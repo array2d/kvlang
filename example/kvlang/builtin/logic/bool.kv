@@ -1,0 +1,10 @@
+def native_bool(A:int) -> (C:bool) {
+    print("A =", A)
+    bool(A) -> './C'
+    print("C =", './C')
+}
+
+str.set("deepxctlrun") -> './term'
+
+# Top-level call: native_bool(1) -> './out'
+native_bool(1) -> './out'
