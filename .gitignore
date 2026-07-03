@@ -1,3 +1,4 @@
+# Python
 __pycache__/
 *.pyc
 .venv/
@@ -5,3 +6,26 @@ __pycache__/
 *.egg-info/
 dist/
 .pytest_cache/
+
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project-specific
+/tmp/
