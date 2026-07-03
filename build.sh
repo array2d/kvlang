@@ -3,12 +3,8 @@ set -e
 
 # kvlang Build Script
 # 编译结果输出到 /tmp 目录
-# Go 安装路径: ~/sdk/go
-
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 OUTPUT_DIR="/tmp/kvlang"
-GOROOT="$HOME/sdk/go"
-export PATH="$GOROOT/bin:$PATH"
 export GOPROXY="${GOPROXY:-https://goproxy.cn,direct}"
 
 echo "=== kvlang Builder ==="
