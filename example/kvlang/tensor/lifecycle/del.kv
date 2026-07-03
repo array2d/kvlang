@@ -1,0 +1,10 @@
+# lifecycle_del: create then delete a heap tensor
+def lifecycle_del() -> () {
+    newtensor("f32", "[8]") -> '/data/tmp'
+    deltensor('/data/tmp')
+}
+
+str.set("deepxctlrun") -> './term'
+
+# Top-level call: lifecycle_del() -> ()
+lifecycle_del() -> ()
