@@ -1,0 +1,10 @@
+def native_abs(A:int) -> (C:int) {
+    print("A =", A)
+    abs(A) -> './C'
+    print("C =", './C')
+}
+
+# Top-level call: native_abs(-5) -> './out'
+
+str.set("deepxctlrun") -> './term' 
+native_abs(-5) -> './out'

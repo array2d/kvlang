@@ -1,0 +1,10 @@
+def native_sign(A:int) -> (C:int) {
+    print("A =", A)
+    sign(A) -> './C'
+    print("C =", './C')
+}
+
+str.set("deepxctlrun") -> './term'
+
+# Top-level call: native_sign(-5) -> './out'
+native_sign(-5) -> './out'

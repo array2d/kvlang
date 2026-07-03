@@ -1,0 +1,10 @@
+def native_log(A:int) -> (C:float) {
+    print("A =", A)
+    log(A) -> './C'
+    print("C =", './C')
+}
+
+str.set("deepxctlrun") -> './term'
+
+# Top-level call: native_log(10) -> './out'
+native_log(10) -> './out'
