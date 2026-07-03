@@ -1,0 +1,8 @@
+def native_and(A:bool, B:bool) -> (C:bool) {
+    A && B -> './C'
+}
+
+str.set("deepxctlrun") -> './term'
+
+# Top-level call: native_and(true, false) -> './out'
+native_and(true, false) -> './out'
