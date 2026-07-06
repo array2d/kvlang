@@ -26,6 +26,7 @@ import (
 
 	"kvlang/internal/ast"
 	"kvlang/internal/parser"
+	"kvlang/internal/register"
 	"kvlang/internal/logx"
 	"github.com/redis/go-redis/v9"
 )
@@ -71,7 +72,7 @@ func main() {
 		// Register all function definitions
 		for i := range df.Funcs {
 			fn := &df.Funcs[i]
-			if err := fn.Register(ctx, rdb); err != nil {
+			if err := register.Func(ctx, rdb, fn); err != nil {
 				logx.Error("FAIL %s: %v", f, err)
 				continue
 			}
@@ -98,7 +99,7 @@ func main() {
 			Signature: "def pre_main() -> ()",
 			Body:      body,
 		}
-		if err := preMain.Register(ctx, rdb); err != nil {
+		if err := register.Func(ctx, rdb, &preMain); err != nil {
 			logx.Error("FAIL register pre_main: %v", err)
 		} else {
 			entryMap := map[string]interface{}{

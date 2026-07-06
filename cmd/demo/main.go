@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"kvlang/internal/parser"
+	"kvlang/internal/register"
 	"kvlang/internal/state"
 	"kvlang/internal/vm"
 	"kvlang/internal/logx"
@@ -43,7 +44,7 @@ func main() {
 		logx.Fatal("加载失败: %v", err)
 	}
 	fn.Name = "print_demo"
-	if err := fn.Register(ctx, rdb); err != nil {
+	if err := register.Func(ctx, rdb, fn); err != nil {
 		logx.Fatal("注册失败: %v", err)
 	}
 	logx.Info("✅ 已加载: %s (body %d 行)", fn.Name, len(fn.Body))
