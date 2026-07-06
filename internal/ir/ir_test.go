@@ -1,4 +1,4 @@
-package vm_test
+package ir_test
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// ── PC navigation (salvaged from deleted engine_test.go) ──
+// ── PC navigation ──
 
 func TestNextPC(t *testing.T) {
 	tests := []struct {
