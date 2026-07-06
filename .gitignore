@@ -36,6 +36,10 @@ Thumbs.db
 # Tool config
 .omc/
 
+# Redis runtime artifacts
+dump.rdb
+appendonly.aof
+
 # Binary
 /kvlang
 /bin/
