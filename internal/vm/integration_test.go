@@ -14,8 +14,21 @@ import (
 	"kvlang/internal/parser"
 	"kvlang/internal/state"
 	"kvlang/internal/vm"
+
+	"kvlang/internal/ast"
 )
 
+// loadFirstFunc parses a .kv file and returns its first function.
+func loadFirstFunc(path string) (*ast.Func, error) {
+	df, err := parser.ParseFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if len(df.Funcs) == 0 {
+		return nil, fmt.Errorf("no functions in %s", path)
+	}
+	return &df.Funcs[0], nil
+}
 
 // ═══════════════════════════════════════════════════════════════
 // Phase 1: 所有 .kv 文件语法解析正确性 (零 Redis)
@@ -87,17 +100,17 @@ func TestParse_ComplexExamples(t *testing.T) {
 		funcName string
 		minBody  int // 最少指令行数
 	}{
-		{"lifecycle/batch_ops.kv", "batch_ops", 10},
-		{"lifecycle/clone_and_use.kv", "clone_and_use", 8},
-		{"nn/mlp_small.kv", "mlp_small", 16},
-		{"nn/polynomial.kv", "polynomial", 12},
-		{"nn/elemwise_long.kv", "elemwise_long", 12},
-		{"nn/normalize.kv", "normalize", 7},
-		{"math/dist2.kv", "dist2", 7},
-		{"math/hadamard3.kv", "hadamard3", 8},
-		{"math/max_abs.kv", "max_abs", 8},
-		{"call/tensor_pipeline.kv", "producer", 4}, // 多函数文件中测试第一个
-		{"mixed/native_and_gpu.kv", "native_and_gpu", 8},
+		{"tensor/lifecycle/batch_ops.kv", "batch_ops", 10},
+		{"tensor/lifecycle/clone_and_use.kv", "clone_and_use", 8},
+		{"tensor/nn/mlp_small.kv", "mlp_small", 16},
+		{"tensor/nn/polynomial.kv", "polynomial", 12},
+		{"tensor/nn/elemwise_long.kv", "elemwise_long", 12},
+		{"tensor/nn/normalize.kv", "normalize", 7},
+		{"tensor/math/dist2.kv", "dist2", 7},
+		{"tensor/math/hadamard3.kv", "hadamard3", 8},
+		{"tensor/math/max_abs.kv", "max_abs", 8},
+		{"tensor/call/tensor_pipeline.kv", "producer", 4}, // 多函数文件中测试第一个
+		{"tensor/mixed/native_and_gpu.kv", "native_and_gpu", 8},
 	}
 
 	root := filepath.Join("example", "kvlang")
@@ -201,7 +214,7 @@ func TestIntegration_NativeScalar(t *testing.T) {
 	for i, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			funcName := fmt.Sprintf("native_%s_%d", tc.name, i)
-			fp := filepath.Join(root, tc.kvFile)
+			fp := filepath.Join(root, tc.dxFile)
 
 			fn, err := loadFirstFunc(fp)
 			if err != nil {
@@ -345,7 +358,7 @@ func TestIntegration_NativePrint(t *testing.T) {
 	for i, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			funcName := fmt.Sprintf("print_%s_%d", tc.name, i)
-			fp := filepath.Join(root, tc.kvFile)
+			fp := filepath.Join(root, tc.dxFile)
 
 			fn, err := loadFirstFunc(fp)
 			if err != nil {
