@@ -1,0 +1,19 @@
+{
+  "name": "kvlang",
+  "displayName": "kvlang",
+  "version": "0.1.0",
+  "engines": { "vscode": "*" },
+  "contributes": {
+    "languages": [{
+      "id": "kvlang",
+      "aliases": ["kvlang", "kv"],
+      "extensions": [".kv"],
+      "configuration": "./language-configuration.json"
+    }],
+    "grammars": [{
+      "language": "kvlang",
+      "scopeName": "source.kvlang",
+      "path": "./syntaxes/kvlang.tmLanguage.json"
+    }]
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "name": "kvlang",
+  "scopeName": "source.kvlang",
+  "fileTypes": [],
+  "patterns": [
+    { "include": "#line_comment" },
+    { "include": "#string_double" },
+    { "include": "#keypath_single" },
+    { "include": "#keyword" },
+    { "include": "#type" },
+    { "include": "#number" },
+    { "include": "#arrow" },
+    { "include": "#arithmetic" }
+  ],
+  "repository": {
+    "line_comment": {
+      "name": "comment.line.kvlang",
+      "match": "#.*$"
+    },
+    "string_double": {
+      "name": "string.quoted.double.kvlang",
+      "begin": "\"",
+      "end": "\""
+    },
+    "keypath_single": {
+      "name": "string.quoted.single.kvlang",
+      "begin": "'",
+      "end": "'"
+    },
+    "keyword": {
+      "name": "keyword.control.kvlang",
+      "match": "\\b(def|var|if|else|for|while|return|switch|case|break|continue|loop)\\b"
+    },
+    "type": {
+      "name": "storage.type.kvlang",
+      "match": "\\b(int|i8|i16|i32|i64|u8|f16|f32|f64|bf16|bf8|bool|string|tensor|list)\\b"
+    },
+    "number": {
+      "name": "constant.numeric.kvlang",
+      "match": "-?[0-9]+(\\.[0-9]+)?"
+    },
+    "arrow": {
+      "name": "keyword.operator.kvlang",
+      "match": "<-|->|<=|=>"
+    },
+    "arithmetic": {
+      "name": "keyword.operator.kvlang",
+      "match": "[+\\-*/]"
+    }
+  }
+}

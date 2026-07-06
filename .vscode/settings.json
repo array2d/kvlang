@@ -1,8 +1,8 @@
 {
   "files.associations": {
-    "*.kv": "python"
+    "*.kv": "kvlang"
   },
-  "[python]": {
+  "[kvlang]": {
     "editor.tabSize": 2,
     "editor.insertSpaces": true
   }
