@@ -15,6 +15,7 @@ dist/
 *.dylib
 *.test
 *.out
+go.sum
 
 # IDE
 .idea/
