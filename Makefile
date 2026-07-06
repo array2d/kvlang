@@ -1,4 +1,4 @@
-.PHONY: build test vet clean
+.PHONY: build test vet clean redis
 
 export GOPROXY ?= https://goproxy.cn,direct
 OUT := bin
@@ -13,6 +13,10 @@ test:
 
 vet:
 	go vet ./...
+
+redis:
+	@redis-cli ping 2>/dev/null || redis-server --daemonize yes
+	redis-cli FLUSHALL
 
 clean:
 	go clean
