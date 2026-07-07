@@ -6,7 +6,7 @@
 
 ```bash
 make redis   # 启动 Redis + 清空数据
-make build   # 构建 bin/kvlang + bin/loader
+make build   # 构建 bin/kvlang + bin/kvlang load
 ```
 
 ## 命令
@@ -14,7 +14,7 @@ make build   # 构建 bin/kvlang + bin/loader
 | 二进制 | 说明 |
 |--------|------|
 | `bin/kvlang` | VM 服务端，常驻消费 vthread |
-| `bin/loader` | 加载 .kv 源文件到 Redis |
+| `bin/kvlang load` | 加载 .kv 源文件到 Redis |
 
 ## 示例
 
