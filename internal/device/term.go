@@ -1,4 +1,4 @@
-package termio
+package device
 
 // TermStream 表示一个已解析的终端流配置。
 type TermStream struct {

@@ -1,4 +1,4 @@
-// Package termio — 终端 I/O 传输层（WebSocket + 文件）。
+// Package device 提供终端 I/O 传输层  终端 I/O 传输层（WebSocket + 文件）。
 //
 // 终端发现流程：
 //   /vthread/<vtid>/term → 终端名称 $name（默认空字符串，空则无终端）
@@ -10,7 +10,7 @@
 // detail: ws://url 或文件路径
 //
 // 不做任何序列化，直接传原始字节流。
-package termio
+package device
 
 import (
 	"context"
