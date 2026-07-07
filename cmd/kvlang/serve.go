@@ -15,7 +15,7 @@ import (
 	"kvlang/internal/kvcpu"
 	"kvlang/internal/keytree"
 
-	"github.com/redis/go-redis/v9"
+	"kvlang/internal/kvspace"
 )
 
 func cmdServe(args []string) {
@@ -32,34 +32,27 @@ func cmdServe(args []string) {
 		vmID = "0"
 	}
 	workers := runtime.GOMAXPROCS(0)
-	logx.Info("VM-%s starting with %d workers, redis=%s", vmID, workers, addr)
+	logx.Info("VM-%s starting with %d workers, kv=%s", vmID, workers, addr)
 
-	rdb := redis.NewClient(&redis.Options{
-		Addr:         addr,
-		PoolSize:     workers * 2,
-		MinIdleConns: workers,
-		PoolTimeout:  10 * time.Second,
-		ReadTimeout:  3 * time.Second,
-		WriteTimeout: 3 * time.Second,
-	})
-	defer rdb.Close()
+	kv := kvspace.NewWithPool(addr, workers)
+	defer kv.Close()
 
-	if err := rdb.Ping(ctx).Err(); err != nil {
-		logx.Error("VM-%s redis connect failed: %v", vmID, err)
+	if err := kv.Ping(ctx); err != nil {
+		logx.Error("VM-%s kvspace connect failed: %v", vmID, err)
 		os.Exit(1)
 	}
 
-	registerVM(ctx, rdb, vmID)
-	registerBuildinOps(ctx, rdb, vmID)
+	registerVM(ctx, kv, vmID)
+	registerBuildinOps(ctx, kv, vmID)
 
 	for i := 0; i < workers; i++ {
-		go kvcpu.RunWorker(ctx, rdb, i)
+		go kvcpu.RunWorker(ctx, kv, i)
 	}
 	logx.Info("VM-%s %d workers started", vmID, workers)
 
-	go heartbeatLoop(ctx, rdb, vmID)
-	go mainWatcher(ctx, rdb, vmID)
-	go sysCmdListener(ctx, rdb, vmID, cancel)
+	go heartbeatLoop(ctx, kv, vmID)
+	go mainWatcher(ctx, kv, vmID)
+	go sysCmdListener(ctx, kv, vmID, cancel)
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
@@ -73,32 +66,32 @@ func cmdServe(args []string) {
 
 	shutdownCtx, scancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer scancel()
-	if err := rdb.Del(shutdownCtx, keytree.SysVM(vmID)).Err(); err != nil {
+	if err := kv.Del(shutdownCtx, keytree.SysVM(vmID)); err != nil {
 		logx.Warn("VM-%s deregister failed: %v", vmID, err)
 	}
 	logx.Info("VM-%s shutdown complete", vmID)
 }
 
-func registerVM(ctx context.Context, rdb *redis.Client, vmID string) {
+func registerVM(ctx context.Context, kv kvspace.KVSpace, vmID string) {
 	reg := map[string]any{
 		"status":     "running",
 		"pid":        os.Getpid(),
 		"started_at": time.Now().Unix(),
 	}
 	data, _ := json.Marshal(reg)
-	if err := rdb.Set(ctx, keytree.SysVM(vmID), data, 0).Err(); err != nil {
+	if err := kv.Set(ctx, keytree.SysVM(vmID), data, 0); err != nil {
 		logx.Error("VM-%s register failed: %v", vmID, err)
 		os.Exit(1)
 	}
 	logx.Info("VM-%s registered at /sys/vm/%s", vmID, vmID)
 }
 
-func registerBuildinOps(ctx context.Context, rdb *redis.Client, vmID string) {
+func registerBuildinOps(ctx context.Context, kv kvspace.KVSpace, vmID string) {
 	key := keytree.OpBackendList("buildin")
 	defs := builtin.OpDefs()
-	rdb.Del(ctx, key)
+	kv.Del(ctx, key)
 	for _, def := range defs {
-		if err := rdb.RPush(ctx, key, def).Err(); err != nil {
+		if err := kv.RPush(ctx, key, def); err != nil {
 			logx.Error("VM-%s register op failed: %v", vmID, err)
 			return
 		}
@@ -106,12 +99,12 @@ func registerBuildinOps(ctx context.Context, rdb *redis.Client, vmID string) {
 	logx.Info("VM-%s registered %d built-in ops", vmID, len(defs))
 }
 
-func heartbeatLoop(ctx context.Context, rdb *redis.Client, vmID string) {
+func heartbeatLoop(ctx context.Context, kv kvspace.KVSpace, vmID string) {
 	key := keytree.SysHeartbeat(vmID)
 	writeHB := func(status string) {
 		hb := map[string]any{"ts": time.Now().Unix(), "status": status, "pid": os.Getpid()}
 		data, _ := json.Marshal(hb)
-		rdb.Set(ctx, key, data, 0)
+		kv.Set(ctx, key, data, 0)
 	}
 	writeHB("running")
 	ticker := time.NewTicker(2 * time.Second)
@@ -127,7 +120,7 @@ func heartbeatLoop(ctx context.Context, rdb *redis.Client, vmID string) {
 	}
 }
 
-func mainWatcher(ctx context.Context, rdb *redis.Client, vmID string) {
+func mainWatcher(ctx context.Context, kv kvspace.KVSpace, vmID string) {
 	const key = keytree.FuncMain
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -136,7 +129,7 @@ func mainWatcher(ctx context.Context, rdb *redis.Client, vmID string) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			val, err := rdb.Get(ctx, key).Result()
+			val, err := kv.Get(ctx, key)
 			if err != nil {
 				continue
 			}
@@ -151,13 +144,13 @@ func mainWatcher(ctx context.Context, rdb *redis.Client, vmID string) {
 			}
 			logx.Info("VM-%s /func/main entry=%s", vmID, entry.Entry)
 
-			rdb.Del(ctx, key) // atomic claim
+			kv.Del(ctx, key) // atomic claim
 
-			vtid, _ := rdb.Incr(ctx, keytree.SysVtidCounter).Result()
+			vtid, _ := kv.Incr(ctx, keytree.SysVtidCounter)
 			vtidStr := fmt.Sprintf("%d", vtid)
 			base := keytree.VThread(vtidStr)
 
-			pipe := rdb.Pipeline()
+			pipe := kv.Pipeline()
 			pipe.Set(ctx, base, `{"pc":"[0,0]","status":"init"}`, 0)
 			pipe.Set(ctx, base+"/[0,0]", entry.Entry, 0)
 			for i, arg := range entry.Reads {
@@ -170,19 +163,19 @@ func mainWatcher(ctx context.Context, rdb *redis.Client, vmID string) {
 			pipe.Exec(ctx)
 
 			status, _ := json.Marshal(map[string]string{"vtid": vtidStr, "status": "executing"})
-			rdb.Set(ctx, key, status, 0)
+			kv.Set(ctx, key, status, 0)
 
 			notify, _ := json.Marshal(map[string]any{"event": "new_vthread", "vtid": vtidStr})
-			rdb.LPush(ctx, keytree.NotifyVM, notify)
+			kv.LPush(ctx, keytree.NotifyVM, notify)
 			logx.Info("VM-%s → vthread %s created", vmID, vtidStr)
 		}
 	}
 }
 
-func sysCmdListener(ctx context.Context, rdb *redis.Client, vmID string, cancel context.CancelFunc) {
+func sysCmdListener(ctx context.Context, kv kvspace.KVSpace, vmID string, cancel context.CancelFunc) {
 	queue := fmt.Sprintf("sys:cmd:vm:%s", vmID)
 	for {
-		result, err := rdb.BLPop(ctx, 5*time.Second, queue).Result()
+		result, err := kv.BLPop(ctx, 5*time.Second, queue)
 		if err != nil {
 			if ctx.Err() != nil {
 				return

@@ -7,29 +7,29 @@ import (
 	"testing"
 	"time"
 
-	"github.com/redis/go-redis/v9"
+	"kvlang/internal/kvspace"
 )
 
-// connectRedisIntegration connects to Redis for integration tests.
-// Uses REDIS_ADDR env or defaults to 127.0.0.1:6379.
-func connectRedisIntegration(t *testing.T) (*redis.Client, context.Context) {
+// connectKVSpace connects to Redis for integration tests.
+// Uses KV_ADDR env or defaults to 127.0.0.1:6379.
+func connectKVSpace(t *testing.T) (kvspace.KVSpace, context.Context) {
 	t.Helper()
-	addr := os.Getenv("REDIS_ADDR")
+	addr := os.Getenv("KV_ADDR")
 	if addr == "" {
 		addr = "127.0.0.1:16379"
 	}
 	ctx := context.Background()
-	rdb := redis.NewClient(&redis.Options{Addr: addr, PoolSize: 10, MinIdleConns: 2})
-	if err := rdb.Ping(ctx).Err(); err != nil {
-		t.Fatalf("Redis not available at %s: %v (set REDIS_ADDR or start Redis)", addr, err)
+	kv := kvspace.NewWithPool(addr, 10)
+	if err := kv.Ping(ctx); err != nil {
+		t.Fatalf("KV not available at %s: %v (set KV_ADDR or start KV)", addr, err)
 	}
-	rdb.FlushDB(ctx)
-	return rdb, ctx
+	kv.FlushDB(ctx)
+	return kv, ctx
 }
 
 // waitVthreadDone polls the vthread state until it reaches "done" or "error".
 // Returns named slot values on success.
-func waitVthreadDone(t *testing.T, rdb *redis.Client, vtid string, timeout time.Duration) (map[string]string, bool) {
+func waitVthreadDone(t *testing.T, kv kvspace.KVSpace, vtid string, timeout time.Duration) (map[string]string, bool) {
 	t.Helper()
 	ctx := context.Background()
 	ticker := time.NewTicker(30 * time.Millisecond)
@@ -38,8 +38,8 @@ func waitVthreadDone(t *testing.T, rdb *redis.Client, vtid string, timeout time.
 
 	for time.Now().Before(deadline) {
 		<-ticker.C
-		val, err := rdb.Get(ctx, "/vthread/"+vtid).Result()
-		if err == redis.Nil {
+		val, err := kv.Get(ctx, "/vthread/"+vtid)
+		if err != nil && strings.Contains(err.Error(), "nil") {
 			continue
 		}
 		if err != nil {
@@ -55,11 +55,11 @@ func waitVthreadDone(t *testing.T, rdb *redis.Client, vtid string, timeout time.
 		switch s.Status {
 		case "done":
 			// read named slots
-			keys, _ := rdb.Keys(ctx, "/vthread/"+vtid+"/*").Result()
+			keys, _ := kv.Keys(ctx, "/vthread/"+vtid+"/*")
 			outputs := make(map[string]string)
 			prefix := "/vthread/" + vtid + "/"
 			for _, k := range keys {
-				if v, err := rdb.Get(ctx, k).Result(); err == nil {
+				if v, err := kv.Get(ctx, k); err == nil {
 					slot := k[len(prefix):]
 					if len(slot) > 0 && slot[0] != '[' {
 						outputs[slot] = v

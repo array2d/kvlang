@@ -17,12 +17,12 @@ import (
 	"kvlang/internal/vthread"
 	"kvlang/internal/keytree"
 
-	"github.com/redis/go-redis/v9"
+	"kvlang/internal/kvspace"
 )
 
 func cmdRun(args []string) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: kvlang run <path|vtid> [redis_addr]")
+		fmt.Fprintln(os.Stderr, "usage: kvlang run <path|vtid> [kv_addr]")
 		os.Exit(1)
 	}
 	target := args[0]
@@ -32,25 +32,25 @@ func cmdRun(args []string) {
 	}
 
 	ctx := context.Background()
-	rdb := redis.NewClient(&redis.Options{Addr: addr})
-	defer rdb.Close()
+	kv := kvspace.New(addr)
+	defer kv.Close()
 
-	if err := rdb.Ping(ctx).Err(); err != nil {
-		logx.Error("redis connect failed: %v", err)
+	if err := kv.Ping(ctx); err != nil {
+		logx.Error("kvspace connect failed: %v", err)
 		os.Exit(1)
 	}
 
 	// vtid (纯数字) → 直接执行
 	if isNumeric(target) {
-		vs := vthread.Get(ctx, rdb, target)
+		vs := vthread.Get(ctx, kv, target)
 		if vs.Status != "init" {
 			logx.Warn("vthread %s status=%s (expect init)", target, vs.Status)
 			os.Exit(1)
 		}
 		logx.Info("[single] executing vthread %s", target)
-		kvcpu.Execute(ctx, rdb, target)
+		kvcpu.Execute(ctx, kv, target)
 		time.Sleep(3 * time.Second)
-		vs = vthread.Get(ctx, rdb, target)
+		vs = vthread.Get(ctx, kv, target)
 		fmt.Printf("\n=== VThread %s ===\n", target)
 		fmt.Printf("  PC:     %s\n", vs.PC)
 		fmt.Printf("  Status: %s\n", vs.Status)
@@ -61,7 +61,7 @@ func cmdRun(args []string) {
 	}
 
 	// 文件路径 → 加载 → 执行
-	loadAndRun(ctx, rdb, target)
+	loadAndRun(ctx, kv, target)
 }
 
 func isNumeric(s string) bool {
@@ -69,7 +69,7 @@ func isNumeric(s string) bool {
 	return err == nil
 }
 
-func loadAndRun(ctx context.Context, rdb *redis.Client, path string) {
+func loadAndRun(ctx context.Context, kv kvspace.KVSpace, path string) {
 	files, err := collectKVFiles(path)
 	if err != nil {
 		logx.Fatal("collect .kv files: %v", err)
@@ -91,7 +91,7 @@ func loadAndRun(ctx context.Context, rdb *redis.Client, path string) {
 		}
 		for i := range df.Funcs {
 			fn := &df.Funcs[i]
-			if err := fn.Register(ctx, rdb); err != nil {
+			if err := fn.Register(ctx, kv); err != nil {
 				logx.Error("FAIL %s: %v", f, err)
 				continue
 			}
@@ -119,7 +119,7 @@ func loadAndRun(ctx context.Context, rdb *redis.Client, path string) {
 		Signature: "def pre_main() -> ()",
 		Body:      body,
 	}
-	if err := preMain.Register(ctx, rdb); err != nil {
+	if err := preMain.Register(ctx, kv); err != nil {
 		logx.Fatal("FAIL register pre_main: %v", err)
 	}
 
@@ -128,25 +128,25 @@ func loadAndRun(ctx context.Context, rdb *redis.Client, path string) {
 		"reads":  []string{},
 		"writes": []string{},
 	})
-	rdb.Set(ctx, keytree.FuncMain, entry, 0)
+	kv.Set(ctx, keytree.FuncMain, entry, 0)
 
 	// 创建 vthread 并执行
 	vtid := fmt.Sprintf("test-%d", time.Now().UnixNano())
 	st := vthread.VThread{PC: "[0,0]", Status: "init", Mode: "single"}
 	data, _ := json.Marshal(st)
-	rdb.Set(ctx, keytree.VThread(vtid), data, 0)
+	kv.Set(ctx, keytree.VThread(vtid), data, 0)
 
-	pipe := rdb.Pipeline()
+	pipe := kv.Pipeline()
 	pipe.Set(ctx, keytree.VThreadSlot(vtid, 0, 0), "pre_main", 0)
 	if _, err := pipe.Exec(ctx); err != nil {
 		logx.Fatal("create vthread: %v", err)
 	}
 
 	logx.Info("[single] executing %s (%d ops)", vtid, len(body))
-	kvcpu.Execute(ctx, rdb, vtid)
+	kvcpu.Execute(ctx, kv, vtid)
 	time.Sleep(3 * time.Second)
 
-	vs := vthread.Get(ctx, rdb, vtid)
+	vs := vthread.Get(ctx, kv, vtid)
 	fmt.Printf("\n=== VThread %s ===\n", vtid)
 	fmt.Printf("  PC:     %s\n", vs.PC)
 	fmt.Printf("  Status: %s\n", vs.Status)

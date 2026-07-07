@@ -151,12 +151,12 @@ func TestParse_ComplexExamples(t *testing.T) {
 // ═══════════════════════════════════════════════════════════════
 
 func TestIntegration_NativeScalar(t *testing.T) {
-	rdb, ctx := connectRedisIntegration(t)
-	defer rdb.Close()
+	kv, ctx := connectKVSpace(t)
+	defer kv.Close()
 
 	vmCtx, vmCancel := context.WithCancel(ctx)
 	defer vmCancel()
-	go vm.RunWorker(vmCtx, rdb, 0)
+	go vm.RunWorker(vmCtx, kv, 0)
 	time.Sleep(150 * time.Millisecond)
 
 	type testCase struct {
@@ -222,20 +222,20 @@ func TestIntegration_NativeScalar(t *testing.T) {
 				t.Fatalf("LoadDxFile: %v", err)
 			}
 			fn.Name = funcName
-			if err := fn.Register(ctx, rdb); err != nil {
+			if err := fn.Register(ctx, kv); err != nil {
 				t.Fatalf("register.Func: %v", err)
 			}
 
-			vtid, err := vthread.CreateVThread(ctx, rdb, funcName, tc.reads, tc.writes)
+			vtid, err := vthread.CreateVThread(ctx, kv, funcName, tc.reads, tc.writes)
 			if err != nil {
 				t.Fatalf("CreateVThread: %v", err)
 			}
 			for slot, val := range tc.inputs {
-				rdb.Set(ctx, "/vthread/"+vtid+"/"+slot, val, 0)
+				kv.Set(ctx, "/vthread/"+vtid+"/"+slot, val, 0)
 			}
-			rdb.RPush(ctx, "notify:vm", `{"event":"new_vthread","vtid":"`+vtid+`"}`)
+			kv.RPush(ctx, "notify:vm", `{"event":"new_vthread","vtid":"`+vtid+`"}`)
 
-			outputs, done := waitVthreadDone(t, rdb, vtid, 10*time.Second)
+			outputs, done := waitVthreadDone(t, kv, vtid, 10*time.Second)
 			if !done {
 				t.Fatal("vthread did not complete")
 			}
@@ -254,36 +254,36 @@ func TestIntegration_NativeScalar(t *testing.T) {
 // ═══════════════════════════════════════════════════════════════
 
 func TestIntegration_CrossCall(t *testing.T) {
-	rdb, ctx := connectRedisIntegration(t)
-	defer rdb.Close()
+	kv, ctx := connectKVSpace(t)
+	defer kv.Close()
 
 	root := filepath.Join("example", "kvlang")
 
 	// 加载 double, triple, diamond
 	double, _ := loadFirstFunc(filepath.Join(root, "call/double.kv"))
 	double.Name = "double"
-	double.Register(ctx, rdb)
+	double.Register(ctx, kv)
 
 	triple, _ := loadFirstFunc(filepath.Join(root, "call/triple.kv"))
 	triple.Name = "triple"
-	triple.Register(ctx, rdb)
+	triple.Register(ctx, kv)
 
 	diamond, _ := loadFirstFunc(filepath.Join(root, "call/diamond.kv"))
 	diamond.Name = "diamond"
-	diamond.Register(ctx, rdb)
+	diamond.Register(ctx, kv)
 
 	// Start VM worker
 	vmCtx, vmCancel := context.WithCancel(ctx)
 	defer vmCancel()
-	go vm.RunWorker(vmCtx, rdb, 0)
+	go vm.RunWorker(vmCtx, kv, 0)
 	time.Sleep(150 * time.Millisecond)
 
 	// diamond(A=5) → double(5)=10, triple(5)=15, R=25
-	vtid, _ := vthread.CreateVThread(ctx, rdb, "diamond", []string{"./a"}, []string{"./r"})
-	rdb.Set(ctx, "/vthread/"+vtid+"/a", "5", 0)
-	rdb.RPush(ctx, "notify:vm", `{"event":"new_vthread","vtid":"`+vtid+`"}`)
+	vtid, _ := vthread.CreateVThread(ctx, kv, "diamond", []string{"./a"}, []string{"./r"})
+	kv.Set(ctx, "/vthread/"+vtid+"/a", "5", 0)
+	kv.RPush(ctx, "notify:vm", `{"event":"new_vthread","vtid":"`+vtid+`"}`)
 
-	outputs, done := waitVthreadDone(t, rdb, vtid, 15*time.Second)
+	outputs, done := waitVthreadDone(t, kv, vtid, 15*time.Second)
 	if !done {
 		t.Fatal("vthread did not complete")
 	}
@@ -299,12 +299,12 @@ func TestIntegration_CrossCall(t *testing.T) {
 // ═══════════════════════════════════════════════════════════════
 
 func TestIntegration_NativePrint(t *testing.T) {
-	rdb, ctx := connectRedisIntegration(t)
-	defer rdb.Close()
+	kv, ctx := connectKVSpace(t)
+	defer kv.Close()
 
 	vmCtx, vmCancel := context.WithCancel(ctx)
 	defer vmCancel()
-	go vm.RunWorker(vmCtx, rdb, 0)
+	go vm.RunWorker(vmCtx, kv, 0)
 	time.Sleep(150 * time.Millisecond)
 
 	root := filepath.Join("example", "kvlang")
@@ -366,20 +366,20 @@ func TestIntegration_NativePrint(t *testing.T) {
 				t.Fatalf("LoadDxFile: %v", err)
 			}
 			fn.Name = funcName
-			if err := fn.Register(ctx, rdb); err != nil {
+			if err := fn.Register(ctx, kv); err != nil {
 				t.Fatalf("register.Func: %v", err)
 			}
 
-			vtid, err := vthread.CreateVThread(ctx, rdb, funcName, tc.reads, tc.writes)
+			vtid, err := vthread.CreateVThread(ctx, kv, funcName, tc.reads, tc.writes)
 			if err != nil {
 				t.Fatalf("CreateVThread: %v", err)
 			}
 			for slot, val := range tc.inputs {
-				rdb.Set(ctx, "/vthread/"+vtid+"/"+slot, val, 0)
+				kv.Set(ctx, "/vthread/"+vtid+"/"+slot, val, 0)
 			}
-			rdb.RPush(ctx, "notify:vm", `{"event":"new_vthread","vtid":"`+vtid+`"}`)
+			kv.RPush(ctx, "notify:vm", `{"event":"new_vthread","vtid":"`+vtid+`"}`)
 
-			outputs, done := waitVthreadDone(t, rdb, vtid, 10*time.Second)
+			outputs, done := waitVthreadDone(t, kv, vtid, 10*time.Second)
 			if !done {
 				t.Fatal("vthread did not complete")
 			}

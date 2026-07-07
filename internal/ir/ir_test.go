@@ -6,7 +6,7 @@ import (
 
 	"kvlang/internal/ir"
 	"kvlang/internal/op/dispatch"
-	"github.com/redis/go-redis/v9"
+	"kvlang/internal/kvspace"
 )
 
 // ── PC navigation ──
@@ -90,12 +90,12 @@ func TestDecodeFromCache(t *testing.T) {
 
 // ── Route: error handling (no live Redis needed) ──
 
-func TestRouteSelect_NoRedis(t *testing.T) {
-	rdb := redis.NewClient(&redis.Options{Addr: "127.0.0.1:9999"})
+func TestRouteSelect_NoKV(t *testing.T) {
+	kv := kvspace.New("127.0.0.1:9999")
 	ctx := context.Background()
-	_, err := dispatch.Select(ctx, rdb, "add")
+	_, err := dispatch.Select(ctx, kv, "add")
 	if err == nil {
-		t.Error("expected error when Redis is not available")
+		t.Error("expected error when KV is not available")
 	}
 	t.Logf("expected error: %v", err)
 }
