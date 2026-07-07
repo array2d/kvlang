@@ -88,7 +88,7 @@ func TestDecodeFromCache(t *testing.T) {
 	}
 }
 
-// ── Route: error handling (no live Redis needed) ──
+// ── Route: error handling (no live kvspace needed) ──
 
 func TestRouteSelect_NoKV(t *testing.T) {
 	kv := kvspace.New("127.0.0.1:9999")

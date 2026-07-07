@@ -16,7 +16,7 @@ type Func struct {
 	Body      []string // kvlang 指令行
 }
 
-// Register 将函数定义写入 Redis KV 空间。
+// Register 将函数定义写入 kvspace 空间。
 func (fn *Func) Register(ctx context.Context, kv kvspace.KVSpace) error {
 	if err := kv.Set(ctx, keytree.SrcFunc(fn.Name), fn.Signature, 0); err != nil {
 		return fmt.Errorf("register sig: %w", err)

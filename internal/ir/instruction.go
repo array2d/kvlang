@@ -18,7 +18,7 @@ type Instruction struct {
 
 const maxParams = 10
 
-// Decode 从 Redis 执行层 key 解码指令。
+// Decode 从 kvspace 执行层 key 解码指令。
 func Decode(ctx context.Context, kv kvspace.KVSpace, vtid string, pc string) (*Instruction, error) {
 	prefix, addr0 := parsePC(pc)
 	keyBase := keytree.VThreadSub(vtid, prefix)
@@ -59,7 +59,7 @@ func Decode(ctx context.Context, kv kvspace.KVSpace, vtid string, pc string) (*I
 	return inst, nil
 }
 
-// DecodeFromCache 从本地缓存 map 解码 (子栈场景, 零 Redis 访问)。
+// DecodeFromCache 从本地缓存 map 解码 (子栈场景, 零 kvspace 访问)。
 func DecodeFromCache(cache map[string]string, pc string) *Instruction {
 	_, addr0 := parsePC(pc)
 	inst := &Instruction{PC: pc}

@@ -1,4 +1,4 @@
-// Package cache 提供 kvcache：子栈指令的本地内存缓存，避免每条指令都访问 Redis。
+// Package cache 提供 kvcache：子栈指令的本地内存缓存，避免每条指令都访问 kvspace。
 package cache
 
 import (
@@ -16,7 +16,7 @@ type KVCache struct {
 	KVs    map[string]string // 相对 key → value, e.g., "[0,0]"→"matmul"
 }
 
-// NewKVCache 从 Redis MGET 加载整个子栈到本地。
+// NewKVCache 从 kvspace MGET 加载整个子栈到本地。
 func NewKVCache(ctx context.Context, kv kvspace.KVSpace, prefix string) *KVCache {
 
 	keys, err := kv.Keys(ctx, prefix+"*")

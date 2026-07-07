@@ -5,5 +5,5 @@
 // 无 /func/main 时 VM 处于空闲等待状态。
 package keytree
 
-// FuncMain 返回程序唯一入口的 Redis key: /func/main。
+// FuncMain 返回程序唯一入口的 kvspace key: /func/main。
 const FuncMain = "/func/main"

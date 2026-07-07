@@ -1,4 +1,4 @@
-// Package vthread 管理 vthread 状态管理与 Redis 持久化。
+// Package vthread 管理 vthread 状态管理与 kvspace 持久化。
 package vthread
 
 import (
@@ -60,7 +60,7 @@ func SetError(ctx context.Context, kv kvspace.KVSpace, vtid string, pc string, e
 	kv.Set(ctx, keytree.VThread(vtid), data, 0)
 }
 
-// CreateVThread 在 Redis 中创建一个新虚线程。
+// CreateVThread 在 kvspace 中创建一个新虚线程。
 func CreateVThread(ctx context.Context, kv kvspace.KVSpace, funcName string, reads, writes []string) (string, error) {
 	vtid := fmt.Sprintf("test-%d", time.Now().UnixNano())
 	st := VThread{PC: "[0,0]", Status: "init", Mode: "single"}

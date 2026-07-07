@@ -32,7 +32,7 @@ func loadFirstFunc(path string) (*ast.Func, error) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// Phase 1: 所有 .kv 文件语法解析正确性 (零 Redis)
+// Phase 1: 所有 .kv 文件语法解析正确性 (零 kvspace)
 // ═══════════════════════════════════════════════════════════════
 
 func TestAllDxFilesParse(t *testing.T) {
@@ -142,7 +142,7 @@ func TestParse_ComplexExamples(t *testing.T) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// Phase 2: 端到端集成测试 (需要 Redis)
+// Phase 2: 端到端集成测试 (需要 kvspace)
 // Native Scalar / Cross-Call (纯 VM, 无需 plats)
 // ═══════════════════════════════════════════════════════════════
 

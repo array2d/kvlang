@@ -10,7 +10,7 @@ import (
 	"kvlang/internal/kvspace"
 )
 
-// connectKVSpace connects to Redis for integration tests.
+// connectKVSpace connects to kvspace for integration tests.
 // Uses KV_ADDR env or defaults to 127.0.0.1:6379.
 func connectKVSpace(t *testing.T) (kvspace.KVSpace, context.Context) {
 	t.Helper()
