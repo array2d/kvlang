@@ -31,7 +31,7 @@ kvlang:  def  →  op(A,B)->C  →  /vthread/[i,j]
 
 **底座是分布式的，语言是单线程的。**
 
-kvlang 的底层是一个分布式系统：Redis KV 空间、heap-plat 跨进程管理 shm、op-plat 常驻消费计算指令、VM 多 worker 并行调度 vthread——但 kvlang **使用起来就像 SQL 一样**，程序员看到的是极其简单的单线程顺序逻辑：
+kvlang 的底层是一个分布式系统：kvspace 空间、heap-plat 跨进程管理 shm、op-plat 常驻消费计算指令、VM 多 worker 并行调度 vthread——但 kvlang **使用起来就像 SQL 一样**，程序员看到的是极其简单的单线程顺序逻辑：
 
 ```kvlang
 # 程序员视角：就几条顺序语句，像写 SQL 一样简单
@@ -45,7 +45,7 @@ def hadamard3() -> ("/data/result") {
 
 | 底座（分布式） | 语言（单线程） |
 |----------------|----------------|
-| Redis KV 空间跨进程共享 | 程序员只写 `A + B -> C` |
+| kvspace 空间跨进程共享 | 程序员只写 `A + B -> C` |
 | heap-plat 管理 shm 生命周期 | `newtensor` / `deltensor` 就像 `malloc` / `free` |
 | op-plat 被动消费 GPU 指令 | `mul` / `add` 不感知 Metal / CUDA |
 | VM 多 worker 并行调度 | `def` 函数定义，调用即 `CALL` 翻译 |
@@ -178,7 +178,7 @@ var b,c<=1,2
 kvlang采用kv地址系统，从而实现跨节点的统一地址，而非传统的单机进程内存模型
 
 
-简单的串行函数与语句可由 python-sdk 直接写入 KV（如 Redis），示例结构：
+简单的串行函数与语句可由 python-sdk 直接写入 KV（如 kvspace），示例结构：
 ```
 /func/gemm = (A:tensor<f32>, B:tensor<f32>, alpha:f32, beta:f32, C:tensor<f32>) -> (Y:tensor<f32>)
 /func/gemm/0 = matmul(A, B) -> Y
@@ -212,7 +212,7 @@ kvlang 通过引号区分两种语义截然不同的值：
 | 引号 | 语义 | 示例 | 解析为 |
 |------|------|------|--------|
 | `"..."`（双引号） | **字符串字面量** | `"f32"`, `"[128]"`, `"hello"` | 值本身 |
-| `'...'`（单引号） | **KV 空间 Key 路径** | `'/data/a'`, `'./ret'`, `'../parent'` | Redis key 引用 |
+| `'...'`（单引号） | **KV 空间 Key 路径** | `'/data/a'`, `'./ret'`, `'../parent'` | kvspace key 引用 |
 | 无引号（裸标识符） | **变量名** | `A`, `alpha`, `my_var` | 形参/局部变量绑定 |
 
 ### 语法规则

@@ -1,11 +1,11 @@
 # kvlang
 
-基于 Redis KV 空间的声明式编程语言 VM 解释器。
+基于 kvspace KV 空间的声明式编程语言 VM 解释器。
 
 ## 快速开始
 
 ```bash
-make redis   # 启动 Redis + 清空数据
+make kvspace   # 启动 kvspace + 清空数据
 make build   # 构建 bin/kvlang + bin/kvlang load
 ```
 
@@ -14,7 +14,7 @@ make build   # 构建 bin/kvlang + bin/kvlang load
 | 二进制 | 说明 |
 |--------|------|
 | `bin/kvlang` | VM 服务端，常驻消费 vthread |
-| `bin/kvlang load` | 加载 .kv 源文件到 Redis |
+| `bin/kvlang load` | 加载 .kv 源文件到 kvspace |
 
 ## 示例
 
@@ -27,7 +27,7 @@ def three_add(A:int, B:int, C:int) -> (R:int) {
 three_add(2, 3, 4) -> './out'
 ```
 
-## Redis Schema
+## kvspace Schema
 
 ```
 /vthread/<vtid>           vthread 状态 (pc, status)
@@ -41,7 +41,7 @@ three_add(2, 3, 4) -> './out'
 ```
 .kv 源文件  ──▶  Lexer ──▶  Parser ──▶  AST ──▶  CodeGen
                                                       │
-   Redis KV  ◀──  Loader  ◀───────────────────────────┘
+   kvspace KV  ◀──  Loader  ◀───────────────────────────┘
       │
       ▼
     VM ──▶ builtin (原生求值)  /  dispatch (GPU 分发)

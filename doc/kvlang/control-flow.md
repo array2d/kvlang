@@ -15,12 +15,12 @@
 |------|-----------|---------|------|--------|
 | 函数单元 | label + 指令序列 | `def name(params) -> (rets) { body }` | `func.func @name(%arg: T) -> T { body }` | `ret_type name(params) { body }` |
 | 调用约定 | 手动 push/pop 寄存器、手动跳转 | CALL 指令 + VM 自动管理子栈帧 | `func.call @callee(%args)` + 显式 SSA 结果 | 函数调用表达式，编译器管理栈帧 |
-| 参数传递 | 寄存器 / 栈偏移 | Redis KV 路径绑定（形参→实参） | Block arguments (SSA 值), 支持 memref 传递 | 按值 / 按引用，编译器分配 |
+| 参数传递 | 寄存器 / 栈偏移 | kvspace 路径绑定（形参→实参） | Block arguments (SSA 值), 支持 memref 传递 | 按值 / 按引用，编译器分配 |
 | 返回值 | rax/eax 寄存器 或 栈 | 隐式 RETURN 将输出形参值回传父栈 | `func.return %val : T` 显式返回 SSA 值 | `return` 表达式 |
 | 栈帧 | push rbp; sub rsp, N | `/vthread/<vtid>/<pc>/` 子键空间 | Region + block hierarchy, alloc 可下沉 | 连续栈内存 |
 | 类型系统 | 无 (原始字节) | 签名标注型别，运行时类型感知求值 | 完整类型体系 (tensor/memref/vector/...) | 编译期静态类型 |
 
-**kvir 的定位**：在汇编之上抽象了 KV 空间——函数帧是 Redis 子树，参数通过路径绑定传递。与 MLIR 共享"深度学习 IR"的目标，但 MLIR 侧重编译优化（SSA、dialect 混用、pass pipeline），kvir 侧重运行时调度（Redis 原生、多后端路由、vthread 并发）。比 C 少一层编译复杂度，比 MLIR 少一层类型和 SSA 的抽象约束。
+**kvir 的定位**：在汇编之上抽象了 KV 空间——函数帧是 kvspace 子树，参数通过路径绑定传递。与 MLIR 共享"深度学习 IR"的目标，但 MLIR 侧重编译优化（SSA、dialect 混用、pass pipeline），kvir 侧重运行时调度（kvspace 原生、多后端路由、vthread 并发）。比 C 少一层编译复杂度，比 MLIR 少一层类型和 SSA 的抽象约束。
 
 ### 1.2 控制流原语
 
@@ -39,13 +39,13 @@
 
 | 维度 | Assembly IR | kvir | MLIR | C 语言 |
 |------|-----------|---------|------|--------|
-| 变量存储 | 寄存器 / 内存地址 | Redis key (`/vthread/<vtid>/<slot>`) | SSA Value (虚拟寄存器编号) → 可下沉到 memref | 栈 / 堆 内存 |
+| 变量存储 | 寄存器 / 内存地址 | kvspace key (`/vthread/<vtid>/<slot>`) | SSA Value (虚拟寄存器编号) → 可下沉到 memref | 栈 / 堆 内存 |
 | 作用域 | 全局（label 可见） | vthread 子树内全局 | Block/Region 隔离, SSA 支配规则 | 词法作用域 `{}` |
 | 活跃分析 | 程序员 / 编译器负责 | VM 不追踪（调用方清理子栈） | SSA use-def chain 自动推导, 编译器负责 | 编译器 RA + 析构 |
-| 并发安全 | 原子指令 + 内存屏障 | Redis WATCH/MULTI/EXEC (picker) | 显式 async/await dialect, gpu.async 等 | mutex / atomic |
+| 并发安全 | 原子指令 + 内存屏障 | kvspace WATCH/MULTI/EXEC (picker) | 显式 async/await dialect, gpu.async 等 | mutex / atomic |
 | 数据流 | 隐式 (side effect) | 显式 (reads/writes 路径数组) | 显式 SSA (操作数 ↔ 结果 编号链接) | 隐式 + 指针别名 |
 
-**MLIR 的 SSA 模型**是其核心设计：每个值有唯一编号（`%0`, `%1`），use-def 链天然形成数据流图。kvir 的数据流则通过 Redis key 路径（`reads`/`writes` 数组）显式编码，适合分布式场景，但缺少编译期 use-def 验证的严格性。
+**MLIR 的 SSA 模型**是其核心设计：每个值有唯一编号（`%0`, `%1`），use-def 链天然形成数据流图。kvir 的数据流则通过 kvspace key 路径（`reads`/`writes` 数组）显式编码，适合分布式场景，但缺少编译期 use-def 验证的严格性。
 
 ### 1.4 MLIR 核心创新对 kvir 的启发
 
@@ -175,7 +175,7 @@ if    → dispatch.If()
 - **指令序列**：0 条或多条顺序指令
 - **终止指令**：恰好 1 条（`br` 条件跳转 / `jump` 无条件跳转 / `return` / `call`）
 
-### 3.3 执行层存储格式（Redis）
+### 3.3 执行层存储格式（kvspace）
 
 ```
 /vthread/<vtid>/<pc>/@0           → "br"        # block 0 的终止指令
@@ -238,7 +238,7 @@ def example(x) -> (y) {
 }
 ```
 
-**Redis 存储**（嵌套 key 天然表达控制流层次）：
+**kvspace 存储**（嵌套 key 天然表达控制流层次）：
 
 ```
 /vthread/<vtid>/[1,0]         = "if"
@@ -372,7 +372,7 @@ block id (@0, @1) 是平面索引，不与调用层级耦合
 1. 引入控制流关键字 opcode：`if`, `for`, `while`, `break`, `continue`, `switch`
 2. VM 实现嵌套作用域栈（scope stack），直接解释关键字
 3. 前端 `@compile` 生成关键字 IR
-4. Redis 存储同构（嵌套 key）
+4. kvspace 存储同构（嵌套 key）
 
 ### Phase 2: 基本块执行（为 C2/C5 做准备）
 

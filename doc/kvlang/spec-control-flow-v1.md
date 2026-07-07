@@ -180,7 +180,7 @@ add           计算      — op-plat 协议名
 栈变量无显式命名       — VM 遇到新变量名自动推导
 ```
 
-好处：IR 中的名字就是 Redis 中的 opcode，零映射。
+好处：IR 中的名字就是 kvspace 中的 opcode，零映射。
 
 #### 为什么栈变量无需显式 new
 
@@ -274,7 +274,7 @@ x || y -> z   →  or(x, y) -> z
 
 每个目标 opcode 必须被对应后端注册了 `symbols` 字段才允许中缀形式。
 
-### 3.6 Redis 存储格式（嵌套同构）
+### 3.6 kvspace 存储格式（嵌套同构）
 
 ```
 fn example(x: f32[4]) -> y: f32[4] {
@@ -289,7 +289,7 @@ fn example(x: f32[4]) -> y: f32[4] {
     ret y
 }
 
-↓ Redis:
+↓ kvspace:
 /src/func/example           = "fn example(x: f32[4]) -> y: f32[4]"
 /src/func/example/0         = "tensor.new([4], f32) -> a"
 /src/func/example/1         = "sum(x) -> s"
@@ -338,7 +338,7 @@ fn example(x: f32[4]) -> y: f32[4] {
 | **支配关系** | 严格支配树 (定义支配所有使用) | 无形式支配约束 |
 | **副作用建模** | 困难 (需要特殊 dialect/op) | 天然 (tensor.new/del 就是指令) |
 | **理论基础** | 编译器优化理论 (Cytron et al. 1991) | 分布式 KV 状态机 |
-| **典型系统** | LLVM IR, MLIR, GCC GIMPLE | kvir, Redis Lua, SQL stored procedures |
+| **典型系统** | LLVM IR, MLIR, GCC GIMPLE | kvir, kvspace Lua, SQL stored procedures |
 
 ### 4.3 各自优势
 
