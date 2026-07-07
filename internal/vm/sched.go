@@ -1,5 +1,5 @@
 // Package sched 负责原子拾取和等待虚线程。
-package sched
+package vm
 
 import (
 	"context"
