@@ -35,6 +35,7 @@ Thumbs.db
 
 # Tool config
 .omc/
+.claude/
 
 # Redis runtime artifacts
 dump.rdb
