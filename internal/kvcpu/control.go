@@ -24,7 +24,7 @@ func If(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *ir.Instr
 	var condVal string
 	var err error
 	if len(condKey) >= 2 && condKey[:2] == "./" {
-		condVal, err = kv.Get(ctx, keytree.VThreadAt(vtid, condKey[2:]))
+		condVal, err = kv.Get(keytree.VThreadAt(vtid, condKey[2:]))
 	} else {
 		condVal = condKey
 	}

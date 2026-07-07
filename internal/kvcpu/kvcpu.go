@@ -108,13 +108,11 @@ func handleControl(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, ins
 }
 
 func isFunctionCall(ctx context.Context, kv kvspace.KVSpace, opcode string) bool {
-	exists, err := kv.Exists(ctx, keytree.SrcFunc(opcode))
-	if err == nil && exists > 0 {
+	if _, err := kv.Get(keytree.SrcFunc(opcode)); err == nil {
 		return true
 	}
 	for _, backend := range []string{"op-metal", "op-cuda", "op-cpu"} {
-		exists, err := kv.Exists(ctx, keytree.OpBackendFunc(backend, opcode))
-		if err == nil && exists > 0 {
+		if _, err := kv.Get(keytree.OpBackendFunc(backend, opcode)); err == nil {
 			return true
 		}
 	}

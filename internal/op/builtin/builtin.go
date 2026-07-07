@@ -25,7 +25,7 @@ func Native(ctx context.Context, kv kvspace.KVSpace, vtid string, pc string, ins
 		var raw string
 		if isRelative(r) {
 			key := keytree.VThreadAt(vtid, r[2:])
-			val, err := kv.Get(ctx, key)
+			val, err := kv.Get(key)
 			if err != nil {
 				msg := fmt.Sprintf("native read %s: %v", key, err)
 				vthread.SetError(ctx, kv, vtid, pc, msg)
@@ -52,7 +52,7 @@ func Native(ctx context.Context, kv kvspace.KVSpace, vtid string, pc string, ins
 		}
 		if len(inst.Writes) > 0 {
 			wKey := resolveWriteKey(vtid, inst.Writes[0])
-			if err := kv.Set(ctx, wKey, val, 0); err != nil {
+			if err := kv.Set(wKey, val, 0); err != nil {
 				msg := fmt.Sprintf("str.set %s: %v", wKey, err)
 				vthread.SetError(ctx, kv, vtid, pc, msg)
 				return fmt.Errorf("%s", msg)
@@ -106,7 +106,7 @@ func Native(ctx context.Context, kv kvspace.KVSpace, vtid string, pc string, ins
 		}
 		if len(inst.Writes) > 0 {
 			wKey := resolveWriteKey(vtid, inst.Writes[0])
-			if err := kv.Set(ctx, wKey, val, 0); err != nil {
+			if err := kv.Set(wKey, val, 0); err != nil {
 				msg := fmt.Sprintf("native write %s: %v", wKey, err)
 				vthread.SetError(ctx, kv, vtid, pc, msg)
 				return fmt.Errorf("%s", msg)
@@ -120,7 +120,7 @@ func Native(ctx context.Context, kv kvspace.KVSpace, vtid string, pc string, ins
 	// 默认：写回计算结果
 	if len(inst.Writes) > 0 {
 		outKey := resolveWriteKey(vtid, inst.Writes[0])
-		if err := kv.Set(ctx, outKey, result.String(), 0); err != nil {
+		if err := kv.Set(outKey, result.String(), 0); err != nil {
 			msg := fmt.Sprintf("native write %s: %v", outKey, err)
 			vthread.SetError(ctx, kv, vtid, pc, msg)
 			return fmt.Errorf("%s", msg)

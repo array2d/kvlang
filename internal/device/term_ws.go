@@ -21,12 +21,12 @@ import (
 
 // ResolveTerm 通过 /vthread/<vtid>/term → /sys/term/${name}/${stream} 解析终端流配置。
 func ResolveTerm(ctx context.Context, kv kvspace.KVSpace, vtid, stream string) TermStream {
-	name, err := kv.Get(ctx, keytree.VThreadTerm(vtid))
+	name, err := kv.Get(keytree.VThreadTerm(vtid))
 	if err != nil || name == "" {
 		return TermStream{}
 	}
 	key := keytree.SysTerm(name, stream)
-	results, err := kv.HMGet(ctx, key, "type", "detail")
+	results, err := kv.HMGet(key, "type", "detail")
 	if err != nil || len(results) < 2 {
 		return TermStream{}
 	}

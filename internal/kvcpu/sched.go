@@ -16,7 +16,7 @@ import (
 
 // Pick 扫描 /vthread/*，原子抢占 status=init 的 vthread。返回 vtid 或空串。
 func Pick(ctx context.Context, kv kvspace.KVSpace) string {
-	keys, err := kv.Keys(ctx, keytree.VThreadPattern())
+	keys, err := kv.Keys(keytree.VThreadPattern())
 	if err != nil {
 		logx.Debug("picker KEYS error: %v", err)
 		return ""
@@ -25,7 +25,7 @@ func Pick(ctx context.Context, kv kvspace.KVSpace) string {
 		vtid := key[len(keytree.VThread("")):]
 		// Skip non-numeric vtid (e.g., system keys nested under /vthread/)
 		// 实际上 key pattern `/vthread/*` 不会匹配 `/vthread/1/sub`，但还是做一次 GET 检查
-		val, err := kv.Get(ctx, key)
+		val, err := kv.Get(key)
 		if err != nil {
 			continue
 		}
@@ -49,7 +49,7 @@ func Pick(ctx context.Context, kv kvspace.KVSpace) string {
 			redis.call('SET', key, ARGV[1])
 			return 1
 		`
-		result, err := kv.Eval(ctx, script, []string{key}, string(data))
+		result, err := kv.Eval(script, []string{key}, string(data))
 		if err != nil || result == 0 {
 			continue
 		}
@@ -60,7 +60,7 @@ func Pick(ctx context.Context, kv kvspace.KVSpace) string {
 
 // Wait 阻塞等待新的 vthread 通知 (BLPOP keytree.NotifyVM)。
 func Wait(ctx context.Context, kv kvspace.KVSpace) {
-	vals, err := kv.BLPop(ctx, 5*time.Second, keytree.NotifyVM)
+	vals, err := kv.Watch(5*time.Second, keytree.NotifyVM)
 	if err != nil {
 		if !strings.Contains(err.Error(), "nil") {
 			logx.Debug("picker BLPOP: %v", err)

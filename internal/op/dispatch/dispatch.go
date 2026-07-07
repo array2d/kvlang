@@ -56,7 +56,7 @@ func resolveParam(ctx context.Context, kv kvspace.KVSpace, vtid, param string) P
 		resolvedKey = keytree.VThreadAt(vtid, param[2:])
 	}
 	ref.Key = resolvedKey
-	val, err := kv.Get(ctx, resolvedKey)
+	val, err := kv.Get(resolvedKey)
 	if err != nil {
 		return ref
 	}
@@ -182,7 +182,7 @@ func Compute(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *ir.
 	task := buildOpTask(ctx, kv, vtid, pc, inst)
 	cmdQueue := fmt.Sprintf("cmd:op-%s", instance)
 	taskJSON, _ := json.Marshal(task)
-	if err := kv.RPush(ctx, cmdQueue, taskJSON); err != nil {
+	if err := kv.RPush(cmdQueue, taskJSON); err != nil {
 		return fmt.Errorf("push task: %w", err)
 	}
 	logx.Debug("[%s] PUSH %s → %s", vtid, inst.Opcode, cmdQueue)
@@ -206,7 +206,7 @@ func Compute(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *ir.
 func Lifecycle(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *ir.Instruction) error {
 	task := buildHeapTask(vtid, pc, inst)
 	taskJSON, _ := json.Marshal(task)
-	if err := kv.RPush(ctx, "cmd:heap-metal:0", taskJSON); err != nil {
+	if err := kv.RPush("cmd:heap-metal:0", taskJSON); err != nil {
 		return fmt.Errorf("push heap task: %w", err)
 	}
 	logx.Debug("[%s] PUSH %s → cmd:heap-metal:0", vtid, inst.Opcode)

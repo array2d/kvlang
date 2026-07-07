@@ -30,7 +30,7 @@ func Decode(ctx context.Context, kv kvspace.KVSpace, vtid string, pc string) (*I
 		keys = append(keys, fmt.Sprintf("%s[%d,%d]", keyBase, addr0, i))
 	}
 
-	vals, err := kv.MGet(ctx, keys...)
+	vals, err := kv.MGet(keys...)
 	if err != nil {
 		return nil, fmt.Errorf("decode MGET: %w", err)
 	}

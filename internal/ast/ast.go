@@ -18,12 +18,12 @@ type Func struct {
 
 // Register 将函数定义写入 kvspace 空间。
 func (fn *Func) Register(ctx context.Context, kv kvspace.KVSpace) error {
-	if err := kv.Set(ctx, keytree.SrcFunc(fn.Name), fn.Signature, 0); err != nil {
+	if err := kv.Set(keytree.SrcFunc(fn.Name), fn.Signature, 0); err != nil {
 		return fmt.Errorf("register sig: %w", err)
 	}
 	for i, line := range fn.Body {
 		key := keytree.SrcFuncLine(fn.Name, i)
-		if err := kv.Set(ctx, key, line, 0); err != nil {
+		if err := kv.Set(key, line, 0); err != nil {
 			return fmt.Errorf("register body[%d]: %w", i, err)
 		}
 	}

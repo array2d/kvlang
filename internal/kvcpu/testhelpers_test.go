@@ -19,11 +19,7 @@ func connectKVSpace(t *testing.T) (kvspace.KVSpace, context.Context) {
 		addr = "127.0.0.1:16379"
 	}
 	ctx := context.Background()
-	kv := kvspace.NewWithPool(addr, 10)
-	if err := kv.Ping(ctx); err != nil {
-		t.Fatalf("KV not available at %s: %v (set KV_ADDR or start KV)", addr, err)
-	}
-	kv.FlushDB(ctx)
+	kv := kvspace.Conn(addr)
 	return kv, ctx
 }
 
@@ -38,7 +34,7 @@ func waitVthreadDone(t *testing.T, kv kvspace.KVSpace, vtid string, timeout time
 
 	for time.Now().Before(deadline) {
 		<-ticker.C
-		val, err := kv.Get(ctx, "/vthread/"+vtid)
+		val, err := kv.Get("/vthread/"+vtid)
 		if err != nil && strings.Contains(err.Error(), "nil") {
 			continue
 		}
@@ -55,11 +51,11 @@ func waitVthreadDone(t *testing.T, kv kvspace.KVSpace, vtid string, timeout time
 		switch s.Status {
 		case "done":
 			// read named slots
-			keys, _ := kv.Keys(ctx, "/vthread/"+vtid+"/*")
+			keys, _ := kv.Keys("/vthread/"+vtid+"/*")
 			outputs := make(map[string]string)
 			prefix := "/vthread/" + vtid + "/"
 			for _, k := range keys {
-				if v, err := kv.Get(ctx, k); err == nil {
+				if v, err := kv.Get(k); err == nil {
 					slot := k[len(prefix):]
 					if len(slot) > 0 && slot[0] != '[' {
 						outputs[slot] = v

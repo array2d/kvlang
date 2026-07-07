@@ -22,7 +22,7 @@ type VThread struct {
 
 // Get 读取 vthread 当前状态。
 func Get(ctx context.Context, kv kvspace.KVSpace, vtid string) VThread {
-	val, err := kv.Get(ctx, keytree.VThread(vtid))
+	val, err := kv.Get(keytree.VThread(vtid))
 	if err != nil {
 		return VThread{Status: "error"}
 	}
@@ -42,7 +42,7 @@ func Set(ctx context.Context, kv kvspace.KVSpace, vtid string, pc, status string
 		logx.Warn("state.Set: marshal vthread %s: %v", vtid, err)
 		return
 	}
-	kv.Set(ctx, keytree.VThread(vtid), data, 0)
+	kv.Set(keytree.VThread(vtid), data, 0)
 }
 
 // SetError 标记 vthread 为 error 状态。
@@ -57,7 +57,7 @@ func SetError(ctx context.Context, kv kvspace.KVSpace, vtid string, pc string, e
 		logx.Warn("state.SetError: marshal vthread %s: %v", vtid, err)
 		return
 	}
-	kv.Set(ctx, keytree.VThread(vtid), data, 0)
+	kv.Set(keytree.VThread(vtid), data, 0)
 }
 
 // CreateVThread 在 kvspace 中创建一个新虚线程。
@@ -65,18 +65,18 @@ func CreateVThread(ctx context.Context, kv kvspace.KVSpace, funcName string, rea
 	vtid := fmt.Sprintf("test-%d", time.Now().UnixNano())
 	st := VThread{PC: "[0,0]", Status: "init", Mode: "single"}
 	data, _ := json.Marshal(st)
-	if err := kv.Set(ctx, keytree.VThread(vtid), data, 0); err != nil {
+	if err := kv.Set(keytree.VThread(vtid), data, 0); err != nil {
 		return "", fmt.Errorf("set state: %w", err)
 	}
 	pipe := kv.Pipeline()
-	pipe.Set(ctx, keytree.VThreadSlot(vtid, 0, 0), funcName, 0)
+	pipe.Set(keytree.VThreadSlot(vtid, 0, 0), funcName, 0)
 	for i, r := range reads {
-		pipe.Set(ctx, keytree.VThreadSlot(vtid, 0, -(i+1)), r, 0)
+		pipe.Set(keytree.VThreadSlot(vtid, 0, -(i+1)), r, 0)
 	}
 	for i, w := range writes {
-		pipe.Set(ctx, keytree.VThreadSlot(vtid, 0, i+1), w, 0)
+		pipe.Set(keytree.VThreadSlot(vtid, 0, i+1), w, 0)
 	}
-	if _, err := pipe.Exec(ctx); err != nil {
+	if _, err := pipe.Exec(); err != nil {
 		return "", fmt.Errorf("pipeline: %w", err)
 	}
 	return vtid, nil
@@ -85,7 +85,7 @@ func CreateVThread(ctx context.Context, kv kvspace.KVSpace, funcName string, rea
 // WaitDone 阻塞等待 op-plat / heap-plat 完成通知。
 func WaitDone(ctx context.Context, kv kvspace.KVSpace, vtid string, timeout time.Duration) (map[string]interface{}, error) {
 	doneKey := keytree.Done(vtid)
-	result, err := kv.BLPop(ctx, timeout, doneKey)
+	result, err := kv.Watch(timeout, doneKey)
 	if err != nil {
 		return nil, fmt.Errorf("waitDone timeout for %s: %w", doneKey, err)
 	}

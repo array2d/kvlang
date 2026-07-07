@@ -152,7 +152,6 @@ func TestParse_ComplexExamples(t *testing.T) {
 
 func TestIntegration_NativeScalar(t *testing.T) {
 	kv, ctx := connectKVSpace(t)
-	defer kv.Close()
 
 	vmCtx, vmCancel := context.WithCancel(ctx)
 	defer vmCancel()
@@ -231,9 +230,9 @@ func TestIntegration_NativeScalar(t *testing.T) {
 				t.Fatalf("CreateVThread: %v", err)
 			}
 			for slot, val := range tc.inputs {
-				kv.Set(ctx, "/vthread/"+vtid+"/"+slot, val, 0)
+				kv.Set("/vthread/"+vtid+"/"+slot, val, 0)
 			}
-			kv.RPush(ctx, "notify:vm", `{"event":"new_vthread","vtid":"`+vtid+`"}`)
+			kv.RPush("notify:vm", `{"event":"new_vthread","vtid":"`+vtid+`"}`)
 
 			outputs, done := waitVthreadDone(t, kv, vtid, 10*time.Second)
 			if !done {
@@ -255,7 +254,6 @@ func TestIntegration_NativeScalar(t *testing.T) {
 
 func TestIntegration_CrossCall(t *testing.T) {
 	kv, ctx := connectKVSpace(t)
-	defer kv.Close()
 
 	root := filepath.Join("example", "kvlang")
 
@@ -280,8 +278,8 @@ func TestIntegration_CrossCall(t *testing.T) {
 
 	// diamond(A=5) → double(5)=10, triple(5)=15, R=25
 	vtid, _ := vthread.CreateVThread(ctx, kv, "diamond", []string{"./a"}, []string{"./r"})
-	kv.Set(ctx, "/vthread/"+vtid+"/a", "5", 0)
-	kv.RPush(ctx, "notify:vm", `{"event":"new_vthread","vtid":"`+vtid+`"}`)
+	kv.Set("/vthread/"+vtid+"/a", "5", 0)
+	kv.RPush("notify:vm", `{"event":"new_vthread","vtid":"`+vtid+`"}`)
 
 	outputs, done := waitVthreadDone(t, kv, vtid, 15*time.Second)
 	if !done {
@@ -300,7 +298,6 @@ func TestIntegration_CrossCall(t *testing.T) {
 
 func TestIntegration_NativePrint(t *testing.T) {
 	kv, ctx := connectKVSpace(t)
-	defer kv.Close()
 
 	vmCtx, vmCancel := context.WithCancel(ctx)
 	defer vmCancel()
@@ -375,9 +372,9 @@ func TestIntegration_NativePrint(t *testing.T) {
 				t.Fatalf("CreateVThread: %v", err)
 			}
 			for slot, val := range tc.inputs {
-				kv.Set(ctx, "/vthread/"+vtid+"/"+slot, val, 0)
+				kv.Set("/vthread/"+vtid+"/"+slot, val, 0)
 			}
-			kv.RPush(ctx, "notify:vm", `{"event":"new_vthread","vtid":"`+vtid+`"}`)
+			kv.RPush("notify:vm", `{"event":"new_vthread","vtid":"`+vtid+`"}`)
 
 			outputs, done := waitVthreadDone(t, kv, vtid, 10*time.Second)
 			if !done {

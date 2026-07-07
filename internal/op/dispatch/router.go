@@ -16,14 +16,14 @@ import (
 // 返回实例标识符, e.g., "metal:0", "cuda:1"
 func Select(ctx context.Context, kv kvspace.KVSpace, opcode string) (string, error) {
 	// 1. 找到支持该算子的所有程序
-	programs, err := kv.Keys(ctx, keytree.OpPattern())
+	programs, err := kv.Keys(keytree.OpPattern())
 	if err != nil {
 		return "", fmt.Errorf("list op programs: %w", err)
 	}
 
 	var chosenProgram string
 	for _, progKey := range programs {
-		list, err := kv.LRange(ctx, progKey, 0, -1)
+		list, err := kv.LRange(progKey, 0, -1)
 		if err != nil {
 			continue
 		}
@@ -47,7 +47,7 @@ func Select(ctx context.Context, kv kvspace.KVSpace, opcode string) (string, err
 	}
 
 	// 2. 选择该程序下负载最低的进程实例
-	instances, err := kv.Keys(ctx, keytree.SysOpPlatPattern())
+	instances, err := kv.Keys(keytree.SysOpPlatPattern())
 	if err != nil {
 		return "", fmt.Errorf("list op-plat instances: %w", err)
 	}
@@ -66,7 +66,7 @@ func Select(ctx context.Context, kv kvspace.KVSpace, opcode string) (string, err
 			continue
 		}
 
-		val, err := kv.Get(ctx, instKey)
+		val, err := kv.Get(instKey)
 		if err != nil {
 			continue
 		}
@@ -98,12 +98,7 @@ func Select(ctx context.Context, kv kvspace.KVSpace, opcode string) (string, err
 // DetermineBackend 判断 func 的编译后端 (按优先级)
 func DetermineBackend(ctx context.Context, kv kvspace.KVSpace, funcName string) string {
 	for _, b := range []string{"op-metal", "op-cuda", "op-cpu"} {
-		exists, err := kv.Exists(ctx, keytree.OpBackendFunc(b, funcName))
-		if err != nil {
-			logx.Debug("route.DetermineBackend: EXISTS error for %s: %v", b, err)
-			continue
-		}
-		if exists > 0 {
+		if _, err := kv.Get(keytree.OpBackendFunc(b, funcName)); err == nil {
 			return b
 		}
 	}

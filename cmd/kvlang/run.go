@@ -46,13 +46,9 @@ func runServe() {
 	workers := runtime.GOMAXPROCS(0)
 	logx.Info("VM-%s starting with %d workers, kv=%s", vmID, workers, addr)
 
-	kv := kvspace.NewWithPool(addr, workers)
-	defer kv.Close()
+	kv := kvspace.Conn(addr)
+	defer kv.DisConn()
 
-	if err := kv.Ping(ctx); err != nil {
-		logx.Error("VM-%s kvspace connect failed: %v", vmID, err)
-		os.Exit(1)
-	}
 
 	registerVM(ctx, kv, vmID)
 	registerBuildinOps(ctx, kv, vmID)
@@ -76,25 +72,23 @@ func runServe() {
 	}
 	cancel()
 
-	shutdownCtx, scancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer scancel()
-	kv.Del(shutdownCtx, keytree.SysVM(vmID))
+	kv.Del(keytree.SysVM(vmID))
 	logx.Info("VM-%s shutdown complete", vmID)
 }
 
 func registerVM(ctx context.Context, kv kvspace.KVSpace, vmID string) {
 	reg := map[string]any{"status": "running", "pid": os.Getpid(), "started_at": time.Now().Unix()}
 	data, _ := json.Marshal(reg)
-	kv.Set(ctx, keytree.SysVM(vmID), data, 0)
+	kv.Set(keytree.SysVM(vmID), data, 0)
 	logx.Info("VM-%s registered at %s", vmID, keytree.SysVM(vmID))
 }
 
 func registerBuildinOps(ctx context.Context, kv kvspace.KVSpace, vmID string) {
 	key := keytree.OpBackendList("buildin")
 	defs := builtin.OpDefs()
-	kv.Del(ctx, key)
+	kv.Del(key)
 	for _, def := range defs {
-		kv.RPush(ctx, key, def)
+		kv.RPush(key, def)
 	}
 	logx.Info("VM-%s registered %d built-in ops", vmID, len(defs))
 }
@@ -104,7 +98,7 @@ func heartbeatLoop(ctx context.Context, kv kvspace.KVSpace, vmID string) {
 	writeHB := func(status string) {
 		hb := map[string]any{"ts": time.Now().Unix(), "status": status, "pid": os.Getpid()}
 		data, _ := json.Marshal(hb)
-		kv.Set(ctx, key, data, 0)
+		kv.Set(key, data, 0)
 	}
 	writeHB("running")
 	ticker := time.NewTicker(2 * time.Second)
@@ -128,7 +122,7 @@ func mainWatcher(ctx context.Context, kv kvspace.KVSpace, vmID string) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			val, err := kv.Get(ctx, keytree.FuncMain)
+			val, err := kv.Get(keytree.FuncMain)
 			if err != nil {
 				continue
 			}
@@ -142,29 +136,29 @@ func mainWatcher(ctx context.Context, kv kvspace.KVSpace, vmID string) {
 				continue
 			}
 			logx.Info("VM-%s %s entry=%s", vmID, keytree.FuncMain, entry.Entry)
-			kv.Del(ctx, keytree.FuncMain)
+			kv.Del(keytree.FuncMain)
 
-			vtid, _ := kv.Incr(ctx, keytree.SysVtidCounter)
+			vtid, _ := kv.Incr(keytree.SysVtidCounter)
 			vtidStr := fmt.Sprintf("%d", vtid)
 			base := keytree.VThread(vtidStr)
 
 			pipe := kv.Pipeline()
-			pipe.Set(ctx, base, `{"pc":"[0,0]","status":"init"}`, 0)
-			pipe.Set(ctx, base+"/[0,0]", entry.Entry, 0)
+			pipe.Set(base, `{"pc":"[0,0]","status":"init"}`, 0)
+			pipe.Set(base+"/[0,0]", entry.Entry, 0)
 			for i, arg := range entry.Reads {
-				pipe.Set(ctx, fmt.Sprintf("%s/[0,-%d]", base, i+1), arg, 0)
+				pipe.Set(fmt.Sprintf("%s/[0,-%d]", base, i+1), arg, 0)
 			}
-			pipe.Set(ctx, base+"/[0,1]", "./ret", 0)
+			pipe.Set(base+"/[0,1]", "./ret", 0)
 			if entry.Term != "" {
-				pipe.Set(ctx, keytree.VThreadTerm(vtidStr), entry.Term, 0)
+				pipe.Set(keytree.VThreadTerm(vtidStr), entry.Term, 0)
 			}
-			pipe.Exec(ctx)
+			pipe.Exec()
 
 			status, _ := json.Marshal(map[string]string{"vtid": vtidStr, "status": "executing"})
-			kv.Set(ctx, keytree.FuncMain, status, 0)
+			kv.Set(keytree.FuncMain, status, 0)
 
 			notify, _ := json.Marshal(map[string]any{"event": "new_vthread", "vtid": vtidStr})
-			kv.LPush(ctx, keytree.NotifyVM, notify)
+			kv.Notify(keytree.NotifyVM, notify)
 			logx.Info("VM-%s → vthread %s created", vmID, vtidStr)
 		}
 	}
@@ -173,7 +167,7 @@ func mainWatcher(ctx context.Context, kv kvspace.KVSpace, vmID string) {
 func sysCmdListener(ctx context.Context, kv kvspace.KVSpace, vmID string, cancel context.CancelFunc) {
 	queue := keytree.SysCmdVM(vmID)
 	for {
-		result, err := kv.BLPop(ctx, 5*time.Second, queue)
+		result, err := kv.Watch(5*time.Second, queue)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -198,13 +192,9 @@ func runFile(args []string) {
 	path := args[0]
 
 	ctx := context.Background()
-	kv := kvspace.New(addr)
-	defer kv.Close()
+	kv := kvspace.Conn(addr)
+	defer kv.DisConn()
 
-	if err := kv.Ping(ctx); err != nil {
-		logx.Error("kvspace connect failed: %v", err)
-		os.Exit(1)
-	}
 
 	files, err := collectKVFiles(path)
 	if err != nil {
@@ -256,14 +246,14 @@ func runFile(args []string) {
 	}
 
 	entry, _ := json.Marshal(map[string]any{"entry": "pre_main", "reads": []string{}, "writes": []string{}})
-	kv.Set(ctx, keytree.FuncMain, entry, 0)
+	kv.Set(keytree.FuncMain, entry, 0)
 
 	vtid := fmt.Sprintf("test-%d", time.Now().UnixNano())
 	st := vthread.VThread{PC: "[0,0]", Status: "init", Mode: "single"}
 	data, _ := json.Marshal(st)
-	pipe := kv.Pipeline(); pipe.Set(ctx, keytree.VThread(vtid), data, 0)
-	pipe.Set(ctx, keytree.VThreadSlot(vtid, 0, 0), "pre_main", 0)
-	pipe.Exec(ctx)
+	pipe := kv.Pipeline(); pipe.Set(keytree.VThread(vtid), data, 0)
+	pipe.Set(keytree.VThreadSlot(vtid, 0, 0), "pre_main", 0)
+	pipe.Exec()
 
 	logx.Info("[single] executing %s (%d ops)", vtid, len(body))
 	kvcpu.Execute(ctx, kv, vtid)
