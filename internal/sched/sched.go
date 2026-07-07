@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"kvlang/internal/logx"
-	"kvlang/internal/state"
+	"kvlang/internal/vthread"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -27,7 +27,7 @@ func Pick(ctx context.Context, rdb *redis.Client) string {
 		if err != nil {
 			continue
 		}
-		var s state.VThreadState
+		var s vthread.VThread
 		if json.Unmarshal([]byte(val), &s) != nil {
 			continue
 		}
@@ -35,7 +35,7 @@ func Pick(ctx context.Context, rdb *redis.Client) string {
 			continue
 		}
 		// 原子 CAS: set status to "running" if it's still "init"
-		updated := state.VThreadState{PC: s.PC, Status: "running", Mode: s.Mode}
+		updated := vthread.VThread{PC: s.PC, Status: "running", Mode: s.Mode}
 		data, _ := json.Marshal(updated)
 		// Lua script for atomic compare-and-set
 		script := `

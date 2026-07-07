@@ -17,7 +17,7 @@ import (
 	"kvlang/internal/vm"
 	"kvlang/internal/ir"
 	"kvlang/internal/logx"
-	"kvlang/internal/state"
+	"kvlang/internal/vthread"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -219,7 +219,7 @@ func registerBuildinOps(ctx context.Context, rdb *redis.Client, vmID string) {
 
 // singleRun 执行单个 vthread 后退出 (调试/单步执行用)。
 func singleRun(ctx context.Context, rdb *redis.Client, vtid string) {
-	vs := state.Get(ctx, rdb, vtid)
+	vs := vthread.Get(ctx, rdb, vtid)
 	if vs.Status != "init" {
 		logx.Warn("vthread %s status=%s (expect init)", vtid, vs.Status)
 		os.Exit(1)
@@ -231,7 +231,7 @@ func singleRun(ctx context.Context, rdb *redis.Client, vtid string) {
 	// 等待异步任务完成
 	time.Sleep(3 * time.Second)
 
-	vs = state.Get(ctx, rdb, vtid)
+	vs = vthread.Get(ctx, rdb, vtid)
 	fmt.Printf("\n=== VThread %s ===\n", vtid)
 	fmt.Printf("  PC:     %s\n", vs.PC)
 	fmt.Printf("  Status: %s\n", vs.Status)

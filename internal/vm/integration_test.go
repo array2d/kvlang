@@ -13,7 +13,7 @@ import (
 
 	"kvlang/internal/parser"
 	"kvlang/internal/register"
-	"kvlang/internal/state"
+	"kvlang/internal/vthread"
 	"kvlang/internal/vm"
 
 	"kvlang/internal/ast"
@@ -226,7 +226,7 @@ func TestIntegration_NativeScalar(t *testing.T) {
 				t.Fatalf("register.Func: %v", err)
 			}
 
-			vtid, err := state.CreateVThread(ctx, rdb, funcName, tc.reads, tc.writes)
+			vtid, err := vthread.CreateVThread(ctx, rdb, funcName, tc.reads, tc.writes)
 			if err != nil {
 				t.Fatalf("CreateVThread: %v", err)
 			}
@@ -279,7 +279,7 @@ func TestIntegration_CrossCall(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 
 	// diamond(A=5) → double(5)=10, triple(5)=15, R=25
-	vtid, _ := state.CreateVThread(ctx, rdb, "diamond", []string{"./a"}, []string{"./r"})
+	vtid, _ := vthread.CreateVThread(ctx, rdb, "diamond", []string{"./a"}, []string{"./r"})
 	rdb.Set(ctx, "/vthread/"+vtid+"/a", "5", 0)
 	rdb.RPush(ctx, "notify:vm", `{"event":"new_vthread","vtid":"`+vtid+`"}`)
 
@@ -370,7 +370,7 @@ func TestIntegration_NativePrint(t *testing.T) {
 				t.Fatalf("register.Func: %v", err)
 			}
 
-			vtid, err := state.CreateVThread(ctx, rdb, funcName, tc.reads, tc.writes)
+			vtid, err := vthread.CreateVThread(ctx, rdb, funcName, tc.reads, tc.writes)
 			if err != nil {
 				t.Fatalf("CreateVThread: %v", err)
 			}

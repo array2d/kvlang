@@ -10,7 +10,7 @@ import (
 	"kvlang/internal/ir"
 	"kvlang/internal/logx"
 	"kvlang/internal/sched"
-	"kvlang/internal/state"
+	"kvlang/internal/vthread"
 	"kvlang/internal/termio"
 	"github.com/redis/go-redis/v9"
 )
@@ -38,7 +38,7 @@ func RunWorker(ctx context.Context, rdb *redis.Client, id int) {
 // Execute 执行一个 vthread 直到完成或出错。
 func Execute(ctx context.Context, rdb *redis.Client, vtid string) {
 	for {
-		s := state.Get(ctx, rdb, vtid)
+		s := vthread.Get(ctx, rdb, vtid)
 		if s.Status == "done" || s.Status == "error" {
 			return
 		}
@@ -46,12 +46,12 @@ func Execute(ctx context.Context, rdb *redis.Client, vtid string) {
 		inst, err := ir.Decode(ctx, rdb, vtid, pc)
 		if err != nil {
 			logx.Debug("[%s] decode error at %s: %v", vtid, pc, err)
-			state.SetError(ctx, rdb, vtid, pc, fmt.Sprintf("decode: %v", err))
+			vthread.SetError(ctx, rdb, vtid, pc, fmt.Sprintf("decode: %v", err))
 			return
 		}
 		if inst.Opcode == "" {
 			logx.Debug("[%s] done at %s", vtid, pc)
-			state.Set(ctx, rdb, vtid, pc, "done")
+			vthread.Set(ctx, rdb, vtid, pc, "done")
 			return
 		}
 		logx.Debug("[%s] PC=%s OP=%s READS=%v WRITES=%v", vtid, pc, inst.Opcode, inst.Reads, inst.Writes)
@@ -71,7 +71,7 @@ func Execute(ctx context.Context, rdb *redis.Client, vtid string) {
 		case ir.IsComputeOp(inst.Opcode):
 			execErr = platform.Compute(ctx, rdb, vtid, pc, inst)
 		default:
-			state.Set(ctx, rdb, vtid, ir.NextPC(pc), "running")
+			vthread.Set(ctx, rdb, vtid, ir.NextPC(pc), "running")
 		}
 		if execErr != nil {
 			logx.Debug("[%s] error: %v", vtid, execErr)
@@ -88,17 +88,17 @@ func handleControl(ctx context.Context, rdb *redis.Client, vtid, pc string, inst
 			// HandleCall already set error state (func not found, parse failure, etc.)
 			return fmt.Errorf("call %s failed", inst.Reads[0])
 		}
-		state.Set(ctx, rdb, vtid, substackPC, "running")
+		vthread.Set(ctx, rdb, vtid, substackPC, "running")
 		logx.Debug("[%s] CALL → %s", vtid, substackPC)
 		return nil
 	case "return":
 		parentPC := codegen.HandleReturn(ctx, rdb, vtid, pc)
 		logx.Debug("[%s] RETURN → %s", vtid, parentPC)
 		if parentPC == pc {
-			state.Set(ctx, rdb, vtid, pc, "done")
+			vthread.Set(ctx, rdb, vtid, pc, "done")
 			return nil
 		}
-		state.Set(ctx, rdb, vtid, parentPC, "running")
+		vthread.Set(ctx, rdb, vtid, parentPC, "running")
 		return nil
 	case "if":
 		return If(ctx, rdb, vtid, pc, inst)

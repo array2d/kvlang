@@ -9,7 +9,7 @@ import (
 
 	"kvlang/internal/ir"
 	"kvlang/internal/logx"
-	"kvlang/internal/state"
+	"kvlang/internal/vthread"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -141,7 +141,7 @@ func Native(ctx context.Context, rdb *redis.Client, vtid string, pc string, inst
 			val, err := rdb.Get(ctx, key).Result()
 			if err != nil {
 				msg := fmt.Sprintf("native read %s: %v", key, err)
-				state.SetError(ctx, rdb, vtid, pc, msg)
+				vthread.SetError(ctx, rdb, vtid, pc, msg)
 				return fmt.Errorf("%s", msg)
 			}
 			raw = val
@@ -153,7 +153,7 @@ func Native(ctx context.Context, rdb *redis.Client, vtid string, pc string, inst
 
 	result, err := evalNative(inst.Opcode, inputs)
 	if err != nil {
-		state.SetError(ctx, rdb, vtid, pc, err.Error())
+		vthread.SetError(ctx, rdb, vtid, pc, err.Error())
 		return err
 	}
 
@@ -167,12 +167,12 @@ func Native(ctx context.Context, rdb *redis.Client, vtid string, pc string, inst
 			wKey := resolveWriteKey(vtid, inst.Writes[0])
 			if err := rdb.Set(ctx, wKey, val, 0).Err(); err != nil {
 				msg := fmt.Sprintf("str.set %s: %v", wKey, err)
-				state.SetError(ctx, rdb, vtid, pc, msg)
+				vthread.SetError(ctx, rdb, vtid, pc, msg)
 				return fmt.Errorf("%s", msg)
 			}
 		}
 		logx.Debug("[%s] str.set %q -> %s", vtid, val, inst.Writes)
-		state.Set(ctx, rdb, vtid, ir.NextPC(pc), "running")
+		vthread.Set(ctx, rdb, vtid, ir.NextPC(pc), "running")
 		return nil
 	}
 
@@ -194,7 +194,7 @@ func Native(ctx context.Context, rdb *redis.Client, vtid string, pc string, inst
 				logx.Warn("[%s] write %s: %v", vtid, stream, err)
 			}
 		}
-		state.Set(ctx, rdb, vtid, ir.NextPC(pc), "running")
+		vthread.Set(ctx, rdb, vtid, ir.NextPC(pc), "running")
 		return nil
 	}
 	// input → 从终端 stdin 读取
@@ -214,7 +214,7 @@ func Native(ctx context.Context, rdb *redis.Client, vtid string, pc string, inst
 			var inErr error
 			val, inErr = ReadTerm(ctx, inTS)
 			if inErr != nil {
-				state.SetError(ctx, rdb, vtid, pc, inErr.Error())
+				vthread.SetError(ctx, rdb, vtid, pc, inErr.Error())
 				return inErr
 			}
 		}
@@ -222,12 +222,12 @@ func Native(ctx context.Context, rdb *redis.Client, vtid string, pc string, inst
 			wKey := resolveWriteKey(vtid, inst.Writes[0])
 			if err := rdb.Set(ctx, wKey, val, 0).Err(); err != nil {
 				msg := fmt.Sprintf("native write %s: %v", wKey, err)
-				state.SetError(ctx, rdb, vtid, pc, msg)
+				vthread.SetError(ctx, rdb, vtid, pc, msg)
 				return fmt.Errorf("%s", msg)
 			}
 		}
 		logx.Debug("[%s] INPUT = %s", vtid, val)
-		state.Set(ctx, rdb, vtid, ir.NextPC(pc), "running")
+		vthread.Set(ctx, rdb, vtid, ir.NextPC(pc), "running")
 		return nil
 	}
 
@@ -235,13 +235,13 @@ func Native(ctx context.Context, rdb *redis.Client, vtid string, pc string, inst
 		outKey := resolveWriteKey(vtid, inst.Writes[0])
 		if err := rdb.Set(ctx, outKey, result.String(), 0).Err(); err != nil {
 			msg := fmt.Sprintf("native write %s: %v", outKey, err)
-			state.SetError(ctx, rdb, vtid, pc, msg)
+			vthread.SetError(ctx, rdb, vtid, pc, msg)
 			return fmt.Errorf("%s", msg)
 		}
 	}
 
 	logx.Debug("[%s] NATIVE %s %v = %s", vtid, inst.Opcode, inputs, result.String())
-	state.Set(ctx, rdb, vtid, ir.NextPC(pc), "running")
+	vthread.Set(ctx, rdb, vtid, ir.NextPC(pc), "running")
 	return nil
 }
 

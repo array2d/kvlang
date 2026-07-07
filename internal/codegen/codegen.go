@@ -12,7 +12,7 @@ import (
 	"kvlang/internal/logx"
 	"kvlang/internal/parser"
 	"kvlang/internal/platform"
-	"kvlang/internal/state"
+	"kvlang/internal/vthread"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -27,7 +27,7 @@ func HandleCall(ctx context.Context, rdb *redis.Client, vtid, pc string, inst *i
 		if err != nil {
 			msg := fmt.Sprintf("func %s not found", funcName)
 			logx.Warn("[%s] CALL: %s", vtid, msg)
-			state.SetError(ctx, rdb, vtid, pc, msg)
+			vthread.SetError(ctx, rdb, vtid, pc, msg)
 			return pc
 		}
 	}
@@ -58,7 +58,7 @@ func HandleCall(ctx context.Context, rdb *redis.Client, vtid, pc string, inst *i
 		if err != nil {
 			msg := fmt.Sprintf("parse body[%d]: %v", i, err)
 			logx.Warn("[%s] CALL: %s", vtid, msg)
-			state.SetError(ctx, rdb, vtid, pc, msg)
+			vthread.SetError(ctx, rdb, vtid, pc, msg)
 			return pc
 		}
 		replaceParams(parsed.Reads, bindings)
@@ -87,7 +87,7 @@ func HandleCall(ctx context.Context, rdb *redis.Client, vtid, pc string, inst *i
 	if _, err := pipe.Exec(ctx); err != nil {
 		msg := fmt.Sprintf("CALL pipeline: %v", err)
 		logx.Warn("[%s] CALL: %s", vtid, msg)
-		state.SetError(ctx, rdb, vtid, pc, msg)
+		vthread.SetError(ctx, rdb, vtid, pc, msg)
 		return pc
 	}
 	return pc + "/[0,0]"

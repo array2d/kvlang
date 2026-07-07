@@ -11,9 +11,16 @@ import (
 	"kvlang/internal/ir"
 	"kvlang/internal/logx"
 	"kvlang/internal/parser"
-	"kvlang/internal/state"
+	"kvlang/internal/vthread"
 	"github.com/redis/go-redis/v9"
 )
+
+type ParamRef struct {
+	Key     string                 `json:"key"`
+	Dtype   string                 `json:"dtype,omitempty"`
+	Shape   []int                  `json:"shape,omitempty"`
+	Address map[string]interface{} `json:"address,omitempty"`
+}
 
 type OpTask struct {
 	Vtid    string                 `json:"vtid"`
@@ -24,12 +31,6 @@ type OpTask struct {
 	Params  map[string]interface{} `json:"params,omitempty"`
 }
 
-type ParamRef struct {
-	Key     string                 `json:"key"`
-	Dtype   string                 `json:"dtype,omitempty"`
-	Shape   []int                  `json:"shape,omitempty"`
-	Address map[string]interface{} `json:"address,omitempty"`
-}
 
 type HeapTask struct {
 	Vtid   string `json:"vtid"`
@@ -184,19 +185,19 @@ func Compute(ctx context.Context, rdb *redis.Client, vtid, pc string, inst *ir.I
 		return fmt.Errorf("push task: %w", err)
 	}
 	logx.Debug("[%s] PUSH %s → %s", vtid, inst.Opcode, cmdQueue)
-	state.Set(ctx, rdb, vtid, pc, "wait")
-	done, err := state.WaitDone(ctx, rdb, vtid, 30*time.Second)
+	vthread.Set(ctx, rdb, vtid, pc, "wait")
+	done, err := vthread.WaitDone(ctx, rdb, vtid, 30*time.Second)
 	if err != nil {
-		state.SetError(ctx, rdb, vtid, pc, fmt.Sprintf("BLPOP timeout: %v", err))
+		vthread.SetError(ctx, rdb, vtid, pc, fmt.Sprintf("BLPOP timeout: %v", err))
 		return err
 	}
 	if status, ok := done["status"].(string); ok && status == "error" {
 		errInfo := fmt.Sprintf("%v", done["error"])
-		state.SetError(ctx, rdb, vtid, pc, errInfo)
+		vthread.SetError(ctx, rdb, vtid, pc, errInfo)
 		return fmt.Errorf("op error: %s", errInfo)
 	}
 	logx.Debug("[%s] DONE %s", vtid, inst.Opcode)
-	state.Set(ctx, rdb, vtid, ir.NextPC(pc), "running")
+	vthread.Set(ctx, rdb, vtid, ir.NextPC(pc), "running")
 	return nil
 }
 
@@ -208,18 +209,18 @@ func Lifecycle(ctx context.Context, rdb *redis.Client, vtid, pc string, inst *ir
 		return fmt.Errorf("push heap task: %w", err)
 	}
 	logx.Debug("[%s] PUSH %s → cmd:heap-metal:0", vtid, inst.Opcode)
-	done, err := state.WaitDone(ctx, rdb, vtid, 5*time.Second)
+	done, err := vthread.WaitDone(ctx, rdb, vtid, 5*time.Second)
 	if err != nil {
-		state.SetError(ctx, rdb, vtid, pc, fmt.Sprintf("heap op timeout: %v", err))
+		vthread.SetError(ctx, rdb, vtid, pc, fmt.Sprintf("heap op timeout: %v", err))
 		return err
 	}
 	if status, ok := done["status"].(string); ok && status == "error" {
 		errInfo := fmt.Sprintf("%v", done["error"])
-		state.SetError(ctx, rdb, vtid, pc, errInfo)
+		vthread.SetError(ctx, rdb, vtid, pc, errInfo)
 		return fmt.Errorf("heap error: %s", errInfo)
 	}
 	logx.Debug("[%s] HEAP %s done", vtid, inst.Opcode)
-	state.Set(ctx, rdb, vtid, ir.NextPC(pc), "running")
+	vthread.Set(ctx, rdb, vtid, ir.NextPC(pc), "running")
 	return nil
 }
 

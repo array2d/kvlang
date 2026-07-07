@@ -6,7 +6,7 @@ import (
 
 	"kvlang/internal/ir"
 	"kvlang/internal/logx"
-	"kvlang/internal/state"
+	"kvlang/internal/vthread"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -46,11 +46,11 @@ func If(ctx context.Context, rdb *redis.Client, vtid, pc string, inst *ir.Instru
 	if target == "" {
 		// No branch → skip
 		logx.Debug("[%s] IF %q → no branch, skip", vtid, condVal)
-		state.Set(ctx, rdb, vtid, ir.NextPC(pc), "running")
+		vthread.Set(ctx, rdb, vtid, ir.NextPC(pc), "running")
 		return nil
 	}
 
 	logx.Debug("[%s] IF %q → %s", vtid, condVal, target)
-	state.Set(ctx, rdb, vtid, target, "running")
+	vthread.Set(ctx, rdb, vtid, target, "running")
 	return nil
 }
