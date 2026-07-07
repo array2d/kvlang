@@ -1,6 +1,6 @@
 //go:build integration
 
-package vm_test
+package kvcpu_test
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 	"kvlang/internal/parser"
 	
 	"kvlang/internal/vthread"
-	"kvlang/internal/vm"
+	"kvlang/internal/kvcpu"
 
 	"kvlang/internal/ast"
 )

@@ -1,5 +1,5 @@
-// Package vm 提供 VM 核心执行循环与控制流指令。
-package vm
+// Package kvcpu 提供 VM 核心执行循环与控制流指令。
+package kvcpu
 
 import (
 	"context"

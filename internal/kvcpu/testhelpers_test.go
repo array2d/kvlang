@@ -1,4 +1,4 @@
-package vm_test
+package kvcpu_test
 
 import (
 	"context"

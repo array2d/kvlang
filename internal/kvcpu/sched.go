@@ -1,5 +1,5 @@
 // Package sched 负责原子拾取和等待虚线程。
-package vm
+package kvcpu
 
 import (
 	"context"
