@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"kvlang/internal/vm"
-	"kvlang/internal/ir"
+	"kvlang/internal/op/builtin"
 	"kvlang/internal/logx"
 	"kvlang/internal/vthread"
 	"github.com/redis/go-redis/v9"
@@ -202,7 +202,7 @@ func updateVMHeartbeat(ctx context.Context, rdb *redis.Client, key, status strin
 // can uniformly LRANGE-read and display all operator backends.
 func registerBuildinOps(ctx context.Context, rdb *redis.Client, vmID string) {
 	const key = "/op/buildin/list"
-	defs := ir.OpDefs()
+	defs := builtin.OpDefs()
 
 	// Clear previous registration
 	rdb.Del(ctx, key)

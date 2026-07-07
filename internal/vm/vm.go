@@ -11,7 +11,7 @@ import (
 	"kvlang/internal/logx"
 	"kvlang/internal/sched"
 	"kvlang/internal/vthread"
-	"kvlang/internal/termio"
+	"kvlang/internal/op/builtin"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -60,8 +60,8 @@ func Execute(ctx context.Context, rdb *redis.Client, vtid string) {
 		switch {
 		case ir.IsControlOp(inst.Opcode):
 			execErr = handleControl(ctx, rdb, vtid, pc, inst)
-		case ir.IsNativeOp(inst.Opcode):
-			execErr = termio.Native(ctx, rdb, vtid, pc, inst)
+		case builtin.IsNativeOp(inst.Opcode):
+			execErr = builtin.Native(ctx, rdb, vtid, pc, inst)
 		case ir.IsLifecycleOp(inst.Opcode):
 			execErr = platform.Lifecycle(ctx, rdb, vtid, pc, inst)
 		case isFunctionCall(ctx, rdb, inst.Opcode):
