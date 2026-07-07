@@ -8,13 +8,13 @@ import (
 	"kvlang/internal/logx"
 	"kvlang/internal/vthread"
 	"kvlang/internal/keytree"
-	"github.com/redis/go-redis/v9"
+	"kvlang/internal/kvspace"
 )
 
 // If 处理 if 控制流指令。
 // if(cond) -> branch_true, branch_false
 // cond 为 true 时跳转到第一个 reads，否则第二个。
-func If(ctx context.Context, rdb *redis.Client, vtid, pc string, inst *ir.Instruction) error {
+func If(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *ir.Instruction) error {
 	if len(inst.Reads) < 1 {
 		return fmt.Errorf("if requires condition")
 	}
@@ -24,7 +24,7 @@ func If(ctx context.Context, rdb *redis.Client, vtid, pc string, inst *ir.Instru
 	var condVal string
 	var err error
 	if len(condKey) >= 2 && condKey[:2] == "./" {
-		condVal, err = rdb.Get(ctx, keytree.VThreadAt(vtid, condKey[2:])).Result()
+		condVal, err = kv.Get(ctx, keytree.VThreadAt(vtid, condKey[2:]))
 	} else {
 		condVal = condKey
 	}
@@ -47,11 +47,11 @@ func If(ctx context.Context, rdb *redis.Client, vtid, pc string, inst *ir.Instru
 	if target == "" {
 		// No branch → skip
 		logx.Debug("[%s] IF %q → no branch, skip", vtid, condVal)
-		vthread.Set(ctx, rdb, vtid, ir.NextPC(pc), "running")
+		vthread.Set(ctx, kv, vtid, ir.NextPC(pc), "running")
 		return nil
 	}
 
 	logx.Debug("[%s] IF %q → %s", vtid, condVal, target)
-	vthread.Set(ctx, rdb, vtid, target, "running")
+	vthread.Set(ctx, kv, vtid, target, "running")
 	return nil
 }

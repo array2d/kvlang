@@ -14,21 +14,21 @@ import (
 	"kvlang/internal/op/dispatch"
 	"kvlang/internal/vthread"
 	"kvlang/internal/keytree"
-	"github.com/redis/go-redis/v9"
+	"kvlang/internal/kvspace"
 )
 
 // HandleCall 执行 CALL 指令的 eager 翻译，返回子栈第一条指令的 PC。
-func HandleCall(ctx context.Context, rdb *redis.Client, vtid, pc string, inst *ir.Instruction) string {
+func HandleCall(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *ir.Instruction) string {
 	funcName := inst.Reads[0]
-	backend := dispatch.DetermineBackend(ctx, rdb, funcName)
+	backend := dispatch.DetermineBackend(ctx, kv, funcName)
 
-	sig, err := rdb.Get(ctx, keytree.OpBackendFunc(backend, funcName)).Result()
+	sig, err := kv.Get(ctx, keytree.OpBackendFunc(backend, funcName))
 	if err != nil {
-		sig, err = rdb.Get(ctx, keytree.SrcFunc(funcName)).Result()
+		sig, err = kv.Get(ctx, keytree.SrcFunc(funcName))
 		if err != nil {
 			msg := fmt.Sprintf("func %s not found", funcName)
 			logx.Warn("[%s] CALL: %s", vtid, msg)
-			vthread.SetError(ctx, rdb, vtid, pc, msg)
+			vthread.SetError(ctx, kv, vtid, pc, msg)
 			return pc
 		}
 	}
@@ -46,20 +46,20 @@ func HandleCall(ctx context.Context, rdb *redis.Client, vtid, pc string, inst *i
 		}
 	}
 
-	compiled := mgetAll(ctx, rdb, keytree.OpBackendFunc(backend, funcName))
+	compiled := mgetAll(ctx, kv, keytree.OpBackendFunc(backend, funcName))
 	if len(compiled) == 0 {
-		compiled = mgetAll(ctx, rdb, keytree.SrcFunc(funcName))
+		compiled = mgetAll(ctx, kv, keytree.SrcFunc(funcName))
 	}
 
 	substackRoot := keytree.VThreadSub(vtid, pc)
-	pipe := rdb.Pipeline()
+	pipe := kv.Pipeline()
 	bodyCount := len(compiled)
 	for i, kvlangLine := range compiled {
 		parsed, err := parser.ParseLine(kvlangLine)
 		if err != nil {
 			msg := fmt.Sprintf("parse body[%d]: %v", i, err)
 			logx.Warn("[%s] CALL: %s", vtid, msg)
-			vthread.SetError(ctx, rdb, vtid, pc, msg)
+			vthread.SetError(ctx, kv, vtid, pc, msg)
 			return pc
 		}
 		replaceParams(parsed.Reads, bindings)
@@ -88,43 +88,43 @@ func HandleCall(ctx context.Context, rdb *redis.Client, vtid, pc string, inst *i
 	if _, err := pipe.Exec(ctx); err != nil {
 		msg := fmt.Sprintf("CALL pipeline: %v", err)
 		logx.Warn("[%s] CALL: %s", vtid, msg)
-		vthread.SetError(ctx, rdb, vtid, pc, msg)
+		vthread.SetError(ctx, kv, vtid, pc, msg)
 		return pc
 	}
 	return pc + "/[0,0]"
 }
 
 // HandleReturn 处理 RETURN: 回传返回值, 删除子栈, 恢复父栈 PC。
-func HandleReturn(ctx context.Context, rdb *redis.Client, vtid, pc string) string {
+func HandleReturn(ctx context.Context, kv kvspace.KVSpace, vtid, pc string) string {
 	lastSlash := strings.LastIndex(pc, "/")
 	if lastSlash < 0 {
 		return pc
 	}
 	parentPC := pc[:lastSlash]
 
-	inst, err := ir.Decode(ctx, rdb, vtid, pc)
+	inst, err := ir.Decode(ctx, kv, vtid, pc)
 	if err == nil {
-		parentInst, pErr := ir.Decode(ctx, rdb, vtid, parentPC)
+		parentInst, pErr := ir.Decode(ctx, kv, vtid, parentPC)
 		if pErr == nil && len(parentInst.Writes) > 0 && len(inst.Reads) > 0 {
 			retSlot := parentInst.Writes[0]
 			retRef := inst.Reads[0]
 			retVal := retRef
 			if strings.HasPrefix(retRef, "./") {
 				srcKey := keytree.VThreadAt(vtid, retRef[2:])
-				if v, e := rdb.Get(ctx, srcKey).Result(); e == nil {
+				if v, e := kv.Get(ctx, srcKey); e == nil {
 					retVal = v
 				}
 			}
 			if strings.HasPrefix(retSlot, "./") {
 				slotKey := keytree.VThreadAt(vtid, retSlot[2:])
-				rdb.Set(ctx, slotKey, retVal, 0)
+				kv.Set(ctx, slotKey, retVal, 0)
 			}
 		}
 	}
 
-	keys, _ := rdb.Keys(ctx, keytree.VThreadAt(vtid, parentPC)+"/*").Result()
+	keys, _ := kv.Keys(ctx, keytree.VThreadAt(vtid, parentPC)+"/*")
 	if len(keys) > 0 {
-		rdb.Del(ctx, keys...)
+		kv.Del(ctx, keys...)
 	}
 	return ir.NextPC(parentPC)
 }
@@ -137,8 +137,8 @@ func replaceParams(params []string, bindings map[string]string) {
 	}
 }
 
-func mgetAll(ctx context.Context, rdb *redis.Client, base string) []string {
-	keys, err := rdb.Keys(ctx, base+"/*").Result()
+func mgetAll(ctx context.Context, kv kvspace.KVSpace, base string) []string {
+	keys, err := kv.Keys(ctx, base+"/*")
 	if err != nil {
 		return nil
 	}
@@ -163,7 +163,7 @@ func mgetAll(ctx context.Context, rdb *redis.Client, base string) []string {
 	if len(ordered) == 0 {
 		return nil
 	}
-	vals, _ := rdb.MGet(ctx, ordered...).Result()
+	vals, _ := kv.MGet(ctx, ordered...)
 	result := make([]string, 0, len(vals))
 	for _, v := range vals {
 		if s, ok := v.(string); ok {
