@@ -5,31 +5,197 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
-	"strconv"
+	"runtime"
+	
 	"strings"
+	"syscall"
 	"time"
 
 	"kvlang/internal/ast"
-	"kvlang/internal/logx"
-	"kvlang/internal/parser"
-	"kvlang/internal/kvcpu"
-	"kvlang/internal/vthread"
 	"kvlang/internal/keytree"
-
+	"kvlang/internal/kvcpu"
 	"kvlang/internal/kvspace"
+	"kvlang/internal/vthread"
+	"kvlang/internal/logx"
+	"kvlang/internal/op/builtin"
+	"kvlang/internal/parser"
+	
 )
 
 func cmdRun(args []string) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: kvlang run <path|vtid> [kv_addr]")
+		runServe()
+	} else {
+		runFile(args)
+	}
+}
+
+// ── serve mode: kvlang run (no args) ──
+
+func runServe() {
+	addr := "127.0.0.1:6379"
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	vmID := os.Getenv("VM_ID")
+	if vmID == "" {
+		vmID = "0"
+	}
+	workers := runtime.GOMAXPROCS(0)
+	logx.Info("VM-%s starting with %d workers, kv=%s", vmID, workers, addr)
+
+	kv := kvspace.NewWithPool(addr, workers)
+	defer kv.Close()
+
+	if err := kv.Ping(ctx); err != nil {
+		logx.Error("VM-%s kvspace connect failed: %v", vmID, err)
 		os.Exit(1)
 	}
-	target := args[0]
+
+	registerVM(ctx, kv, vmID)
+	registerBuildinOps(ctx, kv, vmID)
+
+	for i := 0; i < workers; i++ {
+		go kvcpu.RunWorker(ctx, kv, i)
+	}
+	logx.Info("VM-%s %d workers started", vmID, workers)
+
+	go heartbeatLoop(ctx, kv, vmID)
+	go mainWatcher(ctx, kv, vmID)
+	go sysCmdListener(ctx, kv, vmID, cancel)
+
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	select {
+	case s := <-sig:
+		logx.Info("VM-%s received %s, shutting down...", vmID, s)
+	case <-ctx.Done():
+		logx.Info("VM-%s context cancelled, shutting down...", vmID)
+	}
+	cancel()
+
+	shutdownCtx, scancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer scancel()
+	kv.Del(shutdownCtx, keytree.SysVM(vmID))
+	logx.Info("VM-%s shutdown complete", vmID)
+}
+
+func registerVM(ctx context.Context, kv kvspace.KVSpace, vmID string) {
+	reg := map[string]any{"status": "running", "pid": os.Getpid(), "started_at": time.Now().Unix()}
+	data, _ := json.Marshal(reg)
+	kv.Set(ctx, keytree.SysVM(vmID), data, 0)
+	logx.Info("VM-%s registered at %s", vmID, keytree.SysVM(vmID))
+}
+
+func registerBuildinOps(ctx context.Context, kv kvspace.KVSpace, vmID string) {
+	key := keytree.OpBackendList("buildin")
+	defs := builtin.OpDefs()
+	kv.Del(ctx, key)
+	for _, def := range defs {
+		kv.RPush(ctx, key, def)
+	}
+	logx.Info("VM-%s registered %d built-in ops", vmID, len(defs))
+}
+
+func heartbeatLoop(ctx context.Context, kv kvspace.KVSpace, vmID string) {
+	key := keytree.SysHeartbeat(vmID)
+	writeHB := func(status string) {
+		hb := map[string]any{"ts": time.Now().Unix(), "status": status, "pid": os.Getpid()}
+		data, _ := json.Marshal(hb)
+		kv.Set(ctx, key, data, 0)
+	}
+	writeHB("running")
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			writeHB("stopped")
+			return
+		case <-ticker.C:
+			writeHB("running")
+		}
+	}
+}
+
+func mainWatcher(ctx context.Context, kv kvspace.KVSpace, vmID string) {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			val, err := kv.Get(ctx, keytree.FuncMain)
+			if err != nil {
+				continue
+			}
+			var entry struct {
+				Entry  string   `json:"entry"`
+				Reads  []string `json:"reads"`
+				Writes []string `json:"writes"`
+				Term   string   `json:"term,omitempty"`
+			}
+			if json.Unmarshal([]byte(val), &entry) != nil || entry.Entry == "" {
+				continue
+			}
+			logx.Info("VM-%s %s entry=%s", vmID, keytree.FuncMain, entry.Entry)
+			kv.Del(ctx, keytree.FuncMain)
+
+			vtid, _ := kv.Incr(ctx, keytree.SysVtidCounter)
+			vtidStr := fmt.Sprintf("%d", vtid)
+			base := keytree.VThread(vtidStr)
+
+			pipe := kv.Pipeline()
+			pipe.Set(ctx, base, `{"pc":"[0,0]","status":"init"}`, 0)
+			pipe.Set(ctx, base+"/[0,0]", entry.Entry, 0)
+			for i, arg := range entry.Reads {
+				pipe.Set(ctx, fmt.Sprintf("%s/[0,-%d]", base, i+1), arg, 0)
+			}
+			pipe.Set(ctx, base+"/[0,1]", "./ret", 0)
+			if entry.Term != "" {
+				pipe.Set(ctx, keytree.VThreadTerm(vtidStr), entry.Term, 0)
+			}
+			pipe.Exec(ctx)
+
+			status, _ := json.Marshal(map[string]string{"vtid": vtidStr, "status": "executing"})
+			kv.Set(ctx, keytree.FuncMain, status, 0)
+
+			notify, _ := json.Marshal(map[string]any{"event": "new_vthread", "vtid": vtidStr})
+			kv.LPush(ctx, keytree.NotifyVM, notify)
+			logx.Info("VM-%s → vthread %s created", vmID, vtidStr)
+		}
+	}
+}
+
+func sysCmdListener(ctx context.Context, kv kvspace.KVSpace, vmID string, cancel context.CancelFunc) {
+	queue := keytree.SysCmdVM(vmID)
+	for {
+		result, err := kv.BLPop(ctx, 5*time.Second, queue)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			continue
+		}
+		var cmd struct{ Cmd string `json:"cmd"` }
+		if json.Unmarshal([]byte(result[1]), &cmd) == nil && cmd.Cmd == "shutdown" {
+			logx.Info("VM-%s sys shutdown", vmID)
+			cancel()
+			return
+		}
+	}
+}
+// ── one-shot: kvlang run <file.kv> ──
+
+func runFile(args []string) {
 	addr := "127.0.0.1:6379"
 	if len(args) > 1 {
 		addr = args[1]
 	}
+	path := args[0]
 
 	ctx := context.Background()
 	kv := kvspace.New(addr)
@@ -40,36 +206,6 @@ func cmdRun(args []string) {
 		os.Exit(1)
 	}
 
-	// vtid (纯数字) → 直接执行
-	if isNumeric(target) {
-		vs := vthread.Get(ctx, kv, target)
-		if vs.Status != "init" {
-			logx.Warn("vthread %s status=%s (expect init)", target, vs.Status)
-			os.Exit(1)
-		}
-		logx.Info("[single] executing vthread %s", target)
-		kvcpu.Execute(ctx, kv, target)
-		time.Sleep(3 * time.Second)
-		vs = vthread.Get(ctx, kv, target)
-		fmt.Printf("\n=== VThread %s ===\n", target)
-		fmt.Printf("  PC:     %s\n", vs.PC)
-		fmt.Printf("  Status: %s\n", vs.Status)
-		if vs.Error != nil {
-			fmt.Printf("  Error:  %v\n", vs.Error)
-		}
-		return
-	}
-
-	// 文件路径 → 加载 → 执行
-	loadAndRun(ctx, kv, target)
-}
-
-func isNumeric(s string) bool {
-	_, err := strconv.Atoi(s)
-	return err == nil
-}
-
-func loadAndRun(ctx context.Context, kv kvspace.KVSpace, path string) {
 	files, err := collectKVFiles(path)
 	if err != nil {
 		logx.Fatal("collect .kv files: %v", err)
@@ -96,7 +232,7 @@ func loadAndRun(ctx context.Context, kv kvspace.KVSpace, path string) {
 				continue
 			}
 			loaded++
-			logx.Info("OK   %s → /src/func/%s", f, fn.Name)
+			logx.Info("OK   %s → %s", f, keytree.SrcFunc(fn.Name))
 			if fn.Name == "main" {
 				hasMain = true
 			}
@@ -114,33 +250,20 @@ func loadAndRun(ctx context.Context, kv kvspace.KVSpace, path string) {
 		body = append(body, "main() -> './pre_main_ret'")
 	}
 
-	preMain := ast.Func{
-		Name:      "pre_main",
-		Signature: "def pre_main() -> ()",
-		Body:      body,
-	}
+	preMain := ast.Func{Name: "pre_main", Signature: "def pre_main() -> ()", Body: body}
 	if err := preMain.Register(ctx, kv); err != nil {
 		logx.Fatal("FAIL register pre_main: %v", err)
 	}
 
-	entry, _ := json.Marshal(map[string]any{
-		"entry":  "pre_main",
-		"reads":  []string{},
-		"writes": []string{},
-	})
+	entry, _ := json.Marshal(map[string]any{"entry": "pre_main", "reads": []string{}, "writes": []string{}})
 	kv.Set(ctx, keytree.FuncMain, entry, 0)
 
-	// 创建 vthread 并执行
 	vtid := fmt.Sprintf("test-%d", time.Now().UnixNano())
 	st := vthread.VThread{PC: "[0,0]", Status: "init", Mode: "single"}
 	data, _ := json.Marshal(st)
-	kv.Set(ctx, keytree.VThread(vtid), data, 0)
-
-	pipe := kv.Pipeline()
+	pipe := kv.Pipeline(); pipe.Set(ctx, keytree.VThread(vtid), data, 0)
 	pipe.Set(ctx, keytree.VThreadSlot(vtid, 0, 0), "pre_main", 0)
-	if _, err := pipe.Exec(ctx); err != nil {
-		logx.Fatal("create vthread: %v", err)
-	}
+	pipe.Exec(ctx)
 
 	logx.Info("[single] executing %s (%d ops)", vtid, len(body))
 	kvcpu.Execute(ctx, kv, vtid)
@@ -154,6 +277,8 @@ func loadAndRun(ctx context.Context, kv kvspace.KVSpace, path string) {
 		fmt.Printf("  Error:  %v\n", vs.Error)
 	}
 }
+
+// ── helpers ──
 
 func collectKVFiles(path string) ([]string, error) {
 	info, err := os.Stat(path)
