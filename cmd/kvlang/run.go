@@ -13,7 +13,7 @@ import (
 	"kvlang/internal/ast"
 	"kvlang/internal/logx"
 	"kvlang/internal/parser"
-	"kvlang/internal/vm"
+	"kvlang/internal/kvcpu"
 	"kvlang/internal/vthread"
 	"kvlang/internal/keytree"
 
@@ -48,7 +48,7 @@ func cmdRun(args []string) {
 			os.Exit(1)
 		}
 		logx.Info("[single] executing vthread %s", target)
-		vm.Execute(ctx, rdb, target)
+		kvcpu.Execute(ctx, rdb, target)
 		time.Sleep(3 * time.Second)
 		vs = vthread.Get(ctx, rdb, target)
 		fmt.Printf("\n=== VThread %s ===\n", target)
@@ -143,7 +143,7 @@ func loadAndRun(ctx context.Context, rdb *redis.Client, path string) {
 	}
 
 	logx.Info("[single] executing %s (%d ops)", vtid, len(body))
-	vm.Execute(ctx, rdb, vtid)
+	kvcpu.Execute(ctx, rdb, vtid)
 	time.Sleep(3 * time.Second)
 
 	vs := vthread.Get(ctx, rdb, vtid)

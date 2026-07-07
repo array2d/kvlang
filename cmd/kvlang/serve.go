@@ -12,7 +12,7 @@ import (
 
 	"kvlang/internal/logx"
 	"kvlang/internal/op/builtin"
-	"kvlang/internal/vm"
+	"kvlang/internal/kvcpu"
 	"kvlang/internal/keytree"
 
 	"github.com/redis/go-redis/v9"
@@ -53,7 +53,7 @@ func cmdServe(args []string) {
 	registerBuildinOps(ctx, rdb, vmID)
 
 	for i := 0; i < workers; i++ {
-		go vm.RunWorker(ctx, rdb, i)
+		go kvcpu.RunWorker(ctx, rdb, i)
 	}
 	logx.Info("VM-%s %d workers started", vmID, workers)
 
