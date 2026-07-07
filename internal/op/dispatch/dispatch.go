@@ -1,5 +1,5 @@
-// Package platform 负责算子分发到 op-plat 和 heap-plat。
-package platform
+// Package dispatch 负责算子分发到 op-plat 和 heap-plat。
+package dispatch
 
 import (
 	"context"
