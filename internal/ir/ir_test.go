@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"kvlang/internal/ir"
-	"kvlang/internal/platform"
+	"kvlang/internal/op/dispatch"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -93,7 +93,7 @@ func TestDecodeFromCache(t *testing.T) {
 func TestRouteSelect_NoRedis(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: "127.0.0.1:9999"})
 	ctx := context.Background()
-	_, err := platform.Select(ctx, rdb, "add")
+	_, err := dispatch.Select(ctx, rdb, "add")
 	if err == nil {
 		t.Error("expected error when Redis is not available")
 	}

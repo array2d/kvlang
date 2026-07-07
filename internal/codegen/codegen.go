@@ -11,7 +11,7 @@ import (
 	"kvlang/internal/ir"
 	"kvlang/internal/logx"
 	"kvlang/internal/parser"
-	"kvlang/internal/platform"
+	"kvlang/internal/op/dispatch"
 	"kvlang/internal/vthread"
 	"github.com/redis/go-redis/v9"
 )
@@ -19,7 +19,7 @@ import (
 // HandleCall 执行 CALL 指令的 eager 翻译，返回子栈第一条指令的 PC。
 func HandleCall(ctx context.Context, rdb *redis.Client, vtid, pc string, inst *ir.Instruction) string {
 	funcName := inst.Reads[0]
-	backend := platform.DetermineBackend(ctx, rdb, funcName)
+	backend := dispatch.DetermineBackend(ctx, rdb, funcName)
 
 	sig, err := rdb.Get(ctx, fmt.Sprintf("/op/%s/func/%s", backend, funcName)).Result()
 	if err != nil {

@@ -6,10 +6,9 @@ import (
 	"fmt"
 
 	"kvlang/internal/codegen"
-	"kvlang/internal/platform"
+	"kvlang/internal/op/dispatch"
 	"kvlang/internal/ir"
 	"kvlang/internal/logx"
-	"kvlang/internal/sched"
 	"kvlang/internal/vthread"
 	"kvlang/internal/op/builtin"
 	"github.com/redis/go-redis/v9"
@@ -25,9 +24,9 @@ func RunWorker(ctx context.Context, rdb *redis.Client, id int) {
 			return
 		default:
 		}
-		vtid := sched.Pick(ctx, rdb)
+		vtid := Pick(ctx, rdb)
 		if vtid == "" {
-			sched.Wait(ctx, rdb)
+			Wait(ctx, rdb)
 			continue
 		}
 		logx.Debug("worker-%d picked vthread %s", id, vtid)
@@ -63,13 +62,13 @@ func Execute(ctx context.Context, rdb *redis.Client, vtid string) {
 		case builtin.IsNativeOp(inst.Opcode):
 			execErr = builtin.Native(ctx, rdb, vtid, pc, inst)
 		case ir.IsLifecycleOp(inst.Opcode):
-			execErr = platform.Lifecycle(ctx, rdb, vtid, pc, inst)
+			execErr = dispatch.Lifecycle(ctx, rdb, vtid, pc, inst)
 		case isFunctionCall(ctx, rdb, inst.Opcode):
 			inst.Reads = append([]string{inst.Opcode}, inst.Reads...)
 			inst.Opcode = "call"
 			execErr = handleControl(ctx, rdb, vtid, pc, inst)
 		case ir.IsComputeOp(inst.Opcode):
-			execErr = platform.Compute(ctx, rdb, vtid, pc, inst)
+			execErr = dispatch.Compute(ctx, rdb, vtid, pc, inst)
 		default:
 			vthread.Set(ctx, rdb, vtid, ir.NextPC(pc), "running")
 		}

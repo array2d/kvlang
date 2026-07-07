@@ -9,9 +9,9 @@ import (
 	"fmt"
 	"strings"
 
+	"kvlang/internal/device"
 	"kvlang/internal/ir"
 	"kvlang/internal/logx"
-	"kvlang/internal/termio"
 	"kvlang/internal/vthread"
 
 	"github.com/redis/go-redis/v9"
@@ -68,7 +68,7 @@ func Native(ctx context.Context, rdb *redis.Client, vtid string, pc string, inst
 		if inst.Opcode == OpCerr {
 			stream = "stderr"
 		}
-		ts := termio.ResolveTerm(ctx, rdb, vtid, stream)
+		ts := device.ResolveTerm(ctx, rdb, vtid, stream)
 		parts := make([]string, len(inputs))
 		for i, v := range inputs {
 			parts[i] = v.String()
@@ -76,7 +76,7 @@ func Native(ctx context.Context, rdb *redis.Client, vtid string, pc string, inst
 		line := strings.Join(parts, " ")
 		logx.Debug("[%s] %s %s", vtid, strings.ToUpper(inst.Opcode), line)
 		if !ts.IsZero() {
-			if err := termio.WriteTerm(ctx, ts, line); err != nil {
+			if err := device.WriteTerm(ctx, ts, line); err != nil {
 				logx.Warn("[%s] write %s: %v", vtid, stream, err)
 			}
 		}
@@ -88,16 +88,16 @@ func Native(ctx context.Context, rdb *redis.Client, vtid string, pc string, inst
 	if inst.Opcode == OpInput {
 		if len(inputs) > 0 {
 			prompt := inputs[0].String()
-			outTS := termio.ResolveTerm(ctx, rdb, vtid, "stdout")
+			outTS := device.ResolveTerm(ctx, rdb, vtid, "stdout")
 			if !outTS.IsZero() {
-				termio.WriteTerm(ctx, outTS, prompt)
+				device.WriteTerm(ctx, outTS, prompt)
 			}
 		}
-		inTS := termio.ResolveTerm(ctx, rdb, vtid, "stdin")
+		inTS := device.ResolveTerm(ctx, rdb, vtid, "stdin")
 		var val string
 		if !inTS.IsZero() {
 			var inErr error
-			val, inErr = termio.ReadTerm(ctx, inTS)
+			val, inErr = device.ReadTerm(ctx, inTS)
 			if inErr != nil {
 				vthread.SetError(ctx, rdb, vtid, pc, inErr.Error())
 				return inErr

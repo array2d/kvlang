@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"kvlang/internal/parser"
-	"kvlang/internal/register"
+	
 	"kvlang/internal/vthread"
 	"kvlang/internal/vm"
 
@@ -222,7 +222,7 @@ func TestIntegration_NativeScalar(t *testing.T) {
 				t.Fatalf("LoadDxFile: %v", err)
 			}
 			fn.Name = funcName
-			if err := register.Func(ctx, rdb, fn); err != nil {
+			if err := fn.Register(ctx, rdb); err != nil {
 				t.Fatalf("register.Func: %v", err)
 			}
 
@@ -262,15 +262,15 @@ func TestIntegration_CrossCall(t *testing.T) {
 	// 加载 double, triple, diamond
 	double, _ := loadFirstFunc(filepath.Join(root, "call/double.kv"))
 	double.Name = "double"
-	register.Func(ctx, rdb, double)
+	double.Register(ctx, rdb)
 
 	triple, _ := loadFirstFunc(filepath.Join(root, "call/triple.kv"))
 	triple.Name = "triple"
-	register.Func(ctx, rdb, triple)
+	triple.Register(ctx, rdb)
 
 	diamond, _ := loadFirstFunc(filepath.Join(root, "call/diamond.kv"))
 	diamond.Name = "diamond"
-	register.Func(ctx, rdb, diamond)
+	diamond.Register(ctx, rdb)
 
 	// Start VM worker
 	vmCtx, vmCancel := context.WithCancel(ctx)
@@ -366,7 +366,7 @@ func TestIntegration_NativePrint(t *testing.T) {
 				t.Fatalf("LoadDxFile: %v", err)
 			}
 			fn.Name = funcName
-			if err := register.Func(ctx, rdb, fn); err != nil {
+			if err := fn.Register(ctx, rdb); err != nil {
 				t.Fatalf("register.Func: %v", err)
 			}
 
