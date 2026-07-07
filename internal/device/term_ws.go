@@ -16,15 +16,16 @@ import (
 	"context"
 
 	"github.com/redis/go-redis/v9"
+	"kvlang/internal/keytree"
 )
 
 // ResolveTerm 通过 /vthread/<vtid>/term → /sys/term/${name}/${stream} 解析终端流配置。
 func ResolveTerm(ctx context.Context, rdb *redis.Client, vtid, stream string) TermStream {
-	name, err := rdb.Get(ctx, "/vthread/"+vtid+"/term").Result()
+	name, err := rdb.Get(ctx, keytree.VThreadTerm(vtid)).Result()
 	if err != nil || name == "" {
 		return TermStream{}
 	}
-	key := "/sys/term/" + name + "/" + stream
+	key := keytree.SysTerm(name, stream)
 	results, err := rdb.HMGet(ctx, key, "type", "detail").Result()
 	if err != nil || len(results) < 2 {
 		return TermStream{}

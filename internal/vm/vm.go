@@ -11,6 +11,7 @@ import (
 	"kvlang/internal/logx"
 	"kvlang/internal/vthread"
 	"kvlang/internal/op/builtin"
+	"kvlang/internal/keytree"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -107,12 +108,12 @@ func handleControl(ctx context.Context, rdb *redis.Client, vtid, pc string, inst
 }
 
 func isFunctionCall(ctx context.Context, rdb *redis.Client, opcode string) bool {
-	exists, err := rdb.Exists(ctx, "/src/func/"+opcode).Result()
+	exists, err := rdb.Exists(ctx, keytree.SrcFunc(opcode)).Result()
 	if err == nil && exists > 0 {
 		return true
 	}
 	for _, backend := range []string{"op-metal", "op-cuda", "op-cpu"} {
-		exists, err := rdb.Exists(ctx, fmt.Sprintf("/op/%s/func/%s", backend, opcode)).Result()
+		exists, err := rdb.Exists(ctx, keytree.OpBackendFunc(backend, opcode)).Result()
 		if err == nil && exists > 0 {
 			return true
 		}

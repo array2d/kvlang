@@ -7,6 +7,7 @@ import (
 	"kvlang/internal/ir"
 	"kvlang/internal/logx"
 	"kvlang/internal/vthread"
+	"kvlang/internal/keytree"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -23,7 +24,7 @@ func If(ctx context.Context, rdb *redis.Client, vtid, pc string, inst *ir.Instru
 	var condVal string
 	var err error
 	if len(condKey) >= 2 && condKey[:2] == "./" {
-		condVal, err = rdb.Get(ctx, "/vthread/"+vtid+"/"+condKey[2:]).Result()
+		condVal, err = rdb.Get(ctx, keytree.VThreadAt(vtid, condKey[2:])).Result()
 	} else {
 		condVal = condKey
 	}

@@ -13,6 +13,7 @@ import (
 	"kvlang/internal/ir"
 	"kvlang/internal/logx"
 	"kvlang/internal/vthread"
+	"kvlang/internal/keytree"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -23,7 +24,7 @@ func Native(ctx context.Context, rdb *redis.Client, vtid string, pc string, inst
 	for _, r := range inst.Reads {
 		var raw string
 		if isRelative(r) {
-			key := "/vthread/" + vtid + "/" + r[2:]
+			key := keytree.VThreadAt(vtid, r[2:])
 			val, err := rdb.Get(ctx, key).Result()
 			if err != nil {
 				msg := fmt.Sprintf("native read %s: %v", key, err)

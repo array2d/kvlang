@@ -15,6 +15,7 @@ import (
 	"kvlang/internal/parser"
 	"kvlang/internal/vm"
 	"kvlang/internal/vthread"
+	"kvlang/internal/keytree"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -127,16 +128,16 @@ func loadAndRun(ctx context.Context, rdb *redis.Client, path string) {
 		"reads":  []string{},
 		"writes": []string{},
 	})
-	rdb.Set(ctx, "/func/main", entry, 0)
+	rdb.Set(ctx, keytree.FuncMain, entry, 0)
 
 	// 创建 vthread 并执行
 	vtid := fmt.Sprintf("test-%d", time.Now().UnixNano())
 	st := vthread.VThread{PC: "[0,0]", Status: "init", Mode: "single"}
 	data, _ := json.Marshal(st)
-	rdb.Set(ctx, "/vthread/"+vtid, data, 0)
+	rdb.Set(ctx, keytree.VThread(vtid), data, 0)
 
 	pipe := rdb.Pipeline()
-	pipe.Set(ctx, "/vthread/"+vtid+"/[0,0]", "pre_main", 0)
+	pipe.Set(ctx, keytree.VThreadSlot(vtid, 0, 0), "pre_main", 0)
 	if _, err := pipe.Exec(ctx); err != nil {
 		logx.Fatal("create vthread: %v", err)
 	}

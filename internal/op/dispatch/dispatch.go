@@ -12,6 +12,7 @@ import (
 	"kvlang/internal/logx"
 	"kvlang/internal/parser"
 	"kvlang/internal/vthread"
+	"kvlang/internal/keytree"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -52,7 +53,7 @@ func resolveParam(ctx context.Context, rdb *redis.Client, vtid, param string) Pa
 	ref := ParamRef{Key: param}
 	resolvedKey := param
 	if IsRelative(param) {
-		resolvedKey = "/vthread/" + vtid + "/" + param[2:]
+		resolvedKey = keytree.VThreadAt(vtid, param[2:])
 	}
 	ref.Key = resolvedKey
 	val, err := rdb.Get(ctx, resolvedKey).Result()

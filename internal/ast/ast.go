@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/redis/go-redis/v9"
+	"kvlang/internal/keytree"
 )
 
 // Func 表示一个函数定义。
@@ -17,11 +18,11 @@ type Func struct {
 
 // Register 将函数定义写入 Redis KV 空间。
 func (fn *Func) Register(ctx context.Context, rdb *redis.Client) error {
-	if err := rdb.Set(ctx, "/src/func/"+fn.Name, fn.Signature, 0).Err(); err != nil {
+	if err := rdb.Set(ctx, keytree.SrcFunc(fn.Name), fn.Signature, 0).Err(); err != nil {
 		return fmt.Errorf("register sig: %w", err)
 	}
 	for i, line := range fn.Body {
-		key := fmt.Sprintf("/src/func/%s/%d", fn.Name, i)
+		key := keytree.SrcFuncLine(fn.Name, i)
 		if err := rdb.Set(ctx, key, line, 0).Err(); err != nil {
 			return fmt.Errorf("register body[%d]: %w", i, err)
 		}

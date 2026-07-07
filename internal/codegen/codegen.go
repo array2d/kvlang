@@ -13,6 +13,7 @@ import (
 	"kvlang/internal/parser"
 	"kvlang/internal/op/dispatch"
 	"kvlang/internal/vthread"
+	"kvlang/internal/keytree"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -21,9 +22,9 @@ func HandleCall(ctx context.Context, rdb *redis.Client, vtid, pc string, inst *i
 	funcName := inst.Reads[0]
 	backend := dispatch.DetermineBackend(ctx, rdb, funcName)
 
-	sig, err := rdb.Get(ctx, fmt.Sprintf("/op/%s/func/%s", backend, funcName)).Result()
+	sig, err := rdb.Get(ctx, keytree.OpBackendFunc(backend, funcName)).Result()
 	if err != nil {
-		sig, err = rdb.Get(ctx, "/src/func/"+funcName).Result()
+		sig, err = rdb.Get(ctx, keytree.SrcFunc(funcName)).Result()
 		if err != nil {
 			msg := fmt.Sprintf("func %s not found", funcName)
 			logx.Warn("[%s] CALL: %s", vtid, msg)
@@ -45,12 +46,12 @@ func HandleCall(ctx context.Context, rdb *redis.Client, vtid, pc string, inst *i
 		}
 	}
 
-	compiled := mgetAll(ctx, rdb, fmt.Sprintf("/op/%s/func/%s", backend, funcName))
+	compiled := mgetAll(ctx, rdb, keytree.OpBackendFunc(backend, funcName))
 	if len(compiled) == 0 {
-		compiled = mgetAll(ctx, rdb, "/src/func/"+funcName)
+		compiled = mgetAll(ctx, rdb, keytree.SrcFunc(funcName))
 	}
 
-	substackRoot := fmt.Sprintf("/vthread/%s/%s/", vtid, pc)
+	substackRoot := keytree.VThreadSub(vtid, pc)
 	pipe := rdb.Pipeline()
 	bodyCount := len(compiled)
 	for i, kvlangLine := range compiled {
@@ -109,19 +110,19 @@ func HandleReturn(ctx context.Context, rdb *redis.Client, vtid, pc string) strin
 			retRef := inst.Reads[0]
 			retVal := retRef
 			if strings.HasPrefix(retRef, "./") {
-				srcKey := "/vthread/" + vtid + "/" + retRef[2:]
+				srcKey := keytree.VThreadAt(vtid, retRef[2:])
 				if v, e := rdb.Get(ctx, srcKey).Result(); e == nil {
 					retVal = v
 				}
 			}
 			if strings.HasPrefix(retSlot, "./") {
-				slotKey := "/vthread/" + vtid + "/" + retSlot[2:]
+				slotKey := keytree.VThreadAt(vtid, retSlot[2:])
 				rdb.Set(ctx, slotKey, retVal, 0)
 			}
 		}
 	}
 
-	keys, _ := rdb.Keys(ctx, "/vthread/"+vtid+"/"+parentPC+"/*").Result()
+	keys, _ := rdb.Keys(ctx, keytree.VThreadAt(vtid, parentPC)+"/*").Result()
 	if len(keys) > 0 {
 		rdb.Del(ctx, keys...)
 	}

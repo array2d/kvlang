@@ -9,18 +9,19 @@ import (
 
 	"kvlang/internal/logx"
 	"kvlang/internal/vthread"
+	"kvlang/internal/keytree"
 	"github.com/redis/go-redis/v9"
 )
 
 // Pick 扫描 /vthread/*，原子抢占 status=init 的 vthread。返回 vtid 或空串。
 func Pick(ctx context.Context, rdb *redis.Client) string {
-	keys, err := rdb.Keys(ctx, "/vthread/*").Result()
+	keys, err := rdb.Keys(ctx, keytree.VThreadPattern()).Result()
 	if err != nil {
 		logx.Debug("picker KEYS error: %v", err)
 		return ""
 	}
 	for _, key := range keys {
-		vtid := key[len("/vthread/"):]
+		vtid := key[len(keytree.VThread("")):]
 		// Skip non-numeric vtid (e.g., system keys nested under /vthread/)
 		// 实际上 key pattern `/vthread/*` 不会匹配 `/vthread/1/sub`，但还是做一次 GET 检查
 		val, err := rdb.Get(ctx, key).Result()
@@ -56,9 +57,9 @@ func Pick(ctx context.Context, rdb *redis.Client) string {
 	return ""
 }
 
-// Wait 阻塞等待新的 vthread 通知 (BLPOP notify:vm)。
+// Wait 阻塞等待新的 vthread 通知 (BLPOP keytree.NotifyVM)。
 func Wait(ctx context.Context, rdb *redis.Client) {
-	vals, err := rdb.BLPop(ctx, 5*time.Second, "notify:vm").Result()
+	vals, err := rdb.BLPop(ctx, 5*time.Second, keytree.NotifyVM).Result()
 	if err != nil {
 		if err.Error() != "redis: nil" {
 			logx.Debug("picker BLPOP: %v", err)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/redis/go-redis/v9"
+	"kvlang/internal/keytree"
 )
 
 // Instruction 表示执行层 [addr0, addr1] 解码后的一条指令。
@@ -20,7 +21,7 @@ const maxParams = 10
 // Decode 从 Redis 执行层 key 解码指令。
 func Decode(ctx context.Context, rdb *redis.Client, vtid string, pc string) (*Instruction, error) {
 	prefix, addr0 := parsePC(pc)
-	keyBase := fmt.Sprintf("/vthread/%s/%s", vtid, prefix)
+	keyBase := keytree.VThreadSub(vtid, prefix)
 
 	keys := make([]string, 0, 1+maxParams*2)
 	keys = append(keys, fmt.Sprintf("%s[%d,0]", keyBase, addr0))

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 		"kvlang/internal/logx"
+	"kvlang/internal/keytree"
 	"math"
 	"strings"
 
@@ -15,7 +16,7 @@ import (
 // 返回实例标识符, e.g., "metal:0", "cuda:1"
 func Select(ctx context.Context, rdb *redis.Client, opcode string) (string, error) {
 	// 1. 找到支持该算子的所有程序
-	programs, err := rdb.Keys(ctx, "/op/*/list").Result()
+	programs, err := rdb.Keys(ctx, keytree.OpPattern()).Result()
 	if err != nil {
 		return "", fmt.Errorf("list op programs: %w", err)
 	}
@@ -46,7 +47,7 @@ func Select(ctx context.Context, rdb *redis.Client, opcode string) (string, erro
 	}
 
 	// 2. 选择该程序下负载最低的进程实例
-	instances, err := rdb.Keys(ctx, "/sys/op-plat/*").Result()
+	instances, err := rdb.Keys(ctx, keytree.SysOpPlatPattern()).Result()
 	if err != nil {
 		return "", fmt.Errorf("list op-plat instances: %w", err)
 	}
@@ -97,7 +98,7 @@ func Select(ctx context.Context, rdb *redis.Client, opcode string) (string, erro
 // DetermineBackend 判断 func 的编译后端 (按优先级)
 func DetermineBackend(ctx context.Context, rdb *redis.Client, funcName string) string {
 	for _, b := range []string{"op-metal", "op-cuda", "op-cpu"} {
-		exists, err := rdb.Exists(ctx, fmt.Sprintf("/op/%s/func/%s", b, funcName)).Result()
+		exists, err := rdb.Exists(ctx, keytree.OpBackendFunc(b, funcName)).Result()
 		if err != nil {
 			logx.Debug("route.DetermineBackend: EXISTS error for %s: %v", b, err)
 			continue

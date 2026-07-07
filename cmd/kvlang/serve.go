@@ -13,6 +13,7 @@ import (
 	"kvlang/internal/logx"
 	"kvlang/internal/op/builtin"
 	"kvlang/internal/vm"
+	"kvlang/internal/keytree"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -72,7 +73,7 @@ func cmdServe(args []string) {
 
 	shutdownCtx, scancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer scancel()
-	if err := rdb.Del(shutdownCtx, "/sys/vm/"+vmID).Err(); err != nil {
+	if err := rdb.Del(shutdownCtx, keytree.SysVM(vmID)).Err(); err != nil {
 		logx.Warn("VM-%s deregister failed: %v", vmID, err)
 	}
 	logx.Info("VM-%s shutdown complete", vmID)
@@ -85,7 +86,7 @@ func registerVM(ctx context.Context, rdb *redis.Client, vmID string) {
 		"started_at": time.Now().Unix(),
 	}
 	data, _ := json.Marshal(reg)
-	if err := rdb.Set(ctx, "/sys/vm/"+vmID, data, 0).Err(); err != nil {
+	if err := rdb.Set(ctx, keytree.SysVM(vmID), data, 0).Err(); err != nil {
 		logx.Error("VM-%s register failed: %v", vmID, err)
 		os.Exit(1)
 	}
@@ -93,7 +94,7 @@ func registerVM(ctx context.Context, rdb *redis.Client, vmID string) {
 }
 
 func registerBuildinOps(ctx context.Context, rdb *redis.Client, vmID string) {
-	const key = "/op/buildin/list"
+	key := keytree.OpBackendList("buildin")
 	defs := builtin.OpDefs()
 	rdb.Del(ctx, key)
 	for _, def := range defs {
@@ -106,7 +107,7 @@ func registerBuildinOps(ctx context.Context, rdb *redis.Client, vmID string) {
 }
 
 func heartbeatLoop(ctx context.Context, rdb *redis.Client, vmID string) {
-	key := fmt.Sprintf("/sys/heartbeat/vm:%s", vmID)
+	key := keytree.SysHeartbeat(vmID)
 	writeHB := func(status string) {
 		hb := map[string]any{"ts": time.Now().Unix(), "status": status, "pid": os.Getpid()}
 		data, _ := json.Marshal(hb)
@@ -127,7 +128,7 @@ func heartbeatLoop(ctx context.Context, rdb *redis.Client, vmID string) {
 }
 
 func mainWatcher(ctx context.Context, rdb *redis.Client, vmID string) {
-	const key = "/func/main"
+	const key = keytree.FuncMain
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -152,9 +153,9 @@ func mainWatcher(ctx context.Context, rdb *redis.Client, vmID string) {
 
 			rdb.Del(ctx, key) // atomic claim
 
-			vtid, _ := rdb.Incr(ctx, "/sys/vtid_counter").Result()
+			vtid, _ := rdb.Incr(ctx, keytree.SysVtidCounter).Result()
 			vtidStr := fmt.Sprintf("%d", vtid)
-			base := "/vthread/" + vtidStr
+			base := keytree.VThread(vtidStr)
 
 			pipe := rdb.Pipeline()
 			pipe.Set(ctx, base, `{"pc":"[0,0]","status":"init"}`, 0)
@@ -164,7 +165,7 @@ func mainWatcher(ctx context.Context, rdb *redis.Client, vmID string) {
 			}
 			pipe.Set(ctx, base+"/[0,1]", "./ret", 0)
 			if entry.Term != "" {
-				pipe.Set(ctx, base+"/term", entry.Term, 0)
+				pipe.Set(ctx, keytree.VThreadTerm(vtidStr), entry.Term, 0)
 			}
 			pipe.Exec(ctx)
 
@@ -172,7 +173,7 @@ func mainWatcher(ctx context.Context, rdb *redis.Client, vmID string) {
 			rdb.Set(ctx, key, status, 0)
 
 			notify, _ := json.Marshal(map[string]any{"event": "new_vthread", "vtid": vtidStr})
-			rdb.LPush(ctx, "notify:vm", notify)
+			rdb.LPush(ctx, keytree.NotifyVM, notify)
 			logx.Info("VM-%s → vthread %s created", vmID, vtidStr)
 		}
 	}

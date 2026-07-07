@@ -12,7 +12,7 @@ import (
 // KVCache 子栈指令本地缓存。
 // CALL 翻译后加载，RETURN 时释放。
 type KVCache struct {
-	Prefix string            // "/vthread/1/[2,0]/"
+	Prefix string            // keytree.VThreadSub("1", "[2,0]")
 	KVs    map[string]string // 相对 key → value, e.g., "[0,0]"→"matmul"
 }
 
