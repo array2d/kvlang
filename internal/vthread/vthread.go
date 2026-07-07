@@ -1,18 +1,18 @@
-// Package state 提供 vthread 状态管理与 Redis 持久化。
-package state
+// Package vthread 管理 vthread 状态管理与 Redis 持久化。
+package vthread
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-		"kvlang/internal/logx"
+	"kvlang/internal/logx"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 )
 
-// VThreadState 存储在 /vthread/<vtid> 中，表示运行时状态。
-type VThreadState struct {
+// VThread 存储在 /vthread/<vtid> 中，表示运行时状态。
+type VThread struct {
 	PC     string            `json:"pc"`
 	Status string            `json:"status"`
 	Mode   string            `json:"mode,omitempty"` // "single" | "batch", 默认 "single"
@@ -20,22 +20,22 @@ type VThreadState struct {
 }
 
 // Get 读取 vthread 当前状态。
-func Get(ctx context.Context, rdb *redis.Client, vtid string) VThreadState {
+func Get(ctx context.Context, rdb *redis.Client, vtid string) VThread {
 	val, err := rdb.Get(ctx, "/vthread/"+vtid).Result()
 	if err != nil {
-		return VThreadState{Status: "error"}
+		return VThread{Status: "error"}
 	}
-	var s VThreadState
+	var s VThread
 	if err := json.Unmarshal([]byte(val), &s); err != nil {
 		logx.Warn("state.Get: unmarshal vthread %s: %v", vtid, err)
-		return VThreadState{Status: "error"}
+		return VThread{Status: "error"}
 	}
 	return s
 }
 
 // Set 更新 vthread 的 PC 和 status。
 func Set(ctx context.Context, rdb *redis.Client, vtid string, pc, status string) {
-	s := VThreadState{PC: pc, Status: status}
+	s := VThread{PC: pc, Status: status}
 	data, err := json.Marshal(s)
 	if err != nil {
 		logx.Warn("state.Set: marshal vthread %s: %v", vtid, err)
@@ -62,7 +62,7 @@ func SetError(ctx context.Context, rdb *redis.Client, vtid string, pc string, er
 // CreateVThread 在 Redis 中创建一个新虚线程。
 func CreateVThread(ctx context.Context, rdb *redis.Client, funcName string, reads, writes []string) (string, error) {
 	vtid := fmt.Sprintf("test-%d", time.Now().UnixNano())
-	st := VThreadState{PC: "[0,0]", Status: "init", Mode: "single"}
+	st := VThread{PC: "[0,0]", Status: "init", Mode: "single"}
 	data, _ := json.Marshal(st)
 	if err := rdb.Set(ctx, "/vthread/"+vtid, data, 0).Err(); err != nil {
 		return "", fmt.Errorf("set state: %w", err)
