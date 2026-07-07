@@ -13,7 +13,7 @@ import (
 	"kvlang/internal/parser"
 	"kvlang/internal/vthread"
 	"kvlang/internal/keytree"
-	"github.com/redis/go-redis/v9"
+	"kvlang/internal/kvspace"
 )
 
 type ParamRef struct {
@@ -49,14 +49,14 @@ func IsRelative(param string) bool {
 	return len(param) >= 2 && param[:2] == "./"
 }
 
-func resolveParam(ctx context.Context, rdb *redis.Client, vtid, param string) ParamRef {
+func resolveParam(ctx context.Context, kv kvspace.KVSpace, vtid, param string) ParamRef {
 	ref := ParamRef{Key: param}
 	resolvedKey := param
 	if IsRelative(param) {
 		resolvedKey = keytree.VThreadAt(vtid, param[2:])
 	}
 	ref.Key = resolvedKey
-	val, err := rdb.Get(ctx, resolvedKey).Result()
+	val, err := kv.Get(ctx, resolvedKey)
 	if err != nil {
 		return ref
 	}
@@ -90,13 +90,13 @@ func isLiteral(s string) bool {
 	return true
 }
 
-func buildOpTask(ctx context.Context, rdb *redis.Client, vtid, pc string, inst *ir.Instruction) *OpTask {
+func buildOpTask(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *ir.Instruction) *OpTask {
 	task := &OpTask{Vtid: vtid, PC: pc, Opcode: inst.Opcode, Params: make(map[string]interface{})}
 	switch inst.Opcode {
 	case "save":
 		for i, r := range inst.Reads {
 			if i == 0 {
-				task.Inputs = append(task.Inputs, resolveParam(ctx, rdb, vtid, r))
+				task.Inputs = append(task.Inputs, resolveParam(ctx, kv, vtid, r))
 			} else {
 				task.Params[fmt.Sprintf("arg%d", len(task.Params))] = r
 			}
@@ -106,22 +106,22 @@ func buildOpTask(ctx context.Context, rdb *redis.Client, vtid, pc string, inst *
 			task.Params[fmt.Sprintf("arg%d", len(task.Params))] = r
 		}
 		for _, w := range inst.Writes {
-			task.Outputs = append(task.Outputs, resolveParam(ctx, rdb, vtid, w))
+			task.Outputs = append(task.Outputs, resolveParam(ctx, kv, vtid, w))
 		}
 	case "print":
 		for _, r := range inst.Reads {
-			task.Inputs = append(task.Inputs, resolveParam(ctx, rdb, vtid, r))
+			task.Inputs = append(task.Inputs, resolveParam(ctx, kv, vtid, r))
 		}
 	default:
 		for _, r := range inst.Reads {
 			if isLiteral(r) {
 				task.Params[fmt.Sprintf("arg%d", len(task.Params))] = r
 			} else {
-				task.Inputs = append(task.Inputs, resolveParam(ctx, rdb, vtid, r))
+				task.Inputs = append(task.Inputs, resolveParam(ctx, kv, vtid, r))
 			}
 		}
 		for _, w := range inst.Writes {
-			task.Outputs = append(task.Outputs, resolveParam(ctx, rdb, vtid, w))
+			task.Outputs = append(task.Outputs, resolveParam(ctx, kv, vtid, w))
 		}
 	}
 	return task
@@ -174,54 +174,54 @@ func parseShapeParam(raw string) []int {
 }
 
 // Compute 分发张量计算指令到 op-plat。
-func Compute(ctx context.Context, rdb *redis.Client, vtid, pc string, inst *ir.Instruction) error {
-	instance, err := Select(ctx, rdb, inst.Opcode)
+func Compute(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *ir.Instruction) error {
+	instance, err := Select(ctx, kv, inst.Opcode)
 	if err != nil {
 		return fmt.Errorf("route: %w", err)
 	}
-	task := buildOpTask(ctx, rdb, vtid, pc, inst)
+	task := buildOpTask(ctx, kv, vtid, pc, inst)
 	cmdQueue := fmt.Sprintf("cmd:op-%s", instance)
 	taskJSON, _ := json.Marshal(task)
-	if err := rdb.RPush(ctx, cmdQueue, taskJSON).Err(); err != nil {
+	if err := kv.RPush(ctx, cmdQueue, taskJSON); err != nil {
 		return fmt.Errorf("push task: %w", err)
 	}
 	logx.Debug("[%s] PUSH %s → %s", vtid, inst.Opcode, cmdQueue)
-	vthread.Set(ctx, rdb, vtid, pc, "wait")
-	done, err := vthread.WaitDone(ctx, rdb, vtid, 30*time.Second)
+	vthread.Set(ctx, kv, vtid, pc, "wait")
+	done, err := vthread.WaitDone(ctx, kv, vtid, 30*time.Second)
 	if err != nil {
-		vthread.SetError(ctx, rdb, vtid, pc, fmt.Sprintf("BLPOP timeout: %v", err))
+		vthread.SetError(ctx, kv, vtid, pc, fmt.Sprintf("BLPOP timeout: %v", err))
 		return err
 	}
 	if status, ok := done["status"].(string); ok && status == "error" {
 		errInfo := fmt.Sprintf("%v", done["error"])
-		vthread.SetError(ctx, rdb, vtid, pc, errInfo)
+		vthread.SetError(ctx, kv, vtid, pc, errInfo)
 		return fmt.Errorf("op error: %s", errInfo)
 	}
 	logx.Debug("[%s] DONE %s", vtid, inst.Opcode)
-	vthread.Set(ctx, rdb, vtid, ir.NextPC(pc), "running")
+	vthread.Set(ctx, kv, vtid, ir.NextPC(pc), "running")
 	return nil
 }
 
 // Lifecycle 分发生命周期指令到 heap-plat。
-func Lifecycle(ctx context.Context, rdb *redis.Client, vtid, pc string, inst *ir.Instruction) error {
+func Lifecycle(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *ir.Instruction) error {
 	task := buildHeapTask(vtid, pc, inst)
 	taskJSON, _ := json.Marshal(task)
-	if err := rdb.RPush(ctx, "cmd:heap-metal:0", taskJSON).Err(); err != nil {
+	if err := kv.RPush(ctx, "cmd:heap-metal:0", taskJSON); err != nil {
 		return fmt.Errorf("push heap task: %w", err)
 	}
 	logx.Debug("[%s] PUSH %s → cmd:heap-metal:0", vtid, inst.Opcode)
-	done, err := vthread.WaitDone(ctx, rdb, vtid, 5*time.Second)
+	done, err := vthread.WaitDone(ctx, kv, vtid, 5*time.Second)
 	if err != nil {
-		vthread.SetError(ctx, rdb, vtid, pc, fmt.Sprintf("heap op timeout: %v", err))
+		vthread.SetError(ctx, kv, vtid, pc, fmt.Sprintf("heap op timeout: %v", err))
 		return err
 	}
 	if status, ok := done["status"].(string); ok && status == "error" {
 		errInfo := fmt.Sprintf("%v", done["error"])
-		vthread.SetError(ctx, rdb, vtid, pc, errInfo)
+		vthread.SetError(ctx, kv, vtid, pc, errInfo)
 		return fmt.Errorf("heap error: %s", errInfo)
 	}
 	logx.Debug("[%s] HEAP %s done", vtid, inst.Opcode)
-	vthread.Set(ctx, rdb, vtid, ir.NextPC(pc), "running")
+	vthread.Set(ctx, kv, vtid, ir.NextPC(pc), "running")
 	return nil
 }
 

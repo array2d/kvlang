@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/redis/go-redis/v9"
+	"kvlang/internal/kvspace"
 )
 
 // KVCache 子栈指令本地缓存。
@@ -17,14 +17,14 @@ type KVCache struct {
 }
 
 // NewKVCache 从 Redis MGET 加载整个子栈到本地。
-func NewKVCache(ctx context.Context, rdb *redis.Client, prefix string) *KVCache {
+func NewKVCache(ctx context.Context, kv kvspace.KVSpace, prefix string) *KVCache {
 
-	keys, err := rdb.Keys(ctx, prefix+"*").Result()
+	keys, err := kv.Keys(ctx, prefix+"*")
 	if err != nil || len(keys) == 0 {
 		return nil
 	}
 
-	vals, err := rdb.MGet(ctx, keys...).Result()
+	vals, err := kv.MGet(ctx, keys...)
 	if err != nil {
 		return nil
 	}

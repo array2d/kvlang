@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/redis/go-redis/v9"
+	"kvlang/internal/kvspace"
 	"kvlang/internal/keytree"
 )
 
@@ -19,7 +19,7 @@ type Instruction struct {
 const maxParams = 10
 
 // Decode 从 Redis 执行层 key 解码指令。
-func Decode(ctx context.Context, rdb *redis.Client, vtid string, pc string) (*Instruction, error) {
+func Decode(ctx context.Context, kv kvspace.KVSpace, vtid string, pc string) (*Instruction, error) {
 	prefix, addr0 := parsePC(pc)
 	keyBase := keytree.VThreadSub(vtid, prefix)
 
@@ -30,7 +30,7 @@ func Decode(ctx context.Context, rdb *redis.Client, vtid string, pc string) (*In
 		keys = append(keys, fmt.Sprintf("%s[%d,%d]", keyBase, addr0, i))
 	}
 
-	vals, err := rdb.MGet(ctx, keys...).Result()
+	vals, err := kv.MGet(ctx, keys...)
 	if err != nil {
 		return nil, fmt.Errorf("decode MGET: %w", err)
 	}
