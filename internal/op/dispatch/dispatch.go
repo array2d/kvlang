@@ -130,7 +130,7 @@ func buildOpTask(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst 
 func buildHeapTask(vtid, pc string, inst *ir.Instruction) *HeapTask {
 	task := &HeapTask{Vtid: vtid, PC: pc, Op: inst.Opcode}
 	switch inst.Opcode {
-	case "newtensor":
+	case ir.OpNewTensor:
 		if len(inst.Writes) > 0 {
 			task.Key = inst.Writes[0]
 		}
@@ -140,11 +140,11 @@ func buildHeapTask(vtid, pc string, inst *ir.Instruction) *HeapTask {
 		if len(inst.Reads) > 1 {
 			task.Shape = parseShapeParam(inst.Reads[1])
 		}
-	case "deltensor":
+	case ir.OpDelTensor:
 		if len(inst.Reads) > 0 {
 			task.Key = inst.Reads[0]
 		}
-	case "clonetensor":
+	case ir.OpCloneTensor:
 		if len(inst.Reads) > 0 {
 			task.Src = inst.Reads[0]
 		}

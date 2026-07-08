@@ -79,10 +79,10 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *
 		if !strings.HasPrefix(retRef, "/") {
 			retRef = "./" + retRef
 		}
-		kv.Set(fmt.Sprintf("%s[%d,0]", substackRoot, retIdx), "return", 0)
+		kv.Set(fmt.Sprintf("%s[%d,0]", substackRoot, retIdx), ir.OpReturn, 0)
 		kv.Set(fmt.Sprintf("%s[%d,-1]", substackRoot, retIdx), retRef, 0)
 	} else {
-		kv.Set(fmt.Sprintf("%s[%d,0]", substackRoot, retIdx), "return", 0)
+		kv.Set(fmt.Sprintf("%s[%d,0]", substackRoot, retIdx), ir.OpReturn, 0)
 	}
 
 	return pc + "/[0,0]"

@@ -4,6 +4,7 @@ package lexer
 import (
 	"fmt"
 	"strings"
+	"kvlang/internal/ir"
 )
 
 // Kind 标记 Token 类型。
@@ -193,11 +194,11 @@ func Tokenize(line string) []Token {
 		}
 		word := line[start:i]
 		switch word {
-		case "return":
+		case ir.OpReturn:
 			tokens = append(tokens, Token{Kind: Return, Value: word})
-		case "if":
+		case ir.OpIf:
 			tokens = append(tokens, Token{Kind: If, Value: word})
-		case "for":
+		case ir.OpFor:
 			tokens = append(tokens, Token{Kind: For, Value: word})
 		default:
 			tokens = append(tokens, Token{Kind: Ident, Value: word})

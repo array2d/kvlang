@@ -66,7 +66,7 @@ func Execute(ctx context.Context, kv kvspace.KVSpace, vtid string) {
 			execErr = dispatch.Lifecycle(ctx, kv, vtid, pc, inst)
 		case isFunctionCall(ctx, kv, inst.Opcode):
 			inst.Reads = append([]string{inst.Opcode}, inst.Reads...)
-			inst.Opcode = "call"
+			inst.Opcode = ir.OpCall
 			execErr = handleControl(ctx, kv, vtid, pc, inst)
 		case ir.IsComputeOp(inst.Opcode):
 			execErr = dispatch.Compute(ctx, kv, vtid, pc, inst)
@@ -82,7 +82,7 @@ func Execute(ctx context.Context, kv kvspace.KVSpace, vtid string) {
 
 func handleControl(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *ir.Instruction) error {
 	switch inst.Opcode {
-	case "call":
+	case ir.OpCall:
 		substackPC := codegen.HandleCall(ctx, kv, vtid, pc, inst)
 		if substackPC == pc {
 			// HandleCall already set error state (func not found, parse failure, etc.)
@@ -91,7 +91,7 @@ func handleControl(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, ins
 		vthread.Set(ctx, kv, vtid, substackPC, "running")
 		logx.Debug("[%s] CALL → %s", vtid, substackPC)
 		return nil
-	case "return":
+	case ir.OpReturn:
 		parentPC := codegen.HandleReturn(ctx, kv, vtid, pc)
 		logx.Debug("[%s] RETURN → %s", vtid, parentPC)
 		if parentPC == pc {
@@ -100,7 +100,7 @@ func handleControl(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, ins
 		}
 		vthread.Set(ctx, kv, vtid, parentPC, "running")
 		return nil
-	case "if":
+	case ir.OpIf:
 		return If(ctx, kv, vtid, pc, inst)
 	default:
 		return fmt.Errorf("unknown control op: %s", inst.Opcode)
