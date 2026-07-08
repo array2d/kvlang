@@ -232,7 +232,7 @@ func TestIntegration_NativeScalar(t *testing.T) {
 			for slot, val := range tc.inputs {
 				kv.Set("/vthread/"+vtid+"/"+slot, val, 0)
 			}
-			kv.RPush("notify:vm", `{"event":"new_vthread","vtid":"`+vtid+`"}`)
+			kv.Notify("notify:vm", `{"event":"new_vthread","vtid":"`+vtid+`"}`)
 
 			outputs, done := waitVthreadDone(t, kv, vtid, 10*time.Second)
 			if !done {
@@ -279,7 +279,7 @@ func TestIntegration_CrossCall(t *testing.T) {
 	// diamond(A=5) → double(5)=10, triple(5)=15, R=25
 	vtid, _ := vthread.CreateVThread(ctx, kv, "diamond", []string{"./a"}, []string{"./r"})
 	kv.Set("/vthread/"+vtid+"/a", "5", 0)
-	kv.RPush("notify:vm", `{"event":"new_vthread","vtid":"`+vtid+`"}`)
+	kv.Notify("notify:vm", `{"event":"new_vthread","vtid":"`+vtid+`"}`)
 
 	outputs, done := waitVthreadDone(t, kv, vtid, 15*time.Second)
 	if !done {
@@ -374,7 +374,7 @@ func TestIntegration_NativePrint(t *testing.T) {
 			for slot, val := range tc.inputs {
 				kv.Set("/vthread/"+vtid+"/"+slot, val, 0)
 			}
-			kv.RPush("notify:vm", `{"event":"new_vthread","vtid":"`+vtid+`"}`)
+			kv.Notify("notify:vm", `{"event":"new_vthread","vtid":"`+vtid+`"}`)
 
 			outputs, done := waitVthreadDone(t, kv, vtid, 10*time.Second)
 			if !done {

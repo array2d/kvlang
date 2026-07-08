@@ -25,19 +25,10 @@ func ResolveTerm(ctx context.Context, kv kvspace.KVSpace, vtid, stream string) T
 	if err != nil || name == "" {
 		return TermStream{}
 	}
-	key := keytree.SysTerm(name, stream)
-	results, err := kv.HMGet(key, "type", "detail")
-	if err != nil || len(results) < 2 {
-		return TermStream{}
-	}
-	var ts TermStream
-	if t, ok := results[0].(string); ok {
-		ts.Type = t
-	}
-	if d, ok := results[1].(string); ok {
-		ts.Detail = d
-	}
-	return ts
+	base := keytree.SysTerm(name, stream)
+	t, _ := kv.Get(base + "/type")
+	d, _ := kv.Get(base + "/detail")
+	return TermStream{Type: t, Detail: d}
 }
 
 // WriteTerm 根据 TermStream 类型将文本写入终端。

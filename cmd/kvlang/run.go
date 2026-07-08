@@ -102,7 +102,7 @@ func registerBuildinOps(ctx context.Context, kv kvspace.KVSpace, vmID string) {
 	defs := builtin.OpDefs()
 	kv.Del(key)
 	for _, def := range defs {
-		kv.RPush(key, def)
+		kv.Notify(key, def)
 	}
 	logx.Info("VM-%s registered %d built-in ops", vmID, len(defs))
 }

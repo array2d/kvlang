@@ -23,21 +23,13 @@ func Select(ctx context.Context, kv kvspace.KVSpace, opcode string) (string, err
 
 	var chosenProgram string
 	for _, progKey := range programs {
-		list, err := kv.LRange(progKey, 0, -1)
-		if err != nil {
+		parts := strings.Split(progKey, "/")
+		if len(parts) < 3 {
 			continue
 		}
-		for _, op := range list {
-			if op == opcode {
-				parts := strings.Split(progKey, "/")
-				// "/op/op-cuda/list" → "op-cuda"
-				if len(parts) >= 3 {
-					chosenProgram = parts[2]
-				}
-				break
-			}
-		}
-		if chosenProgram != "" {
+		backend := parts[2]
+		if _, err := kv.Get(keytree.OpBackendFunc(backend, opcode)); err == nil {
+			chosenProgram = backend
 			break
 		}
 	}
