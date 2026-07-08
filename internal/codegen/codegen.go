@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"kvlang/internal/ir"
+	"kvlang/internal/op"
 	"kvlang/internal/logx"
 	"kvlang/internal/parser"
 	"kvlang/internal/op/dispatch"
@@ -18,7 +18,7 @@ import (
 )
 
 // HandleCall 执行 CALL 指令的 eager 翻译，返回子栈第一条指令的 PC。
-func HandleCall(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *ir.Instruction) string {
+func HandleCall(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) string {
 	funcName := inst.Reads[0]
 	backend := dispatch.DetermineBackend(ctx, kv, funcName)
 
@@ -79,10 +79,10 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *
 		if !strings.HasPrefix(retRef, "/") {
 			retRef = "./" + retRef
 		}
-		kv.Set(fmt.Sprintf("%s[%d,0]", substackRoot, retIdx), ir.OpReturn, 0)
+		kv.Set(fmt.Sprintf("%s[%d,0]", substackRoot, retIdx), op.OpReturn, 0)
 		kv.Set(fmt.Sprintf("%s[%d,-1]", substackRoot, retIdx), retRef, 0)
 	} else {
-		kv.Set(fmt.Sprintf("%s[%d,0]", substackRoot, retIdx), ir.OpReturn, 0)
+		kv.Set(fmt.Sprintf("%s[%d,0]", substackRoot, retIdx), op.OpReturn, 0)
 	}
 
 	return pc + "/[0,0]"
@@ -96,9 +96,9 @@ func HandleReturn(ctx context.Context, kv kvspace.KVSpace, vtid, pc string) stri
 	}
 	parentPC := pc[:lastSlash]
 
-	inst, err := ir.Decode(ctx, kv, vtid, pc)
+	inst, err := op.Decode(ctx, kv, vtid, pc)
 	if err == nil {
-		parentInst, pErr := ir.Decode(ctx, kv, vtid, parentPC)
+		parentInst, pErr := op.Decode(ctx, kv, vtid, parentPC)
 		if pErr == nil && len(parentInst.Writes) > 0 && len(inst.Reads) > 0 {
 			retSlot := parentInst.Writes[0]
 			retRef := inst.Reads[0]
@@ -120,7 +120,7 @@ func HandleReturn(ctx context.Context, kv kvspace.KVSpace, vtid, pc string) stri
 	if len(keys) > 0 {
 		kv.Del(keys...)
 	}
-	return ir.NextPC(parentPC)
+	return op.NextPC(parentPC)
 }
 
 func replaceParams(params []string, bindings map[string]string) {

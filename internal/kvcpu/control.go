@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"kvlang/internal/ir"
+	"kvlang/internal/op"
 	"kvlang/internal/logx"
 	"kvlang/internal/vthread"
 	"kvlang/internal/keytree"
@@ -14,7 +14,7 @@ import (
 // If 处理 if 控制流指令。
 // if(cond) -> branch_true, branch_false
 // cond 为 true 时跳转到第一个 reads，否则第二个。
-func If(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *ir.Instruction) error {
+func If(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) error {
 	if len(inst.Reads) < 1 {
 		return fmt.Errorf("if requires condition")
 	}
@@ -47,7 +47,7 @@ func If(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *ir.Instr
 	if target == "" {
 		// No branch → skip
 		logx.Debug("[%s] IF %q → no branch, skip", vtid, condVal)
-		vthread.Set(ctx, kv, vtid, ir.NextPC(pc), "running")
+		vthread.Set(ctx, kv, vtid, op.NextPC(pc), "running")
 		return nil
 	}
 
