@@ -36,13 +36,4 @@ type KVSpace interface {
 	// TODO Eval → Set + 乐观锁 (先 Get 判 init 再 Set)
 	Eval(script string, keys []string, args ...any) (int64, error)
 
-	// TODO Pipeline → 串行 Set
-	Pipeline() Pipeliner
-}
-
-// Pipeliner 管道接口。
-// TODO 移除，调用方串行 Set。
-type Pipeliner interface {
-	Set(key string, value any, ttl time.Duration)
-	Exec() ([]any, error)
 }

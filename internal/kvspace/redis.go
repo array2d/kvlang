@@ -49,22 +49,5 @@ func (r *redisImpl) HMGet(key string, fields ...string) ([]any, error) {
 func (r *redisImpl) Eval(script string, keys []string, args ...any) (int64, error) {
 	return r.rdb.Eval(bg, script, keys, args...).Int64()
 }
-func (r *redisImpl) Pipeline() Pipeliner { return &redisPipe{pipe: r.rdb.Pipeline()} }
 func (r *redisImpl) DisConn() error { return r.rdb.Close() }
 
-type redisPipe struct {
-	pipe redis.Pipeliner
-}
-
-func (p *redisPipe) Set(key string, value any, ttl time.Duration) { p.pipe.Set(bg, key, value, ttl) }
-func (p *redisPipe) Exec() ([]any, error) {
-	cmders, err := p.pipe.Exec(bg)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]any, len(cmders))
-	for i, c := range cmders {
-		result[i] = c
-	}
-	return result, nil
-}
