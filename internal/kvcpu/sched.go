@@ -36,23 +36,13 @@ func Pick(ctx context.Context, kv kvspace.KVSpace) string {
 		if s.Status != "init" {
 			continue
 		}
-		// 原子 CAS: set status to "running" if it's still "init"
-		updated := vthread.VThread{PC: s.PC, Status: "running", Mode: s.Mode}
-		data, _ := json.Marshal(updated)
-		// Lua script for atomic compare-and-set
-		script := `
-			local key = KEYS[1]
-			local val = redis.call('GET', key)
-			if not val then return 0 end
-			local decoded = cjson.decode(val)
-			if decoded.status ~= 'init' then return 0 end
-			redis.call('SET', key, ARGV[1])
-			return 1
-		`
-		result, err := kv.Eval(script, []string{key}, string(data))
-		if err != nil || result == 0 {
+		// Optimistic lock: Get → check init → Set running
+		if s.Status != "init" {
 			continue
 		}
+		updated := vthread.VThread{PC: s.PC, Status: "running", Mode: s.Mode}
+		data, _ := json.Marshal(updated)
+		kv.Set(key, data, 0)
 		return vtid
 	}
 	return ""

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"os/signal"
 	"path/filepath"
 	"runtime"
@@ -151,8 +152,7 @@ func mainWatcher(ctx context.Context, kv kvspace.KVSpace, vmID string) {
 			logx.Info("VM-%s %s entry=%s", vmID, keytree.FuncMain, entry.Entry)
 			kv.Del(keytree.FuncMain)
 
-			vtid, _ := kv.Incr(keytree.SysVtidCounter)
-			vtidStr := fmt.Sprintf("%d", vtid)
+			vtidStr := incrVtid(kv)
 			base := keytree.VThread(vtidStr)
 
 			kv.Set(base, `{"pc":"[0,0]","status":"init"}`, 0)
@@ -367,3 +367,11 @@ func collectKVFiles(path string) ([]string, error) {
 	return files, err
 }
 
+
+func incrVtid(kv kvspace.KVSpace) string {
+	val, _ := kv.Get(keytree.SysVtidCounter)
+	n, _ := strconv.ParseInt(val, 10, 64)
+	n++
+	kv.Set(keytree.SysVtidCounter, strconv.FormatInt(n, 10), 0)
+	return fmt.Sprintf("%d", n)
+}

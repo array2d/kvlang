@@ -19,7 +19,6 @@ func connectKVSpace(t *testing.T) (kvspace.KVSpace, context.Context) {
 	if addr == "" {
 		addr = "127.0.0.1:16379"
 	}
-	ctx := context.Background()
 	kv := kvspace.Conn(addr)
 	return kv, ctx
 }
@@ -28,7 +27,6 @@ func connectKVSpace(t *testing.T) (kvspace.KVSpace, context.Context) {
 // Returns named slot values on success.
 func waitVthreadDone(t *testing.T, kv kvspace.KVSpace, vtid string, timeout time.Duration) (map[string]string, bool) {
 	t.Helper()
-	ctx := context.Background()
 	ticker := time.NewTicker(30 * time.Millisecond)
 	defer ticker.Stop()
 	deadline := time.Now().Add(timeout)
