@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"kvlang/internal/device"
-	"kvlang/internal/ir"
+	"kvlang/internal/op"
 	"kvlang/internal/logx"
 	"kvlang/internal/vthread"
 	"kvlang/internal/keytree"
@@ -19,7 +19,7 @@ import (
 )
 
 // Native 直接求值基础类型运算指令，不经过 op-plat。
-func Native(ctx context.Context, kv kvspace.KVSpace, vtid string, pc string, inst *ir.Instruction) error {
+func Native(ctx context.Context, kv kvspace.KVSpace, vtid string, pc string, inst *op.Instruction) error {
 	inputs := make([]nativeValue, 0, len(inst.Reads))
 	for _, r := range inst.Reads {
 		var raw string
@@ -59,7 +59,7 @@ func Native(ctx context.Context, kv kvspace.KVSpace, vtid string, pc string, ins
 			}
 		}
 		logx.Debug("[%s] str.set %q -> %s", vtid, val, inst.Writes)
-		vthread.Set(ctx, kv, vtid, ir.NextPC(pc), "running")
+		vthread.Set(ctx, kv, vtid, op.NextPC(pc), "running")
 		return nil
 	}
 
@@ -81,7 +81,7 @@ func Native(ctx context.Context, kv kvspace.KVSpace, vtid string, pc string, ins
 				logx.Warn("[%s] write %s: %v", vtid, stream, err)
 			}
 		}
-		vthread.Set(ctx, kv, vtid, ir.NextPC(pc), "running")
+		vthread.Set(ctx, kv, vtid, op.NextPC(pc), "running")
 		return nil
 	}
 
@@ -113,7 +113,7 @@ func Native(ctx context.Context, kv kvspace.KVSpace, vtid string, pc string, ins
 			}
 		}
 		logx.Debug("[%s] INPUT = %s", vtid, val)
-		vthread.Set(ctx, kv, vtid, ir.NextPC(pc), "running")
+		vthread.Set(ctx, kv, vtid, op.NextPC(pc), "running")
 		return nil
 	}
 
@@ -128,6 +128,6 @@ func Native(ctx context.Context, kv kvspace.KVSpace, vtid string, pc string, ins
 	}
 
 	logx.Debug("[%s] NATIVE %s %v = %s", vtid, inst.Opcode, inputs, result.String())
-	vthread.Set(ctx, kv, vtid, ir.NextPC(pc), "running")
+	vthread.Set(ctx, kv, vtid, op.NextPC(pc), "running")
 	return nil
 }

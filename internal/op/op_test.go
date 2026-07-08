@@ -1,10 +1,10 @@
-package ir_test
+package op_test
 
 import (
 	"context"
 	"testing"
 
-	"kvlang/internal/ir"
+	"kvlang/internal/op"
 	"kvlang/internal/op/dispatch"
 	"kvlang/internal/kvspace"
 )
@@ -23,7 +23,7 @@ func TestNextPC(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		if got := ir.NextPC(tc.pc); got != tc.want {
+		if got := op.NextPC(tc.pc); got != tc.want {
 			t.Errorf("NextPC(%q) = %q, want %q", tc.pc, got, tc.want)
 		}
 	}
@@ -40,7 +40,7 @@ func TestParentPC(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		if got := ir.ParentPC(tc.pc); got != tc.want {
+		if got := op.ParentPC(tc.pc); got != tc.want {
 			t.Errorf("ParentPC(%q) = %q, want %q", tc.pc, got, tc.want)
 		}
 	}
@@ -52,17 +52,17 @@ func TestIsComputeOp(t *testing.T) {
 	lifecycle := []string{"newtensor", "deltensor", "clonetensor"}
 
 	for _, op := range compute {
-		if !ir.IsComputeOp(op) {
+		if !op.IsComputeOp(op) {
 			t.Errorf("IsComputeOp(%q) = false, want true", op)
 		}
 	}
 	for _, op := range control {
-		if ir.IsComputeOp(op) {
+		if op.IsComputeOp(op) {
 			t.Errorf("IsComputeOp(%q) = true, want false", op)
 		}
 	}
 	for _, op := range lifecycle {
-		if ir.IsLifecycleOp(op) && ir.IsComputeOp(op) {
+		if op.IsLifecycleOp(op) && op.IsComputeOp(op) {
 			t.Errorf("IsLifecycleOp(%q) should not also be IsComputeOp", op)
 		}
 	}
@@ -76,7 +76,7 @@ func TestDecodeFromCache(t *testing.T) {
 		"[3,1]":  "./c",
 	}
 
-	inst := ir.DecodeFromCache(cache, "[3,0]")
+	inst := op.DecodeFromCache(cache, "[3,0]")
 	if inst.Opcode != "add" {
 		t.Errorf("opcode = %q, want 'add'", inst.Opcode)
 	}

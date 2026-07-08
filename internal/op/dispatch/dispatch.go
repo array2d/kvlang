@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"kvlang/internal/ir"
+	"kvlang/internal/op"
 	"kvlang/internal/logx"
 	"kvlang/internal/parser"
 	"kvlang/internal/vthread"
@@ -90,7 +90,7 @@ func isLiteral(s string) bool {
 	return true
 }
 
-func buildOpTask(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *ir.Instruction) *OpTask {
+func buildOpTask(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) *OpTask {
 	task := &OpTask{Vtid: vtid, PC: pc, Opcode: inst.Opcode, Params: make(map[string]interface{})}
 	switch inst.Opcode {
 	case "save":
@@ -127,10 +127,10 @@ func buildOpTask(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst 
 	return task
 }
 
-func buildHeapTask(vtid, pc string, inst *ir.Instruction) *HeapTask {
+func buildHeapTask(vtid, pc string, inst *op.Instruction) *HeapTask {
 	task := &HeapTask{Vtid: vtid, PC: pc, Op: inst.Opcode}
 	switch inst.Opcode {
-	case ir.OpNewTensor:
+	case op.OpNewTensor:
 		if len(inst.Writes) > 0 {
 			task.Key = inst.Writes[0]
 		}
@@ -140,11 +140,11 @@ func buildHeapTask(vtid, pc string, inst *ir.Instruction) *HeapTask {
 		if len(inst.Reads) > 1 {
 			task.Shape = parseShapeParam(inst.Reads[1])
 		}
-	case ir.OpDelTensor:
+	case op.OpDelTensor:
 		if len(inst.Reads) > 0 {
 			task.Key = inst.Reads[0]
 		}
-	case ir.OpCloneTensor:
+	case op.OpCloneTensor:
 		if len(inst.Reads) > 0 {
 			task.Src = inst.Reads[0]
 		}
@@ -174,7 +174,7 @@ func parseShapeParam(raw string) []int {
 }
 
 // Compute 分发张量计算指令到 op-plat。
-func Compute(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *ir.Instruction) error {
+func Compute(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) error {
 	instance, err := Select(ctx, kv, inst.Opcode)
 	if err != nil {
 		return fmt.Errorf("route: %w", err)
@@ -198,12 +198,12 @@ func Compute(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *ir.
 		return fmt.Errorf("op error: %s", errInfo)
 	}
 	logx.Debug("[%s] DONE %s", vtid, inst.Opcode)
-	vthread.Set(ctx, kv, vtid, ir.NextPC(pc), "running")
+	vthread.Set(ctx, kv, vtid, op.NextPC(pc), "running")
 	return nil
 }
 
 // Lifecycle 分发生命周期指令到 heap-plat。
-func Lifecycle(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *ir.Instruction) error {
+func Lifecycle(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) error {
 	task := buildHeapTask(vtid, pc, inst)
 	taskJSON, _ := json.Marshal(task)
 	if err := kv.Notify("cmd:heap-metal:0", taskJSON); err != nil {
@@ -221,7 +221,7 @@ func Lifecycle(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *i
 		return fmt.Errorf("heap error: %s", errInfo)
 	}
 	logx.Debug("[%s] HEAP %s done", vtid, inst.Opcode)
-	vthread.Set(ctx, kv, vtid, ir.NextPC(pc), "running")
+	vthread.Set(ctx, kv, vtid, op.NextPC(pc), "running")
 	return nil
 }
 

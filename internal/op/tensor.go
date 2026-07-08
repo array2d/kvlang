@@ -1,4 +1,4 @@
-package ir
+package op
 
 const (
 	OpNewTensor   = "newtensor"
