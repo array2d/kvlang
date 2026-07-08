@@ -19,6 +19,7 @@ func connectKVSpace(t *testing.T) (kvspace.KVSpace, context.Context) {
 	if addr == "" {
 		addr = "127.0.0.1:16379"
 	}
+	ctx := context.Background()
 	kv := kvspace.Conn(addr)
 	return kv, ctx
 }
