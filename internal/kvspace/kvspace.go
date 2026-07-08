@@ -21,9 +21,6 @@ type KVSpace interface {
 	// TODO Keys → 调用方自维护索引，不再依赖 pattern scan
 	Keys(pattern string) ([]string, error)
 
-	// TODO Incr → Get + Set 自增
-	Incr(key string) (int64, error)
-
 	// TODO RPush → 归入 Notify
 	RPush(key string, values ...any) error
 
@@ -32,8 +29,5 @@ type KVSpace interface {
 
 	// TODO HMGet → 多次 Get
 	HMGet(key string, fields ...string) ([]any, error)
-
-	// TODO Eval → Set + 乐观锁 (先 Get 判 init 再 Set)
-	Eval(script string, keys []string, args ...any) (int64, error)
 
 }
