@@ -4,30 +4,22 @@ package kvspace
 import "time"
 
 // KVSpace KV 存储接口。
+//
+// 生命周期：Conn(dsn) → Set/Get/Del/... → DisConn()
 type KVSpace interface {
-	// ── 保留 ──
-
+	// 基础 KV
 	Get(key string) (string, error)
 	Set(key string, value any, ttl time.Duration) error
 	Del(keys ...string) error
-	MGet(keys ...string) ([]any, error) // 批量 Get
+	MGet(keys ...string) ([]any, error)
+
+	// 通知
 	Watch(timeout time.Duration, keys ...string) ([]string, error)
 	Notify(key string, values ...any) error
+
+	// 连接
 	DisConn() error
 
-	// ── 待改造 ──
-
-
-	// TODO Keys → 调用方自维护索引，不再依赖 pattern scan
+	// TODO Keys → 调用方自维护索引
 	Keys(pattern string) ([]string, error)
-
-	// TODO RPush → 归入 Notify
-	RPush(key string, values ...any) error
-
-	// TODO LRange → 独立 key 存储 op 列表，用 Get 读取
-	LRange(key string, start, stop int64) ([]string, error)
-
-	// TODO HMGet → 多次 Get
-	HMGet(key string, fields ...string) ([]any, error)
-
 }
