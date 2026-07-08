@@ -68,17 +68,14 @@ func CreateVThread(ctx context.Context, kv kvspace.KVSpace, funcName string, rea
 	if err := kv.Set(keytree.VThread(vtid), data, 0); err != nil {
 		return "", fmt.Errorf("set state: %w", err)
 	}
-	pipe := kv.Pipeline()
-	pipe.Set(keytree.VThreadSlot(vtid, 0, 0), funcName, 0)
+	kv.Set(keytree.VThreadSlot(vtid, 0, 0), funcName, 0)
 	for i, r := range reads {
-		pipe.Set(keytree.VThreadSlot(vtid, 0, -(i+1)), r, 0)
+		kv.Set(keytree.VThreadSlot(vtid, 0, -(i+1)), r, 0)
 	}
 	for i, w := range writes {
-		pipe.Set(keytree.VThreadSlot(vtid, 0, i+1), w, 0)
+		kv.Set(keytree.VThreadSlot(vtid, 0, i+1), w, 0)
 	}
-	if _, err := pipe.Exec(); err != nil {
-		return "", fmt.Errorf("pipeline: %w", err)
-	}
+
 	return vtid, nil
 }
 

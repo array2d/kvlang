@@ -155,17 +155,15 @@ func mainWatcher(ctx context.Context, kv kvspace.KVSpace, vmID string) {
 			vtidStr := fmt.Sprintf("%d", vtid)
 			base := keytree.VThread(vtidStr)
 
-			pipe := kv.Pipeline()
-			pipe.Set(base, `{"pc":"[0,0]","status":"init"}`, 0)
-			pipe.Set(base+"/[0,0]", entry.Entry, 0)
+			kv.Set(base, `{"pc":"[0,0]","status":"init"}`, 0)
+			kv.Set(base+"/[0,0]", entry.Entry, 0)
 			for i, arg := range entry.Reads {
-				pipe.Set(fmt.Sprintf("%s/[0,-%d]", base, i+1), arg, 0)
+				kv.Set(fmt.Sprintf("%s/[0,-%d]", base, i+1), arg, 0)
 			}
-			pipe.Set(base+"/[0,1]", "./ret", 0)
+			kv.Set(base+"/[0,1]", "./ret", 0)
 			if entry.Term != "" {
-				pipe.Set(keytree.VThreadTerm(vtidStr), entry.Term, 0)
+				kv.Set(keytree.VThreadTerm(vtidStr), entry.Term, 0)
 			}
-			pipe.Exec()
 
 			status, _ := json.Marshal(map[string]string{"vtid": vtidStr, "status": "executing"})
 			kv.Set(keytree.FuncMain, status, 0)
@@ -264,9 +262,8 @@ func runFile(args []string) {
 	vtid := fmt.Sprintf("test-%d", time.Now().UnixNano())
 	st := vthread.VThread{PC: "[0,0]", Status: "init", Mode: "single"}
 	data, _ := json.Marshal(st)
-	pipe := kv.Pipeline(); pipe.Set(keytree.VThread(vtid), data, 0)
-	pipe.Set(keytree.VThreadSlot(vtid, 0, 0), "pre_main", 0)
-	pipe.Exec()
+	kv.Set(keytree.VThread(vtid), data, 0)
+	kv.Set(keytree.VThreadSlot(vtid, 0, 0), "pre_main", 0)
 
 	logx.Info("[single] executing %s (%d ops)", vtid, len(body))
 	kvcpu.Execute(ctx, kv, vtid)
@@ -328,10 +325,8 @@ func runCode(name string, rc io.Reader) {
 	vtid := fmt.Sprintf("test-%d", time.Now().UnixNano())
 	st := vthread.VThread{PC: "[0,0]", Status: "init", Mode: "single"}
 	data, _ := json.Marshal(st)
-	pipe := kv.Pipeline()
-	pipe.Set(keytree.VThread(vtid), data, 0)
-	pipe.Set(keytree.VThreadSlot(vtid, 0, 0), "pre_main", 0)
-	pipe.Exec()
+		kv.Set(keytree.VThread(vtid), data, 0)
+		kv.Set(keytree.VThreadSlot(vtid, 0, 0), "pre_main", 0)
 
 	logx.Info("[single] executing %s (%d ops)", vtid, len(body))
 	kvcpu.Execute(ctx, kv, vtid)
@@ -372,22 +367,3 @@ func collectKVFiles(path string) ([]string, error) {
 	return files, err
 }
 
-func showHelp() {
-	fmt.Fprintln(os.Stderr, "kvlang — KV language VM interpreter")
-	fmt.Fprintln(os.Stderr)
-	fmt.Fprintln(os.Stderr, "usage: kvlang [flags] [<file.kv>]")
-	fmt.Fprintln(os.Stderr)
-	fmt.Fprintln(os.Stderr, "commands:")
-	fmt.Fprintln(os.Stderr, "  help              show this help")
-	fmt.Fprintln(os.Stderr)
-	fmt.Fprintln(os.Stderr, "flags:")
-	fmt.Fprintln(os.Stderr, "  -c \"code\"          execute inline code")
-	fmt.Fprintln(os.Stderr, "  -h, --help        show this help")
-	fmt.Fprintln(os.Stderr)
-	fmt.Fprintln(os.Stderr, "examples:")
-	fmt.Fprintln(os.Stderr, "  kvlang                    start daemon")
-	fmt.Fprintln(os.Stderr, "  kvlang file.kv            execute file")
-	fmt.Fprintln(os.Stderr, "  kvlang -c '1+2->./x'     inline code")
-	fmt.Fprintln(os.Stderr, "  echo 'code' | kvlang      pipe input")
-	os.Exit(0)
-}

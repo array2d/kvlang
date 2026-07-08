@@ -52,7 +52,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *
 	}
 
 	substackRoot := keytree.VThreadSub(vtid, pc)
-	pipe := kv.Pipeline()
+	// serial Set
 	bodyCount := len(compiled)
 	for i, kvlangLine := range compiled {
 		parsed, err := parser.ParseLine(kvlangLine)
@@ -64,12 +64,12 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *
 		}
 		replaceParams(parsed.Reads, bindings)
 		replaceParams(parsed.Writes, bindings)
-		pipe.Set(fmt.Sprintf("%s[%d,0]", substackRoot, i), parsed.Opcode, 0)
+		kv.Set(fmt.Sprintf("%s[%d,0]", substackRoot, i), parsed.Opcode, 0)
 		for j, r := range parsed.Reads {
-			pipe.Set(fmt.Sprintf("%s[%d,-%d]", substackRoot, i, j+1), r, 0)
+			kv.Set(fmt.Sprintf("%s[%d,-%d]", substackRoot, i, j+1), r, 0)
 		}
 		for j, w := range parsed.Writes {
-			pipe.Set(fmt.Sprintf("%s[%d,%d]", substackRoot, i, j+1), w, 0)
+			kv.Set(fmt.Sprintf("%s[%d,%d]", substackRoot, i, j+1), w, 0)
 		}
 	}
 
@@ -79,18 +79,12 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *
 		if !strings.HasPrefix(retRef, "/") {
 			retRef = "./" + retRef
 		}
-		pipe.Set(fmt.Sprintf("%s[%d,0]", substackRoot, retIdx), "return", 0)
-		pipe.Set(fmt.Sprintf("%s[%d,-1]", substackRoot, retIdx), retRef, 0)
+		kv.Set(fmt.Sprintf("%s[%d,0]", substackRoot, retIdx), "return", 0)
+		kv.Set(fmt.Sprintf("%s[%d,-1]", substackRoot, retIdx), retRef, 0)
 	} else {
-		pipe.Set(fmt.Sprintf("%s[%d,0]", substackRoot, retIdx), "return", 0)
+		kv.Set(fmt.Sprintf("%s[%d,0]", substackRoot, retIdx), "return", 0)
 	}
 
-	if _, err := pipe.Exec(); err != nil {
-		msg := fmt.Sprintf("CALL pipeline: %v", err)
-		logx.Warn("[%s] CALL: %s", vtid, msg)
-		vthread.SetError(ctx, kv, vtid, pc, msg)
-		return pc
-	}
 	return pc + "/[0,0]"
 }
 
