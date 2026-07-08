@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"runtime"
-	
 	"strings"
 	"syscall"
 	"time"
@@ -21,15 +21,28 @@ import (
 	"kvlang/internal/logx"
 	"kvlang/internal/op/builtin"
 	"kvlang/internal/parser"
-	
 )
 
 func cmdRun(args []string) {
-	if len(args) == 0 {
+	switch {
+	case len(args) == 1 && args[0] == "help":
+		showHelp()
+	case len(args) >= 1 && (args[0] == "-h" || args[0] == "--help"):
+		showHelp()
+	case len(args) >= 2 && args[0] == "-c":
+		runCode("inline", strings.NewReader(args[1]))
+	case len(args) == 0 && !isTerminal():
+		runCode("stdin", os.Stdin)
+	case len(args) == 0:
 		runServe()
-	} else {
+	default:
 		runFile(args)
 	}
+}
+
+func isTerminal() bool {
+	stat, _ := os.Stdin.Stat()
+	return (stat.Mode() & os.ModeCharDevice) != 0
 }
 
 // ── serve mode: kvlang run (no args) ──
@@ -268,6 +281,71 @@ func runFile(args []string) {
 	}
 }
 
+// ── one-shot: kvlang run -c "code" / echo "code" | kvlang run ──
+
+func runCode(name string, rc io.Reader) {
+	ctx := context.Background()
+	kv := kvspace.Conn("127.0.0.1:6379")
+	defer kv.DisConn()
+
+	df, err := parser.ParseCode(rc)
+	if err != nil {
+		logx.Fatal("parse: %v", err)
+	}
+
+	var allPreamble []string
+	hasMain := false
+	for i := range df.Funcs {
+		fn := &df.Funcs[i]
+		if err := fn.Register(ctx, kv); err != nil {
+			logx.Error("FAIL %s/%s: %v", name, fn.Name, err)
+			continue
+		}
+		logx.Info("%s → /src/func/%s", name, fn.Name)
+		if fn.Name == "main" {
+			hasMain = true
+		}
+	}
+	allPreamble = append(allPreamble, df.PreambleLines...)
+
+	if len(allPreamble) == 0 && !hasMain {
+		logx.Fatal("no executable code found")
+	}
+
+	body := make([]string, len(allPreamble))
+	copy(body, allPreamble)
+	if hasMain {
+		body = append(body, "main() -> './pre_main_ret'")
+	}
+
+	preMain := ast.Func{Name: "pre_main", Signature: "def pre_main() -> ()", Body: body}
+	if err := preMain.Register(ctx, kv); err != nil {
+		logx.Fatal("register pre_main: %v", err)
+	}
+
+	kv.Set(keytree.FuncMain, json.RawMessage(`{"entry":"pre_main","reads":[],"writes":[]}`), 0)
+
+	vtid := fmt.Sprintf("test-%d", time.Now().UnixNano())
+	st := vthread.VThread{PC: "[0,0]", Status: "init", Mode: "single"}
+	data, _ := json.Marshal(st)
+	pipe := kv.Pipeline()
+	pipe.Set(keytree.VThread(vtid), data, 0)
+	pipe.Set(keytree.VThreadSlot(vtid, 0, 0), "pre_main", 0)
+	pipe.Exec()
+
+	logx.Info("[single] executing %s (%d ops)", vtid, len(body))
+	kvcpu.Execute(ctx, kv, vtid)
+	time.Sleep(3 * time.Second)
+
+	vs := vthread.Get(ctx, kv, vtid)
+	fmt.Printf("\n=== VThread %s ===\n", vtid)
+	fmt.Printf("  PC:     %s\n", vs.PC)
+	fmt.Printf("  Status: %s\n", vs.Status)
+	if vs.Error != nil {
+		fmt.Printf("  Error:  %v\n", vs.Error)
+	}
+}
+
 // ── helpers ──
 
 func collectKVFiles(path string) ([]string, error) {
@@ -292,4 +370,24 @@ func collectKVFiles(path string) ([]string, error) {
 		return nil
 	})
 	return files, err
+}
+
+func showHelp() {
+	fmt.Fprintln(os.Stderr, "kvlang — KV language VM interpreter")
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, "usage: kvlang [flags] [<file.kv>]")
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, "commands:")
+	fmt.Fprintln(os.Stderr, "  help              show this help")
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, "flags:")
+	fmt.Fprintln(os.Stderr, "  -c \"code\"          execute inline code")
+	fmt.Fprintln(os.Stderr, "  -h, --help        show this help")
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, "examples:")
+	fmt.Fprintln(os.Stderr, "  kvlang                    start daemon")
+	fmt.Fprintln(os.Stderr, "  kvlang file.kv            execute file")
+	fmt.Fprintln(os.Stderr, "  kvlang -c '1+2->./x'     inline code")
+	fmt.Fprintln(os.Stderr, "  echo 'code' | kvlang      pipe input")
+	os.Exit(0)
 }

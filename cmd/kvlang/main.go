@@ -1,22 +1,13 @@
 // kvlang — KV 语言 VM 解释器 CLI。
 //
-//	kvlang run              启动 VM 服务端 (daemon)
-//	kvlang run <file.kv>     加载并执行
+//	kvlang                   启动 daemon
+//	kvlang <file.kv>          执行文件
+//	kvlang -c "code"          执行内联代码
+//	echo "code" | kvlang       管道传入
 package main
 
-import (
-	"fmt"
-	"os"
-)
+import "os"
 
 func main() {
-	if len(os.Args) < 2 || os.Args[1] != "run" {
-		fmt.Fprintln(os.Stderr, "kvlang — KV language VM interpreter")
-		fmt.Fprintln(os.Stderr)
-		fmt.Fprintln(os.Stderr, "usage: kvlang run [<file.kv>]")
-		fmt.Fprintln(os.Stderr, "  (no args)   start daemon")
-		fmt.Fprintln(os.Stderr, "  <file.kv>   load & execute")
-		os.Exit(1)
-	}
-	cmdRun(os.Args[2:])
+	cmdRun(os.Args[1:])
 }
