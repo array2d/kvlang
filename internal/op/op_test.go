@@ -51,19 +51,19 @@ func TestIsComputeOp(t *testing.T) {
 	control := []string{"call", "return", "if", "for"}
 	lifecycle := []string{"newtensor", "deltensor", "clonetensor"}
 
-	for _, op := range compute {
-		if !op.IsComputeOp(op) {
-			t.Errorf("IsComputeOp(%q) = false, want true", op)
+	for _, opc := range compute {
+		if !op.IsComputeOp(opc) {
+			t.Errorf("IsComputeOp(%q) = false, want true", opc)
 		}
 	}
-	for _, op := range control {
-		if op.IsComputeOp(op) {
-			t.Errorf("IsComputeOp(%q) = true, want false", op)
+	for _, opc := range control {
+		if op.IsComputeOp(opc) {
+			t.Errorf("IsComputeOp(%q) = true, want false", opc)
 		}
 	}
-	for _, op := range lifecycle {
-		if op.IsLifecycleOp(op) && op.IsComputeOp(op) {
-			t.Errorf("IsLifecycleOp(%q) should not also be IsComputeOp", op)
+	for _, opc := range lifecycle {
+		if op.IsLifecycleOp(opc) && op.IsComputeOp(opc) {
+			t.Errorf("IsLifecycleOp(%q) should not also be IsComputeOp", opc)
 		}
 	}
 }
