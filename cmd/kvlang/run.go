@@ -25,25 +25,23 @@ import (
 )
 
 func cmdRun(args []string) {
-	switch {
-	case len(args) == 1 && args[0] == "help":
-		showHelp()
-	case len(args) >= 1 && (args[0] == "-h" || args[0] == "--help"):
-		showHelp()
-	case len(args) >= 2 && args[0] == "-c":
-		runCode("inline", strings.NewReader(args[1]))
-	case len(args) == 0 && !isTerminal():
-		runCode("stdin", os.Stdin)
-	case len(args) == 0:
-		runServe()
-	default:
-		runFile(args)
+	// strip leading "run" if present (backward compat)
+	if len(args) > 0 && args[0] == "run" {
+		args = args[1:]
 	}
-}
-
-func isTerminal() bool {
-	stat, _ := os.Stdin.Stat()
-	return (stat.Mode() & os.ModeCharDevice) != 0
+	if len(args) == 1 && (args[0] == "help" || args[0] == "-h" || args[0] == "--help") {
+		showHelp()
+		return
+	}
+	mode, name, rc := parseInput(args, "run")
+	switch mode {
+	case modeServe:
+		runServe()
+	case modeFile:
+		runFile(args)
+	case modeInline, modePipe:
+		runCode(name, rc)
+	}
 }
 
 // ── serve mode: kvlang run (no args) ──
