@@ -55,6 +55,7 @@ func Execute(ctx context.Context, kv kvspace.KVSpace, vtid string) {
 			return
 		}
 		logx.Debug("[%s] PC=%s OP=%s READS=%v WRITES=%v", vtid, pc, inst.Opcode, inst.Reads, inst.Writes)
+		logx.Debug("[%s] isFunc=%v isCtrl=%v isNative=%v", vtid, isFunctionCall(ctx, kv, inst.Opcode), op.IsControlOp(inst.Opcode), builtin.IsNativeOp(inst.Opcode))
 
 		var execErr error
 		switch {
