@@ -155,7 +155,7 @@ func TestIntegration_NativeScalar(t *testing.T) {
 
 	vmCtx, vmCancel := context.WithCancel(ctx)
 	defer vmCancel()
-	go vm.RunWorker(vmCtx, kv, 0)
+	go kvcpu.RunWorker(vmCtx, kv, 0)
 	time.Sleep(150 * time.Millisecond)
 
 	type testCase struct {
@@ -273,7 +273,7 @@ func TestIntegration_CrossCall(t *testing.T) {
 	// Start VM worker
 	vmCtx, vmCancel := context.WithCancel(ctx)
 	defer vmCancel()
-	go vm.RunWorker(vmCtx, kv, 0)
+	go kvcpu.RunWorker(vmCtx, kv, 0)
 	time.Sleep(150 * time.Millisecond)
 
 	// diamond(A=5) → double(5)=10, triple(5)=15, R=25
@@ -301,7 +301,7 @@ func TestIntegration_NativePrint(t *testing.T) {
 
 	vmCtx, vmCancel := context.WithCancel(ctx)
 	defer vmCancel()
-	go vm.RunWorker(vmCtx, kv, 0)
+	go kvcpu.RunWorker(vmCtx, kv, 0)
 	time.Sleep(150 * time.Millisecond)
 
 	root := filepath.Join("example", "kvlang")
