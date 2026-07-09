@@ -21,6 +21,7 @@ const (
 	RBrace                 // }
 	Return                 // return
 	If                     // if
+	Else                   // else
 	For                    // for
 )
 
@@ -45,6 +46,8 @@ func (k Kind) String() string {
 	case Return:
 		return "RETURN"
 	case If:
+		case Else:
+			return "ELSE"
 		return "IF"
 	case For:
 		return "FOR"
@@ -197,8 +200,16 @@ func Tokenize(line string) []Token {
 		case op.OpReturn:
 			tokens = append(tokens, Token{Kind: Return, Value: word})
 		case op.OpIf:
+			case "else":
+				tokens = append(tokens, Token{Kind: Else, Value: word})
 			tokens = append(tokens, Token{Kind: If, Value: word})
 		case op.OpFor:
+			case op.OpWhile:
+				tokens = append(tokens, Token{Kind: Ident, Value: word})
+			case op.OpBreak:
+				tokens = append(tokens, Token{Kind: Ident, Value: word})
+			case op.OpContinue:
+				tokens = append(tokens, Token{Kind: Ident, Value: word})
 			tokens = append(tokens, Token{Kind: For, Value: word})
 		default:
 			tokens = append(tokens, Token{Kind: Ident, Value: word})

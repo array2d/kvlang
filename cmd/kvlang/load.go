@@ -50,7 +50,7 @@ func loadFunctions(kv kvspace.KVSpace, files []string) {
 	if len(allPreamble) == 0 && !hasMain { logx.Fatal("no executable code found") }
 	body := make([]string, len(allPreamble)); copy(body, allPreamble)
 	if hasMain { body = append(body, "main() -> './pre_main_ret'") }
-	preMain := ast.Func{Name: "pre_main", Signature: "def pre_main() -> ()", Body: body}
+	preMain := ast.Func{Name: "pre_main", Signature: "def pre_main() -> ()", Body: toStmts(body)}
 	preMain.Register(ctx, kv)
 	kv.Set(keytree.FuncMain, json.RawMessage(`{"entry":"pre_main","reads":[],"writes":[]}`), 0)
 }
@@ -80,4 +80,15 @@ func collectKVFiles(path string) ([]string, error) {
 		return nil
 	})
 	return files, nil
+}
+
+func toStmts(lines []string) []ast.Stmt {
+	var stmts []ast.Stmt
+	for _, line := range lines {
+		inst, err := parser.ParseLine(line)
+		if err == nil && inst != nil {
+			stmts = append(stmts, inst)
+		}
+	}
+	return stmts
 }

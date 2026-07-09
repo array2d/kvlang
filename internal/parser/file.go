@@ -55,15 +55,17 @@ func parseLines(lines []string) (*ast.File, error) {
 			return nil, fmt.Errorf("cannot extract name from: %s", defLine)
 		}
 
-		var body []string
+		var rawBody []string
 		bodyEnd := len(lines)
 		if strings.HasSuffix(defLine, "{") {
+			depth := 1
 			for j := i + 1; j < len(lines); j++ {
-				if lines[j] == "}" {
+				depth += strings.Count(lines[j], "{") - strings.Count(lines[j], "}")
+				if depth == 0 {
 					bodyEnd = j
 					break
 				}
-				body = append(body, lines[j])
+				rawBody = append(rawBody, lines[j])
 			}
 			if bodyEnd == len(lines) {
 				return nil, fmt.Errorf("unclosed brace in %s", name)
@@ -79,13 +81,14 @@ func parseLines(lines []string) (*ast.File, error) {
 					bodyEnd = j
 					break
 				}
-				body = append(body, lines[j])
+				rawBody = append(rawBody, lines[j])
 			}
 			i = bodyEnd
 		}
-		if len(body) == 0 {
+		if len(rawBody) == 0 {
 			return nil, fmt.Errorf("empty body for %s", name)
 		}
+		body := parseBody(rawBody)
 		df.Funcs = append(df.Funcs, ast.Func{
 			Name:      name,
 			Signature: strings.TrimSuffix(defLine, " {"),
@@ -104,7 +107,7 @@ func parseLines(lines []string) (*ast.File, error) {
 		inBody := false
 		for _, fn := range df.Funcs {
 			for _, bl := range fn.Body {
-				if bl == line {
+				if bl.String() == line {
 					inBody = true
 					break
 				}
@@ -194,4 +197,133 @@ func parseTopLevelCall(line string) (ast.TopLevelCall, bool) {
 		}
 	}
 	return ast.TopLevelCall{FuncName: funcName, Args: args, Outputs: outputs}, true
+}
+
+// parseBody 将原始行列表解析为 AST Stmt 节点。
+func parseBody(lines []string) []ast.Stmt {
+	var stmts []ast.Stmt
+	i := 0
+	for i < len(lines) {
+		line := lines[i]
+		if strings.HasPrefix(line, "while (") || strings.HasPrefix(line, "while(") {
+			whileStmt, next := parseWhileStmt(lines, i)
+			stmts = append(stmts, whileStmt)
+			i = next
+		} else if strings.HasPrefix(line, "break") {
+			stmts = append(stmts, &ast.BreakStmt{})
+			i++
+		} else if strings.HasPrefix(line, "continue") {
+			stmts = append(stmts, &ast.ContinueStmt{})
+			i++
+		} else if strings.HasPrefix(line, "for (") || strings.HasPrefix(line, "for(") {
+			forStmt, next := parseForStmt(lines, i)
+			stmts = append(stmts, forStmt)
+			i = next
+		} else if strings.HasPrefix(line, "if (") || strings.HasPrefix(line, "if(") {
+			ifStmt, next := parseIfStmt(lines, i)
+			stmts = append(stmts, ifStmt)
+			i = next
+		} else {
+			inst, _ := ParseLine(line)
+			if inst != nil {
+				stmts = append(stmts, inst)
+			}
+			i++
+		}
+	}
+	return stmts
+}
+
+// parseIfStmt 解析 if/else 块。
+func parseIfStmt(lines []string, start int) (*ast.IfStmt, int) {
+	line := lines[start]
+	// Extract condition: if (cond) { or if(cond){
+	condStart := strings.Index(line, "(")
+	condEnd := strings.LastIndex(line, ")")
+	cond := strings.TrimSpace(line[condStart+1 : condEnd])
+
+	// Find then/else bodies
+	s := &ast.IfStmt{Cond: cond}
+	depth := 1
+	i := start + 1
+	for i < len(lines) && depth > 0 {
+		depth += strings.Count(lines[i], "{") - strings.Count(lines[i], "}")
+		if strings.HasPrefix(lines[i], "} else {") || lines[i] == "} else {" {
+			depth-- // close of `}`
+			if depth == 0 {
+				i++ // move past `} else {`
+				depth = 1 // opening `{`
+				continue
+			}
+		}
+		if depth == 0 {
+			break
+		}
+		s.Then = append(s.Then, parseBody([]string{lines[i]})...)
+		i++
+	}
+
+	// Parse else body
+	if i < len(lines) && (strings.HasPrefix(lines[i], "else {") || strings.HasPrefix(lines[i], "else{")) {
+		i++ // skip `else {`
+		depth = 1
+		for i < len(lines) && depth > 0 {
+			depth += strings.Count(lines[i], "{") - strings.Count(lines[i], "}")
+			if depth == 0 {
+				i++
+				break
+			}
+			s.Else = append(s.Else, parseBody([]string{lines[i]})...)
+			i++
+		}
+	}
+	return s, i
+}
+
+// parseForStmt 解析 for 循环块: for (var in start..end) { body }
+func parseForStmt(lines []string, start int) (*ast.ForStmt, int) {
+	line := lines[start]
+	// Extract: for (var in start..end) {
+	inner := line[strings.Index(line, "(")+1 : strings.LastIndex(line, ")")]
+	// 格式: "i in 0..10" 或 "i:type in 0..10"
+	parts := strings.SplitN(inner, " in ", 2)
+	varName := strings.TrimSpace(parts[0])
+	if colon := strings.Index(varName, ":"); colon >= 0 {
+		varName = varName[:colon]
+	}
+	rangeParts := strings.SplitN(parts[1], "..", 2)
+	startVal := strings.TrimSpace(rangeParts[0])
+	endVal := strings.TrimSpace(rangeParts[1])
+
+	s := &ast.ForStmt{Var: varName, Start: startVal, End: endVal}
+	depth := 1
+	i := start + 1
+	for i < len(lines) && depth > 0 {
+		depth += strings.Count(lines[i], "{") - strings.Count(lines[i], "}")
+		if depth == 0 {
+			i++
+			break
+		}
+		s.Body = append(s.Body, parseBody([]string{lines[i]})...)
+		i++
+	}
+	return s, i
+}
+
+// parseWhileStmt 解析 while 循环块: while (cond) { body }
+func parseWhileStmt(lines []string, start int) (*ast.WhileStmt, int) {
+	line := lines[start]
+	inner := line[strings.Index(line, "(")+1 : strings.LastIndex(line, ")")]
+	cond := strings.TrimSpace(inner)
+
+	s := &ast.WhileStmt{Cond: cond}
+	depth := 1
+	i := start + 1
+	for i < len(lines) && depth > 0 {
+		depth += strings.Count(lines[i], "{") - strings.Count(lines[i], "}")
+		if depth == 0 { i++; break }
+		s.Body = append(s.Body, parseBody([]string{lines[i]})...)
+		i++
+	}
+	return s, i
 }

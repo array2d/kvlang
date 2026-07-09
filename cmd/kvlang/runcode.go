@@ -32,7 +32,7 @@ func runCode(name string, rc io.Reader) {
 
 	body := make([]string, len(allPreamble)); copy(body, allPreamble)
 	if hasMain { body = append(body, "main() -> './pre_main_ret'") }
-	preMain := ast.Func{Name: "pre_main", Signature: "def pre_main() -> ()", Body: body}
+	preMain := ast.Func{Name: "pre_main", Signature: "def pre_main() -> ()", Body: toStmts(body)}
 	preMain.Register(ctx, kv)
 	kv.Set(keytree.FuncMain, json.RawMessage(`{"entry":"pre_main","reads":[],"writes":[]}`), 0)
 

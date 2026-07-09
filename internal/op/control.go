@@ -4,7 +4,11 @@ const (
 	OpCall   = "call"
 	OpReturn = "return"
 	OpIf     = "if"
+	OpElse   = "else"
 	OpFor    = "for"
+	OpWhile   = "while"
+	OpBreak   = "break"
+	OpContinue = "continue"
 )
 
 // IsControlOp 判断是否为控制流指令。
