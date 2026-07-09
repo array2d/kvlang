@@ -118,6 +118,23 @@ type ContinueStmt struct{}
 func (*ContinueStmt) stmt() {}
 func (*ContinueStmt) String() string { return "continue" }
 
+// BlockStmt 表示一个带标签的基本块。
+// 块内最后一条语句必须是终止指令 (br/jump/return)。
+type BlockStmt struct {
+	Label string // 块标签，如 entry, merge, then
+	Body  []Stmt // 块内语句
+}
+
+func (*BlockStmt) stmt() {}
+func (s *BlockStmt) String() string {
+	r := s.Label + ": {\n"
+	for _, st := range s.Body {
+		r += "\t" + st.String() + "\n"
+	}
+	r += "}"
+	return r
+}
+
 func join(ss []string) string {
 	s := ""
 	for i, v := range ss {
