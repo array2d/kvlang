@@ -266,14 +266,6 @@ func runFile(args []string) {
 	logx.Info("[single] executing %s (%d ops)", vtid, len(body))
 	kvcpu.Execute(ctx, kv, vtid)
 	time.Sleep(3 * time.Second)
-
-	vs := vthread.Get(ctx, kv, vtid)
-	fmt.Printf("\n=== VThread %s ===\n", vtid)
-	fmt.Printf("  PC:     %s\n", vs.PC)
-	fmt.Printf("  Status: %s\n", vs.Status)
-	if vs.Error != nil {
-		fmt.Printf("  Error:  %v\n", vs.Error)
-	}
 }
 
 // ── one-shot: kvlang run -c "code" / echo "code" | kvlang run ──
@@ -329,14 +321,6 @@ func runCode(name string, rc io.Reader) {
 	logx.Info("[single] executing %s (%d ops)", vtid, len(body))
 	kvcpu.Execute(ctx, kv, vtid)
 	time.Sleep(3 * time.Second)
-
-	vs := vthread.Get(ctx, kv, vtid)
-	fmt.Printf("\n=== VThread %s ===\n", vtid)
-	fmt.Printf("  PC:     %s\n", vs.PC)
-	fmt.Printf("  Status: %s\n", vs.Status)
-	if vs.Error != nil {
-		fmt.Printf("  Error:  %v\n", vs.Error)
-	}
 }
 
 // ── helpers ──
