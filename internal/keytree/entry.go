@@ -6,4 +6,6 @@
 package keytree
 
 // FuncMain 返回程序唯一入口的 kvspace key: /func/main。
-const FuncMain = "/func/main"
+const FuncMain = funcPrefix + "main"
+
+const funcPrefix = "/func/"
