@@ -20,7 +20,7 @@ func connectKVSpace(t *testing.T) (kvspace.KVSpace, context.Context) {
 		addr = "127.0.0.1:16379"
 	}
 	kv := kvspace.Conn(addr)
-	return kv, ctx
+	return kv, context.Background()
 }
 
 // waitVthreadDone polls the vthread state until it reaches "done" or "error".
