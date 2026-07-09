@@ -1,0 +1,30 @@
+# loop: for 循环 lowering 到基本块
+# for i in 0..100 { body } 的 block 等价形式
+
+def 循环求和(N:int) -> (total:int) {
+    0 -> './i'
+    0 -> './total'
+
+    cond: {
+        './i' < N -> './more'
+        br('./more', body, exit)
+    }
+
+    body: {
+        './total' + './i' -> './total'
+        jump(step)
+    }
+
+    step: {
+        './i' + 1 -> './i'
+        jump(cond)
+    }
+
+    exit: {
+        return
+    }
+}
+
+str.set("kvlangrun") -> './term'
+
+循环求和(10) -> './out'

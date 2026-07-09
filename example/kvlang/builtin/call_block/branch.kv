@@ -1,0 +1,28 @@
+# branch: 基本块条件分支
+# 右侧冒号: label: { } — 定义处带 :，引用处不带
+
+def 分支示例(flag:bool, X:int) -> (R:int) {
+    entry: {
+        X + 1 -> './a'
+        br('./flag', then, else)
+    }
+
+    then: {
+        './a' * 2 -> './b'
+        jump(merge)
+    }
+
+    else: {
+        './a' * 3 -> './b'
+        jump(merge)
+    }
+
+    merge: {
+        './b' + 10 -> './R'
+        return
+    }
+}
+
+str.set("kvlangrun") -> './term'
+
+分支示例(true, 5) -> './out'

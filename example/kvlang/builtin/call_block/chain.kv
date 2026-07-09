@@ -1,0 +1,29 @@
+# chain: 多层调用链降低到基本块
+# def 函数内直接使用 block 作为唯一控制流结构
+
+def 链式计算(A:int, B:int) -> (R:int) {
+    entry: {
+        A + B -> './s'
+        A * B -> './p'
+        jump(mid)
+    }
+
+    mid: {
+        './s' + './p' -> './t'
+        br('./t', big, small)
+    }
+
+    big: {
+        './t' * 2 -> './R'
+        return
+    }
+
+    small: {
+        './t' + 100 -> './R'
+        return
+    }
+}
+
+str.set("kvlangrun") -> './term'
+
+链式计算(3, 4) -> './out'
