@@ -223,6 +223,10 @@ func parseBody(lines []string) []ast.Stmt {
 			ifStmt, next := parseIfStmt(lines, i)
 			stmts = append(stmts, ifStmt)
 			i = next
+		} else if isBlockStart(line) {
+			block, next := parseBlock(lines, i)
+			stmts = append(stmts, block)
+			i = next
 		} else {
 			inst, _ := ParseLine(line)
 			if inst != nil {
@@ -326,4 +330,83 @@ func parseWhileStmt(lines []string, start int) (*ast.WhileStmt, int) {
 		i++
 	}
 	return s, i
+}
+
+// isBlockStart 判断行是否为 block label 定义: "ident:" 或 "ident: {"
+// 冒号右侧的 `:` 是 label 声明的标志（Assembly/MLIR 惯例），
+// 定义处带 : ，引用处不带（如 br(cond, entry, then)）。
+func isBlockStart(line string) bool {
+	// 必须有 `:` 作为 label 声明标志
+	colonIdx := strings.Index(line, ":")
+	if colonIdx < 0 {
+		return false
+	}
+	prefix := strings.TrimSpace(line[:colonIdx])
+	if prefix == "" {
+		return false
+	}
+	// 排除关键字
+	switch prefix {
+	case "if", "for", "while", "def", "else", "break", "continue", "return":
+		return false
+	}
+	// 排除函数调用 ident(...
+	if strings.Contains(prefix, "(") {
+		return false
+	}
+	// 排除 key 路径 /path:xxx
+	if strings.HasPrefix(prefix, "/") || strings.HasPrefix(prefix, "./") {
+		return false
+	}
+	return true
+}
+
+// parseBlock 解析基本块: label: { body }
+func parseBlock(lines []string, start int) (*ast.BlockStmt, int) {
+	line := lines[start]
+	colonIdx := strings.Index(line, ":")
+	label := strings.TrimSpace(line[:colonIdx])
+
+	// 寻找 `{` 或下一行开始 body
+	rest := strings.TrimSpace(line[colonIdx+1:])
+	s := &ast.BlockStmt{Label: label}
+
+	// label: { stmts }  — 花括号在同一行
+	if strings.HasPrefix(rest, "{") {
+		// body 从下一行开始
+		depth := 1
+		i := start + 1
+		for i < len(lines) && depth > 0 {
+			depth += strings.Count(lines[i], "{") - strings.Count(lines[i], "}")
+			if depth == 0 {
+				i++
+				break
+			}
+			s.Body = append(s.Body, parseBody([]string{lines[i]})...)
+			i++
+		}
+		return s, i
+	}
+
+	// label:  — 花括号在下一行
+	if rest == "" {
+		i := start + 1
+		if i < len(lines) && strings.TrimSpace(lines[i]) == "{" {
+			depth := 1
+			i++ // skip `{`
+			for i < len(lines) && depth > 0 {
+				depth += strings.Count(lines[i], "{") - strings.Count(lines[i], "}")
+				if depth == 0 {
+					i++
+					break
+				}
+				s.Body = append(s.Body, parseBody([]string{lines[i]})...)
+				i++
+			}
+			return s, i
+		}
+	}
+
+	// 无法解析的格式
+	return s, start + 1
 }
