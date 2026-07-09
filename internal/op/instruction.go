@@ -10,10 +10,9 @@ import (
 
 // Instruction 表示执行层 [addr0, addr1] 解码后的一条指令。
 type Instruction struct {
-	Opcode string   // [addr0, 0] = "+" | op.OpCall | op.OpReturn | ...
+	Opcode string   // [addr0, 0] = "+" | OpCall | OpReturn | ...
 	Reads  []string // [addr0, -1], [addr0, -2], ...
 	Writes []string // [addr0, 1], [addr0, 2], ...
-	PC     string   // 当前指令坐标, e.g., "[3,0]" 或 "[2,0]/[1,0]"
 }
 
 const maxParams = 10
@@ -35,7 +34,7 @@ func Decode(ctx context.Context, kv kvspace.KVSpace, vtid string, pc string) (*I
 		return nil, fmt.Errorf("decode MGET: %w", err)
 	}
 
-	inst := &Instruction{PC: pc}
+	inst := &Instruction{}
 
 	if s, ok := vals[0].(string); ok {
 		inst.Opcode = s
@@ -62,7 +61,7 @@ func Decode(ctx context.Context, kv kvspace.KVSpace, vtid string, pc string) (*I
 // DecodeFromCache 从本地缓存 map 解码 (子栈场景, 零 kvspace 访问)。
 func DecodeFromCache(cache map[string]string, pc string) *Instruction {
 	_, addr0 := parsePC(pc)
-	inst := &Instruction{PC: pc}
+	inst := &Instruction{}
 	inst.Opcode = cache[fmt.Sprintf("[%d,0]", addr0)]
 
 	for i := 1; i <= maxParams; i++ {
