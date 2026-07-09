@@ -1,0 +1,44 @@
+# kvlang 语法 (BNF)
+
+## 词法
+
+```
+comment   ::= "#" .* EOL
+string    ::= '"' [^"]* '"'
+path      ::= "./" ident | "/" ident
+number    ::= digit+ ["." digit*]
+ident     ::= letter (letter | digit)*
+op        ::= "+" | "-" | "*" | "/" | "%" | "==" | "!=" | "<" | ">" | "<=" | ">="
+            | "&&" | "||" | "!" | "&" | "|" | "^" | "<<" | ">>"
+keyword   ::= "def" | "return" | "if" | "else" | "for" | "while"
+type      ::= "int" | "f32" | "f64" | "bool" | "string" | "tensor" | "..."
+```
+
+## 语法
+
+```
+file       ::= (func_def EOL | top_call EOL)*
+
+func_def   ::= "def" ident "(" [params] ")" "->" "(" [params] ")"
+               "{" EOL stmt* "}"
+
+top_call   ::= call_expr "->" target             (* def 块外的顶层调用 *)
+
+stmt       ::= prefix | infix | cstyle | control
+
+prefix     ::= ident "(" [arg_list] ")" "->" target
+infix      ::= (primary op primary | op primary) "->" target
+cstyle     ::= target "<-" (call_expr | infix_expr)
+
+call_expr  ::= ident "(" [arg_list] ")"
+target     ::= path
+
+control    ::= "if" "(" expr ")" "{" stmt* "}" ["else" "{" stmt* "}"]
+             | "return" "(" [expr] ")"
+
+params     ::= ident [":" type] ("," ident [":" type])*
+arg_list   ::= arg ("," arg)*
+arg        ::= primary
+primary    ::= ident | number | string | path
+expr       ::= call_expr | primary (op primary)*
+```
