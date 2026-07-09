@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 
-	"kvlang/internal/codegen"
+	"kvlang/internal/layoutcode"
 	"kvlang/internal/op/dispatch"
 	"kvlang/internal/op"
 	"kvlang/internal/logx"
@@ -84,7 +84,7 @@ func Execute(ctx context.Context, kv kvspace.KVSpace, vtid string) {
 func handleControl(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) error {
 	switch inst.Opcode {
 	case op.OpCall:
-		substackPC := codegen.HandleCall(ctx, kv, vtid, pc, inst)
+		substackPC := layoutcode.HandleCall(ctx, kv, vtid, pc, inst)
 		if substackPC == pc {
 			// HandleCall already set error state (func not found, parse failure, etc.)
 			return fmt.Errorf("call %s failed", inst.Reads[0])
@@ -93,7 +93,7 @@ func handleControl(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, ins
 		logx.Debug("[%s] CALL → %s", vtid, substackPC)
 		return nil
 	case op.OpReturn:
-		parentPC := codegen.HandleReturn(ctx, kv, vtid, pc)
+		parentPC := layoutcode.HandleReturn(ctx, kv, vtid, pc, inst)
 		logx.Debug("[%s] RETURN → %s", vtid, parentPC)
 		if parentPC == pc {
 			vthread.Set(ctx, kv, vtid, pc, "done")
