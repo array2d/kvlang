@@ -1,8 +1,9 @@
 // Package logx 提供基于 log/slog 的级别日志，通过 LOG_LEVEL 环境变量控制。
 //
 //	LOG_LEVEL=debug  输出所有级别
-//	LOG_LEVEL=info   输出 info/warn/error (默认)
-//	LOG_LEVEL=warn   输出 warn/error
+//	LOG_LEVEL=debug  输出所有级别
+//	LOG_LEVEL=info   输出 info/warn/error
+//	LOG_LEVEL=warn   输出 warn/error (默认)
 //	LOG_LEVEL=error  仅输出 error
 //
 // 用法: logx.Debug("worker-%d picked vthread %s", id, vtid)
@@ -21,14 +22,14 @@ func init() {
 	switch strings.ToLower(os.Getenv("LOG_LEVEL")) {
 	case "debug":
 		level.Set(slog.LevelDebug)
-	case "info", "":
+	case "info":
 		level.Set(slog.LevelInfo)
-	case "warn":
+	case "warn", "":
 		level.Set(slog.LevelWarn)
 	case "error":
 		level.Set(slog.LevelError)
 	default:
-		level.Set(slog.LevelInfo)
+		level.Set(slog.LevelWarn)
 	}
 
 	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
