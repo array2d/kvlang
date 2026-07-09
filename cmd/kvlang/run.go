@@ -265,7 +265,6 @@ func runFile(args []string) {
 
 	logx.Info("[single] executing %s (%d ops)", vtid, len(body))
 	kvcpu.Execute(ctx, kv, vtid)
-	time.Sleep(3 * time.Second)
 }
 
 // ── one-shot: kvlang run -c "code" / echo "code" | kvlang run ──
@@ -320,7 +319,6 @@ func runCode(name string, rc io.Reader) {
 
 	logx.Info("[single] executing %s (%d ops)", vtid, len(body))
 	kvcpu.Execute(ctx, kv, vtid)
-	time.Sleep(3 * time.Second)
 }
 
 // ── helpers ──
