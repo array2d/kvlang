@@ -60,6 +60,7 @@ func runServe() {
 
 	kv := kvspace.Conn(addr)
 	defer kv.DisConn()
+	registerDefaultTerm(kv)
 
 
 	registerVM(ctx, kv, vmID)
@@ -193,6 +194,16 @@ func sysCmdListener(ctx context.Context, kv kvspace.KVSpace, vmID string, cancel
 }
 // ── one-shot: kvlang run <file.kv> ──
 
+// registerDefaultTerm 注册默认终端，使 print/cerr/input 输出到当前进程。
+func registerDefaultTerm(kv kvspace.KVSpace) {
+	kv.Set(keytree.SysTerm("kvlangrun", "stdout")+"/type", "file", 0)
+	kv.Set(keytree.SysTerm("kvlangrun", "stdout")+"/detail", "/dev/stdout", 0)
+	kv.Set(keytree.SysTerm("kvlangrun", "stderr")+"/type", "file", 0)
+	kv.Set(keytree.SysTerm("kvlangrun", "stderr")+"/detail", "/dev/stderr", 0)
+	kv.Set(keytree.SysTerm("kvlangrun", "stdin")+"/type", "file", 0)
+	kv.Set(keytree.SysTerm("kvlangrun", "stdin")+"/detail", "/dev/stdin", 0)
+}
+
 func runFile(args []string) {
 	addr := "127.0.0.1:6379"
 	if len(args) > 1 {
@@ -203,7 +214,7 @@ func runFile(args []string) {
 	ctx := context.Background()
 	kv := kvspace.Conn(addr)
 	defer kv.DisConn()
-
+	registerDefaultTerm(kv)
 
 	files, err := collectKVFiles(path)
 	if err != nil {
@@ -273,6 +284,7 @@ func runCode(name string, rc io.Reader) {
 	ctx := context.Background()
 	kv := kvspace.Conn("127.0.0.1:6379")
 	defer kv.DisConn()
+	registerDefaultTerm(kv)
 
 	df, err := parser.ParseCode(rc)
 	if err != nil {
