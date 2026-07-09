@@ -7,6 +7,7 @@ package builtin
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"kvlang/internal/device"
@@ -69,17 +70,18 @@ func Native(ctx context.Context, kv kvspace.KVSpace, vtid string, pc string, ins
 		if inst.Opcode == OpCerr {
 			stream = "stderr"
 		}
-		ts := device.ResolveTerm(ctx, kv, vtid, stream)
 		parts := make([]string, len(inputs))
 		for i, v := range inputs {
 			parts[i] = v.String()
 		}
 		line := strings.Join(parts, " ")
-		logx.Debug("[%s] %s %s", vtid, strings.ToUpper(inst.Opcode), line)
+		ts := device.ResolveTerm(ctx, kv, vtid, stream)
 		if !ts.IsZero() {
 			if err := device.WriteTerm(ctx, ts, line); err != nil {
 				logx.Warn("[%s] write %s: %v", vtid, stream, err)
 			}
+		} else {
+			fmt.Fprintln(os.Stderr, line)
 		}
 		vthread.Set(ctx, kv, vtid, op.NextPC(pc), "running")
 		return nil
