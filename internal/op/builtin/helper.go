@@ -8,6 +8,15 @@ import (
 	"kvlang/internal/vthread"
 )
 
+func requireBinary(inputs []nativeValue) error {
+	if len(inputs) != 2 { return fmt.Errorf("binary op requires 2 inputs, got %d", len(inputs)) }
+	return nil
+}
+func requireUnary(inputs []nativeValue) error {
+	if len(inputs) != 1 { return fmt.Errorf("unary op requires 1 input, got %d", len(inputs)) }
+	return nil
+}
+
 // readInputs 从 KV 读取 inst.Reads 对应的值。
 func readInputs(f *op.Frame) []nativeValue {
 	inputs := make([]nativeValue, 0, len(f.Inst.Reads))
