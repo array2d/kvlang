@@ -75,9 +75,9 @@ func TestAllDxFilesParse(t *testing.T) {
 
 		// 验证每行指令可解析
 		for i, line := range fn.Body {
-			inst, err := parser.ParseLine(line)
+			inst, err := parser.ParseLine(line.String())
 			if err != nil {
-				t.Errorf("[%s] body[%d]=%q parse error: %v", f, i, line, err)
+				t.Errorf("[%s] body[%d]=%q parse error: %v", f, i, line.String(), err)
 				continue
 			}
 			if inst.Opcode == "" {
@@ -130,7 +130,7 @@ func TestParse_ComplexExamples(t *testing.T) {
 
 			// 验证每条指令的关键字
 			for i, line := range fn.Body {
-				inst, err := parser.ParseLine(line)
+				inst, err := parser.ParseLine(line.String())
 				if err != nil {
 					t.Errorf("body[%d] %q: %v", i, line, err)
 				}

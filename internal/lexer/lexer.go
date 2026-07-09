@@ -46,9 +46,9 @@ func (k Kind) String() string {
 	case Return:
 		return "RETURN"
 	case If:
-		case Else:
-			return "ELSE"
 		return "IF"
+	case Else:
+		return "ELSE"
 	case For:
 		return "FOR"
 	default:

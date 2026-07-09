@@ -121,10 +121,29 @@ func (*ContinueStmt) String() string { return "continue" }
 func join(ss []string) string {
 	s := ""
 	for i, v := range ss {
-		if i > 0 { s += ", " }
-		s += v
+		if i > 0 {
+			s += ", "
+		}
+		if needsQuote(v) {
+			s += "'" + v + "'"
+		} else {
+			s += v
+		}
 	}
 	return s
+}
+
+func needsQuote(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	if s[0] == '/' {
+		return true
+	}
+	if len(s) >= 2 && s[:2] == "./" {
+		return true
+	}
+	return false
 }
 
 // FormalParams 表示函数签名的形参列表。

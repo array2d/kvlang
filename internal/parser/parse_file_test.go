@@ -63,7 +63,7 @@ func checkKv(t *testing.T, dxFile string, wants []wantInst) {
 		t.Fatalf("[%s] body has %d lines, want %d:\n  got:  %v\n  want: %v", dxFile, len(fn.Body), len(wants), fn.Body, wants)
 	}
 	for i, w := range wants {
-		inst, err := parser.ParseLine(fn.Body[i])
+		inst, err := parser.ParseLine(fn.Body[i].String())
 		if err != nil {
 			t.Errorf("[%s] line[%d] parse error: %v", dxFile, i, err)
 			continue
@@ -182,7 +182,7 @@ func TestParse_NativeArith(t *testing.T) {
 			}
 			// 每个 buildin 示例现在都以 print 语句开头和结尾
 			// 首行应为 print (输入打印)
-			firstInst, err := parser.ParseLine(fn.Body[0])
+			firstInst, err := parser.ParseLine(fn.Body[0].String())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -190,7 +190,7 @@ func TestParse_NativeArith(t *testing.T) {
 				t.Errorf("[%s] first opcode=%s, want print", tt.name, firstInst.Opcode)
 			}
 			// 核心计算在倒数第二行 (最后一行是 print("./C"))
-			computeLine := fn.Body[len(fn.Body)-2]
+			computeLine := fn.Body[len(fn.Body)-2].String()
 			inst, err := parser.ParseLine(computeLine)
 			if err != nil {
 				t.Fatal(err)
