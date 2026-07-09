@@ -90,3 +90,4 @@ func (v nativeValue) asBool() bool {
 		return v.raw != "" && v.raw != "0"
 	}
 }
+
