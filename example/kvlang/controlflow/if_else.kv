@@ -1,5 +1,5 @@
 # if_else: 结构化 if/else 条件分支
-# 测试: 单分支 if, if-else, 嵌套 if-else
+# 测试: 单分支 if, if-else, 嵌套 if-else, 并行判断
 
 def 简单分支(flag:bool, X:int) -> (R:int) {
     if ('./flag') {
@@ -28,16 +28,12 @@ def 单分支判断(flag:bool, X:int) -> (R:int) {
     }
 }
 
-def 与条件判断(A:int, B:int) -> (R:int) {
-    if ('./A' > 0) {
-        if ('./B' > 0) {
-            './A' + './B' -> './R'
-        } else {
-            './A' -> './R'
-        }
+def 正负零判断(X:int) -> (R:int) {
+    if ('./X' > 0) {
+        str.set("1") -> './R'
     } else {
-        if ('./B' > 0) {
-            './B' -> './R'
+        if ('./X' < 0) {
+            str.set("-1") -> './R'
         } else {
             str.set("0") -> './R'
         }

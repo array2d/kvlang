@@ -9,7 +9,16 @@ def is_even(X:int) -> (result:bool) {
     './X' % 2 == 0 -> './result'
 }
 
-def 条件调用(A:int, B:int) -> (R:int) {
+def 条件调用二路(A:int, B:int) -> (R:int) {
+    is_positive(A) -> './pa'
+    if ('./pa') {
+        './A' + './B' -> './R'
+    } else {
+        './A' - './B' -> './R'
+    }
+}
+
+def 双层条件调用(A:int, B:int) -> (R:int) {
     is_positive(A) -> './pa'
     is_positive(B) -> './pb'
     if ('./pa') {
@@ -19,11 +28,7 @@ def 条件调用(A:int, B:int) -> (R:int) {
             './A' -> './R'
         }
     } else {
-        if ('./pb') {
-            './B' -> './R'
-        } else {
-            str.set("0") -> './R'
-        }
+        './B' -> './R'
     }
 }
 
@@ -55,11 +60,7 @@ def 带条件递归(N:int, mode:int) -> (result:int) {
         if ('./mode' == 1) {
             './prev' + './N' -> './result'
         } else {
-            if ('./mode' == 2) {
-                './prev' * './N' -> './result'
-            } else {
-                './N' -> './result'
-            }
+            './prev' * './N' -> './result'
         }
     }
 }
