@@ -27,7 +27,7 @@
 | 原语 | Assembly IR | kvir (当前) | kvir (目标) | MLIR | C 语言 |
 |------|-----------|--------------|--------------|------|--------|
 | 顺序执行 | PC++ | `[i,0] → [i+1,0]` | 同左 | block 内顺序 op | `;` 分隔 |
-| 无条件跳转 | `jmp label` | — (缺失) | `jump <block>` | `cf.br ^block` | `goto label` |
+| 无条件跳转 | `jmp label` | — (缺失) | `goto <block>` | `cf.br ^block` | `goto label` |
 | 条件分支 | `cmp; je/jne label` | `if cond → true/false 子树` (部分) | `if (cond) block1 else block2` | `scf.if` / `cf.cond_br ^t, ^f` | `if/else` |
 | 循环 | `jmp` 回跳 | — (缺失) | `for` / `while` 展开为基本块 | `scf.for` / `scf.while` / `affine.for` | `for` / `while` |
 | 函数调用 | `call func` | `CALL func → eager inline 翻译` | 同左 | `func.call @callee(%args)` | `func(args)` |
@@ -58,7 +58,7 @@ MLIR:                              kvir (类比):
                                
   func dialect  (函数定义)          def ... -> () { }  ← 函数层
   scf dialect  (结构化控制流)        if / for / while  ← 控制流层 (目标)
-  cf dialect   (底层控制流)          br / jump / switch ← CFG 层 (目标)
+  cf dialect   (底层控制流)          br / goto / switch ← CFG 层 (目标)
   linalg dialect (线性代数)          matmul, add, conv  ← 计算层
   gpu dialect  (GPU 抽象)            exop-metal / op-cuda ← 后端调度 (隐性)
   memref dialect (内存抽象)           newtensor/deltensor ← 生命周期层
@@ -85,7 +85,7 @@ MLIR:                              kvir (目标):
   }                                }
 ```
 
-MLIR 的 **Region** 是其关键抽象——`scf.for` 的循环体是一个嵌套的 Region，与父函数的 value 作用域隔离。kvir 当前用 **PC 路径嵌套** (`/vthread/<vtid>/<pc>/`) 实现了类似隔离，但控制流跳转（jump）跨越嵌套时需要更明确的 frame/region 边界语义。
+MLIR 的 **Region** 是其关键抽象——`scf.for` 的循环体是一个嵌套的 Region，与父函数的 value 作用域隔离。kvir 当前用 **PC 路径嵌套** (`/vthread/<vtid>/<pc>/`) 实现了类似隔离，但控制流跳转（goto）跨越嵌套时需要更明确的 frame/region 边界语义。
 
 #### Pass Pipeline 与 kvir 的翻译阶段
 
@@ -139,7 +139,7 @@ if    → dispatch.If()
 
 | 缺失项 | 影响 |
 |------|------|
-| **无条件跳转 (`jump`)** | 无法实现循环回边、无法实现 goto-like 控制流 |
+| **无条件跳转 (`goto`)** | 无法实现循环回边、无法实现 goto-like 控制流 |
 | **循环 (`for`/`while`)** | 循环只能通过前端展开为线性指令（如文档示例中的 python-sdk 写入） |
 | **分支合并 (join/phi)** | if/else 无合并基本块，两个分支各自独立结束 |
 | **结构化块 (block)** | 控制流没有明确的"基本块"边界，靠子树路径区分 |
@@ -173,7 +173,7 @@ if    → dispatch.If()
 每个基本块：
 - **入口标签**：唯一的 block id（如 `@0`, `@1`, `@2`）
 - **指令序列**：0 条或多条顺序指令
-- **终止指令**：恰好 1 条（`br` 条件跳转 / `jump` 无条件跳转 / `return` / `call`）
+- **终止指令**：恰好 1 条（`br` 条件跳转 / `goto` 无条件跳转 / `return` / `call`）
 
 ### 3.3 执行层存储格式（kvspace）
 
@@ -187,7 +187,7 @@ if    → dispatch.If()
 /vthread/<vtid>/<pc>/@0/0,1       → "/data/a"
 ...
 
-/vthread/<vtid>/<pc>/@1           → "jump"      # block 1 的终止指令
+/vthread/<vtid>/<pc>/@1           → "goto"      # block 1 的终止指令
 /vthread/<vtid>/<pc>/@1/-1        → "@3"        # 目标 block
 ```
 
@@ -266,11 +266,11 @@ def example(x) -> (y) {
 
 @1:
     add(./x, 1.0) -> ./y
-    jump @3
+    goto @3
 
 @2:
     mul(./x, -1.0) -> ./y
-    jump @3
+    goto @3
 
 @3:
     deltensor(./a)
@@ -294,7 +294,7 @@ def example(x) -> (y) {
 | Opcode | 含义 | Reads | 语义 |
 |--------|------|-------|------|
 | `br` | 条件分支 | `[cond, true_block, false_block]` | if cond → PC=true_block else PC=false_block |
-| `jump` | 无条件跳转 | `[target_block]` | PC = target_block |
+| `goto` | 无条件跳转 | `[target_block]` | PC = target_block |
 | `call` | 函数调用 | `[func_name, args...]` | 创建子栈帧, PC 入子栈 |
 | `return` | 函数返回 | `[ret_val]` | 清除当前栈帧, PC 回父栈 |
 
@@ -334,7 +334,7 @@ func Execute(vtid) {
         switch block.Terminator.Opcode {
         case "br":
             block = eval(terminator.Cond) ? loadBlock(terminator.True) : loadBlock(terminator.False)
-        case "jump":
+        case "goto":
             block = loadBlock(terminator.Target)
         case "return":
             popFrame(); block = parent.AfterCall
@@ -376,7 +376,7 @@ block id (@0, @1) 是平面索引，不与调用层级耦合
 
 ### Phase 2: 基本块执行（为 C2/C5 做准备）
 
-1. 引入 `jump`/`br` 终止指令
+1. 引入 `goto`/`br` 终止指令
 2. VM 实现 block-loop 执行模式（与关键字模式并存）
 3. 关键字 → 基本块 lowering（在 VM 内或 Scheduler 内）
 4. 前端可选择生成关键字 IR 或基本块 IR
@@ -391,5 +391,5 @@ block id (@0, @1) 是平面索引，不与调用层级耦合
 
 1. 死代码消除、基本块合并、循环不变量外提
 2. 短路求值 (`&&`/`||` 展开为 br 链)
-3. 尾调用优化 (tail call → jump)
+3. 尾调用优化 (tail call → goto)
 4. Dialect 命名空间预留 (`op:linalg:`, `op:scf:`)

@@ -11,6 +11,7 @@ ident     ::= letter (letter | digit)*
 op        ::= "+" | "-" | "*" | "/" | "%" | "==" | "!=" | "<" | ">" | "<=" | ">="
             | "&&" | "||" | "!" | "&" | "|" | "^" | "<<" | ">>"
 keyword   ::= "def" | "return" | "if" | "else" | "for" | "while"
+            | "br" | "goto" | "break" | "continue"
 type      ::= "int" | "f32" | "f64" | "bool" | "string" | "tensor" | "..."
 ```
 
@@ -22,9 +23,9 @@ file       ::= (func_def EOL | top_call EOL)*
 func_def   ::= "def" ident "(" [params] ")" "->" "(" [params] ")"
                "{" EOL stmt* "}"
 
-top_call   ::= call_expr "->" target             (* def 块外的顶层调用 *)
+top_call   ::= call_expr "->" target
 
-stmt       ::= prefix | infix | cstyle | control
+stmt       ::= prefix | infix | cstyle | control | block
 
 prefix     ::= ident "(" [arg_list] ")" "->" target
 infix      ::= (primary op primary | op primary) "->" target
@@ -33,8 +34,22 @@ cstyle     ::= target "<-" (call_expr | infix_expr)
 call_expr  ::= ident "(" [arg_list] ")"
 target     ::= path
 
-control    ::= "if" "(" expr ")" "{" stmt* "}" ["else" "{" stmt* "}"]
-             | "return" "(" [expr] ")"
+control    ::= if_stmt | for_stmt | while_stmt | break_stmt | continue_stmt
+
+if_stmt    ::= "if" "(" expr ")" "{" stmt* "}" ["else" "{" stmt* "}"]
+
+for_stmt   ::= "for" "(" ident "in" path ")" "{" stmt* "}"
+
+while_stmt ::= "while" "(" expr ")" "{" stmt* "}"
+
+break_stmt    ::= "break"
+continue_stmt ::= "continue"
+
+block      ::= ident ":" "{" stmt* terminator "}"
+
+terminator ::= "br" "(" arg ("," arg)* ")"
+             | "goto" "(" arg ")"
+             | "return" ["(" [arg] ")"]
 
 params     ::= ident [":" type] ("," ident [":" type])*
 arg_list   ::= arg ("," arg)*

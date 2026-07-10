@@ -21,7 +21,7 @@
 | 关键字 | 语义 | 来源 |
 |--------|------|------|
 | `br` | 条件分支（基本块终止指令） | `control-flow.md` §3.6 |
-| `jump` | 无条件跳转（基本块终止指令） | `control-flow.md` §3.6 |
+| `goto` | 无条件跳转（基本块终止指令） | `control-flow.md` §3.6 |
 | `switch` / `case` | 多路分支 | `control-flow.md` §3.5 |
 | `loop` | 无限循环 | `control-flow.md` §3.5 |
 
@@ -67,7 +67,7 @@
               ┌────────────────────┼────────────────────┐
               ▼                    ▼                    ▼
         ┌──────────┐       ┌──────────┐        ┌──────────┐
-        │   call   │       │  return  │        │  jump    │  ← Layer 1: 控制流原子
+        │   call   │       │  return  │        │  goto    │  ← Layer 1: 控制流原子
         │  进入函数  │       │  退出函数  │        │  无条件跳转 │     最基础关键字
         └────┬─────┘       └────┬─────┘        └────┬─────┘
              │                  │                    │
@@ -117,7 +117,7 @@
 
 ---
 
-### Layer 1: 控制流原子 — call / return / jump
+### Layer 1: 控制流原子 — call / return / goto
 
 这是三个不可再分的控制流原语，各自改变 PC 的方式不同：
 
@@ -152,11 +152,11 @@ return
 **依赖**：call（必须先有调用才有返回）  
 **代码位置**：`internal/layoutcode/codegen.go` — `HandleReturn`
 
-#### `jump` — 水平跃迁（设计阶段，未实现）
+#### `goto` — 水平跃迁（设计阶段，未实现）
 
 ```
 当前 PC = [1,0]
-jump @3
+goto @3
 
 行为：
   PC = @3 对应的绝对坐标   ← 跳过 [2,0]，直接到 @3
@@ -165,7 +165,7 @@ jump @3
 **依赖**：基本块标签系统（`@0`, `@1`, ...）  
 **来源**：`doc/kvlang/control-flow.md` §3.2
 
-> **注意**：`jump` 在当前代码中不存在。当前实现用 `if` 直接操作 PC 路径字符串（`pc+"/true/0"`）模拟分支跳转，未经过基本块抽象层。
+> **注意**：`goto` 在当前代码中不存在。当前实现用 `if` 直接操作 PC 路径字符串（`pc+"/true/0"`）模拟分支跳转，未经过基本块抽象层。
 
 ---
 
@@ -174,7 +174,7 @@ jump @3
 Layer 2 引入了两个新概念：
 
 1. **基本块**（basic block）：带唯一标签（`@0`, `@1`）的线性指令序列
-2. **终止指令**：每个块的最后一个指令必须是 `br`、`jump`、`return` 或 `call` 之一
+2. **终止指令**：每个块的最后一个指令必须是 `br`、`goto`、`return` 或 `call` 之一
 
 ```
 @0:
@@ -185,11 +185,11 @@ Layer 2 引入了两个新概念：
 
 @1:
     add(./x, 1.0) -> ./y
-    jump @3                 ← 无条件跳转终止指令
+    goto @3                 ← 无条件跳转终止指令
 
 @2:
     mul(./x, -1.0) -> ./y
-    jump @3
+    goto @3
 
 @3:
     deltensor(./a)
@@ -197,9 +197,9 @@ Layer 2 引入了两个新概念：
 ```
 
 **层级关系**：
-- `br cond, @t, @f` 是 `jump @t` + 条件的合体
-- 如果 `jump` 是 Layer 1 原子，那么 `br` 是 `jump` 的扩展（多了条件判断）
-- 实际上 `jump @t` ⊆ `br true, @t, _`，即无条件跳转是条件跳转的特例
+- `br cond, @t, @f` 是 `goto @t` + 条件的合体
+- 如果 `goto` 是 Layer 1 原子，那么 `br` 是 `goto` 的扩展（多了条件判断）
+- 实际上 `goto @t` ⊆ `br true, @t, _`，即无条件跳转是条件跳转的特例
 
 **当前实现**：不存在。当前 `if` 直接操作嵌套 PC 路径，绕过了基本块。
 
@@ -209,7 +209,7 @@ Layer 2 引入了两个新概念：
 
 Layer 3 的所有关键字都可以 **lowering 到 Layer 1+2 的组合**：
 
-#### `if` / `else` → `br` + `jump`
+#### `if` / `else` → `br` + `goto`
 
 ```
 # Layer 3 语法
@@ -227,11 +227,11 @@ after_code
 
 @then:
     then_body
-    jump @merge
+    goto @merge
 
 @else:
     else_body
-    jump @merge
+    goto @merge
 
 @merge:
     after_code
@@ -239,7 +239,7 @@ after_code
 
 **当前实现**：`if` 直接在 `kvcpu/control.go` 中操作 PC 路径，不走基本块 lowering。
 
-#### `for` → init + `br` + body + step + `jump`
+#### `for` → init + `br` + body + step + `goto`
 
 ```
 # Layer 3 语法
@@ -255,12 +255,12 @@ for i in 0..100 {
     body
 @step:
     i = i + 1
-    jump @cond                  ← loop back
+    goto @cond                  ← loop back
 @exit:
     after
 ```
 
-#### `while` → `br` + body + `jump`
+#### `while` → `br` + body + `goto`
 
 ```
 # Layer 3 语法
@@ -273,18 +273,18 @@ while (cond) {
     br cond, @body, @exit
 @body:
     body
-    jump @cond
+    goto @cond
 @exit:
     after
 ```
 
-#### `loop` → body + `jump`
+#### `loop` → body + `goto`
 
 ```
 # 等价于 while(true)
 @body:
     body
-    jump @body
+    goto @body
 ```
 
 #### `switch` / `case` → 链式 `br` 或跳转表
@@ -302,13 +302,13 @@ switch (val) {
     br (val == 2), @case2, @default
 @case1:
     body1
-    jump @merge
+    goto @merge
 @case2:
     body2
-    jump @merge
+    goto @merge
 @default:
     body_default
-    jump @merge
+    goto @merge
 @merge:
 ```
 
@@ -318,12 +318,12 @@ switch (val) {
 
 这两个关键字**完全依赖 Layer 3 的循环结构**，本质是跨块跳转的语法糖：
 
-#### `break` → `jump @loop_exit`
+#### `break` → `goto @loop_exit`
 
 ```
 for i in 0..100 {
     if (cond) {
-        break        ← 等价于 jump @loop_exit
+        break        ← 等价于 goto @loop_exit
     }
     body
 }
@@ -331,22 +331,22 @@ for i in 0..100 {
 
 **语义**：跳出最内层循环的 body 块，跳转到 `@loop_exit`（循环之后的第一条指令）。
 
-**依赖链**：`break` → 循环结构 → `jump` → 基本块标签
+**依赖链**：`break` → 循环结构 → `goto` → 基本块标签
 
-#### `continue` → `jump @loop_step` 或 `jump @loop_cond`
+#### `continue` → `goto @loop_step` 或 `goto @loop_cond`
 
 ```
 for i in 0..100 {
     if (cond) {
-        continue      ← for: 等价于 jump @step
-    }                 ← while: 等价于 jump @cond
+        continue      ← for: 等价于 goto @step
+    }                 ← while: 等价于 goto @cond
     body
 }
 ```
 
 **语义**：跳过本次迭代剩余代码，跳转到循环的条件判断（while）或步进（for）。
 
-**依赖链**：`continue` → 循环结构 → `jump` → 基本块标签
+**依赖链**：`continue` → 循环结构 → `goto` → 基本块标签
 
 ---
 
@@ -356,9 +356,9 @@ for i in 0..100 {
 
 | 关键字 | 不可替代的原因 |
 |--------|--------------|
-| **`call`** | 唯一能进入函数体、创建子栈帧的机制。无法用 `jump` 替代（jump 不创建新栈帧、不做参数绑定、不产生返回点） |
-| **`return`** | 唯一能清理子栈帧、将控制权交还调用方的机制。无法用 `jump` 替代（jump 不清理栈帧、不传递返回值） |
-| **`br`** | 唯一能根据运行时条件选择不同执行路径的机制。`jump` 可以视为 `br(true, @t, _)` 的特例 |
+| **`call`** | 唯一能进入函数体、创建子栈帧的机制。无法用 `goto` 替代（goto 不创建新栈帧、不做参数绑定、不产生返回点） |
+| **`return`** | 唯一能清理子栈帧、将控制权交还调用方的机制。无法用 `goto` 替代（goto 不清理栈帧、不传递返回值） |
+| **`br`** | 唯一能根据运行时条件选择不同执行路径的机制。`goto` 可以视为 `br(true, @t, _)` 的特例 |
 
 **这个三元组 (call, return, br) 构成了图灵完备的控制流基础。** 所有结构化控制流 (`if`/`for`/`while`/`switch`/`break`/`continue`) 都可以 lowering 为这三者 + 基本块标签的组合。
 
@@ -384,13 +384,13 @@ br      ← 水平跃迁（函数内，包含条件判断）
 当前实现路径:
   Layer 0 (PC++) ──→ Layer 1 (call/return) ──→ if (直接操作PC，无基本块)
                                                       │
-                                              跳过了 Layer 2 (br/jump/block)
+                                              跳过了 Layer 2 (br/goto/block)
                                                       │
                                               无法到达 Layer 3/4 (for/while/...)
 
 设计目标路径:
   Layer 0 ──→ Layer 1 ──→ Layer 2 ──→ Layer 3 ──→ Layer 4
-   PC++       call       br/jump    if/for/     break/
+   PC++       call       br/goto    if/for/     break/
               return     @block     while/      continue
                                     switch
 ```
@@ -400,10 +400,10 @@ br      ← 水平跃迁（函数内，包含条件判断）
 ### 演进路径
 
 1. **引入基本块标签 `@N`**：将指令序列组织为带标签的块，PC 不再隐式依赖 `[i,0]` 索引
-2. **实现 `br` / `jump`**：作为 exec loop 的新 case，直接设置 PC 为目标 block 的第一条指令
+2. **实现 `br` / `goto`**：作为 exec loop 的新 case，直接设置 PC 为目标 block 的第一条指令
 3. **`if` 重构**：从直接 PC 拼接改为 lowering 到 `br` + 基本块
-4. **实现 `for` / `while`**：lowering 到 init + `br` + body + `jump` 组合
-5. **实现 `break` / `continue`**：编译器在 lowering 阶段解析为 `jump @exit` / `jump @cond`
+4. **实现 `for` / `while`**：lowering 到 init + `br` + body + `goto` 组合
+5. **实现 `break` / `continue`**：编译器在 lowering 阶段解析为 `goto @exit` / `goto @cond`
 
 ---
 
@@ -417,7 +417,7 @@ br      ← 水平跃迁（函数内，包含条件判断）
 | **闭包/高阶函数** | 函数不是一等公民值，`call` 的 reads[0] 是字符串 opcode，不是运行时求值的函数引用 |
 | **异常/try-catch** | `return` 是正常退出路径，无 unwind 机制；错误处理是 `vthread.SetError` 终止整个线程 |
 | **协程/async-await** | vthread 是单执行流，无挂起/恢复语义 |
-| **动态跳转目标** | `br` 的目标必须编译期确定（静态 block 标签），无法 `jump ./runtime_target` |
+| **动态跳转目标** | `br` 的目标必须编译期确定（静态 block 标签），无法 `goto ./runtime_target` |
 
 ---
 
