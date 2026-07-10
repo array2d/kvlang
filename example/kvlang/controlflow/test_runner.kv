@@ -1,0 +1,333 @@
+# test_runner: 控制流运行时测试
+# 每个函数测试一种控制流模式, 使用 print 输出预期 vs 实际
+
+# ═══════════════════ 辅助函数 ═══════════════════
+
+def assert_eq(actual:int, expected:int, name:string) -> () {
+    if ('./actual' == './expected') {
+        print("PASS", name, "=", './actual')
+    } else {
+        print("FAIL", name, "expected", './expected', "got", './actual')
+    }
+}
+
+def assert_bool(actual:bool, expected:bool, name:string) -> () {
+    if ('./actual') {
+        if ('./expected') {
+            print("PASS", name, "= true")
+        } else {
+            print("FAIL", name, "expected false, got true")
+        }
+    } else {
+        if ('./expected') {
+            print("FAIL", name, "expected true, got false")
+        } else {
+            print("PASS", name, "= false")
+        }
+    }
+}
+
+# ═══════════════════ if/else 测试 ═══════════════════
+
+def test_if_true(X:int) -> (R:int) {
+    str.set("1") -> './flag'
+    if ('./flag') {
+        X * 2 -> './R'
+    } else {
+        X + 10 -> './R'
+    }
+}
+
+def test_if_false(X:int) -> (R:int) {
+    str.set("0") -> './flag'
+    if ('./flag') {
+        X * 2 -> './R'
+    } else {
+        X + 10 -> './R'
+    }
+}
+
+def test_if_no_else(flag:bool, X:int) -> (R:int) {
+    X + 1 -> './R'
+    if ('./flag') {
+        './R' * 2 -> './R'
+    }
+}
+
+def test_if_nested(score:int) -> (grade:int) {
+    if ('./score' > 90) {
+        str.set("1") -> './grade'
+    } else {
+        if ('./score' > 60) {
+            str.set("2") -> './grade'
+        } else {
+            str.set("3") -> './grade'
+        }
+    }
+}
+
+# ═══════════════════ while 循环测试 ═══════════════════
+
+def test_while_sum(N:int) -> (total:int) {
+    str.set("0") -> './total'
+    str.set("1") -> './i'
+    while ('./i' <= N) {
+        './total' + './i' -> './total'
+        './i' + 1 -> './i'
+    }
+}
+
+def test_while_factorial(N:int) -> (result:int) {
+    str.set("1") -> './result'
+    str.set("1") -> './i'
+    while ('./i' <= N) {
+        './result' * './i' -> './result'
+        './i' + 1 -> './i'
+    }
+}
+
+def test_while_halve(N:int) -> (steps:int) {
+    str.set("0") -> './steps'
+    while ('./N' > 1) {
+        './steps' + 1 -> './steps'
+        './N' / 2 -> './N'
+    }
+}
+
+# ═══════════════════ 基本块分支 br/goto ═══════════════════
+
+def test_block_br(X:int) -> (R:int) {
+    entry: {
+        X > 0 -> './gt'
+        br('./gt', positive, negative)
+    }
+    positive: {
+        X * 2 -> './R'
+        goto(done)
+    }
+    negative: {
+        X * -1 -> './R'
+        goto(done)
+    }
+    done: {
+        return
+    }
+}
+
+def test_block_state(state:int, X:int) -> (R:int) {
+    entry: {
+        './state' == 0 -> './s0'
+        br('./s0', state0, not0)
+    }
+    state0: {
+        X + 1 -> './R'
+        return
+    }
+    not0: {
+        './state' == 1 -> './s1'
+        br('./s1', state1, state2)
+    }
+    state1: {
+        X * 2 -> './R'
+        return
+    }
+    state2: {
+        X * 3 -> './R'
+        return
+    }
+}
+
+# ═══════════════════ 基本块循环 ═══════════════════
+
+def test_block_loop_sum(N:int) -> (total:int) {
+    entry: {
+        str.set("0") -> './total'
+        str.set("1") -> './i'
+        goto(cond)
+    }
+    cond: {
+        './i' <= N -> './more'
+        br('./more', body, exit)
+    }
+    body: {
+        './total' + './i' -> './total'
+        goto(step)
+    }
+    step: {
+        './i' + 1 -> './i'
+        goto(cond)
+    }
+    exit: {
+        return
+    }
+}
+
+# ═══════════════════ 尾递归测试 ═══════════════════
+
+def test_tailrec_fact(N:int) -> (result:int) {
+    if ('./N' <= 1) {
+        str.set("1") -> './result'
+    } else {
+        './N' - 1 -> './nm1'
+        test_tailrec_fact('./nm1') -> './prev'
+        './prev' * './N' -> './result'
+    }
+}
+
+def test_gcd_euclid(A:int, B:int) -> (gcd:int) {
+    if ('./B' == 0) {
+        './A' -> './gcd'
+    } else {
+        './A' % './B' -> './rem'
+        test_gcd_euclid('./B', './rem') -> './gcd'
+    }
+}
+
+def test_recursive_sum(N:int) -> (total:int) {
+    if ('./N' <= 0) {
+        str.set("0") -> './total'
+    } else {
+        './N' - 1 -> './nm1'
+        test_recursive_sum('./nm1') -> './prev'
+        './prev' + './N' -> './total'
+    }
+}
+
+# ═══════════════════ 嵌套控制流测试 ═══════════════════
+
+def test_while_with_if(N:int) -> (result:int) {
+    str.set("0") -> './result'
+    str.set("1") -> './i'
+    while ('./i' <= N) {
+        if ('./i' % 2 == 0) {
+            './result' + './i' -> './result'
+        } else {
+            './result' - './i' -> './result'
+        }
+        './i' + 1 -> './i'
+    }
+}
+
+def test_if_with_while(threshold:int, N:int) -> (result:int) {
+    if ('./threshold' > 0) {
+        str.set("0") -> './result'
+        str.set("1") -> './i'
+        while ('./i' <= N) {
+            './result' + './i' -> './result'
+            './i' + 1 -> './i'
+        }
+    } else {
+        str.set("-1") -> './result'
+    }
+}
+
+def test_pos_neg_zero(X:int) -> (R:int) {
+    if ('./X' > 0) {
+        str.set("1") -> './R'
+    } else {
+        if ('./X' < 0) {
+            str.set("-1") -> './R'
+        } else {
+            str.set("0") -> './R'
+        }
+    }
+}
+
+# ═══════════════════ 调用图 + 控制流 ═══════════════════
+
+def test_call_is_positive(X:int) -> (result:bool) {
+    './X' > 0 -> './result'
+}
+
+def test_call_conditional(A:int, B:int) -> (R:int) {
+    test_call_is_positive(A) -> './pa'
+    if ('./pa') {
+        './A' + './B' -> './R'
+    } else {
+        './A' - './B' -> './R'
+    }
+}
+
+# ═══════════════════ 运行所有测试 ═══════════════════
+
+str.set("kvlangrun") -> './term'
+
+print("========== if/else ==========")
+test_if_true(5) -> './r1'
+assert_eq('./r1', 10, "if_true: 5*2")
+test_if_false(5) -> './r2'
+assert_eq('./r2', 15, "if_false: 5+10")
+test_if_no_else(true, 5) -> './r3'
+assert_eq('./r3', 12, "if_no_else: (5+1)*2")
+test_if_no_else(false, 5) -> './r4'
+assert_eq('./r4', 6, "if_no_else: 5+1")
+test_if_nested(95) -> './r5'
+assert_eq('./r5', 1, "if_nested: 95->1")
+test_if_nested(75) -> './r6'
+assert_eq('./r6', 2, "if_nested: 75->2")
+test_if_nested(40) -> './r7'
+assert_eq('./r7', 3, "if_nested: 40->3")
+
+print("========== while ==========")
+test_while_sum(10) -> './r8'
+assert_eq('./r8', 55, "while_sum: 1..10=55")
+test_while_sum(1) -> './r9'
+assert_eq('./r9', 1, "while_sum: 1..1=1")
+test_while_factorial(5) -> './r10'
+assert_eq('./r10', 120, "while_fact: 5!=120")
+test_while_halve(16) -> './r11'
+assert_eq('./r11', 4, "while_halve: 16->4 steps")
+
+print("========== block br/goto ==========")
+test_block_br(7) -> './r12'
+assert_eq('./r12', 14, "block_br: 7*2=14")
+test_block_br(-3) -> './r13'
+assert_eq('./r13', 3, "block_br: |-3|=3")
+test_block_state(0, 10) -> './r14'
+assert_eq('./r14', 11, "block_state0: 10+1=11")
+test_block_state(1, 10) -> './r15'
+assert_eq('./r15', 20, "block_state1: 10*2=20")
+test_block_state(2, 10) -> './r16'
+assert_eq('./r16', 30, "block_state2: 10*3=30")
+
+print("========== block loop ==========")
+test_block_loop_sum(10) -> './r17'
+assert_eq('./r17', 55, "block_loop_sum: 1..10=55")
+
+print("========== tailrec / recursion ==========")
+test_tailrec_fact(5) -> './r18'
+assert_eq('./r18', 120, "tailrec_fact: 5!=120")
+test_tailrec_fact(1) -> './r19'
+assert_eq('./r19', 1, "tailrec_fact: 1!=1")
+test_tailrec_fact(0) -> './r20'
+assert_eq('./r20', 1, "tailrec_fact: 0!=1")
+test_gcd_euclid(48, 18) -> './r21'
+assert_eq('./r21', 6, "gcd: 48,18=6")
+test_gcd_euclid(17, 13) -> './r22'
+assert_eq('./r22', 1, "gcd: 17,13=1")
+test_recursive_sum(10) -> './r23'
+assert_eq('./r23', 55, "rec_sum: 1..10=55")
+test_recursive_sum(0) -> './r24'
+assert_eq('./r24', 0, "rec_sum: 0=0")
+
+print("========== nested control ==========")
+test_while_with_if(5) -> './r25'
+assert_eq('./r25', -3, "while+if: alt_sum(1..5)")
+test_if_with_while(1, 5) -> './r26'
+assert_eq('./r26', 15, "if+while: sum(1..5)=15")
+test_if_with_while(-1, 5) -> './r27'
+assert_eq('./r27', -1, "if+while: negative thresh")
+test_pos_neg_zero(10) -> './r28'
+assert_eq('./r28', 1, "sign: 10->1")
+test_pos_neg_zero(-10) -> './r29'
+assert_eq('./r29', -1, "sign: -10->-1")
+test_pos_neg_zero(0) -> './r30'
+assert_eq('./r30', 0, "sign: 0->0")
+
+print("========== call graph ==========")
+test_call_conditional(5, 3) -> './r31'
+assert_eq('./r31', 8, "call_cond: pos+pos: 5+3=8")
+test_call_conditional(-5, 3) -> './r32'
+assert_eq('./r32', -8, "call_cond: neg+pos: -5-3=-8")
+
+print("========== ALL TESTS DONE ==========")
