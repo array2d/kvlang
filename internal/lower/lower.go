@@ -97,8 +97,8 @@ func lowerBody(stmts []ast.Stmt, lg *labelGen) []ast.Stmt {
 func lowerIf(s *ast.IfStmt, lg *labelGen) []ast.Stmt {
 	condEval, condSlot := evalCond(s.Cond, lg)
 
-	thenLabel := lg.next("then")
-	elseLabel := lg.next("else")
+	thenLabel := "iftrue"
+	elseLabel := "iffalse"
 	mergeLabel := lg.next("merge")
 
 	condBody := append([]ast.Stmt{}, condEval...)

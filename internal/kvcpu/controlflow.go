@@ -51,7 +51,7 @@ func handleBr(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op
 	label := inst.Reads[2]
 	if isTrue { label = inst.Reads[1] }
 	callInst := &op.Instruction{Opcode: op.OpCall, Reads: []string{label}}
-	substackPC := layoutcode.HandleCall(ctx, kv, vtid, pc, callInst)
+	substackPC := layoutcode.HandleCall(ctx, kv, vtid, pc, callInst, false)
 	if substackPC == pc { return fmt.Errorf("br call %s failed", label) }
 	vthread.Set(ctx, kv, vtid, substackPC, "running")
 	return nil
@@ -82,7 +82,7 @@ func jumpOrNext(ctx context.Context, kv kvspace.KVSpace, vtid, pc, target string
 func handleControl(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) error {
 	switch inst.Opcode {
 	case op.OpCall:
-		substackPC := layoutcode.HandleCall(ctx, kv, vtid, pc, inst)
+		substackPC := layoutcode.HandleCall(ctx, kv, vtid, pc, inst, false)
 		if substackPC == pc {
 			return fmt.Errorf("call %s failed", inst.Reads[0])
 		}

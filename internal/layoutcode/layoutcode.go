@@ -30,7 +30,7 @@ func writeStmts(kv kvspace.KVSpace, prefix string, stmts []ast.Stmt) error {
 }
 
 // HandleCall 执行 CALL: 读取签名, 参数绑定, 复制指令到子栈。
-func HandleCall(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) string {
+func HandleCall(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction, tail bool) string {
 	funcName := inst.Reads[0]
 
 	// 读签名
@@ -74,7 +74,7 @@ func copyFunc(ctx context.Context, kv kvspace.KVSpace, srcPrefix, dstPrefix stri
 	for _, k := range keys {
 		suffix := strings.TrimPrefix(k, srcPrefix+"/")
 		// Block label 子路径 → 递归复制
-		if !strings.HasPrefix(suffix, "[") {
+		if !strings.HasPrefix(suffix, "[") && !strings.Contains(suffix, "/") {
 			subKeys, _ := kv.Keys(k + "/*")
 			if len(subKeys) > 0 {
 				copyFunc(ctx, kv, k, dstPrefix+suffix+"/", bindings)
