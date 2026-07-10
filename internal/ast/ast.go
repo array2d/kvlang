@@ -12,7 +12,8 @@ import (
 // Stmt 表示函数体中的一条语句。
 type Stmt interface {
 	stmt()
-	String() string // 序列化为 kvlang 源码行
+	String() string
+	SetKV(kv kvspace.KVSpace, prefix string, idx *int)
 }
 
 // Func 表示一个函数定义。
@@ -55,6 +56,17 @@ var infixOps = map[string]bool{
 var unaryOps = map[string]bool{"!": true, "-neg": false} // - 既是单目也是双目
 
 func (i *Instruction) stmt() {}
+func (i *Instruction) SetKV(kv kvspace.KVSpace, prefix string, idx *int) {
+	n := *idx
+	kv.Set(fmt.Sprintf("%s/[%d,0]", prefix, n), i.Opcode, 0)
+	for j, r := range i.Reads {
+		kv.Set(fmt.Sprintf("%s/[%d,-%d]", prefix, n, j+1), r, 0)
+	}
+	for j, w := range i.Writes {
+		kv.Set(fmt.Sprintf("%s/[%d,%d]", prefix, n, j+1), w, 0)
+	}
+	*idx = n + 1
+}
 func (i *Instruction) String() string {
 	// 终止指令：br/jump/return 统一用前缀格式
 	if i.Opcode == "br" || i.Opcode == "goto" || i.Opcode == "return" {
@@ -99,6 +111,7 @@ type IfStmt struct {
 }
 
 func (*IfStmt) stmt() {}
+func (s *IfStmt) SetKV(kv kvspace.KVSpace, prefix string, idx *int) {}
 func (s *IfStmt) String() string {
 	r := "if (" + s.Cond + ") {\n"
 	for _, st := range s.Then { r += "\t" + st.String() + "\n" }
@@ -119,6 +132,7 @@ type ForStmt struct {
 }
 
 func (*ForStmt) stmt() {}
+func (s *ForStmt) SetKV(kv kvspace.KVSpace, prefix string, idx *int) {}
 func (s *ForStmt) String() string {
 	r := fmt.Sprintf("for (%s in %s) {\n", s.Var, s.Iter)
 	for _, st := range s.Body { r += "\t" + st.String() + "\n" }
@@ -133,6 +147,7 @@ type WhileStmt struct {
 }
 
 func (*WhileStmt) stmt() {}
+func (s *WhileStmt) SetKV(kv kvspace.KVSpace, prefix string, idx *int) {}
 func (s *WhileStmt) String() string {
 	r := "while (" + s.Cond + ") {\n"
 	for _, st := range s.Body { r += "\t" + st.String() + "\n" }
@@ -144,12 +159,14 @@ func (s *WhileStmt) String() string {
 type BreakStmt struct{}
 
 func (*BreakStmt) stmt() {}
+func (*BreakStmt) SetKV(kv kvspace.KVSpace, prefix string, idx *int) {}
 func (*BreakStmt) String() string { return "break" }
 
 // ContinueStmt 表示跳过本次迭代。
 type ContinueStmt struct{}
 
 func (*ContinueStmt) stmt() {}
+func (*ContinueStmt) SetKV(kv kvspace.KVSpace, prefix string, idx *int) {}
 func (*ContinueStmt) String() string { return "continue" }
 
 // BlockStmt 表示一个带标签的基本块。
@@ -160,6 +177,11 @@ type BlockStmt struct {
 }
 
 func (*BlockStmt) stmt() {}
+func (s *BlockStmt) SetKV(kv kvspace.KVSpace, prefix string, idx *int) {
+	sub := prefix + "/" + s.Label
+	i := 0
+	for _, st := range s.Body { st.SetKV(kv, sub, &i) }
+}
 func (s *BlockStmt) String() string {
 	r := s.Label + ": {\n"
 	for _, st := range s.Body {

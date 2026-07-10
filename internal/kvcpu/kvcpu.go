@@ -101,12 +101,16 @@ func handleControl(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, ins
 		}
 		vthread.Set(ctx, kv, vtid, parentPC, "running")
 		return nil
-	case op.OpIf:
-		return If(ctx, kv, vtid, pc, inst)
-	default:
-		return fmt.Errorf("unknown control op: %s", inst.Opcode)
+		case op.OpIf:
+			return If(ctx, kv, vtid, pc, inst)
+		case op.OpBr:
+			return Br(ctx, kv, vtid, pc, inst)
+		case op.OpGoto:
+			return Goto(ctx, kv, vtid, pc, inst)
+		default:
+			return fmt.Errorf("unknown control op: %s", inst.Opcode)
+		}
 	}
-}
 
 func isFunctionCall(ctx context.Context, kv kvspace.KVSpace, opcode string) bool {
 	if _, err := kv.Get(keytree.SrcFunc(opcode)); err == nil {
