@@ -18,6 +18,8 @@ func main() {
 	switch args[0] {
 	case "vet":
 		cmdVet(args[1:])
+	case "kvspace":
+		cmdKVSpace(args[1:])
 	case "format", "fmt":
 		cmdFormat(args[1:])
 	default:
