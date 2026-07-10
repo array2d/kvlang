@@ -25,8 +25,7 @@ func runCode(name string, rc io.Reader) {
 	var allPreamble []string
 	for i := range df.Funcs {
 		fn := lower.Func(&df.Funcs[i])
-		fn.Register(kv)
-		layoutcode.WriteBody(kv, fn.Name, fn.Body)
+		layoutcode.WriteFunc(kv, fn)
 		if fn.Name == "main" { hasMain = true }
 	}
 	allPreamble = df.PreambleLines
@@ -35,7 +34,8 @@ func runCode(name string, rc io.Reader) {
 	body := make([]string, len(allPreamble)); copy(body, allPreamble)
 	if hasMain { body = append(body, "main() -> './pre_main_ret'") }
 	preMain := ast.Func{Name: "pre_main", Signature: "def pre_main() -> ()", Body: toStmts(body)}
-	preMain = *lower.Func(&preMain); preMain.Register(kv); layoutcode.WriteBody(kv, preMain.Name, preMain.Body)
+	preMain = *lower.Func(&preMain)
+	layoutcode.WriteFunc(kv, &preMain)
 	kv.Set(keytree.FuncMain, json.RawMessage(`{"entry":"pre_main","reads":[],"writes":[]}`), 0)
 
 	executeEntry(kv)

@@ -136,6 +136,27 @@ func parseSig(sig string) ast.FormalParams {
 	return fp
 }
 
+// RegisterBlocks 为函数体内所有 BlockStmt label 注册子函数签名。
+// 必须在 WriteBody 之后调用，确保 br/goto 运行时能找到目标 label。
+func RegisterBlocks(kv kvspace.KVSpace, parent string, body []ast.Stmt) {
+	for _, st := range body {
+		if b, ok := st.(*ast.BlockStmt); ok {
+			kv.Set(keytree.SrcFunc(parent+"/"+b.Label), "def "+b.Label+"() -> ()", 0)
+			RegisterBlocks(kv, parent+"/"+b.Label, b.Body)
+		}
+	}
+}
+
+// WriteFunc 完成一个函数的全部 KV 写入：Register + WriteBody + RegisterBlocks。
+func WriteFunc(kv kvspace.KVSpace, fn *ast.Func) error {
+	if err := fn.Register(kv); err != nil {
+		return err
+	}
+	WriteBody(kv, fn.Name, fn.Body)
+	RegisterBlocks(kv, fn.Name, fn.Body)
+	return nil
+}
+
 // HandleReturn 处理 RETURN: 回传值, 删除子栈, 恢复父栈 PC。
 func HandleReturn(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) string {
 	lastSlash := strings.LastIndex(pc, "/")

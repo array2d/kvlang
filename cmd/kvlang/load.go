@@ -44,9 +44,7 @@ func loadFunctions(kv kvspace.KVSpace, files []string) {
 		if err != nil { logx.Warn("SKIP %s: %v", f, err); continue }
 		for i := range df.Funcs {
 			fn := lower.Func(&df.Funcs[i])
-			fn.Register(kv)
-			layoutcode.WriteBody(kv, fn.Name, fn.Body)
-				registerBlocks(kv, fn.Name, fn.Body)
+			layoutcode.WriteFunc(kv, fn)
 			if fn.Name == "main" { hasMain = true }
 		}
 		allPreamble = append(allPreamble, df.PreambleLines...)
@@ -56,8 +54,7 @@ func loadFunctions(kv kvspace.KVSpace, files []string) {
 	if hasMain { body = append(body, "main() -> './pre_main_ret'") }
 	preMain := ast.Func{Name: "pre_main", Signature: "def pre_main() -> ()", Body: toStmts(body)}
 	preMain = *lower.Func(&preMain)
-	preMain.Register(kv)
-	layoutcode.WriteBody(kv, preMain.Name, preMain.Body)
+	layoutcode.WriteFunc(kv, &preMain)
 	kv.Set(keytree.FuncMain, json.RawMessage(`{"entry":"pre_main","reads":[],"writes":[]}`), 0)
 }
 
@@ -98,11 +95,3 @@ func toStmts(lines []string) []ast.Stmt {
 	return stmts
 }
 
-func registerBlocks(kv kvspace.KVSpace, parent string, body []ast.Stmt) {
-	for _, st := range body {
-		if b, ok := st.(*ast.BlockStmt); ok {
-			kv.Set(keytree.SrcFunc(parent+"/"+b.Label), "def "+b.Label+"() -> ()", 0)
-			registerBlocks(kv, parent+"/"+b.Label, b.Body)
-		}
-	}
-}
