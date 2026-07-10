@@ -2,6 +2,7 @@ package keytree
 
 import "fmt"
 
+const OpRoot = "/op"
 const opPrefix = "/op/"
 
 // OpBackendFunc 返回 /op/<backend>/func/<name>

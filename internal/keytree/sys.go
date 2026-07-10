@@ -1,5 +1,6 @@
 package keytree
 
+const SysRoot = "/sys"
 const sysPrefix = "/sys/"
 // SysVM 返回 /sys/vm/<id>
 func SysVM(id string) string { return sysPrefix + "vm/" + id }

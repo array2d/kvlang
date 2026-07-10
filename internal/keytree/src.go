@@ -2,6 +2,7 @@ package keytree
 
 import "fmt"
 
+const SrcRoot = "/src"
 const srcPrefix = "/src/func/"
 
 // SrcFunc 返回 /src/func/<name>
