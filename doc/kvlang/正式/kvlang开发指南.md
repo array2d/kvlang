@@ -151,7 +151,62 @@ def poly3(A:int, B:int, C:int) -> (R:int) {
 poly3(2, 3, 4) -> './out'
 ```
 
-## 5. 常见错误
+## 5. Tensor 支持
+
+kvlang 内置张量生命周期和计算原语，覆盖训练、推理、强化学习场景。
+
+### 5.1 张量生命周期
+
+```kvlang
+def example() {
+    tensor.new("f32", "[128]") -> /data/a    # 分配 128 个 f32
+    tensor.new("f32", "[128]") -> /data/b
+    add(/data/a, /data/b) -> /data/c          # GPU 计算
+    tensor.del(/data/a)                        # 释放
+    tensor.del(/data/b)
+}
+```
+
+| 算子 | 作用 |
+|------|------|
+| `tensor.new(dtype, shape) -> path` | 在 heap 上分配张量 |
+| `tensor.del(path)` | 释放张量 |
+| `tensor.clone(src) -> dst` | 深拷贝 |
+
+### 5.2 张量计算
+
+所有张量运算通过 `op-plat` 分发到 GPU（Metal/CUDA/CPU）：
+
+```kvlang
+matmul(/data/W, /data/X)  -> /data/Y    # 矩阵乘法
+add(/data/A, /data/B)     -> /data/C    # 逐元素加
+relu(/data/X)             -> /data/Y    # 激活
+softmax(/data/X)          -> /data/Y    # 归一化
+sum(/data/X)              -> /data/s    # 归约求和
+reshape(/data/X, "[4,8]") -> /data/Y    # 变形
+```
+
+### 5.3 场景覆盖
+
+```
+推理 (Inference):
+  tensor.new → matmul → softmax → tensor.del
+  单向数据流，无梯度
+
+训练 (Training):  
+  forward: tensor.new → matmul → relu → matmul → loss
+  backward: loss → grad(matmul) → grad(relu) → update
+  双向梯度流，参数更新
+
+强化学习 (RL):
+  env_step: tensor.new → policy_net → action → env → reward
+  learn:     replay_buffer → sample → q_net → td_error → update
+  交互式数据流 + 经验回放
+```
+
+三种场景共享同一套张量原语，区别仅在于数据流方向和调度策略。
+
+## 6. 常见错误
 
 | 错误 | 原因 | 修复 |
 |------|------|------|
