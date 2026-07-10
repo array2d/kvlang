@@ -1,4 +1,4 @@
-.PHONY: build test vet clean redis install
+.PHONY: build test vet clean kvspace install
 
 export GOPROXY ?= https://goproxy.cn,direct
 PREFIX   ?= /usr/local
@@ -17,9 +17,9 @@ test:
 vet:
 	go vet ./...
 
-redis:
+kvspace: build
 	@redis-cli ping 2>/dev/null || redis-server --daemonize yes
-	redis-cli FLUSHALL
+	./kvlang kvspace clear
 
 clean:
 	go clean
