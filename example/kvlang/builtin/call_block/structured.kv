@@ -1,7 +1,7 @@
-# structured: 结构化控制流 (if/for/while) 语法糖
-# 使用 --lower 标志可以查看 lowering 为基本块的结果
+# structured: 结构化控制流 (if/while/for) 语法糖
+# 使用 --lower 查看 if/while 降低为基本块
 
-def 结构化示例(flag:bool, X:int, N:int) -> (R:int) {
+def 结构化示例(flag:bool, X:int) -> (R:int) {
     X + 1 -> './a'
 
     if ('./flag') {
@@ -13,16 +13,6 @@ def 结构化示例(flag:bool, X:int, N:int) -> (R:int) {
     './b' + X -> './R'
 }
 
-def 循环示例(start:int, end:int) -> (sum:int) {
-    str.set("0") -> './sum'
-
-    for (i in start..end) {
-        './sum' + './i' -> './sum'
-    }
-
-    './sum' + 1 -> './sum'
-}
-
 def 条件循环(N:int) -> (acc:int) {
     str.set("1") -> './acc'
 
@@ -31,8 +21,16 @@ def 条件循环(N:int) -> (acc:int) {
     }
 }
 
+def 路径迭代示例(data: tensor) -> (sum:int) {
+    str.set("0") -> './sum'
+
+    for (i in './data') {
+        './sum' + './i' -> './sum'
+    }
+}
+
 str.set("kvlangrun") -> './term'
 
-结构化示例(true, 5, 0) -> './out'
-循环示例(0, 10) -> './out2'
-条件循环(100) -> './out3'
+结构化示例(true, 5) -> './out'
+条件循环(100) -> './out2'
+路径迭代示例('./data') -> './out3'

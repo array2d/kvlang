@@ -9,12 +9,12 @@ def 分支示例(flag:bool, X:int) -> (R:int) {
 
     then: {
         './a' * 2 -> './b'
-        jump(merge)
+        goto(merge)
     }
 
     else: {
         './a' * 3 -> './b'
-        jump(merge)
+        goto(merge)
     }
 
     merge: {

@@ -12,12 +12,12 @@ def 循环求和(N:int) -> (total:int) {
 
     body: {
         './total' + './i' -> './total'
-        jump(step)
+        goto(step)
     }
 
     step: {
         './i' + 1 -> './i'
-        jump(cond)
+        goto(cond)
     }
 
     exit: {
