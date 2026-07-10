@@ -1,0 +1,44 @@
+# nested_control: 嵌套控制流
+# 测试: while 内嵌 if, if 内嵌 while, if-else-if 链
+
+def 嵌套循环条件(N:int) -> (result:int) {
+    str.set("0") -> './result'
+    str.set("1") -> './i'
+    while ('./i' <= N) {
+        if ('./i' % 2 == 0) {
+            './result' + './i' -> './result'
+        } else {
+            './result' - './i' -> './result'
+        }
+        './i' + 1 -> './i'
+    }
+}
+
+def if内嵌循环(threshold:int, N:int) -> (result:int) {
+    if ('./threshold' > 0) {
+        str.set("0") -> './result'
+        str.set("1") -> './i'
+        while ('./i' <= N) {
+            './result' + './i' -> './result'
+            './i' + 1 -> './i'
+        }
+    } else {
+        str.set("-1") -> './result'
+    }
+}
+
+def 三路分支(X:int) -> (R:int) {
+    if ('./X' < 0) {
+        './X' * -1 -> './R'
+    } else {
+        if ('./X' == 0) {
+            str.set("0") -> './R'
+        } else {
+            if ('./X' < 10) {
+                './X' * 2 -> './R'
+            } else {
+                './X' * 3 -> './R'
+            }
+        }
+    }
+}

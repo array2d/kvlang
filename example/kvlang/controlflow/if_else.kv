@@ -1,0 +1,45 @@
+# if_else: 结构化 if/else 条件分支
+# 测试: 单分支 if, if-else, 嵌套 if-else
+
+def 简单分支(flag:bool, X:int) -> (R:int) {
+    if ('./flag') {
+        X * 2 -> './R'
+    } else {
+        X + 10 -> './R'
+    }
+}
+
+def 多头判断(score:int) -> (grade:int) {
+    if ('./score' > 90) {
+        str.set("1") -> './grade'
+    } else {
+        if ('./score' > 60) {
+            str.set("2") -> './grade'
+        } else {
+            str.set("3") -> './grade'
+        }
+    }
+}
+
+def 单分支判断(flag:bool, X:int) -> (R:int) {
+    X + 1 -> './R'
+    if ('./flag') {
+        './R' * 2 -> './R'
+    }
+}
+
+def 与条件判断(A:int, B:int) -> (R:int) {
+    if ('./A' > 0) {
+        if ('./B' > 0) {
+            './A' + './B' -> './R'
+        } else {
+            './A' -> './R'
+        }
+    } else {
+        if ('./B' > 0) {
+            './B' -> './R'
+        } else {
+            str.set("0") -> './R'
+        }
+    }
+}

@@ -1,0 +1,65 @@
+# call_graph_flow: 调用图 + 控制流组合
+# 测试: 函数调用链中的控制流, 递归调用 + 条件分支
+
+def is_positive(X:int) -> (result:bool) {
+    './X' > 0 -> './result'
+}
+
+def is_even(X:int) -> (result:bool) {
+    './X' % 2 == 0 -> './result'
+}
+
+def 条件调用(A:int, B:int) -> (R:int) {
+    is_positive(A) -> './pa'
+    is_positive(B) -> './pb'
+    if ('./pa') {
+        if ('./pb') {
+            './A' + './B' -> './R'
+        } else {
+            './A' -> './R'
+        }
+    } else {
+        if ('./pb') {
+            './B' -> './R'
+        } else {
+            str.set("0") -> './R'
+        }
+    }
+}
+
+def 欧几里得算法(A:int, B:int) -> (gcd:int) {
+    if ('./B' == 0) {
+        './A' -> './gcd'
+    } else {
+        './A' % './B' -> './rem'
+        欧几里得算法('./B', './rem') -> './gcd'
+    }
+}
+
+def 递归求和(N:int) -> (total:int) {
+    if ('./N' <= 0) {
+        str.set("0") -> './total'
+    } else {
+        './N' - 1 -> './nm1'
+        递归求和('./nm1') -> './prev'
+        './prev' + './N' -> './total'
+    }
+}
+
+def 带条件递归(N:int, mode:int) -> (result:int) {
+    if ('./N' <= 0) {
+        str.set("0") -> './result'
+    } else {
+        './N' - 1 -> './nm1'
+        带条件递归('./nm1', './mode') -> './prev'
+        if ('./mode' == 1) {
+            './prev' + './N' -> './result'
+        } else {
+            if ('./mode' == 2) {
+                './prev' * './N' -> './result'
+            } else {
+                './N' -> './result'
+            }
+        }
+    }
+}

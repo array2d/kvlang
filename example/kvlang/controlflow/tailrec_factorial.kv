@@ -1,0 +1,26 @@
+# tailrec_factorial: 尾递归阶乘
+# 尾调用: fact(n, acc) 最后一步调用自身, 复用栈帧
+
+def 尾递归阶乘(N:int) -> (result:int) {
+    str.set("1") -> './acc'
+    if ('./N' <= 1) {
+        './acc' -> './result'
+    } else {
+        './N' - 1 -> './n1'
+        './acc' * './N' -> './acc2'
+        尾递归阶乘('./n1') -> './tmp'
+        './tmp' * './acc2' -> './result'
+    }
+}
+
+def 尾递归阶乘_累加器(N:int) -> (result:int) {
+    str.set("1") -> './acc'
+    if ('./N' <= 1) {
+        './acc' -> './result'
+    } else {
+        './N' - 1 -> './nm1'
+        './acc' * './N' -> './new_acc'
+        尾递归阶乘_累加器('./nm1') -> './rec_res'
+        './rec_res' * './new_acc' -> './result'
+    }
+}

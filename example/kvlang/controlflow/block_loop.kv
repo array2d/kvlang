@@ -1,0 +1,56 @@
+# block_loop: 基本块实现循环 (br + goto)
+# 使用基本块模拟 while/for 循环
+
+def 块循环求和(N:int) -> (total:int) {
+    entry: {
+        str.set("0") -> './total'
+        str.set("1") -> './i'
+        goto(cond)
+    }
+
+    cond: {
+        './i' <= N -> './more'
+        br('./more', body, exit)
+    }
+
+    body: {
+        './total' + './i' -> './total'
+        goto(step)
+    }
+
+    step: {
+        './i' + 1 -> './i'
+        goto(cond)
+    }
+
+    exit: {
+        return
+    }
+}
+
+def 块循环阶乘(N:int) -> (result:int) {
+    entry: {
+        str.set("1") -> './result'
+        str.set("1") -> './i'
+        goto(cond)
+    }
+
+    cond: {
+        './i' <= N -> './more'
+        br('./more', body, exit)
+    }
+
+    body: {
+        './result' * './i' -> './result'
+        goto(step)
+    }
+
+    step: {
+        './i' + 1 -> './i'
+        goto(cond)
+    }
+
+    exit: {
+        return
+    }
+}

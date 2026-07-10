@@ -1,0 +1,39 @@
+# break_continue: break/continue 循环控制
+# 测试: while 中的 break 提前退出和 continue 跳过迭代
+
+def 找到第一个偶数(N:int) -> (result:int) {
+    str.set("1") -> './i'
+    str.set("-1") -> './result'
+    while ('./i' <= N) {
+        if ('./i' % 2 == 0) {
+            './i' -> './result'
+            break
+        }
+        './i' + 1 -> './i'
+    }
+}
+
+def 跳过奇数求和(N:int) -> (sum:int) {
+    str.set("0") -> './sum'
+    str.set("1") -> './i'
+    while ('./i' <= N) {
+        if ('./i' % 2 != 0) {
+            './i' + 1 -> './i'
+            continue
+        }
+        './sum' + './i' -> './sum'
+        './i' + 1 -> './i'
+    }
+}
+
+def 提前退出循环(N:int, stop_at:int) -> (result:int) {
+    str.set("0") -> './result'
+    str.set("1") -> './i'
+    while ('./i' <= N) {
+        if ('./i' == './stop_at') {
+            break
+        }
+        './result' + './i' -> './result'
+        './i' + 1 -> './i'
+    }
+}
