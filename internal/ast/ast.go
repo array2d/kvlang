@@ -43,11 +43,46 @@ type Instruction struct {
 	Writes []string // 输出槽位
 }
 
+// infixOps 中缀符号算子集合。
+var infixOps = map[string]bool{
+	"+": true, "-": true, "*": true, "/": true, "%": true,
+	"==": true, "!=": true, "<": true, ">": true, "<=": true, ">=": true,
+	"&&": true, "||": true, "!": true,
+	"&": true, "|": true, "^": true, "<<": true, ">>": true,
+}
+
+// unaryOps 单目中缀算子（右操作数为空）。
+var unaryOps = map[string]bool{"!": true, "-neg": false} // - 既是单目也是双目
+
 func (i *Instruction) stmt() {}
 func (i *Instruction) String() string {
-	// Reconstruct kvlang source line
+	// 终止指令：br/jump/return 统一用前缀格式
+	if i.Opcode == "br" || i.Opcode == "jump" || i.Opcode == "return" {
+		if len(i.Reads) > 0 {
+			return i.Opcode + "(" + join(i.Reads) + ")"
+		}
+		return i.Opcode
+	}
+
+	// 中缀符号算子：输出中缀形式 X + Y -> Z
+	if infixOps[i.Opcode] {
+		s := ""
+		if len(i.Reads) >= 2 {
+			s = i.Reads[0] + " " + i.Opcode + " " + i.Reads[1]
+		} else if len(i.Reads) == 1 {
+			s = i.Opcode + i.Reads[0]
+		} else {
+			s = i.Opcode
+		}
+		if len(i.Writes) > 0 {
+			s += " -> " + join(i.Writes)
+		}
+		return s
+	}
+
+	// 命名算子：前缀格式 op(A, B) -> C
 	s := i.Opcode
-	if len(i.Reads) > 0 || len(i.Writes) > 0 {
+	if len(i.Reads) > 0 {
 		s += "(" + join(i.Reads) + ")"
 	}
 	if len(i.Writes) > 0 {
