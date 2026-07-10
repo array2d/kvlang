@@ -1,11 +1,16 @@
-.PHONY: build test vet clean redis
+.PHONY: build test vet clean redis install
 
 export GOPROXY ?= https://goproxy.cn,direct
-OUT := bin
+OUT      := bin
+PREFIX   ?= /usr/local
 
 build:
 	go mod tidy
 	go build -ldflags="-s -w" -o $(OUT)/kvlang ./cmd/kvlang/
+
+install: build
+	install -d $(PREFIX)/bin
+	install $(OUT)/kvlang $(PREFIX)/bin/kvlang
 
 test:
 	go test ./... -count=1
