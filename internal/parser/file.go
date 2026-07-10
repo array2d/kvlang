@@ -107,7 +107,7 @@ func parseLines(lines []string) (*ast.File, error) {
 		inBody := false
 		for _, fn := range df.Funcs {
 			for _, bl := range fn.Body {
-				if bl.String() == line {
+				if strings.HasPrefix(line, bl.FirstLine()) {
 					inBody = true
 					break
 				}

@@ -46,6 +46,7 @@ func loadFunctions(kv kvspace.KVSpace, files []string) {
 			fn := lower.Func(&df.Funcs[i])
 			fn.Register(kv)
 			layoutcode.WriteBody(kv, fn.Name, fn.Body)
+				registerBlocks(kv, fn.Name, fn.Body)
 			if fn.Name == "main" { hasMain = true }
 		}
 		allPreamble = append(allPreamble, df.PreambleLines...)
@@ -95,4 +96,13 @@ func toStmts(lines []string) []ast.Stmt {
 		}
 	}
 	return stmts
+}
+
+func registerBlocks(kv kvspace.KVSpace, parent string, body []ast.Stmt) {
+	for _, st := range body {
+		if b, ok := st.(*ast.BlockStmt); ok {
+			kv.Set(keytree.SrcFunc(parent+"/"+b.Label), "def "+b.Label+"() -> ()", 0)
+			registerBlocks(kv, parent+"/"+b.Label, b.Body)
+		}
+	}
 }

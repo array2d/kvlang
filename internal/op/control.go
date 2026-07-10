@@ -16,7 +16,7 @@ const (
 // IsControlOp 判断是否为控制流指令。
 func IsControlOp(opcode string) bool {
 	switch opcode {
-	case OpCall, OpReturn, OpIf, OpFor, OpBr, OpGoto:
+	case OpCall, OpReturn, OpIf, OpFor, OpBr:
 		return true
 	}
 	return false

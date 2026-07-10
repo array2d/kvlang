@@ -48,6 +48,7 @@ var infixOps = map[string]bool{
 var unaryOps = map[string]bool{"!": true, "-neg": false} // - 既是单目也是双目
 
 func (i *Instruction) stmt() {}
+func (i *Instruction) FirstLine() string { return i.String() }
 func (i *Instruction) SetKV(kv kvspace.KVSpace, prefix string, idx *int) {
 	n := *idx
 	kv.Set(fmt.Sprintf("%s/[%d,0]", prefix, n), i.Opcode, 0)
@@ -103,6 +104,7 @@ type IfStmt struct {
 }
 
 func (*IfStmt) stmt() {}
+func (*IfStmt) FirstLine() string { return "if" }
 func (s *IfStmt) SetKV(kv kvspace.KVSpace, prefix string, idx *int) {}
 func (s *IfStmt) String() string {
 	r := "if (" + s.Cond + ") {\n"
@@ -124,6 +126,7 @@ type ForStmt struct {
 }
 
 func (*ForStmt) stmt() {}
+func (*ForStmt) FirstLine() string { return "for" }
 func (s *ForStmt) SetKV(kv kvspace.KVSpace, prefix string, idx *int) {}
 func (s *ForStmt) String() string {
 	r := fmt.Sprintf("for (%s in %s) {\n", s.Var, s.Iter)
@@ -139,6 +142,7 @@ type WhileStmt struct {
 }
 
 func (*WhileStmt) stmt() {}
+func (*WhileStmt) FirstLine() string { return "while" }
 func (s *WhileStmt) SetKV(kv kvspace.KVSpace, prefix string, idx *int) {}
 func (s *WhileStmt) String() string {
 	r := "while (" + s.Cond + ") {\n"
@@ -151,6 +155,7 @@ func (s *WhileStmt) String() string {
 type BreakStmt struct{}
 
 func (*BreakStmt) stmt() {}
+func (*BreakStmt) FirstLine() string { return "break" }
 func (*BreakStmt) SetKV(kv kvspace.KVSpace, prefix string, idx *int) {}
 func (*BreakStmt) String() string { return "break" }
 
@@ -158,6 +163,7 @@ func (*BreakStmt) String() string { return "break" }
 type ContinueStmt struct{}
 
 func (*ContinueStmt) stmt() {}
+func (*ContinueStmt) FirstLine() string { return "continue" }
 func (*ContinueStmt) SetKV(kv kvspace.KVSpace, prefix string, idx *int) {}
 func (*ContinueStmt) String() string { return "continue" }
 
@@ -169,6 +175,7 @@ type BlockStmt struct {
 }
 
 func (*BlockStmt) stmt() {}
+func (s *BlockStmt) FirstLine() string { return s.Label }
 func (s *BlockStmt) SetKV(kv kvspace.KVSpace, prefix string, idx *int) {
 	sub := prefix + "/" + s.Label
 	i := 0

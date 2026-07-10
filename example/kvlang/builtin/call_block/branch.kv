@@ -2,25 +2,15 @@
 # 右侧冒号: label: { } — 定义处带 :，引用处不带
 
 def 分支示例(flag:bool, X:int) -> (R:int) {
-    entry: {
-        X + 1 -> './a'
-        br('./flag', then, else)
-    }
+    X + 1 -> './a'
 
-    then: {
+    if ('./flag') {
         './a' * 2 -> './b'
-        goto(merge)
-    }
-
-    else: {
+    } else {
         './a' * 3 -> './b'
-        goto(merge)
     }
 
-    merge: {
-        './b' + 10 -> './R'
-        return
-    }
+    './b' + 10 -> './R'
 }
 
 str.set("kvlangrun") -> './term'
