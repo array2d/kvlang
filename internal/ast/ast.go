@@ -57,7 +57,7 @@ var unaryOps = map[string]bool{"!": true, "-neg": false} // - 既是单目也是
 func (i *Instruction) stmt() {}
 func (i *Instruction) String() string {
 	// 终止指令：br/jump/return 统一用前缀格式
-	if i.Opcode == "br" || i.Opcode == "jump" || i.Opcode == "return" {
+	if i.Opcode == "br" || i.Opcode == "goto" || i.Opcode == "return" {
 		if len(i.Reads) > 0 {
 			return i.Opcode + "(" + join(i.Reads) + ")"
 		}
@@ -111,17 +111,16 @@ func (s *IfStmt) String() string {
 	return r
 }
 
-// ForStmt 表示 for 循环。
+// ForStmt 表示 for 循环：迭代 kvspace 路径上的数据。
 type ForStmt struct {
-	Var   string // 迭代变量
-	Start string // 起始值
-	End   string // 结束值
-	Body  []Stmt // 循环体
+	Var  string // 迭代变量
+	Iter string // 迭代源路径，如 './data', '/tensor/x'
+	Body []Stmt // 循环体
 }
 
 func (*ForStmt) stmt() {}
 func (s *ForStmt) String() string {
-	r := fmt.Sprintf("for (%s in %s..%s) {\n", s.Var, s.Start, s.End)
+	r := fmt.Sprintf("for (%s in %s) {\n", s.Var, s.Iter)
 	for _, st := range s.Body { r += "\t" + st.String() + "\n" }
 	r += "}"
 	return r

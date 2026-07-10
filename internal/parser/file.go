@@ -286,22 +286,20 @@ func parseIfStmt(lines []string, start int) (*ast.IfStmt, int) {
 	return s, i
 }
 
-// parseForStmt 解析 for 循环块: for (var in start..end) { body }
+// parseForStmt 解析 for 循环: for (var in iter_path) { body }
+// iter_path 是 kvspace 路径，如 './data', '/tensor/x'
 func parseForStmt(lines []string, start int) (*ast.ForStmt, int) {
 	line := lines[start]
-	// Extract: for (var in start..end) {
+	// Extract: for (var in iter_path) {
 	inner := line[strings.Index(line, "(")+1 : strings.LastIndex(line, ")")]
-	// 格式: "i in 0..10" 或 "i:type in 0..10"
 	parts := strings.SplitN(inner, " in ", 2)
 	varName := strings.TrimSpace(parts[0])
 	if colon := strings.Index(varName, ":"); colon >= 0 {
 		varName = varName[:colon]
 	}
-	rangeParts := strings.SplitN(parts[1], "..", 2)
-	startVal := strings.TrimSpace(rangeParts[0])
-	endVal := strings.TrimSpace(rangeParts[1])
+	iterPath := strings.TrimSpace(parts[1])
 
-	s := &ast.ForStmt{Var: varName, Start: startVal, End: endVal}
+	s := &ast.ForStmt{Var: varName, Iter: iterPath}
 	depth := 1
 	i := start + 1
 	for i < len(lines) && depth > 0 {

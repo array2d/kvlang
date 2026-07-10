@@ -59,7 +59,7 @@ func formatBody(w io.Writer, stmts []Stmt, indent string) {
 			fmt.Fprintf(w, "%s}\n", indent)
 
 		case *ForStmt:
-			fmt.Fprintf(w, "%sfor (%s in %s..%s) {\n", indent, s.Var, s.Start, s.End)
+			fmt.Fprintf(w, "%sfor (%s in %s) {\n", indent, s.Var, s.Iter)
 			formatBody(w, s.Body, indent+"\t")
 			fmt.Fprintf(w, "%s}\n", indent)
 

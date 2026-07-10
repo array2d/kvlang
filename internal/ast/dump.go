@@ -82,8 +82,8 @@ func dumpStmt(w io.Writer, st Stmt, prefix string, last bool) {
 		}
 
 	case *ForStmt:
-		fmt.Fprintf(w, "%sForStmt var=%q range=%s..%s (body=%d)\n",
-			fullPrefix, s.Var, s.Start, s.End, len(s.Body))
+		fmt.Fprintf(w, "%sForStmt var=%q iter=%q (body=%d)\n",
+			fullPrefix, s.Var, s.Iter, len(s.Body))
 
 	case *WhileStmt:
 		fmt.Fprintf(w, "%sWhileStmt cond=%q (body=%d)\n",
