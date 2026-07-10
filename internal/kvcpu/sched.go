@@ -4,28 +4,26 @@ package kvcpu
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"strings"
 	"time"
 
+	"kvlang/internal/keytree"
+	"kvlang/internal/kvspace"
 	"kvlang/internal/logx"
 	"kvlang/internal/vthread"
-	"kvlang/internal/keytree"
-	"strings"
-	"kvlang/internal/kvspace"
 )
 
-// Pick 扫描 /vthread/*，原子抢占 status=init 的 vthread。返回 vtid 或空串。
+// Pick 扫描 /vthread/ 子项，原子抢占 status=init 的 vthread。返回 vtid 或空串。
+// kv.List 返回子项名（非完整路径），需用 keytree.VThread(vtid) 构造完整 key。
 func Pick(ctx context.Context, kv kvspace.KVSpace) string {
-	keys, err := kv.List(keytree.VthreadRoot)
+	vtids, err := kv.List(keytree.VthreadRoot)
 	if err != nil {
-		logx.Debug("picker KEYS error: %v", err)
+		logx.Debug("picker list error: %v", err)
 		return ""
 	}
-	for _, key := range keys {
-		vtid := key[len(keytree.VThread("")):]
-		// Skip non-numeric vtid (e.g., system keys nested under /vthread/)
-		// 实际上 key pattern `/vthread/*` 不会匹配 `/vthread/1/sub`，但还是做一次 GET 检查
-		val, err := kv.Get(key)
+	for _, vtid := range vtids {
+		fullKey := keytree.VThread(vtid)
+		val, err := kv.Get(fullKey)
 		if err != nil {
 			continue
 		}
@@ -36,13 +34,9 @@ func Pick(ctx context.Context, kv kvspace.KVSpace) string {
 		if s.Status != "init" {
 			continue
 		}
-		// Optimistic lock: Get → check init → Set running
-		if s.Status != "init" {
-			continue
-		}
 		updated := vthread.VThread{PC: s.PC, Status: "running", Mode: s.Mode}
 		data, _ := json.Marshal(updated)
-		kv.Set(key, data, 0)
+		kv.Set(fullKey, data, 0)
 		return vtid
 	}
 	return ""
@@ -68,4 +62,3 @@ func Wait(ctx context.Context, kv kvspace.KVSpace) {
 	}
 }
 
-var _ = fmt.Println // keep fmt import

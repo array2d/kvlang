@@ -10,13 +10,22 @@ import (
 
 var bg = context.Background()
 
-// Conn 根据 DSN 创建 KVSpace。
+// Conn 根据 DSN 创建 KVSpace（默认连接池大小 16）。
 func Conn(dsn string) KVSpace {
+	return ConnPool(dsn, 16)
+}
+
+// ConnPool 根据 DSN 创建 KVSpace，使用指定连接池大小。
+// serve 模式下 worker 数量较多，需要更大的连接池（至少 workers+8）。
+func ConnPool(dsn string, poolSize int) KVSpace {
+	if poolSize < 16 {
+		poolSize = 16
+	}
 	return &redisImpl{
 		rdb: redis.NewClient(&redis.Options{
 			Addr:         dsn,
-			PoolSize:     8,
-			MinIdleConns: 4,
+			PoolSize:     poolSize,
+			MinIdleConns: min(poolSize/4, 8),
 			PoolTimeout:  10 * time.Second,
 			ReadTimeout:  3 * time.Second,
 			WriteTimeout: 3 * time.Second,
