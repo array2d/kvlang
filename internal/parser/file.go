@@ -228,6 +228,10 @@ func parseBody(lines []string) []ast.Stmt {
 			stmts = append(stmts, block)
 			i = next
 		} else {
+			if line == "" || line == "}" {
+				i++
+				continue
+			}
 			inst, _ := ParseLine(line)
 			if inst != nil {
 				stmts = append(stmts, inst)
@@ -246,7 +250,7 @@ func parseIfStmt(lines []string, start int) (*ast.IfStmt, int) {
 	condEnd := strings.LastIndex(line, ")")
 	cond := strings.TrimSpace(line[condStart+1 : condEnd])
 
-	// Find then/else bodies
+	// Parse then body
 	s := &ast.IfStmt{Cond: cond}
 	depth := 1
 	i := start + 1
@@ -256,8 +260,7 @@ func parseIfStmt(lines []string, start int) (*ast.IfStmt, int) {
 			depth-- // close of `}`
 			if depth == 0 {
 				i++ // move past `} else {`
-				depth = 1 // opening `{`
-				continue
+				break
 			}
 		}
 		if depth == 0 {
@@ -267,9 +270,8 @@ func parseIfStmt(lines []string, start int) (*ast.IfStmt, int) {
 		i++
 	}
 
-	// Parse else body
-	if i < len(lines) && (strings.HasPrefix(lines[i], "else {") || strings.HasPrefix(lines[i], "else{")) {
-		i++ // skip `else {`
+	// Parse else body (no `else {` prefix check — we're already inside it)
+	if i < len(lines) {
 		depth = 1
 		for i < len(lines) && depth > 0 {
 			depth += strings.Count(lines[i], "{") - strings.Count(lines[i], "}")
@@ -345,17 +347,16 @@ func isBlockStart(line string) bool {
 	if prefix == "" {
 		return false
 	}
-	// 排除关键字
-	switch prefix {
-	case "if", "for", "while", "def", "else", "break", "continue", "return":
-		return false
-	}
-	// 排除函数调用 ident(...
+	// 排除函数调用 ident(...   ——  冒号前的部分含 ( 说明是调用
 	if strings.Contains(prefix, "(") {
 		return false
 	}
-	// 排除 key 路径 /path:xxx
+	// 排除 key 路径 /path:xxx  —— 冒号前的部分是路径
 	if strings.HasPrefix(prefix, "/") || strings.HasPrefix(prefix, "./") {
+		return false
+	}
+	// 排除 type 标注 A:int  —— 冒号在类型标注中
+	if strings.Contains(prefix, " ") {
 		return false
 	}
 	return true

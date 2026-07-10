@@ -17,11 +17,11 @@ func isString(s string) bool {
 
 func validateRef(raw, line string) error {
 	if isString(raw) || (len(raw) >= 2 && raw[0] == '\'' && raw[len(raw)-1] == '\'') {
-		return nil
+		return nil // 已加引号，合法
 	}
-	unquoted := stripQuotes(raw)
-	if isKeyRef(unquoted) {
-		return fmt.Errorf("path %q must be single-quoted (e.g. %q) in: %s", unquoted, "'"+unquoted+"'", line)
+	// 裸路径在 reads 位置允许（如 ./tmp + 1 -> './Y'）
+	if isKeyRef(raw) {
+		return nil
 	}
 	return nil
 }

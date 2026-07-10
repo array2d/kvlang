@@ -94,7 +94,39 @@ func ParseLine(line string) (*ast.Instruction, error) {
 		inst.Reads = parseParamList(readsStr)
 	}
 
+	// 4. 无括号的标识符：zeros, return, break, continue 等
+	if inst.Opcode == "" && expr != "" {
+		// 排除纯字面量 (数字、字符串、路径)
+		if !isLiteral(expr) {
+			inst.Opcode = expr
+		}
+	}
+
 	return inst, nil
+}
+
+// isLiteral 判断表达式是否为字面量（数字、字符串、路径），而非操作码。
+func isLiteral(s string) bool {
+	if len(s) == 0 {
+		return true
+	}
+	// 数字
+	if s[0] >= '0' && s[0] <= '9' {
+		return true
+	}
+	// 字符串
+	if s[0] == '"' || s[0] == '\'' {
+		return true
+	}
+	// 路径
+	if s[0] == '/' || (len(s) >= 2 && s[:2] == "./") {
+		return true
+	}
+	// 负数
+	if s[0] == '-' && len(s) > 1 && s[1] >= '0' && s[1] <= '9' {
+		return true
+	}
+	return false
 }
 
 // ── line helpers ──
