@@ -17,5 +17,5 @@ func SysOpPlatPattern() string { return sysPrefix + "op-plat/*" }
 // SysTerm 返回 /sys/term/<name>/<stream>
 func SysTerm(name, stream string) string { return sysPrefix + "term/" + name + "/" + stream }
 
-// SysCmdVM 返回 sys:cmd:vm:<id>
-func SysCmdVM(id string) string { return "sys:cmd:vm:" + id }
+// SysCmdVM 返回 /sys/cmd/vm/<id>
+func SysCmdVM(id string) string { return sysPrefix + "cmd/vm/" + id }
