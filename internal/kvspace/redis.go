@@ -52,21 +52,21 @@ func (r *redisImpl) Notify(key string, values ...any) error {
 }
 func (r *redisImpl) DisConn() error { return r.rdb.Close() }
 
-// maintainIndex 维护目录索引: /a/b/c → /a/.{b}, /a/b/.{c}
+// maintainIndex 维护目录索引: /a/b/c → /.{a}, /a/.{b}, /a/b/.{c}
 func (r *redisImpl) maintainIndex(key string, add bool) {
 	for i := 0; i < len(key); i++ {
-		if key[i] == '/' && i > 0 {
-			parent := key[:i]
-			rest := key[i+1:]
-			if slash := strings.IndexByte(rest, '/'); slash >= 0 {
-				rest = rest[:slash]
-			}
-			if rest == "" || rest == "." { continue }
-			if add {
-				r.rdb.SAdd(bg, parent+"/.", rest)
-			} else {
-				r.rdb.SRem(bg, parent+"/.", rest)
-			}
+		if key[i] != '/' { continue }
+		parent := key[:i]
+		if parent == "" { parent = "/" }
+		rest := key[i+1:]
+		if slash := strings.IndexByte(rest, '/'); slash >= 0 {
+			rest = rest[:slash]
+		}
+		if rest == "" || rest == "." { continue }
+		if add {
+			r.rdb.SAdd(bg, parent+"/.", rest)
+		} else {
+			r.rdb.SRem(bg, parent+"/.", rest)
 		}
 	}
 }

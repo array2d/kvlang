@@ -33,3 +33,8 @@ func VThreadTerm(id string) string { return vthreadPrefix + id + "/term" }
 
 // VThreadPattern 返回 /vthread/* (SCAN 用)
 func VThreadPattern() string { return vthreadPrefix + "*" }
+
+// Roots 返回所有根路径前缀。
+func Roots() []string {
+	return []string{"/vthread", "/src", "/func", "/sys", "/op"}
+}
