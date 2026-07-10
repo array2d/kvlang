@@ -16,7 +16,7 @@ import (
 // 返回实例标识符, e.g., "metal:0", "cuda:1"
 func Select(ctx context.Context, kv kvspace.KVSpace, opcode string) (string, error) {
 	// 1. 找到支持该算子的所有程序
-	programs, err := kv.Keys(keytree.OpPattern())
+	programs, err := kv.List("/op")
 	if err != nil {
 		return "", fmt.Errorf("list op programs: %w", err)
 	}
@@ -39,7 +39,7 @@ func Select(ctx context.Context, kv kvspace.KVSpace, opcode string) (string, err
 	}
 
 	// 2. 选择该程序下负载最低的进程实例
-	instances, err := kv.Keys(keytree.SysOpPlatPattern())
+	instances, err := kv.List("/sys/op-plat")
 	if err != nil {
 		return "", fmt.Errorf("list op-plat instances: %w", err)
 	}

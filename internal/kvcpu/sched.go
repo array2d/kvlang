@@ -16,7 +16,7 @@ import (
 
 // Pick 扫描 /vthread/*，原子抢占 status=init 的 vthread。返回 vtid 或空串。
 func Pick(ctx context.Context, kv kvspace.KVSpace) string {
-	keys, err := kv.Keys(keytree.VThreadPattern())
+	keys, err := kv.List("/vthread")
 	if err != nil {
 		logx.Debug("picker KEYS error: %v", err)
 		return ""

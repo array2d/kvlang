@@ -69,11 +69,12 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *
 // copyFunc 递归复制 srcPrefix 下的所有指令到 dstPrefix，替换 bindings。
 // 支持 block label 子路径: label/[i,0] 作为 call 的目标。
 func copyFunc(ctx context.Context, kv kvspace.KVSpace, srcPrefix, dstPrefix string, bindings map[string]string) int {
-	keys, _ := kv.Keys(srcPrefix + "/*")
+	children, _ := kv.List(srcPrefix)
 	idx := 0
 	seen := map[string]bool{}
-	for _, k := range keys {
-		suffix := strings.TrimPrefix(k, srcPrefix+"/")
+	for _, name := range children {
+		k := srcPrefix + "/" + name
+		suffix := name
 		// Block label 子路径 → 递归复制
 		if !strings.HasPrefix(suffix, "[") && !strings.Contains(suffix, "/") {
 			idx += copyFunc(ctx, kv, k, dstPrefix, bindings)
@@ -149,7 +150,7 @@ func HandleReturn(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst
 		}
 	}
 
-	keys, _ := kv.Keys(keytree.VThreadAt(vtid, parentPC) + "/*")
-	if len(keys) > 0 { kv.Del(keys...) }
+	children, _ := kv.List(keytree.VThreadAt(vtid, parentPC))
+	for _, c := range children { kv.Del(keytree.VThreadAt(vtid, parentPC) + "/" + c) }
 	return op.NextPC(parentPC)
 }
