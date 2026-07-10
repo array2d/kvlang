@@ -19,9 +19,13 @@ type KVCache struct {
 // NewKVCache 从 kvspace MGET 加载整个子栈到本地。
 func NewKVCache(ctx context.Context, kv kvspace.KVSpace, prefix string) *KVCache {
 
-	keys, err := kv.Keys(prefix+"*")
-	if err != nil || len(keys) == 0 {
+	children, err := kv.List(prefix)
+	if err != nil || len(children) == 0 {
 		return nil
+	}
+	keys := make([]string, len(children))
+	for i, c := range children {
+		keys[i] = prefix + "/" + c
 	}
 
 	vals, err := kv.MGet(keys...)
