@@ -54,13 +54,19 @@ func cmdKVSpace(args []string) {
 }
 
 func clearAll(kv kvspace.KVSpace) {
-	for _, root := range keytree.Roots() {
-		children, _ := kv.List(root)
-		for _, c := range children {
-			delRecursive(kv, root+"/"+c)
-		}
-	}
+	clearRoot(kv, keytree.VthreadRoot)
+	clearRoot(kv, keytree.SrcRoot)
+	clearRoot(kv, keytree.FuncRoot)
+	clearRoot(kv, keytree.SysRoot)
+	clearRoot(kv, keytree.OpRoot)
 	kv.Del(keytree.NotifyVM)
+}
+
+func clearRoot(kv kvspace.KVSpace, root string) {
+	children, _ := kv.List(root)
+	for _, c := range children {
+		delRecursive(kv, root+"/"+c)
+	}
 }
 
 func delRecursive(kv kvspace.KVSpace, prefix string) {
