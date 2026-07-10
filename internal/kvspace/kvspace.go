@@ -13,6 +13,9 @@ type KVSpace interface {
 	Del(keys ...string) error
 	MGet(keys ...string) ([]any, error)
 
+	// 目录
+	List(prefix string) ([]string, error) // 列出 prefix 下的直接子项
+
 	// 通知
 	Watch(timeout time.Duration, keys ...string) ([]string, error)
 	Notify(key string, values ...any) error
@@ -20,6 +23,4 @@ type KVSpace interface {
 	// 连接
 	DisConn() error
 
-	// TODO Keys → 调用方自维护索引
-	Keys(pattern string) ([]string, error)
 }
