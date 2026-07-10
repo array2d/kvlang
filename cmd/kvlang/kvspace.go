@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"kvlang/internal/kvspace"
+	"kvlang/internal/keytree"
 )
 
 func cmdKVSpace(args []string) {
@@ -53,11 +54,20 @@ func cmdKVSpace(args []string) {
 }
 
 func clearAll(kv kvspace.KVSpace) {
-	for _, root := range []string{"/vthread", "/src", "/func", "/sys"} {
+	for _, root := range keytree.Roots() {
 		children, _ := kv.List(root)
 		for _, c := range children {
-			kv.Del(root + "/" + c)
+			delRecursive(kv, root+"/"+c)
 		}
 	}
-	kv.Del("/vthread", "/src", "/func", "/sys", "notify:vm")
+	kv.Del(keytree.NotifyVM)
+}
+
+func delRecursive(kv kvspace.KVSpace, prefix string) {
+	children, _ := kv.List(prefix)
+	for _, c := range children {
+		delRecursive(kv, prefix+"/"+c)
+	}
+	kv.Del(prefix)        // 删除自身
+	kv.Del(prefix + "/.")  // 删除索引
 }
