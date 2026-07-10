@@ -1,50 +1,86 @@
 # kvlang
 
-基于 kvspace KV 空间的声明式编程语言 VM 解释器。
+基于 KV 路径寻址的声明式 VM 解释器。指令和数据共享同一棵树，label 即路径，call 即子树复制。
 
 ## 快速开始
 
 ```bash
-make kvspace   # 启动 kvspace + 清空数据
-make build   # 构建 bin/kvlang + bin/kvlang load
+make build    # 编译 kvlang
+make kvspace  # 启动 Redis + 清空
 ```
 
-## 命令
+## 使用
 
-| 二进制 | 说明 |
-|--------|------|
-| `bin/kvlang` | VM 服务端，常驻消费 vthread |
-| `bin/kvlang load` | 加载 .kv 源文件到 kvspace |
+```bash
+kvlang file.kv             # 执行 .kv 文件
+kvlang -c 'print("hi")'    # 内联代码
+echo 'code' | kvlang       # 管道输入
+kvlang vet file.kv          # 语法检查
+kvlang kvspace <cmd>        # KV 空间操作 (get/set/del/list/clear)
+kvlang help                 # 帮助
+```
 
-## 示例
+## 语言速览
 
 ```kvlang
-# example/kvlang/builtin/arith/three_add.kv
-def three_add(A:int, B:int, C:int) -> (R:int) {
-    A + B -> './t'
-    './t' + C -> './R'
+str.set("kvlangrun") -> './term'    # 激活终端输出
+
+def add(A:int, B:int) -> (C:int) {
+    A + B -> './C'
 }
-three_add(2, 3, 4) -> './out'
+add(2, 3) -> './out'
 ```
 
-## kvspace Schema
+### 控制流 (实验性)
 
+```kvlang
+def classify(flag:bool, X:int) -> (R:int) {
+    X + 1 -> './a'
+    if ('./flag') {
+        './a' * 2 -> './b'
+    } else {
+        './a' * 3 -> './b'
+    }
+    './b' + 10 -> './R'
+}
 ```
-/vthread/<vtid>           vthread 状态 (pc, status)
-/vthread/<vtid>/<pc>      指令数据 (reads/writes)
-/src/func/<name>          函数定义
-/sys/term/<name>          终端流配置
+
+### Tensor (设计中)
+
+```kvlang
+tensor.new("f32", "[128]") -> /data/a
+matmul(/data/W, /data/X)    -> /data/Y
+tensor.del(/data/a)
 ```
+
+## 内建算子
+
+算术 `+ - * / %` · 比较 `== != < > <= >=` · 逻辑 `&& || !` · 数学 `abs pow sqrt min max` · 转换 `int float bool` · IO `print cerr` · 字符串 `str.set`
 
 ## 架构
 
 ```
-.kv 源文件  ──▶  Lexer ──▶  Parser ──▶  AST ──▶  CodeGen
-                                                      │
-   kvspace KV  ◀──  Loader  ◀───────────────────────────┘
-      │
-      ▼
-    VM ──▶ builtin (原生求值)  /  dispatch (GPU 分发)
+.kv 源文件 ──▶ Lexer ──▶ Parser ──▶ AST
+  │                                    │
+  │  if/while/for  ──▶ lower ──▶ BlockStmt + br/goto
+  │                                    │
+  ▼                                    ▼
+Register (签名)                WriteBody (KV 结构化)
+  │                                    │
+  └────────── kvspace KV ◀─────────────┘
+                 │
+                 ▼
+               Execute ──▶ builtin (原生) / dispatch (GPU)
+```
+
+## KV 寻址
+
+```
+/vthread/<vtid>/<pc>/[i,0]    指令 opcode
+/vthread/<vtid>/<pc>/[i,-1]   读参数
+/vthread/<vtid>/<pc>/label/    控制流 block 子路径
+/src/func/<name>/              函数体布局
+/src/func/<name>/label/        block label 子函数
 ```
 
 ## License
