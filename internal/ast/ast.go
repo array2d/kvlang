@@ -12,6 +12,7 @@ import (
 type Stmt interface {
 	stmt()
 	String() string
+	FirstLine() string // 返回源码首行，用于 inBody 匹配
 	SetKV(kv kvspace.KVSpace, prefix string, idx *int)
 }
 
