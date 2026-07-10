@@ -25,17 +25,20 @@ func File(f *ast.File) *ast.File {
 
 // Func 将函数体中 if/while 控制流 lowering 为 BlockStmt + br/goto。
 func Func(fn *ast.Func) *ast.Func {
+	lg := &labelGen{parent: fn.Name}
 	lowered := &ast.Func{
 		Name:      fn.Name,
 		Signature: fn.Signature,
-		Body:      lowerBody(fn.Body, &labelGen{}),
+		Body:      lowerBody(fn.Body, lg),
 	}
 	return lowered
 }
 
 type labelGen struct {
-	n int
+	n      int
+	parent string // 父函数名，用于构造 goto→call 的完整 label 路径
 }
+
 
 func (g *labelGen) next(prefix string) string {
 	g.n++
@@ -63,7 +66,7 @@ func lowerBody(stmts []ast.Stmt, lg *labelGen) []ast.Stmt {
 		case *ast.IfStmt:
 			blocks := lowerIf(s, lg)
 			if len(pending) > 0 {
-				pending = append(pending, gotoLabel(blocks[0].(*ast.BlockStmt).Label))
+				pending = append(pending, gotoLabel(lg.parent, blocks[0].(*ast.BlockStmt).Label))
 				result = append(result, wrapBlock("", pending, lg))
 				pending = nil
 			}
@@ -72,7 +75,7 @@ func lowerBody(stmts []ast.Stmt, lg *labelGen) []ast.Stmt {
 		case *ast.WhileStmt:
 			blocks := lowerWhile(s, lg)
 			if len(pending) > 0 {
-				pending = append(pending, gotoLabel(blocks[0].(*ast.BlockStmt).Label))
+				pending = append(pending, gotoLabel(lg.parent, blocks[0].(*ast.BlockStmt).Label))
 				result = append(result, wrapBlock("", pending, lg))
 				pending = nil
 			}
@@ -101,8 +104,8 @@ func lowerIf(s *ast.IfStmt, lg *labelGen) []ast.Stmt {
 	condBody := append([]ast.Stmt{}, condEval...)
 	condBody = append(condBody, brInst(condSlot, thenLabel, elseLabel))
 
-	thenBody := append(lowerBody(s.Then, lg), gotoLabel(mergeLabel))
-	elseBody := append(lowerBody(s.Else, lg), gotoLabel(mergeLabel))
+	thenBody := append(lowerBody(s.Then, lg), gotoLabel(lg.parent, mergeLabel))
+	elseBody := append(lowerBody(s.Else, lg), gotoLabel(lg.parent, mergeLabel))
 
 	return []ast.Stmt{
 		&ast.BlockStmt{Label: lg.next("if_cond"), Body: condBody},
@@ -123,7 +126,7 @@ func lowerWhile(s *ast.WhileStmt, lg *labelGen) []ast.Stmt {
 	condBody = append(condBody, brInst(condSlot, bodyLabel, exitLabel))
 
 	bodyStmts := lowerBody(s.Body, lg)
-	bodyStmts = append(bodyStmts, gotoLabel(condLabel))
+	bodyStmts = append(bodyStmts, gotoLabel(lg.parent, condLabel))
 
 	return []ast.Stmt{
 		&ast.BlockStmt{Label: condLabel, Body: condBody},
@@ -159,8 +162,9 @@ func brInst(cond, tLabel, fLabel string) *ast.Instruction {
 	return &ast.Instruction{Opcode: "br", Reads: []string{cond, tLabel, fLabel}}
 }
 
-func gotoLabel(label string) *ast.Instruction {
-	return &ast.Instruction{Opcode: "goto", Reads: []string{label}}
+// gotoLabel — label 即无参 call，使用 parent/label 完整路径。
+func gotoLabel(parent, label string) *ast.Instruction {
+	return &ast.Instruction{Opcode: "call", Reads: []string{parent + "/" + label}}
 }
 
 func wrapBlock(label string, stmts []ast.Stmt, lg *labelGen) *ast.BlockStmt {

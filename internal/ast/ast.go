@@ -2,7 +2,6 @@
 package ast
 
 import (
-	"context"
 	"fmt"
 
 	"kvlang/internal/kvspace"
@@ -24,17 +23,9 @@ type Func struct {
 }
 
 // Register 将函数定义写入 kvspace 空间。
-func (fn *Func) Register(ctx context.Context, kv kvspace.KVSpace) error {
-	if err := kv.Set(keytree.SrcFunc(fn.Name), fn.Signature, 0); err != nil {
-		return fmt.Errorf("register sig: %w", err)
-	}
-	for i, st := range fn.Body {
-		key := keytree.SrcFuncLine(fn.Name, i)
-		if err := kv.Set(key, st.String(), 0); err != nil {
-			return fmt.Errorf("register body[%d]: %w", i, err)
-		}
-	}
-	return nil
+// Register 将函数签名写入 kvspace（body 由 layoutcode.WriteBody 写入）。
+func (fn *Func) Register(kv kvspace.KVSpace) error {
+	return kv.Set(keytree.SrcFunc(fn.Name), fn.Signature, 0)
 }
 
 // Instruction 表示一条 kvlang 指令。

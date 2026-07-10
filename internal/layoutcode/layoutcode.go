@@ -66,33 +66,35 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *
 	return pc + "/[0,0]"
 }
 
-// copyFunc 复制 srcPrefix 下的所有指令到 dstPrefix, 替换 bindings 中的形参。
-// 返回指令总数。
+// copyFunc 递归复制 srcPrefix 下的所有指令到 dstPrefix，替换 bindings。
+// 支持 block label 子路径: label/[i,0] 作为 call 的目标。
 func copyFunc(ctx context.Context, kv kvspace.KVSpace, srcPrefix, dstPrefix string, bindings map[string]string) int {
 	keys, _ := kv.Keys(srcPrefix + "/*")
 	idx := 0
 	for _, k := range keys {
 		suffix := strings.TrimPrefix(k, srcPrefix+"/")
-		// 检查是不是 [n,0] 格式（主指令 slot）
-		if !strings.HasPrefix(suffix, "[") || !strings.Contains(suffix, ",0]") {
+		// Block label 子路径 → 递归复制
+		if !strings.HasPrefix(suffix, "[") {
+			subKeys, _ := kv.Keys(k + "/*")
+			if len(subKeys) > 0 {
+				copyFunc(ctx, kv, k, dstPrefix+suffix+"/", bindings)
+			}
 			continue
 		}
+		// 检查是不是 [n,0] 格式
+		if !strings.Contains(suffix, ",0]") { continue }
 		val, err := kv.Get(k)
 		if err != nil { continue }
 		if v, ok := bindings[val]; ok { val = v }
-		// 写入 opcode
 		kv.Set(fmt.Sprintf("%s[%d,0]", dstPrefix, idx), val, 0)
 
-		// 读取并写入 reads/writes
 		slotIdx := suffix[1:strings.Index(suffix, ",")]
 		for j := 1; j <= 10; j++ {
-			// reads
 			rk := fmt.Sprintf("%s/[%s,-%d]", srcPrefix, slotIdx, j)
 			if rv, err := kv.Get(rk); err == nil && rv != "" {
 				if v, ok := bindings[rv]; ok { rv = v }
 				kv.Set(fmt.Sprintf("%s[%d,-%d]", dstPrefix, idx, j), rv, 0)
 			}
-			// writes
 			wk := fmt.Sprintf("%s/[%s,%d]", srcPrefix, slotIdx, j)
 			if wv, err := kv.Get(wk); err == nil && wv != "" {
 				if v, ok := bindings[wv]; ok { wv = v }

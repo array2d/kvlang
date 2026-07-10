@@ -1,8 +1,8 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,7 +12,9 @@ import (
 	"kvlang/internal/keytree"
 	"kvlang/internal/kvcpu"
 	"kvlang/internal/kvspace"
+	"kvlang/internal/layoutcode"
 	"kvlang/internal/logx"
+	"kvlang/internal/lower"
 	"kvlang/internal/parser"
 	"kvlang/internal/vthread"
 )
@@ -35,15 +37,16 @@ func runFile(args []string) {
 }
 
 func loadFunctions(kv kvspace.KVSpace, files []string) {
-	ctx := context.Background()
 	hasMain := false
 	var allPreamble []string
 	for _, f := range files {
 		df, err := parser.ParseFile(f)
 		if err != nil { logx.Warn("SKIP %s: %v", f, err); continue }
 		for i := range df.Funcs {
-			if err := df.Funcs[i].Register(ctx, kv); err != nil { logx.Error("FAIL %s: %v", f, err); continue }
-			if df.Funcs[i].Name == "main" { hasMain = true }
+			fn := lower.Func(&df.Funcs[i])
+			fn.Register(kv)
+			layoutcode.WriteBody(kv, fn.Name, fn.Body)
+			if fn.Name == "main" { hasMain = true }
 		}
 		allPreamble = append(allPreamble, df.PreambleLines...)
 	}
@@ -51,19 +54,20 @@ func loadFunctions(kv kvspace.KVSpace, files []string) {
 	body := make([]string, len(allPreamble)); copy(body, allPreamble)
 	if hasMain { body = append(body, "main() -> './pre_main_ret'") }
 	preMain := ast.Func{Name: "pre_main", Signature: "def pre_main() -> ()", Body: toStmts(body)}
-	preMain.Register(ctx, kv)
+	preMain = *lower.Func(&preMain)
+	preMain.Register(kv)
+	layoutcode.WriteBody(kv, preMain.Name, preMain.Body)
 	kv.Set(keytree.FuncMain, json.RawMessage(`{"entry":"pre_main","reads":[],"writes":[]}`), 0)
 }
 
 // executeEntry 创建 vthread 并执行 (runFile/runcode 共用)。
 func executeEntry(kv kvspace.KVSpace) {
-	ctx := context.Background()
 	st := vthread.VThread{PC: "[0,0]", Status: "init", Mode: "single"}
 	data, _ := json.Marshal(st)
 	kv.Set(keytree.VThread("run"), data, 0)
 	kv.Set(keytree.VThreadSlot("run", 0, 0), "pre_main", 0)
 	logx.Info("[single] executing run")
-	kvcpu.Execute(ctx, kv, "run")
+	kvcpu.Execute(context.Background(), kv, "run")
 }
 
 func collectKVFiles(path string) ([]string, error) {

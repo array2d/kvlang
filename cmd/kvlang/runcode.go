@@ -1,11 +1,12 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 
 	"kvlang/internal/ast"
+	"kvlang/internal/layoutcode"
+	"kvlang/internal/lower"
 	"kvlang/internal/keytree"
 	"kvlang/internal/kvspace"
 	"kvlang/internal/logx"
@@ -20,12 +21,13 @@ func runCode(name string, rc io.Reader) {
 	df, err := parser.ParseCode(rc)
 	if err != nil { logx.Fatal("parse: %v", err) }
 
-	ctx := context.Background()
 	hasMain := false
 	var allPreamble []string
 	for i := range df.Funcs {
-		if err := df.Funcs[i].Register(ctx, kv); err != nil { logx.Error("FAIL: %v", err); continue }
-		if df.Funcs[i].Name == "main" { hasMain = true }
+		fn := lower.Func(&df.Funcs[i])
+		fn.Register(kv)
+		layoutcode.WriteBody(kv, fn.Name, fn.Body)
+		if fn.Name == "main" { hasMain = true }
 	}
 	allPreamble = df.PreambleLines
 	if len(allPreamble) == 0 && !hasMain { logx.Fatal("no executable code found") }
@@ -33,7 +35,7 @@ func runCode(name string, rc io.Reader) {
 	body := make([]string, len(allPreamble)); copy(body, allPreamble)
 	if hasMain { body = append(body, "main() -> './pre_main_ret'") }
 	preMain := ast.Func{Name: "pre_main", Signature: "def pre_main() -> ()", Body: toStmts(body)}
-	preMain.Register(ctx, kv)
+	preMain = *lower.Func(&preMain); preMain.Register(kv); layoutcode.WriteBody(kv, preMain.Name, preMain.Body)
 	kv.Set(keytree.FuncMain, json.RawMessage(`{"entry":"pre_main","reads":[],"writes":[]}`), 0)
 
 	executeEntry(kv)
