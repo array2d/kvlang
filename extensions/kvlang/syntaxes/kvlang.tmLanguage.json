@@ -9,8 +9,9 @@
     { "include": "#keyword" },
     { "include": "#type" },
     { "include": "#number" },
-    { "include": "#arrow" },
-    { "include": "#arithmetic" }
+    { "include": "#block_label" },
+    { "include": "#operator" },
+    { "include": "#arrow" }
   ],
   "repository": {
     "line_comment": {
@@ -29,7 +30,11 @@
     },
     "keyword": {
       "name": "keyword.control.kvlang",
-      "match": "\\b(def|var|if|else|for|while|return|switch|case|break|continue|loop)\\b"
+      "match": "\\b(def|var|if|else|for|while|return|switch|case|break|continue|loop|br|goto)\\b"
+    },
+    "block_label": {
+      "name": "entity.name.label.kvlang",
+      "match": "^\\s*([a-zA-Z_][a-zA-Z0-9_]*)\\s*:"
     },
     "type": {
       "name": "storage.type.kvlang",
@@ -39,13 +44,13 @@
       "name": "constant.numeric.kvlang",
       "match": "-?[0-9]+(\\.[0-9]+)?"
     },
-    "arrow": {
+    "operator": {
       "name": "keyword.operator.kvlang",
-      "match": "<-|->|<=|=>"
+      "match": "[+\\-*/%]|==|!=|<=|>=|<|>|&&|\\|\\||!"
     },
-    "arithmetic": {
-      "name": "keyword.operator.kvlang",
-      "match": "[+\\-*/]"
+    "arrow": {
+      "name": "keyword.operator.arrow.kvlang",
+      "match": "<-|->"
     }
   }
 }
