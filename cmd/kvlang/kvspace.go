@@ -53,17 +53,11 @@ func cmdKVSpace(args []string) {
 }
 
 func clearAll(kv kvspace.KVSpace) {
-	roots, _ := kv.List("/")
-	for _, r := range roots {
-		recursiveDel(kv, "/"+r)
+	for _, root := range []string{"/vthread", "/src", "/func", "/sys"} {
+		children, _ := kv.List(root)
+		for _, c := range children {
+			kv.Del(root + "/" + c)
+		}
 	}
-}
-
-func recursiveDel(kv kvspace.KVSpace, prefix string) {
-	children, _ := kv.List(prefix)
-	for _, c := range children {
-		full := prefix + "/" + c
-		recursiveDel(kv, full)
-	}
-	kv.Del(prefix)
+	kv.Del("/vthread", "/src", "/func", "/sys", "notify:vm")
 }
