@@ -11,9 +11,16 @@ import "os"
 
 func main() {
 	args := os.Args[1:]
-	if len(args) >= 1 && args[0] == "vet" {
-		cmdVet(args[1:])
+	if len(args) == 0 {
+		cmdRun(args)
 		return
 	}
-	cmdRun(args)
+	switch args[0] {
+	case "vet":
+		cmdVet(args[1:])
+	case "format", "fmt":
+		cmdFormat(args[1:])
+	default:
+		cmdRun(args)
+	}
 }
