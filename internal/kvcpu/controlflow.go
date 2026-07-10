@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"kvlang/internal/op"
+	"kvlang/internal/layoutcode"
 	"kvlang/internal/logx"
 	"kvlang/internal/vthread"
 	"kvlang/internal/keytree"
@@ -42,20 +43,22 @@ func blockPC(pc, label string) string {
 }
 
 // Br 处理条件分支: br(cond, true_label, false_label).
-func Br(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) error {
+// handleBr 处理条件分支: 求值条件, 对目标 label 发起 call。
+func handleBr(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) error {
 	if len(inst.Reads) < 3 { return fmt.Errorf("br requires 3 args") }
 	condVal := readCond(kv, vtid, inst.Reads[0])
 	isTrue := condVal != "" && condVal != "0" && condVal != "false"
-	target := blockPC(pc, inst.Reads[2])
-	if isTrue { target = blockPC(pc, inst.Reads[1]) }
-	return jumpOrNext(ctx, kv, vtid, pc, target)
+	label := inst.Reads[2]
+	if isTrue { label = inst.Reads[1] }
+	callInst := &op.Instruction{Opcode: op.OpCall, Reads: []string{label}}
+	substackPC := layoutcode.HandleCall(ctx, kv, vtid, pc, callInst)
+	if substackPC == pc { return fmt.Errorf("br call %s failed", label) }
+	vthread.Set(ctx, kv, vtid, substackPC, "running")
+	return nil
 }
 
 // Goto 处理无条件跳转: goto(label).
-func Goto(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) error {
-	if len(inst.Reads) < 1 { return fmt.Errorf("goto requires label") }
-	return jumpOrNext(ctx, kv, vtid, pc, blockPC(pc, inst.Reads[0]))
-}
+
 
 func readCond(kv kvspace.KVSpace, vtid, key string) string {
 	if strings.HasPrefix(key, "./") {
@@ -74,4 +77,30 @@ func jumpOrNext(ctx context.Context, kv kvspace.KVSpace, vtid, pc, target string
 	logx.Debug("[%s] branch → %s", vtid, target)
 	vthread.Set(ctx, kv, vtid, target, "running")
 	return nil
+}
+
+func handleControl(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) error {
+	switch inst.Opcode {
+	case op.OpCall:
+		substackPC := layoutcode.HandleCall(ctx, kv, vtid, pc, inst)
+		if substackPC == pc {
+			return fmt.Errorf("call %s failed", inst.Reads[0])
+		}
+		vthread.Set(ctx, kv, vtid, substackPC, "running")
+		logx.Debug("[%s] CALL → %s", vtid, substackPC)
+		return nil
+	case op.OpReturn:
+		parentPC := layoutcode.HandleReturn(ctx, kv, vtid, pc, inst)
+		logx.Debug("[%s] RETURN → %s", vtid, parentPC)
+		if parentPC == pc {
+			vthread.Set(ctx, kv, vtid, pc, "done")
+			return nil
+		}
+		vthread.Set(ctx, kv, vtid, parentPC, "running")
+		return nil
+	case op.OpIf:
+		return If(ctx, kv, vtid, pc, inst)
+	default:
+		return fmt.Errorf("unknown control op: %s", inst.Opcode)
+	}
 }

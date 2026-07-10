@@ -1,11 +1,10 @@
-// Package kvcpu 提供 VM 核心执行循环与控制流指令。
+// Package kvcpu 提供 KV CPU 执行引擎。
 package kvcpu
 
 import (
 	"context"
 	"fmt"
 
-	"kvlang/internal/layoutcode"
 	"kvlang/internal/op/dispatch"
 	"kvlang/internal/op"
 	"kvlang/internal/logx"
@@ -81,36 +80,6 @@ func Execute(ctx context.Context, kv kvspace.KVSpace, vtid string) {
 	}
 }
 
-func handleControl(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) error {
-	switch inst.Opcode {
-	case op.OpCall:
-		substackPC := layoutcode.HandleCall(ctx, kv, vtid, pc, inst)
-		if substackPC == pc {
-			// HandleCall already set error state (func not found, parse failure, etc.)
-			return fmt.Errorf("call %s failed", inst.Reads[0])
-		}
-		vthread.Set(ctx, kv, vtid, substackPC, "running")
-		logx.Debug("[%s] CALL → %s", vtid, substackPC)
-		return nil
-	case op.OpReturn:
-		parentPC := layoutcode.HandleReturn(ctx, kv, vtid, pc, inst)
-		logx.Debug("[%s] RETURN → %s", vtid, parentPC)
-		if parentPC == pc {
-			vthread.Set(ctx, kv, vtid, pc, "done")
-			return nil
-		}
-		vthread.Set(ctx, kv, vtid, parentPC, "running")
-		return nil
-		case op.OpIf:
-			return If(ctx, kv, vtid, pc, inst)
-		case op.OpBr:
-			return Br(ctx, kv, vtid, pc, inst)
-		case op.OpGoto:
-			return Goto(ctx, kv, vtid, pc, inst)
-		default:
-			return fmt.Errorf("unknown control op: %s", inst.Opcode)
-		}
-	}
 
 func isFunctionCall(ctx context.Context, kv kvspace.KVSpace, opcode string) bool {
 	if _, err := kv.Get(keytree.SrcFunc(opcode)); err == nil {
