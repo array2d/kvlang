@@ -153,16 +153,17 @@ func looksLikeCall(line string) bool {
 	if strings.HasPrefix(line, "def ") || line == "}" || line == "{" {
 		return false
 	}
-	return strings.Contains(line, "->")
+	return strings.Contains(line, "->") || isCallExpr(line)
 }
 
 func parseTopLevelCall(line string) (ast.TopLevelCall, bool) {
 	arrowIdx := strings.Index(line, "->")
-	if arrowIdx < 0 {
-		return ast.TopLevelCall{}, false
+	left := strings.TrimSpace(line)
+	right := ""
+	if arrowIdx >= 0 {
+		left = strings.TrimSpace(line[:arrowIdx])
+		right = strings.TrimSpace(line[arrowIdx+2:])
 	}
-	left := strings.TrimSpace(line[:arrowIdx])
-	right := strings.TrimSpace(line[arrowIdx+2:])
 	open := strings.Index(left, "(")
 	if open < 0 {
 		return ast.TopLevelCall{}, false
@@ -408,4 +409,9 @@ func parseBlock(lines []string, start int) (*ast.BlockStmt, int) {
 
 	// 无法解析的格式
 	return s, start + 1
+}
+
+func isCallExpr(line string) bool {
+	open := strings.Index(line, "(")
+	return open > 0 && !strings.HasPrefix(line, "if ") && !strings.HasPrefix(line, "for ") && !strings.HasPrefix(line, "while ")
 }

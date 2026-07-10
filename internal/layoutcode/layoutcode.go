@@ -44,10 +44,10 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *
 	// 构建参数绑定
 	bindings := make(map[string]string)
 	for i, p := range params.Reads {
-		if i+1 < len(inst.Reads) { bindings[p] = inst.Reads[i+1] }
+		if i+1 < len(inst.Reads) { bindings[p] = inst.Reads[i+1]; bindings["./"+p] = inst.Reads[i+1] }
 	}
 	for i, p := range params.Writes {
-		if i < len(inst.Writes) { bindings[p] = inst.Writes[i] }
+		if i < len(inst.Writes) { bindings[p] = inst.Writes[i]; bindings["./"+p] = inst.Writes[i] }
 	}
 
 	// 复制指令到子栈, 替换形参
