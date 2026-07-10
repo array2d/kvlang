@@ -71,14 +71,17 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *
 func copyFunc(ctx context.Context, kv kvspace.KVSpace, srcPrefix, dstPrefix string, bindings map[string]string) int {
 	keys, _ := kv.Keys(srcPrefix + "/*")
 	idx := 0
+	seen := map[string]bool{}
 	for _, k := range keys {
 		suffix := strings.TrimPrefix(k, srcPrefix+"/")
 		// Block label 子路径 → 递归复制
 		if !strings.HasPrefix(suffix, "[") && !strings.Contains(suffix, "/") {
-			subKeys, _ := kv.Keys(k + "/*")
-			if len(subKeys) > 0 {
-				copyFunc(ctx, kv, k, dstPrefix+suffix+"/", bindings)
-			}
+			idx += copyFunc(ctx, kv, k, dstPrefix, bindings)
+			continue
+		}
+		if strings.Contains(suffix, "/") {
+			label := suffix[:strings.Index(suffix, "/")]
+			if !seen[label] { seen[label] = true; idx += copyFunc(ctx, kv, srcPrefix+"/"+label, dstPrefix, bindings) }
 			continue
 		}
 		// 检查是不是 [n,0] 格式
