@@ -103,19 +103,43 @@ def abs(A:int) -> (C:int) {
 abs(-5) -> './out'
 ```
 
-## 3. 内建算子
+## 3. 内置库
 
-| 类别 | 算子 |
+kvlang 的内置算子分为三组：
+
+### 3.1 VM 原生求值
+
+直接在 VM 进程内完成，无需 GPU。
+
+| 组 | 算子 | 示例 |
+|----|------|------|
+| 算术 | `+` `-` `*` `/` `%` | `A + B -> './C'` |
+| 比较 | `==` `!=` `<` `>` `<=` `>=` | `'./a' < 10 -> './cond'` |
+| 逻辑 | `&&` `\|\|` `!` | `'./a' && './b' -> './r'` |
+| 位运算 | `&` `\|` `^` `<<` `>>` | `A & 0xFF -> './r'` |
+| 数学 | `abs` `neg` `pow` `sqrt` `exp` `log` `min` `max` `sign` | `abs(-5) -> './r'` |
+| 类型转换 | `int` `float` `bool` | `int(3.7) -> './r'` |
+| IO | `print` `cerr` `input` | `print("A =", A)` |
+| 字符串 | `str.set("val") -> './key'` | `str.set("kvlangrun") -> './term'` |
+
+### 3.2 控制流
+
+| 算子 | 说明 |
 |------|------|
-| 算术 | `+` `-` `*` `/` `%` |
-| 比较 | `==` `!=` `<` `>` `<=` `>=` |
-| 逻辑 | `&&` `\|\|` `!` |
-| 数学 | `abs` `neg` `pow` `sqrt` `exp` `log` `min` `max` `sign` |
-| 类型转换 | `int` `float` `bool` |
-| 字符串 | `str.set("val")` → `./key` |
-| IO | `print(x, ...)` `cerr(x, ...)` |
+| `call` | 函数调用，VM 自动管理子栈 |
+| `return` | 函数返回，回传值到父栈 |
+| `if` / `else` | 条件分支（实验性） |
+| `for` / `while` | 循环（实验性） |
+| `break` / `continue` | 循环控制（实验性） |
+| `br` / `goto` | 基本块控制流（lowered） |
 
-> ⚠️ `print` 需要先执行 `str.set("kvlangrun") -> './term'` 才能看到输出。
+### 3.3 张量生命周期
+
+| 算子 | 说明 |
+|------|------|
+| `tensor.new(dtype, shape) -> path` | 在 GPU heap 上分配张量 |
+| `tensor.del(path)` | 释放张量 |
+| `tensor.clone(src) -> dst` | 深拷贝 |
 
 ## 4. 编写模式
 
@@ -215,7 +239,7 @@ reshape(/data/X, "[4,8]") -> /data/Y    # 变形
 | `func not found` | 调用了未定义的函数 | 先 `def` 再调用 |
 | `parse error` | 语法错误 | `./kvlang vet file.kv` 检查 |
 
-## 6. Claude 调试技巧
+## 7. Claude 调试技巧
 
 1. **先 vet 再 run**: `./kvlang vet test.kv && ./kvlang test.kv`
 2. **从最简单开始**: 单行 `1+2->./r` → 函数 → 多函数
