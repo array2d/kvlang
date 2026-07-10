@@ -1,0 +1,38 @@
+# structured: 结构化控制流 (if/for/while) 语法糖
+# 使用 --lower 标志可以查看 lowering 为基本块的结果
+
+def 结构化示例(flag:bool, X:int, N:int) -> (R:int) {
+    X + 1 -> './a'
+
+    if ('./flag') {
+        './a' * 2 -> './b'
+    } else {
+        './a' * 3 -> './b'
+    }
+
+    './b' + X -> './R'
+}
+
+def 循环示例(start:int, end:int) -> (sum:int) {
+    str.set("0") -> './sum'
+
+    for (i in start..end) {
+        './sum' + './i' -> './sum'
+    }
+
+    './sum' + 1 -> './sum'
+}
+
+def 条件循环(N:int) -> (acc:int) {
+    str.set("1") -> './acc'
+
+    while ('./acc' < N) {
+        './acc' * 2 -> './acc'
+    }
+}
+
+str.set("kvlangrun") -> './term'
+
+结构化示例(true, 5, 0) -> './out'
+循环示例(0, 10) -> './out2'
+条件循环(100) -> './out3'
