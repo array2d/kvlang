@@ -6,7 +6,6 @@ import (
 
 	"kvlang/internal/kvspace"
 	"kvlang/internal/op"
-	"kvlang/internal/op/builtin"
 	"kvlang/internal/vthread"
 )
 
@@ -18,9 +17,6 @@ type strVType struct{}
 func (strVType) Name() string { return "str" }
 
 func (s strVType) Exec(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) error {
-	if builtin.IsNativeOp(inst.Opcode) {
-		return builtin.Native(ctx, kv, vtid, pc, inst)
-	}
 	vthread.SetError(ctx, kv, vtid, pc, fmt.Sprintf("unknown str op: %s", inst.Opcode))
 	return fmt.Errorf("unknown str op: %s", inst.Opcode)
 }
