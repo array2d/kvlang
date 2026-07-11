@@ -58,10 +58,10 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *
 	if len(params.Writes) > 0 {
 		retRef := params.Writes[0]
 		if !strings.HasPrefix(retRef, "/") { retRef = "./" + retRef }
-		kv.Set(fmt.Sprintf("%s[%d,0]", root, count), "return", 0)
-		kv.Set(fmt.Sprintf("%s[%d,-1]", root, count), retRef, 0)
+		kv.Set(fmt.Sprintf("%s[%d,0]", root, count), "return")
+		kv.Set(fmt.Sprintf("%s[%d,-1]", root, count), retRef)
 	} else {
-		kv.Set(fmt.Sprintf("%s[%d,0]", root, count), "return", 0)
+		kv.Set(fmt.Sprintf("%s[%d,0]", root, count), "return")
 	}
 	return pc + "/[0,0]"
 }
@@ -90,19 +90,19 @@ func copyFunc(ctx context.Context, kv kvspace.KVSpace, srcPrefix, dstPrefix stri
 		val, err := kv.Get(k)
 		if err != nil { continue }
 		if v, ok := bindings[val]; ok { val = v }
-		kv.Set(fmt.Sprintf("%s[%d,0]", dstPrefix, idx), val, 0)
+		kv.Set(fmt.Sprintf("%s[%d,0]", dstPrefix, idx), val)
 
 		slotIdx := suffix[1:strings.Index(suffix, ",")]
 		for j := 1; j <= 10; j++ {
 			rk := fmt.Sprintf("%s/[%s,-%d]", srcPrefix, slotIdx, j)
 			if rv, err := kv.Get(rk); err == nil && rv != "" {
 				if v, ok := bindings[rv]; ok { rv = v }
-				kv.Set(fmt.Sprintf("%s[%d,-%d]", dstPrefix, idx, j), rv, 0)
+				kv.Set(fmt.Sprintf("%s[%d,-%d]", dstPrefix, idx, j), rv)
 			}
 			wk := fmt.Sprintf("%s/[%s,%d]", srcPrefix, slotIdx, j)
 			if wv, err := kv.Get(wk); err == nil && wv != "" {
 				if v, ok := bindings[wv]; ok { wv = v }
-				kv.Set(fmt.Sprintf("%s[%d,%d]", dstPrefix, idx, j), wv, 0)
+				kv.Set(fmt.Sprintf("%s[%d,%d]", dstPrefix, idx, j), wv)
 			}
 		}
 		idx++
@@ -141,7 +141,7 @@ func parseSig(sig string) ast.FormalParams {
 func RegisterBlocks(kv kvspace.KVSpace, parent string, body []ast.Stmt) {
 	for _, st := range body {
 		if b, ok := st.(*ast.BlockStmt); ok {
-			kv.Set(keytree.SrcFunc(parent+"/"+b.Label), "def "+b.Label+"() -> ()", 0)
+			kv.Set(keytree.SrcFunc(parent+"/"+b.Label), "def "+b.Label+"() -> ()")
 			RegisterBlocks(kv, parent+"/"+b.Label, b.Body)
 		}
 	}
@@ -167,7 +167,7 @@ func HandleReturn(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst
 		srcKey := keytree.VThreadAt(vtid, inst.Reads[0][2:])
 		if v, e := kv.Get(srcKey); e == nil && len(inst.Writes) > 0 {
 			slotKey := keytree.VThreadAt(vtid, inst.Writes[0][2:])
-			kv.Set(slotKey, v, 0)
+			kv.Set(slotKey, v)
 		}
 	}
 

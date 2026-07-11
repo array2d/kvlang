@@ -26,7 +26,7 @@ type Func struct {
 // Register 将函数定义写入 kvspace 空间。
 // Register 将函数签名写入 kvspace（body 由 layoutcode.WriteBody 写入）。
 func (fn *Func) Register(kv kvspace.KVSpace) error {
-	return kv.Set(keytree.SrcFunc(fn.Name), fn.Signature, 0)
+	return kv.Set(keytree.SrcFunc(fn.Name), fn.Signature)
 }
 
 // Instruction 表示一条 kvlang 指令。
@@ -51,12 +51,12 @@ func (i *Instruction) stmt() {}
 func (i *Instruction) FirstLine() string { return i.String() }
 func (i *Instruction) SetKV(kv kvspace.KVSpace, prefix string, idx *int) {
 	n := *idx
-	kv.Set(fmt.Sprintf("%s/[%d,0]", prefix, n), i.Opcode, 0)
+	kv.Set(fmt.Sprintf("%s/[%d,0]", prefix, n), i.Opcode)
 	for j, r := range i.Reads {
-		kv.Set(fmt.Sprintf("%s/[%d,-%d]", prefix, n, j+1), r, 0)
+		kv.Set(fmt.Sprintf("%s/[%d,-%d]", prefix, n, j+1), r)
 	}
 	for j, w := range i.Writes {
-		kv.Set(fmt.Sprintf("%s/[%d,%d]", prefix, n, j+1), w, 0)
+		kv.Set(fmt.Sprintf("%s/[%d,%d]", prefix, n, j+1), w)
 	}
 	*idx = n + 1
 }

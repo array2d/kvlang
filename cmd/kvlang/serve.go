@@ -23,8 +23,8 @@ import (
 func executeEntry(kv kvspace.KVSpace) {
 	st := vthread.VThread{PC: "[0,0]", Status: "init", Mode: "single"}
 	data, _ := json.Marshal(st)
-	kv.Set(keytree.VThread("run"), data, 0)
-	kv.Set(keytree.VThreadSlot("run", 0, 0), "pre_main", 0)
+	kv.Set(keytree.VThread("run"), data)
+	kv.Set(keytree.VThreadSlot("run", 0, 0), "pre_main")
 	logx.Info("[single] executing run")
 	kvcpu.Execute(context.Background(), kv, "run")
 }
@@ -82,7 +82,7 @@ func runServe(args []string) {
 func registerVM(ctx context.Context, kv kvspace.KVSpace, vmID string) {
 	reg := map[string]any{"status": "running", "pid": os.Getpid(), "started_at": time.Now().Unix()}
 	data, _ := json.Marshal(reg)
-	kv.Set(keytree.SysVM(vmID), data, 0)
+	kv.Set(keytree.SysVM(vmID), data)
 	logx.Info("VM-%s registered at %s", vmID, keytree.SysVM(vmID))
 }
 
@@ -101,7 +101,7 @@ func heartbeatLoop(ctx context.Context, kv kvspace.KVSpace, vmID string) {
 	writeHB := func(status string) {
 		hb := map[string]any{"ts": time.Now().Unix(), "status": status, "pid": os.Getpid()}
 		data, _ := json.Marshal(hb)
-		kv.Set(key, data, 0)
+		kv.Set(key, data)
 	}
 	writeHB("running")
 	ticker := time.NewTicker(2 * time.Second)
@@ -139,17 +139,17 @@ func mainWatcher(ctx context.Context, kv kvspace.KVSpace, vmID string) {
 
 			vtidStr := incrVtid(kv)
 			base := keytree.VThread(vtidStr)
-			kv.Set(base, `{"pc":"[0,0]","status":"init"}`, 0)
-			kv.Set(base+"/[0,0]", entry.Entry, 0)
+			kv.Set(base, `{"pc":"[0,0]","status":"init"}`)
+			kv.Set(base+"/[0,0]", entry.Entry)
 			for i, arg := range entry.Reads {
-				kv.Set(fmt.Sprintf("%s/[0,-%d]", base, i+1), arg, 0)
+				kv.Set(fmt.Sprintf("%s/[0,-%d]", base, i+1), arg)
 			}
-			kv.Set(base+"/[0,1]", "./ret", 0)
+			kv.Set(base+"/[0,1]", "./ret")
 			if entry.Term != "" {
-				kv.Set(keytree.VThreadTerm(vtidStr), entry.Term, 0)
+				kv.Set(keytree.VThreadTerm(vtidStr), entry.Term)
 			}
 			status, _ := json.Marshal(map[string]string{"vtid": vtidStr, "status": "executing"})
-			kv.Set(keytree.FuncMain, status, 0)
+			kv.Set(keytree.FuncMain, status)
 			notify, _ := json.Marshal(map[string]any{"event": "new_vthread", "vtid": vtidStr})
 			kv.Notify(keytree.NotifyVM, notify)
 			logx.Info("VM-%s → vthread %s created", vmID, vtidStr)
@@ -160,13 +160,13 @@ func mainWatcher(ctx context.Context, kv kvspace.KVSpace, vmID string) {
 func sysCmdListener(ctx context.Context, kv kvspace.KVSpace, vmID string, cancel context.CancelFunc) {
 	queue := keytree.SysCmdVM(vmID)
 	for {
-		result, err := kv.Watch(5*time.Second, queue)
+		result, err := kv.Watch(queue, 5*time.Second)
 		if err != nil {
 			if ctx.Err() != nil { return }
 			continue
 		}
 		var cmd struct{ Cmd string `json:"cmd"` }
-		if json.Unmarshal([]byte(result[1]), &cmd) == nil && cmd.Cmd == "shutdown" {
+		if json.Unmarshal([]byte(result), &cmd) == nil && cmd.Cmd == "shutdown" {
 			logx.Info("VM-%s sys shutdown", vmID)
 			cancel()
 			return

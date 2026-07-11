@@ -39,15 +39,15 @@ func cmdKVSpace(args []string) {
 
 	case "mget":
 		if len(sub) < 2 { usageExit("kvlang kvspace mget <key1> <key2> ...") }
-		vals, err := kv.MGet(sub[1:]...)
+		vals, err := kv.Gets(sub[1:]...)
 		if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
 		for i, v := range vals {
-			if v == nil { fmt.Printf("%s\t(nil)\n", sub[i+1]) } else { fmt.Printf("%s\t%v\n", sub[i+1], v) }
+			if v == "" { fmt.Printf("%s\t(nil)\n", sub[i+1]) } else { fmt.Printf("%s\t%s\n", sub[i+1], v) }
 		}
 
 	case "set":
 		if len(sub) < 3 { usageExit("kvlang kvspace set <key> <value>") }
-		kv.Set(sub[1], sub[2], 0)
+		kv.Set(sub[1], sub[2])
 
 	case "del":
 		if len(sub) < 2 { usageExit("kvlang kvspace del <key1> [key2 ...]") }
@@ -101,9 +101,9 @@ func kvWatch(kv kvspace.KVSpace, args []string) {
 		os.Exit(1)
 	}
 	key := fs.Arg(0)
-	results, err := kv.Watch(*timeout, key)
+	result, err := kv.Watch(key, *timeout)
 	if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
-	for _, r := range results { fmt.Println(r) }
+	fmt.Println(result)
 }
 
 func usageExit(msg string) {
@@ -122,20 +122,11 @@ func clearAll(kv kvspace.KVSpace) {
 		keytree.NotifyRoot,
 		keytree.DoneRoot,
 	} {
-		clearRoot(kv, root)
+		children, _ := kv.List(root)
+		for _, c := range children {
+			kv.DelR(root + "/" + c)
+		}
 	}
-}
-
-func clearRoot(kv kvspace.KVSpace, root string) {
-	children, _ := kv.List(root)
-	for _, c := range children { delRecursive(kv, root+"/"+c) }
-}
-
-func delRecursive(kv kvspace.KVSpace, prefix string) {
-	children, _ := kv.List(prefix)
-	for _, c := range children { delRecursive(kv, prefix+"/"+c) }
-	kv.Del(prefix)
-	kv.Del(prefix + "/.")
 }
 
 func printTree(kv kvspace.KVSpace, prefix, indent string) {

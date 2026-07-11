@@ -13,7 +13,7 @@ func (strOp) Call(f *op.Frame) error {
 	if len(inputs) > 0 { val = inputs[0].String() }
 	if len(f.Inst.Writes) > 0 {
 		wKey := resolveWriteKey(f.Vtid, f.Inst.Writes[0])
-		if err := f.KV.Set(wKey, val, 0); err != nil {
+		if err := f.KV.Set(wKey, val); err != nil {
 			vthread.SetError(bg, f.KV, f.Vtid, f.PC, err.Error())
 			return err
 		}

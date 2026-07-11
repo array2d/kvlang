@@ -36,7 +36,7 @@ func Pick(ctx context.Context, kv kvspace.KVSpace) string {
 		}
 		updated := vthread.VThread{PC: s.PC, Status: "running", Mode: s.Mode}
 		data, _ := json.Marshal(updated)
-		kv.Set(fullKey, data, 0)
+		kv.Set(fullKey, data)
 		return vtid
 	}
 	return ""
@@ -44,19 +44,19 @@ func Pick(ctx context.Context, kv kvspace.KVSpace) string {
 
 // Wait 阻塞等待新的 vthread 通知 (BLPOP keytree.NotifyVM)。
 func Wait(ctx context.Context, kv kvspace.KVSpace) {
-	vals, err := kv.Watch(5*time.Second, keytree.NotifyVM)
+	val, err := kv.Watch(keytree.NotifyVM, 5*time.Second)
 	if err != nil {
 		if !strings.Contains(err.Error(), "nil") {
 			logx.Debug("picker BLPOP: %v", err)
 		}
 		return
 	}
-	if len(vals) >= 2 {
+	if val != "" {
 		var notify struct {
 			Event string `json:"event"`
 			Vtid  string `json:"vtid"`
 		}
-		if json.Unmarshal([]byte(vals[1]), &notify) == nil {
+		if json.Unmarshal([]byte(val), &notify) == nil {
 			logx.Debug("notify: %s vtid=%s", notify.Event, notify.Vtid)
 		}
 	}

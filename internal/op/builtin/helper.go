@@ -42,7 +42,7 @@ func readInputs(f *op.Frame) []nativeValue {
 func writeResult(f *op.Frame, result nativeValue) error {
 	if len(f.Inst.Writes) > 0 {
 		outKey := resolveWriteKey(f.Vtid, f.Inst.Writes[0])
-		if err := f.KV.Set(outKey, result.String(), 0); err != nil { return err }
+		if err := f.KV.Set(outKey, result.String()); err != nil { return err }
 	}
 	vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
 	return nil

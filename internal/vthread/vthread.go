@@ -42,7 +42,7 @@ func Set(ctx context.Context, kv kvspace.KVSpace, vtid string, pc, status string
 		logx.Warn("state.Set: marshal vthread %s: %v", vtid, err)
 		return
 	}
-	kv.Set(keytree.VThread(vtid), data, 0)
+	kv.Set(keytree.VThread(vtid), data)
 }
 
 // SetError 标记 vthread 为 error 状态。
@@ -57,7 +57,7 @@ func SetError(ctx context.Context, kv kvspace.KVSpace, vtid string, pc string, e
 		logx.Warn("state.SetError: marshal vthread %s: %v", vtid, err)
 		return
 	}
-	kv.Set(keytree.VThread(vtid), data, 0)
+	kv.Set(keytree.VThread(vtid), data)
 }
 
 // CreateVThread 在 kvspace 中创建一个新虚线程。
@@ -65,15 +65,15 @@ func CreateVThread(ctx context.Context, kv kvspace.KVSpace, funcName string, rea
 	vtid := fmt.Sprintf("test-%d", time.Now().UnixNano())
 	st := VThread{PC: "[0,0]", Status: "init", Mode: "single"}
 	data, _ := json.Marshal(st)
-	if err := kv.Set(keytree.VThread(vtid), data, 0); err != nil {
+	if err := kv.Set(keytree.VThread(vtid), data); err != nil {
 		return "", fmt.Errorf("set state: %w", err)
 	}
-	kv.Set(keytree.VThreadSlot(vtid, 0, 0), funcName, 0)
+	kv.Set(keytree.VThreadSlot(vtid, 0, 0), funcName)
 	for i, r := range reads {
-		kv.Set(keytree.VThreadSlot(vtid, 0, -(i+1)), r, 0)
+		kv.Set(keytree.VThreadSlot(vtid, 0, -(i+1)), r)
 	}
 	for i, w := range writes {
-		kv.Set(keytree.VThreadSlot(vtid, 0, i+1), w, 0)
+		kv.Set(keytree.VThreadSlot(vtid, 0, i+1), w)
 	}
 
 	return vtid, nil
@@ -82,13 +82,13 @@ func CreateVThread(ctx context.Context, kv kvspace.KVSpace, funcName string, rea
 // WaitDone 阻塞等待 op-plat / heap-plat 完成通知。
 func WaitDone(ctx context.Context, kv kvspace.KVSpace, vtid string, timeout time.Duration) (map[string]interface{}, error) {
 	doneKey := keytree.Done(vtid)
-	result, err := kv.Watch(timeout, doneKey)
+	result, err := kv.Watch(doneKey, timeout)
 	if err != nil {
 		return nil, fmt.Errorf("waitDone timeout for %s: %w", doneKey, err)
 	}
 	var done map[string]interface{}
-	if len(result) > 1 {
-		if err := json.Unmarshal([]byte(result[1]), &done); err != nil {
+	if result != "" {
+		if err := json.Unmarshal([]byte(result), &done); err != nil {
 			logx.Warn("state.WaitDone: unmarshal done result for %s: %v", vtid, err)
 			return nil, fmt.Errorf("unmarshal done result: %w", err)
 		}

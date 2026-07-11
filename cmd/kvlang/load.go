@@ -104,7 +104,7 @@ func runCode(name string, rc io.Reader, addr string) {
 	preMain := ast.Func{Name: "pre_main", Signature: "def pre_main() -> ()", Body: toStmts(body)}
 	preMain = *lower.Func(&preMain)
 	layoutcode.WriteFunc(kv, &preMain)
-	kv.Set(keytree.FuncMain, `{"entry":"pre_main","reads":[],"writes":[]}`, 0)
+	kv.Set(keytree.FuncMain, `{"entry":"pre_main","reads":[],"writes":[]}`)
 
 	executeEntry(kv)
 }
@@ -129,7 +129,7 @@ func loadFunctions(kv kvspace.KVSpace, files []string) {
 	preMain := ast.Func{Name: "pre_main", Signature: "def pre_main() -> ()", Body: toStmts(body)}
 	preMain = *lower.Func(&preMain)
 	layoutcode.WriteFunc(kv, &preMain)
-	kv.Set(keytree.FuncMain, `{"entry":"pre_main","reads":[],"writes":[]}`, 0)
+	kv.Set(keytree.FuncMain, `{"entry":"pre_main","reads":[],"writes":[]}`)
 }
 
 // collectKVFiles 收集 path（文件或目录）下所有 .kv 文件路径。

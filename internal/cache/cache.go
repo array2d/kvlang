@@ -28,7 +28,7 @@ func NewKVCache(ctx context.Context, kv kvspace.KVSpace, prefix string) *KVCache
 		keys[i] = prefix + "/" + c
 	}
 
-	vals, err := kv.MGet(keys...)
+	vals, err := kv.Gets(keys...)
 	if err != nil {
 		return nil
 	}
@@ -40,8 +40,8 @@ func NewKVCache(ctx context.Context, kv kvspace.KVSpace, prefix string) *KVCache
 
 	for i, key := range keys {
 		localKey := strings.TrimPrefix(key, prefix)
-		if s, ok := vals[i].(string); ok {
-			c.KVs[localKey] = s
+		if vals[i] != "" {
+			c.KVs[localKey] = vals[i]
 		}
 	}
 
