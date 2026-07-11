@@ -2,7 +2,7 @@
 //
 // 存储约定：
 //   /src/<pkg>/<name>              函数完整源码文本（可读，原始）
-//   /func/<pkg>/<name>             编译后签名（供 parseSig 读取）
+//   /func/<pkg>/<name>             编译后签名（供 parser.ParseSignature 读取）
 //   /func/<pkg>/<name>/[i,j]       编译后指令
 //   /func/<pkg>/<name>/<label>/    基本块子路径
 //   /func/.idx/<name>              函数名 → pkg 反向索引
@@ -17,6 +17,7 @@ import (
 	"kvlang/internal/keytree"
 	"kvlang/internal/kvspace"
 	"kvlang/internal/op"
+	"kvlang/internal/parser"
 	"kvlang/internal/vthread"
 )
 
@@ -52,7 +53,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *
 		vthread.SetError(ctx, kv, vtid, pc, "func signature not found: "+funcName)
 		return pc
 	}
-	params := parseSig(sig)
+	params := parser.ParseSignature(sig)
 
 	// 构建参数绑定
 	bindings := make(map[string]string)
@@ -140,44 +141,6 @@ func copyFunc(ctx context.Context, kv kvspace.KVSpace, srcPrefix, dstPrefix stri
 		idx++
 	}
 	return idx
-}
-
-func parseSig(sig string) ast.FormalParams {
-	var fp ast.FormalParams
-	sig = strings.TrimSpace(sig)
-	if strings.HasPrefix(sig, "def ") {
-		sig = sig[4:]
-	}
-	arrow := strings.Index(sig, "->")
-	if arrow < 0 {
-		return fp
-	}
-	left := strings.TrimSpace(sig[:arrow])
-	right := strings.TrimSpace(sig[arrow+2:])
-	if lp := strings.Index(left, "("); lp >= 0 {
-		if rp := strings.LastIndex(left, ")"); rp > lp {
-			for _, p := range strings.Split(left[lp+1:rp], ",") {
-				name := strings.TrimSpace(p)
-				if colon := strings.Index(name, ":"); colon >= 0 {
-					name = name[:colon]
-				}
-				if name != "" {
-					fp.Reads = append(fp.Reads, strings.TrimSpace(name))
-				}
-			}
-		}
-	}
-	right = strings.Trim(right, "()")
-	for _, p := range strings.Split(right, ",") {
-		name := strings.TrimSpace(p)
-		if colon := strings.Index(name, ":"); colon >= 0 {
-			name = name[:colon]
-		}
-		if name != "" {
-			fp.Writes = append(fp.Writes, strings.TrimSpace(name))
-		}
-	}
-	return fp
 }
 
 // RegisterBlocks 为函数体内所有 BlockStmt label 注册编译后子函数签名。

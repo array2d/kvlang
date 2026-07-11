@@ -54,21 +54,3 @@ func Decode(ctx context.Context, kv kvspace.KVSpace, vtid string, pc string) (*I
 	return inst, nil
 }
 
-// DecodeFromCache 从本地缓存 map 解码 (子栈场景, 零 kvspace 访问)。
-func DecodeFromCache(cache map[string]string, pc string) *Instruction {
-	_, addr0 := parsePC(pc)
-	inst := &Instruction{}
-	inst.Opcode = cache[fmt.Sprintf("[%d,0]", addr0)]
-
-	for i := 1; i <= maxParams; i++ {
-		key := fmt.Sprintf("[%d,-%d]", addr0, i)
-		if v, ok := cache[key]; ok && v != "" {
-			inst.Reads = append(inst.Reads, v)
-		}
-		key = fmt.Sprintf("[%d,%d]", addr0, i)
-		if v, ok := cache[key]; ok && v != "" {
-			inst.Writes = append(inst.Writes, v)
-		}
-	}
-	return inst
-}

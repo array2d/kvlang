@@ -63,26 +63,6 @@ func TestIsTensorLifecycle(t *testing.T) {
 	}
 }
 
-func TestDecodeFromCache(t *testing.T) {
-	cache := map[string]string{
-		"[3,0]":  "add",
-		"[3,-1]": "./a",
-		"[3,-2]": "./b",
-		"[3,1]":  "./c",
-	}
-
-	inst := op.DecodeFromCache(cache, "[3,0]")
-	if inst.Opcode != "add" {
-		t.Errorf("opcode = %q, want 'add'", inst.Opcode)
-	}
-	if len(inst.Reads) != 2 || inst.Reads[0] != "./a" || inst.Reads[1] != "./b" {
-		t.Errorf("reads = %v, want [./a ./b]", inst.Reads)
-	}
-	if len(inst.Writes) != 1 || inst.Writes[0] != "./c" {
-		t.Errorf("writes = %v, want [./c]", inst.Writes)
-	}
-}
-
 // ── Route: error handling (no live kvspace needed) ──
 
 func TestRouteSelect_NoKV(t *testing.T) {

@@ -24,39 +24,6 @@ func If(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.Instr
 	return jumpOrNext(ctx, kv, vtid, pc, target)
 }
 
-// funcRoot 提取当前 PC 的函数根路径。
-// [0,0]/entry/[0,0] → [0,0]; [0,0] → [0,0]
-func funcRoot(pc string) string {
-	if idx := strings.LastIndex(pc, "/"); idx >= 0 {
-		// 检查最后一段是否是 block label（非 [n,m] 格式）
-		last := pc[idx+1:]
-		if len(last) > 0 && last[0] != '[' {
-			return pc[:idx] // 去掉 /label
-		}
-	}
-	return pc
-}
-
-// blockPC 构造跳转目标: funcRoot + label + "/[0,0]"
-func blockPC(pc, label string) string {
-	return funcRoot(pc) + "/" + label + "/[0,0]"
-}
-
-// Br 处理条件分支: br(cond, true_label, false_label).
-// handleBr 处理条件分支: 求值条件, 对目标 label 发起 call。
-func handleBr(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) error {
-	if len(inst.Reads) < 3 { return fmt.Errorf("br requires 3 args") }
-	condVal := readCond(kv, vtid, inst.Reads[0])
-	isTrue := condVal != "" && condVal != "0" && condVal != "false"
-	label := inst.Reads[2]
-	if isTrue { label = inst.Reads[1] }
-	callInst := &op.Instruction{Opcode: op.OpCall, Reads: []string{label}}
-	substackPC := layoutcode.HandleCall(ctx, kv, vtid, pc, callInst, false)
-	if substackPC == pc { return fmt.Errorf("br call %s failed", label) }
-	vthread.Set(ctx, kv, vtid, substackPC, "running")
-	return nil
-}
-
 // Goto 处理无条件跳转: goto(label).
 
 

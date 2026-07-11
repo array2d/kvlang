@@ -34,10 +34,13 @@ func Get(ctx context.Context, kv kvspace.KVSpace, vtid string) VThread {
 	return s
 }
 
-// Set 更新 vthread 的 PC 和 status。
+// Set 更新 vthread 的 PC 和 status，保留 Mode 等其他字段。
 func Set(ctx context.Context, kv kvspace.KVSpace, vtid string, pc, status string) {
-	s := VThread{PC: pc, Status: status}
-	data, err := json.Marshal(s)
+	cur := Get(ctx, kv, vtid)
+	cur.PC = pc
+	cur.Status = status
+	cur.Error = nil // 清除上一次错误（Set 表示正常推进）
+	data, err := json.Marshal(cur)
 	if err != nil {
 		logx.Warn("state.Set: marshal vthread %s: %v", vtid, err)
 		return
