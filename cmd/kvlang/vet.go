@@ -1,8 +1,10 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"kvlang/internal/ast"
 	"kvlang/internal/lower"
@@ -10,45 +12,42 @@ import (
 )
 
 func cmdVet(args []string) {
-	dump := false
-	lowerFlag := false
-	filtered := make([]string, 0, len(args))
-	for _, a := range args {
-		switch a {
-		case "--dump":
-			dump = true
-		case "--lower":
-			lowerFlag = true
-		default:
-			filtered = append(filtered, a)
-		}
+	fs := flag.NewFlagSet("vet", flag.ExitOnError)
+	dump      := fs.Bool("dump",  false, "输出 AST 树形结构")
+	lowerFlag := fs.Bool("lower", false, "lower 结构化控制流 → 基本块")
+	code      := fs.String("c",   "",    "内联代码")
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "usage: kvlang vet [--dump] [--lower] [-c code | <file.kv>]")
+		fs.PrintDefaults()
+	}
+	fs.Parse(args)
+
+	var (name string; rc interface{ Read([]byte) (int, error) })
+	switch {
+	case *code != "":
+		name = "inline"
+		rc = strings.NewReader(*code)
+	case fs.NArg() > 0:
+		name = fs.Arg(0)
+	case !isTerminal():
+		name, rc = "stdin", os.Stdin
+	default:
+		fs.Usage()
+		os.Exit(1)
 	}
 
-	mode, name, rc := parseInput(filtered, "vet")
-	switch mode {
-	case modeServe:
-		fmt.Fprintln(os.Stderr, "usage: kvlang vet [--dump] [--lower] [<file.kv>]")
-		fmt.Fprintln(os.Stderr, "  <file.kv>        validate file")
-		fmt.Fprintln(os.Stderr, "  -c \"code\"         validate inline code")
-		fmt.Fprintln(os.Stderr, "  --dump            print AST tree")
-		fmt.Fprintln(os.Stderr, "  --lower           lower structured CF → basic blocks")
-		fmt.Fprintln(os.Stderr, "  echo \"code\" | ...  validate from pipe")
-		os.Exit(1)
-	case modeFile:
-		df, err := parser.ParseFile(name)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
-			os.Exit(1)
-		}
-		printVetResult(name, df, dump, lowerFlag)
-	case modeInline, modePipe:
-		df, err := parser.ParseCode(rc)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
-			os.Exit(1)
-		}
-		printVetResult(name, df, dump, lowerFlag)
+	var df *ast.File
+	var err error
+	if name == "inline" || name == "stdin" {
+		df, err = parser.ParseCode(rc)
+	} else {
+		df, err = parser.ParseFile(name)
 	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
+		os.Exit(1)
+	}
+	printVetResult(name, df, *dump, *lowerFlag)
 }
 
 func printVetResult(name string, df *ast.File, dump, lowerFlag bool) {

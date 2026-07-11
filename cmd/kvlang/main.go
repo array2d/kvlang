@@ -19,7 +19,7 @@ func main() {
 	if len(args) > 0 {
 		switch args[0] {
 		case "serve":
-			runServe()
+			runServe(args[1:])
 			return
 		case "load":
 			cmdLoad(args[1:])

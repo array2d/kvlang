@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -29,8 +30,16 @@ func executeEntry(kv kvspace.KVSpace) {
 }
 
 // runServe 启动 VM daemon，持续监听并执行 vthread。
-func runServe() {
-	addr := "127.0.0.1:6379"
+// args 为 serve 子命令的剩余参数（nil 或空切片均可）。
+func runServe(args []string) {
+	fs := flag.NewFlagSet("serve", flag.ExitOnError)
+	addr := fs.String("addr", "127.0.0.1:6379", "Redis 地址 (host:port)")
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "usage: kvlang serve [--addr host:port]")
+		fs.PrintDefaults()
+	}
+	fs.Parse(args)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -39,9 +48,9 @@ func runServe() {
 	workers := runtime.GOMAXPROCS(0)
 	// 每个 worker 最多占用 1 个连接做 BLPOP，额外 16 用于 mainWatcher/heartbeat/syscmd 等。
 	poolSize := workers + 16
-	logx.Info("VM-%s starting with %d workers, kv=%s pool=%d", vmID, workers, addr, poolSize)
+	logx.Info("VM-%s starting with %d workers, kv=%s pool=%d", vmID, workers, *addr, poolSize)
 
-	kv := kvspace.ConnPool(addr, poolSize)
+	kv := kvspace.ConnPool(*addr, poolSize)
 	defer kv.DisConn()
 	registerDefaultTerm(kv)
 
@@ -164,4 +173,3 @@ func sysCmdListener(ctx context.Context, kv kvspace.KVSpace, vmID string, cancel
 		}
 	}
 }
-

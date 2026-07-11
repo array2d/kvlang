@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -17,54 +18,56 @@ import (
 )
 
 // cmdLoad 将 .kv 文件加载进 kvspace，不执行。
-// 加载后可由 serve daemon 或后续 run 命令执行。
 func cmdLoad(args []string) {
-	addr := "127.0.0.1:6379"
-	var rest []string
-	for i := 0; i < len(args); i++ {
-		if args[i] == "--addr" && i+1 < len(args) && strings.Contains(args[i+1], ":") {
-			addr = args[i+1]
-			i++
-		} else {
-			rest = append(rest, args[i])
-		}
-	}
-	args = rest
-	if len(args) == 0 {
+	fs := flag.NewFlagSet("load", flag.ExitOnError)
+	addr := fs.String("addr", "127.0.0.1:6379", "Redis 地址 (host:port)")
+	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: kvlang load [--addr host:port] <file.kv|dir>")
+		fs.PrintDefaults()
+	}
+	fs.Parse(args)
+
+	if fs.NArg() == 0 {
+		fs.Usage()
 		os.Exit(1)
 	}
 
-	kv := kvspace.Conn(addr)
+	kv := kvspace.Conn(*addr)
 	defer kv.DisConn()
 
-	files, err := collectKVFiles(args[0])
+	files, err := collectKVFiles(fs.Arg(0))
 	if err != nil { logx.Fatal("collect .kv files: %v", err) }
-	if len(files) == 0 { logx.Fatal("no .kv files found in: %s", args[0]) }
+	if len(files) == 0 { logx.Fatal("no .kv files found in: %s", fs.Arg(0)) }
 
 	loadFunctions(kv, files)
 	logx.Info("loaded %d file(s) → ready, run 'kvlang serve' to execute", len(files))
 }
 
-// cmdRun 根据输入模式路由到对应执行路径。
+// cmdRun 解析参数并路由到对应执行路径：内联 / 文件 / 管道 / serve。
 func cmdRun(args []string) {
-	mode, name, rc := parseInput(args, "run")
-	switch mode {
-	case modeServe:
-		runServe()
-	case modeFile:
-		runFile(args)
-	case modeInline, modePipe:
-		runCode(name, rc)
+	fs := flag.NewFlagSet("run", flag.ExitOnError)
+	addr := fs.String("addr", "127.0.0.1:6379", "Redis 地址 (host:port)")
+	code := fs.String("c", "", "内联代码（直接执行字符串）")
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "usage: kvlang [--addr host:port] [-c code | <file.kv>]")
+		fs.PrintDefaults()
+	}
+	fs.Parse(args)
+
+	switch {
+	case *code != "":
+		runCode("inline", strings.NewReader(*code), *addr)
+	case fs.NArg() > 0:
+		runFile(*addr, fs.Arg(0))
+	case !isTerminal():
+		runCode("stdin", os.Stdin, *addr)
+	default:
+		runServe(nil)
 	}
 }
 
 // runFile 加载 .kv 文件后单次执行。
-func runFile(args []string) {
-	addr := "127.0.0.1:6379"
-	if len(args) > 1 { addr = args[1] }
-	path := args[0]
-
+func runFile(addr, path string) {
 	kv := kvspace.Conn(addr)
 	defer kv.DisConn()
 	registerDefaultTerm(kv)
@@ -78,8 +81,8 @@ func runFile(args []string) {
 }
 
 // runCode 从 io.Reader 加载代码后单次执行（内联 / 管道模式）。
-func runCode(name string, rc io.Reader) {
-	kv := kvspace.Conn("127.0.0.1:6379")
+func runCode(name string, rc io.Reader, addr string) {
+	kv := kvspace.Conn(addr)
 	defer kv.DisConn()
 	registerDefaultTerm(kv)
 
@@ -157,4 +160,3 @@ func toStmts(lines []string) []ast.Stmt {
 	}
 	return stmts
 }
-
