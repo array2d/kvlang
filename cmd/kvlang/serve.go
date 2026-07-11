@@ -138,8 +138,10 @@ func mainWatcher(ctx context.Context, kv kvspace.KVSpace, vmID string) {
 			kv.Del(keytree.FuncMain)
 
 			vtidStr := incrVtid(kv)
+			st := vthread.VThread{PC: "[0,0]", Status: "init", Mode: "single"}
+			stData, _ := json.Marshal(st)
+			kv.Set(keytree.VThread(vtidStr), stData)
 			base := keytree.VThread(vtidStr)
-			kv.Set(base, `{"pc":"[0,0]","status":"init"}`)
 			kv.Set(base+"/[0,0]", entry.Entry)
 			for i, arg := range entry.Reads {
 				kv.Set(fmt.Sprintf("%s/[0,-%d]", base, i+1), arg)
