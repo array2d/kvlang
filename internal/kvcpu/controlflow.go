@@ -126,20 +126,13 @@ func brToCall(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op
 func resolveLabel(kv kvspace.KVSpace, vtid, pc, label string) string {
 	// 若 label 已含 / → 直接使用
 	if strings.Contains(label, "/") { return label }
-	// 从 vthread 状态取当前函数名 → 拼接 parent/label
-	s := vthread.Get(context.Background(), kv, vtid)
-	funcPC := s.PC
-	if idx := strings.LastIndex(funcPC, "/"); idx >= 0 {
-		funcPC = funcPC[:idx]
-	}
+	// 从 vthread 入口槽取当前函数名 → 拼接 funcName/label
 	entryKey := keytree.VThreadSlot(vtid, 0, 0)
 	if funcName, err := kv.Get(entryKey); err == nil {
-		// 遍历 /src/func/<funcName>/ 查找 block
-		children, _ := kv.List(keytree.SrcFunc(funcName))
-		for _, c := range children {
-			if c == label {
-				return funcName + "/" + label
-			}
+		qualified := funcName + "/" + label
+		// 通过反向索引验证块是否存在
+		if pkg, err := kv.Get(keytree.FuncIdx(qualified)); err == nil && pkg != "" {
+			return qualified
 		}
 	}
 	return label

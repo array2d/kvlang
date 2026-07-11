@@ -82,10 +82,16 @@ func Execute(ctx context.Context, kv kvspace.KVSpace, vtid string) {
 
 
 func isFunctionCall(ctx context.Context, kv kvspace.KVSpace, opcode string) bool {
-	if _, err := kv.Get(keytree.SrcFunc(opcode)); err == nil {
+	// 通过反向索引判断是否为用户定义函数
+	if pkg, err := kv.Get(keytree.FuncIdx(opcode)); err == nil && pkg != "" {
 		return true
 	}
-	for _, backend := range []string{"op-metal", "op-cuda", "op-cpu"} {
+	// 动态枚举已注册后端，不硬编码后端名
+	backends, err := kv.List(keytree.OpRoot)
+	if err != nil {
+		return false
+	}
+	for _, backend := range backends {
 		if _, err := kv.Get(keytree.OpBackendFunc(backend, opcode)); err == nil {
 			return true
 		}

@@ -184,8 +184,8 @@ check_exit "get 已删除 → exit 1" 1         "$KV kvspace get /test/x"
 section "§8 kvspace tree / dump"
 $KV kvspace clear >/dev/null 2>&1
 $KV load $PRINT_INT >/dev/null 2>&1
-check_out "tree 含函数名"       "print_int"  "$KV kvspace tree /src/func"
-check_out "dump 含签名 def"     "def "       "$KV kvspace dump /src/func/print_int"
+check_out "tree 含函数名"       "print_int"  "$KV kvspace tree /src"
+check_out "dump 含签名 def"     "def "       "$KV kvspace dump /src/print/print_int"
 
 section "§8 kvspace notify / watch"
 $KV kvspace watch --timeout 3s /test/notify >"$WATCH_OUT" 2>&1 &
@@ -203,7 +203,7 @@ check_err  "watch 非法 duration"    "invalid value" "$KV kvspace watch --timeo
 section "§8 kvspace --addr / clear"
 check_out  "kvspace --addr get"   "entry"  "$KV kvspace --addr 127.0.0.1:6379 get /func/main"
 $KV kvspace clear >/dev/null 2>&1
-check_exit "clear 后 list 为空"   1        "$KV kvspace list /src/func 2>/dev/null | grep -q ."
+check_exit "clear 后 list 为空"   1        "$KV kvspace list /src 2>/dev/null | grep -q ."
 
 # ── §9 flag 错误处理 ─────────────────────────────────────────────────────────
 section "§9 Flag 错误处理"
@@ -226,10 +226,97 @@ if [ -z "$REDIS_LEAK" ]; then ok "零 redis 包直引用"; else fail "redis 泄�
 VTHREAD_LEAK=$(grep -rn '"/vthread/' --include="*.go" . | grep -v "internal/keytree" || true)
 if [ -z "$VTHREAD_LEAK" ]; then ok "零硬编码 /vthread/ 路径"; else fail "/vthread/ 泄漏: $VTHREAD_LEAK"; fi
 
-SRCFUNC_LEAK=$(grep -rn '"/src/func/' --include="*.go" . | grep -v "internal/keytree" || true)
-if [ -z "$SRCFUNC_LEAK" ]; then ok "零硬编码 /src/func/ 路径"; else fail "/src/func/ 泄漏: $SRCFUNC_LEAK"; fi
+SRCFUNC_LEAK=$(grep -rn '"\/src\/' --include="*.go" . | grep -v "internal/keytree" || true)
+if [ -z "$SRCFUNC_LEAK" ]; then ok "零硬编码 /src/ 路径"; else fail "/src/ 泄漏: $SRCFUNC_LEAK"; fi
 
 check_exit "check-keytree hook"  0  '.claude/hooks/check-keytree.sh'
+
+# ── §11 vet 全量（所有非 tensor/index .kv 文件）────────────────────────────
+section "§11 vet 全量"
+VET_FAIL=0
+VET_PASS=0
+while IFS= read -r f; do
+  should_run "§11 vet 全量" || break
+  result=$(./kvlang vet "$f" 2>&1)
+  if [ $? -eq 0 ]; then
+    VET_PASS=$((VET_PASS+1))
+  else
+    fail "vet $f: $result"
+    VET_FAIL=$((VET_FAIL+1))
+  fi
+done < <(find example/kvlang/builtin example/kvlang/controlflow \
+           -name "*.kv" ! -name "index.kv" | sort)
+if should_run "§11 vet 全量"; then
+  if [ $VET_FAIL -eq 0 ]; then
+    ok "vet 全量通过 ($VET_PASS 个文件)"
+    PASS=$((PASS+1))
+  fi
+  [ $VET_FAIL -gt 0 ] && FAIL=$((FAIL+VET_FAIL))
+fi
+
+# ── §12 run builtin（有预期输出的文件）────────────────────────────────────
+section "§12 run builtin arith"
+run_kv() { ./kvlang kvspace clear >/dev/null 2>&1; timeout 10 $KV "$1" 2>/dev/null; }
+BA=example/kvlang/builtin/arith
+
+check_out "arith/add   C=5"    "C = 5"    'run_kv '"$BA/add.kv"
+check_out "arith/sub   C=7"    "C = 7"    'run_kv '"$BA/sub.kv"
+check_out "arith/mul   C=42"   "C = 42"   'run_kv '"$BA/mul.kv"
+check_out "arith/div   C=7.5"  "C = 7.5"  'run_kv '"$BA/div.kv"
+check_out "arith/abs   C=5"    "C = 5"    'run_kv '"$BA/abs.kv"
+check_out "arith/neg   C=-5"   "C = -5"   'run_kv '"$BA/neg.kv"
+check_out "arith/sign  C=-1"   "C = -1"   'run_kv '"$BA/sign.kv"
+check_out "arith/pow   C=8"    "C = 8"    'run_kv '"$BA/pow.kv"
+check_out "arith/sqrt  C=4"    "C = 4"    'run_kv '"$BA/sqrt.kv"
+check_out "arith/max   C=7"    "C = 7"    'run_kv '"$BA/max.kv"
+check_out "arith/min   C=-2"   "C = -2"   'run_kv '"$BA/min.kv"
+check_out "arith/exp   C=7"    "C = 7"    'run_kv '"$BA/exp.kv"
+check_out "arith/log   C=2"    "C = 2"    'run_kv '"$BA/log.kv"
+check_out "arith/double_op  S=13"   "S = 13"  'run_kv '"$BA/double_op.kv"
+check_out "arith/double_op_cstyle S=13" "S = 13" 'run_kv '"$BA/double_op_cstyle.kv"
+check_out "arith/three_add R=9"     "R = 9"   'run_kv '"$BA/three_add.kv"
+check_out "arith/poly3 Y=35"        "Y = 35"  'run_kv '"$BA/poly3.kv"
+
+section "§12 run builtin print/cast/chain/compare/logic"
+BP=example/kvlang/builtin/print
+check_out "print/print_int   X=42"    "X = 42"   'run_kv '"$BP/print_int.kv"
+check_out "print/print_bool  C=true"  "C = true" 'run_kv '"$BP/print_bool.kv"
+check_out "print/print_multi R=6"     "R = 6"    'run_kv '"$BP/print_multi.kv"
+check_out "print/print_chain D=20"    "D = 20"   'run_kv '"$BP/print_chain.kv"
+
+BC=example/kvlang/builtin/cast
+check_out "cast/float  C=42.0"  "C = 42.0" 'run_kv '"$BC/float.kv"
+check_out "cast/int    C=3"     "C = 3"    'run_kv '"$BC/int.kv"
+
+check_out "chain/chain D=20"    "D = 20"   'run_kv example/kvlang/builtin/chain/chain.kv'
+check_out "compare/eq  C=true"  "C = true" 'run_kv example/kvlang/builtin/compare/eq.kv'
+check_out "compare/lt  C=true"  "C = true" 'run_kv example/kvlang/builtin/compare/lt.kv'
+check_out "logic/and   C=false" "C = false" 'run_kv example/kvlang/builtin/logic/and.kv'
+check_out "logic/bool  C=true"  "C = true"  'run_kv example/kvlang/builtin/logic/bool.kv'
+check_out "logic/not   C=false" "C = false" 'run_kv example/kvlang/builtin/logic/not.kv'
+
+section "§12 run builtin native（无 print，验 exit 0）"
+NAT_FAIL=0; NAT_PASS=0
+while IFS= read -r f; do
+  should_run "§12 run builtin native" || break
+  ./kvlang kvspace clear >/dev/null 2>&1
+  timeout 10 $KV "$f" >/dev/null 2>/dev/null
+  rc=$?
+  if [ $rc -eq 0 ]; then
+    NAT_PASS=$((NAT_PASS+1))
+  else
+    fail "native exit=$rc: $f"
+    NAT_FAIL=$((NAT_FAIL+1))
+  fi
+done < <(find example/kvlang/builtin/native -name "*.kv" ! -name "index.kv" | sort)
+if should_run "§12 run builtin native"; then
+  if [ $NAT_FAIL -eq 0 ]; then
+    ok "native 全量 exit 0 ($NAT_PASS 个文件)"
+    PASS=$((PASS+1))
+  else
+    FAIL=$((FAIL+NAT_FAIL))
+  fi
+fi
 
 # ── 汇总 ─────────────────────────────────────────────────────────────────────
 echo

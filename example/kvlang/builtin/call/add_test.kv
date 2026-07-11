@@ -3,6 +3,6 @@ def add_test(A:tensor, B:tensor) -> (C:tensor) {
     add(A, B) -> './C'
 }
 
-# This top-level call requires booted services (heap-plat + op-metal)
+# This top-level call requires booted services (heap-plat + op-plat)
 # with tensors at /data/a and /data/b already created.
 # add_test(/data/a, /data/b) -> '/data/c'

@@ -4,95 +4,148 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-		"kvlang/internal/logx"
-	"kvlang/internal/keytree"
 	"math"
 	"strings"
 
+	"kvlang/internal/keytree"
 	"kvlang/internal/kvspace"
+	"kvlang/internal/logx"
 )
 
-// Select 根据 opcode 选择负载最低的 op-plat 实例
-// 返回实例标识符, e.g., "metal:0", "cuda:1"
-func Select(ctx context.Context, kv kvspace.KVSpace, opcode string) (string, error) {
-	// 1. 找到支持该算子的所有程序
-	programs, err := kv.List(keytree.OpRoot)
+// instInfo 是后端实例在 /sys/{op,heap}-plat/<inst> 中存储的注册信息。
+type instInfo struct {
+	Program string  `json:"program"` // 后端名，如 "op-cuda"
+	Status  string  `json:"status"`  // "running" | "stopped"
+	Load    float64 `json:"load"`    // 负载 [0,1]
+}
+
+// selectPlat 通用实例选择器：
+//   - root    = "/sys/op-plat" 或 "/sys/heap-plat"
+//   - prefix  = "op-" 或 "heap-"
+//   - backend = 已确定的后端名，如 "cuda"
+//
+// 返回去掉前缀后的实例标识符，如 "cuda:0"。
+func selectPlat(ctx context.Context, kv kvspace.KVSpace, root, prefix, backend string) (string, error) {
+	instances, err := kv.List(root)
 	if err != nil {
-		return "", fmt.Errorf("list op programs: %w", err)
-	}
-
-	var chosenProgram string
-	for _, progKey := range programs {
-		parts := strings.Split(progKey, "/")
-		if len(parts) < 3 {
-			continue
-		}
-		backend := parts[2]
-		if _, err := kv.Get(keytree.OpBackendFunc(backend, opcode)); err == nil {
-			chosenProgram = backend
-			break
-		}
-	}
-
-	if chosenProgram == "" {
-		return "", fmt.Errorf("no op-plat supports opcode: %s", opcode)
-	}
-
-	// 2. 选择该程序下负载最低的进程实例
-	instances, err := kv.List(keytree.SysRoot + "/op-plat")
-	if err != nil {
-		return "", fmt.Errorf("list op-plat instances: %w", err)
-	}
-
-	type instInfo struct {
-		Program string  `json:"program"`
-		Status  string  `json:"status"`
-		Load    float64 `json:"load"`
+		return "", fmt.Errorf("list %s: %w", root, err)
 	}
 
 	bestLoad := math.MaxFloat64
 	bestInstance := ""
 
-	for _, instKey := range instances {
-		if !strings.Contains(instKey, chosenProgram) {
+	for _, inst := range instances {
+		// inst = "op-cuda:0" 或 "heap-pytorch:1" 等
+		nameWithoutPrefix := strings.TrimPrefix(inst, prefix)
+		// nameWithoutPrefix = "cuda:0"，取冒号前得 "cuda"
+		instBackend := nameWithoutPrefix
+		if idx := strings.IndexByte(nameWithoutPrefix, ':'); idx >= 0 {
+			instBackend = nameWithoutPrefix[:idx]
+		}
+		if instBackend != backend {
 			continue
 		}
 
-		val, err := kv.Get(instKey)
+		val, err := kv.Get(root + "/" + inst)
 		if err != nil {
 			continue
 		}
 		var info instInfo
 		if err := json.Unmarshal([]byte(val), &info); err != nil {
-			logx.Debug("route.Select: unmarshal instance info %s: %v", instKey, err)
+			logx.Debug("selectPlat: unmarshal %s/%s: %v", root, inst, err)
 			continue
 		}
-
 		if info.Status != "running" {
 			continue
 		}
 		if info.Load < bestLoad {
 			bestLoad = info.Load
-			// "/sys/op-plat/op-metal:0" → "metal:0"
-			parts := strings.Split(instKey, "/")
-			lastPart := parts[len(parts)-1]
-			bestInstance = strings.TrimPrefix(lastPart, "op-")
+			bestInstance = nameWithoutPrefix // "cuda:0"
 		}
 	}
 
 	if bestInstance == "" {
-		return "", fmt.Errorf("no running op-plat instance for %s (program %s)", opcode, chosenProgram)
+		return "", fmt.Errorf("no running %s instance for backend=%s", root, backend)
 	}
-
 	return bestInstance, nil
 }
 
-// DetermineBackend 判断 func 的编译后端 (按优先级)
-func DetermineBackend(ctx context.Context, kv kvspace.KVSpace, funcName string) string {
-	for _, b := range []string{"op-metal", "op-cuda", "op-cpu"} {
-		if _, err := kv.Get(keytree.OpBackendFunc(b, funcName)); err == nil {
-			return b
+// Select 根据 opcode 动态选择负载最低的 op-plat 实例。
+// 返回实例标识符（去掉 "op-" 前缀），如 "cuda:0"、"pytorch:1"。
+//
+// 检测流程：
+//  1. kv.List("/op")                   → 所有已注册后端名，如 ["cuda", "pytorch", "jax"]
+//  2. /op/<backend>/func/<opcode>      → 筛选支持该 opcode 的后端
+//  3. kv.List("/sys/op-plat")          → 运行中实例，如 ["op-cuda:0", "op-pytorch:0"]
+//  4. 读取 {status, load}，选负载最低者
+func Select(ctx context.Context, kv kvspace.KVSpace, opcode string) (string, error) {
+	backends, err := kv.List(keytree.OpRoot)
+	if err != nil {
+		return "", fmt.Errorf("list /op backends: %w", err)
+	}
+
+	var chosenBackend string
+	for _, backend := range backends {
+		if _, err := kv.Get(keytree.OpBackendFunc(backend, opcode)); err == nil {
+			chosenBackend = backend
+			break
 		}
 	}
-	return "op-metal"
+	if chosenBackend == "" {
+		return "", fmt.Errorf("no registered backend supports opcode=%s", opcode)
+	}
+
+	return selectPlat(ctx, kv, keytree.SysOpPlatRoot, "op-", chosenBackend)
+}
+
+// SelectHeap 动态选择负载最低的 heap-plat 实例。
+// heap-plat 负责张量生命周期（new/del/clone），不区分 opcode。
+//
+// 检测流程：
+//  1. kv.List("/sys/heap-plat")  → 运行中实例，如 ["heap-cuda:0", "heap-cpu:0"]
+//  2. 读取 {status, load}，选负载最低者（不限后端类型）
+func SelectHeap(ctx context.Context, kv kvspace.KVSpace) (string, error) {
+	instances, err := kv.List(keytree.SysHeapPlatRoot)
+	if err != nil {
+		return "", fmt.Errorf("list /sys/heap-plat: %w", err)
+	}
+
+	bestLoad := math.MaxFloat64
+	bestInstance := ""
+
+	for _, inst := range instances {
+		val, err := kv.Get(keytree.SysHeapPlatInst(inst))
+		if err != nil {
+			continue
+		}
+		var info instInfo
+		if err := json.Unmarshal([]byte(val), &info); err != nil {
+			logx.Debug("SelectHeap: unmarshal %s: %v", inst, err)
+			continue
+		}
+		if info.Status != "running" {
+			continue
+		}
+		if info.Load < bestLoad {
+			bestLoad = info.Load
+			bestInstance = strings.TrimPrefix(inst, "heap-") // "cuda:0"
+		}
+	}
+
+	if bestInstance == "" {
+		return "", fmt.Errorf("no running heap-plat instance")
+	}
+	return bestInstance, nil
+}
+
+// ListBackends 返回当前 kvspace 中所有已注册后端名称。
+// 即 kv.List("/op") 的结果，如 ["cuda", "pytorch", "jax", "triton", "tvm"]。
+func ListBackends(ctx context.Context, kv kvspace.KVSpace) ([]string, error) {
+	return kv.List(keytree.OpRoot)
+}
+
+// BackendSupports 返回 backend 是否支持某 opcode。
+func BackendSupports(ctx context.Context, kv kvspace.KVSpace, backend, opcode string) bool {
+	_, err := kv.Get(keytree.OpBackendFunc(backend, opcode))
+	return err == nil
 }

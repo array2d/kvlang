@@ -40,6 +40,6 @@ func showHelp() {
 	fmt.Fprintln(os.Stderr, "  echo 'print(\"hi\")' | kvlang    管道执行")
 	fmt.Fprintln(os.Stderr, "  kvlang load file.kv            加载不执行")
 	fmt.Fprintln(os.Stderr, "  kvlang serve                   启动 daemon")
-	fmt.Fprintln(os.Stderr, "  kvlang kvspace dump /src/func  查看已加载函数")
+	fmt.Fprintln(os.Stderr, "  kvlang kvspace dump /src        查看已加载函数源码")
 	os.Exit(0)
 }

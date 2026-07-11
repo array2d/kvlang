@@ -1,5 +1,5 @@
 # native_and_gpu: VM 原生标量计算与 GPU tensor 操作交叉执行
-# 验证 VM native eval → heap-plat → op-metal 混合调度正确性
+# 验证 VM native eval → heap-plat → op-plat 混合调度正确性
 def native_and_gpu(N:int) -> ('/data/final') {
     # Step 1: VM 原生计算确定 tensor 大小
     N * 4 -> './size'

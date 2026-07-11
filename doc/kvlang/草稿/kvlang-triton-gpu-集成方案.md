@@ -1,5 +1,9 @@
 # kvlang Tensor 计算对接 Triton + GPU 加速器方案
 
+> **注**：本文以 Triton/CUDA 为例说明集成模式。
+> kvlang 后端是动态的，后端名（op-cuda / op-pytorch / op-jax / op-triton / op-tvm 等）
+> 由外部 op-plat 进程自注册，kvlang 不硬编码任何后端名称。
+
 ## 1. 当前架构：异步消息分发
 
 ```

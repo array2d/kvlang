@@ -1,5 +1,5 @@
 # clone_and_use: 创建 tensor → clone → 分别计算 → 合并结果 → 清理
-# 验证 heap-plat clonetensor + op-metal compute 协同
+# 验证 heap-plat clonetensor + op-plat compute 协同
 def clone_and_use() -> ('/data/merged') {
     newtensor("f32", "[128]") -> '/data/original'
     zeros() -> '/data/original'

@@ -151,7 +151,7 @@ x + 1.0 -> y          # addscalar 算子, 需要 op-plat 注册
 op-plat 注册格式：
 
 ```json
-// /op/op-cuda/add
+// /op/cuda/func/add   （cuda 为后端名，动态注册）
 {
   "symbols": ["+"],
   "dtype": ["f32", "f16", "bf16"],

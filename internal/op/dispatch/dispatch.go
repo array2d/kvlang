@@ -180,7 +180,7 @@ func Compute(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.
 		return fmt.Errorf("route: %w", err)
 	}
 	task := buildOpTask(ctx, kv, vtid, pc, inst)
-	cmdQueue := fmt.Sprintf("cmd:op-%s", instance)
+	cmdQueue := keytree.CmdQueue("op-" + instance)
 	taskJSON, _ := json.Marshal(task)
 	if err := kv.Notify(cmdQueue, taskJSON); err != nil {
 		return fmt.Errorf("push task: %w", err)
@@ -202,14 +202,19 @@ func Compute(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.
 	return nil
 }
 
-// Lifecycle 分发生命周期指令到 heap-plat。
+// Lifecycle 分发生命周期指令到 heap-plat（动态选择负载最低实例）。
 func Lifecycle(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) error {
+	heapInst, err := SelectHeap(ctx, kv)
+	if err != nil {
+		return fmt.Errorf("select heap-plat: %w", err)
+	}
+	cmdQueue := keytree.CmdQueue("heap-" + heapInst)
 	task := buildHeapTask(vtid, pc, inst)
 	taskJSON, _ := json.Marshal(task)
-	if err := kv.Notify("cmd:heap-metal:0", taskJSON); err != nil {
+	if err := kv.Notify(cmdQueue, taskJSON); err != nil {
 		return fmt.Errorf("push heap task: %w", err)
 	}
-	logx.Debug("[%s] PUSH %s → cmd:heap-metal:0", vtid, inst.Opcode)
+	logx.Debug("[%s] PUSH %s → %s", vtid, inst.Opcode, cmdQueue)
 	done, err := vthread.WaitDone(ctx, kv, vtid, 5*time.Second)
 	if err != nil {
 		vthread.SetError(ctx, kv, vtid, pc, fmt.Sprintf("heap op timeout: %v", err))

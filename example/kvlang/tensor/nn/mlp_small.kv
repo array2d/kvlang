@@ -1,5 +1,5 @@
 # mlp_small: 模拟单隐藏层 MLP forward pass（无控制流，逐 op 展开）
-# 联调 VM + heap-plat (newtensor/deltensor) + op-metal (add/mul/relu)
+# 联调 VM + heap-plat (newtensor/deltensor) + op-plat (add/mul/relu)
 # 数学: hidden = relu(X * W + B), output = hidden * W2 + B2
 def mlp_small() -> ('/data/output') {
     # ── 分配所有权重/偏置/中间结果 ──

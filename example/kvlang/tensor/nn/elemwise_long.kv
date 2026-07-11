@@ -1,5 +1,5 @@
 # elemwise_long: 长链 GPU elementwise 操作 pipeline
-# 验证 op-metal 连续多步 kernel dispatch 的稳定性
+# 验证 op-plat 连续多步 kernel dispatch 的稳定性
 # 流程: relu → exp → log → abs → neg → sqrt
 def elemwise_long() -> ('/data/out') {
     newtensor("f32", "[512]") -> '/data/in'

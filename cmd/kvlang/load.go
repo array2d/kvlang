@@ -93,7 +93,7 @@ func runCode(name string, rc io.Reader, addr string) {
 	var allPreamble []string
 	for i := range df.Funcs {
 		fn := lower.Func(&df.Funcs[i])
-		layoutcode.WriteFunc(kv, fn)
+		layoutcode.WriteFunc(kv, "main", fn)
 		if fn.Name == "main" { hasMain = true }
 	}
 	allPreamble = df.PreambleLines
@@ -103,7 +103,7 @@ func runCode(name string, rc io.Reader, addr string) {
 	if hasMain { body = append(body, "main() -> './pre_main_ret'") }
 	preMain := ast.Func{Name: "pre_main", Signature: "def pre_main() -> ()", Body: toStmts(body)}
 	preMain = *lower.Func(&preMain)
-	layoutcode.WriteFunc(kv, &preMain)
+	layoutcode.WriteFunc(kv, "main", &preMain)
 	kv.Set(keytree.FuncMain, `{"entry":"pre_main","reads":[],"writes":[]}`)
 
 	executeEntry(kv)
@@ -116,9 +116,10 @@ func loadFunctions(kv kvspace.KVSpace, files []string) {
 	for _, f := range files {
 		df, err := parser.ParseFile(f)
 		if err != nil { logx.Warn("SKIP %s: %v", f, err); continue }
+		pkg := packageFromPath(f)
 		for i := range df.Funcs {
 			fn := lower.Func(&df.Funcs[i])
-			layoutcode.WriteFunc(kv, fn)
+			layoutcode.WriteFunc(kv, pkg, fn)
 			if fn.Name == "main" { hasMain = true }
 		}
 		allPreamble = append(allPreamble, df.PreambleLines...)
@@ -128,8 +129,19 @@ func loadFunctions(kv kvspace.KVSpace, files []string) {
 	if hasMain { body = append(body, "main() -> './pre_main_ret'") }
 	preMain := ast.Func{Name: "pre_main", Signature: "def pre_main() -> ()", Body: toStmts(body)}
 	preMain = *lower.Func(&preMain)
-	layoutcode.WriteFunc(kv, &preMain)
+	layoutcode.WriteFunc(kv, "main", &preMain)
 	kv.Set(keytree.FuncMain, `{"entry":"pre_main","reads":[],"writes":[]}`)
+}
+
+// packageFromPath 从 .kv 文件路径中推导包名。
+// 取文件所在目录的末级名称，当目录为 "." 或空时返回 "main"。
+func packageFromPath(path string) string {
+	dir := filepath.Dir(path)
+	base := filepath.Base(dir)
+	if base == "." || base == "" || base == "/" {
+		return "main"
+	}
+	return base
 }
 
 // collectKVFiles 收集 path（文件或目录）下所有 .kv 文件路径。

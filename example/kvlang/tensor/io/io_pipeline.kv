@@ -1,5 +1,5 @@
 # io_pipeline: 完整的 IO 流水线 — 创建→计算→保存→加载→打印→清理
-# 验证 VM ↔ heap-plat ↔ op-metal 三方联调
+# 验证 VM ↔ heap-plat ↔ op-plat 三方联调
 def io_pipeline() -> ('/data/final') {
     newtensor("f32", "[64]") -> '/data/x'
     newtensor("f32", "[64]") -> '/data/y'

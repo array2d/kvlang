@@ -1,5 +1,5 @@
 # normalize: 简单 "归一化" — center 后取绝对值
-# sub 和 abs 都是 op-metal GPU kernel
+# sub 和 abs 都是 op-plat GPU kernel
 def normalize() -> ('/data/norm') {
     newtensor("f32", "[256]") -> '/data/raw'
     newtensor("f32", "[256]") -> '/data/center'

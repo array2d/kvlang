@@ -1,5 +1,5 @@
 # batch_ops: 创建 5 个 tensor，多步 GPU 计算，最后全部清理
-# 联调 VM → heap-plat → op-metal 完整链路
+# 联调 VM → heap-plat → op-plat 完整链路
 def batch_ops() -> ('/data/final') {
     newtensor("f32", "[256]") -> '/data/a'
     newtensor("f32", "[256]") -> '/data/b'

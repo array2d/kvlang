@@ -3,9 +3,10 @@ package ast
 
 import (
 	"fmt"
+	"strings"
 
-	"kvlang/internal/kvspace"
 	"kvlang/internal/keytree"
+	"kvlang/internal/kvspace"
 )
 
 // Stmt 表示函数体中的一条语句。
@@ -23,10 +24,24 @@ type Func struct {
 	Body      []Stmt // 函数体语句
 }
 
-// Register 将函数定义写入 kvspace 空间。
-// Register 将函数签名写入 kvspace（body 由 layoutcode.WriteBody 写入）。
-func (fn *Func) Register(kv kvspace.KVSpace) error {
-	return kv.Set(keytree.SrcFunc(fn.Name), fn.Signature)
+// FullText 返回函数的完整源码文本（签名 + 函数体），用于存入 /src/<pkg>/<name>。
+func (fn *Func) FullText() string {
+	var sb strings.Builder
+	sb.WriteString(fn.Signature)
+	sb.WriteString(" {\n")
+	for _, st := range fn.Body {
+		sb.WriteString("    ")
+		sb.WriteString(st.String())
+		sb.WriteString("\n")
+	}
+	sb.WriteString("}")
+	return sb.String()
+}
+
+// Register 将函数完整源码写入 /src/<pkg>/<name>。
+// pkg 由调用方（layoutcode.WriteFunc）传入，来自文件路径。
+func (fn *Func) Register(kv kvspace.KVSpace, pkg string) error {
+	return kv.Set(keytree.SrcFunc(pkg, fn.Name), fn.FullText())
 }
 
 // Instruction 表示一条 kvlang 指令。
