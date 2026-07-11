@@ -224,11 +224,16 @@ func needsQuote(s string) bool {
 	if len(s) == 0 {
 		return false
 	}
-	if s[0] == '/' {
+	// 路径：绝对路径或相对路径
+	if s[0] == '/' || (len(s) >= 2 && s[:2] == "./") {
 		return true
 	}
-	if len(s) >= 2 && s[:2] == "./" {
-		return true
+	// 含空白或 tokenizer 分隔符的字符串必须加引号才能正确 round-trip
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case ' ', '\t', ',', '(', ')', '=', '+', '-', '*', '%', '!', '<', '>', '&', '|', '^', '{', '}', '"', '\'':
+			return true
+		}
 	}
 	return false
 }

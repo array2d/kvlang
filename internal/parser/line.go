@@ -7,272 +7,136 @@ import (
 	"kvlang/internal/ast"
 )
 
-// ParseLine 解析单条 kvlang 指令字符串。
+// ParseLine 解析单条 kvlang 指令字符串，返回 *ast.Instruction。
 //
 // 支持三种赋值风格:
 //
-//	前缀 (命名函数):  add(A, B) -> ./C
-//	中缀 (符号算子):  A + B -> ./C, !A -> ./C
-//	C风格 (左箭头):   ./C <- A + B, ./C <- add(A, B)
+//	前缀（命名函数）: add(A, B) -> './C'
+//	中缀（符号算子）: A + B -> './C', !A -> './C'
+//	C 风格（左箭头）: './C' <- A + B, './C' <- add(A, B)
 func ParseLine(line string) (*ast.Instruction, error) {
 	line = strings.TrimSpace(line)
 	if line == "" {
 		return nil, fmt.Errorf("empty kvlang line")
 	}
+	toks := Tokenize(line)
+	if len(toks) == 0 {
+		return nil, fmt.Errorf("empty token stream: %s", line)
+	}
+	return parseInstFromTokens(toks, line)
+}
 
+// parseInstFromTokens 从 Token 流构建 *ast.Instruction。
+func parseInstFromTokens(toks []Token, line string) (*ast.Instruction, error) {
 	inst := &ast.Instruction{}
 
-	// 1. 分离输出
-	var expr string
-	if larrow := findArrow(line, "<-"); larrow >= 0 {
-		writesStr := strings.TrimSpace(line[:larrow])
-		expr = strings.TrimSpace(line[larrow+2:])
-		if strings.HasPrefix(writesStr, "(") && strings.HasSuffix(writesStr, ")") {
-			writesStr = writesStr[1 : len(writesStr)-1]
+	// 1. 找第一个 Arrow，分割 expr / writes
+	arrowIdx := -1
+	for i, t := range toks {
+		if t.Kind == Arrow {
+			arrowIdx = i
+			break
 		}
-		if err := validateKeyRefs(writesStr, "write", line); err != nil {
-			return nil, err
-		}
-		inst.Writes = parseParamList(writesStr)
-	} else if arrow := strings.Index(line, "->"); arrow >= 0 {
-		expr = strings.TrimSpace(line[:arrow])
-		writesStr := strings.TrimSpace(line[arrow+2:])
-		if strings.HasPrefix(writesStr, "(") && strings.HasSuffix(writesStr, ")") {
-			writesStr = writesStr[1 : len(writesStr)-1]
-		}
-		if err := validateKeyRefs(writesStr, "write", line); err != nil {
-			return nil, err
-		}
-		inst.Writes = parseParamList(writesStr)
-	} else {
-		expr = line
 	}
 
-	// 2. 中缀解析
-	if op, left, right, ok := parseInfix(expr); ok {
-		inst.Opcode = op
-		if left != "" {
-			if err := validateRef(left, line); err != nil {
-				return nil, err
-			}
-			inst.Reads = append(inst.Reads, stripQuotes(left))
+	var exprToks, writeToks []Token
+	if arrowIdx >= 0 {
+		if toks[arrowIdx].Value == "<-" {
+			writeToks = toks[:arrowIdx]
+			exprToks = toks[arrowIdx+1:]
+		} else { // "->"
+			exprToks = toks[:arrowIdx]
+			writeToks = toks[arrowIdx+1:]
 		}
-		if right != "" {
-			if err := validateRef(right, line); err != nil {
-				return nil, err
+	} else {
+		exprToks = toks
+	}
+
+	// 2. 解析写槽（去除外层括号后按逗号收集）
+	inst.Writes = collectParams(stripOuterParens(writeToks))
+
+	// 3. 解析表达式
+	if len(exprToks) == 0 {
+		return inst, nil
+	}
+	first := exprToks[0]
+
+	// 3a. 前缀调用：opcode(args...)  — 含 return(./Z), br(...) 等
+	if len(exprToks) > 1 && exprToks[1].Kind == LParen {
+		inst.Opcode = first.Value
+		inst.Reads = collectParams(innerArgs(exprToks[2:]))
+		return inst, nil
+	}
+
+	// 3b. 中缀算子：A op B
+	if len(exprToks) >= 2 && isInfixOp(exprToks[1].Value) {
+		inst.Opcode = exprToks[1].Value
+		inst.Reads = append(inst.Reads, first.Value)
+		if len(exprToks) > 2 {
+			// 右操作数：将剩余 Token 值拼接（处理 -B 等情况）
+			var sb strings.Builder
+			for _, t := range exprToks[2:] {
+				sb.WriteString(t.Value)
 			}
-			inst.Reads = append(inst.Reads, stripQuotes(right))
+			inst.Reads = append(inst.Reads, sb.String())
 		}
 		return inst, nil
 	}
 
-	// 3. 前缀解析: add(A, B)
-	if idx := strings.Index(expr, "("); idx >= 0 {
-		inst.Opcode = strings.TrimSpace(expr[:idx])
-		rest := expr[idx+1:]
-
-		parenDepth := 1
-		closeIdx := -1
-		for i, c := range rest {
-			if c == '(' {
-				parenDepth++
-			} else if c == ')' {
-				parenDepth--
-				if parenDepth == 0 {
-					closeIdx = i
-					break
-				}
-			}
-		}
-		if closeIdx < 0 {
-			return nil, fmt.Errorf("unmatched paren in: %s", line)
-		}
-		readsStr := rest[:closeIdx]
-		if err := validateKeyRefs(readsStr, "read", line); err != nil {
-			return nil, err
-		}
-		inst.Reads = parseParamList(readsStr)
+	// 3c. 一元前缀算子：!A 或 -A
+	if isUnaryPrefixOp(first.Value) && len(exprToks) >= 2 {
+		inst.Opcode = first.Value
+		inst.Reads = append(inst.Reads, exprToks[1].Value)
+		return inst, nil
 	}
 
-	// 4. 无括号的标识符：zeros, return, break, continue 等
-	if inst.Opcode == "" && expr != "" {
-		// 排除纯字面量 (数字、字符串、路径)
-		if !isLiteral(expr) {
-			inst.Opcode = expr
-		}
-	}
-
+	// 3d. 裸操作码（zeros, break, continue, return 等）
+	inst.Opcode = first.Value
 	return inst, nil
 }
 
-// isLiteral 判断表达式是否为字面量（数字、字符串、路径），而非操作码。
-func isLiteral(s string) bool {
-	if len(s) == 0 {
-		return true
+// ── Token helpers ──
+
+// stripOuterParens 去除首尾的 LParen / RParen（用于多写槽 (a, b)）。
+func stripOuterParens(toks []Token) []Token {
+	if len(toks) >= 2 && toks[0].Kind == LParen && toks[len(toks)-1].Kind == RParen {
+		return toks[1 : len(toks)-1]
 	}
-	// 数字
-	if s[0] >= '0' && s[0] <= '9' {
-		return true
+	return toks
+}
+
+// innerArgs 去除函数调用尾部的 RParen（exprToks[2:] 传入时用）。
+func innerArgs(toks []Token) []Token {
+	if len(toks) > 0 && toks[len(toks)-1].Kind == RParen {
+		return toks[:len(toks)-1]
 	}
-	// 字符串
-	if s[0] == '"' || s[0] == '\'' {
-		return true
+	return toks
+}
+
+// collectParams 从已分隔的 Token 列表中收集参数值（跳过 Comma）。
+func collectParams(toks []Token) []string {
+	var result []string
+	for _, t := range toks {
+		if t.Kind == Comma {
+			continue
+		}
+		result = append(result, t.Value)
 	}
-	// 路径
-	if s[0] == '/' || (len(s) >= 2 && s[:2] == "./") {
-		return true
-	}
-	// 负数
-	if s[0] == '-' && len(s) > 1 && s[1] >= '0' && s[1] <= '9' {
+	return result
+}
+
+// isInfixOp 判断操作符字符串是否为二元中缀算子。
+func isInfixOp(s string) bool {
+	switch s {
+	case "+", "-", "*", "/", "%",
+		"==", "!=", "<", ">", "<=", ">=",
+		"&&", "||", "&", "|", "^", "<<", ">>":
 		return true
 	}
 	return false
 }
 
-// ── line helpers ──
-
-func findArrow(s, arrow string) int {
-	for i := 0; i < len(s)-1; i++ {
-		if s[i] == arrow[0] && s[i+1] == arrow[1] {
-			return i
-		}
-	}
-	return -1
-}
-
-func parseInfix(expr string) (op, left, right string, ok bool) {
-	expr = strings.TrimSpace(expr)
-	if expr == "" {
-		return
-	}
-	if strings.IndexByte(expr, '(') >= 0 {
-		return // 含括号 → 前缀格式
-	}
-	multiOps := []string{"==", "!=", "<=", ">=", "&&", "||", "<<", ">>"}
-	for _, o := range multiOps {
-		if idx := strings.Index(expr, o); idx > 0 {
-			return o, strings.TrimSpace(expr[:idx]), strings.TrimSpace(expr[idx+len(o):]), true
-		}
-	}
-	singleOps := []string{"+", "*", "/", "%", "<", ">", "&", "|", "^"}
-	for _, o := range singleOps {
-		if idx := strings.Index(expr, o); idx > 0 {
-			return o, strings.TrimSpace(expr[:idx]), strings.TrimSpace(expr[idx+1:]), true
-		}
-	}
-	if idx := strings.Index(expr, "-"); idx > 0 {
-		return "-", strings.TrimSpace(expr[:idx]), strings.TrimSpace(expr[idx+1:]), true
-	}
-	if len(expr) > 0 {
-		if expr[0] == '!' {
-			return "!", strings.TrimSpace(expr[1:]), "", true
-		}
-		if expr[0] == '-' {
-			return "-", strings.TrimSpace(expr[1:]), "", true
-		}
-	}
-	return
-}
-
-func parseParamList(s string) []string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return nil
-	}
-	var params []string
-	depth := 0
-	inQuote := byte(0)
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '"' || s[i] == '\'' {
-			if inQuote == 0 {
-				inQuote = s[i]
-			} else if inQuote == s[i] {
-				inQuote = 0
-			}
-			continue
-		}
-		if inQuote != 0 {
-			continue
-		}
-		switch s[i] {
-		case '[', '(', '{':
-			depth++
-		case ']', ')', '}':
-			if depth > 0 {
-				depth--
-			}
-		case ',':
-			if depth == 0 {
-				p := strings.TrimSpace(s[start:i])
-				if p != "" {
-					params = append(params, stripQuotes(p))
-				}
-				start = i + 1
-			}
-		}
-	}
-	if start < len(s) {
-		p := strings.TrimSpace(s[start:])
-		if p != "" {
-			params = append(params, stripQuotes(p))
-		}
-	}
-	return params
-}
-
-func parseParamListRaw(s string) []string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return nil
-	}
-	var params []string
-	depth := 0
-	inQuote := byte(0)
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '"' || s[i] == '\'' {
-			if inQuote == 0 {
-				inQuote = s[i]
-			} else if inQuote == s[i] {
-				inQuote = 0
-			}
-			continue
-		}
-		if inQuote != 0 {
-			continue
-		}
-		switch s[i] {
-		case '[', '(', '{':
-			depth++
-		case ']', ')', '}':
-			if depth > 0 {
-				depth--
-			}
-		case ',':
-			if depth == 0 {
-				p := strings.TrimSpace(s[start:i])
-				if p != "" {
-					params = append(params, p)
-				}
-				start = i + 1
-			}
-		}
-	}
-	if start < len(s) {
-		p := strings.TrimSpace(s[start:])
-		if p != "" {
-			params = append(params, p)
-		}
-	}
-	return params
-}
-
-func stripQuotes(s string) string {
-	if len(s) >= 2 {
-		if (s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'') {
-			return s[1 : len(s)-1]
-		}
-	}
-	return s
+// isUnaryPrefixOp 判断操作符字符串是否为一元前缀算子。
+func isUnaryPrefixOp(s string) bool {
+	return s == "!" || s == "-"
 }
