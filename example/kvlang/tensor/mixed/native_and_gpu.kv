@@ -5,21 +5,21 @@ def native_and_gpu(N:int) -> ('/data/final') {
     N * 4 -> './size'
 
     # Step 2: 基于标量结果创建 tensor（此处简化为固定大小）
-    newtensor("f32", "[256]") -> '/data/x'
-    newtensor("f32", "[256]") -> '/data/y'
-    newtensor("f32", "[256]") -> '/data/final'
+    tensor.new("f32", "[256]") -> '/data/x'
+    tensor.new("f32", "[256]") -> '/data/y'
+    tensor.new("f32", "[256]") -> '/data/final'
 
-    zeros() -> '/data/x'
-    zeros() -> '/data/y'
+    tensor.zeros() -> '/data/x'
+    tensor.zeros() -> '/data/y'
 
     # Step 3: GPU tensor 计算
-    add('/data/x', '/data/y') -> '/data/final'
+    tensor.add('/data/x', '/data/y') -> '/data/final'
 
     # Step 4: VM 原生比较 (验证标量结果还在)
     N == N -> './valid'
 
-    deltensor('/data/x')
-    deltensor('/data/y')
+    tensor.del('/data/x')
+    tensor.del('/data/y')
 }
 
 str.set("kvlangrun") -> './term'

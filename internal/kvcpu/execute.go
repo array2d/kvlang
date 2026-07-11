@@ -5,13 +5,16 @@ import (
 	"context"
 	"fmt"
 
-	"kvlang/internal/op/dispatch"
-	"kvlang/internal/op"
-	"kvlang/internal/logx"
-	"kvlang/internal/vthread"
-	"kvlang/internal/op/builtin"
-	"kvlang/internal/keytree"
 	"kvlang/internal/kvspace"
+	"kvlang/internal/logx"
+	"kvlang/internal/op"
+	"kvlang/internal/op/builtin"
+	"kvlang/internal/op/dispatch"
+	"kvlang/internal/vthread"
+	"kvlang/internal/vtype"
+
+	// 触发 str、tensor vtype 的 init() 注册
+	_ "kvlang/internal/vtype"
 )
 
 // RunWorker 单个 worker 的主循环。
@@ -35,6 +38,12 @@ func RunWorker(ctx context.Context, kv kvspace.KVSpace, id int) {
 }
 
 // Execute 执行一个 vthread 直到完成或出错。
+//
+// Dispatch 优先级（全静态，无 KV 分类查询）：
+//  1. IsControlOp   — call/return/if/br/goto 等控制流关键字
+//  2. IsNativeOp    — +/-/*/print/sqrt/str.set 等标量内建算子
+//  3. vtype.Lookup  — tensor.*、str.* 等命名空间算子（前缀匹配）
+//  4. default       — 用户定义函数（无 dot、无关键字 → 必为 func）
 func Execute(ctx context.Context, kv kvspace.KVSpace, vtid string) {
 	for {
 		s := vthread.Get(ctx, kv, vtid)
@@ -54,25 +63,35 @@ func Execute(ctx context.Context, kv kvspace.KVSpace, vtid string) {
 			return
 		}
 		logx.Debug("[%s] PC=%s OP=%s READS=%v WRITES=%v", vtid, pc, inst.Opcode, inst.Reads, inst.Writes)
-		logx.Debug("[%s] isFunc=%v isCtrl=%v isNative=%v", vtid, isFunctionCall(ctx, kv, inst.Opcode), op.IsControlOp(inst.Opcode), builtin.IsNativeOp(inst.Opcode))
 
 		var execErr error
 		switch {
+
+		// ── 1. 控制流关键字（静态集合，零 KV 查询）──────────────────────
 		case op.IsControlOp(inst.Opcode):
 			execErr = handleControl(ctx, kv, vtid, pc, inst)
+
+		// ── 2. 标量内建算子（静态 map，零 KV 查询）───────────────────────
+		//    覆盖：+ - * / print sqrt int float bool str.set 等
 		case builtin.IsNativeOp(inst.Opcode):
 			execErr = builtin.Native(ctx, kv, vtid, pc, inst)
-		case op.IsLifecycleOp(inst.Opcode):
-			execErr = dispatch.Lifecycle(ctx, kv, vtid, pc, inst)
-		case isFunctionCall(ctx, kv, inst.Opcode):
+
+		// ── 3. VType 命名空间算子（前缀匹配，零 KV 查询）─────────────────
+		//    tensor.*  →  tensorVType → heap-plat 或 op-plat
+		//    str.*     →  strVType    → builtin（未注册于 nativeOps 的新 str op）
+		case vtype.Lookup(inst.Opcode) != nil:
+			execErr = vtype.Lookup(inst.Opcode).Exec(ctx, kv, vtid, pc, inst)
+
+		// ── 4. 用户定义函数（default，无任何 KV 分类查询）───────────────
+		//    不含 dot、不在任何静态集合 → 必然是用户 func
+		//    HandleCall 负责 FuncIdx 查找；不存在则返回清晰错误
+		default:
+			logx.Debug("[%s] user func: %s", vtid, inst.Opcode)
 			inst.Reads = append([]string{inst.Opcode}, inst.Reads...)
 			inst.Opcode = op.OpCall
 			execErr = handleControl(ctx, kv, vtid, pc, inst)
-		case op.IsComputeOp(inst.Opcode):
-			execErr = dispatch.Compute(ctx, kv, vtid, pc, inst)
-		default:
-			vthread.Set(ctx, kv, vtid, op.NextPC(pc), "running")
 		}
+
 		if execErr != nil {
 			logx.Debug("[%s] error: %v", vtid, execErr)
 			return
@@ -80,21 +99,4 @@ func Execute(ctx context.Context, kv kvspace.KVSpace, vtid string) {
 	}
 }
 
-
-func isFunctionCall(ctx context.Context, kv kvspace.KVSpace, opcode string) bool {
-	// 通过反向索引判断是否为用户定义函数
-	if pkg, err := kv.Get(keytree.FuncIdx(opcode)); err == nil && pkg != "" {
-		return true
-	}
-	// 动态枚举已注册后端，不硬编码后端名
-	backends, err := kv.List(keytree.OpRoot)
-	if err != nil {
-		return false
-	}
-	for _, backend := range backends {
-		if _, err := kv.Get(keytree.OpBackendFunc(backend, opcode)); err == nil {
-			return true
-		}
-	}
-	return false
-}
+var _ = dispatch.Lifecycle // 确保 dispatch 包链接

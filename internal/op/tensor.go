@@ -1,12 +1,14 @@
 package op
 
+// tensor.* 生命周期操作码常量。
+// 格式遵循 vtype 命名空间约定：<vtype>.<op>
 const (
-	OpNewTensor   = "newtensor"
-	OpDelTensor   = "deltensor"
-	OpCloneTensor = "clonetensor"
+	OpTensorNew   = "tensor.new"
+	OpTensorDel   = "tensor.del"
+	OpTensorClone = "tensor.clone"
 )
 
-// IsLifecycleOp 判断是否为 tensor 生命周期操作。
-func IsLifecycleOp(opcode string) bool {
-	return opcode == OpNewTensor || opcode == OpDelTensor || opcode == OpCloneTensor
+// IsTensorLifecycle 判断是否为 tensor 生命周期操作。
+func IsTensorLifecycle(opcode string) bool {
+	return opcode == OpTensorNew || opcode == OpTensorDel || opcode == OpTensorClone
 }

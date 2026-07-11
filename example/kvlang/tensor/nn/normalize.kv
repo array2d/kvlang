@@ -1,22 +1,22 @@
 # normalize: 简单 "归一化" — center 后取绝对值
 # sub 和 abs 都是 op-plat GPU kernel
 def normalize() -> ('/data/norm') {
-    newtensor("f32", "[256]") -> '/data/raw'
-    newtensor("f32", "[256]") -> '/data/center'
-    newtensor("f32", "[256]") -> '/data/centered'
-    newtensor("f32", "[256]") -> '/data/norm'
+    tensor.new("f32", "[256]") -> '/data/raw'
+    tensor.new("f32", "[256]") -> '/data/center'
+    tensor.new("f32", "[256]") -> '/data/centered'
+    tensor.new("f32", "[256]") -> '/data/norm'
 
-    zeros() -> '/data/raw'
-    zeros() -> '/data/center'
+    tensor.zeros() -> '/data/raw'
+    tensor.zeros() -> '/data/center'
 
     # centered = raw - center
-    sub('/data/raw', '/data/center') -> '/data/centered'
+    tensor.sub('/data/raw', '/data/center') -> '/data/centered'
     # norm = abs(centered)
     abs('/data/centered') -> '/data/norm'
 
-    deltensor('/data/raw')
-    deltensor('/data/center')
-    deltensor('/data/centered')
+    tensor.del('/data/raw')
+    tensor.del('/data/center')
+    tensor.del('/data/centered')
 }
 
 str.set("kvlangrun") -> './term'

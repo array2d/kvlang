@@ -77,25 +77,25 @@ func checkKv(t *testing.T, dxFile string, wants []wantInst) {
 func TestParse_Lifecycle(t *testing.T) {
 	t.Run("newtensor", func(t *testing.T) {
 		checkKv(t, "../../example/kvlang/tensor/lifecycle/newtensor.kv", []wantInst{
-			{op: "newtensor", reads: []string{"f32", "[16]"}, writes: []string{"/data/x"}},
+			{op: "tensor.new", reads: []string{"f32", "[16]"}, writes: []string{"/data/x"}},
 		})
 	})
 	t.Run("del", func(t *testing.T) {
 		checkKv(t, "../../example/kvlang/tensor/lifecycle/del.kv", []wantInst{
-			{op: "newtensor", reads: []string{"f32", "[8]"}, writes: []string{"/data/tmp"}},
-			{op: "deltensor", reads: []string{"/data/tmp"}, writes: nil},
+			{op: "tensor.new", reads: []string{"f32", "[8]"}, writes: []string{"/data/tmp"}},
+			{op: "tensor.del", reads: []string{"/data/tmp"}, writes: nil},
 		})
 	})
 	t.Run("compute_small", func(t *testing.T) {
 		checkKv(t, "../../example/kvlang/tensor/lifecycle/compute.kv", []wantInst{
-			{op: "newtensor", reads: []string{"f32", "[8]"}, writes: []string{"/data/a"}},
-			{op: "newtensor", reads: []string{"f32", "[8]"}, writes: []string{"/data/b"}},
-			{op: "newtensor", reads: []string{"f32", "[8]"}, writes: []string{"/data/c"}},
-			{op: "zeros", reads: nil, writes: []string{"/data/a"}},
-			{op: "zeros", reads: nil, writes: []string{"/data/b"}},
-			{op: "add", reads: []string{"/data/a", "/data/b"}, writes: []string{"/data/c"}},
-			{op: "deltensor", reads: []string{"/data/a"}, writes: nil},
-			{op: "deltensor", reads: []string{"/data/b"}, writes: nil},
+			{op: "tensor.new", reads: []string{"f32", "[8]"}, writes: []string{"/data/a"}},
+			{op: "tensor.new", reads: []string{"f32", "[8]"}, writes: []string{"/data/b"}},
+			{op: "tensor.new", reads: []string{"f32", "[8]"}, writes: []string{"/data/c"}},
+			{op: "tensor.zeros", reads: nil, writes: []string{"/data/a"}},
+			{op: "tensor.zeros", reads: nil, writes: []string{"/data/b"}},
+			{op: "tensor.add", reads: []string{"/data/a", "/data/b"}, writes: []string{"/data/c"}},
+			{op: "tensor.del", reads: []string{"/data/a"}, writes: nil},
+			{op: "tensor.del", reads: []string{"/data/b"}, writes: nil},
 		})
 	})
 
@@ -106,7 +106,7 @@ func TestParse_Lifecycle(t *testing.T) {
 func TestParse_Call(t *testing.T) {
 	t.Run("add_test", func(t *testing.T) {
 		checkKv(t, "../../example/kvlang/builtin/call/add_test.kv", []wantInst{
-			{op: "add", reads: []string{"A", "B"}, writes: []string{"./C"}},
+			{op: "tensor.add", reads: []string{"A", "B"}, writes: []string{"./C"}},
 		})
 	})
 	t.Run("callee", func(t *testing.T) {
@@ -339,28 +339,28 @@ func TestParse_NewExamples(t *testing.T) {
 	})
 	t.Run("add_sub", func(t *testing.T) {
 		checkKv(t, "../../example/kvlang/tensor/lifecycle/add_sub.kv", []wantInst{
-			{op: "newtensor", reads: []string{"f32", "[64]"}, writes: []string{"/data/a"}},
-			{op: "newtensor", reads: []string{"f32", "[64]"}, writes: []string{"/data/b"}},
-			{op: "newtensor", reads: []string{"f32", "[64]"}, writes: []string{"/data/sum"}},
-			{op: "newtensor", reads: []string{"f32", "[64]"}, writes: []string{"/data/diff"}},
-			{op: "zeros", reads: nil, writes: []string{"/data/a"}},
-			{op: "zeros", reads: nil, writes: []string{"/data/b"}},
-			{op: "add", reads: []string{"/data/a", "/data/b"}, writes: []string{"./sum"}},
-			{op: "sub", reads: []string{"/data/a", "/data/b"}, writes: []string{"./diff"}},
-			{op: "deltensor", reads: []string{"/data/a"}, writes: nil},
-			{op: "deltensor", reads: []string{"/data/b"}, writes: nil},
+			{op: "tensor.new", reads: []string{"f32", "[64]"}, writes: []string{"/data/a"}},
+			{op: "tensor.new", reads: []string{"f32", "[64]"}, writes: []string{"/data/b"}},
+			{op: "tensor.new", reads: []string{"f32", "[64]"}, writes: []string{"/data/sum"}},
+			{op: "tensor.new", reads: []string{"f32", "[64]"}, writes: []string{"/data/diff"}},
+			{op: "tensor.zeros", reads: nil, writes: []string{"/data/a"}},
+			{op: "tensor.zeros", reads: nil, writes: []string{"/data/b"}},
+			{op: "tensor.add", reads: []string{"/data/a", "/data/b"}, writes: []string{"./sum"}},
+			{op: "tensor.sub", reads: []string{"/data/a", "/data/b"}, writes: []string{"./diff"}},
+			{op: "tensor.del", reads: []string{"/data/a"}, writes: nil},
+			{op: "tensor.del", reads: []string{"/data/b"}, writes: nil},
 		})
 	})
 	t.Run("compute_cstyle", func(t *testing.T) {
 		checkKv(t, "../../example/kvlang/tensor/lifecycle/compute_cstyle.kv", []wantInst{
-			{op: "newtensor", reads: []string{"f32", "[8]"}, writes: []string{"/data/a"}},
-			{op: "newtensor", reads: []string{"f32", "[8]"}, writes: []string{"/data/b"}},
-			{op: "newtensor", reads: []string{"f32", "[8]"}, writes: []string{"/data/c"}},
-			{op: "zeros", reads: nil, writes: []string{"/data/a"}},
-			{op: "zeros", reads: nil, writes: []string{"/data/b"}},
-			{op: "add", reads: []string{"/data/a", "/data/b"}, writes: []string{"./c"}},
-			{op: "deltensor", reads: []string{"/data/a"}, writes: nil},
-			{op: "deltensor", reads: []string{"/data/b"}, writes: nil},
+			{op: "tensor.new", reads: []string{"f32", "[8]"}, writes: []string{"/data/a"}},
+			{op: "tensor.new", reads: []string{"f32", "[8]"}, writes: []string{"/data/b"}},
+			{op: "tensor.new", reads: []string{"f32", "[8]"}, writes: []string{"/data/c"}},
+			{op: "tensor.zeros", reads: nil, writes: []string{"/data/a"}},
+			{op: "tensor.zeros", reads: nil, writes: []string{"/data/b"}},
+			{op: "tensor.add", reads: []string{"/data/a", "/data/b"}, writes: []string{"./c"}},
+			{op: "tensor.del", reads: []string{"/data/a"}, writes: nil},
+			{op: "tensor.del", reads: []string{"/data/b"}, writes: nil},
 		})
 	})
 }

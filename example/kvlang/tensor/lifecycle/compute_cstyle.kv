@@ -1,16 +1,16 @@
 # compute_cstyle: create, init, compute, cleanup — using <- assignment
 def compute_cstyle() -> ('/data/c') {
-    newtensor("f32", "[8]") -> '/data/a'
-    newtensor("f32", "[8]") -> '/data/b'
-    newtensor("f32", "[8]") -> '/data/c'
+    tensor.new("f32", "[8]") -> '/data/a'
+    tensor.new("f32", "[8]") -> '/data/b'
+    tensor.new("f32", "[8]") -> '/data/c'
 
-    zeros() -> '/data/a'
-    zeros() -> '/data/b'
+    tensor.zeros() -> '/data/a'
+    tensor.zeros() -> '/data/b'
 
-    './c' <- add('/data/a', '/data/b')
+    './c' <- tensor.add('/data/a', '/data/b')
 
-    deltensor('/data/a')
-    deltensor('/data/b')
+    tensor.del('/data/a')
+    tensor.del('/data/b')
 }
 
 str.set("kvlangrun") -> './term'

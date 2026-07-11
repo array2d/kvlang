@@ -73,12 +73,18 @@ func selectPlat(ctx context.Context, kv kvspace.KVSpace, root, prefix, backend s
 // Select 根据 opcode 动态选择负载最低的 op-plat 实例。
 // 返回实例标识符（去掉 "op-" 前缀），如 "cuda:0"、"pytorch:1"。
 //
+// opcode 支持带 vtype 前缀（如 "tensor.matmul"）；查找后端时自动剥离前缀，
+// 后端仅需注册裸操作名（如 "matmul"）。
+//
 // 检测流程：
-//  1. kv.List("/op")                   → 所有已注册后端名，如 ["cuda", "pytorch", "jax"]
-//  2. /op/<backend>/func/<opcode>      → 筛选支持该 opcode 的后端
-//  3. kv.List("/sys/op-plat")          → 运行中实例，如 ["op-cuda:0", "op-pytorch:0"]
+//  1. kv.List("/op")                    → 所有已注册后端名，如 ["cuda", "pytorch", "jax"]
+//  2. /op/<backend>/func/<opname>       → 筛选支持该操作的后端（opname 已剥离前缀）
+//  3. kv.List("/sys/op-plat")           → 运行中实例，如 ["op-cuda:0", "op-pytorch:0"]
 //  4. 读取 {status, load}，选负载最低者
 func Select(ctx context.Context, kv kvspace.KVSpace, opcode string) (string, error) {
+	// 剥离 vtype 前缀："tensor.matmul" → "matmul"
+	opname := stripVTypePrefix(opcode)
+
 	backends, err := kv.List(keytree.OpRoot)
 	if err != nil {
 		return "", fmt.Errorf("list /op backends: %w", err)
@@ -86,7 +92,7 @@ func Select(ctx context.Context, kv kvspace.KVSpace, opcode string) (string, err
 
 	var chosenBackend string
 	for _, backend := range backends {
-		if _, err := kv.Get(keytree.OpBackendFunc(backend, opcode)); err == nil {
+		if _, err := kv.Get(keytree.OpBackendFunc(backend, opname)); err == nil {
 			chosenBackend = backend
 			break
 		}
@@ -148,4 +154,14 @@ func ListBackends(ctx context.Context, kv kvspace.KVSpace) ([]string, error) {
 func BackendSupports(ctx context.Context, kv kvspace.KVSpace, backend, opcode string) bool {
 	_, err := kv.Get(keytree.OpBackendFunc(backend, opcode))
 	return err == nil
+}
+
+// stripVTypePrefix 剥离 vtype 命名空间前缀。
+// "tensor.matmul" → "matmul"；无前缀则原样返回。
+// dispatch 包不导入 vtype（避免循环），此为本地复制。
+func stripVTypePrefix(opcode string) string {
+	if dot := strings.IndexByte(opcode, '.'); dot > 0 {
+		return opcode[dot+1:]
+	}
+	return opcode
 }

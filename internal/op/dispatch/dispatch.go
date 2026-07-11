@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"kvlang/internal/op"
-	"kvlang/internal/logx"
-	"kvlang/internal/parser"
-	"kvlang/internal/vthread"
 	"kvlang/internal/keytree"
 	"kvlang/internal/kvspace"
+	"kvlang/internal/logx"
+	"kvlang/internal/op"
+	"kvlang/internal/parser"
+	"kvlang/internal/vthread"
 )
 
 type ParamRef struct {
@@ -128,9 +128,10 @@ func buildOpTask(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst 
 }
 
 func buildHeapTask(vtid, pc string, inst *op.Instruction) *HeapTask {
-	task := &HeapTask{Vtid: vtid, PC: pc, Op: inst.Opcode}
+	// Op 字段发送裸操作名（去掉 "tensor." 前缀），与后端协议解耦
+	task := &HeapTask{Vtid: vtid, PC: pc, Op: stripVTypePrefix(inst.Opcode)}
 	switch inst.Opcode {
-	case op.OpNewTensor:
+	case op.OpTensorNew:
 		if len(inst.Writes) > 0 {
 			task.Key = inst.Writes[0]
 		}
@@ -140,11 +141,11 @@ func buildHeapTask(vtid, pc string, inst *op.Instruction) *HeapTask {
 		if len(inst.Reads) > 1 {
 			task.Shape = parseShapeParam(inst.Reads[1])
 		}
-	case op.OpDelTensor:
+	case op.OpTensorDel:
 		if len(inst.Reads) > 0 {
 			task.Key = inst.Reads[0]
 		}
-	case op.OpCloneTensor:
+	case op.OpTensorClone:
 		if len(inst.Reads) > 0 {
 			task.Src = inst.Reads[0]
 		}

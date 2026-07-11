@@ -1,7 +1,7 @@
 # lifecycle_del: create then delete a heap tensor
 def lifecycle_del() -> () {
-    newtensor("f32", "[8]") -> '/data/tmp'
-    deltensor('/data/tmp')
+    tensor.new("f32", "[8]") -> '/data/tmp'
+    tensor.del('/data/tmp')
 }
 
 str.set("kvlangrun") -> './term'

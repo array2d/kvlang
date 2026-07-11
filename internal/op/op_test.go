@@ -46,24 +46,19 @@ func TestParentPC(t *testing.T) {
 	}
 }
 
-func TestIsComputeOp(t *testing.T) {
-	compute := []string{"add", "sub", "mul", "div", "matmul", "relu", "sigmoid", "tanh"}
-	control := []string{"call", "return", "if", "for"}
-	lifecycle := []string{"newtensor", "deltensor", "clonetensor"}
+func TestIsTensorLifecycle(t *testing.T) {
+	// tensor.* lifecycle ops (vtype 命名空间)
+	lifecycle := []string{"tensor.new", "tensor.del", "tensor.clone"}
+	notLifecycle := []string{"tensor.add", "tensor.matmul", "add", "matmul", "call", "return"}
 
-	for _, opc := range compute {
-		if !op.IsComputeOp(opc) {
-			t.Errorf("IsComputeOp(%q) = false, want true", opc)
-		}
-	}
-	for _, opc := range control {
-		if op.IsComputeOp(opc) {
-			t.Errorf("IsComputeOp(%q) = true, want false", opc)
-		}
-	}
 	for _, opc := range lifecycle {
-		if op.IsLifecycleOp(opc) && op.IsComputeOp(opc) {
-			t.Errorf("IsLifecycleOp(%q) should not also be IsComputeOp", opc)
+		if !op.IsTensorLifecycle(opc) {
+			t.Errorf("IsTensorLifecycle(%q) = false, want true", opc)
+		}
+	}
+	for _, opc := range notLifecycle {
+		if op.IsTensorLifecycle(opc) {
+			t.Errorf("IsTensorLifecycle(%q) = true, want false", opc)
 		}
 	}
 }

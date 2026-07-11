@@ -1,24 +1,24 @@
 # io_pipeline: 完整的 IO 流水线 — 创建→计算→保存→加载→打印→清理
 # 验证 VM ↔ heap-plat ↔ op-plat 三方联调
 def io_pipeline() -> ('/data/final') {
-    newtensor("f32", "[64]") -> '/data/x'
-    newtensor("f32", "[64]") -> '/data/y'
-    newtensor("f32", "[64]") -> '/data/z'
-    newtensor("f32", "[64]") -> '/data/temp'
-    zeros() -> '/data/x'
-    zeros() -> '/data/y'
-    zeros() -> '/data/z'
-    add('/data/x', '/data/y') -> '/data/temp'
-    mul('/data/temp', '/data/z') -> '/data/z'
+    tensor.new("f32", "[64]") -> '/data/x'
+    tensor.new("f32", "[64]") -> '/data/y'
+    tensor.new("f32", "[64]") -> '/data/z'
+    tensor.new("f32", "[64]") -> '/data/temp'
+    tensor.zeros() -> '/data/x'
+    tensor.zeros() -> '/data/y'
+    tensor.zeros() -> '/data/z'
+    tensor.add('/data/x', '/data/y') -> '/data/temp'
+    tensor.mul('/data/temp', '/data/z') -> '/data/z'
     print("z =", '/data/z')
-    save('/data/z', '/tmp/io_pipeline_z')
-    newtensor("f32", "[64]") -> '/data/final'
-    load('/tmp/io_pipeline_z') -> '/data/final'
+    tensor.save('/data/z', '/tmp/io_pipeline_z')
+    tensor.new("f32", "[64]") -> '/data/final'
+    tensor.load('/tmp/io_pipeline_z') -> '/data/final'
     print("final =", '/data/final')
-    deltensor('/data/x')
-    deltensor('/data/y')
-    deltensor('/data/z')
-    deltensor('/data/temp')
+    tensor.del('/data/x')
+    tensor.del('/data/y')
+    tensor.del('/data/z')
+    tensor.del('/data/temp')
 }
 
 str.set("kvlangrun") -> './term'
