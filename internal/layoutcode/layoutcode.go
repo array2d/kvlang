@@ -22,17 +22,35 @@ import (
 )
 
 // WriteBody 将 []Stmt 写入 /func/<pkg>/<name>/ 下的结构化 KV（编译后指令）。
-func WriteBody(kv kvspace.KVSpace, pkg, name string, body []ast.Stmt) error {
+func WriteBody(kv kvspace.KVSpace, pkg, name string, body []ast.Stmt) {
 	prefix := keytree.FuncCompiled(pkg, name)
-	return writeStmts(kv, prefix, body)
+	idx := 0
+	for _, st := range body {
+		writeStmt(kv, st, prefix, &idx)
+	}
 }
 
-func writeStmts(kv kvspace.KVSpace, prefix string, stmts []ast.Stmt) error {
-	idx := 0
-	for _, st := range stmts {
-		st.SetKV(kv, prefix, &idx)
+// writeStmt 将单条 Stmt 写入 KV 空间。
+// lower.File 保证调用时只剩 *Instruction 和 *BlockStmt，其余类型无操作。
+func writeStmt(kv kvspace.KVSpace, st ast.Stmt, prefix string, idx *int) {
+	switch s := st.(type) {
+	case *ast.Instruction:
+		n := *idx
+		kv.Set(fmt.Sprintf("%s/[%d,0]", prefix, n), s.Opcode)
+		for j, r := range s.Reads {
+			kv.Set(fmt.Sprintf("%s/[%d,-%d]", prefix, n, j+1), r)
+		}
+		for j, w := range s.Writes {
+			kv.Set(fmt.Sprintf("%s/[%d,%d]", prefix, n, j+1), w)
+		}
+		*idx = n + 1
+	case *ast.BlockStmt:
+		sub := prefix + "/" + s.Label
+		i := 0
+		for _, child := range s.Body {
+			writeStmt(kv, child, sub, &i)
+		}
 	}
-	return nil
 }
 
 // HandleCall 执行 CALL：读取签名、参数绑定、复制指令到子栈。
@@ -162,20 +180,12 @@ func RegisterBlocks(kv kvspace.KVSpace, pkg, parent string, body []ast.Stmt) {
 //  3. 编译 body 指令写入 /func/<pkg>/<name>/[i,j]
 //  4. 块标签写入 /func/<pkg>/<name>/<label>/
 //  5. 反向索引写入 /func/.idx/<name>
-func WriteFunc(kv kvspace.KVSpace, pkg string, fn *ast.Func) error {
-	// 1. 源码
-	if err := fn.Register(kv, pkg); err != nil {
-		return err
-	}
-	// 2. 编译签名
+func WriteFunc(kv kvspace.KVSpace, pkg string, fn *ast.Func) {
+	kv.Set(keytree.SrcFunc(pkg, fn.Name), fn.FullText())
 	kv.Set(keytree.FuncCompiled(pkg, fn.Name), fn.Signature)
-	// 3. 编译 body
 	WriteBody(kv, pkg, fn.Name, fn.Body)
-	// 4. 块标签
 	RegisterBlocks(kv, pkg, fn.Name, fn.Body)
-	// 5. 反向索引
 	kv.Set(keytree.FuncIdx(fn.Name), pkg)
-	return nil
 }
 
 // HandleReturn 处理 RETURN：回传值，删除子栈，恢复父栈 PC。

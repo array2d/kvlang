@@ -2,13 +2,17 @@ package parser
 
 import (
 	"strings"
-
-	"kvlang/internal/ast"
 )
 
+// FormalParams 表示函数签名的形参列表。
+type FormalParams struct {
+	Reads  []string
+	Writes []string
+}
+
 // ParseSignature 解析函数签名，提取形参。
-func ParseSignature(sig string) ast.FormalParams {
-	var fp ast.FormalParams
+func ParseSignature(sig string) FormalParams {
+	var fp FormalParams
 	sig = strings.TrimSpace(sig)
 	if strings.HasPrefix(sig, "def ") {
 		sig = strings.TrimSpace(sig[4:])
