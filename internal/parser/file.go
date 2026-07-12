@@ -37,7 +37,6 @@ func ParseCode(r io.Reader) (*ast.File, error) {
 	if len(lines) == 0 {
 		return nil, fmt.Errorf("empty input")
 	}
-
 	return parseLines(lines)
 }
 
@@ -73,11 +72,7 @@ func parseLines(lines []string) (*ast.File, error) {
 			i = bodyEnd + 1
 		} else {
 			for j := i + 1; j < len(lines); j++ {
-				if strings.HasPrefix(lines[j], "def ") {
-					bodyEnd = j
-					break
-				}
-				if looksLikeCall(lines[j]) {
+				if strings.HasPrefix(lines[j], "def ") || looksLikeCall(lines[j]) {
 					bodyEnd = j
 					break
 				}
@@ -88,11 +83,10 @@ func parseLines(lines []string) (*ast.File, error) {
 		if len(rawBody) == 0 {
 			return nil, fmt.Errorf("empty body for %s", name)
 		}
-		body := parseBody(rawBody)
 		df.Funcs = append(df.Funcs, ast.Func{
 			Name:      name,
 			Signature: strings.TrimSuffix(defLine, " {"),
-			Body:      body,
+			Body:      parseBody(rawBody),
 		})
 	}
 	if len(df.Funcs) == 0 {
@@ -137,39 +131,41 @@ func extractFuncName(sig string) string {
 	if len(sig) >= 2 && sig[0] == '(' && sig[len(sig)-1] == ')' {
 		sig = sig[1 : len(sig)-1]
 	}
-	sig = strings.TrimSuffix(sig, " {")
-	sig = strings.TrimSpace(sig)
-	left := sig
+	sig = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(sig), " {"))
 	if idx := strings.Index(sig, "->"); idx >= 0 {
-		left = strings.TrimSpace(sig[:idx])
+		sig = strings.TrimSpace(sig[:idx])
 	}
-	if idx := strings.Index(left, "("); idx >= 0 {
-		return strings.TrimSpace(left[:idx])
+	if idx := strings.Index(sig, "("); idx >= 0 {
+		return strings.TrimSpace(sig[:idx])
 	}
-	return left
+	return sig
 }
 
+// looksLikeCall 判断行是否为顶层调用（包含 isCallExpr 逻辑）。
 func looksLikeCall(line string) bool {
 	if strings.HasPrefix(line, "def ") || line == "}" || line == "{" {
 		return false
 	}
-	return strings.Contains(line, "->") || isCallExpr(line)
+	if strings.Contains(line, "->") {
+		return true
+	}
+	open := strings.Index(line, "(")
+	return open > 0 &&
+		!strings.HasPrefix(line, "if ") &&
+		!strings.HasPrefix(line, "for ") &&
+		!strings.HasPrefix(line, "while ")
 }
 
 func parseTopLevelCall(line string) (ast.TopLevelCall, bool) {
 	arrowIdx := strings.Index(line, "->")
-	left := strings.TrimSpace(line)
-	right := ""
+	left, right := strings.TrimSpace(line), ""
 	if arrowIdx >= 0 {
 		left = strings.TrimSpace(line[:arrowIdx])
 		right = strings.TrimSpace(line[arrowIdx+2:])
 	}
 	open := strings.Index(left, "(")
-	if open < 0 {
-		return ast.TopLevelCall{}, false
-	}
 	close := strings.LastIndex(left, ")")
-	if close < 0 || close <= open {
+	if open < 0 || close <= open {
 		return ast.TopLevelCall{}, false
 	}
 	funcName := strings.TrimSpace(left[:open])
@@ -177,22 +173,17 @@ func parseTopLevelCall(line string) (ast.TopLevelCall, bool) {
 		return ast.TopLevelCall{}, false
 	}
 	var args []string
-	s := strings.TrimSpace(left[open+1 : close])
-	if s != "" {
+	if s := strings.TrimSpace(left[open+1 : close]); s != "" {
 		for _, a := range strings.Split(s, ",") {
-			a = strings.TrimSpace(a)
-			if a != "" {
+			if a = strings.TrimSpace(a); a != "" {
 				args = append(args, a)
 			}
 		}
 	}
 	var outputs []string
-	right = strings.Trim(right, "()")
-	if right != "" {
+	if right = strings.Trim(right, "()"); right != "" {
 		for _, o := range strings.Split(right, ",") {
-			o = strings.TrimSpace(o)
-			o = strings.Trim(o, `"'`)
-			if o != "" {
+			if o = strings.Trim(strings.TrimSpace(o), `"'`); o != "" {
 				outputs = append(outputs, o)
 			}
 		}
@@ -201,66 +192,87 @@ func parseTopLevelCall(line string) (ast.TopLevelCall, bool) {
 }
 
 // parseBody 将原始行列表解析为 AST Stmt 节点。
+// 以 Tokenize 首 Token 的 Value 进行分发，消除 strings.HasPrefix 双写。
 func parseBody(lines []string) []ast.Stmt {
 	var stmts []ast.Stmt
 	i := 0
 	for i < len(lines) {
 		line := lines[i]
-		if strings.HasPrefix(line, "while (") || strings.HasPrefix(line, "while(") {
-			whileStmt, next := parseWhileStmt(lines, i)
-			stmts = append(stmts, whileStmt)
+		if line == "" || line == "}" {
+			i++
+			continue
+		}
+		toks := Tokenize(line)
+		if len(toks) == 0 {
+			i++
+			continue
+		}
+		switch toks[0].Value {
+		case "while":
+			st, next := parseWhileStmt(lines, i)
+			stmts = append(stmts, st)
 			i = next
-		} else if strings.HasPrefix(line, "break") {
+		case "for":
+			st, next := parseForStmt(lines, i)
+			stmts = append(stmts, st)
+			i = next
+		case "if":
+			st, next := parseIfStmt(lines, i)
+			stmts = append(stmts, st)
+			i = next
+		case "break":
 			stmts = append(stmts, &ast.BreakStmt{})
 			i++
-		} else if strings.HasPrefix(line, "continue") {
+		case "continue":
 			stmts = append(stmts, &ast.ContinueStmt{})
 			i++
-		} else if strings.HasPrefix(line, "for (") || strings.HasPrefix(line, "for(") {
-			forStmt, next := parseForStmt(lines, i)
-			stmts = append(stmts, forStmt)
-			i = next
-		} else if strings.HasPrefix(line, "if (") || strings.HasPrefix(line, "if(") {
-			ifStmt, next := parseIfStmt(lines, i)
-			stmts = append(stmts, ifStmt)
-			i = next
-		} else if isBlockStart(line) {
-			block, next := parseBlock(lines, i)
-			stmts = append(stmts, block)
-			i = next
-		} else {
-			if line == "" || line == "}" {
+		default:
+			if isBlockStart(line) {
+				st, next := parseBlock(lines, i)
+				stmts = append(stmts, st)
+				i = next
+			} else {
+				if inst, _ := ParseLine(line); inst != nil {
+					stmts = append(stmts, inst)
+				}
 				i++
-				continue
 			}
-			inst, _ := ParseLine(line)
-			if inst != nil {
-				stmts = append(stmts, inst)
-			}
-			i++
 		}
 	}
 	return stmts
 }
 
+// parseBracedBody 解析花括号块体（调用前开括号已消费，depth 从 1 开始）。
+func parseBracedBody(lines []string, start int) ([]ast.Stmt, int) {
+	var body []ast.Stmt
+	depth := 1
+	i := start
+	for i < len(lines) && depth > 0 {
+		depth += strings.Count(lines[i], "{") - strings.Count(lines[i], "}")
+		if depth == 0 {
+			i++
+			break
+		}
+		body = append(body, parseBody([]string{lines[i]})...)
+		i++
+	}
+	return body, i
+}
+
 // parseIfStmt 解析 if/else 块。
 func parseIfStmt(lines []string, start int) (*ast.IfStmt, int) {
 	line := lines[start]
-	// Extract condition: if (cond) { or if(cond){
-	condStart := strings.Index(line, "(")
-	condEnd := strings.LastIndex(line, ")")
-	cond := strings.TrimSpace(line[condStart+1 : condEnd])
+	s := &ast.IfStmt{Cond: strings.TrimSpace(line[strings.Index(line, "(")+1 : strings.LastIndex(line, ")")])}
 
-	// Parse then body
-	s := &ast.IfStmt{Cond: cond}
+	// then 分支：遇到 "} else {" 时手动调整 depth
 	depth := 1
 	i := start + 1
 	for i < len(lines) && depth > 0 {
 		depth += strings.Count(lines[i], "{") - strings.Count(lines[i], "}")
-		if strings.HasPrefix(lines[i], "} else {") || lines[i] == "} else {" {
-			depth-- // close of `}`
+		if strings.HasPrefix(lines[i], "} else {") {
+			depth-- // "} else {" 净括号为 0，需手动减去 }
 			if depth == 0 {
-				i++ // move past `} else {`
+				i++
 				break
 			}
 		}
@@ -270,148 +282,66 @@ func parseIfStmt(lines []string, start int) (*ast.IfStmt, int) {
 		s.Then = append(s.Then, parseBody([]string{lines[i]})...)
 		i++
 	}
-
-	// Parse else body (no `else {` prefix check — we're already inside it)
+	// else 分支
 	if i < len(lines) {
-		depth = 1
-		for i < len(lines) && depth > 0 {
-			depth += strings.Count(lines[i], "{") - strings.Count(lines[i], "}")
-			if depth == 0 {
-				i++
-				break
-			}
-			s.Else = append(s.Else, parseBody([]string{lines[i]})...)
-			i++
-		}
+		s.Else, i = parseBracedBody(lines, i)
 	}
 	return s, i
 }
 
 // parseForStmt 解析 for 循环: for (var in iter_path) { body }
-// iter_path 是 kvspace 路径，如 './data', '/tensor/x'
 func parseForStmt(lines []string, start int) (*ast.ForStmt, int) {
 	line := lines[start]
-	// Extract: for (var in iter_path) {
 	inner := line[strings.Index(line, "(")+1 : strings.LastIndex(line, ")")]
 	parts := strings.SplitN(inner, " in ", 2)
 	varName := strings.TrimSpace(parts[0])
 	if colon := strings.Index(varName, ":"); colon >= 0 {
 		varName = varName[:colon]
 	}
-	iterPath := strings.TrimSpace(parts[1])
-
-	s := &ast.ForStmt{Var: varName, Iter: iterPath}
-	depth := 1
-	i := start + 1
-	for i < len(lines) && depth > 0 {
-		depth += strings.Count(lines[i], "{") - strings.Count(lines[i], "}")
-		if depth == 0 {
-			i++
-			break
-		}
-		s.Body = append(s.Body, parseBody([]string{lines[i]})...)
-		i++
-	}
-	return s, i
+	s := &ast.ForStmt{Var: varName, Iter: strings.TrimSpace(parts[1])}
+	body, next := parseBracedBody(lines, start+1)
+	s.Body = body
+	return s, next
 }
 
-// parseWhileStmt 解析 while 循环块: while (cond) { body }
+// parseWhileStmt 解析 while 循环: while (cond) { body }
 func parseWhileStmt(lines []string, start int) (*ast.WhileStmt, int) {
 	line := lines[start]
 	inner := line[strings.Index(line, "(")+1 : strings.LastIndex(line, ")")]
-	cond := strings.TrimSpace(inner)
-
-	s := &ast.WhileStmt{Cond: cond}
-	depth := 1
-	i := start + 1
-	for i < len(lines) && depth > 0 {
-		depth += strings.Count(lines[i], "{") - strings.Count(lines[i], "}")
-		if depth == 0 { i++; break }
-		s.Body = append(s.Body, parseBody([]string{lines[i]})...)
-		i++
-	}
-	return s, i
+	s := &ast.WhileStmt{Cond: strings.TrimSpace(inner)}
+	body, next := parseBracedBody(lines, start+1)
+	s.Body = body
+	return s, next
 }
 
-// isBlockStart 判断行是否为 block label 定义: "ident:" 或 "ident: {"
-// 冒号右侧的 `:` 是 label 声明的标志（Assembly/MLIR 惯例），
-// 定义处带 : ，引用处不带（如 br(cond, entry, then)）。
+// isBlockStart 判断行是否为 block label 定义（如 entry: {）。
 func isBlockStart(line string) bool {
-	// 必须有 `:` 作为 label 声明标志
 	colonIdx := strings.Index(line, ":")
 	if colonIdx < 0 {
 		return false
 	}
 	prefix := strings.TrimSpace(line[:colonIdx])
-	if prefix == "" {
-		return false
-	}
-	// 排除函数调用 ident(...   ——  冒号前的部分含 ( 说明是调用
-	if strings.Contains(prefix, "(") {
-		return false
-	}
-	// 排除 key 路径 /path:xxx  —— 冒号前的部分是路径
-	if strings.HasPrefix(prefix, "/") || strings.HasPrefix(prefix, "./") {
-		return false
-	}
-	// 排除 type 标注 A:int  —— 冒号在类型标注中
-	if strings.Contains(prefix, " ") {
-		return false
-	}
-	return true
+	return prefix != "" &&
+		!strings.Contains(prefix, "(") &&
+		!strings.HasPrefix(prefix, "/") &&
+		!strings.HasPrefix(prefix, "./") &&
+		!strings.Contains(prefix, " ")
 }
 
-// parseBlock 解析基本块: label: { body }
+// parseBlock 解析基本块: label: { body } 或 label:\n{ body }
 func parseBlock(lines []string, start int) (*ast.BlockStmt, int) {
 	line := lines[start]
 	colonIdx := strings.Index(line, ":")
-	label := strings.TrimSpace(line[:colonIdx])
-
-	// 寻找 `{` 或下一行开始 body
+	s := &ast.BlockStmt{Label: strings.TrimSpace(line[:colonIdx])}
 	rest := strings.TrimSpace(line[colonIdx+1:])
-	s := &ast.BlockStmt{Label: label}
 
-	// label: { stmts }  — 花括号在同一行
-	if strings.HasPrefix(rest, "{") {
-		// body 从下一行开始
-		depth := 1
-		i := start + 1
-		for i < len(lines) && depth > 0 {
-			depth += strings.Count(lines[i], "{") - strings.Count(lines[i], "}")
-			if depth == 0 {
-				i++
-				break
-			}
-			s.Body = append(s.Body, parseBody([]string{lines[i]})...)
-			i++
-		}
-		return s, i
+	bodyStart := start + 1
+	if rest == "" && bodyStart < len(lines) && strings.TrimSpace(lines[bodyStart]) == "{" {
+		bodyStart++ // 花括号在下一行，跳过 "{"
+	} else if !strings.HasPrefix(rest, "{") {
+		return s, start + 1
 	}
-
-	// label:  — 花括号在下一行
-	if rest == "" {
-		i := start + 1
-		if i < len(lines) && strings.TrimSpace(lines[i]) == "{" {
-			depth := 1
-			i++ // skip `{`
-			for i < len(lines) && depth > 0 {
-				depth += strings.Count(lines[i], "{") - strings.Count(lines[i], "}")
-				if depth == 0 {
-					i++
-					break
-				}
-				s.Body = append(s.Body, parseBody([]string{lines[i]})...)
-				i++
-			}
-			return s, i
-		}
-	}
-
-	// 无法解析的格式
-	return s, start + 1
-}
-
-func isCallExpr(line string) bool {
-	open := strings.Index(line, "(")
-	return open > 0 && !strings.HasPrefix(line, "if ") && !strings.HasPrefix(line, "for ") && !strings.HasPrefix(line, "while ")
+	body, next := parseBracedBody(lines, bodyStart)
+	s.Body = body
+	return s, next
 }

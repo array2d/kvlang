@@ -125,16 +125,15 @@ func collectParams(toks []Token) []string {
 	return result
 }
 
-// isInfixOp 判断操作符字符串是否为二元中缀算子。
-func isInfixOp(s string) bool {
-	switch s {
-	case "+", "-", "*", "/", "%",
-		"==", "!=", "<", ">", "<=", ">=",
-		"&&", "||", "&", "|", "^", "<<", ">>":
-		return true
-	}
-	return false
+// infixOpSet 包含全部二元中缀算子。
+var infixOpSet = map[string]bool{
+	"+": true, "-": true, "*": true, "/": true, "%": true,
+	"==": true, "!=": true, "<": true, ">": true, "<=": true, ">=": true,
+	"&&": true, "||": true, "&": true, "|": true, "^": true, "<<": true, ">>": true,
 }
+
+// isInfixOp 判断操作符字符串是否为二元中缀算子。
+func isInfixOp(s string) bool { return infixOpSet[s] }
 
 // isUnaryPrefixOp 判断操作符字符串是否为一元前缀算子。
 func isUnaryPrefixOp(s string) bool {
