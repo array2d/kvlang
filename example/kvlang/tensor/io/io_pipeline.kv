@@ -1,27 +1,27 @@
 # io_pipeline: 完整的 IO 流水线 — 创建→计算→保存→加载→打印→清理
 # 验证 VM ↔ heap-plat ↔ op-plat 三方联调
-def io_pipeline() -> ('/data/final') {
-    tensor.new("f32", "[64]") -> '/data/x'
-    tensor.new("f32", "[64]") -> '/data/y'
-    tensor.new("f32", "[64]") -> '/data/z'
-    tensor.new("f32", "[64]") -> '/data/temp'
-    tensor.zeros() -> '/data/x'
-    tensor.zeros() -> '/data/y'
-    tensor.zeros() -> '/data/z'
-    tensor.add('/data/x', '/data/y') -> '/data/temp'
-    tensor.mul('/data/temp', '/data/z') -> '/data/z'
-    print("z =", '/data/z')
-    tensor.save('/data/z', '/tmp/io_pipeline_z')
-    tensor.new("f32", "[64]") -> '/data/final'
-    tensor.load('/tmp/io_pipeline_z') -> '/data/final'
-    print("final =", '/data/final')
-    tensor.del('/data/x')
-    tensor.del('/data/y')
-    tensor.del('/data/z')
-    tensor.del('/data/temp')
+def io_pipeline() -> (/data/final) {
+    tensor.new("f32", "[64]") -> /data/x
+    tensor.new("f32", "[64]") -> /data/y
+    tensor.new("f32", "[64]") -> /data/z
+    tensor.new("f32", "[64]") -> /data/temp
+    tensor.zeros() -> /data/x
+    tensor.zeros() -> /data/y
+    tensor.zeros() -> /data/z
+    tensor.add(/data/x, /data/y) -> /data/temp
+    tensor.mul(/data/temp, /data/z) -> /data/z
+    print("z =", /data/z)
+    tensor.save(/data/z, /tmp/io_pipeline_z)
+    tensor.new("f32", "[64]") -> /data/final
+    tensor.load(/tmp/io_pipeline_z) -> /data/final
+    print("final =", /data/final)
+    tensor.del(/data/x)
+    tensor.del(/data/y)
+    tensor.del(/data/z)
+    tensor.del(/data/temp)
 }
 
-str.set("kvlangrun") -> './term'
+str.set("kvlangrun") -> ./term
 
-# Top-level call: io_pipeline() -> '/data/final'
-io_pipeline() -> '/data/final'
+# Top-level call: io_pipeline() -> /data/final
+io_pipeline() -> /data/final

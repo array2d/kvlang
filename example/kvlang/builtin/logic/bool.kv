@@ -1,10 +1,10 @@
 def native_bool(A:int) -> (C:bool) {
     print("A =", A)
-    bool(A) -> './C'
-    print("C =", './C')
+    bool(A) -> ./C
+    print("C =", ./C)
 }
 
-str.set("kvlangrun") -> './term'
+str.set("kvlangrun") -> ./term
 
-# Top-level call: native_bool(1) -> './out'
-native_bool(1) -> './out'
+# Top-level call: native_bool(1) -> ./out
+native_bool(1) -> ./out

@@ -2,22 +2,22 @@
 # 测试: for (var in path) 遍历 vthread 数据
 
 def 路径求和(data:tensor) -> (sum:int) {
-    str.set("0") -> './sum'
-    for (x in './data') {
-        './sum' + './x' -> './sum'
+    str.set("0") -> ./sum
+    for (x in ./data) {
+        ./sum + ./x -> ./sum
     }
 }
 
 def 路径计数(data:tensor) -> (count:int) {
-    str.set("0") -> './count'
-    for (elem in './data') {
-        './count' + 1 -> './count'
+    str.set("0") -> ./count
+    for (elem in ./data) {
+        ./count + 1 -> ./count
     }
 }
 
 def 路径平方和(data:tensor) -> (sqsum:int) {
-    str.set("0") -> './sqsum'
-    for (v in './data') {
-        './sqsum' + './v' * './v' -> './sqsum'
+    str.set("0") -> ./sqsum
+    for (v in ./data) {
+        ./sqsum + ./v * ./v -> ./sqsum
     }
 }

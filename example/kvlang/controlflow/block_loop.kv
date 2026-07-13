@@ -3,23 +3,23 @@
 
 def 块循环求和(N:int) -> (total:int) {
     entry: {
-        str.set("0") -> './total'
-        str.set("1") -> './i'
+        str.set("0") -> ./total
+        str.set("1") -> ./i
         goto(cond)
     }
 
     cond: {
-        './i' <= N -> './more'
-        br('./more', body, exit)
+        ./i <= N -> ./more
+        br(./more, body, exit)
     }
 
     body: {
-        './total' + './i' -> './total'
+        ./total + ./i -> ./total
         goto(step)
     }
 
     step: {
-        './i' + 1 -> './i'
+        ./i + 1 -> ./i
         goto(cond)
     }
 
@@ -30,23 +30,23 @@ def 块循环求和(N:int) -> (total:int) {
 
 def 块循环阶乘(N:int) -> (result:int) {
     entry: {
-        str.set("1") -> './result'
-        str.set("1") -> './i'
+        str.set("1") -> ./result
+        str.set("1") -> ./i
         goto(cond)
     }
 
     cond: {
-        './i' <= N -> './more'
-        br('./more', body, exit)
+        ./i <= N -> ./more
+        br(./more, body, exit)
     }
 
     body: {
-        './result' * './i' -> './result'
+        ./result * ./i -> ./result
         goto(step)
     }
 
     step: {
-        './i' + 1 -> './i'
+        ./i + 1 -> ./i
         goto(cond)
     }
 

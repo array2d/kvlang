@@ -2,40 +2,40 @@
 # 测试: 单分支 if, if-else, 嵌套 if-else, 并行判断
 
 def 简单分支(flag:bool, X:int) -> (R:int) {
-    if ('./flag') {
-        X * 2 -> './R'
+    if (./flag) {
+        X * 2 -> ./R
     } else {
-        X + 10 -> './R'
+        X + 10 -> ./R
     }
 }
 
 def 多头判断(score:int) -> (grade:int) {
-    if ('./score' > 90) {
-        str.set("1") -> './grade'
+    if (./score > 90) {
+        str.set("1") -> ./grade
     } else {
-        if ('./score' > 60) {
-            str.set("2") -> './grade'
+        if (./score > 60) {
+            str.set("2") -> ./grade
         } else {
-            str.set("3") -> './grade'
+            str.set("3") -> ./grade
         }
     }
 }
 
 def 单分支判断(flag:bool, X:int) -> (R:int) {
-    X + 1 -> './R'
-    if ('./flag') {
-        './R' * 2 -> './R'
+    X + 1 -> ./R
+    if (./flag) {
+        ./R * 2 -> ./R
     }
 }
 
 def 正负零判断(X:int) -> (R:int) {
-    if ('./X' > 0) {
-        str.set("1") -> './R'
+    if (./X > 0) {
+        str.set("1") -> ./R
     } else {
-        if ('./X' < 0) {
-            str.set("-1") -> './R'
+        if (./X < 0) {
+            str.set("-1") -> ./R
         } else {
-            str.set("0") -> './R'
+            str.set("0") -> ./R
         }
     }
 }

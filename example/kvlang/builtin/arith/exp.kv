@@ -1,10 +1,10 @@
 def native_exp(A:int) -> (C:float) {
     print("A =", A)
-    exp(A) -> './C'
-    print("C =", './C')
+    exp(A) -> ./C
+    print("C =", ./C)
 }
 
-str.set("kvlangrun") -> './term'
+str.set("kvlangrun") -> ./term
 
-# Top-level call: native_exp(2) -> './out'
-native_exp(2) -> './out'
+# Top-level call: native_exp(2) -> ./out
+native_exp(2) -> ./out

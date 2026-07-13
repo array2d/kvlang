@@ -3,27 +3,27 @@
 
 def 链式计算(A:int, B:int) -> (R:int) {
     entry: {
-        A + B -> './s'
-        A * B -> './p'
+        A + B -> ./s
+        A * B -> ./p
         goto(mid)
     }
 
     mid: {
-        './s' + './p' -> './t'
-        br('./t', big, small)
+        ./s + ./p -> ./t
+        br(./t, big, small)
     }
 
     big: {
-        './t' * 2 -> './R'
+        ./t * 2 -> ./R
         return
     }
 
     small: {
-        './t' + 100 -> './R'
+        ./t + 100 -> ./R
         return
     }
 }
 
-str.set("kvlangrun") -> './term'
+str.set("kvlangrun") -> ./term
 
-链式计算(3, 4) -> './out'
+链式计算(3, 4) -> ./out

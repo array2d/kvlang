@@ -1,11 +1,11 @@
 def native_and(A:bool, B:bool) -> (C:bool) {
     print("A =", A)
     print("B =", B)
-    './C' <- A && B
-    print("C =", './C')
+    ./C <- A && B
+    print("C =", ./C)
 }
 
-str.set("kvlangrun") -> './term'
+str.set("kvlangrun") -> ./term
 
-# Top-level call: native_and(true, false) -> './out'
-native_and(true, false) -> './out'
+# Top-level call: native_and(true, false) -> ./out
+native_and(true, false) -> ./out

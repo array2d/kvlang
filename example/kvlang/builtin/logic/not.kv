@@ -1,10 +1,10 @@
 def native_not(A:bool) -> (C:bool) {
     print("A =", A)
-    './C' <- !A
-    print("C =", './C')
+    ./C <- !A
+    print("C =", ./C)
 }
 
-str.set("kvlangrun") -> './term'
+str.set("kvlangrun") -> ./term
 
-# Top-level call: native_not(true) -> './out'
-native_not(true) -> './out'
+# Top-level call: native_not(true) -> ./out
+native_not(true) -> ./out

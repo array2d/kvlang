@@ -3,54 +3,54 @@
 
 def 跳转链(X:int) -> (R:int) {
     entry: {
-        X + 1 -> './a'
+        X + 1 -> ./a
         goto(mid)
     }
 
     mid: {
-        './a' * 2 -> './b'
+        ./a * 2 -> ./b
         goto(calc)
     }
 
     calc: {
-        './b' > 10 -> './big'
-        br('./big', big_path, small_path)
+        ./b > 10 -> ./big
+        br(./big, big_path, small_path)
     }
 
     big_path: {
-        './b' + 100 -> './R'
+        ./b + 100 -> ./R
         return
     }
 
     small_path: {
-        './b' - 5 -> './R'
+        ./b - 5 -> ./R
         return
     }
 }
 
 def 状态机跳转(state:int, X:int) -> (R:int) {
     entry: {
-        './state' == 0 -> './s0'
-        br('./s0', start_state, not_start)
+        ./state == 0 -> ./s0
+        br(./s0, start_state, not_start)
     }
 
     start_state: {
-        X + 1 -> './R'
+        X + 1 -> ./R
         return
     }
 
     not_start: {
-        './state' == 1 -> './s1'
-        br('./s1', mid_state, end_state)
+        ./state == 1 -> ./s1
+        br(./s1, mid_state, end_state)
     }
 
     mid_state: {
-        X * 2 -> './R'
+        X * 2 -> ./R
         return
     }
 
     end_state: {
-        X * 3 -> './R'
+        X * 3 -> ./R
         return
     }
 }

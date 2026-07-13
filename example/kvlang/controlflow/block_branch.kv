@@ -3,49 +3,49 @@
 
 def 块分支示例(flag:bool, X:int) -> (R:int) {
     entry: {
-        X + 1 -> './a'
-        br('./flag', then, else)
+        X + 1 -> ./a
+        br(./flag, then, else)
     }
 
     then: {
-        './a' * 2 -> './b'
+        ./a * 2 -> ./b
         goto(merge)
     }
 
     else: {
-        './a' * 3 -> './b'
+        ./a * 3 -> ./b
         goto(merge)
     }
 
     merge: {
-        './b' + 10 -> './R'
+        ./b + 10 -> ./R
         return
     }
 }
 
 def 块多路分支(val:int) -> (R:int) {
     entry: {
-        './val' > 0 -> './gt'
-        br('./gt', positive, not_positive)
+        ./val > 0 -> ./gt
+        br(./gt, positive, not_positive)
     }
 
     positive: {
-        './val' > 10 -> './gt10'
-        br('./gt10', big, small)
+        ./val > 10 -> ./gt10
+        br(./gt10, big, small)
     }
 
     not_positive: {
-        str.set("0") -> './R'
+        str.set("0") -> ./R
         return
     }
 
     big: {
-        './val' * 3 -> './R'
+        ./val * 3 -> ./R
         return
     }
 
     small: {
-        './val' * 2 -> './R'
+        ./val * 2 -> ./R
         return
     }
 }

@@ -2,17 +2,17 @@
 # 右侧冒号: label: { } — 定义处带 :，引用处不带
 
 def 分支示例(flag:bool, X:int) -> (R:int) {
-    X + 1 -> './a'
+    X + 1 -> ./a
 
-    if ('./flag') {
-        './a' * 2 -> './b'
+    if (./flag) {
+        ./a * 2 -> ./b
     } else {
-        './a' * 3 -> './b'
+        ./a * 3 -> ./b
     }
 
-    './b' + 10 -> './R'
+    ./b + 10 -> ./R
 }
 
-str.set("kvlangrun") -> './term'
+str.set("kvlangrun") -> ./term
 
-分支示例(true, 5) -> './out'
+分支示例(true, 5) -> ./out

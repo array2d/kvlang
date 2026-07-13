@@ -1,16 +1,16 @@
 # compute: create 2 tensors, init with zeros, compute sum into a 3rd, cleanup
-def compute() -> ('/data/c') {
-    tensor.new("f32", "[8]") -> '/data/a'
-    tensor.new("f32", "[8]") -> '/data/b'
-    tensor.new("f32", "[8]") -> '/data/c'
-    tensor.zeros() -> '/data/a'
-    tensor.zeros() -> '/data/b'
-    tensor.add('/data/a', '/data/b') -> '/data/c'
-    tensor.del('/data/a')
-    tensor.del('/data/b')
+def compute() -> (/data/c) {
+    tensor.new("f32", "[8]") -> /data/a
+    tensor.new("f32", "[8]") -> /data/b
+    tensor.new("f32", "[8]") -> /data/c
+    tensor.zeros() -> /data/a
+    tensor.zeros() -> /data/b
+    tensor.add(/data/a, /data/b) -> /data/c
+    tensor.del(/data/a)
+    tensor.del(/data/b)
 }
 
-str.set("kvlangrun") -> './term'
+str.set("kvlangrun") -> ./term
 
-# Top-level call: compute() -> '/data/c'
-compute() -> '/data/c'
+# Top-level call: compute() -> /data/c
+compute() -> /data/c

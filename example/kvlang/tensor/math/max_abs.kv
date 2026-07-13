@@ -1,26 +1,26 @@
 # max_abs: 对两个 tensor 逐元素取 max(|a|, |b|)
 # 流程: abs(a) → abs(b) → max(abs_a, abs_b)
-def max_abs() -> ('/data/result') {
-    tensor.new("f32", "[128]") -> '/data/a'
-    tensor.new("f32", "[128]") -> '/data/b'
-    tensor.new("f32", "[128]") -> '/data/abs_a'
-    tensor.new("f32", "[128]") -> '/data/abs_b'
-    tensor.new("f32", "[128]") -> '/data/result'
+def max_abs() -> (/data/result) {
+    tensor.new("f32", "[128]") -> /data/a
+    tensor.new("f32", "[128]") -> /data/b
+    tensor.new("f32", "[128]") -> /data/abs_a
+    tensor.new("f32", "[128]") -> /data/abs_b
+    tensor.new("f32", "[128]") -> /data/result
 
-    tensor.zeros() -> '/data/a'
-    tensor.zeros() -> '/data/b'
+    tensor.zeros() -> /data/a
+    tensor.zeros() -> /data/b
 
-    abs('/data/a') -> '/data/abs_a'
-    abs('/data/b') -> '/data/abs_b'
-    max('/data/abs_a', '/data/abs_b') -> '/data/result'
+    abs(/data/a) -> /data/abs_a
+    abs(/data/b) -> /data/abs_b
+    max(/data/abs_a, /data/abs_b) -> /data/result
 
-    tensor.del('/data/a')
-    tensor.del('/data/b')
-    tensor.del('/data/abs_a')
-    tensor.del('/data/abs_b')
+    tensor.del(/data/a)
+    tensor.del(/data/b)
+    tensor.del(/data/abs_a)
+    tensor.del(/data/abs_b)
 }
 
-str.set("kvlangrun") -> './term'
+str.set("kvlangrun") -> ./term
 
-# Top-level call: max_abs() -> '/data/result'
-max_abs() -> '/data/result'
+# Top-level call: max_abs() -> /data/result
+max_abs() -> /data/result

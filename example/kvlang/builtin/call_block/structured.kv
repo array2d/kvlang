@@ -2,35 +2,35 @@
 # 使用 --lower 查看 if/while 降低为基本块
 
 def 结构化示例(flag:bool, X:int) -> (R:int) {
-    X + 1 -> './a'
+    X + 1 -> ./a
 
-    if ('./flag') {
-        './a' * 2 -> './b'
+    if (./flag) {
+        ./a * 2 -> ./b
     } else {
-        './a' * 3 -> './b'
+        ./a * 3 -> ./b
     }
 
-    './b' + X -> './R'
+    ./b + X -> ./R
 }
 
 def 条件循环(N:int) -> (acc:int) {
-    str.set("1") -> './acc'
+    str.set("1") -> ./acc
 
-    while ('./acc' < N) {
-        './acc' * 2 -> './acc'
+    while (./acc < N) {
+        ./acc * 2 -> ./acc
     }
 }
 
 def 路径迭代示例(data: tensor) -> (sum:int) {
-    str.set("0") -> './sum'
+    str.set("0") -> ./sum
 
-    for (i in './data') {
-        './sum' + './i' -> './sum'
+    for (i in ./data) {
+        ./sum + ./i -> ./sum
     }
 }
 
-str.set("kvlangrun") -> './term'
+str.set("kvlangrun") -> ./term
 
-结构化示例(true, 5) -> './out'
-条件循环(100) -> './out2'
-路径迭代示例('./data') -> './out3'
+结构化示例(true, 5) -> ./out
+条件循环(100) -> ./out2
+路径迭代示例(./data) -> ./out3

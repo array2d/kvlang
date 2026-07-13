@@ -1,8 +1,8 @@
 def native_float(A:int) -> (C:float) {
-    float(A) -> './C'
+    float(A) -> ./C
 }
 
-str.set("kvlangrun") -> './term'
+str.set("kvlangrun") -> ./term
 
-# Top-level call: native_float(42) -> './out'
-native_float(42) -> './out'
+# Top-level call: native_float(42) -> ./out
+native_float(42) -> ./out

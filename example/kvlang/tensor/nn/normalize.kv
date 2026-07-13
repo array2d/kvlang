@@ -1,25 +1,25 @@
 # normalize: 简单 "归一化" — center 后取绝对值
 # sub 和 abs 都是 op-plat GPU kernel
-def normalize() -> ('/data/norm') {
-    tensor.new("f32", "[256]") -> '/data/raw'
-    tensor.new("f32", "[256]") -> '/data/center'
-    tensor.new("f32", "[256]") -> '/data/centered'
-    tensor.new("f32", "[256]") -> '/data/norm'
+def normalize() -> (/data/norm) {
+    tensor.new("f32", "[256]") -> /data/raw
+    tensor.new("f32", "[256]") -> /data/center
+    tensor.new("f32", "[256]") -> /data/centered
+    tensor.new("f32", "[256]") -> /data/norm
 
-    tensor.zeros() -> '/data/raw'
-    tensor.zeros() -> '/data/center'
+    tensor.zeros() -> /data/raw
+    tensor.zeros() -> /data/center
 
     # centered = raw - center
-    tensor.sub('/data/raw', '/data/center') -> '/data/centered'
+    tensor.sub(/data/raw, /data/center) -> /data/centered
     # norm = abs(centered)
-    abs('/data/centered') -> '/data/norm'
+    abs(/data/centered) -> /data/norm
 
-    tensor.del('/data/raw')
-    tensor.del('/data/center')
-    tensor.del('/data/centered')
+    tensor.del(/data/raw)
+    tensor.del(/data/center)
+    tensor.del(/data/centered)
 }
 
-str.set("kvlangrun") -> './term'
+str.set("kvlangrun") -> ./term
 
-# Top-level call: normalize() -> '/data/norm'
-normalize() -> '/data/norm'
+# Top-level call: normalize() -> /data/norm
+normalize() -> /data/norm
