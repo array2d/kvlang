@@ -27,22 +27,25 @@ func (d Diagnostic) String() string {
 type Kind int
 
 const (
-	Ident   Kind = iota // 标识符、符号算子、未引用数字/路径段
-	Literal             // 字面量（引号已去除）
-	Arrow               // -> 或 <-
-	LParen              // (
-	RParen              // )
-	Comma               // ,
-	LBrace              // {
-	RBrace              // }
-	Colon               // :
-	Return              // return
-	If                  // if
-	Else                // else
-	For                 // for
-	While               // while
-	Newline             // 换行（语句分隔符，连续换行折叠为一个）
-	EOF                 // 文件结束哨兵
+	Ident    Kind = iota // 标识符、符号算子、未引用数字/路径段
+	Literal              // 字面量（引号已去除）
+	Arrow                // -> 或 <-
+	LParen               // (
+	RParen               // )
+	Comma                // ,
+	LBrace               // {
+	RBrace               // }
+	Colon                // :
+	Return               // return
+	If                   // if
+	Else                 // else
+	For                  // for
+	While                // while
+	Break                // break
+	Continue             // continue
+	Newline              // 换行（语句分隔符，连续换行折叠为一个）
+	Comment              // # 行注释（含 # 字符）
+	EOF                  // 文件结束哨兵
 )
 
 // String 返回 Kind 的可读名称。
@@ -50,7 +53,9 @@ func (k Kind) String() string {
 	names := [...]string{
 		"IDENT", "LITERAL", "ARROW",
 		"LPAREN", "RPAREN", "COMMA", "LBRACE", "RBRACE", "COLON",
-		"RETURN", "IF", "ELSE", "FOR", "WHILE", "NEWLINE", "EOF",
+		"RETURN", "IF", "ELSE", "FOR", "WHILE",
+		"BREAK", "CONTINUE",
+		"NEWLINE", "COMMENT", "EOF",
 	}
 	if int(k) < len(names) {
 		return names[k]
@@ -66,7 +71,9 @@ type Token struct {
 }
 
 // String 返回 Token 的调试表示。
-func (t Token) String() string { return fmt.Sprintf("%s(%q)@%d:%d", t.Kind, t.Value, t.Pos.Line, t.Pos.Col) }
+func (t Token) String() string {
+	return fmt.Sprintf("%s(%q)@%d:%d", t.Kind, t.Value, t.Pos.Line, t.Pos.Col)
+}
 
 // singleCharToken 将单字符标点映射到对应 Kind。
 var singleCharToken = map[byte]Kind{
@@ -84,12 +91,15 @@ func scanQuoted(src string, i int, quote byte) (string, int) {
 }
 
 // Scan 将整个源字符串（可含换行）扫描为平坦 Token 流，末尾附 EOF 哨兵。
+//
 // 每个 Token 携带源码起始位置 Pos{Line, Col}（均 1-based）。
+// # 注释产生 Comment Token，格式化工具可通过 Comments 字段保留注释（S6）。
+// 连续换行折叠为一个 Newline Token。
 func Scan(src string) []Token {
 	var tokens []Token
 	i := 0
 	line := 1
-	lineStart := 0   // 当前行起始字节偏移
+	lineStart := 0  // 当前行起始字节偏移
 	prevNewline := true
 
 	// pos 返回当前字节偏移 i 对应的源码位置。
@@ -120,11 +130,15 @@ func Scan(src string) []Token {
 			continue
 		}
 
-		// 单行注释
+		// # 行注释 → Comment Token（S6：保留注释）
 		if c == '#' {
+			p := pos()
+			start := i
 			for i < len(src) && src[i] != '\n' {
 				i++
 			}
+			tokens = append(tokens, Token{Kind: Comment, Value: src[start:i], Pos: p})
+			prevNewline = false // Comment 是实质 token，后续 \n 会触发 Newline
 			continue
 		}
 
@@ -243,6 +257,10 @@ func Scan(src string) []Token {
 			tokens = append(tokens, Token{Kind: For, Value: word, Pos: p})
 		case "while":
 			tokens = append(tokens, Token{Kind: While, Value: word, Pos: p})
+		case "break":
+			tokens = append(tokens, Token{Kind: Break, Value: word, Pos: p})
+		case "continue":
+			tokens = append(tokens, Token{Kind: Continue, Value: word, Pos: p})
 		default:
 			tokens = append(tokens, Token{Kind: Ident, Value: word, Pos: p})
 		}

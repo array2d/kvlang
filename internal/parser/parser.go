@@ -92,7 +92,7 @@ func (p *parser) eat(k Kind) bool {
 }
 
 // expect 消费当前 Token。
-// 若 Kind 不匹配：追加 Diagnostic，消费意外 token（不回退），返回合成 token 继续解析。
+// 若 Kind 不匹配：追加 Diagnostic，消费意外 token（error recovery），返回合成 token。
 func (p *parser) expect(k Kind) Token {
 	t := p.advance()
 	if t.Kind != k && t.Kind != EOF {
@@ -105,9 +105,39 @@ func (p *parser) expect(k Kind) Token {
 	return t
 }
 
+// skipNewlines 跳过连续 Newline Token（不消费 Comment）。
 func (p *parser) skipNewlines() {
 	for p.peek().Kind == Newline {
 		p.advance()
+	}
+}
+
+// skipNewlinesAndComments 跳过连续 Newline 和 Comment Token（内容丢弃）。
+// 用于结构性上下文（def body 之前、else 之前等），不需要保留注释。
+func (p *parser) skipNewlinesAndComments() {
+	for {
+		k := p.peek().Kind
+		if k == Newline || k == Comment {
+			p.advance()
+		} else {
+			break
+		}
+	}
+}
+
+// collectLeadingComments 消费并返回前置 Comment 和 Newline Token。
+// 用于 parseBody / parseFile，将注释附加到紧随其后的 AST 节点（S6：注释保留）。
+func (p *parser) collectLeadingComments() []string {
+	var comments []string
+	for {
+		switch p.peek().Kind {
+		case Newline:
+			p.advance()
+		case Comment:
+			comments = append(comments, p.advance().Value)
+		default:
+			return comments
+		}
 	}
 }
 
@@ -116,16 +146,18 @@ func (p *parser) skipNewlines() {
 func (p *parser) parseFile() *ast.File {
 	f := &ast.File{}
 	for {
-		p.skipNewlines()
+		comments := p.collectLeadingComments()
 		if p.peek().Kind == EOF {
 			break
 		}
 		if p.peek().Kind == Ident && p.peek().Value == "def" {
 			fn := p.parseFunc()
+			fn.Comments = comments
 			f.Funcs = append(f.Funcs, fn)
 		} else {
 			inst := p.parseInst()
-			if inst != nil && inst.Opcode != "" {
+			if inst != nil && inst.Expr != nil {
+				inst.Comments = comments
 				f.TopLevelCalls = append(f.TopLevelCalls, inst)
 			}
 		}
@@ -136,7 +168,7 @@ func (p *parser) parseFile() *ast.File {
 // parseFunc 解析单个函数定义：def name(...) -> (...) { body }
 func (p *parser) parseFunc() ast.Func {
 	sig := p.parseFuncSig()
-	p.skipNewlines()
+	p.skipNewlinesAndComments()
 	p.expect(LBrace)
 	body := p.parseBody()
 	p.expect(RBrace)
@@ -200,14 +232,10 @@ func (p *parser) parseParamList(stop Kind) []ast.Param {
 	return params
 }
 
-// ── 条件表达式解析 ─────────────────────────────────────────────
-
-// parseCondInst 解析 if/while 括号内的条件表达式，直接构造 *ast.Instruction。
-// 调用时已确认 peek() 为 LParen；返回后已消费 RParen。
-func (p *parser) parseCondInst() *ast.Instruction {
-	p.expect(LParen)
-	inst := &ast.Instruction{}
-	p.parseExprInto(inst)
-	p.expect(RParen)
-	return inst
+// ParseFuncSig 将签名字符串解析为 ast.FuncSig（公开 API）。
+// 签名格式为 KV 中存储的 FuncSig.String() 输出：def name(A:t) -> (B:t)
+func ParseFuncSig(sig string) ast.FuncSig {
+	toks := Scan(sig)
+	p := &parser{tokens: toks}
+	return p.parseFuncSig()
 }
