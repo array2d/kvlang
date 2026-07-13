@@ -12,7 +12,6 @@ import (
 	"kvlang/internal/kvspace"
 	"kvlang/internal/logx"
 	"kvlang/internal/op"
-	"kvlang/internal/parser"
 	"kvlang/internal/vthread"
 )
 
@@ -231,4 +230,3 @@ func Lifecycle(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *o
 	return nil
 }
 
-var _ = parser.ParseLine

@@ -90,18 +90,17 @@ func runCode(name string, rc io.Reader, addr string) {
 	if err != nil { logx.Fatal("parse: %v", err) }
 
 	hasMain := false
-	var allPreamble []string
 	for i := range df.Funcs {
 		fn := lower.Func(&df.Funcs[i])
 		layoutcode.WriteFunc(kv, "main", fn)
 		if fn.Name == "main" { hasMain = true }
 	}
-	allPreamble = df.PreambleLines
-	if len(allPreamble) == 0 && !hasMain { logx.Fatal("no executable code found") }
+	calls := df.TopLevelCalls
+	if len(calls) == 0 && !hasMain { logx.Fatal("no executable code found") }
 
-	body := make([]string, len(allPreamble)); copy(body, allPreamble)
-	if hasMain { body = append(body, "main() -> './pre_main_ret'") }
-	preMain := ast.Func{Name: "pre_main", Signature: "def pre_main() -> ()", Body: toStmts(body)}
+	body := callsToStmts(calls)
+	if hasMain { body = append(body, &ast.Instruction{Opcode: "main", Writes: []string{"./pre_main_ret"}}) }
+	preMain := ast.Func{Name: "pre_main", Signature: "def pre_main() -> ()", Body: body}
 	preMain = *lower.Func(&preMain)
 	layoutcode.WriteFunc(kv, "main", &preMain)
 	kv.Set(keytree.FuncMain, `{"entry":"pre_main","reads":[],"writes":[]}`)
@@ -112,7 +111,7 @@ func runCode(name string, rc io.Reader, addr string) {
 // loadFunctions 将多个 .kv 文件解析、lower 并写入 kvspace，合成 pre_main 入口。
 func loadFunctions(kv kvspace.KVSpace, files []string) {
 	hasMain := false
-	var allPreamble []string
+	var allCalls []*ast.Instruction
 	for _, f := range files {
 		df, err := parser.ParseFile(f)
 		if err != nil { logx.Warn("SKIP %s: %v", f, err); continue }
@@ -122,12 +121,12 @@ func loadFunctions(kv kvspace.KVSpace, files []string) {
 			layoutcode.WriteFunc(kv, pkg, fn)
 			if fn.Name == "main" { hasMain = true }
 		}
-		allPreamble = append(allPreamble, df.PreambleLines...)
+		allCalls = append(allCalls, df.TopLevelCalls...)
 	}
-	if len(allPreamble) == 0 && !hasMain { logx.Fatal("no executable code found") }
-	body := make([]string, len(allPreamble)); copy(body, allPreamble)
-	if hasMain { body = append(body, "main() -> './pre_main_ret'") }
-	preMain := ast.Func{Name: "pre_main", Signature: "def pre_main() -> ()", Body: toStmts(body)}
+	if len(allCalls) == 0 && !hasMain { logx.Fatal("no executable code found") }
+	body := callsToStmts(allCalls)
+	if hasMain { body = append(body, &ast.Instruction{Opcode: "main", Writes: []string{"./pre_main_ret"}}) }
+	preMain := ast.Func{Name: "pre_main", Signature: "def pre_main() -> ()", Body: body}
 	preMain = *lower.Func(&preMain)
 	layoutcode.WriteFunc(kv, "main", &preMain)
 	kv.Set(keytree.FuncMain, `{"entry":"pre_main","reads":[],"writes":[]}`)
@@ -161,14 +160,11 @@ func collectKVFiles(path string) ([]string, error) {
 	return files, nil
 }
 
-// toStmts 将 kvlang 源码行转换为 AST 语句列表。
-func toStmts(lines []string) []ast.Stmt {
-	var stmts []ast.Stmt
-	for _, line := range lines {
-		inst, err := parser.ParseLine(line)
-		if err == nil && inst != nil {
-			stmts = append(stmts, inst)
-		}
+// callsToStmts 将顶层调用列表转换为语句列表。
+func callsToStmts(calls []*ast.Instruction) []ast.Stmt {
+	stmts := make([]ast.Stmt, len(calls))
+	for i, inst := range calls {
+		stmts[i] = inst
 	}
 	return stmts
 }

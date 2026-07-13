@@ -14,7 +14,6 @@ import (
 func File(f *ast.File) *ast.File {
 	lowered := &ast.File{
 		TopLevelCalls: f.TopLevelCalls,
-		PreambleLines: f.PreambleLines,
 	}
 	for _, fn := range f.Funcs {
 		lf := Func(&fn)
@@ -141,10 +140,12 @@ func evalCond(cond string, lg *labelGen) (insts []ast.Stmt, slot string) {
 		return nil, cond
 	}
 	slot = "./_cond_" + lg.next("cond")
-	inst, err := parser.ParseLine(cond + " -> " + slot)
+	toks := parser.Scan(cond)
+	inst, err := parser.ParseInst(toks[:len(toks)-1]) // strip EOF
 	if err != nil || inst == nil {
 		return nil, cond
 	}
+	inst.Writes = []string{slot}
 	return []ast.Stmt{inst}, slot
 }
 
