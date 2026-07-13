@@ -36,8 +36,11 @@ func writeStmt(kv kvspace.KVSpace, st ast.Stmt, prefix string, idx *int) {
 	switch s := st.(type) {
 	case *ast.Instruction:
 		n := *idx
-		kv.Set(fmt.Sprintf("%s/[%d,0]", prefix, n), s.Opcode)
-		for j, r := range s.Reads {
+		opcode, reads := s.Flat()
+		if opcode != "" {
+			kv.Set(fmt.Sprintf("%s/[%d,0]", prefix, n), opcode)
+		}
+		for j, r := range reads {
 			kv.Set(fmt.Sprintf("%s/[%d,-%d]", prefix, n, j+1), r)
 		}
 		for j, w := range s.Writes {

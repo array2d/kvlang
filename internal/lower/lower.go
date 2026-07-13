@@ -1,5 +1,6 @@
 // Package lower 将结构化控制流 (if/while) lowering 为基本块原语 (br/goto)。
-// for 循环 (路径迭代) 暂不 lowering，待执行层迭代原语就绪后再处理。
+// 同时将复合表达式（多层嵌套算子）展开为 SSA 形式的平坦指令序列（S3）。
+// for 循环（路径迭代）暂不 lowering，待执行层迭代原语就绪后再处理。
 package lower
 
 import (
@@ -19,7 +20,8 @@ func File(f *ast.File) *ast.File {
 	return lowered
 }
 
-// Func 将函数体中 if/while 控制流 lowering 为 BlockStmt + br/goto。
+// Func 将函数体中 if/while 控制流 lowering 为 BlockStmt + br/goto，
+// 并将复合表达式展开为平坦指令序列。
 func Func(fn *ast.Func) *ast.Func {
 	lg := &labelGen{parent: fn.Sig.Name}
 	return &ast.Func{
@@ -38,7 +40,8 @@ func (g *labelGen) next(prefix string) string {
 	return fmt.Sprintf("_%s_%d", prefix, g.n)
 }
 
-// lowerBody 将语句列表中的 if/while 转换为基本块，for 保持原样。
+// lowerBody 将语句列表中的 if/while 转换为基本块，for 保持原样，
+// 并将复合 Instruction 展开为平坦指令序列。
 func lowerBody(stmts []ast.Stmt, lg *labelGen) []ast.Stmt {
 	var result []ast.Stmt
 	var pending []ast.Stmt
@@ -46,7 +49,9 @@ func lowerBody(stmts []ast.Stmt, lg *labelGen) []ast.Stmt {
 	for _, st := range stmts {
 		switch s := st.(type) {
 		case *ast.Instruction:
-			pending = append(pending, s)
+			// 展开复合子表达式为平坦 SSA 序列（S3）
+			flattened := flattenInstExpr(s, lg)
+			pending = append(pending, flattened...)
 
 		case *ast.BlockStmt:
 			s.Body = lowerBody(s.Body, lg)
@@ -129,30 +134,75 @@ func lowerWhile(s *ast.WhileStmt, lg *labelGen) []ast.Stmt {
 }
 
 // evalCond 处理条件指令：
-//   - 简单槽引用（无 Reads）→ 直接用 Opcode 作为槽名
-//   - 复合表达式 → 生成临时槽，填写 Writes
+//   - 简单槽引用（叶节点，无 Reads）→ 直接用 Val 作为槽名
+//   - 复合表达式 → 展开并生成临时槽，填写 Writes
 func evalCond(cond *ast.Instruction, lg *labelGen) (insts []ast.Stmt, slot string) {
 	if isCondSimpleSlot(cond) {
-		return nil, cond.Opcode
+		return nil, cond.Expr.Val
 	}
 	slot = "./_cond_" + lg.next("cond")
 	condInst := *cond // 浅拷贝，不修改原始 AST 节点
 	condInst.Writes = []string{slot}
-	return []ast.Stmt{&condInst}, slot
+	for _, fi := range flattenInstExpr(&condInst, lg) {
+		insts = append(insts, fi)
+	}
+	return insts, slot
 }
 
-// isCondSimpleSlot 判断条件是否为裸槽引用（无 Reads，无 Writes）。
+// isCondSimpleSlot 判断条件是否为裸槽引用（叶节点，无 Writes）。
 // 裸槽引用直接作为 br 的条件操作数，无需生成中间指令。
 func isCondSimpleSlot(inst *ast.Instruction) bool {
-	return len(inst.Reads) == 0 && len(inst.Writes) == 0
+	return inst.Expr != nil && inst.Expr.IsLeaf() && len(inst.Writes) == 0
+}
+
+// flattenInstExpr 将指令的复合子表达式展开为平坦 SSA 形式（S3）。
+// 若所有 Args 均为叶节点（含 nil 或 IsLeaf()），直接返回原指令。
+// 否则递归展开，生成带临时槽的中间指令序列。
+func flattenInstExpr(inst *ast.Instruction, lg *labelGen) []ast.Stmt {
+	if inst.Expr == nil || inst.Expr.IsLeaf() || allArgsLeaf(inst.Expr) {
+		return []ast.Stmt{inst}
+	}
+	var result []ast.Stmt
+	flatArgs := make([]*ast.Expr, len(inst.Expr.Args))
+	for i, arg := range inst.Expr.Args {
+		if arg == nil || arg.IsLeaf() {
+			flatArgs[i] = arg
+		} else {
+			// 生成临时槽，将子表达式的结果写入
+			tmp := "./" + lg.next("tmp")
+			subInst := &ast.Instruction{Expr: arg, Writes: []string{tmp}}
+			result = append(result, flattenInstExpr(subInst, lg)...)
+			flatArgs[i] = ast.Leaf(tmp)
+		}
+	}
+	// 用平坦化后的 Args 重建最终指令
+	result = append(result, &ast.Instruction{
+		Expr:   ast.Call(inst.Expr.Op, flatArgs...),
+		Writes: inst.Writes,
+	})
+	return result
+}
+
+// allArgsLeaf 判断表达式的所有 Args 是否均为叶节点。
+func allArgsLeaf(e *ast.Expr) bool {
+	for _, a := range e.Args {
+		if a != nil && !a.IsLeaf() {
+			return false
+		}
+	}
+	return true
 }
 
 func brInst(cond, tLabel, fLabel string) *ast.Instruction {
-	return &ast.Instruction{Opcode: "br", Reads: []string{cond, tLabel, fLabel}}
+	return &ast.Instruction{
+		Expr: ast.Call("br", ast.Leaf(cond), ast.Leaf(tLabel), ast.Leaf(fLabel)),
+	}
 }
 
 func gotoLabel(parent, label string) *ast.Instruction {
-	return &ast.Instruction{Opcode: "call", Reads: []string{parent + "/" + label}}
+	return &ast.Instruction{
+		Expr: ast.Call("call", ast.Leaf(parent+"/"+label)),
+	}
 }
 
 func wrapBlock(label string, stmts []ast.Stmt, lg *labelGen) *ast.BlockStmt {
@@ -161,4 +211,3 @@ func wrapBlock(label string, stmts []ast.Stmt, lg *labelGen) *ast.BlockStmt {
 	}
 	return &ast.BlockStmt{Label: label, Body: stmts}
 }
-

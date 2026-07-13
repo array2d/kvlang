@@ -100,7 +100,7 @@ func runCode(name string, rc io.Reader, addr string) {
 	if len(calls) == 0 && !hasMain { logx.Fatal("no executable code found") }
 
 	body := callsToStmts(calls)
-	if hasMain { body = append(body, &ast.Instruction{Opcode: "main", Writes: []string{"./pre_main_ret"}}) }
+	if hasMain { body = append(body, &ast.Instruction{Expr: ast.Leaf("main"), Writes: []string{"./pre_main_ret"}}) }
 	preMain := ast.Func{Sig: ast.FuncSig{Name: "pre_main"}, Body: body}
 	preMain = *lower.Func(&preMain)
 	layoutcode.WriteFunc(kv, "main", &preMain)
@@ -127,7 +127,7 @@ func loadFunctions(kv kvspace.KVSpace, files []string) {
 	}
 	if len(allCalls) == 0 && !hasMain { logx.Fatal("no executable code found") }
 	body := callsToStmts(allCalls)
-	if hasMain { body = append(body, &ast.Instruction{Opcode: "main", Writes: []string{"./pre_main_ret"}}) }
+	if hasMain { body = append(body, &ast.Instruction{Expr: ast.Leaf("main"), Writes: []string{"./pre_main_ret"}}) }
 	preMain := ast.Func{Sig: ast.FuncSig{Name: "pre_main"}, Body: body}
 	preMain = *lower.Func(&preMain)
 	layoutcode.WriteFunc(kv, "main", &preMain)
