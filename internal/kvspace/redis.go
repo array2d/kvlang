@@ -88,10 +88,6 @@ func (r *redisImpl) checkLink(path string) string {
 	return t
 }
 
-func (r *redisImpl) resolve(path string) string {
-	return resolveCore(path, r.checkLink)
-}
-
 // resolveCore 路径解析核心：逐 '/' 边界从短到长查链接，替换后重扫，上限 40 跳防环。
 // lookup 返回非空 = 该路径是链接；"" = 非链接。
 func resolveCore(path string, lookup func(string) string) string {
@@ -118,21 +114,17 @@ func resolveCore(path string, lookup func(string) string) string {
 	return path
 }
 
-// resolveWith 是 resolveCore 的纯函数包装，供测试和 memImpl 复用。
-func resolveWith(path string, links map[string]string) string {
-	return resolveCore(path, func(p string) string { return links[p] })
-}
 
 // ── CRUD ─────────────────────────────────────────────────────────
 
 func (r *redisImpl) Get(key string) (string, error) {
-	return r.rdb.Get(bg, r.resolve(key)).Result()
+	return r.rdb.Get(bg, resolveCore(key, r.checkLink)).Result()
 }
 
 func (r *redisImpl) Gets(keys ...string) ([]string, error) {
 	resolved := make([]string, len(keys))
 	for i, k := range keys {
-		resolved[i] = r.resolve(k)
+		resolved[i] = resolveCore(k, r.checkLink)
 	}
 	raw, err := r.rdb.MGet(bg, resolved...).Result()
 	if err != nil {
@@ -148,7 +140,7 @@ func (r *redisImpl) Gets(keys ...string) ([]string, error) {
 }
 
 func (r *redisImpl) Set(key string, value any) error {
-	resolved := r.resolve(key)
+	resolved := resolveCore(key, r.checkLink)
 	r.maintainIndex(resolved, true)
 	return r.rdb.Set(bg, resolved, value, 0).Err()
 }
@@ -159,7 +151,7 @@ func (r *redisImpl) Sets(kvs map[string]any) error {
 	}
 	pairs := make([]any, 0, len(kvs)*2)
 	for k, v := range kvs {
-		resolved := r.resolve(k)
+		resolved := resolveCore(k, r.checkLink)
 		r.maintainIndex(resolved, true)
 		pairs = append(pairs, resolved, v)
 	}
@@ -169,7 +161,7 @@ func (r *redisImpl) Sets(kvs map[string]any) error {
 func (r *redisImpl) Del(keys ...string) error {
 	resolved := make([]string, len(keys))
 	for i, k := range keys {
-		resolved[i] = r.resolve(k)
+		resolved[i] = resolveCore(k, r.checkLink)
 		r.maintainIndex(resolved[i], false)
 	}
 	return r.rdb.Del(bg, resolved...).Err()
@@ -179,18 +171,18 @@ func (r *redisImpl) DelR(prefix string) error {
 	if r.checkLink(prefix) != "" {
 		return r.Unlink(prefix) // 链接只删链接，不动 target 树
 	}
-	resolved := r.resolve(prefix)
+	resolved := resolveCore(prefix, r.checkLink)
 	r.delRecursive(resolved)
 	r.maintainIndex(resolved, false)
 	return nil
 }
 
 func (r *redisImpl) List(prefix string) ([]string, error) {
-	return r.rdb.SMembers(bg, r.resolve(prefix)+"/.").Result()
+	return r.rdb.SMembers(bg, resolveCore(prefix, r.checkLink)+"/.").Result()
 }
 
 func (r *redisImpl) Watch(key string, timeout time.Duration) (string, error) {
-	vals, err := r.rdb.BLPop(bg, timeout, r.resolve(key)).Result()
+	vals, err := r.rdb.BLPop(bg, timeout, resolveCore(key, r.checkLink)).Result()
 	if err != nil {
 		return "", err
 	}
@@ -201,7 +193,7 @@ func (r *redisImpl) Watch(key string, timeout time.Duration) (string, error) {
 }
 
 func (r *redisImpl) Notify(key string, value any) error {
-	return r.rdb.LPush(bg, r.resolve(key), value).Err()
+	return r.rdb.LPush(bg, resolveCore(key, r.checkLink), value).Err()
 }
 
 func (r *redisImpl) DisConn() error { return r.rdb.Close() }
