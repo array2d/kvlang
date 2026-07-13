@@ -36,16 +36,18 @@ func cmdVet(args []string) {
 		os.Exit(1)
 	}
 
-	var df *ast.File
-	var err error
+	var (df *ast.File; err error; diags []parser.Diagnostic)
 	if name == "inline" || name == "stdin" {
-		df, err = parser.ParseCode(rc)
+		df, diags, err = parser.ParseCode(rc)
 	} else {
-		df, err = parser.ParseFile(name)
+		df, diags, err = parser.ParseFile(name)
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
 		os.Exit(1)
+	}
+	for _, d := range diags {
+		fmt.Fprintf(os.Stderr, "%s:%d:%d: %s\n", name, d.Pos.Line, d.Pos.Col, d.Message)
 	}
 	printVetResult(name, df, *dump, *lowerFlag)
 }

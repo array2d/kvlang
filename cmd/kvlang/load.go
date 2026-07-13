@@ -86,21 +86,22 @@ func runCode(name string, rc io.Reader, addr string) {
 	defer kv.DisConn()
 	registerDefaultTerm(kv)
 
-	df, err := parser.ParseCode(rc)
+	df, diags, err := parser.ParseCode(rc)
 	if err != nil { logx.Fatal("parse: %v", err) }
+	for _, d := range diags { logx.Warn("parse: %s", d) }
 
 	hasMain := false
 	for i := range df.Funcs {
 		fn := lower.Func(&df.Funcs[i])
 		layoutcode.WriteFunc(kv, "main", fn)
-		if fn.Name == "main" { hasMain = true }
+		if fn.Sig.Name == "main" { hasMain = true }
 	}
 	calls := df.TopLevelCalls
 	if len(calls) == 0 && !hasMain { logx.Fatal("no executable code found") }
 
 	body := callsToStmts(calls)
 	if hasMain { body = append(body, &ast.Instruction{Opcode: "main", Writes: []string{"./pre_main_ret"}}) }
-	preMain := ast.Func{Name: "pre_main", Signature: "def pre_main() -> ()", Body: body}
+	preMain := ast.Func{Sig: ast.FuncSig{Name: "pre_main"}, Body: body}
 	preMain = *lower.Func(&preMain)
 	layoutcode.WriteFunc(kv, "main", &preMain)
 	kv.Set(keytree.FuncMain, `{"entry":"pre_main","reads":[],"writes":[]}`)
@@ -113,20 +114,21 @@ func loadFunctions(kv kvspace.KVSpace, files []string) {
 	hasMain := false
 	var allCalls []*ast.Instruction
 	for _, f := range files {
-		df, err := parser.ParseFile(f)
+		df, diags, err := parser.ParseFile(f)
 		if err != nil { logx.Warn("SKIP %s: %v", f, err); continue }
+		for _, d := range diags { logx.Warn("%s: %s", f, d) }
 		pkg := packageFromPath(f)
 		for i := range df.Funcs {
 			fn := lower.Func(&df.Funcs[i])
 			layoutcode.WriteFunc(kv, pkg, fn)
-			if fn.Name == "main" { hasMain = true }
+			if fn.Sig.Name == "main" { hasMain = true }
 		}
 		allCalls = append(allCalls, df.TopLevelCalls...)
 	}
 	if len(allCalls) == 0 && !hasMain { logx.Fatal("no executable code found") }
 	body := callsToStmts(allCalls)
 	if hasMain { body = append(body, &ast.Instruction{Opcode: "main", Writes: []string{"./pre_main_ret"}}) }
-	preMain := ast.Func{Name: "pre_main", Signature: "def pre_main() -> ()", Body: body}
+	preMain := ast.Func{Sig: ast.FuncSig{Name: "pre_main"}, Body: body}
 	preMain = *lower.Func(&preMain)
 	layoutcode.WriteFunc(kv, "main", &preMain)
 	kv.Set(keytree.FuncMain, `{"entry":"pre_main","reads":[],"writes":[]}`)
