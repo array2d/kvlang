@@ -186,8 +186,9 @@ func needsQuote(s string) bool {
 	if len(s) == 0 {
 		return false
 	}
+	// 裸路径（./xxx 或 /xxx）不加引号。
 	if s[0] == '/' || (len(s) >= 2 && s[:2] == "./") {
-		return true
+		return false
 	}
 	for i := 0; i < len(s); i++ {
 		switch s[i] {

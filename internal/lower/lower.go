@@ -149,6 +149,11 @@ func evalCond(cond string, lg *labelGen) (insts []ast.Stmt, slot string) {
 }
 
 func isSimpleRef(s string) bool {
+	// 裸路径（./xxx 或 /xxx）且不含运算符/空格 → 直接槽引用，无需生成中间指令。
+	if strings.HasPrefix(s, "./") || strings.HasPrefix(s, "/") {
+		return !strings.ContainsAny(s, " \t+-*%!<>=&|()")
+	}
+	// 普通标识符：不含任何算子字符
 	for _, c := range s {
 		switch c {
 		case ' ', '+', '-', '*', '/', '<', '>', '=', '!', '&', '|', '(', ')':
