@@ -1,7 +1,9 @@
+// file.go: 文件级解析入口 + parser 核心结构体。
+//
+// 数据流：io.Reader → Scan → []Token → parser → *ast.File
 package parser
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -22,326 +24,211 @@ func ParseFile(path string) (*ast.File, error) {
 
 // ParseCode 从 io.Reader 解析 kvlang 代码，返回函数定义和顶层调用。
 func ParseCode(r io.Reader) (*ast.File, error) {
-	var lines []string
-	scanner := bufio.NewScanner(r)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		lines = append(lines, line)
-	}
-	if err := scanner.Err(); err != nil {
+	raw, err := io.ReadAll(r)
+	if err != nil {
 		return nil, err
 	}
-	if len(lines) == 0 {
+	if strings.TrimSpace(string(raw)) == "" {
 		return nil, fmt.Errorf("empty input")
 	}
-	return parseLines(lines)
-}
-
-func parseLines(lines []string) (*ast.File, error) {
-	df := &ast.File{}
-	i := 0
-	for i < len(lines) {
-		if !strings.HasPrefix(lines[i], "def ") {
-			i++
-			continue
-		}
-		defLine := lines[i]
-		name := extractFuncName(defLine)
-		if name == "" {
-			return nil, fmt.Errorf("cannot extract name from: %s", defLine)
-		}
-
-		var rawBody []string
-		bodyEnd := len(lines)
-		if strings.HasSuffix(defLine, "{") {
-			depth := 1
-			for j := i + 1; j < len(lines); j++ {
-				depth += strings.Count(lines[j], "{") - strings.Count(lines[j], "}")
-				if depth == 0 {
-					bodyEnd = j
-					break
-				}
-				rawBody = append(rawBody, lines[j])
-			}
-			if bodyEnd == len(lines) {
-				return nil, fmt.Errorf("unclosed brace in %s", name)
-			}
-			i = bodyEnd + 1
-		} else {
-			for j := i + 1; j < len(lines); j++ {
-				if strings.HasPrefix(lines[j], "def ") || looksLikeCall(lines[j]) {
-					bodyEnd = j
-					break
-				}
-				rawBody = append(rawBody, lines[j])
-			}
-			i = bodyEnd
-		}
-		if len(rawBody) == 0 {
-			return nil, fmt.Errorf("empty body for %s", name)
-		}
-		df.Funcs = append(df.Funcs, ast.Func{
-			Name:      name,
-			Signature: strings.TrimSuffix(defLine, " {"),
-			Body:      parseBody(rawBody),
-		})
-	}
-	if len(df.Funcs) == 0 {
+	p := &parser{tokens: Scan(string(raw))}
+	f := p.parseFile()
+	if len(f.Funcs) == 0 {
 		return nil, fmt.Errorf("no 'def' found")
 	}
-
-	// 顶层调用
-	for _, line := range lines {
-		if strings.HasPrefix(line, "def ") || line == "}" {
-			continue
-		}
-		inBody := false
-		for _, fn := range df.Funcs {
-			for _, bl := range fn.Body {
-				if strings.HasPrefix(line, bl.FirstLine()) {
-					inBody = true
-					break
-				}
-			}
-			if inBody {
-				break
-			}
-		}
-		if inBody {
-			continue
-		}
-		if tc, ok := parseTopLevelCall(line); ok {
-			df.TopLevelCalls = append(df.TopLevelCalls, tc)
-			df.PreambleLines = append(df.PreambleLines, line)
-		}
-	}
-	return df, nil
+	return f, nil
 }
 
-// ── file helpers ──
+// ── parser 结构体 ──────────────────────────────────────────────
 
-func extractFuncName(sig string) string {
-	sig = strings.TrimSpace(sig)
-	if strings.HasPrefix(sig, "def ") {
-		sig = strings.TrimSpace(sig[4:])
-	}
-	if len(sig) >= 2 && sig[0] == '(' && sig[len(sig)-1] == ')' {
-		sig = sig[1 : len(sig)-1]
-	}
-	sig = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(sig), " {"))
-	if idx := strings.Index(sig, "->"); idx >= 0 {
-		sig = strings.TrimSpace(sig[:idx])
-	}
-	if idx := strings.Index(sig, "("); idx >= 0 {
-		return strings.TrimSpace(sig[:idx])
-	}
-	return sig
+// parser 持有平坦 Token 流和当前读取位置。
+type parser struct {
+	tokens []Token
+	pos    int
 }
 
-// looksLikeCall 判断行是否为顶层调用（包含 isCallExpr 逻辑）。
-func looksLikeCall(line string) bool {
-	if strings.HasPrefix(line, "def ") || line == "}" || line == "{" {
-		return false
+// peek 返回当前 Token，不消费；越界时返回 EOF 哨兵。
+func (p *parser) peek() Token {
+	if p.pos >= len(p.tokens) {
+		return Token{Kind: EOF}
 	}
-	if strings.Contains(line, "->") {
+	return p.tokens[p.pos]
+}
+
+// peekAt 返回从当前位置偏移 offset 处的 Token（不消费）。
+func (p *parser) peekAt(offset int) Token {
+	idx := p.pos + offset
+	if idx < 0 || idx >= len(p.tokens) {
+		return Token{Kind: EOF}
+	}
+	return p.tokens[idx]
+}
+
+// advance 消费并返回当前 Token。
+func (p *parser) advance() Token {
+	t := p.peek()
+	if p.pos < len(p.tokens) {
+		p.pos++
+	}
+	return t
+}
+
+// eat 若当前 Token 与 k 匹配则消费，返回是否成功。
+func (p *parser) eat(k Kind) bool {
+	if p.peek().Kind == k {
+		p.advance()
 		return true
 	}
-	open := strings.Index(line, "(")
-	return open > 0 &&
-		!strings.HasPrefix(line, "if ") &&
-		!strings.HasPrefix(line, "for ") &&
-		!strings.HasPrefix(line, "while ")
+	return false
 }
 
-func parseTopLevelCall(line string) (ast.TopLevelCall, bool) {
-	arrowIdx := strings.Index(line, "->")
-	left, right := strings.TrimSpace(line), ""
-	if arrowIdx >= 0 {
-		left = strings.TrimSpace(line[:arrowIdx])
-		right = strings.TrimSpace(line[arrowIdx+2:])
-	}
-	open := strings.Index(left, "(")
-	close := strings.LastIndex(left, ")")
-	if open < 0 || close <= open {
-		return ast.TopLevelCall{}, false
-	}
-	funcName := strings.TrimSpace(left[:open])
-	if funcName == "" {
-		return ast.TopLevelCall{}, false
-	}
-	var args []string
-	if s := strings.TrimSpace(left[open+1 : close]); s != "" {
-		for _, a := range strings.Split(s, ",") {
-			if a = strings.TrimSpace(a); a != "" {
-				args = append(args, a)
-			}
+// expect 消费当前 Token；若 Kind 不匹配则直接消费并忽略（容错）。
+func (p *parser) expect(k Kind) Token {
+	t := p.advance()
+	// 简单容错：不匹配时回退（使调用方仍能继续）
+	if t.Kind != k && t.Kind != EOF {
+		// 放回一步以减少级联错误
+		if p.pos > 0 {
+			p.pos--
 		}
 	}
-	var outputs []string
-	if right = strings.Trim(right, "()"); right != "" {
-		for _, o := range strings.Split(right, ",") {
-			if o = strings.Trim(strings.TrimSpace(o), `"'`); o != "" {
-				outputs = append(outputs, o)
-			}
-		}
-	}
-	return ast.TopLevelCall{FuncName: funcName, Args: args, Outputs: outputs}, true
+	return t
 }
 
-// parseBody 将原始行列表解析为 AST Stmt 节点。
-// 以 Tokenize 首 Token 的 Value 进行分发，消除 strings.HasPrefix 双写。
-func parseBody(lines []string) []ast.Stmt {
-	var stmts []ast.Stmt
-	i := 0
-	for i < len(lines) {
-		line := lines[i]
-		if line == "" || line == "}" {
-			i++
-			continue
+// skipNewlines 跳过连续 Newline token。
+func (p *parser) skipNewlines() {
+	for p.peek().Kind == Newline {
+		p.advance()
+	}
+}
+
+// ── 文件级解析 ─────────────────────────────────────────────────
+
+// parseFile 主解析循环：顺序消费 Token，遇 def 则 parseFunc，否则解析顶层调用。
+func (p *parser) parseFile() *ast.File {
+	f := &ast.File{}
+	for {
+		p.skipNewlines()
+		t := p.peek()
+		if t.Kind == EOF {
+			break
 		}
-		toks := Tokenize(line)
-		if len(toks) == 0 {
-			i++
-			continue
-		}
-		switch toks[0].Value {
-		case "while":
-			st, next := parseWhileStmt(lines, i)
-			stmts = append(stmts, st)
-			i = next
-		case "for":
-			st, next := parseForStmt(lines, i)
-			stmts = append(stmts, st)
-			i = next
-		case "if":
-			st, next := parseIfStmt(lines, i)
-			stmts = append(stmts, st)
-			i = next
-		case "break":
-			stmts = append(stmts, &ast.BreakStmt{})
-			i++
-		case "continue":
-			stmts = append(stmts, &ast.ContinueStmt{})
-			i++
-		default:
-			if isBlockStart(line) {
-				st, next := parseBlock(lines, i)
-				stmts = append(stmts, st)
-				i = next
-			} else {
-				if inst, _ := ParseLine(line); inst != nil {
-					stmts = append(stmts, inst)
+		if t.Kind == Ident && t.Value == "def" {
+			fn := p.parseFunc()
+			f.Funcs = append(f.Funcs, fn)
+		} else {
+			// 顶层指令（调用外部函数或内置函数）
+			toks := p.collectInstTokens()
+			if len(toks) == 0 {
+				p.advance() // 容错：跳过无法识别的 token
+				continue
+			}
+			inst, err := parseInstFromTokens(toks, "")
+			if err == nil && inst != nil && inst.Opcode != "" {
+				tc := ast.TopLevelCall{
+					FuncName: inst.Opcode,
+					Args:     inst.Reads,
+					Outputs:  inst.Writes,
 				}
-				i++
+				f.TopLevelCalls = append(f.TopLevelCalls, tc)
+				f.PreambleLines = append(f.PreambleLines, inst.String())
 			}
 		}
 	}
-	return stmts
+	return f
 }
 
-// parseBracedBody 解析花括号块体（调用前开括号已消费，depth 从 1 开始）。
-func parseBracedBody(lines []string, start int) ([]ast.Stmt, int) {
-	var body []ast.Stmt
-	depth := 1
-	i := start
-	for i < len(lines) && depth > 0 {
-		depth += strings.Count(lines[i], "{") - strings.Count(lines[i], "}")
-		if depth == 0 {
-			i++
-			break
+// parseFunc 解析单个函数定义：def name(...) -> (...) { body }
+func (p *parser) parseFunc() ast.Func {
+	// 收集签名 token：从 'def' 到 LBrace（不含）
+	var sigToks []Token
+	for p.peek().Kind != LBrace && p.peek().Kind != EOF {
+		t := p.advance()
+		if t.Kind != Newline { // 签名通常单行，忽略可能的换行
+			sigToks = append(sigToks, t)
 		}
-		body = append(body, parseBody([]string{lines[i]})...)
-		i++
 	}
-	return body, i
+
+	name := nameFromSigToks(sigToks)
+	sig := tokensToSig(sigToks)
+
+	p.expect(LBrace)
+	body := p.parseBody()
+	p.expect(RBrace)
+
+	return ast.Func{Name: name, Signature: sig, Body: body}
 }
 
-// parseIfStmt 解析 if/else 块。
-func parseIfStmt(lines []string, start int) (*ast.IfStmt, int) {
-	line := lines[start]
-	s := &ast.IfStmt{Cond: strings.TrimSpace(line[strings.Index(line, "(")+1 : strings.LastIndex(line, ")")])}
+// ── collectUntilRParen ──────────────────────────────────────────
 
-	// then 分支：遇到 "} else {" 时手动调整 depth
+// collectUntilRParen 消费从当前 LParen 到匹配 RParen（支持嵌套）之间的 Token，
+// 返回空格拼接的字符串（用于 if/for/while 条件）。
+func (p *parser) collectUntilRParen() string {
+	p.expect(LParen)
+	var parts []string
 	depth := 1
-	i := start + 1
-	for i < len(lines) && depth > 0 {
-		depth += strings.Count(lines[i], "{") - strings.Count(lines[i], "}")
-		if strings.HasPrefix(lines[i], "} else {") {
-			depth-- // "} else {" 净括号为 0，需手动减去 }
-			if depth == 0 {
-				i++
-				break
+	for depth > 0 && p.peek().Kind != EOF {
+		t := p.advance()
+		switch t.Kind {
+		case LParen:
+			depth++
+			parts = append(parts, t.Value)
+		case RParen:
+			depth--
+			if depth > 0 {
+				parts = append(parts, t.Value)
+			}
+		default:
+			parts = append(parts, t.Value)
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// ── 签名重建辅助 ───────────────────────────────────────────────
+
+// nameFromSigToks 从签名 token 列表中提取函数名。
+// 签名以 Ident("def") 开头，函数名为紧随其后的 Ident。
+func nameFromSigToks(toks []Token) string {
+	for i, t := range toks {
+		if t.Kind == Ident && t.Value == "def" {
+			if i+1 < len(toks) && toks[i+1].Kind == Ident {
+				return toks[i+1].Value
 			}
 		}
-		if depth == 0 {
-			break
+	}
+	return ""
+}
+
+// tokensToSig 将签名 token 列表重建为规范字符串。
+//
+// 空格规则（与 kvlang 惯例一致）：
+//   - ) , : 前不加空格
+//   - ( 前不加空格（除非紧跟 ->）
+//   - ( : 后不加空格
+func tokensToSig(toks []Token) string {
+	var sb strings.Builder
+	for i, t := range toks {
+		if i > 0 {
+			prev := toks[i-1]
+			addSpace := true
+			// 前无空格：) , :
+			if t.Kind == RParen || t.Kind == Comma || t.Kind == Colon {
+				addSpace = false
+			}
+			// 前无空格：( ，除非 -> 后的 (
+			if t.Kind == LParen && prev.Kind != Arrow {
+				addSpace = false
+			}
+			// 后无空格：( :
+			if prev.Kind == LParen || prev.Kind == Colon {
+				addSpace = false
+			}
+			if addSpace {
+				sb.WriteByte(' ')
+			}
 		}
-		s.Then = append(s.Then, parseBody([]string{lines[i]})...)
-		i++
+		sb.WriteString(t.Value)
 	}
-	// else 分支
-	if i < len(lines) {
-		s.Else, i = parseBracedBody(lines, i)
-	}
-	return s, i
-}
-
-// parseForStmt 解析 for 循环: for (var in iter_path) { body }
-func parseForStmt(lines []string, start int) (*ast.ForStmt, int) {
-	line := lines[start]
-	inner := line[strings.Index(line, "(")+1 : strings.LastIndex(line, ")")]
-	parts := strings.SplitN(inner, " in ", 2)
-	varName := strings.TrimSpace(parts[0])
-	if colon := strings.Index(varName, ":"); colon >= 0 {
-		varName = varName[:colon]
-	}
-	s := &ast.ForStmt{Var: varName, Iter: strings.TrimSpace(parts[1])}
-	body, next := parseBracedBody(lines, start+1)
-	s.Body = body
-	return s, next
-}
-
-// parseWhileStmt 解析 while 循环: while (cond) { body }
-func parseWhileStmt(lines []string, start int) (*ast.WhileStmt, int) {
-	line := lines[start]
-	inner := line[strings.Index(line, "(")+1 : strings.LastIndex(line, ")")]
-	s := &ast.WhileStmt{Cond: strings.TrimSpace(inner)}
-	body, next := parseBracedBody(lines, start+1)
-	s.Body = body
-	return s, next
-}
-
-// isBlockStart 判断行是否为 block label 定义（如 entry: {）。
-func isBlockStart(line string) bool {
-	colonIdx := strings.Index(line, ":")
-	if colonIdx < 0 {
-		return false
-	}
-	prefix := strings.TrimSpace(line[:colonIdx])
-	return prefix != "" &&
-		!strings.Contains(prefix, "(") &&
-		!strings.HasPrefix(prefix, "/") &&
-		!strings.HasPrefix(prefix, "./") &&
-		!strings.Contains(prefix, " ")
-}
-
-// parseBlock 解析基本块: label: { body } 或 label:\n{ body }
-func parseBlock(lines []string, start int) (*ast.BlockStmt, int) {
-	line := lines[start]
-	colonIdx := strings.Index(line, ":")
-	s := &ast.BlockStmt{Label: strings.TrimSpace(line[:colonIdx])}
-	rest := strings.TrimSpace(line[colonIdx+1:])
-
-	bodyStart := start + 1
-	if rest == "" && bodyStart < len(lines) && strings.TrimSpace(lines[bodyStart]) == "{" {
-		bodyStart++ // 花括号在下一行，跳过 "{"
-	} else if !strings.HasPrefix(rest, "{") {
-		return s, start + 1
-	}
-	body, next := parseBracedBody(lines, bodyStart)
-	s.Body = body
-	return s, next
+	return sb.String()
 }
