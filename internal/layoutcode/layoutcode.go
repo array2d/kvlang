@@ -2,7 +2,7 @@
 //
 // 存储约定：
 //   /src/<pkg>/<name>              函数完整源码文本（可读，原始）
-//   /func/<pkg>/<name>             编译后签名（供 parser.ParseSignature 读取）
+//   /func/<pkg>/<name>             编译后签名（FuncSig.String() 序列化形式）
 //   /func/<pkg>/<name>/[i,j]       编译后指令
 //   /func/<pkg>/<name>/<label>/    基本块子路径
 //   /func/.idx/<name>              函数名 → pkg 反向索引
@@ -71,17 +71,18 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *
 		vthread.SetError(ctx, kv, vtid, pc, "func signature not found: "+funcName)
 		return pc
 	}
-	params := parser.ParseSignature(sig)
+	funcSig := parser.ParseFuncSig(sig)
 
 	// 构建参数绑定
 	bindings := make(map[string]string)
-	for i, p := range params.Reads {
+	for i, p := range funcSig.ParamNames() {
 		if i+1 < len(inst.Reads) {
 			bindings[p] = inst.Reads[i+1]
 			bindings["./"+p] = inst.Reads[i+1]
 		}
 	}
-	for i, p := range params.Writes {
+	returns := funcSig.ReturnNames()
+	for i, p := range returns {
 		if i < len(inst.Writes) {
 			bindings[p] = inst.Writes[i]
 			bindings["./"+p] = inst.Writes[i]
@@ -93,8 +94,8 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *
 	count := copyFunc(ctx, kv, funcKey, root, bindings)
 
 	// 追加 return 指令
-	if len(params.Writes) > 0 {
-		retRef := params.Writes[0]
+	if len(returns) > 0 {
+		retRef := returns[0]
 		if !strings.HasPrefix(retRef, "/") {
 			retRef = "./" + retRef
 		}
@@ -181,11 +182,11 @@ func RegisterBlocks(kv kvspace.KVSpace, pkg, parent string, body []ast.Stmt) {
 //  4. 块标签写入 /func/<pkg>/<name>/<label>/
 //  5. 反向索引写入 /func/.idx/<name>
 func WriteFunc(kv kvspace.KVSpace, pkg string, fn *ast.Func) {
-	kv.Set(keytree.SrcFunc(pkg, fn.Name), fn.FullText())
-	kv.Set(keytree.FuncCompiled(pkg, fn.Name), fn.Signature)
-	WriteBody(kv, pkg, fn.Name, fn.Body)
-	RegisterBlocks(kv, pkg, fn.Name, fn.Body)
-	kv.Set(keytree.FuncIdx(fn.Name), pkg)
+	kv.Set(keytree.SrcFunc(pkg, fn.Sig.Name), fn.FullText())
+	kv.Set(keytree.FuncCompiled(pkg, fn.Sig.Name), fn.Sig.String())
+	WriteBody(kv, pkg, fn.Sig.Name, fn.Body)
+	RegisterBlocks(kv, pkg, fn.Sig.Name, fn.Body)
+	kv.Set(keytree.FuncIdx(fn.Sig.Name), pkg)
 }
 
 // HandleReturn 处理 RETURN：回传值，删除子栈，恢复父栈 PC。

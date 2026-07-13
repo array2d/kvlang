@@ -4,10 +4,7 @@ package lower
 
 import (
 	"fmt"
-	"strings"
-
 	"kvlang/internal/ast"
-	"kvlang/internal/parser"
 )
 
 // File 将文件中所有函数的控制流 lowering 为基本块。
@@ -24,20 +21,17 @@ func File(f *ast.File) *ast.File {
 
 // Func 将函数体中 if/while 控制流 lowering 为 BlockStmt + br/goto。
 func Func(fn *ast.Func) *ast.Func {
-	lg := &labelGen{parent: fn.Name}
-	lowered := &ast.Func{
-		Name:      fn.Name,
-		Signature: fn.Signature,
-		Body:      lowerBody(fn.Body, lg),
+	lg := &labelGen{parent: fn.Sig.Name}
+	return &ast.Func{
+		Sig:  fn.Sig,
+		Body: lowerBody(fn.Body, lg),
 	}
-	return lowered
 }
 
 type labelGen struct {
 	n      int
-	parent string // 父函数名，用于构造 goto→call 的完整 label 路径
+	parent string
 }
-
 
 func (g *labelGen) next(prefix string) string {
 	g.n++
@@ -134,41 +128,29 @@ func lowerWhile(s *ast.WhileStmt, lg *labelGen) []ast.Stmt {
 	}
 }
 
-func evalCond(cond string, lg *labelGen) (insts []ast.Stmt, slot string) {
-	cond = strings.TrimSpace(cond)
-	if isSimpleRef(cond) {
-		return nil, cond
+// evalCond 处理条件指令：
+//   - 简单槽引用（无 Reads）→ 直接用 Opcode 作为槽名
+//   - 复合表达式 → 生成临时槽，填写 Writes
+func evalCond(cond *ast.Instruction, lg *labelGen) (insts []ast.Stmt, slot string) {
+	if isCondSimpleSlot(cond) {
+		return nil, cond.Opcode
 	}
 	slot = "./_cond_" + lg.next("cond")
-	toks := parser.Scan(cond)
-	inst, err := parser.ParseInst(toks[:len(toks)-1]) // strip EOF
-	if err != nil || inst == nil {
-		return nil, cond
-	}
-	inst.Writes = []string{slot}
-	return []ast.Stmt{inst}, slot
+	condInst := *cond // 浅拷贝，不修改原始 AST 节点
+	condInst.Writes = []string{slot}
+	return []ast.Stmt{&condInst}, slot
 }
 
-func isSimpleRef(s string) bool {
-	// 裸路径（./xxx 或 /xxx）且不含运算符/空格 → 直接槽引用，无需生成中间指令。
-	if strings.HasPrefix(s, "./") || strings.HasPrefix(s, "/") {
-		return !strings.ContainsAny(s, " \t+-*%!<>=&|()")
-	}
-	// 普通标识符：不含任何算子字符
-	for _, c := range s {
-		switch c {
-		case ' ', '+', '-', '*', '/', '<', '>', '=', '!', '&', '|', '(', ')':
-			return false
-		}
-	}
-	return true
+// isCondSimpleSlot 判断条件是否为裸槽引用（无 Reads，无 Writes）。
+// 裸槽引用直接作为 br 的条件操作数，无需生成中间指令。
+func isCondSimpleSlot(inst *ast.Instruction) bool {
+	return len(inst.Reads) == 0 && len(inst.Writes) == 0
 }
 
 func brInst(cond, tLabel, fLabel string) *ast.Instruction {
 	return &ast.Instruction{Opcode: "br", Reads: []string{cond, tLabel, fLabel}}
 }
 
-// gotoLabel — label 即无参 call，使用 parent/label 完整路径。
 func gotoLabel(parent, label string) *ast.Instruction {
 	return &ast.Instruction{Opcode: "call", Reads: []string{parent + "/" + label}}
 }
@@ -179,3 +161,4 @@ func wrapBlock(label string, stmts []ast.Stmt, lg *labelGen) *ast.BlockStmt {
 	}
 	return &ast.BlockStmt{Label: label, Body: stmts}
 }
+
