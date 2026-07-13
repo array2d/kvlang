@@ -12,9 +12,9 @@ func Format(w io.Writer, f *File) {
 		if fi > 0 {
 			fmt.Fprintln(w)
 		}
-		sig := fn.Signature
-	sig, _ = strings.CutPrefix(sig, "def ")
-	fmt.Fprintf(w, "def %s {\n", sig)
+		sig := fn.Sig.String()
+		sig, _ = strings.CutPrefix(sig, "def ")
+		fmt.Fprintf(w, "def %s {\n", sig)
 		formatBody(w, fn.Body, "\t")
 		fmt.Fprintln(w, "}")
 	}
@@ -29,7 +29,6 @@ func Format(w io.Writer, f *File) {
 
 func formatBody(w io.Writer, stmts []Stmt, indent string) {
 	for i, st := range stmts {
-		// 空行分隔 block 和控制流结构
 		if i > 0 {
 			_, prevBlock := stmts[i-1].(*BlockStmt)
 			_, curBlock := st.(*BlockStmt)
@@ -50,7 +49,11 @@ func formatBody(w io.Writer, stmts []Stmt, indent string) {
 			fmt.Fprintf(w, "%s}\n", indent)
 
 		case *IfStmt:
-			fmt.Fprintf(w, "%sif (%s) {\n", indent, s.Cond)
+			cond := ""
+			if s.Cond != nil {
+				cond = s.Cond.String()
+			}
+			fmt.Fprintf(w, "%sif (%s) {\n", indent, cond)
 			formatBody(w, s.Then, indent+"\t")
 			if len(s.Else) > 0 {
 				fmt.Fprintf(w, "%s} else {\n", indent)
@@ -64,7 +67,11 @@ func formatBody(w io.Writer, stmts []Stmt, indent string) {
 			fmt.Fprintf(w, "%s}\n", indent)
 
 		case *WhileStmt:
-			fmt.Fprintf(w, "%swhile (%s) {\n", indent, s.Cond)
+			cond := ""
+			if s.Cond != nil {
+				cond = s.Cond.String()
+			}
+			fmt.Fprintf(w, "%swhile (%s) {\n", indent, cond)
 			formatBody(w, s.Body, indent+"\t")
 			fmt.Fprintf(w, "%s}\n", indent)
 

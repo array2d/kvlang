@@ -10,8 +10,7 @@ import (
 func Dump(w io.Writer, f *File) {
 	fmt.Fprintf(w, "File (%d funcs, %d top-level calls)\n", len(f.Funcs), len(f.TopLevelCalls))
 	for i, fn := range f.Funcs {
-		last := i == len(f.Funcs)-1
-		dumpFunc(w, fn, "", last)
+		dumpFunc(w, fn, "", i == len(f.Funcs)-1)
 	}
 	if len(f.TopLevelCalls) > 0 {
 		fmt.Fprintln(w, "TopLevelCalls:")
@@ -26,8 +25,14 @@ func dumpFunc(w io.Writer, fn Func, prefix string, last bool) {
 	if last {
 		branch = "└── "
 	}
-	fmt.Fprintf(w, "%s%sFunc %q (%s) -> (body %d stmts)\n",
-		prefix, branch, fn.Name, fn.Signature[strings.Index(fn.Signature, "("):], len(fn.Body))
+	// 显示 (params) -> (returns) 部分
+	sigStr := fn.Sig.String()
+	paramsDisplay := sigStr
+	if idx := strings.Index(sigStr, "("); idx >= 0 {
+		paramsDisplay = sigStr[idx:]
+	}
+	fmt.Fprintf(w, "%s%sFunc %q %s (body %d stmts)\n",
+		prefix, branch, fn.Sig.Name, paramsDisplay, len(fn.Body))
 	childPrefix := prefix
 	if last {
 		childPrefix += "    "
@@ -35,8 +40,7 @@ func dumpFunc(w io.Writer, fn Func, prefix string, last bool) {
 		childPrefix += "│   "
 	}
 	for i, st := range fn.Body {
-		isLast := i == len(fn.Body)-1
-		dumpStmt(w, st, childPrefix, isLast)
+		dumpStmt(w, st, childPrefix, i == len(fn.Body)-1)
 	}
 }
 
@@ -61,13 +65,16 @@ func dumpStmt(w io.Writer, st Stmt, prefix string, last bool) {
 			childPrefix += "│   "
 		}
 		for i, child := range s.Body {
-			isLast := i == len(s.Body)-1
-			dumpStmt(w, child, childPrefix, isLast)
+			dumpStmt(w, child, childPrefix, i == len(s.Body)-1)
 		}
 
 	case *IfStmt:
+		condStr := ""
+		if s.Cond != nil {
+			condStr = s.Cond.String()
+		}
 		fmt.Fprintf(w, "%sIfStmt cond=%q (then=%d, else=%d)\n",
-			fullPrefix, s.Cond, len(s.Then), len(s.Else))
+			fullPrefix, condStr, len(s.Then), len(s.Else))
 		childPrefix := prefix
 		if last {
 			childPrefix += "    "
@@ -86,8 +93,12 @@ func dumpStmt(w io.Writer, st Stmt, prefix string, last bool) {
 			fullPrefix, s.Var, s.Iter, len(s.Body))
 
 	case *WhileStmt:
+		condStr := ""
+		if s.Cond != nil {
+			condStr = s.Cond.String()
+		}
 		fmt.Fprintf(w, "%sWhileStmt cond=%q (body=%d)\n",
-			fullPrefix, s.Cond, len(s.Body))
+			fullPrefix, condStr, len(s.Body))
 
 	case *BreakStmt:
 		fmt.Fprintf(w, "%sBreakStmt\n", fullPrefix)
