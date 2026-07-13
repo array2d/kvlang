@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -11,13 +12,13 @@ import (
 
 var bg = context.Background()
 
-// Conn 根据 DSN 创建 KVSpace（默认连接池大小 16）。
-func Conn(dsn string) KVSpace {
-	return ConnPool(dsn, 16)
-}
+// value 以 "->" 开头表示软链接（类比 ls: "name -> target"）。
+// kvlang 数据（opcode/路径/签名/JSON）均不以此起始，碰撞风险极低。
+const linkSentinel = "->"
 
-// ConnPool 根据 DSN 创建 KVSpace，使用指定连接池大小。
-// serve 模式下 worker 数量较多，需要更大的连接池（workers+16）。
+func Conn(dsn string) KVSpace { return ConnPool(dsn, 16) }
+
+// ConnPool 创建 KVSpace。serve 模式下 poolSize 建议设为 workers+16。
 func ConnPool(dsn string, poolSize int) KVSpace {
 	if poolSize < 16 {
 		poolSize = 16
@@ -31,21 +32,109 @@ func ConnPool(dsn string, poolSize int) KVSpace {
 			ReadTimeout:  3 * time.Second,
 			WriteTimeout: 3 * time.Second,
 		}),
+		links: make(map[string]string),
 	}
 }
 
 type redisImpl struct {
-	rdb *redis.Client
+	rdb    *redis.Client
+	linkMu sync.RWMutex
+	// links: 非空 = 链接 target；"" = 否定缓存（确认非链接）；不存在 = 未检查（lazy GET）
+	links map[string]string
 }
 
-// Get 读取单个 key。key 不存在时返回 ("", redis.Nil)。
+// ── 软链接 ───────────────────────────────────────────────────────
+
+// Link 和 Unlink 直接读写 Redis，不走 resolve，避免穿透到旧 target。
+
+func (r *redisImpl) Link(target, linkpath string) error {
+	if err := r.rdb.Set(bg, linkpath, linkSentinel+target, 0).Err(); err != nil {
+		return err
+	}
+	r.maintainIndex(linkpath, true)
+	r.linkMu.Lock()
+	r.links[linkpath] = target
+	r.linkMu.Unlock()
+	return nil
+}
+
+func (r *redisImpl) Unlink(linkpath string) error {
+	if err := r.rdb.Del(bg, linkpath).Err(); err != nil {
+		return err
+	}
+	r.maintainIndex(linkpath, false)
+	r.linkMu.Lock()
+	r.links[linkpath] = "" // 否定缓存
+	r.linkMu.Unlock()
+	return nil
+}
+
+// checkLink 返回 path 的链接 target；非链接返回 ""。
+// 缓存缺失时直接 GET Redis（不走 r.Get，避免递归 resolve）。
+func (r *redisImpl) checkLink(path string) string {
+	r.linkMu.RLock()
+	t, known := r.links[path]
+	r.linkMu.RUnlock()
+	if known {
+		return t
+	}
+	val, _ := r.rdb.Get(bg, path).Result()
+	if strings.HasPrefix(val, linkSentinel) {
+		t = val[len(linkSentinel):]
+	}
+	r.linkMu.Lock()
+	r.links[path] = t
+	r.linkMu.Unlock()
+	return t
+}
+
+func (r *redisImpl) resolve(path string) string {
+	return resolveCore(path, r.checkLink)
+}
+
+// resolveCore 路径解析核心：逐 '/' 边界从短到长查链接，替换后重扫，上限 40 跳防环。
+// lookup 返回非空 = 该路径是链接；"" = 非链接。
+func resolveCore(path string, lookup func(string) string) string {
+	for range 40 {
+		found := false
+		for i := 1; i < len(path); i++ {
+			if path[i] != '/' {
+				continue
+			}
+			if t := lookup(path[:i]); t != "" {
+				path, found = t+path[i:], true
+				break
+			}
+		}
+		if !found {
+			if t := lookup(path); t != "" {
+				path, found = t, true
+			}
+		}
+		if !found {
+			return path
+		}
+	}
+	return path
+}
+
+// resolveWith 是 resolveCore 的纯函数包装，供测试和 memImpl 复用。
+func resolveWith(path string, links map[string]string) string {
+	return resolveCore(path, func(p string) string { return links[p] })
+}
+
+// ── CRUD ─────────────────────────────────────────────────────────
+
 func (r *redisImpl) Get(key string) (string, error) {
-	return r.rdb.Get(bg, key).Result()
+	return r.rdb.Get(bg, r.resolve(key)).Result()
 }
 
-// Gets 批量读取，使用 MGET。缺失 key 对应位置返回 ""。
 func (r *redisImpl) Gets(keys ...string) ([]string, error) {
-	raw, err := r.rdb.MGet(bg, keys...).Result()
+	resolved := make([]string, len(keys))
+	for i, k := range keys {
+		resolved[i] = r.resolve(k)
+	}
+	raw, err := r.rdb.MGet(bg, resolved...).Result()
 	if err != nil {
 		return nil, err
 	}
@@ -58,58 +147,50 @@ func (r *redisImpl) Gets(keys ...string) ([]string, error) {
 	return result, nil
 }
 
-// Set 写入单个 key（自动维护目录索引）。
 func (r *redisImpl) Set(key string, value any) error {
-	r.maintainIndex(key, true)
-	return r.rdb.Set(bg, key, value, 0).Err()
+	resolved := r.resolve(key)
+	r.maintainIndex(resolved, true)
+	return r.rdb.Set(bg, resolved, value, 0).Err()
 }
 
-// Sets 批量写入，使用 Redis MSET（维护每个 key 的目录索引）。
 func (r *redisImpl) Sets(kvs map[string]any) error {
 	if len(kvs) == 0 {
 		return nil
 	}
 	pairs := make([]any, 0, len(kvs)*2)
 	for k, v := range kvs {
-		r.maintainIndex(k, true)
-		pairs = append(pairs, k, v)
+		resolved := r.resolve(k)
+		r.maintainIndex(resolved, true)
+		pairs = append(pairs, resolved, v)
 	}
 	return r.rdb.MSet(bg, pairs...).Err()
 }
 
-// Del 删除指定 key，并更新目录索引。
 func (r *redisImpl) Del(keys ...string) error {
-	for _, k := range keys {
-		r.maintainIndex(k, false)
+	resolved := make([]string, len(keys))
+	for i, k := range keys {
+		resolved[i] = r.resolve(k)
+		r.maintainIndex(resolved[i], false)
 	}
-	return r.rdb.Del(bg, keys...).Err()
+	return r.rdb.Del(bg, resolved...).Err()
 }
 
-// DelR 递归删除 prefix 及其所有子项（含目录索引），并从父目录中移除。
 func (r *redisImpl) DelR(prefix string) error {
-	r.delRecursive(prefix)
-	r.maintainIndex(prefix, false)
+	if r.checkLink(prefix) != "" {
+		return r.Unlink(prefix) // 链接只删链接，不动 target 树
+	}
+	resolved := r.resolve(prefix)
+	r.delRecursive(resolved)
+	r.maintainIndex(resolved, false)
 	return nil
 }
 
-// delRecursive 递归删除 prefix 下所有 key 和索引，不修改父目录索引。
-func (r *redisImpl) delRecursive(prefix string) {
-	children, _ := r.rdb.SMembers(bg, prefix+"/.").Result()
-	for _, c := range children {
-		r.delRecursive(prefix + "/" + c)
-	}
-	r.rdb.Del(bg, prefix, prefix+"/.")
-}
-
-// List 列出 prefix 直接子项名（SMEMBERS prefix/.）。
 func (r *redisImpl) List(prefix string) ([]string, error) {
-	return r.rdb.SMembers(bg, prefix+"/.").Result()
+	return r.rdb.SMembers(bg, r.resolve(prefix)+"/.").Result()
 }
 
-// Watch 阻塞等待单 key 消息（BLPOP），返回消息值。
-// timeout=0 永久阻塞；超时返回 ("", redis.Nil)。
 func (r *redisImpl) Watch(key string, timeout time.Duration) (string, error) {
-	vals, err := r.rdb.BLPop(bg, timeout, key).Result()
+	vals, err := r.rdb.BLPop(bg, timeout, r.resolve(key)).Result()
 	if err != nil {
 		return "", err
 	}
@@ -119,34 +200,39 @@ func (r *redisImpl) Watch(key string, timeout time.Duration) (string, error) {
 	return vals[1], nil
 }
 
-// Notify 向 key 推送一条消息（LPUSH）。
 func (r *redisImpl) Notify(key string, value any) error {
-	return r.rdb.LPush(bg, key, value).Err()
+	return r.rdb.LPush(bg, r.resolve(key), value).Err()
 }
 
 func (r *redisImpl) DisConn() error { return r.rdb.Close() }
 
-// maintainIndex 维护目录索引: /a/b/c → SADD /a/. "b", SADD /a/b/. "c"
+// ── 内部工具 ──────────────────────────────────────────────────────
+
+func (r *redisImpl) delRecursive(prefix string) {
+	children, _ := r.rdb.SMembers(bg, prefix+"/.").Result()
+	for _, c := range children {
+		r.delRecursive(prefix + "/" + c)
+	}
+	r.rdb.Del(bg, prefix, prefix+"/.")
+}
+
+// maintainIndex 维护目录索引（调用方须传已 resolve 的路径）。
+// /a/b/c → SADD /a/. b，SADD /a/b/. c，…（所有祖先层级）
 func (r *redisImpl) maintainIndex(key string, add bool) {
-	for i := 0; i < len(key); i++ {
-		if key[i] != '/' {
-			continue
+	prefix := ""
+	for _, p := range strings.Split(key, "/")[1:] {
+		if p == "" || p == "." {
+			break
 		}
-		parent := key[:i]
+		parent := prefix
 		if parent == "" {
 			parent = "/"
 		}
-		rest := key[i+1:]
-		if slash := strings.IndexByte(rest, '/'); slash >= 0 {
-			rest = rest[:slash]
-		}
-		if rest == "" || rest == "." {
-			continue
-		}
 		if add {
-			r.rdb.SAdd(bg, parent+"/.", rest)
+			r.rdb.SAdd(bg, parent+"/.", p)
 		} else {
-			r.rdb.SRem(bg, parent+"/.", rest)
+			r.rdb.SRem(bg, parent+"/.", p)
 		}
+		prefix += "/" + p
 	}
 }
