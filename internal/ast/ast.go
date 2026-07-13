@@ -3,7 +3,6 @@
 package ast
 
 import (
-	"fmt"
 	"strings"
 )
 
@@ -82,16 +81,26 @@ func (s FuncSig) ReturnNames() []string {
 
 // Func 表示一个函数定义。
 type Func struct {
-	Sig  FuncSig
-	Body []Stmt
+	Comments []string // 函数前的行注释
+	Sig      FuncSig
+	Body     []Stmt
 }
 
 // FullText 返回函数的完整源码文本，用于存入 /src/<pkg>/<name>。
 func (fn *Func) FullText() string {
 	var sb strings.Builder
+	for _, c := range fn.Comments {
+		sb.WriteString(c)
+		sb.WriteString("\n")
+	}
 	sb.WriteString(fn.Sig.String())
 	sb.WriteString(" {\n")
 	for _, st := range fn.Body {
+		for _, c := range StmtComments(st) {
+			sb.WriteString("    ")
+			sb.WriteString(c)
+			sb.WriteString("\n")
+		}
 		sb.WriteString("    ")
 		sb.WriteString(st.String())
 		sb.WriteString("\n")
@@ -100,52 +109,114 @@ func (fn *Func) FullText() string {
 	return sb.String()
 }
 
+// ── Expr ──────────────────────────────────────────────────────
+
+// Expr 是 kvlang 表达式树节点（由 Pratt 解析器生成）。
+//
+// 叶节点（IsLeaf()==true）：Op == ""，Val 为操作数字符串（变量名/字面量/路径）。
+// 内节点（IsLeaf()==false）：Op 为算子/函数名，Args 为操作数列表。
+type Expr struct {
+	Op   string  // 算子（"+","*"）/ 函数名（"f","str.set"）/ ""（叶节点）
+	Args []*Expr // 操作数（叶节点时为 nil）
+	Val  string  // 叶节点值（变量名、字面量或路径）
+}
+
+// IsLeaf 判断是否为叶节点（Op 为空）。
+func (e *Expr) IsLeaf() bool { return e != nil && e.Op == "" }
+
+// Leaf 构造叶节点（变量名、字面量或路径）。
+func Leaf(v string) *Expr { return &Expr{Val: v} }
+
+// Call 构造调用/操作节点（算子或函数名 + 操作数列表）。
+func Call(op string, args ...*Expr) *Expr { return &Expr{Op: op, Args: args} }
+
+// infixPrecTable 中缀算子优先级表（值越大优先级越高）。
+var infixPrecTable = map[string]int{
+	"||": 10, "&&": 20,
+	"==": 30, "!=": 30,
+	"<": 40, ">": 40, "<=": 40, ">=": 40,
+	"+": 50, "-": 50,
+	"*": 60, "/": 60, "%": 60,
+	"<<": 70, ">>": 70,
+	"&": 80, "^": 90, "|": 100,
+}
+
+// InfixPrec 返回算子的中缀优先级（0 = 非中缀/不支持）。
+func InfixPrec(op string) int { return infixPrecTable[op] }
+
+// String 返回表达式的规范文本表示（保留优先级，必要时添加括号）。
+func (e *Expr) String() string {
+	if e == nil {
+		return ""
+	}
+	return e.stringPrec(0)
+}
+
+func (e *Expr) stringPrec(outerPrec int) string {
+	if e.IsLeaf() {
+		if needsQuote(e.Val) {
+			return "'" + e.Val + "'"
+		}
+		return e.Val
+	}
+	// 二元中缀
+	if p, ok := infixPrecTable[e.Op]; ok && len(e.Args) == 2 {
+		left := e.Args[0].stringPrec(p)
+		right := e.Args[1].stringPrec(p + 1) // 左结合：右侧严格更高
+		s := left + " " + e.Op + " " + right
+		if outerPrec > p {
+			return "(" + s + ")"
+		}
+		return s
+	}
+	// 一元前缀（仅 1 个操作数）
+	if len(e.Args) == 1 {
+		return e.Op + e.Args[0].stringPrec(200)
+	}
+	// 零参（裸操作码）
+	if len(e.Args) == 0 {
+		return e.Op
+	}
+	// 多参函数调用
+	args := make([]string, len(e.Args))
+	for i, a := range e.Args {
+		args[i] = a.String()
+	}
+	return e.Op + "(" + strings.Join(args, ", ") + ")"
+}
+
 // ── Instruction ───────────────────────────────────────────────
 
 // Instruction 表示一条 kvlang 指令。
+// Expr 是 Pratt 解析的表达式树；Writes 是写目标槽列表。
 type Instruction struct {
-	Opcode string
-	Reads  []string
-	Writes []string
+	Comments []string // 该指令前的行注释
+	Expr     *Expr    // 表达式（nil 表示空指令）
+	Writes   []string // 写目标（槽路径，如 ./x、/abs）
 }
 
-// infixOps 中缀符号算子集合，仅用于 String() 的输出格式化。
-var infixOps = map[string]bool{
-	"+": true, "-": true, "*": true, "/": true, "%": true,
-	"==": true, "!=": true, "<": true, ">": true, "<=": true, ">=": true,
-	"&&": true, "||": true, "!": true,
-	"&": true, "|": true, "^": true, "<<": true, ">>": true,
+// Flat 返回用于 KV 布局的扁平 (opcode, reads) 表示。
+// 前提：lower 已将复合子表达式展开，所有 Args 均为叶节点。
+func (i *Instruction) Flat() (opcode string, reads []string) {
+	if i.Expr == nil {
+		return "", nil
+	}
+	if i.Expr.IsLeaf() {
+		return i.Expr.Val, nil
+	}
+	opcode = i.Expr.Op
+	for _, arg := range i.Expr.Args {
+		reads = append(reads, arg.Val) // lower 保证 Args 均为叶节点
+	}
+	return
 }
 
 func (*Instruction) stmt() {}
 func (i *Instruction) FirstLine() string { return i.String() }
 func (i *Instruction) String() string {
-	if i.Opcode == "br" || i.Opcode == "goto" || i.Opcode == "return" {
-		if len(i.Reads) > 0 {
-			return i.Opcode + "(" + join(i.Reads) + ")"
-		}
-		return i.Opcode
-	}
-	if infixOps[i.Opcode] {
-		s := ""
-		if len(i.Reads) >= 2 {
-			s = i.Reads[0] + " " + i.Opcode + " " + i.Reads[1]
-		} else if len(i.Reads) == 1 {
-			s = i.Opcode + i.Reads[0]
-		} else {
-			s = i.Opcode
-		}
-		if len(i.Writes) > 0 {
-			s += " -> " + join(i.Writes)
-		}
-		return s
-	}
-	s := i.Opcode
-	if len(i.Reads) > 0 {
-		s += "(" + join(i.Reads) + ")"
-	}
+	s := i.Expr.String()
 	if len(i.Writes) > 0 {
-		s += " -> " + join(i.Writes)
+		s += " -> " + joinWrites(i.Writes)
 	}
 	return s
 }
@@ -154,9 +225,10 @@ func (i *Instruction) String() string {
 
 // IfStmt 表示 if/else 控制流。
 type IfStmt struct {
-	Cond *Instruction // 条件表达式，Writes 在 HIR 阶段为 nil
-	Then []Stmt
-	Else []Stmt
+	Comments []string
+	Cond     *Instruction // 条件表达式，lower 前 Writes 为 nil
+	Then     []Stmt
+	Else     []Stmt
 }
 
 func (*IfStmt) stmt() {}
@@ -183,15 +255,16 @@ func (s *IfStmt) String() string {
 
 // ForStmt 表示 for 循环：迭代 kvspace 路径上的数据。
 type ForStmt struct {
-	Var  string
-	Iter string
-	Body []Stmt
+	Comments []string
+	Var      string
+	Iter     string
+	Body     []Stmt
 }
 
 func (*ForStmt) stmt() {}
 func (*ForStmt) FirstLine() string { return "for" }
 func (s *ForStmt) String() string {
-	r := fmt.Sprintf("for (%s in %s) {\n", s.Var, s.Iter)
+	r := "for (" + s.Var + " in " + s.Iter + ") {\n"
 	for _, st := range s.Body {
 		r += "\t" + st.String() + "\n"
 	}
@@ -200,8 +273,9 @@ func (s *ForStmt) String() string {
 
 // WhileStmt 表示 while 循环。
 type WhileStmt struct {
-	Cond *Instruction // 条件表达式，Writes 在 HIR 阶段为 nil
-	Body []Stmt
+	Comments []string
+	Cond     *Instruction
+	Body     []Stmt
 }
 
 func (*WhileStmt) stmt() {}
@@ -219,14 +293,18 @@ func (s *WhileStmt) String() string {
 }
 
 // BreakStmt 表示跳出当前循环。
-type BreakStmt struct{}
+type BreakStmt struct {
+	Comments []string
+}
 
 func (*BreakStmt) stmt()             {}
 func (*BreakStmt) FirstLine() string { return "break" }
 func (*BreakStmt) String() string    { return "break" }
 
 // ContinueStmt 表示跳过本次迭代。
-type ContinueStmt struct{}
+type ContinueStmt struct {
+	Comments []string
+}
 
 func (*ContinueStmt) stmt()             {}
 func (*ContinueStmt) FirstLine() string { return "continue" }
@@ -234,8 +312,9 @@ func (*ContinueStmt) String() string    { return "continue" }
 
 // BlockStmt 表示一个带标签的基本块。
 type BlockStmt struct {
-	Label string
-	Body  []Stmt
+	Comments []string
+	Label    string
+	Body     []Stmt
 }
 
 func (*BlockStmt) stmt() {}
@@ -248,29 +327,46 @@ func (s *BlockStmt) String() string {
 	return r + "}"
 }
 
-// ── 工具函数 ──────────────────────────────────────────────────
-
-func join(ss []string) string {
-	var sb strings.Builder
-	for i, v := range ss {
-		if i > 0 {
-			sb.WriteString(", ")
-		}
-		if needsQuote(v) {
-			sb.WriteByte('\'')
-			sb.WriteString(v)
-			sb.WriteByte('\'')
-		} else {
-			sb.WriteString(v)
-		}
+// StmtComments 返回语句的前置行注释（供 Format/FullText 使用）。
+func StmtComments(st Stmt) []string {
+	switch s := st.(type) {
+	case *Instruction:
+		return s.Comments
+	case *IfStmt:
+		return s.Comments
+	case *ForStmt:
+		return s.Comments
+	case *WhileStmt:
+		return s.Comments
+	case *BreakStmt:
+		return s.Comments
+	case *ContinueStmt:
+		return s.Comments
+	case *BlockStmt:
+		return s.Comments
 	}
-	return sb.String()
+	return nil
 }
 
+// ── 工具函数 ──────────────────────────────────────────────────
+
+// joinWrites 将写槽列表格式化：单槽直接输出，多槽加括号。
+func joinWrites(ss []string) string {
+	if len(ss) == 0 {
+		return ""
+	}
+	if len(ss) == 1 {
+		return ss[0]
+	}
+	return "(" + strings.Join(ss, ", ") + ")"
+}
+
+// needsQuote 判断字符串在输出时是否需要引号包裹。
 func needsQuote(s string) bool {
 	if len(s) == 0 {
 		return false
 	}
+	// 路径不需要引号
 	if s[0] == '/' || (len(s) >= 2 && s[:2] == "./") {
 		return false
 	}

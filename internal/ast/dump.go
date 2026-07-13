@@ -25,7 +25,6 @@ func dumpFunc(w io.Writer, fn Func, prefix string, last bool) {
 	if last {
 		branch = "└── "
 	}
-	// 显示 (params) -> (returns) 部分
 	sigStr := fn.Sig.String()
 	paramsDisplay := sigStr
 	if idx := strings.Index(sigStr, "("); idx >= 0 {
@@ -53,8 +52,9 @@ func dumpStmt(w io.Writer, st Stmt, prefix string, last bool) {
 
 	switch s := st.(type) {
 	case *Instruction:
-		fmt.Fprintf(w, "%sInstruction op=%q reads=%v writes=%v\n",
-			fullPrefix, s.Opcode, s.Reads, s.Writes)
+		exprStr := s.Expr.String()
+		fmt.Fprintf(w, "%sInstruction expr=%q writes=%v\n",
+			fullPrefix, exprStr, s.Writes)
 
 	case *BlockStmt:
 		fmt.Fprintf(w, "%sBlockStmt %q (%d stmts)\n", fullPrefix, s.Label, len(s.Body))
