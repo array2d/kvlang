@@ -189,10 +189,21 @@ func Scan(src string) []Token {
 			continue
 		}
 
-		// '/' — 除法算子或绝对路径（路径总是单引号引用，此处按算子处理）
+		// '/' — 绝对路径字面量 或 除法算子。
+		// 判断规则：/ 后紧跟字母/数字/下划线 → 绝对路径（如 /data/x）；
+		//           否则（后接空格、运算符等）→ 除法算子。
 		if c == '/' {
-			tokens = append(tokens, Token{Kind: Ident, Value: "/"})
-			i++
+			if i+1 < len(src) && isAbsPathStart(src[i+1]) {
+				start := i
+				i++ // 跳过前导 /
+				for i < len(src) && !isTokenDelim(src[i]) {
+					i++
+				}
+				tokens = append(tokens, Token{Kind: Literal, Value: src[start:i]})
+			} else {
+				tokens = append(tokens, Token{Kind: Ident, Value: "/"})
+				i++
+			}
 			continue
 		}
 
@@ -251,4 +262,11 @@ func isTokenDelim(c byte) bool {
 		return true
 	}
 	return false
+}
+
+// isAbsPathStart 判断字节是否可以作为绝对路径的第一个字符（/ 之后）。
+// 使 /data/x 识别为路径字面量而非除法算子。
+func isAbsPathStart(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+		(c >= '0' && c <= '9') || c == '_'
 }
