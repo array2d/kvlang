@@ -19,10 +19,10 @@ func Format(w io.Writer, f *File) {
 		fmt.Fprintln(w, "}")
 	}
 
-	if len(f.PreambleLines) > 0 {
+	if len(f.TopLevelCalls) > 0 {
 		fmt.Fprintln(w)
-		for _, line := range f.PreambleLines {
-			fmt.Fprintln(w, line)
+		for _, inst := range f.TopLevelCalls {
+			fmt.Fprintln(w, inst.String())
 		}
 	}
 }

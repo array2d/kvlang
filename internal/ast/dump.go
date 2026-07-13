@@ -15,8 +15,8 @@ func Dump(w io.Writer, f *File) {
 	}
 	if len(f.TopLevelCalls) > 0 {
 		fmt.Fprintln(w, "TopLevelCalls:")
-		for _, tc := range f.TopLevelCalls {
-			fmt.Fprintf(w, "  %s(%s) -> %s\n", tc.FuncName, strings.Join(tc.Args, ", "), strings.Join(tc.Outputs, ", "))
+		for _, inst := range f.TopLevelCalls {
+			fmt.Fprintf(w, "  %s\n", inst.String())
 		}
 	}
 }
