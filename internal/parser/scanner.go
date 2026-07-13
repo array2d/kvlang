@@ -7,6 +7,22 @@ import (
 	"strings"
 )
 
+// Pos 携带 Token 在源码中的起始位置。
+type Pos struct {
+	Line int // 1-based
+	Col  int // 1-based
+}
+
+// Diagnostic 表示一条解析错误，携带位置信息。
+type Diagnostic struct {
+	Pos     Pos
+	Message string
+}
+
+func (d Diagnostic) String() string {
+	return fmt.Sprintf("%d:%d: %s", d.Pos.Line, d.Pos.Col, d.Message)
+}
+
 // Kind 标记 Token 类型。
 type Kind int
 
@@ -42,14 +58,15 @@ func (k Kind) String() string {
 	return "UNKNOWN"
 }
 
-// Token 表示一个词法单元。
+// Token 表示一个词法单元，携带源码起始位置。
 type Token struct {
 	Kind  Kind
 	Value string
+	Pos   Pos
 }
 
 // String 返回 Token 的调试表示。
-func (t Token) String() string { return fmt.Sprintf("%s(%q)", t.Kind, t.Value) }
+func (t Token) String() string { return fmt.Sprintf("%s(%q)@%d:%d", t.Kind, t.Value, t.Pos.Line, t.Pos.Col) }
 
 // singleCharToken 将单字符标点映射到对应 Kind。
 var singleCharToken = map[byte]Kind{
@@ -67,32 +84,32 @@ func scanQuoted(src string, i int, quote byte) (string, int) {
 }
 
 // Scan 将整个源字符串（可含换行）扫描为平坦 Token 流，末尾附 EOF 哨兵。
-//
-// 规则：
-//   - 换行折叠为单个 Newline token（空行/连续换行合并）
-//   - # 注释延伸至行尾
-//   - 单/双引号字符串 → Literal（引号去除）
-//   - 路径 ./foo → Literal
-//   - 数字 42, 3.14 → Literal
-//   - <- / -> → Arrow
-//   - 双字符算子 ==, !=, <=, >= 等 → Ident
-//   - 单字符算子 +, -, *, / 等 → Ident
-//   - 关键字 return/if/else/for/while → 对应 Kind
-//   - 其余标识符（含点号，如 tensor.new）→ Ident
+// 每个 Token 携带源码起始位置 Pos{Line, Col}（均 1-based）。
 func Scan(src string) []Token {
 	var tokens []Token
 	i := 0
-	prevNewline := true // 压制开头多余换行
+	line := 1
+	lineStart := 0   // 当前行起始字节偏移
+	prevNewline := true
+
+	// pos 返回当前字节偏移 i 对应的源码位置。
+	pos := func() Pos { return Pos{Line: line, Col: i - lineStart + 1} }
 
 	for i < len(src) {
 		c := src[i]
 
 		// 换行：折叠连续换行
-		if c == '\n' || c == '\r' {
+		if c == '\n' {
 			if !prevNewline && len(tokens) > 0 {
-				tokens = append(tokens, Token{Kind: Newline, Value: "\n"})
+				tokens = append(tokens, Token{Kind: Newline, Value: "\n", Pos: pos()})
 				prevNewline = true
 			}
+			i++
+			line++
+			lineStart = i
+			continue
+		}
+		if c == '\r' {
 			i++
 			continue
 		}
@@ -112,25 +129,26 @@ func Scan(src string) []Token {
 		}
 
 		prevNewline = false
+		p := pos() // 记录当前 token 起始位置
 
 		// 引号字符串 → Literal（引号去除）
 		if c == '\'' || c == '"' {
 			val, next := scanQuoted(src, i, c)
-			tokens = append(tokens, Token{Kind: Literal, Value: val})
+			tokens = append(tokens, Token{Kind: Literal, Value: val, Pos: p})
 			i = next
 			continue
 		}
 
-		// 左箭头 <-（在双字符算子之前匹配，避免 <= 误判）
+		// 左箭头 <-
 		if c == '<' && i+1 < len(src) && src[i+1] == '-' {
-			tokens = append(tokens, Token{Kind: Arrow, Value: "<-"})
+			tokens = append(tokens, Token{Kind: Arrow, Value: "<-", Pos: p})
 			i += 2
 			continue
 		}
 
 		// 右箭头 ->
 		if c == '-' && i+1 < len(src) && src[i+1] == '>' {
-			tokens = append(tokens, Token{Kind: Arrow, Value: "->"})
+			tokens = append(tokens, Token{Kind: Arrow, Value: "->", Pos: p})
 			i += 2
 			continue
 		}
@@ -139,7 +157,7 @@ func Scan(src string) []Token {
 		if i+1 < len(src) {
 			switch src[i : i+2] {
 			case "==", "!=", "<=", ">=", "&&", "||", "<<", ">>":
-				tokens = append(tokens, Token{Kind: Ident, Value: src[i : i+2]})
+				tokens = append(tokens, Token{Kind: Ident, Value: src[i : i+2], Pos: p})
 				i += 2
 				continue
 			}
@@ -147,7 +165,7 @@ func Scan(src string) []Token {
 
 		// 单字符标点 — 查表
 		if k, ok := singleCharToken[c]; ok {
-			tokens = append(tokens, Token{Kind: k, Value: string(c)})
+			tokens = append(tokens, Token{Kind: k, Value: string(c), Pos: p})
 			i++
 			continue
 		}
@@ -155,14 +173,14 @@ func Scan(src string) []Token {
 		// 单字符符号算子
 		switch c {
 		case '+', '*', '%', '!', '<', '>', '&', '|', '^':
-			tokens = append(tokens, Token{Kind: Ident, Value: string(c)})
+			tokens = append(tokens, Token{Kind: Ident, Value: string(c), Pos: p})
 			i++
 			continue
 		}
 
 		// '-' 单独处理（已排除 -> 的情况）
 		if c == '-' {
-			tokens = append(tokens, Token{Kind: Ident, Value: "-"})
+			tokens = append(tokens, Token{Kind: Ident, Value: "-", Pos: p})
 			i++
 			continue
 		}
@@ -173,34 +191,32 @@ func Scan(src string) []Token {
 			for i < len(src) && (src[i] >= '0' && src[i] <= '9' || src[i] == '.' || src[i] == 'e' || src[i] == 'E') {
 				i++
 			}
-			tokens = append(tokens, Token{Kind: Literal, Value: src[start:i]})
+			tokens = append(tokens, Token{Kind: Literal, Value: src[start:i], Pos: p})
 			continue
 		}
 
-		// 路径字面量 ./foo（必须先于关键字读取）
+		// 路径字面量 ./foo
 		if c == '.' && i+1 < len(src) && src[i+1] == '/' {
 			start := i
 			i += 2
 			for i < len(src) && !isTokenDelim(src[i]) {
 				i++
 			}
-			tokens = append(tokens, Token{Kind: Literal, Value: src[start:i]})
+			tokens = append(tokens, Token{Kind: Literal, Value: src[start:i], Pos: p})
 			continue
 		}
 
-		// '/' — 绝对路径字面量 或 除法算子。
-		// 判断规则：/ 后紧跟字母/数字/下划线 → 绝对路径（如 /data/x）；
-		//           否则（后接空格、运算符等）→ 除法算子。
+		// '/' — 绝对路径字面量 或 除法算子
 		if c == '/' {
 			if i+1 < len(src) && isAbsPathStart(src[i+1]) {
 				start := i
-				i++ // 跳过前导 /
+				i++
 				for i < len(src) && !isTokenDelim(src[i]) {
 					i++
 				}
-				tokens = append(tokens, Token{Kind: Literal, Value: src[start:i]})
+				tokens = append(tokens, Token{Kind: Literal, Value: src[start:i], Pos: p})
 			} else {
-				tokens = append(tokens, Token{Kind: Ident, Value: "/"})
+				tokens = append(tokens, Token{Kind: Ident, Value: "/", Pos: p})
 				i++
 			}
 			continue
@@ -212,33 +228,30 @@ func Scan(src string) []Token {
 			i++
 		}
 		if i == start {
-			// 当前字符无匹配处理（如裸 =）→ 跳过，防止无限循环
-			i++
+			i++ // 跳过无法识别的字符，防止无限循环
 			continue
 		}
 		word := src[start:i]
 		switch word {
 		case "return":
-			tokens = append(tokens, Token{Kind: Return, Value: word})
+			tokens = append(tokens, Token{Kind: Return, Value: word, Pos: p})
 		case "if":
-			tokens = append(tokens, Token{Kind: If, Value: word})
+			tokens = append(tokens, Token{Kind: If, Value: word, Pos: p})
 		case "else":
-			tokens = append(tokens, Token{Kind: Else, Value: word})
+			tokens = append(tokens, Token{Kind: Else, Value: word, Pos: p})
 		case "for":
-			tokens = append(tokens, Token{Kind: For, Value: word})
+			tokens = append(tokens, Token{Kind: For, Value: word, Pos: p})
 		case "while":
-			tokens = append(tokens, Token{Kind: While, Value: word})
+			tokens = append(tokens, Token{Kind: While, Value: word, Pos: p})
 		default:
-			tokens = append(tokens, Token{Kind: Ident, Value: word})
+			tokens = append(tokens, Token{Kind: Ident, Value: word, Pos: p})
 		}
 	}
 
-	tokens = append(tokens, Token{Kind: EOF, Value: ""})
+	tokens = append(tokens, Token{Kind: EOF, Value: "", Pos: pos()})
 	return tokens
 }
 
-// isTokenDelim 判断字节是否为 Token 边界。
-// 含 ':' 使 "A:int" 分割为 Ident("A") Colon(":") Ident("int")。
 func isTokenDelim(c byte) bool {
 	switch c {
 	case ' ', '\t', '\n', '\r',
@@ -250,8 +263,6 @@ func isTokenDelim(c byte) bool {
 	return false
 }
 
-// isAbsPathStart 判断字节是否可以作为绝对路径的第一个字符（/ 之后）。
-// 使 /data/x 识别为路径字面量而非除法算子。
 func isAbsPathStart(c byte) bool {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
 		(c >= '0' && c <= '9') || c == '_'

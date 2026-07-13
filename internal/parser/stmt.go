@@ -1,21 +1,16 @@
 // stmt.go: 语句级解析。
 //
 // parseBody / parseStmt → parseIf / parseFor / parseWhile / parseBlockLabel
-// collectInstTokens → ParseInst（在 inst.go）
+// parseStmt default → parseInst（直接流式，在 inst.go）
 //
 // 单向依赖：parser.go → stmt.go → inst.go → scanner.go
 package parser
 
 import (
-	"strings"
-
 	"kvlang/internal/ast"
 )
 
-// ── parseBody / parseStmt ──────────────────────────────────────
-
 // parseBody 消费 Token 直到 RBrace 或 EOF，返回语句列表。
-// 调用方负责消费 LBrace（进入块前）和 RBrace（退出块后）。
 func (p *parser) parseBody() []ast.Stmt {
 	var stmts []ast.Stmt
 	for {
@@ -34,15 +29,12 @@ func (p *parser) parseBody() []ast.Stmt {
 
 // parseStmt 根据首 Token 分发到对应语句解析函数。
 func (p *parser) parseStmt() ast.Stmt {
-	t := p.peek()
-
 	// 块标签检测（优先级最高）：任意标记后紧跟 Colon → "label: { body }"
-	// 这允许 "else:"、"return:" 等关键字也用作块标签。
 	if p.peekAt(1).Kind == Colon {
 		return p.parseBlockLabel()
 	}
 
-	switch t.Kind {
+	switch p.peek().Kind {
 	case If:
 		return p.parseIf()
 	case For:
@@ -50,7 +42,7 @@ func (p *parser) parseStmt() ast.Stmt {
 	case While:
 		return p.parseWhile()
 	case Ident:
-		switch t.Value {
+		switch p.peek().Value {
 		case "break":
 			p.advance()
 			return &ast.BreakStmt{}
@@ -59,21 +51,14 @@ func (p *parser) parseStmt() ast.Stmt {
 			return &ast.ContinueStmt{}
 		}
 	}
-	// 其余情况：普通指令
-	toks := p.collectInstTokens()
-	if len(toks) == 0 {
-		return nil
-	}
-	inst, _ := ParseInst(toks)
-	return inst
+	// 其余情况：普通指令（直接流式解析，无中间 buffer）
+	return p.parseInst()
 }
-
-// ── 控制流语句 ─────────────────────────────────────────────────
 
 // parseIf 解析 if/else 块：if (cond) { then } [else { else }]
 func (p *parser) parseIf() *ast.IfStmt {
 	p.advance() // consume 'if'
-	cond := p.collectUntilRParen()
+	cond := p.parseCondInst()
 	p.skipNewlines()
 	p.expect(LBrace)
 	then := p.parseBody()
@@ -81,7 +66,7 @@ func (p *parser) parseIf() *ast.IfStmt {
 
 	p.skipNewlines()
 	if p.peek().Kind == Else {
-		p.advance() // consume 'else'
+		p.advance()
 		p.skipNewlines()
 		p.expect(LBrace)
 		els := p.parseBody()
@@ -91,22 +76,35 @@ func (p *parser) parseIf() *ast.IfStmt {
 	return &ast.IfStmt{Cond: cond, Then: then}
 }
 
-// parseFor 解析 for 循环：for (var in iter_path) { body }
+// parseFor 解析 for 循环：for (var[:type] in iter_path) { body }
 func (p *parser) parseFor() *ast.ForStmt {
 	p.advance() // consume 'for'
-	cond := p.collectUntilRParen()
+	p.expect(LParen)
 
-	// 拆分 "var[:type] in iter"
-	parts := strings.SplitN(cond, " in ", 2)
-	varName := strings.TrimSpace(parts[0])
-	if colon := strings.Index(varName, ":"); colon >= 0 {
-		varName = strings.TrimSpace(varName[:colon])
+	// 迭代变量名（可选 :type 标注）
+	varName := ""
+	if t := p.peek(); t.Kind == Ident || t.Kind == Literal {
+		varName = p.advance().Value
+		if p.peek().Kind == Colon {
+			p.advance() // consume :
+			if p.peek().Kind == Ident {
+				p.advance() // consume type（暂忽略）
+			}
+		}
 	}
+
+	// 'in' 关键字
+	if p.peek().Kind == Ident && p.peek().Value == "in" {
+		p.advance()
+	}
+
+	// 迭代路径
 	iter := ""
-	if len(parts) == 2 {
-		iter = strings.TrimSpace(parts[1])
+	if p.peek().Kind != RParen && p.peek().Kind != EOF {
+		iter = p.advance().Value
 	}
 
+	p.expect(RParen)
 	p.skipNewlines()
 	p.expect(LBrace)
 	body := p.parseBody()
@@ -118,7 +116,7 @@ func (p *parser) parseFor() *ast.ForStmt {
 // parseWhile 解析 while 循环：while (cond) { body }
 func (p *parser) parseWhile() *ast.WhileStmt {
 	p.advance() // consume 'while'
-	cond := p.collectUntilRParen()
+	cond := p.parseCondInst()
 	p.skipNewlines()
 	p.expect(LBrace)
 	body := p.parseBody()
@@ -127,7 +125,6 @@ func (p *parser) parseWhile() *ast.WhileStmt {
 }
 
 // parseBlockLabel 解析带标签的基本块：label: { body }
-// 调用前调用方已确认 peek()==Ident && peekAt(1)==Colon。
 func (p *parser) parseBlockLabel() *ast.BlockStmt {
 	label := p.advance().Value // consume Ident（标签名）
 	p.advance()                // consume Colon
@@ -136,53 +133,4 @@ func (p *parser) parseBlockLabel() *ast.BlockStmt {
 	body := p.parseBody()
 	p.expect(RBrace)
 	return &ast.BlockStmt{Label: label, Body: body}
-}
-
-// ── 指令 token 收集 ────────────────────────────────────────────
-
-// collectInstTokens 收集构成一条指令的 Token 列表。
-//
-// 停止条件（深度为 0）：
-//   - Newline  — 语句行结束
-//   - RBrace   — 块结束
-//   - EOF      — 文件结束
-//   - 新语句关键字（在已有 token 之后出现）— 安全兜底
-func (p *parser) collectInstTokens() []Token {
-	var toks []Token
-	depth := 0
-	for {
-		t := p.peek()
-		switch t.Kind {
-		case EOF, RBrace:
-			return toks
-		case Newline:
-			p.advance() // 消费换行，离开后调用方处于下一语句首
-			return toks
-		}
-		// 深度 0 且已有 token：遇到新语句起始则停止（安全兜底）
-		if depth == 0 && len(toks) > 0 && isNewStmtStart(t) {
-			return toks
-		}
-		toks = append(toks, p.advance())
-		switch t.Kind {
-		case LParen:
-			depth++
-		case RParen:
-			depth--
-		}
-	}
-}
-
-// isNewStmtStart 判断 Token 是否为新语句的起始（用于 collectInstTokens 的安全停止）。
-func isNewStmtStart(t Token) bool {
-	switch t.Kind {
-	case If, For, While, Return:
-		return true
-	case Ident:
-		switch t.Value {
-		case "break", "continue", "def":
-			return true
-		}
-	}
-	return false
 }

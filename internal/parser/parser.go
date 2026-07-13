@@ -1,10 +1,14 @@
 // Package parser 提供 kvlang 语法分析：Token 流 → AST。
 //
 // 入口:
-//   - ParseFile(path) → *ast.File             (文件级)
-//   - ParseCode(r) → *ast.File                (io.Reader 级)
-//   - ParseInst([]Token) → *ast.Instruction   (指令级，token 驱动)
-//   - ParseSignature(sig) → FormalParams      (签名级，来自 KV 存储的字符串)
+//   - ParseFile(path) → (*ast.File, []Diagnostic, error)   (文件级)
+//   - ParseCode(r)    → (*ast.File, []Diagnostic, error)   (io.Reader 级)
+//   - ParseFuncSig(sig) → ast.FuncSig                      (签名级，来自 KV 存储的字符串)
+//
+// 返回值约定：
+//   - error != nil          → IO / 空输入等硬错误，*ast.File 为 nil
+//   - error == nil, diags≠∅ → 语法错误，*ast.File 为尽力解析的部分结果
+//   - error == nil, diags=∅ → 干净解析
 //
 // 数据流：io.Reader → Scan → []Token → parser → *ast.File
 //
@@ -21,41 +25,41 @@ import (
 )
 
 // ParseFile 打开并解析 .kv 源文件。
-func ParseFile(path string) (*ast.File, error) {
+func ParseFile(path string) (*ast.File, []Diagnostic, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", path, err)
+		return nil, nil, fmt.Errorf("open %s: %w", path, err)
 	}
 	defer f.Close()
 	return ParseCode(f)
 }
 
-// ParseCode 从 io.Reader 解析 kvlang 代码，返回函数定义和顶层调用。
-func ParseCode(r io.Reader) (*ast.File, error) {
+// ParseCode 从 io.Reader 解析 kvlang 代码。
+// 语法错误通过 []Diagnostic 返回，不中断解析（error recovery）。
+func ParseCode(r io.Reader) (*ast.File, []Diagnostic, error) {
 	raw, err := io.ReadAll(r)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if strings.TrimSpace(string(raw)) == "" {
-		return nil, fmt.Errorf("empty input")
+		return nil, nil, fmt.Errorf("empty input")
 	}
 	p := &parser{tokens: Scan(string(raw))}
 	f := p.parseFile()
 	if len(f.Funcs) == 0 {
-		return nil, fmt.Errorf("no 'def' found")
+		return nil, p.errors, fmt.Errorf("no 'def' found")
 	}
-	return f, nil
+	return f, p.errors, nil
 }
 
 // ── parser 结构体 ──────────────────────────────────────────────
 
-// parser 持有平坦 Token 流和当前读取位置。
 type parser struct {
 	tokens []Token
 	pos    int
+	errors []Diagnostic // 积累语法错误，不在第一个错误处停止
 }
 
-// peek 返回当前 Token，不消费；越界时返回 EOF 哨兵。
 func (p *parser) peek() Token {
 	if p.pos >= len(p.tokens) {
 		return Token{Kind: EOF}
@@ -63,7 +67,6 @@ func (p *parser) peek() Token {
 	return p.tokens[p.pos]
 }
 
-// peekAt 返回从当前位置偏移 offset 处的 Token（不消费）。
 func (p *parser) peekAt(offset int) Token {
 	idx := p.pos + offset
 	if idx < 0 || idx >= len(p.tokens) {
@@ -72,7 +75,6 @@ func (p *parser) peekAt(offset int) Token {
 	return p.tokens[idx]
 }
 
-// advance 消费并返回当前 Token。
 func (p *parser) advance() Token {
 	t := p.peek()
 	if p.pos < len(p.tokens) {
@@ -81,7 +83,6 @@ func (p *parser) advance() Token {
 	return t
 }
 
-// eat 若当前 Token 与 k 匹配则消费，返回是否成功。
 func (p *parser) eat(k Kind) bool {
 	if p.peek().Kind == k {
 		p.advance()
@@ -90,18 +91,20 @@ func (p *parser) eat(k Kind) bool {
 	return false
 }
 
-// expect 消费当前 Token；若 Kind 不匹配则回退一步（容错）。
+// expect 消费当前 Token。
+// 若 Kind 不匹配：追加 Diagnostic，消费意外 token（不回退），返回合成 token 继续解析。
 func (p *parser) expect(k Kind) Token {
 	t := p.advance()
 	if t.Kind != k && t.Kind != EOF {
-		if p.pos > 0 {
-			p.pos--
-		}
+		p.errors = append(p.errors, Diagnostic{
+			Pos:     t.Pos,
+			Message: fmt.Sprintf("expected %s, got %s %q", k, t.Kind, t.Value),
+		})
+		return Token{Kind: k, Pos: t.Pos} // 合成 token，让调用方继续
 	}
 	return t
 }
 
-// skipNewlines 跳过连续 Newline token。
 func (p *parser) skipNewlines() {
 	for p.peek().Kind == Newline {
 		p.advance()
@@ -110,27 +113,19 @@ func (p *parser) skipNewlines() {
 
 // ── 文件级解析 ─────────────────────────────────────────────────
 
-// parseFile 主解析循环：顺序消费 Token，遇 def 则 parseFunc，否则解析顶层调用。
 func (p *parser) parseFile() *ast.File {
 	f := &ast.File{}
 	for {
 		p.skipNewlines()
-		t := p.peek()
-		if t.Kind == EOF {
+		if p.peek().Kind == EOF {
 			break
 		}
-		if t.Kind == Ident && t.Value == "def" {
+		if p.peek().Kind == Ident && p.peek().Value == "def" {
 			fn := p.parseFunc()
 			f.Funcs = append(f.Funcs, fn)
 		} else {
-			// 顶层指令（调用外部函数或内置函数）
-			toks := p.collectInstTokens()
-			if len(toks) == 0 {
-				p.advance() // 容错：跳过无法识别的 token
-				continue
-			}
-			inst, err := ParseInst(toks)
-			if err == nil && inst != nil && inst.Opcode != "" {
+			inst := p.parseInst()
+			if inst != nil && inst.Opcode != "" {
 				f.TopLevelCalls = append(f.TopLevelCalls, inst)
 			}
 		}
@@ -140,95 +135,79 @@ func (p *parser) parseFile() *ast.File {
 
 // parseFunc 解析单个函数定义：def name(...) -> (...) { body }
 func (p *parser) parseFunc() ast.Func {
-	// 收集签名 token：从 'def' 到 LBrace（不含）
-	var sigToks []Token
-	for p.peek().Kind != LBrace && p.peek().Kind != EOF {
-		t := p.advance()
-		if t.Kind != Newline { // 签名通常单行，忽略可能的换行
-			sigToks = append(sigToks, t)
-		}
-	}
-
-	name := nameFromSigToks(sigToks)
-	sig := tokensToSig(sigToks)
-
+	sig := p.parseFuncSig()
+	p.skipNewlines()
 	p.expect(LBrace)
 	body := p.parseBody()
 	p.expect(RBrace)
-
-	return ast.Func{Name: name, Signature: sig, Body: body}
+	return ast.Func{Sig: sig, Body: body}
 }
 
-// ── collectUntilRParen ──────────────────────────────────────────
+// ── 签名解析 ───────────────────────────────────────────────────
 
-// collectUntilRParen 消费从当前 LParen 到匹配 RParen（支持嵌套）之间的 Token，
-// 返回空格拼接的字符串（用于 if/for/while 条件）。
-func (p *parser) collectUntilRParen() string {
+// parseFuncSig 消费 def name(...) -> (...) 签名，直接构造 ast.FuncSig。
+// 不经中间字符串，不需要 tokensToSig。
+func (p *parser) parseFuncSig() ast.FuncSig {
+	p.advance() // consume 'def'
+	var sig ast.FuncSig
+	if t := p.peek(); t.Kind == Ident {
+		sig.Name = t.Value
+		p.advance()
+	}
+	if p.peek().Kind == LParen {
+		p.advance()
+		sig.Params = p.parseParamList(RParen)
+		p.expect(RParen)
+	}
+	if p.peek().Kind == Arrow {
+		p.advance() // consume ->
+		p.skipNewlines()
+		if p.peek().Kind == LParen {
+			p.advance()
+			sig.Returns = p.parseParamList(RParen)
+			p.expect(RParen)
+		} else {
+			sig.Returns = p.parseParamList(LBrace)
+		}
+	}
+	return sig
+}
+
+// parseParamList 解析 param (, param)* 直到 stop Kind 为止（不消费 stop token）。
+func (p *parser) parseParamList(stop Kind) []ast.Param {
+	var params []ast.Param
+	for p.peek().Kind != stop && p.peek().Kind != EOF {
+		p.skipNewlines()
+		if p.peek().Kind == stop {
+			break
+		}
+		if p.eat(Comma) {
+			continue
+		}
+		t := p.peek()
+		if t.Kind != Ident && t.Kind != Literal {
+			break
+		}
+		param := ast.Param{Name: p.advance().Value}
+		if p.peek().Kind == Colon {
+			p.advance()
+			if p.peek().Kind == Ident {
+				param.Type = p.advance().Value
+			}
+		}
+		params = append(params, param)
+	}
+	return params
+}
+
+// ── 条件表达式解析 ─────────────────────────────────────────────
+
+// parseCondInst 解析 if/while 括号内的条件表达式，直接构造 *ast.Instruction。
+// 调用时已确认 peek() 为 LParen；返回后已消费 RParen。
+func (p *parser) parseCondInst() *ast.Instruction {
 	p.expect(LParen)
-	var parts []string
-	depth := 1
-	for depth > 0 && p.peek().Kind != EOF {
-		t := p.advance()
-		switch t.Kind {
-		case LParen:
-			depth++
-			parts = append(parts, t.Value)
-		case RParen:
-			depth--
-			if depth > 0 {
-				parts = append(parts, t.Value)
-			}
-		default:
-			parts = append(parts, t.Value)
-		}
-	}
-	return strings.Join(parts, " ")
-}
-
-// ── 签名重建辅助 ───────────────────────────────────────────────
-
-// nameFromSigToks 从签名 token 列表中提取函数名。
-// 签名以 Ident("def") 开头，函数名为紧随其后的 Ident。
-func nameFromSigToks(toks []Token) string {
-	for i, t := range toks {
-		if t.Kind == Ident && t.Value == "def" {
-			if i+1 < len(toks) && toks[i+1].Kind == Ident {
-				return toks[i+1].Value
-			}
-		}
-	}
-	return ""
-}
-
-// tokensToSig 将签名 token 列表重建为规范字符串。
-//
-// 空格规则（与 kvlang 惯例一致）：
-//   - ) , : 前不加空格
-//   - ( 前不加空格（除非紧跟 ->）
-//   - ( : 后不加空格
-func tokensToSig(toks []Token) string {
-	var sb strings.Builder
-	for i, t := range toks {
-		if i > 0 {
-			prev := toks[i-1]
-			addSpace := true
-			// 前无空格：) , :
-			if t.Kind == RParen || t.Kind == Comma || t.Kind == Colon {
-				addSpace = false
-			}
-			// 前无空格：( ，除非 -> 后的 (
-			if t.Kind == LParen && prev.Kind != Arrow {
-				addSpace = false
-			}
-			// 后无空格：( :
-			if prev.Kind == LParen || prev.Kind == Colon {
-				addSpace = false
-			}
-			if addSpace {
-				sb.WriteByte(' ')
-			}
-		}
-		sb.WriteString(t.Value)
-	}
-	return sb.String()
+	inst := &ast.Instruction{}
+	p.parseExprInto(inst)
+	p.expect(RParen)
+	return inst
 }
