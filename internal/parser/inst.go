@@ -1,33 +1,19 @@
 package parser
 
 import (
-	"fmt"
 	"strings"
 
 	"kvlang/internal/ast"
 )
 
-// ParseLine 解析单条 kvlang 指令字符串，返回 *ast.Instruction。
+// ParseInst 从 Token 流（不含 Newline/EOF）构建 *ast.Instruction。
 //
 // 支持三种赋值风格:
 //
-//	前缀（命名函数）: add(A, B) -> './C'
-//	中缀（符号算子）: A + B -> './C', !A -> './C'
-//	C 风格（左箭头）: './C' <- A + B, './C' <- add(A, B)
-func ParseLine(line string) (*ast.Instruction, error) {
-	line = strings.TrimSpace(line)
-	if line == "" {
-		return nil, fmt.Errorf("empty kvlang line")
-	}
-	toks := Tokenize(line)
-	if len(toks) == 0 {
-		return nil, fmt.Errorf("empty token stream: %s", line)
-	}
-	return parseInstFromTokens(toks, line)
-}
-
-// parseInstFromTokens 从 Token 流构建 *ast.Instruction。
-func parseInstFromTokens(toks []Token, line string) (*ast.Instruction, error) {
+//	前缀（命名函数）: add(A, B) -> ./C
+//	中缀（符号算子）: A + B -> ./C, !A -> ./C
+//	C 风格（左箭头）: ./C <- A + B, ./C <- add(A, B)
+func ParseInst(toks []Token) (*ast.Instruction, error) {
 	inst := &ast.Instruction{}
 
 	// 1. 找第一个 Arrow，分割 expr / writes

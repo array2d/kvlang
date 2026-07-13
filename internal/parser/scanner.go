@@ -1,6 +1,5 @@
 // scanner.go: kvlang 词法分析。
 // Scan(src string) → []Token  支持整文件多行扫描，末尾附 EOF 哨兵。
-// Tokenize(line string)       向后兼容单行接口，过滤 Newline/EOF。
 package parser
 
 import (
@@ -236,19 +235,6 @@ func Scan(src string) []Token {
 
 	tokens = append(tokens, Token{Kind: EOF, Value: ""})
 	return tokens
-}
-
-// Tokenize 将一行 kvlang 代码分割为 Token 列表（不含 Newline/EOF）。
-// 向后兼容接口，内部调用 Scan。
-func Tokenize(line string) []Token {
-	toks := Scan(line)
-	out := toks[:0:len(toks)]
-	for _, t := range toks {
-		if t.Kind != Newline && t.Kind != EOF {
-			out = append(out, t)
-		}
-	}
-	return out
 }
 
 // isTokenDelim 判断字节是否为 Token 边界。

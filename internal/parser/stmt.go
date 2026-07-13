@@ -1,9 +1,9 @@
 // stmt.go: 语句级解析。
 //
 // parseBody / parseStmt → parseIf / parseFor / parseWhile / parseBlockLabel
-// collectInstTokens → parseInstFromTokens（在 expr.go）
+// collectInstTokens → ParseInst（在 inst.go）
 //
-// 单向依赖：stmt.go → expr.go → scanner.go
+// 单向依赖：parser.go → stmt.go → inst.go → scanner.go
 package parser
 
 import (
@@ -64,7 +64,7 @@ func (p *parser) parseStmt() ast.Stmt {
 	if len(toks) == 0 {
 		return nil
 	}
-	inst, _ := parseInstFromTokens(toks, "")
+	inst, _ := ParseInst(toks)
 	return inst
 }
 
