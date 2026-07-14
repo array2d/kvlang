@@ -142,6 +142,52 @@
 
 ---
 
+## P4：HandleCall 用 Link 替代 Copy
+
+**依赖**：P2 完成（路径已对齐）  
+**影响**：执行语义变更，需完整集成测试  
+**状态**：待完成
+
+### 问题
+
+当前 `internal/layoutcode/layoutcode.go` 的 `HandleCall` 将 `/func/<pkg>/<name>/[i,j]`
+**逐槽复制**到 `/vthread/<vtid>/<frame>/[i,j]`，并在复制时做参数替换（形参 → 实参路径）。
+
+这破坏了设计标准中的核心优雅性：
+- 代码在每个活跃帧都有一份副本，浪费空间
+- 返回时需逐槽删除，而不是一次 `DelR`
+- 概念上"帧 = 代码链接 + 局部参数槽"的纯洁性丢失
+
+### 标准模型（Link-based）
+
+```
+call f(x=3, y=4) -> result          在 frame=/vthread/1/main 中执行
+
+1. Link  /func/math/f  →  /vthread/1/main/f        挂载代码（零拷贝）
+2. Set   /vthread/1/main/f/x  =  3                 绑定实参
+3. Set   /vthread/1/main/f/y  =  4
+   PC = /vthread/1/main/f/[0,0]                    跳入
+
+f 执行完毕，return：
+4. Get   /vthread/1/main/f/z        →  读取返回值
+5. Set   /vthread/1/main/result  =  <z 的值>       写回调用方槽
+6. DelR  /vthread/1/main/f                         销毁帧（含 Link 和所有局部槽）
+   PC 回到 /vthread/1/main 的下一条指令
+```
+
+**不变式**：路径深度 = 调用栈深度。`/vthread/1/main/calc/add` 即是调用链，无需额外 stack 结构。
+
+### 涉及文件
+
+| 文件 | 当前做法 | 标准做法 |
+|------|---------|---------|
+| `internal/layoutcode/layoutcode.go` `HandleCall` | `copyFunc` 逐槽复制 + 参数替换 | `kv.Link(funcPath, framePath)` + `kv.Set` 绑参 |
+| `internal/layoutcode/layoutcode.go` `HandleReturn` | 逐槽删除子栈 | `kv.DelR(framePath)` |
+| `internal/layoutcode/layoutcode.go` `copyFunc` | 递归复制 | 整函数删除 |
+| `internal/kvcpu/controlflow.go` `resolveLabel` | 基于复制后的槽查找 | 基于 Link 后的路径查找（逻辑不变） |
+
+---
+
 ## 优先级
 
 | 编号 | 内容 | 影响 | 状态 |
@@ -149,3 +195,4 @@
 | P1 | API 重命名（路径值不变） | 无运行时影响，纯编译期 | 待完成 |
 | P2 | 路径值迁移 | 需重启 serve + redis flush | 待完成 |
 | P3 | 删除弃用 API | 清理 | 待完成 |
+| P4 | HandleCall Copy → Link | 执行语义变更，需集成测试 | 待完成 |
