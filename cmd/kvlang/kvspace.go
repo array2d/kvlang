@@ -118,9 +118,7 @@ func clearAll(kv kvspace.KVSpace) {
 		keytree.SrcRoot,
 		keytree.FuncRoot,
 		keytree.SysRoot,
-		keytree.OpRoot,
-		keytree.NotifyRoot,
-		keytree.DoneRoot,
+		"/dev",
 	} {
 		children, _ := kv.List(root)
 		for _, c := range children {

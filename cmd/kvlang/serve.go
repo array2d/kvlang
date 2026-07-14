@@ -24,7 +24,7 @@ func executeEntry(kv kvspace.KVSpace) {
 	st := vthread.VThread{PC: "[0,0]", Status: "init", Mode: "single"}
 	data, _ := json.Marshal(st)
 	kv.Set(keytree.VThread("run"), data)
-	kv.Set(keytree.VThreadSlot("run", 0, 0), "pre_main")
+	kv.Set(keytree.VThreadSlot("run", "", 0, 0), "pre_main")
 	logx.Info("[single] executing run")
 	kvcpu.Execute(context.Background(), kv, "run")
 }
@@ -87,17 +87,17 @@ func registerVM(ctx context.Context, kv kvspace.KVSpace, vmID string) {
 }
 
 func registerBuildinOps(ctx context.Context, kv kvspace.KVSpace, vmID string) {
-	key := keytree.OpBackendList("buildin")
-	defs := builtin.OpDefs()
-	kv.Del(key)
-	for _, def := range defs {
-		kv.Notify(key, def)
+	// 每个内置算子注册到 /sys/op/buildin/func/<opcode>
+	for _, opcode := range builtin.NativeOpList() {
+		kv.Set(keytree.SysOpFunc("buildin", opcode), "1")
 	}
-	logx.Info("VM-%s registered %d built-in ops", vmID, len(defs))
+	// 注册实例状态：/sys/op/buildin/0
+	kv.Set(keytree.SysOp("buildin", "0"), `{"status":"running","load":0}`)
+	logx.Info("VM-%s registered buildin ops at %s", vmID, keytree.SysOpRoot)
 }
 
 func heartbeatLoop(ctx context.Context, kv kvspace.KVSpace, vmID string) {
-	key := keytree.SysHeartbeat(vmID)
+	key := keytree.SysVMHB(vmID)
 	writeHB := func(status string) {
 		hb := map[string]any{"ts": time.Now().Unix(), "status": status, "pid": os.Getpid()}
 		data, _ := json.Marshal(hb)
@@ -153,14 +153,14 @@ func mainWatcher(ctx context.Context, kv kvspace.KVSpace, vmID string) {
 			status, _ := json.Marshal(map[string]string{"vtid": vtidStr, "status": "executing"})
 			kv.Set(keytree.FuncMain, status)
 			notify, _ := json.Marshal(map[string]any{"event": "new_vthread", "vtid": vtidStr})
-			kv.Notify(keytree.NotifyVM, notify)
+			kv.Notify(keytree.VthreadReady, notify)
 			logx.Info("VM-%s → vthread %s created", vmID, vtidStr)
 		}
 	}
 }
 
 func sysCmdListener(ctx context.Context, kv kvspace.KVSpace, vmID string, cancel context.CancelFunc) {
-	queue := keytree.SysCmdVM(vmID)
+	queue := keytree.SysVMCmd(vmID)
 	for {
 		result, err := kv.Watch(queue, 5*time.Second)
 		if err != nil {
