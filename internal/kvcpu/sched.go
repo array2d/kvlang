@@ -42,9 +42,9 @@ func Pick(ctx context.Context, kv kvspace.KVSpace) string {
 	return ""
 }
 
-// Wait 阻塞等待新的 vthread 通知 (BLPOP keytree.NotifyVM)。
+// Wait 阻塞等待新的 vthread 通知 (BLPOP keytree.VthreadReady)。
 func Wait(ctx context.Context, kv kvspace.KVSpace) {
-	val, err := kv.Watch(keytree.NotifyVM, 5*time.Second)
+	val, err := kv.Watch(keytree.VthreadReady, 5*time.Second)
 	if err != nil {
 		if !strings.Contains(err.Error(), "nil") {
 			logx.Debug("picker BLPOP: %v", err)

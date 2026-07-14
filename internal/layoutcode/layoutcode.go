@@ -23,7 +23,7 @@ import (
 
 // WriteBody 将 []Stmt 写入 /func/<pkg>/<name>/ 下的结构化 KV（编译后指令）。
 func WriteBody(kv kvspace.KVSpace, pkg, name string, body []ast.Stmt) {
-	prefix := keytree.FuncCompiled(pkg, name)
+	prefix := keytree.Func(pkg, name)
 	idx := 0
 	for _, st := range body {
 		writeStmt(kv, st, prefix, &idx)
@@ -66,7 +66,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *
 		vthread.SetError(ctx, kv, vtid, pc, "func not found: "+funcName)
 		return pc
 	}
-	funcKey := keytree.FuncCompiled(pkg, funcName)
+	funcKey := keytree.Func(pkg, funcName)
 
 	// 读签名（存在 /func/<pkg>/<name> 的 value 上）
 	sig, err := kv.Get(funcKey)
@@ -93,7 +93,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *
 	}
 
 	// 复制指令到子栈，替换形参
-	root := keytree.VThreadSub(vtid, pc)
+	root := keytree.VThreadFrame(vtid, pc)
 	count := copyFunc(ctx, kv, funcKey, root, bindings)
 
 	// 追加 return 指令
@@ -102,10 +102,10 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *
 		if !strings.HasPrefix(retRef, "/") {
 			retRef = "./" + retRef
 		}
-		kv.Set(fmt.Sprintf("%s[%d,0]", root, count), "return")
-		kv.Set(fmt.Sprintf("%s[%d,-1]", root, count), retRef)
+		kv.Set(fmt.Sprintf("%s/[%d,0]", root, count), "return")
+		kv.Set(fmt.Sprintf("%s/[%d,-1]", root, count), retRef)
 	} else {
-		kv.Set(fmt.Sprintf("%s[%d,0]", root, count), "return")
+		kv.Set(fmt.Sprintf("%s/[%d,0]", root, count), "return")
 	}
 	return pc + "/[0,0]"
 }
@@ -141,7 +141,7 @@ func copyFunc(ctx context.Context, kv kvspace.KVSpace, srcPrefix, dstPrefix stri
 		if v, ok := bindings[val]; ok {
 			val = v
 		}
-		kv.Set(fmt.Sprintf("%s[%d,0]", dstPrefix, idx), val)
+		kv.Set(fmt.Sprintf("%s/[%d,0]", dstPrefix, idx), val)
 
 		slotIdx := suffix[1:strings.Index(suffix, ",")]
 		for j := 1; j <= 10; j++ {
@@ -150,14 +150,14 @@ func copyFunc(ctx context.Context, kv kvspace.KVSpace, srcPrefix, dstPrefix stri
 				if v, ok := bindings[rv]; ok {
 					rv = v
 				}
-				kv.Set(fmt.Sprintf("%s[%d,-%d]", dstPrefix, idx, j), rv)
+				kv.Set(fmt.Sprintf("%s/[%d,-%d]", dstPrefix, idx, j), rv)
 			}
 			wk := fmt.Sprintf("%s/[%s,%d]", srcPrefix, slotIdx, j)
 			if wv, err := kv.Get(wk); err == nil && wv != "" {
 				if v, ok := bindings[wv]; ok {
 					wv = v
 				}
-				kv.Set(fmt.Sprintf("%s[%d,%d]", dstPrefix, idx, j), wv)
+				kv.Set(fmt.Sprintf("%s/[%d,%d]", dstPrefix, idx, j), wv)
 			}
 		}
 		idx++
@@ -170,7 +170,7 @@ func copyFunc(ctx context.Context, kv kvspace.KVSpace, srcPrefix, dstPrefix stri
 func RegisterBlocks(kv kvspace.KVSpace, pkg, parent string, body []ast.Stmt) {
 	for _, st := range body {
 		if b, ok := st.(*ast.BlockStmt); ok {
-			blockKey := keytree.FuncCompiled(pkg, parent+"/"+b.Label)
+			blockKey := keytree.Func(pkg, parent+"/"+b.Label)
 			kv.Set(blockKey, "def "+b.Label+"() -> ()")
 			kv.Set(keytree.FuncIdx(parent+"/"+b.Label), pkg)
 			RegisterBlocks(kv, pkg, parent+"/"+b.Label, b.Body)
@@ -185,8 +185,8 @@ func RegisterBlocks(kv kvspace.KVSpace, pkg, parent string, body []ast.Stmt) {
 //  4. 块标签写入 /func/<pkg>/<name>/<label>/
 //  5. 反向索引写入 /func/.idx/<name>
 func WriteFunc(kv kvspace.KVSpace, pkg string, fn *ast.Func) {
-	kv.Set(keytree.SrcFunc(pkg, fn.Sig.Name), fn.FullText())
-	kv.Set(keytree.FuncCompiled(pkg, fn.Sig.Name), fn.Sig.String())
+	kv.Set(keytree.Src(pkg, fn.Sig.Name), fn.FullText())
+	kv.Set(keytree.Func(pkg, fn.Sig.Name), fn.Sig.String())
 	WriteBody(kv, pkg, fn.Sig.Name, fn.Body)
 	RegisterBlocks(kv, pkg, fn.Sig.Name, fn.Body)
 	kv.Set(keytree.FuncIdx(fn.Sig.Name), pkg)

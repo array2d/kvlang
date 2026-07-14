@@ -25,7 +25,7 @@ func ResolveTerm(ctx context.Context, kv kvspace.KVSpace, vtid, stream string) T
 	if err != nil || name == "" {
 		return TermStream{}
 	}
-	base := keytree.SysTerm(name, stream)
+	base := keytree.DevTTY(name, stream)
 	t, _ := kv.Get(base + "/type")
 	d, _ := kv.Get(base + "/detail")
 	return TermStream{Type: t, Detail: d}

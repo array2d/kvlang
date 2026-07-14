@@ -71,12 +71,12 @@ func CreateVThread(ctx context.Context, kv kvspace.KVSpace, funcName string, rea
 	if err := kv.Set(keytree.VThread(vtid), data); err != nil {
 		return "", fmt.Errorf("set state: %w", err)
 	}
-	kv.Set(keytree.VThreadSlot(vtid, 0, 0), funcName)
+	kv.Set(keytree.VThreadSlot(vtid, "", 0, 0), funcName)
 	for i, r := range reads {
-		kv.Set(keytree.VThreadSlot(vtid, 0, -(i+1)), r)
+		kv.Set(keytree.VThreadSlot(vtid, "", 0, -(i+1)), r)
 	}
 	for i, w := range writes {
-		kv.Set(keytree.VThreadSlot(vtid, 0, i+1), w)
+		kv.Set(keytree.VThreadSlot(vtid, "", 0, i+1), w)
 	}
 
 	return vtid, nil
@@ -84,7 +84,7 @@ func CreateVThread(ctx context.Context, kv kvspace.KVSpace, funcName string, rea
 
 // WaitDone 阻塞等待 op-plat / heap-plat 完成通知。
 func WaitDone(ctx context.Context, kv kvspace.KVSpace, vtid string, timeout time.Duration) (map[string]interface{}, error) {
-	doneKey := keytree.Done(vtid)
+	doneKey := keytree.VThreadDone(vtid)
 	result, err := kv.Watch(doneKey, timeout)
 	if err != nil {
 		return nil, fmt.Errorf("waitDone timeout for %s: %w", doneKey, err)

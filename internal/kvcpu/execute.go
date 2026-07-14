@@ -9,7 +9,6 @@ import (
 	"kvlang/internal/logx"
 	"kvlang/internal/op"
 	"kvlang/internal/op/builtin"
-	"kvlang/internal/op/dispatch"
 	"kvlang/internal/vthread"
 	"kvlang/internal/vtype"
 
@@ -99,4 +98,3 @@ func Execute(ctx context.Context, kv kvspace.KVSpace, vtid string) {
 	}
 }
 
-var _ = dispatch.Lifecycle // 确保 dispatch 包链接

@@ -104,7 +104,7 @@ func resolveLabel(kv kvspace.KVSpace, vtid, pc, label string) string {
 		return label
 	}
 	// 从 vthread 入口槽取当前函数名 → 拼接 funcName/label
-	entryKey := keytree.VThreadSlot(vtid, 0, 0)
+	entryKey := keytree.VThreadSlot(vtid, "", 0, 0)
 	if funcName, err := kv.Get(entryKey); err == nil {
 		qualified := funcName + "/" + label
 		// 通过反向索引验证块是否存在
