@@ -1,34 +1,24 @@
 package keytree
 
 const SysRoot = "/sys"
-const sysPrefix = "/sys/"
+
 // SysVM 返回 /sys/vm/<id>
-func SysVM(id string) string { return sysPrefix + "vm/" + id }
+func SysVM(id string) string { return "/sys/vm/" + id }
 
-// SysHeartbeat 返回 /sys/heartbeat/vm:<id>
-func SysHeartbeat(id string) string { return sysPrefix + "heartbeat/vm:" + id }
+// SysVMHB 返回 /sys/vm/<id>/hb（心跳）
+func SysVMHB(id string) string { return "/sys/vm/" + id + "/hb" }
 
-// SysVtidCounter 返回 /sys/vtid_counter
-const SysVtidCounter = sysPrefix + "vtid_counter"
+// SysVMCmd 返回 /sys/vm/<id>/cmd（VM 命令队列）
+func SysVMCmd(id string) string { return "/sys/vm/" + id + "/cmd" }
 
-// SysOpPlatRoot 返回 /sys/op-plat
-const SysOpPlatRoot = sysPrefix + "op-plat"
+// SysOp 返回 /sys/op/<backend>/<n>（op 后端第 n 个实例状态）
+func SysOp(backend, n string) string { return "/sys/op/" + backend + "/" + n }
 
-// SysOpPlatInst 返回 /sys/op-plat/<instance>，instance 形如 "op-cuda:0"
-func SysOpPlatInst(instance string) string { return SysOpPlatRoot + "/" + instance }
+// SysOpCmd 返回 /sys/op/<backend>/<n>/cmd（实例命令队列）
+func SysOpCmd(backend, n string) string { return "/sys/op/" + backend + "/" + n + "/cmd" }
 
-// SysHeapPlatRoot 返回 /sys/heap-plat
-const SysHeapPlatRoot = sysPrefix + "heap-plat"
+// SysOpFunc 返回 /sys/op/<backend>/func/<name>（算子函数定义）
+func SysOpFunc(backend, name string) string { return "/sys/op/" + backend + "/func/" + name }
 
-// SysHeapPlatInst 返回 /sys/heap-plat/<instance>，instance 形如 "heap-cuda:0"
-func SysHeapPlatInst(instance string) string { return SysHeapPlatRoot + "/" + instance }
-
-// CmdQueue 返回后端实例的命令队列 key，形如 cmd:<instance>
-// 例: CmdQueue("op-cuda:0") → "cmd:op-cuda:0"
-func CmdQueue(instance string) string { return "cmd:" + instance }
-
-// SysTerm 返回 /sys/term/<name>/<stream>
-func SysTerm(name, stream string) string { return sysPrefix + "term/" + name + "/" + stream }
-
-// SysCmdVM 返回 /sys/cmd/vm/<id>
-func SysCmdVM(id string) string { return sysPrefix + "cmd/vm/" + id }
+// SysOpRoot 返回 /sys/op（用于 List 枚举所有 backend）
+const SysOpRoot = "/sys/op"
