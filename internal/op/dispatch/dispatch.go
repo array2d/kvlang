@@ -48,11 +48,32 @@ func IsRelative(param string) bool {
 	return len(param) >= 2 && param[:2] == "./"
 }
 
+func isAbsolute(param string) bool {
+	return len(param) > 0 && param[0] == '/'
+}
+
+func isNumber(param string) bool {
+	if len(param) == 0 {
+		return false
+	}
+	for _, c := range param {
+		if c >= '0' && c <= '9' || c == '.' || c == 'e' || c == 'E' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 func resolveParam(ctx context.Context, kv kvspace.KVSpace, vtid, param string) ParamRef {
 	ref := ParamRef{Key: param}
 	resolvedKey := param
 	if IsRelative(param) {
+		// ./x → /vthread/<vtid>/x
 		resolvedKey = keytree.VThreadAt(vtid, param[2:])
+	} else if !isAbsolute(param) && !isNumber(param) {
+		// 裸 ident → 本帧局部变量，与 ./param 等价
+		resolvedKey = keytree.VThreadAt(vtid, param)
 	}
 	ref.Key = resolvedKey
 	val, err := kv.Get(resolvedKey)

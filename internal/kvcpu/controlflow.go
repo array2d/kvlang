@@ -10,6 +10,7 @@ import (
 	"kvlang/internal/layoutcode"
 	"kvlang/internal/logx"
 	"kvlang/internal/op"
+	"kvlang/internal/op/builtin"
 	"kvlang/internal/vthread"
 )
 
@@ -33,13 +34,7 @@ func If(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.Instr
 // Goto 处理无条件跳转: goto(label).
 
 func readCond(kv kvspace.KVSpace, vtid, key string) string {
-	if strings.HasPrefix(key, "./") {
-		val, err := kv.Get(keytree.VThreadAt(vtid, key[2:]))
-		if err == nil {
-			return val
-		}
-	}
-	return key
+	return builtin.ResolveReadValue(kv, vtid, key)
 }
 
 func jumpOrNext(ctx context.Context, kv kvspace.KVSpace, vtid, pc, target string) error {

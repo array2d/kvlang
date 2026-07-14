@@ -3,7 +3,6 @@ package builtin
 import (
 	"fmt"
 
-	"kvlang/internal/keytree"
 	"kvlang/internal/op"
 	"kvlang/internal/vthread"
 )
@@ -18,21 +17,11 @@ func requireUnary(inputs []nativeValue) error {
 }
 
 // readInputs 从 KV 读取 inst.Reads 对应的值。
+// 支持：./x（显式相对槽）、/abs（绝对路径）、3（数字字面量）、x（裸 ident，查本帧槽）。
 func readInputs(f *op.Frame) []nativeValue {
 	inputs := make([]nativeValue, 0, len(f.Inst.Reads))
 	for _, r := range f.Inst.Reads {
-		var raw string
-		if isRelative(r) {
-			key := keytree.VThreadAt(f.Vtid, r[2:])
-			val, err := f.KV.Get(key)
-			if err != nil {
-				vthread.SetError(bg, f.KV, f.Vtid, f.PC, fmt.Sprintf("read %s: %v", key, err))
-				return nil
-			}
-			raw = val
-		} else {
-			raw = r
-		}
+		raw := resolveReadValue(f.KV, f.Vtid, r)
 		inputs = append(inputs, parseNativeValue(raw))
 	}
 	return inputs
