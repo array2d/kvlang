@@ -1,4 +1,4 @@
-// Package dispatch 负责算子分发到 op-plat 和 heap-plat。
+// Package dispatch 负责算子分发到 /sys/op/<backend>/<n>/cmd。
 package dispatch
 
 import (
@@ -31,18 +31,6 @@ type OpTask struct {
 	Params  map[string]interface{} `json:"params,omitempty"`
 }
 
-
-type HeapTask struct {
-	Vtid   string `json:"vtid"`
-	PC     string `json:"pc"`
-	Op     string `json:"op"`
-	Key    string `json:"key"`
-	Device string `json:"device,omitempty"`
-	Dtype  string `json:"dtype,omitempty"`
-	Shape  []int  `json:"shape,omitempty"`
-	Src    string `json:"src,omitempty"`
-	Dst    string `json:"dst,omitempty"`
-}
 
 func IsRelative(param string) bool {
 	return len(param) >= 2 && param[:2] == "./"
@@ -147,34 +135,6 @@ func buildOpTask(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst 
 	return task
 }
 
-func buildHeapTask(vtid, pc string, inst *op.Instruction) *HeapTask {
-	// Op 字段发送裸操作名（去掉 "tensor." 前缀），与后端协议解耦
-	task := &HeapTask{Vtid: vtid, PC: pc, Op: stripVTypePrefix(inst.Opcode)}
-	switch inst.Opcode {
-	case op.OpTensorNew:
-		if len(inst.Writes) > 0 {
-			task.Key = inst.Writes[0]
-		}
-		if len(inst.Reads) > 0 {
-			task.Dtype = inst.Reads[0]
-		}
-		if len(inst.Reads) > 1 {
-			task.Shape = parseShapeParam(inst.Reads[1])
-		}
-	case op.OpTensorDel:
-		if len(inst.Reads) > 0 {
-			task.Key = inst.Reads[0]
-		}
-	case op.OpTensorClone:
-		if len(inst.Reads) > 0 {
-			task.Src = inst.Reads[0]
-		}
-		if len(inst.Writes) > 0 {
-			task.Dst = inst.Writes[0]
-		}
-	}
-	return task
-}
 
 func parseShapeParam(raw string) []int {
 	raw = strings.Trim(raw, "[] ")
@@ -194,14 +154,14 @@ func parseShapeParam(raw string) []int {
 	return shape
 }
 
-// Compute 分发张量计算指令到 op-plat。
+// Compute 分发张量计算指令到 /sys/op/<backend>/<n>/cmd。
 func Compute(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) error {
-	instance, err := Select(ctx, kv, inst.Opcode)
+	backend, n, err := Select(ctx, kv, inst.Opcode)
 	if err != nil {
 		return fmt.Errorf("route: %w", err)
 	}
 	task := buildOpTask(ctx, kv, vtid, pc, inst)
-	cmdQueue := keytree.CmdQueue("op-" + instance)
+	cmdQueue := keytree.SysOpCmd(backend, n)
 	taskJSON, _ := json.Marshal(task)
 	if err := kv.Notify(cmdQueue, taskJSON); err != nil {
 		return fmt.Errorf("push task: %w", err)
@@ -223,31 +183,4 @@ func Compute(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.
 	return nil
 }
 
-// Lifecycle 分发生命周期指令到 heap-plat（动态选择负载最低实例）。
-func Lifecycle(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) error {
-	heapInst, err := SelectHeap(ctx, kv)
-	if err != nil {
-		return fmt.Errorf("select heap-plat: %w", err)
-	}
-	cmdQueue := keytree.CmdQueue("heap-" + heapInst)
-	task := buildHeapTask(vtid, pc, inst)
-	taskJSON, _ := json.Marshal(task)
-	if err := kv.Notify(cmdQueue, taskJSON); err != nil {
-		return fmt.Errorf("push heap task: %w", err)
-	}
-	logx.Debug("[%s] PUSH %s → %s", vtid, inst.Opcode, cmdQueue)
-	done, err := vthread.WaitDone(ctx, kv, vtid, 5*time.Second)
-	if err != nil {
-		vthread.SetError(ctx, kv, vtid, pc, fmt.Sprintf("heap op timeout: %v", err))
-		return err
-	}
-	if status, ok := done["status"].(string); ok && status == "error" {
-		errInfo := fmt.Sprintf("%v", done["error"])
-		vthread.SetError(ctx, kv, vtid, pc, errInfo)
-		return fmt.Errorf("heap error: %s", errInfo)
-	}
-	logx.Debug("[%s] HEAP %s done", vtid, inst.Opcode)
-	vthread.Set(ctx, kv, vtid, op.NextPC(pc), "running")
-	return nil
-}
 
