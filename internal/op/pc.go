@@ -28,7 +28,7 @@ func ParentPC(pc string) string {
 func parsePC(pc string) (prefix string, addr0 int) {
 	idx := strings.LastIndex(pc, "/")
 	if idx >= 0 {
-		prefix = pc[:idx+1]
+		prefix = pc[:idx] // 不含尾斜杠，与 VThreadFrame 对齐
 		addr0 = extractAddr0(pc[idx+1:])
 	} else {
 		addr0 = extractAddr0(pc)

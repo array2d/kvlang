@@ -68,7 +68,7 @@ func TestIsTensorLifecycle(t *testing.T) {
 func TestRouteSelect_NoKV(t *testing.T) {
 	kv := kvspace.Conn("127.0.0.1:9999")
 	ctx := context.Background()
-	_, err := dispatch.Select(ctx, kv, "add")
+	_, _, err := dispatch.Select(ctx, kv, "add")
 	if err == nil {
 		t.Error("expected error when KV is not available")
 	}

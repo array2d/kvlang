@@ -20,13 +20,13 @@ const maxParams = 10
 // Decode 从 kvspace 执行层 key 解码指令。
 func Decode(ctx context.Context, kv kvspace.KVSpace, vtid string, pc string) (*Instruction, error) {
 	prefix, addr0 := parsePC(pc)
-	keyBase := keytree.VThreadSub(vtid, prefix)
+	keyBase := keytree.VThreadFrame(vtid, prefix)
 
 	keys := make([]string, 0, 1+maxParams*2)
-	keys = append(keys, fmt.Sprintf("%s[%d,0]", keyBase, addr0))
+	keys = append(keys, fmt.Sprintf("%s/[%d,0]", keyBase, addr0))
 	for i := 1; i <= maxParams; i++ {
-		keys = append(keys, fmt.Sprintf("%s[%d,-%d]", keyBase, addr0, i))
-		keys = append(keys, fmt.Sprintf("%s[%d,%d]", keyBase, addr0, i))
+		keys = append(keys, fmt.Sprintf("%s/[%d,-%d]", keyBase, addr0, i))
+		keys = append(keys, fmt.Sprintf("%s/[%d,%d]", keyBase, addr0, i))
 	}
 
 	vals, err := kv.Gets(keys...)
