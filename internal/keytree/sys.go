@@ -11,6 +11,9 @@ func SysVMHB(id string) string { return "/sys/vm/" + id + "/hb" }
 // SysVMCmd 返回 /sys/vm/<id>/cmd（VM 命令队列）
 func SysVMCmd(id string) string { return "/sys/vm/" + id + "/cmd" }
 
+// SysVMErr 返回 /sys/vm/<id>/err（VM 错误通知队列，unknown opcode / panic 等）
+func SysVMErr(id string) string { return "/sys/vm/" + id + "/err" }
+
 // SysOp 返回 /sys/op/<backend>/<n>（op 后端第 n 个实例状态）
 func SysOp(backend, n string) string { return "/sys/op/" + backend + "/" + n }
 

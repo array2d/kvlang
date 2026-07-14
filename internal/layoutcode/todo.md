@@ -53,3 +53,43 @@ add 执行完毕，return：
 
 - `kvspace.KVSpace` 接口需实现 `Link(src, dst string) error`
 - `kvspace.KVSpace` 接口需实现 `DelR(prefix string) error`（已有则确认语义）
+
+---
+
+## P5：PC 改为绝对路径
+
+**状态**：待完成
+
+### 问题
+
+当前 PC 存储为相对路径（`"[0,0]"`），`Decode` / `Execute` 额外传 `vtid` 参数拼合真实地址。
+等价于 IP 寄存器只存页内偏移、另用段寄存器存基址——不符合标准。
+
+### 标准
+
+PC 是完整绝对路径，必须以 `/vthread/` 开头：
+
+```
+PC = "/vthread/<vtid>/[0,0]"
+PC = "/vthread/<vtid>/[0,0]/[1,0]"
+```
+
+vtid 可随时从 PC 派生：`VtidFromPC(pc)` = 第二个路径段。
+
+### 涉及改动
+
+| 文件 | 改动 |
+|------|------|
+| `internal/vthread/vthread.go` | `VThread.PC` 存绝对路径 |
+| `internal/op/instruction.go` | `Decode(kv, pc)` 去掉 `vtid` 参数 |
+| `internal/op/pc.go` | `NextPC` / `ParentPC` 已兼容绝对路径（路径操作） |
+| `internal/kvcpu/execute.go` | `Execute(ctx, kv, vtid)` → 首次读 PC 后全用绝对 PC |
+| `internal/kvcpu/controlflow.go` | 执行器签名 `(kv, pc, inst)` 去掉 `vtid` |
+| `internal/op/builtin/*.go` | 同上 |
+| `cmd/kvlang/serve.go` | 初始写入 PC 时用 `VThreadSlot(vtid, "", 0, 0)` 的绝对路径 |
+
+---
+
+## P6：Frame 改为 Link-based（即 P4，重新编号对齐）
+
+见本文件原 P4 节。
