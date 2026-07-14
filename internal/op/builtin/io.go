@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"kvlang/internal/device"
+	"kvlang/internal/keytree"
 	"kvlang/internal/logx"
 	"kvlang/internal/op"
 	"kvlang/internal/vthread"
@@ -33,7 +34,7 @@ func (o ioOp) Call(f *op.Frame) error {
 		var val string
 		if !ts.IsZero() { val, _ = device.ReadTerm(bg, ts) }
 		if len(f.Inst.Writes) > 0 {
-			wKey := resolveWriteKey(f.Vtid, f.Inst.Writes[0])
+			wKey := resolveWriteKey(keytree.FrameRoot(f.PC), f.Inst.Writes[0])
 			if err := f.KV.Set(wKey, val); err != nil {
 				vthread.SetError(bg, f.KV, f.Vtid, f.PC, err.Error())
 				return err

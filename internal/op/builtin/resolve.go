@@ -1,9 +1,6 @@
 package builtin
 
-import (
-	"kvlang/internal/keytree"
-	"kvlang/internal/kvspace"
-)
+import "kvlang/internal/kvspace"
 
 // isRelative 判断参数是否为显式相对路径（./ 开头）。
 func isRelative(param string) bool {
@@ -31,50 +28,50 @@ func isImmediateNumber(param string) bool {
 }
 
 // resolveWriteKey 将写槽参数解析为 kvspace 绝对 key。
-// ./x  → /vthread/<vtid>/x（显式相对）
-// /abs → /abs（绝对路径，原样）
-// x    → /vthread/<vtid>/x（裸 ident，与 ./x 等价）
-func resolveWriteKey(vtid, param string) string {
+//
+//	./x  → framePath/x（帧局部变量，显式相对）
+//	/abs → /abs（绝对路径，原样）
+//	x    → framePath/x（裸 ident，与 ./x 等价）
+//
+// framePath 为当前帧根（keytree.FrameRoot(pc)）。
+func resolveWriteKey(framePath, param string) string {
 	if isRelative(param) {
-		return keytree.VThreadAt(vtid, param[2:])
+		return framePath + "/" + param[2:]
 	}
 	if isAbsolute(param) {
 		return param
 	}
-	// 裸标识符：视为本帧局部变量，等价于 ./param
-	return keytree.VThreadAt(vtid, param)
+	return framePath + "/" + param
 }
 
 // ResolveReadValue 将读槽参数解析为实际值（导出，供 kvcpu 等包使用）。
-// resolveReadValue 是内部别名。
-func ResolveReadValue(kv kvspace.KVSpace, vtid, param string) string {
-	return resolveReadValue(kv, vtid, param)
+func ResolveReadValue(kv kvspace.KVSpace, framePath, param string) string {
+	return resolveReadValue(kv, framePath, param)
 }
 
 // resolveReadValue 将读槽参数解析为实际值。
 //
 // 规则（无歧义，无回退）：
-//   ./x  → 本帧槽（显式相对路径）
-//   /abs → 全局槽（绝对路径）
-//   3    → 数字字面量（以数字开头）
-//   "x"  → 字符串字面量（scanner 已剥引号存为 Literal，不会走到这里作为 Ident）
-//   x    → 本帧局部变量（字面字符串必须用引号，裸 ident 唯一含义是本帧槽）
-func resolveReadValue(kv kvspace.KVSpace, vtid, param string) string {
+//
+//	./x  → kv.Get(framePath/x)  — 帧局部变量（显式相对路径）
+//	/abs → kv.Get(/abs)          — 全局绝对路径
+//	3    → "3"                   — 数字字面量，无 KV 查找
+//	x    → kv.Get(framePath/x)  — 裸 ident，等价于 ./x
+//
+// framePath 为当前帧根（keytree.FrameRoot(pc)），由 Link 模型确保
+// framePath 本身不是链接节点，故读取不会穿透到函数模板。
+func resolveReadValue(kv kvspace.KVSpace, framePath, param string) string {
 	if isRelative(param) {
-		// ./x → /vthread/<vtid>/x
-		val, _ := kv.Get(keytree.VThreadAt(vtid, param[2:]))
+		val, _ := kv.Get(framePath + "/" + param[2:])
 		return val
 	}
 	if isAbsolute(param) {
-		// /abs/path → 绝对路径直接查
 		val, _ := kv.Get(param)
 		return val
 	}
 	if isImmediateNumber(param) {
-		// 3, 4.5, -1 → 数字字面量，无需 KV 查找
 		return param
 	}
-	// 裸 ident → 本帧局部变量（与 ./param 完全等价）
-	val, _ := kv.Get(keytree.VThreadAt(vtid, param))
+	val, _ := kv.Get(framePath + "/" + param)
 	return val
 }
