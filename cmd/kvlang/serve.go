@@ -21,12 +21,15 @@ import (
 
 // executeEntry 创建 vthread 并同步执行 pre_main（单次模式）。
 func executeEntry(kv kvspace.KVSpace) {
-	st := vthread.VThread{PC: "[0,0]", Status: "init", Mode: "single"}
-	data, _ := json.Marshal(st)
-	kv.Set(keytree.VThread("run"), data)
-	kv.Set(keytree.VThreadSlot("run", "", 0, 0), "pre_main")
-	logx.Info("[single] executing run")
-	kvcpu.Execute(context.Background(), kv, "run")
+	ctx := context.Background()
+	const vtid = "run"
+	pc := keytree.VThreadSlot(vtid, "", 0, 0) // /vthread/run/[0,0]
+	vthread.Set(ctx, kv, vtid, pc, "init")
+	kv.Set(keytree.VThreadSlot(vtid, "", 0, 0), "pre_main")
+	logx.Info("[single] executing %s", pc)
+	cpu := kvcpu.New(kv, "single")
+	// 直接执行，不走 pick/wait 队列
+	cpu.Execute(pc)
 }
 
 // runServe 启动 VM daemon，持续监听并执行 vthread。
@@ -57,8 +60,9 @@ func runServe(args []string) {
 	registerVM(ctx, kv, vmID)
 	registerBuildinOps(ctx, kv, vmID)
 
+	c := kvcpu.New(kv, vmID)
 	for i := 0; i < workers; i++ {
-		go kvcpu.RunWorker(ctx, kv, i)
+		go c.RunWorker(i)
 	}
 	logx.Info("VM-%s %d workers started", vmID, workers)
 
@@ -138,23 +142,20 @@ func mainWatcher(ctx context.Context, kv kvspace.KVSpace, vmID string) {
 			kv.Del(keytree.FuncMain)
 
 			vtidStr := incrVtid(kv)
-			st := vthread.VThread{PC: "[0,0]", Status: "init", Mode: "single"}
-			stData, _ := json.Marshal(st)
-			kv.Set(keytree.VThread(vtidStr), stData)
-			base := keytree.VThread(vtidStr)
-			kv.Set(base+"/[0,0]", entry.Entry)
+			absPC := keytree.VThreadSlot(vtidStr, "", 0, 0)
+			vthread.Set(ctx, kv, vtidStr, absPC, "init")
+			kv.Set(keytree.VThreadSlot(vtidStr, "", 0, 0), entry.Entry)
 			for i, arg := range entry.Reads {
-				kv.Set(fmt.Sprintf("%s/[0,-%d]", base, i+1), arg)
+				kv.Set(keytree.VThreadSlot(vtidStr, "", 0, -(i+1)), arg)
 			}
-			kv.Set(base+"/[0,1]", "./ret")
+			kv.Set(keytree.VThreadSlot(vtidStr, "", 0, 1), "./ret")
 			if entry.Term != "" {
 				kv.Set(keytree.VThreadTerm(vtidStr), entry.Term)
 			}
 			status, _ := json.Marshal(map[string]string{"vtid": vtidStr, "status": "executing"})
 			kv.Set(keytree.FuncMain, status)
-			notify, _ := json.Marshal(map[string]any{"event": "new_vthread", "vtid": vtidStr})
-			kv.Notify(keytree.VthreadReady, notify)
-			logx.Info("VM-%s → vthread %s created", vmID, vtidStr)
+			kv.Notify(keytree.VthreadReady, vtidStr) // 平铺标量值，无 JSON
+			logx.Info("VM-%s → vthread %s created pc=%s", vmID, vtidStr, absPC)
 		}
 	}
 }

@@ -168,15 +168,10 @@ func Compute(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.
 	}
 	logx.Debug("[%s] PUSH %s → %s", vtid, inst.Opcode, cmdQueue)
 	vthread.Set(ctx, kv, vtid, pc, "wait")
-	done, err := vthread.WaitDone(ctx, kv, vtid, 30*time.Second)
+	_, err = vthread.WaitDone(ctx, kv, vtid, 30*time.Second)
 	if err != nil {
-		vthread.SetError(ctx, kv, vtid, pc, fmt.Sprintf("BLPOP timeout: %v", err))
+		vthread.SetError(ctx, kv, vtid, pc, err.Error())
 		return err
-	}
-	if status, ok := done["status"].(string); ok && status == "error" {
-		errInfo := fmt.Sprintf("%v", done["error"])
-		vthread.SetError(ctx, kv, vtid, pc, errInfo)
-		return fmt.Errorf("op error: %s", errInfo)
 	}
 	logx.Debug("[%s] DONE %s", vtid, inst.Opcode)
 	vthread.Set(ctx, kv, vtid, op.NextPC(pc), "running")
