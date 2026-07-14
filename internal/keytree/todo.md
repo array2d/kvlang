@@ -9,22 +9,22 @@
 
 | 当前路径/名称 | 标准路径/名称 | 违反原则 |
 |-------------|-------------|---------|
-| `/vthread/` 根 | `/proc/` 根 | 名字偏实现，不类 Unix |
-| `/notify/vm` | `/proc/.ready` | 通知散落到独立根，不归属被通知方 |
-| `/done/<vtid>` | `/proc/<vtid>/.done` | 完成通知散落，不在 vtid 路径下 |
-| `/sys/vtid_counter` | `/proc/.seq` | 计数器不在它所计数的命名空间下 |
-| `/sys/heartbeat/vm:<id>` | `/sys/vm/<id>/.hb` | `:` 做分隔符；属性不在所有者路径下 |
-| `/sys/cmd/vm/<id>` | `/sys/vm/<id>/.cmd` | 路径语义倒置；命令队列不在 VM 路径下 |
+| `/vthread/` 根 | `/vthread/` 根 | 名字偏实现，不类 Unix |
+| `/notify/vm` | `/vthread/ready` | 通知散落到独立根，不归属被通知方 |
+| `/done/<vtid>` | `/vthread/<vtid>/done` | 完成通知散落，不在 vtid 路径下 |
+| `/sys/vtid_counter` | `/vthread/seq` | 计数器不在它所计数的命名空间下 |
+| `/sys/heartbeat/vm:<id>` | `/sys/vm/<id>/hb` | `:` 做分隔符；属性不在所有者路径下 |
+| `/sys/cmd/vm/<id>` | `/sys/vm/<id>/cmd` | 路径语义倒置；命令队列不在 VM 路径下 |
 | `cmd:<instance>` | `/sys/op/<backend>/<n>/.cmd` | `:` 做分隔符；无 `/` 前缀 |
 | `/sys/op-plat/<instance>` | `/sys/op/<backend>/<n>` | 连字符；instance 名含 `:` |
 | `/sys/heap-plat/<instance>` | `/sys/heap/<backend>/<n>` | 同上 |
 | `/op/<backend>/list` | `/sys/op/<backend>/func/`（List 枚举） | 独立根 `/op/`，游离于 sys/ 之外 |
 | `/op/<backend>/func/<name>` | `/sys/op/<backend>/func/<name>` | 同上 |
 | `/sys/term/<name>/<stream>` | `/dev/tty/<name>/<stream>` | 终端是设备，属于 /dev/；Unix 叫 tty 不叫 term |
-| `/func/main` | `/func/.main` | 入口描述符是元数据，缺少点前缀 |
-| `VthreadRoot` 常量 | `ProcRoot` | API 命名不对齐 |
+| `/func/main` | `/func/main` | 入口描述符是元数据，缺少点前缀 |
+| `VthreadRoot` 常量 | `VthreadRoot` | API 命名不对齐 |
 | `VThread*(...)` 函数族 | `Proc*(...)` 函数族 | 同上 |
-| `VThreadSub` 末尾补 `/` | `ProcFrame`，不补 `/` | 路径不含结尾斜杠 |
+| `VThreadSub` 末尾补 `/` | `VThreadFrame`，不补 `/` | 路径不含结尾斜杠 |
 | `FuncCompiled(pkg,name)` | `Func(pkg,name)` | "Compiled" 是实现词，路径层不感知编译 |
 | `SrcFunc(pkg,name)` | `Src(pkg,name)` | 同上 |
 
@@ -43,13 +43,13 @@
 | `entry.go` | `FuncCompiled(pkg, name)` | `Func(pkg, name)` |
 | `entry.go` | `FuncMain = "/func/main"` | 路径值不变，P2 再改 |
 | `src.go` | `SrcFunc(pkg, name)` | `Src(pkg, name)` |
-| `vthread.go` | `VthreadRoot` | `ProcRoot` |
-| `vthread.go` | `VThread(id)` | `Proc(id)` |
+| `vthread.go` | `VthreadRoot` | `VthreadRoot` |
+| `vthread.go` | `VThread(id)` | `VThread(id)` |
 | `vthread.go` | `VThreadAt(id, key)` | `ProcAt(id, key)`（过渡名，P2 再细化） |
 | `vthread.go` | `VThreadSub(id, pc)` | `ProcFrame(id, pc)`（去掉末尾 `/`） |
 | `vthread.go` | `VThreadSlot(id, a, b)` | `ProcSlot(id, "", a, b)` |
-| `vthread.go` | `VThreadTerm(id)` | `ProcTerm(id)` |
-| `vthread.go` | `VThreadPattern()` | 删除（调用方直接用 `ProcRoot`） |
+| `vthread.go` | `VThreadTerm(id)` | `VThreadTerm(id)` |
+| `vthread.go` | `VThreadPattern()` | 删除（调用方直接用 `VthreadRoot`） |
 | `notify.go` | `NotifyRoot`, `NotifyVM` | 路径值不变，P2 再改；先保留 |
 | `notify.go` | `DoneRoot`, `Done(id)` | 路径值不变，P2 再改；先保留 |
 | `sys.go` | `SysVtidCounter` | 路径值不变，P2 再改 |
@@ -70,7 +70,7 @@
 | `internal/vthread/vthread.go` | `VThread(vtid)` | `Proc(vtid)` |
 | `internal/vthread/vthread.go` | `VThreadSlot(vtid,a,b)` | `ProcSlot(vtid,"",a,b)` |
 | `internal/vthread/vthread.go` | `Done(vtid)` | 路径不变，P2 再迁 |
-| `internal/kvcpu/sched.go` | `VthreadRoot` | `ProcRoot` |
+| `internal/kvcpu/sched.go` | `VthreadRoot` | `VthreadRoot` |
 | `internal/kvcpu/sched.go` | `VThread(vtid)` | `Proc(vtid)` |
 | `internal/kvcpu/sched.go` | `NotifyVM` | 路径不变，P2 再迁 |
 | `internal/kvcpu/controlflow.go` | `VThreadAt(vtid,key)` | `ProcAt(vtid,key)` |
@@ -83,7 +83,7 @@
 | `internal/op/dispatch/router.go` | `OpBackendFunc`, `OpBackendList` | `SysOpFunc` |
 | `internal/device/term_ws.go` | `SysTerm` | `DevTTY` |
 | `cmd/kvlang/serve.go` | `SysVM`, `SysHeartbeat`, `SysCmdVM` | `SysVM`, `SysVMHB`, `SysVMCmd` |
-| `cmd/kvlang/serve.go` | `VThread`, `VThreadSlot`, `VThreadTerm` | `Proc`, `ProcSlot`, `ProcTerm` |
+| `cmd/kvlang/serve.go` | `VThread`, `VThreadSlot`, `VThreadTerm` | `Proc`, `VThreadSlot`, `ProcTerm` |
 | `cmd/kvlang/serve.go` | `NotifyVM` | 路径不变，P2 再迁 |
 | `cmd/kvlang/serve.go` | `FuncMain` | 路径不变，P2 再迁 |
 | `cmd/kvlang/util.go` | `SysVtidCounter` | 路径不变，P2 再迁 |
@@ -100,17 +100,17 @@
 
 | 常量/函数 | 当前路径值 | 标准路径值 |
 |----------|-----------|-----------|
-| `FuncMain` | `/func/main` | `/func/.main` |
-| `Proc(id)` | `/vthread/<id>` | `/proc/<id>` |
-| `ProcRoot` | `/vthread` | `/proc` |
-| `ProcSeq`（新建） | — | `/proc/.seq` |
-| `ProcReady`（新建） | — | `/proc/.ready` |
-| `ProcDone(id)`（新建） | — | `/proc/<id>/.done` |
-| `NotifyVM`（弃用） | `/notify/vm` | 合并到 `ProcReady` |
-| `Done(id)`（弃用） | `/done/<id>` | 合并到 `ProcDone(id)` |
+| `FuncMain` | `/func/main` | `/func/main` |
+| `VThread(id)` | `/vthread/<id>` | `/proc/<id>` |
+| `VthreadRoot` | `/vthread` | `/proc` |
+| `VthreadSeq`（新建） | — | `/vthread/seq` |
+| `VthreadReady`（新建） | — | `/vthread/ready` |
+| `VThreadDone(id)`（新建） | — | `/proc/<id>/.done` |
+| `NotifyVM`（弃用） | `/notify/vm` | 合并到 `VthreadReady` |
+| `Done(id)`（弃用） | `/done/<id>` | 合并到 `VThreadDone(id)` |
 | `SysVtidCounter`（弃用） | `/sys/vtid_counter` | `ProcSeq = /proc/.seq` |
-| `SysVMHB(id)` | `/sys/heartbeat/vm:<id>` | `/sys/vm/<id>/.hb` |
-| `SysVMCmd(id)` | `/sys/cmd/vm/<id>` | `/sys/vm/<id>/.cmd` |
+| `SysVMHB(id)` | `/sys/heartbeat/vm:<id>` | `/sys/vm/<id>/hb` |
+| `SysVMCmd(id)` | `/sys/cmd/vm/<id>` | `/sys/vm/<id>/cmd` |
 | `SysOpCmd(b,n)` | `cmd:<instance>` | `/sys/op/<backend>/<n>/.cmd` |
 | `SysOp(b,n)` | `/sys/op-plat/<instance>` | `/sys/op/<backend>/<n>` |
 | `SysHeap(b,n)` | `/sys/heap-plat/<instance>` | `/sys/heap/<backend>/<n>` |
@@ -119,9 +119,9 @@
 
 ### 涉及的 callsite 文件（路径值变更后需验证）
 
-- `cmd/kvlang/serve.go`：`FuncMain`、`NotifyVM` → `ProcReady`、`Done` → `ProcDone`
-- `cmd/kvlang/util.go`：`SysVtidCounter` → `ProcSeq`
-- `internal/kvcpu/sched.go`：`NotifyVM` → `ProcReady`
+- `cmd/kvlang/serve.go`：`FuncMain`、`NotifyVM` → `VthreadReady`、`Done` → `ProcDone`
+- `cmd/kvlang/util.go`：`SysVtidCounter` → `VthreadSeq`
+- `internal/kvcpu/sched.go`：`NotifyVM` → `VthreadReady`
 - `internal/vthread/vthread.go`：`Done(vtid)` → `ProcDone(vtid)`
 - `internal/op/dispatch/dispatch.go`：`CmdQueue` → `SysOpCmd`/`SysHeapCmd`
 - `internal/op/dispatch/router.go`：`SysOpPlatRoot` → `SysOp`，`SysHeapPlatRoot` → `SysHeap`
