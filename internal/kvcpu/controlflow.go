@@ -42,11 +42,6 @@ func handleControl(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, ins
 	case op.OpBr:
 		return brToCall(ctx, kv, vtid, pc, inst)
 
-	case op.OpIf:
-		// if 是 br 的高级语法糖，编译器应已降级。
-		// 兼容旧字节码：原地转换为 br 处理。
-		return brToCall(ctx, kv, vtid, pc, inst)
-
 	default:
 		return fmt.Errorf("unknown control op: %s", inst.Opcode)
 	}

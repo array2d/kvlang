@@ -65,8 +65,7 @@
 
 ---
 
-## 【lower 职责】P10 OpIf 兼容路径移除
+## ✅ 【lower 职责】P10 OpIf 兼容路径移除
 
-**归属**：`internal/lower/lower.go` + `internal/kvcpu/controlflow.go`
-**标准**：`lower` 确保所有 `if` 指令在写入 `/func/` 前降级为 `br`；
-降级完成后删除 `controlflow.go` 中的 `OpIf` 兼容 case。
+**追踪**：见 `internal/lower/todo.md P10`
+**kvcpu 侧**：lower P10 完成后，删除 `controlflow.go` 中的 `case op.OpIf`。
