@@ -20,7 +20,7 @@
 | `/sys/heap-plat/<instance>` | `/sys/heap/<backend>/<n>` | 同上 |
 | `/op/<backend>/list` | `/sys/op/<backend>/func/`（List 枚举） | 独立根 `/op/`，游离于 sys/ 之外 |
 | `/op/<backend>/func/<name>` | `/sys/op/<backend>/func/<name>` | 同上 |
-| `/sys/term/<name>/<stream>` | `/dev/term/<name>/<stream>` | 终端是设备，不属于 sys/ |
+| `/sys/term/<name>/<stream>` | `/dev/tty/<name>/<stream>` | 终端是设备，属于 /dev/；Unix 叫 tty 不叫 term |
 | `/func/main` | `/func/.main` | 入口描述符是元数据，缺少点前缀 |
 | `VthreadRoot` 常量 | `ProcRoot` | API 命名不对齐 |
 | `VThread*(...)` 函数族 | `Proc*(...)` 函数族 | 同上 |
@@ -56,7 +56,7 @@
 | `sys.go` | `SysOpPlatRoot`, `SysOpPlatInst` | `SysOp(backend, n)` |
 | `sys.go` | `SysHeapPlatRoot`, `SysHeapPlatInst` | `SysHeap(backend, n)` |
 | `sys.go` | `CmdQueue(instance)` | `SysOpCmd(backend, n)` |
-| `sys.go` | `SysTerm(name, stream)` | `DevTerm(name, stream)`（移到新文件 dev.go）|
+| `sys.go` | `SysTerm(name, stream)` | `DevTTY(name, stream)`（移到新文件 dev.go）|
 | `op.go` | `OpBackendFunc(backend, name)` | `SysOpFunc(backend, name)` |
 | `op.go` | `OpBackendList(backend)` | 删除（`List(SysOpFunc(b,""))` 即可枚举）|
 | `op.go` | `OpPattern()` | 删除 |
@@ -81,7 +81,7 @@
 | `internal/op/dispatch/router.go` | `SysOpPlatRoot`, `SysHeapPlatRoot` | `SysOp`, `SysHeap` |
 | `internal/op/dispatch/router.go` | `CmdQueue` | `SysOpCmd` / `SysHeapCmd` |
 | `internal/op/dispatch/router.go` | `OpBackendFunc`, `OpBackendList` | `SysOpFunc` |
-| `internal/device/term_ws.go` | `SysTerm` | `DevTerm` |
+| `internal/device/term_ws.go` | `SysTerm` | `DevTTY` |
 | `cmd/kvlang/serve.go` | `SysVM`, `SysHeartbeat`, `SysCmdVM` | `SysVM`, `SysVMHB`, `SysVMCmd` |
 | `cmd/kvlang/serve.go` | `VThread`, `VThreadSlot`, `VThreadTerm` | `Proc`, `ProcSlot`, `ProcTerm` |
 | `cmd/kvlang/serve.go` | `NotifyVM` | 路径不变，P2 再迁 |
@@ -115,7 +115,7 @@
 | `SysOp(b,n)` | `/sys/op-plat/<instance>` | `/sys/op/<backend>/<n>` |
 | `SysHeap(b,n)` | `/sys/heap-plat/<instance>` | `/sys/heap/<backend>/<n>` |
 | `SysOpFunc(b,name)` | `/op/<backend>/func/<name>` | `/sys/op/<backend>/func/<name>` |
-| `DevTerm(name,stream)` | `/sys/term/<name>/<stream>` | `/dev/term/<name>/<stream>` |
+| `DevTTY(name,stream)` | `/sys/term/<name>/<stream>` | `/dev/tty/<name>/<stream>` |
 
 ### 涉及的 callsite 文件（路径值变更后需验证）
 
@@ -125,7 +125,7 @@
 - `internal/vthread/vthread.go`：`Done(vtid)` → `ProcDone(vtid)`
 - `internal/op/dispatch/dispatch.go`：`CmdQueue` → `SysOpCmd`/`SysHeapCmd`
 - `internal/op/dispatch/router.go`：`SysOpPlatRoot` → `SysOp`，`SysHeapPlatRoot` → `SysHeap`
-- `internal/device/term_ws.go`：`SysTerm` → `DevTerm`
+- `internal/device/term_ws.go`：`SysTerm` → `DevTTY`
 
 ---
 
