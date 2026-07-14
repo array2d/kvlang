@@ -53,13 +53,14 @@ func brToCall(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op
 	if len(inst.Reads) < 3 {
 		return fmt.Errorf("br requires 3 args: cond trueLabel falseLabel")
 	}
-	condVal := builtin.ResolveReadValue(kv, vtid, inst.Reads[0])
+	framePath := keytree.FrameRoot(pc)
+	condVal := builtin.ResolveReadValue(kv, framePath, inst.Reads[0])
 	isTrue := condVal != "" && condVal != "0" && condVal != "false"
 	label := inst.Reads[2]
 	if isTrue {
 		label = inst.Reads[1]
 	}
-	qualified := resolveLabel(kv, vtid, pc, label)
+	qualified := resolveLabel(kv, framePath, label)
 	callInst := &op.Instruction{Opcode: op.OpCall, Reads: []string{qualified}}
 	substackPC := layoutcode.HandleCall(ctx, kv, pc, callInst, false)
 	if substackPC == pc {
@@ -70,14 +71,13 @@ func brToCall(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op
 }
 
 // resolveLabel 在函数上下文中将 label 解析为完整函数路径。
-// 若 label 已包含 / 则直接使用；否则尝试拼接当前函数名。
-func resolveLabel(kv kvspace.KVSpace, vtid, pc, label string) string {
+// 若 label 已包含 / 则直接使用；否则从帧的 .func 字段取当前函数名拼接。
+func resolveLabel(kv kvspace.KVSpace, framePath, label string) string {
 	if strings.Contains(label, "/") {
 		return label
 	}
-	// 从 vthread 入口槽（[0,0]）取当前函数名
-	entryKey := keytree.VThreadSlot(vtid, "", 0, 0)
-	if funcName, err := kv.Get(entryKey); err == nil {
+	// 当前函数名由 HandleCall 存入 framePath/.func
+	if funcName, err := kv.Get(framePath + "/.func"); err == nil && funcName != "" {
 		qualified := funcName + "/" + label
 		if pkg, err := kv.Get(keytree.FuncIdx(qualified)); err == nil && pkg != "" {
 			return qualified
