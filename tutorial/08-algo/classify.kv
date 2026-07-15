@@ -1,0 +1,31 @@
+# classify: 成绩分档
+# 算法: 嵌套 if 综合判断，score=85 → grade=B
+# 层级: P3
+# 规则: P3-algo
+# 期望输出:
+#   grade = B
+
+str.set("kvlangrun") -> ./term
+
+def classify(score:int) -> (grade:string) {
+    if (score >= 90) {
+        str.set("A") -> ./grade
+    } else {
+        if (score >= 80) {
+            str.set("B") -> ./grade
+        } else {
+            if (score >= 70) {
+                str.set("C") -> ./grade
+            } else {
+                if (score >= 60) {
+                    str.set("D") -> ./grade
+                } else {
+                    str.set("F") -> ./grade
+                }
+            }
+        }
+    }
+}
+
+classify(85) -> ./g
+print("grade =", ./g)
