@@ -1,88 +1,179 @@
 # kvlang
 
-基于 KV 路径寻址的声明式 VM 解释器。指令和数据共享同一棵树，label 即路径，call 即子树复制。
+[![CI](https://github.com/array2d/kvlang/actions/workflows/ci.yml/badge.svg)](https://github.com/array2d/kvlang/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-## 快速开始
+**A declarative VM where code and data share the same key-value tree.**
 
-```bash
-make build    # 编译 kvlang
-make kvspace  # 启动 Redis + 清空
+Instructions are paths. Function calls are subtree copies. State is transparent and always inspectable — no hidden stack, no opaque heap.
+
+> 中文文档: [README_CN.md](README_CN.md)
+
+---
+
+## Why kvlang?
+
+Most VMs separate code from data. kvlang unifies them in a single KV tree:
+
+```
+/vthread/1/[0,0]  → "add"           # opcode
+/vthread/1/[0,-1] → "/src/add/a"    # read arg
+/vthread/1/[0,-2] → "/src/add/b"
+/vthread/1/[0,1]  → "/src/add/c"    # write result
 ```
 
-## 使用
+- **Instruction = path**. An opcode stored at `[i,0]`, operands as negative/positive indices.
+- **Call = subtree copy**. Calling a function copies its body under the caller's frame.
+- **State is a tree**. Every variable, every return value, every frame lives at a path you can `GET`.
+
+This means you can `GET /vthread/1/[5,-1]` to see a variable mid-execution. Thread state is a KV tree you can inspect, migrate, or persist. No black box.
+
+---
+
+## Quick Start
 
 ```bash
-kvlang file.kv             # 执行 .kv 文件
-kvlang -c 'print("hi")'    # 内联代码
-echo 'code' | kvlang       # 管道输入
-kvlang vet file.kv          # 语法检查
-kvlang kvspace <cmd>        # KV 空间操作 (get/set/del/list/clear)
-kvlang help                 # 帮助
+# Prerequisites: Go 1.24+, Redis (any version)
+make build                    # build kvlang binary
+
+# Run a file
+echo 'print("hello kvlang")' > hello.kv
+kvlang hello.kv               # → hello kvlang
+
+# Inline mode
+kvlang -c '1 + 2 + 3 -> "./x"; print("x =", "./x")'   # → x = 6
+
+# Serve mode (daemon with Redis persistence)
+kvlang load my_program.kv
+kvlang serve                  # workers execute, output to stdout
 ```
 
-## 语言速览
+---
+
+## Architecture
+
+```mermaid
+flowchart LR
+    SRC[".kv source"] --> LEX[Lexer] --> PAR[Parser] --> AST
+    AST --> REG["Register signatures"]
+    AST --> LOWER
+    LOWER["Lower control flow"] --> BODY["WriteBody: AST → KV tree"]
+    REG --> KVSPACE[("kvspace / Redis")]
+    BODY --> KVSPACE
+    KVSPACE --> EXEC[Execute]
+    EXEC --> BUILTIN["builtin ops\narith/compare/logic/cast"]
+    EXEC --> VTHREAD["vthread scheduler\n128 workers"]
+    VTHREAD --> IO["device I/O\nstdout/stderr/websocket"]
+```
+
+**Pipeline**: `.kv` source → parse → lower control flow → write opcodes/operands as KV paths → Redis → workers execute by reading/writing those paths.
+
+**Key components**:
+
+| Layer | Package | Role |
+|-------|---------|------|
+| Parser | `internal/parser` | `.kv` → AST |
+| Lower | `internal/lower` | if/while → block + branch |
+| Layout | `internal/layoutcode` | AST → KV tree (opcode paths) |
+| Scheduler | `internal/kvcpu` | 128 goroutine workers, vthread dispatch |
+| Storage | `internal/kvspace` | KVSpace interface (Redis impl) |
+| Types | `internal/vtype` | int, float, bool, str, tensor |
+
+---
+
+## Language at a Glance
 
 ```kvlang
-str.set("kvlangrun") -> './term'    # 激活终端输出
+// Activate stdout
+str.set("kvlangrun") -> './term'
 
-def add(A:int, B:int) -> (C:int) {
+// Define a function
+def add(A: int, B: int) -> (C: int) {
     A + B -> './C'
 }
-add(2, 3) -> './out'
+
+// Call it
+add(10, 32) -> './sum'
+print("sum =", './sum')    // → sum = 42
 ```
 
-### 控制流 (实验性)
+### Control Flow
 
 ```kvlang
-def classify(flag:bool, X:int) -> (R:int) {
-    X + 1 -> './a'
-    if ('./flag') {
-        './a' * 2 -> './b'
+def abs(x: int) -> (r: int) {
+    if (x < 0) {
+        -x -> './r'
     } else {
-        './a' * 3 -> './b'
+        x -> './r'
     }
-    './b' + 10 -> './R'
 }
 ```
 
-### Tensor (设计中)
+### Multi-return & Recursion (TCO)
 
 ```kvlang
-tensor.new("f32", "[128]") -> /data/a
-matmul(/data/W, /data/X)    -> /data/Y
-tensor.del(/data/a)
+def fib(n: int) -> (a: int, b: int) {
+    if (n <= 1) {
+        0 -> './a'
+        1 -> './b'
+    } else {
+        fib(n - 1) -> './a', './b'
+        './a' + './b' -> './x'
+        './b' -> './a'
+        './x' -> './b'
+    }
+}
+fib(10) -> './_', './result'
+print("fib =", './result')    // → fib = 55
 ```
 
-## 内建算子
+---
 
-算术 `+ - * / %` · 比较 `== != < > <= >=` · 逻辑 `&& || !` · 数学 `abs pow sqrt min max` · 转换 `int float bool` · IO `print cerr` · 字符串 `str.set`
+## Examples
 
-## 架构
+179 example programs, graded P0–P3:
 
-```
-.kv 源文件 ──▶ Lexer ──▶ Parser ──▶ AST
-  │                                    │
-  │  if/while/for  ──▶ lower ──▶ BlockStmt + br/goto
-  │                                    │
-  ▼                                    ▼
-Register (签名)                WriteBody (KV 结构化)
-  │                                    │
-  └────────── kvspace KV ◀─────────────┘
-                 │
-                 ▼
-               Execute ──▶ builtin (原生) / dispatch (GPU)
+| Grade | Category | Examples |
+|-------|----------|----------|
+| P0 | Builtin smoke | print, add, compare, logic |
+| P1 | Equivalence classes | 18 compare variants, 10 logic, 10 arith edges, 7 call patterns |
+| P2 | Frame isolation + TCO | scope isolation, tail-call depth (sum 5050, fact 3628800) |
+| P3 | Algorithms | fibonacci, factorial, gcd, fizzbuzz, power, collatz, classify |
+
+```bash
+python3 example/run.py                    # 175 integration tests
+python3 example/run.py --filter compare   # filter by keyword
 ```
 
-## KV 寻址
+---
+
+## Dependencies
+
+**Only 2 direct dependencies:**
+
+| Package | Purpose |
+|---------|---------|
+| `redis/go-redis/v9` | KV storage backend |
+| `gorilla/websocket` | Optional WebSocket terminal |
+
+Zero framework. Zero code generation. Pure Go standard library + Redis.
+
+---
+
+## KV Path Reference
 
 ```
-/vthread/<vtid>/<pc>/[i,0]    指令 opcode
-/vthread/<vtid>/<pc>/[i,-1]   读参数
-/vthread/<vtid>/<pc>/label/    控制流 block 子路径
-/src/func/<name>/              函数体布局
-/src/func/<name>/label/        block label 子函数
+/vthread/<vtid>/<pc>/[i,0]      opcode
+/vthread/<vtid>/<pc>/[i,-j]     read operand j
+/vthread/<vtid>/<pc>/[i,+j]     write operand j
+/vthread/<vtid>/<pc>/label/     control flow block
+/src/<pkg>/<func>/              function body
+/src/<pkg>/<func>/label/        block label sub-function
+/func/main                      program entry signature
 ```
+
+---
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE)
