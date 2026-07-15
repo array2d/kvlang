@@ -41,7 +41,7 @@ kvlang tutorial/08-algo/collatz.kv     # steps = 111
 | `fizzbuzz.kv` | FizzBuzz 1–15 | modulo, nested if |
 | `gcd.kv` | GCD (Euclidean) | tail recursion |
 | `power.kv` | Fast power (loop) | while, counter |
-| `classify.kv` | Grade classifier | nested if, str.set |
+| `classify.kv` | Grade classifier | nested if, string literal |
 | `collatz.kv` | Collatz conjecture | while, even/odd branch |
 | `tco_depth.kv` | TCO verification | while → goto, tail recursion |
 | `scope_isolation.kv` | Frame isolation | multi-write params, call isolation |
