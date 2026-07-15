@@ -150,6 +150,16 @@ func Scan(src string) []Token {
 			continue
 		}
 
+		// ';' — 显式语句分隔符，折叠规则与 '\n' 相同
+		if c == ';' {
+			if !prevNewline && len(tokens) > 0 {
+				tokens = append(tokens, Token{Kind: Newline, Value: ";", Pos: pos()})
+				prevNewline = true
+			}
+			i++
+			continue
+		}
+
 		// # 行注释 → Comment Token（S6：保留注释）
 		if c == '#' {
 			p := pos()
@@ -279,7 +289,7 @@ func Scan(src string) []Token {
 
 func isTokenDelim(c byte) bool {
 	switch c {
-	case ' ', '\t', '\n', '\r',
+	case ' ', '\t', '\n', '\r', ';',
 		',', ')', '(', '{', '}',
 		'+', '-', '*', '%', '!', '=', '<', '>', '&', '|', '^',
 		':':

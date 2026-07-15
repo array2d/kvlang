@@ -16,7 +16,8 @@ func TestExampleFiles(t *testing.T) {
 	exampleDir := os.Getenv("KV_EXAMPLES")
 	if exampleDir == "" {
 		cwd, _ := os.Getwd()
-		for _, rel := range []string{"../../../../../example/kvlang", "../../../../example/kvlang", "../../../example/kvlang"} {
+		// tutorial/ は example/kvlang の後継（./tutorial から 4 階層上が repo root）
+		for _, rel := range []string{"../../../../../tutorial", "../../../../tutorial", "../../../tutorial"} {
 			candidate := filepath.Join(cwd, rel)
 			if info, err := os.Stat(candidate); err == nil && info.IsDir() {
 				exampleDir = candidate
@@ -25,7 +26,7 @@ func TestExampleFiles(t *testing.T) {
 		}
 	}
 	if exampleDir == "" {
-		t.Skip("example dir not found")
+		t.Skip("tutorial dir not found")
 	}
 
 	var files []string

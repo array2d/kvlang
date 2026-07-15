@@ -1,6 +1,89 @@
 # parser todo — 违反最高标准设计的代码
 
-（已全部完成）
+## S10：`isNum` 启发式误判字符串字面量（inst.go `parsePrimaryExpr`）
+
+**文件**：`inst.go`
+
+**现状**：
+```go
+isNum := len(v) > 0 && v[0] >= '0' && v[0] <= '9'
+```
+仅检查第一个字符，导致 `"5*6 ="` 之类以数字开头的字符串字面量被误判为数字，
+不添加 `"` 前缀，运行时无法识别为字符串字面量，`print("5*6 =", x)` 输出 ` 6` 而非 `5*6 = 6`。
+
+**目标**：改为判断整个字符串是否为合法数字（仅含 `0-9 . e E`）：
+```go
+isNum := isNumericLiteral(v)  // 全字符检查
+```
+
+**影响**：✅ 影响当前功能（含特殊字符的字符串字面量首字符为数字时语义错误）
+
+---
+
+## S11：写槽（write slot）不校验 KV 路径格式（inst.go `collectWriteList`）
+
+**文件**：`inst.go`
+
+**现状**：
+```go
+// collectWriteList / collectWritesUntilArrow
+writes = append(writes, p.advance().Value)  // 裸标识符也被接受
+```
+`->` 右侧的写槽接受任意 token，包括裸标识符（`s`、`result`）。  
+这使得 `funca() -> s` 被静默接受，语义上却暗示"函数有返回值"——与 kvlang 无返回值的设计矛盾。
+
+**目标**：在 `collectWriteList` 和 `collectWritesUntilArrow` 中对每个写槽 token 做路径校验：
+```go
+if !isKVPathToken(tok.Value) {
+    p.errors = append(p.errors, Diagnostic{
+        Pos:     tok.Pos,
+        Message: fmt.Sprintf("write slot must be a KV path (./x or /abs), got %q", tok.Value),
+    })
+}
+```
+其中 `isKVPathToken` 检查：以 `./` 或 `/` 开头。
+
+**影响**：✅ 影响当前功能（裸标识符写槽在运行时静默出错，此校验可将问题前移到解析阶段）
+
+**背景**：`funca() -> s` 是错误写法，`s` 应写为 `./s`。详见 `kvlang语言深度理解.md §3`。
+
+---
+
+## S9：`TopLevelCalls` → `def init()` 合并（Parser 层合成）
+
+**文件**：`parser.go`、`ast/ast.go`、`load.go`
+
+**现状**：
+- `ast.File` 有两个出口：`Funcs []Func` 和 `TopLevelCalls []*Instruction`
+- 裸顶层语句由 `load.go` 在运行时合成 `pre_main`，是消费层的特例处理
+
+**目标**（见 `最高标准设计.md §2.7`）：
+
+1. **`parser.go` `parseFile()` 末尾**：将 `topStmts` 合并进 `def init()`
+   ```go
+   if len(topStmts) > 0 {
+       if idx := funcIndex(f.Funcs, "init"); idx >= 0 {
+           f.Funcs[idx].Body = append(f.Funcs[idx].Body, topStmts...)
+       } else {
+           f.Funcs = append(f.Funcs, ast.Func{
+               Sig:  ast.FuncSig{Name: "init"},
+               Body: topStmts,
+           })
+       }
+   }
+   ```
+
+2. **`ast/ast.go`**：删除 `File.TopLevelCalls []*Instruction` 字段
+
+3. **`load.go`**：
+   - 删除 `allCalls` 积累逻辑和 `pre_main` 合成
+   - 所有文件的 `Funcs`（含各自的 `init()`）统一 `WriteFunc`
+   - 多文件时：在 load 层合成一个 `main/init` 依次调用各 `<pkg>/init`
+   - 入口由 `Bootstrap(ctx, kv, vtid, "init")` 统一触发
+
+4. **`cmd/kvlang/serve.go`**：`pre_main` → `init`，`Bootstrap` 调用点更新
+
+**影响**：✅ 影响当前功能（`-c` 内联执行已修复 ParseCode 门卫，此项是完整收尾）
 
 ---
 
@@ -113,6 +196,9 @@
 |------|------------|------|
 | S3 表达式优先级 | ✅ 是（语义错误） | **DONE** 2026-07-13 |
 | S6 注释丢失 | ✅ 是（kvfmt 有损） | **DONE** 2026-07-13 |
+| S10 isNum 误判 | ✅ 是（字符串首字符为数字时出错） | **DONE** 2026-07-14 |
+| **S11 写槽不校验 KV 路径** | ✅ 是（裸标识符写槽静默出错） | **待实现** |
+| **S9 TopLevelCalls→init()** | ✅ 是（架构收尾） | **待实现** |
 | S4 线性前瞻 | ⚠️ 边缘（性能+文法） | 统一箭头方向时顺带修复 |
 | S5 错误恢复 | ⚠️ 影响诊断质量 | 有余力时改进 |
 | S1 Token Span | ⚠️ 影响诊断精度 | 有余力时改进 |

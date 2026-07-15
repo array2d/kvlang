@@ -145,7 +145,7 @@ func (p *parser) parsePrimaryExpr() *ast.Expr {
 	// 引号字符串（非数字、非路径）：加 " 前缀编码，供 resolveReadValue 识别
 	if t.Kind == Literal {
 		v := t.Value
-		isNum := len(v) > 0 && v[0] >= '0' && v[0] <= '9'
+		isNum := isNumericLiteral(v)
 		isPath := len(v) >= 2 && (v[:2] == "./" || v[0] == '/')
 		if !isNum && !isPath {
 			return ast.Leaf(`"` + v)
@@ -225,3 +225,18 @@ func (p *parser) parseCondInst() *ast.Instruction {
 // ── 算子判断 ──────────────────────────────────────────────────
 
 func isUnaryPrefixOp(s string) bool { return s == "!" || s == "-" }
+
+// isNumericLiteral 判断字符串是否为合法数字字面量（仅含 0-9 . e E，且非空）。
+// 用于区分 Literal token 是"数字"还是"被引号包裹的字符串"。
+// 修复 S10：旧版本仅检查首字符，导致 "5*6 =" 之类被误判为数字。
+func isNumericLiteral(v string) bool {
+	if len(v) == 0 {
+		return false
+	}
+	for _, c := range v {
+		if !(c >= '0' && c <= '9' || c == '.' || c == 'e' || c == 'E') {
+			return false
+		}
+	}
+	return true
+}

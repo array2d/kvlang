@@ -46,9 +46,6 @@ func ParseCode(r io.Reader) (*ast.File, []Diagnostic, error) {
 	}
 	p := &parser{tokens: Scan(string(raw))}
 	f := p.parseFile()
-	if len(f.Funcs) == 0 {
-		return nil, p.errors, fmt.Errorf("no 'def' found")
-	}
 	return f, p.errors, nil
 }
 
@@ -155,10 +152,20 @@ func (p *parser) parseFile() *ast.File {
 			fn.Comments = comments
 			f.Funcs = append(f.Funcs, fn)
 		} else {
+			prevPos := p.pos
 			inst := p.parseInst()
 			if inst != nil && inst.Expr != nil {
 				inst.Comments = comments
 				f.TopLevelCalls = append(f.TopLevelCalls, inst)
+			} else if p.pos == prevPos {
+				// 解析无进展（如悬挂的 ')'）：跳过一个 token，防止死循环
+				if p.peek().Kind != EOF {
+					p.errors = append(p.errors, Diagnostic{
+						Pos:     p.peek().Pos,
+						Message: fmt.Sprintf("unexpected token %s %q at top level", p.peek().Kind, p.peek().Value),
+					})
+					p.advance()
+				}
 			}
 		}
 	}
