@@ -85,7 +85,7 @@ while ('./i' < 10) {
 ### 2.6 终端输出（必须）
 
 ```kvlang
-str.set("kvlangrun") -> './term'    # ⚠️ 必须在所有 print 之前
+"kvlangrun" -> './term'    # ⚠️ 必须在所有 print 之前
 ```
 
 `print` 的输出默认不显示。必须在 `.kv` 文件开头加上这一行，`print` 才会输出到终端。
@@ -93,7 +93,7 @@ str.set("kvlangrun") -> './term'    # ⚠️ 必须在所有 print 之前
 完整示例：
 
 ```kvlang
-str.set("kvlangrun") -> './term'    # 激活终端输出
+"kvlangrun" -> './term'    # 激活终端输出
 
 def abs(A:int) -> (C:int) {
     print("A =", A)                 # 会显示在终端
@@ -120,7 +120,7 @@ kvlang 的内置算子分为三组：
 | 数学 | `abs` `neg` `pow` `sqrt` `exp` `log` `min` `max` `sign` | `abs(-5) -> './r'` |
 | 类型转换 | `int` `float` `bool` | `int(3.7) -> './r'` |
 | IO | `print` `cerr` `input` | `print("A =", A)` |
-| 字符串 | `str.set("val") -> './key'` | `str.set("kvlangrun") -> './term'` |
+| 字符串 | `"val" -> './key'` | `"kvlangrun" -> './term'` |
 
 ### 3.2 控制流
 
@@ -234,7 +234,7 @@ reshape(/data/X, "[4,8]") -> /data/Y    # 变形
 
 | 错误 | 原因 | 修复 |
 |------|------|------|
-| print 无输出 | 缺少 `str.set("kvlangrun") -> './term'` | 在文件开头加这一行 |
+| print 无输出 | 缺少 `"kvlangrun" -> './term'` | 在文件开头加这一行 |
 | `empty body` | 函数体 `{}` 内无指令 | 至少写一行 |
 | `func not found` | 调用了未定义的函数 | 先 `def` 再调用 |
 | `parse error` | 语法错误 | `./kvlang vet file.kv` 检查 |

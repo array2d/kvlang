@@ -14,7 +14,7 @@ kvlang is a declarative, KV-path-addressed language. Programs are trees of key-v
 ### 1.2 Hello World
 
 ```kvlang
-str.set("kvlangrun") -> ./term
+"kvlangrun" -> ./term
 
 def hello() -> () {
     print("hello kvlang")
@@ -302,14 +302,14 @@ fact(10000, 1) -> ./f   # no stack overflow
 |----------|-------------|
 | `print(fmt, args...)` | Print to stdout |
 | `cerr(fmt, args...)` | Print to stderr |
-| `str.set("kvlangrun")` | Activate terminal output |
+| `"kvlangrun" -> ./term` | Activate terminal output |
 
 ### 9.4 String
 
 | Function | Description |
 |----------|-------------|
-| `str.set(s)` | Store string value |
-| `str.concat(a, b)` | Concatenate strings |
+| `string.set(s)` | Store string value |
+| `string.concat(a, b)` | Concatenate strings |
 
 ---
 
@@ -358,7 +358,7 @@ op        ::= "+" | "-" | "*" | "/" | "%"
             | "&" | "|" | "^" | "<<" | ">>"
 keyword   ::= "def" | "if" | "else" | "for" | "while"
             | "break" | "continue" | "return" | "br" | "goto"
-type      ::= "int" | "float" | "bool" | "str" | "..."
+type      ::= "int" | "float" | "bool" | "string" | "..."
 
 # Syntax
 file      ::= (func_def | top_call)*
