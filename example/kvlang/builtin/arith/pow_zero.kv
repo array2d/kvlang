@@ -1,0 +1,15 @@
+# pow_zero: 验证 pow(x, 0) = 1（零次幂边界）
+# 层级: P1
+# 规则: arith/pow
+# 等价类: E-零次幂 (5^0=1)
+# 期望输出:
+#   C = 1.0
+
+str.set("kvlangrun") -> ./term
+
+def pow_fn(A:int, B:int) -> (C:float) {
+    pow(A, B) -> ./C
+}
+
+pow_fn(5, 0) -> ./c
+print("C =", ./c)

@@ -1,0 +1,15 @@
+# to_bool_nonzero: 验证 bool(-1) = true（负数非零→true）
+# 层级: P1
+# 规则: cast/bool
+# 等价类: E-负数非零→true (-1→true)
+# 期望输出:
+#   C = true
+
+str.set("kvlangrun") -> ./term
+
+def bool_fn(A:int) -> (C:bool) {
+    bool(A) -> ./C
+}
+
+bool_fn(-1) -> ./c
+print("C =", ./c)

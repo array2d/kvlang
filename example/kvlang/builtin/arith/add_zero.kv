@@ -1,0 +1,19 @@
+# add_zero: 验证 + 在零加法下 0+x=x（加法单位元边界）
+# 层级: P1
+# 规则: arith/+
+# 等价类: E-零值 (0+5=5, 0+0=0)
+# 期望输出:
+#   C = 5
+#   Z = 0
+
+str.set("kvlangrun") -> ./term
+
+def add_fn(A:int, B:int) -> (C:int) {
+    ./C <- A + B
+}
+
+add_fn(0, 5) -> ./c
+print("C =", ./c)
+
+add_fn(0, 0) -> ./z
+print("Z =", ./z)

@@ -1,0 +1,15 @@
+# min_eq: 验证 min(5, 5) = 5（相等输入边界）
+# 层级: P1
+# 规则: arith/min
+# 等价类: E-相等 (min(5,5)=5)
+# 期望输出:
+#   C = 5
+
+str.set("kvlangrun") -> ./term
+
+def min_fn(A:int, B:int) -> (C:int) {
+    min(A, B) -> ./C
+}
+
+min_fn(5, 5) -> ./c
+print("C =", ./c)

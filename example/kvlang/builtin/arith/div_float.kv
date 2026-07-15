@@ -1,0 +1,15 @@
+# div_float: 验证 / 在不整除时产生浮点结果
+# 层级: P1
+# 规则: arith//
+# 等价类: E-浮点除法 (7/2=3.5)
+# 期望输出:
+#   C = 3.5
+
+str.set("kvlangrun") -> ./term
+
+def div_fn(A:int, B:int) -> (C:float) {
+    ./C <- A / B
+}
+
+div_fn(7, 2) -> ./c
+print("C =", ./c)

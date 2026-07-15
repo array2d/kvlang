@@ -1,0 +1,15 @@
+# sqrt_one: 验证 sqrt(1) = 1（单位值边界）
+# 层级: P1
+# 规则: arith/sqrt
+# 等价类: E-单位值 (sqrt(1)=1)
+# 期望输出:
+#   C = 1.0
+
+str.set("kvlangrun") -> ./term
+
+def sqrt_fn(A:int) -> (C:float) {
+    sqrt(A) -> ./C
+}
+
+sqrt_fn(1) -> ./c
+print("C =", ./c)

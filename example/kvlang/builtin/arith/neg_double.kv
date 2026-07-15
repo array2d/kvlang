@@ -1,0 +1,15 @@
+# neg_double: 验证 neg(-5) = 5（双重取反边界）
+# 层级: P1
+# 规则: arith/neg
+# 等价类: E-负数取反→正数 (neg(-5)=5)
+# 期望输出:
+#   C = 5
+
+str.set("kvlangrun") -> ./term
+
+def neg_fn(A:int) -> (C:int) {
+    neg(A) -> ./C
+}
+
+neg_fn(-5) -> ./c
+print("C =", ./c)

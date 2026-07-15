@@ -1,0 +1,15 @@
+# mul_zero: 验证 * 在乘以零时得到零（乘法零元边界）
+# 层级: P1
+# 规则: arith/*
+# 等价类: E-零乘 (7*0=0)
+# 期望输出:
+#   C = 0
+
+str.set("kvlangrun") -> ./term
+
+def mul_fn(A:int, B:int) -> (C:int) {
+    ./C <- A * B
+}
+
+mul_fn(7, 0) -> ./c
+print("C =", ./c)

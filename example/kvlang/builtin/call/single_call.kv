@@ -1,0 +1,15 @@
+# single_call: 验证参数正确绑定到形参（CR-1）和返回值正确写入调用方写槽（CR-2）
+# fn(A=5) 内部 A==5，返回值 result == 5
+# 层级: P1
+# 规则: CR-1, CR-2
+# 期望输出:
+#   result = 5
+
+str.set("kvlangrun") -> ./term
+
+def pass_val(A:int) -> (R:int) {
+    A + 0 -> ./R
+}
+
+pass_val(5) -> ./result
+print("result =", ./result)
