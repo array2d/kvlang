@@ -258,7 +258,7 @@ def main() -> None:
         'def add2(A:int, B:int) -> (C:int) {\n'
         "    './C' <- A + B\n"
         '}\n'
-        'str.set("kvlangrun") -> \'./term\'\n'
+        '"kvlangrun" -> \'./term\'\n'
         "add2(10, 32) -> './sum'\n"
         'print("sum =", \'./sum\')\n'
     )
