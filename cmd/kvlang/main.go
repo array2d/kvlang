@@ -12,7 +12,12 @@
 //	kvlang help                   帮助
 package main
 
-import "os"
+import (
+	"os"
+
+	// 注册 KVSpace 实现；KVLANG_KV 环境变量选择后端（默认 "redis"）。
+	_ "kvlang/internal/kvspace/redis"
+)
 
 func main() {
 	args := os.Args[1:]
