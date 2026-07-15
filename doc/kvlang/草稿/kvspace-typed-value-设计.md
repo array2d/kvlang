@@ -23,22 +23,52 @@ kind: "bytes"     ←──→    (内建标量类型)
 
 语义：**Value 是有类型的通用数据载体；VType 是该类型的算子命名空间。** 同一类型名同时出现在两个层面——存储层（Value kind）和计算层（VType dispatch）。
 
-## 编码格式
+## 编码格式：统一 TLV
+
+### 格式
 
 ```
-[1 byte kind_len][N bytes kind_name][M bytes raw_value]
+[1 byte kind_len][N bytes kind_name][4 bytes raw_len LE][M bytes raw_value]
 ```
 
-| kind | kind_len | raw_value |
-|------|----------|-----------|
-| `"int"` (3B) | `0x03` | 8B int64 LE |
-| `"float"` (5B) | `0x05` | 8B float64 IEEE 754 LE |
-| `"bool"` (4B) | `0x04` | 1B: 0x00/0x01 |
-| `"str"` (3B) | `0x03` | UTF-8 bytes |
-| `"tensor"` (6B) | `0x06` | JSON metadata |
-| `"bytes"` (5B) | `0x05` | raw bytes |
+| 字段 | 大小 | 说明 |
+|------|------|------|
+| `kind_len` | 1B | kind_name 的字节数（≤ 127） |
+| `kind_name` | N B | vtype name，即 Value.kind |
+| `raw_len` | 4B | raw_value 的字节数，uint32 little-endian |
+| `raw_value` | M B | 类型化原始数据 |
 
-kind_name 字符串化而非数字枚举——人类可读、Redis 中 `GET /key` 直接看到 `\x03int\x2a\x00...` 而非 `\x01\x2a\x00...`，调试友好。vtype 的 `Register()` 注册新类型时，kind_name 随之可用。
+**为什么需要 `raw_len`**：旧格式 `[kind_len][kind][raw]` 中 raw_value 的长度靠外部总长度 `M = len(data) - 1 - kind_len` 推断。当编码后的 `[]byte` 脱离 Redis（写入文件、网络流、拼接多个 value）时，边界信息丢失。增加 4B `raw_len` 使每条编码成为**完全自描述的独立单元**，无需外部上下文即可解码。
+
+### 内建类型编码表
+
+| kind_name | kind_len | raw_len | raw_value |
+|-----------|----------|---------|-----------|
+| `"int"` | `0x03` | `0x08 0x00 0x00 0x00` | 8B int64 LE |
+| `"float"` | `0x05` | `0x08 0x00 0x00 0x00` | 8B float64 IEEE 754 LE |
+| `"bool"` | `0x04` | `0x01 0x00 0x00 0x00` | 1B: 0x00/0x01 |
+| `"str"` | `0x03` | `len(s)` | N bytes UTF-8 |
+| `"tensor"` | `0x06` | `len(meta)` | JSON metadata bytes |
+| `"bytes"` | `0x05` | `len(b)` | raw bytes |
+
+**完整编码示例**：
+
+```
+int(42):
+  03 69 6E 74  08 00 00 00  2A 00 00 00 00 00 00 00
+  ──kind_len=3  raw_len=8    ──int64 LE = 42 ──────
+  ─"int"───────  ───────────
+
+str("hello"):
+  03 73 74 72  05 00 00 00  68 65 6C 6C 6F
+  ──"str"─────  raw_len=5    ─"hello"──────
+
+bool(true):
+  04 62 6F 6F 6C  01 00 00 00  01
+  ──"bool"───────  raw_len=1    true
+```
+
+kind_name 字符串化而非数字枚举——人类可读、Redis 中 `GET /key` 直接看到 `\x03int\x08\x00\x00\x00\x2a...`，调试友好。vtype 的 `Register()` 注册新类型时，kind_name 随之可用。
 
 ## Go 侧 Value 类型
 
@@ -80,19 +110,76 @@ func (v Value) Bytes() []byte  { return v.raw }
 func (v Value) Dispatch(opcode string) Executor { ... }
 ```
 
-## 接口变更
+## 接口变更：直接修改，不做新旧并行
+
+### 决策：一次性切换，不新增并行方法
+
+不推荐 `GetTyped`/`SetTyped` 新旧并行的迁移策略。理由：
+
+1. **调用点规模可控**：全量统计约 80+ 个 `kv.Get`/`kv.Set`/`kv.Gets`/`kv.Watch`/`kv.Notify` 调用点。迁移是机械地在 value 字面量外包裹 `kvspace.Str()`/`kvspace.Int()`，不改变业务逻辑。
+2. **编译期强约束**：直接改接口签名，旧代码编译报错 → 逐个修 → 全部通过。不会留下永不清理的 deprecated 方法。
+3. **接口语义一致性**：整个 KVSpace 接口只有一种 value 承载类型——`Value`。调用方无需在 `Get` 和 `GetTyped` 之间选择。
+
+### 接口全貌
 
 ```go
 type KVSpace interface {
-    Get(key string) (Value, error)
-    Gets(keys ...string) ([]Value, error)
-    Set(key string, value Value) error   // 不再用 any，强制类型化
-    Sets(kvs map[string]Value) error
-    // ... 其余不变
+    Get(key string) (Value, error)             // was (string, error)
+    Gets(keys ...string) ([]Value, error)      // was ([]string, error)
+    Set(key string, value Value) error         // was (key string, value any)
+    Sets(kvs map[string]Value) error           // was (map[string]any)
+    Del(keys ...string) error                  // 不变
+    DelR(prefix string) error                  // 不变
+    List(prefix string) ([]string, error)      // 不变
+    Watch(key string, timeout time.Duration) (Value, error) // was (string, error)
+    Notify(key string, value Value) error      // was (key string, value any)
+    Link(target, linkpath string) error        // 不变
+    Unlink(linkpath string) error              // 不变
+    DisConn() error                            // 不变
 }
 ```
 
 `Set(key, any)` 不再接受裸 `any`。调用方必须显式选择 `kvspace.Int(42)` 或 `kvspace.Str("running")`。**类型在 Set 时确定，Get 时不猜。**
+
+### Watch/Notify 也走 Value
+
+Watch 和 Notify 的语义是消息队列操作，但消息体本质也是值。统一为 `Value` 保持一致：
+
+```go
+// 旧用法
+kv.Notify(keytree.VthreadReady, vtidStr)
+
+// 新用法
+kv.Notify(keytree.VthreadReady, kvspace.Str(vtidStr))
+
+// Watch 返回 Value，调用方自行解码
+msg, err := kv.Watch(queue, 5*time.Second)
+vtid := msg.String()
+```
+
+### 调用点迁移分类
+
+全量 ~80 个调用点按 value 语义分为三类，迁移是机械包裹：
+
+| 语义 | 典型 value | 调用点 | 迁移方式 |
+|------|-----------|--------|---------|
+| **纯字符串** | `"running"`, `"init"`, `"./ret"` | ~60 | `kvspace.Str("running")` |
+| **JSON 文档** | `{"entry":"pre_main",...}` | ~10 | `kvspace.Str(jsonStr)` |
+| **数字（当前 stringified）** | `strconv.FormatInt(n, 10)` | 2 | `kvspace.Int(n)` — 同时消除冗余 `strconv` |
+
+迁移示例对比：
+
+```go
+// 旧代码
+kv.Set(keytree.VThreadStatus(vtid), "running")
+n, _ := strconv.Atoi(kv.Get(keytree.Counter))
+kv.Set(keytree.Counter, strconv.FormatInt(n+1, 10))
+
+// 新代码
+kv.Set(keytree.VThreadStatus(vtid), kvspace.Str("running"))
+n := kv.Get(keytree.Counter).Int()
+kv.Set(keytree.Counter, kvspace.Int(n+1))
+```
 
 ## 与 vtype 的统一
 
@@ -158,38 +245,47 @@ Redis 协议是二进制安全的（RESP bulk string 有显式长度字段，不
 ```go
 // internal/kvspace/encode.go
 
-// EncodeValue 将 Value 编码为 Redis 可存储的 []byte。
-// 格式: [1 byte kind_len][N bytes kind_name][M bytes raw_value]
+import "encoding/binary"
+
+// header: 1B kind_len + kind + 4B raw_len
+const headerBase = 1 + 4
+
+// EncodeValue 将 Value 编码为完全自描述的 []byte。
+// 格式: [1 byte kind_len][N bytes kind_name][4 bytes raw_len LE][M bytes raw_value]
 func EncodeValue(v Value) []byte {
     if v.IsNil() {
         return nil
     }
     kind := v.kind
-    buf := make([]byte, 1+len(kind)+len(v.raw))
+    buf := make([]byte, headerBase+len(kind)+len(v.raw))
     buf[0] = byte(len(kind))
     copy(buf[1:], kind)
-    copy(buf[1+len(kind):], v.raw)
+    binary.LittleEndian.PutUint32(buf[1+len(kind):], uint32(len(v.raw)))
+    copy(buf[headerBase+len(kind):], v.raw)
     return buf
 }
 
-// DecodeValue 从 Redis 读回的 []byte 解码为 Value。
-// 若 data 不以 kind_len 开头（如旧版纯字符串数据），返回 Value{kind: "str", raw: data}。
+// DecodeValue 从编码后的 []byte 解码为 Value。
+// 若 data 不以有效 kind 开头，fallback 为 Value{kind: "str", raw: data}。
 func DecodeValue(data []byte) Value {
     if len(data) == 0 {
         return Value{} // nil
     }
     kindLen := int(data[0])
-    // 最小完整帧: 1 byte kind_len + kindLen + 0 bytes raw
-    if len(data) < 1+kindLen {
-        // 旧版数据或损坏数据 → 当 str 处理
-        return Value{kind: "str", raw: data}
+    // 最小完整帧: 1B kind_len + kindLen + 4B raw_len
+    if len(data) < 1+kindLen+4 {
+        return Value{kind: "str", raw: data} // 旧版或损坏
     }
-    // 额外检查：kind_name 必须是可打印 ASCII，以防把旧版二进制数据误判为 typed value
     kind := string(data[1 : 1+kindLen])
     if !isValidKind(kind) {
         return Value{kind: "str", raw: data}
     }
-    return Value{kind: kind, raw: data[1+kindLen:]}
+    rawLen := binary.LittleEndian.Uint32(data[1+kindLen : 1+kindLen+4])
+    start := 1 + kindLen + 4
+    if len(data) < start+int(rawLen) {
+        return Value{kind: "str", raw: data} // 截断数据
+    }
+    return Value{kind: kind, raw: data[start : start+int(rawLen)]}
 }
 
 // isValidKind 检查字符串是否为合法的 vtype name（字母/数字/下划线，不可为空）。
@@ -210,22 +306,18 @@ func isValidKind(s string) bool {
 
 ### 软链接 sentinel 的二进制兼容
 
-当前 `checkLink` 通过 `strings.HasPrefix(val, "->")` 检测链接。编码后 value 为 `[kind_len][kind][raw]`，`kind_len` 取值范围 1~127（最大 kind 名 127 字节），而 `'->'` 的字节是 `0x2D 0x3E`（0x2D = 45）。
+`checkLink` 检测 value 前 2 字节是否为 `"->"`（0x2D 0x3E）。编码后 value 首字节是 `kind_len`（1~127），次字节是 `kind_name[0]`。
 
-**不会有冲突**：编码后的 value 首字节是 `kind_len`（1~127 中 ≤ 44 是合法类型名长度；45~127 不可能出现，因为 kind 名不会到 45 字节），且链接存储本身不编码（`linkSentinel + target` 是纯字符串）。检测逻辑不变：
+**不会误判**：若 `kind_len == 0x2D`（45），则次字节必须是合法 kind_name 首字符（`[a-zA-Z0-9_]`），而 `0x3E` = `>` 不在合法字符集中。不存在合法 vtype 能产生以 `->` 开头的编码。链接本身存储为纯字符串 `->target`，不经编码。
 
 ```go
-// checkLink 逻辑无需修改：
-// 1. 从 Redis GET 原始字节（用 .Bytes()）
-// 2. 检查前 2 字节是否为 "->"（0x2D 0x3E）
-// 3. 若是链接 → 返回 target；否则交给 DecodeValue 解析
 func (r *redisImpl) checkLink(path string) string {
-    // ...
     raw, _ := r.rdb.Get(bg, path).Bytes()
     if len(raw) >= 2 && raw[0] == '-' && raw[1] == '>' {
-        t = string(raw[2:])
+        return string(raw[2:]) // 链接 target
     }
-    // ...
+    // 非链接，由上层决定是否 DecodeValue
+    return ""
 }
 ```
 
@@ -306,25 +398,16 @@ func (r *redisImpl) Sets(kvs map[string]Value) error {
 | `DEL` | 删 key | 不涉及 value 读写 |
 | `SADD/SREM/SMEMBERS` | 目录索引 | key 名和成员名是路径字符串，与 value 编码无关 |
 
-### 迁移路径
+### 迁移路径：一次性 cutover
 
-```
-阶段 1（当前）          阶段 2（并行）               阶段 3（收敛）
-─────────────────  →  ─────────────────────  →  ─────────────────
-Get → string          Get → string (deprecated)   Get → Value
-Set(key, any)         GetTyped → Value            Set(key, Value)
-                       Set(key, any) (deprecated)
-                       SetTyped(key, Value)
-```
+**不需要阶段 2（新旧并行）**。步骤：
 
-**阶段 2 实现策略**：
-1. `KVSpace` 接口新增 `GetTyped`/`SetTyped`（或直接重命名接口，让旧调用方编译报错来显式迁移）
-2. `redisImpl` 同时实现新旧两套方法，`SetTyped` 写入编码后的 `[]byte`，`Set` 写入 string（旧行为）
-3. `GetTyped` 读回 `[]byte` → `DecodeValue`，`Get` 读回 string（旧行为）
-4. 逐步将 `cmd/kvlang/*.go`、`internal/vthread/*.go` 等调用方从 `Set(key, "...")` 迁移到 `SetTyped(key, kvspace.Str("..."))`
-5. 全部迁移完成后，删除旧接口方法，`GetTyped`/`SetTyped` 重命名为 `Get`/`Set`
+1. 修改 `KVSpace` 接口签名为 `Value` 类型
+2. 修改 `redisImpl` 实现：读写走 `[]byte` + `EncodeValue`/`DecodeValue`
+3. 编译 → ~80 个编译错误 → 逐文件在 value 字面量外包裹 `kvspace.Str()`/`kvspace.Int()`/`kvspace.Bool()`
+4. 编译通过 → 运行测试 → 完成
 
-**Redis 数据兼容**：旧版纯字符串 key 被 `DecodeValue` 以 fallback 方式读取（当作 `kind: "str"`），无需数据迁移。新版 typed value 被旧版 reader 读到会看到 `\x03int\x2a...` 前缀乱码——旧版本来就不区分 int/str，读到乱码不影响破坏性（它本就不理解类型）。
+**Redis 数据兼容**：`DecodeValue` 对不以有效 kind 开头的数据自动 fallback 为 `kind: "str"`，旧数据无需迁移。
 
 ### 类型常量与 vtype 注册的对齐
 
@@ -352,15 +435,18 @@ const (
 
 | 操作 | 额外开销 | 说明 |
 |------|---------|------|
-| `EncodeValue` | 1 次 `make([]byte, 1+len(kind)+len(raw))` + 2 次 `copy` | O(kind+raw)，纳秒级 |
-| `DecodeValue` | 1 次 `data[0]` 索引 + `isValidKind` 检查 | O(1)，kind 名 ≤ 10 字节 |
+| `EncodeValue` | 1 次 `make([]byte, 5+len(kind)+len(raw))` + 3 次 `copy`/`PutUint32` | O(kind+raw)，纳秒级；每值新增 5B 固定开销 |
+| `DecodeValue` | 1 次 `binary.LittleEndian.Uint32` + `isValidKind` 检查 | O(kind)，< 100ns |
 | `Set` (写路径) | EncodeValue + `[]byte` 传入 go-redis | 比原 `fmt.Sprint(any)` 更快（无反射/fmt 开销） |
-| `Get` (读路径) | `.Bytes()` 替代 `.Result()` + DecodeValue | `.Bytes()` 少一次 `string([]byte)` 分配，整体更优 |
+| `Get` (读路径) | `.Bytes()` 替代 `.Result()` + DecodeValue | `.Bytes()` 少一次 `string([]byte)` 分配 |
+
+**空间开销**：每值固定 5B 头部（1B kind_len + 4B raw_len）+ kind_name 长度。以 `int(42)` 为例，编码后 1+3+4+8 = 16B；`bool(true)` 为 1+4+4+1 = 10B。与 JSON `"42"`（4B）或纯字符串 `"running"`（7B）相比有增加，但换来了零歧义的类型信息。
 
 ### 总结
 
-核心改动只有三件事：
+核心改动四件事：
 
-1. **Value 是自描述的** — `[kind_len][kind][raw]` 编码，类型信息嵌入 value 自身
-2. **Redis 边界用 `[]byte`** — 不再依赖 go-redis 的 `any → fmt.Sprint` 隐式转换，显式传入/取出 `[]byte`
-3. **接口签名为 `Value`** — `Get→Value` / `Set(key, Value)` 从签名层面强制类型化，不再接受裸 `any`/`string`
+1. **统一 TLV 编码** — `[kind_len][kind_name][raw_len LE][raw_value]`，完全自描述，脱离 Redis 后仍可独立解码
+2. **Value 携带类型** — `Value{kind, raw}` 在构造时锚定类型，Get 时不猜
+3. **Redis 边界用 `[]byte`** — 不再依赖 go-redis 的 `any → fmt.Sprint` 隐式转换，显式传入/取出 `[]byte`
+4. **接口签名为 `Value`** — `Get→Value` / `Set(key, Value)`，编译期强约束，一次性 cutover
