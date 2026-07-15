@@ -1,0 +1,19 @@
+# le_gt_false: 验证 <= 在大于输入下产生 false
+# 层级: P1
+# 规则: compare/<=
+# 等价类: H-大于→false (7<=3)  E-边界大于→false (7<=6)
+# 期望输出:
+#   H = false
+#   E = false
+
+str.set("kvlangrun") -> ./term
+
+def le_fn(A:int, B:int) -> (C:bool) {
+    ./C <- A <= B
+}
+
+le_fn(7, 3) -> ./h
+print("H =", ./h)
+
+le_fn(7, 6) -> ./e
+print("E =", ./e)
