@@ -14,6 +14,7 @@ import (
 	"kvlang/internal/keytree"
 	"kvlang/internal/kvcpu"
 	"kvlang/internal/kvspace"
+	"kvlang/internal/layoutcode"
 	"kvlang/internal/logx"
 	"kvlang/internal/op/builtin"
 	"kvlang/internal/vthread"
@@ -23,13 +24,14 @@ import (
 func executeEntry(kv kvspace.KVSpace) {
 	ctx := context.Background()
 	const vtid = "run"
-	pc := keytree.VThreadSlot(vtid, "", 0, 0) // /vthread/run/[0,0]
-	vthread.Set(ctx, kv, vtid, pc, "init")
-	kv.Set(keytree.VThreadSlot(vtid, "", 0, 0), kvspace.Str("pre_main"))
-	logx.Info("[single] executing %s", pc)
+	firstPC := layoutcode.Bootstrap(ctx, kv, vtid, "pre_main", nil)
+	if firstPC == "" {
+		logx.Fatal("[single] Bootstrap pre_main failed")
+	}
+	vthread.Set(ctx, kv, vtid, firstPC, "init")
+	logx.Info("[single] executing %s", firstPC)
 	cpu := kvcpu.New(kv, "single")
-	// 直接执行，不走 pick/wait 队列
-	cpu.Execute(pc)
+	cpu.Execute(firstPC)
 }
 
 // runServe 启动 VM daemon，持续监听并执行 vthread。
@@ -142,20 +144,19 @@ func mainWatcher(ctx context.Context, kv kvspace.KVSpace, vmID string) {
 			kv.Del(keytree.FuncMain)
 
 			vtidStr := incrVtid(kv)
-			absPC := keytree.VThreadSlot(vtidStr, "", 0, 0)
-			vthread.Set(ctx, kv, vtidStr, absPC, "init")
-			kv.Set(keytree.VThreadSlot(vtidStr, "", 0, 0), kvspace.Str(entry.Entry))
-			for i, arg := range entry.Reads {
-				kv.Set(keytree.VThreadSlot(vtidStr, "", 0, -(i+1)), kvspace.Str(arg))
+			firstPC := layoutcode.Bootstrap(ctx, kv, vtidStr, entry.Entry, entry.Reads)
+			if firstPC == "" {
+				logx.Warn("VM-%s Bootstrap %s failed", vmID, entry.Entry)
+				continue
 			}
-			kv.Set(keytree.VThreadSlot(vtidStr, "", 0, 1), kvspace.Str("./ret"))
+			vthread.Set(ctx, kv, vtidStr, firstPC, "init")
 			if entry.Term != "" {
 				kv.Set(keytree.VThreadTerm(vtidStr), kvspace.Str(entry.Term))
 			}
 			status, _ := json.Marshal(map[string]string{"vtid": vtidStr, "status": "executing"})
 			kv.Set(keytree.FuncMain, kvspace.Bytes(status))
-			kv.Notify(keytree.VthreadReady, kvspace.Str(vtidStr)) // 平铺标量值，无 JSON
-			logx.Info("VM-%s → vthread %s created pc=%s", vmID, vtidStr, absPC)
+			kv.Notify(keytree.VthreadReady, kvspace.Str(vtidStr))
+			logx.Info("VM-%s → vthread %s created pc=%s", vmID, vtidStr, firstPC)
 		}
 	}
 }
