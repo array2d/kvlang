@@ -1,0 +1,28 @@
+# fibonacci: 迭代斐波那契数列
+# 算法: while 循环 + 临时交换，计算 fib(10) = 55
+# 层级: P3
+# 规则: P3-algo
+# 期望输出:
+#   fib = 55
+
+str.set("kvlangrun") -> ./term
+
+def fibonacci(n:int) -> (result:int) {
+    if (n <= 1) {
+        n + 0 -> ./result
+    } else {
+        str.set("0") -> ./a
+        str.set("1") -> ./b
+        str.set("2") -> ./i
+        while (./i <= n) {
+            ./a + ./b -> ./c
+            ./b + 0 -> ./a
+            ./c + 0 -> ./b
+            ./i + 1 -> ./i
+        }
+        ./b + 0 -> ./result
+    }
+}
+
+fibonacci(10) -> ./ans
+print("fib =", ./ans)
