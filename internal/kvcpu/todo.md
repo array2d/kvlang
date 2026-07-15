@@ -12,11 +12,6 @@
 负数字面量会落入 default 分支，被当作用户函数调用，产生 SetError。
 需支持可选前导 `-` 号。
 
-## P0-10 `resolveLabel` 有"兼容旧路径"双重查找
-**文件**：`controlflow.go`  
-先查 `.rootfunc`，失败后"兼容旧路径"再查 `.func`。
-两种设计并存。应统一成 `.rootfunc` 一种，删除旧 `.func` 分支。
-
 ## P1-1 `ctx context.Context` 传入但从不使用
 **文件**：`execute.go`, `controlflow.go`  
 `handleControl`, `brToCall`, `gotoBlock` 均接收 `ctx`，

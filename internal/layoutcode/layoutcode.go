@@ -15,7 +15,7 @@
 //	callPC/<param>                 参数（本帧局部变量，不经过链接）
 //	callPC/.callpc                 存储 callPC 自身，供 HandleReturn 恢复
 //	callPC/.ret0                   调用方的写槽（return 时写入父帧）
-//	callPC/.func                   当前函数名（供 resolveLabel 使用）
+//	callPC/.rootfunc               根函数名（TCO 不更新，供 resolveLabel 使用）
 package layoutcode
 
 import (
@@ -91,7 +91,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	}
 	funcSig := parser.ParseFuncSig(sigVal.Str())
 
-	// TCO：复用当前帧，仅重链 _fn 到目标块代码区
+	// TCO：复用当前帧，仅重链 _fn 到目标块代码区（.rootfunc 不更新，保持根函数名）
 	if tail {
 		frameRoot := keytree.FrameRoot(pc)
 		kv.Unlink(keytree.FnCode(frameRoot))
@@ -99,7 +99,6 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 			vthread.SetError(ctx, kv, vtid, pc, "tco link failed: "+err.Error())
 			return ""
 		}
-		kv.Set(frameRoot+"/.func", kvspace.Str(funcName))
 		return keytree.FnCode(frameRoot) + "/[0,0]"
 	}
 
@@ -115,8 +114,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 
 	// 存储帧元数据
 	kv.Set(frameRoot+"/.callpc", kvspace.Str(pc))
-	kv.Set(frameRoot+"/.func", kvspace.Str(funcName))
-	kv.Set(frameRoot+"/.rootfunc", kvspace.Str(funcName)) // 根函数名（TCO 不更新，供 resolveLabel 用）
+	kv.Set(frameRoot+"/.rootfunc", kvspace.Str(funcName))
 
 	// 绑定参数：从调用方帧解析实参值后写入子帧（不经过链接）
 	for i, param := range funcSig.ParamNames() {
@@ -178,7 +176,7 @@ func HandleReturn(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.I
 		}
 	}
 
-	// 清理帧：先 Unlink 代码区，再 DelTree 帧根（params / .ret0 / .callpc / .func）
+	// 清理帧：先 Unlink 代码区，再 DelTree 帧根（params / .ret0 / .callpc / .rootfunc）
 	kv.Unlink(keytree.FnCode(frameRoot))
 	kv.DelTree(frameRoot)
 
@@ -199,6 +197,43 @@ func RegisterBlocks(kv kvspace.KVSpace, pkg, parent string, body []ast.Stmt) {
 			RegisterBlocks(kv, pkg, parent+"/"+b.Label, b.Body)
 		}
 	}
+}
+
+// Bootstrap 为 vthread 的顶层入口函数建立初始帧，无需父帧（无 .callpc）。
+//
+// 与 HandleCall 的区别：Bootstrap 直接在 vthreadRoot 建帧；HandleCall 建子帧。
+// 顶层帧的特征：frameRoot == vthreadRoot → HandleReturn 识别为顶层 return → SetDone。
+//
+// args 为按序传入的参数值（对应 funcSig.ParamNames()），可为空。
+// 成功返回第一条指令的绝对 PC（vthreadRoot/_fn/[0,0]）；失败返回 ""。
+func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, args []string) string {
+	pkgVal, err := kv.Get(keytree.FuncIdx(funcName))
+	pkg := pkgVal.Str()
+	if err != nil || pkg == "" {
+		vthread.SetError(ctx, kv, vtid, "", "Bootstrap: func not found: "+funcName)
+		return ""
+	}
+	funcKey := keytree.Func(pkg, funcName)
+
+	vthreadRoot := keytree.VThread(vtid)
+	if err := kv.Link(funcKey, keytree.FnCode(vthreadRoot)); err != nil {
+		vthread.SetError(ctx, kv, vtid, "", "Bootstrap: link failed: "+err.Error())
+		return ""
+	}
+	kv.Set(vthreadRoot+"/.rootfunc", kvspace.Str(funcName))
+
+	// 绑定入参（若有）
+	if len(args) > 0 {
+		sigVal, _ := kv.Get(funcKey)
+		sig := parser.ParseFuncSig(sigVal.Str())
+		for i, param := range sig.ParamNames() {
+			if i < len(args) {
+				kv.Set(vthreadRoot+"/"+param, kvspace.Str(args[i]))
+			}
+		}
+	}
+
+	return keytree.FnCode(vthreadRoot) + "/[0,0]"
 }
 
 // WriteFunc 完成一个函数的全部 KV 写入：

@@ -1,6 +1,9 @@
 package keytree
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // ── 帧路径工具 ────────────────────────────────────────────────────
 //
@@ -29,15 +32,16 @@ func FnCode(frameRoot string) string { return frameRoot + "/_fn" }
 //	/vthread/42/_fn/[2,0]           → /vthread/42          (main 的帧根)
 //	/vthread/42/[3,0]/_fn/[0,0]    → /vthread/42/[3,0]    (add 的帧根)
 //	/vthread/42/[3,0]/[2,0]/_fn/[1,0] → /vthread/42/[3,0]/[2,0]
+// FrameRoot 从任意指令绝对 PC 提取帧根（即 callPC）。
+// 所有合法执行 PC 均由 Bootstrap / HandleCall 产生，格式保证含 "/_fn/"。
+//
+//	/vthread/42/_fn/[2,0]           → /vthread/42
+//	/vthread/42/[3,0]/_fn/[0,0]    → /vthread/42/[3,0]
 func FrameRoot(pc string) string {
 	if idx := strings.LastIndex(pc, "/_fn/"); idx >= 0 {
 		return pc[:idx]
 	}
-	// 兜底：去掉最后一段（不应发生于链接帧）
-	if idx := strings.LastIndex(pc, "/"); idx >= 0 {
-		return pc[:idx]
-	}
-	return pc
+	panic(fmt.Sprintf("FrameRoot: pc has no /_fn/ segment: %q", pc))
 }
 
 // ChildFrameRoot 从 callPC 推导被调方帧根。
@@ -48,15 +52,16 @@ func FrameRoot(pc string) string {
 // 对顶层调用（callPC = /vthread/vtid/_fn/[0,0]，无嵌套 /_fn/）：
 //   parentFrameRoot = /vthread/vtid（vthread 根即 pre_main 帧根）
 //   childFrameRoot = parentFrameRoot + "/" + "[coord]" = /vthread/vtid/[0,0]
+// ChildFrameRoot 从 callPC 推导被调方帧根。
+//
+//   callPC = parentFrameRoot + "/_fn/" + "[coord]"
+//   childFrameRoot = parentFrameRoot + "/" + "[coord]"
+//
+// 例：/vthread/42/_fn/[3,0] → /vthread/42/[3,0]
 func ChildFrameRoot(callPC string) string {
 	idx := strings.LastIndex(callPC, "/_fn/")
 	if idx < 0 {
-		// 无 /_fn/：初始调用时 callPC 形如 /vthread/vtid/[0,0]
-		// 返回去掉最后一段后的父路径（即 vthread 根）
-		if last := strings.LastIndex(callPC, "/"); last >= 0 {
-			return callPC[:last]
-		}
-		return callPC
+		panic(fmt.Sprintf("ChildFrameRoot: callPC has no /_fn/ segment: %q", callPC))
 	}
 	// callPC[:idx] = parentFrameRoot, callPC[idx+5:] = "[coord]"
 	return callPC[:idx] + "/" + callPC[idx+5:]

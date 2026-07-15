@@ -93,26 +93,15 @@ func brToCall(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op
 // resolveLabel 在函数上下文中将 label 解析为完整函数路径。
 //
 // 优先级：
-//  1. label 已含 "/" → 直接返回（编译器生成的完全限定标签）
-//  2. /.rootfunc + "/" + label → 根函数级别（用户书写的裸标签，TCO 不影响）
-//  3. /.func + "/" + label → 当前块级别（保留兼容性）
+//  1. label 已含 "/" → 直接返回（编译器生成的完全限定标签；lower 保证所有 br/goto 走此路径）
+//  2. /.rootfunc + "/" + label → 根函数名（TCO 不更新 .rootfunc，用户裸标签可安全解析）
 func resolveLabel(kv kvspace.KVSpace, framePath, label string) string {
 	if strings.Contains(label, "/") {
 		return label
 	}
-	// 优先用根函数名（TCO 不改变 .rootfunc）
 	if v, err := kv.Get(framePath + "/.rootfunc"); err == nil {
 		if rootFunc := v.Str(); rootFunc != "" {
 			qualified := rootFunc + "/" + label
-			if pv, err := kv.Get(keytree.FuncIdx(qualified)); err == nil && pv.Str() != "" {
-				return qualified
-			}
-		}
-	}
-	// 兼容旧路径：用当前块函数名
-	if v, err := kv.Get(framePath + "/.func"); err == nil {
-		if funcName := v.Str(); funcName != "" {
-			qualified := funcName + "/" + label
 			if pv, err := kv.Get(keytree.FuncIdx(qualified)); err == nil && pv.Str() != "" {
 				return qualified
 			}

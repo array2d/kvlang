@@ -110,7 +110,7 @@ func lowerIfWithCont(pre []ast.Stmt, s *ast.IfStmt, cont []ast.Stmt, lg *labelGe
 	mergeLabel := lg.next("merge")
 
 	condBody := append([]ast.Stmt{}, condEval...)
-	// br 标签使用完整限定名（含父函数前缀），避免 TCO 后 .func 变更导致解析失败
+	// br 标签使用完整限定名（含父函数前缀），resolveLabel 直接返回，零 KV 查询
 	condBody  = append(condBody, brInst(condSlot, lg.parent+"/"+thenLabel, lg.parent+"/"+elseLabel))
 
 	// 将嵌套块从 then/else/cont 体内提升到函数顶层
@@ -152,7 +152,7 @@ func lowerWhileWithCont(pre []ast.Stmt, s *ast.WhileStmt, cont []ast.Stmt, lg *l
 	exitLabel := lg.next("exit")
 
 	condBody := append([]ast.Stmt{}, condEval...)
-	// br 标签使用完整限定名，避免 TCO 后 .func 变更导致解析失败
+	// br 标签使用完整限定名（含父函数前缀），resolveLabel 直接返回，零 KV 查询
 	condBody  = append(condBody, brInst(condSlot, lg.parent+"/"+bodyLabel, lg.parent+"/"+exitLabel))
 
 	bodyInsts, bodyBlocks := splitInstsAndBlocks(injectGoto(lowerBody(s.Body, lg), lg.parent, condLabel))
