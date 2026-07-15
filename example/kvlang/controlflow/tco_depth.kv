@@ -1,0 +1,41 @@
+# tco_depth: 验证 while 循环（底层 goto 即 TCO）不溢出（TCO-1）和尾递归计算正确（TCO-2）
+# TCO-1: sum_while(100) = 5050（while 用 goto 实现 TCO，100 轮不溢出）
+# TCO-2: tailrec_fact(10) = 3628800（尾递归阶乘正确）
+# 层级: P2
+# 规则: TCO-1, TCO-2
+# 期望输出:
+#   sum = 5050
+#   fact = 3628800
+
+str.set("kvlangrun") -> ./term
+
+# TCO-1: while 循环（内部编译为 goto/br TCO）计算 1+...+100
+def sum_while(N:int) -> (total:int) {
+    str.set("0") -> ./total
+    str.set("1") -> ./i
+    while (./i <= N) {
+        ./total + ./i -> ./total
+        ./i + 1 -> ./i
+    }
+}
+
+# TCO-2: 尾递归阶乘（积累器模式，每次递归调用自身）
+def fact_tail(N:int, acc:int) -> (R:int) {
+    if (N <= 1) {
+        acc + 0 -> ./R
+    } else {
+        N - 1 -> ./nm1
+        acc * N -> ./nacc
+        fact_tail(./nm1, ./nacc) -> ./R
+    }
+}
+
+def tailrec_fact(N:int) -> (R:int) {
+    fact_tail(N, 1) -> ./R
+}
+
+sum_while(100) -> ./s
+print("sum =", ./s)
+
+tailrec_fact(10) -> ./f
+print("fact =", ./f)

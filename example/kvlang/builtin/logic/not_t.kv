@@ -1,0 +1,15 @@
+# not_t: 验证 ! 在 !T 下产生 false
+# 层级: P1
+# 规则: logic/!
+# 等价类: !T → false
+# 期望输出:
+#   C = false
+
+str.set("kvlangrun") -> ./term
+
+def not_fn(A:bool) -> (C:bool) {
+    ./C <- !A
+}
+
+not_fn(true) -> ./c
+print("C =", ./c)

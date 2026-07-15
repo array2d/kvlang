@@ -1,0 +1,15 @@
+# or_ff: 验证 || 在 F||F 下产生 false
+# 层级: P1
+# 规则: logic/||
+# 等价类: F||F → false
+# 期望输出:
+#   C = false
+
+str.set("kvlangrun") -> ./term
+
+def or_fn(A:bool, B:bool) -> (C:bool) {
+    ./C <- A || B
+}
+
+or_fn(false, false) -> ./c
+print("C =", ./c)

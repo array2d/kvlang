@@ -1,0 +1,15 @@
+# and_tf: 验证 && 在 T&&F 下产生 false
+# 层级: P1
+# 规则: logic/&&
+# 等价类: T&&F → false
+# 期望输出:
+#   C = false
+
+str.set("kvlangrun") -> ./term
+
+def and_fn(A:bool, B:bool) -> (C:bool) {
+    ./C <- A && B
+}
+
+and_fn(true, false) -> ./c
+print("C =", ./c)
