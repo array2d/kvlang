@@ -1,6 +1,7 @@
 package builtin
 
 import (
+	"kvlang/internal/kvspace"
 	"kvlang/internal/op"
 	"kvlang/internal/vthread"
 )
@@ -12,8 +13,7 @@ func (o bit) Call(f *op.Frame) error {
 	return writeResult(f, r)
 }
 
-// ── 位运算 ──
-func evalBinaryInt(inputs []nativeValue, fn func(int64, int64) int64) (nativeValue, error) {
-	if err := requireBinary(inputs); err != nil { return nativeValue{}, err }
-	return nativeValue{kind: "int", i: fn(inputs[0].asInt(), inputs[1].asInt())}, nil
+func evalBinaryInt(inputs []kvspace.Value, fn func(int64, int64) int64) (kvspace.Value, error) {
+	if err := requireBinary(inputs); err != nil { return kvspace.Value{}, err }
+	return kvspace.Int(fn(asInt(inputs[0]), asInt(inputs[1]))), nil
 }

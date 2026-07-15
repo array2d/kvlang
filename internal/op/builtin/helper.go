@@ -9,50 +9,47 @@ import (
 	"kvlang/internal/vthread"
 )
 
-func requireBinary(inputs []nativeValue) error {
+func requireBinary(inputs []kvspace.Value) error {
 	if len(inputs) != 2 { return fmt.Errorf("binary op requires 2 inputs, got %d", len(inputs)) }
 	return nil
 }
-func requireUnary(inputs []nativeValue) error {
+func requireUnary(inputs []kvspace.Value) error {
 	if len(inputs) != 1 { return fmt.Errorf("unary op requires 1 input, got %d", len(inputs)) }
 	return nil
 }
 
-// readInputs 从 KV 读取 inst.Reads 对应的值。
-// 支持：./x（显式相对槽）、/abs（绝对路径）、3（数字字面量）、x（裸 ident，查本帧槽）。
-func readInputs(f *op.Frame) []nativeValue {
+// readInputs resolves all read-slots of f.Inst into typed Values.
+func readInputs(f *op.Frame) []kvspace.Value {
 	framePath := keytree.FrameRoot(f.PC)
-	inputs := make([]nativeValue, 0, len(f.Inst.Reads))
+	inputs := make([]kvspace.Value, 0, len(f.Inst.Reads))
 	for _, r := range f.Inst.Reads {
-		raw := resolveReadValue(f.KV, framePath, r)
-		inputs = append(inputs, parseNativeValue(raw))
+		inputs = append(inputs, resolveReadValue(f.KV, framePath, r))
 	}
 	return inputs
 }
 
-// writeResult 写回计算结果并推进 PC。
-func writeResult(f *op.Frame, result nativeValue) error {
+// writeResult writes a typed Value to the first write-slot and advances PC.
+func writeResult(f *op.Frame, result kvspace.Value) error {
 	if len(f.Inst.Writes) > 0 {
 		outKey := resolveWriteKey(keytree.FrameRoot(f.PC), f.Inst.Writes[0])
-		if err := f.KV.Set(outKey, kvspace.Str(result.String())); err != nil { return err }
+		if err := f.KV.Set(outKey, result); err != nil { return err }
 	}
 	vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
 	return nil
 }
 
-// nextPC 推进 PC，不写结果。
+// nextPC advances PC without writing a result.
 func nextPC(f *op.Frame) {
 	vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
 }
 
-// ExecuteCopy 执行路径/变量复制：读取 inst.Opcode 引用的值，写入所有 writes 槽。
-// 用于处理 ./A -> ./gcd 形式的赋值指令（opcode = "./A"，无其他参数）。
+// ExecuteCopy copies the Value addressed by inst.Opcode to all write-slots.
+// Preserves the original type — int stays int, float stays float.
 func ExecuteCopy(kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) error {
 	framePath := keytree.FrameRoot(pc)
-	val := resolveReadValue(kv, framePath, inst.Opcode)
+	v := resolveReadValue(kv, framePath, inst.Opcode)
 	for _, w := range inst.Writes {
-		key := resolveWriteKey(framePath, w)
-		if err := kv.Set(key, kvspace.Str(val)); err != nil {
+		if err := kv.Set(resolveWriteKey(framePath, w), v); err != nil {
 			return err
 		}
 	}

@@ -3,6 +3,7 @@ package builtin
 import (
 	"fmt"
 
+	"kvlang/internal/kvspace"
 	"kvlang/internal/op"
 	"kvlang/internal/vthread"
 )
@@ -22,52 +23,52 @@ func (o arith) Call(f *op.Frame) error {
 
 type div struct{}
 func (div) Call(f *op.Frame) error {
-	inputs := readInputs(f)
-	r, err := evalDiv(inputs)
+	r, err := evalDiv(readInputs(f))
 	if err != nil { vthread.SetError(bg, f.KV, f.Vtid, f.PC, err.Error()); return err }
 	return writeResult(f, r)
 }
 
 type mod struct{}
 func (mod) Call(f *op.Frame) error {
-	inputs := readInputs(f)
-	r, err := evalMod(inputs)
+	r, err := evalMod(readInputs(f))
 	if err != nil { vthread.SetError(bg, f.KV, f.Vtid, f.PC, err.Error()); return err }
 	return writeResult(f, r)
 }
 
-// ── 算术 ──
-func evalBinaryArith(inputs []nativeValue, fn func(float64, float64) float64) (nativeValue, error) {
-	if err := requireBinary(inputs); err != nil { return nativeValue{}, err }
+func evalBinaryArith(inputs []kvspace.Value, fn func(float64, float64) float64) (kvspace.Value, error) {
+	if err := requireBinary(inputs); err != nil { return kvspace.Value{}, err }
 	a, b := inputs[0], inputs[1]
-	result := fn(a.asFloat(), b.asFloat())
-	if a.kind == "int" && b.kind == "int" { return nativeValue{kind: "int", i: int64(result)}, nil }
-	return nativeValue{kind: "float", f: result}, nil
+	result := fn(asFloat(a), asFloat(b))
+	if a.Kind() == "int" && b.Kind() == "int" { return kvspace.Int(int64(result)), nil }
+	return kvspace.Float(result), nil
 }
-func evalNeg(v nativeValue) (nativeValue, error) {
-	switch v.kind {
-	case "int": return nativeValue{kind: "int", i: -v.i}, nil
-	case "float": return nativeValue{kind: "float", f: -v.f}, nil
-	default: return nativeValue{}, fmt.Errorf("cannot negate %s", v.kind)
+
+func evalNeg(v kvspace.Value) (kvspace.Value, error) {
+	switch v.Kind() {
+	case "int":   return kvspace.Int(-v.Int()), nil
+	case "float": return kvspace.Float(-v.Float()), nil
+	default:      return kvspace.Value{}, fmt.Errorf("cannot negate %s", v.Kind())
 	}
 }
-func evalDiv(inputs []nativeValue) (nativeValue, error) {
-	if err := requireBinary(inputs); err != nil { return nativeValue{}, err }
-	a, b := inputs[0], inputs[1]
-	bf := b.asFloat()
-	if bf == 0 { return nativeValue{}, fmt.Errorf("division by zero") }
-	return nativeValue{kind: "float", f: a.asFloat() / bf}, nil
+
+func evalDiv(inputs []kvspace.Value) (kvspace.Value, error) {
+	if err := requireBinary(inputs); err != nil { return kvspace.Value{}, err }
+	bf := asFloat(inputs[1])
+	if bf == 0 { return kvspace.Value{}, fmt.Errorf("division by zero") }
+	return kvspace.Float(asFloat(inputs[0]) / bf), nil
 }
-func evalMod(inputs []nativeValue) (nativeValue, error) {
-	if err := requireBinary(inputs); err != nil { return nativeValue{}, err }
-	a, b := inputs[0], inputs[1]
-	if b.asInt() == 0 { return nativeValue{}, fmt.Errorf("modulo by zero") }
-	return nativeValue{kind: "int", i: a.asInt() % b.asInt()}, nil
+
+func evalMod(inputs []kvspace.Value) (kvspace.Value, error) {
+	if err := requireBinary(inputs); err != nil { return kvspace.Value{}, err }
+	b := asInt(inputs[1])
+	if b == 0 { return kvspace.Value{}, fmt.Errorf("modulo by zero") }
+	return kvspace.Int(asInt(inputs[0]) % b), nil
 }
-func evalUnaryArith(inputs []nativeValue, fn func(float64) float64) (nativeValue, error) {
-	if err := requireUnary(inputs); err != nil { return nativeValue{}, err }
+
+func evalUnaryArith(inputs []kvspace.Value, fn func(float64) float64) (kvspace.Value, error) {
+	if err := requireUnary(inputs); err != nil { return kvspace.Value{}, err }
 	v := inputs[0]
-	result := fn(v.asFloat())
-	if v.kind == "int" { return nativeValue{kind: "int", i: int64(result)}, nil }
-	return nativeValue{kind: "float", f: result}, nil
+	result := fn(asFloat(v))
+	if v.Kind() == "int" { return kvspace.Int(int64(result)), nil }
+	return kvspace.Float(result), nil
 }

@@ -1,6 +1,7 @@
 package builtin
 
 import (
+	"kvlang/internal/kvspace"
 	"kvlang/internal/op"
 	"kvlang/internal/vthread"
 )
@@ -12,12 +13,11 @@ func (o cmp) Call(f *op.Frame) error {
 	return writeResult(f, r)
 }
 
-// ── 比较 ──
-func evalCmp(inputs []nativeValue, numCmp func(float64, float64) bool, strCmp func(string, string) bool) (nativeValue, error) {
-	if err := requireBinary(inputs); err != nil { return nativeValue{}, err }
+func evalCmp(inputs []kvspace.Value, numCmp func(float64, float64) bool, strCmp func(string, string) bool) (kvspace.Value, error) {
+	if err := requireBinary(inputs); err != nil { return kvspace.Value{}, err }
 	a, b := inputs[0], inputs[1]
-	if (a.kind == "int" || a.kind == "float") && (b.kind == "int" || b.kind == "float") {
-		return nativeValue{kind: "bool", b: numCmp(a.asFloat(), b.asFloat())}, nil
+	if isNumeric(a) && isNumeric(b) {
+		return kvspace.Bool(numCmp(asFloat(a), asFloat(b))), nil
 	}
-	return nativeValue{kind: "bool", b: strCmp(a.raw, b.raw)}, nil
+	return kvspace.Bool(strCmp(a.Str(), b.Str())), nil
 }

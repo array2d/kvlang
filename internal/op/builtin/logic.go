@@ -1,6 +1,7 @@
 package builtin
 
 import (
+	"kvlang/internal/kvspace"
 	"kvlang/internal/op"
 	"kvlang/internal/vthread"
 )
@@ -19,12 +20,12 @@ func (not) Call(f *op.Frame) error {
 	return writeResult(f, r)
 }
 
-// ── 逻辑 ──
-func evalLogic(inputs []nativeValue, fn func(bool, bool) bool) (nativeValue, error) {
-	if err := requireBinary(inputs); err != nil { return nativeValue{}, err }
-	return nativeValue{kind: "bool", b: fn(inputs[0].asBool(), inputs[1].asBool())}, nil
+func evalLogic(inputs []kvspace.Value, fn func(bool, bool) bool) (kvspace.Value, error) {
+	if err := requireBinary(inputs); err != nil { return kvspace.Value{}, err }
+	return kvspace.Bool(fn(AsBool(inputs[0]), AsBool(inputs[1]))), nil
 }
-func evalNot(inputs []nativeValue) (nativeValue, error) {
-	if err := requireUnary(inputs); err != nil { return nativeValue{}, err }
-	return nativeValue{kind: "bool", b: !inputs[0].asBool()}, nil
+
+func evalNot(inputs []kvspace.Value) (kvspace.Value, error) {
+	if err := requireUnary(inputs); err != nil { return kvspace.Value{}, err }
+	return kvspace.Bool(!AsBool(inputs[0])), nil
 }

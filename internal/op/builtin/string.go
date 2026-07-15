@@ -12,7 +12,7 @@ type strOp struct{}
 func (strOp) Call(f *op.Frame) error {
 	inputs := readInputs(f)
 	val := ""
-	if len(inputs) > 0 { val = inputs[0].String() }
+	if len(inputs) > 0 { val = display(inputs[0]) }
 	if len(f.Inst.Writes) > 0 {
 		wKey := resolveWriteKey(keytree.FrameRoot(f.PC), f.Inst.Writes[0])
 		if err := f.KV.Set(wKey, kvspace.Str(val)); err != nil {

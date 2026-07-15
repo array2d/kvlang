@@ -19,17 +19,18 @@ func (o ioOp) Call(f *op.Frame) error {
 		stream := "stdout"
 		if o.cerr { stream = "stderr" }
 		parts := make([]string, len(inputs))
-		for i, v := range inputs { parts[i] = v.String() }
+		for i, v := range inputs { parts[i] = display(v) }
 		line := strings.Join(parts, " ")
 		ts := device.ResolveTerm(bg, f.KV, f.Vtid, stream)
 		if !ts.IsZero() { device.WriteTerm(bg, ts, line) }
+		logx.Debug("PRINT %s", line)
 		nextPC(f)
 		return nil
 	}
 	if o.input {
 		if len(inputs) > 0 {
 			ts := device.ResolveTerm(bg, f.KV, f.Vtid, "stdout")
-			if !ts.IsZero() { device.WriteTerm(bg, ts, inputs[0].String()) }
+			if !ts.IsZero() { device.WriteTerm(bg, ts, display(inputs[0])) }
 		}
 		ts := device.ResolveTerm(bg, f.KV, f.Vtid, "stdin")
 		var val string
@@ -45,13 +46,4 @@ func (o ioOp) Call(f *op.Frame) error {
 		return nil
 	}
 	return fmt.Errorf("ioOp: no mode")
-}
-
-// ── IO ──
-func evalPrint(inputs []nativeValue) (nativeValue, error) {
-	if len(inputs) == 0 { return nativeValue{kind: "string", raw: ""}, nil }
-	parts := make([]string, len(inputs))
-	for i, v := range inputs { parts[i] = v.String() }
-	logx.Debug("PRINT %s", strings.Join(parts, " "))
-	return nativeValue{kind: "string", raw: strings.Join(parts, " ")}, nil
 }

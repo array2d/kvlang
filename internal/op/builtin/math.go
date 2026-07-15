@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 
+	"kvlang/internal/kvspace"
 	"kvlang/internal/op"
 	"kvlang/internal/vthread"
 )
@@ -15,79 +16,82 @@ func (o mOp) Call(f *op.Frame) error {
 	return writeResult(f, r)
 }
 
-func evalMath(kind string, inputs []nativeValue) (nativeValue, error) {
+func evalMath(kind string, inputs []kvspace.Value) (kvspace.Value, error) {
 	switch kind {
-	case "abs": return evalAbs(inputs)
-	case "pow": return evalPow(inputs)
-	case "min": return evalMin(inputs)
-	case "max": return evalMax(inputs)
+	case "abs":  return evalAbs(inputs)
+	case "pow":  return evalPow(inputs)
+	case "min":  return evalMin(inputs)
+	case "max":  return evalMax(inputs)
 	case "sqrt": return evalSqrt(inputs)
-	case "exp": return evalExp(inputs)
-	case "log": return evalLog(inputs)
-	case "neg": return evalUnaryArith(inputs, func(a float64) float64 { return -a })
+	case "exp":  return evalExp(inputs)
+	case "log":  return evalLog(inputs)
+	case "neg":  return evalUnaryArith(inputs, func(a float64) float64 { return -a })
 	case "sign": return evalSign(inputs)
-	default: return nativeValue{}, fmt.Errorf("unknown math: %s", kind)
+	default:     return kvspace.Value{}, fmt.Errorf("unknown math: %s", kind)
 	}
 }
 
-// ── 数学 ──
-func evalAbs(inputs []nativeValue) (nativeValue, error) {
-	if err := requireUnary(inputs); err != nil { return nativeValue{}, err }
+func evalAbs(inputs []kvspace.Value) (kvspace.Value, error) {
+	if err := requireUnary(inputs); err != nil { return kvspace.Value{}, err }
 	v := inputs[0]
-	switch v.kind {
-	case "int": if v.i < 0 { return nativeValue{kind: "int", i: -v.i}, nil }; return nativeValue{kind: "int", i: v.i}, nil
-	case "float": return nativeValue{kind: "float", f: math.Abs(v.f)}, nil
-	default: return nativeValue{}, fmt.Errorf("abs requires numeric, got %s", v.kind)
+	switch v.Kind() {
+	case "int":   if v.Int() < 0 { return kvspace.Int(-v.Int()), nil }; return v, nil
+	case "float": return kvspace.Float(math.Abs(v.Float())), nil
+	default:      return kvspace.Value{}, fmt.Errorf("abs requires numeric, got %s", v.Kind())
 	}
 }
-func evalPow(inputs []nativeValue) (nativeValue, error) {
-	if err := requireBinary(inputs); err != nil { return nativeValue{}, err }
-	return nativeValue{kind: "float", f: math.Pow(inputs[0].asFloat(), inputs[1].asFloat())}, nil
+
+func evalPow(inputs []kvspace.Value) (kvspace.Value, error) {
+	if err := requireBinary(inputs); err != nil { return kvspace.Value{}, err }
+	return kvspace.Float(math.Pow(asFloat(inputs[0]), asFloat(inputs[1]))), nil
 }
-func evalMin(inputs []nativeValue) (nativeValue, error) {
-	if err := requireBinary(inputs); err != nil { return nativeValue{}, err }
+
+func evalMinMax(inputs []kvspace.Value, fn func(float64, float64) float64, strWin func(a, b kvspace.Value) kvspace.Value) (kvspace.Value, error) {
+	if err := requireBinary(inputs); err != nil { return kvspace.Value{}, err }
 	a, b := inputs[0], inputs[1]
-	if (a.kind == "int" || a.kind == "float") && (b.kind == "int" || b.kind == "float") {
-		af, bf := a.asFloat(), b.asFloat()
-		result := math.Min(af, bf)
-		if a.kind == "int" && b.kind == "int" { return nativeValue{kind: "int", i: int64(result)}, nil }
-		return nativeValue{kind: "float", f: result}, nil
+	if isNumeric(a) && isNumeric(b) {
+		result := fn(asFloat(a), asFloat(b))
+		if a.Kind() == "int" && b.Kind() == "int" { return kvspace.Int(int64(result)), nil }
+		return kvspace.Float(result), nil
 	}
-	if a.raw < b.raw { return a, nil }
-	return b, nil
+	return strWin(a, b), nil
 }
-func evalMax(inputs []nativeValue) (nativeValue, error) {
-	if err := requireBinary(inputs); err != nil { return nativeValue{}, err }
-	a, b := inputs[0], inputs[1]
-	if (a.kind == "int" || a.kind == "float") && (b.kind == "int" || b.kind == "float") {
-		af, bf := a.asFloat(), b.asFloat()
-		result := math.Max(af, bf)
-		if a.kind == "int" && b.kind == "int" { return nativeValue{kind: "int", i: int64(result)}, nil }
-		return nativeValue{kind: "float", f: result}, nil
-	}
-	if a.raw > b.raw { return a, nil }
-	return b, nil
+
+func evalMin(inputs []kvspace.Value) (kvspace.Value, error) {
+	return evalMinMax(inputs, math.Min, func(a, b kvspace.Value) kvspace.Value {
+		if a.Str() < b.Str() { return a }; return b
+	})
 }
-func evalSqrt(inputs []nativeValue) (nativeValue, error) {
-	if err := requireUnary(inputs); err != nil { return nativeValue{}, err }
-	x := inputs[0].asFloat()
-	if x < 0 { return nativeValue{}, fmt.Errorf("sqrt of negative number: %v", x) }
-	return nativeValue{kind: "float", f: math.Sqrt(x)}, nil
+
+func evalMax(inputs []kvspace.Value) (kvspace.Value, error) {
+	return evalMinMax(inputs, math.Max, func(a, b kvspace.Value) kvspace.Value {
+		if a.Str() > b.Str() { return a }; return b
+	})
 }
-func evalExp(inputs []nativeValue) (nativeValue, error) {
-	if err := requireUnary(inputs); err != nil { return nativeValue{}, err }
-	return nativeValue{kind: "float", f: math.Exp(inputs[0].asFloat())}, nil
+
+func evalSqrt(inputs []kvspace.Value) (kvspace.Value, error) {
+	if err := requireUnary(inputs); err != nil { return kvspace.Value{}, err }
+	x := asFloat(inputs[0])
+	if x < 0 { return kvspace.Value{}, fmt.Errorf("sqrt of negative number: %v", x) }
+	return kvspace.Float(math.Sqrt(x)), nil
 }
-func evalLog(inputs []nativeValue) (nativeValue, error) {
-	if err := requireUnary(inputs); err != nil { return nativeValue{}, err }
-	x := inputs[0].asFloat()
-	if x <= 0 { return nativeValue{}, fmt.Errorf("log of non-positive number: %v", x) }
-	return nativeValue{kind: "float", f: math.Log(x)}, nil
+
+func evalExp(inputs []kvspace.Value) (kvspace.Value, error) {
+	if err := requireUnary(inputs); err != nil { return kvspace.Value{}, err }
+	return kvspace.Float(math.Exp(asFloat(inputs[0]))), nil
 }
-func evalSign(inputs []nativeValue) (nativeValue, error) {
-	if err := requireUnary(inputs); err != nil { return nativeValue{}, err }
-	f := inputs[0].asFloat()
-	if f > 0 { return nativeValue{kind: "int", i: 1}, nil }
-	if f < 0 { return nativeValue{kind: "int", i: -1}, nil }
-	return nativeValue{kind: "int", i: 0}, nil
+
+func evalLog(inputs []kvspace.Value) (kvspace.Value, error) {
+	if err := requireUnary(inputs); err != nil { return kvspace.Value{}, err }
+	x := asFloat(inputs[0])
+	if x <= 0 { return kvspace.Value{}, fmt.Errorf("log of non-positive number: %v", x) }
+	return kvspace.Float(math.Log(x)), nil
+}
+
+func evalSign(inputs []kvspace.Value) (kvspace.Value, error) {
+	if err := requireUnary(inputs); err != nil { return kvspace.Value{}, err }
+	f := asFloat(inputs[0])
+	if f > 0 { return kvspace.Int(1), nil }
+	if f < 0 { return kvspace.Int(-1), nil }
+	return kvspace.Int(0), nil
 }
