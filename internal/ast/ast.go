@@ -197,18 +197,64 @@ type Instruction struct {
 
 // Flat 返回用于 KV 布局的扁平 (opcode, reads) 表示。
 // 前提：lower 已将复合子表达式展开，所有 Args 均为叶节点。
+//
+// 归一化规则（仅对 Leaf opcode 生效）：
+//   裸标识符（如 a、result）→ "./ident"（本帧相对路径）
+//   以此区分 "a -> b"（copy, opcode="./a"）
+//   与 "greet() -> ./x"（zero-arg call, opcode="greet"，来自 Call 节点）
 func (i *Instruction) Flat() (opcode string, reads []string) {
 	if i.Expr == nil {
 		return "", nil
 	}
 	if i.Expr.IsLeaf() {
-		return i.Expr.Val, nil
+		v := i.Expr.Val
+		// 裸标识符 → ./ident，使 isCopyOp 的路径检查可直接识别
+		// 排除：路径前缀（./ /）、字符串字面量（" 前缀）、布尔字面量、数字字面量
+		if isBareIdentVal(v) {
+			return "./" + v, nil
+		}
+		return v, nil
 	}
 	opcode = i.Expr.Op
 	for _, arg := range i.Expr.Args {
 		reads = append(reads, arg.Val) // lower 保证 Args 均为叶节点
 	}
 	return
+}
+
+// isBareIdentVal 判断字符串是否为裸标识符（首字母/下划线，其余字母数字下划线）。
+// 用于 Flat() 中将 Leaf("a") 归一化为 "./a"。
+func isBareIdentVal(v string) bool {
+	if len(v) == 0 {
+		return false
+	}
+	// 排除特殊前缀
+	if v[0] == '"' || v[0] == '/' {
+		return false
+	}
+	if len(v) >= 2 && v[:2] == "./" {
+		return false
+	}
+	// 排除布尔字面量
+	if v == "true" || v == "false" {
+		return false
+	}
+	// 排除数字字面量（首字符为数字）
+	if v[0] >= '0' && v[0] <= '9' {
+		return false
+	}
+	// 排除操作符（含 +、-、*、/ 等）
+	c0 := v[0]
+	if !((c0 >= 'a' && c0 <= 'z') || (c0 >= 'A' && c0 <= 'Z') || c0 == '_') {
+		return false
+	}
+	for i := 1; i < len(v); i++ {
+		c := v[i]
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 func (*Instruction) stmt() {}

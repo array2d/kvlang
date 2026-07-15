@@ -82,9 +82,9 @@ func (c *cpu) Execute(pc string) error {
 		case vtype.Lookup(inst.Opcode) != nil:
 			execErr = vtype.Lookup(inst.Opcode).Exec(ctx, c.kv, vtid, pc, inst)
 
-		// ── 4. 路径/变量复制（ ./x -> dst 或 /abs -> dst）─────────────
-		//    当 opcode 为路径或裸标识符且有写槽时，视为"读值→写槽"的 copy 操作。
-		//    语法：./A -> ./R  编译为 opcode="./A" writes=["./R"]，无参数。
+		// ── 4. 路径/变量复制（ ./x -> dst 或 /abs -> dst 或 a -> b）──────
+		//    当 opcode 为路径或字面量且有写槽时，视为 copy 操作。
+		//    裸标识符由 Flat() 归一化为 ./ident，此处通过路径检查统一识别。
 		case isCopyOp(inst.Opcode, inst.Writes):
 			execErr = builtin.ExecuteCopy(c.kv, vtid, pc, inst)
 
@@ -117,7 +117,10 @@ func (c *cpu) Execute(pc string) error {
 // isCopyOp 判断是否为"值引用 → 写槽"操作。
 // 识别所有合法的值引用形式：路径引用、字面量（数字、布尔、引号字符串）。
 //
-//	./x    /abs   — 路径引用
+// 注：裸标识符（如 a、result）由 ast.Instruction.Flat() 归一化为 "./ident"，
+// 因此此处只需路径检查即可覆盖 "a -> b" 的情形，不需要单独的 isBareIdent 分支。
+//
+//	./x    /abs   — 路径引用（含 Flat() 归一化后的裸标识符）
 //	0  3.14       — 数字字面量
 //	true  false   — 布尔字面量
 //	"hello"       — 引号字符串（parser 写入 " 前缀）
@@ -125,7 +128,7 @@ func isCopyOp(opcode string, writes []string) bool {
 	if len(writes) == 0 || len(opcode) == 0 {
 		return false
 	}
-	// 路径引用
+	// 路径引用（含 ./ident 归一化结果）
 	if opcode[0] == '/' || len(opcode) >= 2 && opcode[:2] == "./" {
 		return true
 	}
@@ -137,12 +140,11 @@ func isCopyOp(opcode string, writes []string) bool {
 	if opcode == "true" || opcode == "false" {
 		return true
 	}
-	// 数字字面量：[0-9.eE] 组成，至少一位
+	// 数字字面量：所有字符为 [0-9.eE]
 	for _, c := range opcode {
-		if c >= '0' && c <= '9' || c == '.' || c == 'e' || c == 'E' {
-			continue
+		if !(c >= '0' && c <= '9' || c == '.' || c == 'e' || c == 'E') {
+			return false
 		}
-		return false
 	}
 	return true
 }

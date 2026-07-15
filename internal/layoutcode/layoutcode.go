@@ -237,12 +237,16 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 }
 
 // WriteFunc 完成一个函数的全部 KV 写入：
+//  0. 先 DelTree 清除旧函数数据（避免旧指令 slot 污染新布局）
 //  1. 源码写入 /src/<pkg>/<name>
 //  2. 编译签名写入 /func/<pkg>/<name>
 //  3. 编译 body 指令写入 /func/<pkg>/<name>/[i,j]
 //  4. 块标签写入 /func/<pkg>/<name>/<label>/
 //  5. 反向索引写入 /func/idx/<name>
 func WriteFunc(kv kvspace.KVSpace, pkg string, fn *ast.Func) {
+	// 清除旧函数数据：旧指令的读/写槽数量可能多于新函数，
+	// 若不清除则旧槽（如 [0,-1]、[0,-2]）会被新执行错误读取。
+	kv.DelTree(keytree.Func(pkg, fn.Sig.Name))
 	kv.Set(keytree.Src(pkg, fn.Sig.Name), kvspace.Str(fn.FullText()))
 	kv.Set(keytree.Func(pkg, fn.Sig.Name), kvspace.Str(fn.Sig.String()))
 	WriteBody(kv, pkg, fn.Sig.Name, fn.Body)
