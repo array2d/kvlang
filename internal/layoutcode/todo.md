@@ -1,38 +1,22 @@
-# layoutcode todo
+# layoutcode 设计问题
 
-> 对齐目标：`internal/layoutcode/最高标准设计.md`
-> 本文档记录当前实现与标准之间的偏差。
-
----
-
-## ✅ P5：PC 改为绝对路径
-
-**完成**：PC 全面改为绝对路径，`Decode(kv, pc)` 无需 vtid 参数，
-`HandleCall` / `HandleReturn` 基于绝对 PC 操作帧路径。
-
----
-
-## P4：HandleCall Copy → Link
-
-**状态**：待完成（设计见 `最高标准设计.md §三.2`）
-
-**问题**：当前 `copyFunc` 逐槽复制 `/func/<pkg>/<name>/[i,j]` 到帧路径，并做参数值替换。
-缺陷：帧有独立代码副本、`copyFunc` 递归复杂、无法与 Link-based 帧语义对齐。
-
-**标准**：
+## P0-8 块标签被强制包装为伪函数签名
+**文件**：`layoutcode.go:RegisterBlocks`  
+编译器生成的块（`_then_1`, `_merge_2`）写入函数注册表时伪造了签名字符串：
+```go
+kv.Set(blockKey, kvspace.Str("def "+b.Label+"() -> ()"))
 ```
-kv.Link(/func/<pkg>/<name>, pc)        零拷贝挂载
-kv.Set(pc+"/"+param, actualVal)        绑实参（仅局部槽，无代码副本）
-kv.DelR(pc)                            return 时一次销毁 Link + 局部槽
-```
+块不是函数，是 TCO 跳转目标，不应在函数注册表中用签名来表示。
+解决方向：为块标签单独建立索引（如 `/func/block/idx/<label>`），
+与函数签名索引（`/func/idx/<name>`）分离。
 
-**前置条件**：
-- `kvspace.KVSpace.Link` 接口已实现（`Link(target, linkpath string) error`）
-- `kvspace.KVSpace.Unlink` 接口已实现（`DelR` 含链接时只删链接本身）
+## P1-1 `ctx context.Context` 传入但从不使用
+**文件**：`layoutcode.go`  
+`HandleCall`, `HandleReturn` 均接收 `ctx`，但所有 KV 操作使用包级 `bg`，
+ctx 的取消/超时对 KV 操作无效。
+**解决方案**：全部移除 ctx 参数，或真正将 ctx 传入 KV 操作。
 
-**涉及文件**：
-| 文件 | 变更 |
-|------|------|
-| `layoutcode.go HandleCall` | 替换 `copyFunc` 为 Link + Set 绑参；~55 行 → ~20 行 |
-| `layoutcode.go copyFunc` | **整体删除** |
-| `layoutcode.go HandleReturn` | 已用 `kv.DelR`，无需改动 |
+## P1-11 `kv.Set` 错误在写指令/帧元数据时被全量忽略
+**文件**：`layoutcode.go:writeStmt`, `RegisterBlocks`, `WriteFunc`  
+所有 `kv.Set(...)` 丢弃错误返回值。Redis 写失败时 VM 静默执行错误状态。
+应在 `WriteFunc` 等批量写入入口处检查错误，或改用 `SetMany` 并统一检查。
