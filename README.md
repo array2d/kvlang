@@ -131,37 +131,24 @@ print("fib =", './result')    // → fib = 55
 
 ## Tutorial
 
-Get started in 5 minutes with progressive examples:
+Progressive examples — each file is self-contained and runnable:
 
 | Step | Topic | Code |
 |------|-------|------|
 | [01](tutorial/01-hello/main.kv) | Hello World | `print("hello kvlang")` |
-| [02](tutorial/02-vars/main.kv) | Variables | `42 -> './x'` |
+| [02](tutorial/02-vars/main.kv) | Variables | `42 -> ./x` |
 | [03](tutorial/03-arith/main.kv) | Arithmetic | `10 + 3`, `pow(2,5)`, `sqrt(144)` |
-| [04](tutorial/04-func/main.kv) | Functions | `def add(...)` |
-| [05](tutorial/05-if/main.kv) | Control Flow | `if (x < 0) { ... }` |
-| [06](tutorial/06-recursion/main.kv) | Recursion | `fib(10)`, `fact(10)` with TCO |
+| [04](tutorial/04-func/main.kv) | Functions | `def add(A,B)->(C)` |
+| [05](tutorial/05-if/main.kv) | Conditionals | `if (x < 0) { … }` |
+| [06](tutorial/06-while/main.kv) | While Loops | `while`, `break`, `continue` |
+| [07](tutorial/07-recursion/main.kv) | Recursion | multi-write params, TCO |
+| [08-algo/](tutorial/08-algo/) | Algorithms | fibonacci, fizzbuzz, gcd, collatz, … |
 
 ```bash
-kvlang tutorial/01-hello/main.kv    # run any tutorial step
-```
-
----
-
-## Examples
-
-179 example programs, graded P0–P3:
-
-| Grade | Category | Examples |
-|-------|----------|----------|
-| P0 | Builtin smoke | print, add, compare, logic |
-| P1 | Equivalence classes | 18 compare variants, 10 logic, 10 arith edges, 7 call patterns |
-| P2 | Frame isolation + TCO | scope isolation, tail-call depth (sum 5050, fact 3628800) |
-| P3 | Algorithms | fibonacci, factorial, gcd, fizzbuzz, power, collatz, classify |
-
-```bash
-python3 example/run.py                    # 175 integration tests
-python3 example/run.py --filter compare   # filter by keyword
+kvlang tutorial/01-hello/main.kv        # run a step
+kvlang tutorial/08-algo/fizzbuzz.kv     # run an algorithm
+python3 run.py                          # integration test suite (~50 tests)
+python3 run.py --filter algo            # filter by keyword
 ```
 
 ---

@@ -18,7 +18,7 @@ make build
 # After making changes:
 make vet          # static analysis
 make test         # unit tests
-python3 example/run.py    # integration tests (requires Redis)
+python3 run.py             # integration tests (requires Redis)
 ```
 
 ## Project structure
@@ -37,7 +37,8 @@ internal/
     builtin/        native operators (arith, compare, logic, cast, call, io)
     dispatch/       opcode → executor routing
   device/           I/O device drivers (terminal, websocket)
-example/            .kv example programs + integration test runner
+tutorial/           step-by-step .kv programs (01-hello … 08-algo)
+run.py              integration test suite (~50 tests)
 doc/                design documents, specs, drafts
 ```
 
