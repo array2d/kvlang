@@ -7,6 +7,7 @@ import (
 	"kvlang/internal/op"
 	"kvlang/internal/op/dispatch"
 	"kvlang/internal/kvspace"
+	_ "kvlang/internal/kvspace/redis"
 )
 
 // ── PC navigation ──
