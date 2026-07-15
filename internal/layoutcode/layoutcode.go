@@ -121,8 +121,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	// 绑定参数：从调用方帧解析实参值后写入子帧（不经过链接）
 	for i, param := range funcSig.ParamNames() {
 		if i+1 < len(inst.Reads) {
-			resolved := builtin.ResolveReadValue(kv, callerFrameRoot, inst.Reads[i+1])
-			kv.Set(frameRoot+"/"+param, kvspace.Str(resolved))
+			kv.Set(frameRoot+"/"+param, builtin.ResolveReadValue(kv, callerFrameRoot, inst.Reads[i+1]))
 		}
 	}
 

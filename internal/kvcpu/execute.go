@@ -114,12 +114,37 @@ func (c *cpu) Execute(pc string) error {
 	return nil
 }
 
-// isCopyOp 判断是否为路径/变量复制操作。
-// 条件：opcode 以 ./ 或 / 开头（路径引用），且有写槽（写入目标）。
+// isCopyOp 判断是否为"值引用 → 写槽"操作。
+// 识别所有合法的值引用形式：路径引用、字面量（数字、布尔、引号字符串）。
+//
+//	./x    /abs   — 路径引用
+//	0  3.14       — 数字字面量
+//	true  false   — 布尔字面量
+//	"hello"       — 引号字符串（parser 写入 " 前缀）
 func isCopyOp(opcode string, writes []string) bool {
-	return len(writes) > 0 &&
-		(len(opcode) >= 2 && opcode[:2] == "./" ||
-			len(opcode) >= 1 && opcode[0] == '/')
+	if len(writes) == 0 || len(opcode) == 0 {
+		return false
+	}
+	// 路径引用
+	if opcode[0] == '/' || len(opcode) >= 2 && opcode[:2] == "./" {
+		return true
+	}
+	// 引号字符串字面量
+	if opcode[0] == '"' {
+		return true
+	}
+	// 布尔字面量
+	if opcode == "true" || opcode == "false" {
+		return true
+	}
+	// 数字字面量：[0-9.eE] 组成，至少一位
+	for _, c := range opcode {
+		if c >= '0' && c <= '9' || c == '.' || c == 'e' || c == 'E' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // RunWorker 单个 worker 的主循环。

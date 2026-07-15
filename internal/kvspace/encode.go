@@ -19,34 +19,27 @@ func EncodeValue(v Value) []byte {
 
 // DecodeValue 从 TLV 字节解码为 Value。
 // raw 字节在内部复制，返回的 Value 不与 data 共享内存。
-// 若 data 不以合法 TLV 开头，fallback 为 Value{kind:"str", raw:data}（兼容旧格式）。
+// 格式不合法（截断、kind 非法、长度溢出）时返回零值 Value{}。
 func DecodeValue(data []byte) Value {
 	if len(data) == 0 {
 		return Value{}
 	}
 	kindLen := int(data[0])
 	if len(data) < 1+kindLen+4 {
-		return fallbackStr(data)
+		return Value{}
 	}
 	kind := string(data[1 : 1+kindLen])
 	if !isValidKind(kind) {
-		return fallbackStr(data)
+		return Value{}
 	}
 	rawLen := binary.LittleEndian.Uint32(data[1+kindLen : 1+kindLen+4])
 	start := 1 + kindLen + 4
 	if len(data) < start+int(rawLen) {
-		return fallbackStr(data)
+		return Value{}
 	}
 	raw := make([]byte, rawLen)
 	copy(raw, data[start:start+int(rawLen)])
 	return Value{kind: kind, raw: raw}
-}
-
-// fallbackStr 将未识别的原始数据包装为 str Value（向后兼容旧纯字符串数据）。
-func fallbackStr(data []byte) Value {
-	raw := make([]byte, len(data))
-	copy(raw, data)
-	return Value{kind: "str", raw: raw}
 }
 
 // isValidKind 检查 kind name 是否合法（[a-zA-Z0-9_]，非空，长度 ≤ 127）。
