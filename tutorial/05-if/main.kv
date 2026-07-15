@@ -1,23 +1,25 @@
-// 05-if: conditional logic
-// Run: kvlang tutorial/05-if/main.kv
+# 05-if: conditional logic
+# Run: kvlang tutorial/05-if/main.kv
 
-str.set("kvlangrun") -> './term'
+str.set("kvlangrun") -> ./term
 
 def abs(x: int) -> (r: int) {
     if (x < 0) {
-        -x -> './r'
+        -x -> ./r
     } else {
-        x -> './r'
+        x -> ./r
     }
 }
 
-abs(-5) -> './a'
-print("abs(-5) =", './a')          // 5
+def main() -> () {
+    abs(-5) -> ./a
+    print("abs(-5) =", ./a)      // 5
 
-abs(3) -> './b'
-print("abs(3) =", './b')           // 3
+    abs(3) -> ./b
+    print("abs(3) =", ./b)       // 3
 
-// boolean logic
-print("true && false =", true && false)   // false
-print("true || false =", true || false)   // true
-print("!true =", !true)                   // false
+    print("true && false =", true && false)   // false
+    print("true || false =", true || false)   // true
+    print("!true =", !true)                   // false
+}
+main() -> ()

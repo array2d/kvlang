@@ -1,32 +1,33 @@
-// 06-recursion: recursive functions with TCO
-// Run: kvlang tutorial/06-recursion/main.kv
+# 06-recursion: recursive functions with TCO
+# Run: kvlang tutorial/06-recursion/main.kv
 
-str.set("kvlangrun") -> './term'
+str.set("kvlangrun") -> ./term
 
-// Fibonacci with tail recursion (TCO optimizes the call stack)
 def fib(n: int) -> (a: int, b: int) {
     if (n <= 1) {
-        0 -> './a'
-        1 -> './b'
+        0 -> ./a
+        1 -> ./b
     } else {
-        fib(n - 1) -> './a', './b'
-        './a' + './b' -> './x'
-        './b' -> './a'
-        './x' -> './b'
+        fib(n - 1) -> ./a, ./b
+        ./a + ./b -> ./x
+        ./b -> ./a
+        ./x -> ./b
     }
 }
 
-fib(10) -> './_', './result'
-print("fib(10) =", './result')
-
-// Factorial with TCO
 def fact(n: int, acc: int) -> (r: int) {
     if (n <= 0) {
-        acc -> './r'
+        acc -> ./r
     } else {
-        fact(n - 1, acc * n) -> './r'
+        fact(n - 1, acc * n) -> ./r
     }
 }
 
-fact(10, 1) -> './f'
-print("fact(10) =", './f')         // 3628800
+def main() -> () {
+    fib(10) -> ./_, ./result
+    print("fib(10) =", ./result)
+
+    fact(10, 1) -> ./f
+    print("fact(10) =", ./f)     // 3628800
+}
+main() -> ()
