@@ -1,11 +1,11 @@
 // Package lower 将结构化控制流 (if/while) lowering 为基本块原语 (br/goto)，
 // 并将复合表达式展开为 kvcpu 可直接执行的平坦指令序列。
-// for / break / continue 暂不处理，待执行层迭代原语就绪后再处理（见 todo.md P11）。
 //
 // 设计原则（续体传递，Continuation-Passing Style）：
 //   - if/while 遇到时，将后续所有语句作为续体（cont）传入，注入到 merge/exit block
 //   - 函数入口始终在 [0,0]（平坦指令或 goto 首控制块）
 //   - 任何路径最终以 return / goto / br 结尾（appendReturn 补全）
+//   - break → goto exitLabel，continue → goto condLabel（由 loopCtx 携带当前循环出口）
 package lower
 
 import (
@@ -24,11 +24,18 @@ func File(f *ast.File) *ast.File {
 	return lowered
 }
 
+// loopCtx 携带当前最内层 while 循环的出口标签，供 break/continue 降级使用。
+// nil 表示当前不在任何循环内。
+type loopCtx struct {
+	breakLabel    string // break  → goto breakLabel  (while 的 _exit_N)
+	continueLabel string // continue → goto continueLabel (while 的 _while_N / condLabel)
+}
+
 // Func 将函数体中 if/while 控制流降级为 BlockStmt + br/goto，
 // 展开复合表达式，并在函数尾部补充隐式 return（若缺失）。
 func Func(fn *ast.Func) *ast.Func {
 	lg := &labelGen{parent: fn.Sig.Name}
-	body := lowerBody(fn.Body, lg)
+	body := lowerBody(fn.Body, lg, nil)
 	body = appendReturn(body, fn.Sig)
 	return &ast.Func{Sig: fn.Sig, Body: body}
 }
@@ -54,7 +61,8 @@ func (g *labelGen) tmp() string {
 // lowerBody 以续体传递风格将语句列表降级：
 //   遇到 if/while 时将后续语句作为续体注入 merge/exit block，
 //   保证函数入口 [0,0] 始终有指令（平坦指令或 goto 首控制块）。
-func lowerBody(stmts []ast.Stmt, lg *labelGen) []ast.Stmt {
+//   lc 携带最内层 while 的 break/continue 目标标签（函数顶层传 nil）。
+func lowerBody(stmts []ast.Stmt, lg *labelGen, lc *loopCtx) []ast.Stmt {
 	if len(stmts) == 0 {
 		return nil
 	}
@@ -65,26 +73,42 @@ func lowerBody(stmts []ast.Stmt, lg *labelGen) []ast.Stmt {
 			preamble = append(preamble, flattenInstExpr(s, lg)...)
 
 		case *ast.IfStmt:
-			cont := lowerBody(stmts[i+1:], lg)
-			return lowerIfWithCont(preamble, s, cont, lg)
+			cont := lowerBody(stmts[i+1:], lg, lc)
+			return lowerIfWithCont(preamble, s, cont, lg, lc)
 
 		case *ast.WhileStmt:
-			cont := lowerBody(stmts[i+1:], lg)
-			return lowerWhileWithCont(preamble, s, cont, lg)
+			cont := lowerBody(stmts[i+1:], lg, lc)
+			return lowerWhileWithCont(preamble, s, cont, lg, lc)
 
 		case *ast.BlockStmt:
 			// 用户显式书写的基本块：递归降级体，保留原位。
 			// 若前缀无终止符（preamble 为空或末尾非 return/goto/br），
 			// 自动插入 goto firstBlock 确保 [0,0] 有指令（函数入口必须非空）。
-			s.Body = lowerBody(s.Body, lg)
+			s.Body = lowerBody(s.Body, lg, lc)
 			if !preambleEndsWithTerminator(preamble) {
 				preamble = append(preamble, gotoLabel(lg.parent, s.Label))
 			}
 			out := append(preamble, ast.Stmt(s))
-			return append(out, lowerBody(stmts[i+1:], lg)...)
+			return append(out, lowerBody(stmts[i+1:], lg, lc)...)
+
+		case *ast.BreakStmt:
+			// break → goto exitLabel（当前 while 的出口块）
+			if lc != nil {
+				preamble = append(preamble, gotoLabel(lg.parent, lc.breakLabel))
+			}
+			// break 是终止符：忽略其后的语句（不可达代码）
+			return preamble
+
+		case *ast.ContinueStmt:
+			// continue → goto condLabel（当前 while 的条件块）
+			if lc != nil {
+				preamble = append(preamble, gotoLabel(lg.parent, lc.continueLabel))
+			}
+			// continue 是终止符：忽略其后的语句（不可达代码）
+			return preamble
 
 		default:
-			// for / break / continue 保持原样（P11）
+			// for 暂不处理（P11）
 			preamble = append(preamble, s)
 		}
 	}
@@ -102,7 +126,9 @@ func lowerBody(stmts []ast.Stmt, lg *labelGen) []ast.Stmt {
 //	_else_N: { lowerBody(Else)[insts only]; goto _merge_N }
 //	_merge_N:{ cont[insts only] }
 //	[promoted inner blocks from then/else/cont...]
-func lowerIfWithCont(pre []ast.Stmt, s *ast.IfStmt, cont []ast.Stmt, lg *labelGen) []ast.Stmt {
+//
+// lc 透传给 then/else 体，确保嵌套 break/continue 仍指向外层 while。
+func lowerIfWithCont(pre []ast.Stmt, s *ast.IfStmt, cont []ast.Stmt, lg *labelGen, lc *loopCtx) []ast.Stmt {
 	condEval, condSlot := evalCond(s.Cond, lg)
 	ifLabel    := lg.next("if")
 	thenLabel  := lg.next("then")
@@ -114,8 +140,9 @@ func lowerIfWithCont(pre []ast.Stmt, s *ast.IfStmt, cont []ast.Stmt, lg *labelGe
 	condBody  = append(condBody, brInst(condSlot, lg.parent+"/"+thenLabel, lg.parent+"/"+elseLabel))
 
 	// 将嵌套块从 then/else/cont 体内提升到函数顶层
-	thenInsts, thenBlocks := splitInstsAndBlocks(injectGoto(lowerBody(s.Then, lg), lg.parent, mergeLabel))
-	elseInsts, elseBlocks := splitInstsAndBlocks(injectGoto(lowerBody(s.Else, lg), lg.parent, mergeLabel))
+	// lc 透传：if 内的 break/continue 仍指向外层 while
+	thenInsts, thenBlocks := splitInstsAndBlocks(injectGoto(lowerBody(s.Then, lg, lc), lg.parent, mergeLabel))
+	elseInsts, elseBlocks := splitInstsAndBlocks(injectGoto(lowerBody(s.Else, lg, lc), lg.parent, mergeLabel))
 	contInsts, contBlocks := splitInstsAndBlocks(cont)
 
 	// 修复：提升出来的内层块（如嵌套 if 的 merge 块）也需要正确跳到当前 mergeLabel。
@@ -145,7 +172,10 @@ func lowerIfWithCont(pre []ast.Stmt, s *ast.IfStmt, cont []ast.Stmt, lg *labelGe
 //	_do_N:    { lowerBody(Body)[insts only]; goto _while_N }
 //	_exit_N:  { cont[insts only] }
 //	[promoted inner blocks...]
-func lowerWhileWithCont(pre []ast.Stmt, s *ast.WhileStmt, cont []ast.Stmt, lg *labelGen) []ast.Stmt {
+//
+// 为 while 体创建新 loopCtx（break→exit, continue→while），
+// cont（while 后的语句）继承外层 lc。
+func lowerWhileWithCont(pre []ast.Stmt, s *ast.WhileStmt, cont []ast.Stmt, lg *labelGen, lc *loopCtx) []ast.Stmt {
 	condEval, condSlot := evalCond(s.Cond, lg)
 	condLabel := lg.next("while")
 	bodyLabel := lg.next("do")
@@ -155,7 +185,9 @@ func lowerWhileWithCont(pre []ast.Stmt, s *ast.WhileStmt, cont []ast.Stmt, lg *l
 	// br 标签使用完整限定名（含父函数前缀），resolveLabel 直接返回，零 KV 查询
 	condBody  = append(condBody, brInst(condSlot, lg.parent+"/"+bodyLabel, lg.parent+"/"+exitLabel))
 
-	bodyInsts, bodyBlocks := splitInstsAndBlocks(injectGoto(lowerBody(s.Body, lg), lg.parent, condLabel))
+	// 为 while 体构造新 loopCtx：break→exit, continue→condLabel
+	bodyLc := &loopCtx{breakLabel: exitLabel, continueLabel: condLabel}
+	bodyInsts, bodyBlocks := splitInstsAndBlocks(injectGoto(lowerBody(s.Body, lg, bodyLc), lg.parent, condLabel))
 	// 修复：提升出来的所有内层块也需要跳回 while 条件块（lowerIfWithCont 已为其注入 goto 合并块，
 	// 但最外层合并块本身仍可能缺少 goto _while_N）。
 	injectGotoBlocks(bodyBlocks, lg.parent, condLabel)

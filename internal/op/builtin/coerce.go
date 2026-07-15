@@ -41,7 +41,7 @@ func AsBool(v kvspace.Value) bool {
 // isNumeric reports whether v is int or float.
 func isNumeric(v kvspace.Value) bool { return v.Kind() == "int" || v.Kind() == "float" }
 
-// display formats a Value for human output (print / str.set).
+// display formats a Value for human output (print / string.set).
 func display(v kvspace.Value) string {
 	switch v.Kind() {
 	case "int":   return strconv.FormatInt(v.Int(), 10)

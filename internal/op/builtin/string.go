@@ -20,7 +20,7 @@ func (strOp) Call(f *op.Frame) error {
 			return err
 		}
 	}
-	logx.Debug("[%s] str.set %q -> %s", f.Vtid, val, f.Inst.Writes)
+	logx.Debug("[%s] string.set %q -> %s", f.Vtid, val, f.Inst.Writes)
 	nextPC(f)
 	return nil
 }

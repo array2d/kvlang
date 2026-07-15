@@ -116,7 +116,7 @@ func (fn *Func) FullText() string {
 // 叶节点（IsLeaf()==true）：Op == ""，Val 为操作数字符串（变量名/字面量/路径）。
 // 内节点（IsLeaf()==false）：Op 为算子/函数名，Args 为操作数列表。
 type Expr struct {
-	Op   string  // 算子（"+","*"）/ 函数名（"f","str.set"）/ ""（叶节点）
+	Op   string  // 算子（"+","*"）/ 函数名（"f","string.set"）/ ""（叶节点）
 	Args []*Expr // 操作数（叶节点时为 nil）
 	Val  string  // 叶节点值（变量名、字面量或路径）
 }

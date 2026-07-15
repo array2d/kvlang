@@ -64,9 +64,9 @@ const (
 	OpInput = "input"
 )
 
-// 字符串赋值
+// 字符串赋值（兼容旧名 str.set 通过 alias 支持）
 const (
-	OpStrSet = "str.set"
+	OpStrSet = "string.set"
 )
 
 // nativeOps 定义 VM 原生求值的算子集合。
@@ -133,7 +133,7 @@ var nativeSigs = map[string]string{
 	OpPrint: "def print(A:any, ...) -> ()",
 	OpCerr:  "def cerr(A:any, ...) -> ()",
 	OpInput: "def input(prompt:string?) -> (C:string)",
-	OpStrSet: "def str.set(A:any) -> (...)",
+	OpStrSet: "def string.set(A:any) -> (...)",
 }
 
 // OpDefs 返回格式化后的算子定义文本列表 (按 opcode 排序)。

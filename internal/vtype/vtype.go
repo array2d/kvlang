@@ -2,7 +2,7 @@
 // Kind 常量是所有 vtype name 的权威来源，供全局使用。
 //
 // 每个 VType 拥有一个 dot-prefix，其操作码格式为 "<vtype>.<op>"，例如：
-//   tensor.add   tensor.new   str.set   str.concat
+//   tensor.add   tensor.new   string.set   string.concat
 //
 // 调用方通过 Lookup(opcode) 查找对应 VType，再调用 Exec 执行。
 // 这使 execute.go 的 dispatch switch 无需任何 KV 查询即可路由 vtype 操作。
@@ -31,7 +31,7 @@ const (
 	KindInt    = "int"
 	KindFloat  = "float"
 	KindBool   = "bool"
-	KindStr    = "str"
+	KindStr    = "string"
 	KindBytes  = "bytes"
 	KindTensor = "tensor"
 )
@@ -42,9 +42,9 @@ var registry = map[string]VType{}
 func Register(vt VType) { registry[vt.Name()] = vt }
 
 // Lookup 根据 opcode 前缀查找 VType。
-//   "tensor.add"  → tensor VType
-//   "str.set"     → str VType
-//   "print"       → nil（无 dot 或未注册）
+//   "tensor.add"   → tensor VType
+//   "string.set"   → string VType
+//   "print"        → nil（无 dot 或未注册）
 func Lookup(opcode string) VType {
 	dot := strings.IndexByte(opcode, '.')
 	if dot <= 0 {
@@ -54,9 +54,9 @@ func Lookup(opcode string) VType {
 }
 
 // OpName 去掉命名空间前缀，返回裸操作名。
-//   "tensor.matmul" → "matmul"
-//   "str.set"       → "set"
-//   "print"         → "print"
+//   "tensor.matmul"  → "matmul"
+//   "string.set"     → "set"
+//   "print"          → "print"
 func OpName(opcode string) string {
 	dot := strings.IndexByte(opcode, '.')
 	if dot < 0 {

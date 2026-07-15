@@ -65,9 +65,9 @@ func TestPratt_CompoundCond(t *testing.T) {
 	src := `
 def test(score:int) -> (R:int) {
     if (./score > 90 && ./score < 100) {
-        str.set("A") -> ./R
+        "A" -> ./R
     } else {
-        str.set("B") -> ./R
+        "B" -> ./R
     }
 }
 `

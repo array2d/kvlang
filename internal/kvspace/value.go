@@ -27,7 +27,7 @@ func Bool(v bool) Value {
 	}
 	return Value{kind: "bool", raw: []byte{b}}
 }
-func Str(v string) Value   { return Value{kind: "str", raw: []byte(v)} }
+func Str(v string) Value   { return Value{kind: "string", raw: []byte(v)} }
 func Bytes(v []byte) Value { c := make([]byte, len(v)); copy(c, v); return Value{kind: "bytes", raw: c} }
 
 // Raw 构造任意 vtype 的 Value（用于第三方 vtype 扩展，如 "tensor"）。
@@ -66,10 +66,10 @@ func (v Value) Bool() bool {
 	return v.raw[0] != 0
 }
 
-// Str 返回字符串内容。Kind() != "str" 时返回 ""。
+// Str 返回字符串内容。Kind() != "string" 时返回 ""。
 // 注意：与 String()（fmt.Stringer 调试格式）不同。
 func (v Value) Str() string {
-	if v.kind != "str" {
+	if v.kind != "string" {
 		return ""
 	}
 	return string(v.raw)
@@ -102,8 +102,8 @@ func (v Value) String() string {
 		return "float:" + strconv.FormatFloat(v.Float(), 'f', -1, 64)
 	case "bool":
 		return "bool:" + strconv.FormatBool(v.Bool())
-	case "str":
-		return "str:" + v.Str()
+	case "string":
+		return "string:" + v.Str()
 	default:
 		return v.kind + ":" + strconv.Itoa(len(v.raw)) + "B"
 	}

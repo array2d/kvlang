@@ -250,8 +250,15 @@ func Scan(src string) []Token {
 			continue
 		}
 
-		// '/' — 绝对路径字面量 或 除法算子
+		// '/' — // 行注释 或 绝对路径字面量 或 除法算子
 		if c == '/' {
+			// // 行注释：跳到行尾，不产生 Token
+			if i+1 < len(src) && src[i+1] == '/' {
+				for i < len(src) && src[i] != '\n' {
+					i++
+				}
+				continue
+			}
 			if i+1 < len(src) && isAbsPathStart(src[i+1]) {
 				start := i
 				i++
