@@ -11,8 +11,8 @@ str.set("kvlangrun") -> ./term
 
 # TCO-1: while 循环（内部编译为 goto/br TCO）计算 1+...+100
 def sum_while(N:int) -> (total:int) {
-    str.set("0") -> ./total
-    str.set("1") -> ./i
+    0 -> ./total
+    1 -> ./i
     while (./i <= N) {
         ./total + ./i -> ./total
         ./i + 1 -> ./i

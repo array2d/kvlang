@@ -11,12 +11,12 @@ def 简单分支(flag:bool, X:int) -> (R:int) {
 
 def 多头判断(score:int) -> (grade:int) {
     if (./score > 90) {
-        str.set("1") -> ./grade
+        1 -> ./grade
     } else {
         if (./score > 60) {
-            str.set("2") -> ./grade
+            2 -> ./grade
         } else {
-            str.set("3") -> ./grade
+            3 -> ./grade
         }
     }
 }
@@ -30,12 +30,12 @@ def 单分支判断(flag:bool, X:int) -> (R:int) {
 
 def 正负零判断(X:int) -> (R:int) {
     if (./X > 0) {
-        str.set("1") -> ./R
+        1 -> ./R
     } else {
         if (./X < 0) {
             str.set("-1") -> ./R
         } else {
-            str.set("0") -> ./R
+            0 -> ./R
         }
     }
 }

@@ -3,10 +3,10 @@
 
 def 尾递归斐波那契(N:int) -> (result:int) {
     if (./N <= 0) {
-        str.set("0") -> ./result
+        0 -> ./result
     } else {
         if (./N == 1) {
-            str.set("1") -> ./result
+            1 -> ./result
         } else {
             ./N - 1 -> ./nm1
             尾递归斐波那契(./nm1) -> ./prev
@@ -21,9 +21,9 @@ def 迭代斐波那契(N:int) -> (result:int) {
     if (./N <= 1) {
         ./N -> ./result
     } else {
-        str.set("0") -> ./a
-        str.set("1") -> ./b
-        str.set("2") -> ./i
+        0 -> ./a
+        1 -> ./b
+        2 -> ./i
         while (./i <= N) {
             ./a + ./b -> ./c
             ./b -> ./a

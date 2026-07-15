@@ -30,7 +30,7 @@ def assert_bool(actual:bool, expected:bool, name:string) -> () {
 # ═══════════════════ if/else 测试 ═══════════════════
 
 def test_if_true(X:int) -> (R:int) {
-    str.set("1") -> ./flag
+    1 -> ./flag
     if (./flag) {
         X * 2 -> ./R
     } else {
@@ -39,7 +39,7 @@ def test_if_true(X:int) -> (R:int) {
 }
 
 def test_if_false(X:int) -> (R:int) {
-    str.set("0") -> ./flag
+    0 -> ./flag
     if (./flag) {
         X * 2 -> ./R
     } else {
@@ -56,12 +56,12 @@ def test_if_no_else(flag:bool, X:int) -> (R:int) {
 
 def test_if_nested(score:int) -> (grade:int) {
     if (./score > 90) {
-        str.set("1") -> ./grade
+        1 -> ./grade
     } else {
         if (./score > 60) {
-            str.set("2") -> ./grade
+            2 -> ./grade
         } else {
-            str.set("3") -> ./grade
+            3 -> ./grade
         }
     }
 }
@@ -69,8 +69,8 @@ def test_if_nested(score:int) -> (grade:int) {
 # ═══════════════════ while 循环测试 ═══════════════════
 
 def test_while_sum(N:int) -> (total:int) {
-    str.set("0") -> ./total
-    str.set("1") -> ./i
+    0 -> ./total
+    1 -> ./i
     while (./i <= N) {
         ./total + ./i -> ./total
         ./i + 1 -> ./i
@@ -78,8 +78,8 @@ def test_while_sum(N:int) -> (total:int) {
 }
 
 def test_while_factorial(N:int) -> (result:int) {
-    str.set("1") -> ./result
-    str.set("1") -> ./i
+    1 -> ./result
+    1 -> ./i
     while (./i <= N) {
         ./result * ./i -> ./result
         ./i + 1 -> ./i
@@ -87,7 +87,7 @@ def test_while_factorial(N:int) -> (result:int) {
 }
 
 def test_while_halve(N:int) -> (steps:int) {
-    str.set("0") -> ./steps
+    0 -> ./steps
     while (./N > 1) {
         ./steps + 1 -> ./steps
         ./N / 2 -> ./N
@@ -141,8 +141,8 @@ def test_block_state(state:int, X:int) -> (R:int) {
 
 def test_block_loop_sum(N:int) -> (total:int) {
     entry: {
-        str.set("0") -> ./total
-        str.set("1") -> ./i
+        0 -> ./total
+        1 -> ./i
         goto(cond)
     }
     cond: {
@@ -166,7 +166,7 @@ def test_block_loop_sum(N:int) -> (total:int) {
 
 def test_tailrec_fact(N:int) -> (result:int) {
     if (./N <= 1) {
-        str.set("1") -> ./result
+        1 -> ./result
     } else {
         ./N - 1 -> ./nm1
         test_tailrec_fact(./nm1) -> ./prev
@@ -185,7 +185,7 @@ def test_gcd_euclid(A:int, B:int) -> (gcd:int) {
 
 def test_recursive_sum(N:int) -> (total:int) {
     if (./N <= 0) {
-        str.set("0") -> ./total
+        0 -> ./total
     } else {
         ./N - 1 -> ./nm1
         test_recursive_sum(./nm1) -> ./prev
@@ -196,8 +196,8 @@ def test_recursive_sum(N:int) -> (total:int) {
 # ═══════════════════ 嵌套控制流测试 ═══════════════════
 
 def test_while_with_if(N:int) -> (result:int) {
-    str.set("0") -> ./result
-    str.set("1") -> ./i
+    0 -> ./result
+    1 -> ./i
     while (./i <= N) {
         if (./i % 2 == 0) {
             ./result + ./i -> ./result
@@ -210,8 +210,8 @@ def test_while_with_if(N:int) -> (result:int) {
 
 def test_if_with_while(threshold:int, N:int) -> (result:int) {
     if (./threshold > 0) {
-        str.set("0") -> ./result
-        str.set("1") -> ./i
+        0 -> ./result
+        1 -> ./i
         while (./i <= N) {
             ./result + ./i -> ./result
             ./i + 1 -> ./i
@@ -223,12 +223,12 @@ def test_if_with_while(threshold:int, N:int) -> (result:int) {
 
 def test_pos_neg_zero(X:int) -> (R:int) {
     if (./X > 0) {
-        str.set("1") -> ./R
+        1 -> ./R
     } else {
         if (./X < 0) {
             str.set("-1") -> ./R
         } else {
-            str.set("0") -> ./R
+            0 -> ./R
         }
     }
 }

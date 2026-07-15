@@ -2,13 +2,13 @@
 # 测试: if/else + while + 基本块混合, 多级控制流
 
 def 带早期退出的搜索(N:int, target:int) -> (found:int, steps:int) {
-    str.set("0") -> ./found
-    str.set("0") -> ./steps
-    str.set("1") -> ./i
+    0 -> ./found
+    0 -> ./steps
+    1 -> ./i
     while (./i <= N) {
         ./steps + 1 -> ./steps
         if (./i == ./target) {
-            str.set("1") -> ./found
+            1 -> ./found
             break
         }
         ./i + 1 -> ./i
@@ -18,16 +18,16 @@ def 带早期退出的搜索(N:int, target:int) -> (found:int, steps:int) {
 def 分段计算(X:int) -> (R:int) {
     if (./X < 0) {
         ./X * -1 -> ./X
-        str.set("0") -> ./R
+        0 -> ./R
         while (./X > 0) {
             ./R + ./X -> ./R
             ./X - 1 -> ./X
         }
     } else {
         if (./X == 0) {
-            str.set("0") -> ./R
+            0 -> ./R
         } else {
-            str.set("1") -> ./R
+            1 -> ./R
             while (./X > 1) {
                 ./R * ./X -> ./R
                 ./X - 1 -> ./X
@@ -37,7 +37,7 @@ def 分段计算(X:int) -> (R:int) {
 }
 
 def 多条件过滤(A:int, B:int, C:int) -> (result:int) {
-    str.set("0") -> ./result
+    0 -> ./result
     if (./A > 0) {
         ./result + ./A -> ./result
         if (./B > 0) {

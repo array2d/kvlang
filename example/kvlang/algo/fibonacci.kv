@@ -11,9 +11,9 @@ def fibonacci(n:int) -> (result:int) {
     if (n <= 1) {
         n + 0 -> ./result
     } else {
-        str.set("0") -> ./a
-        str.set("1") -> ./b
-        str.set("2") -> ./i
+        0 -> ./a
+        1 -> ./b
+        2 -> ./i
         while (./i <= n) {
             ./a + ./b -> ./c
             ./b + 0 -> ./a

@@ -8,7 +8,7 @@
 str.set("kvlangrun") -> ./term
 
 def collatz(n:int) -> (steps:int) {
-    str.set("0") -> ./steps
+    0 -> ./steps
     while (n > 1) {
         n % 2 -> ./mod
         ./mod == 0 -> ./even
