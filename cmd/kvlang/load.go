@@ -104,7 +104,7 @@ func runCode(name string, rc io.Reader, addr string) {
 	preMain := ast.Func{Sig: ast.FuncSig{Name: "pre_main"}, Body: body}
 	preMain = *lower.Func(&preMain)
 	layoutcode.WriteFunc(kv, "main", &preMain)
-	kv.Set(keytree.FuncMain, `{"entry":"pre_main","reads":[],"writes":[]}`)
+	kv.Set(keytree.FuncMain, kvspace.Str(`{"entry":"pre_main","reads":[],"writes":[]}`))
 
 	executeEntry(kv)
 }
@@ -131,7 +131,7 @@ func loadFunctions(kv kvspace.KVSpace, files []string) {
 	preMain := ast.Func{Sig: ast.FuncSig{Name: "pre_main"}, Body: body}
 	preMain = *lower.Func(&preMain)
 	layoutcode.WriteFunc(kv, "main", &preMain)
-	kv.Set(keytree.FuncMain, `{"entry":"pre_main","reads":[],"writes":[]}`)
+	kv.Set(keytree.FuncMain, kvspace.Str(`{"entry":"pre_main","reads":[],"writes":[]}`))
 }
 
 // packageFromPath 从 .kv 文件路径中推导包名。

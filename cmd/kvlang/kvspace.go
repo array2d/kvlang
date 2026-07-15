@@ -35,19 +35,19 @@ func cmdKVSpace(args []string) {
 		if len(sub) < 2 { usageExit("kvlang kvspace get <key>") }
 		val, err := kv.Get(sub[1])
 		if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
-		fmt.Println(val)
+		fmt.Println(val) // Value.String() prints "kind:repr" debug format
 
 	case "mget":
 		if len(sub) < 2 { usageExit("kvlang kvspace mget <key1> <key2> ...") }
-		vals, err := kv.Gets(sub[1:]...)
+		vals, err := kv.GetMany(sub[1:])
 		if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
 		for i, v := range vals {
-			if v == "" { fmt.Printf("%s\t(nil)\n", sub[i+1]) } else { fmt.Printf("%s\t%s\n", sub[i+1], v) }
+			if v.IsNil() { fmt.Printf("%s\t(nil)\n", sub[i+1]) } else { fmt.Printf("%s\t%s\n", sub[i+1], v) }
 		}
 
 	case "set":
 		if len(sub) < 3 { usageExit("kvlang kvspace set <key> <value>") }
-		kv.Set(sub[1], sub[2])
+		kv.Set(sub[1], kvspace.Str(sub[2]))
 
 	case "del":
 		if len(sub) < 2 { usageExit("kvlang kvspace del <key1> [key2 ...]") }
@@ -73,7 +73,7 @@ func cmdKVSpace(args []string) {
 
 	case "notify":
 		if len(sub) < 3 { usageExit("kvlang kvspace notify <key> <value>") }
-		if err := kv.Notify(sub[1], sub[2]); err != nil {
+		if err := kv.Notify(sub[1], kvspace.Str(sub[2])); err != nil {
 			fmt.Fprintln(os.Stderr, err); os.Exit(1)
 		}
 
@@ -103,7 +103,7 @@ func kvWatch(kv kvspace.KVSpace, args []string) {
 	key := fs.Arg(0)
 	result, err := kv.Watch(key, *timeout)
 	if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
-	fmt.Println(result)
+	fmt.Println(result) // Value.String() prints "kind:repr" debug format
 }
 
 func usageExit(msg string) {
@@ -122,7 +122,7 @@ func clearAll(kv kvspace.KVSpace) {
 	} {
 		children, _ := kv.List(root)
 		for _, c := range children {
-			kv.DelR(root + "/" + c)
+			kv.DelTree(root + "/" + c)
 		}
 	}
 }
@@ -141,8 +141,8 @@ func printTree(kv kvspace.KVSpace, prefix, indent string) {
 }
 
 func dumpPrefix(kv kvspace.KVSpace, prefix string) {
-	if val, err := kv.Get(prefix); err == nil {
-		short := strings.ReplaceAll(val, "\n", "↵")
+	if valV, err := kv.Get(prefix); err == nil {
+		short := strings.ReplaceAll(valV.Str(), "\n", "↵")
 		if len(short) > 80 { short = short[:80] + "…" }
 		fmt.Printf("%-60s %s\n", prefix, short)
 	}

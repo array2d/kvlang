@@ -25,7 +25,7 @@ func executeEntry(kv kvspace.KVSpace) {
 	const vtid = "run"
 	pc := keytree.VThreadSlot(vtid, "", 0, 0) // /vthread/run/[0,0]
 	vthread.Set(ctx, kv, vtid, pc, "init")
-	kv.Set(keytree.VThreadSlot(vtid, "", 0, 0), "pre_main")
+	kv.Set(keytree.VThreadSlot(vtid, "", 0, 0), kvspace.Str("pre_main"))
 	logx.Info("[single] executing %s", pc)
 	cpu := kvcpu.New(kv, "single")
 	// 直接执行，不走 pick/wait 队列
@@ -86,17 +86,17 @@ func runServe(args []string) {
 func registerVM(ctx context.Context, kv kvspace.KVSpace, vmID string) {
 	reg := map[string]any{"status": "running", "pid": os.Getpid(), "started_at": time.Now().Unix()}
 	data, _ := json.Marshal(reg)
-	kv.Set(keytree.SysVM(vmID), data)
+	kv.Set(keytree.SysVM(vmID), kvspace.Bytes(data))
 	logx.Info("VM-%s registered at %s", vmID, keytree.SysVM(vmID))
 }
 
 func registerBuildinOps(ctx context.Context, kv kvspace.KVSpace, vmID string) {
 	// 每个内置算子注册到 /sys/op/buildin/func/<opcode>
 	for _, opcode := range builtin.NativeOpList() {
-		kv.Set(keytree.SysOpFunc("buildin", opcode), "1")
+		kv.Set(keytree.SysOpFunc("buildin", opcode), kvspace.Str("1"))
 	}
 	// 注册实例状态：/sys/op/buildin/0
-	kv.Set(keytree.SysOp("buildin", "0"), `{"status":"running","load":0}`)
+	kv.Set(keytree.SysOp("buildin", "0"), kvspace.Str(`{"status":"running","load":0}`))
 	logx.Info("VM-%s registered buildin ops at %s", vmID, keytree.SysOpRoot)
 }
 
@@ -105,7 +105,7 @@ func heartbeatLoop(ctx context.Context, kv kvspace.KVSpace, vmID string) {
 	writeHB := func(status string) {
 		hb := map[string]any{"ts": time.Now().Unix(), "status": status, "pid": os.Getpid()}
 		data, _ := json.Marshal(hb)
-		kv.Set(key, data)
+		kv.Set(key, kvspace.Bytes(data))
 	}
 	writeHB("running")
 	ticker := time.NewTicker(2 * time.Second)
@@ -129,7 +129,7 @@ func mainWatcher(ctx context.Context, kv kvspace.KVSpace, vmID string) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			val, err := kv.Get(keytree.FuncMain)
+			entryVal, err := kv.Get(keytree.FuncMain)
 			if err != nil { continue }
 			var entry struct {
 				Entry  string   `json:"entry"`
@@ -137,24 +137,24 @@ func mainWatcher(ctx context.Context, kv kvspace.KVSpace, vmID string) {
 				Writes []string `json:"writes"`
 				Term   string   `json:"term,omitempty"`
 			}
-			if json.Unmarshal([]byte(val), &entry) != nil || entry.Entry == "" { continue }
+			if json.Unmarshal([]byte(entryVal.Str()), &entry) != nil || entry.Entry == "" { continue }
 			logx.Info("VM-%s %s entry=%s", vmID, keytree.FuncMain, entry.Entry)
 			kv.Del(keytree.FuncMain)
 
 			vtidStr := incrVtid(kv)
 			absPC := keytree.VThreadSlot(vtidStr, "", 0, 0)
 			vthread.Set(ctx, kv, vtidStr, absPC, "init")
-			kv.Set(keytree.VThreadSlot(vtidStr, "", 0, 0), entry.Entry)
+			kv.Set(keytree.VThreadSlot(vtidStr, "", 0, 0), kvspace.Str(entry.Entry))
 			for i, arg := range entry.Reads {
-				kv.Set(keytree.VThreadSlot(vtidStr, "", 0, -(i+1)), arg)
+				kv.Set(keytree.VThreadSlot(vtidStr, "", 0, -(i+1)), kvspace.Str(arg))
 			}
-			kv.Set(keytree.VThreadSlot(vtidStr, "", 0, 1), "./ret")
+			kv.Set(keytree.VThreadSlot(vtidStr, "", 0, 1), kvspace.Str("./ret"))
 			if entry.Term != "" {
-				kv.Set(keytree.VThreadTerm(vtidStr), entry.Term)
+				kv.Set(keytree.VThreadTerm(vtidStr), kvspace.Str(entry.Term))
 			}
 			status, _ := json.Marshal(map[string]string{"vtid": vtidStr, "status": "executing"})
-			kv.Set(keytree.FuncMain, status)
-			kv.Notify(keytree.VthreadReady, vtidStr) // 平铺标量值，无 JSON
+			kv.Set(keytree.FuncMain, kvspace.Bytes(status))
+			kv.Notify(keytree.VthreadReady, kvspace.Str(vtidStr)) // 平铺标量值，无 JSON
 			logx.Info("VM-%s → vthread %s created pc=%s", vmID, vtidStr, absPC)
 		}
 	}
@@ -169,7 +169,7 @@ func sysCmdListener(ctx context.Context, kv kvspace.KVSpace, vmID string, cancel
 			continue
 		}
 		var cmd struct{ Cmd string `json:"cmd"` }
-		if json.Unmarshal([]byte(result), &cmd) == nil && cmd.Cmd == "shutdown" {
+		if json.Unmarshal([]byte(result.Str()), &cmd) == nil && cmd.Cmd == "shutdown" {
 			logx.Info("VM-%s sys shutdown", vmID)
 			cancel()
 			return

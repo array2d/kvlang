@@ -8,10 +8,10 @@ import (
 )
 
 func incrVtid(kv kvspace.KVSpace) string {
-	val, _ := kv.Get(keytree.VthreadSeq)
-	n, _ := strconv.ParseInt(val, 10, 64)
+	valV, _ := kv.Get(keytree.VthreadSeq)
+	n, _ := strconv.ParseInt(valV.Str(), 10, 64)
 	n++
-	kv.Set(keytree.VthreadSeq, strconv.FormatInt(n, 10))
+	kv.Set(keytree.VthreadSeq, kvspace.Str(strconv.FormatInt(n, 10)))
 	return fmt.Sprintf("%d", n)
 }
 
