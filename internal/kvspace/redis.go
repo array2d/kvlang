@@ -2,7 +2,7 @@ package kvspace
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"strings"
 	"sync"
 	"time"
@@ -13,7 +13,6 @@ import (
 var bg = context.Background()
 
 // value 以 "->" 开头表示软链接（类比 ls: "name -> target"）。
-// kvlang 数据（opcode/路径/签名/JSON）均不以此起始，碰撞风险极低。
 const linkSentinel = "->"
 
 func Conn(dsn string) KVSpace { return ConnPool(dsn, 16) }
@@ -43,12 +42,10 @@ type redisImpl struct {
 	links map[string]string
 }
 
-// ── 软链接 ───────────────────────────────────────────────────────
-
-// Link 和 Unlink 直接读写 Redis，不走 resolve，避免穿透到旧 target。
+// ── 软链接 ───────────────────────────────────────────────────────────────────
 
 func (r *redisImpl) Link(target, linkpath string) error {
-	if err := r.rdb.Set(bg, linkpath, linkSentinel+target, 0).Err(); err != nil {
+	if err := r.rdb.Set(bg, linkpath, []byte(linkSentinel+target), 0).Err(); err != nil {
 		return err
 	}
 	r.maintainIndex(linkpath, true)
@@ -70,7 +67,6 @@ func (r *redisImpl) Unlink(linkpath string) error {
 }
 
 // checkLink 返回 path 的链接 target；非链接返回 ""。
-// 缓存缺失时直接 GET Redis（不走 r.Get，避免递归 resolve）。
 func (r *redisImpl) checkLink(path string) string {
 	r.linkMu.RLock()
 	t, known := r.links[path]
@@ -78,9 +74,9 @@ func (r *redisImpl) checkLink(path string) string {
 	if known {
 		return t
 	}
-	val, _ := r.rdb.Get(bg, path).Result()
-	if strings.HasPrefix(val, linkSentinel) {
-		t = val[len(linkSentinel):]
+	raw, _ := r.rdb.Get(bg, path).Bytes()
+	if len(raw) >= 2 && raw[0] == '-' && raw[1] == '>' {
+		t = string(raw[2:])
 	}
 	r.linkMu.Lock()
 	r.links[path] = t
@@ -88,8 +84,7 @@ func (r *redisImpl) checkLink(path string) string {
 	return t
 }
 
-// resolveCore 路径解析核心：逐 '/' 边界从短到长查链接，替换后重扫，上限 40 跳防环。
-// lookup 返回非空 = 该路径是链接；"" = 非链接。
+// resolveCore 路径解析核心：逐 '/' 边界从短到长查链接，上限 40 跳防环。
 func resolveCore(path string, lookup func(string) string) string {
 	for range 40 {
 		found := false
@@ -114,14 +109,20 @@ func resolveCore(path string, lookup func(string) string) string {
 	return path
 }
 
+// ── CRUD ─────────────────────────────────────────────────────────────────────
 
-// ── CRUD ─────────────────────────────────────────────────────────
-
-func (r *redisImpl) Get(key string) (string, error) {
-	return r.rdb.Get(bg, resolveCore(key, r.checkLink)).Result()
+func (r *redisImpl) Get(key string) (Value, error) {
+	raw, err := r.rdb.Get(bg, resolveCore(key, r.checkLink)).Bytes()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return Value{}, ErrNotFound
+		}
+		return Value{}, err
+	}
+	return DecodeValue(raw), nil
 }
 
-func (r *redisImpl) Gets(keys ...string) ([]string, error) {
+func (r *redisImpl) GetMany(keys []string) ([]Value, error) {
 	resolved := make([]string, len(keys))
 	for i, k := range keys {
 		resolved[i] = resolveCore(k, r.checkLink)
@@ -130,32 +131,32 @@ func (r *redisImpl) Gets(keys ...string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	result := make([]string, len(raw))
+	result := make([]Value, len(raw))
 	for i, v := range raw {
 		if v != nil {
-			result[i] = fmt.Sprint(v)
+			result[i] = DecodeValue([]byte(v.(string)))
 		}
 	}
 	return result, nil
 }
 
-func (r *redisImpl) Set(key string, value any) error {
+func (r *redisImpl) Set(key string, val Value) error {
 	resolved := resolveCore(key, r.checkLink)
 	r.maintainIndex(resolved, true)
-	return r.rdb.Set(bg, resolved, value, 0).Err()
+	return r.rdb.Set(bg, resolved, EncodeValue(val), 0).Err()
 }
 
-func (r *redisImpl) Sets(kvs map[string]any) error {
-	if len(kvs) == 0 {
+func (r *redisImpl) SetMany(pairs []KVPair) error {
+	if len(pairs) == 0 {
 		return nil
 	}
-	pairs := make([]any, 0, len(kvs)*2)
-	for k, v := range kvs {
-		resolved := resolveCore(k, r.checkLink)
+	args := make([]any, 0, len(pairs)*2)
+	for _, p := range pairs {
+		resolved := resolveCore(p.Key, r.checkLink)
 		r.maintainIndex(resolved, true)
-		pairs = append(pairs, resolved, v)
+		args = append(args, resolved, EncodeValue(p.Val))
 	}
-	return r.rdb.MSet(bg, pairs...).Err()
+	return r.rdb.MSet(bg, args...).Err()
 }
 
 func (r *redisImpl) Del(keys ...string) error {
@@ -167,7 +168,7 @@ func (r *redisImpl) Del(keys ...string) error {
 	return r.rdb.Del(bg, resolved...).Err()
 }
 
-func (r *redisImpl) DelR(prefix string) error {
+func (r *redisImpl) DelTree(prefix string) error {
 	if r.checkLink(prefix) != "" {
 		return r.Unlink(prefix) // 链接只删链接，不动 target 树
 	}
@@ -181,24 +182,27 @@ func (r *redisImpl) List(prefix string) ([]string, error) {
 	return r.rdb.SMembers(bg, resolveCore(prefix, r.checkLink)+"/.").Result()
 }
 
-func (r *redisImpl) Watch(key string, timeout time.Duration) (string, error) {
+func (r *redisImpl) Watch(key string, timeout time.Duration) (Value, error) {
 	vals, err := r.rdb.BLPop(bg, timeout, resolveCore(key, r.checkLink)).Result()
 	if err != nil {
-		return "", err
+		if errors.Is(err, redis.Nil) {
+			return Value{}, ErrNotFound
+		}
+		return Value{}, err
 	}
 	if len(vals) < 2 {
-		return "", nil
+		return Value{}, ErrNotFound
 	}
-	return vals[1], nil
+	return DecodeValue([]byte(vals[1])), nil
 }
 
-func (r *redisImpl) Notify(key string, value any) error {
-	return r.rdb.LPush(bg, resolveCore(key, r.checkLink), value).Err()
+func (r *redisImpl) Notify(key string, val Value) error {
+	return r.rdb.LPush(bg, resolveCore(key, r.checkLink), EncodeValue(val)).Err()
 }
 
 func (r *redisImpl) DisConn() error { return r.rdb.Close() }
 
-// ── 内部工具 ──────────────────────────────────────────────────────
+// ── 内部工具 ──────────────────────────────────────────────────────────────────
 
 func (r *redisImpl) delRecursive(prefix string) {
 	children, _ := r.rdb.SMembers(bg, prefix+"/.").Result()
@@ -208,8 +212,6 @@ func (r *redisImpl) delRecursive(prefix string) {
 	r.rdb.Del(bg, prefix, prefix+"/.")
 }
 
-// maintainIndex 维护目录索引（调用方须传已 resolve 的路径）。
-// /a/b/c → SADD /a/. b，SADD /a/b/. c，…（所有祖先层级）
 func (r *redisImpl) maintainIndex(key string, add bool) {
 	prefix := ""
 	for _, p := range strings.Split(key, "/")[1:] {
