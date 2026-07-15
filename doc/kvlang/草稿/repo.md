@@ -19,17 +19,17 @@
 
 ### 改进项（按优先级）
 
-**P0 — 必须有**:
-- [ ] **添加 LICENSE**（MIT 或 Apache 2.0）。无 LICENSE 的开源项目 star 数天然打折。
-- [ ] **README 加英文版**（`README.md` → `README_CN.md`，新建 `README.md` 英文）。GitHub 默认流量是英文。
+**P0 — 已完成**:
+- [x] **添加 LICENSE**（MIT）
+- [x] **README 加英文版** + mermaid 架构图
+- [x] **GitHub Actions CI** + badge
+- [x] **打 tag v0.1.0** + CHANGELOG
 
-**P1 — 显著提升**:
-- [ ] **架构图**：一张 mermaid/svg 图展示 `kvlang → parser → layoutcode → lower → opcode → vthread → kvspace → Redis` 流水线
-- [ ] **5 分钟快速入门**：README 中一个完整可跑的 hello world（含预期输出）
-
-**P2 — 锦上添花**:
-- [ ] **语言规范独立文件**（`doc/LANGUAGE_SPEC.md`）：从 grammar.bnf 扩展出语义说明
-- [ ] **API 参考**：builtin 函数一览表
+**P1**:
+- [x] **CONTRIBUTING.md**
+- [x] **Issue 模板**（bug report + feature request）
+- [x] **ROADMAP.md**
+- [x] **5 分钟入门教程**（`tutorial/` 目录，6 步渐进）
 
 ---
 

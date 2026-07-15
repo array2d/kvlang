@@ -1,0 +1,10 @@
+// 02-vars: variables and paths
+// Run: kvlang tutorial/02-vars/main.kv
+
+str.set("kvlangrun") -> './term'
+
+42 -> './x'                         // write 42 to path './x'
+print("x =", './x')                 // read from path './x'
+
+'./x' + 8 -> './y'                  // 42 + 8 = 50
+print("y =", './y')

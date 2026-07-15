@@ -129,6 +129,25 @@ print("fib =", './result')    // → fib = 55
 
 ---
 
+## Tutorial
+
+Get started in 5 minutes with progressive examples:
+
+| Step | Topic | Code |
+|------|-------|------|
+| [01](tutorial/01-hello/main.kv) | Hello World | `print("hello kvlang")` |
+| [02](tutorial/02-vars/main.kv) | Variables | `42 -> './x'` |
+| [03](tutorial/03-arith/main.kv) | Arithmetic | `10 + 3`, `pow(2,5)`, `sqrt(144)` |
+| [04](tutorial/04-func/main.kv) | Functions | `def add(...)` |
+| [05](tutorial/05-if/main.kv) | Control Flow | `if (x < 0) { ... }` |
+| [06](tutorial/06-recursion/main.kv) | Recursion | `fib(10)`, `fact(10)` with TCO |
+
+```bash
+kvlang tutorial/01-hello/main.kv    # run any tutorial step
+```
+
+---
+
 ## Examples
 
 179 example programs, graded P0–P3:

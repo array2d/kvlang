@@ -1,0 +1,17 @@
+// 03-arith: arithmetic operations
+// Run: kvlang tutorial/03-arith/main.kv
+
+str.set("kvlangrun") -> './term'
+
+print("add:", 10 + 3)              // 13
+print("sub:", 10 - 3)              // 7
+print("mul:", 10 * 3)              // 30
+print("div:", 10 / 3)              // 3 (int division)
+print("fdiv:", 10.0 / 3.0)        // 3.333...
+
+// math builtins
+print("pow:", pow(2, 5))           // 32
+print("sqrt:", sqrt(144))          // 12
+print("abs:", abs(-42))            // 42
+print("max:", max(3, 7, 1))        // 7
+print("min:", min(3, 7, 1))        // 1
