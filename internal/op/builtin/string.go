@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"kvlang/internal/keytree"
+	"kvlang/internal/kvspace"
 	"kvlang/internal/logx"
 	"kvlang/internal/op"
 	"kvlang/internal/vthread"
@@ -14,7 +15,7 @@ func (strOp) Call(f *op.Frame) error {
 	if len(inputs) > 0 { val = inputs[0].String() }
 	if len(f.Inst.Writes) > 0 {
 		wKey := resolveWriteKey(keytree.FrameRoot(f.PC), f.Inst.Writes[0])
-		if err := f.KV.Set(wKey, val); err != nil {
+		if err := f.KV.Set(wKey, kvspace.Str(val)); err != nil {
 			vthread.SetError(bg, f.KV, f.Vtid, f.PC, err.Error())
 			return err
 		}

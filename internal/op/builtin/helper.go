@@ -34,7 +34,7 @@ func readInputs(f *op.Frame) []nativeValue {
 func writeResult(f *op.Frame, result nativeValue) error {
 	if len(f.Inst.Writes) > 0 {
 		outKey := resolveWriteKey(keytree.FrameRoot(f.PC), f.Inst.Writes[0])
-		if err := f.KV.Set(outKey, result.String()); err != nil { return err }
+		if err := f.KV.Set(outKey, kvspace.Str(result.String())); err != nil { return err }
 	}
 	vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
 	return nil
@@ -52,7 +52,7 @@ func ExecuteCopy(kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) erro
 	val := resolveReadValue(kv, framePath, inst.Opcode)
 	for _, w := range inst.Writes {
 		key := resolveWriteKey(framePath, w)
-		if err := kv.Set(key, val); err != nil {
+		if err := kv.Set(key, kvspace.Str(val)); err != nil {
 			return err
 		}
 	}

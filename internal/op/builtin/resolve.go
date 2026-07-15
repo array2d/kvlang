@@ -70,15 +70,15 @@ func resolveReadValue(kv kvspace.KVSpace, framePath, param string) string {
 	}
 	if isRelative(param) {
 		val, _ := kv.Get(framePath + "/" + param[2:])
-		return val
+		return val.Str()
 	}
 	if isAbsolute(param) {
 		val, _ := kv.Get(param)
-		return val
+		return val.Str()
 	}
 	if isImmediateNumber(param) || isImmediateBool(param) {
 		return param
 	}
 	val, _ := kv.Get(framePath + "/" + param)
-	return val
+	return val.Str()
 }
