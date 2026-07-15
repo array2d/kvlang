@@ -104,7 +104,8 @@ func (c *cpu) Execute(pc string) error {
 		}
 
 		// 读取指令执行后更新的 PC
-		newPC, _ := c.kv.Get(keytree.VThreadPC(vtid))
+		newPCVal, _ := c.kv.Get(keytree.VThreadPC(vtid))
+		newPC := newPCVal.Str()
 		if newPC == "" {
 			break
 		}

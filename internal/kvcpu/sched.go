@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"kvlang/internal/keytree"
+	"kvlang/internal/kvspace"
 	"kvlang/internal/logx"
 )
 
@@ -23,16 +24,17 @@ func (c *cpu) pick(ctx context.Context) string {
 			continue
 		}
 
-		status, err := c.kv.Get(keytree.VThreadStatus(vtid))
-		if err != nil || status != "init" {
+		statusVal, err := c.kv.Get(keytree.VThreadStatus(vtid))
+		if err != nil || statusVal.Str() != "init" {
 			continue
 		}
 
 		// 原子抢占：status → running
-		c.kv.Set(keytree.VThreadStatus(vtid), "running")
+		c.kv.Set(keytree.VThreadStatus(vtid), kvspace.Str("running"))
 
 		// 读取绝对 PC
-		pc, _ := c.kv.Get(keytree.VThreadPC(vtid))
+		pcVal, _ := c.kv.Get(keytree.VThreadPC(vtid))
+		pc := pcVal.Str()
 		if pc == "" {
 			// 兜底：PC 尚未写入时从 vtid 构造
 			pc = keytree.VThreadSlot(vtid, "", 0, 0)
@@ -53,7 +55,7 @@ func (c *cpu) wait(ctx context.Context) {
 		}
 		return
 	}
-	if val != "" {
-		logx.Debug("wait: notify vtid=%s", val)
+	if s := val.Str(); s != "" {
+		logx.Debug("wait: notify vtid=%s", s)
 	}
 }

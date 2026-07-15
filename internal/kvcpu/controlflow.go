@@ -102,17 +102,21 @@ func resolveLabel(kv kvspace.KVSpace, framePath, label string) string {
 		return label
 	}
 	// 优先用根函数名（TCO 不改变 .rootfunc）
-	if rootFunc, err := kv.Get(framePath + "/.rootfunc"); err == nil && rootFunc != "" {
-		qualified := rootFunc + "/" + label
-		if pkg, err := kv.Get(keytree.FuncIdx(qualified)); err == nil && pkg != "" {
-			return qualified
+	if v, err := kv.Get(framePath + "/.rootfunc"); err == nil {
+		if rootFunc := v.Str(); rootFunc != "" {
+			qualified := rootFunc + "/" + label
+			if pv, err := kv.Get(keytree.FuncIdx(qualified)); err == nil && pv.Str() != "" {
+				return qualified
+			}
 		}
 	}
 	// 兼容旧路径：用当前块函数名
-	if funcName, err := kv.Get(framePath + "/.func"); err == nil && funcName != "" {
-		qualified := funcName + "/" + label
-		if pkg, err := kv.Get(keytree.FuncIdx(qualified)); err == nil && pkg != "" {
-			return qualified
+	if v, err := kv.Get(framePath + "/.func"); err == nil {
+		if funcName := v.Str(); funcName != "" {
+			qualified := funcName + "/" + label
+			if pv, err := kv.Get(keytree.FuncIdx(qualified)); err == nil && pv.Str() != "" {
+				return qualified
+			}
 		}
 	}
 	return label

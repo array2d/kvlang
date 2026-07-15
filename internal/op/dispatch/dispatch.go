@@ -69,7 +69,7 @@ func resolveParam(ctx context.Context, kv kvspace.KVSpace, vtid, param string) P
 		return ref
 	}
 	var meta map[string]interface{}
-	if json.Unmarshal([]byte(val), &meta) != nil {
+	if json.Unmarshal([]byte(val.Str()), &meta) != nil {
 		return ref
 	}
 	if dtype, ok := meta["dtype"].(string); ok {
@@ -163,7 +163,7 @@ func Compute(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.
 	task := buildOpTask(ctx, kv, vtid, pc, inst)
 	cmdQueue := keytree.SysOpCmd(backend, n)
 	taskJSON, _ := json.Marshal(task)
-	if err := kv.Notify(cmdQueue, taskJSON); err != nil {
+	if err := kv.Notify(cmdQueue, kvspace.Bytes(taskJSON)); err != nil {
 		return fmt.Errorf("push task: %w", err)
 	}
 	logx.Debug("[%s] PUSH %s → %s", vtid, inst.Opcode, cmdQueue)

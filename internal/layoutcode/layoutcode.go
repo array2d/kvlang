@@ -49,13 +49,13 @@ func writeStmt(kv kvspace.KVSpace, st ast.Stmt, prefix string, idx *int) {
 		n := *idx
 		opcode, reads := s.Flat()
 		if opcode != "" {
-			kv.Set(fmt.Sprintf("%s/[%d,0]", prefix, n), opcode)
+			kv.Set(fmt.Sprintf("%s/[%d,0]", prefix, n), kvspace.Str(opcode))
 		}
 		for j, r := range reads {
-			kv.Set(fmt.Sprintf("%s/[%d,-%d]", prefix, n, j+1), r)
+			kv.Set(fmt.Sprintf("%s/[%d,-%d]", prefix, n, j+1), kvspace.Str(r))
 		}
 		for j, w := range s.Writes {
-			kv.Set(fmt.Sprintf("%s/[%d,%d]", prefix, n, j+1), w)
+			kv.Set(fmt.Sprintf("%s/[%d,%d]", prefix, n, j+1), kvspace.Str(w))
 		}
 		*idx = n + 1
 	case *ast.BlockStmt:
@@ -76,19 +76,20 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	vtid := keytree.VtidFromPC(pc)
 	funcName := inst.Reads[0]
 
-	pkg, err := kv.Get(keytree.FuncIdx(funcName))
+	pkgVal, err := kv.Get(keytree.FuncIdx(funcName))
+	pkg := pkgVal.Str()
 	if err != nil || pkg == "" {
 		vthread.SetError(ctx, kv, vtid, pc, "func not found: "+funcName)
 		return ""
 	}
 	funcKey := keytree.Func(pkg, funcName)
 
-	sig, err := kv.Get(funcKey)
+	sigVal, err := kv.Get(funcKey)
 	if err != nil {
 		vthread.SetError(ctx, kv, vtid, pc, "func signature not found: "+funcName)
 		return ""
 	}
-	funcSig := parser.ParseFuncSig(sig)
+	funcSig := parser.ParseFuncSig(sigVal.Str())
 
 	// TCO：复用当前帧，仅重链 _fn 到目标块代码区
 	if tail {
@@ -98,7 +99,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 			vthread.SetError(ctx, kv, vtid, pc, "tco link failed: "+err.Error())
 			return ""
 		}
-		kv.Set(frameRoot+"/.func", funcName)
+		kv.Set(frameRoot+"/.func", kvspace.Str(funcName))
 		return keytree.FnCode(frameRoot) + "/[0,0]"
 	}
 
@@ -113,22 +114,22 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	}
 
 	// 存储帧元数据
-	kv.Set(frameRoot+"/.callpc", pc)
-	kv.Set(frameRoot+"/.func", funcName)
-	kv.Set(frameRoot+"/.rootfunc", funcName) // 根函数名（TCO 不更新，供 resolveLabel 用）
+	kv.Set(frameRoot+"/.callpc", kvspace.Str(pc))
+	kv.Set(frameRoot+"/.func", kvspace.Str(funcName))
+	kv.Set(frameRoot+"/.rootfunc", kvspace.Str(funcName)) // 根函数名（TCO 不更新，供 resolveLabel 用）
 
 	// 绑定参数：从调用方帧解析实参值后写入子帧（不经过链接）
 	for i, param := range funcSig.ParamNames() {
 		if i+1 < len(inst.Reads) {
 			resolved := builtin.ResolveReadValue(kv, callerFrameRoot, inst.Reads[i+1])
-			kv.Set(frameRoot+"/"+param, resolved)
+			kv.Set(frameRoot+"/"+param, kvspace.Str(resolved))
 		}
 	}
 
 	// 存储调用方写槽（return 时写入父帧）
 	for i := range funcSig.ReturnNames() {
 		if i < len(inst.Writes) {
-			kv.Set(fmt.Sprintf("%s/.ret%d", frameRoot, i), inst.Writes[i])
+			kv.Set(fmt.Sprintf("%s/.ret%d", frameRoot, i), kvspace.Str(inst.Writes[i]))
 		}
 	}
 
@@ -151,7 +152,8 @@ func HandleReturn(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.I
 	// 读取本帧第一个返回值（供顶层 return 用）
 	var returnValue string
 	if len(inst.Reads) > 0 && strings.HasPrefix(inst.Reads[0], "./") {
-		returnValue, _ = kv.Get(frameRoot + "/" + inst.Reads[0][2:])
+		v, _ := kv.Get(frameRoot + "/" + inst.Reads[0][2:])
+		returnValue = v.Str()
 	}
 
 	// 顶层 return：frameRoot 就是 vthreadRoot
@@ -160,24 +162,26 @@ func HandleReturn(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.I
 	}
 
 	// 读取 callPC（在 cleanup 前）
-	callPC, _ := kv.Get(frameRoot + "/.callpc")
+	callPCVal, _ := kv.Get(frameRoot + "/.callpc")
+	callPC := callPCVal.Str()
 
 	// 将所有返回值写入父帧的对应写槽（.ret0, .ret1, ...）
 	if callPC != "" {
 		parentFrameRoot := keytree.FrameRoot(callPC)
 		for i, read := range inst.Reads {
 			retKey := fmt.Sprintf("%s/.ret%d", frameRoot, i)
-			retTarget, _ := kv.Get(retKey)
+			retTargetVal, _ := kv.Get(retKey)
+			retTarget := retTargetVal.Str()
 			if strings.HasPrefix(retTarget, "./") {
-				val, _ := kv.Get(frameRoot + "/" + read[2:])
-				kv.Set(parentFrameRoot+"/"+retTarget[2:], val)
+				v, _ := kv.Get(frameRoot + "/" + read[2:])
+				kv.Set(parentFrameRoot+"/"+retTarget[2:], v)
 			}
 		}
 	}
 
-	// 清理帧：先 Unlink 代码区，再 DelR 帧根（params / .ret0 / .callpc / .func）
+	// 清理帧：先 Unlink 代码区，再 DelTree 帧根（params / .ret0 / .callpc / .func）
 	kv.Unlink(keytree.FnCode(frameRoot))
-	kv.DelR(frameRoot)
+	kv.DelTree(frameRoot)
 
 	if callPC == "" {
 		return "", ""
@@ -191,8 +195,8 @@ func RegisterBlocks(kv kvspace.KVSpace, pkg, parent string, body []ast.Stmt) {
 	for _, st := range body {
 		if b, ok := st.(*ast.BlockStmt); ok {
 			blockKey := keytree.Func(pkg, parent+"/"+b.Label)
-			kv.Set(blockKey, "def "+b.Label+"() -> ()")
-			kv.Set(keytree.FuncIdx(parent+"/"+b.Label), pkg)
+			kv.Set(blockKey, kvspace.Str("def "+b.Label+"() -> ()"))
+			kv.Set(keytree.FuncIdx(parent+"/"+b.Label), kvspace.Str(pkg))
 			RegisterBlocks(kv, pkg, parent+"/"+b.Label, b.Body)
 		}
 	}
@@ -205,9 +209,9 @@ func RegisterBlocks(kv kvspace.KVSpace, pkg, parent string, body []ast.Stmt) {
 //  4. 块标签写入 /func/<pkg>/<name>/<label>/
 //  5. 反向索引写入 /func/idx/<name>
 func WriteFunc(kv kvspace.KVSpace, pkg string, fn *ast.Func) {
-	kv.Set(keytree.Src(pkg, fn.Sig.Name), fn.FullText())
-	kv.Set(keytree.Func(pkg, fn.Sig.Name), fn.Sig.String())
+	kv.Set(keytree.Src(pkg, fn.Sig.Name), kvspace.Str(fn.FullText()))
+	kv.Set(keytree.Func(pkg, fn.Sig.Name), kvspace.Str(fn.Sig.String()))
 	WriteBody(kv, pkg, fn.Sig.Name, fn.Body)
 	RegisterBlocks(kv, pkg, fn.Sig.Name, fn.Body)
-	kv.Set(keytree.FuncIdx(fn.Sig.Name), pkg)
+	kv.Set(keytree.FuncIdx(fn.Sig.Name), kvspace.Str(pkg))
 }

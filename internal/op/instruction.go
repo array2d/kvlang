@@ -36,23 +36,27 @@ func Decode(ctx context.Context, kv kvspace.KVSpace, pc string) (*Instruction, e
 		keys = append(keys, fmt.Sprintf("%s/[%d,%d]", keyBase, addr0, i))
 	}
 
-	vals, err := kv.Gets(keys...)
+	vals, err := kv.GetMany(keys)
 	if err != nil {
 		return nil, fmt.Errorf("Decode MGET: %w", err)
 	}
 
 	inst := &Instruction{}
-	if vals[0] != "" {
-		inst.Opcode = vals[0]
+	if s := vals[0].Str(); s != "" {
+		inst.Opcode = s
 	}
 	for i := 1; i <= maxParams; i++ {
 		readIdx := (i-1)*2 + 1
 		writeIdx := readIdx + 1
-		if readIdx < len(vals) && vals[readIdx] != "" {
-			inst.Reads = append(inst.Reads, vals[readIdx])
+		if readIdx < len(vals) {
+			if s := vals[readIdx].Str(); s != "" {
+				inst.Reads = append(inst.Reads, s)
+			}
 		}
-		if writeIdx < len(vals) && vals[writeIdx] != "" {
-			inst.Writes = append(inst.Writes, vals[writeIdx])
+		if writeIdx < len(vals) {
+			if s := vals[writeIdx].Str(); s != "" {
+				inst.Writes = append(inst.Writes, s)
+			}
 		}
 	}
 	return inst, nil
