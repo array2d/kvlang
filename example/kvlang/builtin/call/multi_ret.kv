@@ -1,12 +1,20 @@
-# multi_ret: function with C-style body that computes 3 results from 2 inputs
+# multi_ret: 验证多返回值各槽独立正确绑定（CR-4）
+# 层级: P1
+# 规则: CR-4
+# 期望输出:
+#   S = 10
+#   D = 4
+#   P = 21
+
+str.set("kvlangrun") -> ./term
+
 def analyze(A:int, B:int) -> (S:int, D:int, P:int) {
     ./S <- A + B
     ./D <- A - B
     ./P <- A * B
 }
 
-str.set("kvlangrun") -> ./term
-
-# Top-level call: analyze(7, 3) -> (./sum, ./diff, ./prod)
 analyze(7, 3) -> (./sum, ./diff, ./prod)
-# Expected: sum=10, diff=4, prod=21
+print("S =", ./sum)
+print("D =", ./diff)
+print("P =", ./prod)

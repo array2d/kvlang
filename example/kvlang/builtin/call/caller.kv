@@ -1,9 +1,19 @@
-# caller: calls callee to add two numbers
-def caller(A:int, B:int) -> (C:int) {
-    callee(A, B) -> ./C
-}
+# caller: 验证调用链正确传播结果（CR-7）
+# caller → add_inner：结果正确传至顶层
+# 层级: P1
+# 规则: CR-7
+# 期望输出:
+#   C = 5
 
 str.set("kvlangrun") -> ./term
 
-# Top-level call: caller(2, 3) -> ./out (calls callee internally)
-caller(2, 3) -> ./out
+def add_inner(X:int, Y:int) -> (Z:int) {
+    X + Y -> ./Z
+}
+
+def caller_fn(A:int, B:int) -> (C:int) {
+    add_inner(A, B) -> ./C
+}
+
+caller_fn(2, 3) -> ./out
+print("C =", ./out)

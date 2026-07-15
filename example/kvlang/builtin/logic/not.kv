@@ -1,10 +1,15 @@
+# not: 验证 ! 在 !T 下产生 false（向后兼容测试）
+# 层级: P1
+# 规则: logic/!
+# 等价类: !T → false
+# 期望输出:
+#   C = false
+
+str.set("kvlangrun") -> ./term
+
 def native_not(A:bool) -> (C:bool) {
-    print("A =", A)
     ./C <- !A
     print("C =", ./C)
 }
 
-str.set("kvlangrun") -> ./term
-
-# Top-level call: native_not(true) -> ./out
 native_not(true) -> ./out
