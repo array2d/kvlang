@@ -27,6 +27,7 @@ import (
 	"kvlang/internal/keytree"
 	"kvlang/internal/kvspace"
 	"kvlang/internal/op"
+	"kvlang/internal/op/builtin"
 	"kvlang/internal/parser"
 	"kvlang/internal/vthread"
 )
@@ -69,9 +70,8 @@ func writeStmt(kv kvspace.KVSpace, st ast.Stmt, prefix string, idx *int) {
 // HandleCall 执行 CALL：链接函数指令树，绑定参数，存储返回槽。
 //
 // pc 为调用指令的绝对路径（如 /vthread/42/_fn/[3,0]）。
-// 返回被调帧第一条指令的绝对 PC，失败时返回 pc 原值。
-//
-// 帧根 = keytree.ChildFrameRoot(pc)，不是链接节点，故参数写入安全。
+// tail=true 时执行 TCO：复用当前帧，仅重链 _fn（br/goto 路径）。
+// 返回被调帧第一条指令的绝对 PC；失败时返回 ""（不再返回 pc，避免"PC == 失败"歧义）。
 func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Instruction, tail bool) string {
 	vtid := keytree.VtidFromPC(pc)
 	funcName := inst.Reads[0]
@@ -79,34 +79,49 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	pkg, err := kv.Get(keytree.FuncIdx(funcName))
 	if err != nil || pkg == "" {
 		vthread.SetError(ctx, kv, vtid, pc, "func not found: "+funcName)
-		return pc
+		return ""
 	}
 	funcKey := keytree.Func(pkg, funcName)
 
 	sig, err := kv.Get(funcKey)
 	if err != nil {
 		vthread.SetError(ctx, kv, vtid, pc, "func signature not found: "+funcName)
-		return pc
+		return ""
 	}
 	funcSig := parser.ParseFuncSig(sig)
 
-	// 帧根：callPC 本身或 parentFrameRoot+"/"+coord（依 ChildFrameRoot 定义）
+	// TCO：复用当前帧，仅重链 _fn 到目标块代码区
+	if tail {
+		frameRoot := keytree.FrameRoot(pc)
+		kv.Unlink(keytree.FnCode(frameRoot))
+		if err := kv.Link(funcKey, keytree.FnCode(frameRoot)); err != nil {
+			vthread.SetError(ctx, kv, vtid, pc, "tco link failed: "+err.Error())
+			return ""
+		}
+		kv.Set(frameRoot+"/.func", funcName)
+		return keytree.FnCode(frameRoot) + "/[0,0]"
+	}
+
+	// 普通 call：从调用方帧解析实参后绑定到子帧
+	callerFrameRoot := keytree.FrameRoot(pc)
 	frameRoot := keytree.ChildFrameRoot(pc)
 
 	// 链接只读指令区：frameRoot/_fn → /func/<pkg>/<name>
 	if err := kv.Link(funcKey, keytree.FnCode(frameRoot)); err != nil {
 		vthread.SetError(ctx, kv, vtid, pc, "link failed: "+err.Error())
-		return pc
+		return ""
 	}
 
-	// 存储帧元数据（.callpc 供 HandleReturn 恢复，.func 供 resolveLabel）
+	// 存储帧元数据
 	kv.Set(frameRoot+"/.callpc", pc)
 	kv.Set(frameRoot+"/.func", funcName)
+	kv.Set(frameRoot+"/.rootfunc", funcName) // 根函数名（TCO 不更新，供 resolveLabel 用）
 
-	// 绑定参数（帧局部变量，不经过链接）
+	// 绑定参数：从调用方帧解析实参值后写入子帧（不经过链接）
 	for i, param := range funcSig.ParamNames() {
 		if i+1 < len(inst.Reads) {
-			kv.Set(frameRoot+"/"+param, inst.Reads[i+1])
+			resolved := builtin.ResolveReadValue(kv, callerFrameRoot, inst.Reads[i+1])
+			kv.Set(frameRoot+"/"+param, resolved)
 		}
 	}
 

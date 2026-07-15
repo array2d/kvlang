@@ -141,7 +141,17 @@ func (p *parser) parsePrimaryExpr() *ast.Expr {
 	}
 
 	// 叶节点：变量名、字面量、路径、裸操作码
-	return ast.Leaf(p.advance().Value)
+	t = p.advance()
+	// 引号字符串（非数字、非路径）：加 " 前缀编码，供 resolveReadValue 识别
+	if t.Kind == Literal {
+		v := t.Value
+		isNum := len(v) > 0 && v[0] >= '0' && v[0] <= '9'
+		isPath := len(v) >= 2 && (v[:2] == "./" || v[0] == '/')
+		if !isNum && !isPath {
+			return ast.Leaf(`"` + v)
+		}
+	}
+	return ast.Leaf(t.Value)
 }
 
 // ── 写槽收集 ──────────────────────────────────────────────────

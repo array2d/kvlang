@@ -82,7 +82,13 @@ func (c *cpu) Execute(pc string) error {
 		case vtype.Lookup(inst.Opcode) != nil:
 			execErr = vtype.Lookup(inst.Opcode).Exec(ctx, c.kv, vtid, pc, inst)
 
-		// ── 4. 用户定义函数（default → rewrite as call）─────────────────
+		// ── 4. 路径/变量复制（ ./x -> dst 或 /abs -> dst）─────────────
+		//    当 opcode 为路径或裸标识符且有写槽时，视为"读值→写槽"的 copy 操作。
+		//    语法：./A -> ./R  编译为 opcode="./A" writes=["./R"]，无参数。
+		case isCopyOp(inst.Opcode, inst.Writes):
+			execErr = builtin.ExecuteCopy(c.kv, vtid, pc, inst)
+
+		// ── 5. 用户定义函数（default → rewrite as call）─────────────────
 		//    不含 dot、不在任何静态集合 → 必然是用户 func
 		//    HandleCall 负责 FuncIdx 查找；未找到 → SetError + Notify SysVMErr
 		default:
@@ -105,6 +111,14 @@ func (c *cpu) Execute(pc string) error {
 		pc = newPC
 	}
 	return nil
+}
+
+// isCopyOp 判断是否为路径/变量复制操作。
+// 条件：opcode 以 ./ 或 / 开头（路径引用），且有写槽（写入目标）。
+func isCopyOp(opcode string, writes []string) bool {
+	return len(writes) > 0 &&
+		(len(opcode) >= 2 && opcode[:2] == "./" ||
+			len(opcode) >= 1 && opcode[0] == '/')
 }
 
 // RunWorker 单个 worker 的主循环。

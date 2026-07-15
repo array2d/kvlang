@@ -21,7 +21,7 @@ func handleControl(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, ins
 	switch inst.Opcode {
 	case op.OpCall:
 		substackPC := layoutcode.HandleCall(ctx, kv, pc, inst, false)
-		if substackPC == pc {
+		if substackPC == "" {
 			return fmt.Errorf("call %s failed", inst.Reads[0])
 		}
 		vthread.Set(ctx, kv, vtid, substackPC, "running")
@@ -39,6 +39,9 @@ func handleControl(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, ins
 		vthread.Set(ctx, kv, vtid, parentPC, "running")
 		return nil
 
+	case op.OpGoto:
+		return gotoBlock(ctx, kv, vtid, pc, inst)
+
 	case op.OpBr:
 		return brToCall(ctx, kv, vtid, pc, inst)
 
@@ -47,8 +50,26 @@ func handleControl(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, ins
 	}
 }
 
+// gotoBlock 处理 goto(label)：TCO 跳转至同函数内的目标块。
+// 复用当前帧（不创建子帧），重新链接 _fn 到目标块代码区。
+func gotoBlock(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) error {
+	if len(inst.Reads) == 0 {
+		return fmt.Errorf("goto requires label")
+	}
+	framePath := keytree.FrameRoot(pc)
+	label := resolveLabel(kv, framePath, inst.Reads[0])
+	callInst := &op.Instruction{Opcode: op.OpCall, Reads: []string{label}}
+	substackPC := layoutcode.HandleCall(ctx, kv, pc, callInst, true)
+	if substackPC == "" {
+		return fmt.Errorf("goto %s failed", label)
+	}
+	vthread.Set(ctx, kv, vtid, substackPC, "running")
+	logx.Debug("[%s] GOTO → %s", vtid, substackPC)
+	return nil
+}
+
 // brToCall 处理 br(cond, trueLabel, falseLabel)：
-// 根据条件选择分支，rewrite 为 call 进入目标块。
+// 根据条件选择分支，TCO 跳转至目标块。
 func brToCall(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) error {
 	if len(inst.Reads) < 3 {
 		return fmt.Errorf("br requires 3 args: cond trueLabel falseLabel")
@@ -62,8 +83,8 @@ func brToCall(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op
 	}
 	qualified := resolveLabel(kv, framePath, label)
 	callInst := &op.Instruction{Opcode: op.OpCall, Reads: []string{qualified}}
-	substackPC := layoutcode.HandleCall(ctx, kv, pc, callInst, false)
-	if substackPC == pc {
+	substackPC := layoutcode.HandleCall(ctx, kv, pc, callInst, true)
+	if substackPC == "" {
 		return fmt.Errorf("br call %s failed", qualified)
 	}
 	vthread.Set(ctx, kv, vtid, substackPC, "running")
@@ -71,12 +92,23 @@ func brToCall(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op
 }
 
 // resolveLabel 在函数上下文中将 label 解析为完整函数路径。
-// 若 label 已包含 / 则直接使用；否则从帧的 .func 字段取当前函数名拼接。
+//
+// 优先级：
+//  1. label 已含 "/" → 直接返回（编译器生成的完全限定标签）
+//  2. /.rootfunc + "/" + label → 根函数级别（用户书写的裸标签，TCO 不影响）
+//  3. /.func + "/" + label → 当前块级别（保留兼容性）
 func resolveLabel(kv kvspace.KVSpace, framePath, label string) string {
 	if strings.Contains(label, "/") {
 		return label
 	}
-	// 当前函数名由 HandleCall 存入 framePath/.func
+	// 优先用根函数名（TCO 不改变 .rootfunc）
+	if rootFunc, err := kv.Get(framePath + "/.rootfunc"); err == nil && rootFunc != "" {
+		qualified := rootFunc + "/" + label
+		if pkg, err := kv.Get(keytree.FuncIdx(qualified)); err == nil && pkg != "" {
+			return qualified
+		}
+	}
+	// 兼容旧路径：用当前块函数名
 	if funcName, err := kv.Get(framePath + "/.func"); err == nil && funcName != "" {
 		qualified := funcName + "/" + label
 		if pkg, err := kv.Get(keytree.FuncIdx(qualified)); err == nil && pkg != "" {

@@ -75,6 +75,26 @@ func (t Token) String() string {
 	return fmt.Sprintf("%s(%q)@%d:%d", t.Kind, t.Value, t.Pos.Line, t.Pos.Col)
 }
 
+// 语言关键字字符串常量（供 keywords 表和注释使用）。
+const kwReturn   = "return"
+const kwIf       = "if"
+const kwElse     = "else"
+const kwFor      = "for"
+const kwWhile    = "while"
+const kwBreak    = "break"
+const kwContinue = "continue"
+
+// keywords 将语言关键字映射到对应 Token Kind。
+var keywords = map[string]Kind{
+	kwReturn:   Return,
+	kwIf:       If,
+	kwElse:     Else,
+	kwFor:      For,
+	kwWhile:    While,
+	kwBreak:    Break,
+	kwContinue: Continue,
+}
+
 // singleCharToken 将单字符标点映射到对应 Kind。
 var singleCharToken = map[byte]Kind{
 	'(': LParen, ')': RParen, ',': Comma,
@@ -246,22 +266,9 @@ func Scan(src string) []Token {
 			continue
 		}
 		word := src[start:i]
-		switch word {
-		case "return":
-			tokens = append(tokens, Token{Kind: Return, Value: word, Pos: p})
-		case "if":
-			tokens = append(tokens, Token{Kind: If, Value: word, Pos: p})
-		case "else":
-			tokens = append(tokens, Token{Kind: Else, Value: word, Pos: p})
-		case "for":
-			tokens = append(tokens, Token{Kind: For, Value: word, Pos: p})
-		case "while":
-			tokens = append(tokens, Token{Kind: While, Value: word, Pos: p})
-		case "break":
-			tokens = append(tokens, Token{Kind: Break, Value: word, Pos: p})
-		case "continue":
-			tokens = append(tokens, Token{Kind: Continue, Value: word, Pos: p})
-		default:
+		if k, ok := keywords[word]; ok {
+			tokens = append(tokens, Token{Kind: k, Value: word, Pos: p})
+		} else {
 			tokens = append(tokens, Token{Kind: Ident, Value: word, Pos: p})
 		}
 	}

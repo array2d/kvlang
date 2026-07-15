@@ -318,6 +318,10 @@ if should_run "§12 run builtin native"; then
   fi
 fi
 
+section "§13 run controlflow/test_runner（32 断言全 PASS）"
+run_kv() { ./kvlang kvspace clear >/dev/null 2>&1 && timeout 30 $KV "$1"; }
+check_out "controlflow/test_runner ALL DONE" "ALL TESTS DONE" 'run_kv example/kvlang/controlflow/test_runner.kv'
+
 # ── 汇总 ─────────────────────────────────────────────────────────────────────
 echo
 echo "════════════════════════════════════"

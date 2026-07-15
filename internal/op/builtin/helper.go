@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"kvlang/internal/keytree"
+	"kvlang/internal/kvspace"
 	"kvlang/internal/op"
 	"kvlang/internal/vthread"
 )
@@ -42,4 +43,19 @@ func writeResult(f *op.Frame, result nativeValue) error {
 // nextPC 推进 PC，不写结果。
 func nextPC(f *op.Frame) {
 	vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
+}
+
+// ExecuteCopy 执行路径/变量复制：读取 inst.Opcode 引用的值，写入所有 writes 槽。
+// 用于处理 ./A -> ./gcd 形式的赋值指令（opcode = "./A"，无其他参数）。
+func ExecuteCopy(kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) error {
+	framePath := keytree.FrameRoot(pc)
+	val := resolveReadValue(kv, framePath, inst.Opcode)
+	for _, w := range inst.Writes {
+		key := resolveWriteKey(framePath, w)
+		if err := kv.Set(key, val); err != nil {
+			return err
+		}
+	}
+	vthread.Set(bg, kv, vtid, op.NextPC(pc), "running")
+	return nil
 }

@@ -59,8 +59,8 @@ func TestResolveCore_Cycle(t *testing.T) {
 }
 
 func TestResolveCore_PathSuffix_Preserved(t *testing.T) {
-	got := resolveCore("/vthread/t1/frame0/[3,-2]",
-		lookup(map[string]string{"/vthread/t1/frame0": "/func/pkg/add"}))
+	got := resolveCore("/frame/t1/frame0/[3,-2]",
+		lookup(map[string]string{"/frame/t1/frame0": "/func/pkg/add"}))
 	if got != "/func/pkg/add/[3,-2]" {
 		t.Errorf("got %q", got)
 	}

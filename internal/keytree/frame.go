@@ -45,12 +45,17 @@ func FrameRoot(pc string) string {
 //   callPC = parentFrameRoot + "/_fn/" + "[coord]"
 //   childFrameRoot = parentFrameRoot + "/" + "[coord]"
 //
-// 对顶层调用（callPC = /vthread/vtid/[0,0]，无 /_fn/）：
-//   childFrameRoot = callPC 本身（帧根含指令坐标）
+// 对顶层调用（callPC = /vthread/vtid/_fn/[0,0]，无嵌套 /_fn/）：
+//   parentFrameRoot = /vthread/vtid（vthread 根即 pre_main 帧根）
+//   childFrameRoot = parentFrameRoot + "/" + "[coord]" = /vthread/vtid/[0,0]
 func ChildFrameRoot(callPC string) string {
 	idx := strings.LastIndex(callPC, "/_fn/")
 	if idx < 0 {
-		// 顶层调用：callPC 本身就是帧根
+		// 无 /_fn/：初始调用时 callPC 形如 /vthread/vtid/[0,0]
+		// 返回去掉最后一段后的父路径（即 vthread 根）
+		if last := strings.LastIndex(callPC, "/"); last >= 0 {
+			return callPC[:last]
+		}
 		return callPC
 	}
 	// callPC[:idx] = parentFrameRoot, callPC[idx+5:] = "[coord]"
