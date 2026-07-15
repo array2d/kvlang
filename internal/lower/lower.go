@@ -94,7 +94,7 @@ func lowerBody(stmts []ast.Stmt, lg *labelGen) []ast.Stmt {
 
 // lowerIfWithCont 将 IfStmt 降级为四块结构，续体注入 merge block。
 // 所有内层块（嵌套 if/while 产生的 BlockStmt）从 then/else/cont 体内提升到函数顶层，
-// 确保所有块均为兄弟节点（扁平 SSA 结构），与 RegisterBlocks 保持一致。
+// 确保所有块均为兄弟节点（读写码结构），与 RegisterBlocks 保持一致。
 //
 //	pre... goto _if_N
 //	_if_N:   { evalCond; br(cond, fn/_then_N, fn/_else_N) }
@@ -118,6 +118,11 @@ func lowerIfWithCont(pre []ast.Stmt, s *ast.IfStmt, cont []ast.Stmt, lg *labelGe
 	elseInsts, elseBlocks := splitInstsAndBlocks(injectGoto(lowerBody(s.Else, lg), lg.parent, mergeLabel))
 	contInsts, contBlocks := splitInstsAndBlocks(cont)
 
+	// 修复：提升出来的内层块（如嵌套 if 的 merge 块）也需要正确跳到当前 mergeLabel。
+	// injectGoto 只处理最后一个块；中间无终止符的块（如嵌套 else 的空 merge）需要补全。
+	injectGotoBlocks(thenBlocks, lg.parent, mergeLabel)
+	injectGotoBlocks(elseBlocks, lg.parent, mergeLabel)
+
 	entry := append(pre, gotoLabel(lg.parent, ifLabel))
 	result := append(entry,
 		&ast.BlockStmt{Label: ifLabel,    Body: condBody},
@@ -133,7 +138,7 @@ func lowerIfWithCont(pre []ast.Stmt, s *ast.IfStmt, cont []ast.Stmt, lg *labelGe
 }
 
 // lowerWhileWithCont 将 WhileStmt 降级为三块结构，续体注入 exit block。
-// 同 lowerIfWithCont，内层块从 body/cont 中提升到函数顶层（扁平 SSA 结构）。
+// 同 lowerIfWithCont，内层块从 body/cont 中提升到函数顶层（读写码结构）。
 //
 //	pre... goto _while_N
 //	_while_N: { evalCond; br(cond, fn/_do_N, fn/_exit_N) }
@@ -151,6 +156,9 @@ func lowerWhileWithCont(pre []ast.Stmt, s *ast.WhileStmt, cont []ast.Stmt, lg *l
 	condBody  = append(condBody, brInst(condSlot, lg.parent+"/"+bodyLabel, lg.parent+"/"+exitLabel))
 
 	bodyInsts, bodyBlocks := splitInstsAndBlocks(injectGoto(lowerBody(s.Body, lg), lg.parent, condLabel))
+	// 修复：提升出来的所有内层块也需要跳回 while 条件块（lowerIfWithCont 已为其注入 goto 合并块，
+	// 但最外层合并块本身仍可能缺少 goto _while_N）。
+	injectGotoBlocks(bodyBlocks, lg.parent, condLabel)
 	contInsts, contBlocks := splitInstsAndBlocks(cont)
 
 	entry := append(pre, gotoLabel(lg.parent, condLabel))
@@ -165,7 +173,7 @@ func lowerWhileWithCont(pre []ast.Stmt, s *ast.WhileStmt, cont []ast.Stmt, lg *l
 }
 
 // splitInstsAndBlocks 将语句列表分为非块语句（指令/goto/return）和块语句两组，
-// 用于将嵌套块从 then/else/body/cont 中提升到函数顶层（扁平 SSA 结构）。
+// 用于将嵌套块从 then/else/body/cont 中提升到函数顶层（读写码结构）。
 func splitInstsAndBlocks(stmts []ast.Stmt) (insts, blocks []ast.Stmt) {
 	for _, s := range stmts {
 		if _, ok := s.(*ast.BlockStmt); ok {
@@ -175,6 +183,17 @@ func splitInstsAndBlocks(stmts []ast.Stmt) (insts, blocks []ast.Stmt) {
 		}
 	}
 	return
+}
+
+// injectGotoBlocks 对切片中每个 BlockStmt 的 body 逐一调用 injectGoto。
+// 仅在块无终止符时才注入，已有终止符的块不受影响。
+// 用于修复提升出来的内层块（如深层嵌套 if 的 merge 块）缺少跳转的问题。
+func injectGotoBlocks(stmts []ast.Stmt, parent, label string) {
+	for _, s := range stmts {
+		if b, ok := s.(*ast.BlockStmt); ok {
+			b.Body = injectGoto(b.Body, parent, label)
+		}
+	}
 }
 
 // injectGoto 在 body 的最后非终止点追加 goto 指令。
@@ -289,7 +308,7 @@ func gotoLabel(parent, label string) *ast.Instruction {
 
 // appendReturn 递归为所有块补充隐式 return。
 //
-// 扁平 SSA 结构下函数体中每个块均可能是出口块（如 if-merge、while-exit），
+// 读写码结构下函数体中每个块均可能是出口块（如 if-merge、while-exit），
 // 必须对 ALL BlockStmt 递归注入，而非只处理最后一个块。
 //
 // 规则：
@@ -301,7 +320,7 @@ func appendReturn(body []ast.Stmt, sig ast.FuncSig) []ast.Stmt {
 	if len(body) == 0 {
 		return []ast.Stmt{makeReturnInst(sig)}
 	}
-	// 对函数体内所有 BlockStmt 递归注入（扁平 SSA 中每块都可能是出口）
+	// 对函数体内所有 BlockStmt 递归注入（读写码中每块都可能是出口）
 	for _, s := range body {
 		if b, ok := s.(*ast.BlockStmt); ok {
 			b.Body = appendReturn(b.Body, sig)

@@ -148,7 +148,7 @@ func HandleReturn(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.I
 
 	frameRoot := keytree.FrameRoot(pc)
 
-	// 读取本帧返回值
+	// 读取本帧第一个返回值（供顶层 return 用）
 	var returnValue string
 	if len(inst.Reads) > 0 && strings.HasPrefix(inst.Reads[0], "./") {
 		returnValue, _ = kv.Get(frameRoot + "/" + inst.Reads[0][2:])
@@ -162,11 +162,17 @@ func HandleReturn(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.I
 	// 读取 callPC（在 cleanup 前）
 	callPC, _ := kv.Get(frameRoot + "/.callpc")
 
-	// 将返回值写入父帧的写槽
-	retTarget, _ := kv.Get(frameRoot + "/.ret0")
-	if strings.HasPrefix(retTarget, "./") && callPC != "" {
+	// 将所有返回值写入父帧的对应写槽（.ret0, .ret1, ...）
+	if callPC != "" {
 		parentFrameRoot := keytree.FrameRoot(callPC)
-		kv.Set(parentFrameRoot+"/"+retTarget[2:], returnValue)
+		for i, read := range inst.Reads {
+			retKey := fmt.Sprintf("%s/.ret%d", frameRoot, i)
+			retTarget, _ := kv.Get(retKey)
+			if strings.HasPrefix(retTarget, "./") {
+				val, _ := kv.Get(frameRoot + "/" + read[2:])
+				kv.Set(parentFrameRoot+"/"+retTarget[2:], val)
+			}
+		}
 	}
 
 	// 清理帧：先 Unlink 代码区，再 DelR 帧根（params / .ret0 / .callpc / .func）
