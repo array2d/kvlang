@@ -1,10 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"kvlang/internal/keytree"
 	"kvlang/internal/kvspace"
@@ -16,7 +18,7 @@ func cmdKVSpace(args []string) {
 	addr := fs.String("addr", "127.0.0.1:6379", "Redis 地址 (host:port)")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: kvlang kvspace [--addr host:port] <subcommand> [args]")
-		fmt.Fprintln(os.Stderr, "subcommands: get mget set del list tree dump watch notify clear")
+		fmt.Fprintln(os.Stderr, "subcommands: get mget set del list tree dump watch notify clear trace")
 		fs.PrintDefaults()
 	}
 	fs.Parse(args)
@@ -79,6 +81,16 @@ func cmdKVSpace(args []string) {
 
 	case "clear":
 		clearAll(kv)
+
+	case "trace":
+		// trace 监听 /vthread/<vtid>/.debug.pause 上的暂停事件，
+		// 将每个事件输出为一行 NDJSON，并自动发送 "step" 使程序继续执行。
+		// 用于捕获已开启调试模式（.debug = "step"）的 vthread 的执行轨迹。
+		//
+		// 用法：kvlang kvspace trace <vtid>
+		// 配合：先用 kvlang kvspace set /vthread/<vtid>/.debug "step" 开启调试
+		if len(sub) < 2 { usageExit("kvlang kvspace trace <vtid>") }
+		kvTrace(kv, sub[1])
 
 	default:
 		fmt.Fprintf(os.Stderr, "unknown kvspace subcommand: %s\n", sub[0])
@@ -148,4 +160,53 @@ func dumpPrefix(kv kvspace.KVSpace, prefix string) {
 	}
 	children, _ := kv.List(prefix)
 	for _, c := range children { dumpPrefix(kv, prefix+"/"+c) }
+}
+
+// kvTrace 监听 /vthread/<vtid>/.debug.pause 上的暂停事件。
+//
+// 每收到一条暂停事件（JSON），将其原样输出为一行 NDJSON（stdout），
+// 然后自动向 /vthread/<vtid>/.debug.resume 发送 "step"，驱动 CPU 执行下一条指令。
+//
+// 终止条件：
+//   - 连续超时（30 s 无事件）：认为程序已结束
+//   - os.Interrupt（Ctrl-C）
+//
+// 用于配合 kvlang kvspace set /vthread/<vtid>/.debug "step" 捕获程序执行轨迹，
+// 输出结果可直接送入 jq / 其他 NDJSON 工具分析。
+func kvTrace(kv kvspace.KVSpace, vtid string) {
+	pauseKey  := keytree.VThreadDebugPause(vtid)
+	resumeKey := keytree.VThreadDebugResume(vtid)
+	statusKey := keytree.VThreadStatus(vtid)
+
+	const watchTimeout = 10 * time.Second
+	const maxIdle      = 3 // 连续超时次数上限
+
+	idle := 0
+	for {
+		val, err := kv.Watch(pauseKey, watchTimeout)
+		if err != nil {
+			// 超时：检查 vthread 是否已终止
+			idle++
+			statusVal, serr := kv.Get(statusKey)
+			if serr != nil || statusVal.IsNil() || idle >= maxIdle {
+				// vthread 已终止或长期无活动 → 正常结束 trace
+				return
+			}
+			continue
+		}
+		idle = 0
+
+		// 将暂停事件输出为一行 NDJSON
+		// val 本身是 CPU 投递的 JSON 字符串，直接输出即可
+		raw := val.Str()
+		if raw == "" {
+			// 空通知（不常见），构造最小 JSON
+			out, _ := json.Marshal(map[string]any{"vtid": vtid, "note": "empty-pause"})
+			raw = string(out)
+		}
+		fmt.Println(raw)
+
+		// 自动发送 "step"，驱动 CPU 继续执行下一条指令
+		kv.Notify(resumeKey, kvspace.Str("step")) //nolint:errcheck
+	}
 }

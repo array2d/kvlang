@@ -30,6 +30,7 @@ func showHelp() {
 	fmt.Fprintln(os.Stderr, "  watch <key> [--timeout 5s]     阻塞等待通知")
 	fmt.Fprintln(os.Stderr, "  notify <key> <value>           推送通知")
 	fmt.Fprintln(os.Stderr, "  clear                          清空所有 kvspace 数据")
+	fmt.Fprintln(os.Stderr, "  trace <vtid>                   追踪 vthread 单步执行，输出 NDJSON")
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, "全局选项:")
 	fmt.Fprintln(os.Stderr, "  --addr host:port               Redis 地址（默认 127.0.0.1:6379）")

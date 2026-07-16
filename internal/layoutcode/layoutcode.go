@@ -223,12 +223,15 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 	kv.Set(vthreadRoot+"/.rootfunc", kvspace.Str(funcName))
 
 	// 绑定入参（若有）
+	// 使用 ResolveReadValue 而非 kvspace.Str，确保字面量（如 "3"、"true"）
+	// 以正确的类型（int/bool）写入帧，与 HandleCall 的参数绑定语义保持一致。
+	// 否则数字参数会被存储为 string，导致 le/lt 等比较操作进入 strCmp 分支。
 	if len(args) > 0 {
 		sigVal, _ := kv.Get(funcKey)
 		sig := parser.ParseFuncSig(sigVal.Str())
 		for i, param := range sig.ParamNames() {
 			if i < len(args) {
-				kv.Set(vthreadRoot+"/"+param, kvspace.Str(args[i]))
+				kv.Set(vthreadRoot+"/"+param, builtin.ResolveReadValue(kv, "", args[i]))
 			}
 		}
 	}

@@ -52,6 +52,27 @@ func VThreadStatusMsg(vtid, statusVal string) string {
 // VThreadAt 返回 /vthread/<vtid>/<key>，通用路径构造（仅供引擎内部调试使用）
 func VThreadAt(vtid, key string) string { return "/vthread/" + vtid + "/" + key }
 
+// ── 调试标志（引擎保留，. 前缀）────────────────────────────────────────────
+//
+// 所有 kvcpu 实例在 execute 循环中自动检查这三个键，无需特殊启动方式。
+// Agent 通过已有 kvspace 命令读写这些键来控制调试行为。
+//
+//	.debug         调试控制键（agent 写，CPU 读）
+//	               ""/"" = 正常执行；"step" = 每条指令后暂停；"break:<func>" = 函数入口暂停
+//	.debug.pause   暂停事件键（CPU 写 Notify，agent 用 Watch 等待）
+//	               值：JSON {"pc":"...","func":"...","frame":"...","op":"..."}
+//	.debug.resume  恢复命令键（agent 写 Notify，CPU 用 Watch 等待）
+//	               值："step"（执行一步继续暂停）| "continue"（恢复全速）| "abort"（终止）
+
+// VThreadDebug 返回 /vthread/<vtid>/.debug（调试控制键）
+func VThreadDebug(vtid string) string { return "/vthread/" + vtid + "/.debug" }
+
+// VThreadDebugPause 返回 /vthread/<vtid>/.debug.pause（CPU → agent 暂停事件）
+func VThreadDebugPause(vtid string) string { return "/vthread/" + vtid + "/.debug.pause" }
+
+// VThreadDebugResume 返回 /vthread/<vtid>/.debug.resume（agent → CPU 恢复命令）
+func VThreadDebugResume(vtid string) string { return "/vthread/" + vtid + "/.debug.resume" }
+
 // VtidFromPC 从绝对 PC 提取 vtid。
 //
 //	"/vthread/42/[0,0]" → "42"
