@@ -61,4 +61,6 @@ var registry = map[string]Op{
 	OpCerr:   ioOp{print: true, cerr: true},
 	OpInput:  ioOp{input: true},
 	OpStrSet: strOp{},
+	OpKVHas:  kvHasOp{},
+	OpKVAt:   kvAtOp{},
 }

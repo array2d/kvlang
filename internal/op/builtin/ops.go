@@ -69,6 +69,12 @@ const (
 	OpStrSet = "string.set"
 )
 
+// KV 遍历 built-in（for 循环遍历 kvspace 路径子项）
+const (
+	OpKVHas = "kv.has"
+	OpKVAt  = "kv.at"
+)
+
 // nativeOps 定义 VM 原生求值的算子集合。
 var nativeOps = map[string]bool{
 	OpAdd: true, OpSub: true, OpMul: true, OpDiv: true, OpMod: true,
@@ -79,6 +85,7 @@ var nativeOps = map[string]bool{
 	OpInt: true, OpFloat: true, OpBool: true,
 	OpPrint: true, OpCerr: true, OpInput: true,
 	OpStrSet: true,
+	OpKVHas: true, OpKVAt: true,
 }
 
 // IsNativeOp 判断是否为 VM 原生求值的符号算子。
