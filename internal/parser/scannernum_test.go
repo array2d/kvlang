@@ -58,7 +58,7 @@ func TestScanNumeric_InExpression(t *testing.T) {
 		// Scientific in expression
 		{"3.14e-5 + 2", "3.14e-5 + 2"},
 		// Arrow expression
-		{"1e+10 -> ./x", "1e+10 -> ./x"},
+		{"1e+10 -> x", "1e+10 -> x"},
 	}
 
 	for _, tc := range tests {
@@ -85,10 +85,10 @@ func TestParseNumericLiteral_InvalidProducesDiagnostic(t *testing.T) {
 		wantContains string
 	}{
 		// 对标 Go: "exponent has no digits"
-		{"def f()->(){ 1e -> ./x }", "invalid numeric literal"},
-		{"def f()->(){ 42e+ -> ./x }", "invalid numeric literal"},
-		{"def f()->(){ 3.14e -> ./x }", "invalid numeric literal"},
-		{"def f()->(){ 1E- -> ./x }", "invalid numeric literal"},
+		{"def f()->(){ 1e -> x }", "invalid numeric literal"},
+		{"def f()->(){ 42e+ -> x }", "invalid numeric literal"},
+		{"def f()->(){ 3.14e -> x }", "invalid numeric literal"},
+		{"def f()->(){ 1E- -> x }", "invalid numeric literal"},
 		// Valid numbers should NOT produce diagnostics
 	}
 	for _, tc := range tests {
@@ -114,12 +114,12 @@ func TestParseNumericLiteral_InvalidProducesDiagnostic(t *testing.T) {
 
 func TestParseNumericLiteral_ValidNoDiagnostic(t *testing.T) {
 	tests := []string{
-		"def f()->(){ 1e10 -> ./x }",
-		"def f()->(){ 1e+10 -> ./x }",
-		"def f()->(){ 3.14e-5 -> ./x }",
-		"def f()->(){ 42 -> ./x }",
-		"def f()->(){ -7 -> ./x }",
-		"def f()->(){ 0 -> ./x }",
+		"def f()->(){ 1e10 -> x }",
+		"def f()->(){ 1e+10 -> x }",
+		"def f()->(){ 3.14e-5 -> x }",
+		"def f()->(){ 42 -> x }",
+		"def f()->(){ -7 -> x }",
+		"def f()->(){ 0 -> x }",
 	}
 	for _, src := range tests {
 		src := src
