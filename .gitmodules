@@ -1,0 +1,3 @@
+[submodule "kvlang-design"]
+	path = kvlang-design
+	url = git@github.com:array2d/kvlang-design.git

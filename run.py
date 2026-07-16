@@ -298,10 +298,10 @@ def main() -> None:
             ok("serve → add(10,20) = 30")
         else:
             fail(f"serve → add(10,20) = 30 (out: {out[:120]})")
-        if "entry=pre_main" in result.stderr:
-            ok("serve stderr 含 entry=pre_main")
+        if "entry=init" in result.stderr:
+            ok("serve stderr 含 entry=init")
         else:
-            fail(f"serve stderr 含 entry=pre_main (stderr: {result.stderr[:200]})")
+            fail(f"serve stderr 含 entry=init (stderr: {result.stderr[:200]})")
     except subprocess.TimeoutExpired:
         fail("serve → 集成测试 (timeout)")
 
