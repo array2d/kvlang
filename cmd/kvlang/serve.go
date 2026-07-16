@@ -20,19 +20,33 @@ import (
 	"kvlang/internal/vthread"
 )
 
-// executeEntry 创建 vthread 并同步执行 pre_main（单次模式）。
-func executeEntry(kv kvspace.KVSpace) {
+// executeEntry 创建 vthread 并同步执行 init（单次模式）。
+//
+// debug=true 时在执行前设置 .debug="step"，启动交互式单步调试代理。
+func executeEntry(kv kvspace.KVSpace, debug bool) {
 	ctx := context.Background()
 	const vtid = "run"
-	firstPC := layoutcode.Bootstrap(ctx, kv, vtid, "pre_main", nil)
+	firstPC := layoutcode.Bootstrap(ctx, kv, vtid, "init", nil)
 	if firstPC == "" {
-		logx.Fatal("[single] Bootstrap pre_main failed")
+		logx.Fatal("[single] Bootstrap init failed")
 	}
 	vthread.Set(ctx, kv, vtid, firstPC, "init")
-	// 自动绑定进程标准终端：registerDefaultTerm 已将进程 stdout/stderr/stdin
-	// 注册为 "kvlangrun"，此处将 vthread 绑定到该终端，无需在 .kv 代码里写
-	// `"kvlangrun" -> ./term`。
+	// 自动绑定进程标准终端
 	kv.Set(keytree.VThreadTerm(vtid), kvspace.Str("kvlangrun"))
+
+	if debug {
+		// 在执行开始前设置单步标志，CPU 会在第一条函数入口处检测到并暂停
+		kv.Set(keytree.VThreadDebug(vtid), kvspace.Str("step"))
+		done := make(chan struct{})
+		go runDebugAgent(kv, vtid, done)
+		logx.Info("[single] debug mode: executing %s", firstPC)
+		cpu := kvcpu.New(kv, "single")
+		cpu.Execute(firstPC)
+		close(done)
+		fmt.Fprintln(os.Stderr, "\n[dbg] execution finished")
+		return
+	}
+
 	logx.Info("[single] executing %s", firstPC)
 	cpu := kvcpu.New(kv, "single")
 	cpu.Execute(firstPC)

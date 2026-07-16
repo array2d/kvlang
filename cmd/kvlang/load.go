@@ -46,28 +46,29 @@ func cmdLoad(args []string) {
 // cmdRun 解析参数并路由到对应执行路径：内联 / 文件 / 管道 / serve。
 func cmdRun(args []string) {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
-	addr := fs.String("addr", "127.0.0.1:6379", "Redis 地址 (host:port)")
-	code := fs.String("c", "", "内联代码（直接执行字符串）")
+	addr  := fs.String("addr", "127.0.0.1:6379", "Redis 地址 (host:port)")
+	code  := fs.String("c", "", "内联代码（直接执行字符串）")
+	debug := fs.Bool("debug", false, "单步调试模式（交互式，每条指令暂停）")
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: kvlang [--addr host:port] [-c code | <file.kv>]")
+		fmt.Fprintln(os.Stderr, "usage: kvlang [--addr host:port] [--debug] [-c code | <file.kv>]")
 		fs.PrintDefaults()
 	}
 	fs.Parse(args)
 
 	switch {
 	case *code != "":
-		runCode("inline", strings.NewReader(*code), *addr)
+		runCode("inline", strings.NewReader(*code), *addr, *debug)
 	case fs.NArg() > 0:
-		runFile(*addr, fs.Arg(0))
+		runFile(*addr, fs.Arg(0), *debug)
 	case !isTerminal():
-		runCode("stdin", os.Stdin, *addr)
+		runCode("stdin", os.Stdin, *addr, *debug)
 	default:
 		runServe(nil)
 	}
 }
 
 // runFile 加载 .kv 文件后单次执行。
-func runFile(addr, path string) {
+func runFile(addr, path string, debug bool) {
 	kv := kvspace.Conn(addr)
 	defer kv.DisConn()
 	registerDefaultTerm(kv)
@@ -77,11 +78,11 @@ func runFile(addr, path string) {
 	if len(files) == 0 { logx.Fatal("no .kv files found in: %s", path) }
 
 	loadFunctions(kv, files)
-	executeEntry(kv)
+	executeEntry(kv, debug)
 }
 
 // runCode 从 io.Reader 加载代码后单次执行（内联 / 管道模式）。
-func runCode(name string, rc io.Reader, addr string) {
+func runCode(name string, rc io.Reader, addr string, debug bool) {
 	kv := kvspace.Conn(addr)
 	defer kv.DisConn()
 	registerDefaultTerm(kv)
@@ -89,49 +90,35 @@ func runCode(name string, rc io.Reader, addr string) {
 	df, diags, err := parser.ParseCode(rc)
 	if err != nil { logx.Fatal("parse: %v", err) }
 	for _, d := range diags { logx.Warn("parse: %s", d) }
+	if len(df.Funcs) == 0 && len(df.TopLevelCalls) == 0 { logx.Fatal("no executable code found") }
 
-	hasMain := false
 	for i := range df.Funcs {
-		fn := lower.Func(&df.Funcs[i])
-		layoutcode.WriteFunc(kv, "main", fn)
-		if fn.Sig.Name == "main" { hasMain = true }
+		layoutcode.WriteFunc(kv, "main", lower.Func(&df.Funcs[i]))
 	}
-	calls := df.TopLevelCalls
-	if len(calls) == 0 && !hasMain { logx.Fatal("no executable code found") }
-
-	body := callsToStmts(calls)
-	if hasMain { body = append(body, &ast.Instruction{Expr: ast.Leaf("main"), Writes: []string{"./pre_main_ret"}}) }
-	preMain := ast.Func{Sig: ast.FuncSig{Name: "pre_main"}, Body: body}
-	preMain = *lower.Func(&preMain)
-	layoutcode.WriteFunc(kv, "main", &preMain)
-	kv.Set(keytree.FuncMain, kvspace.Str(`{"entry":"pre_main","reads":[],"writes":[]}`))
-
-	executeEntry(kv)
+	layoutcode.WriteFunc(kv, "main", makeInitFunc(df.TopLevelCalls))
+	kv.Set(keytree.FuncMain, kvspace.Str(`{"entry":"init","reads":[],"writes":[]}`))
+	executeEntry(kv, debug)
 }
 
-// loadFunctions 将多个 .kv 文件解析、lower 并写入 kvspace，合成 pre_main 入口。
+// loadFunctions 将多个 .kv 文件解析、lower 并写入 kvspace，合成 init 入口。
 func loadFunctions(kv kvspace.KVSpace, files []string) {
-	hasMain := false
 	var allCalls []*ast.Instruction
+	anyCode := false
 	for _, f := range files {
 		df, diags, err := parser.ParseFile(f)
 		if err != nil { logx.Warn("SKIP %s: %v", f, err); continue }
 		for _, d := range diags { logx.Warn("%s: %s", f, d) }
 		pkg := packageFromPath(f)
 		for i := range df.Funcs {
-			fn := lower.Func(&df.Funcs[i])
-			layoutcode.WriteFunc(kv, pkg, fn)
-			if fn.Sig.Name == "main" { hasMain = true }
+			layoutcode.WriteFunc(kv, pkg, lower.Func(&df.Funcs[i]))
+			anyCode = true
 		}
 		allCalls = append(allCalls, df.TopLevelCalls...)
+		if len(df.TopLevelCalls) > 0 { anyCode = true }
 	}
-	if len(allCalls) == 0 && !hasMain { logx.Fatal("no executable code found") }
-	body := callsToStmts(allCalls)
-	if hasMain { body = append(body, &ast.Instruction{Expr: ast.Leaf("main"), Writes: []string{"./pre_main_ret"}}) }
-	preMain := ast.Func{Sig: ast.FuncSig{Name: "pre_main"}, Body: body}
-	preMain = *lower.Func(&preMain)
-	layoutcode.WriteFunc(kv, "main", &preMain)
-	kv.Set(keytree.FuncMain, kvspace.Str(`{"entry":"pre_main","reads":[],"writes":[]}`))
+	if !anyCode { logx.Fatal("no executable code found") }
+	layoutcode.WriteFunc(kv, "main", makeInitFunc(allCalls))
+	kv.Set(keytree.FuncMain, kvspace.Str(`{"entry":"init","reads":[],"writes":[]}`))
 }
 
 // packageFromPath 从 .kv 文件路径中推导包名。
@@ -162,11 +149,17 @@ func collectKVFiles(path string) ([]string, error) {
 	return files, nil
 }
 
-// callsToStmts 将顶层调用列表转换为语句列表。
-func callsToStmts(calls []*ast.Instruction) []ast.Stmt {
-	stmts := make([]ast.Stmt, len(calls))
+// makeInitFunc 将所有顶层暴露指令封装为 init() 函数。
+//
+// kvlang 执行模型：
+//   - .kv 文件中所有顶层（函数定义外）的调用指令构成 init() 体
+//   - Bootstrap 始终以 init 为唯一入口启动 vthread
+//   - main() 是普通函数，无特殊地位；需执行时在顶层直接调用即可
+func makeInitFunc(calls []*ast.Instruction) *ast.Func {
+	body := make([]ast.Stmt, len(calls))
 	for i, inst := range calls {
-		stmts[i] = inst
+		body[i] = inst
 	}
-	return stmts
+	initFn := ast.Func{Sig: ast.FuncSig{Name: "init"}, Body: body}
+	return lower.Func(&initFn)
 }
