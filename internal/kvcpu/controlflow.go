@@ -75,7 +75,8 @@ func brToCall(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op
 		return fmt.Errorf("br requires 3 args: cond trueLabel falseLabel")
 	}
 	framePath := keytree.FrameRoot(pc)
-	isTrue := builtin.AsBool(builtin.ResolveReadValue(kv, framePath, inst.Reads[0]))
+	condVal := builtin.ResolveReadValue(kv, framePath, inst.Reads[0])
+	isTrue := builtin.AsBool(condVal)
 	label := inst.Reads[2]
 	if isTrue {
 		label = inst.Reads[1]

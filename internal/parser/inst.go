@@ -6,6 +6,7 @@ package parser
 
 import (
 	"fmt"
+	"strconv"
 
 	"kvlang/internal/ast"
 )
@@ -159,6 +160,15 @@ func (p *parser) parsePrimaryExpr() *ast.Expr {
 		isNum := isNumericLiteral(v)
 		isPath := len(v) >= 2 && (v[:2] == "./" || v[0] == '/')
 		if !isNum && !isPath {
+			// 语法错误：以数字开头的 Literal 必然是数字字面量意图，
+			// 但 isNumericLiteral 验证不通过（如 "1e"、"42e+"）。
+			// 对标 Go/Rust：无效科学计数法字面量 → 编译错误。
+			if len(v) > 0 && v[0] >= '0' && v[0] <= '9' {
+				p.errors = append(p.errors, Diagnostic{
+					Pos:     t.Pos,
+					Message: fmt.Sprintf("invalid numeric literal %q", v),
+				})
+			}
 			return ast.Leaf(`"` + v)
 		}
 	}
@@ -277,17 +287,19 @@ func (p *parser) parseCondInst() *ast.Instruction {
 
 func isUnaryPrefixOp(s string) bool { return s == "!" || s == "-" }
 
-// isNumericLiteral 判断字符串是否为合法数字字面量（仅含 0-9 . e E，且非空）。
-// 用于区分 Literal token 是"数字"还是"被引号包裹的字符串"。
-// 修复 S10：旧版本仅检查首字符，导致 "5*6 =" 之类被误判为数字。
+// isNumericLiteral 判断字符串是否为合法数字字面量。
+//
+// 对齐 Go strconv.ParseFloat 格式：接受 "42"、"3.14"、"1e10"、"1e+10"、"3.14e-5"。
+// 首字符必为数字（scanner 保证），其余由 strconv.ParseFloat 权威校验。
+//
+// 拒绝："e"、"."、"-"、"1e"（无效科学计数）、"+42"（scanner 不产生此类 token）。
 func isNumericLiteral(v string) bool {
 	if len(v) == 0 {
 		return false
 	}
-	for _, c := range v {
-		if !(c >= '0' && c <= '9' || c == '.' || c == 'e' || c == 'E') {
-			return false
-		}
+	if v[0] < '0' || v[0] > '9' {
+		return false // 首字符非数字 → 不是数字字面量
 	}
-	return true
+	_, err := strconv.ParseFloat(v, 64)
+	return err == nil
 }

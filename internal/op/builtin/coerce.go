@@ -54,17 +54,41 @@ func display(v kvspace.Value) string {
 	}
 }
 
-// parseLiteral parses an immediate operand string (from instruction slots) into a typed Value.
-func parseLiteral(s string) kvspace.Value {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "true":  return kvspace.Bool(true)
-	case "false": return kvspace.Bool(false)
+// tryParseNumber attempts to interpret s as a numeric literal.
+// Returns (value, true) on success; (zero, false) if s is not numeric.
+//
+// Design follows mainstream language runtimes (Go scanner, Python tokenizer,
+// Rust rustc_lexer): check only the first character for fast rejection, then
+// delegate actual parsing to strconv — the authoritative implementation.
+//
+//   "is it a number?" → first-char check  (O(1), no false positives)
+//   "what's the value?" → strconv          (correct for all IEEE 754 forms)
+//
+// kvlang note: the parser merges unary '-' with digit literals into a single
+// Leaf("-42"), so negative literals are handled here as a special case.
+// All other languages treat '-' as a separate unary-operator token.
+//
+// Accepts: "42"  "-7"  "3.14"  "1e10"  "-1.5e-3"
+// Rejects: "e"   "."   "-"     "abc"   ""
+func tryParseNumber(s string) (kvspace.Value, bool) {
+	if len(s) == 0 {
+		return kvspace.Value{}, false
 	}
+	c0 := s[0]
+	switch {
+	case c0 >= '0' && c0 <= '9':
+		// positive literal: integer, float, or scientific notation
+	case c0 == '-' && len(s) >= 2 && s[1] >= '0' && s[1] <= '9':
+		// negative literal: kvlang parser folds "-" + digit → Leaf("-42")
+	default:
+		return kvspace.Value{}, false
+	}
+	// Delegate to stdlib — handles all edge cases including scientific notation.
 	if i, err := strconv.ParseInt(s, 10, 64); err == nil {
-		return kvspace.Int(i)
+		return kvspace.Int(i), true
 	}
 	if f, err := strconv.ParseFloat(s, 64); err == nil {
-		return kvspace.Float(f)
+		return kvspace.Float(f), true
 	}
-	return kvspace.Str(s)
+	return kvspace.Value{}, false
 }

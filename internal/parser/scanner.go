@@ -234,11 +234,36 @@ func Scan(src string) []Token {
 			continue
 		}
 
-		// 数字字面量
+		// 数字字面量（对齐 Go strconv.ParseFloat 格式）：
+		//
+		//  integer = digits
+		//  fraction = "." digits
+		//  exponent = ("e" | "E") ["+" | "-"] digits
+		//  float = integer [fraction] [exponent]
+		//
+		// "1e+10"、"3.14e-5" 为单一 token，而非被 "+"/"-" 截断。
 		if c >= '0' && c <= '9' {
 			start := i
-			for i < len(src) && (src[i] >= '0' && src[i] <= '9' || src[i] == '.' || src[i] == 'e' || src[i] == 'E') {
+			// 整数部分
+			for i < len(src) && src[i] >= '0' && src[i] <= '9' {
 				i++
+			}
+			// 可选小数部分
+			if i < len(src) && src[i] == '.' {
+				i++
+				for i < len(src) && src[i] >= '0' && src[i] <= '9' {
+					i++
+				}
+			}
+			// 可选指数部分：e/E [+|-]? digits
+			if i < len(src) && (src[i] == 'e' || src[i] == 'E') {
+				i++
+				if i < len(src) && (src[i] == '+' || src[i] == '-') {
+					i++
+				}
+				for i < len(src) && src[i] >= '0' && src[i] <= '9' {
+					i++
+				}
 			}
 			tokens = append(tokens, Token{Kind: Literal, Value: src[start:i], Pos: p})
 			continue

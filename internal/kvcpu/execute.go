@@ -159,39 +159,47 @@ func (c *cpu) Execute(pc string) error {
 	return nil
 }
 
-// isCopyOp 判断是否为"值引用 → 写槽"操作。
-// 识别所有合法的值引用形式：路径引用、字面量（数字、布尔、引号字符串）。
+// isCopyOp reports whether this instruction is a value-copy rather than a call.
 //
-// 注：裸标识符（如 a、result）由 ast.Instruction.Flat() 归一化为 "./ident"，
-// 因此此处只需路径检查即可覆盖 "a -> b" 的情形，不需要单独的 isBareIdent 分支。
+// A "copy" instruction has the form  <value-ref> -> slot  where value-ref is
+// one of: a path, a literal (number / bool / string), or a slot name that
+// Flat() has already normalised to the "./ident" form.
 //
-//	./x    /abs   — 路径引用（含 Flat() 归一化后的裸标识符）
-//	0  3.14       — 数字字面量
-//	true  false   — 布尔字面量
-//	"hello"       — 引号字符串（parser 写入 " 前缀）
+// Dispatch table (all cases that are NOT a user-defined function name):
+//
+//	./x   /abs/path   path reference (Flat() normalises bare idents → "./ident")
+//	"hello"           quoted string literal  (parser writes '"' prefix)
+//	true  false       bool literal           (exact keyword)
+//	0  -7  3.14       numeric literal        (first char is digit or '-'+digit)
+//
+// Numeric fast-rejection: function names always start with a letter or '_',
+// so a first-character check is both necessary and sufficient — no need to
+// validate the full number here; ExecuteCopy → resolveReadValue will parse it.
 func isCopyOp(opcode string, writes []string) bool {
 	if len(writes) == 0 || len(opcode) == 0 {
 		return false
 	}
-	// 路径引用（含 ./ident 归一化结果）
-	if opcode[0] == '/' || len(opcode) >= 2 && opcode[:2] == "./" {
+	c0 := opcode[0]
+	// path reference (includes "./ident" form produced by Flat())
+	if c0 == '/' || len(opcode) >= 2 && opcode[:2] == "./" {
 		return true
 	}
-	// 引号字符串字面量
-	if opcode[0] == '"' {
+	// quoted string literal
+	if c0 == '"' {
 		return true
 	}
-	// 布尔字面量
+	// bool literal
 	if opcode == "true" || opcode == "false" {
 		return true
 	}
-	// 数字字面量：所有字符为 [0-9.eE]
-	for _, c := range opcode {
-		if !(c >= '0' && c <= '9' || c == '.' || c == 'e' || c == 'E') {
-			return false
-		}
+	// numeric literal: positive (digit) or negative ('-' followed by digit)
+	if c0 >= '0' && c0 <= '9' {
+		return true
 	}
-	return true
+	if c0 == '-' && len(opcode) >= 2 && opcode[1] >= '0' && opcode[1] <= '9' {
+		return true
+	}
+	return false
 }
 
 // RunWorker 单个 worker 的主循环。

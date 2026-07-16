@@ -2,19 +2,8 @@ package builtin
 
 import "kvlang/internal/kvspace"
 
-func isRelative(param string) bool  { return len(param) >= 2 && param[:2] == "./" }
-func isAbsolute(param string) bool  { return len(param) > 0 && param[0] == '/' }
-
-func isImmediateNumber(param string) bool {
-	if len(param) == 0 { return false }
-	for _, c := range param {
-		if c >= '0' && c <= '9' || c == '.' || c == 'e' || c == 'E' { continue }
-		return false
-	}
-	return true
-}
-
-func isImmediateBool(param string) bool { return param == "true" || param == "false" }
+func isRelative(param string) bool { return len(param) >= 2 && param[:2] == "./" }
+func isAbsolute(param string) bool { return len(param) > 0 && param[0] == '/' }
 
 // resolveWriteKey maps a write-slot param to an absolute KV key.
 func resolveWriteKey(framePath, param string) string {
@@ -31,14 +20,17 @@ func ResolveReadValue(kv kvspace.KVSpace, framePath, param string) kvspace.Value
 
 // resolveReadValue maps a read-slot param to a typed Value.
 //
-//	"X  → kvspace.Str("X")     — quoted string literal (parser writes " prefix)
-//	./x  → kv.Get(framePath/x)  — explicit-relative slot
-//	/abs → kv.Get(/abs)          — absolute path
-//	3    → kvspace.Int(3)        — numeric literal
-//	true → kvspace.Bool(true)    — bool literal
-//	x    → kv.Get(framePath/x)  — bare ident (same as ./x)
+//	"X   → kvspace.Str("X")      quoted string literal  (parser writes " prefix)
+//	./x  → kv.Get(framePath/x)   explicit-relative slot
+//	/abs → kv.Get(/abs)           absolute path
+//	true → kvspace.Bool(true)     bool literal           (exact match)
+//	42   → kvspace.Int(42)        numeric literal        (first-char + strconv)
+//	x    → kv.Get(framePath/x)   bare ident / slot reference
 func resolveReadValue(kv kvspace.KVSpace, framePath, param string) kvspace.Value {
-	if len(param) > 0 && param[0] == '"' {
+	if len(param) == 0 {
+		return kvspace.Value{}
+	}
+	if param[0] == '"' {
 		return kvspace.Str(param[1:])
 	}
 	if isRelative(param) {
@@ -49,9 +41,19 @@ func resolveReadValue(kv kvspace.KVSpace, framePath, param string) kvspace.Value
 		v, _ := kv.Get(param)
 		return v
 	}
-	if isImmediateNumber(param) || isImmediateBool(param) {
-		return parseLiteral(param)
+	// bool literals: exact match (parser always emits lowercase "true"/"false")
+	if param == "true"  { return kvspace.Bool(true) }
+	if param == "false" { return kvspace.Bool(false) }
+	// numeric literals: first-char fast rejection, then delegate to strconv
+	if v, ok := tryParseNumber(param); ok {
+		return v
 	}
+	// malformed numeric literal (starts with digit but ParseFloat failed, e.g. "1e").
+	// Parser should have caught this and issued a diagnostic; runtime returns zero.
+	if len(param) > 0 && param[0] >= '0' && param[0] <= '9' {
+		return kvspace.Value{} // invalid number → zero value, not a bare ident
+	}
+	// bare identifier → slot in current frame
 	v, _ := kv.Get(framePath + "/" + param)
 	return v
 }
