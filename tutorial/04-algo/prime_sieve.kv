@@ -1,0 +1,43 @@
+# prime_sieve: 试除法求质数（Rust The Book §3.5）
+# 算法: 嵌套 while 循环 + 试除，找出 <=30 的所有质数
+# 来源: Rust The Book §3.5 "Loops"
+# 层级: P3
+# 规则: P3-algo
+# 期望输出:
+#   prime: 2
+#   prime: 29
+#   total primes up to 30 = 10
+
+def prime_sieve(limit:int) -> () {
+    print("primes up to", limit)
+
+    0 -> count
+    2 -> n
+
+    while (n <= limit) {
+        1 -> is_prime
+        2 -> d
+
+        while (d < n) {
+            n % d -> rem
+            rem == 0 -> divisible
+            if (divisible) {
+                0 -> is_prime
+                n -> d
+            } else {
+                d + 1 -> d
+            }
+        }
+
+        if (is_prime) {
+            print("  prime:", n)
+            count + 1 -> count
+        }
+
+        n + 1 -> n
+    }
+
+    print("total primes up to", limit, "=", count)
+}
+
+prime_sieve(30) -> ()
