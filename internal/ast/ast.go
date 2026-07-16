@@ -113,19 +113,25 @@ func (fn *Func) FullText() string {
 
 // Expr 是 kvlang 表达式树节点（由 Pratt 解析器生成）。
 //
-// 叶节点（IsLeaf()==true）：Op == ""，Val 为操作数字符串（变量名/字面量/路径）。
+// 叶节点（IsLeaf()==true）：Op == ""，Val 为操作数字符串。
+// Quote 区分字符串字面量（true）和变量/数字/路径（false）。
+//
 // 内节点（IsLeaf()==false）：Op 为算子/函数名，Args 为操作数列表。
 type Expr struct {
-	Op   string  // 算子（"+","*"）/ 函数名（"f","string.set"）/ ""（叶节点）
-	Args []*Expr // 操作数（叶节点时为 nil）
-	Val  string  // 叶节点值（变量名、字面量或路径）
+	Op    string  // 算子（"+"）/ 函数名（"f"）/ ""（叶节点）
+	Args  []*Expr // 操作数（叶节点时为 nil）
+	Val   string  // 叶节点值
+	Quote bool    // true = 字符串字面量（源码中 "..." 包裹）
 }
 
-// IsLeaf 判断是否为叶节点（Op 为空）。
+// IsLeaf 判断是否为叶节点。
 func (e *Expr) IsLeaf() bool { return e != nil && e.Op == "" }
 
-// Leaf 构造叶节点（变量名、字面量或路径）。
+// Leaf 构造变量/数字/路径叶节点。
 func Leaf(v string) *Expr { return &Expr{Val: v} }
+
+// StrLit 构造字符串字面量叶节点。
+func StrLit(v string) *Expr { return &Expr{Val: v, Quote: true} }
 
 // Call 构造调用/操作节点（算子或函数名 + 操作数列表）。
 func Call(op string, args ...*Expr) *Expr { return &Expr{Op: op, Args: args} }
@@ -154,15 +160,10 @@ func (e *Expr) String() string {
 
 func (e *Expr) stringPrec(outerPrec int) string {
 	if e.IsLeaf() {
-		v := e.Val
-		// parser internal " prefix → restore as "content"
-		if len(v) > 0 && v[0] == '"' {
-			return "\"" + v[1:] + "\""
+		if e.Quote {
+			return "\"" + e.Val + "\""
 		}
-		if needsQuote(v) {
-			return "\"" + v + "\""
-		}
-		return v
+		return e.Val
 	}
 	// 二元中缀
 	if p, ok := infixPrecTable[e.Op]; ok && len(e.Args) == 2 {
@@ -209,8 +210,11 @@ func (i *Instruction) Flat() (opcode string, reads []string) {
 	}
 	if i.Expr.IsLeaf() {
 		v := i.Expr.Val
-		// 裸标识符 → ./ident，使 isCopyOp 的路径检查可直接识别
-		// 排除：路径前缀（./ /）、字符串字面量（" 前缀）、布尔字面量、数字字面量
+		// 字符串字面量 → " 前缀（KV 传输标记）
+		if i.Expr.Quote {
+			return "\"" + v, nil
+		}
+		// 裸标识符 → ./ident
 		if isBareIdentVal(v) {
 			return "./" + v, nil
 		}
@@ -218,7 +222,11 @@ func (i *Instruction) Flat() (opcode string, reads []string) {
 	}
 	opcode = i.Expr.Op
 	for _, arg := range i.Expr.Args {
-		reads = append(reads, arg.Val) // lower 保证 Args 均为叶节点
+		r := arg.Val
+		if arg.Quote {
+			r = "\"" + r
+		}
+		reads = append(reads, r)
 	}
 	return
 }
