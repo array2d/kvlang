@@ -4,34 +4,31 @@
 # 期望输出:
 #   0 F = -17.77777777777778 C
 #   300 F = 148.88888888888889 C
-
 def main() -> () {
-    0   -> data/0
-    20  -> data/1
-    40  -> data/2
-    60  -> data/3
-    80  -> data/4
-    100 -> data/5
-    120 -> data/6
-    140 -> data/7
-    160 -> data/8
-    180 -> data/9
-    200 -> data/10
-    220 -> data/11
-    240 -> data/12
-    260 -> data/13
-    280 -> data/14
-    300 -> data/15
-
-    for (fahr in data) {
-        factor <- 5.0 / 9.0        # <- style
-        diff <- fahr - 32
-        cels <- factor * diff
-        print(fahr, "F =", cels, "C")
-    }
-
-    cels <- /last_temp               # global read
-    print("global last_temp =", cels)
+	0 -> data/0
+	20 -> data/1
+	40 -> data/2
+	60 -> data/3
+	80 -> data/4
+	100 -> data/5
+	120 -> data/6
+	140 -> data/7
+	160 -> data/8
+	180 -> data/9
+	200 -> data/10
+	220 -> data/11
+	240 -> data/12
+	260 -> data/13
+	280 -> data/14
+	300 -> data/15
+	for (fahr in data) {
+		5.0 / 9.0 -> factor
+		fahr - 32 -> diff
+		factor * diff -> cels
+		print(fahr, "F =", cels, "C")
+	}
+	/last_temp -> cels
+	print("global last_temp =", cels)
 }
 
-main() -> ()
+main()

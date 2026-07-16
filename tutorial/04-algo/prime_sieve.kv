@@ -4,38 +4,34 @@
 #   prime: 2
 #   prime: 29
 #   total primes up to 30 = 10
-
 def prime_sieve(limit:int) -> () {
-    print("primes up to", limit)
+	print("primes up to", limit)
+	0 -> count
+	2 -> n
+	while (n <= limit) {
+		1 -> is_prime
+		2 -> d
+		while (d < n) {
+			n % d -> rem
+			rem == 0 -> divisible
 
-    count <- 0
-    n <- 2
+			if (divisible) {
+				0 -> is_prime
+				n -> d
+			} else {
+				d + 1 -> d
+			}
+		}
 
-    while (n <= limit) {
-        is_prime <- 1
-        d <- 2
+		if (is_prime) {
+			print("  prime:", n)
+			count + 1 -> count
+		}
 
-        while (d < n) {
-            n % d -> rem
-            rem == 0 -> divisible
-            if (divisible) {
-                is_prime <- 0
-                d <- n                  # break
-            } else {
-                d <- d + 1
-            }
-        }
-
-        if (is_prime) {
-            print("  prime:", n)
-            count <- count + 1
-        }
-
-        n <- n + 1
-    }
-
-    print("total primes up to", limit, "=", count)
-    count -> /last_primes           # global
+		n + 1 -> n
+	}
+	print("total primes up to", limit, "=", count)
+	count -> /last_primes
 }
 
-prime_sieve(30) -> ()
+prime_sieve(30)

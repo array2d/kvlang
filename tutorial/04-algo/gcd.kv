@@ -2,16 +2,15 @@
 # 算法: gcd(48, 18) = 6
 # 期望输出:
 #   gcd = 6
-
 def gcd(A:int, B:int) -> (R:int) {
-    if (B == 0) {
-        A + 0 -> R
-    } else {
-        rem <- A % B
-        gcd(B, rem) -> R
-    }
+	if (B == 0) {
+		A + 0 -> R
+	} else {
+		A % B -> rem
+		gcd(B, rem) -> R
+	}
 }
 
 gcd(48, 18) -> ans
 print("gcd =", ans)
-ans -> /last_gcd                   # global
+ans -> /last_gcd

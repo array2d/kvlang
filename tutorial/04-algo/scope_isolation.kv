@@ -5,37 +5,31 @@
 #   PASS SI-2a: S= 8 D= 2
 #   PASS SI-2b: S= 15 D= 5
 #   PASS SI-3: chain = 10
-
 def id_val(x:int) -> (R:int) {
-    R <- x + 0                     # <- style
+	x + 0 -> R
 }
 
 def sum_diff(A:int, B:int) -> (S:int, D:int) {
-    A + B -> S
-    D <- A - B
+	A + B -> S
+	A - B -> D
 }
 
 def chain_call(a:int, b:int) -> (r:int) {
-    a + b -> r
+	a + b -> r
 }
 
 def main() -> () {
-    id_val(5) -> v1
-    print("PASS SI-1a: x=5 returns", v1)
-
-    v2 <- id_val(10)
-    print("PASS SI-1b: x=10 returns", v2)
-
-    sum_diff(5, 3) -> s1, d1
-    print("PASS SI-2a: S=", s1, "D=", d1)
-
-    sum_diff(10, 5) -> s2, d2
-    print("PASS SI-2b: S=", s2, "D=", d2)
-
-    chain_call(7, 3) -> c
-    print("PASS SI-3: chain =", c)
-
-    c -> /last_chain                # global
+	id_val(5) -> v1
+	print("PASS SI-1a: x=5 returns", v1)
+	id_val(10) -> v2
+	print("PASS SI-1b: x=10 returns", v2)
+	sum_diff(5, 3) -> (s1, d1)
+	print("PASS SI-2a: S=", s1, "D=", d1)
+	sum_diff(10, 5) -> (s2, d2)
+	print("PASS SI-2b: S=", s2, "D=", d2)
+	chain_call(7, 3) -> c
+	print("PASS SI-3: chain =", c)
+	c -> /last_chain
 }
 
-main() -> ()
+main()

@@ -1,13 +1,11 @@
 # 期望输出:
 #   x = 42
 #   y = 50
-
 def main() -> () {
-    42 -> x
-    print("x =", x)
-
-    y <- x + 8
-    print("y =", y)
+	42 -> x
+	print("x =", x)
+	x + 8 -> y
+	print("y =", y)
 }
 
-main() -> ()
+main()

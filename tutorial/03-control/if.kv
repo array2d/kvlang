@@ -1,29 +1,24 @@
 # 期望输出:
 #   abs(-5) = 5
 #   false
-
-def abs(x: int) -> (r: int) {
-    if (x < 0) {
-        r <- -x                     # <- style in true branch
-    } else {
-        x -> r                      # -> style in false branch
-    }
+def abs(x:int) -> (r:int) {
+	if (x < 0) {
+		-x -> r
+	} else {
+		x -> r
+	}
 }
 
 def main() -> () {
-    abs(-5) -> a
-    print("abs(-5) =", a)
-
-    abs(3) -> b
-    print("abs(3) =", b)
-
-    c <- abs(-10)
-    print("abs(-10) =", c)
-
-    b >= 90 -> d
-    print(d)                        # false
-
-    a -> /last_abs                   # global: store last abs result
+	abs(-5) -> a
+	print("abs(-5) =", a)
+	abs(3) -> b
+	print("abs(3) =", b)
+	abs(-10) -> c
+	print("abs(-10) =", c)
+	b >= 90 -> d
+	print(d)
+	a -> /last_abs
 }
 
-main() -> ()
+main()

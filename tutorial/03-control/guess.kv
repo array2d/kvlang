@@ -3,40 +3,37 @@
 # 来源: Python Tutorial §4.4
 # 期望输出:
 #   found 73 in 6 guesses
-
 def guess_number() -> () {
-    73 -> target
-    1  -> lo
-    100 -> hi
-    tries <- 0
-    found <- 0
+	73 -> target
+	1 -> lo
+	100 -> hi
+	0 -> tries
+	0 -> found
+	while (found == 0) {
+		lo + hi -> s
+		s / 2 -> mid_float
+		int(mid_float) -> mid
+		tries + 1 -> tries
+		print("guess #", tries, ":", mid)
+		mid == target -> hit
 
-    while (found == 0) {
-        s <- lo + hi
-        mid_float <- s / 2
-        mid <- int(mid_float)
+		if (hit) {
+			1 -> found
+			print("  correct!")
+		} else {
+			mid < target -> too_low
 
-        tries <- tries + 1
-        print("guess #", tries, ":", mid)
-
-        mid == target -> hit
-        if (hit) {
-            found <- 1
-            print("  correct!")
-        } else {
-            mid < target -> too_low
-            if (too_low) {
-                lo <- mid + 1
-                print("  too low, range:", lo, "-", hi)
-            } else {
-                hi <- mid - 1
-                print("  too high, range:", lo, "-", hi)
-            }
-        }
-    }
-
-    print("found", target, "in", tries, "guesses")
-    tries -> /last_guesses          # global: save result
+			if (too_low) {
+				mid + 1 -> lo
+				print("  too low, range:", lo, "-", hi)
+			} else {
+				mid - 1 -> hi
+				print("  too high, range:", lo, "-", hi)
+			}
+		}
+	}
+	print("found", target, "in", tries, "guesses")
+	tries -> /last_guesses
 }
 
-guess_number() -> ()
+guess_number()

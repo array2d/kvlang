@@ -2,27 +2,26 @@
 # 算法: 嵌套 if，score=85 → grade=B
 # 期望输出:
 #   grade = B
-
 def classify(score:int) -> (grade:string) {
-    if (score >= 90) {
-        "A" -> grade
-    } else {
-        if (score >= 80) {
-            "B" -> grade
-        } else {
-            if (score >= 70) {
-                "C" -> grade
-            } else {
-                if (score >= 60) {
-                    "D" -> grade
-                } else {
-                    "F" -> grade
-                }
-            }
-        }
-    }
+	if (score >= 90) {
+		"A" -> grade
+	} else {
+		if (score >= 80) {
+			"B" -> grade
+		} else {
+			if (score >= 70) {
+				"C" -> grade
+			} else {
+				if (score >= 60) {
+					"D" -> grade
+				} else {
+					"F" -> grade
+				}
+			}
+		}
+	}
 }
 
 classify(85) -> ans
 print("grade =", ans)
-ans -> /last_grade                 # global
+ans -> /last_grade

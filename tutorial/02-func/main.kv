@@ -1,24 +1,21 @@
 # 期望输出:
 #   add(10,20) = 30
 #   double(add(10,20)) = 60
-
-def add(A: int, B: int) -> (C: int) {
-    A + B -> C                      # -> style
+def add(A:int, B:int) -> (C:int) {
+	A + B -> C
 }
 
-def double(x: int) -> (y: int) {
-    y <- x * 2                      # <- style
+def double(x:int) -> (y:int) {
+	x * 2 -> y
 }
 
 def main() -> () {
-    add(10, 20) -> a
-    print("add(10,20) =", a)
-
-    double(a) -> b
-    print("double(add(10,20)) =", b)
-
-    a <- /last_a                    # global read into local
-    print("global last_a =", a)
+	add(10, 20) -> a
+	print("add(10,20) =", a)
+	double(a) -> b
+	print("double(add(10,20)) =", b)
+	/last_a -> a
+	print("global last_a =", a)
 }
 
-main() -> ()
+main()

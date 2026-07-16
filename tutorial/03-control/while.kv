@@ -2,56 +2,55 @@
 #   sum(1..10) = 55
 #   first div7 in [1,20] = 7
 #   sum odds(1..10) = 25
-
-def sum_to(n: int) -> (total: int) {
-    0 -> total
-    i <- 1
-    while (i <= n) {
-        total <- total + i          # <- style
-        i <- i + 1
-    }
+def sum_to(n:int) -> (total:int) {
+	0 -> total
+	1 -> i
+	while (i <= n) {
+		total + i -> total
+		i + 1 -> i
+	}
 }
 
-def first_div7(n: int) -> (result: int) {
-    0 -> result
-    1 -> i
-    while (i <= n) {
-        i % 7 -> rem
-        rem == 0 -> hit
-        if (hit) {
-            i -> result
-            n + 1 -> i              # break by making condition false
-        } else {
-            i + 1 -> i
-        }
-    }
+def first_div7(n:int) -> (result:int) {
+	0 -> result
+	1 -> i
+	while (i <= n) {
+		i % 7 -> rem
+		rem == 0 -> hit
+
+		if (hit) {
+			i -> result
+			n + 1 -> i
+		} else {
+			i + 1 -> i
+		}
+	}
 }
 
-def sum_odds(n: int) -> (total: int) {
-    total <- 0
-    i <- 1
-    while (i <= n) {
-        i % 2 -> rem
-        rem == 1 -> is_odd
-        if (is_odd) {
-            total <- total + i
-        }
-        i <- i + 1
-    }
+def sum_odds(n:int) -> (total:int) {
+	0 -> total
+	1 -> i
+	while (i <= n) {
+		i % 2 -> rem
+		rem == 1 -> is_odd
+
+		if (is_odd) {
+			total + i -> total
+		}
+
+		i + 1 -> i
+	}
 }
 
 def main() -> () {
-    sum_to(10) -> a
-    print("sum(1..10) =", a)
-
-    first_div7(20) -> b
-    print("first div7 in [1,20] =", b)
-
-    c <- sum_odds(10)
-    print("sum odds(1..10) =", c)
-
-    a + b -> ab
-    ab + c -> /last_sum          # global
+	sum_to(10) -> a
+	print("sum(1..10) =", a)
+	first_div7(20) -> b
+	print("first div7 in [1,20] =", b)
+	sum_odds(10) -> c
+	print("sum odds(1..10) =", c)
+	a + b -> ab
+	ab + c -> /last_sum
 }
 
-main() -> ()
+main()

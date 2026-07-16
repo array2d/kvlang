@@ -1,38 +1,35 @@
 # 期望输出:
 #   fib(10) = 34
 #   fact(10) = 3628800
-
-def fib(n: int) -> (a: int, b: int) {
-    if (n <= 1) {
-        0 -> a
-        1 -> b
-    } else {
-        n1 <- n - 1                 # <- style
-        fib(n1) -> a, b
-        x <- a + b
-        b -> a
-        x -> b
-    }
+def fib(n:int) -> (a:int, b:int) {
+	if (n <= 1) {
+		0 -> a
+		1 -> b
+	} else {
+		n - 1 -> n1
+		fib(n1) -> (a, b)
+		a + b -> x
+		b -> a
+		x -> b
+	}
 }
 
-def factorial(n: int) -> (r: int) {
-    r <- 1
-    i <- 1
-    while (i <= n) {
-        r <- r * i
-        i <- i + 1
-    }
+def factorial(n:int) -> (r:int) {
+	1 -> r
+	1 -> i
+	while (i <= n) {
+		r * i -> r
+		i + 1 -> i
+	}
 }
 
 def main() -> () {
-    fib(10) -> f, _
-    print("fib(10) =", f)
-
-    factorial(10) -> ans
-    print("fact(10) =", ans)
-
-    f -> /last_fib                  # global
-    ans -> /last_fact               # global
+	fib(10) -> (f, _)
+	print("fib(10) =", f)
+	factorial(10) -> ans
+	print("fact(10) =", ans)
+	f -> /last_fib
+	ans -> /last_fact
 }
 
-main() -> ()
+main()
