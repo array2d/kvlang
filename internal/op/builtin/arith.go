@@ -55,7 +55,12 @@ func evalDiv(inputs []kvspace.XValue) (kvspace.XValue, error) {
 	if err := requireBinary(inputs); err != nil { return kvspace.XValue{}, err }
 	bf := asFloat(inputs[1])
 	if bf == 0 { return kvspace.XValue{}, fmt.Errorf("division by zero") }
-	return kvspace.Float(asFloat(inputs[0]) / bf), nil
+	// C 风格：两整数相除 → 整除，否则 → 浮除
+	a, b := inputs[0], inputs[1]
+	if isIntKind(a.Kind()) && isIntKind(b.Kind()) {
+		return kvspace.Int64(asInt(a) / asInt(b)), nil
+	}
+	return kvspace.Float64(asFloat(a) / bf), nil
 }
 
 func evalMod(inputs []kvspace.XValue) (kvspace.XValue, error) {
@@ -72,3 +77,4 @@ func evalUnaryArith(inputs []kvspace.XValue, fn func(float64) float64) (kvspace.
 	if isIntKind(v.Kind()) { return kvspace.Int(int64(result)), nil }
 	return kvspace.Float(result), nil
 }
+

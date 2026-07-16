@@ -7,7 +7,7 @@ const (
 	OpAdd = "+"
 	OpSub = "-"
 	OpMul = "*"
-	OpDiv = "/"
+	OpDiv    = "/"
 	OpMod = "%"
 )
 
@@ -74,6 +74,7 @@ const (
 	OpArray = "array"
 	OpLen   = "len"
 	OpAt    = "at"
+	OpSet   = "set" // kvspace array set
 )
 
 // KV 遍历 built-in（for 循环遍历 kvspace 路径子项）
@@ -93,7 +94,7 @@ var nativeOps = map[string]bool{
 	OpPrint: true, OpCerr: true, OpInput: true,
 	OpStrSet: true,
 	OpKVHas: true, OpKVAt: true,
-	OpArray: true, OpLen: true, OpAt: true,
+	OpArray: true, OpLen: true, OpAt: true, OpSet: true,
 }
 
 // IsNativeOp 判断是否为 VM 原生求值的符号算子。

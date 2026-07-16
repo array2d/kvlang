@@ -66,4 +66,5 @@ var registry = map[string]Op{
 	OpArray:  arrayOp{},
 	OpLen:    lenOp{},
 	OpAt:     atOp{},
+	OpSet:    arraySetOp{},
 }

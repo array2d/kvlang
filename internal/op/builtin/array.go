@@ -1,6 +1,7 @@
 package builtin
 
 import (
+	"encoding/binary"
 	"fmt"
 
 	"kvlang/internal/keytree"
@@ -49,4 +50,45 @@ func (atOp) Call(f *op.Frame) error {
 		return fmt.Errorf("at: index out of bounds")
 	}
 	return writeResult(f, elem)
+}
+
+// arraySetOp: set(array, index, value) → modified array
+type arraySetOp struct{}
+func (arraySetOp) Call(f *op.Frame) error {
+	inputs := readInputs(f)
+	if len(inputs) < 3 {
+		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "set requires array, index, value")
+		return fmt.Errorf("set requires array, index, value")
+	}
+	arr := inputs[0]
+	idx := int(inputs[1].Int64())
+	if idx < 0 || idx >= arr.Len() {
+		vthread.SetError(bg, f.KV, f.Vtid, f.PC,
+			fmt.Sprintf("set: index %d out of bounds (len=%d)", idx, arr.Len()))
+		return fmt.Errorf("set: index out of bounds")
+	}
+	val := inputs[2]
+	// Rebuild array with modified element
+	n := arr.Len()
+	total := 4
+	encoded := make([][]byte, n)
+	for i := 0; i < n; i++ {
+		elem := arr.Index(i)
+		if i == idx { elem = val }
+		encoded[i] = kvspace.EncodeXValue(elem)
+		total += len(encoded[i])
+	}
+	raw := make([]byte, total)
+	binary.LittleEndian.PutUint32(raw[:4], uint32(n))
+	off := 4
+	for _, enc := range encoded {
+		copy(raw[off:], enc)
+		off += len(enc)
+	}
+	if len(f.Inst.Writes) > 0 {
+		outKey := resolveWriteKey(keytree.FrameRoot(f.PC), f.Inst.Writes[0])
+		if err := f.KV.Set(outKey, kvspace.Raw("array", raw)); err != nil { return err }
+	}
+	vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
+	return nil
 }
