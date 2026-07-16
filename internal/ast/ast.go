@@ -121,7 +121,7 @@ type Expr struct {
 	Op    string  // 算子（"+"）/ 函数名（"f"）/ ""（叶节点）
 	Args  []*Expr // 操作数（叶节点时为 nil）
 	Val   string  // 叶节点值
-	Quote bool    // true = 字符串字面量（源码中 "..." 包裹）
+	Quote byte    // 0=非字符串, '"'="..." 双引号, '`'=`...` 反引号
 }
 
 // IsLeaf 判断是否为叶节点。
@@ -130,8 +130,11 @@ func (e *Expr) IsLeaf() bool { return e != nil && e.Op == "" }
 // Leaf 构造变量/数字/路径叶节点。
 func Leaf(v string) *Expr { return &Expr{Val: v} }
 
-// StrLit 构造字符串字面量叶节点。
-func StrLit(v string) *Expr { return &Expr{Val: v, Quote: true} }
+// StrLit 构造双引号字符串字面量叶节点。
+func StrLit(v string) *Expr { return &Expr{Val: v, Quote: '"'} }
+
+// RawStr 构造反引号原始字符串字面量叶节点（跨行，零转义）。
+func RawStr(v string) *Expr { return &Expr{Val: v, Quote: '`'} }
 
 // Call 构造调用/操作节点（算子或函数名 + 操作数列表）。
 func Call(op string, args ...*Expr) *Expr { return &Expr{Op: op, Args: args} }
@@ -160,8 +163,11 @@ func (e *Expr) String() string {
 
 func (e *Expr) stringPrec(outerPrec int) string {
 	if e.IsLeaf() {
-		if e.Quote {
-			return "\"" + e.Val + "\""
+		if e.Quote != 0 {
+			if e.Quote == '"' {
+			return "\"" + escapeString(e.Val) + "\""
+		}
+		return "`" + e.Val + "`"
 		}
 		return e.Val
 	}
@@ -211,7 +217,7 @@ func (i *Instruction) Flat() (opcode string, reads []string) {
 	if i.Expr.IsLeaf() {
 		v := i.Expr.Val
 		// 字符串字面量 → " 前缀（KV 传输标记）
-		if i.Expr.Quote {
+		if i.Expr.Quote != 0 {
 			return "\"" + v, nil
 		}
 		// 裸标识符 → ./ident
@@ -223,7 +229,7 @@ func (i *Instruction) Flat() (opcode string, reads []string) {
 	opcode = i.Expr.Op
 	for _, arg := range i.Expr.Args {
 		r := arg.Val
-		if arg.Quote {
+		if arg.Quote != 0 {
 			r = "\"" + r
 		}
 		reads = append(reads, r)

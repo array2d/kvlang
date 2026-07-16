@@ -73,6 +73,7 @@ type Token struct {
 	Kind  Kind
 	Value string
 	Pos   Pos
+	Quote byte // 引号字符 (0=无, '"'=", '`'=`)
 }
 
 // String 返回 Token 的调试表示。
@@ -181,9 +182,24 @@ func Scan(src string) []Token {
 		p := pos() // 记录当前 token 起始位置
 
 		// 引号字符串 → Literal（引号去除）
+		// 反引号原始字符串 `...` — 跨行，零转义（对标 Go raw string）
+		if c == '`' {
+			end := strings.IndexByte(src[i+1:], '`')
+			if end >= 0 {
+				tokens = append(tokens, Token{Kind: Literal, Value: src[i+1 : i+1+end], Pos: p, Quote: '`'})
+				i = i + end + 2
+			} else {
+				tokens = append(tokens, Token{Kind: Literal, Value: src[i+1:], Pos: p, Quote: '`'})
+				i = len(src)
+			}
+			continue
+		}
+
 		if c == '\'' || c == '"' {
 			val, next := scanQuoted(src, i, c)
-			tokens = append(tokens, Token{Kind: Literal, Value: val, Pos: p})
+			tok := Token{Kind: Literal, Value: val, Pos: p}
+			if c == '"' { tok.Quote = '"' }
+			tokens = append(tokens, tok)
 			i = next
 			continue
 		}

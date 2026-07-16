@@ -169,7 +169,10 @@ func (p *parser) parsePrimaryExpr() *ast.Expr {
 					Message: fmt.Sprintf("invalid numeric literal %q", v),
 				})
 			}
-			return ast.StrLit(v)
+			if t.Quote == 96 {
+			return ast.RawStr(v)
+		}
+		return ast.StrLit(v)
 		}
 	}
 	return ast.Leaf(t.Value)
