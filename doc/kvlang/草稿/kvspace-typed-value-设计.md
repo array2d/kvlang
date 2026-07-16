@@ -164,7 +164,7 @@ vtid := msg.String()
 | 语义 | 典型 value | 调用点 | 迁移方式 |
 |------|-----------|--------|---------|
 | **纯字符串** | `"running"`, `"init"`, `"./ret"` | ~60 | `kvspace.Str("running")` |
-| **JSON 文档** | `{"entry":"pre_main",...}` | ~10 | `kvspace.Str(jsonStr)` |
+| **JSON 文档** | `{"entry":"init",...}` | ~10 | `kvspace.Str(jsonStr)` |
 | **数字（当前 stringified）** | `strconv.FormatInt(n, 10)` | 2 | `kvspace.Int(n)` — 同时消除冗余 `strconv` |
 
 迁移示例对比：
