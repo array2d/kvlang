@@ -218,7 +218,7 @@ func kvTrace(kv kvspace.KVSpace, vtid string) {
 	}
 }
 
-// parseValueArg 解析 CLI 的 value 参数为 kvspace.Value。
+// parseValueArg 解析 CLI 的 value 参数为 kvspace.XValue。
 //
 // 格式：kind:repr（Value.String() 往返格式）
 //
@@ -227,7 +227,7 @@ func kvTrace(kv kvspace.KVSpace, vtid string) {
 //	bool:true       → kvspace.Bool(true)
 //	string:hello    → kvspace.Str("hello")
 //	plain (无冒号)   → kvspace.Str(plain)  向后兼容
-func parseValueArg(raw string) (kvspace.Value, error) {
+func parseValueArg(raw string) (kvspace.XValue, error) {
 	// 查找第一个冒号作为 kind/repr 分隔符
 	idx := strings.Index(raw, ":")
 	if idx < 0 {
@@ -240,13 +240,13 @@ func parseValueArg(raw string) (kvspace.Value, error) {
 	case "int":
 		i, err := strconv.ParseInt(repr, 10, 64)
 		if err != nil {
-			return kvspace.Value{}, fmt.Errorf("invalid int value: %q", repr)
+			return kvspace.XValue{}, fmt.Errorf("invalid int value: %q", repr)
 		}
 		return kvspace.Int(i), nil
 	case "float":
 		f, err := strconv.ParseFloat(repr, 64)
 		if err != nil {
-			return kvspace.Value{}, fmt.Errorf("invalid float value: %q", repr)
+			return kvspace.XValue{}, fmt.Errorf("invalid float value: %q", repr)
 		}
 		return kvspace.Float(f), nil
 	case "bool":
@@ -256,12 +256,12 @@ func parseValueArg(raw string) (kvspace.Value, error) {
 		case "false":
 			return kvspace.Bool(false), nil
 		default:
-			return kvspace.Value{}, fmt.Errorf("invalid bool value: %q (expected true/false)", repr)
+			return kvspace.XValue{}, fmt.Errorf("invalid bool value: %q (expected true/false)", repr)
 		}
 	case "string":
 		return kvspace.Str(repr), nil
 	case "nil":
-		return kvspace.Value{}, nil
+		return kvspace.XValue{}, nil
 	default:
 		// 未知 kind（如 tensor:120B）→ Raw 存储
 		// bytes kind 的 repr 是十六进制

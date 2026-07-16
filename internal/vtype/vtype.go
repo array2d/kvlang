@@ -25,7 +25,7 @@ type VType interface {
 }
 
 // ── Kind 常量（所有 vtype name 的权威来源）──────────────────────────────────
-// kvspace.Value.Kind() 与这些常量对齐；kvspace 包因循环导入限制使用字符串字面量，
+// kvspace.XValue.Kind() 与这些常量对齐；kvspace 包因循环导入限制使用字符串字面量，
 // 其余所有包统一引用这里的常量。
 const (
 	KindInt    = "int"
