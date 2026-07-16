@@ -16,10 +16,10 @@ import (
 	"kvlang/internal/op"
 )
 
-// isFuncEntryPC 判断 pc 是否为函数帧入口指令（frameRoot/_fn/[0,0]）。
+// isFuncEntryPC 判断 pc 是否为函数帧入口指令（frameRoot/.fn/[0,0]）。
 // Bootstrap 和 HandleCall 均将第一条 PC 设为此形式。
 func isFuncEntryPC(pc string) bool {
-	return strings.HasSuffix(pc, "/_fn/[0,0]")
+	return strings.HasSuffix(pc, "/.fn/[0,0]")
 }
 
 // debugFuncName 从帧根读取 .rootfunc 字段获取函数名。

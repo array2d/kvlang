@@ -165,7 +165,7 @@ func decodeAt(kv kvspace.KVSpace, pc string) *op.Instruction {
 // ─── 测试 1：事件 JSON 格式 ──────────────────────────────────────────────────
 
 // TestDebugger_EventFormat 验证 .debug.pause 事件的 JSON 字段完整且语义正确：
-//   - pc 必须以 /_fn/[0,0] 结尾（函数入口）
+//   - pc 必须以 /.fn/[0,0] 结尾（函数入口）
 //   - func 与源码函数名一致
 //   - frame 非空（帧根路径）
 //   - op 非空（被暂停指令的 opcode）
@@ -186,8 +186,8 @@ def idplus(x: int) -> (r: int) {
 		if !gotFirst {
 			gotFirst = true
 			// 第一个暂停必定是函数入口
-			if !strings.HasSuffix(ev.PC, "/_fn/[0,0]") {
-				t.Errorf("first pause pc %q should end with /_fn/[0,0]", ev.PC)
+			if !strings.HasSuffix(ev.PC, "/.fn/[0,0]") {
+				t.Errorf("first pause pc %q should end with /.fn/[0,0]", ev.PC)
 			}
 			if ev.Func != "idplus" {
 				t.Errorf("func=%q, want %q", ev.Func, "idplus")

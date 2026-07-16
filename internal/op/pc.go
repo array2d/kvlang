@@ -6,6 +6,21 @@ import (
 	"strings"
 )
 
+// WriteSlotPC 从指令 opcode 路径推导第 i 个写槽路径（i 从 0 起）。
+//
+// 调用指令 opcode 存在 [addr0,0]，写槽存在 [addr0,1], [addr0,2], ...
+// 例：WriteSlotPC("/vthread/42/.fn/[3,0]", 0) → "/vthread/42/.fn/[3,1]"
+//
+// 用于 HandleReturn 直接从 .callpc 指令读写目标，无需额外存 .w{N} 键。
+func WriteSlotPC(pc string, i int) string {
+	idx := strings.LastIndex(pc, "/[")
+	if idx < 0 {
+		return pc
+	}
+	addr0 := extractAddr0(pc[idx+1:])
+	return fmt.Sprintf("%s/[%d,%d]", pc[:idx], addr0, i+1)
+}
+
 // NextPC 返回当前指令的下一条指令坐标。
 func NextPC(pc string) string {
 	parts := strings.Split(pc, "/")

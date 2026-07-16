@@ -11,11 +11,16 @@
 // 帧模型（Link P4）：
 //
 //	callPC                         调用指令绝对路径，作为帧根
-//	callPC/_fn                     软链接 → /func/<pkg>/<name>（只读指令）
+//	callPC/.fn                     软链接 → /func/<pkg>/<name>（只读指令）
 //	callPC/<param>                 参数（本帧局部变量，不经过链接）
 //	callPC/.callpc                 存储 callPC 自身，供 HandleReturn 恢复
-//	callPC/.ret0                   调用方的写槽（return 时写入父帧）
 //	callPC/.rootfunc               根函数名（TCO 不更新，供 resolveLabel 使用）
+//
+// 写槽（读写码语义）：
+//
+//	kvlang 只有读写码，函数调用 `add(x,y) -> ./s` 的 `-> ./s` 是**调用方指定的写目标**。
+//	写槽路径已存在调用指令 [addr0,1], [addr0,2],... 中，HandleReturn 直接从 .callpc
+//	推导路径读取，无需在子帧额外存储——没有"返回值"，只有写槽绑定。
 package layoutcode
 
 import (
@@ -67,10 +72,10 @@ func writeStmt(kv kvspace.KVSpace, st ast.Stmt, prefix string, idx *int) {
 	}
 }
 
-// HandleCall 执行 CALL：链接函数指令树，绑定参数，存储返回槽。
+// HandleCall 执行 CALL：链接函数指令树，绑定参数，存储写槽。
 //
-// pc 为调用指令的绝对路径（如 /vthread/42/_fn/[3,0]）。
-// tail=true 时执行 TCO：复用当前帧，仅重链 _fn（br/goto 路径）。
+// pc 为调用指令的绝对路径（如 /vthread/42/.fn/[3,0]）。
+// tail=true 时执行 TCO：复用当前帧，仅重链 .fn（br/goto 路径）。
 // 返回被调帧第一条指令的绝对 PC；失败时返回 ""（不再返回 pc，避免"PC == 失败"歧义）。
 func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Instruction, tail bool) string {
 	vtid := keytree.VtidFromPC(pc)
@@ -91,7 +96,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	}
 	funcSig := parser.ParseFuncSig(sigVal.Str())
 
-	// TCO：复用当前帧，仅重链 _fn 到目标块代码区（.rootfunc 不更新，保持根函数名）
+	// TCO：复用当前帧，仅重链 .fn 到目标块代码区（.rootfunc 不更新，保持根函数名）
 	if tail {
 		frameRoot := keytree.FrameRoot(pc)
 		kv.Unlink(keytree.FnCode(frameRoot))
@@ -106,7 +111,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	callerFrameRoot := keytree.FrameRoot(pc)
 	frameRoot := keytree.ChildFrameRoot(pc)
 
-	// 链接只读指令区：frameRoot/_fn → /func/<pkg>/<name>
+	// 链接只读指令区：frameRoot/.fn → /func/<pkg>/<name>
 	if err := kv.Link(funcKey, keytree.FnCode(frameRoot)); err != nil {
 		vthread.SetError(ctx, kv, vtid, pc, "link failed: "+err.Error())
 		return ""
@@ -123,19 +128,15 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 		}
 	}
 
-	// 存储调用方写槽（return 时写入父帧）
-	for i := range funcSig.ReturnNames() {
-		if i < len(inst.Writes) {
-			kv.Set(fmt.Sprintf("%s/.ret%d", frameRoot, i), kvspace.Str(inst.Writes[i]))
-		}
-	}
+	// 写槽路径已在调用指令 [addr0,1], [addr0,2], ... 中，HandleReturn 从 .callpc 直接读，
+	// 无需在子帧额外存 .w{N} 冗余键。
 
 	return keytree.FnCode(frameRoot) + "/[0,0]"
 }
 
-// HandleReturn 处理 RETURN：回传值，清理帧，恢复父帧 PC。
+// HandleReturn 处理 RETURN：将被调方输出写入父帧写槽，清理帧，恢复父帧 PC。
 //
-// pc 为 return 指令的绝对路径（如 /vthread/42/[3,0]/_fn/[1,0]）。
+// pc 为 return 指令的绝对路径（如 /vthread/42/[3,0]/.fn/[1,0]）。
 // 返回值：
 //
 //	("", retVal) — 顶层 return（frameRoot == vthreadRoot）；retVal 供 vthread.SetDone
@@ -162,21 +163,24 @@ func HandleReturn(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.I
 	callPCVal, _ := kv.Get(frameRoot + "/.callpc")
 	callPC := callPCVal.Str()
 
-	// 将所有返回值写入父帧的对应写槽（.ret0, .ret1, ...）
+	// 将被调方输出写入父帧的写槽。
+	// 读写码语义：写槽路径直接从调用指令 [callPC addr0, i+1] 读取——
+	//   callPC = /vthread/42/.fn/[3,0] → 第 i 个写槽在 /vthread/42/.fn/[3, i+1]。
+	// 父帧在子帧执行期间保持挂起，父帧 .fn 链接不变，路径可靠解析。
 	if callPC != "" {
 		parentFrameRoot := keytree.FrameRoot(callPC)
 		for i, read := range inst.Reads {
-			retKey := fmt.Sprintf("%s/.ret%d", frameRoot, i)
-			retTargetVal, _ := kv.Get(retKey)
-			retTarget := retTargetVal.Str()
-			if strings.HasPrefix(retTarget, "./") {
+			wSlotPath := op.WriteSlotPC(callPC, i)
+			wTargetVal, _ := kv.Get(wSlotPath)
+			wTarget := wTargetVal.Str()
+			if strings.HasPrefix(wTarget, "./") {
 				v, _ := kv.Get(frameRoot + "/" + read[2:])
-				kv.Set(parentFrameRoot+"/"+retTarget[2:], v)
+				kv.Set(parentFrameRoot+"/"+wTarget[2:], v)
 			}
 		}
 	}
 
-	// 清理帧：先 Unlink 代码区，再 DelTree 帧根（params / .ret0 / .callpc / .rootfunc）
+	// 清理帧：先 Unlink 代码区，再 DelTree 帧根（params / .callpc / .rootfunc）
 	kv.Unlink(keytree.FnCode(frameRoot))
 	kv.DelTree(frameRoot)
 
@@ -205,7 +209,7 @@ func RegisterBlocks(kv kvspace.KVSpace, pkg, parent string, body []ast.Stmt) {
 // 顶层帧的特征：frameRoot == vthreadRoot → HandleReturn 识别为顶层 return → SetDone。
 //
 // args 为按序传入的参数值（对应 funcSig.ParamNames()），可为空。
-// 成功返回第一条指令的绝对 PC（vthreadRoot/_fn/[0,0]）；失败返回 ""。
+// 成功返回第一条指令的绝对 PC（vthreadRoot/.fn/[0,0]）；失败返回 ""。
 func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, args []string) string {
 	pkgVal, err := kv.Get(keytree.FuncIdx(funcName))
 	pkg := pkgVal.Str()

@@ -30,6 +30,28 @@ func TestNextPC(t *testing.T) {
 	}
 }
 
+func TestWriteSlotPC(t *testing.T) {
+	tests := []struct {
+		pc   string
+		slot int
+		want string
+	}{
+		// 调用指令 [3,0]，写槽 0 → [3,1]，写槽 1 → [3,2]
+		{"/vthread/42/.fn/[3,0]", 0, "/vthread/42/.fn/[3,1]"},
+		{"/vthread/42/.fn/[3,0]", 1, "/vthread/42/.fn/[3,2]"},
+		// 嵌套帧（子帧的调用指令）
+		{"/vthread/42/[0,0]/.fn/[5,0]", 0, "/vthread/42/[0,0]/.fn/[5,1]"},
+		// 指令 0
+		{"/vthread/42/.fn/[0,0]", 0, "/vthread/42/.fn/[0,1]"},
+	}
+
+	for _, tc := range tests {
+		if got := op.WriteSlotPC(tc.pc, tc.slot); got != tc.want {
+			t.Errorf("WriteSlotPC(%q, %d) = %q, want %q", tc.pc, tc.slot, got, tc.want)
+		}
+	}
+}
+
 func TestParentPC(t *testing.T) {
 	tests := []struct {
 		pc   string

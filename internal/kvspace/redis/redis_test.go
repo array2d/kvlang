@@ -98,15 +98,15 @@ func TestResolveCore_NegativeCache(t *testing.T) {
 	}
 }
 
-// TestResolveCore_FnLink 模拟 VM 帧链接（/_fn 是唯一实际使用的链接形式）
+// TestResolveCore_FnLink 模拟 VM 帧链接（/.fn 是唯一实际使用的链接形式）
 func TestResolveCore_FnLink(t *testing.T) {
 	lk := testLookup(map[string]string{
-		"/vthread/42/[3,0]/_fn": "/func/main/add",
+		"/vthread/42/[3,0]/.fn": "/func/main/add",
 	})
 	cases := []struct{ in, want string }{
-		{"/vthread/42/[3,0]/_fn/[0,0]", "/func/main/add/[0,0]"},
-		{"/vthread/42/[3,0]/_fn/[2,-1]", "/func/main/add/[2,-1]"},
-		{"/vthread/42/[3,0]/_fn/[5,1]", "/func/main/add/[5,1]"},
+		{"/vthread/42/[3,0]/.fn/[0,0]", "/func/main/add/[0,0]"},
+		{"/vthread/42/[3,0]/.fn/[2,-1]", "/func/main/add/[2,-1]"},
+		{"/vthread/42/[3,0]/.fn/[5,1]", "/func/main/add/[5,1]"},
 		{"/func/main/add/[0,0]", "/func/main/add/[0,0]"}, // 已解析路径不变
 	}
 	for _, c := range cases {
