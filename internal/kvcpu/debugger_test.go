@@ -175,7 +175,7 @@ func TestDebugger_EventFormat(t *testing.T) {
 
 	const src = `
 def idplus(x: int) -> (r: int) {
-    x + 0 -> ./r
+    x + 0 -> r
 }
 `
 	loadSrc(t, kv, src)
@@ -209,7 +209,7 @@ def idplus(x: int) -> (r: int) {
 // TestDebugger_SumTo3_Trace 对 sum_to(3) 进行全量单步迹：
 //
 // 反向验证逻辑：
-//  1. 在每条 `+([./total],[./i]) → ./total` 暂停时（dispatch 前），
+//  1. 在每条 `+([total],[i]) → total` 暂停时（dispatch 前），
 //     读取帧的 total/i 值，与期望的"执行前状态"对比。
 //     期望：iter1(total=0,i=1) iter2(total=1,i=2) iter3(total=3,i=3)
 //  2. `<=` 操作共 4 次（3 真 + 1 假退出循环）
@@ -222,11 +222,11 @@ func TestDebugger_SumTo3_Trace(t *testing.T) {
 
 	const src = `
 def sum_to(n: int) -> (total: int) {
-    0 -> ./total
-    1 -> ./i
-    while (./i <= n) {
-        ./total + ./i -> ./total
-        ./i + 1 -> ./i
+    0 -> total
+    1 -> i
+    while (i <= n) {
+        total + i -> total
+        i + 1 -> i
     }
 }
 `
@@ -235,7 +235,7 @@ def sum_to(n: int) -> (total: int) {
 
 	// 记录 total-add 暂停时的"执行前"状态
 	type addState struct{ total, i int64 }
-	var totalAdds []addState // +([./total],[./i]) 暂停时的 (total, i)
+	var totalAdds []addState // +([total],[i]) 暂停时的 (total, i)
 	var leCount   int        // <= 操作次数
 	var returnOps int        // return 操作次数
 	var finalTotal int64     // 最后一次 return 暂停时的 total
@@ -245,9 +245,9 @@ def sum_to(n: int) -> (total: int) {
 		case "<=":
 			leCount++
 		case "+":
-			// 区分两种 + 指令：+([./total],[./i]) vs +(./i,1)
+			// 区分两种 + 指令：+([total],[i]) vs +(i,1)
 			inst := decodeAt(kv, ev.PC)
-			if len(inst.Reads) >= 1 && inst.Reads[0] == "./total" {
+			if len(inst.Reads) >= 1 && inst.Reads[0] == "total" {
 				// 总和累加 + 的暂停：此时 dispatch 尚未执行，读取执行前状态
 				tot := readInt(kv, ev.Frame, "total")
 				i   := readInt(kv, ev.Frame, "i")
@@ -310,16 +310,16 @@ func TestDebugger_FirstDiv7_Break(t *testing.T) {
 
 	const src = `
 def first_div7(n: int) -> (result: int) {
-    0 -> ./result
-    1 -> ./i
-    while (./i <= n) {
-        ./i % 7 -> ./rem
-        ./rem == 0 -> ./hit
-        if (./hit) {
-            ./i -> ./result
+    0 -> result
+    1 -> i
+    while (i <= n) {
+        i % 7 -> rem
+        rem == 0 -> hit
+        if (hit) {
+            i -> result
             break
         }
-        ./i + 1 -> ./i
+        i + 1 -> i
     }
 }
 `
@@ -367,7 +367,7 @@ def first_div7(n: int) -> (result: int) {
 // TestDebugger_SumOdds10_Continue 反向验证 continue 语义：
 //
 //  1. `%` 操作执行 10 次（i=1..10，每个 i 都检查奇偶）
-//  2. `+([./total],[./i])` 操作执行 5 次（i=1,3,5,7,9 奇数）
+//  2. `+([total],[i])` 操作执行 5 次（i=1,3,5,7,9 奇数）
 //  3. 5 次 total-add 前的执行状态 (total, i) 严格符合手算期望
 //  4. 最终 total=25 (1+3+5+7+9)
 func TestDebugger_SumOdds10_Continue(t *testing.T) {
@@ -376,17 +376,17 @@ func TestDebugger_SumOdds10_Continue(t *testing.T) {
 
 	const src = `
 def sum_odds(n: int) -> (total: int) {
-    0 -> ./total
-    1 -> ./i
-    while (./i <= n) {
-        ./i % 2 -> ./rem
-        ./rem == 0 -> ./even
-        if (./even) {
-            ./i + 1 -> ./i
+    0 -> total
+    1 -> i
+    while (i <= n) {
+        i % 2 -> rem
+        rem == 0 -> even
+        if (even) {
+            i + 1 -> i
             continue
         }
-        ./total + ./i -> ./total
-        ./i + 1 -> ./i
+        total + i -> total
+        i + 1 -> i
     }
 }
 `
@@ -404,7 +404,7 @@ def sum_odds(n: int) -> (total: int) {
 			modCount++
 		case "+":
 			inst := decodeAt(kv, ev.PC)
-			if len(inst.Reads) >= 1 && inst.Reads[0] == "./total" {
+			if len(inst.Reads) >= 1 && inst.Reads[0] == "total" {
 				tot := readInt(kv, ev.Frame, "total")
 				i   := readInt(kv, ev.Frame, "i")
 				totalAdds = append(totalAdds, addState{tot, i})
@@ -466,11 +466,11 @@ func TestDebugger_ContinueCmd(t *testing.T) {
 
 	const src = `
 def sum_to(n: int) -> (total: int) {
-    0 -> ./total
-    1 -> ./i
-    while (./i <= n) {
-        ./total + ./i -> ./total
-        ./i + 1 -> ./i
+    0 -> total
+    1 -> i
+    while (i <= n) {
+        total + i -> total
+        i + 1 -> i
     }
 }
 `
@@ -509,11 +509,11 @@ func TestDebugger_AbortCmd(t *testing.T) {
 
 	const src = `
 def sum_to(n: int) -> (total: int) {
-    0 -> ./total
-    1 -> ./i
-    while (./i <= n) {
-        ./total + ./i -> ./total
-        ./i + 1 -> ./i
+    0 -> total
+    1 -> i
+    while (i <= n) {
+        total + i -> total
+        i + 1 -> i
     }
 }
 `

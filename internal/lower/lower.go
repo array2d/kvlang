@@ -121,8 +121,12 @@ func lowerBody(stmts []ast.Stmt, lg *labelGen, lc *loopCtx) []ast.Stmt {
 			// continue 是终止符：忽略其后的语句（不可达代码）
 			return preamble
 
+		case *ast.ForStmt:
+			cont := lowerBody(stmts[i+1:], lg, lc)
+			return lowerForWithCont(preamble, s, cont, lg, lc)
+
 		default:
-			// for 暂不处理（P11）
+			// 未知节点 → 原样透传
 			preamble = append(preamble, s)
 		}
 	}
@@ -218,7 +222,81 @@ func lowerWhileWithCont(pre []ast.Stmt, s *ast.WhileStmt, cont []ast.Stmt, lg *l
 	return result
 }
 
-// splitInstsAndBlocks 将语句列表分为非块语句（指令/goto/return）和块语句两组，
+// lowerForWithCont 将 ForStmt 降级为四块结构（init/cond/body/exit），续体注入 exit block。
+//
+//	for (v in ./path) { body }
+//
+//	→ pre... goto _for_N
+//	  _for_init_N:  { -1 -> ./_idx }
+//	  _for_cond_N:  { ./_idx + 1 -> ./_idx;  kv.has(./path, ./_idx) -> ./_cond;
+//	                   br(./_cond, fn/_for_body_N, fn/_for_exit_N) }
+//	  _for_body_N:  { kv.at(./path, ./_idx) -> ./v;  lowerBody(body);
+//	                   goto _for_cond_N }
+//	  _for_exit_N:  { cont... }
+//
+// 为 for 体创建新 loopCtx（break→exit, continue→condLabel）。
+func lowerForWithCont(pre []ast.Stmt, s *ast.ForStmt, cont []ast.Stmt, lg *labelGen, lc *loopCtx) []ast.Stmt {
+	initLabel := lg.next("for_init")
+	condLabel := lg.next("for_cond")
+	bodyLabel := lg.next("for_body")
+	exitLabel := lg.next("for_exit")
+
+	// _for_init:  -1 -> ./_idx;  goto fn/_for_cond_N
+	idxSlot := lg.tmp()
+	condSlot := lg.tmp()
+	initBody := []ast.Stmt{
+		makeCopyInst("-1", idxSlot),
+		gotoLabel(lg.parent, condLabel),
+	}
+
+	// _for_cond:  ./_idx + 1 -> ./_idx;  kv.has(./path, ./_idx) -> ./_cond;
+	//             br(./_cond, fn/bodyLabel, fn/exitLabel)
+	addInst := &ast.Instruction{
+		Expr: ast.Call("+", ast.Leaf(idxSlot), ast.Leaf("1")),
+		Writes: []string{idxSlot},
+	}
+	kvHasInst := &ast.Instruction{
+		Expr: ast.Call("kv.has", ast.Leaf(s.Iter), ast.Leaf(idxSlot)),
+		Writes: []string{condSlot},
+	}
+	brI := brInst(condSlot, lg.parent+"/"+bodyLabel, lg.parent+"/"+exitLabel)
+	condBody := []ast.Stmt{addInst, kvHasInst, brI}
+
+	// _for_body:  kv.at(./path, ./_idx) -> ./v;  lowerBody(body);  goto _for_cond_N
+	kvAtInst := &ast.Instruction{
+		Expr: ast.Call("kv.at", ast.Leaf(s.Iter), ast.Leaf(idxSlot)),
+		Writes: []string{s.Var},
+	}
+	bodyLc := &loopCtx{breakLabel: exitLabel, continueLabel: condLabel}
+	bodyInner := lowerBody(s.Body, lg, bodyLc)
+	bodyInsts := append([]ast.Stmt{kvAtInst}, bodyInner...)
+	bodyInsts = injectGoto(bodyInsts, lg.parent, condLabel)
+
+	bodyInstsOnly, bodyBlocks := splitInstsAndBlocks(bodyInsts)
+	injectGotoBlocks(bodyBlocks, lg.parent, condLabel)
+	contInsts, contBlocks := splitInstsAndBlocks(cont)
+
+	entry := append(pre, gotoLabel(lg.parent, initLabel))
+	result := append(entry,
+		&ast.BlockStmt{Label: initLabel, Body: initBody},
+		&ast.BlockStmt{Label: condLabel, Body: condBody},
+		&ast.BlockStmt{Label: bodyLabel, Body: bodyInstsOnly},
+		&ast.BlockStmt{Label: exitLabel, Body: contInsts},
+	)
+	result = append(result, bodyBlocks...)
+	result = append(result, contBlocks...)
+	return result
+}
+
+// makeCopyInst 创建值复制指令：val -> ./dest
+func makeCopyInst(val, dest string) *ast.Instruction {
+	return &ast.Instruction{
+		Expr:   ast.Leaf(val),
+		Writes: []string{dest},
+	}
+}
+
+// // splitInstsAndBlocks 将语句列表分为非块语句（指令/goto/return）和块语句两组，
 // 用于将嵌套块从 then/else/body/cont 中提升到函数顶层（读写码结构）。
 func splitInstsAndBlocks(stmts []ast.Stmt) (insts, blocks []ast.Stmt) {
 	for _, s := range stmts {
