@@ -16,9 +16,14 @@ def main() -> () {
     abs(3) -> b
     print("abs(3) =", b)       // 3
 
-    print("true && false =", true && false)   // false
-    print("true || false =", true || false)   // true
-    print("!true =", !true)                   // false
+    true && false -> and_r
+    print("true && false =", and_r)   // false
+
+    true || false -> or_r
+    print("true || false =", or_r)    // true
+
+    !true -> not_r
+    print("!true =", not_r)           // false
 }
 
 main() -> ()

@@ -1,16 +1,33 @@
 # 03-arith: arithmetic operations
 # Run: kvlang tutorial/03-arith/
+#
+# 读写码风格：所有运算结果必须先写入具名槽，再读取使用。
+# 禁止内联嵌套表达式（如 print("r =", 10 + 3) 是错误的）。
 
 def main() -> () {
-    print("add:", 10 + 3)          // 13
-    print("sub:", 10 - 3)          // 7
-    print("mul:", 10 * 3)          // 30
-    print("div:", 10 / 3)          // 3
-    print("fdiv:", 10.0 / 3.0)     // 3.333...
+    10 + 3     -> add_r
+    print("add:",  add_r)       // 13
 
-    print("pow:", pow(2, 5))       // 32
-    print("sqrt:", sqrt(144))      // 12
-    print("abs:", abs(-42))        // 42
+    10 - 3     -> sub_r
+    print("sub:",  sub_r)       // 7
+
+    10 * 3     -> mul_r
+    print("mul:",  mul_r)       // 30
+
+    10 / 3     -> div_r
+    print("div:",  div_r)       // 3
+
+    10.0 / 3.0 -> fdiv_r
+    print("fdiv:", fdiv_r)      // 3.333...
+
+    pow(2, 5)  -> pow_r
+    print("pow:",  pow_r)       // 32
+
+    sqrt(144)  -> sqrt_r
+    print("sqrt:", sqrt_r)      // 12
+
+    abs(-42)   -> abs_r
+    print("abs:",  abs_r)       // 42
 }
 
 main() -> ()

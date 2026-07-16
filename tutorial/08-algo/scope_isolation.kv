@@ -2,16 +2,12 @@
 # SI-1: 同名参数在不同帧互不干扰
 # SI-2: 多返回值槽绑定不交叉，(S,D)=fn(A,B)→S=A+B, D=A-B
 # SI-3: 连续调用结果各自独立，前次调用不污染后次
-# 层级: P2
-# 规则: SI-1, SI-2, SI-3
 # 期望输出:
 #   PASS SI-1a: x=5 returns 5
 #   PASS SI-1b: x=10 returns 10
 #   PASS SI-2a: S=8 D=2
 #   PASS SI-2b: S=15 D=5
 #   PASS SI-3: chain = 10
-
-# ── 被测函数 ──────────────────────────────────────────────────────────────
 
 def id_val(x:int) -> (R:int) {
     x + 0 -> R
@@ -26,54 +22,55 @@ def add3(A:int, B:int) -> (R:int) {
     A + B -> R
 }
 
-# ── SI-1: 同名参数在不同帧不干扰 ──────────────────────────────────────────
-
 def test_si1() -> () {
-    id_val(5) -> r1
+    id_val(5)  -> r1
     id_val(10) -> r2
-    if (r1 == 5) {
+    r1 == 5 -> ok1
+    if (ok1) {
         print("PASS SI-1a: x=5 returns 5")
     } else {
         print("FAIL SI-1a: got", r1)
     }
-    if (r2 == 10) {
+    r2 == 10 -> ok2
+    if (ok2) {
         print("PASS SI-1b: x=10 returns 10")
     } else {
         print("FAIL SI-1b: got", r2)
     }
 }
 
-# ── SI-2: 多返回值槽不交叉 ─────────────────────────────────────────────────
-
 def test_si2() -> () {
-    sum_diff(5, 3) -> (s1, d1)
-    sum_diff(10, 5) -> (s2, d2)
-    if (s1 == 8 && d1 == 2) {
+    sum_diff(5, 3)   -> (s1, d1)
+    sum_diff(10, 5)  -> (s2, d2)
+    s1 == 8  -> s1ok
+    d1 == 2  -> d1ok
+    s1ok && d1ok -> ok1
+    if (ok1) {
         print("PASS SI-2a: S=8 D=2")
     } else {
         print("FAIL SI-2a: S=", s1, "D=", d1)
     }
-    if (s2 == 15 && d2 == 5) {
+    s2 == 15 -> s2ok
+    d2 == 5  -> d2ok
+    s2ok && d2ok -> ok2
+    if (ok2) {
         print("PASS SI-2b: S=15 D=5")
     } else {
         print("FAIL SI-2b: S=", s2, "D=", d2)
     }
 }
 
-# ── SI-3: 连续调用结果独立 ─────────────────────────────────────────────────
-
 def test_si3() -> () {
     add3(3, 4) -> c1
     add3(1, 2) -> c2
     c1 + c2 -> chain
-    if (chain == 10) {
+    chain == 10 -> ok
+    if (ok) {
         print("PASS SI-3: chain = 10")
     } else {
         print("FAIL SI-3: chain =", chain)
     }
 }
-
-# ── 运行所有测试 ────────────────────────────────────────────────────────────
 
 test_si1() -> ()
 test_si2() -> ()
