@@ -10,7 +10,7 @@ import (
 //   - 零值（IsNil()==true）表示"不存在"或"未初始化"。
 //   - 一旦由构造函数创建，字段不可修改（逻辑不可变）。
 //   - raw 字节由 Value 自身 owned，不与外部缓冲区共享。
-type Value struct {
+type XValue struct {
 	kind string // vtype name
 	raw  []byte // 类型化原始字节
 }
@@ -18,48 +18,48 @@ type Value struct {
 // ── 构造函数 ─────────────────────────────────────────────────────────────────
 // kind 名称与 vtype.Kind* 常量对齐；因循环导入限制，此处直接使用字符串字面量。
 
-func Int(v int64) Value     { return Value{kind: "int", raw: encodeInt64(v)} }
-func Float(v float64) Value { return Value{kind: "float", raw: encodeFloat64(v)} }
-func Bool(v bool) Value {
+func Int(v int64) XValue     { return XValue{kind: "int", raw: encodeInt64(v)} }
+func Float(v float64) XValue { return XValue{kind: "float", raw: encodeFloat64(v)} }
+func Bool(v bool) XValue {
 	b := byte(0)
 	if v {
 		b = 1
 	}
-	return Value{kind: "bool", raw: []byte{b}}
+	return XValue{kind: "bool", raw: []byte{b}}
 }
-func Str(v string) Value   { return Value{kind: "string", raw: []byte(v)} }
-func Bytes(v []byte) Value { c := make([]byte, len(v)); copy(c, v); return Value{kind: "bytes", raw: c} }
+func Str(v string) XValue   { return XValue{kind: "string", raw: []byte(v)} }
+func Bytes(v []byte) XValue { c := make([]byte, len(v)); copy(c, v); return XValue{kind: "bytes", raw: c} }
 
 // Raw 构造任意 vtype 的 Value（用于第三方 vtype 扩展，如 "tensor"）。
 // raw 会被复制，调用方可安全复用原缓冲区。
-func Raw(kind string, raw []byte) Value {
+func Raw(kind string, raw []byte) XValue {
 	c := make([]byte, len(raw))
 	copy(c, raw)
-	return Value{kind: kind, raw: c}
+	return XValue{kind: kind, raw: c}
 }
 
 // ── 判断 ─────────────────────────────────────────────────────────────────────
 
-func (v Value) IsNil() bool  { return v.kind == "" }
-func (v Value) Kind() string { return v.kind }
+func (v XValue) IsNil() bool  { return v.kind == "" }
+func (v XValue) Kind() string { return v.kind }
 
 // ── 访问器（类型不匹配时返回零值，不 panic）────────────────────────────────
 
-func (v Value) Int() int64 {
+func (v XValue) Int() int64 {
 	if v.kind != "int" || len(v.raw) < 8 {
 		return 0
 	}
 	return decodeInt64(v.raw)
 }
 
-func (v Value) Float() float64 {
+func (v XValue) Float() float64 {
 	if v.kind != "float" || len(v.raw) < 8 {
 		return 0
 	}
 	return decodeFloat64(v.raw)
 }
 
-func (v Value) Bool() bool {
+func (v XValue) Bool() bool {
 	if v.kind != "bool" || len(v.raw) == 0 {
 		return false
 	}
@@ -68,14 +68,14 @@ func (v Value) Bool() bool {
 
 // Str 返回字符串内容。Kind() != "string" 时返回 ""。
 // 注意：与 String()（fmt.Stringer 调试格式）不同。
-func (v Value) Str() string {
+func (v XValue) Str() string {
 	if v.kind != "string" {
 		return ""
 	}
 	return string(v.raw)
 }
 
-func (v Value) Bytes() []byte {
+func (v XValue) Bytes() []byte {
 	if v.kind != "bytes" {
 		return nil
 	}
@@ -83,7 +83,7 @@ func (v Value) Bytes() []byte {
 }
 
 // RawBytes 返回底层原始字节（任意 kind）。不拷贝，调用方不得修改。
-func (v Value) RawBytes() []byte { return v.raw }
+func (v XValue) RawBytes() []byte { return v.raw }
 
 // ── Stringer ─────────────────────────────────────────────────────────────────
 
@@ -92,7 +92,7 @@ func (v Value) RawBytes() []byte { return v.raw }
 //	int:42    float:3.14    bool:true    str:hello    nil    tensor:120B
 //
 // 获取 str 类型的字符串内容请用 v.Str()，不要用 v.String()。
-func (v Value) String() string {
+func (v XValue) String() string {
 	switch v.kind {
 	case "":
 		return "nil"
@@ -114,8 +114,8 @@ func (v Value) String() string {
 // 格式：[1B kind_len][N B kind_name][4B raw_len LE][M B raw_value]
 // IsNil() 的 Value 编码为 nil（零字节）。
 
-// EncodeValue 将 Value 编码为完全自描述的 TLV 字节。
-func EncodeValue(v Value) []byte {
+// EncodeXValue 将 Value 编码为完全自描述的 TLV 字节。
+func EncodeXValue(v XValue) []byte {
 	if v.IsNil() {
 		return nil
 	}
@@ -127,33 +127,33 @@ func EncodeValue(v Value) []byte {
 	return buf
 }
 
-// DecodeValue 从 TLV 字节解码为 Value。
+// DecodeXValue 从 TLV 字节解码为 Value。
 // raw 字节在内部复制，返回的 Value 不与 data 共享内存。
 // 格式不合法（截断、kind 非法、长度溢出）时返回零值 Value{}。
-func DecodeValue(data []byte) Value {
+func DecodeXValue(data []byte) XValue {
 	if len(data) == 0 {
-		return Value{}
+		return XValue{}
 	}
 	kindLen := int(data[0])
 	if len(data) < 1+kindLen+4 {
-		return Value{}
+		return XValue{}
 	}
 	kind := string(data[1 : 1+kindLen])
 	if !isValidKind(kind) {
-		return Value{}
+		return XValue{}
 	}
 	rawLen := binary.LittleEndian.Uint32(data[1+kindLen : 1+kindLen+4])
 	start := 1 + kindLen + 4
 	if len(data) < start+int(rawLen) {
-		return Value{}
+		return XValue{}
 	}
 	raw := make([]byte, rawLen)
 	copy(raw, data[start:start+int(rawLen)])
-	return Value{kind: kind, raw: raw}
+	return XValue{kind: kind, raw: raw}
 }
 
-// EncodedSize 返回 Value 编码后的字节数（用于缓冲区容量预估）。
-func EncodedSize(v Value) int {
+// EncodedXSize 返回 Value 编码后的字节数（用于缓冲区容量预估）。
+func EncodedXSize(v XValue) int {
 	if v.IsNil() {
 		return 0
 	}

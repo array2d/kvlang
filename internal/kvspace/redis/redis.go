@@ -106,18 +106,18 @@ func (r *redisImpl) checkLink(path string) string {
 
 // ── CRUD ─────────────────────────────────────────────────────────────────────
 
-func (r *redisImpl) Get(key string) (kvspace.Value, error) {
+func (r *redisImpl) Get(key string) (kvspace.XValue, error) {
 	raw, err := r.rdb.Get(bg, kvspace.ResolveCore(key, r.checkLink)).Bytes()
 	if err != nil {
 		if errors.Is(err, goredis.Nil) {
-			return kvspace.Value{}, kvspace.ErrNotFound
+			return kvspace.XValue{}, kvspace.ErrNotFound
 		}
-		return kvspace.Value{}, err
+		return kvspace.XValue{}, err
 	}
-	return kvspace.DecodeValue(raw), nil
+	return kvspace.DecodeXValue(raw), nil
 }
 
-func (r *redisImpl) GetMany(keys []string) ([]kvspace.Value, error) {
+func (r *redisImpl) GetMany(keys []string) ([]kvspace.XValue, error) {
 	resolved := make([]string, len(keys))
 	for i, k := range keys {
 		resolved[i] = kvspace.ResolveCore(k, r.checkLink)
@@ -126,19 +126,19 @@ func (r *redisImpl) GetMany(keys []string) ([]kvspace.Value, error) {
 	if err != nil {
 		return nil, err
 	}
-	result := make([]kvspace.Value, len(raw))
+	result := make([]kvspace.XValue, len(raw))
 	for i, v := range raw {
 		if v != nil {
-			result[i] = kvspace.DecodeValue([]byte(v.(string)))
+			result[i] = kvspace.DecodeXValue([]byte(v.(string)))
 		}
 	}
 	return result, nil
 }
 
-func (r *redisImpl) Set(key string, val kvspace.Value) error {
+func (r *redisImpl) Set(key string, val kvspace.XValue) error {
 	resolved := kvspace.ResolveCore(key, r.checkLink)
 	r.maintainIndex(resolved, true)
-	return r.rdb.Set(bg, resolved, kvspace.EncodeValue(val), 0).Err()
+	return r.rdb.Set(bg, resolved, kvspace.EncodeXValue(val), 0).Err()
 }
 
 // SetMany 使用 pipeline 批量写入，N 对 key 的索引维护合并为单次 round trip。
@@ -151,7 +151,7 @@ func (r *redisImpl) SetMany(pairs []kvspace.KVPair) error {
 	for _, p := range pairs {
 		resolved := kvspace.ResolveCore(p.Key, r.checkLink)
 		pipeIndex(pipe, resolved, true)
-		msetArgs = append(msetArgs, resolved, kvspace.EncodeValue(p.Val))
+		msetArgs = append(msetArgs, resolved, kvspace.EncodeXValue(p.Val))
 	}
 	pipe.MSet(bg, msetArgs...)
 	_, err := pipe.Exec(bg)
@@ -181,22 +181,22 @@ func (r *redisImpl) List(prefix string) ([]string, error) {
 	return r.rdb.SMembers(bg, kvspace.ResolveCore(prefix, r.checkLink)+"/.").Result()
 }
 
-func (r *redisImpl) Watch(key string, timeout time.Duration) (kvspace.Value, error) {
+func (r *redisImpl) Watch(key string, timeout time.Duration) (kvspace.XValue, error) {
 	vals, err := r.rdb.BLPop(bg, timeout, kvspace.ResolveCore(key, r.checkLink)).Result()
 	if err != nil {
 		if errors.Is(err, goredis.Nil) {
-			return kvspace.Value{}, kvspace.ErrNotFound
+			return kvspace.XValue{}, kvspace.ErrNotFound
 		}
-		return kvspace.Value{}, err
+		return kvspace.XValue{}, err
 	}
 	if len(vals) < 2 {
-		return kvspace.Value{}, kvspace.ErrNotFound
+		return kvspace.XValue{}, kvspace.ErrNotFound
 	}
-	return kvspace.DecodeValue([]byte(vals[1])), nil
+	return kvspace.DecodeXValue([]byte(vals[1])), nil
 }
 
-func (r *redisImpl) Notify(key string, val kvspace.Value) error {
-	return r.rdb.LPush(bg, kvspace.ResolveCore(key, r.checkLink), kvspace.EncodeValue(val)).Err()
+func (r *redisImpl) Notify(key string, val kvspace.XValue) error {
+	return r.rdb.LPush(bg, kvspace.ResolveCore(key, r.checkLink), kvspace.EncodeXValue(val)).Err()
 }
 
 func (r *redisImpl) DisConn() error { return r.rdb.Close() }

@@ -6,7 +6,7 @@ import "time"
 // KVPair 用于批量写入，顺序确定（非 map）。
 type KVPair struct {
 	Key string
-	Val Value
+	Val XValue
 }
 
 // KVSpace KV 存储接口。
@@ -26,12 +26,12 @@ type KVPair struct {
 // 软链接透明穿透：Link(target, linkpath) 后，访问 linkpath/x 透明地访问 target/x。
 type KVSpace interface {
 	// ── 单点读写 ─────────────────────────────────────────────────────────
-	Get(key string) (Value, error)   // key 不存在返回 (Value{}, ErrNotFound)
-	Set(key string, val Value) error // 写入并维护目录索引
+	Get(key string) (XValue, error)   // key 不存在返回 (Value{}, ErrNotFound)
+	Set(key string, val XValue) error // 写入并维护目录索引
 	Del(keys ...string) error        // 精确删除（含索引清理）
 
 	// ── 批量读写 ─────────────────────────────────────────────────────────
-	GetMany(keys []string) ([]Value, error) // 缺失位置返回 Value{}，不返回 error
+	GetMany(keys []string) ([]XValue, error) // 缺失位置返回 Value{}，不返回 error
 	SetMany(pairs []KVPair) error           // 批量写入
 
 	// ── 目录操作 ─────────────────────────────────────────────────────────
@@ -39,8 +39,8 @@ type KVSpace interface {
 	DelTree(prefix string) error          // 递归删除；prefix 本身是链接则只删链接
 
 	// ── 变更通知 ─────────────────────────────────────────────────────────
-	Notify(key string, val Value) error                    // 投递一次性通知信号
-	Watch(key string, timeout time.Duration) (Value, error) // 阻塞等待通知
+	Notify(key string, val XValue) error                    // 投递一次性通知信号
+	Watch(key string, timeout time.Duration) (XValue, error) // 阻塞等待通知
 
 	// ── 软链接 ───────────────────────────────────────────────────────────
 	Link(target, linkpath string) error // 创建软链接：linkpath → target
