@@ -8,7 +8,7 @@ import (
 )
 
 // asFloat coerces a Value to float64 for numeric operations.
-func asFloat(v kvspace.Value) float64 {
+func asFloat(v kvspace.XValue) float64 {
 	switch v.Kind() {
 	case "int":   return float64(v.Int())
 	case "float": return v.Float()
@@ -18,7 +18,7 @@ func asFloat(v kvspace.Value) float64 {
 }
 
 // asInt coerces a Value to int64.
-func asInt(v kvspace.Value) int64 {
+func asInt(v kvspace.XValue) int64 {
 	switch v.Kind() {
 	case "int":   return v.Int()
 	case "float": return int64(v.Float())
@@ -29,7 +29,7 @@ func asInt(v kvspace.Value) int64 {
 
 // AsBool coerces a Value to bool (kvlang truth semantics).
 // Exported for use by kvcpu/controlflow (br condition evaluation).
-func AsBool(v kvspace.Value) bool {
+func AsBool(v kvspace.XValue) bool {
 	switch v.Kind() {
 	case "bool":  return v.Bool()
 	case "int":   return v.Int() != 0
@@ -39,10 +39,10 @@ func AsBool(v kvspace.Value) bool {
 }
 
 // isNumeric reports whether v is int or float.
-func isNumeric(v kvspace.Value) bool { return v.Kind() == "int" || v.Kind() == "float" }
+func isNumeric(v kvspace.XValue) bool { return v.Kind() == "int" || v.Kind() == "float" }
 
 // display formats a Value for human output (print / string.set).
-func display(v kvspace.Value) string {
+func display(v kvspace.XValue) string {
 	switch v.Kind() {
 	case "int":   return strconv.FormatInt(v.Int(), 10)
 	case "float":
@@ -70,9 +70,9 @@ func display(v kvspace.Value) string {
 //
 // Accepts: "42"  "-7"  "3.14"  "1e10"  "-1.5e-3"
 // Rejects: "e"   "."   "-"     "abc"   ""
-func tryParseNumber(s string) (kvspace.Value, bool) {
+func tryParseNumber(s string) (kvspace.XValue, bool) {
 	if len(s) == 0 {
-		return kvspace.Value{}, false
+		return kvspace.XValue{}, false
 	}
 	c0 := s[0]
 	switch {
@@ -81,7 +81,7 @@ func tryParseNumber(s string) (kvspace.Value, bool) {
 	case c0 == '-' && len(s) >= 2 && s[1] >= '0' && s[1] <= '9':
 		// negative literal: kvlang parser folds "-" + digit → Leaf("-42")
 	default:
-		return kvspace.Value{}, false
+		return kvspace.XValue{}, false
 	}
 	// Delegate to stdlib — handles all edge cases including scientific notation.
 	if i, err := strconv.ParseInt(s, 10, 64); err == nil {
@@ -90,5 +90,5 @@ func tryParseNumber(s string) (kvspace.Value, bool) {
 	if f, err := strconv.ParseFloat(s, 64); err == nil {
 		return kvspace.Float(f), true
 	}
-	return kvspace.Value{}, false
+	return kvspace.XValue{}, false
 }

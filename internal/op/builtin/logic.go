@@ -20,12 +20,12 @@ func (not) Call(f *op.Frame) error {
 	return writeResult(f, r)
 }
 
-func evalLogic(inputs []kvspace.Value, fn func(bool, bool) bool) (kvspace.Value, error) {
-	if err := requireBinary(inputs); err != nil { return kvspace.Value{}, err }
+func evalLogic(inputs []kvspace.XValue, fn func(bool, bool) bool) (kvspace.XValue, error) {
+	if err := requireBinary(inputs); err != nil { return kvspace.XValue{}, err }
 	return kvspace.Bool(fn(AsBool(inputs[0]), AsBool(inputs[1]))), nil
 }
 
-func evalNot(inputs []kvspace.Value) (kvspace.Value, error) {
-	if err := requireUnary(inputs); err != nil { return kvspace.Value{}, err }
+func evalNot(inputs []kvspace.XValue) (kvspace.XValue, error) {
+	if err := requireUnary(inputs); err != nil { return kvspace.XValue{}, err }
 	return kvspace.Bool(!AsBool(inputs[0])), nil
 }

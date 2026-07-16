@@ -15,30 +15,30 @@ func (o cOp) Call(f *op.Frame) error {
 	return writeResult(f, r)
 }
 
-func evalCast(kind string, inputs []kvspace.Value) (kvspace.Value, error) {
+func evalCast(kind string, inputs []kvspace.XValue) (kvspace.XValue, error) {
 	switch kind {
 	case "int":   return evalToInt(inputs)
 	case "float": return evalToFloat(inputs)
 	case "bool":  return evalToBool(inputs)
-	default:      return kvspace.Value{}, fmt.Errorf("unknown cast: %s", kind)
+	default:      return kvspace.XValue{}, fmt.Errorf("unknown cast: %s", kind)
 	}
 }
 
-func evalToInt(inputs []kvspace.Value) (kvspace.Value, error) {
-	if err := requireUnary(inputs); err != nil { return kvspace.Value{}, err }
+func evalToInt(inputs []kvspace.XValue) (kvspace.XValue, error) {
+	if err := requireUnary(inputs); err != nil { return kvspace.XValue{}, err }
 	v := inputs[0]
 	if v.Kind() == "int" { return v, nil }
 	return kvspace.Int(asInt(v)), nil
 }
 
-func evalToFloat(inputs []kvspace.Value) (kvspace.Value, error) {
-	if err := requireUnary(inputs); err != nil { return kvspace.Value{}, err }
+func evalToFloat(inputs []kvspace.XValue) (kvspace.XValue, error) {
+	if err := requireUnary(inputs); err != nil { return kvspace.XValue{}, err }
 	v := inputs[0]
 	if v.Kind() == "float" { return v, nil }
 	return kvspace.Float(asFloat(v)), nil
 }
 
-func evalToBool(inputs []kvspace.Value) (kvspace.Value, error) {
-	if err := requireUnary(inputs); err != nil { return kvspace.Value{}, err }
+func evalToBool(inputs []kvspace.XValue) (kvspace.XValue, error) {
+	if err := requireUnary(inputs); err != nil { return kvspace.XValue{}, err }
 	return kvspace.Bool(AsBool(inputs[0])), nil
 }

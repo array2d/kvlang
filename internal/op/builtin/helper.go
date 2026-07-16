@@ -9,19 +9,19 @@ import (
 	"kvlang/internal/vthread"
 )
 
-func requireBinary(inputs []kvspace.Value) error {
+func requireBinary(inputs []kvspace.XValue) error {
 	if len(inputs) != 2 { return fmt.Errorf("binary op requires 2 inputs, got %d", len(inputs)) }
 	return nil
 }
-func requireUnary(inputs []kvspace.Value) error {
+func requireUnary(inputs []kvspace.XValue) error {
 	if len(inputs) != 1 { return fmt.Errorf("unary op requires 1 input, got %d", len(inputs)) }
 	return nil
 }
 
 // readInputs resolves all read-slots of f.Inst into typed Values.
-func readInputs(f *op.Frame) []kvspace.Value {
+func readInputs(f *op.Frame) []kvspace.XValue {
 	framePath := keytree.FrameRoot(f.PC)
-	inputs := make([]kvspace.Value, 0, len(f.Inst.Reads))
+	inputs := make([]kvspace.XValue, 0, len(f.Inst.Reads))
 	for _, r := range f.Inst.Reads {
 		inputs = append(inputs, resolveReadValue(f.KV, framePath, r))
 	}
@@ -29,7 +29,7 @@ func readInputs(f *op.Frame) []kvspace.Value {
 }
 
 // writeResult writes a typed Value to the first write-slot and advances PC.
-func writeResult(f *op.Frame, result kvspace.Value) error {
+func writeResult(f *op.Frame, result kvspace.XValue) error {
 	if len(f.Inst.Writes) > 0 {
 		outKey := resolveWriteKey(keytree.FrameRoot(f.PC), f.Inst.Writes[0])
 		if err := f.KV.Set(outKey, result); err != nil { return err }

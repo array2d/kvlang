@@ -14,7 +14,7 @@ func resolveWriteKey(framePath, param string) string {
 
 // ResolveReadValue maps a read-slot param to a typed Value.
 // Exported for kvcpu/controlflow and layoutcode.
-func ResolveReadValue(kv kvspace.KVSpace, framePath, param string) kvspace.Value {
+func ResolveReadValue(kv kvspace.KVSpace, framePath, param string) kvspace.XValue {
 	return resolveReadValue(kv, framePath, param)
 }
 
@@ -26,9 +26,9 @@ func ResolveReadValue(kv kvspace.KVSpace, framePath, param string) kvspace.Value
 //	true → kvspace.Bool(true)     bool literal           (exact match)
 //	42   → kvspace.Int(42)        numeric literal        (first-char + strconv)
 //	x    → kv.Get(framePath/x)   bare ident / slot reference
-func resolveReadValue(kv kvspace.KVSpace, framePath, param string) kvspace.Value {
+func resolveReadValue(kv kvspace.KVSpace, framePath, param string) kvspace.XValue {
 	if len(param) == 0 {
-		return kvspace.Value{}
+		return kvspace.XValue{}
 	}
 	if param[0] == '"' {
 		return kvspace.Str(param[1:])
@@ -51,7 +51,7 @@ func resolveReadValue(kv kvspace.KVSpace, framePath, param string) kvspace.Value
 	// malformed numeric literal (starts with digit but ParseFloat failed, e.g. "1e").
 	// Parser should have caught this and issued a diagnostic; runtime returns zero.
 	if len(param) > 0 && param[0] >= '0' && param[0] <= '9' {
-		return kvspace.Value{} // invalid number → zero value, not a bare ident
+		return kvspace.XValue{} // invalid number → zero value, not a bare ident
 	}
 	// bare identifier → slot in current frame
 	v, _ := kv.Get(framePath + "/" + param)

@@ -13,8 +13,8 @@ func (o cmp) Call(f *op.Frame) error {
 	return writeResult(f, r)
 }
 
-func evalCmp(inputs []kvspace.Value, numCmp func(float64, float64) bool, strCmp func(string, string) bool) (kvspace.Value, error) {
-	if err := requireBinary(inputs); err != nil { return kvspace.Value{}, err }
+func evalCmp(inputs []kvspace.XValue, numCmp func(float64, float64) bool, strCmp func(string, string) bool) (kvspace.XValue, error) {
+	if err := requireBinary(inputs); err != nil { return kvspace.XValue{}, err }
 	a, b := inputs[0], inputs[1]
 	if isNumeric(a) && isNumeric(b) {
 		return kvspace.Bool(numCmp(asFloat(a), asFloat(b))), nil

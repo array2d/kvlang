@@ -35,38 +35,38 @@ func (mod) Call(f *op.Frame) error {
 	return writeResult(f, r)
 }
 
-func evalBinaryArith(inputs []kvspace.Value, fn func(float64, float64) float64) (kvspace.Value, error) {
-	if err := requireBinary(inputs); err != nil { return kvspace.Value{}, err }
+func evalBinaryArith(inputs []kvspace.XValue, fn func(float64, float64) float64) (kvspace.XValue, error) {
+	if err := requireBinary(inputs); err != nil { return kvspace.XValue{}, err }
 	a, b := inputs[0], inputs[1]
 	result := fn(asFloat(a), asFloat(b))
 	if a.Kind() == "int" && b.Kind() == "int" { return kvspace.Int(int64(result)), nil }
 	return kvspace.Float(result), nil
 }
 
-func evalNeg(v kvspace.Value) (kvspace.Value, error) {
+func evalNeg(v kvspace.XValue) (kvspace.XValue, error) {
 	switch v.Kind() {
 	case "int":   return kvspace.Int(-v.Int()), nil
 	case "float": return kvspace.Float(-v.Float()), nil
-	default:      return kvspace.Value{}, fmt.Errorf("cannot negate %s", v.Kind())
+	default:      return kvspace.XValue{}, fmt.Errorf("cannot negate %s", v.Kind())
 	}
 }
 
-func evalDiv(inputs []kvspace.Value) (kvspace.Value, error) {
-	if err := requireBinary(inputs); err != nil { return kvspace.Value{}, err }
+func evalDiv(inputs []kvspace.XValue) (kvspace.XValue, error) {
+	if err := requireBinary(inputs); err != nil { return kvspace.XValue{}, err }
 	bf := asFloat(inputs[1])
-	if bf == 0 { return kvspace.Value{}, fmt.Errorf("division by zero") }
+	if bf == 0 { return kvspace.XValue{}, fmt.Errorf("division by zero") }
 	return kvspace.Float(asFloat(inputs[0]) / bf), nil
 }
 
-func evalMod(inputs []kvspace.Value) (kvspace.Value, error) {
-	if err := requireBinary(inputs); err != nil { return kvspace.Value{}, err }
+func evalMod(inputs []kvspace.XValue) (kvspace.XValue, error) {
+	if err := requireBinary(inputs); err != nil { return kvspace.XValue{}, err }
 	b := asInt(inputs[1])
-	if b == 0 { return kvspace.Value{}, fmt.Errorf("modulo by zero") }
+	if b == 0 { return kvspace.XValue{}, fmt.Errorf("modulo by zero") }
 	return kvspace.Int(asInt(inputs[0]) % b), nil
 }
 
-func evalUnaryArith(inputs []kvspace.Value, fn func(float64) float64) (kvspace.Value, error) {
-	if err := requireUnary(inputs); err != nil { return kvspace.Value{}, err }
+func evalUnaryArith(inputs []kvspace.XValue, fn func(float64) float64) (kvspace.XValue, error) {
+	if err := requireUnary(inputs); err != nil { return kvspace.XValue{}, err }
 	v := inputs[0]
 	result := fn(asFloat(v))
 	if v.Kind() == "int" { return kvspace.Int(int64(result)), nil }
