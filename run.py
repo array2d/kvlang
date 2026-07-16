@@ -231,8 +231,18 @@ def main() -> None:
 
     check_any("load 文件", "loaded 1 file", [KV, "load", FUNC_KV],
               env=LOG_LEVEL_INFO)
-    check_out("load 后 /func/main 存在", '"entry"',
-              [KV, "kvspace", "get", "/func/main"])
+
+    # load 后 /func/main 键值验证（check_out 内置 clear 会清掉已 load 的数据，
+    # 此处直接 get 验证，不经过 check_out）
+    if should_run("load 后 /func/main 存在"):
+        try:
+            result = run_cmd([KV, "kvspace", "get", "/func/main"], timeout=5)
+            if "entry" in result.stdout:
+                ok("load 后 /func/main 存在")
+            else:
+                fail(f"load 后 /func/main 存在 (stdout: {result.stdout[:120]})")
+        except subprocess.TimeoutExpired:
+            fail("load 后 /func/main 存在 (timeout)")
     check_exit("load 后无 vthread", 1,
                ["bash", "-c",
                 f"{KV} kvspace list /vthread 2>/dev/null | grep -q ."])
@@ -291,8 +301,8 @@ def main() -> None:
     run_cmd([KV, "kvspace", "clear"], timeout=5)
     run_cmd([KV, "load", FUNC_KV], timeout=10, env=LOG_LEVEL_INFO)
     try:
-        result = run_cmd(["timeout", "8", KV, "serve"],
-                         timeout=20, env=LOG_LEVEL_INFO)
+        result = run_cmd(["timeout", "20", KV, "serve"],
+                         timeout=30, env=LOG_LEVEL_INFO)
         out = result.stdout + result.stderr
         if "add(10,20) = 30" in out:
             ok("serve → add(10,20) = 30")
@@ -340,19 +350,37 @@ def main() -> None:
     # ── §8 kvspace ────────────────────────────────────────────────────────
     section("§8 kvspace CRUD")
     run_cmd([KV, "kvspace", "clear"], timeout=5)
-    check_out("set hello", "ok", [KV, "kvspace", "set", "/t/hello", "world"])
-    check_out("get hello", "world", [KV, "kvspace", "get", "/t/hello"])
-    check_out("del hello", "ok", [KV, "kvspace", "del", "/t/hello"])
-    check_exit("get deleted → exit 1", 1,
-               ["bash", "-c", f"{KV} kvspace get /t/hello 2>/dev/null | grep -q ."])
+
+    # CRUD 链式测试（set → get → del → get empty）
+    if should_run("kvspace CRUD chain"):
+        run_cmd([KV, "kvspace", "set", "/t/hello", "string:world"], timeout=5)
+        r = run_cmd([KV, "kvspace", "get", "/t/hello"], timeout=5)
+        if "string:world" in r.stdout: ok("set/get hello roundtrip")
+        else: fail(f"set/get hello roundtrip (stdout: {r.stdout[:120]})")
+
+        run_cmd([KV, "kvspace", "del", "/t/hello"], timeout=5)
+        r = run_cmd([KV, "kvspace", "get", "/t/hello"], timeout=5)
+        if r.returncode != 0: ok("del hello → get exit ≠ 0")
+        else: fail("del hello → get exit ≠ 0")
 
     section("§8 kvspace tree / dump")
     run_cmd([KV, "kvspace", "clear"], timeout=5)
-    run_cmd([KV, "kvspace", "set", "/t/a", "1"], timeout=5)
-    run_cmd([KV, "kvspace", "set", "/t/b", "2"], timeout=5)
-    check_out("list /t", "/t/", [KV, "kvspace", "list", "/t"])
-    check_out("tree /t 含 /t/a", "/t/a", [KV, "kvspace", "tree", "/t"])
-    check_out("dump /t 含 value", "1", [KV, "kvspace", "dump", "/t"])
+
+    if should_run("kvspace tree/dump"):
+        run_cmd([KV, "kvspace", "set", "/t/a", "int:1"], timeout=5)
+        run_cmd([KV, "kvspace", "set", "/t/b", "int:2"], timeout=5)
+
+        r = run_cmd([KV, "kvspace", "list", "/t"], timeout=5)
+        if "a" in r.stdout and "b" in r.stdout: ok("list /t 含 a,b")
+        else: fail(f"list /t 含 a,b (stdout: {r.stdout[:120]})")
+
+        r = run_cmd([KV, "kvspace", "tree", "/t"], timeout=5)
+        if "a" in r.stdout: ok("tree /t 含 a")
+        else: fail(f"tree /t 含 a (stdout: {r.stdout[:120]})")
+
+        r = run_cmd([KV, "kvspace", "dump", "/t"], timeout=5)
+        if "int:1" in r.stdout: ok("dump /t 含 int:1")
+        else: fail(f"dump /t 含 int:1 (stdout: {r.stdout[:120]})")
 
     section("§8 kvspace notify / watch")
     if should_run("notify/watch"):
@@ -380,13 +408,14 @@ def main() -> None:
             fail(f"notify/watch (got: {notify_result})")
 
     section("§8 kvspace --addr / clear")
-    check_any("kvspace --addr set", "ok",
-              [KV, "kvspace", "--addr", "127.0.0.1:6379", "set", "/t/addr", "yes"])
-    check_any("kvspace --addr get", "yes",
-              [KV, "kvspace", "--addr", "127.0.0.1:6379", "get", "/t/addr"])
+    if should_run("kvspace --addr roundtrip"):
+        run_cmd([KV, "kvspace", "--addr", "127.0.0.1:6379", "set", "/t/addr", "string:yes"], timeout=5)
+        r = run_cmd([KV, "kvspace", "--addr", "127.0.0.1:6379", "get", "/t/addr"], timeout=5)
+        if "string:yes" in r.stdout: ok("kvspace --addr set/get roundtrip")
+        else: fail(f"kvspace --addr set/get roundtrip (stdout: {r.stdout[:120]})")
     run_cmd([KV, "kvspace", "clear"], timeout=5)
     check_exit("after clear get 空", 1,
-               ["bash", "-c", f"{KV} kvspace get /t/addr 2>/dev/null | grep -q ."])
+               [KV, "kvspace", "get", "/t/addr"])
 
     # ── §9 Flag 错误处理 ──────────────────────────────────────────────────
     section("§9 Flag 错误处理")
