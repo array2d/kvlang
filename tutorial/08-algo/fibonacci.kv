@@ -7,20 +7,20 @@
 
 def fibonacci(n:int) -> (result:int) {
     if (n <= 1) {
-        n + 0 -> ./result
+        n + 0 -> result
     } else {
-        0 -> ./a
-        1 -> ./b
-        2 -> ./i
-        while (./i <= n) {
-            ./a + ./b -> ./c
-            ./b + 0 -> ./a
-            ./c + 0 -> ./b
-            ./i + 1 -> ./i
+        0 -> a
+        1 -> b
+        2 -> i
+        while (i <= n) {
+            a + b -> c
+            b + 0 -> a
+            c + 0 -> b
+            i + 1 -> i
         }
-        ./b + 0 -> ./result
+        b + 0 -> result
     }
 }
 
-fibonacci(10) -> ./ans
-print("fib =", ./ans)
+fibonacci(10) -> ans
+print("fib =", ans)

@@ -7,12 +7,12 @@
 
 def gcd(A:int, B:int) -> (R:int) {
     if (B == 0) {
-        A + 0 -> ./R
+        A + 0 -> R
     } else {
-        A % B -> ./rem
-        gcd(B, ./rem) -> ./R
+        A % B -> rem
+        gcd(B, rem) -> R
     }
 }
 
-gcd(48, 18) -> ./ans
-print("gcd =", ./ans)
+gcd(48, 18) -> ans
+print("gcd =", ans)

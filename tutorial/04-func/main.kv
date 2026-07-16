@@ -1,19 +1,20 @@
 # 04-func: defining and calling functions
-# Run: kvlang tutorial/04-func/main.kv
+# Run: kvlang tutorial/04-func/
 
 def add(A: int, B: int) -> (C: int) {
-    A + B -> ./C
+    A + B -> C
 }
 
 def double(x: int) -> (y: int) {
-    x * 2 -> ./y
+    x * 2 -> y
 }
 
 def main() -> () {
-    add(10, 20) -> ./a           // 30
-    print("add(10,20) =", ./a)
+    add(10, 20) -> a           // 30
+    print("add(10,20) =", a)
 
-    double(./a) -> ./b          // 60
-    print("double(add(10,20)) =", ./b)
+    double(a) -> b             // 60
+    print("double(add(10,20)) =", b)
 }
+
 main() -> ()

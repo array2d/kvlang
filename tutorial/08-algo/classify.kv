@@ -7,23 +7,23 @@
 
 def classify(score:int) -> (grade:string) {
     if (score >= 90) {
-        "A" -> ./grade
+        "A" -> grade
     } else {
         if (score >= 80) {
-            "B" -> ./grade
+            "B" -> grade
         } else {
             if (score >= 70) {
-                "C" -> ./grade
+                "C" -> grade
             } else {
                 if (score >= 60) {
-                    "D" -> ./grade
+                    "D" -> grade
                 } else {
-                    "F" -> ./grade
+                    "F" -> grade
                 }
             }
         }
     }
 }
 
-classify(85) -> ./g
-print("grade =", ./g)
+classify(85) -> g
+print("grade =", g)

@@ -6,13 +6,13 @@
 #   result = 1024
 
 def power(base:int, exp:int) -> (result:int) {
-    1 -> ./result
-    0 -> ./e
-    while (./e < exp) {
-        ./result * base -> ./result
-        ./e + 1 -> ./e
+    1 -> result
+    0 -> e
+    while (e < exp) {
+        result * base -> result
+        e + 1 -> e
     }
 }
 
-power(2, 10) -> ./ans
-print("result =", ./ans)
+power(2, 10) -> ans
+print("result =", ans)

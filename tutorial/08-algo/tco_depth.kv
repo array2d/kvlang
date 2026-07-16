@@ -9,31 +9,31 @@
 
 # TCO-1: while 循环（内部编译为 goto/br TCO）计算 1+...+100
 def sum_while(N:int) -> (total:int) {
-    0 -> ./total
-    1 -> ./i
-    while (./i <= N) {
-        ./total + ./i -> ./total
-        ./i + 1 -> ./i
+    0 -> total
+    1 -> i
+    while (i <= N) {
+        total + i -> total
+        i + 1 -> i
     }
 }
 
 # TCO-2: 尾递归阶乘（积累器模式，每次递归调用自身）
 def fact_tail(N:int, acc:int) -> (R:int) {
     if (N <= 1) {
-        acc + 0 -> ./R
+        acc + 0 -> R
     } else {
-        N - 1 -> ./nm1
-        acc * N -> ./nacc
-        fact_tail(./nm1, ./nacc) -> ./R
+        N - 1 -> nm1
+        acc * N -> nacc
+        fact_tail(nm1, nacc) -> R
     }
 }
 
 def tailrec_fact(N:int) -> (R:int) {
-    fact_tail(N, 1) -> ./R
+    fact_tail(N, 1) -> R
 }
 
-sum_while(100) -> ./s
-print("sum =", ./s)
+sum_while(100) -> s
+print("sum =", s)
 
-tailrec_fact(10) -> ./f
-print("fact =", ./f)
+tailrec_fact(10) -> f
+print("fact =", f)

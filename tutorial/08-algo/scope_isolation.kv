@@ -14,62 +14,62 @@
 # ── 被测函数 ──────────────────────────────────────────────────────────────
 
 def id_val(x:int) -> (R:int) {
-    x + 0 -> ./R
+    x + 0 -> R
 }
 
 def sum_diff(A:int, B:int) -> (S:int, D:int) {
-    A + B -> ./S
-    A - B -> ./D
+    A + B -> S
+    A - B -> D
 }
 
 def add3(A:int, B:int) -> (R:int) {
-    A + B -> ./R
+    A + B -> R
 }
 
 # ── SI-1: 同名参数在不同帧不干扰 ──────────────────────────────────────────
 
 def test_si1() -> () {
-    id_val(5) -> ./r1
-    id_val(10) -> ./r2
-    if (./r1 == 5) {
+    id_val(5) -> r1
+    id_val(10) -> r2
+    if (r1 == 5) {
         print("PASS SI-1a: x=5 returns 5")
     } else {
-        print("FAIL SI-1a: got", ./r1)
+        print("FAIL SI-1a: got", r1)
     }
-    if (./r2 == 10) {
+    if (r2 == 10) {
         print("PASS SI-1b: x=10 returns 10")
     } else {
-        print("FAIL SI-1b: got", ./r2)
+        print("FAIL SI-1b: got", r2)
     }
 }
 
 # ── SI-2: 多返回值槽不交叉 ─────────────────────────────────────────────────
 
 def test_si2() -> () {
-    sum_diff(5, 3) -> (./s1, ./d1)
-    sum_diff(10, 5) -> (./s2, ./d2)
-    if (./s1 == 8 && ./d1 == 2) {
+    sum_diff(5, 3) -> (s1, d1)
+    sum_diff(10, 5) -> (s2, d2)
+    if (s1 == 8 && d1 == 2) {
         print("PASS SI-2a: S=8 D=2")
     } else {
-        print("FAIL SI-2a: S=", ./s1, "D=", ./d1)
+        print("FAIL SI-2a: S=", s1, "D=", d1)
     }
-    if (./s2 == 15 && ./d2 == 5) {
+    if (s2 == 15 && d2 == 5) {
         print("PASS SI-2b: S=15 D=5")
     } else {
-        print("FAIL SI-2b: S=", ./s2, "D=", ./d2)
+        print("FAIL SI-2b: S=", s2, "D=", d2)
     }
 }
 
 # ── SI-3: 连续调用结果独立 ─────────────────────────────────────────────────
 
 def test_si3() -> () {
-    add3(3, 4) -> ./c1
-    add3(1, 2) -> ./c2
-    ./c1 + ./c2 -> ./chain
-    if (./chain == 10) {
+    add3(3, 4) -> c1
+    add3(1, 2) -> c2
+    c1 + c2 -> chain
+    if (chain == 10) {
         print("PASS SI-3: chain = 10")
     } else {
-        print("FAIL SI-3: chain =", ./chain)
+        print("FAIL SI-3: chain =", chain)
     }
 }
 

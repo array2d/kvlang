@@ -1,11 +1,12 @@
 # 02-vars: variables and paths
-# Run: kvlang tutorial/02-vars/main.kv
+# Run: kvlang tutorial/02-vars/
 
 def main() -> () {
-    42 -> ./x                     // write 42 to path ./x
-    print("x =", ./x)             // read from path ./x
+    42 -> x                     // write 42 to path x
+    print("x =", x)            // read from path x
 
-    ./x + 8 -> ./y              // 42 + 8 = 50
-    print("y =", ./y)
+    x + 8 -> y                  // 42 + 8 = 50
+    print("y =", y)
 }
+
 main() -> ()

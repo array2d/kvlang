@@ -1,55 +1,53 @@
 # 06-while: while loops, break, and continue
-# Run: kvlang tutorial/06-while/main.kv
+# Run: kvlang tutorial/06-while/
 
-# sum 1 + 2 + ... + n
 def sum_to(n: int) -> (total: int) {
-    0 -> ./total
-    1 -> ./i
-    while (./i <= n) {
-        ./total + ./i -> ./total
-        ./i + 1 -> ./i
+    0 -> total
+    1 -> i
+    while (i <= n) {
+        total + i -> total
+        i + 1 -> i
     }
 }
 
-# find the first multiple of 7 in [1, n]; 0 if none (demonstrates break)
 def first_div7(n: int) -> (result: int) {
-    0 -> ./result
-    1 -> ./i
-    while (./i <= n) {
-        ./i % 7 -> ./rem
-        ./rem == 0 -> ./hit
-        if (./hit) {
-            ./i -> ./result
+    0 -> result
+    1 -> i
+    while (i <= n) {
+        i % 7 -> rem
+        rem == 0 -> hit
+        if (hit) {
+            i -> result
             break
         }
-        ./i + 1 -> ./i
+        i + 1 -> i
     }
 }
 
-# sum only odd numbers in [1, n] (demonstrates continue)
 def sum_odds(n: int) -> (total: int) {
-    0 -> ./total
-    1 -> ./i
-    while (./i <= n) {
-        ./i % 2 -> ./rem
-        ./rem == 0 -> ./even
-        if (./even) {
-            ./i + 1 -> ./i
+    0 -> total
+    1 -> i
+    while (i <= n) {
+        i % 2 -> rem
+        rem == 0 -> even
+        if (even) {
+            i + 1 -> i
             continue
         }
-        ./total + ./i -> ./total
-        ./i + 1 -> ./i
+        total + i -> total
+        i + 1 -> i
     }
 }
 
 def main() -> () {
-    sum_to(10) -> ./s
-    print("sum(1..10) =", ./s)              // 55
+    sum_to(10) -> s
+    print("sum(1..10) =", s)              // 55
 
-    first_div7(20) -> ./d7
-    print("first div7 in [1,20] =", ./d7)   // 7
+    first_div7(20) -> d7
+    print("first div7 in [1,20] =", d7)   // 7
 
-    sum_odds(10) -> ./so
-    print("sum odds(1..10) =", ./so)        // 25
+    sum_odds(10) -> so
+    print("sum odds(1..10) =", so)        // 25
 }
+
 main() -> ()

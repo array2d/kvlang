@@ -6,19 +6,19 @@
 #   steps = 111
 
 def collatz(n:int) -> (steps:int) {
-    0 -> ./steps
+    0 -> steps
     while (n > 1) {
-        n % 2 -> ./mod
-        ./mod == 0 -> ./even
-        if (./even) {
+        n % 2 -> mod
+        mod == 0 -> even
+        if (even) {
             n / 2 -> n
         } else {
-            n * 3 -> ./t
-            ./t + 1 -> n
+            n * 3 -> t
+            t + 1 -> n
         }
-        ./steps + 1 -> ./steps
+        steps + 1 -> steps
     }
 }
 
-collatz(27) -> ./ans
-print("steps =", ./ans)
+collatz(27) -> ans
+print("steps =", ans)
