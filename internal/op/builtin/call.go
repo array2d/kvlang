@@ -63,4 +63,7 @@ var registry = map[string]Op{
 	OpStrSet: strOp{},
 	OpKVHas:  kvHasOp{},
 	OpKVAt:   kvAtOp{},
+	OpArray:  arrayOp{},
+	OpLen:    lenOp{},
+	OpAt:     atOp{},
 }

@@ -69,6 +69,13 @@ const (
 	OpStrSet = "string.set"
 )
 
+// 数组 built-in
+const (
+	OpArray = "array"
+	OpLen   = "len"
+	OpAt    = "at"
+)
+
 // KV 遍历 built-in（for 循环遍历 kvspace 路径子项）
 const (
 	OpKVHas = "kv.has"
@@ -86,6 +93,7 @@ var nativeOps = map[string]bool{
 	OpPrint: true, OpCerr: true, OpInput: true,
 	OpStrSet: true,
 	OpKVHas: true, OpKVAt: true,
+	OpArray: true, OpLen: true, OpAt: true,
 }
 
 // IsNativeOp 判断是否为 VM 原生求值的符号算子。

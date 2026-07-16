@@ -10,20 +10,36 @@ import (
 // asFloat coerces a Value to float64 for numeric operations.
 func asFloat(v kvspace.XValue) float64 {
 	switch v.Kind() {
-	case "int":   return float64(v.Int())
-	case "float": return v.Float()
-	case "bool":  if v.Bool() { return 1 }; return 0
-	default:      f, _ := strconv.ParseFloat(v.Str(), 64); return f
+	case "int", "int8", "int16", "int32", "int64":
+		return float64(v.Int64())
+	case "uint8", "uint16", "uint32", "uint64":
+		return float64(v.Uint64())
+	case "float", "float32":
+		return float64(v.Float32())
+	case "float64":
+		return v.Float64()
+	case "bool":
+		if v.Bool() { return 1 }; return 0
+	default:
+		f, _ := strconv.ParseFloat(v.Str(), 64); return f
 	}
 }
 
 // asInt coerces a Value to int64.
 func asInt(v kvspace.XValue) int64 {
 	switch v.Kind() {
-	case "int":   return v.Int()
-	case "float": return int64(v.Float())
-	case "bool":  if v.Bool() { return 1 }; return 0
-	default:      i, _ := strconv.ParseInt(v.Str(), 10, 64); return i
+	case "int", "int8", "int16", "int32", "int64":
+		return v.Int64()
+	case "uint8", "uint16", "uint32", "uint64":
+		return int64(v.Uint64())
+	case "float", "float32":
+		return int64(v.Float32())
+	case "float64":
+		return int64(v.Float64())
+	case "bool":
+		if v.Bool() { return 1 }; return 0
+	default:
+		i, _ := strconv.ParseInt(v.Str(), 10, 64); return i
 	}
 }
 
@@ -31,26 +47,42 @@ func asInt(v kvspace.XValue) int64 {
 // Exported for use by kvcpu/controlflow (br condition evaluation).
 func AsBool(v kvspace.XValue) bool {
 	switch v.Kind() {
-	case "bool":  return v.Bool()
-	case "int":   return v.Int() != 0
-	case "float": return v.Float() != 0
-	default:      s := v.Str(); return s != "" && s != "0" && s != "false"
+	case "bool": return v.Bool()
+	case "int", "int8", "int16", "int32", "int64":
+		return v.Int64() != 0
+	case "uint8", "uint16", "uint32", "uint64":
+		return v.Uint64() != 0
+	case "float", "float32":
+		return v.Float32() != 0
+	case "float64":
+		return v.Float64() != 0
+	default:
+		s := v.Str(); return s != "" && s != "0" && s != "false"
 	}
 }
 
 // isNumeric reports whether v is int or float.
-func isNumeric(v kvspace.XValue) bool { return v.Kind() == "int" || v.Kind() == "float" }
+func isNumeric(v kvspace.XValue) bool { return isIntKind(v.Kind()) || isFloatKind(v.Kind()) }
 
 // display formats a Value for human output (print / string.set).
 func display(v kvspace.XValue) string {
 	switch v.Kind() {
-	case "int":   return strconv.FormatInt(v.Int(), 10)
-	case "float":
-		s := strconv.FormatFloat(v.Float(), 'f', -1, 64)
+	case "int", "int8", "int16", "int32", "int64":
+		return strconv.FormatInt(v.Int64(), 10)
+	case "uint8", "uint16", "uint32", "uint64":
+		return strconv.FormatUint(v.Uint64(), 10)
+	case "float", "float32":
+		s := strconv.FormatFloat(float64(v.Float32()), 'f', -1, 32)
 		if !strings.Contains(s, ".") { s += ".0" }
 		return s
-	case "bool":  return strconv.FormatBool(v.Bool())
-	default:      return v.Str()
+	case "float64":
+		s := strconv.FormatFloat(v.Float64(), 'f', -1, 64)
+		if !strings.Contains(s, ".") { s += ".0" }
+		return s
+	case "bool": return strconv.FormatBool(v.Bool())
+	case "string": return v.Str()
+	case "array": return v.String() // debug format: array:NNB
+	default: return v.String()
 	}
 }
 
@@ -91,4 +123,16 @@ func tryParseNumber(s string) (kvspace.XValue, bool) {
 		return kvspace.Float(f), true
 	}
 	return kvspace.XValue{}, false
+}
+
+func isIntKind(k string) bool {
+	switch k {
+	case "int", "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64":
+		return true
+	}
+	return false
+}
+
+func isFloatKind(k string) bool {
+	return k == "float" || k == "float32" || k == "float64"
 }

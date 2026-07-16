@@ -35,9 +35,18 @@ func evalAbs(inputs []kvspace.XValue) (kvspace.XValue, error) {
 	if err := requireUnary(inputs); err != nil { return kvspace.XValue{}, err }
 	v := inputs[0]
 	switch v.Kind() {
-	case "int":   if v.Int() < 0 { return kvspace.Int(-v.Int()), nil }; return v, nil
-	case "float": return kvspace.Float(math.Abs(v.Float())), nil
-	default:      return kvspace.XValue{}, fmt.Errorf("abs requires numeric, got %s", v.Kind())
+	case "int", "int8", "int16", "int32", "int64":
+		x := v.Int64()
+		if x < 0 { return kvspace.Int64(-x), nil }
+		return v, nil
+	case "uint8", "uint16", "uint32", "uint64":
+		return v, nil
+	case "float", "float32":
+		return kvspace.Float32(float32(math.Abs(float64(v.Float32())))), nil
+	case "float64":
+		return kvspace.Float64(math.Abs(v.Float64())), nil
+	default:
+		return kvspace.XValue{}, fmt.Errorf("abs requires numeric, got %s", v.Kind())
 	}
 }
 

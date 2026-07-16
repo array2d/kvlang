@@ -39,7 +39,7 @@ func evalBinaryArith(inputs []kvspace.XValue, fn func(float64, float64) float64)
 	if err := requireBinary(inputs); err != nil { return kvspace.XValue{}, err }
 	a, b := inputs[0], inputs[1]
 	result := fn(asFloat(a), asFloat(b))
-	if a.Kind() == "int" && b.Kind() == "int" { return kvspace.Int(int64(result)), nil }
+	if isIntKind(a.Kind()) && isIntKind(b.Kind()) { return kvspace.Int64(int64(result)), nil }
 	return kvspace.Float(result), nil
 }
 
@@ -69,6 +69,6 @@ func evalUnaryArith(inputs []kvspace.XValue, fn func(float64) float64) (kvspace.
 	if err := requireUnary(inputs); err != nil { return kvspace.XValue{}, err }
 	v := inputs[0]
 	result := fn(asFloat(v))
-	if v.Kind() == "int" { return kvspace.Int(int64(result)), nil }
+	if isIntKind(v.Kind()) { return kvspace.Int(int64(result)), nil }
 	return kvspace.Float(result), nil
 }
