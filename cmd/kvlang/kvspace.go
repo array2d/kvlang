@@ -10,7 +10,8 @@ import (
 
 	"kvlang/internal/keytree"
 	"kvlang/internal/kvspace"
-)
+
+	"strconv")
 
 func cmdKVSpace(args []string) {
 	// 全局 FlagSet：解析 --addr 及子命令
@@ -49,7 +50,9 @@ func cmdKVSpace(args []string) {
 
 	case "set":
 		if len(sub) < 3 { usageExit("kvlang kvspace set <key> <value>") }
-		kv.Set(sub[1], kvspace.Str(sub[2]))
+		val, err := parseValueArg(sub[2])
+		if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
+		kv.Set(sub[1], val)
 
 	case "del":
 		if len(sub) < 2 { usageExit("kvlang kvspace del <key1> [key2 ...]") }
@@ -123,15 +126,18 @@ func usageExit(msg string) {
 	os.Exit(1)
 }
 
-// clearAll 清空所有已知 KV 根路径。
+// clearAll 清空 kvspace 中所有用户数据。
+// 先清空已知根路径下的子树，再逐级清理根级别未知路径。
 func clearAll(kv kvspace.KVSpace) {
-	for _, root := range []string{
+	roots := []string{
 		keytree.VthreadRoot,
 		keytree.SrcRoot,
 		keytree.FuncRoot,
 		keytree.SysRoot,
 		"/dev",
-	} {
+		"/t",  // 测试/临时命名空间
+	}
+	for _, root := range roots {
 		children, _ := kv.List(root)
 		for _, c := range children {
 			kv.DelTree(root + "/" + c)
@@ -153,8 +159,9 @@ func printTree(kv kvspace.KVSpace, prefix, indent string) {
 }
 
 func dumpPrefix(kv kvspace.KVSpace, prefix string) {
-	if valV, err := kv.Get(prefix); err == nil {
-		short := strings.ReplaceAll(valV.Str(), "\n", "↵")
+	if valV, err := kv.Get(prefix); err == nil && !valV.IsNil() {
+		// Value.String() 输出 kind:repr 格式，展示类型和长度
+		short := strings.ReplaceAll(valV.String(), "\n", "↵")
 		if len(short) > 80 { short = short[:80] + "…" }
 		fmt.Printf("%-60s %s\n", prefix, short)
 	}
@@ -208,5 +215,56 @@ func kvTrace(kv kvspace.KVSpace, vtid string) {
 
 		// 自动发送 "step"，驱动 CPU 继续执行下一条指令
 		kv.Notify(resumeKey, kvspace.Str("step")) //nolint:errcheck
+	}
+}
+
+// parseValueArg 解析 CLI 的 value 参数为 kvspace.Value。
+//
+// 格式：kind:repr（Value.String() 往返格式）
+//
+//	int:42          → kvspace.Int(42)
+//	float:3.14      → kvspace.Float(3.14)
+//	bool:true       → kvspace.Bool(true)
+//	string:hello    → kvspace.Str("hello")
+//	plain (无冒号)   → kvspace.Str(plain)  向后兼容
+func parseValueArg(raw string) (kvspace.Value, error) {
+	// 查找第一个冒号作为 kind/repr 分隔符
+	idx := strings.Index(raw, ":")
+	if idx < 0 {
+		// 无冒号：向后兼容，视为 string
+		return kvspace.Str(raw), nil
+	}
+	kind := raw[:idx]
+	repr := raw[idx+1:]
+	switch kind {
+	case "int":
+		i, err := strconv.ParseInt(repr, 10, 64)
+		if err != nil {
+			return kvspace.Value{}, fmt.Errorf("invalid int value: %q", repr)
+		}
+		return kvspace.Int(i), nil
+	case "float":
+		f, err := strconv.ParseFloat(repr, 64)
+		if err != nil {
+			return kvspace.Value{}, fmt.Errorf("invalid float value: %q", repr)
+		}
+		return kvspace.Float(f), nil
+	case "bool":
+		switch repr {
+		case "true":
+			return kvspace.Bool(true), nil
+		case "false":
+			return kvspace.Bool(false), nil
+		default:
+			return kvspace.Value{}, fmt.Errorf("invalid bool value: %q (expected true/false)", repr)
+		}
+	case "string":
+		return kvspace.Str(repr), nil
+	case "nil":
+		return kvspace.Value{}, nil
+	default:
+		// 未知 kind（如 tensor:120B）→ Raw 存储
+		// bytes kind 的 repr 是十六进制
+		return kvspace.Raw(kind, []byte(repr)), nil
 	}
 }
