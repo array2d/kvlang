@@ -37,6 +37,7 @@ post/
 # Tool config
 .omc/
 .claude/
+CLAUDE.md
 
 # Redis runtime artifacts
 dump.rdb
