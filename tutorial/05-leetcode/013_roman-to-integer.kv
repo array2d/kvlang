@@ -1,0 +1,47 @@
+# 013 Roman to Integer
+# 期望输出: 58, 1994
+def romanToInt(s:string) -> (val:int) {
+    0 -> val
+    0 -> i
+    len(s) -> n
+    "" -> prev
+    while (i < n) {
+        at(s, i) -> c
+        
+        c == "I" -> isI
+        c == "V" -> isV
+        c == "X" -> isX
+        c == "L" -> isL
+        c == "C" -> isC
+        c == "D" -> isD
+
+        prev == "I" -> pI
+        prev == "X" -> pX
+        prev == "C" -> pC
+
+        if (isI) { val + 1 -> val }
+        if (isV) { val + 5 -> val }
+        if (isX) { val + 10 -> val }
+        if (isL) { val + 50 -> val }
+        if (isC) { val + 100 -> val }
+        if (isD) { val + 500 -> val }
+
+        pI -> subI
+        pX -> subX
+        pC -> subC
+        if (isV) { if (subI) { val - 2 -> val } }
+        if (isX) { if (subI) { val - 2 -> val } }
+        if (isL) { if (subX) { val - 20 -> val } }
+        if (isC) { if (subX) { val - 20 -> val } }
+        if (isD) { if (subC) { val - 200 -> val } }
+
+        c -> prev
+        i + 1 -> i
+    }
+}
+
+romanToInt("LVIII") -> a
+print("LVIII =", a)
+romanToInt("MCMXCIV") -> b
+print("MCMXCIV =", b)
+a -> /roman_lviii
