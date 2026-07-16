@@ -154,30 +154,31 @@ func (e *Expr) String() string {
 
 func (e *Expr) stringPrec(outerPrec int) string {
 	if e.IsLeaf() {
-		if needsQuote(e.Val) {
-			return "'" + e.Val + "'"
+		v := e.Val
+		// parser internal " prefix → restore as "content"
+		if len(v) > 0 && v[0] == '"' {
+			return "\"" + v[1:] + "\""
 		}
-		return e.Val
+		if needsQuote(v) {
+			return "\"" + v + "\""
+		}
+		return v
 	}
 	// 二元中缀
 	if p, ok := infixPrecTable[e.Op]; ok && len(e.Args) == 2 {
 		left := e.Args[0].stringPrec(p)
-		right := e.Args[1].stringPrec(p + 1) // 左结合：右侧严格更高
+		right := e.Args[1].stringPrec(p + 1)
 		s := left + " " + e.Op + " " + right
 		if outerPrec > p {
 			return "(" + s + ")"
 		}
 		return s
 	}
-	// 一元前缀（仅 1 个操作数）
-	if len(e.Args) == 1 {
+	// 一元前缀运算符: -x, !x（仅符号算子，不含函数名）
+	if len(e.Args) == 1 && isOperatorChar(e.Op[0]) {
 		return e.Op + e.Args[0].stringPrec(200)
 	}
-	// 零参（裸操作码）
-	if len(e.Args) == 0 {
-		return e.Op
-	}
-	// 多参函数调用
+	// 函数调用（0/1/多参统一用括号）: foo(), print("x"), add(a, b)
 	args := make([]string, len(e.Args))
 	for i, a := range e.Args {
 		args[i] = a.String()
@@ -421,6 +422,15 @@ func needsQuote(s string) bool {
 		case ' ', '\t', ',', '(', ')', '=', '+', '-', '*', '%', '!', '<', '>', '&', '|', '^', '{', '}', '"', '\'':
 			return true
 		}
+	}
+	return false
+}
+
+// isOperatorChar reports whether c is a punctuation operator (not a function name).
+func isOperatorChar(c byte) bool {
+	switch c {
+	case '+', '-', '*', '/', '%', '!', '=', '<', '>', '&', '|', '^':
+		return true
 	}
 	return false
 }
