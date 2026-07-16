@@ -13,7 +13,7 @@ type KVPair struct {
 //
 // 使用模式：
 //
-//	kv.Set("/vt/0/pc", kvspace.Str("pre_main/[0,0]"))
+//	kv.Set("/vt/0/pc", kvspace.Str("init/[0,0]"))
 //	v, _ := kv.Get("/vt/0/pc"); pc := v.Str()
 //	kv.Notify("/vt/0/status", kvspace.Str("running"))
 //	val, _ := kv.Watch("/vt/0/status", 5*time.Second)

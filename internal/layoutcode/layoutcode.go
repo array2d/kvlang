@@ -149,9 +149,11 @@ func HandleReturn(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.I
 
 	// 读取本帧第一个返回值（供顶层 return 用）
 	var returnValue string
-	if len(inst.Reads) > 0 && strings.HasPrefix(inst.Reads[0], "./") {
-		v, _ := kv.Get(frameRoot + "/" + inst.Reads[0][2:])
-		returnValue = v.Str()
+	if len(inst.Reads) > 0 {
+		if rk := frameSlotKey(frameRoot, inst.Reads[0]); rk != "" {
+			v, _ := kv.Get(rk)
+			returnValue = v.Str()
+		}
 	}
 
 	// 顶层 return：frameRoot 就是 vthreadRoot
@@ -167,15 +169,18 @@ func HandleReturn(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.I
 	// 读写码语义：写槽路径直接从调用指令 [callPC addr0, i+1] 读取——
 	//   callPC = /vthread/42/.fn/[3,0] → 第 i 个写槽在 /vthread/42/.fn/[3, i+1]。
 	// 父帧在子帧执行期间保持挂起，父帧 .fn 链接不变，路径可靠解析。
+	// 写槽和 return 读槽均兼容 ./x 和裸名 x 两种形式。
 	if callPC != "" {
 		parentFrameRoot := keytree.FrameRoot(callPC)
 		for i, read := range inst.Reads {
 			wSlotPath := op.WriteSlotPC(callPC, i)
 			wTargetVal, _ := kv.Get(wSlotPath)
 			wTarget := wTargetVal.Str()
-			if strings.HasPrefix(wTarget, "./") {
-				v, _ := kv.Get(frameRoot + "/" + read[2:])
-				kv.Set(parentFrameRoot+"/"+wTarget[2:], v)
+			wk := frameSlotKey(parentFrameRoot, wTarget)
+			rk := frameSlotKey(frameRoot, read)
+			if wk != "" && rk != "" {
+				v, _ := kv.Get(rk)
+				kv.Set(wk, v)
 			}
 		}
 	}
@@ -250,6 +255,30 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 //  3. 编译 body 指令写入 /func/<pkg>/<name>/[i,j]
 //  4. 块标签写入 /func/<pkg>/<name>/<label>/
 //  5. 反向索引写入 /func/idx/<name>
+// frameSlotKey 将槽表达式转换为绝对 KV 路径，兼容 ./x 和裸名 x 两种形式。
+//
+//	"./x"  → frameRoot + "/x"   (相对路径)
+//	"x"    → frameRoot + "/x"   (裸标识符，与 ./x 等价)
+//	"/abs" → "/abs"             (绝对路径，直通)
+//	""     → ""                 (空，忽略)
+//	"."    → ""                 (单点，忽略)
+//	".xxx" → ""                 (引擎保留键，忽略，如 ._ 丢弃槽)
+func frameSlotKey(frameRoot, slot string) string {
+	if slot == "" {
+		return ""
+	}
+	if strings.HasPrefix(slot, "./") {
+		return frameRoot + "/" + slot[2:]
+	}
+	if slot[0] == '/' {
+		return slot // 绝对路径直通
+	}
+	if slot[0] == '.' {
+		return "" // 引擎保留键（._ 等丢弃槽），不写
+	}
+	return frameRoot + "/" + slot // 裸标识符
+}
+
 func WriteFunc(kv kvspace.KVSpace, pkg string, fn *ast.Func) {
 	// 清除旧函数数据：旧指令的读/写槽数量可能多于新函数，
 	// 若不清除则旧槽（如 [0,-1]、[0,-2]）会被新执行错误读取。

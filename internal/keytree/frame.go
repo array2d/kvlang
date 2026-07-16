@@ -58,6 +58,7 @@ func ChildFrameRoot(callPC string) string {
 	if idx < 0 {
 		panic(fmt.Sprintf("ChildFrameRoot: callPC has no /.fn/ segment: %q", callPC))
 	}
-	// callPC[:idx] = parentFrameRoot, callPC[idx+6:] = "[coord]"
-	return callPC[:idx] + "/" + callPC[idx+6:]
+	// callPC[:idx] = parentFrameRoot, callPC[idx+5:] = "[coord]"
+	// "/.fn/" 长度 = 5（注意：之前的 "/._fn/" 是 6，已更名为 "/.fn/"）
+	return callPC[:idx] + "/" + callPC[idx+5:]
 }

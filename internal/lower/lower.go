@@ -386,7 +386,7 @@ func isBareReturn(s *ast.Instruction) bool {
 func makeReturnInst(sig ast.FuncSig) *ast.Instruction {
 	args := make([]*ast.Expr, len(sig.Returns))
 	for i, p := range sig.Returns {
-		args[i] = ast.Leaf("./" + p.Name)
+		args[i] = ast.Leaf(p.Name) // 裸标识符，与 ./p.Name 等价
 	}
 	return &ast.Instruction{Expr: ast.Call(op.OpReturn, args...)}
 }

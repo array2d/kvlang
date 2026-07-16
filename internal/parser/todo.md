@@ -55,7 +55,7 @@ if !isKVPathToken(tok.Value) {
 
 **现状**：
 - `ast.File` 有两个出口：`Funcs []Func` 和 `TopLevelCalls []*Instruction`
-- 裸顶层语句由 `load.go` 在运行时合成 `pre_main`，是消费层的特例处理
+- 裸顶层语句由 `load.go` 在运行时合成 `init`，是消费层的特例处理
 
 **目标**（见 `最高标准设计.md §2.7`）：
 
@@ -76,12 +76,12 @@ if !isKVPathToken(tok.Value) {
 2. **`ast/ast.go`**：删除 `File.TopLevelCalls []*Instruction` 字段
 
 3. **`load.go`**：
-   - 删除 `allCalls` 积累逻辑和 `pre_main` 合成
+   - 删除 `allCalls` 积累逻辑和 `init` 合成
    - 所有文件的 `Funcs`（含各自的 `init()`）统一 `WriteFunc`
    - 多文件时：在 load 层合成一个 `main/init` 依次调用各 `<pkg>/init`
    - 入口由 `Bootstrap(ctx, kv, vtid, "init")` 统一触发
 
-4. **`cmd/kvlang/serve.go`**：`pre_main` → `init`，`Bootstrap` 调用点更新
+4. **`cmd/kvlang/serve.go`**：`init` → `init`，`Bootstrap` 调用点更新
 
 **影响**：✅ 影响当前功能（`-c` 内联执行已修复 ParseCode 门卫，此项是完整收尾）
 
