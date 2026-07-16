@@ -16,7 +16,7 @@
   "repository": {
     "line_comment": {
       "name": "comment.line.kvlang",
-      "match": "#.*$"
+      "match": "(#|//).*$"
     },
     "string_double": {
       "name": "string.quoted.double.kvlang",

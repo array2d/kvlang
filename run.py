@@ -203,9 +203,9 @@ def main() -> None:
 
     # ── §1 构建与静态检查 ─────────────────────────────────────────────────
     section("§1 构建与静态检查")
-    check_exit("go build ./...", 0, ["go", "build", "./..."])
-    check_exit("go vet ./...", 0, ["go", "vet", "./..."])
-    check_exit("go test ./...", 0, ["go", "test", "./...", "-count=1"])
+    check_exit("go build ...", 0, ["go", "build", "./..."])
+    check_exit("go vet ...", 0, ["go", "vet", "./..."])
+    check_exit("go test ...", 0, ["go", "test", "./...", "-count=1"])
     check_exit("check-keytree", 0, [".claude/hooks/check-keytree.sh"])
 
     # 零 redis 直引用（internal/kvspace 除外）
@@ -266,11 +266,11 @@ def main() -> None:
     section("§4b run 内联 -c")
     inline = (
         'def add2(A:int, B:int) -> (C:int) {\n'
-        "    './C' <- A + B\n"
+        "    C <- A + B\n"
         '}\n'
-        '"kvlangrun" -> \'./term\'\n'
-        "add2(10, 32) -> './sum'\n"
-        'print("sum =", \'./sum\')\n'
+        '"kvlangrun" -> term\n'
+        "add2(10, 32) -> sum\n"
+        'print("sum =", sum)\n'
     )
     check_out("run -c inline", "sum = 42", [KV, "-c", inline])
 
