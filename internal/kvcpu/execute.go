@@ -27,12 +27,22 @@ const MaxStackDepth = 256
 //  3. vtype.Lookup  — tensor.*、str.* 等命名空间算子
 //  4. default       — 用户定义函数（rewrite as call）
 //     ↓ HandleCall 内查 FuncIdx；未找到 → SetError + Notify SysVMErr
+//
+// 调试支持（内置，无需特殊启动）：
+// agent 在任意时刻通过 kvspace 写入 /vthread/<vtid>/.debug 即可激活调试模式。
+// CPU 在函数入口处检查该标志；激活后每条指令均暂停，等待 .debug.resume 命令。
 func (c *cpu) Execute(pc string) error {
 	ctx := context.Background()
 	vtid := keytree.VtidFromPC(pc)
 	if vtid == "" {
 		return fmt.Errorf("Execute: invalid pc %q", pc)
 	}
+
+	// stepping 是本次 vthread 执行的局部状态：
+	// true  = 单步模式（每条指令执行后暂停）
+	// false = 正常模式（仅在函数入口检查 .debug 标志）
+	// Execute 每次调用对应一个 vthread，单 goroutine 执行，无需加锁。
+	stepping := false
 
 	for {
 		_, status := vthread.Get(ctx, c.kv, vtid)
@@ -66,6 +76,41 @@ func (c *cpu) Execute(pc string) error {
 			return nil
 		}
 		logx.Debug("[%s] PC=%s OP=%s READS=%v WRITES=%v", vtid, pc, inst.Opcode, inst.Reads, inst.Writes)
+
+		// ── 内联调试检查 ──────────────────────────────────────────────────
+		// 检查点：decode 之后、dispatch 之前。
+		// 此时 KV 空间处于稳定状态（上一条指令已完成，当前指令尚未执行），
+		// agent 通过 kvspace 读取到的是一致的内存快照。
+		//
+		// 性能策略：
+		//   - 非单步模式：仅在函数入口（isFuncEntryPC）读取一次 .debug（每次函数调用 1 次）
+		//   - 单步模式：每条指令读取一次 .debug（已在调试中，overhead 可接受）
+		if stepping || isFuncEntryPC(pc) {
+			v, _ := c.kv.Get(keytree.VThreadDebug(vtid))
+			switch mode := v.Str(); {
+			case mode == "" && stepping:
+				// Agent 清除了 .debug 标志 → 退出单步模式
+				stepping = false
+				logx.Debug("[%s] debug: stepping deactivated", vtid)
+			case mode != "":
+				// .debug 标志已设置 → 暂停
+				if !stepping {
+					stepping = true
+					logx.Debug("[%s] debug: stepping activated at %s", vtid, pc)
+				}
+				debugNotifyPause(ctx, c.kv, vtid, pc, inst)
+				switch cmd := debugWaitResume(c.kv, vtid); cmd {
+				case "abort":
+					vthread.SetError(ctx, c.kv, vtid, pc, "debug: aborted by agent")
+					return fmt.Errorf("debug: aborted by agent")
+				case "continue":
+					stepping = false
+					c.kv.Del(keytree.VThreadDebug(vtid)) // 清除标志，恢复全速
+					logx.Debug("[%s] debug: continue → stepping off", vtid)
+				// "step" 或其他 → 保持单步
+				}
+			}
+		}
 
 		var execErr error
 		switch {
