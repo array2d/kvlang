@@ -1,11 +1,14 @@
-// Package lower 将结构化控制流 (if/while) lowering 为基本块原语 (br/goto)，
-// 并将复合表达式展开为 kvcpu 可直接执行的平坦指令序列。
+// Package lower 将结构化控制流 (if/while) lowering 为基本块原语 (br/goto)。
 //
 // 设计原则（续体传递，Continuation-Passing Style）：
 //   - if/while 遇到时，将后续所有语句作为续体（cont）传入，注入到 merge/exit block
 //   - 函数入口始终在 [0,0]（平坦指令或 goto 首控制块）
 //   - 任何路径最终以 return / goto / br 结尾（appendReturn 补全）
 //   - break → goto exitLabel，continue → goto condLabel（由 loopCtx 携带当前循环出口）
+//
+// 读写码强制约束：
+//   - 所有指令的参数必须为叶节点（路径/字面量），禁止内联嵌套表达式
+//   - 违反者在 lower 阶段 panic（编译期错误），强制用户显式写槽
 package lower
 
 import (
@@ -70,7 +73,18 @@ func lowerBody(stmts []ast.Stmt, lg *labelGen, lc *loopCtx) []ast.Stmt {
 	for i, st := range stmts {
 		switch s := st.(type) {
 		case *ast.Instruction:
-			preamble = append(preamble, flattenInstExpr(s, lg)...)
+			// 读写码原则：所有函数参数必须为叶节点（路径/字面量），禁止内联嵌套表达式。
+			// 错误示例：print("r =", 10 - 3)   ← 10-3 是嵌套表达式，隐含"返回值"语义
+			// 正确写法：10 - 3 -> r \n print("r =", r)
+			if s.Expr != nil && !s.Expr.IsLeaf() && !allArgsLeaf(s.Expr) {
+				panic(fmt.Sprintf(
+					"kvlang read-write code: nested expression as argument is not allowed.\n"+
+						"  got: %v\n"+
+						"  fix: compute sub-expressions explicitly and assign to named slots first.",
+					s.Expr,
+				))
+			}
+			preamble = append(preamble, s)
 
 		case *ast.IfStmt:
 			cont := lowerBody(stmts[i+1:], lg, lc)
@@ -262,47 +276,32 @@ func isTerminator(s *ast.Instruction) bool {
 }
 
 // evalCond 处理条件指令：
-//   - 简单槽引用（叶节点，无 Reads）→ 直接用 Val 作为槽名
-//   - 复合表达式 → 展开并写入临时槽 _N
+//   - 简单槽引用（叶节点，无 Reads）→ 直接用 Val 作为槽名（如 while (hit)）
+//   - 简单比较（所有参数为叶节点）→ 写入临时槽 _N（如 while (i <= n)）
+//   - 嵌套表达式（如 add(a,b) > 0）→ 编译期 panic：先显式求值再用槽
 func evalCond(cond *ast.Instruction, lg *labelGen) (insts []ast.Stmt, slot string) {
 	if isCondSimpleSlot(cond) {
 		return nil, cond.Expr.Val
 	}
+	if !allArgsLeaf(cond.Expr) {
+		panic(fmt.Sprintf(
+			"kvlang read-write code: nested expression in condition is not allowed.\n"+
+				"  got: %v\n"+
+				"  fix: compute sub-expression first and assign to a slot, e.g.:\n"+
+				"       add(a, b) -> _cond_val\n"+
+				"       while (_cond_val > 0) { ... }",
+			cond.Expr,
+		))
+	}
 	slot = lg.tmp()
 	condInst := *cond
 	condInst.Writes = []string{slot}
-	for _, fi := range flattenInstExpr(&condInst, lg) {
-		insts = append(insts, fi)
-	}
+	insts = append(insts, &condInst)
 	return insts, slot
 }
 
 func isCondSimpleSlot(inst *ast.Instruction) bool {
 	return inst.Expr != nil && inst.Expr.IsLeaf() && len(inst.Writes) == 0
-}
-
-// flattenInstExpr 将复合子表达式展开为平坦指令序列（kvcpu 可直接执行）。
-func flattenInstExpr(inst *ast.Instruction, lg *labelGen) []ast.Stmt {
-	if inst.Expr == nil || inst.Expr.IsLeaf() || allArgsLeaf(inst.Expr) {
-		return []ast.Stmt{inst}
-	}
-	var result []ast.Stmt
-	flatArgs := make([]*ast.Expr, len(inst.Expr.Args))
-	for i, arg := range inst.Expr.Args {
-		if arg == nil || arg.IsLeaf() {
-			flatArgs[i] = arg
-		} else {
-			tmp := lg.tmp()
-			subInst := &ast.Instruction{Expr: arg, Writes: []string{tmp}}
-			result = append(result, flattenInstExpr(subInst, lg)...)
-			flatArgs[i] = ast.Leaf(tmp)
-		}
-	}
-	result = append(result, &ast.Instruction{
-		Expr:   ast.Call(inst.Expr.Op, flatArgs...),
-		Writes: inst.Writes,
-	})
-	return result
 }
 
 // preambleEndsWithTerminator 判断 preamble 最后一条指令是否为终止符。

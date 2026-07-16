@@ -5,6 +5,8 @@
 package parser
 
 import (
+	"fmt"
+
 	"kvlang/internal/ast"
 )
 
@@ -110,6 +112,15 @@ func (p *parser) parsePrimaryExpr() *ast.Expr {
 	// 一元前缀算子：! 或 - 后跟操作数
 	if t.Kind == Ident && isUnaryPrefixOp(t.Value) {
 		p.advance()
+		// 优化：-<数字字面量> 直接合并为负数叶节点（如 -42 → Leaf("-42")），
+		// 避免产生 Call("-", Leaf("42")) 的嵌套结构，符合读写码"参数为叶节点"约束。
+		if t.Value == "-" {
+			next := p.peek()
+			if next.Kind == Literal && len(next.Value) > 0 && next.Value[0] >= '0' && next.Value[0] <= '9' {
+				lit := p.advance()
+				return ast.Leaf("-" + lit.Value)
+			}
+		}
 		arg := p.parsePratt(unaryPrec)
 		return ast.Call(t.Value, arg)
 	}
@@ -158,6 +169,9 @@ func (p *parser) parsePrimaryExpr() *ast.Expr {
 
 // collectWriteList 收集 -> 右侧的写槽列表。
 // 支持 (a, b) 带括号形式和裸 a[, b...] 形式。
+//
+// 写槽只能是裸标识符（路径名），若遇到非标识符 token（如 LParen、Literal），
+// 判定为同一行存在第二条指令，发出警告后停止收集。
 func (p *parser) collectWriteList() []string {
 	if p.peek().Kind == LParen {
 		p.advance() // consume (
@@ -182,7 +196,44 @@ func (p *parser) collectWriteList() []string {
 			p.advance()
 			continue
 		}
-		writes = append(writes, p.advance().Value)
+		// 合法写槽：
+		//   Ident  — 裸标识符（如 x, total, _）
+		//   Literal 以 "./" 或 "/" 开头 — 路径引用（如 ./x, /abs/path）
+		// 非法（触发 warning）：
+		//   Ident 后紧跟 LParen — 是函数调用，说明同行存在第二条指令
+		//   Literal 以 '"' 或数字开头 — 字符串/数字字面量，不能是写槽
+		//   其他 token（LParen 等）
+		isPathLiteral := t.Kind == Literal && len(t.Value) >= 2 &&
+			(t.Value[:2] == "./" || t.Value[0] == '/')
+		isIdent := t.Kind == Ident
+		isCallStart := isIdent && p.peekAt(1).Kind == LParen
+		isInvalidLiteral := t.Kind == Literal && !isPathLiteral
+
+		switch {
+		case isCallStart:
+			p.errors = append(p.errors, Diagnostic{
+				Pos:  t.Pos,
+				Warn: true,
+				Message: fmt.Sprintf(
+					"function call %q on same line as write slot — "+
+						"each instruction must be on its own line",
+					t.Value),
+			})
+			return writes
+		case isInvalidLiteral || (!isIdent && !isPathLiteral):
+			p.errors = append(p.errors, Diagnostic{
+				Pos:  t.Pos,
+				Warn: true,
+				Message: fmt.Sprintf(
+					"unexpected token %q in write slot position — "+
+						"did you put two instructions on the same line? "+
+						"each instruction must be on its own line",
+					t.Value),
+			})
+			return writes
+		default:
+			writes = append(writes, p.advance().Value)
+		}
 	}
 	return writes
 }

@@ -13,14 +13,19 @@ type Pos struct {
 	Col  int // 1-based
 }
 
-// Diagnostic 表示一条解析错误，携带位置信息。
+// Diagnostic 表示一条解析诊断（错误或警告），携带位置信息。
 type Diagnostic struct {
 	Pos     Pos
 	Message string
+	Warn    bool // true = 警告（不影响解析继续），false = 错误
 }
 
 func (d Diagnostic) String() string {
-	return fmt.Sprintf("%d:%d: %s", d.Pos.Line, d.Pos.Col, d.Message)
+	kind := "error"
+	if d.Warn {
+		kind = "warn"
+	}
+	return fmt.Sprintf("%d:%d: %s: %s", d.Pos.Line, d.Pos.Col, kind, d.Message)
 }
 
 // Kind 标记 Token 类型。
