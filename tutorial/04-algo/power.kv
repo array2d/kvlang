@@ -1,18 +1,17 @@
 # power: 快速幂（循环实现）
 # 算法: 循环 while + 条件更新，计算 2^10 = 1024
-# 层级: P3
-# 规则: P3-algo
 # 期望输出:
 #   result = 1024
 
 def power(base:int, exp:int) -> (result:int) {
-    1 -> result
-    0 -> e
+    result <- 1
+    e <- 0
     while (e < exp) {
-        result * base -> result
-        e + 1 -> e
+        result <- result * base
+        e <- e + 1
     }
 }
 
 power(2, 10) -> ans
 print("result =", ans)
+ans -> /last_pow                   # global

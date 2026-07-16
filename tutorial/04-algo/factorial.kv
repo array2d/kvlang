@@ -1,18 +1,17 @@
 # factorial: 迭代阶乘
 # 算法: while 循环累乘，计算 10! = 3628800
-# 层级: P3
-# 规则: P3-algo
 # 期望输出:
 #   fact = 3628800
 
 def factorial(n:int) -> (result:int) {
-    1 -> result
-    1 -> i
+    result <- 1
+    i <- 1
     while (i <= n) {
-        result * i -> result
-        i + 1 -> i
+        result <- result * i
+        i <- i + 1
     }
 }
 
 factorial(10) -> ans
 print("fact =", ans)
+ans -> /last_fact                   # global

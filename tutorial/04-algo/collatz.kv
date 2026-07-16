@@ -1,24 +1,23 @@
 # collatz: Collatz 猜想步数
-# 算法: while + 条件分支（奇数×3+1，偶数÷2），计算 start=27 需多少步到 1
-# 层级: P3
-# 规则: P3-algo
+# 算法: while + 条件分支，start=27
 # 期望输出:
 #   steps = 111
 
 def collatz(n:int) -> (steps:int) {
-    0 -> steps
+    steps <- 0
     while (n > 1) {
         n % 2 -> mod
         mod == 0 -> even
         if (even) {
-            n / 2 -> n
+            n <- n / 2
         } else {
-            n * 3 -> t
-            t + 1 -> n
+            t <- n * 3
+            n <- t + 1
         }
-        steps + 1 -> steps
+        steps <- steps + 1
     }
 }
 
 collatz(27) -> ans
 print("steps =", ans)
+ans -> /last_steps                  # global

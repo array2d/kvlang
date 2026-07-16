@@ -1,8 +1,5 @@
-# map_reduce: filter + map + reduce 函数式模式（MDN JS Array）
-# 算法: for 遍历器筛选奇数 (filter) + 求平方累加 (map+reduce 合一)
-# 来源: MDN JavaScript Array.prototype.map / filter / reduce
-# 层级: P3
-# 规则: P3-algo
+# map_reduce: filter + map + reduce（MDN JS Array）
+# 算法: for 遍历器筛选奇数 + 累加平方
 # 期望输出:
 #   odd squares count: 5
 #   sum of squares: 165
@@ -19,16 +16,16 @@ def main() -> () {
     8  -> nums/8
     10 -> nums/9
 
-    0 -> count
-    0 -> total
+    count <- 0
+    total <- 0
     for (n in nums) {
         n % 2 -> rem
         rem == 1 -> is_odd
         if (is_odd) {
             print("  keep:", n)
-            n * n -> sq
-            total + sq -> total
-            count + 1 -> count
+            sq <- n * n
+            total <- total + sq
+            count <- count + 1
         } else {
             print("  skip:", n)
         }
@@ -36,6 +33,7 @@ def main() -> () {
 
     print("odd squares count:", count)
     print("sum of squares:", total)
+    total -> /last_sum               # global
 }
 
 main() -> ()

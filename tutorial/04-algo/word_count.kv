@@ -1,8 +1,5 @@
 # word_count: 单词计数状态机（K&R C §1.5.4）
-# 算法: for 遍历 + while 状态机 (IN/OUT)，统计空格分隔的单词数
-# 来源: C 语言 K&R §1.5.4 "Word Counting"
-# 层级: P3
-# 规则: P3-algo
+# 算法: for 遍历 + IN/OUT 状态机
 # 期望输出:
 #   word count = 3
 
@@ -26,23 +23,24 @@ def main() -> () {
     "n" -> chars/16
     "g" -> chars/17
 
-    0 -> nw
-    0 -> state
+    nw <- 0
+    state <- 0
 
     for (c in chars) {
         c == " " -> blank
         if (blank) {
-            0 -> state
+            state <- 0
         } else {
             state == 0 -> was_out
             if (was_out) {
-                1 -> state
-                nw + 1 -> nw
+                state <- 1
+                nw <- nw + 1
             }
         }
     }
 
     print("word count =", nw)
+    nw -> /last_wc                   # global
 }
 
 main() -> ()

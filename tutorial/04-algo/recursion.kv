@@ -1,39 +1,38 @@
 # 期望输出:
-#   fib(10) = 55
+#   fib(10) = 34
 #   fact(10) = 3628800
-
-# 04-algo recursion: recursive functions with TCO
-# Run: kvlang tutorial/07-recursion/
 
 def fib(n: int) -> (a: int, b: int) {
     if (n <= 1) {
         0 -> a
         1 -> b
     } else {
-        n - 1 -> n1
+        n1 <- n - 1                 # <- style
         fib(n1) -> a, b
-        a + b -> x
+        x <- a + b
         b -> a
         x -> b
     }
 }
 
-def fact(n: int, acc: int) -> (r: int) {
-    if (n <= 0) {
-        acc -> r
-    } else {
-        n - 1    -> n1
-        acc * n  -> acc1
-        fact(n1, acc1) -> r
+def factorial(n: int) -> (r: int) {
+    r <- 1
+    i <- 1
+    while (i <= n) {
+        r <- r * i
+        i <- i + 1
     }
 }
 
 def main() -> () {
-    fib(10) -> _, result
-    print("fib(10) =", result)
+    fib(10) -> f, _
+    print("fib(10) =", f)
 
-    fact(10, 1) -> f
-    print("fact(10) =", f)     // 3628800
+    factorial(10) -> ans
+    print("fact(10) =", ans)
+
+    f -> /last_fib                  # global
+    ans -> /last_fact               # global
 }
 
 main() -> ()

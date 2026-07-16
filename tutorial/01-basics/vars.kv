@@ -2,14 +2,11 @@
 #   x = 42
 #   y = 50
 
-# 01-basics vars: variables and paths
-# Run: kvlang tutorial/02-vars/
-
 def main() -> () {
-    42 -> x                     // write 42 to path x
-    print("x =", x)            // read from path x
+    42 -> x
+    print("x =", x)
 
-    x + 8 -> y                  // 42 + 8 = 50
+    y <- x + 8
     print("y =", y)
 }
 

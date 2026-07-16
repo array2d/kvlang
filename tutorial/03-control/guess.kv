@@ -1,8 +1,6 @@
 # guess_number: 二分查找猜数字（Python Tutorial §4.4）
 # 算法: while 循环 + 二分查找，在 [1,100] 中找 target=73
-# 来源: Python Tutorial §4.4 "break and continue Statements"
-# 层级: P3
-# 规则: P3-algo
+# 来源: Python Tutorial §4.4
 # 期望输出:
 #   found 73 in 6 guesses
 
@@ -10,34 +8,35 @@ def guess_number() -> () {
     73 -> target
     1  -> lo
     100 -> hi
-    0  -> tries
-    0  -> found
+    tries <- 0
+    found <- 0
 
     while (found == 0) {
-        lo + hi -> s
-        s / 2 -> mid_float
-        int(mid_float) -> mid
+        s <- lo + hi
+        mid_float <- s / 2
+        mid <- int(mid_float)
 
-        tries + 1 -> tries
+        tries <- tries + 1
         print("guess #", tries, ":", mid)
 
         mid == target -> hit
         if (hit) {
-            1 -> found
+            found <- 1
             print("  correct!")
         } else {
             mid < target -> too_low
             if (too_low) {
-                mid + 1 -> lo
+                lo <- mid + 1
                 print("  too low, range:", lo, "-", hi)
             } else {
-                mid - 1 -> hi
+                hi <- mid - 1
                 print("  too high, range:", lo, "-", hi)
             }
         }
     }
 
     print("found", target, "in", tries, "guesses")
+    tries -> /last_guesses          # global: save result
 }
 
 guess_number() -> ()

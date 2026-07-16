@@ -1,8 +1,6 @@
 # cels_to_fahr: 摄氏转华氏温度表（K&R C §1.2）
-# 算法: for 遍历器 + 浮点运算，f(°F) → °C = (5/9)*(°F-32)
+# 算法: for 遍历器 + 浮点运算
 # 来源: C 语言 K&R §1.2 "The For Statement"
-# 层级: P3
-# 规则: P3-algo
 # 期望输出:
 #   0 F = -17.77777777777778 C
 #   300 F = 148.88888888888889 C
@@ -26,11 +24,14 @@ def main() -> () {
     300 -> data/15
 
     for (fahr in data) {
-        5.0 / 9.0 -> factor
-        fahr - 32 -> diff
-        factor * diff -> cels
+        factor <- 5.0 / 9.0        # <- style
+        diff <- fahr - 32
+        cels <- factor * diff
         print(fahr, "F =", cels, "C")
     }
+
+    cels <- /last_temp               # global read
+    print("global last_temp =", cels)
 }
 
 main() -> ()

@@ -2,32 +2,28 @@
 #   abs(-5) = 5
 #   false
 
-# 03-control if: conditional logic
-# Run: kvlang tutorial/05-if/
-
 def abs(x: int) -> (r: int) {
     if (x < 0) {
-        -x -> r
+        r <- -x                     # <- style in true branch
     } else {
-        x -> r
+        x -> r                      # -> style in false branch
     }
 }
 
 def main() -> () {
     abs(-5) -> a
-    print("abs(-5) =", a)      // 5
+    print("abs(-5) =", a)
 
     abs(3) -> b
-    print("abs(3) =", b)       // 3
+    print("abs(3) =", b)
 
-    true && false -> and_r
-    print("true && false =", and_r)   // false
+    c <- abs(-10)
+    print("abs(-10) =", c)
 
-    true || false -> or_r
-    print("true || false =", or_r)    // true
+    b >= 90 -> d
+    print(d)                        # false
 
-    !true -> not_r
-    print("!true =", not_r)           // false
+    a -> /last_abs                   # global: store last abs result
 }
 
 main() -> ()

@@ -1,11 +1,12 @@
 # 期望输出:
 #   hello kvlang
-
-# 01-basics hello: your first kvlang program
-# Run: kvlang tutorial/01-hello/
+#   global hits = 1
 
 def main() -> () {
     print("hello kvlang")
+    0 -> /hits
+    /hits + 1 -> /hits
+    print("global hits =", /hits)
 }
 
 main() -> ()
