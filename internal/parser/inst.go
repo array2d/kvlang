@@ -126,6 +126,19 @@ func (p *parser) parsePrimaryExpr() *ast.Expr {
 		return ast.Call(t.Value, arg)
 	}
 
+	// 数组字面量：[elem, elem, ...] — 展开为 array(elem0, elem1, ...)
+	if t.Kind == LBrack {
+		p.advance() // consume [
+		var elems []*ast.Expr
+		for p.peek().Kind != RBrack && p.peek().Kind != EOF {
+			if p.eat(Comma) { continue }
+			elem := p.parsePratt(0)
+			if elem != nil { elems = append(elems, elem) }
+		}
+		p.expect(RBrack)
+		return ast.Call("array", elems...)
+	}
+
 	// 括号分组：(expr)
 	if t.Kind == LParen {
 		p.advance()
