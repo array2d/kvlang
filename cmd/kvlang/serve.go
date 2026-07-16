@@ -29,6 +29,10 @@ func executeEntry(kv kvspace.KVSpace) {
 		logx.Fatal("[single] Bootstrap pre_main failed")
 	}
 	vthread.Set(ctx, kv, vtid, firstPC, "init")
+	// 自动绑定进程标准终端：registerDefaultTerm 已将进程 stdout/stderr/stdin
+	// 注册为 "kvlangrun"，此处将 vthread 绑定到该终端，无需在 .kv 代码里写
+	// `"kvlangrun" -> ./term`。
+	kv.Set(keytree.VThreadTerm(vtid), kvspace.Str("kvlangrun"))
 	logx.Info("[single] executing %s", firstPC)
 	cpu := kvcpu.New(kv, "single")
 	cpu.Execute(firstPC)
@@ -57,7 +61,8 @@ func runServe(args []string) {
 
 	kv := kvspace.ConnPool(*addr, poolSize)
 	defer kv.DisConn()
-	registerDefaultTerm(kv)
+	// serve 是 daemon，不注册 kvlangrun 终端——
+	// 各 vthread 的终端由 agent 通过 entry.Term 显式绑定。
 
 	registerVM(ctx, kv, vmID)
 	registerBuildinOps(ctx, kv, vmID)
