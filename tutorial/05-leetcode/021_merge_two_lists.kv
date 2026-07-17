@@ -34,9 +34,9 @@ def merge(a:str, b:str) -> () {
 			kvat(pa, "next") -> pa
 		} else {
 			kvat(pb, "val") -> bv
-			av <= bv -> take_a
+			av <= bv -> take
 
-			if (take_a) {
+			if (take) {
 				print(av)
 				kvat(pa, "next") -> pa
 			} else {
@@ -51,3 +51,10 @@ def merge(a:str, b:str) -> () {
 		kvat(pb, "next") -> pb
 	}
 }
+
+def main() -> () {
+	build_lists()
+	merge("/a0", "/b0")
+}
+
+main()

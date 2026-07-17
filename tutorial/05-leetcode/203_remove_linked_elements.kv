@@ -24,18 +24,6 @@ def build_list() -> () {
 }
 
 def remove(head:str, val:int) -> () {
-	# skip leading matches
-	while (head != "") {
-		kvat(head, "val") -> hv
-		hv == val -> match
-
-		if (match) {
-			kvat(head, "next") -> head
-		} else {
-			"" -> head
-		}
-	}
-	# print remaining
 	"/n0" -> p
 	while (p != "") {
 		kvat(p, "val") -> v
@@ -49,3 +37,10 @@ def remove(head:str, val:int) -> () {
 		kvat(p, "next") -> p
 	}
 }
+
+def main() -> () {
+	build_list()
+	remove("/n0", 6)
+}
+
+main()
