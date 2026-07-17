@@ -1,0 +1,54 @@
+# 141: Linked List Cycle — 快慢指针
+# 来源: LeetCode #141
+# 期望输出:
+#   1
+#   0
+def has_cycle(head:str) -> (result:int) {
+	0 -> result
+	head -> slow
+	head -> fast
+	while (fast != "") {
+		kvat(slow, "next") -> slow
+		kvat(fast, "next") -> n1
+		n1 == "" -> at_end
+
+		if (at_end) {
+			"" -> fast
+		} else {
+			kvat(n1, "next") -> fast
+			slow == fast -> match
+
+			if (match) {
+				1 -> result
+				"" -> fast
+			}
+		}
+	}
+}
+
+def build_cycle() -> () {
+	3 -> /c0/val
+	"/c1" -> /c0/next
+	2 -> /c1/val
+	"/c2" -> /c1/next
+	0 -> /c2/val
+	"/c0" -> /c2/next
+}
+
+def build_no_cycle() -> () {
+	1 -> /n0/val
+	"/n1" -> /n0/next
+	2 -> /n1/val
+	"" -> /n1/next
+}
+
+def main() -> () {
+	build_cycle()
+	has_cycle("/c0") -> r1
+	print(r1)
+	build_no_cycle()
+	has_cycle("/n0") -> r2
+	print(r2)
+}
+
+main()

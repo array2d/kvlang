@@ -2,18 +2,36 @@
 # 来源: LeetCode #11
 # 期望输出:
 #   49
-
 def max_area(h) -> (mx:int) {
-    len(h) -> n; 0 -> l; n - 1 -> r; 0 -> mx
-    while (l < r) {
-        h[l] -> hl; h[r] -> hr; r - l -> w
-        hl < hr -> ls
-        if (ls) { hl * w -> ar; l + 1 -> l } else { hr * w -> ar; r - 1 -> r }
-        ar > mx -> bg; if (bg) { ar -> mx }
-    }
+	len(h) -> n
+	0 -> l
+	n - 1 -> r
+	0 -> mx
+	while (l < r) {
+		h[l] -> hl
+		h[r] -> hr
+		r - l -> w
+		hl < hr -> ls
+
+		if (ls) {
+			hl * w -> ar
+			l + 1 -> l
+		} else {
+			hr * w -> ar
+			r - 1 -> r
+		}
+
+		ar > mx -> bg
+
+		if (bg) {
+			ar -> mx
+		}
+	}
 }
 
 def main() -> () {
-    max_area([1,8,6,2,5,4,8,3,7]) -> r; print(r)
+	max_area(array(1, 8, 6, 2, 5, 4, 8, 3, 7)) -> r
+	print(r)
 }
-main() -> ()
+
+main()

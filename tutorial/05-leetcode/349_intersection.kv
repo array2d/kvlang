@@ -2,25 +2,45 @@
 # 来源: LeetCode #349
 # 期望输出:
 #   2
-
 def intersection() -> () {
-    a <- [1, 2, 2, 1]; len(a) -> na
-    b <- [2, 2]; len(b) -> nb
-    r <- [0, 0]; 0 -> idx; 0 -> count
-    0 -> i
-    while (i < na) {
-        a[i] -> av; 0 -> j; 0 -> found
-        while (j < nb) {
-            b[j] -> bv
-            av == bv -> match
-            if (match) { 1 -> found; nb -> j }
-            else { j + 1 -> j }
-        }
-        if (found) { r[idx] <- av; idx + 1 -> idx; count + 1 -> count }
-        i + 1 -> i
-    }
-    r[0] -> v
-    print(v)
+	a <- [1, 2, 2, 1]
+	len(a) -> na
+	b <- [2, 2]
+	len(b) -> nb
+	r <- [0, 0]
+	0 -> idx
+	0 -> count
+	0 -> i
+	while (i < na) {
+		a[i] -> av
+		0 -> j
+		0 -> found
+		while (j < nb) {
+			b[j] -> bv
+			av == bv -> match
+
+			if (match) {
+				1 -> found
+				nb -> j
+			} else {
+				j + 1 -> j
+			}
+		}
+
+		if (found) {
+			r <- set(r, idx, av)
+			idx + 1 -> idx
+			count + 1 -> count
+		}
+
+		i + 1 -> i
+	}
+	r[0] -> v
+	print(v)
 }
-def main() -> () { intersection() -> () }
-main() -> ()
+
+def main() -> () {
+	intersection()
+}
+
+main()

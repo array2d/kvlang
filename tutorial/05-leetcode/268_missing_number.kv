@@ -3,14 +3,25 @@
 # 来源: LeetCode #268
 # 期望输出:
 #   2
-
 def missing() -> () {
-    a <- [3, 0, 1]; len(a) -> n; 0 -> s
-    0 -> i
-    while (i < n) { a[i] -> x; s + x -> s; i + 1 -> i }
-    n * n -> nn; nn + n -> total; total / 2 -> expected
-    expected - s -> result
-    print(result)
+	a <- [3, 0, 1]
+	len(a) -> n
+	0 -> s
+	0 -> i
+	while (i < n) {
+		a[i] -> x
+		s + x -> s
+		i + 1 -> i
+	}
+	n * n -> nn
+	nn + n -> total
+	total / 2 -> expected
+	expected - s -> result
+	print(result)
 }
-def main() -> () { missing() -> () }
-main() -> ()
+
+def main() -> () {
+	missing()
+}
+
+main()

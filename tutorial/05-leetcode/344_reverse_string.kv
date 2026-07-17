@@ -6,13 +6,29 @@
 #   l
 #   e
 #   h
-
 def reverse_str() -> () {
-    a <- ["h", "e", "l", "l", "o"]; len(a) -> n
-    0 -> l; n - 1 -> r
-    while (l < r) { a[l] -> tl; a[r] -> tr; a[l] <- tr; a[r] <- tl; l + 1 -> l; r - 1 -> r }
-    0 -> i
-    while (i < n) { a[i] -> x; print(x); i + 1 -> i }
+	a <- ["h", "e", "l", "l", "o"]
+	len(a) -> n
+	0 -> l
+	n - 1 -> r
+	while (l < r) {
+		a[l] -> tl
+		a[r] -> tr
+		a <- set(a, l, tr)
+		a <- set(a, r, tl)
+		l + 1 -> l
+		r - 1 -> r
+	}
+	0 -> i
+	while (i < n) {
+		a[i] -> x
+		print(x)
+		i + 1 -> i
+	}
 }
-def main() -> () { reverse_str() -> () }
-main() -> ()
+
+def main() -> () {
+	reverse_str()
+}
+
+main()

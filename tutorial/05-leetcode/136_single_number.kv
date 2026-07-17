@@ -3,19 +3,21 @@
 # 来源: LeetCode #136
 # 期望输出:
 #   4
-
 def single_number() -> () {
-    a <- [4, 1, 2, 1, 2]; len(a) -> n
-    a[0] -> result; 1 -> i
-    
-    while (i < n) {
-        a[i] -> x
-        result ^ x -> result
-        i + 1 -> i
-    }
-    
-    print(result)
+	a <- [4, 1, 2, 1, 2]
+	len(a) -> n
+	a[0] -> result
+	1 -> i
+	while (i < n) {
+		a[i] -> x
+		result ^ x -> result
+		i + 1 -> i
+	}
+	print(result)
 }
 
-def main() -> () { single_number() -> () }
-main() -> ()
+def main() -> () {
+	single_number()
+}
+
+main()

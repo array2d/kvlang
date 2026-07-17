@@ -7,23 +7,37 @@
 #   12
 #   0
 #   0
-
 def move_zeroes() -> () {
-    a <- [0, 1, 0, 3, 12]; len(a) -> n
-    0 -> w; 0 -> i
-    
-    while (i < n) {
-        a[i] -> x
-        x == 0 -> skip
-        if (skip) { i + 1 -> i }
-        else { a[w] <- x; w + 1 -> w; i + 1 -> i }
-    }
-    
-    while (w < n) { a[w] <- 0; w + 1 -> w }
-    
-    0 -> j
-    while (j < n) { a[j] -> v; print(v); j + 1 -> j }
+	a <- [0, 1, 0, 3, 12]
+	len(a) -> n
+	0 -> w
+	0 -> i
+	while (i < n) {
+		a[i] -> x
+		x == 0 -> skip
+
+		if (skip) {
+			i + 1 -> i
+		} else {
+			a <- set(a, w, x)
+			w + 1 -> w
+			i + 1 -> i
+		}
+	}
+	while (w < n) {
+		a <- set(a, w, 0)
+		w + 1 -> w
+	}
+	0 -> j
+	while (j < n) {
+		a[j] -> v
+		print(v)
+		j + 1 -> j
+	}
 }
 
-def main() -> () { move_zeroes() -> () }
-main() -> ()
+def main() -> () {
+	move_zeroes()
+}
+
+main()

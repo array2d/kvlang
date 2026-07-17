@@ -2,17 +2,29 @@
 # 来源: LeetCode #162
 # 期望输出:
 #   2
-
 def find_peak() -> () {
-    a <- [1, 2, 3, 1]; len(a) -> n
-    0 -> lo; n - 1 -> hi
-    while (lo < hi) {
-        lo + hi -> s; s / 2 -> mid
-        a[mid] -> mv; a[mid + 1] -> nv
-        mv < nv -> up
-        if (up) { mid + 1 -> lo } else { mid -> hi }
-    }
-    print(lo)
+	a <- [1, 2, 3, 1]
+	len(a) -> n
+	0 -> lo
+	n - 1 -> hi
+	while (lo < hi) {
+		lo + hi -> s
+		s / 2 -> mid
+		a[mid] -> mv
+		a[mid + 1] -> nv
+		mv < nv -> up
+
+		if (up) {
+			mid + 1 -> lo
+		} else {
+			mid -> hi
+		}
+	}
+	print(lo)
 }
-def main() -> () { find_peak() -> () }
-main() -> ()
+
+def main() -> () {
+	find_peak()
+}
+
+main()

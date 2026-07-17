@@ -2,15 +2,23 @@
 # 来源: LeetCode #171
 # 期望输出:
 #   28
-
 def title_to_num(s:str) -> () {
-    strlen(s) -> n; 0 -> result; 0 -> i
-    while (i < n) {
-        result * 26 -> r26
-        char(s, i) -> c; c - 65 -> v; v + 1 -> d
-        r26 + d -> result; i + 1 -> i
-    }
-    print(result)
+	strlen(s) -> n
+	0 -> result
+	0 -> i
+	while (i < n) {
+		result * 26 -> r26
+		char(s, i) -> c
+		c - 65 -> v
+		v + 1 -> d
+		r26 + d -> result
+		i + 1 -> i
+	}
+	print(result)
 }
-def main() -> () { title_to_num("AB") -> () }
-main() -> ()
+
+def main() -> () {
+	title_to_num("AB")
+}
+
+main()

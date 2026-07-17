@@ -3,19 +3,35 @@
 # 期望输出:
 #   1
 #   0
-
 def is_pal(x:int) -> (r:int) {
-    x < 0 -> neg
-    if (neg) { 0 -> r } else {
-        x -> orig; 0 -> rev
-        while (orig > 0) { rev * 10 -> r10; orig % 10 -> d; r10 + d -> rev; orig / 10 -> orig }
-        rev == x -> ok
-        if (ok) { 1 -> r } else { 0 -> r }
-    }
+	x < 0 -> neg
+
+	if (neg) {
+		0 -> r
+	} else {
+		x -> orig
+		0 -> rev
+		while (orig > 0) {
+			rev * 10 -> r10
+			orig % 10 -> d
+			r10 + d -> rev
+			orig / 10 -> orig
+		}
+		rev == x -> ok
+
+		if (ok) {
+			1 -> r
+		} else {
+			0 -> r
+		}
+	}
 }
 
 def main() -> () {
-    is_pal(121) -> r1; print(r1)
-    is_pal(-121) -> r2; print(r2)
+	is_pal(121) -> r1
+	print(r1)
+	is_pal(-121) -> r2
+	print(r2)
 }
-main() -> ()
+
+main()

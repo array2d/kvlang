@@ -3,13 +3,29 @@
 # 期望输出:
 #   65
 #   66
-
 def convert(n:int) -> () {
-    # Build reversed chars into array, then print in reverse
-    a <- [0,0,0,0,0]; 0 -> idx; n -> num
-    while (num > 0) { num - 1 -> n1; n1 % 26 -> r; 65 + r -> ch; a[idx] <- ch; idx + 1 -> idx; n1 / 26 -> num }
-    idx - 1 -> k
-    while (k >= 0) { a[k] -> v; print(v); k - 1 -> k }
+	# Build reversed chars into array, then print in reverse
+	a <- [0, 0, 0, 0, 0]
+	0 -> idx
+	n -> num
+	while (num > 0) {
+		num - 1 -> n1
+		n1 % 26 -> r
+		65 + r -> ch
+		a <- set(a, idx, ch)
+		idx + 1 -> idx
+		n1 / 26 -> num
+	}
+	idx - 1 -> k
+	while (k >= 0) {
+		a[k] -> v
+		print(v)
+		k - 1 -> k
+	}
 }
-def main() -> () { convert(28) -> () }
-main() -> ()
+
+def main() -> () {
+	convert(28)
+}
+
+main()

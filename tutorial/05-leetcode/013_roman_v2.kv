@@ -2,18 +2,75 @@
 # 来源: LeetCode #13
 # 期望输出:
 #   58
-
 def roman_to_int(s:str) -> () {
-    strlen(s) -> n; 0 -> result; 0 -> i
-    while (i < n) {
-        char(s, i) -> c
-        c == 73 -> is_I; c == 86 -> is_V; c == 88 -> is_X
-        c == 76 -> is_L; c == 67 -> is_C; c == 68 -> is_D; c == 77 -> is_M
-        if (is_I) { i + 1 -> ni; ni < n -> has_next; if (has_next) { char(s, ni) -> nc; nc == 86 -> iv; nc == 88 -> ix; if (iv) { 4 -> val; i + 1 -> i } else { if (ix) { 9 -> val; i + 1 -> i } else { 1 -> val } } } else { 1 -> val } }
-        else { if (is_V) { 5 -> val } else { if (is_X) { 10 -> val } else { if (is_L) { 50 -> val } else { if (is_C) { 100 -> val } else { if (is_D) { 500 -> val } else { 1000 -> val } } } } } }
-        result + val -> result; i + 1 -> i
-    }
-    print(result)
+	strlen(s) -> n
+	0 -> result
+	0 -> i
+	while (i < n) {
+		char(s, i) -> c
+		c == 73 -> is_I
+		c == 86 -> is_V
+		c == 88 -> is_X
+		c == 76 -> is_L
+		c == 67 -> is_C
+		c == 68 -> is_D
+		c == 77 -> is_M
+
+		if (is_I) {
+			i + 1 -> ni
+			ni < n -> has_next
+
+			if (has_next) {
+				char(s, ni) -> nc
+				nc == 86 -> iv
+				nc == 88 -> ix
+
+				if (iv) {
+					4 -> val
+					i + 1 -> i
+				} else {
+					if (ix) {
+						9 -> val
+						i + 1 -> i
+					} else {
+						1 -> val
+					}
+				}
+			} else {
+				1 -> val
+			}
+		} else {
+			if (is_V) {
+				5 -> val
+			} else {
+				if (is_X) {
+					10 -> val
+				} else {
+					if (is_L) {
+						50 -> val
+					} else {
+						if (is_C) {
+							100 -> val
+						} else {
+							if (is_D) {
+								500 -> val
+							} else {
+								1000 -> val
+							}
+						}
+					}
+				}
+			}
+		}
+
+		result + val -> result
+		i + 1 -> i
+	}
+	print(result)
 }
-def main() -> () { roman_to_int("LVIII") -> () }
-main() -> ()
+
+def main() -> () {
+	roman_to_int("LVIII")
+}
+
+main()

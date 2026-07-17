@@ -2,19 +2,37 @@
 # 来源: LeetCode #167
 # 期望输出:
 #   [ 1 , 2 ]
-
 def two_sum_ii() -> () {
-    a <- [2, 7, 11, 15]; 9 -> target; len(a) -> n
-    0 -> l; n - 1 -> r
-    
-    while (l < r) {
-        a[l] -> lv; a[r] -> rv; lv + rv -> s
-        s == target -> hit
-        if (hit) { l + 1 -> i1; r + 1 -> i2; print("[", i1, ",", i2, "]"); n -> l }
-        else { s < target -> lt
-            if (lt) { l + 1 -> l } else { r - 1 -> r }
-        }
-    }
+	a <- [2, 7, 11, 15]
+	9 -> target
+	len(a) -> n
+	0 -> l
+	n - 1 -> r
+	while (l < r) {
+		a[l] -> lv
+		a[r] -> rv
+		lv + rv -> s
+		s == target -> hit
+
+		if (hit) {
+			l + 1 -> i1
+			r + 1 -> i2
+			print("[", i1, ",", i2, "]")
+			n -> l
+		} else {
+			s < target -> lt
+
+			if (lt) {
+				l + 1 -> l
+			} else {
+				r - 1 -> r
+			}
+		}
+	}
 }
-def main() -> () { two_sum_ii() -> () }
-main() -> ()
+
+def main() -> () {
+	two_sum_ii()
+}
+
+main()

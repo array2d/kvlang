@@ -3,18 +3,32 @@
 # 期望输出:
 #   1
 #   -1
-
 def range_sum() -> () {
-    a <- [-2, 0, 3, -5, 2, -1]; len(a) -> n
-    # build prefix sums
-    p <- [0, 0, 0, 0, 0, 0]
-    a[0] -> s; p[0] <- s; 1 -> i
-    while (i < n) { a[i] -> v; s + v -> s; p[i] <- s; i + 1 -> i }
-    
-    # sumRange(0, 2) = p[2]
-    p[2] -> r1; print(r1)
-    # sumRange(2, 5) = p[5] - p[1]
-    p[5] -> t2; p[1] -> t1; t2 - t1 -> r2; print(r2)
+	a <- [-2, 0, 3, -5, 2, -1]
+	len(a) -> n
+	# build prefix sums
+	p <- [0, 0, 0, 0, 0, 0]
+	a[0] -> s
+	p <- set(p, 0, s)
+	1 -> i
+	while (i < n) {
+		a[i] -> v
+		s + v -> s
+		p <- set(p, i, s)
+		i + 1 -> i
+	}
+	# sumRange(0, 2) = p[2]
+	p[2] -> r1
+	print(r1)
+	# sumRange(2, 5) = p[5] - p[1]
+	p[5] -> t2
+	p[1] -> t1
+	t2 - t1 -> r2
+	print(r2)
 }
-def main() -> () { range_sum() -> () }
-main() -> ()
+
+def main() -> () {
+	range_sum()
+}
+
+main()

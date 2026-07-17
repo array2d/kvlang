@@ -2,16 +2,28 @@
 # 来源: LeetCode #69
 # 期望输出:
 #   2
-
 def my_sqrt(x:int) -> () {
-    0 -> lo; x -> hi; 0 -> ans
-    while (lo <= hi) {
-        lo + hi -> s; s / 2 -> mid
-        mid * mid -> sq
-        sq <= x -> ok
-        if (ok) { mid -> ans; mid + 1 -> lo } else { mid - 1 -> hi }
-    }
-    print(ans)
+	0 -> lo
+	x -> hi
+	0 -> ans
+	while (lo <= hi) {
+		lo + hi -> s
+		s / 2 -> mid
+		mid * mid -> sq
+		sq <= x -> ok
+
+		if (ok) {
+			mid -> ans
+			mid + 1 -> lo
+		} else {
+			mid - 1 -> hi
+		}
+	}
+	print(ans)
 }
-def main() -> () { my_sqrt(4) -> () }
-main() -> ()
+
+def main() -> () {
+	my_sqrt(4)
+}
+
+main()

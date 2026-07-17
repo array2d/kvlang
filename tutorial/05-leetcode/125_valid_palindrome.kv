@@ -3,29 +3,54 @@
 # 期望输出:
 #   1
 #   0
-
 # 用整数数组模拟字符串，1='a', 2='b', etc.
 def is_pal() -> () {
-    s <- [1, 2, 1]; len(s) -> n  # "aba" = palindrome
-    0 -> l; n - 1 -> r; 1 -> ok
-    while (l < r) {
-        s[l] -> lc; s[r] -> rc
-        lc == rc -> match
-        if (match) { l + 1 -> l; r - 1 -> r }
-        else { 0 -> ok; n -> l }
-    }
-    print(ok)
+	s <- [1, 2, 1]
+	len(s) -> n
+	0 -> l
+	n - 1 -> r
+	1 -> ok
+	while (l < r) {
+		s[l] -> lc
+		s[r] -> rc
+		lc == rc -> match
+
+		if (match) {
+			l + 1 -> l
+			r - 1 -> r
+		} else {
+			0 -> ok
+			n -> l
+		}
+	}
+	print(ok)
 }
+
 def not_pal() -> () {
-    s <- [1, 2]; len(s) -> n  # "ab" = not palindrome
-    0 -> l; n - 1 -> r; 1 -> ok
-    while (l < r) {
-        s[l] -> lc; s[r] -> rc
-        lc == rc -> match
-        if (match) { l + 1 -> l; r - 1 -> r }
-        else { 0 -> ok; n -> l }
-    }
-    print(ok)
+	s <- [1, 2]
+	len(s) -> n
+	0 -> l
+	n - 1 -> r
+	1 -> ok
+	while (l < r) {
+		s[l] -> lc
+		s[r] -> rc
+		lc == rc -> match
+
+		if (match) {
+			l + 1 -> l
+			r - 1 -> r
+		} else {
+			0 -> ok
+			n -> l
+		}
+	}
+	print(ok)
 }
-def main() -> () { is_pal() -> (); not_pal() -> () }
-main() -> ()
+
+def main() -> () {
+	is_pal()
+	not_pal()
+}
+
+main()

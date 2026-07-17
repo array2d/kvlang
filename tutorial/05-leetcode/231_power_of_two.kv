@@ -3,17 +3,30 @@
 # 期望输出:
 #   1
 #   0
-
 def is_power(n:int) -> (r:int) {
-    0 -> result
-    n > 0 -> pos
-    if (pos) {
-        1 -> t
-        while (t < n) { t * 2 -> t }
-        t == n -> eq
-        if (eq) { 1 -> result }
-    }
-    result -> r
+	0 -> result
+	n > 0 -> pos
+
+	if (pos) {
+		1 -> t
+		while (t < n) {
+			t * 2 -> t
+		}
+		t == n -> eq
+
+		if (eq) {
+			1 -> result
+		}
+	}
+
+	result -> r
 }
-def main() -> () { is_power(16) -> r1; print(r1); is_power(18) -> r2; print(r2) }
-main() -> ()
+
+def main() -> () {
+	is_power(16) -> r1
+	print(r1)
+	is_power(18) -> r2
+	print(r2)
+}
+
+main()

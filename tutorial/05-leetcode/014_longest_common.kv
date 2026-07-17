@@ -2,23 +2,44 @@
 # 来源: LeetCode #14
 # 期望输出:
 #   fl
-
 def lcp() -> () {
-    "flower" -> a; "flow" -> b; "flight" -> c
-    strlen(a) -> na; strlen(b) -> nb; strlen(c) -> nc
-    0 -> i; 1 -> ok
-    while (ok) {
-        i < na -> ca; i < nb -> cb; i < nc -> cc
-        ca && cb && cc -> all_ok
-        if (all_ok) {
-            char(a, i) -> va; char(b, i) -> vb; char(c, i) -> vc
-            va == vb -> ab; vb == vc -> bc
-            ab && bc -> match
-            if (match) { i + 1 -> i } else { 0 -> ok }
-        } else { 0 -> ok }
-    }
-    slice(a, 0, i) -> ans
-    print(ans)
+	"flower" -> a
+	"flow" -> b
+	"flight" -> c
+	strlen(a) -> na
+	strlen(b) -> nb
+	strlen(c) -> nc
+	0 -> i
+	1 -> ok
+	while (ok) {
+		i < na -> ca
+		i < nb -> cb
+		i < nc -> cc
+		ca && cb && cc -> all_ok
+
+		if (all_ok) {
+			char(a, i) -> va
+			char(b, i) -> vb
+			char(c, i) -> vc
+			va == vb -> ab
+			vb == vc -> bc
+			ab && bc -> match
+
+			if (match) {
+				i + 1 -> i
+			} else {
+				0 -> ok
+			}
+		} else {
+			0 -> ok
+		}
+	}
+	slice(a, 0, i) -> ans
+	print(ans)
 }
-def main() -> () { lcp() -> () }
-main() -> ()
+
+def main() -> () {
+	lcp()
+}
+
+main()

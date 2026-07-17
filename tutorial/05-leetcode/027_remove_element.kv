@@ -6,23 +6,35 @@
 #   k = 2
 #   2
 #   2
-
 def remove_element() -> () {
-    a <- [3, 2, 2, 3]
-    3 -> val; len(a) -> n
-    0 -> k; 0 -> i
+	a <- [3, 2, 2, 3]
+	3 -> val
+	len(a) -> n
+	0 -> k
+	0 -> i
+	while (i < n) {
+		a[i] -> cur
+		cur == val -> skip
 
-    while (i < n) {
-        a[i] -> cur
-        cur == val -> skip
-        if (skip) { i + 1 -> i }
-        else { a[k] <- cur; k + 1 -> k; i + 1 -> i }
-    }
-
-    print("k =", k)
-    0 -> j
-    while (j < k) { a[j] -> v; print(v); j + 1 -> j }
+		if (skip) {
+			i + 1 -> i
+		} else {
+			a <- set(a, k, cur)
+			k + 1 -> k
+			i + 1 -> i
+		}
+	}
+	print("k =", k)
+	0 -> j
+	while (j < k) {
+		a[j] -> v
+		print(v)
+		j + 1 -> j
+	}
 }
 
-def main() -> () { remove_element() -> () }
-main() -> ()
+def main() -> () {
+	remove_element()
+}
+
+main()

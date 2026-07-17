@@ -2,14 +2,22 @@
 # 来源: LeetCode #258
 # 期望输出:
 #   2
-
 def add_digits(n:int) -> () {
-    while (n >= 10) {
-        0 -> s; n -> x
-        while (x > 0) { x % 10 -> d; s + d -> s; x / 10 -> x }
-        s -> n
-    }
-    print(n)
+	while (n >= 10) {
+		0 -> s
+		n -> x
+		while (x > 0) {
+			x % 10 -> d
+			s + d -> s
+			x / 10 -> x
+		}
+		s -> n
+	}
+	print(n)
 }
-def main() -> () { add_digits(38) -> () }
-main() -> ()
+
+def main() -> () {
+	add_digits(38)
+}
+
+main()

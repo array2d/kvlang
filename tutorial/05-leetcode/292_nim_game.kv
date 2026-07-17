@@ -2,10 +2,19 @@
 # 来源: LeetCode #292
 # 期望输出:
 #   0
-
 def can_win(n:int) -> () {
-    n % 4 -> rem; rem == 0 -> lose
-    if (lose) { print(0) } else { print(1) }
+	n % 4 -> rem
+	rem == 0 -> lose
+
+	if (lose) {
+		print(0)
+	} else {
+		print(1)
+	}
 }
-def main() -> () { can_win(4) -> () }
-main() -> ()
+
+def main() -> () {
+	can_win(4)
+}
+
+main()

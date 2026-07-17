@@ -3,19 +3,29 @@
 # 期望输出:
 #   k = 5
 #   k = 5
-
 def remove_dupes(a) -> (k:int) {
-    len(a) -> n; 1 -> k; 1 -> i
-    while (i < n) {
-        a[i] -> cur; k - 1 -> pi; a[pi] -> prev
-        cur == prev -> same
-        if (same) { i + 1 -> i }
-        else { a[k] <- cur; k + 1 -> k; i + 1 -> i }
-    }
+	len(a) -> n
+	1 -> k
+	1 -> i
+	while (i < n) {
+		a[i] -> cur
+		k - 1 -> pi
+		a[pi] -> prev
+		cur == prev -> same
+
+		if (same) {
+			i + 1 -> i
+		} else {
+			a <- set(a, k, cur)
+			k + 1 -> k
+			i + 1 -> i
+		}
+	}
 }
 
 def main() -> () {
-    remove_dupes([0,0,1,1,1,2,2,3,3,4]) -> k
-    print("k =", k)
+	remove_dupes(array(0, 0, 1, 1, 1, 2, 2, 3, 3, 4)) -> k
+	print("k =", k)
 }
-main() -> ()
+
+main()

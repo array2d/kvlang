@@ -3,24 +3,36 @@
 # 来源: LeetCode #169
 # 期望输出:
 #   3
-
 def majority() -> () {
-    a <- [3, 2, 3]; len(a) -> n
-    a[0] -> candidate; 1 -> count; 1 -> i
-    
-    while (i < n) {
-        a[i] -> x
-        count == 0 -> reset
-        if (reset) { x -> candidate; 1 -> count }
-        else {
-            x == candidate -> match
-            if (match) { count + 1 -> count } else { count - 1 -> count }
-        }
-        i + 1 -> i
-    }
-    
-    print(candidate)
+	a <- [3, 2, 3]
+	len(a) -> n
+	a[0] -> candidate
+	1 -> count
+	1 -> i
+	while (i < n) {
+		a[i] -> x
+		count == 0 -> reset
+
+		if (reset) {
+			x -> candidate
+			1 -> count
+		} else {
+			x == candidate -> match
+
+			if (match) {
+				count + 1 -> count
+			} else {
+				count - 1 -> count
+			}
+		}
+
+		i + 1 -> i
+	}
+	print(candidate)
 }
 
-def main() -> () { majority() -> () }
-main() -> ()
+def main() -> () {
+	majority()
+}
+
+main()

@@ -3,17 +3,34 @@
 # 期望输出:
 #   321
 #   -321
-
 def reverse(x:int) -> (result:int) {
-    x < 0 -> neg; x -> n
-    if (neg) { -x -> n }
-    0 -> rev
-    while (n > 0) { rev * 10 -> r; n % 10 -> d; r + d -> rev; n / 10 -> n }
-    if (neg) { -rev -> result } else { rev -> result }
+	x < 0 -> neg
+	x -> n
+
+	if (neg) {
+		-x -> n
+	}
+
+	0 -> rev
+	while (n > 0) {
+		rev * 10 -> r
+		n % 10 -> d
+		r + d -> rev
+		n / 10 -> n
+	}
+
+	if (neg) {
+		-rev -> result
+	} else {
+		rev -> result
+	}
 }
 
 def main() -> () {
-    reverse(123) -> r1; print(r1)
-    reverse(-123) -> r2; print(r2)
+	reverse(123) -> r1
+	print(r1)
+	reverse(-123) -> r2
+	print(r2)
 }
-main() -> ()
+
+main()

@@ -3,22 +3,40 @@
 # 期望输出:
 #   2
 #   2
-
 def strstr(hay:str, needle:str) -> () {
-    strlen(hay) -> nh; strlen(needle) -> nn
-    0 -> i; -1 -> ans
-    nh - nn -> limit
-    while (i <= limit) {
-        1 -> match; 0 -> j
-        while (j < nn) {
-            char(hay, i + j) -> hc; char(needle, j) -> nc
-            hc == nc -> eq
-            if (eq) { j + 1 -> j } else { 0 -> match; nn -> j }
-        }
-        if (match) { i -> ans; limit + 1 -> i }
-        else { i + 1 -> i }
-    }
-    print(ans)
+	strlen(hay) -> nh
+	strlen(needle) -> nn
+	0 -> i
+	-1 -> ans
+	nh - nn -> limit
+	while (i <= limit) {
+		1 -> match
+		0 -> j
+		while (j < nn) {
+			char(hay, i + j) -> hc
+			char(needle, j) -> nc
+			hc == nc -> eq
+
+			if (eq) {
+				j + 1 -> j
+			} else {
+				0 -> match
+				nn -> j
+			}
+		}
+
+		if (match) {
+			i -> ans
+			limit + 1 -> i
+		} else {
+			i + 1 -> i
+		}
+	}
+	print(ans)
 }
-def main() -> () { strstr("hello", "ll") -> () }
-main() -> ()
+
+def main() -> () {
+	strstr("hello", "ll")
+}
+
+main()

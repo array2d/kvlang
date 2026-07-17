@@ -2,14 +2,27 @@
 # 来源: LeetCode #509
 # 期望输出:
 #   55
-
 def fib(n:int) -> () {
-    n <= 1 -> base
-    if (base) { print(n) } else {
-        0 -> a; 1 -> b; 2 -> i
-        while (i <= n) { a + b -> c; b -> a; c -> b; i + 1 -> i }
-        print(c)
-    }
+	n <= 1 -> base
+
+	if (base) {
+		print(n)
+	} else {
+		0 -> a
+		1 -> b
+		2 -> i
+		while (i <= n) {
+			a + b -> c
+			b -> a
+			c -> b
+			i + 1 -> i
+		}
+		print(c)
+	}
 }
-def main() -> () { fib(10) -> () }
-main() -> ()
+
+def main() -> () {
+	fib(10)
+}
+
+main()

@@ -2,16 +2,39 @@
 # 来源: LeetCode #263
 # 期望输出:
 #   1
-
 def is_ugly(n:int) -> () {
-    n <= 0 -> bad
-    if (bad) { print(0) } else {
-        n % 2 -> r2; while (r2 == 0) { n / 2 -> n; n % 2 -> r2 }
-        n % 3 -> r3; while (r3 == 0) { n / 3 -> n; n % 3 -> r3 }
-        n % 5 -> r5; while (r5 == 0) { n / 5 -> n; n % 5 -> r5 }
-        n == 1 -> ok
-        if (ok) { print(1) } else { print(0) }
-    }
+	n <= 0 -> bad
+
+	if (bad) {
+		print(0)
+	} else {
+		n % 2 -> r2
+		while (r2 == 0) {
+			n / 2 -> n
+			n % 2 -> r2
+		}
+		n % 3 -> r3
+		while (r3 == 0) {
+			n / 3 -> n
+			n % 3 -> r3
+		}
+		n % 5 -> r5
+		while (r5 == 0) {
+			n / 5 -> n
+			n % 5 -> r5
+		}
+		n == 1 -> ok
+
+		if (ok) {
+			print(1)
+		} else {
+			print(0)
+		}
+	}
 }
-def main() -> () { is_ugly(6) -> () }
-main() -> ()
+
+def main() -> () {
+	is_ugly(6)
+}
+
+main()

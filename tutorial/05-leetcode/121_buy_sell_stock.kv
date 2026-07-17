@@ -3,23 +3,34 @@
 # 来源: LeetCode #121
 # 期望输出:
 #   5
-
 def max_profit() -> () {
-    a <- [7, 1, 5, 3, 6, 4]; len(a) -> n
-    a[0] -> min_price; 0 -> max_profit; 1 -> i
-    
-    while (i < n) {
-        a[i] -> price
-        price < min_price -> new_min
-        if (new_min) { price -> min_price }
-        else {
-            price - min_price -> profit
-            profit > max_profit -> bigger
-            if (bigger) { profit -> max_profit }
-        }
-        i + 1 -> i
-    }
-    print(max_profit)
+	a <- [7, 1, 5, 3, 6, 4]
+	len(a) -> n
+	a[0] -> min_price
+	0 -> max_profit
+	1 -> i
+	while (i < n) {
+		a[i] -> price
+		price < min_price -> new_min
+
+		if (new_min) {
+			price -> min_price
+		} else {
+			price - min_price -> profit
+			profit > max_profit -> bigger
+
+			if (bigger) {
+				profit -> max_profit
+			}
+		}
+
+		i + 1 -> i
+	}
+	print(max_profit)
 }
-def main() -> () { max_profit() -> () }
-main() -> ()
+
+def main() -> () {
+	max_profit()
+}
+
+main()

@@ -2,11 +2,17 @@
 # 来源: LeetCode #172
 # 期望输出:
 #   1
-
 def trailing(n:int) -> () {
-    0 -> count
-    while (n >= 5) { n / 5 -> n; count + n -> count }
-    print(count)
+	0 -> count
+	while (n >= 5) {
+		n / 5 -> n
+		count + n -> count
+	}
+	print(count)
 }
-def main() -> () { trailing(5) -> () }
-main() -> ()
+
+def main() -> () {
+	trailing(5)
+}
+
+main()

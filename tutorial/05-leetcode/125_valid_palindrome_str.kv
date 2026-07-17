@@ -3,16 +3,30 @@
 # 期望输出:
 #   1
 #   0
-
 def is_pal(s:str) -> () {
-    strlen(s) -> n; 0 -> l; n - 1 -> r; 1 -> ok
-    while (l < r) {
-        char(s, l) -> lc; char(s, r) -> rc
-        lc == rc -> match
-        if (match) { l + 1 -> l; r - 1 -> r }
-        else { 0 -> ok; n -> l }
-    }
-    print(ok)
+	strlen(s) -> n
+	0 -> l
+	n - 1 -> r
+	1 -> ok
+	while (l < r) {
+		char(s, l) -> lc
+		char(s, r) -> rc
+		lc == rc -> match
+
+		if (match) {
+			l + 1 -> l
+			r - 1 -> r
+		} else {
+			0 -> ok
+			n -> l
+		}
+	}
+	print(ok)
 }
-def main() -> () { is_pal("aba") -> (); is_pal("ab") -> () }
-main() -> ()
+
+def main() -> () {
+	is_pal("aba")
+	is_pal("ab")
+}
+
+main()
