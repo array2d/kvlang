@@ -6,6 +6,7 @@ on:
     tags: ["v*"]
   pull_request:
     branches: [master, main]
+  workflow_dispatch:
 
 jobs:
   # ── 编译 + 静态检查 ──────────────────────────────────────────────────────
