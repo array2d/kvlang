@@ -69,6 +69,18 @@ const (
 	OpStrSet = "string.set"
 )
 
+// 字符串 built-in
+const (
+	OpChar   = "char"
+	OpStrLen = "strlen"
+	OpSlice  = "slice"
+	OpConcat = "concat"
+	OpSort   = "sort"
+	OpDict   = "dict"
+	OpDSet   = "dset"
+	OpDGet   = "dget"
+)
+
 // 数组 built-in
 const (
 	OpArray = "array"
@@ -79,8 +91,8 @@ const (
 
 // KV 遍历 built-in（for 循环遍历 kvspace 路径子项）
 const (
-	OpKVHas = "kv.has"
-	OpKVAt  = "kv.at"
+	OpKVHas = "kvhas"
+	OpKVAt  = "kvat"
 )
 
 // nativeOps 定义 VM 原生求值的算子集合。
@@ -95,6 +107,9 @@ var nativeOps = map[string]bool{
 	OpStrSet: true,
 	OpKVHas: true, OpKVAt: true,
 	OpArray: true, OpLen: true, OpAt: true, OpSet: true,
+	OpChar: true, OpStrLen: true, OpSlice: true, OpConcat: true,
+	OpSort: true,
+	OpDict: true, OpDSet: true, OpDGet: true,
 }
 
 // IsNativeOp 判断是否为 VM 原生求值的符号算子。

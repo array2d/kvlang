@@ -45,9 +45,16 @@ func evalBinaryArith(inputs []kvspace.XValue, fn func(float64, float64) float64)
 
 func evalNeg(v kvspace.XValue) (kvspace.XValue, error) {
 	switch v.Kind() {
-	case "int":   return kvspace.Int(-v.Int()), nil
-	case "float": return kvspace.Float(-v.Float()), nil
-	default:      return kvspace.XValue{}, fmt.Errorf("cannot negate %s", v.Kind())
+	case "int", "int8", "int16", "int32", "int64":
+		return kvspace.Int64(-v.Int64()), nil
+	case "uint8", "uint16", "uint32", "uint64":
+		return kvspace.XValue{}, fmt.Errorf("cannot negate unsigned %s", v.Kind())
+	case "float", "float32":
+		return kvspace.Float32(-v.Float32()), nil
+	case "float64":
+		return kvspace.Float64(-v.Float64()), nil
+	default:
+		return kvspace.XValue{}, fmt.Errorf("cannot negate %s", v.Kind())
 	}
 }
 

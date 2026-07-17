@@ -42,6 +42,7 @@ const (
 	RBrace               // }
 	LBrack               // [
 	RBrack               // ]
+	Dot                  // .
 	Colon                // :
 	Return               // return
 	If                   // if
@@ -59,7 +60,7 @@ const (
 func (k Kind) String() string {
 	names := [...]string{
 		"IDENT", "LITERAL", "ARROW",
-		"LPAREN", "RPAREN", "COMMA", "LBRACE", "RBRACE", "LBRACK", "RBRACK", "COLON",
+		"LPAREN", "RPAREN", "COMMA", "LBRACE", "RBRACE", "LBRACK", "RBRACK", "DOT", "COLON",
 		"RETURN", "IF", "ELSE", "FOR", "WHILE",
 		"BREAK", "CONTINUE",
 		"NEWLINE", "COMMENT", "EOF",
@@ -108,7 +109,7 @@ var singleCharToken = map[byte]Kind{
 	'(': LParen, ')': RParen, ',': Comma,
 	'{': LBrace, '}': RBrace,
 	'[': LBrack, ']': RBrack,
-	':': Colon,
+	'.': Dot, ':': Colon,
 }
 
 // scanQuoted 从 src[i]（引号字符）开始，返回引号内容和结束后的下一位置。
@@ -347,7 +348,7 @@ func Scan(src string) []Token {
 func isTokenDelim(c byte) bool {
 	switch c {
 	case ' ', '\t', '\n', '\r', ';',
-		',', ')', '(', '{', '}',
+		',', ')', '(', '{', '}', '[', ']', '.',
 		'+', '-', '*', '%', '!', '=', '<', '>', '&', '|', '^',
 		':':
 		return true

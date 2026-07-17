@@ -61,6 +61,28 @@ func (g *labelGen) tmp() string {
 	return fmt.Sprintf("_%d", g.n)
 }
 
+// flattenNestedCalls 将指令中的嵌套 at/set 调用自动展开为临时槽。
+func flattenNestedCalls(inst *ast.Instruction, lg *labelGen) (*ast.Instruction, []ast.Stmt) {
+	var extra []ast.Stmt
+	flat := *inst
+	flat.Expr = flattenExpr(inst.Expr, lg, &extra)
+	return &flat, extra
+}
+
+func flattenExpr(e *ast.Expr, lg *labelGen, extra *[]ast.Stmt) *ast.Expr {
+	if e == nil || e.IsLeaf() { return e }
+	newArgs := make([]*ast.Expr, len(e.Args))
+	for i, arg := range e.Args {
+		if arg != nil && !arg.IsLeaf() {
+			tmp := lg.tmp()
+			*extra = append(*extra, &ast.Instruction{Expr: flattenExpr(arg, lg, extra), Writes: []string{tmp}})
+			newArgs[i] = ast.Leaf(tmp)
+		} else { newArgs[i] = arg }
+	}
+	return &ast.Expr{Op: e.Op, Args: newArgs, Quote: e.Quote}
+}
+
+
 // lowerBody 以续体传递风格将语句列表降级：
 //   遇到 if/while 时将后续语句作为续体注入 merge/exit block，
 //   保证函数入口 [0,0] 始终有指令（平坦指令或 goto 首控制块）。
@@ -77,12 +99,10 @@ func lowerBody(stmts []ast.Stmt, lg *labelGen, lc *loopCtx) []ast.Stmt {
 			// 错误示例：print("r =", 10 - 3)   ← 10-3 是嵌套表达式，隐含"返回值"语义
 			// 正确写法：10 - 3 -> r \n print("r =", r)
 			if s.Expr != nil && !s.Expr.IsLeaf() && !allArgsLeaf(s.Expr) {
-				panic(fmt.Sprintf(
-					"kvlang read-write code: nested expression as argument is not allowed.\n"+
-						"  got: %v\n"+
-						"  fix: compute sub-expressions explicitly and assign to named slots first.",
-					s.Expr,
-				))
+				flat, extra := flattenNestedCalls(s, lg)
+				preamble = append(preamble, extra...)
+				preamble = append(preamble, flat)
+				continue
 			}
 			preamble = append(preamble, s)
 
@@ -256,7 +276,7 @@ func lowerForWithCont(pre []ast.Stmt, s *ast.ForStmt, cont []ast.Stmt, lg *label
 		Writes: []string{idxSlot},
 	}
 	kvHasInst := &ast.Instruction{
-		Expr: ast.Call("kv.has", ast.Leaf(s.Iter), ast.Leaf(idxSlot)),
+		Expr: ast.Call("kvhas", ast.Leaf(s.Iter), ast.Leaf(idxSlot)),
 		Writes: []string{condSlot},
 	}
 	brI := brInst(condSlot, lg.parent+"/"+bodyLabel, lg.parent+"/"+exitLabel)
@@ -264,7 +284,7 @@ func lowerForWithCont(pre []ast.Stmt, s *ast.ForStmt, cont []ast.Stmt, lg *label
 
 	// _for_body:  kv.at(./path, ./_idx) -> ./v;  lowerBody(body);  goto _for_cond_N
 	kvAtInst := &ast.Instruction{
-		Expr: ast.Call("kv.at", ast.Leaf(s.Iter), ast.Leaf(idxSlot)),
+		Expr: ast.Call("kvat", ast.Leaf(s.Iter), ast.Leaf(idxSlot)),
 		Writes: []string{s.Var},
 	}
 	bodyLc := &loopCtx{breakLabel: exitLabel, continueLabel: condLabel}

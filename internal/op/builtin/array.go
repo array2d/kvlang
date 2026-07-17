@@ -42,6 +42,19 @@ func (atOp) Call(f *op.Frame) error {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "at requires array and index")
 		return fmt.Errorf("at requires array and index")
 	}
+	// 字符串字段名：at(base, "field") → kv.Get(base/field)
+	if inputs[1].Kind() == "string" {
+		fp := keytree.FrameRoot(f.PC)
+		baseVal := resolveReadValue(f.KV, fp, f.Inst.Reads[0])
+		path := baseVal.Str() + "/" + inputs[1].Str()
+		v, _ := f.KV.Get(path)
+		if v.IsNil() {
+			vthread.SetError(bg, f.KV, f.Vtid, f.PC,
+				fmt.Sprintf("at: key not found: %s", path))
+			return fmt.Errorf("at: key not found: %s", path)
+		}
+		return writeResult(f, v)
+	}
 	idx := int(inputs[1].Int64())
 	elem := inputs[0].Index(idx)
 	if elem.IsNil() {
@@ -61,6 +74,20 @@ func (arraySetOp) Call(f *op.Frame) error {
 		return fmt.Errorf("set requires array, index, value")
 	}
 	arr := inputs[0]
+	// 字段写入：set(base, "field", val) → kv.Set(base/field, val)
+	if inputs[1].Kind() == "string" {
+		fp := keytree.FrameRoot(f.PC)
+		baseVal := resolveReadValue(f.KV, fp, f.Inst.Reads[0])
+		path := baseVal.Str() + "/" + inputs[1].Str()
+		f.KV.Set(path, inputs[2])
+		if len(f.Inst.Writes) > 0 {
+			// 写入 base 本身（不变），满足 -> base 返回槽
+			outKey := resolveWriteKey(fp, f.Inst.Writes[0])
+			f.KV.Set(outKey, baseVal)
+		}
+		vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
+		return nil
+	}
 	idx := int(inputs[1].Int64())
 	if idx < 0 || idx >= arr.Len() {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC,
@@ -91,4 +118,25 @@ func (arraySetOp) Call(f *op.Frame) error {
 	}
 	vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
 	return nil
+}
+
+// sortOp: bubble sort (in-place, returns sorted copy)
+type sortOp struct{}
+func (sortOp) Call(f *op.Frame) error {
+	inputs := readInputs(f)
+	if len(inputs) < 1 { return writeResult(f, kvspace.XValue{}) }
+	arr := inputs[0]
+	n := arr.Len()
+	elems := make([]kvspace.XValue, n)
+	for i := 0; i < n; i++ { elems[i] = arr.Index(i) }
+	// bubble sort
+	for i := 0; i < n-1; i++ {
+		for j := 0; j < n-i-1; j++ {
+			if asFloat(elems[j]) > asFloat(elems[j+1]) {
+				elems[j], elems[j+1] = elems[j+1], elems[j]
+			}
+		}
+	}
+	result := kvspace.Array(elems)
+	return writeResult(f, result)
 }

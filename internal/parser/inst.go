@@ -6,6 +6,7 @@ package parser
 
 import (
 	"fmt"
+	"strings"
 	"strconv"
 
 	"kvlang/internal/ast"
@@ -30,12 +31,39 @@ func (p *parser) parseInst() *ast.Instruction {
 		inst.Writes = p.collectWritesUntilArrow()
 		p.advance() // consume <-
 		inst.Expr = p.parsePratt(0)
+		// arr[idx] <- val → set(arr, idx, val) -> arr
+		if len(inst.Writes) == 1 && strings.Contains(inst.Writes[0], "[") {
+			s := inst.Writes[0]
+			br := strings.IndexByte(s, '[')
+			arr := s[:br]
+			idx := s[br+1 : len(s)-1]
+			inst.Expr = ast.Call("set", ast.Leaf(arr), ast.Leaf(idx), inst.Expr)
+			inst.Writes = []string{arr}
+		}
+		// expr.field <- val → set(expr, "field", val) -> expr
+		if len(inst.Writes) == 1 && strings.Contains(inst.Writes[0], ".") {
+			s := inst.Writes[0]
+			dt := strings.IndexByte(s, '.')
+			base := s[:dt]
+			field := s[dt+1:]
+			inst.Expr = ast.Call("set", ast.Leaf(base), ast.StrLit(field), inst.Expr)
+			inst.Writes = []string{base}
+		}
 
 	case arrowAbs >= 0:
 		// expr -> (writes)
 		inst.Expr = p.parsePratt(0)
 		p.advance() // consume ->
 		inst.Writes = p.collectWriteList()
+		// expr -> base.field → set(base, "field", expr) -> base
+		if len(inst.Writes) == 1 && strings.Contains(inst.Writes[0], ".") {
+			s := inst.Writes[0]
+			dt := strings.IndexByte(s, '.')
+			base := s[:dt]
+			field := s[dt+1:]
+			inst.Expr = ast.Call("set", ast.Leaf(base), ast.StrLit(field), inst.Expr)
+			inst.Writes = []string{base}
+		}
 
 	default:
 		// 无 Arrow：纯表达式 / 函数调用
@@ -84,8 +112,30 @@ func (p *parser) parsePratt(minPrec int) *ast.Expr {
 		return nil
 	}
 	for {
+		// 后缀成员访问：expr.field → at(expr, "field")
+		if p.peek().Kind == Dot {
+			p.advance() // consume .
+			if p.peek().Kind == Ident || p.peek().Kind == Literal {
+				field := p.advance().Value
+				left = ast.Call("at", left, ast.StrLit(field))
+				continue
+			}
+		}
+		// 后缀索引：expr[idx] 或 expr[idx, idx]
+		if p.peek().Kind == LBrack {
+			p.advance()
+			var indices []*ast.Expr
+			for p.peek().Kind != RBrack && p.peek().Kind != EOF {
+				if p.eat(Comma) { continue }
+				indices = append(indices, p.parsePratt(0))
+			}
+			p.expect(RBrack)
+			args := []*ast.Expr{left}
+			args = append(args, indices...)
+			left = ast.Call("at", args...)
+			continue
+		}
 		t := p.peek()
-		// 只有 Ident 类型的已知中缀算子才能延伸表达式
 		if t.Kind != Ident {
 			break
 		}
@@ -106,7 +156,7 @@ func (p *parser) parsePrimaryExpr() *ast.Expr {
 
 	// 停止条件：自然边界或分隔符
 	switch t.Kind {
-	case Arrow, RParen, Newline, RBrace, EOF, Comma, Comment:
+	case Arrow, RParen, RBrack, Newline, RBrace, EOF, Comma, Comment:
 		return nil
 	}
 
@@ -170,6 +220,9 @@ func (p *parser) parsePrimaryExpr() *ast.Expr {
 	// 引号字符串（非数字、非路径）：加 " 前缀编码，供 resolveReadValue 识别
 	if t.Kind == Literal {
 		v := t.Value
+		// 双引号/反引号字符串优先于 isPath 检测
+		if t.Quote == '"' { return ast.StrLit(v) }
+		if t.Quote == '`' { return ast.RawStr(v) }
 		isNum := isNumericLiteral(v)
 		isPath := len(v) >= 2 && (v[:2] == "./" || v[0] == '/')
 		if !isNum && !isPath {
@@ -258,7 +311,15 @@ func (p *parser) collectWriteList() []string {
 			})
 			return writes
 		default:
-			writes = append(writes, p.advance().Value)
+			// expr.field 作为整体写槽
+			if t.Kind == Ident && p.peekAt(1).Kind == Dot {
+				w := p.advance().Value // base
+				w += p.advance().Value // .
+				w += p.advance().Value // field
+				writes = append(writes, w)
+			} else {
+				writes = append(writes, p.advance().Value)
+			}
 		}
 	}
 	return writes
@@ -282,6 +343,24 @@ func (p *parser) collectWritesUntilArrow() []string {
 		}
 		if t.Kind == Comma {
 			p.advance()
+			continue
+		}
+		// expr.field 成员访问作为整体写槽
+		if t.Kind == Ident && p.peekAt(1).Kind == Dot {
+			w := p.advance().Value // base name
+			w += "." + p.advance().Value // . field
+			writes = append(writes, w)
+			continue
+		}
+		// arr[idx] 数组索引作为整体写槽
+		if t.Kind == Ident && p.peekAt(1).Kind == LBrack {
+			w := p.advance().Value // arr name
+			w += p.advance().Value // consume [, add to w
+			for p.peek().Kind != RBrack && p.peek().Kind != EOF && p.peek().Kind != Arrow {
+				w += p.advance().Value
+			}
+			if p.peek().Kind == RBrack { w += p.advance().Value }
+			writes = append(writes, w)
 			continue
 		}
 		writes = append(writes, p.advance().Value)

@@ -67,4 +67,12 @@ var registry = map[string]Op{
 	OpLen:    lenOp{},
 	OpAt:     atOp{},
 	OpSet:    arraySetOp{},
+	OpChar:   strCharOp{},
+	OpStrLen: strLenOp{},
+	OpSlice:  strSliceOp{},
+	OpConcat: strConcatOp{},
+	OpSort:   sortOp{},
+	OpDict:   dictOp{},
+	OpDSet:   dictSetOp{},
+	OpDGet:   dictGetOp{},
 }
