@@ -43,6 +43,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.24"
+      - run: go mod tidy
       - run: go build -o kvlang ./cmd/kvlang/
       - run: python3 tutorial/test.py
 
