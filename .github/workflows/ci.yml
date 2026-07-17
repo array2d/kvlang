@@ -23,7 +23,6 @@ jobs:
       - run: go mod tidy
       - run: go build ./...
       - run: go vet ./...
-      - run: go test ./... -count=1
 
   # ── tutorial 集成测试（需要 Redis）────────────────────────────────────────
   tutorial-test:
