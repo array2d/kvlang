@@ -27,19 +27,13 @@ def is_self(n:int) -> (r:int) {
 		}
 	}
 	ok -> r
-}
-
-def main() -> () {
 	1 -> i
 	while (i <= 15) {
 		is_self(i) -> r
 
 		if (r) {
 			print(i)
+			i + 1 -> i
 		}
-
-		i + 1 -> i
 	}
 }
-
-main()

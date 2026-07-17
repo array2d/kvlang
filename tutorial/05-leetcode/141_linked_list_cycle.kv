@@ -42,13 +42,9 @@ def build_no_cycle() -> () {
 	"" -> /n1/next
 }
 
-def main() -> () {
-	build_cycle()
-	has_cycle("/c0") -> r1
-	print(r1)
-	build_no_cycle()
-	has_cycle("/n0") -> r2
-	print(r2)
-}
-
-main()
+build_cycle()
+has_cycle("/c0") -> r1
+print(r1)
+build_no_cycle()
+has_cycle("/n0") -> r2
+print(r2)

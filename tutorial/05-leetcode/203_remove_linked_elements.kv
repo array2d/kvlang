@@ -6,28 +6,46 @@
 #   3
 #   4
 #   5
-
 def build_list() -> () {
-  1 -> /n0/val; "/n1" -> /n0/next
-  2 -> /n1/val; "/n2" -> /n1/next
-  6 -> /n2/val; "/n3" -> /n2/next
-  3 -> /n3/val; "/n4" -> /n3/next
-  4 -> /n4/val; "/n5" -> /n4/next
-  5 -> /n5/val; "/n6" -> /n5/next
-  6 -> /n6/val; ""    -> /n6/next
+	1 -> /n0/val
+	"/n1" -> /n0/next
+	2 -> /n1/val
+	"/n2" -> /n1/next
+	6 -> /n2/val
+	"/n3" -> /n2/next
+	3 -> /n3/val
+	"/n4" -> /n3/next
+	4 -> /n4/val
+	"/n5" -> /n4/next
+	5 -> /n5/val
+	"/n6" -> /n5/next
+	6 -> /n6/val
+	"" -> /n6/next
 }
 
 def remove(head:str, val:int) -> () {
-  # skip leading matches
-  while (head != "") {
-    kvat(head, "val") -> hv
-    hv == val -> match
-    if (match) { kvat(head, "next") -> head } else { "" -> head }
-  }
-  # print remaining
-  "/n0" -> p
-  while (p != "") { kvat(p, "val") -> v; v == val -> skip; if (skip) {} else { print(v) }; kvat(p, "next") -> p }
-}
+	# skip leading matches
+	while (head != "") {
+		kvat(head, "val") -> hv
+		hv == val -> match
 
-def main() -> () { build_list() -> (); remove("/n0", 6) -> () }
-main() -> ()
+		if (match) {
+			kvat(head, "next") -> head
+		} else {
+			"" -> head
+		}
+	}
+	# print remaining
+	"/n0" -> p
+	while (p != "") {
+		kvat(p, "val") -> v
+		v == val -> skip
+
+		if (skip) {
+		} else {
+			print(v)
+		}
+
+		kvat(p, "next") -> p
+	}
+}

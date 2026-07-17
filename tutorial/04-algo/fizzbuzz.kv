@@ -4,20 +4,35 @@
 #   Fizz
 #   Buzz
 #   FizzBuzz
-
 def fizzbuzz(N:int) -> () {
-  1 -> i
-  while (i <= N) {
-    i % 3 -> m3; i % 5 -> m5
-    m3 == 0 -> d3; m5 == 0 -> d5
-    d3 && d5 -> fb
-    if (fb) { print("FizzBuzz") }
-    else if (d3) { print("Fizz") }
-    else if (d5) { print("Buzz") }
-    else { print(i) }
-    i + 1 -> i
-  }
+	1 -> i
+	while (i <= N) {
+		i % 3 -> m3
+		i % 5 -> m5
+		m3 == 0 -> d3
+		m5 == 0 -> d5
+		d3 && d5 -> fb
+
+		if (fb) {
+			print("FizzBuzz")
+		} else {
+			if (d3) {
+				print("Fizz")
+			} else {
+				if (d5) {
+					print("Buzz")
+				} else {
+					print(i)
+				}
+			}
+		}
+
+		i + 1 -> i
+	}
 }
 
-def main() -> () { fizzbuzz(15) -> () }
-main() -> ()
+def main() -> () {
+	fizzbuzz(15)
+}
+
+main()

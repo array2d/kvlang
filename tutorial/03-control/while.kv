@@ -42,15 +42,11 @@ def sum_odds(n:int) -> (total:int) {
 	}
 }
 
-def main() -> () {
-	sum_to(10) -> a
-	print("sum(1..10) =", a)
-	first_div7(20) -> b
-	print("first div7 in [1,20] =", b)
-	sum_odds(10) -> c
-	print("sum odds(1..10) =", c)
-	a + b -> ab
-	ab + c -> /last_sum
-}
-
-main()
+sum_to(10) -> a
+print("sum(1..10) =", a)
+first_div7(20) -> b
+print("first div7 in [1,20] =", b)
+sum_odds(10) -> c
+print("sum odds(1..10) =", c)
+a + b -> ab
+ab + c -> /last_sum
