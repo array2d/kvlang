@@ -138,6 +138,19 @@ func (sortOp) Call(f *op.Frame) error {
 	return writeResult(f, result)
 }
 
+// hasOp: has(path, key) → bool — kvspace 路径存在性检查
+type hasOp struct{}
+func (hasOp) Call(f *op.Frame) error {
+	inputs := readInputs(f)
+	if len(inputs) < 2 { return writeResult(f, kvspace.Bool(false)) }
+	fp := keytree.FrameRoot(f.PC)
+	base := resolveReadValue(f.KV, fp, f.Inst.Reads[0]).Str()
+	if base == "" { base = resolveKVPath(fp, f.Inst.Reads[0]) }
+	key := kvKey(inputs[1])
+	v, _ := f.KV.Get(base + "/" + key)
+	return writeResult(f, kvspace.Bool(!v.IsNil()))
+}
+
 func kvKey(v kvspace.XValue) string {
 	if v.Kind() == "string" { return v.Str() }
 	return strconv.Itoa(int(v.Int64()))

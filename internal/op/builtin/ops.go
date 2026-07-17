@@ -86,7 +86,8 @@ const (
 	OpArray = "array"
 	OpLen   = "len"
 	OpAt    = "at"
-	OpSet   = "set" // kvspace array set
+	OpSet   = "set"
+	OpHas   = "has" // kvspace array set
 )
 
 // KV 遍历 built-in（for 循环遍历 kvspace 路径子项）
@@ -107,6 +108,7 @@ var nativeOps = map[string]bool{
 	OpStrSet: true,
 	OpKVHas: true, OpKVAt: true,
 	OpArray: true, OpLen: true, OpAt: true, OpSet: true,
+	OpHas: true,
 	OpChar: true, OpStrLen: true, OpSlice: true, OpConcat: true,
 	OpSort: true,
 	OpDict: true, OpDSet: true, OpDGet: true,
