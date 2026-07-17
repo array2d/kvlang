@@ -116,6 +116,16 @@ func (p *parser) parsePratt(minPrec int) *ast.Expr {
 		// 后缀成员访问：expr.field → at(expr, "field")
 		if p.peek().Kind == Dot {
 			p.advance() // consume .
+			// h.*key → at(h, key) — 动态解引用，取 key 的值当路径段
+			if p.peek().Kind == Ident && p.peek().Value == "*" {
+				p.advance() // consume *
+				if p.peek().Kind == Ident {
+					key := p.advance().Value
+					left = ast.Call("at", left, ast.Leaf(key))
+					continue
+				}
+			}
+			// h.field → at(h, "field") — 静态字段
 			if p.peek().Kind == Ident || p.peek().Kind == Literal {
 				field := p.advance().Value
 				left = ast.Call("at", left, ast.StrLit(field))

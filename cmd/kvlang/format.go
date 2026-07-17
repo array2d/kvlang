@@ -12,9 +12,10 @@ import (
 
 func cmdFormat(args []string) {
 	fs := flag.NewFlagSet("format", flag.ExitOnError)
-	code := fs.String("c", "", "内联代码")
+	write := fs.Bool("w", false, "原地写入文件（对标 gofmt -w）")
+	code  := fs.String("c", "", "内联代码")
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: kvlang format [-c code | <file.kv>]")
+		fmt.Fprintln(os.Stderr, "usage: kvlang format [-w] [-c code | <file.kv>]")
 		fs.PrintDefaults()
 	}
 	fs.Parse(args)
@@ -46,5 +47,13 @@ func cmdFormat(args []string) {
 	for _, d := range diags {
 		fmt.Fprintf(os.Stderr, "%s:%d:%d: %s\n", name, d.Pos.Line, d.Pos.Col, d.Message)
 	}
-	ast.Format(os.Stdout, df)
+
+	if *write && name != "inline" && name != "stdin" {
+		f, err := os.Create(name)
+		if err != nil { fmt.Fprintf(os.Stderr, "%s: %v\n", name, err); os.Exit(1) }
+		defer f.Close()
+		ast.Format(f, df)
+	} else {
+		ast.Format(os.Stdout, df)
+	}
 }

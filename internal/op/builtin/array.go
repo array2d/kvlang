@@ -43,8 +43,8 @@ func (atOp) Call(f *op.Frame) error {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "at requires array and index")
 		return fmt.Errorf("at requires array and index")
 	}
-	// 路径访问：at(/path, key) or at(ptr, "field")
-	if inputs[1].Kind() == "string" || len(f.Inst.Reads) > 0 && (f.Inst.Reads[0][0] == '/' || f.Inst.Reads[0][0] == '"' && len(f.Inst.Reads[0]) > 1 && f.Inst.Reads[0][1] == '/') {
+	// 路径访问：at(/path, key) or at(ptr, "field") or h.*key
+	if inputs[0].Kind() == "string" || inputs[1].Kind() == "string" || len(f.Inst.Reads) > 0 && (f.Inst.Reads[0][0] == '/' || f.Inst.Reads[0][0] == '"' && len(f.Inst.Reads[0]) > 1 && f.Inst.Reads[0][1] == '/') {
 		fp := keytree.FrameRoot(f.PC)
 		base := resolveReadValue(f.KV, fp, f.Inst.Reads[0]).Str()
 		if base == "" { base = f.Inst.Reads[0]; if len(base) > 1 && base[0] == '"' { base = base[1:] } }
@@ -71,7 +71,7 @@ func (arraySetOp) Call(f *op.Frame) error {
 	}
 	arr := inputs[0]
 	// 路径写入：set(/path, key, val) or set(ptr, "field", val)
-	if inputs[1].Kind() == "string" || len(f.Inst.Reads) > 0 && (f.Inst.Reads[0][0] == '/' || f.Inst.Reads[0][0] == '"' && len(f.Inst.Reads[0]) > 1 && f.Inst.Reads[0][1] == '/') {
+	if inputs[0].Kind() == "string" || inputs[1].Kind() == "string" || len(f.Inst.Reads) > 0 && (f.Inst.Reads[0][0] == '/' || f.Inst.Reads[0][0] == '"' && len(f.Inst.Reads[0]) > 1 && f.Inst.Reads[0][1] == '/') {
 		fp := keytree.FrameRoot(f.PC)
 		base := resolveReadValue(f.KV, fp, f.Inst.Reads[0]).Str()
 		if base == "" { base = f.Inst.Reads[0]; if len(base) > 1 && base[0] == '"' { base = base[1:] } }
