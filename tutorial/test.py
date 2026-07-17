@@ -62,15 +62,15 @@ def main():
             for pat in expects:
                 if pat not in r.stdout:
                     all_ok = False
-                    print(f"{RED}❌ {rel}: want {pat!r}{NC}")
+                    print(f"{RED}❌ kvlang {rel}: want {pat!r}{NC}")
                     print(f"   stdout: {r.stdout[:200]}")
             if all_ok:
-                print(f"{GREEN}✅ {rel}{NC}")
+                print(f"{GREEN}✅ kvlang {rel}{NC}")
                 passed += 1
             else:
                 failed += 1
         except subprocess.TimeoutExpired:
-            print(f"{RED}❌ {rel}: timeout{NC}")
+            print(f"{RED}❌ kvlang {rel}: timeout{NC}")
             failed += 1
 
     print(f"\n{YELLOW}══ {GREEN}PASS:{passed}{YELLOW}  {RED}FAIL:{failed}{YELLOW} ══{NC}")
