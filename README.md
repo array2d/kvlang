@@ -63,67 +63,32 @@ echo '40 + 2 -> x  print(x)' | ./kvlang
 
 ---
 
-## Tutorial — 5-Minute Tour
+## Tutorial
 
-87 progressive, self-contained examples. Every file runs with a single command.
+87 self-contained examples. Start here:
 
 ```bash
-./kvlang tutorial/01-basics/hello.kv         # your first program
-./kvlang tutorial/03-control/guess.kv        # interactive number guessing
+./kvlang tutorial/01-basics/hello.kv         # hello kvlang
+./kvlang tutorial/03-control/guess.kv        # binary search game
 ./kvlang tutorial/04-algo/fibonacci.kv       # fib = 55
-./kvlang tutorial/05-leetcode/001_two_sum.kv # LeetCode #1
+./kvlang tutorial/05-leetcode/001_two_sum.kv # LeetCode
 ```
 
-### Learning Path
-
 ```
-01-basics/          "Hello, kvlang"
-├── hello.kv        print("hello kvlang")
-├── vars.kv         42 -> x, y -> 50
-└── arith.kv        x + y, x * y, x > y
-        │
-02-func/            "Functions are subtree copies"
-└── main.kv         def add(A,B) -> (C) { A + B -> C }
-        │
-03-control/         "if, while, for, break, continue"
-├── if.kv           temperature converter
-├── while.kv        abs, sum, first-divisible
-├── for.kv          Fahrenheit → Celsius table
-├── guess.kv        🔥 interactive binary search game
-└── array_1d.kv     array literal + for-in loop
-        │
-04-algo/            "Classic algorithms in kvlang"
-├── fibonacci.kv    iterative, fib(10) = 55
-├── factorial.kv    accumulator, 10! = 3628800
-├── fizzbuzz.kv     modulo, nested if
-├── gcd.kv          Euclidean algorithm (tail recursion)
-├── collatz.kv      while, even/odd branch
-├── prime_sieve.kv  nested while, prime detection
-├── recursion.kv    countdown with accumulator
-├── tco_depth.kv    TCO verification, deep recursion
-├── power.kv        fast exponentiation by squaring
-├── classify.kv     grade classifier, string literals
-├── scope_isolation.kv  frame isolation, multi-write params
-├── map_reduce.kv   map + reduce pattern
-└── word_count.kv   string iteration
-        │
-05-leetcode/        "73 LeetCode solutions"
-├── 001_two_sum.kv          hash map approach
-├── 009_palindrome.kv       integer palindrome
-├── 053_max_subarray.kv     Kadane's algorithm
-├── 206_reverse_linked_list.kv  pointer manipulation
-├── 238_product_except_self.kv  prefix product
-└── ... (68 more)
+01-basics/        hello, vars, arith               (3 files)
+02-func/          def, call, nested calls          (1 file)
+03-control/       if, while, for, guess game       (5 files)
+04-algo/          fibonacci, gcd, collatz, ...     (13 files)
+05-leetcode/      73 LeetCode solutions            (65 files)
 ```
-
-### Run All Tests
 
 ```bash
-python3 tutorial/test.py                 # all 87 examples
-python3 tutorial/test.py --filter algo   # only algorithms
+python3 tutorial/test.py                  # all 87 pass — verified by CI
 ```
 
-All examples pass on every push — verified by the `tutorial-test` badge above.
+---
+
+## Language at a Glance
 
 ---
 
