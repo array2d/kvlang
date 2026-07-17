@@ -277,16 +277,36 @@ func (*Instruction) stmt() {}
 func (i *Instruction) FirstLine() string { return i.String() }
 func (i *Instruction) String() string {
 	e := i.Expr
-	s := e.String()
-	// array(...) → [...]
-	if e != nil && e.Op == "array" {
-		args := make([]string, len(e.Args))
-		for j, a := range e.Args { args[j] = a.String() }
-		s = "[" + strings.Join(args, ", ") + "]"
+	if e == nil {
+		return ""
 	}
-	// at(base, idx) -> expr → base[idx] (for reads)
-	if e != nil && e.Op == "at" && len(e.Args) >= 2 {
-		if e.Args[1].Quote != 0 {
+	// array(...) → [...]
+	if e.Op == "array" {
+		args := make([]string, len(e.Args))
+		for j, a := range e.Args {
+			args[j] = a.String()
+		}
+		s := "[" + strings.Join(args, ", ") + "]"
+		if len(i.Writes) > 0 {
+			if i.ArrowLeft {
+				return joinWrites(i.Writes) + " <- " + s
+			}
+			return s + " -> " + joinWrites(i.Writes)
+		}
+		return s
+	}
+	// set(base, idx, val) → a[idx] <- val ( <- form only;
+	// -> form stays as set() call since parser can't parse val -> a[idx])
+	if e.Op == "set" && len(e.Args) >= 3 && i.ArrowLeft {
+		base := e.Args[0].String()
+		idx := idxString(e.Args[1])
+		val := e.Args[2].String()
+		return base + "[" + idx + "] <- " + val
+	}
+	s := e.String()
+	// at(base, idx) → base[idx] or base.field
+	if e.Op == "at" && len(e.Args) >= 2 {
+		if e.Args[1].Quote == '"' {
 			s = e.Args[0].String() + "." + e.Args[1].Val
 		} else {
 			s = e.Args[0].String() + "[" + e.Args[1].String() + "]"
@@ -300,6 +320,14 @@ func (i *Instruction) String() string {
 		}
 	}
 	return s
+}
+
+// idxString formats an index expression for [] syntax.
+func idxString(e *Expr) string {
+	if e.Quote == '"' {
+		return "\"" + e.Val + "\""
+	}
+	return e.String()
 }
 
 // ── 控制流节点 ────────────────────────────────────────────────
