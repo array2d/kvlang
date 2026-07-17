@@ -19,21 +19,21 @@
 - [x] 87 tutorial examples: basics, functions, control flow, algorithms, LeetCode
 - [x] CI: build (Linux + macOS), tutorial tests (Redis), cross-compile releases
 
-## v0.2.0 — Ecosystem Foundations
+## v0.2.0 — Tensor & GPU
+
+- [ ] tensor lifecycle ops: tensor.new / tensor.del / tensor.clone (heap-plat backed)
+- [ ] tensor compute dispatch via kvspace op-plat routing
+- [ ] kvspace-cpp client library for C++ backends (✅ created)
+- [ ] GPU tensor ops (Triton / CUDA integration)
+- [ ] benchmarking suite
+
+## v0.3.0 — Ecosystem Foundations
 
 - [ ] playground / online demo
 - [ ] improved error messages with source locations
 - [ ] `go install` support
 - [ ] package manager (`kvlang get`)
 - [ ] standard library: http, json, file I/O
-
-## v0.3.0 — Tensor & GPU
-
-- [ ] tensor lifecycle ops: tensor.new / tensor.del / tensor.clone (heap-plat backed)
-- [ ] tensor compute dispatch via kvspace op-plat routing
-- [ ] kvspace-cpp client library for C++ backends
-- [ ] GPU tensor ops (Triton / CUDA integration)
-- [ ] benchmarking suite
 
 ## v0.4.0 — Distributed
 
