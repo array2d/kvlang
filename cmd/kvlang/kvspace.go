@@ -126,22 +126,21 @@ func usageExit(msg string) {
 	os.Exit(1)
 }
 
-// clearAll 清空 kvspace 中所有用户数据。
-// 先清空已知根路径下的子树，再逐级清理根级别未知路径。
+// clearAll 清空所有 kvspace 数据。
 func clearAll(kv kvspace.KVSpace) {
-	roots := []string{
-		keytree.VthreadRoot,
-		keytree.SrcRoot,
-		keytree.FuncRoot,
-		keytree.SysRoot,
-		"/dev",
-		"/t",  // 测试/临时命名空间
-	}
-	for _, root := range roots {
-		children, _ := kv.List(root)
-		for _, c := range children {
-			kv.DelTree(root + "/" + c)
-		}
+	allRoots, _ := kv.List("/")
+	allRoots = append(allRoots,
+		keytree.VthreadRoot[1:],  // 去掉前缀 / 就是根级名称
+		keytree.SrcRoot[1:],
+		keytree.FuncRoot[1:],
+		keytree.SysRoot[1:],
+		"dev", "t",
+	)
+	seen := map[string]bool{}
+	for _, c := range allRoots {
+		if c == "." || c == "" || seen[c] { continue }
+		seen[c] = true
+		kv.DelTree("/" + c)
 	}
 }
 
