@@ -3,6 +3,7 @@ package builtin
 import (
 	"encoding/binary"
 	"fmt"
+	"strconv"
 
 	"kvlang/internal/keytree"
 	"kvlang/internal/kvspace"
@@ -42,18 +43,13 @@ func (atOp) Call(f *op.Frame) error {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "at requires array and index")
 		return fmt.Errorf("at requires array and index")
 	}
-	// 字符串字段名：at(base, "field") → kv.Get(base/field)
-	if inputs[1].Kind() == "string" {
+	// 路径访问：at(/path, key) or at(ptr, "field")
+	if inputs[1].Kind() == "string" || len(f.Inst.Reads) > 0 && (f.Inst.Reads[0][0] == '/' || f.Inst.Reads[0][0] == '"' && len(f.Inst.Reads[0]) > 1 && f.Inst.Reads[0][1] == '/') {
 		fp := keytree.FrameRoot(f.PC)
-		baseVal := resolveReadValue(f.KV, fp, f.Inst.Reads[0])
-		path := baseVal.Str() + "/" + inputs[1].Str()
-		v, _ := f.KV.Get(path)
-		if v.IsNil() {
-			vthread.SetError(bg, f.KV, f.Vtid, f.PC,
-				fmt.Sprintf("at: key not found: %s", path))
-			return fmt.Errorf("at: key not found: %s", path)
-		}
-		return writeResult(f, v)
+		base := resolveReadValue(f.KV, fp, f.Inst.Reads[0]).Str()
+		if base == "" { base = resolveKVPath(fp, f.Inst.Reads[0]) }
+		path := base + "/" + kvKey(inputs[1])
+		v, _ := f.KV.Get(path); return writeResult(f, v)
 	}
 	idx := int(inputs[1].Int64())
 	elem := inputs[0].Index(idx)
@@ -74,16 +70,17 @@ func (arraySetOp) Call(f *op.Frame) error {
 		return fmt.Errorf("set requires array, index, value")
 	}
 	arr := inputs[0]
-	// 字段写入：set(base, "field", val) → kv.Set(base/field, val)
-	if inputs[1].Kind() == "string" {
+	// 路径写入：set(/path, key, val) or set(ptr, "field", val)
+	if inputs[1].Kind() == "string" || len(f.Inst.Reads) > 0 && (f.Inst.Reads[0][0] == '/' || f.Inst.Reads[0][0] == '"' && len(f.Inst.Reads[0]) > 1 && f.Inst.Reads[0][1] == '/') {
 		fp := keytree.FrameRoot(f.PC)
-		baseVal := resolveReadValue(f.KV, fp, f.Inst.Reads[0])
-		path := baseVal.Str() + "/" + inputs[1].Str()
+		base := resolveReadValue(f.KV, fp, f.Inst.Reads[0]).Str()
+		if base == "" { base = resolveKVPath(fp, f.Inst.Reads[0]) }
+		path := base + "/" + kvKey(inputs[1])
 		f.KV.Set(path, inputs[2])
 		if len(f.Inst.Writes) > 0 {
 			// 写入 base 本身（不变），满足 -> base 返回槽
 			outKey := resolveWriteKey(fp, f.Inst.Writes[0])
-			f.KV.Set(outKey, baseVal)
+			f.KV.Set(outKey, kvspace.Str(""))
 		}
 		vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
 		return nil
@@ -139,4 +136,9 @@ func (sortOp) Call(f *op.Frame) error {
 	}
 	result := kvspace.Array(elems)
 	return writeResult(f, result)
+}
+
+func kvKey(v kvspace.XValue) string {
+	if v.Kind() == "string" { return v.Str() }
+	return strconv.Itoa(int(v.Int64()))
 }
