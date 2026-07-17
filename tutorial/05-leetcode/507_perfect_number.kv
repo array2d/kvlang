@@ -1,0 +1,18 @@
+# 507: Perfect Number
+# 来源: LeetCode #507
+# 期望输出:
+#   1
+
+def is_perfect(n:int) -> () {
+    1 -> sum; 2 -> i
+    i * i -> sq
+    while (sq <= n) {
+        n % i -> rem; rem == 0 -> div
+        if (div) { sum + i -> sum; n / i -> j; sum + j -> sum }
+        i + 1 -> i; i * i -> sq
+    }
+    sum == n -> ok
+    if (ok) { print(1) } else { print(0) }
+}
+def main() -> () { is_perfect(28) -> () }
+main() -> ()

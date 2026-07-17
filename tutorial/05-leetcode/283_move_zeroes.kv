@@ -1,0 +1,29 @@
+# 283: Move Zeroes — 移动零到末尾，保持非零顺序
+# 算法: 读写双指针，写非零值
+# 来源: LeetCode #283
+# 期望输出:
+#   1
+#   3
+#   12
+#   0
+#   0
+
+def move_zeroes() -> () {
+    a <- [0, 1, 0, 3, 12]; len(a) -> n
+    0 -> w; 0 -> i
+    
+    while (i < n) {
+        a[i] -> x
+        x == 0 -> skip
+        if (skip) { i + 1 -> i }
+        else { a[w] <- x; w + 1 -> w; i + 1 -> i }
+    }
+    
+    while (w < n) { a[w] <- 0; w + 1 -> w }
+    
+    0 -> j
+    while (j < n) { a[j] -> v; print(v); j + 1 -> j }
+}
+
+def main() -> () { move_zeroes() -> () }
+main() -> ()

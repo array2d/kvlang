@@ -1,0 +1,18 @@
+# 050: Pow(x,n) — 快速幂
+# 来源: LeetCode #50
+# 期望输出:
+#   1024.0
+
+def my_pow(x:float, n:int) -> () {
+    x -> base; n -> exp; 1.0 -> result
+    exp < 0 -> neg
+    if (neg) { -exp -> exp }
+    while (exp > 0) {
+        exp % 2 -> odd
+        if (odd) { result * base -> result }
+        base * base -> base; exp / 2 -> exp
+    }
+    print(result)
+}
+def main() -> () { my_pow(2.0, 10) -> () }
+main() -> ()

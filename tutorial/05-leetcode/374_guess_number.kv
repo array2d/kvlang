@@ -1,0 +1,19 @@
+# 374: Guess Number Higher or Lower — 二分猜数字
+# 来源: LeetCode #374
+# 期望输出:
+#   6
+
+def guess_number(n:int) -> () {
+    1 -> lo; n -> hi
+    while (lo <= hi) {
+        lo + hi -> s; s / 2 -> mid
+        mid < 6 -> low
+        if (low) { mid + 1 -> lo }
+        else {
+            mid > 6 -> high
+            if (high) { mid - 1 -> hi } else { print(mid); hi + 1 -> lo }
+        }
+    }
+}
+def main() -> () { guess_number(10) -> () }
+main() -> ()

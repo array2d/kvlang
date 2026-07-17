@@ -1,0 +1,16 @@
+# 342: Power of Four — 判断4的幂
+# 来源: LeetCode #342
+# 期望输出:
+#   1
+
+def is_power4(n:int) -> () {
+    n > 0 -> pos
+    if (pos) {
+        1 -> t
+        while (t < n) { t * 4 -> t }
+        t == n -> eq
+        if (eq) { print(1) } else { print(0) }
+    } else { print(0) }
+}
+def main() -> () { is_power4(16) -> () }
+main() -> ()

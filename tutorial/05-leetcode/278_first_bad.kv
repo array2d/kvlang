@@ -1,0 +1,17 @@
+# 278: First Bad Version — 二分查找第一个坏版本
+# 来源: LeetCode #278
+# 期望输出:
+#   4
+
+def first_bad(n:int) -> () {
+    # isBadVersion(i) = i >= 4
+    1 -> lo; n -> hi
+    while (lo < hi) {
+        lo + hi -> s; s / 2 -> mid
+        mid >= 4 -> bad
+        if (bad) { mid -> hi } else { mid + 1 -> lo }
+    }
+    print(lo)
+}
+def main() -> () { first_bad(5) -> () }
+main() -> ()

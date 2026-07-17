@@ -1,0 +1,19 @@
+# 153: Find Minimum in Rotated Sorted Array
+# 来源: LeetCode #153
+# 期望输出:
+#   0
+
+def find_min() -> () {
+    a <- [4, 5, 6, 7, 0, 1, 2]; len(a) -> n
+    0 -> lo; n - 1 -> hi
+    while (lo < hi) {
+        lo + hi -> s; s / 2 -> mid
+        a[mid] -> mv; a[hi] -> rv
+        mv < rv -> ok
+        if (ok) { mid -> hi } else { mid + 1 -> lo }
+    }
+    a[lo] -> ans
+    print(ans)
+}
+def main() -> () { find_min() -> () }
+main() -> ()

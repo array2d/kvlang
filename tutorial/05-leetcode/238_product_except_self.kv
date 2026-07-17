@@ -1,0 +1,27 @@
+# 238: Product of Array Except Self — 前后缀乘积
+# 算法: 两次遍历，前缀积×后缀积
+# 来源: LeetCode #238
+# 期望输出:
+#   24
+#   12
+#   8
+#   6
+
+def product() -> () {
+    a <- [1, 2, 3, 4]; len(a) -> n
+    1 -> prefix; 1 -> suffix
+    
+    # build prefix products into result
+    result <- [1, 1, 1, 1]
+    0 -> i
+    while (i < n) { result[i] <- prefix; a[i] -> x; prefix * x -> prefix; i + 1 -> i }
+    
+    # multiply by suffix products
+    n - 1 -> j
+    while (j >= 0) { result[j] -> rv; suffix * rv -> newv; result[j] <- newv; a[j] -> y; suffix * y -> suffix; j - 1 -> j }
+    
+    0 -> k
+    while (k < n) { result[k] -> v; print(v); k + 1 -> k }
+}
+def main() -> () { product() -> () }
+main() -> ()

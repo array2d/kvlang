@@ -1,0 +1,20 @@
+# 412: Fizz Buzz — 经典面试题数组版
+# 来源: LeetCode #412
+# 期望输出:
+#   1
+#   2
+#   Fizz
+
+def fizzbuzz(n:int) -> () {
+    a <- [1, 2, 3, 4, 5]; 1 -> i
+    while (i <= n) {
+        i % 3 -> m3; i % 5 -> m5
+        m3 == 0 -> d3; m5 == 0 -> d5
+        d3 && d5 -> fb
+        if (fb) { print("FizzBuzz") }
+        else { if (d3) { print("Fizz") } else { if (d5) { print("Buzz") } else { print(i) } } }
+        i + 1 -> i
+    }
+}
+def main() -> () { fizzbuzz(3) -> () }
+main() -> ()

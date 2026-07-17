@@ -1,0 +1,17 @@
+# 326: Power of Three — 判断3的幂
+# 来源: LeetCode #326
+# 期望输出:
+#   1
+#   0
+
+def is_power3(n:int) -> () {
+    n > 0 -> pos
+    if (pos) {
+        1 -> t
+        while (t < n) { t * 3 -> t }
+        t == n -> eq
+        if (eq) { print(1) } else { print(0) }
+    } else { print(0) }
+}
+def main() -> () { is_power3(27) -> (); is_power3(45) -> () }
+main() -> ()

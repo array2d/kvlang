@@ -1,0 +1,21 @@
+# 136: Single Number — 找出只出现一次的数
+# 算法: XOR 异或（所有成对出现的数互相抵消）
+# 来源: LeetCode #136
+# 期望输出:
+#   4
+
+def single_number() -> () {
+    a <- [4, 1, 2, 1, 2]; len(a) -> n
+    a[0] -> result; 1 -> i
+    
+    while (i < n) {
+        a[i] -> x
+        result ^ x -> result
+        i + 1 -> i
+    }
+    
+    print(result)
+}
+
+def main() -> () { single_number() -> () }
+main() -> ()

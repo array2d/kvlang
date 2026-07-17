@@ -1,0 +1,500 @@
+id,title,category
+1,Two Sum,math
+2,Add Two Numbers,math
+3,Longest Substring Without Repeating Characters,array
+4,Median of Two Sorted Arrays,search-sort
+5,Longest Palindromic Substring,array
+7,Reverse Integer,array
+8,String to Integer (atoi),string
+9,Palindrome Number,string
+10,Regular Expression Matching,array
+11,Container With Most Water,array
+12,Integer to Roman,array
+13,Roman to Integer,array
+14,Longest Common Prefix,array
+15,3Sum,math
+16,3Sum Closest,math
+17,Letter Combinations of a Phone Number,math
+18,4Sum,math
+19,Remove Nth Node From End of List,array
+20,Valid Parentheses,array
+21,Merge Two Sorted Lists,search-sort
+22,Generate Parentheses,array
+23,Merge k Sorted Lists,search-sort
+24,Swap Nodes in Pairs,array
+25,Reverse Nodes in k-Group,array
+26,Remove Duplicates from Sorted Array,search-sort
+27,Remove Element,array
+28,Find the Index of the First Occurrence in a String,string
+29,Divide Two Integers,array
+30,Substring with Concatenation of All Words,array
+31,Next Permutation,array
+32,Longest Valid Parentheses,array
+33,Search in Rotated Sorted Array,search-sort
+34,Find First and Last Position of Element in Sorted Array,search-sort
+35,Search Insert Position,search-sort
+36,Valid Sudoku,array
+37,Sudoku Solver,array
+38,Count and Say,math
+39,Combination Sum,math
+40,Combination Sum II,math
+41,First Missing Positive,array
+42,Trapping Rain Water,array
+43,Multiply Strings,string
+44,Wildcard Matching,array
+45,Jump Game II,array
+46,Permutations,array
+47,Permutations II,array
+48,Rotate Image,array
+49,Group Anagrams,array
+50,Pow(x, n),array
+51,N-Queens,array
+52,N-Queens II,array
+53,Maximum Subarray,array
+54,Spiral Matrix,dp
+55,Jump Game,array
+56,Merge Intervals,array
+57,Insert Interval,array
+58,Length of Last Word,array
+59,Spiral Matrix II,dp
+60,Permutation Sequence,array
+61,Rotate List,array
+62,Unique Paths,dp
+63,Unique Paths II,dp
+64,Minimum Path Sum,math
+65,Valid Number,math
+66,Plus One,array
+67,Add Binary,math
+68,Text Justification,array
+69,Sqrt(x),array
+70,Climbing Stairs,array
+71,Simplify Path,dp
+72,Edit Distance,array
+73,Set Matrix Zeroes,dp
+74,Search a 2D Matrix,search-sort
+75,Sort Colors,search-sort
+76,Minimum Window Substring,array
+77,Combinations,array
+78,Subsets,array
+79,Word Search,search-sort
+80,Remove Duplicates from Sorted Array II,search-sort
+81,Search in Rotated Sorted Array II,search-sort
+82,Remove Duplicates from Sorted List II,search-sort
+83,Remove Duplicates from Sorted List,search-sort
+84,Largest Rectangle in Histogram,array
+85,Maximal Rectangle,array
+86,Partition List,array
+87,Scramble String,string
+88,Merge Sorted Array,search-sort
+89,Gray Code,array
+90,Subsets II,array
+91,Decode Ways,array
+92,Reverse Linked List II,linked-list
+93,Restore IP Addresses,math
+94,Binary Tree Inorder Traversal,tree
+95,Unique Binary Search Trees II,tree
+96,Unique Binary Search Trees,tree
+97,Interleaving String,string
+98,Validate Binary Search Tree,tree
+99,Recover Binary Search Tree,tree
+100,Same Tree,tree
+101,Symmetric Tree,tree
+102,Binary Tree Level Order Traversal,tree
+103,Binary Tree Zigzag Level Order Traversal,tree
+104,Maximum Depth of Binary Tree,tree
+105,Construct Binary Tree from Preorder and Inorder Traversal,tree
+106,Construct Binary Tree from Inorder and Postorder Traversal,tree
+107,Binary Tree Level Order Traversal II,tree
+108,Convert Sorted Array to Binary Search Tree,tree
+109,Convert Sorted List to Binary Search Tree,tree
+110,Balanced Binary Tree,tree
+111,Minimum Depth of Binary Tree,tree
+112,Path Sum,math
+113,Path Sum II,math
+114,Flatten Binary Tree to Linked List,tree
+115,Distinct Subsequences,array
+116,Populating Next Right Pointers in Each Node,array
+117,Populating Next Right Pointers in Each Node II,array
+118,Pascal's Triangle,array
+119,Pascal's Triangle II,array
+120,Triangle,array
+121,Best Time to Buy and Sell Stock,array
+122,Best Time to Buy and Sell Stock II,array
+123,Best Time to Buy and Sell Stock III,array
+124,Binary Tree Maximum Path Sum,tree
+125,Valid Palindrome,string
+126,Word Ladder II,array
+127,Word Ladder,array
+128,Longest Consecutive Sequence,array
+129,Sum Root to Leaf Numbers,math
+130,Surrounded Regions,array
+131,Palindrome Partitioning,string
+132,Palindrome Partitioning II,string
+133,Clone Graph,graph
+134,Gas Station,array
+135,Candy,array
+136,Single Number,math
+137,Single Number II,math
+138,Copy List with Random Pointer,array
+139,Word Break,array
+140,Word Break II,array
+141,Linked List Cycle,linked-list
+142,Linked List Cycle II,linked-list
+143,Reorder List,array
+144,Binary Tree Preorder Traversal,tree
+145,Binary Tree Postorder Traversal,tree
+146,LRU Cache,array
+147,Insertion Sort List,search-sort
+148,Sort List,search-sort
+149,Max Points on a Line,array
+150,Evaluate Reverse Polish Notation,array
+151,Reverse Words in a String,string
+152,Maximum Product Subarray,array
+153,Find Minimum in Rotated Sorted Array,search-sort
+154,Find Minimum in Rotated Sorted Array II,search-sort
+155,Min Stack,array
+156,Binary Tree Upside Down,tree
+157,Read N Characters Given Read4,array
+158,Read N Characters Given read4 II - Call Multiple Times,array
+159,Longest Substring with At Most Two Distinct Characters,array
+160,Intersection of Two Linked Lists,linked-list
+161,One Edit Distance,array
+162,Find Peak Element,array
+163,Missing Ranges,array
+164,Maximum Gap,array
+165,Compare Version Numbers,math
+166,Fraction to Recurring Decimal,array
+167,Two Sum II - Input Array Is Sorted,search-sort
+168,Excel Sheet Column Title,array
+169,Majority Element,array
+170,Two Sum III - Data structure design,math
+171,Excel Sheet Column Number,math
+172,Factorial Trailing Zeroes,array
+173,Binary Search Tree Iterator,tree
+174,Dungeon Game,array
+175,Combine Two Tables,sql
+176,Second Highest Salary,sql
+177,Nth Highest Salary,sql
+178,Rank Scores,sql
+179,Largest Number,math
+180,Consecutive Numbers,math
+181,Employees Earning More Than Their Managers,sql
+182,Duplicate Emails,sql
+183,Customers Who Never Order,sql
+184,Department Highest Salary,sql
+185,Department Top Three Salaries,sql
+186,Reverse Words in a String II,string
+187,Repeated DNA Sequences,sql
+188,Best Time to Buy and Sell Stock IV,sql
+189,Rotate Array,sql
+190,Reverse Bits,math
+191,Number of 1 Bits,math
+192,Word Frequency,sql
+193,Valid Phone Numbers,math
+194,Transpose File,sql
+195,Tenth Line,sql
+196,Delete Duplicate Emails,sql
+197,Rising Temperature,sql
+198,House Robber,array
+199,Binary Tree Right Side View,tree
+200,Number of Islands,math
+201,Bitwise AND of Numbers Range,math
+202,Happy Number,math
+203,Remove Linked List Elements,linked-list
+204,Count Primes,math
+205,Isomorphic Strings,string
+206,Reverse Linked List,linked-list
+207,Course Schedule,array
+208,Implement Trie (Prefix Tree),tree
+209,Minimum Size Subarray Sum,math
+210,Course Schedule II,array
+211,Design Add and Search Words Data Structure,search-sort
+212,Word Search II,search-sort
+213,House Robber II,array
+214,Shortest Palindrome,string
+215,Kth Largest Element in an Array,array
+216,Combination Sum III,math
+217,Contains Duplicate,array
+218,The Skyline Problem,array
+219,Contains Duplicate II,array
+220,Contains Duplicate III,array
+221,Maximal Square,array
+222,Count Complete Tree Nodes,tree
+223,Rectangle Area,array
+224,Basic Calculator,array
+225,Implement Stack using Queues,array
+226,Invert Binary Tree,tree
+227,Basic Calculator II,array
+228,Summary Ranges,math
+229,Majority Element II,array
+230,Kth Smallest Element in a BST,tree
+231,Power of Two,array
+232,Implement Queue using Stacks,array
+233,Number of Digit One,math
+234,Palindrome Linked List,linked-list
+235,Lowest Common Ancestor of a Binary Search Tree,tree
+236,Lowest Common Ancestor of a Binary Tree,tree
+237,Delete Node in a Linked List,linked-list
+238,Product of Array Except Self,array
+239,Sliding Window Maximum,array
+240,Search a 2D Matrix II,search-sort
+241,Different Ways to Add Parentheses,math
+242,Valid Anagram,array
+243,Shortest Word Distance,array
+244,Shortest Word Distance II,array
+245,Shortest Word Distance III,array
+246,Strobogrammatic Number,math
+247,Strobogrammatic Number II,math
+248,Strobogrammatic Number III,math
+249,Group Shifted Strings,string
+250,Count Univalue Subtrees,math
+251,Flatten 2D Vector,array
+252,Meeting Rooms,array
+253,Meeting Rooms II,array
+254,Factor Combinations,array
+255,Verify Preorder Sequence in Binary Search Tree,tree
+256,Paint House,array
+257,Binary Tree Paths,tree
+258,Add Digits,math
+259,3Sum Smaller,math
+260,Single Number III,math
+261,Graph Valid Tree,tree
+262,Trips and Users,array
+263,Ugly Number,math
+264,Ugly Number II,math
+265,Paint House II,array
+266,Palindrome Permutation,string
+267,Palindrome Permutation II,string
+268,Missing Number,math
+269,Alien Dictionary,array
+270,Closest Binary Search Tree Value,tree
+271,Encode and Decode Strings,string
+272,Closest Binary Search Tree Value II,tree
+273,Integer to English Words,array
+274,H-Index,array
+275,H-Index II,array
+276,Paint Fence,array
+277,Find the Celebrity,array
+278,First Bad Version,array
+279,Perfect Squares,array
+280,Wiggle Sort,search-sort
+281,Zigzag Iterator,array
+282,Expression Add Operators,math
+283,Move Zeroes,array
+284,Peeking Iterator,array
+285,Inorder Successor in BST,tree
+286,Walls and Gates,array
+287,Find the Duplicate Number,math
+288,Unique Word Abbreviation,array
+289,Game of Life,array
+290,Word Pattern,array
+291,Word Pattern II,array
+292,Nim Game,array
+293,Flip Game,array
+294,Flip Game II,array
+295,Find Median from Data Stream,array
+296,Best Meeting Point,array
+297,Serialize and Deserialize Binary Tree,tree
+298,Binary Tree Longest Consecutive Sequence,tree
+299,Bulls and Cows,array
+300,Longest Increasing Subsequence,array
+301,Remove Invalid Parentheses,array
+302,Smallest Rectangle Enclosing Black Pixels,array
+303,Range Sum Query - Immutable,math
+304,Range Sum Query 2D - Immutable,math
+305,Number of Islands II,math
+306,Additive Number,math
+307,Range Sum Query - Mutable,math
+308,Range Sum Query 2D - Mutable,math
+309,Best Time to Buy and Sell Stock with Cooldown,array
+310,Minimum Height Trees,tree
+311,Sparse Matrix Multiplication,dp
+312,Burst Balloons,array
+313,Super Ugly Number,math
+314,Binary Tree Vertical Order Traversal,tree
+315,Count of Smaller Numbers After Self,math
+316,Remove Duplicate Letters,array
+317,Shortest Distance from All Buildings,array
+318,Maximum Product of Word Lengths,array
+319,Bulb Switcher,array
+320,Generalized Abbreviation,array
+321,Create Maximum Number,math
+322,Coin Change,array
+323,Number of Connected Components in an Undirected Graph,graph
+324,Wiggle Sort II,search-sort
+325,Maximum Size Subarray Sum Equals k,math
+326,Power of Three,array
+327,Count of Range Sum,math
+328,Odd Even Linked List,linked-list
+329,Longest Increasing Path in a Matrix,dp
+330,Patching Array,array
+331,Verify Preorder Serialization of a Binary Tree,tree
+332,Reconstruct Itinerary,array
+333,Largest BST Subtree,tree
+334,Increasing Triplet Subsequence,array
+335,Self Crossing,array
+336,Palindrome Pairs,string
+337,House Robber III,array
+338,Counting Bits,math
+339,Nested List Weight Sum,math
+340,Longest Substring with At Most K Distinct Characters,array
+341,Flatten Nested List Iterator,array
+342,Power of Four,array
+343,Integer Break,array
+344,Reverse String,string
+345,Reverse Vowels of a String,string
+346,Moving Average from Data Stream,array
+347,Top K Frequent Elements,array
+348,Design Tic-Tac-Toe,array
+349,Intersection of Two Arrays,array
+350,Intersection of Two Arrays II,design
+351,Android Unlock Patterns,design
+352,Data Stream as Disjoint Intervals,design
+353,Design Snake Game,design
+354,Russian Doll Envelopes,design
+355,Design Twitter,design
+356,Line Reflection,design
+357,Count Numbers with Unique Digits,math
+358,Rearrange String k Distance Apart,string
+359,Logger Rate Limiter,design
+360,Sort Transformed Array,search-sort
+361,Bomb Enemy,design
+362,Design Hit Counter,math
+363,Max Sum of Rectangle No Larger Than K,math
+364,Nested List Weight Sum II,math
+365,Water and Jug Problem,design
+366,Find Leaves of Binary Tree,tree
+367,Valid Perfect Square,design
+368,Largest Divisible Subset,design
+369,Plus One Linked List,linked-list
+370,Range Addition,math
+371,Sum of Two Integers,math
+372,Super Pow,design
+373,Find K Pairs with Smallest Sums,math
+374,Guess Number Higher or Lower,math
+375,Guess Number Higher or Lower II,math
+376,Wiggle Subsequence,design
+377,Combination Sum IV,math
+378,Kth Smallest Element in a Sorted Matrix,search-sort
+379,Design Phone Directory,design
+380,Insert Delete GetRandom O(1),design
+381,Insert Delete GetRandom O(1) - Duplicates allowed,design
+382,Linked List Random Node,linked-list
+383,Ransom Note,design
+384,Shuffle an Array,design
+385,Mini Parser,design
+386,Lexicographical Numbers,math
+387,First Unique Character in a String,string
+388,Longest Absolute File Path,dp
+389,Find the Difference,design
+390,Elimination Game,design
+391,Perfect Rectangle,design
+392,Is Subsequence,design
+393,UTF-8 Validation,design
+394,Decode String,string
+395,Longest Substring with At Least K Repeating Characters,design
+396,Rotate Function,design
+397,Integer Replacement,design
+398,Random Pick Index,design
+399,Evaluate Division,design
+400,Nth Digit,design
+401,Binary Watch,design
+402,Remove K Digits,design
+403,Frog Jump,design
+404,Sum of Left Leaves,math
+405,Convert a Number to Hexadecimal,math
+406,Queue Reconstruction by Height,design
+407,Trapping Rain Water II,design
+408,Valid Word Abbreviation,design
+409,Longest Palindrome,string
+410,Split Array Largest Sum,math
+411,Minimum Unique Word Abbreviation,design
+412,Fizz Buzz,design
+413,Arithmetic Slices,design
+414,Third Maximum Number,math
+415,Add Strings,string
+416,Partition Equal Subset Sum,math
+417,Pacific Atlantic Water Flow,design
+418,Sentence Screen Fitting,design
+419,Battleships in a Board,design
+420,Strong Password Checker,design
+421,Maximum XOR of Two Numbers in an Array,math
+422,Valid Word Square,design
+423,Reconstruct Original Digits from English,design
+424,Longest Repeating Character Replacement,design
+425,Word Squares,design
+426,Convert Binary Search Tree to Sorted Doubly Linked List,tree
+427,Construct Quad Tree,tree
+428,Serialize and Deserialize N-ary Tree,tree
+429,N-ary Tree Level Order Traversal,tree
+430,Flatten a Multilevel Doubly Linked List,linked-list
+431,Encode N-ary Tree to Binary Tree,tree
+432,All O`one Data Structure,design
+433,Minimum Genetic Mutation,design
+434,Number of Segments in a String,string
+435,Non-overlapping Intervals,design
+436,Find Right Interval,design
+437,Path Sum III,math
+438,Find All Anagrams in a String,string
+439,Ternary Expression Parser,design
+440,K-th Smallest in Lexicographical Order,design
+441,Arranging Coins,design
+442,Find All Duplicates in an Array,design
+443,String Compression,string
+444,Sequence Reconstruction,design
+445,Add Two Numbers II,math
+446,Arithmetic Slices II - Subsequence,design
+447,Number of Boomerangs,math
+448,Find All Numbers Disappeared in an Array,math
+449,Serialize and Deserialize BST,tree
+450,Delete Node in a BST,tree
+451,Sort Characters By Frequency,search-sort
+452,Minimum Number of Arrows to Burst Balloons,math
+453,Minimum Moves to Equal Array Elements,design
+454,4Sum II,math
+455,Assign Cookies,design
+456,132 Pattern,design
+457,Circular Array Loop,design
+458,Poor Pigs,design
+459,Repeated Substring Pattern,design
+460,LFU Cache,design
+461,Hamming Distance,design
+462,Minimum Moves to Equal Array Elements II,design
+463,Island Perimeter,design
+464,Can I Win,design
+465,Optimal Account Balancing,design
+466,Count The Repetitions,math
+467,Unique Substrings in Wraparound String,string
+468,Validate IP Address,math
+469,Convex Polygon,design
+470,Implement Rand10() Using Rand7(),design
+471,Encode String with Shortest Length,string
+472,Concatenated Words,design
+473,Matchsticks to Square,design
+474,Ones and Zeroes,design
+475,Heaters,design
+476,Number Complement,math
+477,Total Hamming Distance,design
+478,Generate Random Point in a Circle,design
+479,Largest Palindrome Product,string
+480,Sliding Window Median,design
+481,Magical String,string
+482,License Key Formatting,design
+483,Smallest Good Base,design
+484,Find Permutation,design
+485,Max Consecutive Ones,design
+486,Predict the Winner,design
+487,Max Consecutive Ones II,design
+488,Zuma Game,design
+489,Robot Room Cleaner,design
+490,The Maze,design
+491,Non-decreasing Subsequences,design
+492,Construct the Rectangle,design
+493,Reverse Pairs,design
+494,Target Sum,math
+495,Teemo Attacking,design
+496,Next Greater Element I,design
+497,Random Point in Non-overlapping Rectangles,design
+498,Diagonal Traverse,design
+499,The Maze III,design
+500,Keyboard Row,design

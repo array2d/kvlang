@@ -1,0 +1,18 @@
+# 344: Reverse String (用数组模拟) — 双指针反转
+# 来源: LeetCode #344
+# 期望输出:
+#   o
+#   l
+#   l
+#   e
+#   h
+
+def reverse_str() -> () {
+    a <- ["h", "e", "l", "l", "o"]; len(a) -> n
+    0 -> l; n - 1 -> r
+    while (l < r) { a[l] -> tl; a[r] -> tr; a[l] <- tr; a[r] <- tl; l + 1 -> l; r - 1 -> r }
+    0 -> i
+    while (i < n) { a[i] -> x; print(x); i + 1 -> i }
+}
+def main() -> () { reverse_str() -> () }
+main() -> ()

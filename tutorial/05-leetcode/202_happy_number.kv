@@ -1,0 +1,17 @@
+# 202: Happy Number — 快乐数检测（循环或到1）
+# 来源: LeetCode #202
+# 期望输出:
+#   1
+
+def is_happy(n:int) -> (result:int) {
+    0 -> slow; n -> fast; 0 -> found
+    while (found == 0) {
+        n -> x; 0 -> s
+        while (x > 0) { x % 10 -> d; d * d -> d2; s + d2 -> s; x / 10 -> x }
+        s -> n
+        n == 1 -> done
+        if (done) { 1 -> found; 1 -> result }
+    }
+}
+def main() -> () { is_happy(19) -> r; print(r) }
+main() -> ()

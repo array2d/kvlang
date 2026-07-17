@@ -1,0 +1,43 @@
+# 217: Contains Duplicate — 检测重复元素
+# 算法: O(n²) 双重遍历（无 hash map 时）
+# 来源: LeetCode #217
+# 期望输出:
+#   true
+#   false
+
+def has_dup() -> () {
+    a <- [1, 2, 3, 1]; len(a) -> n; 0 -> found
+    0 -> i
+    while (i < n) {
+        i + 1 -> j
+        while (j < n) {
+            a[i] -> x; a[j] -> y
+            x == y -> dup
+            if (dup) { 1 -> found; n -> i; n -> j }
+            else { j + 1 -> j }
+        }
+        i + 1 -> i
+    }
+    found -> f
+    if (f) { print("true") } else { print("false") }
+}
+
+def no_dup() -> () {
+    a <- [1, 2, 3, 4]; len(a) -> n; 0 -> found
+    0 -> i
+    while (i < n) {
+        i + 1 -> j
+        while (j < n) {
+            a[i] -> x; a[j] -> y
+            x == y -> dup
+            if (dup) { 1 -> found; n -> i; n -> j }
+            else { j + 1 -> j }
+        }
+        i + 1 -> i
+    }
+    found -> f
+    if (f) { print("true") } else { print("false") }
+}
+
+def main() -> () { has_dup() -> (); no_dup() -> () }
+main() -> ()

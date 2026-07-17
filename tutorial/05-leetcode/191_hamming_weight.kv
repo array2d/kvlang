@@ -1,0 +1,16 @@
+# 191: Number of 1 Bits — 汉明重量
+# 来源: LeetCode #191
+# 期望输出:
+#   3
+
+def hamming(n:int) -> () {
+    0 -> count
+    while (n > 0) {
+        n % 2 -> bit
+        if (bit) { count + 1 -> count }
+        n / 2 -> n
+    }
+    print(count)
+}
+def main() -> () { hamming(11) -> () }
+main() -> ()

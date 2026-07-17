@@ -1,0 +1,31 @@
+# 001: Two Sum — 数组参数版
+# 来源: LeetCode #1
+# 期望输出:
+#   [ 0 , 1 ]
+#   [-1, -1]
+
+def two_sum(nums, target:int) -> () {
+    len(nums) -> n; 0 -> found
+    0 -> i
+    while (i < n) {
+        0 -> j
+        while (j < n) {
+            i == j -> sk
+            if (sk) { j + 1 -> j } else {
+                nums[i] -> x; nums[j] -> y; x + y -> s
+                s == target -> hit
+                if (hit) { print("[", i, ",", j, "]"); 1 -> found; n -> i; n -> j }
+                else { j + 1 -> j }
+            }
+        }
+        i + 1 -> i
+    }
+    found == 0 -> nf
+    if (nf) { print("[-1, -1]") }
+}
+
+def main() -> () {
+    two_sum([2, 7, 11, 15], 9) -> ()
+    two_sum([1, 2, 3], 99) -> ()
+}
+main() -> ()

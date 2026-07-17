@@ -1,0 +1,31 @@
+# 034: Find First and Last Position — 二分查找区间
+# 算法: 两次二分分别找左边界和右边界
+# 来源: LeetCode #34
+# 期望输出:
+#   [ 3 , 4 ]
+
+def search_range() -> () {
+    a <- [5, 7, 7, 8, 8, 10]; len(a) -> n
+    8 -> target
+    # find left
+    0 -> lo; n - 1 -> hi; -1 -> left
+    while (lo <= hi) {
+        lo + hi -> s; s / 2 -> mid
+        a[mid] -> mv
+        mv < target -> lt
+        if (lt) { mid + 1 -> lo }
+        else { mid -> left; mid - 1 -> hi }
+    }
+    # find right  
+    0 -> lo2; n - 1 -> hi2; -1 -> right
+    while (lo2 <= hi2) {
+        lo2 + hi2 -> s2; s2 / 2 -> mid2
+        a[mid2] -> mv2
+        mv2 > target -> gt
+        if (gt) { mid2 - 1 -> hi2 }
+        else { mid2 -> right; mid2 + 1 -> lo2 }
+    }
+    print("[", left, ",", right, "]")
+}
+def main() -> () { search_range() -> () }
+main() -> ()

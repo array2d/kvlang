@@ -1,0 +1,17 @@
+# 441: Arranging Coins — 二分查找完整行数
+# 来源: LeetCode #441
+# 期望输出:
+#   2
+
+def arrange(n:int) -> () {
+    1 -> lo; n -> hi; 0 -> ans
+    while (lo <= hi) {
+        lo + hi -> s; s / 2 -> mid
+        mid * mid -> m2; m2 + mid -> total; total / 2 -> t
+        t <= n -> ok
+        if (ok) { mid -> ans; mid + 1 -> lo } else { mid - 1 -> hi }
+    }
+    print(ans)
+}
+def main() -> () { arrange(5) -> () }
+main() -> ()

@@ -1,28 +1,27 @@
-# array_1d: 一维数组 — 字面量创建、索引访问、遍历求和
-# 语法: a <- [elem, ...]  对标 Python/NumPy
+# array_1d: 一维数组 — [e, ...] 创建、a[i] 读写
+# 语法: a <- [e, ...]  /  a[i] <- v  /  a[i] -> v
 # 层级: P3
 # 规则: P3-algo
 # 期望输出:
 #   len = 4
 #   [0] = 10
-#   sum = 100
+#   after set: 10 99 30
+#   sum = 179
 
 def main() -> () {
-    a <- [10, 20, 30, 40]          # 数组字面量
+    a <- [10, 20, 30, 40]
     len(a) -> n
     print("len =", n)
 
-    at(a, 0) -> v0
+    a[0] -> v0
     print("[0] =", v0)
 
-    0 -> total
-    0 -> i
-    while (i < n) {
-        at(a, i) -> x
-        total + x -> total
-        i + 1 -> i
-    }
+    a[1] <- 99
+    a[0] -> x0; a[1] -> x1; a[2] -> x2
+    print("after set:", x0, x1, x2)
+
+    0 -> total; 0 -> i
+    while (i < n) { a[i] -> x; total + x -> total; i + 1 -> i }
     print("sum =", total)
 }
-
 main() -> ()

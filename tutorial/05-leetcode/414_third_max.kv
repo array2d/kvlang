@@ -1,0 +1,28 @@
+# 414: Third Maximum Number — 找第三大的数
+# 来源: LeetCode #414
+# 期望输出:
+#   1
+
+def third_max() -> () {
+    a <- [2, 2, 3, 1]; len(a) -> n
+    # track top 3
+    0 -> first; 0 -> second; 0 -> third; 0 -> i
+    while (i < n) {
+        a[i] -> x
+        x > first -> gt1
+        if (gt1) { second -> third; first -> second; x -> first }
+        else {
+            x < first -> lt1; x > second -> gt2
+            if (lt1 && gt2) { second -> third; x -> second }
+            else {
+                x < second -> lt2; x > third -> gt3
+                if (lt2 && gt3) { x -> third }
+            }
+        }
+        i + 1 -> i
+    }
+    third > 0 -> ok
+    if (ok) { print(third) } else { first -> ans; print(ans) }
+}
+def main() -> () { third_max() -> () }
+main() -> ()

@@ -1,0 +1,14 @@
+# 371: Sum of Two Integers — 位运算加法
+# 来源: LeetCode #371
+# 期望输出:
+#   5
+
+def get_sum(a:int, b:int) -> () {
+    while (b != 0) {
+        a & b -> carry; carry << 1 -> c2
+        a ^ b -> a; c2 -> b
+    }
+    print(a)
+}
+def main() -> () { get_sum(2, 3) -> () }
+main() -> ()

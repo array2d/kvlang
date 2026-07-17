@@ -1,0 +1,31 @@
+# 033: Search in Rotated Sorted Array
+# 算法: 二分查找 + 半区判断
+# 来源: LeetCode #33
+# 期望输出:
+#   4
+
+def search() -> () {
+    a <- [4, 5, 6, 7, 0, 1, 2]; len(a) -> n
+    0 -> target; 0 -> lo; n - 1 -> hi; -1 -> result
+    
+    while (lo <= hi) {
+        lo + hi -> s; s / 2 -> mid
+        a[mid] -> mv
+        mv == target -> eq
+        if (eq) { mid -> result; hi + 1 -> lo }
+        else {
+            a[lo] -> lv; a[hi] -> rv
+            lv <= mv -> left_sorted
+            if (left_sorted) {
+                lv <= target -> t1; target < mv -> t2
+                if (t1 && t2) { mid - 1 -> hi } else { mid + 1 -> lo }
+            } else {
+                mv <= target -> t3; target <= rv -> t4
+                if (t3 && t4) { mid + 1 -> lo } else { mid - 1 -> hi }
+            }
+        }
+    }
+    print(result)
+}
+def main() -> () { search() -> () }
+main() -> ()

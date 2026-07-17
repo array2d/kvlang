@@ -1,0 +1,22 @@
+# 728: Self Dividing Numbers
+# 来源: LeetCode #728
+# 期望输出:
+#   1
+#   2
+#   12
+
+def is_self(n:int) -> (r:int) {
+    n -> num; 1 -> ok
+    while (num > 0) {
+        num % 10 -> d
+        d == 0 -> zero
+        if (zero) { 0 -> ok; 0 -> num }
+        else { n % d -> rem; rem == 0 -> div; if (div) { num / 10 -> num } else { 0 -> ok; 0 -> num } }
+    }
+    ok -> r
+}
+def main() -> () {
+    1 -> i
+    while (i <= 15) { is_self(i) -> r; if (r) { print(i) }; i + 1 -> i }
+}
+main() -> ()

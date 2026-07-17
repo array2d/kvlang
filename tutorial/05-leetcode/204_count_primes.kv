@@ -1,0 +1,21 @@
+# 204: Count Primes — 埃氏筛计数 n 以内质数
+# 来源: LeetCode #204
+# 期望输出:
+#   4
+
+def count_primes(n:int) -> () {
+    0 -> count; 2 -> i
+    while (i < n) {
+        1 -> is_p; 2 -> d
+        while (d < i) {
+            i % d -> rem; rem == 0 -> div
+            if (div) { 0 -> is_p; i -> d }
+            else { d + 1 -> d }
+        }
+        if (is_p) { count + 1 -> count }
+        i + 1 -> i
+    }
+    print(count)
+}
+def main() -> () { count_primes(10) -> () }
+main() -> ()

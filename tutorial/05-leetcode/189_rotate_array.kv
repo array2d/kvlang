@@ -1,0 +1,37 @@
+# 189: Rotate Array — 三次反转旋转
+# 算法: reverse(0,n-1), reverse(0,k-1), reverse(k,n-1)
+# 来源: LeetCode #189
+# 期望输出:
+#   5
+#   6
+#   7
+#   1
+#   2
+#   3
+#   4
+
+def swap(a_len:int, lo:int, hi:int) -> () {
+    while (lo < hi) {
+        a[lo] -> t; a[hi] -> u; a[lo] <- u; a[hi] <- t
+        lo + 1 -> lo; hi - 1 -> hi
+    }
+}
+
+def rotate() -> () {
+    a <- [1, 2, 3, 4, 5, 6, 7]; len(a) -> n; 3 -> k
+    k % n -> k_eff
+    # reverse all
+    0 -> lo; n - 1 -> hi
+    while (lo < hi) { a[lo] -> t; a[hi] -> u; a[lo] <- u; a[hi] <- t; lo + 1 -> lo; hi - 1 -> hi }
+    # reverse first k
+    0 -> lo2; k_eff - 1 -> hi2
+    while (lo2 < hi2) { a[lo2] -> t2; a[hi2] -> u2; a[lo2] <- u2; a[hi2] <- t2; lo2 + 1 -> lo2; hi2 - 1 -> hi2 }
+    # reverse last n-k
+    k_eff -> lo3; n - 1 -> hi3
+    while (lo3 < hi3) { a[lo3] -> t3; a[hi3] -> u3; a[lo3] <- u3; a[hi3] <- t3; lo3 + 1 -> lo3; hi3 - 1 -> hi3 }
+    
+    0 -> j
+    while (j < n) { a[j] -> v; print(v); j + 1 -> j }
+}
+def main() -> () { rotate() -> () }
+main() -> ()

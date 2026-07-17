@@ -1,0 +1,48 @@
+# 066: Plus One — 数组表示的大整数加一
+# 算法: 从右向左进位
+# 来源: LeetCode #66
+# 期望输出:
+#   1
+#   2
+#   4
+#   0
+#   0
+#   0
+
+def plus_one() -> () {
+    a <- [1, 2, 3]; len(a) -> n
+    n - 1 -> i; 1 -> carry
+    
+    while (i >= 0) {
+        a[i] -> d; d + carry -> s
+        s == 10 -> overflow
+        if (overflow) { 0 -> carry; a[i] <- 0 }
+        else { a[i] <- s; 0 -> carry; -1 -> i }
+        i - 1 -> i
+    }
+    
+    carry == 1 -> need_extend
+    n -> len_val  # placeholder (can't prepend in kvlang)
+    
+    0 -> j
+    while (j < n) { a[j] -> v; print(v); j + 1 -> j }
+}
+
+def plus_one_nines() -> () {
+    a <- [9, 9, 9]; len(a) -> n
+    n - 1 -> i; 1 -> carry
+    
+    while (i >= 0) {
+        a[i] -> d; d + carry -> s
+        s == 10 -> overflow
+        if (overflow) { a[i] <- 0; 1 -> carry }
+        else { a[i] <- s; 0 -> carry; -1 -> i }
+        i - 1 -> i
+    }
+    
+    0 -> j
+    while (j < n) { a[j] -> v; print(v); j + 1 -> j }
+}
+
+def main() -> () { plus_one() -> (); plus_one_nines() -> () }
+main() -> ()

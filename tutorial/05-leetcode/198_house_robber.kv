@@ -1,0 +1,24 @@
+# 198: House Robber — DP 打家劫舍
+# 来源: LeetCode #198
+# 期望输出:
+#   4
+
+def rob() -> () {
+    a <- [1, 2, 3, 1]; len(a) -> n
+    n == 1 -> one; n == 2 -> two
+    if (one) { a[0] -> ans; print(ans) } else {
+        a[0] -> p1; a[1] -> p2
+        p1 > p2 -> bigger
+        if (bigger) { p1 -> p2 }
+        2 -> i
+        while (i < n) {
+            a[i] -> cur
+            p1 + cur -> take; take > p2 -> better
+            if (better) { take -> tmp } else { p2 -> tmp }
+            p2 -> p1; tmp -> p2; i + 1 -> i
+        }
+        print(p2)
+    }
+}
+def main() -> () { rob() -> () }
+main() -> ()
