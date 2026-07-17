@@ -19,7 +19,7 @@
 - [x] 87 tutorial examples: basics, functions, control flow, algorithms, LeetCode
 - [x] CI: build (Linux + macOS), tutorial tests (Redis), cross-compile releases
 
-## v0.2.0 — Tensor, Distributed & Ecosystem
+## v0.2.0 — Tensor & Distributed
 
 ### Tensor & GPU
 - [ ] tensor lifecycle ops: tensor.new / tensor.del / tensor.clone (heap-plat backed)
@@ -33,16 +33,14 @@
 - [ ] RDMA backend for kvspace
 - [ ] cluster mode (`kvlang serve --cluster`)
 
-### Ecosystem
-- [ ] playground / online demo
-- [ ] improved error messages with source locations
-- [ ] `go install` support
-- [ ] package manager (`kvlang get`)
-- [ ] standard library: http, json, file I/O
-- [ ] benchmarking suite
-
 ## Future
 
 - [ ] self-hosting compiler (kvlang → kvlang)
 - [ ] WASM compile target
 - [ ] foreign function interface (FFI)
+- [ ] benchmarking suite
+- [ ] playground / online demo (maybe never)
+- [ ] improved error messages with source locations (maybe never)
+- [ ] `go install` support (maybe never)
+- [ ] package manager (maybe never)
+- [ ] standard library: http, json, file I/O (maybe never)
