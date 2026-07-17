@@ -46,6 +46,7 @@ func asInt(v kvspace.XValue) int64 {
 // AsBool coerces a Value to bool (kvlang truth semantics).
 // Exported for use by kvcpu/controlflow (br condition evaluation).
 func AsBool(v kvspace.XValue) bool {
+	if v.IsNil() { return false }
 	switch v.Kind() {
 	case "bool": return v.Bool()
 	case "int", "int8", "int16", "int32", "int64":

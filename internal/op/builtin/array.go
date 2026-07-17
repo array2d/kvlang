@@ -47,7 +47,7 @@ func (atOp) Call(f *op.Frame) error {
 	if inputs[1].Kind() == "string" || len(f.Inst.Reads) > 0 && (f.Inst.Reads[0][0] == '/' || f.Inst.Reads[0][0] == '"' && len(f.Inst.Reads[0]) > 1 && f.Inst.Reads[0][1] == '/') {
 		fp := keytree.FrameRoot(f.PC)
 		base := resolveReadValue(f.KV, fp, f.Inst.Reads[0]).Str()
-		if base == "" { base = resolveKVPath(fp, f.Inst.Reads[0]) }
+		if base == "" { base = f.Inst.Reads[0]; if len(base) > 1 && base[0] == '"' { base = base[1:] } }
 		path := base + "/" + kvKey(inputs[1])
 		v, _ := f.KV.Get(path); return writeResult(f, v)
 	}
@@ -74,7 +74,7 @@ func (arraySetOp) Call(f *op.Frame) error {
 	if inputs[1].Kind() == "string" || len(f.Inst.Reads) > 0 && (f.Inst.Reads[0][0] == '/' || f.Inst.Reads[0][0] == '"' && len(f.Inst.Reads[0]) > 1 && f.Inst.Reads[0][1] == '/') {
 		fp := keytree.FrameRoot(f.PC)
 		base := resolveReadValue(f.KV, fp, f.Inst.Reads[0]).Str()
-		if base == "" { base = resolveKVPath(fp, f.Inst.Reads[0]) }
+		if base == "" { base = f.Inst.Reads[0]; if len(base) > 1 && base[0] == '"' { base = base[1:] } }
 		path := base + "/" + kvKey(inputs[1])
 		f.KV.Set(path, inputs[2])
 		if len(f.Inst.Writes) > 0 {

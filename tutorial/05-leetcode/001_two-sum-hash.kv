@@ -1,4 +1,4 @@
-# 001: Two Sum — O(n) hash map via kvspace paths
+# 001: Two Sum — O(n) hash map (kvspace paths)
 # 来源: LeetCode #1
 # 期望输出:
 #   [ 0 , 1 ]
@@ -7,9 +7,10 @@ def two_sum(nums, target:int) -> () {
   len(nums) -> n; 0 -> i
   while (i < n) {
     at(nums, i) -> x; target - x -> need
-    has("/tmp", need) -> found
-    if (found) { at("/tmp", need) -> j; print("[", j, ",", i, "]"); n -> i }
-    else { set("/tmp", x, i) -> _; i + 1 -> i }
+    at("/tmp", need) -> j
+    j -> found
+    if (found) { j - 1 -> k; print("[", k, ",", i, "]"); n -> i }
+    else { i + 1 -> v; set("/tmp", x, v) -> _; i + 1 -> i }
   }
 }
 
