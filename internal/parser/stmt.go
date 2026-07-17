@@ -56,7 +56,7 @@ func (p *parser) parseStmt() ast.Stmt {
 	return p.parseInst()
 }
 
-// parseIf 解析 if/else 块：if (cond) { then } [else { else }]
+// parseIf 解析 if/elif/else 块。
 func (p *parser) parseIf() *ast.IfStmt {
 	p.advance() // consume 'if'
 	cond := p.parseCondInst()
@@ -66,6 +66,11 @@ func (p *parser) parseIf() *ast.IfStmt {
 	p.expect(RBrace)
 
 	p.skipNewlinesAndComments()
+	// elif → else { if (...) {...} }
+	if p.peek().Kind == Else && p.peekAt(1).Kind == If {
+		els := p.parseElifChain()
+		return &ast.IfStmt{Cond: cond, Then: then, Else: els}
+	}
 	if p.peek().Kind == Else {
 		p.advance()
 		p.skipNewlinesAndComments()
@@ -75,6 +80,33 @@ func (p *parser) parseIf() *ast.IfStmt {
 		return &ast.IfStmt{Cond: cond, Then: then, Else: els}
 	}
 	return &ast.IfStmt{Cond: cond, Then: then}
+}
+
+// parseElifChain 解析 elif/elif/.../else 链，返回嵌套 IfStmt。
+func (p *parser) parseElifChain() []ast.Stmt {
+	p.advance() // consume else
+	p.advance() // consume if
+	cond := p.parseCondInst()
+	p.skipNewlinesAndComments()
+	p.expect(LBrace)
+	body := p.parseBody()
+	p.expect(RBrace)
+	p.skipNewlinesAndComments()
+
+	// 递归：if 的 else 是下一个 elif/else
+	if p.peek().Kind == Else && p.peekAt(1).Kind == If {
+		chain := p.parseElifChain()
+		return []ast.Stmt{&ast.IfStmt{Cond: cond, Then: body, Else: chain}}
+	}
+	if p.peek().Kind == Else {
+		p.advance()
+		p.skipNewlinesAndComments()
+		p.expect(LBrace)
+		els := p.parseBody()
+		p.expect(RBrace)
+		return []ast.Stmt{&ast.IfStmt{Cond: cond, Then: body, Else: els}}
+	}
+	return []ast.Stmt{&ast.IfStmt{Cond: cond, Then: body}}
 }
 
 // parseFor 解析 for 循环：for (var[:type] in iter_path) { body }
