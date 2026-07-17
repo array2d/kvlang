@@ -3,7 +3,7 @@
     "*.kv": "kvlang"
   },
   "[kvlang]": {
-    "editor.tabSize": 2,
-    "editor.insertSpaces": true
+    "editor.tabSize": 4,
+    "editor.insertSpaces": false
   }
 }

@@ -198,9 +198,10 @@ func (e *Expr) stringPrec(outerPrec int) string {
 // Instruction 表示一条 kvlang 指令。
 // Expr 是 Pratt 解析的表达式树；Writes 是写目标槽列表。
 type Instruction struct {
-	Comments []string // 该指令前的行注释
-	Expr     *Expr    // 表达式（nil 表示空指令）
-	Writes   []string // 写目标（槽路径，如 ./x、/abs）
+	Comments  []string // 该指令前的行注释
+	Expr      *Expr    // 表达式（nil 表示空指令）
+	Writes    []string // 写目标（槽路径，如 ./x、/abs）
+	ArrowLeft bool     // true = <-, false = ->
 }
 
 // Flat 返回用于 KV 布局的扁平 (opcode, reads) 表示。
@@ -275,9 +276,28 @@ func isBareIdentVal(v string) bool {
 func (*Instruction) stmt() {}
 func (i *Instruction) FirstLine() string { return i.String() }
 func (i *Instruction) String() string {
-	s := i.Expr.String()
+	e := i.Expr
+	s := e.String()
+	// array(...) → [...]
+	if e != nil && e.Op == "array" {
+		args := make([]string, len(e.Args))
+		for j, a := range e.Args { args[j] = a.String() }
+		s = "[" + strings.Join(args, ", ") + "]"
+	}
+	// at(base, idx) -> expr → base[idx] (for reads)
+	if e != nil && e.Op == "at" && len(e.Args) >= 2 {
+		if e.Args[1].Quote != 0 {
+			s = e.Args[0].String() + "." + e.Args[1].Val
+		} else {
+			s = e.Args[0].String() + "[" + e.Args[1].String() + "]"
+		}
+	}
 	if len(i.Writes) > 0 {
-		s += " -> " + joinWrites(i.Writes)
+		if i.ArrowLeft {
+			s = joinWrites(i.Writes) + " <- " + s
+		} else {
+			s += " -> " + joinWrites(i.Writes)
+		}
 	}
 	return s
 }

@@ -28,6 +28,7 @@ func (p *parser) parseInst() *ast.Instruction {
 	switch {
 	case arrowAbs >= 0 && arrowVal == "<-":
 		// (writes) <- expr
+		inst.ArrowLeft = true
 		inst.Writes = p.collectWritesUntilArrow()
 		p.advance() // consume <-
 		inst.Expr = p.parsePratt(0)
