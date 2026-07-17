@@ -226,6 +226,24 @@ func (p *parser) parsePrimaryExpr() *ast.Expr {
 		return ast.Call(name, args...)
 	}
 
+	// 点号函数调用：name.name(args, ...) — e.g. tensor.matmul(x, W)
+	// token 流：IDENT . IDENT LPAREN ... — 合并 . 两侧为操作码名
+	if p.peek().Kind == Ident && p.peekAt(1).Kind == Dot &&
+		p.peekAt(2).Kind == Ident && p.peekAt(3).Kind == LParen {
+		opcode := p.advance().Value // consume LHS
+		p.advance()                  // skip Dot
+		opcode += "." + p.advance().Value // consume RHS → "tensor.matmul"
+		p.advance() // consume (
+		var args []*ast.Expr
+		for p.peek().Kind != RParen && p.peek().Kind != EOF {
+			if p.eat(Comma) { continue }
+			arg := p.parsePratt(0)
+			if arg != nil { args = append(args, arg) }
+		}
+		p.expect(RParen)
+		return ast.Call(opcode, args...)
+	}
+
 	// 叶节点：变量名、字面量、路径、裸操作码
 	t = p.advance()
 	// 引号字符串（非数字、非路径）：加 " 前缀编码，供 resolveReadValue 识别
