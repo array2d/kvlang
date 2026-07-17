@@ -1,0 +1,37 @@
+# 021: Merge Two Sorted Lists
+# 来源: LeetCode #21
+# 期望输出:
+#   1
+#   1
+#   2
+#   3
+#   4
+#   4
+
+def build_lists() -> () {
+  1 -> /a0/val; "/a1" -> /a0/next
+  2 -> /a1/val; "/a2" -> /a1/next
+  4 -> /a2/val; ""    -> /a2/next
+  1 -> /b0/val; "/b1" -> /b0/next
+  3 -> /b1/val; "/b2" -> /b1/next
+  4 -> /b2/val; ""    -> /b2/next
+}
+
+def merge(a:str, b:str) -> () {
+  a -> pa; b -> pb
+  while (pa != "") {
+    kvat(pa, "val") -> av
+    pb == "" -> pick_a
+    if (pick_a) { print(av); kvat(pa, "next") -> pa }
+    else {
+      kvat(pb, "val") -> bv
+      av <= bv -> take_a
+      if (take_a) { print(av); kvat(pa, "next") -> pa }
+      else { print(bv); kvat(pb, "next") -> pb }
+    }
+  }
+  while (pb != "") { kvat(pb, "val") -> bv; print(bv); kvat(pb, "next") -> pb }
+}
+
+def main() -> () { build_lists() -> (); merge("/a0", "/b0") -> () }
+main() -> ()
