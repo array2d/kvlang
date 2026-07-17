@@ -19,13 +19,13 @@ def move_zeroes() -> () {
 		if (skip) {
 			i + 1 -> i
 		} else {
-			a <- set(a, w, x)
+			a[w] <- x
 			w + 1 -> w
 			i + 1 -> i
 		}
 	}
 	while (w < n) {
-		a <- set(a, w, 0)
+		a[w] <- 0
 		w + 1 -> w
 	}
 	0 -> j

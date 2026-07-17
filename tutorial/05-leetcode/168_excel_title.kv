@@ -12,7 +12,7 @@ def convert(n:int) -> () {
 		num - 1 -> n1
 		n1 % 26 -> r
 		65 + r -> ch
-		a <- set(a, idx, ch)
+		a[idx] <- ch
 		idx + 1 -> idx
 		n1 / 26 -> num
 	}

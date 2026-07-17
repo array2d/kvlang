@@ -26,15 +26,15 @@ def merge() -> () {
 			av > bv -> a_bigger
 
 			if (a_bigger) {
-				a <- set(a, k, av)
+				a[k] <- av
 				i - 1 -> i
 			} else {
-				a <- set(a, k, bv)
+				a[k] <- bv
 				j - 1 -> j
 			}
 		} else {
 			b[j] -> bv2
-			a <- set(a, k, bv2)
+			a[k] <- bv2
 			j - 1 -> j
 		}
 

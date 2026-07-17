@@ -15,7 +15,7 @@ def product() -> () {
 	result <- [1, 1, 1, 1]
 	0 -> i
 	while (i < n) {
-		result <- set(result, i, prefix)
+		result[i] <- prefix
 		a[i] -> x
 		prefix * x -> prefix
 		i + 1 -> i
@@ -25,7 +25,7 @@ def product() -> () {
 	while (j >= 0) {
 		result[j] -> rv
 		suffix * rv -> newv
-		result <- set(result, j, newv)
+		result[j] <- newv
 		a[j] -> y
 		suffix * y -> suffix
 		j - 1 -> j

@@ -14,8 +14,8 @@ def reverse_str() -> () {
 	while (l < r) {
 		a[l] -> tl
 		a[r] -> tr
-		a <- set(a, l, tr)
-		a <- set(a, r, tl)
+		a[l] <- tr
+		a[r] <- tl
 		l + 1 -> l
 		r - 1 -> r
 	}

@@ -28,7 +28,7 @@ def intersection() -> () {
 		}
 
 		if (found) {
-			r <- set(r, idx, av)
+			r[idx] <- av
 			idx + 1 -> idx
 			count + 1 -> count
 		}

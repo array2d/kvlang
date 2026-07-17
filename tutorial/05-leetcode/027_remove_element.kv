@@ -19,7 +19,7 @@ def remove_element() -> () {
 		if (skip) {
 			i + 1 -> i
 		} else {
-			a <- set(a, k, cur)
+			a[k] <- cur
 			k + 1 -> k
 			i + 1 -> i
 		}
