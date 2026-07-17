@@ -22,7 +22,6 @@
 ## v0.2.0 — Ecosystem Foundations
 
 - [ ] playground / online demo
-- [ ] language server (LSP) for IDE support
 - [ ] improved error messages with source locations
 - [ ] `go install` support
 - [ ] package manager (`kvlang get`)
