@@ -32,10 +32,6 @@ type OpTask struct {
 }
 
 
-func IsRelative(param string) bool {
-	return len(param) >= 2 && param[:2] == "./"
-}
-
 func isAbsolute(param string) bool {
 	return len(param) > 0 && param[0] == '/'
 }
@@ -56,11 +52,8 @@ func isNumber(param string) bool {
 func resolveParam(ctx context.Context, kv kvspace.KVSpace, vtid, param string) ParamRef {
 	ref := ParamRef{Key: param}
 	resolvedKey := param
-	if IsRelative(param) {
-		// ./x → /vthread/<vtid>/x
-		resolvedKey = keytree.VThreadAt(vtid, param[2:])
-	} else if !isAbsolute(param) && !isNumber(param) {
-		// 裸 ident → 本帧局部变量，与 ./param 等价
+	if !isAbsolute(param) && !isNumber(param) {
+		// 裸 ident → 本帧局部变量
 		resolvedKey = keytree.VThreadAt(vtid, param)
 	}
 	ref.Key = resolvedKey
@@ -89,9 +82,6 @@ func resolveParam(ctx context.Context, kv kvspace.KVSpace, vtid, param string) P
 }
 
 func isLiteral(s string) bool {
-	if IsRelative(s) {
-		return false
-	}
 	if len(s) > 0 && s[0] == '/' {
 		return false
 	}

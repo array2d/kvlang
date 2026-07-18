@@ -62,7 +62,6 @@ func (o kvAtOp) Call(f *op.Frame) error {
 
 // resolveKVPath 将槽参数解析为绝对 KV 路径（不做值查找）。
 func resolveKVPath(framePath, param string) string {
-	if isRelative(param) { return framePath + "/" + param[2:] }
 	if isAbsolute(param) { return param }
 	return framePath + "/" + param
 }

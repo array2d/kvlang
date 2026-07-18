@@ -208,9 +208,9 @@ type Instruction struct {
 // 前提：lower 已将复合子表达式展开，所有 Args 均为叶节点。
 //
 // 归一化规则（仅对 Leaf opcode 生效）：
-//   裸标识符（如 a、result）→ "./ident"（本帧相对路径）
-//   以此区分 "a -> b"（copy, opcode="./a"）
-//   与 "greet() -> ./x"（zero-arg call, opcode="greet"，来自 Call 节点）
+//   叶节点（a、42、"s"、/abs）→ 显式拷贝操作码 "="，值引用放读槽
+//   以此区分 "a -> b"（copy, opcode="=", reads=["a"]）
+//   与 "greet() -> x"（zero-arg call, opcode="greet"，来自 Call 节点）
 func (i *Instruction) Flat() (opcode string, reads []string) {
 	if i.Expr == nil {
 		return "", nil
@@ -219,13 +219,9 @@ func (i *Instruction) Flat() (opcode string, reads []string) {
 		v := i.Expr.Val
 		// 字符串字面量 → " 前缀（KV 传输标记）
 		if i.Expr.Quote != 0 {
-			return "\"" + v, nil
+			return "=", []string{"\"" + v}
 		}
-		// 裸标识符 → ./ident
-		if isBareIdentVal(v) {
-			return "./" + v, nil
-		}
-		return v, nil
+		return "=", []string{v}
 	}
 	opcode = i.Expr.Op
 	for _, arg := range i.Expr.Args {
@@ -239,16 +235,12 @@ func (i *Instruction) Flat() (opcode string, reads []string) {
 }
 
 // isBareIdentVal 判断字符串是否为裸标识符（首字母/下划线，其余字母数字下划线）。
-// 用于 Flat() 中将 Leaf("a") 归一化为 "./a"。
 func isBareIdentVal(v string) bool {
 	if len(v) == 0 {
 		return false
 	}
 	// 排除特殊前缀
 	if v[0] == '"' || v[0] == '/' {
-		return false
-	}
-	if len(v) >= 2 && v[:2] == "./" {
 		return false
 	}
 	// 排除布尔字面量
@@ -476,7 +468,7 @@ func needsQuote(s string) bool {
 		return false
 	}
 	// 路径不需要引号
-	if s[0] == '/' || (len(s) >= 2 && s[:2] == "./") {
+	if s[0] == '/' {
 		return false
 	}
 	for i := 0; i < len(s); i++ {

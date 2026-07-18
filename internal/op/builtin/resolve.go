@@ -2,12 +2,10 @@ package builtin
 
 import "kvlang/internal/kvspace"
 
-func isRelative(param string) bool { return len(param) >= 2 && param[:2] == "./" }
 func isAbsolute(param string) bool { return len(param) > 0 && param[0] == '/' }
 
 // resolveWriteKey maps a write-slot param to an absolute KV key.
 func resolveWriteKey(framePath, param string) string {
-	if isRelative(param) { return framePath + "/" + param[2:] }
 	if isAbsolute(param) { return param }
 	return framePath + "/" + param
 }
@@ -21,7 +19,6 @@ func ResolveReadValue(kv kvspace.KVSpace, framePath, param string) kvspace.XValu
 // resolveReadValue maps a read-slot param to a typed Value.
 //
 //	"X   → kvspace.Str("X")      quoted string literal  (parser writes " prefix)
-//	./x  → kv.Get(framePath/x)   explicit-relative slot
 //	/abs → kv.Get(/abs)           absolute path
 //	true → kvspace.Bool(true)     bool literal           (exact match)
 //	42   → kvspace.Int(42)        numeric literal        (first-char + strconv)
@@ -32,10 +29,6 @@ func resolveReadValue(kv kvspace.KVSpace, framePath, param string) kvspace.XValu
 	}
 	if param[0] == '"' {
 		return kvspace.Str(param[1:])
-	}
-	if isRelative(param) {
-		v, _ := kv.Get(framePath + "/" + param[2:])
-		return v
 	}
 	if isAbsolute(param) {
 		v, _ := kv.Get(param)

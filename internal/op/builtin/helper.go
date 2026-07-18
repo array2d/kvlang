@@ -43,11 +43,13 @@ func nextPC(f *op.Frame) {
 	vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
 }
 
-// ExecuteCopy copies the Value addressed by inst.Opcode to all write-slots.
+// ExecuteCopy copies the Value addressed by inst.Reads[0] to all write-slots.
 // Preserves the original type — int stays int, float stays float.
 func ExecuteCopy(kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) error {
 	framePath := keytree.FrameRoot(pc)
-	v := resolveReadValue(kv, framePath, inst.Opcode)
+	var src string
+	if len(inst.Reads) > 0 { src = inst.Reads[0] }
+	v := resolveReadValue(kv, framePath, src)
 	for _, w := range inst.Writes {
 		if err := kv.Set(resolveWriteKey(framePath, w), v); err != nil {
 			return err

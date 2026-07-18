@@ -26,7 +26,6 @@ package layoutcode
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"kvlang/internal/ast"
 	"kvlang/internal/keytree"
@@ -255,20 +254,15 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 //  3. 编译 body 指令写入 /func/<pkg>/<name>/[i,j]
 //  4. 块标签写入 /func/<pkg>/<name>/<label>/
 //  5. 反向索引写入 /func/idx/<name>
-// frameSlotKey 将槽表达式转换为绝对 KV 路径，兼容 ./x 和裸名 x 两种形式。
+// frameSlotKey 将槽表达式转换为绝对 KV 路径。
 //
-//	"./x"  → frameRoot + "/x"   (相对路径)
-//	"x"    → frameRoot + "/x"   (裸标识符，与 ./x 等价)
+//	"x"    → frameRoot + "/x"   (裸标识符)
 //	"/abs" → "/abs"             (绝对路径，直通)
 //	""     → ""                 (空，忽略)
-//	"."    → ""                 (单点，忽略)
 //	".xxx" → ""                 (引擎保留键，忽略，如 ._ 丢弃槽)
 func frameSlotKey(frameRoot, slot string) string {
 	if slot == "" {
 		return ""
-	}
-	if strings.HasPrefix(slot, "./") {
-		return frameRoot + "/" + slot[2:]
 	}
 	if slot[0] == '/' {
 		return slot // 绝对路径直通

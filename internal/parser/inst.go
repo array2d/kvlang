@@ -253,7 +253,7 @@ func (p *parser) parsePrimaryExpr() *ast.Expr {
 		if t.Quote == '"' { return ast.StrLit(v) }
 		if t.Quote == '`' { return ast.RawStr(v) }
 		isNum := isNumericLiteral(v)
-		isPath := len(v) >= 2 && (v[:2] == "./" || v[0] == '/')
+		isPath := len(v) > 0 && v[0] == '/'
 		if !isNum && !isPath {
 			// 语法错误：以数字开头的 Literal 必然是数字字面量意图，
 			// 但 isNumericLiteral 验证不通过（如 "1e"、"42e+"）。
@@ -306,13 +306,12 @@ func (p *parser) collectWriteList() []string {
 		}
 		// 合法写槽：
 		//   Ident  — 裸标识符（如 x, total, _）
-		//   Literal 以 "./" 或 "/" 开头 — 路径引用（如 ./x, /abs/path）
+		//   Literal 以 "/" 开头 — 绝对路径（如 /abs/path）
 		// 非法（触发 warning）：
 		//   Ident 后紧跟 LParen — 是函数调用，说明同行存在第二条指令
 		//   Literal 以 '"' 或数字开头 — 字符串/数字字面量，不能是写槽
 		//   其他 token（LParen 等）
-		isPathLiteral := t.Kind == Literal && len(t.Value) >= 2 &&
-			(t.Value[:2] == "./" || t.Value[0] == '/')
+		isPathLiteral := t.Kind == Literal && len(t.Value) > 0 && t.Value[0] == '/'
 		isIdent := t.Kind == Ident
 		isCallStart := isIdent && p.peekAt(1).Kind == LParen
 		isInvalidLiteral := t.Kind == Literal && !isPathLiteral
@@ -374,9 +373,8 @@ func (p *parser) collectWritesUntilArrow() []string {
 			p.advance()
 			continue
 		}
-		// base.field 成员访问作为整体写槽（base 为裸标识符或路径引用）
-		isPathLit := t.Kind == Literal && len(t.Value) >= 2 &&
-			(t.Value[:2] == "./" || t.Value[0] == '/')
+		// base.field 成员访问作为整体写槽（base 为裸标识符或绝对路径）
+		isPathLit := t.Kind == Literal && len(t.Value) > 0 && t.Value[0] == '/'
 		if (t.Kind == Ident || isPathLit) && p.peekAt(1).Kind == Dot {
 			w := p.advance().Value // base
 			w += p.advance().Value // .
