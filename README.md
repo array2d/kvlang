@@ -6,9 +6,9 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Tutorial Examples](https://img.shields.io/badge/tutorials-87%20examples-4c1)](tutorial/)
 
-**Agent-native 训推一体自迭代强人工智能计算架构。** 以 kvspace 树形路径为统一地址空间，同一语法同时承担 VM 指令、高级语言、编译器 IR、人类可读源码四种职能。
+**deepx 的 VM（原 dxlang），agent-native 训推一体自迭代强人工智能计算架构。** 以 kvspace 树形路径为统一地址空间，同种语法同时承担 VM 指令、高级语言、编译器 IR、人类可读源码四种职能。
 
-> 中文文档: [README_CN.md](README_CN.md) | 设计规范: [kvlang-design](https://github.com/array2d/kvlang-design)
+> 中文文档: [README_CN.md](README_CN.md) | 设计规范: [deepx-design](https://github.com/array2d/deepx-design)
 
 ---
 
