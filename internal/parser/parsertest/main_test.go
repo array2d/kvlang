@@ -206,3 +206,35 @@ func TestScan_BreakContinue_Tokens(t *testing.T) {
 		t.Errorf("expected [Break, Continue], got %v", kinds)
 	}
 }
+
+func TestAssign_Eq(t *testing.T) {
+	// = ≡ <-：写槽在左；== 不受影响；String() 保留 = 形态
+	src := `
+def f(A:int) -> (R:int) {
+    x = A + 1
+    ok = x == 2
+    R = x
+}
+`
+	f, diags, err := parser.ParseCode(strings.NewReader(src))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if len(diags) > 0 {
+		t.Fatalf("diags: %v", diags)
+	}
+	body := f.Funcs[0].Body
+	i0 := body[0].(*ast.Instruction)
+	if !i0.ArrowLeft || !i0.Eq || len(i0.Writes) != 1 || i0.Writes[0] != "x" {
+		t.Errorf("i0: ArrowLeft=%v Eq=%v Writes=%v", i0.ArrowLeft, i0.Eq, i0.Writes)
+	}
+	if got := i0.String(); got != "x = A + 1" {
+		t.Errorf("expected 'x = A + 1', got %q", got)
+	}
+	if i1 := body[1].(*ast.Instruction); i1.Expr.Op != "==" {
+		t.Errorf("expected '==' op, got %q", i1.Expr.Op)
+	}
+	if i2 := body[2].(*ast.Instruction); i2.Expr == nil || !i2.Expr.IsLeaf() || !i2.Eq {
+		t.Errorf("i2: expected leaf copy with Eq")
+	}
+}
