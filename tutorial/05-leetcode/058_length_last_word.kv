@@ -3,17 +3,17 @@
 # 期望输出:
 #   5
 def last_word_len(s:str) -> () {
-	strlen(s) -> n
+	n = strlen(s)  # = 等价于 <-
 	n - 1 -> i
-	0 -> count
+	count <- 0
 	while (i >= 0) {
-		char(s, i) -> c
+		c = char(s, i)  # = 等价于 <-
 		c == 32 -> sp
 
 		if (sp) {
-			-1 -> i
+			i <- -1
 		} else {
-			count + 1 -> count
+			count = count + 1  # = 等价于 <-
 		}
 
 		i - 1 -> i

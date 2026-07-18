@@ -4,25 +4,25 @@
 #   1
 #   0
 def is_power(n:int) -> (r:int) {
-	0 -> result
+	result = 0  # = 等价于 <-
 	n > 0 -> pos
 
 	if (pos) {
-		1 -> t
+		t <- 1
 		while (t < n) {
-			t * 2 -> t
+			t = t * 2  # = 等价于 <-
 		}
 		t == n -> eq
 
 		if (eq) {
-			1 -> result
+			result <- 1
 		}
 	}
 
-	result -> r
+	r = result  # = 等价于 <-
 }
 
 is_power(16) -> r1
 print(r1)
-is_power(18) -> r2
+r2 <- is_power(18)
 print(r2)

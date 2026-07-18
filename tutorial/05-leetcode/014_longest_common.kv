@@ -4,34 +4,34 @@
 #   fl
 def lcp() -> () {
 	"flower" -> a
-	"flow" -> b
-	"flight" -> c
+	b <- "flow"
+	c = "flight"  # = 等价于 <-
 	strlen(a) -> na
-	strlen(b) -> nb
-	strlen(c) -> nc
+	nb <- strlen(b)
+	nc = strlen(c)  # = 等价于 <-
 	0 -> i
-	1 -> ok
+	ok <- 1
 	while (ok) {
-		i < na -> ca
+		ca = i < na  # = 等价于 <-
 		i < nb -> cb
-		i < nc -> cc
-		ca && cb && cc -> all_ok
+		cc <- i < nc
+		all_ok = ca && cb && cc  # = 等价于 <-
 
 		if (all_ok) {
 			char(a, i) -> va
-			char(b, i) -> vb
-			char(c, i) -> vc
+			vb <- char(b, i)
+			vc = char(c, i)  # = 等价于 <-
 			va == vb -> ab
-			vb == vc -> bc
-			ab && bc -> match
+			bc <- vb == vc
+			match = ab && bc  # = 等价于 <-
 
 			if (match) {
 				i + 1 -> i
 			} else {
-				0 -> ok
+				ok <- 0
 			}
 		} else {
-			0 -> ok
+			ok = 0  # = 等价于 <-
 		}
 	}
 	slice(a, 0, i) -> ans

@@ -4,14 +4,14 @@
 #   1
 #   0
 def is_power3(n:int) -> () {
-	n > 0 -> pos
+	pos <- n > 0
 
 	if (pos) {
-		1 -> t
+		t = 1  # = 等价于 <-
 		while (t < n) {
 			t * 3 -> t
 		}
-		t == n -> eq
+		eq <- t == n
 
 		if (eq) {
 			print(1)

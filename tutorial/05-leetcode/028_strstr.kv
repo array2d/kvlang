@@ -5,29 +5,29 @@
 #   2
 def strstr(hay:str, needle:str) -> () {
 	strlen(hay) -> nh
-	strlen(needle) -> nn
-	0 -> i
+	nn <- strlen(needle)
+	i = 0  # = 等价于 <-
 	-1 -> ans
-	nh - nn -> limit
+	limit <- nh - nn
 	while (i <= limit) {
-		1 -> match
+		match = 1  # = 等价于 <-
 		0 -> j
 		while (j < nn) {
-			char(hay, i + j) -> hc
-			char(needle, j) -> nc
+			hc <- char(hay, i + j)
+			nc = char(needle, j)  # = 等价于 <-
 			hc == nc -> eq
 
 			if (eq) {
-				j + 1 -> j
+				j <- j + 1
 			} else {
-				0 -> match
+				match = 0  # = 等价于 <-
 				nn -> j
 			}
 		}
 
 		if (match) {
-			i -> ans
-			limit + 1 -> i
+			ans <- i
+			i = limit + 1  # = 等价于 <-
 		} else {
 			i + 1 -> i
 		}

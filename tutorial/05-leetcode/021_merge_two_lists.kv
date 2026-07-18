@@ -8,37 +8,37 @@
 #   4
 #   4
 def build_lists() -> () {
-	1 -> /a0.val
-	"/a1" -> /a0.next
+	/a0.val <- 1
+	/a0.next = "/a1"  # = 等价于 <-
 	2 -> /a1.val
-	"/a2" -> /a1.next
-	4 -> /a2.val
+	/a1.next <- "/a2"
+	/a2.val = 4  # = 等价于 <-
 	"" -> /a2.next
-	1 -> /b0.val
-	"/b1" -> /b0.next
+	/b0.val <- 1
+	/b0.next = "/b1"  # = 等价于 <-
 	3 -> /b1.val
-	"/b2" -> /b1.next
-	4 -> /b2.val
+	/b1.next <- "/b2"
+	/b2.val = 4  # = 等价于 <-
 	"" -> /b2.next
 }
 
 def merge(a:str, b:str) -> () {
-	a -> pa
-	b -> pb
+	pa <- a
+	pb = b  # = 等价于 <-
 	while (pa != "") {
 		pa.val -> av
-		pb == "" -> pick_a
+		pick_a <- pb == ""
 
 		if (pick_a) {
 			print(av)
-			pa.next -> pa
+			pa = pa.next  # = 等价于 <-
 		} else {
 			pb.val -> bv
-			av <= bv -> take
+			take <- av <= bv
 
 			if (take) {
 				print(av)
-				pa.next -> pa
+				pa = pa.next  # = 等价于 <-
 			} else {
 				print(bv)
 				pb.next -> pb
@@ -46,9 +46,9 @@ def merge(a:str, b:str) -> () {
 		}
 	}
 	while (pb != "") {
-		pb.val -> bv
+		bv <- pb.val
 		print(bv)
-		pb.next -> pb
+		pb = pb.next  # = 等价于 <-
 	}
 }
 

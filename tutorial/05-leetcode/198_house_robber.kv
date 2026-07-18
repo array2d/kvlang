@@ -3,38 +3,38 @@
 # 期望输出:
 #   4
 def rob() -> () {
-	a <- [1, 2, 3, 1]
-	len(a) -> n
-	n == 1 -> one
+	[1, 2, 3, 1] -> a
+	n <- len(a)
+	one = n == 1  # = 等价于 <-
 	n == 2 -> two
 
 	if (one) {
-		a[0] -> ans
+		ans <- a[0]
 		print(ans)
 	} else {
-		a[0] -> p1
+		p1 = a[0]  # = 等价于 <-
 		a[1] -> p2
-		p1 > p2 -> bigger
+		bigger <- p1 > p2
 
 		if (bigger) {
-			p1 -> p2
+			p2 = p1  # = 等价于 <-
 		}
 
 		2 -> i
 		while (i < n) {
-			a[i] -> cur
-			p1 + cur -> take
+			cur <- a[i]
+			take = p1 + cur  # = 等价于 <-
 			take > p2 -> better
 
 			if (better) {
-				take -> tmp
+				tmp <- take
 			} else {
-				p2 -> tmp
+				tmp = p2  # = 等价于 <-
 			}
 
 			p2 -> p1
-			tmp -> p2
-			i + 1 -> i
+			p2 <- tmp
+			i = i + 1  # = 等价于 <-
 		}
 		print(p2)
 	}

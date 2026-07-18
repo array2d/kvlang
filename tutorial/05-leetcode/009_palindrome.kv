@@ -4,30 +4,30 @@
 #   1
 #   0
 def is_pal(x:int) -> (r:int) {
-	x < 0 -> neg
+	neg = x < 0  # = 等价于 <-
 
 	if (neg) {
 		0 -> r
 	} else {
-		x -> orig
-		0 -> rev
+		orig <- x
+		rev = 0  # = 等价于 <-
 		while (orig > 0) {
 			rev * 10 -> r10
-			orig % 10 -> d
-			r10 + d -> rev
+			d <- orig % 10
+			rev = r10 + d  # = 等价于 <-
 			orig / 10 -> orig
 		}
-		rev == x -> ok
+		ok <- rev == x
 
 		if (ok) {
-			1 -> r
+			r = 1  # = 等价于 <-
 		} else {
 			0 -> r
 		}
 	}
 }
 
-is_pal(121) -> r1
+r1 <- is_pal(121)
 print(r1)
-is_pal(-121) -> r2
+r2 = is_pal(-121)  # = 等价于 <-
 print(r2)

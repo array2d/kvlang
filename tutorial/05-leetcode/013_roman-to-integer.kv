@@ -2,23 +2,23 @@
 # 期望输出: 58, 1994
 def romanToInt(s:string) -> (val:int) {
 	0 -> val
-	0 -> i
-	len(s) -> n
+	i <- 0
+	n = len(s)  # = 等价于 <-
 	"" -> prev
 	while (i < n) {
-		s[i] -> c
-		c == "I" -> isI
+		c <- s[i]
+		isI = c == "I"  # = 等价于 <-
 		c == "V" -> isV
-		c == "X" -> isX
-		c == "L" -> isL
+		isX <- c == "X"
+		isL = c == "L"  # = 等价于 <-
 		c == "C" -> isC
-		c == "D" -> isD
-		prev == "I" -> pI
+		isD <- c == "D"
+		pI = prev == "I"  # = 等价于 <-
 		prev == "X" -> pX
-		prev == "C" -> pC
+		pC <- prev == "C"
 
 		if (isI) {
-			val + 1 -> val
+			val = val + 1  # = 等价于 <-
 		}
 
 		if (isV) {
@@ -26,11 +26,11 @@ def romanToInt(s:string) -> (val:int) {
 		}
 
 		if (isX) {
-			val + 10 -> val
+			val <- val + 10
 		}
 
 		if (isL) {
-			val + 50 -> val
+			val = val + 50  # = 等价于 <-
 		}
 
 		if (isC) {
@@ -38,16 +38,16 @@ def romanToInt(s:string) -> (val:int) {
 		}
 
 		if (isD) {
-			val + 500 -> val
+			val <- val + 500
 		}
 
-		pI -> subI
+		subI = pI  # = 等价于 <-
 		pX -> subX
-		pC -> subC
+		subC <- pC
 
 		if (isV) {
 			if (subI) {
-				val - 2 -> val
+				val = val - 2  # = 等价于 <-
 			}
 		}
 
@@ -59,13 +59,13 @@ def romanToInt(s:string) -> (val:int) {
 
 		if (isL) {
 			if (subX) {
-				val - 20 -> val
+				val <- val - 20
 			}
 		}
 
 		if (isC) {
 			if (subX) {
-				val - 20 -> val
+				val = val - 20  # = 等价于 <-
 			}
 		}
 
@@ -75,13 +75,13 @@ def romanToInt(s:string) -> (val:int) {
 			}
 		}
 
-		c -> prev
-		i + 1 -> i
+		prev <- c
+		i = i + 1  # = 等价于 <-
 	}
 }
 
 romanToInt("LVIII") -> a
 print("LVIII =", a)
-romanToInt("MCMXCIV") -> b
+b <- romanToInt("MCMXCIV")
 print("MCMXCIV =", b)
-a -> /roman_lviii
+/roman_lviii = a  # = 等价于 <-

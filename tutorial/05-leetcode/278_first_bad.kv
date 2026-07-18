@@ -5,14 +5,14 @@
 def first_bad(n:int) -> () {
 	# isBadVersion(i) = i >= 4
 	1 -> lo
-	n -> hi
+	hi <- n
 	while (lo < hi) {
-		lo + hi -> s
+		s = lo + hi  # = 等价于 <-
 		s / 2 -> mid
-		mid >= 4 -> bad
+		bad <- mid >= 4
 
 		if (bad) {
-			mid -> hi
+			hi = mid  # = 等价于 <-
 		} else {
 			mid + 1 -> lo
 		}

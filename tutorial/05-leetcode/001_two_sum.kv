@@ -4,35 +4,35 @@
 #   [ 0 , 1 ]
 #   [-1, -1]
 def two_sum(nums, target:int) -> () {
-	len(nums) -> n
-	0 -> found
+	n <- len(nums)
+	found = 0  # = 等价于 <-
 	0 -> i
 	while (i < n) {
-		0 -> j
+		j <- 0
 		while (j < n) {
-			i == j -> sk
+			sk = i == j  # = 等价于 <-
 
 			if (sk) {
 				j + 1 -> j
 			} else {
-				nums[i] -> x
-				nums[j] -> y
+				x <- nums[i]
+				y = nums[j]  # = 等价于 <-
 				x + y -> s
-				s == target -> hit
+				hit <- s == target
 
 				if (hit) {
 					print("[", i, ",", j, "]")
-					1 -> found
+					found = 1  # = 等价于 <-
 					n -> i
-					n -> j
+					j <- n
 				} else {
-					j + 1 -> j
+					j = j + 1  # = 等价于 <-
 				}
 			}
 		}
 		i + 1 -> i
 	}
-	found == 0 -> nf
+	nf <- found == 0
 
 	if (nf) {
 		print("[-1, -1]")

@@ -4,10 +4,10 @@
 #   5
 def get_sum(a:int, b:int) -> () {
 	while (b != 0) {
-		a & b -> carry
+		carry = a & b  # = 等价于 <-
 		carry << 1 -> c2
-		a ^ b -> a
-		c2 -> b
+		a <- a ^ b
+		b = c2  # = 等价于 <-
 	}
 	print(a)
 }

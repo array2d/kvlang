@@ -4,15 +4,15 @@
 #   28
 def title_to_num(s:str) -> () {
 	strlen(s) -> n
-	0 -> result
-	0 -> i
+	result <- 0
+	i = 0  # = 等价于 <-
 	while (i < n) {
 		result * 26 -> r26
-		char(s, i) -> c
-		c - 65 -> v
+		c <- char(s, i)
+		v = c - 65  # = 等价于 <-
 		v + 1 -> d
-		r26 + d -> result
-		i + 1 -> i
+		result <- r26 + d
+		i = i + 1  # = 等价于 <-
 	}
 	print(result)
 }

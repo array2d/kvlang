@@ -3,25 +3,25 @@
 # 期望输出:
 #   1
 def is_ugly(n:int) -> () {
-	n <= 0 -> bad
+	bad = n <= 0  # = 等价于 <-
 
 	if (bad) {
 		print(0)
 	} else {
 		n % 2 -> r2
 		while (r2 == 0) {
-			n / 2 -> n
-			n % 2 -> r2
+			n <- n / 2
+			r2 = n % 2  # = 等价于 <-
 		}
 		n % 3 -> r3
 		while (r3 == 0) {
-			n / 3 -> n
-			n % 3 -> r3
+			n <- n / 3
+			r3 = n % 3  # = 等价于 <-
 		}
 		n % 5 -> r5
 		while (r5 == 0) {
-			n / 5 -> n
-			n % 5 -> r5
+			n <- n / 5
+			r5 = n % 5  # = 等价于 <-
 		}
 		n == 1 -> ok
 

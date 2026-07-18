@@ -3,46 +3,46 @@
 # 期望输出:
 #   1
 def third_max() -> () {
-	a <- [2, 2, 3, 1]
+	a = [2, 2, 3, 1]  # = 等价于 <-
 	len(a) -> n
 	# track top 3
-	0 -> first
-	0 -> second
+	first <- 0
+	second = 0  # = 等价于 <-
 	0 -> third
-	0 -> i
+	i <- 0
 	while (i < n) {
-		a[i] -> x
+		x = a[i]  # = 等价于 <-
 		x > first -> gt1
 
 		if (gt1) {
-			second -> third
-			first -> second
+			third <- second
+			second = first  # = 等价于 <-
 			x -> first
 		} else {
-			x < first -> lt1
-			x > second -> gt2
+			lt1 <- x < first
+			gt2 = x > second  # = 等价于 <-
 
 			if (lt1 && gt2) {
 				second -> third
-				x -> second
+				second <- x
 			} else {
-				x < second -> lt2
+				lt2 = x < second  # = 等价于 <-
 				x > third -> gt3
 
 				if (lt2 && gt3) {
-					x -> third
+					third <- x
 				}
 			}
 		}
 
-		i + 1 -> i
+		i = i + 1  # = 等价于 <-
 	}
 	third > 0 -> ok
 
 	if (ok) {
 		print(third)
 	} else {
-		first -> ans
+		ans <- first
 		print(ans)
 	}
 }

@@ -3,25 +3,25 @@
 # 期望输出:
 #   4
 def count_primes(n:int) -> () {
-	0 -> count
+	count = 0  # = 等价于 <-
 	2 -> i
 	while (i < n) {
-		1 -> is_p
-		2 -> d
+		is_p <- 1
+		d = 2  # = 等价于 <-
 		while (d < i) {
 			i % d -> rem
-			rem == 0 -> div
+			div <- rem == 0
 
 			if (div) {
-				0 -> is_p
+				is_p = 0  # = 等价于 <-
 				i -> d
 			} else {
-				d + 1 -> d
+				d <- d + 1
 			}
 		}
 
 		if (is_p) {
-			count + 1 -> count
+			count = count + 1  # = 等价于 <-
 		}
 
 		i + 1 -> i

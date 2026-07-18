@@ -5,8 +5,8 @@
 def trailing(n:int) -> () {
 	0 -> count
 	while (n >= 5) {
-		n / 5 -> n
-		count + n -> count
+		n <- n / 5
+		count = count + n  # = 等价于 <-
 	}
 	print(count)
 }

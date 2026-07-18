@@ -3,14 +3,14 @@
 # 期望输出:
 #   1
 def is_power4(n:int) -> () {
-	n > 0 -> pos
+	pos = n > 0  # = 等价于 <-
 
 	if (pos) {
 		1 -> t
 		while (t < n) {
-			t * 4 -> t
+			t <- t * 4
 		}
-		t == n -> eq
+		eq = t == n  # = 等价于 <-
 
 		if (eq) {
 			print(1)

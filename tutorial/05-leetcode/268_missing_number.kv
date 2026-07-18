@@ -5,18 +5,18 @@
 #   2
 def missing() -> () {
 	a <- [3, 0, 1]
-	len(a) -> n
+	n = len(a)  # = 等价于 <-
 	0 -> s
-	0 -> i
+	i <- 0
 	while (i < n) {
-		a[i] -> x
+		x = a[i]  # = 等价于 <-
 		s + x -> s
-		i + 1 -> i
+		i <- i + 1
 	}
-	n * n -> nn
+	nn = n * n  # = 等价于 <-
 	nn + n -> total
-	total / 2 -> expected
-	expected - s -> result
+	expected <- total / 2
+	result = expected - s  # = 等价于 <-
 	print(result)
 }
 

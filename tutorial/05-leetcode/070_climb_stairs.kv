@@ -3,14 +3,14 @@
 # 期望输出:
 #   8
 def climb(n:int) -> () {
-	1 -> a
+	a = 1  # = 等价于 <-
 	1 -> b
-	2 -> i
+	i <- 2
 	while (i <= n) {
-		a + b -> c
+		c = a + b  # = 等价于 <-
 		b -> a
-		c -> b
-		i + 1 -> i
+		b <- c
+		i = i + 1  # = 等价于 <-
 	}
 	print(c)
 }

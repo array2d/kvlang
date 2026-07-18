@@ -4,30 +4,30 @@
 #   49
 def max_area(h) -> (mx:int) {
 	len(h) -> n
-	0 -> l
-	n - 1 -> r
+	l <- 0
+	r = n - 1  # = 等价于 <-
 	0 -> mx
 	while (l < r) {
-		h[l] -> hl
-		h[r] -> hr
+		hl <- h[l]
+		hr = h[r]  # = 等价于 <-
 		r - l -> w
-		hl < hr -> ls
+		ls <- hl < hr
 
 		if (ls) {
-			hl * w -> ar
+			ar = hl * w  # = 等价于 <-
 			l + 1 -> l
 		} else {
-			hr * w -> ar
-			r - 1 -> r
+			ar <- hr * w
+			r = r - 1  # = 等价于 <-
 		}
 
 		ar > mx -> bg
 
 		if (bg) {
-			ar -> mx
+			mx <- ar
 		}
 	}
 }
 
-max_area(array(1, 8, 6, 2, 5, 4, 8, 3, 7)) -> r
+r = max_area(array(1, 8, 6, 2, 5, 4, 8, 3, 7))  # = 等价于 <-
 print(r)

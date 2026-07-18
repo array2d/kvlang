@@ -4,30 +4,30 @@
 #   1
 #   0
 def is_square(n:int) -> () {
-	n < 2 -> small
+	small <- n < 2
 
 	if (small) {
 		print(1)
 	} else {
-		1 -> lo
+		lo = 1  # = 等价于 <-
 		n / 2 -> hi
-		0 -> ans
+		ans <- 0
 		while (lo <= hi) {
-			lo + hi -> s
+			s = lo + hi  # = 等价于 <-
 			s / 2 -> mid
-			mid * mid -> sq
-			sq == n -> eq
+			sq <- mid * mid
+			eq = sq == n  # = 等价于 <-
 
 			if (eq) {
 				1 -> ans
-				hi + 1 -> lo
+				lo <- hi + 1
 			} else {
-				sq < n -> lt
+				lt = sq < n  # = 等价于 <-
 
 				if (lt) {
 					mid + 1 -> lo
 				} else {
-					mid - 1 -> hi
+					hi <- mid - 1
 				}
 			}
 		}

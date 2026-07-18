@@ -3,22 +3,22 @@
 # 期望输出:
 #   [ 0 , 1 ]
 def two_sum(nums, target:int) -> () {
-	len(nums) -> n
-	0 -> i
+	n <- len(nums)
+	i = 0  # = 等价于 <-
 	"/tmp" -> h
 	while (i < n) {
-		nums[i] -> x
-		target - x -> need
+		x <- nums[i]
+		need = target - x  # = 等价于 <-
 		h[need] -> j
-		j -> found
+		found <- j
 
 		if (found) {
-			j - 1 -> k
+			k = j - 1  # = 等价于 <-
 			print("[", k, ",", i, "]")
 			n -> i
 		} else {
-			i + 1 -> v
-			set(h, x, v) -> _
+			v <- i + 1
+			_ = set(h, x, v)  # = 等价于 <-
 			i + 1 -> i
 		}
 	}

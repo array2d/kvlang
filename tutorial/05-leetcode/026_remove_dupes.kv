@@ -5,23 +5,23 @@
 #   k = 5
 def remove_dupes(a) -> (k:int) {
 	len(a) -> n
-	1 -> k
-	1 -> i
+	k <- 1
+	i = 1  # = 等价于 <-
 	while (i < n) {
 		a[i] -> cur
-		k - 1 -> pi
-		a[pi] -> prev
+		pi <- k - 1
+		prev = a[pi]  # = 等价于 <-
 		cur == prev -> same
 
 		if (same) {
-			i + 1 -> i
+			i <- i + 1
 		} else {
 			a[k] <- cur
-			k + 1 -> k
+			k = k + 1  # = 等价于 <-
 			i + 1 -> i
 		}
 	}
 }
 
-remove_dupes(array(0, 0, 1, 1, 1, 2, 2, 3, 3, 4)) -> k
+k <- remove_dupes(array(0, 0, 1, 1, 1, 2, 2, 3, 3, 4))
 print("k =", k)

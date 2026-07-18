@@ -5,22 +5,22 @@
 #   false
 def has_dup(a) -> () {
 	len(a) -> n
-	0 -> found
-	0 -> i
+	found <- 0
+	i = 0  # = 等价于 <-
 	while (i < n) {
 		a[i] -> x
-		"/seen"[x] -> v
-		v -> exists
+		v <- "/seen"[x]
+		exists = v  # = 等价于 <-
 
 		if (exists) {
 			1 -> found
-			n -> i
+			i <- n
 		} else {
-			set("/seen", x, 1) -> _
+			_ = set("/seen", x, 1)  # = 等价于 <-
 			i + 1 -> i
 		}
 	}
-	found -> f
+	f <- found
 
 	if (f) {
 		print("true")
@@ -30,24 +30,24 @@ def has_dup(a) -> () {
 }
 
 def no_dup() -> () {
-	a <- [1, 2, 3, 4]
+	a = [1, 2, 3, 4]  # = 等价于 <-
 	len(a) -> n
-	0 -> found
-	0 -> i
+	found <- 0
+	i = 0  # = 等价于 <-
 	while (i < n) {
 		a[i] -> x
-		"/seen2"[x] -> v
-		v -> exists
+		v <- "/seen2"[x]
+		exists = v  # = 等价于 <-
 
 		if (exists) {
 			1 -> found
-			n -> i
+			i <- n
 		} else {
-			set("/seen2", x, 1) -> _
+			_ = set("/seen2", x, 1)  # = 等价于 <-
 			i + 1 -> i
 		}
 	}
-	found -> f
+	f <- found
 
 	if (f) {
 		print("true")

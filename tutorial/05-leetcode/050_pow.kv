@@ -3,23 +3,23 @@
 # 期望输出:
 #   1024.0
 def my_pow(x:float, n:int) -> () {
-	x -> base
-	n -> exp
+	base <- x
+	exp = n  # = 等价于 <-
 	1.0 -> result
-	exp < 0 -> neg
+	neg <- exp < 0
 
 	if (neg) {
-		-exp -> exp
+		exp = -exp  # = 等价于 <-
 	}
 
 	while (exp > 0) {
 		exp % 2 -> odd
 
 		if (odd) {
-			result * base -> result
+			result <- result * base
 		}
 
-		base * base -> base
+		base = base * base  # = 等价于 <-
 		exp / 2 -> exp
 	}
 	print(result)

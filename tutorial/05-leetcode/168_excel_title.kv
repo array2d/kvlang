@@ -5,22 +5,22 @@
 #   66
 def convert(n:int) -> () {
 	# Build reversed chars into array, then print in reverse
-	a <- [0, 0, 0, 0, 0]
-	0 -> idx
-	n -> num
+	[0, 0, 0, 0, 0] -> a
+	idx <- 0
+	num = n  # = 等价于 <-
 	while (num > 0) {
 		num - 1 -> n1
-		n1 % 26 -> r
-		65 + r -> ch
+		r <- n1 % 26
+		ch = 65 + r  # = 等价于 <-
 		a[idx] <- ch
 		idx + 1 -> idx
-		n1 / 26 -> num
+		num <- n1 / 26
 	}
-	idx - 1 -> k
+	k = idx - 1  # = 等价于 <-
 	while (k >= 0) {
 		a[k] -> v
 		print(v)
-		k - 1 -> k
+		k <- k - 1
 	}
 }
 

@@ -7,32 +7,32 @@
 #   2
 #   1
 def build_list() -> () {
-	1 -> /n0.val
-	"/n1" -> /n0.next
+	/n0.val <- 1
+	/n0.next = "/n1"  # = 等价于 <-
 	2 -> /n1.val
-	"/n2" -> /n1.next
-	3 -> /n2.val
+	/n1.next <- "/n2"
+	/n2.val = 3  # = 等价于 <-
 	"/n3" -> /n2.next
-	4 -> /n3.val
-	"/n4" -> /n3.next
+	/n3.val <- 4
+	/n3.next = "/n4"  # = 等价于 <-
 	5 -> /n4.val
-	"" -> /n4.next
+	/n4.next <- ""
 }
 
 def reverse(head:str) -> () {
-	"" -> prev
+	prev = ""  # = 等价于 <-
 	head -> cur
 	while (cur != "") {
-		cur.next -> nxt
-		cur.next <- prev
+		nxt <- cur.next
+		cur.next = prev  # = 等价于 <-
 		cur -> prev
-		nxt -> cur
+		cur <- nxt
 	}
-	prev -> p
+	p = prev  # = 等价于 <-
 	while (p != "") {
 		p.val -> v
 		print(v)
-		p.next -> p
+		p <- p.next
 	}
 }
 

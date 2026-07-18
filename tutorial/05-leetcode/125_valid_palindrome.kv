@@ -5,44 +5,44 @@
 #   0
 # 用整数数组模拟字符串，1='a', 2='b', etc.
 def is_pal() -> () {
-	s <- [1, 2, 1]
+	s = [1, 2, 1]  # = 等价于 <-
 	len(s) -> n
-	0 -> l
-	n - 1 -> r
+	l <- 0
+	r = n - 1  # = 等价于 <-
 	1 -> ok
 	while (l < r) {
-		s[l] -> lc
-		s[r] -> rc
+		lc <- s[l]
+		rc = s[r]  # = 等价于 <-
 		lc == rc -> match
 
 		if (match) {
-			l + 1 -> l
-			r - 1 -> r
+			l <- l + 1
+			r = r - 1  # = 等价于 <-
 		} else {
 			0 -> ok
-			n -> l
+			l <- n
 		}
 	}
 	print(ok)
 }
 
 def not_pal() -> () {
-	s <- [1, 2]
+	s = [1, 2]  # = 等价于 <-
 	len(s) -> n
-	0 -> l
-	n - 1 -> r
+	l <- 0
+	r = n - 1  # = 等价于 <-
 	1 -> ok
 	while (l < r) {
-		s[l] -> lc
-		s[r] -> rc
+		lc <- s[l]
+		rc = s[r]  # = 等价于 <-
 		lc == rc -> match
 
 		if (match) {
-			l + 1 -> l
-			r - 1 -> r
+			l <- l + 1
+			r = r - 1  # = 等价于 <-
 		} else {
 			0 -> ok
-			n -> l
+			l <- n
 		}
 	}
 	print(ok)

@@ -3,22 +3,22 @@
 # 期望输出:
 #   2
 def arrange(n:int) -> () {
-	1 -> lo
+	lo = 1  # = 等价于 <-
 	n -> hi
-	0 -> ans
+	ans <- 0
 	while (lo <= hi) {
-		lo + hi -> s
+		s = lo + hi  # = 等价于 <-
 		s / 2 -> mid
-		mid * mid -> m2
-		m2 + mid -> total
+		m2 <- mid * mid
+		total = m2 + mid  # = 等价于 <-
 		total / 2 -> t
-		t <= n -> ok
+		ok <- t <= n
 
 		if (ok) {
-			mid -> ans
+			ans = mid  # = 等价于 <-
 			mid + 1 -> lo
 		} else {
-			mid - 1 -> hi
+			hi <- mid - 1
 		}
 	}
 	print(ans)

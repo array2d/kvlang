@@ -4,26 +4,26 @@
 #   1
 def is_happy(n:int) -> (result:int) {
 	0 -> slow
-	n -> fast
-	0 -> found
+	fast <- n
+	found = 0  # = 等价于 <-
 	while (found == 0) {
 		n -> x
-		0 -> s
+		s <- 0
 		while (x > 0) {
-			x % 10 -> d
+			d = x % 10  # = 等价于 <-
 			d * d -> d2
-			s + d2 -> s
-			x / 10 -> x
+			s <- s + d2
+			x = x / 10  # = 等价于 <-
 		}
 		s -> n
-		n == 1 -> done
+		done <- n == 1
 
 		if (done) {
-			1 -> found
+			found = 1  # = 等价于 <-
 			1 -> result
 		}
 	}
 }
 
-is_happy(19) -> r
+r <- is_happy(19)
 print(r)

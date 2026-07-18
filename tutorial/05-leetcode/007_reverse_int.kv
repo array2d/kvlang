@@ -4,29 +4,29 @@
 #   321
 #   -321
 def reverse(x:int) -> (result:int) {
-	x < 0 -> neg
+	neg = x < 0  # = 等价于 <-
 	x -> n
 
 	if (neg) {
-		-x -> n
+		n <- -x
 	}
 
-	0 -> rev
+	rev = 0  # = 等价于 <-
 	while (n > 0) {
 		rev * 10 -> r
-		n % 10 -> d
-		r + d -> rev
+		d <- n % 10
+		rev = r + d  # = 等价于 <-
 		n / 10 -> n
 	}
 
 	if (neg) {
-		-rev -> result
+		result <- -rev
 	} else {
-		rev -> result
+		result = rev  # = 等价于 <-
 	}
 }
 
 reverse(123) -> r1
 print(r1)
-reverse(-123) -> r2
+r2 <- reverse(-123)
 print(r2)

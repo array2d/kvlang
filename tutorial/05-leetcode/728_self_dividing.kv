@@ -15,39 +15,39 @@
 #   15
 def is_self(n:int) -> (r:int) {
 	n -> num
-	1 -> ok
+	ok <- 1
 	while (num > 0) {
-		num % 10 -> d
+		d = num % 10  # = 等价于 <-
 		d == 0 -> zero
 
 		if (zero) {
-			0 -> ok
-			0 -> num
+			ok <- 0
+			num = 0  # = 等价于 <-
 		} else {
 			n % d -> rem
-			rem == 0 -> div
+			div <- rem == 0
 
 			if (div) {
-				num / 10 -> num
+				num = num / 10  # = 等价于 <-
 			} else {
 				0 -> ok
-				0 -> num
+				num <- 0
 			}
 		}
 	}
-	ok -> r
+	r = ok  # = 等价于 <-
 }
 
 def main() -> () {
 	1 -> i
 	while (i <= 15) {
-		is_self(i) -> r
+		r <- is_self(i)
 
 		if (r) {
 			print(i)
 		}
 
-		i + 1 -> i
+		i = i + 1  # = 等价于 <-
 	}
 }
 

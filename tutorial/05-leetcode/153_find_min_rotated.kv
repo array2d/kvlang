@@ -4,20 +4,20 @@
 #   0
 def find_min() -> () {
 	a <- [4, 5, 6, 7, 0, 1, 2]
-	len(a) -> n
+	n = len(a)  # = 等价于 <-
 	0 -> lo
-	n - 1 -> hi
+	hi <- n - 1
 	while (lo < hi) {
-		lo + hi -> s
+		s = lo + hi  # = 等价于 <-
 		s / 2 -> mid
-		a[mid] -> mv
-		a[hi] -> rv
+		mv <- a[mid]
+		rv = a[hi]  # = 等价于 <-
 		mv < rv -> ok
 
 		if (ok) {
-			mid -> hi
+			hi <- mid
 		} else {
-			mid + 1 -> lo
+			lo = mid + 1  # = 等价于 <-
 		}
 	}
 	a[lo] -> ans

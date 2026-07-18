@@ -4,22 +4,22 @@
 #   6
 def guess_number(n:int) -> () {
 	1 -> lo
-	n -> hi
+	hi <- n
 	while (lo <= hi) {
-		lo + hi -> s
+		s = lo + hi  # = 等价于 <-
 		s / 2 -> mid
-		mid < 6 -> low
+		low <- mid < 6
 
 		if (low) {
-			mid + 1 -> lo
+			lo = mid + 1  # = 等价于 <-
 		} else {
 			mid > 6 -> high
 
 			if (high) {
-				mid - 1 -> hi
+				hi <- mid - 1
 			} else {
 				print(mid)
-				hi + 1 -> lo
+				lo = hi + 1  # = 等价于 <-
 			}
 		}
 	}

@@ -4,27 +4,27 @@
 # 期望输出:
 #   5
 def max_profit() -> () {
-	a <- [7, 1, 5, 3, 6, 4]
+	a = [7, 1, 5, 3, 6, 4]  # = 等价于 <-
 	len(a) -> n
-	a[0] -> min_price
-	0 -> max_profit
+	min_price <- a[0]
+	max_profit = 0  # = 等价于 <-
 	1 -> i
 	while (i < n) {
-		a[i] -> price
-		price < min_price -> new_min
+		price <- a[i]
+		new_min = price < min_price  # = 等价于 <-
 
 		if (new_min) {
 			price -> min_price
 		} else {
-			price - min_price -> profit
-			profit > max_profit -> bigger
+			profit <- price - min_price
+			bigger = profit > max_profit  # = 等价于 <-
 
 			if (bigger) {
 				profit -> max_profit
 			}
 		}
 
-		i + 1 -> i
+		i <- i + 1
 	}
 	print(max_profit)
 }

@@ -4,14 +4,14 @@
 #   2
 def add_digits(n:int) -> () {
 	while (n >= 10) {
-		0 -> s
+		s = 0  # = 等价于 <-
 		n -> x
 		while (x > 0) {
-			x % 10 -> d
-			s + d -> s
+			d <- x % 10
+			s = s + d  # = 等价于 <-
 			x / 10 -> x
 		}
-		s -> n
+		n <- s
 	}
 	print(n)
 }

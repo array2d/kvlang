@@ -3,29 +3,29 @@
 # 期望输出:
 #   [ 1 , 2 ]
 def two_sum_ii() -> () {
-	a <- [2, 7, 11, 15]
-	9 -> target
-	len(a) -> n
+	[2, 7, 11, 15] -> a
+	target <- 9
+	n = len(a)  # = 等价于 <-
 	0 -> l
-	n - 1 -> r
+	r <- n - 1
 	while (l < r) {
-		a[l] -> lv
+		lv = a[l]  # = 等价于 <-
 		a[r] -> rv
-		lv + rv -> s
-		s == target -> hit
+		s <- lv + rv
+		hit = s == target  # = 等价于 <-
 
 		if (hit) {
 			l + 1 -> i1
-			r + 1 -> i2
+			i2 <- r + 1
 			print("[", i1, ",", i2, "]")
-			n -> l
+			l = n  # = 等价于 <-
 		} else {
 			s < target -> lt
 
 			if (lt) {
-				l + 1 -> l
+				l <- l + 1
 			} else {
-				r - 1 -> r
+				r = r - 1  # = 等价于 <-
 			}
 		}
 	}

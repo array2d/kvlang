@@ -3,37 +3,37 @@
 # 期望输出:
 #   2
 def intersection() -> () {
-	a <- [1, 2, 2, 1]
+	a = [1, 2, 2, 1]  # = 等价于 <-
 	len(a) -> na
 	b <- [2, 2]
-	len(b) -> nb
-	r <- [0, 0]
-	0 -> idx
-	0 -> count
+	nb = len(b)  # = 等价于 <-
+	[0, 0] -> r
+	idx <- 0
+	count = 0  # = 等价于 <-
 	0 -> i
 	while (i < na) {
-		a[i] -> av
-		0 -> j
+		av <- a[i]
+		j = 0  # = 等价于 <-
 		0 -> found
 		while (j < nb) {
-			b[j] -> bv
-			av == bv -> match
+			bv <- b[j]
+			match = av == bv  # = 等价于 <-
 
 			if (match) {
 				1 -> found
-				nb -> j
+				j <- nb
 			} else {
-				j + 1 -> j
+				j = j + 1  # = 等价于 <-
 			}
 		}
 
 		if (found) {
 			r[idx] <- av
 			idx + 1 -> idx
-			count + 1 -> count
+			count <- count + 1
 		}
 
-		i + 1 -> i
+		i = i + 1  # = 等价于 <-
 	}
 	r[0] -> v
 	print(v)

@@ -3,20 +3,20 @@
 # 期望输出:
 #   2
 def my_sqrt(x:int) -> () {
-	0 -> lo
-	x -> hi
+	lo <- 0
+	hi = x  # = 等价于 <-
 	0 -> ans
 	while (lo <= hi) {
-		lo + hi -> s
-		s / 2 -> mid
+		s <- lo + hi
+		mid = s / 2  # = 等价于 <-
 		mid * mid -> sq
-		sq <= x -> ok
+		ok <- sq <= x
 
 		if (ok) {
-			mid -> ans
+			ans = mid  # = 等价于 <-
 			mid + 1 -> lo
 		} else {
-			mid - 1 -> hi
+			hi <- mid - 1
 		}
 	}
 	print(ans)

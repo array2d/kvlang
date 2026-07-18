@@ -4,36 +4,36 @@
 #   58
 def roman_to_int(s:str) -> () {
 	strlen(s) -> n
-	0 -> result
-	0 -> i
+	result <- 0
+	i = 0  # = 等价于 <-
 	while (i < n) {
 		char(s, i) -> c
-		c == 73 -> is_I
-		c == 86 -> is_V
+		is_I <- c == 73
+		is_V = c == 86  # = 等价于 <-
 		c == 88 -> is_X
-		c == 76 -> is_L
-		c == 67 -> is_C
+		is_L <- c == 76
+		is_C = c == 67  # = 等价于 <-
 		c == 68 -> is_D
-		c == 77 -> is_M
+		is_M <- c == 77
 
 		if (is_I) {
-			i + 1 -> ni
+			ni = i + 1  # = 等价于 <-
 			ni < n -> has_next
 
 			if (has_next) {
-				char(s, ni) -> nc
-				nc == 86 -> iv
+				nc <- char(s, ni)
+				iv = nc == 86  # = 等价于 <-
 				nc == 88 -> ix
 
 				if (iv) {
-					4 -> val
-					i + 1 -> i
+					val <- 4
+					i = i + 1  # = 等价于 <-
 				} else {
 					if (ix) {
 						9 -> val
-						i + 1 -> i
+						i <- i + 1
 					} else {
-						1 -> val
+						val = 1  # = 等价于 <-
 					}
 				}
 			} else {
@@ -41,19 +41,19 @@ def roman_to_int(s:str) -> () {
 			}
 		} else {
 			if (is_V) {
-				5 -> val
+				val <- 5
 			} else {
 				if (is_X) {
-					10 -> val
+					val = 10  # = 等价于 <-
 				} else {
 					if (is_L) {
 						50 -> val
 					} else {
 						if (is_C) {
-							100 -> val
+							val <- 100
 						} else {
 							if (is_D) {
-								500 -> val
+								val = 500  # = 等价于 <-
 							} else {
 								1000 -> val
 							}
@@ -63,8 +63,8 @@ def roman_to_int(s:str) -> () {
 			}
 		}
 
-		result + val -> result
-		i + 1 -> i
+		result <- result + val
+		i = i + 1  # = 等价于 <-
 	}
 	print(result)
 }

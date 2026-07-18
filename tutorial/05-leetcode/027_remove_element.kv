@@ -7,29 +7,29 @@
 #   2
 #   2
 def remove_element() -> () {
-	a <- [3, 2, 2, 3]
+	a = [3, 2, 2, 3]  # = 等价于 <-
 	3 -> val
-	len(a) -> n
-	0 -> k
+	n <- len(a)
+	k = 0  # = 等价于 <-
 	0 -> i
 	while (i < n) {
-		a[i] -> cur
-		cur == val -> skip
+		cur <- a[i]
+		skip = cur == val  # = 等价于 <-
 
 		if (skip) {
 			i + 1 -> i
 		} else {
 			a[k] <- cur
-			k + 1 -> k
-			i + 1 -> i
+			k <- k + 1
+			i = i + 1  # = 等价于 <-
 		}
 	}
 	print("k =", k)
 	0 -> j
 	while (j < k) {
-		a[j] -> v
+		v <- a[j]
 		print(v)
-		j + 1 -> j
+		j = j + 1  # = 等价于 <-
 	}
 }
 
