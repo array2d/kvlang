@@ -238,3 +238,40 @@ def f(A:int) -> (R:int) {
 		t.Errorf("i2: expected leaf copy with Eq")
 	}
 }
+
+func TestDictLiteral(t *testing.T) {
+	// { k=v; ... } → dict("k", v, ...)；三种赋值形态均可承接
+	src := `
+def f() -> () {
+    a = { attr1="s1"; attr2=2; attr3=null }
+    { val=1; next="/n1" } -> /n0
+    b <- { x=7 }
+}
+`
+	f, diags, err := parser.ParseCode(strings.NewReader(src))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if len(diags) > 0 {
+		t.Fatalf("diags: %v", diags)
+	}
+	body := f.Funcs[0].Body
+	i0 := body[0].(*ast.Instruction)
+	if i0.Expr.Op != "dict" || len(i0.Expr.Args) != 6 {
+		t.Fatalf("i0: op=%q args=%d", i0.Expr.Op, len(i0.Expr.Args))
+	}
+	if i0.Expr.Args[0].Val != "attr1" || i0.Expr.Args[5].Val != "null" {
+		t.Errorf("i0 args: %v %v", i0.Expr.Args[0].Val, i0.Expr.Args[5].Val)
+	}
+	if got := i0.String(); got != `a = { attr1="s1"; attr2=2; attr3=null }` {
+		t.Errorf("i0.String: %q", got)
+	}
+	i1 := body[1].(*ast.Instruction)
+	if i1.ArrowLeft || i1.Writes[0] != "/n0" || i1.Expr.Op != "dict" {
+		t.Errorf("i1: ArrowLeft=%v Writes=%v op=%q", i1.ArrowLeft, i1.Writes, i1.Expr.Op)
+	}
+	i2 := body[2].(*ast.Instruction)
+	if !i2.ArrowLeft || i2.Eq || i2.Writes[0] != "b" {
+		t.Errorf("i2: %+v", i2)
+	}
+}
