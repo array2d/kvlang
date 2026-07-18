@@ -200,8 +200,15 @@ func (e *Expr) stringPrec(outerPrec int) string {
 type Instruction struct {
 	Comments  []string // 该指令前的行注释
 	Expr      *Expr    // 表达式（nil 表示空指令）
-	Writes    []string // 写目标（槽路径，如 ./x、/abs）
-	ArrowLeft bool     // true = <-, false = ->
+	Writes    []string // 写目标（位置：裸名、/abs、base.名）
+	ArrowLeft bool     // true = 写槽在左（<- 或 =），false = ->
+	Eq        bool     // true = 源码用 = 书写（≡ <-，仅影响还原渲染）
+}
+
+// leftArrow 返回写槽在左时的算子渲染形态。
+func (i *Instruction) leftArrow() string {
+	if i.Eq { return " = " }
+	return " <- "
 }
 
 // Flat 返回用于 KV 布局的扁平 (opcode, reads) 表示。
@@ -281,7 +288,7 @@ func (i *Instruction) String() string {
 		s := "[" + strings.Join(args, ", ") + "]"
 		if len(i.Writes) > 0 {
 			if i.ArrowLeft {
-				return joinWrites(i.Writes) + " <- " + s
+				return joinWrites(i.Writes) + i.leftArrow() + s
 			}
 			return s + " -> " + joinWrites(i.Writes)
 		}
@@ -293,7 +300,7 @@ func (i *Instruction) String() string {
 		base := e.Args[0].String()
 		idx := idxString(e.Args[1])
 		val := e.Args[2].String()
-		return base + "[" + idx + "] <- " + val
+		return base + "[" + idx + "]" + i.leftArrow() + val
 	}
 	s := e.String()
 	// at(base, idx) → base[idx] or base.field
@@ -306,7 +313,7 @@ func (i *Instruction) String() string {
 	}
 	if len(i.Writes) > 0 {
 		if i.ArrowLeft {
-			s = joinWrites(i.Writes) + " <- " + s
+			s = joinWrites(i.Writes) + i.leftArrow() + s
 		} else {
 			s += " -> " + joinWrites(i.Writes)
 		}

@@ -26,11 +26,12 @@ func (p *parser) parseInst() *ast.Instruction {
 	arrowAbs, arrowVal := p.findTopLevelArrow()
 
 	switch {
-	case arrowAbs >= 0 && arrowVal == "<-":
-		// (writes) <- expr
+	case arrowAbs >= 0 && (arrowVal == "<-" || arrowVal == "="):
+		// (writes) <- expr  /  (writes) = expr —— = ≡ <-，写槽在左
 		inst.ArrowLeft = true
+		inst.Eq = arrowVal == "="
 		inst.Writes = p.collectWritesUntilArrow()
-		p.advance() // consume <-
+		p.advance() // consume <- / =
 		inst.Expr = p.parsePratt(0)
 		// arr[idx] <- val → set(arr, idx, val) -> arr
 		if len(inst.Writes) == 1 && strings.Contains(inst.Writes[0], "[") {

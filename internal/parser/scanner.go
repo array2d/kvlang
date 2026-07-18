@@ -234,6 +234,13 @@ func Scan(src string) []Token {
 			}
 		}
 
+		// 赋值算子 = —— Arrow token，≡ <-（"==" 已被双字符分支消费）
+		if c == '=' {
+			tokens = append(tokens, Token{Kind: Arrow, Value: "=", Pos: p})
+			i++
+			continue
+		}
+
 		// 单字符标点 — 查表
 		if k, ok := singleCharToken[c]; ok {
 			tokens = append(tokens, Token{Kind: k, Value: string(c), Pos: p})
