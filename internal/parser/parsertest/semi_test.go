@@ -9,7 +9,7 @@ import (
 )
 
 func TestSemicolon_StatementSeparator(t *testing.T) {
-	src := `1 + 2 + 3 -> "./x"; print("x =", "./x")`
+	src := `1 + 2 + 3 -> x; print("x =", x)`
 	tokens := parser.Scan(src)
 	for _, tok := range tokens {
 		fmt.Printf("  %s\n", tok)
@@ -33,9 +33,9 @@ func TestSemicolon_StatementSeparator(t *testing.T) {
 	if len(f.TopLevelCalls) != 2 {
 		t.Errorf("expected 2 TopLevelCalls, got %d", len(f.TopLevelCalls))
 	}
-	// instruction 1: writes should be ["./x"] only
-	if got := f.TopLevelCalls[0].Writes; len(got) != 1 || got[0] != "./x" {
-		t.Errorf("call[0] writes: expected [./x], got %v", got)
+	// instruction 1: writes should be ["x"] only
+	if got := f.TopLevelCalls[0].Writes; len(got) != 1 || got[0] != "x" {
+		t.Errorf("call[0] writes: expected [x], got %v", got)
 	}
 	// instruction 2: print call, no writes
 	if got := f.TopLevelCalls[1].Writes; len(got) != 0 {

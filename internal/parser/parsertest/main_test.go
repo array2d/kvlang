@@ -12,7 +12,7 @@ import (
 func TestPratt_SimpleArith(t *testing.T) {
 	src := `
 def add(A:int, B:int) -> (C:int) {
-    A + B -> ./C
+    A + B -> C
 }
 `
 	f, diags, err := parser.ParseCode(strings.NewReader(src))
@@ -28,8 +28,8 @@ def add(A:int, B:int) -> (C:int) {
 	}
 	inst := fn.Body[0].(*ast.Instruction)
 	got := inst.String()
-	if got != "A + B -> ./C" {
-		t.Errorf("expected 'A + B -> ./C', got %q", got)
+	if got != "A + B -> C" {
+		t.Errorf("expected 'A + B -> C', got %q", got)
 	}
 }
 
@@ -37,7 +37,7 @@ func TestPratt_Precedence(t *testing.T) {
 	// S3: a + b * c should parse as a + (b * c), not (a + b) * c
 	src := `
 def prec(A:int, B:int, C:int) -> (R:int) {
-    A + B * C -> ./R
+    A + B * C -> R
 }
 `
 	f, _, err := parser.ParseCode(strings.NewReader(src))
@@ -53,10 +53,10 @@ def prec(A:int, B:int, C:int) -> (R:int) {
 	if inst.Expr.Args[1].Op != "*" {
 		t.Errorf("expected right arg '*', got %q", inst.Expr.Args[1].Op)
 	}
-	// String should be "A + B * C -> ./R" (no unnecessary parens)
+	// String should be "A + B * C -> R" (no unnecessary parens)
 	got := inst.String()
-	if got != "A + B * C -> ./R" {
-		t.Errorf("expected 'A + B * C -> ./R', got %q", got)
+	if got != "A + B * C -> R" {
+		t.Errorf("expected 'A + B * C -> R', got %q", got)
 	}
 }
 
@@ -64,10 +64,10 @@ func TestPratt_CompoundCond(t *testing.T) {
 	// S3: compound condition in if
 	src := `
 def test(score:int) -> (R:int) {
-    if (./score > 90 && ./score < 100) {
-        "A" -> ./R
+    if (score > 90 && score < 100) {
+        "A" -> R
     } else {
-        "B" -> ./R
+        "B" -> R
     }
 }
 `
@@ -91,11 +91,11 @@ func TestComments_Preserved(t *testing.T) {
 # This is the add function
 def add(A:int, B:int) -> (C:int) {
     # compute sum
-    A + B -> ./C
+    A + B -> C
 }
 
 # top-level call
-add(1, 2) -> ./result
+add(1, 2) -> result
 `
 	f, _, err := parser.ParseCode(strings.NewReader(src))
 	if err != nil {
@@ -133,7 +133,7 @@ func TestFormat_CommentsPreserved(t *testing.T) {
 # This is the add function
 def add(A:int, B:int) -> (C:int) {
     # compute sum
-    A + B -> ./C
+    A + B -> C
 }
 `
 	f, _, err := parser.ParseCode(strings.NewReader(src))
@@ -155,16 +155,16 @@ def add(A:int, B:int) -> (C:int) {
 func TestBreakContinue_Keywords(t *testing.T) {
 	src := `
 def loop_test(n:int) -> (R:int) {
-    while (./n > 0) {
-        if (./n > 10) {
+    while (n > 0) {
+        if (n > 10) {
             break
         }
-        if (./n > 5) {
+        if (n > 5) {
             continue
         }
-        ./n + 1 -> ./n
+        n + 1 -> n
     }
-    ./n -> ./R
+    n -> R
 }
 `
 	f, _, err := parser.ParseCode(strings.NewReader(src))
