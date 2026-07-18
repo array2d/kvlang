@@ -1,111 +1,38 @@
 # kvlang
 
 [![CI](https://github.com/array2d/kvlang/actions/workflows/ci.yml/badge.svg)](https://github.com/array2d/kvlang/actions/workflows/ci.yml)
-[![Tutorial Tests](https://github.com/array2d/kvlang/actions/workflows/ci.yml/badge.svg?job=tutorial-test)](https://github.com/array2d/kvlang/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Tutorial Examples](https://img.shields.io/badge/tutorials-87%20examples-4c1)](tutorial/)
+[![Tutorial Examples](https://img.shields.io/badge/tutorials-92%20examples-4c1)](tutorial/)
 
 **deepx 的 VM（原 dxlang），agent-native 训推一体自迭代强人工智能计算架构。** 以 kvspace 树形路径为统一地址空间，同种语法同时承担 VM 指令、高级语言、编译器 IR、人类可读源码四种职能。
 
-> 中文文档: [README_CN.md](README_CN.md) | 设计规范: [deepx-design](https://github.com/array2d/deepx-design)
+> 中文文档: [README_CN.md](README_CN.md) | 设计规范: [deepx-design](https://github.com/array2d/deepx-design)（架构细节、模块职责、深度理解均在此仓）
 
 ---
 
-## 架构概览
+## 核心模型：一屏看懂
 
-kvlang 的核心主张：**不分 IR 层，源码即 IR。** 程序计数器是 kvspace 路径字符串，调用栈深度等于路径深度，每个变量、每条指令、每个栈帧都在 kvspace 中独立可寻址。
-
-### 与传统架构的对比
-
-| | LLVM | JVM | kvlang |
-|--|------|-----|--------|
-| IR 层数 | C→IR→MIR→MC | Java→Bytecode→JIT | **单层**：源码即 IR |
-| 地址空间 | 虚拟内存 | 堆+栈 | **kvspace 树形路径** |
-| 数据流 | SSA (phi/alloca) | 操作数栈 | **读写码** `<-`/`->` 显式绑定槽 |
-| 调用栈 | 内存栈段 | Stack Frame 链表 | **路径深度=栈深度** |
-| 崩溃恢复 | 全失 | 全失 | **重启继续**（PC 已持久化） |
-
-### KV 寻址模型
+**不分 IR 层，源码即 IR。** 程序计数器是 kvspace 路径字符串，调用栈深度 = 路径深度：
 
 ```
-程序计数器 PC = "[0,0]/entry/[0,0]"       (KV 路径字符串)
-指令           = kv.Get("/vthread/tid/[0,0]/entry/[0,0]")
-跳转           = PC = "[0,0]/merge/[0,0]"  (字符串拼接)
-调用           = PC = "[0,0]/then/[0,0]"   (路径嵌套)
-栈帧           = /vthread/tid/[0,0]/ 子树   (KV key 层级)
+PC   = "/vthread/tid/[0,0]/.fn/[1,0]"    程序计数器是 KV 路径
+指令 = kv.Get(PC)                         取指是一次 KV 读
+调用 = 创建子树；返回 = 清理子树           崩溃后按 PC 重启继续
 ```
 
-### 地址空间四域
-
-```
-/src/{pkg}/{name}         源码文本
-/func/{pkg}/{name}        编译后函数（签名 + 指令树）
-/vthread/{vid}/           虚线程栈帧（运行时）
-/sys/                     系统基础设施
-```
-
-### 模块
-
-| 模块 | 路径 | 职责 |
-|------|------|------|
-| **ast** | `internal/ast/` | 单层 IR 类型体系：Operand/FuncSig/Stmt/Instruction/File |
-| **parser** | `internal/parser/` | Scan→Token→递归下降→`*ast.File` |
-| **lower** | `internal/lower/` | 同类型变换：IfStmt/WhileStmt → BlockStmt+br |
-| **keytree** | `internal/keytree/` | 路径系统：运行时概念 → kvspace 键路径 |
-| **layoutcode** | `internal/layoutcode/` | Linker：WriteFunc(编译期写入) + HandleCall/Return(运行时帧管理) |
-| **kvcpu** | `internal/kvcpu/` | 执行引擎：Fetch-Decode-Execute + 调度器 |
-| **kvspace** | `internal/kvspace/` | KV 存储接口：Get/Set/Del/List/Watch/Notify/Link |
-| **vthread** | `internal/vthread/` | vthread 状态管理 |
-| **vtype** | `internal/vtype/` | 可扩展算子类型注册 |
-| **op** | `internal/op/` | 内建算子：算术/比较/逻辑/IO |
-
-### 模块依赖图
-
-```
-cmd/kvlang
-  ├── parser ──► ast
-  ├── lower ──► ast
-  ├── layoutcode ──► keytree + kvspace + ast
-  ├── kvcpu ──► layoutcode + keytree + vthread + vtype + op
-  ├── vthread ──► keytree + kvspace
-  └── kvspace (接口)
-```
-
----
-
-## 指令的二维空间模型
-
-每条指令在 KV 树中占据一个 **`[s0, s1]`** 坐标：
-
-```
-s0 轴（横轴） — 执行顺序轴
-s1 轴（纵轴） — 参数轴
-
-        s1 < 0           s1 = 0         s1 > 0
-      (读参，输入)        (操作码)       (写参，输出)
-
-s0 = 0  │  [0,-2] [0,-1]  [0,0]  [0,1] [0,2]
-s0 = 1  │  [1,-2] [1,-1]  [1,0]  [1,1]
-```
-
-- `[s0, 0]` 永远是 opcode
-- `[s0, -1], [s0, -2], ...` 读参（负号 = 消费数据）
-- `[s0, +1], [s0, +2], ...` 写参（正号 = 产出数据）
+每条指令占据二维坐标 `[s0, s1]`：`[s0,0]` 恒为操作码，`[s0,-j]` 读参，`[s0,+j]` 写参。
 
 ```kv
 def add(A: int, B: int) -> (C: int) { A + B -> C }
 ```
 
-编译后写入 kvspace：
+```
+/func/main/add/[0,0]  = "+"     /func/main/add/[0,-1] = "A"
+/func/main/add/[0,-2] = "B"     /func/main/add/[0,1]  = "C"
+```
 
-```
-/func/main/add/[0,0]   = "+"
-/func/main/add/[0,-1]  = "A"
-/func/main/add/[0,-2]  = "B"
-/func/main/add/[0,1]   = "C"
-/func/main/add/[1,0]   = "return"
-```
+地址空间四域：`/src`（源码）`/func`（编译后函数）`/vthread`（运行时栈帧）`/sys`（基础设施）。
 
 ---
 
@@ -115,56 +42,109 @@ def add(A: int, B: int) -> (C: int) { A + B -> C }
 # 依赖: Go 1.24+, Redis
 make build
 
-# 运行 tutorial
-./kvlang tutorial/01-basics/hello.kv
-./kvlang tutorial/03-control/if.kv
-./kvlang tutorial/04-algo/fibonacci.kv
-
-# inline 模式
-./kvlang -c 'print("hello, world")'
-
-# pipe 模式
-echo '40 + 2 -> x  print(x)' | ./kvlang
-
-# 语法检查
-./kvlang vet my_program.kv
-
-# 格式化
-./kvlang format my_program.kv
+./kvlang tutorial/01-basics/hello.kv         # 运行文件
+./kvlang -c 'print("hello, world")'          # inline 模式
+echo '40 + 2 -> x; print(x)' | ./kvlang      # pipe 模式（; 分隔同行语句）
+./kvlang vet my.kv                           # 语法检查
+./kvlang format my.kv                        # 格式化
 ```
 
 ---
 
-## Language at a Glance
+## Language Guide
 
-### 读写码
+### 程序结构（先读这条）
+
+**顶层只能写两种东西：单条指令（赋值/内建调用）和函数调用。`if` / `while` / `for` 必须写在 `def` 函数体内。** 惯例是定义 `main` 再调用它：
 
 ```kv
-expr           -> slot        # 计算 expr，结果写入 slot
-func(a, b)     -> result      # 调用函数，单写参映射
-func(a, b)     -> x, y        # 多写参映射
-func(a, b)     -> _, y        # 丢弃首个写参
+def main() -> () {
+    total = 0  # = 等价于 <-
+    1 -> i
+    while (i <= 5) {
+        total <- total + i
+        i + 1 -> i
+    }
+    print(total)
+}
+
+main()
 ```
 
-### 函数与写参
+### 读写码：赋值三形态
 
-kvlang 函数没有"返回值"——只有读参和写参。`def` 签名中的 `-> (C: int)` 是写参声明，不是返回值类型。
+```kv
+x = 40 + 2            # = ：写槽在左（≡ <-）；= 不是表达式，不能嵌进条件里
+y <- x                # 左箭头：写槽在左
+x * y -> z            # 右箭头：写槽在右
+f(a, b) -> r          # 函数写参映射；多写参 -> x, y；丢弃用 -> _
+```
+
+写槽必须是**位置**：裸名（帧内变量）、`/abs/path`（全局键）、`base.名`（成员）。字面量不是位置。
+
+### 函数：没有返回值，只有写参
+
+`def` 签名中 `-> (C: int)` 是**写参声明**。函数把结果写进写参槽，调用方用 `-> r` 把写参映射到自己的位置：
 
 ```kv
 def add(A: int, B: int) -> (C: int) {
-    A + B -> C          # 写参 C 在被调方帧中写入
+    A + B -> C
 }
+
+def main() -> () {
+    add(3, 4) -> s
+    print(s)          # 7
+}
+
+main()
 ```
 
-### 控制流
+### dict、成员访问与链表
 
 ```kv
-if (cond) { ... }
-if (cond) { ... } else { ... }
-while (cond) { ... }
+d = { name="kv"; ver=1 }    # dict 字面量：成员是平坦键族 d.name、d.ver
+print(d.name)               # 成员读
+d.ver = 2                   # 成员写；动态键用 d.*k（k 的值作键名）
 ```
 
-label block 就是无参函数，`goto(merge)` ≡ `call(父函数/merge)`，控制流统一为 call/return。
+链表等跨函数共享的数据结构，节点用**绝对路径**创建（帧内变量随函数返回销毁）：
+
+```kv
+def build() -> () {
+    /n1 = { val=1; next="/n2" }  # = 等价于 <-
+    /n2 <- { val=2; next="/n3" }
+    { val=3; next="" } -> /n3
+}
+
+def main() -> () {
+    build()
+    "/n1" -> p                   # p 存路径字符串（指针）
+    while (p != "") {
+        p.val -> v               # 指针解引用：读 /n1.val
+        print(v)
+        p.next -> p
+    }
+}
+
+main()
+```
+
+### 数字类型（可选精度声明）
+
+```kv
+f = float32(3)        # int8/16/32/64 uint8/16/32/64 float32/64 十算子，既创建也转换
+w = int8(300)         # 44：窄化补码回绕；float→int 截断向零；算术域统一 int64/float64
+```
+
+### 控制流（仅限 def 体内）
+
+```kv
+if (cond) { ... } else { ... }
+while (cond) { ... }
+for (x in arr) { ... }        # 遍历键族数组
+```
+
+条件支持复合表达式：`if (7 % 2 != 0)`、`while (i < strlen(s))` 均可（编译期自动展平为临时槽）。
 
 ### 操作符
 
@@ -175,46 +155,35 @@ label block 就是无参函数，`goto(merge)` ≡ `call(父函数/merge)`，控
 | 逻辑 | `&&` `\|\|` `!` |
 | 位运算 | `&` `\|` `^` `<<` `>>` |
 
-> `/` 始终返回 `float`。截断用 `int(a / b)`。
+> `/`：两侧均 int → 整除（C 风格，`7/2`=3、`-9/2`=-4）；任一侧 float → 浮除（`7.0/2`=3.5）。
 
 ### 内建函数
 
-`abs` `neg` `sign` `pow` `sqrt` `exp` `log` `min` `max` `int` `float` `bool` `print` `cerr` `input`
+`abs` `neg` `sign` `pow` `sqrt` `exp` `log` `min` `max` `print` `cerr` `input`\
+`int` `float` `bool` 及十个精度算子 · `char` `ord` `strlen` `slice` `concat` · `array` `len` `at` `set` `has` `sort` `dict` `kvat` `kvhas`
+
+字符串按字符处理：`strlen(s)` 取长度，`char(s, i)` 取第 i 个字符（单字符字符串，可与 `"a"` 直接比较），`ord(s, i)` 取字节码（做算术用）。
 
 ---
 
 ## Tutorial
 
-87 个自包含示例，按主题组织：
+93 个自包含示例（92 例带期望输出，CI 全量验证），按主题组织：
 
 ```
-01-basics/        hello, vars, arith               (3 files)
-02-func/          def, call, nested calls          (1 file)
-03-control/       if, while, for, guess game       (5 files)
-04-algo/          fibonacci, gcd, collatz, ...     (13 files)
-05-leetcode/      73 LeetCode solutions            (65 files)
+01-basics/        hello, vars, arith, precision, numtypes  (5 files)
+02-func/          def, call, nested calls                  (1 file)
+03-control/       if, while, for, guess game               (5 files)
+04-algo/          fibonacci, gcd, collatz, ...             (13 files)
+05-leetcode/      LeetCode solutions                       (69 files)
 ```
 
 ```bash
 ./kvlang tutorial/01-basics/hello.kv         # hello kvlang
-./kvlang tutorial/03-control/guess.kv        # binary search game
 ./kvlang tutorial/04-algo/fibonacci.kv       # fib = 55
 ./kvlang tutorial/05-leetcode/001_two_sum.kv # LeetCode
 
-python3 tutorial/test.py                     # 全部 87 例 — CI 验证
-```
-
----
-
-## KV 路径参考
-
-```
-/vthread/<vtid>/<pc>/[i,0]      操作码
-/vthread/<vtid>/<pc>/[i,-j]     读参 j
-/vthread/<vtid>/<pc>/[i,+j]     写参 j
-/vthread/<vtid>/<pc>/label/     控制流 block
-/src/<pkg>/<func>/              函数体
-/func/main                      程序入口签名
+python3 tutorial/test.py                     # 全部 92 例 — CI 验证
 ```
 
 ---
