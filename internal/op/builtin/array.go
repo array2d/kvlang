@@ -47,8 +47,12 @@ func (atOp) Call(f *op.Frame) error {
 	if inputs[0].Kind() == "string" || inputs[1].Kind() == "string" || len(f.Inst.Reads) > 0 && (f.Inst.Reads[0][0] == '/' || f.Inst.Reads[0][0] == '"' && len(f.Inst.Reads[0]) > 1 && f.Inst.Reads[0][1] == '/') {
 		fp := keytree.FrameRoot(f.PC)
 		base := resolveReadValue(f.KV, fp, f.Inst.Reads[0]).Str()
-		if base == "" { base = f.Inst.Reads[0]; if len(base) > 1 && base[0] == '"' { base = base[1:] } }
-		path := base + "/" + kvKey(inputs[1])
+		if base == "" {
+			raw := f.Inst.Reads[0]
+			if len(raw) > 1 && raw[0] == '"' { raw = raw[1:] }
+			base = resolveKVPath(fp, raw)
+		}
+		path := keytree.Member(base, kvKey(inputs[1]))
 		v, _ := f.KV.Get(path); return writeResult(f, v)
 	}
 	idx := int(inputs[1].Int64())
@@ -74,13 +78,17 @@ func (arraySetOp) Call(f *op.Frame) error {
 	if inputs[0].Kind() == "string" || inputs[1].Kind() == "string" || len(f.Inst.Reads) > 0 && (f.Inst.Reads[0][0] == '/' || f.Inst.Reads[0][0] == '"' && len(f.Inst.Reads[0]) > 1 && f.Inst.Reads[0][1] == '/') {
 		fp := keytree.FrameRoot(f.PC)
 		base := resolveReadValue(f.KV, fp, f.Inst.Reads[0]).Str()
-		if base == "" { base = f.Inst.Reads[0]; if len(base) > 1 && base[0] == '"' { base = base[1:] } }
-		path := base + "/" + kvKey(inputs[1])
+		if base == "" {
+			raw := f.Inst.Reads[0]
+			if len(raw) > 1 && raw[0] == '"' { raw = raw[1:] }
+			base = resolveKVPath(fp, raw)
+		}
+		path := keytree.Member(base, kvKey(inputs[1]))
 		f.KV.Set(path, inputs[2])
-		if len(f.Inst.Writes) > 0 {
-			// 写入 base 本身（不变），满足 -> base 返回槽
+		if len(f.Inst.Writes) > 0 && !inputs[0].IsNil() {
+			// 写入 base 本身（值不变），满足 -> base 返回槽
 			outKey := resolveWriteKey(fp, f.Inst.Writes[0])
-			f.KV.Set(outKey, kvspace.Str(""))
+			f.KV.Set(outKey, inputs[0])
 		}
 		vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
 		return nil
@@ -147,7 +155,7 @@ func (hasOp) Call(f *op.Frame) error {
 	base := resolveReadValue(f.KV, fp, f.Inst.Reads[0]).Str()
 	if base == "" { base = resolveKVPath(fp, f.Inst.Reads[0]) }
 	key := kvKey(inputs[1])
-	v, _ := f.KV.Get(base + "/" + key)
+	v, _ := f.KV.Get(keytree.Member(base, key))
 	return writeResult(f, kvspace.Bool(!v.IsNil()))
 }
 

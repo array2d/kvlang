@@ -25,7 +25,7 @@ func (dictSetOp) Call(f *op.Frame) error {
 	// write to frame local path: dict/key = val
 	outKey := resolveWriteKey(keytree.FrameRoot(f.PC), f.Inst.Writes[0])
 	vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
-	return f.KV.Set(outKey + "/" + key, inputs[2])
+	return f.KV.Set(keytree.Member(outKey, key), inputs[2])
 }
 
 // dictGetOp: dget(dict, key) → val or nil
@@ -36,6 +36,6 @@ func (dictGetOp) Call(f *op.Frame) error {
 	key := inputs[1].Str()
 	framePath := keytree.FrameRoot(f.PC)
 	dictPath := resolveWriteKey(framePath, f.Inst.Reads[0])
-	v, _ := f.KV.Get(dictPath + "/" + key)
+	v, _ := f.KV.Get(keytree.Member(dictPath, key))
 	return writeResult(f, v)
 }

@@ -25,7 +25,7 @@ func (o kvHasOp) Call(f *op.Frame) error {
 		prefix = resolveKVPath(fp, f.Inst.Reads[0])
 	}
 	idxVal := resolveReadValue(f.KV, fp, f.Inst.Reads[1])
-	key := prefix + "/" + strconv.Itoa(int(idxVal.Int64()))
+	key := keytree.Member(prefix, strconv.Itoa(int(idxVal.Int64())))
 	v, _ := f.KV.Get(key)
 	return writeResult(f, kvspace.Bool(!v.IsNil()))
 }
@@ -47,9 +47,9 @@ func (o kvAtOp) Call(f *op.Frame) error {
 	idxVal := resolveReadValue(f.KV, fp, f.Inst.Reads[1])
 	var key string
 	if isIntKind(idxVal.Kind()) || isFloatKind(idxVal.Kind()) {
-		key = prefix + "/" + strconv.Itoa(int(idxVal.Int64()))
+		key = keytree.Member(prefix, strconv.Itoa(int(idxVal.Int64())))
 	} else {
-		key = prefix + "/" + idxVal.Str()
+		key = keytree.Member(prefix, idxVal.Str())
 	}
 	v, _ := f.KV.Get(key)
 	if v.IsNil() {

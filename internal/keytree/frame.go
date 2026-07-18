@@ -13,7 +13,6 @@ import (
 //   callPC + "/.fn"            软链接 → /func/<pkg>/<name>（只读指令区）
 //   callPC + "/<param>"         参数（本帧局部变量）
 //   callPC + "/.callpc"         存储 callPC 自身，供 HandleReturn 恢复
-//   callPC + "/.w0"             调用方的第 0 个写槽路径（return 时写入父帧）
 //
 // 层级嵌套（路径深度 = 调用栈深度）：
 //

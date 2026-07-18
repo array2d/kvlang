@@ -234,6 +234,17 @@ func Scan(src string) []Token {
 			}
 		}
 
+		// 路径字面量 ./foo（须在单字符标点查表之前，否则 '.' 被消费为 Dot）
+		if c == '.' && i+1 < len(src) && src[i+1] == '/' {
+			start := i
+			i += 2
+			for i < len(src) && !isTokenDelim(src[i]) {
+				i++
+			}
+			tokens = append(tokens, Token{Kind: Literal, Value: src[start:i], Pos: p})
+			continue
+		}
+
 		// 单字符标点 — 查表
 		if k, ok := singleCharToken[c]; ok {
 			tokens = append(tokens, Token{Kind: k, Value: string(c), Pos: p})
@@ -286,17 +297,6 @@ func Scan(src string) []Token {
 				for i < len(src) && src[i] >= '0' && src[i] <= '9' {
 					i++
 				}
-			}
-			tokens = append(tokens, Token{Kind: Literal, Value: src[start:i], Pos: p})
-			continue
-		}
-
-		// 路径字面量 ./foo
-		if c == '.' && i+1 < len(src) && src[i+1] == '/' {
-			start := i
-			i += 2
-			for i < len(src) && !isTokenDelim(src[i]) {
-				i++
 			}
 			tokens = append(tokens, Token{Kind: Literal, Value: src[start:i], Pos: p})
 			continue

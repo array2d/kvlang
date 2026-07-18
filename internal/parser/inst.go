@@ -340,8 +340,8 @@ func (p *parser) collectWriteList() []string {
 			})
 			return writes
 		default:
-			// expr.field 作为整体写槽
-			if t.Kind == Ident && p.peekAt(1).Kind == Dot {
+			// base.field 作为整体写槽（base 为裸标识符或路径引用）
+			if (t.Kind == Ident || isPathLiteral) && p.peekAt(1).Kind == Dot {
 				w := p.advance().Value // base
 				w += p.advance().Value // .
 				w += p.advance().Value // field
@@ -374,10 +374,13 @@ func (p *parser) collectWritesUntilArrow() []string {
 			p.advance()
 			continue
 		}
-		// expr.field 成员访问作为整体写槽
-		if t.Kind == Ident && p.peekAt(1).Kind == Dot {
-			w := p.advance().Value // base name
-			w += "." + p.advance().Value // . field
+		// base.field 成员访问作为整体写槽（base 为裸标识符或路径引用）
+		isPathLit := t.Kind == Literal && len(t.Value) >= 2 &&
+			(t.Value[:2] == "./" || t.Value[0] == '/')
+		if (t.Kind == Ident || isPathLit) && p.peekAt(1).Kind == Dot {
+			w := p.advance().Value // base
+			w += p.advance().Value // .
+			w += p.advance().Value // field
 			writes = append(writes, w)
 			continue
 		}
