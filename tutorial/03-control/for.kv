@@ -5,29 +5,29 @@
 #   0 F = -17.77777777777778 C
 #   300 F = 148.88888888888889 C
 def main() -> () {
-	0 -> data.0
-	20 -> data.1
+	data.0 <- 0
+	data.1 = 20  # = 等价于 <-
 	40 -> data.2
-	60 -> data.3
-	80 -> data.4
+	data.3 <- 60
+	data.4 = 80  # = 等价于 <-
 	100 -> data.5
-	120 -> data.6
-	140 -> data.7
+	data.6 <- 120
+	data.7 = 140  # = 等价于 <-
 	160 -> data.8
-	180 -> data.9
-	200 -> data.10
+	data.9 <- 180
+	data.10 = 200  # = 等价于 <-
 	220 -> data.11
-	240 -> data.12
-	260 -> data.13
+	data.12 <- 240
+	data.13 = 260  # = 等价于 <-
 	280 -> data.14
-	300 -> data.15
+	data.15 <- 300
 	for (fahr in data) {
-		5.0 / 9.0 -> factor
+		factor = 5.0 / 9.0  # = 等价于 <-
 		fahr - 32 -> diff
-		factor * diff -> cels
+		cels <- factor * diff
 		print(fahr, "F =", cels, "C")
 	}
-	/last_temp -> cels
+	cels = /last_temp  # = 等价于 <-
 	print("global last_temp =", cels)
 }
 

@@ -3,7 +3,7 @@
 #   global hits = 1
 def main() -> () {
 	print("hello kvlang")
-	0 -> /hits
+	/hits = 0  # = 等价于 <-
 	/hits + 1 -> /hits
 	print("global hits =", /hits)
 }

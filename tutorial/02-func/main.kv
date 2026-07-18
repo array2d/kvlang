@@ -6,15 +6,15 @@ def add(A:int, B:int) -> (C:int) {
 }
 
 def double(x:int) -> (y:int) {
-	x * 2 -> y
+	y <- x * 2
 }
 
 def main() -> () {
-	add(10, 20) -> a
+	a = add(10, 20)  # = 等价于 <-
 	print("add(10,20) =", a)
 	double(a) -> b
 	print("double(add(10,20)) =", b)
-	/last_a -> a
+	a <- /last_a
 	print("global last_a =", a)
 }
 

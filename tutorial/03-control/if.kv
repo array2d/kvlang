@@ -5,16 +5,16 @@ def abs(x:int) -> (r:int) {
 	if (x < 0) {
 		-x -> r
 	} else {
-		x -> r
+		r <- x
 	}
 }
 
-abs(-5) -> a
+a = abs(-5)  # = 等价于 <-
 print("abs(-5) =", a)
 abs(3) -> b
 print("abs(3) =", b)
-abs(-10) -> c
+c <- abs(-10)
 print("abs(-10) =", c)
-b >= 90 -> d
+d = b >= 90  # = 等价于 <-
 print(d)
 a -> /last_abs

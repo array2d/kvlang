@@ -5,35 +5,35 @@
 #   found 73 in 6 guesses
 def guess_number() -> () {
 	73 -> target
-	1 -> lo
-	100 -> hi
+	lo <- 1
+	hi = 100  # = 等价于 <-
 	0 -> tries
-	0 -> found
+	found <- 0
 	while (found == 0) {
-		lo + hi -> s
+		s = lo + hi  # = 等价于 <-
 		s / 2 -> mid_float
-		int(mid_float) -> mid
-		tries + 1 -> tries
+		mid <- int(mid_float)
+		tries = tries + 1  # = 等价于 <-
 		print("guess #", tries, ":", mid)
 		mid == target -> hit
 
 		if (hit) {
-			1 -> found
+			found <- 1
 			print("  correct!")
 		} else {
-			mid < target -> too_low
+			too_low = mid < target  # = 等价于 <-
 
 			if (too_low) {
 				mid + 1 -> lo
 				print("  too low, range:", lo, "-", hi)
 			} else {
-				mid - 1 -> hi
+				hi <- mid - 1
 				print("  too high, range:", lo, "-", hi)
 			}
 		}
 	}
 	print("found", target, "in", tries, "guesses")
-	tries -> /last_guesses
+	/last_guesses = tries  # = 等价于 <-
 }
 
 guess_number()
