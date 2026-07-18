@@ -77,8 +77,6 @@ const (
 	OpConcat = "concat"
 	OpSort   = "sort"
 	OpDict   = "dict"
-	OpDSet   = "dset"
-	OpDGet   = "dget"
 )
 
 // 数组 built-in
@@ -111,7 +109,7 @@ var nativeOps = map[string]bool{
 	OpHas: true,
 	OpChar: true, OpStrLen: true, OpSlice: true, OpConcat: true,
 	OpSort: true,
-	OpDict: true, OpDSet: true, OpDGet: true,
+	OpDict: true,
 }
 
 // IsNativeOp 判断是否为 VM 原生求值的符号算子。

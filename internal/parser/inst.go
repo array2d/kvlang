@@ -81,20 +81,30 @@ func (p *parser) parseInst() *ast.Instruction {
 }
 
 // findTopLevelArrow 前瞻（不消费）找第一个深度为 0 的 Arrow token 绝对下标。
-// 遇 Newline / RBrace / EOF / Comment 停止；返回 (-1, "") 表示未找到。
+// 括号与花括号（dict 字面量）均计深度；深度 0 遇 Newline / RBrace / EOF / Comment 停止；
+// 返回 (-1, "") 表示未找到。
 func (p *parser) findTopLevelArrow() (int, string) {
 	depth := 0
 	for i := p.pos; i < len(p.tokens); i++ {
 		switch p.tokens[i].Kind {
-		case LParen:
+		case LParen, LBrace:
 			depth++
 		case RParen:
+			depth--
+		case RBrace:
+			if depth == 0 {
+				return -1, ""
+			}
 			depth--
 		case Arrow:
 			if depth == 0 {
 				return i, p.tokens[i].Value
 			}
-		case Newline, RBrace, EOF, Comment:
+		case Newline, Comment:
+			if depth == 0 {
+				return -1, ""
+			}
+		case EOF:
 			return -1, ""
 		}
 	}
@@ -199,6 +209,50 @@ func (p *parser) parsePrimaryExpr() *ast.Expr {
 		}
 		p.expect(RBrack)
 		return ast.Call("array", elems...)
+	}
+
+	// dict 字面量：{ k1=v1; k2=v2 } → dict("k1", v1, "k2", v2, ...) 调用
+	// 分隔符为 ; / 换行 / 逗号，键值对形如 Ident = expr；值为 null（裸名，运行时解析为 nil）时成员缺席。
+	// 前瞻确认 dict 形态（Ident = … 或空 {}）才消费——否则 { 可能是误置的块体，留给上层报自然错误。
+	if t.Kind == LBrace {
+		j := 1
+		for p.peekAt(j).Kind == Newline || p.peekAt(j).Kind == Comment {
+			j++
+		}
+		isDict := p.peekAt(j).Kind == RBrace ||
+			(p.peekAt(j).Kind == Ident && p.peekAt(j+1).Kind == Arrow && p.peekAt(j+1).Value == "=")
+		if !isDict {
+			return nil
+		}
+		p.advance() // consume {
+		var args []*ast.Expr
+		for {
+			for p.peek().Kind == Newline || p.peek().Kind == Comma || p.peek().Kind == Comment {
+				p.advance()
+			}
+			if p.peek().Kind == RBrace || p.peek().Kind == EOF {
+				break
+			}
+			if p.peek().Kind != Ident {
+				p.errors = append(p.errors, Diagnostic{Pos: p.peek().Pos, Warn: true,
+					Message: fmt.Sprintf("dict literal: expected member name, got %q", p.peek().Value)})
+				break
+			}
+			key := p.advance().Value
+			if !(p.peek().Kind == Arrow && p.peek().Value == "=") {
+				p.errors = append(p.errors, Diagnostic{Pos: p.peek().Pos, Warn: true,
+					Message: fmt.Sprintf("dict literal: expected '=' after %q", key)})
+				break
+			}
+			p.advance() // consume =
+			val := p.parsePratt(0)
+			if val == nil {
+				break
+			}
+			args = append(args, ast.StrLit(key), val)
+		}
+		p.expect(RBrace)
+		return ast.Call("dict", args...)
 	}
 
 	// 括号分组：(expr)

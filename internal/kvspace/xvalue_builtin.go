@@ -35,6 +35,10 @@ func Bool(v bool) XValue {
 	return XValue{kind: "bool", raw: []byte{b}}
 }
 
+// Dict 返回 dict 类型标记值：写在键族 base 键上，成员是 base.名 平坦键（键族本身无容器）。
+// 非 string 值 → 成员解析走按名回退（deep-dive §10.4），成员键 = 帧感知(base).名。
+func Dict() XValue { return XValue{kind: "dict"} }
+
 // ── 整型访问器 ────────────────────────────────────────────────────────────
 
 func (v XValue) Int8() int8 {

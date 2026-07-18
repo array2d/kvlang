@@ -7,35 +7,21 @@ import (
 	"kvlang/internal/vthread"
 )
 
-// dictOp: dict() → empty dict (just returns marker)
+// dictOp: dict(k1, v1, k2, v2, ...) -> base —— dict 字面量 { k1=v1; k2=v2 } 的运行时。
+// base 键写入 kind="dict" 类型标记，成员写入平坦键族 base.k（keytree.Member）。
+// 值为 nil（如 null 裸名解析结果）时跳过写入——kvspace 中缺席即 null。
 type dictOp struct{}
 func (dictOp) Call(f *op.Frame) error {
-	return writeResult(f, kvspace.Str("__dict__"))
-}
-
-// dictSetOp: dset(dict, key, val) → dict (set key→val in kvspace)
-type dictSetOp struct{}
-func (dictSetOp) Call(f *op.Frame) error {
 	inputs := readInputs(f)
-	if len(inputs) < 3 {
-		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "dset requires dict, key, val")
-		return nil
+	fp := keytree.FrameRoot(f.PC)
+	for _, w := range f.Inst.Writes {
+		outKey := resolveWriteKey(fp, w)
+		if err := f.KV.Set(outKey, kvspace.Dict()); err != nil { return err }
+		for i := 0; i+1 < len(inputs); i += 2 {
+			if inputs[i+1].IsNil() { continue }
+			if err := f.KV.Set(keytree.Member(outKey, inputs[i].Str()), inputs[i+1]); err != nil { return err }
+		}
 	}
-	key := inputs[1].Str()
-	// write to frame local path: dict/key = val
-	outKey := resolveWriteKey(keytree.FrameRoot(f.PC), f.Inst.Writes[0])
 	vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
-	return f.KV.Set(keytree.Member(outKey, key), inputs[2])
-}
-
-// dictGetOp: dget(dict, key) → val or nil
-type dictGetOp struct{}
-func (dictGetOp) Call(f *op.Frame) error {
-	inputs := readInputs(f)
-	if len(inputs) < 2 { return writeResult(f, kvspace.XValue{}) }
-	key := inputs[1].Str()
-	framePath := keytree.FrameRoot(f.PC)
-	dictPath := resolveWriteKey(framePath, f.Inst.Reads[0])
-	v, _ := f.KV.Get(keytree.Member(dictPath, key))
-	return writeResult(f, v)
+	return nil
 }

@@ -294,6 +294,21 @@ func (i *Instruction) String() string {
 		}
 		return s
 	}
+	// dict("k1", v1, "k2", v2, ...) → { k1=v1; k2=v2 }
+	if e.Op == "dict" {
+		var pairs []string
+		for j := 0; j+1 < len(e.Args); j += 2 {
+			pairs = append(pairs, e.Args[j].Val+"="+e.Args[j+1].String())
+		}
+		s := "{ " + strings.Join(pairs, "; ") + " }"
+		if len(i.Writes) > 0 {
+			if i.ArrowLeft {
+				return joinWrites(i.Writes) + i.leftArrow() + s
+			}
+			return s + " -> " + joinWrites(i.Writes)
+		}
+		return s
+	}
 	// set(base, idx, val) → a[idx] <- val ( <- form only;
 	// -> form stays as set() call since parser can't parse val -> a[idx])
 	if e.Op == "set" && len(e.Args) >= 3 && i.ArrowLeft {
