@@ -9,7 +9,7 @@ def title_to_num(s:str) -> () {
 	while (i < n) {
 		result * 26 -> r26
 		c <- char(s, i)
-		v = c - 65  # = 等价于 <-
+		v = ord(c) - 65  # = 等价于 <-
 		v + 1 -> d
 		result <- r26 + d
 		i = i + 1  # = 等价于 <-

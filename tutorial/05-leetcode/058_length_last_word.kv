@@ -8,7 +8,7 @@ def last_word_len(s:str) -> () {
 	count <- 0
 	while (i >= 0) {
 		c = char(s, i)  # = 等价于 <-
-		c == 32 -> sp
+		c == " " -> sp
 
 		if (sp) {
 			i <- -1

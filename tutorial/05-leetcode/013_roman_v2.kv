@@ -8,13 +8,13 @@ def roman_to_int(s:str) -> () {
 	i = 0  # = 等价于 <-
 	while (i < n) {
 		char(s, i) -> c
-		is_I <- c == 73
-		is_V = c == 86  # = 等价于 <-
-		c == 88 -> is_X
-		is_L <- c == 76
-		is_C = c == 67  # = 等价于 <-
-		c == 68 -> is_D
-		is_M <- c == 77
+		is_I <- c == "I"
+		is_V = c == "V"  # = 等价于 <-
+		c == "X" -> is_X
+		is_L <- c == "L"
+		is_C = c == "C"  # = 等价于 <-
+		c == "D" -> is_D
+		is_M <- c == "M"
 
 		if (is_I) {
 			ni = i + 1  # = 等价于 <-
@@ -22,8 +22,8 @@ def roman_to_int(s:str) -> () {
 
 			if (has_next) {
 				nc <- char(s, ni)
-				iv = nc == 86  # = 等价于 <-
-				nc == 88 -> ix
+				iv = nc == "V"  # = 等价于 <-
+				nc == "X" -> ix
 
 				if (iv) {
 					val <- 4
