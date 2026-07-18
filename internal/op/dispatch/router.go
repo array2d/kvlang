@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"kvlang/internal/keytree"
-	"kvlang/internal/kvspace"
+	"github.com/array2d/kvlang-go"
 	"kvlang/internal/logx"
 )
 

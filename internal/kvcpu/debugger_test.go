@@ -24,8 +24,8 @@ import (
 
 	"kvlang/internal/keytree"
 	"kvlang/internal/kvcpu"
-	"kvlang/internal/kvspace"
-	_ "kvlang/internal/kvspace/redis" // 注册 Redis 后端
+	"github.com/array2d/kvlang-go"
+	_ "github.com/array2d/kvlang-go/redis" // 注册 Redis 后端
 	"kvlang/internal/layoutcode"
 	"kvlang/internal/lower"
 	"kvlang/internal/op"

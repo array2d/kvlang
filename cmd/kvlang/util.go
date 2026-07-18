@@ -6,7 +6,7 @@ import (
 	"strconv"
 
 	"kvlang/internal/keytree"
-	"kvlang/internal/kvspace"
+	"github.com/array2d/kvlang-go"
 )
 
 // defaultKVSpace 返回 kvspace DSN 默认值：KVLANG_KVSPACE 环境变量覆盖，否则本机 redis。

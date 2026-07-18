@@ -29,7 +29,7 @@ import (
 
 	"kvlang/internal/ast"
 	"kvlang/internal/keytree"
-	"kvlang/internal/kvspace"
+	"github.com/array2d/kvlang-go"
 	"kvlang/internal/op"
 	"kvlang/internal/op/builtin"
 	"kvlang/internal/parser"

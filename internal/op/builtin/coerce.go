@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"kvlang/internal/kvspace"
+	"github.com/array2d/kvlang-go"
 )
 
 // asFloat coerces a Value to float64 for numeric operations.

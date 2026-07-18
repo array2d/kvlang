@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"kvlang/internal/kvspace"
+	"github.com/array2d/kvlang-go"
 	"kvlang/internal/op"
 	"kvlang/internal/op/dispatch"
 	"kvlang/internal/vthread"

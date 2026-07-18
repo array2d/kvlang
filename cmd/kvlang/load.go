@@ -10,7 +10,7 @@ import (
 
 	"kvlang/internal/ast"
 	"kvlang/internal/keytree"
-	"kvlang/internal/kvspace"
+	"github.com/array2d/kvlang-go"
 	"kvlang/internal/layoutcode"
 	"kvlang/internal/logx"
 	"kvlang/internal/lower"

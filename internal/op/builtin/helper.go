@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"kvlang/internal/keytree"
-	"kvlang/internal/kvspace"
+	"github.com/array2d/kvlang-go"
 	"kvlang/internal/op"
 	"kvlang/internal/vthread"
 )

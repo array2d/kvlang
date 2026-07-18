@@ -1,6 +1,6 @@
 package op
 
-import "kvlang/internal/kvspace"
+import "github.com/array2d/kvlang-go"
 
 // Frame 指令执行的运行时上下文。
 type Frame struct {

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"kvlang/internal/kvspace"
+	"github.com/array2d/kvlang-go"
 )
 
 // Instruction 表示执行层 [addr0, addr1] 解码后的一条指令。

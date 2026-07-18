@@ -8,7 +8,6 @@
 //	kvlang load <file.kv|dir>     只加载到 kvspace，不执行
 //	kvlang vet <file.kv>          语法检查
 //	kvlang format <file.kv>       格式化（别名 fmt）
-//	kvlang kvspace <cmd>          KV 空间操作
 //	kvlang help                   帮助
 package main
 
@@ -16,7 +15,7 @@ import (
 	"os"
 
 	// 注册 KVSpace 实现；--kvspace DSN 的 scheme 选择后端（默认 redis://）。
-	_ "kvlang/internal/kvspace/redis"
+	_ "github.com/array2d/kvlang-go/redis"
 )
 
 func main() {
@@ -31,9 +30,6 @@ func main() {
 			return
 		case "vet":
 			cmdVet(args[1:])
-			return
-		case "kvspace":
-			cmdKVSpace(args[1:])
 			return
 		case "format", "fmt":
 			cmdFormat(args[1:])

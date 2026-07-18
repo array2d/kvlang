@@ -1,6 +1,6 @@
 package builtin
 
-import "kvlang/internal/kvspace"
+import "github.com/array2d/kvlang-go"
 
 func isAbsolute(param string) bool { return len(param) > 0 && param[0] == '/' }
 

@@ -13,7 +13,7 @@ import (
 
 	"kvlang/internal/keytree"
 	"kvlang/internal/kvcpu"
-	"kvlang/internal/kvspace"
+	"github.com/array2d/kvlang-go"
 	"kvlang/internal/layoutcode"
 	"kvlang/internal/logx"
 	"kvlang/internal/op/builtin"

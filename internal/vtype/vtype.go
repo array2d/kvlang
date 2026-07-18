@@ -12,7 +12,7 @@ import (
 	"context"
 	"strings"
 
-	"kvlang/internal/kvspace"
+	"github.com/array2d/kvlang-go"
 	"kvlang/internal/op"
 )
 

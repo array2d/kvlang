@@ -15,7 +15,7 @@ package device
 import (
 	"context"
 
-	"kvlang/internal/kvspace"
+	"github.com/array2d/kvlang-go"
 	"kvlang/internal/keytree"
 )
 

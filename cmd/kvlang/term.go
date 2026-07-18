@@ -2,7 +2,7 @@ package main
 
 import (
 	"kvlang/internal/keytree"
-	"kvlang/internal/kvspace"
+	"github.com/array2d/kvlang-go"
 )
 
 func registerDefaultTerm(kv kvspace.KVSpace) {
