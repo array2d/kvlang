@@ -56,9 +56,9 @@ func executeEntry(kv kvspace.KVSpace, debug bool) {
 // args 为 serve 子命令的剩余参数（nil 或空切片均可）。
 func runServe(args []string) {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	addr := fs.String("addr", "127.0.0.1:6379", "Redis 地址 (host:port)")
+	dsn := fs.String("kvspace", defaultKVSpace(), kvspaceFlagDesc)
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: kvlang serve [--addr host:port]")
+		fmt.Fprintln(os.Stderr, "usage: kvlang serve [--kvspace dsn]")
 		fs.PrintDefaults()
 	}
 	fs.Parse(args)
@@ -71,9 +71,9 @@ func runServe(args []string) {
 	workers := runtime.GOMAXPROCS(0)
 	// 每个 worker 最多占用 1 个连接做 BLPOP，额外 16 用于 mainWatcher/heartbeat/syscmd 等。
 	poolSize := workers + 16
-	logx.Info("VM-%s starting with %d workers, kv=%s pool=%d", vmID, workers, *addr, poolSize)
+	logx.Info("VM-%s starting with %d workers, kv=%s pool=%d", vmID, workers, *dsn, poolSize)
 
-	kv := kvspace.ConnPool(*addr, poolSize)
+	kv := kvspace.ConnPool(*dsn, poolSize)
 	defer kv.DisConn()
 	// serve 是 daemon，不注册 kvlangrun 终端——
 	// 各 vthread 的终端由 agent 通过 entry.Term 显式绑定。

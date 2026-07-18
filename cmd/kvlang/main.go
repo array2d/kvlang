@@ -1,13 +1,13 @@
 // kvlang — KV 语言 VM 解释器 CLI。
 //
-//	kvlang                        启动 daemon（serve 模式）
-//	kvlang serve                  启动 daemon（显式）
-//	kvlang <file.kv>              加载并执行文件
+//	kvlang <file.kv|dir>          加载并执行（目录递归收集 *.kv）
 //	kvlang -c "code"              加载并执行内联代码
-//	echo "code" | kvlang          加载并执行管道代码
+//	echo "code" | kvlang          执行管道代码（stdin 非终端）
+//	kvlang                        无参数且 stdin 为终端 → 等价 serve
+//	kvlang serve                  启动 daemon
 //	kvlang load <file.kv|dir>     只加载到 kvspace，不执行
 //	kvlang vet <file.kv>          语法检查
-//	kvlang format <file.kv>       格式化
+//	kvlang format <file.kv>       格式化（别名 fmt）
 //	kvlang kvspace <cmd>          KV 空间操作
 //	kvlang help                   帮助
 package main
@@ -15,7 +15,7 @@ package main
 import (
 	"os"
 
-	// 注册 KVSpace 实现；KVLANG_KV 环境变量选择后端（默认 "redis"）。
+	// 注册 KVSpace 实现；--kvspace DSN 的 scheme 选择后端（默认 redis://）。
 	_ "kvlang/internal/kvspace/redis"
 )
 

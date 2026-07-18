@@ -14,11 +14,11 @@ import (
 	"strconv")
 
 func cmdKVSpace(args []string) {
-	// 全局 FlagSet：解析 --addr 及子命令
+	// 全局 FlagSet：解析 --kvspace 及子命令
 	fs := flag.NewFlagSet("kvspace", flag.ExitOnError)
-	addr := fs.String("addr", "127.0.0.1:6379", "Redis 地址 (host:port)")
+	dsn := fs.String("kvspace", defaultKVSpace(), kvspaceFlagDesc)
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: kvlang kvspace [--addr host:port] <subcommand> [args]")
+		fmt.Fprintln(os.Stderr, "usage: kvlang kvspace [--kvspace dsn] <subcommand> [args]")
 		fmt.Fprintln(os.Stderr, "subcommands: get mget set del list tree dump watch notify clear trace")
 		fs.PrintDefaults()
 	}
@@ -30,7 +30,7 @@ func cmdKVSpace(args []string) {
 		os.Exit(1)
 	}
 
-	kv := kvspace.Conn(*addr)
+	kv := kvspace.Conn(*dsn)
 	defer kv.DisConn()
 
 	switch sub[0] {
@@ -96,7 +96,8 @@ func cmdKVSpace(args []string) {
 		kvTrace(kv, sub[1])
 
 	default:
-		fmt.Fprintf(os.Stderr, "unknown kvspace subcommand: %s\n", sub[0])
+		fmt.Fprintf(os.Stderr, "unknown kvspace subcommand: %s\n\n", sub[0])
+		fs.Usage()
 		os.Exit(1)
 	}
 }

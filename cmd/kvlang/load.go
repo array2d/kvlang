@@ -20,9 +20,9 @@ import (
 // cmdLoad 将 .kv 文件加载进 kvspace，不执行。
 func cmdLoad(args []string) {
 	fs := flag.NewFlagSet("load", flag.ExitOnError)
-	addr := fs.String("addr", "127.0.0.1:6379", "Redis 地址 (host:port)")
+	dsn := fs.String("kvspace", defaultKVSpace(), kvspaceFlagDesc)
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: kvlang load [--addr host:port] <file.kv|dir>")
+		fmt.Fprintln(os.Stderr, "usage: kvlang load [--kvspace dsn] <file.kv|dir>")
 		fs.PrintDefaults()
 	}
 	fs.Parse(args)
@@ -32,7 +32,7 @@ func cmdLoad(args []string) {
 		os.Exit(1)
 	}
 
-	kv := kvspace.Conn(*addr)
+	kv := kvspace.Conn(*dsn)
 	defer kv.DisConn()
 
 	files, err := collectKVFiles(fs.Arg(0))
@@ -46,30 +46,30 @@ func cmdLoad(args []string) {
 // cmdRun 解析参数并路由到对应执行路径：内联 / 文件 / 管道 / serve。
 func cmdRun(args []string) {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
-	addr  := fs.String("addr", "127.0.0.1:6379", "Redis 地址 (host:port)")
+	dsn   := fs.String("kvspace", defaultKVSpace(), kvspaceFlagDesc)
 	code  := fs.String("c", "", "内联代码（直接执行字符串）")
 	debug := fs.Bool("debug", false, "单步调试模式（交互式，每条指令暂停）")
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: kvlang [--addr host:port] [--debug] [-c code | <file.kv>]")
+		fmt.Fprintln(os.Stderr, "usage: kvlang [--kvspace dsn] [--debug] [-c code | <file.kv|dir>]")
 		fs.PrintDefaults()
 	}
 	fs.Parse(args)
 
 	switch {
 	case *code != "":
-		runCode("inline", strings.NewReader(*code), *addr, *debug)
+		runCode("inline", strings.NewReader(*code), *dsn, *debug)
 	case fs.NArg() > 0:
-		runFile(*addr, fs.Arg(0), *debug)
+		runFile(*dsn, fs.Arg(0), *debug)
 	case !isTerminal():
-		runCode("stdin", os.Stdin, *addr, *debug)
+		runCode("stdin", os.Stdin, *dsn, *debug)
 	default:
 		runServe(nil)
 	}
 }
 
 // runFile 加载 .kv 文件后单次执行。
-func runFile(addr, path string, debug bool) {
-	kv := kvspace.Conn(addr)
+func runFile(dsn, path string, debug bool) {
+	kv := kvspace.Conn(dsn)
 	defer kv.DisConn()
 	registerDefaultTerm(kv)
 
@@ -82,8 +82,8 @@ func runFile(addr, path string, debug bool) {
 }
 
 // runCode 从 io.Reader 加载代码后单次执行（内联 / 管道模式）。
-func runCode(name string, rc io.Reader, addr string, debug bool) {
-	kv := kvspace.Conn(addr)
+func runCode(name string, rc io.Reader, dsn string, debug bool) {
+	kv := kvspace.Conn(dsn)
 	defer kv.DisConn()
 	registerDefaultTerm(kv)
 
