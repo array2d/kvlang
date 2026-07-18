@@ -8,47 +8,47 @@
 #   4
 #   4
 def build_lists() -> () {
-	1 -> /a0/val
-	"/a1" -> /a0/next
-	2 -> /a1/val
-	"/a2" -> /a1/next
-	4 -> /a2/val
-	"" -> /a2/next
-	1 -> /b0/val
-	"/b1" -> /b0/next
-	3 -> /b1/val
-	"/b2" -> /b1/next
-	4 -> /b2/val
-	"" -> /b2/next
+	1 -> /a0.val
+	"/a1" -> /a0.next
+	2 -> /a1.val
+	"/a2" -> /a1.next
+	4 -> /a2.val
+	"" -> /a2.next
+	1 -> /b0.val
+	"/b1" -> /b0.next
+	3 -> /b1.val
+	"/b2" -> /b1.next
+	4 -> /b2.val
+	"" -> /b2.next
 }
 
 def merge(a:str, b:str) -> () {
 	a -> pa
 	b -> pb
 	while (pa != "") {
-		kvat(pa, "val") -> av
+		pa.val -> av
 		pb == "" -> pick_a
 
 		if (pick_a) {
 			print(av)
-			kvat(pa, "next") -> pa
+			pa.next -> pa
 		} else {
-			kvat(pb, "val") -> bv
+			pb.val -> bv
 			av <= bv -> take
 
 			if (take) {
 				print(av)
-				kvat(pa, "next") -> pa
+				pa.next -> pa
 			} else {
 				print(bv)
-				kvat(pb, "next") -> pb
+				pb.next -> pb
 			}
 		}
 	}
 	while (pb != "") {
-		kvat(pb, "val") -> bv
+		pb.val -> bv
 		print(bv)
-		kvat(pb, "next") -> pb
+		pb.next -> pb
 	}
 }
 

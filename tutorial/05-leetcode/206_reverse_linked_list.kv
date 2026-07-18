@@ -7,32 +7,32 @@
 #   2
 #   1
 def build_list() -> () {
-	1 -> /n0/val
-	"/n1" -> /n0/next
-	2 -> /n1/val
-	"/n2" -> /n1/next
-	3 -> /n2/val
-	"/n3" -> /n2/next
-	4 -> /n3/val
-	"/n4" -> /n3/next
-	5 -> /n4/val
-	"" -> /n4/next
+	1 -> /n0.val
+	"/n1" -> /n0.next
+	2 -> /n1.val
+	"/n2" -> /n1.next
+	3 -> /n2.val
+	"/n3" -> /n2.next
+	4 -> /n3.val
+	"/n4" -> /n3.next
+	5 -> /n4.val
+	"" -> /n4.next
 }
 
 def reverse(head:str) -> () {
 	"" -> prev
 	head -> cur
 	while (cur != "") {
-		kvat(cur, "next") -> nxt
-		set(cur, "next", prev) -> _
+		cur.next -> nxt
+		cur.next <- prev
 		cur -> prev
 		nxt -> cur
 	}
 	prev -> p
 	while (p != "") {
-		kvat(p, "val") -> v
+		p.val -> v
 		print(v)
-		kvat(p, "next") -> p
+		p.next -> p
 	}
 }
 

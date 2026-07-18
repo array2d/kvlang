@@ -8,14 +8,14 @@ def has_cycle(head:str) -> (result:int) {
 	head -> slow
 	head -> fast
 	while (fast != "") {
-		kvat(slow, "next") -> slow
-		kvat(fast, "next") -> n1
+		slow.next -> slow
+		fast.next -> n1
 		n1 == "" -> at_end
 
 		if (at_end) {
 			"" -> fast
 		} else {
-			kvat(n1, "next") -> fast
+			n1.next -> fast
 			slow == fast -> match
 
 			if (match) {
@@ -27,19 +27,19 @@ def has_cycle(head:str) -> (result:int) {
 }
 
 def build_cycle() -> () {
-	3 -> /c0/val
-	"/c1" -> /c0/next
-	2 -> /c1/val
-	"/c2" -> /c1/next
-	0 -> /c2/val
-	"/c0" -> /c2/next
+	3 -> /c0.val
+	"/c1" -> /c0.next
+	2 -> /c1.val
+	"/c2" -> /c1.next
+	0 -> /c2.val
+	"/c0" -> /c2.next
 }
 
 def build_no_cycle() -> () {
-	1 -> /n0/val
-	"/n1" -> /n0/next
-	2 -> /n1/val
-	"" -> /n1/next
+	1 -> /n0.val
+	"/n1" -> /n0.next
+	2 -> /n1.val
+	"" -> /n1.next
 }
 
 build_cycle()
