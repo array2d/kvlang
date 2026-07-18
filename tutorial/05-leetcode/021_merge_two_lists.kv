@@ -8,18 +8,12 @@
 #   4
 #   4
 def build_lists() -> () {
-	/a0.val <- 1
-	/a0.next = "/a1"  # = 等价于 <-
-	2 -> /a1.val
-	/a1.next <- "/a2"
-	/a2.val = 4  # = 等价于 <-
-	"" -> /a2.next
-	/b0.val <- 1
-	/b0.next = "/b1"  # = 等价于 <-
-	3 -> /b1.val
-	/b1.next <- "/b2"
-	/b2.val = 4  # = 等价于 <-
-	"" -> /b2.next
+	/a0 = { val=1; next="/a1" }  # = 等价于 <-
+	/a1 <- { val=2; next="/a2" }
+	{ val=4; next="" } -> /a2
+	/b0 = { val=1; next="/b1" }  # = 等价于 <-
+	/b1 <- { val=3; next="/b2" }
+	{ val=4; next="" } -> /b2
 }
 
 def merge(a:str, b:str) -> () {

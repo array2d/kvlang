@@ -27,19 +27,14 @@ def has_cycle(head:str) -> (result:int) {
 }
 
 def build_cycle() -> () {
-	/c0.val <- 3
-	/c0.next = "/c1"  # = 等价于 <-
-	2 -> /c1.val
-	/c1.next <- "/c2"
-	/c2.val = 0  # = 等价于 <-
-	"/c0" -> /c2.next
+	{ val=3; next="/c1" } -> /c0
+	/c1 = { val=2; next="/c2" }  # = 等价于 <-
+	/c2 <- { val=0; next="/c0" }
 }
 
 def build_no_cycle() -> () {
-	/n0.val <- 1
-	/n0.next = "/n1"  # = 等价于 <-
-	2 -> /n1.val
-	/n1.next <- ""
+	/n0 = { val=1; next="/n1" }  # = 等价于 <-
+	{ val=2; next="" } -> /n1
 }
 
 build_cycle()
