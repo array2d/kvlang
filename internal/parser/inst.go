@@ -42,30 +42,16 @@ func (p *parser) parseInst() *ast.Instruction {
 			inst.Expr = ast.Call("set", ast.Leaf(arr), ast.Leaf(idx), inst.Expr)
 			inst.Writes = []string{arr}
 		}
-		// expr.field <- val → set(expr, "field", val) -> expr
-		if len(inst.Writes) == 1 && strings.Contains(inst.Writes[0], ".") {
-			s := inst.Writes[0]
-			dt := strings.IndexByte(s, '.')
-			base := s[:dt]
-			field := s[dt+1:]
-			inst.Expr = ast.Call("set", ast.Leaf(base), ast.StrLit(field), inst.Expr)
-			inst.Writes = []string{base}
-		}
+		// base.field / base.*key <- val → set 展开（fix-015）
+		p.desugarMemberWrite(inst)
 
 	case arrowAbs >= 0:
 		// expr -> (writes)
 		inst.Expr = p.parsePratt(0)
 		p.advance() // consume ->
 		inst.Writes = p.collectWriteList()
-		// expr -> base.field → set(base, "field", expr) -> base
-		if len(inst.Writes) == 1 && strings.Contains(inst.Writes[0], ".") {
-			s := inst.Writes[0]
-			dt := strings.IndexByte(s, '.')
-			base := s[:dt]
-			field := s[dt+1:]
-			inst.Expr = ast.Call("set", ast.Leaf(base), ast.StrLit(field), inst.Expr)
-			inst.Writes = []string{base}
-		}
+		// expr -> base.field / base.*key → set 展开（fix-015）
+		p.desugarMemberWrite(inst)
 
 	default:
 		// 无 Arrow：纯表达式 / 函数调用
@@ -78,6 +64,33 @@ func (p *parser) parseInst() *ast.Instruction {
 	}
 	p.eat(Newline)
 	return inst
+}
+
+// desugarMemberWrite 将成员写槽展开为 set 调用：
+//
+//	base.field  → set(base, "field", expr) -> base   静态成员（字面量键）
+//	base.*key   → set(base, key, expr) -> base       动态成员（取 key 变量的值，fix-015）
+func (p *parser) desugarMemberWrite(inst *ast.Instruction) {
+	if len(inst.Writes) != 1 || !strings.Contains(inst.Writes[0], ".") {
+		return
+	}
+	s := inst.Writes[0]
+	dt := strings.IndexByte(s, '.')
+	base := s[:dt]
+	field := s[dt+1:]
+	var key *ast.Expr
+	if strings.HasPrefix(field, "*") {
+		if len(field) == 1 {
+			p.errors = append(p.errors, Diagnostic{Warn: true,
+				Message: "dynamic member write: expected identifier after '.*'"})
+			return
+		}
+		key = ast.Leaf(field[1:])
+	} else {
+		key = ast.StrLit(field)
+	}
+	inst.Expr = ast.Call("set", ast.Leaf(base), key, inst.Expr)
+	inst.Writes = []string{base}
 }
 
 // findTopLevelArrow 前瞻（不消费）找第一个深度为 0 的 Arrow token 绝对下标。
@@ -398,6 +411,10 @@ func (p *parser) collectWriteList() []string {
 			if (t.Kind == Ident || isPathLiteral) && p.peekAt(1).Kind == Dot {
 				w := p.advance().Value // base
 				w += p.advance().Value // .
+				// 动态键 .*key：合并 * 标记，desugar 识别后以裸 Leaf 传 set（fix-015）
+				if p.peek().Kind == Ident && p.peek().Value == "*" && p.peekAt(1).Kind == Ident {
+					w += p.advance().Value // *
+				}
 				w += p.advance().Value // field
 				writes = append(writes, w)
 			} else {
@@ -433,6 +450,10 @@ func (p *parser) collectWritesUntilArrow() []string {
 		if (t.Kind == Ident || isPathLit) && p.peekAt(1).Kind == Dot {
 			w := p.advance().Value // base
 			w += p.advance().Value // .
+			// 动态键 .*key（fix-015）
+			if p.peek().Kind == Ident && p.peek().Value == "*" && p.peekAt(1).Kind == Ident {
+				w += p.advance().Value // *
+			}
 			w += p.advance().Value // field
 			writes = append(writes, w)
 			continue

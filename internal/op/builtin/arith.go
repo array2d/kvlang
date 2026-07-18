@@ -37,13 +37,14 @@ func (mod) Call(f *op.Frame) error {
 
 func evalBinaryArith(inputs []kvspace.XValue, fn func(float64, float64) float64) (kvspace.XValue, error) {
 	if err := requireBinary(inputs); err != nil { return kvspace.XValue{}, err }
-	a, b := inputs[0], inputs[1]
+	a, b := nilAsInt(inputs[0]), nilAsInt(inputs[1])
 	result := fn(asFloat(a), asFloat(b))
 	if isIntKind(a.Kind()) && isIntKind(b.Kind()) { return kvspace.Int64(int64(result)), nil }
 	return kvspace.Float(result), nil
 }
 
 func evalNeg(v kvspace.XValue) (kvspace.XValue, error) {
+	v = nilAsInt(v)
 	switch v.Kind() {
 	case "int", "int8", "int16", "int32", "int64":
 		return kvspace.Int64(-v.Int64()), nil
@@ -60,6 +61,7 @@ func evalNeg(v kvspace.XValue) (kvspace.XValue, error) {
 
 func evalDiv(inputs []kvspace.XValue) (kvspace.XValue, error) {
 	if err := requireBinary(inputs); err != nil { return kvspace.XValue{}, err }
+	inputs[0], inputs[1] = nilAsInt(inputs[0]), nilAsInt(inputs[1])
 	bf := asFloat(inputs[1])
 	if bf == 0 { return kvspace.XValue{}, fmt.Errorf("division by zero") }
 	// C 风格：两整数相除 → 整除，否则 → 浮除
@@ -72,6 +74,7 @@ func evalDiv(inputs []kvspace.XValue) (kvspace.XValue, error) {
 
 func evalMod(inputs []kvspace.XValue) (kvspace.XValue, error) {
 	if err := requireBinary(inputs); err != nil { return kvspace.XValue{}, err }
+	inputs[0], inputs[1] = nilAsInt(inputs[0]), nilAsInt(inputs[1])
 	b := asInt(inputs[1])
 	if b == 0 { return kvspace.XValue{}, fmt.Errorf("modulo by zero") }
 	return kvspace.Int(asInt(inputs[0]) % b), nil
@@ -79,7 +82,7 @@ func evalMod(inputs []kvspace.XValue) (kvspace.XValue, error) {
 
 func evalUnaryArith(inputs []kvspace.XValue, fn func(float64) float64) (kvspace.XValue, error) {
 	if err := requireUnary(inputs); err != nil { return kvspace.XValue{}, err }
-	v := inputs[0]
+	v := nilAsInt(inputs[0])
 	result := fn(asFloat(v))
 	if isIntKind(v.Kind()) { return kvspace.Int(int64(result)), nil }
 	return kvspace.Float(result), nil

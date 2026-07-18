@@ -55,6 +55,11 @@ func (atOp) Call(f *op.Frame) error {
 		path := keytree.Member(base, kvKey(inputs[1]))
 		v, _ := f.KV.Get(path); return writeResult(f, v)
 	}
+	if inputs[0].IsNil() {
+		msg := "at: base " + f.Inst.Reads[0] + " is nil — declare key-family first (e.g. `" + f.Inst.Reads[0] + " = {}`) or pass a path string"
+		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
+		return fmt.Errorf("%s", msg)
+	}
 	idx := int(inputs[1].Int64())
 	elem := inputs[0].Index(idx)
 	if elem.IsNil() {
@@ -92,6 +97,11 @@ func (arraySetOp) Call(f *op.Frame) error {
 		}
 		vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
 		return nil
+	}
+	if arr.IsNil() {
+		msg := "set: base " + f.Inst.Reads[0] + " is nil — declare key-family first (e.g. `" + f.Inst.Reads[0] + " = {}`) or pass a path string"
+		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
+		return fmt.Errorf("%s", msg)
 	}
 	idx := int(inputs[1].Int64())
 	if idx < 0 || idx >= arr.Len() {

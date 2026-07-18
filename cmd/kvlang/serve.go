@@ -26,6 +26,7 @@ import (
 func executeEntry(kv kvspace.KVSpace, debug bool) {
 	ctx := context.Background()
 	const vtid = "run"
+	kv.DelTree(keytree.VThread(vtid)) // 清上次运行的整棵 vthread 残留（帧变量/错误态），防跨次污染
 	firstPC := layoutcode.Bootstrap(ctx, kv, vtid, "init", nil)
 	if firstPC == "" {
 		logx.Fatal("[single] Bootstrap init failed")
@@ -50,6 +51,15 @@ func executeEntry(kv kvspace.KVSpace, debug bool) {
 	logx.Info("[single] executing %s", firstPC)
 	cpu := kvcpu.New(kv, "single")
 	cpu.Execute(firstPC)
+	reportRunError(kv, vtid)
+}
+
+// reportRunError 单次模式终态 error 回显 stderr 并以非零退出（fix-016）。
+func reportRunError(kv kvspace.KVSpace, vtid string) {
+	if msgVal, err := kv.Get(keytree.VThreadStatusMsg(vtid, "error")); err == nil && !msgVal.IsNil() {
+		fmt.Fprintln(os.Stderr, "error:", msgVal.Str())
+		os.Exit(1)
+	}
 }
 
 // runServe 启动 VM daemon，持续监听并执行 vthread。
