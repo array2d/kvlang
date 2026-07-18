@@ -5,20 +5,20 @@
 def collatz(n:int) -> (steps:int) {
 	0 -> steps
 	while (n > 1) {
-		n % 2 -> mod
-		mod == 0 -> even
+		mod <- n % 2
+		even = mod == 0  # = 等价于 <-
 
 		if (even) {
 			n / 2 -> n
 		} else {
-			n * 3 -> t
-			t + 1 -> n
+			t <- n * 3
+			n = t + 1  # = 等价于 <-
 		}
 
 		steps + 1 -> steps
 	}
 }
 
-collatz(27) -> ans
+ans <- collatz(27)
 print("steps =", ans)
-ans -> /last_steps
+/last_steps = ans  # = 等价于 <-

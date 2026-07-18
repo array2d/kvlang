@@ -3,11 +3,11 @@
 #   sum = 5050
 #   fact = 3628800
 def sum_while(N:int) -> (total:int) {
-	0 -> total
+	total = 0  # = 等价于 <-
 	1 -> i
 	while (i <= N) {
-		total + i -> total
-		i + 1 -> i
+		total <- total + i
+		i = i + 1  # = 等价于 <-
 	}
 }
 
@@ -15,19 +15,19 @@ def tailrec_fact(N:int, acc:int) -> (r:int) {
 	if (N <= 1) {
 		acc + 0 -> r
 	} else {
-		acc * N -> acc1
-		N - 1 -> n1
+		acc1 <- acc * N
+		n1 = N - 1  # = 等价于 <-
 		tailrec_fact(n1, acc1) -> r
 	}
 }
 
 def main() -> () {
-	sum_while(100) -> s
+	s <- sum_while(100)
 	print("sum =", s)
-	tailrec_fact(10, 1) -> f
+	f = tailrec_fact(10, 1)  # = 等价于 <-
 	print("fact =", f)
 	s -> /last_tco_sum
-	f -> /last_tco_fact
+	/last_tco_fact <- f
 }
 
 main()

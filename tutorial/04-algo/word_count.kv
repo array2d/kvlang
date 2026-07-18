@@ -3,37 +3,37 @@
 # 期望输出:
 #   word count = 3
 def main() -> () {
-	"h" -> chars.0
+	chars.0 = "h"  # = 等价于 <-
 	"e" -> chars.1
-	"l" -> chars.2
-	"l" -> chars.3
+	chars.2 <- "l"
+	chars.3 = "l"  # = 等价于 <-
 	"o" -> chars.4
-	" " -> chars.5
-	"w" -> chars.6
+	chars.5 <- " "
+	chars.6 = "w"  # = 等价于 <-
 	"o" -> chars.7
-	"r" -> chars.8
-	"l" -> chars.9
+	chars.8 <- "r"
+	chars.9 = "l"  # = 等价于 <-
 	"d" -> chars.10
-	" " -> chars.11
-	"k" -> chars.12
+	chars.11 <- " "
+	chars.12 = "k"  # = 等价于 <-
 	"v" -> chars.13
-	"l" -> chars.14
-	"a" -> chars.15
+	chars.14 <- "l"
+	chars.15 = "a"  # = 等价于 <-
 	"n" -> chars.16
-	"g" -> chars.17
-	0 -> nw
+	chars.17 <- "g"
+	nw = 0  # = 等价于 <-
 	0 -> state
 	for (c in chars) {
-		c == " " -> blank
+		blank <- c == " "
 
 		if (blank) {
-			0 -> state
+			state = 0  # = 等价于 <-
 		} else {
 			state == 0 -> was_out
 
 			if (was_out) {
-				1 -> state
-				nw + 1 -> nw
+				state <- 1
+				nw = nw + 1  # = 等价于 <-
 			}
 		}
 	}

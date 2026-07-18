@@ -4,16 +4,16 @@
 #   grade = B
 def classify(score:int) -> (grade:string) {
 	if (score >= 90) {
-		"A" -> grade
+		grade = "A"  # = 等价于 <-
 	} else {
 		if (score >= 80) {
 			"B" -> grade
 		} else {
 			if (score >= 70) {
-				"C" -> grade
+				grade <- "C"
 			} else {
 				if (score >= 60) {
-					"D" -> grade
+					grade = "D"  # = 等价于 <-
 				} else {
 					"F" -> grade
 				}
@@ -22,6 +22,6 @@ def classify(score:int) -> (grade:string) {
 	}
 }
 
-classify(85) -> ans
+ans <- classify(85)
 print("grade =", ans)
-ans -> /last_grade
+/last_grade = ans  # = 等价于 <-

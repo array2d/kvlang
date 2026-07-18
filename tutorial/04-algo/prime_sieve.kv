@@ -6,32 +6,32 @@
 #   total primes up to 30 = 10
 def prime_sieve(limit:int) -> () {
 	print("primes up to", limit)
-	0 -> count
+	count = 0  # = 等价于 <-
 	2 -> n
 	while (n <= limit) {
-		1 -> is_prime
-		2 -> d
+		is_prime <- 1
+		d = 2  # = 等价于 <-
 		while (d < n) {
 			n % d -> rem
-			rem == 0 -> divisible
+			divisible <- rem == 0
 
 			if (divisible) {
-				0 -> is_prime
+				is_prime = 0  # = 等价于 <-
 				n -> d
 			} else {
-				d + 1 -> d
+				d <- d + 1
 			}
 		}
 
 		if (is_prime) {
 			print("  prime:", n)
-			count + 1 -> count
+			count = count + 1  # = 等价于 <-
 		}
 
 		n + 1 -> n
 	}
 	print("total primes up to", limit, "=", count)
-	count -> /last_primes
+	/last_primes <- count
 }
 
 prime_sieve(30)

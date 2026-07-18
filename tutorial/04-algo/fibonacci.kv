@@ -6,19 +6,19 @@ def fibonacci(n:int) -> (result:int) {
 	if (n <= 1) {
 		n + 0 -> result
 	} else {
-		0 -> a
-		1 -> b
+		a <- 0
+		b = 1  # = 等价于 <-
 		2 -> i
 		while (i <= n) {
-			a + b -> c
-			b + 0 -> a
+			c <- a + b
+			a = b + 0  # = 等价于 <-
 			c + 0 -> b
-			i + 1 -> i
+			i <- i + 1
 		}
-		b + 0 -> result
+		result = b + 0  # = 等价于 <-
 	}
 }
 
 fibonacci(10) -> ans
 print("fib =", ans)
-ans -> /last_fib
+/last_fib <- ans

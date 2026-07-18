@@ -3,14 +3,14 @@
 # 期望输出:
 #   result = 1024
 def power(base:int, exp:int) -> (result:int) {
-	1 -> result
+	result = 1  # = 等价于 <-
 	0 -> e
 	while (e < exp) {
-		result * base -> result
-		e + 1 -> e
+		result <- result * base
+		e = e + 1  # = 等价于 <-
 	}
 }
 
 power(2, 10) -> ans
 print("result =", ans)
-ans -> /last_pow
+/last_pow <- ans

@@ -10,8 +10,8 @@ def id_val(x:int) -> (R:int) {
 }
 
 def sum_diff(A:int, B:int) -> (S:int, D:int) {
-	A + B -> S
-	A - B -> D
+	S <- A + B
+	D = A - B  # = 等价于 <-
 }
 
 def chain_call(a:int, b:int) -> (r:int) {
@@ -19,9 +19,9 @@ def chain_call(a:int, b:int) -> (r:int) {
 }
 
 def main() -> () {
-	id_val(5) -> v1
+	v1 <- id_val(5)
 	print("PASS SI-1a: x=5 returns", v1)
-	id_val(10) -> v2
+	v2 = id_val(10)  # = 等价于 <-
 	print("PASS SI-1b: x=10 returns", v2)
 	sum_diff(5, 3) -> (s1, d1)
 	print("PASS SI-2a: S=", s1, "D=", d1)
@@ -29,7 +29,7 @@ def main() -> () {
 	print("PASS SI-2b: S=", s2, "D=", d2)
 	chain_call(7, 3) -> c
 	print("PASS SI-3: chain =", c)
-	c -> /last_chain
+	/last_chain <- c
 }
 
 main()

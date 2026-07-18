@@ -6,11 +6,11 @@ def gcd(A:int, B:int) -> (R:int) {
 	if (B == 0) {
 		A + 0 -> R
 	} else {
-		A % B -> rem
-		gcd(B, rem) -> R
+		rem <- A % B
+		R = gcd(B, rem)  # = 等价于 <-
 	}
 }
 
 gcd(48, 18) -> ans
 print("gcd =", ans)
-ans -> /last_gcd
+/last_gcd <- ans

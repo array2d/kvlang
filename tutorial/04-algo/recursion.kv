@@ -3,23 +3,23 @@
 #   fact(10) = 3628800
 def fib(n:int) -> (a:int, b:int) {
 	if (n <= 1) {
-		0 -> a
+		a = 0  # = 等价于 <-
 		1 -> b
 	} else {
-		n - 1 -> n1
+		n1 <- n - 1
 		fib(n1) -> (a, b)
-		a + b -> x
+		x = a + b  # = 等价于 <-
 		b -> a
-		x -> b
+		b <- x
 	}
 }
 
 def factorial(n:int) -> (r:int) {
-	1 -> r
+	r = 1  # = 等价于 <-
 	1 -> i
 	while (i <= n) {
-		r * i -> r
-		i + 1 -> i
+		r <- r * i
+		i = i + 1  # = 等价于 <-
 	}
 }
 
@@ -28,8 +28,8 @@ def main() -> () {
 	print("fib(10) =", f)
 	factorial(10) -> ans
 	print("fact(10) =", ans)
-	f -> /last_fib
-	ans -> /last_fact
+	/last_fib <- f
+	/last_fact = ans  # = 等价于 <-
 }
 
 main()
