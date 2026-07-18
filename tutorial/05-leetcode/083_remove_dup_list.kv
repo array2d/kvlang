@@ -1,0 +1,59 @@
+# 083: Remove Duplicates from Sorted List — 链表去重（dict 字面量建表 + next 改写）
+# 来源: LeetCode #83
+# 期望输出:
+#   1
+#   2
+#   1
+#   2
+#   3
+def build() -> () {
+	/e0 = { val=1; next="/e1" }  # = 等价于 <-
+	/e1 <- { val=1; next="/e2" }
+	{ val=2; next="" } -> /e2
+	/f0 = { val=1; next="/f1" }  # = 等价于 <-
+	/f1 <- { val=1; next="/f2" }
+	{ val=2; next="/f3" } -> /f2
+	/f3 = { val=3; next="/f4" }  # = 等价于 <-
+	/f4 <- { val=3; next="" }
+}
+
+def dedup(head:str) -> () {
+	head -> cur
+	while (cur != "") {
+		cur.next -> nxt
+		advance = 1  # = 等价于 <-
+
+		if (nxt != "") {
+			cur.val -> v
+			nxt.val -> nv
+
+			if (nv == v) {
+				nxt.next -> nn
+				cur.next <- nn
+				0 -> advance
+			}
+		}
+		if (advance) {
+			cur.next -> cur
+		}
+	}
+}
+
+def show(head:str) -> () {
+	head -> p
+	while (p != "") {
+		p.val -> v
+		print(v)
+		p.next -> p
+	}
+}
+
+def main() -> () {
+	build()
+	dedup("/e0")
+	show("/e0")
+	dedup("/f0")
+	show("/f0")
+}
+
+main()

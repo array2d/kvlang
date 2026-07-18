@@ -1,0 +1,52 @@
+# 234: Palindrome Linked List — 链表复制到键族数组 + 双指针（dict 声明整型键）
+# 来源: LeetCode #234
+# 期望输出:
+#   true
+#   false
+def is_pal(head:str) -> () {
+	arr = {}  # = 等价于 <-
+	0 -> n
+	head -> p
+	while (p != "") {
+		p.val -> v
+		set(arr, n, v) -> _
+		n <- n + 1
+		p.next -> p
+	}
+	ok = 1  # = 等价于 <-
+	0 -> l
+	r <- n - 1
+	while (l < r) {
+		arr[l] -> x
+		arr[r] -> y
+
+		if (x != y) {
+			0 -> ok
+			r -> l
+		}
+		l <- l + 1
+		r = r - 1  # = 等价于 <-
+	}
+	if (ok) {
+		print("true")
+	} else {
+		print("false")
+	}
+}
+
+def build() -> () {
+	/p0 = { val=1; next="/p1" }  # = 等价于 <-
+	/p1 <- { val=2; next="/p2" }
+	{ val=2; next="/p3" } -> /p2
+	/p3 = { val=1; next="" }  # = 等价于 <-
+	/q0 <- { val=1; next="/q1" }
+	{ val=2; next="" } -> /q1
+}
+
+def main() -> () {
+	build()
+	is_pal("/p0")
+	is_pal("/q0")
+}
+
+main()
