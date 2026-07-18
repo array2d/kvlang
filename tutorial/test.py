@@ -55,7 +55,8 @@ def main():
             continue
         rel = str(f.relative_to(ROOT))
         try:
-            subprocess.run([KV, "kvspace", "clear"], capture_output=True, timeout=5)
+            # kvspace CLI 已迁至 kvlang-go 仓（cmd/kvspace），经 PATH 调用
+            subprocess.run(["kvspace", "clear"], capture_output=True, timeout=5)
             r = subprocess.run([KV, rel], capture_output=True, text=True,
                                timeout=60, cwd=str(ROOT))
             all_ok = True
