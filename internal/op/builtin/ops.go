@@ -55,6 +55,17 @@ const (
 	OpInt   = "int"
 	OpFloat = "float"
 	OpBool  = "bool"
+	// 全谱数字类型创建/转换算子（fix-021）；int/float 为 int64/float64 别名
+	OpInt8    = "int8"
+	OpInt16   = "int16"
+	OpInt32   = "int32"
+	OpInt64   = "int64"
+	OpUint8   = "uint8"
+	OpUint16  = "uint16"
+	OpUint32  = "uint32"
+	OpUint64  = "uint64"
+	OpFloat32 = "float32"
+	OpFloat64 = "float64"
 )
 
 // IO built-in
@@ -102,6 +113,9 @@ var nativeOps = map[string]bool{
 	OpBitAnd: true, OpBitOr: true, OpBitXor: true, OpShl: true, OpShr: true,
 	OpAbs: true, OpPow: true, OpMin: true, OpMax: true, OpSqrt: true, OpExp: true, OpLog: true, OpNeg: true, OpSign: true,
 	OpInt: true, OpFloat: true, OpBool: true,
+	OpInt8: true, OpInt16: true, OpInt32: true, OpInt64: true,
+	OpUint8: true, OpUint16: true, OpUint32: true, OpUint64: true,
+	OpFloat32: true, OpFloat64: true,
 	OpPrint: true, OpCerr: true, OpInput: true,
 	OpStrSet: true,
 	OpKVHas: true, OpKVAt: true,
@@ -159,6 +173,16 @@ var nativeSigs = map[string]string{
 	OpMax:  "def max(A:num, B:num) -> (C:num)",
 	OpSign: "def sign(A:num) -> (C:int)",
 	OpInt:   "def int(A:any) -> (C:int)",
+	OpInt8:    "def int8(A:any) -> (C:int8)",
+	OpInt16:   "def int16(A:any) -> (C:int16)",
+	OpInt32:   "def int32(A:any) -> (C:int32)",
+	OpInt64:   "def int64(A:any) -> (C:int64)",
+	OpUint8:   "def uint8(A:any) -> (C:uint8)",
+	OpUint16:  "def uint16(A:any) -> (C:uint16)",
+	OpUint32:  "def uint32(A:any) -> (C:uint32)",
+	OpUint64:  "def uint64(A:any) -> (C:uint64)",
+	OpFloat32: "def float32(A:any) -> (C:float32)",
+	OpFloat64: "def float64(A:any) -> (C:float64)",
 	OpFloat: "def float(A:any) -> (C:float)",
 	OpBool:  "def bool(A:any) -> (C:bool)",
 	OpPrint: "def print(A:any, ...) -> ()",

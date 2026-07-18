@@ -126,6 +126,12 @@ func tryParseNumber(s string) (kvspace.XValue, bool) {
 	if i, err := strconv.ParseInt(s, 10, 64); err == nil {
 		return kvspace.Int(i), true
 	}
+	// (2^63, 2^64-1] 区间的无小数正整数字面量 → uint64（如 uint64 上界 18446744073709551615）
+	if c0 != '-' && !strings.ContainsAny(s, ".eE") {
+		if u, err := strconv.ParseUint(s, 10, 64); err == nil {
+			return kvspace.Uint64(u), true
+		}
+	}
 	if f, err := strconv.ParseFloat(s, 64); err == nil {
 		return kvspace.Float(f), true
 	}
