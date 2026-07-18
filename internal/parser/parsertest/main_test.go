@@ -275,3 +275,33 @@ def f() -> () {
 		t.Errorf("i2: %+v", i2)
 	}
 }
+
+func TestDynamicMemberWrite(t *testing.T) {
+	// fix-015：写侧动态键三形态展开为 set(base, key, val)，key 为裸 Leaf（非字符串字面量）
+	src := `
+def f(k:str) -> () {
+    5 -> h.*k
+    h.*k = 6
+    h.*k <- 7
+}
+`
+	f, diags, err := parser.ParseCode(strings.NewReader(src))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if len(diags) > 0 {
+		t.Fatalf("diags: %v", diags)
+	}
+	for i, st := range f.Funcs[0].Body {
+		inst := st.(*ast.Instruction)
+		if inst.Expr.Op != "set" || len(inst.Expr.Args) != 3 {
+			t.Fatalf("i%d: op=%q args=%d", i, inst.Expr.Op, len(inst.Expr.Args))
+		}
+		if inst.Expr.Args[1].Val != "k" || inst.Expr.Args[1].Quote != 0 {
+			t.Errorf("i%d: key 应为裸 Leaf(k)，got %q quote=%v", i, inst.Expr.Args[1].Val, inst.Expr.Args[1].Quote)
+		}
+		if len(inst.Writes) != 1 || inst.Writes[0] != "h" {
+			t.Errorf("i%d: writes=%v", i, inst.Writes)
+		}
+	}
+}
