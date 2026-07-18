@@ -65,7 +65,7 @@ func (r *redisImpl) Link(target, linkpath string) error {
 	if err := r.rdb.Set(bg, linkpath, []byte(linkSentinel+target), 0).Err(); err != nil {
 		return err
 	}
-	r.maintainIndex(linkpath, true)
+	r.addIndex(linkpath)
 	r.linkMu.Lock()
 	r.links[linkpath] = linkEntry{checked: true, target: target}
 	r.linkMu.Unlock()
@@ -76,7 +76,7 @@ func (r *redisImpl) Unlink(linkpath string) error {
 	if err := r.rdb.Del(bg, linkpath).Err(); err != nil {
 		return err
 	}
-	r.maintainIndex(linkpath, false)
+	r.delIndex(linkpath)
 	r.linkMu.Lock()
 	r.links[linkpath] = linkEntry{checked: true, target: ""} // 确认非链接
 	r.linkMu.Unlock()
@@ -137,7 +137,7 @@ func (r *redisImpl) GetMany(keys []string) ([]kvspace.XValue, error) {
 
 func (r *redisImpl) Set(key string, val kvspace.XValue) error {
 	resolved := kvspace.ResolveCore(key, r.checkLink)
-	r.maintainIndex(resolved, true)
+	r.addIndex(resolved)
 	return r.rdb.Set(bg, resolved, kvspace.EncodeXValue(val), 0).Err()
 }
 
@@ -150,7 +150,7 @@ func (r *redisImpl) SetMany(pairs []kvspace.KVPair) error {
 	msetArgs := make([]any, 0, len(pairs)*2)
 	for _, p := range pairs {
 		resolved := kvspace.ResolveCore(p.Key, r.checkLink)
-		pipeIndex(pipe, resolved, true)
+		pipeIndex(pipe, resolved)
 		msetArgs = append(msetArgs, resolved, kvspace.EncodeXValue(p.Val))
 	}
 	pipe.MSet(bg, msetArgs...)
@@ -162,9 +162,12 @@ func (r *redisImpl) Del(keys ...string) error {
 	resolved := make([]string, len(keys))
 	for i, k := range keys {
 		resolved[i] = kvspace.ResolveCore(k, r.checkLink)
-		r.maintainIndex(resolved[i], false)
 	}
-	return r.rdb.Del(bg, resolved...).Err()
+	err := r.rdb.Del(bg, resolved...).Err()
+	for _, k := range resolved {
+		r.delIndex(k)
+	}
+	return err
 }
 
 func (r *redisImpl) DelTree(prefix string) error {
@@ -173,7 +176,7 @@ func (r *redisImpl) DelTree(prefix string) error {
 	}
 	resolved := kvspace.ResolveCore(prefix, r.checkLink)
 	r.delRecursive(resolved)
-	r.maintainIndex(resolved, false)
+	r.delIndex(resolved)
 	return nil
 }
 
@@ -211,8 +214,8 @@ func (r *redisImpl) delRecursive(prefix string) {
 	r.rdb.Del(bg, prefix, prefix+"/.")
 }
 
-// maintainIndex 维护单条 key 的层级索引（每级一次 SADD/SREM）。
-func (r *redisImpl) maintainIndex(key string, add bool) {
+// addIndex 写入 key 后维护层级索引（每级一次 SADD，幂等）。
+func (r *redisImpl) addIndex(key string) {
 	prefix := ""
 	for _, p := range strings.Split(key, "/")[1:] {
 		if p == "" || p == "." {
@@ -222,18 +225,46 @@ func (r *redisImpl) maintainIndex(key string, add bool) {
 		if parent == "" {
 			parent = "/"
 		}
-		if add {
-			r.rdb.SAdd(bg, parent+"/.", p)
-		} else {
-			r.rdb.SRem(bg, parent+"/.", p)
-		}
+		r.rdb.SAdd(bg, parent+"/.", p)
 		prefix += "/" + p
 	}
 }
 
-// pipeIndex 向 pipeline 追加该 key 的全部层级 SADD/SREM 索引命令。
+// delIndex 删除 key 后维护目录索引，保持不变量：
+//
+//	p ∈ parent/.  ⟺  parent/p 有值 或 parent/p/. 非空
+//
+// 仅当 key 已无子项时才从直接父索引摘除；随后沿祖先级联，
+// 清理"既无值又无子项"的空目录（含历史残留的幽灵项，自愈）。
+// 旧实现沿全路径无条件 SREM，会把仍有兄弟/子孙的祖先从索引中误清（fix-013）。
+func (r *redisImpl) delIndex(key string) {
+	for key != "" && key != "/" {
+		if n, _ := r.rdb.SCard(bg, key+"/.").Result(); n > 0 {
+			return // key 仍是非空目录，保留于父索引
+		}
+		slash := strings.LastIndexByte(key, '/')
+		if slash < 0 {
+			return
+		}
+		parent := key[:slash]
+		indexParent := parent
+		if indexParent == "" {
+			indexParent = "/"
+		}
+		r.rdb.SRem(bg, indexParent+"/.", key[slash+1:])
+		if parent == "" {
+			return // 已到根
+		}
+		if exists, _ := r.rdb.Exists(bg, parent).Result(); exists > 0 {
+			return // 父级自身有值，仍应列于祖父索引
+		}
+		key = parent
+	}
+}
+
+// pipeIndex 向 pipeline 追加该 key 的全部层级 SADD 索引命令（addIndex 的批量版）。
 // 供 SetMany 使用，将多 key 的索引维护合并为一次 pipeline 执行。
-func pipeIndex(pipe goredis.Pipeliner, key string, add bool) {
+func pipeIndex(pipe goredis.Pipeliner, key string) {
 	prefix := ""
 	for _, p := range strings.Split(key, "/")[1:] {
 		if p == "" || p == "." {
@@ -243,11 +274,7 @@ func pipeIndex(pipe goredis.Pipeliner, key string, add bool) {
 		if parent == "" {
 			parent = "/"
 		}
-		if add {
-			pipe.SAdd(bg, parent+"/.", p)
-		} else {
-			pipe.SRem(bg, parent+"/.", p)
-		}
+		pipe.SAdd(bg, parent+"/.", p)
 		prefix += "/" + p
 	}
 }

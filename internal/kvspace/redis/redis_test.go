@@ -115,3 +115,77 @@ func TestResolveCore_FnLink(t *testing.T) {
 		}
 	}
 }
+
+// ── delIndex 目录索引不变量测试（需本机 Redis，不可达则 skip）───────────────
+// 不变量：p ∈ parent/.  ⟺  parent/p 有值 或 parent/p/. 非空（fix-013）
+
+func testKV(t *testing.T) kvspace.KVSpace {
+	t.Helper()
+	kv := Conn("127.0.0.1:6379")
+	if err := kv.Set("/t13ping", kvspace.Int(1)); err != nil {
+		t.Skipf("redis unavailable: %v", err)
+	}
+	kv.Del("/t13ping")
+	return kv
+}
+
+func contains(ss []string, want string) bool {
+	for _, s := range ss {
+		if s == want { return true }
+	}
+	return false
+}
+
+func TestDelIndex_SiblingSurvives(t *testing.T) {
+	kv := testKV(t)
+	defer kv.DelTree("/t13a")
+	kv.Set("/t13a/b", kvspace.Int(1))
+	kv.Set("/t13a/c", kvspace.Int(2))
+	kv.Del("/t13a/b")
+	children, _ := kv.List("/t13a")
+	if !contains(children, "c") || contains(children, "b") {
+		t.Errorf("List(/t13a) = %v, want [c]", children)
+	}
+	root, _ := kv.List("/")
+	if !contains(root, "t13a") {
+		t.Errorf("兄弟 /t13a/c 仍存活，但 t13a 被误清出根索引")
+	}
+}
+
+func TestDelIndex_CascadeCleansGhost(t *testing.T) {
+	kv := testKV(t)
+	kv.Set("/t13b/x/y", kvspace.Int(1))
+	kv.Del("/t13b/x/y")
+	root, _ := kv.List("/")
+	if contains(root, "t13b") {
+		t.Errorf("空目录链未级联清理，根索引残留幽灵 t13b")
+	}
+}
+
+func TestDelIndex_ParentValueKeeps(t *testing.T) {
+	kv := testKV(t)
+	defer kv.DelTree("/t13c")
+	kv.Set("/t13c", kvspace.Int(5)) // 中间层自身有值
+	kv.Set("/t13c/k", kvspace.Int(1))
+	kv.Del("/t13c/k")
+	root, _ := kv.List("/")
+	if !contains(root, "t13c") {
+		t.Errorf("/t13c 自身有值，不应被清出根索引")
+	}
+}
+
+func TestDelIndex_DirWithChildrenKept(t *testing.T) {
+	kv := testKV(t)
+	defer kv.DelTree("/t13d")
+	kv.Set("/t13d", kvspace.Int(1))
+	kv.Set("/t13d/k", kvspace.Int(2))
+	kv.Del("/t13d") // 删除有子项的目录键：值删除，目录身份保留
+	children, _ := kv.List("/t13d")
+	if !contains(children, "k") {
+		t.Errorf("List(/t13d) = %v, want 含 k", children)
+	}
+	root, _ := kv.List("/")
+	if !contains(root, "t13d") {
+		t.Errorf("/t13d/. 非空，t13d 应保留于根索引")
+	}
+}
