@@ -1,0 +1,42 @@
+# numtypes: 全谱数字类型创建/转换算子（fix-021）
+# 语义: int8/16/32/64、uint8/16/32/64、float32/float64 十个算子既创建也转换；
+#       int/float 是 int64/float64 别名。float→int 截断向零；窄化=补码回绕（同 Go/Rust as、C 转换）；
+#       窄类型进入算术后提升至 int64/float64 运算域（C 整型提升风格），TLV kind 保持声明精度落盘
+# 期望输出:
+#   3.0
+#   0
+#   44
+#   255
+#   4464
+#   -2147483648
+#   4294967295
+#   18446744073709551615
+#   0.1
+#   16777216.0
+#   45
+#   -2
+def main() -> () {
+	f = float32(3)  # = 等价于 <-
+	print(f)
+	i <- int8(0.1)
+	print(i)
+	int8(300) -> w
+	print(w)
+
+	print(uint8(-1))
+	print(int16(70000))
+	print(int32(2147483648))
+	print(uint32(-1))
+	print(uint64(18446744073709551615))
+
+	p32 = float32(0.1)  # = 等价于 <-（float32 精度域）
+	print(p32)
+	print(float32(16777217))
+
+	sum <- w + 1
+	print(sum)
+	int16(-2) -> n
+	print(n)
+}
+
+main()
