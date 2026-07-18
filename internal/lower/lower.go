@@ -376,23 +376,22 @@ func isTerminator(s *ast.Instruction) bool {
 // evalCond 处理条件指令：
 //   - 简单槽引用（叶节点，无 Reads）→ 直接用 Val 作为槽名（如 while (hit)）
 //   - 简单比较（所有参数为叶节点）→ 写入临时槽 _N（如 while (i <= n)）
-//   - 嵌套表达式（如 add(a,b) > 0）→ 编译期 panic：先显式求值再用槽
+//   - 嵌套表达式（如 add(a,b) > 0、i < strlen(s)）→ 展平为临时槽指令序列后求值（fix-023）
 func evalCond(cond *ast.Instruction, lg *labelGen) (insts []ast.Stmt, slot string) {
 	if isCondSimpleSlot(cond) {
 		return nil, cond.Expr.Val
 	}
+	// 复合条件（含嵌套调用/算术，如 while (i < strlen(s))）：
+	// 先展平嵌套子表达式为临时槽指令序列（fix-023，原 tothink-001）。
+	// 展平指令与条件指令同置于条件块内，while 每轮 goto 回条件块时整体重算。
+	flat := cond
 	if !allArgsLeaf(cond.Expr) {
-		panic(fmt.Sprintf(
-			"kvlang read-write code: nested expression in condition is not allowed.\n"+
-				"  got: %v\n"+
-				"  fix: compute sub-expression first and assign to a slot, e.g.:\n"+
-				"       add(a, b) -> _cond_val\n"+
-				"       while (_cond_val > 0) { ... }",
-			cond.Expr,
-		))
+		var extra []ast.Stmt
+		flat, extra = flattenNestedCalls(cond, lg)
+		insts = append(insts, extra...)
 	}
 	slot = lg.tmp()
-	condInst := *cond
+	condInst := *flat
 	condInst.Writes = []string{slot}
 	insts = append(insts, &condInst)
 	return insts, slot

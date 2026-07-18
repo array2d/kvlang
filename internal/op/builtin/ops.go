@@ -83,6 +83,7 @@ const (
 // 字符串 built-in
 const (
 	OpChar   = "char"
+	OpOrd    = "ord"
 	OpStrLen = "strlen"
 	OpSlice  = "slice"
 	OpConcat = "concat"
@@ -121,7 +122,7 @@ var nativeOps = map[string]bool{
 	OpKVHas: true, OpKVAt: true,
 	OpArray: true, OpLen: true, OpAt: true, OpSet: true,
 	OpHas: true,
-	OpChar: true, OpStrLen: true, OpSlice: true, OpConcat: true,
+	OpChar: true, OpOrd: true, OpStrLen: true, OpSlice: true, OpConcat: true,
 	OpSort: true,
 	OpDict: true,
 }

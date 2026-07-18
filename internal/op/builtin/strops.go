@@ -7,7 +7,9 @@ import (
 	"kvlang/internal/vthread"
 )
 
-// strCharOp: char(s, i) -> int (returns byte value of s[i])
+// strCharOp: char(s, i) -> str —— 返回 s 的第 i 个字符（单字符字符串）。
+// fix-024：原返回字节码 int，与 Python s[i]/JS charAt 的动态语言直觉相悖
+// （kvlang 无独立 char 类型，字符即单字符 string）；越界返回 ""（缺席语义）。
 type strCharOp struct{}
 func (strCharOp) Call(f *op.Frame) error {
 	inputs := readInputs(f)
@@ -17,6 +19,23 @@ func (strCharOp) Call(f *op.Frame) error {
 	}
 	s := inputs[0].Str()
 	idx := int(inputs[1].Int64())
+	if idx < 0 || idx >= len(s) {
+		return writeResult(f, kvspace.Str(""))
+	}
+	return writeResult(f, kvspace.Str(s[idx:idx+1]))
+}
+
+// strOrdOp: ord(s) / ord(s, i) -> int —— 返回 s 第 i 个字符（默认 0）的字节码（fix-024 配套）。
+type strOrdOp struct{}
+func (strOrdOp) Call(f *op.Frame) error {
+	inputs := readInputs(f)
+	if len(inputs) < 1 {
+		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "ord requires a string")
+		return fmt.Errorf("ord requires a string")
+	}
+	s := inputs[0].Str()
+	idx := 0
+	if len(inputs) >= 2 { idx = int(inputs[1].Int64()) }
 	if idx < 0 || idx >= len(s) {
 		return writeResult(f, kvspace.Int64(-1))
 	}

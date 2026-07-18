@@ -55,27 +55,34 @@ func evalPow(inputs []kvspace.XValue) (kvspace.XValue, error) {
 	return kvspace.Float(math.Pow(asFloat(inputs[0]), asFloat(inputs[1]))), nil
 }
 
-func evalMinMax(inputs []kvspace.XValue, fn func(float64, float64) float64, strWin func(a, b kvspace.XValue) kvspace.XValue) (kvspace.XValue, error) {
+func evalMinMax(inputs []kvspace.XValue, fn func(float64, float64) float64, intWin func(a, b int64) int64, strWin func(a, b kvspace.XValue) kvspace.XValue) (kvspace.XValue, error) {
 	if err := requireBinary(inputs); err != nil { return kvspace.XValue{}, err }
-	a, b := inputs[0], inputs[1]
+	a, b := nilAsInt(inputs[0]), nilAsInt(inputs[1])
+	// int ∧ int → 原生 int64（fix-022：旧判据 Kind()=="int" 永假——字面量 kind 为 int64；
+	// 且经 float64 中转有 fix-020 同款精度问题）
+	if isIntKind(a.Kind()) && isIntKind(b.Kind()) {
+		return kvspace.Int(intWin(asInt(a), asInt(b))), nil
+	}
 	if isNumeric(a) && isNumeric(b) {
-		result := fn(asFloat(a), asFloat(b))
-		if a.Kind() == "int" && b.Kind() == "int" { return kvspace.Int(int64(result)), nil }
-		return kvspace.Float(result), nil
+		return kvspace.Float(fn(asFloat(a), asFloat(b))), nil
 	}
 	return strWin(a, b), nil
 }
 
 func evalMin(inputs []kvspace.XValue) (kvspace.XValue, error) {
-	return evalMinMax(inputs, math.Min, func(a, b kvspace.XValue) kvspace.XValue {
-		if a.Str() < b.Str() { return a }; return b
-	})
+	return evalMinMax(inputs, math.Min,
+		func(a, b int64) int64 { if a < b { return a }; return b },
+		func(a, b kvspace.XValue) kvspace.XValue {
+			if a.Str() < b.Str() { return a }; return b
+		})
 }
 
 func evalMax(inputs []kvspace.XValue) (kvspace.XValue, error) {
-	return evalMinMax(inputs, math.Max, func(a, b kvspace.XValue) kvspace.XValue {
-		if a.Str() > b.Str() { return a }; return b
-	})
+	return evalMinMax(inputs, math.Max,
+		func(a, b int64) int64 { if a > b { return a }; return b },
+		func(a, b kvspace.XValue) kvspace.XValue {
+			if a.Str() > b.Str() { return a }; return b
+		})
 }
 
 func evalSqrt(inputs []kvspace.XValue) (kvspace.XValue, error) {
