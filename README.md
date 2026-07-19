@@ -3,7 +3,7 @@
 [![CI](https://github.com/array2d/kvlang/actions/workflows/ci.yml/badge.svg)](https://github.com/array2d/kvlang/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Tutorial Examples](https://img.shields.io/badge/tutorials-93%20examples-4c1)](tutorial/)
+[![Tutorial Examples](https://img.shields.io/badge/tutorials-95%20examples-4c1)](tutorial/)
 
 **The VM of deepx (formerly dxlang) — an agent-native, train-inference-unified, self-iterating AI compute architecture.** kvspace tree paths form a single unified address space; one syntax simultaneously serves as VM instructions, high-level language, compiler IR, and human-readable source.
 
@@ -28,8 +28,8 @@ def add(A: int, B: int) -> (C: int) { A + B -> C }
 ```
 
 ```
-/func/main/add/[0,0]  = "+"     /func/main/add/[0,-1] = "A"
-/func/main/add/[0,-2] = "B"     /func/main/add/[0,1]  = "C"
+/lib/main/add/[0,0]  = "+"     /lib/main/add/[0,-1] = "A"
+/lib/main/add/[0,-2] = "B"     /lib/main/add/[0,1]  = "C"
 ```
 
 Four address-space domains: `/src` (source) `/func` (compiled functions) `/vthread` (runtime frames) `/sys` (infrastructure).
@@ -172,7 +172,7 @@ C-style API: `strlen`; `strcmp` returns -1/0/1; `strstr(hay, needle)` returns th
 
 ## Tutorial
 
-94 self-contained examples (93 with expected output, fully CI-verified), organized by topic:
+96 self-contained examples (95 with expected output, fully CI-verified), organized by topic:
 
 ```
 01-basics/        hello, arith, precision, numtypes, strings  (6 files)
@@ -180,6 +180,7 @@ C-style API: `strlen`; `strcmp` returns -1/0/1; `strstr(hay, needle)` returns th
 03-control/       if, while, for, guess game                  (5 files)
 04-algo/          fibonacci, gcd, collatz, ...                (13 files)
 05-leetcode/      LeetCode solutions                          (69 files)
+06-import/        import lib + main                            (2 files)
 ```
 
 ```bash
@@ -187,7 +188,7 @@ C-style API: `strlen`; `strcmp` returns -1/0/1; `strstr(hay, needle)` returns th
 ./kvlang tutorial/04-algo/fibonacci.kv       # fib = 55
 ./kvlang tutorial/05-leetcode/001_two_sum.kv # LeetCode
 
-python3 tutorial/test.py                     # all 93 examples — CI verification
+python3 tutorial/test.py                     # all 95 examples — CI verification
 ```
 
 ---

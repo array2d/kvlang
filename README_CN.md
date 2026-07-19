@@ -3,7 +3,7 @@
 [![CI](https://github.com/array2d/kvlang/actions/workflows/ci.yml/badge.svg)](https://github.com/array2d/kvlang/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Tutorial Examples](https://img.shields.io/badge/tutorials-93%20examples-4c1)](tutorial/)
+[![Tutorial Examples](https://img.shields.io/badge/tutorials-95%20examples-4c1)](tutorial/)
 
 **deepx 的 VM（原 dxlang），agent-native 训推一体自迭代强人工智能计算架构。** 以 kvspace 树形路径为统一地址空间，同种语法同时承担 VM 指令、高级语言、编译器 IR、人类可读源码四种职能。
 
@@ -172,10 +172,11 @@ C 风格 API：`strlen` 长度、`strcmp` 返 -1/0/1、`strstr(hay, needle)` 返
 
 ## Tutorial
 
-94 个自包含示例（93 例带期望输出，CI 全量验证），按主题组织：
+96 个自包含示例（95 例带期望输出，CI 全量验证），按主题组织：
 
 ```
 01-basics/        hello, arith, precision, numtypes, strings（6 files）
+06-import/        import lib + main                            （2 files）
 02-func/          def, call, accumulator                   (2 files)
 03-control/       if, while, for, guess game               (5 files)
 04-algo/          fibonacci, gcd, collatz, ...             (13 files)
@@ -187,7 +188,7 @@ C 风格 API：`strlen` 长度、`strcmp` 返 -1/0/1、`strstr(hay, needle)` 返
 ./kvlang tutorial/04-algo/fibonacci.kv       # fib = 55
 ./kvlang tutorial/05-leetcode/001_two_sum.kv # LeetCode
 
-python3 tutorial/test.py                     # 全部 93 例 — CI 验证
+python3 tutorial/test.py                     # 全部 95 例 — CI 验证
 ```
 
 ---
