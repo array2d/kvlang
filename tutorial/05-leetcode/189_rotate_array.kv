@@ -10,13 +10,16 @@
 #   3
 #   4
 def swap(a_len:int, lo:int, hi:int) -> () {
-	while (lo < hi) {
-		a[lo] -> t
-		u <- a[hi]
-		a[lo] <- u
-		a[hi] <- t
-		lo = lo + 1  # = 等价于 <-
-		hi - 1 -> hi
+	a_len -> a_lenv
+	lo -> lov
+	hi -> hiv
+	while (lov < hiv) {
+		a[lov] -> t
+		u <- a[hiv]
+		a[lov] <- u
+		a[hiv] <- t
+		lov = lov + 1  # = 等价于 <-
+		hiv - 1 -> hiv
 	}
 }
 

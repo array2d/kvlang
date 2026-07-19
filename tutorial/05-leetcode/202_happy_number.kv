@@ -3,11 +3,12 @@
 # 期望输出:
 #   1
 def is_happy(n:int) -> (result:int) {
+	n -> nv
 	0 -> slow
-	fast <- n
+	fast <- nv
 	found = 0  # = 等价于 <-
 	while (found == 0) {
-		n -> x
+		nv -> x
 		s <- 0
 		while (x > 0) {
 			d = x % 10  # = 等价于 <-
@@ -15,8 +16,8 @@ def is_happy(n:int) -> (result:int) {
 			s <- s + d2
 			x = x / 10  # = 等价于 <-
 		}
-		s -> n
-		done <- n == 1
+		s -> nv
+		done <- nv == 1
 
 		if (done) {
 			found = 1  # = 等价于 <-

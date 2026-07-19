@@ -1,0 +1,35 @@
+# accumulator: 累加器的角色归位（fix-027 推论）
+# 语义: 累加器的最终值是调用方要的 → 它是输出 → 声明为写参。
+#       写参零值起步（首读 nil 按 int 0，fix-017），体内可读可写，return 映射给调用方
+#       ——等价于 Go 的命名返回值 func sum(arr []int) (acc int)。
+#       递归形态则相反：acc 是传给下一层的输入 → 读参，本层只读（算新值传下层）。
+# 期望输出:
+#   10
+#   10
+def sum(arr) -> (acc:int) {
+	n = len(arr)  # = 等价于 <-
+	0 -> i
+	while (i < n) {
+		acc + arr[i] -> acc
+		i <- i + 1
+	}
+}
+
+def rsum(arr, i:int, acc:int) -> (r:int) {
+	n <- len(arr)
+
+	if (i >= n) {
+		acc -> r
+	} else {
+		rsum(arr, i + 1, acc + arr[i]) -> r
+	}
+}
+
+def main() -> () {
+	sum([1, 2, 3, 4]) -> s1
+	print(s1)
+	rsum([1, 2, 3, 4], 0, 0) -> s2
+	print(s2)
+}
+
+main()

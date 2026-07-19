@@ -3,16 +3,17 @@
 # 期望输出:
 #   steps = 111
 def collatz(n:int) -> (steps:int) {
+	n -> nv
 	0 -> steps
-	while (n > 1) {
-		mod <- n % 2
+	while (nv > 1) {
+		mod <- nv % 2
 		even = mod == 0  # = 等价于 <-
 
 		if (even) {
-			n / 2 -> n
+			nv / 2 -> nv
 		} else {
-			t <- n * 3
-			n = t + 1  # = 等价于 <-
+			t <- nv * 3
+			nv = t + 1  # = 等价于 <-
 		}
 
 		steps + 1 -> steps

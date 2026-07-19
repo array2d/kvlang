@@ -3,13 +3,15 @@
 # 期望输出:
 #   5
 def get_sum(a:int, b:int) -> () {
-	while (b != 0) {
-		carry = a & b  # = 等价于 <-
+	a -> av
+	b -> bv
+	while (bv != 0) {
+		carry = av & bv  # = 等价于 <-
 		carry << 1 -> c2
-		a <- a ^ b
-		b = c2  # = 等价于 <-
+		av <- av ^ bv
+		bv = c2  # = 等价于 <-
 	}
-	print(a)
+	print(av)
 }
 
 get_sum(2, 3)

@@ -3,17 +3,18 @@
 # 期望输出:
 #   2
 def add_digits(n:int) -> () {
-	while (n >= 10) {
+	n -> nv
+	while (nv >= 10) {
 		s = 0  # = 等价于 <-
-		n -> x
+		nv -> x
 		while (x > 0) {
 			d <- x % 10
 			s = s + d  # = 等价于 <-
 			x / 10 -> x
 		}
-		n <- s
+		nv <- s
 	}
-	print(n)
+	print(nv)
 }
 
 add_digits(38)
