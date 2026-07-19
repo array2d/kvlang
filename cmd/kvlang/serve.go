@@ -58,7 +58,8 @@ func executeEntry(kv kvspace.KVSpace, debug bool) {
 func reportRunError(kv kvspace.KVSpace, vtid string) {
 	msgVal, err := kv.Get(keytree.VThreadStatusMsg(vtid, "error"))
 	if err == nil && !msgVal.IsNil() {
-		fmt.Fprintln(os.Stderr, "error:", msgVal.Str())
+		pcVal, _ := kv.Get(keytree.VThreadPC(vtid))
+		fmt.Fprintln(os.Stderr, "error:", msgVal.Str(), "at", pcVal.Str())
 		os.Exit(1)
 	}
 }
