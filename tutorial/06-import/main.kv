@@ -1,0 +1,12 @@
+# main.kv: import 示例（fix-033）
+# 期望输出:
+#   7
+#   6
+import "lib"
+
+init {
+    add(3, 4) -> s
+    print(s)
+    double(3) -> d
+    print(d)
+}
