@@ -28,6 +28,10 @@ import (
 // ".fn" 以 "." 开头，遵循引擎保留键的统一约定（用户代码禁止写 "." 前缀键）。
 func FnCode(frameRoot string) string { return frameRoot + "/.fn" }
 
+// FrameRO 返回帧的只读参数名单键：frameRoot + "/.ro"（fix-027 读参写保护，
+// Bootstrap/HandleCall 绑定参数时写入逗号分隔名单，kvcpu 写槽检查用）。
+func FrameRO(frameRoot string) string { return frameRoot + "/.ro" }
+
 // FrameRoot 从任意指令绝对 PC 提取帧根（即 callPC）。
 //
 // 所有合法执行 PC 均由 Bootstrap / HandleCall 产生，格式保证含 "/.fn/"。

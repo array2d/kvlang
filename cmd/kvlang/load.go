@@ -90,6 +90,7 @@ func runCode(name string, rc io.Reader, dsn string, debug bool) {
 	df, diags, err := parser.ParseCode(rc)
 	if err != nil { logx.Fatal("parse: %v", err) }
 	for _, d := range diags { logx.Warn("parse: %s", d) }
+	if parser.HasErrors(diags) { logx.Fatal("parse: error-level diagnostics — refusing to execute") }
 	if len(df.Funcs) == 0 && len(df.TopLevelCalls) == 0 { logx.Fatal("no executable code found") }
 
 	for i := range df.Funcs {
@@ -108,6 +109,7 @@ func loadFunctions(kv kvspace.KVSpace, files []string) {
 		df, diags, err := parser.ParseFile(f)
 		if err != nil { logx.Warn("SKIP %s: %v", f, err); continue }
 		for _, d := range diags { logx.Warn("%s: %s", f, d) }
+		if parser.HasErrors(diags) { logx.Fatal("%s: error-level diagnostics — refusing to load", f) }
 		pkg := packageFromPath(f)
 		for i := range df.Funcs {
 			layoutcode.WriteFunc(kv, pkg, lower.Func(&df.Funcs[i]))

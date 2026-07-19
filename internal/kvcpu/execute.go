@@ -1,6 +1,7 @@
 package kvcpu
 
 import (
+	"strings"
 	"context"
 	"fmt"
 
@@ -112,6 +113,11 @@ func (c *cpu) Execute(pc string) error {
 			}
 		}
 
+		// 读参写保护（fix-027）：裸名写槽命中帧 .ro 名单 → 异常终止
+		if err := c.checkReadOnlyWrites(ctx, vtid, pc, inst); err != nil {
+			return err
+		}
+
 		var execErr error
 		switch {
 
@@ -165,6 +171,38 @@ func (c *cpu) Execute(pc string) error {
 // 值引用在读槽（bare ident / literal / /abs），由 ExecuteCopy → resolveReadValue 解析。
 func isCopyOp(opcode string, writes []string) bool {
 	return opcode == "=" && len(writes) > 0
+}
+
+// checkReadOnlyWrites 读参只读公理的运行期防线（fix-027）：
+// 带写槽的指令，裸名写槽（无 / . [ 形态）命中当前帧 .ro 名单（Bootstrap/HandleCall 写入）
+// → SetError 异常终止。set 的 `-> base` 本体回写（写回原值，fix-013）豁免。
+// 编译期 parser 已阻断源码路径，此处兜底 agent 直写 KV 构造的指令。
+func (c *cpu) checkReadOnlyWrites(ctx context.Context, vtid, pc string, inst *op.Instruction) error {
+	if len(inst.Writes) == 0 {
+		return nil
+	}
+	roVal, _ := c.kv.Get(keytree.FrameRO(keytree.FrameRoot(pc)))
+	ro := roVal.Str()
+	if ro == "" {
+		return nil
+	}
+	names := strings.Split(ro, ",")
+	for i, w := range inst.Writes {
+		if strings.ContainsAny(w, "/.[") {
+			continue
+		}
+		if inst.Opcode == "set" && i == 0 && len(inst.Reads) > 0 && w == inst.Reads[0] {
+			continue
+		}
+		for _, n := range names {
+			if w == n {
+				msg := fmt.Sprintf("read-only param %q cannot be used as write slot", w)
+				vthread.SetError(ctx, c.kv, vtid, pc, msg)
+				return fmt.Errorf("%s", msg)
+			}
+		}
+	}
+	return nil
 }
 
 // RunWorker 单个 worker 的主循环。

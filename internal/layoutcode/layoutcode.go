@@ -26,6 +26,7 @@ package layoutcode
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"kvlang/internal/ast"
 	"kvlang/internal/keytree"
@@ -121,10 +122,15 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	kv.Set(frameRoot+"/.rootfunc", kvspace.Str(funcName))
 
 	// 绑定参数：从调用方帧解析实参值后写入子帧（不经过链接）
-	for i, param := range funcSig.ParamNames() {
+	params := funcSig.ParamNames()
+	for i, param := range params {
 		if i+1 < len(inst.Reads) {
 			kv.Set(frameRoot+"/"+param, builtin.ResolveReadValue(kv, callerFrameRoot, inst.Reads[i+1]))
 		}
+	}
+	if len(params) > 0 {
+		// 读参只读名单（fix-027）：kvcpu 写槽检查的运行期防线
+		kv.Set(keytree.FrameRO(frameRoot), kvspace.Str(strings.Join(params, ",")))
 	}
 
 	// 写槽路径已在调用指令 [addr0,1], [addr0,2], ... 中，HandleReturn 从 .callpc 直接读，
@@ -237,10 +243,14 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 	if len(args) > 0 {
 		sigVal, _ := kv.Get(funcKey)
 		sig := parser.ParseFuncSig(sigVal.Str())
-		for i, param := range sig.ParamNames() {
+		params := sig.ParamNames()
+		for i, param := range params {
 			if i < len(args) {
 				kv.Set(vthreadRoot+"/"+param, builtin.ResolveReadValue(kv, "", args[i]))
 			}
+		}
+		if len(params) > 0 {
+			kv.Set(keytree.FrameRO(vthreadRoot), kvspace.Str(strings.Join(params, ","))) // fix-027
 		}
 	}
 

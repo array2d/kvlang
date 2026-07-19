@@ -49,6 +49,10 @@ func cmdVet(args []string) {
 	for _, d := range diags {
 		fmt.Fprintf(os.Stderr, "%s:%d:%d: %s\n", name, d.Pos.Line, d.Pos.Col, d.Message)
 	}
+	if parser.HasErrors(diags) {
+		fmt.Fprintf(os.Stderr, "%s: FAIL\n", name)
+		os.Exit(1)
+	}
 	printVetResult(name, df, *dump, *lowerFlag)
 }
 

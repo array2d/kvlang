@@ -179,7 +179,74 @@ func (p *parser) parseFunc() ast.Func {
 	p.expect(LBrace)
 	body := p.parseBody()
 	p.expect(RBrace)
-	return ast.Func{Sig: sig, Body: body}
+	fn := ast.Func{Sig: sig, Body: body}
+	p.checkReadOnlyParams(&fn)
+	return fn
+}
+
+// checkReadOnlyParams 读参只读公理（fix-027）：读参是「调用方 → 被调方」的输入绑定，
+// 函数体内任何指令/子函数调用把读参裸名放进写槽 = 破坏读写码数据流方向 → error 级诊断。
+// 豁免：成员写脱糖形态 set(base, k, v) -> base 的本体回写（写回原值，见 fix-013）；
+// A.x / A[i] 写的是成员键非本体，脱糖后即上述 set 形态。
+func (p *parser) checkReadOnlyParams(fn *ast.Func) {
+	ro := map[string]bool{}
+	for _, n := range fn.Sig.ParamNames() {
+		ro[n] = true
+	}
+	if len(ro) == 0 {
+		return
+	}
+	bad := func(w string) {
+		p.errors = append(p.errors, Diagnostic{Message: fmt.Sprintf(
+			"func %s: read param %q cannot be used as write slot (read params are read-only)",
+			fn.Sig.Name, w)})
+	}
+	check := func(inst *ast.Instruction) {
+		for i, w := range inst.Writes {
+			if strings.ContainsAny(w, "/.[") {
+				continue // 路径 / 成员键 / 下标形态：非本体写
+			}
+			if inst.Expr != nil && inst.Expr.Op == "set" && i == 0 &&
+				len(inst.Expr.Args) > 0 && w == inst.Expr.Args[0].Val {
+				continue // set 本体回写豁免
+			}
+			if ro[w] {
+				bad(w)
+			}
+		}
+	}
+	var walk func(body []ast.Stmt)
+	walk = func(body []ast.Stmt) {
+		for _, st := range body {
+			switch s := st.(type) {
+			case *ast.Instruction:
+				check(s)
+			case *ast.IfStmt:
+				walk(s.Then)
+				walk(s.Else)
+			case *ast.WhileStmt:
+				walk(s.Body)
+			case *ast.ForStmt:
+				if ro[s.Var] {
+					bad(s.Var)
+				}
+				walk(s.Body)
+			case *ast.BlockStmt:
+				walk(s.Body)
+			}
+		}
+	}
+	walk(fn.Body)
+}
+
+// HasErrors 报告诊断中是否存在 error 级（非 Warn）条目。
+func HasErrors(diags []Diagnostic) bool {
+	for _, d := range diags {
+		if !d.Warn {
+			return true
+		}
+	}
+	return false
 }
 
 // ── 签名解析 ───────────────────────────────────────────────────
