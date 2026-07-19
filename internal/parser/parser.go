@@ -186,6 +186,7 @@ func (p *parser) parseFile() *ast.File {
 // parseFunc 解析单个函数定义：def name(...) -> (...) { body }
 func (p *parser) parseFunc() ast.Func {
 	sig := p.parseFuncSig()
+	p.checkParamDup(&sig)
 	p.skipNewlinesAndComments()
 	p.expect(LBrace)
 	body := p.parseBody()
@@ -193,6 +194,23 @@ func (p *parser) parseFunc() ast.Func {
 	fn := ast.Func{Sig: sig, Body: body}
 	p.checkReadOnlyParams(&fn)
 	return fn
+}
+
+// checkParamDup 参数不可同名，尤其读参列表与写参列表之间（fix-032）。
+// def f(A:int) -> (A:int) 中 A 同时是读参又是写参 → 签名非法。
+func (p *parser) checkParamDup(sig *ast.FuncSig) {
+	seen := map[string]bool{}
+	for _, param := range sig.ParamNames() {
+		seen[param] = true
+	}
+	for _, ret := range sig.Returns {
+		if seen[ret.Name] {
+			p.errors = append(p.errors, Diagnostic{Message: fmt.Sprintf(
+				"func %s: param %q appears in both read-params and write-params — a param is either read-only or write-only, pick one",
+				sig.Name, ret.Name)})
+		}
+		seen[ret.Name] = true
+	}
 }
 
 // checkReadOnlyParams 读参只读公理（fix-027）：读参是「调用方 → 被调方」的输入绑定，

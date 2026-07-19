@@ -96,6 +96,12 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	}
 	funcSig := parser.ParseFuncSig(sigVal.Str())
 
+	// 参数不可同名（fix-032：parser 已拦截，VM 兜底 agent 直写 KV 构造的非法签名）
+	if err := checkDupParams(funcSig, funcName); err != "" {
+		vthread.SetError(ctx, kv, vtid, pc, err)
+		return ""
+	}
+
 	// TCO：复用当前帧，仅重链 .fn 到目标块代码区（.rootfunc 不更新，保持根函数名）
 	if tail {
 		frameRoot := keytree.FrameRoot(pc)
@@ -243,6 +249,10 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 	if len(args) > 0 {
 		sigVal, _ := kv.Get(funcKey)
 		sig := parser.ParseFuncSig(sigVal.Str())
+		if err := checkDupParams(sig, funcName); err != "" {
+			vthread.SetError(ctx, kv, vtid, "", err)
+			return ""
+		}
 		params := sig.ParamNames()
 		for i, param := range params {
 			if i < len(args) {
@@ -292,4 +302,18 @@ func WriteFunc(kv kvspace.KVSpace, pkg string, fn *ast.Func) {
 	WriteBody(kv, pkg, fn.Sig.Name, fn.Body)
 	RegisterBlocks(kv, pkg, fn.Sig.Name, fn.Body)
 	kv.Set(keytree.FuncIdx(fn.Sig.Name), kvspace.Str(pkg))
+}
+
+// checkDupParams 参数不可同名（fix-032：VM 运行时兜底，parser 已拦截源码路径）。
+func checkDupParams(sig ast.FuncSig, funcName string) string {
+	seen := map[string]bool{}
+	for _, p := range sig.ParamNames() {
+		if seen[p] { return fmt.Sprintf("func %s: duplicate read-param %q", funcName, p) }
+		seen[p] = true
+	}
+	for _, r := range sig.Returns {
+		if seen[r.Name] { return fmt.Sprintf("func %s: param %q appears in both read-params and write-params", funcName, r.Name) }
+		seen[r.Name] = true
+	}
+	return ""
 }
