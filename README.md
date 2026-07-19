@@ -55,7 +55,7 @@ echo '40 + 2 -> x; print(x)' | ./kvlang      # pipe mode (; separates statements
 
 ### Program Structure (read this first)
 
-**Top level allows only two things: single instructions (assignments / builtin calls) and function calls. `if` / `while` / `for` must live inside a `def` body.** The convention is to define `main` and call it:
+**Top level: `import`, `lib name { }`, `init { }`, `def`, and single instructions.** Bare `if` / `while` / `for` at the top level are auto-wrapped into an implicit `def __init__() { … }`. The convention is to define `main` and call it:
 
 ```kv
 def main() -> () {
