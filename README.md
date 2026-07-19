@@ -3,7 +3,7 @@
 [![CI](https://github.com/array2d/kvlang/actions/workflows/ci.yml/badge.svg)](https://github.com/array2d/kvlang/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Tutorial Examples](https://img.shields.io/badge/tutorials-92%20examples-4c1)](tutorial/)
+[![Tutorial Examples](https://img.shields.io/badge/tutorials-93%20examples-4c1)](tutorial/)
 
 **deepx 的 VM（原 dxlang），agent-native 训推一体自迭代强人工智能计算架构。** 以 kvspace 树形路径为统一地址空间，同种语法同时承担 VM 指令、高级语言、编译器 IR、人类可读源码四种职能。
 
@@ -159,19 +159,20 @@ for (x in arr) { ... }        # 遍历键族数组
 
 ### 内建函数
 
-`abs` `neg` `sign` `pow` `sqrt` `exp` `log` `min` `max` `print` `cerr` `input`\
-`int` `float` `bool` 及十个精度算子 · `char` `ord` `strlen` `slice` `concat` · `array` `len` `at` `set` `has` `sort` `dict` `kvat` `kvhas`
+`abs` `neg` `sign` `pow` `sqrt` `exp` `log` `min` `max`（变参，如 `max(a,b,c)`）`print` `cerr` `input`\
+`int` `float` `bool` 及十个精度算子 · `char` `ord` `strlen` `strcmp` `strstr` `slice` `concat` · `array` `len` `at` `set` `has` `sort` `dict` `kvat` `kvhas`
 
-字符串按字符处理：`strlen(s)` 取长度，`char(s, i)` 取第 i 个字符（单字符字符串，可与 `"a"` 直接比较），`ord(s, i)` 取字节码（做算术用）。
+字符串支持索引与拼接：`s[i]` 读第 i 个字符（单字符字符串，可与 `"a"` 直接比较，越界返 `""`），`s[i] = "X"` 单字符替换（写回新串），`a + b` 拼接。
+C 风格 API：`strlen` 长度、`strcmp` 返 -1/0/1、`strstr(hay, needle)` 返首次下标（未找到 -1）、`ord(c)` 取字节码（如 `ord(s[i])`）。
 
 ---
 
 ## Tutorial
 
-93 个自包含示例（92 例带期望输出，CI 全量验证），按主题组织：
+94 个自包含示例（93 例带期望输出，CI 全量验证），按主题组织：
 
 ```
-01-basics/        hello, vars, arith, precision, numtypes  (5 files)
+01-basics/        hello, arith, precision, numtypes, strings（6 files）
 02-func/          def, call, nested calls                  (1 file)
 03-control/       if, while, for, guess game               (5 files)
 04-algo/          fibonacci, gcd, collatz, ...             (13 files)
@@ -183,7 +184,7 @@ for (x in arr) { ... }        # 遍历键族数组
 ./kvlang tutorial/04-algo/fibonacci.kv       # fib = 55
 ./kvlang tutorial/05-leetcode/001_two_sum.kv # LeetCode
 
-python3 tutorial/test.py                     # 全部 92 例 — CI 验证
+python3 tutorial/test.py                     # 全部 93 例 — CI 验证
 ```
 
 ---
