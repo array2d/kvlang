@@ -83,7 +83,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 
 	pkgVal, err := kv.Get(keytree.LibIdx(funcName))
 	pkg := pkgVal.Str()
-	if err != nil || pkg == "" {
+	if err != nil || pkgVal.IsNil() {
 		vthread.SetError(ctx, kv, vtid, pc, "NameError: func not found: "+funcName)
 		return ""
 	}
@@ -229,7 +229,7 @@ func RegisterBlocks(kv kvspace.KVSpace, pkg, parent string, body []ast.Stmt) {
 func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, args []string) string {
 	pkgVal, err := kv.Get(keytree.LibIdx(funcName))
 	pkg := pkgVal.Str()
-	if err != nil || pkg == "" {
+	if err != nil || pkgVal.IsNil() {
 		vthread.SetError(ctx, kv, vtid, "", "Bootstrap: NameError: func not found: "+funcName)
 		return ""
 	}

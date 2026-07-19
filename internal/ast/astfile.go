@@ -8,5 +8,4 @@ type File struct {
 	TopLevelCalls []*Instruction // def 块外部的顶层调用（Expr=表达式，Writes=输出槽）
 	Imports       []string       // import 导入列表（fix-033）
 	ImportPaths   []string       // import "path" 引号文件导入子集（与 Imports 同序；fix-035，loader 用来区分文件 vs kvspace）
-	InitBody      []Stmt         // init { ... } 初始化块（fix-033）
 }

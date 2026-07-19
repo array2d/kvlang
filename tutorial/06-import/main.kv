@@ -1,12 +1,8 @@
-# main.kv: import 示例（fix-033）
-# 期望输出:
-#   7
-#   6
-import "lib"
+# main.kv: import 示例——import 为文档级声明
+# 运行: kvlang run lib.kv main.kv
+import math
 
-init {
-    add(3, 4) -> s
-    print(s)
-    double(3) -> d
-    print(d)
-}
+sum(3, 4) -> s
+print(s)
+twice(3) -> d
+print(d)

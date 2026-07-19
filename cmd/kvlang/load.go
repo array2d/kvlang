@@ -59,7 +59,7 @@ func cmdRun(args []string) {
 	case *code != "":
 		runCode("inline", strings.NewReader(*code), *dsn, *debug)
 	case fs.NArg() > 0:
-		runFile(*dsn, fs.Arg(0), *debug)
+		runFiles(*dsn, fs.Args(), *debug)
 	case !isTerminal():
 		runCode("stdin", os.Stdin, *dsn, *debug)
 	default:
@@ -68,14 +68,18 @@ func cmdRun(args []string) {
 }
 
 // runFile 加载 .kv 文件后单次执行。
-func runFile(dsn, path string, debug bool) {
+func runFiles(dsn string, paths []string, debug bool) {
 	kv := kvspace.Conn(dsn)
 	defer kv.DisConn()
 	registerDefaultTerm(kv)
 
-	files, err := collectKVFiles(path)
-	if err != nil { logx.Fatal("collect .kv files: %v", err) }
-	if len(files) == 0 { logx.Fatal("no .kv files found in: %s", path) }
+	var files []string
+	for _, p := range paths {
+		f, err := collectKVFiles(p)
+		if err != nil { logx.Fatal("collect .kv files: %v", err) }
+		files = append(files, f...)
+	}
+	if len(files) == 0 { logx.Fatal("no .kv files found") }
 
 	loadFunctions(kv, files)
 	executeEntry(kv, debug)
@@ -91,34 +95,17 @@ func runCode(name string, rc io.Reader, dsn string, debug bool) {
 	if err != nil { logx.Fatal("parse: %v", err) }
 	for _, d := range diags { d.SrcName = "<inline>"; logx.Warn("parse: %s", d) }
 	if parser.HasErrors(diags) { logx.Fatal("parse: error-level diagnostics — refusing to execute") }
-	if len(df.Funcs) == 0 && len(df.TopLevelCalls) == 0 && len(df.InitBody) == 0 { logx.Fatal("no executable code found") }
-	// kvspace import 断言（fix-033 inline 模式）
-	for _, imp := range df.Imports {
-		if !strings.Contains(imp, ".") && !strings.Contains(imp, "/") {
-			if kids, err := kv.List(keytree.LibFunc(imp, "")); err != nil || len(kids) == 0 {
-				logx.Fatal("kvspace package %q not found — load it first", imp)
-			}
-		}
-	}
-
+	if len(df.Funcs) == 0 && len(df.TopLevelCalls) == 0 { return }
 	for i := range df.Funcs {
 		layoutcode.WriteFunc(kv, "main", lower.Func(&df.Funcs[i]))
 	}
-	allCalls := df.TopLevelCalls
-	var initInsts []*ast.Instruction
-	for _, st := range df.InitBody {
-		if inst, ok := st.(*ast.Instruction); ok {
-			initInsts = append(initInsts, inst)
-		}
-	}
-	allCalls = append(initInsts, allCalls...)
-	layoutcode.WriteFunc(kv, "main", makeInitFunc(allCalls))
+	layoutcode.WriteFunc(kv, "main", makeInitFunc(df.TopLevelCalls))
 	kv.Set(keytree.LibMain, kvspace.Str(`{"entry":"init","reads":[],"writes":[]}`))
 	executeEntry(kv, debug)
 }
 
 // loadFunctions 将多个 .kv 文件解析、lower 并写入 kvspace，合成 init 入口。
-// 递归加载 import 的文件（Python 式去重：已加载跳过，fix-033）。
+// import 在 kvspace 模型中为文档级声明——多文件 run 时全部函数已自然就绪（fix-033）。
 func loadFunctions(kv kvspace.KVSpace, files []string) {
 	var allCalls []*ast.Instruction
 	anyCode := false
@@ -126,68 +113,32 @@ func loadFunctions(kv kvspace.KVSpace, files []string) {
 	for _, f := range files {
 		_loadFile(kv, f, &allCalls, &anyCode, loaded)
 	}
-	if !anyCode { logx.Fatal("no executable code found") }
+	if !anyCode && len(allCalls) == 0 { return }
 	layoutcode.WriteFunc(kv, "main", makeInitFunc(allCalls))
 	kv.Set(keytree.LibMain, kvspace.Str(`{"entry":"init","reads":[],"writes":[]}`))
 }
 
-func _loadFile(kv kvspace.KVSpace, f string, allCalls *[]*ast.Instruction, anyCode *bool, loaded map[string]bool) {
+func _loadFile(kv kvspace.KVSpace, f string, allCalls *[]*ast.Instruction, anyCode *bool, loaded map[string]bool) []string {
 	abs, _ := filepath.Abs(f)
-	if loaded[abs] { return }
+	if loaded[abs] { return nil }
 	loaded[abs] = true
 
 	df, diags, err := parser.ParseFile(f)
-	if err != nil { logx.Warn("SKIP %s: %v", f, err); return }
+	if err != nil { logx.Warn("SKIP %s: %v", f, err); return nil }
 	for _, d := range diags { d.SrcName = f; logx.Warn("%s: %s", f, d) }
 	if parser.HasErrors(diags) { logx.Fatal("%s: error-level diagnostics — refusing to load", f) }
 
-	// 递归加载 import 的文件（fix-033）
-	dir := filepath.Dir(f)
-	for _, imp := range df.Imports {
-		// kvspace import（裸名，非引号）vs 文件 import（引号字符串）（fix-035）
-	isFile := false
-	for _, p := range df.ImportPaths {
-		if p == imp { isFile = true; break }
-	}
-	if !isFile {
-		// kvspace import：断言 /lib/<pkg>/ 存在
-		kids, err := kv.List(keytree.LibFunc(imp, ""))
-		if err != nil || len(kids) == 0 {
-			logx.Fatal("%s: kvspace package %q not found — load it first (kvlang load <file.kv>)", f, imp)
-		}
-		continue
-	}
-	// 文件 import：import "pkg" → pkg.kv
-	ipath := filepath.Join(dir, imp)
-	if !strings.HasSuffix(ipath, ".kv") { ipath += ".kv" }
-	_loadFile(kv, ipath, allCalls, anyCode, loaded)
-	}
+	// 收集 import 列表，交由 loadFunctions 阶段 2 校验
+	impList := df.Imports
 
-	pkg := packageFromPath(f)
+	pkg := df.Package // lib name { } 声明，空即匿名直放 /lib/<name>
 	for i := range df.Funcs {
 		layoutcode.WriteFunc(kv, pkg, lower.Func(&df.Funcs[i]))
 		*anyCode = true
 	}
-	// init { ... } 体合并为顶层调用序列（fix-033）
-	for _, st := range df.InitBody {
-		if inst, ok := st.(*ast.Instruction); ok {
-			*allCalls = append(*allCalls, inst)
-			*anyCode = true
-		}
-	}
 	*allCalls = append(*allCalls, df.TopLevelCalls...)
 	if len(df.TopLevelCalls) > 0 { *anyCode = true }
-}
-
-// packageFromPath 从 .kv 文件路径中推导包名。
-// 取文件所在目录的末级名称，当目录为 "." 或空时返回 "main"。
-func packageFromPath(path string) string {
-	dir := filepath.Dir(path)
-	base := filepath.Base(dir)
-	if base == "." || base == "" || base == "/" {
-		return "main"
-	}
-	return base
+	return impList
 }
 
 // collectKVFiles 收集 path（文件或目录）下所有 .kv 文件路径。

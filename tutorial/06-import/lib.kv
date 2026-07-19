@@ -1,10 +1,10 @@
 # lib.kv: 被导入的数学库（lib block 显式声明包名）
 lib math {
-    def add(A:int, B:int) -> (C:int) {
+    def sum(A:int, B:int) -> (C:int) {
         A + B -> C
     }
 
-    def double(A:int) -> (R:int) {
+    def twice(A:int) -> (R:int) {
         A * 2 -> R
     }
 }

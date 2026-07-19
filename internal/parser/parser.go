@@ -163,11 +163,8 @@ func (p *parser) parseFile() *ast.File {
 		if p.peek().Kind == Ident && p.peek().Value == "import" {
 			p.advance() // consume "import"
 			var imp string
-			isQuoted := false
-			// import "path/to/file.kv" — 文件系统路径
 			if p.peek().Kind == Literal && p.peek().Quote == '"' {
 				imp = p.advance().Value
-				isQuoted = true
 			} else if p.peek().Kind == Ident {
 				// import pkg — kvspace /lib/<pkg>/ 包引用
 				imp = p.advance().Value
@@ -192,7 +189,6 @@ func (p *parser) parseFile() *ast.File {
 				}
 			}
 			f.Imports = append(f.Imports, imp)
-			if isQuoted { f.ImportPaths = append(f.ImportPaths, imp) }
 			p.eat(Newline)
 			continue
 		}
@@ -217,20 +213,7 @@ func (p *parser) parseFile() *ast.File {
 			p.expect(RBrace)
 			continue
 		}
-		// init { ... } — 初始化块（fix-033）
-		if p.peek().Kind == Ident && p.peek().Value == "init" && p.peekAt(1).Kind == LBrace {
-			p.advance() // consume "init"
-			p.advance() // consume {
-			p.skipNewlines()
-			for p.peek().Kind != RBrace && p.peek().Kind != EOF {
-				st := p.parseStmt()
-				if st != nil { f.InitBody = append(f.InitBody, st) }
-				p.skipNewlines()
-			}
-			p.expect(RBrace)
-			continue
-		}
-		if p.peek().Kind == Ident && p.peek().Value == "def" {
+if p.peek().Kind == Ident && p.peek().Value == "def" {
 			if f.Package == "" {
 				p.errors = append(p.errors, Diagnostic{Pos: p.peek().Pos, Warn: true,
 					Message: fmt.Sprintf("def outside lib block — registering under /lib/<name>; consider wrapping in 'lib pkgname { }'")})
