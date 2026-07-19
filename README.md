@@ -5,23 +5,23 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Tutorial Examples](https://img.shields.io/badge/tutorials-93%20examples-4c1)](tutorial/)
 
-**deepx 的 VM（原 dxlang），agent-native 训推一体自迭代强人工智能计算架构。** 以 kvspace 树形路径为统一地址空间，同种语法同时承担 VM 指令、高级语言、编译器 IR、人类可读源码四种职能。
+**The VM of deepx (formerly dxlang) — an agent-native, train-inference-unified, self-iterating AI compute architecture.** kvspace tree paths form a single unified address space; one syntax simultaneously serves as VM instructions, high-level language, compiler IR, and human-readable source.
 
-> 中文文档: [README_CN.md](README_CN.md) | 设计规范: [deepx-design](https://github.com/array2d/deepx-design)（架构细节、模块职责、深度理解均在此仓）
+> 中文文档: [README_CN.md](README_CN.md) | Design specs: [deepx-design](https://github.com/array2d/deepx-design) (architecture details, module responsibilities, deep-dive)
 
 ---
 
-## 核心模型：一屏看懂
+## Core Model in One Screen
 
-**不分 IR 层，源码即 IR。** 程序计数器是 kvspace 路径字符串，调用栈深度 = 路径深度：
+**No IR layers — source IS the IR.** The program counter is a kvspace path string; call-stack depth equals path depth:
 
 ```
-PC   = "/vthread/tid/[0,0]/.fn/[1,0]"    程序计数器是 KV 路径
-指令 = kv.Get(PC)                         取指是一次 KV 读
-调用 = 创建子树；返回 = 清理子树           崩溃后按 PC 重启继续
+PC    = "/vthread/tid/[0,0]/.fn/[1,0]"    the program counter is a KV path
+fetch = kv.Get(PC)                         instruction fetch is one KV read
+call  = create subtree; return = clean it  crash? restart and resume from PC
 ```
 
-每条指令占据二维坐标 `[s0, s1]`：`[s0,0]` 恒为操作码，`[s0,-j]` 读参，`[s0,+j]` 写参。
+Every instruction occupies a 2-D coordinate `[s0, s1]`: `[s0,0]` is always the opcode, `[s0,-j]` read params, `[s0,+j]` write params.
 
 ```kv
 def add(A: int, B: int) -> (C: int) { A + B -> C }
@@ -32,34 +32,34 @@ def add(A: int, B: int) -> (C: int) { A + B -> C }
 /func/main/add/[0,-2] = "B"     /func/main/add/[0,1]  = "C"
 ```
 
-地址空间四域：`/src`（源码）`/func`（编译后函数）`/vthread`（运行时栈帧）`/sys`（基础设施）。
+Four address-space domains: `/src` (source) `/func` (compiled functions) `/vthread` (runtime frames) `/sys` (infrastructure).
 
 ---
 
 ## Quick Start
 
 ```bash
-# 依赖: Go 1.24+, Redis
+# Requirements: Go 1.24+, Redis
 make build
 
-./kvlang tutorial/01-basics/hello.kv         # 运行文件
-./kvlang -c 'print("hello, world")'          # inline 模式
-echo '40 + 2 -> x; print(x)' | ./kvlang      # pipe 模式（; 分隔同行语句）
-./kvlang vet my.kv                           # 语法检查
-./kvlang format my.kv                        # 格式化
+./kvlang tutorial/01-basics/hello.kv         # run a file
+./kvlang -c 'print("hello, world")'          # inline mode
+echo '40 + 2 -> x; print(x)' | ./kvlang      # pipe mode (; separates statements on one line)
+./kvlang vet my.kv                           # syntax check
+./kvlang format my.kv                        # format
 ```
 
 ---
 
 ## Language Guide
 
-### 程序结构（先读这条）
+### Program Structure (read this first)
 
-**顶层只能写两种东西：单条指令（赋值/内建调用）和函数调用。`if` / `while` / `for` 必须写在 `def` 函数体内。** 惯例是定义 `main` 再调用它：
+**Top level allows only two things: single instructions (assignments / builtin calls) and function calls. `if` / `while` / `for` must live inside a `def` body.** The convention is to define `main` and call it:
 
 ```kv
 def main() -> () {
-    total = 0  # = 等价于 <-
+    total = 0  # = is equivalent to <-
     1 -> i
     while (i <= 5) {
         total <- total + i
@@ -71,23 +71,23 @@ def main() -> () {
 main()
 ```
 
-### 读写码：赋值三形态
+### Read-Write Code: Three Assignment Forms
 
 ```kv
-x = 40 + 2            # = ：写槽在左（≡ <-）；= 不是表达式，不能嵌进条件里
-y <- x                # 左箭头：写槽在左
-x * y -> z            # 右箭头：写槽在右
-f(a, b) -> r          # 函数写参映射；多写参 -> x, y；丢弃用 -> _
+x = 40 + 2            # = : write slot on the left (≡ <-); = is NOT an expression, cannot nest in conditions
+y <- x                # left arrow: write slot on the left
+x * y -> z            # right arrow: write slot on the right
+f(a, b) -> r          # write-param mapping for calls; multiple: -> x, y; discard: -> _
 ```
 
-写槽必须是**位置**：裸名（帧内变量）、`/abs/path`（全局键）、`base.名`（成员）。字面量不是位置。
+A write slot must be a **location**: a bare name (frame-local), `/abs/path` (global key), or `base.name` (member). Literals are not locations.
 
-### 函数：没有返回值，只有写参
+### Functions: No Return Values, Only Write Params
 
-`def` 签名中 `-> (C: int)` 是**写参声明**。函数把结果写进写参槽，调用方用 `-> r` 把写参映射到自己的位置。
-**读参只读**：函数体内不可把读参放进写槽（如 `A = A + 1`）。需要体内反复更新的量先想清角色——
-**累加器是输出，声明为写参**（写参零值起步、体内可读可写，同 Go 命名返回值）：`def sum(arr) -> (acc:int) { acc + arr[i] -> acc }`；
-纯工作变量则拷贝局部（`A -> a` 后用 `a`）：
+`-> (C: int)` in a `def` signature is a **write-param declaration**. The function writes results into its write-param slots; the caller maps them with `-> r`.
+**Read params are read-only**: the body may not place a read param in a write slot (e.g. `A = A + 1`). Decide the role first —
+**an accumulator is an output, so declare it as a write param** (write params start at zero, are readable and writable in the body — like Go named return values): `def sum(arr) -> (acc:int) { acc + arr[i] -> acc }`.
+A pure working variable is copied to a local first (`A -> a`, then use `a`):
 
 ```kv
 def add(A: int, B: int) -> (C: int) {
@@ -102,28 +102,28 @@ def main() -> () {
 main()
 ```
 
-### dict、成员访问与链表
+### dict, Member Access, and Linked Lists
 
 ```kv
-d = { name="kv"; ver=1 }    # dict 字面量：成员是平坦键族 d.name、d.ver
-print(d.name)               # 成员读
-d.ver = 2                   # 成员写；动态键用 d.*k（k 的值作键名）
+d = { name="kv"; ver=1 }    # dict literal: members are the flat key-family d.name, d.ver
+print(d.name)               # member read
+d.ver = 2                   # member write; dynamic key: d.*k (the value of k becomes the key)
 ```
 
-链表等跨函数共享的数据结构，节点用**绝对路径**创建（帧内变量随函数返回销毁）：
+Data structures shared across functions (e.g. linked lists) create nodes at **absolute paths** (frame-locals die when the frame returns):
 
 ```kv
 def build() -> () {
-    /n1 = { val=1; next="/n2" }  # = 等价于 <-
+    /n1 = { val=1; next="/n2" }  # = is equivalent to <-
     /n2 <- { val=2; next="/n3" }
     { val=3; next="" } -> /n3
 }
 
 def main() -> () {
     build()
-    "/n1" -> p                   # p 存路径字符串（指针）
+    "/n1" -> p                   # p holds a path string (a pointer)
     while (p != "") {
-        p.val -> v               # 指针解引用：读 /n1.val
+        p.val -> v               # pointer deref: reads /n1.val
         print(v)
         p.next -> p
     }
@@ -132,54 +132,54 @@ def main() -> () {
 main()
 ```
 
-### 数字类型（可选精度声明）
+### Numeric Types (optional precision declaration)
 
 ```kv
-f = float32(3)        # int8/16/32/64 uint8/16/32/64 float32/64 十算子，既创建也转换
-w = int8(300)         # 44：窄化补码回绕；float→int 截断向零；算术域统一 int64/float64
+f = float32(3)        # ten operators int8/16/32/64 uint8/16/32/64 float32/64 — they construct AND convert
+w = int8(300)         # 44: narrowing wraps (two's complement); float→int truncates toward zero; arithmetic domain is int64/float64
 ```
 
-### 控制流（仅限 def 体内）
+### Control Flow (inside def bodies only)
 
 ```kv
 if (cond) { ... } else { ... }
 while (cond) { ... }
-for (x in arr) { ... }        # 遍历键族数组
+for (x in arr) { ... }        # iterate a key-family array
 ```
 
-条件支持复合表达式：`if (7 % 2 != 0)`、`while (i < strlen(s))` 均可（编译期自动展平为临时槽）。
+Conditions may be compound expressions: `if (7 % 2 != 0)` and `while (i < strlen(s))` both work (auto-flattened to temp slots at compile time).
 
-### 操作符
+### Operators
 
-| 类别 | 符号 |
+| Category | Symbols |
 |------|------|
-| 算术 | `+` `-` `*` `/` `%` |
-| 比较 | `==` `!=` `<` `>` `<=` `>=` |
-| 逻辑 | `&&` `\|\|` `!` |
-| 位运算 | `&` `\|` `^` `<<` `>>` |
+| Arithmetic | `+` `-` `*` `/` `%` |
+| Comparison | `==` `!=` `<` `>` `<=` `>=` |
+| Logic | `&&` `\|\|` `!` |
+| Bitwise | `&` `\|` `^` `<<` `>>` |
 
-> `/`：两侧均 int → 整除（C 风格，`7/2`=3、`-9/2`=-4）；任一侧 float → 浮除（`7.0/2`=3.5）。
+> `/`: both ints → integer division (C-style, `7/2`=3, `-9/2`=-4); either side float → float division (`7.0/2`=3.5).
 
-### 内建函数
+### Builtins
 
-`abs` `neg` `sign` `pow` `sqrt` `exp` `log` `min` `max`（变参，如 `max(a,b,c)`）`print` `cerr` `input`\
-`int` `float` `bool` 及十个精度算子 · `char` `ord` `strlen` `strcmp` `strstr` `slice` `concat` · `array` `len` `at` `set` `has` `sort` `dict` `kvat` `kvhas`
+`abs` `neg` `sign` `pow` `sqrt` `exp` `log` `min` `max` (variadic, e.g. `max(a,b,c)`) `print` `cerr` `input`\
+`int` `float` `bool` plus the ten precision operators · `char` `ord` `strlen` `strcmp` `strstr` `slice` `concat` · `array` `len` `at` `set` `has` `sort` `dict` `kvat` `kvhas`
 
-字符串支持索引与拼接：`s[i]` 读第 i 个字符（单字符字符串，可与 `"a"` 直接比较，越界返 `""`），`s[i] = "X"` 单字符替换（写回新串），`a + b` 拼接。
-C 风格 API：`strlen` 长度、`strcmp` 返 -1/0/1、`strstr(hay, needle)` 返首次下标（未找到 -1）、`ord(c)` 取字节码（如 `ord(s[i])`）。
+Strings support indexing and concatenation: `s[i]` reads the i-th char (a single-char string, directly comparable to `"a"`; out of range → `""`), `s[i] = "X"` replaces one char (writes back a new string), `a + b` concatenates.
+C-style API: `strlen`; `strcmp` returns -1/0/1; `strstr(hay, needle)` returns the first index (-1 if absent); `ord(c)` returns the byte code (for arithmetic, e.g. `ord(s[i])`).
 
 ---
 
 ## Tutorial
 
-94 个自包含示例（93 例带期望输出，CI 全量验证），按主题组织：
+94 self-contained examples (93 with expected output, fully CI-verified), organized by topic:
 
 ```
-01-basics/        hello, arith, precision, numtypes, strings（6 files）
-02-func/          def, call, nested calls                  (1 file)
-03-control/       if, while, for, guess game               (5 files)
-04-algo/          fibonacci, gcd, collatz, ...             (13 files)
-05-leetcode/      LeetCode solutions                       (69 files)
+01-basics/        hello, arith, precision, numtypes, strings  (6 files)
+02-func/          def, call, accumulator                      (2 files)
+03-control/       if, while, for, guess game                  (5 files)
+04-algo/          fibonacci, gcd, collatz, ...                (13 files)
+05-leetcode/      LeetCode solutions                          (69 files)
 ```
 
 ```bash
@@ -187,7 +187,7 @@ C 风格 API：`strlen` 长度、`strcmp` 返 -1/0/1、`strstr(hay, needle)` 返
 ./kvlang tutorial/04-algo/fibonacci.kv       # fib = 55
 ./kvlang tutorial/05-leetcode/001_two_sum.kv # LeetCode
 
-python3 tutorial/test.py                     # 全部 93 例 — CI 验证
+python3 tutorial/test.py                     # all 93 examples — CI verification
 ```
 
 ---
