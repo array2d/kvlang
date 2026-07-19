@@ -10,7 +10,7 @@ import (
 // 链接帧结构（P4 Link 模型）：
 //
 //   callPC                      调用指令绝对路径（帧唯一标识符）
-//   callPC + "/.fn"            软链接 → /func/<pkg>/<name>（只读指令区）
+//   callPC + "/.fn"            软链接 → /lib/<pkg>/<name>（只读指令区）
 //   callPC + "/<param>"         参数（本帧局部变量）
 //   callPC + "/.callpc"         存储 callPC 自身，供 HandleReturn 恢复
 //

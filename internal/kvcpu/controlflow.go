@@ -103,7 +103,7 @@ func resolveLabel(kv kvspace.KVSpace, framePath, label string) string {
 	if v, err := kv.Get(framePath + "/.rootfunc"); err == nil {
 		if rootFunc := v.Str(); rootFunc != "" {
 			qualified := rootFunc + "/" + label
-			if pv, err := kv.Get(keytree.FuncIdx(qualified)); err == nil && pv.Str() != "" {
+			if pv, err := kv.Get(keytree.LibIdx(qualified)); err == nil && pv.Str() != "" {
 				return qualified
 			}
 		}

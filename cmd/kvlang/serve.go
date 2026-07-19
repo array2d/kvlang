@@ -162,7 +162,7 @@ func mainWatcher(ctx context.Context, kv kvspace.KVSpace, vmID string) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			entryVal, err := kv.Get(keytree.FuncMain)
+			entryVal, err := kv.Get(keytree.LibMain)
 			if err != nil { continue }
 			var entry struct {
 				Entry  string   `json:"entry"`
@@ -171,8 +171,8 @@ func mainWatcher(ctx context.Context, kv kvspace.KVSpace, vmID string) {
 				Term   string   `json:"term,omitempty"`
 			}
 			if json.Unmarshal([]byte(entryVal.Str()), &entry) != nil || entry.Entry == "" { continue }
-			logx.Info("VM-%s %s entry=%s", vmID, keytree.FuncMain, entry.Entry)
-			kv.Del(keytree.FuncMain)
+			logx.Info("VM-%s %s entry=%s", vmID, keytree.LibMain, entry.Entry)
+			kv.Del(keytree.LibMain)
 
 			vtidStr := incrVtid(kv)
 			firstPC := layoutcode.Bootstrap(ctx, kv, vtidStr, entry.Entry, entry.Reads)
@@ -185,7 +185,7 @@ func mainWatcher(ctx context.Context, kv kvspace.KVSpace, vmID string) {
 				kv.Set(keytree.VThreadTerm(vtidStr), kvspace.Str(entry.Term))
 			}
 			status, _ := json.Marshal(map[string]string{"vtid": vtidStr, "status": "executing"})
-			kv.Set(keytree.FuncMain, kvspace.Bytes(status))
+			kv.Set(keytree.LibMain, kvspace.Bytes(status))
 			kv.Notify(keytree.VthreadReady, kvspace.Str(vtidStr))
 			logx.Info("VM-%s → vthread %s created pc=%s", vmID, vtidStr, firstPC)
 		}

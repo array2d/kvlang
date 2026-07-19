@@ -11,7 +11,7 @@
 // 帧模型（Link P4）：
 //
 //	callPC                         调用指令绝对路径，作为帧根
-//	callPC/.fn                     软链接 → /func/<pkg>/<name>（只读指令）
+//	callPC/.fn                     软链接 → /lib/<pkg>/<name>（只读指令）
 //	callPC/<param>                 参数（本帧局部变量，不经过链接）
 //	callPC/.callpc                 存储 callPC 自身，供 HandleReturn 恢复
 //	callPC/.rootfunc               根函数名（TCO 不更新，供 resolveLabel 使用）
@@ -37,9 +37,9 @@ import (
 	"kvlang/internal/vthread"
 )
 
-// WriteBody 将 []Stmt 写入 /func/<pkg>/<name>/ 下的结构化 KV（编译后指令）。
+// WriteBody 将 []Stmt 写入 /lib/<pkg>/<name>/ 下的结构化 KV（编译后指令）。
 func WriteBody(kv kvspace.KVSpace, pkg, name string, body []ast.Stmt) {
-	prefix := keytree.Func(pkg, name)
+	prefix := keytree.LibFunc(pkg, name)
 	idx := 0
 	for _, st := range body {
 		writeStmt(kv, st, prefix, &idx)
@@ -81,13 +81,13 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	vtid := keytree.VtidFromPC(pc)
 	funcName := inst.Reads[0]
 
-	pkgVal, err := kv.Get(keytree.FuncIdx(funcName))
+	pkgVal, err := kv.Get(keytree.LibIdx(funcName))
 	pkg := pkgVal.Str()
 	if err != nil || pkg == "" {
 		vthread.SetError(ctx, kv, vtid, pc, "NameError: func not found: "+funcName)
 		return ""
 	}
-	funcKey := keytree.Func(pkg, funcName)
+	funcKey := keytree.LibFunc(pkg, funcName)
 
 	sigVal, err := kv.Get(funcKey)
 	if err != nil {
@@ -117,7 +117,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	callerFrameRoot := keytree.FrameRoot(pc)
 	frameRoot := keytree.ChildFrameRoot(pc)
 
-	// 链接只读指令区：frameRoot/.fn → /func/<pkg>/<name>
+	// 链接只读指令区：frameRoot/.fn → /lib/<pkg>/<name>
 	if err := kv.Link(funcKey, keytree.FnCode(frameRoot)); err != nil {
 		vthread.SetError(ctx, kv, vtid, pc, "RuntimeError: link failed: "+err.Error())
 		return ""
@@ -207,13 +207,13 @@ func HandleReturn(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.I
 }
 
 // RegisterBlocks 为函数体内所有 BlockStmt label 注册编译后子函数签名。
-// 写入 /func/<pkg>/<name>/<label>，供 br/goto 运行时查找。
+// 写入 /lib/<pkg>/<name>/<label>，供 br/goto 运行时查找。
 func RegisterBlocks(kv kvspace.KVSpace, pkg, parent string, body []ast.Stmt) {
 	for _, st := range body {
 		if b, ok := st.(*ast.BlockStmt); ok {
-			blockKey := keytree.Func(pkg, parent+"/"+b.Label)
+			blockKey := keytree.LibFunc(pkg, parent+"/"+b.Label)
 			kv.Set(blockKey, kvspace.Str("def "+b.Label+"() -> ()"))
-			kv.Set(keytree.FuncIdx(parent+"/"+b.Label), kvspace.Str(pkg))
+			kv.Set(keytree.LibIdx(parent+"/"+b.Label), kvspace.Str(pkg))
 			RegisterBlocks(kv, pkg, parent+"/"+b.Label, b.Body)
 		}
 	}
@@ -227,13 +227,13 @@ func RegisterBlocks(kv kvspace.KVSpace, pkg, parent string, body []ast.Stmt) {
 // args 为按序传入的参数值（对应 funcSig.ParamNames()），可为空。
 // 成功返回第一条指令的绝对 PC（vthreadRoot/.fn/[0,0]）；失败返回 ""。
 func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, args []string) string {
-	pkgVal, err := kv.Get(keytree.FuncIdx(funcName))
+	pkgVal, err := kv.Get(keytree.LibIdx(funcName))
 	pkg := pkgVal.Str()
 	if err != nil || pkg == "" {
 		vthread.SetError(ctx, kv, vtid, "", "Bootstrap: NameError: func not found: "+funcName)
 		return ""
 	}
-	funcKey := keytree.Func(pkg, funcName)
+	funcKey := keytree.LibFunc(pkg, funcName)
 
 	vthreadRoot := keytree.VThread(vtid)
 	if err := kv.Link(funcKey, keytree.FnCode(vthreadRoot)); err != nil {
@@ -270,10 +270,10 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 // WriteFunc 完成一个函数的全部 KV 写入：
 //  0. 先 DelTree 清除旧函数数据（避免旧指令 slot 污染新布局）
 //  1. 源码写入 /src/<pkg>/<name>
-//  2. 编译签名写入 /func/<pkg>/<name>
-//  3. 编译 body 指令写入 /func/<pkg>/<name>/[i,j]
-//  4. 块标签写入 /func/<pkg>/<name>/<label>/
-//  5. 反向索引写入 /func/idx/<name>
+//  2. 编译签名写入 /lib/<pkg>/<name>
+//  3. 编译 body 指令写入 /lib/<pkg>/<name>/[i,j]
+//  4. 块标签写入 /lib/<pkg>/<name>/<label>/
+//  5. 反向索引写入 /lib/idx/<name>
 // frameSlotKey 将槽表达式转换为绝对 KV 路径。
 //
 //	"x"    → frameRoot + "/x"   (裸标识符)
@@ -296,12 +296,13 @@ func frameSlotKey(frameRoot, slot string) string {
 func WriteFunc(kv kvspace.KVSpace, pkg string, fn *ast.Func) {
 	// 清除旧函数数据：旧指令的读/写槽数量可能多于新函数，
 	// 若不清除则旧槽（如 [0,-1]、[0,-2]）会被新执行错误读取。
-	kv.DelTree(keytree.Func(pkg, fn.Sig.Name))
+	kv.DelTree(keytree.LibFunc(pkg, fn.Sig.Name))
 	kv.Set(keytree.Src(pkg, fn.Sig.Name), kvspace.Str(fn.FullText()))
-	kv.Set(keytree.Func(pkg, fn.Sig.Name), kvspace.Str(fn.Sig.String()))
+	kv.Set(keytree.LibSrc(pkg, fn.Sig.Name), kvspace.Str(fn.FullText())) // fix-034: /lib/<pkg>/<name>.src
+	kv.Set(keytree.LibFunc(pkg, fn.Sig.Name), kvspace.Str(fn.Sig.String()))
 	WriteBody(kv, pkg, fn.Sig.Name, fn.Body)
 	RegisterBlocks(kv, pkg, fn.Sig.Name, fn.Body)
-	kv.Set(keytree.FuncIdx(fn.Sig.Name), kvspace.Str(pkg))
+	kv.Set(keytree.LibIdx(fn.Sig.Name), kvspace.Str(pkg))
 }
 
 // checkDupParams 参数不可同名（fix-032：VM 运行时兜底，parser 已拦截源码路径）。

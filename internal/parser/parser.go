@@ -61,11 +61,12 @@ func ParseCode(r io.Reader) (*ast.File, []Diagnostic, error) {
 // ── parser 结构体 ──────────────────────────────────────────────
 
 type parser struct {
-	tokens   []Token
-	pos      int
-	errors   []Diagnostic // 积累语法错误，不在第一个错误处停止
-	srcLines []string     // 源码行缓存（fix-030：为 diagnostic 附加出错行上下文）
-	srcName  string       // 文件名/内联标注（fix-030）
+	tokens     []Token
+	pos        int
+	errors     []Diagnostic // 积累语法错误，不在第一个错误处停止
+	srcLines   []string     // 源码行缓存（fix-030：为 diagnostic 附加出错行上下文）
+	srcName    string       // 文件名/内联标注（fix-030）
+	srcAliases map[string]string // import … as 别名映射（fix-035：parsePrimaryExpr dotted call 全路径还原用）
 }
 
 func (p *parser) peek() Token {
@@ -158,7 +159,82 @@ func (p *parser) parseFile() *ast.File {
 		if p.peek().Kind == EOF {
 			break
 		}
+		// import pkg（kvspace）或 import "path"（文件糖）或 import … as alias（fix-033/035）
+		if p.peek().Kind == Ident && p.peek().Value == "import" {
+			p.advance() // consume "import"
+			var imp string
+			isQuoted := false
+			// import "path/to/file.kv" — 文件系统路径
+			if p.peek().Kind == Literal && p.peek().Quote == '"' {
+				imp = p.advance().Value
+				isQuoted = true
+			} else if p.peek().Kind == Ident {
+				// import pkg — kvspace /lib/<pkg>/ 包引用
+				imp = p.advance().Value
+			} else {
+				p.errors = append(p.errors, Diagnostic{
+					Pos: p.peek().Pos, Warn: true,
+					Message: "import requires a package name or double-quoted file path",
+				})
+				p.eat(Newline)
+				continue
+			}
+			// import … as alias（fix-035）
+			if p.peek().Kind == Ident && p.peek().Value == "as" {
+				p.advance() // consume "as"
+				if p.peek().Kind == Ident {
+					if f.Aliases == nil { f.Aliases = map[string]string{} }
+					alias := p.advance().Value
+					if f.Aliases == nil { f.Aliases = map[string]string{} }
+					f.Aliases[alias] = imp
+					if p.srcAliases == nil { p.srcAliases = map[string]string{} }
+					p.srcAliases[alias] = imp
+				}
+			}
+			f.Imports = append(f.Imports, imp)
+			if isQuoted { f.ImportPaths = append(f.ImportPaths, imp) }
+			p.eat(Newline)
+			continue
+		}
+		// lib name { ... } — 命名空间块（fix-034：借鉴 C++ namespace / Rust mod）
+		if p.peek().Kind == Ident && p.peek().Value == "lib" && p.peekAt(1).Kind == Ident && p.peekAt(2).Kind == LBrace {
+			p.advance() // consume "lib"
+			pkg := p.advance().Value
+			if pkg == "lib" {
+				p.errors = append(p.errors, Diagnostic{Pos: p.peek().Pos, Warn: true,
+					Message: fmt.Sprintf("package name %q expands to /lib/lib/ — consider a different name", pkg)})
+			}
+			if f.Package == "" { f.Package = pkg }
+			p.expect(LBrace)
+			p.skipNewlines()
+			for p.peek().Kind != RBrace && p.peek().Kind != EOF {
+				if p.peek().Kind == Ident && p.peek().Value == "def" {
+					fn := p.parseFunc()
+					f.Funcs = append(f.Funcs, fn)
+				} else { break }
+				p.skipNewlines()
+			}
+			p.expect(RBrace)
+			continue
+		}
+		// init { ... } — 初始化块（fix-033）
+		if p.peek().Kind == Ident && p.peek().Value == "init" && p.peekAt(1).Kind == LBrace {
+			p.advance() // consume "init"
+			p.advance() // consume {
+			p.skipNewlines()
+			for p.peek().Kind != RBrace && p.peek().Kind != EOF {
+				st := p.parseStmt()
+				if st != nil { f.InitBody = append(f.InitBody, st) }
+				p.skipNewlines()
+			}
+			p.expect(RBrace)
+			continue
+		}
 		if p.peek().Kind == Ident && p.peek().Value == "def" {
+			if f.Package == "" {
+				p.errors = append(p.errors, Diagnostic{Pos: p.peek().Pos, Warn: true,
+					Message: fmt.Sprintf("def outside lib block — registering under /lib/<name>; consider wrapping in 'lib pkgname { }'")})
+			}
 			fn := p.parseFunc()
 			fn.Comments = comments
 			f.Funcs = append(f.Funcs, fn)

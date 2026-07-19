@@ -91,36 +91,92 @@ func runCode(name string, rc io.Reader, dsn string, debug bool) {
 	if err != nil { logx.Fatal("parse: %v", err) }
 	for _, d := range diags { d.SrcName = "<inline>"; logx.Warn("parse: %s", d) }
 	if parser.HasErrors(diags) { logx.Fatal("parse: error-level diagnostics — refusing to execute") }
-	if len(df.Funcs) == 0 && len(df.TopLevelCalls) == 0 { logx.Fatal("no executable code found") }
+	if len(df.Funcs) == 0 && len(df.TopLevelCalls) == 0 && len(df.InitBody) == 0 { logx.Fatal("no executable code found") }
+	// kvspace import 断言（fix-033 inline 模式）
+	for _, imp := range df.Imports {
+		if !strings.Contains(imp, ".") && !strings.Contains(imp, "/") {
+			if kids, err := kv.List(keytree.LibFunc(imp, "")); err != nil || len(kids) == 0 {
+				logx.Fatal("kvspace package %q not found — load it first", imp)
+			}
+		}
+	}
 
 	for i := range df.Funcs {
 		layoutcode.WriteFunc(kv, "main", lower.Func(&df.Funcs[i]))
 	}
-	layoutcode.WriteFunc(kv, "main", makeInitFunc(df.TopLevelCalls))
-	kv.Set(keytree.FuncMain, kvspace.Str(`{"entry":"init","reads":[],"writes":[]}`))
+	allCalls := df.TopLevelCalls
+	var initInsts []*ast.Instruction
+	for _, st := range df.InitBody {
+		if inst, ok := st.(*ast.Instruction); ok {
+			initInsts = append(initInsts, inst)
+		}
+	}
+	allCalls = append(initInsts, allCalls...)
+	layoutcode.WriteFunc(kv, "main", makeInitFunc(allCalls))
+	kv.Set(keytree.LibMain, kvspace.Str(`{"entry":"init","reads":[],"writes":[]}`))
 	executeEntry(kv, debug)
 }
 
 // loadFunctions 将多个 .kv 文件解析、lower 并写入 kvspace，合成 init 入口。
+// 递归加载 import 的文件（Python 式去重：已加载跳过，fix-033）。
 func loadFunctions(kv kvspace.KVSpace, files []string) {
 	var allCalls []*ast.Instruction
 	anyCode := false
+	loaded := map[string]bool{}
 	for _, f := range files {
-		df, diags, err := parser.ParseFile(f)
-		if err != nil { logx.Warn("SKIP %s: %v", f, err); continue }
-		for _, d := range diags { d.SrcName = f; logx.Warn("%s: %s", f, d) }
-		if parser.HasErrors(diags) { logx.Fatal("%s: error-level diagnostics — refusing to load", f) }
-		pkg := packageFromPath(f)
-		for i := range df.Funcs {
-			layoutcode.WriteFunc(kv, pkg, lower.Func(&df.Funcs[i]))
-			anyCode = true
-		}
-		allCalls = append(allCalls, df.TopLevelCalls...)
-		if len(df.TopLevelCalls) > 0 { anyCode = true }
+		_loadFile(kv, f, &allCalls, &anyCode, loaded)
 	}
 	if !anyCode { logx.Fatal("no executable code found") }
 	layoutcode.WriteFunc(kv, "main", makeInitFunc(allCalls))
-	kv.Set(keytree.FuncMain, kvspace.Str(`{"entry":"init","reads":[],"writes":[]}`))
+	kv.Set(keytree.LibMain, kvspace.Str(`{"entry":"init","reads":[],"writes":[]}`))
+}
+
+func _loadFile(kv kvspace.KVSpace, f string, allCalls *[]*ast.Instruction, anyCode *bool, loaded map[string]bool) {
+	abs, _ := filepath.Abs(f)
+	if loaded[abs] { return }
+	loaded[abs] = true
+
+	df, diags, err := parser.ParseFile(f)
+	if err != nil { logx.Warn("SKIP %s: %v", f, err); return }
+	for _, d := range diags { d.SrcName = f; logx.Warn("%s: %s", f, d) }
+	if parser.HasErrors(diags) { logx.Fatal("%s: error-level diagnostics — refusing to load", f) }
+
+	// 递归加载 import 的文件（fix-033）
+	dir := filepath.Dir(f)
+	for _, imp := range df.Imports {
+		// kvspace import（裸名，非引号）vs 文件 import（引号字符串）（fix-035）
+	isFile := false
+	for _, p := range df.ImportPaths {
+		if p == imp { isFile = true; break }
+	}
+	if !isFile {
+		// kvspace import：断言 /lib/<pkg>/ 存在
+		kids, err := kv.List(keytree.LibFunc(imp, ""))
+		if err != nil || len(kids) == 0 {
+			logx.Fatal("%s: kvspace package %q not found — load it first (kvlang load <file.kv>)", f, imp)
+		}
+		continue
+	}
+	// 文件 import：import "pkg" → pkg.kv
+	ipath := filepath.Join(dir, imp)
+	if !strings.HasSuffix(ipath, ".kv") { ipath += ".kv" }
+	_loadFile(kv, ipath, allCalls, anyCode, loaded)
+	}
+
+	pkg := packageFromPath(f)
+	for i := range df.Funcs {
+		layoutcode.WriteFunc(kv, pkg, lower.Func(&df.Funcs[i]))
+		*anyCode = true
+	}
+	// init { ... } 体合并为顶层调用序列（fix-033）
+	for _, st := range df.InitBody {
+		if inst, ok := st.(*ast.Instruction); ok {
+			*allCalls = append(*allCalls, inst)
+			*anyCode = true
+		}
+	}
+	*allCalls = append(*allCalls, df.TopLevelCalls...)
+	if len(df.TopLevelCalls) > 0 { *anyCode = true }
 }
 
 // packageFromPath 从 .kv 文件路径中推导包名。

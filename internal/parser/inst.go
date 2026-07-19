@@ -296,11 +296,18 @@ func (p *parser) parsePrimaryExpr() *ast.Expr {
 
 	// 点号函数调用：name.name(args, ...) — e.g. tensor.matmul(x, W)
 	// token 流：IDENT . IDENT LPAREN ... — 合并 . 两侧为操作码名
+	// import … as alias → 还原为全路径（fix-035）
 	if p.peek().Kind == Ident && p.peekAt(1).Kind == Dot &&
 		p.peekAt(2).Kind == Ident && p.peekAt(3).Kind == LParen {
-		opcode := p.advance().Value // consume LHS
-		p.advance()                  // skip Dot
-		opcode += "." + p.advance().Value // consume RHS → "tensor.matmul"
+		lhs := p.advance().Value // consume LHS
+		p.advance()              // skip Dot
+		rhs := p.advance().Value // consume RHS
+		if p.srcAliases != nil {
+			if full, ok := p.srcAliases[lhs]; ok {
+				lhs = full
+			}
+		}
+		opcode := lhs + "." + rhs // → "tensor.matmul"
 		p.advance() // consume (
 		var args []*ast.Expr
 		for p.peek().Kind != RParen && p.peek().Kind != EOF {

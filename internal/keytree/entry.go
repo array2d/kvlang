@@ -1,18 +1,23 @@
 package keytree
 
-const FuncRoot = "/func"
+const LibRoot = "/lib"
 
-// FuncMain 是程序唯一入口的 kvspace key: /func/main
-const FuncMain = "/func/main"
+// LibMain 是程序唯一入口的 kvspace key: /lib/main
+const LibMain = "/lib/main"
 
-// Func 返回 /func/<pkg>/<name>。
-// pkg 为空时直接返回 /func/<name>（全局函数）。
-func Func(pkg, name string) string {
+// LibFunc 返回 /lib/<pkg>/<name>。
+// pkg 为空时直接返回 /lib/<name>（全局函数）。
+func LibFunc(pkg, name string) string {
 	if pkg == "" {
-		return "/func/" + name
+		return "/lib/" + name
 	}
-	return "/func/" + pkg + "/" + name
+	return "/lib/" + pkg + "/" + name
 }
 
-// FuncIdx 返回 /func/idx/<name>，函数名到包路径的反向索引。
-func FuncIdx(name string) string { return "/func/idx/" + name }
+// LibIdx 返回 /lib/idx/<name>，函数名到包路径的反向索引。
+func LibIdx(name string) string { return "/lib/idx/" + name }
+
+// LibSrc 返回 /lib/<pkg>/<name>.src，存储函数完整源码文本（fix-034）。
+func LibSrc(pkg, name string) string {
+	return "/lib/" + pkg + "/" + name + ".src"
+}
