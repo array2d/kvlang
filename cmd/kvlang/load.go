@@ -101,11 +101,12 @@ func runCode(name string, rc io.Reader, dsn string, debug bool) {
 	}
 	allCalls := df.TopLevelCalls
 	if len(df.InitBody) > 0 {
-		initFn := ast.Func{Sig: ast.FuncSig{Name: "__init__"}, Body: df.InitBody}
+		initFn := ast.Func{Sig: ast.FuncSig{Name: "init"}, Body: df.InitBody}
 		layoutcode.WriteFunc(kv, "main", lower.Func(&initFn))
-		allCalls = append([]*ast.Instruction{{Expr: ast.Call("__init__")}}, allCalls...)
 	}
-	layoutcode.WriteFunc(kv, "main", makeInitFunc(allCalls))
+	if len(allCalls) > 0 {
+		layoutcode.WriteFunc(kv, "main", makeInitFunc(allCalls))
+	}
 	kv.Set(keytree.LibMain, kvspace.Str(`{"entry":"init","reads":[],"writes":[]}`))
 	executeEntry(kv, debug)
 }
@@ -120,7 +121,10 @@ func loadFunctions(kv kvspace.KVSpace, files []string) bool {
 	_loadFile(kv, f, &allCalls, &anyCode, loaded)
 	}
 	if !anyCode && len(allCalls) == 0 { return false }
-	layoutcode.WriteFunc(kv, "main", makeInitFunc(allCalls))
+	// InitBody 已写入入口 init（fix-037），仅当 allCalls 非空时才补 makeInitFunc
+	if len(allCalls) > 0 {
+		layoutcode.WriteFunc(kv, "main", makeInitFunc(allCalls))
+	}
 	kv.Set(keytree.LibMain, kvspace.Str(`{"entry":"init","reads":[],"writes":[]}`))
 	return true
 }
@@ -140,15 +144,18 @@ func _loadFile(kv kvspace.KVSpace, f string, allCalls *[]*ast.Instruction, anyCo
 		layoutcode.WriteFunc(kv, pkg, lower.Func(&df.Funcs[i]))
 		*anyCode = true
 	}
-	// init { ... } 体包装为函数经 lower 展开（fix-036：支持 if/while/for 控制流）
+	// init { ... } 体 / 裸控制流 → 入口 init() 函数体内联（fix-036/037）
 	if len(df.InitBody) > 0 {
-		initFn := ast.Func{Sig: ast.FuncSig{Name: "__init__"}, Body: df.InitBody}
+		initFn := ast.Func{Sig: ast.FuncSig{Name: "init"}, Body: df.InitBody}
 		layoutcode.WriteFunc(kv, pkg, lower.Func(&initFn))
-		*allCalls = append(*allCalls, &ast.Instruction{Expr: ast.Call("__init__")})
 		*anyCode = true
 	}
 	*allCalls = append(*allCalls, df.TopLevelCalls...)
 	if len(df.TopLevelCalls) > 0 { *anyCode = true }
+	// InitBody 存在时，入口 init 已由 initFn 接管——不再用 makeInitFunc 生成空壳
+	if len(df.InitBody) > 0 && len(*allCalls) == 0 {
+		*anyCode = true // 确保 loadFunctions 不跳过
+	}
 }
 
 // collectKVFiles 收集 path（文件或目录）下所有 .kv 文件路径。

@@ -230,6 +230,9 @@ if p.peek().Kind == Ident && p.peek().Value == "def" {
 			fn := p.parseFunc()
 			fn.Comments = comments
 			f.Funcs = append(f.Funcs, fn)
+		} else if p.peek().Kind == If || p.peek().Kind == While || p.peek().Kind == For {
+			// 顶层裸控制流 → 自动封装为隐式 def __init__() -> () { … }（fix-037）
+			f.InitBody = p.parseBody()
 		} else {
 			prevPos := p.pos
 			inst := p.parseInst()
