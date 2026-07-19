@@ -20,7 +20,7 @@ func Dispatch(opcode string) (Op, bool) {
 }
 
 var registry = map[string]Op{
-	OpAdd: arith{f: func(a, b float64) float64 { return a + b }, fi: func(a, b int64) int64 { return a + b }},
+	OpAdd: arith{f: func(a, b float64) float64 { return a + b }, fi: func(a, b int64) int64 { return a + b }, concat: true},
 	OpSub: arith{f: func(a, b float64) float64 { return a - b }, fi: func(a, b int64) int64 { return a - b }, unary: true},
 	OpMul: arith{f: func(a, b float64) float64 { return a * b }, fi: func(a, b int64) int64 { return a * b }},
 	OpDiv: div{},
@@ -80,6 +80,8 @@ var registry = map[string]Op{
 	OpHas:    hasOp{},
 	OpChar:   strCharOp{},
 	OpOrd:    strOrdOp{},
+	OpStrCmp: strCmpOp{},
+	OpStrStr: strStrOp{},
 	OpStrLen: strLenOp{},
 	OpSlice:  strSliceOp{},
 	OpConcat: strConcatOp{},

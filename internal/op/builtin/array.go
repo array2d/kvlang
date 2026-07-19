@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"encoding/binary"
+	"strings"
 	"fmt"
 	"strconv"
 
@@ -43,6 +44,19 @@ func (atOp) Call(f *op.Frame) error {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "at requires array and index")
 		return fmt.Errorf("at requires array and index")
 	}
+	// string base 分流（fix-025）：以 "/" 开头 = 路径指针（键族 deref）；否则 = 字符序列。
+	// s[i] 读返单字符字符串（动态阵营，与 char 一致）；越界/非整型索引返 ""（缺席语义）。
+	if inputs[0].Kind() == "string" && !strings.HasPrefix(inputs[0].Str(), "/") {
+		s := inputs[0].Str()
+		if !isIntKind(inputs[1].Kind()) {
+			return writeResult(f, kvspace.Str(""))
+		}
+		idx := int(inputs[1].Int64())
+		if idx < 0 || idx >= len(s) {
+			return writeResult(f, kvspace.Str(""))
+		}
+		return writeResult(f, kvspace.Str(s[idx:idx+1]))
+	}
 	// 路径访问：at(/path, key) or at(ptr, "field") or h.*key
 	if inputs[0].Kind() == "dict" || inputs[0].Kind() == "string" || inputs[1].Kind() == "string" || len(f.Inst.Reads) > 0 && (f.Inst.Reads[0][0] == '/' || f.Inst.Reads[0][0] == '"' && len(f.Inst.Reads[0]) > 1 && f.Inst.Reads[0][1] == '/') {
 		fp := keytree.FrameRoot(f.PC)
@@ -79,6 +93,25 @@ func (arraySetOp) Call(f *op.Frame) error {
 		return fmt.Errorf("set requires array, index, value")
 	}
 	arr := inputs[0]
+	// string base 分流（fix-025）：非 "/" 开头 = 字符序列，s[i] 写 = 单字符替换后整串回写
+	// （C 直觉 + kvlang 值语义；五语言中仅 C 可变，Python/Go/Rust/JS 字符串不可变，
+	//   kvlang 以"写回新串"呈现 C 直觉、保持值语义）。越界报错（C 为 UB，此处显式）。
+	if arr.Kind() == "string" && !strings.HasPrefix(arr.Str(), "/") {
+		sv := arr.Str()
+		idx := int(inputs[1].Int64())
+		ch := inputs[2].Str()
+		if idx < 0 || idx >= len(sv) {
+			msg := fmt.Sprintf("set: string index %d out of bounds (len=%d)", idx, len(sv))
+			vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
+			return fmt.Errorf("%s", msg)
+		}
+		if len(ch) == 0 {
+			vthread.SetError(bg, f.KV, f.Vtid, f.PC, "set: replacement char is empty")
+			return fmt.Errorf("set: replacement char is empty")
+		}
+		result := sv[:idx] + ch[:1] + sv[idx+1:]
+		return writeResult(f, kvspace.Str(result))
+	}
 	// 路径写入：set(/path, key, val) or set(ptr, "field", val)
 	if inputs[0].Kind() == "dict" || inputs[0].Kind() == "string" || inputs[1].Kind() == "string" || len(f.Inst.Reads) > 0 && (f.Inst.Reads[0][0] == '/' || f.Inst.Reads[0][0] == '"' && len(f.Inst.Reads[0]) > 1 && f.Inst.Reads[0][1] == '/') {
 		fp := keytree.FrameRoot(f.PC)

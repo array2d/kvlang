@@ -1,6 +1,7 @@
 package builtin
 
 import (
+	"strings"
 	"fmt"
 	"github.com/array2d/kvlang-go"
 	"kvlang/internal/op"
@@ -25,7 +26,8 @@ func (strCharOp) Call(f *op.Frame) error {
 	return writeResult(f, kvspace.Str(s[idx:idx+1]))
 }
 
-// strOrdOp: ord(s) / ord(s, i) -> int —— 返回 s 第 i 个字符（默认 0）的字节码（fix-024 配套）。
+// strOrdOp: ord(c) -> int —— 返回单字符字符串的字节码（fix-024 配套；Python 阵营，见 p7）。
+// 按索引取码用组合：ord(char(s, i))。空串返回 -1（缺席语义）。
 type strOrdOp struct{}
 func (strOrdOp) Call(f *op.Frame) error {
 	inputs := readInputs(f)
@@ -34,12 +36,37 @@ func (strOrdOp) Call(f *op.Frame) error {
 		return fmt.Errorf("ord requires a string")
 	}
 	s := inputs[0].Str()
-	idx := 0
-	if len(inputs) >= 2 { idx = int(inputs[1].Int64()) }
-	if idx < 0 || idx >= len(s) {
+	if len(s) == 0 {
 		return writeResult(f, kvspace.Int64(-1))
 	}
-	return writeResult(f, kvspace.Int64(int64(s[idx])))
+	return writeResult(f, kvspace.Int64(int64(s[0])))
+}
+
+// strCmpOp: strcmp(a, b) -> int —— C 语义：a<b 返 -1，相等返 0，a>b 返 1（按字节序）。
+type strCmpOp struct{}
+func (strCmpOp) Call(f *op.Frame) error {
+	inputs := readInputs(f)
+	if len(inputs) < 2 {
+		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "strcmp requires two strings")
+		return fmt.Errorf("strcmp requires two strings")
+	}
+	a, b := inputs[0].Str(), inputs[1].Str()
+	r := int64(0)
+	if a < b { r = -1 } else if a > b { r = 1 }
+	return writeResult(f, kvspace.Int64(r))
+}
+
+// strStrOp: strstr(hay, needle) -> int —— C 名 + 索引语义（C 返指针无法值语义化，
+// 返首次出现的下标，未找到返 -1，同 Python find；fix-025 记录为融合形态）。
+type strStrOp struct{}
+func (strStrOp) Call(f *op.Frame) error {
+	inputs := readInputs(f)
+	if len(inputs) < 2 {
+		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "strstr requires two strings")
+		return fmt.Errorf("strstr requires two strings")
+	}
+	idx := strings.Index(inputs[0].Str(), inputs[1].Str())
+	return writeResult(f, kvspace.Int64(int64(idx)))
 }
 
 // strLenOp: strlen(s) -> int

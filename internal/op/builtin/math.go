@@ -56,17 +56,31 @@ func evalPow(inputs []kvspace.XValue) (kvspace.XValue, error) {
 }
 
 func evalMinMax(inputs []kvspace.XValue, fn func(float64, float64) float64, intWin func(a, b int64) int64, strWin func(a, b kvspace.XValue) kvspace.XValue) (kvspace.XValue, error) {
-	if err := requireBinary(inputs); err != nil { return kvspace.XValue{}, err }
-	a, b := nilAsInt(inputs[0]), nilAsInt(inputs[1])
-	// int ∧ int → 原生 int64（fix-022：旧判据 Kind()=="int" 永假——字面量 kind 为 int64；
-	// 且经 float64 中转有 fix-020 同款精度问题）
-	if isIntKind(a.Kind()) && isIntKind(b.Kind()) {
-		return kvspace.Int(intWin(asInt(a), asInt(b))), nil
+	// 变参 fold（fix-026：Python/JS/Go 3/5 阵营支持 max(a,b,c...)，两参是少数派）
+	if len(inputs) < 2 {
+		return kvspace.XValue{}, fmt.Errorf("min/max requires at least 2 inputs, got %d", len(inputs))
 	}
-	if isNumeric(a) && isNumeric(b) {
-		return kvspace.Float(fn(asFloat(a), asFloat(b))), nil
+	vals := make([]kvspace.XValue, len(inputs))
+	allInt, allNum := true, true
+	for i, v := range inputs {
+		vals[i] = nilAsInt(v)
+		if !isIntKind(vals[i].Kind()) { allInt = false }
+		if !isNumeric(vals[i]) { allNum = false }
 	}
-	return strWin(a, b), nil
+	// int 全域 → 原生 int64 fold（fix-020/022：不经 float64 中转）
+	if allInt {
+		acc := asInt(vals[0])
+		for _, v := range vals[1:] { acc = intWin(acc, asInt(v)) }
+		return kvspace.Int(acc), nil
+	}
+	if allNum {
+		acc := asFloat(vals[0])
+		for _, v := range vals[1:] { acc = fn(acc, asFloat(v)) }
+		return kvspace.Float(acc), nil
+	}
+	acc := vals[0]
+	for _, v := range vals[1:] { acc = strWin(acc, v) }
+	return acc, nil
 }
 
 func evalMin(inputs []kvspace.XValue) (kvspace.XValue, error) {

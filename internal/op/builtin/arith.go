@@ -8,13 +8,17 @@ import (
 	"kvlang/internal/vthread"
 )
 
-type arith struct{ f func(float64, float64) float64; fi func(int64, int64) int64; unary bool }
+type arith struct{ f func(float64, float64) float64; fi func(int64, int64) int64; unary, concat bool }
 func (o arith) Call(f *op.Frame) error {
 	inputs := readInputs(f)
 	if o.unary && len(inputs) == 1 {
 		r, err := evalNeg(inputs[0])
 		if err != nil { vthread.SetError(bg, f.KV, f.Vtid, f.PC, err.Error()); return err }
 		return writeResult(f, r)
+	}
+	// + 号 string 拼接（fix-025：Python/JS/Go/Rust 4/5 阵营；C 无 + 拼接）
+	if o.concat && len(inputs) == 2 && inputs[0].Kind() == "string" && inputs[1].Kind() == "string" {
+		return writeResult(f, kvspace.Str(inputs[0].Str()+inputs[1].Str()))
 	}
 	r, err := evalBinaryArith(inputs, o.f, o.fi)
 	if err != nil { vthread.SetError(bg, f.KV, f.Vtid, f.PC, err.Error()); return err }
