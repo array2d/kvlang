@@ -51,3 +51,4 @@ appendonly.aof
 # Issues tracking
 /issues/
 /issue/
+go.work*

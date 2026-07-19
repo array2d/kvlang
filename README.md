@@ -192,6 +192,32 @@ python3 tutorial/test.py                     # all 93 examples — CI verificati
 
 ---
 
+## Error Cases
+
+Negative tests verifying diagnostic accuracy: each `.kv` file is annotated with expected error/warning messages,
+and `error_test.py` checks that the compiler and runtime produce those diagnostics exactly.
+
+```
+error_cases/
+  type_error/       e.g. char(1) → TypeError
+  index_error/      e.g. at([1,2], 5) → IndexError
+  zero_division/    e.g. 1/0 → ZeroDivisionError
+  key_error/        e.g. kvat("/x","y") → KeyError
+  value_error/      e.g. log(-5) → ValueError
+  name_error/       e.g. nosuch() → NameError
+  read_only/        e.g. reading a read param → compiler rejection
+  recursion_error/  e.g. unbounded recurse → RecursionError
+  runtime_error/    e.g. Bootstrap failure → RuntimeError
+```
+
+```bash
+python3 tutorial/error_test.py              # all 10 negative tests
+python3 tutorial/test.py                    # all 94 positive tests — CI verification
+```
+
+Diagnostic categories follow the [diagnostic-style specification](https://github.com/array2d/deepx-design/blob/master/doc/reference/diagnostic-style-five-languages.md)
+aligned to Python naming conventions (fix-028).
+
 ## License
 
 MIT — see [LICENSE](LICENSE)
