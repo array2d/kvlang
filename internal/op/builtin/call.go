@@ -80,6 +80,8 @@ var registry = map[string]Op{
 	OpHas:    hasOp{},
 	OpChar:   strCharOp{},
 	OpOrd:    strOrdOp{},
+	OpDebugger: debuggerOp{},
+
 	OpStrCmp: strCmpOp{},
 	OpStrStr: strStrOp{},
 	OpStrLen: strLenOp{},

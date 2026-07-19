@@ -75,13 +75,13 @@ func newSession(
 	}
 	vthread.Set(ctx, kv, vtid, firstPC, "init")
 	// 在 goroutine 启动前写 debug 标志，保证 Execute 首次 isFuncEntryPC 检查时可见
-	kv.Set(keytree.VThreadDebug(vtid), kvspace.Str("step"))
+	kv.Set(keytree.VThreadDebugger(vtid), kvspace.Str("step"))
 
 	s := &traceSession{
 		kv:        kv,
 		vtid:      vtid,
-		pauseKey:  keytree.VThreadDebugPause(vtid),
-		resumeKey: keytree.VThreadDebugResume(vtid),
+		pauseKey:  keytree.VThreadDebuggerPause(vtid),
+		resumeKey: keytree.VThreadDebuggerResume(vtid),
 	}
 	s.wg.Add(1)
 	go func() {

@@ -33,8 +33,8 @@ type debugPauseEvent struct {
 //	c        — 取消单步，全速继续执行
 //	q        — 中止程序
 func runDebugAgent(kv kvspace.KVSpace, vtid string, done <-chan struct{}) {
-	pauseKey := keytree.VThreadDebugPause(vtid)
-	resumeKey := keytree.VThreadDebugResume(vtid)
+	pauseKey := keytree.VThreadDebuggerPause(vtid)
+	resumeKey := keytree.VThreadDebuggerResume(vtid)
 	step := 0
 	reader := bufio.NewReader(os.Stdin)
 
@@ -69,7 +69,7 @@ func runDebugAgent(kv kvspace.KVSpace, vtid string, done <-chan struct{}) {
 		case "c", "continue":
 			logx.Debug("[debugAgent] continue")
 			// 清除 .debug 标志，CPU 会退出单步模式
-			kv.Del(keytree.VThreadDebug(vtid))
+			kv.Del(keytree.VThreadDebugger(vtid))
 			kv.Notify(resumeKey, kvspace.Str("continue"))
 			fmt.Fprintln(os.Stderr, "  [continuing at full speed]")
 			// agent 继续监听（CPU 可能在函数入口重新激活调试）

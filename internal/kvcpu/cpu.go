@@ -28,7 +28,7 @@ type cpu struct {
 
 // New 创建一个与 kv 绑定的 CPU 实例。
 // vmID 用于系统级通知（/sys/vm/<vmID>/err）。
-// 所有 CPU 实例均内置调试支持：通过 /vthread/<vtid>/.debug 键激活。
+// 所有 CPU 实例均内置调试支持：通过 /vthread/<vtid>/.debugger 键激活。
 func New(kv kvspace.KVSpace, vmID string) CPU {
 	return &cpu{kv: kv, vmID: vmID}
 }

@@ -1,7 +1,7 @@
 // debug.go: kvcpu 内联调试辅助函数。
 //
 // 所有 cpu.Execute 循环都自动包含调试检查点，agent 只需通过已有
-// kvspace 命令读写 /vthread/<vtid>/.debug* 键即可控制调试行为。
+// kvspace 命令读写 /vthread/<vtid>/.debugger* 键即可控制调试行为。
 // 无需特殊启动方式，对任何正在运行的 kv 程序均有效。
 package kvcpu
 
@@ -31,7 +31,7 @@ func debugFuncName(kv kvspace.KVSpace, frameRoot string) string {
 	return v.Str()
 }
 
-// debugNotifyPause 向 /vthread/<vtid>/.debug.pause 投递暂停事件（JSON）。
+// debugNotifyPause 向 /vthread/<vtid>/.debugger.pause 投递暂停事件（JSON）。
 // CPU 命中断点后调用，agent 通过 kvspace watch 接收。
 func debugNotifyPause(_ context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) {
 	frameRoot := keytree.FrameRoot(pc)
@@ -41,15 +41,15 @@ func debugNotifyPause(_ context.Context, kv kvspace.KVSpace, vtid, pc string, in
 		"frame": frameRoot,
 		"op":    inst.Opcode,
 	})
-	kv.Notify(keytree.VThreadDebugPause(vtid), kvspace.Str(string(event)))
+	kv.Notify(keytree.VThreadDebuggerPause(vtid), kvspace.Str(string(event)))
 }
 
-// debugWaitResume 阻塞等待 /vthread/<vtid>/.debug.resume 上的 Notify，
+// debugWaitResume 阻塞等待 /vthread/<vtid>/.debugger.resume 上的 Notify，
 // 返回 agent 发送的命令字符串（"step" / "continue" / "abort"）。
 // 使用超时重试，与 vthread.WaitDone 保持一致的模式。
 func debugWaitResume(kv kvspace.KVSpace, vtid string) string {
 	for {
-		val, err := kv.Watch(keytree.VThreadDebugResume(vtid), 30*time.Second)
+		val, err := kv.Watch(keytree.VThreadDebuggerResume(vtid), 30*time.Second)
 		if err == nil {
 			return val.Str()
 		}
