@@ -46,7 +46,7 @@ func evalAbs(inputs []kvspace.XValue) (kvspace.XValue, error) {
 	case "float64":
 		return kvspace.Float64(math.Abs(v.Float64())), nil
 	default:
-		return kvspace.XValue{}, fmt.Errorf("abs requires numeric, got %s", v.Kind())
+		return kvspace.XValue{}, fmt.Errorf("TypeError: abs requires numeric, got %s", v.Kind())
 	}
 }
 
@@ -58,7 +58,7 @@ func evalPow(inputs []kvspace.XValue) (kvspace.XValue, error) {
 func evalMinMax(inputs []kvspace.XValue, fn func(float64, float64) float64, intWin func(a, b int64) int64, strWin func(a, b kvspace.XValue) kvspace.XValue) (kvspace.XValue, error) {
 	// 变参 fold（fix-026：Python/JS/Go 3/5 阵营支持 max(a,b,c...)，两参是少数派）
 	if len(inputs) < 2 {
-		return kvspace.XValue{}, fmt.Errorf("min/max requires at least 2 inputs, got %d", len(inputs))
+		return kvspace.XValue{}, fmt.Errorf("TypeError: min/max requires at least 2 inputs, got %d", len(inputs))
 	}
 	vals := make([]kvspace.XValue, len(inputs))
 	allInt, allNum := true, true
@@ -114,7 +114,7 @@ func evalExp(inputs []kvspace.XValue) (kvspace.XValue, error) {
 func evalLog(inputs []kvspace.XValue) (kvspace.XValue, error) {
 	if err := requireUnary(inputs); err != nil { return kvspace.XValue{}, err }
 	x := asFloat(inputs[0])
-	if x <= 0 { return kvspace.XValue{}, fmt.Errorf("log of non-positive number: %v", x) }
+	if x <= 0 { return kvspace.XValue{}, fmt.Errorf("ValueError: log of non-positive number: %v", x) }
 	return kvspace.Float(math.Log(x)), nil
 }
 

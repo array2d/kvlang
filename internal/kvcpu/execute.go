@@ -59,7 +59,7 @@ func (c *cpu) Execute(pc string) error {
 		// P6：栈深度保护
 		depth := stackDepth(pc)
 		if depth > MaxStackDepth {
-			msg := fmt.Sprintf("stack overflow: depth=%d pc=%s", depth, pc)
+			msg := fmt.Sprintf("RecursionError: stack overflow: depth=%d pc=%s; help: remove infinite recursion or reorganize as a loop", depth, pc)
 			vthread.SetError(ctx, c.kv, vtid, pc, msg)
 			logx.Debug("[%s] %s", vtid, msg)
 			return fmt.Errorf("%s", msg)
@@ -102,8 +102,8 @@ func (c *cpu) Execute(pc string) error {
 				debugNotifyPause(ctx, c.kv, vtid, pc, inst)
 				switch cmd := debugWaitResume(c.kv, vtid); cmd {
 				case "abort":
-					vthread.SetError(ctx, c.kv, vtid, pc, "debug: aborted by agent")
-					return fmt.Errorf("debug: aborted by agent")
+					vthread.SetError(ctx, c.kv, vtid, pc, "RuntimeError: debug: aborted by agent")
+					return fmt.Errorf("RuntimeError: debug: aborted by agent")
 				case "continue":
 					stepping = false
 					c.kv.Del(keytree.VThreadDebug(vtid)) // 清除标志，恢复全速
@@ -196,7 +196,7 @@ func (c *cpu) checkReadOnlyWrites(ctx context.Context, vtid, pc string, inst *op
 		}
 		for _, n := range names {
 			if w == n {
-				msg := fmt.Sprintf("read-only param %q cannot be used as write slot", w)
+				msg := fmt.Sprintf("ReadOnlyError: read-only param %q cannot be used as write slot; help: declare it as a write param (accumulator) or copy to a local", w)
 				vthread.SetError(ctx, c.kv, vtid, pc, msg)
 				return fmt.Errorf("%s", msg)
 			}

@@ -84,14 +84,14 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	pkgVal, err := kv.Get(keytree.FuncIdx(funcName))
 	pkg := pkgVal.Str()
 	if err != nil || pkg == "" {
-		vthread.SetError(ctx, kv, vtid, pc, "func not found: "+funcName)
+		vthread.SetError(ctx, kv, vtid, pc, "NameError: func not found: "+funcName)
 		return ""
 	}
 	funcKey := keytree.Func(pkg, funcName)
 
 	sigVal, err := kv.Get(funcKey)
 	if err != nil {
-		vthread.SetError(ctx, kv, vtid, pc, "func signature not found: "+funcName)
+		vthread.SetError(ctx, kv, vtid, pc, "NameError: func signature not found: "+funcName)
 		return ""
 	}
 	funcSig := parser.ParseFuncSig(sigVal.Str())
@@ -101,7 +101,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 		frameRoot := keytree.FrameRoot(pc)
 		kv.Unlink(keytree.FnCode(frameRoot))
 		if err := kv.Link(funcKey, keytree.FnCode(frameRoot)); err != nil {
-			vthread.SetError(ctx, kv, vtid, pc, "tco link failed: "+err.Error())
+			vthread.SetError(ctx, kv, vtid, pc, "tco RuntimeError: link failed: "+err.Error())
 			return ""
 		}
 		return keytree.FnCode(frameRoot) + "/[0,0]"
@@ -113,7 +113,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 
 	// 链接只读指令区：frameRoot/.fn → /func/<pkg>/<name>
 	if err := kv.Link(funcKey, keytree.FnCode(frameRoot)); err != nil {
-		vthread.SetError(ctx, kv, vtid, pc, "link failed: "+err.Error())
+		vthread.SetError(ctx, kv, vtid, pc, "RuntimeError: link failed: "+err.Error())
 		return ""
 	}
 
@@ -224,14 +224,14 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 	pkgVal, err := kv.Get(keytree.FuncIdx(funcName))
 	pkg := pkgVal.Str()
 	if err != nil || pkg == "" {
-		vthread.SetError(ctx, kv, vtid, "", "Bootstrap: func not found: "+funcName)
+		vthread.SetError(ctx, kv, vtid, "", "Bootstrap: NameError: func not found: "+funcName)
 		return ""
 	}
 	funcKey := keytree.Func(pkg, funcName)
 
 	vthreadRoot := keytree.VThread(vtid)
 	if err := kv.Link(funcKey, keytree.FnCode(vthreadRoot)); err != nil {
-		vthread.SetError(ctx, kv, vtid, "", "Bootstrap: link failed: "+err.Error())
+		vthread.SetError(ctx, kv, vtid, "", "Bootstrap: RuntimeError: link failed: "+err.Error())
 		return ""
 	}
 	kv.Set(vthreadRoot+"/.rootfunc", kvspace.Str(funcName))

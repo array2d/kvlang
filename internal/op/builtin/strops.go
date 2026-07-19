@@ -15,8 +15,8 @@ type strCharOp struct{}
 func (strCharOp) Call(f *op.Frame) error {
 	inputs := readInputs(f)
 	if len(inputs) < 2 {
-		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "char requires string and index")
-		return fmt.Errorf("char requires string and index")
+		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "TypeError: char requires string and index")
+		return fmt.Errorf("TypeError: char requires string and index")
 	}
 	s := inputs[0].Str()
 	idx := int(inputs[1].Int64())
@@ -32,8 +32,8 @@ type strOrdOp struct{}
 func (strOrdOp) Call(f *op.Frame) error {
 	inputs := readInputs(f)
 	if len(inputs) < 1 {
-		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "ord requires a string")
-		return fmt.Errorf("ord requires a string")
+		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "TypeError: ord requires a string")
+		return fmt.Errorf("TypeError: ord requires a string")
 	}
 	s := inputs[0].Str()
 	if len(s) == 0 {
@@ -47,8 +47,8 @@ type strCmpOp struct{}
 func (strCmpOp) Call(f *op.Frame) error {
 	inputs := readInputs(f)
 	if len(inputs) < 2 {
-		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "strcmp requires two strings")
-		return fmt.Errorf("strcmp requires two strings")
+		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "TypeError: strcmp requires two strings")
+		return fmt.Errorf("TypeError: strcmp requires two strings")
 	}
 	a, b := inputs[0].Str(), inputs[1].Str()
 	r := int64(0)
@@ -62,8 +62,8 @@ type strStrOp struct{}
 func (strStrOp) Call(f *op.Frame) error {
 	inputs := readInputs(f)
 	if len(inputs) < 2 {
-		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "strstr requires two strings")
-		return fmt.Errorf("strstr requires two strings")
+		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "TypeError: strstr requires two strings")
+		return fmt.Errorf("TypeError: strstr requires two strings")
 	}
 	idx := strings.Index(inputs[0].Str(), inputs[1].Str())
 	return writeResult(f, kvspace.Int64(int64(idx)))
@@ -83,8 +83,8 @@ type strSliceOp struct{}
 func (strSliceOp) Call(f *op.Frame) error {
 	inputs := readInputs(f)
 	if len(inputs) < 3 {
-		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "slice requires string, start, end")
-		return fmt.Errorf("slice requires string, start, end")
+		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "TypeError: slice requires string, start, end")
+		return fmt.Errorf("TypeError: slice requires string, start, end")
 	}
 	s := inputs[0].Str()
 	lo := int(inputs[1].Int64())

@@ -15,8 +15,8 @@ import (
 type kvHasOp struct{}
 func (o kvHasOp) Call(f *op.Frame) error {
 	if len(f.Inst.Reads) < 2 {
-		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "kvhas requires 2 args")
-		return fmt.Errorf("kvhas requires 2 args")
+		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "TypeError: kvhas requires 2 args")
+		return fmt.Errorf("TypeError: kvhas requires 2 args")
 	}
 	fp := keytree.FrameRoot(f.PC)
 	prefix := resolveReadValue(f.KV, fp, f.Inst.Reads[0]).Str()
@@ -36,8 +36,8 @@ func (o kvHasOp) Call(f *op.Frame) error {
 type kvAtOp struct{}
 func (o kvAtOp) Call(f *op.Frame) error {
 	if len(f.Inst.Reads) < 2 {
-		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "kvat requires 2 args")
-		return fmt.Errorf("kvat requires 2 args")
+		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "TypeError: kvat requires 2 args")
+		return fmt.Errorf("TypeError: kvat requires 2 args")
 	}
 	fp := keytree.FrameRoot(f.PC)
 	prefix := resolveReadValue(f.KV, fp, f.Inst.Reads[0]).Str()
@@ -54,7 +54,7 @@ func (o kvAtOp) Call(f *op.Frame) error {
 	v, _ := f.KV.Get(key)
 	if v.IsNil() {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC,
-			fmt.Sprintf("kvat: key not found: %s", key))
+			fmt.Sprintf("KeyError: kvat: key not found: %s; help: verify the key exists in the path or key-family", key))
 		return fmt.Errorf("kvat: key not found: %s", key)
 	}
 	return writeResult(f, v)

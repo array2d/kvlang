@@ -58,13 +58,13 @@ func evalNeg(v kvspace.XValue) (kvspace.XValue, error) {
 	case "int", "int8", "int16", "int32", "int64":
 		return kvspace.Int64(-v.Int64()), nil
 	case "uint8", "uint16", "uint32", "uint64":
-		return kvspace.XValue{}, fmt.Errorf("cannot negate unsigned %s", v.Kind())
+		return kvspace.XValue{}, fmt.Errorf("TypeError: cannot negate unsigned %s", v.Kind())
 	case "float", "float32":
 		return kvspace.Float32(-v.Float32()), nil
 	case "float64":
 		return kvspace.Float64(-v.Float64()), nil
 	default:
-		return kvspace.XValue{}, fmt.Errorf("cannot negate %s", v.Kind())
+		return kvspace.XValue{}, fmt.Errorf("TypeError: cannot negate %s", v.Kind())
 	}
 }
 
@@ -72,7 +72,7 @@ func evalDiv(inputs []kvspace.XValue) (kvspace.XValue, error) {
 	if err := requireBinary(inputs); err != nil { return kvspace.XValue{}, err }
 	inputs[0], inputs[1] = nilAsInt(inputs[0]), nilAsInt(inputs[1])
 	bf := asFloat(inputs[1])
-	if bf == 0 { return kvspace.XValue{}, fmt.Errorf("division by zero") }
+	if bf == 0 { return kvspace.XValue{}, fmt.Errorf("ZeroDivisionError: division by zero") }
 	// C 风格：两整数相除 → 整除，否则 → 浮除
 	a, b := inputs[0], inputs[1]
 	if isIntKind(a.Kind()) && isIntKind(b.Kind()) {
@@ -85,7 +85,7 @@ func evalMod(inputs []kvspace.XValue) (kvspace.XValue, error) {
 	if err := requireBinary(inputs); err != nil { return kvspace.XValue{}, err }
 	inputs[0], inputs[1] = nilAsInt(inputs[0]), nilAsInt(inputs[1])
 	b := asInt(inputs[1])
-	if b == 0 { return kvspace.XValue{}, fmt.Errorf("modulo by zero") }
+	if b == 0 { return kvspace.XValue{}, fmt.Errorf("ZeroDivisionError: modulo by zero") }
 	return kvspace.Int(asInt(inputs[0]) % b), nil
 }
 

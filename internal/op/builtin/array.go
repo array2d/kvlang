@@ -41,8 +41,8 @@ type atOp struct{}
 func (atOp) Call(f *op.Frame) error {
 	inputs := readInputs(f)
 	if len(inputs) < 2 {
-		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "at requires array and index")
-		return fmt.Errorf("at requires array and index")
+		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "TypeError: at requires array and index")
+		return fmt.Errorf("TypeError: at requires array and index")
 	}
 	// string base 分流（fix-025）：以 "/" 开头 = 路径指针（键族 deref）；否则 = 字符序列。
 	// s[i] 读返单字符字符串（动态阵营，与 char 一致）；越界/非整型索引返 ""（缺席语义）。
@@ -70,7 +70,7 @@ func (atOp) Call(f *op.Frame) error {
 		v, _ := f.KV.Get(path); return writeResult(f, v)
 	}
 	if inputs[0].IsNil() {
-		msg := "at: base " + f.Inst.Reads[0] + " is nil — declare key-family first (e.g. `" + f.Inst.Reads[0] + " = {}`) or pass a path string"
+		msg := "IndexError: at: base " + f.Inst.Reads[0] + " is nil; help: declare a key-family first (e.g. `" + f.Inst.Reads[0] + " = {}`) or pass a path string"
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
 		return fmt.Errorf("%s", msg)
 	}
@@ -78,8 +78,8 @@ func (atOp) Call(f *op.Frame) error {
 	elem := inputs[0].Index(idx)
 	if elem.IsNil() {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC,
-			fmt.Sprintf("at: index %d out of bounds", idx))
-		return fmt.Errorf("at: index out of bounds")
+			fmt.Sprintf("IndexError: at: index %d out of bounds; help: the array or string has no item at this position", idx))
+		return fmt.Errorf("IndexError: at: index out of bounds")
 	}
 	return writeResult(f, elem)
 }
@@ -89,8 +89,8 @@ type arraySetOp struct{}
 func (arraySetOp) Call(f *op.Frame) error {
 	inputs := readInputs(f)
 	if len(inputs) < 3 {
-		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "set requires array, index, value")
-		return fmt.Errorf("set requires array, index, value")
+		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "TypeError: set requires array, index, value")
+		return fmt.Errorf("TypeError: set requires array, index, value")
 	}
 	arr := inputs[0]
 	// string base 分流（fix-025）：非 "/" 开头 = 字符序列，s[i] 写 = 单字符替换后整串回写
@@ -101,13 +101,13 @@ func (arraySetOp) Call(f *op.Frame) error {
 		idx := int(inputs[1].Int64())
 		ch := inputs[2].Str()
 		if idx < 0 || idx >= len(sv) {
-			msg := fmt.Sprintf("set: string index %d out of bounds (len=%d)", idx, len(sv))
+			msg := fmt.Sprintf("IndexError: set: string index %d out of bounds (len=%d); help: try adjusting the index or check strlen first", idx, len(sv))
 			vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
 			return fmt.Errorf("%s", msg)
 		}
 		if len(ch) == 0 {
-			vthread.SetError(bg, f.KV, f.Vtid, f.PC, "set: replacement char is empty")
-			return fmt.Errorf("set: replacement char is empty")
+			vthread.SetError(bg, f.KV, f.Vtid, f.PC, "TypeError: set: replacement char is empty")
+			return fmt.Errorf("TypeError: set: replacement char is empty")
 		}
 		result := sv[:idx] + ch[:1] + sv[idx+1:]
 		return writeResult(f, kvspace.Str(result))
@@ -132,14 +132,14 @@ func (arraySetOp) Call(f *op.Frame) error {
 		return nil
 	}
 	if arr.IsNil() {
-		msg := "set: base " + f.Inst.Reads[0] + " is nil — declare key-family first (e.g. `" + f.Inst.Reads[0] + " = {}`) or pass a path string"
+		msg := "IndexError: set: base " + f.Inst.Reads[0] + " is nil; help: declare a key-family first (e.g. `" + f.Inst.Reads[0] + " = {}`) or pass a path string"
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
 		return fmt.Errorf("%s", msg)
 	}
 	idx := int(inputs[1].Int64())
 	if idx < 0 || idx >= arr.Len() {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC,
-			fmt.Sprintf("set: index %d out of bounds (len=%d)", idx, arr.Len()))
+			fmt.Sprintf("IndexError: set: index %d out of bounds (len=%d)", idx, arr.Len()))
 		return fmt.Errorf("set: index out of bounds")
 	}
 	val := inputs[2]
