@@ -7,7 +7,7 @@
 
 **deepx 的 VM（原 dxlang），agent-native 训推一体自迭代强人工智能计算架构。** 以 kvspace 树形路径为统一地址空间，同种语法同时承担 VM 指令、高级语言、编译器 IR、人类可读源码四种职能。
 
-> English: [README.md](README.md) | 设计规范: [deepx-design](https://github.com/array2d/deepx-design)（架构细节、模块职责、深度理解均在此仓）
+> English: [README.md](README.md) | 设计：[kvlang-deep-dive](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-deep-dive.md) — 根设计文档；README 为教学衍生。全部行为规范（p0–p7）、指令模型（§2）、Link 调用机制（§6）、类型系统（§9）、诊断体系（§12）均在其中。
 
 ---
 
