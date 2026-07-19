@@ -44,17 +44,28 @@ func ParseCode(r io.Reader) (*ast.File, []Diagnostic, error) {
 	if strings.TrimSpace(string(raw)) == "" {
 		return nil, nil, fmt.Errorf("empty input")
 	}
-	p := &parser{tokens: Scan(string(raw))}
+		lines := strings.Split(string(raw), "\n")
+		p := &parser{tokens: Scan(string(raw)), srcLines: lines, srcName: "<inline>"}
 	f := p.parseFile()
+	// 为每个 diagnostic 绑定出错行源码（fix-030）
+	for i := range p.errors {
+		d := &p.errors[i]
+		if d.Pos.Line > 0 && d.Pos.Line <= len(lines) {
+			d.Source = lines[d.Pos.Line-1]
+		}
+		d.SrcName = "<inline>"
+	}
 	return f, p.errors, nil
 }
 
 // ── parser 结构体 ──────────────────────────────────────────────
 
 type parser struct {
-	tokens []Token
-	pos    int
-	errors []Diagnostic // 积累语法错误，不在第一个错误处停止
+	tokens   []Token
+	pos      int
+	errors   []Diagnostic // 积累语法错误，不在第一个错误处停止
+	srcLines []string     // 源码行缓存（fix-030：为 diagnostic 附加出错行上下文）
+	srcName  string       // 文件名/内联标注（fix-030）
 }
 
 func (p *parser) peek() Token {
@@ -197,7 +208,8 @@ func (p *parser) checkReadOnlyParams(fn *ast.Func) {
 		return
 	}
 	bad := func(w string) {
-		p.errors = append(p.errors, Diagnostic{Message: fmt.Sprintf(
+		// AST 遍历无 token span，标注函数体第一行（fix-030 定位需求）
+		p.errors = append(p.errors, Diagnostic{Pos: Pos{Line: 1, Col: 1}, Message: fmt.Sprintf(
 			"func %s: read param %q cannot be used as write slot (read params are read-only)",
 			fn.Sig.Name, w)})
 	}

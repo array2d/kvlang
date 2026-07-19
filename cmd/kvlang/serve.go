@@ -56,7 +56,8 @@ func executeEntry(kv kvspace.KVSpace, debug bool) {
 
 // reportRunError 单次模式终态 error 回显 stderr 并以非零退出（fix-016）。
 func reportRunError(kv kvspace.KVSpace, vtid string) {
-	if msgVal, err := kv.Get(keytree.VThreadStatusMsg(vtid, "error")); err == nil && !msgVal.IsNil() {
+	msgVal, err := kv.Get(keytree.VThreadStatusMsg(vtid, "error"))
+	if err == nil && !msgVal.IsNil() {
 		fmt.Fprintln(os.Stderr, "error:", msgVal.Str())
 		os.Exit(1)
 	}
