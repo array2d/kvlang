@@ -1,0 +1,39 @@
+# strings: 字符串索引读写、+ 拼接、C 风格 API（fix-025）
+# 语义: s[i] 读返单字符字符串（动态阵营，可与 "a" 直接比较），越界返 ""；
+#       s[i] = "X" 单字符替换后整串回写（C 直觉 + 值语义）；+ 拼接（4/5 阵营）；
+#       strcmp 返 -1/0/1（C 语义），strstr 返首次下标、未找到 -1（C 名 + 索引语义）
+# 期望输出:
+#   e
+#   Hello
+#   kvlang
+#   Hello kvlang
+#   12
+#   -1
+#   0
+#   6
+#   -1
+#   l
+#   108
+def main() -> () {
+	s = "hello"  # = 等价于 <-
+	print(s[1])
+	s[0] = "H"  # = 等价于 <-
+	print(s)
+
+	t <- "kv" + "lang"
+	print(t)
+	s + " " + t -> w
+	print(w)
+	print(strlen(w))
+
+	print(strcmp("abc", "abd"))
+	print(strcmp("x", "x"))
+	print(strstr(w, "kv"))
+	print(strstr(w, "zz"))
+
+	c <- w[3]
+	print(c)
+	print(ord(c))
+}
+
+main()
