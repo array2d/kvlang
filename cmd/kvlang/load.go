@@ -81,7 +81,7 @@ func runFiles(dsn string, paths []string, debug bool) {
 	}
 	if len(files) == 0 { logx.Fatal("no .kv files found") }
 
-	loadFunctions(kv, files)
+	if !loadFunctions(kv, files) { return } // 纯 def/lib 无 init → 等同 load，不执行
 	executeEntry(kv, debug)
 }
 
@@ -106,30 +106,28 @@ func runCode(name string, rc io.Reader, dsn string, debug bool) {
 
 // loadFunctions 将多个 .kv 文件解析、lower 并写入 kvspace，合成 init 入口。
 // import 在 kvspace 模型中为文档级声明——多文件 run 时全部函数已自然就绪（fix-033）。
-func loadFunctions(kv kvspace.KVSpace, files []string) {
+func loadFunctions(kv kvspace.KVSpace, files []string) bool {
 	var allCalls []*ast.Instruction
 	anyCode := false
 	loaded := map[string]bool{}
 	for _, f := range files {
-		_loadFile(kv, f, &allCalls, &anyCode, loaded)
+	_loadFile(kv, f, &allCalls, &anyCode, loaded)
 	}
-	if !anyCode && len(allCalls) == 0 { return }
+	if !anyCode && len(allCalls) == 0 { return false }
 	layoutcode.WriteFunc(kv, "main", makeInitFunc(allCalls))
 	kv.Set(keytree.LibMain, kvspace.Str(`{"entry":"init","reads":[],"writes":[]}`))
+	return true
 }
 
-func _loadFile(kv kvspace.KVSpace, f string, allCalls *[]*ast.Instruction, anyCode *bool, loaded map[string]bool) []string {
+func _loadFile(kv kvspace.KVSpace, f string, allCalls *[]*ast.Instruction, anyCode *bool, loaded map[string]bool) {
 	abs, _ := filepath.Abs(f)
-	if loaded[abs] { return nil }
+	if loaded[abs] { return }
 	loaded[abs] = true
 
 	df, diags, err := parser.ParseFile(f)
-	if err != nil { logx.Warn("SKIP %s: %v", f, err); return nil }
+	if err != nil { logx.Warn("SKIP %s: %v", f, err); return }
 	for _, d := range diags { d.SrcName = f; logx.Warn("%s: %s", f, d) }
 	if parser.HasErrors(diags) { logx.Fatal("%s: error-level diagnostics — refusing to load", f) }
-
-	// 收集 import 列表，交由 loadFunctions 阶段 2 校验
-	impList := df.Imports
 
 	pkg := df.Package // lib name { } 声明，空即匿名直放 /lib/<name>
 	for i := range df.Funcs {
@@ -138,7 +136,6 @@ func _loadFile(kv kvspace.KVSpace, f string, allCalls *[]*ast.Instruction, anyCo
 	}
 	*allCalls = append(*allCalls, df.TopLevelCalls...)
 	if len(df.TopLevelCalls) > 0 { *anyCode = true }
-	return impList
 }
 
 // collectKVFiles 收集 path（文件或目录）下所有 .kv 文件路径。
