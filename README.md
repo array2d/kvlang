@@ -7,7 +7,7 @@
 
 **The VM of deepx (formerly dxlang) — an agent-native, train-inference-unified, self-iterating AI compute architecture.** kvspace tree paths form a single unified address space; one syntax simultaneously serves as VM instructions, high-level language, compiler IR, and human-readable source.
 
-> 中文文档: [README_CN.md](README_CN.md) | Design: [kvlang-deep-dive](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-deep-dive.md) — root design doc; README is the teaching derivative. All behavior norms (p0–p7), instruction model (§2), Link call mechanism (§6), type system (§9), diagnostics (§12) live there.
+> 中文文档: [README_CN.md](README_CN.md) | Design: [deep-dive](https://github.com/array2d/deepx-design/blob/master/doc/kvlang/deep-dive.md) — root design doc; README is the teaching derivative. All behavior norms (p0–p7), instruction model (§2), Link call mechanism (§6), type system (§9), diagnostics (§12) live there.
 
 ---
 
