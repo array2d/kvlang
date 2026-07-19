@@ -71,7 +71,7 @@ def main() -> () {
 main()
 ```
 
-### Read-Write Code: Three Assignment Forms
+### rwir（Read-Write IR）：Three Assignment Forms
 
 ```kv
 x = 40 + 2            # = : write slot on the left (≡ <-); = is NOT an expression, cannot nest in conditions
@@ -82,7 +82,7 @@ f(a, b) -> r          # write-param mapping for calls; multiple: -> x, y; discar
 
 A write slot must be a **location**: a bare name (frame-local), `/abs/path` (global key), or `base.name` (member). Literals are not locations.
 
-### Functions: No Return Values, Only Write Params
+**`def func(ra,rb) -> (wa,wb) { … }` = composite rwir**, the named form. Single-line rwir like `A + B -> C` is atomic (one opcode + reads + writes); `def` packs multiple rwir into a named unit with the same arrow interface — `(ra,rb)` declare read params, `-> (wa,wb)` declare write params. Calling `add(3,4) -> s` binds arguments to read slots, maps write slots back to the caller frame. No return values, only write-param mapping:
 
 `-> (C: int)` in a `def` signature is a **write-param declaration**. The function writes results into its write-param slots; the caller maps them with `-> r`.
 **Read params are read-only**: the body may not place a read param in a write slot (e.g. `A = A + 1`). Decide the role first —
