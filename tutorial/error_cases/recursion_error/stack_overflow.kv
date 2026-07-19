@@ -1,0 +1,7 @@
+# 期望诊断:
+#   error: RecursionError: stack overflow
+def f() -> () {
+    f()
+}
+
+f()
