@@ -95,11 +95,17 @@ func runCode(name string, rc io.Reader, dsn string, debug bool) {
 	if err != nil { logx.Fatal("parse: %v", err) }
 	for _, d := range diags { d.SrcName = "<inline>"; logx.Warn("parse: %s", d) }
 	if parser.HasErrors(diags) { logx.Fatal("parse: error-level diagnostics — refusing to execute") }
-	if len(df.Funcs) == 0 && len(df.TopLevelCalls) == 0 { return }
+	if len(df.Funcs) == 0 && len(df.TopLevelCalls) == 0 && len(df.InitBody) == 0 { return }
 	for i := range df.Funcs {
 		layoutcode.WriteFunc(kv, "main", lower.Func(&df.Funcs[i]))
 	}
-	layoutcode.WriteFunc(kv, "main", makeInitFunc(df.TopLevelCalls))
+	allCalls := df.TopLevelCalls
+	if len(df.InitBody) > 0 {
+		initFn := ast.Func{Sig: ast.FuncSig{Name: "__init__"}, Body: df.InitBody}
+		layoutcode.WriteFunc(kv, "main", lower.Func(&initFn))
+		allCalls = append([]*ast.Instruction{{Expr: ast.Call("__init__")}}, allCalls...)
+	}
+	layoutcode.WriteFunc(kv, "main", makeInitFunc(allCalls))
 	kv.Set(keytree.LibMain, kvspace.Str(`{"entry":"init","reads":[],"writes":[]}`))
 	executeEntry(kv, debug)
 }
@@ -132,6 +138,13 @@ func _loadFile(kv kvspace.KVSpace, f string, allCalls *[]*ast.Instruction, anyCo
 	pkg := df.Package // lib name { } 声明，空即匿名直放 /lib/<name>
 	for i := range df.Funcs {
 		layoutcode.WriteFunc(kv, pkg, lower.Func(&df.Funcs[i]))
+		*anyCode = true
+	}
+	// init { ... } 体包装为函数经 lower 展开（fix-036：支持 if/while/for 控制流）
+	if len(df.InitBody) > 0 {
+		initFn := ast.Func{Sig: ast.FuncSig{Name: "__init__"}, Body: df.InitBody}
+		layoutcode.WriteFunc(kv, pkg, lower.Func(&initFn))
+		*allCalls = append(*allCalls, &ast.Instruction{Expr: ast.Call("__init__")})
 		*anyCode = true
 	}
 	*allCalls = append(*allCalls, df.TopLevelCalls...)

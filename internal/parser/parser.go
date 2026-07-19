@@ -213,6 +213,15 @@ func (p *parser) parseFile() *ast.File {
 			p.expect(RBrace)
 			continue
 		}
+		// init { ... } — 初始化块（fix-036：parseBody 全语法，支持 if/while/for/赋值/调用）
+		if p.peek().Kind == Ident && p.peek().Value == "init" && p.peekAt(1).Kind == LBrace {
+			p.advance() // consume "init"
+			p.advance() // consume {
+			p.skipNewlines()
+			f.InitBody = p.parseBody()
+			p.expect(RBrace)
+			continue
+		}
 if p.peek().Kind == Ident && p.peek().Value == "def" {
 			if f.Package == "" {
 				p.errors = append(p.errors, Diagnostic{Pos: p.peek().Pos, Warn: true,
