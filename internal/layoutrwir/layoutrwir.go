@@ -11,7 +11,7 @@
 // 帧模型（Link P4）：
 //
 //	callPC                         调用指令绝对路径，作为帧根
-//	frameRoot/.fn                     软链接 → /lib/<pkg>/<name>（只读指令），keytree.FnCode(frameRoot)
+//	frameRoot/.funclib                     软链接 → /lib/<pkg>/<name>（只读指令），keytree.FuncLib(frameRoot)
 //	frameRoot/<param>                 参数（本帧局部变量，不经过链接）
 //	frameRoot/.callpc                 存储 callPC 自身（keytree.CallPC），HandleReturn 据此恢复父 PC
 //	frameRoot/.rootfunc               根函数名（keytree.RootFunc），TCO 不更新，供 resolveLabel 使用
@@ -74,8 +74,8 @@ func writeStmt(kv kvspace.KVSpace, st ast.Stmt, prefix string, idx *int) {
 
 // HandleCall 执行 CALL：链接函数指令树，绑定参数，存储写槽。
 //
-// pc 为调用指令的绝对路径（如 /vthread/42/.fn/[3,0]）。
-// tail=true 时执行 TCO：复用当前帧，仅重链 .fn（br/goto 路径）。
+// pc 为调用指令的绝对路径（如 /vthread/42/.funclib/[3,0]）。
+// tail=true 时执行 TCO：复用当前帧，仅重链 .funclib（br/goto 路径）。
 // 返回被调帧第一条指令的绝对 PC；失败时返回 ""（不再返回 pc，避免"PC == 失败"歧义）。
 func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Instruction, tail bool) string {
 	vtid := keytree.VtidFromPC(pc)
@@ -117,23 +117,23 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 		return ""
 	}
 
-	// TCO：复用当前帧，仅重链 .fn 到目标块代码区（.rootfunc 不更新，保持根函数名）
+	// TCO：复用当前帧，仅重链 .funclib 到目标块代码区（.rootfunc 不更新，保持根函数名）
 	if tail {
 		frameRoot := keytree.FrameRoot(pc)
-		kv.Unlink(keytree.FnCode(frameRoot))
-		if err := kv.Link(funcKey, keytree.FnCode(frameRoot)); err != nil {
+		kv.Unlink(keytree.FuncLib(frameRoot))
+		if err := kv.Link(funcKey, keytree.FuncLib(frameRoot)); err != nil {
 			vthread.SetError(ctx, kv, vtid, pc, "tco RuntimeError: link failed: "+err.Error())
 			return ""
 		}
-		return keytree.FnCode(frameRoot) + "/[0,0]"
+		return keytree.FuncLib(frameRoot) + "/[0,0]"
 	}
 
 	// 普通 call：从调用方帧解析实参后绑定到子帧
 	callerFrameRoot := keytree.FrameRoot(pc)
 	frameRoot := keytree.ChildFrameRoot(pc)
 
-	// 链接只读指令区：frameRoot/.fn → /lib/<pkg>/<name>
-	if err := kv.Link(funcKey, keytree.FnCode(frameRoot)); err != nil {
+	// 链接只读指令区：frameRoot/.funclib → /lib/<pkg>/<name>
+	if err := kv.Link(funcKey, keytree.FuncLib(frameRoot)); err != nil {
 		vthread.SetError(ctx, kv, vtid, pc, "RuntimeError: link failed: "+err.Error())
 		return ""
 	}
@@ -168,12 +168,12 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 		kv.Set(keytree.FrameRO(frameRoot), kvspace.Str(strings.Join(params, ",")))
 	}
 
-	return keytree.FnCode(frameRoot) + "/[0,0]"
+	return keytree.FuncLib(frameRoot) + "/[0,0]"
 }
 
 // HandleReturn 处理 RETURN：将被调方输出写入父帧写槽，清理帧，恢复父帧 PC。
 //
-// pc 为 return 指令的绝对路径（如 /vthread/42/[3,0]/.fn/[1,0]）。
+// pc 为 return 指令的绝对路径（如 /vthread/42/[3,0]/.funclib/[1,0]）。
 // 返回值：
 //
 //	("", retVal) — 顶层 return（frameRoot == vthreadRoot）；retVal 供 vthread.SetDone
@@ -205,7 +205,7 @@ func HandleReturn(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.I
 	// 写参已在子帧执行期间通过 .wparam 零拷贝直写父帧，HandleReturn 无需搬运。
 
 	// 清理帧
-	kv.Unlink(keytree.FnCode(frameRoot))
+	kv.Unlink(keytree.FuncLib(frameRoot))
 	kv.DelTree(frameRoot)
 
 	if callPC == "" {
@@ -233,7 +233,7 @@ func RegisterBlocks(kv kvspace.KVSpace, pkg, parent string, body []ast.Stmt) {
 // 顶层帧的特征：frameRoot == vthreadRoot → HandleReturn 识别为顶层 return → SetDone。
 //
 // args 为按序传入的参数值（对应 funcSig.ParamNames()），可为空。
-// 成功返回第一条指令的绝对 PC（vthreadRoot/.fn/[0,0]）；失败返回 ""。
+// 成功返回第一条指令的绝对 PC（vthreadRoot/.funclib/[0,0]）；失败返回 ""。
 func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, args []string) string {
 	pkgVal, err := kv.Get(keytree.LibIdx(funcName))
 	pkg := pkgVal.Str()
@@ -244,7 +244,7 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 	funcKey := keytree.LibFunc(pkg, funcName)
 
 	vthreadRoot := keytree.VThread(vtid)
-	if err := kv.Link(funcKey, keytree.FnCode(vthreadRoot)); err != nil {
+	if err := kv.Link(funcKey, keytree.FuncLib(vthreadRoot)); err != nil {
 		vthread.SetError(ctx, kv, vtid, "", "Bootstrap: RuntimeError: link failed: "+err.Error())
 		return ""
 	}
@@ -269,7 +269,7 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 		}
 	}
 
-	return keytree.FnCode(vthreadRoot) + "/[0,0]"
+	return keytree.FuncLib(vthreadRoot) + "/[0,0]"
 }
 
 // WriteFunc 完成一个函数的全部 KV 写入：

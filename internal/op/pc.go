@@ -9,7 +9,7 @@ import (
 // WriteSlotPC 从指令 opcode 路径推导第 i 个写槽路径（i 从 0 起）。
 //
 // 调用指令 opcode 存在 [addr0,0]，写槽存在 [addr0,1], [addr0,2], ...
-// 例：WriteSlotPC("/vthread/42/.fn/[3,0]", 0) → "/vthread/42/.fn/[3,1]"
+// 例：WriteSlotPC("/vthread/42/.funclib/[3,0]", 0) → "/vthread/42/.funclib/[3,1]"
 //
 func WriteSlotPC(pc string, i int) string {
 	idx := strings.LastIndex(pc, "/[")
