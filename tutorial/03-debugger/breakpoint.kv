@@ -1,0 +1,12 @@
+def loop(n: int) -> () {
+    1 -> i
+    while (i <= n) {
+        debugger()   # 内联断点：执行至此暂停，等待 agent 命令
+        print(i)
+        i + 1 -> i
+    }
+}
+
+def init() -> () {
+    loop(3)
+}
