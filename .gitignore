@@ -46,6 +46,7 @@ appendonly.aof
 
 # Binary
 /kvlang
+/kvlang_test
 /bin/
 
 # Issues tracking
