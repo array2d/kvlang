@@ -14,7 +14,7 @@ import (
 	"kvlang/internal/keytree"
 	"kvlang/internal/kvcpu"
 	"github.com/array2d/kvlang-go"
-	"kvlang/internal/layoutcode"
+	"kvlang/internal/layoutrwir"
 	"kvlang/internal/logx"
 	"kvlang/internal/op/builtin"
 	"kvlang/internal/vthread"
@@ -27,7 +27,7 @@ func executeEntry(kv kvspace.KVSpace, debug bool) {
 	ctx := context.Background()
 	const vtid = "run"
 	kv.DelTree(keytree.VThread(vtid)) // 清上次运行的整棵 vthread 残留（帧变量/错误态），防跨次污染
-	firstPC := layoutcode.Bootstrap(ctx, kv, vtid, "init", nil)
+	firstPC := layoutrwir.Bootstrap(ctx, kv, vtid, "init", nil)
 	if firstPC == "" {
 		logx.Fatal("[single] Bootstrap init failed")
 	}
@@ -38,12 +38,9 @@ func executeEntry(kv kvspace.KVSpace, debug bool) {
 	if debug {
 		// 在执行开始前设置单步标志，CPU 会在第一条函数入口处检测到并暂停
 		kv.Set(keytree.VThreadDebugger(vtid), kvspace.Str("step"))
-		done := make(chan struct{})
-		go runDebugAgent(kv, vtid, done)
-		logx.Info("[single] debug mode: executing %s", firstPC)
+			logx.Info("[single] debug mode: executing %s", firstPC)
 		cpu := kvcpu.New(kv, "single")
 		cpu.Execute(firstPC)
-		close(done)
 		fmt.Fprintln(os.Stderr, "\n[dbg] execution finished")
 		return
 	}
@@ -175,7 +172,7 @@ func mainWatcher(ctx context.Context, kv kvspace.KVSpace, vmID string) {
 			kv.Del(keytree.LibMain)
 
 			vtidStr := incrVtid(kv)
-			firstPC := layoutcode.Bootstrap(ctx, kv, vtidStr, entry.Entry, entry.Reads)
+			firstPC := layoutrwir.Bootstrap(ctx, kv, vtidStr, entry.Entry, entry.Reads)
 			if firstPC == "" {
 				logx.Warn("VM-%s Bootstrap %s failed", vmID, entry.Entry)
 				continue

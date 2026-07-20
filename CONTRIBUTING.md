@@ -28,7 +28,7 @@ cmd/kvlang/         CLI entry point
 internal/
   parser/           .kv source → AST
   lower/            control flow lowering (if/while → block + branch)
-  layoutcode/       AST → KV path tree (opcodes at /vthread/*)
+  layoutrwir/       AST → KV path tree (opcodes at /vthread/*)
   vthread/          virtual thread lifecycle
   kvcpu/            128-worker goroutine scheduler
   kvspace/          KV storage abstraction (Redis backend)

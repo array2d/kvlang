@@ -11,7 +11,7 @@ func resolveWriteKey(framePath, param string) string {
 }
 
 // ResolveReadValue maps a read-slot param to a typed Value.
-// Exported for kvcpu/controlflow and layoutcode.
+// Exported for kvcpu/controlflow and layoutrwir.
 func ResolveReadValue(kv kvspace.KVSpace, framePath, param string) kvspace.XValue {
 	return resolveReadValue(kv, framePath, param)
 }

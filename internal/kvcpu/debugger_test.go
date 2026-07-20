@@ -26,7 +26,7 @@ import (
 	"kvlang/internal/kvcpu"
 	"github.com/array2d/kvlang-go"
 	_ "github.com/array2d/kvlang-go/redis" // 注册 Redis 后端
-	"kvlang/internal/layoutcode"
+	"kvlang/internal/layoutrwir"
 	"kvlang/internal/lower"
 	"kvlang/internal/op"
 	"kvlang/internal/parser"
@@ -69,7 +69,7 @@ func newSession(
 	kv.DelTree(keytree.VThread(vtid))
 	t.Cleanup(func() { kv.DelTree(keytree.VThread(vtid)) })
 
-	firstPC := layoutcode.Bootstrap(ctx, kv, vtid, funcName, args)
+	firstPC := layoutrwir.Bootstrap(ctx, kv, vtid, funcName, args)
 	if firstPC == "" {
 		t.Fatalf("Bootstrap %q vtid=%q failed", funcName, vtid)
 	}
@@ -149,7 +149,7 @@ func loadSrc(t *testing.T, kv kvspace.KVSpace, src string) {
 	}
 	for i := range df.Funcs {
 		fn := lower.Func(&df.Funcs[i])
-		layoutcode.WriteFunc(kv, "main", fn)
+		layoutrwir.WriteFunc(kv, "main", fn)
 	}
 }
 

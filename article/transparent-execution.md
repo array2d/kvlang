@@ -98,7 +98,7 @@ kvlang kvspace set /func/main '{"entry":"policy"}'
 
 **劣势**：
 - 依赖 Redis 基础设施，不能像 Python 脚本一样开箱即跑
-- 写入 KV 的代码需经过 `kvlang load` 编译为指令树，纯文本 Set 不会自动编译（待支持热编译）
+- 写入 KV 的代码需经过 `kvlang layoutrwir` 编译为指令树，纯文本 Set 不会自动编译（待支持热编译）
 
 ---
 
@@ -156,7 +156,7 @@ agent 发现 step3 之后需要插入 step3b：
 | 劣势 | 说明 | 缓解方案 |
 |------|------|---------|
 | 需要 Redis | 不能像 py/sh 脚本直接运行 | 嵌入式 KV 后端（计划中） |
-| 热编译尚未支持 | `kv set /func/...` 写文本不自动编译 | 支持 `kvlang load --hot` |
+| 热编译尚未支持 | `kv set /func/...` 写文本不自动编译 | 支持 `kvlang layoutrwir --hot` |
 | 路径设计需要规范 | 滥用路径会导致混乱 | keytree 包强制统一路径 |
 | 调试工具不成熟 | 没有 pdb/gdb 等成熟调试器 | KV 透明本身即是最好的调试 |
 

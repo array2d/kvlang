@@ -12,29 +12,29 @@ import (
 	"kvlang/internal/ast"
 	"kvlang/internal/keytree"
 	"github.com/array2d/kvlang-go"
-	"kvlang/internal/layoutcode"
+	"kvlang/internal/layoutrwir"
 	"kvlang/internal/logx"
 	"kvlang/internal/lower"
 	"kvlang/internal/parser"
 )
 
-// cmdLoadAndRun 先 load 再 run（fix-039：替代旧 run 机制）。
-func cmdLoadAndRun(args []string) {
+// cmdLayoutRWIRAndRun 先 layoutrwir 再 run（fix-039：替代旧 run 机制）。
+func cmdLayoutRWIRAndRun(args []string) {
 	if len(args) == 0 {
 		runLib("", "init", false)
 		return
 	}
-	// 参数是文件路径 → load + run
-	cmdLoad(args)
+	// 参数是文件路径 → layoutrwir + run
+	cmdLayoutRWIR(args)
 	runLib("", "init", false)
 }
 
-// cmdLoad 将 .kv 文件加载进 kvspace，不执行。多文件拼接为单源解析。
-func cmdLoad(args []string) {
-	fs := flag.NewFlagSet("load", flag.ExitOnError)
+// cmdLayoutRWIR 将 .kv 文件加载进 kvspace，不执行。多文件拼接为单源解析。
+func cmdLayoutRWIR(args []string) {
+	fs := flag.NewFlagSet("layoutrwir", flag.ExitOnError)
 	dsn := fs.String("kvspace", defaultKVSpace(), kvspaceFlagDesc)
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: kvlang load [--kvspace dsn] <file.kv|dir>...")
+		fmt.Fprintln(os.Stderr, "usage: kvlang layoutrwir [--kvspace dsn] <file.kv|dir>...")
 		fs.PrintDefaults()
 	}
 	fs.Parse(args)
@@ -80,7 +80,7 @@ func cmdLoad(args []string) {
 	for i := range df.Funcs {
 		fpkg := df.Funcs[i].Pkg
 		if fpkg == "" { fpkg = df.Package }
-		layoutcode.WriteFunc(kv, fpkg, lower.Func(&df.Funcs[i]))
+		layoutrwir.WriteFunc(kv, fpkg, lower.Func(&df.Funcs[i]))
 		anyCode = true
 	}
 	// 写入口 init
@@ -88,7 +88,7 @@ func cmdLoad(args []string) {
 	for _, c := range df.TopLevelCalls { body = append(body, c) }
 	if len(body) > 0 {
 		initFn := ast.Func{Sig: ast.FuncSig{Name: "init"}, Body: body}
-		layoutcode.WriteFunc(kv, "", lower.Func(&initFn)) // init 永远匿名 lib（空 pkg）
+		layoutrwir.WriteFunc(kv, "", lower.Func(&initFn)) // init 永远匿名 lib（空 pkg）
 		anyCode = true
 	}
 	if !anyCode { logx.Fatal("no executable code found") }
@@ -168,13 +168,13 @@ func runCode(name string, rc io.Reader, dsn string, debug bool) {
 	for i := range df.Funcs {
 		fpkg := df.Funcs[i].Pkg
 		if fpkg == "" { fpkg = df.Package }
-		layoutcode.WriteFunc(kv, fpkg, lower.Func(&df.Funcs[i]))
+		layoutrwir.WriteFunc(kv, fpkg, lower.Func(&df.Funcs[i]))
 	}
 	body := df.InitBody
 	for _, c := range df.TopLevelCalls { body = append(body, c) }
 	if len(body) > 0 {
 		initFn := ast.Func{Sig: ast.FuncSig{Name: "init"}, Body: body}
-		layoutcode.WriteFunc(kv, "", lower.Func(&initFn)) // init 永远匿名 lib（空 pkg）
+		layoutrwir.WriteFunc(kv, "", lower.Func(&initFn)) // init 永远匿名 lib（空 pkg）
 	}
 	kv.Set(keytree.LibMain, kvspace.Str(`{"entry":"init","reads":[],"writes":[]}`))
 	executeEntry(kv, debug)
@@ -192,7 +192,7 @@ func loadFunctions(kv kvspace.KVSpace, files []string) bool {
 	if !anyCode { return false }
 	if len(initBody) > 0 {
 		initFn := ast.Func{Sig: ast.FuncSig{Name: "init"}, Body: initBody}
-		layoutcode.WriteFunc(kv, "main", lower.Func(&initFn))
+		layoutrwir.WriteFunc(kv, "main", lower.Func(&initFn))
 	}
 	kv.Set(keytree.LibMain, kvspace.Str(`{"entry":"init","reads":[],"writes":[]}`))
 	return true
@@ -211,7 +211,7 @@ func _loadFile(kv kvspace.KVSpace, f string, anyCode *bool, loaded map[string]bo
 	for i := range df.Funcs {
 		fpkg := df.Funcs[i].Pkg
 		if fpkg == "" { fpkg = df.Package }
-		layoutcode.WriteFunc(kv, fpkg, lower.Func(&df.Funcs[i]))
+		layoutrwir.WriteFunc(kv, fpkg, lower.Func(&df.Funcs[i]))
 		*anyCode = true
 	}
 	// InitBody + TopLevelCalls 追加到收集器（fix-038：多文件按序串联）

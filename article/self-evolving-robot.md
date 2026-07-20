@@ -43,7 +43,7 @@ kvlang 的设计恰好对应了每一个需求：
 设计层：生成新任务流
     写 /func/robot/policy_v{n}     ← 新策略函数
     写 /func/robot/task_flow_v{n}  ← 新任务流
-    （热编译：kvlang load --hot 立即生效，无需重启）
+    （热编译：kvlang layoutrwir --hot 立即生效，无需重启）
     │
     ▼
 自训练层：在机器人自身尝试中生成训练信号
@@ -108,7 +108,7 @@ def task_flow_v3(scene:tensor) -> (outcome:bool) {
 
 写入方式：
 ```bash
-kvlang load --hot robot_policy_v3.kv   # 热编译写入 /func/
+kvlang layoutrwir --hot robot_policy_v3.kv   # 热编译写入 /func/
 # 或未来支持：
 kv set /func/robot/policy_v3 "$(cat policy_v3.kv)"  # 直接 set 触发编译
 ```
@@ -173,7 +173,7 @@ kv set /func/main '{"entry":"task_flow_v2"}'
 
 | 能力 | 状态 | 计划 |
 |------|------|------|
-| 热编译（写入文本自动编译为指令树） | ❌ 未支持 | `kvlang load --hot` |
+| 热编译（写入文本自动编译为指令树） | ❌ 未支持 | `kvlang layoutrwir --hot` |
 | 自监督训练算子（policy gradient, PPO） | ⚠️ 部分（基础算子已有） | 补充 RL 算子到 op-plat |
 | 经验回放缓冲区（/sys/heap/replay） | ❌ 未支持 | heap-plat 扩展 |
 | 新颖性检测函数 | ❌ 未支持 | 需要 embedding 距离算子 |

@@ -7,7 +7,7 @@ import (
 
 	"kvlang/internal/keytree"
 	"github.com/array2d/kvlang-go"
-	"kvlang/internal/layoutcode"
+	"kvlang/internal/layoutrwir"
 	"kvlang/internal/logx"
 	"kvlang/internal/op"
 	"kvlang/internal/op/builtin"
@@ -20,7 +20,7 @@ import (
 func handleControl(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) error {
 	switch inst.Opcode {
 	case op.OpCall:
-		substackPC := layoutcode.HandleCall(ctx, kv, pc, inst, false)
+		substackPC := layoutrwir.HandleCall(ctx, kv, pc, inst, false)
 		if substackPC == "" {
 			return fmt.Errorf("call %s failed", inst.Reads[0])
 		}
@@ -29,7 +29,7 @@ func handleControl(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, ins
 		return nil
 
 	case op.OpReturn:
-		parentPC, retVal := layoutcode.HandleReturn(ctx, kv, pc, inst)
+		parentPC, retVal := layoutrwir.HandleReturn(ctx, kv, pc, inst)
 		logx.Debug("[%s] RETURN parentPC=%q retVal=%q", vtid, parentPC, retVal)
 		if parentPC == "" {
 			// 顶层 return → vthread 完成，retVal 成为 .status 终态通知值
@@ -59,7 +59,7 @@ func gotoBlock(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *o
 	framePath := keytree.FrameRoot(pc)
 	label := resolveLabel(kv, framePath, inst.Reads[0])
 	callInst := &op.Instruction{Opcode: op.OpCall, Reads: []string{label}}
-	substackPC := layoutcode.HandleCall(ctx, kv, pc, callInst, true)
+	substackPC := layoutrwir.HandleCall(ctx, kv, pc, callInst, true)
 	if substackPC == "" {
 		return fmt.Errorf("goto %s failed", label)
 	}
@@ -83,7 +83,7 @@ func brToCall(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op
 	}
 	qualified := resolveLabel(kv, framePath, label)
 	callInst := &op.Instruction{Opcode: op.OpCall, Reads: []string{qualified}}
-	substackPC := layoutcode.HandleCall(ctx, kv, pc, callInst, true)
+	substackPC := layoutrwir.HandleCall(ctx, kv, pc, callInst, true)
 	if substackPC == "" {
 		return fmt.Errorf("br call %s failed", qualified)
 	}

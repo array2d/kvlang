@@ -5,7 +5,7 @@
 //	echo "code" | kvlang          执行管道代码（stdin 非终端）
 //	kvlang                        无参数且 stdin 为终端 → 等价 serve
 //	kvlang serve                  启动 daemon
-//	kvlang load <file.kv|dir>     只加载到 kvspace，不执行
+//	kvlang layoutrwir <file.kv|dir>     只加载到 kvspace，不执行
 //	kvlang vet <file.kv>          语法检查
 //	kvlang format <file.kv>       格式化（别名 fmt）
 //	kvlang help                   帮助
@@ -25,11 +25,11 @@ func main() {
 		case "serve":
 			runServe(args[1:])
 			return
-		case "load":
-			cmdLoad(args[1:])
+		case "layoutrwir":
+			cmdLayoutRWIR(args[1:])
 			return
-		case "loadandrun":
-			cmdLoadAndRun(args[1:])
+		case "layoutrwirandrun":
+			cmdLayoutRWIRAndRun(args[1:])
 			return
 		case "run":
 			cmdRun(args[1:])

@@ -1,4 +1,4 @@
-// Package layoutcode 将 AST 布局到 KV 空间的执行层。
+// Package layoutrwir 将 AST 布局到 KV 空间的执行层。
 //
 // 存储约定：
 //
@@ -21,7 +21,7 @@
 //	kvlang 只有读写码，函数调用 `add(x,y) -> ./s` 的 `-> ./s` 是**调用方指定的写目标**。
 //	写槽路径已存在调用指令 [addr0,1], [addr0,2],... 中，HandleReturn 直接从 .callpc
 //	推导路径读取，无需在子帧额外存储——没有"返回值"，只有写槽绑定。
-package layoutcode
+package layoutrwir
 
 import (
 	"context"
