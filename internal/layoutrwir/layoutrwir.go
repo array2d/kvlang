@@ -51,13 +51,13 @@ func writeStmt(kv kvspace.KVSpace, st ast.Stmt, prefix string, idx *int) {
 		n := *idx
 		opcode, reads := s.Flat()
 		if opcode != "" {
-			kv.Set(fmt.Sprintf("%s/[%d,0]", prefix, n), kvspace.Str(opcode))
+			kv.Set(fmt.Sprintf("%s/[%d,0]", prefix, n), kvspace.Rwir(opcode))
 		}
 		for j, r := range reads {
-			kv.Set(fmt.Sprintf("%s/[%d,-%d]", prefix, n, j+1), kvspace.Str(r))
+			kv.Set(fmt.Sprintf("%s/[%d,-%d]", prefix, n, j+1), kvspace.Rwir(r))
 		}
 		for j, w := range s.Writes {
-			kv.Set(fmt.Sprintf("%s/[%d,%d]", prefix, n, j+1), kvspace.Str(w))
+			kv.Set(fmt.Sprintf("%s/[%d,%d]", prefix, n, j+1), kvspace.Rwir(w))
 		}
 		*idx = n + 1
 	case *ast.BlockStmt:
@@ -161,7 +161,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	for i, ret := range funcSig.Returns {
 		wSlot := fmt.Sprintf("%s/[%d,%d]", callerLink, addr0, i+1)
 		wTargetVal, _ := kv.Get(wSlot)
-		wTarget := wTargetVal.Str()
+		wTarget := string(wTargetVal.RawBytes())
 		if wTarget == "" {
 			continue
 		}

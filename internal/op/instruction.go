@@ -42,19 +42,19 @@ func Decode(ctx context.Context, kv kvspace.KVSpace, linkBase, pc string) (*Inst
 	}
 
 	inst := &Instruction{}
-	if s := vals[0].Str(); s != "" {
+	if s := string(vals[0].RawBytes()); s != "" {
 		inst.Opcode = s
 	}
 	for i := 1; i <= maxParams; i++ {
 		readIdx := (i-1)*2 + 1
 		writeIdx := readIdx + 1
 		if readIdx < len(vals) {
-			if s := vals[readIdx].Str(); s != "" {
+			if s := string(vals[readIdx].RawBytes()); s != "" {
 				inst.Reads = append(inst.Reads, s)
 			}
 		}
 		if writeIdx < len(vals) {
-			if s := vals[writeIdx].Str(); s != "" {
+			if s := string(vals[writeIdx].RawBytes()); s != "" {
 				inst.Writes = append(inst.Writes, s)
 			}
 		}
