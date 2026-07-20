@@ -7,7 +7,7 @@ import (
 	"kvlang/internal/op"
 	"kvlang/internal/vthread"
 
-	"github.com/array2d/kvlang-go"
+	"github.com/array2d/kvspace-go"
 )
 
 // debuggerOp: debugger() —— 内联暂停点（tothink-031，对齐 V8/TypeScript `debugger;` 语句）。

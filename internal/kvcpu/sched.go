@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"kvlang/internal/keytree"
-	"github.com/array2d/kvlang-go"
+	"github.com/array2d/kvspace-go"
 	"kvlang/internal/logx"
 )
 

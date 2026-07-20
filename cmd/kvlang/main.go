@@ -15,7 +15,6 @@ import (
 	"os"
 
 	// 注册 KVSpace 实现；--kvspace DSN 的 scheme 选择后端（默认 redis://）。
-	_ "github.com/array2d/kvlang-go/redis"
 )
 
 func main() {

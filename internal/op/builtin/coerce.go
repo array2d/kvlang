@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/array2d/kvlang-go"
+	"github.com/array2d/kvspace-go"
 )
 
 // nilAsInt 将 nil 在数值语境按 int 0 参与（fix-017 方案 A，与 nil==0 比较语义一致）。

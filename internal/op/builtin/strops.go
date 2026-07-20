@@ -3,7 +3,7 @@ package builtin
 import (
 	"strings"
 	"fmt"
-	"github.com/array2d/kvlang-go"
+	"github.com/array2d/kvspace-go"
 	"kvlang/internal/op"
 	"kvlang/internal/vthread"
 )
