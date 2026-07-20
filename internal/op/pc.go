@@ -11,7 +11,6 @@ import (
 // 调用指令 opcode 存在 [addr0,0]，写槽存在 [addr0,1], [addr0,2], ...
 // 例：WriteSlotPC("/vthread/42/.fn/[3,0]", 0) → "/vthread/42/.fn/[3,1]"
 //
-// 用于 HandleReturn 直接从 .callpc 指令读写目标，无需额外存 .w{N} 键。
 func WriteSlotPC(pc string, i int) string {
 	idx := strings.LastIndex(pc, "/[")
 	if idx < 0 {

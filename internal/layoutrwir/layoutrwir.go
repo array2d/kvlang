@@ -11,10 +11,10 @@
 // 帧模型（Link P4）：
 //
 //	callPC                         调用指令绝对路径，作为帧根
-//	callPC/.fn                     软链接 → /lib/<pkg>/<name>（只读指令）
-//	callPC/<param>                 参数（本帧局部变量，不经过链接）
-//	callPC/.callpc                 存储 callPC 自身，供 HandleReturn 恢复
-//	callPC/.rootfunc               根函数名（TCO 不更新，供 resolveLabel 使用）
+//	frameRoot/.fn                     软链接 → /lib/<pkg>/<name>（只读指令），keytree.FnCode(frameRoot)
+//	frameRoot/<param>                 参数（本帧局部变量，不经过链接）
+//	frameRoot/.callpc                 存储 callPC 自身（keytree.CallPC），HandleReturn 据此恢复父 PC
+//	frameRoot/.rootfunc               根函数名（keytree.RootFunc），TCO 不更新，供 resolveLabel 使用
 //
 // 写槽（读写码语义）：
 //
@@ -139,8 +139,8 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	}
 
 	// 存储帧元数据
-	kv.Set(frameRoot+"/.callpc", kvspace.Str(pc))
-	kv.Set(frameRoot+"/.rootfunc", kvspace.Str(funcName))
+	kv.Set(keytree.CallPC(frameRoot), kvspace.Str(pc))
+	kv.Set(keytree.RootFunc(frameRoot), kvspace.Str(funcName))
 
 	// 绑定参数：从调用方帧解析实参值后写入子帧（不经过链接）
 	params := funcSig.ParamNames()
@@ -153,9 +153,6 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 		// 读参只读名单（fix-027）：kvcpu 写槽检查的运行期防线
 		kv.Set(keytree.FrameRO(frameRoot), kvspace.Str(strings.Join(params, ",")))
 	}
-
-	// 写槽路径已在调用指令 [addr0,1], [addr0,2], ... 中，HandleReturn 从 .callpc 直接读，
-	// 无需在子帧额外存 .w{N} 冗余键。
 
 	return keytree.FnCode(frameRoot) + "/[0,0]"
 }
@@ -188,14 +185,14 @@ func HandleReturn(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.I
 	}
 
 	// 读取 callPC（在 cleanup 前）
-	callPCVal, _ := kv.Get(frameRoot + "/.callpc")
+	callPCVal, _ := kv.Get(keytree.CallPC(frameRoot))
 	callPC := callPCVal.Str()
 
 	// 将被调方输出写入父帧的写槽。
 	// 读写码语义：写槽路径直接从调用指令 [callPC addr0, i+1] 读取——
 	//   callPC = /vthread/42/.fn/[3,0] → 第 i 个写槽在 /vthread/42/.fn/[3, i+1]。
 	// 父帧在子帧执行期间保持挂起，父帧 .fn 链接不变，路径可靠解析。
-	// 写槽和 return 读槽均兼容 ./x 和裸名 x 两种形式。
+	// 写槽和 return 读槽均兼容 裸名 x 和绝对路径 /abs 两种形式。
 	if callPC != "" {
 		parentFrameRoot := keytree.FrameRoot(callPC)
 		for i, read := range inst.Reads {
@@ -255,7 +252,7 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 		vthread.SetError(ctx, kv, vtid, "", "Bootstrap: RuntimeError: link failed: "+err.Error())
 		return ""
 	}
-	kv.Set(vthreadRoot+"/.rootfunc", kvspace.Str(funcName))
+	kv.Set(keytree.RootFunc(vthreadRoot), kvspace.Str(funcName))
 
 	// 绑定入参（若有）
 	// 使用 ResolveReadValue 而非 kvspace.Str，确保字面量（如 "3"、"true"）

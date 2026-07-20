@@ -96,7 +96,7 @@ func cmdLayoutRWIR(args []string) {
 	// 源码映射存入 kvspace 供错误定位
 	if len(srcMap) > 0 {
 		b, _ := json.Marshal(srcMap)
-		kv.Set("/lib/.srcmap", kvspace.Bytes(b))
+		kv.Set(keytree.LibSrcMap(), kvspace.Bytes(b))
 	}
 	logx.Info("loaded %d file(s) → ready", len(allFiles))
 }

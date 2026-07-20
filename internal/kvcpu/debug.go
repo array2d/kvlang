@@ -1,7 +1,7 @@
 // debug.go: kvcpu 内联调试辅助函数。
 //
 // 所有 cpu.Execute 循环都自动包含调试检查点，agent 只需通过已有
-// kvspace 命令读写 /vthread/<vtid>/.debugger* 键即可控制调试行为。
+// kvspace 命令读写 keytree.VThreadDebugger* 键即可控制调试行为。
 // 无需特殊启动方式，对任何正在运行的 kv 程序均有效。
 package kvcpu
 
@@ -24,7 +24,7 @@ func isFuncEntryPC(pc string) bool {
 
 // debugFuncName 从帧根读取 .rootfunc 字段获取函数名。
 func debugFuncName(kv kvspace.KVSpace, frameRoot string) string {
-	v, err := kv.Get(frameRoot + "/.rootfunc")
+	v, err := kv.Get(keytree.RootFunc(frameRoot))
 	if err != nil {
 		return "?"
 	}

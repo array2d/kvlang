@@ -10,9 +10,11 @@ import (
 // 链接帧结构（P4 Link 模型）：
 //
 //   callPC                      调用指令绝对路径（帧唯一标识符）
-//   callPC + "/.fn"            软链接 → /lib/<pkg>/<name>（只读指令区）
-//   callPC + "/<param>"         参数（本帧局部变量）
-//   callPC + "/.callpc"         存储 callPC 自身，供 HandleReturn 恢复
+//   frameRoot + "/.fn"           软链接 → /lib/<pkg>/<name>（只读指令区）→ FnCode(frameRoot)
+//   frameRoot + "/<param>"       参数（本帧局部变量）
+//   frameRoot + "/.callpc"        返回地址（仅子帧）→ CallPC(frameRoot)
+//   frameRoot + "/.rootfunc"      根函数名（TCO 不更新）→ RootFunc(frameRoot)
+//   frameRoot + "/.ro"            只读参数名单 → FrameRO(frameRoot)
 //
 // 层级嵌套（路径深度 = 调用栈深度）：
 //
@@ -31,6 +33,15 @@ func FnCode(frameRoot string) string { return frameRoot + "/.fn" }
 // FrameRO 返回帧的只读参数名单键：frameRoot + "/.ro"（fix-027 读参写保护，
 // Bootstrap/HandleCall 绑定参数时写入逗号分隔名单，kvcpu 写槽检查用）。
 func FrameRO(frameRoot string) string { return frameRoot + "/.ro" }
+
+// CallPC 返回帧的返回地址键：frameRoot + "/.callpc"。
+// 存储调用指令的绝对路径，HandleReturn 据此推算写槽路径并恢复父 PC。
+// 顶层帧（Bootstrap 创建）无此键。
+func CallPC(frameRoot string) string { return frameRoot + "/.callpc" }
+
+// RootFunc 返回帧的根函数名键：frameRoot + "/.rootfunc"。
+// TCO 复用帧时不更新此键（保持根函数名），供 resolveLabel 裸标签解析。
+func RootFunc(frameRoot string) string { return frameRoot + "/.rootfunc" }
 
 // FrameRoot 从任意指令绝对 PC 提取帧根（即 callPC）。
 //
