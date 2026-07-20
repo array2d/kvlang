@@ -236,6 +236,7 @@ st := p.parseStmt()
 // parseFunc 解析单个函数定义：def name(...) -> (...) { body }
 func (p *parser) parseFunc() ast.Func {
 	sig := p.parseFuncSig()
+	p.checkParamTypes(&sig)
 	p.checkParamDup(&sig)
 	p.skipNewlinesAndComments()
 	p.expect(LBrace)
@@ -244,6 +245,25 @@ func (p *parser) parseFunc() ast.Func {
 	fn := ast.Func{Sig: sig, Body: body}
 	p.checkReadOnlyParams(&fn)
 	return fn
+}
+
+// checkParamTypes 确保所有参数和返回值都有显式类型标注。
+// 检测不到类型 → error（kvlang 不允许无类型标注的参数）。
+func (p *parser) checkParamTypes(sig *ast.FuncSig) {
+	for _, param := range sig.Params {
+		if param.Type == "" {
+			p.errors = append(p.errors, Diagnostic{Message: fmt.Sprintf(
+				"func %s: param %q has no type annotation — every parameter must declare its type, e.g. %s:int",
+				sig.Name, param.Name, param.Name)})
+		}
+	}
+	for _, ret := range sig.Returns {
+		if ret.Type == "" {
+			p.errors = append(p.errors, Diagnostic{Message: fmt.Sprintf(
+				"func %s: return value %q has no type annotation — every return value must declare its type, e.g. %s:int",
+				sig.Name, ret.Name, ret.Name)})
+		}
+	}
 }
 
 // checkParamDup 参数不可同名，尤其读参列表与写参列表之间（fix-032）。

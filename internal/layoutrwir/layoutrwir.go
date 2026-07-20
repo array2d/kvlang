@@ -28,6 +28,7 @@ import (
 	"kvlang/internal/ast"
 	"kvlang/internal/keytree"
 	"github.com/array2d/kvspace-go"
+	"kvlang/internal/lower"
 	"kvlang/internal/op"
 	"kvlang/internal/op/builtin"
 	"kvlang/internal/parser"
@@ -35,36 +36,36 @@ import (
 )
 
 // WriteBody 将 []Stmt 写入 /lib/<pkg>/<name>/ 下的结构化 KV（编译后指令）。
-func WriteBody(kv kvspace.KVSpace, pkg, name string, body []ast.Stmt) {
+func WriteBody(kv kvspace.KVSpace, pkg, name string, body []ast.Stmt, typeMap map[string]string) {
 	prefix := keytree.LibFunc(pkg, name)
 	idx := 0
 	for _, st := range body {
-		writeStmt(kv, st, prefix, &idx)
+		writeStmt(kv, st, prefix, &idx, typeMap)
 	}
 }
 
 // writeStmt 将单条 Stmt 写入 KV 空间。
 // lower.File 保证调用时只剩 *Instruction 和 *BlockStmt，其余类型无操作。
-func writeStmt(kv kvspace.KVSpace, st ast.Stmt, prefix string, idx *int) {
+func writeStmt(kv kvspace.KVSpace, st ast.Stmt, prefix string, idx *int, typeMap map[string]string) {
 	switch s := st.(type) {
 	case *ast.Instruction:
 		n := *idx
 		opcode, reads := s.Flat()
 		if opcode != "" {
-			kv.Set(fmt.Sprintf("%s/[%d,0]", prefix, n), kvspace.Rwir(opcode))
+			kv.Set(fmt.Sprintf("%s/[%d,0]", prefix, n), slotValue(opcode, typeMap))
 		}
 		for j, r := range reads {
-			kv.Set(fmt.Sprintf("%s/[%d,-%d]", prefix, n, j+1), kvspace.Rwir(r))
+			kv.Set(fmt.Sprintf("%s/[%d,-%d]", prefix, n, j+1), slotValue(r, typeMap))
 		}
 		for j, w := range s.Writes {
-			kv.Set(fmt.Sprintf("%s/[%d,%d]", prefix, n, j+1), kvspace.Rwir(w))
+			kv.Set(fmt.Sprintf("%s/[%d,%d]", prefix, n, j+1), slotValue(w, typeMap))
 		}
 		*idx = n + 1
 	case *ast.BlockStmt:
 		sub := prefix + "/" + s.Label
 		i := 0
 		for _, child := range s.Body {
-			writeStmt(kv, child, sub, &i)
+			writeStmt(kv, child, sub, &i, typeMap)
 		}
 	}
 }
@@ -292,6 +293,18 @@ func resolveReadPath(kv kvspace.KVSpace, framePath, name string) string {
 	return frameSlotKey(framePath, name)
 }
 
+func slotValue(val string, typeMap map[string]string) kvspace.XValue {
+	kind := "rwir"
+	if t, ok := typeMap[val]; ok {
+		kind = t
+	} else if isLiteral(val) {
+		if val[0] == '"' { kind = "string" } else
+		if val == "true" || val == "false" { kind = "bool" } else
+		if val[0] >= '0' && val[0] <= '9' || (val[0] == '-' && len(val) > 1) { kind = "int" }
+	}
+	return kvspace.Raw(kind, []byte(val))
+}
+
 func isLiteral(s string) bool {
 	if s == "" { return false }
 	return s[0] == '"' || s[0] == '/' || s == "true" || s == "false" ||
@@ -320,13 +333,14 @@ func frameSlotKey(frameRoot, slot string) string {
 }
 
 func WriteFunc(kv kvspace.KVSpace, pkg string, fn *ast.Func) {
+	typeMap := lower.InferTypes(fn)
 	// 清除旧函数数据：旧指令的读/写槽数量可能多于新函数，
 	// 若不清除则旧槽（如 [0,-1]、[0,-2]）会被新执行错误读取。
 	kv.DelTree(keytree.LibFunc(pkg, fn.Sig.Name))
 	kv.Set(keytree.Src(pkg, fn.Sig.Name), kvspace.Str(fn.FullText()))
 	kv.Set(keytree.LibSrc(pkg, fn.Sig.Name), kvspace.Str(fn.FullText())) // fix-034: /lib/<pkg>/<name>.src
 	kv.Set(keytree.LibFunc(pkg, fn.Sig.Name), kvspace.Str(fn.Sig.String()))
-	WriteBody(kv, pkg, fn.Sig.Name, fn.Body)
+	WriteBody(kv, pkg, fn.Sig.Name, fn.Body, typeMap)
 	RegisterBlocks(kv, pkg, fn.Sig.Name, fn.Body)
 	kv.Set(keytree.LibIdx(fn.Sig.Name), kvspace.Str(pkg))
 }
