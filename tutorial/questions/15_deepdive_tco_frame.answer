@@ -1,0 +1,1 @@
+调用 = kv.Link，TCO 只需 Unlink + Link 换 .fn 指向目标块，帧模型原生支持。.rootfunc 不更新，保持根函数名供 resolveLabel 裸标签解析。

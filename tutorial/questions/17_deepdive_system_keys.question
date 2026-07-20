@@ -1,0 +1,1 @@
+[DEEP-DIVE] kvlang 的系统变量（如 .fn、.pc）和用户成员键（如 obj.prop）在 kvspace 路径中如何区分？为什么用户代码无法注入系统键？

@@ -1,0 +1,1 @@
+[DEEP-DIVE] 表达式 p.val 中，p 是一个存了路径字符串 "/n0" 的局部变量。kvlang 如何解析 p.val 的最终 kvspace 路径？如果 p 不存路径字符串呢？

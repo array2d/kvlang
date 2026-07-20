@@ -78,6 +78,7 @@ x = 40 + 2            # = : write slot on the left (≡ <-); = is NOT an express
 y <- x                # left arrow: write slot on the left
 x * y -> z            # right arrow: write slot on the right
 f(a, b) -> r          # write-param mapping for calls; multiple: -> x, y; discard: -> _
+divmod(17, 5) -> _, r # multi-write-param: discard quotient with _, keep remainder
 ```
 
 A write slot must be a **location**: a bare name (frame-local), `/abs/path` (global key), or `base.name` (member). Literals are not locations.
@@ -108,6 +109,13 @@ main()
 d = { name="kv"; ver=1 }    # dict literal: members are the flat key-family d.name, d.ver
 print(d.name)               # member read
 d.ver = 2                   # member write; dynamic key: d.*k (the value of k becomes the key)
+```
+
+**Pointer via path string**: store an absolute path in a variable, then use `.member` to read/write at that path — the variable's string value becomes the path prefix.
+```kv
+/node = { val=42 }       # dict at absolute path
+"/node" -> p             # p holds the path string
+p.val -> v               # reads /node.val → 42
 ```
 
 Data structures shared across functions (e.g. linked lists) create nodes at **absolute paths** (frame-locals die when the frame returns):
@@ -165,8 +173,14 @@ Conditions may be compound expressions: `if (7 % 2 != 0)` and `while (i < strlen
 `abs` `neg` `sign` `pow` `sqrt` `exp` `log` `min` `max` (variadic, e.g. `max(a,b,c)`) `print` `cerr` `input`\
 `int` `float` `bool` plus the ten precision operators · `char` `ord` `strlen` `strcmp` `strstr` `slice` `concat` · `array` `len` `at` `set` `has` `sort` `dict` `kvat` `kvhas`
 
-Strings support indexing and concatenation: `s[i]` reads the i-th char (a single-char string, directly comparable to `"a"`; out of range → `""`), `s[i] = "X"` replaces one char (writes back a new string), `a + b` concatenates.
-C-style API: `strlen`; `strcmp` returns -1/0/1; `strstr(hay, needle)` returns the first index (-1 if absent); `ord(c)` returns the byte code (for arithmetic, e.g. `ord(s[i])`).
+```kv
+s = "hello"
+s[1] = "a"             # replaces char at index 1 → "hallo"
+s + " world" -> t      # concatenation → "hallo world"
+```
+
+Strings support indexing and concatenation: `s[i]` reads the i-th char, `s[i] = "X"` replaces one char, `a + b` concatenates.
+C-style API: `strlen`; `strcmp` returns -1/0/1; `strstr(hay, needle)` returns the first index (-1 if absent); `ord(c)` returns the byte code.
 
 ---
 

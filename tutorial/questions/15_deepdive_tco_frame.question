@@ -1,0 +1,1 @@
+[DEEP-DIVE] kvlang 的 TCO（尾调用优化）为什么不需要额外的编译器 pass？帧复用后 .rootfunc 更不更新？
