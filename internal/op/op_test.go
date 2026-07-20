@@ -52,23 +52,6 @@ func TestWriteSlotPC(t *testing.T) {
 	}
 }
 
-func TestParentPC(t *testing.T) {
-	tests := []struct {
-		pc   string
-		want string
-	}{
-		{"[2,0]/[1,0]", "[3,0]"},
-		{"[0,0]/[5,0]", "[1,0]"},
-		{"[0,0]/[3,0]/[2,0]", "[0,0]/[4,0]"},
-	}
-
-	for _, tc := range tests {
-		if got := op.ParentPC(tc.pc); got != tc.want {
-			t.Errorf("ParentPC(%q) = %q, want %q", tc.pc, got, tc.want)
-		}
-	}
-}
-
 func TestIsTensorLifecycle(t *testing.T) {
 	// tensor.* lifecycle ops (vtype 命名空间)
 	lifecycle := []string{"tensor.new", "tensor.del", "tensor.clone"}

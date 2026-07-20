@@ -29,27 +29,6 @@ func NextPC(pc string) string {
 	return strings.Join(parts, "/")
 }
 
-// ParentPC 返回子栈调用者的下一条指令坐标。
-func ParentPC(pc string) string {
-	idx := strings.LastIndex(pc, "/")
-	if idx < 0 {
-		return pc
-	}
-	return NextPC(pc[:idx])
-}
-
-// parsePC 解析 PC 字符串，返回前缀和 addr0。
-func parsePC(pc string) (prefix string, addr0 int) {
-	idx := strings.LastIndex(pc, "/")
-	if idx >= 0 {
-		prefix = pc[:idx] // 不含尾斜杠，与 VThreadFrame 对齐
-		addr0 = extractAddr0(pc[idx+1:])
-	} else {
-		addr0 = extractAddr0(pc)
-	}
-	return
-}
-
 func extractAddr0(coord string) int {
 	s := strings.Trim(coord, "[]")
 	parts := strings.Split(s, ",")

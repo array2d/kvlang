@@ -8,7 +8,6 @@ package kvcpu
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"time"
 
 	"kvlang/internal/keytree"
@@ -16,11 +15,8 @@ import (
 	"kvlang/internal/op"
 )
 
-// isFuncLibEntryPC 判断 pc 是否为函数帧入口指令（frameRoot/.funclib/[0,0]）。
-// Bootstrap 和 HandleCall 均将第一条 PC 设为此形式。
-func isFuncLibEntryPC(pc string) bool {
-	return strings.HasSuffix(pc, "/.funclib/[0,0]")
-}
+// isEntryPC 判断 pc 是否为帧入口指令（末尾坐标=[0,0]）。
+func isEntryPC(pc string) bool { return keytree.IsEntryPC(pc) }
 
 // debugFuncName 从帧根读取 .rootfunc 字段获取函数名。
 func debugFuncName(kv kvspace.KVSpace, frameRoot string) string {

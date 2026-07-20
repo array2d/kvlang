@@ -155,7 +155,7 @@ func loadSrc(t *testing.T, kv kvspace.KVSpace, src string) {
 
 // decodeAt 解码给定 PC 的指令（用于在 pause 事件处理中获取读写槽）。
 func decodeAt(kv kvspace.KVSpace, pc string) *op.Instruction {
-	inst, _ := op.Decode(context.Background(), kv, pc)
+	inst, _ := op.Decode(context.Background(), kv, keytree.FuncLib(keytree.FrameRoot(pc)), pc)
 	if inst == nil {
 		return &op.Instruction{}
 	}

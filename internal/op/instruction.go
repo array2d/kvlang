@@ -21,13 +21,13 @@ const maxParams = 10
 //
 // pc 为绝对路径，格式：/vthread/<vtid>/[i,0] 或 /vthread/<vtid>/[j,0]/[i,0]。
 // keyBase = pc[:lastSlash]，即帧目录；addr0 = i（当前指令序号）。
-func Decode(ctx context.Context, kv kvspace.KVSpace, pc string) (*Instruction, error) {
-	lastSlash := strings.LastIndex(pc, "/")
+func Decode(ctx context.Context, kv kvspace.KVSpace, linkBase, pc string) (*Instruction, error) {
+	lastSlash := strings.LastIndex(pc, "/[")
 	if lastSlash < 0 {
-		return nil, fmt.Errorf("Decode: invalid absolute pc (no /): %q", pc)
+		return nil, fmt.Errorf("Decode: invalid pc (no /[coord]): %q", pc)
 	}
-	keyBase := pc[:lastSlash]              // e.g. /vthread/42 or /vthread/42/[3,0]
 	addr0 := extractAddr0(pc[lastSlash+1:]) // e.g. 0 from "[0,0]"
+	keyBase := linkBase                      // FuncLib(FrameRoot(pc)) — the Link target
 
 	keys := make([]string, 0, 1+maxParams*2)
 	keys = append(keys, fmt.Sprintf("%s/[%d,0]", keyBase, addr0))

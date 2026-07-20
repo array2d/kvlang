@@ -65,7 +65,8 @@ func (c *cpu) Execute(pc string) error {
 			return fmt.Errorf("%s", msg)
 		}
 
-		inst, err := op.Decode(ctx, c.kv, pc)
+		linkBase := keytree.FuncLib(keytree.FrameRoot(pc))
+		inst, err := op.Decode(ctx, c.kv, linkBase, pc)
 		if err != nil {
 			logx.Debug("[%s] decode error at %s: %v", vtid, pc, err)
 			vthread.SetError(ctx, c.kv, vtid, pc, fmt.Sprintf("decode: %v", err))
@@ -84,9 +85,9 @@ func (c *cpu) Execute(pc string) error {
 		// agent 通过 kvspace 读取到的是一致的内存快照。
 		//
 		// 性能策略：
-		//   - 非单步模式：仅在函数入口（isFuncLibEntryPC）读取一次 .debug（每次函数调用 1 次）
+		//   - 非单步模式：仅在函数入口（isEntryPC）读取一次 .debug（每次函数调用 1 次）
 		//   - 单步模式：每条指令读取一次 .debug（已在调试中，overhead 可接受）
-		if stepping || isFuncLibEntryPC(pc) {
+		if stepping || isEntryPC(pc) {
 			v, _ := c.kv.Get(keytree.VThreadDebugger(vtid))
 			switch mode := v.Str(); {
 			case mode == "" && stepping:

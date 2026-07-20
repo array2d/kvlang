@@ -8,19 +8,15 @@
 //	/func/<pkg>/<name>/<label>/    基本块子路径
 //	/func/idx/<name>               函数名 → pkg 反向索引
 //
-// 帧模型（Link P4）：
+// 帧模型（callPC 即子帧根）：
 //
-//	callPC                         调用指令绝对路径，作为帧根
-//	frameRoot/.funclib                     软链接 → /lib/<pkg>/<name>（只读指令），keytree.FuncLib(frameRoot)
-//	frameRoot/<param>                 参数（本帧局部变量，不经过链接）
-//	frameRoot/.callpc                 存储 callPC 自身（keytree.CallPC），HandleReturn 据此恢复父 PC
-//	frameRoot/.rootfunc               根函数名（keytree.RootFunc），TCO 不更新，供 resolveLabel 使用
+//	callPC = parentFrame/[coord]              调用指令 PC = 子帧根
+//	frameRoot/.funclib                         软链接 → /lib/<pkg>/<name>（只读指令）→ keytree.FuncLib(frameRoot)
+//	frameRoot/<param>                           参数（本帧局部变量）
+//	frameRoot/.rootfunc                         入口函数名（keytree.RootFunc），TCO 不更新
+//	frameRoot/.rparam/<name> /.wparam/<name>   零拷贝读写参重定向
 //
-// 写槽（读写码语义）：
-//
-//	kvlang 只有读写码，函数调用 `add(x,y) -> ./s` 的 `-> ./s` 是**调用方指定的写目标**。
-//	写槽路径已存在调用指令 [addr0,1], [addr0,2],... 中，HandleReturn 直接从 .callpc
-//	推导路径读取，无需在子帧额外存储——没有"返回值"，只有写槽绑定。
+// kvcpu 取指：linkBase = FuncLib(FrameRoot(pc))，coord 从 pc 末尾提取
 package layoutrwir
 
 import (
@@ -72,11 +68,11 @@ func writeStmt(kv kvspace.KVSpace, st ast.Stmt, prefix string, idx *int) {
 	}
 }
 
-// HandleCall 执行 CALL：链接函数指令树，绑定参数，存储写槽。
+// HandleCall 执行 CALL：链接函数指令树，绑定参数。
 //
-// pc 为调用指令的绝对路径（如 /vthread/42/.funclib/[3,0]）。
-// tail=true 时执行 TCO：复用当前帧，仅重链 .funclib（br/goto 路径）。
-// 返回被调帧第一条指令的绝对 PC；失败时返回 ""（不再返回 pc，避免"PC == 失败"歧义）。
+// pc 为调用指令的绝对路径（如 /vthread/42/[3,0]）。callPC 即子帧根。
+// tail=true 时执行 TCO：复用当前帧，仅重链 .funclib。
+// 返回被调帧第一条指令 PC（frameRoot/[0,0]）；失败时返回 ""。
 func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Instruction, tail bool) string {
 	vtid := keytree.VtidFromPC(pc)
 	funcName := inst.Reads[0]
@@ -117,7 +113,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 		return ""
 	}
 
-	// TCO：复用当前帧，仅重链 .funclib 到目标块代码区（.rootfunc 不更新，保持根函数名）
+	// TCO：复用当前帧，仅重链 .funclib 到目标块（.rootfunc 不更新）
 	if tail {
 		frameRoot := keytree.FrameRoot(pc)
 		kv.Unlink(keytree.FuncLib(frameRoot))
@@ -125,10 +121,10 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 			vthread.SetError(ctx, kv, vtid, pc, "tco RuntimeError: link failed: "+err.Error())
 			return ""
 		}
-		return keytree.FuncLib(frameRoot) + "/[0,0]"
+		return keytree.EntryPC(frameRoot)
 	}
 
-	// 普通 call：从调用方帧解析实参后绑定到子帧
+	// 普通 call：callPC 即子帧根
 	callerFrameRoot := keytree.FrameRoot(pc)
 	frameRoot := keytree.ChildFrameRoot(pc)
 
@@ -138,11 +134,9 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 		return ""
 	}
 
-	// 存储帧元数据
-	kv.Set(keytree.CallPC(frameRoot), kvspace.Str(pc))
 	kv.Set(keytree.RootFunc(frameRoot), kvspace.Str(funcName))
 
-	// 读参零拷贝：存储调用方值的绝对路径，CPU 直接从此路径读取
+	// 读参零拷贝：存储调用方值的绝对路径
 	params := funcSig.ParamNames()
 	for i, param := range params {
 		if i+1 < len(inst.Reads) {
@@ -152,7 +146,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 			}
 		}
 	}
-	// 写参零拷贝：存储调用方写目标的绝对路径，CPU 直接写入此路径
+	// 写参零拷贝：存储调用方写目标的绝对路径
 	for i, ret := range funcSig.Returns {
 		wSlotPath := op.WriteSlotPC(pc, i)
 		wTargetVal, _ := kv.Get(wSlotPath)
@@ -168,23 +162,19 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 		kv.Set(keytree.FrameRO(frameRoot), kvspace.Str(strings.Join(params, ",")))
 	}
 
-	return keytree.FuncLib(frameRoot) + "/[0,0]"
+	return keytree.EntryPC(frameRoot)
 }
 
-// HandleReturn 处理 RETURN：将被调方输出写入父帧写槽，清理帧，恢复父帧 PC。
+// HandleReturn 处理 RETURN：清理帧，恢复父 PC。
 //
-// pc 为 return 指令的绝对路径（如 /vthread/42/[3,0]/.funclib/[1,0]）。
-// 返回值：
-//
-//	("", retVal) — 顶层 return（frameRoot == vthreadRoot）；retVal 供 vthread.SetDone
-//	(nextPC, "") — 嵌套 return；nextPC 为父帧 callPC 的下一条指令
+// pc 为 return 指令的绝对路径（如 /vthread/42/[3,0]/[1,0]）。
+// 写参已在子帧执行期间经 .wparam 零拷贝直写父帧。
+// 嵌套帧 frameRoot 即 callPC，NextPC(frameRoot) 即为父帧下一条指令。
 func HandleReturn(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Instruction) (nextPC, retVal string) {
 	vtid := keytree.VtidFromPC(pc)
 	vthreadRoot := keytree.VThread(vtid)
-
 	frameRoot := keytree.FrameRoot(pc)
 
-	// 读取本帧第一个返回值（供顶层 return 用）
 	var returnValue string
 	if len(inst.Reads) > 0 {
 		if rk := frameSlotKey(frameRoot, inst.Reads[0]); rk != "" {
@@ -193,27 +183,15 @@ func HandleReturn(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.I
 		}
 	}
 
-	// 顶层 return：frameRoot 就是 vthreadRoot
 	if frameRoot == vthreadRoot {
 		return "", returnValue
 	}
 
-	// 读取 callPC（在 cleanup 前）
-	callPCVal, _ := kv.Get(keytree.CallPC(frameRoot))
-	callPC := callPCVal.Str()
-
-	// 写参已在子帧执行期间通过 .wparam 零拷贝直写父帧，HandleReturn 无需搬运。
-
-	// 清理帧
+	nextPC = op.NextPC(frameRoot)
 	kv.Unlink(keytree.FuncLib(frameRoot))
 	kv.DelTree(frameRoot)
-
-	if callPC == "" {
-		return "", ""
-	}
-	return op.NextPC(callPC), ""
+	return nextPC, ""
 }
-
 // RegisterBlocks 为函数体内所有 BlockStmt label 注册编译后子函数签名。
 // 写入 /lib/<pkg>/<name>/<label>，供 br/goto 运行时查找。
 func RegisterBlocks(kv kvspace.KVSpace, pkg, parent string, body []ast.Stmt) {
@@ -269,7 +247,7 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 		}
 	}
 
-	return keytree.FuncLib(vthreadRoot) + "/[0,0]"
+	return keytree.EntryPC(vthreadRoot)
 }
 
 // WriteFunc 完成一个函数的全部 KV 写入：
