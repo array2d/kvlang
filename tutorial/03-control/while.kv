@@ -2,7 +2,7 @@
 #   sum(1..10) = 55
 #   first div7 in [1,20] = 7
 #   sum odds(1..10) = 25
-def sum_to(n:int) -> (total:int) {
+def sum_to(n:int64) -> (total:int64) {
 	total <- 0
 	i = 1  # = 等价于 <-
 	while (i <= n) {
@@ -11,7 +11,7 @@ def sum_to(n:int) -> (total:int) {
 	}
 }
 
-def first_div7(n:int) -> (result:int) {
+def first_div7(n:int64) -> (result:int64) {
 	result = 0  # = 等价于 <-
 	1 -> i
 	while (i <= n) {
@@ -27,7 +27,7 @@ def first_div7(n:int) -> (result:int) {
 	}
 }
 
-def sum_odds(n:int) -> (total:int) {
+def sum_odds(n:int64) -> (total:int64) {
 	0 -> total
 	i <- 1
 	while (i <= n) {

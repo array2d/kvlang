@@ -1,7 +1,7 @@
 # 期望输出:
 #   fib(10) = 34
 #   fact(10) = 3628800
-def fib(n:int) -> (a:int, b:int) {
+def fib(n:int64) -> (a:int64, b:int64) {
 	if (n <= 1) {
 		a = 0  # = 等价于 <-
 		1 -> b
@@ -14,7 +14,7 @@ def fib(n:int) -> (a:int, b:int) {
 	}
 }
 
-def factorial(n:int) -> (r:int) {
+def factorial(n:int64) -> (r:int64) {
 	r = 1  # = 等价于 <-
 	1 -> i
 	while (i <= n) {

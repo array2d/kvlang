@@ -3,7 +3,7 @@
 # 期望输出:
 #   true
 #   false
-def has_dup(a:int) -> () {
+def has_dup(a:int64) -> () {
 	len(a) -> n
 	found <- 0
 	i = 0  # = 等价于 <-
@@ -30,7 +30,7 @@ def has_dup(a:int) -> () {
 }
 
 def no_dup() -> () {
-	a:int = [1, 2, 3, 4]  # = 等价于 <-
+	a:int64 = [1, 2, 3, 4]  # = 等价于 <-
 	len(a) -> n
 	found <- 0
 	i = 0  # = 等价于 <-
@@ -57,7 +57,7 @@ def no_dup() -> () {
 }
 
 def main() -> () {
-	a1:int = [1, 2, 3, 1]
+	a1:int64 = [1, 2, 3, 1]
 	has_dup(a1)
 	no_dup()
 }

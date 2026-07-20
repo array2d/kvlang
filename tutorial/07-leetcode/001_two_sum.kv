@@ -3,7 +3,7 @@
 # 期望输出:
 #   [ 0 , 1 ]
 #   [-1, -1]
-def two_sum(nums:int, target:int) -> () {
+def two_sum(nums:int64, target:int64) -> () {
 	n <- len(nums)
 	found = 0  # = 等价于 <-
 	0 -> i
@@ -39,7 +39,7 @@ def two_sum(nums:int, target:int) -> () {
 	}
 }
 
-a1:int = [2, 7, 11, 15]
+a1:int64 = [2, 7, 11, 15]
 two_sum(a1, 9)
-a2:int = [1, 2, 3]
+a2:int64 = [1, 2, 3]
 two_sum(a2, 99)

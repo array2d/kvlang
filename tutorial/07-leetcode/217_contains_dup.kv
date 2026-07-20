@@ -5,7 +5,7 @@
 #   true
 #   false
 def has_dup() -> () {
-	a:int = [1, 2, 3, 1]  # = 等价于 <-
+	a:int64 = [1, 2, 3, 1]  # = 等价于 <-
 	len(a) -> n
 	found <- 0
 	i = 0  # = 等价于 <-
@@ -36,7 +36,7 @@ def has_dup() -> () {
 }
 
 def no_dup() -> () {
-	a:int <- [1, 2, 3, 4]
+	a:int64 <- [1, 2, 3, 4]
 	n = len(a)  # = 等价于 <-
 	0 -> found
 	i <- 0

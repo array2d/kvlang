@@ -1,1 +1,1 @@
-[README] 创建 float 类型数组 arr:float = [1.5, 2.5, 3.5]，打印长度和第二个元素。提示：float 数组语法 arr:float = [...]
+[README] 创建 float 类型数组 arr:float64 = [1.5, 2.5, 3.5]，打印长度和第二个元素。提示：float 数组语法 arr:float64 = [...]

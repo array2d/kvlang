@@ -3,7 +3,7 @@
 # 期望输出:
 #   true
 #   false
-def near_dup(nums:int, k:int) -> () {
+def near_dup(nums:int64, k:int64) -> () {
 	n <- len(nums)
 	h = {}  # = 等价于 <-
 	found = 0  # = 等价于 <-
@@ -32,7 +32,7 @@ def near_dup(nums:int, k:int) -> () {
 	}
 }
 
-a1:int = [1, 2, 3, 1]
+a1:int64 = [1, 2, 3, 1]
 near_dup(a1, 3)
-a2:int = [1, 2, 3, 1, 2, 3]
+a2:int64 = [1, 2, 3, 1, 2, 3]
 near_dup(a2, 2)

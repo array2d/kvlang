@@ -1,1 +1,1 @@
-[README] 写一个整除取余函数，输出商和余数。调用时只取余数，丢弃商，打印余数
+[README] 写一个整除取余函数 def divmod(a:int64, b:int64) -> (q:int64, r:int64)。调用 divmod(17, 5) -> (_, rem)，只取余数 rem，丢弃商。打印 rem

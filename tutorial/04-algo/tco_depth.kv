@@ -2,7 +2,7 @@
 # 期望输出:
 #   sum = 5050
 #   fact = 3628800
-def sum_while(N:int) -> (total:int) {
+def sum_while(N:int64) -> (total:int64) {
 	total = 0  # = 等价于 <-
 	1 -> i
 	while (i <= N) {
@@ -11,7 +11,7 @@ def sum_while(N:int) -> (total:int) {
 	}
 }
 
-def tailrec_fact(N:int, acc:int) -> (r:int) {
+def tailrec_fact(N:int64, acc:int64) -> (r:int64) {
 	if (N <= 1) {
 		acc + 0 -> r
 	} else {

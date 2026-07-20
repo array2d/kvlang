@@ -3,11 +3,11 @@
 # 期望输出:
 #   2
 def intersection() -> () {
-	a:int = [1, 2, 2, 1]  # = 等价于 <-
+	a:int64 = [1, 2, 2, 1]  # = 等价于 <-
 	len(a) -> na
-	b:int <- [2, 2]
+	b:int64 <- [2, 2]
 	nb = len(b)  # = 等价于 <-
-	[0, 0] -> r:int
+	[0, 0] -> r:int64
 	idx <- 0
 	count = 0  # = 等价于 <-
 	0 -> i

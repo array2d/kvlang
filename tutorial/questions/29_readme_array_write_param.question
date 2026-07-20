@@ -1,1 +1,1 @@
-[README] 定义函数 make_array() -> (a:int)，体内创建 a:int = [10, 20, 30] 并返回。调用它并打印返回数组的第二个元素。提示：写参声明 -> (a:int)，调用时用 make_array() -> arr
+[README] 定义函数 make_array() -> (a:int64)，体内创建 a:int64 = [10, 20, 30] 并返回。调用它并打印返回数组的第二个元素。提示：写参声明 -> (a:int64)，调用时用 make_array() -> arr

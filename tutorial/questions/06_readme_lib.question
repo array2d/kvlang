@@ -1,1 +1,1 @@
-[README] 定义一个 lib 块包含一个翻倍函数，在 main 里调用这个函数传入 21，打印返回的结果
+[README] 定义一个 lib math { def twice(x:int64) -> (r:int64) { x * 2 -> r } }，在 init 里调用 /lib/math.twice(21) -> v，打印 v

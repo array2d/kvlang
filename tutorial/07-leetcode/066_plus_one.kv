@@ -9,7 +9,7 @@
 #   0
 #   0
 def plus_one() -> () {
-	a:int <- [1, 2, 3]
+	a:int64 <- [1, 2, 3]
 	n = len(a)  # = 等价于 <-
 	n - 1 -> i
 	carry <- 1
@@ -40,7 +40,7 @@ def plus_one() -> () {
 }
 
 def plus_one_nines() -> () {
-	a:int = [9, 9, 9]  # = 等价于 <-
+	a:int64 = [9, 9, 9]  # = 等价于 <-
 	len(a) -> n
 	i <- n - 1
 	carry = 1  # = 等价于 <-

@@ -3,8 +3,8 @@
 # 来源: LeetCode #53
 # 期望输出:
 #   6
-def max_subarray(nums:int) -> () {
-	a:int <- [-2, 1, -3, 4, -1, 2, 1, -5, 4]
+def max_subarray(nums:int64) -> () {
+	a:int64 <- [-2, 1, -3, 4, -1, 2, 1, -5, 4]
 	n = len(a)  # = 等价于 <-
 	a[0] -> cur
 	max <- a[0]
@@ -31,5 +31,5 @@ def max_subarray(nums:int) -> () {
 	print(max)
 }
 
-nums:int = [-2, 1, -3, 4, -1, 2, 1, -5, 4]
+nums:int64 = [-2, 1, -3, 4, -1, 2, 1, -5, 4]
 max_subarray(nums)

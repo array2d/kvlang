@@ -1,1 +1,1 @@
-[README] 写加法和乘法两个函数。先调用加法算出 2 和 4 的和，再把这个和与 3 一起传给乘法，打印最终结果
+[README] 写加法 def add(A:int64, B:int64) -> (C:int64) { A + B -> C } 和乘法 def mul(A:int64, B:int64) -> (C:int64) { A * B -> C }。先调用 add(2, 4) -> s，再调用 mul(s, 3) -> r，打印 r
