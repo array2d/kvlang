@@ -5,4 +5,5 @@ def mutate(a) -> () {
     99 -> a[0]   # ❌ a 是读参，a[0] 展开为 set(a,0,99) -> a，写入读参槽被拒绝
 }
 
-mutate(array(10, 20))
+a:int = [10, 20]
+mutate(a)

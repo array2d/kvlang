@@ -96,7 +96,7 @@ def good() -> (a:int) { a:int = [10, 20]; 99 -> a[0]; a }
 ```
 
 Decide the role first —
-**an accumulator is an output, so declare it as a write param** (write params start at zero, are readable and writable in the body — like Go named return values): `def sum(arr) -> (acc:int) { acc + arr[i] -> acc }`.
+**an accumulator is an output, so declare it as a write param** (write params start at zero, are readable and writable in the body — like Go named return values): `def sum(arr:int) -> (acc:int) { acc + arr[i] -> acc }`.
 A pure working variable is copied to a local first (`A -> a`, then use `a`):
 
 ```kv
