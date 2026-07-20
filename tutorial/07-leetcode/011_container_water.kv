@@ -2,7 +2,7 @@
 # 来源: LeetCode #11
 # 期望输出:
 #   49
-def max_area(h) -> (mx:int) {
+def max_area(h:int) -> (mx:int) {
 	len(h) -> n
 	l <- 0
 	r = n - 1  # = 等价于 <-
@@ -29,5 +29,6 @@ def max_area(h) -> (mx:int) {
 	}
 }
 
-r = max_area(array(1, 8, 6, 2, 5, 4, 8, 3, 7))  # = 等价于 <-
+a:int = [1, 8, 6, 2, 5, 4, 8, 3, 7]
+r = max_area(a)  # = 等价于 <-
 print(r)

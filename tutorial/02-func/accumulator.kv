@@ -6,7 +6,7 @@
 # 期望输出:
 #   10
 #   10
-def sum(arr) -> (acc:int) {
+def sum(arr:int) -> (acc:int) {
 	n = len(arr)  # = 等价于 <-
 	0 -> i
 	while (i < n) {
@@ -15,7 +15,7 @@ def sum(arr) -> (acc:int) {
 	}
 }
 
-def rsum(arr, i:int, acc:int) -> (r:int) {
+def rsum(arr:int, i:int, acc:int) -> (r:int) {
 	n <- len(arr)
 
 	if (i >= n) {
@@ -26,9 +26,11 @@ def rsum(arr, i:int, acc:int) -> (r:int) {
 }
 
 def main() -> () {
-	sum([1, 2, 3, 4]) -> s1
+	a1:int = [1, 2, 3, 4]
+	sum(a1) -> s1
 	print(s1)
-	rsum([1, 2, 3, 4], 0, 0) -> s2
+	a2:int = [1, 2, 3, 4]
+	rsum(a2, 0, 0) -> s2
 	print(s2)
 }
 

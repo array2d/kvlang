@@ -7,12 +7,12 @@
 #   8
 #   6
 def product() -> () {
-	a = [1, 2, 3, 4]  # = 等价于 <-
+	a:int = [1, 2, 3, 4]  # = 等价于 <-
 	len(a) -> n
 	prefix <- 1
 	suffix = 1  # = 等价于 <-
 	# build prefix products into result
-	[1, 1, 1, 1] -> result
+	[1, 1, 1, 1] -> result:int
 	i <- 0
 	while (i < n) {
 		result[i] <- prefix
