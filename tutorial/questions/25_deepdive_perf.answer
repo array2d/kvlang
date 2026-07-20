@@ -1,0 +1,1 @@
+替换 Redis 后端为共享内存 kvspace-server，同机 kvcpu 和 kvspace 走 shm 零拷贝，消除网络往返 | 跨机场景走 RDMA，单边读写绕过远程 CPU | kvlang-go 接口不变（Get/Set/Del/Watch/Notify/Link），kvcpu 代码零改动 | 已有 kvspace-cpp（hiredis 客户端）和 kvspace-rdma（设计阶段）两个实现方向

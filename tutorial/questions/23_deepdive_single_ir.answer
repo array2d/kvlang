@@ -1,0 +1,1 @@
+同一 AST 贯穿 parser→lower→layoutrwir→kvcpu 全流程 | 不分 HIR/LIR/MIR | 源码即 IR，降低编译延迟和复杂度

@@ -1,0 +1,1 @@
+[DEEP-DIVE] kvlang 的标签（label block）和控制流统一为 call/return 是如何实现的？goto 和 call 有什么关系？

@@ -108,7 +108,8 @@ main()
 ```kv
 d = { name="kv"; ver=1 }    # dict literal: members are the flat key-family d.name, d.ver
 print(d.name)               # member read
-d.ver = 2                   # member write; dynamic key: d.*k (the value of k becomes the key)
+d.ver = 2                   # member write
+k = "name"; d.*k -> v       # dynamic key: reads d.name (k's value becomes the key)
 ```
 
 **Pointer via path string**: store an absolute path in a variable, then use `.member` to read/write at that path — the variable's string value becomes the path prefix.
@@ -150,9 +151,10 @@ w = int8(300)         # 44: narrowing wraps (two's complement); float→int trun
 ### Control Flow (inside def bodies only)
 
 ```kv
-if (cond) { ... } else { ... }
-while (cond) { ... }
-for (x in arr) { ... }        # iterate a key-family array
+i = 1; sum = 0
+while (i <= 10) { sum + i -> sum; i + 1 -> i }
+if (sum > 50) { print("big") } else { print("small") }   # sum=55 → big
+for (x in [7, 2, 9, 4]) { print(x) }
 ```
 
 Conditions may be compound expressions: `if (7 % 2 != 0)` and `while (i < strlen(s))` both work (auto-flattened to temp slots at compile time).
@@ -172,6 +174,12 @@ Conditions may be compound expressions: `if (7 % 2 != 0)` and `while (i < strlen
 
 `abs` `neg` `sign` `pow` `sqrt` `exp` `log` `min` `max` (variadic, e.g. `max(a,b,c)`) `print` `cerr` `input`\
 `int` `float` `bool` plus the ten precision operators · `char` `ord` `strlen` `strcmp` `strstr` `slice` `concat` · `array` `len` `at` `set` `has` `sort` `dict` `kvat` `kvhas`
+
+```kv
+a = array(7, 2, 9, 4)   # or [7, 2, 9, 4]
+len(a) -> n              # 4
+at(a, 2) -> e            # 9 (0-indexed)
+```
 
 ```kv
 s = "hello"

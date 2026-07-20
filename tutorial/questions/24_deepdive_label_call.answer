@@ -1,0 +1,1 @@
+label block 就是无参函数 | goto(label) ≡ call(label) | 控制流统一为 call/return 两种原语 | 无需 jmp/br 等额外指令 | lower 期将 goto/br 降级为 call

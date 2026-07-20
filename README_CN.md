@@ -108,7 +108,8 @@ main()
 ```kv
 d = { name="kv"; ver=1 }    # dict 字面量：成员是平坦键族 d.name、d.ver
 print(d.name)               # 成员读
-d.ver = 2                   # 成员写；动态键用 d.*k（k 的值作键名）
+d.ver = 2                   # 成员写
+k = "name"; d.*k -> v       # 动态键：读 d.name（k 的值作键名）
 ```
 
 **路径即指针**：把绝对路径字符串存到变量，再用 `.成员` 语法读写该路径下的键——变量的字符串值会成为路径前缀。
@@ -150,9 +151,10 @@ w = int8(300)         # 44：窄化补码回绕；float→int 截断向零；算
 ### 控制流（仅限 def 体内）
 
 ```kv
-if (cond) { ... } else { ... }
-while (cond) { ... }
-for (x in arr) { ... }        # 遍历键族数组
+if (sum > 50) { print("big") } else { print("small") }
+i = 1; sum = 0
+while (i <= 10) { sum + i -> sum; i + 1 -> i }
+for (x in [7, 2, 9, 4]) { print(x) }
 ```
 
 条件支持复合表达式：`if (7 % 2 != 0)`、`while (i < strlen(s))` 均可（编译期自动展平为临时槽）。
@@ -180,6 +182,11 @@ s + " world" -> t      # 拼接 → "hallo world"
 ```
 
 字符串支持索引与拼接：`s[i]` 读第 i 个字符，`s[i] = "X"` 单字符替换，`a + b` 拼接。
+a = array(7, 2, 9, 4)   # 或 [7, 2, 9, 4]
+len(a) -> n              # 4
+at(a, 2) -> e            # 9
+```
+
 C 风格 API：`strlen` 长度、`strcmp` 返 -1/0/1、`strstr(hay, needle)` 返首次下标（未找到 -1）、`ord(c)` 取字节码。
 
 ---

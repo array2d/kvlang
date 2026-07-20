@@ -1,0 +1,1 @@
+[DEEP-DIVE] 当前 kvspace 基于 Redis，kvcpu 每次取指/读写槽都要网络往返，延迟巨大，导致 kvlang 执行速度远慢于 Python/V8。如何将 kvlang 性能提升至脚本语言级别？基本技术方向是什么？
