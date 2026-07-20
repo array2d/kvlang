@@ -9,7 +9,7 @@
 // CPU 通过 kvspace 作为统一内存，Fetch-Decode-Execute 循环执行 vthread。
 package kvcpu
 
-import "github.com/array2d/kvlang-go"
+import "github.com/array2d/kvspace-go"
 
 // CPU 是 kvlang 虚拟 CPU 的对外接口。
 //

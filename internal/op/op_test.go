@@ -6,8 +6,8 @@ import (
 
 	"kvlang/internal/op"
 	"kvlang/internal/op/dispatch"
-	"github.com/array2d/kvlang-go"
-	_ "github.com/array2d/kvlang-go/redis"
+	"github.com/array2d/kvspace-go"
+	_ "github.com/array2d/kvspace-go/redis"
 )
 
 // ── PC navigation ──
