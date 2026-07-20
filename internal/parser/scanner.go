@@ -28,7 +28,14 @@ func (d Diagnostic) String() string {
 	if d.Warn {
 		kind = "warn"
 	}
-	return fmt.Sprintf("%d:%d: %s: %s", d.Pos.Line, d.Pos.Col, kind, d.Message)
+	src := d.SrcName
+	if src == "" {
+		src = d.SrcFile
+	}
+	if src != "" {
+		return fmt.Sprintf("%s: %s:%d:%d: %s", kind, src, d.Pos.Line, d.Pos.Col, d.Message)
+	}
+	return fmt.Sprintf("%s: %d:%d: %s", kind, d.Pos.Line, d.Pos.Col, d.Message)
 }
 
 // Kind 标记 Token 类型。

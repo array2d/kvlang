@@ -72,7 +72,7 @@ func cmdLayoutRWIR(args []string) {
 	}
 	df, diags, err := parser.ParseCode(strings.NewReader(src.String()))
 	if err != nil { logx.Fatal("parse: %v", err) }
-	for _, d := range diags { logx.Warn("parse: %s", d) }
+	for _, d := range diags { logx.Diag(d) }
 	if parser.HasErrors(diags) { logx.Fatal("parse: error-level diagnostics — refusing to load") }
 
 	// 注册全部函数
@@ -162,7 +162,7 @@ func runCode(name string, rc io.Reader, dsn string, debug bool) {
 
 	df, diags, err := parser.ParseCode(rc)
 	if err != nil { logx.Fatal("parse: %v", err) }
-	for _, d := range diags { d.SrcName = "<inline>"; logx.Warn("parse: %s", d) }
+	for _, d := range diags { d.SrcName = "<inline>"; logx.Diag(d) }
 	if parser.HasErrors(diags) { logx.Fatal("parse: error-level diagnostics — refusing to execute") }
 	if len(df.Funcs) == 0 && len(df.TopLevelCalls) == 0 && len(df.InitBody) == 0 { return }
 	for i := range df.Funcs {
@@ -205,7 +205,7 @@ func _loadFile(kv kvspace.KVSpace, f string, anyCode *bool, loaded map[string]bo
 
 	df, diags, err := parser.ParseFile(f)
 	if err != nil { logx.Warn("SKIP %s: %v", f, err); return }
-	for _, d := range diags { d.SrcName = f; logx.Warn("%s: %s", f, d) }
+	for _, d := range diags { d.SrcName = f; logx.Diag(d) }
 	if parser.HasErrors(diags) { logx.Fatal("%s: error-level diagnostics — refusing to load", f) }
 
 	for i := range df.Funcs {

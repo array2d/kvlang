@@ -41,7 +41,7 @@ func executeEntry(kv kvspace.KVSpace, debug bool) {
 			logx.Info("[single] debug mode: executing %s", firstPC)
 		cpu := kvcpu.New(kv, "single")
 		cpu.Execute(firstPC)
-		fmt.Fprintln(os.Stderr, "\n[dbg] execution finished")
+		logx.Info("[dbg] execution finished")
 		return
 	}
 
@@ -56,7 +56,7 @@ func reportRunError(kv kvspace.KVSpace, vtid string) {
 	msgVal, err := kv.Get(keytree.VThreadStatusMsg(vtid, "error"))
 	if err == nil && !msgVal.IsNil() {
 		pcVal, _ := kv.Get(keytree.VThreadPC(vtid))
-		fmt.Fprintln(os.Stderr, "error:", msgVal.Str(), "at", pcVal.Str())
+		logx.Error("%s at %s", msgVal.Str(), pcVal.Str())
 		os.Exit(1)
 	}
 }

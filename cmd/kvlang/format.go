@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"kvlang/internal/ast"
+	"kvlang/internal/logx"
 	"kvlang/internal/parser"
 )
 
@@ -41,16 +42,16 @@ func cmdFormat(args []string) {
 		df, diags, err = parser.ParseFile(name)
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
+		logx.Error("%s: %v", name, err)
 		os.Exit(1)
 	}
 	for _, d := range diags {
-		fmt.Fprintf(os.Stderr, "%s:%d:%d: %s\n", name, d.Pos.Line, d.Pos.Col, d.Message)
+		d.SrcName = name; logx.Diag(d)
 	}
 
 	if *write && name != "inline" && name != "stdin" {
 		f, err := os.Create(name)
-		if err != nil { fmt.Fprintf(os.Stderr, "%s: %v\n", name, err); os.Exit(1) }
+		if err != nil { logx.Error("%s: %v", name, err); os.Exit(1) }
 		defer f.Close()
 		ast.Format(f, df)
 	} else {

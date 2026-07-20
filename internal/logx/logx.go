@@ -1,65 +1,107 @@
-// Package logx 提供基于 log/slog 的级别日志，通过 LOG_LEVEL 环境变量控制。
+// Package logx 提供编译器风格级别日志，通过 LOG_LEVEL 环境变量控制。
 //
-//	LOG_LEVEL=debug  输出所有级别
 //	LOG_LEVEL=debug  输出所有级别
 //	LOG_LEVEL=info   输出 info/warn/error
-//	LOG_LEVEL=warn   输出 warn/error (默认)
+//	LOG_LEVEL=warn   输出 warn/error（默认）
 //	LOG_LEVEL=error  仅输出 error
 //
-// 用法: logx.Debug("worker-%d picked vthread %s", id, vtid)
+// 输出格式对齐五大语言编译器诊断（GCC/Go/Rust/Python/V8）：
+// 无时间戳、无 key=value 结构，纯文本直接输出到 stderr。
+//
+// 范式：
+//
+//	Debug/Info — 操作消息，不加前缀
+//	Warn/Error  — 自动加 "warn: " / "error: " 前缀
+//	Fatal       — 同 Error + os.Exit(1)
+//	Diag        — 打印 parser.Diagnostic，格式由 Diagnostic.String() 定义
 package logx
 
 import (
 	"fmt"
-	"log/slog"
 	"os"
 	"strings"
+
+	"kvlang/internal/parser"
 )
 
-var level = new(slog.LevelVar)
+type level int
+
+const (
+	levelDebug level = iota
+	levelInfo
+	levelWarn
+	levelError
+)
+
+var currentLevel = levelWarn
 
 func init() {
 	switch strings.ToLower(os.Getenv("LOG_LEVEL")) {
 	case "debug":
-		level.Set(slog.LevelDebug)
+		currentLevel = levelDebug
 	case "info":
-		level.Set(slog.LevelInfo)
+		currentLevel = levelInfo
 	case "warn", "":
-		level.Set(slog.LevelWarn)
+		currentLevel = levelWarn
 	case "error":
-		level.Set(slog.LevelError)
-	default:
-		level.Set(slog.LevelWarn)
+		currentLevel = levelError
 	}
-
-	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: level,
-	})
-	slog.SetDefault(slog.New(handler))
 }
 
-// Debug 调试信息，仅在 LOG_LEVEL=debug 时输出。
 func Debug(format string, args ...any) {
-	slog.Debug(fmt.Sprintf(format, args...))
+	if currentLevel <= levelDebug {
+		fmt.Fprintf(os.Stderr, format+"\n", args...)
+	}
 }
 
-// Info 常规运行信息。
 func Info(format string, args ...any) {
-	slog.Info(fmt.Sprintf(format, args...))
+	if currentLevel <= levelInfo {
+		fmt.Fprintf(os.Stderr, format+"\n", args...)
+	}
 }
 
-// Warn 警告信息（可恢复的问题）。
 func Warn(format string, args ...any) {
-	slog.Warn(fmt.Sprintf(format, args...))
+	if currentLevel <= levelWarn {
+		fmt.Fprintf(os.Stderr, "warn: "+format+"\n", args...)
+	}
 }
 
-// Error 错误信息。
 func Error(format string, args ...any) {
-	slog.Error(fmt.Sprintf(format, args...))
+	if currentLevel <= levelError {
+		fmt.Fprintf(os.Stderr, "error: "+format+"\n", args...)
+	}
 }
 
-// Fatal 输出错误日志后退出。
 func Fatal(format string, args ...any) {
-	slog.Error(fmt.Sprintf(format, args...))
+	Error(format, args...)
 	os.Exit(1)
+}
+
+// Diag 打印一条 parser 诊断，格式由 Diagnostic.String() 定义（已含 level 前缀）。
+func Diag(d parser.Diagnostic) {
+	if d.Warn {
+		if currentLevel <= levelWarn {
+			fmt.Fprintln(os.Stderr, d.String())
+		}
+	} else {
+		if currentLevel <= levelError {
+			fmt.Fprintln(os.Stderr, d.String())
+		}
+	}
+}
+
+// DiagWithSource 打印一条带源码上下文和 ^ 指示符的诊断（对标 GCC 多行风格）。
+func DiagWithSource(d parser.Diagnostic) {
+	if d.Warn && currentLevel > levelWarn {
+		return
+	}
+	if !d.Warn && currentLevel > levelError {
+		return
+	}
+	if d.Source != "" {
+		fmt.Fprintf(os.Stderr, "%s\n  %s\n  %s%c\n", d.String(), d.Source,
+			strings.Repeat(" ", d.Pos.Col-1), '^')
+	} else {
+		fmt.Fprintln(os.Stderr, d.String())
+	}
 }
