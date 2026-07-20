@@ -15,6 +15,8 @@ import (
 //   frameRoot + "/.callpc"        返回地址（仅子帧）→ CallPC(frameRoot)
 //   frameRoot + "/.rootfunc"      根函数名（TCO 不更新）→ RootFunc(frameRoot)
 //   frameRoot + "/.ro"            只读参数名单 → FrameRO(frameRoot)
+//   frameRoot + "/.rparam/<name>"  读参重定向：绝对路径 → 调用方值位置（零拷贝读）
+//   frameRoot + "/.wparam/<name>"  写参重定向：绝对路径 → 调用方写目标（零拷贝写）
 //
 // 层级嵌套（路径深度 = 调用栈深度）：
 //
@@ -33,6 +35,14 @@ func FnCode(frameRoot string) string { return frameRoot + "/.fn" }
 // FrameRO 返回帧的只读参数名单键：frameRoot + "/.ro"（fix-027 读参写保护，
 // Bootstrap/HandleCall 绑定参数时写入逗号分隔名单，kvcpu 写槽检查用）。
 func FrameRO(frameRoot string) string { return frameRoot + "/.ro" }
+
+// RParam 返回读参重定向键：frameRoot + "/.rparam/<name>"。
+// 存调用方值的绝对路径，CPU 读参时直接从此路径读取，零拷贝。
+func RParam(frameRoot, name string) string { return frameRoot + "/.rparam/" + name }
+
+// WParam 返回写参重定向键：frameRoot + "/.wparam/<name>"。
+// 存调用方写目标的绝对路径，CPU 写参时直接写入此路径，HandleReturn 不再搬运。
+func WParam(frameRoot, name string) string { return frameRoot + "/.wparam/" + name }
 
 // CallPC 返回帧的返回地址键：frameRoot + "/.callpc"。
 // 存储调用指令的绝对路径，HandleReturn 据此推算写槽路径并恢复父 PC。

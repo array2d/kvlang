@@ -15,7 +15,7 @@ func (dictOp) Call(f *op.Frame) error {
 	inputs := readInputs(f)
 	fp := keytree.FrameRoot(f.PC)
 	for _, w := range f.Inst.Writes {
-		outKey := resolveWriteKey(fp, w)
+		outKey := resolveWriteKey(f.KV, fp, w)
 		if err := f.KV.Set(outKey, kvspace.Dict()); err != nil { return err }
 		for i := 0; i+1 < len(inputs); i += 2 {
 			if inputs[i+1].IsNil() { continue }

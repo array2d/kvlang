@@ -18,7 +18,7 @@ func (arrayOp) Call(f *op.Frame) error {
 	inputs := readInputs(f)
 	arr := kvspace.Array(inputs)
 	if len(f.Inst.Writes) > 0 {
-		outKey := resolveWriteKey(keytree.FrameRoot(f.PC), f.Inst.Writes[0])
+		outKey := resolveWriteKey(f.KV, keytree.FrameRoot(f.PC), f.Inst.Writes[0])
 		if err := f.KV.Set(outKey, arr); err != nil { return err }
 	}
 	vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
@@ -125,7 +125,7 @@ func (arraySetOp) Call(f *op.Frame) error {
 		f.KV.Set(path, inputs[2])
 		if len(f.Inst.Writes) > 0 && !inputs[0].IsNil() {
 			// 写入 base 本身（值不变），满足 -> base 返回槽
-			outKey := resolveWriteKey(fp, f.Inst.Writes[0])
+			outKey := resolveWriteKey(f.KV, fp, f.Inst.Writes[0])
 			f.KV.Set(outKey, inputs[0])
 		}
 		vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
@@ -161,7 +161,7 @@ func (arraySetOp) Call(f *op.Frame) error {
 		off += len(enc)
 	}
 	if len(f.Inst.Writes) > 0 {
-		outKey := resolveWriteKey(keytree.FrameRoot(f.PC), f.Inst.Writes[0])
+		outKey := resolveWriteKey(f.KV, keytree.FrameRoot(f.PC), f.Inst.Writes[0])
 		if err := f.KV.Set(outKey, kvspace.Raw("array", raw)); err != nil { return err }
 	}
 	vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")

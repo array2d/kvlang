@@ -142,15 +142,29 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	kv.Set(keytree.CallPC(frameRoot), kvspace.Str(pc))
 	kv.Set(keytree.RootFunc(frameRoot), kvspace.Str(funcName))
 
-	// 绑定参数：从调用方帧解析实参值后写入子帧（不经过链接）
+	// 读参零拷贝：存储调用方值的绝对路径，CPU 直接从此路径读取
 	params := funcSig.ParamNames()
 	for i, param := range params {
 		if i+1 < len(inst.Reads) {
-			kv.Set(frameRoot+"/"+param, builtin.ResolveReadValue(kv, callerFrameRoot, inst.Reads[i+1]))
+			rk := frameSlotKey(callerFrameRoot, inst.Reads[i+1])
+			if rk != "" {
+				kv.Set(keytree.RParam(frameRoot, param), kvspace.Str(rk))
+			}
+		}
+	}
+	// 写参零拷贝：存储调用方写目标的绝对路径，CPU 直接写入此路径
+	for i, ret := range funcSig.Returns {
+		wSlotPath := op.WriteSlotPC(pc, i)
+		wTargetVal, _ := kv.Get(wSlotPath)
+		wTarget := wTargetVal.Str()
+		if wTarget != "" {
+			wk := frameSlotKey(callerFrameRoot, wTarget)
+			if wk != "" {
+				kv.Set(keytree.WParam(frameRoot, ret.Name), kvspace.Str(wk))
+			}
 		}
 	}
 	if len(params) > 0 {
-		// 读参只读名单（fix-027）：kvcpu 写槽检查的运行期防线
 		kv.Set(keytree.FrameRO(frameRoot), kvspace.Str(strings.Join(params, ",")))
 	}
 
@@ -188,27 +202,9 @@ func HandleReturn(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.I
 	callPCVal, _ := kv.Get(keytree.CallPC(frameRoot))
 	callPC := callPCVal.Str()
 
-	// 将被调方输出写入父帧的写槽。
-	// 读写码语义：写槽路径直接从调用指令 [callPC addr0, i+1] 读取——
-	//   callPC = /vthread/42/.fn/[3,0] → 第 i 个写槽在 /vthread/42/.fn/[3, i+1]。
-	// 父帧在子帧执行期间保持挂起，父帧 .fn 链接不变，路径可靠解析。
-	// 写槽和 return 读槽均兼容 裸名 x 和绝对路径 /abs 两种形式。
-	if callPC != "" {
-		parentFrameRoot := keytree.FrameRoot(callPC)
-		for i, read := range inst.Reads {
-			wSlotPath := op.WriteSlotPC(callPC, i)
-			wTargetVal, _ := kv.Get(wSlotPath)
-			wTarget := wTargetVal.Str()
-			wk := frameSlotKey(parentFrameRoot, wTarget)
-			rk := frameSlotKey(frameRoot, read)
-			if wk != "" && rk != "" {
-				v, _ := kv.Get(rk)
-				kv.Set(wk, v)
-			}
-		}
-	}
+	// 写参已在子帧执行期间通过 .wparam 零拷贝直写父帧，HandleReturn 无需搬运。
 
-	// 清理帧：先 Unlink 代码区，再 DelTree 帧根（params / .callpc / .rootfunc）
+	// 清理帧
 	kv.Unlink(keytree.FnCode(frameRoot))
 	kv.DelTree(frameRoot)
 
@@ -254,10 +250,7 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 	}
 	kv.Set(keytree.RootFunc(vthreadRoot), kvspace.Str(funcName))
 
-	// 绑定入参（若有）
-	// 使用 ResolveReadValue 而非 kvspace.Str，确保字面量（如 "3"、"true"）
-	// 以正确的类型（int/bool）写入帧，与 HandleCall 的参数绑定语义保持一致。
-	// 否则数字参数会被存储为 string，导致 le/lt 等比较操作进入 strCmp 分支。
+	// 绑定入参（若有）。顶层帧无调用方，值写入 vthreadRoot，.rparam 指向自身槽位。
 	if len(args) > 0 {
 		sigVal, _ := kv.Get(funcKey)
 		sig := parser.ParseFuncSig(sigVal.Str())
@@ -268,7 +261,7 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 		params := sig.ParamNames()
 		for i, param := range params {
 			if i < len(args) {
-				kv.Set(vthreadRoot+"/"+param, builtin.ResolveReadValue(kv, "", args[i]))
+				dest := vthreadRoot + "/" + param; kv.Set(dest, builtin.ResolveReadValue(kv, "", args[i])); kv.Set(keytree.RParam(vthreadRoot, param), kvspace.Str(dest))
 			}
 		}
 		if len(params) > 0 {

@@ -14,7 +14,7 @@ func (strOp) Call(f *op.Frame) error {
 	val := ""
 	if len(inputs) > 0 { val = display(inputs[0]) }
 	if len(f.Inst.Writes) > 0 {
-		wKey := resolveWriteKey(keytree.FrameRoot(f.PC), f.Inst.Writes[0])
+		wKey := resolveWriteKey(f.KV, keytree.FrameRoot(f.PC), f.Inst.Writes[0])
 		if err := f.KV.Set(wKey, kvspace.Str(val)); err != nil {
 			vthread.SetError(bg, f.KV, f.Vtid, f.PC, err.Error())
 			return err

@@ -5,8 +5,12 @@ import "github.com/array2d/kvlang-go"
 func isAbsolute(param string) bool { return len(param) > 0 && param[0] == '/' }
 
 // resolveWriteKey maps a write-slot param to an absolute KV key.
-func resolveWriteKey(framePath, param string) string {
+// 写参重定向：若帧有 .wparam/<param>，返回其存储的绝对路径（零拷贝直写父帧）。
+func resolveWriteKey(kv kvspace.KVSpace, framePath, param string) string {
 	if isAbsolute(param) { return param }
+	if r, _ := kv.Get(framePath + "/.wparam/" + param); !r.IsNil() {
+		return r.Str()
+	}
 	return framePath + "/" + param
 }
 
@@ -46,7 +50,17 @@ func resolveReadValue(kv kvspace.KVSpace, framePath, param string) kvspace.XValu
 	if len(param) > 0 && param[0] >= '0' && param[0] <= '9' {
 		return kvspace.XValue{} // invalid number → zero value, not a bare ident
 	}
-	// bare identifier → slot in current frame
+	// bare identifier → check redirect first, then slot in current frame
+	// 读参重定向：帧 .rparam/<param> → 调用方值位置（零拷贝读）
+	// 写参重定向：帧 .wparam/<param> → 调用方写目标（零拷贝读写）
+	if r, err := kv.Get(framePath + "/.rparam/" + param); err == nil && !r.IsNil() {
+		v, _ := kv.Get(r.Str())
+		return v
+	}
+	if r, err := kv.Get(framePath + "/.wparam/" + param); err == nil && !r.IsNil() {
+		v, _ := kv.Get(r.Str())
+		return v
+	}
 	v, _ := kv.Get(framePath + "/" + param)
 	return v
 }
