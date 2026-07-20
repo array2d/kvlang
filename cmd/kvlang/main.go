@@ -28,6 +28,12 @@ func main() {
 		case "load":
 			cmdLoad(args[1:])
 			return
+		case "loadandrun":
+			cmdLoadAndRun(args[1:])
+			return
+		case "run":
+			cmdRun(args[1:])
+			return
 		case "vet":
 			cmdVet(args[1:])
 			return

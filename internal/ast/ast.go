@@ -84,6 +84,7 @@ type Func struct {
 	Comments []string // 函数前的行注释
 	Sig      FuncSig
 	Body     []Stmt
+	Pkg      string   // 所属 lib 包名（嵌套 lib 时 def 带上所在 lib 的 pkg；fix-039）
 }
 
 // FullText 返回函数的完整源码文本，用于存入 /src/<pkg>/<name>。

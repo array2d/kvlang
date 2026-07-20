@@ -66,7 +66,6 @@ type parser struct {
 	errors     []Diagnostic // 积累语法错误，不在第一个错误处停止
 	srcLines   []string     // 源码行缓存（fix-030：为 diagnostic 附加出错行上下文）
 	srcName    string       // 文件名/内联标注（fix-030）
-	srcAliases map[string]string // import … as 别名映射（fix-035：parsePrimaryExpr dotted call 全路径还原用）
 }
 
 func (p *parser) peek() Token {
@@ -159,67 +158,10 @@ func (p *parser) parseFile() *ast.File {
 		if p.peek().Kind == EOF {
 			break
 		}
-		// import pkg（kvspace）或 import "path"（文件糖）或 import … as alias（fix-033/035）
-		if p.peek().Kind == Ident && p.peek().Value == "import" {
-			p.advance() // consume "import"
-			var imp string
-			if p.peek().Kind == Literal && p.peek().Quote == '"' {
-				imp = p.advance().Value
-			} else if p.peek().Kind == Ident {
-				// import pkg — kvspace /lib/<pkg>/ 包引用
-				imp = p.advance().Value
-			} else {
-				p.errors = append(p.errors, Diagnostic{
-					Pos: p.peek().Pos, Warn: true,
-					Message: "import requires a package name or double-quoted file path",
-				})
-				p.eat(Newline)
-				continue
-			}
-			// import … as alias（fix-035）
-			if p.peek().Kind == Ident && p.peek().Value == "as" {
-				p.advance() // consume "as"
-				if p.peek().Kind == Ident {
-					if f.Aliases == nil { f.Aliases = map[string]string{} }
-					alias := p.advance().Value
-					if f.Aliases == nil { f.Aliases = map[string]string{} }
-					f.Aliases[alias] = imp
-					if p.srcAliases == nil { p.srcAliases = map[string]string{} }
-					p.srcAliases[alias] = imp
-				}
-			}
-			f.Imports = append(f.Imports, imp)
-			p.eat(Newline)
-			continue
-		}
-		// lib name { ... } — 命名空间块（fix-034：借鉴 C++ namespace / Rust mod）
+
+		// lib name { ... } — 命名空间块（fix-034/039：支持嵌套 lib a { lib b { … } }）
 		if p.peek().Kind == Ident && p.peek().Value == "lib" && p.peekAt(1).Kind == Ident && p.peekAt(2).Kind == LBrace {
-			p.advance() // consume "lib"
-			pkg := p.advance().Value
-			if pkg == "lib" {
-				p.errors = append(p.errors, Diagnostic{Pos: p.peek().Pos, Warn: true,
-					Message: fmt.Sprintf("package name %q expands to /lib/lib/ — consider a different name", pkg)})
-			}
-			if f.Package == "" { f.Package = pkg }
-			p.expect(LBrace)
-			p.skipNewlines()
-			for p.peek().Kind != RBrace && p.peek().Kind != EOF {
-				if p.peek().Kind == Ident && p.peek().Value == "def" {
-					fn := p.parseFunc()
-					f.Funcs = append(f.Funcs, fn)
-				} else { break }
-				p.skipNewlines()
-			}
-			p.expect(RBrace)
-			continue
-		}
-		// init { ... } — 初始化块（fix-036：parseBody 全语法，支持 if/while/for/赋值/调用）
-		if p.peek().Kind == Ident && p.peek().Value == "init" && p.peekAt(1).Kind == LBrace {
-			p.advance() // consume "init"
-			p.advance() // consume {
-			p.skipNewlines()
-			f.InitBody = p.parseBody()
-			p.expect(RBrace)
+			p.parseLibBody(f, "")
 			continue
 		}
 if p.peek().Kind == Ident && p.peek().Value == "def" {
@@ -252,6 +194,43 @@ if p.peek().Kind == Ident && p.peek().Value == "def" {
 		}
 	}
 	return f
+}
+
+// parseLibBody 解析 lib name { ... } 块体（fix-039：支持嵌套 lib a { lib b { } }）。
+// prefix 为父级包名（空=顶层），子 lib 名以 "." 拼接：a.b.c。
+func (p *parser) parseLibBody(f *ast.File, prefix string) {
+	p.advance() // consume "lib"
+	name := p.advance().Value
+	pkg := name
+	if prefix != "" { pkg = prefix + "/" + name }
+	if name == "lib" && prefix == "" {
+		p.errors = append(p.errors, Diagnostic{Pos: p.peek().Pos, Warn: true,
+			Message: fmt.Sprintf("package name %q expands to /lib/lib/ — consider a different name", name)})
+	}
+	f.Package = pkg // 嵌套 lib 以最内层为准
+	p.expect(LBrace)
+	p.skipNewlines()
+	for p.peek().Kind != RBrace && p.peek().Kind != EOF {
+		// 嵌套 lib
+		if p.peek().Kind == Ident && p.peek().Value == "lib" && p.peekAt(1).Kind == Ident && p.peekAt(2).Kind == LBrace {
+			p.parseLibBody(f, pkg)
+			p.skipNewlines()
+			continue
+		}
+		if p.peek().Kind == Ident && p.peek().Value == "def" {
+			fn := p.parseFunc()
+			fn.Pkg = pkg // lib 归属（fix-039）
+			f.Funcs = append(f.Funcs, fn)
+			p.skipNewlines()
+			continue
+		}
+st := p.parseStmt()
+		if st != nil {
+			f.InitBody = append(f.InitBody, st)
+		} else { break }
+		p.skipNewlines()
+	}
+	p.expect(RBrace)
 }
 
 // parseFunc 解析单个函数定义：def name(...) -> (...) { body }

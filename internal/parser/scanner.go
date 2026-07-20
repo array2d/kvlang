@@ -313,7 +313,8 @@ func Scan(src string) []Token {
 			if i+1 < len(src) && isAbsPathStart(src[i+1]) {
 				start := i
 				i++
-				for i < len(src) && !isTokenDelim(src[i]) {
+				// 路径字面量中 . 不作为分隔符——/lib/math.sum 是单个 token（fix-039）
+				for i < len(src) && (!isTokenDelim(src[i]) || src[i] == '.') {
 					i++
 				}
 				tokens = append(tokens, Token{Kind: Literal, Value: src[start:i], Pos: p})

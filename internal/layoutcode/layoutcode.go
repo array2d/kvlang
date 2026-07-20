@@ -81,11 +81,26 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	vtid := keytree.VtidFromPC(pc)
 	funcName := inst.Reads[0]
 
-	pkgVal, err := kv.Get(keytree.LibIdx(funcName))
-	pkg := pkgVal.Str()
-	if err != nil || pkgVal.IsNil() {
-		vthread.SetError(ctx, kv, vtid, pc, "NameError: func not found: "+funcName)
-		return ""
+	var pkg string
+	// 全路径调用（fix-039）：/lib/math/sum → pkg=math, name=sum；
+	// /lib/a/b/sum → pkg=a/b, name=sum；/lib/sum → pkg="", name=sum
+	if strings.HasPrefix(funcName, "/lib/") {
+		rest := funcName[len("/lib/"):]
+		// /lib/aaa/bbb/math.sum → pkg=aaa/bbb/math, name=sum
+		if dot := strings.LastIndex(rest, "."); dot > 0 {
+			pkg = rest[:dot]
+			funcName = rest[dot+1:]
+		} else {
+			funcName = rest
+			pkg = ""
+		}
+	} else {
+		pkgVal, err := kv.Get(keytree.LibIdx(funcName))
+		if err != nil || pkgVal.IsNil() {
+			vthread.SetError(ctx, kv, vtid, pc, "NameError: func not found: "+funcName)
+			return ""
+		}
+		pkg = pkgVal.Str()
 	}
 	funcKey := keytree.LibFunc(pkg, funcName)
 
