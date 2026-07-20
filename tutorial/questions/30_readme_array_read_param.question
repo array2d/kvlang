@@ -1,0 +1,1 @@
+[README] 定义函数 sum_arr(arr:int) -> (total:int)，计算 arr 所有元素之和并返回。在 main 中创建 a:int = [1,2,3,4]，调用 sum_arr(a) -> s，打印 s。提示：读参声明 arr:int，len(arr) 取长度，arr[i] 取元素

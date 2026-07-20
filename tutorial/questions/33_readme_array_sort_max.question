@@ -1,0 +1,1 @@
+[README] 创建 int 数组 a:int = [7, 2, 9, 4]，用 sort(a) 排序，然后打印第一个（最小）和最后一个（最大）元素。提示：sort(a) -> sorted，然后用 sorted[0] 和 sorted[len(sorted)-1]
