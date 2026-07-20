@@ -1,1 +1,1 @@
-[README] 用 while 循环遍历数组 a:int = [10, 20, 30]，打印每个元素（每行一个）。提示：len(a) 取长度，a[i] 取第 i 个元素
+[README] 用 for 循环遍历数组 a:int = [10, 20, 30]，打印每个元素（每行一个）。提示：for (x in a) { print(x) }

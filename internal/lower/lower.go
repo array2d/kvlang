@@ -13,6 +13,8 @@ package lower
 
 import (
 	"fmt"
+	"strings"
+
 	"kvlang/internal/ast"
 	"kvlang/internal/op"
 )
@@ -244,15 +246,11 @@ func lowerWhileWithCont(pre []ast.Stmt, s *ast.WhileStmt, cont []ast.Stmt, lg *l
 
 // lowerForWithCont 将 ForStmt 降级为四块结构（init/cond/body/exit），续体注入 exit block。
 //
-//	for (v in ./path) { body }
+//	for (v in path) { body }
 //
-//	→ pre... goto _for_N
-//	  _for_init_N:  { -1 -> ./_idx }
-//	  _for_cond_N:  { ./_idx + 1 -> ./_idx;  kv.has(./path, ./_idx) -> ./_cond;
-//	                   br(./_cond, fn/_for_body_N, fn/_for_exit_N) }
-//	  _for_body_N:  { kv.at(./path, ./_idx) -> ./v;  lowerBody(body);
-//	                   goto _for_cond_N }
-//	  _for_exit_N:  { cont... }
+// 两种模式：
+//   kvspace 路径迭代（iter 以 / 开头或含 /）：kvhas/kvat 遍历键族
+//   XValue 数组迭代（iter 为裸标识符）：len/at 按索引遍历
 //
 // 为 for 体创建新 loopCtx（break→exit, continue→condLabel）。
 func lowerForWithCont(pre []ast.Stmt, s *ast.ForStmt, cont []ast.Stmt, lg *labelGen, lc *loopCtx) []ast.Stmt {
@@ -261,7 +259,6 @@ func lowerForWithCont(pre []ast.Stmt, s *ast.ForStmt, cont []ast.Stmt, lg *label
 	bodyLabel := lg.next("for_body")
 	exitLabel := lg.next("for_exit")
 
-	// _for_init:  -1 -> ./_idx;  goto fn/_for_cond_N
 	idxSlot := lg.tmp()
 	condSlot := lg.tmp()
 	initBody := []ast.Stmt{
@@ -269,27 +266,53 @@ func lowerForWithCont(pre []ast.Stmt, s *ast.ForStmt, cont []ast.Stmt, lg *label
 		gotoLabel(lg.parent, condLabel),
 	}
 
-	// _for_cond:  ./_idx + 1 -> ./_idx;  kv.has(./path, ./_idx) -> ./_cond;
-	//             br(./_cond, fn/bodyLabel, fn/exitLabel)
-	addInst := &ast.Instruction{
-		Expr: ast.Call("+", ast.Leaf(idxSlot), ast.Leaf("1")),
-		Writes: []string{idxSlot},
-	}
-	kvHasInst := &ast.Instruction{
-		Expr: ast.Call("kvhas", ast.Leaf(s.Iter), ast.Leaf(idxSlot)),
-		Writes: []string{condSlot},
-	}
-	brI := brInst(condSlot, lg.parent+"/"+bodyLabel, lg.parent+"/"+exitLabel)
-	condBody := []ast.Stmt{addInst, kvHasInst, brI}
+	isArrayIter := len(s.Iter) > 0 && s.Iter[0] != '/' && !strings.Contains(s.Iter, "/")
+	var condBody, bodyInsts []ast.Stmt
 
-	// _for_body:  kv.at(./path, ./_idx) -> ./v;  lowerBody(body);  goto _for_cond_N
-	kvAtInst := &ast.Instruction{
-		Expr: ast.Call("kvat", ast.Leaf(s.Iter), ast.Leaf(idxSlot)),
-		Writes: []string{s.Var},
+	if isArrayIter {
+		// XValue 数组迭代：_idx < len(arr) → 用 len + at
+		lenSlot := lg.tmp()
+		lenInst := &ast.Instruction{
+			Expr: ast.Call("len", ast.Leaf(s.Iter)),
+			Writes: []string{lenSlot},
+		}
+		addInst := &ast.Instruction{
+			Expr:   ast.Call("+", ast.Leaf(idxSlot), ast.Leaf("1")),
+			Writes: []string{idxSlot},
+		}
+		cmpInst := &ast.Instruction{
+			Expr:   ast.Call("<", ast.Leaf(idxSlot), ast.Leaf(lenSlot)),
+			Writes: []string{condSlot},
+		}
+		brI := brInst(condSlot, lg.parent+"/"+bodyLabel, lg.parent+"/"+exitLabel)
+		condBody = []ast.Stmt{lenInst, addInst, cmpInst, brI}
+
+		atInst := &ast.Instruction{
+			Expr:   ast.Call("at", ast.Leaf(s.Iter), ast.Leaf(idxSlot)),
+			Writes: []string{s.Var},
+		}
+		bodyInner := lowerBody(s.Body, lg, &loopCtx{breakLabel: exitLabel, continueLabel: condLabel})
+		bodyInsts = append([]ast.Stmt{atInst}, bodyInner...)
+	} else {
+		// kvspace 路径迭代：kvhas(./path, _idx) → kvhas + kvat
+		addInst := &ast.Instruction{
+			Expr:   ast.Call("+", ast.Leaf(idxSlot), ast.Leaf("1")),
+			Writes: []string{idxSlot},
+		}
+		kvHasInst := &ast.Instruction{
+			Expr:   ast.Call("kvhas", ast.Leaf(s.Iter), ast.Leaf(idxSlot)),
+			Writes: []string{condSlot},
+		}
+		brI := brInst(condSlot, lg.parent+"/"+bodyLabel, lg.parent+"/"+exitLabel)
+		condBody = []ast.Stmt{addInst, kvHasInst, brI}
+
+		kvAtInst := &ast.Instruction{
+			Expr:   ast.Call("kvat", ast.Leaf(s.Iter), ast.Leaf(idxSlot)),
+			Writes: []string{s.Var},
+		}
+		bodyInner := lowerBody(s.Body, lg, &loopCtx{breakLabel: exitLabel, continueLabel: condLabel})
+		bodyInsts = append([]ast.Stmt{kvAtInst}, bodyInner...)
 	}
-	bodyLc := &loopCtx{breakLabel: exitLabel, continueLabel: condLabel}
-	bodyInner := lowerBody(s.Body, lg, bodyLc)
-	bodyInsts := append([]ast.Stmt{kvAtInst}, bodyInner...)
 	bodyInsts = injectGoto(bodyInsts, lg.parent, condLabel)
 
 	bodyInstsOnly, bodyBlocks := splitInstsAndBlocks(bodyInsts)
