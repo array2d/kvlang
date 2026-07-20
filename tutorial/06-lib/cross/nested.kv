@@ -1,0 +1,16 @@
+# 嵌套 lib + 扁平 lib 混合
+# 期望输出:
+#   nested
+#   42
+lib a {
+    lib b {
+        def greet() -> () { print("nested") }
+    }
+}
+lib x/y {
+    def answer() -> () { print(42) }
+}
+def init() -> () {
+    /lib/a/b.greet()
+    /lib/x/y.answer()
+}

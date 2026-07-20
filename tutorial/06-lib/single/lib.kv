@@ -1,0 +1,8 @@
+# 单文件单 lib：math 库自含函数+init
+lib math {
+    def sum(A:int, B:int) -> (C:int) { A + B -> C }
+    def init() -> () {
+        sum(3, 4) -> s
+        print(s)
+    }
+}

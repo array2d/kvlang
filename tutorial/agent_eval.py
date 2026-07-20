@@ -35,6 +35,7 @@ TASKS = [
     ("list", '构建三节点链表（值 1、2、3，next 存下一节点的绝对路径字符串，尾节点 next 为 ""），遍历并逐行打印节点值', ["1", "2", "3"]),
     ("array", "求数组 [5, 3, 8] 的最大值并打印（可用循环或 max）", ["8"]),
     ("strops", '把字符串 "hello" 的首字符改为 "H"，再与 " kvlang" 拼接并打印', ["Hello kvlang"]),
+    ("libsingle", "定义 lib math { def sum(A:int, B:int) -> (C:int) { A + B -> C }; def init() -> () { sum(3, 4) -> s; print(s) } }", ["7"]),
     ("strfind", '打印子串 "is" 在 "kvlang is kv" 中首次出现的下标', ["7"]),
 ]
 

@@ -1,0 +1,10 @@
+# 多级包名：aaa/bbb/math，全路径调用
+# 期望输出:
+#   7
+lib aaa/bbb/math {
+    def sum(A:int, B:int) -> (C:int) { A + B -> C }
+}
+def init() -> () {
+    /lib/aaa/bbb/math.sum(3, 4) -> s
+    print(s)
+}

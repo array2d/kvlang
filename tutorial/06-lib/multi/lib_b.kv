@@ -1,0 +1,8 @@
+# 运行: kvlang loadandrun lib_a.kv lib_b.kv
+lib math {
+    def twice(A:int) -> (R:int) { A * 2 -> R }
+}
+def init() -> () {
+    sum(3, 4) -> s
+    print(s)
+}

@@ -1,0 +1,7 @@
+# 运行: kvlang loadandrun lib_a.kv lib_b.kv
+lib calc {
+    def init() -> () {
+        /lib/math.sum(3, 4) -> s
+        print(s)
+    }
+}

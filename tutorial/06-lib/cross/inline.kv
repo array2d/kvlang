@@ -1,0 +1,10 @@
+# 单文件内跨 lib 全路径调用
+# 期望输出:
+#   7
+lib math {
+    def sum(A:int, B:int) -> (C:int) { A + B -> C }
+}
+def init() -> () {
+    /lib/math.sum(3, 4) -> s
+    print(s)
+}
