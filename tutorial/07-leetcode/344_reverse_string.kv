@@ -7,7 +7,8 @@
 #   e
 #   h
 def reverse_str() -> () {
-	a = ["h", "e", "l", "l", "o"]  # = 等价于 <-
+	# char 值数组: "hello" → ASCII [104, 101, 108, 108, 111]
+	a:int = [104, 101, 108, 108, 111]
 	n <- len(a)
 	l = 0  # = 等价于 <-
 	n - 1 -> r
@@ -21,8 +22,9 @@ def reverse_str() -> () {
 	}
 	i = 0  # = 等价于 <-
 	while (i < n) {
-		a[i] -> x
-		print(x)
+		a[i] -> c
+		char("abcdefghijklmnopqrstuvwxyz", c - 97) -> s
+		print(s)
 		i <- i + 1
 	}
 }
