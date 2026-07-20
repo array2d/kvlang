@@ -1,1 +1,1 @@
-HandleReturn 从子帧 .callpc 定位调用指令的写槽，逐写参将子帧值 kv.Set 到父帧对应位置。这是写参的跨帧路径映射，不是返回值拷贝。
+HandleCall 已通过 .wparam 将写参目标的绝对路径存入子帧，CPU 执行时直写父帧。HandleReturn 不再搬运——仅读 .callpc 恢复父 PC，Unlink + DelTree 清理子帧。写参跨帧映射在执行时完成，不是返回值拷贝。

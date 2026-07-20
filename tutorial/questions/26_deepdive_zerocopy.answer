@@ -1,0 +1,1 @@
+HandleCall 存储调用方值/目标的绝对路径 | .rparam/<name> 存读参值的绝对路径，CPU 直读调用方帧 | .wparam/<name> 存写参目标的绝对路径，CPU 直写调用方帧 | HandleReturn 仅 Unlink + DelTree，无跨帧搬运 | 变量名即指针，参数的 KV 路径在调用方帧已知，子帧直接通过路径读写
