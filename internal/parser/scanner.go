@@ -13,11 +13,12 @@ type Pos struct {
 	Col  int // 1-based
 }
 
-// Diagnostic 表示一条解析诊断（错误或警告），携带位置信息。
+// Diagnostic 表示一条解析诊断（错误、警告或提示），携带位置信息。
 type Diagnostic struct {
 	Pos       Pos
 	Message   string
-	Warn      bool   // true = 警告（不影响解析继续），false = 错误
+	Warn      bool   // true = 警告
+	Info      bool   // true = 提示（优先级高于 Warn，不影响解析继续）
 	Source    string // 出错行的源码文本
 	SrcFile   string // 含源码的文件路径（同文件诊断合并显示一次）
 	SrcName   string // 逻辑名（内联代码标注为 "<inline>"，文件为路径）
@@ -25,7 +26,9 @@ type Diagnostic struct {
 
 func (d Diagnostic) String() string {
 	kind := "error"
-	if d.Warn {
+	if d.Info {
+		kind = "info"
+	} else if d.Warn {
 		kind = "warn"
 	}
 	src := d.SrcName

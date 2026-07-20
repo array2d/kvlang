@@ -79,7 +79,11 @@ func Fatal(format string, args ...any) {
 
 // Diag 打印一条 parser 诊断，格式由 Diagnostic.String() 定义（已含 level 前缀）。
 func Diag(d parser.Diagnostic) {
-	if d.Warn {
+	if d.Info {
+		if currentLevel <= levelInfo {
+			fmt.Fprintln(os.Stderr, d.String())
+		}
+	} else if d.Warn {
 		if currentLevel <= levelWarn {
 			fmt.Fprintln(os.Stderr, d.String())
 		}
@@ -92,10 +96,13 @@ func Diag(d parser.Diagnostic) {
 
 // DiagWithSource 打印一条带源码上下文和 ^ 指示符的诊断（对标 GCC 多行风格）。
 func DiagWithSource(d parser.Diagnostic) {
-	if d.Warn && currentLevel > levelWarn {
+	if d.Info && currentLevel > levelInfo {
 		return
 	}
-	if !d.Warn && currentLevel > levelError {
+	if !d.Info && d.Warn && currentLevel > levelWarn {
+		return
+	}
+	if !d.Info && !d.Warn && currentLevel > levelError {
 		return
 	}
 	if d.Source != "" {

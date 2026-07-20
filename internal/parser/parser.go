@@ -166,7 +166,7 @@ func (p *parser) parseFile() *ast.File {
 		}
 if p.peek().Kind == Ident && p.peek().Value == "def" {
 			if f.Package == "" {
-				p.errors = append(p.errors, Diagnostic{Pos: p.peek().Pos, Warn: true,
+				p.errors = append(p.errors, Diagnostic{Pos: p.peek().Pos, Info: true,
 					Message: fmt.Sprintf("def outside lib block — registering under /lib/<name>; consider wrapping in 'lib pkgname { }'")})
 			}
 			fn := p.parseFunc()
@@ -204,7 +204,7 @@ func (p *parser) parseLibBody(f *ast.File, prefix string) {
 	pkg := name
 	if prefix != "" { pkg = prefix + "/" + name }
 	if name == "lib" && prefix == "" {
-		p.errors = append(p.errors, Diagnostic{Pos: p.peek().Pos, Warn: true,
+		p.errors = append(p.errors, Diagnostic{Pos: p.peek().Pos, Info: true,
 			Message: fmt.Sprintf("package name %q expands to /lib/lib/ — consider a different name", name)})
 	}
 	f.Package = pkg // 嵌套 lib 以最内层为准
@@ -319,10 +319,10 @@ func (p *parser) checkReadOnlyParams(fn *ast.Func) {
 	walk(fn.Body)
 }
 
-// HasErrors 报告诊断中是否存在 error 级（非 Warn）条目。
+// HasErrors 报告诊断中是否存在 error 级（非 Warn、非 Info）条目。
 func HasErrors(diags []Diagnostic) bool {
 	for _, d := range diags {
-		if !d.Warn {
+		if !d.Warn && !d.Info {
 			return true
 		}
 	}
