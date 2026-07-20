@@ -2,9 +2,10 @@ package builtin
 
 import (
 	"encoding/binary"
-	"strings"
 	"fmt"
+	"math"
 	"strconv"
+	"strings"
 
 	"kvlang/internal/keytree"
 	"github.com/array2d/kvspace-go"
@@ -12,26 +13,81 @@ import (
 	"kvlang/internal/vthread"
 )
 
-// arrayOp: array(elem1, elem2, ...) → 1D array XValue
+// arrayOp: [e1, e2, ...] → typed array XValue。
+// 目标类型由写槽的类型标注决定（如 arr:int32 = [1,2,3] → int32 同构数组）。
+// 无类型标注时回退为异构 TLV 数组。
 type arrayOp struct{}
 func (arrayOp) Call(f *op.Frame) error {
 	inputs := readInputs(f)
-	arr := kvspace.Array(inputs)
-	if len(f.Inst.Writes) > 0 {
-		outKey := resolveWriteKey(f.KV, keytree.FrameRoot(f.PC), f.Inst.Writes[0])
+	if len(f.Inst.Writes) == 0 {
+		vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
+		return nil
+	}
+	frameRoot := keytree.FrameRoot(f.PC)
+	outKey := resolveWriteKey(f.KV, frameRoot, f.Inst.Writes[0])
+	// 从指令写槽 kind 取目标类型
+	targetKind := ""
+	if len(f.Inst.WriteKinds) > 0 && f.Inst.WriteKinds[0] != "rwir" {
+		targetKind = f.Inst.WriteKinds[0]
+	}
+	if targetKind != "" {
+		arr := packTypedArray(targetKind, inputs)
+		if err := f.KV.Set(outKey, arr); err != nil { return err }
+	} else {
+		arr := kvspace.Array(inputs)
 		if err := f.KV.Set(outKey, arr); err != nil { return err }
 	}
 	vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
 	return nil
 }
 
-// lenOp: len(array) → int
+// packTypedArray 将元素按 kind 打包为同构定长数组。
+func packTypedArray(kind string, elems []kvspace.XValue) kvspace.XValue {
+	sz := kindSize(kind)
+	if sz <= 0 { return kvspace.Array(elems) }
+	raw := make([]byte, int32(len(elems))*sz)
+	for i, e := range elems {
+		copy(raw[i*int(sz):], kindBytes(kind, e))
+	}
+	return kvspace.RawN(kind, raw, int32(len(elems)))
+}
+
+func kindSize(kind string) int32 {
+	switch kind {
+	case "bool", "int8", "uint8": return 1
+	case "int16", "uint16": return 2
+	case "int32", "uint32", "float32", "int": return 4
+	case "int64", "uint64", "float64", "float": return 8
+	default: return 0
+	}
+}
+
+func kindBytes(kind string, v kvspace.XValue) []byte {
+	switch kind {
+	case "bool":
+		if AsBool(v) { return []byte{1} }; return []byte{0}
+	case "int8": return []byte{byte(int8(asInt(v)))}
+	case "uint8": return []byte{uint8(asInt(v))}
+	case "int16": b := make([]byte, 2); binary.LittleEndian.PutUint16(b, uint16(int16(asInt(v)))); return b
+	case "uint16": b := make([]byte, 2); binary.LittleEndian.PutUint16(b, uint16(asInt(v))); return b
+	case "int32", "int": b := make([]byte, 4); binary.LittleEndian.PutUint32(b, uint32(int32(asInt(v)))); return b
+	case "uint32": b := make([]byte, 4); binary.LittleEndian.PutUint32(b, uint32(asInt(v))); return b
+	case "float32": b := make([]byte, 4); binary.LittleEndian.PutUint32(b, math.Float32bits(float32(asFloat(v)))); return b
+	case "int64": b := make([]byte, 8); binary.LittleEndian.PutUint64(b, uint64(asInt(v))); return b
+	case "uint64": b := make([]byte, 8); binary.LittleEndian.PutUint64(b, uint64(asInt(v))); return b
+	case "float64", "float": b := make([]byte, 8); binary.LittleEndian.PutUint64(b, math.Float64bits(asFloat(v))); return b
+	default: return v.RawBytes()
+	}
+}
+
+// lenOp: len(array) → int。异构数组用 Len()，同构数组用 ArrayLen()。
 type lenOp struct{}
 func (lenOp) Call(f *op.Frame) error {
 	inputs := readInputs(f)
 	n := 0
 	if len(inputs) > 0 {
 		n = inputs[0].Len()
+		if n == 0 { n = int(inputs[0].ArrayLen()) }
 	}
 	return writeResult(f, kvspace.Int64(int64(n)))
 }
@@ -77,11 +133,28 @@ func (atOp) Call(f *op.Frame) error {
 	idx := int(inputs[1].Int64())
 	elem := inputs[0].Index(idx)
 	if elem.IsNil() {
+		elem = typedIndex(inputs[0], idx)
+	}
+	if elem.IsNil() {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC,
 			fmt.Sprintf("IndexError: at: index %d out of bounds; help: the array or string has no item at this position", idx))
 		return fmt.Errorf("IndexError: at: index out of bounds")
 	}
 	return writeResult(f, elem)
+}
+
+// typedIndex 用同构数组的 arraylength + 定长偏移读取元素。
+func typedIndex(v kvspace.XValue, idx int) kvspace.XValue {
+	n := int(v.ArrayLen())
+	if idx < 0 || idx >= n { return kvspace.XValue{} }
+	k := v.Kind()
+	sz := kindSize(k)
+	if sz <= 0 { return kvspace.XValue{} }
+	off := idx * int(sz)
+	if off+int(sz) > len(v.RawBytes()) { return kvspace.XValue{} }
+	raw := make([]byte, sz)
+	copy(raw, v.RawBytes()[off:off+int(sz)])
+	return kvspace.RawN(k, raw, 1)
 }
 
 // arraySetOp: set(array, index, value) → modified array
@@ -162,7 +235,7 @@ func (arraySetOp) Call(f *op.Frame) error {
 	}
 	if len(f.Inst.Writes) > 0 {
 		outKey := resolveWriteKey(f.KV, keytree.FrameRoot(f.PC), f.Inst.Writes[0])
-		if err := f.KV.Set(outKey, kvspace.Raw("array", raw)); err != nil { return err }
+		if err := f.KV.Set(outKey, kvspace.RawN("array", raw, int32(n))); err != nil { return err }
 	}
 	vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
 	return nil

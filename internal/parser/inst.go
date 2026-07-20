@@ -30,7 +30,7 @@ func (p *parser) parseInst() *ast.Instruction {
 		// (writes) <- expr  /  (writes) = expr —— = ≡ <-，写槽在左
 		inst.ArrowLeft = true
 		inst.Eq = arrowVal == "="
-		inst.Writes = p.collectWritesUntilArrow()
+		inst.Writes, inst.WriteTypes = p.collectWritesUntilArrow()
 		p.advance() // consume <- / =
 		inst.Expr = p.parsePratt(0)
 		// arr[idx] <- val → set(arr, idx, val) -> arr
@@ -41,6 +41,7 @@ func (p *parser) parseInst() *ast.Instruction {
 			idx := s[br+1 : len(s)-1]
 			inst.Expr = ast.Call("set", ast.Leaf(arr), ast.Leaf(idx), inst.Expr)
 			inst.Writes = []string{arr}
+			inst.WriteTypes = nil
 		}
 		// base.field / base.*key <- val → set 展开（fix-015）
 		p.desugarMemberWrite(inst)
@@ -49,7 +50,7 @@ func (p *parser) parseInst() *ast.Instruction {
 		// expr -> (writes)
 		inst.Expr = p.parsePratt(0)
 		p.advance() // consume ->
-		inst.Writes = p.collectWriteList()
+		inst.Writes, inst.WriteTypes = p.collectWriteList()
 		// expr -> base.field / base.*key → set 展开（fix-015）
 		p.desugarMemberWrite(inst)
 
@@ -91,6 +92,7 @@ func (p *parser) desugarMemberWrite(inst *ast.Instruction) {
 	}
 	inst.Expr = ast.Call("set", ast.Leaf(base), key, inst.Expr)
 	inst.Writes = []string{base}
+	inst.WriteTypes = nil
 }
 
 // findTopLevelArrow 前瞻（不消费）找第一个深度为 0 的 Arrow token 绝对下标。
@@ -345,23 +347,23 @@ func (p *parser) parsePrimaryExpr() *ast.Expr {
 
 // collectWriteList 收集 -> 右侧的写槽列表。
 // 支持 (a, b) 带括号形式和裸 a[, b...] 形式。
-//
-// 写槽只能是裸标识符（路径名），若遇到非标识符 token（如 LParen、Literal），
-// 判定为同一行存在第二条指令，发出警告后停止收集。
-func (p *parser) collectWriteList() []string {
+// 返回 (names, types)，types 与 names 平行；无类型标注时对应位置为 ""。
+func (p *parser) collectWriteList() ([]string, []string) {
 	if p.peek().Kind == LParen {
 		p.advance() // consume (
-		var writes []string
+		var writes, wtypes []string
 		for p.peek().Kind != RParen && p.peek().Kind != EOF {
 			if p.eat(Comma) {
 				continue
 			}
-			writes = append(writes, p.advance().Value)
+			name, typ := p.parseWriteSlot()
+			writes = append(writes, name)
+			wtypes = append(wtypes, typ)
 		}
 		p.expect(RParen)
-		return writes
+		return writes, wtypes
 	}
-	var writes []string
+	var writes, wtypes []string
 	for {
 		t := p.peek()
 		if t.Kind == Newline || t.Kind == RBrace || t.Kind == EOF ||
@@ -372,13 +374,6 @@ func (p *parser) collectWriteList() []string {
 			p.advance()
 			continue
 		}
-		// 合法写槽：
-		//   Ident  — 裸标识符（如 x, total, _）
-		//   Literal 以 "/" 开头 — 绝对路径（如 /abs/path）
-		// 非法（触发 warning）：
-		//   Ident 后紧跟 LParen — 是函数调用，说明同行存在第二条指令
-		//   Literal 以 '"' 或数字开头 — 字符串/数字字面量，不能是写槽
-		//   其他 token（LParen 等）
 		isPathLiteral := t.Kind == Literal && len(t.Value) > 0 && t.Value[0] == '/'
 		isIdent := t.Kind == Ident
 		isCallStart := isIdent && p.peekAt(1).Kind == LParen
@@ -394,7 +389,7 @@ func (p *parser) collectWriteList() []string {
 						"each instruction must be on its own line",
 					t.Value),
 			})
-			return writes
+			return writes, wtypes
 		case isInvalidLiteral || (!isIdent && !isPathLiteral):
 			p.errors = append(p.errors, Diagnostic{
 				Pos:  t.Pos,
@@ -405,33 +400,46 @@ func (p *parser) collectWriteList() []string {
 						"each instruction must be on its own line",
 					t.Value),
 			})
-			return writes
+			return writes, wtypes
 		default:
 			// base.field 作为整体写槽（base 为裸标识符或路径引用）
 			if (t.Kind == Ident || isPathLiteral) && p.peekAt(1).Kind == Dot {
 				w := p.advance().Value // base
 				w += p.advance().Value // .
-				// 动态键 .*key：合并 * 标记，desugar 识别后以裸 Leaf 传 set（fix-015）
 				if p.peek().Kind == Ident && p.peek().Value == "*" && p.peekAt(1).Kind == Ident {
 					w += p.advance().Value // *
 				}
 				w += p.advance().Value // field
 				writes = append(writes, w)
+				wtypes = append(wtypes, "")
 			} else {
-				writes = append(writes, p.advance().Value)
+				name, typ := p.parseWriteSlot()
+				writes = append(writes, name)
+				wtypes = append(wtypes, typ)
 			}
 		}
 	}
-	return writes
+	return writes, wtypes
+}
+
+// parseWriteSlot 解析单个写槽：name[:type]
+func (p *parser) parseWriteSlot() (name, typ string) {
+	name = p.advance().Value
+	if p.peek().Kind == Colon && p.peekAt(1).Kind == Ident {
+		p.advance() // consume :
+		typ = p.advance().Value
+	}
+	return
 }
 
 // collectWritesUntilArrow 收集 <- 左侧的写槽，直到遇到 Arrow 为止（不消费 Arrow）。
-func (p *parser) collectWritesUntilArrow() []string {
+// 返回 (names, types)。
+func (p *parser) collectWritesUntilArrow() ([]string, []string) {
 	hasParen := p.peek().Kind == LParen
 	if hasParen {
 		p.advance() // consume (
 	}
-	var writes []string
+	var writes, wtypes []string
 	for {
 		t := p.peek()
 		if t.Kind == Arrow || t.Kind == EOF || t.Kind == Comment {
@@ -445,17 +453,16 @@ func (p *parser) collectWritesUntilArrow() []string {
 			p.advance()
 			continue
 		}
-		// base.field 成员访问作为整体写槽（base 为裸标识符或绝对路径）
 		isPathLit := t.Kind == Literal && len(t.Value) > 0 && t.Value[0] == '/'
 		if (t.Kind == Ident || isPathLit) && p.peekAt(1).Kind == Dot {
 			w := p.advance().Value // base
 			w += p.advance().Value // .
-			// 动态键 .*key（fix-015）
 			if p.peek().Kind == Ident && p.peek().Value == "*" && p.peekAt(1).Kind == Ident {
 				w += p.advance().Value // *
 			}
 			w += p.advance().Value // field
 			writes = append(writes, w)
+			wtypes = append(wtypes, "")
 			continue
 		}
 		// arr[idx] 数组索引作为整体写槽
@@ -467,11 +474,14 @@ func (p *parser) collectWritesUntilArrow() []string {
 			}
 			if p.peek().Kind == RBrack { w += p.advance().Value }
 			writes = append(writes, w)
+			wtypes = append(wtypes, "")
 			continue
 		}
-		writes = append(writes, p.advance().Value)
+		name, typ := p.parseWriteSlot()
+		writes = append(writes, name)
+		wtypes = append(wtypes, typ)
 	}
-	return writes
+	return writes, wtypes
 }
 
 // parseCondInst 解析 if/while/for 括号内的条件，直接构造 *ast.Instruction。

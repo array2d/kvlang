@@ -50,6 +50,12 @@ func writeStmt(kv kvspace.KVSpace, st ast.Stmt, prefix string, idx *int, typeMap
 	switch s := st.(type) {
 	case *ast.Instruction:
 		n := *idx
+		// 将指令的显式 WriteTypes 合并入 typeMap（优先于推断类型）
+		for j, w := range s.Writes {
+			if j < len(s.WriteTypes) && s.WriteTypes[j] != "" {
+				typeMap[w] = s.WriteTypes[j]
+			}
+		}
 		opcode, reads := s.Flat()
 		if opcode != "" {
 			kv.Set(fmt.Sprintf("%s/[%d,0]", prefix, n), slotValue(opcode, typeMap))

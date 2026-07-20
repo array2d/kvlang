@@ -393,6 +393,7 @@ func evalCond(cond *ast.Instruction, lg *labelGen) (insts []ast.Stmt, slot strin
 	slot = lg.tmp()
 	condInst := *flat
 	condInst.Writes = []string{slot}
+	condInst.WriteTypes = nil
 	insts = append(insts, &condInst)
 	return insts, slot
 }

@@ -10,9 +10,11 @@ import (
 
 // Instruction 表示执行层 [addr0, addr1] 解码后的一条指令。
 type Instruction struct {
-	Opcode string   // [addr0, 0] = "+" | OpCall | OpReturn | ...
-	Reads  []string // [addr0, -1], [addr0, -2], ...
-	Writes []string // [addr0, 1], [addr0, 2], ...
+	Opcode     string   // [addr0, 0] = "+" | OpCall | OpReturn | ...
+	Reads      []string // [addr0, -1], [addr0, -2], ...
+	ReadKinds  []string // 读槽的 kind（与 Reads 平行）
+	Writes     []string // [addr0, 1], [addr0, 2], ...
+	WriteKinds []string // 写槽的 kind（与 Writes 平行）
 }
 
 const maxParams = 10
@@ -51,11 +53,13 @@ func Decode(ctx context.Context, kv kvspace.KVSpace, linkBase, pc string) (*Inst
 		if readIdx < len(vals) {
 			if s := string(vals[readIdx].RawBytes()); s != "" {
 				inst.Reads = append(inst.Reads, s)
+				inst.ReadKinds = append(inst.ReadKinds, vals[readIdx].Kind())
 			}
 		}
 		if writeIdx < len(vals) {
 			if s := string(vals[writeIdx].RawBytes()); s != "" {
 				inst.Writes = append(inst.Writes, s)
+				inst.WriteKinds = append(inst.WriteKinds, vals[writeIdx].Kind())
 			}
 		}
 	}

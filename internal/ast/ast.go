@@ -199,11 +199,12 @@ func (e *Expr) stringPrec(outerPrec int) string {
 // Instruction 表示一条 kvlang 指令。
 // Expr 是 Pratt 解析的表达式树；Writes 是写目标槽列表。
 type Instruction struct {
-	Comments  []string // 该指令前的行注释
-	Expr      *Expr    // 表达式（nil 表示空指令）
-	Writes    []string // 写目标（位置：裸名、/abs、base.名）
-	ArrowLeft bool     // true = 写槽在左（<- 或 =），false = ->
-	Eq        bool     // true = 源码用 = 书写（≡ <-，仅影响还原渲染）
+	Comments   []string // 该指令前的行注释
+	Expr       *Expr    // 表达式（nil 表示空指令）
+	Writes     []string // 写目标（位置：裸名、/abs、base.名）
+	WriteTypes []string // 写槽类型标注（与 Writes 平行；"" = 无标注）
+	ArrowLeft  bool     // true = 写槽在左（<- 或 =），false = ->
+	Eq         bool     // true = 源码用 = 书写（≡ <-，仅影响还原渲染）
 }
 
 // leftArrow 返回写槽在左时的算子渲染形态。
@@ -286,6 +287,7 @@ func (i *Instruction) String() string {
 	if e == nil {
 		return ""
 	}
+	writes := i.joinTypedWrites()
 	// array(...) → [...]
 	if e.Op == "array" {
 		args := make([]string, len(e.Args))
@@ -295,9 +297,9 @@ func (i *Instruction) String() string {
 		s := "[" + strings.Join(args, ", ") + "]"
 		if len(i.Writes) > 0 {
 			if i.ArrowLeft {
-				return joinWrites(i.Writes) + i.leftArrow() + s
+				return writes + i.leftArrow() + s
 			}
-			return s + " -> " + joinWrites(i.Writes)
+			return s + " -> " + writes
 		}
 		return s
 	}
@@ -310,9 +312,9 @@ func (i *Instruction) String() string {
 		s := "{ " + strings.Join(pairs, "; ") + " }"
 		if len(i.Writes) > 0 {
 			if i.ArrowLeft {
-				return joinWrites(i.Writes) + i.leftArrow() + s
+				return writes + i.leftArrow() + s
 			}
-			return s + " -> " + joinWrites(i.Writes)
+			return s + " -> " + writes
 		}
 		return s
 	}
@@ -335,12 +337,31 @@ func (i *Instruction) String() string {
 	}
 	if len(i.Writes) > 0 {
 		if i.ArrowLeft {
-			s = joinWrites(i.Writes) + i.leftArrow() + s
+			s = writes + i.leftArrow() + s
 		} else {
-			s += " -> " + joinWrites(i.Writes)
+			s += " -> " + writes
 		}
 	}
 	return s
+}
+
+// joinTypedWrites 将写槽列表格式化：name:type 或裸名。单槽直接，多槽加括号。
+func (i *Instruction) joinTypedWrites() string {
+	if len(i.Writes) == 0 {
+		return ""
+	}
+	parts := make([]string, len(i.Writes))
+	for j, w := range i.Writes {
+		if j < len(i.WriteTypes) && i.WriteTypes[j] != "" {
+			parts[j] = w + ":" + i.WriteTypes[j]
+		} else {
+			parts[j] = w
+		}
+	}
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	return "(" + strings.Join(parts, ", ") + ")"
 }
 
 // idxString formats an index expression for [] syntax.
