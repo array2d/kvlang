@@ -82,7 +82,7 @@ f(a, b) -> r          # write-param mapping for calls; multiple: -> x, y; discar
 
 A write slot must be a **location**: a bare name (frame-local), `/abs/path` (global key), or `base.name` (member). Literals are not locations.
 
-**`def func(ra,rb) -> (wa,wb) { … }` = composite rwir**, the named form. Single-line rwir like `A + B -> C` is atomic (one opcode + reads + writes); `def` packs multiple rwir into a named unit with the same arrow interface — `(ra,rb)` declare read params, `-> (wa,wb)` declare write params. Calling `add(3,4) -> s` binds arguments to read slots, maps write slots back to the caller frame. No return values, only write-param mapping:
+**`def func(ra,rb) -> (wa,wb) { … }` = composite rwir**, the named form. Single-line rwir like `A + B -> C` is atomic (one opcode + reads + writes); `def` packs multiple rwir into a named unit with the same arrow interface — `(ra,rb)` declare read params, `-> (wa,wb)` declare write params. Calling `add(3,4) -> s` binds arguments to read slots, maps write slots back to the caller frame. No return values, only write-param mapping. **Must match all write params** — discard unwanted with `._` (Go-style `_`, engine-level: never written to kvspace).
 
 `-> (C: int)` in a `def` signature is a **write-param declaration**. The function writes results into its write-param slots; the caller maps them with `-> r`.
 **Read params are read-only**: the body may not place a read param in a write slot (e.g. `A = A + 1`). Decide the role first —
