@@ -6,8 +6,6 @@ import (
 )
 
 const VthreadRoot  = "/vthread"
-const VthreadSeq   = "/vthread/seq"   // vtid 序列计数器
-const VthreadReady = "/vthread/ready" // 新 vthread 就绪通知队列
 
 // VThread 返回 /vthread/<vtid>（vthread 根路径，用于 DelR 整体清理）
 func VThread(vtid string) string { return "/vthread/" + vtid }

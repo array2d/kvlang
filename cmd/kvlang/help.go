@@ -14,7 +14,6 @@ usage:
   kvlang -c "code" [--debug]               内联执行
   echo "code" | kvlang                      管道执行（stdin 非终端）
 
-  kvlang serve                               启动 VM daemon
   kvlang vet [--dump] [--lower] [-c code | <file.kv>]  语法检查
   kvlang format [-w] [-c code | <file.kv>]  格式化（别名 fmt；默认打印，-w 原地写回）
   kvlang help                                显示此帮助

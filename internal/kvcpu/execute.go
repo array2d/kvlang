@@ -27,7 +27,7 @@ const MaxStackDepth = 256
 //  2. IsNativeOp    — +/-/*/print/sqrt 等标量内建算子
 //  3. vtype.Lookup  — tensor.*、str.* 等命名空间算子
 //  4. default       — 用户定义函数（rewrite as call）
-//     ↓ HandleCall 内查 FuncIdx；未找到 → SetError + Notify SysVMErr
+//     ↓ HandleCall 内查 FuncIdx；未找到 → SetError
 //
 // 调试支持（内置，无需特殊启动）：
 // agent 在任意时刻通过 kvspace 写入 /vthread/<vtid>/.debugger 即可激活调试模式。
@@ -142,7 +142,7 @@ func (c *cpu) Execute(pc string) error {
 
 		// ── 5. 用户定义函数（default → rewrite as call）─────────────────
 		//    不含 dot、不在任何静态集合 → 必然是用户 func
-		//    HandleCall 负责 FuncIdx 查找；未找到 → SetError + Notify SysVMErr
+		//    HandleCall 负责 FuncIdx 查找；未找到 → SetError
 		default:
 			logx.Debug("[%s] user func: %s", vtid, inst.Opcode)
 			inst.Reads = append([]string{inst.Opcode}, inst.Reads...)
@@ -206,22 +206,7 @@ func (c *cpu) checkReadOnlyWrites(ctx context.Context, vtid, pc string, inst *op
 	return nil
 }
 
-// RunWorker 单个 worker 的主循环。
-func (c *cpu) RunWorker(id int) {
-	ctx := context.Background()
-	logx.Debug("worker-%d started vmID=%s", id, c.vmID)
-	for {
-		pc := c.pick(ctx)
-		if pc == "" {
-			c.wait(ctx)
-			continue
-		}
-		logx.Debug("worker-%d picked pc=%s", id, pc)
-		c.Execute(pc)
-	}
-}
-
-// stackDepth 计算当前调用深度：以 pc 中出现的 [i,j] 段数衡量。
+// stackDepth计算当前调用深度：以 pc 中出现的 [i,j] 段数衡量。
 // /vthread/42/[0,0] → depth=1（顶层）
 // /vthread/42/[3,0]/[0,0] → depth=2
 func stackDepth(pc string) int {

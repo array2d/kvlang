@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -11,11 +12,13 @@ import (
 
 	"kvlang/internal/ast"
 	"kvlang/internal/keytree"
+	"kvlang/internal/kvcpu"
 	"github.com/array2d/kvspace-go"
 	"kvlang/internal/layoutrwir"
 	"kvlang/internal/logx"
 	"kvlang/internal/lower"
 	"kvlang/internal/parser"
+	"kvlang/internal/vthread"
 )
 
 // cmdLayoutRWIRAndRun 先 layoutrwir 再 run（fix-039：替代旧 run 机制）。
@@ -92,7 +95,6 @@ func cmdLayoutRWIR(args []string) {
 		anyCode = true
 	}
 	if !anyCode { logx.Fatal("no executable code found") }
-	kv.Set(keytree.LibMain, kvspace.Str(`{"entry":"init","reads":[],"writes":[]}`))
 	// 源码映射存入 kvspace 供错误定位
 	if len(srcMap) > 0 {
 		b, _ := json.Marshal(srcMap)
@@ -101,7 +103,7 @@ func cmdLayoutRWIR(args []string) {
 	logx.Info("loaded %d file(s) → ready", len(allFiles))
 }
 
-// cmdRun 解析参数并路由：内联 / {lib}.{func} / 文件 / 管道 / serve。
+// cmdRun 解析参数并路由：内联 / {lib}.{func} / 文件 / 管道。
 func cmdRun(args []string) {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	dsn   := fs.String("kvspace", defaultKVSpace(), kvspaceFlagDesc)
@@ -151,7 +153,7 @@ func runFiles(dsn string, paths []string, debug bool) {
 	if len(files) == 0 { logx.Fatal("no .kv files found") }
 
 	if !loadFunctions(kv, files) { return } // 纯 def/lib 无 init → 等同 load，不执行
-	executeEntry(kv, debug)
+	executeEntry(kv, "init", debug)
 }
 
 // runCode 从 io.Reader 加载代码后单次执行（内联 / 管道模式）。
@@ -176,8 +178,7 @@ func runCode(name string, rc io.Reader, dsn string, debug bool) {
 		initFn := ast.Func{Sig: ast.FuncSig{Name: "init"}, Body: body}
 		layoutrwir.WriteFunc(kv, "", lower.Func(&initFn)) // init 永远匿名 lib（空 pkg）
 	}
-	kv.Set(keytree.LibMain, kvspace.Str(`{"entry":"init","reads":[],"writes":[]}`))
-	executeEntry(kv, debug)
+	executeEntry(kv, "init", debug)
 }
 
 // loadFunctions 将多个 .kv 文件解析、lower 并写入 kvspace，合成 init 入口。
@@ -194,7 +195,6 @@ func loadFunctions(kv kvspace.KVSpace, files []string) bool {
 		initFn := ast.Func{Sig: ast.FuncSig{Name: "init"}, Body: initBody}
 		layoutrwir.WriteFunc(kv, "main", lower.Func(&initFn))
 	}
-	kv.Set(keytree.LibMain, kvspace.Str(`{"entry":"init","reads":[],"writes":[]}`))
 	return true
 }
 
@@ -234,8 +234,7 @@ func runLib(lib, fn string, debug bool) {
 	kv := kvspace.Conn(defaultKVSpace())
 	defer kv.DisConn()
 	registerDefaultTerm(kv)
-	kv.Set(keytree.LibMain, kvspace.Str(fmt.Sprintf(`{"entry":"%s","reads":[],"writes":[]}`, name)))
-	executeEntry(kv, debug)
+	executeEntry(kv, name, debug)
 }
 
 // collectKVFiles 收集 path（文件或目录）下所有 .kv 文件路径。
@@ -268,4 +267,42 @@ func makeInitFunc(calls []*ast.Instruction) *ast.Func {
 	}
 	initFn := ast.Func{Sig: ast.FuncSig{Name: "init"}, Body: body}
 	return lower.Func(&initFn)
+}
+
+// executeEntry 创建 vthread 并同步执行（单次模式）。
+// entryName 为 /lib/ 下的函数名（如 "init"、"math.sum"）。
+func executeEntry(kv kvspace.KVSpace, entryName string, debug bool) {
+	ctx := context.Background()
+	const vtid = "run"
+	kv.DelTree(keytree.VThread(vtid))
+	firstPC := layoutrwir.Bootstrap(ctx, kv, vtid, entryName, nil)
+	if firstPC == "" {
+		logx.Fatal("[single] Bootstrap %s failed", entryName)
+	}
+	vthread.Set(ctx, kv, vtid, firstPC, "init")
+	kv.Set(keytree.VThreadTerm(vtid), kvspace.Str("kvlangrun"))
+
+	if debug {
+		kv.Set(keytree.VThreadDebugger(vtid), kvspace.Str("break"))
+		logx.Info("[single] debug mode: executing %s", firstPC)
+		cpu := kvcpu.New(kv, "single")
+		cpu.Execute(firstPC)
+		logx.Info("[dbg] execution finished")
+		return
+	}
+
+	logx.Info("[single] executing %s", firstPC)
+	cpu := kvcpu.New(kv, "single")
+	cpu.Execute(firstPC)
+	reportRunError(kv, vtid)
+}
+
+// reportRunError 单次模式终态 error 回显 stderr 并以非零退出。
+func reportRunError(kv kvspace.KVSpace, vtid string) {
+	msgVal, err := kv.Get(keytree.VThreadStatusMsg(vtid, "error"))
+	if err == nil && !msgVal.IsNil() {
+		pcVal, _ := kv.Get(keytree.VThreadPC(vtid))
+		logx.Error("%s at %s", msgVal.Str(), pcVal.Str())
+		os.Exit(1)
+	}
 }

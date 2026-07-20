@@ -2,9 +2,6 @@ package keytree
 
 const LibRoot = "/lib"
 
-// LibMain 是程序唯一入口的 kvspace key: /lib/main
-const LibMain = "/lib/main"
-
 // LibFunc 返回 /lib/<pkg>.<name>（pkg 非空时 . 分隔；空 = 匿名，直接 /lib/<name>）。
 func LibFunc(pkg, name string) string {
 	if pkg == "" {
