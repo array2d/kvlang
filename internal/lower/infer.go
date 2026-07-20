@@ -146,10 +146,7 @@ func inferOpType(opcode string, reads []string, tm map[string]string) string {
 		return opcode
 	}
 
-	// 数组/字典字面量
-	if opcode == "array" {
-		return "array"
-	}
+	// 字典字面量
 	if opcode == "dict" {
 		return "dict"
 	}

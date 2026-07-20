@@ -56,8 +56,8 @@ func kindSize(kind string) int32 {
 	switch kind {
 	case "bool", "int8", "uint8": return 1
 	case "int16", "uint16": return 2
-	case "int32", "uint32", "float32", "int": return 4
-	case "int64", "uint64", "float64", "float": return 8
+	case "int32", "uint32", "float32": return 4
+	case "int64", "uint64", "float64", "float", "int": return 8
 	default: return 0
 	}
 }
@@ -70,10 +70,10 @@ func kindBytes(kind string, v kvspace.XValue) []byte {
 	case "uint8": return []byte{uint8(asInt(v))}
 	case "int16": b := make([]byte, 2); binary.LittleEndian.PutUint16(b, uint16(int16(asInt(v)))); return b
 	case "uint16": b := make([]byte, 2); binary.LittleEndian.PutUint16(b, uint16(asInt(v))); return b
-	case "int32", "int": b := make([]byte, 4); binary.LittleEndian.PutUint32(b, uint32(int32(asInt(v)))); return b
+	case "int32": b := make([]byte, 4); binary.LittleEndian.PutUint32(b, uint32(int32(asInt(v)))); return b
 	case "uint32": b := make([]byte, 4); binary.LittleEndian.PutUint32(b, uint32(asInt(v))); return b
 	case "float32": b := make([]byte, 4); binary.LittleEndian.PutUint32(b, math.Float32bits(float32(asFloat(v)))); return b
-	case "int64": b := make([]byte, 8); binary.LittleEndian.PutUint64(b, uint64(asInt(v))); return b
+	case "int64", "int": b := make([]byte, 8); binary.LittleEndian.PutUint64(b, uint64(asInt(v))); return b
 	case "uint64": b := make([]byte, 8); binary.LittleEndian.PutUint64(b, uint64(asInt(v))); return b
 	case "float64", "float": b := make([]byte, 8); binary.LittleEndian.PutUint64(b, math.Float64bits(asFloat(v))); return b
 	default: return v.RawBytes()
@@ -209,33 +209,48 @@ func (arraySetOp) Call(f *op.Frame) error {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
 		return fmt.Errorf("%s", msg)
 	}
+	// 数组长度判定
+	n := int(arr.ArrayLen())
+	if n == 0 { n = arr.Len() }
 	idx := int(inputs[1].Int64())
-	if idx < 0 || idx >= arr.Len() {
+	if idx < 0 || idx >= n {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC,
-			fmt.Sprintf("IndexError: set: index %d out of bounds (len=%d)", idx, arr.Len()))
+			fmt.Sprintf("IndexError: set: index %d out of bounds (len=%d)", idx, n))
 		return fmt.Errorf("set: index out of bounds")
 	}
 	val := inputs[2]
-	// Rebuild array with modified element
-	n := arr.Len()
-	total := 4
-	encoded := make([][]byte, n)
-	for i := 0; i < n; i++ {
-		elem := arr.Index(i)
-		if i == idx { elem = val }
-		encoded[i] = kvspace.EncodeXValue(elem)
-		total += len(encoded[i])
-	}
-	raw := make([]byte, total)
-	binary.LittleEndian.PutUint32(raw[:4], uint32(n))
-	off := 4
-	for _, enc := range encoded {
-		copy(raw[off:], enc)
-		off += len(enc)
+	var result kvspace.XValue
+	k := arr.Kind()
+	if kindSize(k) > 0 {
+		// 定长类型：原地替换
+		raw := make([]byte, len(arr.RawBytes()))
+		copy(raw, arr.RawBytes())
+		sz := int(kindSize(k))
+		b := kindBytes(k, val)
+		copy(raw[idx*sz:], b)
+		result = kvspace.RawN(k, raw, int32(n))
+	} else {
+		// 变长类型（string 等）：重建 TLV
+		encoded := make([][]byte, n)
+		total := 4
+		for i := 0; i < n; i++ {
+			elem := arr.Index(i)
+			if i == idx { elem = val }
+			encoded[i] = kvspace.EncodeXValue(elem)
+			total += len(encoded[i])
+		}
+		raw := make([]byte, total)
+		binary.LittleEndian.PutUint32(raw[:4], uint32(n))
+		off := 4
+		for _, enc := range encoded {
+			copy(raw[off:], enc)
+			off += len(enc)
+		}
+		result = kvspace.RawN(k, raw, int32(n))
 	}
 	if len(f.Inst.Writes) > 0 {
 		outKey := resolveWriteKey(f.KV, keytree.FrameRoot(f.PC), f.Inst.Writes[0])
-		if err := f.KV.Set(outKey, kvspace.RawN("array", raw, int32(n))); err != nil { return err }
+		if err := f.KV.Set(outKey, result); err != nil { return err }
 	}
 	vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
 	return nil
