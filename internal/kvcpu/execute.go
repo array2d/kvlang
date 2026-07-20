@@ -94,7 +94,7 @@ func (c *cpu) Execute(pc string) error {
 				// Agent 清除了 .debugger 标志 → 退出单步模式
 				stepping = false
 				logx.Debug("[%s] debug: stepping deactivated", vtid)
-			case mode != "":
+			case mode == "step":
 				// .debugger 标志已设置 → 暂停
 				if !stepping {
 					stepping = true

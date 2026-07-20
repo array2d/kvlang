@@ -37,7 +37,7 @@ func executeEntry(kv kvspace.KVSpace, debug bool) {
 
 	if debug {
 		// 在执行开始前设置单步标志，CPU 会在第一条函数入口处检测到并暂停
-		kv.Set(keytree.VThreadDebugger(vtid), kvspace.Str("step"))
+		kv.Set(keytree.VThreadDebugger(vtid), kvspace.Str("break"))
 			logx.Info("[single] debug mode: executing %s", firstPC)
 		cpu := kvcpu.New(kv, "single")
 		cpu.Execute(firstPC)
