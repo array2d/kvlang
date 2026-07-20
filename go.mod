@@ -3,7 +3,7 @@ module kvlang
 go 1.24.4
 
 require (
-	github.com/array2d/kvspace-go v0.0.0-20260720061903-e1d9f94a31d6
+	github.com/array2d/kvspace-go v0.0.0-20260720142621-5f7c25c20485
 	github.com/gorilla/websocket v1.5.3
 )
 
