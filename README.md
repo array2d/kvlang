@@ -92,11 +92,11 @@ A write slot must be a **location**: a bare name (frame-local), `/abs/path` (glo
 def bad(a) -> () { 99 -> a[0] }
 
 # ✅ correct：数组作写参，函数内读写自由
-def good() -> (a:int) { a:int = [10, 20]; 99 -> a[0]; a }
+def good() -> (a:int64) { a:int64 = [10, 20]; 99 -> a[0]; a }
 ```
 
 Decide the role first —
-**an accumulator is an output, so declare it as a write param** (write params start at zero, are readable and writable in the body — like Go named return values): `def sum(arr:int) -> (acc:int) { acc + arr[i] -> acc }`.
+**an accumulator is an output, so declare it as a write param** (write params start at zero, are readable and writable in the body — like Go named return values): `def sum(arr:int64) -> (acc:int64) { acc + arr[i] -> acc }`.
 A pure working variable is copied to a local first (`A -> a`, then use `a`):
 
 ```kv
@@ -185,7 +185,7 @@ Conditions may be compound expressions: `if (7 % 2 != 0)` and `while (i < strlen
 `int` `float` `bool` plus the ten precision operators · `char` `ord` `strlen` `strcmp` `strstr` `slice` `concat` · `array` `len` `at` `set` `has` `sort` `dict` `kvat` `kvhas`
 
 ```kv
-a:int = [7, 2, 9, 4]     # typed 1D array, = ≡ <-
+a:int64 = [7, 2, 9, 4]     # typed 1D array, = ≡ <-
 len(a) -> n              # 4
 at(a, 2) -> e            # 9 (0-indexed)
 ```
