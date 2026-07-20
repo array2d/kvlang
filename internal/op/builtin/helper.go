@@ -29,10 +29,15 @@ func readInputs(f *op.Frame) []kvspace.XValue {
 }
 
 // writeResult writes a typed Value to the first write-slot and advances PC.
+func setWrite(kv kvspace.KVSpace, framePath, slot string, val kvspace.XValue) error {
+	return kv.Set(resolveWriteKey(kv, framePath, slot), val)
+}
+
 func writeResult(f *op.Frame, result kvspace.XValue) error {
 	if len(f.Inst.Writes) > 0 {
-		outKey := resolveWriteKey(f.KV, keytree.FrameRoot(f.PC), f.Inst.Writes[0])
-		if err := f.KV.Set(outKey, result); err != nil { return err }
+		if err := setWrite(f.KV, keytree.FrameRoot(f.PC), f.Inst.Writes[0], result); err != nil {
+			return err
+		}
 	}
 	vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
 	return nil
@@ -51,7 +56,7 @@ func ExecuteCopy(kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) erro
 	if len(inst.Reads) > 0 { src = inst.Reads[0] }
 	v := resolveReadValue(kv, framePath, src)
 	for _, w := range inst.Writes {
-		if err := kv.Set(resolveWriteKey(kv, framePath, w), v); err != nil {
+		if err := setWrite(kv, framePath, w, v); err != nil {
 			return err
 		}
 	}

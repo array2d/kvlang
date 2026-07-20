@@ -1,0 +1,14 @@
+# ✅ 正确：数组在写参位置，函数返回修改后的数组。
+def mutate() -> (a) {
+    array(10, 20) -> arr
+    99 -> set(arr, 0, 99)    # set 返回修改后的数组
+    1  -> set(arr, 1, 1)
+    arr -> a                 # 返回修改后的数组给调用方
+}
+
+def init() -> () {
+    mutate() -> result
+    at(result, 0) -> v0
+    at(result, 1) -> v1
+    print(v0, v1)   # 99 1
+}

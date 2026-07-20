@@ -22,6 +22,7 @@ package layoutrwir
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"kvlang/internal/ast"
@@ -136,27 +137,40 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 
 	kv.Set(keytree.RootFunc(frameRoot), kvspace.Str(funcName))
 
-	// 读参零拷贝：存储调用方值的绝对路径
+	// 读参零拷贝：.rparam 重定向到调用方值位置
+	// 字面量存为临时变量；变量引用追踪 .rparam 链到源头
+	litSeq := 0
 	params := funcSig.ParamNames()
 	for i, param := range params {
 		if i+1 < len(inst.Reads) {
-			rk := frameSlotKey(callerFrameRoot, inst.Reads[i+1])
+			arg := inst.Reads[i+1]
+			rk := resolveReadPath(kv, callerFrameRoot, arg)
+			if rk == "" && isLiteral(arg) {
+				rk = fmt.Sprintf("%s/_lit%d", callerFrameRoot, litSeq)
+				kv.Set(rk, builtin.ResolveReadValue(kv, callerFrameRoot, arg))
+				litSeq++
+			}
 			if rk != "" {
 				kv.Set(keytree.RParam(frameRoot, param), kvspace.Str(rk))
 			}
 		}
 	}
-	// 写参零拷贝：存储调用方写目标的绝对路径
+	// 写参零拷贝：.rparam 和 .wparam 指向同一调用方路径，不创建本地副本
+	callerLink := keytree.FuncLib(callerFrameRoot)
+	addr0 := extractAddr0(pc)
 	for i, ret := range funcSig.Returns {
-		wSlotPath := op.WriteSlotPC(pc, i)
-		wTargetVal, _ := kv.Get(wSlotPath)
+		wSlot := fmt.Sprintf("%s/[%d,%d]", callerLink, addr0, i+1)
+		wTargetVal, _ := kv.Get(wSlot)
 		wTarget := wTargetVal.Str()
-		if wTarget != "" {
-			wk := frameSlotKey(callerFrameRoot, wTarget)
-			if wk != "" {
-				kv.Set(keytree.WParam(frameRoot, ret.Name), kvspace.Str(wk))
-			}
+		if wTarget == "" {
+			continue
 		}
+		wk := resolveReadPath(kv, callerFrameRoot, wTarget)
+		if wk == "" {
+			continue
+		}
+		kv.Set(keytree.RParam(frameRoot, ret.Name), kvspace.Str(wk))
+		kv.Set(keytree.WParam(frameRoot, ret.Name), kvspace.Str(wk))
 	}
 	if len(params) > 0 {
 		kv.Set(keytree.FrameRO(frameRoot), kvspace.Str(strings.Join(params, ",")))
@@ -177,10 +191,8 @@ func HandleReturn(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.I
 
 	var returnValue string
 	if len(inst.Reads) > 0 {
-		if rk := frameSlotKey(frameRoot, inst.Reads[0]); rk != "" {
-			v, _ := kv.Get(rk)
-			returnValue = v.Str()
-		}
+		v := builtin.ResolveReadValue(kv, frameRoot, inst.Reads[0])
+		returnValue = v.Str()
 	}
 
 	if frameRoot == vthreadRoot {
@@ -188,6 +200,7 @@ func HandleReturn(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.I
 	}
 
 	nextPC = op.NextPC(frameRoot)
+
 	kv.Unlink(keytree.FuncLib(frameRoot))
 	kv.DelTree(frameRoot)
 	return nextPC, ""
@@ -263,6 +276,36 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 //	"/abs" → "/abs"             (绝对路径，直通)
 //	""     → ""                 (空，忽略)
 //	".xxx" → ""                 (引擎保留键，忽略，如 ._ 丢弃槽)
+func resolveWritePath(kv kvspace.KVSpace, framePath, name string) string {
+	rk := frameSlotKey(framePath, name)
+	if r, _ := kv.Get(framePath + "/.wparam/" + name); !r.IsNil() {
+		return r.Str()
+	}
+	return rk
+}
+
+func resolveReadPath(kv kvspace.KVSpace, framePath, name string) string {
+	if isLiteral(name) { return "" }
+	if r, _ := kv.Get(framePath + "/.rparam/" + name); !r.IsNil() {
+		return r.Str()
+	}
+	return frameSlotKey(framePath, name)
+}
+
+func isLiteral(s string) bool {
+	if s == "" { return false }
+	return s[0] == '"' || s[0] == '/' || s == "true" || s == "false" ||
+		(s[0] >= '0' && s[0] <= '9') || (s[0] == '-' && len(s) > 1)
+}
+
+func extractAddr0(pc string) int {
+	idx := strings.LastIndex(pc, "/[")
+	if idx < 0 { return 0 }
+	s := strings.Trim(pc[idx+1:], "[]")
+	n, _ := strconv.Atoi(strings.Split(s, ",")[0])
+	return n
+}
+
 func frameSlotKey(frameRoot, slot string) string {
 	if slot == "" {
 		return ""

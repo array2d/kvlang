@@ -1,27 +1,30 @@
-# 026: Remove Duplicates from Sorted Array — 数组参数版
+# 026: Remove Duplicates from Sorted Array
 # 来源: LeetCode #26
 # 期望输出:
 #   k = 5
 #   k = 5
-def remove_dupes(a) -> (k:int) {
-	len(a) -> n
-	k <- 1
-	i = 1  # = 等价于 <-
-	while (i < n) {
-		a[i] -> cur
-		pi <- k - 1
-		prev = a[pi]  # = 等价于 <-
-		cur == prev -> same
+def remove_dupes() -> (k:int) {
+    array(0, 0, 1, 1, 1, 2, 2, 3, 3, 4) -> a
+    len(a) -> n
+    k <- 1
+    i = 1  # = 等价于 <-
+    while (i < n) {
+        a[i] -> cur
+        pi <- k - 1
+        prev = a[pi]  # = 等价于 <-
+        cur == prev -> same
 
-		if (same) {
-			i <- i + 1
-		} else {
-			a[k] <- cur
-			k = k + 1  # = 等价于 <-
-			i + 1 -> i
-		}
-	}
+        if (same) {
+            i <- i + 1
+        } else {
+            a[k] <- cur
+            k = k + 1  # = 等价于 <-
+            i + 1 -> i
+        }
+    }
 }
 
-k <- remove_dupes(array(0, 0, 1, 1, 1, 2, 2, 3, 3, 4))
+remove_dupes() -> k
+print("k =", k)
+remove_dupes() -> k
 print("k =", k)

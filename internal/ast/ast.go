@@ -225,6 +225,9 @@ func (i *Instruction) Flat() (opcode string, reads []string) {
 	}
 	if i.Expr.IsLeaf() {
 		v := i.Expr.Val
+		if v == "return" {
+			return "return", nil
+		}
 			if v == "return" {
 				return "return", nil
 			}

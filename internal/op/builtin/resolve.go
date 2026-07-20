@@ -57,10 +57,6 @@ func resolveReadValue(kv kvspace.KVSpace, framePath, param string) kvspace.XValu
 		v, _ := kv.Get(r.Str())
 		return v
 	}
-	if r, err := kv.Get(framePath + "/.wparam/" + param); err == nil && !r.IsNil() {
-		v, _ := kv.Get(r.Str())
-		return v
-	}
 	v, _ := kv.Get(framePath + "/" + param)
 	return v
 }
