@@ -86,7 +86,16 @@ A write slot must be a **location**: a bare name (frame-local), `/abs/path` (glo
 **`def func(ra,rb) -> (wa,wb) { … }` = composite rwir**, the named form. Single-line rwir like `A + B -> C` is atomic (one opcode + reads + writes); `def` packs multiple rwir into a named unit with the same arrow interface — `(ra,rb)` declare read params, `-> (wa,wb)` declare write params. Calling `add(3,4) -> s` binds arguments to read slots, maps write slots back to the caller frame. No return values, only write-param mapping. **Must match all write params** — discard unwanted with `._` (Go-style `_`, engine-level: never written to kvspace).
 
 `-> (C: int)` in a `def` signature is a **write-param declaration**. The function writes results into its write-param slots; the caller maps them with `-> r`.
-**Read params are read-only**: the body may not place a read param in a write slot (e.g. `A = A + 1`). Decide the role first —
+**Read params are read-only**: the body may not place a read param in a write slot (e.g. `A = A + 1`). This includes array element writes — `a[i] <- v` writes through `a`, so `a` must be a write param if you need to modify it. **Array/dict to mutate → write param; array/dict to read only → read param.**
+```kv
+# ❌ 错误：数组作读参，a[i] <- v 写读参槽 → parser 拒绝
+def bad(a) -> () { 99 -> a[0] }
+
+# ✅ 正确：数组作写参，函数内读写自由
+def good() -> (a) { array(10, 20) -> a; 99 -> a[0]; a }
+```
+
+Decide the role first —
 **an accumulator is an output, so declare it as a write param** (write params start at zero, are readable and writable in the body — like Go named return values): `def sum(arr) -> (acc:int) { acc + arr[i] -> acc }`.
 A pure working variable is copied to a local first (`A -> a`, then use `a`):
 
