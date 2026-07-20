@@ -75,7 +75,6 @@ var comparisonOps = map[string]bool{
 
 // castOps 是类型转换算子，opcode 即目标类型。
 var castOps = map[string]bool{
-	"int": true, "float": true,
 	"int8": true, "int16": true, "int32": true, "int64": true,
 	"uint8": true, "uint16": true, "uint32": true, "uint64": true,
 	"float32": true, "float64": true,
@@ -129,11 +128,11 @@ func inferOpType(opcode string, reads []string, tm map[string]string) string {
 	// 算术算子：从操作数类型推断 int/float
 	if arithmeticOps[opcode] {
 		for _, r := range reads {
-			if slotType(r, tm) == "float" {
-				return "float"
+			if slotType(r, tm) == "float64" {
+				return "float64"
 			}
 		}
-		return "int"
+		return "int64"
 	}
 
 	// 比较/逻辑算子 → bool
@@ -156,7 +155,7 @@ func inferOpType(opcode string, reads []string, tm map[string]string) string {
 	case "kvhas":
 		return "bool"
 	case "kvlen":
-		return "int"
+		return "int64"
 	case "kvat":
 		// at 的返回类型取决于存储的值，无法静态推断
 		return ""
@@ -187,7 +186,7 @@ func slotType(name string, tm map[string]string) string {
 	}
 	if len(name) > 0 && (name[0] >= '0' && name[0] <= '9' ||
 		(name[0] == '-' && len(name) > 1 && name[1] >= '0' && name[1] <= '9')) {
-		return "int"
+		return "int64"
 	}
 	return ""
 }

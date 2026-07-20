@@ -57,7 +57,7 @@ func kindSize(kind string) int32 {
 	case "bool", "int8", "uint8": return 1
 	case "int16", "uint16": return 2
 	case "int32", "uint32", "float32": return 4
-	case "int64", "uint64", "float64", "float", "int": return 8
+	case "int64", "uint64", "float64": return 8
 	default: return 0
 	}
 }
@@ -73,9 +73,9 @@ func kindBytes(kind string, v kvspace.XValue) []byte {
 	case "int32": b := make([]byte, 4); binary.LittleEndian.PutUint32(b, uint32(int32(asInt(v)))); return b
 	case "uint32": b := make([]byte, 4); binary.LittleEndian.PutUint32(b, uint32(asInt(v))); return b
 	case "float32": b := make([]byte, 4); binary.LittleEndian.PutUint32(b, math.Float32bits(float32(asFloat(v)))); return b
-	case "int64", "int": b := make([]byte, 8); binary.LittleEndian.PutUint64(b, uint64(asInt(v))); return b
+	case "int64": b := make([]byte, 8); binary.LittleEndian.PutUint64(b, uint64(asInt(v))); return b
 	case "uint64": b := make([]byte, 8); binary.LittleEndian.PutUint64(b, uint64(asInt(v))); return b
-	case "float64", "float": b := make([]byte, 8); binary.LittleEndian.PutUint64(b, math.Float64bits(asFloat(v))); return b
+	case "float64": b := make([]byte, 8); binary.LittleEndian.PutUint64(b, math.Float64bits(asFloat(v))); return b
 	default: return v.RawBytes()
 	}
 }

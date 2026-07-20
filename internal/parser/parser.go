@@ -251,6 +251,20 @@ func (p *parser) parseFunc() ast.Func {
 // 检测不到类型 → error（kvlang 不允许无类型标注的参数）。
 func (p *parser) checkParamTypes(sig *ast.FuncSig) {
 	for _, param := range sig.Params {
+		if param.Type == "int" || param.Type == "float" {
+			p.errors = append(p.errors, Diagnostic{Message: fmt.Sprintf(
+				"func %s: param %q uses ambiguous type %q — use int64 or float64 instead (int/float are not valid type annotations)",
+				sig.Name, param.Name, param.Type)})
+		}
+	}
+	for _, ret := range sig.Returns {
+		if ret.Type == "int" || ret.Type == "float" {
+			p.errors = append(p.errors, Diagnostic{Message: fmt.Sprintf(
+				"func %s: return value %q uses ambiguous type %q — use int64 or float64 instead",
+				sig.Name, ret.Name, ret.Type)})
+		}
+	}
+	for _, param := range sig.Params {
 		if param.Type == "" {
 			p.errors = append(p.errors, Diagnostic{Message: fmt.Sprintf(
 				"func %s: param %q has no type annotation — every parameter must declare its type, e.g. %s:int",

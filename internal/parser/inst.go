@@ -428,6 +428,16 @@ func (p *parser) parseWriteSlot() (name, typ string) {
 	if p.peek().Kind == Colon && p.peekAt(1).Kind == Ident {
 		p.advance() // consume :
 		typ = p.advance().Value
+		if typ == "int" || typ == "float" {
+			p.errors = append(p.errors, Diagnostic{Pos: p.peek().Pos, Message: fmt.Sprintf(
+				"ambiguous type %q in write slot — use int64 or float64 instead", typ)})
+		}
+	}
+	return
+	name = p.advance().Value
+	if p.peek().Kind == Colon && p.peekAt(1).Kind == Ident {
+		p.advance() // consume :
+		typ = p.advance().Value
 	}
 	return
 }
