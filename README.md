@@ -88,11 +88,11 @@ A write slot must be a **location**: a bare name (frame-local), `/abs/path` (glo
 `-> (C: int)` in a `def` signature is a **write-param declaration**. The function writes results into its write-param slots; the caller maps them with `-> r`.
 **Read params are read-only**: the body may not place a read param in a write slot (e.g. `A = A + 1`). This includes array element writes — `a[i] <- v` writes through `a`, so `a` must be a write param if you need to modify it. **Array/dict to mutate → write param; array/dict to read only → read param.**
 ```kv
-# ❌ 错误：数组作读参，a[i] <- v 写读参槽 → parser 拒绝
+# ❌ wrong：数组作读参，a[i] <- v 写读参槽 → parser 拒绝
 def bad(a) -> () { 99 -> a[0] }
 
-# ✅ 正确：数组作写参，函数内读写自由
-def good() -> (a) { array(10, 20) -> a; 99 -> a[0]; a }
+# ✅ correct：数组作写参，函数内读写自由
+def good() -> (a:int) { a:int = [10, 20]; 99 -> a[0]; a }
 ```
 
 Decide the role first —
@@ -185,7 +185,7 @@ Conditions may be compound expressions: `if (7 % 2 != 0)` and `while (i < strlen
 `int` `float` `bool` plus the ten precision operators · `char` `ord` `strlen` `strcmp` `strstr` `slice` `concat` · `array` `len` `at` `set` `has` `sort` `dict` `kvat` `kvhas`
 
 ```kv
-a = array(7, 2, 9, 4)   # or [7, 2, 9, 4]
+a:int = [7, 2, 9, 4]     # typed 1D array, = ≡ <-
 len(a) -> n              # 4
 at(a, 2) -> e            # 9 (0-indexed)
 ```
