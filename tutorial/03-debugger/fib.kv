@@ -2,12 +2,15 @@ def fib(n: int) -> (r: int) {
     if (n <= 1) { 1 -> r; return }
     n - 1 -> a
     n - 2 -> b
+    if(n>10){
+        debugger()
+    }
     fib(a) -> ra
     fib(b) -> rb
     ra + rb -> r
 }
 
 def init() -> () {
-    fib(5) -> r
+    fib(21) -> r
     print(r)
 }
