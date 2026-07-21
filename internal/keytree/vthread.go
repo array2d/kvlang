@@ -5,7 +5,8 @@ import (
 	"strings"
 )
 
-const VthreadRoot  = "/vthread"
+const VthreadRoot = "/vthread"
+const VthreadSeq  = "/vthread/seq" // vtid 自增序列计数器
 
 // VThread 返回 /vthread/<vtid>（vthread 根路径，用于 DelR 整体清理）
 func VThread(vtid string) string { return "/vthread/" + vtid }

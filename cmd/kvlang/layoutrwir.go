@@ -273,7 +273,7 @@ func makeInitFunc(calls []*ast.Instruction) *ast.Func {
 // entryName 为 /lib/ 下的函数名（如 "init"、"math.sum"）。
 func executeEntry(kv kvspace.KVSpace, entryName string, debug bool) {
 	ctx := context.Background()
-	const vtid = "run"
+	vtid := incrVtid(kv)
 	kv.DelTree(keytree.VThread(vtid))
 	firstPC := layoutrwir.Bootstrap(ctx, kv, vtid, entryName, nil)
 	if firstPC == "" {
