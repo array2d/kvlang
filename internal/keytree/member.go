@@ -11,5 +11,5 @@ package keytree
 // struct ≡ dict ≡ 键族：obj 无需作为容器节点存在，obj.a、obj.b 是同层平坦键；
 // 嵌套 a.b.c 只是更长的键名，零树深成本——成员表达式即指针。
 
-// Member 返回 base 的成员键：base + "." + name。
-func Member(base, name string) string { return base + "." + name }
+// Member 返回 base 的成员键：base + MemberSep + name。
+func Member(base, name string) string { return base + MemberSep + name }

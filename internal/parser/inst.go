@@ -9,6 +9,8 @@ import (
 	"strings"
 	"strconv"
 
+	"kvlang/internal/keytree"
+
 	"kvlang/internal/ast"
 )
 
@@ -72,11 +74,11 @@ func (p *parser) parseInst() *ast.Instruction {
 //	base.field  → set(base, "field", expr) -> base   静态成员（字面量键）
 //	base.*key   → set(base, key, expr) -> base       动态成员（取 key 变量的值，fix-015）
 func (p *parser) desugarMemberWrite(inst *ast.Instruction) {
-	if len(inst.Writes) != 1 || !strings.Contains(inst.Writes[0], ".") {
+	if len(inst.Writes) != 1 || !strings.Contains(inst.Writes[0], keytree.MemberSep) {
 		return
 	}
 	s := inst.Writes[0]
-	dt := strings.IndexByte(s, '.')
+	dt := strings.Index(s, keytree.MemberSep)
 	base := s[:dt]
 	field := s[dt+1:]
 	var key *ast.Expr
@@ -302,7 +304,7 @@ func (p *parser) parsePrimaryExpr() *ast.Expr {
 		p.peekAt(1).Kind == Dot && p.peekAt(2).Kind == Ident && p.peekAt(3).Kind == LParen {
 		opcode := p.advance().Value // consume LHS
 		p.advance()                  // skip Dot
-		opcode += "." + p.advance().Value // consume RHS → "/lib/math.sum"
+		opcode += keytree.FuncPathSep + p.advance().Value // consume RHS → "/lib/math.sum"
 		p.advance() // consume (
 		var args []*ast.Expr
 		for p.peek().Kind != RParen && p.peek().Kind != EOF {

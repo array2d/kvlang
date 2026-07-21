@@ -26,24 +26,24 @@ import (
 
 // FuncLib 返回帧的函数库链接路径：frameRoot + "/.funclib"。
 // 软链接指向 /lib/<pkg>/<name> 只读指令树，kvcpu 取指时以此为 keyBase。
-func FuncLib(frameRoot string) string { return frameRoot + "/.funclib" }
+func FuncLib(frameRoot string) string { return frameRoot + "/" + ReservedPrefix + "funclib" }
 
 // RootFunc 返回帧的入口函数名键：frameRoot + "/.rootfunc"。
 // TCO 复用帧时不更新此键（保持入口函数名），供 resolveLabel 裸标签解析。
-func RootFunc(frameRoot string) string { return frameRoot + "/.rootfunc" }
+func RootFunc(frameRoot string) string { return frameRoot + "/" + ReservedPrefix + "rootfunc" }
 
 // FrameRO 返回帧的只读参数名单键：frameRoot + "/.ro"。
-func FrameRO(frameRoot string) string { return frameRoot + "/.ro" }
+func FrameRO(frameRoot string) string { return frameRoot + "/" + ReservedPrefix + "ro" }
 
 // RParam 返回读参重定向键：frameRoot + "/.rparam/<name>"。
-func RParam(frameRoot, name string) string { return frameRoot + "/.rparam/" + name }
+func RParam(frameRoot, name string) string { return frameRoot + "/" + ReservedPrefix + "rparam/" + name }
 
 // WParam 返回写参重定向键：frameRoot + "/.wparam/<name>"。
-func WParam(frameRoot, name string) string { return frameRoot + "/.wparam/" + name }
+func WParam(frameRoot, name string) string { return frameRoot + "/" + ReservedPrefix + "wparam/" + name }
 
 // FramePkg 返回帧的包路径键：frameRoot + "/.pkg"。
 // 匿名 lib 时值为空字符串。
-func FramePkg(frameRoot string) string { return frameRoot + "/.pkg" }
+func FramePkg(frameRoot string) string { return frameRoot + "/" + ReservedPrefix + "pkg" }
 
 // FrameRoot 从 PC 提取帧根：去掉末尾 /[coord]。
 //

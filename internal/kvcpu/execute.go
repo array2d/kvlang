@@ -189,7 +189,7 @@ func (c *cpu) checkReadOnlyWrites(ctx context.Context, vtid, pc string, inst *op
 	}
 	names := strings.Split(ro, ",")
 	for i, w := range inst.Writes {
-		if strings.ContainsAny(w, "/.[") {
+		if strings.ContainsAny(w, "/["+keytree.MemberSep) {
 			continue
 		}
 		if inst.Opcode == "set" && i == 0 && len(inst.Reads) > 0 && w == inst.Reads[0] {

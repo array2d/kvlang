@@ -4,6 +4,8 @@ package ast
 
 import (
 	"strings"
+
+	"kvlang/internal/keytree"
 )
 
 // Stmt 表示函数体中的一条语句。
@@ -327,7 +329,7 @@ func (i *Instruction) String() string {
 	// at(base, idx) → base[idx] or base.field
 	if e.Op == "at" && len(e.Args) >= 2 {
 		if e.Args[1].Quote == '"' {
-			s = e.Args[0].String() + "." + e.Args[1].Val
+			s = e.Args[0].String() + keytree.MemberSep + e.Args[1].Val
 		} else {
 			s = e.Args[0].String() + "[" + e.Args[1].String() + "]"
 		}

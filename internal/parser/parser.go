@@ -317,7 +317,7 @@ func (p *parser) checkReadOnlyParams(fn *ast.Func) {
 	}
 	check := func(inst *ast.Instruction) {
 		for i, w := range inst.Writes {
-			if strings.ContainsAny(w, "/.[") {
+			if strings.ContainsAny(w, "/["+keytree.MemberSep) {
 				continue // 路径 / 成员键 / 下标形态：非本体写
 			}
 			if inst.Expr != nil && inst.Expr.Op == "set" && i == 0 &&

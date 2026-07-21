@@ -7,14 +7,14 @@ func LibFunc(pkg, name string) string {
 	if pkg == "" {
 		return "/lib/" + name
 	}
-	return "/lib/" + pkg + "." + name
+	return "/lib/" + pkg + FuncPathSep + name
 }
 
 
 // LibSrc 返回 /lib/<name>.src（pkg=""）或 /lib/<pkg>.<name>.src，存储函数源码副本。
 func LibSrc(pkg, name string) string {
 	if pkg == "" {
-		return "/lib/" + name + ".src"
+		return "/lib/" + name + SrcExt
 	}
-	return "/lib/" + pkg + "." + name + ".src"
+	return "/lib/" + pkg + FuncPathSep + name + SrcExt
 }

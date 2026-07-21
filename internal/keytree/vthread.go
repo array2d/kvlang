@@ -29,13 +29,13 @@ func VThreadTerm(vtid string) string { return "/vthread/" + vtid + "/term" }
 // kvlang 标识符不能以 . 开头，用户代码无法写入这些路径。
 
 // VThreadPC 返回 /vthread/<vtid>/.pc
-func VThreadPC(vtid string) string { return "/vthread/" + vtid + "/.pc" }
+func VThreadPC(vtid string) string { return "/vthread/" + vtid + "/" + ReservedPrefix + "pc" }
 
 // VThreadStatus 返回 /vthread/<vtid>/.status
 //
 //   - 运行期（String）：init | running | wait
 //   - 终态（List/Notify）：main() 的返回值，由 WaitDone Watch 消费
-func VThreadStatus(vtid string) string { return "/vthread/" + vtid + "/.status" }
+func VThreadStatus(vtid string) string { return "/vthread/" + vtid + "/" + ReservedPrefix + "status" }
 
 // VThreadStatusMsg 返回 /vthread/<vtid>/.<statusVal>/msg
 //
@@ -45,7 +45,7 @@ func VThreadStatus(vtid string) string { return "/vthread/" + vtid + "/.status" 
 //	VThreadStatusMsg(vtid, "error")   → /vthread/<vtid>/.error/msg
 //	VThreadStatusMsg(vtid, "timeout") → /vthread/<vtid>/.timeout/msg
 func VThreadStatusMsg(vtid, statusVal string) string {
-	return "/vthread/" + vtid + "/." + statusVal + "/msg"
+	return "/vthread/" + vtid + "/" + ReservedPrefix + statusVal + "/msg"
 }
 
 // VThreadAt 返回 /vthread/<vtid>/<key>，通用路径构造（仅供引擎内部调试使用）
@@ -64,13 +64,13 @@ func VThreadAt(vtid, key string) string { return "/vthread/" + vtid + "/" + key 
 //	               值："step"（执行一步继续暂停）| "continue"（恢复全速）| "abort"（终止）
 
 // VThreadDebugger 返回 /vthread/<vtid>/.debugger（调试控制键）
-func VThreadDebugger(vtid string) string { return "/vthread/" + vtid + "/.debugger" }
+func VThreadDebugger(vtid string) string { return "/vthread/" + vtid + "/" + ReservedPrefix + "debugger" }
 
 // VThreadDebuggerPause 返回 /vthread/<vtid>/.debugger.pause（CPU → agent 暂停事件）
-func VThreadDebuggerPause(vtid string) string { return "/vthread/" + vtid + "/.debugger.pause" }
+func VThreadDebuggerPause(vtid string) string { return "/vthread/" + vtid + "/" + ReservedPrefix + "debugger" + MemberSep + "pause" }
 
 // VThreadDebuggerResume 返回 /vthread/<vtid>/.debugger.resume（agent → CPU 恢复命令）
-func VThreadDebuggerResume(vtid string) string { return "/vthread/" + vtid + "/.debugger.resume" }
+func VThreadDebuggerResume(vtid string) string { return "/vthread/" + vtid + "/" + ReservedPrefix + "debugger" + MemberSep + "resume" }
 
 // VtidFromPC 从绝对 PC 提取 vtid。
 //

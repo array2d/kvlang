@@ -57,9 +57,9 @@ func writeStmt(kv kvspace.KVSpace, st ast.Stmt, prefix string, idx *int, typeMap
 		opcode, reads := s.Flat()
 		// 同包调用限定：pkg 非空且 opcode 是用户函数（非 builtin、非控制流、非已限定）
 		if pkg != "" && !builtin.IsNativeOp(opcode) && !op.IsControlOp(opcode) &&
-			!strings.Contains(opcode, ".") && !strings.HasPrefix(opcode, "/lib/") &&
+			!strings.Contains(opcode, keytree.FuncPathSep) && !strings.HasPrefix(opcode, "/lib/") &&
 			opcode != "=" {
-			opcode = pkg + "." + opcode
+			opcode = pkg + keytree.FuncPathSep + opcode
 		}
 		if opcode != "" {
 			kv.Set(fmt.Sprintf("%s/[%d,0]", prefix, n), slotValue(opcode, typeMap))
@@ -92,15 +92,15 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	var pkg string
 	if strings.HasPrefix(funcName, "/lib/") {
 		rest := funcName[len("/lib/"):]
-		if dot := strings.LastIndex(rest, "."); dot > 0 {
+		if dot := strings.LastIndex(rest, keytree.FuncPathSep); dot > 0 {
 			pkg = rest[:dot]
-			funcName = rest[dot+1:]
+			funcName = rest[dot+len(keytree.FuncPathSep):]
 		} else {
 			funcName = rest
 		}
-	} else if dot := strings.LastIndex(funcName, "."); dot > 0 {
+	} else if dot := strings.LastIndex(funcName, keytree.FuncPathSep); dot > 0 {
 		pkg = funcName[:dot]
-		funcName = funcName[dot+1:]
+		funcName = funcName[dot+len(keytree.FuncPathSep):]
 	}
 	funcKey := keytree.LibFunc(pkg, funcName)
 
@@ -230,9 +230,9 @@ func RegisterBlocks(kv kvspace.KVSpace, pkg, parent string, body []ast.Stmt) {
 // 成功返回第一条指令的绝对 PC（vthreadRoot/.funclib/[0,0]）；失败返回 ""。
 func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, args []string) string {
 	pkg, name := "", funcName
-	if dot := strings.LastIndex(funcName, "."); dot > 0 {
+	if dot := strings.LastIndex(funcName, keytree.FuncPathSep); dot > 0 {
 		pkg = funcName[:dot]
-		name = funcName[dot+1:]
+		name = funcName[dot+len(keytree.FuncPathSep):]
 	}
 	funcKey := keytree.LibFunc(pkg, name)
 
@@ -280,7 +280,7 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 //	".xxx" → ""                 (引擎保留键，忽略，如 ._ 丢弃槽)
 func resolveWritePath(kv kvspace.KVSpace, framePath, name string) string {
 	rk := frameSlotKey(framePath, name)
-	if r, _ := kv.Get(framePath + "/.wparam/" + name); !r.IsNil() {
+	if r, _ := kv.Get(keytree.WParam(framePath, name)); !r.IsNil() {
 		return r.Str()
 	}
 	return rk
@@ -288,7 +288,7 @@ func resolveWritePath(kv kvspace.KVSpace, framePath, name string) string {
 
 func resolveReadPath(kv kvspace.KVSpace, framePath, name string) string {
 	if isLiteral(name) { return "" }
-	if r, _ := kv.Get(framePath + "/.rparam/" + name); !r.IsNil() {
+	if r, _ := kv.Get(keytree.RParam(framePath, name)); !r.IsNil() {
 		return r.Str()
 	}
 	return frameSlotKey(framePath, name)
