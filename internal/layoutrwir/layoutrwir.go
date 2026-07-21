@@ -6,7 +6,6 @@
 //	/lib/<pkg>.<name>/[i,j]         编译后指令
 //	/lib/<pkg>.<name>/<label>/      基本块子路径
 //	/lib/<pkg>.<name>.src           源码副本（fix-034）
-//	/lib/idx/<name>                 函数名 → pkg 反向索引
 //
 // 帧模型（callPC 即子帧根）：
 //
@@ -35,27 +34,33 @@ import (
 )
 
 // WriteBody 将 []Stmt 写入 /lib/<pkg>/<name>/ 下的结构化 KV（编译后指令）。
+// pkg 非空时，用户函数调用 opcode 自动限定为 pkg.name（替代 idx 反向索引）。
 func WriteBody(kv kvspace.KVSpace, pkg, name string, body []ast.Stmt, typeMap map[string]string) {
 	prefix := keytree.LibFunc(pkg, name)
 	idx := 0
 	for _, st := range body {
-		writeStmt(kv, st, prefix, &idx, typeMap)
+		writeStmt(kv, st, prefix, &idx, typeMap, pkg)
 	}
 }
 
 // writeStmt 将单条 Stmt 写入 KV 空间。
 // lower.File 保证调用时只剩 *Instruction 和 *BlockStmt，其余类型无操作。
-func writeStmt(kv kvspace.KVSpace, st ast.Stmt, prefix string, idx *int, typeMap map[string]string) {
+func writeStmt(kv kvspace.KVSpace, st ast.Stmt, prefix string, idx *int, typeMap map[string]string, pkg string) {
 	switch s := st.(type) {
 	case *ast.Instruction:
 		n := *idx
-		// 将指令的显式 WriteTypes 合并入 typeMap（优先于推断类型）
 		for j, w := range s.Writes {
 			if j < len(s.WriteTypes) && s.WriteTypes[j] != "" {
 				typeMap[w] = s.WriteTypes[j]
 			}
 		}
 		opcode, reads := s.Flat()
+		// 同包调用限定：pkg 非空且 opcode 是用户函数（非 builtin、非控制流、非已限定）
+		if pkg != "" && !builtin.IsNativeOp(opcode) && !op.IsControlOp(opcode) &&
+			!strings.Contains(opcode, ".") && !strings.HasPrefix(opcode, "/lib/") &&
+			opcode != "=" {
+			opcode = pkg + "." + opcode
+		}
 		if opcode != "" {
 			kv.Set(fmt.Sprintf("%s/[%d,0]", prefix, n), slotValue(opcode, typeMap))
 		}
@@ -70,7 +75,7 @@ func writeStmt(kv kvspace.KVSpace, st ast.Stmt, prefix string, idx *int, typeMap
 		sub := prefix + "/" + s.Label
 		i := 0
 		for _, child := range s.Body {
-			writeStmt(kv, child, sub, &i, typeMap)
+			writeStmt(kv, child, sub, &i, typeMap, pkg)
 		}
 	}
 }
@@ -85,25 +90,17 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	funcName := inst.Reads[0]
 
 	var pkg string
-	// 全路径调用（fix-039）：/lib/math/sum → pkg=math, name=sum；
-	// /lib/a/b/sum → pkg=a/b, name=sum；/lib/sum → pkg="", name=sum
 	if strings.HasPrefix(funcName, "/lib/") {
 		rest := funcName[len("/lib/"):]
-		// /lib/aaa/bbb/math.sum → pkg=aaa/bbb/math, name=sum
 		if dot := strings.LastIndex(rest, "."); dot > 0 {
 			pkg = rest[:dot]
 			funcName = rest[dot+1:]
 		} else {
 			funcName = rest
-			pkg = ""
 		}
-	} else {
-		pkgVal, err := kv.Get(keytree.LibIdx(funcName))
-		if err != nil || pkgVal.IsNil() {
-			vthread.SetError(ctx, kv, vtid, pc, "NameError: func not found: "+funcName)
-			return ""
-		}
-		pkg = pkgVal.Str()
+	} else if dot := strings.LastIndex(funcName, "."); dot > 0 {
+		pkg = funcName[:dot]
+		funcName = funcName[dot+1:]
 	}
 	funcKey := keytree.LibFunc(pkg, funcName)
 
@@ -142,6 +139,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	}
 
 	kv.Set(keytree.RootFunc(frameRoot), kvspace.Str(funcName))
+	kv.Set(keytree.FramePkg(frameRoot), kvspace.Str(pkg))
 
 	// 读参零拷贝：.rparam 重定向到调用方值位置
 	// 字面量存为临时变量；变量引用追踪 .rparam 链到源头
@@ -218,7 +216,6 @@ func RegisterBlocks(kv kvspace.KVSpace, pkg, parent string, body []ast.Stmt) {
 		if b, ok := st.(*ast.BlockStmt); ok {
 			blockKey := keytree.LibFunc(pkg, parent+"/"+b.Label)
 			kv.Set(blockKey, kvspace.Str("def "+b.Label+"() -> ()"))
-			kv.Set(keytree.LibIdx(parent+"/"+b.Label), kvspace.Str(pkg))
 			RegisterBlocks(kv, pkg, parent+"/"+b.Label, b.Body)
 		}
 	}
@@ -232,20 +229,20 @@ func RegisterBlocks(kv kvspace.KVSpace, pkg, parent string, body []ast.Stmt) {
 // args 为按序传入的参数值（对应 funcSig.ParamNames()），可为空。
 // 成功返回第一条指令的绝对 PC（vthreadRoot/.funclib/[0,0]）；失败返回 ""。
 func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, args []string) string {
-	pkgVal, err := kv.Get(keytree.LibIdx(funcName))
-	pkg := pkgVal.Str()
-	if err != nil || pkgVal.IsNil() {
-		vthread.SetError(ctx, kv, vtid, "", "Bootstrap: NameError: func not found: "+funcName)
-		return ""
+	pkg, name := "", funcName
+	if dot := strings.LastIndex(funcName, "."); dot > 0 {
+		pkg = funcName[:dot]
+		name = funcName[dot+1:]
 	}
-	funcKey := keytree.LibFunc(pkg, funcName)
+	funcKey := keytree.LibFunc(pkg, name)
 
 	vthreadRoot := keytree.VThread(vtid)
 	if err := kv.Link(funcKey, keytree.FuncLib(vthreadRoot)); err != nil {
 		vthread.SetError(ctx, kv, vtid, "", "Bootstrap: RuntimeError: link failed: "+err.Error())
 		return ""
 	}
-	kv.Set(keytree.RootFunc(vthreadRoot), kvspace.Str(funcName))
+	kv.Set(keytree.RootFunc(vthreadRoot), kvspace.Str(name))
+	kv.Set(keytree.FramePkg(vthreadRoot), kvspace.Str(pkg))
 
 	// 绑定入参（若有）。顶层帧无调用方，值写入 vthreadRoot，.rparam 指向自身槽位。
 	if len(args) > 0 {
@@ -275,7 +272,6 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 //  2. 源码副本写入 /lib/<pkg>.<name>.src
 //  3. 编译 body 指令写入 /lib/<pkg>.<name>/[i,j]
 //  4. 块标签写入 /lib/<pkg>.<name>/<label>/
-//  5. 反向索引写入 /lib/idx/<name>
 // frameSlotKey 将槽表达式转换为绝对 KV 路径。
 //
 //	"x"    → frameRoot + "/x"   (裸标识符)
@@ -338,10 +334,11 @@ func WriteFunc(kv kvspace.KVSpace, pkg string, fn *ast.Func) {
 	kv.Set(keytree.LibFunc(pkg, fn.Sig.Name), kvspace.Str(fn.Sig.String()))
 	WriteBody(kv, pkg, fn.Sig.Name, fn.Body, typeMap)
 	RegisterBlocks(kv, pkg, fn.Sig.Name, fn.Body)
-	kv.Set(keytree.LibIdx(fn.Sig.Name), kvspace.Str(pkg))
 }
 
 // checkDupParams 参数不可同名（fix-032：VM 运行时兜底，parser 已拦截源码路径）。
+
+
 func checkDupParams(sig ast.FuncSig, funcName string) string {
 	seen := map[string]bool{}
 	for _, p := range sig.ParamNames() {

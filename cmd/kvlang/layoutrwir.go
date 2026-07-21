@@ -26,9 +26,34 @@ func cmdLayoutRWIRAndRun(args []string) {
 		runLib("", "init", false)
 		return
 	}
-	// 参数是文件路径 → layoutrwir + run
 	cmdLayoutRWIR(args)
-	runLib("", "init", false)
+	// 入口点：优先 lib 内 init，其次匿名 init
+	entry := findEntry(defaultKVSpace())
+	runLib("", entry, false)
+}
+
+// findEntry 递归扫描 /lib/，返回首个 <pkg>.init 的函数名（用于确定执行入口）。
+func findEntry(dsn string) string {
+	kv := kvspace.Conn(dsn)
+	defer kv.DisConn()
+	if entry := findEntryPrefix(kv, keytree.LibRoot); entry != "" {
+		return entry
+	}
+	return "init"
+}
+
+func findEntryPrefix(kv kvspace.KVSpace, prefix string) string {
+	children, _ := kv.List(prefix)
+	for _, c := range children {
+		if strings.HasSuffix(c, ".init") {
+			return c
+		}
+		sub := prefix + "/" + c
+		if entry := findEntryPrefix(kv, sub); entry != "" {
+			return c + "/" + entry
+		}
+	}
+	return ""
 }
 
 // cmdLayoutRWIR 将 .kv 文件加载进 kvspace，不执行。多文件拼接为单源解析。
@@ -140,8 +165,8 @@ func runFiles(dsn string, paths []string, debug bool) {
 	}
 	if len(files) == 0 { logx.Fatal("no .kv files found") }
 
-	if !loadFunctions(kv, files) { return } // 纯 def/lib 无 init → 等同 load，不执行
-	executeEntry(kv, "init", debug)
+	if !loadFunctions(kv, files) { return }
+	executeEntry(kv, findEntry(dsn), debug)
 }
 
 // runCode 从 io.Reader 加载代码后单次执行（内联 / 管道模式）。
@@ -166,7 +191,7 @@ func runCode(name string, rc io.Reader, dsn string, debug bool) {
 		initFn := ast.Func{Sig: ast.FuncSig{Name: "init"}, Body: body}
 		layoutrwir.WriteFunc(kv, "", lower.Func(&initFn)) // init 永远匿名 lib（空 pkg）
 	}
-	executeEntry(kv, "init", debug)
+	executeEntry(kv, findEntry(dsn), debug)
 }
 
 // loadFunctions 将多个 .kv 文件解析、lower 并写入 kvspace，合成 init 入口。
@@ -181,7 +206,7 @@ func loadFunctions(kv kvspace.KVSpace, files []string) bool {
 	if !anyCode { return false }
 	if len(initBody) > 0 {
 		initFn := ast.Func{Sig: ast.FuncSig{Name: "init"}, Body: initBody}
-		layoutrwir.WriteFunc(kv, "main", lower.Func(&initFn))
+		layoutrwir.WriteFunc(kv, "", lower.Func(&initFn))
 	}
 	return true
 }

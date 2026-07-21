@@ -41,6 +41,10 @@ func RParam(frameRoot, name string) string { return frameRoot + "/.rparam/" + na
 // WParam 返回写参重定向键：frameRoot + "/.wparam/<name>"。
 func WParam(frameRoot, name string) string { return frameRoot + "/.wparam/" + name }
 
+// FramePkg 返回帧的包路径键：frameRoot + "/.pkg"。
+// 匿名 lib 时值为空字符串。
+func FramePkg(frameRoot string) string { return frameRoot + "/.pkg" }
+
 // FrameRoot 从 PC 提取帧根：去掉末尾 /[coord]。
 //
 //	/vthread/vtid/[3,0]         → /vthread/vtid

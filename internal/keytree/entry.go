@@ -10,10 +10,11 @@ func LibFunc(pkg, name string) string {
 	return "/lib/" + pkg + "." + name
 }
 
-// LibIdx 返回 /lib/idx/<name>，函数名到包路径的反向索引。
-func LibIdx(name string) string { return "/lib/idx/" + name }
 
-// LibSrc 返回 /lib/<pkg>.<name>.src，存储函数完整源码文本（fix-034）。
+// LibSrc 返回 /lib/<name>.src（pkg=""）或 /lib/<pkg>.<name>.src，存储函数源码副本。
 func LibSrc(pkg, name string) string {
+	if pkg == "" {
+		return "/lib/" + name + ".src"
+	}
 	return "/lib/" + pkg + "." + name + ".src"
 }
