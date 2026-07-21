@@ -2,19 +2,19 @@
 //
 // 存储约定：
 //
-//	/src/<pkg>/<name>              函数完整源码文本
-//	/func/<pkg>/<name>             编译后签名（FuncSig.String()）
-//	/func/<pkg>/<name>/[i,j]       编译后指令
-//	/func/<pkg>/<name>/<label>/    基本块子路径
-//	/func/idx/<name>               函数名 → pkg 反向索引
+//	/lib/<pkg>.<name>               编译后签名（FuncSig.String()）
+//	/lib/<pkg>.<name>/[i,j]         编译后指令
+//	/lib/<pkg>.<name>/<label>/      基本块子路径
+//	/lib/<pkg>.<name>.src           源码副本（fix-034）
+//	/lib/idx/<name>                 函数名 → pkg 反向索引
 //
 // 帧模型（callPC 即子帧根）：
 //
-//	callPC = parentFrame/[coord]              调用指令 PC = 子帧根
-//	frameRoot/.funclib                         软链接 → /lib/<pkg>/<name>（只读指令）→ keytree.FuncLib(frameRoot)
-//	frameRoot/<param>                           参数（本帧局部变量）
-//	frameRoot/.rootfunc                         入口函数名（keytree.RootFunc），TCO 不更新
-//	frameRoot/.rparam/<name> /.wparam/<name>   零拷贝读写参重定向
+//	callPC = parentFrame/[coord]             调用指令 PC = 子帧根
+//	frameRoot/.funclib                        软链接 → /lib/<pkg>/<name>（只读指令）
+//	frameRoot/<param>                         参数（本帧局部变量）
+//	frameRoot/.rootfunc                       入口函数名（keytree.RootFunc），TCO 不更新
+//	frameRoot/.rparam/<name> /.wparam/<name>  零拷贝读写参重定向
 //
 // kvcpu 取指：linkBase = FuncLib(FrameRoot(pc))，coord 从 pc 末尾提取
 package layoutrwir
@@ -22,7 +22,6 @@ package layoutrwir
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"kvlang/internal/ast"
@@ -134,7 +133,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 
 	// 普通 call：callPC 即子帧根
 	callerFrameRoot := keytree.FrameRoot(pc)
-	frameRoot := keytree.ChildFrameRoot(pc)
+	frameRoot := pc
 
 	// 链接只读指令区：frameRoot/.funclib → /lib/<pkg>/<name>
 	if err := kv.Link(funcKey, keytree.FuncLib(frameRoot)); err != nil {
@@ -153,7 +152,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 			arg := inst.Reads[i+1]
 			rk := resolveReadPath(kv, callerFrameRoot, arg)
 			if rk == "" && isLiteral(arg) {
-				rk = fmt.Sprintf("%s/_lit%d", callerFrameRoot, litSeq)
+				rk = fmt.Sprintf("%s/._lit%d", callerFrameRoot, litSeq)
 				kv.Set(rk, builtin.ResolveReadValue(kv, callerFrameRoot, arg))
 				litSeq++
 			}
@@ -164,7 +163,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	}
 	// 写参零拷贝：.rparam 和 .wparam 指向同一调用方路径，不创建本地副本
 	callerLink := keytree.FuncLib(callerFrameRoot)
-	addr0 := extractAddr0(pc)
+	addr0 := op.ExtractAddr0FromPC(pc)
 	for i, ret := range funcSig.Returns {
 		wSlot := fmt.Sprintf("%s/[%d,%d]", callerLink, addr0, i+1)
 		wTargetVal, _ := kv.Get(wSlot)
@@ -272,10 +271,10 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 
 // WriteFunc 完成一个函数的全部 KV 写入：
 //  0. 先 DelTree 清除旧函数数据（避免旧指令 slot 污染新布局）
-//  1. 源码写入 /src/<pkg>/<name>
-//  2. 编译签名写入 /lib/<pkg>/<name>
-//  3. 编译 body 指令写入 /lib/<pkg>/<name>/[i,j]
-//  4. 块标签写入 /lib/<pkg>/<name>/<label>/
+//  1. 编译签名写入 /lib/<pkg>.<name>
+//  2. 源码副本写入 /lib/<pkg>.<name>.src
+//  3. 编译 body 指令写入 /lib/<pkg>.<name>/[i,j]
+//  4. 块标签写入 /lib/<pkg>.<name>/<label>/
 //  5. 反向索引写入 /lib/idx/<name>
 // frameSlotKey 将槽表达式转换为绝对 KV 路径。
 //
@@ -306,7 +305,7 @@ func slotValue(val string, typeMap map[string]string) kvspace.XValue {
 	} else if isLiteral(val) {
 		if val[0] == '"' { kind = "string" } else
 		if val == "true" || val == "false" { kind = "bool" } else
-		if val[0] >= '0' && val[0] <= '9' || (val[0] == '-' && len(val) > 1) { kind = "int" }
+		if val[0] >= '0' && val[0] <= '9' || (val[0] == '-' && len(val) > 1) { kind = "int64" }
 	}
 	return kvspace.Raw(kind, []byte(val))
 }
@@ -315,14 +314,6 @@ func isLiteral(s string) bool {
 	if s == "" { return false }
 	return s[0] == '"' || s[0] == '/' || s == "true" || s == "false" ||
 		(s[0] >= '0' && s[0] <= '9') || (s[0] == '-' && len(s) > 1)
-}
-
-func extractAddr0(pc string) int {
-	idx := strings.LastIndex(pc, "/[")
-	if idx < 0 { return 0 }
-	s := strings.Trim(pc[idx+1:], "[]")
-	n, _ := strconv.Atoi(strings.Split(s, ",")[0])
-	return n
 }
 
 func frameSlotKey(frameRoot, slot string) string {
@@ -343,8 +334,7 @@ func WriteFunc(kv kvspace.KVSpace, pkg string, fn *ast.Func) {
 	// 清除旧函数数据：旧指令的读/写槽数量可能多于新函数，
 	// 若不清除则旧槽（如 [0,-1]、[0,-2]）会被新执行错误读取。
 	kv.DelTree(keytree.LibFunc(pkg, fn.Sig.Name))
-	kv.Set(keytree.Src(pkg, fn.Sig.Name), kvspace.Str(fn.FullText()))
-	kv.Set(keytree.LibSrc(pkg, fn.Sig.Name), kvspace.Str(fn.FullText())) // fix-034: /lib/<pkg>/<name>.src
+	kv.Set(keytree.LibSrc(pkg, fn.Sig.Name), kvspace.Str(fn.FullText()))
 	kv.Set(keytree.LibFunc(pkg, fn.Sig.Name), kvspace.Str(fn.Sig.String()))
 	WriteBody(kv, pkg, fn.Sig.Name, fn.Body, typeMap)
 	RegisterBlocks(kv, pkg, fn.Sig.Name, fn.Body)

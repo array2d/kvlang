@@ -229,9 +229,6 @@ func (i *Instruction) Flat() (opcode string, reads []string) {
 		if v == "return" {
 			return "return", nil
 		}
-			if v == "return" {
-				return "return", nil
-			}
 		// 字符串字面量 → " 前缀（KV 传输标记）
 		if i.Expr.Quote != 0 {
 			return "=", []string{"\"" + v}

@@ -29,7 +29,8 @@ func NextPC(pc string) string {
 	return strings.Join(parts, "/")
 }
 
-func extractAddr0(coord string) int {
+// ExtractAddr0 从 coord 字符串（如 "[3,0]"）提取 s0 坐标。
+func ExtractAddr0(coord string) int {
 	s := strings.Trim(coord, "[]")
 	parts := strings.Split(s, ",")
 	if len(parts) > 0 {
@@ -41,3 +42,14 @@ func extractAddr0(coord string) int {
 	}
 	return 0
 }
+
+// ExtractAddr0FromPC 从含 /[coord] 的绝对路径提取最末段 coord 的 s0 坐标。
+func ExtractAddr0FromPC(pc string) int {
+	idx := strings.LastIndex(pc, "/[")
+	if idx < 0 {
+		return 0
+	}
+	return ExtractAddr0(pc[idx+1:])
+}
+
+func extractAddr0(coord string) int { return ExtractAddr0(coord) }

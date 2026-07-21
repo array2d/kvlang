@@ -52,9 +52,6 @@ func FrameRoot(pc string) string {
 	panic(fmt.Sprintf("FrameRoot: pc has no /[coord] segment: %q", pc))
 }
 
-// ChildFrameRoot 从 callPC 推导子帧根。callPC 自己就是子帧根。
-func ChildFrameRoot(callPC string) string { return callPC }
-
 // EntryPC 返回帧的第一条指令 PC：frameRoot + "/[0,0]"。
 func EntryPC(frameRoot string) string { return frameRoot + "/[0,0]" }
 

@@ -17,6 +17,3 @@ func LibIdx(name string) string { return "/lib/idx/" + name }
 func LibSrc(pkg, name string) string {
 	return "/lib/" + pkg + "." + name + ".src"
 }
-
-// LibSrcMap 返回 /lib/.srcmap，存储多文件拼接后的源码行号→文件路径映射（JSON）。
-func LibSrcMap() string { return "/lib/.srcmap" }

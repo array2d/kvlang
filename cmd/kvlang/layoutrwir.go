@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -61,15 +60,9 @@ func cmdLayoutRWIR(args []string) {
 
 	// 多文件拼接→单一 source→parse→load（fix-039）
 	var src strings.Builder
-	srcMap := make(map[int]string) // line→file 映射
-	line := 1
 	for _, f := range allFiles {
 		b, err := os.ReadFile(f)
 		if err != nil { logx.Fatal("read %s: %v", f, err) }
-		for i := 0; i < strings.Count(string(b),"\n")+1; i++ {
-			srcMap[line+i] = f
-		}
-		line += strings.Count(string(b), "\n") + 1
 		src.Write(b)
 		src.WriteString("\n")
 	}
@@ -95,11 +88,6 @@ func cmdLayoutRWIR(args []string) {
 		anyCode = true
 	}
 	if !anyCode { logx.Fatal("no executable code found") }
-	// 源码映射存入 kvspace 供错误定位
-	if len(srcMap) > 0 {
-		b, _ := json.Marshal(srcMap)
-		kv.Set(keytree.LibSrcMap(), kvspace.Bytes(b))
-	}
 	logx.Info("loaded %d file(s) → ready", len(allFiles))
 }
 
