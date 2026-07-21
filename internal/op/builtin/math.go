@@ -52,7 +52,7 @@ func evalAbs(inputs []kvspace.XValue) (kvspace.XValue, error) {
 
 func evalPow(inputs []kvspace.XValue) (kvspace.XValue, error) {
 	if err := requireBinary(inputs); err != nil { return kvspace.XValue{}, err }
-	return kvspace.Float(math.Pow(asFloat(inputs[0]), asFloat(inputs[1]))), nil
+	return kvspace.Float64(math.Pow(asFloat(inputs[0]), asFloat(inputs[1]))), nil
 }
 
 func evalMinMax(inputs []kvspace.XValue, fn func(float64, float64) float64, intWin func(a, b int64) int64, strWin func(a, b kvspace.XValue) kvspace.XValue) (kvspace.XValue, error) {
@@ -71,12 +71,12 @@ func evalMinMax(inputs []kvspace.XValue, fn func(float64, float64) float64, intW
 	if allInt {
 		acc := asInt(vals[0])
 		for _, v := range vals[1:] { acc = intWin(acc, asInt(v)) }
-		return kvspace.Int(acc), nil
+		return kvspace.Int64(acc), nil
 	}
 	if allNum {
 		acc := asFloat(vals[0])
 		for _, v := range vals[1:] { acc = fn(acc, asFloat(v)) }
-		return kvspace.Float(acc), nil
+		return kvspace.Float64(acc), nil
 	}
 	acc := vals[0]
 	for _, v := range vals[1:] { acc = strWin(acc, v) }
@@ -103,25 +103,25 @@ func evalSqrt(inputs []kvspace.XValue) (kvspace.XValue, error) {
 	if err := requireUnary(inputs); err != nil { return kvspace.XValue{}, err }
 	x := asFloat(inputs[0])
 	if x < 0 { return kvspace.XValue{}, fmt.Errorf("sqrt of negative number: %v", x) }
-	return kvspace.Float(math.Sqrt(x)), nil
+	return kvspace.Float64(math.Sqrt(x)), nil
 }
 
 func evalExp(inputs []kvspace.XValue) (kvspace.XValue, error) {
 	if err := requireUnary(inputs); err != nil { return kvspace.XValue{}, err }
-	return kvspace.Float(math.Exp(asFloat(inputs[0]))), nil
+	return kvspace.Float64(math.Exp(asFloat(inputs[0]))), nil
 }
 
 func evalLog(inputs []kvspace.XValue) (kvspace.XValue, error) {
 	if err := requireUnary(inputs); err != nil { return kvspace.XValue{}, err }
 	x := asFloat(inputs[0])
 	if x <= 0 { return kvspace.XValue{}, fmt.Errorf("ValueError: log of non-positive number: %v", x) }
-	return kvspace.Float(math.Log(x)), nil
+	return kvspace.Float64(math.Log(x)), nil
 }
 
 func evalSign(inputs []kvspace.XValue) (kvspace.XValue, error) {
 	if err := requireUnary(inputs); err != nil { return kvspace.XValue{}, err }
 	f := asFloat(inputs[0])
-	if f > 0 { return kvspace.Int(1), nil }
-	if f < 0 { return kvspace.Int(-1), nil }
-	return kvspace.Int(0), nil
+	if f > 0 { return kvspace.Int64(1), nil }
+	if f < 0 { return kvspace.Int64(-1), nil }
+	return kvspace.Int64(0), nil
 }

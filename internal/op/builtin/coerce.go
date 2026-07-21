@@ -9,7 +9,7 @@ import (
 
 // nilAsInt 将 nil 在数值语境按 int 0 参与（fix-017 方案 A，与 nil==0 比较语义一致）。
 func nilAsInt(v kvspace.XValue) kvspace.XValue {
-	if v.IsNil() { return kvspace.Int(0) }
+	if v.IsNil() { return kvspace.Int64(0) }
 	return v
 }
 
@@ -124,7 +124,7 @@ func tryParseNumber(s string) (kvspace.XValue, bool) {
 	}
 	// Delegate to stdlib — handles all edge cases including scientific notation.
 	if i, err := strconv.ParseInt(s, 10, 64); err == nil {
-		return kvspace.Int(i), true
+		return kvspace.Int64(i), true
 	}
 	// (2^63, 2^64-1] 区间的无小数正整数字面量 → uint64（如 uint64 上界 18446744073709551615）
 	if c0 != '-' && !strings.ContainsAny(s, ".eE") {
@@ -133,7 +133,7 @@ func tryParseNumber(s string) (kvspace.XValue, bool) {
 		}
 	}
 	if f, err := strconv.ParseFloat(s, 64); err == nil {
-		return kvspace.Float(f), true
+		return kvspace.Float64(f), true
 	}
 	return kvspace.XValue{}, false
 }

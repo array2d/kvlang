@@ -25,7 +25,7 @@ func ResolveReadValue(kv kvspace.KVSpace, framePath, param string) kvspace.XValu
 //	"X   → kvspace.Str("X")      quoted string literal  (parser writes " prefix)
 //	/abs → kv.Get(/abs)           absolute path
 //	true → kvspace.Bool(true)     bool literal           (exact match)
-//	42   → kvspace.Int(42)        numeric literal        (first-char + strconv)
+//	42   → kvspace.Int64(42)        numeric literal        (first-char + strconv)
 //	x    → kv.Get(framePath/x)   bare ident / slot reference
 func resolveReadValue(kv kvspace.KVSpace, framePath, param string) kvspace.XValue {
 	if len(param) == 0 {

@@ -49,7 +49,7 @@ func evalBinaryArith(inputs []kvspace.XValue, fn func(float64, float64) float64,
 	}
 	result := fn(asFloat(a), asFloat(b))
 	if isIntKind(a.Kind()) && isIntKind(b.Kind()) { return kvspace.Int64(int64(result)), nil }
-	return kvspace.Float(result), nil
+	return kvspace.Float64(result), nil
 }
 
 func evalNeg(v kvspace.XValue) (kvspace.XValue, error) {
@@ -86,14 +86,14 @@ func evalMod(inputs []kvspace.XValue) (kvspace.XValue, error) {
 	inputs[0], inputs[1] = nilAsInt(inputs[0]), nilAsInt(inputs[1])
 	b := asInt(inputs[1])
 	if b == 0 { return kvspace.XValue{}, fmt.Errorf("ZeroDivisionError: modulo by zero") }
-	return kvspace.Int(asInt(inputs[0]) % b), nil
+	return kvspace.Int64(asInt(inputs[0]) % b), nil
 }
 
 func evalUnaryArith(inputs []kvspace.XValue, fn func(float64) float64) (kvspace.XValue, error) {
 	if err := requireUnary(inputs); err != nil { return kvspace.XValue{}, err }
 	v := nilAsInt(inputs[0])
 	result := fn(asFloat(v))
-	if isIntKind(v.Kind()) { return kvspace.Int(int64(result)), nil }
-	return kvspace.Float(result), nil
+	if isIntKind(v.Kind()) { return kvspace.Int64(int64(result)), nil }
+	return kvspace.Float64(result), nil
 }
 

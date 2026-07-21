@@ -133,7 +133,7 @@ loop:
 // readInt 读取帧内整数变量，返回 int64（变量不存在时返回 0）。
 func readInt(kv kvspace.KVSpace, frame, name string) int64 {
 	v, _ := kv.Get(frame + "/" + name)
-	return v.Int()
+	return v.Int64()
 }
 
 // loadSrc 解析 kv 源码，lower，写入 kvspace（pkg="main"）。

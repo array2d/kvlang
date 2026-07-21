@@ -15,5 +15,5 @@ func (o bit) Call(f *op.Frame) error {
 
 func evalBinaryInt(inputs []kvspace.XValue, fn func(int64, int64) int64) (kvspace.XValue, error) {
 	if err := requireBinary(inputs); err != nil { return kvspace.XValue{}, err }
-	return kvspace.Int(fn(asInt(inputs[0]), asInt(inputs[1]))), nil
+	return kvspace.Int64(fn(asInt(inputs[0]), asInt(inputs[1]))), nil
 }

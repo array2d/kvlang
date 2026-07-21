@@ -44,15 +44,15 @@ func castNum(inputs []kvspace.XValue, mk func(kvspace.XValue) kvspace.XValue) (k
 func evalToInt(inputs []kvspace.XValue) (kvspace.XValue, error) {
 	if err := requireUnary(inputs); err != nil { return kvspace.XValue{}, err }
 	v := inputs[0]
-	if v.Kind() == "int" { return v, nil }
-	return kvspace.Int(asInt(v)), nil
+	if v.Kind() == "int64" { return v, nil }
+	return kvspace.Int64(asInt(v)), nil
 }
 
 func evalToFloat(inputs []kvspace.XValue) (kvspace.XValue, error) {
 	if err := requireUnary(inputs); err != nil { return kvspace.XValue{}, err }
 	v := inputs[0]
-	if v.Kind() == "float" { return v, nil }
-	return kvspace.Float(asFloat(v)), nil
+	if v.Kind() == "float64" { return v, nil }
+	return kvspace.Float64(asFloat(v)), nil
 }
 
 func evalToBool(inputs []kvspace.XValue) (kvspace.XValue, error) {
