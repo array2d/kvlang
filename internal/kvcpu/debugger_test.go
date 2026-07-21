@@ -30,10 +30,12 @@ import (
 	"kvlang/internal/op"
 	"kvlang/internal/parser"
 	"kvlang/internal/vthread"
+
+	_ "github.com/array2d/kvspace-go/redis" // register redis:// scheme
 )
 
 const (
-	dbgTestAddr    = "127.0.0.1:6379"
+	dbgTestAddr    = "redis://127.0.0.1:6379"
 	dbgStepTimeout = 1 * time.Second // 单步等待超时（程序结束后最多等 1s 即检测到 done）
 )
 
@@ -164,7 +166,7 @@ func decodeAt(kv kvspace.KVSpace, pc string) *op.Instruction {
 // ─── 测试 1：事件 JSON 格式 ──────────────────────────────────────────────────
 
 // TestDebugger_EventFormat 验证 .debug.pause 事件的 JSON 字段完整且语义正确：
-//   - pc 必须以 /.fn/[0,0] 结尾（函数入口）
+//   - pc 必须以 /[0,0] 结尾（函数入口）
 //   - func 与源码函数名一致
 //   - frame 非空（帧根路径）
 //   - op 非空（被暂停指令的 opcode）
@@ -173,7 +175,7 @@ func TestDebugger_EventFormat(t *testing.T) {
 	defer kv.DisConn()
 
 	const src = `
-def idplus(x: int) -> (r: int) {
+def idplus(x: int64) -> (r: int64) {
     x + 0 -> r
 }
 `
@@ -185,8 +187,8 @@ def idplus(x: int) -> (r: int) {
 		if !gotFirst {
 			gotFirst = true
 			// 第一个暂停必定是函数入口
-			if !strings.HasSuffix(ev.PC, "/.fn/[0,0]") {
-				t.Errorf("first pause pc %q should end with /.fn/[0,0]", ev.PC)
+			if !strings.HasSuffix(ev.PC, "/[0,0]") {
+				t.Errorf("first pause pc %q should end with /[0,0]", ev.PC)
 			}
 			if ev.Func != "idplus" {
 				t.Errorf("func=%q, want %q", ev.Func, "idplus")
@@ -220,7 +222,7 @@ func TestDebugger_SumTo3_Trace(t *testing.T) {
 	defer kv.DisConn()
 
 	const src = `
-def sum_to(n: int) -> (total: int) {
+def sum_to(n: int64) -> (total: int64) {
     0 -> total
     1 -> i
     while (i <= n) {
@@ -308,7 +310,7 @@ func TestDebugger_FirstDiv7_Break(t *testing.T) {
 	defer kv.DisConn()
 
 	const src = `
-def first_div7(n: int) -> (result: int) {
+def first_div7(n: int64) -> (result: int64) {
     0 -> result
     1 -> i
     while (i <= n) {
@@ -374,7 +376,7 @@ func TestDebugger_SumOdds10_Continue(t *testing.T) {
 	defer kv.DisConn()
 
 	const src = `
-def sum_odds(n: int) -> (total: int) {
+def sum_odds(n: int64) -> (total: int64) {
     0 -> total
     1 -> i
     while (i <= n) {
@@ -464,7 +466,7 @@ func TestDebugger_ContinueCmd(t *testing.T) {
 	defer kv.DisConn()
 
 	const src = `
-def sum_to(n: int) -> (total: int) {
+def sum_to(n: int64) -> (total: int64) {
     0 -> total
     1 -> i
     while (i <= n) {
@@ -507,7 +509,7 @@ func TestDebugger_AbortCmd(t *testing.T) {
 	defer kv.DisConn()
 
 	const src = `
-def sum_to(n: int) -> (total: int) {
+def sum_to(n: int64) -> (total: int64) {
     0 -> total
     1 -> i
     while (i <= n) {

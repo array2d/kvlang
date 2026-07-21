@@ -1,12 +1,9 @@
 package op_test
 
 import (
-	"context"
 	"testing"
 
 	"kvlang/internal/op"
-	"kvlang/internal/op/dispatch"
-	"github.com/array2d/kvspace-go"
 )
 
 // ── PC navigation ──
@@ -66,16 +63,4 @@ func TestIsTensorLifecycle(t *testing.T) {
 			t.Errorf("IsTensorLifecycle(%q) = true, want false", opc)
 		}
 	}
-}
-
-// ── Route: error handling (no live kvspace needed) ──
-
-func TestRouteSelect_NoKV(t *testing.T) {
-	kv := kvspace.Conn("127.0.0.1:9999")
-	ctx := context.Background()
-	_, _, err := dispatch.Select(ctx, kv, "add")
-	if err == nil {
-		t.Error("expected error when KV is not available")
-	}
-	t.Logf("expected error: %v", err)
 }

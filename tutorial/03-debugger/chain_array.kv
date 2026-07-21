@@ -1,13 +1,13 @@
 # 深层数组参数链路：main → f1 → f2 → f3
 # 在 f3 最深处 debugger() 暂停，可 dump kvspace 观察 .rparam/.wparam 链
-def f3() -> (a, s:int64) {
+def f3() -> (a:int64, s:int64) {
     debugger()          # 在此暂停: kvspace dump /vthread/run
     at(a, 0) -> v0
     at(a, 1) -> v1
     v0 + v1 -> s        # 30 + 40 = 70
 }
 
-def f2() -> (a, s:int64) {
+def f2() -> (a:int64, s:int64) {
     a:int64 = [30, 40]  # f2 创建数组放写参
     f3() -> (a, s)      # 传给 f3 的写参，不拷贝，同路径直达
 }
