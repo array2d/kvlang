@@ -1,7 +1,7 @@
 .PHONY: build test vet clean kvspace install
 
 export GOPROXY ?= https://goproxy.cn,direct
-PREFIX   ?= ~./local
+PREFIX   ?= ~/.local
 
 build:
 	go mod tidy
