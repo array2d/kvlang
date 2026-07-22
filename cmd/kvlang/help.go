@@ -16,6 +16,7 @@ usage:
 
   kvlang vet [--dump] [--lower] [-c code | <file.kv>]  语法检查
   kvlang format [-w] [-c code | <file.kv>]  格式化（别名 fmt；默认打印，-w 原地写回）
+  kvlang ps [--kvspace <dsn>]              列出所有 vthread（如 Linux ps）
   kvlang help                                显示此帮助
 
 KV 空间操作已迁至独立 CLI（kvlang-go 仓 cmd/kvspace）:

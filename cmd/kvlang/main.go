@@ -7,6 +7,7 @@
 //	kvlang layoutrwir <file.kv|dir>     只加载到 kvspace，不执行
 //	kvlang vet <file.kv>          语法检查
 //	kvlang format <file.kv>       格式化（别名 fmt）
+//	kvlang ps                     列出所有 vthread（如 Linux ps）
 //	kvlang help                   帮助
 package main
 
@@ -35,6 +36,9 @@ func main() {
 			return
 		case "format", "fmt":
 			cmdFormat(args[1:])
+			return
+		case "ps":
+			cmdPS(args[1:])
 			return
 		case "help", "-h", "--help":
 			showHelp()

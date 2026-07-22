@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"kvlang/internal/keytree"
 	"kvlang/internal/kvcpu"
@@ -61,13 +62,14 @@ func runLib(lib, fn string, debug bool) {
 // executeEntry 创建 vthread 并同步执行。
 func executeEntry(kv kvspace.KVSpace, entryName string, debug bool) {
 	ctx := context.Background()
-	vtid := incrVtid(kv)
+	vtid := vthread.AllocVtid(kv)
 	kv.DelTree(keytree.VThread(vtid))
 	firstPC := layoutrwir.Bootstrap(ctx, kv, vtid, entryName, nil)
 	if firstPC == "" {
 		logx.Fatal("[single] Bootstrap %s failed", entryName)
 	}
 	vthread.Set(ctx, kv, vtid, firstPC, "init")
+	kv.Set(keytree.VThreadCtime(vtid), kvspace.Time(time.Now().UnixNano()))
 	kv.Set(keytree.VThreadTerm(vtid), kvspace.Str("kvlangrun"))
 
 	if debug {
