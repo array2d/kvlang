@@ -16,11 +16,10 @@ func VThreadTerm(vtid string) string { return "/vthread/" + vtid + "/term" }
 
 // ── vthread 引擎保留字段（. 开头，类比 Linux 隐藏文件）────────────────────────
 //
-// 仅三个字段，精确对应 def main()->(.status:str) 的语义：
-//
 //	.pc                   当前绝对 PC（String）
 //	.status               生命周期状态（String: init|running|wait）；
 //	                      终态时 Del+Notify：值为 main() 的返回值（如 "ok"/"error"）
+//	.ctime                创建时刻（Unix 纳秒时间戳，String）
 //	.<statusVal>/msg      终态附加描述，路径随 status 值动态生成：
 //	                        status="error"   → .error/msg   存错误详情
 //	                        status="timeout" → .timeout/msg 存超时说明
@@ -47,6 +46,9 @@ func VThreadStatus(vtid string) string { return "/vthread/" + vtid + "/" + Reser
 func VThreadStatusMsg(vtid, statusVal string) string {
 	return "/vthread/" + vtid + "/" + ReservedPrefix + statusVal + "/msg"
 }
+
+// VThreadCtime 返回 /vthread/<vtid>/.ctime（创建时刻，Unix 纳秒时间戳）
+func VThreadCtime(vtid string) string { return "/vthread/" + vtid + "/" + ReservedPrefix + "ctime" }
 
 // VThreadAt 返回 /vthread/<vtid>/<key>，通用路径构造（仅供引擎内部调试使用）
 func VThreadAt(vtid, key string) string { return "/vthread/" + vtid + "/" + key }

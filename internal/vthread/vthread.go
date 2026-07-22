@@ -30,6 +30,7 @@ package vthread
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"kvlang/internal/keytree"
@@ -78,8 +79,17 @@ func SetError(ctx context.Context, kv kvspace.KVSpace, vtid, pc, errMsg string) 
 
 // ── 生命周期 ──────────────────────────────────────────────────────────────────
 
+// AllocVtid 原子自增 /vthread/seq 并返回新 vtid。
+func AllocVtid(kv kvspace.KVSpace) string {
+	valV, _ := kv.Get(keytree.VthreadSeq)
+	n, _ := strconv.ParseInt(valV.Str(), 10, 64)
+	n++
+	kv.Set(keytree.VthreadSeq, kvspace.Str(strconv.FormatInt(n, 10)))
+	return fmt.Sprintf("%d", n)
+}
+
 // CreateVThread 在 kvspace 中创建新虚线程，返回 vtid。
-func CreateVThread(ctx context.Context, kv kvspace.KVSpace, funcName string, reads, writes []string) (string, error) {
+func CreateVThread(kv kvspace.KVSpace, funcName string, reads, writes []string) (string, error) {
 	vtid := fmt.Sprintf("%d", time.Now().UnixNano())
 	absPC := keytree.VThreadSlot(vtid, "", 0, 0)
 
@@ -87,6 +97,7 @@ func CreateVThread(ctx context.Context, kv kvspace.KVSpace, funcName string, rea
 		return "", fmt.Errorf("vthread.Create: set .pc: %w", err)
 	}
 	kv.Set(keytree.VThreadStatus(vtid), kvspace.Str("init"))
+	kv.Set(keytree.VThreadCtime(vtid), kvspace.Time(time.Now().UnixNano()))
 	kv.Set(keytree.VThreadSlot(vtid, "", 0, 0), kvspace.Str(funcName))
 	for i, r := range reads {
 		kv.Set(keytree.VThreadSlot(vtid, "", 0, -(i+1)), kvspace.Str(r))
