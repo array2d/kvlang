@@ -92,7 +92,7 @@ func BackendSupports(ctx context.Context, kv kvspace.KVSpace, backend, opcode st
 // stripVTypePrefix 剥离 vtype 命名空间前缀。
 // "tensor.matmul" → "matmul"；无前缀则原样返回。
 func stripVTypePrefix(opcode string) string {
-	if dot := strings.IndexByte(opcode, '.'); dot > 0 {
+	if dot := strings.Index(opcode, keytree.FuncPathSep); dot > 0 {
 		return opcode[dot+1:]
 	}
 	return opcode

@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/array2d/kvspace-go"
+	"kvlang/internal/keytree"
 	"kvlang/internal/op"
 )
 
@@ -46,7 +47,7 @@ func Register(vt VType) { registry[vt.Name()] = vt }
 //   "string.set"   → string VType
 //   "print"        → nil（无 dot 或未注册）
 func Lookup(opcode string) VType {
-	dot := strings.IndexByte(opcode, '.')
+	dot := strings.Index(opcode, keytree.FuncPathSep)
 	if dot <= 0 {
 		return nil
 	}
@@ -58,7 +59,7 @@ func Lookup(opcode string) VType {
 //   "string.set"     → "set"
 //   "print"          → "print"
 func OpName(opcode string) string {
-	dot := strings.IndexByte(opcode, '.')
+	dot := strings.Index(opcode, keytree.FuncPathSep)
 	if dot < 0 {
 		return opcode
 	}

@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"kvlang/internal/ast"
+	"kvlang/internal/keytree"
 )
 
 // ParseFile 打开并解析 .kv 源文件。
