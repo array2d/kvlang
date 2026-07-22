@@ -14,14 +14,16 @@ type dictOp struct{}
 func (dictOp) Call(f *op.Frame) error {
 	inputs := readInputs(f)
 	fp := keytree.FrameRoot(f.PC)
+	var pairs []kvspace.KVPair
 	for _, w := range f.Inst.Writes {
 		outKey := resolveWriteKey(f.KV, fp, w)
-		f.KV.Set([]kvspace.KVPair{{outKey, kvspace.Dict()}})
+		pairs = append(pairs, kvspace.KVPair{outKey, kvspace.Dict()})
 		for i := 0; i+1 < len(inputs); i += 2 {
 			if inputs[i+1].IsNil() { continue }
-			f.KV.Set([]kvspace.KVPair{{keytree.Member(outKey, inputs[i].Str()), inputs[i+1]}})
+			pairs = append(pairs, kvspace.KVPair{keytree.Member(outKey, inputs[i].Str()), inputs[i+1]})
 		}
 	}
+	if len(pairs) > 0 { f.KV.Set(pairs) }
 	vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
 	return nil
 }

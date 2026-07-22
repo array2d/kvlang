@@ -37,15 +37,9 @@ import (
 	"github.com/array2d/kvspace-go"
 )
 
-// kvSet is a shorthand for setting a single key-value pair.
-func kvSet(kv kvspace.KVSpace, key string, val kvspace.XValue) {
-	kv.Set([]kvspace.KVPair{{Key: key, Val: val}})
-}
-
 // ── 读 ────────────────────────────────────────────────────────────────────────
 
 // Get 读取 vthread 的当前 PC 和 status。
-// 若读取失败或 vthread 不存在，返回 ("", "")。
 func Get(ctx context.Context, kv kvspace.KVSpace, vtid string) (pc, status string) {
 	vals := kv.Get([]string{keytree.VThreadPC(vtid), keytree.VThreadStatus(vtid)})
 	if len(vals) < 2 {
@@ -56,28 +50,29 @@ func Get(ctx context.Context, kv kvspace.KVSpace, vtid string) (pc, status strin
 
 // ── 写（瞬态） ────────────────────────────────────────────────────────────────
 
-// Set 更新 vthread 的 PC 和 status（瞬态：init / running / wait）。
-// 终态请用 SetDone / SetError，它们使用 Del+Notify 而非 Set。
+// Set 更新 vthread 的 PC 和 status（瞬态：init / running / wait），1 RTT。
 func Set(ctx context.Context, kv kvspace.KVSpace, vtid, pc, status string) {
-	kvSet(kv, keytree.VThreadPC(vtid), kvspace.Str(pc))
-	kvSet(kv, keytree.VThreadStatus(vtid), kvspace.Str(status))
+	kv.Set([]kvspace.KVPair{
+		{keytree.VThreadPC(vtid), kvspace.Str(pc)},
+		{keytree.VThreadStatus(vtid), kvspace.Str(status)},
+	})
 }
 
 // ── 写（终态）─────────────────────────────────────────────────────────────────
 
 // SetDone 标记 vthread 正常完成。
 func SetDone(ctx context.Context, kv kvspace.KVSpace, vtid, retVal string) {
-	if retVal == "" {
-		retVal = "ok"
-	}
+	if retVal == "" { retVal = "ok" }
 	kv.Del(keytree.VThreadStatus(vtid))
 	kv.Notify(keytree.VThreadStatus(vtid), kvspace.Str(retVal))
 }
 
-// SetError 标记 vthread 错误终止。
+// SetError 标记 vthread 错误终止。3 RTT（Set + Del + Notify）。
 func SetError(ctx context.Context, kv kvspace.KVSpace, vtid, pc, errMsg string) {
-	kvSet(kv, keytree.VThreadPC(vtid), kvspace.Str(pc))
-	kvSet(kv, keytree.VThreadStatusMsg(vtid, "error"), kvspace.Str(errMsg))
+	kv.Set([]kvspace.KVPair{
+		{keytree.VThreadPC(vtid), kvspace.Str(pc)},
+		{keytree.VThreadStatusMsg(vtid, "error"), kvspace.Str(errMsg)},
+	})
 	kv.Del(keytree.VThreadStatus(vtid))
 	kv.Notify(keytree.VThreadStatus(vtid), kvspace.Str("error"))
 }
@@ -89,7 +84,7 @@ func AllocVtid(kv kvspace.KVSpace) string {
 	valV := kv.Get([]string{keytree.VthreadSeq})
 	n, _ := strconv.ParseInt(valV[0].Str(), 10, 64)
 	n++
-	kvSet(kv, keytree.VthreadSeq, kvspace.Str(strconv.FormatInt(n, 10)))
+	kv.Set([]kvspace.KVPair{{keytree.VthreadSeq, kvspace.Str(strconv.FormatInt(n, 10))}})
 	return fmt.Sprintf("%d", n)
 }
 

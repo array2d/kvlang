@@ -61,14 +61,18 @@ func writeStmt(kv kvspace.KVSpace, st ast.Stmt, prefix string, idx *int, typeMap
 			opcode != "=" {
 			opcode = pkg + keytree.FuncPathSep + opcode
 		}
+		pairs := make([]kvspace.KVPair, 0, 1+len(reads)+len(s.Writes))
 		if opcode != "" {
-			kv.Set([]kvspace.KVPair{{fmt.Sprintf("%s/[%d,0]", prefix, n), slotValue(opcode, typeMap)}})
+			pairs = append(pairs, kvspace.KVPair{fmt.Sprintf("%s/[%d,0]", prefix, n), slotValue(opcode, typeMap)})
 		}
 		for j, r := range reads {
-			kv.Set([]kvspace.KVPair{{fmt.Sprintf("%s/[%d,-%d]", prefix, n, j+1), slotValue(r, typeMap)}})
+			pairs = append(pairs, kvspace.KVPair{fmt.Sprintf("%s/[%d,-%d]", prefix, n, j+1), slotValue(r, typeMap)})
 		}
 		for j, w := range s.Writes {
-			kv.Set([]kvspace.KVPair{{fmt.Sprintf("%s/[%d,%d]", prefix, n, j+1), slotValue(w, typeMap)}})
+			pairs = append(pairs, kvspace.KVPair{fmt.Sprintf("%s/[%d,%d]", prefix, n, j+1), slotValue(w, typeMap)})
+		}
+		if len(pairs) > 0 {
+			kv.Set(pairs)
 		}
 		*idx = n + 1
 	case *ast.BlockStmt:
@@ -147,19 +151,23 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	// 字面量存为临时变量；变量引用追踪 .rparam 链到源头
 	litSeq := 0
 	params := funcSig.ParamNames()
+	var paramPairs []kvspace.KVPair
 	for i, param := range params {
 		if i+1 < len(inst.Reads) {
 			arg := inst.Reads[i+1]
 			rk := resolveReadPath(kv, callerFrameRoot, arg)
 			if rk == "" && isLiteral(arg) {
 				rk = fmt.Sprintf("%s/._lit%d", callerFrameRoot, litSeq)
-				kv.Set([]kvspace.KVPair{{rk, builtin.ResolveReadValue(kv, callerFrameRoot, arg)}})
+				paramPairs = append(paramPairs, kvspace.KVPair{rk, builtin.ResolveReadValue(kv, callerFrameRoot, arg)})
 				litSeq++
 			}
 			if rk != "" {
-				kv.Set([]kvspace.KVPair{{keytree.RParam(frameRoot, param), kvspace.Str(rk)}})
+				paramPairs = append(paramPairs, kvspace.KVPair{keytree.RParam(frameRoot, param), kvspace.Str(rk)})
 			}
 		}
+	}
+	if len(paramPairs) > 0 {
+		kv.Set(paramPairs)
 	}
 	// 写参零拷贝：.rparam 和 .wparam 指向同一调用方路径，不创建本地副本
 	callerLink := keytree.FuncLib(callerFrameRoot)
@@ -259,18 +267,20 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 			return ""
 		}
 		params := sig.ParamNames()
+		pairs := make([]kvspace.KVPair, 0, len(params)*2+1)
 		for i, param := range params {
 			if i < len(args) {
 				dest := vthreadRoot + "/" + param
-				kv.Set([]kvspace.KVPair{
-					{dest, builtin.ResolveReadValue(kv, "", args[i])},
-					{keytree.RParam(vthreadRoot, param), kvspace.Str(dest)},
-				})
+				pairs = append(pairs,
+					kvspace.KVPair{dest, builtin.ResolveReadValue(kv, "", args[i])},
+					kvspace.KVPair{keytree.RParam(vthreadRoot, param), kvspace.Str(dest)},
+				)
 			}
 		}
 		if len(params) > 0 {
-			kv.Set([]kvspace.KVPair{{keytree.FrameRO(vthreadRoot), kvspace.Str(strings.Join(params, ","))}}) // fix-027
+			pairs = append(pairs, kvspace.KVPair{keytree.FrameRO(vthreadRoot), kvspace.Str(strings.Join(params, ","))})
 		}
+		kv.Set(pairs)
 	}
 
 	return keytree.EntryPC(vthreadRoot)
