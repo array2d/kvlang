@@ -9,7 +9,6 @@ import (
 	"github.com/array2d/kvspace-go"
 	"kvlang/internal/logx"
 	"kvlang/internal/op"
-	"kvlang/internal/vthread"
 )
 
 type ioOp struct{ print, cerr, input bool }
@@ -37,10 +36,7 @@ func (o ioOp) Call(f *op.Frame) error {
 		if !ts.IsZero() { val, _ = device.ReadTerm(bg, ts) }
 		if len(f.Inst.Writes) > 0 {
 			wKey := resolveWriteKey(f.KV, keytree.FrameRoot(f.PC), f.Inst.Writes[0])
-			if err := f.KV.Set(wKey, kvspace.Str(val)); err != nil {
-				vthread.SetError(bg, f.KV, f.Vtid, f.PC, err.Error())
-				return err
-			}
+			f.KV.Set([]kvspace.KVPair{{wKey, kvspace.Str(val)}})
 		}
 		nextPC(f)
 		return nil

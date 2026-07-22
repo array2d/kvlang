@@ -16,10 +16,10 @@ func (dictOp) Call(f *op.Frame) error {
 	fp := keytree.FrameRoot(f.PC)
 	for _, w := range f.Inst.Writes {
 		outKey := resolveWriteKey(f.KV, fp, w)
-		if err := f.KV.Set(outKey, kvspace.Dict()); err != nil { return err }
+		f.KV.Set([]kvspace.KVPair{{outKey, kvspace.Dict()}})
 		for i := 0; i+1 < len(inputs); i += 2 {
 			if inputs[i+1].IsNil() { continue }
-			if err := f.KV.Set(keytree.Member(outKey, inputs[i].Str()), inputs[i+1]); err != nil { return err }
+			f.KV.Set([]kvspace.KVPair{{keytree.Member(outKey, inputs[i].Str()), inputs[i+1]}})
 		}
 	}
 	vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")

@@ -20,10 +20,8 @@ func isEntryPC(pc string) bool { return keytree.IsEntryPC(pc) }
 
 // debugFuncName 从帧根读取 .rootfunc 字段获取函数名。
 func debugFuncName(kv kvspace.KVSpace, frameRoot string) string {
-	v, err := kv.Get(keytree.RootFunc(frameRoot))
-	if err != nil {
-		return "?"
-	}
+	v := kv.Get([]string{keytree.RootFunc(frameRoot)})[0]
+	if v.IsNil() { return "?" }
 	return v.Str()
 }
 
@@ -45,10 +43,8 @@ func debugNotifyPause(_ context.Context, kv kvspace.KVSpace, vtid, pc string, in
 // 使用超时重试，与 vthread.WaitDone 保持一致的模式。
 func debugWaitResume(kv kvspace.KVSpace, vtid string) string {
 	for {
-		val, err := kv.Watch(keytree.VThreadDebuggerResume(vtid), 30*time.Second)
-		if err == nil {
-			return val.Str()
-		}
+		val := kv.Watch(keytree.VThreadDebuggerResume(vtid), 30*time.Second)
+		if !val.IsNil() { return val.Str() }
 		// 超时 → 继续等待
 	}
 }

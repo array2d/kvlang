@@ -34,7 +34,7 @@ func findEntry(dsn string) string {
 }
 
 func findEntryPrefix(kv kvspace.KVSpace, prefix string) string {
-	children, _ := kv.List(prefix)
+	children := kv.List(prefix)
 	for _, c := range children {
 		if strings.HasSuffix(c, ".init") {
 			return c

@@ -69,11 +69,13 @@ func executeEntry(kv kvspace.KVSpace, entryName string, debug bool) {
 		logx.Fatal("[single] Bootstrap %s failed", entryName)
 	}
 	vthread.Set(ctx, kv, vtid, firstPC, "init")
-	kv.Set(keytree.VThreadCtime(vtid), kvspace.Time(time.Now().UnixNano()))
-	kv.Set(keytree.VThreadTerm(vtid), kvspace.Str("kvlangrun"))
+	kv.Set([]kvspace.KVPair{
+		{keytree.VThreadCtime(vtid), kvspace.Time(time.Now().UnixNano())},
+		{keytree.VThreadTerm(vtid), kvspace.Str("kvlangrun")},
+	})
 
 	if debug {
-		kv.Set(keytree.VThreadDebugger(vtid), kvspace.Str("break"))
+		kv.Set([]kvspace.KVPair{{keytree.VThreadDebugger(vtid), kvspace.Str("break")}})
 		logx.Info("[single] debug mode: executing %s", firstPC)
 		cpu := kvcpu.New(kv, "single")
 		cpu.Execute(firstPC)
@@ -88,9 +90,9 @@ func executeEntry(kv kvspace.KVSpace, entryName string, debug bool) {
 }
 
 func reportRunError(kv kvspace.KVSpace, vtid string) {
-	msgVal, err := kv.Get(keytree.VThreadStatusMsg(vtid, "error"))
-	if err == nil && !msgVal.IsNil() {
-		pcVal, _ := kv.Get(keytree.VThreadPC(vtid))
+	msgVal := kv.Get([]string{keytree.VThreadStatusMsg(vtid, "error")})[0]
+	if !msgVal.IsNil() {
+		pcVal := kv.Get([]string{keytree.VThreadPC(vtid)})[0]
 		logx.Error("%s at %s", msgVal.Str(), pcVal.Str())
 		os.Exit(1)
 	}

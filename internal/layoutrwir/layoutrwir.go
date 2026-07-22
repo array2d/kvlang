@@ -62,13 +62,13 @@ func writeStmt(kv kvspace.KVSpace, st ast.Stmt, prefix string, idx *int, typeMap
 			opcode = pkg + keytree.FuncPathSep + opcode
 		}
 		if opcode != "" {
-			kv.Set(fmt.Sprintf("%s/[%d,0]", prefix, n), slotValue(opcode, typeMap))
+			kv.Set([]kvspace.KVPair{{fmt.Sprintf("%s/[%d,0]", prefix, n), slotValue(opcode, typeMap)}})
 		}
 		for j, r := range reads {
-			kv.Set(fmt.Sprintf("%s/[%d,-%d]", prefix, n, j+1), slotValue(r, typeMap))
+			kv.Set([]kvspace.KVPair{{fmt.Sprintf("%s/[%d,-%d]", prefix, n, j+1), slotValue(r, typeMap)}})
 		}
 		for j, w := range s.Writes {
-			kv.Set(fmt.Sprintf("%s/[%d,%d]", prefix, n, j+1), slotValue(w, typeMap))
+			kv.Set([]kvspace.KVPair{{fmt.Sprintf("%s/[%d,%d]", prefix, n, j+1), slotValue(w, typeMap)}})
 		}
 		*idx = n + 1
 	case *ast.BlockStmt:
@@ -104,8 +104,8 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	}
 	funcKey := keytree.LibFunc(pkg, funcName)
 
-	sigVal, err := kv.Get(funcKey)
-	if err != nil {
+	sigVal := kv.Get([]string{funcKey})[0]
+	if sigVal.IsNil() {
 		vthread.SetError(ctx, kv, vtid, pc, "NameError: func signature not found: "+funcName)
 		return ""
 	}
@@ -120,8 +120,8 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	// TCO：复用当前帧，仅重链 .funclib 到目标块（.rootfunc 不更新）
 	if tail {
 		frameRoot := keytree.FrameRoot(pc)
-		kv.Unlink(keytree.FuncLib(frameRoot))
-		if err := kv.Link(funcKey, keytree.FuncLib(frameRoot)); err != nil {
+		kv.UnMount(keytree.FuncLib(frameRoot))
+		if err := kv.Mount(funcKey, keytree.FuncLib(frameRoot)); err != nil {
 			vthread.SetError(ctx, kv, vtid, pc, "tco RuntimeError: link failed: "+err.Error())
 			return ""
 		}
@@ -133,13 +133,15 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	frameRoot := pc
 
 	// 链接只读指令区：frameRoot/.funclib → /lib/<pkg>/<name>
-	if err := kv.Link(funcKey, keytree.FuncLib(frameRoot)); err != nil {
+	if err := kv.Mount(funcKey, keytree.FuncLib(frameRoot)); err != nil {
 		vthread.SetError(ctx, kv, vtid, pc, "RuntimeError: link failed: "+err.Error())
 		return ""
 	}
 
-	kv.Set(keytree.RootFunc(frameRoot), kvspace.Str(funcName))
-	kv.Set(keytree.FramePkg(frameRoot), kvspace.Str(pkg))
+	kv.Set([]kvspace.KVPair{
+		{keytree.RootFunc(frameRoot), kvspace.Str(funcName)},
+		{keytree.FramePkg(frameRoot), kvspace.Str(pkg)},
+	})
 
 	// 读参零拷贝：.rparam 重定向到调用方值位置
 	// 字面量存为临时变量；变量引用追踪 .rparam 链到源头
@@ -151,11 +153,11 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 			rk := resolveReadPath(kv, callerFrameRoot, arg)
 			if rk == "" && isLiteral(arg) {
 				rk = fmt.Sprintf("%s/._lit%d", callerFrameRoot, litSeq)
-				kv.Set(rk, builtin.ResolveReadValue(kv, callerFrameRoot, arg))
+				kv.Set([]kvspace.KVPair{{rk, builtin.ResolveReadValue(kv, callerFrameRoot, arg)}})
 				litSeq++
 			}
 			if rk != "" {
-				kv.Set(keytree.RParam(frameRoot, param), kvspace.Str(rk))
+				kv.Set([]kvspace.KVPair{{keytree.RParam(frameRoot, param), kvspace.Str(rk)}})
 			}
 		}
 	}
@@ -164,7 +166,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	addr0 := op.ExtractAddr0FromPC(pc)
 	for i, ret := range funcSig.Returns {
 		wSlot := fmt.Sprintf("%s/[%d,%d]", callerLink, addr0, i+1)
-		wTargetVal, _ := kv.Get(wSlot)
+		wTargetVal := kv.Get([]string{wSlot})[0]
 		wTarget := string(wTargetVal.RawBytes())
 		if wTarget == "" {
 			continue
@@ -173,11 +175,13 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 		if wk == "" {
 			continue
 		}
-		kv.Set(keytree.RParam(frameRoot, ret.Name), kvspace.Str(wk))
-		kv.Set(keytree.WParam(frameRoot, ret.Name), kvspace.Str(wk))
+		kv.Set([]kvspace.KVPair{
+			{keytree.RParam(frameRoot, ret.Name), kvspace.Str(wk)},
+			{keytree.WParam(frameRoot, ret.Name), kvspace.Str(wk)},
+		})
 	}
 	if len(params) > 0 {
-		kv.Set(keytree.FrameRO(frameRoot), kvspace.Str(strings.Join(params, ",")))
+		kv.Set([]kvspace.KVPair{{keytree.FrameRO(frameRoot), kvspace.Str(strings.Join(params, ","))}})
 	}
 
 	return keytree.EntryPC(frameRoot)
@@ -205,7 +209,7 @@ func HandleReturn(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.I
 
 	nextPC = op.NextPC(frameRoot)
 
-	kv.Unlink(keytree.FuncLib(frameRoot))
+	kv.UnMount(keytree.FuncLib(frameRoot))
 	kv.DelTree(frameRoot)
 	return nextPC, ""
 }
@@ -215,7 +219,7 @@ func RegisterBlocks(kv kvspace.KVSpace, pkg, parent string, body []ast.Stmt) {
 	for _, st := range body {
 		if b, ok := st.(*ast.BlockStmt); ok {
 			blockKey := keytree.LibFunc(pkg, parent+"/"+b.Label)
-			kv.Set(blockKey, kvspace.Str("def "+b.Label+"() -> ()"))
+			kv.Set([]kvspace.KVPair{{blockKey, kvspace.Str("def "+b.Label+"() -> ()")}})
 			RegisterBlocks(kv, pkg, parent+"/"+b.Label, b.Body)
 		}
 	}
@@ -237,16 +241,18 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 	funcKey := keytree.LibFunc(pkg, name)
 
 	vthreadRoot := keytree.VThread(vtid)
-	if err := kv.Link(funcKey, keytree.FuncLib(vthreadRoot)); err != nil {
+	if err := kv.Mount(funcKey, keytree.FuncLib(vthreadRoot)); err != nil {
 		vthread.SetError(ctx, kv, vtid, "", "Bootstrap: RuntimeError: link failed: "+err.Error())
 		return ""
 	}
-	kv.Set(keytree.RootFunc(vthreadRoot), kvspace.Str(name))
-	kv.Set(keytree.FramePkg(vthreadRoot), kvspace.Str(pkg))
+	kv.Set([]kvspace.KVPair{
+		{keytree.RootFunc(vthreadRoot), kvspace.Str(name)},
+		{keytree.FramePkg(vthreadRoot), kvspace.Str(pkg)},
+	})
 
 	// 绑定入参（若有）。顶层帧无调用方，值写入 vthreadRoot，.rparam 指向自身槽位。
 	if len(args) > 0 {
-		sigVal, _ := kv.Get(funcKey)
+		sigVal := kv.Get([]string{funcKey})[0]
 		sig := parser.ParseFuncSig(sigVal.Str())
 		if err := checkDupParams(sig, funcName); err != "" {
 			vthread.SetError(ctx, kv, vtid, "", err)
@@ -255,11 +261,15 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 		params := sig.ParamNames()
 		for i, param := range params {
 			if i < len(args) {
-				dest := vthreadRoot + "/" + param; kv.Set(dest, builtin.ResolveReadValue(kv, "", args[i])); kv.Set(keytree.RParam(vthreadRoot, param), kvspace.Str(dest))
+				dest := vthreadRoot + "/" + param
+				kv.Set([]kvspace.KVPair{
+					{dest, builtin.ResolveReadValue(kv, "", args[i])},
+					{keytree.RParam(vthreadRoot, param), kvspace.Str(dest)},
+				})
 			}
 		}
 		if len(params) > 0 {
-			kv.Set(keytree.FrameRO(vthreadRoot), kvspace.Str(strings.Join(params, ","))) // fix-027
+			kv.Set([]kvspace.KVPair{{keytree.FrameRO(vthreadRoot), kvspace.Str(strings.Join(params, ","))}}) // fix-027
 		}
 	}
 
@@ -280,7 +290,7 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 //	".xxx" → ""                 (引擎保留键，忽略，如 ._ 丢弃槽)
 func resolveWritePath(kv kvspace.KVSpace, framePath, name string) string {
 	rk := frameSlotKey(framePath, name)
-	if r, _ := kv.Get(keytree.WParam(framePath, name)); !r.IsNil() {
+	if r := kv.Get([]string{keytree.WParam(framePath, name)})[0]; !r.IsNil() {
 		return r.Str()
 	}
 	return rk
@@ -288,7 +298,7 @@ func resolveWritePath(kv kvspace.KVSpace, framePath, name string) string {
 
 func resolveReadPath(kv kvspace.KVSpace, framePath, name string) string {
 	if isLiteral(name) { return "" }
-	if r, _ := kv.Get(keytree.RParam(framePath, name)); !r.IsNil() {
+	if r := kv.Get([]string{keytree.RParam(framePath, name)})[0]; !r.IsNil() {
 		return r.Str()
 	}
 	return frameSlotKey(framePath, name)
@@ -330,8 +340,10 @@ func WriteFunc(kv kvspace.KVSpace, pkg string, fn *ast.Func) {
 	// 清除旧函数数据：旧指令的读/写槽数量可能多于新函数，
 	// 若不清除则旧槽（如 [0,-1]、[0,-2]）会被新执行错误读取。
 	kv.DelTree(keytree.LibFunc(pkg, fn.Sig.Name))
-	kv.Set(keytree.LibSrc(pkg, fn.Sig.Name), kvspace.Str(fn.FullText()))
-	kv.Set(keytree.LibFunc(pkg, fn.Sig.Name), kvspace.Str(fn.Sig.String()))
+	kv.Set([]kvspace.KVPair{
+		{keytree.LibSrc(pkg, fn.Sig.Name), kvspace.Str(fn.FullText())},
+		{keytree.LibFunc(pkg, fn.Sig.Name), kvspace.Str(fn.Sig.String())},
+	})
 	WriteBody(kv, pkg, fn.Sig.Name, fn.Body, typeMap)
 	RegisterBlocks(kv, pkg, fn.Sig.Name, fn.Body)
 }

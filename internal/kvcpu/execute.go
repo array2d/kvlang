@@ -88,7 +88,7 @@ func (c *cpu) Execute(pc string) error {
 		//   - 非单步模式：仅在函数入口（isEntryPC）读取一次 .debug（每次函数调用 1 次）
 		//   - 单步模式：每条指令读取一次 .debug（已在调试中，overhead 可接受）
 		if stepping || isEntryPC(pc) {
-			v, _ := c.kv.Get(keytree.VThreadDebugger(vtid))
+			v := c.kv.Get([]string{keytree.VThreadDebugger(vtid)})[0]
 			switch mode := v.Str(); {
 			case mode == "" && stepping:
 				// Agent 清除了 .debugger 标志 → 退出单步模式
@@ -156,7 +156,7 @@ func (c *cpu) Execute(pc string) error {
 		}
 
 		// 读取指令执行后更新的 PC
-		newPCVal, _ := c.kv.Get(keytree.VThreadPC(vtid))
+		newPCVal := c.kv.Get([]string{keytree.VThreadPC(vtid)})[0]
 		newPC := newPCVal.Str()
 		if newPC == "" {
 			break
@@ -182,7 +182,7 @@ func (c *cpu) checkReadOnlyWrites(ctx context.Context, vtid, pc string, inst *op
 	if len(inst.Writes) == 0 {
 		return nil
 	}
-	roVal, _ := c.kv.Get(keytree.FrameRO(keytree.FrameRoot(pc)))
+	roVal := c.kv.Get([]string{keytree.FrameRO(keytree.FrameRoot(pc))})[0]
 	ro := roVal.Str()
 	if ro == "" {
 		return nil

@@ -29,13 +29,10 @@ type instInfo struct {
 func Select(ctx context.Context, kv kvspace.KVSpace, opcode string) (backend, n string, err error) {
 	opname := stripVTypePrefix(opcode)
 
-	backends, err := kv.List(keytree.SysOpRoot)
-	if err != nil {
-		return "", "", fmt.Errorf("list %s: %w", keytree.SysOpRoot, err)
-	}
+	backends := kv.List(keytree.SysOpRoot)
 
 	for _, b := range backends {
-		if _, err := kv.Get(keytree.SysOpFunc(b, opname)); err == nil {
+		if v := kv.Get([]string{keytree.SysOpFunc(b, opname)})[0]; !v.IsNil() {
 			backend = b
 			break
 		}
@@ -44,18 +41,15 @@ func Select(ctx context.Context, kv kvspace.KVSpace, opcode string) (backend, n 
 		return "", "", fmt.Errorf("no backend supports opcode=%s", opcode)
 	}
 
-	children, err := kv.List(keytree.SysOpRoot + "/" + backend)
-	if err != nil {
-		return "", "", fmt.Errorf("list backend %s instances: %w", backend, err)
-	}
+	children := kv.List(keytree.SysOpRoot + "/" + backend)
 
 	bestLoad := math.MaxFloat64
 	for _, child := range children {
 		if child == "func" {
 			continue // 跳过 /sys/op/<backend>/func/ 子树
 		}
-		val, err := kv.Get(keytree.SysOp(backend, child))
-		if err != nil {
+		val := kv.Get([]string{keytree.SysOp(backend, child)})[0]
+		if val.IsNil() {
 			continue
 		}
 		var info instInfo
@@ -80,13 +74,12 @@ func Select(ctx context.Context, kv kvspace.KVSpace, opcode string) (backend, n 
 
 // ListBackends 返回所有已注册 backend 名称（kv.List("/sys/op") 结果）。
 func ListBackends(ctx context.Context, kv kvspace.KVSpace) ([]string, error) {
-	return kv.List(keytree.SysOpRoot)
+	return kv.List(keytree.SysOpRoot), nil
 }
 
 // BackendSupports 返回 backend 是否支持某 opcode。
 func BackendSupports(ctx context.Context, kv kvspace.KVSpace, backend, opcode string) bool {
-	_, err := kv.Get(keytree.SysOpFunc(backend, stripVTypePrefix(opcode)))
-	return err == nil
+	return !kv.Get([]string{keytree.SysOpFunc(backend, stripVTypePrefix(opcode))})[0].IsNil()
 }
 
 // stripVTypePrefix 剥离 vtype 命名空间前缀。

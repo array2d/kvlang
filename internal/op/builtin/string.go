@@ -5,7 +5,6 @@ import (
 	"github.com/array2d/kvspace-go"
 	"kvlang/internal/logx"
 	"kvlang/internal/op"
-	"kvlang/internal/vthread"
 )
 
 type strOp struct{}
@@ -15,10 +14,7 @@ func (strOp) Call(f *op.Frame) error {
 	if len(inputs) > 0 { val = display(inputs[0]) }
 	if len(f.Inst.Writes) > 0 {
 		wKey := resolveWriteKey(f.KV, keytree.FrameRoot(f.PC), f.Inst.Writes[0])
-		if err := f.KV.Set(wKey, kvspace.Str(val)); err != nil {
-			vthread.SetError(bg, f.KV, f.Vtid, f.PC, err.Error())
-			return err
-		}
+		f.KV.Set([]kvspace.KVPair{{wKey, kvspace.Str(val)}})
 	}
 	logx.Debug("[%s] string.set %q -> %s", f.Vtid, val, f.Inst.Writes)
 	nextPC(f)

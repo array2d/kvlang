@@ -25,11 +25,8 @@ func cmdPS(args []string) {
 
 	kv := kvspace.Conn(*dsn)
 
-	vtids, err := kv.List(keytree.VthreadRoot)
-	if err != nil || len(vtids) == 0 {
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "ps:", err)
-		}
+	vtids := kv.List(keytree.VthreadRoot)
+	if len(vtids) == 0 {
 		return
 	}
 

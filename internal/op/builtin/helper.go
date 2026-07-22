@@ -30,7 +30,7 @@ func readInputs(f *op.Frame) []kvspace.XValue {
 
 // writeResult writes a typed Value to the first write-slot and advances PC.
 func setWrite(kv kvspace.KVSpace, framePath, slot string, val kvspace.XValue) error {
-	return kv.Set(resolveWriteKey(kv, framePath, slot), val)
+	return kv.Set([]kvspace.KVPair{{resolveWriteKey(kv, framePath, slot), val}})
 }
 
 func writeResult(f *op.Frame, result kvspace.XValue) error {

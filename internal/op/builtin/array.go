@@ -32,10 +32,10 @@ func (arrayOp) Call(f *op.Frame) error {
 	}
 	if targetKind != "" {
 		arr := packTypedArray(targetKind, inputs)
-		if err := f.KV.Set(outKey, arr); err != nil { return err }
+		f.KV.Set([]kvspace.KVPair{{outKey, arr}})
 	} else {
 		arr := kvspace.Array(inputs)
-		if err := f.KV.Set(outKey, arr); err != nil { return err }
+		f.KV.Set([]kvspace.KVPair{{outKey, arr}})
 	}
 	vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
 	return nil
@@ -123,7 +123,7 @@ func (atOp) Call(f *op.Frame) error {
 			base = resolveKVPath(fp, raw)
 		}
 		path := keytree.Member(base, kvKey(inputs[1]))
-		v, _ := f.KV.Get(path); return writeResult(f, v)
+		v := f.KV.Get([]string{path})[0]; return writeResult(f, v)
 	}
 	if inputs[0].IsNil() {
 		msg := "IndexError: at: base " + f.Inst.Reads[0] + " is nil; help: declare a key-family first (e.g. `" + f.Inst.Reads[0] + " = {}`) or pass a path string"
@@ -195,11 +195,11 @@ func (arraySetOp) Call(f *op.Frame) error {
 			base = resolveKVPath(fp, raw)
 		}
 		path := keytree.Member(base, kvKey(inputs[1]))
-		f.KV.Set(path, inputs[2])
+		f.KV.Set([]kvspace.KVPair{{path, inputs[2]}})
 		if len(f.Inst.Writes) > 0 && !inputs[0].IsNil() {
 			// 写入 base 本身（值不变），满足 -> base 返回槽
 			outKey := resolveWriteKey(f.KV, fp, f.Inst.Writes[0])
-			f.KV.Set(outKey, inputs[0])
+			f.KV.Set([]kvspace.KVPair{{outKey, inputs[0]}})
 		}
 		vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
 		return nil
@@ -250,7 +250,7 @@ func (arraySetOp) Call(f *op.Frame) error {
 	}
 	if len(f.Inst.Writes) > 0 {
 		outKey := resolveWriteKey(f.KV, keytree.FrameRoot(f.PC), f.Inst.Writes[0])
-		if err := f.KV.Set(outKey, result); err != nil { return err }
+		f.KV.Set([]kvspace.KVPair{{outKey, result}})
 	}
 	vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
 	return nil
@@ -286,7 +286,7 @@ func (hasOp) Call(f *op.Frame) error {
 	base := resolveReadValue(f.KV, fp, f.Inst.Reads[0]).Str()
 	if base == "" { base = resolveKVPath(fp, f.Inst.Reads[0]) }
 	key := kvKey(inputs[1])
-	v, _ := f.KV.Get(keytree.Member(base, key))
+	v := f.KV.Get([]string{keytree.Member(base, key)})[0]
 	return writeResult(f, kvspace.Bool(!v.IsNil()))
 }
 

@@ -57,10 +57,7 @@ func resolveParam(ctx context.Context, kv kvspace.KVSpace, vtid, param string) P
 		resolvedKey = keytree.VThreadAt(vtid, param)
 	}
 	ref.Key = resolvedKey
-	val, err := kv.Get(resolvedKey)
-	if err != nil {
-		return ref
-	}
+	val := kv.Get([]string{resolvedKey})[0]
 	var meta map[string]interface{}
 	if json.Unmarshal([]byte(val.Str()), &meta) != nil {
 		return ref
