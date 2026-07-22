@@ -5,110 +5,65 @@ import (
 	"strings"
 )
 
-const VthreadRoot = "/vthread"
-const VthreadSeq  = "/vthread/seq" // vtid 自增序列计数器
+// ── vthread 路径工具 ────────────────────────────────────────────────
 
-// VThread 返回 /vthread/<vtid>（vthread 根路径，用于 DelR 整体清理）
-func VThread(vtid string) string { return "/vthread/" + vtid }
+const VthreadRoot = PathSegSep + PathSegVthread
+const VthreadSeq  = PathSegSep + PathSegVthread + PathSegSep + SegSeq
 
-// VThreadTerm 返回 /vthread/<vtid>/term（绑定终端名，可选）
-func VThreadTerm(vtid string) string { return "/vthread/" + vtid + "/term" }
+func VThread(vtid string) string { return VthreadRoot + PathSegSep + vtid }
 
-// ── vthread 引擎保留字段（. 开头，类比 Linux 隐藏文件）────────────────────────
-//
-//	.pc                   当前绝对 PC（String）
-//	.status               生命周期状态（String: init|running|wait）；
-//	                      终态时 Del+Notify：值为 main() 的返回值（如 "ok"/"error"）
-//	.ctime                创建时刻（Unix 纳秒时间戳，String）
-//	.<statusVal>/msg      终态附加描述，路径随 status 值动态生成：
-//	                        status="error"   → .error/msg   存错误详情
-//	                        status="timeout" → .timeout/msg 存超时说明
-//	                        status="ok"      → 通常不写（无需附加信息）
-//
-// kvlang 标识符不能以 . 开头，用户代码无法写入这些路径。
+func VThreadTerm(vtid string) string { return VthreadRoot + PathSegSep + vtid + PathSegSep + SegTerm }
 
-// VThreadPC 返回 /vthread/<vtid>/.pc
-func VThreadPC(vtid string) string { return "/vthread/" + vtid + "/" + ReservedPrefix + "pc" }
+// ── 引擎保留字段（ReservedPrefix 开头）───────────────────────────────
 
-// VThreadStatus 返回 /vthread/<vtid>/.status
-//
-//   - 运行期（String）：init | running | wait
-//   - 终态（List/Notify）：main() 的返回值，由 WaitDone Watch 消费
-func VThreadStatus(vtid string) string { return "/vthread/" + vtid + "/" + ReservedPrefix + "status" }
+func VThreadPC(vtid string) string {
+	return VthreadRoot + PathSegSep + vtid + PathSegSep + ReservedPrefix + SegPC
+}
 
-// VThreadStatusMsg 返回 /vthread/<vtid>/.<statusVal>/msg
-//
-// 终态附加描述，路径随 status 值动态生成。
-// 例：
-//
-//	VThreadStatusMsg(vtid, "error")   → /vthread/<vtid>/.error/msg
-//	VThreadStatusMsg(vtid, "timeout") → /vthread/<vtid>/.timeout/msg
+func VThreadStatus(vtid string) string {
+	return VthreadRoot + PathSegSep + vtid + PathSegSep + ReservedPrefix + SegStatus
+}
+
+func VThreadCtime(vtid string) string {
+	return VthreadRoot + PathSegSep + vtid + PathSegSep + ReservedPrefix + SegCtime
+}
+
 func VThreadStatusMsg(vtid, statusVal string) string {
-	return "/vthread/" + vtid + "/" + ReservedPrefix + statusVal + "/msg"
+	return VthreadRoot + PathSegSep + vtid + PathSegSep + ReservedPrefix + statusVal + PathSegSep + SegMsg
 }
 
-// VThreadCtime 返回 /vthread/<vtid>/.ctime（创建时刻，Unix 纳秒时间戳）
-func VThreadCtime(vtid string) string { return "/vthread/" + vtid + "/" + ReservedPrefix + "ctime" }
+func VThreadDebugger(vtid string) string {
+	return VthreadRoot + PathSegSep + vtid + PathSegSep + ReservedPrefix + SegDebugger
+}
 
-// VThreadAt 返回 /vthread/<vtid>/<key>，通用路径构造（仅供引擎内部调试使用）
-func VThreadAt(vtid, key string) string { return "/vthread/" + vtid + "/" + key }
+func VThreadDebuggerPause(vtid string) string {
+	return VthreadRoot + PathSegSep + vtid + PathSegSep + ReservedPrefix + SegDebugger + MemberSep + SegPause
+}
 
-// ── 调试标志（引擎保留，. 前缀）────────────────────────────────────────────
-//
-// 所有 kvcpu 实例在 execute 循环中自动检查这三个键，无需特殊启动方式。
-// Agent 通过已有 kvspace 命令读写这些键来控制调试行为。
-//
-//	.debugger         调试控制键（agent 写，CPU 读）
-//	               ""/"" = 正常执行；"step" = 每条指令后暂停；"break:<func>" = 函数入口暂停
-//	.debugger.pause   暂停事件键（CPU 写 Notify，agent 用 Watch 等待）
-//	               值：JSON {"pc":"...","func":"...","frame":"...","op":"..."}
-//	.debugger.resume  恢复命令键（agent 写 Notify，CPU 用 Watch 等待）
-//	               值："step"（执行一步继续暂停）| "continue"（恢复全速）| "abort"（终止）
+func VThreadDebuggerResume(vtid string) string {
+	return VthreadRoot + PathSegSep + vtid + PathSegSep + ReservedPrefix + SegDebugger + MemberSep + SegResume
+}
 
-// VThreadDebugger 返回 /vthread/<vtid>/.debugger（调试控制键）
-func VThreadDebugger(vtid string) string { return "/vthread/" + vtid + "/" + ReservedPrefix + "debugger" }
+func VThreadAt(vtid, key string) string { return VthreadRoot + PathSegSep + vtid + PathSegSep + key }
 
-// VThreadDebuggerPause 返回 /vthread/<vtid>/.debugger.pause（CPU → agent 暂停事件）
-func VThreadDebuggerPause(vtid string) string { return "/vthread/" + vtid + "/" + ReservedPrefix + "debugger" + MemberSep + "pause" }
+// ── PC 解析 ─────────────────────────────────────────────────────────
 
-// VThreadDebuggerResume 返回 /vthread/<vtid>/.debugger.resume（agent → CPU 恢复命令）
-func VThreadDebuggerResume(vtid string) string { return "/vthread/" + vtid + "/" + ReservedPrefix + "debugger" + MemberSep + "resume" }
-
-// VtidFromPC 从绝对 PC 提取 vtid。
-//
-//	"/vthread/42/[0,0]" → "42"
-//	"/vthread/42/[3,0]/[0,0]" → "42"
 func VtidFromPC(pc string) string {
-	const pfx = "/vthread/"
-	if !strings.HasPrefix(pc, pfx) {
-		return ""
-	}
+	const pfx = PathSegSep + PathSegVthread + PathSegSep
+	if !strings.HasPrefix(pc, pfx) { return "" }
 	rest := pc[len(pfx):]
-	slash := strings.Index(rest, "/")
-	if slash < 0 {
-		return rest
-	}
-	return rest[:slash]
+	if slash := strings.Index(rest, PathSegSep); slash >= 0 { return rest[:slash] }
+	return rest
 }
 
-// VThreadSlot 返回指令槽路径。
-//
-//	frame="" → /vthread/<vtid>/[i,j]
-//	frame="[0,0]" → /vthread/<vtid>/[0,0]/[i,j]
 func VThreadSlot(vtid, frame string, i, j int) string {
 	if frame == "" {
-		return fmt.Sprintf("/vthread/%s/[%d,%d]", vtid, i, j)
+		return fmt.Sprintf(VthreadRoot+PathSegSep+"%s/[%d,%d]", vtid, i, j)
 	}
-	return fmt.Sprintf("/vthread/%s/%s/[%d,%d]", vtid, frame, i, j)
+	return fmt.Sprintf(VthreadRoot+PathSegSep+"%s/%s/[%d,%d]", vtid, frame, i, j)
 }
 
-// VThreadFrame 返回子帧路径前缀（不含尾斜杠）。
-//
-//	frame="" → /vthread/<vtid>
-//	frame="[0,0]" → /vthread/<vtid>/[0,0]
 func VThreadFrame(vtid, frame string) string {
-	if frame == "" {
-		return "/vthread/" + vtid
-	}
-	return "/vthread/" + vtid + "/" + frame
+	if frame == "" { return VthreadRoot + PathSegSep + vtid }
+	return VthreadRoot + PathSegSep + vtid + PathSegSep + frame
 }

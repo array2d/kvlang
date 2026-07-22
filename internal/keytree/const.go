@@ -4,17 +4,42 @@ package keytree
 // 均须使用这些常量，禁止硬编码 "." 等裸字符串。
 
 const (
-	// FuncPathSep 包名与函数名的分隔符。目前为 "."，后期可能变为 "::" 等。
-	// 用法：/lib/<pkg><FuncPathSep><name>
-	FuncPathSep = "."
+	// ── 分隔符 ─────────────────────────────────────────────────────────
 
-	// MemberSep 成员访问分隔符。struct/dict 成员键通过此符附着在基路径上。
-	// 与 "/" 结构分隔正交：X/a 是结构子节点，X<MemberSep>a 是同层平坦成员键。
-	MemberSep = "."
+	FuncPathSep = "." // 包名与函数名分隔符，用法：/lib/<pkg><FuncPathSep><name>
+	MemberSep   = "." // 成员访问分隔符，X<MemberSep>a 与 X/a 结构分隔正交
+	ReservedPrefix = "." // 引擎保留字段前缀，用户代码无法写入
+	SrcExt      = ".src" // 函数源码文件后缀
 
-	// ReservedPrefix 引擎保留字段前缀。kvlang 标识符不能以此开头，用户代码无法写入。
-	ReservedPrefix = "."
+	// ── 路径段名 ─────────────────────────────────────────────────────────
 
-	// SrcExt 函数源码文件后缀。
-	SrcExt = ".src"
+	PathSegSep      = "/"        // 路径分隔符（对齐 kvspace.PathSep）
+	PathSegLib      = "lib"      // /lib — 函数库根
+	PathSegVthread  = "vthread"  // /vthread — 虚线程根
+
+	SegFunclib  = "funclib"  // 帧函数库链接（废弃）
+	SegCode     = "code"     // overlay merge 点
+	SegUpper    = "upper"    // overlay upper 层
+	SegRootfunc = "rootfunc" // 入口函数名
+	SegRO       = "ro"       // 只读参数名单
+	SegRParam   = "rparam"   // 读参重定向
+	SegWParam   = "wparam"   // 写参重定向
+	SegPkg      = "pkg"      // 包路径
+
+	SegPC       = "pc"       // 当前 PC
+	SegStatus   = "status"   // 生命周期状态
+	SegCtime    = "ctime"    // 创建时刻
+	SegDebugger = "debugger" // 调试控制键
+	SegPause    = "pause"    // 暂停事件
+	SegResume   = "resume"   // 恢复命令
+	SegMsg      = "msg"      // 终态附加描述
+	SegTerm     = "term"     // 绑定终端名
+	SegSeq      = "seq"      // vtid 自增序列
+
+	SegDev  = "dev"  // /dev
+	SegTTY  = "tty"  // /dev/tty
+	SegSys  = "sys"  // /sys
+	SegOp   = "op"   // /sys/op
+	SegCmd  = "cmd"  // 命令队列
+	SegFunc = "func" // 算子函数定义
 )

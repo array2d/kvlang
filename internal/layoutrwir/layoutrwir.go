@@ -57,7 +57,7 @@ func writeStmt(kv kvspace.KVSpace, st ast.Stmt, prefix string, idx *int, typeMap
 		opcode, reads := s.Flat()
 		// 同包调用限定：pkg 非空且 opcode 是用户函数（非 builtin、非控制流、非已限定）
 		if pkg != "" && !builtin.IsNativeOp(opcode) && !op.IsControlOp(opcode) &&
-			!strings.Contains(opcode, keytree.FuncPathSep) && !strings.HasPrefix(opcode, "/lib/") &&
+			!strings.Contains(opcode, keytree.FuncPathSep) && !strings.HasPrefix(opcode, keytree.LibRoot+keytree.PathSegSep) &&
 			opcode != "=" {
 			opcode = pkg + keytree.FuncPathSep + opcode
 		}
@@ -94,8 +94,9 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	funcName := inst.Reads[0]
 
 	var pkg string
-	if strings.HasPrefix(funcName, "/lib/") {
-		rest := funcName[len("/lib/"):]
+	libPrefix := keytree.LibRoot + keytree.PathSegSep
+	if strings.HasPrefix(funcName, libPrefix) {
+		rest := funcName[len(libPrefix):]
 		if dot := strings.LastIndex(rest, keytree.FuncPathSep); dot > 0 {
 			pkg = rest[:dot]
 			funcName = rest[dot+len(keytree.FuncPathSep):]
@@ -121,10 +122,10 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 		return ""
 	}
 
-	// TCO：复用当前帧，仅重链 overlay 到目标块（.rootfunc 不更新）
+	// TCO：复用当前帧，仅重链 overlay 到目标块（.rootfunc 不更新）。
+	// 注意：不能 UnMount，会删除 upper 层破坏局部变量。直接覆盖 overlay 元数据即可。
 	if tail {
 		frameRoot := keytree.FrameRoot(pc)
-		kv.UnMount(keytree.CodeOverlay(frameRoot))
 		if err := kv.Overlay(keytree.CodeOverlay(frameRoot), funcKey, keytree.CodeUpper(frameRoot)); err != nil {
 			vthread.SetError(ctx, kv, vtid, pc, "tco RuntimeError: overlay failed: "+err.Error())
 			return ""
