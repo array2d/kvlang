@@ -37,13 +37,18 @@ import (
 	"github.com/array2d/kvspace-go"
 )
 
+// kvSet is a shorthand for setting a single key-value pair.
+func kvSet(kv kvspace.KVSpace, key string, val kvspace.XValue) {
+	kv.Set([]kvspace.KVPair{{Key: key, Val: val}})
+}
+
 // ── 读 ────────────────────────────────────────────────────────────────────────
 
 // Get 读取 vthread 的当前 PC 和 status。
 // 若读取失败或 vthread 不存在，返回 ("", "")。
 func Get(ctx context.Context, kv kvspace.KVSpace, vtid string) (pc, status string) {
-	vals, err := kv.GetMany([]string{keytree.VThreadPC(vtid), keytree.VThreadStatus(vtid)})
-	if err != nil || len(vals) < 2 {
+	vals := kv.Get([]string{keytree.VThreadPC(vtid), keytree.VThreadStatus(vtid)})
+	if len(vals) < 2 {
 		return "", ""
 	}
 	return vals[0].Str(), vals[1].Str()
@@ -54,8 +59,8 @@ func Get(ctx context.Context, kv kvspace.KVSpace, vtid string) (pc, status strin
 // Set 更新 vthread 的 PC 和 status（瞬态：init / running / wait）。
 // 终态请用 SetDone / SetError，它们使用 Del+Notify 而非 Set。
 func Set(ctx context.Context, kv kvspace.KVSpace, vtid, pc, status string) {
-	kv.Set(keytree.VThreadPC(vtid), kvspace.Str(pc))
-	kv.Set(keytree.VThreadStatus(vtid), kvspace.Str(status))
+	kvSet(kv, keytree.VThreadPC(vtid), kvspace.Str(pc))
+	kvSet(kv, keytree.VThreadStatus(vtid), kvspace.Str(status))
 }
 
 // ── 写（终态）─────────────────────────────────────────────────────────────────
@@ -71,8 +76,8 @@ func SetDone(ctx context.Context, kv kvspace.KVSpace, vtid, retVal string) {
 
 // SetError 标记 vthread 错误终止。
 func SetError(ctx context.Context, kv kvspace.KVSpace, vtid, pc, errMsg string) {
-	kv.Set(keytree.VThreadPC(vtid), kvspace.Str(pc))
-	kv.Set(keytree.VThreadStatusMsg(vtid, "error"), kvspace.Str(errMsg))
+	kvSet(kv, keytree.VThreadPC(vtid), kvspace.Str(pc))
+	kvSet(kv, keytree.VThreadStatusMsg(vtid, "error"), kvspace.Str(errMsg))
 	kv.Del(keytree.VThreadStatus(vtid))
 	kv.Notify(keytree.VThreadStatus(vtid), kvspace.Str("error"))
 }
@@ -81,10 +86,10 @@ func SetError(ctx context.Context, kv kvspace.KVSpace, vtid, pc, errMsg string) 
 
 // AllocVtid 原子自增 /vthread/seq 并返回新 vtid。
 func AllocVtid(kv kvspace.KVSpace) string {
-	valV, _ := kv.Get(keytree.VthreadSeq)
-	n, _ := strconv.ParseInt(valV.Str(), 10, 64)
+	valV := kv.Get([]string{keytree.VthreadSeq})
+	n, _ := strconv.ParseInt(valV[0].Str(), 10, 64)
 	n++
-	kv.Set(keytree.VthreadSeq, kvspace.Str(strconv.FormatInt(n, 10)))
+	kvSet(kv, keytree.VthreadSeq, kvspace.Str(strconv.FormatInt(n, 10)))
 	return fmt.Sprintf("%d", n)
 }
 
@@ -93,17 +98,20 @@ func CreateVThread(kv kvspace.KVSpace, funcName string, reads, writes []string) 
 	vtid := fmt.Sprintf("%d", time.Now().UnixNano())
 	absPC := keytree.VThreadSlot(vtid, "", 0, 0)
 
-	if err := kv.Set(keytree.VThreadPC(vtid), kvspace.Str(absPC)); err != nil {
-		return "", fmt.Errorf("vthread.Create: set .pc: %w", err)
+	pairs := []kvspace.KVPair{
+		{Key: keytree.VThreadPC(vtid), Val: kvspace.Str(absPC)},
+		{Key: keytree.VThreadStatus(vtid), Val: kvspace.Str("init")},
+		{Key: keytree.VThreadCtime(vtid), Val: kvspace.Time(time.Now().UnixNano())},
+		{Key: keytree.VThreadSlot(vtid, "", 0, 0), Val: kvspace.Str(funcName)},
 	}
-	kv.Set(keytree.VThreadStatus(vtid), kvspace.Str("init"))
-	kv.Set(keytree.VThreadCtime(vtid), kvspace.Time(time.Now().UnixNano()))
-	kv.Set(keytree.VThreadSlot(vtid, "", 0, 0), kvspace.Str(funcName))
 	for i, r := range reads {
-		kv.Set(keytree.VThreadSlot(vtid, "", 0, -(i+1)), kvspace.Str(r))
+		pairs = append(pairs, kvspace.KVPair{Key: keytree.VThreadSlot(vtid, "", 0, -(i + 1)), Val: kvspace.Str(r)})
 	}
 	for i, w := range writes {
-		kv.Set(keytree.VThreadSlot(vtid, "", 0, i+1), kvspace.Str(w))
+		pairs = append(pairs, kvspace.KVPair{Key: keytree.VThreadSlot(vtid, "", 0, i + 1), Val: kvspace.Str(w)})
+	}
+	if err := kv.Set(pairs); err != nil {
+		return "", fmt.Errorf("vthread.Create: %w", err)
 	}
 	return vtid, nil
 }
@@ -112,14 +120,14 @@ func CreateVThread(kv kvspace.KVSpace, funcName string, reads, writes []string) 
 
 // WaitDone 阻塞等待 vthread 终态。
 func WaitDone(ctx context.Context, kv kvspace.KVSpace, vtid string, timeout time.Duration) (string, error) {
-	val, err := kv.Watch(keytree.VThreadStatus(vtid), timeout)
-	if err != nil {
-		return "", fmt.Errorf("WaitDone %s: %w", vtid, err)
-	}
+	val := kv.Watch(keytree.VThreadStatus(vtid), timeout)
 	signal := val.Str()
+	if signal == "" {
+		return "", fmt.Errorf("WaitDone %s: timeout", vtid)
+	}
 	if signal == "error" {
-		msgVal, _ := kv.Get(keytree.VThreadStatusMsg(vtid, "error"))
-		return "", fmt.Errorf("vthread %s: %s", vtid, msgVal.Str())
+		msgVal := kv.Get([]string{keytree.VThreadStatusMsg(vtid, "error")})
+		return "", fmt.Errorf("vthread %s: %s", vtid, msgVal[0].Str())
 	}
 	return signal, nil
 }

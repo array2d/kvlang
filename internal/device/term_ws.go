@@ -21,14 +21,14 @@ import (
 
 // ResolveTerm 通过 /vthread/<vtid>/term → /sys/term/${name}/${stream} 解析终端流配置。
 func ResolveTerm(ctx context.Context, kv kvspace.KVSpace, vtid, stream string) TermStream {
-	nameVal, err := kv.Get(keytree.VThreadTerm(vtid))
-	name := nameVal.Str()
-	if err != nil || name == "" {
+	nameVal := kv.Get([]string{keytree.VThreadTerm(vtid)})[0]
+	
+	name := nameVal.Str(); if name == "" {
 		return TermStream{}
 	}
 	base := keytree.DevTTY(name, stream)
-	tVal, _ := kv.Get(base + "/type")
-	dVal, _ := kv.Get(base + "/detail")
+	tVal := kv.Get([]string{base + "/type"})[0]
+	dVal := kv.Get([]string{base + "/detail"})[0]
 	return TermStream{Type: tVal.Str(), Detail: dVal.Str()}
 }
 

@@ -41,10 +41,7 @@ func Decode(ctx context.Context, kv kvspace.KVSpace, linkBase, pc string) (*Inst
 		keys = append(keys, fmt.Sprintf("%s/[%d,%d]", keyBase, addr0, i))
 	}
 
-	vals, err := kv.GetMany(keys)
-	if err != nil {
-		return nil, fmt.Errorf("Decode MGET: %w", err)
-	}
+	vals := kv.Get(keys)
 
 	inst := &Instruction{}
 	if s := string(vals[0].RawBytes()); s != "" {
