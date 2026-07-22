@@ -24,9 +24,15 @@ import (
 //   /vthread/vtid/[3,0]/[0,0]               子帧第一条指令
 //   /vthread/vtid/[3,0]/[1,0]/[0,0]         孙帧第一条指令
 
-// FuncLib 返回帧的函数库链接路径：frameRoot + "/.funclib"。
-// 软链接指向 /lib/<pkg>/<name> 只读指令树，kvcpu 取指时以此为 keyBase。
+// FuncLib 返回帧的函数库链接路径（已废弃，保留兼容）。
 func FuncLib(frameRoot string) string { return frameRoot + "/" + ReservedPrefix + "funclib" }
+
+// CodeOverlay 返回 overlay merge 点：Overlay(merge=CodeOverlay, lower=funcKey, upper=CodeUpper)。
+// kvspace 自动先查 upper 再回落 lower。
+func CodeOverlay(frameRoot string) string { return frameRoot + "/" + ReservedPrefix + "code" }
+
+// CodeUpper 返回 overlay 的 upper 层，本帧局部变量写入此路径下。
+func CodeUpper(frameRoot string) string { return frameRoot + "/" + ReservedPrefix + "local" }
 
 // RootFunc 返回帧的入口函数名键：frameRoot + "/.rootfunc"。
 // TCO 复用帧时不更新此键（保持入口函数名），供 resolveLabel 裸标签解析。

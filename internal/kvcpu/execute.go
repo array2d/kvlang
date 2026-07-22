@@ -65,7 +65,7 @@ func (c *cpu) Execute(pc string) error {
 			return fmt.Errorf("%s", msg)
 		}
 
-		linkBase := keytree.FuncLib(keytree.FrameRoot(pc))
+		linkBase := keytree.CodeOverlay(keytree.FrameRoot(pc))
 		inst, err := op.Decode(ctx, c.kv, linkBase, pc)
 		if err != nil {
 			logx.Debug("[%s] decode error at %s: %v", vtid, pc, err)

@@ -14,7 +14,7 @@ func resolveWriteKey(kv kvspace.KVSpace, framePath, param string) string {
 	if r := kv.Get([]string{keytree.WParam(framePath, param)})[0]; !r.IsNil() {
 		return r.Str()
 	}
-	return framePath + "/" + param
+	return keytree.CodeOverlay(framePath) + "/" + param
 }
 
 // ResolveReadValue maps a read-slot param to a typed Value.
@@ -58,5 +58,5 @@ func resolveReadValue(kv kvspace.KVSpace, framePath, param string) kvspace.XValu
 	if r := kv.Get([]string{keytree.RParam(framePath, param)})[0]; !r.IsNil() {
 		return kv.Get([]string{r.Str()})[0]
 	}
-	return kv.Get([]string{framePath + "/" + param})[0]
+	return kv.Get([]string{keytree.CodeOverlay(framePath) + "/" + param})[0]
 }
