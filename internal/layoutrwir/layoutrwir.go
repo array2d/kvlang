@@ -15,7 +15,7 @@
 //	frameRoot/.rootfunc                       入口函数名（TCO 不更新）
 //	frameRoot/.rparam/<name> /.wparam/<name>  零拷贝读写参重定向
 //
-// kvcpu 取指：linkBase = CodeOverlay(FrameRoot(pc))，kvspace 自动先查 .local 再回落 /lib
+// kvcpu 取指：linkBase = FrameRoot(pc)，kvspace 自动先查 .upper 再回落 /lib
 package layoutrwir
 
 import (
@@ -126,7 +126,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	// 注意：不能 UnMount，会删除 upper 层破坏局部变量。直接覆盖 overlay 元数据即可。
 	if tail {
 		frameRoot := keytree.FrameRoot(pc)
-		if err := kv.Overlay(keytree.CodeOverlay(frameRoot), funcKey, keytree.CodeUpper(frameRoot)); err != nil {
+		if err := kv.Overlay(frameRoot, funcKey, keytree.CodeUpper(frameRoot)); err != nil {
 			vthread.SetError(ctx, kv, vtid, pc, "tco RuntimeError: overlay failed: "+err.Error())
 			return ""
 		}
@@ -138,7 +138,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	frameRoot := pc
 
 	// overlay: .code/[i,j] → 先 .local/[i,j] → 回落 /lib/<pkg>/<name>/[i,j]
-	if err := kv.Overlay(keytree.CodeOverlay(frameRoot), funcKey, keytree.CodeUpper(frameRoot)); err != nil {
+	if err := kv.Overlay(frameRoot, funcKey, keytree.CodeUpper(frameRoot)); err != nil {
 		vthread.SetError(ctx, kv, vtid, pc, "RuntimeError: overlay failed: "+err.Error())
 		return ""
 	}
@@ -171,7 +171,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 		kv.Set(paramPairs)
 	}
 	// 写参零拷贝：.rparam 和 .wparam 指向同一调用方路径，不创建本地副本
-	callerLink := keytree.CodeOverlay(callerFrameRoot)
+	callerLink := callerFrameRoot
 	addr0 := op.ExtractAddr0FromPC(pc)
 	for i, ret := range funcSig.Returns {
 		wSlot := fmt.Sprintf("%s/[%d,%d]", callerLink, addr0, i+1)
@@ -218,7 +218,7 @@ func HandleReturn(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.I
 
 	nextPC = op.NextPC(frameRoot)
 
-	kv.UnMount(keytree.CodeOverlay(frameRoot))
+	kv.UnMount(frameRoot)
 	kv.DelTree(frameRoot)
 	return nextPC, ""
 }
@@ -250,7 +250,7 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 	funcKey := keytree.LibFunc(pkg, name)
 
 	vthreadRoot := keytree.VThread(vtid)
-	if err := kv.Overlay(keytree.CodeOverlay(vthreadRoot), funcKey, keytree.CodeUpper(vthreadRoot)); err != nil {
+	if err := kv.Overlay(vthreadRoot, funcKey, keytree.CodeUpper(vthreadRoot)); err != nil {
 		vthread.SetError(ctx, kv, vtid, "", "Bootstrap: RuntimeError: overlay failed: "+err.Error())
 		return ""
 	}
@@ -343,7 +343,7 @@ func frameSlotKey(frameRoot, slot string) string {
 	if slot[0] == '.' {
 		return "" // 引擎保留键（._ 等丢弃槽），不写
 	}
-	return keytree.CodeOverlay(frameRoot) + "/" + slot // 裸标识符，穿过 overlay
+	return frameRoot + keytree.PathSegSep + slot // 裸标识符，穿过 overlay
 }
 
 func WriteFunc(kv kvspace.KVSpace, pkg string, fn *ast.Func) {
