@@ -123,7 +123,7 @@ func (atOp) Call(f *op.Frame) error {
 			base = resolveKVPath(fp, raw)
 		}
 		path := keytree.Member(base, kvKey(inputs[1]))
-		v := f.KV.Get([]string{path})[0]; return writeResult(f, v)
+		v := kvspace.GetOne(f.KV, path); return writeResult(f, v)
 	}
 	if inputs[0].IsNil() {
 		msg := "IndexError: at: base " + f.Inst.Reads[0] + " is nil; help: declare a key-family first (e.g. `" + f.Inst.Reads[0] + " = {}`) or pass a path string"
@@ -286,7 +286,7 @@ func (hasOp) Call(f *op.Frame) error {
 	base := resolveReadValue(f.KV, fp, f.Inst.Reads[0]).Str()
 	if base == "" { base = resolveKVPath(fp, f.Inst.Reads[0]) }
 	key := kvKey(inputs[1])
-	v := f.KV.Get([]string{keytree.Member(base, key)})[0]
+	v := kvspace.GetOne(f.KV, keytree.Member(base, key))
 	return writeResult(f, kvspace.Bool(!v.IsNil()))
 }
 

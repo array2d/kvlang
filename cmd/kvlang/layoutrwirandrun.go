@@ -27,7 +27,7 @@ func cmdLayoutRWIRAndRun(args []string) {
 func findEntry(dsn string) string {
 	kv := kvspace.Conn(dsn)
 	defer kv.DisConn()
-	if entry := findEntryPrefix(kv, keytree.LibRoot); entry != "" {
+	if entry := findEntryPrefix(kv, keytree.LibRoot+"/"); entry != "" {
 		return entry
 	}
 	return "init"
@@ -36,13 +36,8 @@ func findEntry(dsn string) string {
 func findEntryPrefix(kv kvspace.KVSpace, prefix string) string {
 	children := kv.List(prefix)
 	for _, c := range children {
-		if strings.HasSuffix(c, ".init") {
-			return c
-		}
-		sub := prefix + "/" + c
-		if entry := findEntryPrefix(kv, sub); entry != "" {
-			return c + "/" + entry
-		}
+		if strings.HasSuffix(c, ".init") { return c }
+		if entry := findEntryPrefix(kv, prefix+c+"/"); entry != "" { return c + "/" + entry }
 	}
 	return ""
 }

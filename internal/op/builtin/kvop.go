@@ -26,7 +26,7 @@ func (o kvHasOp) Call(f *op.Frame) error {
 	}
 	idxVal := resolveReadValue(f.KV, fp, f.Inst.Reads[1])
 	key := keytree.Member(prefix, strconv.Itoa(int(idxVal.Int64())))
-	v := f.KV.Get([]string{key})[0]
+	v := kvspace.GetOne(f.KV, key)
 	return writeResult(f, kvspace.Bool(!v.IsNil()))
 }
 
@@ -51,7 +51,7 @@ func (o kvAtOp) Call(f *op.Frame) error {
 	} else {
 		key = keytree.Member(prefix, idxVal.Str())
 	}
-	v := f.KV.Get([]string{key})[0]
+	v := kvspace.GetOne(f.KV, key)
 	if v.IsNil() {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC,
 			fmt.Sprintf("KeyError: kvat: key not found: %s; help: verify the key exists in the path or key-family", key))

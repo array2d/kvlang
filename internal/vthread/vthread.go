@@ -41,11 +41,9 @@ import (
 
 // Get 读取 vthread 的当前 PC 和 status。
 func Get(ctx context.Context, kv kvspace.KVSpace, vtid string) (pc, status string) {
-	vals := kv.Get([]string{keytree.VThreadPC(vtid), keytree.VThreadStatus(vtid)})
-	if len(vals) < 2 {
-		return "", ""
-	}
-	return vals[0].Str(), vals[1].Str()
+	pcV := kvspace.GetOne(kv, keytree.VThreadPC(vtid))
+	stV := kvspace.GetOne(kv, keytree.VThreadStatus(vtid))
+	return pcV.Str(), stV.Str()
 }
 
 // ── 写（瞬态） ────────────────────────────────────────────────────────────────
@@ -81,8 +79,8 @@ func SetError(ctx context.Context, kv kvspace.KVSpace, vtid, pc, errMsg string) 
 
 // AllocVtid 原子自增 /vthread/seq 并返回新 vtid。
 func AllocVtid(kv kvspace.KVSpace) string {
-	valV := kv.Get([]string{keytree.VthreadSeq})
-	n, _ := strconv.ParseInt(valV[0].Str(), 10, 64)
+	valV := kvspace.GetOne(kv, keytree.VthreadSeq)
+	n, _ := strconv.ParseInt(valV.Str(), 10, 64)
 	n++
 	kv.Set([]kvspace.KVPair{{keytree.VthreadSeq, kvspace.Str(strconv.FormatInt(n, 10))}})
 	return fmt.Sprintf("%d", n)
@@ -121,8 +119,8 @@ func WaitDone(ctx context.Context, kv kvspace.KVSpace, vtid string, timeout time
 		return "", fmt.Errorf("WaitDone %s: timeout", vtid)
 	}
 	if signal == "error" {
-		msgVal := kv.Get([]string{keytree.VThreadStatusMsg(vtid, "error")})
-		return "", fmt.Errorf("vthread %s: %s", vtid, msgVal[0].Str())
+		msgVal := kvspace.GetOne(kv, keytree.VThreadStatusMsg(vtid, "error"))
+		return "", fmt.Errorf("vthread %s: %s", vtid, msgVal.Str())
 	}
 	return signal, nil
 }

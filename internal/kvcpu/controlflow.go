@@ -100,14 +100,14 @@ func resolveLabel(kv kvspace.KVSpace, framePath, label string) string {
 	if strings.Contains(label, "/") {
 		return label
 	}
-	if v := kv.Get([]string{keytree.RootFunc(framePath)})[0]; !v.IsNil() {
+	if v := kvspace.GetOne(kv, keytree.RootFunc(framePath)); !v.IsNil() {
 		if rootFunc := v.Str(); rootFunc != "" {
 			qualified := rootFunc + "/" + label
 			pkg := ""
-			if pv := kv.Get([]string{keytree.FramePkg(framePath)})[0]; !pv.IsNil() {
+			if pv := kvspace.GetOne(kv, keytree.FramePkg(framePath)); !pv.IsNil() {
 				pkg = pv.Str()
 			}
-			if !kv.Get([]string{keytree.LibFunc(pkg, qualified)})[0].IsNil() {
+			if !kvspace.GetOne(kv, keytree.LibFunc(pkg, qualified)).IsNil() {
 				return qualified
 			}
 		}

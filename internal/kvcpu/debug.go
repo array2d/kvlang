@@ -20,7 +20,7 @@ func isEntryPC(pc string) bool { return keytree.IsEntryPC(pc) }
 
 // debugFuncName 从帧根读取 .rootfunc 字段获取函数名。
 func debugFuncName(kv kvspace.KVSpace, frameRoot string) string {
-	v := kv.Get([]string{keytree.RootFunc(frameRoot)})[0]
+	v := kvspace.GetOne(kv, keytree.RootFunc(frameRoot))
 	if v.IsNil() { return "?" }
 	return v.Str()
 }

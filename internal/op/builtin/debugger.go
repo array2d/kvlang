@@ -16,7 +16,7 @@ import (
 type debuggerOp struct{}
 func (debuggerOp) Call(f *op.Frame) error {
 	debugKey := keytree.VThreadDebugger(f.Vtid)
-	v := f.KV.Get([]string{debugKey})[0]
+	v := kvspace.GetOne(f.KV, debugKey)
 	if v.IsNil() {
 		// 非调试模式：no-op
 		vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")

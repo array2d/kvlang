@@ -77,6 +77,7 @@ func writeStmt(kv kvspace.KVSpace, st ast.Stmt, prefix string, idx *int, typeMap
 		*idx = n + 1
 	case *ast.BlockStmt:
 		sub := prefix + "/" + s.Label
+		kvspace.MkIndex(kv, sub+"/")
 		i := 0
 		for _, child := range s.Body {
 			writeStmt(kv, child, sub, &i, typeMap, pkg)
@@ -109,7 +110,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	}
 	funcKey := keytree.LibFunc(pkg, funcName)
 
-	sigVal := kv.Get([]string{funcKey})[0]
+	sigVal := kvspace.GetOne(kv, funcKey)
 	if sigVal.IsNil() {
 		vthread.SetError(ctx, kv, vtid, pc, "NameError: func signature not found: "+funcName)
 		return ""
@@ -123,10 +124,10 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	}
 
 	// TCO：复用当前帧，仅重链 overlay 到目标块（.rootfunc 不更新）。
-	// 注意：不能 UnMount，会删除 upper 层破坏局部变量。直接覆盖 overlay 元数据即可。
 	if tail {
 		frameRoot := keytree.FrameRoot(pc)
-		if err := kv.Overlay(frameRoot, funcKey, keytree.CodeUpper(frameRoot)); err != nil {
+		kv.UnLink(keytree.CodeUpper(frameRoot) + "/")
+		if err := kv.ExtIndex(keytree.CodeUpper(frameRoot)+"/", funcKey+"/"); err != nil {
 			vthread.SetError(ctx, kv, vtid, pc, "tco RuntimeError: overlay failed: "+err.Error())
 			return ""
 		}
@@ -137,8 +138,8 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	callerFrameRoot := keytree.FrameRoot(pc)
 	frameRoot := pc
 
-	// overlay: .code/[i,j] → 先 .local/[i,j] → 回落 /lib/<pkg>/<name>/[i,j]
-	if err := kv.Overlay(frameRoot, funcKey, keytree.CodeUpper(frameRoot)); err != nil {
+	kvspace.MkIndex(kv, keytree.CodeUpper(frameRoot)+"/")
+	if err := kv.ExtIndex(keytree.CodeUpper(frameRoot)+"/", funcKey+"/"); err != nil {
 		vthread.SetError(ctx, kv, vtid, pc, "RuntimeError: overlay failed: "+err.Error())
 		return ""
 	}
@@ -146,6 +147,8 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	kv.Set([]kvspace.KVPair{
 		{keytree.RootFunc(frameRoot), kvspace.Str(funcName)},
 		{keytree.FramePkg(frameRoot), kvspace.Str(pkg)},
+		{frameRoot + keytree.MemberSep + keytree.SegRParam + "/", kvspace.Raw(kvspace.KindIndex, nil)},
+		{frameRoot + keytree.MemberSep + keytree.SegWParam + "/", kvspace.Raw(kvspace.KindIndex, nil)},
 	})
 
 	// 读参零拷贝：.rparam 重定向到调用方值位置
@@ -171,11 +174,11 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 		kv.Set(paramPairs)
 	}
 	// 写参零拷贝：.rparam 和 .wparam 指向同一调用方路径，不创建本地副本
-	callerLink := callerFrameRoot
+	callerLink := keytree.CodeUpper(callerFrameRoot)
 	addr0 := op.ExtractAddr0FromPC(pc)
 	for i, ret := range funcSig.Returns {
 		wSlot := fmt.Sprintf("%s/[%d,%d]", callerLink, addr0, i+1)
-		wTargetVal := kv.Get([]string{wSlot})[0]
+		wTargetVal := kvspace.GetOne(kv, wSlot)
 		wTarget := string(wTargetVal.RawBytes())
 		if wTarget == "" {
 			continue
@@ -218,7 +221,7 @@ func HandleReturn(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.I
 
 	nextPC = op.NextPC(frameRoot)
 
-	kv.UnMount(frameRoot)
+	kv.UnLink(keytree.CodeUpper(frameRoot) + "/")
 	kv.DelTree(frameRoot)
 	return nextPC, ""
 }
@@ -250,7 +253,8 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 	funcKey := keytree.LibFunc(pkg, name)
 
 	vthreadRoot := keytree.VThread(vtid)
-	if err := kv.Overlay(vthreadRoot, funcKey, keytree.CodeUpper(vthreadRoot)); err != nil {
+	kvspace.MkIndex(kv, keytree.CodeUpper(vthreadRoot)+"/")
+	if err := kv.ExtIndex(keytree.CodeUpper(vthreadRoot)+"/", funcKey+"/"); err != nil {
 		vthread.SetError(ctx, kv, vtid, "", "Bootstrap: RuntimeError: overlay failed: "+err.Error())
 		return ""
 	}
@@ -261,7 +265,7 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 
 	// 绑定入参（若有）。顶层帧无调用方，值写入 vthreadRoot，.rparam 指向自身槽位。
 	if len(args) > 0 {
-		sigVal := kv.Get([]string{funcKey})[0]
+		sigVal := kvspace.GetOne(kv, funcKey)
 		sig := parser.ParseFuncSig(sigVal.Str())
 		if err := checkDupParams(sig, funcName); err != "" {
 			vthread.SetError(ctx, kv, vtid, "", err)
@@ -301,7 +305,7 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 //	".xxx" → ""                 (引擎保留键，忽略，如 ._ 丢弃槽)
 func resolveWritePath(kv kvspace.KVSpace, framePath, name string) string {
 	rk := frameSlotKey(framePath, name)
-	if r := kv.Get([]string{keytree.WParam(framePath, name)})[0]; !r.IsNil() {
+	if r := kvspace.GetOne(kv, keytree.WParam(framePath, name)); !r.IsNil() {
 		return r.Str()
 	}
 	return rk
@@ -309,7 +313,7 @@ func resolveWritePath(kv kvspace.KVSpace, framePath, name string) string {
 
 func resolveReadPath(kv kvspace.KVSpace, framePath, name string) string {
 	if isLiteral(name) { return "" }
-	if r := kv.Get([]string{keytree.RParam(framePath, name)})[0]; !r.IsNil() {
+	if r := kvspace.GetOne(kv, keytree.RParam(framePath, name)); !r.IsNil() {
 		return r.Str()
 	}
 	return frameSlotKey(framePath, name)
@@ -343,7 +347,7 @@ func frameSlotKey(frameRoot, slot string) string {
 	if slot[0] == '.' {
 		return "" // 引擎保留键（._ 等丢弃槽），不写
 	}
-	return frameRoot + keytree.PathSegSep + slot // 裸标识符，穿过 overlay
+	return keytree.CodeUpper(frameRoot) + keytree.PathSegSep + slot
 }
 
 func WriteFunc(kv kvspace.KVSpace, pkg string, fn *ast.Func) {
@@ -351,6 +355,7 @@ func WriteFunc(kv kvspace.KVSpace, pkg string, fn *ast.Func) {
 	// 清除旧函数数据：旧指令的读/写槽数量可能多于新函数，
 	// 若不清除则旧槽（如 [0,-1]、[0,-2]）会被新执行错误读取。
 	kv.DelTree(keytree.LibFunc(pkg, fn.Sig.Name))
+	kvspace.MkIndex(kv, keytree.LibFunc(pkg, fn.Sig.Name)+"/")
 	kv.Set([]kvspace.KVPair{
 		{keytree.LibSrc(pkg, fn.Sig.Name), kvspace.Str(fn.FullText())},
 		{keytree.LibFunc(pkg, fn.Sig.Name), kvspace.Str(fn.Sig.String())},

@@ -64,6 +64,7 @@ func executeEntry(kv kvspace.KVSpace, entryName string, debug bool) {
 	ctx := context.Background()
 	vtid := vthread.AllocVtid(kv)
 	kv.DelTree(keytree.VThread(vtid))
+	kvspace.MkIndex(kv, keytree.VThread(vtid)+"/")
 	firstPC := layoutrwir.Bootstrap(ctx, kv, vtid, entryName, nil)
 	if firstPC == "" {
 		logx.Fatal("[single] Bootstrap %s failed", entryName)
@@ -90,9 +91,9 @@ func executeEntry(kv kvspace.KVSpace, entryName string, debug bool) {
 }
 
 func reportRunError(kv kvspace.KVSpace, vtid string) {
-	msgVal := kv.Get([]string{keytree.VThreadStatusMsg(vtid, "error")})[0]
+	msgVal := kvspace.GetOne(kv, keytree.VThreadStatusMsg(vtid, "error"))
 	if !msgVal.IsNil() {
-		pcVal := kv.Get([]string{keytree.VThreadPC(vtid)})[0]
+		pcVal := kvspace.GetOne(kv, keytree.VThreadPC(vtid))
 		logx.Error("%s at %s", msgVal.Str(), pcVal.Str())
 		os.Exit(1)
 	}

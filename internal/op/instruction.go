@@ -32,16 +32,16 @@ func Decode(ctx context.Context, kv kvspace.KVSpace, linkBase, pc string) (*Inst
 		return nil, fmt.Errorf("Decode: invalid pc (no /[coord]): %q", pc)
 	}
 	addr0 := extractAddr0(pc[lastSlash+1:])
-	keyBase := linkBase
+	prefix := linkBase + kvspace.DirIndexSuf
 
-	keys := make([]string, 0, 1+maxParams*2)
-	keys = append(keys, fmt.Sprintf("%s/[%d,0]", keyBase, addr0))
+	names := make([]string, 0, 1+maxParams*2)
+	names = append(names, fmt.Sprintf("[%d,0]", addr0))
 	for i := 1; i <= maxParams; i++ {
-		keys = append(keys, fmt.Sprintf("%s/[%d,-%d]", keyBase, addr0, i))
-		keys = append(keys, fmt.Sprintf("%s/[%d,%d]", keyBase, addr0, i))
+		names = append(names, fmt.Sprintf("[%d,-%d]", addr0, i))
+		names = append(names, fmt.Sprintf("[%d,%d]", addr0, i))
 	}
 
-	vals := kv.Get(keys)
+	vals := kv.Get(prefix, names)
 
 	inst := &Instruction{}
 	if s := string(vals[0].RawBytes()); s != "" {

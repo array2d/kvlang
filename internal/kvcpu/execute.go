@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/array2d/kvspace-go"
 	"kvlang/internal/keytree"
 	"kvlang/internal/logx"
 	"kvlang/internal/op"
@@ -12,7 +13,6 @@ import (
 	"kvlang/internal/vthread"
 	"kvlang/internal/vtype"
 
-	// 触发 str、tensor vtype 的 init() 注册
 	_ "kvlang/internal/vtype"
 )
 
@@ -65,7 +65,7 @@ func (c *cpu) Execute(pc string) error {
 			return fmt.Errorf("%s", msg)
 		}
 
-		linkBase := keytree.FrameRoot(pc)
+		linkBase := keytree.CodeUpper(keytree.FrameRoot(pc))
 		inst, err := op.Decode(ctx, c.kv, linkBase, pc)
 		if err != nil {
 			logx.Debug("[%s] decode error at %s: %v", vtid, pc, err)
@@ -88,7 +88,7 @@ func (c *cpu) Execute(pc string) error {
 		//   - 非单步模式：仅在函数入口（isEntryPC）读取一次 .debug（每次函数调用 1 次）
 		//   - 单步模式：每条指令读取一次 .debug（已在调试中，overhead 可接受）
 		if stepping || isEntryPC(pc) {
-			v := c.kv.Get([]string{keytree.VThreadDebugger(vtid)})[0]
+			v := kvspace.GetOne(c.kv, keytree.VThreadDebugger(vtid))
 			switch mode := v.Str(); {
 			case mode == "" && stepping:
 				// Agent 清除了 .debugger 标志 → 退出单步模式
@@ -156,7 +156,7 @@ func (c *cpu) Execute(pc string) error {
 		}
 
 		// 读取指令执行后更新的 PC
-		newPCVal := c.kv.Get([]string{keytree.VThreadPC(vtid)})[0]
+		newPCVal := kvspace.GetOne(c.kv, keytree.VThreadPC(vtid))
 		newPC := newPCVal.Str()
 		if newPC == "" {
 			break
@@ -182,7 +182,7 @@ func (c *cpu) checkReadOnlyWrites(ctx context.Context, vtid, pc string, inst *op
 	if len(inst.Writes) == 0 {
 		return nil
 	}
-	roVal := c.kv.Get([]string{keytree.FrameRO(keytree.FrameRoot(pc))})[0]
+	roVal := kvspace.GetOne(c.kv, keytree.FrameRO(keytree.FrameRoot(pc)))
 	ro := roVal.Str()
 	if ro == "" {
 		return nil

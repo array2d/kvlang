@@ -32,6 +32,7 @@ func cmdLayoutRWIR(args []string) {
 
 	kv := kvspace.Conn(*dsn)
 	defer kv.DisConn()
+	initDirs(kv)
 
 	var allFiles []string
 	for _, arg := range fs.Args() {

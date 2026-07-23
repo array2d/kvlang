@@ -5,14 +5,23 @@ import (
 	"github.com/array2d/kvspace-go"
 )
 
-func registerDefaultTerm(kv kvspace.KVSpace) {
-	kv.Set([]kvspace.KVPair{
-		{keytree.DevTTY("kvlangrun", "stdout") + "/type", kvspace.Str("file")},
-		{keytree.DevTTY("kvlangrun", "stdout") + "/detail", kvspace.Str("/dev/stdout")},
-		{keytree.DevTTY("kvlangrun", "stderr") + "/type", kvspace.Str("file")},
-		{keytree.DevTTY("kvlangrun", "stderr") + "/detail", kvspace.Str("/dev/stderr")},
-		{keytree.DevTTY("kvlangrun", "stdin") + "/type", kvspace.Str("file")},
-		{keytree.DevTTY("kvlangrun", "stdin") + "/detail", kvspace.Str("/dev/stdin")},
-	})
+func initDirs(kv kvspace.KVSpace) {
+	kvspace.MkIndex(kv, "/lib/")
+	kvspace.MkIndex(kv, "/vthread/")
 }
 
+func registerDefaultTerm(kv kvspace.KVSpace) {
+	initDirs(kv)
+	h := keytree.DevTTY("kvlangrun", "")
+	kvspace.MkIndex(kv, h+"stdout/")
+	kvspace.MkIndex(kv, h+"stderr/")
+	kvspace.MkIndex(kv, h+"stdin/")
+	kv.Set([]kvspace.KVPair{
+		{h + "stdout/type", kvspace.Str("file")},
+		{h + "stdout/detail", kvspace.Str("/dev/stdout")},
+		{h + "stderr/type", kvspace.Str("file")},
+		{h + "stderr/detail", kvspace.Str("/dev/stderr")},
+		{h + "stdin/type", kvspace.Str("file")},
+		{h + "stdin/detail", kvspace.Str("/dev/stdin")},
+	})
+}

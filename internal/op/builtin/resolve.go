@@ -11,10 +11,10 @@ func isAbsolute(param string) bool { return len(param) > 0 && param[0] == '/' }
 // 写参重定向：若帧有 .wparam/<param>，返回其存储的绝对路径（零拷贝直写父帧）。
 func resolveWriteKey(kv kvspace.KVSpace, framePath, param string) string {
 	if isAbsolute(param) { return param }
-	if r := kv.Get([]string{keytree.WParam(framePath, param)})[0]; !r.IsNil() {
+	if r := kvspace.GetOne(kv, keytree.WParam(framePath, param)); !r.IsNil() {
 		return r.Str()
 	}
-	return framePath + keytree.PathSegSep + param
+	return keytree.CodeUpper(framePath) + keytree.PathSegSep + param
 }
 
 // ResolveReadValue maps a read-slot param to a typed Value.
@@ -38,7 +38,7 @@ func resolveReadValue(kv kvspace.KVSpace, framePath, param string) kvspace.XValu
 		return kvspace.Str(param[1:])
 	}
 	if isAbsolute(param) {
-		return kv.Get([]string{param})[0]
+		return kvspace.GetOne(kv, param)
 	}
 	// bool literals: exact match (parser always emits lowercase "true"/"false")
 	if param == "true"  { return kvspace.Bool(true) }
@@ -55,8 +55,8 @@ func resolveReadValue(kv kvspace.KVSpace, framePath, param string) kvspace.XValu
 	// bare identifier → check redirect first, then slot in current frame
 	// 读参重定向：帧 .rparam/<param> → 调用方值位置（零拷贝读）
 	// 写参重定向：帧 .wparam/<param> → 调用方写目标（零拷贝读写）
-	if r := kv.Get([]string{keytree.RParam(framePath, param)})[0]; !r.IsNil() {
-		return kv.Get([]string{r.Str()})[0]
+	if r := kvspace.GetOne(kv, keytree.RParam(framePath, param)); !r.IsNil() {
+		return kvspace.GetOne(kv, r.Str())
 	}
-	return kv.Get([]string{framePath + keytree.PathSegSep + param})[0]
+	return kvspace.GetOne(kv, keytree.CodeUpper(framePath) + keytree.PathSegSep + param)
 }
