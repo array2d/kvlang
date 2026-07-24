@@ -64,7 +64,7 @@ func executeEntry(kv kvspace.KVSpace, entryName string, debug bool) {
 	ctx := context.Background()
 	vtid := vthread.AllocVtid(kv)
 	kv.DelTree(keytree.VThread(vtid))
-	kvspace.MkIndex(kv, keytree.VThread(vtid)+"/")
+	kvspace.MkIndexRecursive(kv, keytree.VThread(vtid)+"/")
 	firstPC := layoutrwir.Bootstrap(ctx, kv, vtid, entryName, nil)
 	if firstPC == "" {
 		logx.Fatal("[single] Bootstrap %s failed", entryName)

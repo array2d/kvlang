@@ -77,7 +77,7 @@ func writeStmt(kv kvspace.KVSpace, st ast.Stmt, prefix string, idx *int, typeMap
 		*idx = n + 1
 	case *ast.BlockStmt:
 		sub := prefix + "/" + s.Label
-		kvspace.MkIndex(kv, sub+"/")
+		kvspace.MkIndexRecursive(kv, sub+"/")
 		i := 0
 		for _, child := range s.Body {
 			writeStmt(kv, child, sub, &i, typeMap, pkg)
@@ -138,7 +138,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	callerFrameRoot := keytree.FrameRoot(pc)
 	frameRoot := pc
 
-	kvspace.MkIndex(kv, keytree.CodeUpper(frameRoot)+"/")
+	kvspace.MkIndexRecursive(kv, keytree.CodeUpper(frameRoot)+"/")
 	if err := kv.ExtIndex(keytree.CodeUpper(frameRoot)+"/", funcKey+"/"); err != nil {
 		vthread.SetError(ctx, kv, vtid, pc, "RuntimeError: overlay failed: "+err.Error())
 		return ""
@@ -253,7 +253,7 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 	funcKey := keytree.LibFunc(pkg, name)
 
 	vthreadRoot := keytree.VThread(vtid)
-	kvspace.MkIndex(kv, keytree.CodeUpper(vthreadRoot)+"/")
+	kvspace.MkIndexRecursive(kv, keytree.CodeUpper(vthreadRoot)+"/")
 	if err := kv.ExtIndex(keytree.CodeUpper(vthreadRoot)+"/", funcKey+"/"); err != nil {
 		vthread.SetError(ctx, kv, vtid, "", "Bootstrap: RuntimeError: overlay failed: "+err.Error())
 		return ""
@@ -355,7 +355,7 @@ func WriteFunc(kv kvspace.KVSpace, pkg string, fn *ast.Func) {
 	// 清除旧函数数据：旧指令的读/写槽数量可能多于新函数，
 	// 若不清除则旧槽（如 [0,-1]、[0,-2]）会被新执行错误读取。
 	kv.DelTree(keytree.LibFunc(pkg, fn.Sig.Name))
-	kvspace.MkIndex(kv, keytree.LibFunc(pkg, fn.Sig.Name)+"/")
+	kvspace.MkIndexRecursive(kv, keytree.LibFunc(pkg, fn.Sig.Name)+"/")
 	kv.Set([]kvspace.KVPair{
 		{keytree.LibSrc(pkg, fn.Sig.Name), kvspace.Str(fn.FullText())},
 		{keytree.LibFunc(pkg, fn.Sig.Name), kvspace.Str(fn.Sig.String())},

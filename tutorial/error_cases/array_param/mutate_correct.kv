@@ -1,4 +1,6 @@
 # ✅ 正确：数组在写参位置，函数返回修改后的数组。
+# 期望诊断:
+#   has no type annotation
 def mutate() -> (a) {
     arr:int = [10, 20]
     99 -> set(arr, 0, 99)    # set 返回修改后的数组

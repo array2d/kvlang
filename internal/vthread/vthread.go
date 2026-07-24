@@ -65,11 +65,14 @@ func SetDone(ctx context.Context, kv kvspace.KVSpace, vtid, retVal string) {
 	kv.Notify(keytree.VThreadStatus(vtid), kvspace.Str(retVal))
 }
 
-// SetError 标记 vthread 错误终止。3 RTT（Set + Del + Notify）。
+// SetError 标记 vthread 错误终止。MkIndexRecursive 确保 .error/ 目录存在（kvspace Set 要求父目录已存在）。
 func SetError(ctx context.Context, kv kvspace.KVSpace, vtid, pc, errMsg string) {
+	msgPath := keytree.VThreadStatusMsg(vtid, "error")
+	prefix, _ := kvspace.SepPath(msgPath)
+	kvspace.MkIndexRecursive(kv, prefix+kvspace.DirIndexSuf)
 	kv.Set([]kvspace.KVPair{
 		{keytree.VThreadPC(vtid), kvspace.Str(pc)},
-		{keytree.VThreadStatusMsg(vtid, "error"), kvspace.Str(errMsg)},
+		{msgPath, kvspace.Str(errMsg)},
 	})
 	kv.Del(keytree.VThreadStatus(vtid))
 	kv.Notify(keytree.VThreadStatus(vtid), kvspace.Str("error"))

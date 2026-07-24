@@ -76,7 +76,7 @@ func newSession(
 	}
 	vthread.Set(ctx, kv, vtid, firstPC, "init")
 	// 在 goroutine 启动前写 debug 标志，保证 Execute 首次 isFuncEntryPC 检查时可见
-	kv.Set(keytree.VThreadDebugger(vtid), kvspace.Str("step"))
+	kv.Set([]kvspace.KVPair{{keytree.VThreadDebugger(vtid), kvspace.Str("step")}})
 
 	s := &traceSession{
 		kv:        kv,
@@ -104,8 +104,8 @@ func (s *traceSession) Run(t *testing.T, handler func(ev pauseEv, step int) stri
 	step := 0
 loop:
 	for {
-		val, err := s.kv.Watch(s.pauseKey, dbgStepTimeout)
-		if err != nil {
+		val := s.kv.Watch(s.pauseKey, dbgStepTimeout)
+		if val.IsNil() {
 			// Watch 超时：检查 Execute 是否已结束
 			select {
 			case <-done:
@@ -134,7 +134,7 @@ loop:
 
 // readInt 读取帧内整数变量，返回 int64（变量不存在时返回 0）。
 func readInt(kv kvspace.KVSpace, frame, name string) int64 {
-	v, _ := kv.Get(frame + "/" + name)
+	v := kvspace.GetOne(kv, frame+"/"+name)
 	return v.Int64()
 }
 
@@ -492,7 +492,7 @@ def sum_to(n: int64) -> (total: int64) {
 	}
 
 	// vthread 不应处于 error 状态（正常结束：SetDone 已 Del .status）
-	errMsg, _ := kv.Get(keytree.VThreadStatusMsg(s.vtid, "error"))
+	errMsg := kvspace.GetOne(kv, keytree.VThreadStatusMsg(s.vtid, "error"))
 	if errMsg.Str() != "" {
 		t.Errorf("unexpected error after continue: %s", errMsg.Str())
 	}
@@ -535,7 +535,7 @@ def sum_to(n: int64) -> (total: int64) {
 	}
 
 	// vthread 应写入 error 消息
-	errMsg, _ := kv.Get(keytree.VThreadStatusMsg(s.vtid, "error"))
+	errMsg := kvspace.GetOne(kv, keytree.VThreadStatusMsg(s.vtid, "error"))
 	if !strings.Contains(errMsg.Str(), "aborted by agent") {
 		t.Errorf("error msg=%q, want contains 'aborted by agent'", errMsg.Str())
 	}

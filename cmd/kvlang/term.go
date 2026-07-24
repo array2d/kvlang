@@ -6,16 +6,16 @@ import (
 )
 
 func initDirs(kv kvspace.KVSpace) {
-	kvspace.MkIndex(kv, "/lib/")
-	kvspace.MkIndex(kv, "/vthread/")
+	kvspace.MkIndexRecursive(kv, "/lib/")
+	kvspace.MkIndexRecursive(kv, "/vthread/")
 }
 
 func registerDefaultTerm(kv kvspace.KVSpace) {
 	initDirs(kv)
 	h := keytree.DevTTY("kvlangrun", "")
-	kvspace.MkIndex(kv, h+"stdout/")
-	kvspace.MkIndex(kv, h+"stderr/")
-	kvspace.MkIndex(kv, h+"stdin/")
+	kvspace.MkIndexRecursive(kv, h+"stdout/")
+	kvspace.MkIndexRecursive(kv, h+"stderr/")
+	kvspace.MkIndexRecursive(kv, h+"stdin/")
 	kv.Set([]kvspace.KVPair{
 		{h + "stdout/type", kvspace.Str("file")},
 		{h + "stdout/detail", kvspace.Str("/dev/stdout")},
