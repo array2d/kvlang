@@ -11,16 +11,13 @@ import (
 // 局部变量直接存在 frameRoot/var，先查本地层再回落 extindex 目标。
 //
 //	callPC = parentFrame/[coord]            调用指令 PC = 子帧根
-//	frameRoot<MemberSep>rootfunc            入口函数名
 //	frameRoot<MemberSep>rparam/<name>       读参重定向
 //	frameRoot<MemberSep>wparam/<name>       写参重定向
 
 func frameMember(root, seg string) string { return root + MemberSep + seg }
 
 func Stack(root string) string { return root + PathSegSep }
-func RootFunc(root string) string   { return frameMember(root, SegRootfunc) }
 func FrameRO(root string) string    { return frameMember(root, SegRO) }
-func FramePkg(root string) string   { return frameMember(root, SegPkg) }
 
 func RParam(root, name string) string { return frameMember(root, SegRParam) + PathSegSep + name }
 func WParam(root, name string) string { return frameMember(root, SegWParam) + PathSegSep + name }

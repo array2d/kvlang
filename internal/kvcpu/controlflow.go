@@ -3,7 +3,6 @@ package kvcpu
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"kvlang/internal/keytree"
 	"github.com/array2d/kvspace-go"
@@ -57,7 +56,7 @@ func gotoBlock(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *o
 		return fmt.Errorf("goto requires label")
 	}
 	framePath := keytree.FrameRoot(pc)
-	label := resolveLabel(kv, framePath, inst.Reads[0])
+	label := resolveLabel(framePath, inst.Reads[0])
 	callInst := &op.Instruction{Opcode: op.OpCall, Reads: []string{label}}
 	substackPC := layoutrwir.HandleCall(ctx, kv, pc, callInst, true)
 	if substackPC == "" {
@@ -81,7 +80,7 @@ func brToCall(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op
 	if isTrue {
 		label = inst.Reads[1]
 	}
-	qualified := resolveLabel(kv, framePath, label)
+	qualified := resolveLabel(framePath, label)
 	callInst := &op.Instruction{Opcode: op.OpCall, Reads: []string{qualified}}
 	substackPC := layoutrwir.HandleCall(ctx, kv, pc, callInst, true)
 	if substackPC == "" {
@@ -91,26 +90,9 @@ func brToCall(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op
 	return nil
 }
 
-// resolveLabel 在函数上下文中将 label 解析为完整函数路径。
-//
-// 优先级：
-//  1. label 已含 "/" → 直接返回（编译器生成的完全限定标签；lower 保证所有 br/goto 走此路径）
-//  2. /.rootfunc + "/" + label → 根函数名（TCO 不更新 .rootfunc，用户裸标签可安全解析）
-func resolveLabel(kv kvspace.KVSpace, framePath, label string) string {
-	if strings.Contains(label, "/") {
-		return label
-	}
-	if v := kvspace.GetOne(kv, keytree.RootFunc(framePath)); !v.IsNil() {
-		if rootFunc := v.Str(); rootFunc != "" {
-			qualified := rootFunc + "/" + label
-			pkg := ""
-			if pv := kvspace.GetOne(kv, keytree.FramePkg(framePath)); !pv.IsNil() {
-				pkg = pv.Str()
-			}
-			if !kvspace.GetOne(kv, keytree.LibFunc(pkg, qualified)).IsNil() {
-				return qualified
-			}
-		}
-	}
+// resolveLabel 将 label 解析为完整函数路径。
+// label 已含 "/" → 直接返回（lower 保证所有 br/goto 走此路径）。
+func resolveLabel(framePath, label string) string {
+	_ = framePath
 	return label
 }

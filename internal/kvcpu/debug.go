@@ -8,6 +8,7 @@ package kvcpu
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"kvlang/internal/keytree"
@@ -18,11 +19,16 @@ import (
 // isEntryPC 判断 pc 是否为帧入口指令（末尾坐标=[0,0]）。
 func isEntryPC(pc string) bool { return keytree.IsEntryPC(pc) }
 
-// debugFuncName 从帧根读取 .rootfunc 字段获取函数名。
+// debugFuncName 从帧根目录的 extindex 目标路径提取函数名。
+// extindex → /lib/<name>/ → 返回 <name>。
 func debugFuncName(kv kvspace.KVSpace, frameRoot string) string {
-	v := kvspace.GetOne(kv, keytree.RootFunc(frameRoot))
-	if v.IsNil() { return "?" }
-	return v.Str()
+	parent, dirName := kvspace.SepPath(frameRoot)
+	if parent != "/" { parent += kvspace.DirIndexSuf }
+	v := kv.Get(parent, []string{dirName + kvspace.DirIndexSuf})[0]
+	extTarget := kvspace.DecodeExtIndex(v)
+	if extTarget == "" { return "?" }
+	name := strings.TrimPrefix(extTarget, keytree.LibRoot+"/")
+	return strings.TrimSuffix(name, "/")
 }
 
 // debugNotifyPause 向 /vthread/<vtid>/.debugger.pause 投递暂停事件（JSON）。

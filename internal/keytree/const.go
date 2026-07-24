@@ -17,11 +17,10 @@ const (
 	PathSegLib      = "lib"      // /lib — 函数库根
 	PathSegVthread  = "vthread"  // /vthread — 虚线程根
 
-	SegRootfunc = "rootfunc" // 入口函数名
 	SegRO       = "ro"       // 只读参数名单
 	SegRParam   = "rparam"   // 读参重定向
 	SegWParam   = "wparam"   // 写参重定向
-	SegPkg      = "pkg"      // 包路径
+
 
 	SegPC       = "pc"       // 当前 PC
 	SegStatus   = "status"   // 生命周期状态

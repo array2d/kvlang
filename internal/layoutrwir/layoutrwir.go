@@ -12,7 +12,6 @@
 //	callPC = parentFrame/[coord]             调用指令 PC = 子帧根
 //	frameRoot/                              extindex → /lib/<pkg>/<name>/（指令查找）
 //	frameRoot.x                             局部变量（extindex 写层）
-//	frameRoot.rootfunc                       入口函数名（TCO 不更新）
 //	frameRoot.rparam/<name> /.wparam/<name>  零拷贝读写参重定向
 //
 // kvcpu 取指：linkBase = Stack(FrameRoot(pc))，即帧根目录；
@@ -124,7 +123,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 		return ""
 	}
 
-	// TCO：复用当前帧，仅重链 overlay 到目标块（.rootfunc 不更新）。
+	// TCO：复用当前帧，Unlink + ExtIndex 重建帧根 extindex。
 	if tail {
 		frameRoot := keytree.FrameRoot(pc)
 		kv.UnLink(keytree.Stack(frameRoot))
@@ -146,9 +145,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	}
 
 	kv.Set([]kvspace.KVPair{
-		{keytree.RootFunc(frameRoot), kvspace.Str(funcName)},
-		{keytree.FramePkg(frameRoot), kvspace.Str(pkg)},
-		{frameRoot + keytree.MemberSep + keytree.SegRParam + "/", kvspace.Raw(kvspace.KindIndex, nil)},
+						{frameRoot + keytree.MemberSep + keytree.SegRParam + "/", kvspace.Raw(kvspace.KindIndex, nil)},
 		{frameRoot + keytree.MemberSep + keytree.SegWParam + "/", kvspace.Raw(kvspace.KindIndex, nil)},
 	})
 
@@ -260,9 +257,7 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 		return ""
 	}
 	kv.Set([]kvspace.KVPair{
-		{keytree.RootFunc(vthreadRoot), kvspace.Str(name)},
-		{keytree.FramePkg(vthreadRoot), kvspace.Str(pkg)},
-	})
+					})
 
 	// 绑定入参（若有）。顶层帧无调用方，值写入 vthreadRoot，.rparam 指向自身槽位。
 	if len(args) > 0 {
