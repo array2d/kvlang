@@ -25,7 +25,7 @@ func debugFuncName(kv kvspace.KVSpace, frameRoot string) string {
 	parent, dirName := kvspace.SepPath(frameRoot)
 	if parent != "/" { parent += kvspace.DirIndexSuf }
 	v := kv.Get(parent, []string{dirName + kvspace.DirIndexSuf})[0]
-	extTarget := kvspace.DecodeExtIndex(v)
+	_, extTarget := kvspace.DecodeExtIndex(v)
 	if extTarget == "" { return "?" }
 	name := strings.TrimPrefix(extTarget, keytree.LibRoot+"/")
 	return strings.TrimSuffix(name, "/")
