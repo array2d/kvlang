@@ -17,9 +17,6 @@ const (
 	PathSegLib      = "lib"      // /lib — 函数库根
 	PathSegVthread  = "vthread"  // /vthread — 虚线程根
 
-	SegFunclib  = "funclib"  // 帧函数库链接（废弃）
-	SegCode     = "code"     // overlay merge 点
-	SegUpper    = "upper"    // overlay upper 层
 	SegRootfunc = "rootfunc" // 入口函数名
 	SegRO       = "ro"       // 只读参数名单
 	SegRParam   = "rparam"   // 读参重定向

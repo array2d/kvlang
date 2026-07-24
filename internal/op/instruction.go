@@ -25,14 +25,14 @@ const maxParams = 128
 // Decode 从 kvspace 执行层 key 解码指令。
 //
 // pc 为绝对路径，格式：/vthread/<vtid>/[i,0] 或 /vthread/<vtid>/[j,0]/[i,0]。
-// keyBase = FuncLib(FrameRoot(pc))，即 .funclib Link 目标的只读指令树根。
+// linkBase = Stack(FrameRoot(pc))，即帧根目录（extindex → /lib/）。
 func Decode(ctx context.Context, kv kvspace.KVSpace, linkBase, pc string) (*Instruction, error) {
 	lastSlash := strings.LastIndex(pc, "/[")
 	if lastSlash < 0 {
 		return nil, fmt.Errorf("Decode: invalid pc (no /[coord]): %q", pc)
 	}
 	addr0 := extractAddr0(pc[lastSlash+1:])
-	prefix := linkBase + kvspace.DirIndexSuf
+	prefix := linkBase
 
 	names := make([]string, 0, 1+maxParams*2)
 	names = append(names, fmt.Sprintf("[%d,0]", addr0))

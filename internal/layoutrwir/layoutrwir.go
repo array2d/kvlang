@@ -7,15 +7,16 @@
 //	/lib/<pkg>.<name>/<label>/      基本块子路径
 //	/lib/<pkg>.<name>.src           源码副本（fix-034）
 //
-// 帧模型（callPC 即子帧根）：
+// 帧模型（callPC = 子帧根；帧根本身是 extindex 指向 /lib/）：
 //
 //	callPC = parentFrame/[coord]             调用指令 PC = 子帧根
-//	frameRoot/.code                          overlay: w=.local r=/lib/<pkg>/<name>
-//	frameRoot/.local                         可写层（本帧局部变量、运行时状态）
-//	frameRoot/.rootfunc                       入口函数名（TCO 不更新）
-//	frameRoot/.rparam/<name> /.wparam/<name>  零拷贝读写参重定向
+//	frameRoot/                              extindex → /lib/<pkg>/<name>/（指令查找）
+//	frameRoot.x                             局部变量（extindex 写层）
+//	frameRoot.rootfunc                       入口函数名（TCO 不更新）
+//	frameRoot.rparam/<name> /.wparam/<name>  零拷贝读写参重定向
 //
-// kvcpu 取指：linkBase = FrameRoot(pc)，kvspace 自动先查 .upper 再回落 /lib
+// kvcpu 取指：linkBase = Stack(FrameRoot(pc))，即帧根目录；
+// kvspace 的 extindex 机制自动先查本地层再回落 /lib/。
 package layoutrwir
 
 import (
@@ -88,7 +89,7 @@ func writeStmt(kv kvspace.KVSpace, st ast.Stmt, prefix string, idx *int, typeMap
 // HandleCall 执行 CALL：链接函数指令树，绑定参数。
 //
 // pc 为调用指令的绝对路径（如 /vthread/42/[3,0]）。callPC 即子帧根。
-// tail=true 时执行 TCO：复用当前帧，仅重链 .funclib。
+// tail=true 时执行 TCO：复用当前帧，Unlink + ExtIndex 重建帧根 extindex。
 // 返回被调帧第一条指令 PC（frameRoot/[0,0]）；失败时返回 ""。
 func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Instruction, tail bool) string {
 	vtid := keytree.VtidFromPC(pc)
@@ -126,8 +127,8 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	// TCO：复用当前帧，仅重链 overlay 到目标块（.rootfunc 不更新）。
 	if tail {
 		frameRoot := keytree.FrameRoot(pc)
-		kv.UnLink(keytree.CodeUpper(frameRoot) + "/")
-		if err := kv.ExtIndex(keytree.CodeUpper(frameRoot)+"/", funcKey+"/"); err != nil {
+		kv.UnLink(keytree.Stack(frameRoot))
+		if err := kv.ExtIndex(keytree.Stack(frameRoot), funcKey+"/"); err != nil {
 			vthread.SetError(ctx, kv, vtid, pc, "tco RuntimeError: overlay failed: "+err.Error())
 			return ""
 		}
@@ -138,8 +139,8 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	callerFrameRoot := keytree.FrameRoot(pc)
 	frameRoot := pc
 
-	kvspace.MkIndexRecursive(kv, keytree.CodeUpper(frameRoot)+"/")
-	if err := kv.ExtIndex(keytree.CodeUpper(frameRoot)+"/", funcKey+"/"); err != nil {
+	kvspace.MkIndexRecursive(kv, keytree.Stack(frameRoot))
+	if err := kv.ExtIndex(keytree.Stack(frameRoot), funcKey+"/"); err != nil {
 		vthread.SetError(ctx, kv, vtid, pc, "RuntimeError: overlay failed: "+err.Error())
 		return ""
 	}
@@ -174,10 +175,10 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 		kv.Set(paramPairs)
 	}
 	// 写参零拷贝：.rparam 和 .wparam 指向同一调用方路径，不创建本地副本
-	callerLink := keytree.CodeUpper(callerFrameRoot)
+	callerLink := keytree.Stack(callerFrameRoot)
 	addr0 := op.ExtractAddr0FromPC(pc)
 	for i, ret := range funcSig.Returns {
-		wSlot := fmt.Sprintf("%s/[%d,%d]", callerLink, addr0, i+1)
+		wSlot := fmt.Sprintf("%s[%d,%d]", callerLink, addr0, i+1)
 		wTargetVal := kvspace.GetOne(kv, wSlot)
 		wTarget := string(wTargetVal.RawBytes())
 		if wTarget == "" {
@@ -221,7 +222,7 @@ func HandleReturn(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.I
 
 	nextPC = op.NextPC(frameRoot)
 
-	kv.UnLink(keytree.CodeUpper(frameRoot) + "/")
+	kv.UnLink(keytree.Stack(frameRoot))
 	kv.DelTree(frameRoot)
 	return nextPC, ""
 }
@@ -243,7 +244,7 @@ func RegisterBlocks(kv kvspace.KVSpace, pkg, parent string, body []ast.Stmt) {
 // 顶层帧的特征：frameRoot == vthreadRoot → HandleReturn 识别为顶层 return → SetDone。
 //
 // args 为按序传入的参数值（对应 funcSig.ParamNames()），可为空。
-// 成功返回第一条指令的绝对 PC（vthreadRoot/.funclib/[0,0]）；失败返回 ""。
+// 成功返回第一条指令的绝对 PC（vthreadRoot/[0,0]）；失败返回 ""。
 func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, args []string) string {
 	pkg, name := "", funcName
 	if dot := strings.LastIndex(funcName, keytree.FuncPathSep); dot > 0 {
@@ -253,8 +254,8 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 	funcKey := keytree.LibFunc(pkg, name)
 
 	vthreadRoot := keytree.VThread(vtid)
-	kvspace.MkIndexRecursive(kv, keytree.CodeUpper(vthreadRoot)+"/")
-	if err := kv.ExtIndex(keytree.CodeUpper(vthreadRoot)+"/", funcKey+"/"); err != nil {
+	kvspace.MkIndexRecursive(kv, keytree.Stack(vthreadRoot))
+	if err := kv.ExtIndex(keytree.Stack(vthreadRoot), funcKey+"/"); err != nil {
 		vthread.SetError(ctx, kv, vtid, "", "Bootstrap: RuntimeError: overlay failed: "+err.Error())
 		return ""
 	}
@@ -347,7 +348,7 @@ func frameSlotKey(frameRoot, slot string) string {
 	if slot[0] == '.' {
 		return "" // 引擎保留键（._ 等丢弃槽），不写
 	}
-	return keytree.CodeUpper(frameRoot) + keytree.PathSegSep + slot
+	return keytree.Stack(frameRoot) + slot
 }
 
 func WriteFunc(kv kvspace.KVSpace, pkg string, fn *ast.Func) {
