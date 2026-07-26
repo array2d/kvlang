@@ -6,8 +6,6 @@ PREFIX   ?= ~/.local
 build:
 	go mod tidy
 	go build -ldflags="-s -w" -o kvlang ./cmd/kvlang/
-
-install: build
 	install -d $(PREFIX)/bin
 	install kvlang $(PREFIX)/bin/kvlang
 
