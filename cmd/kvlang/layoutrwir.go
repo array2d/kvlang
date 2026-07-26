@@ -7,12 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"kvlang/internal/ast"
+	"kvlang/ast"
 	"github.com/array2d/kvspace-go"
-	"kvlang/internal/layoutrwir"
-	"kvlang/internal/logx"
-	"kvlang/internal/lower"
-	"kvlang/internal/parser"
+	"kvlang/layoutrwir"
+	"kvlang/logx"
+	"kvlang/lower"
+	"kvlang/parser"
 )
 
 // cmdLayoutRWIR 将 .kv 文件加载进 kvspace，不执行。多文件拼接为单源解析。

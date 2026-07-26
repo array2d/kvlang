@@ -1,7 +1,7 @@
 package main
 
 import (
-	"kvlang/internal/keytree"
+	"kvlang/keytree"
 	"github.com/array2d/kvspace-go"
 )
 

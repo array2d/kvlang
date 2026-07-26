@@ -6,10 +6,10 @@ import (
 	"os"
 	"strings"
 
-	"kvlang/internal/ast"
-	"kvlang/internal/logx"
-	"kvlang/internal/lower"
-	"kvlang/internal/parser"
+	"kvlang/ast"
+	"kvlang/logx"
+	"kvlang/lower"
+	"kvlang/parser"
 )
 
 func cmdVet(args []string) {

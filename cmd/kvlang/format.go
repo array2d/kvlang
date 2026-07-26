@@ -6,9 +6,9 @@ import (
 	"os"
 	"strings"
 
-	"kvlang/internal/ast"
-	"kvlang/internal/logx"
-	"kvlang/internal/parser"
+	"kvlang/ast"
+	"kvlang/logx"
+	"kvlang/parser"
 )
 
 func cmdFormat(args []string) {

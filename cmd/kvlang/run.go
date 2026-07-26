@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"kvlang/internal/keytree"
-	"kvlang/internal/kvcpu"
+	"kvlang/keytree"
+	"kvlang/kvcpu"
 	"github.com/array2d/kvspace-go"
-	"kvlang/internal/layoutrwir"
-	"kvlang/internal/logx"
-	"kvlang/internal/vthread"
+	"kvlang/layoutrwir"
+	"kvlang/logx"
+	"kvlang/vthread"
 )
 
 // cmdRun 解析参数并路由：内联 / {lib}.{func} / 文件 / 管道。

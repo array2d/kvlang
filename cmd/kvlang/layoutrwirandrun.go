@@ -4,13 +4,13 @@ import (
 	"io"
 	"strings"
 
-	"kvlang/internal/ast"
-	"kvlang/internal/keytree"
+	"kvlang/ast"
+	"kvlang/keytree"
 	"github.com/array2d/kvspace-go"
-	"kvlang/internal/layoutrwir"
-	"kvlang/internal/logx"
-	"kvlang/internal/lower"
-	"kvlang/internal/parser"
+	"kvlang/layoutrwir"
+	"kvlang/logx"
+	"kvlang/lower"
+	"kvlang/parser"
 )
 
 // cmdLayoutRWIRAndRun 先 layoutrwir 再 run（fix-039：替代旧 run 机制）。

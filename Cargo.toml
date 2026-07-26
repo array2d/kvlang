@@ -1,0 +1,17 @@
+[package]
+name = "kvlang"
+version = "0.1.0"
+edition = "2024"
+description = "kvlang VM — Rust runtime (kvcpu executor)"
+license = "MIT"
+
+[lib]
+path = "lib.rs"
+
+[[bin]]
+name = "kvlang"
+path = "cmd/kvlang/main.rs"
+
+[dependencies]
+# kvspace-rdma client (future)
+# serde = { version = "1", features = ["derive"] }

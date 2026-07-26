@@ -1,4 +1,4 @@
-# Python
+# ── Python ────────────────────────────────────────────
 __pycache__/
 *.pyc
 .venv/
@@ -7,8 +7,7 @@ __pycache__/
 dist/
 .pytest_cache/
 
-# Go build artifacts
-*.o
+# ── Go ───────────────────────────────────────────────
 *.exe
 *.exe~
 *.dll
@@ -16,9 +15,20 @@ dist/
 *.dylib
 *.test
 *.out
-go.sum
+go.work.sum
 
-# IDE
+# ── C++ (CMake) ──────────────────────────────────────
+/build/
+
+# ── Rust ─────────────────────────────────────────────
+/target/
+
+# ── Common compiled artifacts ────────────────────────
+*.o
+*.a
+*.lib
+
+# ── IDE / Editor ─────────────────────────────────────
 .idea/
 .vscode/*
 !.vscode/settings.json
@@ -27,29 +37,17 @@ go.sum
 *.swo
 *~
 
-# OS
+# ── OS ───────────────────────────────────────────────
 .DS_Store
 Thumbs.db
 
-# Project-specific
-/tmp/
-post/
-
-# Tool config
-.omc/
-.claude/
-CLAUDE.md
-
-# Redis runtime artifacts
+# ── Redis runtime artifacts ──────────────────────────
 dump.rdb
 appendonly.aof
 
-# Binary
-/kvlang
-/kvlang_test
-/bin/
+# ── Project-specific ─────────────────────────────────
+/tmp/
+/post/
 
-# Issues tracking
-/issues/
-/issue/
-go.work*
+# Tool config
+.omc/

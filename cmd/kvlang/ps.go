@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strconv"
 
-	"kvlang/internal/keytree"
-	"kvlang/internal/vthread"
+	"kvlang/keytree"
+	"kvlang/vthread"
 	"github.com/array2d/kvspace-go"
 )
 
