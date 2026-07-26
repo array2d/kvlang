@@ -3,7 +3,7 @@
 // 设计原则（续体传递，Continuation-Passing Style）：
 //   - if/while 遇到时，将后续所有语句作为续体（cont）传入，注入到 merge/exit block
 //   - 函数入口始终在 [0,0]（平坦指令或 goto 首控制块）
-//   - 任何路径最终以 return / goto / br 结尾（appendReturn 补全）
+//   - 任何路径最终以 return / goto / br 结尾
 //   - break → goto exitLabel，continue → goto condLabel（由 loopCtx 携带当前循环出口）
 //
 // 读写码强制约束：
@@ -35,11 +35,10 @@ type loopCtx struct {
 }
 
 // Func 将函数体中 if/while 控制流降级为 BlockStmt + br/goto，
-// 展开复合表达式，并在函数尾部补充隐式 return（若缺失）。
+// 展开复合表达式。不再插入隐式 return——VM 在遇到空指令槽时自动弹帧。
 func Func(fn *ast.Func) *ast.Func {
 	lg := &labelGen{parent: fn.Sig.Name}
 	body := lowerBody(fn.Body, lg, nil)
-	body = appendReturn(body, fn.Sig)
 	return &ast.Func{Sig: fn.Sig, Body: body}
 }
 
@@ -435,27 +434,3 @@ func gotoLabel(parent, label string) *ast.Instruction {
 	}
 }
 
-// appendReturn 递归为所有块补充隐式 return。
-// return 无参数，返回值通过写参零拷贝传递。
-func appendReturn(body []ast.Stmt, sig ast.FuncSig) []ast.Stmt {
-	if len(body) == 0 {
-		return []ast.Stmt{makeReturnInst()}
-	}
-	for _, s := range body {
-		if b, ok := s.(*ast.BlockStmt); ok {
-			b.Body = appendReturn(b.Body, sig)
-		}
-	}
-	last, ok := body[len(body)-1].(*ast.Instruction)
-	if !ok {
-		return body
-	}
-	if !isTerminator(last) {
-		return append(body, makeReturnInst())
-	}
-	return body
-}
-
-func makeReturnInst() *ast.Instruction {
-	return &ast.Instruction{Expr: ast.Leaf(op.OpReturn)}
-}

@@ -73,6 +73,9 @@ func isNumeric(v kvspace.XValue) bool { return isIntKind(v.Kind()) || isFloatKin
 
 // display formats a Value for human output (print / string.set).
 func display(v kvspace.XValue) string {
+	if v.ArrayLen() > 1 {
+		return formatArray(v)
+	}
 	switch v.Kind() {
 	case "int", "int8", "int16", "int32", "int64":
 		return strconv.FormatInt(v.Int64(), 10)
@@ -91,6 +94,17 @@ func display(v kvspace.XValue) string {
 	case "array": return v.String() // debug format: array:NNB
 	default: return v.String()
 	}
+}
+
+// formatArray 格式化 len>1 的 XValue，显示所有元素。
+func formatArray(v kvspace.XValue) string {
+	n := v.Len()
+	parts := make([]string, n)
+	for i := 0; i < n; i++ {
+		elem := v.Index(i)
+		parts[i] = display(elem)
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
 }
 
 // tryParseNumber attempts to interpret s as a numeric literal.
