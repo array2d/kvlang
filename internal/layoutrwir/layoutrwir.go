@@ -207,14 +207,12 @@ func HandleReturn(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.I
 	vthreadRoot := keytree.VThread(vtid)
 	frameRoot := keytree.FrameRoot(pc)
 
-	var returnValue string
 	if len(inst.Reads) > 0 {
-		v := builtin.ResolveReadValue(kv, frameRoot, inst.Reads[0])
-		returnValue = v.Str()
+		panic("return 不得带参数，返回值通过写参零拷贝传递")
 	}
 
 	if frameRoot == vthreadRoot {
-		return "", returnValue
+		return "", ""
 	}
 
 	nextPC = op.NextPC(frameRoot)

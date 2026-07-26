@@ -283,6 +283,11 @@ func (p *parser) parsePrimaryExpr() *ast.Expr {
 	// 函数调用：name(arg, ...) — name 可为任意非停止 token（含 return 等关键字）
 	if p.peekAt(1).Kind == LParen {
 		name := p.advance().Value
+			if name == "return" {
+				p.errors = append(p.errors, Diagnostic{
+					Pos: p.tokens[p.pos-1].Pos, Message: "return 不接受参数；直接写 return 即可，返回值通过写参零拷贝传递",
+				})
+			}
 		p.advance() // consume (
 		var args []*ast.Expr
 		for p.peek().Kind != RParen && p.peek().Kind != EOF {

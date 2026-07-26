@@ -436,54 +436,26 @@ func gotoLabel(parent, label string) *ast.Instruction {
 }
 
 // appendReturn 递归为所有块补充隐式 return。
-//
-// 读写码结构下函数体中每个块均可能是出口块（如 if-merge、while-exit），
-// 必须对 ALL BlockStmt 递归注入，而非只处理最后一个块。
-//
-// 规则：
-//   - 块体为空 → 追加 return(retVals...)
-//   - 末尾为裸 return（无参数）且函数有返回值 → 替换为 return(./r0, ...)
-//   - 末尾为非终止符指令 → 追加 return(retVals...)
-//   - 末尾为完整终止符（goto/br/return 带参） → 不处理
+// return 无参数，返回值通过写参零拷贝传递。
 func appendReturn(body []ast.Stmt, sig ast.FuncSig) []ast.Stmt {
 	if len(body) == 0 {
-		return []ast.Stmt{makeReturnInst(sig)}
+		return []ast.Stmt{makeReturnInst()}
 	}
-	// 对函数体内所有 BlockStmt 递归注入（读写码中每块都可能是出口）
 	for _, s := range body {
 		if b, ok := s.(*ast.BlockStmt); ok {
 			b.Body = appendReturn(b.Body, sig)
 		}
 	}
-	// 处理函数体/块体本身的末尾
 	last, ok := body[len(body)-1].(*ast.Instruction)
 	if !ok {
-		return body // BlockStmt 已递归处理
-	}
-	if isBareReturn(last) && len(sig.Returns) > 0 {
-		// 裸 return（用户写的无参 return）→ 补全为 return(./retval...)
-		body[len(body)-1] = makeReturnInst(sig)
 		return body
 	}
 	if !isTerminator(last) {
-		return append(body, makeReturnInst(sig))
+		return append(body, makeReturnInst())
 	}
 	return body
 }
 
-// isBareReturn 判断是否为无参数的 return 指令（用户书写裸 return 关键字时产生）。
-func isBareReturn(s *ast.Instruction) bool {
-	if s.Expr == nil {
-		return false
-	}
-	opcode, reads := s.Flat()
-	return opcode == op.OpReturn && len(reads) == 0
-}
-
-func makeReturnInst(sig ast.FuncSig) *ast.Instruction {
-	args := make([]*ast.Expr, len(sig.Returns))
-	for i, p := range sig.Returns {
-		args[i] = ast.Leaf(p.Name) // 裸标识符，与 ./p.Name 等价
-	}
-	return &ast.Instruction{Expr: ast.Call(op.OpReturn, args...)}
+func makeReturnInst() *ast.Instruction {
+	return &ast.Instruction{Expr: ast.Leaf(op.OpReturn)}
 }
