@@ -5,6 +5,8 @@ project(kvlang VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+# .cppx = 避开 Go 编译器的 C++ 源文件（Go 在包目录看到 .cpp 会走 CGo）
+set(CMAKE_CXX_SOURCE_FILE_EXTENSIONS cpp;cxx;cc;cppx)
 
 # ── Compiler warnings ────────────────────────────────
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -18,15 +20,15 @@ endif()
 # Go handles the toolchain (parse/lower/layout).
 
 file(GLOB_RECURSE KV_SOURCES
-    "device/*.cpp"
-    "keytree/*.cpp"
-    "kvcpu/*.cpp"
-    "logx/*.cpp"
-    "op/*.cpp"
-    "op/builtin/*.cpp"
-    "op/dispatch/*.cpp"
-    "vthread/*.cpp"
-    "vtype/*.cpp"
+    "device/*.cppx"
+    "keytree/*.cppx"
+    "kvcpu/*.cppx"
+    "logx/*.cppx"
+    "op/*.cppx"
+    "op/builtin/*.cppx"
+    "op/dispatch/*.cppx"
+    "vthread/*.cppx"
+    "vtype/*.cppx"
 )
 
 add_library(kvlang_lib ${KV_SOURCES})
@@ -35,7 +37,7 @@ add_library(kvlang_lib ${KV_SOURCES})
 target_include_directories(kvlang_lib PUBLIC ${CMAKE_SOURCE_DIR})
 
 # ── CLI executable ───────────────────────────────────
-add_executable(kvlang cmd/kvlang/main.cpp)
+add_executable(kvlang cmd/kvlang/main.cppx)
 target_link_libraries(kvlang PRIVATE kvlang_lib)
 
 # ── Tests (optional) ─────────────────────────────────
