@@ -13,7 +13,7 @@ package lower
 
 import (
 	"fmt"
-		"kvlang/ast"
+	"kvlang/ast"
 	"kvlang/op"
 )
 

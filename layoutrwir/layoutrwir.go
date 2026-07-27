@@ -2,20 +2,19 @@
 //
 // 存储约定：
 //
-//	/lib/<pkg>.<name>               编译后签名（FuncSig.String()）
-//	/lib/<pkg>.<name>/[i,j]         编译后指令
-//	/lib/<pkg>.<name>/<label>/      基本块子路径
+//	/lib/<pkg>.<name>               编译后签名（XValue kind=rwfunc）
+//	/lib/<pkg>.<name>/[i,j]         编译后指令（XValue kind=rwir）
+//	/lib/<pkg>.<name>/<label>/      基本块子路径（XValue kind=label）
 //	/lib/<pkg>.<name>.src           源码副本（fix-034）
 //
-// 帧模型（callPC = 子帧根；帧根本身是 extindex 指向 /lib/）：
+// 帧模型：
 //
 //	callPC = parentFrame/[coord]             调用指令 PC = 子帧根
 //	frameRoot/                              extindex → /lib/<pkg>/<name>/（指令查找）
-//	frameRoot.x                             局部变量（extindex 写层）
+//	frameRoot.returnpc / .callpc             返回地址 / 帧执行进度
 //	frameRoot.rparam/<name> /.wparam/<name>  零拷贝读写参重定向
 //
-// kvcpu 取指：linkBase = Stack(FrameRoot(pc))，即帧根目录；
-// kvspace 的 extindex 机制自动先查本地层再回落 /lib/。
+// 帧类型由帧根 extindex target 的 XValue.Kind() 区分：rwfunc = 函数帧，label = label 帧。
 package layoutrwir
 
 import (
@@ -34,7 +33,6 @@ import (
 )
 
 // WriteBody 将 []Stmt 写入 /lib/<pkg>/<name>/ 下的结构化 KV（编译后指令）。
-// pkg 非空时，用户函数调用 opcode 自动限定为 pkg.name（替代 idx 反向索引）。
 func WriteBody(kv kvspace.KVSpace, pkg, name string, body []ast.Stmt, typeMap map[string]string) {
 	prefix := keytree.LibFunc(pkg, name)
 	idx := 0
@@ -43,8 +41,6 @@ func WriteBody(kv kvspace.KVSpace, pkg, name string, body []ast.Stmt, typeMap ma
 	}
 }
 
-// writeStmt 将单条 Stmt 写入 KV 空间。
-// lower.File 保证调用时只剩 *Instruction 和 *BlockStmt，其余类型无操作。
 func writeStmt(kv kvspace.KVSpace, st ast.Stmt, prefix string, idx *int, typeMap map[string]string, pkg string) {
 	switch s := st.(type) {
 	case *ast.Instruction:
@@ -55,7 +51,6 @@ func writeStmt(kv kvspace.KVSpace, st ast.Stmt, prefix string, idx *int, typeMap
 			}
 		}
 		opcode, reads := s.Flat()
-		// 同包调用限定：pkg 非空且 opcode 是用户函数（非 builtin、非控制流、非已限定）
 		if pkg != "" && !builtin.IsNativeOp(opcode) && !op.IsControlOp(opcode) &&
 			!strings.Contains(opcode, keytree.FuncPathSep) && !strings.HasPrefix(opcode, keytree.LibRoot+keytree.PathSegSep) &&
 			opcode != "=" {
@@ -85,12 +80,11 @@ func writeStmt(kv kvspace.KVSpace, st ast.Stmt, prefix string, idx *int, typeMap
 	}
 }
 
-// HandleCall 执行 CALL：链接函数指令树，绑定参数。
+// HandleCall 执行 CALL：创建子帧，链接指令树，绑定参数，写返回地址。
 //
 // pc 为调用指令的绝对路径（如 /vthread/42/[3,0]）。callPC 即子帧根。
-// tail=true 时执行 TCO：复用当前帧，Unlink + ExtIndex 重建帧根 extindex。
 // 返回被调帧第一条指令 PC（frameRoot/[0,0]）；失败时返回 ""。
-func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Instruction, tail bool) string {
+func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Instruction) string {
 	vtid := keytree.VtidFromPC(pc)
 	funcName := inst.Reads[0]
 
@@ -115,28 +109,15 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 		vthread.SetError(ctx, kv, vtid, pc, "NameError: func signature not found: "+funcName)
 		return ""
 	}
-	funcSig := parser.ParseFuncSig(sigVal.Str())
+	funcSig := parser.ParseFuncSig(string(sigVal.RawBytes()))
 
-	// 参数不可同名（fix-032：parser 已拦截，VM 兜底 agent 直写 KV 构造的非法签名）
 	if err := checkDupParams(funcSig, funcName); err != "" {
 		vthread.SetError(ctx, kv, vtid, pc, err)
 		return ""
 	}
 
-	// TCO：复用当前帧，Unlink + ExtIndex 重建帧根 extindex。
-	if tail {
-		frameRoot := keytree.FrameRoot(pc)
-		kv.UnLink(keytree.Stack(frameRoot))
-		if err := kv.ExtIndex(keytree.Stack(frameRoot), funcKey+"/"); err != nil {
-			vthread.SetError(ctx, kv, vtid, pc, "tco RuntimeError: overlay failed: "+err.Error())
-			return ""
-		}
-		return keytree.EntryPC(frameRoot)
-	}
-
-	// 普通 call：callPC 即子帧根
 	callerFrameRoot := keytree.FrameRoot(pc)
-	frameRoot := pc
+	frameRoot := pc // callPC = 子帧根
 
 	kvspace.MkIndexRecursive(kv, keytree.Stack(frameRoot))
 	if err := kv.ExtIndex(keytree.Stack(frameRoot), funcKey+"/"); err != nil {
@@ -144,13 +125,15 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 		return ""
 	}
 
+	// 系统变量
 	kv.Set([]kvspace.KVPair{
-						{frameRoot + keytree.MemberSep + keytree.SegRParam + "/", kvspace.Raw(kvspace.KindIndex, nil)},
+		{keytree.ReturnPC(frameRoot), kvspace.Str(op.NextPC(pc))},
+		{keytree.CallPC(frameRoot), kvspace.Str(keytree.EntryPC(frameRoot))},
+		{frameRoot + keytree.MemberSep + keytree.SegRParam + "/", kvspace.Raw(kvspace.KindIndex, nil)},
 		{frameRoot + keytree.MemberSep + keytree.SegWParam + "/", kvspace.Raw(kvspace.KindIndex, nil)},
 	})
 
-	// 读参零拷贝：.rparam 重定向到调用方值位置
-	// 字面量存为临时变量；变量引用追踪 .rparam 链到源头
+	// 读参零拷贝
 	litSeq := 0
 	params := funcSig.ParamNames()
 	var paramPairs []kvspace.KVPair
@@ -171,7 +154,8 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	if len(paramPairs) > 0 {
 		kv.Set(paramPairs)
 	}
-	// 写参零拷贝：.rparam 和 .wparam 指向同一调用方路径，不创建本地副本
+
+	// 写参零拷贝
 	callerLink := keytree.Stack(callerFrameRoot)
 	addr0 := op.ExtractAddr0FromPC(pc)
 	for i, ret := range funcSig.Returns {
@@ -197,11 +181,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	return keytree.EntryPC(frameRoot)
 }
 
-// HandleReturn 处理 RETURN：清理帧，恢复父 PC。
-//
-// pc 为 return 指令的绝对路径（如 /vthread/42/[3,0]/[1,0]）。
-// 写参已在子帧执行期间经 .wparam 零拷贝直写父帧。
-// 嵌套帧 frameRoot 即 callPC，NextPC(frameRoot) 即为父帧下一条指令。
+// HandleReturn 处理 RETURN：读 .returnpc，清理帧。
 func HandleReturn(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Instruction) (nextPC, retVal string) {
 	vtid := keytree.VtidFromPC(pc)
 	vthreadRoot := keytree.VThread(vtid)
@@ -215,31 +195,97 @@ func HandleReturn(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.I
 		return "", ""
 	}
 
-	nextPC = op.NextPC(frameRoot)
+	nextPC = kvspace.GetOne(kv, keytree.ReturnPC(frameRoot)).Str()
 
 	kv.UnLink(keytree.Stack(frameRoot))
 	kv.DelTree(frameRoot)
 	return nextPC, ""
 }
-// RegisterBlocks 为函数体内所有 BlockStmt label 注册编译后子函数签名。
-// 写入 /lib/<pkg>/<name>/<label>，供 br/goto 运行时查找。
+
+// HandleLabel 创建或复用 label 帧。
+//   - 新 label：在当前帧下创建子帧（嵌套），写 .returnpc .callpc
+//   - TCO：若祖先链中存在同名 label，丢弃中间帧，跳回目标入口
+func HandleLabel(ctx context.Context, kv kvspace.KVSpace, pc, labelFullPath string) string {
+	vtid := keytree.VtidFromPC(pc)
+
+	// 解析 /lib/ 路径 → pkg + labelPath
+	var pkg, labelPath string
+	libPrefix := keytree.LibRoot + keytree.PathSegSep
+	if strings.HasPrefix(labelFullPath, libPrefix) {
+		rest := labelFullPath[len(libPrefix):]
+		if dot := strings.LastIndex(rest, keytree.FuncPathSep); dot > 0 {
+			pkg = rest[:dot]
+			labelPath = rest[dot+len(keytree.FuncPathSep):]
+		} else {
+			labelPath = rest
+		}
+	} else if dot := strings.LastIndex(labelFullPath, keytree.FuncPathSep); dot > 0 {
+		pkg = labelFullPath[:dot]
+		labelPath = labelFullPath[dot+len(keytree.FuncPathSep):]
+	} else {
+		labelPath = labelFullPath
+	}
+
+	// 取路径末段为 label 名
+	labelName := labelPath
+	if slash := strings.LastIndex(labelPath, keytree.PathSegSep); slash >= 0 {
+		labelName = labelPath[slash+len(keytree.PathSegSep):]
+	}
+
+	currentFrame := keytree.FrameRoot(pc)
+
+	// ── TCO：仅在 label 帧内搜索祖先链（不跨越 rwfunc 边界）──
+	if extKind(kv, currentFrame) == kvspace.KindLabel {
+		for f := currentFrame; f != ""; f = keytree.ParentFrame(f) {
+			if extKind(kv, f) == kvspace.KindRwfunc {
+				break
+			}
+			trimmed := strings.TrimRight(f, keytree.PathSegSep)
+			lastSeg := trimmed[strings.LastIndex(trimmed, keytree.PathSegSep)+len(keytree.PathSegSep):]
+			if lastSeg == labelName {
+				// 找到目标 → 丢弃目标子帧，跳回入口
+				for d := currentFrame; d != f; d = keytree.ParentFrame(d) {
+					kv.UnLink(keytree.Stack(d))
+					kv.DelTree(d)
+				}
+				kv.Set([]kvspace.KVPair{
+					{keytree.CallPC(f), kvspace.Str(keytree.EntryPC(f))},
+				})
+				return keytree.EntryPC(f)
+			}
+		}
+	}
+
+	// ── 新建 label 帧（当前帧下嵌套）─────────────────────────
+	labelFrame := currentFrame + "/" + labelName + "/"
+	kv.DelTree(labelFrame)
+	kvspace.MkIndexRecursive(kv, labelFrame)
+
+	labelKey := keytree.LibFunc(pkg, labelPath)
+	if err := kv.ExtIndex(keytree.Stack(labelFrame), labelKey+"/"); err != nil {
+		vthread.SetError(ctx, kv, vtid, pc, "RuntimeError: label overlay failed: "+err.Error())
+		return ""
+	}
+
+	kv.Set([]kvspace.KVPair{
+		{keytree.ReturnPC(labelFrame), kvspace.Str(op.NextPC(pc))},
+		{keytree.CallPC(labelFrame), kvspace.Str(keytree.EntryPC(labelFrame))},
+	})
+	return keytree.EntryPC(labelFrame)
+}
+
+// RegisterBlocks 为函数体内所有 BlockStmt label 注册 label 签名（XValue kind=label）。
 func RegisterBlocks(kv kvspace.KVSpace, pkg, parent string, body []ast.Stmt) {
 	for _, st := range body {
 		if b, ok := st.(*ast.BlockStmt); ok {
 			blockKey := keytree.LibFunc(pkg, parent+"/"+b.Label)
-			kv.Set([]kvspace.KVPair{{blockKey, kvspace.Str("def "+b.Label+"() -> ()")}})
+			kv.Set([]kvspace.KVPair{{blockKey, kvspace.Raw(kvspace.KindLabel, nil)}})
 			RegisterBlocks(kv, pkg, parent+"/"+b.Label, b.Body)
 		}
 	}
 }
 
-// Bootstrap 为 vthread 的顶层入口函数建立初始帧，无需父帧（无 .callpc）。
-//
-// 与 HandleCall 的区别：Bootstrap 直接在 vthreadRoot 建帧；HandleCall 建子帧。
-// 顶层帧的特征：frameRoot == vthreadRoot → HandleReturn 识别为顶层 return → SetDone。
-//
-// args 为按序传入的参数值（对应 funcSig.ParamNames()），可为空。
-// 成功返回第一条指令的绝对 PC（vthreadRoot/[0,0]）；失败返回 ""。
+// Bootstrap 为 vthread 的顶层入口函数建立虚线程根帧。
 func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, args []string) string {
 	pkg, name := "", funcName
 	if dot := strings.LastIndex(funcName, keytree.FuncPathSep); dot > 0 {
@@ -254,13 +300,15 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 		vthread.SetError(ctx, kv, vtid, "", "Bootstrap: RuntimeError: overlay failed: "+err.Error())
 		return ""
 	}
-	kv.Set([]kvspace.KVPair{
-					})
 
-	// 绑定入参（若有）。顶层帧无调用方，值写入 vthreadRoot，.rparam 指向自身槽位。
+	// 虚线程根也是函数帧，写 .callpc
+	kv.Set([]kvspace.KVPair{
+		{keytree.CallPC(vthreadRoot), kvspace.Str(keytree.EntryPC(vthreadRoot))},
+	})
+
 	if len(args) > 0 {
 		sigVal := kvspace.GetOne(kv, funcKey)
-		sig := parser.ParseFuncSig(sigVal.Str())
+		sig := parser.ParseFuncSig(string(sigVal.RawBytes()))
 		if err := checkDupParams(sig, funcName); err != "" {
 			vthread.SetError(ctx, kv, vtid, "", err)
 			return ""
@@ -285,42 +333,63 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 	return keytree.EntryPC(vthreadRoot)
 }
 
-// WriteFunc 完成一个函数的全部 KV 写入：
-//  0. 先 DelTree 清除旧函数数据（避免旧指令 slot 污染新布局）
-//  1. 编译签名写入 /lib/<pkg>.<name>
-//  2. 源码副本写入 /lib/<pkg>.<name>.src
-//  3. 编译 body 指令写入 /lib/<pkg>.<name>/[i,j]
-//  4. 块标签写入 /lib/<pkg>.<name>/<label>/
-// frameSlotKey 将槽表达式转换为绝对 KV 路径。
-//
-//	"x"    → frameRoot + "/x"   (裸标识符)
-//	"/abs" → "/abs"             (绝对路径，直通)
-//	""     → ""                 (空，忽略)
-//	".xxx" → ""                 (引擎保留键，忽略，如 ._ 丢弃槽)
+// WriteFunc 写函数到 /lib/：签名（kind=rwfunc）、源码、指令体、label 块。
+func WriteFunc(kv kvspace.KVSpace, pkg string, fn *ast.Func) {
+	typeMap := lower.InferTypes(fn)
+	kv.DelTree(keytree.LibFunc(pkg, fn.Sig.Name))
+	kvspace.MkIndexRecursive(kv, keytree.LibFunc(pkg, fn.Sig.Name)+"/")
+	kv.Set([]kvspace.KVPair{
+		{keytree.LibSrc(pkg, fn.Sig.Name), kvspace.Str(fn.FullText())},
+		{keytree.LibFunc(pkg, fn.Sig.Name), kvspace.Raw(kvspace.KindRwfunc, []byte(fn.Sig.String()))},
+	})
+	WriteBody(kv, pkg, fn.Sig.Name, fn.Body, typeMap)
+	RegisterBlocks(kv, pkg, fn.Sig.Name, fn.Body)
+}
+
+// ── 辅助函数 ────────────────────────────────────────────────────────────────
+
 func resolveWritePath(kv kvspace.KVSpace, framePath, name string) string {
-	rk := frameSlotKey(framePath, name)
-	if r := kvspace.GetOne(kv, keytree.WParam(framePath, name)); !r.IsNil() {
-		return r.Str()
+	for f := framePath; f != ""; f = keytree.ParentFrame(f) {
+		if r := kvspace.GetOne(kv, keytree.WParam(f, name)); !r.IsNil() {
+			return r.Str()
+		}
+		if extKind(kv, f) == kvspace.KindRwfunc {
+			break
+		}
 	}
-	return rk
+	return frameSlotKey(framePath, name)
 }
 
 func resolveReadPath(kv kvspace.KVSpace, framePath, name string) string {
 	if isLiteral(name) { return "" }
-	if r := kvspace.GetOne(kv, keytree.RParam(framePath, name)); !r.IsNil() {
-		return r.Str()
+	for f := framePath; f != ""; f = keytree.ParentFrame(f) {
+		if r := kvspace.GetOne(kv, keytree.RParam(f, name)); !r.IsNil() {
+			return r.Str()
+		}
+		if extKind(kv, f) == kvspace.KindRwfunc {
+			break
+		}
+	}
+	// label 帧变量逃逸到函数帧，查找对齐 resolveWriteKey
+	funcFrame := framePath
+	for f := framePath; f != ""; f = keytree.ParentFrame(f) {
+		if extKind(kv, f) == kvspace.KindRwfunc {
+			funcFrame = f
+			break
+		}
+	}
+	if v := kvspace.GetOne(kv, keytree.Stack(funcFrame)+name); !v.IsNil() {
+		return keytree.Stack(funcFrame) + name
 	}
 	return frameSlotKey(framePath, name)
 }
 
 func slotValue(val string, typeMap map[string]string) kvspace.XValue {
-	kind := "rwir"
+	kind := kvspace.KindRwir
 	if t, ok := typeMap[val]; ok {
 		kind = t
 	} else if isLiteral(val) {
-		if val[0] == '"' { kind = "string" } else
-		if val == "true" || val == "false" { kind = "bool" } else
-		if val[0] >= '0' && val[0] <= '9' || (val[0] == '-' && len(val) > 1) { kind = "int64" }
+		if val[0] == '"' { kind = kvspace.KindString } else if val == "true" || val == "false" { kind = kvspace.KindBool } else if val[0] >= '0' && val[0] <= '9' || (val[0] == '-' && len(val) > 1) { kind = kvspace.KindInt64 }
 	}
 	return kvspace.Raw(kind, []byte(val))
 }
@@ -332,34 +401,29 @@ func isLiteral(s string) bool {
 }
 
 func frameSlotKey(frameRoot, slot string) string {
-	if slot == "" {
-		return ""
-	}
-	if slot[0] == '/' {
-		return slot // 绝对路径直通
-	}
-	if slot[0] == '.' {
-		return "" // 引擎保留键（._ 等丢弃槽），不写
-	}
+	if slot == "" { return "" }
+	if slot[0] == '/' { return slot }
+	if slot[0] == '.' { return "" }
 	return keytree.Stack(frameRoot) + slot
 }
 
-func WriteFunc(kv kvspace.KVSpace, pkg string, fn *ast.Func) {
-	typeMap := lower.InferTypes(fn)
-	// 清除旧函数数据：旧指令的读/写槽数量可能多于新函数，
-	// 若不清除则旧槽（如 [0,-1]、[0,-2]）会被新执行错误读取。
-	kv.DelTree(keytree.LibFunc(pkg, fn.Sig.Name))
-	kvspace.MkIndexRecursive(kv, keytree.LibFunc(pkg, fn.Sig.Name)+"/")
-	kv.Set([]kvspace.KVPair{
-		{keytree.LibSrc(pkg, fn.Sig.Name), kvspace.Str(fn.FullText())},
-		{keytree.LibFunc(pkg, fn.Sig.Name), kvspace.Str(fn.Sig.String())},
-	})
-	WriteBody(kv, pkg, fn.Sig.Name, fn.Body, typeMap)
-	RegisterBlocks(kv, pkg, fn.Sig.Name, fn.Body)
+// extKind 读帧根 extindex target 的 XValue.Kind()：rwfunc=函数帧，label=label 帧。
+func extKind(kv kvspace.KVSpace, frameRoot string) string {
+	trimmed := strings.TrimRight(frameRoot, keytree.PathSegSep)
+	if trimmed == "" || trimmed == keytree.PathSegSep {
+		return ""
+	}
+	parent, dirName := kvspace.SepPath(trimmed)
+	if parent != keytree.PathSegSep {
+		parent += kvspace.DirIndexSuf
+	}
+	extVal := kv.Get(parent, []string{dirName + kvspace.DirIndexSuf})[0]
+	_, extTarget := kvspace.DecodeExtIndex(extVal)
+	if extTarget == "" {
+		return ""
+	}
+	return kvspace.GetOne(kv, strings.TrimRight(extTarget, keytree.PathSegSep)).Kind()
 }
-
-// checkDupParams 参数不可同名（fix-032：VM 运行时兜底，parser 已拦截源码路径）。
-
 
 func checkDupParams(sig ast.FuncSig, funcName string) string {
 	seen := map[string]bool{}

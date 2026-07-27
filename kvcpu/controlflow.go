@@ -14,12 +14,10 @@ import (
 )
 
 // handleControl 分发控制流原语（call / return / br / goto）。
-// pc 为绝对路径，inst 已解码。
-// if / for / while 等高级语法由编译器降级为 br，不在此处理。
 func handleControl(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) error {
 	switch inst.Opcode {
 	case op.OpCall:
-		substackPC := layoutrwir.HandleCall(ctx, kv, pc, inst, false)
+		substackPC := layoutrwir.HandleCall(ctx, kv, pc, inst)
 		if substackPC == "" {
 			return fmt.Errorf("call %s failed", inst.Reads[0])
 		}
@@ -31,7 +29,6 @@ func handleControl(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, ins
 		parentPC, retVal := layoutrwir.HandleReturn(ctx, kv, pc, inst)
 		logx.Debug("[%s] RETURN parentPC=%q retVal=%q", vtid, parentPC, retVal)
 		if parentPC == "" {
-			// 顶层 return → vthread 完成，retVal 成为 .status 终态通知值
 			vthread.SetDone(ctx, kv, vtid, retVal)
 			return nil
 		}
@@ -42,57 +39,41 @@ func handleControl(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, ins
 		return gotoBlock(ctx, kv, vtid, pc, inst)
 
 	case op.OpBr:
-		return brToCall(ctx, kv, vtid, pc, inst)
+		return brBlock(ctx, kv, vtid, pc, inst)
 
 	default:
 		return fmt.Errorf("unknown control op: %s", inst.Opcode)
 	}
 }
 
-// gotoBlock 处理 goto(label)：TCO 跳转至同函数内的目标块。
-// 复用当前帧（不创建子帧），重新链接 _fn 到目标块代码区。
+// gotoBlock 处理 goto(label)：创建 label 子帧。
 func gotoBlock(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) error {
 	if len(inst.Reads) == 0 {
 		return fmt.Errorf("goto requires label")
 	}
-	framePath := keytree.FrameRoot(pc)
-	label := resolveLabel(framePath, inst.Reads[0])
-	callInst := &op.Instruction{Opcode: op.OpCall, Reads: []string{label}}
-	substackPC := layoutrwir.HandleCall(ctx, kv, pc, callInst, true)
-	if substackPC == "" {
-		return fmt.Errorf("goto %s failed", label)
+	newPC := layoutrwir.HandleLabel(ctx, kv, pc, inst.Reads[0])
+	if newPC == "" {
+		return fmt.Errorf("goto %s failed", inst.Reads[0])
 	}
-	vthread.Set(ctx, kv, vtid, substackPC, "running")
-	logx.Debug("[%s] GOTO → %s", vtid, substackPC)
+	vthread.Set(ctx, kv, vtid, newPC, "running")
+	logx.Debug("[%s] GOTO → %s", vtid, newPC)
 	return nil
 }
 
-// brToCall 处理 br(cond, trueLabel, falseLabel)：
-// 根据条件选择分支，TCO 跳转至目标块。
-func brToCall(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) error {
+// brBlock 处理 br(cond, trueLabel, falseLabel)：条件分支，创建 label 子帧。
+func brBlock(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) error {
 	if len(inst.Reads) < 3 {
 		return fmt.Errorf("br requires 3 args: cond trueLabel falseLabel")
 	}
-	framePath := keytree.FrameRoot(pc)
-	condVal := builtin.ResolveReadValue(kv, framePath, inst.Reads[0])
-	isTrue := builtin.AsBool(condVal)
+	condVal := builtin.ResolveReadValue(kv, keytree.FrameRoot(pc), inst.Reads[0])
 	label := inst.Reads[2]
-	if isTrue {
+	if builtin.AsBool(condVal) {
 		label = inst.Reads[1]
 	}
-	qualified := resolveLabel(framePath, label)
-	callInst := &op.Instruction{Opcode: op.OpCall, Reads: []string{qualified}}
-	substackPC := layoutrwir.HandleCall(ctx, kv, pc, callInst, true)
-	if substackPC == "" {
-		return fmt.Errorf("br call %s failed", qualified)
+	newPC := layoutrwir.HandleLabel(ctx, kv, pc, label)
+	if newPC == "" {
+		return fmt.Errorf("br %s failed", label)
 	}
-	vthread.Set(ctx, kv, vtid, substackPC, "running")
+	vthread.Set(ctx, kv, vtid, newPC, "running")
 	return nil
-}
-
-// resolveLabel 将 label 解析为完整函数路径。
-// label 已含 "/" → 直接返回（lower 保证所有 br/goto 走此路径）。
-func resolveLabel(framePath, label string) string {
-	_ = framePath
-	return label
 }

@@ -21,8 +21,9 @@ const (
 	SegRParam   = "rparam"   // 读参重定向
 	SegWParam   = "wparam"   // 写参重定向
 
-
 	SegPC       = "pc"       // 当前 PC
+	SegCallPC   = "callpc"   // 本帧执行进度（每 op 更新）
+	SegReturnPC = "returnpc" // 返回地址（帧创建时固化）
 	SegStatus   = "status"   // 生命周期状态
 	SegCtime    = "ctime"    // 创建时刻
 	SegDebugger = "debugger" // 调试控制键

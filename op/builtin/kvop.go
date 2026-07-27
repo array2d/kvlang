@@ -3,6 +3,7 @@ package builtin
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"kvlang/keytree"
 	"github.com/array2d/kvspace-go"
@@ -63,5 +64,5 @@ func (o kvAtOp) Call(f *op.Frame) error {
 // resolveKVPath 将槽参数解析为绝对 KV 路径（不做值查找）。
 func resolveKVPath(framePath, param string) string {
 	if isAbsolute(param) { return param }
-	return framePath + "/" + param
+	return strings.TrimRight(framePath, "/") + "/" + param
 }
