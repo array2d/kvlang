@@ -6,14 +6,14 @@ def count_primes(n:int64) -> () {
 	count = 0  # = 等价于 <-
 	2 -> i
 	while (i < n) {
-		is_p <- 1
+		is_p <- true
 		d = 2  # = 等价于 <-
 		while (d < i) {
 			i % d -> rem
 			div <- rem == 0
 
 			if (div) {
-				is_p = 0  # = 等价于 <-
+				is_p = false  # = 等价于 <-
 				i -> d
 			} else {
 				d <- d + 1

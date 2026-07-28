@@ -10,7 +10,7 @@ def lcp() -> () {
 	nb <- strlen(b)
 	nc = strlen(c)  # = 等价于 <-
 	0 -> i
-	ok <- 1
+	ok <- true
 	while (ok) {
 		ca = i < na  # = 等价于 <-
 		i < nb -> cb
@@ -28,10 +28,10 @@ def lcp() -> () {
 			if (match) {
 				i + 1 -> i
 			} else {
-				ok <- 0
+				ok <- false
 			}
 		} else {
-			ok = 0  # = 等价于 <-
+			ok = false  # = 等价于 <-
 		}
 	}
 	slice(a, 0, i) -> ans

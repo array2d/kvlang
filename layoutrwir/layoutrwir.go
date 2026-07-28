@@ -389,7 +389,7 @@ func slotValue(val string, typeMap map[string]string) kvspace.XValue {
 	if t, ok := typeMap[val]; ok {
 		kind = t
 	} else if isLiteral(val) {
-		if val[0] == '"' { kind = kvspace.KindString } else if val == "true" || val == "false" { kind = kvspace.KindBool } else if val[0] >= '0' && val[0] <= '9' || (val[0] == '-' && len(val) > 1) { kind = kvspace.KindInt64 }
+		if val[0] == '"' { kind = kvspace.KindString } else if val == "true" || val == "false" { kind = kvspace.KindBool } else if val[0] >= '0' && val[0] <= '9' || (val[0] == '-' && len(val) > 1) { if strings.Contains(val, ".") || strings.ContainsAny(val, "eE") { kind = kvspace.KindFloat64 } else { kind = kvspace.KindInt64 } }
 	}
 	return kvspace.Raw(kind, []byte(val))
 }

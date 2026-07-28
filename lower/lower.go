@@ -126,17 +126,19 @@ func lowerBody(stmts []ast.Stmt, lg *labelGen, lc *loopCtx) []ast.Stmt {
 
 		case *ast.BreakStmt:
 			// break → goto exitLabel（当前 while 的出口块）
-			if lc != nil {
-				preamble = append(preamble, gotoLabel(lg.parent, lc.breakLabel))
+			if lc == nil {
+				panic("break outside loop")
 			}
+			preamble = append(preamble, gotoLabel(lg.parent, lc.breakLabel))
 			// break 是终止符：忽略其后的语句（不可达代码）
 			return preamble
 
 		case *ast.ContinueStmt:
 			// continue → goto condLabel（当前 while 的条件块）
-			if lc != nil {
-				preamble = append(preamble, gotoLabel(lg.parent, lc.continueLabel))
+			if lc == nil {
+				panic("continue outside loop")
 			}
+			preamble = append(preamble, gotoLabel(lg.parent, lc.continueLabel))
 			// continue 是终止符：忽略其后的语句（不可达代码）
 			return preamble
 

@@ -14,13 +14,13 @@ def intersection() -> () {
 	while (i < na) {
 		av <- a[i]
 		j = 0  # = 等价于 <-
-		0 -> found
+		false -> found
 		while (j < nb) {
 			bv <- b[j]
 			match = av == bv  # = 等价于 <-
 
 			if (match) {
-				1 -> found
+				true -> found
 				j <- nb
 			} else {
 				j = j + 1  # = 等价于 <-

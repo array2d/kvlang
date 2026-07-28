@@ -104,7 +104,7 @@ func (p *parser) eat(k Kind) bool {
 // 若 Kind 不匹配：追加 Diagnostic，消费意外 token（error recovery），返回合成 token。
 func (p *parser) expect(k Kind) Token {
 	t := p.advance()
-	if t.Kind != k && t.Kind != EOF {
+	if t.Kind != k {
 		p.errors = append(p.errors, Diagnostic{
 			Pos:     t.Pos,
 			Message: fmt.Sprintf("expected %s, got %s %q", k, t.Kind, t.Value),
@@ -174,8 +174,14 @@ if p.peek().Kind == Ident && p.peek().Value == "def" {
 			fn.Comments = comments
 			f.Funcs = append(f.Funcs, fn)
 		} else if p.peek().Kind == If || p.peek().Kind == While || p.peek().Kind == For {
-			// 顶层裸控制流 → 自动封装为隐式 def __init__() -> () { … }（fix-037）
-			f.InitBody = p.parseBody()
+			// 顶层裸控制流已废弃（fix-037）：必须包裹在 def main() / def init() 内
+			t := p.peek()
+			p.errors = append(p.errors, Diagnostic{
+				Pos:     t.Pos,
+				Message: fmt.Sprintf("top-level %s is not supported — wrap in main()", strings.ToLower(t.Kind.String())),
+			})
+			// 跳过一个 Token 防止死循环（不消费 body，避免吞掉其后的 def/lib）
+			p.advance()
 		} else {
 			prevPos := p.pos
 			inst := p.parseInst()

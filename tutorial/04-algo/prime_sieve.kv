@@ -9,14 +9,14 @@ def prime_sieve(limit:int64) -> () {
 	count = 0  # = 等价于 <-
 	2 -> n
 	while (n <= limit) {
-		is_prime <- 1
+		is_prime <- true
 		d = 2  # = 等价于 <-
 		while (d < n) {
 			n % d -> rem
 			divisible <- rem == 0
 
 			if (divisible) {
-				is_prime = 0  # = 等价于 <-
+				is_prime = false  # = 等价于 <-
 				n -> d
 			} else {
 				d <- d + 1

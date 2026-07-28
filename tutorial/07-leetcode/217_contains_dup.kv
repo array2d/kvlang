@@ -7,7 +7,7 @@
 def has_dup() -> () {
 	a:int64 = [1, 2, 3, 1]  # = 等价于 <-
 	len(a) -> n
-	found <- 0
+	found <- false
 	i = 0  # = 等价于 <-
 	while (i < n) {
 		i + 1 -> j
@@ -17,7 +17,7 @@ def has_dup() -> () {
 			x == y -> dup
 
 			if (dup) {
-				found <- 1
+				found <- true
 				i = n  # = 等价于 <-
 				n -> j
 			} else {
@@ -48,7 +48,7 @@ def no_dup() -> () {
 			dup = x == y  # = 等价于 <-
 
 			if (dup) {
-				1 -> found
+				true -> found
 				i <- n
 				j = n  # = 等价于 <-
 			} else {

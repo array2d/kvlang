@@ -13,15 +13,15 @@
 #   11
 #   12
 #   15
-def is_self(n:int64) -> (r:int64) {
+def is_self(n:int64) -> (r:bool) {
 	n -> num
-	ok <- 1
+	ok <- true
 	while (num > 0) {
 		d = num % 10  # = 等价于 <-
 		d == 0 -> zero
 
 		if (zero) {
-			ok <- 0
+			ok <- false
 			num = 0  # = 等价于 <-
 		} else {
 			n % d -> rem
@@ -30,7 +30,7 @@ def is_self(n:int64) -> (r:int64) {
 			if (div) {
 				num = num / 10  # = 等价于 <-
 			} else {
-				0 -> ok
+				false -> ok
 				num <- 0
 			}
 		}

@@ -10,7 +10,7 @@ def str_str(hay:str, needle:str) -> () {
 	-1 -> ans
 	limit <- nh - nn
 	while (i <= limit) {
-		match = 1  # = 等价于 <-
+		match = true  # = 等价于 <-
 		0 -> j
 		while (j < nn) {
 			hc <- char(hay, i + j)
@@ -20,7 +20,7 @@ def str_str(hay:str, needle:str) -> () {
 			if (eq) {
 				j <- j + 1
 			} else {
-				match = 0  # = 等价于 <-
+				match = false  # = 等价于 <-
 				nn -> j
 			}
 		}

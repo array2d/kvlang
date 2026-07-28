@@ -21,7 +21,7 @@ def dedup(head:str) -> () {
 	head -> cur
 	while (cur != "") {
 		cur.next -> nxt
-		advance = 1  # = 等价于 <-
+		advance = true  # = 等价于 <-
 
 		if (nxt != "") {
 			cur.val -> v
@@ -30,7 +30,7 @@ def dedup(head:str) -> () {
 			if (nv == v) {
 				nxt.next -> nn
 				cur.next <- nn
-				0 -> advance
+				false -> advance
 			}
 		}
 		if (advance) {

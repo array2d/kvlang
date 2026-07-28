@@ -15,6 +15,8 @@
 package lower
 
 import (
+	"strings"
+
 	"kvlang/ast"
 	"kvlang/op"
 )
@@ -186,6 +188,9 @@ func slotType(name string, tm map[string]string) string {
 	}
 	if len(name) > 0 && (name[0] >= '0' && name[0] <= '9' ||
 		(name[0] == '-' && len(name) > 1 && name[1] >= '0' && name[1] <= '9')) {
+		if strings.Contains(name, ".") || strings.ContainsAny(name, "eE") {
+			return "float64"
+		}
 		return "int64"
 	}
 	return ""

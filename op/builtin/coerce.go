@@ -51,21 +51,14 @@ func asInt(v kvspace.XValue) int64 {
 
 // AsBool coerces a Value to bool (kvlang truth semantics).
 // Exported for use by kvcpu/controlflow (br condition evaluation).
+//
+// 铁律：bool 只能是 true/false，禁止隐式 coerce。
+// int/float/string 不可当 bool 用——必须显式写 != 0、!= ""。
 func AsBool(v kvspace.XValue) bool {
-	if v.IsNil() { return false }
-	switch v.Kind() {
-	case "bool": return v.Bool()
-	case "int", "int8", "int16", "int32", "int64":
-		return v.Int64() != 0
-	case "uint8", "uint16", "uint32", "uint64":
-		return v.Uint64() != 0
-	case "float", "float32":
-		return v.Float32() != 0
-	case "float64":
-		return v.Float64() != 0
-	default:
-		s := v.Str(); return s != "" && s != "0" && s != "false"
+	if v.Kind() != "bool" {
+		panic("AsBool: expected bool kind, got " + v.Kind() + " — use explicit comparison (e.g. x != 0) instead of bare value")
 	}
+	return v.Bool()
 }
 
 // isNumeric reports whether v is int or float.

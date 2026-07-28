@@ -211,6 +211,10 @@ func (p *parser) parsePrimaryExpr() *ast.Expr {
 				return ast.Leaf("-" + lit.Value)
 			}
 		}
+		// PC3: unary + is identity — return operand directly
+		if t.Value == "+" {
+			return p.parsePratt(unaryPrec)
+		}
 		arg := p.parsePratt(unaryPrec)
 		return ast.Call(t.Value, arg)
 	}
@@ -347,6 +351,19 @@ func (p *parser) parsePrimaryExpr() *ast.Expr {
 		return ast.StrLit(v)
 		}
 	}
+	// PC2: return cannot take a value
+	if t.Kind == Return {
+		next := p.peek()
+		switch next.Kind {
+		case Newline, EOF, RBrace, RParen, RBrack, Comma, Arrow, Comment:
+			// standalone return, OK
+		default:
+			p.errors = append(p.errors, Diagnostic{
+				Pos:     next.Pos,
+				Message: "return cannot take a value — use write-params for output",
+			})
+		}
+	}
 	return ast.Leaf(t.Value)
 }
 
@@ -441,12 +458,6 @@ func (p *parser) parseWriteSlot() (name, typ string) {
 		}
 	}
 	return
-	name = p.advance().Value
-	if p.peek().Kind == Colon && p.peekAt(1).Kind == Ident {
-		p.advance() // consume :
-		typ = p.advance().Value
-	}
-	return
 }
 
 // collectWritesUntilArrow 收集 <- 左侧的写槽，直到遇到 Arrow 为止（不消费 Arrow）。
@@ -459,7 +470,11 @@ func (p *parser) collectWritesUntilArrow() ([]string, []string) {
 	var writes, wtypes []string
 	for {
 		t := p.peek()
-		if t.Kind == Arrow || t.Kind == EOF || t.Kind == Comment {
+		if t.Kind == Comment || (!hasParen && t.Kind == Newline) {
+			p.advance()
+			continue
+		}
+		if t.Kind == Arrow || t.Kind == EOF {
 			break
 		}
 		if hasParen && t.Kind == RParen {
@@ -482,14 +497,20 @@ func (p *parser) collectWritesUntilArrow() ([]string, []string) {
 			wtypes = append(wtypes, "")
 			continue
 		}
-		// arr[idx] 数组索引作为整体写槽
+		// arr[idx] 数组索引作为整体写槽（支持嵌套括号, PC7）
 		if t.Kind == Ident && p.peekAt(1).Kind == LBrack {
 			w := p.advance().Value // arr name
 			w += p.advance().Value // consume [, add to w
-			for p.peek().Kind != RBrack && p.peek().Kind != EOF && p.peek().Kind != Arrow {
+			depth := 1
+			for depth > 0 && p.peek().Kind != EOF && p.peek().Kind != Arrow {
+				if p.peek().Kind == RBrack {
+					depth--
+				}
+				if p.peek().Kind == LBrack {
+					depth++
+				}
 				w += p.advance().Value
 			}
-			if p.peek().Kind == RBrack { w += p.advance().Value }
 			writes = append(writes, w)
 			wtypes = append(wtypes, "")
 			continue
@@ -513,7 +534,7 @@ func (p *parser) parseCondInst() *ast.Instruction {
 
 // ── 算子判断 ──────────────────────────────────────────────────
 
-func isUnaryPrefixOp(s string) bool { return s == "!" || s == "-" }
+func isUnaryPrefixOp(s string) bool { return s == "!" || s == "-" || s == "+" }
 
 // isNumericLiteral 判断字符串是否为合法数字字面量。
 //

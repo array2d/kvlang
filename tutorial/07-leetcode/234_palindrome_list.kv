@@ -13,7 +13,7 @@ def is_pal(head:str) -> () {
 		n <- n + 1
 		p.next -> p
 	}
-	ok = 1  # = 等价于 <-
+	ok = true  # = 等价于 <-
 	0 -> l
 	r <- n - 1
 	while (l < r) {
@@ -21,7 +21,7 @@ def is_pal(head:str) -> () {
 		arr[r] -> y
 
 		if (x != y) {
-			0 -> ok
+			false -> ok
 			r -> l
 		}
 		l <- l + 1

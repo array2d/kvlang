@@ -127,12 +127,28 @@ var singleCharToken = map[byte]Kind{
 }
 
 // scanQuoted 从 src[i]（引号字符）开始，返回引号内容和结束后的下一位置。
+// 转义序列：\" \' \\ 将反斜杠和下一字符替换为下一字符本身。
 func scanQuoted(src string, i int, quote byte) (string, int) {
-	end := strings.IndexByte(src[i+1:], quote)
-	if end >= 0 {
-		return src[i+1 : i+1+end], i + end + 2
+	i++ // skip opening quote
+	var b strings.Builder
+	for i < len(src) {
+		c := src[i]
+		if c == '\\' {
+			i++ // skip backslash
+			if i < len(src) {
+				b.WriteByte(src[i])
+				i++
+			}
+			continue
+		}
+		if c == quote {
+			return b.String(), i + 1
+		}
+		b.WriteByte(c)
+		i++
 	}
-	return src[i+1:], len(src)
+	// unclosed string — return what we have
+	return b.String(), len(src)
 }
 
 // Scan 将整个源字符串（可含换行）扫描为平坦 Token 流，末尾附 EOF 哨兵。
