@@ -1,11 +1,7 @@
 # 期望输出:
 #   hello kvlang
-#   global hits = 1
 def main() -> () {
 	print("hello kvlang")
-	/hits = 0  # = 等价于 <-
-	/hits + 1 -> /hits
-	print("global hits =", /hits)
 }
 
 main()
