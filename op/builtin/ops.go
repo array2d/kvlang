@@ -148,7 +148,7 @@ var nativeSigs = map[string]string{
 	OpAdd: "def +(A:num, B:num) -> (C:num)",
 	OpSub: "def -(A:num, B:num) -> (C:num)",
 	OpMul: "def *(A:num, B:num) -> (C:num)",
-	OpDiv: "def /(A:num, B:num) -> (C:float)",
+	OpDiv: "def /(A:num, B:num) -> (C:num)",
 	OpMod: "def %(A:int, B:int) -> (C:int)",
 	OpEq:  "def ==(A:num, B:num) -> (C:bool)",
 	OpNe:  "def !=(A:num, B:num) -> (C:bool)",

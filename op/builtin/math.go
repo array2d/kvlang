@@ -25,7 +25,9 @@ func evalMath(kind string, inputs []kvspace.XValue) (kvspace.XValue, error) {
 	case "sqrt": return evalSqrt(inputs)
 	case "exp":  return evalExp(inputs)
 	case "log":  return evalLog(inputs)
-	case "neg":  return evalUnaryArith(inputs, func(a float64) float64 { return -a })
+	case "neg":
+		if err := requireUnary(inputs); err != nil { return kvspace.XValue{}, err }
+		return evalNeg(inputs[0])
 	case "sign": return evalSign(inputs)
 	default:     return kvspace.XValue{}, fmt.Errorf("unknown math: %s", kind)
 	}

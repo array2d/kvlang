@@ -148,3 +148,72 @@ func isIntKind(k string) bool {
 func isFloatKind(k string) bool {
 	return k == "float32" || k == "float64"
 }
+
+func isUnsignedKind(k string) bool {
+	switch k {
+	case "uint8", "uint16", "uint32", "uint64":
+		return true
+	}
+	return false
+}
+
+func intKindWidth(k string) int {
+	switch k {
+	case "int8", "uint8":   return 8
+	case "int16", "uint16": return 16
+	case "int32", "uint32": return 32
+	case "int64", "uint64": return 64
+	}
+	return 0
+}
+
+// widerIntKind 返回能容纳 ak 和 bk 全量程的最小整数 kind。
+func widerIntKind(ak, bk string) string {
+	aw, bw := intKindWidth(ak), intKindWidth(bk)
+	au, bu := isUnsignedKind(ak), isUnsignedKind(bk)
+	if au && bu {
+		if aw >= bw { return ak }
+		return bk
+	}
+	if !au && !bu {
+		if aw >= bw { return ak }
+		return bk
+	}
+	// mixed signed/unsigned → 需要更宽一级有符号类型承载两方全量程
+	w := aw
+	if bw > w { w = bw }
+	switch w {
+	case 8:  return "int16"
+	case 16: return "int32"
+	case 32: return "int64"
+	default: return "int64"
+	}
+}
+
+func widerFloatKind(ak, bk string) string {
+	if ak == "float64" || bk == "float64" { return "float64" }
+	if ak == "float32" || bk == "float32" { return "float32" }
+	return "float64"
+}
+
+func narrowInt(ak, bk string, v int64) kvspace.XValue {
+	kind := widerIntKind(ak, bk)
+	switch kind {
+	case "int8":   return kvspace.Int8(int8(v))
+	case "int16":  return kvspace.Int16(int16(v))
+	case "int32":  return kvspace.Int32(int32(v))
+	case "int64":  return kvspace.Int64(v)
+	case "uint8":  return kvspace.Uint8(uint8(v))
+	case "uint16": return kvspace.Uint16(uint16(v))
+	case "uint32": return kvspace.Uint32(uint32(v))
+	case "uint64": return kvspace.Uint64(uint64(v))
+	default:       return kvspace.Int64(v)
+	}
+}
+
+func narrowFloat(ak, bk string, v float64) kvspace.XValue {
+	if widerFloatKind(ak, bk) == "float32" {
+		return kvspace.Float32(float32(v))
+	}
+	return kvspace.Float64(v)
+}

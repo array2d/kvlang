@@ -48,12 +48,14 @@ func evalBinaryArith(inputs []kvspace.XValue, fn func(float64, float64) float64,
 	if err := requireNumeric(a, b); err != nil { return kvspace.XValue{}, err }
 	// int ∧ int → 原生 int64 运算，绝不经 float64 中转（fix-020：
 	// float64 仅 53 位尾数，>2^53 的整数会静默丢精度；溢出语义 = 补码回绕，同 C/Go）
-	if isIntKind(a.Kind()) && isIntKind(b.Kind()) && fnInt != nil {
-		return kvspace.Int64(fnInt(asInt(a), asInt(b))), nil
+	// 结果窄化回输入类型中更宽者，保留位宽信息（fix-034）。
+	if isIntKind(a.Kind()) && isIntKind(b.Kind()) {
+		if fnInt == nil {
+			panic("evalBinaryArith: fnInt is nil for int operands — every arith op must provide int path")
+		}
+		return narrowInt(a.Kind(), b.Kind(), fnInt(asInt(a), asInt(b))), nil
 	}
-	result := fn(asFloat(a), asFloat(b))
-	if isIntKind(a.Kind()) && isIntKind(b.Kind()) { return kvspace.Int64(int64(result)), nil }
-	return kvspace.Float64(result), nil
+	return narrowFloat(a.Kind(), b.Kind(), fn(asFloat(a), asFloat(b))), nil
 }
 
 func evalNeg(v kvspace.XValue) (kvspace.XValue, error) {
@@ -81,17 +83,15 @@ func evalDiv(inputs []kvspace.XValue) (kvspace.XValue, error) {
 		return kvspace.XValue{}, fmt.Errorf("TypeError: None in arithmetic")
 	}
 	if err := requireNumeric(a, b); err != nil { return kvspace.XValue{}, err }
-	bf := asFloat(b)
-	// fix-rc1：同时检 asFloat 与 asInt。非常小的浮点（如 1e-20）的 asFloat!=0
-	// 但 asInt 截断为零 → 整数路径 Go panic，浮点路径也产生反常大数。
-	if bf == 0 || asInt(b) == 0 {
+	if asFloat(b) == 0 {
 		return kvspace.XValue{}, fmt.Errorf("ZeroDivisionError: division by zero")
 	}
-	// C 风格：两整数相除 → 整除，否则 → 浮除
+	// 两整数 → 整数整除（C/Go/Rust 阵营）；含浮点 → 浮除。
+	// fix-034：结果窄化回输入更宽类型，不复全部消灭为 int64/float64。
 	if isIntKind(a.Kind()) && isIntKind(b.Kind()) {
-		return kvspace.Int64(asInt(a) / asInt(b)), nil
+		return narrowInt(a.Kind(), b.Kind(), asInt(a)/asInt(b)), nil
 	}
-	return kvspace.Float64(asFloat(a) / bf), nil
+	return narrowFloat(a.Kind(), b.Kind(), asFloat(a)/asFloat(b)), nil
 }
 
 func evalMod(inputs []kvspace.XValue) (kvspace.XValue, error) {
@@ -103,18 +103,6 @@ func evalMod(inputs []kvspace.XValue) (kvspace.XValue, error) {
 	if err := requireInt(inputs[0], inputs[1]); err != nil { return kvspace.XValue{}, err }
 	b := asInt(inputs[1])
 	if b == 0 { return kvspace.XValue{}, fmt.Errorf("ZeroDivisionError: modulo by zero") }
-	return kvspace.Int64(asInt(inputs[0]) % b), nil
-}
-
-func evalUnaryArith(inputs []kvspace.XValue, fn func(float64) float64) (kvspace.XValue, error) {
-	if err := requireUnary(inputs); err != nil { return kvspace.XValue{}, err }
-	v := inputs[0]
-	if v.IsNone() {
-		return kvspace.XValue{}, fmt.Errorf("TypeError: None in arithmetic")
-	}
-	if err := requireNumeric(v); err != nil { return kvspace.XValue{}, err }
-	result := fn(asFloat(v))
-	if isIntKind(v.Kind()) { return kvspace.Int64(int64(result)), nil }
-	return kvspace.Float64(result), nil
+	return narrowInt(inputs[0].Kind(), inputs[1].Kind(), asInt(inputs[0])%b), nil
 }
 
