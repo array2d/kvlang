@@ -20,6 +20,8 @@ func (o cmp) Call(f *op.Frame) error {
 func evalCmp(inputs []kvspace.XValue, numCmp func(float64, float64) bool, intCmp func(int64, int64) bool, strCmp func(string, string) bool) (kvspace.XValue, error) {
 	if err := requireBinary(inputs); err != nil { return kvspace.XValue{}, err }
 	a, b := inputs[0], inputs[1]
+	// nullAsInt: null 在数值比较中按 int64(0) 处理（fix-017 方案 A，与 null==0 比较语义一致）
+	a, b = nullAsInt(a), nullAsInt(b)
 	// int ∧ int → 原生 int64 比较（fix-020：>2^53 经 float64 会误判相等）
 	if isIntKind(a.Kind()) && isIntKind(b.Kind()) && intCmp != nil {
 		return kvspace.Bool(intCmp(asInt(a), asInt(b))), nil

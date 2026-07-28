@@ -7,8 +7,8 @@ import (
 	"github.com/array2d/kvspace-go"
 )
 
-// nilAsInt 将 nil 在数值语境按 int 0 参与（fix-017 方案 A，与 nil==0 比较语义一致）。
-func nilAsInt(v kvspace.XValue) kvspace.XValue {
+// nullAsInt 将 null 在数值语境按 int 0 参与（fix-017 方案 A，与 null==0 比较语义一致）。
+func nullAsInt(v kvspace.XValue) kvspace.XValue {
 	if v.IsNil() { return kvspace.Int64(0) }
 	return v
 }

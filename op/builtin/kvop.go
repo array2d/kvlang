@@ -20,13 +20,18 @@ func (o kvHasOp) Call(f *op.Frame) error {
 		return fmt.Errorf("TypeError: kvhas requires 2 args")
 	}
 	fp := keytree.FrameRoot(f.PC)
+	funcFrame := funcFrameRoot(f.KV, fp)
 	prefix := resolveReadValue(f.KV, fp, f.Inst.Reads[0]).Str()
 	if prefix == "" {
-		// 退化为路径字面量解析
-		prefix = resolveKVPath(fp, f.Inst.Reads[0])
+		prefix = resolveKVPath(funcFrame, f.Inst.Reads[0])
 	}
 	idxVal := resolveReadValue(f.KV, fp, f.Inst.Reads[1])
-	key := keytree.Member(prefix, strconv.Itoa(int(idxVal.Int64())))
+	var key string
+	if isIntKind(idxVal.Kind()) || isFloatKind(idxVal.Kind()) {
+		key = keytree.Member(prefix, strconv.Itoa(int(idxVal.Int64())))
+	} else {
+		key = keytree.Member(prefix, idxVal.Str())
+	}
 	v := kvspace.GetOne(f.KV, key)
 	return writeResult(f, kvspace.Bool(!v.IsNil()))
 }
@@ -41,9 +46,10 @@ func (o kvAtOp) Call(f *op.Frame) error {
 		return fmt.Errorf("TypeError: kvat requires 2 args")
 	}
 	fp := keytree.FrameRoot(f.PC)
+	funcFrame := funcFrameRoot(f.KV, fp)
 	prefix := resolveReadValue(f.KV, fp, f.Inst.Reads[0]).Str()
 	if prefix == "" {
-		prefix = resolveKVPath(fp, f.Inst.Reads[0])
+		prefix = resolveKVPath(funcFrame, f.Inst.Reads[0])
 	}
 	idxVal := resolveReadValue(f.KV, fp, f.Inst.Reads[1])
 	var key string

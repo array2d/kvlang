@@ -38,7 +38,7 @@ func evalCast(kind string, inputs []kvspace.XValue) (kvspace.XValue, error) {
 // castNum 数字类型算子公共路径：一元、nil 按 int 0（fix-017）、构造目标 kind。
 func castNum(inputs []kvspace.XValue, mk func(kvspace.XValue) kvspace.XValue) (kvspace.XValue, error) {
 	if err := requireUnary(inputs); err != nil { return kvspace.XValue{}, err }
-	return mk(nilAsInt(inputs[0])), nil
+	return mk(nullAsInt(inputs[0])), nil
 }
 
 func evalToInt(inputs []kvspace.XValue) (kvspace.XValue, error) {

@@ -48,6 +48,18 @@ func nextPC(f *op.Frame) {
 	vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
 }
 
+// funcFrameRoot returns the nearest rwfunc frame root from the given frame path.
+// Relative path resolution (kvhas/kvat/at/set) must use the function frame root,
+// not the current label frame root, because data lives under the function frame.
+func funcFrameRoot(kv kvspace.KVSpace, frameRoot string) string {
+	for f := frameRoot; f != ""; f = keytree.ParentFrame(f) {
+		if extKind(kv, f) == kvspace.KindRwfunc {
+			return f
+		}
+	}
+	return frameRoot
+}
+
 // ExecuteCopy copies the Value addressed by inst.Reads[0] to all write-slots.
 // Preserves the original type — int stays int, float stays float.
 func ExecuteCopy(kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) error {

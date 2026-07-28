@@ -396,7 +396,7 @@ func slotValue(val string, typeMap map[string]string) kvspace.XValue {
 
 func isLiteral(s string) bool {
 	if s == "" { return false }
-	return s[0] == '"' || s[0] == '/' || s == "true" || s == "false" ||
+	return s[0] == '"' || s[0] == '/' || s == "true" || s == "false" || s == "null" ||
 		(s[0] >= '0' && s[0] <= '9') || (s[0] == '-' && len(s) > 1)
 }
 

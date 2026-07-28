@@ -45,7 +45,7 @@ func Register(vt VType) { registry[vt.Name()] = vt }
 // Lookup 根据 opcode 前缀查找 VType。
 //   "tensor.add"   → tensor VType
 //   "string.set"   → string VType
-//   "print"        → nil（无 dot 或未注册）
+//   "print"        → null（无 dot 或未注册）
 func Lookup(opcode string) VType {
 	dot := strings.Index(opcode, keytree.FuncPathSep)
 	if dot <= 0 {

@@ -58,6 +58,9 @@ func resolveReadValue(kv kvspace.KVSpace, framePath, param string) kvspace.XValu
 	if param == "false" {
 		return kvspace.Bool(false)
 	}
+	if param == "null" {
+		return kvspace.XValue{}
+	}
 	if v, ok := tryParseNumber(param); ok {
 		return v
 	}

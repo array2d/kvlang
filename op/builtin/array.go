@@ -114,19 +114,27 @@ func (atOp) Call(f *op.Frame) error {
 		return writeResult(f, kvspace.Str(s[idx:idx+1]))
 	}
 	// 路径访问：at(/path, key) or at(ptr, "field") or h.*key
-	if inputs[0].Kind() == "dict" || inputs[0].Kind() == "string" || inputs[1].Kind() == "string" || len(f.Inst.Reads) > 0 && (f.Inst.Reads[0][0] == '/' || f.Inst.Reads[0][0] == '"' && len(f.Inst.Reads[0]) > 1 && f.Inst.Reads[0][1] == '/') {
+	// 排除 typed array（int32/float64/…）：用字符串 key 对同构数组做路径访问是错误。
+	if (inputs[0].Kind() == "dict" || inputs[0].Kind() == "string" || inputs[1].Kind() == "string" || len(f.Inst.Reads) > 0 && (f.Inst.Reads[0][0] == '/' || f.Inst.Reads[0][0] == '"' && len(f.Inst.Reads[0]) > 1 && f.Inst.Reads[0][1] == '/')) && kindSize(inputs[0].Kind()) <= 0 {
 		fp := keytree.FrameRoot(f.PC)
+		funcFrame := funcFrameRoot(f.KV, fp)
 		base := resolveReadValue(f.KV, fp, f.Inst.Reads[0]).Str()
 		if base == "" {
 			raw := f.Inst.Reads[0]
 			if len(raw) > 1 && raw[0] == '"' { raw = raw[1:] }
-			base = resolveKVPath(fp, raw)
+			base = resolveKVPath(funcFrame, raw)
 		}
 		path := keytree.Member(base, kvKey(inputs[1]))
 		v := kvspace.GetOne(f.KV, path); return writeResult(f, v)
 	}
+	// 拒绝 string 索引 typed array（五语言中仅 JS 允许，C/Python/Rust/Go 均编译/运行时拒绝）
+	if kindSize(inputs[0].Kind()) > 0 && inputs[1].Kind() == "string" {
+		msg := "IndexError: at: index must be integer for typed array"
+		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
+		return fmt.Errorf("%s", msg)
+	}
 	if inputs[0].IsNil() {
-		msg := "IndexError: at: base " + f.Inst.Reads[0] + " is nil; help: declare a key-family first (e.g. `" + f.Inst.Reads[0] + " = {}`) or pass a path string"
+		msg := "IndexError: at: base " + f.Inst.Reads[0] + " is null; help: declare a key-family first (e.g. `" + f.Inst.Reads[0] + " = {}`) or pass a path string"
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
 		return fmt.Errorf("%s", msg)
 	}
@@ -186,13 +194,15 @@ func (arraySetOp) Call(f *op.Frame) error {
 		return writeResult(f, kvspace.Str(result))
 	}
 	// 路径写入：set(/path, key, val) or set(ptr, "field", val)
-	if inputs[0].Kind() == "dict" || inputs[0].Kind() == "string" || inputs[1].Kind() == "string" || len(f.Inst.Reads) > 0 && (f.Inst.Reads[0][0] == '/' || f.Inst.Reads[0][0] == '"' && len(f.Inst.Reads[0]) > 1 && f.Inst.Reads[0][1] == '/') {
+	// 排除 typed array（int32/float64/…）：用字符串 key 对同构数组做路径访问是错误。
+	if (inputs[0].Kind() == "dict" || inputs[0].Kind() == "string" || inputs[1].Kind() == "string" || len(f.Inst.Reads) > 0 && (f.Inst.Reads[0][0] == '/' || f.Inst.Reads[0][0] == '"' && len(f.Inst.Reads[0]) > 1 && f.Inst.Reads[0][1] == '/')) && kindSize(inputs[0].Kind()) <= 0 {
 		fp := keytree.FrameRoot(f.PC)
+		funcFrame := funcFrameRoot(f.KV, fp)
 		base := resolveReadValue(f.KV, fp, f.Inst.Reads[0]).Str()
 		if base == "" {
 			raw := f.Inst.Reads[0]
 			if len(raw) > 1 && raw[0] == '"' { raw = raw[1:] }
-			base = resolveKVPath(fp, raw)
+			base = resolveKVPath(funcFrame, raw)
 		}
 		path := keytree.Member(base, kvKey(inputs[1]))
 		f.KV.Set([]kvspace.KVPair{{path, inputs[2]}})
@@ -204,8 +214,14 @@ func (arraySetOp) Call(f *op.Frame) error {
 		vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
 		return nil
 	}
+	// 拒绝 string 索引 typed array（五语言中仅 JS 允许，C/Python/Rust/Go 均编译/运行时拒绝）
+	if kindSize(arr.Kind()) > 0 && inputs[1].Kind() == "string" {
+		msg := "IndexError: set: index must be integer for typed array"
+		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
+		return fmt.Errorf("%s", msg)
+	}
 	if arr.IsNil() {
-		msg := "IndexError: set: base " + f.Inst.Reads[0] + " is nil; help: declare a key-family first (e.g. `" + f.Inst.Reads[0] + " = {}`) or pass a path string"
+		msg := "IndexError: set: base " + f.Inst.Reads[0] + " is null; help: declare a key-family first (e.g. `" + f.Inst.Reads[0] + " = {}`) or pass a path string"
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
 		return fmt.Errorf("%s", msg)
 	}
@@ -283,8 +299,9 @@ func (hasOp) Call(f *op.Frame) error {
 	inputs := readInputs(f)
 	if len(inputs) < 2 { return writeResult(f, kvspace.Bool(false)) }
 	fp := keytree.FrameRoot(f.PC)
+	funcFrame := funcFrameRoot(f.KV, fp)
 	base := resolveReadValue(f.KV, fp, f.Inst.Reads[0]).Str()
-	if base == "" { base = resolveKVPath(fp, f.Inst.Reads[0]) }
+	if base == "" { base = resolveKVPath(funcFrame, f.Inst.Reads[0]) }
 	key := kvKey(inputs[1])
 	v := kvspace.GetOne(f.KV, keytree.Member(base, key))
 	return writeResult(f, kvspace.Bool(!v.IsNil()))

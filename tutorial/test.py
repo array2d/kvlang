@@ -39,7 +39,16 @@ def parse_expects(f: Path) -> list[str]:
 def main():
     ap = argparse.ArgumentParser(description="tutorial test")
     ap.add_argument("--filter", default="", help="filter by name")
+    ap.add_argument("--no-build", action="store_true", help="skip make build")
     args = ap.parse_args()
+
+    if not args.no_build:
+        r = subprocess.run(["make", "build"], capture_output=True, text=True,
+                           timeout=120, cwd=str(ROOT))
+        if r.returncode != 0:
+            print(f"{RED}❌ make build failed:{NC}\n{r.stderr}")
+            sys.exit(1)
+        print(f"{GREEN}✅ build ok{NC}")
 
     passed = failed = 0
     files = [f for f in discover(ROOT / "tutorial")
