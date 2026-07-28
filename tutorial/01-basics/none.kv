@@ -1,0 +1,15 @@
+# 变量名即地址，未赋值即 None
+#
+# 期望输出
+#   before
+#   after
+#   42
+def main() -> () {
+  print("before")
+  x -> y       # x 未赋值 → None，y ← None
+  print(y)     # None → 输出空行
+  print("after")
+  42 -> x      # 显式赋值
+  print(x)
+}
+main()
