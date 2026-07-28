@@ -5,18 +5,19 @@
 #   false
 def has_dup(a:int64) -> () {
 	len(a) -> n
+	seen = {}  # = 等价于 <-
 	found <- false
 	i = 0  # = 等价于 <-
 	while (i < n) {
 		a[i] -> x
-		v <- "/seen"[x]
-		exists = v  # = 等价于 <-
+		seen.*x -> v
+		exists = v != null  # = 等价于 <-
 
 		if (exists) {
 			true -> found
 			i <- n
 		} else {
-			_ = set("/seen", x, true)  # = 等价于 <-
+			_ = set(seen, x, 1)  # = 等价于 <-
 			i + 1 -> i
 		}
 	}
@@ -32,18 +33,19 @@ def has_dup(a:int64) -> () {
 def no_dup() -> () {
 	a:int64 = [1, 2, 3, 4]  # = 等价于 <-
 	len(a) -> n
+	seen = {}  # = 等价于 <-
 	found <- false
 	i = 0  # = 等价于 <-
 	while (i < n) {
 		a[i] -> x
-		v <- "/seen2"[x]
-		exists = v  # = 等价于 <-
+		seen.*x -> v
+		exists = v != null  # = 等价于 <-
 
 		if (exists) {
 			true -> found
 			i <- n
 		} else {
-			_ = set("/seen2", x, true)  # = 等价于 <-
+			_ = set(seen, x, 1)  # = 等价于 <-
 			i + 1 -> i
 		}
 	}

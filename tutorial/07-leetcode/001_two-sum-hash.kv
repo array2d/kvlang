@@ -12,7 +12,7 @@ def two_sum(nums:int64, target:int64) -> () {
 		h[need] -> j
 		found <- j
 
-		if (found) {
+		if (found != null) {
 			k = j - 1  # = 等价于 <-
 			print("[", k, ",", i, "]")
 			n -> i

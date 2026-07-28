@@ -15,7 +15,7 @@ def my_pow(x:float64, n:int64) -> () {
 	while (exp > 0) {
 		exp % 2 -> odd
 
-		if (odd) {
+		if (odd != 0) {
 			result <- result * base
 		}
 

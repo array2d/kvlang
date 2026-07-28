@@ -38,7 +38,7 @@ def has_dup() -> () {
 def no_dup() -> () {
 	a:int64 <- [1, 2, 3, 4]
 	n = len(a)  # = 等价于 <-
-	0 -> found
+	false -> found
 	i <- 0
 	while (i < n) {
 		j = i + 1  # = 等价于 <-
