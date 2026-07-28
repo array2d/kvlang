@@ -17,8 +17,6 @@ func (o cOp) Call(f *op.Frame) error {
 
 func evalCast(kind string, inputs []kvspace.XValue) (kvspace.XValue, error) {
 	switch kind {
-	case "int":   return evalToInt(inputs)
-	case "float": return evalToFloat(inputs)
 	case "bool":  return evalToBool(inputs)
 	// 全谱数字类型创建/转换（fix-021）：float→int 截断向零，窄化=补码回绕（同 Go/Rust as/C 转换）
 	case "int8":    return castNum(inputs, func(v kvspace.XValue) kvspace.XValue { return kvspace.Int8(int8(asInt(v))) })
@@ -42,26 +40,6 @@ func castNum(inputs []kvspace.XValue, mk func(kvspace.XValue) kvspace.XValue) (k
 		return kvspace.XValue{}, fmt.Errorf("TypeError: cannot cast None")
 	}
 	return mk(inputs[0]), nil
-}
-
-func evalToInt(inputs []kvspace.XValue) (kvspace.XValue, error) {
-	if err := requireUnary(inputs); err != nil { return kvspace.XValue{}, err }
-	v := inputs[0]
-	if v.IsNone() {
-		return kvspace.XValue{}, fmt.Errorf("TypeError: cannot cast None")
-	}
-	if v.Kind() == "int64" { return v, nil }
-	return kvspace.Int64(asInt(v)), nil
-}
-
-func evalToFloat(inputs []kvspace.XValue) (kvspace.XValue, error) {
-	if err := requireUnary(inputs); err != nil { return kvspace.XValue{}, err }
-	v := inputs[0]
-	if v.IsNone() {
-		return kvspace.XValue{}, fmt.Errorf("TypeError: cannot cast None")
-	}
-	if v.Kind() == "float64" { return v, nil }
-	return kvspace.Float64(asFloat(v)), nil
 }
 
 func evalToBool(inputs []kvspace.XValue) (kvspace.XValue, error) {

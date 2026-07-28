@@ -53,8 +53,6 @@ var registry = map[string]Op{
 	OpNeg:  mOp{kind: "neg"},
 	OpSign: mOp{kind: "sign"},
 
-	OpInt:   cOp{kind: "int"},
-	OpFloat: cOp{kind: "float"},
 	OpBool:  cOp{kind: "bool"},
 	OpInt8:    cOp{kind: "int8"},
 	OpInt16:   cOp{kind: "int16"},

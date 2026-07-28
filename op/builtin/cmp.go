@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/array2d/kvspace-go"
 	"kvlang/op"
@@ -24,7 +25,7 @@ func evalCmp(inputs []kvspace.XValue, o cmp) (kvspace.XValue, error) {
 	if err := requireBinary(inputs); err != nil { return kvspace.XValue{}, err }
 	a, b := inputs[0], inputs[1]
 
-	// null kind 比较：仅 ==/!= 允许，直接比较 kind
+	// null kind 比较：仅 ==/!= 允许
 	if a.IsNone() || b.IsNone() {
 		if !o.allowNull {
 			return kvspace.XValue{}, fmt.Errorf("TypeError: None in comparison")
@@ -32,11 +33,17 @@ func evalCmp(inputs []kvspace.XValue, o cmp) (kvspace.XValue, error) {
 		return kvspace.Bool(o.s(a.Kind(), b.Kind())), nil
 	}
 
-	if isIntKind(a.Kind()) && isIntKind(b.Kind()) && o.i != nil {
+	// 同类型直接比较；混合类型 → TypeError（p0/p1：不容忍跨类型静默比较）
+	switch {
+	case isIntKind(a.Kind()) && isIntKind(b.Kind()) && o.i != nil:
 		return kvspace.Bool(o.i(asInt(a), asInt(b))), nil
-	}
-	if isNumeric(a) && isNumeric(b) {
+	case isNumeric(a) && isNumeric(b):
 		return kvspace.Bool(o.f(asFloat(a), asFloat(b))), nil
+	case a.Kind() == "string" && b.Kind() == "string":
+		return kvspace.Bool(o.s(a.Str(), b.Str())), nil
+	case a.Kind() == "bool" && b.Kind() == "bool":
+		return kvspace.Bool(o.s(strconv.FormatBool(a.Bool()), strconv.FormatBool(b.Bool()))), nil
+	default:
+		return kvspace.XValue{}, fmt.Errorf("TypeError: cannot compare %s with %s", a.Kind(), b.Kind())
 	}
-	return kvspace.Bool(o.s(a.Str(), b.Str())), nil
 }

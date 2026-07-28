@@ -1,0 +1,7 @@
+# expected
+#   TypeError: cannot compare int64 with bool
+# 修复: todo-033 — int>bool 曾通过 asInt 将 bool→0/1 静默比较
+def main() -> () {
+	int64(1) < true -> x
+}
+main()

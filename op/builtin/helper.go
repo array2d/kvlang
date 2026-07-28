@@ -18,6 +18,34 @@ func requireUnary(inputs []kvspace.XValue) error {
 	return nil
 }
 
+// requireNumeric guards that all inputs are numeric (int or float kinds).
+func requireNumeric(inputs ...kvspace.XValue) error {
+	for _, v := range inputs {
+		if !isNumeric(v) {
+			return fmt.Errorf("TypeError: expected numeric, got %s", v.Kind())
+		}
+	}
+	return nil
+}
+
+// requireInt guards that all inputs are integer kinds.
+func requireInt(inputs ...kvspace.XValue) error {
+	for _, v := range inputs {
+		if !isIntKind(v.Kind()) {
+			return fmt.Errorf("TypeError: expected integer, got %s", v.Kind())
+		}
+	}
+	return nil
+}
+
+// requireKind guards that an input has a specific kind.
+func requireKind(v kvspace.XValue, kind string) error {
+	if v.Kind() != kind {
+		return fmt.Errorf("TypeError: expected %s, got %s", kind, v.Kind())
+	}
+	return nil
+}
+
 // readInputs resolves all read-slots of f.Inst into typed Values.
 func readInputs(f *op.Frame) []kvspace.XValue {
 	framePath := keytree.FrameRoot(f.PC)

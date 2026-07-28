@@ -42,15 +42,21 @@ func (arrayOp) Call(f *op.Frame) error {
 }
 
 // packTypedArray 将元素按 kind 打包为同构定长数组。
+// 铁律：所有元素 kind 必须匹配目标 kind。
 func packTypedArray(kind string, elems []kvspace.XValue) kvspace.XValue {
 	sz := kindSize(kind)
 	if sz <= 0 { return kvspace.Array(elems) }
 	raw := make([]byte, int32(len(elems))*sz)
 	for i, e := range elems {
+		if e.Kind() != kind {
+			panic("packTypedArray: element " + itoa(i) + " kind mismatch: expected " + kind + ", got " + e.Kind())
+		}
 		copy(raw[i*int(sz):], kindBytes(kind, e))
 	}
 	return kvspace.RawN(kind, raw, int32(len(elems)))
 }
+
+func itoa(i int) string { return strconv.Itoa(i) }
 
 func kindSize(kind string) int32 {
 	switch kind {
@@ -272,19 +278,37 @@ func (arraySetOp) Call(f *op.Frame) error {
 	return nil
 }
 
-// sortOp: bubble sort (in-place, returns sorted copy)
+// sortOp: bubble sort (in-place, returns sorted copy).
+// 铁律：元素必须全数字或全字符串；混合类型/不可比类型 → TypeError。
 type sortOp struct{}
 func (sortOp) Call(f *op.Frame) error {
 	inputs := readInputs(f)
 	if len(inputs) < 1 { return writeResult(f, kvspace.XValue{}) }
 	arr := inputs[0]
 	n := arr.Len()
+	if n <= 1 { return writeResult(f, arr) }
 	elems := make([]kvspace.XValue, n)
-	for i := 0; i < n; i++ { elems[i] = arr.Index(i) }
+	allNum, allStr := true, true
+	for i := 0; i < n; i++ {
+		elems[i] = arr.Index(i)
+		if !isNumeric(elems[i]) { allNum = false }
+		if elems[i].Kind() != "string" { allStr = false }
+	}
+	if !allNum && !allStr {
+		msg := "TypeError: sort requires all elements to be numeric or all string"
+		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
+		return fmt.Errorf("%s", msg)
+	}
 	// bubble sort
 	for i := 0; i < n-1; i++ {
 		for j := 0; j < n-i-1; j++ {
-			if asFloat(elems[j]) > asFloat(elems[j+1]) {
+			var swap bool
+			if allNum {
+				swap = asFloat(elems[j]) > asFloat(elems[j+1])
+			} else {
+				swap = elems[j].Str() > elems[j+1].Str()
+			}
+			if swap {
 				elems[j], elems[j+1] = elems[j+1], elems[j]
 			}
 		}
@@ -309,5 +333,6 @@ func (hasOp) Call(f *op.Frame) error {
 
 func kvKey(v kvspace.XValue) string {
 	if v.Kind() == "string" { return v.Str() }
-	return strconv.Itoa(int(v.Int64()))
+	if isIntKind(v.Kind()) { return strconv.FormatInt(v.Int64(), 10) }
+	panic("kvKey: expected string or int kind, got " + v.Kind())
 }

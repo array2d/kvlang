@@ -1,0 +1,7 @@
+# expected
+#   TypeError: expected numeric, got string
+# 修复: todo-033 — sqrt/exp/log/sign 曾通过 asFloat default 将 "hello"→0.0 静默计算
+def main() -> () {
+	sqrt("hello") -> x
+}
+main()

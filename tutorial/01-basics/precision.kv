@@ -1,6 +1,5 @@
 # precision: 数字精度与类型提升
-# 语义: int 与 float 是语言面两种数字字面量（运行时 XValue 另有 int8~uint64/float32 等 kind）。
-#       int op int → 原生 int64 运算与比较，绝不经 float64 中转（fix-020，对齐 C/Go/Rust）；
+# 语义: int64 与 float64 是数值运算域；int64 op int64 → 原生 int64 运算与比较，绝不经 float64 中转（fix-020，对齐 C/Go/Rust）；
 #       任一侧 float → float64 提升（混合比较为 C 式 double 提升）
 # 期望输出:
 #   5
@@ -37,9 +36,9 @@ def main() -> () {
 	r = 7 % 3  # = 等价于 <-
 	print(r)
 
-	ti <- int(3.99)
+	ti <- int64(3.99)
 	print(ti)
-	float(7) -> tf
+	float64(7) -> tf
 	print(tf)
 
 	sci = 1e3  # = 等价于 <-（科学计数法字面量恒为 float）

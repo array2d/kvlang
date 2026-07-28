@@ -25,7 +25,7 @@ def parse_expects(f: Path) -> list[str]:
     with open(f) as fh:
         for line in fh:
             line = line.rstrip("\n")
-            if line.startswith("# 期望诊断"):
+            if line.startswith("# expected"):
                 in_block = True
                 continue
             if in_block:

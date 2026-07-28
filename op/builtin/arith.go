@@ -41,10 +41,11 @@ func (mod) Call(f *op.Frame) error {
 
 func evalBinaryArith(inputs []kvspace.XValue, fn func(float64, float64) float64, fnInt func(int64, int64) int64) (kvspace.XValue, error) {
 	if err := requireBinary(inputs); err != nil { return kvspace.XValue{}, err }
-	if inputs[0].IsNone() || inputs[1].IsNone() {
+	a, b := inputs[0], inputs[1]
+	if a.IsNone() || b.IsNone() {
 		return kvspace.XValue{}, fmt.Errorf("TypeError: None in arithmetic")
 	}
-	a, b := inputs[0], inputs[1]
+	if err := requireNumeric(a, b); err != nil { return kvspace.XValue{}, err }
 	// int ∧ int → 原生 int64 运算，绝不经 float64 中转（fix-020：
 	// float64 仅 53 位尾数，>2^53 的整数会静默丢精度；溢出语义 = 补码回绕，同 C/Go）
 	if isIntKind(a.Kind()) && isIntKind(b.Kind()) && fnInt != nil {
@@ -60,11 +61,11 @@ func evalNeg(v kvspace.XValue) (kvspace.XValue, error) {
 		return kvspace.XValue{}, fmt.Errorf("TypeError: None in arithmetic")
 	}
 	switch v.Kind() {
-	case "int", "int8", "int16", "int32", "int64":
+	case "int8", "int16", "int32", "int64":
 		return kvspace.Int64(-v.Int64()), nil
 	case "uint8", "uint16", "uint32", "uint64":
 		return kvspace.XValue{}, fmt.Errorf("TypeError: cannot negate unsigned %s", v.Kind())
-	case "float", "float32":
+	case "float32":
 		return kvspace.Float32(-v.Float32()), nil
 	case "float64":
 		return kvspace.Float64(-v.Float64()), nil
@@ -75,17 +76,18 @@ func evalNeg(v kvspace.XValue) (kvspace.XValue, error) {
 
 func evalDiv(inputs []kvspace.XValue) (kvspace.XValue, error) {
 	if err := requireBinary(inputs); err != nil { return kvspace.XValue{}, err }
-	if inputs[0].IsNone() || inputs[1].IsNone() {
+	a, b := inputs[0], inputs[1]
+	if a.IsNone() || b.IsNone() {
 		return kvspace.XValue{}, fmt.Errorf("TypeError: None in arithmetic")
 	}
-	bf := asFloat(inputs[1])
+	if err := requireNumeric(a, b); err != nil { return kvspace.XValue{}, err }
+	bf := asFloat(b)
 	// fix-rc1：同时检 asFloat 与 asInt。非常小的浮点（如 1e-20）的 asFloat!=0
 	// 但 asInt 截断为零 → 整数路径 Go panic，浮点路径也产生反常大数。
-	if bf == 0 || asInt(inputs[1]) == 0 {
+	if bf == 0 || asInt(b) == 0 {
 		return kvspace.XValue{}, fmt.Errorf("ZeroDivisionError: division by zero")
 	}
 	// C 风格：两整数相除 → 整除，否则 → 浮除
-	a, b := inputs[0], inputs[1]
 	if isIntKind(a.Kind()) && isIntKind(b.Kind()) {
 		return kvspace.Int64(asInt(a) / asInt(b)), nil
 	}
@@ -97,6 +99,8 @@ func evalMod(inputs []kvspace.XValue) (kvspace.XValue, error) {
 	if inputs[0].IsNone() || inputs[1].IsNone() {
 		return kvspace.XValue{}, fmt.Errorf("TypeError: None in arithmetic")
 	}
+	// 模运算仅整数（五语言中仅 Python/JS 支持浮点取模；取 C/Go/Rust 阵营）
+	if err := requireInt(inputs[0], inputs[1]); err != nil { return kvspace.XValue{}, err }
 	b := asInt(inputs[1])
 	if b == 0 { return kvspace.XValue{}, fmt.Errorf("ZeroDivisionError: modulo by zero") }
 	return kvspace.Int64(asInt(inputs[0]) % b), nil
@@ -104,10 +108,11 @@ func evalMod(inputs []kvspace.XValue) (kvspace.XValue, error) {
 
 func evalUnaryArith(inputs []kvspace.XValue, fn func(float64) float64) (kvspace.XValue, error) {
 	if err := requireUnary(inputs); err != nil { return kvspace.XValue{}, err }
-	if inputs[0].IsNone() {
+	v := inputs[0]
+	if v.IsNone() {
 		return kvspace.XValue{}, fmt.Errorf("TypeError: None in arithmetic")
 	}
-	v := inputs[0]
+	if err := requireNumeric(v); err != nil { return kvspace.XValue{}, err }
 	result := fn(asFloat(v))
 	if isIntKind(v.Kind()) { return kvspace.Int64(int64(result)), nil }
 	return kvspace.Float64(result), nil

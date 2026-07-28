@@ -114,5 +114,10 @@ type strConcatOp struct{}
 func (strConcatOp) Call(f *op.Frame) error {
 	inputs := readInputs(f)
 	if len(inputs) < 2 { return writeResult(f, kvspace.Str("")) }
+	if inputs[0].Kind() != "string" || inputs[1].Kind() != "string" {
+		msg := fmt.Sprintf("TypeError: concat requires strings, got %s and %s", inputs[0].Kind(), inputs[1].Kind())
+		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
+		return fmt.Errorf("%s", msg)
+	}
 	return writeResult(f, kvspace.Str(inputs[0].Str()+inputs[1].Str()))
 }

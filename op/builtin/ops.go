@@ -50,12 +50,9 @@ const (
 	OpSign = "sign"
 )
 
-// 类型转换 built-in
+// 类型转换 built-in（无 int/float 别名——只有具体位宽类型）
 const (
-	OpInt   = "int"
-	OpFloat = "float"
 	OpBool  = "bool"
-	// 全谱数字类型创建/转换算子（fix-021）；int/float 为 int64/float64 别名
 	OpInt8    = "int8"
 	OpInt16   = "int16"
 	OpInt32   = "int32"
@@ -116,7 +113,7 @@ var nativeOps = map[string]bool{
 	OpAnd: true, OpOr: true, OpNot: true,
 	OpBitAnd: true, OpBitOr: true, OpBitXor: true, OpShl: true, OpShr: true,
 	OpAbs: true, OpPow: true, OpMin: true, OpMax: true, OpSqrt: true, OpExp: true, OpLog: true, OpNeg: true, OpSign: true,
-	OpInt: true, OpFloat: true, OpBool: true,
+OpBool: true,
 	OpInt8: true, OpInt16: true, OpInt32: true, OpInt64: true,
 	OpUint8: true, OpUint16: true, OpUint32: true, OpUint64: true,
 	OpFloat32: true, OpFloat64: true,
@@ -176,7 +173,6 @@ var nativeSigs = map[string]string{
 	OpMin:  "def min(A:num, B:num) -> (C:num)",
 	OpMax:  "def max(A:num, B:num) -> (C:num)",
 	OpSign: "def sign(A:num) -> (C:int)",
-	OpInt:   "def int(A:any) -> (C:int)",
 	OpInt8:    "def int8(A:any) -> (C:int8)",
 	OpInt16:   "def int16(A:any) -> (C:int16)",
 	OpInt32:   "def int32(A:any) -> (C:int32)",
@@ -187,7 +183,6 @@ var nativeSigs = map[string]string{
 	OpUint64:  "def uint64(A:any) -> (C:uint64)",
 	OpFloat32: "def float32(A:any) -> (C:float32)",
 	OpFloat64: "def float64(A:any) -> (C:float64)",
-	OpFloat: "def float(A:any) -> (C:float)",
 	OpBool:  "def bool(A:any) -> (C:bool)",
 	OpPrint: "def print(A:any, ...) -> ()",
 	OpCerr:  "def cerr(A:any, ...) -> ()",
@@ -213,7 +208,7 @@ func OpDefs() []string {
 func IsUnaryNativeOp(opcode string) bool {
 	switch opcode {
 	case OpNot, OpSub, OpAbs, OpSqrt, OpExp, OpLog, OpNeg, OpSign,
-		OpInt, OpFloat, OpBool:
+		OpBool:
 		return true
 	}
 	return false

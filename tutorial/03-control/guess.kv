@@ -12,7 +12,7 @@ def guess_number() -> () {
 	while (found == 0) {
 		s = lo + hi  # = 等价于 <-
 		s / 2 -> mid_float
-		mid <- int(mid_float)
+		mid <- int64(mid_float)
 		tries = tries + 1  # = 等价于 <-
 		print("guess #", tries, ":", mid)
 		mid == target -> hit
