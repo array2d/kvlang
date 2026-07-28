@@ -67,7 +67,7 @@ func brBlock(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.
 	}
 	condVal := builtin.ResolveReadValue(kv, keytree.FrameRoot(pc), inst.Reads[0])
 	if condVal.IsNone() {
-		msg := "TypeError: null in branch condition"
+		msg := "TypeError: None in branch condition"
 		vthread.SetError(ctx, kv, vtid, pc, msg)
 		return fmt.Errorf("%s", msg)
 	}

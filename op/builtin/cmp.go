@@ -27,7 +27,7 @@ func evalCmp(inputs []kvspace.XValue, o cmp) (kvspace.XValue, error) {
 	// null kind 比较：仅 ==/!= 允许，直接比较 kind
 	if a.IsNone() || b.IsNone() {
 		if !o.allowNull {
-			return kvspace.XValue{}, fmt.Errorf("TypeError: null in comparison")
+			return kvspace.XValue{}, fmt.Errorf("TypeError: None in comparison")
 		}
 		return kvspace.Bool(o.s(a.Kind(), b.Kind())), nil
 	}

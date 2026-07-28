@@ -39,7 +39,7 @@ func evalCast(kind string, inputs []kvspace.XValue) (kvspace.XValue, error) {
 func castNum(inputs []kvspace.XValue, mk func(kvspace.XValue) kvspace.XValue) (kvspace.XValue, error) {
 	if err := requireUnary(inputs); err != nil { return kvspace.XValue{}, err }
 	if inputs[0].IsNone() {
-		return kvspace.XValue{}, fmt.Errorf("TypeError: cannot cast null")
+		return kvspace.XValue{}, fmt.Errorf("TypeError: cannot cast None")
 	}
 	return mk(inputs[0]), nil
 }
@@ -48,7 +48,7 @@ func evalToInt(inputs []kvspace.XValue) (kvspace.XValue, error) {
 	if err := requireUnary(inputs); err != nil { return kvspace.XValue{}, err }
 	v := inputs[0]
 	if v.IsNone() {
-		return kvspace.XValue{}, fmt.Errorf("TypeError: cannot cast null")
+		return kvspace.XValue{}, fmt.Errorf("TypeError: cannot cast None")
 	}
 	if v.Kind() == "int64" { return v, nil }
 	return kvspace.Int64(asInt(v)), nil
@@ -58,7 +58,7 @@ func evalToFloat(inputs []kvspace.XValue) (kvspace.XValue, error) {
 	if err := requireUnary(inputs); err != nil { return kvspace.XValue{}, err }
 	v := inputs[0]
 	if v.IsNone() {
-		return kvspace.XValue{}, fmt.Errorf("TypeError: cannot cast null")
+		return kvspace.XValue{}, fmt.Errorf("TypeError: cannot cast None")
 	}
 	if v.Kind() == "float64" { return v, nil }
 	return kvspace.Float64(asFloat(v)), nil
@@ -67,7 +67,7 @@ func evalToFloat(inputs []kvspace.XValue) (kvspace.XValue, error) {
 func evalToBool(inputs []kvspace.XValue) (kvspace.XValue, error) {
 	if err := requireUnary(inputs); err != nil { return kvspace.XValue{}, err }
 	if inputs[0].IsNone() {
-		return kvspace.XValue{}, fmt.Errorf("TypeError: cannot cast null")
+		return kvspace.XValue{}, fmt.Errorf("TypeError: cannot cast None")
 	}
 	return kvspace.Bool(AsBool(inputs[0])), nil
 }

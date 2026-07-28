@@ -18,7 +18,7 @@ func (o bit) Call(f *op.Frame) error {
 func evalBinaryInt(inputs []kvspace.XValue, fn func(int64, int64) int64) (kvspace.XValue, error) {
 	if err := requireBinary(inputs); err != nil { return kvspace.XValue{}, err }
 	if inputs[0].IsNone() || inputs[1].IsNone() {
-		return kvspace.XValue{}, fmt.Errorf("TypeError: null in bitwise operation")
+		return kvspace.XValue{}, fmt.Errorf("TypeError: None in bitwise operation")
 	}
 	return kvspace.Int64(fn(asInt(inputs[0]), asInt(inputs[1]))), nil
 }

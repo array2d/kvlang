@@ -42,7 +42,7 @@ func (mod) Call(f *op.Frame) error {
 func evalBinaryArith(inputs []kvspace.XValue, fn func(float64, float64) float64, fnInt func(int64, int64) int64) (kvspace.XValue, error) {
 	if err := requireBinary(inputs); err != nil { return kvspace.XValue{}, err }
 	if inputs[0].IsNone() || inputs[1].IsNone() {
-		return kvspace.XValue{}, fmt.Errorf("TypeError: null in arithmetic")
+		return kvspace.XValue{}, fmt.Errorf("TypeError: None in arithmetic")
 	}
 	a, b := inputs[0], inputs[1]
 	// int ∧ int → 原生 int64 运算，绝不经 float64 中转（fix-020：
@@ -57,7 +57,7 @@ func evalBinaryArith(inputs []kvspace.XValue, fn func(float64, float64) float64,
 
 func evalNeg(v kvspace.XValue) (kvspace.XValue, error) {
 	if v.IsNone() {
-		return kvspace.XValue{}, fmt.Errorf("TypeError: null in arithmetic")
+		return kvspace.XValue{}, fmt.Errorf("TypeError: None in arithmetic")
 	}
 	switch v.Kind() {
 	case "int", "int8", "int16", "int32", "int64":
@@ -76,7 +76,7 @@ func evalNeg(v kvspace.XValue) (kvspace.XValue, error) {
 func evalDiv(inputs []kvspace.XValue) (kvspace.XValue, error) {
 	if err := requireBinary(inputs); err != nil { return kvspace.XValue{}, err }
 	if inputs[0].IsNone() || inputs[1].IsNone() {
-		return kvspace.XValue{}, fmt.Errorf("TypeError: null in arithmetic")
+		return kvspace.XValue{}, fmt.Errorf("TypeError: None in arithmetic")
 	}
 	bf := asFloat(inputs[1])
 	// fix-rc1：同时检 asFloat 与 asInt。非常小的浮点（如 1e-20）的 asFloat!=0
@@ -95,7 +95,7 @@ func evalDiv(inputs []kvspace.XValue) (kvspace.XValue, error) {
 func evalMod(inputs []kvspace.XValue) (kvspace.XValue, error) {
 	if err := requireBinary(inputs); err != nil { return kvspace.XValue{}, err }
 	if inputs[0].IsNone() || inputs[1].IsNone() {
-		return kvspace.XValue{}, fmt.Errorf("TypeError: null in arithmetic")
+		return kvspace.XValue{}, fmt.Errorf("TypeError: None in arithmetic")
 	}
 	b := asInt(inputs[1])
 	if b == 0 { return kvspace.XValue{}, fmt.Errorf("ZeroDivisionError: modulo by zero") }
@@ -105,7 +105,7 @@ func evalMod(inputs []kvspace.XValue) (kvspace.XValue, error) {
 func evalUnaryArith(inputs []kvspace.XValue, fn func(float64) float64) (kvspace.XValue, error) {
 	if err := requireUnary(inputs); err != nil { return kvspace.XValue{}, err }
 	if inputs[0].IsNone() {
-		return kvspace.XValue{}, fmt.Errorf("TypeError: null in arithmetic")
+		return kvspace.XValue{}, fmt.Errorf("TypeError: None in arithmetic")
 	}
 	v := inputs[0]
 	result := fn(asFloat(v))

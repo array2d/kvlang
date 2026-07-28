@@ -134,7 +134,7 @@ func (atOp) Call(f *op.Frame) error {
 		return fmt.Errorf("%s", msg)
 	}
 	if inputs[0].IsNone() {
-		msg := "IndexError: at: base " + f.Inst.Reads[0] + " is null; help: declare a key-family first (e.g. `" + f.Inst.Reads[0] + " = {}`) or pass a path string"
+		msg := "IndexError: at: base " + f.Inst.Reads[0] + " is None; help: declare a key-family first (e.g. `" + f.Inst.Reads[0] + " = {}`) or pass a path string"
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
 		return fmt.Errorf("%s", msg)
 	}
@@ -221,7 +221,7 @@ func (arraySetOp) Call(f *op.Frame) error {
 		return fmt.Errorf("%s", msg)
 	}
 	if arr.IsNone() {
-		msg := "IndexError: set: base " + f.Inst.Reads[0] + " is null; help: declare a key-family first (e.g. `" + f.Inst.Reads[0] + " = {}`) or pass a path string"
+		msg := "IndexError: set: base " + f.Inst.Reads[0] + " is None; help: declare a key-family first (e.g. `" + f.Inst.Reads[0] + " = {}`) or pass a path string"
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
 		return fmt.Errorf("%s", msg)
 	}
