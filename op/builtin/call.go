@@ -26,8 +26,8 @@ var registry = map[string]Op{
 	OpDiv: div{},
 	OpMod: mod{},
 
-	OpEq: cmp{f: func(a, b float64) bool { return a == b }, i: func(a, b int64) bool { return a == b }, s: func(a, b string) bool { return a == b }},
-	OpNe: cmp{f: func(a, b float64) bool { return a != b }, i: func(a, b int64) bool { return a != b }, s: func(a, b string) bool { return a != b }},
+	OpEq: cmp{f: func(a, b float64) bool { return a == b }, i: func(a, b int64) bool { return a == b }, s: func(a, b string) bool { return a == b }, allowNull: true},
+	OpNe: cmp{f: func(a, b float64) bool { return a != b }, i: func(a, b int64) bool { return a != b }, s: func(a, b string) bool { return a != b }, allowNull: true},
 	OpLt: cmp{f: func(a, b float64) bool { return a < b }, i: func(a, b int64) bool { return a < b }, s: func(a, b string) bool { return a < b }},
 	OpGt: cmp{f: func(a, b float64) bool { return a > b }, i: func(a, b int64) bool { return a > b }, s: func(a, b string) bool { return a > b }},
 	OpLe: cmp{f: func(a, b float64) bool { return a <= b }, i: func(a, b int64) bool { return a <= b }, s: func(a, b string) bool { return a <= b }},

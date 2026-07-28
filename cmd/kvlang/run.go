@@ -92,7 +92,7 @@ func executeEntry(kv kvspace.KVSpace, entryName string, debug bool) {
 
 func reportRunError(kv kvspace.KVSpace, vtid string) {
 	msgVal := kvspace.GetOne(kv, keytree.VThreadStatusMsg(vtid, "error"))
-	if !msgVal.IsNil() {
+	if !msgVal.IsNone() {
 		pcVal := kvspace.GetOne(kv, keytree.VThreadPC(vtid))
 		logx.Error("%s at %s", msgVal.Str(), pcVal.Str())
 		os.Exit(1)

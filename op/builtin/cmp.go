@@ -1,35 +1,42 @@
 package builtin
 
 import (
+	"fmt"
+
 	"github.com/array2d/kvspace-go"
 	"kvlang/op"
 	"kvlang/vthread"
 )
 
 type cmp struct {
-	f func(float64, float64) bool
-	i func(int64, int64) bool
-	s func(string, string) bool
+	f         func(float64, float64) bool
+	i         func(int64, int64) bool
+	s         func(string, string) bool
+	allowNull bool // ==/!= 允许 null kind 比较；< > <= >= 不允许
 }
 func (o cmp) Call(f *op.Frame) error {
-	r, err := evalCmp(readInputs(f), o.f, o.i, o.s)
+	r, err := evalCmp(readInputs(f), o)
 	if err != nil { vthread.SetError(bg, f.KV, f.Vtid, f.PC, err.Error()); return err }
 	return writeResult(f, r)
 }
 
-func evalCmp(inputs []kvspace.XValue, numCmp func(float64, float64) bool, intCmp func(int64, int64) bool, strCmp func(string, string) bool) (kvspace.XValue, error) {
+func evalCmp(inputs []kvspace.XValue, o cmp) (kvspace.XValue, error) {
 	if err := requireBinary(inputs); err != nil { return kvspace.XValue{}, err }
 	a, b := inputs[0], inputs[1]
-	// nullAsInt: null 在数值比较中按 int64(0) 处理（fix-017 方案 A，与 null==0 比较语义一致）
-	a, b = nullAsInt(a), nullAsInt(b)
-	// int ∧ int → 原生 int64 比较（fix-020：>2^53 经 float64 会误判相等）
-	if isIntKind(a.Kind()) && isIntKind(b.Kind()) && intCmp != nil {
-		return kvspace.Bool(intCmp(asInt(a), asInt(b))), nil
+
+	// null kind 比较：仅 ==/!= 允许，直接比较 kind
+	if a.IsNone() || b.IsNone() {
+		if !o.allowNull {
+			return kvspace.XValue{}, fmt.Errorf("TypeError: null in comparison")
+		}
+		return kvspace.Bool(o.s(a.Kind(), b.Kind())), nil
 	}
-	// 混合数值 → float64 提升比较（C 阵营语义：3 == 3.0 为 true；
-	// 大整数 vs float 的混合比较存在 float64 固有精度边界，与 C 一致）
+
+	if isIntKind(a.Kind()) && isIntKind(b.Kind()) && o.i != nil {
+		return kvspace.Bool(o.i(asInt(a), asInt(b))), nil
+	}
 	if isNumeric(a) && isNumeric(b) {
-		return kvspace.Bool(numCmp(asFloat(a), asFloat(b))), nil
+		return kvspace.Bool(o.f(asFloat(a), asFloat(b))), nil
 	}
-	return kvspace.Bool(strCmp(a.Str(), b.Str())), nil
+	return kvspace.Bool(o.s(a.Str(), b.Str())), nil
 }

@@ -17,7 +17,7 @@ type debuggerOp struct{}
 func (debuggerOp) Call(f *op.Frame) error {
 	debugKey := keytree.VThreadDebugger(f.Vtid)
 	v := kvspace.GetOne(f.KV, debugKey)
-	if v.IsNil() {
+	if v.IsNone() {
 		// 非调试模式：no-op
 		vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
 		return nil
@@ -34,7 +34,7 @@ func (debuggerOp) Call(f *op.Frame) error {
 	resumeKey := keytree.VThreadDebuggerResume(f.Vtid)
 	for {
 		cmdVal := f.KV.Watch(resumeKey, 0)
-		if cmdVal.IsNil() { continue }
+		if cmdVal.IsNone() { continue }
 		switch cmdVal.Str() {
 		case "abort":
 			vthread.SetError(bg, f.KV, f.Vtid, f.PC, "debugger: aborted by agent")

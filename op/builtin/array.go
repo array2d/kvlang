@@ -133,17 +133,17 @@ func (atOp) Call(f *op.Frame) error {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
 		return fmt.Errorf("%s", msg)
 	}
-	if inputs[0].IsNil() {
+	if inputs[0].IsNone() {
 		msg := "IndexError: at: base " + f.Inst.Reads[0] + " is null; help: declare a key-family first (e.g. `" + f.Inst.Reads[0] + " = {}`) or pass a path string"
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
 		return fmt.Errorf("%s", msg)
 	}
 	idx := int(inputs[1].Int64())
 	elem := inputs[0].Index(idx)
-	if elem.IsNil() {
+	if elem.IsNone() {
 		elem = typedIndex(inputs[0], idx)
 	}
-	if elem.IsNil() {
+	if elem.IsNone() {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC,
 			fmt.Sprintf("IndexError: at: index %d out of bounds; help: the array or string has no item at this position", idx))
 		return fmt.Errorf("IndexError: at: index out of bounds")
@@ -206,7 +206,7 @@ func (arraySetOp) Call(f *op.Frame) error {
 		}
 		path := keytree.Member(base, kvKey(inputs[1]))
 		f.KV.Set([]kvspace.KVPair{{path, inputs[2]}})
-		if len(f.Inst.Writes) > 0 && !inputs[0].IsNil() {
+		if len(f.Inst.Writes) > 0 && !inputs[0].IsNone() {
 			// 写入 base 本身（值不变），满足 -> base 返回槽
 			outKey := resolveWriteKey(f.KV, fp, f.Inst.Writes[0])
 			f.KV.Set([]kvspace.KVPair{{outKey, inputs[0]}})
@@ -220,7 +220,7 @@ func (arraySetOp) Call(f *op.Frame) error {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
 		return fmt.Errorf("%s", msg)
 	}
-	if arr.IsNil() {
+	if arr.IsNone() {
 		msg := "IndexError: set: base " + f.Inst.Reads[0] + " is null; help: declare a key-family first (e.g. `" + f.Inst.Reads[0] + " = {}`) or pass a path string"
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
 		return fmt.Errorf("%s", msg)
@@ -304,7 +304,7 @@ func (hasOp) Call(f *op.Frame) error {
 	if base == "" { base = resolveKVPath(funcFrame, f.Inst.Reads[0]) }
 	key := kvKey(inputs[1])
 	v := kvspace.GetOne(f.KV, keytree.Member(base, key))
-	return writeResult(f, kvspace.Bool(!v.IsNil()))
+	return writeResult(f, kvspace.Bool(!v.IsNone()))
 }
 
 func kvKey(v kvspace.XValue) string {

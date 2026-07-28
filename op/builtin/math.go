@@ -63,7 +63,10 @@ func evalMinMax(inputs []kvspace.XValue, fn func(float64, float64) float64, intW
 	vals := make([]kvspace.XValue, len(inputs))
 	allInt, allNum := true, true
 	for i, v := range inputs {
-		vals[i] = nullAsInt(v)
+		if v.IsNone() {
+			return kvspace.XValue{}, fmt.Errorf("TypeError: null in min/max")
+		}
+		vals[i] = v
 		if !isIntKind(vals[i].Kind()) { allInt = false }
 		if !isNumeric(vals[i]) { allNum = false }
 	}

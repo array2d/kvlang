@@ -1,4 +1,4 @@
-# 242: Valid Anagram — dict 字符计数（动态键读写 h.*c，null 计 0）
+# 242: Valid Anagram — dict 字符计数（动态键读写 h.*c，用 has 检存在）
 # 来源: LeetCode #242
 # 期望输出:
 #   true
@@ -15,15 +15,25 @@ def is_anagram(s:str, t:str) -> () {
 		0 -> i
 		while (i < ns) {
 			char(s, i) -> c
-			h.*c -> v
-			h.*c = v + 1  # = 等价于 <-（null 计 0：fix-017；写侧动态键：fix-015）
+			has(h, c) -> exists
+			if (exists) {
+				h.*c + 1 -> h.*c
+			} else {
+				1 -> h.*c
+			}
 			i <- i + 1
 		}
 		0 -> i
 		while (i < nt) {
 			char(t, i) -> c
-			h.*c -> v
-			v - 1 -> h.*c
+			has(h, c) -> exists
+			if (exists) {
+				h.*c -> v
+				v - 1 -> h.*c
+			} else {
+				false -> ok
+				nt -> i
+			}
 			i + 1 -> i
 		}
 		0 -> i

@@ -22,10 +22,10 @@ func resolveWriteKey(kv kvspace.KVSpace, framePath, param string) string {
 		}
 	}
 	for f := framePath; f != ""; f = keytree.ParentFrame(f) {
-		if r := kvspace.GetOne(kv, keytree.WParam(f, param)); !r.IsNil() {
+		if r := kvspace.GetOne(kv, keytree.WParam(f, param)); !r.IsNone() {
 			return r.Str()
 		}
-		if v := kvspace.GetOne(kv, keytree.Stack(f)+param); !v.IsNil() {
+		if v := kvspace.GetOne(kv, keytree.Stack(f)+param); !v.IsNone() {
 			return keytree.Stack(f) + param
 		}
 		if extKind(kv, f) == kvspace.KindRwfunc {
@@ -69,10 +69,10 @@ func resolveReadValue(kv kvspace.KVSpace, framePath, param string) kvspace.XValu
 	}
 	// 递归向上查找，每层先查 .rparam 重定向，再查变量值
 	for f := framePath; f != ""; f = keytree.ParentFrame(f) {
-		if r := kvspace.GetOne(kv, keytree.RParam(f, param)); !r.IsNil() {
+		if r := kvspace.GetOne(kv, keytree.RParam(f, param)); !r.IsNone() {
 			return kvspace.GetOne(kv, r.Str())
 		}
-		if v := kvspace.GetOne(kv, keytree.Stack(f)+param); !v.IsNil() {
+		if v := kvspace.GetOne(kv, keytree.Stack(f)+param); !v.IsNone() {
 			return v
 		}
 		if extKind(kv, f) == kvspace.KindRwfunc {

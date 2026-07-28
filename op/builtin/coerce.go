@@ -7,12 +7,6 @@ import (
 	"github.com/array2d/kvspace-go"
 )
 
-// nullAsInt 将 null 在数值语境按 int 0 参与（fix-017 方案 A，与 null==0 比较语义一致）。
-func nullAsInt(v kvspace.XValue) kvspace.XValue {
-	if v.IsNil() { return kvspace.Int64(0) }
-	return v
-}
-
 // asFloat coerces a Value to float64 for numeric operations.
 func asFloat(v kvspace.XValue) float64 {
 	switch v.Kind() {

@@ -19,7 +19,7 @@ func (dictOp) Call(f *op.Frame) error {
 		outKey := resolveWriteKey(f.KV, fp, w)
 		pairs = append(pairs, kvspace.KVPair{outKey, kvspace.Dict()})
 		for i := 0; i+1 < len(inputs); i += 2 {
-			if inputs[i+1].IsNil() { continue }
+			if inputs[i+1].IsNone() { continue }
 			pairs = append(pairs, kvspace.KVPair{keytree.Member(outKey, inputs[i].Str()), inputs[i+1]})
 		}
 	}

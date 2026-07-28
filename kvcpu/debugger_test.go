@@ -105,7 +105,7 @@ func (s *traceSession) Run(t *testing.T, handler func(ev pauseEv, step int) stri
 loop:
 	for {
 		val := s.kv.Watch(s.pauseKey, dbgStepTimeout)
-		if val.IsNil() {
+		if val.IsNone() {
 			// Watch 超时：检查 Execute 是否已结束
 			select {
 			case <-done:

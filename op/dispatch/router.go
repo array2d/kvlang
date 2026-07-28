@@ -32,7 +32,7 @@ func Select(ctx context.Context, kv kvspace.KVSpace, opcode string) (backend, n 
 	backends := kv.List(keytree.SysOpRoot + keytree.PathSegSep)
 
 	for _, b := range backends {
-		if v := kvspace.GetOne(kv, keytree.SysOpFunc(b, opname)); !v.IsNil() {
+		if v := kvspace.GetOne(kv, keytree.SysOpFunc(b, opname)); !v.IsNone() {
 			backend = b
 			break
 		}
@@ -49,7 +49,7 @@ func Select(ctx context.Context, kv kvspace.KVSpace, opcode string) (backend, n 
 			continue // 跳过 /sys/op/<backend>/func/ 子树
 		}
 		val := kvspace.GetOne(kv, keytree.SysOp(backend, child))
-		if val.IsNil() {
+		if val.IsNone() {
 			continue
 		}
 		var info instInfo
@@ -79,7 +79,7 @@ func ListBackends(ctx context.Context, kv kvspace.KVSpace) ([]string, error) {
 
 // BackendSupports 返回 backend 是否支持某 opcode。
 func BackendSupports(ctx context.Context, kv kvspace.KVSpace, backend, opcode string) bool {
-	return !kvspace.GetOne(kv, keytree.SysOpFunc(backend, stripVTypePrefix(opcode))).IsNil()
+	return !kvspace.GetOne(kv, keytree.SysOpFunc(backend, stripVTypePrefix(opcode))).IsNone()
 }
 
 // stripVTypePrefix 剥离 vtype 命名空间前缀。

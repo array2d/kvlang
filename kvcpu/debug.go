@@ -50,7 +50,7 @@ func debugNotifyPause(_ context.Context, kv kvspace.KVSpace, vtid, pc string, in
 func debugWaitResume(kv kvspace.KVSpace, vtid string) string {
 	for {
 		val := kv.Watch(keytree.VThreadDebuggerResume(vtid), 30*time.Second)
-		if !val.IsNil() { return val.Str() }
+		if !val.IsNone() { return val.Str() }
 		// 超时 → 继续等待
 	}
 }

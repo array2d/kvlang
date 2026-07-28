@@ -35,15 +35,21 @@ func evalCast(kind string, inputs []kvspace.XValue) (kvspace.XValue, error) {
 	}
 }
 
-// castNum 数字类型算子公共路径：一元、nil 按 int 0（fix-017）、构造目标 kind。
+// castNum 数字类型算子公共路径：一元、检查 nil、构造目标 kind。
 func castNum(inputs []kvspace.XValue, mk func(kvspace.XValue) kvspace.XValue) (kvspace.XValue, error) {
 	if err := requireUnary(inputs); err != nil { return kvspace.XValue{}, err }
-	return mk(nullAsInt(inputs[0])), nil
+	if inputs[0].IsNone() {
+		return kvspace.XValue{}, fmt.Errorf("TypeError: cannot cast null")
+	}
+	return mk(inputs[0]), nil
 }
 
 func evalToInt(inputs []kvspace.XValue) (kvspace.XValue, error) {
 	if err := requireUnary(inputs); err != nil { return kvspace.XValue{}, err }
 	v := inputs[0]
+	if v.IsNone() {
+		return kvspace.XValue{}, fmt.Errorf("TypeError: cannot cast null")
+	}
 	if v.Kind() == "int64" { return v, nil }
 	return kvspace.Int64(asInt(v)), nil
 }
@@ -51,11 +57,17 @@ func evalToInt(inputs []kvspace.XValue) (kvspace.XValue, error) {
 func evalToFloat(inputs []kvspace.XValue) (kvspace.XValue, error) {
 	if err := requireUnary(inputs); err != nil { return kvspace.XValue{}, err }
 	v := inputs[0]
+	if v.IsNone() {
+		return kvspace.XValue{}, fmt.Errorf("TypeError: cannot cast null")
+	}
 	if v.Kind() == "float64" { return v, nil }
 	return kvspace.Float64(asFloat(v)), nil
 }
 
 func evalToBool(inputs []kvspace.XValue) (kvspace.XValue, error) {
 	if err := requireUnary(inputs); err != nil { return kvspace.XValue{}, err }
+	if inputs[0].IsNone() {
+		return kvspace.XValue{}, fmt.Errorf("TypeError: cannot cast null")
+	}
 	return kvspace.Bool(AsBool(inputs[0])), nil
 }

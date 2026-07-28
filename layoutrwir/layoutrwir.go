@@ -105,7 +105,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	funcKey := keytree.LibFunc(pkg, funcName)
 
 	sigVal := kvspace.GetOne(kv, funcKey)
-	if sigVal.IsNil() {
+	if sigVal.IsNone() {
 		vthread.SetError(ctx, kv, vtid, pc, "NameError: func signature not found: "+funcName)
 		return ""
 	}
@@ -350,7 +350,7 @@ func WriteFunc(kv kvspace.KVSpace, pkg string, fn *ast.Func) {
 
 func resolveWritePath(kv kvspace.KVSpace, framePath, name string) string {
 	for f := framePath; f != ""; f = keytree.ParentFrame(f) {
-		if r := kvspace.GetOne(kv, keytree.WParam(f, name)); !r.IsNil() {
+		if r := kvspace.GetOne(kv, keytree.WParam(f, name)); !r.IsNone() {
 			return r.Str()
 		}
 		if extKind(kv, f) == kvspace.KindRwfunc {
@@ -363,7 +363,7 @@ func resolveWritePath(kv kvspace.KVSpace, framePath, name string) string {
 func resolveReadPath(kv kvspace.KVSpace, framePath, name string) string {
 	if isLiteral(name) { return "" }
 	for f := framePath; f != ""; f = keytree.ParentFrame(f) {
-		if r := kvspace.GetOne(kv, keytree.RParam(f, name)); !r.IsNil() {
+		if r := kvspace.GetOne(kv, keytree.RParam(f, name)); !r.IsNone() {
 			return r.Str()
 		}
 		if extKind(kv, f) == kvspace.KindRwfunc {
@@ -378,7 +378,7 @@ func resolveReadPath(kv kvspace.KVSpace, framePath, name string) string {
 			break
 		}
 	}
-	if v := kvspace.GetOne(kv, keytree.Stack(funcFrame)+name); !v.IsNil() {
+	if v := kvspace.GetOne(kv, keytree.Stack(funcFrame)+name); !v.IsNone() {
 		return keytree.Stack(funcFrame) + name
 	}
 	return frameSlotKey(framePath, name)

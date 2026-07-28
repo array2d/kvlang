@@ -66,6 +66,11 @@ func brBlock(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.
 		return fmt.Errorf("br requires 3 args: cond trueLabel falseLabel")
 	}
 	condVal := builtin.ResolveReadValue(kv, keytree.FrameRoot(pc), inst.Reads[0])
+	if condVal.IsNone() {
+		msg := "TypeError: null in branch condition"
+		vthread.SetError(ctx, kv, vtid, pc, msg)
+		return fmt.Errorf("%s", msg)
+	}
 	label := inst.Reads[2]
 	if builtin.AsBool(condVal) {
 		label = inst.Reads[1]

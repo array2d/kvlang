@@ -10,8 +10,7 @@ def has_dup(a:int64) -> () {
 	i = 0  # = 等价于 <-
 	while (i < n) {
 		a[i] -> x
-		seen.*x -> v
-		exists = v != null  # = 等价于 <-
+		has(seen, x) -> exists
 
 		if (exists) {
 			true -> found
@@ -38,8 +37,7 @@ def no_dup() -> () {
 	i = 0  # = 等价于 <-
 	while (i < n) {
 		a[i] -> x
-		seen.*x -> v
-		exists = v != null  # = 等价于 <-
+		has(seen, x) -> exists
 
 		if (exists) {
 			true -> found
