@@ -24,16 +24,16 @@ def main() -> () {
 	print(t)
 	s + " " + t -> w
 	print(w)
-	print(strlen(w))
+	print(string.len(w))
 
-	print(strcmp("abc", "abd"))
-	print(strcmp("x", "x"))
-	print(strstr(w, "kv"))
-	print(strstr(w, "zz"))
+	print(string.cmp("abc", "abd"))
+	print(string.cmp("x", "x"))
+	print(string.find(w, "kv"))
+	print(string.find(w, "zz"))
 
 	c <- w[3]
 	print(c)
-	print(ord(c))
+	print(string.ord(c))
 }
 
 main()

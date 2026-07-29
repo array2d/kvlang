@@ -4,13 +4,13 @@
 #   1
 #   0
 def is_pal(s:str) -> () {
-	n = strlen(s)  # = 等价于 <-
+	n = string.len(s)  # = 等价于 <-
 	0 -> l
 	r <- n - 1
 	ok = 1  # = 等价于 <-
 	while (l < r) {
-		char(s, l) -> lc
-		rc <- char(s, r)
+		string.char(s, l) -> lc
+		rc <- string.char(s, r)
 		match = lc == rc  # = 等价于 <-
 
 		if (match) {

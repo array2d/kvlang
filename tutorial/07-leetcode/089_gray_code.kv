@@ -1,0 +1,27 @@
+# 089: Gray Code — 生成 n 位格雷码序列
+# 来源: LeetCode #89
+# 公式: G(i) = i ^ (i >> 1)
+# 期望输出:
+#   0
+#   1
+#   3
+#   2
+def gray_code(n:int64) -> () {
+	total = 1  # = 等价于 <-
+	k = 0  # = 等价于 <-
+	while (k < n) {
+		total <- total * 2
+		k + 1 -> k
+	}
+	i = 0  # = 等价于 <-
+	while (i < total) {
+		g <- i ^ (i / 2)
+		print(g)
+		i + 1 -> i
+	}
+}
+
+def main() -> () {
+	gray_code(2)
+}
+main()

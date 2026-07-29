@@ -188,7 +188,7 @@ func (arraySetOp) Call(f *op.Frame) error {
 		idx := int(inputs[1].Int64())
 		ch := inputs[2].Str()
 		if idx < 0 || idx >= len(sv) {
-			msg := fmt.Sprintf("IndexError: set: string index %d out of bounds (len=%d); help: try adjusting the index or check strlen first", idx, len(sv))
+			msg := fmt.Sprintf("IndexError: set: string index %d out of bounds (len=%d); help: try adjusting the index or check string.len first", idx, len(sv))
 			vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
 			return fmt.Errorf("%s", msg)
 		}

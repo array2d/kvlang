@@ -1,0 +1,32 @@
+# 062: Unique Paths — DP 机器人路径数
+# 来源: LeetCode #62
+# 期望输出:
+#   28
+#   3
+def dp(m:int64, n:int64) -> (result:int64) {
+	i = 0  # = 等价于 <-
+	while (i < n) {
+		_ = set("/tmp/up", i, 1)  # = 等价于 <-
+		i + 1 -> i
+	}
+	j <- 1
+	while (j < m) {
+		k = 1  # = 等价于 <-
+		while (k < n) {
+			/tmp/up[k] -> v
+			/tmp/up[k-1] -> prev
+			_ = set("/tmp/up", k, prev + v)  # = 等价于 <-
+			k + 1 -> k
+		}
+		j + 1 -> j
+	}
+	/tmp/up[n-1] -> result
+}
+
+def main() -> () {
+	r1 <- dp(3, 7)
+	print(r1)
+	r2 = dp(3, 2)  # = 等价于 <-
+	print(r2)
+}
+main()

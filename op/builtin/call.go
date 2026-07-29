@@ -82,7 +82,7 @@ var registry = map[string]Op{
 
 	OpStrCmp: strCmpOp{},
 	OpStrStr: strStrOp{},
-	OpStrLen: strLenOp{},
+	OpStringLen: strLenOp{},
 	OpSlice:  strSliceOp{},
 	OpConcat: strConcatOp{},
 	OpSort:   sortOp{},

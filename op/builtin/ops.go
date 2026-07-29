@@ -79,14 +79,14 @@ const (
 
 // 字符串 built-in
 const (
-	OpChar   = "char"
-	OpOrd    = "ord"
-	OpDebugger = "debugger"
-	OpStrCmp = "strcmp"
-	OpStrStr = "strstr"
-	OpStrLen = "strlen"
-	OpSlice  = "slice"
-	OpConcat = "concat"
+	OpChar      = "string.char"
+	OpOrd       = "string.ord"
+	OpDebugger  = "debugger"
+	OpStrCmp    = "string.cmp"
+	OpStrStr    = "string.find"
+	OpStringLen = "string.len"
+	OpSlice     = "string.slice"
+	OpConcat    = "string.concat"
 	OpSort   = "sort"
 	OpDict   = "dict"
 )
@@ -122,7 +122,7 @@ OpBool: true,
 	OpKVHas: true, OpKVAt: true,
 	OpArray: true, OpLen: true, OpAt: true, OpSet: true,
 	OpHas: true,
-	OpChar: true, OpOrd: true, OpDebugger: true, OpStrCmp: true, OpStrStr: true, OpStrLen: true, OpSlice: true, OpConcat: true,
+	OpChar: true, OpOrd: true, OpDebugger: true, OpStrCmp: true, OpStrStr: true, OpStringLen: true, OpSlice: true, OpConcat: true,
 	OpSort: true,
 	OpDict: true,
 }

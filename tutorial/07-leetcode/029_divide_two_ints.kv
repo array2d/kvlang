@@ -1,0 +1,38 @@
+# 029: Divide Two Integers — 不用 */ % 实现整数除法
+# 来源: LeetCode #29
+# 期望输出:
+#   3
+#   -2
+def divide(dividend:int64, divisor:int64) -> (result:int64) {
+	dend <- dividend
+	dsor = divisor  # = 等价于 <-
+	neg = 0  # = 等价于 <-
+	if (dend < 0) {
+		neg <- 1 - neg
+		dend <- 0 - dend
+	}
+	if (dsor < 0) {
+		neg = 1 - neg  # = 等价于 <-
+		dsor <- 0 - dsor
+	}
+	result = 0  # = 等价于 <-
+	while (dend >= dsor) {
+		temp <- dsor
+		multiple = 1  # = 等价于 <-
+		while (dend >= temp + temp) {
+			temp <- temp + temp
+			multiple <- multiple + multiple
+		}
+		dend <- dend - temp
+		result = result + multiple  # = 等价于 <-
+	}
+	if (neg == 1) { result <- 0 - result }
+}
+
+def main() -> () {
+	r1 = divide(10, 3)  # = 等价于 <-
+	print(r1)
+	r2 <- divide(7, -3)
+	print(r2)
+}
+main()

@@ -4,8 +4,8 @@
 #   2
 #   2
 def str_str(hay:str, needle:str) -> () {
-	strlen(hay) -> nh
-	nn <- strlen(needle)
+	string.len(hay) -> nh
+	nn <- string.len(needle)
 	i = 0  # = 等价于 <-
 	-1 -> ans
 	limit <- nh - nn
@@ -13,8 +13,8 @@ def str_str(hay:str, needle:str) -> () {
 		match = true  # = 等价于 <-
 		0 -> j
 		while (j < nn) {
-			hc <- char(hay, i + j)
-			nc = char(needle, j)  # = 等价于 <-
+			hc <- string.char(hay, i + j)
+			nc = string.char(needle, j)  # = 等价于 <-
 			hc == nc -> eq
 
 			if (eq) {

@@ -1,0 +1,59 @@
+# 160: Intersection of Two Linked Lists — 找两个链表的交点
+# 来源: LeetCode #160
+# 双指针法: pA 走完走 B, pB 走完走 A, 相遇即交点
+# 期望输出:
+#   8
+def build_lists() -> () {
+	# common tail: 8→4→5
+	/t8 = { val=8; next="/t4" }  # = 等价于 <-
+	/t4 <- { val=4; next="/t5" }
+	{ val=5; next="" } -> /t5
+	# list A: 4→1→/t8
+	/a0 = { val=4; next="/a1" }  # = 等价于 <-
+	{ val=1; next="/t8" } -> /a1
+	# list B: 5→6→1→/t8
+	/b0 = { val=5; next="/b1" }  # = 等价于 <-
+	/b1 <- { val=6; next="/b2" }
+	{ val=1; next="/t8" } -> /b2
+}
+
+def get_intersection(ha:str, hb:str) -> () {
+	pa = ha  # = 等价于 <-
+	pb <- hb
+	switch_a = 0  # = 等价于 <-
+	switch_b <- 0
+	while (pa != pb) {
+		pa.next -> nxt
+		if (nxt == "") {
+			if (switch_a == 0) {
+				hb -> pa
+				1 -> switch_a
+			} else {
+				"" -> pa
+			}
+		} else {
+			nxt -> pa
+		}
+		pb.next -> nxt2
+		if (nxt2 == "") {
+			if (switch_b == 0) {
+				ha -> pb
+				switch_b <- 1
+			} else {
+				"" -> pb
+			}
+		} else {
+			nxt2 -> pb
+		}
+	}
+	if (pa != "") {
+		pa.val -> v
+		print(v)
+	}
+}
+
+def main() -> () {
+	build_lists()
+	get_intersection("/a0", "/b0")
+}
+main()

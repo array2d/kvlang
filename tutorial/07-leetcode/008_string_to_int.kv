@@ -1,0 +1,31 @@
+# 008: String to Integer (atoi) — 字符串转整数
+# 来源: LeetCode #8
+# 简化: 不处理前导空格
+# 期望输出:
+#   42
+#   -42
+#   4193
+def my_atoi(s:str) -> (result:int64) {
+	result = 0  # = 等价于 <-
+	n = string.len(s)  # = 等价于 <-
+	i <- 0
+	sign = 1  # = 等价于 <-
+	if (s[i] == "-") { -1 -> sign ; i + 1 -> i }
+	if (s[i] == "+") { i + 1 -> i }
+	while (i < n) {
+		c2 = s[i]  # = 等价于 <-
+		digit <- string.ord(c2) - 48
+		if (digit >= 0 && digit <= 9) {
+			result = result * 10 + digit  # = 等价于 <-
+			i + 1 -> i
+		} else { n -> i }
+	}
+	result <- result * sign
+}
+
+def main() -> () {
+	print(my_atoi("42"))
+	print(my_atoi("-42"))
+	print(my_atoi("4193"))
+}
+main()

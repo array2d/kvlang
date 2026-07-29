@@ -3,7 +3,7 @@
 def romanToInt(s:string) -> (val:int64) {
 	0 -> val
 	i <- 0
-	n = len(s)  # = 等价于 <-
+	n = string.len(s)  # = 等价于 <-
 	"" -> prev
 	while (i < n) {
 		c <- s[i]
@@ -13,6 +13,7 @@ def romanToInt(s:string) -> (val:int64) {
 		isL = c == "L"  # = 等价于 <-
 		c == "C" -> isC
 		isD <- c == "D"
+		isM = c == "M"  # = 等价于 <-
 		pI = prev == "I"  # = 等价于 <-
 		prev == "X" -> pX
 		pC <- prev == "C"
@@ -39,6 +40,10 @@ def romanToInt(s:string) -> (val:int64) {
 
 		if (isD) {
 			val <- val + 500
+		}
+
+		if (isM) {
+			val + 1000 -> val
 		}
 
 		subI = pI  # = 等价于 <-
@@ -72,6 +77,12 @@ def romanToInt(s:string) -> (val:int64) {
 		if (isD) {
 			if (subC) {
 				val - 200 -> val
+			}
+		}
+
+		if (isM) {
+			if (subC) {
+				val <- val - 200
 			}
 		}
 

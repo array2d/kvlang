@@ -4,8 +4,8 @@
 #   true
 #   false
 def is_anagram(s:str, t:str) -> () {
-	ns = strlen(s)  # = 等价于 <-
-	nt <- strlen(t)
+	ns = string.len(s)  # = 等价于 <-
+	nt <- string.len(t)
 	ok = true  # = 等价于 <-
 
 	if (ns != nt) {
@@ -14,7 +14,7 @@ def is_anagram(s:str, t:str) -> () {
 		h = {}  # = 等价于 <-
 		0 -> i
 		while (i < ns) {
-			char(s, i) -> c
+			string.char(s, i) -> c
 			has(h, c) -> exists
 			if (exists) {
 				h.*c + 1 -> h.*c
@@ -25,7 +25,7 @@ def is_anagram(s:str, t:str) -> () {
 		}
 		0 -> i
 		while (i < nt) {
-			char(t, i) -> c
+			string.char(t, i) -> c
 			has(h, c) -> exists
 			if (exists) {
 				h.*c -> v
@@ -38,7 +38,7 @@ def is_anagram(s:str, t:str) -> () {
 		}
 		0 -> i
 		while (i < ns) {
-			char(s, i) -> c
+			string.char(s, i) -> c
 			h.*c -> v
 
 			if (v != 0) {

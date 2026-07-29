@@ -377,12 +377,12 @@ func isTerminator(s *ast.Instruction) bool {
 // evalCond 处理条件指令：
 //   - 简单槽引用（叶节点，无 Reads）→ 直接用 Val 作为槽名（如 while (hit)）
 //   - 简单比较（所有参数为叶节点）→ 写入临时槽 _N（如 while (i <= n)）
-//   - 嵌套表达式（如 add(a,b) > 0、i < strlen(s)）→ 展平为临时槽指令序列后求值（fix-023）
+//   - 嵌套表达式（如 add(a,b) > 0、i < string.len(s)）→ 展平为临时槽指令序列后求值（fix-023）
 func evalCond(cond *ast.Instruction, lg *labelGen) (insts []ast.Stmt, slot string) {
 	if isCondSimpleSlot(cond) {
 		return nil, cond.Expr.Val
 	}
-	// 复合条件（含嵌套调用/算术，如 while (i < strlen(s))）：
+	// 复合条件（含嵌套调用/算术，如 while (i < string.len(s))）：
 	// 先展平嵌套子表达式为临时槽指令序列（fix-023，原 tothink-001）。
 	// 展平指令与条件指令同置于条件块内，while 每轮 goto 回条件块时整体重算。
 	flat := cond

@@ -1,10 +1,21 @@
-# 多级包名：aaa/bbb/math，全路径调用
+# 多级包名调用：全路径 /lib/aaa/bbb/math.sum() 与短形式 aaa/bbb/math.sum() 等价
 # 期望输出:
 #   7
+#   7
+#   30
 lib aaa/bbb/math {
     def sum(A:int64, B:int64) -> (C:int64) { A + B -> C }
+    def double(A:int64) -> (C:int64) {
+        sum(A, A) -> C  # 同包裸名调用
+    }
 }
 def init() -> () {
     /lib/aaa/bbb/math.sum(3, 4) -> s
     print(s)
+
+    aaa/bbb/math.sum(3, 4) -> t
+    print(t)
+
+    /lib/aaa/bbb/math.double(15) -> d
+    print(d)
 }
