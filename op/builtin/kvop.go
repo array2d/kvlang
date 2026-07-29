@@ -11,6 +11,11 @@ import (
 	"kvlang/vthread"
 )
 
+func init() {
+	Register("kvhas", "", kvHasOp{})
+	Register("kvat",  "", kvAtOp{})
+}
+
 // kvHasOp: kv.has(prefix, idx) -> bool
 //   若 prefix 为变量名（非路径），先从帧中读其值（路径字符串），再检查路径是否存在。
 type kvHasOp struct{}

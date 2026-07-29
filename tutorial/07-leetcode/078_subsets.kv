@@ -1,0 +1,56 @@
+# 078: Subsets — 迭代生成幂集
+# 来源: LeetCode #78
+# 期望输出:
+#   []
+#   [1]
+#   [2]
+#   [1,2]
+#   [3]
+#   [1,3]
+#   [2,3]
+#   [1,2,3]
+def subsets() -> () {
+	nums:int64 = [1, 2, 3]
+	n <- len(nums)
+	# store subsets in /tmp/ss/, each subset stored as (len, [elements...])
+	_ = set("/tmp/ss", 0, [0])  # empty subset: length=0
+	count = 1  # = 等价于 <-
+	idx = 0  # = 等价于 <-
+	while (idx < n) {
+		x <- nums[idx]
+		ci = 0  # = 等价于 <-
+		prev_count = count  # = 等价于 <-
+		while (ci < prev_count) {
+			/tmp/ss[ci][0] -> slen
+			# build new subset
+			new:int64 = []
+			k = 0  # = 等价于 <-
+			while (k < slen) {
+				/tmp/ss[ci][k+1] -> ek
+				append(new, ek) -> new
+				k + 1 -> k
+			}
+			append(new, x) -> new
+			_ = set("/tmp/ss", count, new)  # = 等价于 <-
+			count + 1 -> count
+			ci + 1 -> ci
+		}
+		idx + 1 -> idx
+	}
+	# print
+	pi = 0  # = 等价于 <-
+	while (pi < count) {
+		/tmp/ss[pi][0] -> slen
+		ki = 1  # = 等价于 <-
+		while (ki <= slen) {
+			print("/tmp/ss[pi][", ki, "]")
+			ki + 1 -> ki
+		}
+		pi + 1 -> pi
+	}
+}
+
+def main() -> () {
+	subsets()
+}
+main()

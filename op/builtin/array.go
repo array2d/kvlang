@@ -13,6 +13,15 @@ import (
 	"kvlang/vthread"
 )
 
+func init() {
+	Register("array", "", arrayOp{})
+	Register("len",   "", lenOp{})
+	Register("at",    "", atOp{})
+	Register("set",   "", arraySetOp{})
+	Register("has",   "", hasOp{})
+	Register("sort",  "", sortOp{})
+}
+
 // arrayOp: [e1, e2, ...] → typed array XValue。
 // 目标类型由写槽的类型标注决定（如 arr:int32 = [1,2,3] → int32 同构数组）。
 // 无类型标注时回退为异构 TLV 数组。

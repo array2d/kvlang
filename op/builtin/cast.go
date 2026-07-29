@@ -8,6 +8,20 @@ import (
 	"kvlang/vthread"
 )
 
+func init() {
+	Register("bool",    "def bool(A:any) -> (C:bool)",       cOp{kind: "bool"})
+	Register("int8",    "def int8(A:any) -> (C:int8)",       cOp{kind: "int8"})
+	Register("int16",   "def int16(A:any) -> (C:int16)",     cOp{kind: "int16"})
+	Register("int32",   "def int32(A:any) -> (C:int32)",     cOp{kind: "int32"})
+	Register("int64",   "def int64(A:any) -> (C:int64)",     cOp{kind: "int64"})
+	Register("uint8",   "def uint8(A:any) -> (C:uint8)",     cOp{kind: "uint8"})
+	Register("uint16",  "def uint16(A:any) -> (C:uint16)",   cOp{kind: "uint16"})
+	Register("uint32",  "def uint32(A:any) -> (C:uint32)",   cOp{kind: "uint32"})
+	Register("uint64",  "def uint64(A:any) -> (C:uint64)",   cOp{kind: "uint64"})
+	Register("float32", "def float32(A:any) -> (C:float32)", cOp{kind: "float32"})
+	Register("float64", "def float64(A:any) -> (C:float64)", cOp{kind: "float64"})
+}
+
 type cOp struct{ kind string }
 func (o cOp) Call(f *op.Frame) error {
 	r, err := evalCast(o.kind, readInputs(f))

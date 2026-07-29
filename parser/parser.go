@@ -274,21 +274,21 @@ func (p *parser) checkParamTypes(sig *ast.FuncSig) {
 	for _, param := range sig.Params {
 		if param.Type == "" {
 			p.errors = append(p.errors, Diagnostic{Message: fmt.Sprintf(
-				"func %s: param %q has no type annotation — every parameter must declare its type, e.g. %s:int",
+				"func %s: param %q has no type annotation — every parameter must declare its type, e.g. %s:int64",
 				sig.Name, param.Name, param.Name)})
 		}
 	}
 	for _, ret := range sig.Returns {
 		if ret.Type == "" {
 			p.errors = append(p.errors, Diagnostic{Message: fmt.Sprintf(
-				"func %s: return value %q has no type annotation — every return value must declare its type, e.g. %s:int",
+				"func %s: return value %q has no type annotation — every return value must declare its type, e.g. %s:int64",
 				sig.Name, ret.Name, ret.Name)})
 		}
 	}
 }
 
 // checkParamDup 参数不可同名，尤其读参列表与写参列表之间（fix-032）。
-// def f(A:int) -> (A:int) 中 A 同时是读参又是写参 → 签名非法。
+// def f(A:int64) -> (A:int64) 中 A 同时是读参又是写参 → 签名非法。
 func (p *parser) checkParamDup(sig *ast.FuncSig) {
 	seen := map[string]bool{}
 	for _, param := range sig.ParamNames() {

@@ -7,6 +7,10 @@ import (
 	"kvlang/vthread"
 )
 
+func init() {
+	Register("dict", "", dictOp{})
+}
+
 // dictOp: dict(k1, v1, k2, v2, ...) -> base —— dict 字面量 { k1=v1; k2=v2 } 的运行时。
 // base 键写入 kind="dict" 类型标记，成员写入平坦键族 base.k（keytree.Member）。
 // 值为 null（如 null 裸名解析结果）时跳过写入——kvspace 中缺席即 null。

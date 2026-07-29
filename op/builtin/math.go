@@ -9,6 +9,18 @@ import (
 	"kvlang/vthread"
 )
 
+func init() {
+	Register("abs",  "def abs(A:num) -> (C:num)",        mOp{kind: "abs"})
+	Register("pow",  "def pow(A:num, B:num) -> (C:float64)", mOp{kind: "pow"})
+	Register("min",  "def min(A:num, B:num) -> (C:num)",     mOp{kind: "min"})
+	Register("max",  "def max(A:num, B:num) -> (C:num)",     mOp{kind: "max"})
+	Register("sqrt", "def sqrt(A:num) -> (C:float64)",       mOp{kind: "sqrt"})
+	Register("exp",  "def exp(A:num) -> (C:float64)",        mOp{kind: "exp"})
+	Register("log",  "def log(A:num) -> (C:float64)",        mOp{kind: "log"})
+	Register("neg",  "def neg(A:num) -> (C:num)",            mOp{kind: "neg"})
+	Register("sign", "def sign(A:num) -> (C:int64)",         mOp{kind: "sign"})
+}
+
 type mOp struct{ kind string }
 func (o mOp) Call(f *op.Frame) error {
 	r, err := evalMath(o.kind, readInputs(f))

@@ -1,0 +1,50 @@
+# 101: Symmetric Tree — 判断二叉树是否镜像对称
+# 来源: LeetCode #101
+# 期望输出:
+#   true
+#   false
+def build() -> () {
+	/t0 <- { val=1; left="/t1"; right="/t2" }
+	/t1 <- { val=2; left="/t3"; right="/t4" }
+	/t2 <- { val=2; left="/t5"; right="/t6" }
+	{ val=3; left=""; right="" } -> /t3
+	/t4 <- { val=4; left=""; right="" }
+	{ val=4; left=""; right="" } -> /t5
+	/t6 <- { val=3; left=""; right="" }
+	/u0 <- { val=1; left="/u1"; right="/u2" }
+	/u1 <- { val=2; left=""; right="/u3" }
+	/u2 <- { val=2; left=""; right="" }
+	{ val=3; left=""; right="" } -> /u3
+}
+
+def mirror(a:str, b:str) -> (ok:int64) {
+	1 -> ok
+	if (a == "") {
+		if (b != "") { ok <- 0 }
+	}
+	if (ok == 1 && a != "") {
+		if (a.val != b.val) { 0 -> ok }
+		else {
+			mirror(a.left, b.right) -> l
+			if (l == 0) { ok <- 0 }
+		}
+	}
+	if (ok == 1 && a != "") {
+		mirror(a.right, b.left) -> r
+		if (r == 0) { 0 -> ok }
+	}
+}
+
+def is_symmetric(root:str) -> (ok:int64) {
+	if (root == "") { 1 -> ok }
+	else { mirror(root.left, root.right) -> ok }
+}
+
+def main() -> () {
+	build()
+	is_symmetric("/t0") -> r1
+	if (r1 == 1) { print("true") } else { print("false") }
+	is_symmetric("/u0") -> r2
+	if (r2 == 1) { print("true") } else { print("false") }
+}
+main()

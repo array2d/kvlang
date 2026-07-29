@@ -11,6 +11,12 @@ import (
 	"kvlang/op"
 )
 
+func init() {
+	Register("print", "def print(A:any, ...) -> ()",       ioOp{print: true})
+	Register("cerr",  "def cerr(A:any, ...) -> ()",        ioOp{print: true, cerr: true})
+	Register("input", "def input(prompt:string?) -> (C:string)", ioOp{input: true})
+}
+
 type ioOp struct{ print, cerr, input bool }
 func (o ioOp) Call(f *op.Frame) error {
 	inputs := readInputs(f)

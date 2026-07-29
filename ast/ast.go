@@ -30,7 +30,7 @@ type FuncSig struct {
 	Returns []Param
 }
 
-// String 重建规范签名字符串：def name(A:int, B:int) -> (C:int)
+// String 重建规范签名字符串：def name(A:int64, B:int64) -> (C:int64)
 func (s FuncSig) String() string {
 	var sb strings.Builder
 	sb.WriteString("def ")

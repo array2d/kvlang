@@ -8,6 +8,14 @@ import (
 	"kvlang/vthread"
 )
 
+func init() {
+	Register("&",  "def &(A:int64, B:int64) -> (C:int64)",  bit{f: func(a, b int64) int64 { return a & b }})
+	Register("|",  "def |(A:int64, B:int64) -> (C:int64)",  bit{f: func(a, b int64) int64 { return a | b }})
+	Register("^",  "def ^(A:int64, B:int64) -> (C:int64)",  bit{f: func(a, b int64) int64 { return a ^ b }})
+	Register("<<", "def <<(A:int64, B:int64) -> (C:int64)", bit{f: func(a, b int64) int64 { return a << uint64(b) }})
+	Register(">>", "def >>(A:int64, B:int64) -> (C:int64)", bit{f: func(a, b int64) int64 { return a >> uint64(b) }})
+}
+
 type bit struct{ f func(int64, int64) int64 }
 func (o bit) Call(f *op.Frame) error {
 	r, err := evalBinaryInt(readInputs(f), o.f)
