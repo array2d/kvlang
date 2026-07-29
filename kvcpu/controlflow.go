@@ -6,7 +6,7 @@ import (
 
 	"kvlang/keytree"
 	"github.com/array2d/kvspace-go"
-	"kvlang/layoutrwir"
+	"kvlang/layout"
 	"kvlang/logx"
 	"kvlang/rwir"
 	"kvlang/rwir/builtin"
@@ -17,7 +17,7 @@ import (
 func handleControl(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *rwir.Rwir) error {
 	switch inst.Opcode {
 	case rwir.OpCall:
-		substackPC := layoutrwir.HandleCall(ctx, kv, pc, inst)
+		substackPC := layout.HandleCall(ctx, kv, pc, inst)
 		if substackPC == "" {
 			return fmt.Errorf("call %s failed", inst.Reads[0].Name)
 		}
@@ -26,7 +26,7 @@ func handleControl(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, ins
 		return nil
 
 	case rwir.OpReturn:
-		parentPC, retVal := layoutrwir.HandleReturn(ctx, kv, pc, inst)
+		parentPC, retVal := layout.HandleReturn(ctx, kv, pc, inst)
 		logx.Debug("[%s] RETURN parentPC=%q retVal=%q", vtid, parentPC, retVal)
 		if parentPC == "" {
 			vthread.SetDone(ctx, kv, vtid, retVal)
@@ -46,21 +46,21 @@ func handleControl(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, ins
 	}
 }
 
-// gotoBlock 处理 goto(label)：创建 label 子帧。
+// gotoBlock 处理 goto(scope)：复用或创建 scope 帧，PC 跳转。
 func gotoBlock(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *rwir.Rwir) error {
 	if len(inst.Reads) == 0 {
-		return fmt.Errorf("goto requires label")
+		return fmt.Errorf("goto requires scope")
 	}
-	newPC := layoutrwir.HandleLabel(ctx, kv, pc, inst.Reads[0].Name)
+	newPC := layout.HandleScope(ctx, kv, pc, inst.Reads[0].Name)
 	if newPC == "" {
-		return fmt.Errorf("goto %s failed", inst.Reads[0].Name)
+		msg := fmt.Sprintf("RuntimeError: goto %s failed", inst.Reads[0].Name); vthread.SetError(ctx, kv, vtid, pc, msg); return fmt.Errorf("%s", inst.Reads[0].Name)
 	}
 	vthread.Set(ctx, kv, vtid, newPC, "running")
 	logx.Debug("[%s] GOTO → %s", vtid, newPC)
 	return nil
 }
 
-// brBlock 处理 br(cond, trueLabel, falseLabel)：条件分支，创建 label 子帧。
+// brBlock 处理 br(cond, trueScope, falseScope)：条件分支，复用或创建 scope 帧。
 func brBlock(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *rwir.Rwir) error {
 	if len(inst.Reads) < 3 {
 		return fmt.Errorf("br requires 3 args: cond trueLabel falseLabel")
@@ -75,9 +75,9 @@ func brBlock(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *rwi
 	if builtin.AsBool(condVal) {
 		label = inst.Reads[1].Name
 	}
-	newPC := layoutrwir.HandleLabel(ctx, kv, pc, label)
+	newPC := layout.HandleScope(ctx, kv, pc, label)
 	if newPC == "" {
-		return fmt.Errorf("br %s failed", label)
+		msg := fmt.Sprintf("RuntimeError: br %s failed", label); vthread.SetError(ctx, kv, vtid, pc, msg); return fmt.Errorf("%s", label)
 	}
 	vthread.Set(ctx, kv, vtid, newPC, "running")
 	return nil

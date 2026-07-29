@@ -27,25 +27,24 @@ type Rwir struct {
 const maxParams = 128
 
 // Decode 从 kvspace 执行层 key 解码指令。
-//
-// pc 为绝对路径，格式：/vthread/<vtid>/[i,0] 或 /vthread/<vtid>/[j,0]/[i,0]。
-// linkBase = Stack(FrameRoot(pc))，即帧根目录（extindex → /lib/）。
+// scope 帧：key 名前缀 scope 链（. 连接），用父帧 extindex 解析。
 func Decode(ctx context.Context, kv kvspace.KVSpace, linkBase, pc string) (*Rwir, error) {
 	lastSlash := strings.LastIndex(pc, "/[")
 	if lastSlash < 0 {
 		return nil, fmt.Errorf("Decode: invalid pc (no /[coord]): %q", pc)
 	}
 	addr0 := extractAddr0(pc[lastSlash+1:])
-	prefix := linkBase
+
+	scopePrefix, lookupBase := scopePrefixAndBase(linkBase)
 
 	names := make([]string, 0, 1+maxParams*2)
-	names = append(names, fmt.Sprintf("[%d,0]", addr0))
+	names = append(names, fmt.Sprintf("%s[%d,0]", scopePrefix, addr0))
 	for i := 1; i <= maxParams; i++ {
-		names = append(names, fmt.Sprintf("[%d,-%d]", addr0, i))
-		names = append(names, fmt.Sprintf("[%d,%d]", addr0, i))
+		names = append(names, fmt.Sprintf("%s[%d,-%d]", scopePrefix, addr0, i))
+		names = append(names, fmt.Sprintf("%s[%d,%d]", scopePrefix, addr0, i))
 	}
 
-	vals := kv.Get(prefix, names)
+	vals := kv.Get(lookupBase, names)
 
 	r := &Rwir{}
 	if s := string(vals[0].RawBytes()); s != "" {
@@ -73,4 +72,34 @@ func Decode(ctx context.Context, kv kvspace.KVSpace, linkBase, pc string) (*Rwir
 			pc, maxParams, len(r.Reads), len(r.Writes))
 	}
 	return r, nil
+}
+
+// scopePrefixAndBase 从 linkBase 提取 scope 链（. 连接）与 rwfunc 帧 linkBase。
+// linkBase="/vthread/1/[0,0]/_a/_b/" → "a.b", "/vthread/1/[0,0]/"
+// linkBase="/vthread/1/[0,0]/"      → "",      "/vthread/1/[0,0]/"
+// linkBase="/vthread/1/"            → "",      "/vthread/1/"
+func scopePrefixAndBase(linkBase string) (scopePrefix, lookupBase string) {
+	lookupBase = linkBase
+	trimmed := strings.TrimRight(linkBase, "/")
+	if trimmed == "" || !strings.Contains(trimmed, "[") {
+		return
+	}
+	var scopes []string
+	rest := trimmed
+	for rest != "" {
+		sep := strings.LastIndex(rest, "/")
+		if sep < 0 { break }
+		seg := rest[sep+1:]
+		rest = rest[:sep]
+		if len(seg) > 0 && seg[0] == '[' {
+			lookupBase = rest + "/" + seg + "/"
+			break
+		}
+		scopes = append(scopes, seg)
+	}
+	for i := len(scopes) - 1; i >= 0; i-- {
+		if scopePrefix != "" { scopePrefix += "." }
+		scopePrefix += scopes[i]
+	}
+	return
 }

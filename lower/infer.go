@@ -44,7 +44,7 @@ func inferBody(body []ast.Stmt, tm map[string]string) {
 		switch s := st.(type) {
 		case *ast.Instruction:
 			inferInst(s, tm)
-		case *ast.BlockStmt:
+		case *ast.ScopeStmt:
 			inferBody(s.Body, tm)
 		case *ast.IfStmt:
 			if s.Cond != nil {

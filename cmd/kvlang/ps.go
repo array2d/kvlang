@@ -25,7 +25,7 @@ func cmdPS(args []string) {
 
 	kv := kvspace.Conn(*dsn)
 
-	vtids := kv.List(keytree.VthreadRoot + keytree.PathSegSep)
+	vtids := kv.List(keytree.VthreadRoot + keytree.PathSegSep, false)
 
 	var ids []int64
 	for _, v := range vtids {

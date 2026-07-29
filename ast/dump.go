@@ -56,8 +56,8 @@ func dumpStmt(w io.Writer, st Stmt, prefix string, last bool) {
 		fmt.Fprintf(w, "%sInstruction expr=%q writes=%v\n",
 			fullPrefix, exprStr, s.Writes)
 
-	case *BlockStmt:
-		fmt.Fprintf(w, "%sBlockStmt %q (%d stmts)\n", fullPrefix, s.Label, len(s.Body))
+	case *ScopeStmt:
+		fmt.Fprintf(w, "%sScopeStmt %q (%d stmts)\n", fullPrefix, s.Label, len(s.Body))
 		childPrefix := prefix
 		if last {
 			childPrefix += "    "

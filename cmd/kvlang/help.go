@@ -8,8 +8,8 @@ import (
 const helpText = `kvlang — KV language VM interpreter
 
 usage:
-  kvlang layoutrwir <file|dir>…                   装载到 /lib/（多文件拼接为单源，不执行）
-  kvlang layoutrwirandrun <file|dir>… [--debug]   先 layoutrwir 再 run
+  kvlang layout <file|dir>…                   装载到 /lib/（多文件拼接为单源，不执行）
+  kvlang layoutrwirandrun <file|dir>… [--debug]   先 layout 再 run
   kvlang run [{lib}.{func}]                 执行 /lib/{lib}.{func}（默认 .init，无参=匿名 lib）
   kvlang -c "code" [--debug]               内联执行
   echo "code" | kvlang                      管道执行（stdin 非终端）
@@ -28,7 +28,7 @@ KV 空间操作已迁至独立 CLI（kvlang-go 仓 cmd/kvspace）:
 
 示例:
   kvlang layoutrwirandrun file.kv             装载并执行
-  kvlang layoutrwir lib.kv                    仅装载不执行
+  kvlang layout lib.kv                    仅装载不执行
   kvlang run math.sum                   执行 /lib/math.sum
   kvlang -c 'x = 40 + 2; print(x)'      内联执行（= 等价于 <-）
   kvlang vet -c 'a = { k=1 }'           语法检查内联代码

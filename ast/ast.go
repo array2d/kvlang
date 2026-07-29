@@ -498,16 +498,16 @@ func (*ContinueStmt) stmt()             {}
 func (*ContinueStmt) FirstLine() string { return "continue" }
 func (*ContinueStmt) String() string    { return "continue" }
 
-// BlockStmt 表示一个带标签的基本块。
-type BlockStmt struct {
+// ScopeStmt 表示一个带标签的基本块。
+type ScopeStmt struct {
 	Comments []string
 	Label    string
 	Body     []Stmt
 }
 
-func (*BlockStmt) stmt() {}
-func (s *BlockStmt) FirstLine() string { return s.Label }
-func (s *BlockStmt) String() string {
+func (*ScopeStmt) stmt() {}
+func (s *ScopeStmt) FirstLine() string { return s.Label }
+func (s *ScopeStmt) String() string {
 	r := s.Label + ": {\n"
 	for _, st := range s.Body {
 		r += "\t" + st.String() + "\n"
@@ -530,7 +530,7 @@ func StmtComments(st Stmt) []string {
 		return s.Comments
 	case *ContinueStmt:
 		return s.Comments
-	case *BlockStmt:
+	case *ScopeStmt:
 		return s.Comments
 	}
 	return nil

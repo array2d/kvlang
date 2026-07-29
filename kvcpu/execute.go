@@ -7,7 +7,7 @@ import (
 
 	"github.com/array2d/kvspace-go"
 	"kvlang/keytree"
-	"kvlang/layoutrwir"
+	"kvlang/layout"
 	"kvlang/logx"
 	"kvlang/rwir"
 	"kvlang/rwir/builtin"
@@ -74,12 +74,21 @@ func (c *cpu) Execute(pc string) error {
 		if inst.Opcode == "" {
 			frameRoot := keytree.FrameRoot(pc)
 			if frameRoot == keytree.VThread(vtid) {
-				logx.Debug("[%s] empty opcode at %s → top-level done", vtid, pc)
 				vthread.SetDone(ctx, c.kv, vtid, "ok")
 				return nil
 			}
-			logx.Debug("[%s] empty opcode at %s → implicit return", vtid, pc)
-			parentPC, _ := layoutrwir.HandleReturn(ctx, c.kv, pc, &rwir.Rwir{Opcode: rwir.OpReturn})
+			// scope 帧隐式 return：读 .returnpc，DelTree 自身
+			if layout.ExtKind(c.kv, frameRoot) != kvspace.KindRwfunc {
+				parentPC := layout.HandleScopeReturn(ctx, c.kv, pc)
+				if parentPC == "" {
+					vthread.SetDone(ctx, c.kv, vtid, "ok")
+					return nil
+				}
+				vthread.Set(ctx, c.kv, vtid, parentPC, "running")
+				pc = parentPC
+				continue
+			}
+			parentPC, _ := layout.HandleReturn(ctx, c.kv, pc, &rwir.Rwir{Opcode: rwir.OpReturn})
 			if parentPC == "" {
 				vthread.SetDone(ctx, c.kv, vtid, "ok")
 				return nil

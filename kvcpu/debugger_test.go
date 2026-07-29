@@ -25,7 +25,7 @@ import (
 	"kvlang/keytree"
 	"kvlang/kvcpu"
 	"github.com/array2d/kvspace-go"
-	"kvlang/layoutrwir"
+	"kvlang/layout"
 	"kvlang/lower"
 	"kvlang/rwir"
 	"kvlang/parser"
@@ -70,7 +70,7 @@ func newSession(
 	kv.DelTree(keytree.VThread(vtid))
 	t.Cleanup(func() { kv.DelTree(keytree.VThread(vtid)) })
 
-	firstPC := layoutrwir.Bootstrap(ctx, kv, vtid, funcName, args)
+	firstPC := layout.Bootstrap(ctx, kv, vtid, funcName, args)
 	if firstPC == "" {
 		t.Fatalf("Bootstrap %q vtid=%q failed", funcName, vtid)
 	}
@@ -150,7 +150,7 @@ func loadSrc(t *testing.T, kv kvspace.KVSpace, src string) {
 	}
 	for i := range df.Funcs {
 		fn := lower.Func(&df.Funcs[i])
-		layoutrwir.WriteFunc(kv, "main", fn)
+		layout.WriteFunc(kv, "main", fn)
 	}
 }
 

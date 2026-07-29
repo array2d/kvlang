@@ -375,7 +375,7 @@ func (p *parser) checkReadOnlyParams(fn *ast.Func) {
 					bad(s.Var)
 				}
 				walk(s.Body)
-			case *ast.BlockStmt:
+			case *ast.ScopeStmt:
 				walk(s.Body)
 			}
 		}

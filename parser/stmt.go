@@ -158,14 +158,14 @@ func (p *parser) parseWhile() *ast.WhileStmt {
 }
 
 // parseBlockLabel 解析带标签的基本块：label: { body }
-func (p *parser) parseBlockLabel() *ast.BlockStmt {
+func (p *parser) parseBlockLabel() *ast.ScopeStmt {
 	label := p.advance().Value // consume Ident（标签名）
 	p.advance()                // consume Colon
 	p.skipNewlinesAndComments()
 	p.expect(LBrace)
 	body := p.parseBody()
 	p.expect(RBrace)
-	return &ast.BlockStmt{Label: label, Body: body}
+	return &ast.ScopeStmt{Label: label, Body: body}
 }
 
 // attachComments 将 comments 附加到语句节点的 Comments 字段。
@@ -186,7 +186,7 @@ func attachComments(st ast.Stmt, comments []string) {
 		s.Comments = comments
 	case *ast.ContinueStmt:
 		s.Comments = comments
-	case *ast.BlockStmt:
+	case *ast.ScopeStmt:
 		s.Comments = comments
 	}
 }

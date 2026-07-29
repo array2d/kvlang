@@ -41,7 +41,7 @@ func (o ioOp) Call(f *rwir.Frame) error {
 		var val string
 		if !ts.IsZero() { val, _ = device.ReadTerm(bg, ts) }
 		if len(f.Inst.Writes) > 0 {
-			wKey := resolveWriteKey(f.KV, keytree.FrameRoot(f.PC), f.Inst.Writes[0].Name)
+			wKey := writeSlotKey(f.KV, keytree.FrameRoot(f.PC), f.Inst.Writes[0].Name)
 			f.KV.Set([]kvspace.KVPair{{wKey, kvspace.String(val)}})
 		}
 		nextPC(f)

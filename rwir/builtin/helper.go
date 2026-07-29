@@ -48,7 +48,7 @@ func requireKind(v kvspace.XValue, kind string) error {
 
 // readInputs resolves all read-slots of f.Inst into typed Values.
 func readInputs(f *rwir.Frame) []kvspace.XValue {
-	framePath := keytree.FrameRoot(f.PC)
+	framePath := funcFrameRoot(f.KV, keytree.FrameRoot(f.PC))
 	inputs := make([]kvspace.XValue, 0, len(f.Inst.Reads))
 	for _, r := range f.Inst.Reads {
 		inputs = append(inputs, resolveReadValue(f.KV, framePath, r.Name))
@@ -57,13 +57,10 @@ func readInputs(f *rwir.Frame) []kvspace.XValue {
 }
 
 // writeResult writes a typed Value to the first write-slot and advances PC.
-func setWrite(kv kvspace.KVSpace, framePath, slot string, val kvspace.XValue) error {
-	return kv.Set([]kvspace.KVPair{{resolveWriteKey(kv, framePath, slot), val}})
-}
-
 func writeResult(f *rwir.Frame, result kvspace.XValue) error {
 	if len(f.Inst.Writes) > 0 {
-		if err := setWrite(f.KV, keytree.FrameRoot(f.PC), f.Inst.Writes[0].Name, result); err != nil {
+		key := resolveWriteSlot(f.KV, keytree.FrameRoot(f.PC), f.Inst.Writes[0].Name)
+		if err := f.KV.Set([]kvspace.KVPair{{key, result}}); err != nil {
 			return err
 		}
 	}
@@ -71,24 +68,37 @@ func writeResult(f *rwir.Frame, result kvspace.XValue) error {
 	return nil
 }
 
+// resolveWriteSlot 返回写槽在 rwfunc 帧的绝对 key（先查 .wparam 重定向）。
+func resolveWriteSlot(kv kvspace.KVSpace, framePath, name string) string {
+	rwRoot := funcFrameRoot(kv, framePath)
+	if r := kvspace.GetOne(kv, keytree.WParam(rwRoot, name)); !r.IsNone() {
+		return r.Str()
+	}
+	return keytree.Stack(rwRoot) + name
+}
+
 // nextPC advances PC without writing a result.
 func nextPC(f *rwir.Frame) {
 	vthread.Set(bg, f.KV, f.Vtid, rwir.NextPC(f.PC), "running")
 }
 
+// setWrite writes a typed Value to a named slot (先查 .wparam 重定向).
+func setWrite(kv kvspace.KVSpace, framePath, slot string, val kvspace.XValue) error {
+	return kv.Set([]kvspace.KVPair{{resolveWriteSlot(kv, framePath, slot), val}})
+}
+
 // funcFrameRoot returns the nearest rwfunc frame root from the given frame path.
-// Relative path resolution (kvhas/kvat/at/set) must use the function frame root,
-// not the current label frame root, because data lives under the function frame.
+// Uses .lib marker to identify rwfunc frames (extKind fails due to extindex cascade).
 func funcFrameRoot(kv kvspace.KVSpace, frameRoot string) string {
 	for f := frameRoot; f != ""; f = keytree.ParentFrame(f) {
-		if extKind(kv, f) == kvspace.KindRwfunc {
+		if !kvspace.GetOne(kv, keytree.Stack(f)+keytree.SegLib).IsNone() {
 			return f
 		}
 	}
 	return frameRoot
 }
 
-// ExecuteCopy copies the Value addressed by inst.Reads[0] to all write-slots.
+// ExecuteCopy copies the Value addressed by inst.Reads[0] to all write-slots (先查 .wparam 重定向).
 // Preserves the original type — int stays int, float stays float.
 func ExecuteCopy(kv kvspace.KVSpace, vtid, pc string, inst *rwir.Rwir) error {
 	framePath := keytree.FrameRoot(pc)
@@ -96,7 +106,8 @@ func ExecuteCopy(kv kvspace.KVSpace, vtid, pc string, inst *rwir.Rwir) error {
 	if len(inst.Reads) > 0 { src = inst.Reads[0].Name }
 	v := resolveReadValue(kv, framePath, src)
 	for _, w := range inst.Writes {
-		if err := setWrite(kv, framePath, w.Name, v); err != nil {
+		key := resolveWriteSlot(kv, framePath, w.Name)
+		if err := kv.Set([]kvspace.KVPair{{key, v}}); err != nil {
 			return err
 		}
 	}

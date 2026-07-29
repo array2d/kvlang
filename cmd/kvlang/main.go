@@ -4,7 +4,7 @@
 //	kvlang -c "code"              加载并执行内联代码
 //	echo "code" | kvlang          执行管道代码（stdin 非终端）
 //	kvlang                        无参数且 stdin 为终端 → 执行 .init
-//	kvlang layoutrwir <file.kv|dir>     只加载到 kvspace，不执行
+//	kvlang layout <file.kv|dir>     只加载到 kvspace，不执行
 //	kvlang vet <file.kv>          语法检查
 //	kvlang format <file.kv>       格式化（别名 fmt）
 //	kvlang ps                     列出所有 vthread（如 Linux ps）
@@ -22,11 +22,11 @@ func main() {
 	args := os.Args[1:]
 	if len(args) > 0 {
 		switch args[0] {
-		case "layoutrwir":
-			cmdLayoutRWIR(args[1:])
+		case "layout":
+			cmdLayout(args[1:])
 			return
-		case "layoutrwirandrun":
-			cmdLayoutRWIRAndRun(args[1:])
+		case "layoutandrun":
+			cmdLayoutAndRun(args[1:])
 			return
 		case "run":
 			cmdRun(args[1:])

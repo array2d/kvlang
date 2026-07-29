@@ -33,7 +33,7 @@ func (arrayOp) Call(f *rwir.Frame) error {
 		return nil
 	}
 	frameRoot := keytree.FrameRoot(f.PC)
-	outKey := resolveWriteKey(f.KV, frameRoot, f.Inst.Writes[0].Name)
+	outKey := writeSlotKey(f.KV, frameRoot, f.Inst.Writes[0].Name)
 	// 从指令写槽 kind 取目标类型
 	targetKind := ""
 	if len(f.Inst.Writes) > 0 && f.Inst.Writes[0].Kind != "" && f.Inst.Writes[0].Kind != "rwir" {
@@ -223,7 +223,7 @@ func (arraySetOp) Call(f *rwir.Frame) error {
 		f.KV.Set([]kvspace.KVPair{{path, inputs[2]}})
 		if len(f.Inst.Writes) > 0 && !inputs[0].IsNone() {
 			// 写入 base 本身（值不变），满足 -> base 返回槽
-			outKey := resolveWriteKey(f.KV, fp, f.Inst.Writes[0].Name)
+			outKey := writeSlotKey(f.KV, fp, f.Inst.Writes[0].Name)
 			f.KV.Set([]kvspace.KVPair{{outKey, inputs[0]}})
 		}
 		vthread.Set(bg, f.KV, f.Vtid, rwir.NextPC(f.PC), "running")
@@ -280,7 +280,7 @@ func (arraySetOp) Call(f *rwir.Frame) error {
 		result = kvspace.RawN(k, raw, int32(n))
 	}
 	if len(f.Inst.Writes) > 0 {
-		outKey := resolveWriteKey(f.KV, keytree.FrameRoot(f.PC), f.Inst.Writes[0].Name)
+		outKey := writeSlotKey(f.KV, keytree.FrameRoot(f.PC), f.Inst.Writes[0].Name)
 		f.KV.Set([]kvspace.KVPair{{outKey, result}})
 	}
 	vthread.Set(bg, f.KV, f.Vtid, rwir.NextPC(f.PC), "running")

@@ -9,30 +9,10 @@ import (
 
 func isAbsolute(param string) bool { return len(param) > 0 && param[0] == '/' }
 
-// resolveWriteKey maps a write-slot param to an absolute KV key。
-// 递归向上查找：先查 .wparam 重定向，再查变量值，函数帧边界为止。
-// 若变量首次写入且当前帧为 label，写到函数帧——TCO 丢弃 label 帧时变量不丢。
-func resolveWriteKey(kv kvspace.KVSpace, framePath, param string) string {
-	if isAbsolute(param) { return param }
-	funcFrame := framePath
-	for f := framePath; f != ""; f = keytree.ParentFrame(f) {
-		if extKind(kv, f) == kvspace.KindRwfunc {
-			funcFrame = f
-			break
-		}
-	}
-	for f := framePath; f != ""; f = keytree.ParentFrame(f) {
-		if r := kvspace.GetOne(kv, keytree.WParam(f, param)); !r.IsNone() {
-			return r.Str()
-		}
-		if v := kvspace.GetOne(kv, keytree.Stack(f)+param); !v.IsNone() {
-			return keytree.Stack(f) + param
-		}
-		if extKind(kv, f) == kvspace.KindRwfunc {
-			break
-		}
-	}
-	return keytree.Stack(funcFrame) + param
+// writeSlotKey 返回 slot 在 rwfunc 帧的绝对 KV key。
+func writeSlotKey(kv kvspace.KVSpace, framePath, slot string) string {
+	if isAbsolute(slot) { return slot }
+	return keytree.Stack(funcFrameRoot(kv, framePath)) + slot
 }
 
 // ResolveReadValue maps a read-slot param to a typed Value.
@@ -40,8 +20,8 @@ func ResolveReadValue(kv kvspace.KVSpace, framePath, param string) kvspace.XValu
 	return resolveReadValue(kv, framePath, param)
 }
 
-// resolveReadValue maps a read-slot param to a typed Value.
-// 递归向上查找：当前帧 → 父帧 → ... → 函数帧边界（extKind="rwfunc"）。
+// resolveReadValue 从 rwfunc 帧查读参值。
+// 先查 .rparam 重定向，再查 rwfunc Stack 变量，最后查当前帧。
 func resolveReadValue(kv kvspace.KVSpace, framePath, param string) kvspace.XValue {
 	if len(param) == 0 {
 		return kvspace.XValue{}
@@ -67,17 +47,13 @@ func resolveReadValue(kv kvspace.KVSpace, framePath, param string) kvspace.XValu
 	if len(param) > 0 && param[0] >= '0' && param[0] <= '9' {
 		return kvspace.XValue{}
 	}
-	// 递归向上查找，每层先查 .rparam 重定向，再查变量值
-	for f := framePath; f != ""; f = keytree.ParentFrame(f) {
-		if r := kvspace.GetOne(kv, keytree.RParam(f, param)); !r.IsNone() {
-			return kvspace.GetOne(kv, r.Str())
-		}
-		if v := kvspace.GetOne(kv, keytree.Stack(f)+param); !v.IsNone() {
-			return v
-		}
-		if extKind(kv, f) == kvspace.KindRwfunc {
-			break
-		}
+	// scope/function 帧统一：查 rwfunc 帧 .rparam 与 Stack 变量
+	rwRoot := funcFrameRoot(kv, framePath)
+	if r := kvspace.GetOne(kv, keytree.RParam(rwRoot, param)); !r.IsNone() {
+		return kvspace.GetOne(kv, r.Str())
+	}
+	if v := kvspace.GetOne(kv, keytree.Stack(rwRoot)+param); !v.IsNone() {
+		return v
 	}
 	return kvspace.XValue{}
 }

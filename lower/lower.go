@@ -34,7 +34,7 @@ type loopCtx struct {
 	continueLabel string // continue → goto continueLabel (while 的 _while_N / condLabel)
 }
 
-// Func 将函数体中 if/while 控制流降级为 BlockStmt + br/goto，
+// Func 将函数体中 if/while 控制流降级为 ScopeStmt + br/goto，
 // 展开复合表达式。不再插入隐式 return——VM 在遇到空指令槽时自动弹帧。
 func Func(fn *ast.Func) *ast.Func {
 	lg := &labelGen{parent: fn.Sig.Name}
@@ -113,13 +113,13 @@ func lowerBody(stmts []ast.Stmt, lg *labelGen, lc *loopCtx) []ast.Stmt {
 			cont := lowerBody(stmts[i+1:], lg, lc)
 			return lowerWhileWithCont(preamble, s, cont, lg, lc)
 
-		case *ast.BlockStmt:
+		case *ast.ScopeStmt:
 			// 用户显式书写的基本块：递归降级体，保留原位。
 			// 若前缀无终止符（preamble 为空或末尾非 return/goto/br），
 			// 自动插入 goto firstBlock 确保 [0,0] 有指令（函数入口必须非空）。
 			s.Body = lowerBody(s.Body, lg, lc)
 			if !preambleEndsWithTerminator(preamble) {
-				preamble = append(preamble, gotoLabel(lg.parent, s.Label))
+				preamble = append(preamble, gotoLabel("", s.Label))
 			}
 			out := append(preamble, ast.Stmt(s))
 			return append(out, lowerBody(stmts[i+1:], lg, lc)...)
@@ -129,7 +129,7 @@ func lowerBody(stmts []ast.Stmt, lg *labelGen, lc *loopCtx) []ast.Stmt {
 			if lc == nil {
 				panic("break outside loop")
 			}
-			preamble = append(preamble, gotoLabel(lg.parent, lc.breakLabel))
+			preamble = append(preamble, gotoLabel("", lc.breakLabel))
 			// break 是终止符：忽略其后的语句（不可达代码）
 			return preamble
 
@@ -138,7 +138,7 @@ func lowerBody(stmts []ast.Stmt, lg *labelGen, lc *loopCtx) []ast.Stmt {
 			if lc == nil {
 				panic("continue outside loop")
 			}
-			preamble = append(preamble, gotoLabel(lg.parent, lc.continueLabel))
+			preamble = append(preamble, gotoLabel("", lc.continueLabel))
 			// continue 是终止符：忽略其后的语句（不可达代码）
 			return preamble
 
@@ -156,7 +156,7 @@ func lowerBody(stmts []ast.Stmt, lg *labelGen, lc *loopCtx) []ast.Stmt {
 }
 
 // lowerIfWithCont 将 IfStmt 降级为四块结构，续体注入 merge block。
-// 所有内层块（嵌套 if/while 产生的 BlockStmt）从 then/else/cont 体内提升到函数顶层，
+// 所有内层块（嵌套 if/while 产生的 ScopeStmt）从 then/else/cont 体内提升到函数顶层，
 // 确保所有块均为兄弟节点（读写码结构），与 RegisterBlocks 保持一致。
 //
 //	pre... goto _if_N
@@ -175,26 +175,25 @@ func lowerIfWithCont(pre []ast.Stmt, s *ast.IfStmt, cont []ast.Stmt, lg *labelGe
 	mergeLabel := lg.next("merge")
 
 	condBody := append([]ast.Stmt{}, condEval...)
-	// br 标签使用完整限定名（含父函数前缀），resolveLabel 直接返回，零 KV 查询
-	condBody  = append(condBody, brInst(condSlot, lg.parent+"/"+thenLabel, lg.parent+"/"+elseLabel))
+	condBody  = append(condBody, brInst(condSlot, thenLabel, elseLabel))
 
 	// 将嵌套块从 then/else/cont 体内提升到函数顶层
 	// lc 透传：if 内的 break/continue 仍指向外层 while
-	thenInsts, thenBlocks := splitInstsAndBlocks(injectGoto(lowerBody(s.Then, lg, lc), lg.parent, mergeLabel))
-	elseInsts, elseBlocks := splitInstsAndBlocks(injectGoto(lowerBody(s.Else, lg, lc), lg.parent, mergeLabel))
+	thenInsts, thenBlocks := splitInstsAndBlocks(injectGoto(lowerBody(s.Then, lg, lc), mergeLabel))
+	elseInsts, elseBlocks := splitInstsAndBlocks(injectGoto(lowerBody(s.Else, lg, lc), mergeLabel))
 	contInsts, contBlocks := splitInstsAndBlocks(cont)
 
 	// 修复：提升出来的内层块（如嵌套 if 的 merge 块）也需要正确跳到当前 mergeLabel。
 	// injectGoto 只处理最后一个块；中间无终止符的块（如嵌套 else 的空 merge）需要补全。
-	injectGotoBlocks(thenBlocks, lg.parent, mergeLabel)
-	injectGotoBlocks(elseBlocks, lg.parent, mergeLabel)
+	injectGotoBlocks(thenBlocks, mergeLabel)
+	injectGotoBlocks(elseBlocks, mergeLabel)
 
-	entry := append(pre, gotoLabel(lg.parent, ifLabel))
+	entry := append(pre, gotoLabel("", ifLabel))
 	result := append(entry,
-		&ast.BlockStmt{Label: ifLabel,    Body: condBody},
-		&ast.BlockStmt{Label: thenLabel,  Body: thenInsts},
-		&ast.BlockStmt{Label: elseLabel,  Body: elseInsts},
-		&ast.BlockStmt{Label: mergeLabel, Body: contInsts},
+		&ast.ScopeStmt{Label: ifLabel,    Body: condBody},
+		&ast.ScopeStmt{Label: thenLabel,  Body: thenInsts},
+		&ast.ScopeStmt{Label: elseLabel,  Body: elseInsts},
+		&ast.ScopeStmt{Label: mergeLabel, Body: contInsts},
 	)
 	// 提升内层块为函数顶层兄弟节点
 	result = append(result, thenBlocks...)
@@ -221,22 +220,21 @@ func lowerWhileWithCont(pre []ast.Stmt, s *ast.WhileStmt, cont []ast.Stmt, lg *l
 	exitLabel := lg.next("exit")
 
 	condBody := append([]ast.Stmt{}, condEval...)
-	// br 标签使用完整限定名（含父函数前缀），resolveLabel 直接返回，零 KV 查询
-	condBody  = append(condBody, brInst(condSlot, lg.parent+"/"+bodyLabel, lg.parent+"/"+exitLabel))
+	condBody  = append(condBody, brInst(condSlot, bodyLabel, exitLabel))
 
 	// 为 while 体构造新 loopCtx：break→exit, continue→condLabel
 	bodyLc := &loopCtx{breakLabel: exitLabel, continueLabel: condLabel}
-	bodyInsts, bodyBlocks := splitInstsAndBlocks(injectGoto(lowerBody(s.Body, lg, bodyLc), lg.parent, condLabel))
+	bodyInsts, bodyBlocks := splitInstsAndBlocks(injectGoto(lowerBody(s.Body, lg, bodyLc), condLabel))
 	// 修复：提升出来的所有内层块也需要跳回 while 条件块（lowerIfWithCont 已为其注入 goto 合并块，
 	// 但最外层合并块本身仍可能缺少 goto _while_N）。
-	injectGotoBlocks(bodyBlocks, lg.parent, condLabel)
+	injectGotoBlocks(bodyBlocks, condLabel)
 	contInsts, contBlocks := splitInstsAndBlocks(cont)
 
-	entry := append(pre, gotoLabel(lg.parent, condLabel))
+	entry := append(pre, gotoLabel("", condLabel))
 	result := append(entry,
-		&ast.BlockStmt{Label: condLabel, Body: condBody},
-		&ast.BlockStmt{Label: bodyLabel, Body: bodyInsts},
-		&ast.BlockStmt{Label: exitLabel, Body: contInsts},
+		&ast.ScopeStmt{Label: condLabel, Body: condBody},
+		&ast.ScopeStmt{Label: bodyLabel, Body: bodyInsts},
+		&ast.ScopeStmt{Label: exitLabel, Body: contInsts},
 	)
 	result = append(result, bodyBlocks...)
 	result = append(result, contBlocks...)
@@ -267,7 +265,7 @@ func lowerForWithCont(pre []ast.Stmt, s *ast.ForStmt, cont []ast.Stmt, lg *label
 	condSlot := lg.tmp()
 	initBody := []ast.Stmt{
 		makeCopyInst("-1", idxSlot),
-		gotoLabel(lg.parent, condLabel),
+		gotoLabel("", condLabel),
 	}
 
 	// _for_cond:  ./_idx + 1 -> ./_idx;  kv.has(./path, ./_idx) -> ./_cond;
@@ -280,7 +278,7 @@ func lowerForWithCont(pre []ast.Stmt, s *ast.ForStmt, cont []ast.Stmt, lg *label
 		Expr: ast.Call("kvhas", ast.Leaf(s.Iter), ast.Leaf(idxSlot)),
 		Writes: []string{condSlot},
 	}
-	brI := brInst(condSlot, lg.parent+"/"+bodyLabel, lg.parent+"/"+exitLabel)
+	brI := brInst(condSlot, bodyLabel, exitLabel)
 	condBody := []ast.Stmt{addInst, kvHasInst, brI}
 
 	// _for_body:  kv.at(./path, ./_idx) -> ./v;  lowerBody(body);  goto _for_cond_N
@@ -291,18 +289,18 @@ func lowerForWithCont(pre []ast.Stmt, s *ast.ForStmt, cont []ast.Stmt, lg *label
 	bodyLc := &loopCtx{breakLabel: exitLabel, continueLabel: condLabel}
 	bodyInner := lowerBody(s.Body, lg, bodyLc)
 	bodyInsts := append([]ast.Stmt{kvAtInst}, bodyInner...)
-	bodyInsts = injectGoto(bodyInsts, lg.parent, condLabel)
+	bodyInsts = injectGoto(bodyInsts, condLabel)
 
 	bodyInstsOnly, bodyBlocks := splitInstsAndBlocks(bodyInsts)
-	injectGotoBlocks(bodyBlocks, lg.parent, condLabel)
+	injectGotoBlocks(bodyBlocks, condLabel)
 	contInsts, contBlocks := splitInstsAndBlocks(cont)
 
-	entry := append(pre, gotoLabel(lg.parent, initLabel))
+	entry := append(pre, gotoLabel("", initLabel))
 	result := append(entry,
-		&ast.BlockStmt{Label: initLabel, Body: initBody},
-		&ast.BlockStmt{Label: condLabel, Body: condBody},
-		&ast.BlockStmt{Label: bodyLabel, Body: bodyInstsOnly},
-		&ast.BlockStmt{Label: exitLabel, Body: contInsts},
+		&ast.ScopeStmt{Label: initLabel, Body: initBody},
+		&ast.ScopeStmt{Label: condLabel, Body: condBody},
+		&ast.ScopeStmt{Label: bodyLabel, Body: bodyInstsOnly},
+		&ast.ScopeStmt{Label: exitLabel, Body: contInsts},
 	)
 	result = append(result, bodyBlocks...)
 	result = append(result, contBlocks...)
@@ -321,7 +319,7 @@ func makeCopyInst(val, dest string) *ast.Instruction {
 // 用于将嵌套块从 then/else/body/cont 中提升到函数顶层（读写码结构）。
 func splitInstsAndBlocks(stmts []ast.Stmt) (insts, blocks []ast.Stmt) {
 	for _, s := range stmts {
-		if _, ok := s.(*ast.BlockStmt); ok {
+		if _, ok := s.(*ast.ScopeStmt); ok {
 			blocks = append(blocks, s)
 		} else {
 			insts = append(insts, s)
@@ -330,22 +328,22 @@ func splitInstsAndBlocks(stmts []ast.Stmt) (insts, blocks []ast.Stmt) {
 	return
 }
 
-// injectGotoBlocks 对切片中每个 BlockStmt 的 body 逐一调用 injectGoto。
+// injectGotoBlocks 对切片中每个 ScopeStmt 的 body 逐一调用 injectGoto。
 // 仅在块无终止符时才注入，已有终止符的块不受影响。
 // 用于修复提升出来的内层块（如深层嵌套 if 的 merge 块）缺少跳转的问题。
-func injectGotoBlocks(stmts []ast.Stmt, parent, label string) {
+func injectGotoBlocks(stmts []ast.Stmt, label string) {
 	for _, s := range stmts {
-		if b, ok := s.(*ast.BlockStmt); ok {
-			b.Body = injectGoto(b.Body, parent, label)
+		if b, ok := s.(*ast.ScopeStmt); ok {
+			b.Body = injectGoto(b.Body, label)
 		}
 	}
 }
 
 // injectGoto 在 body 的最后非终止点追加 goto 指令。
 // 若末尾为控制转移（return/goto/br），则不追加。
-// 若末尾为 BlockStmt，则递归注入到该块的尾部。
-func injectGoto(body []ast.Stmt, parent, label string) []ast.Stmt {
-	g := gotoLabel(parent, label)
+// 若末尾为 ScopeStmt，则递归注入到该块的尾部。
+func injectGoto(body []ast.Stmt, label string) []ast.Stmt {
+	g := gotoLabel("", label)
 	if len(body) == 0 {
 		return []ast.Stmt{g}
 	}
@@ -355,8 +353,8 @@ func injectGoto(body []ast.Stmt, parent, label string) []ast.Stmt {
 			return body
 		}
 		return append(body, g)
-	case *ast.BlockStmt:
-		s.Body = injectGoto(s.Body, parent, label)
+	case *ast.ScopeStmt:
+		s.Body = injectGoto(s.Body, label)
 		return body
 	}
 	return append(body, g)
@@ -430,9 +428,9 @@ func brInst(cond, tLabel, fLabel string) *ast.Instruction {
 	}
 }
 
-func gotoLabel(parent, label string) *ast.Instruction {
+func gotoLabel(_, label string) *ast.Instruction {
 	return &ast.Instruction{
-		Expr: ast.Call(rwir.OpGoto, ast.Leaf(parent+"/"+label)),
+		Expr: ast.Call(rwir.OpGoto, ast.Leaf(label)),
 	}
 }
 

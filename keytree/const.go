@@ -9,6 +9,8 @@ const (
 	FuncPathSep = "." // 包名与函数名分隔符，用法：/lib/<pkg><FuncPathSep><name>
 	MemberSep   = "." // 成员访问分隔符，X<MemberSep>a 与 X/a 结构分隔正交
 	ReservedPrefix = "." // 引擎保留字段前缀，用户代码无法写入
+	SegLib     = ".lib" // rwfunc 帧 extindex 对应的 lib 路径
+	ScopeSep    = "/." // scope 帧路径前缀：frameRoot/.scope → /lib/<func>/.scope
 	SrcExt      = ".src" // 函数源码文件后缀
 
 	// ── 路径段名 ─────────────────────────────────────────────────────────

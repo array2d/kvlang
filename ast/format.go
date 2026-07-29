@@ -46,8 +46,8 @@ func Format(w io.Writer, f *File) {
 func formatBody(w io.Writer, stmts []Stmt, indent string) {
 	for i, st := range stmts {
 		if i > 0 {
-			_, prevBlock := stmts[i-1].(*BlockStmt)
-			_, curBlock := st.(*BlockStmt)
+			_, prevBlock := stmts[i-1].(*ScopeStmt)
+			_, curBlock := st.(*ScopeStmt)
 			_, prevIf := stmts[i-1].(*IfStmt)
 			_, curIf := st.(*IfStmt)
 			if prevBlock || curBlock || prevIf || curIf {
@@ -64,7 +64,7 @@ func formatBody(w io.Writer, stmts []Stmt, indent string) {
 		case *Instruction:
 			fmt.Fprintf(w, "%s%s\n", indent, s.String())
 
-		case *BlockStmt:
+		case *ScopeStmt:
 			fmt.Fprintf(w, "%s%s: {\n", indent, s.Label)
 			formatBody(w, s.Body, indent+"\t")
 			fmt.Fprintf(w, "%s}\n", indent)

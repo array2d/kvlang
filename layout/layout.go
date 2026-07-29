@@ -15,7 +15,7 @@
 //	frameRoot.rparam/<name> /.wparam/<name>  零拷贝读写参重定向
 //
 // 帧类型由帧根 extindex target 的 XValue.Kind() 区分：rwfunc = 函数帧，label = label 帧。
-package layoutrwir
+package layout
 
 import (
 	"context"
@@ -70,12 +70,58 @@ func writeStmt(kv kvspace.KVSpace, st ast.Stmt, prefix string, idx *int, typeMap
 			kv.Set(pairs)
 		}
 		*idx = n + 1
-	case *ast.BlockStmt:
-		sub := prefix + "/" + s.Label
-		kvspace.MkIndexRecursive(kv, sub+"/")
-		i := 0
+	case *ast.ScopeStmt:
+		// scope 指令 flat key: /lib/func/scopeName[coord]
+		scopePrefix := prefix + "/" + s.Label
+		scopeIdx := 0
 		for _, child := range s.Body {
-			writeStmt(kv, child, sub, &i, typeMap, pkg)
+			writeStmtScope(kv, child, scopePrefix, &scopeIdx, typeMap, pkg, prefix)
+		}
+
+	}
+}
+
+// writeStmtScope 写 scope 体内指令，key 格式 funcPrefix/scopeName[coord]。
+// funcPrefix 为 /lib/<func>，所有 scope（含嵌套）均平级使用 funcPrefix。
+func writeStmtScope(kv kvspace.KVSpace, st ast.Stmt, scopePrefix string, idx *int, typeMap map[string]string, pkg string, funcPrefix string) {
+	writeStmtScope2(kv, st, scopePrefix, idx, typeMap, pkg, funcPrefix)
+}
+
+func writeStmtScope2(kv kvspace.KVSpace, st ast.Stmt, scopePrefix string, idx *int, typeMap map[string]string, pkg string, funcPrefix string) {
+	switch s := st.(type) {
+	case *ast.Instruction:
+		n := *idx
+		for j, w := range s.Writes {
+			if j < len(s.WriteTypes) && s.WriteTypes[j] != "" {
+				typeMap[w] = s.WriteTypes[j]
+			}
+		}
+		opcode, reads := s.Flat()
+		if pkg != "" && !builtin.IsNativeOp(opcode) && !rwir.IsControlOp(opcode) &&
+			!strings.Contains(opcode, keytree.FuncPathSep) && !strings.HasPrefix(opcode, keytree.LibRoot+keytree.PathSegSep) &&
+			opcode != "=" {
+			opcode = pkg + keytree.FuncPathSep + opcode
+		}
+		pairs := make([]kvspace.KVPair, 0, 1+len(reads)+len(s.Writes))
+		if opcode != "" {
+			pairs = append(pairs, kvspace.KVPair{fmt.Sprintf("%s[%d,0]", scopePrefix, n), slotValue(opcode, typeMap)})
+		}
+		for j, r := range reads {
+			pairs = append(pairs, kvspace.KVPair{fmt.Sprintf("%s[%d,-%d]", scopePrefix, n, j+1), slotValue(r, typeMap)})
+		}
+		for j, w := range s.Writes {
+			pairs = append(pairs, kvspace.KVPair{fmt.Sprintf("%s[%d,%d]", scopePrefix, n, j+1), slotValue(w, typeMap)})
+		}
+		if len(pairs) > 0 {
+			kv.Set(pairs)
+		}
+		*idx = n + 1
+	case *ast.ScopeStmt:
+		// 嵌套 scope 也用 funcPrefix，保持平级
+		childPrefix := funcPrefix + "/" + s.Label
+		childIdx := 0
+		for _, child := range s.Body {
+			writeStmtScope2(kv, child, childPrefix, &childIdx, typeMap, pkg, funcPrefix)
 		}
 	}
 }
@@ -131,6 +177,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *rwir.R
 		{keytree.CallPC(frameRoot), kvspace.String(keytree.EntryPC(frameRoot))},
 		{frameRoot + keytree.MemberSep + keytree.SegRParam + "/", kvspace.Raw(kvspace.KindIndex, nil)},
 		{frameRoot + keytree.MemberSep + keytree.SegWParam + "/", kvspace.Raw(kvspace.KindIndex, nil)},
+			{keytree.Stack(frameRoot) + keytree.SegLib, kvspace.String(funcKey)},
 	})
 
 	// 读参零拷贝
@@ -235,9 +282,9 @@ func HandleLabel(ctx context.Context, kv kvspace.KVSpace, pc, labelFullPath stri
 	currentFrame := keytree.FrameRoot(pc)
 
 	// ── TCO：仅在 label 帧内搜索祖先链（不跨越 rwfunc 边界）──
-	if extKind(kv, currentFrame) == kvspace.KindLabel {
+	if extKind(kv, currentFrame) == kvspace.KindRwfunc {
 		for f := currentFrame; f != ""; f = keytree.ParentFrame(f) {
-			if extKind(kv, f) == kvspace.KindRwfunc {
+			if !kvspace.GetOne(kv, keytree.Stack(f)+keytree.SegLib).IsNone() {
 				break
 			}
 			trimmed := strings.TrimRight(f, keytree.PathSegSep)
@@ -277,9 +324,9 @@ func HandleLabel(ctx context.Context, kv kvspace.KVSpace, pc, labelFullPath stri
 // RegisterBlocks 为函数体内所有 BlockStmt label 注册 label 签名（XValue kind=label）。
 func RegisterBlocks(kv kvspace.KVSpace, pkg, parent string, body []ast.Stmt) {
 	for _, st := range body {
-		if b, ok := st.(*ast.BlockStmt); ok {
+		if b, ok := st.(*ast.ScopeStmt); ok {
 			blockKey := keytree.LibFunc(pkg, parent+"/"+b.Label)
-			kv.Set([]kvspace.KVPair{{blockKey, kvspace.Raw(kvspace.KindLabel, nil)}})
+			kv.Set([]kvspace.KVPair{{blockKey, kvspace.Raw(kvspace.KindRwfunc, nil)}})
 			RegisterBlocks(kv, pkg, parent+"/"+b.Label, b.Body)
 		}
 	}
@@ -304,6 +351,7 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 	// 虚线程根也是函数帧，写 .callpc
 	kv.Set([]kvspace.KVPair{
 		{keytree.CallPC(vthreadRoot), kvspace.String(keytree.EntryPC(vthreadRoot))},
+			{keytree.Stack(vthreadRoot) + keytree.SegLib, kvspace.String(funcKey)},
 	})
 
 	if len(args) > 0 {
@@ -362,7 +410,6 @@ func WriteFunc(kv kvspace.KVSpace, pkg string, fn *ast.Func) {
 		{keytree.LibFunc(pkg, fn.Sig.Name), kvspace.Rwfunc(countDirectInsts(fn.Body), fn.Sig.NumReads(), fn.Sig.NumWrites(), []byte(fn.Sig.String()))},
 	})
 	WriteBody(kv, pkg, fn.Sig.Name, fn.Body, typeMap)
-	RegisterBlocks(kv, pkg, fn.Sig.Name, fn.Body)
 }
 
 // ── 辅助函数 ────────────────────────────────────────────────────────────────
@@ -372,7 +419,7 @@ func resolveWritePath(kv kvspace.KVSpace, framePath, name string) string {
 		if r := kvspace.GetOne(kv, keytree.WParam(f, name)); !r.IsNone() {
 			return r.Str()
 		}
-		if extKind(kv, f) == kvspace.KindRwfunc {
+		if !kvspace.GetOne(kv, keytree.Stack(f)+keytree.SegLib).IsNone() {
 			break
 		}
 	}
@@ -385,14 +432,14 @@ func resolveReadPath(kv kvspace.KVSpace, framePath, name string) string {
 		if r := kvspace.GetOne(kv, keytree.RParam(f, name)); !r.IsNone() {
 			return r.Str()
 		}
-		if extKind(kv, f) == kvspace.KindRwfunc {
+		if !kvspace.GetOne(kv, keytree.Stack(f)+keytree.SegLib).IsNone() {
 			break
 		}
 	}
 	// label 帧变量逃逸到函数帧，查找对齐 resolveWriteKey
 	funcFrame := framePath
 	for f := framePath; f != ""; f = keytree.ParentFrame(f) {
-		if extKind(kv, f) == kvspace.KindRwfunc {
+		if !kvspace.GetOne(kv, keytree.Stack(f)+keytree.SegLib).IsNone() {
 			funcFrame = f
 			break
 		}
@@ -442,6 +489,83 @@ func extKind(kv kvspace.KVSpace, frameRoot string) string {
 		return ""
 	}
 	return kvspace.GetOne(kv, strings.TrimRight(extTarget, keytree.PathSegSep)).Kind()
+}
+
+// ExtKind 判断帧类型：有 .lib → rwfunc；否则 → scope 或空。
+func ExtKind(kv kvspace.KVSpace, frameRoot string) string {
+	if !kvspace.GetOne(kv, keytree.Stack(frameRoot)+keytree.SegLib).IsNone() {
+		return kvspace.KindRwfunc
+	}
+	return ""
+}
+
+// rwfuncFrameRoot 从 framePath 向上找到最近的 rwfunc 帧根（通过 .lib 标记识别）。
+func rwfuncFrameRoot(kv kvspace.KVSpace, framePath string) string {
+	for f := framePath; f != ""; f = keytree.ParentFrame(f) {
+		if !kvspace.GetOne(kv, keytree.Stack(f)+keytree.SegLib).IsNone() {
+			return f
+		}
+	}
+	return framePath
+}
+
+// HandleScope goto/br 跳入 scope。scope 帧为 rwfunc 平级子帧，不建 extindex。
+func HandleScope(ctx context.Context, kv kvspace.KVSpace, pc, scopeName string) string {
+	rwRoot := strings.TrimRight(rwfuncFrameRoot(kv, keytree.FrameRoot(pc)), keytree.PathSegSep)
+	scopeFrame := rwRoot + keytree.PathSegSep + scopeName + keytree.PathSegSep
+
+	callpcKey := keytree.CallPC(scopeFrame)
+	exists := !kvspace.GetOne(kv, callpcKey).IsNone()
+
+	if !exists {
+		kvspace.MkIndexRecursive(kv, scopeFrame)
+		kv.Set([]kvspace.KVPair{
+			{keytree.ReturnPC(scopeFrame), kvspace.String(rwir.NextPC(pc))},
+		})
+	}
+	// callpc 每次更新，returnpc 仅首次设置（保持原始返回路径）
+	kv.Set([]kvspace.KVPair{
+		{keytree.CallPC(scopeFrame), kvspace.String(keytree.EntryPC(scopeFrame))},
+	})
+	return keytree.EntryPC(scopeFrame)
+}
+
+// HandleScopeReturn scope 帧隐式 return：读 .returnpc，DelTree 自身。
+func HandleScopeReturn(ctx context.Context, kv kvspace.KVSpace, pc string) string {
+	frameRoot := keytree.FrameRoot(pc)
+	parentPC := kvspace.GetOne(kv, keytree.ReturnPC(frameRoot)).Str()
+	kv.UnLink(keytree.Stack(frameRoot))
+	kv.DelTree(frameRoot)
+	return parentPC
+}
+
+// libFuncPrefix 返回 rwfunc 帧 extindex 对应的 lib 路径（无末尾 /）。
+func libFuncPrefix(kv kvspace.KVSpace, rwRoot string) string {
+	libVal := kvspace.GetOne(kv, keytree.Stack(rwRoot)+keytree.SegLib)
+	if !libVal.IsNone() {
+		return libVal.Str()
+	}
+	return ""
+}
+
+// libPrefixForFrame 返回任意帧（rwfunc 或 scope）的 extindex 目标路径（无末尾 /）。
+func libPrefixForFrame(kv kvspace.KVSpace, frameRoot string) string {
+	if lib := libFuncPrefix(kv, frameRoot); lib != "" {
+		return lib
+	}
+	return libFromExtIndex(kv, frameRoot)
+}
+
+// libFromExtIndex 通过 extindex 读取帧的 lib 前缀。
+func libFromExtIndex(kv kvspace.KVSpace, frameRoot string) string {
+	trimmed := strings.TrimRight(frameRoot, keytree.PathSegSep)
+	parent, dirName := kvspace.SepPath(trimmed)
+	if parent != keytree.PathSegSep {
+		parent += kvspace.DirIndexSuf
+	}
+	extVal := kv.Get(parent, []string{dirName + kvspace.DirIndexSuf})[0]
+	_, extTarget := kvspace.DecodeExtIndex(extVal)
+	return strings.TrimRight(extTarget, keytree.PathSegSep)
 }
 
 func checkDupParams(sig ast.FuncSig, funcName string) string {
