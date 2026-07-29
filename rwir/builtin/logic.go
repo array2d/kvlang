@@ -2,7 +2,7 @@ package builtin
 
 import (
 	"github.com/array2d/kvspace-go"
-	"kvlang/op"
+	"kvlang/rwir"
 	"kvlang/vthread"
 )
 
@@ -13,14 +13,14 @@ func init() {
 }
 
 type logic struct{ f func(bool, bool) bool }
-func (o logic) Call(f *op.Frame) error {
+func (o logic) Call(f *rwir.Frame) error {
 	r, err := evalLogic(readInputs(f), o.f)
 	if err != nil { vthread.SetError(bg, f.KV, f.Vtid, f.PC, err.Error()); return err }
 	return writeResult(f, r)
 }
 
 type not struct{}
-func (not) Call(f *op.Frame) error {
+func (not) Call(f *rwir.Frame) error {
 	r, err := evalNot(readInputs(f))
 	if err != nil { vthread.SetError(bg, f.KV, f.Vtid, f.PC, err.Error()); return err }
 	return writeResult(f, r)

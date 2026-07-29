@@ -51,8 +51,8 @@ func Get(ctx context.Context, kv kvspace.KVSpace, vtid string) (pc, status strin
 // Set 更新 vthread 的 PC 和 status（瞬态：init / running / wait），1 RTT。
 func Set(ctx context.Context, kv kvspace.KVSpace, vtid, pc, status string) {
 	kv.Set([]kvspace.KVPair{
-		{keytree.VThreadPC(vtid), kvspace.Str(pc)},
-		{keytree.VThreadStatus(vtid), kvspace.Str(status)},
+		{keytree.VThreadPC(vtid), kvspace.String(pc)},
+		{keytree.VThreadStatus(vtid), kvspace.String(status)},
 	})
 }
 
@@ -62,7 +62,7 @@ func Set(ctx context.Context, kv kvspace.KVSpace, vtid, pc, status string) {
 func SetDone(ctx context.Context, kv kvspace.KVSpace, vtid, retVal string) {
 	if retVal == "" { retVal = "ok" }
 	kv.Del(keytree.VThreadStatus(vtid))
-	kv.Notify(keytree.VThreadStatus(vtid), kvspace.Str(retVal))
+	kv.Notify(keytree.VThreadStatus(vtid), kvspace.String(retVal))
 }
 
 // SetError 标记 vthread 错误终止。MkIndexRecursive 确保 .error/ 目录存在（kvspace Set 要求父目录已存在）。
@@ -71,11 +71,11 @@ func SetError(ctx context.Context, kv kvspace.KVSpace, vtid, pc, errMsg string) 
 	prefix, _ := kvspace.SepPath(msgPath)
 	kvspace.MkIndexRecursive(kv, prefix+kvspace.DirIndexSuf)
 	kv.Set([]kvspace.KVPair{
-		{keytree.VThreadPC(vtid), kvspace.Str(pc)},
-		{msgPath, kvspace.Str(errMsg)},
+		{keytree.VThreadPC(vtid), kvspace.String(pc)},
+		{msgPath, kvspace.String(errMsg)},
 	})
 	kv.Del(keytree.VThreadStatus(vtid))
-	kv.Notify(keytree.VThreadStatus(vtid), kvspace.Str("error"))
+	kv.Notify(keytree.VThreadStatus(vtid), kvspace.String("error"))
 }
 
 // ── 生命周期 ──────────────────────────────────────────────────────────────────
@@ -85,7 +85,7 @@ func AllocVtid(kv kvspace.KVSpace) string {
 	valV := kvspace.GetOne(kv, keytree.VthreadSeq)
 	n, _ := strconv.ParseInt(valV.Str(), 10, 64)
 	n++
-	kv.Set([]kvspace.KVPair{{keytree.VthreadSeq, kvspace.Str(strconv.FormatInt(n, 10))}})
+	kv.Set([]kvspace.KVPair{{keytree.VthreadSeq, kvspace.String(strconv.FormatInt(n, 10))}})
 	return fmt.Sprintf("%d", n)
 }
 
@@ -95,16 +95,16 @@ func CreateVThread(kv kvspace.KVSpace, funcName string, reads, writes []string) 
 	absPC := keytree.VThreadSlot(vtid, "", 0, 0)
 
 	pairs := []kvspace.KVPair{
-		{Key: keytree.VThreadPC(vtid), Val: kvspace.Str(absPC)},
-		{Key: keytree.VThreadStatus(vtid), Val: kvspace.Str("init")},
+		{Key: keytree.VThreadPC(vtid), Val: kvspace.String(absPC)},
+		{Key: keytree.VThreadStatus(vtid), Val: kvspace.String("init")},
 		{Key: keytree.VThreadCtime(vtid), Val: kvspace.Time(time.Now().UnixNano())},
-		{Key: keytree.VThreadSlot(vtid, "", 0, 0), Val: kvspace.Str(funcName)},
+		{Key: keytree.VThreadSlot(vtid, "", 0, 0), Val: kvspace.String(funcName)},
 	}
 	for i, r := range reads {
-		pairs = append(pairs, kvspace.KVPair{Key: keytree.VThreadSlot(vtid, "", 0, -(i + 1)), Val: kvspace.Str(r)})
+		pairs = append(pairs, kvspace.KVPair{Key: keytree.VThreadSlot(vtid, "", 0, -(i + 1)), Val: kvspace.String(r)})
 	}
 	for i, w := range writes {
-		pairs = append(pairs, kvspace.KVPair{Key: keytree.VThreadSlot(vtid, "", 0, i + 1), Val: kvspace.Str(w)})
+		pairs = append(pairs, kvspace.KVPair{Key: keytree.VThreadSlot(vtid, "", 0, i + 1), Val: kvspace.String(w)})
 	}
 	if err := kv.Set(pairs); err != nil {
 		return "", fmt.Errorf("vthread.Create: %w", err)

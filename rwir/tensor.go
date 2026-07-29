@@ -1,4 +1,4 @@
-package op
+package rwir
 
 // tensor.* 生命周期操作码常量。
 // 格式遵循 vtype 命名空间约定：<vtype>.<op>

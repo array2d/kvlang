@@ -1,4 +1,4 @@
-package op
+package rwir
 
 import "github.com/array2d/kvspace-go"
 
@@ -7,6 +7,6 @@ type Frame struct {
 	KV   kvspace.KVSpace
 	Vtid string
 	PC   string
-	Inst *Instruction
+	Inst *Rwir
 }
 

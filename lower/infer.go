@@ -18,7 +18,7 @@ import (
 	"strings"
 
 	"kvlang/ast"
-	"kvlang/op"
+	"kvlang/rwir"
 )
 
 // InferTypes 为单个函数体中的所有中间变量推断类型。
@@ -109,8 +109,8 @@ func inferInst(inst *ast.Instruction, tm map[string]string) {
 // inferOpType 根据 opcode 和读参类型推断写参类型。
 func inferOpType(opcode string, reads []string, tm map[string]string) string {
 	// 控制流原语无写参类型
-	if opcode == op.OpReturn || opcode == op.OpGoto || opcode == op.OpBr ||
-		opcode == op.OpCall {
+	if opcode == rwir.OpReturn || opcode == rwir.OpGoto || opcode == rwir.OpBr ||
+		opcode == rwir.OpCall {
 		return ""
 	}
 

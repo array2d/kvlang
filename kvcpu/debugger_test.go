@@ -27,7 +27,7 @@ import (
 	"github.com/array2d/kvspace-go"
 	"kvlang/layoutrwir"
 	"kvlang/lower"
-	"kvlang/op"
+	"kvlang/rwir"
 	"kvlang/parser"
 	"kvlang/vthread"
 
@@ -76,7 +76,7 @@ func newSession(
 	}
 	vthread.Set(ctx, kv, vtid, firstPC, "init")
 	// 在 goroutine 启动前写 debug 标志，保证 Execute 首次 isFuncEntryPC 检查时可见
-	kv.Set([]kvspace.KVPair{{keytree.VThreadDebugger(vtid), kvspace.Str("step")}})
+	kv.Set([]kvspace.KVPair{{keytree.VThreadDebugger(vtid), kvspace.String("step")}})
 
 	s := &traceSession{
 		kv:        kv,
@@ -122,7 +122,7 @@ loop:
 		s.Events = append(s.Events, ev)
 
 		cmd := handler(ev, step)
-		s.kv.Notify(s.resumeKey, kvspace.Str(cmd))
+		s.kv.Notify(s.resumeKey, kvspace.String(cmd))
 
 		if cmd != "step" {
 			<-done // "continue"/"abort" 后等待 Execute 完全退出
@@ -155,10 +155,10 @@ func loadSrc(t *testing.T, kv kvspace.KVSpace, src string) {
 }
 
 // decodeAt 解码给定 PC 的指令（用于在 pause 事件处理中获取读写槽）。
-func decodeAt(kv kvspace.KVSpace, pc string) *op.Instruction {
-	inst, _ := op.Decode(context.Background(), kv, keytree.Stack(keytree.FrameRoot(pc)), pc)
+func decodeAt(kv kvspace.KVSpace, pc string) *rwir.Rwir {
+	inst, _ := rwir.Decode(context.Background(), kv, keytree.Stack(keytree.FrameRoot(pc)), pc)
 	if inst == nil {
-		return &op.Instruction{}
+		return &rwir.Rwir{}
 	}
 	return inst
 }

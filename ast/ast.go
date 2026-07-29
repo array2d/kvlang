@@ -70,6 +70,12 @@ func (s FuncSig) ParamNames() []string {
 	return names
 }
 
+// NumReads 返回读参（输入参数）数量。
+func (s FuncSig) NumReads() int32 { return int32(len(s.Params)) }
+
+// NumWrites 返回写参（输出参数）数量。
+func (s FuncSig) NumWrites() int32 { return int32(len(s.Returns)) }
+
 // ReturnNames 返回输出参数名列表。
 func (s FuncSig) ReturnNames() []string {
 	names := make([]string, len(s.Returns))
@@ -86,10 +92,42 @@ type Func struct {
 	Comments []string // 函数前的行注释
 	Sig      FuncSig
 	Body     []Stmt
-	Pkg      string   // 所属 lib 包名（嵌套 lib 时 def 带上所在 lib 的 pkg；fix-039）
+	Pkg      string   // 所属 lib 包名（嵌套 lib 时 rwfunc 带上所在 lib 的 pkg；fix-039）
 }
 
-// FullText 返回函数的完整源码文本，用于存入 /src/<pkg>/<name>。
+// RwirDecl 表示一个 rwir 声明（签名，无体，解释器直执行）。
+type RwirDecl struct {
+	Comments []string // 声明前的行注释
+	Sig      FuncSig
+	Pkg      string   // 所属 lib 包名
+}
+
+// SigString 返回 "rwir name(params) -> (returns)" 格式的签名字符串。
+func (d RwirDecl) SigString() string {
+	var sb strings.Builder
+	sb.WriteString("rwir ")
+	sb.WriteString(d.Sig.Name)
+	sb.WriteByte('(')
+	for i, p := range d.Sig.Params {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteString(p.Name)
+		sb.WriteByte(':')
+		sb.WriteString(p.Type)
+	}
+	sb.WriteString(") -> (")
+	for i, r := range d.Sig.Returns {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteString(r.Name)
+		sb.WriteByte(':')
+		sb.WriteString(r.Type)
+	}
+	sb.WriteByte(')')
+	return sb.String()
+}
 func (fn *Func) FullText() string {
 	var sb strings.Builder
 	for _, c := range fn.Comments {

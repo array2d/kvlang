@@ -12,7 +12,7 @@ import (
 	"kvlang/kvcpu"
 	"github.com/array2d/kvspace-go"
 	"kvlang/layoutrwir"
-	"kvlang/op/builtin"
+	"kvlang/rwir/builtin"
 	"kvlang/logx"
 	"kvlang/vthread"
 )
@@ -74,11 +74,11 @@ func executeEntry(kv kvspace.KVSpace, entryName string, debug bool) {
 	vthread.Set(ctx, kv, vtid, firstPC, "init")
 	kv.Set([]kvspace.KVPair{
 		{keytree.VThreadCtime(vtid), kvspace.Time(time.Now().UnixNano())},
-		{keytree.VThreadTerm(vtid), kvspace.Str("kvlangrun")},
+		{keytree.VThreadTerm(vtid), kvspace.String("kvlangrun")},
 	})
 
 	if debug {
-		kv.Set([]kvspace.KVPair{{keytree.VThreadDebugger(vtid), kvspace.Str("break")}})
+		kv.Set([]kvspace.KVPair{{keytree.VThreadDebugger(vtid), kvspace.String("break")}})
 		logx.Info("[single] debug mode: executing %s", firstPC)
 		cpu := kvcpu.New(kv, "single")
 		cpu.Execute(firstPC)

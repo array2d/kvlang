@@ -9,9 +9,9 @@ import (
 	"kvlang/keytree"
 	"kvlang/layoutrwir"
 	"kvlang/logx"
-	"kvlang/op"
-	"kvlang/op/builtin"
-	"kvlang/op/dispatch"
+	"kvlang/rwir"
+	"kvlang/rwir/builtin"
+	"kvlang/rwir/dispatch"
 	"kvlang/vthread"
 )
 
@@ -65,7 +65,7 @@ func (c *cpu) Execute(pc string) error {
 		}
 
 		linkBase := keytree.Stack(keytree.FrameRoot(pc))
-		inst, err := op.Decode(ctx, c.kv, linkBase, pc)
+		inst, err := rwir.Decode(ctx, c.kv, linkBase, pc)
 		if err != nil {
 			logx.Debug("[%s] decode error at %s: %v", vtid, pc, err)
 			vthread.SetError(ctx, c.kv, vtid, pc, fmt.Sprintf("decode: %v", err))
@@ -79,7 +79,7 @@ func (c *cpu) Execute(pc string) error {
 				return nil
 			}
 			logx.Debug("[%s] empty opcode at %s → implicit return", vtid, pc)
-			parentPC, _ := layoutrwir.HandleReturn(ctx, c.kv, pc, &op.Instruction{Opcode: op.OpReturn})
+			parentPC, _ := layoutrwir.HandleReturn(ctx, c.kv, pc, &rwir.Rwir{Opcode: rwir.OpReturn})
 			if parentPC == "" {
 				vthread.SetDone(ctx, c.kv, vtid, "ok")
 				return nil
@@ -134,7 +134,7 @@ func (c *cpu) Execute(pc string) error {
 		switch {
 
 		// ── 1. 控制流原语（静态集合，零 KV 查询）──────────────────────────
-		case op.IsControlOp(inst.Opcode):
+		case rwir.IsControlOp(inst.Opcode):
 			execErr = handleControl(ctx, c.kv, vtid, pc, inst)
 
 		// ── 2. 标量内建算子（静态 map，零 KV 查询）──────────────────────
@@ -156,8 +156,8 @@ func (c *cpu) Execute(pc string) error {
 		//    HandleCall 负责 FuncIdx 查找；未找到 → SetError
 		default:
 			logx.Debug("[%s] user func: %s", vtid, inst.Opcode)
-			inst.Reads = append([]string{inst.Opcode}, inst.Reads...)
-			inst.Opcode = op.OpCall
+			inst.Reads = append([]rwir.Param{{Name: inst.Opcode}}, inst.Reads...)
+			inst.Opcode = rwir.OpCall
 			execErr = handleControl(ctx, c.kv, vtid, pc, inst)
 		}
 
@@ -181,7 +181,7 @@ func (c *cpu) Execute(pc string) error {
 //
 // Copy 指令由 Flat() 编码为显式操作码 "="：<value-ref> -> slot
 // 值引用在读槽（bare ident / literal / /abs），由 ExecuteCopy → resolveReadValue 解析。
-func isCopyOp(opcode string, writes []string) bool {
+func isCopyOp(opcode string, writes []rwir.Param) bool {
 	return opcode == "=" && len(writes) > 0
 }
 
@@ -189,7 +189,7 @@ func isCopyOp(opcode string, writes []string) bool {
 // 带写槽的指令，裸名写槽（无 / . [ 形态）命中当前帧 .ro 名单（Bootstrap/HandleCall 写入）
 // → SetError 异常终止。set 的 `-> base` 本体回写（写回原值，fix-013）豁免。
 // 编译期 parser 已阻断源码路径，此处兜底 agent 直写 KV 构造的指令。
-func (c *cpu) checkReadOnlyWrites(ctx context.Context, vtid, pc string, inst *op.Instruction) error {
+func (c *cpu) checkReadOnlyWrites(ctx context.Context, vtid, pc string, inst *rwir.Rwir) error {
 	if len(inst.Writes) == 0 {
 		return nil
 	}
@@ -200,15 +200,15 @@ func (c *cpu) checkReadOnlyWrites(ctx context.Context, vtid, pc string, inst *op
 	}
 	names := strings.Split(ro, ",")
 	for i, w := range inst.Writes {
-		if strings.ContainsAny(w, "/["+keytree.MemberSep) {
+		if strings.ContainsAny(w.Name, "/["+keytree.MemberSep) {
 			continue
 		}
-		if inst.Opcode == "set" && i == 0 && len(inst.Reads) > 0 && w == inst.Reads[0] {
+		if inst.Opcode == "set" && i == 0 && len(inst.Reads) > 0 && w.Name == inst.Reads[0].Name {
 			continue
 		}
 		for _, n := range names {
-			if w == n {
-				msg := fmt.Sprintf("ReadOnlyError: read-only param %q cannot be used as write slot; help: declare it as a write param (accumulator) or copy to a local", w)
+			if w.Name == n {
+				msg := fmt.Sprintf("ReadOnlyError: read-only param %q cannot be used as write slot; help: declare it as a write param (accumulator) or copy to a local", w.Name)
 				vthread.SetError(ctx, c.kv, vtid, pc, msg)
 				return fmt.Errorf("%s", msg)
 			}

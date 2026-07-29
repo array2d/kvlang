@@ -11,7 +11,7 @@ import (
 	"kvlang/keytree"
 	"github.com/array2d/kvspace-go"
 	"kvlang/logx"
-	"kvlang/op"
+	"kvlang/rwir"
 	"kvlang/vthread"
 )
 
@@ -85,38 +85,38 @@ func isLiteral(s string) bool {
 	return true
 }
 
-func buildOpTask(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) *OpTask {
+func buildOpTask(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *rwir.Rwir) *OpTask {
 	task := &OpTask{Vtid: vtid, PC: pc, Opcode: inst.Opcode, Params: make(map[string]interface{})}
 	switch inst.Opcode {
 	case "save":
 		for i, r := range inst.Reads {
 			if i == 0 {
-				task.Inputs = append(task.Inputs, resolveParam(ctx, kv, vtid, r))
+				task.Inputs = append(task.Inputs, resolveParam(ctx, kv, vtid, r.Name))
 			} else {
-				task.Params[fmt.Sprintf("arg%d", len(task.Params))] = r
+				task.Params[fmt.Sprintf("arg%d", len(task.Params))] = r.Name
 			}
 		}
 	case "load":
 		for _, r := range inst.Reads {
-			task.Params[fmt.Sprintf("arg%d", len(task.Params))] = r
+			task.Params[fmt.Sprintf("arg%d", len(task.Params))] = r.Name
 		}
 		for _, w := range inst.Writes {
-			task.Outputs = append(task.Outputs, resolveParam(ctx, kv, vtid, w))
+			task.Outputs = append(task.Outputs, resolveParam(ctx, kv, vtid, w.Name))
 		}
 	case "print":
 		for _, r := range inst.Reads {
-			task.Inputs = append(task.Inputs, resolveParam(ctx, kv, vtid, r))
+			task.Inputs = append(task.Inputs, resolveParam(ctx, kv, vtid, r.Name))
 		}
 	default:
 		for _, r := range inst.Reads {
-			if isLiteral(r) {
-				task.Params[fmt.Sprintf("arg%d", len(task.Params))] = r
+			if isLiteral(r.Name) {
+				task.Params[fmt.Sprintf("arg%d", len(task.Params))] = r.Name
 			} else {
-				task.Inputs = append(task.Inputs, resolveParam(ctx, kv, vtid, r))
+				task.Inputs = append(task.Inputs, resolveParam(ctx, kv, vtid, r.Name))
 			}
 		}
 		for _, w := range inst.Writes {
-			task.Outputs = append(task.Outputs, resolveParam(ctx, kv, vtid, w))
+			task.Outputs = append(task.Outputs, resolveParam(ctx, kv, vtid, w.Name))
 		}
 	}
 	return task
@@ -142,7 +142,7 @@ func parseShapeParam(raw string) []int {
 }
 
 // Compute 分发张量计算指令到 /sys/op/<backend>/<n>/cmd。
-func Compute(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) error {
+func Compute(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *rwir.Rwir) error {
 	backend, n, err := Select(ctx, kv, inst.Opcode)
 	if err != nil {
 		return fmt.Errorf("route: %w", err)
@@ -161,7 +161,7 @@ func Compute(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.
 		return err
 	}
 	logx.Debug("[%s] DONE %s", vtid, inst.Opcode)
-	vthread.Set(ctx, kv, vtid, op.NextPC(pc), "running")
+	vthread.Set(ctx, kv, vtid, rwir.NextPC(pc), "running")
 	return nil
 }
 

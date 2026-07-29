@@ -26,8 +26,8 @@ import (
 	"kvlang/keytree"
 	"github.com/array2d/kvspace-go"
 	"kvlang/lower"
-	"kvlang/op"
-	"kvlang/op/builtin"
+	"kvlang/rwir"
+	"kvlang/rwir/builtin"
 	"kvlang/parser"
 	"kvlang/vthread"
 )
@@ -51,7 +51,7 @@ func writeStmt(kv kvspace.KVSpace, st ast.Stmt, prefix string, idx *int, typeMap
 			}
 		}
 		opcode, reads := s.Flat()
-		if pkg != "" && !builtin.IsNativeOp(opcode) && !op.IsControlOp(opcode) &&
+		if pkg != "" && !builtin.IsNativeOp(opcode) && !rwir.IsControlOp(opcode) &&
 			!strings.Contains(opcode, keytree.FuncPathSep) && !strings.HasPrefix(opcode, keytree.LibRoot+keytree.PathSegSep) &&
 			opcode != "=" {
 			opcode = pkg + keytree.FuncPathSep + opcode
@@ -84,9 +84,9 @@ func writeStmt(kv kvspace.KVSpace, st ast.Stmt, prefix string, idx *int, typeMap
 //
 // pc 为调用指令的绝对路径（如 /vthread/42/[3,0]）。callPC 即子帧根。
 // 返回被调帧第一条指令 PC（frameRoot/[0,0]）；失败时返回 ""。
-func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Instruction) string {
+func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *rwir.Rwir) string {
 	vtid := keytree.VtidFromPC(pc)
-	funcName := inst.Reads[0]
+	funcName := inst.Reads[0].Name
 
 	var pkg string
 	libPrefix := keytree.LibRoot + keytree.PathSegSep
@@ -127,8 +127,8 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 
 	// 系统变量
 	kv.Set([]kvspace.KVPair{
-		{keytree.ReturnPC(frameRoot), kvspace.Str(op.NextPC(pc))},
-		{keytree.CallPC(frameRoot), kvspace.Str(keytree.EntryPC(frameRoot))},
+		{keytree.ReturnPC(frameRoot), kvspace.String(rwir.NextPC(pc))},
+		{keytree.CallPC(frameRoot), kvspace.String(keytree.EntryPC(frameRoot))},
 		{frameRoot + keytree.MemberSep + keytree.SegRParam + "/", kvspace.Raw(kvspace.KindIndex, nil)},
 		{frameRoot + keytree.MemberSep + keytree.SegWParam + "/", kvspace.Raw(kvspace.KindIndex, nil)},
 	})
@@ -139,7 +139,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 	var paramPairs []kvspace.KVPair
 	for i, param := range params {
 		if i+1 < len(inst.Reads) {
-			arg := inst.Reads[i+1]
+			arg := inst.Reads[i+1].Name
 			rk := resolveReadPath(kv, callerFrameRoot, arg)
 			if rk == "" && isLiteral(arg) {
 				rk = fmt.Sprintf("%s/._lit%d", callerFrameRoot, litSeq)
@@ -147,7 +147,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 				litSeq++
 			}
 			if rk != "" {
-				paramPairs = append(paramPairs, kvspace.KVPair{keytree.RParam(frameRoot, param), kvspace.Str(rk)})
+				paramPairs = append(paramPairs, kvspace.KVPair{keytree.RParam(frameRoot, param), kvspace.String(rk)})
 			}
 		}
 	}
@@ -157,7 +157,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 
 	// 写参零拷贝
 	callerLink := keytree.Stack(callerFrameRoot)
-	addr0 := op.ExtractAddr0FromPC(pc)
+	addr0 := rwir.ExtractAddr0FromPC(pc)
 	for i, ret := range funcSig.Returns {
 		wSlot := fmt.Sprintf("%s[%d,%d]", callerLink, addr0, i+1)
 		wTargetVal := kvspace.GetOne(kv, wSlot)
@@ -170,19 +170,19 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Ins
 			continue
 		}
 		kv.Set([]kvspace.KVPair{
-			{keytree.RParam(frameRoot, ret.Name), kvspace.Str(wk)},
-			{keytree.WParam(frameRoot, ret.Name), kvspace.Str(wk)},
+			{keytree.RParam(frameRoot, ret.Name), kvspace.String(wk)},
+			{keytree.WParam(frameRoot, ret.Name), kvspace.String(wk)},
 		})
 	}
 	if len(params) > 0 {
-		kv.Set([]kvspace.KVPair{{keytree.FrameRO(frameRoot), kvspace.Str(strings.Join(params, ","))}})
+		kv.Set([]kvspace.KVPair{{keytree.FrameRO(frameRoot), kvspace.String(strings.Join(params, ","))}})
 	}
 
 	return keytree.EntryPC(frameRoot)
 }
 
 // HandleReturn 处理 RETURN：读 .returnpc，清理帧。
-func HandleReturn(ctx context.Context, kv kvspace.KVSpace, pc string, inst *op.Instruction) (nextPC, retVal string) {
+func HandleReturn(ctx context.Context, kv kvspace.KVSpace, pc string, inst *rwir.Rwir) (nextPC, retVal string) {
 	vtid := keytree.VtidFromPC(pc)
 	vthreadRoot := keytree.VThread(vtid)
 	frameRoot := keytree.FrameRoot(pc)
@@ -249,7 +249,7 @@ func HandleLabel(ctx context.Context, kv kvspace.KVSpace, pc, labelFullPath stri
 					kv.DelTree(d)
 				}
 				kv.Set([]kvspace.KVPair{
-					{keytree.CallPC(f), kvspace.Str(keytree.EntryPC(f))},
+					{keytree.CallPC(f), kvspace.String(keytree.EntryPC(f))},
 				})
 				return keytree.EntryPC(f)
 			}
@@ -268,8 +268,8 @@ func HandleLabel(ctx context.Context, kv kvspace.KVSpace, pc, labelFullPath stri
 	}
 
 	kv.Set([]kvspace.KVPair{
-		{keytree.ReturnPC(labelFrame), kvspace.Str(op.NextPC(pc))},
-		{keytree.CallPC(labelFrame), kvspace.Str(keytree.EntryPC(labelFrame))},
+		{keytree.ReturnPC(labelFrame), kvspace.String(rwir.NextPC(pc))},
+		{keytree.CallPC(labelFrame), kvspace.String(keytree.EntryPC(labelFrame))},
 	})
 	return keytree.EntryPC(labelFrame)
 }
@@ -303,7 +303,7 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 
 	// 虚线程根也是函数帧，写 .callpc
 	kv.Set([]kvspace.KVPair{
-		{keytree.CallPC(vthreadRoot), kvspace.Str(keytree.EntryPC(vthreadRoot))},
+		{keytree.CallPC(vthreadRoot), kvspace.String(keytree.EntryPC(vthreadRoot))},
 	})
 
 	if len(args) > 0 {
@@ -320,12 +320,12 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 				dest := vthreadRoot + "/" + param
 				pairs = append(pairs,
 					kvspace.KVPair{dest, builtin.ResolveReadValue(kv, "", args[i])},
-					kvspace.KVPair{keytree.RParam(vthreadRoot, param), kvspace.Str(dest)},
+					kvspace.KVPair{keytree.RParam(vthreadRoot, param), kvspace.String(dest)},
 				)
 			}
 		}
 		if len(params) > 0 {
-			pairs = append(pairs, kvspace.KVPair{keytree.FrameRO(vthreadRoot), kvspace.Str(strings.Join(params, ","))})
+			pairs = append(pairs, kvspace.KVPair{keytree.FrameRO(vthreadRoot), kvspace.String(strings.Join(params, ","))})
 		}
 		kv.Set(pairs)
 	}
@@ -334,13 +334,32 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 }
 
 // WriteFunc 写函数到 /lib/：签名（kind=rwfunc）、源码、指令体、label 块。
+// countDirectInsts 返回 body 中直接 rwir 指令数量（不计 scope/block 内）。
+func countDirectInsts(body []ast.Stmt) int32 {
+	var n int32
+	for _, st := range body {
+		if _, ok := st.(*ast.Instruction); ok {
+			n++
+		}
+	}
+	return n
+}
+
+// WriteRwir 将 rwir 声明写入 /lib/<pkg>/<name>，kind="rwir"，无指令体。
+func WriteRwir(kv kvspace.KVSpace, pkg string, decl *ast.RwirDecl) {
+	kv.DelTree(keytree.LibFunc(pkg, decl.Sig.Name))
+	kv.Set([]kvspace.KVPair{
+		{keytree.LibFunc(pkg, decl.Sig.Name), kvspace.Rwir(decl.Sig.NumReads(), decl.Sig.NumWrites(), []byte(decl.SigString()))},
+	})
+}
+
 func WriteFunc(kv kvspace.KVSpace, pkg string, fn *ast.Func) {
 	typeMap := lower.InferTypes(fn)
 	kv.DelTree(keytree.LibFunc(pkg, fn.Sig.Name))
 	kvspace.MkIndexRecursive(kv, keytree.LibFunc(pkg, fn.Sig.Name)+"/")
 	kv.Set([]kvspace.KVPair{
-		{keytree.LibSrc(pkg, fn.Sig.Name), kvspace.Str(fn.FullText())},
-		{keytree.LibFunc(pkg, fn.Sig.Name), kvspace.Raw(kvspace.KindRwfunc, []byte(fn.Sig.String()))},
+		{keytree.LibSrc(pkg, fn.Sig.Name), kvspace.String(fn.FullText())},
+		{keytree.LibFunc(pkg, fn.Sig.Name), kvspace.Rwfunc(countDirectInsts(fn.Body), fn.Sig.NumReads(), fn.Sig.NumWrites(), []byte(fn.Sig.String()))},
 	})
 	WriteBody(kv, pkg, fn.Sig.Name, fn.Body, typeMap)
 	RegisterBlocks(kv, pkg, fn.Sig.Name, fn.Body)

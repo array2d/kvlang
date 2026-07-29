@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/array2d/kvspace-go"
-	"kvlang/op"
+	"kvlang/rwir"
 	"kvlang/vthread"
 )
 
@@ -17,7 +17,7 @@ func init() {
 }
 
 type arith struct{ f func(float64, float64) float64; fi func(int64, int64) int64; unary, concat bool }
-func (o arith) Call(f *op.Frame) error {
+func (o arith) Call(f *rwir.Frame) error {
 	inputs := readInputs(f)
 	if o.unary && len(inputs) == 1 {
 		r, err := evalNeg(inputs[0])
@@ -26,7 +26,7 @@ func (o arith) Call(f *op.Frame) error {
 	}
 	// + 号 string 拼接（fix-025：Python/JS/Go/Rust 4/5 阵营；C 无 + 拼接）
 	if o.concat && len(inputs) == 2 && inputs[0].Kind() == "string" && inputs[1].Kind() == "string" {
-		return writeResult(f, kvspace.Str(inputs[0].Str()+inputs[1].Str()))
+		return writeResult(f, kvspace.String(inputs[0].Str()+inputs[1].Str()))
 	}
 	r, err := evalBinaryArith(inputs, o.f, o.fi)
 	if err != nil { vthread.SetError(bg, f.KV, f.Vtid, f.PC, err.Error()); return err }
@@ -34,14 +34,14 @@ func (o arith) Call(f *op.Frame) error {
 }
 
 type div struct{}
-func (div) Call(f *op.Frame) error {
+func (div) Call(f *rwir.Frame) error {
 	r, err := evalDiv(readInputs(f))
 	if err != nil { vthread.SetError(bg, f.KV, f.Vtid, f.PC, err.Error()); return err }
 	return writeResult(f, r)
 }
 
 type mod struct{}
-func (mod) Call(f *op.Frame) error {
+func (mod) Call(f *rwir.Frame) error {
 	r, err := evalMod(readInputs(f))
 	if err != nil { vthread.SetError(bg, f.KV, f.Vtid, f.PC, err.Error()); return err }
 	return writeResult(f, r)

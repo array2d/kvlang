@@ -5,7 +5,7 @@ import (
 	"strconv"
 
 	"github.com/array2d/kvspace-go"
-	"kvlang/op"
+	"kvlang/rwir"
 	"kvlang/vthread"
 )
 
@@ -24,7 +24,7 @@ type cmp struct {
 	s         func(string, string) bool
 	allowNull bool // ==/!= 允许 null kind 比较；< > <= >= 不允许
 }
-func (o cmp) Call(f *op.Frame) error {
+func (o cmp) Call(f *rwir.Frame) error {
 	r, err := evalCmp(readInputs(f), o)
 	if err != nil { vthread.SetError(bg, f.KV, f.Vtid, f.PC, err.Error()); return err }
 	return writeResult(f, r)

@@ -7,7 +7,7 @@ import (
 
 	"kvlang/keytree"
 	"github.com/array2d/kvspace-go"
-	"kvlang/op"
+	"kvlang/rwir"
 	"kvlang/vthread"
 )
 
@@ -19,18 +19,18 @@ func init() {
 // kvHasOp: kv.has(prefix, idx) -> bool
 //   若 prefix 为变量名（非路径），先从帧中读其值（路径字符串），再检查路径是否存在。
 type kvHasOp struct{}
-func (o kvHasOp) Call(f *op.Frame) error {
+func (o kvHasOp) Call(f *rwir.Frame) error {
 	if len(f.Inst.Reads) < 2 {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "TypeError: kvhas requires 2 args")
 		return fmt.Errorf("TypeError: kvhas requires 2 args")
 	}
 	fp := keytree.FrameRoot(f.PC)
 	funcFrame := funcFrameRoot(f.KV, fp)
-	prefix := resolveReadValue(f.KV, fp, f.Inst.Reads[0]).Str()
+	prefix := resolveReadValue(f.KV, fp, f.Inst.Reads[0].Name).Str()
 	if prefix == "" {
-		prefix = resolveKVPath(funcFrame, f.Inst.Reads[0])
+		prefix = resolveKVPath(funcFrame, f.Inst.Reads[0].Name)
 	}
-	idxVal := resolveReadValue(f.KV, fp, f.Inst.Reads[1])
+	idxVal := resolveReadValue(f.KV, fp, f.Inst.Reads[1].Name)
 	var key string
 	if isIntKind(idxVal.Kind()) || isFloatKind(idxVal.Kind()) {
 		key = keytree.Member(prefix, strconv.Itoa(int(idxVal.Int64())))
@@ -45,18 +45,18 @@ func (o kvHasOp) Call(f *op.Frame) error {
 //   若 prefix 为变量名，先从帧中读其值（路径字符串），再用该路径访问。
 //   idx 支持整数索引和字符串索引（路径段名）。
 type kvAtOp struct{}
-func (o kvAtOp) Call(f *op.Frame) error {
+func (o kvAtOp) Call(f *rwir.Frame) error {
 	if len(f.Inst.Reads) < 2 {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "TypeError: kvat requires 2 args")
 		return fmt.Errorf("TypeError: kvat requires 2 args")
 	}
 	fp := keytree.FrameRoot(f.PC)
 	funcFrame := funcFrameRoot(f.KV, fp)
-	prefix := resolveReadValue(f.KV, fp, f.Inst.Reads[0]).Str()
+	prefix := resolveReadValue(f.KV, fp, f.Inst.Reads[0].Name).Str()
 	if prefix == "" {
-		prefix = resolveKVPath(funcFrame, f.Inst.Reads[0])
+		prefix = resolveKVPath(funcFrame, f.Inst.Reads[0].Name)
 	}
-	idxVal := resolveReadValue(f.KV, fp, f.Inst.Reads[1])
+	idxVal := resolveReadValue(f.KV, fp, f.Inst.Reads[1].Name)
 	var key string
 	if isIntKind(idxVal.Kind()) || isFloatKind(idxVal.Kind()) {
 		key = keytree.Member(prefix, strconv.Itoa(int(idxVal.Int64())))

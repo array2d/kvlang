@@ -1,4 +1,4 @@
-package op
+package rwir
 
 const OpCall     = "call"
 const OpReturn   = "return"

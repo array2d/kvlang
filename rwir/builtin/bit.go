@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/array2d/kvspace-go"
-	"kvlang/op"
+	"kvlang/rwir"
 	"kvlang/vthread"
 )
 
@@ -17,7 +17,7 @@ func init() {
 }
 
 type bit struct{ f func(int64, int64) int64 }
-func (o bit) Call(f *op.Frame) error {
+func (o bit) Call(f *rwir.Frame) error {
 	r, err := evalBinaryInt(readInputs(f), o.f)
 	if err != nil { vthread.SetError(bg, f.KV, f.Vtid, f.PC, err.Error()); return err }
 	return writeResult(f, r)

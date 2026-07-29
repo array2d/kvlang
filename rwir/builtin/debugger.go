@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 
 	"kvlang/keytree"
-	"kvlang/op"
+	"kvlang/rwir"
 	"kvlang/vthread"
 
 	"github.com/array2d/kvspace-go"
@@ -18,12 +18,12 @@ func init() {
 // 非调试模式下（.debugger 为空）为 no-op；调试模式下暂停当前 vthread 等待 agent 命令。
 // 暂停/恢复逻辑内联于此（不 import kvcpu 以避免循环依赖：kvcpu → builtin）。
 type debuggerOp struct{}
-func (debuggerOp) Call(f *op.Frame) error {
+func (debuggerOp) Call(f *rwir.Frame) error {
 	debugKey := keytree.VThreadDebugger(f.Vtid)
 	v := kvspace.GetOne(f.KV, debugKey)
 	if v.IsNone() {
 		// 非调试模式：no-op
-		vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
+		vthread.Set(bg, f.KV, f.Vtid, rwir.NextPC(f.PC), "running")
 		return nil
 	}
 	// 通知 agent 暂停位置
@@ -45,11 +45,11 @@ func (debuggerOp) Call(f *op.Frame) error {
 			return nil
 		case "continue":
 			f.KV.Del(debugKey)
-			vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
+			vthread.Set(bg, f.KV, f.Vtid, rwir.NextPC(f.PC), "running")
 			return nil
 		default:
 			// "step" 或其他 → 单步到下一条指令
-			vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
+			vthread.Set(bg, f.KV, f.Vtid, rwir.NextPC(f.PC), "running")
 			return nil
 		}
 	}

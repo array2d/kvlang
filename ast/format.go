@@ -8,6 +8,17 @@ import (
 // Format 将 AST 格式化为规范的 kvlang 源码输出到 w。
 // 前置行注释（Comments 字段）在对应节点前原样输出（S6：注释保留）。
 func Format(w io.Writer, f *File) {
+	for _, d := range f.RwirDecls {
+		for _, c := range d.Comments {
+			fmt.Fprintln(w, c)
+		}
+		fmt.Fprintln(w, d.SigString())
+		fmt.Fprintln(w)
+	}
+	if len(f.RwirDecls) > 0 && len(f.Funcs) > 0 {
+		fmt.Fprintln(w)
+	}
+
 	for fi, fn := range f.Funcs {
 		if fi > 0 {
 			fmt.Fprintln(w)

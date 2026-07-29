@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/array2d/kvspace-go"
-	"kvlang/op"
+	"kvlang/rwir"
 	"kvlang/vthread"
 )
 
@@ -23,7 +23,7 @@ func init() {
 }
 
 type cOp struct{ kind string }
-func (o cOp) Call(f *op.Frame) error {
+func (o cOp) Call(f *rwir.Frame) error {
 	r, err := evalCast(o.kind, readInputs(f))
 	if err != nil { vthread.SetError(bg, f.KV, f.Vtid, f.PC, err.Error()); return err }
 	return writeResult(f, r)

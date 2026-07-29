@@ -9,7 +9,7 @@ import (
 
 	"kvlang/keytree"
 	"github.com/array2d/kvspace-go"
-	"kvlang/op"
+	"kvlang/rwir"
 	"kvlang/vthread"
 )
 
@@ -26,18 +26,18 @@ func init() {
 // 目标类型由写槽的类型标注决定（如 arr:int32 = [1,2,3] → int32 同构数组）。
 // 无类型标注时回退为异构 TLV 数组。
 type arrayOp struct{}
-func (arrayOp) Call(f *op.Frame) error {
+func (arrayOp) Call(f *rwir.Frame) error {
 	inputs := readInputs(f)
 	if len(f.Inst.Writes) == 0 {
-		vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
+		vthread.Set(bg, f.KV, f.Vtid, rwir.NextPC(f.PC), "running")
 		return nil
 	}
 	frameRoot := keytree.FrameRoot(f.PC)
-	outKey := resolveWriteKey(f.KV, frameRoot, f.Inst.Writes[0])
+	outKey := resolveWriteKey(f.KV, frameRoot, f.Inst.Writes[0].Name)
 	// 从指令写槽 kind 取目标类型
 	targetKind := ""
-	if len(f.Inst.WriteKinds) > 0 && f.Inst.WriteKinds[0] != "rwir" {
-		targetKind = f.Inst.WriteKinds[0]
+	if len(f.Inst.Writes) > 0 && f.Inst.Writes[0].Kind != "" && f.Inst.Writes[0].Kind != "rwir" {
+		targetKind = f.Inst.Writes[0].Kind
 	}
 	if targetKind != "" {
 		arr := packTypedArray(targetKind, inputs)
@@ -46,7 +46,7 @@ func (arrayOp) Call(f *op.Frame) error {
 		arr := kvspace.Array(inputs)
 		f.KV.Set([]kvspace.KVPair{{outKey, arr}})
 	}
-	vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
+	vthread.Set(bg, f.KV, f.Vtid, rwir.NextPC(f.PC), "running")
 	return nil
 }
 
@@ -97,7 +97,7 @@ func kindBytes(kind string, v kvspace.XValue) []byte {
 
 // lenOp: len(array) → int。异构数组用 Len()，同构数组用 ArrayLen()。
 type lenOp struct{}
-func (lenOp) Call(f *op.Frame) error {
+func (lenOp) Call(f *rwir.Frame) error {
 	inputs := readInputs(f)
 	n := 0
 	if len(inputs) > 0 {
@@ -109,7 +109,7 @@ func (lenOp) Call(f *op.Frame) error {
 
 // atOp: at(array, index) → element
 type atOp struct{}
-func (atOp) Call(f *op.Frame) error {
+func (atOp) Call(f *rwir.Frame) error {
 	inputs := readInputs(f)
 	if len(inputs) < 2 {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "TypeError: at requires array and index")
@@ -120,22 +120,22 @@ func (atOp) Call(f *op.Frame) error {
 	if inputs[0].Kind() == "string" && !strings.HasPrefix(inputs[0].Str(), "/") {
 		s := inputs[0].Str()
 		if !isIntKind(inputs[1].Kind()) {
-			return writeResult(f, kvspace.Str(""))
+			return writeResult(f, kvspace.String(""))
 		}
 		idx := int(inputs[1].Int64())
 		if idx < 0 || idx >= len(s) {
-			return writeResult(f, kvspace.Str(""))
+			return writeResult(f, kvspace.String(""))
 		}
-		return writeResult(f, kvspace.Str(s[idx:idx+1]))
+		return writeResult(f, kvspace.String(s[idx:idx+1]))
 	}
 	// 路径访问：at(/path, key) or at(ptr, "field") or h.*key
 	// 排除 typed array（int32/float64/…）：用字符串 key 对同构数组做路径访问是错误。
-	if (inputs[0].Kind() == "dict" || inputs[0].Kind() == "string" || inputs[1].Kind() == "string" || len(f.Inst.Reads) > 0 && (f.Inst.Reads[0][0] == '/' || f.Inst.Reads[0][0] == '"' && len(f.Inst.Reads[0]) > 1 && f.Inst.Reads[0][1] == '/')) && kindSize(inputs[0].Kind()) <= 0 {
+	if (inputs[0].Kind() == "dict" || inputs[0].Kind() == "string" || inputs[1].Kind() == "string" || len(f.Inst.Reads) > 0 && (f.Inst.Reads[0].Name[0] == '/' || f.Inst.Reads[0].Name[0] == '"' && len(f.Inst.Reads[0].Name) > 1 && f.Inst.Reads[0].Name[1] == '/')) && kindSize(inputs[0].Kind()) <= 0 {
 		fp := keytree.FrameRoot(f.PC)
 		funcFrame := funcFrameRoot(f.KV, fp)
-		base := resolveReadValue(f.KV, fp, f.Inst.Reads[0]).Str()
+		base := resolveReadValue(f.KV, fp, f.Inst.Reads[0].Name).Str()
 		if base == "" {
-			raw := f.Inst.Reads[0]
+			raw := f.Inst.Reads[0].Name
 			if len(raw) > 1 && raw[0] == '"' { raw = raw[1:] }
 			base = resolveKVPath(funcFrame, raw)
 		}
@@ -149,7 +149,7 @@ func (atOp) Call(f *op.Frame) error {
 		return fmt.Errorf("%s", msg)
 	}
 	if inputs[0].IsNone() {
-		msg := "IndexError: at: base " + f.Inst.Reads[0] + " is None; help: declare a key-family first (e.g. `" + f.Inst.Reads[0] + " = {}`) or pass a path string"
+		msg := "IndexError: at: base " + f.Inst.Reads[0].Name + " is None; help: declare a key-family first (e.g. `" + f.Inst.Reads[0].Name + " = {}`) or pass a path string"
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
 		return fmt.Errorf("%s", msg)
 	}
@@ -182,7 +182,7 @@ func typedIndex(v kvspace.XValue, idx int) kvspace.XValue {
 
 // arraySetOp: set(array, index, value) → modified array
 type arraySetOp struct{}
-func (arraySetOp) Call(f *op.Frame) error {
+func (arraySetOp) Call(f *rwir.Frame) error {
 	inputs := readInputs(f)
 	if len(inputs) < 3 {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "TypeError: set requires array, index, value")
@@ -206,16 +206,16 @@ func (arraySetOp) Call(f *op.Frame) error {
 			return fmt.Errorf("TypeError: set: replacement char is empty")
 		}
 		result := sv[:idx] + ch[:1] + sv[idx+1:]
-		return writeResult(f, kvspace.Str(result))
+		return writeResult(f, kvspace.String(result))
 	}
 	// 路径写入：set(/path, key, val) or set(ptr, "field", val)
 	// 排除 typed array（int32/float64/…）：用字符串 key 对同构数组做路径访问是错误。
-	if (inputs[0].Kind() == "dict" || inputs[0].Kind() == "string" || inputs[1].Kind() == "string" || len(f.Inst.Reads) > 0 && (f.Inst.Reads[0][0] == '/' || f.Inst.Reads[0][0] == '"' && len(f.Inst.Reads[0]) > 1 && f.Inst.Reads[0][1] == '/')) && kindSize(inputs[0].Kind()) <= 0 {
+	if (inputs[0].Kind() == "dict" || inputs[0].Kind() == "string" || inputs[1].Kind() == "string" || len(f.Inst.Reads) > 0 && (f.Inst.Reads[0].Name[0] == '/' || f.Inst.Reads[0].Name[0] == '"' && len(f.Inst.Reads[0].Name) > 1 && f.Inst.Reads[0].Name[1] == '/')) && kindSize(inputs[0].Kind()) <= 0 {
 		fp := keytree.FrameRoot(f.PC)
 		funcFrame := funcFrameRoot(f.KV, fp)
-		base := resolveReadValue(f.KV, fp, f.Inst.Reads[0]).Str()
+		base := resolveReadValue(f.KV, fp, f.Inst.Reads[0].Name).Str()
 		if base == "" {
-			raw := f.Inst.Reads[0]
+			raw := f.Inst.Reads[0].Name
 			if len(raw) > 1 && raw[0] == '"' { raw = raw[1:] }
 			base = resolveKVPath(funcFrame, raw)
 		}
@@ -223,10 +223,10 @@ func (arraySetOp) Call(f *op.Frame) error {
 		f.KV.Set([]kvspace.KVPair{{path, inputs[2]}})
 		if len(f.Inst.Writes) > 0 && !inputs[0].IsNone() {
 			// 写入 base 本身（值不变），满足 -> base 返回槽
-			outKey := resolveWriteKey(f.KV, fp, f.Inst.Writes[0])
+			outKey := resolveWriteKey(f.KV, fp, f.Inst.Writes[0].Name)
 			f.KV.Set([]kvspace.KVPair{{outKey, inputs[0]}})
 		}
-		vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
+		vthread.Set(bg, f.KV, f.Vtid, rwir.NextPC(f.PC), "running")
 		return nil
 	}
 	// 拒绝 string 索引 typed array（五语言中仅 JS 允许，C/Python/Rust/Go 均编译/运行时拒绝）
@@ -236,7 +236,7 @@ func (arraySetOp) Call(f *op.Frame) error {
 		return fmt.Errorf("%s", msg)
 	}
 	if arr.IsNone() {
-		msg := "IndexError: set: base " + f.Inst.Reads[0] + " is None; help: declare a key-family first (e.g. `" + f.Inst.Reads[0] + " = {}`) or pass a path string"
+		msg := "IndexError: set: base " + f.Inst.Reads[0].Name + " is None; help: declare a key-family first (e.g. `" + f.Inst.Reads[0].Name + " = {}`) or pass a path string"
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
 		return fmt.Errorf("%s", msg)
 	}
@@ -280,17 +280,17 @@ func (arraySetOp) Call(f *op.Frame) error {
 		result = kvspace.RawN(k, raw, int32(n))
 	}
 	if len(f.Inst.Writes) > 0 {
-		outKey := resolveWriteKey(f.KV, keytree.FrameRoot(f.PC), f.Inst.Writes[0])
+		outKey := resolveWriteKey(f.KV, keytree.FrameRoot(f.PC), f.Inst.Writes[0].Name)
 		f.KV.Set([]kvspace.KVPair{{outKey, result}})
 	}
-	vthread.Set(bg, f.KV, f.Vtid, op.NextPC(f.PC), "running")
+	vthread.Set(bg, f.KV, f.Vtid, rwir.NextPC(f.PC), "running")
 	return nil
 }
 
 // sortOp: bubble sort (in-place, returns sorted copy).
 // 铁律：元素必须全数字或全字符串；混合类型/不可比类型 → TypeError。
 type sortOp struct{}
-func (sortOp) Call(f *op.Frame) error {
+func (sortOp) Call(f *rwir.Frame) error {
 	inputs := readInputs(f)
 	if len(inputs) < 1 { return writeResult(f, kvspace.XValue{}) }
 	arr := inputs[0]
@@ -328,13 +328,13 @@ func (sortOp) Call(f *op.Frame) error {
 
 // hasOp: has(path, key) → bool — kvspace 路径存在性检查
 type hasOp struct{}
-func (hasOp) Call(f *op.Frame) error {
+func (hasOp) Call(f *rwir.Frame) error {
 	inputs := readInputs(f)
 	if len(inputs) < 2 { return writeResult(f, kvspace.Bool(false)) }
 	fp := keytree.FrameRoot(f.PC)
 	funcFrame := funcFrameRoot(f.KV, fp)
-	base := resolveReadValue(f.KV, fp, f.Inst.Reads[0]).Str()
-	if base == "" { base = resolveKVPath(funcFrame, f.Inst.Reads[0]) }
+	base := resolveReadValue(f.KV, fp, f.Inst.Reads[0].Name).Str()
+	if base == "" { base = resolveKVPath(funcFrame, f.Inst.Reads[0].Name) }
 	key := kvKey(inputs[1])
 	v := kvspace.GetOne(f.KV, keytree.Member(base, key))
 	return writeResult(f, kvspace.Bool(!v.IsNone()))

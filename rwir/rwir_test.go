@@ -1,9 +1,9 @@
-package op_test
+package rwir_test
 
 import (
 	"testing"
 
-	"kvlang/op"
+	"kvlang/rwir"
 )
 
 // ── PC navigation ──

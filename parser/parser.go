@@ -165,7 +165,10 @@ func (p *parser) parseFile() *ast.File {
 			p.parseLibBody(f, "")
 			continue
 		}
-if p.peek().Kind == Ident && p.peek().Value == "rwfunc" {
+if p.peek().Kind == Ident && p.peek().Value == "rwir" {
+			decl := p.parseRwirDecl()
+			f.RwirDecls = append(f.RwirDecls, decl)
+		} else if p.peek().Kind == Ident && p.peek().Value == "rwfunc" {
 			if f.Package == "" {
 				p.errors = append(p.errors, Diagnostic{Pos: p.peek().Pos, Info: true,
 					Message: fmt.Sprintf("rwfunc outside lib block — registering under /lib/<name>; consider wrapping in 'lib pkgname { }'")})
@@ -224,7 +227,11 @@ func (p *parser) parseLibBody(f *ast.File, prefix string) {
 			p.skipNewlines()
 			continue
 		}
-		if p.peek().Kind == Ident && p.peek().Value == "rwfunc" {
+		if p.peek().Kind == Ident && p.peek().Value == "rwir" {
+				decl := p.parseRwirDecl()
+				decl.Pkg = pkg // lib 归属
+				f.RwirDecls = append(f.RwirDecls, decl)
+			} else if p.peek().Kind == Ident && p.peek().Value == "rwfunc" {
 			fn := p.parseFunc()
 			fn.Pkg = pkg // lib 归属（fix-039）
 			f.Funcs = append(f.Funcs, fn)
@@ -387,6 +394,38 @@ func HasErrors(diags []Diagnostic) bool {
 }
 
 // ── 签名解析 ───────────────────────────────────────────────────
+
+// parseRwirDecl 解析 rwir name(...) -> (...) 声明（无体）。
+func (p *parser) parseRwirDecl() ast.RwirDecl {
+	p.advance() // consume 'rwir'
+	var decl ast.RwirDecl
+	if t := p.peek(); t.Kind == Ident {
+		decl.Sig.Name = t.Value
+		p.advance()
+		// 处理点号命名空间：string.len, tensor.matmul 等
+		if p.peek().Kind == Dot {
+			decl.Sig.Name += p.advance().Value // .
+			if p.peek().Kind == Ident {
+				decl.Sig.Name += p.advance().Value
+			}
+		}
+	}
+	if p.peek().Kind == LParen {
+		p.advance()
+		decl.Sig.Params = p.parseParamList(RParen)
+		p.expect(RParen)
+	}
+	if p.peek().Kind == Arrow {
+		p.advance() // consume ->
+		p.skipNewlines()
+		if p.peek().Kind == LParen {
+			p.advance()
+			decl.Sig.Returns = p.parseParamList(RParen)
+			p.expect(RParen)
+		}
+	}
+	return decl
+}
 
 // parseFuncSig 消费 rwfunc name(...) -> (...) 签名，直接构造 ast.FuncSig。
 // 不经中间字符串，不需要 tokensToSig。

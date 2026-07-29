@@ -8,7 +8,7 @@ import (
 	"kvlang/keytree"
 	"github.com/array2d/kvspace-go"
 	"kvlang/logx"
-	"kvlang/op"
+	"kvlang/rwir"
 )
 
 func init() {
@@ -18,7 +18,7 @@ func init() {
 }
 
 type ioOp struct{ print, cerr, input bool }
-func (o ioOp) Call(f *op.Frame) error {
+func (o ioOp) Call(f *rwir.Frame) error {
 	inputs := readInputs(f)
 	if o.print {
 		stream := "stdout"
@@ -41,8 +41,8 @@ func (o ioOp) Call(f *op.Frame) error {
 		var val string
 		if !ts.IsZero() { val, _ = device.ReadTerm(bg, ts) }
 		if len(f.Inst.Writes) > 0 {
-			wKey := resolveWriteKey(f.KV, keytree.FrameRoot(f.PC), f.Inst.Writes[0])
-			f.KV.Set([]kvspace.KVPair{{wKey, kvspace.Str(val)}})
+			wKey := resolveWriteKey(f.KV, keytree.FrameRoot(f.PC), f.Inst.Writes[0].Name)
+			f.KV.Set([]kvspace.KVPair{{wKey, kvspace.String(val)}})
 		}
 		nextPC(f)
 		return nil

@@ -7,7 +7,7 @@ import (
 	"kvlang/keytree"
 	"github.com/array2d/kvspace-go"
 	"kvlang/logx"
-	"kvlang/op"
+	"kvlang/rwir"
 	"kvlang/vthread"
 )
 
@@ -25,13 +25,13 @@ func init() {
 // ── string.set ────────────────────────────────────────────────────
 
 type strOp struct{}
-func (strOp) Call(f *op.Frame) error {
+func (strOp) Call(f *rwir.Frame) error {
 	inputs := readInputs(f)
 	val := ""
 	if len(inputs) > 0 { val = display(inputs[0]) }
 	if len(f.Inst.Writes) > 0 {
-		wKey := resolveWriteKey(f.KV, keytree.FrameRoot(f.PC), f.Inst.Writes[0])
-		f.KV.Set([]kvspace.KVPair{{wKey, kvspace.Str(val)}})
+		wKey := resolveWriteKey(f.KV, keytree.FrameRoot(f.PC), f.Inst.Writes[0].Name)
+		f.KV.Set([]kvspace.KVPair{{wKey, kvspace.String(val)}})
 	}
 	logx.Debug("[%s] string.set %q -> %s", f.Vtid, val, f.Inst.Writes)
 	nextPC(f)
@@ -41,7 +41,7 @@ func (strOp) Call(f *op.Frame) error {
 // ── string.char ───────────────────────────────────────────────────
 
 type strCharOp struct{}
-func (strCharOp) Call(f *op.Frame) error {
+func (strCharOp) Call(f *rwir.Frame) error {
 	inputs := readInputs(f)
 	if len(inputs) < 2 {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "TypeError: string.char requires string and index")
@@ -55,13 +55,13 @@ func (strCharOp) Call(f *op.Frame) error {
 			fmt.Sprintf("IndexError: at: index %d out of bounds (char count=%d)", idx, len(runes)))
 		return fmt.Errorf("IndexError: char index out of bounds")
 	}
-	return writeResult(f, kvspace.Str(string(runes[idx])))
+	return writeResult(f, kvspace.String(string(runes[idx])))
 }
 
 // ── string.ord ────────────────────────────────────────────────────
 
 type strOrdOp struct{}
-func (strOrdOp) Call(f *op.Frame) error {
+func (strOrdOp) Call(f *rwir.Frame) error {
 	inputs := readInputs(f)
 	if len(inputs) < 1 {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "TypeError: string.ord requires a string")
@@ -76,7 +76,7 @@ func (strOrdOp) Call(f *op.Frame) error {
 // ── string.cmp ────────────────────────────────────────────────────
 
 type strCmpOp struct{}
-func (strCmpOp) Call(f *op.Frame) error {
+func (strCmpOp) Call(f *rwir.Frame) error {
 	inputs := readInputs(f)
 	if len(inputs) < 2 {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "TypeError: string.cmp requires two strings")
@@ -91,7 +91,7 @@ func (strCmpOp) Call(f *op.Frame) error {
 // ── string.find ───────────────────────────────────────────────────
 
 type strStrOp struct{}
-func (strStrOp) Call(f *op.Frame) error {
+func (strStrOp) Call(f *rwir.Frame) error {
 	inputs := readInputs(f)
 	if len(inputs) < 2 {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "TypeError: string.find requires two strings")
@@ -103,7 +103,7 @@ func (strStrOp) Call(f *op.Frame) error {
 // ── string.len ────────────────────────────────────────────────────
 
 type strLenOp struct{}
-func (strLenOp) Call(f *op.Frame) error {
+func (strLenOp) Call(f *rwir.Frame) error {
 	inputs := readInputs(f)
 	n := 0
 	if len(inputs) > 0 { n = len([]rune(inputs[0].Str())) }
@@ -113,7 +113,7 @@ func (strLenOp) Call(f *op.Frame) error {
 // ── string.slice ──────────────────────────────────────────────────
 
 type strSliceOp struct{}
-func (strSliceOp) Call(f *op.Frame) error {
+func (strSliceOp) Call(f *rwir.Frame) error {
 	inputs := readInputs(f)
 	if len(inputs) < 3 {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "TypeError: string.slice requires string, start, end")
@@ -127,20 +127,20 @@ func (strSliceOp) Call(f *op.Frame) error {
 			fmt.Sprintf("IndexError: at: slice index out of bounds (lo=%d hi=%d char count=%d)", lo, hi, n))
 		return fmt.Errorf("IndexError: slice index out of bounds")
 	}
-	if lo >= hi { return writeResult(f, kvspace.Str("")) }
-	return writeResult(f, kvspace.Str(string(runes[lo:hi])))
+	if lo >= hi { return writeResult(f, kvspace.String("")) }
+	return writeResult(f, kvspace.String(string(runes[lo:hi])))
 }
 
 // ── string.concat ─────────────────────────────────────────────────
 
 type strConcatOp struct{}
-func (strConcatOp) Call(f *op.Frame) error {
+func (strConcatOp) Call(f *rwir.Frame) error {
 	inputs := readInputs(f)
-	if len(inputs) < 2 { return writeResult(f, kvspace.Str("")) }
+	if len(inputs) < 2 { return writeResult(f, kvspace.String("")) }
 	if inputs[0].Kind() != "string" || inputs[1].Kind() != "string" {
 		msg := fmt.Sprintf("TypeError: string.concat requires strings, got %s and %s", inputs[0].Kind(), inputs[1].Kind())
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
 		return fmt.Errorf("%s", msg)
 	}
-	return writeResult(f, kvspace.Str(inputs[0].Str()+inputs[1].Str()))
+	return writeResult(f, kvspace.String(inputs[0].Str()+inputs[1].Str()))
 }

@@ -14,7 +14,7 @@ package lower
 import (
 	"fmt"
 	"kvlang/ast"
-	"kvlang/op"
+	"kvlang/rwir"
 )
 
 // File 将文件中所有函数降级。
@@ -368,7 +368,7 @@ func isTerminator(s *ast.Instruction) bool {
 		return false
 	}
 	switch s.Expr.Op {
-	case op.OpReturn, op.OpGoto, op.OpBr:
+	case rwir.OpReturn, rwir.OpGoto, rwir.OpBr:
 		return true
 	}
 	return false
@@ -426,13 +426,13 @@ func allArgsLeaf(e *ast.Expr) bool {
 
 func brInst(cond, tLabel, fLabel string) *ast.Instruction {
 	return &ast.Instruction{
-		Expr: ast.Call(op.OpBr, ast.Leaf(cond), ast.Leaf(tLabel), ast.Leaf(fLabel)),
+		Expr: ast.Call(rwir.OpBr, ast.Leaf(cond), ast.Leaf(tLabel), ast.Leaf(fLabel)),
 	}
 }
 
 func gotoLabel(parent, label string) *ast.Instruction {
 	return &ast.Instruction{
-		Expr: ast.Call(op.OpGoto, ast.Leaf(parent+"/"+label)),
+		Expr: ast.Call(rwir.OpGoto, ast.Leaf(parent+"/"+label)),
 	}
 }
 

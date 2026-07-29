@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"context"
+	"strings"
 
 	"github.com/array2d/kvspace-go"
 	"kvlang/keytree"
@@ -32,6 +33,34 @@ func Register(opcode, sig string, impl Op) {
 	}
 }
 
+// countSigParams 从 "rwir name(params) -> (returns)" 签名字符串中解析读写参数量。
+func countSigParams(sig string) (reads, writes int32) {
+	// 找到 -> 分割
+	arrow := strings.Index(sig, "->")
+	if arrow < 0 { return 0, 0 }
+	// 读参：sig 开头到 -> 之间的括号内容
+	readsPart := sig[:arrow]
+	if lp := strings.Index(readsPart, "("); lp >= 0 {
+		if rp := strings.Index(readsPart, ")"); rp > lp {
+			inner := readsPart[lp+1 : rp]
+			if strings.TrimSpace(inner) != "" {
+				reads = 1 + int32(strings.Count(inner, ","))
+			}
+		}
+	}
+	// 写参：-> 之后到末尾的括号内容
+	writesPart := sig[arrow+2:]
+	if lp := strings.Index(writesPart, "("); lp >= 0 {
+		if rp := strings.Index(writesPart, ")"); rp > lp {
+			inner := writesPart[lp+1 : rp]
+			if strings.TrimSpace(inner) != "" {
+				writes = 1 + int32(strings.Count(inner, ","))
+			}
+		}
+	}
+	return
+}
+
 // WriteSysRwir 将所有已注册的 native rwir 签名写入 /sys/rwir/。
 // 基础类型（+, ==, print 等）→ /sys/rwir/opcode
 // string.* 类型（string.len, string.char 等）→ /sys/rwir/string.opcode
@@ -39,9 +68,10 @@ func Register(opcode, sig string, impl Op) {
 func WriteSysRwir(kv kvspace.KVSpace) {
 	pairs := make([]kvspace.KVPair, 0, len(nativeSigs))
 	for opcode, sig := range nativeSigs {
+		reads, writes := countSigParams(sig)
 		pairs = append(pairs, kvspace.KVPair{
 			Key: keytree.SysRwir(opcode),
-			Val: kvspace.Raw("rwir", []byte(sig)),
+			Val: kvspace.Rwir(reads, writes, []byte(sig)),
 		})
 	}
 	if len(pairs) > 0 {

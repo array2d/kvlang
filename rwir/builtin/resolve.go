@@ -47,7 +47,7 @@ func resolveReadValue(kv kvspace.KVSpace, framePath, param string) kvspace.XValu
 		return kvspace.XValue{}
 	}
 	if param[0] == '"' {
-		return kvspace.Str(param[1:])
+		return kvspace.String(param[1:])
 	}
 	if isAbsolute(param) {
 		return kvspace.GetOne(kv, param)

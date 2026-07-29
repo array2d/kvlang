@@ -5,7 +5,7 @@ import (
 	"math"
 
 	"github.com/array2d/kvspace-go"
-	"kvlang/op"
+	"kvlang/rwir"
 	"kvlang/vthread"
 )
 
@@ -22,7 +22,7 @@ func init() {
 }
 
 type mOp struct{ kind string }
-func (o mOp) Call(f *op.Frame) error {
+func (o mOp) Call(f *rwir.Frame) error {
 	r, err := evalMath(o.kind, readInputs(f))
 	if err != nil { vthread.SetError(bg, f.KV, f.Vtid, f.PC, err.Error()); return err }
 	return writeResult(f, r)
@@ -101,7 +101,7 @@ func evalMinMax(inputs []kvspace.XValue, fn func(float64, float64) float64, intW
 	// allStr
 	acc := inputs[0].Str()
 	for _, v := range inputs[1:] { acc = strWin(acc, v.Str()) }
-	return kvspace.Str(acc), nil
+	return kvspace.String(acc), nil
 }
 
 func evalMin(inputs []kvspace.XValue) (kvspace.XValue, error) {

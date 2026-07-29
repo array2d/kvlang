@@ -13,7 +13,7 @@ import (
 
 	"kvlang/keytree"
 	"github.com/array2d/kvspace-go"
-	"kvlang/op"
+	"kvlang/rwir"
 )
 
 // isEntryPC 判断 pc 是否为帧入口指令（末尾坐标=[0,0]）。
@@ -33,7 +33,7 @@ func debugFuncName(kv kvspace.KVSpace, frameRoot string) string {
 
 // debugNotifyPause 向 /vthread/<vtid>/.debugger.pause 投递暂停事件（JSON）。
 // CPU 命中断点后调用，agent 通过 kvspace watch 接收。
-func debugNotifyPause(_ context.Context, kv kvspace.KVSpace, vtid, pc string, inst *op.Instruction) {
+func debugNotifyPause(_ context.Context, kv kvspace.KVSpace, vtid, pc string, inst *rwir.Rwir) {
 	frameRoot := keytree.FrameRoot(pc)
 	event, _ := json.Marshal(map[string]any{
 		"pc":    pc,
@@ -41,7 +41,7 @@ func debugNotifyPause(_ context.Context, kv kvspace.KVSpace, vtid, pc string, in
 		"frame": frameRoot,
 		"op":    inst.Opcode,
 	})
-	kv.Notify(keytree.VThreadDebuggerPause(vtid), kvspace.Str(string(event)))
+	kv.Notify(keytree.VThreadDebuggerPause(vtid), kvspace.String(string(event)))
 }
 
 // debugWaitResume 阻塞等待 /vthread/<vtid>/.debugger.resume 上的 Notify，
