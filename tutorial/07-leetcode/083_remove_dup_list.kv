@@ -17,7 +17,7 @@ def build() -> () {
 	/f4 <- { val=3; next="" }
 }
 
-def dedup(head:str) -> () {
+def dedup(head:string) -> () {
 	head -> cur
 	while (cur != "") {
 		cur.next -> nxt
@@ -39,7 +39,7 @@ def dedup(head:str) -> () {
 	}
 }
 
-def show(head:str) -> () {
+def show(head:string) -> () {
 	head -> p
 	while (p != "") {
 		p.val -> v

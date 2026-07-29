@@ -4,7 +4,7 @@
 
 ### Added
 - KV path-addressed declarative VM interpreter
-- Typed values: int, float, bool, str, bytes, tensor
+- Typed values: int, float, bool, string, bytes, tensor
 - Builtin operators: arithmetic, comparison, logic, cast, call, string, I/O
 - Tail-call optimization (TCO) for deep recursion
 - Frame isolation with scope correctness

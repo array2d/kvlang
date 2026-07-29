@@ -3,7 +3,7 @@
 ## v0.1.0 — Core VM ✅
 
 - [x] KV path-addressed instruction model (`[i,0]` opcode, `[i,-j]` reads, `[i,+j]` writes)
-- [x] typed values: int, float, bool, str, bytes, tensor
+- [x] typed values: int, float, bool, string, bytes, tensor
 - [x] builtin operators: arith, compare, logic, bitwise, cast, call, string, I/O
 - [x] single-layer IR — same syntax is VM instruction, high-level language, and compiler IR
 - [x] control flow: if/else, while (break/continue), for-in

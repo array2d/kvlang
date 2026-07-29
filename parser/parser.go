@@ -254,21 +254,37 @@ func (p *parser) parseFunc() ast.Func {
 	return fn
 }
 
-// checkParamTypes 确保所有参数和返回值都有显式类型标注。
-// 检测不到类型 → error（kvlang 不允许无类型标注的参数）。
+// validTypes kvlang 合法类型名集合（权威来源，与 kvspace.XValue.Kind() 对齐）。
+var validTypes = map[string]bool{
+	"int8": true, "int16": true, "int32": true, "int64": true,
+	"uint8": true, "uint16": true, "uint32": true, "uint64": true,
+	"float32": true, "float64": true,
+	"bool": true, "string": true, "bytes": true, "any": true,
+}
+
+// checkParamTypes 确保所有参数和返回值都有显式类型标注且类型名合法。
 func (p *parser) checkParamTypes(sig *ast.FuncSig) {
+	typeError := func(kind string) string {
+		if kind == "int" || kind == "float" {
+			return "ambiguous type — use int64 or float64 instead"
+		}
+		if kind == "str" {
+			return "unknown type — use string instead"
+		}
+		return "unknown type — valid: int8/16/32/64, uint8/16/32/64, float32/64, bool, string, bytes, any"
+	}
 	for _, param := range sig.Params {
-		if param.Type == "int" || param.Type == "float" {
+		if !validTypes[param.Type] {
 			p.errors = append(p.errors, Diagnostic{Message: fmt.Sprintf(
-				"func %s: param %q uses ambiguous type %q — use int64 or float64 instead (int/float are not valid type annotations)",
-				sig.Name, param.Name, param.Type)})
+				"func %s: param %q: %s (got %q)",
+				sig.Name, param.Name, typeError(param.Type), param.Type)})
 		}
 	}
 	for _, ret := range sig.Returns {
-		if ret.Type == "int" || ret.Type == "float" {
+		if !validTypes[ret.Type] {
 			p.errors = append(p.errors, Diagnostic{Message: fmt.Sprintf(
-				"func %s: return value %q uses ambiguous type %q — use int64 or float64 instead",
-				sig.Name, ret.Name, ret.Type)})
+				"func %s: return value %q: %s (got %q)",
+				sig.Name, ret.Name, typeError(ret.Type), ret.Type)})
 		}
 	}
 	for _, param := range sig.Params {

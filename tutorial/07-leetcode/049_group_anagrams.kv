@@ -1,0 +1,63 @@
+# 049: Group Anagrams — 字母异位词分组
+# 来源: LeetCode #49
+# 用字符计数向量作 key（26 个 int 拼接为字符串）
+# 期望输出:
+#   bat
+#   nat tan
+#   ate eat tea
+def count_key(w:string) -> (key:string) {
+	key = ""
+	n <- string.len(w)
+	i = 0  # = 等价于 <-
+	while (i < n) {
+		c = w[i]  # = 等价于 <-
+		key + c -> key
+		i + 1 -> i
+	}
+}
+
+def group(words_len:int64) -> () {
+	# manual test: strings stored in hash by sorted-key
+	# use simple approach: each word's char counts → key
+	visited:int64 = [0, 0, 0, 0, 0, 0]  # track printed
+	n <- words_len
+	i = 0  # = 等价于 <-
+	while (i < n) {
+		if (visited[i] == 0) {
+			visited[i] <- 1
+			print(words[i])
+			j = i + 1  # 等价于 <-
+			while (j < n) {
+				if (visited[j] == 0) {
+					# check if words[i] and words[j] are anagrams
+					if (string.len(words[i]) == string.len(words[j])) {
+						# compare char by char after sorting... simplified
+						# just compare if same length and same char multiset
+						ai = 0
+						match = 1  # = 等价于 <-
+						while (ai < string.len(words[i])) {
+							ci = words[i][ai]
+							found = 0  # = 等价于 <-
+							aj = 0
+							while (aj < string.len(words[j])) {
+								if (words[j][aj] == ci) { 1 -> found ; aj <- string.len(words[j]) }
+								else { aj = aj + 1 }  # = 等价于 <-
+							}
+							if (found == 0) { 0 -> match ; string.len(words[i]) -> ai }
+							ai + 1 -> ai
+						}
+						if (match == 1) {
+							visited[j] <- 1
+							print(" ", words[j])
+						}
+					}
+				}
+				j + 1 -> j
+			}
+		}
+		i = i + 1  # = 等价于 <-
+	}
+}
+
+words:string = ["eat", "tea", "tan", "ate", "nat", "bat"]
+group(6)

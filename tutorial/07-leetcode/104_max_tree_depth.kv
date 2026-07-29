@@ -10,7 +10,7 @@ def build_tree() -> () {
 	{ val=7; left=""; right="" } -> /t4
 }
 
-def max_depth(root:str) -> (depth:int64) {
+def max_depth(root:string) -> (depth:int64) {
 	if (root == "") { 0 -> depth }
 	else {
 		ld = max_depth(root.left)  # = 等价于 <-

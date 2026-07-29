@@ -12,7 +12,7 @@ def build() -> () {
 	{ val=4; left=""; right="" } -> /v2
 }
 
-def same(a:str, b:str) -> (ok:int64) {
+def same(a:string, b:string) -> (ok:int64) {
 	1 -> ok
 	if (a == "") {
 		if (b != "") { 0 -> ok }

@@ -32,7 +32,7 @@ internal/
   vthread/          virtual thread lifecycle
   kvcpu/            128-worker goroutine scheduler
   kvspace/          KV storage abstraction (Redis backend)
-  vtype/            typed value system (int, float, bool, str, tensor)
+  vtype/            typed value system (int, float, bool, string, tensor)
   op/
     builtin/        native operators (arith, compare, logic, cast, call, io)
     dispatch/       opcode → executor routing
