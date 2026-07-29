@@ -4,7 +4,7 @@
 #   1
 #   0
 # 用整数数组模拟字符串，1='a', 2='b', etc.
-def is_pal() -> () {
+rwfunc is_pal() -> () {
 	s:int64 = [1, 2, 1]  # = 等价于 <-
 	len(s) -> n
 	l <- 0
@@ -26,7 +26,7 @@ def is_pal() -> () {
 	print(ok)
 }
 
-def not_pal() -> () {
+rwfunc not_pal() -> () {
 	s:int64 = [1, 2]  # = 等价于 <-
 	len(s) -> n
 	l <- 0

@@ -12,14 +12,14 @@ import (
 )
 
 func init() {
-	Register("string.set",    "def string.set(A:any) -> (...)", strOp{})
-	Register("string.char",   "def string.char(S:string, I:int64) -> (C:string)", strCharOp{})
-	Register("string.ord",    "def string.ord(S:string) -> (C:int64)",          strOrdOp{})
-	Register("string.cmp",    "def string.cmp(A:string, B:string) -> (C:int64)", strCmpOp{})
-	Register("string.find",   "def string.find(Hay:string, Needle:string) -> (C:int64)", strStrOp{})
-	Register("string.len",    "def string.len(S:string) -> (C:int64)", strLenOp{})
-	Register("string.slice",  "def string.slice(S:string, Lo:int64, Hi:int64) -> (C:string)", strSliceOp{})
-	Register("string.concat", "def string.concat(A:string, B:string) -> (C:string)", strConcatOp{})
+	Register("string.set",    "rwir string.set(A:any) -> (...)", strOp{})
+	Register("string.char",   "rwir string.char(S:string, I:int64) -> (C:string)", strCharOp{})
+	Register("string.ord",    "rwir string.ord(S:string) -> (C:int64)",          strOrdOp{})
+	Register("string.cmp",    "rwir string.cmp(A:string, B:string) -> (C:int64)", strCmpOp{})
+	Register("string.find",   "rwir string.find(Hay:string, Needle:string) -> (C:int64)", strStrOp{})
+	Register("string.len",    "rwir string.len(S:string) -> (C:int64)", strLenOp{})
+	Register("string.slice",  "rwir string.slice(S:string, Lo:int64, Hi:int64) -> (C:string)", strSliceOp{})
+	Register("string.concat", "rwir string.concat(A:string, B:string) -> (C:string)", strConcatOp{})
 }
 
 // ── string.set ────────────────────────────────────────────────────

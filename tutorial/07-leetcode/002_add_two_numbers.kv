@@ -4,7 +4,7 @@
 #   7
 #   0
 #   8
-def build_lists() -> () {
+rwfunc build_lists() -> () {
 	/l1_0 = { val=2; next="/l1_1" }
 	/l1_1 <- { val=4; next="/l1_2" }
 	{ val=3; next="" } -> /l1_2
@@ -13,7 +13,7 @@ def build_lists() -> () {
 	/l2_2 = { val=4; next="" }  # = 等价于 <-
 }
 
-def add(a:string, b:string) -> () {
+rwfunc add(a:string, b:string) -> () {
 	carry = 0  # = 等价于 <-
 	result = {}  # = 等价于 <-
 	0 -> ri
@@ -44,7 +44,7 @@ def add(a:string, b:string) -> () {
 	}
 }
 
-def main() -> () {
+rwfunc main() -> () {
 	build_lists()
 	add("/l1_0", "/l2_0")
 }

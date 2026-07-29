@@ -165,22 +165,22 @@ func (p *parser) parseFile() *ast.File {
 			p.parseLibBody(f, "")
 			continue
 		}
-if p.peek().Kind == Ident && p.peek().Value == "def" {
+if p.peek().Kind == Ident && p.peek().Value == "rwfunc" {
 			if f.Package == "" {
 				p.errors = append(p.errors, Diagnostic{Pos: p.peek().Pos, Info: true,
-					Message: fmt.Sprintf("def outside lib block — registering under /lib/<name>; consider wrapping in 'lib pkgname { }'")})
+					Message: fmt.Sprintf("rwfunc outside lib block — registering under /lib/<name>; consider wrapping in 'lib pkgname { }'")})
 			}
 			fn := p.parseFunc()
 			fn.Comments = comments
 			f.Funcs = append(f.Funcs, fn)
 		} else if p.peek().Kind == If || p.peek().Kind == While || p.peek().Kind == For {
-			// 顶层裸控制流已废弃（fix-037）：必须包裹在 def main() / def init() 内
+			// 顶层裸控制流已废弃（fix-037）：必须包裹在 rwfunc main() / rwfunc init() 内
 			t := p.peek()
 			p.errors = append(p.errors, Diagnostic{
 				Pos:     t.Pos,
 				Message: fmt.Sprintf("top-level %s is not supported — wrap in main()", strings.ToLower(t.Kind.String())),
 			})
-			// 跳过一个 Token 防止死循环（不消费 body，避免吞掉其后的 def/lib）
+			// 跳过一个 Token 防止死循环（不消费 body，避免吞掉其后的 rwfunc/lib）
 			p.advance()
 		} else {
 			prevPos := p.pos
@@ -224,7 +224,7 @@ func (p *parser) parseLibBody(f *ast.File, prefix string) {
 			p.skipNewlines()
 			continue
 		}
-		if p.peek().Kind == Ident && p.peek().Value == "def" {
+		if p.peek().Kind == Ident && p.peek().Value == "rwfunc" {
 			fn := p.parseFunc()
 			fn.Pkg = pkg // lib 归属（fix-039）
 			f.Funcs = append(f.Funcs, fn)
@@ -240,7 +240,7 @@ st := p.parseStmt()
 	p.expect(RBrace)
 }
 
-// parseFunc 解析单个函数定义：def name(...) -> (...) { body }
+// parseFunc 解析单个函数定义：rwfunc name(...) -> (...) { body }
 func (p *parser) parseFunc() ast.Func {
 	sig := p.parseFuncSig()
 	p.checkParamTypes(&sig)
@@ -388,10 +388,10 @@ func HasErrors(diags []Diagnostic) bool {
 
 // ── 签名解析 ───────────────────────────────────────────────────
 
-// parseFuncSig 消费 def name(...) -> (...) 签名，直接构造 ast.FuncSig。
+// parseFuncSig 消费 rwfunc name(...) -> (...) 签名，直接构造 ast.FuncSig。
 // 不经中间字符串，不需要 tokensToSig。
 func (p *parser) parseFuncSig() ast.FuncSig {
-	p.advance() // consume 'def'
+	p.advance() // consume 'rwfunc'
 	var sig ast.FuncSig
 	if t := p.peek(); t.Kind == Ident {
 		sig.Name = t.Value
@@ -444,7 +444,7 @@ func (p *parser) parseParamList(stop Kind) []ast.Param {
 }
 
 // ParseFuncSig 将签名字符串解析为 ast.FuncSig（公开 API）。
-// 签名格式为 KV 中存储的 FuncSig.String() 输出：def name(A:t) -> (B:t)
+// 签名格式为 KV 中存储的 FuncSig.String() 输出：rwfunc name(A:t) -> (B:t)
 func ParseFuncSig(sig string) ast.FuncSig {
 	toks := Scan(sig)
 	p := &parser{tokens: toks}

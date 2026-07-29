@@ -4,13 +4,13 @@
 #   2
 #   1
 #   3
-def build_tree() -> () {
+rwfunc build_tree() -> () {
 	/t0 = { val=1; left="/t1"; right="/t2" }
 	/t1 <- { val=2; left=""; right="" }
 	{ val=3; left=""; right="" } -> /t2
 }
 
-def inorder(root:string) -> () {
+rwfunc inorder(root:string) -> () {
 	# iterative stack simulation
 	si = 0  # = 等价于 <-
 	stack = {}  # = 等价于 <-
@@ -29,7 +29,7 @@ def inorder(root:string) -> () {
 	}
 }
 
-def main() -> () {
+rwfunc main() -> () {
 	build_tree()
 	inorder("/t0")
 }

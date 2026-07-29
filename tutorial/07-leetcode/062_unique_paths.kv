@@ -3,7 +3,7 @@
 # 期望输出:
 #   28
 #   3
-def dp(m:int64, n:int64) -> (result:int64) {
+rwfunc dp(m:int64, n:int64) -> (result:int64) {
 	i = 0  # = 等价于 <-
 	while (i < n) {
 		_ = set("/tmp/up", i, 1)  # = 等价于 <-
@@ -23,7 +23,7 @@ def dp(m:int64, n:int64) -> (result:int64) {
 	/tmp/up[n-1] -> result
 }
 
-def main() -> () {
+rwfunc main() -> () {
 	r1 <- dp(3, 7)
 	print(r1)
 	r2 = dp(3, 2)  # = 等价于 <-

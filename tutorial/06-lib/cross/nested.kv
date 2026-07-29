@@ -4,13 +4,13 @@
 #   42
 lib a {
     lib b {
-        def greet() -> () { print("nested") }
+        rwfunc greet() -> () { print("nested") }
     }
 }
 lib x/y {
-    def answer() -> () { print(42) }
+    rwfunc answer() -> () { print(42) }
 }
-def init() -> () {
+rwfunc init() -> () {
     /lib/a/b.greet()
     /lib/x/y.answer()
 }

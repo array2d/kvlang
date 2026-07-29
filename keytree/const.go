@@ -37,6 +37,7 @@ const (
 	SegTTY  = "tty"  // /dev/tty
 	SegSys  = "sys"  // /sys
 	SegOp   = "op"   // /sys/op
+	SegRwir = "rwir" // /sys/rwir
 	SegCmd  = "cmd"  // 命令队列
 	SegFunc = "func" // 算子函数定义
 )

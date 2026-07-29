@@ -1,4 +1,4 @@
-def fib(n: int64) -> (r: int64) {
+rwfunc fib(n: int64) -> (r: int64) {
     if (n <= 1) { 1 -> r; return }
     n - 1 -> a
     n - 2 -> b
@@ -10,7 +10,7 @@ def fib(n: int64) -> (r: int64) {
     ra + rb -> r
 }
 
-def init() -> () {
+rwfunc init() -> () {
     fib(21) -> r
     print(r)
 }

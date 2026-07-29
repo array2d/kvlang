@@ -1,7 +1,7 @@
 # expected
 #   TypeError: cannot negate unsigned uint8
 # 修复: fix-034 — neg 逐 kind switch，uint8/16/32/64 拒绝取负（五语言中 C 编译警告、Rust 编译错误、Go 编译错误、Python/JS 无符号类型）
-def main() -> () {
+rwfunc main() -> () {
         uint8(5) -> x
         -(x) -> y
 }

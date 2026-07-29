@@ -3,7 +3,7 @@
 # 期望输出:
 #   true
 #   false
-def has_dup(a:int64) -> () {
+rwfunc has_dup(a:int64) -> () {
 	len(a) -> n
 	seen = {}  # = 等价于 <-
 	found <- false
@@ -29,7 +29,7 @@ def has_dup(a:int64) -> () {
 	}
 }
 
-def no_dup() -> () {
+rwfunc no_dup() -> () {
 	a:int64 = [1, 2, 3, 4]  # = 等价于 <-
 	len(a) -> n
 	seen = {}  # = 等价于 <-
@@ -56,7 +56,7 @@ def no_dup() -> () {
 	}
 }
 
-def main() -> () {
+rwfunc main() -> () {
 	a1:int64 = [1, 2, 3, 1]
 	has_dup(a1)
 	no_dup()

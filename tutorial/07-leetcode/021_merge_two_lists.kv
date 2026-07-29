@@ -7,7 +7,7 @@
 #   3
 #   4
 #   4
-def build_lists() -> () {
+rwfunc build_lists() -> () {
 	/a0 = { val=1; next="/a1" }  # = 等价于 <-
 	/a1 <- { val=2; next="/a2" }
 	{ val=4; next="" } -> /a2
@@ -16,7 +16,7 @@ def build_lists() -> () {
 	{ val=4; next="" } -> /b2
 }
 
-def merge(a:string, b:string) -> () {
+rwfunc merge(a:string, b:string) -> () {
 	pa <- a
 	pb = b  # = 等价于 <-
 	while (pa != "") {
@@ -46,7 +46,7 @@ def merge(a:string, b:string) -> () {
 	}
 }
 
-def main() -> () {
+rwfunc main() -> () {
 	build_lists()
 	merge("/a0", "/b0")
 }

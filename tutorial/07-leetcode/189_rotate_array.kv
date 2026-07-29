@@ -9,7 +9,7 @@
 #   2
 #   3
 #   4
-def swap(a_len:int64, lo:int64, hi:int64) -> () {
+rwfunc swap(a_len:int64, lo:int64, hi:int64) -> () {
 	a_len -> a_lenv
 	lo -> lov
 	hi -> hiv
@@ -23,7 +23,7 @@ def swap(a_len:int64, lo:int64, hi:int64) -> () {
 	}
 }
 
-def rotate() -> () {
+rwfunc rotate() -> () {
 	a:int64 <- [1, 2, 3, 4, 5, 6, 7]
 	n = len(a)  # = 等价于 <-
 	3 -> k

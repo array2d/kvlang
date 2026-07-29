@@ -1,9 +1,9 @@
-# 单 lib 自含 def init
+# 单 lib 自含 rwfunc init
 # 期望输出:
 #   7
 lib math {
-    def sum(A:int64, B:int64) -> (C:int64) { A + B -> C }
-    def init() -> () {
+    rwfunc sum(A:int64, B:int64) -> (C:int64) { A + B -> C }
+    rwfunc init() -> () {
         sum(3, 4) -> s
         print(s)
     }

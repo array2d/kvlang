@@ -6,7 +6,7 @@
 #   3
 #   2
 #   1
-def build_list() -> () {
+rwfunc build_list() -> () {
 	/n0 = { val=1; next="/n1" }  # = 等价于 <-
 	{ val=2; next="/n2" } -> /n1
 	/n2 <- { val=3; next="/n3" }
@@ -14,7 +14,7 @@ def build_list() -> () {
 	{ val=5; next="" } -> /n4
 }
 
-def reverse(head:string) -> () {
+rwfunc reverse(head:string) -> () {
 	prev = ""  # = 等价于 <-
 	head -> cur
 	while (cur != "") {
@@ -31,7 +31,7 @@ def reverse(head:string) -> () {
 	}
 }
 
-def main() -> () {
+rwfunc main() -> () {
 	build_list()
 	reverse("/n0")
 }

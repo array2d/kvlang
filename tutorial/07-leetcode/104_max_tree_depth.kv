@@ -2,7 +2,7 @@
 # 来源: LeetCode #104
 # 期望输出:
 #   3
-def build_tree() -> () {
+rwfunc build_tree() -> () {
 	/t0 = { val=3; left="/t1"; right="/t2" }
 	{ val=9; left=""; right="" } -> /t1
 	/t2 <- { val=20; left="/t3"; right="/t4" }
@@ -10,7 +10,7 @@ def build_tree() -> () {
 	{ val=7; left=""; right="" } -> /t4
 }
 
-def max_depth(root:string) -> (depth:int64) {
+rwfunc max_depth(root:string) -> (depth:int64) {
 	if (root == "") { 0 -> depth }
 	else {
 		ld = max_depth(root.left)  # = 等价于 <-
@@ -20,7 +20,7 @@ def max_depth(root:string) -> (depth:int64) {
 	}
 }
 
-def main() -> () {
+rwfunc main() -> () {
 	build_tree()
 	d <- max_depth("/t0")
 	print(d)

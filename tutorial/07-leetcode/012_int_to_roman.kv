@@ -3,7 +3,7 @@
 # 期望输出:
 #   LVIII
 #   MCMXCIV
-def int_to_roman(n:int64) -> () {
+rwfunc int_to_roman(n:int64) -> () {
 	result <- ""
 	val <- n
 	while (val >= 1000) { result + "M" -> result ; val <- val - 1000 }
@@ -22,7 +22,7 @@ def int_to_roman(n:int64) -> () {
 	print(result)
 }
 
-def main() -> () {
+rwfunc main() -> () {
 	int_to_roman(58)
 	int_to_roman(1994)
 }

@@ -3,7 +3,7 @@
 # 期望输出:
 #   true
 #   false
-def is_pal(head:string) -> () {
+rwfunc is_pal(head:string) -> () {
 	arr = {}  # = 等价于 <-
 	0 -> n
 	head -> p
@@ -34,7 +34,7 @@ def is_pal(head:string) -> () {
 	}
 }
 
-def build() -> () {
+rwfunc build() -> () {
 	/p0 = { val=1; next="/p1" }  # = 等价于 <-
 	/p1 <- { val=2; next="/p2" }
 	{ val=2; next="/p3" } -> /p2
@@ -43,7 +43,7 @@ def build() -> () {
 	{ val=2; next="" } -> /q1
 }
 
-def main() -> () {
+rwfunc main() -> () {
 	build()
 	is_pal("/p0")
 	is_pal("/q0")

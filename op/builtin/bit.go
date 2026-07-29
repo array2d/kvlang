@@ -9,11 +9,11 @@ import (
 )
 
 func init() {
-	Register("&",  "def &(A:int64, B:int64) -> (C:int64)",  bit{f: func(a, b int64) int64 { return a & b }})
-	Register("|",  "def |(A:int64, B:int64) -> (C:int64)",  bit{f: func(a, b int64) int64 { return a | b }})
-	Register("^",  "def ^(A:int64, B:int64) -> (C:int64)",  bit{f: func(a, b int64) int64 { return a ^ b }})
-	Register("<<", "def <<(A:int64, B:int64) -> (C:int64)", bit{f: func(a, b int64) int64 { return a << uint64(b) }})
-	Register(">>", "def >>(A:int64, B:int64) -> (C:int64)", bit{f: func(a, b int64) int64 { return a >> uint64(b) }})
+	Register("&",  "rwir &(A:int64, B:int64) -> (C:int64)",  bit{f: func(a, b int64) int64 { return a & b }})
+	Register("|",  "rwir |(A:int64, B:int64) -> (C:int64)",  bit{f: func(a, b int64) int64 { return a | b }})
+	Register("^",  "rwir ^(A:int64, B:int64) -> (C:int64)",  bit{f: func(a, b int64) int64 { return a ^ b }})
+	Register("<<", "rwir <<(A:int64, B:int64) -> (C:int64)", bit{f: func(a, b int64) int64 { return a << uint64(b) }})
+	Register(">>", "rwir >>(A:int64, B:int64) -> (C:int64)", bit{f: func(a, b int64) int64 { return a >> uint64(b) }})
 }
 
 type bit struct{ f func(int64, int64) int64 }

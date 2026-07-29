@@ -3,7 +3,7 @@
 # 期望输出:
 #   true
 #   false
-def build() -> () {
+rwfunc build() -> () {
 	/t0 <- { val=1; left="/t1"; right="/t2" }
 	{ val=2; left=""; right="" } -> /t1
 	/t2 <- { val=3; left=""; right="" }
@@ -12,7 +12,7 @@ def build() -> () {
 	{ val=4; left=""; right="" } -> /v2
 }
 
-def same(a:string, b:string) -> (ok:int64) {
+rwfunc same(a:string, b:string) -> (ok:int64) {
 	1 -> ok
 	if (a == "") {
 		if (b != "") { 0 -> ok }
@@ -30,7 +30,7 @@ def same(a:string, b:string) -> (ok:int64) {
 	}
 }
 
-def main() -> () {
+rwfunc main() -> () {
 	build()
 	same("/t0", "/t0") -> r1
 	if (r1 == 1) { print("true") } else { print("false") }

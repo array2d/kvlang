@@ -4,7 +4,7 @@
 #   true
 #   true
 #   false
-def is_valid(s:string) -> (ok:int64) {
+rwfunc is_valid(s:string) -> (ok:int64) {
 	ok <- 1
 	si = -1  # = 等价于 <-
 	n = string.len(s)  # = 等价于 <-
@@ -52,7 +52,7 @@ def is_valid(s:string) -> (ok:int64) {
 	if (si >= 0) { 0 -> ok }
 }
 
-def main() -> () {
+rwfunc main() -> () {
 	r1 = is_valid("()")  # = 等价于 <-
 	if (r1 == 1) { print("true") } else { print("false") }
 	r2 <- is_valid("()[]{}")

@@ -10,12 +10,12 @@ import (
 )
 
 func init() {
-	Register("==", "def ==(A:num, B:num) -> (C:bool)", cmp{f: func(a, b float64) bool { return a == b }, i: func(a, b int64) bool { return a == b }, s: func(a, b string) bool { return a == b }, allowNull: true})
-	Register("!=", "def !=(A:num, B:num) -> (C:bool)", cmp{f: func(a, b float64) bool { return a != b }, i: func(a, b int64) bool { return a != b }, s: func(a, b string) bool { return a != b }, allowNull: true})
-	Register("<",  "def <(A:num, B:num) -> (C:bool)",  cmp{f: func(a, b float64) bool { return a < b },  i: func(a, b int64) bool { return a < b },  s: func(a, b string) bool { return a < b }})
-	Register(">",  "def >(A:num, B:num) -> (C:bool)",  cmp{f: func(a, b float64) bool { return a > b },  i: func(a, b int64) bool { return a > b },  s: func(a, b string) bool { return a > b }})
-	Register("<=", "def <=(A:num, B:num) -> (C:bool)", cmp{f: func(a, b float64) bool { return a <= b }, i: func(a, b int64) bool { return a <= b }, s: func(a, b string) bool { return a <= b }})
-	Register(">=", "def >=(A:num, B:num) -> (C:bool)", cmp{f: func(a, b float64) bool { return a >= b }, i: func(a, b int64) bool { return a >= b }, s: func(a, b string) bool { return a >= b }})
+	Register("==", "rwir ==(A:num, B:num) -> (C:bool)", cmp{f: func(a, b float64) bool { return a == b }, i: func(a, b int64) bool { return a == b }, s: func(a, b string) bool { return a == b }, allowNull: true})
+	Register("!=", "rwir !=(A:num, B:num) -> (C:bool)", cmp{f: func(a, b float64) bool { return a != b }, i: func(a, b int64) bool { return a != b }, s: func(a, b string) bool { return a != b }, allowNull: true})
+	Register("<",  "rwir <(A:num, B:num) -> (C:bool)",  cmp{f: func(a, b float64) bool { return a < b },  i: func(a, b int64) bool { return a < b },  s: func(a, b string) bool { return a < b }})
+	Register(">",  "rwir >(A:num, B:num) -> (C:bool)",  cmp{f: func(a, b float64) bool { return a > b },  i: func(a, b int64) bool { return a > b },  s: func(a, b string) bool { return a > b }})
+	Register("<=", "rwir <=(A:num, B:num) -> (C:bool)", cmp{f: func(a, b float64) bool { return a <= b }, i: func(a, b int64) bool { return a <= b }, s: func(a, b string) bool { return a <= b }})
+	Register(">=", "rwir >=(A:num, B:num) -> (C:bool)", cmp{f: func(a, b float64) bool { return a >= b }, i: func(a, b int64) bool { return a >= b }, s: func(a, b string) bool { return a >= b }})
 }
 
 type cmp struct {

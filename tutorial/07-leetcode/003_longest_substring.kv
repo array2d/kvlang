@@ -4,7 +4,7 @@
 #   3
 #   1
 #   5
-def length_of_longest(s:string) -> (max_len:int64) {
+rwfunc length_of_longest(s:string) -> (max_len:int64) {
 	n <- string.len(s)
 	last = {}  # = 等价于 <-
 	max_len = 0  # = 等价于 <-
@@ -25,7 +25,7 @@ def length_of_longest(s:string) -> (max_len:int64) {
 	}
 }
 
-def main() -> () {
+rwfunc main() -> () {
 	r1 = length_of_longest("abcabcbb")  # = 等价于 <-
 	print(r1)
 	print(length_of_longest("bbbbb"))

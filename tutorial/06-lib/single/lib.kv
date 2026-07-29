@@ -1,7 +1,7 @@
 # 单文件单 lib：math 库自含函数+init
 lib math {
-    def sum(A:int64, B:int64) -> (C:int64) { A + B -> C }
-    def init() -> () {
+    rwfunc sum(A:int64, B:int64) -> (C:int64) { A + B -> C }
+    rwfunc init() -> () {
         sum(3, 4) -> s
         print(s)
     }

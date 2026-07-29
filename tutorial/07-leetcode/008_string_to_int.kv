@@ -5,7 +5,7 @@
 #   42
 #   -42
 #   4193
-def my_atoi(s:string) -> (result:int64) {
+rwfunc my_atoi(s:string) -> (result:int64) {
 	result = 0  # = 等价于 <-
 	n = string.len(s)  # = 等价于 <-
 	i <- 0
@@ -23,7 +23,7 @@ def my_atoi(s:string) -> (result:int64) {
 	result <- result * sign
 }
 
-def main() -> () {
+rwfunc main() -> () {
 	print(my_atoi("42"))
 	print(my_atoi("-42"))
 	print(my_atoi("4193"))

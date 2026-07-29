@@ -3,7 +3,7 @@
 # 期望输出:
 #   3
 #   -2
-def divide(dividend:int64, divisor:int64) -> (result:int64) {
+rwfunc divide(dividend:int64, divisor:int64) -> (result:int64) {
 	dend <- dividend
 	dsor = divisor  # = 等价于 <-
 	neg = 0  # = 等价于 <-
@@ -29,7 +29,7 @@ def divide(dividend:int64, divisor:int64) -> (result:int64) {
 	if (neg == 1) { result <- 0 - result }
 }
 
-def main() -> () {
+rwfunc main() -> () {
 	r1 = divide(10, 3)  # = 等价于 <-
 	print(r1)
 	r2 <- divide(7, -3)

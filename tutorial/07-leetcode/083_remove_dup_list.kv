@@ -6,7 +6,7 @@
 #   1
 #   2
 #   3
-def build() -> () {
+rwfunc build() -> () {
 	/e0 = { val=1; next="/e1" }  # = 等价于 <-
 	/e1 <- { val=1; next="/e2" }
 	{ val=2; next="" } -> /e2
@@ -17,7 +17,7 @@ def build() -> () {
 	/f4 <- { val=3; next="" }
 }
 
-def dedup(head:string) -> () {
+rwfunc dedup(head:string) -> () {
 	head -> cur
 	while (cur != "") {
 		cur.next -> nxt
@@ -39,7 +39,7 @@ def dedup(head:string) -> () {
 	}
 }
 
-def show(head:string) -> () {
+rwfunc show(head:string) -> () {
 	head -> p
 	while (p != "") {
 		p.val -> v
@@ -48,7 +48,7 @@ def show(head:string) -> () {
 	}
 }
 
-def main() -> () {
+rwfunc main() -> () {
 	build()
 	dedup("/e0")
 	show("/e0")

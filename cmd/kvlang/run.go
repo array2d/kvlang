@@ -12,6 +12,7 @@ import (
 	"kvlang/kvcpu"
 	"github.com/array2d/kvspace-go"
 	"kvlang/layoutrwir"
+	"kvlang/op/builtin"
 	"kvlang/logx"
 	"kvlang/vthread"
 )
@@ -65,6 +66,7 @@ func executeEntry(kv kvspace.KVSpace, entryName string, debug bool) {
 	vtid := vthread.AllocVtid(kv)
 	kv.DelTree(keytree.VThread(vtid))
 	kvspace.MkIndexRecursive(kv, keytree.VThread(vtid)+"/")
+	builtin.WriteSysRwir(kv)
 	firstPC := layoutrwir.Bootstrap(ctx, kv, vtid, entryName, nil)
 	if firstPC == "" {
 		logx.Fatal("[single] Bootstrap %s failed", entryName)

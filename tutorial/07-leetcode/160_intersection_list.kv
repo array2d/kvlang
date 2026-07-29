@@ -3,7 +3,7 @@
 # 双指针法: pA 走完走 B, pB 走完走 A, 相遇即交点
 # 期望输出:
 #   8
-def build_lists() -> () {
+rwfunc build_lists() -> () {
 	# common tail: 8→4→5
 	/t8 = { val=8; next="/t4" }  # = 等价于 <-
 	/t4 <- { val=4; next="/t5" }
@@ -17,7 +17,7 @@ def build_lists() -> () {
 	{ val=1; next="/t8" } -> /b2
 }
 
-def get_intersection(ha:string, hb:string) -> () {
+rwfunc get_intersection(ha:string, hb:string) -> () {
 	pa = ha  # = 等价于 <-
 	pb <- hb
 	switch_a = 0  # = 等价于 <-
@@ -52,7 +52,7 @@ def get_intersection(ha:string, hb:string) -> () {
 	}
 }
 
-def main() -> () {
+rwfunc main() -> () {
 	build_lists()
 	get_intersection("/a0", "/b0")
 }

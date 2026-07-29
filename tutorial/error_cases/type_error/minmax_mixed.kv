@@ -1,7 +1,7 @@
 # expected
 #   TypeError: min/max requires all numeric or all string
 # 修复: todo-033 — evalMinMax 曾对所有非数字类型回退到字符串比较（dict1 < dict2 静默"成功"）
-def main() -> () {
+rwfunc main() -> () {
 	min(int64(1), "a") -> x
 }
 main()

@@ -5,20 +5,20 @@
 #   PASS SI-2a: S= 8 D= 2
 #   PASS SI-2b: S= 15 D= 5
 #   PASS SI-3: chain = 10
-def id_val(x:int64) -> (R:int64) {
+rwfunc id_val(x:int64) -> (R:int64) {
 	x + 0 -> R
 }
 
-def sum_diff(A:int64, B:int64) -> (S:int64, D:int64) {
+rwfunc sum_diff(A:int64, B:int64) -> (S:int64, D:int64) {
 	S <- A + B
 	D = A - B  # = 等价于 <-
 }
 
-def chain_call(a:int64, b:int64) -> (r:int64) {
+rwfunc chain_call(a:int64, b:int64) -> (r:int64) {
 	a + b -> r
 }
 
-def main() -> () {
+rwfunc main() -> () {
 	v1 <- id_val(5)
 	print("PASS SI-1a: x=5 returns", v1)
 	v2 = id_val(10)  # = 等价于 <-
