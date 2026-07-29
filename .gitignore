@@ -53,3 +53,8 @@ kvlang
 
 # Tool config
 .omc/
+tutorial/07-leetcode/038_count_and_say.kv
+tutorial/07-leetcode/049_group_anagrams.kv
+tutorial/07-leetcode/056_merge_intervals.kv
+tutorial/07-leetcode/078_subsets.kv
+tutorial/07-leetcode/101_symmetric_tree.kv
