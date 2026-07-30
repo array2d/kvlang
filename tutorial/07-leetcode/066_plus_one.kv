@@ -1,0 +1,72 @@
+# 066: Plus One — 数组表示的大整数加一
+# 算法: 从右向左进位
+# 来源: LeetCode #66
+# 期望输出:
+#   1
+#   2
+#   4
+#   0
+#   0
+#   0
+rwfunc plus_one() -> () {
+	a:int64 <- [1, 2, 3]
+	n = len(a)  # = 等价于 <-
+	n - 1 -> i
+	carry <- 1
+	while (i >= 0) {
+		d = a[i]  # = 等价于 <-
+		d + carry -> s
+		overflow <- s == 10
+
+		if (overflow) {
+			carry = 0  # = 等价于 <-
+			a[i] <- 0
+		} else {
+			a[i] <- s
+			0 -> carry
+			i <- -1
+		}
+
+		i = i - 1  # = 等价于 <-
+	}
+	carry == 1 -> need_extend
+	len_val <- n
+	j = 0  # = 等价于 <-
+	while (j < n) {
+		a[j] -> v
+		println(v)
+		j <- j + 1
+	}
+}
+
+rwfunc plus_one_nines() -> () {
+	a:int64 = [9, 9, 9]  # = 等价于 <-
+	len(a) -> n
+	i <- n - 1
+	carry = 1  # = 等价于 <-
+	while (i >= 0) {
+		a[i] -> d
+		s <- d + carry
+		overflow = s == 10  # = 等价于 <-
+
+		if (overflow) {
+			a[i] <- 0
+			1 -> carry
+		} else {
+			a[i] <- s
+			carry <- 0
+			i = -1  # = 等价于 <-
+		}
+
+		i - 1 -> i
+	}
+	j <- 0
+	while (j < n) {
+		v = a[j]  # = 等价于 <-
+		println(v)
+		j + 1 -> j
+	}
+}
+
+plus_one()
+plus_one_nines()

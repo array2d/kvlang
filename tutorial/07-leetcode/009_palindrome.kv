@@ -1,0 +1,33 @@
+# 009: Palindrome Number
+# 来源: LeetCode #9
+# 期望输出:
+#   1
+#   0
+rwfunc is_pal(x:int64) -> (r:int64) {
+	neg = x < 0  # = 等价于 <-
+
+	if (neg) {
+		0 -> r
+	} else {
+		orig <- x
+		rev = 0  # = 等价于 <-
+		while (orig > 0) {
+			rev * 10 -> r10
+			d <- orig % 10
+			rev = r10 + d  # = 等价于 <-
+			orig / 10 -> orig
+		}
+		ok <- rev == x
+
+		if (ok) {
+			r = 1  # = 等价于 <-
+		} else {
+			0 -> r
+		}
+	}
+}
+
+r1 <- is_pal(121)
+println(r1)
+r2 = is_pal(-121)  # = 等价于 <-
+println(r2)

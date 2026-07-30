@@ -1,0 +1,25 @@
+# 342: Power of Four — 判断4的幂
+# 来源: LeetCode #342
+# 期望输出:
+#   1
+rwfunc is_power4(n:int64) -> () {
+	pos = n > 0  # = 等价于 <-
+
+	if (pos) {
+		1 -> t
+		while (t < n) {
+			t <- t * 4
+		}
+		eq = t == n  # = 等价于 <-
+
+		if (eq) {
+			println(1)
+		} else {
+			println(0)
+		}
+	} else {
+		println(0)
+	}
+}
+
+is_power4(16)

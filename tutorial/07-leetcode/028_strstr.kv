@@ -1,0 +1,38 @@
+# 028: strStr — 暴力子串查找
+# 来源: LeetCode #28
+# 期望输出:
+#   2
+#   2
+rwfunc str_str(hay:string, needle:string) -> () {
+	string.len(hay) -> nh
+	nn <- string.len(needle)
+	i = 0  # = 等价于 <-
+	-1 -> ans
+	limit <- nh - nn
+	while (i <= limit) {
+		match = true  # = 等价于 <-
+		0 -> j
+		while (j < nn) {
+			hc <- string.char(hay, i + j)
+			nc = string.char(needle, j)  # = 等价于 <-
+			hc == nc -> eq
+
+			if (eq) {
+				j <- j + 1
+			} else {
+				match = false  # = 等价于 <-
+				nn -> j
+			}
+		}
+
+		if (match) {
+			ans <- i
+			i = limit + 1  # = 等价于 <-
+		} else {
+			i + 1 -> i
+		}
+	}
+	println(ans)
+}
+
+str_str("hello", "ll")

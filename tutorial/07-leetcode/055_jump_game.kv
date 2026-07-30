@@ -1,0 +1,34 @@
+# 055: Jump Game — 贪心最大可达位置
+# 来源: LeetCode #55
+# 期望输出:
+#   true
+#   false
+rwfunc can_jump(nums:int64) -> (ok:int64) {
+	ok = 1  # = 等价于 <-
+	n <- len(nums)
+	0 -> reach
+	i = 0  # = 等价于 <-
+	while (i < n) {
+		if (i > reach) {
+			0 -> ok
+			n -> i
+		} else {
+			dist <- nums[i] + i
+			if (dist > reach) { dist -> reach }
+			if (reach >= n - 1) {
+				n -> i
+			}
+			i + 1 -> i
+		}
+	}
+}
+
+rwfunc main() -> () {
+	a1:int64 = [2, 3, 1, 1, 4]
+	a2:int64 <- [3, 2, 1, 0, 4]
+	r1 = can_jump(a1)  # = 等价于 <-
+	if (r1 == 1) { println("true") } else { println("false") }
+	r2 <- can_jump(a2)
+	if (r2 == 1) { println("true") } else { println("false") }
+}
+main()

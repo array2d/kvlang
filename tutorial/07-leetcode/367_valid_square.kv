@@ -1,0 +1,39 @@
+# 367: Valid Perfect Square — 二分判断完全平方数
+# 来源: LeetCode #367
+# 期望输出:
+#   1
+#   0
+rwfunc is_square(n:int64) -> () {
+	small <- n < 2
+
+	if (small) {
+		println(1)
+	} else {
+		lo = 1  # = 等价于 <-
+		n / 2 -> hi
+		ans <- 0
+		while (lo <= hi) {
+			s = lo + hi  # = 等价于 <-
+			s / 2 -> mid
+			sq <- mid * mid
+			eq = sq == n  # = 等价于 <-
+
+			if (eq) {
+				1 -> ans
+				lo <- hi + 1
+			} else {
+				lt = sq < n  # = 等价于 <-
+
+				if (lt) {
+					mid + 1 -> lo
+				} else {
+					hi <- mid - 1
+				}
+			}
+		}
+		println(ans)
+	}
+}
+
+is_square(16)
+is_square(14)

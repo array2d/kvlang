@@ -1,0 +1,26 @@
+# 162: Find Peak Element — 二分找峰值
+# 来源: LeetCode #162
+# 期望输出:
+#   2
+rwfunc find_peak() -> () {
+	a:int64 <- [1, 2, 3, 1]
+	n = len(a)  # = 等价于 <-
+	0 -> lo
+	hi <- n - 1
+	while (lo < hi) {
+		s = lo + hi  # = 等价于 <-
+		s / 2 -> mid
+		mv <- a[mid]
+		nv = a[mid + 1]  # = 等价于 <-
+		mv < nv -> up
+
+		if (up) {
+			lo <- mid + 1
+		} else {
+			hi = mid  # = 等价于 <-
+		}
+	}
+	println(lo)
+}
+
+find_peak()
