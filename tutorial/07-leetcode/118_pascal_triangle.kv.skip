@@ -1,0 +1,54 @@
+# 118: Pascal's Triangle — 生成杨辉三角
+# 来源: LeetCode #118
+# 逐行计算并打印
+# 期望输出:
+#   1
+#   1
+#   1
+#   1
+#   2
+#   1
+#   1
+#   3
+#   3
+#   1
+#   1
+#   4
+#   6
+#   4
+#   1
+rwfunc generate(num_rows:int64) -> () {
+	# store prev row in dict
+	_ = set("/tmp/pt", 0, 1)
+	println(1)
+	if (num_rows == 1) { }
+	r = 1  # = 等价于 <-
+	while (r < num_rows) {
+		println(1)
+		_ = set("/tmp/cur", 0, 1)
+		i = 1  # = 等价于 <-
+		while (i < r) {
+			/tmp/pt[i-1] -> a
+			/tmp/pt[i] -> b
+			v <- a + b
+			println(v)
+			_ = set("/tmp/cur", i, v)
+			i + 1 -> i
+		}
+		println(1)
+		_ = set("/tmp/cur", r, 1)
+		# copy cur to pt
+		k = 0  # = 等价于 <-
+		while (k <= r) {
+			/tmp/cur[k] -> val
+			_ = set("/tmp/pt", k, val)
+			k + 1 -> k
+		}
+		r + 1 -> r
+	}
+}
+
+rwfunc main() -> () {
+	generate(5)
+}
+main()

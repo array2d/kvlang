@@ -1,0 +1,32 @@
+# 121: Best Time to Buy and Sell Stock — 一次交易最大利润
+# 算法: 遍历记录最低买入价，计算最大利润
+# 来源: LeetCode #121
+# 期望输出:
+#   5
+rwfunc max_profit() -> () {
+	a:int64 = [7, 1, 5, 3, 6, 4]  # = 等价于 <-
+	len(a) -> n
+	min_price <- a[0]
+	max_profit = 0  # = 等价于 <-
+	1 -> i
+	while (i < n) {
+		price <- a[i]
+		new_min = price < min_price  # = 等价于 <-
+
+		if (new_min) {
+			price -> min_price
+		} else {
+			profit <- price - min_price
+			bigger = profit > max_profit  # = 等价于 <-
+
+			if (bigger) {
+				profit -> max_profit
+			}
+		}
+
+		i <- i + 1
+	}
+	println(max_profit)
+}
+
+max_profit()

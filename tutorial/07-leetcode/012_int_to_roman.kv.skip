@@ -1,0 +1,29 @@
+# 012: Integer to Roman — 整数转罗马数字
+# 来源: LeetCode #12
+# 期望输出:
+#   LVIII
+#   MCMXCIV
+rwfunc int_to_roman(n:int64) -> () {
+	result <- ""
+	val <- n
+	while (val >= 1000) { result + "M" -> result ; val <- val - 1000 }
+	if (val >= 900) { result + "CM" -> result ; val <- val - 900 }
+	if (val >= 500) { result + "D" -> result ; val <- val - 500 }
+	if (val >= 400) { result + "CD" -> result ; val <- val - 400 }
+	while (val >= 100) { result + "C" -> result ; val <- val - 100 }
+	if (val >= 90) { result + "XC" -> result ; val <- val - 90 }
+	if (val >= 50) { result + "L" -> result ; val <- val - 50 }
+	if (val >= 40) { result + "XL" -> result ; val <- val - 40 }
+	while (val >= 10) { result + "X" -> result ; val <- val - 10 }
+	if (val >= 9) { result + "IX" -> result ; val <- val - 9 }
+	if (val >= 5) { result + "V" -> result ; val <- val - 5 }
+	if (val >= 4) { result + "IV" -> result ; val <- val - 4 }
+	while (val >= 1) { result + "I" -> result ; val <- val - 1 }
+	println(result)
+}
+
+rwfunc main() -> () {
+	int_to_roman(58)
+	int_to_roman(1994)
+}
+main()

@@ -1,0 +1,17 @@
+# 371: Sum of Two Integers — 位运算加法
+# 来源: LeetCode #371
+# 期望输出:
+#   5
+rwfunc get_sum(a:int64, b:int64) -> () {
+	a -> av
+	b -> bv
+	while (bv != 0) {
+		carry = av & bv  # = 等价于 <-
+		carry << 1 -> c2
+		av <- av ^ bv
+		bv = c2  # = 等价于 <-
+	}
+	println(av)
+}
+
+get_sum(2, 3)

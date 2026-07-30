@@ -1,0 +1,59 @@
+# 242: Valid Anagram — dict 字符计数（动态键读写 h.*c，用 has 检存在）
+# 来源: LeetCode #242
+# 期望输出:
+#   true
+#   false
+rwfunc is_anagram(s:string, t:string) -> () {
+	ns = string.len(s)  # = 等价于 <-
+	nt <- string.len(t)
+	ok = true  # = 等价于 <-
+
+	if (ns != nt) {
+		false -> ok
+	} else {
+		h = {}  # = 等价于 <-
+		0 -> i
+		while (i < ns) {
+			string.char(s, i) -> c
+			has(h, c) -> exists
+			if (exists) {
+				h.*c + 1 -> h.*c
+			} else {
+				1 -> h.*c
+			}
+			i <- i + 1
+		}
+		0 -> i
+		while (i < nt) {
+			string.char(t, i) -> c
+			has(h, c) -> exists
+			if (exists) {
+				h.*c -> v
+				v - 1 -> h.*c
+			} else {
+				false -> ok
+				nt -> i
+			}
+			i + 1 -> i
+		}
+		0 -> i
+		while (i < ns) {
+			string.char(s, i) -> c
+			h.*c -> v
+
+			if (v != 0) {
+				false -> ok
+				ns -> i
+			}
+			i <- i + 1
+		}
+	}
+	if (ok) {
+		println("true")
+	} else {
+		println("false")
+	}
+}
+
+is_anagram("anagram", "nagaram")
+is_anagram("rat", "car")

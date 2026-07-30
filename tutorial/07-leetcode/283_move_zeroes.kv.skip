@@ -1,0 +1,36 @@
+# 283: Move Zeroes — 双指针原地移零（TLV 数组读写）
+# 来源: LeetCode #283
+# 期望输出:
+#   1
+#   3
+#   12
+#   0
+#   0
+rwfunc move_zeroes() -> () {
+	a:int64 = [0, 1, 0, 3, 12]  # = 等价于 <-
+	n <- len(a)
+	0 -> w
+	0 -> i
+	while (i < n) {
+		a[i] -> x
+		nz = x != 0  # = 等价于 <-
+
+		if (nz) {
+			a[w] <- x
+			w <- w + 1
+		}
+		i + 1 -> i
+	}
+	while (w < n) {
+		a[w] <- 0
+		w = w + 1  # = 等价于 <-
+	}
+	0 -> i
+	while (i < n) {
+		a[i] -> v
+		println(v)
+		i <- i + 1
+	}
+}
+
+move_zeroes()

@@ -1,0 +1,15 @@
+# 172: Factorial Trailing Zeroes — n! 尾部零的个数
+# 来源: LeetCode #172
+# 期望输出:
+#   1
+rwfunc trailing(n:int64) -> () {
+	n -> nv
+	0 -> count
+	while (nv >= 5) {
+		nv <- nv / 5
+		count = count + nv  # = 等价于 <-
+	}
+	println(count)
+}
+
+trailing(5)

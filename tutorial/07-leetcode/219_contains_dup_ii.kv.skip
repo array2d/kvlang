@@ -1,0 +1,41 @@
+# 219: Contains Duplicate II — hash 记录最近下标（has 检存在）
+# 来源: LeetCode #219
+# 期望输出:
+#   true
+#   false
+rwfunc near_dup(nums:int64, k:int64) -> () {
+	n <- len(nums)
+	h = {}  # = 等价于 <-
+	found = false  # = 等价于 <-
+	0 -> i
+	while (i < n) {
+		nums[i] -> x
+		has(h, x) -> exists
+
+		if (exists) {
+			h.*x -> j
+			if (j > 0) {
+				d <- i - j + 1
+
+				if (d <= k) {
+					true -> found
+					n -> i
+				}
+			}
+		}
+		if (found == false) {
+			set(h, x, i + 1) -> _
+		}
+		i <- i + 1
+	}
+	if (found) {
+		println("true")
+	} else {
+		println("false")
+	}
+}
+
+a1:int64 = [1, 2, 3, 1]
+near_dup(a1, 3)
+a2:int64 = [1, 2, 3, 1, 2, 3]
+near_dup(a2, 2)

@@ -1,0 +1,51 @@
+# 002: Add Two Numbers — 链表大数相加
+# 来源: LeetCode #2
+# 期望输出:
+#   7
+#   0
+#   8
+rwfunc build_lists() -> () {
+	/l1_0 = { val=2; next="/l1_1" }
+	/l1_1 <- { val=4; next="/l1_2" }
+	{ val=3; next="" } -> /l1_2
+	/l2_0 <- { val=5; next="/l2_1" }
+	{ val=6; next="/l2_2" } -> /l2_1
+	/l2_2 = { val=4; next="" }  # = 等价于 <-
+}
+
+rwfunc add(a:string, b:string) -> () {
+	carry = 0  # = 等价于 <-
+	result = {}  # = 等价于 <-
+	0 -> ri
+	pa <- a
+	pb = b  # = 等价于 <-
+	while (pa != "" || pb != "" || carry != 0) {
+		sum <- carry
+		if (pa != "") {
+			pa.val -> av
+			sum + av -> sum
+			pa = pa.next  # = 等价于 <-
+		}
+		if (pb != "") {
+			pb.val -> bv
+			bv + sum -> sum
+			pb.next -> pb
+		}
+		digit <- sum % 10
+		_ = set(result, ri, digit)  # = 等价于 <-
+		ri + 1 -> ri
+		sum / 10 -> carry
+	}
+	i = ri - 1  # = 等价于 <-
+	while (i >= 0) {
+		v <- result[i]
+		println(v)
+		i - 1 -> i
+	}
+}
+
+rwfunc main() -> () {
+	build_lists()
+	add("/l1_0", "/l2_0")
+}
+main()
