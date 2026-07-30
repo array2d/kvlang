@@ -19,12 +19,12 @@ rwfunc range_sum() -> () {
 	}
 	# sumRange(0, 2) = p[2]
 	p[2] -> r1
-	print(r1)
+	println(r1)
 	# sumRange(2, 5) = p[5] - p[1]
 	t2 <- p[5]
 	t1 = p[1]  # = 等价于 <-
 	t2 - t1 -> r2
-	print(r2)
+	println(r2)
 }
 
 range_sum()

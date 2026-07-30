@@ -14,39 +14,39 @@
 rwfunc main() -> () {
         # int8(127) + int8(1) → -128（int8 回绕证明结果仍是 int8。若是 int64 则为 128）
         int8(127) + int8(1) -> a
-        print(a)
+        println(a)
 
         # uint8(255) + uint8(1) → 0（uint8 回绕证明 unsigned 语义保留）
         uint8(255) + uint8(1) -> b
-        print(b)
+        println(b)
 
         # float32(16777216) + float32(1) → 16777216（float32 精度不可表示 16777217，证明结果未升级 float64）
         float32(16777216) + float32(1) -> c
-        print(c)
+        println(c)
 
         # int8(100) * int16(2) → 200（混合宽度向更宽提升→int16）
         int8(100) * int16(2) -> d
-        print(d)
+        println(d)
 
         # int8(120) / int8(10) → 12（整数整除 C/Go/Rust 阵营，结果窄化回 int8）
         int8(120) / int8(10) -> e
-        print(e)
+        println(e)
 
         # int8(120) / float32(10) → 12.0（含浮点→浮除，窄化回 float32）
         int8(120) / float32(10) -> f
-        print(f)
+        println(f)
 
         # int8(7) % int16(3) → 1（模运算窄化回更宽 int16）
         int8(7) % int16(3) -> g
-        print(g)
+        println(g)
 
         # neg(int64_max) − 纯整数路径，不经 float64（fix-020+fix-034）
         neg(9223372036854775807) -> h
-        print(h)
+        println(h)
 
         # int32(100) * int32(100) → 10000（同类型→同类型 int32）
         int32(100) * int32(100) -> i
-        print(i)
+        println(i)
 }
 
 main()

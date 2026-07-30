@@ -23,57 +23,57 @@
 rwfunc main() -> () {
 	# 算术 — 同类型 int64
 	5 + 3 -> a                    # = 等价于 <-
-	print(a)
+	println(a)
 	7 - 2 - 2 -> b
-	print(b)
+	println(b)
 	# 算术 — 混合 int+float（float 提升）
 	7.5 / 3 -> c
-	print(c)
+	println(c)
 	7 % 3 -> d
-	print(d)
+	println(d)
 
 	# 位运算 — 仅整数
 	5 & 3 -> e                     # = 等价于 <-
-	print(e)
+	println(e)
 	neg(2) -> f
-	print(f)
+	println(f)
 	3 | 4 -> g
-	print(g)
+	println(g)
 
 	# 比较 — 同类型
 	5 > 3 -> h                     # = 等价于 <-
-	print(h)
+	println(h)
 	3 > 5 -> i
-	print(i)
+	println(i)
 	# 比较 — C 式 double 提升
 	3 == 3.0 -> j
-	print(j)
+	println(j)
 
 	# 数学函数 — 仅数字
 	sqrt(64.0) -> k
-	print(k)
+	println(k)
 	abs(-3) -> l
-	print(l)
+	println(l)
 	pow(2, 3) -> m
-	print(m)
+	println(m)
 	log(exp(1.0)) -> n
-	print(n)
+	println(n)
 
 	# min/max — 全数字（变参 fold）
 	max(1, 3, 2) -> o
-	print(o)
+	println(o)
 
 	# 字符串拼接
 	"a" + "bc" -> p                # = 等价于 <-
-	print(p)
+	println(p)
 
 	# 字符串比较（C 语义）
 	string.cmp("a", "b") -> q
-	print(q)
+	println(q)
 
 	# bool 显式比较
 	true == true -> r              # = 等价于 <-
-	print(r)
+	println(r)
 }
 
 main()

@@ -11,11 +11,11 @@ rwfunc double(x:int64) -> (y:int64) {
 
 rwfunc main() -> () {
 	a = add(10, 20)  # = 等价于 <-
-	print("add(10,20) =", a)
+	println("add(10,20) =", a)
 	double(a) -> b
-	print("double(add(10,20)) =", b)
+	println("double(add(10,20)) =", b)
 	a <- /last_a
-	print("global last_a =", a)
+	println("global last_a =", a)
 }
 
 main()

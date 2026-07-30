@@ -54,10 +54,10 @@ rwfunc is_valid(s:string) -> (ok:int64) {
 
 rwfunc main() -> () {
 	r1 = is_valid("()")  # = 等价于 <-
-	if (r1 == 1) { print("true") } else { print("false") }
+	if (r1 == 1) { println("true") } else { println("false") }
 	r2 <- is_valid("()[]{}")
-	if (r2 == 1) { print("true") } else { print("false") }
+	if (r2 == 1) { println("true") } else { println("false") }
 	r3 = is_valid("(]")  # = 等价于 <-
-	if (r3 == 1) { print("true") } else { print("false") }
+	if (r3 == 1) { println("true") } else { println("false") }
 }
 main()

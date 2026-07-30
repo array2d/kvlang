@@ -6,7 +6,7 @@ rwfunc fib(n:int64) -> () {
 	base <- n <= 1
 
 	if (base) {
-		print(n)
+		println(n)
 	} else {
 		a = 0  # = 等价于 <-
 		1 -> b
@@ -17,7 +17,7 @@ rwfunc fib(n:int64) -> () {
 			b <- c
 			i = i + 1  # = 等价于 <-
 		}
-		print(c)
+		println(c)
 	}
 }
 

@@ -26,7 +26,7 @@ rwfunc reverse(head:string) -> () {
 	p = prev  # = 等价于 <-
 	while (p != "") {
 		p.val -> v
-		print(v)
+		println(v)
 		p <- p.next
 	}
 }

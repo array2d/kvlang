@@ -27,9 +27,9 @@ rwfunc length_of_longest(s:string) -> (max_len:int64) {
 
 rwfunc main() -> () {
 	r1 = length_of_longest("abcabcbb")  # = 等价于 <-
-	print(r1)
-	print(length_of_longest("bbbbb"))
+	println(r1)
+	println(length_of_longest("bbbbb"))
 	r3 <- length_of_longest("abcde")
-	print(r3)
+	println(r3)
 }
 main()

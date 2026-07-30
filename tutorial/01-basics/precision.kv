@@ -21,46 +21,46 @@
 #   false
 rwfunc main() -> () {
 	a = 2 + 3  # = 等价于 <-
-	print(a)
+	println(a)
 	b <- 2 + 3.5
-	print(b)
+	println(b)
 	1.5 * 2 -> c
-	print(c)
+	println(c)
 
 	q = 7 / 2  # = 等价于 <-（整除：两侧均 int）
-	print(q)
+	println(q)
 	-9 / 2 -> qz
-	print(qz)
+	println(qz)
 	fq <- 7.0 / 2
-	print(fq)
+	println(fq)
 	r = 7 % 3  # = 等价于 <-
-	print(r)
+	println(r)
 
 	ti <- int64(3.99)
-	print(ti)
+	println(ti)
 	float64(7) -> tf
-	print(tf)
+	println(tf)
 
 	sci = 1e3  # = 等价于 <-（科学计数法字面量恒为 float）
-	print(sci)
+	println(sci)
 	small <- 2.5e-2
-	print(small)
+	println(small)
 
 	0.1 + 0.2 -> sum
-	print(sum)
+	println(sum)
 
 	eq = 3 == 3.0  # = 等价于 <-（跨类型数值比较：值提升后相等）
-	print(eq)
+	println(eq)
 
 	big <- 9223372036854775807
-	print(big)
+	println(big)
 
 	big - 1 -> bm
-	print(bm)
+	println(bm)
 	precise = 9007199254740993 + 0  # = 等价于 <-（2^53+1：int 算术不经 float，精度保真）
-	print(precise)
+	println(precise)
 	same <- big == 9223372036854775806
-	print(same)
+	println(same)
 }
 
 main()

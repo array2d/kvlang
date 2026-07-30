@@ -30,7 +30,7 @@
     },
     "keyword": {
       "name": "keyword.control.kvlang",
-      "match": "\\b(def|var|if|else|for|while|return|switch|case|break|continue|loop|br|goto)\\b"
+      "match": "\\b(rwfunc|rwir|if|else|for|while|break|continue|return)\\b"
     },
     "block_label": {
       "name": "entity.name.label.kvlang",
@@ -38,7 +38,7 @@
     },
     "type": {
       "name": "storage.type.kvlang",
-      "match": "\\b(int|i8|i16|i32|i64|u8|f16|f32|f64|bf16|bf8|bool|string|tensor|list)\\b"
+      "match": "\\b(int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64|bool|string)\\b"
     },
     "number": {
       "name": "constant.numeric.kvlang",
@@ -50,7 +50,7 @@
     },
     "arrow": {
       "name": "keyword.operator.arrow.kvlang",
-      "match": "<-|->"
+      "match": "<-|->|="
     }
   }
 }

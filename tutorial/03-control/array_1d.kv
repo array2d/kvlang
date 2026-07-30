@@ -7,14 +7,14 @@
 rwfunc main() -> () {
 	a:int64 = [10, 20, 30, 40]  # = 等价于 <-
 	len(a) -> n
-	print("len =", n)
+	println("len =", n)
 	v0 <- a[0]
-	print("[0] =", v0)
+	println("[0] =", v0)
 	a[1] <- 99
 	x0 = a[0]  # = 等价于 <-
 	a[1] -> x1
 	x2 <- a[2]
-	print("after set:", x0, x1, x2)
+	println("after set:", x0, x1, x2)
 	total = 0  # = 等价于 <-
 	0 -> i
 	while (i < n) {
@@ -22,7 +22,7 @@ rwfunc main() -> () {
 		total = total + x  # = 等价于 <-
 		i + 1 -> i
 	}
-	print("sum =", total)
+	println("sum =", total)
 }
 
 main()

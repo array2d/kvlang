@@ -27,8 +27,8 @@ rwfunc main() -> () {
 	a1:int64 = [2, 3, 1, 1, 4]
 	a2:int64 <- [3, 2, 1, 0, 4]
 	r1 = can_jump(a1)  # = 等价于 <-
-	if (r1 == 1) { print("true") } else { print("false") }
+	if (r1 == 1) { println("true") } else { println("false") }
 	r2 <- can_jump(a2)
-	if (r2 == 1) { print("true") } else { print("false") }
+	if (r2 == 1) { println("true") } else { println("false") }
 }
 main()

@@ -7,7 +7,7 @@ rwfunc is_square(n:int64) -> () {
 	small <- n < 2
 
 	if (small) {
-		print(1)
+		println(1)
 	} else {
 		lo = 1  # = 等价于 <-
 		n / 2 -> hi
@@ -31,7 +31,7 @@ rwfunc is_square(n:int64) -> () {
 				}
 			}
 		}
-		print(ans)
+		println(ans)
 	}
 }
 

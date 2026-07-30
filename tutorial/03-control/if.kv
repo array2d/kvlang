@@ -10,11 +10,11 @@ rwfunc abs(x:int64) -> (r:int64) {
 }
 
 a = abs(-5)  # = 等价于 <-
-print("abs(-5) =", a)
+println("abs(-5) =", a)
 abs(3) -> b
-print("abs(3) =", b)
+println("abs(3) =", b)
 c <- abs(-10)
-print("abs(-10) =", c)
+println("abs(-10) =", c)
 d = b >= 90  # = 等价于 <-
-print(d)
+println(d)
 a -> /last_abs

@@ -49,7 +49,7 @@ rwfunc rotate(N:int64) -> () {
 		while (col < N) {
 			idx = row * N + col  # = 等价于 <-
 			v <- mat[idx]
-			print(v)
+			println(v)
 			col + 1 -> col
 		}
 		row + 1 -> row

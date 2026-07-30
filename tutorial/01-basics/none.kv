@@ -5,11 +5,11 @@
 #   after
 #   42
 rwfunc main() -> () {
-  print("before")
+  println("before")
   x -> y       # x 未赋值 → None，y ← None
-  print(y)     # None → 输出空行
-  print("after")
+  println(y)     # None → 输出空行
+  println("after")
   42 -> x      # 显式赋值
-  print(x)
+  println(x)
 }
 main()

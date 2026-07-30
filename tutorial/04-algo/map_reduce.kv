@@ -21,16 +21,16 @@ rwfunc main() -> () {
 		rem == 1 -> is_odd
 
 		if (is_odd) {
-			print("  keep:", n)
+			println("  keep:", n)
 			sq <- n * n
 			total = total + sq  # = 等价于 <-
 			count + 1 -> count
 		} else {
-			print("  skip:", n)
+			println("  skip:", n)
 		}
 	}
-	print("odd squares count:", count)
-	print("sum of squares:", total)
+	println("odd squares count:", count)
+	println("sum of squares:", total)
 	/last_sum <- total
 }
 

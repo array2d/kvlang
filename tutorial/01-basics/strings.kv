@@ -16,24 +16,24 @@
 #   108
 rwfunc main() -> () {
 	s = "hello"  # = 等价于 <-
-	print(s[1])
+	println(s[1])
 	s[0] = "H"  # = 等价于 <-
-	print(s)
+	println(s)
 
 	t <- "kv" + "lang"
-	print(t)
+	println(t)
 	s + " " + t -> w
-	print(w)
-	print(string.len(w))
+	println(w)
+	println(string.len(w))
 
-	print(string.cmp("abc", "abd"))
-	print(string.cmp("x", "x"))
-	print(string.find(w, "kv"))
-	print(string.find(w, "zz"))
+	println(string.cmp("abc", "abd"))
+	println(string.cmp("x", "x"))
+	println(string.find(w, "kv"))
+	println(string.find(w, "zz"))
 
 	c <- w[3]
-	print(c)
-	print(string.ord(c))
+	println(c)
+	println(string.ord(c))
 }
 
 main()

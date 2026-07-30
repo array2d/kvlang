@@ -19,7 +19,7 @@ rwfunc convert(n:int64) -> () {
 	k = idx - 1  # = 等价于 <-
 	while (k >= 0) {
 		a[k] -> v
-		print(v)
+		println(v)
 		k <- k - 1
 	}
 }

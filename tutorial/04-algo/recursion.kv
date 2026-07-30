@@ -25,9 +25,9 @@ rwfunc factorial(n:int64) -> (r:int64) {
 
 rwfunc main() -> () {
 	fib(10) -> (f, _)
-	print("fib(10) =", f)
+	println("fib(10) =", f)
 	factorial(10) -> ans
-	print("fact(10) =", ans)
+	println("fact(10) =", ans)
 	/last_fib <- f
 	/last_fact = ans  # = 等价于 <-
 }

@@ -10,7 +10,7 @@ rwfunc rob() -> () {
 
 	if (one) {
 		ans <- a[0]
-		print(ans)
+		println(ans)
 	} else {
 		p1 = a[0]  # = 等价于 <-
 		a[1] -> p2
@@ -36,7 +36,7 @@ rwfunc rob() -> () {
 			p2 <- tmp
 			i = i + 1  # = 等价于 <-
 		}
-		print(p2)
+		println(p2)
 	}
 }
 

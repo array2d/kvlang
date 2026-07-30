@@ -49,3 +49,18 @@ func readFile(path string) (string, error) {
 	}
 	return s, nil
 }
+
+// writeFileRaw 追加文本到文件（不添加换行）。
+func writeFileRaw(path, text string) error {
+	fileWritersMu.Lock()
+	defer fileWritersMu.Unlock()
+	f, ok := fileWriters[path]
+	if !ok {
+		var err error
+		f, err = os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil { return fmt.Errorf("open %s: %w", path, err) }
+		fileWriters[path] = f
+	}
+	if _, err := f.WriteString(text); err != nil { return fmt.Errorf("write %s: %w", path, err) }
+	return f.Sync()
+}

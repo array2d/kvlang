@@ -30,7 +30,7 @@ func ResolveTerm(ctx context.Context, kv kvspace.KVSpace, vtid, stream string) T
 	return TermStream{Type: tVal.Str(), Detail: dVal.Str()}
 }
 
-// WriteTerm 根据 TermStream 类型将文本写入终端。
+// WriteTerm 根据 TermStream 类型将文本写入终端（追加换行）。
 func WriteTerm(ctx context.Context, s TermStream, text string) error {
 	switch s.Type {
 	case "websocket":
@@ -39,6 +39,18 @@ func WriteTerm(ctx context.Context, s TermStream, text string) error {
 		return writeFile(s.Detail, text)
 	default:
 		return nil // 无终端，静默丢弃
+	}
+}
+
+// WriteTermRaw 同 WriteTerm 但不追加换行。
+func WriteTermRaw(ctx context.Context, s TermStream, text string) error {
+	switch s.Type {
+	case "websocket":
+		return writeWS(ctx, s.Detail, text)
+	case "file":
+		return writeFileRaw(s.Detail, text)
+	default:
+		return nil
 	}
 }
 

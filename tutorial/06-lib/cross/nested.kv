@@ -4,11 +4,11 @@
 #   42
 lib a {
     lib b {
-        rwfunc greet() -> () { print("nested") }
+        rwfunc greet() -> () { println("nested") }
     }
 }
 lib x/y {
-    rwfunc answer() -> () { print(42) }
+    rwfunc answer() -> () { println(42) }
 }
 rwfunc init() -> () {
     /lib/a/b.greet()

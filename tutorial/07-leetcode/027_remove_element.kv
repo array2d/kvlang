@@ -24,11 +24,11 @@ rwfunc remove_element() -> () {
 			i = i + 1  # = 等价于 <-
 		}
 	}
-	print("k =", k)
+	println("k =", k)
 	0 -> j
 	while (j < k) {
 		v <- a[j]
-		print(v)
+		println(v)
 		j = j + 1  # = 等价于 <-
 	}
 }

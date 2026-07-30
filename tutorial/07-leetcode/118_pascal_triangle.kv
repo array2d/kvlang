@@ -20,22 +20,22 @@
 rwfunc generate(num_rows:int64) -> () {
 	# store prev row in dict
 	_ = set("/tmp/pt", 0, 1)
-	print(1)
+	println(1)
 	if (num_rows == 1) { }
 	r = 1  # = 等价于 <-
 	while (r < num_rows) {
-		print(1)
+		println(1)
 		_ = set("/tmp/cur", 0, 1)
 		i = 1  # = 等价于 <-
 		while (i < r) {
 			/tmp/pt[i-1] -> a
 			/tmp/pt[i] -> b
 			v <- a + b
-			print(v)
+			println(v)
 			_ = set("/tmp/cur", i, v)
 			i + 1 -> i
 		}
-		print(1)
+		println(1)
 		_ = set("/tmp/cur", r, 1)
 		# copy cur to pt
 		k = 0  # = 等价于 <-

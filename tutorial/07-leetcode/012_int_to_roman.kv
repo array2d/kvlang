@@ -19,7 +19,7 @@ rwfunc int_to_roman(n:int64) -> () {
 	if (val >= 5) { result + "V" -> result ; val <- val - 5 }
 	if (val >= 4) { result + "IV" -> result ; val <- val - 4 }
 	while (val >= 1) { result + "I" -> result ; val <- val - 1 }
-	print(result)
+	println(result)
 }
 
 rwfunc main() -> () {

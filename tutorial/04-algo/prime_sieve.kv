@@ -5,7 +5,7 @@
 #   prime: 29
 #   total primes up to 30 = 10
 rwfunc prime_sieve(limit:int64) -> () {
-	print("primes up to", limit)
+	println("primes up to", limit)
 	count = 0  # = 等价于 <-
 	2 -> n
 	while (n <= limit) {
@@ -24,13 +24,13 @@ rwfunc prime_sieve(limit:int64) -> () {
 		}
 
 		if (is_prime) {
-			print("  prime:", n)
+			println("  prime:", n)
 			count = count + 1  # = 等价于 <-
 		}
 
 		n + 1 -> n
 	}
-	print("total primes up to", limit, "=", count)
+	println("total primes up to", limit, "=", count)
 	/last_primes <- count
 }
 

@@ -20,15 +20,15 @@ rwfunc chain_call(a:int64, b:int64) -> (r:int64) {
 
 rwfunc main() -> () {
 	v1 <- id_val(5)
-	print("PASS SI-1a: x=5 returns", v1)
+	println("PASS SI-1a: x=5 returns", v1)
 	v2 = id_val(10)  # = 等价于 <-
-	print("PASS SI-1b: x=10 returns", v2)
+	println("PASS SI-1b: x=10 returns", v2)
 	sum_diff(5, 3) -> (s1, d1)
-	print("PASS SI-2a: S=", s1, "D=", d1)
+	println("PASS SI-2a: S=", s1, "D=", d1)
 	sum_diff(10, 5) -> (s2, d2)
-	print("PASS SI-2b: S=", s2, "D=", d2)
+	println("PASS SI-2b: S=", s2, "D=", d2)
 	chain_call(7, 3) -> c
-	print("PASS SI-3: chain =", c)
+	println("PASS SI-3: chain =", c)
 	/last_chain <- c
 }
 

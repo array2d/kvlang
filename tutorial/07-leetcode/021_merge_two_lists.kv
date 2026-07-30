@@ -24,24 +24,24 @@ rwfunc merge(a:string, b:string) -> () {
 		pick_a <- pb == ""
 
 		if (pick_a) {
-			print(av)
+			println(av)
 			pa = pa.next  # = 等价于 <-
 		} else {
 			pb.val -> bv
 			take <- av <= bv
 
 			if (take) {
-				print(av)
+				println(av)
 				pa = pa.next  # = 等价于 <-
 			} else {
-				print(bv)
+				println(bv)
 				pb.next -> pb
 			}
 		}
 	}
 	while (pb != "") {
 		bv <- pb.val
-		print(bv)
+		println(bv)
 		pb = pb.next  # = 等价于 <-
 	}
 }

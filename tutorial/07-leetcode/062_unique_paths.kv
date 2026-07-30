@@ -25,8 +25,8 @@ rwfunc dp(m:int64, n:int64) -> (result:int64) {
 
 rwfunc main() -> () {
 	r1 <- dp(3, 7)
-	print(r1)
+	println(r1)
 	r2 = dp(3, 2)  # = 等价于 <-
-	print(r2)
+	println(r2)
 }
 main()

@@ -34,7 +34,7 @@ rwfunc plus_one() -> () {
 	j = 0  # = 等价于 <-
 	while (j < n) {
 		a[j] -> v
-		print(v)
+		println(v)
 		j <- j + 1
 	}
 }
@@ -63,7 +63,7 @@ rwfunc plus_one_nines() -> () {
 	j <- 0
 	while (j < n) {
 		v = a[j]  # = 等价于 <-
-		print(v)
+		println(v)
 		j + 1 -> j
 	}
 }

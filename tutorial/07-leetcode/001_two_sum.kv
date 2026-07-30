@@ -21,7 +21,7 @@ rwfunc two_sum(nums:int64, target:int64) -> () {
 				hit <- s == target
 
 				if (hit) {
-					print("[", i, ",", j, "]")
+					println("[", i, ",", j, "]")
 					found = 1  # = 等价于 <-
 					n -> i
 					j <- n
@@ -35,7 +35,7 @@ rwfunc two_sum(nums:int64, target:int64) -> () {
 	nf <- found == 0
 
 	if (nf) {
-		print("[-1, -1]")
+		println("[-1, -1]")
 	}
 }
 

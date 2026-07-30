@@ -14,7 +14,7 @@ rwfunc two_sum(nums:int64, target:int64) -> () {
 		if (exists) {
 			h[need] -> j
 			k = j - 1  # = 等价于 <-
-			print("[", k, ",", i, "]")
+			println("[", k, ",", i, "]")
 			n -> i
 		} else {
 			v <- i + 1

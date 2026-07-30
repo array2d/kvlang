@@ -25,10 +25,10 @@ rwfunc main() -> () {
 		factor = 5.0 / 9.0  # = 等价于 <-
 		fahr - 32 -> diff
 		cels <- factor * diff
-		print(fahr, "F =", cels, "C")
+		println(fahr, "F =", cels, "C")
 	}
 	cels = /last_temp  # = 等价于 <-
-	print("global last_temp =", cels)
+	println("global last_temp =", cels)
 }
 
 main()
