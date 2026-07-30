@@ -203,12 +203,8 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *rwir.R
 	}
 
 	// 写参零拷贝
-	callerLink := keytree.Stack(callerFrameRoot)
-	addr0 := rwir.ExtractAddr0FromPC(pc)
 	for i, ret := range funcSig.Returns {
-		wSlot := fmt.Sprintf("%s[%d,%d]", callerLink, addr0, i+1)
-		wTargetVal := kvspace.GetOne(kv, wSlot)
-		wTarget := string(wTargetVal.RawBytes())
+		wTarget := ""; if i < len(inst.Writes) { wTarget = inst.Writes[i].Name }
 		if wTarget == "" {
 			continue
 		}
@@ -423,7 +419,14 @@ func resolveWritePath(kv kvspace.KVSpace, framePath, name string) string {
 			break
 		}
 	}
-	return frameSlotKey(framePath, name)
+	rwRoot := framePath
+	for f := framePath; f != ""; f = keytree.ParentFrame(f) {
+		if !kvspace.GetOne(kv, keytree.Stack(f)+keytree.SegLib).IsNone() {
+			rwRoot = f
+			break
+		}
+	}
+	return frameSlotKey(rwRoot, name)
 }
 
 func resolveReadPath(kv kvspace.KVSpace, framePath, name string) string {
@@ -447,7 +450,7 @@ func resolveReadPath(kv kvspace.KVSpace, framePath, name string) string {
 	if v := kvspace.GetOne(kv, keytree.Stack(funcFrame)+name); !v.IsNone() {
 		return keytree.Stack(funcFrame) + name
 	}
-	return frameSlotKey(framePath, name)
+	return frameSlotKey(funcFrame, name)
 }
 
 func slotValue(val string, typeMap map[string]string) kvspace.XValue {
