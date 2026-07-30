@@ -6,6 +6,7 @@ import (
 
 	"github.com/array2d/kvspace-go"
 	"kvlang/keytree"
+	"kvlang/symbol"
 )
 
 // nativeOp 内置算子注册项。
@@ -22,6 +23,17 @@ var bg = context.Background()
 // Register 注册一个 native opcode：签名 + 实现。
 func Register(opcode, sig string, impl Op) {
 	registry[opcode] = nativeOp{sig: sig, impl: impl}
+}
+
+// registerWord 注册 word 及其全部 glyph。word 是保留字，用户不可定义同名函数。
+func registerWord(word, sig string, impl Op) {
+	Register(word, sig, impl)
+	e := symbol.ByWord(word)
+	for _, g := range e.Glyphs {
+		if g != word {
+			Register(g, strings.Replace(sig, word, g, 1), impl)
+		}
+	}
 }
 
 // countSigParams 从 "rwir name(params) -> (returns)" 签名字符串中解析读写参数量。
@@ -102,8 +114,9 @@ func OpDefs() []string {
 
 // IsUnaryNativeOp 判断是否为单目原生算子。
 func IsUnaryNativeOp(opcode string) bool {
+	if symbol.Lookup(opcode).Unary { return true }
 	switch opcode {
-	case "!", "-", "abs", "sqrt", "exp", "log", "neg", "sign", "bool":
+	case "abs", "sqrt", "exp", "log", "neg", "sign", "bool":
 		return true
 	}
 	return false

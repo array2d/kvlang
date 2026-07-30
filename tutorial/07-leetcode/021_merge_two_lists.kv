@@ -29,6 +29,7 @@ rwfunc merge(a:string, b:string) -> () {
 		} else {
 			pb.val -> bv
 			take <- av <= bv
+			take_m <- av ≤ bv
 
 			if (take) {
 				println(av)

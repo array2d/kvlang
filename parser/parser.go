@@ -23,6 +23,7 @@ import (
 
 	"kvlang/ast"
 	"kvlang/keytree"
+	"kvlang/symbol"
 )
 
 // ParseFile 打开并解析 .kv 源文件。
@@ -175,6 +176,10 @@ if p.peek().Kind == Ident && p.peek().Value == "rwir" {
 			}
 			fn := p.parseFunc()
 			fn.Comments = comments
+			if f.Package == "" && symbol.ByWord(fn.Sig.Name).Word == fn.Sig.Name {
+				p.errors = append(p.errors, Diagnostic{Pos: p.peek().Pos,
+					Message: fmt.Sprintf("function %q shadows builtin %q — wrap in 'lib pkg { }' or rename", fn.Sig.Name, fn.Sig.Name)})
+			}
 			f.Funcs = append(f.Funcs, fn)
 		} else if p.peek().Kind == If || p.peek().Kind == While || p.peek().Kind == For {
 			// 顶层裸控制流已废弃（fix-037）：必须包裹在 rwfunc main() / rwfunc init() 内
@@ -217,6 +222,7 @@ func (p *parser) parseLibBody(f *ast.File, prefix string) {
 		p.errors = append(p.errors, Diagnostic{Pos: p.peek().Pos, Info: true,
 			Message: fmt.Sprintf("package name %q expands to /lib/lib/ — consider a different name", name)})
 	}
+	prevPkg := f.Package
 	f.Package = pkg // 嵌套 lib 以最内层为准
 	p.expect(LBrace)
 	p.skipNewlines()
@@ -245,6 +251,7 @@ st := p.parseStmt()
 		p.skipNewlines()
 	}
 	p.expect(RBrace)
+	f.Package = prevPkg // 退出 lib 块，恢复外层包名
 }
 
 // parseFunc 解析单个函数定义：rwfunc name(...) -> (...) { body }

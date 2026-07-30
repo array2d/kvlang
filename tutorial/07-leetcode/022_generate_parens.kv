@@ -13,6 +13,7 @@ rwfunc generate() -> () {
 		pow <- 8
 		while (pow > 0) {
 			bit <- (idx / pow) % 2
+			bit_m <- (idx ÷ pow) % 2
 			if (bit == 0) {
 				s + "(" -> s
 				bal + 1 -> bal
@@ -22,6 +23,7 @@ rwfunc generate() -> () {
 				if (bal < 0) { 0 -> ok2 ; 0 -> pow }
 			}
 			pow / 2 -> pow
+			pow ÷ 2 -> pow_m
 		}
 		if (bal == 0 && ok2 == 1 && string.len(s) == 4) { println(s) }
 		idx + 1 -> idx

@@ -11,11 +11,14 @@ rwfunc is_square(n:int64) -> () {
 	} else {
 		lo = 1  # = 等价于 <-
 		n / 2 -> hi
+		n ÷ 2 -> hi_m
 		ans <- 0
 		while (lo <= hi) {
 			s = lo + hi  # = 等价于 <-
 			s / 2 -> mid
+			s ÷ 2 -> mid_m
 			sq <- mid * mid
+			sq_m <- mid × mid
 			eq = sq == n  # = 等价于 <-
 
 			if (eq) {

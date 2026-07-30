@@ -8,6 +8,7 @@ import (
 	"github.com/array2d/kvspace-go"
 	"kvlang/keytree"
 	"kvlang/layout"
+	"kvlang/symbol"
 	"kvlang/logx"
 	"kvlang/rwir"
 	"kvlang/rwir/builtin"
@@ -191,7 +192,7 @@ func (c *cpu) Execute(pc string) error {
 // Copy 指令由 Flat() 编码为显式操作码 "="：<value-ref> -> slot
 // 值引用在读槽（bare ident / literal / /abs），由 ExecuteCopy → resolveReadValue 解析。
 func isCopyOp(opcode string, writes []rwir.Param) bool {
-	return opcode == "=" && len(writes) > 0
+	return symbol.Lookup(opcode).Word == "assign" && len(writes) > 0
 }
 
 // checkReadOnlyWrites 读参只读公理的运行期防线（fix-027）：

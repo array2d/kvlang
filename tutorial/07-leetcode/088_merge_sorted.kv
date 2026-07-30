@@ -19,6 +19,7 @@ rwfunc merge() -> () {
 	k <- total - 1
 	while (j >= 0) {
 		i_ok = i >= 0  # = 等价于 <-
+		i_ok_m = i ≥ 0  # = 等价于 <-
 
 		if (i_ok) {
 			a[i] -> av

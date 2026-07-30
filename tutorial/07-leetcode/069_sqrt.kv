@@ -9,8 +9,11 @@ rwfunc my_sqrt(x:int64) -> () {
 	while (lo <= hi) {
 		s <- lo + hi
 		mid = s / 2  # = 等价于 <-
+		mid_m = s ÷ 2  # = 等价于 <-
 		mid * mid -> sq
+		mid × mid -> sq_m
 		ok <- sq <= x
+		ok_m <- sq ≤ x
 
 		if (ok) {
 			ans = mid  # = 等价于 <-

@@ -1,21 +1,22 @@
 # 期望输出:
-#   add(10,20) = 30
-#   double(add(10,20)) = 60
-rwfunc add(A:int64, B:int64) -> (C:int64) {
-	A + B -> C
+#   mylib.add(10,20) = 30
+#   double(mylib.add(10,20)) = 60
+lib mylib {
+	rwfunc add(A:int64, B:int64) -> (C:int64) {
+		A + B -> C
+	}
 }
 
 rwfunc double(x:int64) -> (y:int64) {
 	y <- x * 2
+	y_m <- x × 2
 }
 
 rwfunc main() -> () {
-	a = add(10, 20)  # = 等价于 <-
-	println("add(10,20) =", a)
+	a = mylib.add(10, 20)  # = 等价于 <-
+	println("mylib.add(10,20) =", a)
 	double(a) -> b
-	println("double(add(10,20)) =", b)
-	a <- /last_a
-	println("global last_a =", a)
+	println("double(mylib.add(10,20)) =", b)
 }
 
 main()

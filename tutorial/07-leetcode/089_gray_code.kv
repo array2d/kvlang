@@ -11,11 +11,14 @@ rwfunc gray_code(n:int64) -> () {
 	k = 0  # = 等价于 <-
 	while (k < n) {
 		total <- total * 2
+		total_m <- total × 2
 		k + 1 -> k
 	}
 	i = 0  # = 等价于 <-
 	while (i < total) {
 		g <- i ^ (i / 2)
+		g_m <- i ^ (i ÷ 2)
+		println(g_m)
 		println(g)
 		i + 1 -> i
 	}

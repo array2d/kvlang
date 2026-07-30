@@ -10,6 +10,7 @@ rwfunc is_power3(n:int64) -> () {
 		t = 1  # = 等价于 <-
 		while (t < n) {
 			t * 3 -> t
+			t × 3 -> t_m
 		}
 		eq <- t == n
 

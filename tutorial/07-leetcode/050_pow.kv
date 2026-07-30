@@ -17,10 +17,13 @@ rwfunc my_pow(x:float64, n:int64) -> () {
 
 		if (odd != 0) {
 			result <- result * base
+			result_m <- result × base
 		}
 
 		base = base * base  # = 等价于 <-
+		base_m = base × base  # = 等价于 <-
 		exp / 2 -> exp
+		exp ÷ 2 -> exp_m
 	}
 	println(result)
 }

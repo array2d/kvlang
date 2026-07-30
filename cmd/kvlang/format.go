@@ -48,6 +48,9 @@ func cmdFormat(args []string) {
 	for _, d := range diags {
 		d.SrcName = name; logx.Diag(d)
 	}
+	if parser.HasErrors(diags) {
+		os.Exit(1)
+	}
 
 	if *write && name != "inline" && name != "stdin" {
 		f, err := os.Create(name)

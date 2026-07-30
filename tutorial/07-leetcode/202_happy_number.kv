@@ -13,8 +13,10 @@ rwfunc is_happy(n:int64) -> (result:int64) {
 		while (x > 0) {
 			d = x % 10  # = 等价于 <-
 			d * d -> d2
+			d × d -> d2_m
 			s <- s + d2
 			x = x / 10  # = 等价于 <-
+			x_m = x ÷ 10  # = 等价于 <-
 		}
 		s -> nv
 		done <- nv == 1

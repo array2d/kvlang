@@ -8,6 +8,7 @@ rwfunc guess_number(n:int64) -> () {
 	while (lo <= hi) {
 		s = lo + hi  # = 等价于 <-
 		s / 2 -> mid
+		s ÷ 2 -> mid_m
 		low <- mid < 6
 
 		if (low) {

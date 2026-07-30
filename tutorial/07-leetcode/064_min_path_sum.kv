@@ -16,10 +16,12 @@ rwfunc min_path_sum() -> (result:int64) {
 	r = 1  # = 等价于 <-
 	while (r < rows) {
 		idx0 = r * cols  # = 等价于 <-
+		idx0_m = r × cols  # = 等价于 <-
 		grid[idx0] <- grid[idx0] + grid[idx0-cols]
 		c = 1  # = 等价于 <-
 		while (c < cols) {
 			idx = r * cols + c  # = 等价于 <-
+			idx_m = r × cols + c  # = 等价于 <-
 			up <- grid[idx-cols]
 			left = grid[idx-1]  # = 等价于 <-
 			min = up  # = 等价于 <-

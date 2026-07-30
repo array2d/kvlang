@@ -2,24 +2,40 @@
 #   add: 13
 #   sub: 7
 #   mul: 30
+#   mul(×): 30
 #   div: 3
+#   div(÷): 3
+#   mod: 1
 #   pow: 32.0
 #   sqrt: 12.0
+#   sqrt(√): 12.0
 rwfunc main() -> () {
 	10 + 3 -> add_r
 	println("add:", add_r)
-	sub_r <- 10 - 3
+
+	10 - 3 -> sub_r
 	println("sub:", sub_r)
+
 	mul_r = 10 * 3  # = 等价于 <-
 	println("mul:", mul_r)
+	mul_r2 = 10 × 3  # = 等价于 <-
+	println("mul(×):", mul_r2)
+
 	10 / 3 -> div_r
 	println("div:", div_r)
+	10 ÷ 3 -> div_r2
+	println("div(÷):", div_r2)
+
+	10 % 3 -> mod_r
+	println("mod:", mod_r)
+
 	pow_r <- pow(2, 5)
 	println("pow:", pow_r)
+
 	sqrt_r = sqrt(144)  # = 等价于 <-
 	println("sqrt:", sqrt_r)
-	0 -> /ops_count
-	/ops_count <- /ops_count + 6
+	sqrt_r2 = √(144)  # = 等价于 <-
+	println("sqrt(√):", sqrt_r2)
 }
 
 main()

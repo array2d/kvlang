@@ -16,6 +16,7 @@ rwfunc tailrec_fact(N:int64, acc:int64) -> (r:int64) {
 		acc + 0 -> r
 	} else {
 		acc1 <- acc * N
+		acc1_m <- acc × N
 		n1 = N - 1  # = 等价于 <-
 		tailrec_fact(n1, acc1) -> r
 	}

@@ -11,6 +11,7 @@ rwfunc add_digits(n:int64) -> () {
 			d <- x % 10
 			s = s + d  # = 等价于 <-
 			x / 10 -> x
+			x ÷ 10 -> x_m
 		}
 		nv <- s
 	}

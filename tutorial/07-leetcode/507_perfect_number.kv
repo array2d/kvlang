@@ -6,6 +6,7 @@ rwfunc is_perfect(n:int64) -> () {
 	sum = 1  # = 等价于 <-
 	2 -> i
 	sq <- i * i
+	sq_m <- i × i
 	while (sq <= n) {
 		rem = n % i  # = 等价于 <-
 		rem == 0 -> div
@@ -13,11 +14,13 @@ rwfunc is_perfect(n:int64) -> () {
 		if (div) {
 			sum <- sum + i
 			j = n / i  # = 等价于 <-
+			j_m = n ÷ i  # = 等价于 <-
 			sum + j -> sum
 		}
 
 		i <- i + 1
 		sq = i * i  # = 等价于 <-
+		sq_m = i × i  # = 等价于 <-
 	}
 	sum == n -> ok
 

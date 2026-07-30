@@ -5,6 +5,7 @@
 #   8
 #   3
 #   2.5
+#   2.5
 #   1
 #   1
 #   -2
@@ -12,6 +13,7 @@
 #   true
 #   false
 #   true
+#   8.0
 #   8.0
 #   3
 #   8.0
@@ -28,6 +30,8 @@ rwfunc main() -> () {
 	println(b)
 	# 算术 — 混合 int+float（float 提升）
 	7.5 / 3 -> c
+	7.5 ÷ 3 -> c_m
+	println(c_m)
 	println(c)
 	7 % 3 -> d
 	println(d)
@@ -51,6 +55,8 @@ rwfunc main() -> () {
 
 	# 数学函数 — 仅数字
 	sqrt(64.0) -> k
+	√(64.0) -> k_m
+	println(k_m)
 	println(k)
 	abs(-3) -> l
 	println(l)

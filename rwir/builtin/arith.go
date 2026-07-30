@@ -9,11 +9,11 @@ import (
 )
 
 func init() {
-	Register("+", "rwir +(A:num, B:num) -> (C:num)", arith{f: func(a, b float64) float64 { return a + b }, fi: func(a, b int64) int64 { return a + b }, concat: true})
-	Register("-", "rwir -(A:num, B:num) -> (C:num)", arith{f: func(a, b float64) float64 { return a - b }, fi: func(a, b int64) int64 { return a - b }, unary: true})
-	Register("*", "rwir *(A:num, B:num) -> (C:num)", arith{f: func(a, b float64) float64 { return a * b }, fi: func(a, b int64) int64 { return a * b }})
-	Register("/", "rwir /(A:num, B:num) -> (C:num)", div{})
-	Register("%", "rwir %(A:int64, B:int64) -> (C:int64)", mod{})
+	registerWord("add", "rwir add(A:num, B:num) -> (C:num)", arith{f: func(a, b float64) float64 { return a + b }, fi: func(a, b int64) int64 { return a + b }, concat: true})
+	registerWord("sub", "rwir sub(A:num, B:num) -> (C:num)", arith{f: func(a, b float64) float64 { return a - b }, fi: func(a, b int64) int64 { return a - b }, unary: true})
+	registerWord("mul", "rwir mul(A:num, B:num) -> (C:num)", arith{f: func(a, b float64) float64 { return a * b }, fi: func(a, b int64) int64 { return a * b }})
+	registerWord("div", "rwir div(A:num, B:num) -> (C:num)", div{})
+	registerWord("mod", "rwir mod(A:int64, B:int64) -> (C:int64)", mod{})
 }
 
 type arith struct{ f func(float64, float64) float64; fi func(int64, int64) int64; unary, concat bool }

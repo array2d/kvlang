@@ -14,7 +14,7 @@ func init() {
 	Register("pow",  "rwir pow(A:num, B:num) -> (C:float64)", mOp{kind: "pow"})
 	Register("min",  "rwir min(A:num, B:num) -> (C:num)",     mOp{kind: "min"})
 	Register("max",  "rwir max(A:num, B:num) -> (C:num)",     mOp{kind: "max"})
-	Register("sqrt", "rwir sqrt(A:num) -> (C:float64)",       mOp{kind: "sqrt"})
+	registerWord("sqrt", "rwir sqrt(A:num) -> (C:float64)", mOp{kind: "sqrt"})
 	Register("exp",  "rwir exp(A:num) -> (C:float64)",        mOp{kind: "exp"})
 	Register("log",  "rwir log(A:num) -> (C:float64)",        mOp{kind: "log"})
 	Register("neg",  "rwir neg(A:num) -> (C:num)",            mOp{kind: "neg"})

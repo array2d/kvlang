@@ -29,6 +29,7 @@ rwfunc is_valid(s:string) -> (ok:int64) {
 				/tmp/vp[si] -> top
 				si - 1 -> si
 				if (top != 1) { ok = 0 ; n -> i }  # = 等价于 <-
+				if (top ≠ 1) { ok_m = 0 ; n -> i }  # = 等价于 <-
 			}
 		}
 		if (c == "]") {
@@ -37,6 +38,7 @@ rwfunc is_valid(s:string) -> (ok:int64) {
 				/tmp/vp[si] -> top
 				si - 1 -> si
 				if (top != 2) { 0 -> ok ; n -> i }  # = 等价于 <-
+				if (top ≠ 2) { 0 -> ok_m ; n -> i }  # = 等价于 <-
 			}
 		}
 		if (c == "}") {
@@ -45,11 +47,13 @@ rwfunc is_valid(s:string) -> (ok:int64) {
 				/tmp/vp[si] -> top
 				si = si - 1  # = 等价于 <-
 				if (top != 3) { ok <- 0 ; i = n }  # = 等价于 <-
+				if (top ≠ 3) { ok_m <- 0 ; i = n }  # = 等价于 <-
 			}
 		}
 		i = i + 1  # = 等价于 <-
 	}
 	if (si >= 0) { 0 -> ok }
+	if (si ≥ 0) { 0 -> ok_m }
 }
 
 rwfunc main() -> () {

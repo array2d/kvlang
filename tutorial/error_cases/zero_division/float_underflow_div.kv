@@ -2,6 +2,8 @@
 #   division by zero
 rwfunc main() -> () {
     1.0 / 1e-20 -> x
+    1.0 ÷ 1e-20 -> x_m
+    println(x_m)
     println(x)
 }
 main()

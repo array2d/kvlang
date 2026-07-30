@@ -10,12 +10,14 @@ import (
 )
 
 func init() {
-	Register("==", "rwir ==(A:num, B:num) -> (C:bool)", cmp{f: func(a, b float64) bool { return a == b }, i: func(a, b int64) bool { return a == b }, s: func(a, b string) bool { return a == b }, allowNull: true})
-	Register("!=", "rwir !=(A:num, B:num) -> (C:bool)", cmp{f: func(a, b float64) bool { return a != b }, i: func(a, b int64) bool { return a != b }, s: func(a, b string) bool { return a != b }, allowNull: true})
-	Register("<",  "rwir <(A:num, B:num) -> (C:bool)",  cmp{f: func(a, b float64) bool { return a < b },  i: func(a, b int64) bool { return a < b },  s: func(a, b string) bool { return a < b }})
-	Register(">",  "rwir >(A:num, B:num) -> (C:bool)",  cmp{f: func(a, b float64) bool { return a > b },  i: func(a, b int64) bool { return a > b },  s: func(a, b string) bool { return a > b }})
-	Register("<=", "rwir <=(A:num, B:num) -> (C:bool)", cmp{f: func(a, b float64) bool { return a <= b }, i: func(a, b int64) bool { return a <= b }, s: func(a, b string) bool { return a <= b }})
-	Register(">=", "rwir >=(A:num, B:num) -> (C:bool)", cmp{f: func(a, b float64) bool { return a >= b }, i: func(a, b int64) bool { return a >= b }, s: func(a, b string) bool { return a >= b }})
+	eqCmp := cmp{f: func(a, b float64) bool { return a == b }, i: func(a, b int64) bool { return a == b }, s: func(a, b string) bool { return a == b }, allowNull: true}
+	registerWord("eq",  "rwir eq(A:num, B:num) -> (C:bool)",  eqCmp)
+	neqCmp := cmp{f: func(a, b float64) bool { return a != b }, i: func(a, b int64) bool { return a != b }, s: func(a, b string) bool { return a != b }, allowNull: true}
+	registerWord("neq", "rwir neq(A:num, B:num) -> (C:bool)", neqCmp)
+	registerWord("lt",  "rwir lt(A:num, B:num) -> (C:bool)",  cmp{f: func(a, b float64) bool { return a < b },  i: func(a, b int64) bool { return a < b },  s: func(a, b string) bool { return a < b }})
+	registerWord("gt",  "rwir gt(A:num, B:num) -> (C:bool)",  cmp{f: func(a, b float64) bool { return a > b },  i: func(a, b int64) bool { return a > b },  s: func(a, b string) bool { return a > b }})
+	registerWord("le",  "rwir le(A:num, B:num) -> (C:bool)",  cmp{f: func(a, b float64) bool { return a <= b }, i: func(a, b int64) bool { return a <= b }, s: func(a, b string) bool { return a <= b }})
+	registerWord("ge",  "rwir ge(A:num, B:num) -> (C:bool)",  cmp{f: func(a, b float64) bool { return a >= b }, i: func(a, b int64) bool { return a >= b }, s: func(a, b string) bool { return a >= b }})
 }
 
 type cmp struct {

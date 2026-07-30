@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"kvlang/ast"
+	"kvlang/symbol"
 	"kvlang/rwir"
 )
 
@@ -63,17 +64,9 @@ func inferBody(body []ast.Stmt, tm map[string]string) {
 	}
 }
 
-// arithmeticOps 是需要做数值类型推导的算术/位运算算子。
-var arithmeticOps = map[string]bool{
-	"+": true, "-": true, "*": true, "/": true, "%": true,
-	"<<": true, ">>": true, "&": true, "|": true, "^": true,
-}
+// arithmeticOps 委托给 ops 包，禁止 hardcode。
 
-// comparisonOps 产 bool 的比较/逻辑算子。
-var comparisonOps = map[string]bool{
-	"==": true, "!=": true, "<": true, ">": true, "<=": true, ">=": true,
-	"&&": true, "||": true,
-}
+// comparisonOps 委托给 ops 包，禁止 hardcode。
 
 // castOps 是类型转换算子，opcode 即目标类型。
 var castOps = map[string]bool{
@@ -115,20 +108,15 @@ func inferOpType(opcode string, reads []string, tm map[string]string) string {
 	}
 
 	// 拷贝：继承源操作数类型
-	if opcode == "=" {
+	if symbol.Lookup(opcode).Word == "assign" {
 		if len(reads) > 0 {
 			return slotType(reads[0], tm)
 		}
 		return ""
 	}
 
-	// 一元取反 ! → bool
-	if opcode == "!" {
-		return "bool"
-	}
-
 	// 算术算子：从操作数类型推断 int/float
-	if arithmeticOps[opcode] {
+	if symbol.Lookup(opcode).Arith {
 		for _, r := range reads {
 			if slotType(r, tm) == "float64" {
 				return "float64"
@@ -138,7 +126,7 @@ func inferOpType(opcode string, reads []string, tm map[string]string) string {
 	}
 
 	// 比较/逻辑算子 → bool
-	if comparisonOps[opcode] {
+	if symbol.Lookup(opcode).Cmp {
 		return "bool"
 	}
 

@@ -7,6 +7,7 @@ rwfunc trailing(n:int64) -> () {
 	0 -> count
 	while (nv >= 5) {
 		nv <- nv / 5
+		nv_m <- nv ÷ 5
 		count = count + nv  # = 等价于 <-
 	}
 	println(count)

@@ -9,11 +9,11 @@ import (
 )
 
 func init() {
-	Register("&",  "rwir &(A:int64, B:int64) -> (C:int64)",  bit{f: func(a, b int64) int64 { return a & b }})
-	Register("|",  "rwir |(A:int64, B:int64) -> (C:int64)",  bit{f: func(a, b int64) int64 { return a | b }})
-	Register("^",  "rwir ^(A:int64, B:int64) -> (C:int64)",  bit{f: func(a, b int64) int64 { return a ^ b }})
-	Register("<<", "rwir <<(A:int64, B:int64) -> (C:int64)", bit{f: func(a, b int64) int64 { return a << uint64(b) }})
-	Register(">>", "rwir >>(A:int64, B:int64) -> (C:int64)", bit{f: func(a, b int64) int64 { return a >> uint64(b) }})
+	registerWord("bitand", "rwir bitand(A:int64, B:int64) -> (C:int64)", bit{f: func(a, b int64) int64 { return a & b }})
+	registerWord("bitor",  "rwir bitor(A:int64, B:int64) -> (C:int64)",  bit{f: func(a, b int64) int64 { return a | b }})
+	registerWord("bitxor", "rwir bitxor(A:int64, B:int64) -> (C:int64)", bit{f: func(a, b int64) int64 { return a ^ b }})
+	registerWord("shl",    "rwir shl(A:int64, B:int64) -> (C:int64)",    bit{f: func(a, b int64) int64 { return a << uint64(b) }})
+	registerWord("shr",    "rwir shr(A:int64, B:int64) -> (C:int64)",    bit{f: func(a, b int64) int64 { return a >> uint64(b) }})
 }
 
 type bit struct{ f func(int64, int64) int64 }

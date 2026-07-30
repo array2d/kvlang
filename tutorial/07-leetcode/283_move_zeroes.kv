@@ -14,6 +14,7 @@ rwfunc move_zeroes() -> () {
 	while (i < n) {
 		a[i] -> x
 		nz = x != 0  # = 等价于 <-
+		nz_m = x ≠ 0  # = 等价于 <-
 
 		if (nz) {
 			a[w] <- x

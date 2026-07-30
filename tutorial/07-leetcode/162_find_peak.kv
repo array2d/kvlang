@@ -10,6 +10,7 @@ rwfunc find_peak() -> () {
 	while (lo < hi) {
 		s = lo + hi  # = 等价于 <-
 		s / 2 -> mid
+		s ÷ 2 -> mid_m
 		mv <- a[mid]
 		nv = a[mid + 1]  # = 等价于 <-
 		mv < nv -> up

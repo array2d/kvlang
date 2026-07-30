@@ -11,6 +11,7 @@ rwfunc is_power(n:int64) -> (r:int64) {
 		t <- 1
 		while (t < n) {
 			t = t * 2  # = 等价于 <-
+			t_m = t × 2  # = 等价于 <-
 		}
 		t == n -> eq
 

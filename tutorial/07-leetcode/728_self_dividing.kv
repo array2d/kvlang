@@ -29,6 +29,7 @@ rwfunc is_self(n:int64) -> (r:bool) {
 
 			if (div) {
 				num = num / 10  # = 等价于 <-
+				num_m = num ÷ 10  # = 等价于 <-
 			} else {
 				false -> ok
 				num <- 0

@@ -10,42 +10,49 @@ rwfunc build_lists() -> () {
 	{ val=3; next="" } -> /l1_2
 	/l2_0 <- { val=5; next="/l2_1" }
 	{ val=6; next="/l2_2" } -> /l2_1
-	/l2_2 = { val=4; next="" }  # = 等价于 <-
+	/l2_2 = { val=4; next="" }
 }
 
+lib lc {
 rwfunc add(a:string, b:string) -> () {
-	carry = 0  # = 等价于 <-
-	result = {}  # = 等价于 <-
+	carry = 0
+	result = {  }
 	0 -> ri
 	pa <- a
-	pb = b  # = 等价于 <-
+	pb = b
 	while (pa != "" || pb != "" || carry != 0) {
 		sum <- carry
+
 		if (pa != "") {
 			pa.val -> av
 			sum + av -> sum
-			pa = pa.next  # = 等价于 <-
+			pa = pa.next
 		}
+
 		if (pb != "") {
 			pb.val -> bv
 			bv + sum -> sum
 			pb.next -> pb
 		}
+
 		digit <- sum % 10
-		_ = set(result, ri, digit)  # = 等价于 <-
+		result[ri] = digit
 		ri + 1 -> ri
 		sum / 10 -> carry
+		sum ÷ 10 -> carry_m
 	}
-	i = ri - 1  # = 等价于 <-
+	i = ri - 1
 	while (i >= 0) {
 		v <- result[i]
 		println(v)
 		i - 1 -> i
 	}
 }
+}
 
 rwfunc main() -> () {
 	build_lists()
-	add("/l1_0", "/l2_0")
+	lc.add("/l1_0", "/l2_0")
 }
+
 main()

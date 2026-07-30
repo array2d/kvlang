@@ -5,6 +5,8 @@ package parser
 import (
 	"fmt"
 	"strings"
+
+	"kvlang/symbol"
 )
 
 // Pos 携带 Token 在源码中的起始位置。
@@ -253,20 +255,44 @@ func Scan(src string) []Token {
 			continue
 		}
 
-		// 双字符算子（在单字符之前匹配）
+		// 双字符算子
+		isTwoCharOp := false
 		if i+1 < len(src) {
-			switch src[i : i+2] {
-			case "==", "!=", "<=", ">=", "&&", "||", "<<", ">>":
-				tokens = append(tokens, Token{Kind: Ident, Value: src[i : i+2], Pos: p})
-				i += 2
-				continue
+			two := src[i : i+2]
+			for _, op := range symbol.ScannerTwoCharOps() {
+				if two == op {
+					tokens = append(tokens, Token{Kind: Ident, Value: two, Pos: p})
+					i += 2
+					isTwoCharOp = true
+					break
+				}
 			}
 		}
+		if isTwoCharOp { continue }
 
-		// 赋值算子 = —— Arrow token，≡ <-（"==" 已被双字符分支消费）
+		// 赋值算子 =
 		if c == '=' {
 			tokens = append(tokens, Token{Kind: Arrow, Value: "=", Pos: p})
 			i++
+			continue
+		}
+
+		// '/' — // 行注释 或 绝对路径字面量 或 除法算子
+		if c == '/' {
+			// // 行注释：跳到行尾，不产生 Token
+			if i+1 < len(src) && src[i+1] == '/' {
+				for i < len(src) && src[i] != '\n' { i++ }
+				continue
+			}
+			if i+1 < len(src) && isAbsPathStart(src[i+1]) {
+				start := i
+				i++
+				for i < len(src) && (!isTokenDelim(src[i]) || src[i] == '.') { i++ }
+				tokens = append(tokens, Token{Kind: Literal, Value: src[start:i], Pos: p})
+			} else {
+				tokens = append(tokens, Token{Kind: Ident, Value: "/", Pos: p})
+				i++
+			}
 			continue
 		}
 
@@ -278,19 +304,30 @@ func Scan(src string) []Token {
 		}
 
 		// 单字符符号算子
-		switch c {
-		case '+', '*', '%', '!', '<', '>', '&', '|', '^':
-			tokens = append(tokens, Token{Kind: Ident, Value: string(c), Pos: p})
-			i++
-			continue
+		isSingleCharOp := false
+		for _, b := range symbol.ScannerOneCharOps() {
+			if c == b {
+				tokens = append(tokens, Token{Kind: Ident, Value: string(c), Pos: p})
+				i++
+				isSingleCharOp = true
+				break
+			}
 		}
+		if isSingleCharOp { continue }
 
-		// '-' 单独处理（已排除 -> 的情况）
-		if c == '-' {
-			tokens = append(tokens, Token{Kind: Ident, Value: "-", Pos: p})
-			i++
-			continue
+		// Unicode 符号算子（× ÷ ≠ ≤ ≥ ∧ ∨ ¬ √ ⊗）
+		matched := false
+		for _, op := range symbol.UnicodeOps() {
+			if strings.HasPrefix(src[i:], op) {
+				tokens = append(tokens, Token{Kind: Ident, Value: op, Pos: p})
+				i += len(op)
+				matched = true
+				break
+			}
 		}
+		if matched { continue }
+
+
 
 		// 数字字面量（对齐 Go strconv.ParseFloat 格式）：
 		//
@@ -327,29 +364,7 @@ func Scan(src string) []Token {
 			continue
 		}
 
-		// '/' — // 行注释 或 绝对路径字面量 或 除法算子
-		if c == '/' {
-			// // 行注释：跳到行尾，不产生 Token
-			if i+1 < len(src) && src[i+1] == '/' {
-				for i < len(src) && src[i] != '\n' {
-					i++
-				}
-				continue
-			}
-			if i+1 < len(src) && isAbsPathStart(src[i+1]) {
-				start := i
-				i++
-				// 路径字面量中 . 不作为分隔符——/lib/math.sum 是单个 token（fix-039）
-				for i < len(src) && (!isTokenDelim(src[i]) || src[i] == '.') {
-					i++
-				}
-				tokens = append(tokens, Token{Kind: Literal, Value: src[start:i], Pos: p})
-			} else {
-				tokens = append(tokens, Token{Kind: Ident, Value: "/", Pos: p})
-				i++
-			}
-			continue
-		}
+
 
 		// 关键字 / 标识符（含点号：tensor.new 等）
 		start := i

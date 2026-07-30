@@ -7,9 +7,9 @@ import (
 )
 
 func init() {
-	Register("&&", "rwir &&(A:bool, B:bool) -> (C:bool)", logic{f: func(a, b bool) bool { return a && b }})
-	Register("||", "rwir ||(A:bool, B:bool) -> (C:bool)", logic{f: func(a, b bool) bool { return a || b }})
-	Register("!",  "rwir !(A:bool) -> (C:bool)",          not{})
+	registerWord("and", "rwir and(A:bool, B:bool) -> (C:bool)", logic{f: func(a, b bool) bool { return a && b }})
+	registerWord("or",  "rwir or(A:bool, B:bool) -> (C:bool)",  logic{f: func(a, b bool) bool { return a || b }})
+	registerWord("not", "rwir not(A:bool) -> (C:bool)",          not{})
 }
 
 type logic struct{ f func(bool, bool) bool }

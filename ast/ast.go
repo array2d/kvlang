@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"kvlang/keytree"
+	"kvlang/symbol"
 )
 
 // Stmt 表示函数体中的一条语句。
@@ -180,19 +181,9 @@ func RawStr(v string) *Expr { return &Expr{Val: v, Quote: '`'} }
 // Call 构造调用/操作节点（算子或函数名 + 操作数列表）。
 func Call(op string, args ...*Expr) *Expr { return &Expr{Op: op, Args: args} }
 
-// infixPrecTable 中缀算子优先级表（值越大优先级越高）。
-var infixPrecTable = map[string]int{
-	"||": 10, "&&": 20,
-	"==": 30, "!=": 30,
-	"<": 40, ">": 40, "<=": 40, ">=": 40,
-	"+": 50, "-": 50,
-	"*": 60, "/": 60, "%": 60,
-	"<<": 70, ">>": 70,
-	"&": 80, "^": 90, "|": 100,
-}
-
 // InfixPrec 返回算子的中缀优先级（0 = 非中缀/不支持）。
-func InfixPrec(op string) int { return infixPrecTable[op] }
+// 委托给 ops 包，禁止在此 hardcode 优先级。
+func InfixPrec(op string) int { return symbol.Lookup(op).Precedence }
 
 // String 返回表达式的规范文本表示（保留优先级，必要时添加括号）。
 func (e *Expr) String() string {
@@ -203,6 +194,9 @@ func (e *Expr) String() string {
 }
 
 func (e *Expr) stringPrec(outerPrec int) string {
+	if e == nil {
+		return "<?>"
+	}
 	if e.IsLeaf() {
 		if e.Quote != 0 {
 			if e.Quote == '"' {
@@ -213,7 +207,7 @@ func (e *Expr) stringPrec(outerPrec int) string {
 		return e.Val
 	}
 	// 二元中缀
-	if p, ok := infixPrecTable[e.Op]; ok && len(e.Args) == 2 {
+	if p := symbol.Lookup(e.Op).Precedence; p > 0 && len(e.Args) == 2 {
 		left := e.Args[0].stringPrec(p)
 		right := e.Args[1].stringPrec(p + 1)
 		s := left + " " + e.Op + " " + right
@@ -249,8 +243,8 @@ type Instruction struct {
 
 // leftArrow 返回写槽在左时的算子渲染形态。
 func (i *Instruction) leftArrow() string {
-	if i.Eq { return " = " }
-	return " <- "
+	if i.Eq { return symbol.ArrowEq }
+	return symbol.ArrowLeft
 }
 
 // Flat 返回用于 KV 布局的扁平 (opcode, reads) 表示。
@@ -336,7 +330,7 @@ func (i *Instruction) String() string {
 			if i.ArrowLeft {
 				return writes + i.leftArrow() + s
 			}
-			return s + " -> " + writes
+			return s + symbol.ArrowRight + writes
 		}
 		return s
 	}
@@ -351,7 +345,7 @@ func (i *Instruction) String() string {
 			if i.ArrowLeft {
 				return writes + i.leftArrow() + s
 			}
-			return s + " -> " + writes
+			return s + symbol.ArrowRight + writes
 		}
 		return s
 	}
@@ -376,7 +370,7 @@ func (i *Instruction) String() string {
 		if i.ArrowLeft {
 			s = writes + i.leftArrow() + s
 		} else {
-			s += " -> " + writes
+			s += symbol.ArrowRight + writes
 		}
 	}
 	return s
@@ -569,9 +563,8 @@ func needsQuote(s string) bool {
 
 // isOperatorChar reports whether c is a punctuation operator (not a function name).
 func isOperatorChar(c byte) bool {
-	switch c {
-	case '+', '-', '*', '/', '%', '!', '=', '<', '>', '&', '|', '^':
-		return true
+	for _, b := range symbol.ScannerOneCharOps() {
+		if c == b { return true }
 	}
 	return false
 }

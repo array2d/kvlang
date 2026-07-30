@@ -13,6 +13,7 @@ rwfunc search_insert() -> () {
 	while (lo <= hi) {
 		s = lo + hi  # = 等价于 <-
 		s / 2 -> mid
+		s ÷ 2 -> mid_m
 		mv <- a[mid]
 		eq = mv == target  # = 等价于 <-
 

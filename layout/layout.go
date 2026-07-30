@@ -24,6 +24,7 @@ import (
 
 	"kvlang/ast"
 	"kvlang/keytree"
+	"kvlang/symbol"
 	"github.com/array2d/kvspace-go"
 	"kvlang/lower"
 	"kvlang/rwir"
@@ -53,7 +54,7 @@ func writeStmt(kv kvspace.KVSpace, st ast.Stmt, prefix string, idx *int, typeMap
 		opcode, reads := s.Flat()
 		if pkg != "" && !builtin.IsNativeOp(opcode) && !rwir.IsControlOp(opcode) &&
 			!strings.Contains(opcode, keytree.FuncPathSep) && !strings.HasPrefix(opcode, keytree.LibRoot+keytree.PathSegSep) &&
-			opcode != "=" {
+			symbol.Lookup(opcode).Word != "assign" {
 			opcode = pkg + keytree.FuncPathSep + opcode
 		}
 		pairs := make([]kvspace.KVPair, 0, 1+len(reads)+len(s.Writes))
@@ -99,7 +100,7 @@ func writeStmtScope2(kv kvspace.KVSpace, st ast.Stmt, scopePrefix string, idx *i
 		opcode, reads := s.Flat()
 		if pkg != "" && !builtin.IsNativeOp(opcode) && !rwir.IsControlOp(opcode) &&
 			!strings.Contains(opcode, keytree.FuncPathSep) && !strings.HasPrefix(opcode, keytree.LibRoot+keytree.PathSegSep) &&
-			opcode != "=" {
+			symbol.Lookup(opcode).Word != "assign" {
 			opcode = pkg + keytree.FuncPathSep + opcode
 		}
 		pairs := make([]kvspace.KVPair, 0, 1+len(reads)+len(s.Writes))

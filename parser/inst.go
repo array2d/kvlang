@@ -12,6 +12,7 @@ import (
 	"kvlang/keytree"
 
 	"kvlang/ast"
+	"kvlang/symbol"
 )
 
 // parseInst 直接在 token 流上解析一条指令（Pratt 递归下降）。
@@ -204,7 +205,7 @@ func (p *parser) parsePrimaryExpr() *ast.Expr {
 		p.advance()
 		// 优化：-<数字字面量> 直接合并为负数叶节点（如 -42 → Leaf("-42")），
 		// 避免产生 Call("-", Leaf("42")) 的嵌套结构，符合读写码"参数为叶节点"约束。
-		if t.Value == "-" {
+		if symbol.Lookup(t.Value).Word == "sub" {
 			next := p.peek()
 			if next.Kind == Literal && len(next.Value) > 0 && next.Value[0] >= '0' && next.Value[0] <= '9' {
 				lit := p.advance()
@@ -212,7 +213,7 @@ func (p *parser) parsePrimaryExpr() *ast.Expr {
 			}
 		}
 		// PC3: unary + is identity — return operand directly
-		if t.Value == "+" {
+		if symbol.Lookup(t.Value).Word == "add" {
 			return p.parsePratt(unaryPrec)
 		}
 		arg := p.parsePratt(unaryPrec)
@@ -534,7 +535,7 @@ func (p *parser) parseCondInst() *ast.Instruction {
 
 // ── 算子判断 ──────────────────────────────────────────────────
 
-func isUnaryPrefixOp(s string) bool { return s == "!" || s == "-" || s == "+" }
+func isUnaryPrefixOp(s string) bool { return symbol.Lookup(s).Unary }
 
 // isNumericLiteral 判断字符串是否为合法数字字面量。
 //

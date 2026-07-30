@@ -18,6 +18,7 @@ rwfunc product() -> () {
 		result[i] <- prefix
 		x = a[i]  # = 等价于 <-
 		prefix * x -> prefix
+		prefix × x -> prefix_m
 		i <- i + 1
 	}
 	# multiply by suffix products
@@ -25,9 +26,11 @@ rwfunc product() -> () {
 	while (j >= 0) {
 		result[j] -> rv
 		newv <- suffix * rv
+		newv_m <- suffix × rv
 		result[j] <- newv
 		y = a[j]  # = 等价于 <-
 		suffix * y -> suffix
+		suffix × y -> suffix_m
 		j <- j - 1
 	}
 	k = 0  # = 等价于 <-

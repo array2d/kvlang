@@ -17,10 +17,12 @@ rwfunc my_atoi(s:string) -> (result:int64) {
 		digit <- string.ord(c2) - 48
 		if (digit >= 0 && digit <= 9) {
 			result = result * 10 + digit  # = 等价于 <-
+			result_m = result × 10 + digit  # = 等价于 <-
 			i + 1 -> i
 		} else { n -> i }
 	}
 	result <- result * sign
+	result_m <- result × sign
 }
 
 rwfunc main() -> () {

@@ -40,6 +40,7 @@ def main():
     ap = argparse.ArgumentParser(description="tutorial test")
     ap.add_argument("--filter", default="", help="filter by name")
     ap.add_argument("--no-build", action="store_true", help="skip make build")
+    ap.add_argument("--errorexit", action="store_true", help="exit on first error")
     args = ap.parse_args()
 
     if not args.no_build:
@@ -64,11 +65,7 @@ def main():
             continue
         rel = str(f.relative_to(ROOT))
         try:
-            # kvspace CLI 已迁至 kvspace-go 仓（cmd/kvspace），经 PATH 调用；CI 中不可用时跳过。
-            try:
-                subprocess.run(["kvspace", "clear"], capture_output=True, timeout=5)
-            except FileNotFoundError:
-                pass
+            subprocess.run(["redis-cli", "-p", "6379", "FLUSHALL"], capture_output=True, timeout=5)
             r = subprocess.run([KV, rel], capture_output=True, text=True,
                                timeout=60, cwd=str(ROOT))
             all_ok = True
@@ -88,9 +85,15 @@ def main():
                 passed += 1
             else:
                 failed += 1
+                if args.errorexit:
+                    print(f"\n{YELLOW}errorexit: stopping at first failure{NC}")
+                    sys.exit(1)
         except subprocess.TimeoutExpired:
             print(f"{RED}❌ kvlang {rel}: timeout{NC}")
             failed += 1
+            if args.errorexit:
+                print(f"\n{YELLOW}errorexit: stopping at first failure{NC}")
+                sys.exit(1)
 
     print(f"\n{YELLOW}══ {GREEN}PASS:{passed}{YELLOW}  {RED}FAIL:{failed}{YELLOW} ══{NC}")
     sys.exit(0 if failed == 0 else 1)
