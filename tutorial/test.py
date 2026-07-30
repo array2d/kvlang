@@ -72,6 +72,12 @@ def main():
             r = subprocess.run([KV, rel], capture_output=True, text=True,
                                timeout=60, cwd=str(ROOT))
             all_ok = True
+            if r.returncode != 0:
+                all_ok = False
+                print(f"{RED}❌ kvlang {rel}: exit code {r.returncode}{NC}")
+            if r.stderr.strip():
+                all_ok = False
+                print(f"{RED}❌ kvlang {rel}: stderr — {r.stderr.strip()[:200]}{NC}")
             for pat in expects:
                 if pat not in r.stdout:
                     all_ok = False

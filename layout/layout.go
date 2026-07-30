@@ -175,8 +175,8 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *rwir.R
 	kv.Set([]kvspace.KVPair{
 		{keytree.ReturnPC(frameRoot), kvspace.String(rwir.NextPC(pc))},
 		{keytree.CallPC(frameRoot), kvspace.String(keytree.EntryPC(frameRoot))},
-		{frameRoot + keytree.MemberSep + keytree.SegRParam + "/", kvspace.Raw(kvspace.KindIndex, nil)},
-		{frameRoot + keytree.MemberSep + keytree.SegWParam + "/", kvspace.Raw(kvspace.KindIndex, nil)},
+		{keytree.Stack(frameRoot) + keytree.ReservedPrefix + keytree.SegRParam + "/", kvspace.Raw(kvspace.KindIndex, nil)},
+		{keytree.Stack(frameRoot) + keytree.ReservedPrefix + keytree.SegWParam + "/", kvspace.Raw(kvspace.KindIndex, nil)},
 			{keytree.Stack(frameRoot) + keytree.SegLib, kvspace.String(funcKey)},
 	})
 

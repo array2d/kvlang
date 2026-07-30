@@ -17,7 +17,7 @@ type Op interface {
 // Dispatch 根据 opcode 分发算子。
 func Dispatch(opcode string) (Op, bool) {
 	o, ok := registry[opcode]
-	return o, ok
+	return o.impl, ok && o.impl != nil
 }
 
 // Native 内建算子入口：Dispatch → Call。

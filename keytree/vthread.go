@@ -8,11 +8,11 @@ import (
 // ── vthread 路径工具 ────────────────────────────────────────────────
 
 const VthreadRoot = PathSegSep + PathSegVthread
-const VthreadSeq  = VthreadRoot + PathSegSep + SegSeq
+const VthreadSeq  = VthreadRoot + PathSegSep + ReservedPrefix + SegSeq
 
 func VThread(vtid string) string { return VthreadRoot + PathSegSep + vtid }
 
-func vtMember(vtid, seg string) string { return VThread(vtid) + MemberSep + seg }
+func vtMember(vtid, seg string) string { return VThread(vtid) + PathSegSep + ReservedPrefix + seg }
 
 func VThreadPC(vtid string) string              { return vtMember(vtid, SegPC) }
 func VThreadStatus(vtid string) string          { return vtMember(vtid, SegStatus) }

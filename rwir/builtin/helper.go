@@ -68,8 +68,9 @@ func writeResult(f *rwir.Frame, result kvspace.XValue) error {
 	return nil
 }
 
-// resolveWriteSlot 返回写槽在 rwfunc 帧的绝对 key（先查 .wparam 重定向）。
+// resolveWriteSlot 返回写槽的绝对 KV key（先查 .wparam 重定向，再处理绝对路径）。
 func resolveWriteSlot(kv kvspace.KVSpace, framePath, name string) string {
+	if isAbsolute(name) { return name }
 	rwRoot := funcFrameRoot(kv, framePath)
 	if r := kvspace.GetOne(kv, keytree.WParam(rwRoot, name)); !r.IsNone() {
 		return r.Str()

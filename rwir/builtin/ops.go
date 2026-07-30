@@ -8,29 +8,20 @@ import (
 	"kvlang/keytree"
 )
 
-// nativeOps VM 原生求值的算子集合（各 op 文件 init() 自行注册）。
-var nativeOps = map[string]bool{}
+// nativeOp 内置算子注册项。
+type nativeOp struct {
+	sig  string // 签名: "rwir op(reads...) -> (writes...)"
+	impl Op     // nil 表示无实现（仅占位，非 VM 原生求值）
+}
 
-// nativeSigs 内置算子签名（各 op 文件 init() 自行注册）。
-// 格式: "rwir op(reads...) -> (writes...)"
-// 类型: num(int64/float64), int64, float64, bool, string, any
-var nativeSigs = map[string]string{}
-
-// registry opcode → Op 实现（各 op 文件 init() 自行注册）。
-var registry = map[string]Op{}
+// registry opcode → nativeOp（各 op 文件 init() 自行注册）。
+var registry = map[string]nativeOp{}
 
 var bg = context.Background()
 
 // Register 注册一个 native opcode：签名 + 实现。
-// impl 为 nil 表示纯控制流算子（call/return/br/goto 不在 nativeOps 中）。
 func Register(opcode, sig string, impl Op) {
-	nativeOps[opcode] = true
-	if sig != "" {
-		nativeSigs[opcode] = sig
-	}
-	if impl != nil {
-		registry[opcode] = impl
-	}
+	registry[opcode] = nativeOp{sig: sig, impl: impl}
 }
 
 // countSigParams 从 "rwir name(params) -> (returns)" 签名字符串中解析读写参数量。
@@ -66,12 +57,14 @@ func countSigParams(sig string) (reads, writes int32) {
 // string.* 类型（string.len, string.char 等）→ /sys/rwir/string.opcode
 // 应在 runtime 启动时调用（非 parser 阶段）。
 func WriteSysRwir(kv kvspace.KVSpace) {
-	pairs := make([]kvspace.KVPair, 0, len(nativeSigs))
-	for opcode, sig := range nativeSigs {
-		reads, writes := countSigParams(sig)
+	pairs := make([]kvspace.KVPair, 0, len(registry))
+	for opcode, op := range registry {
+		if op.sig == "" { continue }
+		if strings.Contains(opcode, "/") { continue }
+		reads, writes := countSigParams(op.sig)
 		pairs = append(pairs, kvspace.KVPair{
 			Key: keytree.SysRwir(opcode),
-			Val: kvspace.Rwir(reads, writes, []byte(sig)),
+			Val: kvspace.Rwir(reads, writes, []byte(op.sig)),
 		})
 	}
 	if len(pairs) > 0 {
@@ -80,12 +73,15 @@ func WriteSysRwir(kv kvspace.KVSpace) {
 }
 
 // IsNativeOp 判断是否为 VM 原生求值的算子。
-func IsNativeOp(opcode string) bool { return nativeOps[opcode] }
+func IsNativeOp(opcode string) bool {
+	_, ok := registry[opcode]
+	return ok
+}
 
 // NativeOpList 返回所有 VM 原生算子的列表 (仅 opcode)。
 func NativeOpList() []string {
-	ops := make([]string, 0, len(nativeOps))
-	for op := range nativeOps {
+	ops := make([]string, 0, len(registry))
+	for op := range registry {
 		ops = append(ops, op)
 	}
 	return ops
@@ -93,12 +89,12 @@ func NativeOpList() []string {
 
 // OpDefs 返回格式化后的算子定义文本列表 (按 opcode 排序)。
 func OpDefs() []string {
-	defs := make([]string, 0, len(nativeSigs))
-	for op := range nativeOps {
-		if sig, ok := nativeSigs[op]; ok {
-			defs = append(defs, sig)
+	defs := make([]string, 0, len(registry))
+	for opcode, op := range registry {
+		if op.sig != "" {
+			defs = append(defs, op.sig)
 		} else {
-			defs = append(defs, "rwir "+op+"() -> ()")
+			defs = append(defs, "rwir "+opcode+"() -> ()")
 		}
 	}
 	return defs
