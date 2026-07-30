@@ -60,3 +60,4 @@ tutorial/07-leetcode/078_subsets.kv
 tutorial/07-leetcode/101_symmetric_tree.kv
 *.kvfail
 *.kv.skip
+go.sum
