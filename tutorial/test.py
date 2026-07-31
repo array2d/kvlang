@@ -2,7 +2,7 @@
 """kvlang tutorial test — 从 .kv 文件 # 期望输出 头注释自动生成测试。"""
 
 from __future__ import annotations
-import argparse, re, subprocess, sys
+import argparse, os, re, subprocess, sys
 from pathlib import Path
 
 RED, GREEN, YELLOW, NC = "\033[0;31m", "\033[0;32m", "\033[1;33m", "\033[0m"
@@ -54,6 +54,8 @@ def main():
     passed = failed = 0
     files = [f for f in discover(ROOT / "tutorial")
              if args.filter in str(f)]
+
+    print(f"kvlang: {os.path.abspath(KV)}")
 
     if not files:
         print(f"{YELLOW}no .kv files found{NC}")
