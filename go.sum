@@ -1,7 +1,3 @@
-github.com/array2d/kvspace-go v0.0.0-20260730073905-1096a40002f0 h1:e8IJ5UWgC1KgdxgxqBix9QkAy2G9v3dXxKVhaayIrWU=
-github.com/array2d/kvspace-go v0.0.0-20260730073905-1096a40002f0/go.mod h1:FtalN1LxRD9NYQ6V4ga90P+6tAYjOgtjnI1hq/D0x8I=
-github.com/array2d/kvspace-go v0.0.0-20260731033340-acf8d125359a h1:JCY63DWulnraMwncvp7wK9+8tmi500TqvY66Y/CTWks=
-github.com/array2d/kvspace-go v0.0.0-20260731033340-acf8d125359a/go.mod h1:FtalN1LxRD9NYQ6V4ga90P+6tAYjOgtjnI1hq/D0x8I=
 github.com/bsm/ginkgo/v2 v2.12.0 h1:Ny8MWAHyOepLGlLKYmXG4IEkioBysk6GpaRTLC8zwWs=
 github.com/bsm/ginkgo/v2 v2.12.0/go.mod h1:SwYbGRRDovPVboqFv0tPTcG1sN61LM1Z4ARdbAV9g4c=
 github.com/bsm/gomega v1.27.10 h1:yeMWxP2pV2fG3FgAODIY8EiRE3dy0aeFYt4l7wh6yKA=
