@@ -40,7 +40,7 @@ var byWord = map[string]Entry{
 	"add":  {"add",  []string{"+"}, 50, true, false, true},
 	"sub":  {"sub",  []string{"-"}, 50, true, false, true},
 	"mul":  {"mul",  []string{"*", "×"}, 60, true, false, false},
-	"div":  {"div",  []string{"/", "÷"}, 60, true, false, false},
+	"div":  {"div",  []string{"÷"}, 60, true, false, false},
 	"mod":  {"mod",  []string{"%"}, 60, true, false, false},
 	// ── 比较 ──────────────────────────────────────────────────────
 	"eq":  {"eq",  []string{"=="}, 30, false, true, false},

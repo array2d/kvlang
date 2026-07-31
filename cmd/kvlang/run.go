@@ -34,8 +34,8 @@ func cmdRun(args []string) {
 		runCode("inline", strings.NewReader(*code), *dsn, *debug)
 	case fs.NArg() > 0:
 		arg := fs.Arg(0)
-		if !strings.HasSuffix(arg, ".kv") && strings.Contains(arg, keytree.FuncPathSep) {
-			parts := strings.SplitN(arg, keytree.FuncPathSep, 2)
+		if !strings.HasSuffix(arg, ".kv") && strings.Contains(arg, keytree.MemberSep) {
+			parts := strings.SplitN(arg, keytree.MemberSep, 2)
 			runLib(parts[0], parts[1], *debug)
 		} else if !strings.HasSuffix(arg, ".kv") {
 			runLib(arg, "init", *debug)
@@ -52,7 +52,7 @@ func cmdRun(args []string) {
 // runLib 执行 /lib/{lib}.{func}。lib/func 为空时默认 "init"。
 func runLib(lib, fn string, debug bool) {
 	if fn == "" { fn = "init" }
-	name := lib + keytree.FuncPathSep + fn
+	name := lib + keytree.MemberSep + fn
 	if lib == "" { name = fn }
 	kv := kvspace.Conn(defaultKVSpace())
 	defer kv.DisConn()

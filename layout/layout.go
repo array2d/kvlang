@@ -53,9 +53,9 @@ func writeStmt(kv kvspace.KVSpace, st ast.Stmt, prefix string, idx *int, typeMap
 		}
 		opcode, reads := s.Flat()
 		if pkg != "" && !builtin.IsNativeOp(opcode) && !rwir.IsControlOp(opcode) &&
-			!strings.Contains(opcode, keytree.FuncPathSep) && !strings.HasPrefix(opcode, keytree.LibRoot+keytree.PathSegSep) &&
+			!strings.Contains(opcode, keytree.MemberSep) && !strings.HasPrefix(opcode, keytree.LibRoot+keytree.PathSegSep) &&
 			symbol.Lookup(opcode).Word != "assign" {
-			opcode = pkg + keytree.FuncPathSep + opcode
+			opcode = pkg + keytree.MemberSep + opcode
 		}
 		pairs := make([]kvspace.KVPair, 0, 1+len(reads)+len(s.Writes))
 		if opcode != "" {
@@ -95,9 +95,9 @@ func writeStmtScope(kv kvspace.KVSpace, st ast.Stmt, scopePrefix string, idx *in
 		}
 		opcode, reads := s.Flat()
 		if pkg != "" && !builtin.IsNativeOp(opcode) && !rwir.IsControlOp(opcode) &&
-			!strings.Contains(opcode, keytree.FuncPathSep) && !strings.HasPrefix(opcode, keytree.LibRoot+keytree.PathSegSep) &&
+			!strings.Contains(opcode, keytree.MemberSep) && !strings.HasPrefix(opcode, keytree.LibRoot+keytree.PathSegSep) &&
 			symbol.Lookup(opcode).Word != "assign" {
-			opcode = pkg + keytree.FuncPathSep + opcode
+			opcode = pkg + keytree.MemberSep + opcode
 		}
 		pairs := make([]kvspace.KVPair, 0, 1+len(reads)+len(s.Writes))
 		if opcode != "" {
@@ -135,15 +135,15 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *rwir.R
 	libPrefix := keytree.LibRoot + keytree.PathSegSep
 	if strings.HasPrefix(funcName, libPrefix) {
 		rest := funcName[len(libPrefix):]
-		if dot := strings.LastIndex(rest, keytree.FuncPathSep); dot > 0 {
+		if dot := strings.LastIndex(rest, keytree.MemberSep); dot > 0 {
 			pkg = rest[:dot]
-			funcName = rest[dot+len(keytree.FuncPathSep):]
+			funcName = rest[dot+len(keytree.MemberSep):]
 		} else {
 			funcName = rest
 		}
-	} else if dot := strings.LastIndex(funcName, keytree.FuncPathSep); dot > 0 {
+	} else if dot := strings.LastIndex(funcName, keytree.MemberSep); dot > 0 {
 		pkg = funcName[:dot]
-		funcName = funcName[dot+len(keytree.FuncPathSep):]
+		funcName = funcName[dot+len(keytree.MemberSep):]
 	}
 	funcKey := keytree.LibFunc(pkg, funcName)
 
@@ -172,8 +172,8 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *rwir.R
 	kv.Set([]kvspace.KVPair{
 		{keytree.ReturnPC(frameRoot), kvspace.String(rwir.NextPC(pc))},
 		{keytree.CallPC(frameRoot), kvspace.String(keytree.EntryPC(frameRoot))},
-		{keytree.Stack(frameRoot) + keytree.ReservedPrefix + keytree.SegRParam + "/", kvspace.Raw(kvspace.KindIndex, nil)},
-		{keytree.Stack(frameRoot) + keytree.ReservedPrefix + keytree.SegWParam + "/", kvspace.Raw(kvspace.KindIndex, nil)},
+		{keytree.Stack(frameRoot) + keytree.RuntimeMemberSep + keytree.SegRParam + "/", kvspace.Raw(kvspace.KindIndex, nil)},
+		{keytree.Stack(frameRoot) + keytree.RuntimeMemberSep + keytree.SegWParam + "/", kvspace.Raw(kvspace.KindIndex, nil)},
 			{keytree.Stack(frameRoot) + keytree.SegLib, kvspace.String(funcKey)},
 	})
 
@@ -253,15 +253,15 @@ func HandleLabel(ctx context.Context, kv kvspace.KVSpace, pc, labelFullPath stri
 	libPrefix := keytree.LibRoot + keytree.PathSegSep
 	if strings.HasPrefix(labelFullPath, libPrefix) {
 		rest := labelFullPath[len(libPrefix):]
-		if dot := strings.LastIndex(rest, keytree.FuncPathSep); dot > 0 {
+		if dot := strings.LastIndex(rest, keytree.MemberSep); dot > 0 {
 			pkg = rest[:dot]
-			labelPath = rest[dot+len(keytree.FuncPathSep):]
+			labelPath = rest[dot+len(keytree.MemberSep):]
 		} else {
 			labelPath = rest
 		}
-	} else if dot := strings.LastIndex(labelFullPath, keytree.FuncPathSep); dot > 0 {
+	} else if dot := strings.LastIndex(labelFullPath, keytree.MemberSep); dot > 0 {
 		pkg = labelFullPath[:dot]
-		labelPath = labelFullPath[dot+len(keytree.FuncPathSep):]
+		labelPath = labelFullPath[dot+len(keytree.MemberSep):]
 	} else {
 		labelPath = labelFullPath
 	}
@@ -328,9 +328,9 @@ func RegisterBlocks(kv kvspace.KVSpace, pkg, parent string, body []ast.Stmt) {
 // Bootstrap 为 vthread 的顶层入口函数建立虚线程根帧。
 func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, args []string) string {
 	pkg, name := "", funcName
-	if dot := strings.LastIndex(funcName, keytree.FuncPathSep); dot > 0 {
+	if dot := strings.LastIndex(funcName, keytree.MemberSep); dot > 0 {
 		pkg = funcName[:dot]
-		name = funcName[dot+len(keytree.FuncPathSep):]
+		name = funcName[dot+len(keytree.MemberSep):]
 	}
 	funcKey := keytree.LibFunc(pkg, name)
 

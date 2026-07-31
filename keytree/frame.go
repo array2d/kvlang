@@ -14,7 +14,7 @@ import (
 //	frameRoot<MemberSep>rparam/<name>       读参重定向
 //	frameRoot<MemberSep>wparam/<name>       写参重定向
 
-func frameMember(root, seg string) string { return Stack(root) + ReservedPrefix + seg }
+func frameMember(root, seg string) string { return Stack(root) + RuntimeMemberSep + seg }
 
 func Stack(root string) string { return strings.TrimRight(root, PathSegSep) + PathSegSep }
 func FrameRO(root string) string    { return frameMember(root, SegRO) }

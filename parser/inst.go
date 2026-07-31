@@ -314,7 +314,7 @@ func (p *parser) parsePrimaryExpr() *ast.Expr {
 		p.peekAt(1).Kind == Dot && p.peekAt(2).Kind == Ident && p.peekAt(3).Kind == LParen {
 		opcode := p.advance().Value // consume LHS
 		p.advance()                  // skip Dot
-		opcode += keytree.FuncPathSep + p.advance().Value // consume RHS → "/lib/math.sum"
+		opcode += keytree.MemberSep + p.advance().Value // consume RHS → "/lib/math.sum"
 		p.advance() // consume (
 		var args []*ast.Expr
 		for p.peek().Kind != RParen && p.peek().Kind != EOF {

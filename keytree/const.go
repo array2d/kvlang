@@ -4,18 +4,10 @@ package keytree
 // 均须使用这些常量，禁止硬编码 "." 等裸字符串。
 
 const (
-	// ── 分隔符 ─────────────────────────────────────────────────────────
+	MemberSep      = "."  // 成员访问分隔符
+	RuntimeMemberSep = "‥" // 运行时保留字段前缀（U+2025）——‥ 的唯一定义处，禁止硬编码
 
-	FuncPathSep = "." // 包名与函数名分隔符，用法：/lib/<pkg><FuncPathSep><name>
-	MemberSep   = "." // 成员访问分隔符，X<MemberSep>a 与 X/a 结构分隔正交
-	ReservedPrefix = "." // 引擎保留字段前缀，用户代码无法写入
-	SegLib     = ".lib" // rwfunc 帧 extindex 对应的 lib 路径
-	ScopeSep    = "/." // scope 帧路径前缀：frameRoot/.scope → /lib/<func>/.scope
-	SrcExt      = ".src" // 函数源码文件后缀
-
-	// ── 路径段名 ─────────────────────────────────────────────────────────
-
-	PathSegSep      = "/"        // 路径分隔符（对齐 kvspace.PathSep）
+	PathSegSep      = "/"        // 路径分隔符；除法请使用数学除号 ÷，禁止使用 /
 	PathSegLib      = "lib"      // /lib — 函数库根
 	PathSegVthread  = "vthread"  // /vthread — 虚线程根
 
@@ -42,4 +34,11 @@ const (
 	SegRwir = "rwir" // /sys/rwir
 	SegCmd  = "cmd"  // 命令队列
 	SegFunc = "func" // 算子函数定义
+
+)
+
+var (
+	SegLib  = RuntimeMemberSep + "lib"  // rwfunc 帧 extindex 对应的 lib 路径
+	ScopeSep = "/" + RuntimeMemberSep   // scope 帧路径前缀
+	SrcExt  = MemberSep + "src"             // 函数源码文件后缀
 )
