@@ -16,9 +16,6 @@ import (
 	"kvlang/rwir"
 )
 
-// isEntryPC 判断 pc 是否为帧入口指令（末尾坐标=[0,0]）。
-func isEntryPC(pc string) bool { return keytree.IsEntryPC(pc) }
-
 // debugFuncName 从帧根目录的 extindex 目标路径提取函数名。
 // extindex → /lib/<name>/ → 返回 <name>。
 func debugFuncName(kv kvspace.KVSpace, frameRoot string) string {

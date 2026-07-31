@@ -89,35 +89,3 @@ func IsNativeOp(opcode string) bool {
 	_, ok := registry[opcode]
 	return ok
 }
-
-// NativeOpList 返回所有 VM 原生算子的列表 (仅 opcode)。
-func NativeOpList() []string {
-	ops := make([]string, 0, len(registry))
-	for op := range registry {
-		ops = append(ops, op)
-	}
-	return ops
-}
-
-// OpDefs 返回格式化后的算子定义文本列表 (按 opcode 排序)。
-func OpDefs() []string {
-	defs := make([]string, 0, len(registry))
-	for opcode, op := range registry {
-		if op.sig != "" {
-			defs = append(defs, op.sig)
-		} else {
-			defs = append(defs, "rwir "+opcode+"() -> ()")
-		}
-	}
-	return defs
-}
-
-// IsUnaryNativeOp 判断是否为单目原生算子。
-func IsUnaryNativeOp(opcode string) bool {
-	if symbol.Lookup(opcode).Unary { return true }
-	switch opcode {
-	case "abs", "sqrt", "exp", "log", "neg", "sign", "bool":
-		return true
-	}
-	return false
-}

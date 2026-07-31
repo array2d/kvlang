@@ -33,7 +33,7 @@ func Decode(ctx context.Context, kv kvspace.KVSpace, linkBase, pc string) (*Rwir
 	if lastSlash < 0 {
 		return nil, fmt.Errorf("Decode: invalid pc (no /[coord]): %q", pc)
 	}
-	addr0 := extractAddr0(pc[lastSlash+1:])
+	addr0 := ExtractAddr0(pc[lastSlash+1:])
 
 	scopePrefix, lookupBase := scopePrefixAndBase(linkBase)
 

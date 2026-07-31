@@ -32,9 +32,12 @@ type FuncSig struct {
 }
 
 // String 重建规范签名字符串：rwfunc name(A:int64, B:int64) -> (C:int64)
-func (s FuncSig) String() string {
+func (s FuncSig) String() string { return s.sigString("rwfunc") }
+
+func (s FuncSig) sigString(prefix string) string {
 	var sb strings.Builder
-	sb.WriteString("rwfunc ")
+	sb.WriteString(prefix)
+	sb.WriteByte(' ')
 	sb.WriteString(s.Name)
 	sb.WriteByte('(')
 	for i, p := range s.Params {
@@ -104,31 +107,7 @@ type RwirDecl struct {
 }
 
 // SigString 返回 "rwir name(params) -> (returns)" 格式的签名字符串。
-func (d RwirDecl) SigString() string {
-	var sb strings.Builder
-	sb.WriteString("rwir ")
-	sb.WriteString(d.Sig.Name)
-	sb.WriteByte('(')
-	for i, p := range d.Sig.Params {
-		if i > 0 {
-			sb.WriteString(", ")
-		}
-		sb.WriteString(p.Name)
-		sb.WriteByte(':')
-		sb.WriteString(p.Type)
-	}
-	sb.WriteString(") -> (")
-	for i, r := range d.Sig.Returns {
-		if i > 0 {
-			sb.WriteString(", ")
-		}
-		sb.WriteString(r.Name)
-		sb.WriteByte(':')
-		sb.WriteString(r.Type)
-	}
-	sb.WriteByte(')')
-	return sb.String()
-}
+func (d RwirDecl) SigString() string { return d.Sig.sigString("rwir") }
 func (fn *Func) FullText() string {
 	var sb strings.Builder
 	for _, c := range fn.Comments {
@@ -278,37 +257,6 @@ func (i *Instruction) Flat() (opcode string, reads []string) {
 		reads = append(reads, r)
 	}
 	return
-}
-
-// isBareIdentVal 判断字符串是否为裸标识符（首字母/下划线，其余字母数字下划线）。
-func isBareIdentVal(v string) bool {
-	if len(v) == 0 {
-		return false
-	}
-	// 排除特殊前缀
-	if v[0] == '"' || v[0] == '/' {
-		return false
-	}
-	// 排除布尔字面量
-	if v == "true" || v == "false" {
-		return false
-	}
-	// 排除数字字面量（首字符为数字）
-	if v[0] >= '0' && v[0] <= '9' {
-		return false
-	}
-	// 排除操作符（含 +、-、*、/ 等）
-	c0 := v[0]
-	if !((c0 >= 'a' && c0 <= 'z') || (c0 >= 'A' && c0 <= 'Z') || c0 == '_') {
-		return false
-	}
-	for i := 1; i < len(v); i++ {
-		c := v[i]
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') {
-			return false
-		}
-	}
-	return true
 }
 
 func (*Instruction) stmt() {}
@@ -531,35 +479,6 @@ func StmtComments(st Stmt) []string {
 }
 
 // ── 工具函数 ──────────────────────────────────────────────────
-
-// joinWrites 将写槽列表格式化：单槽直接输出，多槽加括号。
-func joinWrites(ss []string) string {
-	if len(ss) == 0 {
-		return ""
-	}
-	if len(ss) == 1 {
-		return ss[0]
-	}
-	return "(" + strings.Join(ss, ", ") + ")"
-}
-
-// needsQuote 判断字符串在输出时是否需要引号包裹。
-func needsQuote(s string) bool {
-	if len(s) == 0 {
-		return false
-	}
-	// 路径不需要引号
-	if s[0] == '/' {
-		return false
-	}
-	for i := 0; i < len(s); i++ {
-		switch s[i] {
-		case ' ', '\t', ',', '(', ')', '=', '+', '-', '*', '%', '!', '<', '>', '&', '|', '^', '{', '}', '"', '\'':
-			return true
-		}
-	}
-	return false
-}
 
 // isOperatorChar reports whether c is a punctuation operator (not a function name).
 func isOperatorChar(c byte) bool {

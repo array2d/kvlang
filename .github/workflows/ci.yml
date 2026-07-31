@@ -43,6 +43,7 @@ jobs:
           go-version: "1.24"
       - run: go mod tidy
       - run: go build -o kvlang ./cmd/kvlang/
+      - run: go install github.com/array2d/kvspace-go/cmd/kvspace@latest
       - run: python3 tutorial/test.py
 
   # ── 多平台交叉编译（仅 tag 时生成 release 产物）─────────────────────────

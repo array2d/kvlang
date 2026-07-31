@@ -99,25 +99,14 @@ func (t Token) String() string {
 	return fmt.Sprintf("%s(%q)@%d:%d", t.Kind, t.Value, t.Pos.Line, t.Pos.Col)
 }
 
-// 语言关键字字符串常量（供 keywords 表和注释使用）。
-const kwReturn   = "return"
-const kwIf       = "if"
-const kwElse     = "else"
-const kwFor      = "for"
-const kwWhile    = "while"
-const kwBreak    = "break"
-const kwContinue = "continue"
-
-
-// keywords 将语言关键字映射到对应 Token Kind。
 var keywords = map[string]Kind{
-	kwReturn:   Return,
-	kwIf:       If,
-	kwElse:     Else,
-	kwFor:      For,
-	kwWhile:    While,
-	kwBreak:    Break,
-	kwContinue: Continue,
+	"return":   Return,
+	"if":       If,
+	"else":     Else,
+	"for":      For,
+	"while":    While,
+	"break":    Break,
+	"continue": Continue,
 }
 
 // singleCharToken 将单字符标点映射到对应 Kind。

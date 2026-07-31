@@ -108,7 +108,7 @@ func (c *cpu) Execute(pc string) error {
 		// 性能策略：
 		//   - 非单步模式：仅在函数入口（isEntryPC）读取一次 .debug（每次函数调用 1 次）
 		//   - 单步模式：每条指令读取一次 .debug（已在调试中，overhead 可接受）
-		if stepping || isEntryPC(pc) {
+		if stepping || keytree.IsEntryPC(pc) {
 			v := kvspace.GetOne(c.kv, keytree.VThreadDebugger(vtid))
 			switch mode := v.Str(); {
 			case mode == "" && stepping:

@@ -119,7 +119,7 @@ func lowerBody(stmts []ast.Stmt, lg *labelGen, lc *loopCtx) []ast.Stmt {
 			// 自动插入 goto firstBlock 确保 [0,0] 有指令（函数入口必须非空）。
 			s.Body = lowerBody(s.Body, lg, lc)
 			if !preambleEndsWithTerminator(preamble) {
-				preamble = append(preamble, gotoLabel("", s.Label))
+				preamble = append(preamble, gotoLabel( s.Label))
 			}
 			out := append(preamble, ast.Stmt(s))
 			return append(out, lowerBody(stmts[i+1:], lg, lc)...)
@@ -129,7 +129,7 @@ func lowerBody(stmts []ast.Stmt, lg *labelGen, lc *loopCtx) []ast.Stmt {
 			if lc == nil {
 				panic("break outside loop")
 			}
-			preamble = append(preamble, gotoLabel("", lc.breakLabel))
+			preamble = append(preamble, gotoLabel( lc.breakLabel))
 			// break 是终止符：忽略其后的语句（不可达代码）
 			return preamble
 
@@ -138,7 +138,7 @@ func lowerBody(stmts []ast.Stmt, lg *labelGen, lc *loopCtx) []ast.Stmt {
 			if lc == nil {
 				panic("continue outside loop")
 			}
-			preamble = append(preamble, gotoLabel("", lc.continueLabel))
+			preamble = append(preamble, gotoLabel( lc.continueLabel))
 			// continue 是终止符：忽略其后的语句（不可达代码）
 			return preamble
 
@@ -188,7 +188,7 @@ func lowerIfWithCont(pre []ast.Stmt, s *ast.IfStmt, cont []ast.Stmt, lg *labelGe
 	injectGotoBlocks(thenBlocks, mergeLabel)
 	injectGotoBlocks(elseBlocks, mergeLabel)
 
-	entry := append(pre, gotoLabel("", ifLabel))
+	entry := append(pre, gotoLabel( ifLabel))
 	result := append(entry,
 		&ast.ScopeStmt{Label: ifLabel,    Body: condBody},
 		&ast.ScopeStmt{Label: thenLabel,  Body: thenInsts},
@@ -230,7 +230,7 @@ func lowerWhileWithCont(pre []ast.Stmt, s *ast.WhileStmt, cont []ast.Stmt, lg *l
 	injectGotoBlocks(bodyBlocks, condLabel)
 	contInsts, contBlocks := splitInstsAndBlocks(cont)
 
-	entry := append(pre, gotoLabel("", condLabel))
+	entry := append(pre, gotoLabel( condLabel))
 	result := append(entry,
 		&ast.ScopeStmt{Label: condLabel, Body: condBody},
 		&ast.ScopeStmt{Label: bodyLabel, Body: bodyInsts},
@@ -265,7 +265,7 @@ func lowerForWithCont(pre []ast.Stmt, s *ast.ForStmt, cont []ast.Stmt, lg *label
 	condSlot := lg.tmp()
 	initBody := []ast.Stmt{
 		makeCopyInst("-1", idxSlot),
-		gotoLabel("", condLabel),
+		gotoLabel( condLabel),
 	}
 
 	// _for_cond:  ./_idx + 1 -> ./_idx;  kv.has(./path, ./_idx) -> ./_cond;
@@ -295,7 +295,7 @@ func lowerForWithCont(pre []ast.Stmt, s *ast.ForStmt, cont []ast.Stmt, lg *label
 	injectGotoBlocks(bodyBlocks, condLabel)
 	contInsts, contBlocks := splitInstsAndBlocks(cont)
 
-	entry := append(pre, gotoLabel("", initLabel))
+	entry := append(pre, gotoLabel( initLabel))
 	result := append(entry,
 		&ast.ScopeStmt{Label: initLabel, Body: initBody},
 		&ast.ScopeStmt{Label: condLabel, Body: condBody},
@@ -343,7 +343,7 @@ func injectGotoBlocks(stmts []ast.Stmt, label string) {
 // 若末尾为控制转移（return/goto/br），则不追加。
 // 若末尾为 ScopeStmt，则递归注入到该块的尾部。
 func injectGoto(body []ast.Stmt, label string) []ast.Stmt {
-	g := gotoLabel("", label)
+	g := gotoLabel( label)
 	if len(body) == 0 {
 		return []ast.Stmt{g}
 	}
@@ -428,7 +428,7 @@ func brInst(cond, tLabel, fLabel string) *ast.Instruction {
 	}
 }
 
-func gotoLabel(_, label string) *ast.Instruction {
+func gotoLabel(label string) *ast.Instruction {
 	return &ast.Instruction{
 		Expr: ast.Call(rwir.OpGoto, ast.Leaf(label)),
 	}

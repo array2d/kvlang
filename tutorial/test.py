@@ -65,7 +65,10 @@ def main():
             continue
         rel = str(f.relative_to(ROOT))
         try:
-            subprocess.run(["redis-cli", "-p", "6379", "FLUSHALL"], capture_output=True, timeout=5)
+            try:
+                subprocess.run(["redis-cli", "-p", "6379", "FLUSHALL"], capture_output=True, timeout=5)
+            except FileNotFoundError:
+                pass
             r = subprocess.run([KV, rel], capture_output=True, text=True,
                                timeout=60, cwd=str(ROOT))
             all_ok = True

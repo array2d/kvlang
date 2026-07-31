@@ -1,8 +1,6 @@
 package builtin
 
 import (
-	"strings"
-
 	"kvlang/keytree"
 	"github.com/array2d/kvspace-go"
 )
@@ -56,22 +54,4 @@ func resolveReadValue(kv kvspace.KVSpace, framePath, param string) kvspace.XValu
 		return v
 	}
 	return kvspace.XValue{}
-}
-
-// extKind 读帧根 extindex target 的 XValue.Kind()。
-func extKind(kv kvspace.KVSpace, frameRoot string) string {
-	trimmed := strings.TrimRight(frameRoot, keytree.PathSegSep)
-	if trimmed == "" || trimmed == keytree.PathSegSep {
-		return ""
-	}
-	parent, dirName := kvspace.SepPath(trimmed)
-	if parent != keytree.PathSegSep {
-		parent += kvspace.DirIndexSuf
-	}
-	extVal := kv.Get(parent, []string{dirName + kvspace.DirIndexSuf})[0]
-	_, extTarget := kvspace.DecodeExtIndex(extVal)
-	if extTarget == "" {
-		return ""
-	}
-	return kvspace.GetOne(kv, strings.TrimRight(extTarget, keytree.PathSegSep)).Kind()
 }

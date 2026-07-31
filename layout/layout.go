@@ -85,10 +85,6 @@ func writeStmt(kv kvspace.KVSpace, st ast.Stmt, prefix string, idx *int, typeMap
 // writeStmtScope 写 scope 体内指令，key 格式 funcPrefix/scopeName[coord]。
 // funcPrefix 为 /lib/<func>，所有 scope（含嵌套）均平级使用 funcPrefix。
 func writeStmtScope(kv kvspace.KVSpace, st ast.Stmt, scopePrefix string, idx *int, typeMap map[string]string, pkg string, funcPrefix string) {
-	writeStmtScope2(kv, st, scopePrefix, idx, typeMap, pkg, funcPrefix)
-}
-
-func writeStmtScope2(kv kvspace.KVSpace, st ast.Stmt, scopePrefix string, idx *int, typeMap map[string]string, pkg string, funcPrefix string) {
 	switch s := st.(type) {
 	case *ast.Instruction:
 		n := *idx
@@ -122,7 +118,7 @@ func writeStmtScope2(kv kvspace.KVSpace, st ast.Stmt, scopePrefix string, idx *i
 		childPrefix := funcPrefix + "/" + s.Label
 		childIdx := 0
 		for _, child := range s.Body {
-			writeStmtScope2(kv, child, childPrefix, &childIdx, typeMap, pkg, funcPrefix)
+			writeStmtScope(kv, child, childPrefix, &childIdx, typeMap, pkg, funcPrefix)
 		}
 	}
 }
@@ -411,25 +407,6 @@ func WriteFunc(kv kvspace.KVSpace, pkg string, fn *ast.Func) {
 
 // ── 辅助函数 ────────────────────────────────────────────────────────────────
 
-func resolveWritePath(kv kvspace.KVSpace, framePath, name string) string {
-	for f := framePath; f != ""; f = keytree.ParentFrame(f) {
-		if r := kvspace.GetOne(kv, keytree.WParam(f, name)); !r.IsNone() {
-			return r.Str()
-		}
-		if !kvspace.GetOne(kv, keytree.Stack(f)+keytree.SegLib).IsNone() {
-			break
-		}
-	}
-	rwRoot := framePath
-	for f := framePath; f != ""; f = keytree.ParentFrame(f) {
-		if !kvspace.GetOne(kv, keytree.Stack(f)+keytree.SegLib).IsNone() {
-			rwRoot = f
-			break
-		}
-	}
-	return frameSlotKey(rwRoot, name)
-}
-
 func resolveReadPath(kv kvspace.KVSpace, framePath, name string) string {
 	if isLiteral(name) { return "" }
 	for f := framePath; f != ""; f = keytree.ParentFrame(f) {
@@ -541,35 +518,6 @@ func HandleScopeReturn(ctx context.Context, kv kvspace.KVSpace, pc string) strin
 	kv.UnLink(keytree.Stack(frameRoot))
 	kv.DelTree(frameRoot)
 	return parentPC
-}
-
-// libFuncPrefix 返回 rwfunc 帧 extindex 对应的 lib 路径（无末尾 /）。
-func libFuncPrefix(kv kvspace.KVSpace, rwRoot string) string {
-	libVal := kvspace.GetOne(kv, keytree.Stack(rwRoot)+keytree.SegLib)
-	if !libVal.IsNone() {
-		return libVal.Str()
-	}
-	return ""
-}
-
-// libPrefixForFrame 返回任意帧（rwfunc 或 scope）的 extindex 目标路径（无末尾 /）。
-func libPrefixForFrame(kv kvspace.KVSpace, frameRoot string) string {
-	if lib := libFuncPrefix(kv, frameRoot); lib != "" {
-		return lib
-	}
-	return libFromExtIndex(kv, frameRoot)
-}
-
-// libFromExtIndex 通过 extindex 读取帧的 lib 前缀。
-func libFromExtIndex(kv kvspace.KVSpace, frameRoot string) string {
-	trimmed := strings.TrimRight(frameRoot, keytree.PathSegSep)
-	parent, dirName := kvspace.SepPath(trimmed)
-	if parent != keytree.PathSegSep {
-		parent += kvspace.DirIndexSuf
-	}
-	extVal := kv.Get(parent, []string{dirName + kvspace.DirIndexSuf})[0]
-	_, extTarget := kvspace.DecodeExtIndex(extVal)
-	return strings.TrimRight(extTarget, keytree.PathSegSep)
 }
 
 func checkDupParams(sig ast.FuncSig, funcName string) string {
