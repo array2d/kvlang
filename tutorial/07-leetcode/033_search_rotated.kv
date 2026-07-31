@@ -12,7 +12,7 @@ rwfunc search() -> () {
 	-1 -> result
 	while (lo <= hi) {
 		s <- lo + hi
-		mid = s / 2  # = 等价于 <-
+		mid = s ÷ 2  # = 等价于 <-
 		mid_m = s ÷ 2  # = 等价于 <-
 		a[mid] -> mv
 		eq <- mv == target

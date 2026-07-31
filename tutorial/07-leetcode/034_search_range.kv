@@ -13,7 +13,7 @@ rwfunc search_range() -> () {
 	left = -1  # = 等价于 <-
 	while (lo <= hi) {
 		lo + hi -> s
-		mid <- s / 2
+		mid <- s ÷ 2
 		mid_m <- s ÷ 2
 		mv = a[mid]  # = 等价于 <-
 		mv < target -> lt
@@ -31,7 +31,7 @@ rwfunc search_range() -> () {
 	-1 -> right
 	while (lo2 <= hi2) {
 		s2 <- lo2 + hi2
-		mid2 = s2 / 2  # = 等价于 <-
+		mid2 = s2 ÷ 2  # = 等价于 <-
 		mid2_m = s2 ÷ 2  # = 等价于 <-
 		a[mid2] -> mv2
 		gt <- mv2 > target

@@ -16,7 +16,7 @@ rwfunc is_pal(x:int64) -> (r:int64) {
 			rev × 10 -> r10_m
 			d <- orig % 10
 			rev = r10 + d  # = 等价于 <-
-			orig / 10 -> orig
+			orig ÷ 10 -> orig
 			orig ÷ 10 -> orig_m
 		}
 		ok <- rev == x

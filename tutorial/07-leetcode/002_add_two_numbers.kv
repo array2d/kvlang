@@ -38,7 +38,7 @@ rwfunc add(a:string, b:string) -> () {
 		digit <- sum % 10
 		result[ri] = digit
 		ri + 1 -> ri
-		sum / 10 -> carry
+		sum ÷ 10 -> carry
 		sum ÷ 10 -> carry_m
 	}
 	i = ri - 1
