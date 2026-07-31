@@ -12,19 +12,19 @@ rwfunc is_ugly(n:int64) -> () {
 	} else {
 		nv % 2 -> r2
 		while (r2 == 0) {
-			nv <- nv / 2
+			nv <- nv ÷ 2
 			nv_m <- nv ÷ 2
 			r2 = nv % 2  # = 等价于 <-
 		}
 		nv % 3 -> r3
 		while (r3 == 0) {
-			nv <- nv / 3
+			nv <- nv ÷ 3
 			nv_m <- nv ÷ 3
 			r3 = nv % 3  # = 等价于 <-
 		}
 		nv % 5 -> r5
 		while (r5 == 0) {
-			nv <- nv / 5
+			nv <- nv ÷ 5
 			nv_m <- nv ÷ 5
 			r5 = nv % 5  # = 等价于 <-
 		}

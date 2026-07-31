@@ -8,7 +8,7 @@ rwfunc first_bad(n:int64) -> () {
 	hi <- n
 	while (lo < hi) {
 		s = lo + hi  # = 等价于 <-
-		s / 2 -> mid
+		s ÷ 2 -> mid
 		s ÷ 2 -> mid_m
 		bad <- mid >= 4
 		bad_m <- mid ≥ 4

@@ -9,7 +9,7 @@ rwfunc find_min() -> () {
 	hi <- n - 1
 	while (lo < hi) {
 		s = lo + hi  # = 等价于 <-
-		s / 2 -> mid
+		s ÷ 2 -> mid
 		mv <- a[mid]
 		rv = a[hi]  # = 等价于 <-
 		mv < rv -> ok
