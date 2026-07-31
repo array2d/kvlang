@@ -55,4 +55,3 @@ kvlang
 .omc/
 *.kvfail
 *.kv.skip
-go.sum
