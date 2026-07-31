@@ -11,7 +11,7 @@ rwfunc guess_number() -> () {
 	found <- 0
 	while (found == 0) {
 		s = lo + hi  # = 等价于 <-
-		s / 2 -> mid_float
+		s ÷ 2 -> mid_float
 		s ÷ 2 -> mid_float_m
 		mid <- int64(mid_float)
 		tries = tries + 1  # = 等价于 <-

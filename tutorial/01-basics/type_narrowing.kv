@@ -31,14 +31,14 @@ rwfunc main() -> () {
         println(d_m)
         println(d)
 
-        # int8(120) / int8(10) → 12（整数整除 C/Go/Rust 阵营，结果窄化回 int8）
-        int8(120) / int8(10) -> e
+        # int8(120) ÷ int8(10) → 12（整数整除 C/Go/Rust 阵营，结果窄化回 int8）
+        int8(120) ÷ int8(10) -> e
         int8(120) ÷ int8(10) -> e_m
         println(e_m)
         println(e)
 
-        # int8(120) / float32(10) → 12.0（含浮点→浮除，窄化回 float32）
-        int8(120) / float32(10) -> f
+        # int8(120) ÷ float32(10) → 12.0（含浮点→浮除，窄化回 float32）
+        int8(120) ÷ float32(10) -> f
         int8(120) ÷ float32(10) -> f_m
         println(f_m)
         println(f)

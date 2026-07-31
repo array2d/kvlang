@@ -10,7 +10,7 @@ rwfunc collatz(n:int64) -> (steps:int64) {
 		even = mod == 0  # = 等价于 <-
 
 		if (even) {
-			nv / 2 -> nv
+			nv ÷ 2 -> nv
 			nv ÷ 2 -> nv_m
 		} else {
 			t <- nv * 3
