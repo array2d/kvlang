@@ -55,3 +55,4 @@ kvlang
 .omc/
 *.kvfail
 *.kv.skip
+tutorial/test_failures.csv
