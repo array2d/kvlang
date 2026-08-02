@@ -209,7 +209,9 @@ func (p *parser) parsePrimaryExpr() *ast.Expr {
 			next := p.peek()
 			if next.Kind == Literal && len(next.Value) > 0 && next.Value[0] >= '0' && next.Value[0] <= '9' {
 				lit := p.advance()
-				return ast.Leaf("-" + lit.Value)
+				neg := "-" + lit.Value
+				if isFloatLiteral(neg) { return ast.FloatLit(neg) }
+				return ast.IntLit(neg)
 			}
 		}
 		// PC3: unary + is identity — return operand directly
@@ -328,29 +330,20 @@ func (p *parser) parsePrimaryExpr() *ast.Expr {
 
 	// 叶节点：变量名、字面量、路径、裸操作码
 	t = p.advance()
-	// 引号字符串（非数字、非路径）：加 " 前缀编码，供 resolveReadValue 识别
 	if t.Kind == Literal {
 		v := t.Value
-		// 双引号/反引号字符串优先于 isPath 检测
 		if t.Quote == '"' { return ast.StrLit(v) }
 		if t.Quote == '`' { return ast.RawStr(v) }
-		isNum := isNumericLiteral(v)
-		isPath := len(v) > 0 && v[0] == '/'
-		if !isNum && !isPath {
-			// 语法错误：以数字开头的 Literal 必然是数字字面量意图，
-			// 但 isNumericLiteral 验证不通过（如 "1e"、"42e+"）。
-			// 对标 Go/Rust：无效科学计数法字面量 → 编译错误。
-			if len(v) > 0 && v[0] >= '0' && v[0] <= '9' {
-				p.errors = append(p.errors, Diagnostic{
-					Pos:     t.Pos,
-					Message: fmt.Sprintf("invalid numeric literal %q", v),
-				})
+		if len(v) > 0 && v[0] == '/' { return ast.Leaf(v) }
+		if len(v) > 0 && v[0] >= '0' && v[0] <= '9' {
+			if !isNumericLiteral(v) {
+				p.errors = append(p.errors, Diagnostic{Pos: t.Pos, Message: fmt.Sprintf("invalid numeric literal %q", v)})
+				return ast.Leaf(v)
 			}
-			if t.Quote == 96 {
-			return ast.RawStr(v)
+			if isFloatLiteral(v) { return ast.FloatLit(v) }
+			return ast.IntLit(v)
 		}
 		return ast.StrLit(v)
-		}
 	}
 	// PC2: return cannot take a value
 	if t.Kind == Return {
@@ -364,6 +357,16 @@ func (p *parser) parsePrimaryExpr() *ast.Expr {
 				Message: "return cannot take a value — use write-params for output",
 			})
 		}
+	// 布尔/None 字面量（scanner 产生 Ident token）
+	if t.Kind == Ident {
+		switch t.Value {
+		case "true", "false":
+			return ast.BoolLit(t.Value)
+		case "None":
+			return ast.NoneLit()
+		}
+	}
+
 	}
 	return ast.Leaf(t.Value)
 }
@@ -553,3 +556,6 @@ func isNumericLiteral(v string) bool {
 	_, err := strconv.ParseFloat(v, 64)
 	return err == nil
 }
+
+// isFloatLiteral 判断数字字面量是否为浮点类型（含小数点或指数符号）。
+func isFloatLiteral(v string) bool { return strings.ContainsAny(v, ".eE") }

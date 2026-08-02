@@ -22,7 +22,7 @@ func debugFuncName(kv kvspace.KVSpace, frameRoot string) string {
 	parent, dirName := kvspace.SepPath(frameRoot)
 	if parent != "/" { parent += kvspace.DirIndexSuf }
 	v := kv.Get(parent, []string{dirName + kvspace.DirIndexSuf})[0]
-	_, extTarget := kvspace.DecodeExtIndex(v)
+	extHead := kvspace.DecodeXValueHead(v.Encode()); extTarget := kvspace.DecodeExtIndex(extHead.Raw).ExtPath()
 	if extTarget == "" { return "?" }
 	name := strings.TrimPrefix(extTarget, keytree.LibRoot+"/")
 	return strings.TrimSuffix(name, "/")
@@ -38,7 +38,7 @@ func debugNotifyPause(_ context.Context, kv kvspace.KVSpace, vtid, pc string, in
 		"frame": frameRoot,
 		"op":    inst.Opcode,
 	})
-	kv.Notify(keytree.VThreadDebuggerPause(vtid), kvspace.String(string(event)))
+	kv.Notify(keytree.VThreadDebuggerPause(vtid), kvspace.NewChar(string(event)))
 }
 
 // debugWaitResume 阻塞等待 /vthread/<vtid>/.debugger.resume 上的 Notify，
@@ -47,7 +47,7 @@ func debugNotifyPause(_ context.Context, kv kvspace.KVSpace, vtid, pc string, in
 func debugWaitResume(kv kvspace.KVSpace, vtid string) string {
 	for {
 		val := kv.Watch(keytree.VThreadDebuggerResume(vtid), 30*time.Second)
-		if !val.IsNone() { return val.Str() }
+		if !kvspace.IsNone(val) { return val.String() }
 		// 超时 → 继续等待
 	}
 }

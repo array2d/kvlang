@@ -26,19 +26,16 @@ func (o kvHasOp) Call(f *rwir.Frame) error {
 	}
 	fp := keytree.FrameRoot(f.PC)
 	funcFrame := funcFrameRoot(f.KV, fp)
-	prefix := resolveReadValue(f.KV, fp, f.Inst.Reads[0].Name).Str()
-	if prefix == "" {
-		prefix = resolveKVPath(funcFrame, f.Inst.Reads[0].Name)
-	}
-	idxVal := resolveReadValue(f.KV, fp, f.Inst.Reads[1].Name)
+	prefix := resolveBasePath(f.KV, fp, funcFrame, f.Inst.Reads[0])
+	idxVal := resolveReadValue(f.KV, fp, f.Inst.Reads[1])
 	var key string
 	if isIntKind(idxVal.Kind()) || isFloatKind(idxVal.Kind()) {
-		key = keytree.Member(prefix, strconv.Itoa(int(idxVal.Int64())))
+		key = keytree.Member(prefix, strconv.Itoa(int(asInt(idxVal))))
 	} else {
-		key = keytree.Member(prefix, idxVal.Str())
+		key = keytree.Member(prefix, idxVal.String())
 	}
 	v := kvspace.GetOne(f.KV, key)
-	return writeResult(f, kvspace.Bool(!v.IsNone()))
+	return writeResult(f, kvspace.NewBool(!kvspace.IsNone(v)))
 }
 
 // kvAtOp: kv.at(prefix, idx) -> value
@@ -52,19 +49,16 @@ func (o kvAtOp) Call(f *rwir.Frame) error {
 	}
 	fp := keytree.FrameRoot(f.PC)
 	funcFrame := funcFrameRoot(f.KV, fp)
-	prefix := resolveReadValue(f.KV, fp, f.Inst.Reads[0].Name).Str()
-	if prefix == "" {
-		prefix = resolveKVPath(funcFrame, f.Inst.Reads[0].Name)
-	}
-	idxVal := resolveReadValue(f.KV, fp, f.Inst.Reads[1].Name)
+	prefix := resolveBasePath(f.KV, fp, funcFrame, f.Inst.Reads[0])
+	idxVal := resolveReadValue(f.KV, fp, f.Inst.Reads[1])
 	var key string
 	if isIntKind(idxVal.Kind()) || isFloatKind(idxVal.Kind()) {
-		key = keytree.Member(prefix, strconv.Itoa(int(idxVal.Int64())))
+		key = keytree.Member(prefix, strconv.Itoa(int(asInt(idxVal))))
 	} else {
-		key = keytree.Member(prefix, idxVal.Str())
+		key = keytree.Member(prefix, idxVal.String())
 	}
 	v := kvspace.GetOne(f.KV, key)
-	if v.IsNone() {
+	if kvspace.IsNone(v) {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC,
 			fmt.Sprintf("KeyError: kvat: key not found: %s; help: verify the key exists in the path or key-family", key))
 		return fmt.Errorf("kvat: key not found: %s", key)

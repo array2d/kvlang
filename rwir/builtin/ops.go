@@ -76,7 +76,7 @@ func WriteSysRwir(kv kvspace.KVSpace) {
 		reads, writes := countSigParams(op.sig)
 		pairs = append(pairs, kvspace.KVPair{
 			Key: keytree.SysRwir(opcode),
-			Val: kvspace.Rwir(reads, writes, []byte(op.sig)),
+			Val: kvspace.NewRwir(int32(reads), int32(writes), string(op.sig)),
 		})
 	}
 	if len(pairs) > 0 {

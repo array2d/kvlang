@@ -2,12 +2,13 @@
 """kvlang tutorial test — 从 .kv 文件 # 期望输出 头注释自动生成测试。"""
 
 from __future__ import annotations
-import argparse, os, re, subprocess, sys
+import argparse, csv, os, re, subprocess, sys
 from pathlib import Path
 
 RED, GREEN, YELLOW, NC = "\033[0;31m", "\033[0;32m", "\033[1;33m", "\033[0m"
 ROOT = Path(__file__).resolve().parent.parent
 KV = str(ROOT / "kvlang")
+FAIL_CSV = (ROOT / "tutorial" / "test_failures.csv").resolve()
 
 
 def discover(root: Path) -> list[Path]:
@@ -27,12 +28,11 @@ def parse_expects(f: Path) -> list[str]:
             if in_block:
                 if line.startswith("#   ") or line.startswith("# \t"):
                     p = line[2:].strip()
-                    # 去掉行尾注释 "(i=3)" 之类
                     p = re.sub(r"\s*\(.*\)\s*$", "", p)
                     if p:
                         pats.append(p)
                 elif not line.startswith("#"):
-                    break  # 空行或非注释行结束块
+                    break
     return pats
 
 
@@ -52,6 +52,7 @@ def main():
         print(f"{GREEN}✅ build ok{NC}")
 
     passed = failed = 0
+    failures: list[dict] = []
     files = [f for f in discover(ROOT / "tutorial")
              if args.filter in str(f)]
 
@@ -77,31 +78,55 @@ def main():
             if r.returncode != 0:
                 all_ok = False
                 print(f"{RED}❌ kvlang {rel}: exit code {r.returncode}{NC}")
+                failures.append({"file": rel, "reason": f"exit code {r.returncode}",
+                                 "expected": "", "stdout": r.stdout[:500]})
             if r.stderr.strip():
                 all_ok = False
                 print(f"{RED}❌ kvlang {rel}: stderr — {r.stderr.strip()[:200]}{NC}")
+                found = [x for x in failures if x["file"] == rel and x["reason"].startswith("exit code")]
+                if not found:
+                    failures.append({"file": rel, "reason": f"stderr: {r.stderr.strip()[:200]}",
+                                     "expected": "", "stdout": r.stdout[:500]})
             for pat in expects:
                 if pat not in r.stdout:
                     all_ok = False
                     print(f"{RED}❌ kvlang {rel}: want {pat!r}{NC}")
                     print(f"   stdout: {r.stdout[:200]}")
+                    failures.append({"file": rel, "reason": "output mismatch",
+                                     "expected": pat, "stdout": r.stdout[:500]})
             if all_ok:
                 print(f"{GREEN}✅ kvlang {rel}{NC}")
                 passed += 1
             else:
                 failed += 1
                 if args.errorexit:
+                    _write_csv(failures)
                     print(f"\n{YELLOW}errorexit: stopping at first failure{NC}")
                     sys.exit(1)
         except subprocess.TimeoutExpired:
             print(f"{RED}❌ kvlang {rel}: timeout{NC}")
             failed += 1
+            failures.append({"file": rel, "reason": "timeout", "expected": "", "stdout": ""})
             if args.errorexit:
+                _write_csv(failures)
                 print(f"\n{YELLOW}errorexit: stopping at first failure{NC}")
                 sys.exit(1)
 
-    print(f"\n{YELLOW}══ {GREEN}PASS:{passed}{YELLOW}  {RED}FAIL:{failed}{YELLOW} ══{NC}")
+    _write_csv(failures)
+    print(f"{YELLOW}══ {GREEN}PASS:{passed}{YELLOW}  {RED}FAIL:{failed}{YELLOW} ══{NC}")
+    print(f"report: {FAIL_CSV}")
     sys.exit(0 if failed == 0 else 1)
+
+
+def _write_csv(failures: list[dict]) -> None:
+    if not failures:
+        FAIL_CSV.write_text("file,reason,expected,stdout\n", encoding="utf-8")
+        return
+    with open(FAIL_CSV, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=["file", "reason", "expected", "stdout"])
+        w.writeheader()
+        for row in failures:
+            w.writerow(row)
 
 
 if __name__ == "__main__":

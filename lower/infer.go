@@ -79,6 +79,17 @@ func inferInst(inst *ast.Instruction, tm map[string]string) {
 	if inst.Expr == nil || len(inst.Writes) == 0 {
 		return
 	}
+	// 快速路径：叶节点字面量直接从 Lit 字段获取类型，无需 Flat() → slotType() 字符串重解析。
+	if inst.Expr.IsLeaf() && inst.Expr.Lit != ast.LitNone {
+		if inferred := litToType(inst.Expr.Lit); inferred != "" {
+			for _, w := range inst.Writes {
+				if w == "" || w[0] == '.' { continue }
+				if _, exists := tm[w]; !exists { tm[w] = inferred }
+			}
+		}
+		return
+	}
+
 	opcode, reads := inst.Flat()
 	if opcode == "" {
 		return
@@ -180,6 +191,18 @@ func slotType(name string, tm map[string]string) string {
 			return "float64"
 		}
 		return "int64"
+	}
+	return ""
+}
+
+// litToType 将 LitKind 映射为类型字符串，跳过 Flat() → slotType() 字符串重解析。
+func litToType(lit ast.LitKind) string {
+	switch lit {
+	case ast.LitInt:    return "int64"
+	case ast.LitFloat:  return "float64"
+	case ast.LitString, ast.LitRawString: return "string"
+	case ast.LitBool:   return "bool"
+	case ast.LitNil:    return ""
 	}
 	return ""
 }

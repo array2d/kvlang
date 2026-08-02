@@ -22,12 +22,12 @@ import (
 // ResolveTerm 通过 /vthread/<vtid>/term → /sys/term/${name}/${stream} 解析终端流配置。
 func ResolveTerm(ctx context.Context, kv kvspace.KVSpace, vtid, stream string) TermStream {
 	nameVal := kvspace.GetOne(kv, keytree.VThreadTerm(vtid))
-	name := nameVal.Str()
+	name := nameVal.String()
 	if name == "" { return TermStream{} }
 	base := keytree.DevTTY(name, stream)
 	tVal := kvspace.GetOne(kv, base+"/type")
 	dVal := kvspace.GetOne(kv, base+"/detail")
-	return TermStream{Type: tVal.Str(), Detail: dVal.Str()}
+	return TermStream{Type: tVal.String(), Detail: dVal.String()}
 }
 
 // WriteTerm 根据 TermStream 类型将文本写入终端（追加换行）。

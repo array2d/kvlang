@@ -110,7 +110,7 @@ func (c *cpu) Execute(pc string) error {
 		//   - 单步模式：每条指令读取一次 .debug（已在调试中，overhead 可接受）
 		if stepping || keytree.IsEntryPC(pc) {
 			v := kvspace.GetOne(c.kv, keytree.VThreadDebugger(vtid))
-			switch mode := v.Str(); {
+			switch mode := v.String(); {
 			case mode == "" && stepping:
 				// Agent 清除了 .debugger 标志 → 退出单步模式
 				stepping = false
@@ -178,7 +178,7 @@ func (c *cpu) Execute(pc string) error {
 
 		// 读取指令执行后更新的 PC
 		newPCVal := kvspace.GetOne(c.kv, keytree.VThreadPC(vtid))
-		newPC := newPCVal.Str()
+		newPC := newPCVal.String()
 		if newPC == "" {
 			break
 		}
@@ -204,7 +204,7 @@ func (c *cpu) checkReadOnlyWrites(ctx context.Context, vtid, pc string, inst *rw
 		return nil
 	}
 	roVal := kvspace.GetOne(c.kv, keytree.FrameRO(keytree.FrameRoot(pc)))
-	ro := roVal.Str()
+	ro := roVal.String()
 	if ro == "" {
 		return nil
 	}

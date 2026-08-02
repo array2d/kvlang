@@ -8,10 +8,10 @@ import (
 	"github.com/array2d/kvspace-go"
 )
 
-// Param 表示一条指令的读写槽：名称 + kind。
+// Param 表示一条指令的读写槽：名称 + 解码后的 XValue（nil=变量引用）。
 type Param struct {
 	Name string
-	Kind string
+	Val  kvspace.XValue // 解码后的 XValue；Kind≠rwir → 字面量，Kind=rwir → 变量引用
 }
 
 // Rwir 表示执行层 [addr0, addr1] 解码后的一条 rwir 指令。
@@ -47,22 +47,22 @@ func Decode(ctx context.Context, kv kvspace.KVSpace, linkBase, pc string) (*Rwir
 	vals := kv.Get(lookupBase, names)
 
 	r := &Rwir{}
-	if s := string(vals[0].RawBytes()); s != "" {
-		r.Opcode = s
+	if !kvspace.IsNone(vals[0]) {
+		r.Opcode = vals[0].String()
 	}
 	truncated := false
 	for i := 1; i <= maxParams; i++ {
 		readIdx := (i-1)*2 + 1
 		writeIdx := readIdx + 1
 		if readIdx < len(vals) {
-			if s := string(vals[readIdx].RawBytes()); s != "" {
-				r.Reads = append(r.Reads, Param{Name: s, Kind: vals[readIdx].Kind()})
+			if !kvspace.IsNone(vals[readIdx]) {
+				r.Reads = append(r.Reads, Param{Name: vals[readIdx].String(), Val: vals[readIdx]})
 				if i == maxParams { truncated = true }
 			}
 		}
 		if writeIdx < len(vals) {
-			if s := string(vals[writeIdx].RawBytes()); s != "" {
-				r.Writes = append(r.Writes, Param{Name: s, Kind: vals[writeIdx].Kind()})
+			if !kvspace.IsNone(vals[writeIdx]) {
+				r.Writes = append(r.Writes, Param{Name: vals[writeIdx].String(), Val: vals[writeIdx]})
 				if i == maxParams { truncated = true }
 			}
 		}

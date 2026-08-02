@@ -21,10 +21,10 @@ func (dictOp) Call(f *rwir.Frame) error {
 	var pairs []kvspace.KVPair
 	for _, w := range f.Inst.Writes {
 		outKey := writeSlotKey(f.KV, fp, w.Name)
-		pairs = append(pairs, kvspace.KVPair{outKey, kvspace.Dict()})
+		pairs = append(pairs, kvspace.KVPair{outKey, kvspace.Dict{}})
 		for i := 0; i+1 < len(inputs); i += 2 {
-			if inputs[i+1].IsNone() { continue }
-			pairs = append(pairs, kvspace.KVPair{keytree.Member(outKey, inputs[i].Str()), inputs[i+1]})
+			if kvspace.IsNone(inputs[i+1]) { continue }
+			pairs = append(pairs, kvspace.KVPair{keytree.Member(outKey, inputs[i].String()), inputs[i+1]})
 		}
 	}
 	if len(pairs) > 0 { f.KV.Set(pairs) }

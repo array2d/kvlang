@@ -53,8 +53,13 @@ func dumpStmt(w io.Writer, st Stmt, prefix string, last bool) {
 	switch s := st.(type) {
 	case *Instruction:
 		exprStr := s.Expr.String()
-		fmt.Fprintf(w, "%sInstruction expr=%q writes=%v\n",
-			fullPrefix, exprStr, s.Writes)
+		litStr := ""
+		if s.Expr != nil && s.Expr.IsLeaf() && s.Expr.Lit != LitNone {
+			litStr = " lit=" + s.Expr.Lit.String()
+		}
+
+		fmt.Fprintf(w, "%sInstruction expr=%q%s writes=%v\n",
+			fullPrefix, exprStr, litStr, s.Writes)
 
 	case *ScopeStmt:
 		fmt.Fprintf(w, "%sScopeStmt %q (%d stmts)\n", fullPrefix, s.Label, len(s.Body))

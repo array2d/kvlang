@@ -27,11 +27,11 @@ func (not) Call(f *rwir.Frame) error {
 }
 
 func evalLogic(inputs []kvspace.XValue, fn func(bool, bool) bool) (kvspace.XValue, error) {
-	if err := requireBinary(inputs); err != nil { return kvspace.XValue{}, err }
-	return kvspace.Bool(fn(AsBool(inputs[0]), AsBool(inputs[1]))), nil
+	if err := requireBinary(inputs); err != nil { return kvspace.None{}, err }
+	return kvspace.NewBool(fn(AsBool(inputs[0]), AsBool(inputs[1]))), nil
 }
 
 func evalNot(inputs []kvspace.XValue) (kvspace.XValue, error) {
-	if err := requireUnary(inputs); err != nil { return kvspace.XValue{}, err }
-	return kvspace.Bool(!AsBool(inputs[0])), nil
+	if err := requireUnary(inputs); err != nil { return kvspace.None{}, err }
+	return kvspace.NewBool(!AsBool(inputs[0])), nil
 }

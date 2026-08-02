@@ -3,6 +3,7 @@ package builtin
 import (
 	"kvlang/keytree"
 	"github.com/array2d/kvspace-go"
+	"kvlang/rwir"
 )
 
 func isAbsolute(param string) bool { return len(param) > 0 && param[0] == '/' }
@@ -14,44 +15,29 @@ func writeSlotKey(kv kvspace.KVSpace, framePath, slot string) string {
 }
 
 // ResolveReadValue maps a read-slot param to a typed Value.
-func ResolveReadValue(kv kvspace.KVSpace, framePath, param string) kvspace.XValue {
+func ResolveReadValue(kv kvspace.KVSpace, framePath string, param rwir.Param) kvspace.XValue {
 	return resolveReadValue(kv, framePath, param)
 }
 
 // resolveReadValue 从 rwfunc 帧查读参值。
-// 先查 .rparam 重定向，再查 rwfunc Stack 变量，最后查当前帧。
-func resolveReadValue(kv kvspace.KVSpace, framePath, param string) kvspace.XValue {
-	if len(param) == 0 {
-		return kvspace.XValue{}
+// 字面量（Kind ≠ rwir/rwfunc）→ 直接返 Val。变量引用 → 帧查找。
+func resolveReadValue(kv kvspace.KVSpace, framePath string, param rwir.Param) kvspace.XValue {
+	if !kvspace.IsNone(param.Val) && param.Val.Kind() != kvspace.KindRwir && param.Val.Kind() != kvspace.KindRwfunc {
+		return param.Val
 	}
-	if param[0] == '"' {
-		return kvspace.String(param[1:])
+	name := param.Name
+	if len(name) == 0 {
+		return kvspace.None{}
 	}
-	if isAbsolute(param) {
-		return kvspace.GetOne(kv, param)
+	if isAbsolute(name) {
+		return kvspace.GetOne(kv, name)
 	}
-	if param == "true" {
-		return kvspace.Bool(true)
-	}
-	if param == "false" {
-		return kvspace.Bool(false)
-	}
-	if param == "null" {
-		return kvspace.XValue{}
-	}
-	if v, ok := tryParseNumber(param); ok {
-		return v
-	}
-	if len(param) > 0 && param[0] >= '0' && param[0] <= '9' {
-		return kvspace.XValue{}
-	}
-	// scope/function 帧统一：查 rwfunc 帧 .rparam 与 Stack 变量
 	rwRoot := funcFrameRoot(kv, framePath)
-	if r := kvspace.GetOne(kv, keytree.RParam(rwRoot, param)); !r.IsNone() {
-		return kvspace.GetOne(kv, r.Str())
+	if r := kvspace.GetOne(kv, keytree.RParam(rwRoot, name)); !kvspace.IsNone(r) {
+		return kvspace.GetOne(kv, r.String())
 	}
-	if v := kvspace.GetOne(kv, keytree.Stack(rwRoot)+param); !v.IsNone() {
+	if v := kvspace.GetOne(kv, keytree.Stack(rwRoot)+name); !kvspace.IsNone(v) {
 		return v
 	}
-	return kvspace.XValue{}
+	return kvspace.None{}
 }

@@ -65,8 +65,8 @@ func brBlock(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *rwi
 	if len(inst.Reads) < 3 {
 		return fmt.Errorf("br requires 3 args: cond trueLabel falseLabel")
 	}
-	condVal := builtin.ResolveReadValue(kv, keytree.FrameRoot(pc), inst.Reads[0].Name)
-	if condVal.IsNone() {
+	condVal := builtin.ResolveReadValue(kv, keytree.FrameRoot(pc), inst.Reads[0])
+	if kvspace.IsNone(condVal) {
 		msg := "TypeError: None in branch condition"
 		vthread.SetError(ctx, kv, vtid, pc, msg)
 		return fmt.Errorf("%s", msg)

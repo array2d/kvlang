@@ -24,11 +24,11 @@ func (o bit) Call(f *rwir.Frame) error {
 }
 
 func evalBinaryInt(inputs []kvspace.XValue, fn func(int64, int64) int64) (kvspace.XValue, error) {
-	if err := requireBinary(inputs); err != nil { return kvspace.XValue{}, err }
-	if inputs[0].IsNone() || inputs[1].IsNone() {
-		return kvspace.XValue{}, fmt.Errorf("TypeError: None in bitwise operation")
+	if err := requireBinary(inputs); err != nil { return kvspace.None{}, err }
+	if kvspace.IsNone(inputs[0]) || kvspace.IsNone(inputs[1]) {
+		return kvspace.None{}, fmt.Errorf("TypeError: None in bitwise operation")
 	}
 	// 位运算仅整数（五语言一致：C/Rust/Go/JS 均禁止浮点位运算，Python & 是 set intersection）
-	if err := requireInt(inputs[0], inputs[1]); err != nil { return kvspace.XValue{}, err }
-	return kvspace.Int64(fn(asInt(inputs[0]), asInt(inputs[1]))), nil
+	if err := requireInt(inputs[0], inputs[1]); err != nil { return kvspace.None{}, err }
+	return kvspace.NewInt64(fn(asInt(inputs[0]), asInt(inputs[1]))), nil
 }

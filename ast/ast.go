@@ -132,10 +132,43 @@ func (fn *Func) FullText() string {
 
 // ── Expr ──────────────────────────────────────────────────────
 
+// LitKind 标记叶节点的字面量类型。
+type LitKind uint8
+
+const (
+	LitNone      LitKind = iota // 非字面量（变量引用、路径）
+	LitInt                      // 整数字面量
+	LitFloat                    // 浮点字面量
+	LitString                   // 双引号/单引号字符串字面量
+	LitRawString                // 反引号原始字符串字面量
+	LitBool                     // 布尔字面量（true, false）
+	LitNil                      // None 字面量
+)
+
+func (k LitKind) String() string {
+	switch k {
+	case LitNone:
+		return "none"
+	case LitInt:
+		return "int"
+	case LitFloat:
+		return "float"
+	case LitString:
+		return "string"
+	case LitRawString:
+		return "rawstring"
+	case LitBool:
+		return "bool"
+	case LitNil:
+		return "nil"
+	}
+	return "unknown"
+}
+
 // Expr 是 kvlang 表达式树节点（由 Pratt 解析器生成）。
 //
 // 叶节点（IsLeaf()==true）：Op == ""，Val 为操作数字符串。
-// Quote 区分字符串字面量（true）和变量/数字/路径（false）。
+// Lit 携带字面量类型分类（LitNone=非字面量如变量/路径）。
 //
 // 内节点（IsLeaf()==false）：Op 为算子/函数名，Args 为操作数列表。
 type Expr struct {
@@ -143,19 +176,32 @@ type Expr struct {
 	Args  []*Expr // 操作数（叶节点时为 nil）
 	Val   string  // 叶节点值
 	Quote byte    // 0=非字符串, '"'="..." 双引号, '`'=`...` 反引号
+	Lit   LitKind // 字面量类型（仅叶节点有意义；LitNone=变量/路径）
 }
 
 // IsLeaf 判断是否为叶节点。
 func (e *Expr) IsLeaf() bool { return e != nil && e.Op == "" }
 
-// Leaf 构造变量/数字/路径叶节点。
+// Leaf 构造变量/路径叶节点（非字面量）。
 func Leaf(v string) *Expr { return &Expr{Val: v} }
 
 // StrLit 构造双引号字符串字面量叶节点。
-func StrLit(v string) *Expr { return &Expr{Val: v, Quote: '"'} }
+func StrLit(v string) *Expr { return &Expr{Val: v, Quote: '"', Lit: LitString} }
 
 // RawStr 构造反引号原始字符串字面量叶节点（跨行，零转义）。
-func RawStr(v string) *Expr { return &Expr{Val: v, Quote: '`'} }
+func RawStr(v string) *Expr { return &Expr{Val: v, Quote: '`', Lit: LitRawString} }
+
+// IntLit 构造整数字面量叶节点。
+func IntLit(v string) *Expr { return &Expr{Val: v, Lit: LitInt} }
+
+// FloatLit 构造浮点字面量叶节点。
+func FloatLit(v string) *Expr { return &Expr{Val: v, Lit: LitFloat} }
+
+// BoolLit 构造布尔字面量叶节点。
+func BoolLit(v string) *Expr { return &Expr{Val: v, Lit: LitBool} }
+
+// NoneLit 构造 None 字面量叶节点。
+func NoneLit() *Expr { return &Expr{Val: "None", Lit: LitNil} }
 
 // Call 构造调用/操作节点（算子或函数名 + 操作数列表）。
 func Call(op string, args ...*Expr) *Expr { return &Expr{Op: op, Args: args} }

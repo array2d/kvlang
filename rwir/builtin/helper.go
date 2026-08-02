@@ -51,7 +51,7 @@ func readInputs(f *rwir.Frame) []kvspace.XValue {
 	framePath := funcFrameRoot(f.KV, keytree.FrameRoot(f.PC))
 	inputs := make([]kvspace.XValue, 0, len(f.Inst.Reads))
 	for _, r := range f.Inst.Reads {
-		inputs = append(inputs, resolveReadValue(f.KV, framePath, r.Name))
+		inputs = append(inputs, resolveReadValue(f.KV, framePath, r))
 	}
 	return inputs
 }
@@ -72,8 +72,8 @@ func writeResult(f *rwir.Frame, result kvspace.XValue) error {
 func resolveWriteSlot(kv kvspace.KVSpace, framePath, name string) string {
 	if isAbsolute(name) { return name }
 	rwRoot := funcFrameRoot(kv, framePath)
-	if r := kvspace.GetOne(kv, keytree.WParam(rwRoot, name)); !r.IsNone() {
-		return r.Str()
+	if r := kvspace.GetOne(kv, keytree.WParam(rwRoot, name)); !kvspace.IsNone(r) {
+		return r.String()
 	}
 	return keytree.Stack(rwRoot) + name
 }
@@ -88,11 +88,32 @@ func setWrite(kv kvspace.KVSpace, framePath, slot string, val kvspace.XValue) er
 	return kv.Set([]kvspace.KVPair{{resolveWriteSlot(kv, framePath, slot), val}})
 }
 
+// isContainerKind reports whether a kind represents a container/marker type
+// (dict, index, etc.) whose String() method does not return a path.
+func isContainerKind(kind string) bool {
+	switch kind {
+	case "dict", "index", "linkindex", "extindex", "rwfunc", "rwir":
+		return true
+	}
+	return false
+}
+
+// resolveBasePath resolves the first read-slot of an at/has/set instruction as a KV base path.
+// For container types (dict, index, etc.) and None, resolves the variable name from the function frame.
+// For string values starting with "/", uses the string directly as a path.
+func resolveBasePath(kv kvspace.KVSpace, fp, funcFrame string, read rwir.Param) string {
+	v := resolveReadValue(kv, fp, read)
+	if kvspace.IsNone(v) || isContainerKind(v.Kind()) {
+		return resolveKVPath(funcFrame, read.Name)
+	}
+	return v.String()
+}
+
 // funcFrameRoot returns the nearest rwfunc frame root from the given frame path.
 // Uses .lib marker to identify rwfunc frames (extKind fails due to extindex cascade).
 func funcFrameRoot(kv kvspace.KVSpace, frameRoot string) string {
 	for f := frameRoot; f != ""; f = keytree.ParentFrame(f) {
-		if !kvspace.GetOne(kv, keytree.Stack(f)+keytree.SegLib).IsNone() {
+		if !kvspace.IsNone(kvspace.GetOne(kv, keytree.Stack(f)+keytree.SegLib)) {
 			return f
 		}
 	}
@@ -103,9 +124,11 @@ func funcFrameRoot(kv kvspace.KVSpace, frameRoot string) string {
 // Preserves the original type — int stays int, float stays float.
 func ExecuteCopy(kv kvspace.KVSpace, vtid, pc string, inst *rwir.Rwir) error {
 	framePath := keytree.FrameRoot(pc)
-	var src string
-	if len(inst.Reads) > 0 { src = inst.Reads[0].Name }
-	v := resolveReadValue(kv, framePath, src)
+	if len(inst.Reads) == 0 {
+		vthread.Set(bg, kv, vtid, rwir.NextPC(pc), "running")
+		return nil
+	}
+	v := resolveReadValue(kv, framePath, inst.Reads[0])
 	for _, w := range inst.Writes {
 		key := resolveWriteSlot(kv, framePath, w.Name)
 		if err := kv.Set([]kvspace.KVPair{{key, v}}); err != nil {
