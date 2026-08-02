@@ -454,15 +454,10 @@ func slotValue(val string, typeMap map[string]string) kvspace.XValue {
 	case kvspace.KindBool:
 		return kvspace.NewBool(val == "true")
 	case kvspace.KindInt64:
-		i, err := strconv.ParseInt(val, 10, 64)
-		if err != nil {
-			u, err2 := strconv.ParseUint(val, 10, 64)
-			if err2 == nil {
-				return kvspace.NewUint64(u)
-			}
-			return kvspace.NewInt64(0)
+		if v, ok := builtin.TryParseNumber(val); ok {
+			return v
 		}
-		return kvspace.NewInt64(i)
+		return kvspace.NewInt64(0)
 	case kvspace.KindFloat64:
 		f, _ := strconv.ParseFloat(val, 64)
 		return kvspace.NewFloat64(f)

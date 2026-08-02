@@ -123,8 +123,9 @@ func formatArray(v kvspace.XValue) string {
 	return "[" + strings.Join(parts, ", ") + "]"
 }
 
-// tryParseNumber attempts to interpret s as a numeric literal.
-func tryParseNumber(s string) (kvspace.XValue, bool) {
+// TryParseNumber attempts to interpret s as a numeric literal.
+// Tries int64 first, then uint64 for overflow, then float64.
+func TryParseNumber(s string) (kvspace.XValue, bool) {
 	if len(s) == 0 {
 		return kvspace.None{}, false
 	}
