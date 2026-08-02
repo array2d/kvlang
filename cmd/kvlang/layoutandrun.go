@@ -36,8 +36,10 @@ func findEntry(dsn string) string {
 func findEntryPrefix(kv kvspace.KVSpace, prefix string) string {
 	children := kv.List(prefix, false)
 	for _, c := range children {
+		c = strings.TrimSuffix(c, "/")
 		if strings.HasSuffix(c, ".init") { return c }
-		if entry := findEntryPrefix(kv, prefix+c+"/"); entry != "" { return c + "/" + entry }
+		sub := kvspace.JoinPath(prefix, c) + "/"
+		if entry := findEntryPrefix(kv, sub); entry != "" { return c + "/" + entry }
 	}
 	return ""
 }

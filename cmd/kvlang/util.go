@@ -12,6 +12,6 @@ func defaultKVSpace() string {
 	return "redis://127.0.0.1:6379"
 }
 
-const kvspaceFlagDesc = "kvspace 地址（DSN，如 redis://host:port；裸 host:port 视为 redis；默认可由 KVLANG_KVSPACE 覆盖）"
+const kvspaceFlagDesc = "kvspace 地址（DSN，如 redis://host:port、art:// 进程内 ART；默认可由 KVLANG_KVSPACE 覆盖）"
 
 
