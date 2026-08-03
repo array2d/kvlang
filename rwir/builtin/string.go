@@ -48,7 +48,7 @@ func (strCharOp) Call(f *rwir.Frame) error {
 		return fmt.Errorf("TypeError: string.char requires string and index")
 	}
 	s := inputs[0].String()
-	idx := int(asInt(inputs[1]))
+	idx := int(asInt64(inputs[1]))
 	runes := []rune(s)
 	if idx < 0 || idx >= len(runes) {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC,
@@ -119,7 +119,7 @@ func (strSliceOp) Call(f *rwir.Frame) error {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "TypeError: string.slice requires string, start, end")
 		return fmt.Errorf("TypeError: string.slice requires string, start, end")
 	}
-	lo, hi := int(asInt(inputs[1])), int(asInt(inputs[2]))
+	lo, hi := int(asInt64(inputs[1])), int(asInt64(inputs[2]))
 	runes := []rune(inputs[0].String())
 	n := len(runes)
 	if lo < 0 || hi > n || lo > hi {

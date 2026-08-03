@@ -30,5 +30,5 @@ func evalBinaryInt(inputs []kvspace.XValue, fn func(int64, int64) int64) (kvspac
 	}
 	// 位运算仅整数（五语言一致：C/Rust/Go/JS 均禁止浮点位运算，Python & 是 set intersection）
 	if err := requireInt(inputs[0], inputs[1]); err != nil { return kvspace.None{}, err }
-	return kvspace.NewInt64(fn(asInt(inputs[0]), asInt(inputs[1]))), nil
+	return kvspace.NewInt64(fn(asInt64(inputs[0]), asInt64(inputs[1]))), nil
 }

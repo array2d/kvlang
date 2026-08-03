@@ -25,8 +25,8 @@ func asFloat(v kvspace.XValue) float64 {
 	}
 }
 
-// asInt coerces a numeric Value to int64.
-func asInt(v kvspace.XValue) int64 {
+// asInt64 coerces a numeric Value to int64.
+func asInt64(v kvspace.XValue) int64 {
 	switch v := v.(type) {
 	case kvspace.Int8: return int64(v.At(0))
 	case kvspace.Int16: return int64(v.At(0))
@@ -38,8 +38,10 @@ func asInt(v kvspace.XValue) int64 {
 	case kvspace.Uint64: return int64(v.At(0))
 	case kvspace.Float32: return int64(v.At(0))
 	case kvspace.Float64: return int64(v.At(0))
+	case kvspace.Time: return v.At(0)
+	case kvspace.Duration: return v.At(0)
 	default:
-		panic("asInt: cannot coerce " + v.Kind() + " to int — expected numeric kind")
+		panic("asInt64: cannot coerce " + v.Kind() + " to int — expected numeric kind")
 	}
 }
 
@@ -105,7 +107,7 @@ func rawBytesOf(v kvspace.XValue) []byte {
 	switch v := v.(type) {
 	case kvspace.Int8, kvspace.Int16, kvspace.Int32, kvspace.Int64,
 		kvspace.Uint8, kvspace.Uint16, kvspace.Uint32, kvspace.Uint64,
-		kvspace.Float32, kvspace.Float64, kvspace.Bool, kvspace.Char, kvspace.Time:
+		kvspace.Float32, kvspace.Float64, kvspace.Bool, kvspace.Char, kvspace.Time, kvspace.Duration:
 		return v.Encode()[1+len(v.Kind())+8:]
 	default:
 		h := kvspace.DecodeXValueHead(v.Encode())

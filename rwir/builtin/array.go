@@ -88,15 +88,15 @@ func kindBytes(kind string, v kvspace.XValue) []byte {
 	switch kind {
 	case "bool":
 		if AsBool(v) { return []byte{1} }; return []byte{0}
-	case "int8": return []byte{byte(int8(asInt(v)))}
-	case "uint8": return []byte{uint8(asInt(v))}
-	case "int16": b := make([]byte, 2); binary.LittleEndian.PutUint16(b, uint16(int16(asInt(v)))); return b
-	case "uint16": b := make([]byte, 2); binary.LittleEndian.PutUint16(b, uint16(asInt(v))); return b
-	case "int32": b := make([]byte, 4); binary.LittleEndian.PutUint32(b, uint32(int32(asInt(v)))); return b
-	case "uint32": b := make([]byte, 4); binary.LittleEndian.PutUint32(b, uint32(asInt(v))); return b
+	case "int8": return []byte{byte(int8(asInt64(v)))}
+	case "uint8": return []byte{uint8(asInt64(v))}
+	case "int16": b := make([]byte, 2); binary.LittleEndian.PutUint16(b, uint16(int16(asInt64(v)))); return b
+	case "uint16": b := make([]byte, 2); binary.LittleEndian.PutUint16(b, uint16(asInt64(v))); return b
+	case "int32": b := make([]byte, 4); binary.LittleEndian.PutUint32(b, uint32(int32(asInt64(v)))); return b
+	case "uint32": b := make([]byte, 4); binary.LittleEndian.PutUint32(b, uint32(asInt64(v))); return b
 	case "float32": b := make([]byte, 4); binary.LittleEndian.PutUint32(b, math.Float32bits(float32(asFloat(v)))); return b
-	case "int64": b := make([]byte, 8); binary.LittleEndian.PutUint64(b, uint64(asInt(v))); return b
-	case "uint64": b := make([]byte, 8); binary.LittleEndian.PutUint64(b, uint64(asInt(v))); return b
+	case "int64": b := make([]byte, 8); binary.LittleEndian.PutUint64(b, uint64(asInt64(v))); return b
+	case "uint64": b := make([]byte, 8); binary.LittleEndian.PutUint64(b, uint64(asInt64(v))); return b
 	case "float64": b := make([]byte, 8); binary.LittleEndian.PutUint64(b, math.Float64bits(asFloat(v))); return b
 	default: return rawBytesOf(v)
 	}
@@ -129,7 +129,7 @@ func (atOp) Call(f *rwir.Frame) error {
 		if !isIntKind(inputs[1].Kind()) {
 			return writeResult(f, kvspace.NewChar(""))
 		}
-		idx := int(asInt(inputs[1]))
+		idx := int(asInt64(inputs[1]))
 		if idx < 0 || idx >= len(s) {
 			return writeResult(f, kvspace.NewChar(""))
 		}
@@ -155,7 +155,7 @@ func (atOp) Call(f *rwir.Frame) error {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
 		return fmt.Errorf("%s", msg)
 	}
-	idx := int(asInt(inputs[1]))
+	idx := int(asInt64(inputs[1]))
 	elem := xvalueAt(inputs[0], idx)
 	if kvspace.IsNone(elem) {
 		elem = typedIndex(inputs[0], idx)
@@ -196,7 +196,7 @@ func (arraySetOp) Call(f *rwir.Frame) error {
 	//   kvlang 以"写回新串"呈现 C 直觉、保持值语义）。越界报错（C 为 UB，此处显式）。
 	if arr.Kind() == "string" && !strings.HasPrefix(arr.String(), "/") {
 		sv := arr.String()
-		idx := int(asInt(inputs[1]))
+		idx := int(asInt64(inputs[1]))
 		ch := inputs[2].String()
 		if idx < 0 || idx >= len(sv) {
 			msg := fmt.Sprintf("IndexError: set: string index %d out of bounds (len=%d); help: try adjusting the index or check string.len first", idx, len(sv))
@@ -240,7 +240,7 @@ func (arraySetOp) Call(f *rwir.Frame) error {
 	// 数组长度判定
 	n := int(arr.ArrayLen())
 	if n == 0 { n = int(arr.ArrayLen()) }
-	idx := int(asInt(inputs[1]))
+	idx := int(asInt64(inputs[1]))
 	if idx < 0 || idx >= n {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC,
 			fmt.Sprintf("IndexError: set: index %d out of bounds (len=%d)", idx, n))
@@ -338,6 +338,6 @@ func (hasOp) Call(f *rwir.Frame) error {
 
 func kvKey(v kvspace.XValue) string {
 	if v.Kind() == "string" { return v.String() }
-	if isIntKind(v.Kind()) { return strconv.FormatInt(asInt(v), 10) }
+	if isIntKind(v.Kind()) { return strconv.FormatInt(asInt64(v), 10) }
 	panic("kvKey: expected string or int kind, got " + v.Kind())
 }

@@ -30,7 +30,7 @@ func (o kvHasOp) Call(f *rwir.Frame) error {
 	idxVal := resolveReadValue(f.KV, fp, f.Inst.Reads[1])
 	var key string
 	if isIntKind(idxVal.Kind()) || isFloatKind(idxVal.Kind()) {
-		key = keytree.Member(prefix, strconv.Itoa(int(asInt(idxVal))))
+		key = keytree.Member(prefix, strconv.Itoa(int(asInt64(idxVal))))
 	} else {
 		key = keytree.Member(prefix, idxVal.String())
 	}
@@ -53,7 +53,7 @@ func (o kvAtOp) Call(f *rwir.Frame) error {
 	idxVal := resolveReadValue(f.KV, fp, f.Inst.Reads[1])
 	var key string
 	if isIntKind(idxVal.Kind()) || isFloatKind(idxVal.Kind()) {
-		key = keytree.Member(prefix, strconv.Itoa(int(asInt(idxVal))))
+		key = keytree.Member(prefix, strconv.Itoa(int(asInt64(idxVal))))
 	} else {
 		key = keytree.Member(prefix, idxVal.String())
 	}

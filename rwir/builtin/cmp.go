@@ -47,7 +47,7 @@ func evalCmp(inputs []kvspace.XValue, o cmp) (kvspace.XValue, error) {
 	// 同类型直接比较；混合类型 → TypeError（p0/p1：不容忍跨类型静默比较）
 	switch {
 	case isIntKind(a.Kind()) && isIntKind(b.Kind()) && o.i != nil:
-		return kvspace.NewBool(o.i(asInt(a), asInt(b))), nil
+		return kvspace.NewBool(o.i(asInt64(a), asInt64(b))), nil
 	case isNumeric(a) && isNumeric(b):
 		return kvspace.NewBool(o.f(asFloat(a), asFloat(b))), nil
 	case a.Kind() == "string" && b.Kind() == "string":

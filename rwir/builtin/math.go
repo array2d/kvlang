@@ -50,7 +50,7 @@ func evalAbs(inputs []kvspace.XValue) (kvspace.XValue, error) {
 	v := inputs[0]
 	switch v.Kind() {
 	case "int8", "int16", "int32", "int64":
-		x := asInt(v)
+		x := asInt64(v)
 		if x < 0 { return kvspace.NewInt64(-x), nil }
 		return v, nil
 	case "uint8", "uint16", "uint32", "uint64":
@@ -89,8 +89,8 @@ func evalMinMax(inputs []kvspace.XValue, fn func(float64, float64) float64, intW
 	}
 	// int 全域 → 原生 int64 fold（fix-020/022：不经 float64 中转）
 	if allInt {
-		acc := asInt(inputs[0])
-		for _, v := range inputs[1:] { acc = intWin(acc, asInt(v)) }
+		acc := asInt64(inputs[0])
+		for _, v := range inputs[1:] { acc = intWin(acc, asInt64(v)) }
 		return kvspace.NewInt64(acc), nil
 	}
 	if allNum {

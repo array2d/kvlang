@@ -61,7 +61,7 @@ func evalBinaryArith(inputs []kvspace.XValue, fn func(float64, float64) float64,
 		if fnInt == nil {
 			panic("evalBinaryArith: fnInt is nil for int operands — every arith op must provide int path")
 		}
-		return narrowInt(a.Kind(), b.Kind(), fnInt(asInt(a), asInt(b))), nil
+		return narrowInt(a.Kind(), b.Kind(), fnInt(asInt64(a), asInt64(b))), nil
 	}
 	return narrowFloat(a.Kind(), b.Kind(), fn(asFloat(a), asFloat(b))), nil
 }
@@ -72,13 +72,13 @@ func evalNeg(v kvspace.XValue) (kvspace.XValue, error) {
 	}
 	switch v := v.(type) {
 	case kvspace.Int8:
-		return kvspace.NewInt8(int8(-asInt(v))), nil
+		return kvspace.NewInt8(int8(-asInt64(v))), nil
 	case kvspace.Int16:
-		return kvspace.NewInt16(int16(-asInt(v))), nil
+		return kvspace.NewInt16(int16(-asInt64(v))), nil
 	case kvspace.Int32:
-		return kvspace.NewInt32(int32(-asInt(v))), nil
+		return kvspace.NewInt32(int32(-asInt64(v))), nil
 	case kvspace.Int64:
-		return kvspace.NewInt64(-asInt(v)), nil
+		return kvspace.NewInt64(-asInt64(v)), nil
 	case kvspace.Uint8, kvspace.Uint16, kvspace.Uint32, kvspace.Uint64:
 		return kvspace.None{}, fmt.Errorf("TypeError: cannot negate unsigned %s", v.Kind())
 	case kvspace.Float32:
@@ -103,7 +103,7 @@ func evalDiv(inputs []kvspace.XValue) (kvspace.XValue, error) {
 	// 两整数 → 整数整除（C/Go/Rust 阵营）；含浮点 → 浮除。
 	// fix-034：结果窄化回输入更宽类型，不复全部消灭为 int64/float64。
 	if isIntKind(a.Kind()) && isIntKind(b.Kind()) {
-		return narrowInt(a.Kind(), b.Kind(), asInt(a)/asInt(b)), nil
+		return narrowInt(a.Kind(), b.Kind(), asInt64(a)/asInt64(b)), nil
 	}
 	return narrowFloat(a.Kind(), b.Kind(), asFloat(a)/asFloat(b)), nil
 }
@@ -115,8 +115,8 @@ func evalMod(inputs []kvspace.XValue) (kvspace.XValue, error) {
 	}
 	// 模运算仅整数（五语言中仅 Python/JS 支持浮点取模；取 C/Go/Rust 阵营）
 	if err := requireInt(inputs[0], inputs[1]); err != nil { return kvspace.None{}, err }
-	b := asInt(inputs[1])
+	b := asInt64(inputs[1])
 	if b == 0 { return kvspace.None{}, fmt.Errorf("ZeroDivisionError: modulo by zero") }
-	return narrowInt(inputs[0].Kind(), inputs[1].Kind(), asInt(inputs[0])%b), nil
+	return narrowInt(inputs[0].Kind(), inputs[1].Kind(), asInt64(inputs[0])%b), nil
 }
 
