@@ -312,11 +312,21 @@ func (p *parser) parsePrimaryExpr() *ast.Expr {
 
 	// 点号函数调用：name.name(args, ...) 或 /lib/name.name(args, ...)
 	// token 流：(IDENT|LITERAL_PATH) . IDENT LPAREN ... — 合并 . 两侧为操作码名
+	// 点号函数调用：name.name(args, ...) 或 name.name.name(args, ...)
+	// token 流：(IDENT|LITERAL_PATH) (. IDENT)+ LPAREN ... — 合并 . 链为操作码名
+	isDottedCall := false
 	if (p.peek().Kind == Ident || (p.peek().Kind == Literal && len(p.peek().Value) > 0 && p.peek().Value[0] == '/')) &&
-		p.peekAt(1).Kind == Dot && p.peekAt(2).Kind == Ident && p.peekAt(3).Kind == LParen {
+		p.peekAt(1).Kind == Dot && p.peekAt(2).Kind == Ident {
+		j := 3
+		for p.peekAt(j).Kind == Dot && p.peekAt(j+1).Kind == Ident { j += 2 }
+		isDottedCall = p.peekAt(j).Kind == LParen
+	}
+	if isDottedCall {
 		opcode := p.advance().Value // consume LHS
-		p.advance()                  // skip Dot
-		opcode += keytree.MemberSep + p.advance().Value // consume RHS → "/lib/math.sum"
+		for p.peek().Kind == Dot && p.peekAt(1).Kind == Ident {
+			p.advance() // skip Dot
+			opcode += keytree.MemberSep + p.advance().Value // consume segment
+		}
 		p.advance() // consume (
 		var args []*ast.Expr
 		for p.peek().Kind != RParen && p.peek().Kind != EOF {
