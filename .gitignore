@@ -56,3 +56,4 @@ kvlang
 *.kvfail
 *.kv.skip
 tutorial/test_failures.csv
+tutorial/benchmark.csv

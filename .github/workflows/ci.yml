@@ -44,6 +44,7 @@ jobs:
       - run: go mod tidy
       - run: go build -o kvlang ./cmd/kvlang/
       - run: go install github.com/array2d/kvspace-go/cmd/kvspace@latest
+      - run: python3 -m unittest tutorial/test_benchmark.py
       - run: python3 tutorial/test.py
 
   # ── 多平台交叉编译（仅 tag 时生成 release 产物）─────────────────────────
