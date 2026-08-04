@@ -4,7 +4,7 @@
 #   gcd = 6
 rwfunc gcd(A:int64, B:int64) -> (R:int64) {
 	if (B == 0) {
-		A + 0 -> R
+		A -> R
 	} else {
 		rem <- A % B
 		R = gcd(B, rem)  # = 等价于 <-
@@ -13,4 +13,3 @@ rwfunc gcd(A:int64, B:int64) -> (R:int64) {
 
 gcd(48, 18) -> ans
 println("gcd =", ans)
-/last_gcd <- ans

@@ -7,11 +7,9 @@ rwfunc factorial(n:int64) -> (result:int64) {
 	i <- 1
 	while (i <= n) {
 		result = result * i  # = 等价于 <-
-		result_m = result × i  # = 等价于 <-
 		i + 1 -> i
 	}
 }
 
 ans <- factorial(10)
 println("fact =", ans)
-/last_fact = ans  # = 等价于 <-

@@ -5,8 +5,8 @@
 #   t0 < t1: true
 #   t0 > t1: false
 #   delta >= 0 ns: true
-#   delta ms = 0
-#   delta s = 0
+#   delta ms >= 0: true
+#   delta s >= 0: true
 #   t0 + delta == t1: true
 #   1000 ms
 #   1 s = 1000000000 ns
@@ -30,12 +30,12 @@ rwfunc main() -> () {
     println(time.duration.before(zero, delta))
 
     ms <- time.duration.as_millis(delta)
-    print("delta ms = ")
-    println(ms)
+    print("delta ms >= 0: ")
+    println(ms >= 0)
 
     s <- time.duration.as_seconds(delta)
-    print("delta s = ")
-    println(s)
+    print("delta s >= 0: ")
+    println(s >= 0)
 
     sum <- time.add(t0, delta)
     print("t0 + delta == t1: ")

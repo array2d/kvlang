@@ -17,7 +17,7 @@ rwfunc prime_sieve(limit:int64) -> () {
 
 			if (divisible) {
 				is_prime = false  # = 等价于 <-
-				n -> d
+				break
 			} else {
 				d <- d + 1
 			}
@@ -31,7 +31,6 @@ rwfunc prime_sieve(limit:int64) -> () {
 		n + 1 -> n
 	}
 	println("total primes up to", limit, "=", count)
-	/last_primes <- count
 }
 
 prime_sieve(30)
