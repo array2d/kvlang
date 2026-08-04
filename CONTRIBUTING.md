@@ -18,7 +18,7 @@ make build
 # After making changes:
 make vet          # static analysis
 make test         # unit tests
-KVLANG_TEST_REDIS=1 python3 tutorial/test.py  # requires a dedicated local Redis
+python3 run.py             # integration tests (requires Redis)
 ```
 
 ## Project structure

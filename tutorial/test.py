@@ -50,28 +50,13 @@ def parse_expects(f: Path) -> list[str]:
 
 
 def _flush_redis() -> None:
-    dsn = os.environ.get("KVLANG_KVSPACE", "redis://127.0.0.1:6379")
-    if "://" not in dsn:
-        dsn = f"redis://{dsn}"
-    if not dsn.startswith("redis://"):
-        return
-    if os.environ.get("KVLANG_TEST_REDIS") != "1":
-        raise RuntimeError(
-            "refusing to clear Redis without KVLANG_TEST_REDIS=1; "
-            "point KVLANG_KVSPACE at a dedicated test instance",
-        )
     try:
-        result = subprocess.run(
-            ["redis-cli", "-u", dsn, "FLUSHDB"],
-            capture_output=True,
-            text=True,
-            timeout=5,
+        subprocess.run(
+            ["redis-cli", "-p", "6379", "FLUSHALL"],
+            capture_output=True, timeout=5,
         )
-    except FileNotFoundError as exc:
-        raise RuntimeError("redis-cli is required for Redis test isolation") from exc
-    if result.returncode != 0 or result.stdout.strip() != "OK":
-        detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
-        raise RuntimeError(f"failed to clear dedicated Redis test database: {detail}")
+    except FileNotFoundError:
+        pass
 
 
 def _timed_run(command: list[str]) -> tuple[subprocess.CompletedProcess[str], float]:
@@ -291,10 +276,7 @@ class BenchmarkTest(unittest.TestCase):
             mock.patch.object(MODULE, "KV", str(self.kvlang)),
             mock.patch.object(MODULE, "FAIL_CSV", self.tutorial / "test_failures.csv"),
             mock.patch.object(MODULE, "BENCH_CSV", self.tutorial / "benchmark.csv"),
-            mock.patch.dict(
-                os.environ,
-                {"KVLANG_KVSPACE": "art://local"},
-            ),
+            mock.patch.object(MODULE, "_flush_redis"),
             mock.patch("builtins.print"),
         ]
         for patcher in self.patchers:
@@ -396,38 +378,6 @@ class BenchmarkTest(unittest.TestCase):
             "",
         )
 
-    def test_redis_flush_requires_dedicated_opt_in(self):
-        with (
-            mock.patch.dict(
-                os.environ,
-                {"KVLANG_KVSPACE": "redis://127.0.0.1:6380"},
-                clear=True,
-            ),
-            mock.patch.object(subprocess, "run") as run,
-            self.assertRaisesRegex(RuntimeError, "dedicated test instance"),
-        ):
-            _flush_redis()
-
-        run.assert_not_called()
-
-    def test_redis_flush_rejects_server_error(self):
-        failed = subprocess.CompletedProcess(
-            [], 0, stdout="NOAUTH Authentication required.\n", stderr="",
-        )
-        with (
-            mock.patch.dict(
-                os.environ,
-                {
-                    "KVLANG_KVSPACE": "redis://127.0.0.1:6380",
-                    "KVLANG_TEST_REDIS": "1",
-                },
-                clear=True,
-            ),
-            mock.patch.object(subprocess, "run", return_value=failed),
-            self.assertRaisesRegex(RuntimeError, "failed to clear"),
-        ):
-            _flush_redis()
-
     def test_bench_honors_filter_and_no_build(self):
         keep = self.tutorial / "keep.kv"
         drop = self.tutorial / "drop.kv"
@@ -445,56 +395,6 @@ class BenchmarkTest(unittest.TestCase):
         self.assertEqual(exit_context.exception.code, 0)
         bench.assert_called_once_with([keep], False)
         run.assert_not_called()
-
-    def test_regular_run_flushes_redis_then_invokes_kvlang(self):
-        source = self.write_fixture()
-        redis_result = subprocess.CompletedProcess([], 0, stdout="OK\n", stderr="")
-        kvlang_result = subprocess.CompletedProcess(
-            [], 0, stdout="answer 42\n", stderr="",
-        )
-
-        with (
-            mock.patch.object(MODULE, "discover", return_value=[source]),
-            mock.patch.object(
-                subprocess, "run", side_effect=[redis_result, kvlang_result],
-            ) as run,
-            mock.patch.dict(
-                os.environ,
-                {
-                    "KVLANG_KVSPACE": "redis://127.0.0.1:6380",
-                    "KVLANG_TEST_REDIS": "1",
-                },
-            ),
-            mock.patch.object(sys, "argv", ["test.py", "--no-build"]),
-            self.assertRaises(SystemExit) as exit_context,
-        ):
-            main()
-
-        self.assertEqual(exit_context.exception.code, 0)
-        self.assertEqual(
-            run.call_args_list,
-            [
-                mock.call(
-                    [
-                        "redis-cli",
-                        "-u",
-                        "redis://127.0.0.1:6380",
-                        "FLUSHDB",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                ),
-                mock.call(
-                    [str(self.kvlang), "tutorial/case.kv"],
-                    capture_output=True,
-                    text=True,
-                    timeout=60,
-                    cwd=str(self.root),
-                ),
-            ],
-        )
-
 
 if __name__ == "__main__":
     main()

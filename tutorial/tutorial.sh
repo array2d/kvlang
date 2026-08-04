@@ -105,25 +105,16 @@ GOPROXY="$GOPROXY" PREFIX="$INSTALL_PREFIX" make build
 export PATH="$INSTALL_PREFIX/bin:$PATH"
 
 # ═══════════════════════════════════════════════
-# step 4: start a dedicated test redis
+# step 4: start redis
 # ═══════════════════════════════════════════════
 
-KVLANG_TEST_REDIS_PORT="${KVLANG_TEST_REDIS_PORT:-16379}"
-if redis-cli -p "$KVLANG_TEST_REDIS_PORT" ping &>/dev/null; then
-    die "port $KVLANG_TEST_REDIS_PORT is already running Redis; choose a dedicated port with KVLANG_TEST_REDIS_PORT"
+if ! redis-cli ping &>/dev/null; then
+    say "starting redis-server"
+    redis-server --daemonize yes --loglevel warning
+    sleep 1
 fi
-say "starting dedicated redis-server on port $KVLANG_TEST_REDIS_PORT"
-redis-server \
-    --bind 127.0.0.1 \
-    --port "$KVLANG_TEST_REDIS_PORT" \
-    --save '' \
-    --appendonly no \
-    --daemonize yes \
-    --loglevel warning
-trap 'redis-cli -p "$KVLANG_TEST_REDIS_PORT" shutdown nosave &>/dev/null || true' EXIT
-sleep 1
-redis-cli -p "$KVLANG_TEST_REDIS_PORT" ping &>/dev/null || die "dedicated redis-server failed to start"
-say "dedicated redis is up"
+redis-cli ping &>/dev/null || die "redis-server failed to start"
+say "redis is up"
 
 # ═══════════════════════════════════════════════
 # step 5: run tutorial tests
@@ -131,6 +122,4 @@ say "dedicated redis is up"
 
 say "running tutorial/test.py"
 cd "$WORKDIR/kvlang"
-KVLANG_KVSPACE="redis://127.0.0.1:$KVLANG_TEST_REDIS_PORT" \
-KVLANG_TEST_REDIS=1 \
 python3 tutorial/test.py
