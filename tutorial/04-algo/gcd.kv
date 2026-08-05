@@ -11,5 +11,10 @@ rwfunc gcd(A:int64, B:int64) -> (R:int64) {
 	}
 }
 
+t0 <- time.now()
 gcd(48, 18) -> ans
+t1 <- time.now()
 println("gcd =", ans)
+delta <- time.sub(t1, t0)
+ns <- time.duration.as_nanos(delta)
+println("__bench_ns:", ns)

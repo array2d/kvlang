@@ -23,6 +23,8 @@ FAIL_CSV = (ROOT / "tutorial" / "test_failures.csv").resolve()
 BENCH_CSV = (ROOT / "tutorial" / "benchmark.csv").resolve()
 MODULE = sys.modules[__name__]
 
+_KV_ENV = {**os.environ, "KVLANG_KVSPACE": os.environ.get("KVLANG_KVSPACE", "art://")}
+
 
 def discover(root: Path) -> list[Path]:
     return sorted(root.rglob("*.kv"))
@@ -59,11 +61,26 @@ def _flush_redis() -> None:
         pass
 
 
-def _timed_run(command: list[str]) -> tuple[subprocess.CompletedProcess[str], float]:
-    started = time.perf_counter()
+def _extract_bench_us(stdout: str) -> tuple[str, float]:
+    """从 stdout 提取 __bench_ns: 或 __bench_us: 行，返回 (清理后stdout, us)。"""
+    bench_us = 0.0
+    lines = stdout.split("\n")
+    clean = []
+    for line in lines:
+        if line.startswith("__bench_ns:"):
+            bench_us = float(line.split(":")[1].strip()) / 1000.0
+        elif line.startswith("__bench_us:"):
+            bench_us = float(line.split(":")[1].strip())
+        else:
+            clean.append(line)
+    return "\n".join(clean), bench_us
+
+
+def _timed_run(command: list[str], env: dict | None = None) -> tuple[subprocess.CompletedProcess[str], float]:
     result = subprocess.run(command, capture_output=True, text=True,
-                            timeout=60, cwd=str(ROOT))
-    return result, (time.perf_counter() - started) * 1000
+                            timeout=60, cwd=str(ROOT), env=env)
+    _, us = _extract_bench_us(result.stdout)
+    return result, us / 1000.0  # 返回 ms，兼容旧格式
 
 
 def _benchmark_error(results: dict[str, subprocess.CompletedProcess[str]],
@@ -71,7 +88,10 @@ def _benchmark_error(results: dict[str, subprocess.CompletedProcess[str]],
     for name, result in results.items():
         if result.returncode != 0:
             return f"{name} exited with status {result.returncode}"
-    outputs = {name: result.stdout for name, result in results.items()}
+    outputs = {}
+    for name, result in results.items():
+        clean, _ = _extract_bench_us(result.stdout)
+        outputs[name] = clean
     for name, output in outputs.items():
         if any(expected not in output for expected in expects):
             return f"{name} output does not match expected output"
@@ -108,7 +128,7 @@ def _benchmark_file(f: Path, expects: list[str]) -> tuple[dict[str, str], str]:
 
         try:
             _flush_redis()
-            kv_result, kv_ms = _timed_run([KV, rel])
+            kv_result, kv_ms = _timed_run([KV, rel], env=_KV_ENV)
             py_result, py_ms = _timed_run([sys.executable, str(f.with_suffix(".py"))])
             c_result, c_ms = _timed_run([str(executable)])
         except FileNotFoundError as exc:
@@ -195,7 +215,7 @@ def main():
         try:
             _flush_redis()
             r = subprocess.run([KV, rel], capture_output=True, text=True,
-                               timeout=60, cwd=str(ROOT))
+                               timeout=60, cwd=str(ROOT), env=_KV_ENV)
             all_ok = True
             if r.returncode != 0:
                 all_ok = False

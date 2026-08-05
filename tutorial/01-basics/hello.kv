@@ -1,7 +1,12 @@
 # 期望输出:
 #   hello kvlang
 rwfunc main() -> () {
+	t0 <- time.now()
 	println("hello kvlang")
+	t1 <- time.now()
+	delta <- time.sub(t1, t0)
+	ns <- time.duration.as_nanos(delta)
+	println("__bench_ns:", ns)
 }
 
 main()

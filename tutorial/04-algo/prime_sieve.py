@@ -1,3 +1,5 @@
+import time
+
 def prime_sieve(limit: int) -> None:
     print("primes up to", limit)
     count = 0
@@ -12,5 +14,7 @@ def prime_sieve(limit: int) -> None:
             count += 1
     print("total primes up to", limit, "=", count)
 
-
-prime_sieve(30)
+t0 = time.perf_counter()
+prime_sieve(200)
+t1 = time.perf_counter()
+print(f"__bench_us: {int((t1 - t0) * 1_000_000)}")

@@ -1,9 +1,9 @@
 # prime_sieve: 试除法求质数（Rust The Book §3.5）
-# 算法: 嵌套 while，找出 <=30 的质数
+# 算法: 嵌套 while，找出 <=200 的质数
 # 期望输出:
 #   prime: 2
-#   prime: 29
-#   total primes up to 30 = 10
+#   prime: 199
+#   total primes up to 200 = 46
 rwfunc prime_sieve(limit:int64) -> () {
 	println("primes up to", limit)
 	count = 0  # = 等价于 <-
@@ -33,4 +33,9 @@ rwfunc prime_sieve(limit:int64) -> () {
 	println("total primes up to", limit, "=", count)
 }
 
-prime_sieve(30)
+t0 <- time.now()
+prime_sieve(200)
+t1 <- time.now()
+delta <- time.sub(t1, t0)
+ns <- time.duration.as_nanos(delta)
+println("__bench_ns:", ns)

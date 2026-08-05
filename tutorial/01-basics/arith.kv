@@ -10,6 +10,7 @@
 #   sqrt: 12.0
 #   sqrt(√): 12.0
 rwfunc main() -> () {
+	t0 <- time.now()
 	10 + 3 -> add_r
 	println("add:", add_r)
 
@@ -36,6 +37,11 @@ rwfunc main() -> () {
 	println("sqrt:", sqrt_r)
 	sqrt_r2 = √(144)  # = 等价于 <-
 	println("sqrt(√):", sqrt_r2)
+
+	t1 <- time.now()
+	delta <- time.sub(t1, t0)
+	ns <- time.duration.as_nanos(delta)
+	println("__bench_ns:", ns)
 }
 
 main()
