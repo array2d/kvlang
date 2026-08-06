@@ -34,7 +34,8 @@ var byWord = map[string]Entry{
 	// ── 算术 ──────────────────────────────────────────────────────
 	"add":  {"add",  []string{"+"}, 50, true, false, true},
 	"sub":  {"sub",  []string{"-"}, 50, true, false, true},
-	"mul":  {"mul",  []string{"*", "×"}, 60, true, false, false},
+	"star": {"star", []string{"*"}, 0, false, false, false},
+		"mul":  {"mul",  []string{"×"}, 60, true, false, false},
 	"div":  {"div",  []string{"÷"}, 60, true, false, false},
 	"mod":  {"mod",  []string{"%"}, 60, true, false, false},
 	// ── 比较 ──────────────────────────────────────────────────────
