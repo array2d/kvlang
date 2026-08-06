@@ -17,9 +17,9 @@ rwfunc rotate(N:int64) -> () {
 	while (i < N) {
 		j = i + 1  # = 等价于 <-
 		while (j < N) {
-			ri <- i * N + j
+			ri <- i × N + j
 			ri_m <- i × N + j
-			rj = j * N + i  # = 等价于 <-
+			rj = j × N + i  # = 等价于 <-
 			rj_m = j × N + i  # = 等价于 <-
 			mat[ri] -> t
 			mat[rj] -> u
@@ -32,7 +32,7 @@ rwfunc rotate(N:int64) -> () {
 	# reverse each row
 	r = 0  # = 等价于 <-
 	while (r < N) {
-		l <- r * N
+		l <- r × N
 		l_m <- r × N
 		h = l + N - 1  # = 等价于 <-
 		while (l < h) {
@@ -50,7 +50,7 @@ rwfunc rotate(N:int64) -> () {
 	while (row < N) {
 		col = 0  # = 等价于 <-
 		while (col < N) {
-			idx = row * N + col  # = 等价于 <-
+			idx = row × N + col  # = 等价于 <-
 			idx_m = row × N + col  # = 等价于 <-
 			v <- mat[idx]
 			println(v)

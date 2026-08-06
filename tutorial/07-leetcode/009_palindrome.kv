@@ -12,7 +12,7 @@ rwfunc is_pal(x:int64) -> (r:int64) {
 		orig <- x
 		rev = 0  # = 等价于 <-
 		while (orig > 0) {
-			rev * 10 -> r10
+			rev × 10 -> r10
 			rev × 10 -> r10_m
 			d <- orig % 10
 			rev = r10 + d  # = 等价于 <-

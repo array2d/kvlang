@@ -14,11 +14,11 @@ rwfunc max_area(h:int64) -> (mx:int64) {
 		ls <- hl < hr
 
 		if (ls) {
-			ar = hl * w  # = 等价于 <-
+			ar = hl × w  # = 等价于 <-
 			ar_m = hl × w  # = 等价于 <-
 			l + 1 -> l
 		} else {
-			ar <- hr * w
+			ar <- hr × w
 			ar_m <- hr × w
 			r = r - 1  # = 等价于 <-
 		}

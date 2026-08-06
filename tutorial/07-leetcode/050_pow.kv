@@ -16,11 +16,11 @@ rwfunc my_pow(x:float64, n:int64) -> () {
 		exp % 2 -> odd
 
 		if (odd != 0) {
-			result <- result * base
+			result <- result × base
 			result_m <- result × base
 		}
 
-		base = base * base  # = 等价于 <-
+		base = base × base  # = 等价于 <-
 		base_m = base × base  # = 等价于 <-
 		exp ÷ 2 -> exp
 		exp ÷ 2 -> exp_m
