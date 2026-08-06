@@ -1,1 +1,0 @@
-HandleCall 已通过 .wparam 将写参目标的绝对路径存入子帧，CPU 执行时直写父帧。HandleReturn 不再搬运——仅读 .callpc 恢复父 PC，Unlink + DelTree 清理子帧。写参跨帧映射在执行时完成，不是返回值拷贝。

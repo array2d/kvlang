@@ -1,1 +1,1 @@
-[README] 用递归实现阶乘。def fact(n:int64) -> (r:int64)，fact(0)=1，fact(n)=n*fact(n-1)。调用 fact(5) 并打印结果
+[README] 用递归实现阶乘。接收一个 int64 参数，当参数为 0 时结果为 1。调用该函数计算 5 的阶乘并打印结果。

@@ -1,1 +1,1 @@
-[README] 写加法 def add(A:int64, B:int64) -> (C:int64) { A + B -> C } 和乘法 def mul(A:int64, B:int64) -> (C:int64) { A * B -> C }。先调用 add(2, 4) -> s，再调用 mul(s, 3) -> r，打印 r
+[README] 定义一个 lib math，包含两个函数：一个做两数相加，一个做两数相乘。先计算 2+4，再将结果乘以 3，打印最终结果。

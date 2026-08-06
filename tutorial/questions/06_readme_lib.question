@@ -1,1 +1,1 @@
-[README] 定义一个 lib math { def twice(x:int64) -> (r:int64) { x * 2 -> r } }，在 init 里调用 /lib/math.twice(21) -> v，打印 v
+[README] 定义一个 lib math，其中包含一个函数能将 int64 参数乘以 2 作为写参输出。在 init 里调用这个函数传入 21，打印结果。lib 中的函数通过绝对路径调用，格式为 /lib/包名.函数名
