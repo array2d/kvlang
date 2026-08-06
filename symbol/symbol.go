@@ -6,11 +6,6 @@ const (
 	ArrowLeft  = " <- "
 	ArrowRight = " -> "
 	ArrowEq    = " = "
-	OpAdd      = " + "
-	OpSub      = " - "
-	OpMul      = " * "
-	OpDiv      = " / "
-	OpMod      = " % "
 )
 
 type Entry struct {
