@@ -25,8 +25,8 @@ rwfunc main() -> () {
         float32(16777216) + float32(1) -> c
         println(c)
 
-        # int8(100) * int16(2) → 200（混合宽度向更宽提升→int16）
-        int8(100) * int16(2) -> d
+        # int8(100) × int16(2) → 200（混合宽度向更宽提升→int16）
+        int8(100) × int16(2) -> d
         int8(100) × int16(2) -> d_m
         println(d_m)
         println(d)
@@ -51,8 +51,8 @@ rwfunc main() -> () {
         neg(9223372036854775807) -> h
         println(h)
 
-        # int32(100) * int32(100) → 10000（同类型→同类型 int32）
-        int32(100) * int32(100) -> i
+        # int32(100) × int32(100) → 10000（同类型→同类型 int32）
+        int32(100) × int32(100) -> i
         int32(100) × int32(100) -> i_m
         println(i_m)
         println(i)

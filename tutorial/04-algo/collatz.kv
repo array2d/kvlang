@@ -13,7 +13,7 @@ rwfunc collatz(n:int64) -> (steps:int64) {
 			nv ÷ 2 -> nv
 			nv ÷ 2 -> nv_m
 		} else {
-			t <- nv * 3
+			t <- nv × 3
 			t_m <- nv × 3
 			nv = t + 1  # = 等价于 <-
 		}

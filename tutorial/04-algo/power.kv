@@ -6,7 +6,7 @@ rwfunc power(base:int64, exp:int64) -> (result:int64) {
 	result = 1  # = 等价于 <-
 	0 -> e
 	while (e < exp) {
-		result <- result * base
+		result <- result × base
 		result_m <- result × base
 		e = e + 1  # = 等价于 <-
 	}
