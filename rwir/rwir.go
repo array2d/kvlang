@@ -44,7 +44,7 @@ func Decode(ctx context.Context, kv kvspace.KVSpace, linkBase, pc string) (*Rwir
 		names = append(names, fmt.Sprintf("%s[%d,%d]", scopePrefix, addr0, i))
 	}
 
-	vals := kv.Get(lookupBase, names)
+	vals := kv.Get(lookupBase, names, true)
 
 	r := &Rwir{}
 	if !kvspace.IsNone(vals[0]) {

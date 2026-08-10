@@ -29,7 +29,7 @@ type instInfo struct {
 func Select(ctx context.Context, kv kvspace.KVSpace, opcode string) (backend, n string, err error) {
 	opname := stripVTypePrefix(opcode)
 
-	backends := kv.List(keytree.SysOpRoot + keytree.PathSegSep, false)
+	backends := kv.List(keytree.SysOpRoot + keytree.PathSegSep, false, true)
 
 	for _, b := range backends {
 		if v := kvspace.GetOne(kv, keytree.SysOpFunc(b, opname)); !kvspace.IsNone(v) {
@@ -41,7 +41,7 @@ func Select(ctx context.Context, kv kvspace.KVSpace, opcode string) (backend, n 
 		return "", "", fmt.Errorf("no backend supports opcode=%s", opcode)
 	}
 
-	children := kv.List(keytree.SysOpRoot + keytree.PathSegSep + backend + keytree.PathSegSep, false)
+	children := kv.List(keytree.SysOpRoot + keytree.PathSegSep + backend + keytree.PathSegSep, false, true)
 
 	bestLoad := math.MaxFloat64
 	for _, child := range children {
@@ -74,7 +74,7 @@ func Select(ctx context.Context, kv kvspace.KVSpace, opcode string) (backend, n 
 
 // ListBackends 返回所有已注册 backend 名称（kv.List("/sys/op") 结果）。
 func ListBackends(ctx context.Context, kv kvspace.KVSpace) ([]string, error) {
-	return kv.List(keytree.SysOpRoot + keytree.PathSegSep, false), nil
+	return kv.List(keytree.SysOpRoot + keytree.PathSegSep, false, true), nil
 }
 
 // BackendSupports 返回 backend 是否支持某 opcode。
