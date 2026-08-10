@@ -495,7 +495,7 @@ func extKind(kv kvspace.KVSpace, frameRoot string) string {
 	if parent != keytree.PathSegSep {
 		parent += kvspace.DirIndexSuf
 	}
-	extVal := kv.Get(parent, []string{dirName + kvspace.DirIndexSuf})[0]
+	extVal := kv.Get(parent, []string{dirName + kvspace.DirIndexSuf}, true)[0]
 	extHead := kvspace.DecodeXValueHead(extVal.Encode()); extTarget := kvspace.DecodeExtIndex(extHead.Raw).ExtPath()
 	if extTarget == "" {
 		return ""
