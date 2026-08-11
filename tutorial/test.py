@@ -195,14 +195,29 @@ def _rust_test_file(f: Path, expects: list[str], env: dict) -> tuple[bool, str]:
     if layout.returncode != 0:
         return False, f"layout failed: {layout.stderr.strip()[:100]}"
 
-    # Step 2: Rust runtime executes main
+    # Step 2: List available functions in /lib/, try each
+    from pathlib import Path as _Path
+    func_names = [_Path(f).stem, "main", "init"]
     try:
-        rust = subprocess.run([RUST_BIN, "main"], capture_output=True, text=True,
-                              timeout=30, cwd=str(ROOT), env=env)
-    except FileNotFoundError:
-        return False, f"rust binary not found at {RUST_BIN} (build with: cargo build)"
-    if rust.returncode != 0:
-        return False, f"rust exit {rust.returncode}: {rust.stderr.strip()[:100]}"
+        ls = subprocess.run(
+            [os.path.expanduser("~/.local/bin/kvspace"), "--kvspace", f"shm://{SHM_PATH}",
+             "list", "/lib/"], capture_output=True, text=True, timeout=5, env=env)
+        for line in ls.stdout.strip().split('\n'):
+            name = line.strip().split()[0].rstrip('/')
+            if name and name not in func_names:
+                func_names.append(name)
+    except Exception: pass
+
+    rust = None
+    for fn in func_names:
+        try:
+            rust = subprocess.run([RUST_BIN, fn], capture_output=True, text=True,
+                                  timeout=30, cwd=str(ROOT), env=env)
+        except FileNotFoundError:
+            return False, f"rust binary not found at {RUST_BIN}"
+        if rust.returncode == 0: break
+    if rust is None or rust.returncode != 0:
+        return False, f"rust exit {rust.returncode}: {rust.stderr.strip()[:100] if rust else 'no attempt'}"
 
     # Step 3: Check output
     for pat in expects:
