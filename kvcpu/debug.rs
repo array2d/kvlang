@@ -1,2 +1,1 @@
-//! Debugger support.
-pub fn debugger_step() { todo!("debugger_step") }
+pub fn debugger_active() -> bool { false }

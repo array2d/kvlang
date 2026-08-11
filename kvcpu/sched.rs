@@ -1,2 +1,1 @@
-//! VThread scheduler.
-pub fn schedule() { todo!("schedule") }
+pub struct Scheduler; impl Scheduler { pub fn new() -> Self { Scheduler } }

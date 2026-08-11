@@ -1,21 +1,18 @@
-//! KV path constants — identical to keytree/const.go and keytree/const.h.
+//! Path constants — matching keytree/const.go and keytree/vthread.go.
 
-pub const SYS_ROOT: &str = "/sys";
-pub const SYS_VM: &str = "/sys/vm";
-pub const SYS_VT: &str = "/sys/vthread";
-pub const SYS_LIB: &str = "/sys/lib";
-pub const LIB_ROOT: &str = "/lib";
-pub const VT_ROOT: &str = "/vthread";
-pub const FRAME_PC: &str = ".pc";
-pub const FRAME_STATUS: &str = ".status";
-pub const FRAME_RETVAL: &str = ".retval";
-pub const FRAME_ERR: &str = ".err";
-pub const FRAME_DEBUG: &str = ".debugger";
-pub const FRAME_X: &str = ".x";
-pub const FRAME_RPARAM: &str = ".rparam";
-pub const FRAME_WPARAM: &str = ".wparam";
+pub const PATHS_SEP: &str = "/";
+pub const PATH_SEG_LIB: &str = "lib";
+pub const PATH_SEG_VTHREAD: &str = "vthread";
+pub const RUNTIME_MEMBER_SEP: &str = "‥"; // U+2025, matching Go
+pub const VTHREAD_ROOT: &str = "/vthread";
 
-pub fn vt_path(vtid: &str) -> String { format!("/vthread/{vtid}") }
-pub fn vt_pc(vtid: &str) -> String { format!("/vthread/{vtid}/.pc") }
-pub fn lib_func(pkg: &str, name: &str) -> String { format!("/lib/{pkg}.{name}") }
-pub fn frame_local(root: &str, slot: &str) -> String { format!("{root}.x/{slot}") }
+pub const SEG_PC: &str = "pc";
+pub const SEG_STATUS: &str = "status";
+pub const SEG_CALLPC: &str = "callpc";
+pub const SEG_LIB: &str = "lib";
+
+pub fn lib_path(name: &str) -> String { format!("/{}/{}", PATH_SEG_LIB, name) }
+pub fn vthread(vtid: &str) -> String { format!("{}/{}", VTHREAD_ROOT, vtid) }
+fn vt_member(vtid: &str, seg: &str) -> String { format!("{}/{}{}", vthread(vtid), RUNTIME_MEMBER_SEP, seg) }
+pub fn vthread_pc(vtid: &str) -> String { vt_member(vtid, SEG_PC) }
+pub fn vthread_status(vtid: &str) -> String { vt_member(vtid, SEG_STATUS) }
