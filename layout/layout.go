@@ -2,19 +2,22 @@
 //
 // 存储约定：
 //
-//	/lib/<pkg>.<name>               编译后签名（XValue kind=rwfunc）
-//	/lib/<pkg>.<name>/[i,j]         编译后指令（XValue kind=rwir）
+//	/lib/<pkg>.<name>/[0,0]         编译后签名（XValue kind=rwfunc, body=[nr|nw]）
+//	/lib/<pkg>.<name>/<param>       命名参数→slot 指针（XValue kind=string, isptr=1）
+//	/lib/<pkg>.<name>/[i,j]         编译后指令（XValue kind=rwir），i 从 1 开始
 //	/lib/<pkg>.<name>/<label>/      基本块子路径（XValue kind=label）
 //	/lib/<pkg>.<name>.src           源码副本（fix-034）
 //
-// 帧模型：
+// 帧模型（指针传址方案）：
 //
 //	callPC = parentFrame/[coord]             调用指令 PC = 子帧根
-//	frameRoot/                              extindex → /lib/<pkg>/<name>/（指令查找）
+//	frameRoot/                              extindex → /lib/<pkg>/<name>/（指令+参数声明）
+//	frameRoot/<name> → ext→ Ptr("[0,-j]")    命名参数 → slot 映射（layout 写入，只读）
+//	frameRoot/[0,-j] → Char(path)            runtime 实参槽（HandleCall 写入，无 ext 冲突）
 //	frameRoot.returnpc / .callpc             返回地址 / 帧执行进度
-//	frameRoot.rparam/<name> /.wparam/<name>  零拷贝读写参重定向
+//	frameRoot‥lib                            帧类型标记
 //
-// 帧类型由帧根 extindex target 的 XValue.Kind() 区分：rwfunc = 函数帧，label = label 帧。
+// 帧类型由 .lib 标记识别：存在 → rwfunc 帧。
 package layout
 
 import (
@@ -30,14 +33,14 @@ import (
 	"kvlang/lower"
 	"kvlang/rwir"
 	"kvlang/rwir/builtin"
-	"kvlang/parser"
 	"kvlang/vthread"
 )
 
 // WriteBody 将 []Stmt 写入 /lib/<pkg>/<name>/ 下的结构化 KV（编译后指令）。
-func WriteBody(kv kvspace.KVSpace, pkg, name string, body []ast.Stmt, typeMap map[string]string) {
+// offset: 起始 idx 偏移（顶层函数=1，[0,...] 被函数定义占用）。
+func WriteBody(kv kvspace.KVSpace, pkg, name string, body []ast.Stmt, typeMap map[string]string, offset int) {
 	prefix := keytree.LibFunc(pkg, name)
-	idx := 0
+	idx := offset
 	for _, st := range body {
 		writeStmt(kv, st, prefix, &idx, typeMap, pkg)
 	}
@@ -128,6 +131,7 @@ func writeStmtScope(kv kvspace.KVSpace, st ast.Stmt, scopePrefix string, idx *in
 //
 // pc 为调用指令的绝对路径（如 /vthread/42/[3,0]）。callPC 即子帧根。
 // 返回被调帧第一条指令 PC（frameRoot/[0,0]）；失败时返回 ""。
+// HandleCall 处理函数调用：创建子帧，建立 extindex，写入实参到 &[0,-j] slot。
 func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *rwir.Rwir) string {
 	vtid := keytree.VtidFromPC(pc)
 	funcName := inst.Reads[0].Name
@@ -147,24 +151,35 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *rwir.R
 		funcName = funcName[dot+len(keytree.MemberSep):]
 	}
 	funcKey := keytree.LibFunc(pkg, funcName)
+	funcDir := funcKey + keytree.PathSegSep
 
-	sigVal := kvspace.GetOne(kv, funcKey)
-	if kvspace.IsNone(sigVal) {
-		vthread.SetError(ctx, kv, vtid, pc, "NameError: func signature not found: "+funcName)
+	// 读函数签名
+	sigVal := kvspace.GetOne(kv, funcDir+"[0,0]")
+	if kvspace.IsNone(sigVal) || sigVal.Kind() != kvspace.KindRwfunc {
+		vthread.SetError(ctx, kv, vtid, pc, "NameError: func not found: "+funcName)
 		return ""
 	}
-	funcSig := parser.ParseFuncSig(string(sigVal.String()))
+	rwfunc := sigVal.(kvspace.Rwfunc)
+	nr, nw := int(rwfunc.NumReads()), int(rwfunc.NumWrites())
 
-	if err := checkDupParams(funcSig, funcName); err != "" {
-		vthread.SetError(ctx, kv, vtid, pc, err)
-		return ""
+	// 列目录提取命名参数 → slot 映射
+	children := kv.List(funcDir, false, false)
+	nameSlot := map[string]string{} // "a" → "[0,-1]"
+	for _, child := range children {
+		if len(child) == 0 || child[0] == '[' {
+			continue
+		}
+		v := kvspace.GetOne(kv, funcDir+child)
+		if kvspace.IsPtr(v) {
+			nameSlot[child] = kvspace.PtrTarget(v)
+		}
 	}
 
 	callerFrameRoot := keytree.FrameRoot(pc)
-	frameRoot := pc // callPC = 子帧根
+	frameRoot := pc
 
 	kvspace.MkIndexRecursive(kv, keytree.Stack(frameRoot))
-	if err := kv.ExtIndex(keytree.Stack(frameRoot), funcKey+"/"); err != nil {
+	if err := kv.ExtIndex(keytree.Stack(frameRoot), funcDir); err != nil {
 		vthread.SetError(ctx, kv, vtid, pc, "RuntimeError: overlay failed: "+err.Error())
 		return ""
 	}
@@ -173,16 +188,14 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *rwir.R
 	kv.Set([]kvspace.KVPair{
 		{keytree.ReturnPC(frameRoot), kvspace.NewChar(rwir.NextPC(pc))},
 		{keytree.CallPC(frameRoot), kvspace.NewChar(keytree.EntryPC(frameRoot))},
-		{keytree.Stack(frameRoot) + keytree.RuntimeMemberSep + keytree.SegRParam + "/", kvspace.NewIndex(nil)},
-		{keytree.Stack(frameRoot) + keytree.RuntimeMemberSep + keytree.SegWParam + "/", kvspace.NewIndex(nil)},
-			{keytree.Stack(frameRoot) + keytree.SegLib, kvspace.NewChar(funcKey)},
+		{keytree.Stack(frameRoot) + keytree.SegLib, kvspace.NewChar(funcKey)},
 	})
 
-	// 读参零拷贝
+	// 读参：写 caller arg 地址到 frameRoot/[0,-j]
 	litSeq := 0
-	params := funcSig.ParamNames()
-	var paramPairs []kvspace.KVPair
-	for i, param := range params {
+	var argPairs []kvspace.KVPair
+	for i := 0; i < nr; i++ {
+		slot := fmt.Sprintf("%s[0,-%d]", frameRoot+keytree.PathSegSep, i+1)
 		if i+1 < len(inst.Reads) {
 			arg := inst.Reads[i+1]
 			rk := resolveReadPath(kv, callerFrameRoot, arg.Name)
@@ -191,34 +204,25 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *rwir.R
 					rk = fmt.Sprintf("%s/._lit%d", callerFrameRoot, litSeq)
 					litSeq++
 				}
-				paramPairs = append(paramPairs, kvspace.KVPair{rk, arg.Val})
+				argPairs = append(argPairs, kvspace.KVPair{rk, arg.Val})
 			}
 			if rk != "" {
-				paramPairs = append(paramPairs, kvspace.KVPair{keytree.RParam(frameRoot, param), kvspace.NewChar(rk)})
+				argPairs = append(argPairs, kvspace.KVPair{slot, kvspace.NewChar(rk)})
 			}
 		}
 	}
-	if len(paramPairs) > 0 {
-		kv.Set(paramPairs)
-	}
-
-	// 写参零拷贝
-	for i, ret := range funcSig.Returns {
-		wTarget := ""; if i < len(inst.Writes) { wTarget = inst.Writes[i].Name }
-		if wTarget == "" {
-			continue
+	// 写参（返回值）：写 caller 写槽地址到 frameRoot/[0,+j]
+	for i := 0; i < nw; i++ {
+		slot := fmt.Sprintf("%s[0,%d]", frameRoot+keytree.PathSegSep, i+1)
+		if i < len(inst.Writes) {
+			wk := resolveReadPath(kv, callerFrameRoot, inst.Writes[i].Name)
+			if wk != "" {
+				argPairs = append(argPairs, kvspace.KVPair{slot, kvspace.NewChar(wk)})
+			}
 		}
-		wk := resolveReadPath(kv, callerFrameRoot, wTarget)
-		if wk == "" {
-			continue
-		}
-		kv.Set([]kvspace.KVPair{
-			{keytree.RParam(frameRoot, ret.Name), kvspace.NewChar(wk)},
-			{keytree.WParam(frameRoot, ret.Name), kvspace.NewChar(wk)},
-		})
 	}
-	if len(params) > 0 {
-		kv.Set([]kvspace.KVPair{{keytree.FrameRO(frameRoot), kvspace.NewChar(strings.Join(params, ","))}})
+	if len(argPairs) > 0 {
+		kv.Set(argPairs)
 	}
 
 	return keytree.EntryPC(frameRoot)
@@ -322,7 +326,7 @@ func RegisterBlocks(kv kvspace.KVSpace, pkg, parent string, body []ast.Stmt) {
 	for _, st := range body {
 		if b, ok := st.(*ast.ScopeStmt); ok {
 			blockKey := keytree.LibFunc(pkg, parent+"/"+b.Label)
-			kv.Set([]kvspace.KVPair{{blockKey, kvspace.NewRwfunc(0, 0, 0, "")}})
+			kv.Set([]kvspace.KVPair{{blockKey, kvspace.NewRwfunc(0, 0, 0)}})
 			RegisterBlocks(kv, pkg, parent+"/"+b.Label, b.Body)
 		}
 	}
@@ -336,42 +340,40 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 		name = funcName[dot+len(keytree.MemberSep):]
 	}
 	funcKey := keytree.LibFunc(pkg, name)
+	funcDir := funcKey + keytree.PathSegSep
+
+	// 读函数签名
+	sigVal := kvspace.GetOne(kv, funcDir+"[0,0]")
+	if kvspace.IsNone(sigVal) || sigVal.Kind() != kvspace.KindRwfunc {
+		vthread.SetError(ctx, kv, vtid, "", "Bootstrap: func not found: "+funcName)
+		return ""
+	}
+	rwfunc := sigVal.(kvspace.Rwfunc)
+	nr := int(rwfunc.NumReads())
 
 	vthreadRoot := keytree.VThread(vtid)
 	kvspace.MkIndexRecursive(kv, keytree.Stack(vthreadRoot))
-	if err := kv.ExtIndex(keytree.Stack(vthreadRoot), funcKey+"/"); err != nil {
+	if err := kv.ExtIndex(keytree.Stack(vthreadRoot), funcDir); err != nil {
 		vthread.SetError(ctx, kv, vtid, "", "Bootstrap: RuntimeError: overlay failed: "+err.Error())
 		return ""
 	}
 
-	// 虚线程根也是函数帧，写 .callpc
 	kv.Set([]kvspace.KVPair{
 		{keytree.CallPC(vthreadRoot), kvspace.NewChar(keytree.EntryPC(vthreadRoot))},
-			{keytree.Stack(vthreadRoot) + keytree.SegLib, kvspace.NewChar(funcKey)},
+		{keytree.Stack(vthreadRoot) + keytree.SegLib, kvspace.NewChar(funcKey)},
 	})
 
 	if len(args) > 0 {
-		sigVal := kvspace.GetOne(kv, funcKey)
-		sig := parser.ParseFuncSig(string(sigVal.String()))
-		if err := checkDupParams(sig, funcName); err != "" {
-			vthread.SetError(ctx, kv, vtid, "", err)
-			return ""
+		pairs := make([]kvspace.KVPair, 0, nr)
+		for i := 0; i < nr && i < len(args); i++ {
+			slot := fmt.Sprintf("%s[0,-%d]", vthreadRoot+keytree.PathSegSep, i+1)
+			pairs = append(pairs,
+				kvspace.KVPair{slot, builtin.ResolveReadValue(kv, "", rwir.Param{Name: args[i]})},
+			)
 		}
-		params := sig.ParamNames()
-		pairs := make([]kvspace.KVPair, 0, len(params)*2+1)
-		for i, param := range params {
-			if i < len(args) {
-				dest := vthreadRoot + "/" + param
-				pairs = append(pairs,
-					kvspace.KVPair{dest, builtin.ResolveReadValue(kv, "", rwir.Param{Name: args[i]})},
-					kvspace.KVPair{keytree.RParam(vthreadRoot, param), kvspace.NewChar(dest)},
-				)
-			}
+		if len(pairs) > 0 {
+			kv.Set(pairs)
 		}
-		if len(params) > 0 {
-			pairs = append(pairs, kvspace.KVPair{keytree.FrameRO(vthreadRoot), kvspace.NewChar(strings.Join(params, ","))})
-		}
-		kv.Set(pairs)
 	}
 
 	return keytree.EntryPC(vthreadRoot)
@@ -397,15 +399,43 @@ func WriteRwir(kv kvspace.KVSpace, pkg string, decl *ast.RwirDecl) {
 	})
 }
 
+// WriteFunc 写函数到 /lib/ 下。
+//
+// 布局：
+//
+//	/lib/<pkg>.<name>/[0,0]     → Rwfunc(nr, nw, al=numInsts)   ← 函数签名
+//	/lib/<pkg>.<name>/<param>   → Ptr(char, "[0,-j]", 1)         ← 命名参数→slot
+//	/lib/<pkg>.<name>/<ret>     → Ptr(char, "[0,+j]", 1)         ← 命名返回值→slot
+//	/lib/<pkg>.<name>/[1,0]     → instruction 0 opcode            ← idx+1
+//	...
 func WriteFunc(kv kvspace.KVSpace, pkg string, fn *ast.Func) {
 	typeMap := lower.InferTypes(fn)
-	kv.DelTree(keytree.LibFunc(pkg, fn.Sig.Name))
-	kvspace.MkIndexRecursive(kv, keytree.LibFunc(pkg, fn.Sig.Name)+"/")
-	kv.Set([]kvspace.KVPair{
+	funcDir := keytree.LibFunc(pkg, fn.Sig.Name)
+	kv.DelTree(funcDir)
+	kvspace.MkIndexRecursive(kv, funcDir+"/")
+
+	nr, nw := fn.Sig.NumReads(), fn.Sig.NumWrites()
+	pairs := []kvspace.KVPair{
+		{funcDir + "/[0,0]", kvspace.NewRwfunc(countDirectInsts(fn.Body), nr, nw)},
 		{keytree.LibSrc(pkg, fn.Sig.Name), kvspace.NewChar(fn.FullText())},
-		{keytree.LibFunc(pkg, fn.Sig.Name), kvspace.NewRwfunc(countDirectInsts(fn.Body), fn.Sig.NumReads(), fn.Sig.NumWrites(), fn.Sig.String())},
-	})
-	WriteBody(kv, pkg, fn.Sig.Name, fn.Body, typeMap)
+	}
+
+	for i, p := range fn.Sig.Params {
+		slot := fmt.Sprintf("[0,-%d]", i+1)
+		pairs = append(pairs, kvspace.KVPair{
+			funcDir + "/" + p.Name,
+			kvspace.NewPtr(kvspace.KindString, slot, 1),
+		})
+	}
+	for i, r := range fn.Sig.Returns {
+		slot := fmt.Sprintf("[0,%d]", i+1)
+		pairs = append(pairs, kvspace.KVPair{
+			funcDir + "/" + r.Name,
+			kvspace.NewPtr(kvspace.KindString, slot, 1),
+		})
+	}
+	kv.Set(pairs)
+	WriteBody(kv, pkg, fn.Sig.Name, fn.Body, typeMap, 1) // 指令从 [1,0] 开始
 }
 
 // ── 辅助函数 ────────────────────────────────────────────────────────────────

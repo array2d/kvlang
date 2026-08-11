@@ -41,7 +41,7 @@ func FrameRoot(pc string) string {
 
 func EntryPC(root string) string {
 	root = strings.TrimRight(root, PathSegSep)
-	return root + PathSegSep + "[0,0]"
+	return root + PathSegSep + "[1,0]"
 }
 func IsEntryPC(pc string) bool {
 	idx := strings.LastIndex(pc, PathSegSep+"[")

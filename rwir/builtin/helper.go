@@ -68,12 +68,16 @@ func writeResult(f *rwir.Frame, result kvspace.XValue) error {
 	return nil
 }
 
-// resolveWriteSlot 返回写槽的绝对 KV key（先查 .wparam 重定向，再处理绝对路径）。
+// resolveWriteSlot 返回写槽的绝对 KV key。
+// 优先走命名 Ptr → slot → arg 地址链，fallback 帧内局部变量。
 func resolveWriteSlot(kv kvspace.KVSpace, framePath, name string) string {
 	if isAbsolute(name) { return name }
 	rwRoot := funcFrameRoot(kv, framePath)
-	if r := kvspace.GetOne(kv, keytree.WParam(rwRoot, name)); !kvspace.IsNone(r) {
-		return r.String()
+	if ptrVal := kvspace.GetOne(kv, keytree.Stack(rwRoot)+name); kvspace.IsPtr(ptrVal) {
+		argAddr := kvspace.GetOne(kv, keytree.Stack(rwRoot)+kvspace.PtrTarget(ptrVal))
+		if !kvspace.IsNone(argAddr) {
+			return argAddr.String()
+		}
 	}
 	return keytree.Stack(rwRoot) + name
 }
