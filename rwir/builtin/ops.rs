@@ -38,6 +38,7 @@ pub fn native(cpu: &KVCpu, opcode: &str, reads: &[Param], writes: &[Param],
         "time.duration.seconds" => { super::time::exec_duration_seconds(reads, writes, vars); }
         "time.duration.as_nanos" => { super::time::exec_duration_as_nanos(reads, writes, vars); }
         "time.duration.as_millis" => { super::time::exec_duration_as_millis(reads, writes, vars); }
+        "time.duration.as_seconds" => { super::time::exec_duration_as_seconds(reads, writes, vars); }
         "int8" | "int16" | "int32" | "int64" | "uint8" | "uint16" | "uint32" | "uint64"
         | "float32" | "float64" | "bool" | "string" | "char" => super::cast::exec_cast(reads, writes, vars),
         "bitand" | "&" => super::bit::exec_bitand(reads, writes, vars),
@@ -48,6 +49,10 @@ pub fn native(cpu: &KVCpu, opcode: &str, reads: &[Param], writes: &[Param],
         "at" => super::string::exec_at(reads, writes, vars),
         "len" | "string.len" => super::string::exec_len(reads, writes, vars),
         "concat" => super::string::exec_concat(reads, writes, vars),
+        "string.find" => super::string::exec_find(reads, writes, vars),
+        "string.ord" => super::string::exec_ord(reads, writes, vars),
+        "string.cmp" => super::string::exec_cmp(reads, writes, vars),
+        "max" => super::math::exec_max(reads, writes, vars),
         "set" | "=" => { super::kvop::exec_set(cpu, reads, writes, vars); }
         "kvhas" => { super::kvop::exec_kvhas(cpu, reads, writes, vars); }
         "exp" => { super::math::exec_exp(reads, writes, vars); }

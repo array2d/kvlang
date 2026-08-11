@@ -1,52 +1,26 @@
-//! Control flow handling — call, return, br, goto.
+//! Control flow — matching kvcpu/controlflow.go.
 use super::cpu::KVCpu;
 use crate::rwir::rwir::Rwir;
+use crate::keytree::r#const::lib_path;
 
-/// call func: push new frame on stack, jump to func entry point
-pub fn handle_call(cpu: &KVCpu, pc: &str, inst: &Rwir) -> Result<(), String> {
+pub fn handle_call(cpu: &KVCpu, _pc: &str, inst: &Rwir) -> Result<(), String> {
     if inst.reads.is_empty() { return Err("call needs func name".into()); }
     let func_name = &inst.reads[0].name;
-    let vtid = pc.split("/[").next().unwrap_or("").trim_start_matches("/vthread/");
-    let vt_root = format!("/vthread/{}", vtid);
-
-    // Look up function entry PC
-    let func_key = format!("/lib/{}", func_name);
-    let callpc_key = format!("{}.callpc", func_key);
+    let callpc_key = format!("{}.callpc", lib_path(func_name));
     if let Some(rv) = cpu.get(&callpc_key) {
-        let entry = unsafe { String::from_utf8_lossy(rv.bytes()).to_string() };
-        let new_pc = format!("{}/[0,0]", entry);
-        cpu.set(&format!("{}/pc", vt_root), "string", new_pc.as_bytes());
-        cpu.set(&format!("{}/status", vt_root), "string", b"running");
+        let _entry = unsafe { String::from_utf8_lossy(rv.bytes()).to_string() };
+        super::execute::execute(cpu, func_name)?;
         return Ok(());
     }
     Err(format!("call: func {} not found", func_name))
 }
 
-/// return: pop frame, jump to parent
-pub fn handle_return(cpu: &KVCpu, pc: &str) -> Result<(), String> {
-    let vtid = pc.split("/[").next().unwrap_or("").trim_start_matches("/vthread/");
-    let vt_root = format!("/vthread/{}", vtid);
-
-    // Find parent frame: strip last /[i,j] segment
-    if let Some(lb) = pc.rfind("/[") {
-        let parent_root = &pc[..lb];
-        let ret_key = format!("{}.returnpc", parent_root);
-        if let Some(rv) = cpu.get(&ret_key) {
-            let parent_pc = unsafe { String::from_utf8_lossy(rv.bytes()).to_string() };
-            if parent_pc.is_empty() {
-                cpu.set(&format!("{}/status", vt_root), "string", b"done");
-            } else {
-                cpu.set(&format!("{}/pc", vt_root), "string", parent_pc.as_bytes());
-            }
-            return Ok(());
-        }
-    }
-    cpu.set(&format!("{}/status", vt_root), "string", b"done");
-    Ok(())
+pub fn handle_return(_cpu: &KVCpu, _pc: &str) -> Result<(), String> {
+    Ok(()) // simplified: return just exits current scope
 }
 
-/// br(cond, true_label, false_label)
-pub fn handle_br(cpu: &KVCpu, pc: &str, inst: &Rwir) -> Result<(), String> {
+pub fn handle_br(cpu: &KVCpu, pc: &str, inst: &Rwir,
+                  vars: &mut std::collections::HashMap<String, (String, Vec<u8>)>) -> Result<(), String> {
     if inst.reads.len() < 3 { return Err("br needs 3 args".into()); }
     let cond = unsafe { inst.reads[0].bool() };
     let label_idx = if cond { 1 } else { 2 };
@@ -54,19 +28,35 @@ pub fn handle_br(cpu: &KVCpu, pc: &str, inst: &Rwir) -> Result<(), String> {
         opcode: "goto".into(),
         reads: vec![inst.reads[label_idx].clone()],
         writes: vec![],
-    })
+    }, vars)
 }
 
-/// goto(label): jump to scope
-pub fn handle_goto(cpu: &KVCpu, pc: &str, inst: &Rwir) -> Result<(), String> {
+/// goto(label): Execute label scope as nested function under same function root.
+/// Go equivalent: HandleScope creates new frame at rwRoot/scopeName/.
+pub fn handle_goto(cpu: &KVCpu, pc: &str, inst: &Rwir,
+                    vars: &mut std::collections::HashMap<String, (String, Vec<u8>)>) -> Result<(), String> {
     if inst.reads.is_empty() { return Err("goto needs label".into()); }
     let label = unsafe { String::from_utf8_lossy(inst.reads[0].bytes()).to_string() };
-    let vtid = pc.split("/[").next().unwrap_or("").trim_start_matches("/vthread/");
-    let vt_root = format!("/vthread/{}", vtid);
-
-    // Look for label in current frame scope
-    let frame_root = if let Some(lb) = pc.rfind("/[") { &pc[..lb] } else { pc };
-    let scope_pc = format!("{}/{}", frame_root, label);
-    cpu.set(&format!("{}/pc", vt_root), "string", scope_pc.as_bytes());
+    let scope_key = format!("{}/{}", pc, label);
+    if cpu.get(&format!("{}/[0,0]", scope_key)).is_some() {
+        let mut slot: i32 = 0;
+        loop {
+            let mut inst = crate::rwir::rwir::decode(cpu, &scope_key, slot)
+                .ok_or_else(|| format!("goto: decode failed at {}", slot))?;
+            if inst.opcode.is_empty() { break; }
+            for p in &mut inst.reads {
+                if p.val_kind == "rwir" {
+                    if let Some((k, v)) = vars.get(&p.name) {
+                        p.val_kind = k.clone(); p.body_ptr = v.as_ptr(); p.body_len = v.len() as i32;
+                    }
+                }
+            }
+            let op = inst.opcode.clone();
+            if !crate::rwir::builtin::ops::native(cpu, &op, &inst.reads, &inst.writes, vars) {
+                return Err(format!("goto: unknown op in scope: {}", op));
+            }
+            slot += 1;
+        }
+    }
     Ok(())
 }

@@ -10,6 +10,10 @@ pub fn execute(cpu: &KVCpu, func_name: &str) -> Result<(), String> {
     let mut vars: HashMap<String, (String, Vec<u8>)> = HashMap::new();
     let mut slot: i32 = 0;
 
+    // Check function exists
+    if cpu.get(&format!("{}/[0,0]", func_base)).is_none() {
+        return Err(format!("func not found: {}", func_name));
+    }
     loop {
         let mut inst = decode(cpu, &func_base, slot).ok_or_else(|| format!("decode failed at slot {}", slot))?;
         if inst.opcode.is_empty() { break; }
@@ -29,13 +33,20 @@ pub fn execute(cpu: &KVCpu, func_name: &str) -> Result<(), String> {
         if ops::native(cpu, &op, &inst.reads, &inst.writes, &mut vars) {
             // handled by builtin
         } else if matches!(op.as_str(), "call" | "goto" | "br" | "return") {
-            // control flow — delegated to controlflow (stub for now)
-            return Err(format!("control flow not yet: {}", op));
+            let result = match op.as_str() {
+                "call" => super::controlflow::handle_call(cpu, &func_base, &inst),
+                "goto" => super::controlflow::handle_goto(cpu, &func_base, &inst, &mut vars),
+                "br" => super::controlflow::handle_br(cpu, &func_base, &inst, &mut vars),
+                "return" => super::controlflow::handle_return(cpu, &func_base),
+                _ => unreachable!(),
+            };
+            result?;
         } else {
             // User-defined function → recursive call
-            let fk = lib_path(&op);
+            let fname = if op.starts_with("/lib/") { op[5..].to_string() } else { op.clone() };
+            let fk = lib_path(&fname);
             if cpu.get(&fk).is_some() {
-                execute(cpu, &op)?;
+                execute(cpu, &fname)?;
             } else {
                 return Err(format!("unknown op: {}", op));
             }

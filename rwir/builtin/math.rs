@@ -15,3 +15,9 @@ pub fn exec_sqrt(r: &[Param], w: &[Param], v: &mut HashMap<String, (String, Vec<
 pub fn exec_abs(r: &[Param], w: &[Param], v: &mut HashMap<String, (String, Vec<u8>)>) { let x = unsafe { r[0].i64() }; store_i64(v, w, if x<0 {-x} else {x}); }
 pub fn exec_exp(r: &[Param], w: &[Param], v: &mut HashMap<String, (String, Vec<u8>)>) { store(v, w, f64_arg(&r[0]).exp()); }
 pub fn exec_log(r: &[Param], w: &[Param], v: &mut HashMap<String, (String, Vec<u8>)>) { store(v, w, f64_arg(&r[0]).ln()); }
+pub fn exec_max(r: &[super::super::rwir::Param], w: &[super::super::rwir::Param], vars: &mut std::collections::HashMap<String, (String, Vec<u8>)>) {
+    if let (Some(a), Some(b)) = (r.first(), r.get(1)) {
+        let va = unsafe { f64_arg(a) }; let vb = unsafe { f64_arg(b) };
+        store(vars, w, if va > vb { va } else { vb });
+    }
+}
