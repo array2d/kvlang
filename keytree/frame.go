@@ -45,5 +45,12 @@ func EntryPC(root string) string {
 }
 func IsEntryPC(pc string) bool {
 	idx := strings.LastIndex(pc, PathSegSep+"[")
-	return idx >= 0 && pc[idx:] == PathSegSep+"[0,0]"
+	return idx >= 0 && pc[idx:] == PathSegSep+"[1,0]"
+}
+
+// ScopeEntryPC returns entry for scope/label frames: root/[0,0].
+// Scope frames don't have a function sig at [0,0], so first instruction is [0,0].
+func ScopeEntryPC(root string) string {
+	root = strings.TrimRight(root, PathSegSep)
+	return root + PathSegSep + "[0,0]"
 }

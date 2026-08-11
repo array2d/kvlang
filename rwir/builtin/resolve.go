@@ -26,6 +26,9 @@ func ResolveReadValue(kv kvspace.KVSpace, framePath string, param rwir.Param) kv
 //	frameRoot/a → ext→ Ptr("[0,-1]")             ← 1跳: name→slot
 //	frameRoot/[0,-1] → Char("/vthread/1/x")      ← 2跳: slot→arg地址
 //	GetOne("/vthread/1/x") → value                ← 3跳: 解引用
+//
+// 由于 HandleCall 的 arg 可能再经 Ptr 链传递，argAddr 指向的值可能仍是 Char（路径重定向），
+// 需要循环解引用直到非 Char 类型。
 func resolveReadValue(kv kvspace.KVSpace, framePath string, param rwir.Param) kvspace.XValue {
 	if !kvspace.IsNone(param.Val) && param.Val.Kind() != kvspace.KindRwir && param.Val.Kind() != kvspace.KindRwfunc {
 		return param.Val
@@ -38,7 +41,8 @@ func resolveReadValue(kv kvspace.KVSpace, framePath string, param rwir.Param) kv
 		return kvspace.GetOne(kv, name)
 	}
 	rwRoot := funcFrameRoot(kv, framePath)
-	// 尝试命名 Ptr：frameRoot/name → Ptr → 读 slot → 解引用
+	// 命名 Ptr：frameRoot/name → Ptr → 读 slot → 一级解引用
+	// resolveReadPath 已沿 Char 链跟到底，slot 里存的是最终目标路径。
 	if ptrVal := kvspace.GetOne(kv, keytree.Stack(rwRoot)+name); kvspace.IsPtr(ptrVal) {
 		argAddr := kvspace.GetOne(kv, keytree.Stack(rwRoot)+kvspace.PtrTarget(ptrVal))
 		if !kvspace.IsNone(argAddr) {

@@ -296,9 +296,9 @@ func HandleLabel(ctx context.Context, kv kvspace.KVSpace, pc, labelFullPath stri
 					kv.DelTree(d)
 				}
 				kv.Set([]kvspace.KVPair{
-					{keytree.CallPC(f), kvspace.NewChar(keytree.EntryPC(f))},
+					{keytree.CallPC(f), kvspace.NewChar(keytree.ScopeEntryPC(f))},
 				})
-				return keytree.EntryPC(f)
+				return keytree.ScopeEntryPC(f)
 			}
 		}
 	}
@@ -316,9 +316,9 @@ func HandleLabel(ctx context.Context, kv kvspace.KVSpace, pc, labelFullPath stri
 
 	kv.Set([]kvspace.KVPair{
 		{keytree.ReturnPC(labelFrame), kvspace.NewChar(rwir.NextPC(pc))},
-		{keytree.CallPC(labelFrame), kvspace.NewChar(keytree.EntryPC(labelFrame))},
+		{keytree.CallPC(labelFrame), kvspace.NewChar(keytree.ScopeEntryPC(labelFrame))},
 	})
-	return keytree.EntryPC(labelFrame)
+	return keytree.ScopeEntryPC(labelFrame)
 }
 
 // RegisterBlocks 为函数体内所有 BlockStmt label 注册 label 签名（XValue kind=label）。
@@ -442,15 +442,6 @@ func WriteFunc(kv kvspace.KVSpace, pkg string, fn *ast.Func) {
 
 func resolveReadPath(kv kvspace.KVSpace, framePath, name string) string {
 	if isLiteral(name) { return "" }
-	for f := framePath; f != ""; f = keytree.ParentFrame(f) {
-		if r := kvspace.GetOne(kv, keytree.RParam(f, name)); !kvspace.IsNone(r) {
-			return r.String()
-		}
-		if !kvspace.IsNone(kvspace.GetOne(kv, keytree.Stack(f)+keytree.SegLib)) {
-			break
-		}
-	}
-	// label 帧变量逃逸到函数帧，查找对齐 resolveWriteKey
 	funcFrame := framePath
 	for f := framePath; f != ""; f = keytree.ParentFrame(f) {
 		if !kvspace.IsNone(kvspace.GetOne(kv, keytree.Stack(f)+keytree.SegLib)) {
@@ -458,10 +449,22 @@ func resolveReadPath(kv kvspace.KVSpace, framePath, name string) string {
 			break
 		}
 	}
-	if v := kvspace.GetOne(kv, keytree.Stack(funcFrame)+name); !kvspace.IsNone(v) {
-		return keytree.Stack(funcFrame) + name
+	v := kvspace.GetOne(kv, keytree.Stack(funcFrame)+name)
+	if kvspace.IsNone(v) {
+		return frameSlotKey(funcFrame, name)
 	}
-	return frameSlotKey(funcFrame, name)
+	// 命名 param → Ptr → slot → 沿 Char 链到底（HandleCall 写入时 Char(path) 的最终目标）
+	if kvspace.IsPtr(v) {
+		path := keytree.Stack(funcFrame) + kvspace.PtrTarget(v)
+		for {
+			nextVal := kvspace.GetOne(kv, path)
+			if kvspace.IsNone(nextVal) || nextVal.Kind() != kvspace.KindString {
+				return path
+			}
+			path = nextVal.String()
+		}
+	}
+	return keytree.Stack(funcFrame) + name
 }
 
 func slotValue(val string, typeMap map[string]string) kvspace.XValue {
@@ -567,9 +570,9 @@ func HandleScope(ctx context.Context, kv kvspace.KVSpace, pc, scopeName string) 
 	}
 	// callpc 每次更新，returnpc 仅首次设置（保持原始返回路径）
 	kv.Set([]kvspace.KVPair{
-		{keytree.CallPC(scopeFrame), kvspace.NewChar(keytree.EntryPC(scopeFrame))},
+		{keytree.CallPC(scopeFrame), kvspace.NewChar(keytree.ScopeEntryPC(scopeFrame))},
 	})
-	return keytree.EntryPC(scopeFrame)
+	return keytree.ScopeEntryPC(scopeFrame)
 }
 
 // HandleScopeReturn scope 帧隐式 return：读 .returnpc，DelTree 自身。
