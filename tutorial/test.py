@@ -25,7 +25,7 @@ FAIL_CSV = (ROOT / "tutorial" / "test_failures.csv").resolve()
 BENCH_CSV = (ROOT / "tutorial" / "benchmark.csv").resolve()
 MODULE = sys.modules[__name__]
 
-_KV_ENV = {**os.environ, "KVLANG_KVSPACE": os.environ.get("KVLANG_KVSPACE", "art://")}
+_KV_ENV = {**os.environ, "KVLANG_KVSPACE": os.environ.get("KVLANG_KVSPACE", "goheap://")}
 _SHM_ENV = {**os.environ, "KVLANG_KVSPACE": f"shm://{SHM_PATH}",
             "LD_LIBRARY_PATH": str(ROOT.parent / "kvspace-c" / "build"),
             "KVSPACE_SHM": SHM_PATH}
