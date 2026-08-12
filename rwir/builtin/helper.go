@@ -60,7 +60,7 @@ func readInputs(f *rwir.Frame) []kvspace.XValue {
 func writeResult(f *rwir.Frame, result kvspace.XValue) error {
 	if len(f.Inst.Writes) > 0 {
 		key := resolveWriteSlot(f.KV, keytree.FrameRoot(f.PC), f.Inst.Writes[0].Name)
-		if err := f.KV.Set([]kvspace.KVPair{{key, result}}); err != nil {
+		if err := f.KV.Set([]kvspace.KVPair{{key, result, -1}}); err != nil {
 			return err
 		}
 	}
@@ -98,7 +98,7 @@ func nextPC(f *rwir.Frame) {
 
 // setWrite writes a typed Value to a named slot (先查 .wparam 重定向).
 func setWrite(kv kvspace.KVSpace, framePath, slot string, val kvspace.XValue) error {
-	return kv.Set([]kvspace.KVPair{{resolveWriteSlot(kv, framePath, slot), val}})
+	return kv.Set([]kvspace.KVPair{{resolveWriteSlot(kv, framePath, slot), val, -1}})
 }
 
 // isContainerKind reports whether a kind represents a container/marker type
@@ -144,7 +144,7 @@ func ExecuteCopy(kv kvspace.KVSpace, vtid, pc string, inst *rwir.Rwir) error {
 	v := resolveReadValue(kv, framePath, inst.Reads[0])
 	for _, w := range inst.Writes {
 		key := resolveWriteSlot(kv, framePath, w.Name)
-		if err := kv.Set([]kvspace.KVPair{{key, v}}); err != nil {
+		if err := kv.Set([]kvspace.KVPair{{key, v, -1}}); err != nil {
 			return err
 		}
 	}

@@ -34,25 +34,22 @@ func (arrayOp) Call(f *rwir.Frame) error {
 	}
 	frameRoot := keytree.FrameRoot(f.PC)
 	outKey := writeSlotKey(f.KV, frameRoot, f.Inst.Writes[0].Name)
-	// 从输入元素推断目标类型：全部同 kind → 同构数组；否则异构
-	targetKind := ""
-	if len(inputs) > 0 {
-		k := inputs[0].Kind()
-		if kindSize(k) > 0 {
-			same := true
-			for _, e := range inputs[1:] {
-				if e.Kind() != k { same = false; break }
-			}
-			if same { targetKind = k }
+	// 所有数组必须同构。空数组回退 int64。
+	if len(inputs) == 0 {
+		vthread.Set(bg, f.KV, f.Vtid, rwir.NextPC(f.PC), "running")
+		return nil
+	}
+	targetKind := inputs[0].Kind()
+	if kindSize(targetKind) <= 0 {
+		panic("array: unsupported element kind " + targetKind)
+	}
+	for _, e := range inputs[1:] {
+		if e.Kind() != targetKind {
+			panic("array: mixed kinds " + targetKind + " and " + e.Kind())
 		}
 	}
-	if targetKind != "" {
-		arr := packTypedArray(targetKind, inputs)
-		f.KV.Set([]kvspace.KVPair{{outKey, arr}})
-	} else {
-		arr := arrayVal(inputs)
-		f.KV.Set([]kvspace.KVPair{{outKey, arr}})
-	}
+	arr := packTypedArray(targetKind, inputs)
+	f.KV.Set([]kvspace.KVPair{{outKey, arr, -1}})
 	vthread.Set(bg, f.KV, f.Vtid, rwir.NextPC(f.PC), "running")
 	return nil
 }
@@ -156,19 +153,57 @@ func (atOp) Call(f *rwir.Frame) error {
 		return fmt.Errorf("%s", msg)
 	}
 	idx := int(asInt64(inputs[1]))
-	elem := xvalueAt(inputs[0], idx)
-	if kvspace.IsNone(elem) {
-		elem = typedIndex(inputs[0], idx)
+	// 同构数组：零拷贝读 raw[arridx]
+	if kindSize(inputs[0].Kind()) > 0 {
+		elem := arridxGet(f, f.Inst.Reads[0].Name, int32(idx))
+		if kvspace.IsNone(elem) {
+			vthread.SetError(bg, f.KV, f.Vtid, f.PC,
+				fmt.Sprintf("IndexError: at: index %d out of bounds", idx))
+			return fmt.Errorf("IndexError: at: index out of bounds")
+		}
+		return writeResult(f, elem)
 	}
+	elem := typedIndex(inputs[0], idx)
 	if kvspace.IsNone(elem) {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC,
-			fmt.Sprintf("IndexError: at: index %d out of bounds; help: the array or string has no item at this position", idx))
+			fmt.Sprintf("IndexError: at: index %d out of bounds", idx))
 		return fmt.Errorf("IndexError: at: index out of bounds")
 	}
 	return writeResult(f, elem)
 }
 
-// typedIndex 用同构数组的 arraylength + 定长偏移读取元素。
+// arridxGet 从 frame 的 slot 中零拷贝读取 raw[arridx] 位置的元素。
+func arridxGet(f *rwir.Frame, slotName string, arridx int32) kvspace.XValue {
+	fp := keytree.FrameRoot(f.PC)
+	rwRoot := funcFrameRoot(f.KV, fp)
+	if ptrVal := kvspace.GetOne(f.KV, keytree.Stack(rwRoot)+slotName); kvspace.IsPtr(ptrVal) {
+		argAddr := kvspace.GetOne(f.KV, keytree.Stack(rwRoot)+kvspace.PtrTarget(ptrVal))
+		if !kvspace.IsNone(argAddr) {
+			parent, last := kvspace.SepPath(argAddr.ValueString())
+			if parent != kvspace.PathSep { parent += kvspace.DirIndexSuf }
+			return f.KV.Get(parent, []string{last}, true, arridx)[0]
+		}
+	}
+	parent, last := kvspace.SepPath(keytree.Stack(rwRoot) + slotName)
+	if parent != kvspace.PathSep { parent += kvspace.DirIndexSuf }
+	return f.KV.Get(parent, []string{last}, true, arridx)[0]
+}
+
+// arridxSet 零拷贝写入 raw[arridx] 位置的元素。
+func arridxSet(f *rwir.Frame, slotName string, arridx int32, val kvspace.XValue) {
+	fp := keytree.FrameRoot(f.PC)
+	rwRoot := funcFrameRoot(f.KV, fp)
+	if ptrVal := kvspace.GetOne(f.KV, keytree.Stack(rwRoot)+slotName); kvspace.IsPtr(ptrVal) {
+		argAddr := kvspace.GetOne(f.KV, keytree.Stack(rwRoot)+kvspace.PtrTarget(ptrVal))
+		if !kvspace.IsNone(argAddr) {
+			f.KV.Set([]kvspace.KVPair{{argAddr.ValueString(), val, arridx}})
+			return
+		}
+	}
+	f.KV.Set([]kvspace.KVPair{{keytree.Stack(rwRoot) + slotName, val, arridx}})
+}
+
+// typedIndex 用同构数组的 arraylength + 定长偏移读取元素（回退路径）。
 func typedIndex(v kvspace.XValue, idx int) kvspace.XValue {
 	n := int(v.ArrayLen())
 	if idx < 0 || idx >= n { return kvspace.None{} }
@@ -217,11 +252,11 @@ func (arraySetOp) Call(f *rwir.Frame) error {
 		funcFrame := funcFrameRoot(f.KV, fp)
 		base := resolveBasePath(f.KV, fp, funcFrame, f.Inst.Reads[0])
 		path := keytree.Member(base, kvKey(inputs[1]))
-		f.KV.Set([]kvspace.KVPair{{path, inputs[2]}})
+		f.KV.Set([]kvspace.KVPair{{path, inputs[2], -1}})
 		if len(f.Inst.Writes) > 0 && !kvspace.IsNone(inputs[0]) {
 			// 写入 base 本身（值不变），满足 -> base 返回槽
 			outKey := writeSlotKey(f.KV, fp, f.Inst.Writes[0].Name)
-			f.KV.Set([]kvspace.KVPair{{outKey, inputs[0]}})
+			f.KV.Set([]kvspace.KVPair{{outKey, inputs[0], -1}})
 		}
 		vthread.Set(bg, f.KV, f.Vtid, rwir.NextPC(f.PC), "running")
 		return nil
@@ -237,51 +272,16 @@ func (arraySetOp) Call(f *rwir.Frame) error {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
 		return fmt.Errorf("%s", msg)
 	}
-	// 数组长度判定
-	n := int(arr.ArrayLen())
-	if n == 0 { n = int(arr.ArrayLen()) }
 	idx := int(asInt64(inputs[1]))
-	if idx < 0 || idx >= n {
-		vthread.SetError(bg, f.KV, f.Vtid, f.PC,
-			fmt.Sprintf("IndexError: set: index %d out of bounds (len=%d)", idx, n))
-		return fmt.Errorf("set: index out of bounds")
+	// 同构数组：零拷贝写入 raw[arridx]
+	if kindSize(arr.Kind()) > 0 {
+		arridxSet(f, f.Inst.Reads[0].Name, int32(idx), inputs[2])
+		vthread.Set(bg, f.KV, f.Vtid, rwir.NextPC(f.PC), "running")
+		return nil
 	}
-	val := inputs[2]
-	var result kvspace.XValue
-	k := arr.Kind()
-	if kindSize(k) > 0 {
-		// 定长类型：原地替换
-		raw := make([]byte, len(rawBytesOf(arr)))
-		copy(raw, rawBytesOf(arr))
-		sz := int(kindSize(k))
-		b := kindBytes(k, val)
-		copy(raw[idx*sz:], b)
-		result = rawDecodeN(k, raw, int32(n))
-	} else {
-		// 变长类型（string 等）：重建 TLV
-		encoded := make([][]byte, n)
-		total := 4
-		for i := 0; i < n; i++ {
-			elem := xvalueAt(arr, i)
-			if i == idx { elem = val }
-			encoded[i] = elem.Encode()
-			total += len(encoded[i])
-		}
-		raw := make([]byte, total)
-		binary.LittleEndian.PutUint32(raw[:4], uint32(n))
-		off := 4
-		for _, enc := range encoded {
-			copy(raw[off:], enc)
-			off += len(enc)
-		}
-		result = rawDecodeN(k, raw, int32(n))
-	}
-	if len(f.Inst.Writes) > 0 {
-		outKey := writeSlotKey(f.KV, keytree.FrameRoot(f.PC), f.Inst.Writes[0].Name)
-		f.KV.Set([]kvspace.KVPair{{outKey, result}})
-	}
-	vthread.Set(bg, f.KV, f.Vtid, rwir.NextPC(f.PC), "running")
-	return nil
+	msg := "IndexError: set: unsupported array kind " + arr.Kind() + " (string array does not exist; use Char index via s[i])"
+	vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
+	return fmt.Errorf("%s", msg)
 }
 
 // sortOp: bubble sort (in-place, returns sorted copy).
@@ -294,32 +294,24 @@ func (sortOp) Call(f *rwir.Frame) error {
 	n := int(arr.ArrayLen())
 	if n <= 1 { return writeResult(f, arr) }
 	elems := make([]kvspace.XValue, n)
-	allNum, allStr := true, true
 	for i := 0; i < n; i++ {
-		elems[i] = xvalueAt(arr, i)
-		if !isNumeric(elems[i]) { allNum = false }
-		if elems[i].Kind() != "string" { allStr = false }
-	}
-	if !allNum && !allStr {
-		msg := "TypeError: sort requires all elements to be numeric or all string"
-		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
-		return fmt.Errorf("%s", msg)
+		elems[i] = typedIndex(arr, i)
+		if kvspace.IsNone(elems[i]) {
+			msg := "TypeError: sort: element at index " + itoa(i) + " is None"
+			vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
+			return fmt.Errorf("%s", msg)
+		}
 	}
 	// bubble sort
 	for i := 0; i < n-1; i++ {
 		for j := 0; j < n-i-1; j++ {
-			var swap bool
-			if allNum {
-				swap = asFloat(elems[j]) > asFloat(elems[j+1])
-			} else {
-				swap = elems[j].ValueString() > elems[j+1].ValueString()
-			}
+			swap := asFloat(elems[j]) > asFloat(elems[j+1])
 			if swap {
 				elems[j], elems[j+1] = elems[j+1], elems[j]
 			}
 		}
 	}
-	result := arrayVal(elems)
+	result := packTypedArray(arr.Kind(), elems)
 	return writeResult(f, result)
 }
 

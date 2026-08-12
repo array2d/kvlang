@@ -288,24 +288,4 @@ func rawDecodeN(kind string, raw []byte, n int32) kvspace.XValue {
 	}
 }
 
-// arrayVal 将 []XValue 编码为数组。元素必须同 kind，否则 panic。
-func arrayVal(elems []kvspace.XValue) kvspace.XValue {
-	if len(elems) == 0 {
-		return kvspace.None{}
-	}
-	k := elems[0].Kind()
-	for _, e := range elems[1:] {
-		if e.Kind() != k {
-			panic("arrayVal: mixed kinds " + k + " and " + e.Kind())
-		}
-	}
-	sz := kindSize(k)
-	if sz <= 0 {
-		panic("arrayVal: unsupported kind " + k + " (no fixed element size)")
-	}
-	raw := make([]byte, int32(len(elems))*sz)
-	for i, e := range elems {
-		copy(raw[i*int(sz):], kindBytes(k, e))
-	}
-	return rawDecodeN(k, raw, int32(len(elems)))
-}
+
