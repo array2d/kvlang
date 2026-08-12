@@ -73,14 +73,8 @@ func Select(ctx context.Context, kv kvspace.KVSpace, opcode string) (backend, n 
 }
 
 // ListBackends 返回所有已注册 backend 名称（kv.List("/sys/op") 结果）。
-func ListBackends(ctx context.Context, kv kvspace.KVSpace) ([]string, error) {
-	return kv.List(keytree.SysOpRoot + keytree.PathSegSep, false, true), nil
-}
 
 // BackendSupports 返回 backend 是否支持某 opcode。
-func BackendSupports(ctx context.Context, kv kvspace.KVSpace, backend, opcode string) bool {
-	return !kvspace.IsNone(kvspace.GetOne(kv, keytree.SysOpFunc(backend, stripVTypePrefix(opcode))))
-}
 
 // stripVTypePrefix 剥离 vtype 命名空间前缀。
 // "tensor.matmul" → "matmul"；无前缀则原样返回。

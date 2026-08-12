@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"kvlang/keytree"
@@ -30,7 +29,6 @@ type OpTask struct {
 	Outputs []ParamRef             `json:"outputs"`
 	Params  map[string]interface{} `json:"params,omitempty"`
 }
-
 
 func isAbsolute(param string) bool {
 	return len(param) > 0 && param[0] == '/'
@@ -122,25 +120,6 @@ func buildOpTask(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst 
 	return task
 }
 
-
-func parseShapeParam(raw string) []int {
-	raw = strings.Trim(raw, "[] ")
-	if raw == "" {
-		return nil
-	}
-	var shape []int
-	for _, s := range strings.Split(raw, ",") {
-		s = strings.TrimSpace(s)
-		if s == "" {
-			continue
-		}
-		var n int
-		fmt.Sscanf(s, "%d", &n)
-		shape = append(shape, n)
-	}
-	return shape
-}
-
 // Compute 分发张量计算指令到 /sys/op/<backend>/<n>/cmd。
 func Compute(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *rwir.Rwir) error {
 	backend, n, err := Select(ctx, kv, inst.Opcode)
@@ -164,5 +143,4 @@ func Compute(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *rwi
 	vthread.Set(ctx, kv, vtid, rwir.NextPC(pc), "running")
 	return nil
 }
-
 

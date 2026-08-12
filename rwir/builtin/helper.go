@@ -39,12 +39,6 @@ func requireInt(inputs ...kvspace.XValue) error {
 }
 
 // requireKind guards that an input has a specific kind.
-func requireKind(v kvspace.XValue, kind string) error {
-	if v.Kind() != kind {
-		return fmt.Errorf("TypeError: expected %s, got %s", kind, v.Kind())
-	}
-	return nil
-}
 
 // readInputs resolves all read-slots of f.Inst into typed Values.
 func readInputs(f *rwir.Frame) []kvspace.XValue {
@@ -97,9 +91,6 @@ func nextPC(f *rwir.Frame) {
 }
 
 // setWrite writes a typed Value to a named slot (先查 .wparam 重定向).
-func setWrite(kv kvspace.KVSpace, framePath, slot string, val kvspace.XValue) error {
-	return kv.Set([]kvspace.KVPair{{resolveWriteSlot(kv, framePath, slot), val, -1}})
-}
 
 // isContainerKind reports whether a kind represents a container/marker type
 // (dict, index, etc.) whose String() method does not return a path.

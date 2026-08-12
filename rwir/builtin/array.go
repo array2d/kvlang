@@ -156,22 +156,21 @@ func (atOp) Call(f *rwir.Frame) error {
 	return writeResult(f, elem)
 }
 
-// arridxGet 从 frame 的 slot 中零拷贝读取 raw[arridx] 位置的元素。
-func arridxGet(f *rwir.Frame, slotName string, arridx int32) kvspace.XValue {
-	fp := keytree.FrameRoot(f.PC)
-	rwRoot := funcFrameRoot(f.KV, fp)
-	if ptrVal := kvspace.GetOne(f.KV, keytree.Stack(rwRoot)+slotName); kvspace.IsPtr(ptrVal) {
-		argAddr := kvspace.GetOne(f.KV, keytree.Stack(rwRoot)+kvspace.PtrTarget(ptrVal))
-		if !kvspace.IsNone(argAddr) {
-			parent, last := kvspace.SepPath(argAddr.ValueString())
-			if parent != kvspace.PathSep { parent += kvspace.DirIndexSuf }
-			return f.KV.Get(parent, []string{last}, true, arridx)[0]
-		}
-	}
-	parent, last := kvspace.SepPath(keytree.Stack(rwRoot) + slotName)
-	if parent != kvspace.PathSep { parent += kvspace.DirIndexSuf }
-	return f.KV.Get(parent, []string{last}, true, arridx)[0]
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // arridxSet 零拷贝写入 raw[arridx] 位置的元素。
 func arridxSet(f *rwir.Frame, slotName string, arridx int32, val kvspace.XValue) {
