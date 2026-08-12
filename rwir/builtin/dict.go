@@ -24,7 +24,7 @@ func (dictOp) Call(f *rwir.Frame) error {
 		pairs = append(pairs, kvspace.KVPair{outKey, kvspace.Dict{}})
 		for i := 0; i+1 < len(inputs); i += 2 {
 			if kvspace.IsNone(inputs[i+1]) { continue }
-			pairs = append(pairs, kvspace.KVPair{keytree.Member(outKey, inputs[i].String()), inputs[i+1]})
+			pairs = append(pairs, kvspace.KVPair{keytree.Member(outKey, inputs[i].ValueString()), inputs[i+1]})
 		}
 	}
 	if len(pairs) > 0 { f.KV.Set(pairs) }

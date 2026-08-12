@@ -46,7 +46,7 @@ func resolveReadValue(kv kvspace.KVSpace, framePath string, param rwir.Param) kv
 	if ptrVal := kvspace.GetOne(kv, keytree.Stack(rwRoot)+name); kvspace.IsPtr(ptrVal) {
 		argAddr := kvspace.GetOne(kv, keytree.Stack(rwRoot)+kvspace.PtrTarget(ptrVal))
 		if !kvspace.IsNone(argAddr) {
-			return kvspace.GetOne(kv, argAddr.String())
+			return kvspace.GetOne(kv, argAddr.ValueString())
 		}
 	}
 	// fallback: 帧内局部变量

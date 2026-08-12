@@ -39,7 +39,7 @@ func (debuggerOp) Call(f *rwir.Frame) error {
 	for {
 		cmdVal := f.KV.Watch(resumeKey, 0)
 		if kvspace.IsNone(cmdVal) { continue }
-		switch cmdVal.String() {
+		switch cmdVal.ValueString() {
 		case "abort":
 			vthread.SetError(bg, f.KV, f.Vtid, f.PC, "debugger: aborted by agent")
 			return nil

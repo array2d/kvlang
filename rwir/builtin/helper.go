@@ -79,13 +79,13 @@ func resolveWriteSlot(kv kvspace.KVSpace, framePath, name string) string {
 		if !kvspace.IsNone(argAddr) {
 			v := argAddr
 			for v.Kind() == kvspace.KindString {
-				next := kvspace.GetOne(kv, v.String())
+				next := kvspace.GetOne(kv, v.ValueString())
 				if kvspace.IsNone(next) || next.Kind() != kvspace.KindString {
-					return v.String()
+					return v.ValueString()
 				}
 				v = next
 			}
-			return v.String()
+			return v.ValueString()
 		}
 	}
 	return keytree.Stack(rwRoot) + name
@@ -119,7 +119,7 @@ func resolveBasePath(kv kvspace.KVSpace, fp, funcFrame string, read rwir.Param) 
 	if kvspace.IsNone(v) || isContainerKind(v.Kind()) {
 		return resolveKVPath(funcFrame, read.Name)
 	}
-	return v.String()
+	return v.ValueString()
 }
 
 // funcFrameRoot returns the nearest rwfunc frame root from the given frame path.

@@ -99,8 +99,8 @@ func evalMinMax(inputs []kvspace.XValue, fn func(float64, float64) float64, intW
 		return kvspace.NewFloat64(acc), nil
 	}
 	// allStr
-	acc := inputs[0].String()
-	for _, v := range inputs[1:] { acc = strWin(acc, v.String()) }
+	acc := inputs[0].ValueString()
+	for _, v := range inputs[1:] { acc = strWin(acc, v.ValueString()) }
 	return kvspace.NewChar(acc), nil
 }
 

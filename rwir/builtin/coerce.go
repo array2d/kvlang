@@ -59,12 +59,12 @@ func isNumeric(v kvspace.XValue) bool { return isIntKind(v.Kind()) || isFloatKin
 // display formats a Value for human output (print / string.set).
 func display(v kvspace.XValue) string {
 	if v.Kind() == "string" {
-		return v.String()
+		return v.ValueString()
 	}
 	if v.ArrayLen() > 1 {
 		return formatArray(v)
 	}
-	return v.String()
+	return v.ValueString()
 }
 
 // xvalueAt returns the i-th element of any XValue, or None{}.
@@ -86,7 +86,7 @@ func xvalueAt(v kvspace.XValue, i int) kvspace.XValue {
 	case kvspace.Float64: return kvspace.NewFloat64(v.At(i))
 	case kvspace.Bool: return kvspace.NewBool(v.At(i))
 	case kvspace.Char:
-		return kvspace.NewChar(string([]rune(v.String())[i]))
+		return kvspace.NewChar(string([]rune(v.ValueString())[i]))
 	default:
 		raw := v.Encode()
 		kl := int(raw[0])

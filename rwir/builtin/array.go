@@ -124,8 +124,8 @@ func (atOp) Call(f *rwir.Frame) error {
 	}
 	// string base 分流（fix-025）：以 "/" 开头 = 路径指针（键族 deref）；否则 = 字符序列。
 	// s[i] 读返单字符字符串（动态阵营，与 char 一致）；越界/非整型索引返 ""（缺席语义）。
-	if inputs[0].Kind() == "string" && !strings.HasPrefix(inputs[0].String(), "/") {
-		s := inputs[0].String()
+	if inputs[0].Kind() == "string" && !strings.HasPrefix(inputs[0].ValueString(), "/") {
+		s := inputs[0].ValueString()
 		if !isIntKind(inputs[1].Kind()) {
 			return writeResult(f, kvspace.NewChar(""))
 		}
@@ -194,10 +194,10 @@ func (arraySetOp) Call(f *rwir.Frame) error {
 	// string base 分流（fix-025）：非 "/" 开头 = 字符序列，s[i] 写 = 单字符替换后整串回写
 	// （C 直觉 + kvlang 值语义；五语言中仅 C 可变，Python/Go/Rust/JS 字符串不可变，
 	//   kvlang 以"写回新串"呈现 C 直觉、保持值语义）。越界报错（C 为 UB，此处显式）。
-	if arr.Kind() == "string" && !strings.HasPrefix(arr.String(), "/") {
-		sv := arr.String()
+	if arr.Kind() == "string" && !strings.HasPrefix(arr.ValueString(), "/") {
+		sv := arr.ValueString()
 		idx := int(asInt64(inputs[1]))
-		ch := inputs[2].String()
+		ch := inputs[2].ValueString()
 		if idx < 0 || idx >= len(sv) {
 			msg := fmt.Sprintf("IndexError: set: string index %d out of bounds (len=%d); help: try adjusting the index or check string.len first", idx, len(sv))
 			vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
@@ -312,7 +312,7 @@ func (sortOp) Call(f *rwir.Frame) error {
 			if allNum {
 				swap = asFloat(elems[j]) > asFloat(elems[j+1])
 			} else {
-				swap = elems[j].String() > elems[j+1].String()
+				swap = elems[j].ValueString() > elems[j+1].ValueString()
 			}
 			if swap {
 				elems[j], elems[j+1] = elems[j+1], elems[j]
@@ -337,7 +337,7 @@ func (hasOp) Call(f *rwir.Frame) error {
 }
 
 func kvKey(v kvspace.XValue) string {
-	if v.Kind() == "string" { return v.String() }
+	if v.Kind() == "string" { return v.ValueString() }
 	if isIntKind(v.Kind()) { return strconv.FormatInt(asInt64(v), 10) }
 	panic("kvKey: expected string or int kind, got " + v.Kind())
 }

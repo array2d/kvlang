@@ -47,7 +47,7 @@ func (strCharOp) Call(f *rwir.Frame) error {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "TypeError: string.char requires string and index")
 		return fmt.Errorf("TypeError: string.char requires string and index")
 	}
-	s := inputs[0].String()
+	s := inputs[0].ValueString()
 	idx := int(asInt64(inputs[1]))
 	runes := []rune(s)
 	if idx < 0 || idx >= len(runes) {
@@ -67,7 +67,7 @@ func (strOrdOp) Call(f *rwir.Frame) error {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "TypeError: string.ord requires a string")
 		return fmt.Errorf("TypeError: string.ord requires a string")
 	}
-	s := inputs[0].String()
+	s := inputs[0].ValueString()
 	runes := []rune(s)
 	if len(runes) == 0 { return writeResult(f, kvspace.NewInt64(-1)) }
 	return writeResult(f, kvspace.NewInt64(int64(runes[0])))
@@ -82,7 +82,7 @@ func (strCmpOp) Call(f *rwir.Frame) error {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "TypeError: string.cmp requires two strings")
 		return fmt.Errorf("TypeError: string.cmp requires two strings")
 	}
-	a, b := inputs[0].String(), inputs[1].String()
+	a, b := inputs[0].ValueString(), inputs[1].ValueString()
 	r := int64(0)
 	if a < b { r = -1 } else if a > b { r = 1 }
 	return writeResult(f, kvspace.NewInt64(r))
@@ -97,7 +97,7 @@ func (strStrOp) Call(f *rwir.Frame) error {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, "TypeError: string.find requires two strings")
 		return fmt.Errorf("TypeError: string.find requires two strings")
 	}
-	return writeResult(f, kvspace.NewInt64(int64(strings.Index(inputs[0].String(), inputs[1].String()))))
+	return writeResult(f, kvspace.NewInt64(int64(strings.Index(inputs[0].ValueString(), inputs[1].ValueString()))))
 }
 
 // ── string.len ────────────────────────────────────────────────────
@@ -106,7 +106,7 @@ type strLenOp struct{}
 func (strLenOp) Call(f *rwir.Frame) error {
 	inputs := readInputs(f)
 	n := 0
-	if len(inputs) > 0 { n = len([]rune(inputs[0].String())) }
+	if len(inputs) > 0 { n = len([]rune(inputs[0].ValueString())) }
 	return writeResult(f, kvspace.NewInt64(int64(n)))
 }
 
@@ -120,7 +120,7 @@ func (strSliceOp) Call(f *rwir.Frame) error {
 		return fmt.Errorf("TypeError: string.slice requires string, start, end")
 	}
 	lo, hi := int(asInt64(inputs[1])), int(asInt64(inputs[2]))
-	runes := []rune(inputs[0].String())
+	runes := []rune(inputs[0].ValueString())
 	n := len(runes)
 	if lo < 0 || hi > n || lo > hi {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC,
@@ -142,5 +142,5 @@ func (strConcatOp) Call(f *rwir.Frame) error {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
 		return fmt.Errorf("%s", msg)
 	}
-	return writeResult(f, kvspace.NewChar(inputs[0].String()+inputs[1].String()))
+	return writeResult(f, kvspace.NewChar(inputs[0].ValueString()+inputs[1].ValueString()))
 }
