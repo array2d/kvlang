@@ -17,7 +17,7 @@ import (
 	// 注册 KVSpace 实现；--kvspace DSN 的 scheme 选择后端（默认 shm://）。
 	_ "github.com/array2d/kvspace-go/redis"
 	_ "github.com/array2d/kvspace-go/goheap"
-	_ "github.com/array2d/kvspace-go/shm"
+	// _ "github.com/array2d/kvspace-go/shm" // requires libkvspace-c.so
 )
 
 func main() {
