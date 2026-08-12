@@ -242,7 +242,7 @@ func HandleReturn(ctx context.Context, kv kvspace.KVSpace, pc string, inst *rwir
 		return "", ""
 	}
 
-	nextPC = kvspace.GetOne(kv, keytree.ReturnPC(frameRoot)).String()
+	nextPC = kvspace.GetOne(kv, keytree.ReturnPC(frameRoot)).ValueString()
 
 	kv.DelExtIndex(keytree.Stack(frameRoot))
 	kv.DelTree(frameRoot)
@@ -461,7 +461,7 @@ func resolveReadPath(kv kvspace.KVSpace, framePath, name string) string {
 			if kvspace.IsNone(nextVal) || nextVal.Kind() != kvspace.KindString {
 				return path
 			}
-			path = nextVal.String()
+			path = nextVal.ValueString()
 		}
 	}
 	return keytree.Stack(funcFrame) + name
@@ -578,7 +578,7 @@ func HandleScope(ctx context.Context, kv kvspace.KVSpace, pc, scopeName string) 
 // HandleScopeReturn scope 帧隐式 return：读 .returnpc，DelTree 自身。
 func HandleScopeReturn(ctx context.Context, kv kvspace.KVSpace, pc string) string {
 	frameRoot := keytree.FrameRoot(pc)
-	parentPC := kvspace.GetOne(kv, keytree.ReturnPC(frameRoot)).String()
+	parentPC := kvspace.GetOne(kv, keytree.ReturnPC(frameRoot)).ValueString()
 	kv.DelExtIndex(keytree.Stack(frameRoot))
 	kv.DelTree(frameRoot)
 	return parentPC

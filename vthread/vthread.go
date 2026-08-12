@@ -43,7 +43,7 @@ import (
 func Get(ctx context.Context, kv kvspace.KVSpace, vtid string) (pc, status string) {
 	pcV := kvspace.GetOne(kv, keytree.VThreadPC(vtid))
 	stV := kvspace.GetOne(kv, keytree.VThreadStatus(vtid))
-	return pcV.String(), stV.String()
+	return pcV.ValueString(), stV.ValueString()
 }
 
 // ── 写（瞬态） ────────────────────────────────────────────────────────────────
@@ -83,7 +83,7 @@ func SetError(ctx context.Context, kv kvspace.KVSpace, vtid, pc, errMsg string) 
 // AllocVtid 原子自增 /vthread/seq 并返回新 vtid。
 func AllocVtid(kv kvspace.KVSpace) string {
 	valV := kvspace.GetOne(kv, keytree.VthreadSeq)
-	n, _ := strconv.ParseInt(valV.String(), 10, 64)
+	n, _ := strconv.ParseInt(valV.ValueString(), 10, 64)
 	n++
 	kv.Set([]kvspace.KVPair{{keytree.VthreadSeq, kvspace.NewChar(strconv.FormatInt(n, 10))}})
 	return fmt.Sprintf("%d", n)
@@ -117,13 +117,13 @@ func CreateVThread(kv kvspace.KVSpace, funcName string, reads, writes []string) 
 // WaitDone 阻塞等待 vthread 终态。
 func WaitDone(ctx context.Context, kv kvspace.KVSpace, vtid string, timeout time.Duration) (string, error) {
 	val := kv.Watch(keytree.VThreadStatus(vtid), timeout)
-	signal := val.String()
+	signal := val.ValueString()
 	if signal == "" {
 		return "", fmt.Errorf("WaitDone %s: timeout", vtid)
 	}
 	if signal == "error" {
 		msgVal := kvspace.GetOne(kv, keytree.VThreadStatusMsg(vtid, "error"))
-		return "", fmt.Errorf("vthread %s: %s", vtid, msgVal.String())
+		return "", fmt.Errorf("vthread %s: %s", vtid, msgVal.ValueString())
 	}
 	return signal, nil
 }
