@@ -82,7 +82,7 @@ func evalMinMax(inputs []kvspace.XValue, fn func(float64, float64) float64, intW
 		}
 		if !isIntKind(v.Kind()) { allInt = false }
 		if !isNumeric(v) { allNum = false }
-		if v.Kind() != "string" { allStr = false }
+		if v.Kind() != "stringbyte" { allStr = false }
 	}
 	if !allNum && !allStr {
 		return kvspace.None{}, fmt.Errorf("TypeError: min/max requires all numeric or all string")
@@ -101,7 +101,7 @@ func evalMinMax(inputs []kvspace.XValue, fn func(float64, float64) float64, intW
 	// allStr
 	acc := inputs[0].ValueString()
 	for _, v := range inputs[1:] { acc = strWin(acc, v.ValueString()) }
-	return kvspace.NewChar(acc), nil
+	return kvspace.NewStringByte([]byte(acc)...), nil
 }
 
 func evalMin(inputs []kvspace.XValue) (kvspace.XValue, error) {

@@ -150,7 +150,7 @@ func Compute(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *rwi
 	task := buildOpTask(ctx, kv, vtid, pc, inst)
 	cmdQueue := keytree.SysOpCmd(backend, n)
 	taskJSON, _ := json.Marshal(task)
-	if err := kv.Notify(cmdQueue, kvspace.NewBytes(taskJSON)); err != nil {
+	if err := kv.Notify(cmdQueue, kvspace.NewByte(taskJSON...)); err != nil {
 		return fmt.Errorf("push task: %w", err)
 	}
 	logx.Debug("[%s] PUSH %s → %s", vtid, inst.Opcode, cmdQueue)

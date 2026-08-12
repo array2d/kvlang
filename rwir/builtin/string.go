@@ -31,7 +31,7 @@ func (strOp) Call(f *rwir.Frame) error {
 	if len(inputs) > 0 { val = display(inputs[0]) }
 	if len(f.Inst.Writes) > 0 {
 		wKey := writeSlotKey(f.KV, keytree.FrameRoot(f.PC), f.Inst.Writes[0].Name)
-		f.KV.Set([]kvspace.KVPair{{wKey, kvspace.NewChar(val), -1}})
+		f.KV.Set([]kvspace.KVPair{{wKey, kvspace.NewStringByte([]byte(val)...), -1}})
 	}
 	logx.Debug("[%s] string.set %q -> %s", f.Vtid, val, f.Inst.Writes)
 	nextPC(f)
@@ -55,7 +55,7 @@ func (strCharOp) Call(f *rwir.Frame) error {
 			fmt.Sprintf("IndexError: at: index %d out of bounds (char count=%d)", idx, len(runes)))
 		return fmt.Errorf("IndexError: char index out of bounds")
 	}
-	return writeResult(f, kvspace.NewChar(string(runes[idx])))
+	return writeResult(f, kvspace.NewStringByte([]byte(string(runes[idx]))...))
 }
 
 // ── string.ord ────────────────────────────────────────────────────
@@ -127,8 +127,8 @@ func (strSliceOp) Call(f *rwir.Frame) error {
 			fmt.Sprintf("IndexError: at: slice index out of bounds (lo=%d hi=%d char count=%d)", lo, hi, n))
 		return fmt.Errorf("IndexError: slice index out of bounds")
 	}
-	if lo >= hi { return writeResult(f, kvspace.NewChar("")) }
-	return writeResult(f, kvspace.NewChar(string(runes[lo:hi])))
+	if lo >= hi { return writeResult(f, kvspace.NewStringByte([]byte("")...)) }
+	return writeResult(f, kvspace.NewStringByte([]byte(string(runes[lo:hi]))...))
 }
 
 // ── string.concat ─────────────────────────────────────────────────
@@ -136,11 +136,11 @@ func (strSliceOp) Call(f *rwir.Frame) error {
 type strConcatOp struct{}
 func (strConcatOp) Call(f *rwir.Frame) error {
 	inputs := readInputs(f)
-	if len(inputs) < 2 { return writeResult(f, kvspace.NewChar("")) }
-	if inputs[0].Kind() != "string" || inputs[1].Kind() != "string" {
+	if len(inputs) < 2 { return writeResult(f, kvspace.NewStringByte([]byte("")...)) }
+	if inputs[0].Kind() != "stringbyte" || inputs[1].Kind() != "stringbyte" {
 		msg := fmt.Sprintf("TypeError: string.concat requires strings, got %s and %s", inputs[0].Kind(), inputs[1].Kind())
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
 		return fmt.Errorf("%s", msg)
 	}
-	return writeResult(f, kvspace.NewChar(inputs[0].ValueString()+inputs[1].ValueString()))
+	return writeResult(f, kvspace.NewStringByte([]byte(inputs[0].ValueString()+inputs[1].ValueString())...))
 }

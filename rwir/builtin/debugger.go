@@ -32,7 +32,7 @@ func (debuggerOp) Call(f *rwir.Frame) error {
 		"pc": f.PC, "vtid": f.Vtid, "opcode": f.Inst.Opcode,
 		"func": "", "frame": keytree.FrameRoot(f.PC),
 	})
-	f.KV.Notify(pauseKey, kvspace.NewBytes(info))
+	f.KV.Notify(pauseKey, kvspace.NewByte(info...))
 
 	// 阻塞等待 agent 命令
 	resumeKey := keytree.VThreadDebuggerResume(f.Vtid)

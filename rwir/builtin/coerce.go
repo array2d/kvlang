@@ -58,7 +58,7 @@ func isNumeric(v kvspace.XValue) bool { return isIntKind(v.Kind()) || isFloatKin
 
 // display formats a Value for human output (print / string.set).
 func display(v kvspace.XValue) string {
-	if v.Kind() == "string" {
+	if v.Kind() == "stringbyte" {
 		return v.ValueString()
 	}
 	if v.ArrayLen() > 1 {
@@ -85,8 +85,6 @@ func xvalueAt(v kvspace.XValue, i int) kvspace.XValue {
 	case kvspace.Float32: return kvspace.NewFloat32(v.At(i))
 	case kvspace.Float64: return kvspace.NewFloat64(v.At(i))
 	case kvspace.Bool: return kvspace.NewBool(v.At(i))
-	case kvspace.Char:
-		return kvspace.NewChar(string([]rune(v.ValueString())[i]))
 	default:
 		raw := v.Encode()
 		kl := int(raw[0])
@@ -107,7 +105,7 @@ func rawBytesOf(v kvspace.XValue) []byte {
 	switch v := v.(type) {
 	case kvspace.Int8, kvspace.Int16, kvspace.Int32, kvspace.Int64,
 		kvspace.Uint8, kvspace.Uint16, kvspace.Uint32, kvspace.Uint64,
-		kvspace.Float32, kvspace.Float64, kvspace.Bool, kvspace.Char, kvspace.Time, kvspace.Duration:
+		kvspace.Float32, kvspace.Float64, kvspace.Bool,  kvspace.Time, kvspace.Duration:
 		return v.Encode()[1+len(v.Kind())+1+8:]
 	default:
 		h := kvspace.DecodeXValueHead(v.Encode())

@@ -50,7 +50,7 @@ func evalCmp(inputs []kvspace.XValue, o cmp) (kvspace.XValue, error) {
 		return kvspace.NewBool(o.i(asInt64(a), asInt64(b))), nil
 	case isNumeric(a) && isNumeric(b):
 		return kvspace.NewBool(o.f(asFloat(a), asFloat(b))), nil
-	case a.Kind() == "string" && b.Kind() == "string":
+	case a.Kind() == "stringbyte" && b.Kind() == "stringbyte":
 		return kvspace.NewBool(o.s(a.ValueString(), b.ValueString())), nil
 	case a.Kind() == "bool" && b.Kind() == "bool":
 		return kvspace.NewBool(o.s(strconv.FormatBool(AsBool(a)), strconv.FormatBool(AsBool(b)))), nil

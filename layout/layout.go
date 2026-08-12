@@ -186,9 +186,9 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *rwir.R
 
 	// 系统变量
 	kv.Set([]kvspace.KVPair{
-		{keytree.ReturnPC(frameRoot), kvspace.NewChar(rwir.NextPC(pc)), -1},
-		{keytree.CallPC(frameRoot), kvspace.NewChar(keytree.EntryPC(frameRoot)), -1},
-		{keytree.Stack(frameRoot) + keytree.SegLib, kvspace.NewChar(funcKey), -1},
+		{keytree.ReturnPC(frameRoot), kvspace.NewStringByte([]byte(rwir.NextPC(pc))...), -1},
+		{keytree.CallPC(frameRoot), kvspace.NewStringByte([]byte(keytree.EntryPC(frameRoot))...), -1},
+		{keytree.Stack(frameRoot) + keytree.SegLib, kvspace.NewStringByte([]byte(funcKey)...), -1},
 	})
 
 	// 读参：写 caller arg 地址到 frameRoot/[0,-j]
@@ -207,7 +207,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *rwir.R
 				argPairs = append(argPairs, kvspace.KVPair{rk, arg.Val, -1})
 			}
 			if rk != "" {
-				argPairs = append(argPairs, kvspace.KVPair{slot, kvspace.NewChar(rk), -1})
+				argPairs = append(argPairs, kvspace.KVPair{slot, kvspace.NewStringByte([]byte(rk)...), -1})
 			}
 		}
 	}
@@ -217,7 +217,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *rwir.R
 		if i < len(inst.Writes) {
 			wk := resolveReadPath(kv, callerFrameRoot, inst.Writes[i].Name)
 			if wk != "" {
-				argPairs = append(argPairs, kvspace.KVPair{slot, kvspace.NewChar(wk), -1})
+				argPairs = append(argPairs, kvspace.KVPair{slot, kvspace.NewStringByte([]byte(wk)...), -1})
 			}
 		}
 	}
@@ -296,7 +296,7 @@ func HandleLabel(ctx context.Context, kv kvspace.KVSpace, pc, labelFullPath stri
 					kv.DelTree(d)
 				}
 				kv.Set([]kvspace.KVPair{
-					{keytree.CallPC(f), kvspace.NewChar(keytree.ScopeEntryPC(f)), -1},
+					{keytree.CallPC(f), kvspace.NewStringByte([]byte(keytree.ScopeEntryPC(f))...), -1},
 				})
 				return keytree.ScopeEntryPC(f)
 			}
@@ -315,8 +315,8 @@ func HandleLabel(ctx context.Context, kv kvspace.KVSpace, pc, labelFullPath stri
 	}
 
 	kv.Set([]kvspace.KVPair{
-		{keytree.ReturnPC(labelFrame), kvspace.NewChar(rwir.NextPC(pc)), -1},
-		{keytree.CallPC(labelFrame), kvspace.NewChar(keytree.ScopeEntryPC(labelFrame)), -1},
+		{keytree.ReturnPC(labelFrame), kvspace.NewStringByte([]byte(rwir.NextPC(pc))...), -1},
+		{keytree.CallPC(labelFrame), kvspace.NewStringByte([]byte(keytree.ScopeEntryPC(labelFrame))...), -1},
 	})
 	return keytree.ScopeEntryPC(labelFrame)
 }
@@ -359,8 +359,8 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 	}
 
 	kv.Set([]kvspace.KVPair{
-		{keytree.CallPC(vthreadRoot), kvspace.NewChar(keytree.EntryPC(vthreadRoot)), -1},
-		{keytree.Stack(vthreadRoot) + keytree.SegLib, kvspace.NewChar(funcKey), -1},
+		{keytree.CallPC(vthreadRoot), kvspace.NewStringByte([]byte(keytree.EntryPC(vthreadRoot))...), -1},
+		{keytree.Stack(vthreadRoot) + keytree.SegLib, kvspace.NewStringByte([]byte(funcKey)...), -1},
 	})
 
 	if len(args) > 0 {
@@ -417,16 +417,16 @@ func WriteFunc(kv kvspace.KVSpace, pkg string, fn *ast.Func) {
 	nr, nw := fn.Sig.NumReads(), fn.Sig.NumWrites()
 	pairs := []kvspace.KVPair{
 		{funcDir + "/[0,0]", kvspace.NewRwfunc(countDirectInsts(fn.Body), nr, nw), -1},
-		{keytree.LibSrc(pkg, fn.Sig.Name), kvspace.NewChar(fn.FullText()), -1},
+		{keytree.LibSrc(pkg, fn.Sig.Name), kvspace.NewStringByte([]byte(fn.FullText())...), -1},
 	}
 
 	for i, p := range fn.Sig.Params {
 		slot := fmt.Sprintf("[0,-%d]", i+1)
-		pairs = append(pairs, kvspace.KVPair{Key: funcDir + "/" + p.Name, Val: kvspace.NewPtr(kvspace.KindString, slot, 1), Arridx: -1})
+		pairs = append(pairs, kvspace.KVPair{Key: funcDir + "/" + p.Name, Val: kvspace.NewPtr(kvspace.KindStringByte, slot, 1), Arridx: -1})
 	}
 	for i, r := range fn.Sig.Returns {
 		slot := fmt.Sprintf("[0,%d]", i+1)
-		pairs = append(pairs, kvspace.KVPair{Key: funcDir + "/" + r.Name, Val: kvspace.NewPtr(kvspace.KindString, slot, 1), Arridx: -1})
+		pairs = append(pairs, kvspace.KVPair{Key: funcDir + "/" + r.Name, Val: kvspace.NewPtr(kvspace.KindStringByte, slot, 1), Arridx: -1})
 	}
 	kv.Set(pairs)
 	WriteBody(kv, pkg, fn.Sig.Name, fn.Body, typeMap, 1) // 指令从 [1,0] 开始
@@ -452,7 +452,7 @@ func resolveReadPath(kv kvspace.KVSpace, framePath, name string) string {
 		path := keytree.Stack(funcFrame) + kvspace.PtrTarget(v)
 		for {
 			nextVal := kvspace.GetOne(kv, path)
-			if kvspace.IsNone(nextVal) || nextVal.Kind() != kvspace.KindString {
+			if kvspace.IsNone(nextVal) || nextVal.Kind() != kvspace.KindStringByte {
 				return path
 			}
 			path = nextVal.ValueString()
@@ -467,17 +467,17 @@ func slotValue(val string, typeMap map[string]string) kvspace.XValue {
 	}
 	kind := kvspace.KindRwir
 	if val[0] == '"' {
-		kind = kvspace.KindString
+		kind = kvspace.KindStringByte
 	} else if val == "true" || val == "false" {
 		kind = kvspace.KindBool
 	} else if val[0] >= '0' && val[0] <= '9' || (val[0] == '-' && len(val) > 1) {
 		if strings.Contains(val, ".") || strings.ContainsAny(val, "eE") { kind = kvspace.KindFloat64 } else { kind = kvspace.KindInt64 }
 	}
 	switch kind {
-	case kvspace.KindString:
+	case kvspace.KindStringByte:
 		s := val
 		if len(s) > 0 && s[0] == '"' { s = s[1:] }
-		return kvspace.NewChar(s)
+		return kvspace.NewStringByte([]byte(s)...)
 	case kvspace.KindBool:
 		return kvspace.NewBool(val == "true")
 	case kvspace.KindInt64:
@@ -559,12 +559,12 @@ func HandleScope(ctx context.Context, kv kvspace.KVSpace, pc, scopeName string) 
 	if !exists {
 		kvspace.MkIndexRecursive(kv, scopeFrame)
 		kv.Set([]kvspace.KVPair{
-			{keytree.ReturnPC(scopeFrame), kvspace.NewChar(rwir.NextPC(pc)), -1},
+			{keytree.ReturnPC(scopeFrame), kvspace.NewStringByte([]byte(rwir.NextPC(pc))...), -1},
 		})
 	}
 	// callpc 每次更新，returnpc 仅首次设置（保持原始返回路径）
 	kv.Set([]kvspace.KVPair{
-		{keytree.CallPC(scopeFrame), kvspace.NewChar(keytree.ScopeEntryPC(scopeFrame)), -1},
+		{keytree.CallPC(scopeFrame), kvspace.NewStringByte([]byte(keytree.ScopeEntryPC(scopeFrame))...), -1},
 	})
 	return keytree.ScopeEntryPC(scopeFrame)
 }
