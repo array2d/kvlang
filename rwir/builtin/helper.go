@@ -105,7 +105,7 @@ func setWrite(kv kvspace.KVSpace, framePath, slot string, val kvspace.XValue) er
 // (dict, index, etc.) whose String() method does not return a path.
 func isContainerKind(kind string) bool {
 	switch kind {
-	case "dict", "index", "linkindex", "extindex", "rwfunc", "rwir":
+	case "dict", "index", "extindex", "rwfunc", "rwir":
 		return true
 	}
 	return false

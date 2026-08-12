@@ -108,7 +108,7 @@ func rawBytesOf(v kvspace.XValue) []byte {
 	case kvspace.Int8, kvspace.Int16, kvspace.Int32, kvspace.Int64,
 		kvspace.Uint8, kvspace.Uint16, kvspace.Uint32, kvspace.Uint64,
 		kvspace.Float32, kvspace.Float64, kvspace.Bool, kvspace.Char, kvspace.Time, kvspace.Duration:
-		return v.Encode()[1+len(v.Kind())+8:]
+		return v.Encode()[1+len(v.Kind())+1+8:]
 	default:
 		h := kvspace.DecodeXValueHead(v.Encode())
 		return h.Raw

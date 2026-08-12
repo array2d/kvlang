@@ -244,7 +244,7 @@ func HandleReturn(ctx context.Context, kv kvspace.KVSpace, pc string, inst *rwir
 
 	nextPC = kvspace.GetOne(kv, keytree.ReturnPC(frameRoot)).String()
 
-	kv.UnLink(keytree.Stack(frameRoot))
+	kv.DelExtIndex(keytree.Stack(frameRoot))
 	kv.DelTree(frameRoot)
 	return nextPC, ""
 }
@@ -292,7 +292,7 @@ func HandleLabel(ctx context.Context, kv kvspace.KVSpace, pc, labelFullPath stri
 			if lastSeg == labelName {
 				// 找到目标 → 丢弃目标子帧，跳回入口
 				for d := currentFrame; d != f; d = keytree.ParentFrame(d) {
-					kv.UnLink(keytree.Stack(d))
+					kv.DelExtIndex(keytree.Stack(d))
 					kv.DelTree(d)
 				}
 				kv.Set([]kvspace.KVPair{
@@ -579,7 +579,7 @@ func HandleScope(ctx context.Context, kv kvspace.KVSpace, pc, scopeName string) 
 func HandleScopeReturn(ctx context.Context, kv kvspace.KVSpace, pc string) string {
 	frameRoot := keytree.FrameRoot(pc)
 	parentPC := kvspace.GetOne(kv, keytree.ReturnPC(frameRoot)).String()
-	kv.UnLink(keytree.Stack(frameRoot))
+	kv.DelExtIndex(keytree.Stack(frameRoot))
 	kv.DelTree(frameRoot)
 	return parentPC
 }
