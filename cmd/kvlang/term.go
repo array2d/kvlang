@@ -17,11 +17,11 @@ func registerDefaultTerm(kv kvspace.KVSpace) {
 	kvspace.MkIndexRecursive(kv, h+"stderr/")
 	kvspace.MkIndexRecursive(kv, h+"stdin/")
 	kv.Set([]kvspace.KVPair{
-		{h + "stdout/type", kvspace.NewChar("file"), -1},
-		{h + "stdout/detail", kvspace.NewChar("/dev/stdout"), -1},
-		{h + "stderr/type", kvspace.NewChar("file"), -1},
-		{h + "stderr/detail", kvspace.NewChar("/dev/stderr"), -1},
-		{h + "stdin/type", kvspace.NewChar("file"), -1},
-		{h + "stdin/detail", kvspace.NewChar("/dev/stdin"), -1},
+		{h + "stdout/type", kvspace.NewStringByte([]byte("file")...), -1},
+		{h + "stdout/detail", kvspace.NewStringByte([]byte("/dev/stdout")...), -1},
+		{h + "stderr/type", kvspace.NewStringByte([]byte("file")...), -1},
+		{h + "stderr/detail", kvspace.NewStringByte([]byte("/dev/stderr")...), -1},
+		{h + "stdin/type", kvspace.NewStringByte([]byte("file")...), -1},
+		{h + "stdin/detail", kvspace.NewStringByte([]byte("/dev/stdin")...), -1},
 	})
 }

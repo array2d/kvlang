@@ -38,7 +38,7 @@ func debugNotifyPause(_ context.Context, kv kvspace.KVSpace, vtid, pc string, in
 		"frame": frameRoot,
 		"op":    inst.Opcode,
 	})
-	kv.Notify(keytree.VThreadDebuggerPause(vtid), kvspace.NewChar(string(event)))
+	kv.Notify(keytree.VThreadDebuggerPause(vtid), kvspace.NewStringByte([]byte(string(event))...))
 }
 
 // debugWaitResume 阻塞等待 /vthread/<vtid>/.debugger.resume 上的 Notify，
