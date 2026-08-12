@@ -491,8 +491,3 @@ func (p *parser) parseParamList(stop Kind) []ast.Param {
 
 // ParseFuncSig 将签名字符串解析为 ast.FuncSig（公开 API）。
 // 签名格式为 KV 中存储的 FuncSig.String() 输出：rwfunc name(A:t) -> (B:t)
-func ParseFuncSig(sig string) ast.FuncSig {
-	toks := Scan(sig)
-	p := &parser{tokens: toks}
-	return p.parseFuncSig()
-}

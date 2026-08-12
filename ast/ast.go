@@ -81,13 +81,6 @@ func (s FuncSig) NumReads() int32 { return int32(len(s.Params)) }
 func (s FuncSig) NumWrites() int32 { return int32(len(s.Returns)) }
 
 // ReturnNames 返回输出参数名列表。
-func (s FuncSig) ReturnNames() []string {
-	names := make([]string, len(s.Returns))
-	for i, p := range s.Returns {
-		names[i] = p.Name
-	}
-	return names
-}
 
 // ── 函数 ──────────────────────────────────────────────────────
 
