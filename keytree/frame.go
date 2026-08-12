@@ -1,8 +1,8 @@
 package keytree
 
 import (
-	"fmt"
 	"strings"
+	"fmt"
 )
 
 // ── 帧路径工具 ────────────────────────────────────────────────────
@@ -18,9 +18,6 @@ func frameMember(root, seg string) string { return Stack(root) + RuntimeMemberSe
 
 func Stack(root string) string { return strings.TrimRight(root, PathSegSep) + PathSegSep }
 func FrameRO(root string) string    { return frameMember(root, SegRO) }
-
-func RParam(root, name string) string { return frameMember(root, SegRParam) + PathSegSep + name }
-func WParam(root, name string) string { return frameMember(root, SegWParam) + PathSegSep + name }
 
 func CallPC(root string) string   { return frameMember(root, SegCallPC) }
 func ReturnPC(root string) string { return frameMember(root, SegReturnPC) }

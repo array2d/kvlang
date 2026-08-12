@@ -252,85 +252,8 @@ func HandleReturn(ctx context.Context, kv kvspace.KVSpace, pc string, inst *rwir
 // HandleLabel 创建或复用 label 帧。
 //   - 新 label：在当前帧下创建子帧（嵌套），写 .returnpc .callpc
 //   - TCO：若祖先链中存在同名 label，丢弃中间帧，跳回目标入口
-func HandleLabel(ctx context.Context, kv kvspace.KVSpace, pc, labelFullPath string) string {
-	vtid := keytree.VtidFromPC(pc)
-
-	// 解析 /lib/ 路径 → pkg + labelPath
-	var pkg, labelPath string
-	libPrefix := keytree.LibRoot + keytree.PathSegSep
-	if strings.HasPrefix(labelFullPath, libPrefix) {
-		rest := labelFullPath[len(libPrefix):]
-		if dot := strings.LastIndex(rest, keytree.MemberSep); dot > 0 {
-			pkg = rest[:dot]
-			labelPath = rest[dot+len(keytree.MemberSep):]
-		} else {
-			labelPath = rest
-		}
-	} else if dot := strings.LastIndex(labelFullPath, keytree.MemberSep); dot > 0 {
-		pkg = labelFullPath[:dot]
-		labelPath = labelFullPath[dot+len(keytree.MemberSep):]
-	} else {
-		labelPath = labelFullPath
-	}
-
-	// 取路径末段为 label 名
-	labelName := labelPath
-	if slash := strings.LastIndex(labelPath, keytree.PathSegSep); slash >= 0 {
-		labelName = labelPath[slash+len(keytree.PathSegSep):]
-	}
-
-	currentFrame := keytree.FrameRoot(pc)
-
-	// ── TCO：仅在 label 帧内搜索祖先链（不跨越 rwfunc 边界）──
-	if extKind(kv, currentFrame) == kvspace.KindRwfunc {
-		for f := currentFrame; f != ""; f = keytree.ParentFrame(f) {
-			if !kvspace.IsNone(kvspace.GetOne(kv, keytree.Stack(f)+keytree.SegLib)) {
-				break
-			}
-			trimmed := strings.TrimRight(f, keytree.PathSegSep)
-			lastSeg := trimmed[strings.LastIndex(trimmed, keytree.PathSegSep)+len(keytree.PathSegSep):]
-			if lastSeg == labelName {
-				// 找到目标 → 丢弃目标子帧，跳回入口
-				for d := currentFrame; d != f; d = keytree.ParentFrame(d) {
-					kv.DelExtIndex(keytree.Stack(d))
-					kv.DelTree(d)
-				}
-				kv.Set([]kvspace.KVPair{
-					{keytree.CallPC(f), kvspace.NewStringByte([]byte(keytree.ScopeEntryPC(f))...), -1},
-				})
-				return keytree.ScopeEntryPC(f)
-			}
-		}
-	}
-
-	// ── 新建 label 帧（当前帧下嵌套）─────────────────────────
-	labelFrame := currentFrame + "/" + labelName + "/"
-	kv.DelTree(labelFrame)
-	kvspace.MkIndexRecursive(kv, labelFrame)
-
-	labelKey := keytree.LibFunc(pkg, labelPath)
-	if err := kv.ExtIndex(keytree.Stack(labelFrame), labelKey+"/"); err != nil {
-		vthread.SetError(ctx, kv, vtid, pc, "RuntimeError: label overlay failed: "+err.Error())
-		return ""
-	}
-
-	kv.Set([]kvspace.KVPair{
-		{keytree.ReturnPC(labelFrame), kvspace.NewStringByte([]byte(rwir.NextPC(pc))...), -1},
-		{keytree.CallPC(labelFrame), kvspace.NewStringByte([]byte(keytree.ScopeEntryPC(labelFrame))...), -1},
-	})
-	return keytree.ScopeEntryPC(labelFrame)
-}
 
 // RegisterBlocks 为函数体内所有 BlockStmt label 注册 label 签名（XValue kind=label）。
-func RegisterBlocks(kv kvspace.KVSpace, pkg, parent string, body []ast.Stmt) {
-	for _, st := range body {
-		if b, ok := st.(*ast.ScopeStmt); ok {
-			blockKey := keytree.LibFunc(pkg, parent+"/"+b.Label)
-			kv.Set([]kvspace.KVPair{{blockKey, kvspace.NewRwfunc(0, 0, 0), -1}})
-			RegisterBlocks(kv, pkg, parent+"/"+b.Label, b.Body)
-		}
-	}
-}
 
 // Bootstrap 为 vthread 的顶层入口函数建立虚线程根帧。
 func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, args []string) string {
@@ -392,12 +315,6 @@ func countDirectInsts(body []ast.Stmt) int32 {
 }
 
 // WriteRwir 将 rwir 声明写入 /lib/<pkg>/<name>，kind="rwir"，无指令体。
-func WriteRwir(kv kvspace.KVSpace, pkg string, decl *ast.RwirDecl) {
-	kv.DelTree(keytree.LibFunc(pkg, decl.Sig.Name))
-	kv.Set([]kvspace.KVPair{
-		{keytree.LibFunc(pkg, decl.Sig.Name), kvspace.NewRwir(decl.Sig.NumReads(), decl.Sig.NumWrites(), decl.SigString()), -1},
-	})
-}
 
 // WriteFunc 写函数到 /lib/ 下。
 //
@@ -513,22 +430,6 @@ func frameSlotKey(frameRoot, slot string) string {
 }
 
 // extKind 读帧根 extindex target 的 XValue.Kind()：rwfunc=函数帧，label=label 帧。
-func extKind(kv kvspace.KVSpace, frameRoot string) string {
-	trimmed := strings.TrimRight(frameRoot, keytree.PathSegSep)
-	if trimmed == "" || trimmed == keytree.PathSegSep {
-		return ""
-	}
-	parent, dirName := kvspace.SepPath(trimmed)
-	if parent != keytree.PathSegSep {
-		parent += kvspace.DirIndexSuf
-	}
-	extVal := kv.Get(parent, []string{dirName + kvspace.DirIndexSuf}, true, -1)[0]
-	extHead := kvspace.DecodeXValueHead(extVal.Encode()); extTarget := kvspace.DecodeExtIndex(extHead.Raw).ExtPath()
-	if extTarget == "" {
-		return ""
-	}
-	return kvspace.GetOne(kv, strings.TrimRight(extTarget, keytree.PathSegSep)).Kind()
-}
 
 // ExtKind 判断帧类型：有 .lib → rwfunc；否则 → scope 或空。
 func ExtKind(kv kvspace.KVSpace, frameRoot string) string {
@@ -578,15 +479,3 @@ func HandleScopeReturn(ctx context.Context, kv kvspace.KVSpace, pc string) strin
 	return parentPC
 }
 
-func checkDupParams(sig ast.FuncSig, funcName string) string {
-	seen := map[string]bool{}
-	for _, p := range sig.ParamNames() {
-		if seen[p] { return fmt.Sprintf("func %s: duplicate read-param %q", funcName, p) }
-		seen[p] = true
-	}
-	for _, r := range sig.Returns {
-		if seen[r.Name] { return fmt.Sprintf("func %s: param %q appears in both read-params and write-params", funcName, r.Name) }
-		seen[r.Name] = true
-	}
-	return ""
-}

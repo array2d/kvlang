@@ -126,11 +126,3 @@ func _loadFile(kv kvspace.KVSpace, f string, anyCode *bool, loaded map[string]bo
 	if len(df.InitBody) > 0 || len(df.TopLevelCalls) > 0 { *anyCode = true }
 }
 
-func makeInitFunc(calls []*ast.Instruction) *ast.Func {
-	body := make([]ast.Stmt, len(calls))
-	for i, inst := range calls {
-		body[i] = inst
-	}
-	initFn := ast.Func{Sig: ast.FuncSig{Name: "init"}, Body: body}
-	return lower.Func(&initFn)
-}

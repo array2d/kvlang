@@ -45,14 +45,10 @@ func VtidFromPC(pc string) string {
 	return rest
 }
 
+
 func VThreadSlot(vtid, frame string, i, j int) string {
 	if frame == "" {
-		return fmt.Sprintf(VthreadRoot+PathSegSep+"%s/[%d,%d]", vtid, i, j)
+		return fmt.Sprintf("/vthread/%s/[%d,%d]", vtid, i, j)
 	}
-	return fmt.Sprintf(VthreadRoot+PathSegSep+"%s/%s/[%d,%d]", vtid, frame, i, j)
-}
-
-func VThreadFrame(vtid, frame string) string {
-	if frame == "" { return VThread(vtid) }
-	return VThread(vtid) + PathSegSep + frame
+	return fmt.Sprintf("/vthread/%s/%s/[%d,%d]", vtid, frame, i, j)
 }
