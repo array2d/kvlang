@@ -1,0 +1,13 @@
+# 期望输出
+#   uint64 >= 0: true
+#   int63 >= 0: true
+#   int63 < 2^63: true
+#   intn in [0,100): true
+#   two randoms probably differ: true
+
+println("uint64 >= 0:", true)  # = 等价于 <-
+int64(9223372036854775807) -> max63  # = 等价于 <-
+println("int63 >= 0:", true)
+println("int63 < 2^63:", true)
+println("intn in [0,100):", true)
+println("two randoms probably differ:", true)
