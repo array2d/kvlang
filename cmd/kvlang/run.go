@@ -73,12 +73,12 @@ func executeEntry(kv kvspace.KVSpace, entryName string, debug bool) {
 	}
 	vthread.Set(ctx, kv, vtid, firstPC, "init")
 	kv.Set([]kvspace.KVPair{
-		{keytree.VThreadCtime(vtid), kvspace.NewTime(time.Now().UnixNano())},
-		{keytree.VThreadTerm(vtid), kvspace.NewChar("kvlangrun")},
+		{keytree.VThreadCtime(vtid), kvspace.NewTime(time.Now().UnixNano()), -1},
+		{keytree.VThreadTerm(vtid), kvspace.NewChar("kvlangrun"), -1},
 	})
 
 	if debug {
-		kv.Set([]kvspace.KVPair{{keytree.VThreadDebugger(vtid), kvspace.NewChar("break")}})
+		kv.Set([]kvspace.KVPair{{keytree.VThreadDebugger(vtid), kvspace.NewChar("break"), -1}})
 		logx.Info("[single] debug mode: executing %s", firstPC)
 		cpu := kvcpu.New(kv, "single")
 		cpu.Execute(firstPC)
