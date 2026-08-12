@@ -59,7 +59,7 @@ func resolveParam(ctx context.Context, kv kvspace.KVSpace, vtid, param string) P
 	ref.Key = resolvedKey
 	val := kvspace.GetOne(kv, resolvedKey)
 	var meta map[string]interface{}
-	if json.Unmarshal([]byte(val.String()), &meta) != nil {
+	if json.Unmarshal([]byte(val.ValueString()), &meta) != nil {
 		return ref
 	}
 	if dtype, ok := meta["dtype"].(string); ok {

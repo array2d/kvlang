@@ -53,7 +53,7 @@ func Select(ctx context.Context, kv kvspace.KVSpace, opcode string) (backend, n 
 			continue
 		}
 		var info instInfo
-		if json.Unmarshal([]byte(val.String()), &info) != nil {
+		if json.Unmarshal([]byte(val.ValueString()), &info) != nil {
 			logx.Debug("Select: unmarshal %s/%s: invalid", backend, child)
 			continue
 		}

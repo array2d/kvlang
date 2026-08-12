@@ -48,7 +48,7 @@ func Decode(ctx context.Context, kv kvspace.KVSpace, linkBase, pc string) (*Rwir
 
 	r := &Rwir{}
 	if !kvspace.IsNone(vals[0]) {
-		r.Opcode = vals[0].String()
+		r.Opcode = vals[0].ValueString()
 	}
 	truncated := false
 	for i := 1; i <= maxParams; i++ {
@@ -56,13 +56,13 @@ func Decode(ctx context.Context, kv kvspace.KVSpace, linkBase, pc string) (*Rwir
 		writeIdx := readIdx + 1
 		if readIdx < len(vals) {
 			if !kvspace.IsNone(vals[readIdx]) {
-				r.Reads = append(r.Reads, Param{Name: vals[readIdx].String(), Val: vals[readIdx]})
+				r.Reads = append(r.Reads, Param{Name: vals[readIdx].ValueString(), Val: vals[readIdx]})
 				if i == maxParams { truncated = true }
 			}
 		}
 		if writeIdx < len(vals) {
 			if !kvspace.IsNone(vals[writeIdx]) {
-				r.Writes = append(r.Writes, Param{Name: vals[writeIdx].String(), Val: vals[writeIdx]})
+				r.Writes = append(r.Writes, Param{Name: vals[writeIdx].ValueString(), Val: vals[writeIdx]})
 				if i == maxParams { truncated = true }
 			}
 		}
