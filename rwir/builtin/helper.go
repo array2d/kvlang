@@ -54,7 +54,7 @@ func readInputs(f *rwir.Frame) []kvspace.XValue {
 func writeResult(f *rwir.Frame, result kvspace.XValue) error {
 	if len(f.Inst.Writes) > 0 {
 		key := resolveWriteSlot(f.KV, keytree.FrameRoot(f.PC), f.Inst.Writes[0].Name)
-		if err := f.KV.Set([]kvspace.KVPair{{key, result, -1}}); err != nil {
+		if err := f.KV.Set([]kvspace.KVPair{{Key: key, Val: result}}); err != nil {
 			return err
 		}
 	}
@@ -135,7 +135,7 @@ func ExecuteCopy(kv kvspace.KVSpace, vtid, pc string, inst *rwir.Rwir) error {
 	v := resolveReadValue(kv, framePath, inst.Reads[0])
 	for _, w := range inst.Writes {
 		key := resolveWriteSlot(kv, framePath, w.Name)
-		if err := kv.Set([]kvspace.KVPair{{key, v, -1}}); err != nil {
+		if err := kv.Set([]kvspace.KVPair{{Key: key, Val: v}}); err != nil {
 			return err
 		}
 	}

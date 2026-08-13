@@ -86,31 +86,22 @@ func xvalueAt(v kvspace.XValue, i int) kvspace.XValue {
 	case kvspace.Float64: return kvspace.NewFloat64(v.At(i))
 	case kvspace.Bool: return kvspace.NewBool(v.At(i))
 	default:
-		raw := v.Encode()
-		kl := int(raw[0])
-		start := 1 + kl + 8
+		data := v.Encode()
+		start := int(kvspace.DecodeXValueHead(data).HeadLen())
 		for j := 0; j < i; j++ {
-			h := kvspace.DecodeXValueHead(raw[start:])
+			h := kvspace.DecodeXValueHead(data[start:])
 			if h.Kind == "" {
 				return kvspace.None{}
 			}
-			start += int(h.HeadLen())
+			start += int(h.HeadLen()) + int(h.BodyLen)
 		}
-		return kvspace.DecodeXValueHead(raw[start:]).Decode()
+		return kvspace.DecodeXValue(data[start:])
 	}
 }
 
-// rawBytesOf 返回 XValue 的原始字节（不通过 TLV 解码）。
+// rawBytesOf 返回 XValue 的 body 原始字节。
 func rawBytesOf(v kvspace.XValue) []byte {
-	switch v := v.(type) {
-	case kvspace.Int8, kvspace.Int16, kvspace.Int32, kvspace.Int64,
-		kvspace.Uint8, kvspace.Uint16, kvspace.Uint32, kvspace.Uint64,
-		kvspace.Float32, kvspace.Float64, kvspace.Bool,  kvspace.Time, kvspace.Duration:
-		return v.Encode()[1+len(v.Kind())+1+8:]
-	default:
-		h := kvspace.DecodeXValueHead(v.Encode())
-		return h.Raw
-	}
+	return kvspace.BodyBytes(v)
 }
 
 // formatArray 格式化 len>1 的 XValue。

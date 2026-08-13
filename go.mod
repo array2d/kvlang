@@ -13,3 +13,4 @@ require (
 	github.com/redis/go-redis/v9 v9.7.0 // indirect
 )
 
+replace github.com/array2d/kvspace-go v0.1.0 => ../kvspace-go

@@ -12,7 +12,7 @@ func Bytes(v kvspace.XValue) []byte {
 	if v.Kind() != kvspace.KindStringByte {
 		panic("utf8.Bytes: expected stringbyte, got " + v.Kind())
 	}
-	return v.Encode()[1+len(v.Kind())+1+4+4:]
+	return kvspace.BodyBytes(v)
 }
 
 // String decodes UTF-8 bytes to a Go string.

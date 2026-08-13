@@ -63,13 +63,13 @@ func writeStmt(kv kvspace.KVSpace, st ast.Stmt, prefix string, idx *int, typeMap
 		}
 		pairs := make([]kvspace.KVPair, 0, 1+len(reads)+len(s.Writes))
 		if opcode != "" {
-			pairs = append(pairs, kvspace.KVPair{fmt.Sprintf("%s/[%d,0]", prefix, n), slotValue(opcode, typeMap), -1})
+			pairs = append(pairs, kvspace.KVPair{Key: fmt.Sprintf("%s/[%d,0]", prefix, n), Val: slotValue(opcode, typeMap)})
 		}
 		for j, r := range reads {
-			pairs = append(pairs, kvspace.KVPair{fmt.Sprintf("%s/[%d,-%d]", prefix, n, j+1), slotValue(r, typeMap), -1})
+			pairs = append(pairs, kvspace.KVPair{Key: fmt.Sprintf("%s/[%d,-%d]", prefix, n, j+1), Val: slotValue(r, typeMap)})
 		}
 		for j, w := range s.Writes {
-			pairs = append(pairs, kvspace.KVPair{fmt.Sprintf("%s/[%d,%d]", prefix, n, j+1), slotValue(w, typeMap), -1})
+			pairs = append(pairs, kvspace.KVPair{Key: fmt.Sprintf("%s/[%d,%d]", prefix, n, j+1), Val: slotValue(w, typeMap)})
 		}
 		if len(pairs) > 0 {
 			kv.Set(pairs)
@@ -105,13 +105,13 @@ func writeStmtScope(kv kvspace.KVSpace, st ast.Stmt, scopePrefix string, idx *in
 		}
 		pairs := make([]kvspace.KVPair, 0, 1+len(reads)+len(s.Writes))
 		if opcode != "" {
-			pairs = append(pairs, kvspace.KVPair{fmt.Sprintf("%s[%d,0]", scopePrefix, n), slotValue(opcode, typeMap), -1})
+			pairs = append(pairs, kvspace.KVPair{Key: fmt.Sprintf("%s[%d,0]", scopePrefix, n), Val: slotValue(opcode, typeMap)})
 		}
 		for j, r := range reads {
-			pairs = append(pairs, kvspace.KVPair{fmt.Sprintf("%s[%d,-%d]", scopePrefix, n, j+1), slotValue(r, typeMap), -1})
+			pairs = append(pairs, kvspace.KVPair{Key: fmt.Sprintf("%s[%d,-%d]", scopePrefix, n, j+1), Val: slotValue(r, typeMap)})
 		}
 		for j, w := range s.Writes {
-			pairs = append(pairs, kvspace.KVPair{fmt.Sprintf("%s[%d,%d]", scopePrefix, n, j+1), slotValue(w, typeMap), -1})
+			pairs = append(pairs, kvspace.KVPair{Key: fmt.Sprintf("%s[%d,%d]", scopePrefix, n, j+1), Val: slotValue(w, typeMap)})
 		}
 		if len(pairs) > 0 {
 			kv.Set(pairs)
@@ -186,9 +186,9 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *rwir.R
 
 	// 系统变量
 	kv.Set([]kvspace.KVPair{
-		{keytree.ReturnPC(frameRoot), kvspace.NewStringByte([]byte(rwir.NextPC(pc))...), -1},
-		{keytree.CallPC(frameRoot), kvspace.NewStringByte([]byte(keytree.EntryPC(frameRoot))...), -1},
-		{keytree.Stack(frameRoot) + keytree.SegLib, kvspace.NewStringByte([]byte(funcKey)...), -1},
+		{Key: keytree.ReturnPC(frameRoot), Val: kvspace.NewStringByte([]byte(rwir.NextPC(pc))...)},
+		{Key: keytree.CallPC(frameRoot), Val: kvspace.NewStringByte([]byte(keytree.EntryPC(frameRoot))...)},
+		{Key: keytree.Stack(frameRoot) + keytree.SegLib, Val: kvspace.NewStringByte([]byte(funcKey)...)},
 	})
 
 	// 读参：写 caller arg 地址到 frameRoot/[0,-j]
@@ -204,10 +204,10 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *rwir.R
 					rk = fmt.Sprintf("%s/._lit%d", callerFrameRoot, litSeq)
 					litSeq++
 				}
-				argPairs = append(argPairs, kvspace.KVPair{rk, arg.Val, -1})
+				argPairs = append(argPairs, kvspace.KVPair{Key: rk, Val: arg.Val})
 			}
 			if rk != "" {
-				argPairs = append(argPairs, kvspace.KVPair{slot, kvspace.NewStringByte([]byte(rk)...), -1})
+				argPairs = append(argPairs, kvspace.KVPair{Key: slot, Val: kvspace.NewStringByte([]byte(rk)...)})
 			}
 		}
 	}
@@ -217,7 +217,7 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *rwir.R
 		if i < len(inst.Writes) {
 			wk := resolveReadPath(kv, callerFrameRoot, inst.Writes[i].Name)
 			if wk != "" {
-				argPairs = append(argPairs, kvspace.KVPair{slot, kvspace.NewStringByte([]byte(wk)...), -1})
+				argPairs = append(argPairs, kvspace.KVPair{Key: slot, Val: kvspace.NewStringByte([]byte(wk)...)})
 			}
 		}
 	}
@@ -282,8 +282,8 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 	}
 
 	kv.Set([]kvspace.KVPair{
-		{keytree.CallPC(vthreadRoot), kvspace.NewStringByte([]byte(keytree.EntryPC(vthreadRoot))...), -1},
-		{keytree.Stack(vthreadRoot) + keytree.SegLib, kvspace.NewStringByte([]byte(funcKey)...), -1},
+		{Key: keytree.CallPC(vthreadRoot), Val: kvspace.NewStringByte([]byte(keytree.EntryPC(vthreadRoot))...)},
+		{Key: keytree.Stack(vthreadRoot) + keytree.SegLib, Val: kvspace.NewStringByte([]byte(funcKey)...)},
 	})
 
 	if len(args) > 0 {
@@ -291,7 +291,7 @@ func Bootstrap(ctx context.Context, kv kvspace.KVSpace, vtid, funcName string, a
 		for i := 0; i < nr && i < len(args); i++ {
 			slot := fmt.Sprintf("%s[0,-%d]", vthreadRoot+keytree.PathSegSep, i+1)
 			pairs = append(pairs,
-				kvspace.KVPair{slot, builtin.ResolveReadValue(kv, "", rwir.Param{Name: args[i]}), -1},
+				kvspace.KVPair{Key: slot, Val: builtin.ResolveReadValue(kv, "", rwir.Param{Name: args[i]})},
 			)
 		}
 		if len(pairs) > 0 {
@@ -333,17 +333,17 @@ func WriteFunc(kv kvspace.KVSpace, pkg string, fn *ast.Func) {
 
 	nr, nw := fn.Sig.NumReads(), fn.Sig.NumWrites()
 	pairs := []kvspace.KVPair{
-		{funcDir + "/[0,0]", kvspace.NewRwfunc(countDirectInsts(fn.Body), nr, nw), -1},
-		{keytree.LibSrc(pkg, fn.Sig.Name), kvspace.NewStringByte([]byte(fn.FullText())...), -1},
+		{Key: funcDir + "/[0,0]", Val: kvspace.NewRwfunc(countDirectInsts(fn.Body), nr, nw)},
+		{Key: keytree.LibSrc(pkg, fn.Sig.Name), Val: kvspace.NewStringByte([]byte(fn.FullText())...)},
 	}
 
 	for i, p := range fn.Sig.Params {
 		slot := fmt.Sprintf("[0,-%d]", i+1)
-		pairs = append(pairs, kvspace.KVPair{Key: funcDir + "/" + p.Name, Val: kvspace.NewPtr(kvspace.KindStringByte, slot, 1), Arridx: -1})
+		pairs = append(pairs, kvspace.KVPair{Key: funcDir + "/" + p.Name, Val: kvspace.NewPtr(kvspace.KindStringByte, slot, 1)})
 	}
 	for i, r := range fn.Sig.Returns {
 		slot := fmt.Sprintf("[0,%d]", i+1)
-		pairs = append(pairs, kvspace.KVPair{Key: funcDir + "/" + r.Name, Val: kvspace.NewPtr(kvspace.KindStringByte, slot, 1), Arridx: -1})
+		pairs = append(pairs, kvspace.KVPair{Key: funcDir + "/" + r.Name, Val: kvspace.NewPtr(kvspace.KindStringByte, slot, 1)})
 	}
 	kv.Set(pairs)
 	WriteBody(kv, pkg, fn.Sig.Name, fn.Body, typeMap, 1) // 指令从 [1,0] 开始
@@ -460,12 +460,12 @@ func HandleScope(ctx context.Context, kv kvspace.KVSpace, pc, scopeName string) 
 	if !exists {
 		kvspace.MkIndexRecursive(kv, scopeFrame)
 		kv.Set([]kvspace.KVPair{
-			{keytree.ReturnPC(scopeFrame), kvspace.NewStringByte([]byte(rwir.NextPC(pc))...), -1},
+			{Key: keytree.ReturnPC(scopeFrame), Val: kvspace.NewStringByte([]byte(rwir.NextPC(pc))...)},
 		})
 	}
 	// callpc 每次更新，returnpc 仅首次设置（保持原始返回路径）
 	kv.Set([]kvspace.KVPair{
-		{keytree.CallPC(scopeFrame), kvspace.NewStringByte([]byte(keytree.ScopeEntryPC(scopeFrame))...), -1},
+		{Key: keytree.CallPC(scopeFrame), Val: kvspace.NewStringByte([]byte(keytree.ScopeEntryPC(scopeFrame))...)},
 	})
 	return keytree.ScopeEntryPC(scopeFrame)
 }

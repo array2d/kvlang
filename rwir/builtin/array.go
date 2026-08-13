@@ -20,6 +20,8 @@ func init() {
 	Register("set",   "", arraySetOp{})
 	Register("has",   "", hasOp{})
 	Register("sort",  "", sortOp{})
+	Register("scatter", "", scatterOp{})
+	Register("compact", "", compactOp{})
 }
 
 // arrayOp: [e1, e2, ...] → typed array XValue。
@@ -49,7 +51,7 @@ func (arrayOp) Call(f *rwir.Frame) error {
 		}
 	}
 	arr := packTypedArray(targetKind, inputs)
-	f.KV.Set([]kvspace.KVPair{{outKey, arr, -1}})
+	f.KV.Set([]kvspace.KVPair{{Key: outKey, Val: arr}})
 	vthread.Set(bg, f.KV, f.Vtid, rwir.NextPC(f.PC), "running")
 	return nil
 }
@@ -142,7 +144,7 @@ func (atOp) Call(f *rwir.Frame) error {
 		return fmt.Errorf("%s", msg)
 	}
 	idx := int(asInt64(inputs[1]))
-	// 同构数组：零拷贝读 raw[arridx]
+	// 同构数组：整读后内存内下标
 	if kvspace.ElemSize(inputs[0].Kind()) > 0 {
 		elem := typedIndex(inputs[0], idx)
 		return writeResult(f, elem)
@@ -172,18 +174,33 @@ func (atOp) Call(f *rwir.Frame) error {
 
 
 
-// arridxSet 零拷贝写入 raw[arridx] 位置的元素。
-func arridxSet(f *rwir.Frame, slotName string, arridx int32, val kvspace.XValue) {
+// setElem 整存整取：读整个数组，内存内改 idx 元素，写回整个数组。
+func setElem(f *rwir.Frame, slotName string, idx int32, val kvspace.XValue) {
 	fp := keytree.FrameRoot(f.PC)
 	rwRoot := funcFrameRoot(f.KV, fp)
-	if ptrVal := kvspace.GetOne(f.KV, keytree.Stack(rwRoot)+slotName); kvspace.IsPtr(ptrVal) {
+	key := keytree.Stack(rwRoot) + slotName
+	if ptrVal := kvspace.GetOne(f.KV, key); kvspace.IsPtr(ptrVal) {
 		argAddr := kvspace.GetOne(f.KV, keytree.Stack(rwRoot)+kvspace.PtrTarget(ptrVal))
 		if !kvspace.IsNone(argAddr) {
-			f.KV.Set([]kvspace.KVPair{{argAddr.ValueString(), val, arridx}})
-			return
+			key = argAddr.ValueString()
 		}
 	}
-	f.KV.Set([]kvspace.KVPair{{keytree.Stack(rwRoot) + slotName, val, arridx}})
+	arr := kvspace.GetOne(f.KV, key)
+	if kvspace.IsNone(arr) {
+		return
+	}
+	f.KV.Set([]kvspace.KVPair{{Key: key, Val: setArrayElem(arr, int(idx), val)}})
+}
+
+// setArrayElem 返回将 arr 第 idx 元素替换为 val 后的副本（同构定长数组，val 按 kind 窄化）。
+func setArrayElem(arr kvspace.XValue, idx int, val kvspace.XValue) kvspace.XValue {
+	kind := arr.Kind()
+	es := int(kvspace.ElemSize(kind))
+	body := kvspace.BodyBytes(arr)
+	newBody := make([]byte, len(body))
+	copy(newBody, body)
+	copy(newBody[idx*es:], kindBytes(kind, val))
+	return rawDecodeN(kind, newBody, int32(len(newBody)/es))
 }
 
 // typedIndex 用同构数组的 arraylength + 定长偏移读取元素（回退路径）。
@@ -235,11 +252,11 @@ func (arraySetOp) Call(f *rwir.Frame) error {
 		funcFrame := funcFrameRoot(f.KV, fp)
 		base := resolveBasePath(f.KV, fp, funcFrame, f.Inst.Reads[0])
 		path := keytree.Member(base, kvKey(inputs[1]))
-		f.KV.Set([]kvspace.KVPair{{path, inputs[2], -1}})
+		f.KV.Set([]kvspace.KVPair{{Key: path, Val: inputs[2]}})
 		if len(f.Inst.Writes) > 0 && !kvspace.IsNone(inputs[0]) {
 			// 写入 base 本身（值不变），满足 -> base 返回槽
 			outKey := writeSlotKey(f.KV, fp, f.Inst.Writes[0].Name)
-			f.KV.Set([]kvspace.KVPair{{outKey, inputs[0], -1}})
+			f.KV.Set([]kvspace.KVPair{{Key: outKey, Val: inputs[0]}})
 		}
 		vthread.Set(bg, f.KV, f.Vtid, rwir.NextPC(f.PC), "running")
 		return nil
@@ -256,9 +273,9 @@ func (arraySetOp) Call(f *rwir.Frame) error {
 		return fmt.Errorf("%s", msg)
 	}
 	idx := int(asInt64(inputs[1]))
-	// 同构数组：零拷贝写入 raw[arridx]
+	// 同构数组：整存整取写入元素
 	if kvspace.ElemSize(arr.Kind()) > 0 {
-		arridxSet(f, f.Inst.Reads[0].Name, int32(idx), inputs[2])
+		setElem(f, f.Inst.Reads[0].Name, int32(idx), inputs[2])
 		vthread.Set(bg, f.KV, f.Vtid, rwir.NextPC(f.PC), "running")
 		return nil
 	}
@@ -309,6 +326,52 @@ func (hasOp) Call(f *rwir.Frame) error {
 	key := kvKey(inputs[1])
 	v := kvspace.GetOne(f.KV, keytree.Member(base, key))
 	return writeResult(f, kvspace.NewBool(!kvspace.IsNone(v)))
+}
+
+// scatterOp: 解压 []type -> <>type。紧凑数组 arr（一个 packed body）拆成 arr<0>..arr<N-1> 标量 key，删除 arr。
+type scatterOp struct{}
+func (scatterOp) Call(f *rwir.Frame) error {
+	inputs := readInputs(f)
+	if len(inputs) == 0 || kvspace.IsNone(inputs[0]) || kvspace.ElemSize(inputs[0].Kind()) <= 0 {
+		return writeResult(f, kvspace.None{})
+	}
+	arr := inputs[0]
+	fp := keytree.FrameRoot(f.PC)
+	base := resolveWriteSlot(f.KV, fp, f.Inst.Reads[0].Name)
+	n := int(arr.ArrayLen())
+	pairs := make([]kvspace.KVPair, 0, n)
+	for i := 0; i < n; i++ {
+		pairs = append(pairs, kvspace.KVPair{Key: fmt.Sprintf("%s<%d>", base, i), Val: typedIndex(arr, i)})
+	}
+	if len(pairs) > 0 {
+		f.KV.Set(pairs)
+		f.KV.Del(base)
+	}
+	return writeResult(f, arr)
+}
+
+// compactOp: 压缩 <>type -> []type。arr<0>..arr<N-1> 标量 key 打包成紧凑数组 arr（一个 packed body），删除 item key。
+type compactOp struct{}
+func (compactOp) Call(f *rwir.Frame) error {
+	fp := keytree.FrameRoot(f.PC)
+	base := resolveWriteSlot(f.KV, fp, f.Inst.Reads[0].Name)
+	var elems []kvspace.XValue
+	for i := 0; ; i++ {
+		v := kvspace.GetOne(f.KV, fmt.Sprintf("%s<%d>", base, i))
+		if kvspace.IsNone(v) {
+			break
+		}
+		elems = append(elems, v)
+	}
+	if len(elems) == 0 {
+		return writeResult(f, kvspace.None{})
+	}
+	arr := packTypedArray(elems[0].Kind(), elems)
+	f.KV.Set([]kvspace.KVPair{{Key: base, Val: arr}})
+	for i := range elems {
+		f.KV.Del(fmt.Sprintf("%s<%d>", base, i))
+	}
+	return writeResult(f, arr)
 }
 
 func kvKey(v kvspace.XValue) string {
