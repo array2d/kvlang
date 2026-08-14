@@ -45,6 +45,22 @@ func asInt64(v kvspace.XValue) int64 {
 	}
 }
 
+// asUint64 coerces an unsigned numeric Value to uint64（位保真，不回绕）。
+func asUint64(v kvspace.XValue) uint64 {
+	switch v := v.(type) {
+	case kvspace.Uint8:
+		return uint64(v.At(0))
+	case kvspace.Uint16:
+		return uint64(v.At(0))
+	case kvspace.Uint32:
+		return uint64(v.At(0))
+	case kvspace.Uint64:
+		return v.At(0)
+	default:
+		panic("asUint64: cannot coerce " + v.Kind() + " to uint64 — expected unsigned kind")
+	}
+}
+
 // AsBool coerces a Value to bool.
 func AsBool(v kvspace.XValue) bool {
 	if v.Kind() != "bool" {
