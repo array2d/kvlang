@@ -40,7 +40,7 @@ rwfunc main() -> () {
 
 	t1 <- time.now()
 	delta <- time.sub(t1, t0)
-	ns <- time.duration.as_nanos(delta)
+	ns <- time/duration.as_nanos(delta)
 	println("__bench_ns:", ns)
 }
 
