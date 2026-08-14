@@ -49,7 +49,7 @@ appendonly.aof
 # ── Project-specific ─────────────────────────────────
 /tmp/
 /post/
-kvlang
+/kvlang
 
 # Tool config
 .omc/
