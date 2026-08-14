@@ -1,4 +1,4 @@
-package device
+package term
 
 import (
 	"fmt"

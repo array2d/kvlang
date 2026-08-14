@@ -88,3 +88,17 @@ func IsNativeRwir(opcode string) bool {
 	_, ok := rwirregistry[opcode]
 	return ok
 }
+
+// globalRwir 记录全局 rwir（不随 lib 命名空间），由 rwirext 通过 RegisterGlobalRwir 注册。
+var globalRwir = map[string]bool{}
+
+// RegisterGlobalRwir 标记 opcode 为全局 rwir（layout 不补 pkg 前缀）。
+func RegisterGlobalRwir(opcode string) { globalRwir[opcode] = true }
+
+// IsGlobalRwir 判断 opcode 是否为全局 rwir。
+func IsGlobalRwir(opcode string) bool { return globalRwir[opcode] }
+
+// ResolveWriteSlot 解析写槽名为 KV key（供 kvcpu handoff 回写结果）。
+func ResolveWriteSlot(kv kvspace.KVSpace, framePath, name string) string {
+	return resolveWriteSlot(kv, framePath, name)
+}

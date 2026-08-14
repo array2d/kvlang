@@ -1,0 +1,38 @@
+# json: json.to / json.from 外部执行器（rwirext）—— KV 子树 ↔ JSON
+# extern: 需先启动 redis 与 json rwirext 两个外部进程
+#   1) make kvspace                                           # 起 redis 并清空 kvspace
+#   2) go build -o /tmp/json-rwirext ./rwirext/json/cmd/ && /tmp/json-rwirext &
+#   3) ./kvlang tutorial/10-rwirext/json.kv
+# 语义: json.to(rootkey) 把 rootkey 整棵子树读成 map[string]any 再 json.Marshal；
+#       json.from(json) 反序列化 JSON 写回子树。目录→嵌套对象；连续数组（[]T）与
+#       散 key 数组（<>T，name<0>..name<N-1>）统一序列化为 JSON 数组。
+# 期望输出:
+#   j = {"active":true,"age":42,"cont":[10,20,30],"grp":{"c":1,"d":2},"name":"alice","scat":[10,20,30],"score":3.14}
+#   name = alice
+#   c = 1
+#   cont = [10, 20, 30]
+#   scat = [10, 20, 30]
+#   len = 3 3
+rwfunc main() -> () {
+	42 -> /data/age
+	"alice" -> /data/name
+	3.14 -> /data/score
+	true -> /data/active
+	1 -> /data/grp/c
+	2 -> /data/grp/d
+	a:[]int64 = [10, 20, 30]
+	[10, 20, 30] -> /data/cont
+	scatter(a) -> /data/scat
+	json.to(/data) -> j
+	println("j =", j)
+	json.from(j) -> /data2
+	println("name =", /data2/name)
+	println("c =", /data2/grp/c)
+	println("cont =", /data2/cont)
+	println("scat =", /data2/scat)
+	len(/data2/cont) -> n1
+	len(/data2/scat) -> n2
+	println("len =", n1, n2)
+}
+
+main()

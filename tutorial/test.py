@@ -56,6 +56,17 @@ def parse_expects(f: Path) -> list[str]:
     return pats
 
 
+def _needs_extern(f: Path) -> bool:
+    """文件头含 # extern 标记 = 需外部 rwirext（redis/独立进程），不参与 goheap 自动测试。"""
+    with open(f) as fh:
+        for line in fh:
+            if line.startswith("# extern"):
+                return True
+            if line and not line.startswith("#"):
+                return False
+    return False
+
+
 def _flush_redis() -> None:
     try:
         subprocess.run(
@@ -257,13 +268,17 @@ def main():
         print(f"{YELLOW}no .kv files found{NC}")
         sys.exit(0)
 
-    passed = failed = 0
+    passed = failed = skipped = 0
     failures: list[dict] = []
     for f in files:
+        rel = str(f.relative_to(ROOT))
+        if _needs_extern(f):
+            print(f"{YELLOW}⏭ {prefix} {rel}: needs external rwirext{NC}")
+            skipped += 1
+            continue
         expects = parse_expects(f)
         if not expects:
             continue
-        rel = str(f.relative_to(ROOT))
         try:
             if args.runtime == "rust":
                 ok, detail = _rust_test_file(f, expects, _SHM_ENV)
@@ -321,7 +336,7 @@ def main():
                 sys.exit(1)
 
     _write_csv(failures)
-    print(f"{YELLOW}══ {GREEN}PASS:{passed}{YELLOW}  {RED}FAIL:{failed}{YELLOW} ══{NC}")
+    print(f"{YELLOW}══ {GREEN}PASS:{passed}{YELLOW}  {RED}FAIL:{failed}{YELLOW}  SKIP:{skipped} ══{NC}")
     print(f"report: {FAIL_CSV}")
     sys.exit(0 if failed == 0 else 1)
 

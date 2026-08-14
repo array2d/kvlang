@@ -4,6 +4,9 @@ import (
 	"strings"
 	"context"
 	"fmt"
+	"strconv"
+	"sync/atomic"
+	"time"
 
 	"github.com/array2d/kvspace-go"
 	"kvlang/keytree"
@@ -22,11 +25,13 @@ const MaxStackDepth = 256
 
 // Execute 从绝对 PC 开始执行 vthread，直到完成、出错或 ctx 取消。
 //
-// Dispatch 优先级（全静态，无 KV 分类查询）：
+// Dispatch 优先级：
 //  1. IsControlOp   — call/return/br/goto 控制流原语
-//  2. IsNativeRwir    — +/-/*/print/sqrt 等标量内建算子
-//  3. tensor.*       — tensor 命名空间算子（op/dispatch）
-//  4. default       — 用户定义函数（rewrite as call）
+//  2. IsNativeRwir  — +/-/*/print/sqrt 等标量内建算子
+//  3. tensor.*      — tensor 命名空间算子（op/dispatch）
+//  4. isCopyOp      — 路径/字面量复制
+//  5. isUserRwir    — 用户声明的 rwir（查 /sys/rwir/<opcode>）→ 外部执行器 handoff
+//  6. default       — 用户定义函数（rewrite as call）
 //     ↓ HandleCall 内查 FuncIdx；未找到 → SetError
 //
 // 调试支持（内置，无需特殊启动）：
@@ -161,7 +166,11 @@ func (c *cpu) Execute(pc string) error {
 		case isCopyOp(inst.Opcode, inst.Writes):
 			execErr = builtin.ExecuteCopy(c.kv, vtid, pc, inst)
 
-		// ── 5. 用户定义函数（default → rewrite as call）─────────────────
+		// ── 5. 用户声明的 rwir（读写码）：/sys/rwir/<opcode> 存在 → 外部执行器 handoff ──
+		case isUserRwir(c.kv, inst.Opcode):
+			execErr = handoffExternalRwir(ctx, c.kv, vtid, pc, inst)
+
+		// ── 6. 用户定义函数（default → rewrite as call）─────────────────
 		//    不含 dot、不在任何静态集合 → 必然是用户 func
 		//    HandleCall 负责 FuncIdx 查找；未找到 → SetError
 		default:
@@ -193,6 +202,45 @@ func (c *cpu) Execute(pc string) error {
 // 值引用在读槽（bare ident / literal / /abs），由 ExecuteCopy → resolveReadValue 解析。
 func isCopyOp(opcode string, writes []rwir.Param) bool {
 	return symbol.Lookup(opcode).Word == "assign" && len(writes) > 0
+}
+
+// externalRwirTimeout 外部执行器完成 rwir 的等待超时。
+const externalRwirTimeout = 30 * time.Second
+
+// isUserRwir 判断 opcode 是否为扩展 rwir（读写码）：/sys/rwir/<opcode> 的 kind == "rwir"。
+// rwir 的唯一标准是 kind；不在 rwirregistry（native builtin）内的 rwir 即扩展 rwir。
+func isUserRwir(kv kvspace.KVSpace, opcode string) bool {
+	// 全路径 opcode（如 /lib/math.sum）是函数调用，不是 rwir
+	if strings.HasPrefix(opcode, "/") {
+		return false
+	}
+	v := kvspace.GetOne(kv, keytree.SysRwir(opcode))
+	return !kvspace.IsNone(v) && v.Kind() == kvspace.KindRwir
+}
+
+// handoffSeq 全局递增的 handoff 请求号，保证每次 .todo<vid> 的 id 唯一（循环里同一 pc 也唯一）。
+var handoffSeq int64
+
+// handoffExternalRwir 把当前 rwir 交给外部执行器：
+// 写 "pc|id" 到 /sys/rwir/<opcode>/.todo<vid>，再 watch /sys/rwir/<opcode>/.done<vid> == id。
+func handoffExternalRwir(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *rwir.Rwir) error {
+	base := keytree.SysRwir(inst.Opcode)
+	todoKey := base + "/.todo<" + vtid + ">"
+	doneKey := base + "/.done<" + vtid + ">"
+	id := strconv.FormatInt(atomic.AddInt64(&handoffSeq, 1), 10)
+	if err := kv.Set([]kvspace.KVPair{{Key: todoKey, Val: kvspace.NewCharByte([]byte(pc + "|" + id)...)}}); err != nil {
+		msg := fmt.Sprintf("RuntimeError: external rwir %s: todo write failed: %v", inst.Opcode, err)
+		vthread.SetError(ctx, kv, vtid, pc, msg)
+		return fmt.Errorf("%s", msg)
+	}
+	doneVal := kv.Watch(doneKey, kvspace.NewCharByte([]byte(id)...), externalRwirTimeout)
+	if kvspace.IsNone(doneVal) || doneVal.ValueString() != id {
+		msg := fmt.Sprintf("RuntimeError: external rwir %s timeout", inst.Opcode)
+		vthread.SetError(ctx, kv, vtid, pc, msg)
+		return fmt.Errorf("%s", msg)
+	}
+	vthread.Set(ctx, kv, vtid, rwir.NextPC(pc), "running")
+	return nil
 }
 
 // checkReadOnlyWrites 读参只读公理的运行期防线（fix-027）：

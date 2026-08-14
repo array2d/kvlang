@@ -49,7 +49,7 @@ func findEntryPrefix(kv kvspace.KVSpace, prefix string) string {
 func runFiles(dsn string, paths []string, debug bool) {
 	kv := kvspace.Conn(dsn)
 	defer kv.DisConn()
-	registerDefaultTerm(kv)
+	initDirs(kv)
 
 	var files []string
 	for _, p := range paths {
@@ -59,6 +59,7 @@ func runFiles(dsn string, paths []string, debug bool) {
 	}
 	if len(files) == 0 { logx.Fatal("no .kv files found") }
 
+	layoutAndRunStdlib(kv)
 	if !loadFunctions(kv, files) { return }
 	executeEntry(kv, findEntry(dsn), debug)
 }
@@ -66,7 +67,8 @@ func runFiles(dsn string, paths []string, debug bool) {
 func runCode(name string, rc io.Reader, dsn string, debug bool) {
 	kv := kvspace.Conn(dsn)
 	defer kv.DisConn()
-	registerDefaultTerm(kv)
+	initDirs(kv)
+	layoutAndRunStdlib(kv)
 
 	df, diags, err := parser.ParseCode(rc)
 	if err != nil { logx.Fatal("parse: %v", err) }
@@ -77,6 +79,9 @@ func runCode(name string, rc io.Reader, dsn string, debug bool) {
 		fpkg := df.Funcs[i].Pkg
 		if fpkg == "" { fpkg = df.Package }
 		layout.WriteFunc(kv, fpkg, lower.Func(&df.Funcs[i]))
+	}
+	for i := range df.RwirDecls {
+		layout.WriteRwirDecl(kv, &df.RwirDecls[i])
 	}
 	body := df.InitBody
 	for _, c := range df.TopLevelCalls { body = append(body, c) }

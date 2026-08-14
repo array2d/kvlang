@@ -61,6 +61,9 @@ func cmdLayout(args []string) {
 		layout.WriteFunc(kv, fpkg, lower.Func(&df.Funcs[i]))
 		anyCode = true
 	}
+	for i := range df.RwirDecls {
+		layout.WriteRwirDecl(kv, &df.RwirDecls[i])
+	}
 	body := df.InitBody
 	for _, c := range df.TopLevelCalls { body = append(body, c) }
 	if len(body) > 0 {
@@ -120,6 +123,9 @@ func _loadFile(kv kvspace.KVSpace, f string, anyCode *bool, loaded map[string]bo
 		if fpkg == "" { fpkg = df.Package }
 		layout.WriteFunc(kv, fpkg, lower.Func(&df.Funcs[i]))
 		*anyCode = true
+	}
+	for i := range df.RwirDecls {
+		layout.WriteRwirDecl(kv, &df.RwirDecls[i])
 	}
 	for _, st := range df.InitBody { *initBody = append(*initBody, st) }
 	for _, c := range df.TopLevelCalls { *initBody = append(*initBody, c) }

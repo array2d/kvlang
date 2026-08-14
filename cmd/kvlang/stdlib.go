@@ -72,4 +72,8 @@ func runStdlibInit(kv kvspace.KVSpace, funcName string) {
 	cpu := kvcpu.New(kv, "stdlib")
 	cpu.Execute(firstPC)
 	kv.DelTree(keytree.VThread(vtid))
+	// 删除已执行的 init 函数树，避免 findEntry 把 stdlib 的 lib init 误当用户入口
+	if dot := strings.LastIndex(funcName, keytree.MemberSep); dot > 0 {
+		kv.DelTree(keytree.LibFunc(funcName[:dot], funcName[dot+len(keytree.MemberSep):]))
+	}
 }
