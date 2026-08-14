@@ -463,9 +463,9 @@ func (p *parser) collectWriteList() ([]string, []string) {
 // parseWriteSlot 解析单个写槽：name[:type]
 func (p *parser) parseWriteSlot() (name, typ string) {
 	name = p.advance().Value
-	if p.peek().Kind == Colon && p.peekAt(1).Kind == Ident {
+	if p.peek().Kind == Colon {
 		p.advance() // consume :
-		typ = p.advance().Value
+		typ = p.parseType()
 		if typ == "int" || typ == "float" {
 			p.errors = append(p.errors, Diagnostic{Pos: p.peek().Pos, Message: fmt.Sprintf(
 				"ambiguous type %q in write slot — use int64 or float64 instead", typ)})

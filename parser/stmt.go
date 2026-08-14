@@ -31,8 +31,8 @@ func (p *parser) parseBody() []ast.Stmt {
 
 // parseStmt 根据首 Token 分发到对应语句解析函数。
 func (p *parser) parseStmt() ast.Stmt {
-	// 块标签检测（优先级最高）：Ident 后紧跟 Colon，且 Colon 后不是 Ident（排除 typed write: name:type = expr）
-	if p.peekAt(1).Kind == Colon && p.peekAt(2).Kind != Ident {
+	// 块标签检测（优先级最高）：Ident 后紧跟 Colon，且 Colon 后不是类型起始（排除 typed write: name:kindexp = expr）
+	if p.peekAt(1).Kind == Colon && p.peekAt(2).Kind != Ident && p.peekAt(2).Kind != LBrack {
 		return p.parseBlockLabel()
 	}
 

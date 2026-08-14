@@ -3,7 +3,7 @@
 # 期望输出:
 #   true
 #   false
-rwfunc can_jump(nums:int64) -> (ok:int64) {
+rwfunc can_jump(nums:[]int64) -> (ok:int64) {
 	ok = 1  # = 等价于 <-
 	n <- len(nums)
 	0 -> reach

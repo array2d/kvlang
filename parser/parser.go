@@ -268,12 +268,54 @@ func (p *parser) parseFunc() ast.Func {
 	return fn
 }
 
-// validTypes kvlang 合法类型名集合（权威来源，与 kvspace.XValue.Kind() 对齐）。
-var validTypes = map[string]bool{
+// validKinds kvlang 合法基础类型名（权威来源，与 kvspace.XValue.Kind() 对齐）。
+var validKinds = map[string]bool{
 	"int8": true, "int16": true, "int32": true, "int64": true,
 	"uint8": true, "uint16": true, "uint32": true, "uint64": true,
 	"float32": true, "float64": true,
-	"bool": true, "string": true, "bytes": true, "any": true,
+	"bool": true, "stringbyte": true,
+}
+
+// validKindexp 校验类型表达式（kindexp）：前缀修饰符序列 + 基础 kind。
+// 文法：kindexp ::= kind | '*' kindexp | '@' kindexp | '[' ']' kindexp | '[' dims ']' kindexp | '<' '>' kindexp | '<' dims '>' kindexp
+func validKindexp(t string) bool {
+	for t != "" {
+		switch t[0] {
+		case '*', '@':
+			t = t[1:]
+		case '[', '<':
+			close := byte(']')
+			if t[0] == '<' {
+				close = '>'
+			}
+			end := strings.IndexByte(t, close)
+			if end < 0 {
+				return false
+			}
+			if inner := t[1:end]; inner != "" && !validDims(inner) {
+				return false
+			}
+			t = t[end+1:]
+		default:
+			return validKinds[t]
+		}
+	}
+	return false
+}
+
+// validDims 校验维度列表（逗号分隔的非负整数）。
+func validDims(s string) bool {
+	for _, d := range strings.Split(s, ",") {
+		if d == "" {
+			return false
+		}
+		for i := 0; i < len(d); i++ {
+			if d[i] < '0' || d[i] > '9' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // checkParamTypes 确保所有参数和返回值都有显式类型标注且类型名合法。
@@ -282,20 +324,20 @@ func (p *parser) checkParamTypes(sig *ast.FuncSig) {
 		if kind == "int" || kind == "float" {
 			return "ambiguous type — use int64 or float64 instead"
 		}
-		if kind == "str" {
-			return "unknown type — use string instead"
+		if kind == "string" || kind == "bytes" || kind == "any" {
+			return "unknown type — use stringbyte instead"
 		}
-		return "unknown type — valid: int8/16/32/64, uint8/16/32/64, float32/64, bool, string, bytes, any"
+		return "unknown type — valid: int8/16/32/64, uint8/16/32/64, float32/64, bool, stringbyte, []T, [N]T, *T"
 	}
 	for _, param := range sig.Params {
-		if !validTypes[param.Type] {
+		if !validKindexp(param.Type) {
 			p.errors = append(p.errors, Diagnostic{Message: fmt.Sprintf(
 				"func %s: param %q: %s (got %q)",
 				sig.Name, param.Name, typeError(param.Type), param.Type)})
 		}
 	}
 	for _, ret := range sig.Returns {
-		if !validTypes[ret.Type] {
+		if !validKindexp(ret.Type) {
 			p.errors = append(p.errors, Diagnostic{Message: fmt.Sprintf(
 				"func %s: return value %q: %s (got %q)",
 				sig.Name, ret.Name, typeError(ret.Type), ret.Type)})
@@ -462,6 +504,46 @@ func (p *parser) parseFuncSig() ast.FuncSig {
 	return sig
 }
 
+// parseType 解析类型表达式（kindexp）直到参数/返回值列表的终止符（, ) { EOF）为止。
+// 按括号深度收集 [] / <> 内的维度和逗号；基础 kind、* @ 修饰符、数字维度均为单 token。
+func (p *parser) parseType() string {
+	var sb strings.Builder
+	depth := 0
+	for {
+		t := p.peek()
+		switch t.Kind {
+		case LBrack:
+			depth++
+			sb.WriteString("[")
+			p.advance()
+		case RBrack:
+			depth--
+			sb.WriteString("]")
+			p.advance()
+		case Ident:
+			if t.Value == "<" {
+				depth++
+			} else if t.Value == ">" {
+				depth--
+			}
+			sb.WriteString(t.Value)
+			p.advance()
+		case Literal:
+			sb.WriteString(t.Value)
+			p.advance()
+		case Comma:
+			if depth > 0 {
+				sb.WriteString(",")
+				p.advance()
+			} else {
+				return sb.String()
+			}
+		default:
+			return sb.String()
+		}
+	}
+}
+
 // parseParamList 解析 param (, param)* 直到 stop Kind 为止（不消费 stop token）。
 func (p *parser) parseParamList(stop Kind) []ast.Param {
 	var params []ast.Param
@@ -480,9 +562,7 @@ func (p *parser) parseParamList(stop Kind) []ast.Param {
 		param := ast.Param{Name: p.advance().Value}
 		if p.peek().Kind == Colon {
 			p.advance()
-			if p.peek().Kind == Ident {
-				param.Type = p.advance().Value
-			}
+			param.Type = p.parseType()
 		}
 		params = append(params, param)
 	}

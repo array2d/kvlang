@@ -194,11 +194,25 @@ func HandleCall(ctx context.Context, kv kvspace.KVSpace, pc string, inst *rwir.R
 	// 读参：写 caller arg 地址到 frameRoot/[0,-j]
 	litSeq := 0
 	var argPairs []kvspace.KVPair
+	paramTypes := rwfunc.ParamTypes()
 	for i := 0; i < nr; i++ {
 		slot := fmt.Sprintf("%s[0,-%d]", frameRoot+keytree.PathSegSep, i+1)
 		if i+1 < len(inst.Reads) {
 			arg := inst.Reads[i+1]
 			rk := resolveReadPath(kv, callerFrameRoot, arg.Name)
+			// 类型检查：参数定义的数组性与实参的数组性必须一致
+			if i < len(paramTypes) && paramTypes[i] != "" {
+				argVal := arg.Val
+				if !isConcreteVal(argVal) && rk != "" {
+					argVal = kvspace.GetOne(kv, rk)
+				}
+				if !kvspace.IsNone(argVal) && isArrayType(paramTypes[i]) != isArrayArg(argVal) {
+					vthread.SetError(ctx, kv, vtid, pc, fmt.Sprintf(
+						"TypeError: %s param %q declared %s but got %s",
+						funcName, arg.Name, paramTypes[i], arrayDesc(argVal)))
+					return ""
+				}
+			}
 			if isConcreteVal(arg.Val) {
 				if rk == "" {
 					rk = fmt.Sprintf("%s/._lit%d", callerFrameRoot, litSeq)
@@ -332,8 +346,12 @@ func WriteFunc(kv kvspace.KVSpace, pkg string, fn *ast.Func) {
 	kvspace.MkIndexRecursive(kv, funcDir+"/")
 
 	nr, nw := fn.Sig.NumReads(), fn.Sig.NumWrites()
+	paramTypes := make([]string, len(fn.Sig.Params))
+	for i, p := range fn.Sig.Params {
+		paramTypes[i] = p.Type
+	}
 	pairs := []kvspace.KVPair{
-		{Key: funcDir + "/[0,0]", Val: kvspace.NewRwfunc(countDirectInsts(fn.Body), nr, nw)},
+		{Key: funcDir + "/[0,0]", Val: kvspace.NewRwfuncWithTypes(countDirectInsts(fn.Body), nr, nw, paramTypes)},
 		{Key: keytree.LibSrc(pkg, fn.Sig.Name), Val: kvspace.NewStringByte([]byte(fn.FullText())...)},
 	}
 
@@ -414,6 +432,24 @@ func slotValue(val string, typeMap map[string]string) kvspace.XValue {
 func isConcreteVal(v kvspace.XValue) bool {
 	if kvspace.IsNone(v) { return false }
 	return v.Kind() != kvspace.KindRwir && v.Kind() != kvspace.KindRwfunc
+}
+
+// isArrayType 判断 kindexp 是否含数组修饰符（[] [N] <> <N>）。
+func isArrayType(t string) bool {
+	return strings.ContainsAny(t, "[]<>")
+}
+
+// isArrayArg 判断实参是否为数组。stringbyte 是标量（字符串），即使 ArrayLen>1（多字节）。
+func isArrayArg(v kvspace.XValue) bool {
+	if kvspace.IsNone(v) { return false }
+	return v.Kind() != kvspace.KindStringByte && v.ArrayLen() > 1
+}
+
+// arrayDesc 描述值的数组性（scalar/array/None）。
+func arrayDesc(v kvspace.XValue) string {
+	if kvspace.IsNone(v) { return "None" }
+	if isArrayArg(v) { return "array" }
+	return "scalar"
 }
 
 func isLiteral(s string) bool {

@@ -16,7 +16,7 @@ rwfunc build_list() -> () {
 	/n6 <- { val=6; next="" }
 }
 
-rwfunc remove(head:string, val:int64) -> () {
+rwfunc remove(head:stringbyte, val:int64) -> () {
 	p <- "/n0"
 	while (p != "") {
 		v = p.val  # = 等价于 <-

@@ -6,7 +6,7 @@
 # 期望输出:
 #   10
 #   10
-rwfunc sum(arr:int64) -> (acc:int64) {
+rwfunc sum(arr:[]int64) -> (acc:int64) {
 	n = len(arr)  # = 等价于 <-
 	0 -> acc  # 显式初始化累加器（strict null：write parm 首读为 null，拒绝 null 算术）
 	0 -> i
@@ -16,7 +16,7 @@ rwfunc sum(arr:int64) -> (acc:int64) {
 	}
 }
 
-rwfunc rsum(arr:int64, i:int64, acc:int64) -> (r:int64) {
+rwfunc rsum(arr:[]int64, i:int64, acc:int64) -> (r:int64) {
 	n <- len(arr)
 
 	if (i >= n) {

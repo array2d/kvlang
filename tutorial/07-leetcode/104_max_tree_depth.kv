@@ -10,7 +10,7 @@ rwfunc build_tree() -> () {
 	{ val=7; left=""; right="" } -> /t4
 }
 
-rwfunc max_depth(root:string) -> (depth:int64) {
+rwfunc max_depth(root:stringbyte) -> (depth:int64) {
 	if (root == "") { 0 -> depth }
 	else {
 		ld = max_depth(root.left)  # = 等价于 <-

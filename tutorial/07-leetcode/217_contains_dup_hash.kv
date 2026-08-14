@@ -3,7 +3,7 @@
 # 期望输出:
 #   true
 #   false
-rwfunc has_dup(a:int64) -> () {
+rwfunc has_dup(a:[]int64) -> () {
 	len(a) -> n
 	seen = {}  # = 等价于 <-
 	found <- false
