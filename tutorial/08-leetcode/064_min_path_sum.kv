@@ -1,0 +1,41 @@
+# 064: Minimum Path Sum — 网格最小路径和
+# 来源: LeetCode #64
+# 期望输出:
+#   7
+rwfunc min_path_sum() -> (result:int64) {
+	rows = 3  # = 等价于 <-
+	cols <- 3
+	grid:[]int64 = [1, 3, 1, 1, 5, 1, 4, 2, 1]
+	# first row
+	j = 1  # = 等价于 <-
+	while (j < cols) {
+		grid[j] <- grid[j] + grid[j-1]
+		j + 1 -> j
+	}
+	# first col and rest
+	r = 1  # = 等价于 <-
+	while (r < rows) {
+		idx0 = r × cols  # = 等价于 <-
+		idx0_m = r × cols  # = 等价于 <-
+		grid[idx0] <- grid[idx0] + grid[idx0-cols]
+		c = 1  # = 等价于 <-
+		while (c < cols) {
+			idx = r × cols + c  # = 等价于 <-
+			idx_m = r × cols + c  # = 等价于 <-
+			up <- grid[idx-cols]
+			left = grid[idx-1]  # = 等价于 <-
+			min = up  # = 等价于 <-
+			if (left < up) { left -> min }
+			grid[idx] <- grid[idx] + min
+			c + 1 -> c
+		}
+		r + 1 -> r
+	}
+	grid[rows × cols - 1] -> result
+}
+
+rwfunc main() -> () {
+	r <- min_path_sum()
+	println(r)
+}
+main()

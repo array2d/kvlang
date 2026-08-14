@@ -1,0 +1,29 @@
+# continuous: 连续数组 []int64（一个 XValue，元素连续打包）
+# 语义: [] = 同构定长连续数组；at/set/len 整存整取，元素在内存内下标访问
+# 期望输出:
+#   len = 4
+#   [0] = 10
+#   after set: 10 99 30
+#   sum = 179
+rwfunc main() -> () {
+	a:[]int64 = [10, 20, 30, 40]
+	len(a) -> n
+	println("len =", n)
+	v0 <- a[0]
+	println("[0] =", v0)
+	a[1] <- 99
+	x0 = a[0]
+	a[1] -> x1
+	x2 <- a[2]
+	println("after set:", x0, x1, x2)
+	total = 0
+	0 -> i
+	while (i < n) {
+		x <- a[i]
+		total = total + x
+		i + 1 -> i
+	}
+	println("sum =", total)
+}
+
+main()

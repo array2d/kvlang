@@ -1,0 +1,65 @@
+# 217: Contains Duplicate — O(n) hash set
+# 来源: LeetCode #217
+# 期望输出:
+#   true
+#   false
+rwfunc has_dup(a:[]int64) -> () {
+	len(a) -> n
+	seen = {}  # = 等价于 <-
+	found <- false
+	i = 0  # = 等价于 <-
+	while (i < n) {
+		a[i] -> x
+		has(seen, x) -> exists
+
+		if (exists) {
+			true -> found
+			i <- n
+		} else {
+			_ = set(seen, x, 1)  # = 等价于 <-
+			i + 1 -> i
+		}
+	}
+	f <- found
+
+	if (f) {
+		println("true")
+	} else {
+		println("false")
+	}
+}
+
+rwfunc no_dup() -> () {
+	a:[]int64 = [1, 2, 3, 4]  # = 等价于 <-
+	len(a) -> n
+	seen = {}  # = 等价于 <-
+	found <- false
+	i = 0  # = 等价于 <-
+	while (i < n) {
+		a[i] -> x
+		has(seen, x) -> exists
+
+		if (exists) {
+			true -> found
+			i <- n
+		} else {
+			_ = set(seen, x, 1)  # = 等价于 <-
+			i + 1 -> i
+		}
+	}
+	f <- found
+
+	if (f) {
+		println("true")
+	} else {
+		println("false")
+	}
+}
+
+rwfunc main() -> () {
+	a1:[]int64 = [1, 2, 3, 1]
+	has_dup(a1)
+	no_dup()
+}
+
+main()

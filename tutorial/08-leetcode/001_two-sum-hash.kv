@@ -1,0 +1,28 @@
+# 001: Two Sum — O(n) hash map (h.*key 动态解引用，has 检存在)
+# 来源: LeetCode #1
+# 期望输出:
+#   [ 0 , 1 ]
+rwfunc two_sum(nums:[]int64, target:int64) -> () {
+	n <- len(nums)
+	i = 0  # = 等价于 <-
+	"/tmp" -> h
+	while (i < n) {
+		x <- nums[i]
+		need = target - x  # = 等价于 <-
+		has(h, need) -> exists
+
+		if (exists) {
+			h[need] -> j
+			k = j - 1  # = 等价于 <-
+			println("[", k, ",", i, "]")
+			n -> i
+		} else {
+			v <- i + 1
+			_ = set(h, x, v)  # = 等价于 <-
+			i + 1 -> i
+		}
+	}
+}
+
+a:[]int64 = [2, 7, 11, 15]
+two_sum(a, 9)

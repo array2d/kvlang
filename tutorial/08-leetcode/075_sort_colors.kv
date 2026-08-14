@@ -1,0 +1,45 @@
+# 075: Sort Colors — 荷兰国旗三指针
+# 来源: LeetCode #75
+# 期望输出:
+#   0
+#   0
+#   1
+#   1
+#   2
+#   2
+rwfunc sort_colors() -> () {
+	nums:[]int64 = [2, 0, 2, 1, 1, 0]
+	n = len(nums)  # = 等价于 <-
+	lo = 0  # = 等价于 <-
+	mid <- 0
+	hi = n - 1  # = 等价于 <-
+	while (mid <= hi) {
+		nums[mid] -> v
+		if (v == 0) {
+			nums[lo] -> t
+			nums[mid] <- t
+			nums[lo] <- v
+			lo + 1 -> lo
+			mid <- mid + 1
+		}
+		else if (v == 1) {
+			mid + 1 -> mid
+		}
+		else {
+			nums[hi] -> t
+			nums[mid] <- t
+			nums[hi] <- v
+			hi - 1 -> hi
+		}
+	}
+	i = 0  # = 等价于 <-
+	while (i < n) {
+		println(nums[i])
+		i + 1 -> i
+	}
+}
+
+rwfunc main() -> () {
+	sort_colors()
+}
+main()

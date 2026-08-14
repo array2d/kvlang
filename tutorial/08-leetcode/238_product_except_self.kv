@@ -1,0 +1,44 @@
+# 238: Product of Array Except Self — 前后缀乘积
+# 算法: 两次遍历，前缀积×后缀积
+# 来源: LeetCode #238
+# 期望输出:
+#   24
+#   12
+#   8
+#   6
+rwfunc product() -> () {
+	a:[]int64 = [1, 2, 3, 4]  # = 等价于 <-
+	len(a) -> n
+	prefix <- 1
+	suffix = 1  # = 等价于 <-
+	# build prefix products into result
+	[1, 1, 1, 1] -> result:[]int64
+	i <- 0
+	while (i < n) {
+		result[i] <- prefix
+		x = a[i]  # = 等价于 <-
+		prefix × x -> prefix
+		prefix × x -> prefix_m
+		i <- i + 1
+	}
+	# multiply by suffix products
+	j = n - 1  # = 等价于 <-
+	while (j >= 0) {
+		result[j] -> rv
+		newv <- suffix × rv
+		newv_m <- suffix × rv
+		result[j] <- newv
+		y = a[j]  # = 等价于 <-
+		suffix × y -> suffix
+		suffix × y -> suffix_m
+		j <- j - 1
+	}
+	k = 0  # = 等价于 <-
+	while (k < n) {
+		result[k] -> v
+		println(v)
+		k <- k + 1
+	}
+}
+
+product()

@@ -1,0 +1,70 @@
+# 217: Contains Duplicate — 检测重复元素
+# 算法: O(n²) 双重遍历（无 hash map 时）
+# 来源: LeetCode #217
+# 期望输出:
+#   true
+#   false
+rwfunc has_dup() -> () {
+	a:[]int64 = [1, 2, 3, 1]  # = 等价于 <-
+	len(a) -> n
+	found <- false
+	i = 0  # = 等价于 <-
+	while (i < n) {
+		i + 1 -> j
+		while (j < n) {
+			x <- a[i]
+			y = a[j]  # = 等价于 <-
+			x == y -> dup
+
+			if (dup) {
+				found <- true
+				i = n  # = 等价于 <-
+				n -> j
+			} else {
+				j <- j + 1
+			}
+		}
+		i = i + 1  # = 等价于 <-
+	}
+	found -> f
+
+	if (f) {
+		println("true")
+	} else {
+		println("false")
+	}
+}
+
+rwfunc no_dup() -> () {
+	a:[]int64 <- [1, 2, 3, 4]
+	n = len(a)  # = 等价于 <-
+	false -> found
+	i <- 0
+	while (i < n) {
+		j = i + 1  # = 等价于 <-
+		while (j < n) {
+			a[i] -> x
+			y <- a[j]
+			dup = x == y  # = 等价于 <-
+
+			if (dup) {
+				true -> found
+				i <- n
+				j = n  # = 等价于 <-
+			} else {
+				j + 1 -> j
+			}
+		}
+		i <- i + 1
+	}
+	f = found  # = 等价于 <-
+
+	if (f) {
+		println("true")
+	} else {
+		println("false")
+	}
+}
+
+has_dup()
+no_dup()
