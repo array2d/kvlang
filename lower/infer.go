@@ -180,7 +180,7 @@ func slotType(name string, tm map[string]string) string {
 	}
 	// 字面量推断
 	if len(name) > 0 && name[0] == '"' {
-		return "stringbyte"
+		return "charbyte"
 	}
 	if name == "true" || name == "false" {
 		return "bool"
@@ -200,7 +200,7 @@ func litToType(lit ast.LitKind) string {
 	switch lit {
 	case ast.LitInt:    return "int64"
 	case ast.LitFloat:  return "float64"
-	case ast.LitString, ast.LitRawString: return "stringbyte"
+	case ast.LitString, ast.LitRawString: return "charbyte"
 	case ast.LitBool:   return "bool"
 	case ast.LitNil:    return ""
 	}

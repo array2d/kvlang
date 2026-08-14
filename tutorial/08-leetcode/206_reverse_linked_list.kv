@@ -14,7 +14,7 @@ rwfunc build_list() -> () {
 	{ val=5; next="" } -> /n4
 }
 
-rwfunc reverse(head:stringbyte) -> () {
+rwfunc reverse(head:charbyte) -> () {
 	prev = ""  # = 等价于 <-
 	head -> cur
 	while (cur != "") {

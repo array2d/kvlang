@@ -74,7 +74,7 @@ func isNumeric(v kvspace.XValue) bool { return isIntKind(v.Kind()) || isFloatKin
 
 // display formats a Value for human output (print / string.set).
 func display(v kvspace.XValue) string {
-	if v.Kind() == "stringbyte" {
+	if v.Kind() == "charbyte" {
 		return v.ValueString()
 	}
 	if v.ArrayLen() > 1 {
@@ -82,6 +82,9 @@ func display(v kvspace.XValue) string {
 	}
 	return v.ValueString()
 }
+
+// Display 格式化 XValue 为可打印字符串（rwirext 打印用）。
+func Display(v kvspace.XValue) string { return display(v) }
 
 // xvalueAt returns the i-th element of any XValue, or None{}.
 func xvalueAt(v kvspace.XValue, i int) kvspace.XValue {

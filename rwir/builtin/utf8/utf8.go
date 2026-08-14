@@ -7,10 +7,10 @@ import (
 	"github.com/array2d/kvspace-go"
 )
 
-// Bytes returns the raw UTF-8 bytes of a stringbyte XValue.
+// Bytes returns the raw UTF-8 bytes of a charbyte XValue.
 func Bytes(v kvspace.XValue) []byte {
-	if v.Kind() != kvspace.KindStringByte {
-		panic("utf8.Bytes: expected stringbyte, got " + v.Kind())
+	if v.Kind() != kvspace.KindCharByte {
+		panic("utf8.Bytes: expected charbyte, got " + v.Kind())
 	}
 	return kvspace.BodyBytes(v)
 }
@@ -20,12 +20,12 @@ func String(v kvspace.XValue) string {
 	return string(Bytes(v))
 }
 
-// Len returns the number of UTF-8 runes in the stringbyte array.
+// Len returns the number of UTF-8 runes in the charbyte array.
 func Len(v kvspace.XValue) int {
 	return utf8.RuneCount(Bytes(v))
 }
 
-// At returns the i-th rune as a stringbyte (UTF-8 encoding of a single char).
+// At returns the i-th rune as a charbyte (UTF-8 encoding of a single char).
 func At(v kvspace.XValue, i int) kvspace.XValue {
 	b := Bytes(v)
 	var idx int
@@ -34,13 +34,13 @@ func At(v kvspace.XValue, i int) kvspace.XValue {
 		idx += sz
 	}
 	if idx >= len(b) {
-		return kvspace.NewStringByte([]byte("")...)
+		return kvspace.NewCharByte([]byte("")...)
 	}
 	r, sz := utf8.DecodeRune(b[idx:])
-	return kvspace.NewStringByte([]byte(string(runeToUTF8(r, sz)))...)
+	return kvspace.NewCharByte([]byte(string(runeToUTF8(r, sz)))...)
 }
 
-// Set returns a new stringbyte with the i-th rune replaced.
+// Set returns a new charbyte with the i-th rune replaced.
 func Set(v kvspace.XValue, i int, ch kvspace.XValue) kvspace.XValue {
 	b := Bytes(v)
 	chb := Bytes(ch)
@@ -57,7 +57,7 @@ func Set(v kvspace.XValue, i int, ch kvspace.XValue) kvspace.XValue {
 	result = append(result, b[:idx]...)
 	result = append(result, chb...)
 	result = append(result, b[idx+sz:]...)
-	return kvspace.NewStringByte(result...)
+	return kvspace.NewCharByte(result...)
 }
 
 // Slice returns a substring from lo to hi (rune indices).
@@ -65,13 +65,13 @@ func Slice(v kvspace.XValue, lo, hi int) kvspace.XValue {
 	b := Bytes(v)
 	runeStarts := runeOffsets(b)
 	if lo < 0 || lo > len(runeStarts) {
-		return kvspace.NewStringByte([]byte("")...)
+		return kvspace.NewCharByte([]byte("")...)
 	}
 	if hi > len(runeStarts) {
 		hi = len(runeStarts)
 	}
 	if lo >= hi {
-		return kvspace.NewStringByte([]byte("")...)
+		return kvspace.NewCharByte([]byte("")...)
 	}
 	start := runeStarts[lo]
 	end := start
@@ -80,7 +80,7 @@ func Slice(v kvspace.XValue, lo, hi int) kvspace.XValue {
 	} else {
 		end = len(b)
 	}
-	return kvspace.NewStringByte(b[start:end]...)
+	return kvspace.NewCharByte(b[start:end]...)
 }
 
 // runeOffsets returns byte offsets of each rune start.

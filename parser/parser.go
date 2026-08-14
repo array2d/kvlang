@@ -235,10 +235,12 @@ func (p *parser) parseLibBody(f *ast.File, prefix string) {
 			continue
 		}
 		if p.peek().Kind == Ident && p.peek().Value == "rwir" {
-				decl := p.parseRwirDecl()
-				decl.Pkg = pkg // lib 归属
-				f.RwirDecls = append(f.RwirDecls, decl)
-			} else if p.peek().Kind == Ident && p.peek().Value == "rwfunc" {
+			decl := p.parseRwirDecl()
+			decl.Pkg = pkg // lib 归属
+			f.RwirDecls = append(f.RwirDecls, decl)
+			p.skipNewlines()
+			continue
+		} else if p.peek().Kind == Ident && p.peek().Value == "rwfunc" {
 			fn := p.parseFunc()
 			fn.Pkg = pkg // lib 归属（fix-039）
 			f.Funcs = append(f.Funcs, fn)
@@ -278,7 +280,7 @@ var validKinds = map[string]bool{
 	"int8": true, "int16": true, "int32": true, "int64": true,
 	"uint8": true, "uint16": true, "uint32": true, "uint64": true,
 	"float32": true, "float64": true,
-	"bool": true, "stringbyte": true,
+	"bool": true, "charbyte": true,
 }
 
 // validKindexp 校验类型表达式（kindexp）：前缀修饰符序列 + 基础 kind。
@@ -335,9 +337,9 @@ func (p *parser) checkParamTypes(sig *ast.FuncSig) {
 			return "ambiguous type — use int64 or float64 instead"
 		}
 		if kind == "string" || kind == "bytes" || kind == "any" {
-			return "unknown type — use stringbyte instead"
+			return "unknown type — use charbyte instead"
 		}
-		return "unknown type — valid: int8/16/32/64, uint8/16/32/64, float32/64, bool, stringbyte, []T, [N]T, *T"
+		return "unknown type — valid: int8/16/32/64, uint8/16/32/64, float32/64, bool, charbyte, []T, [N]T, *T"
 	}
 	for _, param := range sig.Params {
 		if !validKindexp(param.Type) {

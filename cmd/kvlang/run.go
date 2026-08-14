@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"kvlang/rwirext/term"
 	"kvlang/keytree"
 	"kvlang/kvcpu"
 	"github.com/array2d/kvspace-go"
@@ -19,11 +20,14 @@ import (
 )
 
 // cmdRun 解析参数并路由：内联 / {lib}.{func} / 文件 / 管道。
+var noterm bool
+
 func cmdRun(args []string) {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	dsn   := fs.String("kvspace", defaultKVSpace(), kvspaceFlagDesc)
 	code  := fs.String("c", "", "内联代码（直接执行字符串）")
 	debug := fs.Bool("debug", false, "单步调试模式（交互式，每条指令暂停）")
+	fs.BoolVar(&noterm, "noterm", false, "禁用内置终端 daemon（print/input 不再可用）")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: kvlang run [--debug] [-c code | {lib}.{func} | <file.kv|dir>]")
 		fs.PrintDefaults()
@@ -57,18 +61,22 @@ func runLib(lib, fn string, debug bool) {
 	if lib == "" { name = fn }
 	kv := kvspace.Conn(defaultKVSpace())
 	defer kv.DisConn()
-	registerDefaultTerm(kv)
+	initDirs(kv)
+	layoutAndRunStdlib(kv)
 	executeEntry(kv, name, debug)
 }
 
 // executeEntry 创建 vthread 并同步执行。
 func executeEntry(kv kvspace.KVSpace, entryName string, debug bool) {
 	ctx := context.Background()
-	layoutAndRunStdlib(kv)
 	vtid := vthread.AllocVtid(kv)
 	kv.DelTree(keytree.VThread(vtid))
 	kvspace.MkIndexRecursive(kv, keytree.VThread(vtid)+"/")
 	builtin.WriteSysRwir(kv, filepath.Base(os.Args[0]))
+	if !noterm {
+		term.Register(kv)
+		go term.Serve(kv)
+	}
 	firstPC := layout.Bootstrap(ctx, kv, vtid, entryName, nil)
 	if firstPC == "" {
 		logx.Fatal("[single] Bootstrap %s failed", entryName)
@@ -76,11 +84,11 @@ func executeEntry(kv kvspace.KVSpace, entryName string, debug bool) {
 	vthread.Set(ctx, kv, vtid, firstPC, "init")
 	kv.Set([]kvspace.KVPair{
 		{Key: keytree.VThreadCtime(vtid), Val: kvspace.NewTime(time.Now().UnixNano())},
-		{Key: keytree.VThreadTerm(vtid), Val: kvspace.NewStringByte([]byte("kvlangrun")...)},
+		{Key: keytree.VThreadTerm(vtid), Val: kvspace.NewCharByte([]byte("kvlangrun")...)},
 	})
 
 	if debug {
-		kv.Set([]kvspace.KVPair{{Key: keytree.VThreadDebugger(vtid), Val: kvspace.NewStringByte([]byte("break")...)}})
+		kv.Set([]kvspace.KVPair{{Key: keytree.VThreadDebugger(vtid), Val: kvspace.NewCharByte([]byte("break")...)}})
 		logx.Info("[single] debug mode: executing %s", firstPC)
 		cpu := kvcpu.New(kv, "single")
 		cpu.Execute(firstPC)
