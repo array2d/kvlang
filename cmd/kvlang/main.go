@@ -18,9 +18,6 @@ import (
 	_ "github.com/array2d/kvspace-go/redis"
 	_ "github.com/array2d/kvspace-go/goheap"
 	// _ "github.com/array2d/kvspace-go/shm" // requires libkvspace-c.so
-
-	// 注册 lib 内置常量 key（math.Pi 等），触发 lib/math 的 init 调用 lib.RegisterLibData。
-	_ "kvlang/lib/math"
 )
 
 func main() {

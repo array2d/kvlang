@@ -13,7 +13,6 @@ import (
 	"kvlang/kvcpu"
 	"github.com/array2d/kvspace-go"
 	"kvlang/layout"
-	"kvlang/lib"
 	"kvlang/rwir/builtin"
 	"kvlang/logx"
 	"kvlang/vthread"
@@ -65,11 +64,11 @@ func runLib(lib, fn string, debug bool) {
 // executeEntry 创建 vthread 并同步执行。
 func executeEntry(kv kvspace.KVSpace, entryName string, debug bool) {
 	ctx := context.Background()
+	layoutAndRunStdlib(kv)
 	vtid := vthread.AllocVtid(kv)
 	kv.DelTree(keytree.VThread(vtid))
 	kvspace.MkIndexRecursive(kv, keytree.VThread(vtid)+"/")
 	builtin.WriteSysRwir(kv, filepath.Base(os.Args[0]))
-	lib.WriteLibData(kv)
 	firstPC := layout.Bootstrap(ctx, kv, vtid, entryName, nil)
 	if firstPC == "" {
 		logx.Fatal("[single] Bootstrap %s failed", entryName)

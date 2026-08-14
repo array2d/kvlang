@@ -226,6 +226,7 @@ func (p *parser) parseLibBody(f *ast.File, prefix string) {
 	f.Package = pkg // 嵌套 lib 以最内层为准
 	p.expect(LBrace)
 	p.skipNewlines()
+	var body []ast.Stmt
 	for p.peek().Kind != RBrace && p.peek().Kind != EOF {
 		// 嵌套 lib
 		if p.peek().Kind == Ident && p.peek().Value == "lib" && p.peekAt(1).Kind == Ident && p.peekAt(2).Kind == LBrace {
@@ -246,11 +247,15 @@ func (p *parser) parseLibBody(f *ast.File, prefix string) {
 		}
 st := p.parseStmt()
 		if st != nil {
-			f.InitBody = append(f.InitBody, st)
+			body = append(body, st)
 		} else { break }
 		p.skipNewlines()
 	}
 	p.expect(RBrace)
+	// 隐式 init 封装：lib 块 body 即该 lib 的 init()
+	if len(body) > 0 {
+		f.Funcs = append(f.Funcs, ast.Func{Sig: ast.FuncSig{Name: "init"}, Pkg: pkg, Body: body})
+	}
 	f.Package = prevPkg // 退出 lib 块，恢复外层包名
 }
 
