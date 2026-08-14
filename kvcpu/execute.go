@@ -24,7 +24,7 @@ const MaxStackDepth = 256
 //
 // Dispatch 优先级（全静态，无 KV 分类查询）：
 //  1. IsControlOp   — call/return/br/goto 控制流原语
-//  2. IsNativeOp    — +/-/*/print/sqrt 等标量内建算子
+//  2. IsNativeRwir    — +/-/*/print/sqrt 等标量内建算子
 //  3. tensor.*       — tensor 命名空间算子（op/dispatch）
 //  4. default       — 用户定义函数（rewrite as call）
 //     ↓ HandleCall 内查 FuncIdx；未找到 → SetError
@@ -148,7 +148,7 @@ func (c *cpu) Execute(pc string) error {
 			execErr = handleControl(ctx, c.kv, vtid, pc, inst)
 
 		// ── 2. 标量内建算子（静态 map，零 KV 查询）──────────────────────
-		case builtin.IsNativeOp(inst.Opcode):
+		case builtin.IsNativeRwir(inst.Opcode):
 			execErr = builtin.Native(ctx, c.kv, vtid, pc, inst)
 
 		// ── 3. tensor 命名空间算子（op/dispatch）────────────────────────

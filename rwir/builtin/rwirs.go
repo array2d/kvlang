@@ -9,24 +9,24 @@ import (
 	"kvlang/symbol"
 )
 
-// nativeOp 内置算子注册项。
-type nativeOp struct {
+// nativeRwir 内置算子注册项。
+type nativeRwir struct {
 	sig  string // 签名: "rwir op(reads...) -> (writes...)"
-	impl Op     // nil 表示无实现（仅占位，非 VM 原生求值）
+	impl Rwir     // nil 表示无实现（仅占位，非 VM 原生求值）
 }
 
-// registry opcode → nativeOp（各 op 文件 init() 自行注册）。
-var registry = map[string]nativeOp{}
+// rwirregistry opcode → nativeRwir（各 op 文件 init() 自行注册）。
+var rwirregistry = map[string]nativeRwir{}
 
 var bg = context.Background()
 
 // Register 注册一个 native opcode：签名 + 实现。
-func Register(opcode, sig string, impl Op) {
-	registry[opcode] = nativeOp{sig: sig, impl: impl}
+func Register(opcode, sig string, impl Rwir) {
+	rwirregistry[opcode] = nativeRwir{sig: sig, impl: impl}
 }
 
 // registerWord 注册 word 及其全部 glyph。word 是保留字，用户不可定义同名函数。
-func registerWord(word, sig string, impl Op) {
+func registerWord(word, sig string, impl Rwir) {
 	Register(word, sig, impl)
 	e := symbol.ByWord(word)
 	for _, g := range e.Glyphs {
@@ -64,18 +64,17 @@ func countSigParams(sig string) (reads, writes int32) {
 	return
 }
 
-// WriteSysRwir 将所有已注册的 native rwir 签名写入 /sys/rwir/。
-// 基础类型（+, ==, print 等）→ /sys/rwir/opcode
-// string.* 类型（string.len, string.char 等）→ /sys/rwir/string.opcode
-// 应在 runtime 启动时调用（非 parser 阶段）。
-func WriteSysRwir(kv kvspace.KVSpace) {
-	pairs := make([]kvspace.KVPair, 0, len(registry))
-	for opcode, op := range registry {
+// WriteSysRwir 将所有已注册的 native rwir 签名写入 /sys/rwir/{runtime}/。
+// rwir 是空函数体（无指令体，仅签名），只能落在 /sys/rwir/{runtime}/，不进 /lib/。
+// {runtime} 反射自可执行文件名（如 kvlang），使多个 runtime 共存于同一 kvspace 不冲突。
+func WriteSysRwir(kv kvspace.KVSpace, runtime string) {
+	pairs := make([]kvspace.KVPair, 0, len(rwirregistry))
+	for opcode, op := range rwirregistry {
 		if op.sig == "" { continue }
 		if strings.Contains(opcode, "/") { continue }
 		reads, writes := countSigParams(op.sig)
 		pairs = append(pairs, kvspace.KVPair{
-			Key: keytree.SysRwir(opcode),
+			Key: keytree.SysRwirRuntime(runtime, opcode),
 			Val: kvspace.NewRwir(int32(reads), int32(writes), string(op.sig)),
 		})
 	}
@@ -84,8 +83,8 @@ func WriteSysRwir(kv kvspace.KVSpace) {
 	}
 }
 
-// IsNativeOp 判断是否为 VM 原生求值的算子。
-func IsNativeOp(opcode string) bool {
-	_, ok := registry[opcode]
+// IsNativeRwir 判断是否为 VM 原生求值的算子。
+func IsNativeRwir(opcode string) bool {
+	_, ok := rwirregistry[opcode]
 	return ok
 }
