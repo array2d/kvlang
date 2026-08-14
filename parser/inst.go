@@ -58,8 +58,15 @@ func (p *parser) parseInst() *ast.Instruction {
 		p.desugarMemberWrite(inst)
 
 	default:
-		// 无 Arrow：纯表达式 / 函数调用
-		inst.Expr = p.parsePratt(0)
+		// 无 Arrow：裸类型声明 name:type → 空数组（散 key 0 元素）；否则纯表达式 / 函数调用
+		if p.peek().Kind == Ident && p.peekAt(1).Kind == Colon {
+			name, typ := p.parseWriteSlot()
+			inst.Writes = []string{name}
+			inst.WriteTypes = []string{typ}
+			inst.Expr = ast.Call("array")
+		} else {
+			inst.Expr = p.parsePratt(0)
+		}
 	}
 
 	// 吃掉行尾内联注释（不保留，不会影响下一语句的前置注释收集）
@@ -89,10 +96,6 @@ func (p *parser) checkWriteTypeMatch(inst *ast.Instruction) {
 			name = inst.Writes[j]
 		}
 		switch {
-		case strings.Contains(wt, "<") && exprIsArray:
-			p.errors = append(p.errors, Diagnostic{Message: fmt.Sprintf(
-				"write %q declared separated array %s but assigned a continuous array literal — declare continuous then scatter explicitly: a:[]T = [...]; b <- scatter(a)",
-				name, wt)})
 		case !isArrayKindexp(wt) && exprIsArray:
 			p.errors = append(p.errors, Diagnostic{Message: fmt.Sprintf(
 				"write %q declared scalar %s but assigned an array literal — use []%s instead",
@@ -213,26 +216,6 @@ func (p *parser) parsePratt(minPrec int) *ast.Expr {
 			left = ast.Call("at", args...)
 			continue
 		}
-		// 后缀分离数组索引：expr<i> 或 expr<i,j>（< 紧邻左操作数；a < i 的空格形式是比较）
-		if p.peek().Kind == Ident && p.peek().Value == "<" && p.adjacent() {
-			p.advance() // consume <
-			cmpPrec := ast.InfixPrec(">")
-			var indices []*ast.Expr
-			for {
-				indices = append(indices, p.parsePratt(cmpPrec)) // 停于 > 或 ,
-				if p.peek().Kind == Ident && p.peek().Value == ">" {
-					p.advance()
-					break
-				}
-				if !p.eat(Comma) {
-					break
-				}
-			}
-			args := []*ast.Expr{left}
-			args = append(args, indices...)
-			left = ast.Call("at", args...)
-			continue
-		}
 		t := p.peek()
 		if t.Kind != Ident {
 			break
@@ -246,16 +229,6 @@ func (p *parser) parsePratt(minPrec int) *ast.Expr {
 		left = ast.Call(op, left, right)
 	}
 	return left
-}
-
-// adjacent 判断 p.peek() 是否紧邻前一个 token（无空白），用于区分 a<i> 索引与 a < i 比较。
-func (p *parser) adjacent() bool {
-	if p.pos == 0 {
-		return false
-	}
-	prev := p.tokens[p.pos-1]
-	cur := p.peek()
-	return prev.Pos.Line == cur.Pos.Line && prev.Pos.Col+len(prev.Value) == cur.Pos.Col
 }
 
 // parsePrimaryExpr 解析主表达式（一元前缀、括号分组、函数调用、叶节点）。

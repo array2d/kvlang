@@ -446,9 +446,9 @@ func isConcreteVal(v kvspace.XValue) bool {
 	return v.Kind() != kvspace.KindRwir && v.Kind() != kvspace.KindRwfunc
 }
 
-// isArrayType 判断 kindexp 是否含数组修饰符（[] [N] <> <N>）。
+// isArrayType 判断 kindexp 是否含数组修饰符（[] [N]）。
 func isArrayType(t string) bool {
-	return strings.ContainsAny(t, "[]<>")
+	return strings.Contains(t, "[")
 }
 
 // isArrayArg 判断实参是否为数组。charbyte 是标量（字符串），即使 ArrayLen>1（多字节）。

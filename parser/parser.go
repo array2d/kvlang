@@ -284,18 +284,14 @@ var validKinds = map[string]bool{
 }
 
 // validKindexp 校验类型表达式（kindexp）：前缀修饰符序列 + 基础 kind。
-// 文法：kindexp ::= kind | '*' kindexp | '@' kindexp | '[' ']' kindexp | '[' dims ']' kindexp | '<' '>' kindexp | '<' dims '>' kindexp
+// 文法：kindexp ::= kind | '*' kindexp | '@' kindexp | '[' ']' kindexp | '[' dims ']' kindexp
 func validKindexp(t string) bool {
 	for t != "" {
 		switch t[0] {
 		case '*', '@':
 			t = t[1:]
-		case '[', '<':
-			close := byte(']')
-			if t[0] == '<' {
-				close = '>'
-			}
-			end := strings.IndexByte(t, close)
+		case '[':
+			end := strings.IndexByte(t, ']')
 			if end < 0 {
 				return false
 			}
@@ -325,9 +321,9 @@ func validDims(s string) bool {
 	return true
 }
 
-// isArrayKindexp 判断 kindexp 是否含数组修饰符（[] [N] <> <N>）。
+// isArrayKindexp 判断 kindexp 是否含数组修饰符（[] [N]）。
 func isArrayKindexp(t string) bool {
-	return strings.ContainsAny(t, "[]<>")
+	return strings.Contains(t, "[")
 }
 
 // checkParamTypes 确保所有参数和返回值都有显式类型标注且类型名合法。
@@ -517,7 +513,7 @@ func (p *parser) parseFuncSig() ast.FuncSig {
 }
 
 // parseType 解析类型表达式（kindexp）直到参数/返回值列表的终止符（, ) { EOF）为止。
-// 按括号深度收集 [] / <> 内的维度和逗号；基础 kind、* @ 修饰符、数字维度均为单 token。
+// 按括号深度收集 [] 内的维度和逗号；基础 kind、* @ 修饰符、数字维度均为单 token。
 func (p *parser) parseType() string {
 	var sb strings.Builder
 	depth := 0
@@ -533,11 +529,6 @@ func (p *parser) parseType() string {
 			sb.WriteString("]")
 			p.advance()
 		case Ident:
-			if t.Value == "<" {
-				depth++
-			} else if t.Value == ">" {
-				depth--
-			}
 			sb.WriteString(t.Value)
 			p.advance()
 		case Literal:

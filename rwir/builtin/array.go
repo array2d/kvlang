@@ -20,8 +20,10 @@ func init() {
 	Register("set",   "", arraySetOp{})
 	Register("has",   "", hasOp{})
 	Register("sort",  "", sortOp{})
-	Register("scatter", "", scatterOp{})
-	Register("compact", "", compactOp{})
+	Register("array.scatter", "", scatterOp{})
+	Register("array.compact", "", compactOp{})
+	Register("array.append",  "", appendOp{})
+	Register("array.slice",   "", sliceOp{})
 }
 
 // arrayOp: [e1, e2, ...] → typed array XValue。
@@ -351,11 +353,11 @@ func (hasOp) Call(f *rwir.Frame) error {
 	return writeResult(f, kvspace.NewBool(!kvspace.IsNone(v)))
 }
 
-// scatterOp: 解压 []type -> <>type。读连续 src，写分离 dst（dst<0>..dst<N-1> 各自 key），不动 src。
+// scatterOp: array.scatter(src) -> dst。解压 compact 数组为散 key（dst<0>..dst<N-1>），不动 src。
 type scatterOp struct{}
 func (scatterOp) Call(f *rwir.Frame) error {
 	if len(f.Inst.Writes) == 0 {
-		msg := "TypeError: scatter requires a write param: scatter(src) -> dst"
+		msg := "TypeError: array.scatter requires a write param: array.scatter(src) -> dst"
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
 		return fmt.Errorf("%s", msg)
 	}
@@ -365,7 +367,7 @@ func (scatterOp) Call(f *rwir.Frame) error {
 		return nil
 	}
 	if kvspace.ElemSize(inputs[0].Kind()) <= 0 {
-		msg := "TypeError: scatter requires a continuous array ([]T), got " + inputs[0].Kind()
+		msg := "TypeError: array.scatter requires a compact array ([]T), got " + inputs[0].Kind()
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
 		return fmt.Errorf("%s", msg)
 	}
@@ -384,16 +386,16 @@ func (scatterOp) Call(f *rwir.Frame) error {
 	return nil
 }
 
-// compactOp: 压缩 <>type -> []type。读分离 src（src<0>..src<N-1> 顺读到缺席），写连续 dst，不动 src。
+// compactOp: array.compact(src) -> dst。压缩散 key（src<0>..src<N-1>）为 compact 数组，不动 src。
 type compactOp struct{}
 func (compactOp) Call(f *rwir.Frame) error {
 	if len(f.Inst.Reads) == 0 {
-		msg := "TypeError: compact requires a read param: compact(src) -> dst"
+		msg := "TypeError: array.compact requires a read param: array.compact(src) -> dst"
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
 		return fmt.Errorf("%s", msg)
 	}
 	if len(f.Inst.Writes) == 0 {
-		msg := "TypeError: compact requires a write param: compact(src) -> dst"
+		msg := "TypeError: array.compact requires a write param: array.compact(src) -> dst"
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
 		return fmt.Errorf("%s", msg)
 	}
@@ -414,6 +416,72 @@ func (compactOp) Call(f *rwir.Frame) error {
 	arr := packTypedArray(elems[0].Kind(), elems)
 	dst := resolveWriteSlot(f.KV, fp, f.Inst.Writes[0].Name)
 	f.KV.Set([]kvspace.KVPair{{Key: dst, Val: arr}})
+	nextPC(f)
+	return nil
+}
+
+// ensureScattered 若 base 是 compact 数组，就地 scatter 为散 key（写 base<0>..base<N-1>，删 base）。
+func ensureScattered(f *rwir.Frame, base string) {
+	arr := kvspace.GetOne(f.KV, base)
+	if kvspace.IsNone(arr) || kvspace.ElemSize(arr.Kind()) <= 0 {
+		return
+	}
+	n := int(arr.ArrayLen())
+	pairs := make([]kvspace.KVPair, 0, n)
+	for i := 0; i < n; i++ {
+		pairs = append(pairs, kvspace.KVPair{Key: fmt.Sprintf("%s<%d>", base, i), Val: typedIndex(arr, i)})
+	}
+	f.KV.Set(pairs)
+	f.KV.Del(base)
+}
+
+// appendOp: array.append(A, elem) -> A。追加元素（长度+1）；compact 自动先 scatter。
+type appendOp struct{}
+func (appendOp) Call(f *rwir.Frame) error {
+	if len(f.Inst.Reads) < 2 {
+		msg := "TypeError: array.append requires array and element"
+		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
+		return fmt.Errorf("%s", msg)
+	}
+	fp := keytree.FrameRoot(f.PC)
+	base := resolveWriteSlot(f.KV, fp, f.Inst.Reads[0].Name)
+	ensureScattered(f, base)
+	n := separatedLen(f.KV, base)
+	f.KV.Set([]kvspace.KVPair{{Key: fmt.Sprintf("%s<%d>", base, n), Val: readInputs(f)[1]}})
+	nextPC(f)
+	return nil
+}
+
+// sliceOp: array.slice(A, lo, hi) -> A。切片 A[lo:hi]（长度=hi-lo）；compact 自动先 scatter。
+type sliceOp struct{}
+func (sliceOp) Call(f *rwir.Frame) error {
+	if len(f.Inst.Reads) < 3 {
+		msg := "TypeError: array.slice requires array, start, end"
+		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
+		return fmt.Errorf("%s", msg)
+	}
+	fp := keytree.FrameRoot(f.PC)
+	base := resolveWriteSlot(f.KV, fp, f.Inst.Reads[0].Name)
+	ensureScattered(f, base)
+	n := separatedLen(f.KV, base)
+	lo := int(asInt64(readInputs(f)[1]))
+	hi := int(asInt64(readInputs(f)[2]))
+	if lo < 0 || hi < lo || hi > n {
+		msg := fmt.Sprintf("IndexError: array.slice: bounds [%d:%d] out of range (len=%d)", lo, hi, n)
+		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
+		return fmt.Errorf("%s", msg)
+	}
+	elems := make([]kvspace.KVPair, 0, hi-lo)
+	for i := lo; i < hi; i++ {
+		elems = append(elems, kvspace.KVPair{
+			Key: fmt.Sprintf("%s<%d>", base, i-lo),
+			Val: kvspace.GetOne(f.KV, fmt.Sprintf("%s<%d>", base, i)),
+		})
+	}
+	f.KV.Set(elems)
+	for i := hi - lo; i < n; i++ {
+		f.KV.Del(fmt.Sprintf("%s<%d>", base, i))
+	}
 	nextPC(f)
 	return nil
 }

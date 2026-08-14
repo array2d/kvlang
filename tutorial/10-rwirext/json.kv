@@ -4,8 +4,8 @@
 #   2) go build -o /tmp/json-rwirext ./rwirext/json/cmd/ && /tmp/json-rwirext &
 #   3) ./kvlang tutorial/10-rwirext/json.kv
 # 语义: json.to(rootkey) 把 rootkey 整棵子树读成 map[string]any 再 json.Marshal；
-#       json.from(json) 反序列化 JSON 写回子树。目录→嵌套对象；连续数组（[]T）与
-#       散 key 数组（<>T，name<0>..name<N-1>）统一序列化为 JSON 数组。
+#       json.from(json) 反序列化 JSON 写回子树。目录→嵌套对象；compact 数组（[]T）与
+#       散 key 数组（name<0>..name<N-1>）统一序列化为 JSON 数组。
 # 期望输出:
 #   j = {"active":true,"age":42,"cont":[10,20,30],"grp":{"c":1,"d":2},"name":"alice","scat":[10,20,30],"score":3.14}
 #   name = alice
@@ -22,7 +22,7 @@ rwfunc main() -> () {
 	2 -> /data/grp/d
 	a:[]int64 = [10, 20, 30]
 	[10, 20, 30] -> /data/cont
-	scatter(a) -> /data/scat
+	array.scatter(a) -> /data/scat
 	json.to(/data) -> j
 	println("j =", j)
 	json.from(j) -> /data2
