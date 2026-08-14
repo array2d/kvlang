@@ -10,7 +10,7 @@ const (
 
 type Entry struct {
 	Word       string   // 唯一英文名，如 "add"、"lbrace"
-	Glyphs     []string // 该词对应的全部符号，如 {"+"}、{"*","×"}
+	Glyphs     []string // 该词对应的全部符号，如 {"+"}、{"!=","≠"}
 	Precedence int      // Pratt 优先级，0=非中缀
 	Arith, Cmp bool
 	Unary      bool
@@ -34,7 +34,7 @@ var byWord = map[string]Entry{
 	// ── 算术 ──────────────────────────────────────────────────────
 	"add":  {"add",  []string{"+"}, 50, true, false, true},
 	"sub":  {"sub",  []string{"-"}, 50, true, false, true},
-	"star": {"star", []string{"*"}, 0, false, false, false},
+	"pointer": {"pointer", []string{"*"}, 0, false, false, false},
 		"mul":  {"mul",  []string{"×"}, 60, true, false, false},
 	"div":  {"div",  []string{"÷"}, 60, true, false, false},
 	"mod":  {"mod",  []string{"%"}, 60, true, false, false},
