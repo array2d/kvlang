@@ -97,7 +97,14 @@ func (lenOp) Call(f *rwir.Frame) error {
 	inputs := readInputs(f)
 	n := 0
 	if len(inputs) > 0 {
-		n = int(inputs[0].ArrayLen())
+		if kvspace.IsNone(inputs[0]) && len(f.Inst.Reads) > 0 {
+			fp := keytree.FrameRoot(f.PC)
+			if base := separatedBase(f.KV, fp, f.Inst.Reads[0].Name); base != "" {
+				n = separatedLen(f.KV, base)
+			}
+		} else {
+			n = int(inputs[0].ArrayLen())
+		}
 	}
 	return writeResult(f, kvspace.NewInt64(int64(n)))
 }
@@ -137,6 +144,13 @@ func (atOp) Call(f *rwir.Frame) error {
 		msg := "IndexError: at: index must be integer for typed array"
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
 		return fmt.Errorf("%s", msg)
+	}
+	if kvspace.IsNone(inputs[0]) && len(f.Inst.Reads) > 0 {
+		fp := keytree.FrameRoot(f.PC)
+		if base := separatedBase(f.KV, fp, f.Inst.Reads[0].Name); base != "" {
+			idx := int(asInt64(inputs[1]))
+			return writeResult(f, kvspace.GetOne(f.KV, fmt.Sprintf("%s<%d>", base, idx)))
+		}
 	}
 	if kvspace.IsNone(inputs[0]) {
 		msg := "IndexError: at: base " + f.Inst.Reads[0].Name + " is None; help: declare a key-family first (e.g. `" + f.Inst.Reads[0].Name + " = {}`) or pass a path string"
@@ -267,6 +281,15 @@ func (arraySetOp) Call(f *rwir.Frame) error {
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
 		return fmt.Errorf("%s", msg)
 	}
+	if kvspace.IsNone(arr) && len(f.Inst.Reads) > 0 {
+		fp := keytree.FrameRoot(f.PC)
+		if base := separatedBase(f.KV, fp, f.Inst.Reads[0].Name); base != "" {
+			idx := int(asInt64(inputs[1]))
+			f.KV.Set([]kvspace.KVPair{{Key: fmt.Sprintf("%s<%d>", base, idx), Val: inputs[2]}})
+			vthread.Set(bg, f.KV, f.Vtid, rwir.NextPC(f.PC), "running")
+			return nil
+		}
+	}
 	if kvspace.IsNone(arr) {
 		msg := "IndexError: set: base " + f.Inst.Reads[0].Name + " is None; help: declare a key-family first (e.g. `" + f.Inst.Reads[0].Name + " = {}`) or pass a path string"
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
@@ -328,50 +351,89 @@ func (hasOp) Call(f *rwir.Frame) error {
 	return writeResult(f, kvspace.NewBool(!kvspace.IsNone(v)))
 }
 
-// scatterOp: 解压 []type -> <>type。紧凑数组 arr（一个 packed body）拆成 arr<0>..arr<N-1> 标量 key，删除 arr。
+// scatterOp: 解压 []type -> <>type。读连续 src，写分离 dst（dst<0>..dst<N-1> 各自 key），不动 src。
 type scatterOp struct{}
 func (scatterOp) Call(f *rwir.Frame) error {
+	if len(f.Inst.Writes) == 0 {
+		msg := "TypeError: scatter requires a write param: scatter(src) -> dst"
+		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
+		return fmt.Errorf("%s", msg)
+	}
 	inputs := readInputs(f)
-	if len(inputs) == 0 || kvspace.IsNone(inputs[0]) || kvspace.ElemSize(inputs[0].Kind()) <= 0 {
-		return writeResult(f, kvspace.None{})
+	if len(inputs) == 0 || kvspace.IsNone(inputs[0]) {
+		nextPC(f)
+		return nil
+	}
+	if kvspace.ElemSize(inputs[0].Kind()) <= 0 {
+		msg := "TypeError: scatter requires a continuous array ([]T), got " + inputs[0].Kind()
+		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
+		return fmt.Errorf("%s", msg)
 	}
 	arr := inputs[0]
 	fp := keytree.FrameRoot(f.PC)
-	base := resolveWriteSlot(f.KV, fp, f.Inst.Reads[0].Name)
+	dst := resolveWriteSlot(f.KV, fp, f.Inst.Writes[0].Name)
 	n := int(arr.ArrayLen())
 	pairs := make([]kvspace.KVPair, 0, n)
 	for i := 0; i < n; i++ {
-		pairs = append(pairs, kvspace.KVPair{Key: fmt.Sprintf("%s<%d>", base, i), Val: typedIndex(arr, i)})
+		pairs = append(pairs, kvspace.KVPair{Key: fmt.Sprintf("%s<%d>", dst, i), Val: typedIndex(arr, i)})
 	}
 	if len(pairs) > 0 {
 		f.KV.Set(pairs)
-		f.KV.Del(base)
 	}
-	return writeResult(f, arr)
+	nextPC(f)
+	return nil
 }
 
-// compactOp: 压缩 <>type -> []type。arr<0>..arr<N-1> 标量 key 打包成紧凑数组 arr（一个 packed body），删除 item key。
+// compactOp: 压缩 <>type -> []type。读分离 src（src<0>..src<N-1> 顺读到缺席），写连续 dst，不动 src。
 type compactOp struct{}
 func (compactOp) Call(f *rwir.Frame) error {
+	if len(f.Inst.Reads) == 0 {
+		msg := "TypeError: compact requires a read param: compact(src) -> dst"
+		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
+		return fmt.Errorf("%s", msg)
+	}
+	if len(f.Inst.Writes) == 0 {
+		msg := "TypeError: compact requires a write param: compact(src) -> dst"
+		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
+		return fmt.Errorf("%s", msg)
+	}
 	fp := keytree.FrameRoot(f.PC)
-	base := resolveWriteSlot(f.KV, fp, f.Inst.Reads[0].Name)
+	src := resolveWriteSlot(f.KV, fp, f.Inst.Reads[0].Name)
 	var elems []kvspace.XValue
 	for i := 0; ; i++ {
-		v := kvspace.GetOne(f.KV, fmt.Sprintf("%s<%d>", base, i))
+		v := kvspace.GetOne(f.KV, fmt.Sprintf("%s<%d>", src, i))
 		if kvspace.IsNone(v) {
 			break
 		}
 		elems = append(elems, v)
 	}
 	if len(elems) == 0 {
-		return writeResult(f, kvspace.None{})
+		nextPC(f)
+		return nil
 	}
 	arr := packTypedArray(elems[0].Kind(), elems)
-	f.KV.Set([]kvspace.KVPair{{Key: base, Val: arr}})
-	for i := range elems {
-		f.KV.Del(fmt.Sprintf("%s<%d>", base, i))
+	dst := resolveWriteSlot(f.KV, fp, f.Inst.Writes[0].Name)
+	f.KV.Set([]kvspace.KVPair{{Key: dst, Val: arr}})
+	nextPC(f)
+	return nil
+}
+
+// separatedBase 返回分离数组的 base key 路径（base<0> 存在）；非分离返回 ""。
+func separatedBase(kv kvspace.KVSpace, fp, name string) string {
+	base := resolveWriteSlot(kv, fp, name)
+	if kvspace.IsNone(kvspace.GetOne(kv, base+"<0>")) {
+		return ""
 	}
-	return writeResult(f, arr)
+	return base
+}
+
+// separatedLen 返回分离数组的元素数（base<0>..base<N-1>）。
+func separatedLen(kv kvspace.KVSpace, base string) int {
+	for i := 0; ; i++ {
+		if kvspace.IsNone(kvspace.GetOne(kv, fmt.Sprintf("%s<%d>", base, i))) {
+			return i
+		}
+	}
 }
 
 func kvKey(v kvspace.XValue) string {

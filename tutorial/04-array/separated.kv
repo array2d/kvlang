@@ -1,20 +1,23 @@
-# separated: 分离数组 <>int64（scatter 拆成 arr<0>..arr<N-1> 各自 key）
-# 语义: <> = 分离数组，元素分散在 key；scatter/compact 在 [] 与 <> 之间转换
+# separated: 分离数组 <>int64（元素分散在 b<0>..b<N-1> 各自 key，按 key 寻址）
+# 语义: <> = 分离数组；scatter 把连续 [] 转分离 <>，compact 把分离 <> 转连续 []
+# 创建分离数组必须显式 scatter：先 a:[]int64 = [...]，再 b <- scatter(a)
 # 期望输出:
-#   len after scatter = 0
-#   len after compact = 3
-#   a[0] = 10
-#   a[2] = 30
+#   len(b) = 3
+#   b<0> = 10
+#   b<2> = 30
+#   len(c) = 3
+#   c[0] = 10
 rwfunc main() -> () {
-	a:[]int64 = [10, 20, 30]
-	scatter(a)
-	len(a) -> n1
-	println("len after scatter =", n1)
-	compact(a)
-	len(a) -> n2
-	println("len after compact =", n2)
-	println("a[0] =", a[0])
-	println("a[2] =", a[2])
+	a:[]int64 = [10, 20, 30]   # 连续数组
+	b <- scatter(a)             # 显式 scatter：连续 a → 分离 b（b<0>..b<2>）
+	len(b) -> n1
+	println("len(b) =", n1)
+	println("b<0> =", b<0>)     # 分离元素访问 <i>
+	println("b<2> =", b<2>)
+	c <- compact(b)             # 显式 compact：分离 b → 连续 c
+	len(c) -> n2
+	println("len(c) =", n2)
+	println("c[0] =", c[0])     # 连续元素访问 [i]
 }
 
 main()
