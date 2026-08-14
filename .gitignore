@@ -50,6 +50,7 @@ appendonly.aof
 /tmp/
 /post/
 /kvlang
+/json
 
 # Tool config
 .omc/
