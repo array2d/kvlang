@@ -318,6 +318,11 @@ func validDims(s string) bool {
 	return true
 }
 
+// isArrayKindexp 判断 kindexp 是否含数组修饰符（[] [N] <> <N>）。
+func isArrayKindexp(t string) bool {
+	return strings.ContainsAny(t, "[]<>")
+}
+
 // checkParamTypes 确保所有参数和返回值都有显式类型标注且类型名合法。
 func (p *parser) checkParamTypes(sig *ast.FuncSig) {
 	typeError := func(kind string) string {

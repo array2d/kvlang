@@ -27,10 +27,10 @@ rwfunc rsum(arr:[]int64, i:int64, acc:int64) -> (r:int64) {
 }
 
 rwfunc main() -> () {
-	a1:int64 = [1, 2, 3, 4]
+	a1:[]int64 = [1, 2, 3, 4]
 	sum(a1) -> s1
 	println(s1)
-	a2:int64 = [1, 2, 3, 4]
+	a2:[]int64 = [1, 2, 3, 4]
 	rsum(a2, 0, 0) -> s2
 	println(s2)
 }

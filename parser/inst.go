@@ -67,7 +67,37 @@ func (p *parser) parseInst() *ast.Instruction {
 		p.advance()
 	}
 	p.eat(Newline)
+	p.checkWriteTypeMatch(inst)
 	return inst
+}
+
+// checkWriteTypeMatch 检查写槽类型标注与表达式的数组性是否一致（layout 阶段报错）。
+// 标量标注（int64）配数组字面量（[1,2,3]）→ 报错；数组标注（[]int64）配标量字面量（42）→ 报错。
+func (p *parser) checkWriteTypeMatch(inst *ast.Instruction) {
+	if inst.Expr == nil {
+		return
+	}
+	exprIsArray := inst.Expr.Op == "array"
+	exprIsScalarLit := inst.Expr.IsLeaf() && inst.Expr.Lit != ast.LitNone && inst.Expr.Lit != ast.LitNil
+
+	for j, wt := range inst.WriteTypes {
+		if wt == "" {
+			continue
+		}
+		name := ""
+		if j < len(inst.Writes) {
+			name = inst.Writes[j]
+		}
+		switch {
+		case !isArrayKindexp(wt) && exprIsArray:
+			p.errors = append(p.errors, Diagnostic{Message: fmt.Sprintf(
+				"write %q declared scalar %s but assigned an array literal — use []%s instead",
+				name, wt, wt)})
+		case isArrayKindexp(wt) && exprIsScalarLit:
+			p.errors = append(p.errors, Diagnostic{Message: fmt.Sprintf(
+				"write %q declared %s but assigned a scalar literal", name, wt)})
+		}
+	}
 }
 
 // desugarMemberWrite 将成员写槽展开为 set 调用：
