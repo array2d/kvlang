@@ -12,7 +12,7 @@ rwfunc build() -> () {
 	{ val=4; left=""; right="" } -> /v2
 }
 
-rwfunc same(a:charbyte, b:charbyte) -> (ok:int64) {
+rwfunc same(a:char/utf32, b:char/utf32) -> (ok:int64) {
 	if (a == "" || b == "") {
 		if (a == b) { 1 -> ok } else { 0 -> ok }
 	} else {

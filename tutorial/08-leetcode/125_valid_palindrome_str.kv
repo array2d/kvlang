@@ -3,7 +3,7 @@
 # 期望输出:
 #   1
 #   0
-rwfunc is_pal(s:charbyte) -> () {
+rwfunc is_pal(s:char/utf32) -> () {
 	n = string.len(s)  # = 等价于 <-
 	0 -> l
 	r <- n - 1

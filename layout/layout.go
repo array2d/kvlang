@@ -61,15 +61,19 @@ func writeStmt(kv kvspace.KVSpace, st ast.Stmt, prefix string, idx *int, typeMap
 			symbol.Lookup(opcode).Word != "assign" {
 			opcode = pkg + keytree.MemberSep + opcode
 		}
+		targetChar := ""
+		if len(s.Writes) == 1 && len(s.WriteTypes) > 0 && kvspace.IsCharKind(s.WriteTypes[0]) {
+			targetChar = s.WriteTypes[0]
+		}
 		pairs := make([]kvspace.KVPair, 0, 1+len(reads)+len(s.Writes))
 		if opcode != "" {
-			pairs = append(pairs, kvspace.KVPair{Key: fmt.Sprintf("%s/[%d,0]", prefix, n), Val: slotValue(opcode, typeMap)})
+			pairs = append(pairs, kvspace.KVPair{Key: fmt.Sprintf("%s/[%d,0]", prefix, n), Val: slotValue(opcode, typeMap, "")})
 		}
 		for j, r := range reads {
-			pairs = append(pairs, kvspace.KVPair{Key: fmt.Sprintf("%s/[%d,-%d]", prefix, n, j+1), Val: slotValue(r, typeMap)})
+			pairs = append(pairs, kvspace.KVPair{Key: fmt.Sprintf("%s/[%d,-%d]", prefix, n, j+1), Val: slotValue(r, typeMap, targetChar)})
 		}
 		for j, w := range s.Writes {
-			pairs = append(pairs, kvspace.KVPair{Key: fmt.Sprintf("%s/[%d,%d]", prefix, n, j+1), Val: slotValue(w, typeMap)})
+			pairs = append(pairs, kvspace.KVPair{Key: fmt.Sprintf("%s/[%d,%d]", prefix, n, j+1), Val: slotValue(w, typeMap, "")})
 		}
 		if len(pairs) > 0 {
 			kv.Set(pairs)
@@ -103,15 +107,19 @@ func writeStmtScope(kv kvspace.KVSpace, st ast.Stmt, scopePrefix string, idx *in
 			symbol.Lookup(opcode).Word != "assign" {
 			opcode = pkg + keytree.MemberSep + opcode
 		}
+		targetChar := ""
+		if len(s.Writes) == 1 && len(s.WriteTypes) > 0 && kvspace.IsCharKind(s.WriteTypes[0]) {
+			targetChar = s.WriteTypes[0]
+		}
 		pairs := make([]kvspace.KVPair, 0, 1+len(reads)+len(s.Writes))
 		if opcode != "" {
-			pairs = append(pairs, kvspace.KVPair{Key: fmt.Sprintf("%s[%d,0]", scopePrefix, n), Val: slotValue(opcode, typeMap)})
+			pairs = append(pairs, kvspace.KVPair{Key: fmt.Sprintf("%s[%d,0]", scopePrefix, n), Val: slotValue(opcode, typeMap, "")})
 		}
 		for j, r := range reads {
-			pairs = append(pairs, kvspace.KVPair{Key: fmt.Sprintf("%s[%d,-%d]", scopePrefix, n, j+1), Val: slotValue(r, typeMap)})
+			pairs = append(pairs, kvspace.KVPair{Key: fmt.Sprintf("%s[%d,-%d]", scopePrefix, n, j+1), Val: slotValue(r, typeMap, targetChar)})
 		}
 		for j, w := range s.Writes {
-			pairs = append(pairs, kvspace.KVPair{Key: fmt.Sprintf("%s[%d,%d]", scopePrefix, n, j+1), Val: slotValue(w, typeMap)})
+			pairs = append(pairs, kvspace.KVPair{Key: fmt.Sprintf("%s[%d,%d]", scopePrefix, n, j+1), Val: slotValue(w, typeMap, "")})
 		}
 		if len(pairs) > 0 {
 			kv.Set(pairs)
@@ -357,11 +365,11 @@ func WriteFunc(kv kvspace.KVSpace, pkg string, fn *ast.Func) {
 
 	for i, p := range fn.Sig.Params {
 		slot := fmt.Sprintf("[0,-%d]", i+1)
-		pairs = append(pairs, kvspace.KVPair{Key: funcDir + "/" + p.Name, Val: kvspace.NewPtr(kvspace.KindCharByte, slot, 1)})
+		pairs = append(pairs, kvspace.KVPair{Key: funcDir + "/" + p.Name, Val: kvspace.NewPtr(kvspace.KindChar, slot, 1)})
 	}
 	for i, r := range fn.Sig.Returns {
 		slot := fmt.Sprintf("[0,%d]", i+1)
-		pairs = append(pairs, kvspace.KVPair{Key: funcDir + "/" + r.Name, Val: kvspace.NewPtr(kvspace.KindCharByte, slot, 1)})
+		pairs = append(pairs, kvspace.KVPair{Key: funcDir + "/" + r.Name, Val: kvspace.NewPtr(kvspace.KindChar, slot, 1)})
 	}
 	kv.Set(pairs)
 	WriteBody(kv, pkg, fn.Sig.Name, fn.Body, typeMap, 1) // 指令从 [1,0] 开始
@@ -399,7 +407,7 @@ func resolveReadPath(kv kvspace.KVSpace, framePath, name string) string {
 		path := keytree.Stack(funcFrame) + kvspace.PtrTarget(v)
 		for {
 			nextVal := kvspace.GetOne(kv, path)
-			if kvspace.IsNone(nextVal) || nextVal.Kind() != kvspace.KindCharByte {
+			if kvspace.IsNone(nextVal) || !kvspace.IsCharKind(nextVal.Kind()) {
 				return path
 			}
 			path = nextVal.ValueString()
@@ -408,23 +416,27 @@ func resolveReadPath(kv kvspace.KVSpace, framePath, name string) string {
 	return keytree.Stack(funcFrame) + name
 }
 
-func slotValue(val string, typeMap map[string]string) kvspace.XValue {
+func slotValue(val string, typeMap map[string]string, targetChar string) kvspace.XValue {
 	if !isLiteral(val) {
 		return kvspace.NewRwir(0, 0, val)
 	}
 	kind := kvspace.KindRwir
 	if val[0] == '"' {
-		kind = kvspace.KindCharByte
+		kind = kvspace.KindChar
 	} else if val == "true" || val == "false" {
 		kind = kvspace.KindBool
 	} else if val[0] >= '0' && val[0] <= '9' || (val[0] == '-' && len(val) > 1) {
 		if strings.Contains(val, ".") || strings.ContainsAny(val, "eE") { kind = kvspace.KindFloat64 } else { kind = kvspace.KindInt64 }
 	}
 	switch kind {
-	case kvspace.KindCharByte:
+	case kvspace.KindChar:
 		s := val
 		if len(s) > 0 && s[0] == '"' { s = s[1:] }
-		return kvspace.NewCharByte([]byte(s)...)
+		k := kvspace.KindChar
+		if targetChar != "" {
+			k = targetChar
+		}
+		return kvspace.NewChar(k, s)
 	case kvspace.KindBool:
 		return kvspace.NewBool(val == "true")
 	case kvspace.KindInt64:
@@ -451,10 +463,10 @@ func isArrayType(t string) bool {
 	return strings.Contains(t, "[")
 }
 
-// isArrayArg 判断实参是否为数组。charbyte 是标量（字符串），即使 ArrayLen>1（多字节）。
+// isArrayArg 判断实参是否为数组。字符家族（char/utf32、char/utf8）是标量，即使 ArrayLen>1。
 func isArrayArg(v kvspace.XValue) bool {
 	if kvspace.IsNone(v) { return false }
-	return v.Kind() != kvspace.KindCharByte && v.ArrayLen() > 1
+	return !kvspace.IsCharKind(v.Kind()) && v.ArrayLen() > 1
 }
 
 // arrayDesc 描述值的数组性（scalar/array/None）。

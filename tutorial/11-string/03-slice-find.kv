@@ -1,0 +1,12 @@
+# 切片与查找：string.slice（码点区间 [lo,hi)）、string.find（码点下标，未找到 -1）
+# 期望输出:
+#   6
+#   hello
+#   -1
+rwfunc main() -> () {
+	s = "hello world"
+	println(string.find(s, "world"))
+	println(string.slice(s, 0, 5))
+	println(string.find(s, "zz"))
+}
+main()

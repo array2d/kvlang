@@ -163,7 +163,7 @@ func toJSONValue(v kvspace.XValue) interface{} {
 		return nil
 	}
 	n := int(v.ArrayLen())
-	if v.Kind() == kvspace.KindCharByte {
+	if kvspace.IsCharKind(v.Kind()) {
 		return v.ValueString()
 	}
 	if n > 1 && kvspace.ElemSize(v.Kind()) > 0 {

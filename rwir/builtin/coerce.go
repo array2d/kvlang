@@ -74,7 +74,7 @@ func isNumeric(v kvspace.XValue) bool { return isIntKind(v.Kind()) || isFloatKin
 
 // display formats a Value for human output (print / string.set).
 func display(v kvspace.XValue) string {
-	if v.Kind() == "charbyte" {
+	if kvspace.IsCharKind(v.Kind()) {
 		return v.ValueString()
 	}
 	if v.ArrayLen() > 1 {
@@ -291,6 +291,10 @@ func rawDecodeN(kind string, raw []byte, n int32) kvspace.XValue {
 		return kvspace.DecodeFloat32(raw)
 	case "float64":
 		return kvspace.DecodeFloat64(raw)
+	case "char/utf32":
+		return kvspace.DecodeChar32(raw)
+	case "char/utf8":
+		return kvspace.DecodeCharByte(raw)
 	default:
 		panic("rawDecodeN: unknown kind " + kind)
 	}

@@ -7,10 +7,10 @@ import (
 	"github.com/array2d/kvspace-go"
 )
 
-// Bytes returns the raw UTF-8 bytes of a charbyte XValue.
+// Bytes returns the raw UTF-8 bytes of a char/utf8 XValue.
 func Bytes(v kvspace.XValue) []byte {
-	if v.Kind() != kvspace.KindCharByte {
-		panic("utf8.Bytes: expected charbyte, got " + v.Kind())
+	if v.Kind() != kvspace.KindCharUtf8 {
+		panic("utf8.Bytes: expected char/utf8, got " + v.Kind())
 	}
 	return kvspace.BodyBytes(v)
 }

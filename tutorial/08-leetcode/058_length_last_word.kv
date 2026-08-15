@@ -2,7 +2,7 @@
 # 来源: LeetCode #58
 # 期望输出:
 #   5
-rwfunc last_word_len(s:charbyte) -> () {
+rwfunc last_word_len(s:char/utf32) -> () {
 	n = string.len(s)  # = 等价于 <-
 	n - 1 -> i
 	count <- 0

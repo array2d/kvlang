@@ -72,9 +72,9 @@ func resolveWriteSlot(kv kvspace.KVSpace, framePath, name string) string {
 		argAddr := kvspace.GetOne(kv, keytree.Stack(rwRoot)+kvspace.PtrTarget(ptrVal))
 		if !kvspace.IsNone(argAddr) {
 			v := argAddr
-			for v.Kind() == kvspace.KindCharByte {
+			for kvspace.IsCharKind(v.Kind()) {
 				next := kvspace.GetOne(kv, v.ValueString())
-				if kvspace.IsNone(next) || next.Kind() != kvspace.KindCharByte {
+				if kvspace.IsNone(next) || !kvspace.IsCharKind(next.Kind()) {
 					return v.ValueString()
 				}
 				v = next

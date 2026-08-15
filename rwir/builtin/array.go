@@ -120,21 +120,25 @@ func (atOp) Call(f *rwir.Frame) error {
 		return fmt.Errorf("TypeError: at requires array and index")
 	}
 	// string base 分流（fix-025）：以 "/" 开头 = 路径指针（键族 deref）；否则 = 字符序列。
-	// s[i] 读返单字符字符串（动态阵营，与 char 一致）；越界/非整型索引返 ""（缺席语义）。
-	if inputs[0].Kind() == "charbyte" && !strings.HasPrefix(inputs[0].ValueString(), "/") {
-		s := inputs[0].ValueString()
+	// s[i] 读返第 i 个码点；越界/非整型索引返 ""（缺席语义）。
+	if kvspace.IsCharKind(inputs[0].Kind()) && !strings.HasPrefix(inputs[0].ValueString(), "/") {
+		if err := varLenCharErr(inputs[0].Kind()); err != nil {
+			vthread.SetError(bg, f.KV, f.Vtid, f.PC, err.Error())
+			return err
+		}
 		if !isIntKind(inputs[1].Kind()) {
-			return writeResult(f, kvspace.NewCharByte([]byte("")...))
+			return writeResult(f, kvspace.NewChar32())
 		}
 		idx := int(asInt64(inputs[1]))
-		if idx < 0 || idx >= len(s) {
-			return writeResult(f, kvspace.NewCharByte([]byte("")...))
+		runes := stringRunes(inputs[0])
+		if idx < 0 || idx >= len(runes) {
+			return writeResult(f, kvspace.NewChar32())
 		}
-		return writeResult(f, kvspace.NewCharByte([]byte(s[idx:idx+1])...))
+		return writeResult(f, kvspace.NewChar32(runes[idx]))
 	}
 	// 路径访问：at(/path, key) or at(ptr, "field") or h.*key
 	// 排除 typed array（int32/float64/…）：用字符串 key 对同构数组做路径访问是错误。
-	if (inputs[0].Kind() == "dict" || inputs[0].Kind() == "charbyte" || inputs[1].Kind() == "charbyte" || len(f.Inst.Reads) > 0 && (f.Inst.Reads[0].Name[0] == '/' || f.Inst.Reads[0].Name[0] == '"' && len(f.Inst.Reads[0].Name) > 1 && f.Inst.Reads[0].Name[1] == '/'))  {
+	if (inputs[0].Kind() == "dict" || kvspace.IsCharKind(inputs[0].Kind()) || kvspace.IsCharKind(inputs[1].Kind()) || len(f.Inst.Reads) > 0 && (f.Inst.Reads[0].Name[0] == '/' || f.Inst.Reads[0].Name[0] == '"' && len(f.Inst.Reads[0].Name) > 1 && f.Inst.Reads[0].Name[1] == '/'))  {
 		fp := keytree.FrameRoot(f.PC)
 		funcFrame := funcFrameRoot(f.KV, fp)
 		base := resolveBasePath(f.KV, fp, funcFrame, f.Inst.Reads[0])
@@ -142,7 +146,7 @@ func (atOp) Call(f *rwir.Frame) error {
 		v := kvspace.GetOne(f.KV, path); return writeResult(f, v)
 	}
 	// 拒绝 string 索引 typed array（五语言中仅 JS 允许，C/Python/Rust/Go 均编译/运行时拒绝）
-	if kvspace.ElemSize(inputs[0].Kind()) > 0 && inputs[1].Kind() == "charbyte" {
+	if kvspace.ElemSize(inputs[0].Kind()) > 0 && kvspace.IsCharKind(inputs[1].Kind()) {
 		msg := "IndexError: at: index must be integer for typed array"
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
 		return fmt.Errorf("%s", msg)
@@ -242,28 +246,32 @@ func (arraySetOp) Call(f *rwir.Frame) error {
 		return fmt.Errorf("TypeError: set requires array, index, value")
 	}
 	arr := inputs[0]
-	// string base 分流（fix-025）：非 "/" 开头 = 字符序列，s[i] 写 = 单字符替换后整串回写
+	// string base 分流（fix-025）：非 "/" 开头 = 字符序列，s[i] 写 = 替换第 i 个码点后整串回写
 	// （C 直觉 + kvlang 值语义；五语言中仅 C 可变，Python/Go/Rust/JS 字符串不可变，
 	//   kvlang 以"写回新串"呈现 C 直觉、保持值语义）。越界报错（C 为 UB，此处显式）。
-	if arr.Kind() == "charbyte" && !strings.HasPrefix(arr.ValueString(), "/") {
-		sv := arr.ValueString()
+	if kvspace.IsCharKind(arr.Kind()) && !strings.HasPrefix(arr.ValueString(), "/") {
+		if err := varLenCharErr(arr.Kind()); err != nil {
+			vthread.SetError(bg, f.KV, f.Vtid, f.PC, err.Error())
+			return err
+		}
 		idx := int(asInt64(inputs[1]))
-		ch := inputs[2].ValueString()
-		if idx < 0 || idx >= len(sv) {
-			msg := fmt.Sprintf("IndexError: set: string index %d out of bounds (len=%d); help: try adjusting the index or check string.len first", idx, len(sv))
+		runes := stringRunes(arr)
+		if idx < 0 || idx >= len(runes) {
+			msg := fmt.Sprintf("IndexError: set: string index %d out of bounds (len=%d); help: try adjusting the index or check string.len first", idx, len(runes))
 			vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
 			return fmt.Errorf("%s", msg)
 		}
-		if len(ch) == 0 {
+		repl := stringRunes(inputs[2])
+		if len(repl) == 0 {
 			vthread.SetError(bg, f.KV, f.Vtid, f.PC, "TypeError: set: replacement char is empty")
 			return fmt.Errorf("TypeError: set: replacement char is empty")
 		}
-		result := sv[:idx] + ch[:1] + sv[idx+1:]
-		return writeResult(f, kvspace.NewCharByte([]byte(result)...))
+		runes[idx] = repl[0]
+		return writeResult(f, kvspace.NewChar32(runes...))
 	}
 	// 路径写入：set(/path, key, val) or set(ptr, "field", val)
 	// 排除 typed array（int32/float64/…）：用字符串 key 对同构数组做路径访问是错误。
-	if (inputs[0].Kind() == "dict" || inputs[0].Kind() == "charbyte" || inputs[1].Kind() == "charbyte" || len(f.Inst.Reads) > 0 && (f.Inst.Reads[0].Name[0] == '/' || f.Inst.Reads[0].Name[0] == '"' && len(f.Inst.Reads[0].Name) > 1 && f.Inst.Reads[0].Name[1] == '/'))  {
+	if (inputs[0].Kind() == "dict" || kvspace.IsCharKind(inputs[0].Kind()) || kvspace.IsCharKind(inputs[1].Kind()) || len(f.Inst.Reads) > 0 && (f.Inst.Reads[0].Name[0] == '/' || f.Inst.Reads[0].Name[0] == '"' && len(f.Inst.Reads[0].Name) > 1 && f.Inst.Reads[0].Name[1] == '/'))  {
 		fp := keytree.FrameRoot(f.PC)
 		funcFrame := funcFrameRoot(f.KV, fp)
 		base := resolveBasePath(f.KV, fp, funcFrame, f.Inst.Reads[0])
@@ -278,7 +286,7 @@ func (arraySetOp) Call(f *rwir.Frame) error {
 		return nil
 	}
 	// 拒绝 string 索引 typed array（五语言中仅 JS 允许，C/Python/Rust/Go 均编译/运行时拒绝）
-	if kvspace.ElemSize(arr.Kind()) > 0 && inputs[1].Kind() == "charbyte" {
+	if kvspace.ElemSize(arr.Kind()) > 0 && kvspace.IsCharKind(inputs[1].Kind()) {
 		msg := "IndexError: set: index must be integer for typed array"
 		vthread.SetError(bg, f.KV, f.Vtid, f.PC, msg)
 		return fmt.Errorf("%s", msg)
@@ -505,7 +513,7 @@ func separatedLen(kv kvspace.KVSpace, base string) int {
 }
 
 func kvKey(v kvspace.XValue) string {
-	if v.Kind() == "charbyte" { return v.ValueString() }
+	if kvspace.IsCharKind(v.Kind()) { return v.ValueString() }
 	if isIntKind(v.Kind()) { return strconv.FormatInt(asInt64(v), 10) }
 	panic("kvKey: expected string or int kind, got " + v.Kind())
 }

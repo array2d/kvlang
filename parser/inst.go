@@ -379,6 +379,24 @@ func (p *parser) parsePrimaryExpr() *ast.Expr {
 		return ast.Call(opcode, args...)
 	}
 
+	// 斜杠函数调用：char/utf8(args, ...) — kind 名含 / 的转换函数
+	// token 流：IDENT LITERAL_PATH LPAREN ... — 合并为 kind 名
+	if p.peek().Kind == Ident && p.peekAt(1).Kind == Literal &&
+		len(p.peekAt(1).Value) > 0 && p.peekAt(1).Value[0] == '/' &&
+		p.peekAt(2).Kind == LParen {
+		opcode := p.advance().Value // consume IDENT
+		opcode += p.advance().Value // consume LITERAL_PATH（含前导 /）
+		p.advance()                 // consume (
+		var args []*ast.Expr
+		for p.peek().Kind != RParen && p.peek().Kind != EOF {
+			if p.eat(Comma) { continue }
+			arg := p.parsePratt(0)
+			if arg != nil { args = append(args, arg) }
+		}
+		p.expect(RParen)
+		return ast.Call(opcode, args...)
+	}
+
 	// 叶节点：变量名、字面量、路径、裸操作码
 	t = p.advance()
 	if t.Kind == Literal {
