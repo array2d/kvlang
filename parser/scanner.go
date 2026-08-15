@@ -348,7 +348,7 @@ func Scan(src string) []Token {
 			continue
 		}
 
-		// 关键字 / 标识符（含点号：tensor.new 等）
+		// 关键字 / 标识符（含点号：string.len 等）
 		start := i
 		for i < len(src) && !isTokenDelim(src[i]) {
 			i++
