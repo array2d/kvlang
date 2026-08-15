@@ -33,6 +33,7 @@ import (
 	"kvlang/lower"
 	"kvlang/rwir"
 	"kvlang/rwir/builtin"
+	"kvlang/rwir/ext"
 	"kvlang/vthread"
 )
 
@@ -56,7 +57,7 @@ func writeStmt(kv kvspace.KVSpace, st ast.Stmt, prefix string, idx *int, typeMap
 			}
 		}
 		opcode, reads := s.Flat()
-		if pkg != "" && !builtin.IsNativeRwir(opcode) && !builtin.IsGlobalRwir(opcode) && !rwir.IsControlOp(opcode) &&
+		if pkg != "" && !builtin.IsNativeRwir(opcode) && !ext.IsGlobalRwir(opcode) && !rwir.IsControlOp(opcode) &&
 			!strings.Contains(opcode, keytree.MemberSep) && !strings.HasPrefix(opcode, keytree.LibRoot+keytree.PathSegSep) &&
 			symbol.Lookup(opcode).Word != "assign" {
 			opcode = pkg + keytree.MemberSep + opcode
@@ -102,7 +103,7 @@ func writeStmtScope(kv kvspace.KVSpace, st ast.Stmt, scopePrefix string, idx *in
 			}
 		}
 		opcode, reads := s.Flat()
-		if pkg != "" && !builtin.IsNativeRwir(opcode) && !builtin.IsGlobalRwir(opcode) && !rwir.IsControlOp(opcode) &&
+		if pkg != "" && !builtin.IsNativeRwir(opcode) && !ext.IsGlobalRwir(opcode) && !rwir.IsControlOp(opcode) &&
 			!strings.Contains(opcode, keytree.MemberSep) && !strings.HasPrefix(opcode, keytree.LibRoot+keytree.PathSegSep) &&
 			symbol.Lookup(opcode).Word != "assign" {
 			opcode = pkg + keytree.MemberSep + opcode

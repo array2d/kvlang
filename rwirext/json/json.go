@@ -1,7 +1,13 @@
-// Package json 提供 json.to / json.from 两个 rwir 的 rwirext（外部执行器）。
-// json.to(rootkey)：把 rootkey 下的整棵子树递归读成 map[string]any 再 json.Marshal。
-// json.from(json)：把 JSON 反序列化为 map[string]any 再递归写回 KV 子树。
-// 数组：compact []T（单 key 多元素）与散 key（name<0>..name<N-1>）统一序列化为 JSON 数组。
+// Package json 是 rwirext 扩展运行时（另一个是 term）。
+//
+// 一个 rwirext 只需做三件事：
+//  1. 用 ext.Ext 声明己方 rwir（opcode + 签名 + 读写参数量）；
+//  2. Register/Serve 两行转发（注册签名、常驻监控 .todo、批量执行、交还 PC）；
+//  3. exec 按 opcode 分发到具体 handler。
+//
+// 中央 kvlang runtime 把控制权交给扩展运行时，扩展运行时批量执行己方 rwir
+// 直到遇到非己方指令，再把最终 PC 写回 /vthread/<vtid>/pc。livebyte 的 agent
+// 扩展照此模板实现即可：声明 op 集合与 exec 分发，其余由框架负责。
 package json
 
 import (
@@ -11,62 +17,25 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/array2d/kvspace-go"
 	"kvlang/keytree"
 	"kvlang/rwir"
 	"kvlang/rwir/builtin"
+	"kvlang/rwir/ext"
 )
 
-var ops = []string{"json.to", "json.from"}
-
-var opSet = map[string]bool{"json.to": true, "json.from": true}
-
-// Register 注册 json.to/json.from 两个 rwir 到 /rwir/（kind=rwir），幂等。
-func Register(kv kvspace.KVSpace) {
-	kv.Set([]kvspace.KVPair{
-		{Key: "/rwir/json.to", Val: kvspace.NewRwir(1, 1, "rwir json.to(rootkey:charbyte) -> (dest:[]charbyte)")},
-		{Key: "/rwir/json.from", Val: kvspace.NewRwir(1, 1, "rwir json.from(src:[]charbyte) -> (rootkey:charbyte)")},
-	})
-	for _, op := range ops {
-		builtin.RegisterGlobalRwir(op)
-	}
+// rt 声明 json 扩展运行时：json.to / json.from 两个 rwir。
+var rt = ext.Ext{
+	Ops: []ext.Op{
+		{Name: "json.to", Sig: "rwir json.to(rootkey:charbyte) -> (dest:[]charbyte)", Nr: 1, Nw: 1},
+		{Name: "json.from", Sig: "rwir json.from(src:[]charbyte) -> (rootkey:charbyte)", Nr: 1, Nw: 1},
+	},
+	Exec: exec,
 }
 
-// Serve 常驻循环：持续处理各 rwir 的 .todo<vid>。
-func Serve(kv kvspace.KVSpace) {
-	for {
-		Register(kv) // 幂等重注册，兜底外部 FLUSHALL 清空 /rwir
-		for _, op := range ops {
-			serve(kv, op)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-}
-
-func serve(kv kvspace.KVSpace, op string) {
-	ctx := context.Background()
-	base := "/rwir/" + op
-	for _, child := range kv.List(base+"/", false, false) {
-		if !strings.HasPrefix(child, ".todo<") {
-			continue
-		}
-		vid := strings.TrimSuffix(strings.TrimPrefix(child, ".todo<"), ">")
-		pcID := kvspace.GetOne(kv, base+"/"+child).ValueString()
-		pc, id := pcID, ""
-		if i := strings.LastIndex(pcID, "|"); i >= 0 {
-			pc, id = pcID[:i], pcID[i+1:]
-		}
-
-		// 批量执行己方 rwir，直到下一条非己方指令
-		finalPC := builtin.RunBatch(ctx, kv, pc, opSet, exec)
-		builtin.FinishBatch(kv, vid, finalPC)
-
-		kv.Set([]kvspace.KVPair{{Key: base + "/.done<" + vid + ">", Val: kvspace.NewCharByte([]byte(id)...)}})
-		kv.Del(base + "/" + child)
-	}
-}
+func Register(kv kvspace.KVSpace) { rt.Register(kv) }
+func Serve(kv kvspace.KVSpace)    { rt.Serve(kv) }
 
 func exec(_ context.Context, kv kvspace.KVSpace, pc string, inst *rwir.Rwir) {
 	if inst.Opcode == "json.to" {

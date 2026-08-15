@@ -1,16 +1,17 @@
-// term：print/println/cerr/input 四个 rwir 的常驻外部执行器（rwirext）。
+// Package term 是 rwirext 扩展运行时：print/println/cerr/input 四个 rwir。
+// 只需声明己方 op（含各自行为标志），交给 ext.Ext 框架注册与常驻执行。
 // 自行解释执行：直接写 /dev/stdout|stderr、读 /dev/stdin，无终端发现。
 package term
 
 import (
 	"context"
 	"strings"
-	"time"
 
 	"github.com/array2d/kvspace-go"
 	"kvlang/keytree"
 	"kvlang/rwir"
 	"kvlang/rwir/builtin"
+	"kvlang/rwir/ext"
 )
 
 type op struct {
@@ -29,68 +30,33 @@ var ops = []op{
 	{name: "input", sig: "rwir input(prompt:charbyte?) -> (C:charbyte)", input: true},
 }
 
-var opSet = map[string]bool{}
+var rt = ext.Ext{Ops: toOps(), Exec: exec}
+
 var opByOpcode = map[string]op{}
 
-// init 在包导入时标记这些 opcode 为全局 rwir（layout 不补 pkg 前缀）。
+// init 在包导入时标记全局 rwir：term 与中央 runtime 同进程，vet/format 也会 layout
+// 用户代码但不调 Register，必须在导入期就注册，否则裸 opcode 会被补 pkg 前缀。
 func init() {
 	for _, o := range ops {
-		builtin.RegisterGlobalRwir(o.name)
-		opSet[o.name] = true
+		ext.RegisterGlobalRwir(o.name)
 		opByOpcode[o.name] = o
 	}
 }
 
-// Register 把 term 承载的 rwir 注册到 /rwir/（kind=rwir），幂等。
-func Register(kv kvspace.KVSpace) {
-	pairs := make([]kvspace.KVPair, 0, len(ops))
-	for _, o := range ops {
+func toOps() []ext.Op {
+	out := make([]ext.Op, len(ops))
+	for i, o := range ops {
 		nr, nw := int32(1), int32(0)
 		if o.input {
 			nw = 1
 		}
-		pairs = append(pairs, kvspace.KVPair{
-			Key: keytree.Rwir(o.name),
-			Val: kvspace.NewRwir(nr, nw, o.sig),
-		})
+		out[i] = ext.Op{Name: o.name, Sig: o.sig, Nr: nr, Nw: nw}
 	}
-	kv.Set(pairs)
+	return out
 }
 
-// Serve 常驻循环：持续处理各 rwir 的 .todo<vid>。
-func Serve(kv kvspace.KVSpace) {
-	for {
-		Register(kv) // 幂等重注册，兜底外部 FLUSHALL 清空 /rwir
-		for _, o := range ops {
-			serveOne(kv, o)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-}
-
-func serveOne(kv kvspace.KVSpace, o op) {
-	ctx := context.Background()
-	base := keytree.Rwir(o.name)
-	for _, child := range kv.List(base+"/", false, false) {
-		if !strings.HasPrefix(child, ".todo<") {
-			continue
-		}
-		vid := strings.TrimSuffix(strings.TrimPrefix(child, ".todo<"), ">")
-		pcID := kvspace.GetOne(kv, base+"/"+child).ValueString()
-		pc, id := pcID, ""
-		if i := strings.LastIndex(pcID, "|"); i >= 0 {
-			pc, id = pcID[:i], pcID[i+1:]
-		}
-
-		// 批量执行己方 rwir，直到下一条非己方指令
-		finalPC := builtin.RunBatch(ctx, kv, pc, opSet, exec)
-		builtin.FinishBatch(kv, vid, finalPC)
-
-		doneKey := base + "/.done<" + vid + ">"
-		kv.Set([]kvspace.KVPair{{Key: doneKey, Val: kvspace.NewCharByte([]byte(id)...)}})
-		kv.Del(base + "/" + child)
-	}
-}
+func Register(kv kvspace.KVSpace) { rt.Register(kv) }
+func Serve(kv kvspace.KVSpace)    { rt.Serve(kv) }
 
 func exec(_ context.Context, kv kvspace.KVSpace, pc string, inst *rwir.Rwir) {
 	o := opByOpcode[inst.Opcode]
@@ -131,7 +97,6 @@ func handleInput(kv kvspace.KVSpace, pc string, inst *rwir.Rwir) {
 		}
 	}
 	val, _ := readFile("/dev/stdin")
-	// 直接写回 input 调用处的写槽（pc 的写参），不经过 .result 中转
 	if len(inst.Writes) > 0 {
 		writeKey := builtin.ResolveWriteSlot(kv, keytree.FrameRoot(pc), inst.Writes[0].Name)
 		kv.Set([]kvspace.KVPair{{Key: writeKey, Val: kvspace.NewCharByte([]byte(val)...)}})
