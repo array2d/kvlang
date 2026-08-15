@@ -2,9 +2,9 @@
 //
 // 终端发现流程：
 //   /vthread/<vtid>/term → 终端名称 $name（默认空字符串，空则无终端）
-//   /sys/term/${name}/stdout  → {type, detail}
-//   /sys/term/${name}/stderr  → {type, detail}
-//   /sys/term/${name}/stdin   → {type, detail}
+//   /dev/tty/${name}/stdout  → {type, detail}
+//   /dev/tty/${name}/stderr  → {type, detail}
+//   /dev/tty/${name}/stdin   → {type, detail}
 //
 // type 取值: "file"
 // detail: 文件路径
@@ -26,7 +26,7 @@ type TermStream struct {
 // IsZero 终端未配置时返回 true。
 func (s TermStream) IsZero() bool { return s.Type == "" }
 
-// ResolveTerm 通过 /vthread/<vtid>/term → /sys/term/${name}/${stream} 解析终端流配置。
+// ResolveTerm 通过 /vthread/<vtid>/term → /dev/tty/${name}/${stream} 解析终端流配置。
 func ResolveTerm(kv kvspace.KVSpace, vtid, stream string) TermStream {
 	name := kvspace.GetOne(kv, keytree.VThreadTerm(vtid)).ValueString()
 	if name == "" {

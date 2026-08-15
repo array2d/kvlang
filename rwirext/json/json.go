@@ -21,6 +21,8 @@ import (
 
 var ops = []string{"json.to", "json.from"}
 
+var opSet = map[string]bool{"json.to": true, "json.from": true}
+
 // Register 注册 json.to/json.from 两个 rwir 到 /rwir/（kind=rwir），幂等。
 func Register(kv kvspace.KVSpace) {
 	kv.Set([]kvspace.KVPair{
@@ -57,21 +59,26 @@ func serve(kv kvspace.KVSpace, op string) {
 			pc, id = pcID[:i], pcID[i+1:]
 		}
 
-		if op == "json.to" {
-			doTo(ctx, kv, pc)
-		} else {
-			doFrom(ctx, kv, pc)
-		}
+		// 批量执行己方 rwir，直到下一条非己方指令
+		finalPC := builtin.RunBatch(ctx, kv, pc, opSet, exec)
+		builtin.FinishBatch(kv, vid, finalPC)
 
 		kv.Set([]kvspace.KVPair{{Key: base + "/.done<" + vid + ">", Val: kvspace.NewCharByte([]byte(id)...)}})
 		kv.Del(base + "/" + child)
 	}
 }
 
+func exec(_ context.Context, kv kvspace.KVSpace, pc string, inst *rwir.Rwir) {
+	if inst.Opcode == "json.to" {
+		doTo(kv, pc, inst)
+	} else {
+		doFrom(kv, pc, inst)
+	}
+}
+
 // doTo 序列化：rootkey 子树 → map[string]any → json.Marshal → 写回写参 dest。
-func doTo(ctx context.Context, kv kvspace.KVSpace, pc string) {
-	inst, err := rwir.Decode(ctx, kv, keytree.Stack(keytree.FrameRoot(pc)), pc)
-	if err != nil || len(inst.Reads) == 0 || len(inst.Writes) == 0 {
+func doTo(kv kvspace.KVSpace, pc string, inst *rwir.Rwir) {
+	if len(inst.Reads) == 0 || len(inst.Writes) == 0 {
 		return
 	}
 	root := rootKey(kv, keytree.FrameRoot(pc), inst.Reads[0])
@@ -81,9 +88,8 @@ func doTo(ctx context.Context, kv kvspace.KVSpace, pc string) {
 }
 
 // doFrom 反序列化：JSON → map[string]any → 递归写回 rootkey（写参）子树。
-func doFrom(ctx context.Context, kv kvspace.KVSpace, pc string) {
-	inst, err := rwir.Decode(ctx, kv, keytree.Stack(keytree.FrameRoot(pc)), pc)
-	if err != nil || len(inst.Reads) == 0 || len(inst.Writes) == 0 {
+func doFrom(kv kvspace.KVSpace, pc string, inst *rwir.Rwir) {
+	if len(inst.Reads) == 0 || len(inst.Writes) == 0 {
 		return
 	}
 	src := builtin.ResolveReadValue(kv, keytree.FrameRoot(pc), inst.Reads[0])

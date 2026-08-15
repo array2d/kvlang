@@ -15,7 +15,6 @@ import (
 	"kvlang/logx"
 	"kvlang/rwir"
 	"kvlang/rwir/builtin"
-	"kvlang/rwir/dispatch"
 	"kvlang/vthread"
 )
 
@@ -28,10 +27,9 @@ const MaxStackDepth = 256
 // Dispatch 优先级：
 //  1. IsControlOp   — call/return/br/goto 控制流原语
 //  2. IsNativeRwir  — +/-/*/print/sqrt 等标量内建算子
-//  3. tensor.*      — tensor 命名空间算子（op/dispatch）
-//  4. isCopyOp      — 路径/字面量复制
-//  5. isUserRwir    — 用户声明的 rwir（查 /rwir/<opcode>）→ 外部执行器 handoff
-//  6. default       — 用户定义函数（rewrite as call）
+//  3. isCopyOp      — 路径/字面量复制
+//  4. isUserRwir    — 用户声明的 rwir（查 /rwir/<opcode>）→ 外部执行器 handoff
+//  5. default       — 用户定义函数（rewrite as call）
 //     ↓ HandleCall 内查 FuncIdx；未找到 → SetError
 //
 // 调试支持（内置，无需特殊启动）：
@@ -156,21 +154,17 @@ func (c *cpu) Execute(pc string) error {
 		case builtin.IsNativeRwir(inst.Opcode):
 			execErr = builtin.Native(ctx, c.kv, vtid, pc, inst)
 
-		// ── 3. tensor 命名空间算子（op/dispatch）────────────────────────
-		case strings.HasPrefix(inst.Opcode, "tensor."):
-			execErr = dispatch.Compute(ctx, c.kv, vtid, pc, inst)
-
-		// ── 4. 路径/变量复制（ ./x -> dst 或 /abs -> dst 或 a -> b）──────
+		// ── 3. 路径/变量复制（ ./x -> dst 或 /abs -> dst 或 a -> b）──────
 		//    当 opcode 为路径或字面量且有写槽时，视为 copy 操作。
 		//    裸标识符由 Flat() 归一化为 ./ident，此处通过路径检查统一识别。
 		case isCopyOp(inst.Opcode, inst.Writes):
 			execErr = builtin.ExecuteCopy(c.kv, vtid, pc, inst)
 
-		// ── 5. 用户声明的 rwir（读写码）：/rwir/<opcode> 存在 → 外部执行器 handoff ──
+		// ── 4. 用户声明的 rwir（读写码）：/rwir/<opcode> 存在 → 外部执行器 handoff ──
 		case isUserRwir(c.kv, inst.Opcode):
 			execErr = handoffExternalRwir(ctx, c.kv, vtid, pc, inst)
 
-		// ── 6. 用户定义函数（default → rewrite as call）─────────────────
+		// ── 5. 用户定义函数（default → rewrite as call）─────────────────
 		//    不含 dot、不在任何静态集合 → 必然是用户 func
 		//    HandleCall 负责 FuncIdx 查找；未找到 → SetError
 		default:
@@ -239,7 +233,7 @@ func handoffExternalRwir(ctx context.Context, kv kvspace.KVSpace, vtid, pc strin
 		vthread.SetError(ctx, kv, vtid, pc, msg)
 		return fmt.Errorf("%s", msg)
 	}
-	vthread.Set(ctx, kv, vtid, rwir.NextPC(pc), "running")
+	// 不在此推进 PC：cpuext 批量执行己方 rwir 后，已把最终 PC 写回 /vthread/<vtid>/pc。
 	return nil
 }
 

@@ -29,10 +29,15 @@ var ops = []op{
 	{name: "input", sig: "rwir input(prompt:charbyte?) -> (C:charbyte)", input: true},
 }
 
+var opSet = map[string]bool{}
+var opByOpcode = map[string]op{}
+
 // init 在包导入时标记这些 opcode 为全局 rwir（layout 不补 pkg 前缀）。
 func init() {
 	for _, o := range ops {
 		builtin.RegisterGlobalRwir(o.name)
+		opSet[o.name] = true
+		opByOpcode[o.name] = o
 	}
 }
 
@@ -94,11 +99,9 @@ func serveOne(kv kvspace.KVSpace, o op) {
 			pc, id = pcID[:i], pcID[i+1:]
 		}
 
-		if o.input {
-			handleInput(ctx, kv, pc)
-		} else {
-			handlePrint(ctx, kv, o, pc)
-		}
+		// 批量执行己方 rwir，直到下一条非己方指令
+		finalPC := builtin.RunBatch(ctx, kv, pc, opSet, exec)
+		builtin.FinishBatch(kv, vid, finalPC)
 
 		doneKey := base + "/.done<" + vid + ">"
 		kv.Set([]kvspace.KVPair{{Key: doneKey, Val: kvspace.NewCharByte([]byte(id)...)}})
@@ -106,11 +109,16 @@ func serveOne(kv kvspace.KVSpace, o op) {
 	}
 }
 
-func handlePrint(ctx context.Context, kv kvspace.KVSpace, o op, pc string) {
-	inst, err := rwir.Decode(ctx, kv, keytree.Stack(keytree.FrameRoot(pc)), pc)
-	if err != nil {
-		return
+func exec(_ context.Context, kv kvspace.KVSpace, pc string, inst *rwir.Rwir) {
+	o := opByOpcode[inst.Opcode]
+	if o.input {
+		handleInput(kv, pc, inst)
+	} else {
+		handlePrint(kv, o, pc, inst)
 	}
+}
+
+func handlePrint(kv kvspace.KVSpace, o op, pc string, inst *rwir.Rwir) {
 	vtid := keytree.VtidFromPC(pc)
 	parts := make([]string, len(inst.Reads))
 	for i, r := range inst.Reads {
@@ -137,11 +145,7 @@ func handlePrint(ctx context.Context, kv kvspace.KVSpace, o op, pc string) {
 	}
 }
 
-func handleInput(ctx context.Context, kv kvspace.KVSpace, pc string) {
-	inst, err := rwir.Decode(ctx, kv, keytree.Stack(keytree.FrameRoot(pc)), pc)
-	if err != nil {
-		return
-	}
+func handleInput(kv kvspace.KVSpace, pc string, inst *rwir.Rwir) {
 	vtid := keytree.VtidFromPC(pc)
 	if len(inst.Reads) > 0 {
 		v := builtin.ResolveReadValue(kv, keytree.FrameRoot(pc), inst.Reads[0])
