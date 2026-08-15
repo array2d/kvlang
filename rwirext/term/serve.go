@@ -1,5 +1,5 @@
 // term：print/println/cerr/input 四个 rwir 的常驻外部执行器（rwirext）。
-// 复用 term 包的终端传输层（ResolveTerm/WriteTerm/ReadTerm），拿 pc 直接 Decode 读参，零值搬运。
+// 自行解释执行：直接写 /dev/stdout|stderr、读 /dev/stdin，无终端发现。
 package term
 
 import (
@@ -41,9 +41,8 @@ func init() {
 	}
 }
 
-// Register 把 term 承载的 rwir 注册到 /rwir/（kind=rwir），并设置默认终端，幂等。
+// Register 把 term 承载的 rwir 注册到 /rwir/（kind=rwir），幂等。
 func Register(kv kvspace.KVSpace) {
-	registerDefaultTerm(kv)
 	pairs := make([]kvspace.KVPair, 0, len(ops))
 	for _, o := range ops {
 		nr, nw := int32(1), int32(0)
@@ -56,22 +55,6 @@ func Register(kv kvspace.KVSpace) {
 		})
 	}
 	kv.Set(pairs)
-}
-
-// registerDefaultTerm 设置默认终端 kvlangrun → file /dev/stdout|stderr|stdin。
-func registerDefaultTerm(kv kvspace.KVSpace) {
-	h := keytree.DevTTY("kvlangrun", "")
-	kvspace.MkIndexRecursive(kv, h+"stdout/")
-	kvspace.MkIndexRecursive(kv, h+"stderr/")
-	kvspace.MkIndexRecursive(kv, h+"stdin/")
-	kv.Set([]kvspace.KVPair{
-		{Key: h + "stdout/type", Val: kvspace.NewCharByte([]byte("file")...)},
-		{Key: h + "stdout/detail", Val: kvspace.NewCharByte([]byte("/dev/stdout")...)},
-		{Key: h + "stderr/type", Val: kvspace.NewCharByte([]byte("file")...)},
-		{Key: h + "stderr/detail", Val: kvspace.NewCharByte([]byte("/dev/stderr")...)},
-		{Key: h + "stdin/type", Val: kvspace.NewCharByte([]byte("file")...)},
-		{Key: h + "stdin/detail", Val: kvspace.NewCharByte([]byte("/dev/stdin")...)},
-	})
 }
 
 // Serve 常驻循环：持续处理各 rwir 的 .todo<vid>。
@@ -119,7 +102,6 @@ func exec(_ context.Context, kv kvspace.KVSpace, pc string, inst *rwir.Rwir) {
 }
 
 func handlePrint(kv kvspace.KVSpace, o op, pc string, inst *rwir.Rwir) {
-	vtid := keytree.VtidFromPC(pc)
 	parts := make([]string, len(inst.Reads))
 	for i, r := range inst.Reads {
 		parts[i] = builtin.Display(builtin.ResolveReadValue(kv, keytree.FrameRoot(pc), r))
@@ -130,37 +112,25 @@ func handlePrint(kv kvspace.KVSpace, o op, pc string, inst *rwir.Rwir) {
 	}
 	line := strings.Join(parts, sep)
 
-	stream := "stdout"
+	path := "/dev/stdout"
 	if o.cerr {
-		stream = "stderr"
-	}
-	ts := ResolveTerm(kv, vtid, stream)
-	if ts.IsZero() {
-		return
+		path = "/dev/stderr"
 	}
 	if o.rawnl {
-		WriteTermRaw(ts, line)
+		writeFileRaw(path, line)
 	} else {
-		WriteTerm(ts, line)
+		writeFile(path, line)
 	}
 }
 
 func handleInput(kv kvspace.KVSpace, pc string, inst *rwir.Rwir) {
-	vtid := keytree.VtidFromPC(pc)
 	if len(inst.Reads) > 0 {
 		v := builtin.ResolveReadValue(kv, keytree.FrameRoot(pc), inst.Reads[0])
 		if prompt := builtin.Display(v); prompt != "" {
-			ts := ResolveTerm(kv, vtid, "stdout")
-			if !ts.IsZero() {
-				WriteTerm(ts, prompt)
-			}
+			writeFile("/dev/stdout", prompt)
 		}
 	}
-	ts := ResolveTerm(kv, vtid, "stdin")
-	if ts.IsZero() {
-		return
-	}
-	val, _ := ReadTerm(ts)
+	val, _ := readFile("/dev/stdin")
 	// 直接写回 input 调用处的写槽（pc 的写参），不经过 .result 中转
 	if len(inst.Writes) > 0 {
 		writeKey := builtin.ResolveWriteSlot(kv, keytree.FrameRoot(pc), inst.Writes[0].Name)

@@ -18,7 +18,6 @@ func VThreadPC(vtid string) string              { return vtMember(vtid, SegPC) }
 func VThreadStatus(vtid string) string          { return vtMember(vtid, SegStatus) }
 func VThreadCtime(vtid string) string           { return vtMember(vtid, SegCtime) }
 func VThreadDebugger(vtid string) string        { return vtMember(vtid, SegDebugger) }
-func VThreadTerm(vtid string) string            { return vtMember(vtid, SegTerm) }
 
 func VThreadStatusMsg(vtid, statusVal string) string {
 	return vtMember(vtid, statusVal) + PathSegSep + SegMsg
