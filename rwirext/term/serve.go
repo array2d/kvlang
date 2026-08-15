@@ -36,7 +36,7 @@ func init() {
 	}
 }
 
-// Register 把 term 承载的 rwir 注册到 /sys/rwir/（kind=rwir），并设置默认终端，幂等。
+// Register 把 term 承载的 rwir 注册到 /rwir/（kind=rwir），并设置默认终端，幂等。
 func Register(kv kvspace.KVSpace) {
 	registerDefaultTerm(kv)
 	pairs := make([]kvspace.KVPair, 0, len(ops))
@@ -46,7 +46,7 @@ func Register(kv kvspace.KVSpace) {
 			nw = 1
 		}
 		pairs = append(pairs, kvspace.KVPair{
-			Key: keytree.SysRwir(o.name),
+			Key: keytree.Rwir(o.name),
 			Val: kvspace.NewRwir(nr, nw, o.sig),
 		})
 	}
@@ -72,7 +72,7 @@ func registerDefaultTerm(kv kvspace.KVSpace) {
 // Serve 常驻循环：持续处理各 rwir 的 .todo<vid>。
 func Serve(kv kvspace.KVSpace) {
 	for {
-		Register(kv) // 幂等重注册，兜底外部 FLUSHALL 清空 /sys/rwir
+		Register(kv) // 幂等重注册，兜底外部 FLUSHALL 清空 /rwir
 		for _, o := range ops {
 			serveOne(kv, o)
 		}
@@ -82,7 +82,7 @@ func Serve(kv kvspace.KVSpace) {
 
 func serveOne(kv kvspace.KVSpace, o op) {
 	ctx := context.Background()
-	base := keytree.SysRwir(o.name)
+	base := keytree.Rwir(o.name)
 	for _, child := range kv.List(base+"/", false, false) {
 		if !strings.HasPrefix(child, ".todo<") {
 			continue

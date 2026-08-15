@@ -64,17 +64,17 @@ func countSigParams(sig string) (reads, writes int32) {
 	return
 }
 
-// WriteSysRwir 将所有已注册的 native rwir 签名写入 /sys/rwir/{runtime}/。
-// rwir 是空函数体（无指令体，仅签名），只能落在 /sys/rwir/{runtime}/，不进 /lib/。
+// WriteRwir 将所有已注册的 native rwir 签名写入 /rwir/{runtime}/。
+// rwir 是空函数体（无指令体，仅签名），只能落在 /rwir/{runtime}/，不进 /lib/。
 // {runtime} 反射自可执行文件名（如 kvlang），使多个 runtime 共存于同一 kvspace 不冲突。
-func WriteSysRwir(kv kvspace.KVSpace, runtime string) {
+func WriteRwir(kv kvspace.KVSpace, runtime string) {
 	pairs := make([]kvspace.KVPair, 0, len(rwirregistry))
 	for opcode, op := range rwirregistry {
 		if op.sig == "" { continue }
 		if strings.Contains(opcode, "/") { continue }
 		reads, writes := countSigParams(op.sig)
 		pairs = append(pairs, kvspace.KVPair{
-			Key: keytree.SysRwirRuntime(runtime, opcode),
+			Key: keytree.RwirRuntime(runtime, opcode),
 			Val: kvspace.NewRwir(int32(reads), int32(writes), string(op.sig)),
 		})
 	}

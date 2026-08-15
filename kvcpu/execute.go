@@ -30,7 +30,7 @@ const MaxStackDepth = 256
 //  2. IsNativeRwir  — +/-/*/print/sqrt 等标量内建算子
 //  3. tensor.*      — tensor 命名空间算子（op/dispatch）
 //  4. isCopyOp      — 路径/字面量复制
-//  5. isUserRwir    — 用户声明的 rwir（查 /sys/rwir/<opcode>）→ 外部执行器 handoff
+//  5. isUserRwir    — 用户声明的 rwir（查 /rwir/<opcode>）→ 外部执行器 handoff
 //  6. default       — 用户定义函数（rewrite as call）
 //     ↓ HandleCall 内查 FuncIdx；未找到 → SetError
 //
@@ -166,7 +166,7 @@ func (c *cpu) Execute(pc string) error {
 		case isCopyOp(inst.Opcode, inst.Writes):
 			execErr = builtin.ExecuteCopy(c.kv, vtid, pc, inst)
 
-		// ── 5. 用户声明的 rwir（读写码）：/sys/rwir/<opcode> 存在 → 外部执行器 handoff ──
+		// ── 5. 用户声明的 rwir（读写码）：/rwir/<opcode> 存在 → 外部执行器 handoff ──
 		case isUserRwir(c.kv, inst.Opcode):
 			execErr = handoffExternalRwir(ctx, c.kv, vtid, pc, inst)
 
@@ -207,14 +207,14 @@ func isCopyOp(opcode string, writes []rwir.Param) bool {
 // externalRwirTimeout 外部执行器完成 rwir 的等待超时。
 const externalRwirTimeout = 30 * time.Second
 
-// isUserRwir 判断 opcode 是否为扩展 rwir（读写码）：/sys/rwir/<opcode> 的 kind == "rwir"。
+// isUserRwir 判断 opcode 是否为扩展 rwir（读写码）：/rwir/<opcode> 的 kind == "rwir"。
 // rwir 的唯一标准是 kind；不在 rwirregistry（native builtin）内的 rwir 即扩展 rwir。
 func isUserRwir(kv kvspace.KVSpace, opcode string) bool {
 	// 全路径 opcode（如 /lib/math.sum）是函数调用，不是 rwir
 	if strings.HasPrefix(opcode, "/") {
 		return false
 	}
-	v := kvspace.GetOne(kv, keytree.SysRwir(opcode))
+	v := kvspace.GetOne(kv, keytree.Rwir(opcode))
 	return !kvspace.IsNone(v) && v.Kind() == kvspace.KindRwir
 }
 
@@ -222,9 +222,9 @@ func isUserRwir(kv kvspace.KVSpace, opcode string) bool {
 var handoffSeq int64
 
 // handoffExternalRwir 把当前 rwir 交给外部执行器：
-// 写 "pc|id" 到 /sys/rwir/<opcode>/.todo<vid>，再 watch /sys/rwir/<opcode>/.done<vid> == id。
+// 写 "pc|id" 到 /rwir/<opcode>/.todo<vid>，再 watch /rwir/<opcode>/.done<vid> == id。
 func handoffExternalRwir(ctx context.Context, kv kvspace.KVSpace, vtid, pc string, inst *rwir.Rwir) error {
-	base := keytree.SysRwir(inst.Opcode)
+	base := keytree.Rwir(inst.Opcode)
 	todoKey := base + "/.todo<" + vtid + ">"
 	doneKey := base + "/.done<" + vtid + ">"
 	id := strconv.FormatInt(atomic.AddInt64(&handoffSeq, 1), 10)

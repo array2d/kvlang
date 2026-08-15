@@ -9,11 +9,11 @@ func SysOpCmd(backend, n string) string { return SysOp(backend, n) + PathSegSep 
 func SysOpFunc(backend, name string) string { return SysRoot + PathSegSep + SegOp + PathSegSep + backend + PathSegSep + SegFunc + PathSegSep + name }
 
 const SysOpRoot   = PathSegSep + SegSys + PathSegSep + SegOp
-const SysRwirRoot = PathSegSep + SegSys + PathSegSep + SegRwir
+const RwirRoot    = PathSegSep + SegRwir
 
-func SysRwir(opcode string) string { return SysRwirRoot + PathSegSep + opcode }
+func Rwir(opcode string) string { return RwirRoot + PathSegSep + opcode }
 
-// SysRwirRuntime 返回 /sys/rwir/{runtime}/{opcode}。{runtime} 反射自可执行文件名。
-func SysRwirRuntime(runtime, opcode string) string {
-	return SysRwirRoot + PathSegSep + runtime + PathSegSep + opcode
+// RwirRuntime 返回 /rwir/{runtime}/{opcode}。{runtime} 反射自可执行文件名。
+func RwirRuntime(runtime, opcode string) string {
+	return RwirRoot + PathSegSep + runtime + PathSegSep + opcode
 }

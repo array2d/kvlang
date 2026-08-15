@@ -367,14 +367,14 @@ func WriteFunc(kv kvspace.KVSpace, pkg string, fn *ast.Func) {
 	WriteBody(kv, pkg, fn.Sig.Name, fn.Body, typeMap, 1) // 指令从 [1,0] 开始
 }
 
-// WriteRwirDecl 将用户声明的 rwir（读写码，无体）写入 /sys/rwir/<opcode>，kind=rwir。
+// WriteRwirDecl 将用户声明的 rwir（读写码，无体）写入 /rwir/<opcode>，kind=rwir。
 func WriteRwirDecl(kv kvspace.KVSpace, decl *ast.RwirDecl) {
 	opcode := decl.Sig.Name
 	if decl.Pkg != "" {
 		opcode = decl.Pkg + keytree.MemberSep + opcode
 	}
 	kv.Set([]kvspace.KVPair{{
-		Key: keytree.SysRwir(opcode),
+		Key: keytree.Rwir(opcode),
 		Val: kvspace.NewRwir(decl.Sig.NumReads(), decl.Sig.NumWrites(), decl.SigString()),
 	}})
 }

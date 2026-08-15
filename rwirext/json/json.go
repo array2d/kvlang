@@ -1,7 +1,7 @@
 // Package json 提供 json.to / json.from 两个 rwir 的 rwirext（外部执行器）。
 // json.to(rootkey)：把 rootkey 下的整棵子树递归读成 map[string]any 再 json.Marshal。
 // json.from(json)：把 JSON 反序列化为 map[string]any 再递归写回 KV 子树。
-// 数组：连续 []T（单 key 多元素）与散 key <>T（name<0>..name<N-1>）统一序列化为 JSON 数组。
+// 数组：compact []T（单 key 多元素）与散 key（name<0>..name<N-1>）统一序列化为 JSON 数组。
 package json
 
 import (
@@ -21,11 +21,11 @@ import (
 
 var ops = []string{"json.to", "json.from"}
 
-// Register 注册 json.to/json.from 两个 rwir 到 /sys/rwir/（kind=rwir），幂等。
+// Register 注册 json.to/json.from 两个 rwir 到 /rwir/（kind=rwir），幂等。
 func Register(kv kvspace.KVSpace) {
 	kv.Set([]kvspace.KVPair{
-		{Key: "/sys/rwir/json.to", Val: kvspace.NewRwir(1, 1, "rwir json.to(rootkey:charbyte) -> (dest:[]charbyte)")},
-		{Key: "/sys/rwir/json.from", Val: kvspace.NewRwir(1, 1, "rwir json.from(src:[]charbyte) -> (rootkey:charbyte)")},
+		{Key: "/rwir/json.to", Val: kvspace.NewRwir(1, 1, "rwir json.to(rootkey:charbyte) -> (dest:[]charbyte)")},
+		{Key: "/rwir/json.from", Val: kvspace.NewRwir(1, 1, "rwir json.from(src:[]charbyte) -> (rootkey:charbyte)")},
 	})
 	for _, op := range ops {
 		builtin.RegisterGlobalRwir(op)
@@ -35,7 +35,7 @@ func Register(kv kvspace.KVSpace) {
 // Serve 常驻循环：持续处理各 rwir 的 .todo<vid>。
 func Serve(kv kvspace.KVSpace) {
 	for {
-		Register(kv) // 幂等重注册，兜底外部 FLUSHALL 清空 /sys/rwir
+		Register(kv) // 幂等重注册，兜底外部 FLUSHALL 清空 /rwir
 		for _, op := range ops {
 			serve(kv, op)
 		}
@@ -45,7 +45,7 @@ func Serve(kv kvspace.KVSpace) {
 
 func serve(kv kvspace.KVSpace, op string) {
 	ctx := context.Background()
-	base := "/sys/rwir/" + op
+	base := "/rwir/" + op
 	for _, child := range kv.List(base+"/", false, false) {
 		if !strings.HasPrefix(child, ".todo<") {
 			continue

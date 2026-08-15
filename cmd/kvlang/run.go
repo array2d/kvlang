@@ -72,7 +72,7 @@ func executeEntry(kv kvspace.KVSpace, entryName string, debug bool) {
 	vtid := vthread.AllocVtid(kv)
 	kv.DelTree(keytree.VThread(vtid))
 	kvspace.MkIndexRecursive(kv, keytree.VThread(vtid)+"/")
-	builtin.WriteSysRwir(kv, filepath.Base(os.Args[0]))
+	builtin.WriteRwir(kv, filepath.Base(os.Args[0]))
 	if !noterm {
 		term.Register(kv)
 		go term.Serve(kv)
