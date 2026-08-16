@@ -11,13 +11,13 @@ import (
 
 func init() {
 	eqCmp := cmp{f: func(a, b float64) bool { return a == b }, p: func(c int) bool { return c == 0 }, s: func(a, b string) bool { return a == b }, allowNull: true}
-	registerWord("eq",  "rwir eq(A:num, B:num) -> (C:bool)",  eqCmp)
+	registerKinds("eq", 2, "bool", numKinds, eqCmp)
 	neqCmp := cmp{f: func(a, b float64) bool { return a != b }, p: func(c int) bool { return c != 0 }, s: func(a, b string) bool { return a != b }, allowNull: true}
-	registerWord("neq", "rwir neq(A:num, B:num) -> (C:bool)", neqCmp)
-	registerWord("lt",  "rwir lt(A:num, B:num) -> (C:bool)",  cmp{f: func(a, b float64) bool { return a < b },  p: func(c int) bool { return c < 0 },  s: func(a, b string) bool { return a < b }})
-	registerWord("gt",  "rwir gt(A:num, B:num) -> (C:bool)",  cmp{f: func(a, b float64) bool { return a > b },  p: func(c int) bool { return c > 0 },  s: func(a, b string) bool { return a > b }})
-	registerWord("le",  "rwir le(A:num, B:num) -> (C:bool)",  cmp{f: func(a, b float64) bool { return a <= b }, p: func(c int) bool { return c <= 0 }, s: func(a, b string) bool { return a <= b }})
-	registerWord("ge",  "rwir ge(A:num, B:num) -> (C:bool)",  cmp{f: func(a, b float64) bool { return a >= b }, p: func(c int) bool { return c >= 0 }, s: func(a, b string) bool { return a >= b }})
+	registerKinds("neq", 2, "bool", numKinds, neqCmp)
+	registerKinds("lt", 2, "bool", numKinds, cmp{f: func(a, b float64) bool { return a < b }, p: func(c int) bool { return c < 0 }, s: func(a, b string) bool { return a < b }})
+	registerKinds("gt", 2, "bool", numKinds, cmp{f: func(a, b float64) bool { return a > b }, p: func(c int) bool { return c > 0 }, s: func(a, b string) bool { return a > b }})
+	registerKinds("le", 2, "bool", numKinds, cmp{f: func(a, b float64) bool { return a <= b }, p: func(c int) bool { return c <= 0 }, s: func(a, b string) bool { return a <= b }})
+	registerKinds("ge", 2, "bool", numKinds, cmp{f: func(a, b float64) bool { return a >= b }, p: func(c int) bool { return c >= 0 }, s: func(a, b string) bool { return a >= b }})
 }
 
 type cmp struct {
