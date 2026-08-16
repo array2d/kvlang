@@ -19,7 +19,7 @@ func init() {
 	Register("at",    "", atOp{})
 	Register("set",   "", arraySetOp{})
 	Register("has",   "", hasOp{})
-	Register("sort",  "", sortOp{})
+	Register("array.sort",  "", sortOp{})
 	Register("array.scatter", "", scatterOp{})
 	Register("array.compact", "", compactOp{})
 	Register("array.append",  "", appendOp{})

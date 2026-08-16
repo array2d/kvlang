@@ -54,15 +54,15 @@ rwfunc main() -> () {
 	println(j)
 
 	# 数学函数 — 仅数字
-	sqrt(64.0) -> k
+	math.sqrt(64.0) -> k
 	√(64.0) -> k_m
 	println(k_m)
 	println(k)
 	math.abs(-3) -> l
 	println(l)
-	pow(2, 3) -> m
+	math.pow(2, 3) -> m
 	println(m)
-	log(exp(1.0)) -> n
+	math.log(math.exp(1.0)) -> n
 	println(n)
 
 	# min/max — 全数字（math.max 嵌套 fold）

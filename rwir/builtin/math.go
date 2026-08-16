@@ -10,11 +10,11 @@ import (
 )
 
 func init() {
-	Register("pow",  "rwir pow(A:num, B:num) -> (C:float64)", mOp{kind: "pow"})
-	registerWord("sqrt", "rwir sqrt(A:num) -> (C:float64)", mOp{kind: "sqrt"})
-	Register("exp",  "rwir exp(A:num) -> (C:float64)",        mOp{kind: "exp"})
-	Register("log",  "rwir log(A:num) -> (C:float64)",        mOp{kind: "log"})
-	Register("neg",  "rwir neg(A:num) -> (C:num)",            mOp{kind: "neg"})
+	Register("math.pow",  "rwir math.pow(A:num, B:num) -> (C:float64)", mOp{kind: "pow"})
+	registerWord("math.sqrt", "rwir math.sqrt(A:num) -> (C:float64)", mOp{kind: "sqrt"})
+	Register("math.exp",  "rwir math.exp(A:num) -> (C:float64)",        mOp{kind: "exp"})
+	Register("math.log",  "rwir math.log(A:num) -> (C:float64)",        mOp{kind: "log"})
+	Register("neg",       "rwir neg(A:num) -> (C:num)",                 mOp{kind: "neg"})
 }
 
 type mOp struct{ kind string }

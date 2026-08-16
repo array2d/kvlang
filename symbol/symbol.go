@@ -50,7 +50,7 @@ var byWord = map[string]Entry{
 	"or":  {"or",  []string{"||"}, 10, false, true, false},
 	"not": {"not", []string{"!"}, 0, false, true, true},
 	// ── 数学符号 ──────────────────────────────────────────────────
-	"sqrt":      {"sqrt",      []string{"√"}, 0, true, false, true},
+	"math.sqrt": {"math.sqrt", []string{"√"}, 0, true, false, true},
 
 	// ── 位运算 ────────────────────────────────────────────────────
 	"bitand": {"bitand", []string{"&"}, 80, true, false, false},
