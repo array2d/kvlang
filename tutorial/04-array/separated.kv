@@ -1,4 +1,4 @@
-# separated: 散 key 数组（元素分散在 b<0>..b<N-1> 各自 key，按 key 寻址）
+# separated: 散 key 数组（元素分散在 b[0]..b[N-1] 各自 key，按 key 寻址）
 # 语义: 字面量初始化默认 compact；array.scatter 把 compact 转散 key，array.compact 反向
 # 散 key 元素访问与 compact 一致，统一用 [i]
 # 期望输出:
@@ -9,7 +9,7 @@
 #   c[0] = 10
 rwfunc main() -> () {
 	a:[]int64 = [10, 20, 30]       # 字面量初始化 → compact
-	b <- array.scatter(a)          # 显式 scatter：compact a → 散 key b（b<0>..b<2>）
+	b <- array.scatter(a)          # 显式 scatter：compact a → 散 key b（b[0]..b[2]）
 	len(b) -> n1
 	println("len(b) =", n1)
 	println("b[0] =", b[0])        # 散 key 元素访问 [i]

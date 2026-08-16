@@ -75,7 +75,7 @@ func rootKey(kv kvspace.KVSpace, framePath string, r rwir.Param) string {
 }
 
 // buildMap 递归把 root 下的子树读成 map[string]any。
-// 目录→嵌套 map；散 key 数组（name<0>..name<N-1>）→ JSON 数组；叶子→Go 值。
+// 目录→嵌套 map；散 key 数组（name[0]..name[N-1]）→ JSON 数组；叶子→Go 值。
 func buildMap(kv kvspace.KVSpace, root string) map[string]any {
 	m := map[string]any{}
 	scat := map[string][]int{}
@@ -95,7 +95,7 @@ func buildMap(kv kvspace.KVSpace, root string) map[string]any {
 		sort.Ints(idxs)
 		arr := make([]interface{}, len(idxs))
 		for i, idx := range idxs {
-			arr[i] = toJSONValue(kvspace.GetOne(kv, root+"/"+base+"<"+strconv.Itoa(idx)+">"))
+			arr[i] = toJSONValue(kvspace.GetOne(kv, root+"/"+base+"["+strconv.Itoa(idx)+"]"))
 		}
 		m[base] = arr
 	}
@@ -119,10 +119,10 @@ func writeMap(kv kvspace.KVSpace, root string, m map[string]any) {
 	}
 }
 
-// splitArrayName 解析散 key 数组元素名 name<i> → (name, i, ok)。
+// splitArrayName 解析散 key 数组元素名 name[i] → (name, i, ok)。
 func splitArrayName(name string) (base string, idx int, ok bool) {
-	lt := strings.LastIndex(name, "<")
-	if lt <= 0 || !strings.HasSuffix(name, ">") {
+	lt := strings.LastIndex(name, "[")
+	if lt <= 0 || !strings.HasSuffix(name, "]") {
 		return "", 0, false
 	}
 	i, err := strconv.Atoi(name[lt+1 : len(name)-1])

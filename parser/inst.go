@@ -115,10 +115,6 @@ func (p *parser) desugarMemberWrite(inst *ast.Instruction) {
 	if len(inst.Writes) != 1 || !strings.Contains(inst.Writes[0], keytree.MemberSep) {
 		return
 	}
-	// 绝对路径 key（如 /lib/math.Pi）里的 . 是 key 的一部分，不是成员分隔符
-	if inst.Writes[0][0] == '/' {
-		return
-	}
 	s := inst.Writes[0]
 	dt := strings.Index(s, keytree.MemberSep)
 	base := s[:dt]
