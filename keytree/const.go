@@ -26,8 +26,6 @@ const (
 	SegMsg      = "msg"      // 终态附加描述
 	SegSeq      = "seq"      // vtid 自增序列
 
-	SegRwir = "rwir" // /rwir
-
 )
 
 var (

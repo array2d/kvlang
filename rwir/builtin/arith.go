@@ -9,11 +9,11 @@ import (
 )
 
 func init() {
-	registerWord("add", "rwir add(A:num, B:num) -> (C:num)", arith{f: func(a, b float64) float64 { return a + b }, fi: func(a, b int64) int64 { return a + b }, concat: true})
-	registerWord("sub", "rwir sub(A:num, B:num) -> (C:num)", arith{f: func(a, b float64) float64 { return a - b }, fi: func(a, b int64) int64 { return a - b }, unary: true})
-	registerWord("mul", "rwir mul(A:num, B:num) -> (C:num)", arith{f: func(a, b float64) float64 { return a * b }, fi: func(a, b int64) int64 { return a * b }})
-	registerWord("div", "rwir div(A:num, B:num) -> (C:num)", div{})
-	registerWord("mod", "rwir mod(A:int64, B:int64) -> (C:int64)", mod{})
+	registerKinds("add", 2, "", numKinds, arith{f: func(a, b float64) float64 { return a + b }, fi: func(a, b int64) int64 { return a + b }, concat: true})
+	registerKinds("sub", 2, "", numKinds, arith{f: func(a, b float64) float64 { return a - b }, fi: func(a, b int64) int64 { return a - b }, unary: true})
+	registerKinds("mul", 2, "", numKinds, arith{f: func(a, b float64) float64 { return a * b }, fi: func(a, b int64) int64 { return a * b }})
+	registerKinds("div", 2, "", numKinds, div{})
+	registerKinds("mod", 2, "", allIntKinds, mod{})
 }
 
 type arith struct{ f func(float64, float64) float64; fi func(int64, int64) int64; unary, concat bool }

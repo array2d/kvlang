@@ -79,6 +79,14 @@ func inferInst(inst *ast.Instruction, tm map[string]string) {
 	if inst.Expr == nil || len(inst.Writes) == 0 {
 		return
 	}
+	// 记录显式声明的写类型（如 a:[]int64 → tm[a]="[]int64"）
+	for j, w := range inst.Writes {
+		if j < len(inst.WriteTypes) && inst.WriteTypes[j] != "" {
+			if _, exists := tm[w]; !exists {
+				tm[w] = inst.WriteTypes[j]
+			}
+		}
+	}
 	// 快速路径：叶节点字面量直接从 Lit 字段获取类型，无需 Flat() → slotType() 字符串重解析。
 	if inst.Expr.IsLeaf() && inst.Expr.Lit != ast.LitNone {
 		if inferred := litToType(inst.Expr.Lit); inferred != "" {
@@ -155,12 +163,43 @@ func inferOpType(opcode string, reads []string, tm map[string]string) string {
 	switch opcode {
 	case "kvhas":
 		return "bool"
-	case "kvlen":
+	case "kvlen", "len", "string.len", "string.ord", "string.cmp", "string.find":
 		return "int64"
-	case "kvat":
-		// at 的返回类型取决于存储的值，无法静态推断
+	case "string.char", "string.set", "string.slice", "string.concat":
+		return "char/utf32"
+	case "random.int63":
+		return "int64"
+	case "random.intn", "random.uint64":
+		return "uint64"
+	case "pow", "sqrt", "exp", "log":
+		return "float64"
+	case "sign":
+		return "int64"
+	case "abs", "neg", "max", "min":
+		if len(reads) > 0 {
+			return slotType(reads[0], tm)
+		}
+		return ""
+	case "kvat", "at":
+		// 从数组首散 key 成员（base.0）或紧凑数组声明（[]T）推断元素类型
+		if len(reads) > 0 {
+			if t := tm[reads[0]+".0"]; t != "" {
+				return t
+			}
+			if t := tm[reads[0]]; strings.HasPrefix(t, "[]") {
+				return t[2:]
+			}
+		}
 		return ""
 	case "set":
+		// set(base, k, v) -> base：记录数组首元素类型（供 kvat 推断元素类型）
+		if len(reads) >= 3 {
+			if t := slotType(reads[2], tm); t != "" {
+				if _, exists := tm[reads[0]+".0"]; !exists {
+					tm[reads[0]+".0"] = t
+				}
+			}
+		}
 		// set 回写原值，类型同 base
 		if len(reads) > 0 {
 			return slotType(reads[0], tm)

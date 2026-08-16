@@ -180,7 +180,7 @@ func isUnsignedKind(k string) bool {
 	return false
 }
 
-func intKindWidth(k string) int {
+func IntKindWidth(k string) int {
 	switch k {
 	case "int8", "uint8":
 		return 8
@@ -194,8 +194,8 @@ func intKindWidth(k string) int {
 	return 0
 }
 
-func widerIntKind(ak, bk string) string {
-	aw, bw := intKindWidth(ak), intKindWidth(bk)
+func WiderIntKind(ak, bk string) string {
+	aw, bw := IntKindWidth(ak), IntKindWidth(bk)
 	au, bu := isUnsignedKind(ak), isUnsignedKind(bk)
 	if au && bu {
 		if aw >= bw {
@@ -225,7 +225,7 @@ func widerIntKind(ak, bk string) string {
 	}
 }
 
-func widerFloatKind(ak, bk string) string {
+func WiderFloatKind(ak, bk string) string {
 	if ak == "float64" || bk == "float64" {
 		return "float64"
 	}
@@ -236,7 +236,7 @@ func widerFloatKind(ak, bk string) string {
 }
 
 func narrowInt(ak, bk string, v int64) kvspace.XValue {
-	kind := widerIntKind(ak, bk)
+	kind := WiderIntKind(ak, bk)
 	switch kind {
 	case "int8":
 		return kvspace.NewInt8(int8(v))
@@ -260,7 +260,7 @@ func narrowInt(ak, bk string, v int64) kvspace.XValue {
 }
 
 func narrowFloat(ak, bk string, v float64) kvspace.XValue {
-	if widerFloatKind(ak, bk) == "float32" {
+	if WiderFloatKind(ak, bk) == "float32" {
 		return kvspace.NewFloat32(float32(v))
 	}
 	return kvspace.NewFloat64(v)

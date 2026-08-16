@@ -9,11 +9,11 @@ import (
 )
 
 func init() {
-	registerWord("bitand", "rwir bitand(A:int64, B:int64) -> (C:int64)", bit{f: func(a, b int64) int64 { return a & b }})
-	registerWord("bitor",  "rwir bitor(A:int64, B:int64) -> (C:int64)",  bit{f: func(a, b int64) int64 { return a | b }})
-	registerWord("bitxor", "rwir bitxor(A:int64, B:int64) -> (C:int64)", bit{f: func(a, b int64) int64 { return a ^ b }})
-	registerWord("shl",    "rwir shl(A:int64, B:int64) -> (C:int64)",    bit{f: func(a, b int64) int64 { return a << uint64(b) }})
-	registerWord("shr",    "rwir shr(A:int64, B:int64) -> (C:int64)",    bit{f: func(a, b int64) int64 { return a >> uint64(b) }})
+	registerKinds("bitand", 2, "", []string{"int64", "uint64"}, bit{f: func(a, b int64) int64 { return a & b }})
+	registerKinds("bitor", 2, "", []string{"int64", "uint64"}, bit{f: func(a, b int64) int64 { return a | b }})
+	registerKinds("bitxor", 2, "", []string{"int64", "uint64"}, bit{f: func(a, b int64) int64 { return a ^ b }})
+	registerKinds("shl", 2, "", []string{"int64", "uint64"}, bit{f: func(a, b int64) int64 { return a << uint64(b) }})
+	registerKinds("shr", 2, "", []string{"int64", "uint64"}, bit{f: func(a, b int64) int64 { return a >> uint64(b) }})
 }
 
 type bit struct{ f func(int64, int64) int64 }
@@ -30,5 +30,5 @@ func evalBinaryInt(inputs []kvspace.XValue, fn func(int64, int64) int64) (kvspac
 	}
 	// 位运算仅整数（五语言一致：C/Rust/Go/JS 均禁止浮点位运算，Python & 是 set intersection）
 	if err := requireInt(inputs[0], inputs[1]); err != nil { return kvspace.None{}, err }
-	return kvspace.NewInt64(fn(asInt64(inputs[0]), asInt64(inputs[1]))), nil
+	return narrowInt(inputs[0].Kind(), inputs[1].Kind(), fn(asInt64(inputs[0]), asInt64(inputs[1]))), nil
 }

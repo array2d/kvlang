@@ -282,7 +282,7 @@ var validKinds = map[string]bool{
 	"uint8": true, "uint16": true, "uint32": true, "uint64": true,
 	"float32": true, "float64": true,
 	"bool": true, "char/utf32": true, "char/utf8": true, "char/ascii": true,
-	"num": true, "any": true,
+	"any": true,
 }
 
 // validKindexp 校验类型表达式（kindexp）：前缀修饰符序列 + 基础 kind。
@@ -337,7 +337,7 @@ func (p *parser) checkParamTypes(sig *ast.FuncSig) {
 		if kind == "string" || kind == "bytes" {
 			return "unknown type — use char/utf32 instead"
 		}
-		return "unknown type — valid: int8/16/32/64, uint8/16/32/64, float32/64, bool, char/utf32, num, any, []T, [N]T, *T"
+		return "unknown type — valid: int8/16/32/64, uint8/16/32/64, float32/64, bool, char/utf32, any, []T, [N]T, *T"
 	}
 	for _, param := range sig.Params {
 		if !validKindexp(param.Type) {

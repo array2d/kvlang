@@ -350,6 +350,7 @@ func countDirectInsts(body []ast.Stmt) int32 {
 //	...
 func WriteFunc(kv kvspace.KVSpace, pkg string, fn *ast.Func) {
 	typeMap := lower.InferTypes(fn)
+	lower.Specialize(fn, typeMap)
 	funcDir := keytree.LibFunc(pkg, fn.Sig.Name)
 	kv.DelTree(funcDir)
 	kvspace.MkIndexRecursive(kv, funcDir+"/")
@@ -376,7 +377,7 @@ func WriteFunc(kv kvspace.KVSpace, pkg string, fn *ast.Func) {
 	WriteBody(kv, pkg, fn.Sig.Name, fn.Body, typeMap, 1) // 指令从 [1,0] 开始
 }
 
-// WriteRwirDecl 将用户声明的 rwir（读写码，无体）写入 /rwir/<opcode>，kind=rwir。
+// WriteRwirDecl 将用户声明的 rwir（读写码，无体）写入 /lib/<opcode>，kind=rwir。
 func WriteRwirDecl(kv kvspace.KVSpace, decl *ast.RwirDecl) {
 	opcode := decl.Sig.Name
 	if decl.Pkg != "" {
