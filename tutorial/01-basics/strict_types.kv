@@ -54,19 +54,19 @@ rwfunc main() -> () {
 	println(j)
 
 	# 数学函数 — 仅数字
-	math.sqrt(64.0) -> k
+	sqrt(64.0) -> k
 	√(64.0) -> k_m
 	println(k_m)
 	println(k)
-	math.abs(-3) -> l
+	abs(-3) -> l
 	println(l)
-	math.pow(2, 3) -> m
+	pow(2, 3) -> m
 	println(m)
-	math.log(math.exp(1.0)) -> n
+	log(exp(1.0)) -> n
 	println(n)
 
-	# min/max — 全数字（math.max 嵌套 fold）
-	math.max(math.max(1, 3), 2) -> o
+	# min/max — 全数字（max 嵌套 fold）
+	max(max(1, 3), 2) -> o
 	println(o)
 
 	# 字符串拼接
