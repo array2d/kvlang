@@ -1,0 +1,3 @@
+[build]
+rustflags = ["-L", "/home/peng.li24/github.com/array2d/kvspace-c/build"]
+

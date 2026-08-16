@@ -95,9 +95,6 @@ type Token struct {
 }
 
 // String 返回 Token 的调试表示。
-func (t Token) String() string {
-	return fmt.Sprintf("%s(%q)@%d:%d", t.Kind, t.Value, t.Pos.Line, t.Pos.Col)
-}
 
 var keywords = map[string]Kind{
 	"return":   Return,
@@ -316,8 +313,6 @@ func Scan(src string) []Token {
 		}
 		if matched { continue }
 
-
-
 		// 数字字面量（对齐 Go strconv.ParseFloat 格式）：
 		//
 		//  integer = digits
@@ -353,9 +348,7 @@ func Scan(src string) []Token {
 			continue
 		}
 
-
-
-		// 关键字 / 标识符（含点号：tensor.new 等）
+		// 关键字 / 标识符（含点号：string.len 等）
 		start := i
 		for i < len(src) && !isTokenDelim(src[i]) {
 			i++

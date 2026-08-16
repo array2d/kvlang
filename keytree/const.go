@@ -24,16 +24,9 @@ const (
 	SegPause    = "pause"    // 暂停事件
 	SegResume   = "resume"   // 恢复命令
 	SegMsg      = "msg"      // 终态附加描述
-	SegTerm     = "term"     // 绑定终端名
 	SegSeq      = "seq"      // vtid 自增序列
 
-	SegDev  = "dev"  // /dev
-	SegTTY  = "tty"  // /dev/tty
-	SegSys  = "sys"  // /sys
-	SegOp   = "op"   // /sys/op
-	SegRwir = "rwir" // /sys/rwir
-	SegCmd  = "cmd"  // 命令队列
-	SegFunc = "func" // 算子函数定义
+	SegRwir = "rwir" // /rwir
 
 )
 

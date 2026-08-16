@@ -32,7 +32,7 @@ func (o kvHasOp) Call(f *rwir.Frame) error {
 	if isIntKind(idxVal.Kind()) || isFloatKind(idxVal.Kind()) {
 		key = keytree.Member(prefix, strconv.Itoa(int(asInt64(idxVal))))
 	} else {
-		key = keytree.Member(prefix, idxVal.String())
+		key = keytree.Member(prefix, idxVal.ValueString())
 	}
 	v := kvspace.GetOne(f.KV, key)
 	return writeResult(f, kvspace.NewBool(!kvspace.IsNone(v)))
@@ -55,7 +55,7 @@ func (o kvAtOp) Call(f *rwir.Frame) error {
 	if isIntKind(idxVal.Kind()) || isFloatKind(idxVal.Kind()) {
 		key = keytree.Member(prefix, strconv.Itoa(int(asInt64(idxVal))))
 	} else {
-		key = keytree.Member(prefix, idxVal.String())
+		key = keytree.Member(prefix, idxVal.ValueString())
 	}
 	v := kvspace.GetOne(f.KV, key)
 	if kvspace.IsNone(v) {

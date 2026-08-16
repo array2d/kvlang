@@ -1,0 +1,11 @@
+# 码点操作：string.char（第 i 个码点）、string.ord（首码点值）
+# 定宽 utf32 下 O(1) 索引；多字节字符（é）也按码点计
+# 期望输出:
+#   é
+#   233
+rwfunc main() -> () {
+	s = "héllo"
+	println(string.char(s, 1))
+	println(string.ord("é"))
+}
+main()

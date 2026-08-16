@@ -25,8 +25,8 @@ func (o arith) Call(f *rwir.Frame) error {
 		return writeResult(f, r)
 	}
 	// + 号 string 拼接（fix-025：Python/JS/Go/Rust 4/5 阵营；C 无 + 拼接）
-	if o.concat && len(inputs) == 2 && inputs[0].Kind() == "string" && inputs[1].Kind() == "string" {
-		return writeResult(f, kvspace.NewChar(inputs[0].String()+inputs[1].String()))
+	if o.concat && len(inputs) == 2 && kvspace.IsCharKind(inputs[0].Kind()) && kvspace.IsCharKind(inputs[1].Kind()) {
+		return writeResult(f, kvspace.NewChar(kvspace.KindChar, inputs[0].ValueString()+inputs[1].ValueString()))
 	}
 	r, err := evalBinaryArith(inputs, o.f, o.fi)
 	if err != nil { vthread.SetError(bg, f.KV, f.Vtid, f.PC, err.Error()); return err }

@@ -1,0 +1,45 @@
+# 141: Linked List Cycle — 快慢指针
+# 来源: LeetCode #141
+# 期望输出:
+#   1
+#   0
+rwfunc has_cycle(head:char/utf32) -> (result:int64) {
+	result = 0  # = 等价于 <-
+	head -> slow
+	fast <- head
+	while (fast != "") {
+		slow = slow.next  # = 等价于 <-
+		fast.next -> n1
+		at_end <- n1 == ""
+
+		if (at_end) {
+			fast = ""  # = 等价于 <-
+		} else {
+			n1.next -> fast
+			match <- slow == fast
+
+			if (match) {
+				result = 1  # = 等价于 <-
+				"" -> fast
+			}
+		}
+	}
+}
+
+rwfunc build_cycle() -> () {
+	{ val=3; next="/c1" } -> /c0
+	/c1 = { val=2; next="/c2" }  # = 等价于 <-
+	/c2 <- { val=0; next="/c0" }
+}
+
+rwfunc build_no_cycle() -> () {
+	/n0 = { val=1; next="/n1" }  # = 等价于 <-
+	{ val=2; next="" } -> /n1
+}
+
+build_cycle()
+r1 = has_cycle("/c0")  # = 等价于 <-
+println(r1)
+build_no_cycle()
+has_cycle("/n0") -> r2
+println(r2)

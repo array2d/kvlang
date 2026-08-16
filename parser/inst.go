@@ -58,8 +58,15 @@ func (p *parser) parseInst() *ast.Instruction {
 		p.desugarMemberWrite(inst)
 
 	default:
-		// 无 Arrow：纯表达式 / 函数调用
-		inst.Expr = p.parsePratt(0)
+		// 无 Arrow：裸类型声明 name:type → 空数组（散 key 0 元素）；否则纯表达式 / 函数调用
+		if p.peek().Kind == Ident && p.peekAt(1).Kind == Colon {
+			name, typ := p.parseWriteSlot()
+			inst.Writes = []string{name}
+			inst.WriteTypes = []string{typ}
+			inst.Expr = ast.Call("array")
+		} else {
+			inst.Expr = p.parsePratt(0)
+		}
 	}
 
 	// 吃掉行尾内联注释（不保留，不会影响下一语句的前置注释收集）
@@ -67,7 +74,37 @@ func (p *parser) parseInst() *ast.Instruction {
 		p.advance()
 	}
 	p.eat(Newline)
+	p.checkWriteTypeMatch(inst)
 	return inst
+}
+
+// checkWriteTypeMatch 检查写槽类型标注与表达式的数组性是否一致（layout 阶段报错）。
+// 标量标注（int64）配数组字面量（[1,2,3]）→ 报错；数组标注（[]int64）配标量字面量（42）→ 报错。
+func (p *parser) checkWriteTypeMatch(inst *ast.Instruction) {
+	if inst.Expr == nil {
+		return
+	}
+	exprIsArray := inst.Expr.Op == "array"
+	exprIsScalarLit := inst.Expr.IsLeaf() && inst.Expr.Lit != ast.LitNone && inst.Expr.Lit != ast.LitNil
+
+	for j, wt := range inst.WriteTypes {
+		if wt == "" {
+			continue
+		}
+		name := ""
+		if j < len(inst.Writes) {
+			name = inst.Writes[j]
+		}
+		switch {
+		case !isArrayKindexp(wt) && exprIsArray:
+			p.errors = append(p.errors, Diagnostic{Message: fmt.Sprintf(
+				"write %q declared scalar %s but assigned an array literal — use []%s instead",
+				name, wt, wt)})
+		case isArrayKindexp(wt) && exprIsScalarLit:
+			p.errors = append(p.errors, Diagnostic{Message: fmt.Sprintf(
+				"write %q declared %s but assigned a scalar literal", name, wt)})
+		}
+	}
 }
 
 // desugarMemberWrite 将成员写槽展开为 set 调用：
@@ -76,6 +113,10 @@ func (p *parser) parseInst() *ast.Instruction {
 //	base.*key   → set(base, key, expr) -> base       动态成员（取 key 变量的值，fix-015）
 func (p *parser) desugarMemberWrite(inst *ast.Instruction) {
 	if len(inst.Writes) != 1 || !strings.Contains(inst.Writes[0], keytree.MemberSep) {
+		return
+	}
+	// 绝对路径 key（如 /lib/math.Pi）里的 . 是 key 的一部分，不是成员分隔符
+	if inst.Writes[0][0] == '/' {
 		return
 	}
 	s := inst.Writes[0]
@@ -338,6 +379,24 @@ func (p *parser) parsePrimaryExpr() *ast.Expr {
 		return ast.Call(opcode, args...)
 	}
 
+	// 斜杠函数调用：char/utf8(args, ...) — kind 名含 / 的转换函数
+	// token 流：IDENT LITERAL_PATH LPAREN ... — 合并为 kind 名
+	if p.peek().Kind == Ident && p.peekAt(1).Kind == Literal &&
+		len(p.peekAt(1).Value) > 0 && p.peekAt(1).Value[0] == '/' &&
+		p.peekAt(2).Kind == LParen {
+		opcode := p.advance().Value // consume IDENT
+		opcode += p.advance().Value // consume LITERAL_PATH（含前导 /）
+		p.advance()                 // consume (
+		var args []*ast.Expr
+		for p.peek().Kind != RParen && p.peek().Kind != EOF {
+			if p.eat(Comma) { continue }
+			arg := p.parsePratt(0)
+			if arg != nil { args = append(args, arg) }
+		}
+		p.expect(RParen)
+		return ast.Call(opcode, args...)
+	}
+
 	// 叶节点：变量名、字面量、路径、裸操作码
 	t = p.advance()
 	if t.Kind == Literal {
@@ -463,9 +522,9 @@ func (p *parser) collectWriteList() ([]string, []string) {
 // parseWriteSlot 解析单个写槽：name[:type]
 func (p *parser) parseWriteSlot() (name, typ string) {
 	name = p.advance().Value
-	if p.peek().Kind == Colon && p.peekAt(1).Kind == Ident {
+	if p.peek().Kind == Colon {
 		p.advance() // consume :
-		typ = p.advance().Value
+		typ = p.parseType()
 		if typ == "int" || typ == "float" {
 			p.errors = append(p.errors, Diagnostic{Pos: p.peek().Pos, Message: fmt.Sprintf(
 				"ambiguous type %q in write slot — use int64 or float64 instead", typ)})

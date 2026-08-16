@@ -2,10 +2,7 @@ module kvlang
 
 go 1.24.4
 
-require (
-	github.com/array2d/kvspace-go v0.1.0
-	github.com/gorilla/websocket v1.5.3
-)
+require github.com/array2d/kvspace-go v0.1.0
 
 require (
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
@@ -13,3 +10,4 @@ require (
 	github.com/redis/go-redis/v9 v9.7.0 // indirect
 )
 
+replace github.com/array2d/kvspace-go v0.1.0 => ../kvspace-go

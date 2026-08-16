@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"encoding/json"
+	"time"
 
 	"kvlang/keytree"
 	"kvlang/rwir"
@@ -26,20 +27,24 @@ func (debuggerOp) Call(f *rwir.Frame) error {
 		vthread.Set(bg, f.KV, f.Vtid, rwir.NextPC(f.PC), "running")
 		return nil
 	}
-	// 通知 agent 暂停位置
+	// 写暂停位置（agent 轮询读取）
 	pauseKey := keytree.VThreadDebuggerPause(f.Vtid)
 	info, _ := json.Marshal(map[string]string{
 		"pc": f.PC, "vtid": f.Vtid, "opcode": f.Inst.Opcode,
 		"func": "", "frame": keytree.FrameRoot(f.PC),
 	})
-	f.KV.Notify(pauseKey, kvspace.NewBytes(info))
+	f.KV.Set([]kvspace.KVPair{{Key: pauseKey, Val: kvspace.NewCharByte(info...)}})
 
-	// 阻塞等待 agent 命令
+	// 轮询等待 agent 命令
 	resumeKey := keytree.VThreadDebuggerResume(f.Vtid)
 	for {
-		cmdVal := f.KV.Watch(resumeKey, 0)
-		if kvspace.IsNone(cmdVal) { continue }
-		switch cmdVal.String() {
+		cmd := kvspace.GetOne(f.KV, resumeKey).ValueString()
+		if cmd == "" {
+			time.Sleep(time.Millisecond)
+			continue
+		}
+		f.KV.Del(resumeKey) // 消费命令
+		switch cmd {
 		case "abort":
 			vthread.SetError(bg, f.KV, f.Vtid, f.PC, "debugger: aborted by agent")
 			return nil

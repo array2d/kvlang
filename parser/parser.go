@@ -226,6 +226,7 @@ func (p *parser) parseLibBody(f *ast.File, prefix string) {
 	f.Package = pkg // 嵌套 lib 以最内层为准
 	p.expect(LBrace)
 	p.skipNewlines()
+	var body []ast.Stmt
 	for p.peek().Kind != RBrace && p.peek().Kind != EOF {
 		// 嵌套 lib
 		if p.peek().Kind == Ident && p.peek().Value == "lib" && p.peekAt(1).Kind == Ident && p.peekAt(2).Kind == LBrace {
@@ -234,10 +235,12 @@ func (p *parser) parseLibBody(f *ast.File, prefix string) {
 			continue
 		}
 		if p.peek().Kind == Ident && p.peek().Value == "rwir" {
-				decl := p.parseRwirDecl()
-				decl.Pkg = pkg // lib 归属
-				f.RwirDecls = append(f.RwirDecls, decl)
-			} else if p.peek().Kind == Ident && p.peek().Value == "rwfunc" {
+			decl := p.parseRwirDecl()
+			decl.Pkg = pkg // lib 归属
+			f.RwirDecls = append(f.RwirDecls, decl)
+			p.skipNewlines()
+			continue
+		} else if p.peek().Kind == Ident && p.peek().Value == "rwfunc" {
 			fn := p.parseFunc()
 			fn.Pkg = pkg // lib 归属（fix-039）
 			f.Funcs = append(f.Funcs, fn)
@@ -246,11 +249,15 @@ func (p *parser) parseLibBody(f *ast.File, prefix string) {
 		}
 st := p.parseStmt()
 		if st != nil {
-			f.InitBody = append(f.InitBody, st)
+			body = append(body, st)
 		} else { break }
 		p.skipNewlines()
 	}
 	p.expect(RBrace)
+	// 隐式 init 封装：lib 块 body 即该 lib 的 init()
+	if len(body) > 0 {
+		f.Funcs = append(f.Funcs, ast.Func{Sig: ast.FuncSig{Name: "init"}, Pkg: pkg, Body: body})
+	}
 	f.Package = prevPkg // 退出 lib 块，恢复外层包名
 }
 
@@ -268,12 +275,57 @@ func (p *parser) parseFunc() ast.Func {
 	return fn
 }
 
-// validTypes kvlang 合法类型名集合（权威来源，与 kvspace.XValue.Kind() 对齐）。
-var validTypes = map[string]bool{
+// validKinds kvlang 合法基础类型名（权威来源，与 kvspace.XValue.Kind() 对齐）。
+// num / any 是类型类（多态）：num = int|float 联合，any = 任意类型；非真实落盘 kind，仅签名声明。
+var validKinds = map[string]bool{
 	"int8": true, "int16": true, "int32": true, "int64": true,
 	"uint8": true, "uint16": true, "uint32": true, "uint64": true,
 	"float32": true, "float64": true,
-	"bool": true, "string": true, "bytes": true, "any": true,
+	"bool": true, "char/utf32": true, "char/utf8": true, "char/ascii": true,
+	"num": true, "any": true,
+}
+
+// validKindexp 校验类型表达式（kindexp）：前缀修饰符序列 + 基础 kind。
+// 文法：kindexp ::= kind | '*' kindexp | '@' kindexp | '[' ']' kindexp | '[' dims ']' kindexp
+func validKindexp(t string) bool {
+	for t != "" {
+		switch t[0] {
+		case '*', '@':
+			t = t[1:]
+		case '[':
+			end := strings.IndexByte(t, ']')
+			if end < 0 {
+				return false
+			}
+			if inner := t[1:end]; inner != "" && !validDims(inner) {
+				return false
+			}
+			t = t[end+1:]
+		default:
+			return validKinds[t]
+		}
+	}
+	return false
+}
+
+// validDims 校验维度列表（逗号分隔的非负整数）。
+func validDims(s string) bool {
+	for _, d := range strings.Split(s, ",") {
+		if d == "" {
+			return false
+		}
+		for i := 0; i < len(d); i++ {
+			if d[i] < '0' || d[i] > '9' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// isArrayKindexp 判断 kindexp 是否含数组修饰符（[] [N]）。
+func isArrayKindexp(t string) bool {
+	return strings.Contains(t, "[")
 }
 
 // checkParamTypes 确保所有参数和返回值都有显式类型标注且类型名合法。
@@ -282,20 +334,20 @@ func (p *parser) checkParamTypes(sig *ast.FuncSig) {
 		if kind == "int" || kind == "float" {
 			return "ambiguous type — use int64 or float64 instead"
 		}
-		if kind == "str" {
-			return "unknown type — use string instead"
+		if kind == "string" || kind == "bytes" {
+			return "unknown type — use char/utf32 instead"
 		}
-		return "unknown type — valid: int8/16/32/64, uint8/16/32/64, float32/64, bool, string, bytes, any"
+		return "unknown type — valid: int8/16/32/64, uint8/16/32/64, float32/64, bool, char/utf32, num, any, []T, [N]T, *T"
 	}
 	for _, param := range sig.Params {
-		if !validTypes[param.Type] {
+		if !validKindexp(param.Type) {
 			p.errors = append(p.errors, Diagnostic{Message: fmt.Sprintf(
 				"func %s: param %q: %s (got %q)",
 				sig.Name, param.Name, typeError(param.Type), param.Type)})
 		}
 	}
 	for _, ret := range sig.Returns {
-		if !validTypes[ret.Type] {
+		if !validKindexp(ret.Type) {
 			p.errors = append(p.errors, Diagnostic{Message: fmt.Sprintf(
 				"func %s: return value %q: %s (got %q)",
 				sig.Name, ret.Name, typeError(ret.Type), ret.Type)})
@@ -409,7 +461,7 @@ func (p *parser) parseRwirDecl() ast.RwirDecl {
 	if t := p.peek(); t.Kind == Ident {
 		decl.Sig.Name = t.Value
 		p.advance()
-		// 处理点号命名空间：string.len, tensor.matmul 等
+		// 处理点号命名空间：string.len, array.scatter 等
 		if p.peek().Kind == Dot {
 			decl.Sig.Name += p.advance().Value // .
 			if p.peek().Kind == Ident {
@@ -462,6 +514,41 @@ func (p *parser) parseFuncSig() ast.FuncSig {
 	return sig
 }
 
+// parseType 解析类型表达式（kindexp）直到参数/返回值列表的终止符（, ) { EOF）为止。
+// 按括号深度收集 [] 内的维度和逗号；基础 kind、* @ 修饰符、数字维度均为单 token。
+func (p *parser) parseType() string {
+	var sb strings.Builder
+	depth := 0
+	for {
+		t := p.peek()
+		switch t.Kind {
+		case LBrack:
+			depth++
+			sb.WriteString("[")
+			p.advance()
+		case RBrack:
+			depth--
+			sb.WriteString("]")
+			p.advance()
+		case Ident:
+			sb.WriteString(t.Value)
+			p.advance()
+		case Literal:
+			sb.WriteString(t.Value)
+			p.advance()
+		case Comma:
+			if depth > 0 {
+				sb.WriteString(",")
+				p.advance()
+			} else {
+				return sb.String()
+			}
+		default:
+			return sb.String()
+		}
+	}
+}
+
 // parseParamList 解析 param (, param)* 直到 stop Kind 为止（不消费 stop token）。
 func (p *parser) parseParamList(stop Kind) []ast.Param {
 	var params []ast.Param
@@ -480,9 +567,7 @@ func (p *parser) parseParamList(stop Kind) []ast.Param {
 		param := ast.Param{Name: p.advance().Value}
 		if p.peek().Kind == Colon {
 			p.advance()
-			if p.peek().Kind == Ident {
-				param.Type = p.advance().Value
-			}
+			param.Type = p.parseType()
 		}
 		params = append(params, param)
 	}
@@ -491,8 +576,3 @@ func (p *parser) parseParamList(stop Kind) []ast.Param {
 
 // ParseFuncSig 将签名字符串解析为 ast.FuncSig（公开 API）。
 // 签名格式为 KV 中存储的 FuncSig.String() 输出：rwfunc name(A:t) -> (B:t)
-func ParseFuncSig(sig string) ast.FuncSig {
-	toks := Scan(sig)
-	p := &parser{tokens: toks}
-	return p.parseFuncSig()
-}

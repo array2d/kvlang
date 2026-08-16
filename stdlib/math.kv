@@ -1,0 +1,41 @@
+lib math {
+    /lib/math.Pi = 3.141592653589793
+    /lib/math.E = 2.718281828459045
+    /lib/math.Tau = 6.283185307179586
+
+    rwfunc abs(x:num) -> (r:num) {
+        if (x < 0) {
+            -x -> r
+        } else {
+            x -> r
+        }
+    }
+
+    rwfunc sign(x:num) -> (r:int64) {
+        if (x > 0) {
+            1 -> r
+        } else {
+            if (x < 0) {
+                -1 -> r
+            } else {
+                0 -> r
+            }
+        }
+    }
+
+    rwfunc max(a:num, b:num) -> (r:num) {
+        if (a > b) {
+            a -> r
+        } else {
+            b -> r
+        }
+    }
+
+    rwfunc min(a:num, b:num) -> (r:num) {
+        if (a < b) {
+            a -> r
+        } else {
+            b -> r
+        }
+    }
+}

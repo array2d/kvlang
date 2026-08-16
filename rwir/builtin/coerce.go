@@ -45,6 +45,22 @@ func asInt64(v kvspace.XValue) int64 {
 	}
 }
 
+// asUint64 coerces an unsigned numeric Value to uint64（位保真，不回绕）。
+func asUint64(v kvspace.XValue) uint64 {
+	switch v := v.(type) {
+	case kvspace.Uint8:
+		return uint64(v.At(0))
+	case kvspace.Uint16:
+		return uint64(v.At(0))
+	case kvspace.Uint32:
+		return uint64(v.At(0))
+	case kvspace.Uint64:
+		return v.At(0)
+	default:
+		panic("asUint64: cannot coerce " + v.Kind() + " to uint64 — expected unsigned kind")
+	}
+}
+
 // AsBool coerces a Value to bool.
 func AsBool(v kvspace.XValue) bool {
 	if v.Kind() != "bool" {
@@ -58,14 +74,17 @@ func isNumeric(v kvspace.XValue) bool { return isIntKind(v.Kind()) || isFloatKin
 
 // display formats a Value for human output (print / string.set).
 func display(v kvspace.XValue) string {
-	if v.Kind() == "string" {
-		return v.String()
+	if kvspace.IsCharKind(v.Kind()) {
+		return v.ValueString()
 	}
 	if v.ArrayLen() > 1 {
 		return formatArray(v)
 	}
-	return v.String()
+	return v.ValueString()
 }
+
+// Display 格式化 XValue 为可打印字符串（rwirext 打印用）。
+func Display(v kvspace.XValue) string { return display(v) }
 
 // xvalueAt returns the i-th element of any XValue, or None{}.
 func xvalueAt(v kvspace.XValue, i int) kvspace.XValue {
@@ -85,34 +104,23 @@ func xvalueAt(v kvspace.XValue, i int) kvspace.XValue {
 	case kvspace.Float32: return kvspace.NewFloat32(v.At(i))
 	case kvspace.Float64: return kvspace.NewFloat64(v.At(i))
 	case kvspace.Bool: return kvspace.NewBool(v.At(i))
-	case kvspace.Char:
-		return kvspace.NewChar(string([]rune(v.String())[i]))
 	default:
-		raw := v.Encode()
-		kl := int(raw[0])
-		start := 1 + kl + 8
+		data := v.Encode()
+		start := int(kvspace.DecodeXValueHead(data).HeadLen())
 		for j := 0; j < i; j++ {
-			h := kvspace.DecodeXValueHead(raw[start:])
+			h := kvspace.DecodeXValueHead(data[start:])
 			if h.Kind == "" {
 				return kvspace.None{}
 			}
-			start += int(h.HeadLen())
+			start += int(h.HeadLen()) + int(h.BodyLen)
 		}
-		return kvspace.DecodeXValueHead(raw[start:]).Decode()
+		return kvspace.DecodeXValue(data[start:])
 	}
 }
 
-// rawBytesOf 返回 XValue 的原始字节（不通过 TLV 解码）。
+// rawBytesOf 返回 XValue 的 body 原始字节。
 func rawBytesOf(v kvspace.XValue) []byte {
-	switch v := v.(type) {
-	case kvspace.Int8, kvspace.Int16, kvspace.Int32, kvspace.Int64,
-		kvspace.Uint8, kvspace.Uint16, kvspace.Uint32, kvspace.Uint64,
-		kvspace.Float32, kvspace.Float64, kvspace.Bool, kvspace.Char, kvspace.Time, kvspace.Duration:
-		return v.Encode()[1+len(v.Kind())+8:]
-	default:
-		h := kvspace.DecodeXValueHead(v.Encode())
-		return h.Raw
-	}
+	return kvspace.BodyBytes(v)
 }
 
 // formatArray 格式化 len>1 的 XValue。
@@ -283,29 +291,13 @@ func rawDecodeN(kind string, raw []byte, n int32) kvspace.XValue {
 		return kvspace.DecodeFloat32(raw)
 	case "float64":
 		return kvspace.DecodeFloat64(raw)
+	case "char/utf32":
+		return kvspace.DecodeChar32(raw)
+	case "char/utf8":
+		return kvspace.DecodeCharByte(raw)
 	default:
 		panic("rawDecodeN: unknown kind " + kind)
 	}
 }
 
-// arrayVal 将 []XValue 编码为数组。元素必须同 kind，否则 panic。
-func arrayVal(elems []kvspace.XValue) kvspace.XValue {
-	if len(elems) == 0 {
-		return kvspace.None{}
-	}
-	k := elems[0].Kind()
-	for _, e := range elems[1:] {
-		if e.Kind() != k {
-			panic("arrayVal: mixed kinds " + k + " and " + e.Kind())
-		}
-	}
-	sz := kindSize(k)
-	if sz <= 0 {
-		panic("arrayVal: unsupported kind " + k + " (no fixed element size)")
-	}
-	raw := make([]byte, int32(len(elems))*sz)
-	for i, e := range elems {
-		copy(raw[i*int(sz):], kindBytes(k, e))
-	}
-	return rawDecodeN(k, raw, int32(len(elems)))
-}
+

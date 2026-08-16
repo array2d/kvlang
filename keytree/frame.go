@@ -1,8 +1,8 @@
 package keytree
 
 import (
-	"fmt"
 	"strings"
+	"fmt"
 )
 
 // ── 帧路径工具 ────────────────────────────────────────────────────
@@ -18,9 +18,6 @@ func frameMember(root, seg string) string { return Stack(root) + RuntimeMemberSe
 
 func Stack(root string) string { return strings.TrimRight(root, PathSegSep) + PathSegSep }
 func FrameRO(root string) string    { return frameMember(root, SegRO) }
-
-func RParam(root, name string) string { return frameMember(root, SegRParam) + PathSegSep + name }
-func WParam(root, name string) string { return frameMember(root, SegWParam) + PathSegSep + name }
 
 func CallPC(root string) string   { return frameMember(root, SegCallPC) }
 func ReturnPC(root string) string { return frameMember(root, SegReturnPC) }
@@ -41,9 +38,16 @@ func FrameRoot(pc string) string {
 
 func EntryPC(root string) string {
 	root = strings.TrimRight(root, PathSegSep)
-	return root + PathSegSep + "[0,0]"
+	return root + PathSegSep + "[1,0]"
 }
 func IsEntryPC(pc string) bool {
 	idx := strings.LastIndex(pc, PathSegSep+"[")
-	return idx >= 0 && pc[idx:] == PathSegSep+"[0,0]"
+	return idx >= 0 && pc[idx:] == PathSegSep+"[1,0]"
+}
+
+// ScopeEntryPC returns entry for scope/label frames: root/[0,0].
+// Scope frames don't have a function sig at [0,0], so first instruction is [0,0].
+func ScopeEntryPC(root string) string {
+	root = strings.TrimRight(root, PathSegSep)
+	return root + PathSegSep + "[0,0]"
 }

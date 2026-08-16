@@ -10,13 +10,13 @@ import (
 )
 
 // Op 内建算子接口。
-type Op interface {
+type Rwir interface {
 	Call(f *rwir.Frame) error
 }
 
 // Dispatch 根据 opcode 分发算子。
-func Dispatch(opcode string) (Op, bool) {
-	o, ok := registry[opcode]
+func Dispatch(opcode string) (Rwir, bool) {
+	o, ok := rwirregistry[opcode]
 	return o.impl, ok && o.impl != nil
 }
 

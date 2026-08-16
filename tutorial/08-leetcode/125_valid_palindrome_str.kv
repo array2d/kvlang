@@ -1,0 +1,28 @@
+# 125: Valid Palindrome — 用 char 双指针
+# 来源: LeetCode #125
+# 期望输出:
+#   1
+#   0
+rwfunc is_pal(s:char/utf32) -> () {
+	n = string.len(s)  # = 等价于 <-
+	0 -> l
+	r <- n - 1
+	ok = 1  # = 等价于 <-
+	while (l < r) {
+		string.char(s, l) -> lc
+		rc <- string.char(s, r)
+		match = lc == rc  # = 等价于 <-
+
+		if (match) {
+			l + 1 -> l
+			r <- r - 1
+		} else {
+			ok = 0  # = 等价于 <-
+			n -> l
+		}
+	}
+	println(ok)
+}
+
+is_pal("aba")
+is_pal("ab")

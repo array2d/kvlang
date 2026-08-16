@@ -39,12 +39,6 @@ func requireInt(inputs ...kvspace.XValue) error {
 }
 
 // requireKind guards that an input has a specific kind.
-func requireKind(v kvspace.XValue, kind string) error {
-	if v.Kind() != kind {
-		return fmt.Errorf("TypeError: expected %s, got %s", kind, v.Kind())
-	}
-	return nil
-}
 
 // readInputs resolves all read-slots of f.Inst into typed Values.
 func readInputs(f *rwir.Frame) []kvspace.XValue {
@@ -60,7 +54,7 @@ func readInputs(f *rwir.Frame) []kvspace.XValue {
 func writeResult(f *rwir.Frame, result kvspace.XValue) error {
 	if len(f.Inst.Writes) > 0 {
 		key := resolveWriteSlot(f.KV, keytree.FrameRoot(f.PC), f.Inst.Writes[0].Name)
-		if err := f.KV.Set([]kvspace.KVPair{{key, result}}); err != nil {
+		if err := f.KV.Set([]kvspace.KVPair{{Key: key, Val: result}}); err != nil {
 			return err
 		}
 	}
@@ -68,12 +62,25 @@ func writeResult(f *rwir.Frame, result kvspace.XValue) error {
 	return nil
 }
 
-// resolveWriteSlot 返回写槽的绝对 KV key（先查 .wparam 重定向，再处理绝对路径）。
+// resolveWriteSlot 返回写槽的绝对 KV key。
+// Ptr → slot → Char(path) 链，沿着 Char 一路解引用到底（非 Char 类型），
+// 防止递归调用时中间帧的 slot 里 Char(path) 被返回值覆盖。
 func resolveWriteSlot(kv kvspace.KVSpace, framePath, name string) string {
 	if isAbsolute(name) { return name }
 	rwRoot := funcFrameRoot(kv, framePath)
-	if r := kvspace.GetOne(kv, keytree.WParam(rwRoot, name)); !kvspace.IsNone(r) {
-		return r.String()
+	if ptrVal := kvspace.GetOne(kv, keytree.Stack(rwRoot)+name); kvspace.IsPtr(ptrVal) {
+		argAddr := kvspace.GetOne(kv, keytree.Stack(rwRoot)+kvspace.PtrTarget(ptrVal))
+		if !kvspace.IsNone(argAddr) {
+			v := argAddr
+			for kvspace.IsCharKind(v.Kind()) {
+				next := kvspace.GetOne(kv, v.ValueString())
+				if kvspace.IsNone(next) || !kvspace.IsCharKind(next.Kind()) {
+					return v.ValueString()
+				}
+				v = next
+			}
+			return v.ValueString()
+		}
 	}
 	return keytree.Stack(rwRoot) + name
 }
@@ -84,15 +91,12 @@ func nextPC(f *rwir.Frame) {
 }
 
 // setWrite writes a typed Value to a named slot (先查 .wparam 重定向).
-func setWrite(kv kvspace.KVSpace, framePath, slot string, val kvspace.XValue) error {
-	return kv.Set([]kvspace.KVPair{{resolveWriteSlot(kv, framePath, slot), val}})
-}
 
 // isContainerKind reports whether a kind represents a container/marker type
 // (dict, index, etc.) whose String() method does not return a path.
 func isContainerKind(kind string) bool {
 	switch kind {
-	case "dict", "index", "linkindex", "extindex", "rwfunc", "rwir":
+	case "dict", "index", "extindex", "rwfunc", "rwir":
 		return true
 	}
 	return false
@@ -106,7 +110,7 @@ func resolveBasePath(kv kvspace.KVSpace, fp, funcFrame string, read rwir.Param) 
 	if kvspace.IsNone(v) || isContainerKind(v.Kind()) {
 		return resolveKVPath(funcFrame, read.Name)
 	}
-	return v.String()
+	return v.ValueString()
 }
 
 // funcFrameRoot returns the nearest rwfunc frame root from the given frame path.
@@ -131,7 +135,7 @@ func ExecuteCopy(kv kvspace.KVSpace, vtid, pc string, inst *rwir.Rwir) error {
 	v := resolveReadValue(kv, framePath, inst.Reads[0])
 	for _, w := range inst.Writes {
 		key := resolveWriteSlot(kv, framePath, w.Name)
-		if err := kv.Set([]kvspace.KVPair{{key, v}}); err != nil {
+		if err := kv.Set([]kvspace.KVPair{{Key: key, Val: v}}); err != nil {
 			return err
 		}
 	}

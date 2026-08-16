@@ -1,0 +1,19 @@
+# 136: Single Number — 找出只出现一次的数
+# 算法: XOR 异或（所有成对出现的数互相抵消）
+# 来源: LeetCode #136
+# 期望输出:
+#   4
+rwfunc single_number() -> () {
+	a:[]int64 <- [4, 1, 2, 1, 2]
+	n = len(a)  # = 等价于 <-
+	a[0] -> result
+	i <- 1
+	while (i < n) {
+		x = a[i]  # = 等价于 <-
+		result ^ x -> result
+		i <- i + 1
+	}
+	println(result)
+}
+
+single_number()

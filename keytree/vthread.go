@@ -18,7 +18,6 @@ func VThreadPC(vtid string) string              { return vtMember(vtid, SegPC) }
 func VThreadStatus(vtid string) string          { return vtMember(vtid, SegStatus) }
 func VThreadCtime(vtid string) string           { return vtMember(vtid, SegCtime) }
 func VThreadDebugger(vtid string) string        { return vtMember(vtid, SegDebugger) }
-func VThreadTerm(vtid string) string            { return vtMember(vtid, SegTerm) }
 
 func VThreadStatusMsg(vtid, statusVal string) string {
 	return vtMember(vtid, statusVal) + PathSegSep + SegMsg
@@ -45,14 +44,10 @@ func VtidFromPC(pc string) string {
 	return rest
 }
 
+
 func VThreadSlot(vtid, frame string, i, j int) string {
 	if frame == "" {
-		return fmt.Sprintf(VthreadRoot+PathSegSep+"%s/[%d,%d]", vtid, i, j)
+		return fmt.Sprintf("/vthread/%s/[%d,%d]", vtid, i, j)
 	}
-	return fmt.Sprintf(VthreadRoot+PathSegSep+"%s/%s/[%d,%d]", vtid, frame, i, j)
-}
-
-func VThreadFrame(vtid, frame string) string {
-	if frame == "" { return VThread(vtid) }
-	return VThread(vtid) + PathSegSep + frame
+	return fmt.Sprintf("/vthread/%s/%s/[%d,%d]", vtid, frame, i, j)
 }

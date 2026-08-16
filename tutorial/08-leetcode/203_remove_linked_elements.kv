@@ -1,0 +1,39 @@
+# 203: Remove Linked List Elements
+# 来源: LeetCode #203
+# 期望输出:
+#   1
+#   2
+#   3
+#   4
+#   5
+rwfunc build_list() -> () {
+	/n0 <- { val=1; next="/n1" }
+	/n1 = { val=2; next="/n2" }  # = 等价于 <-
+	{ val=6; next="/n3" } -> /n2
+	/n3 <- { val=3; next="/n4" }
+	/n4 = { val=4; next="/n5" }  # = 等价于 <-
+	{ val=5; next="/n6" } -> /n5
+	/n6 <- { val=6; next="" }
+}
+
+rwfunc remove(head:char/utf32, val:int64) -> () {
+	p <- "/n0"
+	while (p != "") {
+		v = p.val  # = 等价于 <-
+		v == val -> skip
+
+		if (skip) {
+		} else {
+			println(v)
+		}
+
+		p <- p.next
+	}
+}
+
+rwfunc main() -> () {
+	build_list()
+	remove("/n0", 6)
+}
+
+main()

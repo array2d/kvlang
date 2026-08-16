@@ -1,0 +1,36 @@
+# 027: Remove Element — 原地移除指定值
+# 算法: 读写指针，跳过等于 val 的元素
+# 来源: LeetCode #27
+# 期望输出:
+#   k = 2
+#   k = 2
+#   2
+#   2
+rwfunc remove_element() -> () {
+	a:[]int64 = [3, 2, 2, 3]  # = 等价于 <-
+	3 -> val
+	n <- len(a)
+	k = 0  # = 等价于 <-
+	0 -> i
+	while (i < n) {
+		cur <- a[i]
+		skip = cur == val  # = 等价于 <-
+
+		if (skip) {
+			i + 1 -> i
+		} else {
+			a[k] <- cur
+			k <- k + 1
+			i = i + 1  # = 等价于 <-
+		}
+	}
+	println("k =", k)
+	0 -> j
+	while (j < k) {
+		v <- a[j]
+		println(v)
+		j = j + 1  # = 等价于 <-
+	}
+}
+
+remove_element()

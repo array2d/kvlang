@@ -22,14 +22,14 @@ func debugFuncName(kv kvspace.KVSpace, frameRoot string) string {
 	parent, dirName := kvspace.SepPath(frameRoot)
 	if parent != "/" { parent += kvspace.DirIndexSuf }
 	v := kv.Get(parent, []string{dirName + kvspace.DirIndexSuf}, true)[0]
-	extHead := kvspace.DecodeXValueHead(v.Encode()); extTarget := kvspace.DecodeExtIndex(extHead.Raw).ExtPath()
+	extTarget := kvspace.DecodeExtIndex(kvspace.BodyBytes(v)).ExtPath()
 	if extTarget == "" { return "?" }
 	name := strings.TrimPrefix(extTarget, keytree.LibRoot+"/")
 	return strings.TrimSuffix(name, "/")
 }
 
-// debugNotifyPause 向 /vthread/<vtid>/.debugger.pause 投递暂停事件（JSON）。
-// CPU 命中断点后调用，agent 通过 kvspace watch 接收。
+// debugNotifyPause 向 /vthread/<vtid>/.debugger.pause 写暂停事件（JSON）。
+// CPU 命中断点后调用，agent 通过 kvspace 轮询读取。
 func debugNotifyPause(_ context.Context, kv kvspace.KVSpace, vtid, pc string, inst *rwir.Rwir) {
 	frameRoot := keytree.FrameRoot(pc)
 	event, _ := json.Marshal(map[string]any{
@@ -38,16 +38,19 @@ func debugNotifyPause(_ context.Context, kv kvspace.KVSpace, vtid, pc string, in
 		"frame": frameRoot,
 		"op":    inst.Opcode,
 	})
-	kv.Notify(keytree.VThreadDebuggerPause(vtid), kvspace.NewChar(string(event)))
+	kv.Set([]kvspace.KVPair{{Key: keytree.VThreadDebuggerPause(vtid), Val: kvspace.NewCharByte(event...)}})
 }
 
-// debugWaitResume 阻塞等待 /vthread/<vtid>/.debugger.resume 上的 Notify，
+// debugWaitResume 轮询 /vthread/<vtid>/.debugger.resume，
 // 返回 agent 发送的命令字符串（"step" / "continue" / "abort"）。
-// 使用超时重试，与 vthread.WaitDone 保持一致的模式。
 func debugWaitResume(kv kvspace.KVSpace, vtid string) string {
+	resumeKey := keytree.VThreadDebuggerResume(vtid)
 	for {
-		val := kv.Watch(keytree.VThreadDebuggerResume(vtid), 30*time.Second)
-		if !kvspace.IsNone(val) { return val.String() }
-		// 超时 → 继续等待
+		cmd := kvspace.GetOne(kv, resumeKey).ValueString()
+		if cmd != "" {
+			kv.Del(resumeKey) // 消费命令
+			return cmd
+		}
+		time.Sleep(time.Millisecond)
 	}
 }

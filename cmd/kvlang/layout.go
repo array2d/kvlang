@@ -61,6 +61,9 @@ func cmdLayout(args []string) {
 		layout.WriteFunc(kv, fpkg, lower.Func(&df.Funcs[i]))
 		anyCode = true
 	}
+	for i := range df.RwirDecls {
+		layout.WriteRwirDecl(kv, &df.RwirDecls[i])
+	}
 	body := df.InitBody
 	for _, c := range df.TopLevelCalls { body = append(body, c) }
 	if len(body) > 0 {
@@ -121,16 +124,11 @@ func _loadFile(kv kvspace.KVSpace, f string, anyCode *bool, loaded map[string]bo
 		layout.WriteFunc(kv, fpkg, lower.Func(&df.Funcs[i]))
 		*anyCode = true
 	}
+	for i := range df.RwirDecls {
+		layout.WriteRwirDecl(kv, &df.RwirDecls[i])
+	}
 	for _, st := range df.InitBody { *initBody = append(*initBody, st) }
 	for _, c := range df.TopLevelCalls { *initBody = append(*initBody, c) }
 	if len(df.InitBody) > 0 || len(df.TopLevelCalls) > 0 { *anyCode = true }
 }
 
-func makeInitFunc(calls []*ast.Instruction) *ast.Func {
-	body := make([]ast.Stmt, len(calls))
-	for i, inst := range calls {
-		body[i] = inst
-	}
-	initFn := ast.Func{Sig: ast.FuncSig{Name: "init"}, Body: body}
-	return lower.Func(&initFn)
-}
