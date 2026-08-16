@@ -1,5 +1,5 @@
 # expected
-#   TypeError: concat requires strings, got int64 and bool
+#   TypeError: string.concat requires strings, got int64 and bool
 # 修复: todo-033 — concat 曾将 42→"42", true→"true" 静默拼接为 "42true"
 rwfunc main() -> () {
 	string.concat(int64(42), true) -> x

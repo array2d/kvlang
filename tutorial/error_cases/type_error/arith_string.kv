@@ -1,5 +1,5 @@
 # expected
-#   TypeError: expected numeric, got string
+#   TypeError: expected numeric, got char/utf32
 # 修复: todo-033 — asFloat/asInt 不再接受非数字类型；string+int 直接 TypeError
 rwfunc main() -> () {
 	"hello" + int64(3) -> x

@@ -1,8 +1,8 @@
 # expected
-#   division by zero
+#   ZeroDivisionError: division by zero
 rwfunc main() -> () {
-    1.0 ÷ 1e-20 -> x
-    1.0 ÷ 1e-20 -> x_m
+    1.0 ÷ 0.0 -> x
+    1.0 ÷ 0.0 -> x_m
     println(x_m)
     println(x)
 }
