@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -72,7 +71,7 @@ func executeEntry(kv kvspace.KVSpace, entryName string, debug bool) {
 	vtid := vthread.AllocVtid(kv)
 	kv.DelTree(keytree.VThread(vtid))
 	kvspace.MkIndexRecursive(kv, keytree.VThread(vtid)+"/")
-	builtin.WriteRwir(kv, filepath.Base(os.Args[0]))
+	builtin.WriteRwir(kv)
 	if !noterm {
 		term.Register(kv)
 		go term.Serve(kv)
