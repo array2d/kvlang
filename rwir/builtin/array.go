@@ -155,7 +155,7 @@ func (atOp) Call(f *rwir.Frame) error {
 		fp := keytree.FrameRoot(f.PC)
 		if base := separatedBase(f.KV, fp, f.Inst.Reads[0].Name); base != "" {
 			idx := int(asInt64(inputs[1]))
-			return writeResult(f, kvspace.GetOne(f.KV, fmt.Sprintf("%s<%d>", base, idx)))
+			return writeResult(f, kvspace.GetOne(f.KV, fmt.Sprintf("%s[%d]", base, idx)))
 		}
 	}
 	if kvspace.IsNone(inputs[0]) {
@@ -295,7 +295,7 @@ func (arraySetOp) Call(f *rwir.Frame) error {
 		fp := keytree.FrameRoot(f.PC)
 		if base := separatedBase(f.KV, fp, f.Inst.Reads[0].Name); base != "" {
 			idx := int(asInt64(inputs[1]))
-			f.KV.Set([]kvspace.KVPair{{Key: fmt.Sprintf("%s<%d>", base, idx), Val: inputs[2]}})
+			f.KV.Set([]kvspace.KVPair{{Key: fmt.Sprintf("%s[%d]", base, idx), Val: inputs[2]}})
 			vthread.Set(bg, f.KV, f.Vtid, rwir.NextPC(f.PC), "running")
 			return nil
 		}
@@ -361,7 +361,7 @@ func (hasOp) Call(f *rwir.Frame) error {
 	return writeResult(f, kvspace.NewBool(!kvspace.IsNone(v)))
 }
 
-// scatterOp: array.scatter(src) -> dst。解压 compact 数组为散 key（dst<0>..dst<N-1>），不动 src。
+// scatterOp: array.scatter(src) -> dst。解压 compact 数组为散 key（dst[0]..dst[N-1]），不动 src。
 type scatterOp struct{}
 func (scatterOp) Call(f *rwir.Frame) error {
 	if len(f.Inst.Writes) == 0 {
@@ -385,7 +385,7 @@ func (scatterOp) Call(f *rwir.Frame) error {
 	n := int(arr.ArrayLen())
 	pairs := make([]kvspace.KVPair, 0, n)
 	for i := 0; i < n; i++ {
-		pairs = append(pairs, kvspace.KVPair{Key: fmt.Sprintf("%s<%d>", dst, i), Val: typedIndex(arr, i)})
+		pairs = append(pairs, kvspace.KVPair{Key: fmt.Sprintf("%s[%d]", dst, i), Val: typedIndex(arr, i)})
 	}
 	if len(pairs) > 0 {
 		f.KV.Set(pairs)
@@ -394,7 +394,7 @@ func (scatterOp) Call(f *rwir.Frame) error {
 	return nil
 }
 
-// compactOp: array.compact(src) -> dst。压缩散 key（src<0>..src<N-1>）为 compact 数组，不动 src。
+// compactOp: array.compact(src) -> dst。压缩散 key（src[0]..src[N-1]）为 compact 数组，不动 src。
 type compactOp struct{}
 func (compactOp) Call(f *rwir.Frame) error {
 	if len(f.Inst.Reads) == 0 {
@@ -411,7 +411,7 @@ func (compactOp) Call(f *rwir.Frame) error {
 	src := resolveWriteSlot(f.KV, fp, f.Inst.Reads[0].Name)
 	var elems []kvspace.XValue
 	for i := 0; ; i++ {
-		v := kvspace.GetOne(f.KV, fmt.Sprintf("%s<%d>", src, i))
+		v := kvspace.GetOne(f.KV, fmt.Sprintf("%s[%d]", src, i))
 		if kvspace.IsNone(v) {
 			break
 		}
@@ -428,7 +428,7 @@ func (compactOp) Call(f *rwir.Frame) error {
 	return nil
 }
 
-// ensureScattered 若 base 是 compact 数组，就地 scatter 为散 key（写 base<0>..base<N-1>，删 base）。
+// ensureScattered 若 base 是 compact 数组，就地 scatter 为散 key（写 base[0]..base[N-1]，删 base）。
 func ensureScattered(f *rwir.Frame, base string) {
 	arr := kvspace.GetOne(f.KV, base)
 	if kvspace.IsNone(arr) || kvspace.ElemSize(arr.Kind()) <= 0 {
@@ -437,7 +437,7 @@ func ensureScattered(f *rwir.Frame, base string) {
 	n := int(arr.ArrayLen())
 	pairs := make([]kvspace.KVPair, 0, n)
 	for i := 0; i < n; i++ {
-		pairs = append(pairs, kvspace.KVPair{Key: fmt.Sprintf("%s<%d>", base, i), Val: typedIndex(arr, i)})
+		pairs = append(pairs, kvspace.KVPair{Key: fmt.Sprintf("%s[%d]", base, i), Val: typedIndex(arr, i)})
 	}
 	f.KV.Set(pairs)
 	f.KV.Del(base)
@@ -455,7 +455,7 @@ func (appendOp) Call(f *rwir.Frame) error {
 	base := resolveWriteSlot(f.KV, fp, f.Inst.Reads[0].Name)
 	ensureScattered(f, base)
 	n := separatedLen(f.KV, base)
-	f.KV.Set([]kvspace.KVPair{{Key: fmt.Sprintf("%s<%d>", base, n), Val: readInputs(f)[1]}})
+	f.KV.Set([]kvspace.KVPair{{Key: fmt.Sprintf("%s[%d]", base, n), Val: readInputs(f)[1]}})
 	nextPC(f)
 	return nil
 }
@@ -482,31 +482,31 @@ func (sliceOp) Call(f *rwir.Frame) error {
 	elems := make([]kvspace.KVPair, 0, hi-lo)
 	for i := lo; i < hi; i++ {
 		elems = append(elems, kvspace.KVPair{
-			Key: fmt.Sprintf("%s<%d>", base, i-lo),
-			Val: kvspace.GetOne(f.KV, fmt.Sprintf("%s<%d>", base, i)),
+			Key: fmt.Sprintf("%s[%d]", base, i-lo),
+			Val: kvspace.GetOne(f.KV, fmt.Sprintf("%s[%d]", base, i)),
 		})
 	}
 	f.KV.Set(elems)
 	for i := hi - lo; i < n; i++ {
-		f.KV.Del(fmt.Sprintf("%s<%d>", base, i))
+		f.KV.Del(fmt.Sprintf("%s[%d]", base, i))
 	}
 	nextPC(f)
 	return nil
 }
 
-// separatedBase 返回分离数组的 base key 路径（base<0> 存在）；非分离返回 ""。
+// separatedBase 返回分离数组的 base key 路径（base[0] 存在）；非分离返回 ""。
 func separatedBase(kv kvspace.KVSpace, fp, name string) string {
 	base := resolveWriteSlot(kv, fp, name)
-	if kvspace.IsNone(kvspace.GetOne(kv, base+"<0>")) {
+	if kvspace.IsNone(kvspace.GetOne(kv, base+"[0]")) {
 		return ""
 	}
 	return base
 }
 
-// separatedLen 返回分离数组的元素数（base<0>..base<N-1>）。
+// separatedLen 返回分离数组的元素数（base[0]..base[N-1]）。
 func separatedLen(kv kvspace.KVSpace, base string) int {
 	for i := 0; ; i++ {
-		if kvspace.IsNone(kvspace.GetOne(kv, fmt.Sprintf("%s<%d>", base, i))) {
+		if kvspace.IsNone(kvspace.GetOne(kv, fmt.Sprintf("%s[%d]", base, i))) {
 			return i
 		}
 	}
