@@ -1,0 +1,29 @@
+# 链表：非表意指针（隐式 .hex 子 key）+ dict
+# 待实现：需隐式 .hex 子 key + ‥incr 计数（见 非表意指针key生成规则.md）
+# wip: 需要 .hex 隐式创建实现
+# 语义: l 是容器 dict；l.head = {} 隐式建节点 .1；指针 p 走链，p.next = {} 隐式建下一节点
+# 期望输出:
+#   10
+#   20
+#   30
+
+l = {}
+l.head = {}
+l.head.val = 10
+
+p = l.head
+p.next = {}
+p = p.next
+p.val = 20
+
+p.next = {}
+p = p.next
+p.val = 30
+
+# 遍历链表
+p = l.head
+while (p != null) {
+    p.val -> v
+    println(v)
+    p.next -> p
+}

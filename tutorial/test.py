@@ -56,11 +56,11 @@ def parse_expects(f: Path) -> list[str]:
     return pats
 
 
-def _needs_extern(f: Path) -> bool:
-    """文件头含 # extern 标记 = 需外部 rwirext（redis/独立进程），不参与 goheap 自动测试。"""
+def _needs_skip(f: Path) -> bool:
+    """文件头含 # extern 或 # wip 标记 = 不参与自动测试（外部 rwirext / 待实现特性）。"""
     with open(f) as fh:
         for line in fh:
-            if line.startswith("# extern"):
+            if line.startswith("# extern") or line.startswith("# wip"):
                 return True
             if line and not line.startswith("#"):
                 return False
@@ -272,8 +272,8 @@ def main():
     failures: list[dict] = []
     for f in files:
         rel = str(f.relative_to(ROOT))
-        if _needs_extern(f):
-            print(f"{YELLOW}⏭ {prefix} {rel}: needs external rwirext{NC}")
+        if _needs_skip(f):
+            print(f"{YELLOW}⏭ {prefix} {rel}: extern/wip{NC}")
             skipped += 1
             continue
         expects = parse_expects(f)
