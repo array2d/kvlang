@@ -83,17 +83,18 @@ func (e Ext) serve(kv kvspace.KVSpace, op string, ops map[string]bool) {
 			pc, id = pcID[:i], pcID[i+1:]
 		}
 
-		finalPC := RunBatch(ctx, kv, pc, ops, e.Exec)
-		FinishBatch(kv, vid, finalPC)
+		finalPC := RunSeq(ctx, kv, pc, ops, e.Exec)
+		WriteFinalPC(kv, vid, finalPC)
 
 		kv.Set([]kvspace.KVPair{{Key: base + "/.done<" + vid + ">", Val: kvspace.NewCharByte([]byte(id)...)}})
 		kv.Del(base + "/" + child)
 	}
 }
 
-// RunBatch 从 pc 起连续执行 opcode ∈ ops 的 rwir，返回下一条非己方指令的 PC。
+// RunSeq 从 pc 起逐条顺序执行 opcode ∈ ops 的 rwir，返回下一条非己方指令的 PC。
+// 顺序执行、保持 PC 次序——ext 的 rwir 存在顺序依赖，非并行 batch；
 // exec 接收已解码 inst（避免重复 Decode）；己方 rwir 是叶算子，不跨帧，linkBase 恒定。
-func RunBatch(ctx context.Context, kv kvspace.KVSpace, pc string, ops map[string]bool, exec func(ctx context.Context, kv kvspace.KVSpace, pc string, inst *rwir.Rwir)) string {
+func RunSeq(ctx context.Context, kv kvspace.KVSpace, pc string, ops map[string]bool, exec func(ctx context.Context, kv kvspace.KVSpace, pc string, inst *rwir.Rwir)) string {
 	linkBase := keytree.Stack(keytree.FrameRoot(pc))
 	for {
 		inst, err := rwir.Decode(ctx, kv, linkBase, pc)
@@ -106,7 +107,7 @@ func RunBatch(ctx context.Context, kv kvspace.KVSpace, pc string, ops map[string
 	return pc
 }
 
-// FinishBatch 把最终 PC 写回 VM 的 pc key（VM 从该 PC 继续执行）。
-func FinishBatch(kv kvspace.KVSpace, vtid, finalPC string) {
+// WriteFinalPC 把最终 PC 写回 VM 的 pc key（VM 从该 PC 继续执行）。
+func WriteFinalPC(kv kvspace.KVSpace, vtid, finalPC string) {
 	kv.Set([]kvspace.KVPair{{Key: keytree.VThreadPC(vtid), Val: kvspace.NewCharByte([]byte(finalPC)...)}})
 }
