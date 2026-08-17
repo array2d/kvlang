@@ -1,4 +1,4 @@
-.PHONY: build test vet clean kvspace install rust rust-test
+.PHONY: build test vet clean kvspace install
 
 export GOPROXY ?= https://goproxy.cn,direct
 PREFIX   ?= ~/.local
@@ -9,16 +9,9 @@ build:
 	install -d $(PREFIX)/bin
 	install kvlang $(PREFIX)/bin/kvlang
 
-rust:
-	cargo build --manifest-path $(CURDIR)/Cargo.toml
-
-rust-test:
-	python3 tutorial/test.py --runtime=rust
-
 vet:
 	go vet ./...
 
 clean:
 	go clean
-	cargo clean --manifest-path $(CURDIR)/Cargo.toml
 	rm -f kvlang

@@ -1,0 +1,12 @@
+[package]
+name = "kvlang-layout"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "kvlang 编译期（parser/lower/layoutcode），只依赖 kvspace-durable 的 C ABI"
+
+[lib]
+name = "kvlang_layout"
+path = "src/lib.rs"
+
+[dependencies]
