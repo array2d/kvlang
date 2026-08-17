@@ -23,7 +23,7 @@ KV 空间操作已迁至独立 CLI（kvlang-go 仓 cmd/kvspace）:
   kvspace [--kvspace dsn] <get|mget|set|del|list|tree|dump|watch|notify|clear>
 
 选项:
-  --kvspace <dsn>                kvspace 地址（默认 redis://127.0.0.1:6379；KVLANG_KVSPACE 可覆盖）
+  --kvspace <dsn>                kvspace 地址（默认 redis://127.0.0.1:6379；KVSPACE 可覆盖）
   --debug                        单步调试模式（设 .debugger="step"，agent 通过 kvspace 协议控制）
 
 示例:

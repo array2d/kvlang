@@ -12,14 +12,14 @@ func initDirs(kv kvspace.KVSpace) {
 	kvspace.MkIndexRecursive(kv, "/vthread/")
 }
 
-// defaultKVSpace 返回 kvspace DSN 默认值：KVLANG_KVSPACE 环境变量覆盖，否则本机 redis。
+// defaultKVSpace 返回 kvspace DSN 默认值：KVSPACE 环境变量覆盖，否则本机 redis。
 func defaultKVSpace() string {
-	if v := os.Getenv("KVLANG_KVSPACE"); v != "" {
+	if v := os.Getenv("KVSPACE"); v != "" {
 		return v
 	}
 	return "redis://127.0.0.1:6379"
 }
 
-const kvspaceFlagDesc = "kvspace 地址（DSN，如 redis://host:port、art:// 进程内 ART；默认可由 KVLANG_KVSPACE 覆盖）"
+const kvspaceFlagDesc = "kvspace 地址（DSN，如 redis://host:port、art:// 进程内 ART；默认可由 KVSPACE 覆盖）"
 
 
