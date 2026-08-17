@@ -20,13 +20,17 @@ RED, GREEN, YELLOW, NC = "\033[0;31m", "\033[0;32m", "\033[1;33m", "\033[0m"
 ROOT = Path(__file__).resolve().parent.parent
 KV = str(ROOT / "kvlang")
 RUST_BIN = str(ROOT / "target" / "debug" / "kvlang")
+LAYOUT_BIN = os.environ.get("KVLANG_LAYOUT_BIN",
+                            str(ROOT / "layout" / "target" / "debug" / "examples" / "layout_file"))
+CRUN_BIN = os.environ.get("KVBIN", str(ROOT / "runtime" / "test" / "run"))
+_C_DSN = os.environ.get("KVSPACE", "redis://127.0.0.1:6379")
 SHM_PATH = "/tmp/kvlang_rust_test"
 FAIL_CSV = (ROOT / "tutorial" / "test_failures.csv").resolve()
 BENCH_CSV = (ROOT / "tutorial" / "benchmark.csv").resolve()
 MODULE = sys.modules[__name__]
 
-_KV_ENV = {**os.environ, "KVLANG_KVSPACE": os.environ.get("KVLANG_KVSPACE", "goheap://")}
-_SHM_ENV = {**os.environ, "KVLANG_KVSPACE": f"shm://{SHM_PATH}",
+_KV_ENV = {**os.environ, "KVSPACE": os.environ.get("KVSPACE", "goheap://")}
+_SHM_ENV = {**os.environ, "KVSPACE": f"shm://{SHM_PATH}",
             "LD_LIBRARY_PATH": str(ROOT.parent / "kvspace-c" / "build"),
             "KVSPACE_SHM": SHM_PATH}
 
@@ -237,15 +241,52 @@ def _rust_test_file(f: Path, expects: list[str], env: dict) -> tuple[bool, str]:
     return True, rust.stdout[:200]
 
 
+def _detect_entry(out: str) -> str:
+    m = re.search(r"ENTRY=(\S+)", out)
+    return m.group(1) if m else "init"
+
+
+def _c_test_file(f: Path, expects: list[str], env: dict) -> tuple[bool, str]:
+    """Rust layout → kvspace(redis/shm) → C runtime，检查输出。"""
+    rel = str(f.relative_to(ROOT))
+    if _C_DSN.startswith("shm://"):
+        try:
+            os.unlink(_C_DSN[len("shm://"):])
+        except OSError:
+            pass
+    elif _C_DSN.startswith("fs://"):
+        shutil.rmtree(_C_DSN[len("fs://"):], ignore_errors=True)
+    else:
+        _flush_redis()
+    layout = subprocess.run([LAYOUT_BIN, rel, _C_DSN], capture_output=True, text=True,
+                            timeout=60, cwd=str(ROOT), env=env)
+    if layout.returncode != 0:
+        return False, f"layout failed: {layout.stderr.strip()[:100]}"
+    entry = _detect_entry(layout.stdout)
+    try:
+        crun = subprocess.run([CRUN_BIN, entry], capture_output=True, text=True,
+                              timeout=120, cwd=str(ROOT), env={**env, "KVSPACE": _C_DSN})
+    except subprocess.TimeoutExpired:
+        return False, "timeout"
+    if crun.returncode != 0:
+        return False, f"c runtime exit {crun.returncode}: {crun.stderr.strip()[:100]}"
+    for pat in expects:
+        if pat not in crun.stdout:
+            return False, f"want {pat!r}"
+    return True, crun.stdout[:200]
+
+
 def main():
     ap = argparse.ArgumentParser(description="tutorial test")
     ap.add_argument("--filter", default="", help="filter by name")
     ap.add_argument("--no-build", action="store_true", help="skip make build")
     ap.add_argument("--errorexit", action="store_true", help="exit on first error")
     ap.add_argument("--bench", action="store_true", help="benchmark matching .kv/.py/.c files")
-    ap.add_argument("--runtime", default="go", choices=("go", "rust"),
-                    help="runtime to test (default: go)")
+    ap.add_argument("--runtime", default="go", choices=("go", "rust", "c"),
+                    help="runtime to test (default: go; env KVLANG_RUNTIME=c 等价 --runtime c)")
     args = ap.parse_args()
+    if os.environ.get("KVLANG_RUNTIME") == "c":
+        args.runtime = "c"
 
     if not args.no_build and args.runtime == "go":
         r = subprocess.run(["make", "build"], capture_output=True, text=True,
@@ -282,6 +323,15 @@ def main():
         try:
             if args.runtime == "rust":
                 ok, detail = _rust_test_file(f, expects, _SHM_ENV)
+                if ok:
+                    print(f"{GREEN}✅ {prefix} {rel}{NC}")
+                    passed += 1
+                else:
+                    print(f"{RED}❌ {prefix} {rel}: {detail}{NC}")
+                    failures.append({"file": rel, "reason": detail, "expected": "", "stdout": ""})
+                    failed += 1
+            elif args.runtime == "c":
+                ok, detail = _c_test_file(f, expects, _KV_ENV)
                 if ok:
                     print(f"{GREEN}✅ {prefix} {rel}{NC}")
                     passed += 1
