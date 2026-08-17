@@ -1,0 +1,11 @@
+[package]
+name = "kvlang-rwext-term"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "term"
+path = "src/main.rs"
+
+[dependencies]
+libc = "0.2"

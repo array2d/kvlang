@@ -1,0 +1,37 @@
+package builtin
+
+import (
+	"github.com/array2d/kvspace-go"
+	"oldhero/rwir"
+	"oldhero/vthread"
+)
+
+func init() {
+	registerWord("and", "rwir and(A:bool, B:bool) -> (C:bool)", logic{f: func(a, b bool) bool { return a && b }})
+	registerWord("or",  "rwir or(A:bool, B:bool) -> (C:bool)",  logic{f: func(a, b bool) bool { return a || b }})
+	registerWord("not", "rwir not(A:bool) -> (C:bool)",          not{})
+}
+
+type logic struct{ f func(bool, bool) bool }
+func (o logic) Call(f *rwir.Frame) error {
+	r, err := evalLogic(readInputs(f), o.f)
+	if err != nil { vthread.SetError(bg, f.KV, f.Vtid, f.PC, err.Error()); return err }
+	return writeResult(f, r)
+}
+
+type not struct{}
+func (not) Call(f *rwir.Frame) error {
+	r, err := evalNot(readInputs(f))
+	if err != nil { vthread.SetError(bg, f.KV, f.Vtid, f.PC, err.Error()); return err }
+	return writeResult(f, r)
+}
+
+func evalLogic(inputs []kvspace.XValue, fn func(bool, bool) bool) (kvspace.XValue, error) {
+	if err := requireBinary(inputs); err != nil { return kvspace.None{}, err }
+	return kvspace.NewBool(fn(AsBool(inputs[0]), AsBool(inputs[1]))), nil
+}
+
+func evalNot(inputs []kvspace.XValue) (kvspace.XValue, error) {
+	if err := requireUnary(inputs); err != nil { return kvspace.None{}, err }
+	return kvspace.NewBool(!AsBool(inputs[0])), nil
+}
