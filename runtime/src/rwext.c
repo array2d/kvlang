@@ -62,6 +62,32 @@ int rwext_del(rwext_conn *c, const char *key) {
     return kv_del(c->kv, key, err, sizeof err);
 }
 
+int rwext_get_tlv(rwext_conn *c, const char *key, uint8_t **out, uint32_t *out_len) {
+    if (out) *out = NULL;
+    if (out_len) *out_len = 0;
+    xval_t v; xv_zero(&v);
+    kv_get_one(c->kv, key, &v);
+    if (xv_none(&v)) { xv_free(&v); return 0; }
+    uint8_t *b = malloc(v.len);
+    if (!b) { xv_free(&v); return -1; }
+    memcpy(b, v.data, v.len);
+    *out = b; *out_len = v.len;
+    xv_free(&v);
+    return 0;
+}
+
+int rwext_set_tlv(rwext_conn *c, const char *key, const uint8_t *val, uint32_t val_len) {
+    xval_t v = { (uint8_t *)val, val_len };
+    kv_pair_t p = { (char *)key, v };
+    char err[256];
+    return kv_set(c->kv, &p, 1, err, sizeof err);
+}
+
+int rwext_mkindex(rwext_conn *c, const char *path) {
+    char err[256];
+    return kv_mkindex(c->kv, path, err, sizeof err);
+}
+
 char *rwext_print_line(rwext_conn *c, const char *pc, int *rawnl, int *cerr) {
     if (rawnl) *rawnl = 0;
     if (cerr) *cerr = 0;
@@ -101,4 +127,60 @@ char *rwext_next_pc(const char *pc) {
     sbuf_t b; sb_init(&b);
     rwir_next_pc(pc, &b);
     return sb_detach(&b);
+}
+
+char *rwext_params(rwext_conn *c, const char *pc) {
+    char *fr = kt_frame_root(pc);
+    if (!fr) return strdup("");
+    char *lb = kt_stack(fr);
+    rwir_inst_t inst;
+    char err[256];
+    if (rwir_decode(c->kv, lb, pc, &inst, err, sizeof err) != 0) {
+        free(fr); free(lb); return strdup("");
+    }
+    free(lb);
+    sbuf_t b; sb_init(&b);
+    sb_puts(&b, inst.opcode ? inst.opcode : "");
+    for (int i = 0; i < inst.nr; i++) { sb_putc(&b, '\n'); sb_puts(&b, inst.reads[i].name ? inst.reads[i].name : ""); }
+    for (int i = 0; i < inst.nw; i++) { sb_putc(&b, '\n'); sb_puts(&b, inst.writes[i].name ? inst.writes[i].name : ""); }
+    free(fr);
+    rwir_inst_free(&inst);
+    return sb_detach(&b);
+}
+
+/* 解析读参 idx 为字符串（变量 → 帧槽值；路径 → 该路径下的值）。 */
+char *rwext_resolve_read(rwext_conn *c, const char *pc, int idx) {
+    char *fr = kt_frame_root(pc);
+    if (!fr) return strdup("");
+    char *lb = kt_stack(fr);
+    rwir_inst_t inst;
+    char err[256];
+    if (rwir_decode(c->kv, lb, pc, &inst, err, sizeof err) != 0 || idx < 0 || idx >= inst.nr) {
+        free(fr); free(lb); return strdup("");
+    }
+    free(lb);
+    xval_t v; xv_zero(&v);
+    bi_resolve_read_value(c->kv, fr, inst.reads[idx].name, &inst.reads[idx].val, &v);
+    char *s = xv_none(&v) ? strdup("") : xv_value_string(&v);
+    xv_free(&v);
+    free(fr);
+    rwir_inst_free(&inst);
+    return s;
+}
+
+/* 解析写参 idx 为 KV 路径（路径 → 直接返回；变量 → 帧槽路径）。 */
+char *rwext_resolve_write(rwext_conn *c, const char *pc, int idx) {
+    char *fr = kt_frame_root(pc);
+    if (!fr) return strdup("");
+    char *lb = kt_stack(fr);
+    rwir_inst_t inst;
+    char err[256];
+    if (rwir_decode(c->kv, lb, pc, &inst, err, sizeof err) != 0 || idx < 0 || idx >= inst.nw) {
+        free(fr); free(lb); return strdup("");
+    }
+    free(lb);
+    char *s = bi_resolve_write_slot(c->kv, fr, inst.writes[idx].name);
+    free(fr);
+    rwir_inst_free(&inst);
+    return s;
 }

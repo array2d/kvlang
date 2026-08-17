@@ -1,0 +1,93 @@
+package main
+
+import (
+	"io"
+	"strings"
+
+	"oldhero/ast"
+	"oldhero/keytree"
+	"github.com/array2d/kvspace-go"
+	"oldhero/layout"
+	"oldhero/logx"
+	"oldhero/lower"
+	"oldhero/parser"
+)
+
+// cmdLayoutAndRun 先 layout 再 run（fix-039：替代旧 run 机制）。
+func cmdLayoutAndRun(args []string) {
+	if len(args) == 0 {
+		runLib("", "init", false)
+		return
+	}
+	cmdLayout(args)
+	entry := findEntry(defaultKVSpace())
+	runLib("", entry, false)
+}
+
+func findEntry(dsn string) string {
+	kv := kvspace.Conn(dsn)
+	defer kv.DisConn()
+	if entry := findEntryPrefix(kv, keytree.LibRoot+"/"); entry != "" {
+		return entry
+	}
+	return "init"
+}
+
+func findEntryPrefix(kv kvspace.KVSpace, prefix string) string {
+	children := kv.List(prefix, false, true)
+	for _, c := range children {
+		c = strings.TrimSuffix(c, "/")
+		if strings.HasSuffix(c, ".init") { return c }
+		sub := kvspace.JoinPath(prefix, c) + "/"
+		if entry := findEntryPrefix(kv, sub); entry != "" { return c + "/" + entry }
+	}
+	return ""
+}
+
+// ── 加载 + 执行（组合 layout.go 和 run.go）────────────────────────
+
+func runFiles(dsn string, paths []string, debug bool) {
+	kv := kvspace.Conn(dsn)
+	defer kv.DisConn()
+	initDirs(kv)
+
+	var files []string
+	for _, p := range paths {
+		f, err := collectKVFiles(p)
+		if err != nil { logx.Fatal("collect .kv files: %v", err) }
+		files = append(files, f...)
+	}
+	if len(files) == 0 { logx.Fatal("no .kv files found") }
+
+	layoutAndRunStdlib(kv)
+	if !loadFunctions(kv, files) { return }
+	executeEntry(kv, findEntry(dsn), debug)
+}
+
+func runCode(name string, rc io.Reader, dsn string, debug bool) {
+	kv := kvspace.Conn(dsn)
+	defer kv.DisConn()
+	initDirs(kv)
+	layoutAndRunStdlib(kv)
+
+	df, diags, err := parser.ParseCode(rc)
+	if err != nil { logx.Fatal("parse: %v", err) }
+	for _, d := range diags { d.SrcName = "<inline>"; logx.Diag(d) }
+	if parser.HasErrors(diags) { logx.Fatal("parse: error-level diagnostics — refusing to execute") }
+	if len(df.Funcs) == 0 && len(df.TopLevelCalls) == 0 && len(df.InitBody) == 0 { return }
+	for i := range df.Funcs {
+		fpkg := df.Funcs[i].Pkg
+		if fpkg == "" { fpkg = df.Package }
+		layout.WriteFunc(kv, fpkg, lower.Func(&df.Funcs[i]))
+	}
+	for i := range df.RwirDecls {
+		layout.WriteRwirDecl(kv, &df.RwirDecls[i])
+	}
+	body := df.InitBody
+	for _, c := range df.TopLevelCalls { body = append(body, c) }
+	if len(body) > 0 {
+		initFn := ast.Func{Sig: ast.FuncSig{Name: "init"}, Body: body}
+		layout.WriteFunc(kv, "", lower.Func(&initFn))
+	}
+	executeEntry(kv, findEntry(dsn), debug)
+}

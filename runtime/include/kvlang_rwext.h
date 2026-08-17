@@ -24,6 +24,15 @@ int rwext_set(rwext_conn *c, const char *key, const char *val);
 /* 删 key */
 int rwext_del(rwext_conn *c, const char *key);
 
+/* 读 key 的原始 TLV 字节（含类型信息，malloc，调用方 free）；None → out=NULL */
+int rwext_get_tlv(rwext_conn *c, const char *key, uint8_t **out, uint32_t *out_len);
+
+/* 写原始 TLV 字节 */
+int rwext_set_tlv(rwext_conn *c, const char *key, const uint8_t *val, uint32_t val_len);
+
+/* 递归建目录索引 */
+int rwext_mkindex(rwext_conn *c, const char *path);
+
 /* 从 pc 解码指令；若 opcode ∈ {print,println,cerr}，resolve 全部 reads 并 display，
  * 以自身 sep（print 无分隔、println/cerr 空格分隔）连接返回（malloc）；
  * 非己方指令返回 NULL（调用方应停止 RunSeq）。
@@ -33,3 +42,13 @@ char *rwext_print_line(rwext_conn *c, const char *pc, int *rawnl, int *cerr);
 
 /* 当前指令的下一条 PC（malloc） */
 char *rwext_next_pc(const char *pc);
+
+/* 解码指令，返回 opcode + 读参名 + 写参名（\n 分隔：首行 opcode，接 nr 行读参名，接 nw 行写参名，malloc）。
+ * 供 numpy/tensor 扩展按路径零拷贝读 raw 数据。 */
+char *rwext_params(rwext_conn *c, const char *pc);
+
+/* 解析读参 idx 为字符串（变量 → 帧槽值；路径 → 该路径下的值）。 */
+char *rwext_resolve_read(rwext_conn *c, const char *pc, int idx);
+
+/* 解析写参 idx 为 KV 路径（路径 → 直接返回；变量 → 帧槽路径）。 */
+char *rwext_resolve_write(rwext_conn *c, const char *pc, int idx);
