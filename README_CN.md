@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Tutorial Examples](https://img.shields.io/badge/tutorials-140%20examples-4c1)](tutorial/)
 
-**deepx 的 VM（原 dxlang），agent-native 训推一体自迭代强人工智能计算架构。** 以 kvspace 树形路径为统一地址空间，同种语法同时承担 VM 指令、高级语言、编译器 IR、人类可读源码四种职能。
+**以 kvspace 为寻址空间和内存空间、小核心、扩展主导的明文解释执行语言（原训推框架 deepx 的前端语言，前身 dxlang）。** 代码与数据统一在一棵 KV 树；PC 即 KV 路径、可崩溃恢复，源码即 IR、KV 皆明文。核心 runtime 只做执行循环与控制流，其余能力交由 rwirext 扩展承担（`term` / `json` 等为基础示例）。
 
 > English: [README.md](README.md) | 设计：[deep-dive](https://github.com/array2d/deepx-design/blob/master/doc/kvlang/deep-dive.md) — 根设计文档；README 为教学衍生。全部行为规范（p0–p7）、指令模型（§2）、Link 调用机制（§6）、类型系统（§9）、诊断体系（§12）均在其中。
 >
@@ -37,6 +37,18 @@ lib main {
 ```
 
 地址空间只有两个域：`/lib`（函数库——签名、指令树、`.src` 源码）和 `/vthread`（运行时栈帧）。`/` 下其余路径全部由用户自定义。**没有 `/dev` 设备域，也没有终端**——KV 世界里只有 key 和 value；`print` 这类 I/O 是[扩展 rwir](#内建函数与扩展-rwir)，不是地址空间域。
+
+---
+
+## 生态架构
+
+kvspace 是核心的寻址空间与内存空间；语言本体是小核心 runtime，能力由上层扩展承担。
+
+![kvlang 生态架构](docs/kvlang-ecosystem-architecture.png)
+
+- **kvspace** — 一套 C ABI（`kvspace_*`，24 符号），由 DSN 选择两种实现：`kvspace-c`（C，`shm://`，链接 `blockmalloc` + `slotsboxmalloc`）与 `kvspace-durable`（Rust，`redis://` / `fs://`，s3/tikv 规划中）。
+- **kvlang** — `layout`（Rust，编译）与 `runtime`（C，执行），二者都只依赖 `kvspace_*` C ABI。
+- **rwirext** — 构建在 runtime 之上的扩展。嵌入式（Rust `term`，经 `kvlang_rwext.h` 链接 `libkvlang_runtime`）或独立进程 handoff（Go `json`、Python `numpy`）。`term` / `json` 只是基础示例扩展，不是招牌能力。
 
 ---
 
