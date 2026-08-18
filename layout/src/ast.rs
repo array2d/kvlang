@@ -469,7 +469,7 @@ impl fmt::Display for IfStmt {
 pub struct ForStmt {
     pub comments: Vec<String>,
     pub var: String,
-    pub iter: String,
+    pub iter: Expr,
     pub body: Vec<Stmt>,
 }
 

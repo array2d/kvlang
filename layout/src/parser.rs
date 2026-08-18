@@ -667,16 +667,41 @@ impl Parser {
         if self.peek().kind == Kind::Ident && self.peek().value == "in" {
             self.advance();
         }
-        let mut iter = String::new();
+        let mut iter = ast::leaf("");
         if self.peek().kind != Kind::RParen && self.peek().kind != Kind::EOF {
-            iter = self.advance().value;
+            iter = self.parse_pratt(0).unwrap_or_else(|| ast::leaf(""));
         }
+        // for-in 源允许顶层散 key 字面量 `for (x in {...})`（物化到临时槽后展开）。
+        self.check_sparse_usage(&iter, true);
         self.expect(Kind::RParen);
         self.skip_newlines_and_comments();
         self.expect(Kind::LBrace);
         let body = self.parse_body();
         self.expect(Kind::RBrace);
         Stmt::For(ast::ForStmt { comments: Vec::new(), var, iter, body })
+    }
+
+    /// 校验散 key 字面量 `{...}` 的出现位置。`top_legal` 表示当前上下文允许顶层出现
+    /// （赋值右值 / for-in 源）；无论如何，其元素内部都不得再嵌套散 key 字面量。
+    fn check_sparse_usage(&mut self, e: &Expr, top_legal: bool) {
+        let top_is_sparse = e.op == "sparsearray";
+        let bad = if top_is_sparse && top_legal {
+            e.args.iter().any(expr_contains_sparse)
+        } else {
+            expr_contains_sparse(e)
+        };
+        if bad {
+            let t = self.peek();
+            self.errors.push(Diagnostic {
+                pos: t.pos,
+                warn: false,
+                info: false,
+                message: "scattered-key array literal {...} is only allowed as an assignment right-hand side (x = {...}) or a for-in source".to_string(),
+                source: String::new(),
+                src_file: String::new(),
+                src_name: String::new(),
+            });
+        }
     }
 
     fn parse_while(&mut self) -> Stmt {
@@ -758,6 +783,11 @@ impl Parser {
         }
         self.eat(Kind::Newline);
         self.check_write_type_match(&inst);
+        // 散 key 字面量 `{...}` 仅允许作赋值右值（单一写目标）；其余位置报错。
+        let top_legal = inst.writes.len() == 1;
+        if let Some(e) = &inst.expr {
+            self.check_sparse_usage(e, top_legal);
+        }
         if inst.expr.is_none() && inst.writes.is_empty() {
             return None;
         }
@@ -879,6 +909,9 @@ impl Parser {
         }
 
         // 数组字面量
+        // 数组字面量 `[...]` → compact 数组：元素连续打包进单个 XValue（定长）。
+        // 与散 key 数组字面量 `{...}` 相对——compact 要求元素定长，不接受变长字符串；
+        // 想要字符串数组必须写成散 key `{"a","b"}`。
         if t.kind == Kind::LBrack {
             self.advance();
             let mut elems = Vec::new();
@@ -891,6 +924,20 @@ impl Parser {
                 }
             }
             self.expect(Kind::RBrack);
+            if let Some(bad) = elems.iter().find(|e| e.is_leaf() && e.quote != 0) {
+                self.errors.push(Diagnostic {
+                    pos: t.pos,
+                    warn: false,
+                    info: false,
+                    message: format!(
+                        "compact array [...] cannot hold variable-length string element {:?}; use a scattered-key array {{...}} for string arrays",
+                        bad.val
+                    ),
+                    source: String::new(),
+                    src_file: String::new(),
+                    src_name: String::new(),
+                });
+            }
             return Some(ast::call("array", elems));
         }
 
@@ -905,7 +952,25 @@ impl Parser {
                     && self.peek_at(j + 1).kind == Kind::Arrow
                     && self.peek_at(j + 1).value == "=");
             if !is_dict {
-                return None;
+                // 值列表 `{v0, v1, ...}`（无 `=> =`）→ 散 key 数组字面量，区别于 dict 的
+                // `key => = val`。散 key：每个元素落在 base.<i> 独立 key（变长/可增长），
+                // 字符串数组走这里；compact 定长打包走 `[...]`。
+                self.advance(); // consume {
+                let mut elems = Vec::new();
+                loop {
+                    while matches!(self.peek().kind, Kind::Newline | Kind::Comma | Kind::Comment) {
+                        self.advance();
+                    }
+                    if self.peek().kind == Kind::RBrace || self.peek().kind == Kind::EOF {
+                        break;
+                    }
+                    match self.parse_pratt(0) {
+                        Some(e) => elems.push(e),
+                        None => break,
+                    }
+                }
+                self.expect(Kind::RBrace);
+                return Some(ast::call("sparsearray", elems));
             }
             self.advance(); // consume {
             let mut args = Vec::new();
@@ -1358,6 +1423,11 @@ fn is_numeric_literal(v: &str) -> bool {
 
 fn is_float_literal(v: &str) -> bool {
     v.contains('.') || v.contains('e') || v.contains('E')
+}
+
+/// 表达式树中任意节点是否为散 key 字面量 `{...}`（parser 产出的 sparsearray）。
+fn expr_contains_sparse(e: &Expr) -> bool {
+    e.op == "sparsearray" || e.args.iter().any(expr_contains_sparse)
 }
 
 fn attach_comments(st: Stmt, comments: Vec<String>) -> Stmt {

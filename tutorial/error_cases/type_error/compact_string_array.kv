@@ -1,0 +1,8 @@
+# expected
+#   compact array [...] cannot hold variable-length string element
+# 修复: 括号规约 — compact [..] 只容定长元素；变长字符串数组必须用散 key {..}
+rwfunc main() -> () {
+	x = ["af", "f23gw", "232f"]
+	println(x)
+}
+main()

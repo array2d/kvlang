@@ -42,6 +42,15 @@ fn lower_body(stmts: &[Stmt], lg: &mut LabelGen, lc: Option<&LoopCtx>) -> Vec<St
     for (i, st) in stmts.iter().enumerate() {
         match st {
             Stmt::Instruction(s) => {
+                // 散 key 数组字面量 `base = {v0, v1, ...}` → 逐元素散 key 写入。
+                if s.writes.len() == 1 {
+                    if let Some(e) = &s.expr {
+                        if e.op == "sparsearray" {
+                            preamble.extend(expand_sparse(&s.writes[0], e, lg));
+                            continue;
+                        }
+                    }
+                }
                 let need_flatten = match &s.expr {
                     Some(e) => !e.is_leaf() && !all_args_leaf(e),
                     None => false,
@@ -174,7 +183,29 @@ fn lower_for_with_cont(
 
     let idx_slot = lg.tmp();
     let cond_slot = lg.tmp();
-    let init_body = vec![make_copy_inst("-1", &idx_slot), goto_label(&cond_label)];
+
+    // 迭代源：裸标识符直接原地遍历；表达式（如数组字面量）先物化到临时槽。
+    let mut init_body = Vec::new();
+    let iter_slot = if s.iter.is_leaf() {
+        s.iter.val.clone()
+    } else if s.iter.op == "sparsearray" {
+        let slot = lg.tmp();
+        init_body.extend(expand_sparse(&slot, &s.iter, lg));
+        slot
+    } else {
+        let slot = lg.tmp();
+        init_body.push(Stmt::Instruction(Instruction {
+            comments: Vec::new(),
+            expr: Some(s.iter.clone()),
+            writes: vec![slot.clone()],
+            write_types: Vec::new(),
+            arrow_left: true,
+            eq: true,
+        }));
+        slot
+    };
+    init_body.push(make_copy_inst("-1", &idx_slot));
+    init_body.push(goto_label(&cond_label));
 
     let add_inst = Instruction {
         comments: Vec::new(),
@@ -186,7 +217,7 @@ fn lower_for_with_cont(
     };
     let kv_has_inst = Instruction {
         comments: Vec::new(),
-        expr: Some(ast::call("kvhas", vec![ast::leaf(&s.iter), ast::leaf(&idx_slot)])),
+        expr: Some(ast::call("kvhas", vec![ast::leaf(&iter_slot), ast::leaf(&idx_slot)])),
         writes: vec![cond_slot.clone()],
         write_types: Vec::new(),
         arrow_left: false,
@@ -200,7 +231,7 @@ fn lower_for_with_cont(
 
     let kv_at_inst = Instruction {
         comments: Vec::new(),
-        expr: Some(ast::call("kvat", vec![ast::leaf(&s.iter), ast::leaf(&idx_slot)])),
+        expr: Some(ast::call("kvat", vec![ast::leaf(&iter_slot), ast::leaf(&idx_slot)])),
         writes: vec![s.var.clone()],
         write_types: Vec::new(),
         arrow_left: false,
@@ -283,6 +314,32 @@ fn goto_label(label: &str) -> Stmt {
         arrow_left: false,
         eq: false,
     })
+}
+
+/// 散 key 数组字面量（parser 产出的 sparsearray）展开为逐元素散 key 写入：
+///   `base = {a, b}` → `set(base,"0",a); set(base,"1",b)`——每个元素落在 base.<i>
+/// 独立 key（变长/字符串数组的存储形态），与 compact `[...]`（单打包 XValue）相对。
+/// 元素为复合表达式时先 flatten 展开子调用。
+fn expand_sparse(base: &str, e: &Expr, lg: &mut LabelGen) -> Vec<Stmt> {
+    let mut out = Vec::new();
+    for (i, el) in e.args.iter().enumerate() {
+        let inst = Instruction {
+            comments: Vec::new(),
+            expr: Some(ast::call("set", vec![ast::leaf(base), ast::str_lit(&i.to_string()), el.clone()])),
+            writes: vec![base.to_string()],
+            write_types: Vec::new(),
+            arrow_left: true,
+            eq: false,
+        };
+        if all_args_leaf(inst.expr.as_ref().unwrap()) {
+            out.push(Stmt::Instruction(inst));
+        } else {
+            let (flat, extra) = flatten_nested_calls(&inst, lg);
+            out.extend(extra);
+            out.push(Stmt::Instruction(flat));
+        }
+    }
+    out
 }
 
 fn make_copy_inst(val: &str, dest: &str) -> Stmt {

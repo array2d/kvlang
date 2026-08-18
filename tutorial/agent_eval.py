@@ -15,13 +15,19 @@ import json, os, re, subprocess, sys, urllib.request, uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-KV = str(ROOT / "kvlang")
 OUT = Path("/tmp/agent_eval")
 QUESTIONS_DIR = ROOT / "tutorial" / "questions"
+
+# runner：Rust layout → kvspace(redis) → C runtime(term)。旧的单体 kvlang 二进制已归档。
+LAYOUT_BIN = os.environ.get("KVLANG_LAYOUT_BIN", str(ROOT / "bin" / "layout_file"))
+TERM_BIN = os.environ.get("KVLANG_TERM_BIN", str(ROOT / "bin" / "term"))
+DSN = os.environ.get("KVSPACE", "redis://127.0.0.1:6379")
 
 API_BASE = os.environ.get("KVLANG_EVAL_API_BASE", "").rstrip("/")
 API_KEY = os.environ.get("KVLANG_EVAL_API_KEY", "")
 MODEL = os.environ.get("KVLANG_EVAL_MODEL", "qwen3.7-plus")
+# 教学文档：默认整篇 README；可用 KVLANG_EVAL_DOC 指向精简提示词做对比。
+DOC = os.environ.get("KVLANG_EVAL_DOC", str(ROOT / "README.md"))
 
 SYSTEM = """你是 kvlang 程序员。kvlang 是一门全新语言，下面的 README 是它的教学文档，语法以其中示例为准，不要套用其它语言的语法直觉。
 只输出可直接运行的 kvlang 代码：顶层直接写语句或 rwfunc+调用；不要 markdown 围栏、不要解释文字。"""
@@ -72,25 +78,36 @@ def chat(readme: str, task: str) -> str:
 
 def strip_fences(code: str) -> str:
     code = code.strip()
-    m = re.match(r"^```[\w]*\n(.*?)\n?```$", code, re.S)
-    return m.group(1) if m else code
+    m = re.search(r"```[\w]*\n(.*?)\n?```", code, re.S)
+    return m.group(1).strip() if m else code
 
 
 def run_kv(path: Path) -> tuple[str, str]:
-    subprocess.run(["kvspace", "clear"], capture_output=True, timeout=10)
-    r = subprocess.run([KV, str(path)], capture_output=True, text=True, timeout=60, cwd=str(ROOT))
-    return r.stdout, r.stderr
+    subprocess.run(["kvspace", "--kvspace", DSN, "clear"], capture_output=True, timeout=10)
+    lay = subprocess.run([LAYOUT_BIN, str(path), DSN], capture_output=True, text=True,
+                         timeout=60, cwd=str(ROOT))
+    if lay.returncode != 0:
+        return "", f"layout failed: {lay.stderr.strip()}"
+    m = re.search(r"ENTRY=(\S+)", lay.stdout)
+    entry = m.group(1) if m else "init"
+    r = subprocess.run([TERM_BIN, entry], capture_output=True, text=True, timeout=60,
+                       cwd=str(ROOT), env={**os.environ, "KVSPACE": DSN})
+    # 剥离 term 的 __bench_ns:/__bench_us: 基准行
+    out = "\n".join(ln for ln in r.stdout.splitlines() if not ln.startswith("__bench_"))
+    return out, r.stderr
 
 
 def main() -> None:
     if not API_BASE or not API_KEY:
         sys.exit("需设置 KVLANG_EVAL_API_BASE / KVLANG_EVAL_API_KEY 环境变量")
-    readme = (ROOT / "README.md").read_text()
+    readme = Path(DOC).read_text()
     OUT.mkdir(parents=True, exist_ok=True)
 
     tasks = load_tasks()
     if not tasks:
         sys.exit(f"未找到 [README] 问题（{QUESTIONS_DIR}）")
+
+    print(f"教学文档: {DOC}（{len(readme)} 字符）")
 
     print(f"模型: {MODEL}")
     print(f"题目: {len(tasks)} 道\n")
