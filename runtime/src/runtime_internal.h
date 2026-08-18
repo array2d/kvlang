@@ -123,6 +123,9 @@ bool xv_is_int_kind(const char *kind);
 bool xv_is_uint_kind(const char *kind);
 bool xv_is_float_kind(const char *kind);
 bool xv_is_num_kind(const char *kind);
+/* 签名类型表达式（runtime篇-07）校验/匹配 */
+bool type_expr_valid(const char *expr);
+bool type_expr_match(const char *expr, const char *kind, int32_t ndim, const int32_t *dims);
 int64_t xv_as_int64(const xval_t *v);
 double  xv_as_float64(const xval_t *v);
 uint64_t xv_as_uint64(const xval_t *v);
@@ -242,7 +245,14 @@ void display(const xval_t *v, char **out);                     /* malloc，对�
 
 /* ── kvcpu ─────────────────────────────────────────────────────────── */
 
-int kvcpu_execute(kv_t *kv, const char *pc);
+/* 两种执行模式（详见 runtime篇-05）：
+ *   KVMODE_WATCH   模式1：runtime 主导，遇 ext rwir → handoff(.todo) + watch(.done) 阻塞（2 线程）
+ *   KVMODE_RETURN  模式2：扩展主导，遇 ext rwir → 不 handoff 不 watch，返回该 ext rwir 的 PC（单线程函数调用）
+ * kvcpu_execute_mode 返回值：-1 错误；0 正常结束(done)；1 遇 ext rwir（仅 KVMODE_RETURN，*out_pc=其 PC）。 */
+typedef enum { KVMODE_WATCH = 0, KVMODE_RETURN = 1 } kvmode_t;
+
+int kvcpu_execute_mode(kv_t *kv, const char *pc, kvmode_t mode, char **out_pc);
+int kvcpu_execute(kv_t *kv, const char *pc);   /* = KVMODE_WATCH，out_pc 忽略 */
 char *kvcpu_bootstrap(kv_t *kv, const char *vtid, const char *funcname, const char *const *args, int nargs);
 
 /* ── logx ──────────────────────────────────────────────────────────── */

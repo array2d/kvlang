@@ -5,15 +5,20 @@
 #   make layout    Rust layout（layout_file）
 #   make json      Go json 扩展（json-rwirext 可执行文件）
 #   make oldhero   Go 旧 runtime（kvlang，兼容保留）
+#   make test      全量 tutorial 回归（C runtime + Rust term，递归跑所有子目录 kv）
 #   make all       全部
 #   make clean     清理 bin/ 与各构建目录
 
 BIN         := bin
 KVSPACE_LIB ?= kvspace-c
 
-.PHONY: all runtime term run layout json oldhero clean
+.PHONY: all runtime term run layout json oldhero test clean
 
 all: runtime term run layout json
+
+test: KVSPACE_LIB := kvspace_durable
+test: runtime term run layout
+	python3 tutorial/test.py --no-build
 
 runtime:
 	cmake -S runtime -B build/runtime -DCMAKE_BUILD_TYPE=Release -DKVSPACE_LIB=$(KVSPACE_LIB)

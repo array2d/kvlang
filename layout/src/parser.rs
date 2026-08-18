@@ -400,7 +400,7 @@ impl Parser {
 
     fn check_param_types(&mut self, sig: &FuncSig) {
         for param in &sig.params {
-            if !valid_kindexp(&param.ty) {
+            if !crate::type_expr::valid_type_expr(&param.ty) {
                 self.errors.push(Diagnostic {
                     pos: Pos { line: 0, col: 0 },
                     message: format!("func {}: param {:?}: {} (got {:?})", sig.name, param.name, type_error(&param.ty), param.ty),
@@ -413,7 +413,7 @@ impl Parser {
             }
         }
         for ret in &sig.returns {
-            if !valid_kindexp(&ret.ty) {
+            if !crate::type_expr::valid_type_expr(&ret.ty) {
                 self.errors.push(Diagnostic {
                     pos: Pos { line: 0, col: 0 },
                     message: format!("func {}: return value {:?}: {} (got {:?})", sig.name, ret.name, type_error(&ret.ty), ret.ty),
@@ -1327,58 +1327,12 @@ fn attach_comments(st: Stmt, comments: Vec<String>) -> Stmt {
     st
 }
 
-fn valid_kinds() -> &'static [&'static str] {
-    &[
-        "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64", "float32", "float64",
-        "bool", "char/utf32", "char/utf8", "char/ascii", "any",
-    ]
-}
-
-fn valid_kindexp(t: &str) -> bool {
-    let mut t = t;
-    while !t.is_empty() {
-        match t.as_bytes()[0] {
-            b'*' | b'@' => t = &t[1..],
-            b'[' => {
-                let end = match t.find(']') {
-                    Some(e) => e,
-                    None => return false,
-                };
-                if !t[1..end].is_empty() && !valid_dims(&t[1..end]) {
-                    return false;
-                }
-                t = &t[end + 1..];
-            }
-            _ => return valid_kinds().contains(&t),
-        }
-    }
-    false
-}
-
-fn valid_dims(s: &str) -> bool {
-    for d in s.split(',') {
-        if d.is_empty() {
-            return false;
-        }
-        if !d.bytes().all(|b| b.is_ascii_digit()) {
-            return false;
-        }
-    }
-    true
-}
-
 fn is_array_kindexp(t: &str) -> bool {
     t.contains('[')
 }
 
-fn type_error(kind: &str) -> String {
-    if kind == "int" || kind == "float" {
-        return "ambiguous type — use int64 or float64 instead".to_string();
-    }
-    if kind == "string" || kind == "bytes" {
-        return "unknown type — use char/utf32 instead".to_string();
-    }
-    "unknown type — valid: int8/16/32/64, uint8/16/32/64, float32/64, bool, char/utf32, any, []T, [N]T, *T".to_string()
+fn type_error(_kind: &str) -> String {
+    "unknown type — valid: int8/16/32/64, uint8/16/32/64, float32/64, bool, char/utf32, dict, index, char, any, []T, [2,3]T, [?,N]T, A|B".to_string()
 }
 
 fn walk_read_only(

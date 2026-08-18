@@ -20,9 +20,8 @@ RED, GREEN, YELLOW, NC = "\033[0;31m", "\033[0;32m", "\033[1;33m", "\033[0m"
 ROOT = Path(__file__).resolve().parent.parent
 KV = str(ROOT / "kvlang")
 RUST_BIN = str(ROOT / "target" / "debug" / "kvlang")
-LAYOUT_BIN = os.environ.get("KVLANG_LAYOUT_BIN",
-                            str(ROOT / "layout" / "target" / "debug" / "examples" / "layout_file"))
-CRUN_BIN = os.environ.get("KVBIN", str(ROOT / "runtime" / "test" / "run"))
+LAYOUT_BIN = os.environ.get("KVLANG_LAYOUT_BIN", str(ROOT / "bin" / "layout_file"))
+TERM_BIN = os.environ.get("KVLANG_TERM_BIN", str(ROOT / "bin" / "term"))
 _C_DSN = os.environ.get("KVSPACE", "redis://127.0.0.1:6379")
 SHM_PATH = "/tmp/kvlang_rust_test"
 FAIL_CSV = (ROOT / "tutorial" / "test_failures.csv").resolve()
@@ -264,12 +263,12 @@ def _c_test_file(f: Path, expects: list[str], env: dict) -> tuple[bool, str]:
         return False, f"layout failed: {layout.stderr.strip()[:100]}"
     entry = _detect_entry(layout.stdout)
     try:
-        crun = subprocess.run([CRUN_BIN, entry], capture_output=True, text=True,
+        crun = subprocess.run([TERM_BIN, entry], capture_output=True, text=True,
                               timeout=120, cwd=str(ROOT), env={**env, "KVSPACE": _C_DSN})
     except subprocess.TimeoutExpired:
         return False, "timeout"
     if crun.returncode != 0:
-        return False, f"c runtime exit {crun.returncode}: {crun.stderr.strip()[:100]}"
+        return False, f"term exit {crun.returncode}: {crun.stderr.strip()[:100]}"
     for pat in expects:
         if pat not in crun.stdout:
             return False, f"want {pat!r}"
@@ -282,8 +281,8 @@ def main():
     ap.add_argument("--no-build", action="store_true", help="skip make build")
     ap.add_argument("--errorexit", action="store_true", help="exit on first error")
     ap.add_argument("--bench", action="store_true", help="benchmark matching .kv/.py/.c files")
-    ap.add_argument("--runtime", default="go", choices=("go", "rust", "c"),
-                    help="runtime to test (default: go; env KVLANG_RUNTIME=c 等价 --runtime c)")
+    ap.add_argument("--runtime", default="c", choices=("go", "rust", "c"),
+                    help="runtime to test (default: c; env KVLANG_RUNTIME=c 等价 --runtime c)")
     args = ap.parse_args()
     if os.environ.get("KVLANG_RUNTIME") == "c":
         args.runtime = "c"

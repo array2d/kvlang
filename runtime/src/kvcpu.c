@@ -327,7 +327,7 @@ static bool is_copy_op(const char *opcode) {
     return strcmp(opcode, "=") == 0;
 }
 
-static bool is_user_rwir(kv_t *kv, const char *opcode) {
+static bool is_ext_rwir(kv_t *kv, const char *opcode) {
     if (opcode[0] == '/') return false;
     char *rk = kt_rwir(opcode);
     xval_t v; xv_zero(&v);
@@ -431,7 +431,8 @@ char *kvcpu_bootstrap(kv_t *kv, const char *vtid, const char *funcname,
     return ep;
 }
 
-int kvcpu_execute(kv_t *kv, const char *pc) {
+int kvcpu_execute_mode(kv_t *kv, const char *pc, kvmode_t mode, char **out_pc) {
+    if (out_pc) *out_pc = NULL;
     sbuf_t vtid_b; sb_init(&vtid_b);
     const char *vtid = kt_vtid_from_pc(pc, &vtid_b);
     if (vtid[0] == 0) { sb_free(&vtid_b); return -1; }
@@ -502,7 +503,13 @@ int kvcpu_execute(kv_t *kv, const char *pc) {
             exec_err = bi_native(&f);
         } else if (is_copy_op(inst.opcode)) {
             exec_err = bi_execute_copy(kv, vtid, cur, &inst);
-        } else if (is_user_rwir(kv, inst.opcode)) {
+        } else if (is_ext_rwir(kv, inst.opcode)) {
+            if (mode == KVMODE_RETURN) {
+                if (out_pc) *out_pc = strdup(cur);
+                free(fr); rwir_inst_free(&inst);
+                free(cur); sb_free(&vtid_b);
+                return 1;
+            }
             exec_err = handoff_external_rwir(kv, vtid, cur, &inst);
         } else {
             /* 用户函数 → call */
@@ -534,4 +541,9 @@ int kvcpu_execute(kv_t *kv, const char *pc) {
     free(cur);
     sb_free(&vtid_b);
     return rc;
+}
+
+int kvcpu_execute(kv_t *kv, const char *pc) {
+    int rc = kvcpu_execute_mode(kv, pc, KVMODE_WATCH, NULL);
+    return rc == 1 ? 0 : rc;   /* WATCH 模式不返回 1，防御性归一 */
 }

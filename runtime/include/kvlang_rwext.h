@@ -1,5 +1,6 @@
 #pragma once
 #include <stdint.h>
+#include <stdbool.h>
 
 /* kvlang 扩展 runtime ABI：供第三方语言（Rust/Python/Go）通过 C ABI 嵌入 C runtime，
  * 实现自定义 rwirext（如 term 的 print）。opaque handle + C 字符串，不暴露内部结构。 */
@@ -52,3 +53,9 @@ char *rwext_resolve_read(rwext_conn *c, const char *pc, int idx);
 
 /* 解析写参 idx 为 KV 路径（路径 → 直接返回；变量 → 帧槽路径）。 */
 char *rwext_resolve_write(rwext_conn *c, const char *pc, int idx);
+
+/* 签名类型表达式（runtime篇-07）——供扩展做实参类型判定。 */
+/* 语法校验：type = atom("|"atom)*, atom = [dims](family|kind), dims="[]"|"["dim(","dim)*"]", dim=int|"?"。 */
+bool type_expr_valid(const char *expr);
+/* 值判定：kind 为实际落盘 kind 串，ndim 为秩（标量 0），dims 为各维长（标量传 NULL）。 */
+bool type_expr_match(const char *expr, const char *kind, int32_t ndim, const int32_t *dims);
