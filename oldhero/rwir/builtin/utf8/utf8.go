@@ -20,12 +20,12 @@ func String(v kvspace.XValue) string {
 	return string(Bytes(v))
 }
 
-// Len returns the number of UTF-8 runes in the charbyte array.
+// Len returns the number of UTF-8 runes in the char/utf8 array.
 func Len(v kvspace.XValue) int {
 	return utf8.RuneCount(Bytes(v))
 }
 
-// At returns the i-th rune as a charbyte (UTF-8 encoding of a single char).
+// At returns the i-th rune as a char/utf8 (UTF-8 encoding of a single char).
 func At(v kvspace.XValue, i int) kvspace.XValue {
 	b := Bytes(v)
 	var idx int
@@ -40,7 +40,7 @@ func At(v kvspace.XValue, i int) kvspace.XValue {
 	return kvspace.NewCharByte([]byte(string(runeToUTF8(r, sz)))...)
 }
 
-// Set returns a new charbyte with the i-th rune replaced.
+// Set returns a new char/utf8 with the i-th rune replaced.
 func Set(v kvspace.XValue, i int, ch kvspace.XValue) kvspace.XValue {
 	b := Bytes(v)
 	chb := Bytes(ch)

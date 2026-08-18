@@ -1,24 +1,38 @@
-//! term 扩展 runtime：第一个通过 C ABI（kvlang_rwext）嵌入 C runtime 的扩展。
-//! 用 Rust 实现，独立进程常驻 serve，注册 print/println/cerr 并执行外部 rwir。
+//! term 扩展 runtime：模式2（runtime 主导 + term 嵌入，单线程函数调用）。
+//! 专注一个 vthread 的 print/println/cerr：bootstrap 拿 vid 后循环
+//!   execute_vthread(vid)（runtime 主导执行，遇 ext rwir 直接返回 pc）
+//!   → RunSeq 连续处理己方 print → 写回 vthread pc → 继续，
+//! 直到 vthread done，term 退出进程。
 
-use std::ffi::{c_char, c_int, CStr, CString};
-use std::time::Duration;
+use std::ffi::{c_char, c_int, c_void, CStr, CString};
+use std::io::Write;
+use std::ptr::null_mut;
 
 #[repr(C)]
-struct rwext_conn {
+struct kvlang_rt {
     _p: [u8; 0],
 }
 
+// 对齐 C 的 struct rwext_conn { kv_t *kv; }（单指针）。
+#[repr(C)]
+struct rwext_conn {
+    kv: *mut c_void,
+}
+
+unsafe impl Send for kvlang_rt {}
 unsafe impl Send for rwext_conn {}
 
 unsafe extern "C" {
-    fn rwext_connect(dsn: *const c_char) -> *mut rwext_conn;
-    fn rwext_disconnect(c: *mut rwext_conn);
-    fn rwext_register(c: *mut rwext_conn, opcode: *const c_char, nr: i32, nw: i32, sig: *const c_char) -> c_int;
-    fn rwext_list(c: *mut rwext_conn, prefix: *const c_char) -> *mut c_char;
-    fn rwext_get(c: *mut rwext_conn, key: *const c_char) -> *mut c_char;
+    // kvlang_rt ABI（主导执行）
+    fn kvlang_rt_connect(dsn: *const c_char) -> *mut kvlang_rt;
+    fn kvlang_rt_kv(rt: *mut kvlang_rt) -> *mut c_void;
+    fn kvlang_rt_bootstrap(rt: *mut kvlang_rt, funcname: *const c_char,
+                           args: *const *const c_char, nargs: c_int) -> *mut c_char;
+    fn kvlang_rt_execute_vthread(rt: *mut kvlang_rt, vid: *const c_char, out_pc: *mut *mut c_char) -> c_int;
+
+    // rwext ABI（注册 / 处理 print）
+    fn rwext_register(c: *mut rwext_conn, opcode: *const c_char, nr: c_int, nw: c_int, sig: *const c_char) -> c_int;
     fn rwext_set(c: *mut rwext_conn, key: *const c_char, val: *const c_char) -> c_int;
-    fn rwext_del(c: *mut rwext_conn, key: *const c_char) -> c_int;
     fn rwext_print_line(c: *mut rwext_conn, pc: *const c_char, rawnl: *mut c_int, cerr: *mut c_int) -> *mut c_char;
     fn rwext_next_pc(pc: *const c_char) -> *mut c_char;
 }
@@ -58,73 +72,72 @@ fn register(c: *mut rwext_conn) {
     }
 }
 
-fn serve_op(c: *mut rwext_conn, op: &Op) {
-    let base = format!("/lib/{}", op.name);
-    let children = take(unsafe { rwext_list(c, cs(&format!("{base}/")).as_ptr()) });
-    for child in children.split('\n') {
-        if !child.starts_with(".todo<") || !child.ends_with('>') {
-            continue;
+fn print_line(line: &str, rawnl: i32, is_cerr: i32) {
+    if is_cerr != 0 {
+        eprint!("{line}");
+        if rawnl == 0 {
+            eprintln!();
         }
-        let vid = &child[6..child.len() - 1];
-        let todo_key = format!("{base}/{child}");
-        let pcid = take(unsafe { rwext_get(c, cs(&todo_key).as_ptr()) });
-        let (pc, id) = match pcid.rfind('|') {
-            Some(i) => (&pcid[..i], &pcid[i + 1..]),
-            None => (pcid.as_str(), ""),
-        };
-
-        let mut cur = pc.to_string();
-        loop {
-            let mut rawnl = 0i32;
-            let mut is_cerr = 0i32;
-            let p = unsafe { rwext_print_line(c, cs(&cur).as_ptr(), &mut rawnl, &mut is_cerr) };
-            if p.is_null() {
-                break;
-            }
-            let line = take(p);
-            if is_cerr != 0 {
-                eprint!("{line}");
-                if rawnl == 0 {
-                    eprintln!();
-                }
-            } else {
-                print!("{line}");
-                if rawnl == 0 {
-                    println!();
-                }
-            }
-            cur = take(unsafe { rwext_next_pc(cs(&cur).as_ptr()) });
+        std::io::stderr().flush().ok();
+    } else {
+        print!("{line}");
+        if rawnl == 0 {
+            println!();
         }
-
-        let vt_pc = format!("/vthread/{vid}/\u{2025}pc");
-        unsafe {
-            rwext_set(c, cs(&vt_pc).as_ptr(), cs(&cur).as_ptr());
-            let done_key = format!("{base}/.done<{vid}>");
-            rwext_set(c, cs(&done_key).as_ptr(), cs(id).as_ptr());
-            rwext_del(c, cs(&todo_key).as_ptr());
-        }
-    }
-}
-
-struct Conn(*mut rwext_conn);
-unsafe impl Send for Conn {}
-
-fn serve(conn: Conn) {
-    register(conn.0);
-    loop {
-        for op in OPS {
-            serve_op(conn.0, op);
-        }
-        std::thread::sleep(Duration::from_millis(500));
+        std::io::stdout().flush().ok();
     }
 }
 
 fn main() {
-    let dsn = std::env::args().nth(1).unwrap_or_else(|| "redis://127.0.0.1:6379".to_string());
-    let c = unsafe { rwext_connect(cs(&dsn).as_ptr()) };
-    if c.is_null() {
-        eprintln!("term: rwext_connect failed: {dsn}");
+    let dsn = std::env::var("KVSPACE").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
+    let funcname = std::env::args().nth(1).unwrap_or_else(|| "main".to_string());
+
+    let rt = unsafe { kvlang_rt_connect(cs(&dsn).as_ptr()) };
+    if rt.is_null() {
+        eprintln!("term: kvlang_rt_connect failed: {dsn}");
         std::process::exit(1);
     }
-    serve(Conn(c));
+    let kv = unsafe { kvlang_rt_kv(rt) };
+    let mut conn = rwext_conn { kv };
+
+    register(&mut conn);
+
+    let vid = unsafe { kvlang_rt_bootstrap(rt, cs(&funcname).as_ptr(), null_mut(), 0) };
+    if vid.is_null() {
+        eprintln!("term: bootstrap {funcname} failed");
+        std::process::exit(1);
+    }
+    let vid = take(vid);
+    let vpc = format!("/vthread/{vid}/\u{2025}pc");
+
+    loop {
+        // runtime 主导执行，遇 ext rwir 直接返回 pc
+        let mut pc: *mut c_char = null_mut();
+        let rc = unsafe { kvlang_rt_execute_vthread(rt, cs(&vid).as_ptr(), &mut pc) };
+        if rc == 0 {
+            break; // vthread done
+        }
+        if rc != 1 {
+            break; // 错误
+        }
+
+        // RunSeq：连续处理己方 print，遇非己方停下（c 停在非己方 pc）
+        let mut c = take(pc);
+        loop {
+            let mut rawnl = 0i32;
+            let mut is_cerr = 0i32;
+            let p = unsafe { rwext_print_line(&mut conn, cs(&c).as_ptr(), &mut rawnl, &mut is_cerr) };
+            if p.is_null() {
+                break;
+            }
+            let line = take(p);
+            print_line(&line, rawnl, is_cerr);
+            c = take(unsafe { rwext_next_pc(cs(&c).as_ptr()) });
+        }
+
+        // 写回非己方 pc，让 runtime 从它继续
+        unsafe {
+            rwext_set(&mut conn, cs(&vpc).as_ptr(), cs(&c).as_ptr());
+        }
+    }
 }

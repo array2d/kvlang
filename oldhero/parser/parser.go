@@ -23,6 +23,7 @@ import (
 
 	"oldhero/ast"
 	"oldhero/keytree"
+	"oldhero/rwir"
 	"oldhero/symbol"
 )
 
@@ -275,54 +276,6 @@ func (p *parser) parseFunc() ast.Func {
 	return fn
 }
 
-// validKinds kvlang 合法基础类型名（权威来源，与 kvspace.XValue.Kind() 对齐）。
-// num / any 是类型类（多态）：num = int|float 联合，any = 任意类型；非真实落盘 kind，仅签名声明。
-var validKinds = map[string]bool{
-	"int8": true, "int16": true, "int32": true, "int64": true,
-	"uint8": true, "uint16": true, "uint32": true, "uint64": true,
-	"float32": true, "float64": true,
-	"bool": true, "char/utf32": true, "char/utf8": true, "char/ascii": true,
-	"any": true,
-}
-
-// validKindexp 校验类型表达式（kindexp）：前缀修饰符序列 + 基础 kind。
-// 文法：kindexp ::= kind | '*' kindexp | '@' kindexp | '[' ']' kindexp | '[' dims ']' kindexp
-func validKindexp(t string) bool {
-	for t != "" {
-		switch t[0] {
-		case '*', '@':
-			t = t[1:]
-		case '[':
-			end := strings.IndexByte(t, ']')
-			if end < 0 {
-				return false
-			}
-			if inner := t[1:end]; inner != "" && !validDims(inner) {
-				return false
-			}
-			t = t[end+1:]
-		default:
-			return validKinds[t]
-		}
-	}
-	return false
-}
-
-// validDims 校验维度列表（逗号分隔的非负整数）。
-func validDims(s string) bool {
-	for _, d := range strings.Split(s, ",") {
-		if d == "" {
-			return false
-		}
-		for i := 0; i < len(d); i++ {
-			if d[i] < '0' || d[i] > '9' {
-				return false
-			}
-		}
-	}
-	return true
-}
-
 // isArrayKindexp 判断 kindexp 是否含数组修饰符（[] [N]）。
 func isArrayKindexp(t string) bool {
 	return strings.Contains(t, "[")
@@ -331,23 +284,17 @@ func isArrayKindexp(t string) bool {
 // checkParamTypes 确保所有参数和返回值都有显式类型标注且类型名合法。
 func (p *parser) checkParamTypes(sig *ast.FuncSig) {
 	typeError := func(kind string) string {
-		if kind == "int" || kind == "float" {
-			return "ambiguous type — use int64 or float64 instead"
-		}
-		if kind == "string" || kind == "bytes" {
-			return "unknown type — use char/utf32 instead"
-		}
-		return "unknown type — valid: int8/16/32/64, uint8/16/32/64, float32/64, bool, char/utf32, any, []T, [N]T, *T"
+		return "unknown type — valid: int8/16/32/64, uint8/16/32/64, float32/64, bool, char/utf32, dict, index, char, any, []T, [2,3]T, [?,N]T, A|B"
 	}
 	for _, param := range sig.Params {
-		if !validKindexp(param.Type) {
+		if !rwir.ValidTypeExpr(param.Type) {
 			p.errors = append(p.errors, Diagnostic{Message: fmt.Sprintf(
 				"func %s: param %q: %s (got %q)",
 				sig.Name, param.Name, typeError(param.Type), param.Type)})
 		}
 	}
 	for _, ret := range sig.Returns {
-		if !validKindexp(ret.Type) {
+		if !rwir.ValidTypeExpr(ret.Type) {
 			p.errors = append(p.errors, Diagnostic{Message: fmt.Sprintf(
 				"func %s: return value %q: %s (got %q)",
 				sig.Name, ret.Name, typeError(ret.Type), ret.Type)})

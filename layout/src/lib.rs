@@ -10,6 +10,7 @@ pub mod ast;
 pub mod scanner;
 pub mod parser;
 pub mod builtin;
+pub mod type_expr;
 pub mod lower;
 pub mod code;
 

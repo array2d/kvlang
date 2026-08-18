@@ -27,7 +27,7 @@ var ops = []op{
 	{name: "print", sig: "rwir print(A:any, ...) -> ()", nosep: true, rawnl: true},
 	{name: "println", sig: "rwir println(A:any, ...) -> ()"},
 	{name: "cerr", sig: "rwir cerr(A:any, ...) -> ()", cerr: true},
-	{name: "input", sig: "rwir input(prompt:charbyte?) -> (C:charbyte)", input: true},
+	{name: "input", sig: "rwir input(prompt:char/utf8?) -> (C:char/utf8)", input: true},
 }
 
 var rt = ext.Ext{Ops: toOps(), Exec: exec}
