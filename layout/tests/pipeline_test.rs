@@ -30,7 +30,8 @@ fn compile_simple_func() {
     let b = body(&sig_val);
     assert_eq!(kvkind::rwfunc_num_reads(b), 2);
     assert_eq!(kvkind::rwfunc_num_writes(b), 1);
-    assert_eq!(kvkind::rwfunc_param_types(b), vec!["int64", "int64"]);
+    // kindexp 列表：读参在前(nr=2)、写参在后(nw=1)
+    assert_eq!(kvkind::rwfunc_param_types(b), vec!["int64", "int64", "int64"]);
 
     // 参数 Ptr
     let a = kv.get_one("/lib/sum/A");

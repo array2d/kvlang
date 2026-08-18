@@ -14,7 +14,7 @@ rwfunc build_lists() -> () {
 }
 
 lib lc {
-rwfunc add(a:char/utf32, b:char/utf32) -> () {
+rwfunc add(a:[]char/utf32, b:[]char/utf32) -> () {
 	carry = 0
 	result = {  }
 	0 -> ri

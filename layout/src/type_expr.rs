@@ -56,9 +56,20 @@ fn valid_atom(s: &str) -> bool {
     valid_base(s)
 }
 
-/// 类型表达式语法校验（装载期）。
+/// 末参变参标记：`A:any...` 表 0..N 个同型实参。
+pub fn is_variadic(expr: &str) -> bool {
+    expr.ends_with("...")
+}
+
+/// 去掉尾缀 `...`（非变参原样返回）。
+pub fn strip_variadic(expr: &str) -> &str {
+    expr.strip_suffix("...").unwrap_or(expr)
+}
+
+/// 类型表达式语法校验（装载期）。允许末参尾缀 `...` 变参。
 pub fn valid_type_expr(expr: &str) -> bool {
-    !expr.is_empty() && expr.split('|').all(valid_atom)
+    let e = strip_variadic(expr);
+    !e.is_empty() && e.split('|').all(valid_atom)
 }
 
 fn base_match(s: &str, kind: &str) -> bool {
@@ -105,9 +116,11 @@ fn match_atom(s: &str, kind: &str, ndim: i32, dims: &[i32]) -> bool {
     base_match(s, kind)
 }
 
-/// 值（kind/ndim/dims）是否匹配类型表达式：任一 atom 命中即 true。
+/// 单值（kind/ndim/dims）是否匹配类型表达式：任一 atom 命中即 true。
+/// 变参 `...` 按单元素判定（去尾缀后匹配），重复由派发循环处理。
 pub fn match_type(expr: &str, kind: &str, ndim: i32, dims: &[i32]) -> bool {
-    !expr.is_empty() && expr.split('|').any(|atom| match_atom(atom, kind, ndim, dims))
+    let e = strip_variadic(expr);
+    !e.is_empty() && e.split('|').any(|atom| match_atom(atom, kind, ndim, dims))
 }
 
 #[cfg(test)]
@@ -123,9 +136,21 @@ mod tests {
             "[?,768]float32", "[?,?]int8",
             "int64|float64", "[2,3]float32|float32", "[]float32|[]float64",
             "bool|char/utf8", "index|dict",
+            "any...", "int64|float64...", "[]float32...",
         ] {
             assert!(valid_type_expr(e), "{e} should be valid");
         }
+    }
+
+    #[test]
+    fn variadic() {
+        assert!(is_variadic("any..."));
+        assert!(!is_variadic("any"));
+        assert_eq!(strip_variadic("int64|float64..."), "int64|float64");
+        // 变参 kindexp 按单元素匹配
+        assert!(match_type("any...", "int64", 0, &[]));
+        assert!(match_type("int64|float64...", "float64", 0, &[]));
+        assert!(!match_type("int64...", "bool", 0, &[]));
     }
 
     #[test]

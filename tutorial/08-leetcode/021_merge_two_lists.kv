@@ -16,7 +16,7 @@ rwfunc build_lists() -> () {
 	{ val=4; next="" } -> /b2
 }
 
-rwfunc merge(a:char/utf32, b:char/utf32) -> () {
+rwfunc merge(a:[]char/utf32, b:[]char/utf32) -> () {
 	pa <- a
 	pb = b  # = 等价于 <-
 	while (pa != "") {

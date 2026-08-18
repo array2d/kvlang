@@ -6,7 +6,6 @@
 static uint32_t rd32(const uint8_t *p) { return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24); }
 static uint16_t rd16(const uint8_t *p) { return (uint16_t)(p[0] | (p[1] << 8)); }
 static uint64_t rd64(const uint8_t *p) { return (uint64_t)rd32(p) | ((uint64_t)rd32(p + 4) << 32); }
-static void wr32(uint8_t *p, uint32_t v) { p[0] = v & 0xFF; p[1] = (v >> 8) & 0xFF; p[2] = (v >> 16) & 0xFF; p[3] = (v >> 24) & 0xFF; }
 
 void xv_free(xval_t *v) {
     free(v->data);
@@ -17,51 +16,25 @@ void xv_set_bytes(xval_t *v, uint8_t *data, uint32_t len) {
     v->data = data; v->len = len;
 }
 
+/* head 编解码统一委托给链接的 kvspace .so（kvspace-c / kvspace-durable 同一 ABI），
+ * runtime 不再私持 TLV head 布局，杜绝多份手写偏移不一致。 */
 static int xv_decode_head_raw(const uint8_t *d, uint32_t len, kvhead_t *h) {
     memset(h, 0, sizeof(*h));
-    if (!d || len < 4) return -1;
-    uint8_t kl = d[0];
-    uint32_t o = 1 + kl;
-    if (len < o + 3 + 4) return -1;
-    uint8_t ref = d[o], arr_flag = d[o + 1], ndim = d[o + 2];
-    if (len < o + 3 + 4u * ndim + 4) return -1;
-    uint32_t k = kl > 31 ? 31 : kl;
-    memcpy(h->kind, d + 1, k); h->kind[k] = 0;
-    h->is_ptr = (ref == 1);
-    uint32_t raw_off = o + 3 + 4u * ndim;
-    uint32_t raw_len = rd32(d + raw_off);
-    h->body_offset = (int32_t)(raw_off + 4);
-    h->body_len = (int32_t)raw_len;
-    if (arr_flag == 0) h->array_len = 1;
-    else if (ndim > 0) {
-        int32_t n = 1;
-        for (uint32_t i = 0; i < ndim; i++) n *= (int32_t)rd32(d + o + 3 + 4 * i);
-        h->array_len = n;
-    } else {
-        int32_t es = xv_elem_size((const char *)h->kind);
-        h->array_len = es > 0 ? (int32_t)raw_len / es : 0;
-    }
-    return 0;
+    if (!d || len == 0) return -1;
+    kvspace_decode_head(d, len, h);
+    return h->kind[0] ? 0 : -1;
 }
 
 static uint8_t *xv_encode_tlv(const char *kind, int32_t ref, const uint8_t *raw,
                               uint32_t raw_len, int32_t array_len, uint32_t *out_len) {
-    int32_t al = array_len <= 0 ? 1 : array_len;
-    int32_t ndim = al > 1 ? 1 : 0;
-    uint32_t kl = (uint32_t)strlen(kind);
-    uint32_t head_len = 1 + kl + 1 + 1 + 1 + 4u * ndim + 4;
-    uint32_t total = head_len + raw_len;
-    uint8_t *buf = malloc(total);
-    buf[0] = (uint8_t)kl;
-    memcpy(buf + 1, kind, kl);
-    uint32_t o = 1 + kl;
-    buf[o++] = (uint8_t)ref;
-    buf[o++] = (uint8_t)(al > 1 ? 1 : 0);
-    buf[o++] = (uint8_t)ndim;
-    if (ndim) { wr32(buf + o, (uint32_t)al); o += 4; }
-    wr32(buf + o, raw_len); o += 4;
-    if (raw_len) memcpy(buf + o, raw, raw_len);
-    *out_len = total;
+    uint8_t *tmp = NULL; uint32_t tl = 0;
+    int rc = ref == 1 ? kvspace_tlv_encode_ptr(kind, raw, raw_len, array_len, &tmp, &tl)
+                      : kvspace_tlv_encode(kind, raw, raw_len, array_len, &tmp, &tl);
+    if (rc != 0 || !tmp) { *out_len = 0; return NULL; }
+    uint8_t *buf = malloc(tl);          /* 转交 runtime 所有权（统一 free 释放） */
+    memcpy(buf, tmp, tl);
+    kvspace_bytes_free(tmp, tl);        /* .so 分配器配对释放 */
+    *out_len = tl;
     return buf;
 }
 

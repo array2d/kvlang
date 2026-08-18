@@ -77,17 +77,33 @@ static bool valid_atom(const char *s, size_t len) {
     return valid_base(p, (size_t)(s + len - p));
 }
 
-/* 类型表达式语法校验（装载期）。 */
+/* 末参变参标记：A:any... 表 0..N 个同型实参。 */
+bool type_expr_variadic(const char *expr) {
+    if (!expr) return false;
+    size_t n = strlen(expr);
+    return n >= 3 && memcmp(expr + n - 3, "...", 3) == 0;
+}
+
+/* 去掉尾缀 "..." 后的有效长度。 */
+static size_t effective_len(const char *expr) {
+    size_t n = strlen(expr);
+    return (n >= 3 && memcmp(expr + n - 3, "...", 3) == 0) ? n - 3 : n;
+}
+
+/* 类型表达式语法校验（装载期）。允许末参尾缀 "..." 变参。 */
 bool type_expr_valid(const char *expr) {
     if (!expr || !*expr) return false;
+    size_t total = effective_len(expr);
+    if (total == 0) return false;
     const char *p = expr;
+    const char *end = expr + total;
     for (;;) {
-        const char *pipe = strchr(p, '|');
-        size_t len = pipe ? (size_t)(pipe - p) : strlen(p);
+        const char *pipe = memchr(p, '|', (size_t)(end - p));
+        size_t len = pipe ? (size_t)(pipe - p) : (size_t)(end - p);
         if (!valid_atom(p, len)) return false;
         if (!pipe) break;
         p = pipe + 1;
-        if (*p == '\0') return false;   /* 尾随 '|' → 空 atom */
+        if (p >= end) return false;   /* 尾随 '|' → 空 atom */
     }
     return true;
 }
@@ -98,9 +114,9 @@ static bool base_match(const char *s, size_t len, const char *kind) {
     return kind_eq(s, len, kind);
 }
 
-/* match_shape：shape="" → ndim>=1；否则维数须一致且逐维 ?（跳过）或精确相等。 */
+/* match_shape：shape="" 等价 "[?]" → 恰一维（ndim==1）；否则维数须一致且逐维 ?（跳过）或精确相等。 */
 static bool match_shape(const char *s, size_t len, int32_t ndim, const int32_t *dims) {
-    if (len == 0) return ndim >= 1;
+    if (len == 0) return ndim == 1;
     int count = 1;
     for (size_t i = 0; i < len; i++) if (s[i] == ',') count++;
     if (count != ndim) return false;
@@ -120,27 +136,32 @@ static bool match_shape(const char *s, size_t len, int32_t ndim, const int32_t *
     return true;
 }
 
-/* match_atom：ndim = -1 表示「已消费 dims，不再判 ndim」（递归哨兵）。 */
+/* match_atom：裸 kind 表单值（shape=[1]，即 ndim==0）；[dims] 前缀强制 shape。
+ * 数组/字符串须显式 []kind（[]⟺[?] 一维）或 [n]kind。 */
 static bool match_atom(const char *s, size_t len, const char *kind, int32_t ndim, const int32_t *dims) {
+    if (len == 3 && strncmp(s, "any", 3) == 0) return true;   /* any：顶类型，任意 kind + 任意 shape */
     if (s[0] == '[') {
         const char *end = memchr(s, ']', len);
         if (!end) return false;
         if (!match_shape(s + 1, (size_t)(end - s - 1), ndim, dims)) return false;
-        return match_atom(end + 1, (size_t)(s + len - end - 1), kind, -1, NULL);
+        return base_match(end + 1, (size_t)(s + len - end - 1), kind);
     }
-    if (ndim >= 0 && ndim != 0) return false;   /* 标量 */
-    return base_match(s, len, kind);
+    return base_match(s, len, kind) && ndim == 0;
 }
 
-/* 值（kind/ndim/dims）是否匹配类型表达式：任一 atom 命中即 true。 */
+/* 单值（kind/ndim/dims）是否匹配类型表达式：任一 atom 命中即 true。
+ * 变参 "..." 按单元素判定（去尾缀后匹配），重复由派发循环处理。 */
 bool type_expr_match(const char *expr, const char *kind, int32_t ndim, const int32_t *dims) {
     if (!expr || !kind) return false;
+    const char *end = expr + effective_len(expr);
     const char *p = expr;
-    while (p && *p) {
-        const char *pipe = strchr(p, '|');
-        size_t len = pipe ? (size_t)(pipe - p) : strlen(p);
+    while (p < end) {
+        const char *pipe = memchr(p, '|', (size_t)(end - p));
+        size_t len = pipe ? (size_t)(pipe - p) : (size_t)(end - p);
         if (match_atom(p, len, kind, ndim, dims)) return true;
-        p = pipe ? pipe + 1 : NULL;
+        if (!pipe) break;
+        p = pipe + 1;
     }
     return false;
 }
+

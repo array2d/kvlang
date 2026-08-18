@@ -74,7 +74,7 @@ pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) {
 
     let nr = fn_.sig.num_reads();
     let nw = fn_.sig.num_writes();
-    let param_types: Vec<String> = fn_.sig.params.iter().map(|p| p.ty.clone()).collect();
+    let param_types: Vec<String> = fn_.sig.kindexp_list();
 
     let mut pairs: Vec<(String, Vec<u8>)> = Vec::new();
     pairs.push((
@@ -104,7 +104,7 @@ pub fn write_rwir_decl(kv: &mut Kv, decl: &RwirDecl) {
     if !decl.pkg.is_empty() {
         opcode = format!("{}{}{opcode}", decl.pkg, keytree::MEMBER_SEP);
     }
-    let v = kvkind::new_rwir(decl.sig.num_reads(), decl.sig.num_writes(), &decl.sig_string());
+    let v = kvkind::new_rwir(decl.sig.num_reads(), decl.sig.num_writes(), &decl.sig.kindexp_list().join("\n"));
     let _ = kv.set(&[(keytree::rwir(&opcode), v)]);
 }
 

@@ -547,84 +547,36 @@ static int bi_cast_char_ascii(frame_t *f) { return bi_cast_char(f, K_CHAR_ASCII)
 
 /* ── 注册表 ───────────────────────────────────────────────────────── */
 
+/* 数字多类型运算融合为单条：派发前 strip_num_kind 剥掉 <numkind>. 前缀，
+ * int64.add / float32.add … 全部归到同一条 add（union 语义），bi_* 按操作数 kind 归约。 */
 static const struct { const char *op; bi_fn fn; } builtins[] = {
     {"add", bi_add}, {"+", bi_add},
-    {"int8.add", bi_add}, {"int16.add", bi_add}, {"int32.add", bi_add}, {"int64.add", bi_add},
-    {"uint8.add", bi_add}, {"uint16.add", bi_add}, {"uint32.add", bi_add}, {"uint64.add", bi_add},
-    {"float32.add", bi_add}, {"float64.add", bi_add},
     {"sub", bi_sub}, {"-", bi_sub},
-    {"int8.sub", bi_sub}, {"int16.sub", bi_sub}, {"int32.sub", bi_sub}, {"int64.sub", bi_sub},
-    {"uint8.sub", bi_sub}, {"uint16.sub", bi_sub}, {"uint32.sub", bi_sub}, {"uint64.sub", bi_sub},
-    {"float32.sub", bi_sub}, {"float64.sub", bi_sub},
     {"mul", bi_mul}, {"×", bi_mul},
-    {"int8.mul", bi_mul}, {"int16.mul", bi_mul}, {"int32.mul", bi_mul}, {"int64.mul", bi_mul},
-    {"uint8.mul", bi_mul}, {"uint16.mul", bi_mul}, {"uint32.mul", bi_mul}, {"uint64.mul", bi_mul},
-    {"float32.mul", bi_mul}, {"float64.mul", bi_mul},
     {"div", bi_div}, {"÷", bi_div},
-    {"int8.div", bi_div}, {"int16.div", bi_div}, {"int32.div", bi_div}, {"int64.div", bi_div},
-    {"uint8.div", bi_div}, {"uint16.div", bi_div}, {"uint32.div", bi_div}, {"uint64.div", bi_div},
-    {"float32.div", bi_div}, {"float64.div", bi_div},
     {"mod", bi_mod}, {"%", bi_mod},
-    {"int8.mod", bi_mod}, {"int16.mod", bi_mod}, {"int32.mod", bi_mod}, {"int64.mod", bi_mod},
-    {"uint8.mod", bi_mod}, {"uint16.mod", bi_mod}, {"uint32.mod", bi_mod}, {"uint64.mod", bi_mod},
     {"eq", bi_eq}, {"==", bi_eq},
-    {"int8.eq", bi_eq}, {"int16.eq", bi_eq}, {"int32.eq", bi_eq}, {"int64.eq", bi_eq},
-    {"uint8.eq", bi_eq}, {"uint16.eq", bi_eq}, {"uint32.eq", bi_eq}, {"uint64.eq", bi_eq},
-    {"float32.eq", bi_eq}, {"float64.eq", bi_eq},
     {"neq", bi_neq}, {"!=", bi_neq}, {"≠", bi_neq},
-    {"int8.neq", bi_neq}, {"int16.neq", bi_neq}, {"int32.neq", bi_neq}, {"int64.neq", bi_neq},
-    {"uint8.neq", bi_neq}, {"uint16.neq", bi_neq}, {"uint32.neq", bi_neq}, {"uint64.neq", bi_neq},
-    {"float32.neq", bi_neq}, {"float64.neq", bi_neq},
     {"lt", bi_lt}, {"<", bi_lt},
-    {"int8.lt", bi_lt}, {"int16.lt", bi_lt}, {"int32.lt", bi_lt}, {"int64.lt", bi_lt},
-    {"uint8.lt", bi_lt}, {"uint16.lt", bi_lt}, {"uint32.lt", bi_lt}, {"uint64.lt", bi_lt},
-    {"float32.lt", bi_lt}, {"float64.lt", bi_lt},
     {"gt", bi_gt}, {">", bi_gt},
-    {"int8.gt", bi_gt}, {"int16.gt", bi_gt}, {"int32.gt", bi_gt}, {"int64.gt", bi_gt},
-    {"uint8.gt", bi_gt}, {"uint16.gt", bi_gt}, {"uint32.gt", bi_gt}, {"uint64.gt", bi_gt},
-    {"float32.gt", bi_gt}, {"float64.gt", bi_gt},
     {"le", bi_le}, {"<=", bi_le}, {"≤", bi_le},
-    {"int8.le", bi_le}, {"int16.le", bi_le}, {"int32.le", bi_le}, {"int64.le", bi_le},
-    {"uint8.le", bi_le}, {"uint16.le", bi_le}, {"uint32.le", bi_le}, {"uint64.le", bi_le},
-    {"float32.le", bi_le}, {"float64.le", bi_le},
     {"ge", bi_ge}, {">=", bi_ge}, {"≥", bi_ge},
-    {"int8.ge", bi_ge}, {"int16.ge", bi_ge}, {"int32.ge", bi_ge}, {"int64.ge", bi_ge},
-    {"uint8.ge", bi_ge}, {"uint16.ge", bi_ge}, {"uint32.ge", bi_ge}, {"uint64.ge", bi_ge},
-    {"float32.ge", bi_ge}, {"float64.ge", bi_ge},
     {"and", bi_and}, {"&&", bi_and},
     {"or", bi_or}, {"||", bi_or},
     {"not", bi_not}, {"!", bi_not},
     {"bitand", bi_bitand}, {"&", bi_bitand},
-    {"int64.bitand", bi_bitand}, {"uint64.bitand", bi_bitand},
     {"bitor", bi_bitor}, {"|", bi_bitor},
-    {"int64.bitor", bi_bitor}, {"uint64.bitor", bi_bitor},
     {"bitxor", bi_bitxor}, {"^", bi_bitxor},
-    {"int64.bitxor", bi_bitxor}, {"uint64.bitxor", bi_bitxor},
     {"shl", bi_shl}, {"<<", bi_shl},
-    {"int64.shl", bi_shl}, {"uint64.shl", bi_shl},
     {"shr", bi_shr}, {">>", bi_shr},
-    {"int64.shr", bi_shr}, {"uint64.shr", bi_shr},
-    {"pow", bi_pow}, {"float32.pow", bi_pow}, {"float64.pow", bi_pow},
-    {"sqrt", bi_sqrt}, {"√", bi_sqrt}, {"float32.sqrt", bi_sqrt}, {"float64.sqrt", bi_sqrt},
-    {"exp", bi_exp}, {"float32.exp", bi_exp}, {"float64.exp", bi_exp},
-    {"log", bi_log}, {"float32.log", bi_log}, {"float64.log", bi_log},
+    {"pow", bi_pow},
+    {"sqrt", bi_sqrt}, {"√", bi_sqrt},
+    {"exp", bi_exp},
+    {"log", bi_log},
     {"neg", bi_neg},
-    {"int8.neg", bi_neg}, {"int16.neg", bi_neg}, {"int32.neg", bi_neg}, {"int64.neg", bi_neg},
-    {"float32.neg", bi_neg}, {"float64.neg", bi_neg},
     {"abs", bi_abs},
-    {"int8.abs", bi_abs}, {"int16.abs", bi_abs}, {"int32.abs", bi_abs}, {"int64.abs", bi_abs},
-    {"float32.abs", bi_abs}, {"float64.abs", bi_abs},
     {"sign", bi_sign},
-    {"int8.sign", bi_sign}, {"int16.sign", bi_sign}, {"int32.sign", bi_sign}, {"int64.sign", bi_sign},
-    {"uint8.sign", bi_sign}, {"uint16.sign", bi_sign}, {"uint32.sign", bi_sign}, {"uint64.sign", bi_sign},
-    {"float32.sign", bi_sign}, {"float64.sign", bi_sign},
     {"max", bi_max}, {"min", bi_min},
-    {"int8.max", bi_max}, {"int16.max", bi_max}, {"int32.max", bi_max}, {"int64.max", bi_max},
-    {"uint8.max", bi_max}, {"uint16.max", bi_max}, {"uint32.max", bi_max}, {"uint64.max", bi_max},
-    {"float32.max", bi_max}, {"float64.max", bi_max},
-    {"int8.min", bi_min}, {"int16.min", bi_min}, {"int32.min", bi_min}, {"int64.min", bi_min},
-    {"uint8.min", bi_min}, {"uint16.min", bi_min}, {"uint32.min", bi_min}, {"uint64.min", bi_min},
-    {"float32.min", bi_min}, {"float64.min", bi_min},
     /* cast */
     {"bool", bi_cast_bool}, {"int8", bi_cast_int8}, {"int16", bi_cast_int16},
     {"int32", bi_cast_int32}, {"int64", bi_cast_int64}, {"uint8", bi_cast_uint8},
@@ -656,8 +608,22 @@ static const struct { const char *op; bi_fn fn; } builtins[] = {
 
 static const size_t builtins_n = sizeof(builtins) / sizeof(builtins[0]);
 
+/* 剥离 <numkind>. 前缀（int64.add → add），使融合后的单条 add 覆盖全部数字类型。
+ * 非数字前缀（array./string./time/duration. 等）与裸类型 cast（int64）原样保留。 */
+static const char *NUM_KINDS[] = {"int8", "int16", "int32", "int64", "uint8",
+                                  "uint16", "uint32", "uint64", "float32", "float64"};
+static const char *strip_num_kind(const char *op) {
+    const char *dot = strchr(op, '.');
+    if (!dot) return op;
+    size_t n = (size_t)(dot - op);
+    for (size_t i = 0; i < sizeof(NUM_KINDS) / sizeof(NUM_KINDS[0]); i++)
+        if (strlen(NUM_KINDS[i]) == n && strncmp(op, NUM_KINDS[i], n) == 0) return dot + 1;
+    return op;
+}
+
 bool bi_is_native(const char *opcode) {
-    for (size_t i = 0; i < builtins_n; i++) if (strcmp(builtins[i].op, opcode) == 0) return true;
+    const char *op = strip_num_kind(opcode);
+    for (size_t i = 0; i < builtins_n; i++) if (strcmp(builtins[i].op, op) == 0) return true;
     return false;
 }
 
@@ -678,8 +644,9 @@ bool bi_num_op(const char *opcode) {
 }
 
 int bi_native(frame_t *f) {
+    const char *op = strip_num_kind(f->inst->opcode);
     for (size_t i = 0; i < builtins_n; i++) {
-        if (strcmp(builtins[i].op, f->inst->opcode) == 0) return builtins[i].fn(f);
+        if (strcmp(builtins[i].op, op) == 0) return builtins[i].fn(f);
     }
     return set_err(f, "unknown builtin op: %s", f->inst->opcode);
 }

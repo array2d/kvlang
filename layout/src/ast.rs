@@ -109,6 +109,15 @@ impl FuncSig {
         self.params.iter().map(|p| p.name.clone()).collect()
     }
 
+    /// 参数 kindexp 列表（读参在前、写参在后，源文法逐字节），落盘于 rwir/rwfunc body。
+    pub fn kindexp_list(&self) -> Vec<String> {
+        self.params
+            .iter()
+            .chain(self.returns.iter())
+            .map(|p| p.ty.clone())
+            .collect()
+    }
+
     pub fn num_reads(&self) -> i32 {
         self.params.len() as i32
     }

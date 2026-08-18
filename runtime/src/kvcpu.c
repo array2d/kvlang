@@ -25,6 +25,80 @@ static bool is_literal(const char *s) {
            strcmp(s, "null") == 0 || (s[0] >= '0' && s[0] <= '9') || (s[0] == '-' && s[1]);
 }
 
+/* 派发期读参类型校验（runtime篇-07 第八节）：把每个实参的 kind 逐一匹配
+ * rwir/rwfunc 定义的读参 kindexp。def_sig 为读参 kindexp 在前的 \n 分隔列表，
+ * def_nr 为定义读参数。空 kindexp / any 跳过；末读参 "..." 变参吸收其后全部实参。
+ * XValue 头只携带 array_len 不含多维 shape，故仅校验 kind 层。
+ * 不匹配 → 置 TypeError，返回 -1；通过返回 0。 */
+static int check_read_types(kv_t *kv, const char *vtid, const char *pc,
+                            const char *opcode, const char *def_sig, int def_nr,
+                            param_t *args, int nargs) {
+    if (def_nr <= 0 || !def_sig || !*def_sig) return 0;
+    char *dup = strdup(def_sig);
+    char *reads[128];
+    int rn = 0;
+    for (char *s = dup; rn < def_nr && rn < 128; ) {
+        reads[rn++] = s;
+        char *nl = strchr(s, '\n');
+        if (!nl) break;
+        *nl = 0; s = nl + 1;
+    }
+    bool var_last = rn > 0 && type_expr_variadic(reads[rn - 1]);
+    int min_args = var_last ? rn - 1 : rn;
+    char *fr = kt_frame_root(pc);
+    int rc = 0;
+    if (nargs < min_args) {
+        char msg[256];
+        snprintf(msg, sizeof msg, "TypeError: %s expects %d args, got %d", opcode, min_args, nargs);
+        vt_set_error(kv, vtid, pc, msg);
+        rc = -1;
+    }
+    for (int i = 0; rc == 0 && i < nargs; i++) {
+        const char *exp = i < rn ? reads[i] : (var_last ? reads[rn - 1] : NULL);
+        if (!exp) {
+            char msg[256];
+            snprintf(msg, sizeof msg, "TypeError: %s expects %d args, got %d", opcode, rn, nargs);
+            vt_set_error(kv, vtid, pc, msg);
+            rc = -1;
+            break;
+        }
+        if (!exp[0] || !type_expr_valid(exp)) continue;   /* 动态/非法 kindexp 跳过 */
+        xval_t v; xv_zero(&v);
+        bi_resolve_read_value(kv, fr, args[i].name, &args[i].val, &v);
+        const char *k = xv_kind(&v);
+        kvhead_t h; xv_head(&v, &h);
+        bool ok = type_expr_match(exp, k, h.ndim, h.dims);
+        char kbuf[40]; snprintf(kbuf, sizeof kbuf, "%s", k[0] ? k : "None");
+        xv_free(&v);
+        if (!ok) {
+            char msg[256];
+            snprintf(msg, sizeof msg, "TypeError: %s arg %d: expected %s, got %s", opcode, i + 1, exp, kbuf);
+            vt_set_error(kv, vtid, pc, msg);
+            rc = -1;
+        }
+    }
+    free(fr); free(dup);
+    return rc;
+}
+
+/* 读取 rwir/rwfunc 定义体的 kindexp-list（nr/nw 前缀后的 \n 分隔串）。
+ * 返回 malloc 串（调用方 free）并置 *out_nr；无定义返回 NULL。 */
+static char *load_def_reads(kv_t *kv, const char *key, int *out_nr) {
+    *out_nr = 0;
+    xval_t v; xv_zero(&v);
+    kv_get_one(kv, key, &v);
+    if (xv_none(&v)) { xv_free(&v); return NULL; }
+    kvhead_t h; xv_head(&v, &h);
+    int32_t bl; const uint8_t *b = xv_body(&v, &h, &bl);
+    if (bl < 4) { xv_free(&v); return NULL; }
+    *out_nr = b[0] | (b[1] << 8);
+    size_t sl = (size_t)(bl - 4);
+    char *sig = malloc(sl + 1);
+    memcpy(sig, b + 4, sl); sig[sl] = 0;
+    xv_free(&v);
+    return sig;
+}
+
 static char *frame_slot_key(const char *frame_root, const char *slot) {
     if (!slot || !slot[0]) return NULL;
     if (slot[0] == '/') return strdup(slot);
@@ -193,6 +267,15 @@ static char *handle_call(kv_t *kv, const char *pc, rwir_inst_t *inst) {
     const uint8_t *sbody = sig.data + h.body_offset;
     int nr = sbody[0] | (sbody[1] << 8);
     int nw = sbody[2] | (sbody[3] << 8);
+
+    {   /* 读参类型校验：reads[0]=函数名，实参从 reads[1] 起 */
+        size_t sl = h.body_len >= 4 ? (size_t)(h.body_len - 4) : 0;
+        char *ds = malloc(sl + 1);
+        memcpy(ds, sbody + 4, sl); ds[sl] = 0;
+        int crc = check_read_types(kv, vtid, pc, fn, ds, nr, inst->reads + 1, inst->nr - 1);
+        free(ds);
+        if (crc != 0) goto fail;
+    }
 
     char *caller_fr = kt_frame_root(pc);
     char *frame_root = strdup(pc);
@@ -504,13 +587,21 @@ int kvcpu_execute_mode(kv_t *kv, const char *pc, kvmode_t mode, char **out_pc) {
         } else if (is_copy_op(inst.opcode)) {
             exec_err = bi_execute_copy(kv, vtid, cur, &inst);
         } else if (is_ext_rwir(kv, inst.opcode)) {
-            if (mode == KVMODE_RETURN) {
+            char *rk = kt_rwir(inst.opcode);
+            int def_nr = 0;
+            char *def_sig = load_def_reads(kv, rk, &def_nr);
+            free(rk);
+            if (def_sig) {
+                exec_err = check_read_types(kv, vtid, cur, inst.opcode, def_sig, def_nr, inst.reads, inst.nr);
+                free(def_sig);
+            }
+            if (exec_err == 0 && mode == KVMODE_RETURN) {
                 if (out_pc) *out_pc = strdup(cur);
                 free(fr); rwir_inst_free(&inst);
                 free(cur); sb_free(&vtid_b);
                 return 1;
             }
-            exec_err = handoff_external_rwir(kv, vtid, cur, &inst);
+            if (exec_err == 0) exec_err = handoff_external_rwir(kv, vtid, cur, &inst);
         } else {
             /* 用户函数 → call */
             rwir_inst_t ci;

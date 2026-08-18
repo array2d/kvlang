@@ -51,7 +51,7 @@ def serve(dsn: str):
         raise RuntimeError("rwext_connect failed")
 
     for op, (nr, nw) in OPS.items():
-        sig = f"rwir {op}(a:path, b:path) -> (c:path)"
+        sig = "\n".join(["any"] * (nr + nw))
         _rwext.rwext_register(conn, op.encode(), nr, nw, sig.encode())
 
     while True:

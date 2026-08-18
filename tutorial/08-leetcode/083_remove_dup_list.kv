@@ -17,7 +17,7 @@ rwfunc build() -> () {
 	/f4 <- { val=3; next="" }
 }
 
-rwfunc dedup(head:char/utf32) -> () {
+rwfunc dedup(head:[]char/utf32) -> () {
 	head -> cur
 	while (cur != "") {
 		cur.next -> nxt
@@ -39,7 +39,7 @@ rwfunc dedup(head:char/utf32) -> () {
 	}
 }
 
-rwfunc show(head:char/utf32) -> () {
+rwfunc show(head:[]char/utf32) -> () {
 	head -> p
 	while (p != "") {
 		p.val -> v

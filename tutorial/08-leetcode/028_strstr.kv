@@ -3,7 +3,7 @@
 # 期望输出:
 #   2
 #   2
-rwfunc str_str(hay:char/utf32, needle:char/utf32) -> () {
+rwfunc str_str(hay:[]char/utf32, needle:[]char/utf32) -> () {
 	string.len(hay) -> nh
 	nn <- string.len(needle)
 	i = 0  # = 等价于 <-
