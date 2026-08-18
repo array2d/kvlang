@@ -7,7 +7,7 @@
 
 **The VM of deepx (formerly dxlang) — an agent-native, train-inference-unified, self-iterating AI compute architecture.** kvspace tree paths form a single unified address space; one syntax simultaneously serves as VM instructions, high-level language, compiler IR, and human-readable source.
 
-> 中文文档: [README_CN.md](README_CN.md) | Design: [deep-dive](https://github.com/array2d/deepx-design/blob/master/doc/kvlang/deep-dive.md) — root design doc; README is the teaching derivative. All behavior norms (p0–p7), instruction model (§2), Link call mechanism (§6), type system (§9), diagnostics (§12) live there.
+> 中文文档: [README_CN.md](README_CN.md) | Design: [deep-dive](https://github.com/array2d/deepx-design/blob/master/doc/kvlang/kvlang-design-and-implementation) — root design doc; README is the teaching derivative. All behavior norms (p0–p7), instruction model (§2), Link call mechanism (§6), type system (§9), diagnostics (§12) live there.
 >
 > Design docs (CN): [deepx-design/doc/kvlang-design-and-implementation](https://github.com/array2d/deepx-design/tree/master/doc/kvlang-design-and-implementation) · (EN): [deepx-design/doc-en/kvlang-design-and-implementation](https://github.com/array2d/deepx-design/tree/master/doc-en/kvlang-design-and-implementation) — 19 chapters covering architecture, parser, runtime, kvspace, and language design reference.
 
@@ -36,7 +36,7 @@ lib main {
 /lib/main.add/[0,-2] = "B"     /lib/main.add/[0,1]  = "C"
 ```
 
-Four address-space domains: `/lib` (function library) `/vthread` (runtime frames) `/sys` (infrastructure) `/dev` (I/O).
+Two address-space domains exist: `/lib` (function library — signatures, instruction trees, `.src`) and `/vthread` (runtime frames). Everything else under `/` is user-defined. There is **no `/dev` device domain and no terminal** — the KV world holds only keys and values; I/O such as `print` is an [extension rwir](#builtins-and-extension-rwir), not an address-space domain.
 
 ---
 
@@ -188,13 +188,18 @@ Conditions may be compound expressions: `if (7 % 2 != 0)` and `while (i < string
 > `÷`: both ints → integer division (C-style, `7÷2`=3, `-9÷2`=-4); either side float → float division (`7.0÷2`=3.5).
 > `/` is reserved for paths and path separators. `*` is reserved for future pointer dereference.
 
-### Builtins
+### Builtins and Extension rwir
 
-**Scalar:** `abs` `neg` `sign` `pow` `sqrt` `exp` `log` `min` `max` (variadic, e.g. `max(a,b,c)`) `println` (auto-newline) `print` (no newline) `cerr` `input` `debugger`\
-**Types:** `bool` `int8` `int16` `int32` `int64` `uint8` `uint16` `uint32` `uint64` `float32` `float64`\
-**Collections:** `array` `len` `at` `set` `has` `sort` `dict` `kvat` `kvhas`\
+**Builtins** are the rwir the runtime evaluates in-process (the `bi_is_native` set). They are pure KV→KV computations — no I/O:
+
+**Scalar:** `abs` `neg` `sign` `pow` `sqrt` `exp` `log` `min` `max` (variadic, e.g. `max(a,b,c)`) `debugger`\
+**Types:** `bool` `int8` `int16` `int32` `int64` `uint8` `uint16` `uint32` `uint64` `float32` `float64` `char/utf8` `char/utf32` `char/ascii`\
+**Collections:** `array` `len` `at` `set` `has` `array.sort` `array.slice` `array.append` `dict` `kvat` `kvhas`\
 **Strings:** `string.char` `string.ord` `string.len` `string.cmp` `string.find` `string.slice` `string.concat` `string.set`\
-**Time:** `time.now` `time.sub` `time.add` `time.duration.nanos` `time.duration.millis` `time.duration.seconds` `time.before` `time.after`
+**Time:** `time.now` `time.sub` `time.add` `time.before` `time.after` `time/duration.nanos` `time/duration.as_nanos` (and `millis`/`seconds`/`minutes`/`hours` variants)\
+**Random:** `random.uint64` `random.int63` `random.intn`
+
+**`print` / `println` / `cerr` are NOT builtins.** In the KV world there is no terminal — only keys and values — so I/O is not a core-language primitive. They are **extension rwir**: the `term` extension runtime registers them at `/lib/<opcode>` (kind `rwir`) and writes to the host process's `stdout`/`stderr`. The core runtime recognizes any `/lib/<opcode>` that carries an `rwir` signature and is not a builtin as an extension rwir, and hands it off to its extension runtime. Same mechanism as `json.to` / `json.from` (the `json` extension) and tensor ops (the numpy / GPU extensions).
 
 ```kv
 a:int64 = [7, 2, 9, 4]     # typed 1D array, = ≡ <-

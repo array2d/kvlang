@@ -36,7 +36,7 @@ lib main {
 /lib/main.add/[0,-2] = "B"     /lib/main.add/[0,1]  = "C"
 ```
 
-地址空间四域：`/lib`（函数库）`/vthread`（运行时栈帧）`/sys`（基础设施）`/dev`（I/O 设备）。
+地址空间只有两个域：`/lib`（函数库——签名、指令树、`.src` 源码）和 `/vthread`（运行时栈帧）。`/` 下其余路径全部由用户自定义。**没有 `/dev` 设备域，也没有终端**——KV 世界里只有 key 和 value；`print` 这类 I/O 是[扩展 rwir](#内建函数与扩展-rwir)，不是地址空间域。
 
 ---
 
@@ -185,13 +185,18 @@ for (x in [7, 2, 9, 4]) { println(x) }
 > `÷`：两侧均 int → 整除（C 风格，`7÷2`=3、`-9÷2`=-4）；任一侧 float → 浮除（`7.0÷2`=3.5）。
 > `/` 保留用于路径及路径分隔。`*` 保留用于后续指针解引用。
 
-### 内建函数
+### 内建函数与扩展 rwir
 
-**标量：** `abs` `neg` `sign` `pow` `sqrt` `exp` `log` `min` `max`（变参，如 `max(a,b,c)`）`println`（自动换行）`print`（不换行）`cerr` `input` `debugger`\
-**类型：** `bool` `int8` `int16` `int32` `int64` `uint8` `uint16` `uint32` `uint64` `float32` `float64`\
-**容器：** `array` `len` `at` `set` `has` `sort` `dict` `kvat` `kvhas`\
+**内建（builtin）** 是 runtime 在进程内直接求值的 rwir（`bi_is_native` 集合），全部是纯 KV→KV 计算，不做 I/O：
+
+**标量：** `abs` `neg` `sign` `pow` `sqrt` `exp` `log` `min` `max`（变参，如 `max(a,b,c)`）`debugger`\
+**类型：** `bool` `int8` `int16` `int32` `int64` `uint8` `uint16` `uint32` `uint64` `float32` `float64` `char/utf8` `char/utf32` `char/ascii`\
+**容器：** `array` `len` `at` `set` `has` `array.sort` `array.slice` `array.append` `dict` `kvat` `kvhas`\
 **字符串：** `string.char` `string.ord` `string.len` `string.cmp` `string.find` `string.slice` `string.concat` `string.set`\
-**时间：** `time.now` `time.sub` `time.add` `time.duration.nanos` `time.duration.millis` `time.duration.seconds` `time.before` `time.after`
+**时间：** `time.now` `time.sub` `time.add` `time.before` `time.after` `time/duration.nanos` `time/duration.as_nanos`（及 `millis`/`seconds`/`minutes`/`hours` 变体）\
+**随机：** `random.uint64` `random.int63` `random.intn`
+
+**`print` / `println` / `cerr` 不是内建。** KV 世界里没有终端，只有 key 和 value——I/O 不是核心语言原语。它们是**扩展 rwir**：由 `term` 扩展运行时把签名注册到 `/lib/<opcode>`（kind=`rwir`），并写宿主进程的 `stdout`/`stderr`。核心 runtime 把任何"`/lib/<opcode>` 上带 `rwir` 签名、且不在 builtin 表里"的 opcode 识别为扩展 rwir，交给其扩展运行时执行。与 `json.to` / `json.from`（json 扩展）、tensor 算子（numpy / GPU 扩展）同一套机制。
 
 ```kv
 a:int64 = [7, 2, 9, 4]     # 带类型 1D 数组，= ≡ <-
