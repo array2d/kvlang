@@ -412,7 +412,7 @@ var ops = []op{
 
 func register(c *C.rwext_conn) {
 	for _, o := range ops {
-		sig := "rwir " + o.name + "(a:any) -> (b:any)"
+		sig := strings.TrimSuffix(strings.Repeat("any\n", o.nr+o.nw), "\n")
 		co := cstr(o.name)
 		cs := cstr(sig)
 		C.rwext_register(c, co, C.int32_t(o.nr), C.int32_t(o.nw), cs)

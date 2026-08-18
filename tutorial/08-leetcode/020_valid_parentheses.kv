@@ -4,7 +4,7 @@
 #   true
 #   true
 #   false
-rwfunc is_valid(s:char/utf32) -> (ok:int64) {
+rwfunc is_valid(s:[]char/utf32) -> (ok:int64) {
 	ok <- 1
 	si = -1  # = 等价于 <-
 	n = string.len(s)  # = 等价于 <-

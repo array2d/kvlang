@@ -45,9 +45,9 @@ struct Op {
 }
 
 const OPS: &[Op] = &[
-    Op { name: "print", sig: "rwir print(A:any, ...) -> ()", nr: 1, nw: 0 },
-    Op { name: "println", sig: "rwir println(A:any, ...) -> ()", nr: 1, nw: 0 },
-    Op { name: "cerr", sig: "rwir cerr(A:any, ...) -> ()", nr: 1, nw: 0 },
+    Op { name: "print", sig: "any...", nr: 1, nw: 0 },
+    Op { name: "println", sig: "any...", nr: 1, nw: 0 },
+    Op { name: "cerr", sig: "any...", nr: 1, nw: 0 },
 ];
 
 fn cs(s: &str) -> CString {

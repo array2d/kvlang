@@ -5,19 +5,26 @@
 #   make layout    Rust layout（layout_file）
 #   make json      Go json 扩展（json-rwirext 可执行文件）
 #   make oldhero   Go 旧 runtime（kvlang，兼容保留）
-#   make test      全量 tutorial 回归（C runtime + Rust term，递归跑所有子目录 kv）
-#   make all       全部
+#   make shm       链 kvspace-c 后端（SHM，默认，= all 的后端组件）
+#   make durable   链 kvspace_durable 后端（redis/fs/s3）
+#   make test      durable 后端全量 tutorial 回归
+#   make all       全部（shm 后端 + json）
 #   make clean     清理 bin/ 与各构建目录
+# 切换后端只需 make shm / make durable：runtime 经 cmake 重配、layout 经环境变量重建。
 
 BIN         := bin
 KVSPACE_LIB ?= kvspace-c
 
-.PHONY: all runtime term run layout json oldhero test clean
+.PHONY: all runtime term run layout json oldhero shm durable test clean
 
 all: runtime term run layout json
 
-test: KVSPACE_LIB := kvspace_durable
-test: runtime term run layout
+shm: runtime term run layout
+
+durable: KVSPACE_LIB := kvspace_durable
+durable: runtime term run layout
+
+test: durable
 	python3 tutorial/test.py --no-build
 
 runtime:

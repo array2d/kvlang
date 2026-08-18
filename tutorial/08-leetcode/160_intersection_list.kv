@@ -17,7 +17,7 @@ rwfunc build_lists() -> () {
 	{ val=1; next="/t8" } -> /b2
 }
 
-rwfunc get_intersection(ha:char/utf32, hb:char/utf32) -> () {
+rwfunc get_intersection(ha:[]char/utf32, hb:[]char/utf32) -> () {
 	pa = ha  # = 等价于 <-
 	pb <- hb
 	switch_a = 0  # = 等价于 <-

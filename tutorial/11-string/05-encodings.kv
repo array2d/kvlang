@@ -7,9 +7,9 @@
 rwfunc main() -> () {
 	a = "abc"               # 默认 char/utf32
 	println(a)
-	b:char/ascii = "xyz"    # ASCII 定宽，可索引
+	b:[]char/ascii = "xyz"    # ASCII 定宽，可索引
 	println(string.char(b, 1))
-	c:char/utf8 = "héllo"   # UTF-8 变宽，打印 OK（索引会报错）
+	c:[]char/utf8 = "héllo"   # UTF-8 变宽，打印 OK（索引会报错）
 	println(c)
 }
 main()

@@ -277,6 +277,7 @@ impl Parser {
     fn parse_func(&mut self) -> Func {
         let sig = self.parse_func_sig();
         self.check_param_types(&sig);
+        self.check_variadic(&sig);
         self.check_param_dup(&sig);
         self.skip_newlines_and_comments();
         self.expect(Kind::LBrace);
@@ -313,6 +314,8 @@ impl Parser {
                 self.expect(Kind::RParen);
             }
         }
+        self.check_param_types(&decl.sig);
+        self.check_variadic(&decl.sig);
         decl
     }
 
@@ -368,6 +371,18 @@ impl Parser {
                     } else {
                         return sb;
                     }
+                }
+                Kind::Dot if depth == 0 => {
+                    // 尾缀 "..." 变参：吞三个点，附加后结束（变参必在类型末尾）
+                    let mut dots = 0;
+                    while self.peek().kind == Kind::Dot {
+                        self.advance();
+                        dots += 1;
+                    }
+                    if dots == 3 {
+                        sb.push_str("...");
+                    }
+                    return sb;
                 }
                 _ => return sb,
             }
@@ -443,6 +458,36 @@ impl Parser {
                 self.errors.push(Diagnostic {
                     pos: Pos { line: 0, col: 0 },
                     message: format!("func {}: return value {:?} has no type annotation — every return value must declare its type, e.g. {}:int64", sig.name, ret.name, ret.name),
+                    warn: false,
+                    info: false,
+                    source: String::new(),
+                    src_file: String::new(),
+                    src_name: String::new(),
+                });
+            }
+        }
+    }
+
+    fn check_variadic(&mut self, sig: &FuncSig) {
+        let last = sig.params.len().saturating_sub(1);
+        for (i, p) in sig.params.iter().enumerate() {
+            if crate::type_expr::is_variadic(&p.ty) && i != last {
+                self.errors.push(Diagnostic {
+                    pos: Pos { line: 0, col: 0 },
+                    message: format!("func {}: variadic param {:?} must be the last read-param", sig.name, p.name),
+                    warn: false,
+                    info: false,
+                    source: String::new(),
+                    src_file: String::new(),
+                    src_name: String::new(),
+                });
+            }
+        }
+        for r in &sig.returns {
+            if crate::type_expr::is_variadic(&r.ty) {
+                self.errors.push(Diagnostic {
+                    pos: Pos { line: 0, col: 0 },
+                    message: format!("func {}: write-param {:?} cannot be variadic", sig.name, r.name),
                     warn: false,
                     info: false,
                     source: String::new(),
@@ -1255,7 +1300,12 @@ impl Parser {
             None => return,
         };
         let expr_is_array = e.op == "array";
-        let expr_is_scalar_lit = e.is_leaf() && e.lit != ast::LitKind::LitNone && e.lit != ast::LitKind::LitNil;
+        // 字符串字面量恒一维 []char/编码（非标量），故排除；仅 int/float/bool 字面量算标量。
+        let expr_is_scalar_lit = e.is_leaf()
+            && e.lit != ast::LitKind::LitNone
+            && e.lit != ast::LitKind::LitNil
+            && e.lit != ast::LitKind::LitString
+            && e.lit != ast::LitKind::LitRawString;
 
         for (j, wt) in inst.write_types.iter().enumerate() {
             if wt.is_empty() {

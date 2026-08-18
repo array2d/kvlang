@@ -15,6 +15,8 @@ typedef struct {
     int32_t array_len;
     int32_t body_len;
     int32_t body_offset;
+    int32_t ndim;       /* 0=标量，N=N 维数组（唯一「是否数组」标志） */
+    int32_t dims[8];    /* kind+ndim+dims 即完整 kindexp */
 } kvhead_t;
 
 extern void *kvspace_conn(const char *dsn);
@@ -126,6 +128,7 @@ bool xv_is_num_kind(const char *kind);
 /* 签名类型表达式（runtime篇-07）校验/匹配 */
 bool type_expr_valid(const char *expr);
 bool type_expr_match(const char *expr, const char *kind, int32_t ndim, const int32_t *dims);
+bool type_expr_variadic(const char *expr);
 int64_t xv_as_int64(const xval_t *v);
 double  xv_as_float64(const xval_t *v);
 uint64_t xv_as_uint64(const xval_t *v);
