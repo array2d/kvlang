@@ -168,6 +168,31 @@ char *rwext_resolve_read(rwext_conn *c, const char *pc, int idx) {
     return s;
 }
 
+/* 解析读参 idx 为 KV 路径（变量/临时 → 帧槽路径；路径 → 直接返回；内联字面量 → ""）。 */
+char *rwext_resolve_read_path(rwext_conn *c, const char *pc, int idx) {
+    char *fr = kt_frame_root(pc);
+    if (!fr) return strdup("");
+    char *lb = kt_stack(fr);
+    rwir_inst_t inst;
+    char err[256];
+    if (rwir_decode(c->kv, lb, pc, &inst, err, sizeof err) != 0 || idx < 0 || idx >= inst.nr) {
+        free(fr); free(lb); return strdup("");
+    }
+    free(lb);
+    const char *nm = inst.reads[idx].name;
+    char *s;
+    if (!nm || !nm[0] || nm[0] == '"' || (nm[0] >= '0' && nm[0] <= '9') ||
+        (nm[0] == '-' && nm[1]) || strcmp(nm, "true") == 0 ||
+        strcmp(nm, "false") == 0 || strcmp(nm, "null") == 0) {
+        s = strdup("");                         /* 内联字面量：无路径 */
+    } else {
+        s = bi_resolve_write_slot(c->kv, fr, nm);   /* 变量/临时/路径 → 帧槽路径 */
+    }
+    free(fr);
+    rwir_inst_free(&inst);
+    return s ? s : strdup("");
+}
+
 /* 解析写参 idx 为 KV 路径（路径 → 直接返回；变量 → 帧槽路径）。 */
 char *rwext_resolve_write(rwext_conn *c, const char *pc, int idx) {
     char *fr = kt_frame_root(pc);

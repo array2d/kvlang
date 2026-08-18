@@ -8,5 +8,6 @@ description = "kvlang 编译期（parser/lower/layoutcode），只依赖 kvspace
 [lib]
 name = "kvlang_layout"
 path = "src/lib.rs"
+crate-type = ["rlib", "cdylib"]
 
 [dependencies]

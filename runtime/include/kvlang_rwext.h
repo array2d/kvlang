@@ -51,6 +51,10 @@ char *rwext_params(rwext_conn *c, const char *pc);
 /* 解析读参 idx 为字符串（变量 → 帧槽值；路径 → 该路径下的值）。 */
 char *rwext_resolve_read(rwext_conn *c, const char *pc, int idx);
 
+/* 解析读参 idx 为 KV 路径（变量 → 帧槽路径；路径 → 直接返回；字面量 → ""）。
+ * 供 numpy/tensor 扩展按路径零拷贝读整块 ndarray raw 数据。 */
+char *rwext_resolve_read_path(rwext_conn *c, const char *pc, int idx);
+
 /* 解析写参 idx 为 KV 路径（路径 → 直接返回；变量 → 帧槽路径）。 */
 char *rwext_resolve_write(rwext_conn *c, const char *pc, int idx);
 

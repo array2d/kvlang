@@ -277,7 +277,7 @@ def _c_test_file(f: Path, expects: list[str], env: dict) -> tuple[bool, str]:
 
 def main():
     ap = argparse.ArgumentParser(description="tutorial test")
-    ap.add_argument("--filter", default="", help="filter by name")
+    ap.add_argument("--filter", default="", help="按路径子串过滤（如 14-numpy / 11-string/01）")
     ap.add_argument("--no-build", action="store_true", help="skip make build")
     ap.add_argument("--errorexit", action="store_true", help="exit on first error")
     ap.add_argument("--bench", action="store_true", help="benchmark matching .kv/.py/.c files")

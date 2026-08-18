@@ -319,7 +319,7 @@ static char *handle_call(kv_t *kv, const char *pc, rwir_inst_t *inst) {
                 kvhead_t ah; kvspace_decode_head(arg->val.data, arg->val.len, &ah);
                 int32_t abl; const uint8_t *ab = xv_body(&arg->val, &ah, &abl);
                 pairs[np].key = strdup(rk);
-                kvspace_tlv_encode(xv_kind(&arg->val), ab, (uint32_t)abl, ah.array_len,
+                kvspace_tlv_encode(xv_kind(&arg->val), ab, (uint32_t)abl, ah.dims, ah.ndim,
                                    &pairs[np].val.data, &pairs[np].val.len);
                 np++;
             }
