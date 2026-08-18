@@ -1,0 +1,29 @@
+# numpy 第四类：reduce（归约）
+# extern: 需 numpy 扩展引擎驱动
+#   python runtime-rwirext_example/py/numpy/numpy.py tutorial/14-numpy/04-reduce.kv
+# 期望输出:
+#   m: [[0, 1, 2], [3, 4, 5]]
+#   sum: 15
+#   prod: 0
+#   max: 5
+#   min: 0
+#   mean: 2.5
+lib demo {
+	rwfunc main() -> () {
+		numpy.arange(6) -> r
+		numpy.reshape(r, [2, 3]) -> m
+		numpy.print("m:", m)
+		numpy.sum(m) -> s
+		numpy.print("sum:", s)
+		numpy.prod(m) -> p
+		numpy.print("prod:", p)
+		numpy.max(m) -> mx
+		numpy.print("max:", mx)
+		numpy.min(m) -> mn
+		numpy.print("min:", mn)
+		a:[]float64 = [1.0, 2.0, 3.0, 4.0]
+		numpy.mean(a) -> me
+		numpy.print("mean:", me)
+	}
+}
+demo.main()

@@ -66,7 +66,8 @@ extern "C" {
         kind: *const c_char,
         raw: *const u8,
         raw_len: u32,
-        array_len: i32,
+        dims: *const i32,
+        ndim: i32,
         out: *mut *mut u8,
         out_len: *mut u32,
     ) -> c_int;
@@ -74,7 +75,8 @@ extern "C" {
         kind: *const c_char,
         raw: *const u8,
         raw_len: u32,
-        array_len: i32,
+        dims: *const i32,
+        ndim: i32,
         out: *mut *mut u8,
         out_len: *mut u32,
     ) -> c_int;
@@ -248,19 +250,34 @@ impl Drop for Kv {
 
 // ── XValue TLV 编解码（供 kvkind 使用） ─────────────────────────────
 
+/// array_len → dims：char/* 恒一维（含空串/单字符）；其余标量(≤1)=0 维、多元素=1 维。
+fn al_to_dims(kind: &str, array_len: i32) -> Vec<i32> {
+    if kind.starts_with("char/") {
+        vec![array_len.max(0)]
+    } else if array_len > 1 {
+        vec![array_len]
+    } else {
+        Vec::new()
+    }
+}
+
 /// 通用 TLV 编码（内联，ref=0）。
 pub fn tlv_encode(kind: &str, raw: &[u8], array_len: i32) -> Vec<u8> {
     let ck = CString::new(kind).expect("no NUL in kind");
+    let dims = al_to_dims(kind, array_len);
     call_alloc(|out, out_len| unsafe {
-        kvspace_tlv_encode(ck.as_ptr(), raw.as_ptr(), raw.len() as u32, array_len, out, out_len)
+        kvspace_tlv_encode(ck.as_ptr(), raw.as_ptr(), raw.len() as u32,
+                           dims.as_ptr(), dims.len() as i32, out, out_len)
     })
 }
 
 /// 通用 TLV 编码（软链接，ref=1）。
 pub fn tlv_encode_ptr(kind: &str, raw: &[u8], array_len: i32) -> Vec<u8> {
     let ck = CString::new(kind).expect("no NUL in kind");
+    let dims = al_to_dims(kind, array_len);
     call_alloc(|out, out_len| unsafe {
-        kvspace_tlv_encode_ptr(ck.as_ptr(), raw.as_ptr(), raw.len() as u32, array_len, out, out_len)
+        kvspace_tlv_encode_ptr(ck.as_ptr(), raw.as_ptr(), raw.len() as u32,
+                               dims.as_ptr(), dims.len() as i32, out, out_len)
     })
 }
 

@@ -37,9 +37,9 @@ extern int   kvspace_del_ext_index(void *h, const char *path, char *err, uint32_
 extern int   kvspace_watch(void *h, const char *key, const uint8_t *target, uint32_t target_len,
                            uint64_t tick_ns, uint8_t **out, uint32_t *out_len);
 extern int   kvspace_tlv_encode(const char *kind, const uint8_t *raw, uint32_t raw_len,
-                                int32_t array_len, uint8_t **out, uint32_t *out_len);
+                                const int32_t *dims, int32_t ndim, uint8_t **out, uint32_t *out_len);
 extern int   kvspace_tlv_encode_ptr(const char *kind, const uint8_t *raw, uint32_t raw_len,
-                                    int32_t array_len, uint8_t **out, uint32_t *out_len);
+                                    const int32_t *dims, int32_t ndim, uint8_t **out, uint32_t *out_len);
 extern int   kvspace_decode_head(const uint8_t *data, uint32_t data_len, kvhead_t *out);
 extern int   kvspace_new_ptr(const char *kind, const char *target, int32_t array_len,
                              uint8_t **out, uint32_t *out_len);

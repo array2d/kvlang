@@ -25,11 +25,19 @@ static int xv_decode_head_raw(const uint8_t *d, uint32_t len, kvhead_t *h) {
     return h->kind[0] ? 0 : -1;
 }
 
+/* array_len → dims：char/* 恒一维（含空串/单字符）；其余标量(≤1)=0 维、多元素=1 维。 */
+static int32_t al_to_dims(const char *kind, int32_t array_len, int32_t *dims) {
+    if (strncmp(kind, "char/", 5) == 0) { dims[0] = array_len < 0 ? 0 : array_len; return 1; }
+    if (array_len > 1) { dims[0] = array_len; return 1; }
+    return 0;
+}
+
 static uint8_t *xv_encode_tlv(const char *kind, int32_t ref, const uint8_t *raw,
                               uint32_t raw_len, int32_t array_len, uint32_t *out_len) {
+    int32_t dims[1]; int32_t ndim = al_to_dims(kind, array_len, dims);
     uint8_t *tmp = NULL; uint32_t tl = 0;
-    int rc = ref == 1 ? kvspace_tlv_encode_ptr(kind, raw, raw_len, array_len, &tmp, &tl)
-                      : kvspace_tlv_encode(kind, raw, raw_len, array_len, &tmp, &tl);
+    int rc = ref == 1 ? kvspace_tlv_encode_ptr(kind, raw, raw_len, dims, ndim, &tmp, &tl)
+                      : kvspace_tlv_encode(kind, raw, raw_len, dims, ndim, &tmp, &tl);
     if (rc != 0 || !tmp) { *out_len = 0; return NULL; }
     uint8_t *buf = malloc(tl);          /* 转交 runtime 所有权（统一 free 释放） */
     memcpy(buf, tmp, tl);
