@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Tutorial Examples](https://img.shields.io/badge/tutorials-140%20examples-4c1)](tutorial/)
 
-**The VM of deepx (formerly dxlang) — an agent-native, train-inference-unified, self-iterating AI compute architecture.** kvspace tree paths form a single unified address space; one syntax simultaneously serves as VM instructions, high-level language, compiler IR, and human-readable source.
+**A plaintext, interpreted language whose addressing space and memory space are both kvspace — a small core with extensions on top (the front-end language of deepx, formerly dxlang).** Code and data live in one KV tree; the PC is a KV path (crash-resumable), the source is the IR, and every KV value is plaintext. The core runtime does only the execute loop and control flow; all other capabilities are carried by rwirext extensions (`term` / `json` are example base extensions).
 
 > 中文文档: [README_CN.md](README_CN.md) | Design: [deep-dive](https://github.com/array2d/deepx-design/blob/master/doc/kvlang/kvlang-design-and-implementation) — root design doc; README is the teaching derivative. All behavior norms (p0–p7), instruction model (§2), Link call mechanism (§6), type system (§9), diagnostics (§12) live there.
 >
@@ -37,6 +37,18 @@ lib main {
 ```
 
 Two address-space domains exist: `/lib` (function library — signatures, instruction trees, `.src`) and `/vthread` (runtime frames). Everything else under `/` is user-defined. There is **no `/dev` device domain and no terminal** — the KV world holds only keys and values; I/O such as `print` is an [extension rwir](#builtins-and-extension-rwir), not an address-space domain.
+
+---
+
+## Ecosystem Architecture
+
+kvspace is the addressing and memory space at the core; the language is a small runtime with extensions on top.
+
+![kvlang ecosystem architecture](docs/kvlang-ecosystem-architecture.png)
+
+- **kvspace** — one C ABI (`kvspace_*`, 24 symbols), two implementations selected by DSN: `kvspace-c` (C, `shm://`, links `blockmalloc` + `slotsboxmalloc`) and `kvspace-durable` (Rust, `redis://` / `fs://`, s3/tikv planned).
+- **kvlang** — `layout` (Rust, compile) and `runtime` (C, execute), both depending only on the `kvspace_*` C ABI.
+- **rwirext** — extensions on top of the runtime. Embedded (Rust `term`, links `libkvlang_runtime` via `kvlang_rwext.h`) or process-separated by handoff (Go `json`, Python `numpy`). `term` / `json` are example base extensions, not headline features.
 
 ---
 

@@ -25,8 +25,8 @@ runtime:
 	cmake --build build/runtime --target kvlang_runtime -j
 
 term:
-	cargo build --release --manifest-path runtime-rwirext/rust/term/Cargo.toml
-	cp runtime-rwirext/rust/term/target/release/term $(BIN)/
+	cargo build --release --manifest-path runtime-rwirext_example/rust/term/Cargo.toml
+	cp runtime-rwirext_example/rust/term/target/release/term $(BIN)/
 
 run: runtime
 	cmake --build build/runtime --target run -j
@@ -36,7 +36,7 @@ layout:
 	cp layout/target/release/examples/layout_file $(BIN)/
 
 json:
-	cd runtime-rwirext/go/json && go build -o ../../../bin/json-rwirext ./cmd/
+	cd runtime-rwirext_example/go/json && go build -o ../../../bin/json-rwirext ./cmd/
 
 oldhero:
 	cd oldhero && go build -ldflags="-s -w" -o ../bin/kvlang ./cmd/kvlang/
@@ -44,4 +44,4 @@ oldhero:
 clean:
 	rm -rf $(BIN) build
 	cargo clean --manifest-path layout/Cargo.toml
-	cargo clean --manifest-path runtime-rwirext/rust/term/Cargo.toml
+	cargo clean --manifest-path runtime-rwirext_example/rust/term/Cargo.toml
