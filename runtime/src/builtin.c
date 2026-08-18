@@ -6,7 +6,7 @@ typedef int (*bi_fn)(frame_t *f);
 
 /* collection 模块 handler（builtin_coll.c） */
 int bi_array(frame_t *f), bi_len(frame_t *f), bi_at(frame_t *f), bi_set(frame_t *f),
-    bi_has(frame_t *f), bi_sort(frame_t *f), bi_scatter(frame_t *f), bi_compact(frame_t *f),
+    bi_has(frame_t *f), bi_scatter(frame_t *f), bi_compact(frame_t *f),
     bi_append(frame_t *f), bi_slice(frame_t *f), bi_dict(frame_t *f), bi_string_set(frame_t *f),
     bi_string_char(frame_t *f), bi_string_ord(frame_t *f), bi_string_cmp(frame_t *f),
     bi_string_find(frame_t *f), bi_string_len(frame_t *f), bi_string_slice(frame_t *f),
@@ -585,7 +585,7 @@ static const struct { const char *op; bi_fn fn; } builtins[] = {
     {"char/utf32", bi_cast_char32}, {"char/utf8", bi_cast_char8}, {"char/ascii", bi_cast_char_ascii},
     /* collection */
     {"array", bi_array}, {"len", bi_len}, {"at", bi_at}, {"set", bi_set}, {"has", bi_has},
-    {"array.sort", bi_sort}, {"array.scatter", bi_scatter}, {"array.compact", bi_compact},
+    {"array.scatter", bi_scatter}, {"array.compact", bi_compact},
     {"array.append", bi_append}, {"array.slice", bi_slice},
     {"dict", bi_dict},
     {"string.set", bi_string_set}, {"string.char", bi_string_char}, {"string.ord", bi_string_ord},
@@ -999,22 +999,6 @@ int bi_set(frame_t *f) {
     free_inputs(in, n); return set_err(f, "IndexError: set: unsupported array kind %s", k0);
 }
 
-int bi_sort(frame_t *f) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
-    if (n < 1) { xval_t r; xv_zero(&r); int rc = write_result(f, &r); free_inputs(in, n); return rc; }
-    int al = xv_array_len(&in[0]);
-    if (al <= 1) { int rc = write_result(f, &in[0]); free_inputs(in, n); return rc; }
-    xval_t *elems = malloc(sizeof(xval_t) * al);
-    for (int i = 0; i < al; i++) { xvalue_at(&in[0], i, &elems[i]); }
-    for (int i = 0; i < al - 1; i++)
-        for (int j = 0; j < al - i - 1; j++)
-            if (xv_as_float64(&elems[j]) > xv_as_float64(&elems[j + 1])) { xval_t t = elems[j]; elems[j] = elems[j + 1]; elems[j + 1] = t; }
-    xval_t r; pack_typed_array(xv_kind(&in[0]), elems, al, &r);
-    int rc = write_result(f, &r); xv_free(&r);
-    for (int i = 0; i < al; i++) xv_free(&elems[i]);
-    free(elems); free_inputs(in, n); return rc;
-}
-
 int bi_scatter(frame_t *f) {
     if (f->inst->nw == 0) return set_err(f, "TypeError: array.scatter requires a write param");
     xval_t in[2]; int n = read_inputs(f, in, 2);
@@ -1362,6 +1346,13 @@ int bi_kvhas(frame_t *f) {
     char *ff = bi_func_frame_root(f->kv, fr);
     xval_t base; xv_zero(&base);
     bi_resolve_read_value(f->kv, ff, f->inst->reads[0].name, &f->inst->reads[0].val, &base);
+    if (!xv_none(&base) && xv_elem_size(xv_kind(&base)) > 0 && !xv_is_char_kind(xv_kind(&base))
+            && f->inst->reads[0].name[0] != '/' && xv_is_int_kind(xv_kind(&in[1]))) {
+        int idx = (int)xv_as_int64(&in[1]);
+        xval_t e; xv_new_bool(&e, idx >= 0 && idx < xv_array_len(&base));
+        int rc = write_result(f, &e); xv_free(&e);
+        xv_free(&base); free(ff); free(fr); free_inputs(in, n); return rc;
+    }
     char *bp = xv_none(&base) || (strcmp(xv_kind(&base), K_DICT) == 0 || strcmp(xv_kind(&base), K_INDEX) == 0 || strcmp(xv_kind(&base), K_EXT_INDEX) == 0) ? bi_resolve_write_slot(f->kv, ff, f->inst->reads[0].name) : xv_value_string(&base);
     char *kk = kv_key(&in[1]);
     char *path = kt_member(bp, kk);
@@ -1379,6 +1370,14 @@ int bi_kvat(frame_t *f) {
     char *ff = bi_func_frame_root(f->kv, fr);
     xval_t base; xv_zero(&base);
     bi_resolve_read_value(f->kv, ff, f->inst->reads[0].name, &f->inst->reads[0].val, &base);
+    if (!xv_none(&base) && xv_elem_size(xv_kind(&base)) > 0 && !xv_is_char_kind(xv_kind(&base))
+            && f->inst->reads[0].name[0] != '/' && xv_is_int_kind(xv_kind(&in[1]))) {
+        int idx = (int)xv_as_int64(&in[1]);
+        if (idx < 0 || idx >= xv_array_len(&base)) { xv_free(&base); free(ff); free(fr); free_inputs(in, n); return set_err(f, "KeyError: kvat: index out of range: %d", idx); }
+        xval_t e; xvalue_at(&base, idx, &e);
+        int rc = write_result(f, &e); xv_free(&e);
+        xv_free(&base); free(ff); free(fr); free_inputs(in, n); return rc;
+    }
     char *bp = xv_none(&base) || (strcmp(xv_kind(&base), K_DICT) == 0 || strcmp(xv_kind(&base), K_INDEX) == 0 || strcmp(xv_kind(&base), K_EXT_INDEX) == 0) ? bi_resolve_write_slot(f->kv, ff, f->inst->reads[0].name) : xv_value_string(&base);
     char *kk = kv_key(&in[1]);
     char *path = kt_member(bp, kk);

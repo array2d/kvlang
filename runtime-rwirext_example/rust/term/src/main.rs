@@ -26,14 +26,34 @@ unsafe extern "C" {
     // kvlang_rt ABI（主导执行）
     fn kvlang_rt_connect(dsn: *const c_char) -> *mut kvlang_rt;
     fn kvlang_rt_kv(rt: *mut kvlang_rt) -> *mut c_void;
-    fn kvlang_rt_bootstrap(rt: *mut kvlang_rt, funcname: *const c_char,
-                           args: *const *const c_char, nargs: c_int) -> *mut c_char;
-    fn kvlang_rt_execute_vthread(rt: *mut kvlang_rt, vid: *const c_char, out_pc: *mut *mut c_char) -> c_int;
+    fn kvlang_rt_bootstrap(
+        rt: *mut kvlang_rt,
+        funcname: *const c_char,
+        args: *const *const c_char,
+        nargs: c_int,
+    ) -> *mut c_char;
+    fn kvlang_rt_execute_vthread(
+        rt: *mut kvlang_rt,
+        vid: *const c_char,
+        out_pc: *mut *mut c_char,
+    ) -> c_int;
 
     // rwext ABI（注册 / 处理 print）
-    fn rwext_register(c: *mut rwext_conn, opcode: *const c_char, nr: c_int, nw: c_int, sig: *const c_char) -> c_int;
+    fn rwext_register(
+        c: *mut rwext_conn,
+        opcode: *const c_char,
+        nr: c_int,
+        nw: c_int,
+        sig: *const c_char,
+    ) -> c_int;
+    fn rwext_get(c: *mut rwext_conn, key: *const c_char) -> *mut c_char;
     fn rwext_set(c: *mut rwext_conn, key: *const c_char, val: *const c_char) -> c_int;
-    fn rwext_print_line(c: *mut rwext_conn, pc: *const c_char, rawnl: *mut c_int, cerr: *mut c_int) -> *mut c_char;
+    fn rwext_print_line(
+        c: *mut rwext_conn,
+        pc: *const c_char,
+        rawnl: *mut c_int,
+        cerr: *mut c_int,
+    ) -> *mut c_char;
     fn rwext_next_pc(pc: *const c_char) -> *mut c_char;
 }
 
@@ -45,9 +65,24 @@ struct Op {
 }
 
 const OPS: &[Op] = &[
-    Op { name: "print", sig: "any...", nr: 1, nw: 0 },
-    Op { name: "println", sig: "any...", nr: 1, nw: 0 },
-    Op { name: "cerr", sig: "any...", nr: 1, nw: 0 },
+    Op {
+        name: "print",
+        sig: "any...",
+        nr: 1,
+        nw: 0,
+    },
+    Op {
+        name: "println",
+        sig: "any...",
+        nr: 1,
+        nw: 0,
+    },
+    Op {
+        name: "cerr",
+        sig: "any...",
+        nr: 1,
+        nw: 0,
+    },
 ];
 
 fn cs(s: &str) -> CString {
@@ -90,7 +125,9 @@ fn print_line(line: &str, rawnl: i32, is_cerr: i32) {
 
 fn main() {
     let dsn = std::env::var("KVSPACE").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
-    let funcname = std::env::args().nth(1).unwrap_or_else(|| "main".to_string());
+    let funcname = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "main".to_string());
 
     let rt = unsafe { kvlang_rt_connect(cs(&dsn).as_ptr()) };
     if rt.is_null() {
@@ -118,7 +155,26 @@ fn main() {
             break; // vthread done
         }
         if rc != 1 {
-            break; // 错误
+            // 错误：runtime 已把 status/错误信息写进 vthread，读出来上报，别静默吞掉整帧。
+            let st = take(unsafe {
+                rwext_get(
+                    &mut conn,
+                    cs(&format!("/vthread/{vid}/\u{2025}status")).as_ptr(),
+                )
+            });
+            let msg = take(unsafe {
+                rwext_get(
+                    &mut conn,
+                    cs(&format!("/vthread/{vid}/\u{2025}error/msg")).as_ptr(),
+                )
+            });
+            let st = if st.is_empty() {
+                "error".to_string()
+            } else {
+                st
+            };
+            eprintln!("term: vthread {vid} {st}: {msg}");
+            std::process::exit(1);
         }
 
         // RunSeq：连续处理己方 print，遇非己方停下（c 停在非己方 pc）
@@ -126,7 +182,8 @@ fn main() {
         loop {
             let mut rawnl = 0i32;
             let mut is_cerr = 0i32;
-            let p = unsafe { rwext_print_line(&mut conn, cs(&c).as_ptr(), &mut rawnl, &mut is_cerr) };
+            let p =
+                unsafe { rwext_print_line(&mut conn, cs(&c).as_ptr(), &mut rawnl, &mut is_cerr) };
             if p.is_null() {
                 break;
             }

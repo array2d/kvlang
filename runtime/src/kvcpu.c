@@ -257,10 +257,20 @@ static char *handle_call(kv_t *kv, const char *pc, rwir_inst_t *inst) {
     xval_t sig; xv_zero(&sig);
     kv_get_one(kv, sig_key.p, &sig);
     if (xv_none(&sig) || !xv_kind_is(&sig, K_RWFUNC)) {
-        sbuf_t vtroot; sb_init(&vtroot); kt_vthread(vtid, &vtroot);
-        char msg[256]; snprintf(msg, sizeof msg, "NameError: rwir/rwfunc not found: %s", fn);
+        /* 按 xvalue 的 kind 精确区分缺 rwir 还是缺 rwfunc：
+         * 到这里说明 opcode 已被 is_ext_rwir 判否（/lib/<op> 非 rwir）。 */
+        char *rk = kt_rwir(fn);
+        xval_t rv; xv_zero(&rv);
+        kv_get_one(kv, rk, &rv);
+        char msg[256];
+        if (!xv_none(&rv) && xv_kind_is(&rv, K_RWIR))
+            snprintf(msg, sizeof msg, "NameError: rwir 未注册/签名不匹配: %s", fn);
+        else if (!xv_none(&sig))
+            snprintf(msg, sizeof msg, "NameError: %s 不是 rwfunc (kind=%s)", fn, xv_kind(&sig));
+        else
+            snprintf(msg, sizeof msg, "NameError: rwfunc not found: %s", fn);
+        xv_free(&rv); free(rk);
         vt_set_error(kv, vtid, pc, msg);
-        sb_free(&vtroot);
         goto fail;
     }
     kvhead_t h; kvspace_decode_head(sig.data, sig.len, &h);
