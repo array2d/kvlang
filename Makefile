@@ -32,7 +32,7 @@ runtime:
 	cmake --build build/runtime --target kvlang_runtime -j
 
 term:
-	cargo build --release --manifest-path runtime-rwirext_example/rust/term/Cargo.toml
+	KVLANG_KVSPACE_LIB=$(KVSPACE_LIB) cargo build --release --manifest-path runtime-rwirext_example/rust/term/Cargo.toml
 	cp runtime-rwirext_example/rust/term/target/release/term $(BIN)/
 
 run: runtime
@@ -43,7 +43,11 @@ layout:
 	cp layout/target/release/examples/layout_file $(BIN)/
 
 json:
-	cd runtime-rwirext_example/go/json && go build -o ../../../bin/json-rwirext ./cmd/
+ifeq ($(KVSPACE_LIB),kvspace_durable)
+	cd runtime-rwirext_example/go/json && CGO_LDFLAGS="-L$(CURDIR)/../kvspace-durable/target/release -lkvspace_durable -Wl,--disable-new-dtags -Wl,-rpath,$(CURDIR)/../kvspace-durable/target/release" go build -o ../../../bin/json-rwirext ./cmd/
+else
+	cd runtime-rwirext_example/go/json && CGO_LDFLAGS="-L$(CURDIR)/../kvspace-c/build -lkvspace-c -Wl,--disable-new-dtags -Wl,-rpath,$(CURDIR)/../kvspace-c/build -Wl,-rpath,$(CURDIR)/../blockmalloc/build -Wl,-rpath,$(CURDIR)/../slotsboxmalloc/build" go build -o ../../../bin/json-rwirext ./cmd/
+endif
 
 oldhero:
 	cd oldhero && go build -ldflags="-s -w" -o ../bin/kvlang ./cmd/kvlang/

@@ -30,7 +30,7 @@ pub fn is_none(data: &[u8]) -> bool {
     data.is_empty()
 }
 
-pub fn head(data: &[u8]) -> ffi::KVHead {
+pub fn head(data: &[u8]) -> ffi::kvspaceHead_t {
     ffi::decode_head(data)
 }
 
@@ -55,7 +55,7 @@ pub fn array_len(data: &[u8]) -> i32 {
 }
 
 /// 从 data 截取 body 字节。
-pub fn body<'a>(data: &'a [u8], h: &ffi::KVHead) -> &'a [u8] {
+pub fn body<'a>(data: &'a [u8], h: &ffi::kvspaceHead_t) -> &'a [u8] {
     let off = h.body_offset as usize;
     let len = h.body_len as usize;
     if off + len > data.len() {

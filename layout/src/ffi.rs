@@ -15,11 +15,11 @@ pub type Handle = *mut c_void;
 
 #[allow(dead_code)]
 extern "C" {
-    fn kvspace_conn(dsn: *const c_char) -> Handle;
-    fn kvspace_free(h: Handle);
-    fn kvspace_bytes_free(p: *mut u8, len: u32);
+    fn kvspaceConnect(dsn: *const c_char) -> Handle;
+    fn kvspaceFree(h: Handle);
+    fn kvspaceBytesFree(p: *mut u8, len: u32);
 
-    fn kvspace_set(
+    fn kvspaceSet(
         h: Handle,
         keys: *const *const c_char,
         vals: *const u8,
@@ -28,13 +28,13 @@ extern "C" {
         err: *mut c_char,
         err_cap: u32,
     ) -> c_int;
-    fn kvspace_get_one(
+    fn kvspaceGet(
         h: Handle,
         key: *const c_char,
         out: *mut *mut u8,
         out_len: *mut u32,
     ) -> c_int;
-    fn kvspace_list(
+    fn kvspaceList(
         h: Handle,
         prefix: *const c_char,
         expand_ext: c_int,
@@ -42,27 +42,27 @@ extern "C" {
         out: *mut *mut u8,
         out_len: *mut u32,
     ) -> c_int;
-    fn kvspace_del(
+    fn kvspaceDel(
         h: Handle,
         keys: *const *const c_char,
         nkeys: u32,
         err: *mut c_char,
         err_cap: u32,
     ) -> c_int;
-    fn kvspace_del_tree(h: Handle, prefix: *const c_char, err: *mut c_char, err_cap: u32) -> c_int;
-    fn kvspace_mkindex(h: Handle, path: *const c_char, err: *mut c_char, err_cap: u32) -> c_int;
-    fn kvspace_ext_index(
+    fn kvspaceDelTree(h: Handle, prefix: *const c_char, err: *mut c_char, err_cap: u32) -> c_int;
+    fn kvspaceMkindex(h: Handle, path: *const c_char, err: *mut c_char, err_cap: u32) -> c_int;
+    fn kvspaceMkindexExt(
         h: Handle,
         path: *const c_char,
         ext_path: *const c_char,
         err: *mut c_char,
         err_cap: u32,
     ) -> c_int;
-    fn kvspace_del_ext_index(h: Handle, path: *const c_char, err: *mut c_char, err_cap: u32) -> c_int;
-    fn kvspace_clear(h: Handle, err: *mut c_char, err_cap: u32) -> c_int;
-    fn kvspace_disconn(h: Handle, err: *mut c_char, err_cap: u32) -> c_int;
+    fn kvspaceRmindexExt(h: Handle, path: *const c_char, err: *mut c_char, err_cap: u32) -> c_int;
+    fn kvspaceClear(h: Handle, err: *mut c_char, err_cap: u32) -> c_int;
+    fn kvspaceDisconnect(h: Handle, err: *mut c_char, err_cap: u32) -> c_int;
 
-    fn kvspace_tlv_encode(
+    fn kvspaceTlvEncode(
         kind: *const c_char,
         raw: *const u8,
         raw_len: u32,
@@ -71,7 +71,7 @@ extern "C" {
         out: *mut *mut u8,
         out_len: *mut u32,
     ) -> c_int;
-    fn kvspace_tlv_encode_ptr(
+    fn kvspaceTlvEncodePtr(
         kind: *const c_char,
         raw: *const u8,
         raw_len: u32,
@@ -80,36 +80,38 @@ extern "C" {
         out: *mut *mut u8,
         out_len: *mut u32,
     ) -> c_int;
-    fn kvspace_decode_head(data: *const u8, data_len: u32, out: *mut KVHead) -> c_int;
+    fn kvspaceDecodeHead(data: *const u8, data_len: u32, out: *mut kvspaceHead_t) -> c_int;
 
-    fn kvspace_new_ptr(
+    fn kvspaceNewPtr(
         kind: *const c_char,
         target: *const c_char,
         array_len: i32,
         out: *mut *mut u8,
         out_len: *mut u32,
     ) -> c_int;
-    fn kvspace_new_char(
+    fn kvspaceNewChar(
         kind: *const c_char,
         s: *const c_char,
         out: *mut *mut u8,
         out_len: *mut u32,
     ) -> c_int;
-    fn kvspace_new_char_byte(bytes: *const u8, len: u32, out: *mut *mut u8, out_len: *mut u32)
+    fn kvspaceNewCharByte(bytes: *const u8, len: u32, out: *mut *mut u8, out_len: *mut u32)
         -> c_int;
-    fn kvspace_new_bool(v: u8, out: *mut *mut u8, out_len: *mut u32) -> c_int;
-    fn kvspace_new_int64(v: i64, out: *mut *mut u8, out_len: *mut u32) -> c_int;
-    fn kvspace_new_float64(v: f64, out: *mut *mut u8, out_len: *mut u32) -> c_int;
+    fn kvspaceNewBool(v: u8, out: *mut *mut u8, out_len: *mut u32) -> c_int;
+    fn kvspaceNewInt64(v: i64, out: *mut *mut u8, out_len: *mut u32) -> c_int;
+    fn kvspaceNewFloat64(v: f64, out: *mut *mut u8, out_len: *mut u32) -> c_int;
 }
 
-/// XValueHead 解码结果（与 kvspace-durable 的 KVHead 布局一致）。
+/// XValueHead 解码结果（与 kvspace-durable 的 kvspaceHead_t 布局一致）。
 #[repr(C)]
-pub struct KVHead {
+pub struct kvspaceHead_t {
     pub kind: [u8; 32],
     pub is_ptr: u8,
     pub array_len: i32,
     pub body_len: i32,
     pub body_offset: i32,
+    pub ndim: i32,
+    pub dims: [i32; 8],
 }
 
 // ── 内部助手 ─────────────────────────────────────────────────────────
@@ -137,7 +139,7 @@ fn call_alloc(f: impl FnOnce(*mut *mut u8, *mut u32) -> c_int) -> Vec<u8> {
         return Vec::new();
     }
     let bytes = unsafe { std::slice::from_raw_parts(out, out_len as usize) }.to_vec();
-    unsafe { kvspace_bytes_free(out, out_len) };
+    unsafe { kvspaceBytesFree(out, out_len) };
     bytes
 }
 
@@ -160,7 +162,7 @@ pub struct Kv {
 impl Kv {
     pub fn conn(dsn: &str) -> Kv {
         let c = CString::new(dsn).expect("no NUL in dsn");
-        let h = unsafe { kvspace_conn(c.as_ptr()) };
+        let h = unsafe { kvspaceConnect(c.as_ptr()) };
         Kv { h }
     }
 
@@ -175,7 +177,7 @@ impl Kv {
         }
         let mut err: [c_char; 256] = [0; 256];
         let ret = unsafe {
-            kvspace_set(
+            kvspaceSet(
                 self.h,
                 key_ptrs.as_ptr(),
                 vals.as_ptr(),
@@ -191,13 +193,13 @@ impl Kv {
     /// 单点读：None 返回空字节。
     pub fn get_one(&mut self, key: &str) -> Vec<u8> {
         let c = CString::new(key).expect("no NUL in key");
-        call_alloc(|out, out_len| unsafe { kvspace_get_one(self.h, c.as_ptr(), out, out_len) })
+        call_alloc(|out, out_len| unsafe { kvspaceGet(self.h, c.as_ptr(), out, out_len) })
     }
 
     pub fn list(&mut self, prefix: &str, expand_ext: bool, resolve: bool) -> Vec<String> {
         let c = CString::new(prefix).expect("no NUL in prefix");
         let bytes = call_alloc(|out, out_len| unsafe {
-            kvspace_list(self.h, c.as_ptr(), expand_ext as c_int, resolve as c_int, out, out_len)
+            kvspaceList(self.h, c.as_ptr(), expand_ext as c_int, resolve as c_int, out, out_len)
         });
         if bytes.is_empty() {
             return Vec::new();
@@ -211,14 +213,14 @@ impl Kv {
     pub fn del_tree(&mut self, prefix: &str) -> Result<(), String> {
         let c = CString::new(prefix).expect("no NUL");
         let mut err: [c_char; 256] = [0; 256];
-        let ret = unsafe { kvspace_del_tree(self.h, c.as_ptr(), err.as_mut_ptr(), err.len() as u32) };
+        let ret = unsafe { kvspaceDelTree(self.h, c.as_ptr(), err.as_mut_ptr(), err.len() as u32) };
         err_ret(&mut err, ret)
     }
 
     pub fn mkindex(&mut self, path: &str) -> Result<(), String> {
         let c = CString::new(path).expect("no NUL");
         let mut err: [c_char; 256] = [0; 256];
-        let ret = unsafe { kvspace_mkindex(self.h, c.as_ptr(), err.as_mut_ptr(), err.len() as u32) };
+        let ret = unsafe { kvspaceMkindex(self.h, c.as_ptr(), err.as_mut_ptr(), err.len() as u32) };
         err_ret(&mut err, ret)
     }
 
@@ -227,7 +229,7 @@ impl Kv {
         let ce = CString::new(ext_path).expect("no NUL");
         let mut err: [c_char; 256] = [0; 256];
         let ret = unsafe {
-            kvspace_ext_index(self.h, cp.as_ptr(), ce.as_ptr(), err.as_mut_ptr(), err.len() as u32)
+            kvspaceMkindexExt(self.h, cp.as_ptr(), ce.as_ptr(), err.as_mut_ptr(), err.len() as u32)
         };
         err_ret(&mut err, ret)
     }
@@ -236,7 +238,7 @@ impl Kv {
         let c = CString::new(path).expect("no NUL");
         let mut err: [c_char; 256] = [0; 256];
         let ret = unsafe {
-            kvspace_del_ext_index(self.h, c.as_ptr(), err.as_mut_ptr(), err.len() as u32)
+            kvspaceRmindexExt(self.h, c.as_ptr(), err.as_mut_ptr(), err.len() as u32)
         };
         err_ret(&mut err, ret)
     }
@@ -244,7 +246,7 @@ impl Kv {
 
 impl Drop for Kv {
     fn drop(&mut self) {
-        unsafe { kvspace_free(self.h) };
+        unsafe { kvspaceFree(self.h) };
     }
 }
 
@@ -266,7 +268,7 @@ pub fn tlv_encode(kind: &str, raw: &[u8], array_len: i32) -> Vec<u8> {
     let ck = CString::new(kind).expect("no NUL in kind");
     let dims = al_to_dims(kind, array_len);
     call_alloc(|out, out_len| unsafe {
-        kvspace_tlv_encode(ck.as_ptr(), raw.as_ptr(), raw.len() as u32,
+        kvspaceTlvEncode(ck.as_ptr(), raw.as_ptr(), raw.len() as u32,
                            dims.as_ptr(), dims.len() as i32, out, out_len)
     })
 }
@@ -276,22 +278,24 @@ pub fn tlv_encode_ptr(kind: &str, raw: &[u8], array_len: i32) -> Vec<u8> {
     let ck = CString::new(kind).expect("no NUL in kind");
     let dims = al_to_dims(kind, array_len);
     call_alloc(|out, out_len| unsafe {
-        kvspace_tlv_encode_ptr(ck.as_ptr(), raw.as_ptr(), raw.len() as u32,
+        kvspaceTlvEncodePtr(ck.as_ptr(), raw.as_ptr(), raw.len() as u32,
                                dims.as_ptr(), dims.len() as i32, out, out_len)
     })
 }
 
 /// 解码 XValueHead。
-pub fn decode_head(data: &[u8]) -> KVHead {
-    let mut h = KVHead {
+pub fn decode_head(data: &[u8]) -> kvspaceHead_t {
+    let mut h = kvspaceHead_t {
         kind: [0u8; 32],
         is_ptr: 0,
         array_len: 0,
         body_len: 0,
         body_offset: 0,
+        ndim: 0,
+        dims: [0i32; 8],
     };
     unsafe {
-        kvspace_decode_head(data.as_ptr(), data.len() as u32, &mut h);
+        kvspaceDecodeHead(data.as_ptr(), data.len() as u32, &mut h);
     }
     h
 }
@@ -302,7 +306,7 @@ pub fn new_ptr(kind: &str, target: &str, array_len: i32) -> Vec<u8> {
     let ck = CString::new(kind).expect("no NUL");
     let ct = CString::new(target).expect("no NUL");
     call_alloc(|out, out_len| unsafe {
-        kvspace_new_ptr(ck.as_ptr(), ct.as_ptr(), array_len, out, out_len)
+        kvspaceNewPtr(ck.as_ptr(), ct.as_ptr(), array_len, out, out_len)
     })
 }
 
@@ -310,24 +314,24 @@ pub fn new_char(kind: &str, s: &str) -> Vec<u8> {
     let ck = CString::new(kind).expect("no NUL");
     let cs = CString::new(s).expect("no NUL");
     call_alloc(|out, out_len| unsafe {
-        kvspace_new_char(ck.as_ptr(), cs.as_ptr(), out, out_len)
+        kvspaceNewChar(ck.as_ptr(), cs.as_ptr(), out, out_len)
     })
 }
 
 pub fn new_char_byte(bytes: &[u8]) -> Vec<u8> {
     call_alloc(|out, out_len| unsafe {
-        kvspace_new_char_byte(bytes.as_ptr(), bytes.len() as u32, out, out_len)
+        kvspaceNewCharByte(bytes.as_ptr(), bytes.len() as u32, out, out_len)
     })
 }
 
 pub fn new_bool(v: bool) -> Vec<u8> {
-    call_alloc(|out, out_len| unsafe { kvspace_new_bool(v as u8, out, out_len) })
+    call_alloc(|out, out_len| unsafe { kvspaceNewBool(v as u8, out, out_len) })
 }
 
 pub fn new_int64(v: i64) -> Vec<u8> {
-    call_alloc(|out, out_len| unsafe { kvspace_new_int64(v, out, out_len) })
+    call_alloc(|out, out_len| unsafe { kvspaceNewInt64(v, out, out_len) })
 }
 
 pub fn new_float64(v: f64) -> Vec<u8> {
-    call_alloc(|out, out_len| unsafe { kvspace_new_float64(v, out, out_len) })
+    call_alloc(|out, out_len| unsafe { kvspaceNewFloat64(v, out, out_len) })
 }

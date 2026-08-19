@@ -7,7 +7,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # ── 依赖路径（相对 kvlang，不 hardcode 绝对路径）────────────────
 get_filename_component(ARRAY2D "${CMAKE_SOURCE_DIR}/../.." ABSOLUTE)
-set(KVSPACE_C_DIR "${ARRAY2D}/kvspace/build")
+set(KVSPACE_C_DIR "${ARRAY2D}/kvspace-c/build")
 set(KVSPACE_DURABLE_DIR "${ARRAY2D}/kvspace-durable/target/release")
 set(BLOCKMALLOC_DIR "${ARRAY2D}/blockmalloc/build")
 set(SLOTSBOXMALLOC_DIR "${ARRAY2D}/slotsboxmalloc/build")
