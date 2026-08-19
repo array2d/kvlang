@@ -36,6 +36,10 @@ extern int   kvspaceMkindexExt(void *h, const char *path, const char *ext_path, 
 extern int   kvspaceRmindexExt(void *h, const char *path, char *err, uint32_t err_cap);
 extern int   kvspaceWatch(void *h, const char *key, const uint8_t *target, uint32_t target_len,
                            uint64_t tick_ns, uint8_t **out, uint32_t *out_len);
+extern int   kvspaceNotify(void *h, const char *key, const uint8_t *val, uint32_t len,
+                            char *err, uint32_t err_cap);
+extern int   kvspaceTake(void *h, const char *key, uint64_t timeout_ns,
+                          uint8_t **out, uint32_t *out_len);
 extern int   kvspaceTlvEncode(const char *kind, const uint8_t *raw, uint32_t raw_len,
                                 const int32_t *dims, int32_t ndim, uint8_t **out, uint32_t *out_len);
 extern int   kvspaceTlvEncodePtr(const char *kind, const uint8_t *raw, uint32_t raw_len,
@@ -165,6 +169,8 @@ int kvlangKvDelExtIndex(kvlangKv_t *k, const char *path, char *err, uint32_t err
 int kvlangKvList(kvlangKv_t *k, const char *prefix, bool expand_ext, bool resolve,
             char ***out_names, int *out_count);           /* split \n */
 int kvlangKvWatch(kvlangKv_t *k, const char *key, const kvlangXvalue_t *target, uint64_t tick_ns, kvlangXvalue_t *out);
+int kvlangKvNotify(kvlangKv_t *k, const char *key, const kvlangXvalue_t *val, char *err, uint32_t err_cap);
+int kvlangKvTake(kvlangKv_t *k, const char *key, uint64_t timeout_ns, kvlangXvalue_t *out);
 
 /* ── keytree ───────────────────────────────────────────────────────── */
 

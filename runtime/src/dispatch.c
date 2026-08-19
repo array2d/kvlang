@@ -433,11 +433,14 @@ int kvlangDispatchDelegate(kvlangKv_t *kv, const char *vtid, const char *pc, kvl
     }
 
     char *cmd = kvlangKeytreeSysRwirBackendCmd(backend);
-    if (set_char(kv, cmd, json.p, err, sizeof err) != 0) {
-        free(cmd);
+    kvlangXvalue_t cmdv; kvlangXvalueZero(&cmdv);
+    kvlangXvalueNewCharUtf8(&cmdv, json.p);
+    if (kvlangKvNotify(kv, cmd, &cmdv, err, sizeof err) != 0) {
+        kvlangXvalueFree(&cmdv); free(cmd);
         fail_msg(kv, vtid, pc, "push task: %s", err);
         goto done_err;
     }
+    kvlangXvalueFree(&cmdv);
     free(cmd);
 
     kvlangVthreadSet(kv, vtid, pc, "wait");

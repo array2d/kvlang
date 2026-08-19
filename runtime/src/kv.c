@@ -126,3 +126,17 @@ int kvlangKvWatch(kvlangKv_t *k, const char *key, const kvlangXvalue_t *target, 
     kvspaceBytesFree(d, len);
     return 0;
 }
+
+int kvlangKvNotify(kvlangKv_t *k, const char *key, const kvlangXvalue_t *val, char *err, uint32_t err_cap) {
+    const uint8_t *p = val->data ? val->data : (const uint8_t *)"";
+    return kvspaceNotify(k->h, key, p, val->len, err, err_cap);
+}
+
+int kvlangKvTake(kvlangKv_t *k, const char *key, uint64_t timeout_ns, kvlangXvalue_t *out) {
+    kvlangXvalueZero(out);
+    uint8_t *d; uint32_t len;
+    if (kvspaceTake(k->h, key, timeout_ns, &d, &len) != 0) return -1;
+    kvlangXvalueCopyMalloc(out, d, len);
+    kvspaceBytesFree(d, len);
+    return 0;
+}

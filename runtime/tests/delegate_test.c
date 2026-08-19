@@ -42,6 +42,14 @@ static char *get_char(kvlangKv_t *kv, const char *key) {
     return s;
 }
 
+static char *take_char(kvlangKv_t *kv, const char *key, uint64_t ns) {
+    kvlangXvalue_t v; kvlangXvalueZero(&v);
+    kvlangKvTake(kv, key, ns, &v);
+    char *s = kvlangXvalueNone(&v) ? NULL : kvlangXvalueValueString(&v);
+    kvlangXvalueFree(&v);
+    return s;
+}
+
 static void register_backend(kvlangKv_t *kv, const char *name, const char *opcode, const char *status) {
     char *dir = kvlangKeytreeSysRwirBackend(name);
     char path[256];
@@ -89,33 +97,24 @@ typedef struct {
 
 static void *executor(void *p) {
     exec_arg_t *a = p;
-    for (int i = 0; i < 2000; i++) {
-        char *cmd = get_char(a->kv, a->cmd);
-        if (cmd && cmd[0]) {
-            free(cmd);
-            if (a->delay_ms > 0) usleep((useconds_t)a->delay_ms * 1000);
-            if (a->write_out) set_char(a->kv, a->out_key, "ok");
-            /* status key is /sys/task/<id>.status; id is inside cmd JSON */
-            char *json = get_char(a->kv, a->cmd);
-            const char *rid = json ? strstr(json, "\"request_id\":\"") : NULL;
-            if (!rid) { free(json); a->ran = 1; return NULL; }
-            rid += 14;
-            const char *end = strchr(rid, '"');
-            if (!end) { free(json); a->ran = 1; return NULL; }
-            char id[160];
-            size_t n = (size_t)(end - rid);
-            if (n >= sizeof id) n = sizeof id - 1;
-            memcpy(id, rid, n); id[n] = 0;
-            free(json);
-            char *sk = kvlangKeytreeSysTask(id, "status");
-            set_char(a->kv, sk, "done");
-            free(sk);
-            a->ran = 1;
-            return NULL;
-        }
-        free(cmd);
-        usleep(1000);
-    }
+    char *json = take_char(a->kv, a->cmd, 2000000000ULL);
+    if (!json) return NULL;
+    if (a->delay_ms > 0) usleep((useconds_t)a->delay_ms * 1000);
+    if (a->write_out) set_char(a->kv, a->out_key, "ok");
+    const char *rid = strstr(json, "\"request_id\":\"");
+    if (!rid) { free(json); a->ran = 1; return NULL; }
+    rid += 14;
+    const char *end = strchr(rid, '"');
+    if (!end) { free(json); a->ran = 1; return NULL; }
+    char id[160];
+    size_t n = (size_t)(end - rid);
+    if (n >= sizeof id) n = sizeof id - 1;
+    memcpy(id, rid, n); id[n] = 0;
+    free(json);
+    char *sk = kvlangKeytreeSysTask(id, "status");
+    set_char(a->kv, sk, "done");
+    free(sk);
+    a->ran = 1;
     return NULL;
 }
 
@@ -244,16 +243,11 @@ static void test_one_definition(kvlangKv_t *kv) {
 
 static void *executor_out_only(void *p) {
     exec_arg_t *a = p;
-    for (int i = 0; i < 2000; i++) {
-        char *cmd = get_char(a->kv, a->cmd);
-        if (cmd && cmd[0]) {
-            free(cmd);
-            set_char(a->kv, a->out_key, "ok");
-            a->ran = 1;
-            return NULL;
-        }
-        free(cmd);
-        usleep(1000);
+    char *json = take_char(a->kv, a->cmd, 2000000000ULL);
+    if (json) {
+        set_char(a->kv, a->out_key, "ok");
+        free(json);
+        a->ran = 1;
     }
     return NULL;
 }
