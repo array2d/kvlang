@@ -1,9 +1,9 @@
-//! 验证 corebrain 自造代码三入口：kvlangLayoutVet / kvlangLayoutSrc + `.src` 读回。
+//! 验证 corebrain 自造代码三入口：kvlangLayoutVet / kvlangLayoutCode + `.src` 读回。
 //! 用法：verify_src_abi [dsn]
 
 use std::os::raw::c_char;
 
-use kvlang_layout::capi::{kvlangLayoutSrc, kvlangLayoutVet};
+use kvlang_layout::capi::{kvlangLayoutCode, kvlangLayoutVet};
 use kvlang_layout::Kv;
 
 fn cs(s: &str) -> std::ffi::CString {
@@ -34,7 +34,7 @@ fn main() {
     // 3) layout 内存源码进 kvspace → 0，返回入口名
     let mut entry = [0u8; 512];
     let mut err3 = [0u8; 512];
-    let rc = kvlangLayoutSrc(
+    let rc = kvlangLayoutCode(
         cs(good).as_ptr(),
         cs(&dsn).as_ptr(),
         entry.as_mut_ptr() as *mut c_char,
@@ -57,7 +57,7 @@ fn main() {
 
     // 5) layout 非法源码 → -1，不污染 /lib、不打崩
     let mut err4 = [0u8; 512];
-    let rc = kvlangLayoutSrc(
+    let rc = kvlangLayoutCode(
         cs(bad).as_ptr(),
         cs(&dsn).as_ptr(),
         std::ptr::null_mut(),

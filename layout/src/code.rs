@@ -63,6 +63,18 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// 格式化源码（parse → 规范化源码），不写入 kvspace。失败返回错误。
+pub fn format(src: &str) -> Result<String, String> {
+    let (file, diags) = parser::parse_code(src)?;
+    for d in &diags {
+        eprintln!("{}", d.string());
+    }
+    if parser::has_errors(&diags) {
+        return Err("parse: error-level diagnostics — refusing to format".to_string());
+    }
+    Ok(file.format())
+}
+
 /// 校验源码是否可 layout（parse + lower），但不写入 kvspace。
 /// 供运行时 vet 闸门：LLM 生成的 kv 代码先过此关，失败不污染 /lib。
 pub fn vet(src: &str) -> Result<(), String> {
@@ -93,6 +105,8 @@ pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) {
     lower::specialize(fn_, &type_map);
     let func_dir = keytree::lib_func(pkg, &fn_.sig.name);
 
+    // 按函数覆盖（文件夹复制式合并）：只 del_tree 本函数子树，不动 /lib 下其它函数。
+    // 禁止整库删除——layoutcode 必须可增量：多次 layout 各自覆盖其函数，不误删先前的函数。
     let _ = kv.del_tree(&func_dir);
     let _ = kv.mkindex(&format!("{func_dir}/"));
 
@@ -306,4 +320,35 @@ fn is_literal(s: &str) -> bool {
         || s == "null"
         || b[0].is_ascii_digit()
         || (b[0] == b'-' && s.len() > 1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn roundtrip(src: &str) {
+        let once = format(src).unwrap_or_else(|e| panic!("format: {e}\nsrc:\n{src}"));
+        assert!(vet(&once).is_ok(), "formatted must vet:\n{once}");
+        assert_eq!(format(&once).unwrap(), once, "idempotent fail:\n{once}");
+    }
+
+    #[test]
+    fn format_preserves_lib() {
+        roundtrip("lib http {\n\trwfunc get(url:[]char/utf32) -> (resp:[]char/utf32) {\n\t\thttp.call(\"GET\", \"\", url, \"\") -> resp\n\t}\n}\n");
+        roundtrip("lib byteseek {\nlib session {\nlib s1 {\nrwfunc main() -> () {\n3 + 4 -> s\nprintln(s)\n}\n}\n}\n}\nmain()\n");
+    }
+
+    #[test]
+    fn nested_lib_layout_and_merge() {
+        let mut kv = Kv::conn(&format!("fs:///tmp/kvlang_layout_nested_{}", std::process::id()));
+        init_dirs(&mut kv).unwrap();
+
+        compile(&mut kv, "lib a {\nlib b {\nrwfunc f() -> (r:int64) {\n1 -> r\n}\n}\n}\n").unwrap();
+        assert_eq!(kvkind::kind(&kv.get_one("/lib/a/b.f/[0,0]")), "rwfunc");
+
+        // 同 lib a 下再 layout 另一嵌套 lib c，验证 b.f 未被整库删除（增量合并）
+        compile(&mut kv, "lib a {\nlib c {\nrwfunc g() -> (r:int64) {\n2 -> r\n}\n}\n}\n").unwrap();
+        assert_eq!(kvkind::kind(&kv.get_one("/lib/a/b.f/[0,0]")), "rwfunc", "b.f 应保留");
+        assert_eq!(kvkind::kind(&kv.get_one("/lib/a/c.g/[0,0]")), "rwfunc");
+    }
 }

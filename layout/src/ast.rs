@@ -551,6 +551,175 @@ pub struct File {
     pub init_body: Vec<Stmt>,
 }
 
+/// 包树节点：按 lib 包名分组，format 时重建嵌套 lib 块（保包名，round-trip 不丢）。
+#[derive(Default)]
+struct PkgNode {
+    rwirs: Vec<RwirDecl>,
+    funcs: Vec<Func>,
+    body: Vec<Stmt>,
+    children: std::collections::BTreeMap<String, PkgNode>,
+}
+
+fn pkg_node<'a>(root: &'a mut PkgNode, pkg: &str) -> &'a mut PkgNode {
+    if pkg.is_empty() {
+        return root;
+    }
+    let mut cur = root;
+    for seg in pkg.split('/') {
+        cur = cur.children.entry(seg.to_string()).or_default();
+    }
+    cur
+}
+
+fn emit_node(sb: &mut String, node: &PkgNode, indent: &str) {
+    let mut items: Vec<String> = Vec::new();
+    for d in &node.rwirs {
+        let mut s = String::new();
+        for c in &d.comments {
+            s.push_str(indent);
+            s.push_str(c);
+            s.push('\n');
+        }
+        s.push_str(indent);
+        s.push_str(&d.sig_string());
+        items.push(s);
+    }
+    for f in &node.funcs {
+        let mut s = String::new();
+        for c in &f.comments {
+            s.push_str(indent);
+            s.push_str(c);
+            s.push('\n');
+        }
+        s.push_str(indent);
+        s.push_str(&f.sig.to_string());
+        s.push_str(" {\n");
+        format_body(&mut s, &f.body, &format!("{indent}\t"));
+        s.push_str(indent);
+        s.push('}');
+        items.push(s);
+    }
+    if !node.body.is_empty() {
+        let mut s = String::new();
+        format_body(&mut s, &node.body, indent);
+        items.push(s.trim_end_matches('\n').to_string());
+    }
+    for (name, child) in &node.children {
+        let mut s = String::new();
+        s.push_str(indent);
+        s.push_str("lib ");
+        s.push_str(name);
+        s.push_str(" {\n");
+        emit_node(&mut s, child, &format!("{indent}\t"));
+        s.push_str(indent);
+        s.push('}');
+        items.push(s);
+    }
+    sb.push_str(&items.join("\n\n"));
+}
+
+impl File {
+    /// 格式化为规范 kvlang 源码（重建 lib 分组，保留包名，round-trip 语义等价）。
+    pub fn format(&self) -> String {
+        let mut root = PkgNode::default();
+        for d in &self.rwir_decls {
+            pkg_node(&mut root, &d.pkg).rwirs.push(d.clone());
+        }
+        for f in &self.funcs {
+            let n = pkg_node(&mut root, &f.pkg);
+            if f.sig.name == "init" {
+                n.body.extend(f.body.clone());
+            } else {
+                n.funcs.push(f.clone());
+            }
+        }
+        let mut sb = String::new();
+        emit_node(&mut sb, &root, "");
+        for inst in &self.top_level_calls {
+            if !sb.is_empty() {
+                sb.push('\n');
+            }
+            for c in &inst.comments {
+                sb.push_str(c);
+                sb.push('\n');
+            }
+            sb.push_str(&inst.to_string());
+        }
+        sb
+    }
+}
+
+/// 缩进格式化语句体（对齐 Go ast.formatBody）。
+fn format_body(sb: &mut String, stmts: &[Stmt], indent: &str) {
+    for (i, st) in stmts.iter().enumerate() {
+        if i > 0 {
+            let prev = &stmts[i - 1];
+            let prev_block = matches!(prev, Stmt::Scope(_) | Stmt::If(_));
+            let cur_block = matches!(st, Stmt::Scope(_) | Stmt::If(_));
+            if prev_block || cur_block {
+                sb.push('\n');
+            }
+        }
+        for c in stmt_comments(st) {
+            sb.push_str(indent);
+            sb.push_str(c);
+            sb.push('\n');
+        }
+        let child = format!("{indent}\t");
+        match st {
+            Stmt::Instruction(s) => {
+                sb.push_str(indent);
+                sb.push_str(&s.to_string());
+                sb.push('\n');
+            }
+            Stmt::Scope(s) => {
+                sb.push_str(indent);
+                sb.push_str(&s.label);
+                sb.push_str(": {\n");
+                format_body(sb, &s.body, &child);
+                sb.push_str(indent);
+                sb.push_str("}\n");
+            }
+            Stmt::If(s) => {
+                let cond = s.cond.as_ref().map(|c| c.to_string()).unwrap_or_default();
+                sb.push_str(indent);
+                sb.push_str(&format!("if ({cond}) {{\n"));
+                format_body(sb, &s.then_, &child);
+                if !s.else_.is_empty() {
+                    sb.push_str(indent);
+                    sb.push_str("} else {\n");
+                    format_body(sb, &s.else_, &child);
+                }
+                sb.push_str(indent);
+                sb.push_str("}\n");
+            }
+            Stmt::For(s) => {
+                sb.push_str(indent);
+                sb.push_str(&format!("for ({} in {}) {{\n", s.var, s.iter));
+                format_body(sb, &s.body, &child);
+                sb.push_str(indent);
+                sb.push_str("}\n");
+            }
+            Stmt::While(s) => {
+                let cond = s.cond.as_ref().map(|c| c.to_string()).unwrap_or_default();
+                sb.push_str(indent);
+                sb.push_str(&format!("while ({cond}) {{\n"));
+                format_body(sb, &s.body, &child);
+                sb.push_str(indent);
+                sb.push_str("}\n");
+            }
+            Stmt::Break(_) => {
+                sb.push_str(indent);
+                sb.push_str("break\n");
+            }
+            Stmt::Continue(_) => {
+                sb.push_str(indent);
+                sb.push_str("continue\n");
+            }
+        }
+    }
+}
+
 // ── 工具 ─────────────────────────────────────────────────────────────
 
 fn escape_string(s: &str) -> String {
