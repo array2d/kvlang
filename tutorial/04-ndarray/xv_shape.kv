@@ -1,0 +1,18 @@
+# 期望输出:
+#   numel= 4 dim= 1
+#   shape0= 4
+#   at1= 20
+#   set1= 99
+rwfunc main() -> () {
+	a:[]int64 = [10, 20, 30, 40]
+	xv.numel(a) -> n
+	xv.dim(a) -> d
+	println("numel=", n, "dim=", d)
+	xv.shape(a) -> s
+	println("shape0=", s[0])
+	xv.at(a, 1) -> e
+	println("at1=", e)
+	xv.set(a, 1, 99)
+	println("set1=", a[1])
+}
+main()

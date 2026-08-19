@@ -287,6 +287,19 @@ void kvlangXvalueNewTlv(kvlangXvalue_t *v, const char *kind, const uint8_t *raw,
     v->len = len;
 }
 
+/* 显式 ndim/dims 构造（保留多维 shape，供 xv.shape/xv.set 用）。 */
+void kvlangXvalueNewTlvDims(kvlangXvalue_t *v, const char *kind, const uint8_t *raw, uint32_t raw_len,
+                            const int32_t *dims, int32_t ndim) {
+    uint8_t *tmp = NULL; uint32_t tl = 0;
+    if (kvspaceTlvEncode(kind, raw, raw_len, dims, ndim, &tmp, &tl) != 0 || !tmp) {
+        v->data = NULL; v->len = 0; return;
+    }
+    uint8_t *buf = malloc(tl);
+    memcpy(buf, tmp, tl);
+    kvspaceBytesFree(tmp, tl);
+    v->data = buf; v->len = tl;
+}
+
 void kvlangXvalueNewInt64(kvlangXvalue_t *v, int64_t n) {
     uint8_t r[8];
     r[0] = n & 0xFF; r[1] = (n >> 8) & 0xFF; r[2] = (n >> 16) & 0xFF; r[3] = (n >> 24) & 0xFF;

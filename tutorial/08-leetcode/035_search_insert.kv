@@ -6,7 +6,7 @@
 rwfunc search_insert() -> () {
 	a:[]int64 = [1, 3, 5, 6]  # = 等价于 <-
 	5 -> target
-	n <- len(a)
+	n <- xv.numel(a)
 	lo = 0  # = 等价于 <-
 	n - 1 -> hi
 	pos <- 0

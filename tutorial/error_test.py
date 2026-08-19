@@ -5,11 +5,13 @@
 用法: python3 tutorial/error_test.py
 """
 from __future__ import annotations
-import re, subprocess, sys
+import os, re, subprocess, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-KV = str(ROOT / "kvlang")
+LAYOUT_BIN = os.environ.get("KVLANG_LAYOUT_BIN", str(ROOT / "bin" / "layout_file"))
+TERM_BIN = os.environ.get("KVLANG_TERM_BIN", str(ROOT / "bin" / "kvlang"))
+_C_DSN = os.environ.get("KVSPACE", "redis://127.0.0.1:6379")
 ERROR_CASES = ROOT / "tutorial" / "error_cases"
 RED, GREEN, NC = "\033[0;31m", "\033[0;32m", "\033[0m"
 
@@ -42,20 +44,25 @@ def _unescape_logx(stderr: str) -> str:
     """logx msg= 域为 JSON-style 引号串，\" → " 以利子串匹配。"""
     return stderr.replace('\\"', '"')
 
+def _detect_entry(out: str) -> str:
+    m = re.search(r"ENTRY=(\S+)", out)
+    return m.group(1) if m else "init"
+
+
 def collect_errors(rel: str) -> str:
-    """运行 .kv 文件（-c 行优先）或 vet，收集 stderr（含各级诊断）。"""
+    """layout（编译期诊断）+ run（运行时诊断），收集 stderr 合并。"""
     # 用 kvspace clear 隔离各 case
     subprocess.run(["kvspace", "clear"], capture_output=True, timeout=10)
-    # 先尝试直接运行（运行时错误放 stderr + logx）
-    r = subprocess.run([KV, rel], capture_output=True, text=True,
-                       timeout=60, cwd=str(ROOT))
-    stderr = _unescape_logx(r.stderr)
-    # 若仅有编译期日志级输出（no "error:" prefix），补一次 vet 获取纯文本诊断
-    if not any("error:" in ln for ln in stderr.splitlines()):
-        r2 = subprocess.run([KV, "vet", rel], capture_output=True, text=True,
-                            timeout=60, cwd=str(ROOT))
-        if r2.stderr:
-            stderr += "\n" + _unescape_logx(r2.stderr)
+    stderr = ""
+    layout = subprocess.run([LAYOUT_BIN, rel, _C_DSN], capture_output=True,
+                            text=True, timeout=60, cwd=str(ROOT))
+    stderr += _unescape_logx(layout.stderr)
+    if layout.returncode == 0:
+        entry = _detect_entry(layout.stdout)
+        crun = subprocess.run([TERM_BIN, entry], capture_output=True,
+                              text=True, timeout=120, cwd=str(ROOT),
+                              env={**os.environ, "KVSPACE": _C_DSN})
+        stderr += "\n" + _unescape_logx(crun.stderr)
     return stderr
 
 

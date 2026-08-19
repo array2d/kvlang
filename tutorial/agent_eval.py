@@ -20,7 +20,7 @@ QUESTIONS_DIR = ROOT / "tutorial" / "questions"
 
 # runner：Rust layout → kvspace(redis) → C runtime(term)。旧的单体 kvlang 二进制已归档。
 LAYOUT_BIN = os.environ.get("KVLANG_LAYOUT_BIN", str(ROOT / "bin" / "layout_file"))
-TERM_BIN = os.environ.get("KVLANG_TERM_BIN", str(ROOT / "bin" / "term"))
+TERM_BIN = os.environ.get("KVLANG_TERM_BIN", str(ROOT / "bin" / "kvlang"))
 DSN = os.environ.get("KVSPACE", "redis://127.0.0.1:6379")
 
 API_BASE = os.environ.get("KVLANG_EVAL_API_BASE", "").rstrip("/")

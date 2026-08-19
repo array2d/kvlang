@@ -145,6 +145,8 @@ void kvlangXvalueNewCharKind(kvlangXvalue_t *v, const char *kind, const char *s)
 void kvlangXvalueNewPtr(kvlangXvalue_t *v, const char *kind, const char *target, int32_t al);
 void kvlangXvalueNewRwir(kvlangXvalue_t *v, int32_t nr, int32_t nw, const char *sig);
 void kvlangXvalueNewTlv(kvlangXvalue_t *v, const char *kind, const uint8_t *raw, uint32_t raw_len, int32_t al);
+void kvlangXvalueNewTlvDims(kvlangXvalue_t *v, const char *kind, const uint8_t *raw, uint32_t raw_len,
+                            const int32_t *dims, int32_t ndim);
 
 void kvlangFormatFloat(char *out, size_t cap, double v);
 

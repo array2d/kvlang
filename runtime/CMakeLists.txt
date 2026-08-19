@@ -38,13 +38,6 @@ else()
     set_target_properties(kvlang_runtime PROPERTIES BUILD_RPATH "${KVSPACE_DURABLE_DIR}")
 endif()
 target_link_libraries(kvlang_runtime PRIVATE m pthread)
-# --export-dynamic 供 term 扩展找符号；--disable-new-dtags 使 rpath 转 DT_RPATH（传递），
-# 让 run → runtime → kvspace-c → blockmalloc/slotsboxmalloc 的传递依赖能被 run/runtime 的 rpath 找到。
+# --export-dynamic 供 kvlang（term 扩展）找符号；--disable-new-dtags 使 rpath 转 DT_RPATH（传递），
+# 让 runtime → kvspace-c → blockmalloc/slotsboxmalloc 的传递依赖能被 runtime 的 rpath 找到。
 set_target_properties(kvlang_runtime PROPERTIES LINK_FLAGS "-Wl,--export-dynamic -Wl,--disable-new-dtags")
-
-# ── 测试执行器 run：只链接 runtime（term 扩展是独立进程）──────────
-add_executable(run test/main.c)
-target_link_libraries(run PRIVATE kvlang_runtime)
-set_target_properties(run PROPERTIES
-    LINK_FLAGS "-Wl,--disable-new-dtags"
-    BUILD_RPATH "${BIN_DIR};${KVSPACE_C_DIR};${BLOCKMALLOC_DIR};${SLOTSBOXMALLOC_DIR};${KVSPACE_DURABLE_DIR}")

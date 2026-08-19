@@ -217,7 +217,7 @@ fn lower_for_with_cont(
     };
     let kv_has_inst = Instruction {
         comments: Vec::new(),
-        expr: Some(ast::call("kvhas", vec![ast::leaf(&iter_slot), ast::leaf(&idx_slot)])),
+        expr: Some(ast::call("kv.has", vec![ast::leaf(&iter_slot), ast::leaf(&idx_slot)])),
         writes: vec![cond_slot.clone()],
         write_types: Vec::new(),
         arrow_left: false,
@@ -231,7 +231,7 @@ fn lower_for_with_cont(
 
     let kv_at_inst = Instruction {
         comments: Vec::new(),
-        expr: Some(ast::call("kvat", vec![ast::leaf(&iter_slot), ast::leaf(&idx_slot)])),
+        expr: Some(ast::call("kv.at", vec![ast::leaf(&iter_slot), ast::leaf(&idx_slot)])),
         writes: vec![s.var.clone()],
         write_types: Vec::new(),
         arrow_left: false,
@@ -561,10 +561,12 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
         return "dict".to_string();
     }
     match opcode {
-        "kvhas" => return "bool".to_string(),
-        "kvlen" | "len" | "string.len" | "string.ord" | "string.cmp" | "string.find" => {
+        "kv.has" => return "bool".to_string(),
+        "kvlen" | "xv.numel" | "xv.dim" | "string.len" | "string.ord" | "string.cmp" | "string.find" => {
             return "int64".to_string();
         }
+        "xv.shape" => return "[]int64".to_string(),
+        "kv.list" => return "[]char/utf8".to_string(),
         "string.char" | "string.set" | "string.slice" | "string.concat" => return "char/utf32".to_string(),
         "random.int63" => return "int64".to_string(),
         "random.intn" | "random.uint64" => return "uint64".to_string(),
@@ -573,7 +575,7 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
         "abs" | "neg" | "max" | "min" => {
             return if !reads.is_empty() { slot_type(&reads[0], tm) } else { String::new() };
         }
-        "kvat" | "at" => {
+        "kv.at" | "xv.at" | "at" => {
             if !reads.is_empty() {
                 if let Some(t) = tm.get(&format!("{}.0", reads[0])) {
                     return t.clone();

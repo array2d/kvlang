@@ -4,7 +4,7 @@
 #   2
 rwfunc find_peak() -> () {
 	a:[]int64 <- [1, 2, 3, 1]
-	n = len(a)  # = 等价于 <-
+	n = xv.numel(a)  # = 等价于 <-
 	0 -> lo
 	hi <- n - 1
 	while (lo < hi) {
