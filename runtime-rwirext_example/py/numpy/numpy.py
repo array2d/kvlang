@@ -11,10 +11,10 @@
 设计要点：
   · ndarray 不是新类型，就是 [dims]dtype——一维字面量由 kvlang 产生，更高的秩由 numpy
     算子（reshape/matmul/…）产出并按 [dims]dtype 存回 kvspace。
-  · tensor data 零拷贝：读走权威 kvspace_decode_head，在 kvspace-c SHM 地址上建 ndarray 视图；
-    写走权威 N 维 kvspace_tlv_encode，dims 直接落盘。
-  · 遵照读写码：从 rwext_params 取 opcode 与读/写操作数名；读参优先按路径零拷贝 view，
-    否则回退 rwext_resolve_read；写参经 rwext_resolve_write 解析为 KV 路径。
+  · tensor data 零拷贝：读走权威 kvspaceDecodeHead，在 kvspace-c SHM 地址上建 ndarray 视图；
+    写走权威 N 维 kvspaceTlvEncode，dims 直接落盘。
+  · 遵照读写码：从 kvlang_rwextParams 取 opcode 与读/写操作数名；读参优先按路径零拷贝 view，
+    否则回退 kvlang_rwextResolveRead；写参经 kvlang_rwextResolveWrite 解析为 KV 路径。
   · numpy.print 走本进程自身的 stdout（不经 kvlang println）。
 """
 
@@ -50,7 +50,7 @@ _rt = _find_lib("libkvlang_runtime.so", "KVLANG_RUNTIME_LIB", "kvlang/bin/libkvl
 _lay = _find_lib("libkvlang_layout.so", "KVLANG_LAYOUT_LIB", "kvlang/layout/target/release/libkvlang_layout.so")
 
 
-class KVHead(ctypes.Structure):
+class kvspace_head_t(ctypes.Structure):
     _fields_ = [("kind", ctypes.c_uint8 * 32), ("is_ptr", ctypes.c_uint8),
                 ("array_len", ctypes.c_int32), ("body_len", ctypes.c_int32),
                 ("body_offset", ctypes.c_int32), ("ndim", ctypes.c_int32),
@@ -58,37 +58,41 @@ class KVHead(ctypes.Structure):
 
 
 def _bind():
-    _ks.kvsc_open.argtypes = [ctypes.c_char_p, ctypes.c_size_t]; _ks.kvsc_open.restype = ctypes.c_void_p
-    _ks.kvsc_close.argtypes = [ctypes.c_void_p]
-    _ks.kvsc_get.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_int32)]
-    _ks.kvsc_get.restype = ctypes.POINTER(ctypes.c_uint8)
-    _ks.kvsc_set.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.POINTER(ctypes.c_uint8), ctypes.c_int32]
-    _ks.kvspace_decode_head.argtypes = [ctypes.POINTER(ctypes.c_uint8), ctypes.c_uint32, ctypes.POINTER(KVHead)]
-    _ks.kvspace_decode_head.restype = ctypes.c_int
-    _ks.kvspace_tlv_encode.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_uint8), ctypes.c_uint32,
-                                       ctypes.POINTER(ctypes.c_int32), ctypes.c_int32,
-                                       ctypes.POINTER(ctypes.POINTER(ctypes.c_uint8)), ctypes.POINTER(ctypes.c_uint32)]
-    _ks.kvspace_bytes_free.argtypes = [ctypes.POINTER(ctypes.c_uint8), ctypes.c_uint32]
-    for fn, r in [("rwext_connect", ctypes.c_void_p), ("rwext_list", ctypes.c_void_p),
-                  ("rwext_get", ctypes.c_void_p), ("rwext_params", ctypes.c_void_p),
-                  ("rwext_resolve_read", ctypes.c_void_p), ("rwext_resolve_read_path", ctypes.c_void_p),
-                  ("rwext_resolve_write", ctypes.c_void_p),
-                  ("rwext_next_pc", ctypes.c_void_p), ("rwext_register", ctypes.c_int),
-                  ("rwext_set", ctypes.c_int), ("rwext_del", ctypes.c_int)]:
-        getattr(_rt, fn).restype = r
-    _rt.rwext_connect.argtypes = [ctypes.c_char_p]
-    _rt.rwext_register.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int32, ctypes.c_int32, ctypes.c_char_p]
-    _rt.rwext_list.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
-    _rt.rwext_get.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
-    _rt.rwext_set.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p]
-    _rt.rwext_del.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
-    _rt.rwext_params.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
-    _rt.rwext_resolve_read.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
-    _rt.rwext_resolve_read_path.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
-    _rt.rwext_resolve_write.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
-    _rt.rwext_next_pc.argtypes = [ctypes.c_char_p]
-    _lay.kvlang_layout_file.restype = ctypes.c_int
-    _lay.kvlang_layout_file.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p,
+    # kvspace ABI（扩展宿主自连）：句柄 = kvspaceConnect(dsn)，shm 下即 ShmOpen，可直传 Shm* 零拷贝
+    _ks.kvspaceConnect.argtypes = [ctypes.c_char_p]; _ks.kvspaceConnect.restype = ctypes.c_void_p
+    _ks.kvspaceFree.argtypes = [ctypes.c_void_p]
+    _ks.kvspaceShmGet.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_int32)]
+    _ks.kvspaceShmGet.restype = ctypes.POINTER(ctypes.c_uint8)
+    _ks.kvspaceShmSet.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.POINTER(ctypes.c_uint8), ctypes.c_int32]
+    _ks.kvspaceDecodeHead.argtypes = [ctypes.POINTER(ctypes.c_uint8), ctypes.c_uint32, ctypes.POINTER(kvspace_head_t)]
+    _ks.kvspaceDecodeHead.restype = ctypes.c_int
+    _ks.kvspaceTlvEncode.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_uint8), ctypes.c_uint32,
+                                      ctypes.POINTER(ctypes.c_int32), ctypes.c_int32,
+                                      ctypes.POINTER(ctypes.POINTER(ctypes.c_uint8)), ctypes.POINTER(ctypes.c_uint32)]
+    _ks.kvspaceTlvEncode.restype = ctypes.c_int
+    _ks.kvspaceBytesFree.argtypes = [ctypes.POINTER(ctypes.c_uint8), ctypes.c_uint32]
+    _ks.kvspaceList.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int, ctypes.c_int,
+                                ctypes.POINTER(ctypes.POINTER(ctypes.c_uint8)), ctypes.POINTER(ctypes.c_uint32)]
+    _ks.kvspaceList.restype = ctypes.c_int
+    _ks.kvspaceNewChar.argtypes = [ctypes.c_char_p, ctypes.c_char_p,
+                                   ctypes.POINTER(ctypes.POINTER(ctypes.c_uint8)), ctypes.POINTER(ctypes.c_uint32)]
+    _ks.kvspaceNewChar.restype = ctypes.c_int
+    _ks.kvspaceDel.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_char_p), ctypes.c_uint32,
+                               ctypes.c_char_p, ctypes.c_uint32]
+    _ks.kvspaceDel.restype = ctypes.c_int
+    # rwext ABI（kvspace 不提供的 runtime 语义）：句柄传扩展自连的 kvspace
+    for fn in ("kvlang_rwextParams", "kvlang_rwextResolveRead", "kvlang_rwextResolveReadPath",
+               "kvlang_rwextResolveWrite", "kvlang_rwextNextPc"):
+        getattr(_rt, fn).restype = ctypes.c_void_p
+    _rt.kvlang_rwextRegister.restype = ctypes.c_int
+    _rt.kvlang_rwextRegister.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int32, ctypes.c_int32, ctypes.c_char_p]
+    _rt.kvlang_rwextParams.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+    _rt.kvlang_rwextResolveRead.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+    _rt.kvlang_rwextResolveReadPath.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+    _rt.kvlang_rwextResolveWrite.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+    _rt.kvlang_rwextNextPc.argtypes = [ctypes.c_char_p]
+    _lay.kvlangLayoutFile.restype = ctypes.c_int
+    _lay.kvlangLayoutFile.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p,
                                         ctypes.c_uint32, ctypes.c_char_p, ctypes.c_uint32]
 
 
@@ -178,26 +182,57 @@ OPS = {f"numpy.{n}": spec for cat in _CATEGORIES.values() for n, spec in cat.ite
 
 class Engine:
     def __init__(self, dsn):
-        path = dsn.split("://", 1)[1] if "://" in dsn else dsn
-        self.kv = _ks.kvsc_open(path.encode(), 8 * 64 ** 4)
+        self.kv = _ks.kvspaceConnect(dsn.encode())
         if not self.kv:
-            raise RuntimeError(f"kvsc_open failed: {dsn}")
-        self.conn = _rt.rwext_connect(dsn.encode())
-        if not self.conn:
-            raise RuntimeError("rwext_connect failed")
+            raise RuntimeError(f"kvspaceConnect failed: {dsn}")
 
     def close(self):
         if self.kv:
-            _ks.kvsc_close(self.kv); self.kv = None
+            _ks.kvspaceFree(self.kv); self.kv = None
+
+    # ── 句柄自带的 KV 存取（handoff：list todo / read todo / write pc,done / del todo）──
+    def kv_get(self, key):
+        ol = ctypes.c_int32()
+        d = _ks.kvspaceShmGet(self.kv, key.encode(), 1, ctypes.byref(ol))
+        if not d or ol.value <= 0:
+            return ""
+        h = kvspace_head_t()
+        if _ks.kvspaceDecodeHead(d, ol.value, ctypes.byref(h)) != 0 or h.body_len <= 0:
+            return ""
+        raw = ctypes.string_at(ctypes.cast(d, ctypes.c_void_p).value + h.body_offset, h.body_len)
+        return raw.decode("utf-8", "replace")
+
+    def kv_set(self, key, val):
+        out = ctypes.POINTER(ctypes.c_uint8)(); ol = ctypes.c_uint32()
+        if _ks.kvspaceNewChar(b"char/utf8", val.encode(), ctypes.byref(out), ctypes.byref(ol)) != 0:
+            return
+        _ks.kvspaceShmSet(self.kv, key.encode(), out, ol.value)
+        _ks.kvspaceBytesFree(out, ol.value)
+
+    def kv_list(self, prefix):
+        out = ctypes.POINTER(ctypes.c_uint8)(); ol = ctypes.c_uint32()
+        if _ks.kvspaceList(self.kv, prefix.encode(), 0, 0, ctypes.byref(out), ctypes.byref(ol)) != 0 \
+                or not out or ol.value == 0:
+            if out:
+                _ks.kvspaceBytesFree(out, ol.value)
+            return []
+        s = ctypes.string_at(out, ol.value).decode("utf-8", "replace")
+        _ks.kvspaceBytesFree(out, ol.value)
+        return s.split("\n") if s else []
+
+    def kv_del(self, key):
+        keys = (ctypes.c_char_p * 1)(key.encode())
+        err = ctypes.create_string_buffer(256)
+        _ks.kvspaceDel(self.kv, keys, 1, err, 256)
 
     # ── tensor 零拷贝读写 ───────────────────────────────────────────
     def view(self, key):
         ol = ctypes.c_int32()
-        d = _ks.kvsc_get(self.kv, key.encode(), 1, ctypes.byref(ol))
+        d = _ks.kvspaceShmGet(self.kv, key.encode(), 1, ctypes.byref(ol))
         if not d:
             return None
-        h = KVHead()
-        if _ks.kvspace_decode_head(d, ol.value, ctypes.byref(h)) != 0:
+        h = kvspace_head_t()
+        if _ks.kvspaceDecodeHead(d, ol.value, ctypes.byref(h)) != 0:
             return None
         kind = bytes(h.kind).split(b"\x00", 1)[0].decode()
         if h.is_ptr or kind not in _KIND_CTYPE:
@@ -219,61 +254,61 @@ class Engine:
         dims = (ctypes.c_int32 * ndim)(*shape) if ndim > 0 else None
         buf = (ctypes.c_uint8 * len(raw)).from_buffer_copy(raw) if raw else None
         out = ctypes.POINTER(ctypes.c_uint8)(); ol = ctypes.c_uint32()
-        if _ks.kvspace_tlv_encode(_kind_of(arr.dtype).encode(),
-                                  ctypes.cast(buf, ctypes.POINTER(ctypes.c_uint8)), len(raw),
-                                  dims, ndim, ctypes.byref(out), ctypes.byref(ol)) != 0:
+        if _ks.kvspaceTlvEncode(_kind_of(arr.dtype).encode(),
+                                 ctypes.cast(buf, ctypes.POINTER(ctypes.c_uint8)), len(raw),
+                                 dims, ndim, ctypes.byref(out), ctypes.byref(ol)) != 0:
             raise RuntimeError(f"tlv_encode failed: {key}")
-        _ks.kvsc_set(self.kv, key.encode(), out, ol.value)
-        _ks.kvspace_bytes_free(out, ol.value)
+        _ks.kvspaceShmSet(self.kv, key.encode(), out, ol.value)
+        _ks.kvspaceBytesFree(out, ol.value)
 
     # ── 读参：解析为帧槽路径后零拷贝 view；内联字面量回退 resolve_read ──
     def read_arg(self, pc, i):
-        path = _s(_rt.rwext_resolve_read_path(self.conn, pc.encode(), i))
+        path = _s(_rt.kvlang_rwextResolveReadPath(self.kv, pc.encode(), i))
         if path:
             v = self.view(path)
             if v is not None:
                 return v
-        return _parse(_s(_rt.rwext_resolve_read(self.conn, pc.encode(), i)))
+        return _parse(_s(_rt.kvlang_rwextResolveRead(self.kv, pc.encode(), i)))
 
     # ── 注册五大类 ─────────────────────────────────────────────────
     def register(self):
         for op, (nr, _) in OPS.items():
-            _rt.rwext_register(self.conn, op.encode(), nr, 1, ("\n".join(["any"] * (nr + 1))).encode())
-        _rt.rwext_register(self.conn, b"numpy.print", 1, 0, b"any...")
+            _rt.kvlang_rwextRegister(self.kv, op.encode(), nr, 1, ("\n".join(["any"] * (nr + 1))).encode())
+        _rt.kvlang_rwextRegister(self.kv, b"numpy.print", 1, 0, b"any...")
 
     def _handle(self, op, nr, fn, pc):
-        params = _s(_rt.rwext_params(self.conn, pc.encode())).split("\n")
+        params = _s(_rt.kvlang_rwextParams(self.kv, pc.encode())).split("\n")
         if op == "numpy.print":
             parts = []
             for i in range(len(params) - 1):
-                path = _s(_rt.rwext_resolve_read_path(self.conn, pc.encode(), i))
+                path = _s(_rt.kvlang_rwextResolveReadPath(self.kv, pc.encode(), i))
                 v = self.view(path) if path else None
                 parts.append(_fmt(v) if v is not None
-                             else _s(_rt.rwext_resolve_read(self.conn, pc.encode(), i)))
+                             else _s(_rt.kvlang_rwextResolveRead(self.kv, pc.encode(), i)))
             print(" ".join(parts), flush=True)
         else:
             args = [self.read_arg(pc, i) for i in range(nr)]
-            self.alloc(_s(_rt.rwext_resolve_write(self.conn, pc.encode(), 0)), np.asarray(fn(args)))
+            self.alloc(_s(_rt.kvlang_rwextResolveWrite(self.kv, pc.encode(), 0)), np.asarray(fn(args)))
 
     def serve(self, stop):
         table = {**OPS, "numpy.print": (1, None)}
         while not stop.is_set():
             for op, (nr, fn) in table.items():
                 base = f"/lib/{op}"
-                for child in _s(_rt.rwext_list(self.conn, f"{base}/".encode())).split("\n"):
+                for child in self.kv_list(f"{base}/"):
                     if not (child.startswith(".todo<") and child.endswith(">")):
                         continue
                     vid = child[6:-1]
                     todo = f"{base}/{child}"
-                    pc, _, pid = _s(_rt.rwext_get(self.conn, todo.encode())).rpartition("|")
+                    pc, _, pid = self.kv_get(todo).rpartition("|")
                     try:
                         self._handle(op, nr, fn, pc)
                     except Exception as e:                 # 计算失败也要放行，避免 run 阻塞超时
                         print(f"[numpy] {op} @ {pc}: {e}", file=sys.stderr, flush=True)
-                    nxt = _s(_rt.rwext_next_pc(pc.encode()))
-                    _rt.rwext_set(self.conn, f"/vthread/{vid}/‥pc".encode(), nxt.encode())
-                    _rt.rwext_set(self.conn, f"{base}/.done<{vid}>".encode(), pid.encode())
-                    _rt.rwext_del(self.conn, todo.encode())
+                    nxt = _s(_rt.kvlang_rwextNextPc(pc.encode()))
+                    self.kv_set(f"/vthread/{vid}/‥pc", nxt)
+                    self.kv_set(f"{base}/.done<{vid}>", pid)
+                    self.kv_del(todo)
             time.sleep(0.01)
 
 
@@ -292,7 +327,7 @@ def run(kvfile, dsn=None):
 
     entry_buf = ctypes.create_string_buffer(512)
     err_buf = ctypes.create_string_buffer(512)
-    if _lay.kvlang_layout_file(str(kvfile).encode(), dsn.encode(),
+    if _lay.kvlangLayoutFile(str(kvfile).encode(), dsn.encode(),
                                entry_buf, 512, err_buf, 512) != 0:
         sys.exit(f"layout failed: {err_buf.value.decode()}")
     entry = entry_buf.value.decode() or "init"

@@ -3,14 +3,40 @@
 package json
 
 /*
+// 后端（kvspace-c=shm / kvspace_durable=redis|fs）由 Makefile 经 CGO_LDFLAGS 注入，
+// 对齐 term 的 KVLANG_KVSPACE_LIB；扩展宿主自连 kvspace，不经 runtime。
 #cgo CFLAGS: -I${SRCDIR}/../../../runtime/include
 #cgo LDFLAGS: -L${SRCDIR}/../../../bin -lkvlang_runtime -Wl,-rpath,${SRCDIR}/../../../bin
-#cgo LDFLAGS: -Wl,-rpath-link,${SRCDIR}/../../../../kvspace/build
-#cgo LDFLAGS: -Wl,-rpath-link,${SRCDIR}/../../../../blockmalloc/build
-#cgo LDFLAGS: -Wl,-rpath-link,${SRCDIR}/../../../../slotsboxmalloc/build
-#cgo LDFLAGS: -Wl,-rpath-link,${SRCDIR}/../../../../kvspace-durable/target/release
 #include "kvlang_rwext.h"
+#include <stdint.h>
 #include <stdlib.h>
+
+// kvspace ABI（扩展宿主自连，不经 runtime）——runtime .so 传递解析其后端实现。
+extern void *kvspaceConnect(const char *dsn);
+extern void  kvspaceFree(void *h);
+extern void  kvspaceBytesFree(uint8_t *p, uint32_t len);
+extern int   kvspaceGet(void *h, const char *key, uint8_t **out, uint32_t *out_len);
+extern int   kvspaceSet(void *h, const char *const *keys, const uint8_t *vals,
+                        const uint32_t *lens, uint32_t n, char *err, uint32_t err_cap);
+extern int   kvspaceList(void *h, const char *prefix, int expand_ext, int resolve,
+                         uint8_t **out, uint32_t *out_len);
+extern int   kvspaceDel(void *h, const char *const *keys, uint32_t nkeys, char *err, uint32_t err_cap);
+extern int   kvspaceMkindex(void *h, const char *path, char *err, uint32_t err_cap);
+extern int   kvspaceNewChar(const char *kind, const char *s, uint8_t **out, uint32_t *out_len);
+
+// XValue 头（repr(C)，对齐 kvspace ABI）：kind+ndim+dims 即 kindexp，body 段靠 offset/len 定位。
+typedef struct {
+    uint8_t kind[32];
+    uint8_t is_ptr;
+    int32_t array_len;
+    int32_t body_len;
+    int32_t body_offset;
+    int32_t ndim;
+    int32_t dims[8];
+} kvspaceHead_t;
+extern int   kvspaceDecodeHead(const uint8_t *data, uint32_t data_len, kvspaceHead_t *out);
+extern int   kvspaceTlvEncode(const char *kind, const uint8_t *raw, uint32_t raw_len,
+                              const int32_t *dims, int32_t ndim, uint8_t **out, uint32_t *out_len);
 */
 import "C"
 
@@ -38,136 +64,181 @@ func gostr(s *C.char) string {
 	return C.GoString(s)
 }
 
-func list(c *C.rwext_conn, prefix string) []string {
+func list(c unsafe.Pointer, prefix string) []string {
 	cp := cstr(prefix)
 	defer C.free(unsafe.Pointer(cp))
-	s := C.rwext_list(c, cp)
-	if s == nil {
+	var out *C.uint8_t
+	var outLen C.uint32_t
+	if C.kvspaceList(c, cp, 0, 0, &out, &outLen) != 0 || out == nil || outLen == 0 {
+		if out != nil {
+			C.kvspaceBytesFree(out, outLen)
+		}
 		return nil
 	}
-	defer C.free(unsafe.Pointer(s))
-	str := C.GoString(s)
+	defer C.kvspaceBytesFree(out, outLen)
+	str := C.GoStringN((*C.char)(unsafe.Pointer(out)), C.int(outLen))
 	if str == "" {
 		return nil
 	}
 	return strings.Split(str, "\n")
 }
 
-func get(c *C.rwext_conn, key string) string {
-	ck := cstr(key)
-	defer C.free(unsafe.Pointer(ck))
-	return gostr(C.rwext_get(c, ck))
+func get(c unsafe.Pointer, key string) string {
+	_, raw, _ := parseTLV(getTLV(c, key))
+	return string(raw)
 }
 
-func getTLV(c *C.rwext_conn, key string) []byte {
+func getTLV(c unsafe.Pointer, key string) []byte {
 	ck := cstr(key)
 	defer C.free(unsafe.Pointer(ck))
 	var out *C.uint8_t
 	var outLen C.uint32_t
-	C.rwext_get_tlv(c, ck, &out, &outLen)
-	if out == nil {
+	if C.kvspaceGet(c, ck, &out, &outLen) != 0 || out == nil || outLen == 0 {
+		if out != nil {
+			C.kvspaceBytesFree(out, outLen)
+		}
 		return nil
 	}
-	defer C.free(unsafe.Pointer(out))
+	defer C.kvspaceBytesFree(out, outLen)
 	return C.GoBytes(unsafe.Pointer(out), C.int(outLen))
 }
 
-func setTLV(c *C.rwext_conn, key string, tlv []byte) {
+func setTLV(c unsafe.Pointer, key string, tlv []byte) {
 	ck := cstr(key)
 	defer C.free(unsafe.Pointer(ck))
 	buf := C.CBytes(tlv)
 	defer C.free(buf)
-	C.rwext_set_tlv(c, ck, (*C.uint8_t)(buf), C.uint32_t(len(tlv)))
+	keys := [1]*C.char{ck}
+	lens := [1]C.uint32_t{C.uint32_t(len(tlv))}
+	var err [256]C.char
+	C.kvspaceSet(c, &keys[0], (*C.uint8_t)(buf), &lens[0], 1, &err[0], 256)
 }
 
-func setChar(c *C.rwext_conn, key, val string) {
-	ck := cstr(key)
+func setChar(c unsafe.Pointer, key, val string) {
+	ck := cstr("char/utf8")
 	cv := cstr(val)
 	defer C.free(unsafe.Pointer(ck))
 	defer C.free(unsafe.Pointer(cv))
-	C.rwext_set(c, ck, cv)
+	var out *C.uint8_t
+	var outLen C.uint32_t
+	if C.kvspaceNewChar(ck, cv, &out, &outLen) != 0 || out == nil {
+		return
+	}
+	defer C.kvspaceBytesFree(out, outLen)
+	kek := cstr(key)
+	defer C.free(unsafe.Pointer(kek))
+	keys := [1]*C.char{kek}
+	lens := [1]C.uint32_t{outLen}
+	var err [256]C.char
+	C.kvspaceSet(c, &keys[0], out, &lens[0], 1, &err[0], 256)
 }
 
-func mkindex(c *C.rwext_conn, path string) {
+func del(c unsafe.Pointer, key string) {
+	ck := cstr(key)
+	defer C.free(unsafe.Pointer(ck))
+	keys := [1]*C.char{ck}
+	var err [256]C.char
+	C.kvspaceDel(c, &keys[0], 1, &err[0], 256)
+}
+
+func mkindex(c unsafe.Pointer, path string) {
 	cp := cstr(path)
 	defer C.free(unsafe.Pointer(cp))
-	C.rwext_mkindex(c, cp)
+	var err [256]C.char
+	C.kvspaceMkindex(c, cp, &err[0], 256)
 }
 
-func resolveRead(c *C.rwext_conn, pc string, idx int) string {
+func resolveRead(c unsafe.Pointer, pc string, idx int) string {
 	cp := cstr(pc)
 	defer C.free(unsafe.Pointer(cp))
-	return gostr(C.rwext_resolve_read(c, cp, C.int(idx)))
+	return gostr(C.kvlang_rwextResolveRead(c, cp, C.int(idx)))
 }
 
-func resolveWrite(c *C.rwext_conn, pc string, idx int) string {
+func resolveWrite(c unsafe.Pointer, pc string, idx int) string {
 	cp := cstr(pc)
 	defer C.free(unsafe.Pointer(cp))
-	return gostr(C.rwext_resolve_write(c, cp, C.int(idx)))
+	return gostr(C.kvlang_rwextResolveWrite(c, cp, C.int(idx)))
 }
 
 func nextPC(pc string) string {
 	cp := cstr(pc)
 	defer C.free(unsafe.Pointer(cp))
-	return gostr(C.rwext_next_pc(cp))
+	return gostr(C.kvlang_rwextNextPc(cp))
 }
 
-func params(c *C.rwext_conn, pc string) []string {
+func params(c unsafe.Pointer, pc string) []string {
 	cp := cstr(pc)
 	defer C.free(unsafe.Pointer(cp))
-	return strings.Split(gostr(C.rwext_params(c, cp)), "\n")
+	return strings.Split(gostr(C.kvlang_rwextParams(c, cp)), "\n")
 }
 
-// ── TLV 编解码（kindexp：kl|kind|ref|arr_flag|ndim|dims|raw_len|raw）───
+// ── XValue 编解码（走权威 kvspace ABI：DecodeHead 读头 + TlvEncode/NewChar 编码）──
 
-func u32(v uint32) []byte {
-	b := make([]byte, 4)
-	binary.LittleEndian.PutUint32(b, v)
-	return b
-}
-
+// parseTLV：kvspaceDecodeHead 解出 kind/ndim/dims，body 段即元素平铺；arrLen = ∏dims（标量为 1）。
 func parseTLV(data []byte) (kind string, raw []byte, arrLen int) {
-	if len(data) < 4 {
+	if len(data) == 0 {
 		return "", nil, 0
 	}
-	kl := int(data[0])
-	kind = string(data[1 : 1+kl])
-	o := 1 + kl
-	arrFlag := data[o+1]
-	ndim := int(data[o+2])
-	rawOff := o + 3 + 4*ndim
-	if rawOff+4 > len(data) {
+	var h C.kvspaceHead_t
+	if C.kvspaceDecodeHead((*C.uint8_t)(unsafe.Pointer(&data[0])), C.uint32_t(len(data)), &h) != 0 {
+		return "", nil, 0
+	}
+	kb := C.GoBytes(unsafe.Pointer(&h.kind[0]), 32)
+	if i := bytes.IndexByte(kb, 0); i >= 0 {
+		kb = kb[:i]
+	}
+	kind = string(kb)
+	bo, bl := int(h.body_offset), int(h.body_len)
+	if bo < 0 || bl < 0 || bo+bl > len(data) {
 		return kind, nil, 1
 	}
-	rawLen := int(binary.LittleEndian.Uint32(data[rawOff : rawOff+4]))
-	raw = data[rawOff+4 : rawOff+4+rawLen]
-	if arrFlag == 0 {
+	raw = data[bo : bo+bl]
+	arrLen = 1
+	for i := 0; i < int(h.ndim); i++ {
+		arrLen *= int(h.dims[i])
+	}
+	if arrLen < 1 {
 		arrLen = 1
-	} else {
-		arrLen = 1
-		for i := 0; i < ndim; i++ {
-			arrLen *= int(binary.LittleEndian.Uint32(data[o+3+4*i : o+3+4*i+4]))
-		}
 	}
 	return kind, raw, arrLen
 }
 
+// constructTLV：char/* 走 kvspaceNewChar，数值/布尔走 kvspaceTlvEncode（arrLen>1 → 一维 [arrLen]）。
 func constructTLV(kind string, raw []byte, arrLen int) []byte {
-	var b bytes.Buffer
-	b.WriteByte(byte(len(kind)))
-	b.WriteString(kind)
-	b.WriteByte(0) // ref
-	if arrLen > 1 {
-		b.WriteByte(1) // arr_flag
-		b.WriteByte(1) // ndim
-		b.Write(u32(uint32(arrLen)))
-	} else {
-		b.WriteByte(0)
-		b.WriteByte(0)
+	if strings.HasPrefix(kind, "char/") {
+		ck := cstr(kind)
+		cv := C.CBytes(append(append([]byte{}, raw...), 0)) // NUL 结尾
+		defer C.free(unsafe.Pointer(ck))
+		defer C.free(cv)
+		var out *C.uint8_t
+		var ol C.uint32_t
+		if C.kvspaceNewChar(ck, (*C.char)(cv), &out, &ol) != 0 || out == nil {
+			return nil
+		}
+		defer C.kvspaceBytesFree(out, ol)
+		return C.GoBytes(unsafe.Pointer(out), C.int(ol))
 	}
-	b.Write(u32(uint32(len(raw))))
-	b.Write(raw)
-	return b.Bytes()
+	ck := cstr(kind)
+	defer C.free(unsafe.Pointer(ck))
+	var buf unsafe.Pointer
+	if len(raw) > 0 {
+		buf = C.CBytes(raw)
+		defer C.free(buf)
+	}
+	d := [1]C.int32_t{C.int32_t(arrLen)}
+	var dims *C.int32_t
+	var ndim C.int32_t
+	if arrLen > 1 {
+		dims = &d[0]
+		ndim = 1
+	}
+	var out *C.uint8_t
+	var ol C.uint32_t
+	if C.kvspaceTlvEncode(ck, (*C.uint8_t)(buf), C.uint32_t(len(raw)), dims, ndim, &out, &ol) != 0 || out == nil {
+		return nil
+	}
+	defer C.kvspaceBytesFree(out, ol)
+	return C.GoBytes(unsafe.Pointer(out), C.int(ol))
 }
 
 // ── JSON 值 ↔ TLV ───────────────────────────────────────────────────
@@ -341,20 +412,20 @@ func splitArrayName(name string) (base string, idx int, ok bool) {
 	return name[:lt], i, true
 }
 
-func buildMap(c *C.rwext_conn, root string) map[string]any {
+func buildMap(c unsafe.Pointer, root string) map[string]any {
 	m := map[string]any{}
 	scat := map[string][]int{}
 	for _, child := range list(c, root+"/") {
 		if child == "" {
 			continue
 		}
-		if base, idx, ok := splitArrayName(child); ok {
-			scat[base] = append(scat[base], idx)
+		if strings.HasSuffix(child, "/") { // index 目录 → 递归
+			name := strings.TrimSuffix(child, "/")
+			m[name] = buildMap(c, root+"/"+name)
 			continue
 		}
-		// 目录：list(child+"/") 非空 → 递归
-		if len(list(c, root+"/"+child+"/")) > 0 {
-			m[child] = buildMap(c, root+"/"+child)
+		if base, idx, ok := splitArrayName(child); ok {
+			scat[base] = append(scat[base], idx)
 			continue
 		}
 		kind, raw, arrLen := parseTLV(getTLV(c, root+"/"+child))
@@ -372,7 +443,7 @@ func buildMap(c *C.rwext_conn, root string) map[string]any {
 	return m
 }
 
-func writeMap(c *C.rwext_conn, root string, m map[string]any) {
+func writeMap(c unsafe.Pointer, root string, m map[string]any) {
 	for k, v := range m {
 		childPath := root + "/" + k
 		switch t := v.(type) {
@@ -410,18 +481,18 @@ var ops = []op{
 	{"json.from", 1, 1},
 }
 
-func register(c *C.rwext_conn) {
+func register(c unsafe.Pointer) {
 	for _, o := range ops {
 		sig := strings.TrimSuffix(strings.Repeat("any\n", o.nr+o.nw), "\n")
 		co := cstr(o.name)
 		cs := cstr(sig)
-		C.rwext_register(c, co, C.int32_t(o.nr), C.int32_t(o.nw), cs)
+		C.kvlang_rwextRegister(c, co, C.int32_t(o.nr), C.int32_t(o.nw), cs)
 		C.free(unsafe.Pointer(co))
 		C.free(unsafe.Pointer(cs))
 	}
 }
 
-func doTo(c *C.rwext_conn, pc string, readNames, writeNames []string) {
+func doTo(c unsafe.Pointer, pc string, readNames, writeNames []string) {
 	root := readNames[0]
 	if !strings.HasPrefix(root, "/") {
 		root = resolveRead(c, pc, 0)
@@ -431,7 +502,7 @@ func doTo(c *C.rwext_conn, pc string, readNames, writeNames []string) {
 	setChar(c, dest, string(data))
 }
 
-func doFrom(c *C.rwext_conn, pc string, readNames, writeNames []string) {
+func doFrom(c unsafe.Pointer, pc string, readNames, writeNames []string) {
 	src := resolveRead(c, pc, 0)
 	root := writeNames[0]
 	if !strings.HasPrefix(root, "/") {
@@ -440,7 +511,7 @@ func doFrom(c *C.rwext_conn, pc string, readNames, writeNames []string) {
 	writeMap(c, root, fromJSON([]byte(src)))
 }
 
-func serveOp(c *C.rwext_conn, o op) {
+func serveOp(c unsafe.Pointer, o op) {
 	base := "/lib/" + o.name
 	for _, child := range list(c, base+"/") {
 		if !strings.HasPrefix(child, ".todo<") || !strings.HasSuffix(child, ">") {
@@ -467,9 +538,7 @@ func serveOp(c *C.rwext_conn, o op) {
 		nxt := nextPC(pc)
 		setChar(c, "/vthread/"+vid+"/‥pc", nxt)
 		setChar(c, base+"/.done<"+vid+">", id)
-		ck := cstr(todo)
-		C.rwext_del(c, ck)
-		C.free(unsafe.Pointer(ck))
+		del(c, todo)
 	}
 }
 
@@ -477,10 +546,11 @@ func serveOp(c *C.rwext_conn, o op) {
 func Serve(dsn string) {
 	cd := cstr(dsn)
 	defer C.free(unsafe.Pointer(cd))
-	c := C.rwext_connect(cd)
+	c := C.kvspaceConnect(cd)
 	if c == nil {
 		return
 	}
+	defer C.kvspaceFree(c)
 	register(c)
 	for {
 		for _, o := range ops {

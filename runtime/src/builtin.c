@@ -2,32 +2,32 @@
 #include <math.h>
 #include <time.h>
 
-typedef int (*bi_fn)(frame_t *f);
+typedef int (*kvlangBuiltinFn)(kvlangFrame_t *f);
 
 /* collection 模块 handler（builtin_coll.c） */
-int bi_array(frame_t *f), bi_len(frame_t *f), bi_at(frame_t *f), bi_set(frame_t *f),
-    bi_has(frame_t *f), bi_scatter(frame_t *f), bi_compact(frame_t *f),
-    bi_append(frame_t *f), bi_slice(frame_t *f), bi_dict(frame_t *f), bi_string_set(frame_t *f),
-    bi_string_char(frame_t *f), bi_string_ord(frame_t *f), bi_string_cmp(frame_t *f),
-    bi_string_find(frame_t *f), bi_string_len(frame_t *f), bi_string_slice(frame_t *f),
-    bi_string_concat(frame_t *f), bi_time_now(frame_t *f), bi_time_sub(frame_t *f),
-    bi_time_add(frame_t *f), bi_dur_from(frame_t *f), bi_dur_to(frame_t *f),
-    bi_dur_arith(frame_t *f), bi_dur_cmp(frame_t *f), bi_time_cmp(frame_t *f),
-    bi_rand_uint64(frame_t *f), bi_rand_int63(frame_t *f), bi_rand_intn(frame_t *f),
-    bi_kvhas(frame_t *f), bi_kvat(frame_t *f), bi_debugger(frame_t *f);
+int kvlangBuiltinArray(kvlangFrame_t *f), kvlangBuiltinLen(kvlangFrame_t *f), kvlangBuiltinAt(kvlangFrame_t *f), kvlangBuiltinSet(kvlangFrame_t *f),
+    kvlangBuiltinHas(kvlangFrame_t *f), kvlangBuiltinScatter(kvlangFrame_t *f), kvlangBuiltinCompact(kvlangFrame_t *f),
+    kvlangBuiltinAppend(kvlangFrame_t *f), kvlangBuiltinSlice(kvlangFrame_t *f), kvlangBuiltinDict(kvlangFrame_t *f), kvlangBuiltinStringSet(kvlangFrame_t *f),
+    kvlangBuiltinStringChar(kvlangFrame_t *f), kvlangBuiltinStringOrd(kvlangFrame_t *f), kvlangBuiltinStringCmp(kvlangFrame_t *f),
+    kvlangBuiltinStringFind(kvlangFrame_t *f), kvlangBuiltinStringLen(kvlangFrame_t *f), kvlangBuiltinStringSlice(kvlangFrame_t *f),
+    kvlangBuiltinStringConcat(kvlangFrame_t *f), kvlangBuiltinTimeNow(kvlangFrame_t *f), kvlangBuiltinTimeSub(kvlangFrame_t *f),
+    kvlangBuiltinTimeAdd(kvlangFrame_t *f), kvlangBuiltinDurFrom(kvlangFrame_t *f), kvlangBuiltinDurTo(kvlangFrame_t *f),
+    kvlangBuiltinDurArith(kvlangFrame_t *f), kvlangBuiltinDurCmp(kvlangFrame_t *f), kvlangBuiltinTimeCmp(kvlangFrame_t *f),
+    kvlangBuiltinRandUint64(kvlangFrame_t *f), kvlangBuiltinRandInt63(kvlangFrame_t *f), kvlangBuiltinRandIntn(kvlangFrame_t *f),
+    kvlangBuiltinKvhas(kvlangFrame_t *f), kvlangBuiltinKvat(kvlangFrame_t *f), kvlangBuiltinDebugger(kvlangFrame_t *f);
 
 /* ── 类型 helper（对齐 Go isIntKind 含 uint）────────────────────── */
 
-static bool is_int_kind(const char *k) { return xv_is_int_kind(k) || xv_is_uint_kind(k); }
-static bool is_float_kind(const char *k) { return xv_is_float_kind(k); }
-static bool is_unsigned_kind(const char *k) { return xv_is_uint_kind(k); }
-static bool is_numeric(const xval_t *v) { return xv_is_num_kind(xv_kind(v)); }
+static bool is_int_kind(const char *k) { return kvlangXvalueIsIntKind(k) || kvlangXvalueIsUintKind(k); }
+static bool is_float_kind(const char *k) { return kvlangXvalueIsFloatKind(k); }
+static bool is_unsigned_kind(const char *k) { return kvlangXvalueIsUintKind(k); }
+static bool is_numeric(const kvlangXvalue_t *v) { return kvlangXvalueIsNumKind(kvlangXvalueKind(v)); }
 
 static int int_width(const char *k) {
-    if (strcmp(k, K_INT8) == 0 || strcmp(k, K_UINT8) == 0) return 8;
-    if (strcmp(k, K_INT16) == 0 || strcmp(k, K_UINT16) == 0) return 16;
-    if (strcmp(k, K_INT32) == 0 || strcmp(k, K_UINT32) == 0) return 32;
-    if (strcmp(k, K_INT64) == 0 || strcmp(k, K_UINT64) == 0) return 64;
+    if (strcmp(k, KVSPACE_KIND_INT8) == 0 || strcmp(k, KVSPACE_KIND_UINT8) == 0) return 8;
+    if (strcmp(k, KVSPACE_KIND_INT16) == 0 || strcmp(k, KVSPACE_KIND_UINT16) == 0) return 16;
+    if (strcmp(k, KVSPACE_KIND_INT32) == 0 || strcmp(k, KVSPACE_KIND_UINT32) == 0) return 32;
+    if (strcmp(k, KVSPACE_KIND_INT64) == 0 || strcmp(k, KVSPACE_KIND_UINT64) == 0) return 64;
     return 0;
 }
 
@@ -38,148 +38,148 @@ static const char *wider_int_kind(const char *a, const char *b) {
     if (!au && !bu) return aw >= bw ? a : b;
     int w = aw > bw ? aw : bw;
     switch (w) {
-    case 8: return K_INT16;
-    case 16: return K_INT32;
-    case 32: return K_INT64;
-    default: return K_INT64;
+    case 8: return KVSPACE_KIND_INT16;
+    case 16: return KVSPACE_KIND_INT32;
+    case 32: return KVSPACE_KIND_INT64;
+    default: return KVSPACE_KIND_INT64;
     }
 }
 
 static const char *wider_float_kind(const char *a, const char *b) {
-    if (strcmp(a, K_FLOAT64) == 0 || strcmp(b, K_FLOAT64) == 0) return K_FLOAT64;
-    if (strcmp(a, K_FLOAT32) == 0 || strcmp(b, K_FLOAT32) == 0) return K_FLOAT32;
-    return K_FLOAT64;
+    if (strcmp(a, KVSPACE_KIND_FLOAT64) == 0 || strcmp(b, KVSPACE_KIND_FLOAT64) == 0) return KVSPACE_KIND_FLOAT64;
+    if (strcmp(a, KVSPACE_KIND_FLOAT32) == 0 || strcmp(b, KVSPACE_KIND_FLOAT32) == 0) return KVSPACE_KIND_FLOAT32;
+    return KVSPACE_KIND_FLOAT64;
 }
 
-static void narrow_int(const char *a, const char *b, int64_t v, xval_t *out) {
+static void narrow_int(const char *a, const char *b, int64_t v, kvlangXvalue_t *out) {
     const char *k = wider_int_kind(a, b);
-    if (strcmp(k, K_INT8) == 0) { int8_t x = (int8_t)v; xv_new_tlv(out, K_INT8, (uint8_t *)&x, 1, 1); return; }
-    if (strcmp(k, K_INT16) == 0) { int16_t x = (int16_t)v; uint8_t r[2] = { x & 0xFF, (x >> 8) & 0xFF }; xv_new_tlv(out, K_INT16, r, 2, 1); return; }
-    if (strcmp(k, K_INT32) == 0) { int32_t x = (int32_t)v; uint8_t r[4]; memcpy(r, &x, 4); xv_new_tlv(out, K_INT32, r, 4, 1); return; }
-    if (strcmp(k, K_UINT8) == 0) { uint8_t x = (uint8_t)v; xv_new_tlv(out, K_UINT8, &x, 1, 1); return; }
-    if (strcmp(k, K_UINT16) == 0) { uint16_t x = (uint16_t)v; uint8_t r[2] = { x & 0xFF, (x >> 8) & 0xFF }; xv_new_tlv(out, K_UINT16, r, 2, 1); return; }
-    if (strcmp(k, K_UINT32) == 0) { uint32_t x = (uint32_t)v; uint8_t r[4]; memcpy(r, &x, 4); xv_new_tlv(out, K_UINT32, r, 4, 1); return; }
-    if (strcmp(k, K_UINT64) == 0) { uint64_t x = (uint64_t)v; uint8_t r[8]; memcpy(r, &x, 8); xv_new_tlv(out, K_UINT64, r, 8, 1); return; }
-    xv_new_int64(out, v);
+    if (strcmp(k, KVSPACE_KIND_INT8) == 0) { int8_t x = (int8_t)v; kvlangXvalueNewTlv(out, KVSPACE_KIND_INT8, (uint8_t *)&x, 1, 1); return; }
+    if (strcmp(k, KVSPACE_KIND_INT16) == 0) { int16_t x = (int16_t)v; uint8_t r[2] = { x & 0xFF, (x >> 8) & 0xFF }; kvlangXvalueNewTlv(out, KVSPACE_KIND_INT16, r, 2, 1); return; }
+    if (strcmp(k, KVSPACE_KIND_INT32) == 0) { int32_t x = (int32_t)v; uint8_t r[4]; memcpy(r, &x, 4); kvlangXvalueNewTlv(out, KVSPACE_KIND_INT32, r, 4, 1); return; }
+    if (strcmp(k, KVSPACE_KIND_UINT8) == 0) { uint8_t x = (uint8_t)v; kvlangXvalueNewTlv(out, KVSPACE_KIND_UINT8, &x, 1, 1); return; }
+    if (strcmp(k, KVSPACE_KIND_UINT16) == 0) { uint16_t x = (uint16_t)v; uint8_t r[2] = { x & 0xFF, (x >> 8) & 0xFF }; kvlangXvalueNewTlv(out, KVSPACE_KIND_UINT16, r, 2, 1); return; }
+    if (strcmp(k, KVSPACE_KIND_UINT32) == 0) { uint32_t x = (uint32_t)v; uint8_t r[4]; memcpy(r, &x, 4); kvlangXvalueNewTlv(out, KVSPACE_KIND_UINT32, r, 4, 1); return; }
+    if (strcmp(k, KVSPACE_KIND_UINT64) == 0) { uint64_t x = (uint64_t)v; uint8_t r[8]; memcpy(r, &x, 8); kvlangXvalueNewTlv(out, KVSPACE_KIND_UINT64, r, 8, 1); return; }
+    kvlangXvalueNewInt64(out, v);
 }
 
-static void narrow_float(const char *a, const char *b, double v, xval_t *out) {
-    if (strcmp(wider_float_kind(a, b), K_FLOAT32) == 0) {
+static void narrow_float(const char *a, const char *b, double v, kvlangXvalue_t *out) {
+    if (strcmp(wider_float_kind(a, b), KVSPACE_KIND_FLOAT32) == 0) {
         float f = (float)v; uint8_t r[4]; memcpy(r, &f, 4);
-        xv_new_tlv(out, K_FLOAT32, r, 4, 1);
-    } else xv_new_float64(out, v);
+        kvlangXvalueNewTlv(out, KVSPACE_KIND_FLOAT32, r, 4, 1);
+    } else kvlangXvalueNewFloat64(out, v);
 }
 
-static int cmp_int(const xval_t *a, const xval_t *b) {
-    bool au = is_unsigned_kind(xv_kind(a)), bu = is_unsigned_kind(xv_kind(b));
-    if (!au && !bu) { int64_t ai = xv_as_int64(a), bi = xv_as_int64(b); return ai < bi ? -1 : ai > bi ? 1 : 0; }
-    if (au && bu) { uint64_t x = xv_as_uint64(a), y = xv_as_uint64(b); return x < y ? -1 : x > y ? 1 : 0; }
-    if (au && !bu) { int64_t bi = xv_as_int64(b); if (bi < 0) return 1; uint64_t x = xv_as_uint64(a); return x < (uint64_t)bi ? -1 : x > (uint64_t)bi ? 1 : 0; }
-    int64_t ai = xv_as_int64(a); if (ai < 0) return -1; uint64_t y = xv_as_uint64(b);
+static int cmp_int(const kvlangXvalue_t *a, const kvlangXvalue_t *b) {
+    bool au = is_unsigned_kind(kvlangXvalueKind(a)), bu = is_unsigned_kind(kvlangXvalueKind(b));
+    if (!au && !bu) { int64_t ai = kvlangXvalueAsInt64(a), bi = kvlangXvalueAsInt64(b); return ai < bi ? -1 : ai > bi ? 1 : 0; }
+    if (au && bu) { uint64_t x = kvlangXvalueAsUint64(a), y = kvlangXvalueAsUint64(b); return x < y ? -1 : x > y ? 1 : 0; }
+    if (au && !bu) { int64_t bi = kvlangXvalueAsInt64(b); if (bi < 0) return 1; uint64_t x = kvlangXvalueAsUint64(a); return x < (uint64_t)bi ? -1 : x > (uint64_t)bi ? 1 : 0; }
+    int64_t ai = kvlangXvalueAsInt64(a); if (ai < 0) return -1; uint64_t y = kvlangXvalueAsUint64(b);
     return (uint64_t)ai < y ? -1 : (uint64_t)ai > y ? 1 : 0;
 }
 
 /* ── resolve ───────────────────────────────────────────────────────── */
 
-char *bi_func_frame_root(kv_t *kv, const char *frame_root) {
+char *kvlangBuiltinFuncFrameRoot(kvlangKv_t *kv, const char *frame_root) {
     char *cur = strdup(frame_root);
     for (;;) {
-        sbuf_t k; sb_init(&k);
-        char *stk = kt_stack(cur);
-        sb_puts(&k, stk); free(stk);
-        sb_puts(&k, SEG_LIB);
-        xval_t v; xv_zero(&v);
-        kv_get_one(kv, k.p, &v);
-        bool found = !xv_none(&v);
-        xv_free(&v); sb_free(&k);
+        kvlangStrbuf_t k; kvlangStrbufInit(&k);
+        char *stk = kvlangKeytreeStack(cur);
+        kvlangStrbufPuts(&k, stk); free(stk);
+        kvlangStrbufPuts(&k, SEG_LIB);
+        kvlangXvalue_t v; kvlangXvalueZero(&v);
+        kvlangKvGetOne(kv, k.p, &v);
+        bool found = !kvlangXvalueNone(&v);
+        kvlangXvalueFree(&v); kvlangStrbufFree(&k);
         if (found) return cur;
-        char *parent = kt_parent_frame(cur);
+        char *parent = kvlangKeytreeParentFrame(cur);
         if (parent[0] == 0) { free(parent); return cur; }
         free(cur); cur = parent;
     }
 }
 
-void bi_resolve_read_value(kv_t *kv, const char *frame_path, const char *name,
-                           const xval_t *val, xval_t *out) {
-    xv_zero(out);
-    if (val && !xv_none(val) && !xv_kind_is(val, K_RWIR) && !xv_kind_is(val, K_RWFUNC)) {
-        kvhead_t h; xv_head(val, &h);
-        int32_t blen; const uint8_t *body = xv_body(val, &h, &blen);
-        xv_new_tlv(out, xv_kind(val), body, (uint32_t)blen, h.array_len);
+void kvlangBuiltinResolveReadValue(kvlangKv_t *kv, const char *frame_path, const char *name,
+                           const kvlangXvalue_t *val, kvlangXvalue_t *out) {
+    kvlangXvalueZero(out);
+    if (val && !kvlangXvalueNone(val) && !kvlangXvalueKindIs(val, KVSPACE_KIND_RWIR) && !kvlangXvalueKindIs(val, KVSPACE_KIND_RWFUNC)) {
+        kvspaceHead_t h; kvlangXvalueHead(val, &h);
+        int32_t blen; const uint8_t *body = kvlangXvalueBody(val, &h, &blen);
+        kvlangXvalueNewTlv(out, kvlangXvalueKind(val), body, (uint32_t)blen, h.array_len);
         return;
     }
     if (!name || !name[0]) return;
-    if (name[0] == '/') { kv_get_one(kv, name, out); return; }
-    char *rw = bi_func_frame_root(kv, frame_path);
-    sbuf_t key; sb_init(&key);
-    char *stk = kt_stack(rw);
-    sb_puts(&key, stk); free(stk); sb_puts(&key, name);
-    xval_t pv; xv_zero(&pv);
-    kv_get_one(kv, key.p, &pv);
-    if (xv_is_ptr(&pv)) {
-        char *target = xv_ptr_target(&pv);
-        sbuf_t ak; sb_init(&ak);
-        char *stk2 = kt_stack(rw);
-        sb_puts(&ak, stk2); free(stk2); sb_puts(&ak, target);
+    if (name[0] == '/') { kvlangKvGetOne(kv, name, out); return; }
+    char *rw = kvlangBuiltinFuncFrameRoot(kv, frame_path);
+    kvlangStrbuf_t key; kvlangStrbufInit(&key);
+    char *stk = kvlangKeytreeStack(rw);
+    kvlangStrbufPuts(&key, stk); free(stk); kvlangStrbufPuts(&key, name);
+    kvlangXvalue_t pv; kvlangXvalueZero(&pv);
+    kvlangKvGetOne(kv, key.p, &pv);
+    if (kvlangXvalueIsPtr(&pv)) {
+        char *target = kvlangXvaluePtrTarget(&pv);
+        kvlangStrbuf_t ak; kvlangStrbufInit(&ak);
+        char *stk2 = kvlangKeytreeStack(rw);
+        kvlangStrbufPuts(&ak, stk2); free(stk2); kvlangStrbufPuts(&ak, target);
         free(target);
-        xval_t av; xv_zero(&av);
-        kv_get_one(kv, ak.p, &av);
-        if (!xv_none(&av)) {
-            char *path = xv_value_string(&av);
-            kv_get_one(kv, path, out);
+        kvlangXvalue_t av; kvlangXvalueZero(&av);
+        kvlangKvGetOne(kv, ak.p, &av);
+        if (!kvlangXvalueNone(&av)) {
+            char *path = kvlangXvalueValueString(&av);
+            kvlangKvGetOne(kv, path, out);
             free(path);
         }
-        xv_free(&av); sb_free(&ak);
-    } else if (!xv_none(&pv)) {
+        kvlangXvalueFree(&av); kvlangStrbufFree(&ak);
+    } else if (!kvlangXvalueNone(&pv)) {
         *out = pv; pv.data = NULL; pv.len = 0;
     }
-    xv_free(&pv); sb_free(&key); free(rw);
+    kvlangXvalueFree(&pv); kvlangStrbufFree(&key); free(rw);
 }
 
-char *bi_resolve_write_slot(kv_t *kv, const char *frame_path, const char *name) {
+char *kvlangBuiltinResolveWriteSlot(kvlangKv_t *kv, const char *frame_path, const char *name) {
     if (name[0] == '/') return strdup(name);
-    char *rw = bi_func_frame_root(kv, frame_path);
-    sbuf_t key; sb_init(&key);
-    char *stk = kt_stack(rw);
-    sb_puts(&key, stk); free(stk); sb_puts(&key, name);
-    xval_t pv; xv_zero(&pv);
-    kv_get_one(kv, key.p, &pv);
+    char *rw = kvlangBuiltinFuncFrameRoot(kv, frame_path);
+    kvlangStrbuf_t key; kvlangStrbufInit(&key);
+    char *stk = kvlangKeytreeStack(rw);
+    kvlangStrbufPuts(&key, stk); free(stk); kvlangStrbufPuts(&key, name);
+    kvlangXvalue_t pv; kvlangXvalueZero(&pv);
+    kvlangKvGetOne(kv, key.p, &pv);
     char *result = NULL;
-    if (xv_is_ptr(&pv)) {
-        char *target = xv_ptr_target(&pv);
-        sbuf_t ak; sb_init(&ak);
-        char *stk2 = kt_stack(rw);
-        sb_puts(&ak, stk2); free(stk2); sb_puts(&ak, target);
+    if (kvlangXvalueIsPtr(&pv)) {
+        char *target = kvlangXvaluePtrTarget(&pv);
+        kvlangStrbuf_t ak; kvlangStrbufInit(&ak);
+        char *stk2 = kvlangKeytreeStack(rw);
+        kvlangStrbufPuts(&ak, stk2); free(stk2); kvlangStrbufPuts(&ak, target);
         free(target);
-        xval_t av; xv_zero(&av);
-        kv_get_one(kv, ak.p, &av);
-        if (!xv_none(&av)) {
-            xval_t v = av; av.data = NULL; av.len = 0;
+        kvlangXvalue_t av; kvlangXvalueZero(&av);
+        kvlangKvGetOne(kv, ak.p, &av);
+        if (!kvlangXvalueNone(&av)) {
+            kvlangXvalue_t v = av; av.data = NULL; av.len = 0;
             for (;;) {
-                if (!xv_is_char_kind(xv_kind(&v))) break;
-                char *p = xv_value_string(&v);
-                xval_t next; xv_zero(&next);
-                kv_get_one(kv, p, &next);
-                if (xv_none(&next) || !xv_is_char_kind(xv_kind(&next))) { result = p; break; }
+                if (!kvlangXvalueIsCharKind(kvlangXvalueKind(&v))) break;
+                char *p = kvlangXvalueValueString(&v);
+                kvlangXvalue_t next; kvlangXvalueZero(&next);
+                kvlangKvGetOne(kv, p, &next);
+                if (kvlangXvalueNone(&next) || !kvlangXvalueIsCharKind(kvlangXvalueKind(&next))) { result = p; break; }
                 free(p);
-                xv_free(&v); v = next;
+                kvlangXvalueFree(&v); v = next;
             }
-            xv_free(&v);
+            kvlangXvalueFree(&v);
         }
-        xv_free(&av); sb_free(&ak);
+        kvlangXvalueFree(&av); kvlangStrbufFree(&ak);
     }
-    xv_free(&pv); sb_free(&key); free(rw);
+    kvlangXvalueFree(&pv); kvlangStrbufFree(&key); free(rw);
     if (result) return result;
     /* fallback: Stack(rw) + name */
-    char *rw2 = bi_func_frame_root(kv, frame_path);
-    sbuf_t o; sb_init(&o);
-    char *stk3 = kt_stack(rw2);
-    sb_puts(&o, stk3); free(stk3); sb_puts(&o, name);
+    char *rw2 = kvlangBuiltinFuncFrameRoot(kv, frame_path);
+    kvlangStrbuf_t o; kvlangStrbufInit(&o);
+    char *stk3 = kvlangKeytreeStack(rw2);
+    kvlangStrbufPuts(&o, stk3); free(stk3); kvlangStrbufPuts(&o, name);
     free(rw2);
-    return sb_detach(&o);
+    return kvlangStrbufDetach(&o);
 }
 
-/* ── coerce / display ─────────────────────────────────────────────── */
+/* ── coerce / kvlangDisplay ─────────────────────────────────────────────── */
 
 static bool try_parse_int(const char *s, int64_t *out) {
     if (!s || !s[0]) return false;
@@ -188,422 +188,422 @@ static bool try_parse_int(const char *s, int64_t *out) {
     *out = v; return true;
 }
 
-bool bi_try_parse_number(const char *s, xval_t *out) {
-    xv_zero(out);
+bool kvlangBuiltinTryParseNumber(const char *s, kvlangXvalue_t *out) {
+    kvlangXvalueZero(out);
     if (!s || !s[0]) return false;
     char c0 = s[0];
     bool num = (c0 >= '0' && c0 <= '9') || (c0 == '-' && s[1] >= '0' && s[1] <= '9');
     if (!num) return false;
     int64_t iv;
-    if (try_parse_int(s, &iv)) { xv_new_int64(out, iv); return true; }
+    if (try_parse_int(s, &iv)) { kvlangXvalueNewInt64(out, iv); return true; }
     if (c0 != '-' && !strpbrk(s, ".eE")) {
         char *end; unsigned long long uv = strtoull(s, &end, 10);
         if (end != s && *end == 0) {
             uint8_t r[8]; memcpy(r, &uv, 8);
-            xv_new_tlv(out, K_UINT64, r, 8, 1); return true;
+            kvlangXvalueNewTlv(out, KVSPACE_KIND_UINT64, r, 8, 1); return true;
         }
     }
     char *end; double f = strtod(s, &end);
-    if (end != s && *end == 0) { xv_new_float64(out, f); return true; }
+    if (end != s && *end == 0) { kvlangXvalueNewFloat64(out, f); return true; }
     return false;
 }
 
-static void xvalue_at(const xval_t *v, int i, xval_t *out) {
-    xv_zero(out);
-    int n = xv_array_len(v);
+static void xvalue_at(const kvlangXvalue_t *v, int i, kvlangXvalue_t *out) {
+    kvlangXvalueZero(out);
+    int n = kvlangXvalueArrayLen(v);
     if (i < 0 || i >= n) return;
-    const char *k = xv_kind(v);
-    int sz = xv_elem_size(k);
+    const char *k = kvlangXvalueKind(v);
+    int sz = kvlangXvalueElemSize(k);
     if (sz <= 0) return;
-    kvhead_t h; kvspace_decode_head(v->data, v->len, &h);
+    kvspaceHead_t h; kvspaceDecodeHead(v->data, v->len, &h);
     const uint8_t *body = v->data + h.body_offset;
-    xv_new_tlv(out, k, body + i * sz, (uint32_t)sz, 1);
+    kvlangXvalueNewTlv(out, k, body + i * sz, (uint32_t)sz, 1);
 }
 
-void display(const xval_t *v, char **out);
+void kvlangDisplay(const kvlangXvalue_t *v, char **out);
 
-static void format_array(const xval_t *v, char **out) {
-    int n = xv_array_len(v);
-    sbuf_t b; sb_init(&b);
-    sb_putc(&b, '[');
+static void format_array(const kvlangXvalue_t *v, char **out) {
+    int n = kvlangXvalueArrayLen(v);
+    kvlangStrbuf_t b; kvlangStrbufInit(&b);
+    kvlangStrbufPutc(&b, '[');
     for (int i = 0; i < n; i++) {
-        if (i) sb_puts(&b, ", ");
-        xval_t e; xvalue_at(v, i, &e);
-        char *s; display(&e, &s);
-        sb_puts(&b, s); free(s); xv_free(&e);
+        if (i) kvlangStrbufPuts(&b, ", ");
+        kvlangXvalue_t e; xvalue_at(v, i, &e);
+        char *s; kvlangDisplay(&e, &s);
+        kvlangStrbufPuts(&b, s); free(s); kvlangXvalueFree(&e);
     }
-    sb_putc(&b, ']');
-    *out = sb_detach(&b);
+    kvlangStrbufPutc(&b, ']');
+    *out = kvlangStrbufDetach(&b);
 }
 
-void display(const xval_t *v, char **out) {
-    if (xv_is_char_kind(xv_kind(v))) { *out = xv_value_string(v); return; }
-    if (xv_array_len(v) > 1) { format_array(v, out); return; }
-    *out = xv_value_string(v);
+void kvlangDisplay(const kvlangXvalue_t *v, char **out) {
+    if (kvlangXvalueIsCharKind(kvlangXvalueKind(v))) { *out = kvlangXvalueValueString(v); return; }
+    if (kvlangXvalueArrayLen(v) > 1) { format_array(v, out); return; }
+    *out = kvlangXvalueValueString(v);
 }
 
 /* ── frame helper ─────────────────────────────────────────────────── */
 
-static int read_inputs(frame_t *f, xval_t *out, int cap) {
-    char *fr = kt_frame_root(f->pc);
-    char *ff = bi_func_frame_root(f->kv, fr);
+static int read_inputs(kvlangFrame_t *f, kvlangXvalue_t *out, int cap) {
+    char *fr = kvlangKeytreeFrameRoot(f->pc);
+    char *ff = kvlangBuiltinFuncFrameRoot(f->kv, fr);
     free(fr);
     int n = 0;
     for (int i = 0; i < f->inst->nr && n < cap; i++) {
-        bi_resolve_read_value(f->kv, ff, f->inst->reads[i].name, &f->inst->reads[i].val, &out[n]);
+        kvlangBuiltinResolveReadValue(f->kv, ff, f->inst->reads[i].name, &f->inst->reads[i].val, &out[n]);
         n++;
     }
     free(ff);
     return n;
 }
 
-static void free_inputs(xval_t *in, int n) { for (int i = 0; i < n; i++) xv_free(&in[i]); }
+static void free_inputs(kvlangXvalue_t *in, int n) { for (int i = 0; i < n; i++) kvlangXvalueFree(&in[i]); }
 
-static void next_pc(frame_t *f) {
-    sbuf_t npc; sb_init(&npc);
-    rwir_next_pc(f->pc, &npc);
-    vt_set(f->kv, f->vtid, npc.p, "running");
-    sb_free(&npc);
+static void next_pc(kvlangFrame_t *f) {
+    kvlangStrbuf_t npc; kvlangStrbufInit(&npc);
+    kvlangRwirNextPc(f->pc, &npc);
+    kvlangVthreadSet(f->kv, f->vtid, npc.p, "running");
+    kvlangStrbufFree(&npc);
 }
 
-static int write_result(frame_t *f, const xval_t *result) {
+static int write_result(kvlangFrame_t *f, const kvlangXvalue_t *result) {
     if (f->inst->nw > 0) {
-        char *fr = kt_frame_root(f->pc);
-        char *key = bi_resolve_write_slot(f->kv, fr, f->inst->writes[0].name);
+        char *fr = kvlangKeytreeFrameRoot(f->pc);
+        char *key = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->writes[0].name);
         free(fr);
-        kv_pair_t pair = { key, *result };
+        kvlangKvPair_t pair = { key, *result };
         char err[256];
-        kv_set(f->kv, &pair, 1, err, sizeof err);
+        kvlangKvSet(f->kv, &pair, 1, err, sizeof err);
         free(key);
     }
     next_pc(f);
     return 0;
 }
 
-static int set_err(frame_t *f, const char *fmt, ...) {
+static int set_err(kvlangFrame_t *f, const char *fmt, ...) {
     char msg[512];
     va_list ap; va_start(ap, fmt);
     vsnprintf(msg, sizeof msg, fmt, ap);
     va_end(ap);
-    vt_set_error(f->kv, f->vtid, f->pc, msg);
+    kvlangVthreadSetError(f->kv, f->vtid, f->pc, msg);
     return -1;
 }
 
 /* ── 数值算子 ─────────────────────────────────────────────────────── */
 
-static int bi_add(frame_t *f) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
+static int kvlangBuiltinAdd(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
     int rc;
-    if (n == 2 && xv_is_char_kind(xv_kind(&in[0])) && xv_is_char_kind(xv_kind(&in[1]))) {
-        char *a = xv_value_string(&in[0]), *b = xv_value_string(&in[1]);
-        sbuf_t s; sb_init(&s); sb_puts(&s, a); sb_puts(&s, b);
-        xval_t r; xv_new_char_utf32(&r, s.p);
+    if (n == 2 && kvlangXvalueIsCharKind(kvlangXvalueKind(&in[0])) && kvlangXvalueIsCharKind(kvlangXvalueKind(&in[1]))) {
+        char *a = kvlangXvalueValueString(&in[0]), *b = kvlangXvalueValueString(&in[1]);
+        kvlangStrbuf_t s; kvlangStrbufInit(&s); kvlangStrbufPuts(&s, a); kvlangStrbufPuts(&s, b);
+        kvlangXvalue_t r; kvlangXvalueNewCharUtf32(&r, s.p);
         rc = write_result(f, &r);
-        xv_free(&r); free(a); free(b); sb_free(&s);
+        kvlangXvalueFree(&r); free(a); free(b); kvlangStrbufFree(&s);
     } else if (n >= 2 && is_numeric(&in[0]) && is_numeric(&in[1])) {
-        if (is_int_kind(xv_kind(&in[0])) && is_int_kind(xv_kind(&in[1]))) {
-            xval_t r; narrow_int(xv_kind(&in[0]), xv_kind(&in[1]), xv_as_int64(&in[0]) + xv_as_int64(&in[1]), &r);
-            rc = write_result(f, &r); xv_free(&r);
+        if (is_int_kind(kvlangXvalueKind(&in[0])) && is_int_kind(kvlangXvalueKind(&in[1]))) {
+            kvlangXvalue_t r; narrow_int(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1]), kvlangXvalueAsInt64(&in[0]) + kvlangXvalueAsInt64(&in[1]), &r);
+            rc = write_result(f, &r); kvlangXvalueFree(&r);
         } else {
-            xval_t r; narrow_float(xv_kind(&in[0]), xv_kind(&in[1]), xv_as_float64(&in[0]) + xv_as_float64(&in[1]), &r);
-            rc = write_result(f, &r); xv_free(&r);
+            kvlangXvalue_t r; narrow_float(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1]), kvlangXvalueAsFloat64(&in[0]) + kvlangXvalueAsFloat64(&in[1]), &r);
+            rc = write_result(f, &r); kvlangXvalueFree(&r);
         }
-    } else rc = set_err(f, "TypeError: expected numeric, got %s", n ? xv_kind(&in[0]) : "none");
+    } else rc = set_err(f, "TypeError: expected numeric, got %s", n ? kvlangXvalueKind(&in[0]) : "none");
     free_inputs(in, n);
     return rc;
 }
 
-static int bi_sub(frame_t *f) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
+static int kvlangBuiltinSub(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
     int rc;
     if (n == 1) {
-        xval_t r; xv_new_int64(&r, -xv_as_int64(&in[0]));
-        rc = write_result(f, &r); xv_free(&r);
-    } else if (n >= 2 && is_int_kind(xv_kind(&in[0])) && is_int_kind(xv_kind(&in[1]))) {
-        xval_t r; narrow_int(xv_kind(&in[0]), xv_kind(&in[1]), xv_as_int64(&in[0]) - xv_as_int64(&in[1]), &r);
-        rc = write_result(f, &r); xv_free(&r);
+        kvlangXvalue_t r; kvlangXvalueNewInt64(&r, -kvlangXvalueAsInt64(&in[0]));
+        rc = write_result(f, &r); kvlangXvalueFree(&r);
+    } else if (n >= 2 && is_int_kind(kvlangXvalueKind(&in[0])) && is_int_kind(kvlangXvalueKind(&in[1]))) {
+        kvlangXvalue_t r; narrow_int(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1]), kvlangXvalueAsInt64(&in[0]) - kvlangXvalueAsInt64(&in[1]), &r);
+        rc = write_result(f, &r); kvlangXvalueFree(&r);
     } else if (n >= 2 && is_numeric(&in[0]) && is_numeric(&in[1])) {
-        xval_t r; narrow_float(xv_kind(&in[0]), xv_kind(&in[1]), xv_as_float64(&in[0]) - xv_as_float64(&in[1]), &r);
-        rc = write_result(f, &r); xv_free(&r);
-    } else rc = set_err(f, "TypeError: expected numeric, got %s", n ? xv_kind(&in[0]) : "none");
+        kvlangXvalue_t r; narrow_float(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1]), kvlangXvalueAsFloat64(&in[0]) - kvlangXvalueAsFloat64(&in[1]), &r);
+        rc = write_result(f, &r); kvlangXvalueFree(&r);
+    } else rc = set_err(f, "TypeError: expected numeric, got %s", n ? kvlangXvalueKind(&in[0]) : "none");
     free_inputs(in, n);
     return rc;
 }
 
-static int bi_mul(frame_t *f) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
+static int kvlangBuiltinMul(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
     int rc;
-    if (n >= 2 && is_int_kind(xv_kind(&in[0])) && is_int_kind(xv_kind(&in[1]))) {
-        xval_t r; narrow_int(xv_kind(&in[0]), xv_kind(&in[1]), xv_as_int64(&in[0]) * xv_as_int64(&in[1]), &r);
-        rc = write_result(f, &r); xv_free(&r);
+    if (n >= 2 && is_int_kind(kvlangXvalueKind(&in[0])) && is_int_kind(kvlangXvalueKind(&in[1]))) {
+        kvlangXvalue_t r; narrow_int(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1]), kvlangXvalueAsInt64(&in[0]) * kvlangXvalueAsInt64(&in[1]), &r);
+        rc = write_result(f, &r); kvlangXvalueFree(&r);
     } else if (n >= 2 && is_numeric(&in[0]) && is_numeric(&in[1])) {
-        xval_t r; narrow_float(xv_kind(&in[0]), xv_kind(&in[1]), xv_as_float64(&in[0]) * xv_as_float64(&in[1]), &r);
-        rc = write_result(f, &r); xv_free(&r);
-    } else rc = set_err(f, "TypeError: expected numeric, got %s", n ? xv_kind(&in[0]) : "none");
+        kvlangXvalue_t r; narrow_float(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1]), kvlangXvalueAsFloat64(&in[0]) * kvlangXvalueAsFloat64(&in[1]), &r);
+        rc = write_result(f, &r); kvlangXvalueFree(&r);
+    } else rc = set_err(f, "TypeError: expected numeric, got %s", n ? kvlangXvalueKind(&in[0]) : "none");
     free_inputs(in, n);
     return rc;
 }
 
-static int bi_div(frame_t *f) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
+static int kvlangBuiltinDiv(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
     int rc;
     if (n < 2) { rc = set_err(f, "TypeError: binary op requires 2 inputs, got %d", n); free_inputs(in, n); return rc; }
-    if (xv_as_float64(&in[1]) == 0) { rc = set_err(f, "ZeroDivisionError: division by zero"); free_inputs(in, n); return rc; }
-    if (is_int_kind(xv_kind(&in[0])) && is_int_kind(xv_kind(&in[1]))) {
-        xval_t r; narrow_int(xv_kind(&in[0]), xv_kind(&in[1]), xv_as_int64(&in[0]) / xv_as_int64(&in[1]), &r);
-        rc = write_result(f, &r); xv_free(&r);
+    if (kvlangXvalueAsFloat64(&in[1]) == 0) { rc = set_err(f, "ZeroDivisionError: division by zero"); free_inputs(in, n); return rc; }
+    if (is_int_kind(kvlangXvalueKind(&in[0])) && is_int_kind(kvlangXvalueKind(&in[1]))) {
+        kvlangXvalue_t r; narrow_int(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1]), kvlangXvalueAsInt64(&in[0]) / kvlangXvalueAsInt64(&in[1]), &r);
+        rc = write_result(f, &r); kvlangXvalueFree(&r);
     } else {
-        xval_t r; narrow_float(xv_kind(&in[0]), xv_kind(&in[1]), xv_as_float64(&in[0]) / xv_as_float64(&in[1]), &r);
-        rc = write_result(f, &r); xv_free(&r);
+        kvlangXvalue_t r; narrow_float(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1]), kvlangXvalueAsFloat64(&in[0]) / kvlangXvalueAsFloat64(&in[1]), &r);
+        rc = write_result(f, &r); kvlangXvalueFree(&r);
     }
     free_inputs(in, n);
     return rc;
 }
 
-static int bi_mod(frame_t *f) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
+static int kvlangBuiltinMod(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
     int rc;
-    if (n < 2 || !is_int_kind(xv_kind(&in[0])) || !is_int_kind(xv_kind(&in[1]))) {
-        rc = set_err(f, "TypeError: expected integer, got %s", n ? xv_kind(&in[0]) : "none");
+    if (n < 2 || !is_int_kind(kvlangXvalueKind(&in[0])) || !is_int_kind(kvlangXvalueKind(&in[1]))) {
+        rc = set_err(f, "TypeError: expected integer, got %s", n ? kvlangXvalueKind(&in[0]) : "none");
         free_inputs(in, n); return rc;
     }
-    int64_t b = xv_as_int64(&in[1]);
+    int64_t b = kvlangXvalueAsInt64(&in[1]);
     if (b == 0) { rc = set_err(f, "ZeroDivisionError: modulo by zero"); free_inputs(in, n); return rc; }
-    xval_t r; narrow_int(xv_kind(&in[0]), xv_kind(&in[1]), xv_as_int64(&in[0]) % b, &r);
-    rc = write_result(f, &r); xv_free(&r);
+    kvlangXvalue_t r; narrow_int(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1]), kvlangXvalueAsInt64(&in[0]) % b, &r);
+    rc = write_result(f, &r); kvlangXvalueFree(&r);
     free_inputs(in, n);
     return rc;
 }
 
 typedef enum { CMP_EQ, CMP_NEQ, CMP_LT, CMP_GT, CMP_LE, CMP_GE } cmp_op;
 
-static int bi_cmp(frame_t *f, cmp_op op) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
+static int kvlangBuiltinCmp(kvlangFrame_t *f, cmp_op op) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
     if (n < 2) { set_err(f, "TypeError: binary op requires 2 inputs, got %d", n); free_inputs(in, n); return -1; }
     bool allow_null = (op == CMP_EQ || op == CMP_NEQ);
-    if (xv_none(&in[0]) || xv_none(&in[1])) {
+    if (kvlangXvalueNone(&in[0]) || kvlangXvalueNone(&in[1])) {
         if (!allow_null) { set_err(f, "TypeError: None in comparison"); free_inputs(in, n); return -1; }
-        bool eq = xv_none(&in[0]) == xv_none(&in[1]);
+        bool eq = kvlangXvalueNone(&in[0]) == kvlangXvalueNone(&in[1]);
         bool r = (op == CMP_EQ) ? eq : (op == CMP_NEQ) ? !eq : false;
-        xval_t rv; xv_new_bool(&rv, r);
-        int rc = write_result(f, &rv); xv_free(&rv); free_inputs(in, n); return rc;
+        kvlangXvalue_t rv; kvlangXvalueNewBool(&rv, r);
+        int rc = write_result(f, &rv); kvlangXvalueFree(&rv); free_inputs(in, n); return rc;
     }
     bool r;
-    const char *ka = xv_kind(&in[0]), *kb = xv_kind(&in[1]);
+    const char *ka = kvlangXvalueKind(&in[0]), *kb = kvlangXvalueKind(&in[1]);
     if (is_int_kind(ka) && is_int_kind(kb)) {
         int c = cmp_int(&in[0], &in[1]);
         r = op == CMP_EQ ? c == 0 : op == CMP_NEQ ? c != 0 : op == CMP_LT ? c < 0 : op == CMP_GT ? c > 0 : op == CMP_LE ? c <= 0 : c >= 0;
     } else if (is_numeric(&in[0]) && is_numeric(&in[1])) {
-        double a = xv_as_float64(&in[0]), b = xv_as_float64(&in[1]);
+        double a = kvlangXvalueAsFloat64(&in[0]), b = kvlangXvalueAsFloat64(&in[1]);
         r = op == CMP_EQ ? a == b : op == CMP_NEQ ? a != b : op == CMP_LT ? a < b : op == CMP_GT ? a > b : op == CMP_LE ? a <= b : a >= b;
-    } else if (xv_is_char_kind(ka) && xv_is_char_kind(kb)) {
-        char *a = xv_value_string(&in[0]), *b = xv_value_string(&in[1]);
+    } else if (kvlangXvalueIsCharKind(ka) && kvlangXvalueIsCharKind(kb)) {
+        char *a = kvlangXvalueValueString(&in[0]), *b = kvlangXvalueValueString(&in[1]);
         int c = strcmp(a, b);
         r = op == CMP_EQ ? c == 0 : op == CMP_NEQ ? c != 0 : op == CMP_LT ? c < 0 : op == CMP_GT ? c > 0 : op == CMP_LE ? c <= 0 : c >= 0;
         free(a); free(b);
-    } else if (strcmp(ka, K_BOOL) == 0 && strcmp(kb, K_BOOL) == 0) {
-        bool a = xv_as_bool(&in[0]), b = xv_as_bool(&in[1]);
+    } else if (strcmp(ka, KVSPACE_KIND_BOOL) == 0 && strcmp(kb, KVSPACE_KIND_BOOL) == 0) {
+        bool a = kvlangXvalueAsBool(&in[0]), b = kvlangXvalueAsBool(&in[1]);
         r = op == CMP_EQ ? a == b : op == CMP_NEQ ? a != b : op == CMP_LT ? a < b : op == CMP_GT ? a > b : op == CMP_LE ? a <= b : a >= b;
     } else {
         set_err(f, "TypeError: cannot compare %s with %s", ka, kb); free_inputs(in, n); return -1;
     }
-    xval_t rv; xv_new_bool(&rv, r);
-    int rc = write_result(f, &rv); xv_free(&rv); free_inputs(in, n);
+    kvlangXvalue_t rv; kvlangXvalueNewBool(&rv, r);
+    int rc = write_result(f, &rv); kvlangXvalueFree(&rv); free_inputs(in, n);
     return rc;
 }
 
-static int bi_eq(frame_t *f) { return bi_cmp(f, CMP_EQ); }
-static int bi_neq(frame_t *f) { return bi_cmp(f, CMP_NEQ); }
-static int bi_lt(frame_t *f) { return bi_cmp(f, CMP_LT); }
-static int bi_gt(frame_t *f) { return bi_cmp(f, CMP_GT); }
-static int bi_le(frame_t *f) { return bi_cmp(f, CMP_LE); }
-static int bi_ge(frame_t *f) { return bi_cmp(f, CMP_GE); }
+static int kvlangBuiltinEq(kvlangFrame_t *f) { return kvlangBuiltinCmp(f, CMP_EQ); }
+static int kvlangBuiltinNeq(kvlangFrame_t *f) { return kvlangBuiltinCmp(f, CMP_NEQ); }
+static int kvlangBuiltinLt(kvlangFrame_t *f) { return kvlangBuiltinCmp(f, CMP_LT); }
+static int kvlangBuiltinGt(kvlangFrame_t *f) { return kvlangBuiltinCmp(f, CMP_GT); }
+static int kvlangBuiltinLe(kvlangFrame_t *f) { return kvlangBuiltinCmp(f, CMP_LE); }
+static int kvlangBuiltinGe(kvlangFrame_t *f) { return kvlangBuiltinCmp(f, CMP_GE); }
 
-static int bi_and(frame_t *f) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
-    xval_t r; xv_new_bool(&r, n >= 2 && xv_as_bool(&in[0]) && xv_as_bool(&in[1]));
-    int rc = write_result(f, &r); xv_free(&r); free_inputs(in, n);
+static int kvlangBuiltinAnd(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
+    kvlangXvalue_t r; kvlangXvalueNewBool(&r, n >= 2 && kvlangXvalueAsBool(&in[0]) && kvlangXvalueAsBool(&in[1]));
+    int rc = write_result(f, &r); kvlangXvalueFree(&r); free_inputs(in, n);
     return rc;
 }
-static int bi_or(frame_t *f) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
-    xval_t r; xv_new_bool(&r, n >= 2 && (xv_as_bool(&in[0]) || xv_as_bool(&in[1])));
-    int rc = write_result(f, &r); xv_free(&r); free_inputs(in, n);
+static int kvlangBuiltinOr(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
+    kvlangXvalue_t r; kvlangXvalueNewBool(&r, n >= 2 && (kvlangXvalueAsBool(&in[0]) || kvlangXvalueAsBool(&in[1])));
+    int rc = write_result(f, &r); kvlangXvalueFree(&r); free_inputs(in, n);
     return rc;
 }
-static int bi_not(frame_t *f) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
-    xval_t r; xv_new_bool(&r, !(n >= 1 && xv_as_bool(&in[0])));
-    int rc = write_result(f, &r); xv_free(&r); free_inputs(in, n);
+static int kvlangBuiltinNot(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
+    kvlangXvalue_t r; kvlangXvalueNewBool(&r, !(n >= 1 && kvlangXvalueAsBool(&in[0])));
+    int rc = write_result(f, &r); kvlangXvalueFree(&r); free_inputs(in, n);
     return rc;
 }
 
-static int bi_bit(frame_t *f, int op) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
-    if (n < 2 || !is_int_kind(xv_kind(&in[0])) || !is_int_kind(xv_kind(&in[1]))) {
-        set_err(f, "TypeError: expected integer, got %s", n ? xv_kind(&in[0]) : "none");
+static int kvlangBuiltinBit(kvlangFrame_t *f, int op) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
+    if (n < 2 || !is_int_kind(kvlangXvalueKind(&in[0])) || !is_int_kind(kvlangXvalueKind(&in[1]))) {
+        set_err(f, "TypeError: expected integer, got %s", n ? kvlangXvalueKind(&in[0]) : "none");
         free_inputs(in, n); return -1;
     }
-    int64_t a = xv_as_int64(&in[0]), b = xv_as_int64(&in[1]);
+    int64_t a = kvlangXvalueAsInt64(&in[0]), b = kvlangXvalueAsInt64(&in[1]);
     int64_t v = op == 0 ? a & b : op == 1 ? a | b : op == 2 ? a ^ b : op == 3 ? (a << (uint64_t)b) : (a >> (uint64_t)b);
-    xval_t r; narrow_int(xv_kind(&in[0]), xv_kind(&in[1]), v, &r);
-    int rc = write_result(f, &r); xv_free(&r); free_inputs(in, n);
+    kvlangXvalue_t r; narrow_int(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1]), v, &r);
+    int rc = write_result(f, &r); kvlangXvalueFree(&r); free_inputs(in, n);
     return rc;
 }
-static int bi_bitand(frame_t *f) { return bi_bit(f, 0); }
-static int bi_bitor(frame_t *f) { return bi_bit(f, 1); }
-static int bi_bitxor(frame_t *f) { return bi_bit(f, 2); }
-static int bi_shl(frame_t *f) { return bi_bit(f, 3); }
-static int bi_shr(frame_t *f) { return bi_bit(f, 4); }
+static int kvlangBuiltinBitand(kvlangFrame_t *f) { return kvlangBuiltinBit(f, 0); }
+static int kvlangBuiltinBitor(kvlangFrame_t *f) { return kvlangBuiltinBit(f, 1); }
+static int kvlangBuiltinBitxor(kvlangFrame_t *f) { return kvlangBuiltinBit(f, 2); }
+static int kvlangBuiltinShl(kvlangFrame_t *f) { return kvlangBuiltinBit(f, 3); }
+static int kvlangBuiltinShr(kvlangFrame_t *f) { return kvlangBuiltinBit(f, 4); }
 
 /* math */
-static int bi_math_unary(frame_t *f, int op) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
-    if (n < 1 || !is_numeric(&in[0])) { set_err(f, "TypeError: expected numeric, got %s", n ? xv_kind(&in[0]) : "none"); free_inputs(in, n); return -1; }
-    xval_t r;
-    double x = xv_as_float64(&in[0]);
+static int kvlangBuiltinMathUnary(kvlangFrame_t *f, int op) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
+    if (n < 1 || !is_numeric(&in[0])) { set_err(f, "TypeError: expected numeric, got %s", n ? kvlangXvalueKind(&in[0]) : "none"); free_inputs(in, n); return -1; }
+    kvlangXvalue_t r;
+    double x = kvlangXvalueAsFloat64(&in[0]);
     switch (op) {
-    case 0: xv_new_float64(&r, sqrt(x)); break;
-    case 1: xv_new_float64(&r, exp(x)); break;
-    case 2: xv_new_float64(&r, log(x)); break;
-    case 3: /* neg */ if (is_float_kind(xv_kind(&in[0]))) { narrow_float(xv_kind(&in[0]), xv_kind(&in[0]), -x, &r); } else { narrow_int(xv_kind(&in[0]), xv_kind(&in[0]), -xv_as_int64(&in[0]), &r); } break;
-    case 4: /* abs */ if (is_float_kind(xv_kind(&in[0]))) { narrow_float(xv_kind(&in[0]), xv_kind(&in[0]), fabs(x), &r); } else { narrow_int(xv_kind(&in[0]), xv_kind(&in[0]), xv_as_int64(&in[0]) < 0 ? -xv_as_int64(&in[0]) : xv_as_int64(&in[0]), &r); } break;
-    case 5: xv_new_int64(&r, x < 0 ? -1 : x > 0 ? 1 : 0); break;
+    case 0: kvlangXvalueNewFloat64(&r, sqrt(x)); break;
+    case 1: kvlangXvalueNewFloat64(&r, exp(x)); break;
+    case 2: kvlangXvalueNewFloat64(&r, log(x)); break;
+    case 3: /* neg */ if (is_float_kind(kvlangXvalueKind(&in[0]))) { narrow_float(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[0]), -x, &r); } else { narrow_int(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[0]), -kvlangXvalueAsInt64(&in[0]), &r); } break;
+    case 4: /* abs */ if (is_float_kind(kvlangXvalueKind(&in[0]))) { narrow_float(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[0]), fabs(x), &r); } else { narrow_int(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[0]), kvlangXvalueAsInt64(&in[0]) < 0 ? -kvlangXvalueAsInt64(&in[0]) : kvlangXvalueAsInt64(&in[0]), &r); } break;
+    case 5: kvlangXvalueNewInt64(&r, x < 0 ? -1 : x > 0 ? 1 : 0); break;
     }
-    int rc = write_result(f, &r); xv_free(&r); free_inputs(in, n);
+    int rc = write_result(f, &r); kvlangXvalueFree(&r); free_inputs(in, n);
     return rc;
 }
-static int bi_sqrt(frame_t *f) { return bi_math_unary(f, 0); }
-static int bi_exp(frame_t *f) { return bi_math_unary(f, 1); }
-static int bi_log(frame_t *f) { return bi_math_unary(f, 2); }
-static int bi_neg(frame_t *f) { return bi_math_unary(f, 3); }
-static int bi_abs(frame_t *f) { return bi_math_unary(f, 4); }
-static int bi_sign(frame_t *f) { return bi_math_unary(f, 5); }
+static int kvlangBuiltinSqrt(kvlangFrame_t *f) { return kvlangBuiltinMathUnary(f, 0); }
+static int kvlangBuiltinExp(kvlangFrame_t *f) { return kvlangBuiltinMathUnary(f, 1); }
+static int kvlangBuiltinLog(kvlangFrame_t *f) { return kvlangBuiltinMathUnary(f, 2); }
+static int kvlangBuiltinNeg(kvlangFrame_t *f) { return kvlangBuiltinMathUnary(f, 3); }
+static int kvlangBuiltinAbs(kvlangFrame_t *f) { return kvlangBuiltinMathUnary(f, 4); }
+static int kvlangBuiltinSign(kvlangFrame_t *f) { return kvlangBuiltinMathUnary(f, 5); }
 
-static int bi_pow(frame_t *f) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
+static int kvlangBuiltinPow(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
     if (n < 2 || !is_numeric(&in[0]) || !is_numeric(&in[1])) { set_err(f, "TypeError: expected numeric"); free_inputs(in, n); return -1; }
-    xval_t r; xv_new_float64(&r, pow(xv_as_float64(&in[0]), xv_as_float64(&in[1])));
-    int rc = write_result(f, &r); xv_free(&r); free_inputs(in, n);
+    kvlangXvalue_t r; kvlangXvalueNewFloat64(&r, pow(kvlangXvalueAsFloat64(&in[0]), kvlangXvalueAsFloat64(&in[1])));
+    int rc = write_result(f, &r); kvlangXvalueFree(&r); free_inputs(in, n);
     return rc;
 }
 
-static int bi_maxmin(frame_t *f, bool is_max) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
+static int kvlangBuiltinMaxmin(kvlangFrame_t *f, bool is_max) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
     if (n < 2) { set_err(f, "TypeError: binary op requires 2 inputs, got %d", n); free_inputs(in, n); return -1; }
-    xval_t r;
-    if (is_int_kind(xv_kind(&in[0])) && is_int_kind(xv_kind(&in[1]))) {
+    kvlangXvalue_t r;
+    if (is_int_kind(kvlangXvalueKind(&in[0])) && is_int_kind(kvlangXvalueKind(&in[1]))) {
         int c = cmp_int(&in[0], &in[1]);
         bool take_a = (is_max && c >= 0) || (!is_max && c <= 0);
-        narrow_int(xv_kind(&in[0]), xv_kind(&in[1]), take_a ? xv_as_int64(&in[0]) : xv_as_int64(&in[1]), &r);
+        narrow_int(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1]), take_a ? kvlangXvalueAsInt64(&in[0]) : kvlangXvalueAsInt64(&in[1]), &r);
     } else if (is_numeric(&in[0]) && is_numeric(&in[1])) {
-        double a = xv_as_float64(&in[0]), b = xv_as_float64(&in[1]);
+        double a = kvlangXvalueAsFloat64(&in[0]), b = kvlangXvalueAsFloat64(&in[1]);
         bool take_a = (is_max && a >= b) || (!is_max && a <= b);
-        narrow_float(xv_kind(&in[0]), xv_kind(&in[1]), take_a ? a : b, &r);
-    } else { set_err(f, "TypeError: max/min requires numeric, got %s and %s", xv_kind(&in[0]), xv_kind(&in[1])); free_inputs(in, n); return -1; }
-    int rc = write_result(f, &r); xv_free(&r); free_inputs(in, n);
+        narrow_float(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1]), take_a ? a : b, &r);
+    } else { set_err(f, "TypeError: max/min requires numeric, got %s and %s", kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1])); free_inputs(in, n); return -1; }
+    int rc = write_result(f, &r); kvlangXvalueFree(&r); free_inputs(in, n);
     return rc;
 }
-static int bi_max(frame_t *f) { return bi_maxmin(f, true); }
-static int bi_min(frame_t *f) { return bi_maxmin(f, false); }
+static int kvlangBuiltinMax(kvlangFrame_t *f) { return kvlangBuiltinMaxmin(f, true); }
+static int kvlangBuiltinMin(kvlangFrame_t *f) { return kvlangBuiltinMaxmin(f, false); }
 
 /* cast */
-static int bi_cast_num(frame_t *f, const char *kind) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
-    if (n < 1 || xv_none(&in[0])) { set_err(f, "TypeError: cannot cast None"); free_inputs(in, n); return -1; }
-    xval_t r;
-    if (strcmp(kind, K_BOOL) == 0) xv_new_bool(&r, xv_as_bool(&in[0]));
-    else if (strcmp(kind, K_FLOAT32) == 0) { float fv = (float)xv_as_float64(&in[0]); uint8_t b[4]; memcpy(b, &fv, 4); xv_new_tlv(&r, K_FLOAT32, b, 4, 1); }
-    else if (strcmp(kind, K_FLOAT64) == 0) xv_new_float64(&r, xv_as_float64(&in[0]));
-    else { int64_t v = xv_as_int64(&in[0]); narrow_int(kind, kind, v, &r); }
-    int rc = write_result(f, &r); xv_free(&r); free_inputs(in, n);
+static int kvlangBuiltinCastNum(kvlangFrame_t *f, const char *kind) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
+    if (n < 1 || kvlangXvalueNone(&in[0])) { set_err(f, "TypeError: cannot cast None"); free_inputs(in, n); return -1; }
+    kvlangXvalue_t r;
+    if (strcmp(kind, KVSPACE_KIND_BOOL) == 0) kvlangXvalueNewBool(&r, kvlangXvalueAsBool(&in[0]));
+    else if (strcmp(kind, KVSPACE_KIND_FLOAT32) == 0) { float fv = (float)kvlangXvalueAsFloat64(&in[0]); uint8_t b[4]; memcpy(b, &fv, 4); kvlangXvalueNewTlv(&r, KVSPACE_KIND_FLOAT32, b, 4, 1); }
+    else if (strcmp(kind, KVSPACE_KIND_FLOAT64) == 0) kvlangXvalueNewFloat64(&r, kvlangXvalueAsFloat64(&in[0]));
+    else { int64_t v = kvlangXvalueAsInt64(&in[0]); narrow_int(kind, kind, v, &r); }
+    int rc = write_result(f, &r); kvlangXvalueFree(&r); free_inputs(in, n);
     return rc;
 }
-static int bi_cast_bool(frame_t *f) { return bi_cast_num(f, K_BOOL); }
-static int bi_cast_int8(frame_t *f) { return bi_cast_num(f, K_INT8); }
-static int bi_cast_int16(frame_t *f) { return bi_cast_num(f, K_INT16); }
-static int bi_cast_int32(frame_t *f) { return bi_cast_num(f, K_INT32); }
-static int bi_cast_int64(frame_t *f) { return bi_cast_num(f, K_INT64); }
-static int bi_cast_uint8(frame_t *f) { return bi_cast_num(f, K_UINT8); }
-static int bi_cast_uint16(frame_t *f) { return bi_cast_num(f, K_UINT16); }
-static int bi_cast_uint32(frame_t *f) { return bi_cast_num(f, K_UINT32); }
-static int bi_cast_uint64(frame_t *f) { return bi_cast_num(f, K_UINT64); }
-static int bi_cast_f32(frame_t *f) { return bi_cast_num(f, K_FLOAT32); }
-static int bi_cast_f64(frame_t *f) { return bi_cast_num(f, K_FLOAT64); }
+static int kvlangBuiltinCastBool(kvlangFrame_t *f) { return kvlangBuiltinCastNum(f, KVSPACE_KIND_BOOL); }
+static int kvlangBuiltinCastInt8(kvlangFrame_t *f) { return kvlangBuiltinCastNum(f, KVSPACE_KIND_INT8); }
+static int kvlangBuiltinCastInt16(kvlangFrame_t *f) { return kvlangBuiltinCastNum(f, KVSPACE_KIND_INT16); }
+static int kvlangBuiltinCastInt32(kvlangFrame_t *f) { return kvlangBuiltinCastNum(f, KVSPACE_KIND_INT32); }
+static int kvlangBuiltinCastInt64(kvlangFrame_t *f) { return kvlangBuiltinCastNum(f, KVSPACE_KIND_INT64); }
+static int kvlangBuiltinCastUint8(kvlangFrame_t *f) { return kvlangBuiltinCastNum(f, KVSPACE_KIND_UINT8); }
+static int kvlangBuiltinCastUint16(kvlangFrame_t *f) { return kvlangBuiltinCastNum(f, KVSPACE_KIND_UINT16); }
+static int kvlangBuiltinCastUint32(kvlangFrame_t *f) { return kvlangBuiltinCastNum(f, KVSPACE_KIND_UINT32); }
+static int kvlangBuiltinCastUint64(kvlangFrame_t *f) { return kvlangBuiltinCastNum(f, KVSPACE_KIND_UINT64); }
+static int kvlangBuiltinCastF32(kvlangFrame_t *f) { return kvlangBuiltinCastNum(f, KVSPACE_KIND_FLOAT32); }
+static int kvlangBuiltinCastF64(kvlangFrame_t *f) { return kvlangBuiltinCastNum(f, KVSPACE_KIND_FLOAT64); }
 
-static int bi_cast_char(frame_t *f, const char *kind) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
-    if (n < 1 || xv_none(&in[0])) { set_err(f, "TypeError: char conversion requires a value"); free_inputs(in, n); return -1; }
-    char *s = xv_value_string(&in[0]);
-    xval_t r;
-    if (strcmp(kind, K_CHAR) == 0) xv_new_char_utf32(&r, s);
-    else xv_new_char_kind(&r, kind, s);
-    int rc = write_result(f, &r); xv_free(&r); free(s); free_inputs(in, n);
+static int kvlangBuiltinCastChar(kvlangFrame_t *f, const char *kind) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
+    if (n < 1 || kvlangXvalueNone(&in[0])) { set_err(f, "TypeError: char conversion requires a value"); free_inputs(in, n); return -1; }
+    char *s = kvlangXvalueValueString(&in[0]);
+    kvlangXvalue_t r;
+    if (strcmp(kind, KVSPACE_KIND_CHAR) == 0) kvlangXvalueNewCharUtf32(&r, s);
+    else kvlangXvalueNewCharKind(&r, kind, s);
+    int rc = write_result(f, &r); kvlangXvalueFree(&r); free(s); free_inputs(in, n);
     return rc;
 }
-static int bi_cast_char32(frame_t *f) { return bi_cast_char(f, K_CHAR); }
-static int bi_cast_char8(frame_t *f) { return bi_cast_char(f, K_CHAR_UTF8); }
-static int bi_cast_char_ascii(frame_t *f) { return bi_cast_char(f, K_CHAR_ASCII); }
+static int kvlangBuiltinCastChar32(kvlangFrame_t *f) { return kvlangBuiltinCastChar(f, KVSPACE_KIND_CHAR); }
+static int kvlangBuiltinCastChar8(kvlangFrame_t *f) { return kvlangBuiltinCastChar(f, KVSPACE_KIND_CHAR_UTF8); }
+static int kvlangBuiltinCastCharAscii(kvlangFrame_t *f) { return kvlangBuiltinCastChar(f, KVSPACE_KIND_CHAR_ASCII); }
 
 /* ── 注册表 ───────────────────────────────────────────────────────── */
 
 /* 数字多类型运算融合为单条：派发前 strip_num_kind 剥掉 <numkind>. 前缀，
- * int64.add / float32.add … 全部归到同一条 add（union 语义），bi_* 按操作数 kind 归约。 */
-static const struct { const char *op; bi_fn fn; } builtins[] = {
-    {"add", bi_add}, {"+", bi_add},
-    {"sub", bi_sub}, {"-", bi_sub},
-    {"mul", bi_mul}, {"×", bi_mul},
-    {"div", bi_div}, {"÷", bi_div},
-    {"mod", bi_mod}, {"%", bi_mod},
-    {"eq", bi_eq}, {"==", bi_eq},
-    {"neq", bi_neq}, {"!=", bi_neq}, {"≠", bi_neq},
-    {"lt", bi_lt}, {"<", bi_lt},
-    {"gt", bi_gt}, {">", bi_gt},
-    {"le", bi_le}, {"<=", bi_le}, {"≤", bi_le},
-    {"ge", bi_ge}, {">=", bi_ge}, {"≥", bi_ge},
-    {"and", bi_and}, {"&&", bi_and},
-    {"or", bi_or}, {"||", bi_or},
-    {"not", bi_not}, {"!", bi_not},
-    {"bitand", bi_bitand}, {"&", bi_bitand},
-    {"bitor", bi_bitor}, {"|", bi_bitor},
-    {"bitxor", bi_bitxor}, {"^", bi_bitxor},
-    {"shl", bi_shl}, {"<<", bi_shl},
-    {"shr", bi_shr}, {">>", bi_shr},
-    {"pow", bi_pow},
-    {"sqrt", bi_sqrt}, {"√", bi_sqrt},
-    {"exp", bi_exp},
-    {"log", bi_log},
-    {"neg", bi_neg},
-    {"abs", bi_abs},
-    {"sign", bi_sign},
-    {"max", bi_max}, {"min", bi_min},
+ * int64.add / float32.add … 全部归到同一条 add（union 语义），kvlangBuiltin* 按操作数 kind 归约。 */
+static const struct { const char *op; kvlangBuiltinFn fn; } builtins[] = {
+    {"add", kvlangBuiltinAdd}, {"+", kvlangBuiltinAdd},
+    {"sub", kvlangBuiltinSub}, {"-", kvlangBuiltinSub},
+    {"mul", kvlangBuiltinMul}, {"×", kvlangBuiltinMul},
+    {"div", kvlangBuiltinDiv}, {"÷", kvlangBuiltinDiv},
+    {"mod", kvlangBuiltinMod}, {"%", kvlangBuiltinMod},
+    {"eq", kvlangBuiltinEq}, {"==", kvlangBuiltinEq},
+    {"neq", kvlangBuiltinNeq}, {"!=", kvlangBuiltinNeq}, {"≠", kvlangBuiltinNeq},
+    {"lt", kvlangBuiltinLt}, {"<", kvlangBuiltinLt},
+    {"gt", kvlangBuiltinGt}, {">", kvlangBuiltinGt},
+    {"le", kvlangBuiltinLe}, {"<=", kvlangBuiltinLe}, {"≤", kvlangBuiltinLe},
+    {"ge", kvlangBuiltinGe}, {">=", kvlangBuiltinGe}, {"≥", kvlangBuiltinGe},
+    {"and", kvlangBuiltinAnd}, {"&&", kvlangBuiltinAnd},
+    {"or", kvlangBuiltinOr}, {"||", kvlangBuiltinOr},
+    {"not", kvlangBuiltinNot}, {"!", kvlangBuiltinNot},
+    {"bitand", kvlangBuiltinBitand}, {"&", kvlangBuiltinBitand},
+    {"bitor", kvlangBuiltinBitor}, {"|", kvlangBuiltinBitor},
+    {"bitxor", kvlangBuiltinBitxor}, {"^", kvlangBuiltinBitxor},
+    {"shl", kvlangBuiltinShl}, {"<<", kvlangBuiltinShl},
+    {"shr", kvlangBuiltinShr}, {">>", kvlangBuiltinShr},
+    {"pow", kvlangBuiltinPow},
+    {"sqrt", kvlangBuiltinSqrt}, {"√", kvlangBuiltinSqrt},
+    {"exp", kvlangBuiltinExp},
+    {"log", kvlangBuiltinLog},
+    {"neg", kvlangBuiltinNeg},
+    {"abs", kvlangBuiltinAbs},
+    {"sign", kvlangBuiltinSign},
+    {"max", kvlangBuiltinMax}, {"min", kvlangBuiltinMin},
     /* cast */
-    {"bool", bi_cast_bool}, {"int8", bi_cast_int8}, {"int16", bi_cast_int16},
-    {"int32", bi_cast_int32}, {"int64", bi_cast_int64}, {"uint8", bi_cast_uint8},
-    {"uint16", bi_cast_uint16}, {"uint32", bi_cast_uint32}, {"uint64", bi_cast_uint64},
-    {"float32", bi_cast_f32}, {"float64", bi_cast_f64},
-    {"char/utf32", bi_cast_char32}, {"char/utf8", bi_cast_char8}, {"char/ascii", bi_cast_char_ascii},
+    {"bool", kvlangBuiltinCastBool}, {"int8", kvlangBuiltinCastInt8}, {"int16", kvlangBuiltinCastInt16},
+    {"int32", kvlangBuiltinCastInt32}, {"int64", kvlangBuiltinCastInt64}, {"uint8", kvlangBuiltinCastUint8},
+    {"uint16", kvlangBuiltinCastUint16}, {"uint32", kvlangBuiltinCastUint32}, {"uint64", kvlangBuiltinCastUint64},
+    {"float32", kvlangBuiltinCastF32}, {"float64", kvlangBuiltinCastF64},
+    {"char/utf32", kvlangBuiltinCastChar32}, {"char/utf8", kvlangBuiltinCastChar8}, {"char/ascii", kvlangBuiltinCastCharAscii},
     /* collection */
-    {"array", bi_array}, {"len", bi_len}, {"at", bi_at}, {"set", bi_set}, {"has", bi_has},
-    {"array.scatter", bi_scatter}, {"array.compact", bi_compact},
-    {"array.append", bi_append}, {"array.slice", bi_slice},
-    {"dict", bi_dict},
-    {"string.set", bi_string_set}, {"string.char", bi_string_char}, {"string.ord", bi_string_ord},
-    {"string.cmp", bi_string_cmp}, {"string.find", bi_string_find}, {"string.len", bi_string_len},
-    {"string.slice", bi_string_slice}, {"string.concat", bi_string_concat},
-    {"time.now", bi_time_now}, {"time.sub", bi_time_sub}, {"time.add", bi_time_add},
-    {"time/duration.nanos", bi_dur_from}, {"time/duration.millis", bi_dur_from},
-    {"time/duration.seconds", bi_dur_from}, {"time/duration.minutes", bi_dur_from},
-    {"time/duration.hours", bi_dur_from},
-    {"time/duration.as_nanos", bi_dur_to}, {"time/duration.as_millis", bi_dur_to},
-    {"time/duration.as_seconds", bi_dur_to}, {"time/duration.as_minutes", bi_dur_to},
-    {"time/duration.as_hours", bi_dur_to},
-    {"time/duration.add", bi_dur_arith}, {"time/duration.sub", bi_dur_arith},
-    {"time/duration.before", bi_dur_cmp}, {"time/duration.after", bi_dur_cmp},
-    {"time.before", bi_time_cmp}, {"time.after", bi_time_cmp},
-    {"random.uint64", bi_rand_uint64}, {"random.int63", bi_rand_int63}, {"random.intn", bi_rand_intn},
-    {"kvhas", bi_kvhas}, {"kvat", bi_kvat},
-    {"debugger", bi_debugger},
+    {"array", kvlangBuiltinArray}, {"len", kvlangBuiltinLen}, {"at", kvlangBuiltinAt}, {"set", kvlangBuiltinSet}, {"has", kvlangBuiltinHas},
+    {"array.scatter", kvlangBuiltinScatter}, {"array.compact", kvlangBuiltinCompact},
+    {"array.append", kvlangBuiltinAppend}, {"array.slice", kvlangBuiltinSlice},
+    {"dict", kvlangBuiltinDict},
+    {"string.set", kvlangBuiltinStringSet}, {"string.char", kvlangBuiltinStringChar}, {"string.ord", kvlangBuiltinStringOrd},
+    {"string.cmp", kvlangBuiltinStringCmp}, {"string.find", kvlangBuiltinStringFind}, {"string.len", kvlangBuiltinStringLen},
+    {"string.slice", kvlangBuiltinStringSlice}, {"string.concat", kvlangBuiltinStringConcat},
+    {"time.now", kvlangBuiltinTimeNow}, {"time.sub", kvlangBuiltinTimeSub}, {"time.add", kvlangBuiltinTimeAdd},
+    {"time/duration.nanos", kvlangBuiltinDurFrom}, {"time/duration.millis", kvlangBuiltinDurFrom},
+    {"time/duration.seconds", kvlangBuiltinDurFrom}, {"time/duration.minutes", kvlangBuiltinDurFrom},
+    {"time/duration.hours", kvlangBuiltinDurFrom},
+    {"time/duration.as_nanos", kvlangBuiltinDurTo}, {"time/duration.as_millis", kvlangBuiltinDurTo},
+    {"time/duration.as_seconds", kvlangBuiltinDurTo}, {"time/duration.as_minutes", kvlangBuiltinDurTo},
+    {"time/duration.as_hours", kvlangBuiltinDurTo},
+    {"time/duration.add", kvlangBuiltinDurArith}, {"time/duration.sub", kvlangBuiltinDurArith},
+    {"time/duration.before", kvlangBuiltinDurCmp}, {"time/duration.after", kvlangBuiltinDurCmp},
+    {"time.before", kvlangBuiltinTimeCmp}, {"time.after", kvlangBuiltinTimeCmp},
+    {"random.uint64", kvlangBuiltinRandUint64}, {"random.int63", kvlangBuiltinRandInt63}, {"random.intn", kvlangBuiltinRandIntn},
+    {"kvhas", kvlangBuiltinKvhas}, {"kvat", kvlangBuiltinKvat},
+    {"debugger", kvlangBuiltinDebugger},
 };
 
 static const size_t builtins_n = sizeof(builtins) / sizeof(builtins[0]);
@@ -621,13 +621,13 @@ static const char *strip_num_kind(const char *op) {
     return op;
 }
 
-bool bi_is_native(const char *opcode) {
+bool kvlangBuiltinIsNative(const char *opcode) {
     const char *op = strip_num_kind(opcode);
     for (size_t i = 0; i < builtins_n; i++) if (strcmp(builtins[i].op, op) == 0) return true;
     return false;
 }
 
-bool bi_num_op(const char *opcode) {
+bool kvlangBuiltinNumOp(const char *opcode) {
     switch (opcode[0]) {
     case 'a': return strcmp(opcode, "add") == 0 || strcmp(opcode, "abs") == 0;
     case 'b': return strcmp(opcode, "bitand") == 0 || strcmp(opcode, "bitor") == 0 || strcmp(opcode, "bitxor") == 0;
@@ -643,7 +643,7 @@ bool bi_num_op(const char *opcode) {
     return false;
 }
 
-int bi_native(frame_t *f) {
+int kvlangBuiltinNative(kvlangFrame_t *f) {
     const char *op = strip_num_kind(f->inst->opcode);
     for (size_t i = 0; i < builtins_n; i++) {
         if (strcmp(builtins[i].op, op) == 0) return builtins[i].fn(f);
@@ -653,22 +653,22 @@ int bi_native(frame_t *f) {
 
 /* ── copy ─────────────────────────────────────────────────────────── */
 
-int bi_execute_copy(kv_t *kv, const char *vtid, const char *pc, rwir_inst_t *inst) {
-    char *fr = kt_frame_root(pc);
-    frame_t f = { kv, vtid, pc, inst };
+int kvlangBuiltinExecuteCopy(kvlangKv_t *kv, const char *vtid, const char *pc, kvlangRwirInst_t *inst) {
+    char *fr = kvlangKeytreeFrameRoot(pc);
+    kvlangFrame_t f = { kv, vtid, pc, inst };
     if (inst->nr == 0) { free(fr); next_pc(&f); return 0; }
-    char *ff = bi_func_frame_root(kv, fr);
-    xval_t v; xv_zero(&v);
-    bi_resolve_read_value(kv, ff, inst->reads[0].name, &inst->reads[0].val, &v);
+    char *ff = kvlangBuiltinFuncFrameRoot(kv, fr);
+    kvlangXvalue_t v; kvlangXvalueZero(&v);
+    kvlangBuiltinResolveReadValue(kv, ff, inst->reads[0].name, &inst->reads[0].val, &v);
     free(ff);
     for (int i = 0; i < inst->nw; i++) {
-        char *key = bi_resolve_write_slot(kv, fr, inst->writes[i].name);
-        kv_pair_t pair = { key, v };
+        char *key = kvlangBuiltinResolveWriteSlot(kv, fr, inst->writes[i].name);
+        kvlangKvPair_t pair = { key, v };
         char err[256];
-        kv_set(kv, &pair, 1, err, sizeof err);
+        kvlangKvSet(kv, &pair, 1, err, sizeof err);
         free(key);
     }
-    xv_free(&v);
+    kvlangXvalueFree(&v);
     free(fr);
     next_pc(&f);
     return 0;
@@ -690,15 +690,15 @@ static uint32_t utf8_decode_next(const char *s, size_t *i, size_t len) {
     return cp;
 }
 
-static uint32_t *string_runes(const xval_t *v, int *out_n) {
-    if (xv_kind_is(v, K_CHAR)) {
-        int n = xv_array_len(v);
+static uint32_t *string_runes(const kvlangXvalue_t *v, int *out_n) {
+    if (kvlangXvalueKindIs(v, KVSPACE_KIND_CHAR)) {
+        int n = kvlangXvalueArrayLen(v);
         uint32_t *r = malloc(sizeof(uint32_t) * (n > 0 ? n : 1));
-        for (int i = 0; i < n; i++) r[i] = xv_char32_at(v, i);
+        for (int i = 0; i < n; i++) r[i] = kvlangXvalueChar32At(v, i);
         *out_n = n;
         return r;
     }
-    char *s = xv_value_string(v);
+    char *s = kvlangXvalueValueString(v);
     size_t len = strlen(s);
     int cap = 16, n = 0;
     uint32_t *r = malloc(sizeof(uint32_t) * cap);
@@ -712,218 +712,218 @@ static uint32_t *string_runes(const xval_t *v, int *out_n) {
     return r;
 }
 
-static void new_char32_cp(xval_t *out, uint32_t cp) {
+static void new_char32_cp(kvlangXvalue_t *out, uint32_t cp) {
     uint8_t le[4] = { cp & 0xFF, (cp >> 8) & 0xFF, (cp >> 16) & 0xFF, (cp >> 24) & 0xFF };
     uint8_t *o; uint32_t l; int32_t d = 1;
-    kvspace_tlv_encode(K_CHAR, le, 4, &d, 1, &o, &l);
+    kvspaceTlvEncode(KVSPACE_KIND_CHAR, le, 4, &d, 1, &o, &l);
     out->data = o; out->len = l;
 }
 
-static int write_char32(frame_t *f, const uint32_t *r, int n) {
-    xval_t e;
+static int write_char32(kvlangFrame_t *f, const uint32_t *r, int n) {
+    kvlangXvalue_t e;
     if (n > 0) {
-        sbuf_t raw; sb_init(&raw);
+        kvlangStrbuf_t raw; kvlangStrbufInit(&raw);
         for (int i = 0; i < n; i++) {
             uint8_t le[4] = { r[i] & 0xFF, (r[i] >> 8) & 0xFF, (r[i] >> 16) & 0xFF, (r[i] >> 24) & 0xFF };
-            sb_putn(&raw, (const char *)le, 4);
+            kvlangStrbufPutn(&raw, (const char *)le, 4);
         }
         uint8_t *out; uint32_t len; int32_t d = n;
-        kvspace_tlv_encode(K_CHAR, (const uint8_t *)raw.p, (uint32_t)raw.len, &d, 1, &out, &len);
-        sb_free(&raw);
+        kvspaceTlvEncode(KVSPACE_KIND_CHAR, (const uint8_t *)raw.p, (uint32_t)raw.len, &d, 1, &out, &len);
+        kvlangStrbufFree(&raw);
         e.data = out; e.len = len;
     } else {
         uint8_t *out; uint32_t len; int32_t d = 0;
-        kvspace_tlv_encode(K_CHAR, (const uint8_t *)"", 0, &d, 1, &out, &len);
+        kvspaceTlvEncode(KVSPACE_KIND_CHAR, (const uint8_t *)"", 0, &d, 1, &out, &len);
         e.data = out; e.len = len;
     }
     int rc = write_result(f, &e);
-    xv_free(&e);
+    kvlangXvalueFree(&e);
     return rc;
 }
 
-static char *kv_key(const xval_t *v) {
-    if (xv_is_char_kind(xv_kind(v))) return xv_value_string(v);
-    if (is_int_kind(xv_kind(v))) { char buf[32]; snprintf(buf, sizeof buf, "%lld", (long long)xv_as_int64(v)); return strdup(buf); }
+static char *kvlangKvKey(const kvlangXvalue_t *v) {
+    if (kvlangXvalueIsCharKind(kvlangXvalueKind(v))) return kvlangXvalueValueString(v);
+    if (is_int_kind(kvlangXvalueKind(v))) { char buf[32]; snprintf(buf, sizeof buf, "%lld", (long long)kvlangXvalueAsInt64(v)); return strdup(buf); }
     return strdup("");
 }
 
 static const char *var_len_char_err(const char *kind) {
-    return strcmp(kind, K_CHAR_UTF8) == 0 ? "TypeError: char/utf8 is variable-width; index/code-point ops require char/utf32 or char/ascii" : NULL;
+    return strcmp(kind, KVSPACE_KIND_CHAR_UTF8) == 0 ? "TypeError: char/utf8 is variable-width; index/code-point ops require char/utf32 or char/ascii" : NULL;
 }
 
-static void pack_typed_array(const char *kind, const xval_t *elems, int n, xval_t *out) {
-    int sz = xv_elem_size(kind);
+static void pack_typed_array(const char *kind, const kvlangXvalue_t *elems, int n, kvlangXvalue_t *out) {
+    int sz = kvlangXvalueElemSize(kind);
     uint8_t *raw = malloc((size_t)sz * (n > 0 ? n : 1));
     for (int i = 0; i < n; i++) {
         const uint8_t *b; int32_t blen;
-        kvhead_t h; kvspace_decode_head(elems[i].data, elems[i].len, &h);
+        kvspaceHead_t h; kvspaceDecodeHead(elems[i].data, elems[i].len, &h);
         b = elems[i].data + h.body_offset; blen = h.body_len;
         int c = blen < sz ? blen : sz;
         memcpy(raw + i * sz, b, (size_t)c);
         for (int j = c; j < sz; j++) raw[i * sz + j] = 0;
     }
-    xv_new_tlv(out, kind, raw, (uint32_t)(sz * n), n);
+    kvlangXvalueNewTlv(out, kind, raw, (uint32_t)(sz * n), n);
     free(raw);
 }
 
-static char *separated_base(kv_t *kv, const char *fp, const char *name) {
-    char *base = bi_resolve_write_slot(kv, fp, name);
-    sbuf_t k; sb_init(&k);
-    sb_puts(&k, base); sb_puts(&k, "[0]");
-    xval_t v; xv_zero(&v);
-    kv_get_one(kv, k.p, &v);
-    bool exists = !xv_none(&v);
-    xv_free(&v); sb_free(&k);
+static char *separated_base(kvlangKv_t *kv, const char *fp, const char *name) {
+    char *base = kvlangBuiltinResolveWriteSlot(kv, fp, name);
+    kvlangStrbuf_t k; kvlangStrbufInit(&k);
+    kvlangStrbufPuts(&k, base); kvlangStrbufPuts(&k, "[0]");
+    kvlangXvalue_t v; kvlangXvalueZero(&v);
+    kvlangKvGetOne(kv, k.p, &v);
+    bool exists = !kvlangXvalueNone(&v);
+    kvlangXvalueFree(&v); kvlangStrbufFree(&k);
     if (!exists) { free(base); return NULL; }
     return base;
 }
 
-static int separated_len(kv_t *kv, const char *base) {
+static int separated_len(kvlangKv_t *kv, const char *base) {
     for (int i = 0; ; i++) {
-        sbuf_t k; sb_init(&k);
-        sb_printf(&k, "%s[%d]", base, i);
-        xval_t v; xv_zero(&v);
-        kv_get_one(kv, k.p, &v);
-        bool none = xv_none(&v);
-        xv_free(&v); sb_free(&k);
+        kvlangStrbuf_t k; kvlangStrbufInit(&k);
+        kvlangStrbufPrintf(&k, "%s[%d]", base, i);
+        kvlangXvalue_t v; kvlangXvalueZero(&v);
+        kvlangKvGetOne(kv, k.p, &v);
+        bool none = kvlangXvalueNone(&v);
+        kvlangXvalueFree(&v); kvlangStrbufFree(&k);
         if (none) return i;
     }
 }
 
 /* ── array 系列 ───────────────────────────────────────────────────── */
 
-static void ensure_scattered(frame_t *f, const char *base) {
-    xval_t arr; xv_zero(&arr);
-    kv_get_one(f->kv, base, &arr);
-    if (xv_none(&arr) || xv_elem_size(xv_kind(&arr)) <= 0) { xv_free(&arr); return; }
-    int n = xv_array_len(&arr);
+static void ensure_scattered(kvlangFrame_t *f, const char *base) {
+    kvlangXvalue_t arr; kvlangXvalueZero(&arr);
+    kvlangKvGetOne(f->kv, base, &arr);
+    if (kvlangXvalueNone(&arr) || kvlangXvalueElemSize(kvlangXvalueKind(&arr)) <= 0) { kvlangXvalueFree(&arr); return; }
+    int n = kvlangXvalueArrayLen(&arr);
     for (int i = 0; i < n; i++) {
-        sbuf_t k; sb_init(&k); sb_printf(&k, "%s[%d]", base, i);
-        xval_t e; xvalue_at(&arr, i, &e);
-        kv_pair_t p = { k.p, e };
-        char err[256]; kv_set(f->kv, &p, 1, err, sizeof err);
-        xv_free(&e); sb_free(&k);
+        kvlangStrbuf_t k; kvlangStrbufInit(&k); kvlangStrbufPrintf(&k, "%s[%d]", base, i);
+        kvlangXvalue_t e; xvalue_at(&arr, i, &e);
+        kvlangKvPair_t p = { k.p, e };
+        char err[256]; kvlangKvSet(f->kv, &p, 1, err, sizeof err);
+        kvlangXvalueFree(&e); kvlangStrbufFree(&k);
     }
-    xv_free(&arr);
-    char err[256]; kv_del(f->kv, base, err, sizeof err);
+    kvlangXvalueFree(&arr);
+    char err[256]; kvlangKvDel(f->kv, base, err, sizeof err);
 }
 
-int bi_array(frame_t *f) {
-    xval_t in[64]; int n = read_inputs(f, in, 64);
+int kvlangBuiltinArray(kvlangFrame_t *f) {
+    kvlangXvalue_t in[64]; int n = read_inputs(f, in, 64);
     if (f->inst->nw == 0 || n == 0) { next_pc(f); free_inputs(in, n); return 0; }
-    const char *kind = xv_kind(&in[0]);
-    if (xv_elem_size(kind) <= 0) { free_inputs(in, n); return set_err(f, "array: unsupported element kind %s", kind); }
-    for (int i = 1; i < n; i++) if (strcmp(xv_kind(&in[i]), kind) != 0) { free_inputs(in, n); return set_err(f, "array: mixed kinds %s and %s", kind, xv_kind(&in[i])); }
-    xval_t arr; pack_typed_array(kind, in, n, &arr);
-    char *fr = kt_frame_root(f->pc);
-    char *key = bi_resolve_write_slot(f->kv, fr, f->inst->writes[0].name);
+    const char *kind = kvlangXvalueKind(&in[0]);
+    if (kvlangXvalueElemSize(kind) <= 0) { free_inputs(in, n); return set_err(f, "array: unsupported element kind %s", kind); }
+    for (int i = 1; i < n; i++) if (strcmp(kvlangXvalueKind(&in[i]), kind) != 0) { free_inputs(in, n); return set_err(f, "array: mixed kinds %s and %s", kind, kvlangXvalueKind(&in[i])); }
+    kvlangXvalue_t arr; pack_typed_array(kind, in, n, &arr);
+    char *fr = kvlangKeytreeFrameRoot(f->pc);
+    char *key = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->writes[0].name);
     free(fr);
-    kv_pair_t p = { key, arr };
-    char err[256]; kv_set(f->kv, &p, 1, err, sizeof err);
-    free(key); xv_free(&arr);
+    kvlangKvPair_t p = { key, arr };
+    char err[256]; kvlangKvSet(f->kv, &p, 1, err, sizeof err);
+    free(key); kvlangXvalueFree(&arr);
     next_pc(f);
     free_inputs(in, n);
     return 0;
 }
 
-int bi_len(frame_t *f) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
+int kvlangBuiltinLen(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
     int len = 0;
-    if (n > 0 && xv_none(&in[0]) && f->inst->nr > 0) {
-        char *fr = kt_frame_root(f->pc);
+    if (n > 0 && kvlangXvalueNone(&in[0]) && f->inst->nr > 0) {
+        char *fr = kvlangKeytreeFrameRoot(f->pc);
         char *base = separated_base(f->kv, fr, f->inst->reads[0].name);
         if (base) { len = separated_len(f->kv, base); free(base); }
         free(fr);
-    } else if (n > 0) len = xv_array_len(&in[0]);
-    xval_t r; xv_new_int64(&r, len);
-    int rc = write_result(f, &r); xv_free(&r); free_inputs(in, n);
+    } else if (n > 0) len = kvlangXvalueArrayLen(&in[0]);
+    kvlangXvalue_t r; kvlangXvalueNewInt64(&r, len);
+    int rc = write_result(f, &r); kvlangXvalueFree(&r); free_inputs(in, n);
     return rc;
 }
 
-int bi_at(frame_t *f) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
+int kvlangBuiltinAt(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
     if (n < 2) { free_inputs(in, n); return set_err(f, "TypeError: at requires array and index"); }
-    const char *k0 = xv_kind(&in[0]), *k1 = xv_kind(&in[1]);
+    const char *k0 = kvlangXvalueKind(&in[0]), *k1 = kvlangXvalueKind(&in[1]);
     /* 字符串非路径 → 码点索引 */
-    if (xv_is_char_kind(k0)) {
-        char *s = xv_value_string(&in[0]);
+    if (kvlangXvalueIsCharKind(k0)) {
+        char *s = kvlangXvalueValueString(&in[0]);
         bool is_path = s[0] == '/';
         free(s);
         if (!is_path) {
             if (var_len_char_err(k0)) { free_inputs(in, n); return set_err(f, "%s", var_len_char_err(k0)); }
-            if (!is_int_kind(k1)) { xval_t e; xv_new_char_utf32(&e, ""); int rc = write_result(f, &e); xv_free(&e); free_inputs(in, n); return rc; }
-            int idx = (int)xv_as_int64(&in[1]);
+            if (!is_int_kind(k1)) { kvlangXvalue_t e; kvlangXvalueNewCharUtf32(&e, ""); int rc = write_result(f, &e); kvlangXvalueFree(&e); free_inputs(in, n); return rc; }
+            int idx = (int)kvlangXvalueAsInt64(&in[1]);
             int rn; uint32_t *r = string_runes(&in[0], &rn);
-            if (idx < 0 || idx >= rn) { free(r); xval_t e; xv_new_char_utf32(&e, ""); int rc = write_result(f, &e); xv_free(&e); free_inputs(in, n); return rc; }
-            xval_t e; new_char32_cp(&e, r[idx]);
-            int rc = write_result(f, &e); xv_free(&e); free(r); free_inputs(in, n); return rc;
+            if (idx < 0 || idx >= rn) { free(r); kvlangXvalue_t e; kvlangXvalueNewCharUtf32(&e, ""); int rc = write_result(f, &e); kvlangXvalueFree(&e); free_inputs(in, n); return rc; }
+            kvlangXvalue_t e; new_char32_cp(&e, r[idx]);
+            int rc = write_result(f, &e); kvlangXvalueFree(&e); free(r); free_inputs(in, n); return rc;
         }
     }
     /* 路径访问 */
-    bool path_access = strcmp(k0, K_DICT) == 0 || xv_is_char_kind(k0) || xv_is_char_kind(k1) ||
+    bool path_access = strcmp(k0, KVSPACE_KIND_DICT) == 0 || kvlangXvalueIsCharKind(k0) || kvlangXvalueIsCharKind(k1) ||
         (f->inst->nr > 0 && (f->inst->reads[0].name[0] == '/' || (f->inst->reads[0].name[0] == '"' && f->inst->reads[0].name[1] == '/')));
     if (path_access) {
-        char *fr = kt_frame_root(f->pc);
-        char *ff = bi_func_frame_root(f->kv, fr);
-        xval_t base; xv_zero(&base);
-        bi_resolve_read_value(f->kv, ff, f->inst->reads[0].name, &f->inst->reads[0].val, &base);
-        char *bp = xv_none(&base) || (strcmp(xv_kind(&base), K_DICT) == 0 || strcmp(xv_kind(&base), K_INDEX) == 0 || strcmp(xv_kind(&base), K_EXT_INDEX) == 0) ? bi_resolve_write_slot(f->kv, ff, f->inst->reads[0].name) : xv_value_string(&base);
-        char *kk = kv_key(&in[1]);
-        char *path = kt_member(bp, kk);
-        xval_t v; xv_zero(&v);
-        kv_get_one(f->kv, path, &v);
-        int rc = write_result(f, &v); xv_free(&v);
-        free(path); free(kk); free(bp); xv_free(&base); free(ff); free(fr);
+        char *fr = kvlangKeytreeFrameRoot(f->pc);
+        char *ff = kvlangBuiltinFuncFrameRoot(f->kv, fr);
+        kvlangXvalue_t base; kvlangXvalueZero(&base);
+        kvlangBuiltinResolveReadValue(f->kv, ff, f->inst->reads[0].name, &f->inst->reads[0].val, &base);
+        char *bp = kvlangXvalueNone(&base) || (strcmp(kvlangXvalueKind(&base), KVSPACE_KIND_DICT) == 0 || strcmp(kvlangXvalueKind(&base), KVSPACE_KIND_INDEX) == 0 || strcmp(kvlangXvalueKind(&base), KVSPACE_KIND_EXT_INDEX) == 0) ? kvlangBuiltinResolveWriteSlot(f->kv, ff, f->inst->reads[0].name) : kvlangXvalueValueString(&base);
+        char *kk = kvlangKvKey(&in[1]);
+        char *path = kvlangKeytreeMember(bp, kk);
+        kvlangXvalue_t v; kvlangXvalueZero(&v);
+        kvlangKvGetOne(f->kv, path, &v);
+        int rc = write_result(f, &v); kvlangXvalueFree(&v);
+        free(path); free(kk); free(bp); kvlangXvalueFree(&base); free(ff); free(fr);
         free_inputs(in, n); return rc;
     }
-    if (xv_elem_size(k0) > 0 && xv_is_char_kind(k1)) { free_inputs(in, n); return set_err(f, "IndexError: at: index must be integer for typed array"); }
-    if (xv_none(&in[0]) && f->inst->nr > 0) {
-        char *fr = kt_frame_root(f->pc);
+    if (kvlangXvalueElemSize(k0) > 0 && kvlangXvalueIsCharKind(k1)) { free_inputs(in, n); return set_err(f, "IndexError: at: index must be integer for typed array"); }
+    if (kvlangXvalueNone(&in[0]) && f->inst->nr > 0) {
+        char *fr = kvlangKeytreeFrameRoot(f->pc);
         char *base = separated_base(f->kv, fr, f->inst->reads[0].name);
         if (base) {
-            int idx = (int)xv_as_int64(&in[1]);
-            sbuf_t k; sb_init(&k); sb_printf(&k, "%s[%d]", base, idx);
-            xval_t v; xv_zero(&v); kv_get_one(f->kv, k.p, &v);
-            int rc = write_result(f, &v); xv_free(&v); sb_free(&k);
+            int idx = (int)kvlangXvalueAsInt64(&in[1]);
+            kvlangStrbuf_t k; kvlangStrbufInit(&k); kvlangStrbufPrintf(&k, "%s[%d]", base, idx);
+            kvlangXvalue_t v; kvlangXvalueZero(&v); kvlangKvGetOne(f->kv, k.p, &v);
+            int rc = write_result(f, &v); kvlangXvalueFree(&v); kvlangStrbufFree(&k);
             free(base); free(fr); free_inputs(in, n); return rc;
         }
         free(fr);
     }
-    if (xv_none(&in[0])) { free_inputs(in, n); return set_err(f, "IndexError: at: base is None; help: declare a key-family first or pass a path string"); }
-    int idx = (int)xv_as_int64(&in[1]);
-    xval_t e; xvalue_at(&in[0], idx, &e);
-    int rc = write_result(f, &e); xv_free(&e); free_inputs(in, n);
+    if (kvlangXvalueNone(&in[0])) { free_inputs(in, n); return set_err(f, "IndexError: at: base is None; help: declare a key-family first or pass a path string"); }
+    int idx = (int)kvlangXvalueAsInt64(&in[1]);
+    kvlangXvalue_t e; xvalue_at(&in[0], idx, &e);
+    int rc = write_result(f, &e); kvlangXvalueFree(&e); free_inputs(in, n);
     return rc;
 }
 
-int bi_has(frame_t *f) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
-    if (n < 2) { xval_t r; xv_new_bool(&r, false); int rc = write_result(f, &r); xv_free(&r); free_inputs(in, n); return rc; }
-    char *fr = kt_frame_root(f->pc);
-    char *ff = bi_func_frame_root(f->kv, fr);
-    xval_t base; xv_zero(&base);
-    bi_resolve_read_value(f->kv, ff, f->inst->reads[0].name, &f->inst->reads[0].val, &base);
-    char *bp = xv_none(&base) || (strcmp(xv_kind(&base), K_DICT) == 0 || strcmp(xv_kind(&base), K_INDEX) == 0) ? bi_resolve_write_slot(f->kv, ff, f->inst->reads[0].name) : xv_value_string(&base);
-    char *kk = kv_key(&in[1]);
-    char *path = kt_member(bp, kk);
-    xval_t v; xv_zero(&v); kv_get_one(f->kv, path, &v);
-    bool exists = !xv_none(&v);
-    xval_t r; xv_new_bool(&r, exists);
-    int rc = write_result(f, &r); xv_free(&r); xv_free(&v);
-    free(path); free(kk); free(bp); xv_free(&base); free(ff); free(fr);
+int kvlangBuiltinHas(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
+    if (n < 2) { kvlangXvalue_t r; kvlangXvalueNewBool(&r, false); int rc = write_result(f, &r); kvlangXvalueFree(&r); free_inputs(in, n); return rc; }
+    char *fr = kvlangKeytreeFrameRoot(f->pc);
+    char *ff = kvlangBuiltinFuncFrameRoot(f->kv, fr);
+    kvlangXvalue_t base; kvlangXvalueZero(&base);
+    kvlangBuiltinResolveReadValue(f->kv, ff, f->inst->reads[0].name, &f->inst->reads[0].val, &base);
+    char *bp = kvlangXvalueNone(&base) || (strcmp(kvlangXvalueKind(&base), KVSPACE_KIND_DICT) == 0 || strcmp(kvlangXvalueKind(&base), KVSPACE_KIND_INDEX) == 0) ? kvlangBuiltinResolveWriteSlot(f->kv, ff, f->inst->reads[0].name) : kvlangXvalueValueString(&base);
+    char *kk = kvlangKvKey(&in[1]);
+    char *path = kvlangKeytreeMember(bp, kk);
+    kvlangXvalue_t v; kvlangXvalueZero(&v); kvlangKvGetOne(f->kv, path, &v);
+    bool exists = !kvlangXvalueNone(&v);
+    kvlangXvalue_t r; kvlangXvalueNewBool(&r, exists);
+    int rc = write_result(f, &r); kvlangXvalueFree(&r); kvlangXvalueFree(&v);
+    free(path); free(kk); free(bp); kvlangXvalueFree(&base); free(ff); free(fr);
     free_inputs(in, n); return rc;
 }
 
-int bi_set(frame_t *f) {
-    xval_t in[3]; int n = read_inputs(f, in, 3);
+int kvlangBuiltinSet(kvlangFrame_t *f) {
+    kvlangXvalue_t in[3]; int n = read_inputs(f, in, 3);
     if (n < 3) { free_inputs(in, n); return set_err(f, "TypeError: set requires array, index, value"); }
-    const char *k0 = xv_kind(&in[0]);
+    const char *k0 = kvlangXvalueKind(&in[0]);
     /* 字符串非路径 → 替换码点 */
-    if (xv_is_char_kind(k0)) {
-        char *s = xv_value_string(&in[0]); bool is_path = s[0] == '/'; free(s);
+    if (kvlangXvalueIsCharKind(k0)) {
+        char *s = kvlangXvalueValueString(&in[0]); bool is_path = s[0] == '/'; free(s);
         if (!is_path) {
             if (var_len_char_err(k0)) { free_inputs(in, n); return set_err(f, "%s", var_len_char_err(k0)); }
-            int idx = (int)xv_as_int64(&in[1]);
+            int idx = (int)kvlangXvalueAsInt64(&in[1]);
             int rn; uint32_t *r = string_runes(&in[0], &rn);
             if (idx < 0 || idx >= rn) { free(r); free_inputs(in, n); return set_err(f, "IndexError: set: string index %d out of bounds (len=%d)", idx, rn); }
             int rn2; uint32_t *repl = string_runes(&in[2], &rn2);
@@ -935,143 +935,143 @@ int bi_set(frame_t *f) {
         }
     }
     /* 路径写入 */
-    bool path_access = strcmp(k0, K_DICT) == 0 || xv_is_char_kind(k0) || xv_is_char_kind(xv_kind(&in[1])) ||
+    bool path_access = strcmp(k0, KVSPACE_KIND_DICT) == 0 || kvlangXvalueIsCharKind(k0) || kvlangXvalueIsCharKind(kvlangXvalueKind(&in[1])) ||
         (f->inst->nr > 0 && (f->inst->reads[0].name[0] == '/' || (f->inst->reads[0].name[0] == '"' && f->inst->reads[0].name[1] == '/')));
     if (path_access) {
-        char *fr = kt_frame_root(f->pc);
-        char *ff = bi_func_frame_root(f->kv, fr);
-        xval_t base; xv_zero(&base);
-        bi_resolve_read_value(f->kv, ff, f->inst->reads[0].name, &f->inst->reads[0].val, &base);
-        char *bp = xv_none(&base) || (strcmp(xv_kind(&base), K_DICT) == 0 || strcmp(xv_kind(&base), K_INDEX) == 0) ? bi_resolve_write_slot(f->kv, ff, f->inst->reads[0].name) : xv_value_string(&base);
-        char *kk = kv_key(&in[1]);
-        char *path = kt_member(bp, kk);
-        kv_pair_t p = { path, in[2] };
-        char err[256]; kv_set(f->kv, &p, 1, err, sizeof err);
-        if (f->inst->nw > 0 && !xv_none(&in[0])) {
-            char *ok = bi_resolve_write_slot(f->kv, fr, f->inst->writes[0].name);
-            kv_pair_t p2 = { ok, in[0] }; kv_set(f->kv, &p2, 1, err, sizeof err);
+        char *fr = kvlangKeytreeFrameRoot(f->pc);
+        char *ff = kvlangBuiltinFuncFrameRoot(f->kv, fr);
+        kvlangXvalue_t base; kvlangXvalueZero(&base);
+        kvlangBuiltinResolveReadValue(f->kv, ff, f->inst->reads[0].name, &f->inst->reads[0].val, &base);
+        char *bp = kvlangXvalueNone(&base) || (strcmp(kvlangXvalueKind(&base), KVSPACE_KIND_DICT) == 0 || strcmp(kvlangXvalueKind(&base), KVSPACE_KIND_INDEX) == 0) ? kvlangBuiltinResolveWriteSlot(f->kv, ff, f->inst->reads[0].name) : kvlangXvalueValueString(&base);
+        char *kk = kvlangKvKey(&in[1]);
+        char *path = kvlangKeytreeMember(bp, kk);
+        kvlangKvPair_t p = { path, in[2] };
+        char err[256]; kvlangKvSet(f->kv, &p, 1, err, sizeof err);
+        if (f->inst->nw > 0 && !kvlangXvalueNone(&in[0])) {
+            char *ok = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->writes[0].name);
+            kvlangKvPair_t p2 = { ok, in[0] }; kvlangKvSet(f->kv, &p2, 1, err, sizeof err);
             free(ok);
         }
-        free(path); free(kk); free(bp); xv_free(&base); free(ff); free(fr);
+        free(path); free(kk); free(bp); kvlangXvalueFree(&base); free(ff); free(fr);
         next_pc(f); free_inputs(in, n); return 0;
     }
-    if (xv_elem_size(k0) > 0 && xv_is_char_kind(xv_kind(&in[1]))) { free_inputs(in, n); return set_err(f, "IndexError: set: index must be integer for typed array"); }
-    if (xv_none(&in[0]) && f->inst->nr > 0) {
-        char *fr = kt_frame_root(f->pc);
+    if (kvlangXvalueElemSize(k0) > 0 && kvlangXvalueIsCharKind(kvlangXvalueKind(&in[1]))) { free_inputs(in, n); return set_err(f, "IndexError: set: index must be integer for typed array"); }
+    if (kvlangXvalueNone(&in[0]) && f->inst->nr > 0) {
+        char *fr = kvlangKeytreeFrameRoot(f->pc);
         char *base = separated_base(f->kv, fr, f->inst->reads[0].name);
         if (base) {
-            int idx = (int)xv_as_int64(&in[1]);
-            sbuf_t k; sb_init(&k); sb_printf(&k, "%s[%d]", base, idx);
-            kv_pair_t p = { k.p, in[2] };
-            char err[256]; kv_set(f->kv, &p, 1, err, sizeof err);
-            sb_free(&k); free(base); free(fr);
+            int idx = (int)kvlangXvalueAsInt64(&in[1]);
+            kvlangStrbuf_t k; kvlangStrbufInit(&k); kvlangStrbufPrintf(&k, "%s[%d]", base, idx);
+            kvlangKvPair_t p = { k.p, in[2] };
+            char err[256]; kvlangKvSet(f->kv, &p, 1, err, sizeof err);
+            kvlangStrbufFree(&k); free(base); free(fr);
             next_pc(f); free_inputs(in, n); return 0;
         }
         free(fr);
     }
-    if (xv_none(&in[0])) { free_inputs(in, n); return set_err(f, "IndexError: set: base is None"); }
-    if (xv_elem_size(k0) > 0) {
+    if (kvlangXvalueNone(&in[0])) { free_inputs(in, n); return set_err(f, "IndexError: set: base is None"); }
+    if (kvlangXvalueElemSize(k0) > 0) {
         /* 整存整取改元素 */
-        char *fr = kt_frame_root(f->pc);
-        char *key = bi_resolve_write_slot(f->kv, fr, f->inst->reads[0].name);
-        xval_t arr; xv_zero(&arr); kv_get_one(f->kv, key, &arr);
-        if (!xv_none(&arr)) {
-            int idx = (int)xv_as_int64(&in[1]);
-            int sz = xv_elem_size(k0);
-            kvhead_t h; kvspace_decode_head(arr.data, arr.len, &h);
+        char *fr = kvlangKeytreeFrameRoot(f->pc);
+        char *key = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->reads[0].name);
+        kvlangXvalue_t arr; kvlangXvalueZero(&arr); kvlangKvGetOne(f->kv, key, &arr);
+        if (!kvlangXvalueNone(&arr)) {
+            int idx = (int)kvlangXvalueAsInt64(&in[1]);
+            int sz = kvlangXvalueElemSize(k0);
+            kvspaceHead_t h; kvspaceDecodeHead(arr.data, arr.len, &h);
             const uint8_t *body = arr.data + h.body_offset;
-            int al = xv_array_len(&arr);
+            int al = kvlangXvalueArrayLen(&arr);
             if (idx >= 0 && idx < al) {
                 uint8_t *nb = malloc((size_t)h.body_len);
                 memcpy(nb, body, (size_t)h.body_len);
-                const uint8_t *vb; int32_t vbl; kvhead_t vh; kvspace_decode_head(in[2].data, in[2].len, &vh); vb = in[2].data + vh.body_offset; vbl = vh.body_len;
+                const uint8_t *vb; int32_t vbl; kvspaceHead_t vh; kvspaceDecodeHead(in[2].data, in[2].len, &vh); vb = in[2].data + vh.body_offset; vbl = vh.body_len;
                 int c = vbl < sz ? vbl : sz;
                 memcpy(nb + idx * sz, vb, (size_t)c);
-                xval_t nv; xv_new_tlv(&nv, k0, nb, (uint32_t)h.body_len, al);
-                kv_pair_t p = { key, nv };
-                char err[256]; kv_set(f->kv, &p, 1, err, sizeof err);
-                xv_free(&nv); free(nb);
+                kvlangXvalue_t nv; kvlangXvalueNewTlv(&nv, k0, nb, (uint32_t)h.body_len, al);
+                kvlangKvPair_t p = { key, nv };
+                char err[256]; kvlangKvSet(f->kv, &p, 1, err, sizeof err);
+                kvlangXvalueFree(&nv); free(nb);
             }
         }
-        xv_free(&arr); free(key); free(fr);
+        kvlangXvalueFree(&arr); free(key); free(fr);
         next_pc(f); free_inputs(in, n); return 0;
     }
     free_inputs(in, n); return set_err(f, "IndexError: set: unsupported array kind %s", k0);
 }
 
-int bi_scatter(frame_t *f) {
+int kvlangBuiltinScatter(kvlangFrame_t *f) {
     if (f->inst->nw == 0) return set_err(f, "TypeError: array.scatter requires a write param");
-    xval_t in[2]; int n = read_inputs(f, in, 2);
-    if (n == 0 || xv_none(&in[0])) { next_pc(f); free_inputs(in, n); return 0; }
-    if (xv_elem_size(xv_kind(&in[0])) <= 0) { free_inputs(in, n); return set_err(f, "TypeError: array.scatter requires a compact array ([]T), got %s", xv_kind(&in[0])); }
-    char *fr = kt_frame_root(f->pc);
-    char *dst = bi_resolve_write_slot(f->kv, fr, f->inst->writes[0].name);
-    int al = xv_array_len(&in[0]);
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
+    if (n == 0 || kvlangXvalueNone(&in[0])) { next_pc(f); free_inputs(in, n); return 0; }
+    if (kvlangXvalueElemSize(kvlangXvalueKind(&in[0])) <= 0) { free_inputs(in, n); return set_err(f, "TypeError: array.scatter requires a compact array ([]T), got %s", kvlangXvalueKind(&in[0])); }
+    char *fr = kvlangKeytreeFrameRoot(f->pc);
+    char *dst = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->writes[0].name);
+    int al = kvlangXvalueArrayLen(&in[0]);
     for (int i = 0; i < al; i++) {
-        sbuf_t k; sb_init(&k); sb_printf(&k, "%s[%d]", dst, i);
-        xval_t e; xvalue_at(&in[0], i, &e);
-        kv_pair_t p = { k.p, e }; char err[256]; kv_set(f->kv, &p, 1, err, sizeof err);
-        xv_free(&e); sb_free(&k);
+        kvlangStrbuf_t k; kvlangStrbufInit(&k); kvlangStrbufPrintf(&k, "%s[%d]", dst, i);
+        kvlangXvalue_t e; xvalue_at(&in[0], i, &e);
+        kvlangKvPair_t p = { k.p, e }; char err[256]; kvlangKvSet(f->kv, &p, 1, err, sizeof err);
+        kvlangXvalueFree(&e); kvlangStrbufFree(&k);
     }
     free(dst); free(fr);
     next_pc(f); free_inputs(in, n); return 0;
 }
 
-int bi_compact(frame_t *f) {
+int kvlangBuiltinCompact(kvlangFrame_t *f) {
     if (f->inst->nr == 0 || f->inst->nw == 0) return set_err(f, "TypeError: array.compact requires read and write params");
-    char *fr = kt_frame_root(f->pc);
-    char *src = bi_resolve_write_slot(f->kv, fr, f->inst->reads[0].name);
-    xval_t elems[1024]; int n = 0;
+    char *fr = kvlangKeytreeFrameRoot(f->pc);
+    char *src = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->reads[0].name);
+    kvlangXvalue_t elems[1024]; int n = 0;
     for (int i = 0; ; i++) {
-        sbuf_t k; sb_init(&k); sb_printf(&k, "%s[%d]", src, i);
-        xval_t v; xv_zero(&v); kv_get_one(f->kv, k.p, &v);
-        bool none = xv_none(&v); sb_free(&k);
+        kvlangStrbuf_t k; kvlangStrbufInit(&k); kvlangStrbufPrintf(&k, "%s[%d]", src, i);
+        kvlangXvalue_t v; kvlangXvalueZero(&v); kvlangKvGetOne(f->kv, k.p, &v);
+        bool none = kvlangXvalueNone(&v); kvlangStrbufFree(&k);
         if (none) break;
         elems[n++] = v;
     }
     if (n == 0) { free(src); free(fr); next_pc(f); return 0; }
-    xval_t arr; pack_typed_array(xv_kind(&elems[0]), elems, n, &arr);
-    char *dst = bi_resolve_write_slot(f->kv, fr, f->inst->writes[0].name);
-    kv_pair_t p = { dst, arr }; char err[256]; kv_set(f->kv, &p, 1, err, sizeof err);
-    for (int i = 0; i < n; i++) xv_free(&elems[i]);
-    xv_free(&arr);
+    kvlangXvalue_t arr; pack_typed_array(kvlangXvalueKind(&elems[0]), elems, n, &arr);
+    char *dst = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->writes[0].name);
+    kvlangKvPair_t p = { dst, arr }; char err[256]; kvlangKvSet(f->kv, &p, 1, err, sizeof err);
+    for (int i = 0; i < n; i++) kvlangXvalueFree(&elems[i]);
+    kvlangXvalueFree(&arr);
     free(dst); free(src); free(fr);
     next_pc(f); return 0;
 }
 
-int bi_append(frame_t *f) {
+int kvlangBuiltinAppend(kvlangFrame_t *f) {
     if (f->inst->nr < 2) return set_err(f, "TypeError: array.append requires array and element");
-    xval_t in[2]; int n = read_inputs(f, in, 2);
-    char *fr = kt_frame_root(f->pc);
-    char *base = bi_resolve_write_slot(f->kv, fr, f->inst->reads[0].name);
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
+    char *fr = kvlangKeytreeFrameRoot(f->pc);
+    char *base = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->reads[0].name);
     ensure_scattered(f, base);
     int len = separated_len(f->kv, base);
-    sbuf_t k; sb_init(&k); sb_printf(&k, "%s[%d]", base, len);
-    kv_pair_t p = { k.p, n >= 2 ? in[1] : in[0] };
-    char err[256]; kv_set(f->kv, &p, 1, err, sizeof err);
-    sb_free(&k); free(base); free(fr);
+    kvlangStrbuf_t k; kvlangStrbufInit(&k); kvlangStrbufPrintf(&k, "%s[%d]", base, len);
+    kvlangKvPair_t p = { k.p, n >= 2 ? in[1] : in[0] };
+    char err[256]; kvlangKvSet(f->kv, &p, 1, err, sizeof err);
+    kvlangStrbufFree(&k); free(base); free(fr);
     next_pc(f); free_inputs(in, n); return 0;
 }
 
-int bi_slice(frame_t *f) {
+int kvlangBuiltinSlice(kvlangFrame_t *f) {
     if (f->inst->nr < 3) return set_err(f, "TypeError: array.slice requires array, start, end");
-    xval_t in[3]; int n = read_inputs(f, in, 3);
-    char *fr = kt_frame_root(f->pc);
-    char *base = bi_resolve_write_slot(f->kv, fr, f->inst->reads[0].name);
+    kvlangXvalue_t in[3]; int n = read_inputs(f, in, 3);
+    char *fr = kvlangKeytreeFrameRoot(f->pc);
+    char *base = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->reads[0].name);
     ensure_scattered(f, base);
     int al = separated_len(f->kv, base);
-    int lo = (int)xv_as_int64(&in[1]), hi = (int)xv_as_int64(&in[2]);
+    int lo = (int)kvlangXvalueAsInt64(&in[1]), hi = (int)kvlangXvalueAsInt64(&in[2]);
     if (lo < 0 || hi < lo || hi > al) { free(base); free(fr); free_inputs(in, n); return set_err(f, "IndexError: array.slice: bounds [%d:%d] out of range (len=%d)", lo, hi, al); }
     for (int i = lo; i < hi; i++) {
-        sbuf_t sk; sb_init(&sk); sb_printf(&sk, "%s[%d]", base, i);
-        xval_t v; xv_zero(&v); kv_get_one(f->kv, sk.p, &v);
-        sbuf_t dk; sb_init(&dk); sb_printf(&dk, "%s[%d]", base, i - lo);
-        kv_pair_t p = { dk.p, v }; char err[256]; kv_set(f->kv, &p, 1, err, sizeof err);
-        xv_free(&v); sb_free(&sk); sb_free(&dk);
+        kvlangStrbuf_t sk; kvlangStrbufInit(&sk); kvlangStrbufPrintf(&sk, "%s[%d]", base, i);
+        kvlangXvalue_t v; kvlangXvalueZero(&v); kvlangKvGetOne(f->kv, sk.p, &v);
+        kvlangStrbuf_t dk; kvlangStrbufInit(&dk); kvlangStrbufPrintf(&dk, "%s[%d]", base, i - lo);
+        kvlangKvPair_t p = { dk.p, v }; char err[256]; kvlangKvSet(f->kv, &p, 1, err, sizeof err);
+        kvlangXvalueFree(&v); kvlangStrbufFree(&sk); kvlangStrbufFree(&dk);
     }
     for (int i = hi - lo; i < al; i++) {
-        sbuf_t dk; sb_init(&dk); sb_printf(&dk, "%s[%d]", base, i);
-        char err[256]; kv_del(f->kv, dk.p, err, sizeof err); sb_free(&dk);
+        kvlangStrbuf_t dk; kvlangStrbufInit(&dk); kvlangStrbufPrintf(&dk, "%s[%d]", base, i);
+        char err[256]; kvlangKvDel(f->kv, dk.p, err, sizeof err); kvlangStrbufFree(&dk);
     }
     free(base); free(fr);
     next_pc(f); free_inputs(in, n); return 0;
@@ -1079,21 +1079,21 @@ int bi_slice(frame_t *f) {
 
 /* ── dict ─────────────────────────────────────────────────────────── */
 
-int bi_dict(frame_t *f) {
-    xval_t in[64]; int n = read_inputs(f, in, 64);
-    char *fr = kt_frame_root(f->pc);
+int kvlangBuiltinDict(kvlangFrame_t *f) {
+    kvlangXvalue_t in[64]; int n = read_inputs(f, in, 64);
+    char *fr = kvlangKeytreeFrameRoot(f->pc);
     for (int w = 0; w < f->inst->nw; w++) {
-        char *ok = bi_resolve_write_slot(f->kv, fr, f->inst->writes[w].name);
-        xval_t mark; xv_new_tlv(&mark, K_DICT, (const uint8_t *)"", 0, 1);
-        kv_pair_t p0 = { ok, mark };
-        char err[256]; kv_set(f->kv, &p0, 1, err, sizeof err);
-        xv_free(&mark);
+        char *ok = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->writes[w].name);
+        kvlangXvalue_t mark; kvlangXvalueNewTlv(&mark, KVSPACE_KIND_DICT, (const uint8_t *)"", 0, 1);
+        kvlangKvPair_t p0 = { ok, mark };
+        char err[256]; kvlangKvSet(f->kv, &p0, 1, err, sizeof err);
+        kvlangXvalueFree(&mark);
         for (int i = 0; i + 1 < n; i += 2) {
-            if (xv_none(&in[i + 1])) continue;
-            char *k = xv_value_string(&in[i]);
-            char *mk = kt_member(ok, k);
-            kv_pair_t p = { mk, in[i + 1] };
-            kv_set(f->kv, &p, 1, err, sizeof err);
+            if (kvlangXvalueNone(&in[i + 1])) continue;
+            char *k = kvlangXvalueValueString(&in[i]);
+            char *mk = kvlangKeytreeMember(ok, k);
+            kvlangKvPair_t p = { mk, in[i + 1] };
+            kvlangKvSet(f->kv, &p, 1, err, sizeof err);
             free(k); free(mk);
         }
         free(ok);
@@ -1104,28 +1104,28 @@ int bi_dict(frame_t *f) {
 
 /* ── string 系列 ──────────────────────────────────────────────────── */
 
-int bi_string_set(frame_t *f) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
+int kvlangBuiltinStringSet(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
     char *s = NULL;
-    if (n > 0) display(&in[0], &s);
+    if (n > 0) kvlangDisplay(&in[0], &s);
     else s = strdup("");
     if (f->inst->nw > 0) {
-        char *fr = kt_frame_root(f->pc);
-        char *key = bi_resolve_write_slot(f->kv, fr, f->inst->writes[0].name);
-        xval_t v; xv_new_char_utf32(&v, s);
-        kv_pair_t p = { key, v };
-        char err[256]; kv_set(f->kv, &p, 1, err, sizeof err);
-        xv_free(&v); free(key); free(fr);
+        char *fr = kvlangKeytreeFrameRoot(f->pc);
+        char *key = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->writes[0].name);
+        kvlangXvalue_t v; kvlangXvalueNewCharUtf32(&v, s);
+        kvlangKvPair_t p = { key, v };
+        char err[256]; kvlangKvSet(f->kv, &p, 1, err, sizeof err);
+        kvlangXvalueFree(&v); free(key); free(fr);
     }
     free(s);
     next_pc(f); free_inputs(in, n); return 0;
 }
 
-int bi_string_char(frame_t *f) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
+int kvlangBuiltinStringChar(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
     if (n < 2) { free_inputs(in, n); return set_err(f, "TypeError: string.char requires string and index"); }
-    if (var_len_char_err(xv_kind(&in[0]))) { free_inputs(in, n); return set_err(f, "%s", var_len_char_err(xv_kind(&in[0]))); }
-    int idx = (int)xv_as_int64(&in[1]);
+    if (var_len_char_err(kvlangXvalueKind(&in[0]))) { free_inputs(in, n); return set_err(f, "%s", var_len_char_err(kvlangXvalueKind(&in[0]))); }
+    int idx = (int)kvlangXvalueAsInt64(&in[1]);
     int rn; uint32_t *r = string_runes(&in[0], &rn);
     int rc;
     if (idx < 0 || idx >= rn) rc = set_err(f, "IndexError: at: index %d out of bounds (char count=%d)", idx, rn);
@@ -1134,58 +1134,58 @@ int bi_string_char(frame_t *f) {
     return rc;
 }
 
-int bi_string_ord(frame_t *f) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
+int kvlangBuiltinStringOrd(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
     if (n < 1) { free_inputs(in, n); return set_err(f, "TypeError: string.ord requires a string"); }
-    if (var_len_char_err(xv_kind(&in[0]))) { free_inputs(in, n); return set_err(f, "%s", var_len_char_err(xv_kind(&in[0]))); }
+    if (var_len_char_err(kvlangXvalueKind(&in[0]))) { free_inputs(in, n); return set_err(f, "%s", var_len_char_err(kvlangXvalueKind(&in[0]))); }
     int rn; uint32_t *r = string_runes(&in[0], &rn);
-    xval_t e; xv_new_int64(&e, rn == 0 ? -1 : (int64_t)r[0]);
-    int rc = write_result(f, &e); xv_free(&e); free(r); free_inputs(in, n);
+    kvlangXvalue_t e; kvlangXvalueNewInt64(&e, rn == 0 ? -1 : (int64_t)r[0]);
+    int rc = write_result(f, &e); kvlangXvalueFree(&e); free(r); free_inputs(in, n);
     return rc;
 }
 
-int bi_string_cmp(frame_t *f) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
+int kvlangBuiltinStringCmp(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
     if (n < 2) { free_inputs(in, n); return set_err(f, "TypeError: string.cmp requires two strings"); }
-    char *a = xv_value_string(&in[0]), *b = xv_value_string(&in[1]);
+    char *a = kvlangXvalueValueString(&in[0]), *b = kvlangXvalueValueString(&in[1]);
     int64_t r = strcmp(a, b) < 0 ? -1 : strcmp(a, b) > 0 ? 1 : 0;
-    xval_t e; xv_new_int64(&e, r);
-    int rc = write_result(f, &e); xv_free(&e); free(a); free(b); free_inputs(in, n);
+    kvlangXvalue_t e; kvlangXvalueNewInt64(&e, r);
+    int rc = write_result(f, &e); kvlangXvalueFree(&e); free(a); free(b); free_inputs(in, n);
     return rc;
 }
 
-int bi_string_find(frame_t *f) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
+int kvlangBuiltinStringFind(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
     if (n < 2) { free_inputs(in, n); return set_err(f, "TypeError: string.find requires two strings"); }
-    if (var_len_char_err(xv_kind(&in[0]))) { free_inputs(in, n); return set_err(f, "%s", var_len_char_err(xv_kind(&in[0]))); }
+    if (var_len_char_err(kvlangXvalueKind(&in[0]))) { free_inputs(in, n); return set_err(f, "%s", var_len_char_err(kvlangXvalueKind(&in[0]))); }
     int hn; uint32_t *hay = string_runes(&in[0], &hn);
     int nn; uint32_t *needle = string_runes(&in[1], &nn);
     int64_t r = -1;
     if (nn == 0) r = 0;
     else for (int i = 0; i + nn <= hn; i++) { bool m = true; for (int j = 0; j < nn; j++) if (hay[i + j] != needle[j]) { m = false; break; } if (m) { r = i; break; } }
-    xval_t e; xv_new_int64(&e, r);
-    int rc = write_result(f, &e); xv_free(&e); free(hay); free(needle); free_inputs(in, n);
+    kvlangXvalue_t e; kvlangXvalueNewInt64(&e, r);
+    int rc = write_result(f, &e); kvlangXvalueFree(&e); free(hay); free(needle); free_inputs(in, n);
     return rc;
 }
 
-int bi_string_len(frame_t *f) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
+int kvlangBuiltinStringLen(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
     int len = 0;
     if (n > 0) {
-        if (var_len_char_err(xv_kind(&in[0]))) { free_inputs(in, n); return set_err(f, "%s", var_len_char_err(xv_kind(&in[0]))); }
-        if (xv_kind_is(&in[0], K_CHAR)) len = xv_array_len(&in[0]);
+        if (var_len_char_err(kvlangXvalueKind(&in[0]))) { free_inputs(in, n); return set_err(f, "%s", var_len_char_err(kvlangXvalueKind(&in[0]))); }
+        if (kvlangXvalueKindIs(&in[0], KVSPACE_KIND_CHAR)) len = kvlangXvalueArrayLen(&in[0]);
         else { uint32_t *r = string_runes(&in[0], &len); free(r); }
     }
-    xval_t e; xv_new_int64(&e, len);
-    int rc = write_result(f, &e); xv_free(&e); free_inputs(in, n);
+    kvlangXvalue_t e; kvlangXvalueNewInt64(&e, len);
+    int rc = write_result(f, &e); kvlangXvalueFree(&e); free_inputs(in, n);
     return rc;
 }
 
-int bi_string_slice(frame_t *f) {
-    xval_t in[3]; int n = read_inputs(f, in, 3);
+int kvlangBuiltinStringSlice(kvlangFrame_t *f) {
+    kvlangXvalue_t in[3]; int n = read_inputs(f, in, 3);
     if (n < 3) { free_inputs(in, n); return set_err(f, "TypeError: string.slice requires string, start, end"); }
-    if (var_len_char_err(xv_kind(&in[0]))) { free_inputs(in, n); return set_err(f, "%s", var_len_char_err(xv_kind(&in[0]))); }
-    int lo = (int)xv_as_int64(&in[1]), hi = (int)xv_as_int64(&in[2]);
+    if (var_len_char_err(kvlangXvalueKind(&in[0]))) { free_inputs(in, n); return set_err(f, "%s", var_len_char_err(kvlangXvalueKind(&in[0]))); }
+    int lo = (int)kvlangXvalueAsInt64(&in[1]), hi = (int)kvlangXvalueAsInt64(&in[2]);
     int rn; uint32_t *r = string_runes(&in[0], &rn);
     if (lo < 0 || hi > rn || lo > hi) { free(r); free_inputs(in, n); return set_err(f, "IndexError: at: slice index out of bounds (lo=%d hi=%d char count=%d)", lo, hi, rn); }
     write_char32(f, r + lo, hi - lo);
@@ -1193,11 +1193,11 @@ int bi_string_slice(frame_t *f) {
     return 0;
 }
 
-int bi_string_concat(frame_t *f) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
-    if (n < 2 || !xv_is_char_kind(xv_kind(&in[0])) || !xv_is_char_kind(xv_kind(&in[1]))) {
-        if (n >= 2) set_err(f, "TypeError: string.concat requires strings, got %s and %s", xv_kind(&in[0]), xv_kind(&in[1]));
-        else { xval_t e; xv_new_char_utf32(&e, ""); write_result(f, &e); xv_free(&e); }
+int kvlangBuiltinStringConcat(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
+    if (n < 2 || !kvlangXvalueIsCharKind(kvlangXvalueKind(&in[0])) || !kvlangXvalueIsCharKind(kvlangXvalueKind(&in[1]))) {
+        if (n >= 2) set_err(f, "TypeError: string.concat requires strings, got %s and %s", kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1]));
+        else { kvlangXvalue_t e; kvlangXvalueNewCharUtf32(&e, ""); write_result(f, &e); kvlangXvalueFree(&e); }
         free_inputs(in, n); return n < 2 ? 0 : -1;
     }
     int a, b; uint32_t *ra = string_runes(&in[0], &a); uint32_t *rb = string_runes(&in[1], &b);
@@ -1216,34 +1216,34 @@ static int64_t now_nanos(void) {
     return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
 }
 
-static void new_time(xval_t *v, int64_t ns) {
+static void new_time(kvlangXvalue_t *v, int64_t ns) {
     uint8_t r[8]; memcpy(r, &ns, 8);
-    xv_new_tlv(v, K_TIME, r, 8, 1);
+    kvlangXvalueNewTlv(v, KVSPACE_KIND_TIME, r, 8, 1);
 }
-static void new_duration(xval_t *v, int64_t ns) {
+static void new_duration(kvlangXvalue_t *v, int64_t ns) {
     uint8_t r[8]; memcpy(r, &ns, 8);
-    xv_new_tlv(v, K_DURATION, r, 8, 1);
+    kvlangXvalueNewTlv(v, KVSPACE_KIND_DURATION, r, 8, 1);
 }
 
-int bi_time_now(frame_t *f) {
-    xval_t e; new_time(&e, now_nanos());
-    int rc = write_result(f, &e); xv_free(&e);
+int kvlangBuiltinTimeNow(kvlangFrame_t *f) {
+    kvlangXvalue_t e; new_time(&e, now_nanos());
+    int rc = write_result(f, &e); kvlangXvalueFree(&e);
     return rc;
 }
 
-int bi_time_sub(frame_t *f) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
+int kvlangBuiltinTimeSub(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
     if (n < 2) { free_inputs(in, n); return set_err(f, "TypeError: time.sub requires 2 time args"); }
-    xval_t e; new_duration(&e, xv_as_int64(&in[0]) - xv_as_int64(&in[1]));
-    int rc = write_result(f, &e); xv_free(&e); free_inputs(in, n);
+    kvlangXvalue_t e; new_duration(&e, kvlangXvalueAsInt64(&in[0]) - kvlangXvalueAsInt64(&in[1]));
+    int rc = write_result(f, &e); kvlangXvalueFree(&e); free_inputs(in, n);
     return rc;
 }
 
-int bi_time_add(frame_t *f) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
+int kvlangBuiltinTimeAdd(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
     if (n < 2) { free_inputs(in, n); return set_err(f, "TypeError: time.add requires time and duration"); }
-    xval_t e; new_time(&e, xv_as_int64(&in[0]) + xv_as_int64(&in[1]));
-    int rc = write_result(f, &e); xv_free(&e); free_inputs(in, n);
+    kvlangXvalue_t e; new_time(&e, kvlangXvalueAsInt64(&in[0]) + kvlangXvalueAsInt64(&in[1]));
+    int rc = write_result(f, &e); kvlangXvalueFree(&e); free_inputs(in, n);
     return rc;
 }
 
@@ -1256,49 +1256,49 @@ static int64_t dur_scale(const char *op) {
     return 1;
 }
 
-int bi_dur_from(frame_t *f) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
+int kvlangBuiltinDurFrom(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
     if (n < 1) { free_inputs(in, n); return set_err(f, "TypeError: time/duration.from requires 1 int64 arg"); }
-    xval_t e; new_duration(&e, xv_as_int64(&in[0]) * dur_scale(f->inst->opcode));
-    int rc = write_result(f, &e); xv_free(&e); free_inputs(in, n);
+    kvlangXvalue_t e; new_duration(&e, kvlangXvalueAsInt64(&in[0]) * dur_scale(f->inst->opcode));
+    int rc = write_result(f, &e); kvlangXvalueFree(&e); free_inputs(in, n);
     return rc;
 }
 
-int bi_dur_to(frame_t *f) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
+int kvlangBuiltinDurTo(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
     if (n < 1) { free_inputs(in, n); return set_err(f, "TypeError: time/duration.as requires 1 duration arg"); }
-    xval_t e; xv_new_int64(&e, xv_as_int64(&in[0]) / dur_scale(f->inst->opcode));
-    int rc = write_result(f, &e); xv_free(&e); free_inputs(in, n);
+    kvlangXvalue_t e; kvlangXvalueNewInt64(&e, kvlangXvalueAsInt64(&in[0]) / dur_scale(f->inst->opcode));
+    int rc = write_result(f, &e); kvlangXvalueFree(&e); free_inputs(in, n);
     return rc;
 }
 
-int bi_dur_arith(frame_t *f) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
+int kvlangBuiltinDurArith(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
     if (n < 2) { free_inputs(in, n); return set_err(f, "TypeError: time/duration arith requires 2 duration args"); }
-    int64_t a = xv_as_int64(&in[0]), b = xv_as_int64(&in[1]);
+    int64_t a = kvlangXvalueAsInt64(&in[0]), b = kvlangXvalueAsInt64(&in[1]);
     bool sub = strstr(f->inst->opcode, ".sub") != NULL;
-    xval_t e; new_duration(&e, sub ? a - b : a + b);
-    int rc = write_result(f, &e); xv_free(&e); free_inputs(in, n);
+    kvlangXvalue_t e; new_duration(&e, sub ? a - b : a + b);
+    int rc = write_result(f, &e); kvlangXvalueFree(&e); free_inputs(in, n);
     return rc;
 }
 
-int bi_dur_cmp(frame_t *f) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
+int kvlangBuiltinDurCmp(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
     if (n < 2) { free_inputs(in, n); return set_err(f, "TypeError: time/duration cmp requires 2 duration args"); }
     bool before = strstr(f->inst->opcode, "before") != NULL;
-    int64_t a = xv_as_int64(&in[0]), b = xv_as_int64(&in[1]);
-    xval_t e; xv_new_bool(&e, before ? a < b : a > b);
-    int rc = write_result(f, &e); xv_free(&e); free_inputs(in, n);
+    int64_t a = kvlangXvalueAsInt64(&in[0]), b = kvlangXvalueAsInt64(&in[1]);
+    kvlangXvalue_t e; kvlangXvalueNewBool(&e, before ? a < b : a > b);
+    int rc = write_result(f, &e); kvlangXvalueFree(&e); free_inputs(in, n);
     return rc;
 }
 
-int bi_time_cmp(frame_t *f) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
+int kvlangBuiltinTimeCmp(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
     if (n < 2) { free_inputs(in, n); return set_err(f, "TypeError: time cmp requires 2 args"); }
     bool before = strstr(f->inst->opcode, "before") != NULL;
-    int64_t a = xv_as_int64(&in[0]), b = xv_as_int64(&in[1]);
-    xval_t e; xv_new_bool(&e, before ? a < b : a > b);
-    int rc = write_result(f, &e); xv_free(&e); free_inputs(in, n);
+    int64_t a = kvlangXvalueAsInt64(&in[0]), b = kvlangXvalueAsInt64(&in[1]);
+    kvlangXvalue_t e; kvlangXvalueNewBool(&e, before ? a < b : a > b);
+    int rc = write_result(f, &e); kvlangXvalueFree(&e); free_inputs(in, n);
     return rc;
 }
 
@@ -1311,93 +1311,93 @@ static uint64_t crypto_rand_u64(void) {
     return v;
 }
 
-int bi_rand_uint64(frame_t *f) {
+int kvlangBuiltinRandUint64(kvlangFrame_t *f) {
     uint64_t v = crypto_rand_u64();
     uint8_t r[8]; memcpy(r, &v, 8);
-    xval_t e; xv_new_tlv(&e, K_UINT64, r, 8, 1);
-    int rc = write_result(f, &e); xv_free(&e);
+    kvlangXvalue_t e; kvlangXvalueNewTlv(&e, KVSPACE_KIND_UINT64, r, 8, 1);
+    int rc = write_result(f, &e); kvlangXvalueFree(&e);
     return rc;
 }
 
-int bi_rand_int63(frame_t *f) {
+int kvlangBuiltinRandInt63(kvlangFrame_t *f) {
     int64_t v = (int64_t)(crypto_rand_u64() >> 1);
-    xval_t e; xv_new_int64(&e, v);
-    int rc = write_result(f, &e); xv_free(&e);
+    kvlangXvalue_t e; kvlangXvalueNewInt64(&e, v);
+    int rc = write_result(f, &e); kvlangXvalueFree(&e);
     return rc;
 }
 
-int bi_rand_intn(frame_t *f) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
-    if (n < 1 || xv_none(&in[0])) { free_inputs(in, n); return set_err(f, "TypeError: random.intn requires 1 int64 arg"); }
-    uint64_t m = (uint64_t)xv_as_int64(&in[0]);
+int kvlangBuiltinRandIntn(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
+    if (n < 1 || kvlangXvalueNone(&in[0])) { free_inputs(in, n); return set_err(f, "TypeError: random.intn requires 1 int64 arg"); }
+    uint64_t m = (uint64_t)kvlangXvalueAsInt64(&in[0]);
     uint64_t v = m == 0 ? 0 : crypto_rand_u64() % m;
     uint8_t r[8]; memcpy(r, &v, 8);
-    xval_t e; xv_new_tlv(&e, K_UINT64, r, 8, 1);
-    int rc = write_result(f, &e); xv_free(&e); free_inputs(in, n);
+    kvlangXvalue_t e; kvlangXvalueNewTlv(&e, KVSPACE_KIND_UINT64, r, 8, 1);
+    int rc = write_result(f, &e); kvlangXvalueFree(&e); free_inputs(in, n);
     return rc;
 }
 
 /* ── kvop ─────────────────────────────────────────────────────────── */
 
-int bi_kvhas(frame_t *f) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
+int kvlangBuiltinKvhas(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
     if (n < 2) { free_inputs(in, n); return set_err(f, "TypeError: kvhas requires 2 args"); }
-    char *fr = kt_frame_root(f->pc);
-    char *ff = bi_func_frame_root(f->kv, fr);
-    xval_t base; xv_zero(&base);
-    bi_resolve_read_value(f->kv, ff, f->inst->reads[0].name, &f->inst->reads[0].val, &base);
-    if (!xv_none(&base) && xv_elem_size(xv_kind(&base)) > 0 && !xv_is_char_kind(xv_kind(&base))
-            && f->inst->reads[0].name[0] != '/' && xv_is_int_kind(xv_kind(&in[1]))) {
-        int idx = (int)xv_as_int64(&in[1]);
-        xval_t e; xv_new_bool(&e, idx >= 0 && idx < xv_array_len(&base));
-        int rc = write_result(f, &e); xv_free(&e);
-        xv_free(&base); free(ff); free(fr); free_inputs(in, n); return rc;
+    char *fr = kvlangKeytreeFrameRoot(f->pc);
+    char *ff = kvlangBuiltinFuncFrameRoot(f->kv, fr);
+    kvlangXvalue_t base; kvlangXvalueZero(&base);
+    kvlangBuiltinResolveReadValue(f->kv, ff, f->inst->reads[0].name, &f->inst->reads[0].val, &base);
+    if (!kvlangXvalueNone(&base) && kvlangXvalueElemSize(kvlangXvalueKind(&base)) > 0 && !kvlangXvalueIsCharKind(kvlangXvalueKind(&base))
+            && f->inst->reads[0].name[0] != '/' && kvlangXvalueIsIntKind(kvlangXvalueKind(&in[1]))) {
+        int idx = (int)kvlangXvalueAsInt64(&in[1]);
+        kvlangXvalue_t e; kvlangXvalueNewBool(&e, idx >= 0 && idx < kvlangXvalueArrayLen(&base));
+        int rc = write_result(f, &e); kvlangXvalueFree(&e);
+        kvlangXvalueFree(&base); free(ff); free(fr); free_inputs(in, n); return rc;
     }
-    char *bp = xv_none(&base) || (strcmp(xv_kind(&base), K_DICT) == 0 || strcmp(xv_kind(&base), K_INDEX) == 0 || strcmp(xv_kind(&base), K_EXT_INDEX) == 0) ? bi_resolve_write_slot(f->kv, ff, f->inst->reads[0].name) : xv_value_string(&base);
-    char *kk = kv_key(&in[1]);
-    char *path = kt_member(bp, kk);
-    xval_t v; xv_zero(&v); kv_get_one(f->kv, path, &v);
-    xval_t e; xv_new_bool(&e, !xv_none(&v));
-    int rc = write_result(f, &e); xv_free(&e); xv_free(&v);
-    free(path); free(kk); free(bp); xv_free(&base); free(ff); free(fr);
+    char *bp = kvlangXvalueNone(&base) || (strcmp(kvlangXvalueKind(&base), KVSPACE_KIND_DICT) == 0 || strcmp(kvlangXvalueKind(&base), KVSPACE_KIND_INDEX) == 0 || strcmp(kvlangXvalueKind(&base), KVSPACE_KIND_EXT_INDEX) == 0) ? kvlangBuiltinResolveWriteSlot(f->kv, ff, f->inst->reads[0].name) : kvlangXvalueValueString(&base);
+    char *kk = kvlangKvKey(&in[1]);
+    char *path = kvlangKeytreeMember(bp, kk);
+    kvlangXvalue_t v; kvlangXvalueZero(&v); kvlangKvGetOne(f->kv, path, &v);
+    kvlangXvalue_t e; kvlangXvalueNewBool(&e, !kvlangXvalueNone(&v));
+    int rc = write_result(f, &e); kvlangXvalueFree(&e); kvlangXvalueFree(&v);
+    free(path); free(kk); free(bp); kvlangXvalueFree(&base); free(ff); free(fr);
     free_inputs(in, n); return rc;
 }
 
-int bi_kvat(frame_t *f) {
-    xval_t in[2]; int n = read_inputs(f, in, 2);
+int kvlangBuiltinKvat(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
     if (n < 2) { free_inputs(in, n); return set_err(f, "TypeError: kvat requires 2 args"); }
-    char *fr = kt_frame_root(f->pc);
-    char *ff = bi_func_frame_root(f->kv, fr);
-    xval_t base; xv_zero(&base);
-    bi_resolve_read_value(f->kv, ff, f->inst->reads[0].name, &f->inst->reads[0].val, &base);
-    if (!xv_none(&base) && xv_elem_size(xv_kind(&base)) > 0 && !xv_is_char_kind(xv_kind(&base))
-            && f->inst->reads[0].name[0] != '/' && xv_is_int_kind(xv_kind(&in[1]))) {
-        int idx = (int)xv_as_int64(&in[1]);
-        if (idx < 0 || idx >= xv_array_len(&base)) { xv_free(&base); free(ff); free(fr); free_inputs(in, n); return set_err(f, "KeyError: kvat: index out of range: %d", idx); }
-        xval_t e; xvalue_at(&base, idx, &e);
-        int rc = write_result(f, &e); xv_free(&e);
-        xv_free(&base); free(ff); free(fr); free_inputs(in, n); return rc;
+    char *fr = kvlangKeytreeFrameRoot(f->pc);
+    char *ff = kvlangBuiltinFuncFrameRoot(f->kv, fr);
+    kvlangXvalue_t base; kvlangXvalueZero(&base);
+    kvlangBuiltinResolveReadValue(f->kv, ff, f->inst->reads[0].name, &f->inst->reads[0].val, &base);
+    if (!kvlangXvalueNone(&base) && kvlangXvalueElemSize(kvlangXvalueKind(&base)) > 0 && !kvlangXvalueIsCharKind(kvlangXvalueKind(&base))
+            && f->inst->reads[0].name[0] != '/' && kvlangXvalueIsIntKind(kvlangXvalueKind(&in[1]))) {
+        int idx = (int)kvlangXvalueAsInt64(&in[1]);
+        if (idx < 0 || idx >= kvlangXvalueArrayLen(&base)) { kvlangXvalueFree(&base); free(ff); free(fr); free_inputs(in, n); return set_err(f, "KeyError: kvat: index out of range: %d", idx); }
+        kvlangXvalue_t e; xvalue_at(&base, idx, &e);
+        int rc = write_result(f, &e); kvlangXvalueFree(&e);
+        kvlangXvalueFree(&base); free(ff); free(fr); free_inputs(in, n); return rc;
     }
-    char *bp = xv_none(&base) || (strcmp(xv_kind(&base), K_DICT) == 0 || strcmp(xv_kind(&base), K_INDEX) == 0 || strcmp(xv_kind(&base), K_EXT_INDEX) == 0) ? bi_resolve_write_slot(f->kv, ff, f->inst->reads[0].name) : xv_value_string(&base);
-    char *kk = kv_key(&in[1]);
-    char *path = kt_member(bp, kk);
-    xval_t v; xv_zero(&v); kv_get_one(f->kv, path, &v);
-    if (xv_none(&v)) { free(path); free(kk); free(bp); xv_free(&base); free(ff); free(fr); free_inputs(in, n); return set_err(f, "KeyError: kvat: key not found: %s", path); }
-    int rc = write_result(f, &v); xv_free(&v);
-    free(path); free(kk); free(bp); xv_free(&base); free(ff); free(fr);
+    char *bp = kvlangXvalueNone(&base) || (strcmp(kvlangXvalueKind(&base), KVSPACE_KIND_DICT) == 0 || strcmp(kvlangXvalueKind(&base), KVSPACE_KIND_INDEX) == 0 || strcmp(kvlangXvalueKind(&base), KVSPACE_KIND_EXT_INDEX) == 0) ? kvlangBuiltinResolveWriteSlot(f->kv, ff, f->inst->reads[0].name) : kvlangXvalueValueString(&base);
+    char *kk = kvlangKvKey(&in[1]);
+    char *path = kvlangKeytreeMember(bp, kk);
+    kvlangXvalue_t v; kvlangXvalueZero(&v); kvlangKvGetOne(f->kv, path, &v);
+    if (kvlangXvalueNone(&v)) { free(path); free(kk); free(bp); kvlangXvalueFree(&base); free(ff); free(fr); free_inputs(in, n); return set_err(f, "KeyError: kvat: key not found: %s", path); }
+    int rc = write_result(f, &v); kvlangXvalueFree(&v);
+    free(path); free(kk); free(bp); kvlangXvalueFree(&base); free(ff); free(fr);
     free_inputs(in, n); return rc;
 }
 
 /* ── debugger ─────────────────────────────────────────────────────── */
 
-int bi_debugger(frame_t *f) {
-    sbuf_t dk; sb_init(&dk);
-    kt_vthread_debugger(f->vtid, &dk);
-    xval_t v; xv_zero(&v); kv_get_one(f->kv, dk.p, &v);
-    bool dbg = !xv_none(&v);
-    xv_free(&v);
-    if (!dbg) { sb_free(&dk); next_pc(f); return 0; }
-    sb_free(&dk);
+int kvlangBuiltinDebugger(kvlangFrame_t *f) {
+    kvlangStrbuf_t dk; kvlangStrbufInit(&dk);
+    kvlangKeytreeVthreadDebugger(f->vtid, &dk);
+    kvlangXvalue_t v; kvlangXvalueZero(&v); kvlangKvGetOne(f->kv, dk.p, &v);
+    bool dbg = !kvlangXvalueNone(&v);
+    kvlangXvalueFree(&v);
+    if (!dbg) { kvlangStrbufFree(&dk); next_pc(f); return 0; }
+    kvlangStrbufFree(&dk);
     next_pc(f);
     return 0;
 }

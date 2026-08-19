@@ -46,7 +46,7 @@ fn write_out(buf: *mut c_char, cap: u32, s: &str) {
 /// 成功返回 0，入口名写入 `entry_out`（含 NUL，长度 ≤ entry_cap）；
 /// 失败返回 -1，错误信息写入 `err_out`（含 NUL，长度 ≤ err_cap）。
 #[no_mangle]
-pub extern "C" fn kvlang_layout_file(
+pub extern "C" fn kvlangLayoutFile(
     path: *const c_char,
     dsn: *const c_char,
     entry_out: *mut c_char,

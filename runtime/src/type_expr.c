@@ -78,7 +78,7 @@ static bool valid_atom(const char *s, size_t len) {
 }
 
 /* 末参变参标记：A:any... 表 0..N 个同型实参。 */
-bool type_expr_variadic(const char *expr) {
+bool kvlang_rwextTypeVariadic(const char *expr) {
     if (!expr) return false;
     size_t n = strlen(expr);
     return n >= 3 && memcmp(expr + n - 3, "...", 3) == 0;
@@ -91,7 +91,7 @@ static size_t effective_len(const char *expr) {
 }
 
 /* 类型表达式语法校验（装载期）。允许末参尾缀 "..." 变参。 */
-bool type_expr_valid(const char *expr) {
+bool kvlang_rwextTypeValid(const char *expr) {
     if (!expr || !*expr) return false;
     size_t total = effective_len(expr);
     if (total == 0) return false;
@@ -151,7 +151,7 @@ static bool match_atom(const char *s, size_t len, const char *kind, int32_t ndim
 
 /* 单值（kind/ndim/dims）是否匹配类型表达式：任一 atom 命中即 true。
  * 变参 "..." 按单元素判定（去尾缀后匹配），重复由派发循环处理。 */
-bool type_expr_match(const char *expr, const char *kind, int32_t ndim, const int32_t *dims) {
+bool kvlang_rwextTypeMatch(const char *expr, const char *kind, int32_t ndim, const int32_t *dims) {
     if (!expr || !kind) return false;
     const char *end = expr + effective_len(expr);
     const char *p = expr;

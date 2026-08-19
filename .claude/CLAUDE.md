@@ -1,1 +1,1 @@
-deepx-design/.claude/claude.md
+../deepx-design/.claude/claude.md

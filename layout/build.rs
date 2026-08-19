@@ -6,7 +6,7 @@ fn main() {
     let lib = std::env::var("KVLANG_KVSPACE_LIB").unwrap_or_else(|_| "kvspace_durable".into());
     let root = format!("{}/../..", env!("CARGO_MANIFEST_DIR")); // array2d 工作区根
     let (lib_dir, extra) = if lib == "kvspace-c" {
-        (format!("{root}/kvspace/build"), true)
+        (format!("{root}/kvspace-c/build"), true)
     } else {
         (format!("{root}/kvspace-durable/target/release"), false)
     };

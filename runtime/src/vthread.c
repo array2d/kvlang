@@ -1,69 +1,69 @@
 #include "runtime_internal.h"
 
-void vt_get(kv_t *kv, const char *vtid, char **pc, char **status) {
+void kvlangVthreadGet(kvlangKv_t *kv, const char *vtid, char **pc, char **status) {
     *pc = NULL; *status = NULL;
-    sbuf_t k; sb_init(&k);
-    kt_vthread_pc(vtid, &k);
-    xval_t pv; xv_zero(&pv);
-    kv_get_one(kv, k.p, &pv);
-    if (!xv_none(&pv)) *pc = xv_value_string(&pv);
-    xv_free(&pv);
-    kt_vthread_status(vtid, &k);
-    xval_t sv; xv_zero(&sv);
-    kv_get_one(kv, k.p, &sv);
-    if (!xv_none(&sv)) *status = xv_value_string(&sv);
-    xv_free(&sv);
-    sb_free(&k);
+    kvlangStrbuf_t k; kvlangStrbufInit(&k);
+    kvlangKeytreeVthreadPc(vtid, &k);
+    kvlangXvalue_t pv; kvlangXvalueZero(&pv);
+    kvlangKvGetOne(kv, k.p, &pv);
+    if (!kvlangXvalueNone(&pv)) *pc = kvlangXvalueValueString(&pv);
+    kvlangXvalueFree(&pv);
+    kvlangKeytreeVthreadStatus(vtid, &k);
+    kvlangXvalue_t sv; kvlangXvalueZero(&sv);
+    kvlangKvGetOne(kv, k.p, &sv);
+    if (!kvlangXvalueNone(&sv)) *status = kvlangXvalueValueString(&sv);
+    kvlangXvalueFree(&sv);
+    kvlangStrbufFree(&k);
 }
 
-void vt_set(kv_t *kv, const char *vtid, const char *pc, const char *status) {
-    sbuf_t k1, k2; sb_init(&k1); sb_init(&k2);
-    kt_vthread_pc(vtid, &k1);
-    kt_vthread_status(vtid, &k2);
-    xval_t v1, v2; xv_zero(&v1); xv_zero(&v2);
-    xv_new_char_utf8(&v1, pc);
-    xv_new_char_utf8(&v2, status);
-    kv_pair_t pairs[2] = { { k1.p, v1 }, { k2.p, v2 } };
+void kvlangVthreadSet(kvlangKv_t *kv, const char *vtid, const char *pc, const char *status) {
+    kvlangStrbuf_t k1, k2; kvlangStrbufInit(&k1); kvlangStrbufInit(&k2);
+    kvlangKeytreeVthreadPc(vtid, &k1);
+    kvlangKeytreeVthreadStatus(vtid, &k2);
+    kvlangXvalue_t v1, v2; kvlangXvalueZero(&v1); kvlangXvalueZero(&v2);
+    kvlangXvalueNewCharUtf8(&v1, pc);
+    kvlangXvalueNewCharUtf8(&v2, status);
+    kvlangKvPair_t pairs[2] = { { k1.p, v1 }, { k2.p, v2 } };
     char err[256];
-    kv_set(kv, pairs, 2, err, sizeof err);
-    xv_free(&v1); xv_free(&v2); sb_free(&k1); sb_free(&k2);
+    kvlangKvSet(kv, pairs, 2, err, sizeof err);
+    kvlangXvalueFree(&v1); kvlangXvalueFree(&v2); kvlangStrbufFree(&k1); kvlangStrbufFree(&k2);
 }
 
-void vt_set_done(kv_t *kv, const char *vtid, const char *ret) {
+void kvlangVthreadSetDone(kvlangKv_t *kv, const char *vtid, const char *ret) {
     if (ret == NULL || ret[0] == 0) ret = "ok";
-    sbuf_t k; sb_init(&k);
-    kt_vthread_status(vtid, &k);
-    xval_t v; xv_zero(&v);
-    xv_new_char_utf8(&v, ret);
-    kv_pair_t pair = { k.p, v };
+    kvlangStrbuf_t k; kvlangStrbufInit(&k);
+    kvlangKeytreeVthreadStatus(vtid, &k);
+    kvlangXvalue_t v; kvlangXvalueZero(&v);
+    kvlangXvalueNewCharUtf8(&v, ret);
+    kvlangKvPair_t pair = { k.p, v };
     char err[256];
-    kv_set(kv, &pair, 1, err, sizeof err);
-    xv_free(&v); sb_free(&k);
+    kvlangKvSet(kv, &pair, 1, err, sizeof err);
+    kvlangXvalueFree(&v); kvlangStrbufFree(&k);
 }
 
-void vt_set_error(kv_t *kv, const char *vtid, const char *pc, const char *msg) {
-    sbuf_t msg_path, pc_key, st_key; sb_init(&msg_path); sb_init(&pc_key); sb_init(&st_key);
-    kt_vthread_status_msg(vtid, "error", &msg_path);
-    kt_vthread_pc(vtid, &pc_key);
-    kt_vthread_status(vtid, &st_key);
+void kvlangVthreadSetError(kvlangKv_t *kv, const char *vtid, const char *pc, const char *msg) {
+    kvlangStrbuf_t msg_path, pc_key, st_key; kvlangStrbufInit(&msg_path); kvlangStrbufInit(&pc_key); kvlangStrbufInit(&st_key);
+    kvlangKeytreeVthreadStatusMsg(vtid, "error", &msg_path);
+    kvlangKeytreeVthreadPc(vtid, &pc_key);
+    kvlangKeytreeVthreadStatus(vtid, &st_key);
 
     /* 确保 .error/ 父目录存在 */
     char *sep = strrchr(msg_path.p, '/');
     if (sep) {
-        sbuf_t dir; sb_init(&dir);
-        sb_putn(&dir, msg_path.p, (size_t)(sep - msg_path.p) + 1);
+        kvlangStrbuf_t dir; kvlangStrbufInit(&dir);
+        kvlangStrbufPutn(&dir, msg_path.p, (size_t)(sep - msg_path.p) + 1);
         char err[256];
-        kv_mkindex(kv, dir.p, err, sizeof err);
-        sb_free(&dir);
+        kvlangKvMkindex(kv, dir.p, err, sizeof err);
+        kvlangStrbufFree(&dir);
     }
 
-    xval_t vpc, vmsg, vst; xv_zero(&vpc); xv_zero(&vmsg); xv_zero(&vst);
-    xv_new_char_utf8(&vpc, pc);
-    xv_new_char_utf8(&vmsg, msg);
-    xv_new_char_utf8(&vst, "error");
-    kv_pair_t pairs[3] = { { pc_key.p, vpc }, { msg_path.p, vmsg }, { st_key.p, vst } };
+    kvlangXvalue_t vpc, vmsg, vst; kvlangXvalueZero(&vpc); kvlangXvalueZero(&vmsg); kvlangXvalueZero(&vst);
+    kvlangXvalueNewCharUtf8(&vpc, pc);
+    kvlangXvalueNewCharUtf8(&vmsg, msg);
+    kvlangXvalueNewCharUtf8(&vst, "error");
+    kvlangKvPair_t pairs[3] = { { pc_key.p, vpc }, { msg_path.p, vmsg }, { st_key.p, vst } };
     char err[256];
-    kv_set(kv, pairs, 3, err, sizeof err);
-    xv_free(&vpc); xv_free(&vmsg); xv_free(&vst);
-    sb_free(&msg_path); sb_free(&pc_key); sb_free(&st_key);
+    kvlangKvSet(kv, pairs, 3, err, sizeof err);
+    kvlangXvalueFree(&vpc); kvlangXvalueFree(&vmsg); kvlangXvalueFree(&vst);
+    kvlangStrbufFree(&msg_path); kvlangStrbufFree(&pc_key); kvlangStrbufFree(&st_key);
 }
