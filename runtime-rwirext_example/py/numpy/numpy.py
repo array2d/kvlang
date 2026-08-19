@@ -13,8 +13,8 @@
     算子（reshape/matmul/…）产出并按 [dims]dtype 存回 kvspace。
   · tensor data 零拷贝：读走权威 kvspaceDecodeHead，在 kvspace-c SHM 地址上建 ndarray 视图；
     写走权威 N 维 kvspaceTlvEncode，dims 直接落盘。
-  · 遵照读写码：从 kvlang_rwextParams 取 opcode 与读/写操作数名；读参优先按路径零拷贝 view，
-    否则回退 kvlang_rwextResolveRead；写参经 kvlang_rwextResolveWrite 解析为 KV 路径。
+  · 遵照读写码：从 kvlang_rwirextParams 取 opcode 与读/写操作数名；读参优先按路径零拷贝 view，
+    否则回退 kvlang_rwirextResolveRead；写参经 kvlang_rwirextResolveWrite 解析为 KV 路径。
   · numpy.print 走本进程自身的 stdout（不经 kvlang println）。
 """
 
@@ -80,17 +80,17 @@ def _bind():
     _ks.kvspaceDel.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_char_p), ctypes.c_uint32,
                                ctypes.c_char_p, ctypes.c_uint32]
     _ks.kvspaceDel.restype = ctypes.c_int
-    # rwext ABI（kvspace 不提供的 runtime 语义）：句柄传扩展自连的 kvspace
-    for fn in ("kvlang_rwextParams", "kvlang_rwextResolveRead", "kvlang_rwextResolveReadPath",
-               "kvlang_rwextResolveWrite", "kvlang_rwextNextPc"):
+    # rwirext ABI（kvspace 不提供的 runtime 语义）：句柄传扩展自连的 kvspace
+    for fn in ("kvlang_rwirextParams", "kvlang_rwirextResolveRead", "kvlang_rwirextResolveReadPath",
+               "kvlang_rwirextResolveWrite", "kvlang_rwirextNextPc"):
         getattr(_rt, fn).restype = ctypes.c_void_p
-    _rt.kvlang_rwextRegister.restype = ctypes.c_int
-    _rt.kvlang_rwextRegister.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int32, ctypes.c_int32, ctypes.c_char_p]
-    _rt.kvlang_rwextParams.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
-    _rt.kvlang_rwextResolveRead.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
-    _rt.kvlang_rwextResolveReadPath.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
-    _rt.kvlang_rwextResolveWrite.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
-    _rt.kvlang_rwextNextPc.argtypes = [ctypes.c_char_p]
+    _rt.kvlang_rwirextRegister.restype = ctypes.c_int
+    _rt.kvlang_rwirextRegister.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int32, ctypes.c_int32, ctypes.c_char_p]
+    _rt.kvlang_rwirextParams.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+    _rt.kvlang_rwirextResolveRead.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+    _rt.kvlang_rwirextResolveReadPath.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+    _rt.kvlang_rwirextResolveWrite.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+    _rt.kvlang_rwirextNextPc.argtypes = [ctypes.c_char_p]
     _lay.kvlangLayoutFile.restype = ctypes.c_int
     _lay.kvlangLayoutFile.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p,
                                         ctypes.c_uint32, ctypes.c_char_p, ctypes.c_uint32]
@@ -263,32 +263,32 @@ class Engine:
 
     # ── 读参：解析为帧槽路径后零拷贝 view；内联字面量回退 resolve_read ──
     def read_arg(self, pc, i):
-        path = _s(_rt.kvlang_rwextResolveReadPath(self.kv, pc.encode(), i))
+        path = _s(_rt.kvlang_rwirextResolveReadPath(self.kv, pc.encode(), i))
         if path:
             v = self.view(path)
             if v is not None:
                 return v
-        return _parse(_s(_rt.kvlang_rwextResolveRead(self.kv, pc.encode(), i)))
+        return _parse(_s(_rt.kvlang_rwirextResolveRead(self.kv, pc.encode(), i)))
 
     # ── 注册五大类 ─────────────────────────────────────────────────
     def register(self):
         for op, (nr, _) in OPS.items():
-            _rt.kvlang_rwextRegister(self.kv, op.encode(), nr, 1, ("\n".join(["any"] * (nr + 1))).encode())
-        _rt.kvlang_rwextRegister(self.kv, b"numpy.print", 1, 0, b"any...")
+            _rt.kvlang_rwirextRegister(self.kv, op.encode(), nr, 1, ("\n".join(["any"] * (nr + 1))).encode())
+        _rt.kvlang_rwirextRegister(self.kv, b"numpy.print", 1, 0, b"any...")
 
     def _handle(self, op, nr, fn, pc):
-        params = _s(_rt.kvlang_rwextParams(self.kv, pc.encode())).split("\n")
+        params = _s(_rt.kvlang_rwirextParams(self.kv, pc.encode())).split("\n")
         if op == "numpy.print":
             parts = []
             for i in range(len(params) - 1):
-                path = _s(_rt.kvlang_rwextResolveReadPath(self.kv, pc.encode(), i))
+                path = _s(_rt.kvlang_rwirextResolveReadPath(self.kv, pc.encode(), i))
                 v = self.view(path) if path else None
                 parts.append(_fmt(v) if v is not None
-                             else _s(_rt.kvlang_rwextResolveRead(self.kv, pc.encode(), i)))
+                             else _s(_rt.kvlang_rwirextResolveRead(self.kv, pc.encode(), i)))
             print(" ".join(parts), flush=True)
         else:
             args = [self.read_arg(pc, i) for i in range(nr)]
-            self.alloc(_s(_rt.kvlang_rwextResolveWrite(self.kv, pc.encode(), 0)), np.asarray(fn(args)))
+            self.alloc(_s(_rt.kvlang_rwirextResolveWrite(self.kv, pc.encode(), 0)), np.asarray(fn(args)))
 
     def serve(self, stop):
         table = {**OPS, "numpy.print": (1, None)}
@@ -305,7 +305,7 @@ class Engine:
                         self._handle(op, nr, fn, pc)
                     except Exception as e:                 # 计算失败也要放行，避免 run 阻塞超时
                         print(f"[numpy] {op} @ {pc}: {e}", file=sys.stderr, flush=True)
-                    nxt = _s(_rt.kvlang_rwextNextPc(pc.encode()))
+                    nxt = _s(_rt.kvlang_rwirextNextPc(pc.encode()))
                     self.kv_set(f"/vthread/{vid}/‥pc", nxt)
                     self.kv_set(f"{base}/.done<{vid}>", pid)
                     self.kv_del(todo)
