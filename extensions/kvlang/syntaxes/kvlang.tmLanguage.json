@@ -4,7 +4,9 @@
   "fileTypes": [],
   "patterns": [
     { "include": "#line_comment" },
+    { "include": "#string_triple" },
     { "include": "#string_double" },
+    { "include": "#string_raw" },
     { "include": "#keypath_single" },
     { "include": "#keyword" },
     { "include": "#type" },
@@ -18,10 +20,20 @@
       "name": "comment.line.kvlang",
       "match": "(#|//).*$"
     },
+    "string_triple": {
+      "name": "string.quoted.triple.kvlang",
+      "begin": "\"\"\"",
+      "end": "\"\"\""
+    },
     "string_double": {
       "name": "string.quoted.double.kvlang",
       "begin": "\"",
       "end": "\""
+    },
+    "string_raw": {
+      "name": "string.quoted.raw.kvlang",
+      "begin": "`",
+      "end": "`"
     },
     "keypath_single": {
       "name": "string.quoted.single.kvlang",

@@ -1,0 +1,17 @@
+# 跨行字符串："""..."""（对标 Python，跨行 + 转义）与 `...`（对标 Go，跨行 + 零转义）
+# 期望输出:
+#   line1
+#   line2
+#   one
+#   two
+#   raw\nliteral
+rwfunc main() -> () {
+	s <- """line1
+line2"""
+	println(s)
+	t <- """one\ntwo"""
+	println(t)
+	r <- `raw\nliteral`
+	println(r)
+}
+main()
