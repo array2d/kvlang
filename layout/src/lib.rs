@@ -16,6 +16,6 @@ pub mod lower;
 pub mod code;
 pub mod capi;
 
-pub use code::{compile, init_dirs, write_func, write_rwir_decl};
+pub use code::{compile, init_dirs, vet, write_func, write_rwir_decl};
 pub use ffi::Kv;
 pub use scanner::Diagnostic;

@@ -63,6 +63,30 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// 校验源码是否可 layout（parse + lower），但不写入 kvspace。
+/// 供运行时 vet 闸门：LLM 生成的 kv 代码先过此关，失败不污染 /lib。
+pub fn vet(src: &str) -> Result<(), String> {
+    let (file, diags) = parser::parse_code(src)?;
+    for d in &diags {
+        eprintln!("{}", d.string());
+    }
+    if parser::has_errors(&diags) {
+        return Err("parse: error-level diagnostics — refusing to load".to_string());
+    }
+    let mut any_code = false;
+    for func in &file.funcs {
+        let _ = lower::lower_func(func);
+        any_code = true;
+    }
+    if !file.init_body.is_empty() || !file.top_level_calls.is_empty() {
+        any_code = true;
+    }
+    if !any_code {
+        return Err("no executable code found".to_string());
+    }
+    Ok(())
+}
+
 /// 写函数到 /lib/：签名（rwfunc）、源码、参数 Ptr、指令体。
 pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) {
     let mut type_map = lower::infer_types(fn_);
