@@ -1,13 +1,14 @@
 //! layout 的 C ABI：供第三方（Rust/Python/C 等）把 .kv 代码 layout 进 kvspace，
 //! 无需 fork 子进程。符号在 cdylib（libkvlang_layout.so）中导出。
 //!
-//! 三个入口，对应 corebrain 自造 kv 代码的三步：
-//!   kvlangLayoutFile(path,…)  从文件 layout（原有）
-//!   kvlangLayoutSrc(src,…)    从内存源码串 layout —— LLM 生成即插入，不落盘
-//!   kvlangLayoutVet(src,…)       只校验（parse+lower），不写 kvspace —— 自造代码的闸门
-//! 源码读回（`.src`）是纯 KV 读（/lib/<fn>.src），不在此 ABI。
+//! 三个入口：
+//!   kvlangLayoutVet(src,…)       只校验（parse+lower），不写 kvspace —— 自造代码闸门
+//!   kvlangLayoutFormat(src,…)    格式化（parse → 规范化源码），不写 kvspace
+//!   kvlangLayoutCode(src,dsn,…)  从源码串 layout 进 kvspace（LLM 生成即插入，不落盘）
+//! kvlangLayoutFile(path,…) 是 Code 的薄封装（读文件后走同一 core）。源码读回（`.src`）
+//! 是纯 KV 读（/lib/<fn>.src），不在此 ABI。
 //!
-//! 三者都在 C 边界用 catch_unwind 兜住 kvlang 内部 panic（设计上对非法输入 panic），
+//! 各入口都在 C 边界用 catch_unwind 兜住 kvlang 内部 panic（设计上对非法输入 panic），
 //! 坏代码只会返回 -1，绝不打崩宿主进程。
 
 use std::ffi::CStr;
@@ -15,7 +16,7 @@ use std::fs;
 use std::os::raw::c_char;
 use std::panic::catch_unwind;
 
-use crate::{compile, init_dirs, vet, Kv};
+use crate::{compile, format, init_dirs, vet, Kv};
 
 /// 复刻 Go runtime / layout_file 的 findEntry：DFS /lib/ 找首个 `.init`，否则 "init"。
 fn find_entry(kv: &mut Kv, prefix: &str) -> String {
@@ -106,7 +107,7 @@ pub extern "C" fn kvlangLayoutFile(
 /// 把内存源码串 `src` 直接 layout 进 `dsn`（LLM 生成即插入，不落盘）。
 /// 成功返回 0（entry_out=入口名），失败返回 -1（err_out=错误）。
 #[no_mangle]
-pub extern "C" fn kvlangLayoutSrc(
+pub extern "C" fn kvlangLayoutCode(
     src: *const c_char,
     dsn: *const c_char,
     entry_out: *mut c_char,
@@ -131,6 +132,33 @@ pub extern "C" fn kvlangLayoutVet(src: *const c_char, err_out: *mut c_char, err_
         }
         Err(_) => {
             write_out(err_out, err_cap, "vet panicked (invalid program)");
+            -1
+        }
+    }
+}
+
+/// 格式化 `src`（parse → 规范化源码），不写 kvspace。合法返回 0（out=格式化结果），
+/// 非法返回 -1（err_out=错误）。
+#[no_mangle]
+pub extern "C" fn kvlangLayoutFormat(
+    src: *const c_char,
+    out: *mut c_char,
+    out_cap: u32,
+    err_out: *mut c_char,
+    err_cap: u32,
+) -> i32 {
+    let src = cstr(src).to_string();
+    match catch_unwind(|| format(&src)) {
+        Ok(Ok(s)) => {
+            write_out(out, out_cap, &s);
+            0
+        }
+        Ok(Err(e)) => {
+            write_out(err_out, err_cap, &e);
+            -1
+        }
+        Err(_) => {
+            write_out(err_out, err_cap, "format panicked (invalid program)");
             -1
         }
     }
