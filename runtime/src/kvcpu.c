@@ -43,7 +43,7 @@ static int check_read_types(kvlangKv_t *kv, const char *vtid, const char *pc,
         if (!nl) break;
         *nl = 0; s = nl + 1;
     }
-    bool var_last = rn > 0 && kvlang_rwextTypeVariadic(reads[rn - 1]);
+    bool var_last = rn > 0 && kvlang_rwirextTypeVariadic(reads[rn - 1]);
     int min_args = var_last ? rn - 1 : rn;
     char *fr = kvlangKeytreeFrameRoot(pc);
     int rc = 0;
@@ -62,12 +62,12 @@ static int check_read_types(kvlangKv_t *kv, const char *vtid, const char *pc,
             rc = -1;
             break;
         }
-        if (!exp[0] || !kvlang_rwextTypeValid(exp)) continue;   /* 动态/非法 kindexp 跳过 */
+        if (!exp[0] || !kvlang_rwirextTypeValid(exp)) continue;   /* 动态/非法 kindexp 跳过 */
         kvlangXvalue_t v; kvlangXvalueZero(&v);
         kvlangBuiltinResolveReadValue(kv, fr, args[i].name, &args[i].val, &v);
         const char *k = kvlangXvalueKind(&v);
         kvspaceHead_t h; kvlangXvalueHead(&v, &h);
-        bool ok = kvlang_rwextTypeMatch(exp, k, h.ndim, h.dims);
+        bool ok = kvlang_rwirextTypeMatch(exp, k, h.ndim, h.dims);
         char kbuf[40]; snprintf(kbuf, sizeof kbuf, "%s", k[0] ? k : "None");
         kvlangXvalueFree(&v);
         if (!ok) {

@@ -126,9 +126,9 @@ bool kvlangXvalueIsUintKind(const char *kind);
 bool kvlangXvalueIsFloatKind(const char *kind);
 bool kvlangXvalueIsNumKind(const char *kind);
 /* 签名类型表达式（runtime篇-07）校验/匹配 */
-bool kvlang_rwextTypeValid(const char *expr);
-bool kvlang_rwextTypeMatch(const char *expr, const char *kind, int32_t ndim, const int32_t *dims);
-bool kvlang_rwextTypeVariadic(const char *expr);
+bool kvlang_rwirextTypeValid(const char *expr);
+bool kvlang_rwirextTypeMatch(const char *expr, const char *kind, int32_t ndim, const int32_t *dims);
+bool kvlang_rwirextTypeVariadic(const char *expr);
 int64_t kvlangXvalueAsInt64(const kvlangXvalue_t *v);
 double  kvlangXvalueAsFloat64(const kvlangXvalue_t *v);
 uint64_t kvlangXvalueAsUint64(const kvlangXvalue_t *v);

@@ -48,7 +48,7 @@ kvspace is the addressing and memory space at the core; the language is a small 
 
 - **kvspace** — one C ABI (`kvspace_*`, 24 symbols), two implementations selected by DSN: `kvspace-c` (C, `shm://`, links `blockmalloc` + `slotsboxmalloc`) and `kvspace-durable` (Rust, `redis://` / `fs://`, s3/tikv planned).
 - **kvlang** — `layout` (Rust, compile) and `runtime` (C, execute), both depending only on the `kvspace_*` C ABI.
-- **rwirext** — extensions on top of the runtime. Embedded (Rust `term`, links `libkvlang_runtime` via `kvlang_rwext.h`) or process-separated by handoff (Go `json`, Python `numpy`). `term` / `json` are example base extensions, not headline features.
+- **rwirext** — extensions on top of the runtime. Embedded (Rust `term`, links `libkvlang_runtime` via `kvlang_rwirext.h`) or process-separated by handoff (Go `json`, Python `numpy`). `term` / `json` are example base extensions, not headline features.
 
 ---
 

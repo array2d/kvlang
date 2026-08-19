@@ -63,21 +63,21 @@ unsafe extern "C" {
     fn kvspaceNewChar(kind: *const c_char, s: *const c_char, out: *mut *mut u8, out_len: *mut u32) -> c_int;
     fn kvspaceDecodeHead(data: *const u8, data_len: u32, out: *mut kvspaceHead_t) -> c_int;
 
-    // rwext ABI（kvspace 不提供的 runtime 语义；句柄传扩展自连的 kvspace）
-    fn kvlang_rwextRegister(
+    // rwirext ABI（kvspace 不提供的 runtime 语义；句柄传扩展自连的 kvspace）
+    fn kvlang_rwirextRegister(
         kvspace: *mut c_void,
         opcode: *const c_char,
         nr: c_int,
         nw: c_int,
         sig: *const c_char,
     ) -> c_int;
-    fn kvlang_rwextPrintLine(
+    fn kvlang_rwirextPrintLine(
         kvspace: *mut c_void,
         pc: *const c_char,
         rawnl: *mut c_int,
         cerr: *mut c_int,
     ) -> *mut c_char;
-    fn kvlang_rwextNextPc(pc: *const c_char) -> *mut c_char;
+    fn kvlang_rwirextNextPc(pc: *const c_char) -> *mut c_char;
 }
 
 struct Op {
@@ -179,7 +179,7 @@ fn kv_set(kv: *mut c_void, key: &str, val: &str) {
 fn register(kv: *mut c_void) {
     for op in OPS {
         unsafe {
-            kvlang_rwextRegister(kv, cs(op.name).as_ptr(), op.nr, op.nw, cs(op.sig).as_ptr());
+            kvlang_rwirextRegister(kv, cs(op.name).as_ptr(), op.nr, op.nw, cs(op.sig).as_ptr());
         }
     }
 }
@@ -252,13 +252,13 @@ fn main() {
         loop {
             let mut rawnl = 0i32;
             let mut is_cerr = 0i32;
-            let p = unsafe { kvlang_rwextPrintLine(kv, cs(&c).as_ptr(), &mut rawnl, &mut is_cerr) };
+            let p = unsafe { kvlang_rwirextPrintLine(kv, cs(&c).as_ptr(), &mut rawnl, &mut is_cerr) };
             if p.is_null() {
                 break;
             }
             let line = take(p);
             print_line(&line, rawnl, is_cerr);
-            c = take(unsafe { kvlang_rwextNextPc(cs(&c).as_ptr()) });
+            c = take(unsafe { kvlang_rwirextNextPc(cs(&c).as_ptr()) });
         }
 
         // 写回非己方 pc，让 runtime 从它继续

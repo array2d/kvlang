@@ -1,5 +1,5 @@
 // Package json 是 rwirext 扩展运行时（json.to/json.from）。经 C runtime 的
-// rwext_* ABI 与 kvspace 交互（不依赖 kvspace-go）。独立进程常驻 serve。
+// rwirext_* ABI 与 kvspace 交互（不依赖 kvspace-go）。独立进程常驻 serve。
 package json
 
 /*
@@ -7,7 +7,7 @@ package json
 // 对齐 term 的 KVLANG_KVSPACE_LIB；扩展宿主自连 kvspace，不经 runtime。
 #cgo CFLAGS: -I${SRCDIR}/../../../runtime/include
 #cgo LDFLAGS: -L${SRCDIR}/../../../bin -lkvlang_runtime -Wl,-rpath,${SRCDIR}/../../../bin
-#include "kvlang_rwext.h"
+#include "kvlang_rwirext.h"
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -151,25 +151,25 @@ func mkindex(c unsafe.Pointer, path string) {
 func resolveRead(c unsafe.Pointer, pc string, idx int) string {
 	cp := cstr(pc)
 	defer C.free(unsafe.Pointer(cp))
-	return gostr(C.kvlang_rwextResolveRead(c, cp, C.int(idx)))
+	return gostr(C.kvlang_rwirextResolveRead(c, cp, C.int(idx)))
 }
 
 func resolveWrite(c unsafe.Pointer, pc string, idx int) string {
 	cp := cstr(pc)
 	defer C.free(unsafe.Pointer(cp))
-	return gostr(C.kvlang_rwextResolveWrite(c, cp, C.int(idx)))
+	return gostr(C.kvlang_rwirextResolveWrite(c, cp, C.int(idx)))
 }
 
 func nextPC(pc string) string {
 	cp := cstr(pc)
 	defer C.free(unsafe.Pointer(cp))
-	return gostr(C.kvlang_rwextNextPc(cp))
+	return gostr(C.kvlang_rwirextNextPc(cp))
 }
 
 func params(c unsafe.Pointer, pc string) []string {
 	cp := cstr(pc)
 	defer C.free(unsafe.Pointer(cp))
-	return strings.Split(gostr(C.kvlang_rwextParams(c, cp)), "\n")
+	return strings.Split(gostr(C.kvlang_rwirextParams(c, cp)), "\n")
 }
 
 // ── XValue 编解码（走权威 kvspace ABI：DecodeHead 读头 + TlvEncode/NewChar 编码）──
@@ -486,7 +486,7 @@ func register(c unsafe.Pointer) {
 		sig := strings.TrimSuffix(strings.Repeat("any\n", o.nr+o.nw), "\n")
 		co := cstr(o.name)
 		cs := cstr(sig)
-		C.kvlang_rwextRegister(c, co, C.int32_t(o.nr), C.int32_t(o.nw), cs)
+		C.kvlang_rwirextRegister(c, co, C.int32_t(o.nr), C.int32_t(o.nw), cs)
 		C.free(unsafe.Pointer(co))
 		C.free(unsafe.Pointer(cs))
 	}

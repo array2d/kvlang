@@ -48,7 +48,7 @@ kvspace 是核心的寻址空间与内存空间；语言本体是小核心 runti
 
 - **kvspace** — 一套 C ABI（`kvspace_*`，24 符号），由 DSN 选择两种实现：`kvspace-c`（C，`shm://`，链接 `blockmalloc` + `slotsboxmalloc`）与 `kvspace-durable`（Rust，`redis://` / `fs://`，s3/tikv 规划中）。
 - **kvlang** — `layout`（Rust，编译）与 `runtime`（C，执行），二者都只依赖 `kvspace_*` C ABI。
-- **rwirext** — 构建在 runtime 之上的扩展。嵌入式（Rust `term`，经 `kvlang_rwext.h` 链接 `libkvlang_runtime`）或独立进程 handoff（Go `json`、Python `numpy`）。`term` / `json` 只是基础示例扩展，不是招牌能力。
+- **rwirext** — 构建在 runtime 之上的扩展。嵌入式（Rust `term`，经 `kvlang_rwirext.h` 链接 `libkvlang_runtime`）或独立进程 handoff（Go `json`、Python `numpy`）。`term` / `json` 只是基础示例扩展，不是招牌能力。
 
 ---
 

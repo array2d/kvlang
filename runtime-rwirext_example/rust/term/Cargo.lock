@@ -3,7 +3,7 @@
 version = 4
 
 [[package]]
-name = "kvlang-rwext-term"
+name = "kvlang-rwirext-term"
 version = "0.1.0"
 dependencies = [
  "libc",
