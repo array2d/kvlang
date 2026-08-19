@@ -18,6 +18,14 @@ fn fresh_kv() -> Kv {
 }
 
 #[test]
+fn refuse_rwir_and_rwfunc() {
+    let mut kv = fresh_kv();
+    compile(&mut kv, "rwfunc dup() -> () {\n    1 -> _\n}\n").unwrap();
+    let err = compile(&mut kv, "rwir dup() -> ()\n").unwrap_err();
+    assert!(err.contains("one opcode, one definition"), "{err}");
+}
+
+#[test]
 fn compile_simple_func() {
     let mut kv = fresh_kv();
     let src = "rwfunc sum(A:int64, B:int64) -> (C:int64) {\n    A + B -> C\n}\n";

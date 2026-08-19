@@ -177,6 +177,19 @@ int kvlangKvWatch(kvlangKv_t *k, const char *key, const kvlangXvalue_t *target, 
 #define SEG_MSG     "msg"
 #define LIB_ROOT    "/lib"
 #define VTHREAD_ROOT "/vthread"
+#define SYS_ROOT     "/sys"
+#define DEV_ROOT     "/dev"
+#define DONE_ROOT    "/done"
+#define SEG_DELEGSEQ "delegseq"
+#define SEG_RWIR_BACKEND "rwir-backend"
+#define SEG_LAST_HEARTBEAT "last_heartbeat"
+#define SEG_CATEGORY "category"
+#define SEG_LOAD     "load"
+#define SEG_CMD      "cmd"
+#define SEG_OP       "op"
+#define SEG_TASK     "task"
+#define SEG_DONE     "done"
+#define SEG_RWIR     "rwir"
 
 static inline void kvlangStrbufClear(kvlangStrbuf_t *b) { b->len = 0; if (b->p) b->p[0] = 0; }
 
@@ -199,6 +212,22 @@ void kvlangKeytreeFrameCallpc(const char *root, kvlangStrbuf_t *out);
 void kvlangKeytreeFrameReturnpc(const char *root, kvlangStrbuf_t *out);
 void kvlangKeytreeFrameRo(const char *root, kvlangStrbuf_t *out);
 bool kvlangKeytreeIsEntryPc(const char *pc);
+
+char *kvlangKeytreeCanonOp(const char *opcode);                       /* malloc */
+bool kvlangKeytreeValidSegment(const char *s);
+char *kvlangKeytreeCheckWriteKey(const char *vtid, const char *key);  /* malloc err or NULL */
+char *kvlangKeytreeSysRwirBackendRoot(void);                          /* malloc */
+char *kvlangKeytreeSysRwirBackend(const char *name);                  /* malloc */
+char *kvlangKeytreeSysRwirBackendOp(const char *name, const char *opcode);
+char *kvlangKeytreeSysRwirBackendCmd(const char *name);
+char *kvlangKeytreeSysRwirBackendStatus(const char *name);
+char *kvlangKeytreeSysRwirBackendLoad(const char *name);
+char *kvlangKeytreeSysRwirBackendHeartbeat(const char *name);
+char *kvlangKeytreeSysRwirBackendCategoryRoot(const char *name);
+char *kvlangKeytreeSysTask(const char *task_id, const char *field);
+char *kvlangKeytreeDoneRwir(const char *task_id);
+char *kvlangKeytreeVthreadDelegSeq(const char *vtid);
+char *kvlangKeytreeLibSig(const char *opcode);                        /* /lib/<op>/[0,0] */
 
 /* ── rwir ──────────────────────────────────────────────────────────── */
 
@@ -232,6 +261,17 @@ void kvlangVthreadGet(kvlangKv_t *kv, const char *vtid, char **pc, char **status
 void kvlangVthreadSet(kvlangKv_t *kv, const char *vtid, const char *pc, const char *status);
 void kvlangVthreadSetDone(kvlangKv_t *kv, const char *vtid, const char *ret);
 void kvlangVthreadSetError(kvlangKv_t *kv, const char *vtid, const char *pc, const char *msg);
+int64_t kvlangVthreadNextSeq(kvlangKv_t *kv, const char *key);   /* Get-then-Set; Incr replaces this */
+
+/* ── dispatch (rwir-backend) ───────────────────────────────────────── */
+
+#define KVLANG_DELEGATE_OK    0
+#define KVLANG_DELEGATE_ERR  -1
+#define KVLANG_DELEGATE_LOCAL 1   /* backend left duty; run local rwfunc */
+
+bool kvlangDispatchIsDelegatedOp(kvlangKv_t *kv, const char *opcode);
+int  kvlangDispatchDelegate(kvlangKv_t *kv, const char *vtid, const char *pc, kvlangRwirInst_t *inst);
+void kvlangDispatchSetDefaultTimeoutNs(int64_t ns);
 
 /* ── builtin ───────────────────────────────────────────────────────── */
 

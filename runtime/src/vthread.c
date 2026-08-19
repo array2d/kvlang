@@ -67,3 +67,31 @@ void kvlangVthreadSetError(kvlangKv_t *kv, const char *vtid, const char *pc, con
     kvlangXvalueFree(&vpc); kvlangXvalueFree(&vmsg); kvlangXvalueFree(&vst);
     kvlangStrbufFree(&msg_path); kvlangStrbufFree(&pc_key); kvlangStrbufFree(&st_key);
 }
+
+/* Get-then-Set. Two processes can collide; kvspace Incr replaces this. */
+int64_t kvlangVthreadNextSeq(kvlangKv_t *kv, const char *key) {
+    kvlangXvalue_t v; kvlangXvalueZero(&v);
+    kvlangKvGetOne(kv, key, &v);
+    int64_t n = 0;
+    if (!kvlangXvalueNone(&v)) {
+        char *s = kvlangXvalueValueString(&v);
+        char *end = NULL;
+        n = strtoll(s, &end, 10);
+        if (end == s || (end && *end)) {
+            fprintf(stderr, "NextSeq: unparsable counter at %s\n", key);
+            abort();
+        }
+        free(s);
+    }
+    kvlangXvalueFree(&v);
+    n++;
+    char buf[32];
+    snprintf(buf, sizeof buf, "%lld", (long long)n);
+    kvlangXvalue_t nv; kvlangXvalueZero(&nv);
+    kvlangXvalueNewCharUtf8(&nv, buf);
+    kvlangKvPair_t p = { (char *)key, nv };
+    char err[256];
+    kvlangKvSet(kv, &p, 1, err, sizeof err);
+    kvlangXvalueFree(&nv);
+    return n;
+}

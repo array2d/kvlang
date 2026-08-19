@@ -23,7 +23,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${BIN_DIR}")
 add_library(kvlang_runtime SHARED
     src/strbuf.c src/xvalue.c src/kv.c src/keytree.c src/rwir.c
     src/vthread.c src/logx.c src/builtin.c src/kvcpu.c src/runtime.c src/rwirext.c
-    src/type_expr.c)
+    src/type_expr.c src/dispatch.c)
 target_include_directories(kvlang_runtime PUBLIC include src)
 target_compile_definitions(kvlang_runtime PRIVATE _GNU_SOURCE)
 
@@ -41,3 +41,13 @@ target_link_libraries(kvlang_runtime PRIVATE m pthread)
 # --export-dynamic 供 kvlang（term 扩展）找符号；--disable-new-dtags 使 rpath 转 DT_RPATH（传递），
 # 让 runtime → kvspace-c → blockmalloc/slotsboxmalloc 的传递依赖能被 runtime 的 rpath 找到。
 set_target_properties(kvlang_runtime PROPERTIES LINK_FLAGS "-Wl,--export-dynamic -Wl,--disable-new-dtags")
+
+add_executable(kvlang_delegate_test tests/delegate_test.c)
+target_link_libraries(kvlang_delegate_test PRIVATE kvlang_runtime pthread)
+target_include_directories(kvlang_delegate_test PRIVATE include src)
+if(KVSPACE_LIB STREQUAL "kvspace-c")
+    set_target_properties(kvlang_delegate_test PROPERTIES
+        BUILD_RPATH "${KVSPACE_C_DIR};${BLOCKMALLOC_DIR};${SLOTSBOXMALLOC_DIR};${BIN_DIR}")
+else()
+    set_target_properties(kvlang_delegate_test PROPERTIES BUILD_RPATH "${KVSPACE_DURABLE_DIR};${BIN_DIR}")
+endif()
