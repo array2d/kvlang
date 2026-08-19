@@ -1,11 +1,21 @@
-//! layout 的 C ABI：供第三方（Python/C 等）直接把 .kv 代码 layout 进 kvspace，
-//! 无需 fork layout_file 子进程。符号在 cdylib（libkvlang_layout.so）中导出。
+//! layout 的 C ABI：供第三方（Rust/Python/C 等）把 .kv 代码 layout 进 kvspace，
+//! 无需 fork 子进程。符号在 cdylib（libkvlang_layout.so）中导出。
+//!
+//! 三个入口，对应 corebrain 自造 kv 代码的三步：
+//!   kvlangLayoutFile(path,…)  从文件 layout（原有）
+//!   kvlangLayoutSrc(src,…)    从内存源码串 layout —— LLM 生成即插入，不落盘
+//!   kvlangLayoutVet(src,…)       只校验（parse+lower），不写 kvspace —— 自造代码的闸门
+//! 源码读回（`.src`）是纯 KV 读（/lib/<fn>.src），不在此 ABI。
+//!
+//! 三者都在 C 边界用 catch_unwind 兜住 kvlang 内部 panic（设计上对非法输入 panic），
+//! 坏代码只会返回 -1，绝不打崩宿主进程。
 
 use std::ffi::CStr;
 use std::fs;
 use std::os::raw::c_char;
+use std::panic::catch_unwind;
 
-use crate::{compile, init_dirs, Kv};
+use crate::{compile, init_dirs, vet, Kv};
 
 /// 复刻 Go runtime / layout_file 的 findEntry：DFS /lib/ 找首个 `.init`，否则 "init"。
 fn find_entry(kv: &mut Kv, prefix: &str) -> String {
@@ -42,9 +52,40 @@ fn write_out(buf: *mut c_char, cap: u32, s: &str) {
     }
 }
 
-/// 读 `path` 指向的 .kv 文件，layout 进 `dsn` 指定的 kvspace。
-/// 成功返回 0，入口名写入 `entry_out`（含 NUL，长度 ≤ entry_cap）；
-/// 失败返回 -1，错误信息写入 `err_out`（含 NUL，长度 ≤ err_cap）。
+/// 把源码 layout 进 dsn 指向的 kvspace，返回入口名或错误。
+fn layout_core(src: &str, dsn: &str) -> Result<String, String> {
+    let mut kv = Kv::conn(dsn);
+    init_dirs(&mut kv)?;
+    compile(&mut kv, src)?;
+    let entry = find_entry(&mut kv, "/lib/");
+    Ok(if entry.is_empty() { "init".to_string() } else { entry })
+}
+
+/// 结果落地为 C 约定：成功写 entry、返回 0；失败写 err、返回 -1；panic 兜为 -1。
+fn finish(
+    r: std::thread::Result<Result<String, String>>,
+    entry_out: *mut c_char,
+    entry_cap: u32,
+    err_out: *mut c_char,
+    err_cap: u32,
+) -> i32 {
+    match r {
+        Ok(Ok(entry)) => {
+            write_out(entry_out, entry_cap, &entry);
+            0
+        }
+        Ok(Err(e)) => {
+            write_out(err_out, err_cap, &e);
+            -1
+        }
+        Err(_) => {
+            write_out(err_out, err_cap, "layout panicked (invalid program)");
+            -1
+        }
+    }
+}
+
+/// 读 `path` 指向的 .kv 文件，layout 进 `dsn`。成功返回 0（entry_out=入口名），失败返回 -1。
 #[no_mangle]
 pub extern "C" fn kvlangLayoutFile(
     path: *const c_char,
@@ -54,23 +95,43 @@ pub extern "C" fn kvlangLayoutFile(
     err_out: *mut c_char,
     err_cap: u32,
 ) -> i32 {
-    let src = match fs::read_to_string(cstr(path)) {
-        Ok(s) => s,
-        Err(e) => {
-            write_out(err_out, err_cap, &format!("read {}: {e}", cstr(path)));
-            return -1;
+    let (path, dsn) = (cstr(path).to_string(), cstr(dsn).to_string());
+    let r = catch_unwind(|| {
+        let src = fs::read_to_string(&path).map_err(|e| format!("read {path}: {e}"))?;
+        layout_core(&src, &dsn)
+    });
+    finish(r, entry_out, entry_cap, err_out, err_cap)
+}
+
+/// 把内存源码串 `src` 直接 layout 进 `dsn`（LLM 生成即插入，不落盘）。
+/// 成功返回 0（entry_out=入口名），失败返回 -1（err_out=错误）。
+#[no_mangle]
+pub extern "C" fn kvlangLayoutSrc(
+    src: *const c_char,
+    dsn: *const c_char,
+    entry_out: *mut c_char,
+    entry_cap: u32,
+    err_out: *mut c_char,
+    err_cap: u32,
+) -> i32 {
+    let (src, dsn) = (cstr(src).to_string(), cstr(dsn).to_string());
+    let r = catch_unwind(|| layout_core(&src, &dsn));
+    finish(r, entry_out, entry_cap, err_out, err_cap)
+}
+
+/// 只校验 `src`（parse+lower），不写 kvspace。合法返回 0，非法返回 -1（err_out=错误）。
+#[no_mangle]
+pub extern "C" fn kvlangLayoutVet(src: *const c_char, err_out: *mut c_char, err_cap: u32) -> i32 {
+    let src = cstr(src).to_string();
+    match catch_unwind(|| vet(&src)) {
+        Ok(Ok(())) => 0,
+        Ok(Err(e)) => {
+            write_out(err_out, err_cap, &e);
+            -1
         }
-    };
-    let mut kv = Kv::conn(cstr(dsn));
-    if let Err(e) = init_dirs(&mut kv) {
-        write_out(err_out, err_cap, &format!("init_dirs: {e}"));
-        return -1;
+        Err(_) => {
+            write_out(err_out, err_cap, "vet panicked (invalid program)");
+            -1
+        }
     }
-    if let Err(e) = compile(&mut kv, &src) {
-        write_out(err_out, err_cap, &e);
-        return -1;
-    }
-    let entry = find_entry(&mut kv, "/lib/");
-    write_out(entry_out, entry_cap, if entry.is_empty() { "init" } else { &entry });
-    0
 }
