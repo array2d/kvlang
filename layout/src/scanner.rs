@@ -168,6 +168,40 @@ fn scan_quoted(src: &[u8], mut i: usize, quote: u8) -> (String, usize) {
     (String::from_utf8_lossy(&b).into_owned(), src.len())
 }
 
+/// 三引号字符串 `"""..."""` —— 跨行，转义（对标 Python triple-quote）。
+/// 起始 `i` 指向开头的第一个 `"`，返回（内容，闭合 `"""` 之后的字节下标）。
+fn scan_triple_quoted(src: &[u8], mut i: usize) -> (String, usize) {
+    i += 3;
+    let mut b: Vec<u8> = Vec::new();
+    while i < src.len() {
+        let c = src[i];
+        if c == b'\\' {
+            i += 1;
+            if i < src.len() {
+                b.push(src[i]);
+                i += 1;
+            }
+            continue;
+        }
+        if c == b'"' && i + 2 < src.len() && src[i + 1] == b'"' && src[i + 2] == b'"' {
+            return (String::from_utf8_lossy(&b).into_owned(), i + 3);
+        }
+        b.push(c);
+        i += 1;
+    }
+    (String::from_utf8_lossy(&b).into_owned(), src.len())
+}
+
+/// 跨行字面量消费后同步 line/line_start（字面量内部换行不产生 Newline Token，但行号需前进）。
+fn advance_line_count(src: &[u8], start: usize, end: usize, line: &mut i32, line_start: &mut usize) {
+    for k in start..end {
+        if src[k] == b'\n' {
+            *line += 1;
+            *line_start = k + 1;
+        }
+    }
+}
+
 fn is_token_delim(c: u8) -> bool {
     matches!(
         c,
@@ -278,16 +312,16 @@ pub fn scan(src: &str) -> Vec<Token> {
         prev_newline = false;
         let p = pos(i, line, line_start);
 
-        // 反引号原始字符串
+        // 反引号原始字符串 `...` — 跨行，零转义（对标 Go raw string）
         if c == b'`' {
-            if let Some(end) = find_byte(&src[i + 1..], b'`') {
+            let next = if let Some(end) = find_byte(&src[i + 1..], b'`') {
                 tokens.push(Token {
                     kind: Kind::Literal,
                     value: String::from_utf8_lossy(&src[i + 1..i + 1 + end]).into_owned(),
                     pos: p,
                     quote: b'`',
                 });
-                i = i + end + 2;
+                i + end + 2
             } else {
                 tokens.push(Token {
                     kind: Kind::Literal,
@@ -295,8 +329,19 @@ pub fn scan(src: &str) -> Vec<Token> {
                     pos: p,
                     quote: b'`',
                 });
-                i = src.len();
-            }
+                src.len()
+            };
+            advance_line_count(src, i, next, &mut line, &mut line_start);
+            i = next;
+            continue;
+        }
+
+        // 三引号字符串 """...""" — 跨行，转义（对标 Python triple-quote）
+        if c == b'"' && i + 2 < src.len() && src[i + 1] == b'"' && src[i + 2] == b'"' {
+            let (val, next) = scan_triple_quoted(src, i);
+            tokens.push(Token { kind: Kind::Literal, value: val, pos: p, quote: b'"' });
+            advance_line_count(src, i, next, &mut line, &mut line_start);
+            i = next;
             continue;
         }
 

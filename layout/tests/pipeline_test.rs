@@ -76,6 +76,22 @@ fn compile_string_literal_and_lib() {
 }
 
 #[test]
+fn compile_multiline_string_literal() {
+    let mut kv = fresh_kv();
+    let src = "lib m { rwfunc ml() -> () {\n    \"\"\"hello\nworld\"\"\" -> _\n} }\n";
+    compile(&mut kv, src).unwrap();
+
+    let r = kv.get_one("/lib/m.ml/[1,-1]");
+    assert_eq!(kvkind::kind(&r), "char/utf32");
+    let b = body(&r);
+    let s: String = b
+        .chunks_exact(4)
+        .map(|c| char::from_u32(u32::from_le_bytes([c[0], c[1], c[2], c[3]])).unwrap_or('\u{FFFD}'))
+        .collect();
+    assert_eq!(s, "hello\nworld");
+}
+
+#[test]
 fn compile_control_flow_lowers_to_blocks() {
     let mut kv = fresh_kv();
     let src = "rwfunc f(X:int64) -> (Y:int64) {\n    if (X > 0) {\n        X -> Y\n    } else {\n        0 -> Y\n    }\n}\n";
