@@ -9,7 +9,7 @@
 rwfunc reverse_str() -> () {
 	# char 值数组: "hello" → ASCII [104, 101, 108, 108, 111]
 	a:[]int64 = [104, 101, 108, 108, 111]
-	n <- len(a)
+	n <- xv.numel(a)
 	l = 0  # = 等价于 <-
 	n - 1 -> r
 	while (l < r) {

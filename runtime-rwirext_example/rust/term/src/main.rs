@@ -208,12 +208,12 @@ fn main() {
 
     let rt = unsafe { kvlangRuntimeConnect(cs(&dsn).as_ptr()) };
     if rt.is_null() {
-        eprintln!("term: kvlangRuntimeConnect failed: {dsn}");
+        eprintln!("kvlang: kvlangRuntimeConnect failed: {dsn}");
         std::process::exit(1);
     }
     let kv = unsafe { kvspaceConnect(cs(&dsn).as_ptr()) };
     if kv.is_null() {
-        eprintln!("term: kvspaceConnect failed: {dsn}");
+        eprintln!("kvlang: kvspaceConnect failed: {dsn}");
         std::process::exit(1);
     }
 
@@ -221,7 +221,7 @@ fn main() {
 
     let vid = unsafe { kvlangRuntimeBootstrap(rt, cs(&funcname).as_ptr(), null_mut(), 0) };
     if vid.is_null() {
-        eprintln!("term: bootstrap {funcname} failed");
+        eprintln!("kvlang: bootstrap {funcname} failed");
         std::process::exit(1);
     }
     let vid = take(vid);
@@ -243,7 +243,7 @@ fn main() {
             } else {
                 st
             };
-            eprintln!("term: vthread {vid} {st}: {msg}");
+            eprintln!("kvlang: vthread {vid} {st}: {msg}");
             std::process::exit(1);
         }
 

@@ -4,7 +4,7 @@
 #   true
 #   false
 rwfunc has_dup(a:[]int64) -> () {
-	len(a) -> n
+	xv.numel(a) -> n
 	seen = {}  # = 等价于 <-
 	found <- false
 	i = 0  # = 等价于 <-
@@ -31,7 +31,7 @@ rwfunc has_dup(a:[]int64) -> () {
 
 rwfunc no_dup() -> () {
 	a:[]int64 = [1, 2, 3, 4]  # = 等价于 <-
-	len(a) -> n
+	xv.numel(a) -> n
 	seen = {}  # = 等价于 <-
 	found <- false
 	i = 0  # = 等价于 <-

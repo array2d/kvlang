@@ -1,0 +1,28 @@
+# 期望输出:
+#   v= 42
+#   has_data= true
+#   x= 42
+#   n= 2
+#   numel= 3 dim= 1
+#   shape0= 3
+rwfunc main() -> () {
+	kv.set("/tmp/kvt.data", 42)
+	kv.get("/tmp/kvt.data") -> v
+	println("v=", v)
+	kv.has("/tmp/kvt", "data") -> h
+	println("has_data=", h)
+	kv.at("/tmp/kvt", "data") -> x
+	println("x=", x)
+	kv.mkindex("/tmp/kvt/")
+	kv.set("/tmp/kvt/a", 1)
+	kv.set("/tmp/kvt/b", 2)
+	kv.list("/tmp/kvt/") -> names
+	xv.numel(names) -> n
+	println("n=", n)
+	xv.numel([10,20,30]) -> m
+	xv.dim([10,20,30]) -> d
+	println("numel=", m, "dim=", d)
+	xv.shape([10,20,30]) -> s
+	println("shape0=", s[0])
+}
+main()

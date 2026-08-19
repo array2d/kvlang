@@ -5,7 +5,7 @@
 #   2
 rwfunc missing() -> () {
 	a:[]int64 <- [3, 0, 1]
-	n = len(a)  # = 等价于 <-
+	n = xv.numel(a)  # = 等价于 <-
 	0 -> s
 	i <- 0
 	while (i < n) {

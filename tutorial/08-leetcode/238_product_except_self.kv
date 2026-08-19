@@ -8,7 +8,7 @@
 #   6
 rwfunc product() -> () {
 	a:[]int64 = [1, 2, 3, 4]  # = 等价于 <-
-	len(a) -> n
+	xv.numel(a) -> n
 	prefix <- 1
 	suffix = 1  # = 等价于 <-
 	# build prefix products into result
