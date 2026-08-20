@@ -86,6 +86,15 @@ int main(void) {
     }
     expect(gone, "Get must be None after TTL");
 
+    set_char(kv, "/e2/ghost", "g");
+    expect(kvlangKvExpire(kv, "/e2/ghost", 40000000ULL, err, sizeof err) == 0, "expire ghost");
+    usleep(80000);
+    expect(!list_has(kv, "/e2/", "ghost"), "List after TTL must not resurrect");
+    expect(!list_has(kv, "/e2/", "ghost"), "second List after TTL must stay empty");
+    got = get_char(kv, "/e2/ghost");
+    expect(!got, "Get after List-first reap is None");
+    free(got);
+
     kvlangKvDisconnect(kv);
     fprintf(stderr, "ok\n");
     return 0;
