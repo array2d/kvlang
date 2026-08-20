@@ -170,7 +170,7 @@ fn native_rwir_set() -> &'static [&'static str] {
         "kv.get", "kv.set", "kv.del", "kv.deltree", "kv.list", "kv.mkindex",
         "kv.extindex", "kv.rmindexext", "kv.watch",
         // xv.* 形状内省与多维元素访问
-        "xv.numel", "xv.dim", "xv.shape", "xv.at", "xv.set",
+        "xv.numel", "xv.dim", "xv.shape", "xv.at", "xv.set", "xv.reshape",
     ]
 }
 

@@ -536,6 +536,10 @@ fn infer_inst(inst: &Instruction, tm: &mut HashMap<String, String>) {
         Some(e) => e,
         None => return,
     };
+    // kv.set 成员形（3 读：base, key, val）是 void 无写槽，但 base 仍须推断为 obj/map（供 for-in / 成员访问）
+    if e.op == "kv.set" && e.args.len() >= 3 && !e.args[0].val.contains('/') {
+        tm.entry(e.args[0].val.clone()).or_insert_with(|| "obj".to_string());
+    }
     if inst.writes.is_empty() {
         return;
     }
@@ -648,6 +652,9 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
                     tm.entry(key).or_insert(t);
                 }
             }
+            return if !reads.is_empty() { slot_type(&reads[0], tm) } else { String::new() };
+        }
+        "xv.reshape" => {
             return if !reads.is_empty() { slot_type(&reads[0], tm) } else { String::new() };
         }
         _ => {}

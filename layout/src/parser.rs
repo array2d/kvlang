@@ -539,17 +539,22 @@ impl Parser {
             });
         };
         let check = |p: &mut Self, inst: &Instruction, ro: &std::collections::HashSet<String>, fname: &str| {
-            for (i, w) in inst.writes.iter().enumerate() {
+            // 写槽命中读参（非路径/索引/成员）
+            for w in inst.writes.iter() {
                 if w.contains('/') || w.contains('[') || w.contains(keytree::MEMBER_SEP) {
                     continue;
                 }
-                if let Some(e) = &inst.expr {
-                    if e.op == "set" && i == 0 && !e.args.is_empty() && w == &e.args[0].val {
-                        continue;
-                    }
-                }
                 if ro.contains(w) {
                     bad(p, w, fname);
+                }
+            }
+            // kv.set 成员形（3 读：base, key, val）改写 base 的成员目录，命中读参即拒绝
+            if let Some(e) = &inst.expr {
+                if e.op == "kv.set" && e.args.len() >= 3 {
+                    let base = &e.args[0].val;
+                    if !base.contains('/') && ro.contains(base) {
+                        bad(p, base, fname);
+                    }
                 }
             }
         };
@@ -1357,8 +1362,9 @@ impl Parser {
             ast::str_lit(&field)
         };
         let e = inst.expr.take();
+        // base.key = v 脱糖为 kv.set(base, key, val)：kv.set 是 void（副作用写成员），无写槽
         inst.expr = Some(ast::call("kv.set", vec![ast::leaf(&base), key, e.unwrap_or(ast::leaf(""))]));
-        inst.writes = vec![base];
+        inst.writes = Vec::new();
         inst.write_types = Vec::new();
     }
 

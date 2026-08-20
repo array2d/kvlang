@@ -12,7 +12,7 @@ rwfunc main() -> () {
 	println("shape0=", s[0])
 	xv.at(a, 1) -> e
 	println("at1=", e)
-	xv.set(a, 1, 99)
+	xv.set(a, 1, 99) -> a
 	println("set1=", a[1])
 }
 main()
