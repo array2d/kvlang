@@ -140,3 +140,7 @@ int kvlangKvTake(kvlangKv_t *k, const char *key, uint64_t timeout_ns, kvlangXval
     kvspaceBytesFree(d, len);
     return 0;
 }
+
+int kvlangKvIncr(kvlangKv_t *k, const char *key, int64_t *out, char *err, uint32_t err_cap) {
+    return kvspaceIncr(k->h, key, out, err, err_cap);
+}

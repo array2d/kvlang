@@ -40,6 +40,7 @@ extern int   kvspaceNotify(void *h, const char *key, const uint8_t *val, uint32_
                             char *err, uint32_t err_cap);
 extern int   kvspaceTake(void *h, const char *key, uint64_t timeout_ns,
                           uint8_t **out, uint32_t *out_len);
+extern int   kvspaceIncr(void *h, const char *key, int64_t *out, char *err, uint32_t err_cap);
 extern int   kvspaceTlvEncode(const char *kind, const uint8_t *raw, uint32_t raw_len,
                                 const int32_t *dims, int32_t ndim, uint8_t **out, uint32_t *out_len);
 extern int   kvspaceTlvEncodePtr(const char *kind, const uint8_t *raw, uint32_t raw_len,
@@ -171,6 +172,7 @@ int kvlangKvList(kvlangKv_t *k, const char *prefix, bool expand_ext, bool resolv
 int kvlangKvWatch(kvlangKv_t *k, const char *key, const kvlangXvalue_t *target, uint64_t tick_ns, kvlangXvalue_t *out);
 int kvlangKvNotify(kvlangKv_t *k, const char *key, const kvlangXvalue_t *val, char *err, uint32_t err_cap);
 int kvlangKvTake(kvlangKv_t *k, const char *key, uint64_t timeout_ns, kvlangXvalue_t *out);
+int kvlangKvIncr(kvlangKv_t *k, const char *key, int64_t *out, char *err, uint32_t err_cap);
 
 /* ── keytree ───────────────────────────────────────────────────────── */
 
@@ -267,7 +269,7 @@ void kvlangVthreadGet(kvlangKv_t *kv, const char *vtid, char **pc, char **status
 void kvlangVthreadSet(kvlangKv_t *kv, const char *vtid, const char *pc, const char *status);
 void kvlangVthreadSetDone(kvlangKv_t *kv, const char *vtid, const char *ret);
 void kvlangVthreadSetError(kvlangKv_t *kv, const char *vtid, const char *pc, const char *msg);
-int64_t kvlangVthreadNextSeq(kvlangKv_t *kv, const char *key);   /* Get-then-Set; Incr replaces this */
+int64_t kvlangVthreadNextSeq(kvlangKv_t *kv, const char *key);
 
 /* ── dispatch (rwir-backend) ───────────────────────────────────────── */
 

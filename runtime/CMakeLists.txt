@@ -48,12 +48,18 @@ target_include_directories(kvlang_delegate_test PRIVATE include src)
 add_executable(kvlang_notify_test tests/notify_contract_test.c)
 target_link_libraries(kvlang_notify_test PRIVATE kvlang_runtime pthread)
 target_include_directories(kvlang_notify_test PRIVATE include src)
+add_executable(kvlang_incr_test tests/incr_test.c)
+target_link_libraries(kvlang_incr_test PRIVATE kvlang_runtime pthread)
+target_include_directories(kvlang_incr_test PRIVATE include src)
 if(KVSPACE_LIB STREQUAL "kvspace-c")
     set_target_properties(kvlang_delegate_test PROPERTIES
         BUILD_RPATH "${KVSPACE_C_DIR};${BLOCKMALLOC_DIR};${SLOTSBOXMALLOC_DIR};${BIN_DIR}")
     set_target_properties(kvlang_notify_test PROPERTIES
         BUILD_RPATH "${KVSPACE_C_DIR};${BLOCKMALLOC_DIR};${SLOTSBOXMALLOC_DIR};${BIN_DIR}")
+    set_target_properties(kvlang_incr_test PROPERTIES
+        BUILD_RPATH "${KVSPACE_C_DIR};${BLOCKMALLOC_DIR};${SLOTSBOXMALLOC_DIR};${BIN_DIR}")
 else()
     set_target_properties(kvlang_delegate_test PROPERTIES BUILD_RPATH "${KVSPACE_DURABLE_DIR};${BIN_DIR}")
     set_target_properties(kvlang_notify_test PROPERTIES BUILD_RPATH "${KVSPACE_DURABLE_DIR};${BIN_DIR}")
+    set_target_properties(kvlang_incr_test PROPERTIES BUILD_RPATH "${KVSPACE_DURABLE_DIR};${BIN_DIR}")
 endif()
