@@ -15,7 +15,7 @@ rwfunc is_anagram(s:[]char/utf32, t:[]char/utf32) -> () {
 		0 -> i
 		while (i < ns) {
 			string.char(s, i) -> c
-			has(h, c) -> exists
+			kv.get(h, c) != None -> exists
 			if (exists) {
 				h.*c + 1 -> h.*c
 			} else {
@@ -26,7 +26,7 @@ rwfunc is_anagram(s:[]char/utf32, t:[]char/utf32) -> () {
 		0 -> i
 		while (i < nt) {
 			string.char(t, i) -> c
-			has(h, c) -> exists
+			kv.get(h, c) != None -> exists
 			if (exists) {
 				h.*c -> v
 				v - 1 -> h.*c

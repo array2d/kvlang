@@ -684,7 +684,7 @@ impl Parser {
     /// 校验散 key 字面量 `{...}` 的出现位置。`top_legal` 表示当前上下文允许顶层出现
     /// （赋值右值 / for-in 源）；无论如何，其元素内部都不得再嵌套散 key 字面量。
     fn check_sparse_usage(&mut self, e: &Expr, top_legal: bool) {
-        let top_is_sparse = e.op == "sparsearray";
+        let top_is_sparse = e.op == "map";
         let bad = if top_is_sparse && top_legal {
             e.args.iter().any(expr_contains_sparse)
         } else {
@@ -752,7 +752,8 @@ impl Parser {
                     let arr = s[..br].to_string();
                     let idx = s[br + 1..s.len().saturating_sub(1)].to_string();
                     let e = inst.expr.take();
-                    inst.expr = Some(ast::call("set", vec![ast::leaf(&arr), ast::leaf(&idx), e.unwrap_or(ast::leaf(""))]));
+                    let op = if arr.starts_with('/') { "kv.set" } else { "xv.set" };
+                    inst.expr = Some(ast::call(op, vec![ast::leaf(&arr), ast::leaf(&idx), e.unwrap_or(ast::leaf(""))]));
                     inst.writes = vec![arr];
                     inst.write_types = Vec::new();
                 }
@@ -833,13 +834,13 @@ impl Parser {
                     self.advance(); // consume *
                     if self.peek().kind == Kind::Ident {
                         let key = self.advance().value;
-                        left = ast::call("at", vec![left, ast::leaf(&key)]);
+                        left = ast::call("kv.get", vec![left, ast::leaf(&key)]);
                         continue;
                     }
                 }
                 if self.peek().kind == Kind::Ident || self.peek().kind == Kind::Literal {
                     let field = self.advance().value;
-                    left = ast::call("at", vec![left, ast::str_lit(&field)]);
+                    left = ast::call("kv.get", vec![left, ast::str_lit(&field)]);
                     continue;
                 }
             }
@@ -856,9 +857,11 @@ impl Parser {
                     }
                 }
                 self.expect(Kind::RBrack);
+                let is_path = left.is_leaf() && left.val.starts_with('/');
                 let mut args = vec![left];
                 args.extend(indices);
-                left = ast::call("at", args);
+                // 路径字面量 + [idx] → kv.get（KV 路径成员访问）；否则 xv.at（compact 数组元素）。
+                left = ast::call(if is_path { "kv.get" } else { "xv.at" }, args);
                 continue;
             }
             let t = self.peek();
@@ -970,7 +973,7 @@ impl Parser {
                     }
                 }
                 self.expect(Kind::RBrace);
-                return Some(ast::call("sparsearray", elems));
+                return Some(ast::call("map", elems));
             }
             self.advance(); // consume {
             let mut args = Vec::new();
@@ -986,7 +989,7 @@ impl Parser {
                     self.errors.push(Diagnostic {
                         pos: t.pos,
                         warn: true,
-                        message: format!("dict literal: expected member name, got {:?}", t.value),
+                        message: format!("obj literal: expected member name, got {:?}", t.value),
                         info: false,
                         source: String::new(),
                         src_file: String::new(),
@@ -1000,7 +1003,7 @@ impl Parser {
                     self.errors.push(Diagnostic {
                         pos: t.pos,
                         warn: true,
-                        message: format!("dict literal: expected '=' after {key:?}"),
+                        message: format!("obj literal: expected '=' after {key:?}"),
                         info: false,
                         source: String::new(),
                         src_file: String::new(),
@@ -1017,7 +1020,7 @@ impl Parser {
                 args.push(val);
             }
             self.expect(Kind::RBrace);
-            return Some(ast::call("dict", args));
+            return Some(ast::call("obj", args));
         }
 
         // 括号分组
@@ -1354,7 +1357,7 @@ impl Parser {
             ast::str_lit(&field)
         };
         let e = inst.expr.take();
-        inst.expr = Some(ast::call("set", vec![ast::leaf(&base), key, e.unwrap_or(ast::leaf(""))]));
+        inst.expr = Some(ast::call("kv.set", vec![ast::leaf(&base), key, e.unwrap_or(ast::leaf(""))]));
         inst.writes = vec![base];
         inst.write_types = Vec::new();
     }
@@ -1425,9 +1428,9 @@ fn is_float_literal(v: &str) -> bool {
     v.contains('.') || v.contains('e') || v.contains('E')
 }
 
-/// 表达式树中任意节点是否为散 key 字面量 `{...}`（parser 产出的 sparsearray）。
+/// 表达式树中任意节点是否为散 key 字面量 `{...}`（parser 产出的 "map"）。
 fn expr_contains_sparse(e: &Expr) -> bool {
-    e.op == "sparsearray" || e.args.iter().any(expr_contains_sparse)
+    e.op == "map" || e.args.iter().any(expr_contains_sparse)
 }
 
 fn attach_comments(st: Stmt, comments: Vec<String>) -> Stmt {
@@ -1452,7 +1455,7 @@ fn is_array_kindexp(t: &str) -> bool {
 }
 
 fn type_error(_kind: &str) -> String {
-    "unknown type — valid: int8/16/32/64, uint8/16/32/64, float32/64, bool, char/utf32, dict, index, char, any, []T, [2,3]T, [?,N]T, A|B".to_string()
+    "unknown type — valid: int8/16/32/64, uint8/16/32/64, float32/64, bool, char/utf32, obj, map, index, char, any, []T, [2,3]T, [?,N]T, A|B".to_string()
 }
 
 fn walk_read_only(

@@ -156,7 +156,7 @@ pub fn try_parse_number(s: &str) -> Option<Vec<u8>> {
 fn native_rwir_set() -> &'static [&'static str] {
     &[
         // 单字 builtin
-        "array", "at", "set", "has", "dict", "debugger",
+        "array", "obj", "map", "debugger",
         // cast kind
         "bool", "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
         "float32", "float64", "char/utf8", "char/ascii", "char/utf32",
@@ -168,7 +168,7 @@ fn native_rwir_set() -> &'static [&'static str] {
         "sqrt", "√", "neg", "abs", "sign", "max", "min", "pow", "exp", "log",
         // kv.* 树操作
         "kv.get", "kv.set", "kv.del", "kv.deltree", "kv.list", "kv.mkindex",
-        "kv.extindex", "kv.rmindexext", "kv.watch", "kv.has", "kv.at",
+        "kv.extindex", "kv.rmindexext", "kv.watch",
         // xv.* 形状内省与多维元素访问
         "xv.numel", "xv.dim", "xv.shape", "xv.at", "xv.set",
     ]

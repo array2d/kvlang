@@ -15,7 +15,7 @@ fn known_kind(k: &str) -> bool {
     matches!(
         k,
         "bool" | "int8" | "int16" | "int32" | "int64" | "uint8" | "uint16" | "uint32" | "uint64"
-            | "float32" | "float64" | "char/utf32" | "char/utf8" | "char/ascii" | "dict" | "index"
+            | "float32" | "float64" | "char/utf32" | "char/utf8" | "char/ascii" | "obj" | "index"
             | "extindex" | "rwir" | "rwfunc" | "scope" | "time" | "duration"
     )
 }
@@ -131,11 +131,11 @@ mod tests {
     fn valid() {
         for e in [
             "int64", "uint8", "float32", "bool", "any",
-            "char/utf8", "char/utf32", "char/ascii", "dict", "index",
+            "char/utf8", "char/utf32", "char/ascii", "obj", "index",
             "[]float32", "[2]float32", "[2,3]float32", "[2,3,4]float64",
             "[?,768]float32", "[?,?]int8",
             "int64|float64", "[2,3]float32|float32", "[]float32|[]float64",
-            "bool|char/utf8", "index|dict",
+            "bool|char/utf8", "index|obj",
             "any...", "int64|float64...", "[]float32...",
         ] {
             assert!(valid_type_expr(e), "{e} should be valid");
@@ -170,7 +170,7 @@ mod tests {
         let cases = [
             ("int64", "int64", 0, &[][..], true),
             ("int64", "float64", 0, &[], false),
-            ("any", "dict", 0, &[], true),
+            ("any", "obj", 0, &[], true),
             ("any", "int4", 0, &[], true),
             ("char/utf8", "char/utf8", 0, &[], true),
             ("char/utf8", "char/utf32", 0, &[], false),
@@ -185,7 +185,7 @@ mod tests {
             ("[2,3]float32|float32", "float64", 0, &[], false),
             ("[]float32|[]float64", "float64", 1, &[10], true),
             ("bool|char/utf8", "char/utf8", 0, &[], true),
-            ("index|dict", "index", 0, &[], true),
+            ("index|obj", "index", 0, &[], true),
         ];
         for (expr, kind, ndim, dims, want) in cases {
             let got = match_type(expr, kind, ndim, dims);

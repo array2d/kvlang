@@ -2,7 +2,7 @@
 #   true
 rwfunc main() -> () {
 	/tmp/kvhas_test.data = 42
-	kv.has(/tmp/kvhas_test, "data") -> ok
+	kv.get(/tmp/kvhas_test, "data") != None -> ok
 	println(ok)
 }
 main()

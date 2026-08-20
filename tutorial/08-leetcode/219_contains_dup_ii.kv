@@ -10,7 +10,7 @@ rwfunc near_dup(nums:[]int64, k:int64) -> () {
 	0 -> i
 	while (i < n) {
 		nums[i] -> x
-		has(h, x) -> exists
+		kv.get(h, x) != None -> exists
 
 		if (exists) {
 			h.*x -> j
@@ -24,7 +24,7 @@ rwfunc near_dup(nums:[]int64, k:int64) -> () {
 			}
 		}
 		if (found == false) {
-			set(h, x, i + 1) -> _
+			kv.set(h, x, i + 1) -> _
 		}
 		i <- i + 1
 	}

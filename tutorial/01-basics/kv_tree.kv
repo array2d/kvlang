@@ -9,9 +9,9 @@ rwfunc main() -> () {
 	kv.set("/tmp/kvt.data", 42)
 	kv.get("/tmp/kvt.data") -> v
 	println("v=", v)
-	kv.has("/tmp/kvt", "data") -> h
+	kv.get("/tmp/kvt", "data") != None -> h
 	println("has_data=", h)
-	kv.at("/tmp/kvt", "data") -> x
+	kv.get("/tmp/kvt", "data") -> x
 	println("x=", x)
 	kv.mkindex("/tmp/kvt/")
 	kv.set("/tmp/kvt/a", 1)
