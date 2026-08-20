@@ -87,6 +87,7 @@ extern int   kvspaceNewFloat64(double v, uint8_t **out, uint32_t *out_len);
 
 #define MAX_PARAMS 128
 #define MAX_STACK_DEPTH 256
+#define X_MAX_NDIM 8
 
 /* ── 基础类型 ──────────────────────────────────────────────────────── */
 

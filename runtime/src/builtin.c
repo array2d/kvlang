@@ -6,7 +6,7 @@ typedef int (*kvlangBuiltinFn)(kvlangFrame_t *f);
 
 /* collection 模块 handler（builtin_coll.c） */
 int kvlangBuiltinArray(kvlangFrame_t *f), kvlangBuiltinXvNumel(kvlangFrame_t *f), kvlangBuiltinXvDim(kvlangFrame_t *f), kvlangBuiltinXvShape(kvlangFrame_t *f),
-    kvlangBuiltinXvAt(kvlangFrame_t *f), kvlangBuiltinXvSet(kvlangFrame_t *f),
+    kvlangBuiltinXvAt(kvlangFrame_t *f), kvlangBuiltinXvSet(kvlangFrame_t *f), kvlangBuiltinXvReshape(kvlangFrame_t *f),
     kvlangBuiltinScatter(kvlangFrame_t *f), kvlangBuiltinCompact(kvlangFrame_t *f),
     kvlangBuiltinAppend(kvlangFrame_t *f), kvlangBuiltinSlice(kvlangFrame_t *f), kvlangBuiltinObj(kvlangFrame_t *f), kvlangBuiltinMap(kvlangFrame_t *f), kvlangBuiltinStringSet(kvlangFrame_t *f),
     kvlangBuiltinStringChar(kvlangFrame_t *f), kvlangBuiltinStringOrd(kvlangFrame_t *f), kvlangBuiltinStringCmp(kvlangFrame_t *f),
@@ -593,7 +593,7 @@ static const struct { const char *op; kvlangBuiltinFn fn; } builtins[] = {
     {"array.append", kvlangBuiltinAppend}, {"array.slice", kvlangBuiltinSlice},
     {"obj", kvlangBuiltinObj}, {"map", kvlangBuiltinMap},
     {"xv.numel", kvlangBuiltinXvNumel}, {"xv.dim", kvlangBuiltinXvDim}, {"xv.shape", kvlangBuiltinXvShape},
-    {"xv.at", kvlangBuiltinXvAt}, {"xv.set", kvlangBuiltinXvSet},
+    {"xv.at", kvlangBuiltinXvAt}, {"xv.set", kvlangBuiltinXvSet}, {"xv.reshape", kvlangBuiltinXvReshape},
     {"string.set", kvlangBuiltinStringSet}, {"string.char", kvlangBuiltinStringChar}, {"string.ord", kvlangBuiltinStringOrd},
     {"string.cmp", kvlangBuiltinStringCmp}, {"string.find", kvlangBuiltinStringFind}, {"string.len", kvlangBuiltinStringLen},
     {"string.slice", kvlangBuiltinStringSlice}, {"string.concat", kvlangBuiltinStringConcat},
@@ -934,6 +934,7 @@ int kvlangBuiltinXvAt(kvlangFrame_t *f) {
 int kvlangBuiltinXvSet(kvlangFrame_t *f) {
     int nidx = f->inst->nr - 2;
     if (nidx < 1) return set_err(f, "TypeError: xv.set requires array, indices, value");
+    if (f->inst->nw == 0) return set_err(f, "TypeError: xv.set requires a write param (-> a)");
     kvlangXvalue_t in[MAX_PARAMS]; int n = read_inputs(f, in, MAX_PARAMS);
     const char *k = kvlangXvalueKind(&in[0]);
     int sz = kvlangXvalueElemSize(k);
@@ -950,13 +951,43 @@ int kvlangBuiltinXvSet(kvlangFrame_t *f) {
     int c = vh.body_len < sz ? vh.body_len : sz;
     memcpy(nb + flat * sz, vb, (size_t)c);
     kvlangXvalue_t nv; kvlangXvalueNewTlvDims(&nv, k, nb, (uint32_t)h.body_len, h.dims, h.ndim);
-    char *fr = kvlangKeytreeFrameRoot(f->pc);
-    char *key = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->reads[0].name);
-    free(fr);
-    kvlangKvPair_t p = { key, nv };
-    char err[256]; kvlangKvSet(f->kv, &p, 1, err, sizeof err);
-    free(key); kvlangXvalueFree(&nv); free(nb); free_inputs(in, n);
-    next_pc(f); return 0;
+    int rc = write_result(f, &nv);
+    kvlangXvalueFree(&nv); free(nb); free_inputs(in, n);
+    return rc;
+}
+
+int kvlangBuiltinXvReshape(kvlangFrame_t *f) {
+    int ndims = f->inst->nr - 1;
+    if (ndims < 1) return set_err(f, "TypeError: xv.reshape requires array and >=1 dims");
+    if (f->inst->nw == 0) return set_err(f, "TypeError: xv.reshape requires a write param (-> a)");
+    kvlangXvalue_t in[MAX_PARAMS]; int n = read_inputs(f, in, MAX_PARAMS);
+    const char *k = kvlangXvalueKind(&in[0]);
+    if (kvlangXvalueElemSize(k) <= 0) { free_inputs(in, n); return set_err(f, "TypeError: xv.reshape requires a compact array, got %s", k); }
+    kvspaceHead_t h; kvspaceDecodeHead(in[0].data, in[0].len, &h);
+    if (h.ndim < 1) { free_inputs(in, n); return set_err(f, "TypeError: xv.reshape requires a compact array, got scalar %s", k); }
+    if (ndims > X_MAX_NDIM) { free_inputs(in, n); return set_err(f, "IndexError: xv.reshape: at most %d dims, got %d", X_MAX_NDIM, ndims); }
+    int32_t dims[X_MAX_NDIM]; int64_t numel = 1;
+    for (int i = 0; i < ndims; i++) {
+        dims[i] = (int32_t)kvlangXvalueAsInt64(&in[i + 1]);
+        if (dims[i] < 0) { free_inputs(in, n); return set_err(f, "IndexError: xv.reshape: negative dim %d", dims[i]); }
+        numel *= dims[i];
+    }
+    if (numel != h.array_len) { free_inputs(in, n); return set_err(f, "IndexError: xv.reshape: cannot reshape %d elements into %lld", h.array_len, (long long)numel); }
+    /* 原地改写：数组 head 形状段恒 X_MAX_NDIM×4=32B，改写 dims+ndim+padding，body 不搬 */
+    uint8_t *data = in[0].data;
+    int32_t dims_off = 1 + (int32_t)data[0] + 2;
+    data[dims_off - 1] = (uint8_t)ndims;
+    memset(data + dims_off, 0, (size_t)(X_MAX_NDIM * 4));
+    for (int i = 0; i < ndims; i++) {
+        uint32_t v = (uint32_t)dims[i];
+        data[dims_off + i * 4] = (uint8_t)v;
+        data[dims_off + i * 4 + 1] = (uint8_t)(v >> 8);
+        data[dims_off + i * 4 + 2] = (uint8_t)(v >> 16);
+        data[dims_off + i * 4 + 3] = (uint8_t)(v >> 24);
+    }
+    int rc = write_result(f, &in[0]);
+    free_inputs(in, n);
+    return rc;
 }
 
 int kvlangBuiltinScatter(kvlangFrame_t *f) {
@@ -1001,9 +1032,10 @@ int kvlangBuiltinCompact(kvlangFrame_t *f) {
 
 int kvlangBuiltinAppend(kvlangFrame_t *f) {
     if (f->inst->nr < 2) return set_err(f, "TypeError: array.append requires array and element");
+    if (f->inst->nw == 0) return set_err(f, "TypeError: array.append requires a write param (-> arr)");
     kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
     char *fr = kvlangKeytreeFrameRoot(f->pc);
-    char *base = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->reads[0].name);
+    char *base = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->writes[0].name);
     ensure_scattered(f, base);
     int len = separated_len(f->kv, base);
     kvlangStrbuf_t k; kvlangStrbufInit(&k); kvlangStrbufPrintf(&k, "%s[%d]", base, len);
@@ -1015,9 +1047,10 @@ int kvlangBuiltinAppend(kvlangFrame_t *f) {
 
 int kvlangBuiltinSlice(kvlangFrame_t *f) {
     if (f->inst->nr < 3) return set_err(f, "TypeError: array.slice requires array, start, end");
+    if (f->inst->nw == 0) return set_err(f, "TypeError: array.slice requires a write param (-> arr)");
     kvlangXvalue_t in[3]; int n = read_inputs(f, in, 3);
     char *fr = kvlangKeytreeFrameRoot(f->pc);
-    char *base = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->reads[0].name);
+    char *base = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->writes[0].name);
     ensure_scattered(f, base);
     int al = separated_len(f->kv, base);
     int lo = (int)kvlangXvalueAsInt64(&in[1]), hi = (int)kvlangXvalueAsInt64(&in[2]);
