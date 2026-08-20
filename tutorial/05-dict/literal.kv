@@ -10,7 +10,7 @@ rwfunc main() -> () {
 	println("h.x =", v)
 	42 -> h.z
 	println("h.z =", h.z)
-	has(h, "x") -> ok
+	kv.get(h, "x") != None -> ok
 	println("has x:", ok)
 }
 

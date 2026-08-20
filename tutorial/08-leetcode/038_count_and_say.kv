@@ -19,8 +19,8 @@ rwfunc next_seq(src_len:int64) -> (dst_len:int64) {
 			if (v == cur) { count + 1 -> count ; j + 1 -> j }
 			else { src_len -> j }
 		}
-		_ = set("/tmp/s2", di, count)
-		_ = set("/tmp/s2", di+1, cur)
+		_ = kv.set("/tmp/s2", di, count)
+		_ = kv.set("/tmp/s2", di+1, cur)
 		di + 2 -> di
 		i + count -> i
 	}
@@ -46,14 +46,14 @@ rwfunc copy_from_s2_to_s(s2_len:int64) -> () {
 	i = 0  # = 等价于 <-
 	while (i < s2_len) {
 		/tmp/s2[i] -> v
-		_ = set("/tmp/s", i, v)  # = 等价于 <-
+		_ = kv.set("/tmp/s", i, v)  # = 等价于 <-
 		i + 1 -> i
 	}
 }
 
 rwfunc count_and_say(N:int64) -> () {
-	_ = set("/tmp/s", 0, 1)   # count=1 of digit 1
-	_ = set("/tmp/s", 1, 1)
+	_ = kv.set("/tmp/s", 0, 1)   # count=1 of digit 1
+	_ = kv.set("/tmp/s", 1, 1)
 	cur_len = 2  # = 等价于 <-
 	round = 1  # = 等价于 <-
 	while (round < N) {

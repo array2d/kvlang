@@ -17,7 +17,7 @@ rwfunc inorder(root:[]char/utf32) -> () {
 	cur <- root
 	while (cur != "" || si > 0) {
 		while (cur != "") {
-			_ = set(stack, si, cur)
+			_ = kv.set(stack, si, cur)
 			si + 1 -> si
 			cur.left -> cur
 		}

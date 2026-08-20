@@ -13,15 +13,15 @@ rwfunc is_valid(s:[]char/utf32) -> (ok:int64) {
 		c = s[i]  # = 等价于 <-
 		if (c == "(") {
 			si + 1 -> si
-			_ <- set("/tmp/vp", si, 1)
+			_ <- kv.set("/tmp/vp", si, 1)
 		}
 		if (c == "[") {
 			si = si + 1  # = 等价于 <-
-			set("/tmp/vp", si, 2) -> _
+			kv.set("/tmp/vp", si, 2) -> _
 		}
 		if (c == "{") {
 			si + 1 -> si
-			_ = set("/tmp/vp", si, 3)  # = 等价于 <-
+			_ = kv.set("/tmp/vp", si, 3)  # = 等价于 <-
 		}
 		if (c == ")") {
 			if (si < 0) { 0 -> ok ; n -> i }

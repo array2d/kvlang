@@ -392,8 +392,8 @@ impl fmt::Display for Instruction {
             }
             return write!(f, "{s}");
         }
-        // dict("k1", v1, ...) → { k1=v1; k2=v2 }
-        if e.op == "dict" {
+        // obj("k1", v1, ...) → { k1=v1; k2=v2 }
+        if e.op == "obj" {
             let mut pairs = Vec::new();
             let mut j = 0;
             while j + 1 < e.args.len() {

@@ -10,13 +10,13 @@ rwfunc has_dup(a:[]int64) -> () {
 	i = 0  # = 等价于 <-
 	while (i < n) {
 		a[i] -> x
-		has(seen, x) -> exists
+		kv.get(seen, x) != None -> exists
 
 		if (exists) {
 			true -> found
 			i <- n
 		} else {
-			_ = set(seen, x, 1)  # = 等价于 <-
+			_ = kv.set(seen, x, 1)  # = 等价于 <-
 			i + 1 -> i
 		}
 	}
@@ -37,13 +37,13 @@ rwfunc no_dup() -> () {
 	i = 0  # = 等价于 <-
 	while (i < n) {
 		a[i] -> x
-		has(seen, x) -> exists
+		kv.get(seen, x) != None -> exists
 
 		if (exists) {
 			true -> found
 			i <- n
 		} else {
-			_ = set(seen, x, 1)  # = 等价于 <-
+			_ = kv.set(seen, x, 1)  # = 等价于 <-
 			i + 1 -> i
 		}
 	}

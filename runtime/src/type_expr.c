@@ -28,7 +28,7 @@ static bool known_kind(const char *s, size_t len) {
            kind_eq(s, len, "float32") || kind_eq(s, len, "float64") ||
            kind_eq(s, len, "char/utf32") || kind_eq(s, len, "char/utf8") ||
            kind_eq(s, len, "char/ascii") ||
-           kind_eq(s, len, "dict") || kind_eq(s, len, "index") ||
+           kind_eq(s, len, "obj") || kind_eq(s, len, "index") ||
            kind_eq(s, len, "extindex") ||
            kind_eq(s, len, "rwir") || kind_eq(s, len, "rwfunc") ||
            kind_eq(s, len, "scope") || kind_eq(s, len, "time") ||

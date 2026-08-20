@@ -270,9 +270,9 @@ char *kvlangXvalueValueString(const kvlangXvalue_t *v) {
         if (blen > 0) n++;
         kvlangStrbuf_t b; kvlangStrbufInit(&b); kvlangStrbufPrintf(&b, "(%d)", n); return kvlangStrbufDetach(&b);
     }
-    if (strcmp(k, KVSPACE_KIND_DICT) == 0) {
+    if (strcmp(k, KVSPACE_KIND_OBJ) == 0) {
         kvlangStrbuf_t b; kvlangStrbufInit(&b);
-        if (blen == 0) kvlangStrbufPuts(&b, "dict");
+        if (blen == 0) kvlangStrbufPuts(&b, "obj");
         else { int n = 1; for (int32_t i = 0; i < blen; i++) if (body[i] == '\n') n++; kvlangStrbufPrintf(&b, "{%d}", n); }
         return kvlangStrbufDetach(&b);
     }

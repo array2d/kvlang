@@ -9,7 +9,7 @@ rwfunc is_pal(head:[]char/utf32) -> () {
 	head -> p
 	while (p != "") {
 		p.val -> v
-		set(arr, n, v) -> _
+		kv.set(arr, n, v) -> _
 		n <- n + 1
 		p.next -> p
 	}

@@ -29,12 +29,13 @@ impl LabelGen {
 
 /// 将函数体中 if/while 控制流降级为 ScopeStmt + br/goto，展开复合表达式。
 pub fn lower_func(fn_: &Func) -> Func {
+    let tm = infer_types(fn_);
     let mut lg = LabelGen { n: 0 };
-    let body = lower_body(&fn_.body, &mut lg, None);
+    let body = lower_body(&fn_.body, &mut lg, None, &tm);
     Func { comments: Vec::new(), sig: fn_.sig.clone(), body, pkg: String::new() }
 }
 
-fn lower_body(stmts: &[Stmt], lg: &mut LabelGen, lc: Option<&LoopCtx>) -> Vec<Stmt> {
+fn lower_body(stmts: &[Stmt], lg: &mut LabelGen, lc: Option<&LoopCtx>, tm: &HashMap<String, String>) -> Vec<Stmt> {
     if stmts.is_empty() {
         return Vec::new();
     }
@@ -45,7 +46,7 @@ fn lower_body(stmts: &[Stmt], lg: &mut LabelGen, lc: Option<&LoopCtx>) -> Vec<St
                 // 散 key 数组字面量 `base = {v0, v1, ...}` → 逐元素散 key 写入。
                 if s.writes.len() == 1 {
                     if let Some(e) = &s.expr {
-                        if e.op == "sparsearray" {
+                        if e.op == "map" {
                             preamble.extend(expand_sparse(&s.writes[0], e, lg));
                             continue;
                         }
@@ -64,22 +65,22 @@ fn lower_body(stmts: &[Stmt], lg: &mut LabelGen, lc: Option<&LoopCtx>) -> Vec<St
                 preamble.push(st.clone());
             }
             Stmt::If(s) => {
-                let cont = lower_body(&stmts[i + 1..], lg, lc);
-                return lower_if_with_cont(&preamble, s, cont, lg, lc);
+                let cont = lower_body(&stmts[i + 1..], lg, lc, tm);
+                return lower_if_with_cont(&preamble, s, cont, lg, lc, tm);
             }
             Stmt::While(s) => {
-                let cont = lower_body(&stmts[i + 1..], lg, lc);
-                return lower_while_with_cont(&preamble, s, cont, lg, lc);
+                let cont = lower_body(&stmts[i + 1..], lg, lc, tm);
+                return lower_while_with_cont(&preamble, s, cont, lg, lc, tm);
             }
             Stmt::Scope(s) => {
                 let mut s = s.clone();
-                s.body = lower_body(&s.body, lg, lc);
+                s.body = lower_body(&s.body, lg, lc, tm);
                 if !preamble_ends_with_terminator(&preamble) {
                     preamble.push(goto_label(&s.label));
                 }
                 let mut out = preamble;
                 out.push(Stmt::Scope(s));
-                out.extend(lower_body(&stmts[i + 1..], lg, lc));
+                out.extend(lower_body(&stmts[i + 1..], lg, lc, tm));
                 return out;
             }
             Stmt::Break(_) => {
@@ -93,8 +94,8 @@ fn lower_body(stmts: &[Stmt], lg: &mut LabelGen, lc: Option<&LoopCtx>) -> Vec<St
                 return preamble;
             }
             Stmt::For(s) => {
-                let cont = lower_body(&stmts[i + 1..], lg, lc);
-                return lower_for_with_cont(&preamble, s, cont, lg, lc);
+                let cont = lower_body(&stmts[i + 1..], lg, lc, tm);
+                return lower_for_with_cont(&preamble, s, cont, lg, lc, tm);
             }
         }
     }
@@ -107,6 +108,7 @@ fn lower_if_with_cont(
     cont: Vec<Stmt>,
     lg: &mut LabelGen,
     lc: Option<&LoopCtx>,
+    tm: &HashMap<String, String>,
 ) -> Vec<Stmt> {
     let (cond_eval, cond_slot) = eval_cond(s.cond.as_ref(), lg);
     let if_label = lg.next("if");
@@ -117,8 +119,8 @@ fn lower_if_with_cont(
     let mut cond_body = cond_eval;
     cond_body.push(br_inst(&cond_slot, &then_label, &else_label));
 
-    let then_ = inject_goto(lower_body(&s.then_, lg, lc), &merge_label);
-    let else_ = inject_goto(lower_body(&s.else_, lg, lc), &merge_label);
+    let then_ = inject_goto(lower_body(&s.then_, lg, lc, tm), &merge_label);
+    let else_ = inject_goto(lower_body(&s.else_, lg, lc, tm), &merge_label);
     let (then_insts, mut then_blocks) = split_insts_and_blocks(then_);
     let (else_insts, mut else_blocks) = split_insts_and_blocks(else_);
     let (cont_insts, cont_blocks) = split_insts_and_blocks(cont);
@@ -144,6 +146,7 @@ fn lower_while_with_cont(
     cont: Vec<Stmt>,
     lg: &mut LabelGen,
     _lc: Option<&LoopCtx>,
+    tm: &HashMap<String, String>,
 ) -> Vec<Stmt> {
     let (cond_eval, cond_slot) = eval_cond(s.cond.as_ref(), lg);
     let cond_label = lg.next("while");
@@ -154,7 +157,7 @@ fn lower_while_with_cont(
     cond_body.push(br_inst(&cond_slot, &body_label, &exit_label));
 
     let body_lc = LoopCtx { break_label: exit_label.clone(), continue_label: cond_label.clone() };
-    let body_ = inject_goto(lower_body(&s.body, lg, Some(&body_lc)), &cond_label);
+    let body_ = inject_goto(lower_body(&s.body, lg, Some(&body_lc), tm), &cond_label);
     let (body_insts, mut body_blocks) = split_insts_and_blocks(body_);
     inject_goto_blocks(&mut body_blocks, &cond_label);
     let (cont_insts, cont_blocks) = split_insts_and_blocks(cont);
@@ -175,6 +178,7 @@ fn lower_for_with_cont(
     cont: Vec<Stmt>,
     lg: &mut LabelGen,
     _lc: Option<&LoopCtx>,
+    tm: &HashMap<String, String>,
 ) -> Vec<Stmt> {
     let init_label = lg.next("for_init");
     let cond_label = lg.next("for_cond");
@@ -183,12 +187,17 @@ fn lower_for_with_cont(
 
     let idx_slot = lg.tmp();
     let cond_slot = lg.tmp();
+    let len_slot = lg.tmp();
+    let keys_slot = lg.tmp();
+    let key_slot = lg.tmp();
+    let is_map_obj = s.iter.op == "map" || s.iter.op == "obj"
+        || (s.iter.is_leaf() && matches!(tm.get(&s.iter.val), Some(t) if t == "obj" || t == "map"));
 
     // 迭代源：裸标识符直接原地遍历；表达式（如数组字面量）先物化到临时槽。
     let mut init_body = Vec::new();
     let iter_slot = if s.iter.is_leaf() {
         s.iter.val.clone()
-    } else if s.iter.op == "sparsearray" {
+    } else if s.iter.op == "map" {
         let slot = lg.tmp();
         init_body.extend(expand_sparse(&slot, &s.iter, lg));
         slot
@@ -205,6 +214,33 @@ fn lower_for_with_cont(
         slot
     };
     init_body.push(make_copy_inst("-1", &idx_slot));
+    if is_map_obj {
+        init_body.push(Stmt::Instruction(Instruction {
+            comments: Vec::new(),
+            expr: Some(ast::call("kv.list", vec![ast::leaf(&iter_slot)])),
+            writes: vec![keys_slot.clone()],
+            write_types: Vec::new(),
+            arrow_left: false,
+            eq: false,
+        }));
+        init_body.push(Stmt::Instruction(Instruction {
+            comments: Vec::new(),
+            expr: Some(ast::call("xv.numel", vec![ast::leaf(&keys_slot)])),
+            writes: vec![len_slot.clone()],
+            write_types: Vec::new(),
+            arrow_left: false,
+            eq: false,
+        }));
+    } else {
+        init_body.push(Stmt::Instruction(Instruction {
+            comments: Vec::new(),
+            expr: Some(ast::call("xv.numel", vec![ast::leaf(&iter_slot)])),
+            writes: vec![len_slot.clone()],
+            write_types: Vec::new(),
+            arrow_left: false,
+            eq: false,
+        }));
+    }
     init_body.push(goto_label(&cond_label));
 
     let add_inst = Instruction {
@@ -215,9 +251,9 @@ fn lower_for_with_cont(
         arrow_left: false,
         eq: false,
     };
-    let kv_has_inst = Instruction {
+    let lt_inst = Instruction {
         comments: Vec::new(),
-        expr: Some(ast::call("kv.has", vec![ast::leaf(&iter_slot), ast::leaf(&idx_slot)])),
+        expr: Some(ast::call("<", vec![ast::leaf(&idx_slot), ast::leaf(&len_slot)])),
         writes: vec![cond_slot.clone()],
         write_types: Vec::new(),
         arrow_left: false,
@@ -225,21 +261,40 @@ fn lower_for_with_cont(
     };
     let cond_body = vec![
         Stmt::Instruction(add_inst),
-        Stmt::Instruction(kv_has_inst),
+        Stmt::Instruction(lt_inst),
         br_inst(&cond_slot, &body_label, &exit_label),
     ];
 
-    let kv_at_inst = Instruction {
-        comments: Vec::new(),
-        expr: Some(ast::call("kv.at", vec![ast::leaf(&iter_slot), ast::leaf(&idx_slot)])),
-        writes: vec![s.var.clone()],
-        write_types: Vec::new(),
-        arrow_left: false,
-        eq: false,
-    };
     let body_lc = LoopCtx { break_label: exit_label.clone(), continue_label: cond_label.clone() };
-    let body_inner = lower_body(&s.body, lg, Some(&body_lc));
-    let mut body_insts = vec![Stmt::Instruction(kv_at_inst)];
+    let body_inner = lower_body(&s.body, lg, Some(&body_lc), tm);
+    let mut body_insts = Vec::new();
+    if is_map_obj {
+        body_insts.push(Stmt::Instruction(Instruction {
+            comments: Vec::new(),
+            expr: Some(ast::call("xv.at", vec![ast::leaf(&keys_slot), ast::leaf(&idx_slot)])),
+            writes: vec![key_slot.clone()],
+            write_types: Vec::new(),
+            arrow_left: false,
+            eq: false,
+        }));
+        body_insts.push(Stmt::Instruction(Instruction {
+            comments: Vec::new(),
+            expr: Some(ast::call("kv.get", vec![ast::leaf(&iter_slot), ast::leaf(&key_slot)])),
+            writes: vec![s.var.clone()],
+            write_types: Vec::new(),
+            arrow_left: false,
+            eq: false,
+        }));
+    } else {
+        body_insts.push(Stmt::Instruction(Instruction {
+            comments: Vec::new(),
+            expr: Some(ast::call("xv.at", vec![ast::leaf(&iter_slot), ast::leaf(&idx_slot)])),
+            writes: vec![s.var.clone()],
+            write_types: Vec::new(),
+            arrow_left: false,
+            eq: false,
+        }));
+    }
     body_insts.extend(body_inner);
     let body_insts = inject_goto(body_insts, &cond_label);
 
@@ -316,30 +371,18 @@ fn goto_label(label: &str) -> Stmt {
     })
 }
 
-/// 散 key 数组字面量（parser 产出的 sparsearray）展开为逐元素散 key 写入：
-///   `base = {a, b}` → `set(base,"0",a); set(base,"1",b)`——每个元素落在 base.<i>
-/// 独立 key（变长/字符串数组的存储形态），与 compact `[...]`（单打包 XValue）相对。
-/// 元素为复合表达式时先 flatten 展开子调用。
-fn expand_sparse(base: &str, e: &Expr, lg: &mut LabelGen) -> Vec<Stmt> {
-    let mut out = Vec::new();
-    for (i, el) in e.args.iter().enumerate() {
-        let inst = Instruction {
-            comments: Vec::new(),
-            expr: Some(ast::call("set", vec![ast::leaf(base), ast::str_lit(&i.to_string()), el.clone()])),
-            writes: vec![base.to_string()],
-            write_types: Vec::new(),
-            arrow_left: true,
-            eq: false,
-        };
-        if all_args_leaf(inst.expr.as_ref().unwrap()) {
-            out.push(Stmt::Instruction(inst));
-        } else {
-            let (flat, extra) = flatten_nested_calls(&inst, lg);
-            out.extend(extra);
-            out.push(Stmt::Instruction(flat));
-        }
-    }
-    out
+/// 散 key 数组字面量（parser 产出的 "map"）→ 单条 `map(v0, v1, ...) -> base`，
+/// 运行时 map builtin 创建 map 根（kind=map）+ 子键 `base/[i]`（相对 key，方括号索引串）。
+fn expand_sparse(base: &str, e: &Expr, _lg: &mut LabelGen) -> Vec<Stmt> {
+    let inst = Instruction {
+        comments: Vec::new(),
+        expr: Some(ast::call("map", e.args.clone())),
+        writes: vec![base.to_string()],
+        write_types: Vec::new(),
+        arrow_left: true,
+        eq: false,
+    };
+    vec![Stmt::Instruction(inst)]
 }
 
 fn make_copy_inst(val: &str, dest: &str) -> Stmt {
@@ -557,11 +600,20 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
     if is_cast_op(opcode) {
         return opcode.to_string();
     }
-    if opcode == "dict" {
-        return "dict".to_string();
+    if opcode == "obj" {
+        return "obj".to_string();
+    }
+    if opcode == "map" {
+        return "map".to_string();
+    }
+    if opcode == "kv.set" {
+        // 成员写 base.key = v（3 reads：base, key, value）→ base 是 obj/map。
+        if reads.len() >= 3 {
+            tm.entry(reads[0].clone()).or_insert_with(|| "obj".to_string());
+        }
+        return String::new();
     }
     match opcode {
-        "kv.has" => return "bool".to_string(),
         "kvlen" | "xv.numel" | "xv.dim" | "string.len" | "string.ord" | "string.cmp" | "string.find" => {
             return "int64".to_string();
         }
@@ -575,7 +627,7 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
         "abs" | "neg" | "max" | "min" => {
             return if !reads.is_empty() { slot_type(&reads[0], tm) } else { String::new() };
         }
-        "kv.at" | "xv.at" | "at" => {
+        "xv.at" => {
             if !reads.is_empty() {
                 if let Some(t) = tm.get(&format!("{}.0", reads[0])) {
                     return t.clone();
@@ -588,9 +640,9 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
             }
             return String::new();
         }
-        "set" => {
-            if reads.len() >= 3 {
-                let t = slot_type(&reads[2], tm);
+        "xv.set" => {
+            if let Some(last) = reads.last() {
+                let t = slot_type(last, tm);
                 if !t.is_empty() {
                     let key = format!("{}.0", reads[0]);
                     tm.entry(key).or_insert(t);
@@ -675,6 +727,14 @@ fn specialize_inst(inst: &mut Instruction, tm: &HashMap<String, String>) {
     };
     if e.is_leaf() {
         return;
+    }
+    // xv.at/xv.set 基座是 obj/map → 降为 kv.get/kv.set（成员目录访问）。
+    if (e.op == "xv.at" || e.op == "xv.set") && !e.args.is_empty() {
+        if let Some(t) = tm.get(&e.args[0].val) {
+            if t == "obj" || t == "map" {
+                e.op = if e.op == "xv.at" { "kv.get".to_string() } else { "kv.set".to_string() };
+            }
+        }
     }
     let opcode = e.op.clone();
     let mut word = symbol::lookup(&opcode).word.to_string();

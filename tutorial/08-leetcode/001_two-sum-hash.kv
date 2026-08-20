@@ -9,16 +9,16 @@ rwfunc two_sum(nums:[]int64, target:int64) -> () {
 	while (i < n) {
 		x <- nums[i]
 		need = target - x  # = 等价于 <-
-		has(h, need) -> exists
+		kv.get(h, need) != None -> exists
 
 		if (exists) {
-			h[need] -> j
+			kv.get(h, need) -> j
 			k = j - 1  # = 等价于 <-
 			println("[", k, ",", i, "]")
 			n -> i
 		} else {
 			v <- i + 1
-			_ = set(h, x, v)  # = 等价于 <-
+			_ = kv.set(h, x, v)  # = 等价于 <-
 			i + 1 -> i
 		}
 	}
