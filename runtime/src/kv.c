@@ -148,3 +148,20 @@ int kvlangKvIncr(kvlangKv_t *k, const char *key, int64_t *out, char *err, uint32
 int kvlangKvExpire(kvlangKv_t *k, const char *key, uint64_t ttl_ns, char *err, uint32_t err_cap) {
     return kvspaceExpire(k->h, key, ttl_ns, err, err_cap);
 }
+
+int kvlangKvWatchAny(kvlangKv_t *k, const char *const *keys, int n, uint64_t timeout_ns,
+                     char **out_key, kvlangXvalue_t *out) {
+    *out_key = NULL;
+    kvlangXvalueZero(out);
+    uint8_t *kb = NULL, *d = NULL; uint32_t kl = 0, len = 0;
+    if (kvspaceWatchAny(k->h, keys, (uint32_t)n, timeout_ns, &kb, &kl, &d, &len) != 0) return -1;
+    if (kb) {
+        *out_key = malloc((size_t)kl + 1);
+        memcpy(*out_key, kb, kl);
+        (*out_key)[kl] = 0;
+        kvspaceBytesFree(kb, kl);
+    }
+    kvlangXvalueCopyMalloc(out, d, len);
+    kvspaceBytesFree(d, len);
+    return 0;
+}
