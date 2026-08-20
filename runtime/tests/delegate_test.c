@@ -169,6 +169,11 @@ static void test_delegate_ok(kvlangKv_t *kv) {
     char *out = get_char(kv, "/data/out");
     expect(out && strcmp(out, "ok") == 0, "output written");
     free(out);
+    char **names = NULL; int n = 0;
+    kvlangKvList(kv, "/sys/task/", false, false, &names, &n);
+    expect(n == 0, "delegate must expire task status off the directory");
+    for (int i = 0; i < n; i++) free(names[i]);
+    free(names);
     kvlangRwirInstFree(&inst);
     free(cmd);
 }

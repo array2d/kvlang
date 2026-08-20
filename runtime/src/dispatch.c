@@ -8,8 +8,10 @@
 #define NEG_CACHE_CAP     64
 
 static int64_t default_timeout_ns = 30LL * 1000000000LL;
+static int64_t task_status_ttl_ns = 10LL * 60LL * 1000000000LL;
 
 void kvlangDispatchSetDefaultTimeoutNs(int64_t ns) { default_timeout_ns = ns; }
+void kvlangDispatchSetTaskStatusTtlNs(int64_t ns) { task_status_ttl_ns = ns; }
 
 static int64_t now_ns(void) {
     struct timespec t;
@@ -477,12 +479,18 @@ int kvlangDispatchDelegate(kvlangKv_t *kv, const char *vtid, const char *pc, kvl
     kvlangStrbufFree(&npc);
     kvlangLogDebug("[%s] DONE %s task=%s", vtid, inst->opcode, task_id);
 
+    if (kvlangKvExpire(kv, status_key, (uint64_t)task_status_ttl_ns, err, sizeof err) != 0) {
+        fail_msg(kv, vtid, pc, "%s: expire task status: %s", op, err);
+        goto done_err;
+    }
+
     for (int i = 0; i < inst->nw; i++) free(out_keys[i]);
     free(out_keys); free(fr); free(backend); free(op);
     free(done_key); free(status_key); kvlangStrbufFree(&json);
     return KVLANG_DELEGATE_OK;
 
 done_err:
+    if (status_key) kvlangKvExpire(kv, status_key, (uint64_t)task_status_ttl_ns, err, sizeof err);
     for (int i = 0; i < inst->nw; i++) free(out_keys[i]);
     free(out_keys); free(fr); free(backend); free(op);
     free(done_key); free(status_key); kvlangStrbufFree(&json);

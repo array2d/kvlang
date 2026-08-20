@@ -144,3 +144,7 @@ int kvlangKvTake(kvlangKv_t *k, const char *key, uint64_t timeout_ns, kvlangXval
 int kvlangKvIncr(kvlangKv_t *k, const char *key, int64_t *out, char *err, uint32_t err_cap) {
     return kvspaceIncr(k->h, key, out, err, err_cap);
 }
+
+int kvlangKvExpire(kvlangKv_t *k, const char *key, uint64_t ttl_ns, char *err, uint32_t err_cap) {
+    return kvspaceExpire(k->h, key, ttl_ns, err, err_cap);
+}
