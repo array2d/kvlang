@@ -9,68 +9,47 @@ on:
   workflow_dispatch:
 
 jobs:
-  # ── 编译 + 静态检查 ──────────────────────────────────────────────────────
   build:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
-      - run: go mod tidy
-      - run: go build ./...
+          path: kvlang
+      - uses: ./kvlang/.github/actions/setup-kvspace-c
+      - name: Runtime tests
+        working-directory: kvlang
+        run: |
+          cmake -S runtime -B build/runtime -DCMAKE_BUILD_TYPE=Release -DKVSPACE_LIB=kvspace-c
+          cmake --build build/runtime --target kvlang_runtime \
+            kvlang_delegate_test kvlang_notify_test kvlang_incr_test \
+            kvlang_expire_test kvlang_watchany_test -j
+          ./bin/kvlang_delegate_test
+          ./bin/kvlang_notify_test
+          ./bin/kvlang_incr_test
+          ./bin/kvlang_expire_test
+          ./bin/kvlang_watchany_test
 
-  # ── tutorial 集成测试（需要 Redis）────────────────────────────────────────
   tutorial-test:
     runs-on: ubuntu-latest
-    services:
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
-      - run: go mod tidy
-      - run: go build -o kvlang ./cmd/kvlang/
-      - run: go install github.com/array2d/kvspace-go/cmd/kvspace@latest
-      - run: python3 -m unittest tutorial.test.BenchmarkTest
-      - run: python3 tutorial/test.py
+          path: kvlang
+      - uses: ./kvlang/.github/actions/setup-kvspace-c
+      - uses: dtolnay/rust-toolchain@stable
+      - name: make shm
+        working-directory: kvlang
+        run: mkdir -p bin && make shm -j
+      - name: tutorial
+        working-directory: kvlang
+        env:
+          KVSPACE: shm:///tmp/kvlang_ci
+          LD_LIBRARY_PATH: ${{ github.workspace }}/kvspace-c/build:${{ github.workspace }}/blockmalloc/build:${{ github.workspace }}/slotsboxmalloc/build
+        run: python3 tutorial/test.py --no-build
 
-  # ── 多平台交叉编译（仅 tag 时生成 release 产物）─────────────────────────
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.24"
-
-      - name: Cross-compile
-        run: |
-          go mod tidy
-          mkdir -p dist
-          for GOOS in linux darwin; do
-            for GOARCH in amd64 arm64; do
-              echo "Building $GOOS/$GOARCH..."
-              GOOS=$GOOS GOARCH=$GOARCH go build -ldflags="-s -w" -o dist/kvlang-$GOOS-$GOARCH ./cmd/kvlang/
-            done
-          done
-          ls -lh dist/
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
-          generate_release_notes: true
+      - run: echo "0.2.0 release artifacts are built with make shm; Go dist is retired"

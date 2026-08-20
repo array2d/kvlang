@@ -1,0 +1,35 @@
+name: setup-kvspace-c
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v4
+      with:
+        repository: array2d/blockmalloc
+        path: blockmalloc
+    - uses: actions/checkout@v4
+      with:
+        repository: array2d/slotsboxmalloc
+        path: slotsboxmalloc
+    - uses: actions/checkout@v4
+      with:
+        repository: ${{ github.repository_owner }}/kvspace-c
+        ref: feat/notify-take
+        path: kvspace-c
+    - name: Build kvspace-c
+      shell: bash
+      run: |
+        cmake -S blockmalloc -B blockmalloc/build -DCMAKE_BUILD_TYPE=Release
+        cmake --build blockmalloc/build -j --target blockmalloc
+        mkdir -p slotsboxmalloc/build kvspace-c/build
+        gcc -shared -fPIC -O2 -o slotsboxmalloc/build/libslotsboxmalloc.so \
+          slotsboxmalloc/src/slotsboxmalloc.c \
+          -Islotsboxmalloc/include -Iblockmalloc/include \
+          -Lblockmalloc/build -lblockmalloc \
+          -Wl,-rpath,$GITHUB_WORKSPACE/blockmalloc/build
+        gcc -shared -fPIC -O2 -o kvspace-c/build/libkvspace-c.so \
+          kvspace-c/src/xvalue.c kvspace-c/src/kvspace.c kvspace-c/src/durable_abi.c \
+          -Ikvspace-c/include -Iblockmalloc/include -Islotsboxmalloc/include \
+          -Lblockmalloc/build -lblockmalloc -Lslotsboxmalloc/build -lslotsboxmalloc \
+          -lpthread \
+          -Wl,-rpath,$GITHUB_WORKSPACE/blockmalloc/build \
+          -Wl,-rpath,$GITHUB_WORKSPACE/slotsboxmalloc/build
