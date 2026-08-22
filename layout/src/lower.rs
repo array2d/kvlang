@@ -190,8 +190,8 @@ fn lower_for_with_cont(
     let len_slot = lg.tmp();
     let keys_slot = lg.tmp();
     let key_slot = lg.tmp();
-    let is_map_obj = s.iter.op == "map" || s.iter.op == "obj"
-        || (s.iter.is_leaf() && matches!(tm.get(&s.iter.val), Some(t) if t == "obj" || t == "map"));
+    let is_obj = s.iter.op == "obj"
+        || (s.iter.is_leaf() && matches!(tm.get(&s.iter.val), Some(t) if t == "obj"));
 
     // 迭代源：裸标识符直接原地遍历；表达式（如数组字面量）先物化到临时槽。
     let mut init_body = Vec::new();
@@ -214,7 +214,7 @@ fn lower_for_with_cont(
         slot
     };
     init_body.push(make_copy_inst("-1", &idx_slot));
-    if is_map_obj {
+    if is_obj {
         init_body.push(Stmt::Instruction(Instruction {
             comments: Vec::new(),
             expr: Some(ast::call("kv.list", vec![ast::leaf(&iter_slot)])),
@@ -268,7 +268,7 @@ fn lower_for_with_cont(
     let body_lc = LoopCtx { break_label: exit_label.clone(), continue_label: cond_label.clone() };
     let body_inner = lower_body(&s.body, lg, Some(&body_lc), tm);
     let mut body_insts = Vec::new();
-    if is_map_obj {
+    if is_obj {
         body_insts.push(Stmt::Instruction(Instruction {
             comments: Vec::new(),
             expr: Some(ast::call("xv.at", vec![ast::leaf(&keys_slot), ast::leaf(&idx_slot)])),
@@ -735,10 +735,11 @@ fn specialize_inst(inst: &mut Instruction, tm: &HashMap<String, String>) {
     if e.is_leaf() {
         return;
     }
-    // xv.at/xv.set 基座是 obj/map → 降为 kv.get/kv.set（成员目录访问）。
+    // xv.at/xv.set 基座是 obj → 降为 kv.get/kv.set（命名成员目录访问）。
+    // map 是散 key 数组（base[i]），保持 xv.at/xv.set 走散 key 下标路径。
     if (e.op == "xv.at" || e.op == "xv.set") && !e.args.is_empty() {
         if let Some(t) = tm.get(&e.args[0].val) {
-            if t == "obj" || t == "map" {
+            if t == "obj" {
                 e.op = if e.op == "xv.at" { "kv.get".to_string() } else { "kv.set".to_string() };
             }
         }
