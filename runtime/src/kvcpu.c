@@ -596,6 +596,21 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode, char *
             exec_err = kvlangBuiltinNative(&f);
         } else if (is_copy_op(inst.opcode)) {
             exec_err = kvlangBuiltinExecuteCopy(kv, vtid, cur, &inst);
+        } else if (kvlangDispatchIsDelegatedOp(kv, inst.opcode)) {
+            exec_err = kvlangDispatchDelegate(kv, vtid, cur, &inst);
+            if (exec_err == KVLANG_DELEGATE_LOCAL) {
+                kvlangRwirInst_t ci;
+                ci.opcode = strdup(OP_CALL);
+                ci.nr = inst.nr + 1;
+                ci.nw = inst.nw;
+                ci.reads = malloc(sizeof(kvlangParam_t) * (size_t)ci.nr);
+                ci.reads[0].name = strdup(inst.opcode);
+                ci.reads[0].val.data = NULL; ci.reads[0].val.len = 0;
+                for (int i = 0; i < inst.nr; i++) ci.reads[i + 1] = inst.reads[i];
+                ci.writes = inst.writes;
+                exec_err = handle_control(kv, vtid, cur, &ci);
+                free(ci.opcode); free(ci.reads[0].name); free(ci.reads);
+            }
         } else if (is_ext_rwir(kv, inst.opcode)) {
             char *rk = kvlangKeytreeRwir(inst.opcode);
             int def_nr = 0;
