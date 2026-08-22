@@ -265,15 +265,14 @@ char *kvlangXvalueValueString(const kvlangXvalue_t *v) {
         return kvlangStrbufDetach(&b);
     }
     if (strcmp(k, KVSPACE_KIND_INDEX) == 0) {
-        int n = 0;
-        for (int32_t i = 0; i < blen; i++) if (body[i] == '\n') n++;
-        if (blen > 0) n++;
+        int n = blen >= 4 ? (int)rd32(body) : 0;
         kvlangStrbuf_t b; kvlangStrbufInit(&b); kvlangStrbufPrintf(&b, "(%d)", n); return kvlangStrbufDetach(&b);
     }
     if (strcmp(k, KVSPACE_KIND_OBJ) == 0) {
+        int n = blen >= 4 ? (int)rd32(body) : 0;
         kvlangStrbuf_t b; kvlangStrbufInit(&b);
-        if (blen == 0) kvlangStrbufPuts(&b, "obj");
-        else { int n = 1; for (int32_t i = 0; i < blen; i++) if (body[i] == '\n') n++; kvlangStrbufPrintf(&b, "{%d}", n); }
+        if (n == 0) kvlangStrbufPuts(&b, KVSPACE_KIND_OBJ);
+        else kvlangStrbufPrintf(&b, "{%d}", n);
         return kvlangStrbufDetach(&b);
     }
     return strndup2(body, blen);

@@ -20,19 +20,20 @@ static bool kind_eq(const char *s, size_t len, const char *k) {
 
 /* 精确 kind 集合（对齐 runtime kind 常量，不含 None）。 */
 static bool known_kind(const char *s, size_t len) {
-    return kind_eq(s, len, "bool") ||
-           kind_eq(s, len, "int8") || kind_eq(s, len, "int16") ||
-           kind_eq(s, len, "int32") || kind_eq(s, len, "int64") ||
-           kind_eq(s, len, "uint8") || kind_eq(s, len, "uint16") ||
-           kind_eq(s, len, "uint32") || kind_eq(s, len, "uint64") ||
-           kind_eq(s, len, "float32") || kind_eq(s, len, "float64") ||
-           kind_eq(s, len, "char/utf32") || kind_eq(s, len, "char/utf8") ||
-           kind_eq(s, len, "char/ascii") ||
-           kind_eq(s, len, "obj") || kind_eq(s, len, "index") ||
-           kind_eq(s, len, "extindex") ||
-           kind_eq(s, len, "rwir") || kind_eq(s, len, "rwfunc") ||
-           kind_eq(s, len, "scope") || kind_eq(s, len, "time") ||
-           kind_eq(s, len, "duration");
+    return kind_eq(s, len, KVSPACE_KIND_BOOL) ||
+           kind_eq(s, len, KVSPACE_KIND_INT8) || kind_eq(s, len, KVSPACE_KIND_INT16) ||
+           kind_eq(s, len, KVSPACE_KIND_INT32) || kind_eq(s, len, KVSPACE_KIND_INT64) ||
+           kind_eq(s, len, KVSPACE_KIND_UINT8) || kind_eq(s, len, KVSPACE_KIND_UINT16) ||
+           kind_eq(s, len, KVSPACE_KIND_UINT32) || kind_eq(s, len, KVSPACE_KIND_UINT64) ||
+           kind_eq(s, len, KVSPACE_KIND_FLOAT32) || kind_eq(s, len, KVSPACE_KIND_FLOAT64) ||
+           kind_eq(s, len, KVSPACE_KIND_CHAR) || kind_eq(s, len, KVSPACE_KIND_CHAR_UTF8) ||
+           kind_eq(s, len, KVSPACE_KIND_CHAR_ASCII) ||
+           kind_eq(s, len, KVSPACE_KIND_OBJ) || kind_eq(s, len, KVSPACE_KIND_MAP) ||
+           kind_eq(s, len, KVSPACE_KIND_INDEX) || kind_eq(s, len, KVSPACE_KIND_EXT_INDEX) ||
+           kind_eq(s, len, KVSPACE_KIND_RWIR) || kind_eq(s, len, KVSPACE_KIND_RWFUNC) ||
+           kind_eq(s, len, KVSPACE_KIND_SCOPE) || kind_eq(s, len, KVSPACE_KIND_TIME) ||
+           kind_eq(s, len, KVSPACE_KIND_DURATION) ||
+           kind_eq(s, len, "json"); /* json：递归 union，type-only，非落盘 kind */
 }
 
 /* base = any | kind（kind 为精确合法 kind 串） */

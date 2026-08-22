@@ -961,7 +961,7 @@ impl Parser {
                     && self.peek_at(j + 1).value == "=");
             if !is_dict {
                 // 值列表 `{v0, v1, ...}`（无 `=> =`）→ 散 key 数组字面量，区别于 dict 的
-                // `key => = val`。散 key：每个元素落在 base.<i> 独立 key（变长/可增长），
+                // `key => = val`。散 key：每个元素落在 base.i 独立 key（变长/可增长），
                 // 字符串数组走这里；compact 定长打包走 `[...]`。
                 self.advance(); // consume {
                 let mut elems = Vec::new();
