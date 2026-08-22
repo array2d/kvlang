@@ -1100,16 +1100,18 @@ int kvlangBuiltinMap(kvlangFrame_t *f) {
     char *fr = kvlangKeytreeFrameRoot(f->pc);
     for (int w = 0; w < f->inst->nw; w++) {
         char *ok = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->writes[w].name);
-        kvlangXvalue_t mark; kvlangXvalueNewTlv(&mark, KVSPACE_KIND_MAP, (const uint8_t *)"", 0, 1);
-        kvlangKvPair_t p0 = { ok, mark };
-        char err[256]; kvlangKvSet(f->kv, &p0, 1, err, sizeof err);
-        kvlangXvalueFree(&mark);
+        /* 散 key 数组：base[i] 方括号下标，无根标记（对齐 array.scatter/separated_len）。 */
+        int old = separated_len(f->kv, ok);
+        for (int i = 0; i < old; i++) {
+            kvlangStrbuf_t k; kvlangStrbufInit(&k); kvlangStrbufPrintf(&k, "%s[%d]", ok, i);
+            char err[256]; kvlangKvDel(f->kv, k.p, err, sizeof err); kvlangStrbufFree(&k);
+        }
+        char err[256]; kvlangKvDel(f->kv, ok, err, sizeof err);
         for (int i = 0; i < n; i++) {
-            char key[32]; snprintf(key, sizeof key, "[%d]", i);
-            char *mk = kvlangKeytreeMember(ok, key);
-            kvlangKvPair_t p = { mk, in[i] };
+            kvlangStrbuf_t k; kvlangStrbufInit(&k); kvlangStrbufPrintf(&k, "%s[%d]", ok, i);
+            kvlangKvPair_t p = { k.p, in[i] };
             kvlangKvSet(f->kv, &p, 1, err, sizeof err);
-            free(mk);
+            kvlangStrbufFree(&k);
         }
         free(ok);
     }
