@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include "const.h"
 
 /* ── kvspace-durable C ABI ─────────────────────────────────────────── */
 
@@ -49,41 +50,7 @@ extern int   kvspaceNewBool(uint8_t v, uint8_t **out, uint32_t *out_len);
 extern int   kvspaceNewInt64(int64_t v, uint8_t **out, uint32_t *out_len);
 extern int   kvspaceNewFloat64(double v, uint8_t **out, uint32_t *out_len);
 
-/* ── kind 常量 ─────────────────────────────────────────────────────── */
-
-#define KVSPACE_KIND_NONE       "None"
-#define KVSPACE_KIND_BOOL       "bool"
-#define KVSPACE_KIND_INT8       "int8"
-#define KVSPACE_KIND_INT16      "int16"
-#define KVSPACE_KIND_INT32      "int32"
-#define KVSPACE_KIND_INT64      "int64"
-#define KVSPACE_KIND_UINT8      "uint8"
-#define KVSPACE_KIND_UINT16     "uint16"
-#define KVSPACE_KIND_UINT32     "uint32"
-#define KVSPACE_KIND_UINT64     "uint64"
-#define KVSPACE_KIND_FLOAT32    "float32"
-#define KVSPACE_KIND_FLOAT64    "float64"
-#define KVSPACE_KIND_CHAR       "char/utf32"
-#define KVSPACE_KIND_CHAR_UTF8  "char/utf8"
-#define KVSPACE_KIND_CHAR_ASCII "char/ascii"
-#define KVSPACE_KIND_OBJ       "obj"
-#define KVSPACE_KIND_MAP        "map"
-#define KVSPACE_KIND_INDEX      "index"
-#define KVSPACE_KIND_EXT_INDEX  "extindex"
-#define KVSPACE_KIND_RWIR       "rwir"
-#define KVSPACE_KIND_RWFUNC     "rwfunc"
-#define KVSPACE_KIND_SCOPE      "scope"
-#define KVSPACE_KIND_TIME       "time"
-#define KVSPACE_KIND_DURATION   "duration"
-
-/* ── 路径/成员常量 ─────────────────────────────────────────────────── */
-
-#define PATH_SEP          "/"
-#define DIR_INDEX_SUF     "/"
-#define MEMBER_SEP        "."
-#define INDEX_VALUE_SEP   "\n"
-#define RUNTIME_MEMBER_SEP "\xE2\x80\xA5"   /* ‥ U+2025 */
-#define EXT_INDEX_HEAD    "\xE2\x80\xA6"    /* … U+2026 */
+/* ── 数值上限 ──────────────────────────────────────────────────────── */
 
 #define MAX_PARAMS 128
 #define MAX_STACK_DEPTH 256

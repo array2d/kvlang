@@ -191,7 +191,7 @@ fn lower_for_with_cont(
     let keys_slot = lg.tmp();
     let key_slot = lg.tmp();
     let is_obj = s.iter.op == "obj"
-        || (s.iter.is_leaf() && matches!(tm.get(&s.iter.val), Some(t) if t == "obj"));
+        || (s.iter.is_leaf() && matches!(tm.get(&s.iter.val), Some(t) if t == "objindex"));
 
     // 迭代源：裸标识符直接原地遍历；表达式（如数组字面量）先物化到临时槽。
     let mut init_body = Vec::new();
@@ -538,7 +538,7 @@ fn infer_inst(inst: &Instruction, tm: &mut HashMap<String, String>) {
     };
     // kv.set 成员形（3 读：base, key, val）是 void 无写槽，但 base 仍须推断为 obj/map（供 for-in / 成员访问）
     if e.op == "kv.set" && e.args.len() >= 3 && !e.args[0].val.contains('/') {
-        tm.entry(e.args[0].val.clone()).or_insert_with(|| "obj".to_string());
+        tm.entry(e.args[0].val.clone()).or_insert_with(|| "objindex".to_string());
     }
     if inst.writes.is_empty() {
         return;
@@ -605,15 +605,15 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
         return opcode.to_string();
     }
     if opcode == "obj" {
-        return "obj".to_string();
+        return "objindex".to_string();
     }
     if opcode == "map" {
-        return "map".to_string();
+        return "strkeymapindex".to_string();
     }
     if opcode == "kv.set" {
         // 成员写 base.key = v（3 reads：base, key, value）→ base 是 obj/map。
         if reads.len() >= 3 {
-            tm.entry(reads[0].clone()).or_insert_with(|| "obj".to_string());
+            tm.entry(reads[0].clone()).or_insert_with(|| "objindex".to_string());
         }
         return String::new();
     }
@@ -739,7 +739,7 @@ fn specialize_inst(inst: &mut Instruction, tm: &HashMap<String, String>) {
     // map 是散 key 数组（base[i]），保持 xv.at/xv.set 走散 key 下标路径。
     if (e.op == "xv.at" || e.op == "xv.set") && !e.args.is_empty() {
         if let Some(t) = tm.get(&e.args[0].val) {
-            if t == "obj" {
+            if t == "objindex" {
                 e.op = if e.op == "xv.at" { "kv.get".to_string() } else { "kv.set".to_string() };
             }
         }

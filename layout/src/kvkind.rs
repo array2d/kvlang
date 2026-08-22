@@ -14,8 +14,8 @@ pub const KIND_CHAR_ASCII: &str = "char/ascii";
 pub const KIND_BOOL: &str = "bool";
 pub const KIND_INT64: &str = "int64";
 pub const KIND_FLOAT64: &str = "float64";
-pub const KIND_OBJ: &str = "obj";
-pub const KIND_MAP: &str = "map";
+pub const KIND_OBJ: &str = "objindex";
+pub const KIND_MAP: &str = "strkeymapindex";
 pub const KIND_INDEX: &str = "index";
 pub const KIND_EXT_INDEX: &str = "extindex";
 
