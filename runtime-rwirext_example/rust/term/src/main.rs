@@ -71,11 +71,17 @@ unsafe extern "C" {
         nw: c_int,
         sig: *const c_char,
     ) -> c_int;
-    fn kvlang_rwirextPrintLine(
+    fn kvlang_rwirextHandoff(
+        kvspace: *mut c_void,
+        vtid: *const c_char,
+        pc: *const c_char,
+    ) -> c_int;
+    fn kvlang_rwirextIsExt(kvspace: *mut c_void, opcode: *const c_char) -> c_int;
+    fn kvlang_rwirextParams(kvspace: *mut c_void, pc: *const c_char) -> *mut c_char;
+    fn kvlang_rwirextResolveRead(
         kvspace: *mut c_void,
         pc: *const c_char,
-        rawnl: *mut c_int,
-        cerr: *mut c_int,
+        idx: c_int,
     ) -> *mut c_char;
     fn kvlang_rwirextNextPc(pc: *const c_char) -> *mut c_char;
 }
@@ -247,22 +253,42 @@ fn main() {
             std::process::exit(1);
         }
 
-        // RunSeq：连续处理己方 print，遇非己方停下（c 停在非己方 pc）
+        // RunSeq：连续处理己方 print/println/cerr，遇非己方指令停下（c 停在非己方 pc）
         let mut c = take(pc);
-        loop {
-            let mut rawnl = 0i32;
-            let mut is_cerr = 0i32;
-            let p = unsafe { kvlang_rwirextPrintLine(kv, cs(&c).as_ptr(), &mut rawnl, &mut is_cerr) };
-            if p.is_null() {
-                break;
+        let non_print = loop {
+            let params = take(unsafe { kvlang_rwirextParams(kv, cs(&c).as_ptr()) });
+            let mut it = params.split('\n');
+            let opcode = it.next().unwrap_or("");
+            let reads: Vec<&str> = it.collect();
+            let (sep, rawnl, is_cerr) = match opcode {
+                "print" => ("", 1, 0),
+                "println" => (" ", 0, 0),
+                "cerr" => (" ", 0, 1),
+                _ => break opcode.to_string(),
+            };
+            let nr = reads.len();
+            let mut line = String::new();
+            for i in 0..nr {
+                if i > 0 {
+                    line.push_str(sep);
+                }
+                let d = take(unsafe { kvlang_rwirextResolveRead(kv, cs(&c).as_ptr(), i as c_int) });
+                line.push_str(&d);
             }
-            let line = take(p);
             print_line(&line, rawnl, is_cerr);
             c = take(unsafe { kvlang_rwirextNextPc(cs(&c).as_ptr()) });
-        }
+        };
 
-        // 写回非己方 pc，让 runtime 从它继续
-        kv_set(kv, &vpc, &c);
+        // 外部扩展 rwir（json.to/numpy…）：handoff 给对应扩展进程，扩展写回下一 PC 并 signal .done
+        if !non_print.is_empty() && unsafe { kvlang_rwirextIsExt(kv, cs(&non_print).as_ptr()) } != 0 {
+            if unsafe { kvlang_rwirextHandoff(kv, cs(&vid).as_ptr(), cs(&c).as_ptr()) } != 0 {
+                eprintln!("kvlang: handoff {non_print} failed at {c}");
+                std::process::exit(1);
+            }
+        } else {
+            // native/control/帧结束：写回 pc 让 runtime 继续/判 done
+            kv_set(kv, &vpc, &c);
+        }
     }
 
     unsafe { kvspaceFree(kv) };

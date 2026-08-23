@@ -32,8 +32,7 @@ static bool known_kind(const char *s, size_t len) {
            kind_eq(s, len, KVSPACE_KIND_INDEX) || kind_eq(s, len, KVSPACE_KIND_EXT_INDEX) ||
            kind_eq(s, len, KVSPACE_KIND_RWIR) || kind_eq(s, len, KVSPACE_KIND_RWFUNC) ||
            kind_eq(s, len, KVSPACE_KIND_SCOPE) || kind_eq(s, len, KVSPACE_KIND_TIME) ||
-           kind_eq(s, len, KVSPACE_KIND_DURATION) ||
-           kind_eq(s, len, "json"); /* json：递归 union，type-only，非落盘 kind */
+           kind_eq(s, len, KVSPACE_KIND_DURATION);
 }
 
 /* base = any | kind（kind 为精确合法 kind 串） */

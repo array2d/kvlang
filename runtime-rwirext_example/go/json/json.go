@@ -44,6 +44,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"math"
 	"sort"
 	"strconv"
@@ -347,46 +348,6 @@ func jsonValueToTLV(v interface{}) []byte {
 	}
 }
 
-func jsonArrayToTLV(arr []interface{}) []byte {
-	if len(arr) == 0 {
-		return nil
-	}
-	switch arr[0].(type) {
-	case json.Number:
-		allInt := true
-		for _, e := range arr {
-			if _, err := e.(json.Number).Int64(); err != nil {
-				allInt = false
-				break
-			}
-		}
-		if allInt {
-			raw := make([]byte, 0, len(arr)*8)
-			for _, e := range arr {
-				i, _ := e.(json.Number).Int64()
-				raw = append(raw, u64(uint64(i))...)
-			}
-			return constructTLV("int64", raw, len(arr))
-		}
-		raw := make([]byte, 0, len(arr)*8)
-		for _, e := range arr {
-			f, _ := e.(json.Number).Float64()
-			raw = append(raw, u64bits(f)...)
-		}
-		return constructTLV("float64", raw, len(arr))
-	case bool:
-		raw := make([]byte, len(arr))
-		for i, e := range arr {
-			if e.(bool) {
-				raw[i] = 1
-			}
-		}
-		return constructTLV("bool", raw, len(arr))
-	default:
-		return nil
-	}
-}
-
 func u64(v uint64) []byte {
 	b := make([]byte, 8)
 	binary.LittleEndian.PutUint64(b, v)
@@ -399,63 +360,124 @@ func u64bits(f float64) []byte {
 }
 
 // ── KV 子树 ↔ map[string]any ───────────────────────────────────────
+// objindex（对象）/ strkeymapindex（数组）承载复杂结构：marker 在 path.，
+// 成员在 path.<key>（key 恒字符串，数组下标为数字字符串）。后端按 . 成员自动维护 index。
 
-func splitArrayName(name string) (base string, idx int, ok bool) {
-	lt := strings.LastIndex(name, "[")
-	if lt <= 0 || !strings.HasSuffix(name, "]") {
-		return "", 0, false
-	}
-	i, err := strconv.Atoi(name[lt+1 : len(name)-1])
-	if err != nil {
-		return "", 0, false
-	}
-	return name[:lt], i, true
+func mkIndexMarker(kind string, names []string) []byte {
+	body := make([]byte, 4)
+	binary.LittleEndian.PutUint32(body, uint32(len(names)))
+	body = append(body, []byte(strings.Join(names, "\n"))...)
+	return constructTLV(kind, body, 1)
 }
 
-func buildMap(c unsafe.Pointer, root string) map[string]any {
-	m := map[string]any{}
-	scat := map[string][]int{}
-	for _, child := range list(c, root+"/") {
-		if child == "" {
-			continue
-		}
-		if strings.HasSuffix(child, "/") { // index 目录 → 递归
-			name := strings.TrimSuffix(child, "/")
-			m[name] = buildMap(c, root+"/"+name)
-			continue
-		}
-		if base, idx, ok := splitArrayName(child); ok {
-			scat[base] = append(scat[base], idx)
-			continue
-		}
-		kind, raw, arrLen := parseTLV(getTLV(c, root+"/"+child))
-		m[child] = tlvToJSONValue(kind, raw, arrLen)
+// validateKey：JSON 对象 key 不能含影响 kvspace 存储分隔的字符（§5.4）。
+// 空串、/ . [ ] \n \r \0 U+2025 及 ASCII 控制字符一律拒绝（不静默丢键、不转义）。
+func validateKey(k string) error {
+	if k == "" {
+		return fmt.Errorf("json: empty key rejected")
 	}
-	for base, idxs := range scat {
-		sort.Ints(idxs)
-		arr := make([]interface{}, len(idxs))
-		for i, idx := range idxs {
-			kind, raw, arrLen := parseTLV(getTLV(c, root+"/"+base+"["+strconv.Itoa(idx)+"]"))
-			arr[i] = tlvToJSONValue(kind, raw, arrLen)
+	for _, r := range k {
+		if r == '/' || r == '.' || r == '[' || r == ']' || r == '\n' || r == '\r' ||
+			r == 0 || r < 0x20 || r == '‥' {
+			return fmt.Errorf("json: forbidden char %q in key %q", r, k)
 		}
-		m[base] = arr
+	}
+	return nil
+}
+
+func writeValue(c unsafe.Pointer, path string, v interface{}) error {
+	switch t := v.(type) {
+	case nil:
+		setTLV(c, path, nil) // None：key 存在、值为空字节（JSON null）
+	case map[string]any:
+		return writeObj(c, path, t)
+	case []interface{}:
+		return writeArr(c, path, t)
+	default:
+		setTLV(c, path, jsonValueToTLV(v))
+	}
+	return nil
+}
+
+func writeObj(c unsafe.Pointer, path string, m map[string]any) error {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		if err := validateKey(k); err != nil {
+			return err
+		}
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	setTLV(c, path+".", mkIndexMarker("objindex", keys))
+	for _, k := range keys {
+		if err := writeValue(c, path+"."+k, m[k]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeArr(c unsafe.Pointer, path string, arr []interface{}) error {
+	keys := make([]string, len(arr))
+	for i := range arr {
+		keys[i] = strconv.Itoa(i)
+	}
+	setTLV(c, path+".", mkIndexMarker("strkeymapindex", keys))
+	for i, v := range arr {
+		if err := writeValue(c, path+"."+strconv.Itoa(i), v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func readValue(c unsafe.Pointer, path string) interface{} {
+	kind, _, _ := parseTLV(getTLV(c, path+"."))
+	switch kind {
+	case "objindex":
+		return readObj(c, path)
+	case "strkeymapindex":
+		return readArr(c, path)
+	}
+	kind, raw, arrLen := parseTLV(getTLV(c, path))
+	if kind == "" {
+		return nil // None → JSON null
+	}
+	return tlvToJSONValue(kind, raw, arrLen)
+}
+
+func readObj(c unsafe.Pointer, path string) map[string]any {
+	m := map[string]any{}
+	for _, name := range list(c, path+".") {
+		m[name] = readValue(c, path+"."+name)
 	}
 	return m
 }
 
-func writeMap(c unsafe.Pointer, root string, m map[string]any) {
-	for k, v := range m {
-		childPath := root + "/" + k
-		switch t := v.(type) {
-		case map[string]any:
-			mkindex(c, childPath+"/")
-			writeMap(c, childPath, t)
-		case []interface{}:
-			setTLV(c, childPath, jsonArrayToTLV(t))
-		default:
-			setTLV(c, childPath, jsonValueToTLV(v))
+func readArr(c unsafe.Pointer, path string) []interface{} {
+	idxs := make([]int, 0, 8)
+	for _, n := range list(c, path+".") {
+		if i, err := strconv.Atoi(n); err == nil {
+			idxs = append(idxs, i)
 		}
 	}
+	sort.Ints(idxs)
+	arr := make([]interface{}, len(idxs))
+	for i, idx := range idxs {
+		arr[i] = readValue(c, path+"."+strconv.Itoa(idx))
+	}
+	return arr
+}
+
+func writeMap(c unsafe.Pointer, root string, m map[string]any) error {
+	return writeObj(c, root, m)
+}
+
+func buildMap(c unsafe.Pointer, root string) map[string]any {
+	if m, ok := readValue(c, root).(map[string]any); ok {
+		return m
+	}
+	return map[string]any{}
 }
 
 func fromJSON(data []byte) map[string]any {
@@ -502,13 +524,17 @@ func doTo(c unsafe.Pointer, pc string, readNames, writeNames []string) {
 	setChar(c, dest, string(data))
 }
 
-func doFrom(c unsafe.Pointer, pc string, readNames, writeNames []string) {
+func doFrom(c unsafe.Pointer, pc string, readNames, writeNames []string, vid string) {
 	src := resolveRead(c, pc, 0)
 	root := writeNames[0]
 	if !strings.HasPrefix(root, "/") {
 		root = resolveWrite(c, pc, 0)
 	}
-	writeMap(c, root, fromJSON([]byte(src)))
+	if err := writeMap(c, root, fromJSON([]byte(src))); err != nil {
+		setChar(c, "/vthread/"+vid+"/‥status", "error")
+		setChar(c, "/vthread/"+vid+"/‥error/msg", err.Error())
+		return
+	}
 }
 
 func serveOp(c unsafe.Pointer, o op) {
@@ -532,7 +558,7 @@ func serveOp(c unsafe.Pointer, o op) {
 		if opcode == "json.to" {
 			doTo(c, pc, readNames, writeNames)
 		} else {
-			doFrom(c, pc, readNames, writeNames)
+			doFrom(c, pc, readNames, writeNames, vid)
 		}
 
 		nxt := nextPC(pc)
@@ -542,11 +568,19 @@ func serveOp(c unsafe.Pointer, o op) {
 	}
 }
 
-// Serve 常驻循环：注册 + 监控 .todo + 批量执行 + 交还 PC。
-func Serve(dsn string) {
+func connect(dsn string) unsafe.Pointer {
 	cd := cstr(dsn)
 	defer C.free(unsafe.Pointer(cd))
-	c := C.kvspaceConnect(cd)
+	return C.kvspaceConnect(cd)
+}
+
+func disconnect(c unsafe.Pointer) {
+	C.kvspaceFree(c)
+}
+
+// Serve 常驻循环：注册 + 监控 .todo + 批量执行 + 交还 PC。
+func Serve(dsn string) {
+	c := connect(dsn)
 	if c == nil {
 		return
 	}
