@@ -16,13 +16,36 @@ void kvlangXvalueSetBytes(kvlangXvalue_t *v, uint8_t *data, uint32_t len) {
     v->data = data; v->len = len;
 }
 
+/* 解析 kindexpr 内容 → (ref, dims, base kind)。kindexpr 为 NUL 终止串。 */
+void kvlang_kindexpr_parse(const uint8_t *kx, kvlang_kindexpr_t *out) {
+    memset(out, 0, sizeof(*out));
+    if (!kx) return;
+    int32_t i = 0;
+    if (kx[0] == '*') { out->ref = 1; i = 1; }
+    else if (kx[0] == '@') { out->ref = 2; i = 1; }
+    if (kx[i] == '[') {
+        i++;
+        while (kx[i] != ']' && kx[i] != 0 && out->ndim < X_MAX_NDIM) {
+            int32_t d = 0;
+            while (kx[i] >= '0' && kx[i] <= '9') { d = d * 10 + (kx[i] - '0'); i++; }
+            out->dims[out->ndim++] = d;
+            if (kx[i] == ',') i++;
+        }
+        if (kx[i] == ']') i++;
+    }
+    out->kind = (const char *)(kx + i);
+    out->kind_len = (int32_t)strlen((const char *)(kx + i));
+    out->array_len = 1;
+    for (int d = 0; d < out->ndim; d++) out->array_len *= out->dims[d];
+}
+
 /* head 编解码统一委托给链接的 kvspace .so（kvspace-c / kvspace-durable 同一 ABI），
  * runtime 不再私持 TLV head 布局，杜绝多份手写偏移不一致。 */
 static int kvlangXvalueDecodeHeadRaw(const uint8_t *d, uint32_t len, kvspaceHead_t *h) {
     memset(h, 0, sizeof(*h));
     if (!d || len == 0) return -1;
     kvspaceDecodeHead(d, len, h);
-    return h->kind[0] ? 0 : -1;
+    return h->kindexpr[0] ? 0 : -1;
 }
 
 /* array_len → dims：char/* 恒一维（含空串/单字符）；其余标量(≤1)=0 维、多元素=1 维。 */
@@ -58,28 +81,37 @@ const char *kvlangXvalueKind(const kvlangXvalue_t *v) {
     char *b = buf[idx];
     idx = (idx + 1) & 15;
     if (kvlangXvalueNone(v)) { b[0] = 0; return b; }
-    uint8_t kl = v->data[0];
+    kvspaceHead_t h;
+    if (kvlangXvalueHead(v, &h) < 0) { b[0] = 0; return b; }
+    kvlang_kindexpr_t kx; kvlang_kindexpr_parse(h.kindexpr, &kx);
+    int32_t kl = kx.kind_len;
     if (kl > 32) kl = 32;
-    memcpy(b, v->data + 1, kl);
+    memcpy(b, kx.kind, (size_t)kl);
     b[kl] = 0;
     return b;
 }
 
 bool kvlangXvalueKindIs(const kvlangXvalue_t *v, const char *kind) {
     if (kvlangXvalueNone(v)) return kind[0] == 0;
-    uint8_t kl = v->data[0];
-    return (size_t)kl == strlen(kind) && memcmp(v->data + 1, kind, kl) == 0;
+    kvspaceHead_t h;
+    if (kvlangXvalueHead(v, &h) < 0) return false;
+    kvlang_kindexpr_t kx; kvlang_kindexpr_parse(h.kindexpr, &kx);
+    return (size_t)kx.kind_len == strlen(kind) && memcmp(kx.kind, kind, (size_t)kx.kind_len) == 0;
 }
 
 bool kvlangXvalueIsPtr(const kvlangXvalue_t *v) {
     if (kvlangXvalueNone(v)) return false;
-    return v->len > 2 + v->data[0] && v->data[1 + v->data[0]] == 1;
+    kvspaceHead_t h;
+    if (kvlangXvalueHead(v, &h) < 0) return false;
+    kvlang_kindexpr_t kx; kvlang_kindexpr_parse(h.kindexpr, &kx);
+    return kx.ref == 1;
 }
 
 int32_t kvlangXvalueArrayLen(const kvlangXvalue_t *v) {
     if (kvlangXvalueNone(v)) return 0;
     kvspaceHead_t h; kvlangXvalueDecodeHeadRaw(v->data, v->len, &h);
-    return h.array_len;
+    kvlang_kindexpr_t kx; kvlang_kindexpr_parse(h.kindexpr, &kx);
+    return kx.array_len;
 }
 
 const uint8_t *kvlangXvalueBody(const kvlangXvalue_t *v, const kvspaceHead_t *h, int32_t *out_len) {
@@ -176,7 +208,9 @@ bool kvlangXvalueAsBool(const kvlangXvalue_t *v) {
 
 uint32_t kvlangXvalueChar32At(const kvlangXvalue_t *v, int32_t idx) {
     kvspaceHead_t h; const uint8_t *b = v_body(v, &h);
-    if (!b || idx < 0 || idx >= h.array_len) return 0;
+    if (!b) return 0;
+    kvlang_kindexpr_t kx; kvlang_kindexpr_parse(h.kindexpr, &kx);
+    if (idx < 0 || idx >= kx.array_len) return 0;
     return rd32(b + idx * 4);
 }
 
@@ -237,8 +271,9 @@ char *kvlangXvalueValueString(const kvlangXvalue_t *v) {
     if (!body) return strdup(KVSPACE_KIND_NONE);
     int32_t blen = h.body_len;
     const char *k = kvlangXvalueKind(v);
+    kvlang_kindexpr_t kx; kvlang_kindexpr_parse(h.kindexpr, &kx);
 
-    if (h.is_ptr) {
+    if (kx.ref == 1) {
         kvlangStrbuf_t b; kvlangStrbufInit(&b);
         kvlangStrbufPutn(&b, "\xE2\x86\x92", 3);
         kvlangStrbufPutn(&b, (const char *)body, (size_t)blen);
@@ -346,7 +381,7 @@ void kvlangXvalueNewRwir(kvlangXvalue_t *v, int32_t nr, int32_t nw, const char *
     raw[0] = nr & 0xFF; raw[1] = (nr >> 8) & 0xFF;
     raw[2] = nw & 0xFF; raw[3] = (nw >> 8) & 0xFF;
     memcpy(raw + 4, sig, sl);
-    kvlangXvalueNewTlv(v, KVSPACE_KIND_RWIR, raw, (uint32_t)(4 + sl), 1);
+    kvlangXvalueNewTlv(v, KVSPACE_KIND_DEF_RWIR, raw, (uint32_t)(4 + sl), 1);
     free(raw);
 }
 

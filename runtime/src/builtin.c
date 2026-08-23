@@ -858,7 +858,8 @@ int kvlangBuiltinXvDim(kvlangFrame_t *f) {
         free(fr);
     } else if (n > 0) {
         kvspaceHead_t h; kvlangXvalueHead(&in[0], &h);
-        ndim = h.ndim;
+        kvlang_kindexpr_t kx; kvlang_kindexpr_parse(h.kindexpr, &kx);
+        ndim = kx.ndim;
     }
     kvlangXvalue_t r; kvlangXvalueNewInt64(&r, ndim);
     int rc = write_result(f, &r); kvlangXvalueFree(&r); free_inputs(in, n);
@@ -875,8 +876,9 @@ int kvlangBuiltinXvShape(kvlangFrame_t *f) {
         free(fr);
     } else if (n > 0 && !kvlangXvalueNone(&in[0])) {
         kvspaceHead_t h; kvlangXvalueHead(&in[0], &h);
-        ndim = h.ndim;
-        for (int i = 0; i < ndim && i < 8; i++) dims[i] = h.dims[i];
+        kvlang_kindexpr_t kx; kvlang_kindexpr_parse(h.kindexpr, &kx);
+        ndim = kx.ndim;
+        for (int i = 0; i < ndim && i < 8; i++) dims[i] = kx.dims[i];
     }
     uint8_t raw[64]; uint32_t raw_len = 0;
     for (int i = 0; i < ndim; i++) {
@@ -891,12 +893,12 @@ int kvlangBuiltinXvShape(kvlangFrame_t *f) {
 }
 
 /* 计算多维下标 (i0..i_{n-1}) 的 row-major 扁平索引，越界返回 -1。 */
-static int64_t flat_index(const kvspaceHead_t *h, const kvlangXvalue_t *in, int nidx) {
+static int64_t flat_index(const kvlang_kindexpr_t *kx, const kvlangXvalue_t *in, int nidx) {
     int64_t flat = 0;
     for (int i = 0; i < nidx; i++) {
         int64_t idx = kvlangXvalueAsInt64(&in[i + 1]);
-        if (idx < 0 || idx >= h->dims[i]) return -1;
-        flat = flat * h->dims[i] + idx;
+        if (idx < 0 || idx >= kx->dims[i]) return -1;
+        flat = flat * kx->dims[i] + idx;
     }
     return flat;
 }
@@ -921,9 +923,10 @@ int kvlangBuiltinXvAt(kvlangFrame_t *f) {
     const char *k = kvlangXvalueKind(&in[0]);
     int sz = kvlangXvalueElemSize(k);
     kvspaceHead_t h; kvspaceDecodeHead(in[0].data, in[0].len, &h);
-    if (sz <= 0 || h.ndim == 0) { free_inputs(in, n); return set_err(f, "TypeError: xv.at requires a compact array, got %s", k); }
-    if (nidx != h.ndim) { free_inputs(in, n); return set_err(f, "IndexError: xv.at: %d-dim array needs %d indices, got %d", h.ndim, h.ndim, nidx); }
-    int64_t flat = flat_index(&h, in, nidx);
+    kvlang_kindexpr_t kx; kvlang_kindexpr_parse(h.kindexpr, &kx);
+    if (sz <= 0 || kx.ndim == 0) { free_inputs(in, n); return set_err(f, "TypeError: xv.at requires a compact array, got %s", k); }
+    if (nidx != kx.ndim) { free_inputs(in, n); return set_err(f, "IndexError: xv.at: %d-dim array needs %d indices, got %d", kx.ndim, kx.ndim, nidx); }
+    int64_t flat = flat_index(&kx, in, nidx);
     if (flat < 0) { free_inputs(in, n); return set_err(f, "IndexError: xv.at: index out of bounds"); }
     const uint8_t *body = in[0].data + h.body_offset;
     kvlangXvalue_t e; kvlangXvalueNewTlv(&e, k, body + flat * sz, (uint32_t)sz, 1);
@@ -939,9 +942,10 @@ int kvlangBuiltinXvSet(kvlangFrame_t *f) {
     const char *k = kvlangXvalueKind(&in[0]);
     int sz = kvlangXvalueElemSize(k);
     kvspaceHead_t h; kvspaceDecodeHead(in[0].data, in[0].len, &h);
-    if (sz <= 0 || h.ndim == 0) { free_inputs(in, n); return set_err(f, "TypeError: xv.set requires a compact array, got %s", k); }
-    if (nidx != h.ndim) { free_inputs(in, n); return set_err(f, "IndexError: xv.set: %d-dim array needs %d indices, got %d", h.ndim, h.ndim, nidx); }
-    int64_t flat = flat_index(&h, in, nidx);
+    kvlang_kindexpr_t kx; kvlang_kindexpr_parse(h.kindexpr, &kx);
+    if (sz <= 0 || kx.ndim == 0) { free_inputs(in, n); return set_err(f, "TypeError: xv.set requires a compact array, got %s", k); }
+    if (nidx != kx.ndim) { free_inputs(in, n); return set_err(f, "IndexError: xv.set: %d-dim array needs %d indices, got %d", kx.ndim, kx.ndim, nidx); }
+    int64_t flat = flat_index(&kx, in, nidx);
     if (flat < 0) { free_inputs(in, n); return set_err(f, "IndexError: xv.set: index out of bounds"); }
     const uint8_t *body = in[0].data + h.body_offset;
     uint8_t *nb = malloc((size_t)h.body_len);
@@ -950,7 +954,7 @@ int kvlangBuiltinXvSet(kvlangFrame_t *f) {
     const uint8_t *vb = in[nidx + 1].data + vh.body_offset;
     int c = vh.body_len < sz ? vh.body_len : sz;
     memcpy(nb + flat * sz, vb, (size_t)c);
-    kvlangXvalue_t nv; kvlangXvalueNewTlvDims(&nv, k, nb, (uint32_t)h.body_len, h.dims, h.ndim);
+    kvlangXvalue_t nv; kvlangXvalueNewTlvDims(&nv, k, nb, (uint32_t)h.body_len, kx.dims, kx.ndim);
     int rc = write_result(f, &nv);
     kvlangXvalueFree(&nv); free(nb); free_inputs(in, n);
     return rc;
@@ -964,7 +968,8 @@ int kvlangBuiltinXvReshape(kvlangFrame_t *f) {
     const char *k = kvlangXvalueKind(&in[0]);
     if (kvlangXvalueElemSize(k) <= 0) { free_inputs(in, n); return set_err(f, "TypeError: xv.reshape requires a compact array, got %s", k); }
     kvspaceHead_t h; kvspaceDecodeHead(in[0].data, in[0].len, &h);
-    if (h.ndim < 1) { free_inputs(in, n); return set_err(f, "TypeError: xv.reshape requires a compact array, got scalar %s", k); }
+    kvlang_kindexpr_t kx; kvlang_kindexpr_parse(h.kindexpr, &kx);
+    if (kx.ndim < 1) { free_inputs(in, n); return set_err(f, "TypeError: xv.reshape requires a compact array, got scalar %s", k); }
     if (ndims > X_MAX_NDIM) { free_inputs(in, n); return set_err(f, "IndexError: xv.reshape: at most %d dims, got %d", X_MAX_NDIM, ndims); }
     int32_t dims[X_MAX_NDIM]; int64_t numel = 1;
     for (int i = 0; i < ndims; i++) {
@@ -972,20 +977,11 @@ int kvlangBuiltinXvReshape(kvlangFrame_t *f) {
         if (dims[i] < 0) { free_inputs(in, n); return set_err(f, "IndexError: xv.reshape: negative dim %d", dims[i]); }
         numel *= dims[i];
     }
-    if (numel != h.array_len) { free_inputs(in, n); return set_err(f, "IndexError: xv.reshape: cannot reshape %d elements into %lld", h.array_len, (long long)numel); }
-    /* 原地改写：数组 head 形状段恒 X_MAX_NDIM×4=32B，改写 dims+ndim+padding，body 不搬 */
-    uint8_t *data = in[0].data;
-    int32_t dims_off = 1 + (int32_t)data[0] + 2;
-    data[dims_off - 1] = (uint8_t)ndims;
-    memset(data + dims_off, 0, (size_t)(X_MAX_NDIM * 4));
-    for (int i = 0; i < ndims; i++) {
-        uint32_t v = (uint32_t)dims[i];
-        data[dims_off + i * 4] = (uint8_t)v;
-        data[dims_off + i * 4 + 1] = (uint8_t)(v >> 8);
-        data[dims_off + i * 4 + 2] = (uint8_t)(v >> 16);
-        data[dims_off + i * 4 + 3] = (uint8_t)(v >> 24);
-    }
-    int rc = write_result(f, &in[0]);
+    if (numel != kx.array_len) { free_inputs(in, n); return set_err(f, "IndexError: xv.reshape: cannot reshape %d elements into %lld", kx.array_len, (long long)numel); }
+    const uint8_t *body = in[0].data + h.body_offset;
+    kvlangXvalue_t nv; kvlangXvalueNewTlvDims(&nv, k, body, (uint32_t)h.body_len, dims, ndims);
+    int rc = write_result(f, &nv);
+    kvlangXvalueFree(&nv);
     free_inputs(in, n);
     return rc;
 }

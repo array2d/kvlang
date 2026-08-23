@@ -11,13 +11,11 @@
 /* ── kvspace-durable C ABI ─────────────────────────────────────────── */
 
 typedef struct {
-    uint8_t kind[32];
-    uint8_t is_ptr;
-    int32_t array_len;
-    int32_t body_len;
-    int32_t body_offset;
-    int32_t ndim;       /* 0=标量，N=N 维数组（唯一「是否数组」标志） */
-    int32_t dims[8];    /* kind+ndim+dims 即完整 kindexp */
+    uint8_t kindexpr[256]; /* NUL 终止（含 ref 前缀与 [dims]，去 padding） */
+    uint8_t ro;            /* 1=只读，0=可写 */
+    uint32_t vid;          /* vthread id */
+    int32_t body_len;      /* body 字节数 */
+    int32_t body_offset;   /* body 在 data 内的起始偏移（= head_len） */
 } kvspaceHead_t;
 
 extern void *kvspaceConnect(const char *dsn);
@@ -55,6 +53,19 @@ extern int   kvspaceNewFloat64(double v, uint8_t **out, uint32_t *out_len);
 #define MAX_PARAMS 128
 #define MAX_STACK_DEPTH 256
 #define X_MAX_NDIM 8
+
+/* ── 派生 head：解析 kindexpr 得到（不落盘） ───────────────────────── */
+
+typedef struct {
+    const char *kind;   /* base kind（kindexpr 子串，非 NUL 终止） */
+    int32_t     kind_len;
+    int32_t     ref;    /* 0=内联 1=软链接 2=扩展句柄 */
+    int32_t     ndim;
+    int32_t     dims[X_MAX_NDIM];
+    int32_t     array_len;
+} kvlang_kindexpr_t;
+
+void kvlang_kindexpr_parse(const uint8_t *kindexpr, kvlang_kindexpr_t *out);
 
 /* ── 基础类型 ──────────────────────────────────────────────────────── */
 
@@ -94,10 +105,10 @@ bool kvlangXvalueIsIntKind(const char *kind);
 bool kvlangXvalueIsUintKind(const char *kind);
 bool kvlangXvalueIsFloatKind(const char *kind);
 bool kvlangXvalueIsNumKind(const char *kind);
-/* 签名类型表达式（runtime篇-07）校验/匹配 */
-bool kvlang_rwirextTypeValid(const char *expr);
-bool kvlang_rwirextTypeMatch(const char *expr, const char *kind, int32_t ndim, const int32_t *dims);
-bool kvlang_rwirextTypeVariadic(const char *expr);
+/* 签名 kindexpr（runtime篇-07）校验/匹配 */
+bool kvlang_rwirextKindexprValid(const char *expr);
+bool kvlang_rwirextKindexprMatch(const char *expr, const char *kind, int32_t ndim, const int32_t *dims);
+bool kvlang_rwirextKindexprVariadic(const char *expr);
 int64_t kvlangXvalueAsInt64(const kvlangXvalue_t *v);
 double  kvlangXvalueAsFloat64(const kvlangXvalue_t *v);
 uint64_t kvlangXvalueAsUint64(const kvlangXvalue_t *v);

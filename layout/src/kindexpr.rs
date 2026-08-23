@@ -1,4 +1,4 @@
-//! 签名类型表达式（runtime篇-07，修订：无家族简写）：语法校验 + 值匹配。
+//! 签名 kindexpr（runtime篇-07，修订：无家族简写）：语法校验 + 值匹配。
 //!
 //! type   = atom ("|" atom)*
 //! atom   = [dims] ( any | kind )
@@ -68,7 +68,7 @@ pub fn strip_variadic(expr: &str) -> &str {
 }
 
 /// 类型表达式语法校验（装载期）。允许末参尾缀 `...` 变参。
-pub fn valid_type_expr(expr: &str) -> bool {
+pub fn valid_kindexpr(expr: &str) -> bool {
     let e = strip_variadic(expr);
     !e.is_empty() && e.split('|').all(valid_atom)
 }
@@ -119,7 +119,7 @@ fn match_atom(s: &str, kind: &str, ndim: i32, dims: &[i32]) -> bool {
 
 /// 单值（kind/ndim/dims）是否匹配类型表达式：任一 atom 命中即 true。
 /// 变参 `...` 按单元素判定（去尾缀后匹配），重复由派发循环处理。
-pub fn match_type(expr: &str, kind: &str, ndim: i32, dims: &[i32]) -> bool {
+pub fn match_kindexpr(expr: &str, kind: &str, ndim: i32, dims: &[i32]) -> bool {
     let e = strip_variadic(expr);
     !e.is_empty() && e.split('|').any(|atom| match_atom(atom, kind, ndim, dims))
 }
@@ -139,7 +139,7 @@ mod tests {
             "bool|char/utf8", "index|objindex",
             "any...", "int64|float64...", "[]float32...",
         ] {
-            assert!(valid_type_expr(e), "{e} should be valid");
+            assert!(valid_kindexpr(e), "{e} should be valid");
         }
     }
 
@@ -149,9 +149,9 @@ mod tests {
         assert!(!is_variadic("any"));
         assert_eq!(strip_variadic("int64|float64..."), "int64|float64");
         // 变参 kindexp 按单元素匹配
-        assert!(match_type("any...", "int64", 0, &[]));
-        assert!(match_type("int64|float64...", "float64", 0, &[]));
-        assert!(!match_type("int64...", "bool", 0, &[]));
+        assert!(match_kindexpr("any...", "int64", 0, &[]));
+        assert!(match_kindexpr("int64|float64...", "float64", 0, &[]));
+        assert!(!match_kindexpr("int64...", "bool", 0, &[]));
     }
 
     #[test]
@@ -162,7 +162,7 @@ mod tests {
             "*int64", "@int64", "int64*", "float64|", "int ", "float32,float64",
             "int", "uint", "float", "num", "char", "int4", "fp8", "fp16", "string", "charbyte",
         ] {
-            assert!(!valid_type_expr(e), "{e} should be invalid");
+            assert!(!valid_kindexpr(e), "{e} should be invalid");
         }
     }
 
@@ -189,8 +189,8 @@ mod tests {
             ("index|objindex", "index", 0, &[], true),
         ];
         for (expr, kind, ndim, dims, want) in cases {
-            let got = match_type(expr, kind, ndim, dims);
-            assert_eq!(got, want, "match_type({expr}, {kind}, ndim={ndim}, dims={dims:?})");
+            let got = match_kindexpr(expr, kind, ndim, dims);
+            assert_eq!(got, want, "match_kindexpr({expr}, {kind}, ndim={ndim}, dims={dims:?})");
         }
     }
 }
