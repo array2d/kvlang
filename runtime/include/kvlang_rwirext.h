@@ -41,11 +41,11 @@ char *kvlang_rwirextResolveReadPath(void *kvspace, const char *pc, int idx);
 /* 解析写参 idx 为 KV 路径（路径 → 直接返回；变量 → 帧槽路径）。 */
 char *kvlang_rwirextResolveWrite(void *kvspace, const char *pc, int idx);
 
-/* 签名类型表达式（runtime篇-07）——供扩展做实参类型判定。 */
+/* 签名 kindexpr（runtime篇-07）——供扩展做实参类型判定。 */
 /* 语法校验：type = atom("|"atom)*, atom = [dims](family|kind),
  * dims="[]"|"["dim(","dim)*"]", dim=int|"?"。 */
-bool kvlang_rwirextTypeValid(const char *expr);
+bool kvlang_rwirextKindexprValid(const char *expr);
 /* 值判定：kind 为实际落盘 kind 串，ndim 为秩（标量 0），dims 为各维长（标量传
  * NULL）。 */
-bool kvlang_rwirextTypeMatch(const char *expr, const char *kind, int32_t ndim,
+bool kvlang_rwirextKindexprMatch(const char *expr, const char *kind, int32_t ndim,
                            const int32_t *dims);

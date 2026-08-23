@@ -11,7 +11,7 @@ pub mod ast;
 pub mod scanner;
 pub mod parser;
 pub mod builtin;
-pub mod type_expr;
+pub mod kindexpr;
 pub mod lower;
 pub mod code;
 pub mod capi;

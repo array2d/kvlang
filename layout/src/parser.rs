@@ -415,7 +415,7 @@ impl Parser {
 
     fn check_param_types(&mut self, sig: &FuncSig) {
         for param in &sig.params {
-            if !crate::type_expr::valid_type_expr(&param.ty) {
+            if !crate::kindexpr::valid_kindexpr(&param.ty) {
                 self.errors.push(Diagnostic {
                     pos: Pos { line: 0, col: 0 },
                     message: format!("func {}: param {:?}: {} (got {:?})", sig.name, param.name, type_error(&param.ty), param.ty),
@@ -428,7 +428,7 @@ impl Parser {
             }
         }
         for ret in &sig.returns {
-            if !crate::type_expr::valid_type_expr(&ret.ty) {
+            if !crate::kindexpr::valid_kindexpr(&ret.ty) {
                 self.errors.push(Diagnostic {
                     pos: Pos { line: 0, col: 0 },
                     message: format!("func {}: return value {:?}: {} (got {:?})", sig.name, ret.name, type_error(&ret.ty), ret.ty),
@@ -471,7 +471,7 @@ impl Parser {
     fn check_variadic(&mut self, sig: &FuncSig) {
         let last = sig.params.len().saturating_sub(1);
         for (i, p) in sig.params.iter().enumerate() {
-            if crate::type_expr::is_variadic(&p.ty) && i != last {
+            if crate::kindexpr::is_variadic(&p.ty) && i != last {
                 self.errors.push(Diagnostic {
                     pos: Pos { line: 0, col: 0 },
                     message: format!("func {}: variadic param {:?} must be the last read-param", sig.name, p.name),
@@ -484,7 +484,7 @@ impl Parser {
             }
         }
         for r in &sig.returns {
-            if crate::type_expr::is_variadic(&r.ty) {
+            if crate::kindexpr::is_variadic(&r.ty) {
                 self.errors.push(Diagnostic {
                     pos: Pos { line: 0, col: 0 },
                     message: format!("func {}: write-param {:?} cannot be variadic", sig.name, r.name),

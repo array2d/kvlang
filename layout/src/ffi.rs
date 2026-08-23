@@ -102,16 +102,14 @@ extern "C" {
     fn kvspaceNewFloat64(v: f64, out: *mut *mut u8, out_len: *mut u32) -> c_int;
 }
 
-/// XValueHead 解码结果（与 kvspace-durable 的 kvspaceHead_t 布局一致）。
+/// XValueHead 解码结果（与 kvspace-durable 的 kvspaceHead_t 布局一致）。kindexpr 为唯一类型真相。
 #[repr(C)]
 pub struct kvspaceHead_t {
-    pub kind: [u8; 32],
-    pub is_ptr: u8,
-    pub array_len: i32,
+    pub kindexpr: [u8; 256],
+    pub ro: u8,
+    pub vid: u32,
     pub body_len: i32,
     pub body_offset: i32,
-    pub ndim: i32,
-    pub dims: [i32; 8],
 }
 
 // ── 内部助手 ─────────────────────────────────────────────────────────
@@ -286,13 +284,11 @@ pub fn tlv_encode_ptr(kind: &str, raw: &[u8], array_len: i32) -> Vec<u8> {
 /// 解码 XValueHead。
 pub fn decode_head(data: &[u8]) -> kvspaceHead_t {
     let mut h = kvspaceHead_t {
-        kind: [0u8; 32],
-        is_ptr: 0,
-        array_len: 0,
+        kindexpr: [0u8; 256],
+        ro: 0,
+        vid: 0,
         body_len: 0,
         body_offset: 0,
-        ndim: 0,
-        dims: [0i32; 8],
     };
     unsafe {
         kvspaceDecodeHead(data.as_ptr(), data.len() as u32, &mut h);

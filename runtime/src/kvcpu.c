@@ -43,7 +43,7 @@ static int check_read_types(kvlangKv_t *kv, const char *vtid, const char *pc,
         if (!nl) break;
         *nl = 0; s = nl + 1;
     }
-    bool var_last = rn > 0 && kvlang_rwirextTypeVariadic(reads[rn - 1]);
+    bool var_last = rn > 0 && kvlang_rwirextKindexprVariadic(reads[rn - 1]);
     int min_args = var_last ? rn - 1 : rn;
     char *fr = kvlangKeytreeFrameRoot(pc);
     int rc = 0;
@@ -62,12 +62,13 @@ static int check_read_types(kvlangKv_t *kv, const char *vtid, const char *pc,
             rc = -1;
             break;
         }
-        if (!exp[0] || !kvlang_rwirextTypeValid(exp)) continue;   /* 动态/非法 kindexp 跳过 */
+        if (!exp[0] || !kvlang_rwirextKindexprValid(exp)) continue;   /* 动态/非法 kindexp 跳过 */
         kvlangXvalue_t v; kvlangXvalueZero(&v);
         kvlangBuiltinResolveReadValue(kv, fr, args[i].name, &args[i].val, &v);
         const char *k = kvlangXvalueKind(&v);
         kvspaceHead_t h; kvlangXvalueHead(&v, &h);
-        bool ok = kvlang_rwirextTypeMatch(exp, k, h.ndim, h.dims);
+        kvlang_kindexpr_t kx; kvlang_kindexpr_parse(h.kindexpr, &kx);
+        bool ok = kvlang_rwirextKindexprMatch(exp, k, kx.ndim, kx.dims);
         char kbuf[40]; snprintf(kbuf, sizeof kbuf, "%s", k[0] ? k : "None");
         kvlangXvalueFree(&v);
         if (!ok) {
@@ -256,14 +257,14 @@ static char *handle_call(kvlangKv_t *kv, const char *pc, kvlangRwirInst_t *inst)
     kvlangStrbufPrintf(&sig_key, "%s[0,0]", func_dir.p);
     kvlangXvalue_t sig; kvlangXvalueZero(&sig);
     kvlangKvGetOne(kv, sig_key.p, &sig);
-    if (kvlangXvalueNone(&sig) || !kvlangXvalueKindIs(&sig, KVSPACE_KIND_RWFUNC)) {
+    if (kvlangXvalueNone(&sig) || !kvlangXvalueKindIs(&sig, KVSPACE_KIND_DEF_RWFUNC)) {
         /* 按 xvalue 的 kind 精确区分缺 rwir 还是缺 rwfunc：
          * 到这里说明 opcode 已被 is_ext_rwir 判否（/lib/<op> 非 rwir）。 */
         char *rk = kvlangKeytreeRwir(fn);
         kvlangXvalue_t rv; kvlangXvalueZero(&rv);
         kvlangKvGetOne(kv, rk, &rv);
         char msg[256];
-        if (!kvlangXvalueNone(&rv) && kvlangXvalueKindIs(&rv, KVSPACE_KIND_RWIR))
+        if (!kvlangXvalueNone(&rv) && kvlangXvalueKindIs(&rv, KVSPACE_KIND_DEF_RWIR))
             snprintf(msg, sizeof msg, "NameError: rwir 未注册/签名不匹配: %s", fn);
         else if (!kvlangXvalueNone(&sig))
             snprintf(msg, sizeof msg, "NameError: %s 不是 rwfunc (kind=%s)", fn, kvlangXvalueKind(&sig));
@@ -328,8 +329,9 @@ static char *handle_call(kvlangKv_t *kv, const char *pc, kvlangRwirInst_t *inst)
                 /* 写字面量到 rk（拷贝，避免 double-free） */
                 kvspaceHead_t ah; kvspaceDecodeHead(arg->val.data, arg->val.len, &ah);
                 int32_t abl; const uint8_t *ab = kvlangXvalueBody(&arg->val, &ah, &abl);
+                kvlang_kindexpr_t akx; kvlang_kindexpr_parse(ah.kindexpr, &akx);
                 pairs[np].key = strdup(rk);
-                kvspaceTlvEncode(kvlangXvalueKind(&arg->val), ab, (uint32_t)abl, ah.dims, ah.ndim,
+                kvspaceTlvEncode(kvlangXvalueKind(&arg->val), ab, (uint32_t)abl, akx.dims, akx.ndim,
                                    &pairs[np].val.data, &pairs[np].val.len);
                 np++;
             }
@@ -425,7 +427,7 @@ bool is_ext_rwir(kvlangKv_t *kv, const char *opcode) {
     char *rk = kvlangKeytreeRwir(opcode);
     kvlangXvalue_t v; kvlangXvalueZero(&v);
     kvlangKvGetOne(kv, rk, &v);
-    bool r = !kvlangXvalueNone(&v) && kvlangXvalueKindIs(&v, KVSPACE_KIND_RWIR);
+    bool r = !kvlangXvalueNone(&v) && kvlangXvalueKindIs(&v, KVSPACE_KIND_DEF_RWIR);
     kvlangXvalueFree(&v); free(rk);
     return r;
 }
@@ -476,7 +478,7 @@ char *kvlangKvcpuBootstrap(kvlangKv_t *kv, const char *vtid, const char *funcnam
     kvlangStrbufPrintf(&sig_key, "%s[0,0]", func_dir.p);
     kvlangXvalue_t sig; kvlangXvalueZero(&sig);
     kvlangKvGetOne(kv, sig_key.p, &sig);
-    if (kvlangXvalueNone(&sig) || !kvlangXvalueKindIs(&sig, KVSPACE_KIND_RWFUNC)) {
+    if (kvlangXvalueNone(&sig) || !kvlangXvalueKindIs(&sig, KVSPACE_KIND_DEF_RWFUNC)) {
         char msg[256]; snprintf(msg, sizeof msg, "Bootstrap: rwir/rwfunc not found: %s", funcname);
         kvlangVthreadSetError(kv, vtid, "", msg);
         kvlangXvalueFree(&sig); kvlangStrbufFree(&sig_key); kvlangStrbufFree(&func_dir);
