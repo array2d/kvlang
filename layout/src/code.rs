@@ -30,11 +30,23 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<(), String> {
         return Err("parse: error-level diagnostics — refusing to load".to_string());
     }
 
+    // 用户函数名 → 有效包名。layout 只对这些名字加包前缀（正向识别用户函数），
+    // 其余 opcode（native / 扩展 rwir）原样落盘，由 runtime 查 /lib/<op> 的 XValue kind 判定。
+    let mut user_pkg: HashMap<String, String> = HashMap::new();
+    for func in &file.funcs {
+        let p = if func.pkg.is_empty() { file.package.clone() } else { func.pkg.clone() };
+        user_pkg.insert(func.sig.name.clone(), p);
+    }
+    for decl in &file.rwir_decls {
+        let p = if decl.pkg.is_empty() { file.package.clone() } else { decl.pkg.clone() };
+        user_pkg.insert(decl.sig.name.clone(), p);
+    }
+
     let mut any_code = false;
     for func in &file.funcs {
         let pkg = if func.pkg.is_empty() { file.package.clone() } else { func.pkg.clone() };
         let mut lowered = lower::lower_func(func);
-        write_func(kv, &pkg, &mut lowered);
+        write_func(kv, &pkg, &mut lowered, &user_pkg);
         any_code = true;
     }
     for decl in &file.rwir_decls {
@@ -53,7 +65,7 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<(), String> {
             pkg: String::new(),
         };
         let mut lowered = lower::lower_func(&init_fn);
-        write_func(kv, "", &mut lowered);
+        write_func(kv, "", &mut lowered, &user_pkg);
         any_code = true;
     }
 
@@ -100,7 +112,7 @@ pub fn vet(src: &str) -> Result<(), String> {
 }
 
 /// 写函数到 /lib/：签名（rwfunc）、源码、参数 Ptr、指令体。
-pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) {
+pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func, user_pkg: &HashMap<String, String>) {
     let mut type_map = lower::infer_types(fn_);
     lower::specialize(fn_, &type_map);
     let func_dir = keytree::lib_func(pkg, &fn_.sig.name);
@@ -133,7 +145,7 @@ pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) {
     }
     let _ = kv.set(&pairs);
 
-    write_body(kv, pkg, &fn_.sig.name, &fn_.body, &mut type_map, 1);
+    write_body(kv, pkg, &fn_.sig.name, &fn_.body, &mut type_map, 1, user_pkg);
 }
 
 /// 写用户声明的 rwir（无体）到 /lib/<opcode>。
@@ -147,11 +159,11 @@ pub fn write_rwir_decl(kv: &mut Kv, decl: &RwirDecl) {
 }
 
 /// 将 body 写入 /lib/<pkg>/<name>/ 下。offset 起始 idx（顶层函数=1）。
-fn write_body(kv: &mut Kv, pkg: &str, name: &str, body: &[Stmt], type_map: &mut HashMap<String, String>, offset: i32) {
+fn write_body(kv: &mut Kv, pkg: &str, name: &str, body: &[Stmt], type_map: &mut HashMap<String, String>, offset: i32, user_pkg: &HashMap<String, String>) {
     let prefix = keytree::lib_func(pkg, name);
     let mut idx = offset;
     for st in body {
-        write_stmt(kv, st, &prefix, &mut idx, type_map, pkg);
+        write_stmt(kv, st, &prefix, &mut idx, type_map, pkg, user_pkg);
     }
 }
 
@@ -162,6 +174,7 @@ fn write_stmt(
     idx: &mut i32,
     type_map: &mut HashMap<String, String>,
     pkg: &str,
+    user_pkg: &HashMap<String, String>,
 ) {
     match st {
         Stmt::Instruction(s) => {
@@ -173,9 +186,7 @@ fn write_stmt(
             }
             let (mut opcode, reads) = s.flat();
             if !pkg.is_empty()
-                && !builtin::is_native_rwir(&opcode)
-                && !builtin::is_global_rwir(&opcode)
-                && !is_control_op(&opcode)
+                && user_pkg.get(&opcode).map_or(false, |p| p == pkg)
                 && !opcode.contains(keytree::MEMBER_SEP)
                 && !opcode.starts_with("/lib/")
                 && symbol::lookup(&opcode).word != "assign"
@@ -207,7 +218,7 @@ fn write_stmt(
             let scope_prefix = format!("{prefix}/{}", s.label);
             let mut scope_idx = 0;
             for child in &s.body {
-                write_stmt_scope(kv, child, &scope_prefix, &mut scope_idx, type_map, pkg, prefix);
+                write_stmt_scope(kv, child, &scope_prefix, &mut scope_idx, type_map, pkg, prefix, user_pkg);
             }
         }
         _ => {}
@@ -222,6 +233,7 @@ fn write_stmt_scope(
     type_map: &mut HashMap<String, String>,
     pkg: &str,
     func_prefix: &str,
+    user_pkg: &HashMap<String, String>,
 ) {
     match st {
         Stmt::Instruction(s) => {
@@ -233,9 +245,7 @@ fn write_stmt_scope(
             }
             let (mut opcode, reads) = s.flat();
             if !pkg.is_empty()
-                && !builtin::is_native_rwir(&opcode)
-                && !builtin::is_global_rwir(&opcode)
-                && !is_control_op(&opcode)
+                && user_pkg.get(&opcode).map_or(false, |p| p == pkg)
                 && !opcode.contains(keytree::MEMBER_SEP)
                 && !opcode.starts_with("/lib/")
                 && symbol::lookup(&opcode).word != "assign"
@@ -267,7 +277,7 @@ fn write_stmt_scope(
             let child_prefix = format!("{func_prefix}/{}", s.label);
             let mut child_idx = 0;
             for child in &s.body {
-                write_stmt_scope(kv, child, &child_prefix, &mut child_idx, type_map, pkg, func_prefix);
+                write_stmt_scope(kv, child, &child_prefix, &mut child_idx, type_map, pkg, func_prefix, user_pkg);
             }
         }
         _ => {}
@@ -302,10 +312,6 @@ fn slot_value(val: &str, target_char: &str) -> Vec<u8> {
 
 fn count_direct_insts(body: &[Stmt]) -> i32 {
     body.iter().filter(|st| matches!(st, Stmt::Instruction(_))).count() as i32
-}
-
-fn is_control_op(op: &str) -> bool {
-    matches!(op, "call" | "return" | "br" | "goto")
 }
 
 fn is_literal(s: &str) -> bool {

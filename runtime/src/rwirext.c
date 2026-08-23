@@ -15,56 +15,29 @@ int kvlang_rwirextRegister(void *kvspace, const char *opcode, int32_t nr,
   return rc;
 }
 
-char *kvlang_rwirextPrintLine(void *kvspace, const char *pc, int *rawnl,
-                            int *cerr) {
+int kvlang_rwirextHandoff(void *kvspace, const char *vtid, const char *pc) {
   kvlangKv_t k = {kvspace};
-  if (rawnl)
-    *rawnl = 0;
-  if (cerr)
-    *cerr = 0;
   char *fr = kvlangKeytreeFrameRoot(pc);
   if (!fr)
-    return NULL;
+    return -1;
   char *lb = kvlangKeytreeStack(fr);
   kvlangRwirInst_t inst;
   char err[256];
   if (kvlangRwirDecode(&k, lb, pc, &inst, err, sizeof err) != 0) {
     free(fr);
     free(lb);
-    return NULL;
+    return -1;
   }
   free(lb);
-  if (!inst.opcode || (strcmp(inst.opcode, "print") != 0 &&
-                       strcmp(inst.opcode, "println") != 0 &&
-                       strcmp(inst.opcode, "cerr") != 0)) {
-    free(fr);
-    kvlangRwirInstFree(&inst);
-    return NULL;
-  }
-  const char *sep = strcmp(inst.opcode, "print") == 0 ? "" : " ";
-  if (rawnl)
-    *rawnl = (strcmp(inst.opcode, "print") == 0);
-  if (cerr)
-    *cerr = (strcmp(inst.opcode, "cerr") == 0);
-
-  kvlangStrbuf_t line;
-  kvlangStrbufInit(&line);
-  for (int i = 0; i < inst.nr; i++) {
-    if (i > 0)
-      kvlangStrbufPuts(&line, sep);
-    kvlangXvalue_t v;
-    kvlangXvalueZero(&v);
-    kvlangBuiltinResolveReadValue(&k, fr, inst.reads[i].name,
-                                  &inst.reads[i].val, &v);
-    char *s = NULL;
-    kvlangDisplay(&v, &s);
-    kvlangStrbufPuts(&line, s);
-    free(s);
-    kvlangXvalueFree(&v);
-  }
+  int rc = handoff_external_rwir(&k, vtid, pc, &inst);
   free(fr);
   kvlangRwirInstFree(&inst);
-  return kvlangStrbufDetach(&line);
+  return rc;
+}
+
+int kvlang_rwirextIsExt(void *kvspace, const char *opcode) {
+  kvlangKv_t k = {kvspace};
+  return is_ext_rwir(&k, opcode) ? 1 : 0;
 }
 
 char *kvlang_rwirextNextPc(const char *pc) {

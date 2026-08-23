@@ -194,6 +194,10 @@ int kvlangRwirNextPc(const char *pc, kvlangStrbuf_t *out);
 int kvlangRwirExtractAddr0(const char *coord);
 int kvlangRwirDecode(kvlangKv_t *kv, const char *link_base, const char *pc, kvlangRwirInst_t *out, char *err, uint32_t err_cap);
 void kvlangRwirInstFree(kvlangRwirInst_t *inst);
+/* 外部扩展 handoff：写 /lib/<opcode>/.todo<vid> 并阻塞 watch .done<vid>（30s 超时）。 */
+int handoff_external_rwir(kvlangKv_t *kv, const char *vtid, const char *pc, kvlangRwirInst_t *inst);
+/* opcode 是否外部扩展 rwir（/lib/<opcode> kind=rwir）。 */
+bool is_ext_rwir(kvlangKv_t *kv, const char *opcode);
 
 /* ── vthread ───────────────────────────────────────────────────────── */
 

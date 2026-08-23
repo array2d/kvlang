@@ -1,5 +1,5 @@
 //! builtin 辅助（对齐 rwir/builtin 中 lower/layout 依赖的部分：
-//! NumOp/IsNumKind/WiderNumKind/OpKind/TryParseNumber/IsNativeRwir/IsGlobalRwir）。
+//! NumOp/IsNumKind/WiderNumKind/OpKind/TryParseNumber）。
 
 use super::ffi;
 
@@ -148,40 +148,4 @@ pub fn try_parse_number(s: &str) -> Option<Vec<u8>> {
         return Some(ffi::new_float64(f));
     }
     None
-}
-
-// ── native / global rwir 判定（layout 命名空间用） ───────────────────
-
-/// VM 原生 rwir 中不带 `.` 的 opcode（带 `.` 的由 MemberSep 检查兜底）。
-fn native_rwir_set() -> &'static [&'static str] {
-    &[
-        // 单字 builtin
-        "array", "obj", "map", "debugger",
-        // cast kind
-        "bool", "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
-        "float32", "float64", "char/utf8", "char/ascii", "char/utf32",
-        // 数值 op word + glyph
-        "add", "+", "sub", "-", "mul", "×", "div", "÷", "mod", "%",
-        "eq", "==", "neq", "!=", "≠", "lt", "<", "gt", ">", "le", "<=", "≤", "ge", ">=", "≥",
-        "and", "&&", "or", "||", "not", "!",
-        "bitand", "&", "bitor", "|", "bitxor", "^", "shl", "<<", "shr", ">>",
-        "sqrt", "√", "neg", "abs", "sign", "max", "min", "pow", "exp", "log",
-        // kv.* 树操作
-        "kv.get", "kv.set", "kv.del", "kv.deltree", "kv.list", "kv.mkindex",
-        "kv.extindex", "kv.rmindexext", "kv.watch",
-        // xv.* 形状内省与多维元素访问
-        "xv.numel", "xv.dim", "xv.shape", "xv.at", "xv.set", "xv.reshape",
-    ]
-}
-
-pub fn is_native_rwir(opcode: &str) -> bool {
-    native_rwir_set().contains(&opcode)
-}
-
-fn global_rwir_set() -> &'static [&'static str] {
-    &["print", "println", "cerr", "input", "json.to", "json.from"]
-}
-
-pub fn is_global_rwir(opcode: &str) -> bool {
-    global_rwir_set().contains(&opcode)
 }

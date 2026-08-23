@@ -420,7 +420,7 @@ static bool is_copy_op(const char *opcode) {
     return strcmp(opcode, "=") == 0;
 }
 
-static bool is_ext_rwir(kvlangKv_t *kv, const char *opcode) {
+bool is_ext_rwir(kvlangKv_t *kv, const char *opcode) {
     if (opcode[0] == '/') return false;
     char *rk = kvlangKeytreeRwir(opcode);
     kvlangXvalue_t v; kvlangXvalueZero(&v);
@@ -432,7 +432,7 @@ static bool is_ext_rwir(kvlangKv_t *kv, const char *opcode) {
 
 static int64_t handoff_seq = 0;
 
-static int handoff_external_rwir(kvlangKv_t *kv, const char *vtid, const char *pc, kvlangRwirInst_t *inst) {
+int handoff_external_rwir(kvlangKv_t *kv, const char *vtid, const char *pc, kvlangRwirInst_t *inst) {
     char *base = kvlangKeytreeRwir(inst->opcode);
     kvlangStrbuf_t todo, done; kvlangStrbufInit(&todo); kvlangStrbufInit(&done);
     kvlangStrbufPrintf(&todo, "%s/.todo<%s>", base, vtid);

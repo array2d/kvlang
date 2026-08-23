@@ -1,0 +1,16 @@
+# json: json.to / json.from 往返（objindex / strkeymapindex 承载复杂结构）
+# extern: 需先启动 redis 与 json rwirext 两个外部进程
+#   1) redis-server --port 6379
+#   2) ./bin/json-rwirext &
+#   3) ./bin/kvlang <本文件>
+# 语义: json.from(json) 把 JSON 反序列化进 KV 树（对象→objindex、数组→strkeymapindex、
+#       null→None 空字节）；json.to(root) 把 KV 子树序列化回 JSON，二者无损等价。
+# 期望输出:
+#   roundtrip = {"a":[1,{"b":"x"}],"list":[{"x":1},{"y":2}],"mixed":[1,"a",true,null,3.14],"n":null,"s":["a","b"]}
+rwfunc main() -> () {
+	json.from("{\"a\":[1,{\"b\":\"x\"}],\"list\":[{\"x\":1},{\"y\":2}],\"mixed\":[1,\"a\",true,null,3.14],\"n\":null,\"s\":[\"a\",\"b\"]}") -> /t
+	json.to(/t) -> out
+	println("roundtrip =", out)
+}
+
+main()

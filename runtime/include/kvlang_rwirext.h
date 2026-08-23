@@ -14,13 +14,14 @@
 int kvlang_rwirextRegister(void *kvspace, const char *opcode, int32_t nr,
                          int32_t nw, const char *sig);
 
-/* 从 pc 解码指令；若 opcode ∈ {print,println,cerr}，resolve 全部 reads 并
- * display， 以自身 sep（print 无分隔、println/cerr
- * 空格分隔）连接返回（malloc）； 非己方指令返回 NULL（调用方应停止 RunSeq）。
- * rawnl/cerr 输出该指令的换行/流属性：print→rawnl=1（不换行，stdout）；
- * println→rawnl=0（换行，stdout）；cerr→rawnl=0,cerr=1（换行，stderr）。 */
-char *kvlang_rwirextPrintLine(void *kvspace, const char *pc, int *rawnl,
-                            int *cerr);
+/* 外部扩展 handoff：写 /lib/<opcode>/.todo<vid> 并阻塞 watch .done<vid>（30s
+ * 超时）。RETURN 模式下 term 遇非己方 ext rwir（如 json.to/numpy）时调用，把
+ * 该指令交给对应扩展进程，扩展处理后写回下一 PC 并 signal .done。返回 0 成功，
+ * -1 失败/超时。 */
+int kvlang_rwirextHandoff(void *kvspace, const char *vtid, const char *pc);
+
+/* opcode 是否外部扩展 rwir（/lib/<opcode> kind=rwir）。非 ext（native/control/用户函数）返回 0。 */
+int kvlang_rwirextIsExt(void *kvspace, const char *opcode);
 
 /* 当前指令的下一条 PC（malloc） */
 char *kvlang_rwirextNextPc(const char *pc);
