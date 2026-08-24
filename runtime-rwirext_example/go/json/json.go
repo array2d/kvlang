@@ -6,7 +6,7 @@ package json
 // 后端（kvspace-c=shm / kvspace_durable=redis|fs）由 Makefile 经 CGO_LDFLAGS 注入，
 // 对齐 term 的 KVLANG_KVSPACE_LIB；扩展宿主自连 kvspace，不经 runtime。
 #cgo CFLAGS: -I${SRCDIR}/../../../runtime/include
-#cgo LDFLAGS: -L${SRCDIR}/../../../bin -lkvlang_runtime -Wl,-rpath,${SRCDIR}/../../../bin
+#cgo LDFLAGS: -L${SRCDIR}/../../../bin -lkvlang_runtime -L${SRCDIR}/../../../layout/target/release -lkvlang_layout -Wl,-rpath,${SRCDIR}/../../../bin -Wl,-rpath,${SRCDIR}/../../../layout/target/release
 #include "kvlang_rwirext.h"
 #include <stdint.h>
 #include <stdlib.h>
@@ -24,19 +24,27 @@ extern int   kvspaceDel(void *h, const char *const *keys, uint32_t nkeys, char *
 extern int   kvspaceMkindex(void *h, const char *path, char *err, uint32_t err_cap);
 extern int   kvspaceNewChar(const char *kind, const char *s, uint8_t **out, uint32_t *out_len);
 
-// XValue 头（repr(C)，对齐 kvspace ABI）：kind+ndim+dims 即 kindexp，body 段靠 offset/len 定位。
+// XValue 头（repr(C)，对齐 kvspace ABI）：kindexpr 为唯一类型真相，body 段靠 offset/len 定位。
 typedef struct {
-    uint8_t kind[32];
-    uint8_t is_ptr;
-    int32_t array_len;
-    int32_t body_len;
-    int32_t body_offset;
-    int32_t ndim;
-    int32_t dims[8];
+    uint8_t  kindexpr[256];
+    uint8_t  ro;
+    uint32_t vid;
+    int32_t  body_len;
+    int32_t  body_offset;
 } kvspaceHead_t;
 extern int   kvspaceDecodeHead(const uint8_t *data, uint32_t data_len, kvspaceHead_t *out);
 extern int   kvspaceTlvEncode(const char *kind, const uint8_t *raw, uint32_t raw_len,
                               const int32_t *dims, int32_t ndim, uint8_t **out, uint32_t *out_len);
+
+// kindexpr 解析（kvlang/layout 提供 ABI，唯一事实源）：ref/ndim/dims/kind。
+typedef struct {
+    int32_t ref;
+    int32_t ndim;
+    int32_t dims[8];
+    int32_t array_len;
+    uint8_t kind[64];
+} kvlangKindexpr;
+extern int   kvlangKindexprParse(const char *kindexpr, kvlangKindexpr *out);
 */
 import "C"
 
@@ -184,7 +192,11 @@ func parseTLV(data []byte) (kind string, raw []byte, arrLen int) {
 	if C.kvspaceDecodeHead((*C.uint8_t)(unsafe.Pointer(&data[0])), C.uint32_t(len(data)), &h) != 0 {
 		return "", nil, 0
 	}
-	kb := C.GoBytes(unsafe.Pointer(&h.kind[0]), 32)
+	var kx C.kvlangKindexpr
+	if C.kvlangKindexprParse((*C.char)(unsafe.Pointer(&h.kindexpr[0])), &kx) != 0 {
+		return "", nil, 0
+	}
+	kb := C.GoBytes(unsafe.Pointer(&kx.kind[0]), 64)
 	if i := bytes.IndexByte(kb, 0); i >= 0 {
 		kb = kb[:i]
 	}
@@ -195,8 +207,8 @@ func parseTLV(data []byte) (kind string, raw []byte, arrLen int) {
 	}
 	raw = data[bo : bo+bl]
 	arrLen = 1
-	for i := 0; i < int(h.ndim); i++ {
-		arrLen *= int(h.dims[i])
+	for i := 0; i < int(kx.ndim); i++ {
+		arrLen *= int(kx.dims[i])
 	}
 	if arrLen < 1 {
 		arrLen = 1

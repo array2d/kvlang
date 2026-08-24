@@ -293,7 +293,7 @@ char *kvlangXvalueValueString(const kvlangXvalue_t *v) {
     }
     if (strcmp(k, KVSPACE_KIND_CHAR_UTF8) == 0 || strcmp(k, KVSPACE_KIND_CHAR_ASCII) == 0) return strndup2(body, blen);
     if (strcmp(k, KVSPACE_KIND_CHAR) == 0) return utf32_to_utf8(body, blen);
-    if (strcmp(k, KVSPACE_KIND_RWIR) == 0) return strndup2(body + (blen >= 4 ? 4 : 0), blen >= 4 ? blen - 4 : 0);
+    if (strcmp(k, KVSPACE_KIND_RWIR) == 0 || strcmp(k, KVSPACE_KIND_RWIR_OR_RWFUNC) == 0) return strndup2(body + (blen >= 4 ? 4 : 0), blen >= 4 ? blen - 4 : 0);
     if (strcmp(k, KVSPACE_KIND_RWFUNC) == 0) {
         kvlangStrbuf_t b; kvlangStrbufInit(&b);
         kvlangStrbufPrintf(&b, "r%d/w%d", (blen >= 2 ? rd16(body) : 0), (blen >= 4 ? rd16(body + 2) : 0));

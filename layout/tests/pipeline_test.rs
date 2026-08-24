@@ -25,7 +25,7 @@ fn compile_simple_func() {
 
     // 函数签名
     let sig_val = kv.get_one("/lib/sum/[0,0]");
-    assert_eq!(kvkind::kind(&sig_val), "rwfunc");
+    assert_eq!(kvkind::kind(&sig_val), "defrwfunc");
     assert_eq!(kvkind::array_len(&sig_val), 1);
     let b = body(&sig_val);
     assert_eq!(kvkind::rwfunc_num_reads(b), 2);
@@ -43,7 +43,7 @@ fn compile_simple_func() {
 
     // 指令（特化后 opcode = int64.add）
     let op = kv.get_one("/lib/sum/[1,0]");
-    assert_eq!(kvkind::kind(&op), "rwir");
+    assert_eq!(kvkind::kind(&op), "rwir|rwfunc");
     assert_eq!(sig(&op), "int64.add");
     assert_eq!(sig(&kv.get_one("/lib/sum/[1,-1]")), "A");
     assert_eq!(sig(&kv.get_one("/lib/sum/[1,-2]")), "B");
@@ -62,7 +62,7 @@ fn compile_string_literal_and_lib() {
 
     // 函数在 /lib/p.hi/ 下（lib 块 pkg 前缀）
     let sig_val = kv.get_one("/lib/p.hi/[0,0]");
-    assert_eq!(kvkind::kind(&sig_val), "rwfunc");
+    assert_eq!(kvkind::kind(&sig_val), "defrwfunc");
 
     // 字符串字面量读槽 → char/utf32（UTF-32 LE 码点）
     let r = kv.get_one("/lib/p.hi/[1,-1]");
@@ -98,7 +98,7 @@ fn compile_control_flow_lowers_to_blocks() {
     compile(&mut kv, src).unwrap();
 
     let sig_val = kv.get_one("/lib/f/[0,0]");
-    assert_eq!(kvkind::kind(&sig_val), "rwfunc");
+    assert_eq!(kvkind::kind(&sig_val), "defrwfunc");
     // 降级后存在 if/then 基本块（label 指令以 _label[coord] 扁平键存在；空 merge 块不落盘）
     let children = kv.list("/lib/f/", false, false);
     assert!(children.iter().any(|c| c.contains("_if_")));

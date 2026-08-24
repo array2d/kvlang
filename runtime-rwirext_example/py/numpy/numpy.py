@@ -51,10 +51,15 @@ _lay = _find_lib("libkvlang_layout.so", "KVLANG_LAYOUT_LIB", "kvlang/layout/targ
 
 
 class kvspace_head_t(ctypes.Structure):
-    _fields_ = [("kind", ctypes.c_uint8 * 32), ("is_ptr", ctypes.c_uint8),
-                ("array_len", ctypes.c_int32), ("body_len", ctypes.c_int32),
-                ("body_offset", ctypes.c_int32), ("ndim", ctypes.c_int32),
-                ("dims", ctypes.c_int32 * 8)]
+    _fields_ = [("kindexpr", ctypes.c_uint8 * 256), ("ro", ctypes.c_uint8),
+                ("vid", ctypes.c_uint32), ("body_len", ctypes.c_int32),
+                ("body_offset", ctypes.c_int32)]
+
+
+class kvlang_kindexpr_t(ctypes.Structure):
+    _fields_ = [("ref", ctypes.c_int32), ("ndim", ctypes.c_int32),
+                ("dims", ctypes.c_int32 * 8), ("array_len", ctypes.c_int32),
+                ("kind", ctypes.c_uint8 * 64)]
 
 
 def _bind():
@@ -94,6 +99,8 @@ def _bind():
     _lay.kvlangLayoutFile.restype = ctypes.c_int
     _lay.kvlangLayoutFile.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p,
                                         ctypes.c_uint32, ctypes.c_char_p, ctypes.c_uint32]
+    _lay.kvlangKindexprParse.restype = ctypes.c_int
+    _lay.kvlangKindexprParse.argtypes = [ctypes.c_char_p, ctypes.POINTER(kvlang_kindexpr_t)]
 
 
 _bind()
@@ -234,17 +241,20 @@ class Engine:
         h = kvspace_head_t()
         if _ks.kvspaceDecodeHead(d, ol.value, ctypes.byref(h)) != 0:
             return None
-        kind = bytes(h.kind).split(b"\x00", 1)[0].decode()
-        if h.is_ptr or kind not in _KIND_CTYPE:
+        kx = kvlang_kindexpr_t()
+        if _lay.kvlangKindexprParse(ctypes.cast(h.kindexpr, ctypes.c_char_p), ctypes.byref(kx)) != 0:
+            return None
+        kind = bytes(kx.kind).split(b"\x00", 1)[0].decode()
+        if kx.ref != 0 or kind not in _KIND_CTYPE:
             return None
         elem = _KIND_CTYPE[kind]
         n = h.body_len // ctypes.sizeof(elem)
         base = ctypes.cast(d, ctypes.c_void_p).value
         ptr = ctypes.cast(base + h.body_offset, ctypes.POINTER(elem))
         flat = np.ctypeslib.as_array(ptr, shape=(max(n, 1),))
-        if h.ndim == 0:
+        if kx.ndim == 0:
             return flat[0]
-        return flat[:n].reshape(tuple(h.dims[i] for i in range(h.ndim)))
+        return flat[:n].reshape(tuple(kx.dims[i] for i in range(kx.ndim)))
 
     def alloc(self, key, arr):
         arr = np.asarray(arr)                       # 保形（ascontiguousarray 会把 0 维升 1 维）

@@ -24,6 +24,7 @@ pub const KIND_RWIR: &str = "rwir";
 pub const KIND_RWFUNC: &str = "rwfunc";
 pub const KIND_DEF_RWIR: &str = "defrwir";
 pub const KIND_DEF_RWFUNC: &str = "defrwfunc";
+pub const KIND_RWIR_OR_RWFUNC: &str = "rwir|rwfunc";
 pub const KIND_SCOPE: &str = "scope";
 
 // ── 通用 XValue 字节访问器 ───────────────────────────────────────────
@@ -38,7 +39,7 @@ pub fn head(data: &[u8]) -> ffi::kvspaceHead_t {
 }
 
 /// 解析 head 的 kindexpr 内容 → (ref, dims, base kind)。
-fn parse_kindexpr(kx: &str) -> (i32, Vec<i32>, String) {
+pub fn parse_kindexpr(kx: &str) -> (i32, Vec<i32>, String) {
     let (r, rest) = match kx.as_bytes().first() {
         Some(b'*') => (1, &kx[1..]),
         Some(b'@') => (2, &kx[1..]),
@@ -136,6 +137,12 @@ fn rwir_body(nr: i32, nw: i32, sig: &str) -> Vec<u8> {
 
 pub fn new_rwir(nr: i32, nw: i32, sig: &str) -> Vec<u8> {
     ffi::tlv_encode(KIND_RWIR, &rwir_body(nr, nw, sig), 1)
+}
+
+/// 调用目标（看起来像函数调用的 opcode）→ kindexpr `rwir|rwfunc` 并列。
+/// 静态无法判定是扩展 rwir 还是用户 rwfunc，交 runtime 查 /lib/<op> 的 XValue kind 分派。
+pub fn new_rwir_union(sig: &str) -> Vec<u8> {
+    ffi::tlv_encode(KIND_RWIR_OR_RWFUNC, &rwir_body(0, 0, sig), 1)
 }
 
 pub fn new_defrwir(nr: i32, nw: i32, sig: &str) -> Vec<u8> {
