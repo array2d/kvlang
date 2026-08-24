@@ -1,0 +1,30 @@
+name: release-abi
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 下载 ABI 依赖
+        env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+        run: ./ci/deps.sh
+      - name: 构建 runtime + layout
+        run: make runtime layout
+      - name: 打包 ABI 产物
+        run: |
+          set -euo pipefail
+          v="${GITHUB_REF_NAME}"
+          d="kvlang-abi-$v-linux-x86_64"
+          mkdir -p "$d/include" "$d/lib"
+          cp runtime/include/*.h "$d/include/"
+          cp bin/libkvlang_runtime.so "$d/lib/"
+          cp layout/target/release/libkvlang_layout.so "$d/lib/"
+          printf '{"abi":"%s"}\n' "$v" > "$d/abi-manifest.json"
+          tar czf "$d.tar.gz" "$d"
+          sha256sum "$d.tar.gz" > SHA256SUMS
+      - name: 发布 release
+        run: gh release create "${GITHUB_REF_NAME}" kvlang-abi-*.tar.gz SHA256SUMS --generate-notes
