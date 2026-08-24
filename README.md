@@ -13,6 +13,13 @@
 
 ---
 
+## Use Cases
+
+- **Model front-end for deepx**: the front-end language of the train-and-infer framework deepx (formerly dxlang) — model structure and operator graphs are expressed as a KV tree, with code, parameters, and intermediate results living in one tree addressed by path.
+- **Self-iterating agents (e.g. byteseek)**: the agent harness is written in kvlang; because code is data, the PC is a path, and execution resumes from the PC after a crash, the agent reads and rewrites its own code and state through the same KV reads/writes.
+
+---
+
 ## Core Model in One Screen
 
 **No IR layers — source IS the IR.** The program counter is a kvspace path string; call-stack depth equals path depth:
