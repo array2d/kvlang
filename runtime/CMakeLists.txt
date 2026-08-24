@@ -5,13 +5,6 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# ── 依赖 .so 由 ci/deps.sh 下载到 libso/（不再引用相邻仓库）────────
-set(LIBSO_DIR "${CMAKE_SOURCE_DIR}/../libso")
-set(KVSPACE_C_DIR "${LIBSO_DIR}/lib")
-set(KVSPACE_DURABLE_DIR "${LIBSO_DIR}/lib")
-set(BLOCKMALLOC_DIR "${LIBSO_DIR}/lib")
-set(SLOTSBOXMALLOC_DIR "${LIBSO_DIR}/lib")
-
 # ── kvspace 后端（kvspace-c 或 kvspace_durable，均导出同一 C ABI）────
 set(KVSPACE_LIB "kvspace-c" CACHE STRING "kvspace 后端库：kvspace-c / kvspace_durable")
 
@@ -28,14 +21,9 @@ target_include_directories(kvlang_runtime PUBLIC include src)
 target_compile_definitions(kvlang_runtime PRIVATE _GNU_SOURCE)
 
 if(KVSPACE_LIB STREQUAL "kvspace-c")
-    target_link_directories(kvlang_runtime PRIVATE ${KVSPACE_C_DIR} ${BLOCKMALLOC_DIR} ${SLOTSBOXMALLOC_DIR})
     target_link_libraries(kvlang_runtime PRIVATE kvspace-c blockmalloc slotsboxmalloc)
-    set_target_properties(kvlang_runtime PROPERTIES
-        BUILD_RPATH "${KVSPACE_C_DIR};${BLOCKMALLOC_DIR};${SLOTSBOXMALLOC_DIR}")
 else()
-    target_link_directories(kvlang_runtime PRIVATE ${KVSPACE_DURABLE_DIR})
     target_link_libraries(kvlang_runtime PRIVATE kvspace_durable)
-    set_target_properties(kvlang_runtime PROPERTIES BUILD_RPATH "${KVSPACE_DURABLE_DIR}")
 endif()
 target_link_libraries(kvlang_runtime PRIVATE m pthread)
 # --export-dynamic 供 kvlang（term 扩展）找符号；--disable-new-dtags 使 rpath 转 DT_RPATH（传递），
