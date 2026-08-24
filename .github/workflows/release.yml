@@ -15,7 +15,9 @@ jobs:
         env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
         run: ./ci/deps.sh
       - name: 构建 runtime + layout
-        run: make runtime layout
+        run: |
+          make runtime
+          cargo build --release --manifest-path layout/Cargo.toml
       - name: 打包 ABI 产物
         run: |
           set -euo pipefail
