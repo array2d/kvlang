@@ -7,7 +7,7 @@ for repo in $(jq -r 'keys[]' "$ROOT/deps.json"); do
   tmp="$(mktemp -d)"
   gh release download "$ver" -R "array2d/$repo" -p "${repo}-abi-*-linux-x86_64.tar.gz" -D "$tmp"
   tar xzf "$tmp"/*.tar.gz -C "$tmp" --strip-components=1
-  sudo cp -r "$tmp/include/"* /usr/include/
+  if [ -d "$tmp/include" ]; then sudo cp -r "$tmp/include/"* /usr/include/; fi
   sudo cp "$tmp/lib/"*.so* /usr/lib/
   rm -rf "$tmp"
 done
