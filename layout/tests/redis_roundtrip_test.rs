@@ -35,12 +35,12 @@ fn redis_compile() {
     compile(&mut kv, src).unwrap();
 
     let sig_val = kv.get_one("/lib/sum/[0,0]");
-    assert_eq!(kvkind::kind(&sig_val), "rwfunc");
+    assert_eq!(kvkind::kind(&sig_val), "defrwfunc");
     let b = body(&sig_val);
     assert_eq!(kvkind::rwfunc_num_reads(b), 2);
     assert_eq!(kvkind::rwfunc_num_writes(b), 1);
 
     let op = kv.get_one("/lib/sum/[1,0]");
-    assert_eq!(kvkind::kind(&op), "rwir");
+    assert_eq!(kvkind::kind(&op), "rwir|rwfunc");
     assert_eq!(String::from_utf8_lossy(&body(&op)[4..]), "int64.add");
 }

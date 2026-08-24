@@ -17,16 +17,14 @@ struct kvlangRuntime_t {
     _p: [u8; 0],
 }
 
-// 对齐 kvspace ABI 的 kvspaceHead_t（repr(C)）：kind+ndim+dims 即完整 kindexp，body 段定位靠 offset/len。
+// 对齐 kvspace ABI 的 kvspaceHead_t（repr(C)）：kindexpr 为唯一类型真相，body 段定位靠 offset/len。
 #[repr(C)]
 struct kvspaceHead_t {
-    kind: [u8; 32],
-    is_ptr: u8,
-    array_len: i32,
+    kindexpr: [u8; 256],
+    ro: u8,
+    vid: u32,
     body_len: i32,
     body_offset: i32,
-    ndim: i32,
-    dims: [i32; 8],
 }
 
 unsafe impl Send for kvlangRuntime_t {}
@@ -140,13 +138,11 @@ fn kv_get(kv: *mut c_void, key: &str) -> String {
         return String::new();
     }
     let mut h = kvspaceHead_t {
-        kind: [0; 32],
-        is_ptr: 0,
-        array_len: 0,
+        kindexpr: [0; 256],
+        ro: 0,
+        vid: 0,
         body_len: 0,
         body_offset: 0,
-        ndim: 0,
-        dims: [0; 8],
     };
     let s = if unsafe { kvspaceDecodeHead(out, out_len, &mut h) } == 0
         && h.body_len > 0

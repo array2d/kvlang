@@ -11,7 +11,7 @@ use std::collections::HashMap;
 
 use super::ast::{Func, RwirDecl, Stmt};
 use super::ffi::Kv;
-use super::{builtin, ffi, keytree, kvkind, lower, parser, symbol};
+use super::{builtin, ffi, keytree, kvkind, lower, parser};
 
 /// 创建基础目录 /lib/ 与 /vthread/（layout 前必须存在）。
 pub fn init_dirs(kv: &mut Kv) -> Result<(), String> {
@@ -30,23 +30,11 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<(), String> {
         return Err("parse: error-level diagnostics — refusing to load".to_string());
     }
 
-    // 用户函数名 → 有效包名。layout 只对这些名字加包前缀（正向识别用户函数），
-    // 其余 opcode（native / 扩展 rwir）原样落盘，由 runtime 查 /lib/<op> 的 XValue kind 判定。
-    let mut user_pkg: HashMap<String, String> = HashMap::new();
-    for func in &file.funcs {
-        let p = if func.pkg.is_empty() { file.package.clone() } else { func.pkg.clone() };
-        user_pkg.insert(func.sig.name.clone(), p);
-    }
-    for decl in &file.rwir_decls {
-        let p = if decl.pkg.is_empty() { file.package.clone() } else { decl.pkg.clone() };
-        user_pkg.insert(decl.sig.name.clone(), p);
-    }
-
     let mut any_code = false;
     for func in &file.funcs {
         let pkg = if func.pkg.is_empty() { file.package.clone() } else { func.pkg.clone() };
         let mut lowered = lower::lower_func(func);
-        write_func(kv, &pkg, &mut lowered, &user_pkg);
+        write_func(kv, &pkg, &mut lowered);
         any_code = true;
     }
     for decl in &file.rwir_decls {
@@ -65,7 +53,7 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<(), String> {
             pkg: String::new(),
         };
         let mut lowered = lower::lower_func(&init_fn);
-        write_func(kv, "", &mut lowered, &user_pkg);
+        write_func(kv, "", &mut lowered);
         any_code = true;
     }
 
@@ -112,7 +100,7 @@ pub fn vet(src: &str) -> Result<(), String> {
 }
 
 /// 写函数到 /lib/：签名（rwfunc）、源码、参数 Ptr、指令体。
-pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func, user_pkg: &HashMap<String, String>) {
+pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) {
     let mut type_map = lower::infer_types(fn_);
     lower::specialize(fn_, &type_map);
     let func_dir = keytree::lib_func(pkg, &fn_.sig.name);
@@ -145,7 +133,7 @@ pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func, user_pkg: &HashMap<Str
     }
     let _ = kv.set(&pairs);
 
-    write_body(kv, pkg, &fn_.sig.name, &fn_.body, &mut type_map, 1, user_pkg);
+    write_body(kv, pkg, &fn_.sig.name, &fn_.body, &mut type_map, 1);
 }
 
 /// 写用户声明的 rwir（无体）到 /lib/<opcode>。
@@ -159,11 +147,11 @@ pub fn write_rwir_decl(kv: &mut Kv, decl: &RwirDecl) {
 }
 
 /// 将 body 写入 /lib/<pkg>/<name>/ 下。offset 起始 idx（顶层函数=1）。
-fn write_body(kv: &mut Kv, pkg: &str, name: &str, body: &[Stmt], type_map: &mut HashMap<String, String>, offset: i32, user_pkg: &HashMap<String, String>) {
+fn write_body(kv: &mut Kv, pkg: &str, name: &str, body: &[Stmt], type_map: &mut HashMap<String, String>, offset: i32) {
     let prefix = keytree::lib_func(pkg, name);
     let mut idx = offset;
     for st in body {
-        write_stmt(kv, st, &prefix, &mut idx, type_map, pkg, user_pkg);
+        write_stmt(kv, st, &prefix, &mut idx, type_map, pkg);
     }
 }
 
@@ -174,7 +162,6 @@ fn write_stmt(
     idx: &mut i32,
     type_map: &mut HashMap<String, String>,
     pkg: &str,
-    user_pkg: &HashMap<String, String>,
 ) {
     match st {
         Stmt::Instruction(s) => {
@@ -184,15 +171,7 @@ fn write_stmt(
                     type_map.insert(w.clone(), s.write_types[j].clone());
                 }
             }
-            let (mut opcode, reads) = s.flat();
-            if !pkg.is_empty()
-                && user_pkg.get(&opcode).map_or(false, |p| p == pkg)
-                && !opcode.contains(keytree::MEMBER_SEP)
-                && !opcode.starts_with("/lib/")
-                && symbol::lookup(&opcode).word != "assign"
-            {
-                opcode = format!("{pkg}{}{opcode}", keytree::MEMBER_SEP);
-            }
+            let (opcode, reads) = s.flat();
             let target_char = if s.writes.len() == 1 && !s.write_types.is_empty() && kvkind::is_char_kind(&s.write_types[0]) {
                 s.write_types[0].as_str()
             } else {
@@ -201,7 +180,7 @@ fn write_stmt(
 
             let mut pairs: Vec<(String, Vec<u8>)> = Vec::with_capacity(1 + reads.len() + s.writes.len());
             if !opcode.is_empty() {
-                pairs.push((format!("{prefix}/[{n},0]"), slot_value(&opcode, "")));
+                pairs.push((format!("{prefix}/[{n},0]"), opcode_value(&opcode)));
             }
             for (j, r) in reads.iter().enumerate() {
                 pairs.push((format!("{prefix}/[{n},-{}]", j + 1), slot_value(r, target_char)));
@@ -218,7 +197,7 @@ fn write_stmt(
             let scope_prefix = format!("{prefix}/{}", s.label);
             let mut scope_idx = 0;
             for child in &s.body {
-                write_stmt_scope(kv, child, &scope_prefix, &mut scope_idx, type_map, pkg, prefix, user_pkg);
+                write_stmt_scope(kv, child, &scope_prefix, &mut scope_idx, type_map, pkg, prefix);
             }
         }
         _ => {}
@@ -233,7 +212,6 @@ fn write_stmt_scope(
     type_map: &mut HashMap<String, String>,
     pkg: &str,
     func_prefix: &str,
-    user_pkg: &HashMap<String, String>,
 ) {
     match st {
         Stmt::Instruction(s) => {
@@ -243,15 +221,7 @@ fn write_stmt_scope(
                     type_map.insert(w.clone(), s.write_types[j].clone());
                 }
             }
-            let (mut opcode, reads) = s.flat();
-            if !pkg.is_empty()
-                && user_pkg.get(&opcode).map_or(false, |p| p == pkg)
-                && !opcode.contains(keytree::MEMBER_SEP)
-                && !opcode.starts_with("/lib/")
-                && symbol::lookup(&opcode).word != "assign"
-            {
-                opcode = format!("{pkg}{}{opcode}", keytree::MEMBER_SEP);
-            }
+            let (opcode, reads) = s.flat();
             let target_char = if s.writes.len() == 1 && !s.write_types.is_empty() && kvkind::is_char_kind(&s.write_types[0]) {
                 s.write_types[0].as_str()
             } else {
@@ -260,7 +230,7 @@ fn write_stmt_scope(
 
             let mut pairs: Vec<(String, Vec<u8>)> = Vec::with_capacity(1 + reads.len() + s.writes.len());
             if !opcode.is_empty() {
-                pairs.push((format!("{scope_prefix}[{n},0]"), slot_value(&opcode, "")));
+                pairs.push((format!("{scope_prefix}[{n},0]"), opcode_value(&opcode)));
             }
             for (j, r) in reads.iter().enumerate() {
                 pairs.push((format!("{scope_prefix}[{n},-{}]", j + 1), slot_value(r, target_char)));
@@ -277,10 +247,20 @@ fn write_stmt_scope(
             let child_prefix = format!("{func_prefix}/{}", s.label);
             let mut child_idx = 0;
             for child in &s.body {
-                write_stmt_scope(kv, child, &child_prefix, &mut child_idx, type_map, pkg, func_prefix, user_pkg);
+                write_stmt_scope(kv, child, &child_prefix, &mut child_idx, type_map, pkg, func_prefix);
             }
         }
         _ => {}
+    }
+}
+
+/// 调用目标 opcode 槽值：函数调用/运算符 → `rwir|rwfunc` 并列；
+/// 控制/拷贝 opcode（return/goto/br/call/=）原样 `rwir`（非调用目标）。
+fn opcode_value(opcode: &str) -> Vec<u8> {
+    if matches!(opcode, "return" | "goto" | "br" | "call" | "=") {
+        kvkind::new_rwir(0, 0, opcode)
+    } else {
+        kvkind::new_rwir_union(opcode)
     }
 }
 
@@ -350,11 +330,11 @@ mod tests {
         init_dirs(&mut kv).unwrap();
 
         compile(&mut kv, "lib a {\nlib b {\nrwfunc f() -> (r:int64) {\n1 -> r\n}\n}\n}\n").unwrap();
-        assert_eq!(kvkind::kind(&kv.get_one("/lib/a/b.f/[0,0]")), "rwfunc");
+        assert_eq!(kvkind::kind(&kv.get_one("/lib/a/b.f/[0,0]")), "defrwfunc");
 
         // 同 lib a 下再 layout 另一嵌套 lib c，验证 b.f 未被整库删除（增量合并）
         compile(&mut kv, "lib a {\nlib c {\nrwfunc g() -> (r:int64) {\n2 -> r\n}\n}\n}\n").unwrap();
-        assert_eq!(kvkind::kind(&kv.get_one("/lib/a/b.f/[0,0]")), "rwfunc", "b.f 应保留");
-        assert_eq!(kvkind::kind(&kv.get_one("/lib/a/c.g/[0,0]")), "rwfunc");
+        assert_eq!(kvkind::kind(&kv.get_one("/lib/a/b.f/[0,0]")), "defrwfunc", "b.f 应保留");
+        assert_eq!(kvkind::kind(&kv.get_one("/lib/a/c.g/[0,0]")), "defrwfunc");
     }
 }
