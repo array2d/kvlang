@@ -8,7 +8,7 @@ for repo in $(jq -r 'keys[]' "$ROOT/deps.json"); do
   ver=$(jq -r ".\"$repo\"" "$ROOT/deps.json")
   tmp="$(mktemp -d)"
   gh release download "$ver" -R "array2d/$repo" -p "${repo}-abi-*-linux-x86_64.tar.gz" -D "$tmp"
-  tar xzf "$tmp"/*.tar.gz -C "$ROOT/libso"
+  tar xzf "$tmp"/*.tar.gz -C "$ROOT/libso" --strip-components=1
   rm -rf "$tmp"
 done
 echo "✅ ABI deps → libso/: $(ls "$ROOT/libso" 2>/dev/null | tr '\n' ' ')"
