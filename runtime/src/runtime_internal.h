@@ -19,7 +19,7 @@ typedef struct {
 } kvspaceHead_t;
 
 extern void *kvspaceConnect(const char *dsn);
-extern void  kvspaceFree(void *h);
+extern void  kvspaceClose(void *h);
 extern void  kvspaceBytesFree(uint8_t *p, uint32_t len);
 extern int   kvspaceSet(void *h, const char *const *keys, const uint8_t *vals,
                          const uint32_t *lens, uint32_t n, char *err, uint32_t err_cap);

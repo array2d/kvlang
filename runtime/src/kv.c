@@ -20,7 +20,7 @@ kvlangKv_t *kvlangKvConnect(const char *dsn) {
 
 void kvlangKvDisconnect(kvlangKv_t *k) {
     if (!k) return;
-    if (k->h) kvspaceFree(k->h);
+    if (k->h) kvspaceClose(k->h);
     free(k);
 }
 
