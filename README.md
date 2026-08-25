@@ -213,7 +213,7 @@ Conditions may be compound expressions: `if (7 % 2 != 0)` and `while (i < string
 **Scalar:** `abs` `neg` `sign` `pow` `sqrt` `exp` `log` `min` `max` (variadic, e.g. `max(a,b,c)`) `debugger`\
 **Types:** `bool` `int8` `int16` `int32` `int64` `uint8` `uint16` `uint32` `uint64` `float32` `float64` `char/utf8` `char/utf32` `char/ascii`\
 **Collections:** `array` `at` `set` `has` `array.sort` `array.slice` `array.append` `dict`\
-**Shape:** `xv.numel` `xv.dim` `xv.shape` `xv.at` `xv.set`\
+**Shape:** `ndarray.numel` `ndarray.dim` `ndarray.shape` `xv.at` `xv.set`\
 **KV tree:** `kv.get` `kv.set` `kv.del` `kv.deltree` `kv.list` `kv.mkindex` `kv.extindex` `kv.rmindexext` `kv.watch` `kv.has` `kv.at`\
 **Strings:** `string.char` `string.ord` `string.len` `string.cmp` `string.find` `string.slice` `string.concat` `string.set`\
 **Time:** `time.now` `time.sub` `time.add` `time.before` `time.after` `time/duration.nanos` `time/duration.as_nanos` (and `millis`/`seconds`/`minutes`/`hours` variants)\
@@ -223,7 +223,7 @@ Conditions may be compound expressions: `if (7 % 2 != 0)` and `while (i < string
 
 ```kv
 a:int64 = [7, 2, 9, 4]     # typed 1D array, = ≡ <-
-xv.numel(a) -> n         # 4
+ndarray.numel(a) -> n         # 4
 at(a, 2) -> e            # 9 (0-indexed)
 set(a, 1, 99) -> a       # modify element: a becomes [7, 99, 9, 4]
 sort(a) -> sorted         # sorted copy: [2, 4, 7, 9]

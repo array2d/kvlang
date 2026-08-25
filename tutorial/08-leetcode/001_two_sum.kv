@@ -4,7 +4,7 @@
 #   [ 0 , 1 ]
 #   [-1, -1]
 rwfunc two_sum(nums:[]int64, target:int64) -> () {
-	n <- xv.numel(nums)
+	n <- ndarray.numel(nums)
 	found = 0  # = 等价于 <-
 	0 -> i
 	while (i < n) {

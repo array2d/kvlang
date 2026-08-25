@@ -1,0 +1,13 @@
+# strkeymap_coord: strkeymapindex 坐标段访问 a.[i]
+# 语义: {..} 创建 1 维散 key map，成员名是坐标段 "[i]"，a.[i] 走 kv.get
+# 期望输出:
+#   a[0] = 10
+#   a[2] = 30
+rwfunc main() -> () {
+	a = {10, 20, 30}
+	a.[0] -> v0
+	a.[2] -> v2
+	println("a[0] =", v0)
+	println("a[2] =", v2)
+}
+main()

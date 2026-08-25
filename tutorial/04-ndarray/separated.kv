@@ -1,22 +1,22 @@
-# separated: 散 key 数组（元素分散在 b[0]..b[N-1] 各自 key，按 key 寻址）
+# separated: 散 key 数组（元素分散在 b.[0]..b.[N-1] 各自 key，按坐标段寻址）
 # 语义: 字面量初始化默认 compact；array.scatter 把 compact 转散 key，array.compact 反向
-# 散 key 元素访问与 compact 一致，统一用 [i]
+# 散 key 元素访问用 b.[i]（走 kv.get），compact 用 b[i]（走 xv.at）
 # 期望输出:
-#   xv.numel(b) = 3
+#   ndarray.numel(b) = 3
 #   b[0] = 10
 #   b[2] = 30
-#   xv.numel(c) = 3
+#   ndarray.numel(c) = 3
 #   c[0] = 10
 rwfunc main() -> () {
 	a:[]int64 = [10, 20, 30]       # 字面量初始化 → compact
-	b <- array.scatter(a)          # 显式 scatter：compact a → 散 key b（b[0]..b[2]）
-	xv.numel(b) -> n1
-	println("xv.numel(b) =", n1)
-	println("b[0] =", b[0])        # 散 key 元素访问 [i]
-	println("b[2] =", b[2])
+	b <- array.scatter(a)          # 显式 scatter：compact a → 散 key b（b.[0]..b.[2]）
+	ndarray.numel(b) -> n1
+	println("ndarray.numel(b) =", n1)
+	println("b[0] =", b.[0])       # 散 key 元素访问 .[i]
+	println("b[2] =", b.[2])
 	c <- array.compact(b)          # 显式 compact：散 key b → compact c
-	xv.numel(c) -> n2
-	println("xv.numel(c) =", n2)
+	ndarray.numel(c) -> n2
+	println("ndarray.numel(c) =", n2)
 	println("c[0] =", c[0])        # compact 元素访问 [i]
 }
 

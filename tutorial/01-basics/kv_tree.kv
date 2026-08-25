@@ -17,12 +17,12 @@ rwfunc main() -> () {
 	kv.set("/tmp/kvt/a", 1)
 	kv.set("/tmp/kvt/b", 2)
 	kv.list("/tmp/kvt/") -> names
-	xv.numel(names) -> n
+	ndarray.numel(names) -> n
 	println("n=", n)
-	xv.numel([10,20,30]) -> m
-	xv.dim([10,20,30]) -> d
+	ndarray.numel([10,20,30]) -> m
+	ndarray.dim([10,20,30]) -> d
 	println("numel=", m, "dim=", d)
-	xv.shape([10,20,30]) -> s
+	ndarray.shape([10,20,30]) -> s
 	println("shape0=", s[0])
 }
 main()
