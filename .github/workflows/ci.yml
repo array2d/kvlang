@@ -9,7 +9,13 @@ jobs:
         env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
         run: ./ci/deps.sh
       - name: 构建
+        env: { KVSPACE_BACKEND_PATH: /usr/lib/kvspace }
         run: make shm
+      - name: rwir 合同测试
+        env: { KVSPACE_BACKEND_PATH: /usr/lib/kvspace }
+        run: make test-rwir
       - name: 测试
-        env: { KVSPACE: "shm:///tmp/kvlang_ci" }
+        env:
+          KVSPACE: "shm:///tmp/kvlang_ci"
+          KVSPACE_BACKEND_PATH: /usr/lib/kvspace
         run: python3 tutorial/test.py

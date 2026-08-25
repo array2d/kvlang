@@ -67,3 +67,13 @@ void kvlangVthreadSetError(kvlangKv_t *kv, const char *vtid, const char *pc, con
     kvlangXvalueFree(&vpc); kvlangXvalueFree(&vmsg); kvlangXvalueFree(&vst);
     kvlangStrbufFree(&msg_path); kvlangStrbufFree(&pc_key); kvlangStrbufFree(&st_key);
 }
+
+int64_t kvlangVthreadNextSeq(kvlangKv_t *kv, const char *key) {
+    int64_t n = 0;
+    char err[256];
+    if (kvlangKvIncr(kv, key, &n, err, sizeof err) != 0) {
+        fprintf(stderr, "NextSeq: %s\n", err[0] ? err : "Incr failed");
+        abort();
+    }
+    return n;
+}

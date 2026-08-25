@@ -598,6 +598,13 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode, char *
             exec_err = kvlangBuiltinNative(&f);
         } else if (is_copy_op(inst.opcode)) {
             exec_err = kvlangBuiltinExecuteCopy(kv, vtid, cur, &inst);
+        } else if (kvlangDispatchIsDelegatedOp(kv, inst.opcode)) {
+            exec_err = kvlangDispatchDelegate(kv, vtid, cur, &inst);
+            if (exec_err == KVLANG_DELEGATE_LOCAL) {
+                exec_err = 0;
+                goto user_call;
+            }
+            goto exec_done;
         } else if (is_ext_rwir(kv, inst.opcode)) {
             char *rk = kvlangKeytreeRwir(inst.opcode);
             int def_nr = 0;
@@ -615,6 +622,7 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode, char *
             }
             if (exec_err == 0) exec_err = handoff_external_rwir(kv, vtid, cur, &inst);
         } else {
+user_call:
             /* 用户函数 → call */
             kvlangRwirInst_t ci;
             ci.opcode = strdup(OP_CALL);
@@ -629,6 +637,7 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode, char *
             free(ci.opcode); free(ci.reads[0].name); free(ci.reads);
         }
 
+exec_done:
         if (exec_err != 0) { free(fr); kvlangRwirInstFree(&inst); rc = -1; break; }
 
         char *newpc = NULL, *st = NULL;
