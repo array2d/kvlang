@@ -19,7 +19,7 @@ rwfunc build_list() -> () {
 rwfunc remove(head:[]char/utf32, val:int64) -> () {
 	p <- "/n0"
 	while (p != "") {
-		v = p.val  # = 等价于 <-
+		v = p·val  # = 等价于 <-
 		v == val -> skip
 
 		if (skip) {
@@ -27,7 +27,7 @@ rwfunc remove(head:[]char/utf32, val:int64) -> () {
 			println(v)
 		}
 
-		p <- p.next
+		p <- p·next
 	}
 }
 

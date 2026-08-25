@@ -16,10 +16,10 @@ rwfunc same(a:[]char/utf32, b:[]char/utf32) -> (ok:int64) {
 	if (a == "" || b == "") {
 		if (a == b) { 1 -> ok } else { 0 -> ok }
 	} else {
-		if (a.val == b.val) {
-			same(a.left, b.left) -> ok
+		if (a·val == b·val) {
+			same(a·left, b·left) -> ok
 			if (ok == 1) {
-				same(a.right, b.right) -> ok
+				same(a·right, b·right) -> ok
 			}
 		} else { 0 -> ok }
 	}

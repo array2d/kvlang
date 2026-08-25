@@ -24,16 +24,16 @@ rwfunc main() -> () {
 	println(t)
 	s + " " + t -> w
 	println(w)
-	println(string.len(w))
+	println(string·len(w))
 
-	println(string.cmp("abc", "abd"))
-	println(string.cmp("x", "x"))
-	println(string.find(w, "kv"))
-	println(string.find(w, "zz"))
+	println(string·cmp("abc", "abd"))
+	println(string·cmp("x", "x"))
+	println(string·find(w, "kv"))
+	println(string·find(w, "zz"))
 
 	c <- w[3]
 	println(c)
-	println(string.ord(c))
+	println(string·ord(c))
 }
 
 main()

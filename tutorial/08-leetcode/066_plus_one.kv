@@ -10,7 +10,7 @@
 #   0
 rwfunc plus_one() -> () {
 	a:[]int64 <- [1, 2, 3]
-	n = ndarray.numel(a)  # = 等价于 <-
+	n = ndarray·numel(a)  # = 等价于 <-
 	n - 1 -> i
 	carry <- 1
 	while (i >= 0) {
@@ -41,7 +41,7 @@ rwfunc plus_one() -> () {
 
 rwfunc plus_one_nines() -> () {
 	a:[]int64 = [9, 9, 9]  # = 等价于 <-
-	ndarray.numel(a) -> n
+	ndarray·numel(a) -> n
 	i <- n - 1
 	carry = 1  # = 等价于 <-
 	while (i >= 0) {

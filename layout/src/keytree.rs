@@ -3,7 +3,7 @@
 
 // ── 常量 ─────────────────────────────────────────────────────────────
 
-pub const MEMBER_SEP: &str = "."; // 成员访问分隔符
+pub const MEMBER_SEP: &str = "·"; // 成员访问分隔符（U+00B7 中点号）：释放 '.' 供小数 key 使用
 pub const RUNTIME_MEMBER_SEP: &str = "\u{2025}"; // U+2025，运行时保留字段前缀
 pub const PATH_SEG_SEP: &str = "/"; // 路径分隔符
 pub const PATH_SEG_LIB: &str = "lib"; // /lib
@@ -33,7 +33,7 @@ pub fn lib_func(pkg: &str, name: &str) -> String {
     if pkg.is_empty() {
         format!("{LIB_ROOT}/{name}")
     } else {
-        format!("{LIB_ROOT}/{pkg}.{name}")
+        format!("{LIB_ROOT}/{pkg}{MEMBER_SEP}{name}")
     }
 }
 
@@ -41,7 +41,7 @@ pub fn lib_src(pkg: &str, name: &str) -> String {
     if pkg.is_empty() {
         format!("{LIB_ROOT}/{name}{SRC_EXT}")
     } else {
-        format!("{LIB_ROOT}/{pkg}.{name}{SRC_EXT}")
+        format!("{LIB_ROOT}/{pkg}{MEMBER_SEP}{name}{SRC_EXT}")
     }
 }
 

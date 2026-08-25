@@ -20,21 +20,21 @@ rwfunc build() -> () {
 rwfunc dedup(head:[]char/utf32) -> () {
 	head -> cur
 	while (cur != "") {
-		cur.next -> nxt
+		cur·next -> nxt
 		advance = true  # = 等价于 <-
 
 		if (nxt != "") {
-			cur.val -> v
-			nxt.val -> nv
+			cur·val -> v
+			nxt·val -> nv
 
 			if (nv == v) {
-				nxt.next -> nn
-				cur.next <- nn
+				nxt·next -> nn
+				cur·next <- nn
 				false -> advance
 			}
 		}
 		if (advance) {
-			cur.next -> cur
+			cur·next -> cur
 		}
 	}
 }
@@ -42,9 +42,9 @@ rwfunc dedup(head:[]char/utf32) -> () {
 rwfunc show(head:[]char/utf32) -> () {
 	head -> p
 	while (p != "") {
-		p.val -> v
+		p·val -> v
 		println(v)
-		p.next -> p
+		p·next -> p
 	}
 }
 

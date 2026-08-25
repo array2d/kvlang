@@ -4,8 +4,8 @@
 #   2
 #   2
 rwfunc str_str(hay:[]char/utf32, needle:[]char/utf32) -> () {
-	string.len(hay) -> nh
-	nn <- string.len(needle)
+	string·len(hay) -> nh
+	nn <- string·len(needle)
 	i = 0  # = 等价于 <-
 	-1 -> ans
 	limit <- nh - nn
@@ -13,8 +13,8 @@ rwfunc str_str(hay:[]char/utf32, needle:[]char/utf32) -> () {
 		match = true  # = 等价于 <-
 		0 -> j
 		while (j < nn) {
-			hc <- string.char(hay, i + j)
-			nc = string.char(needle, j)  # = 等价于 <-
+			hc <- string·char(hay, i + j)
+			nc = string·char(needle, j)  # = 等价于 <-
 			hc == nc -> eq
 
 			if (eq) {

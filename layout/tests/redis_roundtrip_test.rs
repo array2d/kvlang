@@ -42,5 +42,5 @@ fn redis_compile() {
 
     let op = kv.get_one("/lib/sum/[1,0]");
     assert_eq!(kvkind::kind(&op), "rwir|rwfunc");
-    assert_eq!(String::from_utf8_lossy(&body(&op)[4..]), "int64.add");
+    assert_eq!(String::from_utf8_lossy(&body(&op)[4..]), "int64·add");
 }

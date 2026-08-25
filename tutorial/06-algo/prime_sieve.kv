@@ -33,9 +33,9 @@ rwfunc prime_sieve(limit:int64) -> () {
 	println("total primes up to", limit, "=", count)
 }
 
-t0 <- time.now()
+t0 <- time·now()
 prime_sieve(200)
-t1 <- time.now()
-delta <- time.sub(t1, t0)
-ns <- time/duration.as_nanos(delta)
+t1 <- time·now()
+delta <- time·sub(t1, t0)
+ns <- time/duration·as_nanos(delta)
 println("__bench_ns:", ns)

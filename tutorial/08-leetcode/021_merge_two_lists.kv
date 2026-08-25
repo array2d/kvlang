@@ -20,30 +20,30 @@ rwfunc merge(a:[]char/utf32, b:[]char/utf32) -> () {
 	pa <- a
 	pb = b  # = 等价于 <-
 	while (pa != "") {
-		pa.val -> av
+		pa·val -> av
 		pick_a <- pb == ""
 
 		if (pick_a) {
 			println(av)
-			pa = pa.next  # = 等价于 <-
+			pa = pa·next  # = 等价于 <-
 		} else {
-			pb.val -> bv
+			pb·val -> bv
 			take <- av <= bv
 			take_m <- av ≤ bv
 
 			if (take) {
 				println(av)
-				pa = pa.next  # = 等价于 <-
+				pa = pa·next  # = 等价于 <-
 			} else {
 				println(bv)
-				pb.next -> pb
+				pb·next -> pb
 			}
 		}
 	}
 	while (pb != "") {
-		bv <- pb.val
+		bv <- pb·val
 		println(bv)
-		pb = pb.next  # = 等价于 <-
+		pb = pb·next  # = 等价于 <-
 	}
 }
 

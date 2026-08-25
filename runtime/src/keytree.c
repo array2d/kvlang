@@ -57,15 +57,18 @@ char *kvlangKeytreeParentFrame(const char *root) {
 
 char *kvlangKeytreeMember(const char *base, const char *name) {
     size_t bl = strlen(base), nl = strlen(name);
-    char *r = malloc(bl + nl + 2);
-    memcpy(r, base, bl); r[bl] = '.'; memcpy(r + bl + 1, name, nl); r[bl + 1 + nl] = 0;
+    char *r = malloc(bl + nl + MEMBER_SEP_LEN + 1);
+    memcpy(r, base, bl);
+    memcpy(r + bl, MEMBER_SEP, MEMBER_SEP_LEN);
+    memcpy(r + bl + MEMBER_SEP_LEN, name, nl);
+    r[bl + MEMBER_SEP_LEN + nl] = 0;
     return r;
 }
 
 char *kvlangKeytreeLibFunc(const char *pkg, const char *name) {
     kvlangStrbuf_t b; kvlangStrbufInit(&b);
     kvlangStrbufPuts(&b, LIB_ROOT PATH_SEP);
-    if (pkg && pkg[0]) { kvlangStrbufPuts(&b, pkg); kvlangStrbufPutc(&b, '.'); }
+    if (pkg && pkg[0]) { kvlangStrbufPuts(&b, pkg); kvlangStrbufPuts(&b, MEMBER_SEP); }
     kvlangStrbufPuts(&b, name);
     return kvlangStrbufDetach(&b);
 }

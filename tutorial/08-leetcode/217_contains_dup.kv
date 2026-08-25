@@ -6,7 +6,7 @@
 #   false
 rwfunc has_dup() -> () {
 	a:[]int64 = [1, 2, 3, 1]  # = 等价于 <-
-	ndarray.numel(a) -> n
+	ndarray·numel(a) -> n
 	found <- false
 	i = 0  # = 等价于 <-
 	while (i < n) {
@@ -37,7 +37,7 @@ rwfunc has_dup() -> () {
 
 rwfunc no_dup() -> () {
 	a:[]int64 <- [1, 2, 3, 4]
-	n = ndarray.numel(a)  # = 等价于 <-
+	n = ndarray·numel(a)  # = 等价于 <-
 	false -> found
 	i <- 0
 	while (i < n) {

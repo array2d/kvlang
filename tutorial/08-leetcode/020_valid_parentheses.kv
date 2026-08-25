@@ -7,21 +7,21 @@
 rwfunc is_valid(s:[]char/utf32) -> (ok:int64) {
 	ok <- 1
 	si = -1  # = 等价于 <-
-	n = string.len(s)  # = 等价于 <-
+	n = string·len(s)  # = 等价于 <-
 	i <- 0
 	while (i < n) {
 		c = s[i]  # = 等价于 <-
 		if (c == "(") {
 			si + 1 -> si
-			_ <- kv.set("/tmp/vp", si, 1)
+			_ <- kv·set("/tmp/vp", si, 1)
 		}
 		if (c == "[") {
 			si = si + 1  # = 等价于 <-
-			kv.set("/tmp/vp", si, 2) -> _
+			kv·set("/tmp/vp", si, 2) -> _
 		}
 		if (c == "{") {
 			si + 1 -> si
-			_ = kv.set("/tmp/vp", si, 3)  # = 等价于 <-
+			_ = kv·set("/tmp/vp", si, 3)  # = 等价于 <-
 		}
 		if (c == ")") {
 			if (si < 0) { 0 -> ok ; n -> i }

@@ -57,7 +57,7 @@ static void scope_prefix_and_base(const char *link_base, kvlangStrbuf_t *sp, kvl
         }
     }
     for (int i = nscopes - 1; i >= 0; i--) {
-        if (sp->len > 0) kvlangStrbufPutc(sp, '.');
+        if (sp->len > 0) kvlangStrbufPuts(sp, MEMBER_SEP);
         kvlangStrbufPuts(sp, scopes[i]);
         free(scopes[i]);
     }

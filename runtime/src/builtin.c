@@ -589,28 +589,28 @@ static const struct { const char *op; kvlangBuiltinFn fn; } builtins[] = {
     {"char/utf32", kvlangBuiltinCastChar32}, {"char/utf8", kvlangBuiltinCastChar8}, {"char/ascii", kvlangBuiltinCastCharAscii},
     /* collection */
     {"array", kvlangBuiltinArray},
-    {"array.scatter", kvlangBuiltinScatter}, {"array.compact", kvlangBuiltinCompact},
-    {"array.append", kvlangBuiltinAppend}, {"array.slice", kvlangBuiltinSlice},
+    {"array·scatter", kvlangBuiltinScatter}, {"array·compact", kvlangBuiltinCompact},
+    {"array·append", kvlangBuiltinAppend}, {"array·slice", kvlangBuiltinSlice},
     {"obj", kvlangBuiltinObj}, {"map", kvlangBuiltinMap},
-    {"ndarray.numel", kvlangBuiltinNdarrayNumel}, {"ndarray.dim", kvlangBuiltinNdarrayDim}, {"ndarray.shape", kvlangBuiltinNdarrayShape},
-    {"xv.at", kvlangBuiltinXvAt}, {"xv.set", kvlangBuiltinXvSet}, {"xv.reshape", kvlangBuiltinXvReshape},
-    {"string.set", kvlangBuiltinStringSet}, {"string.char", kvlangBuiltinStringChar}, {"string.ord", kvlangBuiltinStringOrd},
-    {"string.cmp", kvlangBuiltinStringCmp}, {"string.find", kvlangBuiltinStringFind}, {"string.len", kvlangBuiltinStringLen},
-    {"string.slice", kvlangBuiltinStringSlice}, {"string.concat", kvlangBuiltinStringConcat},
-    {"time.now", kvlangBuiltinTimeNow}, {"time.sub", kvlangBuiltinTimeSub}, {"time.add", kvlangBuiltinTimeAdd},
-    {"time/duration.nanos", kvlangBuiltinDurFrom}, {"time/duration.millis", kvlangBuiltinDurFrom},
-    {"time/duration.seconds", kvlangBuiltinDurFrom}, {"time/duration.minutes", kvlangBuiltinDurFrom},
-    {"time/duration.hours", kvlangBuiltinDurFrom},
-    {"time/duration.as_nanos", kvlangBuiltinDurTo}, {"time/duration.as_millis", kvlangBuiltinDurTo},
-    {"time/duration.as_seconds", kvlangBuiltinDurTo}, {"time/duration.as_minutes", kvlangBuiltinDurTo},
-    {"time/duration.as_hours", kvlangBuiltinDurTo},
-    {"time/duration.add", kvlangBuiltinDurArith}, {"time/duration.sub", kvlangBuiltinDurArith},
-    {"time/duration.before", kvlangBuiltinDurCmp}, {"time/duration.after", kvlangBuiltinDurCmp},
-    {"time.before", kvlangBuiltinTimeCmp}, {"time.after", kvlangBuiltinTimeCmp},
-    {"random.uint64", kvlangBuiltinRandUint64}, {"random.int63", kvlangBuiltinRandInt63}, {"random.intn", kvlangBuiltinRandIntn},
-    {"kv.get", kvlangBuiltinKvGet}, {"kv.set", kvlangBuiltinKvSet}, {"kv.del", kvlangBuiltinKvDel},
-    {"kv.deltree", kvlangBuiltinKvDelTree}, {"kv.list", kvlangBuiltinKvList}, {"kv.listlen", kvlangBuiltinKvListLen}, {"kv.listn", kvlangBuiltinKvListN}, {"kv.mkindex", kvlangBuiltinKvMkindex},
-    {"kv.extindex", kvlangBuiltinKvExtIndex}, {"kv.rmindexext", kvlangBuiltinKvRmIndexExt}, {"kv.watch", kvlangBuiltinKvWatch},
+    {"ndarray·numel", kvlangBuiltinNdarrayNumel}, {"ndarray·dim", kvlangBuiltinNdarrayDim}, {"ndarray·shape", kvlangBuiltinNdarrayShape},
+    {"xv·at", kvlangBuiltinXvAt}, {"xv·set", kvlangBuiltinXvSet}, {"xv·reshape", kvlangBuiltinXvReshape},
+    {"string·set", kvlangBuiltinStringSet}, {"string·char", kvlangBuiltinStringChar}, {"string·ord", kvlangBuiltinStringOrd},
+    {"string·cmp", kvlangBuiltinStringCmp}, {"string·find", kvlangBuiltinStringFind}, {"string·len", kvlangBuiltinStringLen},
+    {"string·slice", kvlangBuiltinStringSlice}, {"string·concat", kvlangBuiltinStringConcat},
+    {"time·now", kvlangBuiltinTimeNow}, {"time·sub", kvlangBuiltinTimeSub}, {"time·add", kvlangBuiltinTimeAdd},
+    {"time/duration·nanos", kvlangBuiltinDurFrom}, {"time/duration·millis", kvlangBuiltinDurFrom},
+    {"time/duration·seconds", kvlangBuiltinDurFrom}, {"time/duration·minutes", kvlangBuiltinDurFrom},
+    {"time/duration·hours", kvlangBuiltinDurFrom},
+    {"time/duration·as_nanos", kvlangBuiltinDurTo}, {"time/duration·as_millis", kvlangBuiltinDurTo},
+    {"time/duration·as_seconds", kvlangBuiltinDurTo}, {"time/duration·as_minutes", kvlangBuiltinDurTo},
+    {"time/duration·as_hours", kvlangBuiltinDurTo},
+    {"time/duration·add", kvlangBuiltinDurArith}, {"time/duration·sub", kvlangBuiltinDurArith},
+    {"time/duration·before", kvlangBuiltinDurCmp}, {"time/duration·after", kvlangBuiltinDurCmp},
+    {"time·before", kvlangBuiltinTimeCmp}, {"time·after", kvlangBuiltinTimeCmp},
+    {"random·uint64", kvlangBuiltinRandUint64}, {"random·int63", kvlangBuiltinRandInt63}, {"random·intn", kvlangBuiltinRandIntn},
+    {"kv·get", kvlangBuiltinKvGet}, {"kv·set", kvlangBuiltinKvSet}, {"kv·del", kvlangBuiltinKvDel},
+    {"kv·deltree", kvlangBuiltinKvDelTree}, {"kv·list", kvlangBuiltinKvList}, {"kv·listlen", kvlangBuiltinKvListLen}, {"kv·listn", kvlangBuiltinKvListN}, {"kv·mkindex", kvlangBuiltinKvMkindex},
+    {"kv·extindex", kvlangBuiltinKvExtIndex}, {"kv·rmindexext", kvlangBuiltinKvRmIndexExt}, {"kv·watch", kvlangBuiltinKvWatch},
     {"debugger", kvlangBuiltinDebugger},
 };
 
@@ -621,11 +621,11 @@ static const size_t builtins_n = sizeof(builtins) / sizeof(builtins[0]);
 static const char *NUM_KINDS[] = {"int8", "int16", "int32", "int64", "uint8",
                                   "uint16", "uint32", "uint64", "float32", "float64"};
 static const char *strip_num_kind(const char *op) {
-    const char *dot = strchr(op, '.');
+    const char *dot = strstr(op, MEMBER_SEP);
     if (!dot) return op;
     size_t n = (size_t)(dot - op);
     for (size_t i = 0; i < sizeof(NUM_KINDS) / sizeof(NUM_KINDS[0]); i++)
-        if (strlen(NUM_KINDS[i]) == n && strncmp(op, NUM_KINDS[i], n) == 0) return dot + 1;
+        if (strlen(NUM_KINDS[i]) == n && strncmp(op, NUM_KINDS[i], n) == 0) return dot + MEMBER_SEP_LEN;
     return op;
 }
 
@@ -798,10 +798,10 @@ static int separated_len(kvlangKv_t *kv, const char *base) {
     }
 }
 
-/* 坐标段 key：base.[s0,s1,...]。1 维即 base.[s0]。 */
+/* 坐标段 key：base·[s0,s1,...]。1 维即 base·[s0]。 */
 static char *scatter_key(const char *base, const int64_t *coords, int ncoord) {
     kvlangStrbuf_t b; kvlangStrbufInit(&b);
-    kvlangStrbufPuts(&b, base); kvlangStrbufPutc(&b, '.'); kvlangStrbufPutc(&b, '[');
+    kvlangStrbufPuts(&b, base); kvlangStrbufPuts(&b, MEMBER_SEP); kvlangStrbufPutc(&b, '[');
     for (int i = 0; i < ncoord; i++) {
         if (i) kvlangStrbufPutc(&b, ',');
         kvlangStrbufPrintf(&b, "%lld", (long long)coords[i]);

@@ -4,13 +4,13 @@
 #   1
 #   0
 rwfunc is_pal(s:[]char/utf32) -> () {
-	n = string.len(s)  # = 等价于 <-
+	n = string·len(s)  # = 等价于 <-
 	0 -> l
 	r <- n - 1
 	ok = 1  # = 等价于 <-
 	while (l < r) {
-		string.char(s, l) -> lc
-		rc <- string.char(s, r)
+		string·char(s, l) -> lc
+		rc <- string·char(s, r)
 		match = lc == rc  # = 等价于 <-
 
 		if (match) {

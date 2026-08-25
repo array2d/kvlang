@@ -7,12 +7,12 @@ use std::fs;
 
 use kvlang_layout::{compile, init_dirs, Kv};
 
-/// 复刻 Go runtime 的 findEntry：DFS /lib/ 找首个 `.init`，否则 "init"。
+/// 复刻 Go runtime 的 findEntry：DFS /lib/ 找首个 `·init`，否则 "init"。
 fn find_entry(kv: &mut Kv, prefix: &str) -> String {
     let children = kv.list(prefix, false, true);
     for c in &children {
         let c = c.trim_end_matches('/');
-        if c.ends_with(".init") {
+        if c.ends_with("·init") {
             return c.to_string();
         }
         let sub = format!("{prefix}{c}/");

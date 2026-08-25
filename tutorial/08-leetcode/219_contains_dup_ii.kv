@@ -4,16 +4,16 @@
 #   true
 #   false
 rwfunc near_dup(nums:[]int64, k:int64) -> () {
-	n <- ndarray.numel(nums)
+	n <- ndarray·numel(nums)
 	h = {}  # = 等价于 <-
 	found = false  # = 等价于 <-
 	0 -> i
 	while (i < n) {
 		nums[i] -> x
-		kv.get(h, x) != None -> exists
+		kv·get(h, x) != None -> exists
 
 		if (exists) {
-			h.*x -> j
+			h·*x -> j
 			if (j > 0) {
 				d <- i - j + 1
 
@@ -24,7 +24,7 @@ rwfunc near_dup(nums:[]int64, k:int64) -> () {
 			}
 		}
 		if (found == false) {
-			kv.set(h, x, i + 1) -> _
+			kv·set(h, x, i + 1) -> _
 		}
 		i <- i + 1
 	}

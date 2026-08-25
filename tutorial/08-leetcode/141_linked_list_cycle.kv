@@ -8,14 +8,14 @@ rwfunc has_cycle(head:[]char/utf32) -> (result:int64) {
 	head -> slow
 	fast <- head
 	while (fast != "") {
-		slow = slow.next  # = 等价于 <-
-		fast.next -> n1
+		slow = slow·next  # = 等价于 <-
+		fast·next -> n1
 		at_end <- n1 == ""
 
 		if (at_end) {
 			fast = ""  # = 等价于 <-
 		} else {
-			n1.next -> fast
+			n1·next -> fast
 			match <- slow == fast
 
 			if (match) {

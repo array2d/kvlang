@@ -5,20 +5,20 @@
 #   1
 #   5
 rwfunc length_of_longest(s:[]char/utf32) -> (max_len:int64) {
-	n <- string.len(s)
+	n <- string·len(s)
 	last = {}  # = 等价于 <-
 	max_len = 0  # = 等价于 <-
 	left = 0  # = 等价于 <-
 	right <- 0
 	while (right < n) {
 		s[right] -> c
-		exists <- kv.get(last, c) != None
+		exists <- kv·get(last, c) != None
 		if (exists) {
 			prev = last[c]  # = 等价于 <-
 			cand <- prev + 1
 			if (cand > left) { left <- cand }
 		}
-		_ = kv.set(last, c, right)  # = 等价于 <-
+		_ = kv·set(last, c, right)  # = 等价于 <-
 		cur <- right - left + 1
 		if (cur > max_len) { cur -> max_len }
 		right + 1 -> right

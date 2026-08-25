@@ -1,11 +1,11 @@
-# 242: Valid Anagram — dict 字符计数（动态键读写 h.*c，用 has 检存在）
+# 242: Valid Anagram — dict 字符计数（动态键读写 h·*c，用 has 检存在）
 # 来源: LeetCode #242
 # 期望输出:
 #   true
 #   false
 rwfunc is_anagram(s:[]char/utf32, t:[]char/utf32) -> () {
-	ns = string.len(s)  # = 等价于 <-
-	nt <- string.len(t)
+	ns = string·len(s)  # = 等价于 <-
+	nt <- string·len(t)
 	ok = true  # = 等价于 <-
 
 	if (ns != nt) {
@@ -14,22 +14,22 @@ rwfunc is_anagram(s:[]char/utf32, t:[]char/utf32) -> () {
 		h = {}  # = 等价于 <-
 		0 -> i
 		while (i < ns) {
-			string.char(s, i) -> c
-			kv.get(h, c) != None -> exists
+			string·char(s, i) -> c
+			kv·get(h, c) != None -> exists
 			if (exists) {
-				h.*c + 1 -> h.*c
+				h·*c + 1 -> h·*c
 			} else {
-				1 -> h.*c
+				1 -> h·*c
 			}
 			i <- i + 1
 		}
 		0 -> i
 		while (i < nt) {
-			string.char(t, i) -> c
-			kv.get(h, c) != None -> exists
+			string·char(t, i) -> c
+			kv·get(h, c) != None -> exists
 			if (exists) {
-				h.*c -> v
-				v - 1 -> h.*c
+				h·*c -> v
+				v - 1 -> h·*c
 			} else {
 				false -> ok
 				nt -> i
@@ -38,8 +38,8 @@ rwfunc is_anagram(s:[]char/utf32, t:[]char/utf32) -> () {
 		}
 		0 -> i
 		while (i < ns) {
-			string.char(s, i) -> c
-			h.*c -> v
+			string·char(s, i) -> c
+			h·*c -> v
 
 			if (v != 0) {
 				false -> ok

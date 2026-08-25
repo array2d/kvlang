@@ -8,10 +8,10 @@ rwfunc is_pal(head:[]char/utf32) -> () {
 	0 -> n
 	head -> p
 	while (p != "") {
-		p.val -> v
-		kv.set(arr, n, v) -> _
+		p·val -> v
+		kv·set(arr, n, v) -> _
 		n <- n + 1
-		p.next -> p
+		p·next -> p
 	}
 	ok = true  # = 等价于 <-
 	0 -> l

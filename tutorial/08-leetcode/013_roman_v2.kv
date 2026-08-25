@@ -3,11 +3,11 @@
 # 期望输出:
 #   58
 rwfunc roman_to_int(s:[]char/utf32) -> () {
-	string.len(s) -> n
+	string·len(s) -> n
 	result <- 0
 	i = 0  # = 等价于 <-
 	while (i < n) {
-		string.char(s, i) -> c
+		string·char(s, i) -> c
 		is_I <- c == "I"
 		is_V = c == "V"  # = 等价于 <-
 		c == "X" -> is_X
@@ -21,7 +21,7 @@ rwfunc roman_to_int(s:[]char/utf32) -> () {
 			ni < n -> has_next
 
 			if (has_next) {
-				nc <- string.char(s, ni)
+				nc <- string·char(s, ni)
 				iv = nc == "V"  # = 等价于 <-
 				nc == "X" -> ix
 

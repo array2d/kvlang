@@ -6,9 +6,9 @@ rwfunc lcp() -> () {
 	"flower" -> a
 	b <- "flow"
 	c = "flight"  # = 等价于 <-
-	string.len(a) -> na
-	nb <- string.len(b)
-	nc = string.len(c)  # = 等价于 <-
+	string·len(a) -> na
+	nb <- string·len(b)
+	nc = string·len(c)  # = 等价于 <-
 	0 -> i
 	ok <- true
 	while (ok) {
@@ -18,9 +18,9 @@ rwfunc lcp() -> () {
 		all_ok = ca && cb && cc  # = 等价于 <-
 
 		if (all_ok) {
-			string.char(a, i) -> va
-			vb <- string.char(b, i)
-			vc = string.char(c, i)  # = 等价于 <-
+			string·char(a, i) -> va
+			vb <- string·char(b, i)
+			vc = string·char(c, i)  # = 等价于 <-
 			va == vb -> ab
 			bc <- vb == vc
 			match = ab && bc  # = 等价于 <-
@@ -34,7 +34,7 @@ rwfunc lcp() -> () {
 			ok = false  # = 等价于 <-
 		}
 	}
-	string.slice(a, 0, i) -> ans
+	string·slice(a, 0, i) -> ans
 	println(ans)
 }
 
