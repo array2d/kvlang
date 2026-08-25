@@ -12,16 +12,27 @@
 
 BIN         := bin
 
-.PHONY: all runtime term layout json oldhero test install clean
+.PHONY: all shm runtime term layout json oldhero test test-rwir install clean
 
 all: runtime term layout json
+shm: all
 
-test: all
+test: all test-rwir
 	python3 tutorial/test.py --no-build
 
 runtime:
 	cmake -S runtime -B build/runtime -DCMAKE_BUILD_TYPE=Release
-	cmake --build build/runtime --target kvlang_runtime -j
+	cmake --build build/runtime --target kvlang_runtime \
+		kvlang_delegate_test kvlang_notify_test kvlang_incr_test \
+		kvlang_expire_test kvlang_watchany_test -j
+
+test-rwir:
+	./$(BIN)/kvlang_delegate_test
+	./$(BIN)/kvlang_notify_test
+	./$(BIN)/kvlang_incr_test
+	./$(BIN)/kvlang_expire_test
+	./$(BIN)/kvlang_watchany_test
+	cargo test --manifest-path layout/Cargo.toml --test pipeline_test refuse_rwir_and_rwfunc -- --nocapture
 
 term:
 	cargo build --release --manifest-path runtime-rwirext_example/rust/term/Cargo.toml

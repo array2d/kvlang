@@ -35,6 +35,12 @@ extern int   kvspaceMkindexExt(void *h, const char *path, const char *ext_path, 
 extern int   kvspaceRmindexExt(void *h, const char *path, char *err, uint32_t err_cap);
 extern int   kvspaceWatch(void *h, const char *key, const uint8_t *target, uint32_t target_len,
                            uint64_t tick_ns, uint8_t **out, uint32_t *out_len);
+extern int   kvspaceNotify(void *h, const char *key, const uint8_t *val, uint32_t len, char *err, uint32_t err_cap);
+extern int   kvspaceTake(void *h, const char *key, uint64_t timeout_ns, uint8_t **out, uint32_t *out_len);
+extern int   kvspaceWatchAny(void *h, const char *const *keys, uint32_t nkeys, uint64_t timeout_ns,
+                             uint8_t **out_key, uint32_t *out_key_len, uint8_t **out, uint32_t *out_len);
+extern int   kvspaceIncr(void *h, const char *key, int64_t *out, char *err, uint32_t err_cap);
+extern int   kvspaceExpire(void *h, const char *key, uint64_t ttl_ns, char *err, uint32_t err_cap);
 extern int   kvspaceTlvEncode(const char *kind, const uint8_t *raw, uint32_t raw_len,
                                 const int32_t *dims, int32_t ndim, uint8_t **out, uint32_t *out_len);
 extern int   kvspaceTlvEncodePtr(const char *kind, const uint8_t *raw, uint32_t raw_len,
@@ -145,6 +151,12 @@ int kvlangKvDelExtIndex(kvlangKv_t *k, const char *path, char *err, uint32_t err
 int kvlangKvList(kvlangKv_t *k, const char *prefix, bool expand_ext, bool resolve,
             char ***out_names, int *out_count);           /* split \n */
 int kvlangKvWatch(kvlangKv_t *k, const char *key, const kvlangXvalue_t *target, uint64_t tick_ns, kvlangXvalue_t *out);
+int kvlangKvNotify(kvlangKv_t *k, const char *key, const kvlangXvalue_t *val, char *err, uint32_t err_cap);
+int kvlangKvTake(kvlangKv_t *k, const char *key, uint64_t timeout_ns, kvlangXvalue_t *out);
+int kvlangKvIncr(kvlangKv_t *k, const char *key, int64_t *out, char *err, uint32_t err_cap);
+int kvlangKvExpire(kvlangKv_t *k, const char *key, uint64_t ttl_ns, char *err, uint32_t err_cap);
+int kvlangKvWatchAny(kvlangKv_t *k, const char *const *keys, int n, uint64_t timeout_ns,
+                     char **out_key, kvlangXvalue_t *out);
 
 /* ── keytree ───────────────────────────────────────────────────────── */
 
@@ -157,6 +169,19 @@ int kvlangKvWatch(kvlangKv_t *k, const char *key, const kvlangXvalue_t *target, 
 #define SEG_MSG     "msg"
 #define LIB_ROOT    "/lib"
 #define VTHREAD_ROOT "/vthread"
+#define SYS_ROOT     "/sys"
+#define DEV_ROOT     "/dev"
+#define DONE_ROOT    "/done"
+#define SEG_DELEGSEQ "delegseq"
+#define SEG_RWIR_BACKEND "rwir-backend"
+#define SEG_LAST_HEARTBEAT "last_heartbeat"
+#define SEG_CATEGORY "category"
+#define SEG_LOAD     "load"
+#define SEG_CMD      "cmd"
+#define SEG_OP       "op"
+#define SEG_TASK     "task"
+#define SEG_DONE     "done"
+#define SEG_RWIR     "rwir"
 
 static inline void kvlangStrbufClear(kvlangStrbuf_t *b) { b->len = 0; if (b->p) b->p[0] = 0; }
 
@@ -179,6 +204,22 @@ void kvlangKeytreeFrameCallpc(const char *root, kvlangStrbuf_t *out);
 void kvlangKeytreeFrameReturnpc(const char *root, kvlangStrbuf_t *out);
 void kvlangKeytreeFrameRo(const char *root, kvlangStrbuf_t *out);
 bool kvlangKeytreeIsEntryPc(const char *pc);
+
+char *kvlangKeytreeCanonOp(const char *opcode);
+bool kvlangKeytreeValidSegment(const char *s);
+char *kvlangKeytreeCheckWriteKey(const char *vtid, const char *key);
+char *kvlangKeytreeSysRwirBackendRoot(void);
+char *kvlangKeytreeSysRwirBackend(const char *name);
+char *kvlangKeytreeSysRwirBackendOp(const char *name, const char *opcode);
+char *kvlangKeytreeSysRwirBackendCmd(const char *name);
+char *kvlangKeytreeSysRwirBackendStatus(const char *name);
+char *kvlangKeytreeSysRwirBackendLoad(const char *name);
+char *kvlangKeytreeSysRwirBackendHeartbeat(const char *name);
+char *kvlangKeytreeSysRwirBackendCategoryRoot(const char *name);
+char *kvlangKeytreeSysTask(const char *task_id, const char *field);
+char *kvlangKeytreeDoneRwir(const char *task_id);
+char *kvlangKeytreeVthreadDelegSeq(const char *vtid);
+char *kvlangKeytreeLibSig(const char *opcode);
 
 /* ── rwir ──────────────────────────────────────────────────────────── */
 
@@ -216,6 +257,16 @@ void kvlangVthreadGet(kvlangKv_t *kv, const char *vtid, char **pc, char **status
 void kvlangVthreadSet(kvlangKv_t *kv, const char *vtid, const char *pc, const char *status);
 void kvlangVthreadSetDone(kvlangKv_t *kv, const char *vtid, const char *ret);
 void kvlangVthreadSetError(kvlangKv_t *kv, const char *vtid, const char *pc, const char *msg);
+int64_t kvlangVthreadNextSeq(kvlangKv_t *kv, const char *key);
+
+#define KVLANG_DELEGATE_OK    0
+#define KVLANG_DELEGATE_ERR  -1
+#define KVLANG_DELEGATE_LOCAL 1
+
+bool kvlangDispatchIsDelegatedOp(kvlangKv_t *kv, const char *opcode);
+int  kvlangDispatchDelegate(kvlangKv_t *kv, const char *vtid, const char *pc, kvlangRwirInst_t *inst);
+void kvlangDispatchSetDefaultTimeoutNs(int64_t ns);
+void kvlangDispatchSetTaskStatusTtlNs(int64_t ns);
 
 /* ── builtin ───────────────────────────────────────────────────────── */
 

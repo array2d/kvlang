@@ -13,7 +13,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${BIN_DIR}")
 add_library(kvlang_runtime SHARED
     src/strbuf.c src/xvalue.c src/kv.c src/keytree.c src/rwir.c
     src/vthread.c src/logx.c src/builtin.c src/kvcpu.c src/runtime.c src/rwirext.c
-    src/kindexpr.c)
+    src/kindexpr.c src/dispatch.c)
 target_include_directories(kvlang_runtime PUBLIC include src)
 target_compile_definitions(kvlang_runtime PRIVATE _GNU_SOURCE)
 
@@ -22,3 +22,16 @@ target_link_libraries(kvlang_runtime PRIVATE kvspace m pthread)
 
 # --export-dynamic 供 kvlang（term 扩展）找符号；--disable-new-dtags 使 rpath 转 DT_RPATH（传递）。
 set_target_properties(kvlang_runtime PROPERTIES LINK_FLAGS "-Wl,--export-dynamic -Wl,--disable-new-dtags")
+
+function(kvlang_runtime_test name src)
+    add_executable(${name} ${src})
+    target_link_libraries(${name} PRIVATE kvlang_runtime pthread)
+    target_include_directories(${name} PRIVATE include src)
+    set_target_properties(${name} PROPERTIES BUILD_RPATH "${BIN_DIR}")
+endfunction()
+
+kvlang_runtime_test(kvlang_delegate_test tests/delegate_test.c)
+kvlang_runtime_test(kvlang_notify_test tests/notify_contract_test.c)
+kvlang_runtime_test(kvlang_incr_test tests/incr_test.c)
+kvlang_runtime_test(kvlang_expire_test tests/expire_test.c)
+kvlang_runtime_test(kvlang_watchany_test tests/watchany_test.c)

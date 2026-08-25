@@ -11,10 +11,18 @@ fn sig(data: &[u8]) -> String {
 }
 
 fn fresh_kv() -> Kv {
-    let dsn = format!("fs:///tmp/kvlang_layout_test_{}", std::process::id());
+    let dsn = format!("shm:///tmp/kvlang_layout_test_{}", std::process::id());
     let mut kv = Kv::conn(&dsn);
     init_dirs(&mut kv).unwrap();
     kv
+}
+
+#[test]
+fn refuse_rwir_and_rwfunc() {
+    let mut kv = fresh_kv();
+    compile(&mut kv, "rwfunc dup() -> () {\n    1 -> _\n}\n").unwrap();
+    let err = compile(&mut kv, "rwir dup() -> ()\n").unwrap_err();
+    assert!(err.contains("one opcode, one definition"), "{err}");
 }
 
 #[test]

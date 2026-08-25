@@ -34,11 +34,12 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<(), String> {
     for func in &file.funcs {
         let pkg = if func.pkg.is_empty() { file.package.clone() } else { func.pkg.clone() };
         let mut lowered = lower::lower_func(func);
-        write_func(kv, &pkg, &mut lowered);
+        write_func(kv, &pkg, &mut lowered)?;
         any_code = true;
     }
     for decl in &file.rwir_decls {
-        write_rwir_decl(kv, decl);
+        write_rwir_decl(kv, decl)?;
+        any_code = true;
     }
 
     let mut body = file.init_body.clone();
@@ -53,7 +54,7 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<(), String> {
             pkg: String::new(),
         };
         let mut lowered = lower::lower_func(&init_fn);
-        write_func(kv, "", &mut lowered);
+        write_func(kv, "", &mut lowered)?;
         any_code = true;
     }
 
@@ -100,10 +101,21 @@ pub fn vet(src: &str) -> Result<(), String> {
 }
 
 /// 写函数到 /lib/：签名（rwfunc）、源码、参数 Ptr、指令体。
-pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) {
+pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) -> Result<(), String> {
     let mut type_map = lower::infer_types(fn_);
     lower::specialize(fn_, &type_map);
     let func_dir = keytree::lib_func(pkg, &fn_.sig.name);
+    let opcode = if pkg.is_empty() {
+        fn_.sig.name.clone()
+    } else {
+        format!("{}{}{}", pkg, keytree::MEMBER_SEP, fn_.sig.name)
+    };
+    let existing = kv.get_one(&keytree::rwir(&opcode));
+    if kvkind::kind(&existing) == kvkind::KIND_DEF_RWIR {
+        return Err(format!(
+            "{opcode}: rwir declaration and rwfunc body both define it; one opcode, one definition"
+        ));
+    }
 
     // 按函数覆盖（文件夹复制式合并）：只 del_tree 本函数子树，不动 /lib 下其它函数。
     // 禁止整库删除——layoutcode 必须可增量：多次 layout 各自覆盖其函数，不误删先前的函数。
@@ -134,16 +146,23 @@ pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) {
     let _ = kv.set(&pairs);
 
     write_body(kv, pkg, &fn_.sig.name, &fn_.body, &mut type_map, 1);
+    Ok(())
 }
 
 /// 写用户声明的 rwir（无体）到 /lib/<opcode>。
-pub fn write_rwir_decl(kv: &mut Kv, decl: &RwirDecl) {
+pub fn write_rwir_decl(kv: &mut Kv, decl: &RwirDecl) -> Result<(), String> {
     let mut opcode = decl.sig.name.clone();
     if !decl.pkg.is_empty() {
         opcode = format!("{}{}{opcode}", decl.pkg, keytree::MEMBER_SEP);
     }
+    let sig = kv.get_one(&format!("{}/[0,0]", keytree::lib_func("", &opcode)));
+    if kvkind::kind(&sig) == kvkind::KIND_DEF_RWFUNC {
+        return Err(format!(
+            "{opcode}: rwir declaration and rwfunc body both define it; one opcode, one definition"
+        ));
+    }
     let v = kvkind::new_defrwir(decl.sig.num_reads(), decl.sig.num_writes(), &decl.sig.kindexp_list().join("\n"));
-    let _ = kv.set(&[(keytree::rwir(&opcode), v)]);
+    kv.set(&[(keytree::rwir(&opcode), v)])
 }
 
 /// 将 body 写入 /lib/<pkg>/<name>/ 下。offset 起始 idx（顶层函数=1）。
