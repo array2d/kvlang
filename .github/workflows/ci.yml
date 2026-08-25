@@ -9,7 +9,7 @@ jobs:
         env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
         run: ./ci/deps.sh
       - name: 构建
-        run: make shm
+        run: make runtime term layout
       - name: 测试
         env: { KVSPACE: "shm:///tmp/kvlang_ci" }
         run: python3 tutorial/test.py
