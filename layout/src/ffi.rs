@@ -16,7 +16,7 @@ pub type Handle = *mut c_void;
 #[allow(dead_code)]
 extern "C" {
     fn kvspaceConnect(dsn: *const c_char) -> Handle;
-    fn kvspaceFree(h: Handle);
+    fn kvspaceClose(h: Handle);
     fn kvspaceBytesFree(p: *mut u8, len: u32);
 
     fn kvspaceSet(
@@ -244,7 +244,7 @@ impl Kv {
 
 impl Drop for Kv {
     fn drop(&mut self) {
-        unsafe { kvspaceFree(self.h) };
+        unsafe { kvspaceClose(self.h) };
     }
 }
 

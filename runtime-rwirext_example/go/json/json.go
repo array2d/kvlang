@@ -13,7 +13,7 @@ package json
 
 // kvspace ABI（扩展宿主自连，不经 runtime）——runtime .so 传递解析其后端实现。
 extern void *kvspaceConnect(const char *dsn);
-extern void  kvspaceFree(void *h);
+extern void  kvspaceClose(void *h);
 extern void  kvspaceBytesFree(uint8_t *p, uint32_t len);
 extern int   kvspaceGet(void *h, const char *key, uint8_t **out, uint32_t *out_len);
 extern int   kvspaceSet(void *h, const char *const *keys, const uint8_t *vals,
@@ -620,7 +620,7 @@ func connect(dsn string) unsafe.Pointer {
 }
 
 func disconnect(c unsafe.Pointer) {
-	C.kvspaceFree(c)
+	C.kvspaceClose(c)
 }
 
 // Serve 常驻循环：注册 + 监控 .todo + 批量执行 + 交还 PC。
@@ -629,7 +629,7 @@ func Serve(dsn string) {
 	if c == nil {
 		return
 	}
-	defer C.kvspaceFree(c)
+	defer C.kvspaceClose(c)
 	register(c)
 	for {
 		for _, o := range ops {

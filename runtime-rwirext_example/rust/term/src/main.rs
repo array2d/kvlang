@@ -46,7 +46,7 @@ unsafe extern "C" {
 
     // kvspace ABI（扩展宿主自连：读状态、写 pc）
     fn kvspaceConnect(dsn: *const c_char) -> *mut c_void;
-    fn kvspaceFree(h: *mut c_void);
+    fn kvspaceClose(h: *mut c_void);
     fn kvspaceBytesFree(p: *mut u8, len: u32);
     fn kvspaceGet(h: *mut c_void, key: *const c_char, out: *mut *mut u8, out_len: *mut u32) -> c_int;
     fn kvspaceSet(
@@ -287,5 +287,5 @@ fn main() {
         }
     }
 
-    unsafe { kvspaceFree(kv) };
+    unsafe { kvspaceClose(kv) };
 }
