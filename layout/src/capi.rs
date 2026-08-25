@@ -18,11 +18,11 @@ use std::panic::catch_unwind;
 
 use crate::{compile, format, init_dirs, kvkind, vet, Kv};
 
-/// 复刻 Go runtime / layout_file 的 findEntry：DFS /lib/ 找首个 `.init`，否则 "init"。
+/// 复刻 Go runtime / layout_file 的 findEntry：DFS /lib/ 找首个 `·init`，否则 "init"。
 fn find_entry(kv: &mut Kv, prefix: &str) -> String {
     for c in kv.list(prefix, false, true) {
         let c = c.trim_end_matches('/');
-        if c.ends_with(".init") {
+        if c.ends_with("·init") {
             return c.to_string();
         }
         let sub = format!("{prefix}{c}/");

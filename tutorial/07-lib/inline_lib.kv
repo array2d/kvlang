@@ -1,6 +1,6 @@
 # 期望输出:
-#   mylib.add(10,20) = 30
-#   double(mylib.add(10,20)) = 60
+#   mylib·add(10,20) = 30
+#   double(mylib·add(10,20)) = 60
 lib mylib {
 	rwfunc add(A:int64, B:int64) -> (C:int64) {
 		A + B -> C
@@ -13,10 +13,10 @@ rwfunc double(x:int64) -> (y:int64) {
 }
 
 rwfunc main() -> () {
-	a = mylib.add(10, 20)  # = 等价于 <-
-	println("mylib.add(10,20) =", a)
+	a = mylib·add(10, 20)  # = 等价于 <-
+	println("mylib·add(10,20) =", a)
 	double(a) -> b
-	println("double(mylib.add(10,20)) =", b)
+	println("double(mylib·add(10,20)) =", b)
 }
 
 main()

@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use super::symbol;
+use super::{keytree, symbol};
 
 #[derive(Clone, Copy)]
 pub struct Pos {
@@ -140,7 +140,6 @@ fn single_char_token(c: u8) -> Option<Kind> {
         b'}' => Kind::RBrace,
         b'[' => Kind::LBrack,
         b']' => Kind::RBrack,
-        b'.' => Kind::Dot,
         b':' => Kind::Colon,
         _ => return None,
     })
@@ -216,7 +215,8 @@ fn is_token_delim(c: u8) -> bool {
             | b'}'
             | b'['
             | b']'
-            | b'.'
+            | b'.' // 小数点：仅数字字面量内合法，其余位置作分隔（不产 token）
+            | 0xC2 // ·（U+00B7）成员分隔符首字节
             | b'+'
             | b'-'
             | b'*'
@@ -400,7 +400,7 @@ pub fn scan(src: &str) -> Vec<Token> {
             if i + 1 < src.len() && is_abs_path_start(src[i + 1]) {
                 let start = i;
                 i += 1;
-                while i < src.len() && (!is_token_delim(src[i]) || src[i] == b'.') {
+                while i < src.len() && !is_token_delim(src[i]) {
                     i += 1;
                 }
                 tokens.push(Token {
@@ -413,6 +413,14 @@ pub fn scan(src: &str) -> Vec<Token> {
                 tokens.push(Token { kind: Kind::Ident, value: "/".to_string(), pos: p, quote: 0 });
                 i += 1;
             }
+            continue;
+        }
+
+        // 成员分隔符 ·（U+00B7，2 字节）
+        if c == 0xC2 && i + 1 < src.len() && src[i + 1] == 0xB7 {
+            tokens.push(Token { kind: Kind::Dot, value: "·".to_string(), pos: p, quote: 0 });
+            i += 2;
+            prev_newline = false;
             continue;
         }
 

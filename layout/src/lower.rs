@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use super::ast::{self, Expr, Func, Instruction, LitKind, Stmt};
-use super::{builtin, symbol};
+use super::{builtin, keytree, symbol};
 
 // ── 控制流 lowering（续体传递风格） ──────────────────────────────────
 
@@ -218,7 +218,7 @@ fn lower_for_with_cont(
     if is_obj {
         init_body.push(Stmt::Instruction(Instruction {
             comments: Vec::new(),
-            expr: Some(ast::call("kv.listlen", vec![ast::leaf(&iter_slot)])),
+            expr: Some(ast::call("kv·listlen", vec![ast::leaf(&iter_slot)])),
             writes: vec![len_slot.clone()],
             write_types: Vec::new(),
             arrow_left: false,
@@ -227,7 +227,7 @@ fn lower_for_with_cont(
     } else {
         init_body.push(Stmt::Instruction(Instruction {
             comments: Vec::new(),
-            expr: Some(ast::call("ndarray.numel", vec![ast::leaf(&iter_slot)])),
+            expr: Some(ast::call("ndarray·numel", vec![ast::leaf(&iter_slot)])),
             writes: vec![len_slot.clone()],
             write_types: Vec::new(),
             arrow_left: false,
@@ -264,7 +264,7 @@ fn lower_for_with_cont(
     if is_obj {
         body_insts.push(Stmt::Instruction(Instruction {
             comments: Vec::new(),
-            expr: Some(ast::call("kv.listn", vec![ast::leaf(&iter_slot), ast::leaf(&idx_slot)])),
+            expr: Some(ast::call("kv·listn", vec![ast::leaf(&iter_slot), ast::leaf(&idx_slot)])),
             writes: vec![key_slot.clone()],
             write_types: Vec::new(),
             arrow_left: false,
@@ -272,7 +272,7 @@ fn lower_for_with_cont(
         }));
         body_insts.push(Stmt::Instruction(Instruction {
             comments: Vec::new(),
-            expr: Some(ast::call("kv.get", vec![ast::leaf(&iter_slot), ast::leaf(&key_slot)])),
+            expr: Some(ast::call("kv·get", vec![ast::leaf(&iter_slot), ast::leaf(&key_slot)])),
             writes: vec![s.var.clone()],
             write_types: Vec::new(),
             arrow_left: false,
@@ -281,7 +281,7 @@ fn lower_for_with_cont(
     } else {
         body_insts.push(Stmt::Instruction(Instruction {
             comments: Vec::new(),
-            expr: Some(ast::call("xv.at", vec![ast::leaf(&iter_slot), ast::leaf(&idx_slot)])),
+            expr: Some(ast::call("xv·at", vec![ast::leaf(&iter_slot), ast::leaf(&idx_slot)])),
             writes: vec![s.var.clone()],
             write_types: Vec::new(),
             arrow_left: false,
@@ -530,7 +530,7 @@ fn infer_inst(inst: &Instruction, tm: &mut HashMap<String, String>) {
         None => return,
     };
     // kv.set 成员形（3 读：base, key, val）是 void 无写槽，但 base 仍须推断为 obj/map（供 for-in / 成员访问）
-    if e.op == "kv.set" && e.args.len() >= 3 && !e.args[0].val.contains('/') {
+    if e.op == "kv·set" && e.args.len() >= 3 && !e.args[0].val.contains('/') {
         tm.entry(e.args[0].val.clone()).or_insert_with(|| "objindex".to_string());
     }
     if inst.writes.is_empty() {
@@ -545,7 +545,7 @@ fn infer_inst(inst: &Instruction, tm: &mut HashMap<String, String>) {
         let inferred = lit_to_type(e.lit);
         if !inferred.is_empty() {
             for w in &inst.writes {
-                if w.is_empty() || w.starts_with('.') {
+                if w.is_empty() || w.starts_with(keytree::MEMBER_SEP) {
                     continue;
                 }
                 tm.entry(w.clone()).or_insert_with(|| inferred.to_string());
@@ -562,7 +562,7 @@ fn infer_inst(inst: &Instruction, tm: &mut HashMap<String, String>) {
         return;
     }
     for w in &inst.writes {
-        if w.is_empty() || w.starts_with('.') {
+        if w.is_empty() || w.starts_with(keytree::MEMBER_SEP) {
             continue;
         }
         tm.entry(w.clone()).or_insert_with(|| inferred.clone());
@@ -603,7 +603,7 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
     if opcode == "map" {
         return "[]strkeymapindex".to_string();
     }
-    if opcode == "kv.set" {
+    if opcode == "kv·set" {
         // 成员写 base.key = v（3 reads：base, key, value）→ base 是 obj/map。
         if reads.len() >= 3 {
             tm.entry(reads[0].clone()).or_insert_with(|| "objindex".to_string());
@@ -611,20 +611,20 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
         return String::new();
     }
     match opcode {
-        "kvlen" | "ndarray.numel" | "ndarray.dim" | "kv.listlen" | "string.len" | "string.ord" | "string.cmp" | "string.find" => {
+        "kvlen" | "ndarray·numel" | "ndarray·dim" | "kv·listlen" | "string·len" | "string·ord" | "string·cmp" | "string·find" => {
             return "int64".to_string();
         }
-        "ndarray.shape" => return "[]int64".to_string(),
-        "kv.list" => return "[]char/utf8".to_string(),
-        "string.char" | "string.set" | "string.slice" | "string.concat" => return "char/utf32".to_string(),
+        "ndarray·shape" => return "[]int64".to_string(),
+        "kv·list" => return "[]char/utf8".to_string(),
+        "string·char" | "string·set" | "string·slice" | "string·concat" => return "char/utf32".to_string(),
         "random.int63" => return "int64".to_string(),
-        "random.intn" | "random.uint64" => return "uint64".to_string(),
+        "random·intn" | "random.uint64" => return "uint64".to_string(),
         "pow" | "sqrt" | "exp" | "log" => return "float64".to_string(),
         "sign" => return "int64".to_string(),
         "abs" | "neg" | "max" | "min" => {
             return if !reads.is_empty() { slot_type(&reads[0], tm) } else { String::new() };
         }
-        "xv.at" => {
+        "xv·at" => {
             if !reads.is_empty() {
                 if let Some(t) = tm.get(&format!("{}.0", reads[0])) {
                     return t.clone();
@@ -637,7 +637,7 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
             }
             return String::new();
         }
-        "xv.set" => {
+        "xv·set" => {
             if let Some(last) = reads.last() {
                 let t = slot_type(last, tm);
                 if !t.is_empty() {
@@ -647,7 +647,7 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
             }
             return if !reads.is_empty() { slot_type(&reads[0], tm) } else { String::new() };
         }
-        "xv.reshape" => {
+        "xv·reshape" => {
             return if !reads.is_empty() { slot_type(&reads[0], tm) } else { String::new() };
         }
         _ => {}
@@ -730,10 +730,10 @@ fn specialize_inst(inst: &mut Instruction, tm: &HashMap<String, String>) {
     }
     // xv.at/xv.set 基座是 obj → 降为 kv.get/kv.set（命名成员目录访问）。
     // map 是散 key 数组（base[i]），保持 xv.at/xv.set 走散 key 下标路径。
-    if (e.op == "xv.at" || e.op == "xv.set") && !e.args.is_empty() {
+    if (e.op == "xv·at" || e.op == "xv·set") && !e.args.is_empty() {
         if let Some(t) = tm.get(&e.args[0].val) {
             if t == "objindex" {
-                e.op = if e.op == "xv.at" { "kv.get".to_string() } else { "kv.set".to_string() };
+                e.op = if e.op == "xv·at" { "kv·get".to_string() } else { "kv·set".to_string() };
             }
         }
     }
@@ -764,5 +764,5 @@ fn specialize_inst(inst: &mut Instruction, tm: &HashMap<String, String>) {
     if k.is_empty() {
         return;
     }
-    e.op = format!("{k}.{word}");
+    e.op = format!("{k}{}{word}", keytree::MEMBER_SEP);
 }

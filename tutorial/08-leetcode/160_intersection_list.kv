@@ -23,7 +23,7 @@ rwfunc get_intersection(ha:[]char/utf32, hb:[]char/utf32) -> () {
 	switch_a = 0  # = 等价于 <-
 	switch_b <- 0
 	while (pa != pb) {
-		pa.next -> nxt
+		pa·next -> nxt
 		if (nxt == "") {
 			if (switch_a == 0) {
 				hb -> pa
@@ -34,7 +34,7 @@ rwfunc get_intersection(ha:[]char/utf32, hb:[]char/utf32) -> () {
 		} else {
 			nxt -> pa
 		}
-		pb.next -> nxt2
+		pb·next -> nxt2
 		if (nxt2 == "") {
 			if (switch_b == 0) {
 				ha -> pb
@@ -47,7 +47,7 @@ rwfunc get_intersection(ha:[]char/utf32, hb:[]char/utf32) -> () {
 		}
 	}
 	if (pa != "") {
-		pa.val -> v
+		pa·val -> v
 		println(v)
 	}
 }

@@ -41,10 +41,10 @@ fn compile_simple_func() {
     assert!(kvkind::is_ptr(&c));
     assert_eq!(kvkind::ptr_target(&c), "[0,1]");
 
-    // 指令（特化后 opcode = int64.add）
+    // 指令（特化后 opcode = int64·add）
     let op = kv.get_one("/lib/sum/[1,0]");
     assert_eq!(kvkind::kind(&op), "rwir|rwfunc");
-    assert_eq!(sig(&op), "int64.add");
+    assert_eq!(sig(&op), "int64·add");
     assert_eq!(sig(&kv.get_one("/lib/sum/[1,-1]")), "A");
     assert_eq!(sig(&kv.get_one("/lib/sum/[1,-2]")), "B");
     assert_eq!(sig(&kv.get_one("/lib/sum/[1,1]")), "C");
@@ -60,12 +60,12 @@ fn compile_string_literal_and_lib() {
     let src = "lib p { rwfunc hi() -> () {\n    \"hello\" -> _\n} }\n";
     compile(&mut kv, src).unwrap();
 
-    // 函数在 /lib/p.hi/ 下（lib 块 pkg 前缀）
-    let sig_val = kv.get_one("/lib/p.hi/[0,0]");
+    // 函数在 /lib/p·hi/ 下（lib 块 pkg 前缀）
+    let sig_val = kv.get_one("/lib/p·hi/[0,0]");
     assert_eq!(kvkind::kind(&sig_val), "defrwfunc");
 
     // 字符串字面量读槽 → char/utf32（UTF-32 LE 码点）
-    let r = kv.get_one("/lib/p.hi/[1,-1]");
+    let r = kv.get_one("/lib/p·hi/[1,-1]");
     assert_eq!(kvkind::kind(&r), "char/utf32");
     let b = body(&r);
     let s: String = b
@@ -81,7 +81,7 @@ fn compile_multiline_string_literal() {
     let src = "lib m { rwfunc ml() -> () {\n    \"\"\"hello\nworld\"\"\" -> _\n} }\n";
     compile(&mut kv, src).unwrap();
 
-    let r = kv.get_one("/lib/m.ml/[1,-1]");
+    let r = kv.get_one("/lib/m·ml/[1,-1]");
     assert_eq!(kvkind::kind(&r), "char/utf32");
     let b = body(&r);
     let s: String = b

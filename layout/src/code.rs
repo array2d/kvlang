@@ -1,11 +1,11 @@
 //! layoutcode（对齐 layout/layout.go 的编译期部分）：把 AST 写到 /lib/ 下的结构化 KV。
 //!
 //! 存储约定：
-//!   /lib/<pkg>.<name>/[0,0]         编译后签名（kind=rwfunc）
-//!   /lib/<pkg>.<name>/<param>       命名参数→slot 指针（kind=char, isptr=1）
-//!   /lib/<pkg>.<name>/[i,j]         编译后指令（kind=rwir），i 从 1 开始
-//!   /lib/<pkg>.<name>/<label>/      基本块子路径（scope 指令）
-//!   /lib/<pkg>.<name>.src           源码副本
+//!   /lib/<pkg>·<name>/[0,0]         编译后签名（kind=rwfunc）
+//!   /lib/<pkg>·<name>/<param>       命名参数→slot 指针（kind=char, isptr=1）
+//!   /lib/<pkg>·<name>/[i,j]         编译后指令（kind=rwir），i 从 1 开始
+//!   /lib/<pkg>·<name>/<label>/      基本块子路径（scope 指令）
+//!   /lib/<pkg>·<name>.src           源码副本
 
 use std::collections::HashMap;
 
@@ -320,7 +320,7 @@ mod tests {
 
     #[test]
     fn format_preserves_lib() {
-        roundtrip("lib http {\n\trwfunc get(url:[]char/utf32) -> (resp:[]char/utf32) {\n\t\thttp.call(\"GET\", \"\", url, \"\") -> resp\n\t}\n}\n");
+        roundtrip("lib http {\n\trwfunc get(url:[]char/utf32) -> (resp:[]char/utf32) {\n\t\thttp·call(\"GET\", \"\", url, \"\") -> resp\n\t}\n}\n");
         roundtrip("lib byteseek {\nlib session {\nlib s1 {\nrwfunc main() -> () {\n3 + 4 -> s\nprintln(s)\n}\n}\n}\n}\nmain()\n");
     }
 
@@ -330,11 +330,11 @@ mod tests {
         init_dirs(&mut kv).unwrap();
 
         compile(&mut kv, "lib a {\nlib b {\nrwfunc f() -> (r:int64) {\n1 -> r\n}\n}\n}\n").unwrap();
-        assert_eq!(kvkind::kind(&kv.get_one("/lib/a/b.f/[0,0]")), "defrwfunc");
+        assert_eq!(kvkind::kind(&kv.get_one("/lib/a/b·f/[0,0]")), "defrwfunc");
 
-        // 同 lib a 下再 layout 另一嵌套 lib c，验证 b.f 未被整库删除（增量合并）
+        // 同 lib a 下再 layout 另一嵌套 lib c，验证 b·f 未被整库删除（增量合并）
         compile(&mut kv, "lib a {\nlib c {\nrwfunc g() -> (r:int64) {\n2 -> r\n}\n}\n}\n").unwrap();
-        assert_eq!(kvkind::kind(&kv.get_one("/lib/a/b.f/[0,0]")), "defrwfunc", "b.f 应保留");
-        assert_eq!(kvkind::kind(&kv.get_one("/lib/a/c.g/[0,0]")), "defrwfunc");
+        assert_eq!(kvkind::kind(&kv.get_one("/lib/a/b·f/[0,0]")), "defrwfunc", "b·f 应保留");
+        assert_eq!(kvkind::kind(&kv.get_one("/lib/a/c·g/[0,0]")), "defrwfunc");
     }
 }

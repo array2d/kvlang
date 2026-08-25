@@ -1,5 +1,15 @@
 #include "runtime_internal.h"
 
+/* 找末个成员分隔符（·，多字节），对齐 strrchr('.') 的单字节旧语义。 */
+static const char *rfind_sep(const char *s) {
+    const char *found = NULL, *p = s;
+    while ((p = strstr(p, MEMBER_SEP)) != NULL) {
+        found = p;
+        p += MEMBER_SEP_LEN;
+    }
+    return found;
+}
+
 static int stack_depth(const char *pc) {
     int d = 0;
     for (; *pc; pc++) if (*pc == '[') d++;
@@ -103,7 +113,7 @@ static char *load_def_reads(kvlangKv_t *kv, const char *key, int *out_nr) {
 static char *frame_slot_key(const char *frame_root, const char *slot) {
     if (!slot || !slot[0]) return NULL;
     if (slot[0] == '/') return strdup(slot);
-    if (slot[0] == '.') return NULL;
+    if (strncmp(slot, MEMBER_SEP, MEMBER_SEP_LEN) == 0) return NULL;
     kvlangStrbuf_t b; kvlangStrbufInit(&b);
     char *stk = kvlangKeytreeStack(frame_root);
     kvlangStrbufPuts(&b, stk); free(stk);
@@ -242,12 +252,12 @@ static char *handle_call(kvlangKv_t *kv, const char *pc, kvlangRwirInst_t *inst)
     const char *lp = "/lib/";
     if (strncmp(fn, lp, 5) == 0) {
         const char *rest = fn + 5;
-        const char *dot = strrchr(rest, '.');
-        if (dot) { free(pkg); pkg = strndup(rest, (size_t)(dot - rest)); free(name); name = strdup(dot + 1); }
+        const char *dot = rfind_sep(rest);
+        if (dot) { free(pkg); pkg = strndup(rest, (size_t)(dot - rest)); free(name); name = strdup(dot + MEMBER_SEP_LEN); }
         else { free(name); name = strdup(rest); }
     } else {
-        const char *dot = strrchr(fn, '.');
-        if (dot) { free(pkg); pkg = strndup(fn, (size_t)(dot - fn)); free(name); name = strdup(dot + 1); }
+        const char *dot = rfind_sep(fn);
+        if (dot) { free(pkg); pkg = strndup(fn, (size_t)(dot - fn)); free(name); name = strdup(dot + MEMBER_SEP_LEN); }
     }
     char *func_key = kvlangKeytreeLibFunc(pkg, name);
     kvlangStrbuf_t func_dir; kvlangStrbufInit(&func_dir);
@@ -468,8 +478,8 @@ char *kvlangKvcpuBootstrap(kvlangKv_t *kv, const char *vtid, const char *funcnam
                       const char *const *args, int nargs) {
     char *pkg = strdup("");
     char *name = strdup(funcname);
-    const char *dot = strrchr(funcname, '.');
-    if (dot) { free(pkg); pkg = strndup(funcname, (size_t)(dot - funcname)); free(name); name = strdup(dot + 1); }
+    const char *dot = rfind_sep(funcname);
+    if (dot) { free(pkg); pkg = strndup(funcname, (size_t)(dot - funcname)); free(name); name = strdup(dot + MEMBER_SEP_LEN); }
     char *func_key = kvlangKeytreeLibFunc(pkg, name);
     kvlangStrbuf_t func_dir; kvlangStrbufInit(&func_dir);
     kvlangStrbufPuts(&func_dir, func_key); kvlangStrbufPutc(&func_dir, '/');

@@ -6,7 +6,7 @@
 # 用整数数组模拟字符串，1='a', 2='b', etc.
 rwfunc is_pal() -> () {
 	s:[]int64 = [1, 2, 1]  # = 等价于 <-
-	ndarray.numel(s) -> n
+	ndarray·numel(s) -> n
 	l <- 0
 	r = n - 1  # = 等价于 <-
 	1 -> ok
@@ -28,7 +28,7 @@ rwfunc is_pal() -> () {
 
 rwfunc not_pal() -> () {
 	s:[]int64 = [1, 2]  # = 等价于 <-
-	ndarray.numel(s) -> n
+	ndarray·numel(s) -> n
 	l <- 0
 	r = n - 1  # = 等价于 <-
 	1 -> ok

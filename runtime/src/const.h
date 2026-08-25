@@ -37,7 +37,8 @@
 
 #define PATH_SEP           "/"
 #define DIR_INDEX_SUF      "/"
-#define MEMBER_SEP         "."
+#define MEMBER_SEP         "\xC2\xB7"   /* · U+00B7 中点号：成员分隔符，释放 '.' 供小数 key */
+#define MEMBER_SEP_LEN     2            /* MEMBER_SEP 的 UTF-8 字节数 */
 #define INDEX_VALUE_SEP    "\n"
 #define RUNTIME_MEMBER_SEP "\xE2\x80\xA5"   /* ‥ U+2025 */
 #define EXT_INDEX_HEAD     "\xE2\x80\xA6"   /* … U+2026 */

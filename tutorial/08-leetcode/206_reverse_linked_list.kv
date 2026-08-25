@@ -18,16 +18,16 @@ rwfunc reverse(head:[]char/utf32) -> () {
 	prev = ""  # = 等价于 <-
 	head -> cur
 	while (cur != "") {
-		nxt <- cur.next
-		cur.next = prev  # = 等价于 <-
+		nxt <- cur·next
+		cur·next = prev  # = 等价于 <-
 		cur -> prev
 		cur <- nxt
 	}
 	p = prev  # = 等价于 <-
 	while (p != "") {
-		p.val -> v
+		p·val -> v
 		println(v)
-		p <- p.next
+		p <- p·next
 	}
 }
 

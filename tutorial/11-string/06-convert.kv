@@ -9,7 +9,7 @@ rwfunc main() -> () {
 	s:[]char/utf8 = "hello"   # 变宽，禁索引
 	t <- char/utf32(s)      # 转 utf32 定宽，可索引
 	println(t)
-	println(string.char(t, 1))
+	println(string·char(t, 1))
 	u <- char/ascii("world")  # 转 ascii（非 ASCII 会报错）
 	println(u)
 }

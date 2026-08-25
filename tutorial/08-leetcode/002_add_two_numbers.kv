@@ -24,15 +24,15 @@ rwfunc add(a:[]char/utf32, b:[]char/utf32) -> () {
 		sum <- carry
 
 		if (pa != "") {
-			pa.val -> av
+			pa·val -> av
 			sum + av -> sum
-			pa = pa.next
+			pa = pa·next
 		}
 
 		if (pb != "") {
-			pb.val -> bv
+			pb·val -> bv
 			bv + sum -> sum
-			pb.next -> pb
+			pb·next -> pb
 		}
 
 		digit <- sum % 10
@@ -52,7 +52,7 @@ rwfunc add(a:[]char/utf32, b:[]char/utf32) -> () {
 
 rwfunc main() -> () {
 	build_lists()
-	lc.add("/l1_0", "/l2_0")
+	lc·add("/l1_0", "/l2_0")
 }
 
 main()

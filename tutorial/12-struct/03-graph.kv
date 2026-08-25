@@ -1,21 +1,21 @@
 # 有向图（邻接表）：非表意指针 + dict
-# 待实现：需隐式 .hex 子 key
-# wip: 需要 .hex 隐式创建实现
-# 语义: g 是容器；g.a/g.b/g.c 隐式建节点，邻居存为成员引用。边 a→b, a→c
+# 待实现：需隐式 ·hex 子 key
+# wip: 需要 ·hex 隐式创建实现
+# 语义: g 是容器；g·a/g·b/g·c 隐式建节点，邻居存为成员引用。边 a→b, a→c
 # 期望输出:
-#   g.a -> 2 , 3
+#   g·a -> 2 , 3
 
 g = {}
-g.a = {}
-g.a.val = 1
-g.b = {}
-g.b.val = 2
-g.c = {}
-g.c.val = 3
+g·a = {}
+g·a·val = 1
+g·b = {}
+g·b·val = 2
+g·c = {}
+g·c·val = 3
 
-g.a.n0 = g.b
-g.a.n1 = g.c
+g·a·n0 = g·b
+g·a·n1 = g·c
 
-g.a.n0.val -> x
-g.a.n1.val -> y
-println("g.a ->", x, ",", y)
+g·a·n0·val -> x
+g·a·n1·val -> y
+println("g·a ->", x, ",", y)

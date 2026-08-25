@@ -13,8 +13,8 @@ rwfunc build_tree() -> () {
 rwfunc max_depth(root:[]char/utf32) -> (depth:int64) {
 	if (root == "") { 0 -> depth }
 	else {
-		ld = max_depth(root.left)  # = 等价于 <-
-		rd <- max_depth(root.right)
+		ld = max_depth(root·left)  # = 等价于 <-
+		rd <- max_depth(root·right)
 		if (ld > rd) { ld + 1 -> depth }
 		else { depth <- rd + 1 }
 	}

@@ -41,7 +41,7 @@ static ENTRIES: &[Entry] = &[
     Entry { word: "rbrack", glyphs: &["]"], precedence: 0, arith: false, cmp: false, unary: false },
     Entry { word: "comma", glyphs: &[","], precedence: 0, arith: false, cmp: false, unary: false },
     Entry { word: "semicolon", glyphs: &[";"], precedence: 0, arith: false, cmp: false, unary: false },
-    Entry { word: "dot", glyphs: &["."], precedence: 0, arith: false, cmp: false, unary: false },
+    Entry { word: "dot", glyphs: &["·"], precedence: 0, arith: false, cmp: false, unary: false },
     Entry { word: "colon", glyphs: &[":"], precedence: 0, arith: false, cmp: false, unary: false },
     // 箭头 / 赋值（= 兼作 copy opcode）
     Entry { word: "assign", glyphs: &["<-", "->", "="], precedence: 0, arith: false, cmp: false, unary: false },

@@ -3,7 +3,7 @@
 rwfunc romanToInt(s:[]char/utf32) -> (val:int64) {
 	0 -> val
 	i <- 0
-	n = string.len(s)  # = 等价于 <-
+	n = string·len(s)  # = 等价于 <-
 	"" -> prev
 	while (i < n) {
 		c <- s[i]

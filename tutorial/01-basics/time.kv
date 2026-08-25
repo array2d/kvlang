@@ -12,43 +12,43 @@
 #   1 s = 1000000000 ns
 rwfunc main() -> () {
     println("before")
-    t0 <- time.now()
-    t1 <- time.now()
+    t0 <- time·now()
+    t1 <- time·now()
     println("after")
 
-    before <- time.before(t0, t1)
+    before <- time·before(t0, t1)
     print("t0 < t1: ")
     println(before)
 
-    after <- time.after(t0, t1)
+    after <- time·after(t0, t1)
     print("t0 > t1: ")
     println(after)
 
-    delta <- time.sub(t1, t0)
+    delta <- time·sub(t1, t0)
     print("delta >= 0 ns: ")
-    zero = time/duration.nanos(0)  # = 等价于 <-
-    println(time/duration.before(zero, delta))
+    zero = time/duration·nanos(0)  # = 等价于 <-
+    println(time/duration·before(zero, delta))
 
-    ms <- time/duration.as_millis(delta)
+    ms <- time/duration·as_millis(delta)
     print("delta ms = ")
     println(ms)
 
-    s <- time/duration.as_seconds(delta)
+    s <- time/duration·as_seconds(delta)
     print("delta s = ")
     println(s)
 
-    sum <- time.add(t0, delta)
+    sum <- time·add(t0, delta)
     print("t0 + delta == t1: ")
-    a <- not(time.before(sum, t1))
-    b <- not(time.after(sum, t1))
+    a <- not(time·before(sum, t1))
+    b <- not(time·after(sum, t1))
     println(and(a, b))
 
     1000 -> n  # = 等价于 <-
     print(n)
     println(" ms")
 
-    one_sec <- time/duration.seconds(1)
-    ns <- time/duration.as_nanos(one_sec)
+    one_sec <- time/duration·seconds(1)
+    ns <- time/duration·as_nanos(one_sec)
     print("1 s = ")
     print(ns)
     println(" ns")

@@ -1,19 +1,19 @@
 # random: 随机数生成（crypto/rand 真随机，非伪随机）
-# 语义: random.uint64() 返回随机 uint64；random.int63() 返回非负 int64（≤ 2^63-1）；
-#       random.intn(n) 返回 [0, n) 的 uint64
+# 语义: random·uint64() 返回随机 uint64；random·int63() 返回非负 int64（≤ 2^63-1）；
+#       random·intn(n) 返回 [0, n) 的 uint64
 # 期望输出:
 #   int63 >= 0: true
 #   intn in [0,100): true
 #   two randoms differ: true
 rwfunc main() -> () {
-	n <- random.int63()
+	n <- random·int63()
 	println("int63 >= 0:", n >= 0)
 
-	m <- random.intn(100)
+	m <- random·intn(100)
 	println("intn in [0,100):", m >= 0 && m < 100)
 
-	a <- random.uint64()
-	b <- random.uint64()
+	a <- random·uint64()
+	b <- random·uint64()
 	println("two randoms differ:", a != b)
 }
 

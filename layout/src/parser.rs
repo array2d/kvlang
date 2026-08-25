@@ -294,7 +294,8 @@ impl Parser {
         if self.peek().kind == Kind::Ident {
             decl.sig.name = self.advance().value;
             if self.peek().kind == Kind::Dot {
-                decl.sig.name.push_str(&self.advance().value); // .
+                self.advance(); // .
+                decl.sig.name.push_str(keytree::MEMBER_SEP);
                 if self.peek().kind == Kind::Ident {
                     decl.sig.name.push_str(&self.advance().value);
                 }
@@ -550,7 +551,7 @@ impl Parser {
             }
             // kv.set 成员形（3 读：base, key, val）改写 base 的成员目录，命中读参即拒绝
             if let Some(e) = &inst.expr {
-                if e.op == "kv.set" && e.args.len() >= 3 {
+                if e.op == "kv·set" && e.args.len() >= 3 {
                     let base = &e.args[0].val;
                     if !base.contains('/') && ro.contains(base) {
                         bad(p, base, fname);
@@ -757,10 +758,10 @@ impl Parser {
                     let arr = s[..br].to_string();
                     let idxs = s[br + 1..s.len().saturating_sub(1)].to_string();
                     let e = inst.expr.take();
-                    // strkeymap 坐标写 m.[i,j] <- v：坐标段是成员名（kv.set 字符串键）。
-                    let dot_coord = arr.ends_with('.');
-                    let arr = arr.trim_end_matches('.').to_string();
-                    let op = if dot_coord { "kv.set" } else if arr.starts_with('/') { "kv.set" } else { "xv.set" };
+                    // strkeymap 坐标写 m·[i,j] <- v：坐标段是成员名（kv.set 字符串键）。
+                    let dot_coord = arr.ends_with(keytree::MEMBER_SEP);
+                    let arr = arr.trim_end_matches(keytree::MEMBER_SEP).to_string();
+                    let op = if dot_coord { "kv·set" } else if arr.starts_with('/') { "kv·set" } else { "xv·set" };
                     if dot_coord {
                         inst.expr = Some(ast::call(
                             op,
@@ -857,13 +858,13 @@ impl Parser {
                     self.advance(); // consume *
                     if self.peek().kind == Kind::Ident {
                         let key = self.advance().value;
-                        left = ast::call("kv.get", vec![left, ast::leaf(&key)]);
+                        left = ast::call("kv·get", vec![left, ast::leaf(&key)]);
                         continue;
                     }
                 }
                 if self.peek().kind == Kind::Ident || self.peek().kind == Kind::Literal {
                     let field = self.advance().value;
-                    left = ast::call("kv.get", vec![left, ast::str_lit(&field)]);
+                    left = ast::call("kv·get", vec![left, ast::str_lit(&field)]);
                     continue;
                 }
                 // strkeymap 坐标访问 m.[i,j]：坐标段是单个成员名（kv.get 字符串键）。
@@ -883,7 +884,7 @@ impl Parser {
                         "[{}]",
                         idxs.iter().map(|e| e.to_string()).collect::<Vec<_>>().join(",")
                     );
-                    left = ast::call("kv.get", vec![left, ast::str_lit(&coord)]);
+                    left = ast::call("kv·get", vec![left, ast::str_lit(&coord)]);
                     continue;
                 }
             }
@@ -904,7 +905,7 @@ impl Parser {
                 let mut args = vec![left];
                 args.extend(indices);
                 // 路径字面量 + [idx] → kv.get（KV 路径成员访问）；否则 xv.at（compact 数组元素）。
-                left = ast::call(if is_path { "kv.get" } else { "xv.at" }, args);
+                left = ast::call(if is_path { "kv·get" } else { "xv·at" }, args);
                 continue;
             }
             let t = self.peek();
@@ -1275,7 +1276,8 @@ impl Parser {
             }
             if (t.kind == Kind::Ident || is_path_literal) && self.peek_at(1).kind == Kind::Dot {
                 let mut w = self.advance().value;
-                w.push_str(&self.advance().value); // .
+                self.advance(); // .
+                w.push_str(keytree::MEMBER_SEP);
                 if self.peek().kind == Kind::Ident && self.peek().value == "*" && self.peek_at(1).kind == Kind::Ident {
                     w.push_str(&self.advance().value); // *
                 }
@@ -1338,9 +1340,13 @@ impl Parser {
                 continue;
             }
             let is_path_lit = t.kind == Kind::Literal && !t.value.is_empty() && t.value.as_bytes()[0] == b'/';
-            if (t.kind == Kind::Ident || is_path_lit) && self.peek_at(1).kind == Kind::Dot {
+            if (t.kind == Kind::Ident || is_path_lit)
+                && self.peek_at(1).kind == Kind::Dot
+                && self.peek_at(2).kind != Kind::LBrack
+            {
                 let mut w = self.advance().value;
-                w.push_str(&self.advance().value); // .
+                self.advance(); // .
+                w.push_str(keytree::MEMBER_SEP);
                 if self.peek().kind == Kind::Ident && self.peek().value == "*" && self.peek_at(1).kind == Kind::Ident {
                     w.push_str(&self.advance().value); // *
                 }
@@ -1368,7 +1374,8 @@ impl Parser {
             }
             if t.kind == Kind::Ident && self.peek_at(1).kind == Kind::Dot && self.peek_at(2).kind == Kind::LBrack {
                 let mut w = self.advance().value; // base
-                w.push_str(&self.advance().value); // .
+                self.advance(); // .
+                w.push_str(keytree::MEMBER_SEP);
                 w.push_str(&self.advance().value); // [
                 let mut depth = 1i32;
                 while depth > 0 && self.peek().kind != Kind::EOF && self.peek().kind != Kind::Arrow {
@@ -1398,7 +1405,7 @@ impl Parser {
         let s = inst.writes[0].clone();
         let dt = s.find(keytree::MEMBER_SEP).unwrap_or(s.len());
         let base = s[..dt].to_string();
-        let field = s[dt + 1..].to_string();
+        let field = s[dt + keytree::MEMBER_SEP.len()..].to_string();
         let key = if field.starts_with('*') {
             if field.len() == 1 {
                 let t = self.peek();
@@ -1419,7 +1426,7 @@ impl Parser {
         };
         let e = inst.expr.take();
         // base.key = v 脱糖为 kv.set(base, key, val)：kv.set 是 void（副作用写成员），无写槽
-        inst.expr = Some(ast::call("kv.set", vec![ast::leaf(&base), key, e.unwrap_or(ast::leaf(""))]));
+        inst.expr = Some(ast::call("kv·set", vec![ast::leaf(&base), key, e.unwrap_or(ast::leaf(""))]));
         inst.writes = Vec::new();
         inst.write_types = Vec::new();
     }
