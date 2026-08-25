@@ -5,7 +5,7 @@
 #   -1
 rwfunc range_sum() -> () {
 	a:[]int64 <- [-2, 0, 3, -5, 2, -1]
-	n = xv.numel(a)  # = 等价于 <-
+	n = ndarray.numel(a)  # = 等价于 <-
 	# build prefix sums
 	[0, 0, 0, 0, 0, 0] -> p:[]int64
 	s <- a[0]

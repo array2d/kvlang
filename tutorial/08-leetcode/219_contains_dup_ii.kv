@@ -4,7 +4,7 @@
 #   true
 #   false
 rwfunc near_dup(nums:[]int64, k:int64) -> () {
-	n <- xv.numel(nums)
+	n <- ndarray.numel(nums)
 	h = {}  # = 等价于 <-
 	found = false  # = 等价于 <-
 	0 -> i

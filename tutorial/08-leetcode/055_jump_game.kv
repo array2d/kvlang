@@ -5,7 +5,7 @@
 #   false
 rwfunc can_jump(nums:[]int64) -> (ok:int64) {
 	ok = 1  # = 等价于 <-
-	n <- xv.numel(nums)
+	n <- ndarray.numel(nums)
 	0 -> reach
 	i = 0  # = 等价于 <-
 	while (i < n) {

@@ -191,7 +191,9 @@ fn lower_for_with_cont(
     let keys_slot = lg.tmp();
     let key_slot = lg.tmp();
     let is_obj = s.iter.op == "obj"
-        || (s.iter.is_leaf() && matches!(tm.get(&s.iter.val), Some(t) if t == "objindex"));
+        || s.iter.op == "map"
+        || (s.iter.is_leaf()
+            && matches!(tm.get(&s.iter.val), Some(t) if t == "objindex" || t == "[]strkeymapindex" || t == "strkeymapindex"));
 
     // 迭代源：裸标识符直接原地遍历；表达式（如数组字面量）先物化到临时槽。
     let mut init_body = Vec::new();
@@ -217,15 +219,7 @@ fn lower_for_with_cont(
     if is_obj {
         init_body.push(Stmt::Instruction(Instruction {
             comments: Vec::new(),
-            expr: Some(ast::call("kv.list", vec![ast::leaf(&iter_slot)])),
-            writes: vec![keys_slot.clone()],
-            write_types: Vec::new(),
-            arrow_left: false,
-            eq: false,
-        }));
-        init_body.push(Stmt::Instruction(Instruction {
-            comments: Vec::new(),
-            expr: Some(ast::call("xv.numel", vec![ast::leaf(&keys_slot)])),
+            expr: Some(ast::call("kv.listlen", vec![ast::leaf(&iter_slot)])),
             writes: vec![len_slot.clone()],
             write_types: Vec::new(),
             arrow_left: false,
@@ -234,7 +228,7 @@ fn lower_for_with_cont(
     } else {
         init_body.push(Stmt::Instruction(Instruction {
             comments: Vec::new(),
-            expr: Some(ast::call("xv.numel", vec![ast::leaf(&iter_slot)])),
+            expr: Some(ast::call("ndarray.numel", vec![ast::leaf(&iter_slot)])),
             writes: vec![len_slot.clone()],
             write_types: Vec::new(),
             arrow_left: false,
@@ -271,7 +265,7 @@ fn lower_for_with_cont(
     if is_obj {
         body_insts.push(Stmt::Instruction(Instruction {
             comments: Vec::new(),
-            expr: Some(ast::call("xv.at", vec![ast::leaf(&keys_slot), ast::leaf(&idx_slot)])),
+            expr: Some(ast::call("kv.listn", vec![ast::leaf(&iter_slot), ast::leaf(&idx_slot)])),
             writes: vec![key_slot.clone()],
             write_types: Vec::new(),
             arrow_left: false,
@@ -608,7 +602,7 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
         return "objindex".to_string();
     }
     if opcode == "map" {
-        return "strkeymapindex".to_string();
+        return "[]strkeymapindex".to_string();
     }
     if opcode == "kv.set" {
         // 成员写 base.key = v（3 reads：base, key, value）→ base 是 obj/map。
@@ -618,10 +612,10 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
         return String::new();
     }
     match opcode {
-        "kvlen" | "xv.numel" | "xv.dim" | "string.len" | "string.ord" | "string.cmp" | "string.find" => {
+        "kvlen" | "ndarray.numel" | "ndarray.dim" | "kv.listlen" | "string.len" | "string.ord" | "string.cmp" | "string.find" => {
             return "int64".to_string();
         }
-        "xv.shape" => return "[]int64".to_string(),
+        "ndarray.shape" => return "[]int64".to_string(),
         "kv.list" => return "[]char/utf8".to_string(),
         "string.char" | "string.set" | "string.slice" | "string.concat" => return "char/utf32".to_string(),
         "random.int63" => return "int64".to_string(),

@@ -5,7 +5,7 @@
 #   4
 rwfunc single_number() -> () {
 	a:[]int64 <- [4, 1, 2, 1, 2]
-	n = xv.numel(a)  # = 等价于 <-
+	n = ndarray.numel(a)  # = 等价于 <-
 	a[0] -> result
 	i <- 1
 	while (i < n) {

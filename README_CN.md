@@ -210,7 +210,7 @@ for (x in [7, 2, 9, 4]) { println(x) }
 **标量：** `abs` `neg` `sign` `pow` `sqrt` `exp` `log` `min` `max`（变参，如 `max(a,b,c)`）`debugger`\
 **类型：** `bool` `int8` `int16` `int32` `int64` `uint8` `uint16` `uint32` `uint64` `float32` `float64` `char/utf8` `char/utf32` `char/ascii`\
 **容器：** `array` `at` `set` `has` `array.sort` `array.slice` `array.append` `dict`\
-**形状：** `xv.numel` `xv.dim` `xv.shape` `xv.at` `xv.set`\
+**形状：** `ndarray.numel` `ndarray.dim` `ndarray.shape` `xv.at` `xv.set`\
 **KV 树：** `kv.get` `kv.set` `kv.del` `kv.deltree` `kv.list` `kv.mkindex` `kv.extindex` `kv.rmindexext` `kv.watch` `kv.has` `kv.at`\
 **字符串：** `string.char` `string.ord` `string.len` `string.cmp` `string.find` `string.slice` `string.concat` `string.set`\
 **时间：** `time.now` `time.sub` `time.add` `time.before` `time.after` `time/duration.nanos` `time/duration.as_nanos`（及 `millis`/`seconds`/`minutes`/`hours` 变体）\
@@ -220,7 +220,7 @@ for (x in [7, 2, 9, 4]) { println(x) }
 
 ```kv
 a:int64 = [7, 2, 9, 4]     # 带类型 1D 数组，= ≡ <-
-xv.numel(a) -> n         # 4
+ndarray.numel(a) -> n         # 4
 at(a, 2) -> e            # 9
 set(a, 1, 99) -> a       # 修改元素：a 变为 [7, 99, 9, 4]
 sort(a) -> sorted         # 排序副本：[2, 4, 7, 9]

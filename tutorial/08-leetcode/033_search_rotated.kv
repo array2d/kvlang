@@ -5,7 +5,7 @@
 #   4
 rwfunc search() -> () {
 	a:[]int64 <- [4, 5, 6, 7, 0, 1, 2]
-	n = xv.numel(a)  # = 等价于 <-
+	n = ndarray.numel(a)  # = 等价于 <-
 	0 -> target
 	lo <- 0
 	hi = n - 1  # = 等价于 <-

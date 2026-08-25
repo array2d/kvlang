@@ -5,7 +5,7 @@
 typedef int (*kvlangBuiltinFn)(kvlangFrame_t *f);
 
 /* collection 模块 handler（builtin_coll.c） */
-int kvlangBuiltinArray(kvlangFrame_t *f), kvlangBuiltinXvNumel(kvlangFrame_t *f), kvlangBuiltinXvDim(kvlangFrame_t *f), kvlangBuiltinXvShape(kvlangFrame_t *f),
+int kvlangBuiltinArray(kvlangFrame_t *f), kvlangBuiltinNdarrayNumel(kvlangFrame_t *f), kvlangBuiltinNdarrayDim(kvlangFrame_t *f), kvlangBuiltinNdarrayShape(kvlangFrame_t *f),
     kvlangBuiltinXvAt(kvlangFrame_t *f), kvlangBuiltinXvSet(kvlangFrame_t *f), kvlangBuiltinXvReshape(kvlangFrame_t *f),
     kvlangBuiltinScatter(kvlangFrame_t *f), kvlangBuiltinCompact(kvlangFrame_t *f),
     kvlangBuiltinAppend(kvlangFrame_t *f), kvlangBuiltinSlice(kvlangFrame_t *f), kvlangBuiltinObj(kvlangFrame_t *f), kvlangBuiltinMap(kvlangFrame_t *f), kvlangBuiltinStringSet(kvlangFrame_t *f),
@@ -16,7 +16,7 @@ int kvlangBuiltinArray(kvlangFrame_t *f), kvlangBuiltinXvNumel(kvlangFrame_t *f)
     kvlangBuiltinDurArith(kvlangFrame_t *f), kvlangBuiltinDurCmp(kvlangFrame_t *f), kvlangBuiltinTimeCmp(kvlangFrame_t *f),
     kvlangBuiltinRandUint64(kvlangFrame_t *f), kvlangBuiltinRandInt63(kvlangFrame_t *f), kvlangBuiltinRandIntn(kvlangFrame_t *f),
     kvlangBuiltinKvGet(kvlangFrame_t *f), kvlangBuiltinKvSet(kvlangFrame_t *f), kvlangBuiltinKvDel(kvlangFrame_t *f),
-    kvlangBuiltinKvDelTree(kvlangFrame_t *f), kvlangBuiltinKvList(kvlangFrame_t *f), kvlangBuiltinKvMkindex(kvlangFrame_t *f),
+    kvlangBuiltinKvDelTree(kvlangFrame_t *f), kvlangBuiltinKvList(kvlangFrame_t *f), kvlangBuiltinKvListLen(kvlangFrame_t *f), kvlangBuiltinKvListN(kvlangFrame_t *f), kvlangBuiltinKvMkindex(kvlangFrame_t *f),
     kvlangBuiltinKvExtIndex(kvlangFrame_t *f), kvlangBuiltinKvRmIndexExt(kvlangFrame_t *f), kvlangBuiltinKvWatch(kvlangFrame_t *f),
     kvlangBuiltinDebugger(kvlangFrame_t *f);
 
@@ -592,7 +592,7 @@ static const struct { const char *op; kvlangBuiltinFn fn; } builtins[] = {
     {"array.scatter", kvlangBuiltinScatter}, {"array.compact", kvlangBuiltinCompact},
     {"array.append", kvlangBuiltinAppend}, {"array.slice", kvlangBuiltinSlice},
     {"obj", kvlangBuiltinObj}, {"map", kvlangBuiltinMap},
-    {"xv.numel", kvlangBuiltinXvNumel}, {"xv.dim", kvlangBuiltinXvDim}, {"xv.shape", kvlangBuiltinXvShape},
+    {"ndarray.numel", kvlangBuiltinNdarrayNumel}, {"ndarray.dim", kvlangBuiltinNdarrayDim}, {"ndarray.shape", kvlangBuiltinNdarrayShape},
     {"xv.at", kvlangBuiltinXvAt}, {"xv.set", kvlangBuiltinXvSet}, {"xv.reshape", kvlangBuiltinXvReshape},
     {"string.set", kvlangBuiltinStringSet}, {"string.char", kvlangBuiltinStringChar}, {"string.ord", kvlangBuiltinStringOrd},
     {"string.cmp", kvlangBuiltinStringCmp}, {"string.find", kvlangBuiltinStringFind}, {"string.len", kvlangBuiltinStringLen},
@@ -609,7 +609,7 @@ static const struct { const char *op; kvlangBuiltinFn fn; } builtins[] = {
     {"time.before", kvlangBuiltinTimeCmp}, {"time.after", kvlangBuiltinTimeCmp},
     {"random.uint64", kvlangBuiltinRandUint64}, {"random.int63", kvlangBuiltinRandInt63}, {"random.intn", kvlangBuiltinRandIntn},
     {"kv.get", kvlangBuiltinKvGet}, {"kv.set", kvlangBuiltinKvSet}, {"kv.del", kvlangBuiltinKvDel},
-    {"kv.deltree", kvlangBuiltinKvDelTree}, {"kv.list", kvlangBuiltinKvList}, {"kv.mkindex", kvlangBuiltinKvMkindex},
+    {"kv.deltree", kvlangBuiltinKvDelTree}, {"kv.list", kvlangBuiltinKvList}, {"kv.listlen", kvlangBuiltinKvListLen}, {"kv.listn", kvlangBuiltinKvListN}, {"kv.mkindex", kvlangBuiltinKvMkindex},
     {"kv.extindex", kvlangBuiltinKvExtIndex}, {"kv.rmindexext", kvlangBuiltinKvRmIndexExt}, {"kv.watch", kvlangBuiltinKvWatch},
     {"debugger", kvlangBuiltinDebugger},
 };
@@ -777,7 +777,7 @@ static void pack_typed_array(const char *kind, const kvlangXvalue_t *elems, int 
 static char *separated_base(kvlangKv_t *kv, const char *fp, const char *name) {
     char *base = kvlangBuiltinResolveWriteSlot(kv, fp, name);
     kvlangStrbuf_t k; kvlangStrbufInit(&k);
-    kvlangStrbufPuts(&k, base); kvlangStrbufPuts(&k, "[0]");
+    kvlangStrbufPuts(&k, base); kvlangStrbufPuts(&k, ".[0]");
     kvlangXvalue_t v; kvlangXvalueZero(&v);
     kvlangKvGetOne(kv, k.p, &v);
     bool exists = !kvlangXvalueNone(&v);
@@ -789,13 +789,38 @@ static char *separated_base(kvlangKv_t *kv, const char *fp, const char *name) {
 static int separated_len(kvlangKv_t *kv, const char *base) {
     for (int i = 0; ; i++) {
         kvlangStrbuf_t k; kvlangStrbufInit(&k);
-        kvlangStrbufPrintf(&k, "%s[%d]", base, i);
+        kvlangStrbufPrintf(&k, "%s.[%d]", base, i);
         kvlangXvalue_t v; kvlangXvalueZero(&v);
         kvlangKvGetOne(kv, k.p, &v);
         bool none = kvlangXvalueNone(&v);
         kvlangXvalueFree(&v); kvlangStrbufFree(&k);
         if (none) return i;
     }
+}
+
+/* 坐标段 key：base.[s0,s1,...]。1 维即 base.[s0]。 */
+static char *scatter_key(const char *base, const int64_t *coords, int ncoord) {
+    kvlangStrbuf_t b; kvlangStrbufInit(&b);
+    kvlangStrbufPuts(&b, base); kvlangStrbufPutc(&b, '.'); kvlangStrbufPutc(&b, '[');
+    for (int i = 0; i < ncoord; i++) {
+        if (i) kvlangStrbufPutc(&b, ',');
+        kvlangStrbufPrintf(&b, "%lld", (long long)coords[i]);
+    }
+    kvlangStrbufPutc(&b, ']');
+    return kvlangStrbufDetach(&b);
+}
+
+/* map 目录标记：kind=strkeymapindex，body=[4B count LE][name\n...]，dims 落 head。 */
+static void map_marker(kvlangXvalue_t *out, const char *const *names, int n, const int32_t *dims, int ndim) {
+    kvlangStrbuf_t body; kvlangStrbufInit(&body);
+    char count[4] = { (char)(n & 0xFF), (char)((n >> 8) & 0xFF), (char)((n >> 16) & 0xFF), (char)((n >> 24) & 0xFF) };
+    kvlangStrbufPutn(&body, count, 4);
+    for (int i = 0; i < n; i++) {
+        if (i) kvlangStrbufPutc(&body, '\n');
+        kvlangStrbufPuts(&body, names[i]);
+    }
+    kvlangXvalueNewTlvDims(out, KVSPACE_KIND_MAP, (const uint8_t *)body.p, (uint32_t)body.len, dims, ndim);
+    kvlangStrbufFree(&body);
 }
 
 /* ── array 系列 ───────────────────────────────────────────────────── */
@@ -806,11 +831,12 @@ static void ensure_scattered(kvlangFrame_t *f, const char *base) {
     if (kvlangXvalueNone(&arr) || kvlangXvalueElemSize(kvlangXvalueKind(&arr)) <= 0) { kvlangXvalueFree(&arr); return; }
     int n = kvlangXvalueArrayLen(&arr);
     for (int i = 0; i < n; i++) {
-        kvlangStrbuf_t k; kvlangStrbufInit(&k); kvlangStrbufPrintf(&k, "%s[%d]", base, i);
+        int64_t c[1] = { i };
+        char *k = scatter_key(base, c, 1);
         kvlangXvalue_t e; xvalue_at(&arr, i, &e);
-        kvlangKvPair_t p = { k.p, e };
+        kvlangKvPair_t p = { k, e };
         char err[256]; kvlangKvSet(f->kv, &p, 1, err, sizeof err);
-        kvlangXvalueFree(&e); kvlangStrbufFree(&k);
+        kvlangXvalueFree(&e); free(k);
     }
     kvlangXvalueFree(&arr);
     char err[256]; kvlangKvDel(f->kv, base, err, sizeof err);
@@ -834,29 +860,19 @@ int kvlangBuiltinArray(kvlangFrame_t *f) {
     return 0;
 }
 
-int kvlangBuiltinXvNumel(kvlangFrame_t *f) {
+int kvlangBuiltinNdarrayNumel(kvlangFrame_t *f) {
     kvlangXvalue_t in[1]; int n = read_inputs(f, in, 1);
     int64_t n_el = 0;
-    if (n > 0 && kvlangXvalueNone(&in[0]) && f->inst->nr > 0) {
-        char *fr = kvlangKeytreeFrameRoot(f->pc);
-        char *base = separated_base(f->kv, fr, f->inst->reads[0].name);
-        if (base) { n_el = separated_len(f->kv, base); free(base); }
-        free(fr);
-    } else if (n > 0) n_el = kvlangXvalueArrayLen(&in[0]);
+    if (n > 0) n_el = kvlangXvalueArrayLen(&in[0]);
     kvlangXvalue_t r; kvlangXvalueNewInt64(&r, n_el);
     int rc = write_result(f, &r); kvlangXvalueFree(&r); free_inputs(in, n);
     return rc;
 }
 
-int kvlangBuiltinXvDim(kvlangFrame_t *f) {
+int kvlangBuiltinNdarrayDim(kvlangFrame_t *f) {
     kvlangXvalue_t in[1]; int n = read_inputs(f, in, 1);
     int64_t ndim = 0;
-    if (n > 0 && kvlangXvalueNone(&in[0]) && f->inst->nr > 0) {
-        char *fr = kvlangKeytreeFrameRoot(f->pc);
-        char *base = separated_base(f->kv, fr, f->inst->reads[0].name);
-        if (base) { ndim = 1; free(base); }
-        free(fr);
-    } else if (n > 0) {
+    if (n > 0) {
         kvspaceHead_t h; kvlangXvalueHead(&in[0], &h);
         kvlang_kindexpr_t kx; kvlang_kindexpr_parse(h.kindexpr, &kx);
         ndim = kx.ndim;
@@ -866,15 +882,10 @@ int kvlangBuiltinXvDim(kvlangFrame_t *f) {
     return rc;
 }
 
-int kvlangBuiltinXvShape(kvlangFrame_t *f) {
+int kvlangBuiltinNdarrayShape(kvlangFrame_t *f) {
     kvlangXvalue_t in[1]; int n = read_inputs(f, in, 1);
     int32_t dims[8]; int32_t ndim = 0;
-    if (n > 0 && kvlangXvalueNone(&in[0]) && f->inst->nr > 0) {
-        char *fr = kvlangKeytreeFrameRoot(f->pc);
-        char *base = separated_base(f->kv, fr, f->inst->reads[0].name);
-        if (base) { dims[0] = separated_len(f->kv, base); ndim = 1; free(base); }
-        free(fr);
-    } else if (n > 0 && !kvlangXvalueNone(&in[0])) {
+    if (n > 0 && !kvlangXvalueNone(&in[0])) {
         kvspaceHead_t h; kvlangXvalueHead(&in[0], &h);
         kvlang_kindexpr_t kx; kvlang_kindexpr_parse(h.kindexpr, &kx);
         ndim = kx.ndim;
@@ -907,19 +918,6 @@ int kvlangBuiltinXvAt(kvlangFrame_t *f) {
     int nidx = f->inst->nr - 1;
     if (nidx < 1) return set_err(f, "TypeError: xv.at requires array and indices");
     kvlangXvalue_t in[MAX_PARAMS]; int n = read_inputs(f, in, MAX_PARAMS);
-    /* 散 key 数组（kv.list 产出的 key 列表）：base[idx] 平方括号寻址 */
-    if (nidx == 1 && kvlangXvalueNone(&in[0]) && f->inst->nr > 0) {
-        char *fr = kvlangKeytreeFrameRoot(f->pc);
-        char *base = separated_base(f->kv, fr, f->inst->reads[0].name);
-        if (base) {
-            int idx = (int)kvlangXvalueAsInt64(&in[1]);
-            kvlangStrbuf_t k; kvlangStrbufInit(&k); kvlangStrbufPrintf(&k, "%s[%d]", base, idx);
-            kvlangXvalue_t v; kvlangXvalueZero(&v); kvlangKvGetOne(f->kv, k.p, &v);
-            int rc = write_result(f, &v); kvlangXvalueFree(&v); kvlangStrbufFree(&k);
-            free(base); free(fr); free_inputs(in, n); return rc;
-        }
-        free(fr);
-    }
     const char *k = kvlangXvalueKind(&in[0]);
     int sz = kvlangXvalueElemSize(k);
     kvspaceHead_t h; kvspaceDecodeHead(in[0].data, in[0].len, &h);
@@ -994,11 +992,25 @@ int kvlangBuiltinScatter(kvlangFrame_t *f) {
     char *fr = kvlangKeytreeFrameRoot(f->pc);
     char *dst = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->writes[0].name);
     int al = kvlangXvalueArrayLen(&in[0]);
+    if (al > 0) {
+        char **names = malloc(sizeof(char *) * (size_t)al);
+        for (int i = 0; i < al; i++) {
+            kvlangStrbuf_t s; kvlangStrbufInit(&s); kvlangStrbufPrintf(&s, "[%d]", i);
+            names[i] = kvlangStrbufDetach(&s);
+        }
+        int32_t dims[1] = { al };
+        kvlangXvalue_t mark; map_marker(&mark, (const char *const *)names, al, dims, 1);
+        kvlangKvPair_t p0 = { dst, mark }; char err[256]; kvlangKvSet(f->kv, &p0, 1, err, sizeof err);
+        kvlangXvalueFree(&mark);
+        for (int i = 0; i < al; i++) free(names[i]);
+        free(names);
+    }
     for (int i = 0; i < al; i++) {
-        kvlangStrbuf_t k; kvlangStrbufInit(&k); kvlangStrbufPrintf(&k, "%s[%d]", dst, i);
+        int64_t c[1] = { i };
+        char *k = scatter_key(dst, c, 1);
         kvlangXvalue_t e; xvalue_at(&in[0], i, &e);
-        kvlangKvPair_t p = { k.p, e }; char err[256]; kvlangKvSet(f->kv, &p, 1, err, sizeof err);
-        kvlangXvalueFree(&e); kvlangStrbufFree(&k);
+        kvlangKvPair_t p = { k, e }; char err[256]; kvlangKvSet(f->kv, &p, 1, err, sizeof err);
+        kvlangXvalueFree(&e); free(k);
     }
     free(dst); free(fr);
     next_pc(f); free_inputs(in, n); return 0;
@@ -1010,9 +1022,10 @@ int kvlangBuiltinCompact(kvlangFrame_t *f) {
     char *src = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->reads[0].name);
     kvlangXvalue_t elems[1024]; int n = 0;
     for (int i = 0; ; i++) {
-        kvlangStrbuf_t k; kvlangStrbufInit(&k); kvlangStrbufPrintf(&k, "%s[%d]", src, i);
-        kvlangXvalue_t v; kvlangXvalueZero(&v); kvlangKvGetOne(f->kv, k.p, &v);
-        bool none = kvlangXvalueNone(&v); kvlangStrbufFree(&k);
+        int64_t c[1] = { i };
+        char *k = scatter_key(src, c, 1);
+        kvlangXvalue_t v; kvlangXvalueZero(&v); kvlangKvGetOne(f->kv, k, &v);
+        bool none = kvlangXvalueNone(&v); free(k);
         if (none) break;
         elems[n++] = v;
     }
@@ -1034,10 +1047,11 @@ int kvlangBuiltinAppend(kvlangFrame_t *f) {
     char *base = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->writes[0].name);
     ensure_scattered(f, base);
     int len = separated_len(f->kv, base);
-    kvlangStrbuf_t k; kvlangStrbufInit(&k); kvlangStrbufPrintf(&k, "%s[%d]", base, len);
-    kvlangKvPair_t p = { k.p, n >= 2 ? in[1] : in[0] };
+    int64_t c[1] = { len };
+    char *k = scatter_key(base, c, 1);
+    kvlangKvPair_t p = { k, n >= 2 ? in[1] : in[0] };
     char err[256]; kvlangKvSet(f->kv, &p, 1, err, sizeof err);
-    kvlangStrbufFree(&k); free(base); free(fr);
+    free(k); free(base); free(fr);
     next_pc(f); free_inputs(in, n); return 0;
 }
 
@@ -1052,15 +1066,17 @@ int kvlangBuiltinSlice(kvlangFrame_t *f) {
     int lo = (int)kvlangXvalueAsInt64(&in[1]), hi = (int)kvlangXvalueAsInt64(&in[2]);
     if (lo < 0 || hi < lo || hi > al) { free(base); free(fr); free_inputs(in, n); return set_err(f, "IndexError: array.slice: bounds [%d:%d] out of range (len=%d)", lo, hi, al); }
     for (int i = lo; i < hi; i++) {
-        kvlangStrbuf_t sk; kvlangStrbufInit(&sk); kvlangStrbufPrintf(&sk, "%s[%d]", base, i);
-        kvlangXvalue_t v; kvlangXvalueZero(&v); kvlangKvGetOne(f->kv, sk.p, &v);
-        kvlangStrbuf_t dk; kvlangStrbufInit(&dk); kvlangStrbufPrintf(&dk, "%s[%d]", base, i - lo);
-        kvlangKvPair_t p = { dk.p, v }; char err[256]; kvlangKvSet(f->kv, &p, 1, err, sizeof err);
-        kvlangXvalueFree(&v); kvlangStrbufFree(&sk); kvlangStrbufFree(&dk);
+        int64_t sc[1] = { i }, dc[1] = { i - lo };
+        char *sk = scatter_key(base, sc, 1);
+        kvlangXvalue_t v; kvlangXvalueZero(&v); kvlangKvGetOne(f->kv, sk, &v);
+        char *dk = scatter_key(base, dc, 1);
+        kvlangKvPair_t p = { dk, v }; char err[256]; kvlangKvSet(f->kv, &p, 1, err, sizeof err);
+        kvlangXvalueFree(&v); free(sk); free(dk);
     }
     for (int i = hi - lo; i < al; i++) {
-        kvlangStrbuf_t dk; kvlangStrbufInit(&dk); kvlangStrbufPrintf(&dk, "%s[%d]", base, i);
-        char err[256]; kvlangKvDel(f->kv, dk.p, err, sizeof err); kvlangStrbufFree(&dk);
+        int64_t dc[1] = { i };
+        char *dk = scatter_key(base, dc, 1);
+        char err[256]; kvlangKvDel(f->kv, dk, err, sizeof err); free(dk);
     }
     free(base); free(fr);
     next_pc(f); free_inputs(in, n); return 0;
@@ -1096,20 +1112,35 @@ int kvlangBuiltinMap(kvlangFrame_t *f) {
     char *fr = kvlangKeytreeFrameRoot(f->pc);
     for (int w = 0; w < f->inst->nw; w++) {
         char *ok = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->writes[w].name);
-        /* 散 key 数组：base[i] 方括号下标，无根标记（对齐 array.scatter/separated_len）。 */
+        /* 散 key 数组：元素在 ok.[i]，目录标记（kind=strkeymapindex，dims=[n]）在 ok。 */
         int old = separated_len(f->kv, ok);
         for (int i = 0; i < old; i++) {
-            kvlangStrbuf_t k; kvlangStrbufInit(&k); kvlangStrbufPrintf(&k, "%s[%d]", ok, i);
-            char err[256]; kvlangKvDel(f->kv, k.p, err, sizeof err); kvlangStrbufFree(&k);
+            int64_t c[1] = { i };
+            char *k = scatter_key(ok, c, 1);
+            char err[256]; kvlangKvDel(f->kv, k, err, sizeof err); free(k);
         }
         char err[256]; kvlangKvDel(f->kv, ok, err, sizeof err);
+
+        char **names = malloc(sizeof(char *) * (size_t)(n > 0 ? n : 1));
+        int64_t *cs = malloc(sizeof(int64_t) * (size_t)(n > 0 ? n : 1));
         for (int i = 0; i < n; i++) {
-            kvlangStrbuf_t k; kvlangStrbufInit(&k); kvlangStrbufPrintf(&k, "%s[%d]", ok, i);
-            kvlangKvPair_t p = { k.p, in[i] };
-            kvlangKvSet(f->kv, &p, 1, err, sizeof err);
-            kvlangStrbufFree(&k);
+            kvlangStrbuf_t s; kvlangStrbufInit(&s); kvlangStrbufPrintf(&s, "[%d]", i);
+            names[i] = kvlangStrbufDetach(&s); cs[i] = i;
         }
-        free(ok);
+        int32_t dims[1] = { n };
+        if (n > 0) {
+            kvlangXvalue_t mark; map_marker(&mark, (const char *const *)names, n, dims, 1);
+            kvlangKvPair_t p0 = { ok, mark };
+            kvlangKvSet(f->kv, &p0, 1, err, sizeof err);
+            kvlangXvalueFree(&mark);
+        }
+        for (int i = 0; i < n; i++) {
+            char *k = scatter_key(ok, &cs[i], 1);
+            kvlangKvPair_t p = { k, in[i] };
+            kvlangKvSet(f->kv, &p, 1, err, sizeof err);
+            free(k); free(names[i]);
+        }
+        free(names); free(cs); free(ok);
     }
     free(fr);
     next_pc(f); free_inputs(in, n); return 0;
@@ -1435,21 +1466,91 @@ int kvlangBuiltinKvList(kvlangFrame_t *f) {
     char *fr = kvlangKeytreeFrameRoot(f->pc);
     char *dst = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->writes[0].name);
     free(fr);
+    /* 结果是一个 strkeymapindex：目录标记在 dst（dims=[count]），成员名是坐标段 [i]，
+     * 值是对应的成员名字符串。 */
+    if (count > 0) {
+        char **coords = malloc(sizeof(char *) * (size_t)count);
+        for (int i = 0; i < count; i++) {
+            kvlangStrbuf_t s; kvlangStrbufInit(&s); kvlangStrbufPrintf(&s, "[%d]", i);
+            coords[i] = kvlangStrbufDetach(&s);
+        }
+        int32_t dims[1] = { count };
+        kvlangXvalue_t mark; map_marker(&mark, (const char *const *)coords, count, dims, 1);
+        kvlangKvPair_t p0 = { dst, mark }; char err[256]; kvlangKvSet(f->kv, &p0, 1, err, sizeof err);
+        kvlangXvalueFree(&mark);
+        for (int i = 0; i < count; i++) free(coords[i]);
+        free(coords);
+    }
     for (int i = 0; i < count; i++) {
-        kvlangStrbuf_t k; kvlangStrbufInit(&k); kvlangStrbufPrintf(&k, "%s[%d]", dst, i);
+        int64_t c[1] = { i };
+        char *k = scatter_key(dst, c, 1);
         kvlangXvalue_t e; kvlangXvalueNewCharUtf8(&e, names[i]);
-        kvlangKvPair_t p = { k.p, e }; char err[256]; kvlangKvSet(f->kv, &p, 1, err, sizeof err);
-        kvlangXvalueFree(&e); kvlangStrbufFree(&k); free(names[i]);
+        kvlangKvPair_t p = { k, e }; char err[256]; kvlangKvSet(f->kv, &p, 1, err, sizeof err);
+        kvlangXvalueFree(&e); free(k); free(names[i]);
     }
     for (int i = count; ; i++) {
-        kvlangStrbuf_t k; kvlangStrbufInit(&k); kvlangStrbufPrintf(&k, "%s[%d]", dst, i);
-        kvlangXvalue_t v; kvlangXvalueZero(&v); kvlangKvGetOne(f->kv, k.p, &v);
+        int64_t c[1] = { i };
+        char *k = scatter_key(dst, c, 1);
+        kvlangXvalue_t v; kvlangXvalueZero(&v); kvlangKvGetOne(f->kv, k, &v);
         bool none = kvlangXvalueNone(&v); kvlangXvalueFree(&v);
-        if (none) { kvlangStrbufFree(&k); break; }
-        char err[256]; kvlangKvDel(f->kv, k.p, err, sizeof err); kvlangStrbufFree(&k);
+        if (none) { free(k); break; }
+        char err[256]; kvlangKvDel(f->kv, k, err, sizeof err); free(k);
     }
     free(names); free(dst); free(key);
     next_pc(f); free_inputs(in, n); return 0;
+}
+
+/* 解析 obj/map 成员目录 key（<frame>/<name>.），供 kv.list/listlen/listn 共用。 */
+static char *kv_list_dir(kvlangFrame_t *f, kvlangXvalue_t *in, int n) {
+    char *key = n >= 1 ? path_arg(f, 0, in) : NULL;
+    if (!key && f->inst->nr >= 1) {
+        const char *name = f->inst->reads[0].name;
+        if (name[0] != '/') {
+            char *fr = kvlangKeytreeFrameRoot(f->pc);
+            char *ff = kvlangBuiltinFuncFrameRoot(f->kv, fr);
+            char *base = kvlangBuiltinResolveWriteSlot(f->kv, ff, name);
+            free(ff); free(fr);
+            key = kvlangKeytreeMember(base, "");
+            free(base);
+        }
+    }
+    return key;
+}
+
+int kvlangBuiltinKvListLen(kvlangFrame_t *f) {
+    kvlangXvalue_t in[1]; int n = read_inputs(f, in, 1);
+    char *key = kv_list_dir(f, in, n);
+    int64_t count = 0;
+    if (key) {
+        char **names = NULL; int cnt = 0;
+        kvlangKvList(f->kv, key, false, false, &names, &cnt);
+        for (int i = 0; i < cnt; i++) free(names[i]);
+        free(names);
+        count = cnt;
+        free(key);
+    }
+    kvlangXvalue_t r; kvlangXvalueNewInt64(&r, count);
+    int rc = write_result(f, &r); kvlangXvalueFree(&r); free_inputs(in, n);
+    return rc;
+}
+
+int kvlangBuiltinKvListN(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
+    char *key = kv_list_dir(f, in, n);
+    int idx = n >= 2 ? (int)kvlangXvalueAsInt64(&in[1]) : -1;
+    kvlangXvalue_t r; kvlangXvalueZero(&r);
+    if (key && idx >= 0) {
+        char **names = NULL; int cnt = 0;
+        kvlangKvList(f->kv, key, false, false, &names, &cnt);
+        if (idx < cnt) {
+            kvlangXvalueNewCharUtf8(&r, names[idx]);
+        }
+        for (int i = 0; i < cnt; i++) free(names[i]);
+        free(names);
+        free(key);
+    }
+    int rc = write_result(f, &r); kvlangXvalueFree(&r); free_inputs(in, n);
+    return rc;
 }
 
 int kvlangBuiltinKvMkindex(kvlangFrame_t *f) { return kv_path_void(f, "kv.mkindex", kvlangKvMkindex); }

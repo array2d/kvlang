@@ -4,9 +4,9 @@
 #   2
 rwfunc intersection() -> () {
 	a:[]int64 = [1, 2, 2, 1]  # = 等价于 <-
-	xv.numel(a) -> na
+	ndarray.numel(a) -> na
 	b:[]int64 <- [2, 2]
-	nb = xv.numel(b)  # = 等价于 <-
+	nb = ndarray.numel(b)  # = 等价于 <-
 	[0, 0] -> r:[]int64
 	idx <- 0
 	count = 0  # = 等价于 <-

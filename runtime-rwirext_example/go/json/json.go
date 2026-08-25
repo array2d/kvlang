@@ -254,6 +254,28 @@ func constructTLV(kind string, raw []byte, arrLen int) []byte {
 	return C.GoBytes(unsafe.Pointer(out), C.int(ol))
 }
 
+// encodeTLVDims：显式 dims/ndim 编码（供 strkeymapindex 目录标记落 dims）。
+func encodeTLVDims(kind string, raw []byte, dims []int32) []byte {
+	ck := cstr(kind)
+	defer C.free(unsafe.Pointer(ck))
+	var buf unsafe.Pointer
+	if len(raw) > 0 {
+		buf = C.CBytes(raw)
+		defer C.free(buf)
+	}
+	carr := make([]C.int32_t, len(dims))
+	for i, d := range dims {
+		carr[i] = C.int32_t(d)
+	}
+	var out *C.uint8_t
+	var ol C.uint32_t
+	if C.kvspaceTlvEncode(ck, (*C.uint8_t)(buf), C.uint32_t(len(raw)), &carr[0], C.int32_t(len(carr)), &out, &ol) != 0 || out == nil {
+		return nil
+	}
+	defer C.kvspaceBytesFree(out, ol)
+	return C.GoBytes(unsafe.Pointer(out), C.int(ol))
+}
+
 // ── JSON 值 ↔ TLV ───────────────────────────────────────────────────
 
 func readInt(raw []byte) int64 {
@@ -382,6 +404,15 @@ func mkIndexMarker(kind string, names []string) []byte {
 	return constructTLV(kind, body, 1)
 }
 
+// strkeymapindex 目录标记：body 同上，dims=[len]（恒一维坐标段 [i]）。
+func mkMapMarker(names []string) []byte {
+	body := make([]byte, 4)
+	binary.LittleEndian.PutUint32(body, uint32(len(names)))
+	body = append(body, []byte(strings.Join(names, "\n"))...)
+	dims := []int32{int32(len(names))}
+	return encodeTLVDims("strkeymapindex", body, dims)
+}
+
 // validateKey：JSON 对象 key 不能含影响 kvspace 存储分隔的字符（§5.4）。
 // 空串、/ . [ ] \n \r \0 U+2025 及 ASCII 控制字符一律拒绝（不静默丢键、不转义）。
 func validateKey(k string) error {
@@ -432,11 +463,11 @@ func writeObj(c unsafe.Pointer, path string, m map[string]any) error {
 func writeArr(c unsafe.Pointer, path string, arr []interface{}) error {
 	keys := make([]string, len(arr))
 	for i := range arr {
-		keys[i] = strconv.Itoa(i)
+		keys[i] = fmt.Sprintf("[%d]", i)
 	}
-	setTLV(c, path+".", mkIndexMarker("strkeymapindex", keys))
+	setTLV(c, path+".", mkMapMarker(keys))
 	for i, v := range arr {
-		if err := writeValue(c, path+"."+strconv.Itoa(i), v); err != nil {
+		if err := writeValue(c, path+"."+fmt.Sprintf("[%d]", i), v); err != nil {
 			return err
 		}
 	}
@@ -469,14 +500,16 @@ func readObj(c unsafe.Pointer, path string) map[string]any {
 func readArr(c unsafe.Pointer, path string) []interface{} {
 	idxs := make([]int, 0, 8)
 	for _, n := range list(c, path+".") {
-		if i, err := strconv.Atoi(n); err == nil {
+		s := strings.TrimPrefix(n, "[")
+		s = strings.TrimSuffix(s, "]")
+		if i, err := strconv.Atoi(s); err == nil {
 			idxs = append(idxs, i)
 		}
 	}
 	sort.Ints(idxs)
 	arr := make([]interface{}, len(idxs))
 	for i, idx := range idxs {
-		arr[i] = readValue(c, path+"."+strconv.Itoa(idx))
+		arr[i] = readValue(c, path+"."+fmt.Sprintf("[%d]", idx))
 	}
 	return arr
 }

@@ -5,10 +5,10 @@
 #   set1= 99
 rwfunc main() -> () {
 	a:[]int64 = [10, 20, 30, 40]
-	xv.numel(a) -> n
-	xv.dim(a) -> d
+	ndarray.numel(a) -> n
+	ndarray.dim(a) -> d
 	println("numel=", n, "dim=", d)
-	xv.shape(a) -> s
+	ndarray.shape(a) -> s
 	println("shape0=", s[0])
 	xv.at(a, 1) -> e
 	println("at1=", e)

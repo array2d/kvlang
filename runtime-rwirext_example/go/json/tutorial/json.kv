@@ -30,8 +30,8 @@ rwfunc main() -> () {
 	println("c =", /data2/grp/c)
 	println("cont =", /data2/cont)
 	println("scat =", /data2/scat)
-	xv.numel(/data2/cont) -> n1
-	xv.numel(/data2/scat) -> n2
+	ndarray.numel(/data2/cont) -> n1
+	ndarray.numel(/data2/scat) -> n2
 	println("len =", n1, n2)
 }
 

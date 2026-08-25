@@ -755,10 +755,28 @@ impl Parser {
                     let s = inst.writes[0].clone();
                     let br = s.find('[').unwrap_or(s.len());
                     let arr = s[..br].to_string();
-                    let idx = s[br + 1..s.len().saturating_sub(1)].to_string();
+                    let idxs = s[br + 1..s.len().saturating_sub(1)].to_string();
                     let e = inst.expr.take();
-                    let op = if arr.starts_with('/') { "kv.set" } else { "xv.set" };
-                    inst.expr = Some(ast::call(op, vec![ast::leaf(&arr), ast::leaf(&idx), e.unwrap_or(ast::leaf(""))]));
+                    // strkeymap 坐标写 m.[i,j] <- v：坐标段是成员名（kv.set 字符串键）。
+                    let dot_coord = arr.ends_with('.');
+                    let arr = arr.trim_end_matches('.').to_string();
+                    let op = if dot_coord { "kv.set" } else if arr.starts_with('/') { "kv.set" } else { "xv.set" };
+                    if dot_coord {
+                        inst.expr = Some(ast::call(
+                            op,
+                            vec![ast::leaf(&arr), ast::str_lit(&format!("[{}]", idxs)), e.unwrap_or(ast::leaf(""))],
+                        ));
+                    } else {
+                        // 多维 compact 下标：arr[i,j] <- v 展开为 xv.set(arr, i, j, v)。
+                        let mut args = vec![ast::leaf(&arr)];
+                        for idx in idxs.split(',').map(|x| x.trim()) {
+                            if !idx.is_empty() {
+                                args.push(ast::leaf(idx));
+                            }
+                        }
+                        args.push(e.unwrap_or(ast::leaf("")));
+                        inst.expr = Some(ast::call(op, args));
+                    }
                     inst.writes = vec![arr];
                     inst.write_types = Vec::new();
                 }
@@ -846,6 +864,26 @@ impl Parser {
                 if self.peek().kind == Kind::Ident || self.peek().kind == Kind::Literal {
                     let field = self.advance().value;
                     left = ast::call("kv.get", vec![left, ast::str_lit(&field)]);
+                    continue;
+                }
+                // strkeymap 坐标访问 m.[i,j]：坐标段是单个成员名（kv.get 字符串键）。
+                if self.peek().kind == Kind::LBrack {
+                    self.advance();
+                    let mut idxs = Vec::new();
+                    while self.peek().kind != Kind::RBrack && self.peek().kind != Kind::EOF {
+                        if self.eat(Kind::Comma) {
+                            continue;
+                        }
+                        if let Some(idx) = self.parse_pratt(0) {
+                            idxs.push(idx);
+                        }
+                    }
+                    self.expect(Kind::RBrack);
+                    let coord = format!(
+                        "[{}]",
+                        idxs.iter().map(|e| e.to_string()).collect::<Vec<_>>().join(",")
+                    );
+                    left = ast::call("kv.get", vec![left, ast::str_lit(&coord)]);
                     continue;
                 }
             }
@@ -1313,6 +1351,24 @@ impl Parser {
             }
             if t.kind == Kind::Ident && self.peek_at(1).kind == Kind::LBrack {
                 let mut w = self.advance().value;
+                w.push_str(&self.advance().value); // [
+                let mut depth = 1i32;
+                while depth > 0 && self.peek().kind != Kind::EOF && self.peek().kind != Kind::Arrow {
+                    if self.peek().kind == Kind::RBrack {
+                        depth -= 1;
+                    }
+                    if self.peek().kind == Kind::LBrack {
+                        depth += 1;
+                    }
+                    w.push_str(&self.advance().value);
+                }
+                writes.push(w);
+                wtypes.push(String::new());
+                continue;
+            }
+            if t.kind == Kind::Ident && self.peek_at(1).kind == Kind::Dot && self.peek_at(2).kind == Kind::LBrack {
+                let mut w = self.advance().value; // base
+                w.push_str(&self.advance().value); // .
                 w.push_str(&self.advance().value); // [
                 let mut depth = 1i32;
                 while depth > 0 && self.peek().kind != Kind::EOF && self.peek().kind != Kind::Arrow {
