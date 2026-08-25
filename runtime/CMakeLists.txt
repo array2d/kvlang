@@ -5,9 +5,6 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# ── kvspace 后端（kvspace-c 或 kvspace_durable，均导出同一 C ABI）────
-set(KVSPACE_LIB "kvspace-c" CACHE STRING "kvspace 后端库：kvspace-c / kvspace_durable")
-
 # ── 输出统一到 bin/ ──────────────────────────────────────────────
 set(BIN_DIR "${CMAKE_SOURCE_DIR}/../bin")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${BIN_DIR}")
@@ -20,12 +17,8 @@ add_library(kvlang_runtime SHARED
 target_include_directories(kvlang_runtime PUBLIC include src)
 target_compile_definitions(kvlang_runtime PRIVATE _GNU_SOURCE)
 
-if(KVSPACE_LIB STREQUAL "kvspace-c")
-    target_link_libraries(kvlang_runtime PRIVATE kvspace-c blockmalloc slotsboxmalloc)
-else()
-    target_link_libraries(kvlang_runtime PRIVATE kvspace_durable)
-endif()
-target_link_libraries(kvlang_runtime PRIVATE m pthread)
-# --export-dynamic 供 kvlang（term 扩展）找符号；--disable-new-dtags 使 rpath 转 DT_RPATH（传递），
-# 让 runtime → kvspace-c → blockmalloc/slotsboxmalloc 的传递依赖能被 runtime 的 rpath 找到。
+# 链接 kvspace dispatch 前端（已安装 /usr/lib），运行期按 DSN 选后端，编译期不再选后端。
+target_link_libraries(kvlang_runtime PRIVATE kvspace m pthread)
+
+# --export-dynamic 供 kvlang（term 扩展）找符号；--disable-new-dtags 使 rpath 转 DT_RPATH（传递）。
 set_target_properties(kvlang_runtime PROPERTIES LINK_FLAGS "-Wl,--export-dynamic -Wl,--disable-new-dtags")

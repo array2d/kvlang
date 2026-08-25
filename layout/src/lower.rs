@@ -188,7 +188,6 @@ fn lower_for_with_cont(
     let idx_slot = lg.tmp();
     let cond_slot = lg.tmp();
     let len_slot = lg.tmp();
-    let keys_slot = lg.tmp();
     let key_slot = lg.tmp();
     let is_obj = s.iter.op == "obj"
         || s.iter.op == "map"
