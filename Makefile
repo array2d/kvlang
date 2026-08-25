@@ -7,6 +7,7 @@
 #   make shm       链 kvspace-c 后端（SHM，默认，= all 的后端组件）
 #   make durable   链 kvspace_durable 后端（redis/fs/s3）
 #   make test      durable 后端全量 tutorial 回归
+#   make install   一次性安装产物到最终态目录（.so→/usr/lib，可执行→/usr/bin，头→/usr/include/kvlang/）
 #   make all       全部（shm 后端 + json）
 #   make clean     清理 bin/ 与各构建目录
 # 切换后端只需 make shm / make durable：runtime 经 cmake 重配、layout 经环境变量重建。
@@ -14,7 +15,7 @@
 BIN         := bin
 KVSPACE_LIB ?= kvspace-c
 
-.PHONY: all runtime term layout json oldhero shm durable test clean
+.PHONY: all runtime term layout json oldhero shm durable test install clean
 
 all: runtime term layout json
 
@@ -36,7 +37,15 @@ term:
 
 layout:
 	KVLANG_KVSPACE_LIB=$(KVSPACE_LIB) cargo build --release --manifest-path layout/Cargo.toml --example layout_file
+	KVLANG_KVSPACE_LIB=$(KVSPACE_LIB) cargo build --release --manifest-path layout/Cargo.toml
 	cp layout/target/release/examples/layout_file $(BIN)/
+
+install:
+	install -d /usr/lib /usr/bin /usr/include/kvlang
+	install -m 755 $(BIN)/libkvlang_runtime.so /usr/lib/
+	install -m 755 layout/target/release/libkvlang_layout.so /usr/lib/
+	install -m 755 $(BIN)/kvlang $(BIN)/layout_file /usr/bin/
+	install -m 644 runtime/include/kvlang_runtime.h runtime/include/kvlang_rwirext.h /usr/include/kvlang/
 
 json:
 ifeq ($(KVSPACE_LIB),kvspace_durable)
