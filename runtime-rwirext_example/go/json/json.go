@@ -394,8 +394,11 @@ func u64bits(f float64) []byte {
 }
 
 // ── KV 子树 ↔ map[string]any ───────────────────────────────────────
-// objindex（对象）/ strkeymapindex（数组）承载复杂结构：marker 在 path.，
-// 成员在 path.<key>（key 恒字符串，数组下标为数字字符串）。后端按 . 成员自动维护 index。
+// objindex（对象）/ strkeymapindex（数组）承载复杂结构：marker 在 path·，
+// 成员在 path·<key>（key 恒字符串，数组下标为坐标段 [i]）。后端按 · 成员自动维护 index。
+
+// sep 成员分隔符，对齐 kvspace OBJ_SEP / runtime MEMBER_SEP（U+00B7 中点号）。
+const sep = "·"
 
 func mkIndexMarker(kind string, names []string) []byte {
 	body := make([]byte, 4)
@@ -414,13 +417,14 @@ func mkMapMarker(names []string) []byte {
 }
 
 // validateKey：JSON 对象 key 不能含影响 kvspace 存储分隔的字符（§5.4）。
-// 空串、/ . [ ] \n \r \0 U+2025 及 ASCII 控制字符一律拒绝（不静默丢键、不转义）。
+// 空串、/ · [ ] \n \r \0 U+2025 及 ASCII 控制字符一律拒绝（不静默丢键、不转义）。
+// '.' 已释放给小数 key，可作成员名。
 func validateKey(k string) error {
 	if k == "" {
 		return fmt.Errorf("json: empty key rejected")
 	}
 	for _, r := range k {
-		if r == '/' || r == '.' || r == '[' || r == ']' || r == '\n' || r == '\r' ||
+		if r == '/' || r == '·' || r == '[' || r == ']' || r == '\n' || r == '\r' ||
 			r == 0 || r < 0x20 || r == '‥' {
 			return fmt.Errorf("json: forbidden char %q in key %q", r, k)
 		}
@@ -451,9 +455,9 @@ func writeObj(c unsafe.Pointer, path string, m map[string]any) error {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	setTLV(c, path+".", mkIndexMarker("objindex", keys))
+	setTLV(c, path+sep, mkIndexMarker("objindex", keys))
 	for _, k := range keys {
-		if err := writeValue(c, path+"."+k, m[k]); err != nil {
+		if err := writeValue(c, path+sep+k, m[k]); err != nil {
 			return err
 		}
 	}
@@ -465,9 +469,9 @@ func writeArr(c unsafe.Pointer, path string, arr []interface{}) error {
 	for i := range arr {
 		keys[i] = fmt.Sprintf("[%d]", i)
 	}
-	setTLV(c, path+".", mkMapMarker(keys))
+	setTLV(c, path+sep, mkMapMarker(keys))
 	for i, v := range arr {
-		if err := writeValue(c, path+"."+fmt.Sprintf("[%d]", i), v); err != nil {
+		if err := writeValue(c, path+sep+fmt.Sprintf("[%d]", i), v); err != nil {
 			return err
 		}
 	}
@@ -475,7 +479,7 @@ func writeArr(c unsafe.Pointer, path string, arr []interface{}) error {
 }
 
 func readValue(c unsafe.Pointer, path string) interface{} {
-	kind, _, _ := parseTLV(getTLV(c, path+"."))
+	kind, _, _ := parseTLV(getTLV(c, path+sep))
 	switch kind {
 	case "objindex":
 		return readObj(c, path)
@@ -491,15 +495,15 @@ func readValue(c unsafe.Pointer, path string) interface{} {
 
 func readObj(c unsafe.Pointer, path string) map[string]any {
 	m := map[string]any{}
-	for _, name := range list(c, path+".") {
-		m[name] = readValue(c, path+"."+name)
+	for _, name := range list(c, path+sep) {
+		m[name] = readValue(c, path+sep+name)
 	}
 	return m
 }
 
 func readArr(c unsafe.Pointer, path string) []interface{} {
 	idxs := make([]int, 0, 8)
-	for _, n := range list(c, path+".") {
+	for _, n := range list(c, path+sep) {
 		s := strings.TrimPrefix(n, "[")
 		s = strings.TrimSuffix(s, "]")
 		if i, err := strconv.Atoi(s); err == nil {
@@ -509,7 +513,7 @@ func readArr(c unsafe.Pointer, path string) []interface{} {
 	sort.Ints(idxs)
 	arr := make([]interface{}, len(idxs))
 	for i, idx := range idxs {
-		arr[i] = readValue(c, path+"."+fmt.Sprintf("[%d]", idx))
+		arr[i] = readValue(c, path+sep+fmt.Sprintf("[%d]", idx))
 	}
 	return arr
 }
@@ -544,8 +548,8 @@ type op struct {
 }
 
 var ops = []op{
-	{"json.to", 1, 1},
-	{"json.from", 1, 1},
+	{"json" + sep + "to", 1, 1},
+	{"json" + sep + "from", 1, 1},
 }
 
 func register(c unsafe.Pointer) {
@@ -600,7 +604,7 @@ func serveOp(c unsafe.Pointer, o op) {
 		opcode := ps[0]
 		readNames := ps[1 : 1+o.nr]
 		writeNames := ps[1+o.nr : 1+o.nr+o.nw]
-		if opcode == "json.to" {
+		if opcode == "json"+sep+"to" {
 			doTo(c, pc, readNames, writeNames)
 		} else {
 			doFrom(c, pc, readNames, writeNames, vid)
