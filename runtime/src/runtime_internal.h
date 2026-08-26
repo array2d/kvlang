@@ -42,8 +42,7 @@ extern int   kvspaceTlvEncodePtr(const char *kind, const uint8_t *raw, uint32_t 
 extern int   kvspaceDecodeHead(const uint8_t *data, uint32_t data_len, kvspaceHead_t *out);
 extern int   kvspaceNewPtr(const char *kind, const char *target, int32_t array_len,
                              uint8_t **out, uint32_t *out_len);
-extern int   kvspaceNewChar(const char *kind, const char *s, uint8_t **out, uint32_t *out_len);
-extern int   kvspaceNewCharByte(const uint8_t *bytes, uint32_t len, uint8_t **out, uint32_t *out_len);
+extern int   kvspaceNewChar(const uint8_t *bytes, uint32_t len, uint8_t **out, uint32_t *out_len);
 extern int   kvspaceNewBool(uint8_t v, uint8_t **out, uint32_t *out_len);
 extern int   kvspaceNewInt64(int64_t v, uint8_t **out, uint32_t *out_len);
 extern int   kvspaceNewFloat64(double v, uint8_t **out, uint32_t *out_len);

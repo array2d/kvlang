@@ -89,14 +89,7 @@ extern "C" {
         out: *mut *mut u8,
         out_len: *mut u32,
     ) -> c_int;
-    fn kvspaceNewChar(
-        kind: *const c_char,
-        s: *const c_char,
-        out: *mut *mut u8,
-        out_len: *mut u32,
-    ) -> c_int;
-    fn kvspaceNewCharByte(bytes: *const u8, len: u32, out: *mut *mut u8, out_len: *mut u32)
-        -> c_int;
+    fn kvspaceNewChar(bytes: *const u8, len: u32, out: *mut *mut u8, out_len: *mut u32) -> c_int;
     fn kvspaceNewBool(v: u8, out: *mut *mut u8, out_len: *mut u32) -> c_int;
     fn kvspaceNewInt64(v: i64, out: *mut *mut u8, out_len: *mut u32) -> c_int;
     fn kvspaceNewFloat64(v: f64, out: *mut *mut u8, out_len: *mut u32) -> c_int;
@@ -307,16 +300,35 @@ pub fn new_ptr(kind: &str, target: &str, array_len: i32) -> Vec<u8> {
 }
 
 pub fn new_char(kind: &str, s: &str) -> Vec<u8> {
+    let bytes = s.as_bytes();
+    if kind == "char/utf8" {
+        return new_char_byte(bytes);
+    }
+    let (raw, n) = if kind == "char/utf32" {
+        let v: Vec<u8> = s.chars().flat_map(|c| (c as u32).to_le_bytes()).collect();
+        let n = (v.len() / 4) as i32;
+        (v, n)
+    } else {
+        (bytes.to_vec(), bytes.len() as i32)
+    };
     let ck = CString::new(kind).expect("no NUL");
-    let cs = CString::new(s).expect("no NUL");
+    let dims = [n];
     call_alloc(|out, out_len| unsafe {
-        kvspaceNewChar(ck.as_ptr(), cs.as_ptr(), out, out_len)
+        kvspaceTlvEncode(
+            ck.as_ptr(),
+            raw.as_ptr(),
+            raw.len() as u32,
+            dims.as_ptr(),
+            1,
+            out,
+            out_len,
+        )
     })
 }
 
 pub fn new_char_byte(bytes: &[u8]) -> Vec<u8> {
     call_alloc(|out, out_len| unsafe {
-        kvspaceNewCharByte(bytes.as_ptr(), bytes.len() as u32, out, out_len)
+        kvspaceNewChar(bytes.as_ptr(), bytes.len() as u32, out, out_len)
     })
 }
 

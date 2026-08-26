@@ -58,7 +58,7 @@ unsafe extern "C" {
         err: *mut c_char,
         err_cap: u32,
     ) -> c_int;
-    fn kvspaceNewChar(kind: *const c_char, s: *const c_char, out: *mut *mut u8, out_len: *mut u32) -> c_int;
+    fn kvspaceNewChar(bytes: *const u8, len: u32, out: *mut *mut u8, out_len: *mut u32) -> c_int;
     fn kvspaceDecodeHead(data: *const u8, data_len: u32, out: *mut kvspaceHead_t) -> c_int;
 
     // rwirext ABI（kvspace 不提供的 runtime 语义；句柄传扩展自连的 kvspace）
@@ -163,7 +163,8 @@ fn kv_get(kv: *mut c_void, key: &str) -> String {
 fn kv_set(kv: *mut c_void, key: &str, val: &str) {
     let mut out: *mut u8 = null_mut();
     let mut out_len: u32 = 0;
-    if unsafe { kvspaceNewChar(cs("char/utf8").as_ptr(), cs(val).as_ptr(), &mut out, &mut out_len) } != 0
+    let vb = cs(val);
+    if unsafe { kvspaceNewChar(vb.as_ptr() as *const u8, vb.as_bytes().len() as u32, &mut out, &mut out_len) } != 0
         || out.is_null()
     {
         return;

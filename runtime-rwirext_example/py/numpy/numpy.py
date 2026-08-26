@@ -79,7 +79,7 @@ def _bind():
     _ks.kvspaceList.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int, ctypes.c_int,
                                 ctypes.POINTER(ctypes.POINTER(ctypes.c_uint8)), ctypes.POINTER(ctypes.c_uint32)]
     _ks.kvspaceList.restype = ctypes.c_int
-    _ks.kvspaceNewChar.argtypes = [ctypes.c_char_p, ctypes.c_char_p,
+    _ks.kvspaceNewChar.argtypes = [ctypes.POINTER(ctypes.c_uint8), ctypes.c_uint32,
                                    ctypes.POINTER(ctypes.POINTER(ctypes.c_uint8)), ctypes.POINTER(ctypes.c_uint32)]
     _ks.kvspaceNewChar.restype = ctypes.c_int
     _ks.kvspaceDel.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_char_p), ctypes.c_uint32,
@@ -211,7 +211,8 @@ class Engine:
 
     def kv_set(self, key, val):
         out = ctypes.POINTER(ctypes.c_uint8)(); ol = ctypes.c_uint32()
-        if _ks.kvspaceNewChar(b"char/utf8", val.encode(), ctypes.byref(out), ctypes.byref(ol)) != 0:
+        b = val.encode()
+        if _ks.kvspaceNewChar(b, len(b), ctypes.byref(out), ctypes.byref(ol)) != 0:
             return
         _ks.kvspaceShmSet(self.kv, key.encode(), out, ol.value)
         _ks.kvspaceBytesFree(out, ol.value)
