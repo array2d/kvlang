@@ -21,8 +21,9 @@ extern int   kvspaceSet(void *h, const char *const *keys, const uint8_t *vals,
 extern int   kvspaceList(void *h, const char *prefix, int expand_ext, int resolve,
                          uint8_t **out, uint32_t *out_len);
 extern int   kvspaceDel(void *h, const char *const *keys, uint32_t nkeys, char *err, uint32_t err_cap);
+extern int   kvspaceDelTree(void *h, const char *prefix, char *err, uint32_t err_cap);
 extern int   kvspaceMkindex(void *h, const char *path, char *err, uint32_t err_cap);
-extern int   kvspaceNewChar(const char *kind, const char *s, uint8_t **out, uint32_t *out_len);
+extern int   kvspaceNewChar(const uint8_t *bytes, uint32_t len, uint8_t **out, uint32_t *out_len);
 
 // XValue 头（repr(C)，对齐 kvspace ABI）：kindexpr 为唯一类型真相，body 段靠 offset/len 定位。
 typedef struct {
@@ -124,13 +125,11 @@ func setTLV(c unsafe.Pointer, key string, tlv []byte) {
 }
 
 func setChar(c unsafe.Pointer, key, val string) {
-	ck := cstr("char/utf8")
-	cv := cstr(val)
-	defer C.free(unsafe.Pointer(ck))
-	defer C.free(unsafe.Pointer(cv))
+	cv := C.CBytes([]byte(val))
+	defer C.free(cv)
 	var out *C.uint8_t
 	var outLen C.uint32_t
-	if C.kvspaceNewChar(ck, cv, &out, &outLen) != 0 || out == nil {
+	if C.kvspaceNewChar((*C.uint8_t)(cv), C.uint32_t(len(val)), &out, &outLen) != 0 || out == nil {
 		return
 	}
 	defer C.kvspaceBytesFree(out, outLen)
@@ -148,6 +147,13 @@ func del(c unsafe.Pointer, key string) {
 	keys := [1]*C.char{ck}
 	var err [256]C.char
 	C.kvspaceDel(c, &keys[0], 1, &err[0], 256)
+}
+
+func delTree(c unsafe.Pointer, prefix string) {
+	cp := cstr(prefix)
+	defer C.free(unsafe.Pointer(cp))
+	var err [256]C.char
+	C.kvspaceDelTree(c, cp, &err[0], 256)
 }
 
 func mkindex(c unsafe.Pointer, path string) {
@@ -216,16 +222,15 @@ func parseTLV(data []byte) (kind string, raw []byte, arrLen int) {
 	return kind, raw, arrLen
 }
 
-// constructTLV：char/* 走 kvspaceNewChar，数值/布尔走 kvspaceTlvEncode（arrLen>1 → 一维 [arrLen]）。
+// constructTLV：char/utf8 走 kvspaceNewChar（显式长度，NUL 安全），
+// 其余（数值/布尔/objindex 等）走 kvspaceTlvEncode（arrLen>1 → 一维 [arrLen]）。
 func constructTLV(kind string, raw []byte, arrLen int) []byte {
-	if strings.HasPrefix(kind, "char/") {
-		ck := cstr(kind)
-		cv := C.CBytes(append(append([]byte{}, raw...), 0)) // NUL 结尾
-		defer C.free(unsafe.Pointer(ck))
-		defer C.free(cv)
+	if kind == "char/utf8" {
+		buf := C.CBytes(raw)
+		defer C.free(buf)
 		var out *C.uint8_t
 		var ol C.uint32_t
-		if C.kvspaceNewChar(ck, (*C.char)(cv), &out, &ol) != 0 || out == nil {
+		if C.kvspaceNewChar((*C.uint8_t)(buf), C.uint32_t(len(raw)), &out, &ol) != 0 || out == nil {
 			return nil
 		}
 		defer C.kvspaceBytesFree(out, ol)
@@ -519,6 +524,10 @@ func readArr(c unsafe.Pointer, path string) []interface{} {
 }
 
 func writeMap(c unsafe.Pointer, root string, m map[string]any) error {
+	// 覆盖语义：root 子树等于 src，写前清空旧子树（杜绝孤儿键与 obj→scalar 脏读）。
+	if root != "" && root != "/" {
+		delTree(c, root)
+	}
 	return writeObj(c, root, m)
 }
 

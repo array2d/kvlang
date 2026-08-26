@@ -10,7 +10,7 @@ func TestEdgeKeys(t *testing.T) {
 	c := rtConn(t)
 	defer disconnect(c)
 	cases := []string{
-		`{"a.b":1}`,              // 点号 key（应拒绝）
+		`{"a.b":1}`,              // 点号 key（合法，· 才是成员分隔符）
 		`{"a/b":1}`,              // 斜杠 key（应拒绝）
 		`{"a[b]":1}`,             // 方括号 key（应拒绝）
 		`{"a\nb":1}`,             // 换行 key（应拒绝）
