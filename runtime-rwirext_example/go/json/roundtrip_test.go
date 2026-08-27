@@ -21,12 +21,12 @@ func rtConn(t *testing.T) unsafe.Pointer {
 }
 
 func roundTrip(c unsafe.Pointer, root, input string) string {
-	m := fromJSON([]byte(input))
-	if m == nil {
-		return "<fromJSON nil>"
+	v, err := fromJSON([]byte(input))
+	if err != nil {
+		return "<fromJSON error>"
 	}
-	_ = writeMap(c, root, m)
-	out, _ := json.Marshal(buildMap(c, root))
+	_ = write(c, root, v)
+	out, _ := json.Marshal(build(c, root))
 	return string(out)
 }
 

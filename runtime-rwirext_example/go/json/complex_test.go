@@ -10,16 +10,16 @@ import (
 	"unsafe"
 )
 
-// rt 往返一次并返回输出 JSON 与 writeMap 错误。
+// rt 往返一次并返回输出 JSON 与 write 错误。
 func rt(c unsafe.Pointer, root, in string) (string, error) {
-	m := fromJSON([]byte(in))
-	if m == nil {
-		return "", fmt.Errorf("fromJSON returned nil (非 object 顶层或解析失败)")
-	}
-	if err := writeMap(c, root, m); err != nil {
+	v, err := fromJSON([]byte(in))
+	if err != nil {
 		return "", err
 	}
-	out, _ := json.Marshal(buildMap(c, root))
+	if err := write(c, root, v); err != nil {
+		return "", err
+	}
+	out, _ := json.Marshal(build(c, root))
 	return string(out), nil
 }
 
