@@ -24,6 +24,7 @@ extern int   kvspaceDel(void *h, const char *const *keys, uint32_t nkeys, char *
 extern int   kvspaceDelTree(void *h, const char *prefix, char *err, uint32_t err_cap);
 extern int   kvspaceMkindex(void *h, const char *path, char *err, uint32_t err_cap);
 extern int   kvspaceNewChar(const uint8_t *bytes, uint32_t len, uint8_t **out, uint32_t *out_len);
+extern const char *kvspaceConst(const char *name);
 
 // XValue 头（repr(C)，对齐 kvspace ABI）：kindexpr 为唯一类型真相，body 段靠 offset/len 定位。
 typedef struct {
@@ -169,6 +170,12 @@ func resolveRead(c unsafe.Pointer, pc string, idx int) string {
 	return gostr(C.kvlang_rwirextResolveRead(c, cp, C.int(idx)))
 }
 
+func resolveReadPath(c unsafe.Pointer, pc string, idx int) string {
+	cp := cstr(pc)
+	defer C.free(unsafe.Pointer(cp))
+	return gostr(C.kvlang_rwirextResolveReadPath(c, cp, C.int(idx)))
+}
+
 func resolveWrite(c unsafe.Pointer, pc string, idx int) string {
 	cp := cstr(pc)
 	defer C.free(unsafe.Pointer(cp))
@@ -225,7 +232,7 @@ func parseTLV(data []byte) (kind string, raw []byte, arrLen int) {
 // constructTLV：char/utf8 走 kvspaceNewChar（显式长度，NUL 安全），
 // 其余（数值/布尔/objindex 等）走 kvspaceTlvEncode（arrLen>1 → 一维 [arrLen]）。
 func constructTLV(kind string, raw []byte, arrLen int) []byte {
-	if kind == "char/utf8" {
+	if kind == kindChar8 {
 		buf := C.CBytes(raw)
 		defer C.free(buf)
 		var out *C.uint8_t
@@ -345,11 +352,11 @@ func tlvToJSONValue(kind string, raw []byte, arrLen int) interface{} {
 		if arrLen > 1 {
 			arr := make([]interface{}, arrLen)
 			for i := 0; i < arrLen; i++ {
-				arr[i] = float64From(raw[i*es : i*es+es])
+				arr[i] = floatJSON(float64From(raw[i*es : i*es+es]))
 			}
 			return arr
 		}
-		return float64From(raw[:es])
+		return floatJSON(float64From(raw[:es]))
 	case "char/utf8", "char/ascii":
 		return string(raw)
 	case "char/utf32":
@@ -366,24 +373,45 @@ func float64From(raw []byte) float64 {
 	return math.Float64frombits(binary.LittleEndian.Uint64(raw))
 }
 
-func jsonValueToTLV(v interface{}) []byte {
+// floatJSON：float 导出保形——数学上为整数的值带小数点（1.0 而非 1），-0.0 保符号，
+// 使二次往返的 kind 不漂移（float64 整数不再被误读成 int64）。
+func floatJSON(f float64) json.Number {
+	if math.IsInf(f, 0) || math.IsNaN(f) {
+		return json.Number(strconv.FormatFloat(f, 'g', -1, 64))
+	}
+	if f == 0 && math.Signbit(f) {
+		return json.Number("-0.0")
+	}
+	s := strconv.FormatFloat(f, 'g', -1, 64)
+	if !strings.ContainsAny(s, ".eE") {
+		return json.Number(s + ".0")
+	}
+	return json.Number(s)
+}
+
+func jsonValueToTLV(v interface{}) ([]byte, error) {
 	switch t := v.(type) {
 	case json.Number:
+		s := t.String()
 		if i, err := t.Int64(); err == nil {
-			return constructTLV("int64", u64(uint64(i)), 1)
+			return constructTLV(kindInt64, u64(uint64(i)), 1), nil
+		}
+		// 纯整数文本（无 . e E）但 Int64 失败 → 超 int64，显式拒绝，不静默降 float64。
+		if !strings.ContainsAny(s, ".eE") {
+			return nil, fmt.Errorf("json: integer %s overflows int64", s)
 		}
 		f, _ := t.Float64()
-		return constructTLV("float64", u64bits(f), 1)
+		return constructTLV(kindFloat64, u64bits(f), 1), nil
 	case bool:
 		b := byte(0)
 		if t {
 			b = 1
 		}
-		return constructTLV("bool", []byte{b}, 1)
+		return constructTLV(kindBool, []byte{b}, 1), nil
 	case string:
-		return constructTLV("char/utf8", []byte(t), 1)
+		return constructTLV(kindChar8, []byte(t), 1), nil
 	default:
-		return nil
+		return nil, fmt.Errorf("json: unsupported value type %T", v)
 	}
 }
 
@@ -402,8 +430,50 @@ func u64bits(f float64) []byte {
 // objindex（对象）/ strkeymapindex（数组）承载复杂结构：marker 在 path·，
 // 成员在 path·<key>（key 恒字符串，数组下标为坐标段 [i]）。后端按 · 成员自动维护 index。
 
-// sep 成员分隔符，对齐 kvspace OBJ_SEP / runtime MEMBER_SEP（U+00B7 中点号）。
-const sep = "·"
+// 从 kvspace ABI（kvspaceConst）取的常量，扩展不硬编码分隔符/kind 字面量（#111）。
+var (
+	sep         string
+	runtimeSep  string
+	dirSuf      string
+	indexSep    string
+	kindObj     string
+	kindMap     string
+	kindIndex   string
+	kindChar8   string
+	kindInt64   string
+	kindFloat64 string
+	kindBool    string
+)
+
+func init() {
+	sep = cconst("KVSPACE_MEMBER_SEP")
+	runtimeSep = cconst("KVSPACE_RUNTIME_MEMBER_SEP")
+	dirSuf = cconst("KVSPACE_DIR_INDEX_SUF")
+	indexSep = cconst("KVSPACE_INDEX_VALUE_SEP")
+	kindObj = cconst("KVSPACE_KIND_OBJ")
+	kindMap = cconst("KVSPACE_KIND_MAP")
+	kindIndex = cconst("KVSPACE_KIND_INDEX")
+	kindChar8 = cconst("KVSPACE_KIND_CHAR_UTF8")
+	kindInt64 = cconst("KVSPACE_KIND_INT64")
+	kindFloat64 = cconst("KVSPACE_KIND_FLOAT64")
+	kindBool = cconst("KVSPACE_KIND_BOOL")
+
+	ops = []op{
+		{"json" + sep + "to", 1, 1},
+		{"json" + sep + "from", 1, 1},
+	}
+}
+
+func cconst(name string) string {
+	cn := cstr(name)
+	defer C.free(unsafe.Pointer(cn))
+	s := C.kvspaceConst(cn)
+	if s == nil {
+		return ""
+	}
+	// kvspaceConst 返回静态字符串，不得 free。
+	return C.GoString(s)
+}
 
 func mkIndexMarker(kind string, names []string) []byte {
 	body := make([]byte, 4)
@@ -418,7 +488,7 @@ func mkMapMarker(names []string) []byte {
 	binary.LittleEndian.PutUint32(body, uint32(len(names)))
 	body = append(body, []byte(strings.Join(names, "\n"))...)
 	dims := []int32{int32(len(names))}
-	return encodeTLVDims("strkeymapindex", body, dims)
+	return encodeTLVDims(kindMap, body, dims)
 }
 
 // validateKey：JSON 对象 key 不能含影响 kvspace 存储分隔的字符（§5.4）。
@@ -429,8 +499,8 @@ func validateKey(k string) error {
 		return fmt.Errorf("json: empty key rejected")
 	}
 	for _, r := range k {
-		if r == '/' || r == '·' || r == '[' || r == ']' || r == '\n' || r == '\r' ||
-			r == 0 || r < 0x20 || r == '‥' {
+		if r == '[' || r == ']' || r == '\r' || r == 0 || r < 0x20 ||
+			strings.ContainsRune(sep+dirSuf+indexSep+runtimeSep, r) {
 			return fmt.Errorf("json: forbidden char %q in key %q", r, k)
 		}
 	}
@@ -446,7 +516,11 @@ func writeValue(c unsafe.Pointer, path string, v interface{}) error {
 	case []interface{}:
 		return writeArr(c, path, t)
 	default:
-		setTLV(c, path, jsonValueToTLV(v))
+		tlv, err := jsonValueToTLV(v)
+		if err != nil {
+			return err
+		}
+		setTLV(c, path, tlv)
 	}
 	return nil
 }
@@ -460,7 +534,7 @@ func writeObj(c unsafe.Pointer, path string, m map[string]any) error {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	setTLV(c, path+sep, mkIndexMarker("objindex", keys))
+	setTLV(c, path+sep, mkIndexMarker(kindObj, keys))
 	for _, k := range keys {
 		if err := writeValue(c, path+sep+k, m[k]); err != nil {
 			return err
@@ -484,18 +558,34 @@ func writeArr(c unsafe.Pointer, path string, arr []interface{}) error {
 }
 
 func readValue(c unsafe.Pointer, path string) interface{} {
+	// · 成员容器（objindex/strkeymapindex）
 	kind, _, _ := parseTLV(getTLV(c, path+sep))
-	switch kind {
-	case "objindex":
+	if kind == kindObj {
 		return readObj(c, path)
-	case "strkeymapindex":
+	}
+	if kind == kindMap {
 		return readArr(c, path)
 	}
+	// / 目录树（kind=index）
+	if dkind, _, _ := parseTLV(getTLV(c, path+dirSuf)); dkind == kindIndex {
+		return readDir(c, path)
+	}
+	// 单值（标量 / compact ndarray / 字符串）
 	kind, raw, arrLen := parseTLV(getTLV(c, path))
 	if kind == "" {
 		return nil // None → JSON null
 	}
 	return tlvToJSONValue(kind, raw, arrLen)
+}
+
+// readDir：/ 目录树（kind=index）→ JSON object，子节点递归；子名带尾 /（子目录）或 ·（成员目录）先 strip。
+func readDir(c unsafe.Pointer, path string) map[string]any {
+	m := map[string]any{}
+	for _, name := range list(c, path+dirSuf) {
+		key := strings.TrimSuffix(strings.TrimSuffix(name, dirSuf), sep)
+		m[key] = readValue(c, path+dirSuf+key)
+	}
+	return m
 }
 
 func readObj(c unsafe.Pointer, path string) map[string]any {
@@ -523,29 +613,26 @@ func readArr(c unsafe.Pointer, path string) []interface{} {
 	return arr
 }
 
-func writeMap(c unsafe.Pointer, root string, m map[string]any) error {
-	// 覆盖语义：root 子树等于 src，写前清空旧子树（杜绝孤儿键与 obj→scalar 脏读）。
+// write：顶层写入（覆盖语义，root 子树等于 src）。v 可为 map/slice/标量/nil。
+func write(c unsafe.Pointer, root string, v interface{}) error {
 	if root != "" && root != "/" {
 		delTree(c, root)
 	}
-	return writeObj(c, root, m)
+	return writeValue(c, root, v)
 }
 
-func buildMap(c unsafe.Pointer, root string) map[string]any {
-	if m, ok := readValue(c, root).(map[string]any); ok {
-		return m
-	}
-	return map[string]any{}
+func build(c unsafe.Pointer, root string) interface{} {
+	return readValue(c, root)
 }
 
-func fromJSON(data []byte) map[string]any {
+func fromJSON(data []byte) (interface{}, error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
-	var m map[string]any
-	if err := dec.Decode(&m); err != nil {
-		return nil
+	var v interface{}
+	if err := dec.Decode(&v); err != nil {
+		return nil, err
 	}
-	return m
+	return v, nil
 }
 
 // ── rwir handoff ───────────────────────────────────────────────────
@@ -556,10 +643,7 @@ type op struct {
 	nw   int
 }
 
-var ops = []op{
-	{"json" + sep + "to", 1, 1},
-	{"json" + sep + "from", 1, 1},
-}
+var ops []op
 
 func register(c unsafe.Pointer) {
 	for _, o := range ops {
@@ -575,9 +659,9 @@ func register(c unsafe.Pointer) {
 func doTo(c unsafe.Pointer, pc string, readNames, writeNames []string) {
 	root := readNames[0]
 	if !strings.HasPrefix(root, "/") {
-		root = resolveRead(c, pc, 0)
+		root = resolveReadPath(c, pc, 0)
 	}
-	data, _ := json.Marshal(buildMap(c, root))
+	data, _ := json.Marshal(build(c, root))
 	dest := resolveWrite(c, pc, 0)
 	setChar(c, dest, string(data))
 }
@@ -588,9 +672,15 @@ func doFrom(c unsafe.Pointer, pc string, readNames, writeNames []string, vid str
 	if !strings.HasPrefix(root, "/") {
 		root = resolveWrite(c, pc, 0)
 	}
-	if err := writeMap(c, root, fromJSON([]byte(src))); err != nil {
-		setChar(c, "/vthread/"+vid+"/‥status", "error")
-		setChar(c, "/vthread/"+vid+"/‥error/msg", err.Error())
+	v, err := fromJSON([]byte(src))
+	if err != nil {
+		setChar(c, "/vthread/"+vid+"/"+runtimeSep+"status", "error")
+		setChar(c, "/vthread/"+vid+"/"+runtimeSep+"error/msg", err.Error())
+		return
+	}
+	if err := write(c, root, v); err != nil {
+		setChar(c, "/vthread/"+vid+"/"+runtimeSep+"status", "error")
+		setChar(c, "/vthread/"+vid+"/"+runtimeSep+"error/msg", err.Error())
 		return
 	}
 }
@@ -620,7 +710,7 @@ func serveOp(c unsafe.Pointer, o op) {
 		}
 
 		nxt := nextPC(pc)
-		setChar(c, "/vthread/"+vid+"/‥pc", nxt)
+		setChar(c, "/vthread/"+vid+"/"+runtimeSep+"pc", nxt)
 		setChar(c, base+"/.done<"+vid+">", id)
 		del(c, todo)
 	}

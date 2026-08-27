@@ -113,12 +113,12 @@ func TestRandomRoundtrip(t *testing.T) {
 		v := genValue(r, 0)
 		in, _ := json.Marshal(v)
 		root := "/rt/rand" + strconv.Itoa(i)
-		m := fromJSON(in)
-		if m == nil {
+		v, err := fromJSON(in)
+		if err != nil {
 			continue
 		}
-		_ = writeMap(c, root, m)
-		out, _ := json.Marshal(buildMap(c, root))
+		_ = write(c, root, v)
+		out, _ := json.Marshal(build(c, root))
 		if !reflect.DeepEqual(canonical(string(in)), canonical(string(out))) {
 			fail++
 			if fail <= 8 {
