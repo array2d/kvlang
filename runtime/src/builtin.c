@@ -158,16 +158,19 @@ char *kvlangBuiltinResolveWriteSlot(kvlangKv_t *kv, const char *frame_path, cons
         kvlangXvalue_t av; kvlangXvalueZero(&av);
         kvlangKvGetOne(kv, ak.p, &av);
         if (!kvlangXvalueNone(&av)) {
+            /* 只追显式软链接（ptr, ref==1）链；av 是 handle_call 已 resolve 好的
+             * 最终写目标路径（普通 char），直接取字符串，勿再按值读下一跳——
+             * 否则会把已写数据（char）误当路径再追，导致二次调用写回旧值。 */
             kvlangXvalue_t v = av; av.data = NULL; av.len = 0;
-            for (;;) {
-                if (!kvlangXvalueIsCharKind(kvlangXvalueKind(&v))) break;
-                char *p = kvlangXvalueValueString(&v);
-                kvlangXvalue_t next; kvlangXvalueZero(&next);
-                kvlangKvGetOne(kv, p, &next);
-                if (kvlangXvalueNone(&next) || !kvlangXvalueIsCharKind(kvlangXvalueKind(&next))) { result = p; break; }
-                free(p);
-                kvlangXvalueFree(&v); v = next;
+            while (kvlangXvalueIsPtr(&v)) {
+                char *np = kvlangXvaluePtrTarget(&v);
+                kvlangXvalue_t nxt; kvlangXvalueZero(&nxt);
+                kvlangKvGetOne(kv, np, &nxt);
+                free(np);
+                kvlangXvalueFree(&v);
+                v = nxt;
             }
+            if (!kvlangXvalueNone(&v)) result = kvlangXvalueValueString(&v);
             kvlangXvalueFree(&v);
         }
         kvlangXvalueFree(&av); kvlangStrbufFree(&ak);
