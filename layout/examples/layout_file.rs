@@ -7,18 +7,23 @@ use std::fs;
 
 use kvlang_layout::{compile, init_dirs, Kv};
 
-/// 复刻 Go runtime 的 findEntry：DFS /lib/ 找首个 `·init`，否则 "init"。
-fn find_entry(kv: &mut Kv, prefix: &str) -> String {
+/// 复刻 Go runtime 的 findEntry：DFS /lib/ 找首个 init（顶层 `init` 或 lib 块内 `pkg·init`）。
+fn find_entry(kv: &mut Kv, prefix: &str, pkg: &str) -> String {
     let children = kv.list(prefix, false, true);
     for c in &children {
-        let c = c.trim_end_matches('/');
-        if c.ends_with("·init") {
-            return c.to_string();
+        let base = c.trim_end_matches('/');
+        if base.ends_with(".src") {
+            continue;
         }
-        let sub = format!("{prefix}{c}/");
-        let entry = find_entry(kv, &sub);
+        let full = if pkg.is_empty() { base.to_string() } else { format!("{pkg}·{base}") };
+        if base == "init" {
+            return full;
+        }
+        let next_pkg = if pkg.is_empty() { base.to_string() } else { format!("{pkg}/{base}") };
+        let sub = if c.ends_with('/') { format!("{prefix}{base}/") } else { format!("{prefix}{base}·") };
+        let entry = find_entry(kv, &sub, &next_pkg);
         if !entry.is_empty() {
-            return format!("{c}/{entry}");
+            return entry;
         }
     }
     String::new()
@@ -37,7 +42,7 @@ fn main() {
     init_dirs(&mut kv).expect("init_dirs");
     compile(&mut kv, &src).expect("compile");
 
-    let entry = find_entry(&mut kv, "/lib/");
+    let entry = find_entry(&mut kv, "/lib/", "");
     let entry = if entry.is_empty() { "init" } else { &entry };
     println!("ENTRY={entry}");
     eprintln!("[rust-layout] {} -> {} (entry={entry})", args[1], dsn);

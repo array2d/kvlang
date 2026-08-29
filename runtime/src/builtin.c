@@ -987,22 +987,11 @@ int kvlangBuiltinScatter(kvlangFrame_t *f) {
     char *dst = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->writes[0].name);
     int al = kvlangXvalueArrayLen(&in[0]);
     if (al > 0) {
-        char **names = malloc(sizeof(char *) * (size_t)al);
-        for (int i = 0; i < al; i++) {
-            kvlangStrbuf_t s; kvlangStrbufInit(&s); kvlangStrbufPrintf(&s, "[%d]", i);
-            names[i] = kvlangStrbufDetach(&s);
-        }
         char err[256];
         int32_t dims[1] = { al };
         kvlangXvalue_t mark; map_marker(&mark, dims, 1);
         kvlangKvPair_t p0 = { dst, mark }; kvlangKvSet(f->kv, &p0, 1, err, sizeof err);
         kvlangXvalueFree(&mark);
-        char *dir = kvlangKeytreeMember(dst, "");
-        kvlangXvalue_t mi; memindex(&mi, (const char *const *)names, al);
-        kvlangKvPair_t p1 = { dir, mi }; kvlangKvSet(f->kv, &p1, 1, err, sizeof err);
-        kvlangXvalueFree(&mi); free(dir);
-        for (int i = 0; i < al; i++) free(names[i]);
-        free(names);
     }
     for (int i = 0; i < al; i++) {
         int64_t c[1] = { i };

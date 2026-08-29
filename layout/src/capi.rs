@@ -19,16 +19,21 @@ use std::panic::catch_unwind;
 use crate::{compile, format, init_dirs, kvkind, vet, Kv};
 
 /// 复刻 Go runtime / layout_file 的 findEntry：DFS /lib/ 找首个 `·init`，否则 "init"。
-fn find_entry(kv: &mut Kv, prefix: &str) -> String {
+fn find_entry(kv: &mut Kv, prefix: &str, pkg: &str) -> String {
     for c in kv.list(prefix, false, true) {
-        let c = c.trim_end_matches('/');
-        if c.ends_with("·init") {
-            return c.to_string();
+        let base = c.trim_end_matches('/');
+        if base.ends_with(".src") {
+            continue;
         }
-        let sub = format!("{prefix}{c}/");
-        let entry = find_entry(kv, &sub);
+        let full = if pkg.is_empty() { base.to_string() } else { format!("{pkg}·{base}") };
+        if base == "init" {
+            return full;
+        }
+        let next_pkg = if pkg.is_empty() { base.to_string() } else { format!("{pkg}/{base}") };
+        let sub = if c.ends_with('/') { format!("{prefix}{base}/") } else { format!("{prefix}{base}·") };
+        let entry = find_entry(kv, &sub, &next_pkg);
         if !entry.is_empty() {
-            return format!("{c}/{entry}");
+            return entry;
         }
     }
     String::new()
@@ -58,7 +63,7 @@ fn layout_core(src: &str, dsn: &str) -> Result<String, String> {
     let mut kv = Kv::conn(dsn);
     init_dirs(&mut kv)?;
     compile(&mut kv, src)?;
-    let entry = find_entry(&mut kv, "/lib/");
+    let entry = find_entry(&mut kv, "/lib/", "");
     Ok(if entry.is_empty() { "init".to_string() } else { entry })
 }
 

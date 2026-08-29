@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use super::{keytree, symbol};
+use super::symbol;
 
 #[derive(Clone, Copy)]
 pub struct Pos {

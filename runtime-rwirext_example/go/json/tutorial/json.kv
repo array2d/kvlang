@@ -7,22 +7,30 @@
 #       json·from(json) 反序列化 JSON 写回子树。目录→嵌套对象；compact 数组（[]T）与
 #       散 key 数组（name[0]..name[N-1]）统一序列化为 JSON 数组。
 # 期望输出:
-#   j = {"active":true,"age":42,"cont":[10,20,30],"grp":{"c":1,"d":2},"name":"alice","scat":[10,20,30],"score":3.14}
+#   j = {"active":true,"age":42,"cont":[10,20,30],"grp":{"c":1,"d":2},"name":"alice","nested":{"level1":{"count":3,"flags":[true,false,true],"level2":"deep"},"list":[1,2,3]},"scat":[10,20,30],"score":3.14}
 #   name = alice
 #   c = 1
 #   cont = [10, 20, 30]
 #   scat = [10, 20, 30]
 #   len = 3 3
+#   level2 = deep
+#   count = 3
+#   flags = [true, false, true]
+#   list = [1, 2, 3]
 rwfunc main() -> () {
-	42 -> /data/age
-	"alice" -> /data/name
-	3.14 -> /data/score
-	true -> /data/active
-	1 -> /data/grp/c
-	2 -> /data/grp/d
+	42 -> /data·age
+	"alice" -> /data·name
+	3.14 -> /data·score
+	true -> /data·active
+	1 -> /data·grp·c
+	2 -> /data·grp·d
+	"deep" -> /data·nested·level1·level2
+	3 -> /data·nested·level1·count
+	[true, false, true] -> /data·nested·level1·flags
+	[1, 2, 3] -> /data·nested·list
 	a:[]int64 = [10, 20, 30]
-	[10, 20, 30] -> /data/cont
-	array·scatter(a) -> /data/scat
+	[10, 20, 30] -> /data·cont
+	array·scatter(a) -> /data·scat
 	json·to(/data) -> j
 	println("j =", j)
 	json·from(j) -> /data2
@@ -33,6 +41,10 @@ rwfunc main() -> () {
 	ndarray·numel(/data2·cont) -> n1
 	ndarray·numel(/data2·scat) -> n2
 	println("len =", n1, n2)
+	println("level2 =", /data2·nested·level1·level2)
+	println("count =", /data2·nested·level1·count)
+	println("flags =", /data2·nested·level1·flags)
+	println("list =", /data2·nested·list)
 }
 
 main()

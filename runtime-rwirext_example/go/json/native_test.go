@@ -34,3 +34,37 @@ func TestNativeDataTo(t *testing.T) {
 		t.Errorf("dir with scatter got %s", got)
 	}
 }
+
+// TestLocalContainer：object/stringkeymap 值（模拟 kvlang 局部变量，无尾 / 的帧槽路径）→ json。
+func TestLocalContainer(t *testing.T) {
+	c := rtConn(t)
+	defer disconnect(c)
+
+	// object 局部变量：混合类型 + compact 数组成员
+	if err := write(c, "/rt/profile", map[string]any{
+		"name": "alice", "age": json.Number("42"),
+		"active": true, "score": json.Number("3.14"),
+		"nums": []interface{}{json.Number("1"), json.Number("2"), json.Number("3")},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := json.Marshal(build(c, "/rt/profile")); string(got) != `{"active":true,"age":42,"name":"alice","nums":[1,2,3],"score":3.14}` {
+		t.Errorf("obj got %s", got)
+	}
+
+	// stringkeymap 局部变量：整型散 key 数组
+	if err := write(c, "/rt/map", []interface{}{json.Number("10"), json.Number("20"), json.Number("30")}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := json.Marshal(build(c, "/rt/map")); string(got) != `[10,20,30]` {
+		t.Errorf("map got %s", got)
+	}
+
+	// stringkeymap 局部变量：字符串散 key 数组
+	if err := write(c, "/rt/tags", []interface{}{"a", "b", "c"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := json.Marshal(build(c, "/rt/tags")); string(got) != `["a","b","c"]` {
+		t.Errorf("tags got %s", got)
+	}
+}
