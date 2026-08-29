@@ -331,11 +331,12 @@ static char *handle_call(kvlangKv_t *kv, const char *pc, kvlangRwirInst_t *inst)
             char *rk = resolve_read_path(kv, caller_fr, arg->name);
             bool concrete = !kvlangXvalueNone(&arg->val) && !kvlangXvalueKindIs(&arg->val, KVSPACE_KIND_RWIR) && !kvlangXvalueKindIs(&arg->val, KVSPACE_KIND_RWFUNC);
             if (concrete) {
-                if (!rk) {
-                    kvlangStrbuf_t lk; kvlangStrbufInit(&lk);
-                    kvlangStrbufPrintf(&lk, "%s/._lit%d", caller_fr, lit_seq++);
-                    rk = kvlangStrbufDetach(&lk);
-                }
+                /* 字面量无变量槽，一律写 ._litN；勿沿用 resolve_read_path 的返回值——
+                 * 否则字面量内容（如 "https://x" 里的 //）会被当路径段，二次读回即丢。 */
+                if (rk) free(rk);
+                kvlangStrbuf_t lk; kvlangStrbufInit(&lk);
+                kvlangStrbufPrintf(&lk, "%s/._lit%d", caller_fr, lit_seq++);
+                rk = kvlangStrbufDetach(&lk);
                 /* 写字面量到 rk（拷贝，避免 double-free） */
                 kvspaceHead_t ah; kvspaceDecodeHead(arg->val.data, arg->val.len, &ah);
                 int32_t abl; const uint8_t *ab = kvlangXvalueBody(&arg->val, &ah, &abl);
