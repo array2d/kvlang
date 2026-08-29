@@ -145,6 +145,16 @@ fn single_char_token(c: u8) -> Option<Kind> {
     })
 }
 
+fn escaped_byte(c: u8) -> u8 {
+    match c {
+        b'n' => b'\n',
+        b't' => b'\t',
+        b'r' => b'\r',
+        b'0' => 0,
+        other => other,
+    }
+}
+
 fn scan_quoted(src: &[u8], mut i: usize, quote: u8) -> (String, usize) {
     i += 1;
     let mut b: Vec<u8> = Vec::new();
@@ -153,7 +163,7 @@ fn scan_quoted(src: &[u8], mut i: usize, quote: u8) -> (String, usize) {
         if c == b'\\' {
             i += 1;
             if i < src.len() {
-                b.push(src[i]);
+                b.push(escaped_byte(src[i]));
                 i += 1;
             }
             continue;
@@ -177,7 +187,7 @@ fn scan_triple_quoted(src: &[u8], mut i: usize) -> (String, usize) {
         if c == b'\\' {
             i += 1;
             if i < src.len() {
-                b.push(src[i]);
+                b.push(escaped_byte(src[i]));
                 i += 1;
             }
             continue;
@@ -401,9 +411,21 @@ pub fn scan(src: &str) -> Vec<Token> {
                 let start = i;
                 i += 1;
                 while i < src.len() {
-                    // ·（U+00B7）在绝对路径里是路径字符，不是成员分隔符
+                    // ·（U+00B7）与 .（释放给小数 key）是路径字符；· 后的坐标段 [0,1] 是成员链。
                     if src[i] == 0xC2 && i + 1 < src.len() && src[i + 1] == 0xB7 {
                         i += 2;
+                        if i < src.len() && src[i] == b'[' {
+                            while i < src.len() && src[i] != b']' {
+                                i += 1;
+                            }
+                            if i < src.len() {
+                                i += 1; // 跳过 ]
+                            }
+                        }
+                        continue;
+                    }
+                    if src[i] == b'.' {
+                        i += 1;
                         continue;
                     }
                     if is_token_delim(src[i]) {
