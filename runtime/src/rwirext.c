@@ -77,6 +77,42 @@ char *kvlang_rwirextParams(void *kvspace, const char *pc) {
   return kvlangStrbufDetach(&b);
 }
 
+/* stringkeymap 容器值：遍历 p· 成员 → "[e0, e1, ...]"（成员为 map 时递归）。 */
+static char *display_map(kvlangKv_t *k, const char *path) {
+  char *dir = kvlangKeytreeMember(path, "");
+  char **names;
+  int cnt;
+  if (kvlangKvList(k, dir, false, false, &names, &cnt) != 0 || cnt <= 0) {
+    free(dir);
+    free(names);
+    return strdup("[]");
+  }
+  kvlangStrbuf_t b;
+  kvlangStrbufInit(&b);
+  kvlangStrbufPutc(&b, '[');
+  for (int i = 0; i < cnt; i++) {
+    if (i) kvlangStrbufPuts(&b, ", ");
+    char *mk = kvlangKeytreeMember(path, names[i]);
+    kvlangXvalue_t mv;
+    kvlangXvalueZero(&mv);
+    kvlangKvGetOne(k, mk, &mv);
+    char *ms = kvlangXvalueNone(&mv)
+                   ? strdup("")
+                   : strcmp(kvlangXvalueKind(&mv), KVSPACE_KIND_MAP) == 0
+                         ? display_map(k, mk)
+                         : kvlangXvalueValueString(&mv);
+    kvlangStrbufPuts(&b, ms);
+    free(ms);
+    kvlangXvalueFree(&mv);
+    free(mk);
+    free(names[i]);
+  }
+  kvlangStrbufPutc(&b, ']');
+  free(names);
+  free(dir);
+  return kvlangStrbufDetach(&b);
+}
+
 /* 解析读参 idx 为字符串（变量 → 帧槽值；路径 → 该路径下的值）。 */
 char *kvlang_rwirextResolveRead(void *kvspace, const char *pc, int idx) {
   kvlangKv_t k = {kvspace};
@@ -97,7 +133,16 @@ char *kvlang_rwirextResolveRead(void *kvspace, const char *pc, int idx) {
   kvlangXvalueZero(&v);
   kvlangBuiltinResolveReadValue(&k, fr, inst.reads[idx].name,
                                 &inst.reads[idx].val, &v);
-  char *s = kvlangXvalueNone(&v) ? strdup("") : kvlangXvalueValueString(&v);
+  char *s;
+  if (kvlangXvalueNone(&v)) {
+    s = strdup("");
+  } else if (strcmp(kvlangXvalueKind(&v), KVSPACE_KIND_MAP) == 0) {
+    char *path = kvlangBuiltinResolveWriteSlot(&k, fr, inst.reads[idx].name);
+    s = display_map(&k, path);
+    free(path);
+  } else {
+    s = kvlangXvalueValueString(&v);
+  }
   kvlangXvalueFree(&v);
   free(fr);
   kvlangRwirInstFree(&inst);

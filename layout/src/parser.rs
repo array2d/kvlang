@@ -1403,6 +1403,10 @@ impl Parser {
             return;
         }
         let s = inst.writes[0].clone();
+        // 路径字面量（/ 开头）是完整 key，不是成员写，勿脱糖。
+        if s.starts_with('/') {
+            return;
+        }
         let dt = s.find(keytree::MEMBER_SEP).unwrap_or(s.len());
         let base = s[..dt].to_string();
         let field = s[dt + keytree::MEMBER_SEP.len()..].to_string();
