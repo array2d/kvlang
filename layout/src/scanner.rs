@@ -400,7 +400,15 @@ pub fn scan(src: &str) -> Vec<Token> {
             if i + 1 < src.len() && is_abs_path_start(src[i + 1]) {
                 let start = i;
                 i += 1;
-                while i < src.len() && !is_token_delim(src[i]) {
+                while i < src.len() {
+                    // ·（U+00B7）在绝对路径里是路径字符，不是成员分隔符
+                    if src[i] == 0xC2 && i + 1 < src.len() && src[i + 1] == 0xB7 {
+                        i += 2;
+                        continue;
+                    }
+                    if is_token_delim(src[i]) {
+                        break;
+                    }
                     i += 1;
                 }
                 tokens.push(Token {

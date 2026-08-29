@@ -230,7 +230,7 @@ func parseTLV(data []byte) (kind string, raw []byte, arrLen int) {
 }
 
 // constructTLV：char/utf8 走 kvspaceNewChar（显式长度，NUL 安全），
-// 其余（数值/布尔/objindex 等）走 kvspaceTlvEncode（arrLen>1 → 一维 [arrLen]）。
+// 其余（数值/布尔/object 等）走 kvspaceTlvEncode（arrLen>1 → 一维 [arrLen]）。
 func constructTLV(kind string, raw []byte, arrLen int) []byte {
 	if kind == kindChar8 {
 		buf := C.CBytes(raw)
@@ -266,7 +266,7 @@ func constructTLV(kind string, raw []byte, arrLen int) []byte {
 	return C.GoBytes(unsafe.Pointer(out), C.int(ol))
 }
 
-// encodeTLVDims：显式 dims/ndim 编码（供 strkeymapindex 目录标记落 dims）。
+// encodeTLVDims：显式 dims/ndim 编码（供 stringkeymap 容器值落 dims）。
 func encodeTLVDims(kind string, raw []byte, dims []int32) []byte {
 	ck := cstr(kind)
 	defer C.free(unsafe.Pointer(ck))
@@ -427,8 +427,9 @@ func u64bits(f float64) []byte {
 }
 
 // ── KV 子树 ↔ map[string]any ───────────────────────────────────────
-// objindex（对象）/ strkeymapindex（数组）承载复杂结构：marker 在 path·，
-// 成员在 path·<key>（key 恒字符串，数组下标为坐标段 [i]）。后端按 · 成员自动维护 index。
+// 值/索引分离：容器值（object/stringkeymap）存 p（无后缀，body 空，stringkeymap 的 dims 在 head）；
+// memindex 存 p·（kind=index，body=[4B count][names]，成员列表唯一权威）；成员在 p·<key>
+// （key 恒字符串，数组下标为坐标段 [i]）。后端按 · 成员自动维护 index 与 stringkeymap 兜底。
 
 // 从 kvspace ABI（kvspaceConst）取的常量，扩展不硬编码分隔符/kind 字面量（#111）。
 var (
@@ -475,21 +476,19 @@ func cconst(name string) string {
 	return C.GoString(s)
 }
 
-func mkIndexMarker(kind string, names []string) []byte {
+// memindex p·：kind=index，body=[4B count LE][names]，成员列表唯一权威。
+func mkMemIndex(names []string) []byte {
 	body := make([]byte, 4)
 	binary.LittleEndian.PutUint32(body, uint32(len(names)))
 	body = append(body, []byte(strings.Join(names, "\n"))...)
-	return constructTLV(kind, body, 1)
+	return constructTLV(kindIndex, body, 1)
 }
 
-// strkeymapindex 目录标记：body 同上，dims=[len]（恒一维坐标段 [i]）。
-func mkMapMarker(names []string) []byte {
-	body := make([]byte, 4)
-	binary.LittleEndian.PutUint32(body, uint32(len(names)))
-	body = append(body, []byte(strings.Join(names, "\n"))...)
-	dims := []int32{int32(len(names))}
-	return encodeTLVDims(kindMap, body, dims)
-}
+// 容器值（无后缀 p）：object body 空。
+func mkObjValue() []byte { return constructTLV(kindObj, nil, 1) }
+
+// 容器值（无后缀 p）：stringkeymap body 空，dims=[n]（恒一维坐标段 [i]）。
+func mkMapValue(n int) []byte { return encodeTLVDims(kindMap, nil, []int32{int32(n)}) }
 
 // validateKey：JSON 对象 key 不能含影响 kvspace 存储分隔的字符（§5.4）。
 // 空串、/ · [ ] \n \r \0 U+2025 及 ASCII 控制字符一律拒绝（不静默丢键、不转义）。
@@ -534,7 +533,8 @@ func writeObj(c unsafe.Pointer, path string, m map[string]any) error {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	setTLV(c, path+sep, mkIndexMarker(kindObj, keys))
+	setTLV(c, path, mkObjValue())
+	setTLV(c, path+sep, mkMemIndex(keys))
 	for _, k := range keys {
 		if err := writeValue(c, path+sep+k, m[k]); err != nil {
 			return err
@@ -548,7 +548,8 @@ func writeArr(c unsafe.Pointer, path string, arr []interface{}) error {
 	for i := range arr {
 		keys[i] = fmt.Sprintf("[%d]", i)
 	}
-	setTLV(c, path+sep, mkMapMarker(keys))
+	setTLV(c, path, mkMapValue(len(arr)))
+	setTLV(c, path+sep, mkMemIndex(keys))
 	for i, v := range arr {
 		if err := writeValue(c, path+sep+fmt.Sprintf("[%d]", i), v); err != nil {
 			return err
@@ -558,8 +559,8 @@ func writeArr(c unsafe.Pointer, path string, arr []interface{}) error {
 }
 
 func readValue(c unsafe.Pointer, path string) interface{} {
-	// · 成员容器（objindex/strkeymapindex）
-	kind, _, _ := parseTLV(getTLV(c, path+sep))
+	// 容器值在 p（无后缀）：object/stringkeymap（body 空，成员在 memindex p·）
+	kind, _, _ := parseTLV(getTLV(c, path))
 	if kind == kindObj {
 		return readObj(c, path)
 	}

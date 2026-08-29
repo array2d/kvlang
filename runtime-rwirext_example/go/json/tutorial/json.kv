@@ -26,12 +26,12 @@ rwfunc main() -> () {
 	json·to(/data) -> j
 	println("j =", j)
 	json·from(j) -> /data2
-	println("name =", /data2/name)
-	println("c =", /data2/grp/c)
-	println("cont =", /data2/cont)
-	println("scat =", /data2/scat)
-	ndarray·numel(/data2/cont) -> n1
-	ndarray·numel(/data2/scat) -> n2
+	println("name =", /data2·name)
+	println("c =", /data2·grp·c)
+	println("cont =", /data2·cont)
+	println("scat =", /data2·scat)
+	ndarray·numel(/data2·cont) -> n1
+	ndarray·numel(/data2·scat) -> n2
 	println("len =", n1, n2)
 }
 

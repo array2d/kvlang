@@ -303,11 +303,15 @@ char *kvlangXvalueValueString(const kvlangXvalue_t *v) {
         int n = blen >= 4 ? (int)rd32(body) : 0;
         kvlangStrbuf_t b; kvlangStrbufInit(&b); kvlangStrbufPrintf(&b, "(%d)", n); return kvlangStrbufDetach(&b);
     }
-    if (strcmp(k, KVSPACE_KIND_OBJ) == 0) {
-        int n = blen >= 4 ? (int)rd32(body) : 0;
+    if (strcmp(k, KVSPACE_KIND_OBJ) == 0) return strdup(KVSPACE_KIND_OBJ);
+    if (strcmp(k, KVSPACE_KIND_MAP) == 0) {
         kvlangStrbuf_t b; kvlangStrbufInit(&b);
-        if (n == 0) kvlangStrbufPuts(&b, KVSPACE_KIND_OBJ);
-        else kvlangStrbufPrintf(&b, "{%d}", n);
+        kvlangStrbufPuts(&b, "map[");
+        for (int d = 0; d < kx.ndim; d++) {
+            if (d) kvlangStrbufPutc(&b, ',');
+            kvlangStrbufPrintf(&b, "%d", kx.dims[d]);
+        }
+        kvlangStrbufPutc(&b, ']');
         return kvlangStrbufDetach(&b);
     }
     return strndup2(body, blen);

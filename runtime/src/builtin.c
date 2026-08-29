@@ -774,22 +774,11 @@ static void pack_typed_array(const char *kind, const kvlangXvalue_t *elems, int 
     free(raw);
 }
 
-static char *separated_base(kvlangKv_t *kv, const char *fp, const char *name) {
-    char *base = kvlangBuiltinResolveWriteSlot(kv, fp, name);
-    kvlangStrbuf_t k; kvlangStrbufInit(&k);
-    kvlangStrbufPuts(&k, base); kvlangStrbufPuts(&k, ".[0]");
-    kvlangXvalue_t v; kvlangXvalueZero(&v);
-    kvlangKvGetOne(kv, k.p, &v);
-    bool exists = !kvlangXvalueNone(&v);
-    kvlangXvalueFree(&v); kvlangStrbufFree(&k);
-    if (!exists) { free(base); return NULL; }
-    return base;
-}
-
 static int separated_len(kvlangKv_t *kv, const char *base) {
     for (int i = 0; ; i++) {
         kvlangStrbuf_t k; kvlangStrbufInit(&k);
-        kvlangStrbufPrintf(&k, "%s.[%d]", base, i);
+        kvlangStrbufPuts(&k, base); kvlangStrbufPuts(&k, MEMBER_SEP);
+        kvlangStrbufPrintf(&k, "[%d]", i);
         kvlangXvalue_t v; kvlangXvalueZero(&v);
         kvlangKvGetOne(kv, k.p, &v);
         bool none = kvlangXvalueNone(&v);
@@ -810,8 +799,8 @@ static char *scatter_key(const char *base, const int64_t *coords, int ncoord) {
     return kvlangStrbufDetach(&b);
 }
 
-/* map 目录标记：kind=strkeymapindex，body=[4B count LE][name\n...]，dims 落 head。 */
-static void map_marker(kvlangXvalue_t *out, const char *const *names, int n, const int32_t *dims, int ndim) {
+/* memindex（p·）：kind=index，body=[4B count LE][name\n...]，成员列表唯一权威。 */
+static void memindex(kvlangXvalue_t *out, const char *const *names, int n) {
     kvlangStrbuf_t body; kvlangStrbufInit(&body);
     char count[4] = { (char)(n & 0xFF), (char)((n >> 8) & 0xFF), (char)((n >> 16) & 0xFF), (char)((n >> 24) & 0xFF) };
     kvlangStrbufPutn(&body, count, 4);
@@ -819,8 +808,13 @@ static void map_marker(kvlangXvalue_t *out, const char *const *names, int n, con
         if (i) kvlangStrbufPutc(&body, '\n');
         kvlangStrbufPuts(&body, names[i]);
     }
-    kvlangXvalueNewTlvDims(out, KVSPACE_KIND_MAP, (const uint8_t *)body.p, (uint32_t)body.len, dims, ndim);
+    kvlangXvalueNewTlv(out, KVSPACE_KIND_INDEX, (const uint8_t *)body.p, (uint32_t)body.len, 1);
     kvlangStrbufFree(&body);
+}
+
+/* stringkeymap 容器值（p）：body 空，dims 落 head。 */
+static void map_marker(kvlangXvalue_t *out, const int32_t *dims, int ndim) {
+    kvlangXvalueNewTlvDims(out, KVSPACE_KIND_MAP, (const uint8_t *)"", 0, dims, ndim);
 }
 
 /* ── array 系列 ───────────────────────────────────────────────────── */
@@ -998,10 +992,15 @@ int kvlangBuiltinScatter(kvlangFrame_t *f) {
             kvlangStrbuf_t s; kvlangStrbufInit(&s); kvlangStrbufPrintf(&s, "[%d]", i);
             names[i] = kvlangStrbufDetach(&s);
         }
+        char err[256];
         int32_t dims[1] = { al };
-        kvlangXvalue_t mark; map_marker(&mark, (const char *const *)names, al, dims, 1);
-        kvlangKvPair_t p0 = { dst, mark }; char err[256]; kvlangKvSet(f->kv, &p0, 1, err, sizeof err);
+        kvlangXvalue_t mark; map_marker(&mark, dims, 1);
+        kvlangKvPair_t p0 = { dst, mark }; kvlangKvSet(f->kv, &p0, 1, err, sizeof err);
         kvlangXvalueFree(&mark);
+        char *dir = kvlangKeytreeMember(dst, "");
+        kvlangXvalue_t mi; memindex(&mi, (const char *const *)names, al);
+        kvlangKvPair_t p1 = { dir, mi }; kvlangKvSet(f->kv, &p1, 1, err, sizeof err);
+        kvlangXvalueFree(&mi); free(dir);
         for (int i = 0; i < al; i++) free(names[i]);
         free(names);
     }
@@ -1089,18 +1088,44 @@ int kvlangBuiltinObj(kvlangFrame_t *f) {
     char *fr = kvlangKeytreeFrameRoot(f->pc);
     for (int w = 0; w < f->inst->nw; w++) {
         char *ok = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->writes[w].name);
+        char err[256];
+        /* 重建：清旧成员（p·name），容器值随后重写。 */
+        char *dir = kvlangKeytreeMember(ok, "");
+        char **old = NULL; int oc = 0;
+        kvlangKvList(f->kv, dir, false, false, &old, &oc);
+        for (int i = 0; i < oc; i++) {
+            char *mk = kvlangKeytreeMember(ok, old[i]);
+            kvlangKvDel(f->kv, mk, err, sizeof err);
+            free(mk); free(old[i]);
+        }
+        free(old); free(dir);
+        /* 收集成员名（跳过 None）。 */
+        int cnt = 0;
+        for (int i = 0; i + 1 < n; i += 2) if (!kvlangXvalueNone(&in[i + 1])) cnt++;
+        char **names = malloc(sizeof(char *) * (size_t)(cnt > 0 ? cnt : 1));
+        for (int i = 0, j = 0; i + 1 < n; i += 2) {
+            if (kvlangXvalueNone(&in[i + 1])) continue;
+            names[j++] = kvlangXvalueValueString(&in[i]);
+        }
+        /* 容器值 p：kind=object，body 空。 */
         kvlangXvalue_t mark; kvlangXvalueNewTlv(&mark, KVSPACE_KIND_OBJ, (const uint8_t *)"", 0, 1);
         kvlangKvPair_t p0 = { ok, mark };
-        char err[256]; kvlangKvSet(f->kv, &p0, 1, err, sizeof err);
+        kvlangKvSet(f->kv, &p0, 1, err, sizeof err);
         kvlangXvalueFree(&mark);
-        for (int i = 0; i + 1 < n; i += 2) {
+        /* memindex p·：kind=index，body=[4B count][names]。 */
+        char *mip = kvlangKeytreeMember(ok, "");
+        kvlangXvalue_t mi; memindex(&mi, (const char *const *)names, cnt);
+        kvlangKvPair_t p1 = { mip, mi };
+        kvlangKvSet(f->kv, &p1, 1, err, sizeof err);
+        kvlangXvalueFree(&mi); free(mip);
+        for (int i = 0, j = 0; i + 1 < n; i += 2) {
             if (kvlangXvalueNone(&in[i + 1])) continue;
-            char *k = kvlangXvalueValueString(&in[i]);
-            char *mk = kvlangKeytreeMember(ok, k);
+            char *mk = kvlangKeytreeMember(ok, names[j]);
             kvlangKvPair_t p = { mk, in[i + 1] };
             kvlangKvSet(f->kv, &p, 1, err, sizeof err);
-            free(k); free(mk);
+            free(mk); free(names[j]); j++;
         }
+        free(names);
         free(ok);
     }
     free(fr);
@@ -1112,35 +1137,44 @@ int kvlangBuiltinMap(kvlangFrame_t *f) {
     char *fr = kvlangKeytreeFrameRoot(f->pc);
     for (int w = 0; w < f->inst->nw; w++) {
         char *ok = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->writes[w].name);
-        /* 散 key 数组：元素在 ok.[i]，目录标记（kind=strkeymapindex，dims=[n]）在 ok。 */
-        int old = separated_len(f->kv, ok);
-        for (int i = 0; i < old; i++) {
-            int64_t c[1] = { i };
-            char *k = scatter_key(ok, c, 1);
-            char err[256]; kvlangKvDel(f->kv, k, err, sizeof err); free(k);
+        char err[256];
+        /* 重建：清旧成员（p·name）与旧容器值，随后重写。 */
+        char *dir = kvlangKeytreeMember(ok, "");
+        char **old = NULL; int oc = 0;
+        kvlangKvList(f->kv, dir, false, false, &old, &oc);
+        for (int i = 0; i < oc; i++) {
+            char *mk = kvlangKeytreeMember(ok, old[i]);
+            kvlangKvDel(f->kv, mk, err, sizeof err);
+            free(mk); free(old[i]);
         }
-        char err[256]; kvlangKvDel(f->kv, ok, err, sizeof err);
+        free(old); free(dir);
+        kvlangKvDel(f->kv, ok, err, sizeof err);
 
         char **names = malloc(sizeof(char *) * (size_t)(n > 0 ? n : 1));
-        int64_t *cs = malloc(sizeof(int64_t) * (size_t)(n > 0 ? n : 1));
         for (int i = 0; i < n; i++) {
             kvlangStrbuf_t s; kvlangStrbufInit(&s); kvlangStrbufPrintf(&s, "[%d]", i);
-            names[i] = kvlangStrbufDetach(&s); cs[i] = i;
+            names[i] = kvlangStrbufDetach(&s);
         }
+        /* 容器值 p：stringkeymap，body 空，dims=[n] 落 head。 */
         int32_t dims[1] = { n };
-        if (n > 0) {
-            kvlangXvalue_t mark; map_marker(&mark, (const char *const *)names, n, dims, 1);
-            kvlangKvPair_t p0 = { ok, mark };
-            kvlangKvSet(f->kv, &p0, 1, err, sizeof err);
-            kvlangXvalueFree(&mark);
-        }
+        kvlangXvalue_t mark; map_marker(&mark, dims, 1);
+        kvlangKvPair_t p0 = { ok, mark };
+        kvlangKvSet(f->kv, &p0, 1, err, sizeof err);
+        kvlangXvalueFree(&mark);
+        /* memindex p·：kind=index，body=[4B count][[0]\n[1]...]。 */
+        char *mip = kvlangKeytreeMember(ok, "");
+        kvlangXvalue_t mi; memindex(&mi, (const char *const *)names, n);
+        kvlangKvPair_t p1 = { mip, mi };
+        kvlangKvSet(f->kv, &p1, 1, err, sizeof err);
+        kvlangXvalueFree(&mi); free(mip);
         for (int i = 0; i < n; i++) {
-            char *k = scatter_key(ok, &cs[i], 1);
+            int64_t c[1] = { i };
+            char *k = scatter_key(ok, c, 1);
             kvlangKvPair_t p = { k, in[i] };
             kvlangKvSet(f->kv, &p, 1, err, sizeof err);
             free(k); free(names[i]);
         }
-        free(names); free(cs); free(ok);
+        free(names); free(ok);
     }
     free(fr);
     next_pc(f); free_inputs(in, n); return 0;
@@ -1466,26 +1500,29 @@ int kvlangBuiltinKvList(kvlangFrame_t *f) {
     char *fr = kvlangKeytreeFrameRoot(f->pc);
     char *dst = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->writes[0].name);
     free(fr);
-    /* 结果是一个 strkeymapindex：目录标记在 dst（dims=[count]），成员名是坐标段 [i]，
-     * 值是对应的成员名字符串。 */
-    if (count > 0) {
-        char **coords = malloc(sizeof(char *) * (size_t)count);
-        for (int i = 0; i < count; i++) {
-            kvlangStrbuf_t s; kvlangStrbufInit(&s); kvlangStrbufPrintf(&s, "[%d]", i);
-            coords[i] = kvlangStrbufDetach(&s);
-        }
-        int32_t dims[1] = { count };
-        kvlangXvalue_t mark; map_marker(&mark, (const char *const *)coords, count, dims, 1);
-        kvlangKvPair_t p0 = { dst, mark }; char err[256]; kvlangKvSet(f->kv, &p0, 1, err, sizeof err);
-        kvlangXvalueFree(&mark);
-        for (int i = 0; i < count; i++) free(coords[i]);
-        free(coords);
+    /* 结果是一个 stringkeymap：容器值在 dst（body 空，dims=[count] 落 head），
+     * memindex 在 dst·，成员名是坐标段 [i]，值是对应的成员名字符串。 */
+    char **coords = malloc(sizeof(char *) * (size_t)(count > 0 ? count : 1));
+    for (int i = 0; i < count; i++) {
+        kvlangStrbuf_t s; kvlangStrbufInit(&s); kvlangStrbufPrintf(&s, "[%d]", i);
+        coords[i] = kvlangStrbufDetach(&s);
     }
+    char err[256];
+    int32_t dims[1] = { count };
+    kvlangXvalue_t mark; map_marker(&mark, dims, 1);
+    kvlangKvPair_t p0 = { dst, mark }; kvlangKvSet(f->kv, &p0, 1, err, sizeof err);
+    kvlangXvalueFree(&mark);
+    char *dir = kvlangKeytreeMember(dst, "");
+    kvlangXvalue_t mi; memindex(&mi, (const char *const *)coords, count);
+    kvlangKvPair_t p1 = { dir, mi }; kvlangKvSet(f->kv, &p1, 1, err, sizeof err);
+    kvlangXvalueFree(&mi); free(dir);
+    for (int i = 0; i < count; i++) free(coords[i]);
+    free(coords);
     for (int i = 0; i < count; i++) {
         int64_t c[1] = { i };
         char *k = scatter_key(dst, c, 1);
         kvlangXvalue_t e; kvlangXvalueNewCharUtf8(&e, names[i]);
-        kvlangKvPair_t p = { k, e }; char err[256]; kvlangKvSet(f->kv, &p, 1, err, sizeof err);
+        kvlangKvPair_t p = { k, e }; kvlangKvSet(f->kv, &p, 1, err, sizeof err);
         kvlangXvalueFree(&e); free(k); free(names[i]);
     }
     for (int i = count; ; i++) {
@@ -1494,7 +1531,7 @@ int kvlangBuiltinKvList(kvlangFrame_t *f) {
         kvlangXvalue_t v; kvlangXvalueZero(&v); kvlangKvGetOne(f->kv, k, &v);
         bool none = kvlangXvalueNone(&v); kvlangXvalueFree(&v);
         if (none) { free(k); break; }
-        char err[256]; kvlangKvDel(f->kv, k, err, sizeof err); free(k);
+        kvlangKvDel(f->kv, k, err, sizeof err); free(k);
     }
     free(names); free(dst); free(key);
     next_pc(f); free_inputs(in, n); return 0;
