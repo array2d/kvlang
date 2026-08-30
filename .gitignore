@@ -59,3 +59,4 @@ appendonly.aof
 tutorial/test_failures.csv
 
 /bin/
+*.dump
