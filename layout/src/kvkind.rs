@@ -118,6 +118,78 @@ pub fn value_string(data: &[u8]) -> String {
     String::from_utf8_lossy(body(data, &h)).into_owned()
 }
 
+/// 把 XValue TLV 解码成可读文本，形如 "kind:value"（软链接 "→target:kind"、空 "None"）。
+/// 对齐 kvspace CLI 的 format_value/plain，供 dump 审查 lower 后的 /lib。
+pub fn display(data: &[u8]) -> String {
+    if data.is_empty() {
+        return "None".to_string();
+    }
+    let (r, _, k) = parse_kindexpr(&kindexpr(data));
+    if k.is_empty() {
+        return "None".to_string();
+    }
+    let h = ffi::decode_head(data);
+    let b = body(data, &h);
+    if r == 1 {
+        return format!("→{}:{}", String::from_utf8_lossy(b), k);
+    }
+    format!("{}:{}", k, plain_value(&k, b))
+}
+
+fn le_u32(b: &[u8]) -> u32 {
+    b.iter().take(4).enumerate().fold(0, |a, (i, &x)| a | ((x as u32) << (8 * i)))
+}
+fn le_u64(b: &[u8]) -> u64 {
+    b.iter().take(8).enumerate().fold(0u64, |a, (i, &x)| a | ((x as u64) << (8 * i)))
+}
+fn fmt_float(v: f64) -> String {
+    let s = format!("{v}");
+    if s.contains('.') { s } else { format!("{s}.0") }
+}
+fn count_names(b: &[u8]) -> usize {
+    if b.len() < 4 { 0 } else { le_u32(b) as usize }
+}
+fn arr<const N: usize>(b: &[u8]) -> [u8; N] {
+    let mut a = [0u8; N];
+    let n = b.len().min(N);
+    a[..n].copy_from_slice(&b[..n]);
+    a
+}
+
+fn plain_value(k: &str, b: &[u8]) -> String {
+    match k {
+        "bool" => (b.first().copied().unwrap_or(0) != 0).to_string(),
+        "int8" => (b.first().map(|&x| x as i8).unwrap_or(0) as i64).to_string(),
+        "int16" => (i16::from_le_bytes(arr(b)) as i64).to_string(),
+        "int32" => (i32::from_le_bytes(arr(b)) as i64).to_string(),
+        "int64" => i64::from_le_bytes(arr(b)).to_string(),
+        "uint8" => b.first().copied().unwrap_or(0).to_string(),
+        "uint16" => u16::from_le_bytes(arr(b)).to_string(),
+        "uint32" => le_u32(b).to_string(),
+        "uint64" => le_u64(b).to_string(),
+        "float32" => fmt_float(f32::from_le_bytes(arr(b)) as f64),
+        "float64" => fmt_float(f64::from_le_bytes(arr(b))),
+        "char/utf8" | "char/ascii" => String::from_utf8_lossy(b).into_owned(),
+        "char/utf32" => b.chunks(4).map(|c| char::from_u32(le_u32(c)).unwrap_or('\u{FFFD}')).collect(),
+        "index" => format!("({})", count_names(b)),
+        // kvlang 自有 kind：body = [2B nr][2B nw][sig]；槽值/调用目标 nr=nw=0，取 sig 即可。
+        "rwir" | "rwir|rwfunc" | "defrwir" | "defrwfunc" => {
+            let (nr, nw) = if b.len() >= 4 {
+                (u16::from_le_bytes([b[0], b[1]]), u16::from_le_bytes([b[2], b[3]]))
+            } else {
+                (0, 0)
+            };
+            let sig = String::from_utf8_lossy(&b[4.min(b.len())..]).into_owned();
+            if nr == 0 && nw == 0 {
+                sig
+            } else {
+                format!("(nr={nr},nw={nw}) {sig}")
+            }
+        }
+        _ => String::from_utf8_lossy(b).into_owned(),
+    }
+}
+
 pub fn is_char_kind(k: &str) -> bool {
     k.starts_with("char/")
 }

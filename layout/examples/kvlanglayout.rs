@@ -1,11 +1,11 @@
 //! 读 .kv 文件，用 Rust layout 编译进 kvspace（默认 redis），并输出入口（ENTRY=...），
 //! 供 Go runtime 执行验证。
-//! 用法：layout_file <file.kv> [dsn]
+//! 用法：kvlanglayout <file.kv> [dsn]
 
 use std::env;
 use std::fs;
 
-use kvlang_layout::{compile, init_dirs, Kv};
+use kvlanglayout::{compile, init_dirs, Kv};
 
 /// 复刻 Go runtime 的 findEntry：DFS /lib/ 找首个 init（顶层 `init` 或 lib 块内 `pkg·init`）。
 fn find_entry(kv: &mut Kv, prefix: &str, pkg: &str) -> String {
@@ -32,7 +32,7 @@ fn find_entry(kv: &mut Kv, prefix: &str, pkg: &str) -> String {
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
-        eprintln!("usage: layout_file <file.kv> [dsn]");
+        eprintln!("usage: kvlanglayout <file.kv> [dsn]");
         std::process::exit(1);
     }
     let dsn = args.get(2).map(String::as_str).unwrap_or("redis://127.0.0.1:6379");

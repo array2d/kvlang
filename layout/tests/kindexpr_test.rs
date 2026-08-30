@@ -1,4 +1,4 @@
-use kvlang_layout::parser::{self};
+use kvlanglayout::parser::{self};
 
 #[test]
 fn parse_type_expression_signature() {

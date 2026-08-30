@@ -1,4 +1,4 @@
-use kvlang_layout::{compile, init_dirs, kvkind, Kv};
+use kvlanglayout::{compile, init_dirs, kvkind, Kv};
 
 fn body(data: &[u8]) -> &[u8] {
     let h = kvkind::head(data);
@@ -11,7 +11,7 @@ fn sig(data: &[u8]) -> String {
 }
 
 fn fresh_kv() -> Kv {
-    let dsn = format!("fs:///tmp/kvlang_layout_test_{}", std::process::id());
+    let dsn = format!("fs:///tmp/kvlanglayout_test_{}", std::process::id());
     let mut kv = Kv::conn(&dsn);
     init_dirs(&mut kv).unwrap();
     kv

@@ -1,4 +1,4 @@
-use kvlang_layout::{compile, init_dirs, kvkind, Kv};
+use kvlanglayout::{compile, init_dirs, kvkind, Kv};
 
 fn body(data: &[u8]) -> &[u8] {
     let h = kvkind::head(data);

@@ -1,10 +1,11 @@
 //! layout 的 C ABI：供第三方（Rust/Python/C 等）把 .kv 代码 layout 进 kvspace，
-//! 无需 fork 子进程。符号在 cdylib（libkvlang_layout.so）中导出。
+//! 无需 fork 子进程。符号在 cdylib（libkvlanglayout.so）中导出。
 //!
-//! 三个入口：
+//! 四个入口：
 //!   kvlangLayoutVet(src,…)       只校验（parse+lower），不写 kvspace —— 自造代码闸门
 //!   kvlangLayoutFormat(src,…)    格式化（parse → 规范化源码），不写 kvspace
 //!   kvlangLayoutCode(src,dsn,…)  从源码串 layout 进 kvspace（LLM 生成即插入，不落盘）
+//!   kvlangLayoutDump(lib,dsn,…)  把 /lib 子树递归导出为可读文本（审查 lower 后的 code）
 //! kvlangLayoutFile(path,…) 是 Code 的薄封装（读文件后走同一 core）。源码读回（`.src`）
 //! 是纯 KV 读（/lib/<fn>.src），不在此 ABI。
 //!
@@ -16,9 +17,9 @@ use std::fs;
 use std::os::raw::c_char;
 use std::panic::catch_unwind;
 
-use crate::{compile, format, init_dirs, kvkind, vet, Kv};
+use crate::{compile, dump, format, init_dirs, kvkind, vet, Kv};
 
-/// 复刻 Go runtime / layout_file 的 findEntry：DFS /lib/ 找首个 `·init`，否则 "init"。
+/// 复刻 Go runtime / kvlanglayout 的 findEntry：DFS /lib/ 找首个 `·init`，否则 "init"。
 fn find_entry(kv: &mut Kv, prefix: &str, pkg: &str) -> String {
     for c in kv.list(prefix, false, true) {
         let base = c.trim_end_matches('/');
@@ -164,6 +165,40 @@ pub extern "C" fn kvlangLayoutFormat(
         }
         Err(_) => {
             write_out(err_out, err_cap, "format panicked (invalid program)");
+            -1
+        }
+    }
+}
+
+/// dump：把 lib 前缀下的整棵子树递归导出为可读文本（`key \t kind:value`）。
+/// 不做 upper（反向 lowering），只原样呈现 lower 后的 kvspace code，供审查。
+/// 成功返回 0（out=dump 文本），失败返回 -1（err_out=错误）。
+#[no_mangle]
+pub extern "C" fn kvlangLayoutDump(
+    lib: *const c_char,
+    dsn: *const c_char,
+    out: *mut c_char,
+    out_cap: u32,
+    err_out: *mut c_char,
+    err_cap: u32,
+) -> i32 {
+    let lib = cstr(lib).to_string();
+    let dsn = cstr(dsn).to_string();
+    let r = catch_unwind(|| -> Result<String, String> {
+        let mut kv = Kv::conn(&dsn);
+        Ok(dump(&mut kv, &lib))
+    });
+    match r {
+        Ok(Ok(s)) => {
+            write_out(out, out_cap, &s);
+            0
+        }
+        Ok(Err(e)) => {
+            write_out(err_out, err_cap, &e);
+            -1
+        }
+        Err(_) => {
+            write_out(err_out, err_cap, "dump panicked");
             -1
         }
     }
