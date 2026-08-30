@@ -102,14 +102,33 @@ pub fn vet(src: &str) -> Result<(), String> {
 /// dump：把 /lib 子树重构为可运行的 kvlang 源码（还原 `lib {}` 与 `rwfunc`），
 /// lower 后的原始槽位（`key kind:value`）以 `#` 注释附在各自函数后，供审查。
 pub fn dump(kv: &mut Kv, lib: &str) -> String {
-    let prefix = if lib.ends_with('/') {
-        lib.to_string()
-    } else {
-        format!("{lib}/")
-    };
+    // lib 是 /lib 下任意 prefix，只 dump 该子树。三种情形：
+    //   /lib           → 全量
+    //   /lib/foo       → 虚拟 pkg（func 存于 /lib/foo·* 扁平目录）：走全树后过滤
+    //   /lib/foo·main  → 精确函数目录：直接 emit 该函数
+    let prefix = lib.trim_end_matches('/').to_string();
     let mut funcs: Vec<DumpFunc> = Vec::new();
     let mut decls: Vec<String> = Vec::new();
-    collect_funcs(kv, &prefix, "", &mut funcs, &mut decls);
+    if prefix == "/lib" {
+        collect_funcs(kv, "/lib/", "", &mut funcs, &mut decls);
+    } else if is_func_dir(kv, &format!("{prefix}/")) {
+        // prefix 本身就是函数目录：直接重建该函数（pkg/name 从路径反推）。
+        let base = prefix.trim_start_matches("/lib/");
+        let (fpkg, name) = func_identity("", base);
+        let src = kvkind::value_string(&kv.get_one(&format!("{prefix}.src")));
+        let mut slots = Vec::new();
+        collect_slots(kv, &format!("{prefix}/"), &mut slots);
+        funcs.push(DumpFunc { pkg: fpkg, name, src, slots, dir: format!("{prefix}/") });
+    } else {
+        // 虚拟 pkg：func dir 以 prefix 为前缀（`/lib/foo` 匹配 `/lib/foo·*` 与 `/lib/foo/*`）。
+        collect_funcs(kv, "/lib/", "", &mut funcs, &mut decls);
+        let under = |dir: &str| dir.starts_with(&format!("{prefix}·")) || dir.starts_with(&format!("{prefix}/"));
+        funcs.retain(|f| under(&f.dir));
+        decls.retain(|d| {
+            let path = d.split(' ').next().unwrap_or("");
+            under(path)
+        });
+    }
 
     let mut root = DumpNode::default();
     for f in funcs {
@@ -153,6 +172,7 @@ fn pkg_node<'a>(root: &'a mut DumpNode, pkg: &str) -> &'a mut DumpNode {
 }
 
 /// 递归收集 /lib 下的函数（目录 + 同名 .src）与 defrwir 声明。pkg 用 / 分隔累积。
+/// 目录判定不依赖 list 的尾斜杠（shm 后端不带、redis 带）——用 is_func_dir / 子项非空 探测。
 fn collect_funcs(kv: &mut Kv, prefix: &str, pkg: &str, funcs: &mut Vec<DumpFunc>, decls: &mut Vec<String>) {
     for c in kv.list(prefix, false, true) {
         if c.ends_with(keytree::SRC_EXT) {
@@ -161,26 +181,22 @@ fn collect_funcs(kv: &mut Kv, prefix: &str, pkg: &str, funcs: &mut Vec<DumpFunc>
         }
         let base = c.trim_end_matches('/').to_string();
         let sub_pkg = if pkg.is_empty() { base.clone() } else { format!("{pkg}/{base}") };
-        if c.ends_with('/') {
-            let sub = format!("{prefix}{base}/");
-            if is_func_dir(kv, &sub) {
-                let (fpkg, name) = func_identity(pkg, &base);
-                let src = kvkind::value_string(&kv.get_one(&format!("{prefix}{base}.src")));
-                let mut slots = Vec::new();
-                collect_slots(kv, &sub, &mut slots);
-                funcs.push(DumpFunc { pkg: fpkg, name, src, slots, dir: sub });
-            } else {
-                collect_funcs(kv, &sub, &sub_pkg, funcs, decls);
-            }
+        // 函数目录（含 [0,0] 签名槽）→ 重建源码；普通目录 → 递归；成员容器（· 结尾）→ 递归；否则声明叶。
+        let dir_sub = format!("{prefix}{base}/");
+        let mem_sub = format!("{prefix}{base}·");
+        if is_func_dir(kv, &dir_sub) {
+            let (fpkg, name) = func_identity(pkg, &base);
+            let src = kvkind::value_string(&kv.get_one(&format!("{prefix}{base}.src")));
+            let mut slots = Vec::new();
+            collect_slots(kv, &dir_sub, &mut slots);
+            funcs.push(DumpFunc { pkg: fpkg, name, src, slots, dir: dir_sub });
+        } else if !kv.list(&dir_sub, false, true).is_empty() {
+            collect_funcs(kv, &dir_sub, &sub_pkg, funcs, decls);
+        } else if !kv.list(&mem_sub, false, true).is_empty() {
+            collect_funcs(kv, &mem_sub, &sub_pkg, funcs, decls);
         } else {
-            // 裸条目：object 成员（有 memindex `·`）递归；否则是 defrwir 声明叶。
-            let mem = format!("{prefix}{base}·");
-            if kv.list(&mem, false, true).is_empty() {
-                let v = kv.get_one(&format!("{prefix}{base}"));
-                decls.push(format!("{prefix}{base} {}", sanitize(&kvkind::display(&v))));
-            } else {
-                collect_funcs(kv, &mem, &sub_pkg, funcs, decls);
-            }
+            let v = kv.get_one(&format!("{prefix}{base}"));
+            decls.push(format!("{prefix}{base} {}", sanitize(&kvkind::display(&v))));
         }
     }
 }
