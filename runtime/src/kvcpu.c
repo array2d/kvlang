@@ -258,6 +258,46 @@ static char *handle_call(kvlangKv_t *kv, const char *pc, kvlangRwirInst_t *inst)
     } else {
         const char *dot = rfind_sep(fn);
         if (dot) { free(pkg); pkg = strndup(fn, (size_t)(dot - fn)); free(name); name = strdup(dot + MEMBER_SEP_LEN); }
+        else {
+            /* 裸名调用（无 /lib/ 无 ·）：同 pkg 优先——当前函数所在 lib 下有同名 rwfunc 就用之
+             * （lib aaa/bbb/math 内 sum(A,A) → /lib/aaa/bbb/math·sum），否则退回根 /lib/<fn>。 */
+            char *fr = kvlangKeytreeFrameRoot(pc);
+            char *ff = fr ? kvlangBuiltinFuncFrameRoot(kv, fr) : NULL;
+            free(fr);
+            if (ff) {
+                /* 函数目录在帧的 ‥lib 槽（/lib/aaa/bbb/math·double/）：由此取调用者 pkg。 */
+                kvlangStrbuf_t lk; kvlangStrbufInit(&lk);
+                char *stk = kvlangKeytreeStack(ff);
+                kvlangStrbufPuts(&lk, stk); free(stk);
+                kvlangStrbufPuts(&lk, SEG_LIB);
+                kvlangXvalue_t lv; kvlangXvalueZero(&lv);
+                kvlangKvGetOne(kv, lk.p, &lv);
+                kvlangStrbufFree(&lk);
+                char *funcdir = kvlangXvalueNone(&lv) ? NULL : kvlangXvalueValueString(&lv);
+                kvlangXvalueFree(&lv);
+                if (funcdir) {
+                    char *rel = funcdir + 5; // 剥 /lib/
+                    size_t rl = strlen(rel);
+                    if (rl > 0 && rel[rl - 1] == '/') rel[rl - 1] = '\0'; // 剥尾 /
+                    const char *sep = rfind_sep(rel);
+                    if (sep) {
+                        char *cand_pkg = strndup(rel, (size_t)(sep - rel));
+                        char *cand = kvlangKeytreeLibFunc(cand_pkg, fn);
+                        kvlangStrbuf_t sk; kvlangStrbufInit(&sk);
+                        kvlangStrbufPrintf(&sk, "%s/[0,0]", cand);
+                        kvlangXvalue_t sv; kvlangXvalueZero(&sv);
+                        kvlangKvGetOne(kv, sk.p, &sv);
+                        bool ok = !kvlangXvalueNone(&sv) && kvlangXvalueKindIs(&sv, KVSPACE_KIND_DEF_RWFUNC);
+                        kvlangXvalueFree(&sv); kvlangStrbufFree(&sk);
+                        if (ok) { free(pkg); pkg = cand_pkg; }
+                        else free(cand_pkg);
+                        free(cand);
+                    }
+                    free(funcdir);
+                }
+                free(ff);
+            }
+        }
     }
     char *func_key = kvlangKeytreeLibFunc(pkg, name);
     kvlangStrbuf_t func_dir; kvlangStrbufInit(&func_dir);
