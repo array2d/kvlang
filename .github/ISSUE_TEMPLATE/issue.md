@@ -8,11 +8,12 @@ labels: []
 <!-- 标题格式：类别/子类/题目，例如 1-layout/lower/rwir按kind特化 -->
 
 <!-- 类别（子类不约束）：
+- 0-kvspace  kvspace 存储后端
 - 1-layout   编译期（parser / lower / 类型推断 / layout / format / vet）
 - 2-runtime  执行期（kvcpu / dispatch / vthread / handoff / frame / pc）
 - 3-tutorial 教程 / 回归用例
 - 4-rwirext  扩展运行时（框架 + term / json / op-gpu / llm / agent）
-- 0-kvspace  kvspace 存储后端
+- 5-formal   形式化验证（不变量 / proof obligation / 运行时自检 / 自指验证）
 - other      其他（perf / docs / infra）
 -->
 
