@@ -1420,21 +1420,25 @@ static char *path_arg(kvlangFrame_t *f, int idx, const kvlangXvalue_t *in) {
     return NULL;
 }
 
-static char *member_path(kvlangFrame_t *f, const kvlangXvalue_t *in) {
+static char *member_path(kvlangFrame_t *f, const kvlangXvalue_t *in, int n) {
     const kvlangXvalue_t *base = &in[0];
     char *fr = kvlangKeytreeFrameRoot(f->pc);
     char *ff = kvlangBuiltinFuncFrameRoot(f->kv, fr);
     char *bp = kvlangXvalueNone(base) || (strcmp(kvlangXvalueKind(base), KVSPACE_KIND_OBJ) == 0 || strcmp(kvlangXvalueKind(base), KVSPACE_KIND_MAP) == 0 || strcmp(kvlangXvalueKind(base), KVSPACE_KIND_INDEX) == 0 || strcmp(kvlangXvalueKind(base), KVSPACE_KIND_EXT_INDEX) == 0) ? kvlangBuiltinResolveWriteSlot(f->kv, ff, f->inst->reads[0].name) : kvlangXvalueValueString(base);
     free(ff); free(fr);
-    char *kk = kvlangKvKey(&in[1]);
-    char *path = kvlangKeytreeMember(bp, kk);
-    free(kk); free(bp);
-    return path;
+    /* 成员链：base 之后逐段拼 key（变参），每段可为静态字面量或动态键（运行时值）。 */
+    for (int i = 1; i < n; i++) {
+        char *kk = kvlangKvKey(&in[i]);
+        char *next = kvlangKeytreeMember(bp, kk);
+        free(kk); free(bp);
+        bp = next;
+    }
+    return bp;
 }
 
 int kvlangBuiltinKvGet(kvlangFrame_t *f) {
-    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
-    char *key = f->inst->nr >= 2 ? member_path(f, in) : (n >= 1 ? path_arg(f, 0, in) : NULL);
+    kvlangXvalue_t in[MAX_PARAMS]; int n = read_inputs(f, in, MAX_PARAMS);
+    char *key = f->inst->nr >= 2 ? member_path(f, in, n) : (n >= 1 ? path_arg(f, 0, in) : NULL);
     if (!key) { free_inputs(in, n); return set_err(f, "TypeError: kv.get requires a path"); }
     kvlangXvalue_t v; kvlangXvalueZero(&v);
     kvlangKvGetOne(f->kv, key, &v);
@@ -1443,9 +1447,9 @@ int kvlangBuiltinKvGet(kvlangFrame_t *f) {
 }
 
 int kvlangBuiltinKvSet(kvlangFrame_t *f) {
-    kvlangXvalue_t in[3]; int n = read_inputs(f, in, 3);
+    kvlangXvalue_t in[MAX_PARAMS]; int n = read_inputs(f, in, MAX_PARAMS);
     char *key; kvlangXvalue_t *val;
-    if (f->inst->nr >= 3) { key = member_path(f, in); val = &in[2]; }
+    if (f->inst->nr >= 3) { key = member_path(f, in, n - 1); val = &in[n - 1]; }
     else { key = n >= 1 ? path_arg(f, 0, in) : NULL; val = &in[1]; }
     if (!key || (f->inst->nr < 3 && n < 2)) { free(key); free_inputs(in, n); return set_err(f, "TypeError: kv.set requires path and value"); }
     kvlangKvPair_t p = { key, *val };

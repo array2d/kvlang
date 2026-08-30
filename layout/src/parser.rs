@@ -850,24 +850,37 @@ impl Parser {
 
     fn parse_pratt(&mut self, min_prec: i32) -> Option<Expr> {
         let mut left = self.parse_primary_expr()?;
+        // 成员链：base + 各段收集成单个变参 kv·get(base, seg1, seg2, ...)，runtime 直接拼路径。
+        // 不在 layout 摊成嵌套 kv·get（内层返回的是值，丢路径，#110）。每段为静态字面量或
+        // 动态键（*k 的变量）。
+        let mut chain_base: Option<Expr> = None;
+        let mut chain_segs: Vec<Expr> = Vec::new();
         loop {
             // 后缀成员访问
             if self.peek().kind == Kind::Dot {
-                self.advance(); // consume .
+                self.advance(); // consume ·
+                // 动态键 d·*k：段是变量（运行时取值的字符串键）。
                 if self.peek().kind == Kind::Ident && self.peek().value == "*" {
                     self.advance(); // consume *
                     if self.peek().kind == Kind::Ident {
                         let key = self.advance().value;
-                        left = ast::call("kv·get", vec![left, ast::leaf(&key)]);
+                        if chain_base.is_none() {
+                            chain_base = Some(left.clone());
+                        }
+                        chain_segs.push(ast::leaf(&key));
                         continue;
                     }
                 }
+                // 静态成员：段是字符串字面量。
                 if self.peek().kind == Kind::Ident || self.peek().kind == Kind::Literal {
                     let field = self.advance().value;
-                    left = ast::call("kv·get", vec![left, ast::str_lit(&field)]);
+                    if chain_base.is_none() {
+                        chain_base = Some(left.clone());
+                    }
+                    chain_segs.push(ast::str_lit(&field));
                     continue;
                 }
-                // strkeymap 坐标访问 m.[i,j]：坐标段是单个成员名（kv.get 字符串键）。
+                // strkeymap 坐标访问 m·[i,j]：坐标段是单个成员名 "[i,j]"（字符串键）。
                 if self.peek().kind == Kind::LBrack {
                     self.advance();
                     let mut idxs = Vec::new();
@@ -884,9 +897,18 @@ impl Parser {
                         "[{}]",
                         idxs.iter().map(|e| e.to_string()).collect::<Vec<_>>().join(",")
                     );
-                    left = ast::call("kv·get", vec![left, ast::str_lit(&coord)]);
+                    if chain_base.is_none() {
+                        chain_base = Some(left.clone());
+                    }
+                    chain_segs.push(ast::str_lit(&coord));
                     continue;
                 }
+            }
+            // 成员链被打断（下标/中缀/循环尾）：flush 成单个变参 kv·get。
+            if let Some(base) = chain_base.take() {
+                let mut args = vec![base];
+                args.append(&mut chain_segs);
+                left = ast::call("kv·get", args);
             }
             // 后缀索引
             if self.peek().kind == Kind::LBrack {
@@ -919,6 +941,11 @@ impl Parser {
             let op = self.advance().value;
             let right = self.parse_pratt(prec)?;
             left = ast::call(&op, vec![left, right]);
+        }
+        if let Some(base) = chain_base.take() {
+            let mut args = vec![base];
+            args.append(&mut chain_segs);
+            left = ast::call("kv·get", args);
         }
         Some(left)
     }
@@ -1276,12 +1303,20 @@ impl Parser {
             }
             if (t.kind == Kind::Ident || is_path_literal) && self.peek_at(1).kind == Kind::Dot {
                 let mut w = self.advance().value;
-                self.advance(); // .
-                w.push_str(keytree::MEMBER_SEP);
-                if self.peek().kind == Kind::Ident && self.peek().value == "*" && self.peek_at(1).kind == Kind::Ident {
-                    w.push_str(&self.advance().value); // *
+                // 成员链写槽：整段 p·obj·deep 收成单个 write 槽，交给 desugar_member_write
+                // 拆成 kv·set(base, "obj·deep", v)。勿在每段 · 处截断（否则 deep 被当独立写槽）。
+                while self.peek().kind == Kind::Dot {
+                    self.advance(); // .
+                    w.push_str(keytree::MEMBER_SEP);
+                    if self.peek().kind == Kind::Ident && self.peek().value == "*" && self.peek_at(1).kind == Kind::Ident {
+                        w.push_str(&self.advance().value); // *
+                    }
+                    if self.peek().kind == Kind::Ident || self.peek().kind == Kind::Literal {
+                        w.push_str(&self.advance().value);
+                    } else {
+                        break;
+                    }
                 }
-                w.push_str(&self.advance().value);
                 writes.push(w);
                 wtypes.push(String::new());
             } else {
@@ -1345,12 +1380,19 @@ impl Parser {
                 && self.peek_at(2).kind != Kind::LBrack
             {
                 let mut w = self.advance().value;
-                self.advance(); // .
-                w.push_str(keytree::MEMBER_SEP);
-                if self.peek().kind == Kind::Ident && self.peek().value == "*" && self.peek_at(1).kind == Kind::Ident {
-                    w.push_str(&self.advance().value); // *
+                // 成员链写槽：整段 p·obj·deep 收成单个 write 槽（勿在每段 · 处截断）。
+                while self.peek().kind == Kind::Dot && self.peek_at(1).kind != Kind::LBrack {
+                    self.advance(); // .
+                    w.push_str(keytree::MEMBER_SEP);
+                    if self.peek().kind == Kind::Ident && self.peek().value == "*" && self.peek_at(1).kind == Kind::Ident {
+                        w.push_str(&self.advance().value); // *
+                    }
+                    if self.peek().kind == Kind::Ident || self.peek().kind == Kind::Literal {
+                        w.push_str(&self.advance().value);
+                    } else {
+                        break;
+                    }
                 }
-                w.push_str(&self.advance().value);
                 writes.push(w);
                 wtypes.push(String::new());
                 continue;
