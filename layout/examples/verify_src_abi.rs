@@ -3,8 +3,8 @@
 
 use std::os::raw::c_char;
 
-use kvlang_layout::capi::{kvlangLayoutCode, kvlangLayoutVet};
-use kvlang_layout::Kv;
+use kvlanglayout::capi::{kvlangLayoutCode, kvlangLayoutVet};
+use kvlanglayout::Kv;
 
 fn cs(s: &str) -> std::ffi::CString {
     std::ffi::CString::new(s).unwrap()

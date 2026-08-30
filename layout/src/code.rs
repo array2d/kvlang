@@ -99,6 +99,30 @@ pub fn vet(src: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// dump：递归遍历 lib 前缀下的整棵子树，逐行输出 `key \t kind:value`。
+/// 不做 upper（反向 lowering），只原样呈现 lower 后的 kvspace code，供审查。
+pub fn dump(kv: &mut Kv, lib: &str) -> String {
+    let prefix = if lib.ends_with('/') {
+        lib.to_string()
+    } else {
+        format!("{lib}/")
+    };
+    let mut out = String::new();
+    dump_into(kv, &prefix, &mut out);
+    out
+}
+
+fn dump_into(kv: &mut Kv, prefix: &str, out: &mut String) {
+    for c in kv.list(prefix, false, true) {
+        let full = format!("{prefix}{c}");
+        let v = kv.get_one(&full);
+        out.push_str(&format!("{full}\t{}\n", kvkind::display(&v)));
+        if c.ends_with('/') {
+            dump_into(kv, &full, out);
+        }
+    }
+}
+
 /// 写函数到 /lib/：签名（rwfunc）、源码、参数 Ptr、指令体。
 pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) {
     let mut type_map = lower::infer_types(fn_);
@@ -326,7 +350,7 @@ mod tests {
 
     #[test]
     fn nested_lib_layout_and_merge() {
-        let mut kv = Kv::conn(&format!("fs:///tmp/kvlang_layout_nested_{}", std::process::id()));
+        let mut kv = Kv::conn(&format!("fs:///tmp/kvlanglayout_nested_{}", std::process::id()));
         init_dirs(&mut kv).unwrap();
 
         compile(&mut kv, "lib a {\nlib b {\nrwfunc f() -> (r:int64) {\n1 -> r\n}\n}\n}\n").unwrap();

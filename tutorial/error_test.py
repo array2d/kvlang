@@ -9,7 +9,7 @@ import os, re, subprocess, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-LAYOUT_BIN = os.environ.get("KVLANG_LAYOUT_BIN", str(ROOT / "bin" / "layout_file"))
+LAYOUT_BIN = os.environ.get("KVLANG_LAYOUT_BIN", str(ROOT / "bin" / "kvlanglayout"))
 TERM_BIN = os.environ.get("KVLANG_TERM_BIN", str(ROOT / "bin" / "kvlang"))
 _C_DSN = os.environ.get("KVSPACE", "redis://127.0.0.1:6379")
 ERROR_CASES = ROOT / "tutorial" / "error_cases"

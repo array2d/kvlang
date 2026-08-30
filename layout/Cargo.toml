@@ -6,7 +6,7 @@ license = "MIT"
 description = "kvlang 编译期（parser/lower/layoutcode），只依赖 kvspace-durable 的 C ABI"
 
 [lib]
-name = "kvlang_layout"
+name = "kvlanglayout"
 path = "src/lib.rs"
 crate-type = ["rlib", "cdylib"]
 

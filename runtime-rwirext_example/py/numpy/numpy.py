@@ -4,7 +4,7 @@
     python numpy.py <file.kv>
 
 依序执行：
-  1. kvlang layout（bin/layout_file）把 .kv 布局进 shm；
+  1. kvlang layout（bin/kvlanglayout）把 .kv 布局进 shm；
   2. 本进程注册五大类 numpy 算子到 /lib/numpy.*，起后台 serve 线程（mode-1 WATCH 手递）；
   3. bin/run 执行主程序，遇 numpy.* 指令通过 .todo/.done 手递给本进程计算/打印。
 
