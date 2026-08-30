@@ -1450,30 +1450,35 @@ impl Parser {
         if s.starts_with('/') {
             return;
         }
-        let dt = s.find(keytree::MEMBER_SEP).unwrap_or(s.len());
-        let base = s[..dt].to_string();
-        let field = s[dt + keytree::MEMBER_SEP.len()..].to_string();
-        let key = if field.starts_with('*') {
-            if field.len() == 1 {
-                let t = self.peek();
-                self.errors.push(Diagnostic {
-                    pos: t.pos,
-                    warn: true,
-                    message: "dynamic member write: expected identifier after '.*'".to_string(),
-                    info: false,
-                    source: String::new(),
-                    src_file: String::new(),
-                    src_name: String::new(),
-                });
-                return;
+        // 成员链写槽 p·a·b = v → 变参 kv·set(p, "a", "b", v)，与读侧 #110 一致逐段拼路径。
+        // 不再按首个 · 压扁成 kv·set(p, "a·b", v)：扁平段把「成员链」与「含 · 的成员名」混为一谈。
+        let mut parts = s.split(keytree::MEMBER_SEP);
+        let base = parts.next().unwrap_or("").to_string();
+        let mut args = vec![ast::leaf(&base)];
+        for field in parts {
+            if field.starts_with('*') {
+                if field.len() == 1 {
+                    let t = self.peek();
+                    self.errors.push(Diagnostic {
+                        pos: t.pos,
+                        warn: true,
+                        message: "dynamic member write: expected identifier after '.*'".to_string(),
+                        info: false,
+                        source: String::new(),
+                        src_file: String::new(),
+                        src_name: String::new(),
+                    });
+                    return;
+                }
+                args.push(ast::leaf(&field[1..]));
+            } else {
+                args.push(ast::str_lit(field));
             }
-            ast::leaf(&field[1..])
-        } else {
-            ast::str_lit(&field)
-        };
+        }
         let e = inst.expr.take();
-        // base.key = v 脱糖为 kv.set(base, key, val)：kv.set 是 void（副作用写成员），无写槽
-        inst.expr = Some(ast::call("kv·set", vec![ast::leaf(&base), key, e.unwrap_or(ast::leaf(""))]));
+        args.push(e.unwrap_or(ast::leaf("")));
+        // base.a.b = v 脱糖为 kv·set(base, "a", "b", v)：kv·set 是 void（副作用写成员），无写槽
+        inst.expr = Some(ast::call("kv·set", args));
         inst.writes = Vec::new();
         inst.write_types = Vec::new();
     }

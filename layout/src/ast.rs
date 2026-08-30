@@ -724,14 +724,14 @@ fn format_body(sb: &mut String, stmts: &[Stmt], indent: &str) {
 
 fn escape_string(s: &str) -> String {
     let mut b = String::new();
-    for c in s.bytes() {
+    for c in s.chars() {
         match c {
-            b'\\' => b.push_str("\\\\"),
-            b'"' => b.push_str("\\\""),
-            b'\n' => b.push_str("\\n"),
-            b'\t' => b.push_str("\\t"),
-            b'\r' => b.push_str("\\r"),
-            _ => b.push(c as char),
+            '\\' => b.push_str("\\\\"),
+            '"' => b.push_str("\\\""),
+            '\n' => b.push_str("\\n"),
+            '\t' => b.push_str("\\t"),
+            '\r' => b.push_str("\\r"),
+            c => b.push(c),
         }
     }
     b
