@@ -231,36 +231,37 @@ impl Parser {
         let prev_pkg = f.package.clone();
         f.package = pkg.clone();
         self.expect(Kind::LBrace);
-        self.skip_newlines();
         let mut body: Vec<Stmt> = Vec::new();
-        while self.peek().kind != Kind::RBrace && self.peek().kind != Kind::EOF {
+        loop {
+            let comments = self.collect_leading_comments();
+            if self.peek().kind == Kind::RBrace || self.peek().kind == Kind::EOF {
+                break;
+            }
             let is_nested_lib = self.peek().kind == Kind::Ident
                 && self.peek().value == "lib"
                 && self.peek_at(1).kind == Kind::Ident
                 && self.peek_at(2).kind == Kind::LBrace;
             if is_nested_lib {
                 self.parse_lib_body(f, &pkg);
-                self.skip_newlines();
                 continue;
             }
             if self.peek().kind == Kind::Ident && self.peek().value == "rwir" {
                 let mut decl = self.parse_rwir_decl();
                 decl.pkg = pkg.clone();
+                decl.comments = comments;
                 f.rwir_decls.push(decl);
-                self.skip_newlines();
                 continue;
             } else if self.peek().kind == Kind::Ident && self.peek().value == "rwfunc" {
                 let mut func = self.parse_func();
                 func.pkg = pkg.clone();
+                func.comments = comments;
                 f.funcs.push(func);
-                self.skip_newlines();
                 continue;
             }
             match self.parse_stmt() {
-                Some(st) => body.push(st),
+                Some(st) => body.push(attach_comments(st, comments)),
                 None => break,
             }
-            self.skip_newlines();
         }
         self.expect(Kind::RBrace);
         if !body.is_empty() {

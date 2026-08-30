@@ -170,8 +170,8 @@ pub extern "C" fn kvlangLayoutFormat(
     }
 }
 
-/// dump：把 lib 前缀下的整棵子树递归导出为可读文本（`key \t kind:value`）。
-/// 不做 upper（反向 lowering），只原样呈现 lower 后的 kvspace code，供审查。
+/// dump：把 lib 前缀下的整棵子树重构为可运行的 kvlang 源码（还原 `lib {}` 与 `rwfunc`），
+/// lower 后的原始槽位以 `#` 注释附在各自函数后，供审查。
 /// 成功返回 0（out=dump 文本），失败返回 -1（err_out=错误）。
 #[no_mangle]
 pub extern "C" fn kvlangLayoutDump(
