@@ -99,28 +99,163 @@ pub fn vet(src: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// dump：递归遍历 lib 前缀下的整棵子树，逐行输出 `key \t kind:value`。
-/// 不做 upper（反向 lowering），只原样呈现 lower 后的 kvspace code，供审查。
+/// dump：把 /lib 子树重构为可运行的 kvlang 源码（还原 `lib {}` 与 `rwfunc`），
+/// lower 后的原始槽位（`key kind:value`）以 `#` 注释附在各自函数后，供审查。
 pub fn dump(kv: &mut Kv, lib: &str) -> String {
     let prefix = if lib.ends_with('/') {
         lib.to_string()
     } else {
         format!("{lib}/")
     };
+    let mut funcs: Vec<DumpFunc> = Vec::new();
+    let mut decls: Vec<String> = Vec::new();
+    collect_funcs(kv, &prefix, "", &mut funcs, &mut decls);
+
+    let mut root = DumpNode::default();
+    for f in funcs {
+        pkg_node(&mut root, &f.pkg).funcs.push(f);
+    }
     let mut out = String::new();
-    dump_into(kv, &prefix, &mut out);
+    emit_node(&mut out, &root, "");
+    for d in decls {
+        out.push_str("# ");
+        out.push_str(&d);
+        out.push('\n');
+    }
     out
 }
 
-fn dump_into(kv: &mut Kv, prefix: &str, out: &mut String) {
+/// 一个可运行函数：源码（.src）+ 原始槽位注释。
+struct DumpFunc {
+    pkg: String,
+    name: String,
+    src: String,
+    slots: Vec<String>,
+    dir: String,
+}
+
+/// pkg 树节点（与 ast 的 PkgNode 同构，但装 dump 产物）。
+#[derive(Default)]
+struct DumpNode {
+    funcs: Vec<DumpFunc>,
+    children: std::collections::BTreeMap<String, DumpNode>,
+}
+
+fn pkg_node<'a>(root: &'a mut DumpNode, pkg: &str) -> &'a mut DumpNode {
+    if pkg.is_empty() {
+        return root;
+    }
+    let mut cur = root;
+    for seg in pkg.split('/') {
+        cur = cur.children.entry(seg.to_string()).or_default();
+    }
+    cur
+}
+
+/// 递归收集 /lib 下的函数（目录 + 同名 .src）与 defrwir 声明。pkg 用 / 分隔累积。
+fn collect_funcs(kv: &mut Kv, prefix: &str, pkg: &str, funcs: &mut Vec<DumpFunc>, decls: &mut Vec<String>) {
     for c in kv.list(prefix, false, true) {
-        let full = format!("{prefix}{c}");
-        let v = kv.get_one(&full);
-        out.push_str(&format!("{full}\t{}\n", kvkind::display(&v)));
+        if c.ends_with(keytree::SRC_EXT) {
+            // .src 与其目录成对，随目录处理，此处跳过。
+            continue;
+        }
+        let base = c.trim_end_matches('/').to_string();
+        let sub_pkg = if pkg.is_empty() { base.clone() } else { format!("{pkg}/{base}") };
         if c.ends_with('/') {
-            dump_into(kv, &full, out);
+            let sub = format!("{prefix}{base}/");
+            if is_func_dir(kv, &sub) {
+                let (fpkg, name) = func_identity(pkg, &base);
+                let src = kvkind::value_string(&kv.get_one(&format!("{prefix}{base}.src")));
+                let mut slots = Vec::new();
+                collect_slots(kv, &sub, &mut slots);
+                funcs.push(DumpFunc { pkg: fpkg, name, src, slots, dir: sub });
+            } else {
+                collect_funcs(kv, &sub, &sub_pkg, funcs, decls);
+            }
+        } else {
+            // 裸条目：object 成员（有 memindex `·`）递归；否则是 defrwir 声明叶。
+            let mem = format!("{prefix}{base}·");
+            if kv.list(&mem, false, true).is_empty() {
+                let v = kv.get_one(&format!("{prefix}{base}"));
+                decls.push(format!("{prefix}{base} {}", sanitize(&kvkind::display(&v))));
+            } else {
+                collect_funcs(kv, &mem, &sub_pkg, funcs, decls);
+            }
         }
     }
+}
+
+/// 目录是否为函数目录（含 [0,0] 签名槽）。lib 目录只有子函数/子 lib，无 [ 槽位。
+fn is_func_dir(kv: &mut Kv, dir: &str) -> bool {
+    kv.list(dir, false, true).iter().any(|c| c.starts_with('['))
+}
+
+/// 目录名 → (pkg, name)。扁平后端（fs）目录名含 `·`（`<pkg尾段>·<name>`）需拆；
+/// 嵌套后端（redis memindex）目录名已是裸函数名，直接沿用累积 pkg。
+fn func_identity(pkg: &str, base: &str) -> (String, String) {
+    match base.rfind(keytree::MEMBER_SEP) {
+        Some(i) => {
+            let seg = &base[..i];
+            let name = &base[i + keytree::MEMBER_SEP.len()..];
+            let fpkg = if pkg.is_empty() { seg.to_string() } else { format!("{pkg}/{seg}") };
+            (fpkg, name.to_string())
+        }
+        None => (pkg.to_string(), base.to_string()),
+    }
+}
+
+/// 递归导出函数目录下的槽位行（相对 key + kind:value，跳过空索引目录）。
+fn collect_slots(kv: &mut Kv, prefix: &str, out: &mut Vec<String>) {
+    for c in kv.list(prefix, false, true) {
+        let full = format!("{prefix}{c}");
+        if c.ends_with('/') {
+            collect_slots(kv, &full, out);
+        } else {
+            let v = kv.get_one(&full);
+            out.push(format!("{c} {}", sanitize(&kvkind::display(&v))));
+        }
+    }
+}
+
+/// 注释不允许换行：defrwfunc 的参数类型以 \n 连接，改 " | " 呈现。
+fn sanitize(s: &str) -> String {
+    s.replace('\n', " | ")
+}
+
+fn emit_node(out: &mut String, node: &DumpNode, indent: &str) {
+    let mut funcs: Vec<&DumpFunc> = node.funcs.iter().collect();
+    funcs.sort_by(|a, b| a.name.cmp(&b.name));
+    for f in funcs {
+        emit_func(out, f, indent);
+    }
+    for (name, child) in &node.children {
+        out.push_str(indent);
+        out.push_str("lib ");
+        out.push_str(name);
+        out.push_str(" {\n");
+        emit_node(out, child, &format!("{indent}    "));
+        out.push_str(indent);
+        out.push_str("}\n");
+    }
+}
+
+fn emit_func(out: &mut String, f: &DumpFunc, indent: &str) {
+    for line in f.src.lines() {
+        out.push_str(indent);
+        out.push_str(line);
+        out.push('\n');
+    }
+    out.push_str(indent);
+    out.push_str("# ");
+    out.push_str(&f.dir);
+    out.push('\n');
+    for s in &f.slots {
+        out.push_str(indent);
+        out.push_str("#   ");
+        out.push_str(s);
+        out.push('\n');
+    }
+    out.push('\n');
 }
 
 /// 写函数到 /lib/：签名（rwfunc）、源码、参数 Ptr、指令体。

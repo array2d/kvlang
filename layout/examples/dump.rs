@@ -1,4 +1,4 @@
-//! 调试用：编译一个 .kv 文件，dump /lib 树（key → kind:value，审查 lower 后的 code）。
+//! 调试用：编译一个 .kv 文件，dump /lib 树为可运行的 kvlang（lower 槽位在 # 注释）。
 //! 用法：dump <file.kv>    dsn 走 KVSPACE env（默认 redis://127.0.0.1:6379）
 use std::env;
 use std::fs;

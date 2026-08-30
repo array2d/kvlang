@@ -7,7 +7,7 @@
     "languages": [{
       "id": "kvlang",
       "aliases": ["kvlang", "kv"],
-      "extensions": [".kv"],
+      "extensions": [".kv", ".kv.dump"],
       "configuration": "./language-configuration.json"
     }],
     "grammars": [{

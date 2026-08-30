@@ -1,6 +1,6 @@
 //! 控制流 lowering + 类型推断 + 特化（对齐 lower/lower.go、infer.go、specialize.go）。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::ast::{self, Expr, Func, Instruction, LitKind, Stmt};
 use super::{builtin, keytree, symbol};
@@ -31,11 +31,48 @@ impl LabelGen {
 pub fn lower_func(fn_: &Func) -> Func {
     let tm = infer_types(fn_);
     let mut lg = LabelGen { n: 0 };
-    let body = lower_body(&fn_.body, &mut lg, None, &tm);
+    // 收集已有 br/goto 的跳转目标：这些 label 已可达，lower 时不再补 fall-through goto（幂等）。
+    let mut targets = HashSet::new();
+    collect_goto_targets(&fn_.body, &mut targets);
+    let body = lower_body(&fn_.body, &mut lg, None, &tm, &targets);
     Func { comments: Vec::new(), sig: fn_.sig.clone(), body, pkg: String::new() }
 }
 
-fn lower_body(stmts: &[Stmt], lg: &mut LabelGen, lc: Option<&LoopCtx>, tm: &HashMap<String, String>) -> Vec<Stmt> {
+/// 递归收集 br/goto 的跳转目标 label（含嵌套 scope/if/while/for 体）。
+fn collect_goto_targets(stmts: &[Stmt], targets: &mut HashSet<String>) {
+    for st in stmts {
+        match st {
+            Stmt::Instruction(s) => {
+                if let Some(e) = &s.expr {
+                    match e.op.as_str() {
+                        "goto" => {
+                            if let Some(a) = e.args.first() {
+                                targets.insert(a.val.clone());
+                            }
+                        }
+                        "br" => {
+                            if e.args.len() >= 3 {
+                                targets.insert(e.args[1].val.clone());
+                                targets.insert(e.args[2].val.clone());
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Stmt::Scope(s) => collect_goto_targets(&s.body, targets),
+            Stmt::If(s) => {
+                collect_goto_targets(&s.then_, targets);
+                collect_goto_targets(&s.else_, targets);
+            }
+            Stmt::While(s) => collect_goto_targets(&s.body, targets),
+            Stmt::For(s) => collect_goto_targets(&s.body, targets),
+            _ => {}
+        }
+    }
+}
+
+fn lower_body(stmts: &[Stmt], lg: &mut LabelGen, lc: Option<&LoopCtx>, tm: &HashMap<String, String>, targets: &HashSet<String>) -> Vec<Stmt> {
     if stmts.is_empty() {
         return Vec::new();
     }
@@ -65,22 +102,22 @@ fn lower_body(stmts: &[Stmt], lg: &mut LabelGen, lc: Option<&LoopCtx>, tm: &Hash
                 preamble.push(st.clone());
             }
             Stmt::If(s) => {
-                let cont = lower_body(&stmts[i + 1..], lg, lc, tm);
-                return lower_if_with_cont(&preamble, s, cont, lg, lc, tm);
+                let cont = lower_body(&stmts[i + 1..], lg, lc, tm, targets);
+                return lower_if_with_cont(&preamble, s, cont, lg, lc, tm, targets);
             }
             Stmt::While(s) => {
-                let cont = lower_body(&stmts[i + 1..], lg, lc, tm);
-                return lower_while_with_cont(&preamble, s, cont, lg, lc, tm);
+                let cont = lower_body(&stmts[i + 1..], lg, lc, tm, targets);
+                return lower_while_with_cont(&preamble, s, cont, lg, lc, tm, targets);
             }
             Stmt::Scope(s) => {
                 let mut s = s.clone();
-                s.body = lower_body(&s.body, lg, lc, tm);
-                if !preamble_ends_with_terminator(&preamble) {
+                s.body = lower_body(&s.body, lg, lc, tm, targets);
+                if !preamble_ends_with_terminator(&preamble) && !targets.contains(&s.label) {
                     preamble.push(goto_label(&s.label));
                 }
                 let mut out = preamble;
                 out.push(Stmt::Scope(s));
-                out.extend(lower_body(&stmts[i + 1..], lg, lc, tm));
+                out.extend(lower_body(&stmts[i + 1..], lg, lc, tm, targets));
                 return out;
             }
             Stmt::Break(_) => {
@@ -94,8 +131,8 @@ fn lower_body(stmts: &[Stmt], lg: &mut LabelGen, lc: Option<&LoopCtx>, tm: &Hash
                 return preamble;
             }
             Stmt::For(s) => {
-                let cont = lower_body(&stmts[i + 1..], lg, lc, tm);
-                return lower_for_with_cont(&preamble, s, cont, lg, lc, tm);
+                let cont = lower_body(&stmts[i + 1..], lg, lc, tm, targets);
+                return lower_for_with_cont(&preamble, s, cont, lg, lc, tm, targets);
             }
         }
     }
@@ -109,6 +146,7 @@ fn lower_if_with_cont(
     lg: &mut LabelGen,
     lc: Option<&LoopCtx>,
     tm: &HashMap<String, String>,
+    targets: &HashSet<String>,
 ) -> Vec<Stmt> {
     let (cond_eval, cond_slot) = eval_cond(s.cond.as_ref(), lg);
     let if_label = lg.next("if");
@@ -119,8 +157,8 @@ fn lower_if_with_cont(
     let mut cond_body = cond_eval;
     cond_body.push(br_inst(&cond_slot, &then_label, &else_label));
 
-    let then_ = inject_goto(lower_body(&s.then_, lg, lc, tm), &merge_label);
-    let else_ = inject_goto(lower_body(&s.else_, lg, lc, tm), &merge_label);
+    let then_ = inject_goto(lower_body(&s.then_, lg, lc, tm, targets), &merge_label);
+    let else_ = inject_goto(lower_body(&s.else_, lg, lc, tm, targets), &merge_label);
     let (then_insts, mut then_blocks) = split_insts_and_blocks(then_);
     let (else_insts, mut else_blocks) = split_insts_and_blocks(else_);
     let (cont_insts, cont_blocks) = split_insts_and_blocks(cont);
@@ -147,6 +185,7 @@ fn lower_while_with_cont(
     lg: &mut LabelGen,
     _lc: Option<&LoopCtx>,
     tm: &HashMap<String, String>,
+    targets: &HashSet<String>,
 ) -> Vec<Stmt> {
     let (cond_eval, cond_slot) = eval_cond(s.cond.as_ref(), lg);
     let cond_label = lg.next("while");
@@ -157,7 +196,7 @@ fn lower_while_with_cont(
     cond_body.push(br_inst(&cond_slot, &body_label, &exit_label));
 
     let body_lc = LoopCtx { break_label: exit_label.clone(), continue_label: cond_label.clone() };
-    let body_ = inject_goto(lower_body(&s.body, lg, Some(&body_lc), tm), &cond_label);
+    let body_ = inject_goto(lower_body(&s.body, lg, Some(&body_lc), tm, targets), &cond_label);
     let (body_insts, mut body_blocks) = split_insts_and_blocks(body_);
     inject_goto_blocks(&mut body_blocks, &cond_label);
     let (cont_insts, cont_blocks) = split_insts_and_blocks(cont);
@@ -179,6 +218,7 @@ fn lower_for_with_cont(
     lg: &mut LabelGen,
     _lc: Option<&LoopCtx>,
     tm: &HashMap<String, String>,
+    targets: &HashSet<String>,
 ) -> Vec<Stmt> {
     let init_label = lg.next("for_init");
     let cond_label = lg.next("for_cond");
@@ -259,7 +299,7 @@ fn lower_for_with_cont(
     ];
 
     let body_lc = LoopCtx { break_label: exit_label.clone(), continue_label: cond_label.clone() };
-    let body_inner = lower_body(&s.body, lg, Some(&body_lc), tm);
+    let body_inner = lower_body(&s.body, lg, Some(&body_lc), tm, targets);
     let mut body_insts = Vec::new();
     if is_obj {
         body_insts.push(Stmt::Instruction(Instruction {

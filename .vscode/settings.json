@@ -1,6 +1,7 @@
 {
   "files.associations": {
-    "*.kv": "kvlang"
+    "*.kv": "kvlang",
+    "*.kv.dump": "kvlang"
   },
   "[kvlang]": {
     "editor.tabSize": 4,
