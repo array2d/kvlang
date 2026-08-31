@@ -28,5 +28,8 @@ rwfunc is_happy(n:int64) -> (result:int64) {
 	}
 }
 
-r <- is_happy(19)
-println(r)
+rwfunc test() -> () {
+
+	r <- is_happy(19)
+	println(r)
+}

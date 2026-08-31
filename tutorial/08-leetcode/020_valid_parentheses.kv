@@ -56,7 +56,7 @@ rwfunc is_valid(s:[]char/utf32) -> (ok:int64) {
 	if (si ≥ 0) { 0 -> ok_m }
 }
 
-rwfunc main() -> () {
+rwfunc test() -> () {
 	r1 = is_valid("()")  # = 等价于 <-
 	if (r1 == 1) { println("true") } else { println("false") }
 	r2 <- is_valid("()[]{}")
@@ -64,4 +64,3 @@ rwfunc main() -> () {
 	r3 = is_valid("(]")  # = 等价于 <-
 	if (r3 == 1) { println("true") } else { println("false") }
 }
-main()

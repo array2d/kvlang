@@ -8,7 +8,7 @@ rwfunc mutate() -> (a) {
     arr -> a                 # 返回修改后的数组给调用方
 }
 
-rwfunc init() -> () {
+rwfunc test() -> () {
     mutate() -> result
     xv·at(result, 0) -> v0
     xv·at(result, 1) -> v1

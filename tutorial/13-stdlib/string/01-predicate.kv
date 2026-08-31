@@ -1,0 +1,30 @@
+# string 谓词：eq / ne / empty / contains / startswith / endswith
+# 期望输出:
+#   true
+#   false
+#   true
+#   true
+#   false
+#   true
+#   false
+#   true
+#   false
+#   false
+#   true
+#   false
+#   false
+rwfunc test() -> () {
+	println(string·eq("hello", "hello"))
+	println(string·eq("hello", "world"))
+	println(string·ne("hello", "world"))
+	println(string·empty(""))
+	println(string·empty("hi"))
+	println(string·contains("hello world", "world"))
+	println(string·contains("hello world", "xyz"))
+	println(string·startswith("hello", "hel"))
+	println(string·startswith("hello", "world"))
+	println(string·startswith("hi", "hello"))
+	println(string·endswith("hello", "llo"))
+	println(string·endswith("hello", "world"))
+	println(string·endswith("hi", "hello"))
+}

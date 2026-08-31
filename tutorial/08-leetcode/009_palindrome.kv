@@ -29,7 +29,10 @@ rwfunc is_pal(x:int64) -> (r:int64) {
 	}
 }
 
-r1 <- is_pal(121)
-println(r1)
-r2 = is_pal(-121)  # = 等价于 <-
-println(r2)
+rwfunc test() -> () {
+
+	r1 <- is_pal(121)
+	println(r1)
+	r2 = is_pal(-121)  # = 等价于 <-
+	println(r2)
+}

@@ -4,7 +4,7 @@
 #   h·x = 1
 #   h·z = 42
 #   has x: true
-rwfunc main() -> () {
+rwfunc test() -> () {
 	h = {x=1; y=2}
 	h·x -> v
 	println("h·x =", v)
@@ -13,5 +13,3 @@ rwfunc main() -> () {
 	kv·get(h, "x") != None -> ok
 	println("has x:", ok)
 }
-
-main()

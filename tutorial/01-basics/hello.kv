@@ -1,6 +1,6 @@
 # 期望输出:
 #   hello kvlang
-rwfunc main() -> () {
+rwfunc test() -> () {
 	t0 <- time·now()
 	println("hello kvlang")
 	t1 <- time·now()
@@ -8,5 +8,3 @@ rwfunc main() -> () {
 	ns <- time/duration·as_nanos(delta)
 	println("__bench_ns:", ns)
 }
-
-main()

@@ -22,7 +22,7 @@ rwfunc tailrec_fact(N:int64, acc:int64) -> (r:int64) {
 	}
 }
 
-rwfunc main() -> () {
+rwfunc test() -> () {
 	s <- sum_while(100)
 	println("sum =", s)
 	f = tailrec_fact(10, 1)  # = 等价于 <-
@@ -30,5 +30,3 @@ rwfunc main() -> () {
 	s -> /last_tco_sum
 	/last_tco_fact <- f
 }
-
-main()

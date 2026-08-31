@@ -22,6 +22,9 @@ rwfunc collatz(n:int64) -> (steps:int64) {
 	}
 }
 
-ans <- collatz(27)
-println("steps =", ans)
-/last_steps = ans  # = 等价于 <-
+rwfunc test() -> () {
+
+	ans <- collatz(27)
+	println("steps =", ans)
+	/last_steps = ans  # = 等价于 <-
+}

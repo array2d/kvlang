@@ -29,10 +29,9 @@ rwfunc divide(dividend:int64, divisor:int64) -> (result:int64) {
 	if (neg == 1) { result <- 0 - result }
 }
 
-rwfunc main() -> () {
+rwfunc test() -> () {
 	r1 = divide(10, 3)  # = 等价于 <-
 	println(r1)
 	r2 <- divide(7, -3)
 	println(r2)
 }
-main()

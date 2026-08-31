@@ -1,0 +1,19 @@
+[package]
+name = "kvlang-rs"
+version = "0.1.0"
+edition = "2021"
+description = "功能完整的 kvlang runtime：模式2 主导执行 + 纯净 rwir stdlib（term/json/http/kvlanglayout）"
+
+[lib]
+name = "kvlang_rs"
+path = "src/lib.rs"
+
+[[bin]]
+name = "kvlang"
+path = "src/main.rs"
+
+[dependencies]
+libc = "0.2"
+serde_json = "1"
+ureq = { version = "2", features = ["gzip"] }
+rustyline = "15"

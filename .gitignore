@@ -22,7 +22,7 @@ go.work.sum
 build/
 
 # ── Rust ─────────────────────────────────────────────
-/target/
+*target/
 
 # ── Common compiled artifacts ────────────────────────
 *.o

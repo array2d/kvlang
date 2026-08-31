@@ -1,7 +1,6 @@
 # expected
 #   TypeError: max/min requires numeric, got int64 and char/utf32
 # 修复: min/max 现为 native 逐 kind op，混类型在运行时 TypeError
-rwfunc main() -> () {
+rwfunc test() -> () {
 	min(int64(1), "a") -> x
 }
-main()

@@ -5,7 +5,7 @@
 #   [0] = 10
 #   after set: 10 99 30
 #   sum = 179
-rwfunc main() -> () {
+rwfunc test() -> () {
 	a:[]int64 = [10, 20, 30, 40]
 	ndarray·numel(a) -> n
 	println("len =", n)
@@ -25,5 +25,3 @@ rwfunc main() -> () {
 	}
 	println("sum =", total)
 }
-
-main()

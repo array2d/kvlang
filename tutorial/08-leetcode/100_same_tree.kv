@@ -25,11 +25,10 @@ rwfunc same(a:[]char/utf32, b:[]char/utf32) -> (ok:int64) {
 	}
 }
 
-rwfunc main() -> () {
+rwfunc test() -> () {
 	build()
 	same("/t0", "/t0") -> r1
 	if (r1 == 1) { println("true") } else { println("false") }
 	same("/t0", "/v0") -> r2
 	if (r2 == 1) { println("true") } else { println("false") }
 }
-main()

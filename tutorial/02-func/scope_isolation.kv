@@ -18,7 +18,7 @@ rwfunc chain_call(a:int64, b:int64) -> (r:int64) {
 	a + b -> r
 }
 
-rwfunc main() -> () {
+rwfunc test() -> () {
 	v1 <- id_val(5)
 	println("PASS SI-1a: x=5 returns", v1)
 	v2 = id_val(10)  # = 等价于 <-
@@ -31,5 +31,3 @@ rwfunc main() -> () {
 	println("PASS SI-3: chain =", c)
 	/last_chain <- c
 }
-
-main()

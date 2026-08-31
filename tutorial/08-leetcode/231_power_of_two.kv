@@ -23,7 +23,10 @@ rwfunc is_power(n:int64) -> (r:int64) {
 	r = result  # = 等价于 <-
 }
 
-is_power(16) -> r1
-println(r1)
-r2 <- is_power(18)
-println(r2)
+rwfunc test() -> () {
+
+	is_power(16) -> r1
+	println(r1)
+	r2 <- is_power(18)
+	println(r2)
+}

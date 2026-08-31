@@ -1,3 +1,6 @@
 # expected:
 #   error: KeyError: kv·at: key not found
-kv·get([1, 2], 5) -> _
+
+rwfunc test() -> () {
+	kv·get([1, 2], 5) -> _
+}

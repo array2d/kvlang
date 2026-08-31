@@ -28,7 +28,10 @@ rwfunc reverse(x:int64) -> (result:int64) {
 	}
 }
 
-reverse(123) -> r1
-println(r1)
-r2 <- reverse(-123)
-println(r2)
+rwfunc test() -> () {
+
+	reverse(123) -> r1
+	println(r1)
+	r2 <- reverse(-123)
+	println(r2)
+}

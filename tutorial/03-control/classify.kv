@@ -22,6 +22,9 @@ rwfunc classify(score:int64) -> (grade:[]char/utf32) {
 	}
 }
 
-ans <- classify(85)
-println("grade =", ans)
-/last_grade = ans  # = 等价于 <-
+rwfunc test() -> () {
+
+	ans <- classify(85)
+	println("grade =", ans)
+	/last_grade = ans  # = 等价于 <-
+}

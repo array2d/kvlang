@@ -1,0 +1,10 @@
+# time·elapsed_ns：从指定时刻到现在的纳秒数（确定 >= 0）
+# 期望输出:
+#   elapsed >= 0: true
+rwfunc test() -> () {
+	time·now() -> t0
+	time·elapsed_ns(t0) -> ns
+	ns >= 0 -> ok
+	print("elapsed >= 0: ")
+	println(ok)
+}

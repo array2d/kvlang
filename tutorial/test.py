@@ -209,40 +209,20 @@ def _rust_test_file(f: Path, expects: list[str], env: dict) -> tuple[bool, str]:
     if layout.returncode != 0:
         return False, f"layout failed: {layout.stderr.strip()[:100]}"
 
-    # Step 2: List available functions in /lib/, try each
-    from pathlib import Path as _Path
-    func_names = [_Path(f).stem, "main", "init"]
+    # Step 2: 约定入口 test（每个 tutorial 顶层 rwfunc test()）
     try:
-        ls = subprocess.run(
-            [os.path.expanduser("~/.local/bin/kvspace"), "--kvspace", f"shm://{SHM_PATH}",
-             "list", "/lib/"], capture_output=True, text=True, timeout=5, env=env)
-        for line in ls.stdout.strip().split('\n'):
-            name = line.strip().split()[0].rstrip('/')
-            if name and name not in func_names:
-                func_names.append(name)
-    except Exception: pass
-
-    rust = None
-    for fn in func_names:
-        try:
-            rust = subprocess.run([RUST_BIN, fn], capture_output=True, text=True,
-                                  timeout=30, cwd=str(ROOT), env=env)
-        except FileNotFoundError:
-            return False, f"rust binary not found at {RUST_BIN}"
-        if rust.returncode == 0: break
-    if rust is None or rust.returncode != 0:
-        return False, f"rust exit {rust.returncode}: {rust.stderr.strip()[:100] if rust else 'no attempt'}"
+        rust = subprocess.run([RUST_BIN, "test"], capture_output=True, text=True,
+                              timeout=30, cwd=str(ROOT), env=env)
+    except FileNotFoundError:
+        return False, f"rust binary not found at {RUST_BIN}"
+    if rust.returncode != 0:
+        return False, f"rust exit {rust.returncode}: {rust.stderr.strip()[:100]}"
 
     # Step 3: Check output
     for pat in expects:
         if pat not in rust.stdout:
             return False, f"want {pat!r}"
     return True, rust.stdout[:200]
-
-
-def _detect_entry(out: str) -> str:
-    m = re.search(r"ENTRY=(\S+)", out)
-    return m.group(1) if m else "init"
 
 
 def _c_test_file(f: Path, expects: list[str], env: dict) -> tuple[bool, str]:
@@ -261,7 +241,7 @@ def _c_test_file(f: Path, expects: list[str], env: dict) -> tuple[bool, str]:
                             timeout=60, cwd=str(ROOT), env=env)
     if layout.returncode != 0:
         return False, f"layout failed: {layout.stderr.strip()[:100]}"
-    entry = _detect_entry(layout.stdout)
+    entry = "test"  # 约定入口：每个 tutorial 顶层 rwfunc test()（pkg 空、裸名）
     try:
         crun = subprocess.run([TERM_BIN, entry], capture_output=True, text=True,
                               timeout=120, cwd=str(ROOT), env={**env, "KVSPACE": _C_DSN})

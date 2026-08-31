@@ -48,12 +48,10 @@ rwfunc show(head:[]char/utf32) -> () {
 	}
 }
 
-rwfunc main() -> () {
+rwfunc test() -> () {
 	build()
 	dedup("/e0")
 	show("/e0")
 	dedup("/f0")
 	show("/f0")
 }
-
-main()

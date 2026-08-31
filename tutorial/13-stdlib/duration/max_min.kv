@@ -1,0 +1,16 @@
+# max / min：取两 duration 的较大/较小值
+# 期望输出:
+#   max: 3
+#   min: 1
+rwfunc test() -> () {
+	time/duration·hours(1) -> h1
+	time/duration·hours(3) -> h3
+	time/duration·max(h1, h3) -> mx
+	time/duration·as_hours(mx) -> mx_h
+	print("max: ")
+	println(mx_h)
+	time/duration·min(h1, h3) -> mn
+	time/duration·as_hours(mn) -> mn_h
+	print("min: ")
+	println(mn_h)
+}

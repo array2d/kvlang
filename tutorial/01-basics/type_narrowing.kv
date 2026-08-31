@@ -12,7 +12,7 @@
 #   -9223372036854775807
 #   10000
 #   10000
-rwfunc main() -> () {
+rwfunc test() -> () {
         # int8(127) + int8(1) → -128（int8 回绕证明结果仍是 int8。若是 int64 则为 128）
         int8(127) + int8(1) -> a
         println(a)
@@ -57,5 +57,3 @@ rwfunc main() -> () {
         println(i_m)
         println(i)
 }
-
-main()

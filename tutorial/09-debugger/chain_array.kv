@@ -17,7 +17,7 @@ rwfunc f1() -> (s:int64) {
     f2() -> (_, s)      # 接收 s，丢弃数组
 }
 
-rwfunc init() -> () {
+rwfunc test() -> () {
     f1() -> r
     println(r)            # 70
 }

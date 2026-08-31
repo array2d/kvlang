@@ -1,3 +1,6 @@
 # expected:
 #   error: KeyError: kv·at: key not found
-kv·get("/x", "y") -> _
+
+rwfunc test() -> () {
+	kv·get("/x", "y") -> _
+}

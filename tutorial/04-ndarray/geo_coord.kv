@@ -3,7 +3,7 @@
 # 期望输出:
 #   [39.9,116.4] -> Beijing
 #   [31.23,121.47] -> Shanghai
-rwfunc main() -> () {
+rwfunc test() -> () {
 	geo·[39.9,116.4] <- "Beijing"
 	geo·[31.23,121.47] <- "Shanghai"
 	geo·[39.9,116.4] -> bj
@@ -11,4 +11,3 @@ rwfunc main() -> () {
 	println("[39.9,116.4] ->", bj)
 	println("[31.23,121.47] ->", sh)
 }
-main()

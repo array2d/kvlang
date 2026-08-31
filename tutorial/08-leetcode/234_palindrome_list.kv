@@ -43,10 +43,8 @@ rwfunc build() -> () {
 	{ val=2; next="" } -> /q1
 }
 
-rwfunc main() -> () {
+rwfunc test() -> () {
 	build()
 	is_pal("/p0")
 	is_pal("/q0")
 }
-
-main()

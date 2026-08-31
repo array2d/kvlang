@@ -3,11 +3,10 @@
 # 期望输出:
 #   a[0] = 10
 #   a[2] = 30
-rwfunc main() -> () {
+rwfunc test() -> () {
 	a = {10, 20, 30}
 	a·[0] -> v0
 	a·[2] -> v2
 	println("a[0] =", v0)
 	println("a[2] =", v2)
 }
-main()

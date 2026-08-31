@@ -91,8 +91,11 @@ rwfunc romanToInt(s:[]char/utf32) -> (val:int64) {
 	}
 }
 
-romanToInt("LVIII") -> a
-println("LVIII =", a)
-b <- romanToInt("MCMXCIV")
-println("MCMXCIV =", b)
-/roman_lviii = a  # = 等价于 <-
+rwfunc test() -> () {
+
+	romanToInt("LVIII") -> a
+	println("LVIII =", a)
+	b <- romanToInt("MCMXCIV")
+	println("MCMXCIV =", b)
+	/roman_lviii = a  # = 等价于 <-
+}

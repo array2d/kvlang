@@ -9,7 +9,7 @@
 #   pow: 32.0
 #   sqrt: 12.0
 #   sqrt(√): 12.0
-rwfunc main() -> () {
+rwfunc test() -> () {
 	t0 <- time·now()
 	10 + 3 -> add_r
 	println("add:", add_r)
@@ -43,5 +43,3 @@ rwfunc main() -> () {
 	ns <- time/duration·as_nanos(delta)
 	println("__bench_ns:", ns)
 }
-
-main()

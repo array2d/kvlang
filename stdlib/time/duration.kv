@@ -1,0 +1,39 @@
+# lib time/duration —— 时长标准库便利函数。native rwir: nanos/millis/seconds/minutes/hours/
+# as_nanos/as_millis/as_seconds/as_minutes/as_hours/add/sub/before/after；
+# days/as_days/is_zero/equal/max/min 是 rwfunc 封装（kv 源码，可寻址/可自改）。
+
+lib time/duration {
+	rwfunc days(n:int64) -> (dur:duration) {
+		n × 24 -> h
+		time/duration·hours(h) -> dur
+	}
+	rwfunc as_days(d:duration) -> (n:int64) {
+		time/duration·as_hours(d) -> h
+		h ÷ 24 -> n
+	}
+	rwfunc is_zero(d:duration) -> (r:bool) {
+		time/duration·as_nanos(d) -> ns
+		ns == 0 -> r
+	}
+	rwfunc equal(d1:duration, d2:duration) -> (r:bool) {
+		time/duration·before(d1, d2) -> b
+		time/duration·after(d1, d2) -> a
+		!b && !a -> r
+	}
+	rwfunc max(d1:duration, d2:duration) -> (r:duration) {
+		time/duration·after(d1, d2) -> a
+		if (a) {
+			d1 -> r
+		} else {
+			d2 -> r
+		}
+	}
+	rwfunc min(d1:duration, d2:duration) -> (r:duration) {
+		time/duration·before(d1, d2) -> b
+		if (b) {
+			d1 -> r
+		} else {
+			d2 -> r
+		}
+	}
+}

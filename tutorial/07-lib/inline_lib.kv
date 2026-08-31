@@ -12,11 +12,9 @@ rwfunc double(x:int64) -> (y:int64) {
 	y_m <- x × 2
 }
 
-rwfunc main() -> () {
+rwfunc test() -> () {
 	a = mylib·add(10, 20)  # = 等价于 <-
 	println("mylib·add(10,20) =", a)
 	double(a) -> b
 	println("double(mylib·add(10,20)) =", b)
 }
-
-main()

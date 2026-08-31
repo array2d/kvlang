@@ -7,7 +7,7 @@
 #   b[2] = 30
 #   ndarray·numel(c) = 3
 #   c[0] = 10
-rwfunc main() -> () {
+rwfunc test() -> () {
 	a:[]int64 = [10, 20, 30]       # 字面量初始化 → compact
 	b <- array·scatter(a)          # 显式 scatter：compact a → 散 key b（b·[0]..b·[2]）
 	ndarray·numel(b) -> n1
@@ -19,5 +19,3 @@ rwfunc main() -> () {
 	println("ndarray·numel(c) =", n2)
 	println("c[0] =", c[0])        # compact 元素访问 [i]
 }
-
-main()

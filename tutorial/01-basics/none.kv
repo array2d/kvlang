@@ -4,7 +4,7 @@
 #   before
 #   after
 #   42
-rwfunc main() -> () {
+rwfunc test() -> () {
   println("before")
   x -> y       # x 未赋值 → None，y ← None
   println(y)     # None → 输出空行
@@ -12,4 +12,3 @@ rwfunc main() -> () {
   42 -> x      # 显式赋值
   println(x)
 }
-main()

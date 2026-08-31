@@ -1,0 +1,13 @@
+# xv·swap：交换数组两下标元素，返回新数组，原数组不变
+# 期望输出:
+#   swap(0,2)[0]: 30
+#   swap(0,2)[2]: 10
+#   original[0]: 10
+
+rwfunc test() -> () {
+	a:[]int64 = [10, 20, 30, 40]
+	b <- xv·swap(a, 0, 2)
+	println("swap(0,2)[0]:", b[0])
+	println("swap(0,2)[2]:", b[2])
+	println("original[0]:", a[0])
+}

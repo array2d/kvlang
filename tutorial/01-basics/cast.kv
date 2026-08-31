@@ -20,7 +20,7 @@
 #   42
 #   42
 #   42
-rwfunc main() -> () {
+rwfunc test() -> () {
     # ── int8/16/32/64 ──
     int8(127) + int8(1) -> i8  # = 等价于 <-（回绕到 -128）
     println(i8)
@@ -58,4 +58,3 @@ rwfunc main() -> () {
     println(int64(x))
     println(uint64(x))
 }
-main()

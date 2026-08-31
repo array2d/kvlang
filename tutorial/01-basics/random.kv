@@ -5,7 +5,7 @@
 #   int63 >= 0: true
 #   intn in [0,100): true
 #   two randoms differ: true
-rwfunc main() -> () {
+rwfunc test() -> () {
 	n <- random·int63()
 	println("int63 >= 0:", n >= 0)
 
@@ -16,5 +16,3 @@ rwfunc main() -> () {
 	b <- random·uint64()
 	println("two randoms differ:", a != b)
 }
-
-main()

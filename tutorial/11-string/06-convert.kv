@@ -5,7 +5,7 @@
 #   hello
 #   e
 #   world
-rwfunc main() -> () {
+rwfunc test() -> () {
 	s:[]char/utf8 = "hello"   # 变宽，禁索引
 	t <- char/utf32(s)      # 转 utf32 定宽，可索引
 	println(t)
@@ -13,4 +13,3 @@ rwfunc main() -> () {
 	u <- char/ascii("world")  # 转 ascii（非 ASCII 会报错）
 	println(u)
 }
-main()

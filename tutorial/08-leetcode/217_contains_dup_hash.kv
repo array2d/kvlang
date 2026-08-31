@@ -56,10 +56,8 @@ rwfunc no_dup() -> () {
 	}
 }
 
-rwfunc main() -> () {
+rwfunc test() -> () {
 	a1:[]int64 = [1, 2, 3, 1]
 	has_dup(a1)
 	no_dup()
 }
-
-main()

@@ -19,27 +19,6 @@ use std::panic::catch_unwind;
 
 use crate::{compile, dump, format, init_dirs, kvkind, vet, Kv};
 
-/// 复刻 Go runtime / kvlanglayout 的 findEntry：DFS /lib/ 找首个 `·init`，否则 "init"。
-fn find_entry(kv: &mut Kv, prefix: &str, pkg: &str) -> String {
-    for c in kv.list(prefix, false, true) {
-        let base = c.trim_end_matches('/');
-        if base.ends_with(".src") {
-            continue;
-        }
-        let full = if pkg.is_empty() { base.to_string() } else { format!("{pkg}·{base}") };
-        if base == "init" {
-            return full;
-        }
-        let next_pkg = if pkg.is_empty() { base.to_string() } else { format!("{pkg}/{base}") };
-        let sub = if c.ends_with('/') { format!("{prefix}{base}/") } else { format!("{prefix}{base}·") };
-        let entry = find_entry(kv, &sub, &next_pkg);
-        if !entry.is_empty() {
-            return entry;
-        }
-    }
-    String::new()
-}
-
 fn cstr<'a>(p: *const c_char) -> &'a str {
     if p.is_null() {
         return "";
@@ -59,13 +38,13 @@ fn write_out(buf: *mut c_char, cap: u32, s: &str) {
     }
 }
 
-/// 把源码 layout 进 dsn 指向的 kvspace，返回入口名或错误。
+/// 把源码 layout 进 dsn 指向的 kvspace。入口不再自动探测（见 runtime：入口须显式给出），
+/// entry_out 恒为空串——消费方按约定自定入口（tutorial 用 test，散语句脚本用 init）。
 fn layout_core(src: &str, dsn: &str) -> Result<String, String> {
     let mut kv = Kv::conn(dsn);
     init_dirs(&mut kv)?;
     compile(&mut kv, src)?;
-    let entry = find_entry(&mut kv, "/lib/", "");
-    Ok(if entry.is_empty() { "init".to_string() } else { entry })
+    Ok(String::new())
 }
 
 /// 结果落地为 C 约定：成功写 entry、返回 0；失败写 err、返回 -1；panic 兜为 -1。

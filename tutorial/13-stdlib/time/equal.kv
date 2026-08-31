@@ -1,0 +1,15 @@
+# time·equal：两时刻相等判断
+# 期望输出:
+#   same: true
+#   shifted: false
+rwfunc test() -> () {
+	time·now() -> t0
+	time/duration·seconds(1) -> one_sec
+	time·add(t0, one_sec) -> t1
+	time·equal(t0, t0) -> same
+	print("same: ")
+	println(same)
+	time·equal(t0, t1) -> shifted
+	print("shifted: ")
+	println(shifted)
+}
