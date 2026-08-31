@@ -10,7 +10,7 @@
 #   t0 + delta == t1: true
 #   1000 ms
 #   1 s = 1000000000 ns
-rwfunc main() -> () {
+rwfunc test() -> () {
     println("before")
     t0 <- time·now()
     t1 <- time·now()
@@ -53,4 +53,3 @@ rwfunc main() -> () {
     print(ns)
     println(" ns")
 }
-main()

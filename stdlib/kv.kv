@@ -1,0 +1,27 @@
+# lib kv —— KV 空间便利库。native rwir：kv·get/set/del/deltree/list/listlen；
+# rwfunc 补充：has（存在检测）、get_or（缺省回退）、set_default（幂等写）。
+# /___kv_stdlib_null___ 为内部 sentinel 路径，用户不得写入。
+
+lib kv {
+	rwfunc has(path:[]char/utf32) -> (result:bool) {
+		v <- kv·get(path)
+		sentinel <- kv·get("/___kv_stdlib_null___")
+		result = !(v == sentinel)
+	}
+	rwfunc get_or(path:[]char/utf32, default_val:[]char/utf32) -> (result:[]char/utf32) {
+		v <- kv·get(path)
+		sentinel <- kv·get("/___kv_stdlib_null___")
+		if (v == sentinel) {
+			result = default_val
+		} else {
+			result = v
+		}
+	}
+	rwfunc set_default(path:[]char/utf32, val:[]char/utf32) -> () {
+		existing <- kv·get(path)
+		sentinel <- kv·get("/___kv_stdlib_null___")
+		if (existing == sentinel) {
+			kv·set(path, val)
+		}
+	}
+}

@@ -25,11 +25,10 @@ rwfunc length_of_longest(s:[]char/utf32) -> (max_len:int64) {
 	}
 }
 
-rwfunc main() -> () {
+rwfunc test() -> () {
 	r1 = length_of_longest("abcabcbb")  # = 等价于 <-
 	println(r1)
 	println(length_of_longest("bbbbb"))
 	r3 <- length_of_longest("abcde")
 	println(r3)
 }
-main()

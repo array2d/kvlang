@@ -3,10 +3,9 @@
 #   6
 #   hello
 #   -1
-rwfunc main() -> () {
+rwfunc test() -> () {
 	s = "hello world"
 	println(string·find(s, "world"))
 	println(string·slice(s, 0, 5))
 	println(string·find(s, "zz"))
 }
-main()

@@ -3,7 +3,7 @@
 #   shape0= 4
 #   at1= 20
 #   set1= 99
-rwfunc main() -> () {
+rwfunc test() -> () {
 	a:[]int64 = [10, 20, 30, 40]
 	ndarray·numel(a) -> n
 	ndarray·dim(a) -> d
@@ -15,4 +15,3 @@ rwfunc main() -> () {
 	xv·set(a, 1, 99) -> a
 	println("set1=", a[1])
 }
-main()

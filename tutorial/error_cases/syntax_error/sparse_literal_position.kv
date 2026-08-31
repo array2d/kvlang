@@ -1,7 +1,6 @@
 # expected
 #   scattered-key array literal {...} is only allowed as an assignment right-hand side
 # 修复: 括号规约 — {..} 散 key 字面量只能作赋值右值 x = {..} 或 for-in 源 for(s in {..})
-rwfunc main() -> () {
+rwfunc test() -> () {
 	println({1, 2, 3})
 }
-main()

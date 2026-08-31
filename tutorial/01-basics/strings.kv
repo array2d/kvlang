@@ -14,7 +14,7 @@
 #   -1
 #   l
 #   108
-rwfunc main() -> () {
+rwfunc test() -> () {
 	s = "hello"  # = 等价于 <-
 	println(s[1])
 	s[0] = "H"  # = 等价于 <-
@@ -35,5 +35,3 @@ rwfunc main() -> () {
 	println(c)
 	println(string·ord(c))
 }
-
-main()

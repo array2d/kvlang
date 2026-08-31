@@ -1,7 +1,6 @@
 # expected
 #   TypeError: expected integer, got float64
 # 修复: todo-033 — 模运算仅整数（五语言中仅 Python/JS 支持浮点取模，取 C/Go/Rust 阵营）
-rwfunc main() -> () {
+rwfunc test() -> () {
 	float64(10.5) % int64(3) -> x
 }
-main()

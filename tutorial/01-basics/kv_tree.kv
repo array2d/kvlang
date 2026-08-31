@@ -5,7 +5,7 @@
 #   n= 2
 #   numel= 3 dim= 1
 #   shape0= 3
-rwfunc main() -> () {
+rwfunc test() -> () {
 	kv·set("/tmp/kvt·data", 42)
 	kv·get("/tmp/kvt·data") -> v
 	println("v=", v)
@@ -25,4 +25,3 @@ rwfunc main() -> () {
 	ndarray·shape([10,20,30]) -> s
 	println("shape0=", s[0])
 }
-main()

@@ -24,7 +24,10 @@ rwfunc remove_dupes() -> (k:int64) {
     }
 }
 
-remove_dupes() -> k
-println("k =", k)
-remove_dupes() -> k
-println("k =", k)
+rwfunc test() -> () {
+
+	remove_dupes() -> k
+	println("k =", k)
+	remove_dupes() -> k
+	println("k =", k)
+}

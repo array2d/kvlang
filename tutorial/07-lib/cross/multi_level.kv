@@ -9,7 +9,7 @@ lib aaa/bbb/math {
         sum(A, A) -> C  # 同包裸名调用
     }
 }
-rwfunc init() -> () {
+rwfunc test() -> () {
     /lib/aaa/bbb/math·sum(3, 4) -> s
     println(s)
 

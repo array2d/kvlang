@@ -1,0 +1,13 @@
+# equal：判断两 duration 是否相等
+# 期望输出:
+#   true
+#   false
+rwfunc test() -> () {
+	time/duration·hours(2) -> a
+	time/duration·hours(2) -> b
+	time/duration·hours(3) -> c
+	time/duration·equal(a, b) -> eq
+	println(eq)
+	time/duration·equal(a, c) -> neq
+	println(neq)
+}

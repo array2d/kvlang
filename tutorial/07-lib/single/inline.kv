@@ -1,10 +1,10 @@
-# 单 lib 自含 rwfunc init
+# 单 lib + 顶层 test 调用
 # 期望输出:
 #   7
 lib math {
     rwfunc sum(A:int64, B:int64) -> (C:int64) { A + B -> C }
-    rwfunc init() -> () {
-        math·sum(3, 4) -> s
-        println(s)
-    }
+}
+rwfunc test() -> () {
+    math·sum(3, 4) -> s
+    println(s)
 }

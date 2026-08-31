@@ -23,7 +23,7 @@
 #   9223372036854775806
 #   9007199254740993
 #   false
-rwfunc main() -> () {
+rwfunc test() -> () {
 	a = 2 + 3  # = 等价于 <-
 	println(a)
 	b <- 2 + 3.5
@@ -74,5 +74,3 @@ rwfunc main() -> () {
 	same <- big == 9223372036854775806
 	println(same)
 }
-
-main()

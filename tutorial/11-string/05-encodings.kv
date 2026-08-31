@@ -4,7 +4,7 @@
 #   abc
 #   y
 #   héllo
-rwfunc main() -> () {
+rwfunc test() -> () {
 	a = "abc"               # 默认 char/utf32
 	println(a)
 	b:[]char/ascii = "xyz"    # ASCII 定宽，可索引
@@ -12,4 +12,3 @@ rwfunc main() -> () {
 	c:[]char/utf8 = "héllo"   # UTF-8 变宽，打印 OK（索引会报错）
 	println(c)
 }
-main()

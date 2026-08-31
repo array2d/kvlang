@@ -42,11 +42,14 @@ rwfunc sum_odds(n:int64) -> (total:int64) {
 	}
 }
 
-sum_to(10) -> a
-println("sum(1..10) =", a)
-b <- first_div7(20)
-println("first div7 in [1,20] =", b)
-c = sum_odds(10)  # = 等价于 <-
-println("sum odds(1..10) =", c)
-a + b -> ab
-/last_sum <- ab + c
+rwfunc test() -> () {
+
+	sum_to(10) -> a
+	println("sum(1..10) =", a)
+	b <- first_div7(20)
+	println("first div7 in [1,20] =", b)
+	c = sum_odds(10)  # = 等价于 <-
+	println("sum odds(1..10) =", c)
+	a + b -> ab
+	/last_sum <- ab + c
+}

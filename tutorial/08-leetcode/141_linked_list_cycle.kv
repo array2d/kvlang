@@ -37,9 +37,12 @@ rwfunc build_no_cycle() -> () {
 	{ val=2; next="" } -> /n1
 }
 
-build_cycle()
-r1 = has_cycle("/c0")  # = 等价于 <-
-println(r1)
-build_no_cycle()
-has_cycle("/n0") -> r2
-println(r2)
+rwfunc test() -> () {
+
+	build_cycle()
+	r1 = has_cycle("/c0")  # = 等价于 <-
+	println(r1)
+	build_no_cycle()
+	has_cycle("/n0") -> r2
+	println(r2)
+}

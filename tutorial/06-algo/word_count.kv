@@ -2,7 +2,7 @@
 # 算法: for 遍历 + IN/OUT 状态机
 # 期望输出:
 #   word count = 3
-rwfunc main() -> () {
+rwfunc test() -> () {
 	chars·0 = "h"  # = 等价于 <-
 	"e" -> chars·1
 	chars·2 <- "l"
@@ -40,5 +40,3 @@ rwfunc main() -> () {
 	println("word count =", nw)
 	nw -> /last_wc
 }
-
-main()

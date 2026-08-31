@@ -11,10 +11,13 @@ rwfunc factorial(n:int64) -> (result:int64) {
 	}
 }
 
-t0 <- time·now()
-ans <- factorial(10)
-t1 <- time·now()
-println("fact =", ans)
-delta <- time·sub(t1, t0)
-ns <- time/duration·as_nanos(delta)
-println("__bench_ns:", ns)
+rwfunc test() -> () {
+
+	t0 <- time·now()
+	ans <- factorial(10)
+	t1 <- time·now()
+	println("fact =", ans)
+	delta <- time·sub(t1, t0)
+	ns <- time/duration·as_nanos(delta)
+	println("__bench_ns:", ns)
+}

@@ -1,0 +1,89 @@
+# lib string —— 字符串便利标准库。string native rwir 提供 len/char/ord/cmp/concat/find/slice；
+# 以下 rwfunc 封装常用组合操作（判断 / 变换）。
+# 字符串类型恒 []char/utf32（kvlang 字面量默认编码）。
+
+lib string {
+	rwfunc eq(a:[]char/utf32, b:[]char/utf32) -> (r:bool) {
+		string·cmp(a, b) == 0 -> r
+	}
+	rwfunc ne(a:[]char/utf32, b:[]char/utf32) -> (r:bool) {
+		string·cmp(a, b) != 0 -> r
+	}
+	rwfunc empty(s:[]char/utf32) -> (r:bool) {
+		string·len(s) == 0 -> r
+	}
+	rwfunc contains(s:[]char/utf32, sub:[]char/utf32) -> (r:bool) {
+		string·find(s, sub) != -1 -> r
+	}
+	rwfunc startswith(s:[]char/utf32, pre:[]char/utf32) -> (r:bool) {
+		sl <- string·len(s)
+		pl <- string·len(pre)
+		if (pl > sl) {
+			false -> r
+		} else {
+			string·slice(s, 0, pl) -> prefix
+			string·cmp(prefix, pre) == 0 -> r
+		}
+	}
+	rwfunc endswith(s:[]char/utf32, suf:[]char/utf32) -> (r:bool) {
+		sl <- string·len(s)
+		fl <- string·len(suf)
+		if (fl > sl) {
+			false -> r
+		} else {
+			sl - fl -> lo
+			string·slice(s, lo, sl) -> tail
+			string·cmp(tail, suf) == 0 -> r
+		}
+	}
+	rwfunc reverse(s:[]char/utf32) -> (r:[]char/utf32) {
+		n <- string·len(s)
+		"" -> r
+		i <- n - 1
+		while (i >= 0) {
+			string·char(s, i) -> c
+			string·concat(r, c) -> r
+			i <- i - 1
+		}
+	}
+	rwfunc repeat(s:[]char/utf32, n:int64) -> (r:[]char/utf32) {
+		"" -> r
+		i <- 0
+		while (i < n) {
+			string·concat(r, s) -> r
+			i <- i + 1
+		}
+	}
+	rwfunc upper(s:[]char/utf32) -> (r:[]char/utf32) {
+		"" -> r
+		n <- string·len(s)
+		i <- 0
+		while (i < n) {
+			string·char(s, i) -> c
+			string·find("abcdefghijklmnopqrstuvwxyz", c) -> idx
+			if (idx != -1) {
+				string·char("ABCDEFGHIJKLMNOPQRSTUVWXYZ", idx) -> uc
+				string·concat(r, uc) -> r
+			} else {
+				string·concat(r, c) -> r
+			}
+			i <- i + 1
+		}
+	}
+	rwfunc lower(s:[]char/utf32) -> (r:[]char/utf32) {
+		"" -> r
+		n <- string·len(s)
+		i <- 0
+		while (i < n) {
+			string·char(s, i) -> c
+			string·find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c) -> idx
+			if (idx != -1) {
+				string·char("abcdefghijklmnopqrstuvwxyz", idx) -> lc
+				string·concat(r, lc) -> r
+			} else {
+				string·concat(r, c) -> r
+			}
+			i <- i + 1
+		}
+	}
+}

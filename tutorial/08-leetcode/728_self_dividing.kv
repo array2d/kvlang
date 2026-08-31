@@ -39,7 +39,7 @@ rwfunc is_self(n:int64) -> (r:bool) {
 	r = ok  # = 等价于 <-
 }
 
-rwfunc main() -> () {
+rwfunc test() -> () {
 	1 -> i
 	while (i <= 15) {
 		r <- is_self(i)
@@ -51,5 +51,3 @@ rwfunc main() -> () {
 		i = i + 1  # = 等价于 <-
 	}
 }
-
-main()

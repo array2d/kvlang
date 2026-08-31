@@ -23,10 +23,9 @@ rwfunc dp(m:int64, n:int64) -> (result:int64) {
 	/tmp/up[n-1] -> result
 }
 
-rwfunc main() -> () {
+rwfunc test() -> () {
 	r1 <- dp(3, 7)
 	println(r1)
 	r2 = dp(3, 2)  # = 等价于 <-
 	println(r2)
 }
-main()

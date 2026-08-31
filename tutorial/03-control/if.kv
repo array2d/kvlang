@@ -11,14 +11,17 @@ lib my {
     }
 }
 
-a = my·abs(-5)  # = 等价于 <-
-println("abs(-5) =", a)
-my·abs(3) -> b
-println("abs(3) =", b)
-c <- my·abs(-10)
-println("abs(-10) =", c)
-d = b >= 90  # = 等价于 <-
-d_m = b ≥ 90  # = 等价于 <-
-println(d_m)
-println(d)
-a -> /last_abs
+rwfunc test() -> () {
+
+	a = my·abs(-5)  # = 等价于 <-
+	println("abs(-5) =", a)
+	my·abs(3) -> b
+	println("abs(3) =", b)
+	c <- my·abs(-10)
+	println("abs(-10) =", c)
+	d = b >= 90  # = 等价于 <-
+	d_m = b ≥ 90  # = 等价于 <-
+	println(d_m)
+	println(d)
+	a -> /last_abs
+}

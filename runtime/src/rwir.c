@@ -30,7 +30,23 @@ static void scope_prefix_and_base(const char *link_base, kvlangStrbuf_t *sp, kvl
     if (n == 0) return;
     bool has_bracket = false;
     for (size_t i = 0; i < n; i++) if (link_base[i] == '[') { has_bracket = true; break; }
-    if (!has_bracket) return;
+    if (!has_bracket) {
+        /* 无 bracket：函数帧即 vthread 根 /vthread/<vtid>/（bootstrap 入口帧）。
+         * 锚点固定为根，其后各段皆为 scope（· 连接），使根上的 extindex 覆盖所有嵌套 scope。 */
+        int slashes = 0; size_t third = (size_t)-1;
+        for (size_t i = 0; i < n; i++) if (link_base[i] == '/') { if (++slashes == 3) { third = i; break; } }
+        if (third == (size_t)-1) return; /* 就是 vthread 根本身：sp="" lb=link_base */
+        kvlangStrbufClear(lb);
+        kvlangStrbufPutn(lb, link_base, third);
+        kvlangStrbufPutc(lb, '/');
+        for (size_t i = third + 1; i < n; ) {
+            size_t j = i; while (j < n && link_base[j] != '/') j++;
+            if (sp->len > 0) kvlangStrbufPuts(sp, MEMBER_SEP);
+            kvlangStrbufPutn(sp, link_base + i, j - i);
+            i = (j < n) ? j + 1 : j;
+        }
+        return;
+    }
 
     char *scopes[MAX_STACK_DEPTH];
     int nscopes = 0;

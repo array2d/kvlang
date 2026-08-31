@@ -55,5 +55,8 @@ rwfunc is_anagram(s:[]char/utf32, t:[]char/utf32) -> () {
 	}
 }
 
-is_anagram("anagram", "nagaram")
-is_anagram("rat", "car")
+rwfunc test() -> () {
+
+	is_anagram("anagram", "nagaram")
+	is_anagram("rat", "car")
+}

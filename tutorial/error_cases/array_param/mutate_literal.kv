@@ -7,5 +7,8 @@ rwfunc mutate(a) -> () {
     99 -> a[0]   # ❌ a 是读参，a[0] 展开为 kv·set(a,0,99) -> a，写入读参槽被拒绝
 }
 
-a:[]int64 = [10, 20]
-mutate(a)
+rwfunc test() -> () {
+
+	a:[]int64 = [10, 20]
+	mutate(a)
+}

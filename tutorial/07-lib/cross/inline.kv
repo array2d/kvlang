@@ -4,7 +4,7 @@
 lib math {
     rwfunc sum(A:int64, B:int64) -> (C:int64) { A + B -> C }
 }
-rwfunc init() -> () {
+rwfunc test() -> () {
     /lib/math·sum(3, 4) -> s
     println(s)
 }

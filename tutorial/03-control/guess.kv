@@ -37,4 +37,7 @@ rwfunc guess_number() -> () {
 	/last_guesses = tries  # = 等价于 <-
 }
 
-guess_number()
+rwfunc test() -> () {
+
+	guess_number()
+}

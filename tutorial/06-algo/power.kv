@@ -12,6 +12,9 @@ rwfunc power(base:int64, exp:int64) -> (result:int64) {
 	}
 }
 
-power(2, 10) -> ans
-println("result =", ans)
-/last_pow <- ans
+rwfunc test() -> () {
+
+	power(2, 10) -> ans
+	println("result =", ans)
+	/last_pow <- ans
+}

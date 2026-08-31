@@ -1,0 +1,18 @@
+# lib time —— 时间标准库便利函数。native rwir: now/sub/add/before/after；
+# since/equal/elapsed_ns 是 rwfunc 封装（kv 源码，可寻址/可自改）。
+
+lib time {
+	rwfunc since(t:time) -> (dur:duration) {
+		time·now() -> now
+		time·sub(now, t) -> dur
+	}
+	rwfunc equal(a:time, b:time) -> (r:bool) {
+		time·before(a, b) -> ba
+		time·after(a, b) -> aa
+		!ba && !aa -> r
+	}
+	rwfunc elapsed_ns(t:time) -> (ns:int64) {
+		time·since(t) -> dur
+		time/duration·as_nanos(dur) -> ns
+	}
+}

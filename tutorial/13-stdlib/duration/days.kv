@@ -1,0 +1,11 @@
+# days / as_days：天为单位的 duration 构造与转换
+# 期望输出:
+#   2
+#   3
+rwfunc test() -> () {
+	time/duration·as_days(time/duration·hours(48)) -> d
+	println(d)
+	time/duration·days(3) -> three
+	time/duration·as_days(three) -> n
+	println(n)
+}

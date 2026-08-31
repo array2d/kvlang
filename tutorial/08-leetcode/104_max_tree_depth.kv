@@ -20,9 +20,8 @@ rwfunc max_depth(root:[]char/utf32) -> (depth:int64) {
 	}
 }
 
-rwfunc main() -> () {
+rwfunc test() -> () {
 	build_tree()
 	d <- max_depth("/t0")
 	println(d)
 }
-main()

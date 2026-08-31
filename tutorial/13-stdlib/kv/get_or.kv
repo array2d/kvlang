@@ -1,0 +1,12 @@
+# kv·get_or：读取 KV 值，不存在时返回默认值
+# 期望输出:
+#   get_or missing: default_val
+#   get_or existing: world
+
+rwfunc test() -> () {
+	v1 <- kv·get_or("/missing_key", "default_val")
+	println("get_or missing:", v1)
+	kv·set("/exists_key", "world")
+	v2 <- kv·get_or("/exists_key", "default_val")
+	println("get_or existing:", v2)
+}
