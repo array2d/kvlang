@@ -12,7 +12,7 @@ jobs:
         run: |
           make runtime
           make layout
-          sudo make install
+          sudo cp layout/target/release/libkvlanglayout.so /usr/lib/
           make runtime-rs
       - name: 测试
         env: { KVSPACE: "shm:///tmp/kvlang_ci" }
