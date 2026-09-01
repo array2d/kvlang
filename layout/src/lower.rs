@@ -35,7 +35,12 @@ pub fn lower_func(fn_: &Func) -> Func {
     let mut targets = HashSet::new();
     collect_goto_targets(&fn_.body, &mut targets);
     let body = lower_body(&fn_.body, &mut lg, None, &tm, &targets);
-    Func { comments: Vec::new(), sig: fn_.sig.clone(), body, pkg: String::new() }
+    Func {
+        comments: Vec::new(),
+        sig: fn_.sig.clone(),
+        body,
+        pkg: String::new(),
+    }
 }
 
 /// 递归收集 br/goto 的跳转目标 label（含嵌套 scope/if/while/for 体）。
@@ -72,7 +77,13 @@ fn collect_goto_targets(stmts: &[Stmt], targets: &mut HashSet<String>) {
     }
 }
 
-fn lower_body(stmts: &[Stmt], lg: &mut LabelGen, lc: Option<&LoopCtx>, tm: &HashMap<String, String>, targets: &HashSet<String>) -> Vec<Stmt> {
+fn lower_body(
+    stmts: &[Stmt],
+    lg: &mut LabelGen,
+    lc: Option<&LoopCtx>,
+    tm: &HashMap<String, String>,
+    targets: &HashSet<String>,
+) -> Vec<Stmt> {
     if stmts.is_empty() {
         return Vec::new();
     }
@@ -168,10 +179,26 @@ fn lower_if_with_cont(
 
     let mut result = pre.to_vec();
     result.push(goto_label(&if_label));
-    result.push(Stmt::Scope(ast::ScopeStmt { comments: Vec::new(), label: if_label, body: cond_body }));
-    result.push(Stmt::Scope(ast::ScopeStmt { comments: Vec::new(), label: then_label, body: then_insts }));
-    result.push(Stmt::Scope(ast::ScopeStmt { comments: Vec::new(), label: else_label, body: else_insts }));
-    result.push(Stmt::Scope(ast::ScopeStmt { comments: Vec::new(), label: merge_label, body: cont_insts }));
+    result.push(Stmt::Scope(ast::ScopeStmt {
+        comments: Vec::new(),
+        label: if_label,
+        body: cond_body,
+    }));
+    result.push(Stmt::Scope(ast::ScopeStmt {
+        comments: Vec::new(),
+        label: then_label,
+        body: then_insts,
+    }));
+    result.push(Stmt::Scope(ast::ScopeStmt {
+        comments: Vec::new(),
+        label: else_label,
+        body: else_insts,
+    }));
+    result.push(Stmt::Scope(ast::ScopeStmt {
+        comments: Vec::new(),
+        label: merge_label,
+        body: cont_insts,
+    }));
     result.extend(then_blocks);
     result.extend(else_blocks);
     result.extend(cont_blocks);
@@ -195,17 +222,35 @@ fn lower_while_with_cont(
     let mut cond_body = cond_eval;
     cond_body.push(br_inst(&cond_slot, &body_label, &exit_label));
 
-    let body_lc = LoopCtx { break_label: exit_label.clone(), continue_label: cond_label.clone() };
-    let body_ = inject_goto(lower_body(&s.body, lg, Some(&body_lc), tm, targets), &cond_label);
+    let body_lc = LoopCtx {
+        break_label: exit_label.clone(),
+        continue_label: cond_label.clone(),
+    };
+    let body_ = inject_goto(
+        lower_body(&s.body, lg, Some(&body_lc), tm, targets),
+        &cond_label,
+    );
     let (body_insts, mut body_blocks) = split_insts_and_blocks(body_);
     inject_goto_blocks(&mut body_blocks, &cond_label);
     let (cont_insts, cont_blocks) = split_insts_and_blocks(cont);
 
     let mut result = pre.to_vec();
     result.push(goto_label(&cond_label));
-    result.push(Stmt::Scope(ast::ScopeStmt { comments: Vec::new(), label: cond_label, body: cond_body }));
-    result.push(Stmt::Scope(ast::ScopeStmt { comments: Vec::new(), label: body_label, body: body_insts }));
-    result.push(Stmt::Scope(ast::ScopeStmt { comments: Vec::new(), label: exit_label, body: cont_insts }));
+    result.push(Stmt::Scope(ast::ScopeStmt {
+        comments: Vec::new(),
+        label: cond_label,
+        body: cond_body,
+    }));
+    result.push(Stmt::Scope(ast::ScopeStmt {
+        comments: Vec::new(),
+        label: body_label,
+        body: body_insts,
+    }));
+    result.push(Stmt::Scope(ast::ScopeStmt {
+        comments: Vec::new(),
+        label: exit_label,
+        body: cont_insts,
+    }));
     result.extend(body_blocks);
     result.extend(cont_blocks);
     result
@@ -286,7 +331,10 @@ fn lower_for_with_cont(
     };
     let lt_inst = Instruction {
         comments: Vec::new(),
-        expr: Some(ast::call("<", vec![ast::leaf(&idx_slot), ast::leaf(&len_slot)])),
+        expr: Some(ast::call(
+            "<",
+            vec![ast::leaf(&idx_slot), ast::leaf(&len_slot)],
+        )),
         writes: vec![cond_slot.clone()],
         write_types: Vec::new(),
         arrow_left: false,
@@ -298,13 +346,19 @@ fn lower_for_with_cont(
         br_inst(&cond_slot, &body_label, &exit_label),
     ];
 
-    let body_lc = LoopCtx { break_label: exit_label.clone(), continue_label: cond_label.clone() };
+    let body_lc = LoopCtx {
+        break_label: exit_label.clone(),
+        continue_label: cond_label.clone(),
+    };
     let body_inner = lower_body(&s.body, lg, Some(&body_lc), tm, targets);
     let mut body_insts = Vec::new();
     if is_obj {
         body_insts.push(Stmt::Instruction(Instruction {
             comments: Vec::new(),
-            expr: Some(ast::call("kv·listn", vec![ast::leaf(&iter_slot), ast::leaf(&idx_slot)])),
+            expr: Some(ast::call(
+                "kv·listn",
+                vec![ast::leaf(&iter_slot), ast::leaf(&idx_slot)],
+            )),
             writes: vec![key_slot.clone()],
             write_types: Vec::new(),
             arrow_left: false,
@@ -312,7 +366,10 @@ fn lower_for_with_cont(
         }));
         body_insts.push(Stmt::Instruction(Instruction {
             comments: Vec::new(),
-            expr: Some(ast::call("kv·get", vec![ast::leaf(&iter_slot), ast::leaf(&key_slot)])),
+            expr: Some(ast::call(
+                "kv·get",
+                vec![ast::leaf(&iter_slot), ast::leaf(&key_slot)],
+            )),
             writes: vec![s.var.clone()],
             write_types: Vec::new(),
             arrow_left: false,
@@ -321,7 +378,10 @@ fn lower_for_with_cont(
     } else {
         body_insts.push(Stmt::Instruction(Instruction {
             comments: Vec::new(),
-            expr: Some(ast::call("xv·at", vec![ast::leaf(&iter_slot), ast::leaf(&idx_slot)])),
+            expr: Some(ast::call(
+                "xv·at",
+                vec![ast::leaf(&iter_slot), ast::leaf(&idx_slot)],
+            )),
             writes: vec![s.var.clone()],
             write_types: Vec::new(),
             arrow_left: false,
@@ -337,10 +397,26 @@ fn lower_for_with_cont(
 
     let mut result = pre.to_vec();
     result.push(goto_label(&init_label));
-    result.push(Stmt::Scope(ast::ScopeStmt { comments: Vec::new(), label: init_label, body: init_body }));
-    result.push(Stmt::Scope(ast::ScopeStmt { comments: Vec::new(), label: cond_label, body: cond_body }));
-    result.push(Stmt::Scope(ast::ScopeStmt { comments: Vec::new(), label: body_label, body: body_insts_only }));
-    result.push(Stmt::Scope(ast::ScopeStmt { comments: Vec::new(), label: exit_label, body: cont_insts }));
+    result.push(Stmt::Scope(ast::ScopeStmt {
+        comments: Vec::new(),
+        label: init_label,
+        body: init_body,
+    }));
+    result.push(Stmt::Scope(ast::ScopeStmt {
+        comments: Vec::new(),
+        label: cond_label,
+        body: cond_body,
+    }));
+    result.push(Stmt::Scope(ast::ScopeStmt {
+        comments: Vec::new(),
+        label: body_label,
+        body: body_insts_only,
+    }));
+    result.push(Stmt::Scope(ast::ScopeStmt {
+        comments: Vec::new(),
+        label: exit_label,
+        body: cont_insts,
+    }));
     result.extend(body_blocks);
     result.extend(cont_blocks);
     result
@@ -377,7 +453,13 @@ fn flatten_expr(e: &Expr, lg: &mut LabelGen, extra: &mut Vec<Stmt>) -> Expr {
             new_args.push(arg.clone());
         }
     }
-    Expr { op: e.op.clone(), args: new_args, val: String::new(), quote: e.quote, lit: LitKind::LitNone }
+    Expr {
+        op: e.op.clone(),
+        args: new_args,
+        val: String::new(),
+        quote: e.quote,
+        lit: LitKind::LitNone,
+    }
 }
 
 // ── 助手 ─────────────────────────────────────────────────────────────
@@ -385,7 +467,10 @@ fn flatten_expr(e: &Expr, lg: &mut LabelGen, extra: &mut Vec<Stmt>) -> Expr {
 fn br_inst(cond: &str, t_label: &str, f_label: &str) -> Stmt {
     Stmt::Instruction(Instruction {
         comments: Vec::new(),
-        expr: Some(ast::call("br", vec![ast::leaf(cond), ast::leaf(t_label), ast::leaf(f_label)])),
+        expr: Some(ast::call(
+            "br",
+            vec![ast::leaf(cond), ast::leaf(t_label), ast::leaf(f_label)],
+        )),
         writes: Vec::new(),
         write_types: Vec::new(),
         arrow_left: false,
@@ -499,7 +584,11 @@ fn eval_cond(cond: Option<&Instruction>, lg: &mut LabelGen) -> (Vec<Stmt>, Strin
         None => return (Vec::new(), String::new()),
     };
     if is_cond_simple_slot(cond) {
-        let v = cond.expr.as_ref().map(|e| e.val.clone()).unwrap_or_default();
+        let v = cond
+            .expr
+            .as_ref()
+            .map(|e| e.val.clone())
+            .unwrap_or_default();
         return (Vec::new(), v);
     }
     let mut insts = Vec::new();
@@ -571,14 +660,16 @@ fn infer_inst(inst: &Instruction, tm: &mut HashMap<String, String>) {
     };
     // kv.set 成员形（3 读：base, key, val）是 void 无写槽，但 base 仍须推断为 obj/map（供 for-in / 成员访问）
     if e.op == "kv·set" && e.args.len() >= 3 && !e.args[0].val.contains('/') {
-        tm.entry(e.args[0].val.clone()).or_insert_with(|| "object".to_string());
+        tm.entry(e.args[0].val.clone())
+            .or_insert_with(|| "object".to_string());
     }
     if inst.writes.is_empty() {
         return;
     }
     for (j, w) in inst.writes.iter().enumerate() {
         if j < inst.write_types.len() && !inst.write_types[j].is_empty() {
-            tm.entry(w.clone()).or_insert_with(|| inst.write_types[j].clone());
+            tm.entry(w.clone())
+                .or_insert_with(|| inst.write_types[j].clone());
         }
     }
     if e.is_leaf() && e.lit != LitKind::LitNone {
@@ -612,7 +703,16 @@ fn infer_inst(inst: &Instruction, tm: &mut HashMap<String, String>) {
 fn is_cast_op(op: &str) -> bool {
     matches!(
         op,
-        "int8" | "int16" | "int32" | "int64" | "uint8" | "uint16" | "uint32" | "uint64" | "float32" | "float64"
+        "int8"
+            | "int16"
+            | "int32"
+            | "int64"
+            | "uint8"
+            | "uint16"
+            | "uint32"
+            | "uint64"
+            | "float32"
+            | "float64"
     )
 }
 
@@ -621,7 +721,11 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
         return String::new();
     }
     if symbol::lookup(opcode).word == "assign" {
-        return if !reads.is_empty() { slot_type(&reads[0], tm) } else { String::new() };
+        return if !reads.is_empty() {
+            slot_type(&reads[0], tm)
+        } else {
+            String::new()
+        };
     }
     if symbol::lookup(opcode).arith {
         for r in reads {
@@ -646,23 +750,30 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
     if opcode == "kv·set" {
         // 成员写 base.key = v（3 reads：base, key, value）→ base 是 obj/map。
         if reads.len() >= 3 {
-            tm.entry(reads[0].clone()).or_insert_with(|| "object".to_string());
+            tm.entry(reads[0].clone())
+                .or_insert_with(|| "object".to_string());
         }
         return String::new();
     }
     match opcode {
-        "kvlen" | "ndarray·numel" | "ndarray·dim" | "kv·listlen" | "string·len" | "string·ord" | "string·cmp" | "string·find" => {
+        "kvlen" | "ndarray·numel" | "ndarray·dim" | "kv·listlen" | "string·len" | "string·ord"
+        | "string·cmp" | "string·find" | "string·parseint" => {
             return "int64".to_string();
         }
         "ndarray·shape" => return "[]int64".to_string(),
         "kv·list" => return "[]char/utf8".to_string(),
-        "string·char" | "string·set" | "string·slice" | "string·concat" => return "char/utf32".to_string(),
+        "string·char" | "string·set" | "string·slice" | "string·concat" | "string·formatint"
+        | "string·formatuint" => return "char/utf32".to_string(),
         "random.int63" => return "int64".to_string(),
-        "random·intn" | "random.uint64" => return "uint64".to_string(),
+        "random·intn" | "random.uint64" | "string·parseuint" => return "uint64".to_string(),
         "pow" | "sqrt" | "exp" | "log" => return "float64".to_string(),
         "sign" => return "int64".to_string(),
         "abs" | "neg" | "max" | "min" => {
-            return if !reads.is_empty() { slot_type(&reads[0], tm) } else { String::new() };
+            return if !reads.is_empty() {
+                slot_type(&reads[0], tm)
+            } else {
+                String::new()
+            };
         }
         "xv·at" => {
             if !reads.is_empty() {
@@ -685,10 +796,18 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
                     tm.entry(key).or_insert(t);
                 }
             }
-            return if !reads.is_empty() { slot_type(&reads[0], tm) } else { String::new() };
+            return if !reads.is_empty() {
+                slot_type(&reads[0], tm)
+            } else {
+                String::new()
+            };
         }
         "xv·reshape" => {
-            return if !reads.is_empty() { slot_type(&reads[0], tm) } else { String::new() };
+            return if !reads.is_empty() {
+                slot_type(&reads[0], tm)
+            } else {
+                String::new()
+            };
         }
         _ => {}
     }
@@ -773,7 +892,11 @@ fn specialize_inst(inst: &mut Instruction, tm: &HashMap<String, String>) {
     if (e.op == "xv·at" || e.op == "xv·set") && !e.args.is_empty() {
         if let Some(t) = tm.get(&e.args[0].val) {
             if t == "object" {
-                e.op = if e.op == "xv·at" { "kv·get".to_string() } else { "kv·set".to_string() };
+                e.op = if e.op == "xv·at" {
+                    "kv·get".to_string()
+                } else {
+                    "kv·set".to_string()
+                };
             }
         }
     }

@@ -6,38 +6,138 @@
 //! 不纯 rwir（llm/shell/python/byteseek·run 等）留在 byteseek，依赖本库后自行叠加。
 
 pub mod http;
+pub mod internet;
 pub mod json;
 pub mod kvlayout;
 pub mod term;
 
 use crate::engine::Engine;
 use crate::ffi::*;
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
-/// rwir 注册表：(opcode, 读参数, 写参数, 签名)。
-pub const REGS: &[(&str, i32, i32, &str)] = &[
-    ("input", 1, 1, "any\nany"),
-    ("print", 1, 0, "any..."),
-    ("println", 1, 0, "any..."),
-    ("cerr", 1, 0, "any..."),
-    ("json·to", 1, 1, "any\nany"),
-    ("json·from", 1, 1, "any\nany"),
+/// 单个 rwir 的签名：读参 / 写参各自独立的 kindexpr 列表（逐槽一型，不假设同型）。
+pub struct Rwir {
+    pub rp: &'static [&'static str],
+    pub wp: &'static [&'static str],
+}
+
+/// rwir 注册表：key = 去 `/lib` 后的 opcode，value = 每槽 kindexpr（读参 rp / 写参 wp）。
+pub const REGS: &[(&str, Rwir)] = &[
+    (
+        "input",
+        Rwir {
+            rp: &["any"],
+            wp: &["any"],
+        },
+    ),
+    (
+        "print",
+        Rwir {
+            rp: &["any..."],
+            wp: &[],
+        },
+    ),
+    (
+        "println",
+        Rwir {
+            rp: &["any..."],
+            wp: &[],
+        },
+    ),
+    (
+        "cerr",
+        Rwir {
+            rp: &["any..."],
+            wp: &[],
+        },
+    ),
+    (
+        "json·to",
+        Rwir {
+            rp: &["any"],
+            wp: &["any"],
+        },
+    ),
+    (
+        "json·from",
+        Rwir {
+            rp: &["any"],
+            wp: &["any"],
+        },
+    ),
     (
         "http·call",
-        4,
-        1,
-        "[]char/utf32\n[]char/utf32\n[]char/utf32\n[]char/utf32\n[]char/utf32",
+        Rwir {
+            rp: &[
+                "[]char/utf32",
+                "[]char/utf32",
+                "[]char/utf32",
+                "[]char/utf32",
+            ],
+            wp: &["[]char/utf32"],
+        },
     ),
-    ("kvlanglayout·vet", 1, 1, "[]char/utf32\n[]char/utf32"),
-    ("kvlanglayout·format", 1, 1, "[]char/utf32\n[]char/utf32"),
-    ("kvlanglayout·layout", 1, 1, "[]char/utf32\n[]char/utf32"),
-    ("kvlanglayout·dump", 1, 1, "[]char/utf32\n[]char/utf32"),
+    (
+        "kvlanglayout·vet",
+        Rwir {
+            rp: &["[]char/utf32"],
+            wp: &["[]char/utf32"],
+        },
+    ),
+    (
+        "kvlanglayout·format",
+        Rwir {
+            rp: &["[]char/utf32"],
+            wp: &["[]char/utf32"],
+        },
+    ),
+    (
+        "kvlanglayout·layout",
+        Rwir {
+            rp: &["[]char/utf32"],
+            wp: &["[]char/utf32"],
+        },
+    ),
+    (
+        "kvlanglayout·dump",
+        Rwir {
+            rp: &["[]char/utf32"],
+            wp: &["[]char/utf32"],
+        },
+    ),
+    (
+        "internet/proc·exec",
+        Rwir {
+            rp: &["[]stringkeymap", "[]stringkeymap"],
+            wp: &["uint8"],
+        },
+    ),
 ];
 
+/// opcode → &Rwir，供注册与逐槽 kindexpr 查询。
+static RWIRMAP: OnceLock<HashMap<&'static str, &'static Rwir>> = OnceLock::new();
+pub fn rwirmap() -> &'static HashMap<&'static str, &'static Rwir> {
+    RWIRMAP.get_or_init(|| REGS.iter().map(|(op, r)| (*op, r)).collect())
+}
+
 pub fn register(eng: &Engine) {
-    for (op, nr, nw, sig) in REGS {
-        unsafe { kvlang_rwirextRegister(eng.kv, cs(op).as_ptr(), *nr, *nw, cs(sig).as_ptr()) };
+    for (op, r) in REGS {
+        let sig =
+            r.rp.iter()
+                .chain(r.wp.iter())
+                .copied()
+                .collect::<Vec<_>>()
+                .join("\n");
+        unsafe {
+            kvlang_rwirextRegister(
+                eng.kv,
+                cs(op).as_ptr(),
+                r.rp.len() as i32,
+                r.wp.len() as i32,
+                cs(&sig).as_ptr(),
+            )
+        };
     }
 }
 
@@ -56,19 +156,13 @@ pub fn is_inproc(op: &str) -> bool {
             | "kvlanglayout·format"
             | "kvlanglayout·layout"
             | "kvlanglayout·dump"
+            | "internet/proc·exec"
     )
-}
-
-/// 进程内已注册的 rwir opcode 集合（不读 /lib，直接本地过滤）。
-static REGISTERED: OnceLock<HashSet<&'static str>> = OnceLock::new();
-
-fn registered() -> &'static HashSet<&'static str> {
-    REGISTERED.get_or_init(|| REGS.iter().map(|r| r.0).collect())
 }
 
 /// 判「别人的 rwir」：opcode 是否已注册（进程内 map）。
 pub fn is_others_rwir(op: &str) -> bool {
-    registered().contains(op)
+    rwirmap().contains_key(op)
 }
 
 /// 主导驱动循环遇到就地 rwir 时分派。
@@ -79,6 +173,7 @@ pub fn dispatch(eng: &Engine, op: &str, pc: &str) {
         "json·to" => json::to(eng, pc),
         "json·from" => json::from(eng, pc),
         "http·call" => http::call(eng, pc),
+        "internet/proc·exec" => internet::exec(eng, pc),
         "kvlanglayout·vet" => {
             let out = kvlayout::vet(eng, &eng.read0(pc));
             eng.set_kv(&eng.write0(pc), &out);

@@ -11,7 +11,9 @@ fn cs(s: &str) -> std::ffi::CString {
 }
 
 fn main() {
-    let dsn = std::env::args().nth(1).unwrap_or_else(|| "redis://127.0.0.1:6379".into());
+    let dsn = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "redis://127.0.0.1:6379".into());
 
     let good = "rwfunc addup(a:int64, b:int64) -> c:int64 {\n\tadd(a, b) -> c\n}\n";
     let bad = "rwfunc broken( -> {\n\tthis is not kvlang\n";

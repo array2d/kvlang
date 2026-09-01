@@ -11,7 +11,10 @@ int kvlangBuiltinArray(kvlangFrame_t *f), kvlangBuiltinNdarrayNumel(kvlangFrame_
     kvlangBuiltinAppend(kvlangFrame_t *f), kvlangBuiltinSlice(kvlangFrame_t *f), kvlangBuiltinObj(kvlangFrame_t *f), kvlangBuiltinMap(kvlangFrame_t *f), kvlangBuiltinStringSet(kvlangFrame_t *f),
     kvlangBuiltinStringChar(kvlangFrame_t *f), kvlangBuiltinStringOrd(kvlangFrame_t *f), kvlangBuiltinStringCmp(kvlangFrame_t *f),
     kvlangBuiltinStringFind(kvlangFrame_t *f), kvlangBuiltinStringLen(kvlangFrame_t *f), kvlangBuiltinStringSlice(kvlangFrame_t *f),
-    kvlangBuiltinStringConcat(kvlangFrame_t *f), kvlangBuiltinTimeNow(kvlangFrame_t *f), kvlangBuiltinTimeSub(kvlangFrame_t *f),
+    kvlangBuiltinStringConcat(kvlangFrame_t *f),
+    kvlangBuiltinStringFormatInt(kvlangFrame_t *f), kvlangBuiltinStringFormatUint(kvlangFrame_t *f),
+    kvlangBuiltinStringParseInt(kvlangFrame_t *f), kvlangBuiltinStringParseUint(kvlangFrame_t *f),
+    kvlangBuiltinTimeNow(kvlangFrame_t *f), kvlangBuiltinTimeSub(kvlangFrame_t *f),
     kvlangBuiltinTimeAdd(kvlangFrame_t *f), kvlangBuiltinDurFrom(kvlangFrame_t *f), kvlangBuiltinDurTo(kvlangFrame_t *f),
     kvlangBuiltinDurArith(kvlangFrame_t *f), kvlangBuiltinDurCmp(kvlangFrame_t *f), kvlangBuiltinTimeCmp(kvlangFrame_t *f),
     kvlangBuiltinRandUint64(kvlangFrame_t *f), kvlangBuiltinRandInt63(kvlangFrame_t *f), kvlangBuiltinRandIntn(kvlangFrame_t *f),
@@ -159,7 +162,7 @@ char *kvlangBuiltinResolveWriteSlot(kvlangKv_t *kv, const char *frame_path, cons
         kvlangXvalue_t av; kvlangXvalueZero(&av);
         kvlangKvGetOne(kv, ak.p, &av);
         if (!kvlangXvalueNone(&av)) {
-            /* 只追显式软链接（ptr, ref==1）链；av 是 handle_call 已 resolve 好的
+            /* 只追显式指针（ptr, ref==1）链；av 是 handle_call 已 resolve 好的
              * 最终写目标路径（普通 char），直接取字符串，勿再按值读下一跳——
              * 否则会把已写数据（char）误当路径再追，导致二次调用写回旧值。 */
             kvlangXvalue_t v = av; av.data = NULL; av.len = 0;
@@ -601,6 +604,8 @@ static const struct { const char *op; kvlangBuiltinFn fn; } builtins[] = {
     {"string·set", kvlangBuiltinStringSet}, {"string·char", kvlangBuiltinStringChar}, {"string·ord", kvlangBuiltinStringOrd},
     {"string·cmp", kvlangBuiltinStringCmp}, {"string·find", kvlangBuiltinStringFind}, {"string·len", kvlangBuiltinStringLen},
     {"string·slice", kvlangBuiltinStringSlice}, {"string·concat", kvlangBuiltinStringConcat},
+    {"string·formatint", kvlangBuiltinStringFormatInt}, {"string·formatuint", kvlangBuiltinStringFormatUint},
+    {"string·parseint", kvlangBuiltinStringParseInt}, {"string·parseuint", kvlangBuiltinStringParseUint},
     {"time·now", kvlangBuiltinTimeNow}, {"time·sub", kvlangBuiltinTimeSub}, {"time·add", kvlangBuiltinTimeAdd},
     {"time/duration·nanos", kvlangBuiltinDurFrom}, {"time/duration·millis", kvlangBuiltinDurFrom},
     {"time/duration·seconds", kvlangBuiltinDurFrom}, {"time/duration·minutes", kvlangBuiltinDurFrom},
@@ -1279,6 +1284,71 @@ int kvlangBuiltinStringConcat(kvlangFrame_t *f) {
     write_char32(f, r, a + b);
     free(r); free(ra); free(rb); free_inputs(in, n);
     return 0;
+}
+
+/* ── strconv（对齐 Go strconv 的 Format/Parse，base 2..36）─────────── */
+
+static int fmt_base(uint64_t u, int base, int neg, char *buf) {
+    if (base < 2 || base > 36) base = 10;
+    char tmp[65]; int n = 0;
+    if (u == 0) tmp[n++] = '0';
+    while (u) { int d = (int)(u % (unsigned)base); tmp[n++] = d < 10 ? '0' + d : 'a' + d - 10; u /= (unsigned)base; }
+    int len = 0;
+    if (neg) buf[len++] = '-';
+    for (int i = n - 1; i >= 0; i--) buf[len++] = tmp[i];
+    return len;
+}
+
+static int write_ascii(kvlangFrame_t *f, const char *buf, int len) {
+    uint32_t r[66];
+    for (int i = 0; i < len; i++) r[i] = (uint32_t)(unsigned char)buf[i];
+    return write_char32(f, r, len);
+}
+
+int kvlangBuiltinStringFormatInt(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
+    int64_t v = kvlangXvalueAsInt64(&in[0]);
+    int base = n >= 2 ? (int)kvlangXvalueAsInt64(&in[1]) : 10;
+    uint64_t u = v < 0 ? (uint64_t)(-(v + 1)) + 1 : (uint64_t)v;
+    char buf[66]; int len = fmt_base(u, base, v < 0, buf);
+    int rc = write_ascii(f, buf, len); free_inputs(in, n);
+    return rc;
+}
+
+int kvlangBuiltinStringFormatUint(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
+    uint64_t u = kvlangXvalueAsUint64(&in[0]);
+    int base = n >= 2 ? (int)kvlangXvalueAsInt64(&in[1]) : 10;
+    char buf[66]; int len = fmt_base(u, base, 0, buf);
+    int rc = write_ascii(f, buf, len); free_inputs(in, n);
+    return rc;
+}
+
+int kvlangBuiltinStringParseInt(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
+    char *s = kvlangXvalueValueString(&in[0]);
+    int base = n >= 2 ? (int)kvlangXvalueAsInt64(&in[1]) : 10;
+    char *end = NULL; long long v = strtoll(s, &end, base);
+    int bad = s[0] == '\0' || end == s || *end != '\0';
+    free(s);
+    if (bad) { free_inputs(in, n); return set_err(f, "ValueError: string.parseint: invalid syntax"); }
+    kvlangXvalue_t e; kvlangXvalueNewInt64(&e, (int64_t)v);
+    int rc = write_result(f, &e); kvlangXvalueFree(&e); free_inputs(in, n);
+    return rc;
+}
+
+int kvlangBuiltinStringParseUint(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
+    char *s = kvlangXvalueValueString(&in[0]);
+    int base = n >= 2 ? (int)kvlangXvalueAsInt64(&in[1]) : 10;
+    char *end = NULL; unsigned long long v = strtoull(s, &end, base);
+    int bad = s[0] == '\0' || end == s || *end != '\0';
+    free(s);
+    if (bad) { free_inputs(in, n); return set_err(f, "ValueError: string.parseuint: invalid syntax"); }
+    uint64_t u = (uint64_t)v; uint8_t r[8]; memcpy(r, &u, 8);
+    kvlangXvalue_t e; kvlangXvalueNewTlv(&e, KVSPACE_KIND_UINT64, r, 8, 1);
+    int rc = write_result(f, &e); kvlangXvalueFree(&e); free_inputs(in, n);
+    return rc;
 }
 
 /* ── time / duration ──────────────────────────────────────────────── */

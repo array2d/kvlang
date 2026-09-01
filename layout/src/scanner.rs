@@ -14,8 +14,8 @@ pub struct Pos {
 pub struct Diagnostic {
     pub pos: Pos,
     pub message: String,
-    pub warn: bool,   // true = 警告
-    pub info: bool,   // true = 提示（优先级高于 warn）
+    pub warn: bool, // true = 警告
+    pub info: bool, // true = 提示（优先级高于 warn）
     pub source: String,
     pub src_file: String,
     pub src_name: String,
@@ -36,9 +36,15 @@ impl Diagnostic {
             self.src_name.as_str()
         };
         if !src.is_empty() {
-            format!("{kind}: {src}:{}:{}: {}", self.pos.line, self.pos.col, self.message)
+            format!(
+                "{kind}: {src}:{}:{}: {}",
+                self.pos.line, self.pos.col, self.message
+            )
         } else {
-            format!("{kind}: {}:{}: {}", self.pos.line, self.pos.col, self.message)
+            format!(
+                "{kind}: {}:{}: {}",
+                self.pos.line, self.pos.col, self.message
+            )
         }
     }
 }
@@ -114,7 +120,12 @@ pub struct Token {
 
 impl Token {
     pub fn eof(pos: Pos) -> Token {
-        Token { kind: Kind::EOF, value: String::new(), pos, quote: 0 }
+        Token {
+            kind: Kind::EOF,
+            value: String::new(),
+            pos,
+            quote: 0,
+        }
     }
 }
 
@@ -202,7 +213,13 @@ fn scan_triple_quoted(src: &[u8], mut i: usize) -> (String, usize) {
 }
 
 /// 跨行字面量消费后同步 line/line_start（字面量内部换行不产生 Newline Token，但行号需前进）。
-fn advance_line_count(src: &[u8], start: usize, end: usize, line: &mut i32, line_start: &mut usize) {
+fn advance_line_count(
+    src: &[u8],
+    start: usize,
+    end: usize,
+    line: &mut i32,
+    line_start: &mut usize,
+) {
     for k in start..end {
         if src[k] == b'\n' {
             *line += 1;
@@ -243,7 +260,10 @@ fn is_token_delim(c: u8) -> bool {
 }
 
 fn is_abs_path_start(c: u8) -> bool {
-    (b'a'..=b'z').contains(&c) || (b'A'..=b'Z').contains(&c) || (b'0'..=b'9').contains(&c) || c == b'_'
+    (b'a'..=b'z').contains(&c)
+        || (b'A'..=b'Z').contains(&c)
+        || (b'0'..=b'9').contains(&c)
+        || c == b'_'
 }
 
 /// 将整个源扫描为平坦 Token 流，末尾附 EOF。
@@ -349,7 +369,12 @@ pub fn scan(src: &str) -> Vec<Token> {
         // 三引号字符串 """...""" — 跨行，转义（对标 Python triple-quote）
         if c == b'"' && i + 2 < src.len() && src[i + 1] == b'"' && src[i + 2] == b'"' {
             let (val, next) = scan_triple_quoted(src, i);
-            tokens.push(Token { kind: Kind::Literal, value: val, pos: p, quote: b'"' });
+            tokens.push(Token {
+                kind: Kind::Literal,
+                value: val,
+                pos: p,
+                quote: b'"',
+            });
             advance_line_count(src, i, next, &mut line, &mut line_start);
             i = next;
             continue;
@@ -359,20 +384,35 @@ pub fn scan(src: &str) -> Vec<Token> {
         if c == b'\'' || c == b'"' {
             let (val, next) = scan_quoted(src, i, c);
             let quote = if c == b'"' { b'"' } else { 0 };
-            tokens.push(Token { kind: Kind::Literal, value: val, pos: p, quote });
+            tokens.push(Token {
+                kind: Kind::Literal,
+                value: val,
+                pos: p,
+                quote,
+            });
             i = next;
             continue;
         }
 
         // 左箭头 <-
         if c == b'<' && i + 1 < src.len() && src[i + 1] == b'-' {
-            tokens.push(Token { kind: Kind::Arrow, value: "<-".to_string(), pos: p, quote: 0 });
+            tokens.push(Token {
+                kind: Kind::Arrow,
+                value: "<-".to_string(),
+                pos: p,
+                quote: 0,
+            });
             i += 2;
             continue;
         }
         // 右箭头 ->
         if c == b'-' && i + 1 < src.len() && src[i + 1] == b'>' {
-            tokens.push(Token { kind: Kind::Arrow, value: "->".to_string(), pos: p, quote: 0 });
+            tokens.push(Token {
+                kind: Kind::Arrow,
+                value: "->".to_string(),
+                pos: p,
+                quote: 0,
+            });
             i += 2;
             continue;
         }
@@ -380,7 +420,10 @@ pub fn scan(src: &str) -> Vec<Token> {
         // 双字符算子
         if i + 1 < src.len() {
             let two = &src[i..i + 2];
-            if symbol::scanner_two_char_ops().iter().any(|op| op.as_bytes() == two) {
+            if symbol::scanner_two_char_ops()
+                .iter()
+                .any(|op| op.as_bytes() == two)
+            {
                 tokens.push(Token {
                     kind: Kind::Ident,
                     value: String::from_utf8_lossy(two).into_owned(),
@@ -394,7 +437,12 @@ pub fn scan(src: &str) -> Vec<Token> {
 
         // 赋值算子 =
         if c == b'=' {
-            tokens.push(Token { kind: Kind::Arrow, value: "=".to_string(), pos: p, quote: 0 });
+            tokens.push(Token {
+                kind: Kind::Arrow,
+                value: "=".to_string(),
+                pos: p,
+                quote: 0,
+            });
             i += 1;
             continue;
         }
@@ -440,7 +488,12 @@ pub fn scan(src: &str) -> Vec<Token> {
                     quote: 0,
                 });
             } else {
-                tokens.push(Token { kind: Kind::Ident, value: "/".to_string(), pos: p, quote: 0 });
+                tokens.push(Token {
+                    kind: Kind::Ident,
+                    value: "/".to_string(),
+                    pos: p,
+                    quote: 0,
+                });
                 i += 1;
             }
             continue;
@@ -448,7 +501,12 @@ pub fn scan(src: &str) -> Vec<Token> {
 
         // 成员分隔符 ·（U+00B7，2 字节）
         if c == 0xC2 && i + 1 < src.len() && src[i + 1] == 0xB7 {
-            tokens.push(Token { kind: Kind::Dot, value: "·".to_string(), pos: p, quote: 0 });
+            tokens.push(Token {
+                kind: Kind::Dot,
+                value: "·".to_string(),
+                pos: p,
+                quote: 0,
+            });
             i += 2;
             prev_newline = false;
             continue;
@@ -456,7 +514,12 @@ pub fn scan(src: &str) -> Vec<Token> {
 
         // 单字符标点
         if let Some(k) = single_char_token(c) {
-            tokens.push(Token { kind: k, value: (c as char).to_string(), pos: p, quote: 0 });
+            tokens.push(Token {
+                kind: k,
+                value: (c as char).to_string(),
+                pos: p,
+                quote: 0,
+            });
             i += 1;
             continue;
         }
@@ -474,9 +537,16 @@ pub fn scan(src: &str) -> Vec<Token> {
         }
 
         // Unicode 符号算子
-        if let Some(op) = symbol::unicode_ops().into_iter().find(|op| src[i..].starts_with(op.as_bytes()))
+        if let Some(op) = symbol::unicode_ops()
+            .into_iter()
+            .find(|op| src[i..].starts_with(op.as_bytes()))
         {
-            tokens.push(Token { kind: Kind::Ident, value: op.clone(), pos: p, quote: 0 });
+            tokens.push(Token {
+                kind: Kind::Ident,
+                value: op.clone(),
+                pos: p,
+                quote: 0,
+            });
             i += op.len();
             continue;
         }
@@ -522,9 +592,19 @@ pub fn scan(src: &str) -> Vec<Token> {
         }
         let word = String::from_utf8_lossy(&src[start..i]).into_owned();
         if let Some(k) = keyword(&word) {
-            tokens.push(Token { kind: k, value: word, pos: p, quote: 0 });
+            tokens.push(Token {
+                kind: k,
+                value: word,
+                pos: p,
+                quote: 0,
+            });
         } else {
-            tokens.push(Token { kind: Kind::Ident, value: word, pos: p, quote: 0 });
+            tokens.push(Token {
+                kind: Kind::Ident,
+                value: word,
+                pos: p,
+                quote: 0,
+            });
         }
     }
 

@@ -15,12 +15,24 @@ fn find_entry(kv: &mut Kv, prefix: &str, pkg: &str) -> String {
         if base.ends_with(".src") {
             continue;
         }
-        let full = if pkg.is_empty() { base.to_string() } else { format!("{pkg}·{base}") };
+        let full = if pkg.is_empty() {
+            base.to_string()
+        } else {
+            format!("{pkg}·{base}")
+        };
         if base == "init" {
             return full;
         }
-        let next_pkg = if pkg.is_empty() { base.to_string() } else { format!("{pkg}/{base}") };
-        let sub = if c.ends_with('/') { format!("{prefix}{base}/") } else { format!("{prefix}{base}·") };
+        let next_pkg = if pkg.is_empty() {
+            base.to_string()
+        } else {
+            format!("{pkg}/{base}")
+        };
+        let sub = if c.ends_with('/') {
+            format!("{prefix}{base}/")
+        } else {
+            format!("{prefix}{base}·")
+        };
         let entry = find_entry(kv, &sub, &next_pkg);
         if !entry.is_empty() {
             return entry;
@@ -35,7 +47,10 @@ fn main() {
         eprintln!("usage: kvlanglayout <file.kv> [dsn]");
         std::process::exit(1);
     }
-    let dsn = args.get(2).map(String::as_str).unwrap_or("redis://127.0.0.1:6379");
+    let dsn = args
+        .get(2)
+        .map(String::as_str)
+        .unwrap_or("redis://127.0.0.1:6379");
     let src = fs::read_to_string(&args[1]).expect("read file");
 
     let mut kv = Kv::conn(dsn);

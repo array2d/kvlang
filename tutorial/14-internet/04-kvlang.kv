@@ -1,0 +1,11 @@
+# internet/proc·exec 启动 kvlang 自身：子进程继承 KVSPACE，与父共享同一 redis
+#   父作为子的父进程，同步等待并取回退出码
+# 期望输出:
+#   kvlang in kvlang
+#   exit= 0
+rwfunc test() -> () {
+	noenv = map()
+	args = {"kvlang", "-c", "print(\"kvlang in kvlang\")"}
+	internet/proc·exec(args, noenv) -> code
+	println("exit=", code)
+}

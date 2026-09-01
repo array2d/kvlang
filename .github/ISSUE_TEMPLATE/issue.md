@@ -14,6 +14,7 @@ labels: []
 - 3-tutorial 教程 / 回归用例
 - 4-rwirext  扩展运行时（框架 + term / json / op-gpu / llm / agent）
 - 5-formal   形式化验证（不变量 / proof obligation / 运行时自检 / 自指验证）
+- 6-internet 真实机器与进程表示（/internet 名册 + proc/fs OS 工具箱 + @ 扩展世界 + runtime-rs vthread 执行器路由）
 - other      其他（perf / docs / infra）
 -->
 

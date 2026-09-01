@@ -69,7 +69,11 @@ pub fn kindexpr(data: &[u8]) -> String {
         return String::new();
     }
     let h = ffi::decode_head(data);
-    let end = h.kindexpr.iter().position(|&b| b == 0).unwrap_or(h.kindexpr.len());
+    let end = h
+        .kindexpr
+        .iter()
+        .position(|&b| b == 0)
+        .unwrap_or(h.kindexpr.len());
     String::from_utf8_lossy(&h.kindexpr[..end]).into_owned()
 }
 
@@ -106,7 +110,7 @@ pub fn body<'a>(data: &'a [u8], h: &ffi::kvspaceHead_t) -> &'a [u8] {
     &data[off..off + len]
 }
 
-/// 软链接目标（Ptr 的 body 即目标路径）。
+/// 指针目标 key（Ptr 的 body 即目标 key 路径；head 去 * 为目标完整 kindexpr）。
 pub fn ptr_target(data: &[u8]) -> String {
     let h = ffi::decode_head(data);
     String::from_utf8_lossy(body(data, &h)).into_owned()
@@ -118,7 +122,7 @@ pub fn value_string(data: &[u8]) -> String {
     String::from_utf8_lossy(body(data, &h)).into_owned()
 }
 
-/// 把 XValue TLV 解码成可读文本，形如 "kind:value"（软链接 "→target:kind"、空 "None"）。
+/// 把 XValue TLV 解码成可读文本，形如 "kind:value"（指针 "→target:kind"、空 "None"）。
 /// 对齐 kvspace CLI 的 format_value/plain，供 dump 审查 lower 后的 /lib。
 pub fn display(data: &[u8]) -> String {
     if data.is_empty() {
@@ -137,17 +141,31 @@ pub fn display(data: &[u8]) -> String {
 }
 
 fn le_u32(b: &[u8]) -> u32 {
-    b.iter().take(4).enumerate().fold(0, |a, (i, &x)| a | ((x as u32) << (8 * i)))
+    b.iter()
+        .take(4)
+        .enumerate()
+        .fold(0, |a, (i, &x)| a | ((x as u32) << (8 * i)))
 }
 fn le_u64(b: &[u8]) -> u64 {
-    b.iter().take(8).enumerate().fold(0u64, |a, (i, &x)| a | ((x as u64) << (8 * i)))
+    b.iter()
+        .take(8)
+        .enumerate()
+        .fold(0u64, |a, (i, &x)| a | ((x as u64) << (8 * i)))
 }
 fn fmt_float(v: f64) -> String {
     let s = format!("{v}");
-    if s.contains('.') { s } else { format!("{s}.0") }
+    if s.contains('.') {
+        s
+    } else {
+        format!("{s}.0")
+    }
 }
 fn count_names(b: &[u8]) -> usize {
-    if b.len() < 4 { 0 } else { le_u32(b) as usize }
+    if b.len() < 4 {
+        0
+    } else {
+        le_u32(b) as usize
+    }
 }
 fn arr<const N: usize>(b: &[u8]) -> [u8; N] {
     let mut a = [0u8; N];
@@ -170,12 +188,18 @@ fn plain_value(k: &str, b: &[u8]) -> String {
         "float32" => fmt_float(f32::from_le_bytes(arr(b)) as f64),
         "float64" => fmt_float(f64::from_le_bytes(arr(b))),
         "char/utf8" | "char/ascii" => String::from_utf8_lossy(b).into_owned(),
-        "char/utf32" => b.chunks(4).map(|c| char::from_u32(le_u32(c)).unwrap_or('\u{FFFD}')).collect(),
+        "char/utf32" => b
+            .chunks(4)
+            .map(|c| char::from_u32(le_u32(c)).unwrap_or('\u{FFFD}'))
+            .collect(),
         "index" => format!("({})", count_names(b)),
         // kvlang 自有 kind：body = [2B nr][2B nw][sig]；槽值/调用目标 nr=nw=0，取 sig 即可。
         "rwir" | "rwir|rwfunc" | "defrwir" | "defrwfunc" => {
             let (nr, nw) = if b.len() >= 4 {
-                (u16::from_le_bytes([b[0], b[1]]), u16::from_le_bytes([b[2], b[3]]))
+                (
+                    u16::from_le_bytes([b[0], b[1]]),
+                    u16::from_le_bytes([b[2], b[3]]),
+                )
             } else {
                 (0, 0)
             };

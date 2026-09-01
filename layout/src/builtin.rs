@@ -6,7 +6,10 @@ use super::ffi;
 // ── 数值 kind 工具 ───────────────────────────────────────────────────
 
 pub fn is_int_kind(k: &str) -> bool {
-    matches!(k, "int8" | "int16" | "int32" | "int64" | "uint8" | "uint16" | "uint32" | "uint64")
+    matches!(
+        k,
+        "int8" | "int16" | "int32" | "int64" | "uint8" | "uint16" | "uint32" | "uint64"
+    )
 }
 
 pub fn is_float_kind(k: &str) -> bool {
@@ -35,7 +38,11 @@ pub fn wider_int_kind(ak: &str, bk: &str) -> String {
     let (aw, bw) = (int_kind_width(ak), int_kind_width(bk));
     let (au, bu) = (is_unsigned_kind(ak), is_unsigned_kind(bk));
     if au == bu {
-        return if aw >= bw { ak.to_string() } else { bk.to_string() };
+        return if aw >= bw {
+            ak.to_string()
+        } else {
+            bk.to_string()
+        };
     }
     let w = aw.max(bw);
     match w {
@@ -115,11 +122,31 @@ pub fn op_kind(op: &str, k: &str) -> String {
 pub fn num_op(opcode: &str) -> bool {
     matches!(
         opcode,
-        "add" | "sub" | "mul" | "div" | "neg" | "mod"
-            | "bitand" | "bitor" | "bitxor" | "shl" | "shr"
-            | "eq" | "neq" | "lt" | "le" | "gt" | "ge"
-            | "pow" | "sqrt" | "exp" | "log"
-            | "abs" | "sign" | "max" | "min"
+        "add"
+            | "sub"
+            | "mul"
+            | "div"
+            | "neg"
+            | "mod"
+            | "bitand"
+            | "bitor"
+            | "bitxor"
+            | "shl"
+            | "shr"
+            | "eq"
+            | "neq"
+            | "lt"
+            | "le"
+            | "gt"
+            | "ge"
+            | "pow"
+            | "sqrt"
+            | "exp"
+            | "log"
+            | "abs"
+            | "sign"
+            | "max"
+            | "min"
     )
 }
 

@@ -5,8 +5,8 @@
 static char *g_rwir_opcodes[256];
 static int g_rwir_n = 0;
 
-/* 共享队列根：第一个 rwir 的 /lib/<opcode>/todo 绝对路径。 */
-static char *g_first_todo = NULL;
+/* 共享队列根：第一个 rwir 的 /lib/<opcode>/vids 绝对路径。 */
+static char *g_first_vids = NULL;
 
 bool isothersrwir(const char *opcode) {
   if (opcode[0] == '/')
@@ -17,24 +17,30 @@ bool isothersrwir(const char *opcode) {
   return false;
 }
 
-/* 建立 rwir 的 todo 队列：第一个 rwir 是真实 strkeymap，后续是 Ptr 指向第一个。 */
-static void register_todo(kvlangKv_t *k, const char *opcode) {
+/* 建立 rwir 的 vids 队列：第一个 rwir 是真实 strkeymap，后续是 Ptr 指向第一个。
+ * 幂等：vids 已存在则跳过——否则脏 kvspace 上重复注册时，Set 经路径穿透会把首队列
+ * 改成自指 Ptr，令 resolve_path 死循环（父子 kvlang 共享同一 redis 的挂起根因）。 */
+static void register_vids(kvlangKv_t *k, const char *opcode) {
   char *base = kvlangKeytreeRwir(opcode);
   kvlangStrbuf_t tk; kvlangStrbufInit(&tk);
-  kvlangStrbufPuts(&tk, base); kvlangStrbufPuts(&tk, "/todo");
-  kvlangXvalue_t v; kvlangXvalueZero(&v);
-  if (g_first_todo == NULL) {
-    g_first_todo = strdup(tk.p);
+  kvlangStrbufPuts(&tk, base); kvlangStrbufPuts(&tk, "/vids");
+  bool first = (g_first_vids == NULL);
+  if (first) g_first_vids = strdup(tk.p);
+  kvlangXvalue_t cur; kvlangXvalueZero(&cur);
+  bool exists = (kvlangKvGetOne(k, tk.p, &cur) == 0 && !kvlangXvalueNone(&cur));
+  kvlangXvalueFree(&cur);
+  if (!exists) {
+    kvlangXvalue_t v; kvlangXvalueZero(&v);
     int32_t dims[1] = {0};
-    kvlangXvalueNewTlvDims(&v, KVSPACE_KIND_MAP, (const uint8_t *)"", 0, dims, 1);
-  } else {
-    int32_t dims[1] = {0};
-    kvlangXvalueNewPtrDims(&v, KVSPACE_KIND_MAP, g_first_todo, dims, 1);
+    if (first)
+      kvlangXvalueNewTlvDims(&v, KVSPACE_KIND_MAP, (const uint8_t *)"", 0, dims, 1);
+    else
+      kvlangXvalueNewPtr(&v, KVSPACE_KIND_MAP, g_first_vids);
+    kvlangKvPair_t p = {tk.p, v};
+    char err[256];
+    kvlangKvSet(k, &p, 1, err, sizeof err);
+    kvlangXvalueFree(&v);
   }
-  kvlangKvPair_t p = {tk.p, v};
-  char err[256];
-  kvlangKvSet(k, &p, 1, err, sizeof err);
-  kvlangXvalueFree(&v);
   kvlangStrbufFree(&tk);
   free(base);
 }
@@ -56,8 +62,8 @@ int kvlang_rwirextRegister(void *kvspace, const char *opcode, int32_t nr,
       return rc;
   if (g_rwir_n < 256)
     g_rwir_opcodes[g_rwir_n++] = strdup(opcode);
-  /* 建立共享 todo 队列（第一个真实 strkeymap，后续 Ptr 指向它）。 */
-  register_todo(&k, opcode);
+  /* 建立共享 vids 队列（第一个真实 strkeymap，后续 Ptr 指向它）。 */
+  register_vids(&k, opcode);
   return rc;
 }
 

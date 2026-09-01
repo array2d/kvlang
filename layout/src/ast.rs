@@ -210,11 +210,11 @@ impl fmt::Display for LitKind {
 
 #[derive(Clone)]
 pub struct Expr {
-    pub op: String,       // 算子/函数名（"" = 叶节点）
-    pub args: Vec<Expr>,  // 操作数（叶节点为空）
-    pub val: String,      // 叶节点值
-    pub quote: u8,        // 0=非字符串, '"'=双引号, '`'=反引号
-    pub lit: LitKind,     // 字面量类型（仅叶节点有意义）
+    pub op: String,      // 算子/函数名（"" = 叶节点）
+    pub args: Vec<Expr>, // 操作数（叶节点为空）
+    pub val: String,     // 叶节点值
+    pub quote: u8,       // 0=非字符串, '"'=双引号, '`'=反引号
+    pub lit: LitKind,    // 字面量类型（仅叶节点有意义）
 }
 
 impl Expr {
@@ -224,35 +224,83 @@ impl Expr {
 }
 
 pub fn leaf(v: &str) -> Expr {
-    Expr { op: String::new(), args: Vec::new(), val: v.to_string(), quote: 0, lit: LitKind::LitNone }
+    Expr {
+        op: String::new(),
+        args: Vec::new(),
+        val: v.to_string(),
+        quote: 0,
+        lit: LitKind::LitNone,
+    }
 }
 
 pub fn str_lit(v: &str) -> Expr {
-    Expr { op: String::new(), args: Vec::new(), val: v.to_string(), quote: b'"', lit: LitKind::LitString }
+    Expr {
+        op: String::new(),
+        args: Vec::new(),
+        val: v.to_string(),
+        quote: b'"',
+        lit: LitKind::LitString,
+    }
 }
 
 pub fn raw_str(v: &str) -> Expr {
-    Expr { op: String::new(), args: Vec::new(), val: v.to_string(), quote: b'`', lit: LitKind::LitRawString }
+    Expr {
+        op: String::new(),
+        args: Vec::new(),
+        val: v.to_string(),
+        quote: b'`',
+        lit: LitKind::LitRawString,
+    }
 }
 
 pub fn int_lit(v: &str) -> Expr {
-    Expr { op: String::new(), args: Vec::new(), val: v.to_string(), quote: 0, lit: LitKind::LitInt }
+    Expr {
+        op: String::new(),
+        args: Vec::new(),
+        val: v.to_string(),
+        quote: 0,
+        lit: LitKind::LitInt,
+    }
 }
 
 pub fn float_lit(v: &str) -> Expr {
-    Expr { op: String::new(), args: Vec::new(), val: v.to_string(), quote: 0, lit: LitKind::LitFloat }
+    Expr {
+        op: String::new(),
+        args: Vec::new(),
+        val: v.to_string(),
+        quote: 0,
+        lit: LitKind::LitFloat,
+    }
 }
 
 pub fn bool_lit(v: &str) -> Expr {
-    Expr { op: String::new(), args: Vec::new(), val: v.to_string(), quote: 0, lit: LitKind::LitBool }
+    Expr {
+        op: String::new(),
+        args: Vec::new(),
+        val: v.to_string(),
+        quote: 0,
+        lit: LitKind::LitBool,
+    }
 }
 
 pub fn none_lit() -> Expr {
-    Expr { op: String::new(), args: Vec::new(), val: "None".to_string(), quote: 0, lit: LitKind::LitNil }
+    Expr {
+        op: String::new(),
+        args: Vec::new(),
+        val: "None".to_string(),
+        quote: 0,
+        lit: LitKind::LitNil,
+    }
 }
 
 pub fn call(op: &str, args: Vec<Expr>) -> Expr {
-    Expr { op: op.to_string(), args, val: String::new(), quote: 0, lit: LitKind::LitNone }
+    Expr {
+        op: op.to_string(),
+        args,
+        val: String::new(),
+        quote: 0,
+        lit: LitKind::LitNone,
+    }
 }
 
 impl Expr {
@@ -300,7 +348,7 @@ impl fmt::Display for Expr {
 #[derive(Clone, Default)]
 pub struct Instruction {
     pub comments: Vec<String>,
-    pub expr: Option<Expr>,  // None = 空指令
+    pub expr: Option<Expr>, // None = 空指令
     pub writes: Vec<String>,
     pub write_types: Vec<String>,
     pub arrow_left: bool, // true = 写槽在左（<- 或 =）
@@ -336,7 +384,13 @@ impl Instruction {
         let reads: Vec<String> = e
             .args
             .iter()
-            .map(|a| if a.quote != 0 { format!("\"{}", a.val) } else { a.val.clone() })
+            .map(|a| {
+                if a.quote != 0 {
+                    format!("\"{}", a.val)
+                } else {
+                    a.val.clone()
+                }
+            })
             .collect();
         (opcode, reads)
     }
@@ -448,7 +502,11 @@ pub struct IfStmt {
 
 impl fmt::Display for IfStmt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let cond = self.cond.as_ref().map(|c| c.to_string()).unwrap_or_default();
+        let cond = self
+            .cond
+            .as_ref()
+            .map(|c| c.to_string())
+            .unwrap_or_default();
         let mut r = format!("if ({cond}) {{\n");
         for st in &self.then_ {
             r.push_str(&format!("\t{st}\n"));
@@ -492,7 +550,11 @@ pub struct WhileStmt {
 
 impl fmt::Display for WhileStmt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let cond = self.cond.as_ref().map(|c| c.to_string()).unwrap_or_default();
+        let cond = self
+            .cond
+            .as_ref()
+            .map(|c| c.to_string())
+            .unwrap_or_default();
         let mut r = format!("while ({cond}) {{\n");
         for st in &self.body {
             r.push_str(&format!("\t{st}\n"));

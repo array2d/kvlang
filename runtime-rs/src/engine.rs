@@ -17,18 +17,22 @@ pub struct Engine {
 
 impl Engine {
     // ── kvspace 读写（绝对路径，char/utf8 与 char/utf32 编解码）─────────
-    pub fn set_kv(&self, key: &str, val: &str) {
+    /// 通用 TLV 编码写入：任意 kind + body 字节 + dims（空=标量 ndim0）。
+    /// set_kv 与各 rwir 的类型化输出共用，避免每种 kind 一个专用写函数。
+    pub fn set_tlv_encoded(&self, key: &str, kind: &str, raw: &[u8], dims: &[i32]) {
         unsafe {
-            let utf32: Vec<u32> = val.chars().map(|c| c as u32).collect();
-            let raw: Vec<u8> = utf32.iter().flat_map(|v| v.to_le_bytes()).collect();
-            let dims = [utf32.len() as i32];
+            let (dptr, ndim) = if dims.is_empty() {
+                (std::ptr::null(), 0)
+            } else {
+                (dims.as_ptr(), dims.len() as i32)
+            };
             let (mut buf, mut len) = (null_mut(), 0u32);
             kvspaceTlvEncode(
-                cs("char/utf32").as_ptr(),
+                cs(kind).as_ptr(),
                 raw.as_ptr(),
                 raw.len() as u32,
-                dims.as_ptr(),
-                1,
+                dptr,
+                ndim,
                 &mut buf,
                 &mut len,
             );
@@ -47,6 +51,11 @@ impl Engine {
             );
             kvspaceBytesFree(buf, len);
         }
+    }
+    pub fn set_kv(&self, key: &str, val: &str) {
+        let utf32: Vec<u32> = val.chars().map(|c| c as u32).collect();
+        let raw: Vec<u8> = utf32.iter().flat_map(|v| v.to_le_bytes()).collect();
+        self.set_tlv_encoded(key, "char/utf32", &raw, &[utf32.len() as i32]);
     }
     pub fn get_kv(&self, key: &str) -> String {
         unsafe {
