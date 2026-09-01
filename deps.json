@@ -1,7 +1,7 @@
 {
-  "kvspace": "v0.2.3",
-  "kvspace-c": "v0.2.3",
-  "kvspace-durable": "v0.2.3",
+  "kvspace": "v0.2.4",
+  "kvspace-c": "v0.2.4",
+  "kvspace-durable": "v0.2.4",
   "blockmalloc": "v0.1.4",
   "slotsboxmalloc": "v0.1.4"
 }
