@@ -171,6 +171,7 @@ fn boot(dsn: &str) -> Engine {
         rt,
         kv,
         dsn: dsn.to_string(),
+        ext: None,
     };
     eng.register();
     eng.layout_stdlib();
@@ -215,7 +216,7 @@ fn drive(eng: &Engine, funcname: &str) {
         };
 
         // 外部扩展 rwir（如 numpy）：handoff；native/控制帧/帧结束：写回 pc 让 runtime 继续。
-        if !stop_op.is_empty() && unsafe { kvlang_rwirextIsExt(kv, cs(&stop_op).as_ptr()) } != 0 {
+        if !stop_op.is_empty() && rwir::is_others_rwir(&stop_op) {
             if unsafe { kvlang_rwirextHandoff(kv, cs(&vid).as_ptr(), cs(&c).as_ptr()) } != 0 {
                 eprintln!("kvlang: handoff {stop_op} 失败 @ {c}");
                 std::process::exit(1);

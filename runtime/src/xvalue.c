@@ -379,6 +379,18 @@ void kvlangXvalueNewPtr(kvlangXvalue_t *v, const char *kind, const char *target,
     v->data = kvlangXvalueEncodeTlv(kind, 1, (const uint8_t *)target, (uint32_t)strlen(target), al, &len);
     v->len = len;
 }
+
+void kvlangXvalueNewPtrDims(kvlangXvalue_t *v, const char *kind, const char *target,
+                            const int32_t *dims, int32_t ndim) {
+    uint8_t *tmp = NULL; uint32_t tl = 0;
+    if (kvspaceTlvEncodePtr(kind, (const uint8_t *)target, (uint32_t)strlen(target), dims, ndim, &tmp, &tl) != 0 || !tmp) {
+        v->data = NULL; v->len = 0; return;
+    }
+    uint8_t *buf = malloc(tl);
+    memcpy(buf, tmp, tl);
+    kvspaceBytesFree(tmp, tl);
+    v->data = buf; v->len = tl;
+}
 void kvlangXvalueNewRwir(kvlangXvalue_t *v, int32_t nr, int32_t nw, const char *sig) {
     size_t sl = strlen(sig);
     uint8_t *raw = malloc(4 + sl);

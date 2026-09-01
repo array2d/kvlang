@@ -11,6 +11,8 @@ pub struct Engine {
     pub rt: *mut c_void, // kvlang runtime 句柄
     pub kv: *mut c_void, // kvspace 句柄（自持，同时传给 rwirext）
     pub dsn: String,     // kvspace DSN（layout rwir 需要）
+    /// 外部 rwir 就地处理器（返回 true=已处理）。run_fn 遇非纯净 rwir 时委托；None 则报未知。
+    pub ext: Option<fn(&Engine, op: &str, pc: &str) -> bool>,
 }
 
 impl Engine {
@@ -166,22 +168,29 @@ impl Engine {
 
     /// 启动时把内嵌 stdlib（lib/**/*.kv）layout 进 kvspace，使其 rwfunc 可解析。
     /// 幂等、best-effort：坏了只 warn 不中断（tutorial 多不依赖 stdlib）。
-    pub fn layout_stdlib(&self) {
+    /// 把单段内存源码 layout 进 kvspace，返回是否成功（失败打印错误）。
+    pub fn layout_src(&self, name: &str, src: &str) -> bool {
         let mut err = [0u8; 4096];
+        let rc = unsafe {
+            kvlangLayoutCode(
+                cs(src).as_ptr(),
+                cs(&self.dsn).as_ptr(),
+                std::ptr::null_mut(),
+                0,
+                err.as_mut_ptr() as *mut c_char,
+                err.len() as u32,
+            )
+        };
+        if rc != 0 {
+            eprintln!("kvlang: layout {name} 失败: {}", cbuf(&err));
+            return false;
+        }
+        true
+    }
+
+    pub fn layout_stdlib(&self) {
         for (name, src) in crate::stdlib::EMBEDDED_KV {
-            let rc = unsafe {
-                kvlangLayoutCode(
-                    cs(src).as_ptr(),
-                    cs(&self.dsn).as_ptr(),
-                    std::ptr::null_mut(),
-                    0,
-                    err.as_mut_ptr() as *mut c_char,
-                    err.len() as u32,
-                )
-            };
-            if rc != 0 {
-                eprintln!("kvlang: stdlib {name} layout 失败: {}", cbuf(&err));
-            }
+            self.layout_src(name, src);
         }
     }
 
@@ -241,7 +250,17 @@ impl Engine {
             let c = take(pc);
             let params = take(unsafe { kvlang_rwirextParams(self.kv, cs(&c).as_ptr()) });
             let op = params.lines().next().unwrap_or("").to_string();
-            rwir::dispatch(self, &op, &c);
+            let handled = if rwir::is_inproc(&op) {
+                rwir::dispatch(self, &op, &c);
+                true
+            } else if let Some(f) = self.ext {
+                f(self, &op, &c)
+            } else {
+                false
+            };
+            if !handled {
+                eprintln!("kvlang: 未知 rwir: {op} @ {c}");
+            }
             let nxt = take(unsafe { kvlang_rwirextNextPc(cs(&c).as_ptr()) });
             self.set_kv(&vpc, &nxt);
         }

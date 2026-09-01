@@ -153,8 +153,7 @@ unsafe extern "C" {
         idx: c_int,
     ) -> *mut c_char;
     pub fn kvlang_rwirextNextPc(pc: *const c_char) -> *mut c_char;
-    // IsExt/Handoff：非己方处理的外部 rwir（如 numpy）移交给对应扩展进程。
-    pub fn kvlang_rwirextIsExt(kvspace: *mut c_void, opcode: *const c_char) -> c_int;
+    // Handoff：非己方处理的外部 rwir（如 numpy）移交给对应扩展进程。
     pub fn kvlang_rwirextHandoff(
         kvspace: *mut c_void,
         vtid: *const c_char,
@@ -186,6 +185,14 @@ unsafe extern "C" {
         err_cap: u32,
     ) -> c_int;
     pub fn kvlangLayoutVet(src: *const c_char, err: *mut c_char, err_cap: u32) -> c_int;
+    pub fn kvlangLayoutDump(
+        lib: *const c_char,
+        dsn: *const c_char,
+        out: *mut c_char,
+        out_cap: u32,
+        err: *mut c_char,
+        err_cap: u32,
+    ) -> c_int;
 }
 
 pub fn cs(s: &str) -> CString {

@@ -93,10 +93,9 @@ char *kvlangRuntimeBootstrap(kvlangRuntime_t *rt, const char *funcname,
   return vtid;
 }
 
-int kvlangRuntimeExecute(kvlangRuntime_t *rt, const char *funcname,
-                         const char *const *args, int nargs, char **ret,
-                         char *err, uint32_t err_cap) {
-  kvlangKv_t *kv = rt->kv;
+int kvlangRuntimeExecuteKv(kvlangKv_t *kv, const char *funcname,
+                           const char *const *args, int nargs, char **ret,
+                           char *err, uint32_t err_cap) {
   char *vtid = alloc_vtid(kv);
 
   kvlangStrbuf_t vtroot;
@@ -159,4 +158,10 @@ int kvlangRuntimeExecute(kvlangRuntime_t *rt, const char *funcname,
   free(stack_vt);
   free(vtid);
   return rc;
+}
+
+int kvlangRuntimeExecute(kvlangRuntime_t *rt, const char *funcname,
+                         const char *const *args, int nargs, char **ret,
+                         char *err, uint32_t err_cap) {
+  return kvlangRuntimeExecuteKv(rt->kv, funcname, args, nargs, ret, err, err_cap);
 }

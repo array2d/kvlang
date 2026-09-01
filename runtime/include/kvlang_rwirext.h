@@ -20,9 +20,6 @@ int kvlang_rwirextRegister(void *kvspace, const char *opcode, int32_t nr,
  * -1 失败/超时。 */
 int kvlang_rwirextHandoff(void *kvspace, const char *vtid, const char *pc);
 
-/* opcode 是否外部扩展 rwir（/lib/<opcode> kind=rwir）。非 ext（native/control/用户函数）返回 0。 */
-int kvlang_rwirextIsExt(void *kvspace, const char *opcode);
-
 /* 当前指令的下一条 PC（malloc） */
 char *kvlang_rwirextNextPc(const char *pc);
 
