@@ -469,6 +469,22 @@ static int handle_control(kvlangKv_t *kv, const char *vtid, const char *pc, kvla
     return -1;
 }
 
+/* 动态调用：以运行时得到的 funckey 在当前 vthread 造一次 OP_CALL（不新开 vid），
+ * pc 落在被调入口，帧结束回到本指令 NextPc。供 native vthread·call 用。 */
+int kvlangKvcpuDynCall(kvlangKv_t *kv, const char *vtid, const char *pc, const char *funckey) {
+    kvlangRwirInst_t ci;
+    ci.opcode = strdup(OP_CALL);
+    ci.reads = malloc(sizeof(kvlangParam_t));
+    ci.reads[0].name = strdup(funckey);
+    kvlangXvalueZero(&ci.reads[0].val);
+    ci.nr = 1;
+    ci.writes = NULL;
+    ci.nw = 0;
+    int rc = handle_control(kv, vtid, pc, &ci);
+    free(ci.opcode); free(ci.reads[0].name); free(ci.reads);
+    return rc;
+}
+
 static bool is_copy_op(const char *opcode) {
     return strcmp(opcode, "=") == 0;
 }

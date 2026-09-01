@@ -7,6 +7,7 @@
 //!   kvlang layout <file>   仅 layout，打印 ENTRY=<entry>
 //!   kvlang vet <file>      仅校验（parse+lower），打印 ok 或错误
 //!   kvlang format <file>   格式化输出到 stdout
+//!   kvlang（无参，设 KVLANG_LIB=p1:p2:…）  layout 各路径下所有 .kv → run 各 lib 的 init（pkg 取自源码 `lib` 声明，同 stdlib）
 //! 驱动循环：executeVthread 主导执行，遇 rwir 停下；就地 rwir（print/json/http/…）
 //! 连续批处理 + nextPc；外部 rwir（如 numpy）handoff 给扩展进程；native/控制帧写回 pc。
 #![allow(non_snake_case, non_camel_case_types)]
@@ -107,9 +108,17 @@ fn main() {
 
         // ── 运行已入库的显式入口（tutorial 测试主路径：pkg·func 或裸名，pkg 可空）──
         [x] => drive(&boot(&dsn), x),
+        // ── KVLANG_LIB=p1:p2:… → layout 各路径下所有 .kv（相对名=pkg），复用 stdlib 的 run init 引导──
         [] => {
-            eprintln!("kvlang: need entry");
-            std::process::exit(1);
+            let lib = std::env::var("KVLANG_LIB").unwrap_or_default();
+            if lib.is_empty() {
+                eprintln!("kvlang: need entry");
+                std::process::exit(1);
+            }
+            let eng = boot(&dsn);
+            let libs = collect_libs(&lib);
+            let inits = eng.layout_libs(&libs);
+            eng.run_inits(&inits);
         }
         _ => {
             eprintln!("kvlang: 参数不合法");
@@ -133,6 +142,42 @@ fn layout_code_or_die(src: &str, dsn: &str) {
     if rc != 0 {
         eprintln!("kvlang: layout 失败: {}", cbuf(&err));
         std::process::exit(1);
+    }
+}
+
+/// KVLANG_LIB（: 分隔路径）→ (名, 源码)：文件取 basename，目录递归、相对根、排序（确定性）。
+/// 名仅作错误显示；pkg 与 init 由 layout 按源码 `lib` 声明产出，不从此名/路径推导。
+fn collect_libs(spec: &str) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    for path in spec.split(':').filter(|s| !s.is_empty()) {
+        let p = std::path::Path::new(path);
+        if p.is_dir() {
+            walk_kv(p, p, &mut out);
+        } else if path.ends_with(".kv") && p.is_file() {
+            let name = p.file_name().unwrap_or_default().to_string_lossy().into_owned();
+            out.push((name, read_file(path)));
+        }
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+fn walk_kv(root: &std::path::Path, dir: &std::path::Path, out: &mut Vec<(String, String)>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in entries.filter_map(|e| e.ok()) {
+        let path = e.path();
+        if path.is_dir() {
+            walk_kv(root, &path, out);
+        } else if path.extension().map_or(false, |x| x == "kv") {
+            let rel = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            out.push((rel, std::fs::read_to_string(&path).unwrap_or_default()));
+        }
     }
 }
 
@@ -174,8 +219,8 @@ fn boot(dsn: &str) -> Engine {
         ext: None,
     };
     eng.register();
-    eng.layout_stdlib();
-    eng.run_stdlib_init();
+    let inits = eng.layout_stdlib();
+    eng.run_inits(&inits);
     eng
 }
 

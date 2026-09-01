@@ -117,6 +117,18 @@ unsafe extern "C" {
         out: *mut *mut u8,
         out_len: *mut u32,
     ) -> c_int;
+    pub fn kvspaceTlvEncodeMode(
+        kind: *const c_char,
+        raw: *const u8,
+        raw_len: u32,
+        dims: *const i32,
+        ndim: i32,
+        r#ref: i32,
+        ro: u8,
+        vid: u32,
+        out: *mut *mut u8,
+        out_len: *mut u32,
+    ) -> c_int;
 
     // ── kvlang runtime：模式2 执行 ───────────────────────────────────
     pub fn kvlangRuntimeConnect(dsn: *const c_char) -> *mut c_void;

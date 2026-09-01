@@ -13,7 +13,7 @@ fn main() {
     let mut kv = Kv::conn(&dsn);
     init_dirs(&mut kv).unwrap();
     match compile(&mut kv, &src) {
-        Ok(()) => print!("{}", dump(&mut kv, prefix)),
+        Ok(_) => print!("{}", dump(&mut kv, prefix)),
         Err(e) => eprintln!("compile error: {e}"),
     }
 }

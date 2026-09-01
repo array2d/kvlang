@@ -38,13 +38,13 @@ fn write_out(buf: *mut c_char, cap: u32, s: &str) {
     }
 }
 
-/// 把源码 layout 进 dsn 指向的 kvspace。入口不再自动探测（见 runtime：入口须显式给出），
-/// entry_out 恒为空串——消费方按约定自定入口（tutorial 用 test，散语句脚本用 init）。
+/// 把源码 layout 进 dsn 指向的 kvspace。entry_out = 本次写入的 init 函数名列表（\n 分隔，
+/// pkg 严格取自 `lib` 声明）：`lib X {…}` → `X·init`，裸顶层语句 → `init`，无 init → 空串。
+/// 消费方据此按 lib 声明驱动 init（tutorial 仍按约定跑 test；`\S+` 匹配者取首个入口）。
 fn layout_core(src: &str, dsn: &str) -> Result<String, String> {
     let mut kv = Kv::conn(dsn);
     init_dirs(&mut kv)?;
-    compile(&mut kv, src)?;
-    Ok(String::new())
+    Ok(compile(&mut kv, src)?.join("\n"))
 }
 
 /// 结果落地为 C 约定：成功写 entry、返回 0；失败写 err、返回 -1；panic 兜为 -1。

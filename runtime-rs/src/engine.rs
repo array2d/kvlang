@@ -87,12 +87,100 @@ impl Engine {
         }
     }
 
+    /// 扩展世界（@ ref=2）句柄编码写入：kind=目标完整 kindexpr（如 "[]uint8"），body=定位串。
+    /// 读取该 key 时由 read_at 按 body 前缀路由给对应 /lib/internet/* 兑现器还原真实字节。
+    pub fn set_ext_handle(&self, key: &str, target_kindexpr: &str, locator: &str) {
+        unsafe {
+            let (mut buf, mut len) = (null_mut(), 0u32);
+            kvspaceTlvEncodeMode(
+                cs(target_kindexpr).as_ptr(),
+                locator.as_ptr(),
+                locator.len() as u32,
+                std::ptr::null(),
+                0,
+                2,
+                0,
+                0,
+                &mut buf,
+                &mut len,
+            );
+            let ck = cs(key);
+            let keys = [ck.as_ptr()];
+            let lens = [len];
+            let mut err = [0u8; 256];
+            kvspaceSet(
+                self.kv,
+                keys.as_ptr(),
+                buf,
+                lens.as_ptr(),
+                1,
+                err.as_mut_ptr() as *mut c_char,
+                256,
+            );
+            kvspaceBytesFree(buf, len);
+        }
+    }
+
+    /// 读 key 的 head，返回 (ref, body 串)。仅 ref==2 时 body 有意义（扩展句柄定位串）。
+    fn head_ref_body(&self, key: &str) -> (i32, String) {
+        let tlv = self.get_tlv(key);
+        if tlv.is_empty() {
+            return (0, String::new());
+        }
+        unsafe {
+            let mut head = KvspaceHead::default();
+            kvspaceDecodeHead(tlv.as_ptr(), tlv.len() as u32, &mut head);
+            let kx = String::from_utf8_lossy(&head.kindexpr)
+                .trim_end_matches('\0')
+                .to_string();
+            let (r, _, _) = parse_kindexpr(&kx);
+            if r != 2 {
+                return (r, String::new());
+            }
+            let bo = head.body_offset as usize;
+            let bl = head.body_len.max(0) as usize;
+            let body = String::from_utf8_lossy(&tlv[bo..bo + bl]).into_owned();
+            (r, body)
+        }
+    }
+
+    /// 扩展句柄兑现：按 body 前缀路由 —— /internet/{host}/proc/... → 进程内 proc 兑现器
+    /// （逻辑路径 → /tmp/kvlangruntime-rs/{pid}/… 物理文件 → 读回字节）。其余前缀暂原样退化。
+    fn resolve_ext_bytes(&self, locator: &str) -> Vec<u8> {
+        if locator.starts_with("/internet/") && locator.contains("/proc/") {
+            return rwir::internet::resolve_read(locator);
+        }
+        locator.as_bytes().to_vec()
+    }
+    fn resolve_ext(&self, locator: &str) -> String {
+        String::from_utf8_lossy(&self.resolve_ext_bytes(locator)).into_owned()
+    }
+
+    /// 读一个 int64 读参：ValueString 输出十进制串，直接 parse（缺槽/空串退 0）。
+    pub fn read_i64(&self, pc: &str, idx: i32) -> i64 {
+        self.read_at(pc, idx).trim().parse().unwrap_or(0)
+    }
+
     // ── rwir 派发时按下标解析读/写槽（rwirext 宿主 ABI，传 kvspace 句柄）─
+    /// @-aware 读参：@ 句柄按 body 前缀路由兑现真实字节，其余（字面量/普通值/指针）沿用 C ResolveRead。
+    pub fn read_at(&self, pc: &str, idx: i32) -> String {
+        let p = take(unsafe { kvlang_rwirextResolveReadPath(self.kv, cs(pc).as_ptr(), idx) });
+        if !p.is_empty() {
+            let (r, body) = self.head_ref_body(&p);
+            if r == 2 {
+                return self.resolve_ext(&body);
+            }
+        }
+        take(unsafe { kvlang_rwirextResolveRead(self.kv, cs(pc).as_ptr(), idx) })
+    }
     pub fn read0(&self, pc: &str) -> String {
-        take(unsafe { kvlang_rwirextResolveRead(self.kv, cs(pc).as_ptr(), 0) })
+        self.read_at(pc, 0)
+    }
+    pub fn write_at(&self, pc: &str, idx: i32) -> String {
+        take(unsafe { kvlang_rwirextResolveWrite(self.kv, cs(pc).as_ptr(), idx) })
     }
     pub fn write0(&self, pc: &str) -> String {
-        take(unsafe { kvlang_rwirextResolveWrite(self.kv, cs(pc).as_ptr(), 0) })
+        self.write_at(pc, 0)
     }
 
     // ── kvspace 结构操作（json/http 扩展遍历子树用）────────────────────
@@ -175,59 +263,56 @@ impl Engine {
         rwir::register(self);
     }
 
-    /// 启动时把内嵌 stdlib（lib/**/*.kv）layout 进 kvspace，使其 rwfunc 可解析。
-    /// 幂等、best-effort：坏了只 warn 不中断（tutorial 多不依赖 stdlib）。
-    /// 把单段内存源码 layout 进 kvspace，返回是否成功（失败打印错误）。
-    pub fn layout_src(&self, name: &str, src: &str) -> bool {
+    /// 把单段内存源码 layout 进 kvspace，返回其写入的 init 函数名列表（entry_out，\n 分隔，
+    /// pkg 严格取自源码 `lib` 声明）。失败打印错误并返回空。幂等、best-effort。
+    pub fn layout_src(&self, name: &str, src: &str) -> Vec<String> {
+        let mut entry = [0u8; 4096];
         let mut err = [0u8; 4096];
         let rc = unsafe {
             kvlangLayoutCode(
                 cs(src).as_ptr(),
                 cs(&self.dsn).as_ptr(),
-                std::ptr::null_mut(),
-                0,
+                entry.as_mut_ptr() as *mut c_char,
+                entry.len() as u32,
                 err.as_mut_ptr() as *mut c_char,
                 err.len() as u32,
             )
         };
         if rc != 0 {
             eprintln!("kvlang: layout {name} 失败: {}", cbuf(&err));
-            return false;
+            return Vec::new();
         }
-        true
+        cbuf(&entry)
+            .split('\n')
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect()
     }
 
-    pub fn layout_stdlib(&self) {
-        for (name, src) in crate::stdlib::EMBEDDED_KV {
-            self.layout_src(name, src);
+    /// layout 一组 (名, 源码) 库进 kvspace（stdlib 与 KVLANG_LIB 共用），汇总各库的 init 函数名。
+    pub fn layout_libs<S: AsRef<str>>(&self, libs: &[(S, S)]) -> Vec<String> {
+        let mut inits = Vec::new();
+        for (name, src) in libs {
+            inits.extend(self.layout_src(name.as_ref(), src.as_ref()));
         }
+        inits
+    }
+    pub fn layout_stdlib(&self) -> Vec<String> {
+        self.layout_libs(crate::stdlib::EMBEDDED_KV)
     }
 
-    /// layout 之后单独运行内嵌 stdlib 各 lib 的 init（与 layout_stdlib 分离，不写进 layout 逻辑）。
-    /// 常量成员式（如 /lib/math·Pi）在 init 里赋值落值，故启动时须 run，run 完即删该 init（一次性引导）。
-    /// 递归遍历内嵌 stdlib 的 pkg 树（含嵌套 lib，如 time → time/duration），按深度升序 = 从 /lib 根
-    /// 到叶子 pkg，父 pkg 的 init 先于子 pkg。仅限内嵌 stdlib pkg，不遍历整棵 /lib —— 否则会把用户
-    /// 代码的顶层 init/入口也误跑并删掉。
-    pub fn run_stdlib_init(&self) {
-        // 从内嵌文件路径构造祖先闭包 pkg 集：time/duration.kv → {time, time/duration}。
-        let mut pkgs: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-        for (name, _) in crate::stdlib::EMBEDDED_KV {
-            let pkg = name.trim_end_matches(".kv");
-            let mut acc = String::new();
-            for seg in pkg.split('/') {
-                if !acc.is_empty() {
-                    acc.push('/');
-                }
-                acc.push_str(seg);
-                pkgs.insert(acc.clone());
-            }
-        }
-        let mut pkgs: Vec<String> = pkgs.into_iter().collect();
-        pkgs.sort_by_key(|p| (p.matches('/').count(), p.clone())); // 父 pkg 先于子 pkg
-        for pkg in pkgs {
-            let initfn = format!("{pkg}\u{b7}init");
+    /// 运行 layout 返回的一组 init 函数（与 layout 分离）：按 pkg 深度升序（父先于子）run，
+    /// run 完即删（一次性引导）。init 名由 layout 按 `lib` 声明给出（`X·init`/`init`），
+    /// 不做文件系统路径推导。常量成员式（如 /lib/math·Pi）在 init 落值；KVLANG_LIB 库
+    /// （如 byteseek，把 config/种子/REPL 编排进 <pkg>·init）同款引导。
+    pub fn run_inits(&self, inits: &[String]) {
+        let mut inits: Vec<String> = inits.to_vec();
+        inits.sort();
+        inits.dedup();
+        inits.sort_by_key(|f| f.matches('/').count()); // 父 pkg 先于子 pkg
+        for initfn in inits {
             if self.get_kv(&format!("/lib/{initfn}.src")).is_empty() {
-                continue; // 纯 rwfunc lib 无 init
+                continue;
             }
             self.run_fn(&initfn);
             self.del_tree(&format!("/lib/{initfn}")); // 帧子树 /lib/<pkg>·init/*

@@ -1,0 +1,17 @@
+# vthread·call(funckey)：在当前 vthread（同 vid，进程↔vid 1:1）按运行时 funckey 动态调用
+#   funckey 是去 /lib 前缀的 func key 串（裸名 pkg 空即裸名）；被调跑完回到本指令后继续
+#   与 vthread·run 不同：不新开 vid、不 WATCH 挂起——被调里的 rwir 由当前驱动就地派发
+# 期望输出:
+#   before call
+#   hello from dynamic call
+#   after call
+rwfunc greet() -> () {
+	println("hello from dynamic call")
+}
+
+rwfunc test() -> () {
+	println("before call")
+	name = "greet"
+	vthread·call(name)
+	println("after call")
+}
