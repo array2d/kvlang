@@ -1,7 +1,6 @@
 # kvlang 统一构建：产物全部输出到 bin/，各组件独立编译。
 #   make runtime    C runtime 库（libkvlang_runtime.so，经 CMake）
 #   make runtime-rs 功能完整 Rust runtime → 编译为 kvlang（term/json/http/kvlanglayout 就地 rwir）
-#   make term       极简 Rust term 扩展（仅 print，教学示例，非默认产物）
 #   make layout     Rust layout（kvlanglayout）
 #   make json       Go json 扩展（json-rwirext 可执行文件）
 #   make oldhero    Go 旧 runtime（kvlang-go，兼容保留，即将归档）
@@ -13,7 +12,7 @@
 
 BIN         := bin
 
-.PHONY: all runtime runtime-rs term layout json oldhero test install clean
+.PHONY: all runtime runtime-rs layout json oldhero test install clean
 
 all: runtime runtime-rs layout json
 
@@ -27,10 +26,6 @@ runtime:
 runtime-rs:
 	cargo build --release --manifest-path runtime-rs/Cargo.toml
 	cp runtime-rs/target/release/kvlang $(BIN)/kvlang
-
-term:
-	cargo build --release --manifest-path runtime-rwirext_example/rust/term/Cargo.toml
-	cp runtime-rwirext_example/rust/term/target/release/kvlang $(BIN)/kvlang
 
 layout:
 	cargo build --release --manifest-path layout/Cargo.toml --example kvlanglayout
@@ -54,4 +49,3 @@ clean:
 	rm -rf $(BIN) build
 	cargo clean --manifest-path layout/Cargo.toml
 	cargo clean --manifest-path runtime-rs/Cargo.toml
-	cargo clean --manifest-path runtime-rwirext_example/rust/term/Cargo.toml

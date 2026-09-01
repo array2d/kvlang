@@ -1,6 +1,44 @@
 #include "kvlang_rwirext.h"
 #include "runtime_internal.h"
 
+/* 进程内已注册 rwir opcode 集合：isothersrwir 不读 /lib，直接本地过滤。 */
+static char *g_rwir_opcodes[256];
+static int g_rwir_n = 0;
+
+/* 共享队列根：第一个 rwir 的 /lib/<opcode>/todo 绝对路径。 */
+static char *g_first_todo = NULL;
+
+bool isothersrwir(const char *opcode) {
+  if (opcode[0] == '/')
+    return false;
+  for (int i = 0; i < g_rwir_n; i++)
+    if (strcmp(g_rwir_opcodes[i], opcode) == 0)
+      return true;
+  return false;
+}
+
+/* 建立 rwir 的 todo 队列：第一个 rwir 是真实 strkeymap，后续是 Ptr 指向第一个。 */
+static void register_todo(kvlangKv_t *k, const char *opcode) {
+  char *base = kvlangKeytreeRwir(opcode);
+  kvlangStrbuf_t tk; kvlangStrbufInit(&tk);
+  kvlangStrbufPuts(&tk, base); kvlangStrbufPuts(&tk, "/todo");
+  kvlangXvalue_t v; kvlangXvalueZero(&v);
+  if (g_first_todo == NULL) {
+    g_first_todo = strdup(tk.p);
+    int32_t dims[1] = {0};
+    kvlangXvalueNewTlvDims(&v, KVSPACE_KIND_MAP, (const uint8_t *)"", 0, dims, 1);
+  } else {
+    int32_t dims[1] = {0};
+    kvlangXvalueNewPtrDims(&v, KVSPACE_KIND_MAP, g_first_todo, dims, 1);
+  }
+  kvlangKvPair_t p = {tk.p, v};
+  char err[256];
+  kvlangKvSet(k, &p, 1, err, sizeof err);
+  kvlangXvalueFree(&v);
+  kvlangStrbufFree(&tk);
+  free(base);
+}
+
 int kvlang_rwirextRegister(void *kvspace, const char *opcode, int32_t nr,
                          int32_t nw, const char *sig) {
   kvlangKv_t k = {kvspace};
@@ -12,6 +50,14 @@ int kvlang_rwirextRegister(void *kvspace, const char *opcode, int32_t nr,
   int rc = kvlangKvSet(&k, &p, 1, err, sizeof err);
   kvlangXvalueFree(&v);
   free(key);
+  /* 进程内 map 也注册一份。 */
+  for (int i = 0; i < g_rwir_n; i++)
+    if (strcmp(g_rwir_opcodes[i], opcode) == 0)
+      return rc;
+  if (g_rwir_n < 256)
+    g_rwir_opcodes[g_rwir_n++] = strdup(opcode);
+  /* 建立共享 todo 队列（第一个真实 strkeymap，后续 Ptr 指向它）。 */
+  register_todo(&k, opcode);
   return rc;
 }
 
@@ -33,11 +79,6 @@ int kvlang_rwirextHandoff(void *kvspace, const char *vtid, const char *pc) {
   free(fr);
   kvlangRwirInstFree(&inst);
   return rc;
-}
-
-int kvlang_rwirextIsExt(void *kvspace, const char *opcode) {
-  kvlangKv_t k = {kvspace};
-  return is_ext_rwir(&k, opcode) ? 1 : 0;
 }
 
 char *kvlang_rwirextNextPc(const char *pc) {

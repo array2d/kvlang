@@ -309,7 +309,7 @@ static char *handle_call(kvlangKv_t *kv, const char *pc, kvlangRwirInst_t *inst)
     kvlangKvGetOne(kv, sig_key.p, &sig);
     if (kvlangXvalueNone(&sig) || !kvlangXvalueKindIs(&sig, KVSPACE_KIND_DEF_RWFUNC)) {
         /* 按 xvalue 的 kind 精确区分缺 rwir 还是缺 rwfunc：
-         * 到这里说明 opcode 已被 is_ext_rwir 判否（/lib/<op> 非 rwir）。 */
+         * 到这里说明 opcode 已被 isothersrwir 判否（/lib/<op> 非 rwir）。 */
         char *rk = kvlangKeytreeRwir(fn);
         kvlangXvalue_t rv; kvlangXvalueZero(&rv);
         kvlangKvGetOne(kv, rk, &rv);
@@ -473,23 +473,13 @@ static bool is_copy_op(const char *opcode) {
     return strcmp(opcode, "=") == 0;
 }
 
-bool is_ext_rwir(kvlangKv_t *kv, const char *opcode) {
-    if (opcode[0] == '/') return false;
-    char *rk = kvlangKeytreeRwir(opcode);
-    kvlangXvalue_t v; kvlangXvalueZero(&v);
-    kvlangKvGetOne(kv, rk, &v);
-    bool r = !kvlangXvalueNone(&v) && kvlangXvalueKindIs(&v, KVSPACE_KIND_DEF_RWIR);
-    kvlangXvalueFree(&v); free(rk);
-    return r;
-}
-
 static int64_t handoff_seq = 0;
 
 int handoff_external_rwir(kvlangKv_t *kv, const char *vtid, const char *pc, kvlangRwirInst_t *inst) {
     char *base = kvlangKeytreeRwir(inst->opcode);
     kvlangStrbuf_t todo, done; kvlangStrbufInit(&todo); kvlangStrbufInit(&done);
-    kvlangStrbufPrintf(&todo, "%s/.todo<%s>", base, vtid);
-    kvlangStrbufPrintf(&done, "%s/.done<%s>", base, vtid);
+    kvlangStrbufPrintf(&todo, "%s/todo/%s", base, vtid);
+    kvlangStrbufPrintf(&done, "%s/done/%s", base, vtid);
     int64_t id = ++handoff_seq;
     kvlangStrbuf_t payload; kvlangStrbufInit(&payload);
     kvlangStrbufPrintf(&payload, "%s|%lld", pc, (long long)id);
@@ -649,7 +639,7 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode, char *
             exec_err = kvlangBuiltinNative(&f);
         } else if (is_copy_op(inst.opcode)) {
             exec_err = kvlangBuiltinExecuteCopy(kv, vtid, cur, &inst);
-        } else if (is_ext_rwir(kv, inst.opcode)) {
+        } else if (isothersrwir(inst.opcode)) {
             char *rk = kvlangKeytreeRwir(inst.opcode);
             int def_nr = 0;
             char *def_sig = load_def_reads(kv, rk, &def_nr);

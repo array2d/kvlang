@@ -122,6 +122,7 @@ void kvlangXvalueNewCharUtf8(kvlangXvalue_t *v, const char *s);
 void kvlangXvalueNewCharUtf32(kvlangXvalue_t *v, const char *s);  /* UTF-8 → UTF-32 LE body */
 void kvlangXvalueNewCharKind(kvlangXvalue_t *v, const char *kind, const char *s);
 void kvlangXvalueNewPtr(kvlangXvalue_t *v, const char *kind, const char *target, int32_t al);
+void kvlangXvalueNewPtrDims(kvlangXvalue_t *v, const char *kind, const char *target, const int32_t *dims, int32_t ndim);
 void kvlangXvalueNewRwir(kvlangXvalue_t *v, int32_t nr, int32_t nw, const char *sig);
 void kvlangXvalueNewTlv(kvlangXvalue_t *v, const char *kind, const uint8_t *raw, uint32_t raw_len, int32_t al);
 void kvlangXvalueNewTlvDims(kvlangXvalue_t *v, const char *kind, const uint8_t *raw, uint32_t raw_len,
@@ -206,8 +207,8 @@ int kvlangRwirDecode(kvlangKv_t *kv, const char *link_base, const char *pc, kvla
 void kvlangRwirInstFree(kvlangRwirInst_t *inst);
 /* 外部扩展 handoff：写 /lib/<opcode>/.todo<vid> 并阻塞 watch .done<vid>（30s 超时）。 */
 int handoff_external_rwir(kvlangKv_t *kv, const char *vtid, const char *pc, kvlangRwirInst_t *inst);
-/* opcode 是否外部扩展 rwir（/lib/<opcode> kind=rwir）。 */
-bool is_ext_rwir(kvlangKv_t *kv, const char *opcode);
+/* opcode 是否已注册的扩展 rwir（进程内 map，不读 /lib）。 */
+bool isothersrwir(const char *opcode);
 
 /* ── vthread ───────────────────────────────────────────────────────── */
 
@@ -242,6 +243,8 @@ typedef enum { KVMODE_WATCH = 0, KVMODE_RETURN = 1 } kvmode_t;
 int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode, char **out_pc);
 int kvlangKvcpuExecute(kvlangKv_t *kv, const char *pc);   /* = KVMODE_WATCH，out_pc 忽略 */
 char *kvlangKvcpuBootstrap(kvlangKv_t *kv, const char *vtid, const char *funcname, const char *const *args, int nargs);
+/* run funcname 到结束（alloc_vtid + bootstrap + KVMODE_WATCH），返回终态/错误。 */
+int kvlangRuntimeExecuteKv(kvlangKv_t *kv, const char *funcname, const char *const *args, int nargs, char **ret, char *err, uint32_t err_cap);
 
 /* ── logx ──────────────────────────────────────────────────────────── */
 

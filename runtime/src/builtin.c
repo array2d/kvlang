@@ -18,7 +18,8 @@ int kvlangBuiltinArray(kvlangFrame_t *f), kvlangBuiltinNdarrayNumel(kvlangFrame_
     kvlangBuiltinKvGet(kvlangFrame_t *f), kvlangBuiltinKvSet(kvlangFrame_t *f), kvlangBuiltinKvDel(kvlangFrame_t *f),
     kvlangBuiltinKvDelTree(kvlangFrame_t *f), kvlangBuiltinKvList(kvlangFrame_t *f), kvlangBuiltinKvListLen(kvlangFrame_t *f), kvlangBuiltinKvListN(kvlangFrame_t *f), kvlangBuiltinKvMkindex(kvlangFrame_t *f),
     kvlangBuiltinKvExtIndex(kvlangFrame_t *f), kvlangBuiltinKvRmIndexExt(kvlangFrame_t *f), kvlangBuiltinKvWatch(kvlangFrame_t *f),
-    kvlangBuiltinDebugger(kvlangFrame_t *f);
+    kvlangBuiltinDebugger(kvlangFrame_t *f), kvlangBuiltinVthreadRun(kvlangFrame_t *f),
+    kvlangBuiltinVthreadSetstatus(kvlangFrame_t *f);
 
 /* ── 类型 helper（对齐 Go isIntKind 含 uint）────────────────────── */
 
@@ -614,6 +615,8 @@ static const struct { const char *op; kvlangBuiltinFn fn; } builtins[] = {
     {"kv·get", kvlangBuiltinKvGet}, {"kv·set", kvlangBuiltinKvSet}, {"kv·del", kvlangBuiltinKvDel},
     {"kv·deltree", kvlangBuiltinKvDelTree}, {"kv·list", kvlangBuiltinKvList}, {"kv·listlen", kvlangBuiltinKvListLen}, {"kv·listn", kvlangBuiltinKvListN}, {"kv·mkindex", kvlangBuiltinKvMkindex},
     {"kv·extindex", kvlangBuiltinKvExtIndex}, {"kv·rmindexext", kvlangBuiltinKvRmIndexExt}, {"kv·watch", kvlangBuiltinKvWatch},
+    {"vthread·run", kvlangBuiltinVthreadRun},
+    {"vthread·setstatus", kvlangBuiltinVthreadSetstatus},
     {"debugger", kvlangBuiltinDebugger},
 };
 
@@ -1611,16 +1614,48 @@ int kvlangBuiltinKvWatch(kvlangFrame_t *f) {
     free(key); free_inputs(in, n); return rc;
 }
 
-/* ── debugger ─────────────────────────────────────────────────────── */
+/* ── vthread ─────────────────────────────────────────────────────── */
 
-int kvlangBuiltinDebugger(kvlangFrame_t *f) {
-    kvlangStrbuf_t dk; kvlangStrbufInit(&dk);
-    kvlangKeytreeVthreadDebugger(f->vtid, &dk);
-    kvlangXvalue_t v; kvlangXvalueZero(&v); kvlangKvGetOne(f->kv, dk.p, &v);
-    bool dbg = !kvlangXvalueNone(&v);
-    kvlangXvalueFree(&v);
-    if (!dbg) { kvlangStrbufFree(&dk); next_pc(f); return 0; }
-    kvlangStrbufFree(&dk);
+int kvlangBuiltinVthreadRun(kvlangFrame_t *f) {
+    kvlangXvalue_t in[1]; int n = read_inputs(f, in, 1);
+    if (n < 1 || !kvlangXvalueIsCharKind(kvlangXvalueKind(&in[0]))) {
+        free_inputs(in, n);
+        return set_err(f, "TypeError: vthread.run requires 1 string arg");
+    }
+    char *fn = kvlangXvalueValueString(&in[0]);
+    char *ret = NULL;
+    char err[256];
+    int rc = kvlangRuntimeExecuteKv(f->kv, fn, NULL, 0, &ret, err, sizeof err);
+    free(fn); free(ret); free_inputs(in, n);
+    if (rc != 0) return set_err(f, "%s", err);
     next_pc(f);
     return 0;
+}
+
+/* ── vthread 控制 / debugger ─────────────────────────────────────── */
+
+/* 设状态并把 PC 前进到下一指令。execute 循环只在 init/running/wait 下继续，
+ * 其余状态（paused/done/error…）即停。恢复：外部把 /vthread/{vid}/·status 改回 running。 */
+static int set_status(kvlangFrame_t *f, const char *status) {
+    kvlangStrbuf_t npc; kvlangStrbufInit(&npc);
+    kvlangRwirNextPc(f->pc, &npc);
+    kvlangVthreadSet(f->kv, f->vtid, npc.p, status);
+    kvlangStrbufFree(&npc);
+    return 0;
+}
+
+int kvlangBuiltinVthreadSetstatus(kvlangFrame_t *f) {
+    kvlangXvalue_t in[1]; int n = read_inputs(f, in, 1);
+    if (n < 1 || !kvlangXvalueIsCharKind(kvlangXvalueKind(&in[0]))) {
+        free_inputs(in, n);
+        return set_err(f, "TypeError: vthread.setstatus requires 1 string arg");
+    }
+    char *status = kvlangXvalueValueString(&in[0]);
+    int rc = set_status(f, status);
+    free(status); free_inputs(in, n);
+    return rc;
+}
+
+int kvlangBuiltinDebugger(kvlangFrame_t *f) {
+    return set_status(f, "paused");
 }

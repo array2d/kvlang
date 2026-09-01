@@ -12,6 +12,8 @@ pub mod term;
 
 use crate::engine::Engine;
 use crate::ffi::*;
+use std::collections::HashSet;
+use std::sync::OnceLock;
 
 /// rwir 注册表：(opcode, 读参数, 写参数, 签名)。
 pub const REGS: &[(&str, i32, i32, &str)] = &[
@@ -27,9 +29,10 @@ pub const REGS: &[(&str, i32, i32, &str)] = &[
         1,
         "[]char/utf32\n[]char/utf32\n[]char/utf32\n[]char/utf32\n[]char/utf32",
     ),
-    ("kvlanglayout·vet", 1, 1, "any\nany"),
-    ("kvlanglayout·layout", 1, 1, "any\nany"),
-    ("kvlanglayout·src", 1, 1, "any\nany"),
+    ("kvlanglayout·vet", 1, 1, "[]char/utf32\n[]char/utf32"),
+    ("kvlanglayout·format", 1, 1, "[]char/utf32\n[]char/utf32"),
+    ("kvlanglayout·layout", 1, 1, "[]char/utf32\n[]char/utf32"),
+    ("kvlanglayout·dump", 1, 1, "[]char/utf32\n[]char/utf32"),
 ];
 
 pub fn register(eng: &Engine) {
@@ -50,9 +53,22 @@ pub fn is_inproc(op: &str) -> bool {
             | "json·from"
             | "http·call"
             | "kvlanglayout·vet"
+            | "kvlanglayout·format"
             | "kvlanglayout·layout"
-            | "kvlanglayout·src"
+            | "kvlanglayout·dump"
     )
+}
+
+/// 进程内已注册的 rwir opcode 集合（不读 /lib，直接本地过滤）。
+static REGISTERED: OnceLock<HashSet<&'static str>> = OnceLock::new();
+
+fn registered() -> &'static HashSet<&'static str> {
+    REGISTERED.get_or_init(|| REGS.iter().map(|r| r.0).collect())
+}
+
+/// 判「别人的 rwir」：opcode 是否已注册（进程内 map）。
+pub fn is_others_rwir(op: &str) -> bool {
+    registered().contains(op)
 }
 
 /// 主导驱动循环遇到就地 rwir 时分派。
@@ -67,12 +83,16 @@ pub fn dispatch(eng: &Engine, op: &str, pc: &str) {
             let out = kvlayout::vet(eng, &eng.read0(pc));
             eng.set_kv(&eng.write0(pc), &out);
         }
+        "kvlanglayout·format" => {
+            let out = kvlayout::format(eng, &eng.read0(pc));
+            eng.set_kv(&eng.write0(pc), &out);
+        }
         "kvlanglayout·layout" => {
             let out = kvlayout::layout(eng, &eng.read0(pc));
             eng.set_kv(&eng.write0(pc), &out);
         }
-        "kvlanglayout·src" => {
-            let out = kvlayout::src(eng, &eng.read0(pc));
+        "kvlanglayout·dump" => {
+            let out = kvlayout::dump(eng, &eng.read0(pc));
             eng.set_kv(&eng.write0(pc), &out);
         }
         other => eprintln!("kvlang: 未知 rwir: {other} @ {pc}"),
