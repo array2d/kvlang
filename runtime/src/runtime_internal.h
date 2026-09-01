@@ -240,6 +240,7 @@ typedef enum { KVMODE_WATCH = 0, KVMODE_RETURN = 1 } kvmode_t;
 int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode, char **out_pc);
 int kvlangKvcpuExecute(kvlangKv_t *kv, const char *pc);   /* = KVMODE_WATCH，out_pc 忽略 */
 char *kvlangKvcpuBootstrap(kvlangKv_t *kv, const char *vtid, const char *funcname, const char *const *args, int nargs);
+int kvlangKvcpuDynCall(kvlangKv_t *kv, const char *vtid, const char *pc, const char *funckey);
 /* run funcname 到结束（alloc_vtid + bootstrap + KVMODE_WATCH），返回终态/错误。 */
 int kvlangRuntimeExecuteKv(kvlangKv_t *kv, const char *funcname, const char *const *args, int nargs, char **ret, char *err, uint32_t err_cap);
 

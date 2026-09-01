@@ -23,8 +23,7 @@ pub fn print_line(eng: &Engine, pc: &str) {
         if i > 0 {
             line.push_str(sep);
         }
-        let d = take(unsafe { kvlang_rwirextResolveRead(eng.kv, cs(pc).as_ptr(), i as i32) });
-        line.push_str(&d);
+        line.push_str(&eng.read_at(pc, i as i32));
     }
     if cerr != 0 {
         eprint!("{line}");

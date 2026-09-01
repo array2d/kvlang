@@ -5,6 +5,7 @@
 //!   kvlayout: kvlanglayout·vet/layout/src          自造 kv 代码入库（layout C ABI）
 //! 不纯 rwir（llm/shell/python/byteseek·run 等）留在 byteseek，依赖本库后自行叠加。
 
+pub mod fs;
 pub mod http;
 pub mod internet;
 pub mod json;
@@ -110,7 +111,21 @@ pub const REGS: &[(&str, Rwir)] = &[
         "internet/proc·exec",
         Rwir {
             rp: &["[]stringkeymap", "[]stringkeymap"],
-            wp: &["uint8"],
+            wp: &["uint8", "[]uint8", "[]uint8"],
+        },
+    ),
+    (
+        "internet/fs·size",
+        Rwir {
+            rp: &["[]char/utf8"],
+            wp: &["int64"],
+        },
+    ),
+    (
+        "internet/fs·read",
+        Rwir {
+            rp: &["[]char/utf8", "int64", "int64"],
+            wp: &["[]uint8"],
         },
     ),
 ];
@@ -157,6 +172,8 @@ pub fn is_inproc(op: &str) -> bool {
             | "kvlanglayout·layout"
             | "kvlanglayout·dump"
             | "internet/proc·exec"
+            | "internet/fs·size"
+            | "internet/fs·read"
     )
 }
 
@@ -174,6 +191,8 @@ pub fn dispatch(eng: &Engine, op: &str, pc: &str) {
         "json·from" => json::from(eng, pc),
         "http·call" => http::call(eng, pc),
         "internet/proc·exec" => internet::exec(eng, pc),
+        "internet/fs·size" => fs::size(eng, pc),
+        "internet/fs·read" => fs::read(eng, pc),
         "kvlanglayout·vet" => {
             let out = kvlayout::vet(eng, &eng.read0(pc));
             eng.set_kv(&eng.write0(pc), &out);

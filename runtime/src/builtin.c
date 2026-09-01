@@ -6,7 +6,7 @@ typedef int (*kvlangBuiltinFn)(kvlangFrame_t *f);
 
 /* collection 模块 handler（builtin_coll.c） */
 int kvlangBuiltinArray(kvlangFrame_t *f), kvlangBuiltinNdarrayNumel(kvlangFrame_t *f), kvlangBuiltinNdarrayDim(kvlangFrame_t *f), kvlangBuiltinNdarrayShape(kvlangFrame_t *f),
-    kvlangBuiltinXvAt(kvlangFrame_t *f), kvlangBuiltinXvSet(kvlangFrame_t *f), kvlangBuiltinXvReshape(kvlangFrame_t *f),
+    kvlangBuiltinXvAt(kvlangFrame_t *f), kvlangBuiltinXvSet(kvlangFrame_t *f), kvlangBuiltinXvReshape(kvlangFrame_t *f), kvlangBuiltinXvReinterpret(kvlangFrame_t *f),
     kvlangBuiltinScatter(kvlangFrame_t *f), kvlangBuiltinCompact(kvlangFrame_t *f),
     kvlangBuiltinAppend(kvlangFrame_t *f), kvlangBuiltinSlice(kvlangFrame_t *f), kvlangBuiltinObj(kvlangFrame_t *f), kvlangBuiltinMap(kvlangFrame_t *f), kvlangBuiltinStringSet(kvlangFrame_t *f),
     kvlangBuiltinStringChar(kvlangFrame_t *f), kvlangBuiltinStringOrd(kvlangFrame_t *f), kvlangBuiltinStringCmp(kvlangFrame_t *f),
@@ -22,6 +22,7 @@ int kvlangBuiltinArray(kvlangFrame_t *f), kvlangBuiltinNdarrayNumel(kvlangFrame_
     kvlangBuiltinKvDelTree(kvlangFrame_t *f), kvlangBuiltinKvList(kvlangFrame_t *f), kvlangBuiltinKvListLen(kvlangFrame_t *f), kvlangBuiltinKvListN(kvlangFrame_t *f), kvlangBuiltinKvMkindex(kvlangFrame_t *f),
     kvlangBuiltinKvExtIndex(kvlangFrame_t *f), kvlangBuiltinKvRmIndexExt(kvlangFrame_t *f), kvlangBuiltinKvWatch(kvlangFrame_t *f),
     kvlangBuiltinDebugger(kvlangFrame_t *f), kvlangBuiltinVthreadRun(kvlangFrame_t *f),
+    kvlangBuiltinVthreadCall(kvlangFrame_t *f),
     kvlangBuiltinVthreadSetstatus(kvlangFrame_t *f);
 
 /* ── 类型 helper（对齐 Go isIntKind 含 uint）────────────────────── */
@@ -601,6 +602,7 @@ static const struct { const char *op; kvlangBuiltinFn fn; } builtins[] = {
     {"obj", kvlangBuiltinObj}, {"map", kvlangBuiltinMap},
     {"ndarray·numel", kvlangBuiltinNdarrayNumel}, {"ndarray·dim", kvlangBuiltinNdarrayDim}, {"ndarray·shape", kvlangBuiltinNdarrayShape},
     {"xv·at", kvlangBuiltinXvAt}, {"xv·set", kvlangBuiltinXvSet}, {"xv·reshape", kvlangBuiltinXvReshape},
+    {"xv·reinterpret", kvlangBuiltinXvReinterpret},
     {"string·set", kvlangBuiltinStringSet}, {"string·char", kvlangBuiltinStringChar}, {"string·ord", kvlangBuiltinStringOrd},
     {"string·cmp", kvlangBuiltinStringCmp}, {"string·find", kvlangBuiltinStringFind}, {"string·len", kvlangBuiltinStringLen},
     {"string·slice", kvlangBuiltinStringSlice}, {"string·concat", kvlangBuiltinStringConcat},
@@ -621,6 +623,7 @@ static const struct { const char *op; kvlangBuiltinFn fn; } builtins[] = {
     {"kv·deltree", kvlangBuiltinKvDelTree}, {"kv·list", kvlangBuiltinKvList}, {"kv·listlen", kvlangBuiltinKvListLen}, {"kv·listn", kvlangBuiltinKvListN}, {"kv·mkindex", kvlangBuiltinKvMkindex},
     {"kv·extindex", kvlangBuiltinKvExtIndex}, {"kv·rmindexext", kvlangBuiltinKvRmIndexExt}, {"kv·watch", kvlangBuiltinKvWatch},
     {"vthread·run", kvlangBuiltinVthreadRun},
+    {"vthread·call", kvlangBuiltinVthreadCall},
     {"vthread·setstatus", kvlangBuiltinVthreadSetstatus},
     {"debugger", kvlangBuiltinDebugger},
 };
@@ -986,6 +989,21 @@ int kvlangBuiltinXvReshape(kvlangFrame_t *f) {
     int rc = write_result(f, &nv);
     kvlangXvalueFree(&nv);
     free_inputs(in, n);
+    return rc;
+}
+
+/* xv·reinterpret(arr, kindexpr) -> a：body 字节原样，整个 kindexpr 换成传入的（kind+dims 一起），不做校验。 */
+int kvlangBuiltinXvReinterpret(kvlangFrame_t *f) {
+    if (f->inst->nr < 2) return set_err(f, "TypeError: xv.reinterpret requires array and kindexpr");
+    if (f->inst->nw == 0) return set_err(f, "TypeError: xv.reinterpret requires a write param (-> a)");
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
+    char *ke = kvlangXvalueValueString(&in[1]);
+    kvlang_kindexpr_t nkx; kvlang_kindexpr_parse((const uint8_t *)ke, &nkx);
+    kvspaceHead_t h; kvspaceDecodeHead(in[0].data, in[0].len, &h);
+    const uint8_t *body = in[0].data + h.body_offset;
+    kvlangXvalue_t nv; kvlangXvalueNewTlvDims(&nv, nkx.kind, body, (uint32_t)h.body_len, nkx.dims, nkx.ndim);
+    int rc = write_result(f, &nv);
+    kvlangXvalueFree(&nv); free(ke); free_inputs(in, n);
     return rc;
 }
 
@@ -1700,6 +1718,21 @@ int kvlangBuiltinVthreadRun(kvlangFrame_t *f) {
     if (rc != 0) return set_err(f, "%s", err);
     next_pc(f);
     return 0;
+}
+
+/* vthread·call(funckey)：在当前 vthread（同 vid，进程↔vid 1:1）按运行时 funckey 造一次
+ * 动态 OP_CALL，跑到被调函数结束再回到本指令 NextPc。与 vthread·run 不同：不新开 vid、
+ * 不 WATCH 挂起——被调代码里的 rwir（println/shell·run…）由当前驱动就地派发。 */
+int kvlangBuiltinVthreadCall(kvlangFrame_t *f) {
+    kvlangXvalue_t in[1]; int n = read_inputs(f, in, 1);
+    if (n < 1 || !kvlangXvalueIsCharKind(kvlangXvalueKind(&in[0]))) {
+        free_inputs(in, n);
+        return set_err(f, "TypeError: vthread.call requires 1 string arg");
+    }
+    char *fn = kvlangXvalueValueString(&in[0]);
+    int rc = kvlangKvcpuDynCall(f->kv, f->vtid, f->pc, fn);
+    free(fn); free_inputs(in, n);
+    return rc;
 }
 
 /* ── vthread 控制 / debugger ─────────────────────────────────────── */

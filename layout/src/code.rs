@@ -21,7 +21,9 @@ pub fn init_dirs(kv: &mut Kv) -> Result<(), String> {
 }
 
 /// 顶层入口（对齐 cmd/kvlang/layout.go 的 cmdLayout）：parse → lower → write。
-pub fn compile(kv: &mut Kv, src: &str) -> Result<(), String> {
+/// 返回本次写入的 init 函数名列表（pkg 严格取自 `lib` 声明：`lib X {…}` → `X·init`，
+/// 裸顶层语句 → `init`），供消费方按 lib 声明驱动 init（非文件系统路径推导）。
+pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
     let (file, diags) = parser::parse_code(src)?;
     for d in &diags {
         eprintln!("{}", d.string());
@@ -31,6 +33,7 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<(), String> {
     }
 
     let mut any_code = false;
+    let mut inits: Vec<String> = Vec::new();
     for func in &file.funcs {
         let pkg = if func.pkg.is_empty() {
             file.package.clone()
@@ -40,6 +43,9 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<(), String> {
         let mut lowered = lower::lower_func(func);
         write_func(kv, &pkg, &mut lowered);
         any_code = true;
+        if func.sig.name == "init" {
+            inits.push(init_fn_name(&pkg));
+        }
     }
     for decl in &file.rwir_decls {
         write_rwir_decl(kv, decl);
@@ -63,12 +69,22 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<(), String> {
         let mut lowered = lower::lower_func(&init_fn);
         write_func(kv, "", &mut lowered);
         any_code = true;
+        inits.push(init_fn_name(""));
     }
 
     if !any_code {
         return Err("no executable code found".to_string());
     }
-    Ok(())
+    Ok(inits)
+}
+
+/// pkg → init 函数名（运行时用名，无 /lib 前缀）：空 pkg → `init`，否则 `<pkg>·init`。
+fn init_fn_name(pkg: &str) -> String {
+    if pkg.is_empty() {
+        "init".to_string()
+    } else {
+        format!("{pkg}{}init", keytree::MEMBER_SEP)
+    }
 }
 
 /// 格式化源码（parse → 规范化源码），不写入 kvspace。失败返回错误。
@@ -315,6 +331,16 @@ pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) {
     let mut type_map = lower::infer_types(fn_);
     lower::specialize(fn_, &type_map);
     let func_dir = keytree::lib_func(pkg, &fn_.sig.name);
+
+    // pkg 下同名 func 已存在（含签名槽 [0,0]）→ info 提示即将覆盖（严格按 lib 声明判定，非路径）。
+    if !kv.get_one(&format!("{func_dir}/[0,0]")).is_empty() {
+        let qual = if pkg.is_empty() {
+            fn_.sig.name.clone()
+        } else {
+            format!("{pkg}/{}", fn_.sig.name)
+        };
+        eprintln!("info: func {qual} already defined — overwriting");
+    }
 
     // 按函数覆盖（文件夹复制式合并）：只 del_tree 本函数子树，不动 /lib 下其它函数。
     // 禁止整库删除——layoutcode 必须可增量：多次 layout 各自覆盖其函数，不误删先前的函数。
