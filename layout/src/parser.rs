@@ -42,7 +42,10 @@ struct Parser {
 
 impl Parser {
     fn peek(&self) -> Token {
-        self.tokens.get(self.pos).cloned().unwrap_or_else(|| Token::eof(Pos { line: 0, col: 0 }))
+        self.tokens
+            .get(self.pos)
+            .cloned()
+            .unwrap_or_else(|| Token::eof(Pos { line: 0, col: 0 }))
     }
 
     fn peek_at(&self, offset: isize) -> Token {
@@ -82,7 +85,12 @@ impl Parser {
                 src_file: String::new(),
                 src_name: String::new(),
             });
-            return Token { kind: k, value: String::new(), pos: t.pos, quote: 0 };
+            return Token {
+                kind: k,
+                value: String::new(),
+                pos: t.pos,
+                quote: 0,
+            };
         }
         t
     }
@@ -193,7 +201,10 @@ impl Parser {
                         let t = self.peek();
                         self.errors.push(Diagnostic {
                             pos: t.pos,
-                            message: format!("unexpected token {} {:?} at top level", t.kind, t.value),
+                            message: format!(
+                                "unexpected token {} {:?} at top level",
+                                t.kind, t.value
+                            ),
                             warn: false,
                             info: false,
                             source: String::new(),
@@ -220,7 +231,9 @@ impl Parser {
             let pos = self.peek().pos;
             self.errors.push(Diagnostic {
                 pos,
-                message: format!("package name {name:?} expands to /lib/lib/ — consider a different name"),
+                message: format!(
+                    "package name {name:?} expands to /lib/lib/ — consider a different name"
+                ),
                 info: true,
                 warn: false,
                 source: String::new(),
@@ -267,7 +280,11 @@ impl Parser {
         if !body.is_empty() {
             f.funcs.push(Func {
                 comments: Vec::new(),
-                sig: FuncSig { name: "init".to_string(), params: Vec::new(), returns: Vec::new() },
+                sig: FuncSig {
+                    name: "init".to_string(),
+                    params: Vec::new(),
+                    returns: Vec::new(),
+                },
                 body,
                 pkg: pkg.clone(),
             });
@@ -284,14 +301,27 @@ impl Parser {
         self.expect(Kind::LBrace);
         let body = self.parse_body();
         self.expect(Kind::RBrace);
-        let func = Func { comments: Vec::new(), sig, body, pkg: String::new() };
+        let func = Func {
+            comments: Vec::new(),
+            sig,
+            body,
+            pkg: String::new(),
+        };
         self.check_read_only_params(&func);
         func
     }
 
     fn parse_rwir_decl(&mut self) -> RwirDecl {
         self.advance(); // consume 'rwir'
-        let mut decl = RwirDecl { comments: Vec::new(), sig: FuncSig { name: String::new(), params: Vec::new(), returns: Vec::new() }, pkg: String::new() };
+        let mut decl = RwirDecl {
+            comments: Vec::new(),
+            sig: FuncSig {
+                name: String::new(),
+                params: Vec::new(),
+                returns: Vec::new(),
+            },
+            pkg: String::new(),
+        };
         if self.peek().kind == Kind::Ident {
             decl.sig.name = self.advance().value;
             if self.peek().kind == Kind::Dot {
@@ -323,7 +353,11 @@ impl Parser {
 
     fn parse_func_sig(&mut self) -> FuncSig {
         self.advance(); // consume 'rwfunc'
-        let mut sig = FuncSig { name: String::new(), params: Vec::new(), returns: Vec::new() };
+        let mut sig = FuncSig {
+            name: String::new(),
+            params: Vec::new(),
+            returns: Vec::new(),
+        };
         if self.peek().kind == Kind::Ident {
             sig.name = self.advance().value;
         }
@@ -405,7 +439,10 @@ impl Parser {
             if t.kind != Kind::Ident && t.kind != Kind::Literal {
                 break;
             }
-            let mut param = Param { name: self.advance().value, ty: String::new() };
+            let mut param = Param {
+                name: self.advance().value,
+                ty: String::new(),
+            };
             if self.peek().kind == Kind::Colon {
                 self.advance();
                 param.ty = self.parse_type();
@@ -420,7 +457,13 @@ impl Parser {
             if !crate::kindexpr::valid_kindexpr(&param.ty) {
                 self.errors.push(Diagnostic {
                     pos: Pos { line: 0, col: 0 },
-                    message: format!("func {}: param {:?}: {} (got {:?})", sig.name, param.name, type_error(&param.ty), param.ty),
+                    message: format!(
+                        "func {}: param {:?}: {} (got {:?})",
+                        sig.name,
+                        param.name,
+                        type_error(&param.ty),
+                        param.ty
+                    ),
                     warn: false,
                     info: false,
                     source: String::new(),
@@ -433,7 +476,13 @@ impl Parser {
             if !crate::kindexpr::valid_kindexpr(&ret.ty) {
                 self.errors.push(Diagnostic {
                     pos: Pos { line: 0, col: 0 },
-                    message: format!("func {}: return value {:?}: {} (got {:?})", sig.name, ret.name, type_error(&ret.ty), ret.ty),
+                    message: format!(
+                        "func {}: return value {:?}: {} (got {:?})",
+                        sig.name,
+                        ret.name,
+                        type_error(&ret.ty),
+                        ret.ty
+                    ),
                     warn: false,
                     info: false,
                     source: String::new(),
@@ -476,7 +525,10 @@ impl Parser {
             if crate::kindexpr::is_variadic(&p.ty) && i != last {
                 self.errors.push(Diagnostic {
                     pos: Pos { line: 0, col: 0 },
-                    message: format!("func {}: variadic param {:?} must be the last read-param", sig.name, p.name),
+                    message: format!(
+                        "func {}: variadic param {:?} must be the last read-param",
+                        sig.name, p.name
+                    ),
                     warn: false,
                     info: false,
                     source: String::new(),
@@ -489,7 +541,10 @@ impl Parser {
             if crate::kindexpr::is_variadic(&r.ty) {
                 self.errors.push(Diagnostic {
                     pos: Pos { line: 0, col: 0 },
-                    message: format!("func {}: write-param {:?} cannot be variadic", sig.name, r.name),
+                    message: format!(
+                        "func {}: write-param {:?} cannot be variadic",
+                        sig.name, r.name
+                    ),
                     warn: false,
                     info: false,
                     source: String::new(),
@@ -540,7 +595,10 @@ impl Parser {
                 src_name: String::new(),
             });
         };
-        let check = |p: &mut Self, inst: &Instruction, ro: &std::collections::HashSet<String>, fname: &str| {
+        let check = |p: &mut Self,
+                     inst: &Instruction,
+                     ro: &std::collections::HashSet<String>,
+                     fname: &str| {
             // 写槽命中读参（非路径/索引/成员）
             for w in inst.writes.iter() {
                 if w.contains('/') || w.contains('[') || w.contains(keytree::MEMBER_SEP) {
@@ -597,12 +655,16 @@ impl Parser {
             Kind::Break => {
                 self.advance();
                 self.eat(Kind::Newline);
-                Some(Stmt::Break(ast::BreakStmt { comments: Vec::new() }))
+                Some(Stmt::Break(ast::BreakStmt {
+                    comments: Vec::new(),
+                }))
             }
             Kind::Continue => {
                 self.advance();
                 self.eat(Kind::Newline);
-                Some(Stmt::Continue(ast::ContinueStmt { comments: Vec::new() }))
+                Some(Stmt::Continue(ast::ContinueStmt {
+                    comments: Vec::new(),
+                }))
             }
             _ => self.parse_inst().map(Stmt::Instruction),
         }
@@ -619,7 +681,12 @@ impl Parser {
 
         if self.peek().kind == Kind::Else && self.peek_at(1).kind == Kind::If {
             let els = self.parse_elif_chain();
-            return Stmt::If(ast::IfStmt { comments: Vec::new(), cond, then_, else_: els });
+            return Stmt::If(ast::IfStmt {
+                comments: Vec::new(),
+                cond,
+                then_,
+                else_: els,
+            });
         }
         if self.peek().kind == Kind::Else {
             self.advance();
@@ -627,9 +694,19 @@ impl Parser {
             self.expect(Kind::LBrace);
             let els = self.parse_body();
             self.expect(Kind::RBrace);
-            return Stmt::If(ast::IfStmt { comments: Vec::new(), cond, then_, else_: els });
+            return Stmt::If(ast::IfStmt {
+                comments: Vec::new(),
+                cond,
+                then_,
+                else_: els,
+            });
         }
-        Stmt::If(ast::IfStmt { comments: Vec::new(), cond, then_, else_: Vec::new() })
+        Stmt::If(ast::IfStmt {
+            comments: Vec::new(),
+            cond,
+            then_,
+            else_: Vec::new(),
+        })
     }
 
     fn parse_elif_chain(&mut self) -> Vec<Stmt> {
@@ -644,7 +721,12 @@ impl Parser {
 
         if self.peek().kind == Kind::Else && self.peek_at(1).kind == Kind::If {
             let chain = self.parse_elif_chain();
-            return vec![Stmt::If(ast::IfStmt { comments: Vec::new(), cond, then_: body, else_: chain })];
+            return vec![Stmt::If(ast::IfStmt {
+                comments: Vec::new(),
+                cond,
+                then_: body,
+                else_: chain,
+            })];
         }
         if self.peek().kind == Kind::Else {
             self.advance();
@@ -652,9 +734,19 @@ impl Parser {
             self.expect(Kind::LBrace);
             let els = self.parse_body();
             self.expect(Kind::RBrace);
-            return vec![Stmt::If(ast::IfStmt { comments: Vec::new(), cond, then_: body, else_: els })];
+            return vec![Stmt::If(ast::IfStmt {
+                comments: Vec::new(),
+                cond,
+                then_: body,
+                else_: els,
+            })];
         }
-        vec![Stmt::If(ast::IfStmt { comments: Vec::new(), cond, then_: body, else_: Vec::new() })]
+        vec![Stmt::If(ast::IfStmt {
+            comments: Vec::new(),
+            cond,
+            then_: body,
+            else_: Vec::new(),
+        })]
     }
 
     fn parse_for(&mut self) -> Stmt {
@@ -685,7 +777,12 @@ impl Parser {
         self.expect(Kind::LBrace);
         let body = self.parse_body();
         self.expect(Kind::RBrace);
-        Stmt::For(ast::ForStmt { comments: Vec::new(), var, iter, body })
+        Stmt::For(ast::ForStmt {
+            comments: Vec::new(),
+            var,
+            iter,
+            body,
+        })
     }
 
     /// 校验散 key 字面量 `{...}` 的出现位置。`top_legal` 表示当前上下文允许顶层出现
@@ -718,7 +815,11 @@ impl Parser {
         self.expect(Kind::LBrace);
         let body = self.parse_body();
         self.expect(Kind::RBrace);
-        Stmt::While(ast::WhileStmt { comments: Vec::new(), cond, body })
+        Stmt::While(ast::WhileStmt {
+            comments: Vec::new(),
+            cond,
+            body,
+        })
     }
 
     fn parse_block_label(&mut self) -> Stmt {
@@ -728,7 +829,11 @@ impl Parser {
         self.expect(Kind::LBrace);
         let body = self.parse_body();
         self.expect(Kind::RBrace);
-        Stmt::Scope(ast::ScopeStmt { comments: Vec::new(), label, body })
+        Stmt::Scope(ast::ScopeStmt {
+            comments: Vec::new(),
+            label,
+            body,
+        })
     }
 
     fn parse_cond_inst(&mut self) -> Option<Instruction> {
@@ -833,7 +938,7 @@ impl Parser {
             // 后缀成员访问
             if self.peek().kind == Kind::Dot {
                 self.advance(); // consume ·
-                // 动态键 d·*k：段是变量（运行时取值的字符串键）。
+                                // 动态键 d·*k：段是变量（运行时取值的字符串键）。
                 if self.peek().kind == Kind::Ident && self.peek().value == "*" {
                     self.advance(); // consume *
                     if self.peek().kind == Kind::Ident {
@@ -869,7 +974,10 @@ impl Parser {
                     self.expect(Kind::RBrack);
                     let coord = format!(
                         "[{}]",
-                        idxs.iter().map(|e| e.to_string()).collect::<Vec<_>>().join(",")
+                        idxs.iter()
+                            .map(|e| e.to_string())
+                            .collect::<Vec<_>>()
+                            .join(",")
                     );
                     if chain_base.is_none() {
                         chain_base = Some(left.clone());
@@ -927,8 +1035,14 @@ impl Parser {
     fn parse_primary_expr(&mut self) -> Option<Expr> {
         let t = self.peek();
         match t.kind {
-            Kind::Arrow | Kind::RParen | Kind::RBrack | Kind::Newline | Kind::RBrace | Kind::EOF
-            | Kind::Comma | Kind::Comment => return None,
+            Kind::Arrow
+            | Kind::RParen
+            | Kind::RBrack
+            | Kind::Newline
+            | Kind::RBrace
+            | Kind::EOF
+            | Kind::Comma
+            | Kind::Comment => return None,
             _ => {}
         }
 
@@ -1006,7 +1120,10 @@ impl Parser {
                 self.advance(); // consume {
                 let mut elems = Vec::new();
                 loop {
-                    while matches!(self.peek().kind, Kind::Newline | Kind::Comma | Kind::Comment) {
+                    while matches!(
+                        self.peek().kind,
+                        Kind::Newline | Kind::Comma | Kind::Comment
+                    ) {
                         self.advance();
                     }
                     if self.peek().kind == Kind::RBrace || self.peek().kind == Kind::EOF {
@@ -1023,7 +1140,10 @@ impl Parser {
             self.advance(); // consume {
             let mut args = Vec::new();
             loop {
-                while matches!(self.peek().kind, Kind::Newline | Kind::Comma | Kind::Comment) {
+                while matches!(
+                    self.peek().kind,
+                    Kind::Newline | Kind::Comma | Kind::Comment
+                ) {
                     self.advance();
                 }
                 if self.peek().kind == Kind::RBrace || self.peek().kind == Kind::EOF {
@@ -1080,10 +1200,15 @@ impl Parser {
         if self.peek_at(1).kind == Kind::LParen {
             let name = self.advance().value;
             if name == "return" {
-                let pos = self.tokens.get(self.pos.saturating_sub(1)).map(|t| t.pos).unwrap_or(Pos { line: 0, col: 0 });
+                let pos = self
+                    .tokens
+                    .get(self.pos.saturating_sub(1))
+                    .map(|t| t.pos)
+                    .unwrap_or(Pos { line: 0, col: 0 });
                 self.errors.push(Diagnostic {
                     pos,
-                    message: "return 不接受参数；直接写 return 即可，返回值通过写参零拷贝传递".to_string(),
+                    message: "return 不接受参数；直接写 return 即可，返回值通过写参零拷贝传递"
+                        .to_string(),
                     warn: false,
                     info: false,
                     source: String::new(),
@@ -1109,15 +1234,16 @@ impl Parser {
         let is_dotted_call = {
             let lhs = self.peek();
             let lhs_ok = lhs.kind == Kind::Ident
-                || (lhs.kind == Kind::Literal && !lhs.value.is_empty() && lhs.value.as_bytes()[0] == b'/');
-            lhs_ok && self.peek_at(1).kind == Kind::Dot && self.peek_at(2).kind == Kind::Ident
-                && {
-                    let mut j = 3isize;
-                    while self.peek_at(j).kind == Kind::Dot && self.peek_at(j + 1).kind == Kind::Ident {
-                        j += 2;
-                    }
-                    self.peek_at(j).kind == Kind::LParen
+                || (lhs.kind == Kind::Literal
+                    && !lhs.value.is_empty()
+                    && lhs.value.as_bytes()[0] == b'/');
+            lhs_ok && self.peek_at(1).kind == Kind::Dot && self.peek_at(2).kind == Kind::Ident && {
+                let mut j = 3isize;
+                while self.peek_at(j).kind == Kind::Dot && self.peek_at(j + 1).kind == Kind::Ident {
+                    j += 2;
                 }
+                self.peek_at(j).kind == Kind::LParen
+            }
         };
         if is_dotted_call {
             let mut opcode = self.advance().value;
@@ -1199,12 +1325,19 @@ impl Parser {
         if t.kind == Kind::Return {
             let next = self.peek();
             match next.kind {
-                Kind::Newline | Kind::EOF | Kind::RBrace | Kind::RParen | Kind::RBrack | Kind::Comma
-                | Kind::Arrow | Kind::Comment => {}
+                Kind::Newline
+                | Kind::EOF
+                | Kind::RBrace
+                | Kind::RParen
+                | Kind::RBrack
+                | Kind::Comma
+                | Kind::Arrow
+                | Kind::Comment => {}
                 _ => {
                     self.errors.push(Diagnostic {
                         pos: next.pos,
-                        message: "return cannot take a value — use write-params for output".to_string(),
+                        message: "return cannot take a value — use write-params for output"
+                            .to_string(),
                         warn: false,
                         info: false,
                         source: String::new(),
@@ -1239,14 +1372,18 @@ impl Parser {
         let mut wtypes = Vec::new();
         loop {
             let t = self.peek();
-            if matches!(t.kind, Kind::Newline | Kind::RBrace | Kind::EOF | Kind::RParen | Kind::Comment) {
+            if matches!(
+                t.kind,
+                Kind::Newline | Kind::RBrace | Kind::EOF | Kind::RParen | Kind::Comment
+            ) {
                 break;
             }
             if t.kind == Kind::Comma {
                 self.advance();
                 continue;
             }
-            let is_path_literal = t.kind == Kind::Literal && !t.value.is_empty() && t.value.as_bytes()[0] == b'/';
+            let is_path_literal =
+                t.kind == Kind::Literal && !t.value.is_empty() && t.value.as_bytes()[0] == b'/';
             let is_ident = t.kind == Kind::Ident;
             let is_call_start = is_ident && self.peek_at(1).kind == Kind::LParen;
             let is_invalid_literal = t.kind == Kind::Literal && !is_path_literal;
@@ -1287,7 +1424,9 @@ impl Parser {
                 }
                 w.push_str(&self.advance().value); // [
                 let mut depth = 1i32;
-                while depth > 0 && !matches!(self.peek().kind, Kind::EOF | Kind::Newline | Kind::RBrace) {
+                while depth > 0
+                    && !matches!(self.peek().kind, Kind::EOF | Kind::Newline | Kind::RBrace)
+                {
                     if self.peek().kind == Kind::RBrack {
                         depth -= 1;
                     }
@@ -1307,7 +1446,10 @@ impl Parser {
                 while self.peek().kind == Kind::Dot {
                     self.advance(); // .
                     w.push_str(keytree::MEMBER_SEP);
-                    if self.peek().kind == Kind::Ident && self.peek().value == "*" && self.peek_at(1).kind == Kind::Ident {
+                    if self.peek().kind == Kind::Ident
+                        && self.peek().value == "*"
+                        && self.peek_at(1).kind == Kind::Ident
+                    {
                         w.push_str(&self.advance().value); // *
                     }
                     if self.peek().kind == Kind::Ident || self.peek().kind == Kind::Literal {
@@ -1337,7 +1479,9 @@ impl Parser {
                 let pos = self.peek().pos;
                 self.errors.push(Diagnostic {
                     pos,
-                    message: format!("ambiguous type {typ:?} in write slot — use int64 or float64 instead"),
+                    message: format!(
+                        "ambiguous type {typ:?} in write slot — use int64 or float64 instead"
+                    ),
                     warn: false,
                     info: false,
                     source: String::new(),
@@ -1373,7 +1517,8 @@ impl Parser {
                 self.advance();
                 continue;
             }
-            let is_path_lit = t.kind == Kind::Literal && !t.value.is_empty() && t.value.as_bytes()[0] == b'/';
+            let is_path_lit =
+                t.kind == Kind::Literal && !t.value.is_empty() && t.value.as_bytes()[0] == b'/';
             if (t.kind == Kind::Ident || is_path_lit)
                 && self.peek_at(1).kind == Kind::Dot
                 && self.peek_at(2).kind != Kind::LBrack
@@ -1383,7 +1528,10 @@ impl Parser {
                 while self.peek().kind == Kind::Dot && self.peek_at(1).kind != Kind::LBrack {
                     self.advance(); // .
                     w.push_str(keytree::MEMBER_SEP);
-                    if self.peek().kind == Kind::Ident && self.peek().value == "*" && self.peek_at(1).kind == Kind::Ident {
+                    if self.peek().kind == Kind::Ident
+                        && self.peek().value == "*"
+                        && self.peek_at(1).kind == Kind::Ident
+                    {
                         w.push_str(&self.advance().value); // *
                     }
                     if self.peek().kind == Kind::Ident || self.peek().kind == Kind::Literal {
@@ -1400,7 +1548,8 @@ impl Parser {
                 let mut w = self.advance().value;
                 w.push_str(&self.advance().value); // [
                 let mut depth = 1i32;
-                while depth > 0 && self.peek().kind != Kind::EOF && self.peek().kind != Kind::Arrow {
+                while depth > 0 && self.peek().kind != Kind::EOF && self.peek().kind != Kind::Arrow
+                {
                     if self.peek().kind == Kind::RBrack {
                         depth -= 1;
                     }
@@ -1413,13 +1562,17 @@ impl Parser {
                 wtypes.push(String::new());
                 continue;
             }
-            if t.kind == Kind::Ident && self.peek_at(1).kind == Kind::Dot && self.peek_at(2).kind == Kind::LBrack {
+            if t.kind == Kind::Ident
+                && self.peek_at(1).kind == Kind::Dot
+                && self.peek_at(2).kind == Kind::LBrack
+            {
                 let mut w = self.advance().value; // base
                 self.advance(); // .
                 w.push_str(keytree::MEMBER_SEP);
                 w.push_str(&self.advance().value); // [
                 let mut depth = 1i32;
-                while depth > 0 && self.peek().kind != Kind::EOF && self.peek().kind != Kind::Arrow {
+                while depth > 0 && self.peek().kind != Kind::EOF && self.peek().kind != Kind::Arrow
+                {
                     if self.peek().kind == Kind::RBrack {
                         depth -= 1;
                     }
@@ -1453,11 +1606,19 @@ impl Parser {
         let e = inst.expr.take();
         let dot_coord = arr.ends_with(keytree::MEMBER_SEP);
         let arr = arr.trim_end_matches(keytree::MEMBER_SEP).to_string();
-        let op = if dot_coord || arr.starts_with('/') { "kv·set" } else { "xv·set" };
+        let op = if dot_coord || arr.starts_with('/') {
+            "kv·set"
+        } else {
+            "xv·set"
+        };
         if dot_coord {
             inst.expr = Some(ast::call(
                 op,
-                vec![ast::leaf(&arr), ast::str_lit(&format!("[{}]", idxs)), e.unwrap_or(ast::leaf(""))],
+                vec![
+                    ast::leaf(&arr),
+                    ast::str_lit(&format!("[{}]", idxs)),
+                    e.unwrap_or(ast::leaf("")),
+                ],
             ));
         } else {
             let mut args = vec![ast::leaf(&arr)];

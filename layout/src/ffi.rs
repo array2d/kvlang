@@ -28,12 +28,7 @@ extern "C" {
         err: *mut c_char,
         err_cap: u32,
     ) -> c_int;
-    fn kvspaceGet(
-        h: Handle,
-        key: *const c_char,
-        out: *mut *mut u8,
-        out_len: *mut u32,
-    ) -> c_int;
+    fn kvspaceGet(h: Handle, key: *const c_char, out: *mut *mut u8, out_len: *mut u32) -> c_int;
     fn kvspaceList(
         h: Handle,
         prefix: *const c_char,
@@ -71,21 +66,11 @@ extern "C" {
         out: *mut *mut u8,
         out_len: *mut u32,
     ) -> c_int;
-    fn kvspaceTlvEncodePtr(
-        kind: *const c_char,
-        raw: *const u8,
-        raw_len: u32,
-        dims: *const i32,
-        ndim: i32,
-        out: *mut *mut u8,
-        out_len: *mut u32,
-    ) -> c_int;
     fn kvspaceDecodeHead(data: *const u8, data_len: u32, out: *mut kvspaceHead_t) -> c_int;
 
     fn kvspaceNewPtr(
-        kind: *const c_char,
+        target_kindexpr: *const c_char,
         target: *const c_char,
-        array_len: i32,
         out: *mut *mut u8,
         out_len: *mut u32,
     ) -> c_int;
@@ -190,7 +175,14 @@ impl Kv {
     pub fn list(&mut self, prefix: &str, expand_ext: bool, resolve: bool) -> Vec<String> {
         let c = CString::new(prefix).expect("no NUL in prefix");
         let bytes = call_alloc(|out, out_len| unsafe {
-            kvspaceList(self.h, c.as_ptr(), expand_ext as c_int, resolve as c_int, out, out_len)
+            kvspaceList(
+                self.h,
+                c.as_ptr(),
+                expand_ext as c_int,
+                resolve as c_int,
+                out,
+                out_len,
+            )
         });
         if bytes.is_empty() {
             return Vec::new();
@@ -220,7 +212,13 @@ impl Kv {
         let ce = CString::new(ext_path).expect("no NUL");
         let mut err: [c_char; 256] = [0; 256];
         let ret = unsafe {
-            kvspaceMkindexExt(self.h, cp.as_ptr(), ce.as_ptr(), err.as_mut_ptr(), err.len() as u32)
+            kvspaceMkindexExt(
+                self.h,
+                cp.as_ptr(),
+                ce.as_ptr(),
+                err.as_mut_ptr(),
+                err.len() as u32,
+            )
         };
         err_ret(&mut err, ret)
     }
@@ -228,9 +226,8 @@ impl Kv {
     pub fn del_ext_index(&mut self, path: &str) -> Result<(), String> {
         let c = CString::new(path).expect("no NUL");
         let mut err: [c_char; 256] = [0; 256];
-        let ret = unsafe {
-            kvspaceRmindexExt(self.h, c.as_ptr(), err.as_mut_ptr(), err.len() as u32)
-        };
+        let ret =
+            unsafe { kvspaceRmindexExt(self.h, c.as_ptr(), err.as_mut_ptr(), err.len() as u32) };
         err_ret(&mut err, ret)
     }
 }
@@ -259,18 +256,15 @@ pub fn tlv_encode(kind: &str, raw: &[u8], array_len: i32) -> Vec<u8> {
     let ck = CString::new(kind).expect("no NUL in kind");
     let dims = al_to_dims(kind, array_len);
     call_alloc(|out, out_len| unsafe {
-        kvspaceTlvEncode(ck.as_ptr(), raw.as_ptr(), raw.len() as u32,
-                           dims.as_ptr(), dims.len() as i32, out, out_len)
-    })
-}
-
-/// 通用 TLV 编码（软链接，ref=1）。
-pub fn tlv_encode_ptr(kind: &str, raw: &[u8], array_len: i32) -> Vec<u8> {
-    let ck = CString::new(kind).expect("no NUL in kind");
-    let dims = al_to_dims(kind, array_len);
-    call_alloc(|out, out_len| unsafe {
-        kvspaceTlvEncodePtr(ck.as_ptr(), raw.as_ptr(), raw.len() as u32,
-                               dims.as_ptr(), dims.len() as i32, out, out_len)
+        kvspaceTlvEncode(
+            ck.as_ptr(),
+            raw.as_ptr(),
+            raw.len() as u32,
+            dims.as_ptr(),
+            dims.len() as i32,
+            out,
+            out_len,
+        )
     })
 }
 
@@ -291,12 +285,10 @@ pub fn decode_head(data: &[u8]) -> kvspaceHead_t {
 
 // ── 标准标量构造器 ───────────────────────────────────────────────────
 
-pub fn new_ptr(kind: &str, target: &str, array_len: i32) -> Vec<u8> {
-    let ck = CString::new(kind).expect("no NUL");
+pub fn new_ptr(target_kindexpr: &str, target: &str) -> Vec<u8> {
+    let ck = CString::new(target_kindexpr).expect("no NUL");
     let ct = CString::new(target).expect("no NUL");
-    call_alloc(|out, out_len| unsafe {
-        kvspaceNewPtr(ck.as_ptr(), ct.as_ptr(), array_len, out, out_len)
-    })
+    call_alloc(|out, out_len| unsafe { kvspaceNewPtr(ck.as_ptr(), ct.as_ptr(), out, out_len) })
 }
 
 pub fn new_char(kind: &str, s: &str) -> Vec<u8> {

@@ -191,7 +191,7 @@ pub extern "C" fn kvlangLayoutDump(
 /// kindexpr 解析结果（repr(C)，内存布局 = i32,i32,[i32;8],i32,[u8;64]）。
 #[repr(C)]
 pub struct kvlangKindexpr {
-    pub ref_: i32,      // 0=内联 1=软链接(*) 2=扩展句柄(@)
+    pub ref_: i32,      // 0=内联 1=指针(*) 2=扩展句柄(@)
     pub ndim: i32,      // 维数（0=标量）
     pub dims: [i32; 8], // 各维大小（前 ndim 项有效）
     pub array_len: i32, // 元素总数（标量=1，多维=各维乘积）
@@ -218,7 +218,11 @@ pub extern "C" fn kvlangKindexprParse(kindexpr: *const c_char, out: *mut kvlangK
             out.dims[i] = *d;
         }
     }
-    out.array_len = if dims.is_empty() { 1 } else { dims.iter().product() };
+    out.array_len = if dims.is_empty() {
+        1
+    } else {
+        dims.iter().product()
+    };
     let kb = kind.as_bytes();
     let n = kb.len().min(63);
     out.kind[..n].copy_from_slice(&kb[..n]);

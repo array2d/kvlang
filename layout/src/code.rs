@@ -32,7 +32,11 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<(), String> {
 
     let mut any_code = false;
     for func in &file.funcs {
-        let pkg = if func.pkg.is_empty() { file.package.clone() } else { func.pkg.clone() };
+        let pkg = if func.pkg.is_empty() {
+            file.package.clone()
+        } else {
+            func.pkg.clone()
+        };
         let mut lowered = lower::lower_func(func);
         write_func(kv, &pkg, &mut lowered);
         any_code = true;
@@ -48,7 +52,11 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<(), String> {
     if !body.is_empty() {
         let init_fn = Func {
             comments: Vec::new(),
-            sig: super::ast::FuncSig { name: "init".to_string(), params: Vec::new(), returns: Vec::new() },
+            sig: super::ast::FuncSig {
+                name: "init".to_string(),
+                params: Vec::new(),
+                returns: Vec::new(),
+            },
             body,
             pkg: String::new(),
         };
@@ -118,11 +126,19 @@ pub fn dump(kv: &mut Kv, lib: &str) -> String {
         let src = kvkind::value_string(&kv.get_one(&format!("{prefix}.src")));
         let mut slots = Vec::new();
         collect_slots(kv, &format!("{prefix}/"), &mut slots);
-        funcs.push(DumpFunc { pkg: fpkg, name, src, slots, dir: format!("{prefix}/") });
+        funcs.push(DumpFunc {
+            pkg: fpkg,
+            name,
+            src,
+            slots,
+            dir: format!("{prefix}/"),
+        });
     } else {
         // 虚拟 pkg：func dir 以 prefix 为前缀（`/lib/foo` 匹配 `/lib/foo·*` 与 `/lib/foo/*`）。
         collect_funcs(kv, "/lib/", "", &mut funcs, &mut decls);
-        let under = |dir: &str| dir.starts_with(&format!("{prefix}·")) || dir.starts_with(&format!("{prefix}/"));
+        let under = |dir: &str| {
+            dir.starts_with(&format!("{prefix}·")) || dir.starts_with(&format!("{prefix}/"))
+        };
         funcs.retain(|f| under(&f.dir));
         decls.retain(|d| {
             let path = d.split(' ').next().unwrap_or("");
@@ -173,14 +189,24 @@ fn pkg_node<'a>(root: &'a mut DumpNode, pkg: &str) -> &'a mut DumpNode {
 
 /// 递归收集 /lib 下的函数（目录 + 同名 .src）与 defrwir 声明。pkg 用 / 分隔累积。
 /// 目录判定不依赖 list 的尾斜杠（shm 后端不带、redis 带）——用 is_func_dir / 子项非空 探测。
-fn collect_funcs(kv: &mut Kv, prefix: &str, pkg: &str, funcs: &mut Vec<DumpFunc>, decls: &mut Vec<String>) {
+fn collect_funcs(
+    kv: &mut Kv,
+    prefix: &str,
+    pkg: &str,
+    funcs: &mut Vec<DumpFunc>,
+    decls: &mut Vec<String>,
+) {
     for c in kv.list(prefix, false, true) {
         if c.ends_with(keytree::SRC_EXT) {
             // .src 与其目录成对，随目录处理，此处跳过。
             continue;
         }
         let base = c.trim_end_matches('/').to_string();
-        let sub_pkg = if pkg.is_empty() { base.clone() } else { format!("{pkg}/{base}") };
+        let sub_pkg = if pkg.is_empty() {
+            base.clone()
+        } else {
+            format!("{pkg}/{base}")
+        };
         // 函数目录（含 [0,0] 签名槽）→ 重建源码；普通目录 → 递归；成员容器（· 结尾）→ 递归；否则声明叶。
         let dir_sub = format!("{prefix}{base}/");
         let mem_sub = format!("{prefix}{base}·");
@@ -189,7 +215,13 @@ fn collect_funcs(kv: &mut Kv, prefix: &str, pkg: &str, funcs: &mut Vec<DumpFunc>
             let src = kvkind::value_string(&kv.get_one(&format!("{prefix}{base}.src")));
             let mut slots = Vec::new();
             collect_slots(kv, &dir_sub, &mut slots);
-            funcs.push(DumpFunc { pkg: fpkg, name, src, slots, dir: dir_sub });
+            funcs.push(DumpFunc {
+                pkg: fpkg,
+                name,
+                src,
+                slots,
+                dir: dir_sub,
+            });
         } else if !kv.list(&dir_sub, false, true).is_empty() {
             collect_funcs(kv, &dir_sub, &sub_pkg, funcs, decls);
         } else if !kv.list(&mem_sub, false, true).is_empty() {
@@ -213,7 +245,11 @@ fn func_identity(pkg: &str, base: &str) -> (String, String) {
         Some(i) => {
             let seg = &base[..i];
             let name = &base[i + keytree::MEMBER_SEP.len()..];
-            let fpkg = if pkg.is_empty() { seg.to_string() } else { format!("{pkg}/{seg}") };
+            let fpkg = if pkg.is_empty() {
+                seg.to_string()
+            } else {
+                format!("{pkg}/{seg}")
+            };
             (fpkg, name.to_string())
         }
         None => (pkg.to_string(), base.to_string()),
@@ -300,11 +336,17 @@ pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) {
     ));
     for (i, p) in fn_.sig.params.iter().enumerate() {
         let slot = format!("[0,-{}]", i + 1);
-        pairs.push((format!("{func_dir}/{}", p.name), ffi::new_ptr(kvkind::KIND_CHAR, &slot, 1)));
+        pairs.push((
+            format!("{func_dir}/{}", p.name),
+            ffi::new_ptr(kvkind::KIND_CHAR, &slot),
+        ));
     }
     for (i, r) in fn_.sig.returns.iter().enumerate() {
         let slot = format!("[0,{}]", i + 1);
-        pairs.push((format!("{func_dir}/{}", r.name), ffi::new_ptr(kvkind::KIND_CHAR, &slot, 1)));
+        pairs.push((
+            format!("{func_dir}/{}", r.name),
+            ffi::new_ptr(kvkind::KIND_CHAR, &slot),
+        ));
     }
     let _ = kv.set(&pairs);
 
@@ -317,12 +359,23 @@ pub fn write_rwir_decl(kv: &mut Kv, decl: &RwirDecl) {
     if !decl.pkg.is_empty() {
         opcode = format!("{}{}{opcode}", decl.pkg, keytree::MEMBER_SEP);
     }
-    let v = kvkind::new_defrwir(decl.sig.num_reads(), decl.sig.num_writes(), &decl.sig.kindexp_list().join("\n"));
+    let v = kvkind::new_defrwir(
+        decl.sig.num_reads(),
+        decl.sig.num_writes(),
+        &decl.sig.kindexp_list().join("\n"),
+    );
     let _ = kv.set(&[(keytree::rwir(&opcode), v)]);
 }
 
 /// 将 body 写入 /lib/<pkg>/<name>/ 下。offset 起始 idx（顶层函数=1）。
-fn write_body(kv: &mut Kv, pkg: &str, name: &str, body: &[Stmt], type_map: &mut HashMap<String, String>, offset: i32) {
+fn write_body(
+    kv: &mut Kv,
+    pkg: &str,
+    name: &str,
+    body: &[Stmt],
+    type_map: &mut HashMap<String, String>,
+    offset: i32,
+) {
     let prefix = keytree::lib_func(pkg, name);
     let mut idx = offset;
     for st in body {
@@ -347,18 +400,25 @@ fn write_stmt(
                 }
             }
             let (opcode, reads) = s.flat();
-            let target_char = if s.writes.len() == 1 && !s.write_types.is_empty() && kvkind::is_char_kind(&s.write_types[0]) {
+            let target_char = if s.writes.len() == 1
+                && !s.write_types.is_empty()
+                && kvkind::is_char_kind(&s.write_types[0])
+            {
                 s.write_types[0].as_str()
             } else {
                 ""
             };
 
-            let mut pairs: Vec<(String, Vec<u8>)> = Vec::with_capacity(1 + reads.len() + s.writes.len());
+            let mut pairs: Vec<(String, Vec<u8>)> =
+                Vec::with_capacity(1 + reads.len() + s.writes.len());
             if !opcode.is_empty() {
                 pairs.push((format!("{prefix}/[{n},0]"), opcode_value(&opcode)));
             }
             for (j, r) in reads.iter().enumerate() {
-                pairs.push((format!("{prefix}/[{n},-{}]", j + 1), slot_value(r, target_char)));
+                pairs.push((
+                    format!("{prefix}/[{n},-{}]", j + 1),
+                    slot_value(r, target_char),
+                ));
             }
             for (j, w) in s.writes.iter().enumerate() {
                 pairs.push((format!("{prefix}/[{n},{}]", j + 1), slot_value(w, "")));
@@ -372,7 +432,15 @@ fn write_stmt(
             let scope_prefix = format!("{prefix}/{}", s.label);
             let mut scope_idx = 0;
             for child in &s.body {
-                write_stmt_scope(kv, child, &scope_prefix, &mut scope_idx, type_map, pkg, prefix);
+                write_stmt_scope(
+                    kv,
+                    child,
+                    &scope_prefix,
+                    &mut scope_idx,
+                    type_map,
+                    pkg,
+                    prefix,
+                );
             }
         }
         _ => {}
@@ -397,18 +465,25 @@ fn write_stmt_scope(
                 }
             }
             let (opcode, reads) = s.flat();
-            let target_char = if s.writes.len() == 1 && !s.write_types.is_empty() && kvkind::is_char_kind(&s.write_types[0]) {
+            let target_char = if s.writes.len() == 1
+                && !s.write_types.is_empty()
+                && kvkind::is_char_kind(&s.write_types[0])
+            {
                 s.write_types[0].as_str()
             } else {
                 ""
             };
 
-            let mut pairs: Vec<(String, Vec<u8>)> = Vec::with_capacity(1 + reads.len() + s.writes.len());
+            let mut pairs: Vec<(String, Vec<u8>)> =
+                Vec::with_capacity(1 + reads.len() + s.writes.len());
             if !opcode.is_empty() {
                 pairs.push((format!("{scope_prefix}[{n},0]"), opcode_value(&opcode)));
             }
             for (j, r) in reads.iter().enumerate() {
-                pairs.push((format!("{scope_prefix}[{n},-{}]", j + 1), slot_value(r, target_char)));
+                pairs.push((
+                    format!("{scope_prefix}[{n},-{}]", j + 1),
+                    slot_value(r, target_char),
+                ));
             }
             for (j, w) in s.writes.iter().enumerate() {
                 pairs.push((format!("{scope_prefix}[{n},{}]", j + 1), slot_value(w, "")));
@@ -422,7 +497,15 @@ fn write_stmt_scope(
             let child_prefix = format!("{func_prefix}/{}", s.label);
             let mut child_idx = 0;
             for child in &s.body {
-                write_stmt_scope(kv, child, &child_prefix, &mut child_idx, type_map, pkg, func_prefix);
+                write_stmt_scope(
+                    kv,
+                    child,
+                    &child_prefix,
+                    &mut child_idx,
+                    type_map,
+                    pkg,
+                    func_prefix,
+                );
             }
         }
         _ => {}
@@ -450,7 +533,11 @@ fn slot_value(val: &str, target_char: &str) -> Vec<u8> {
         if !s.is_empty() && s.as_bytes()[0] == b'"' {
             s = &s[1..];
         }
-        let k = if target_char.is_empty() { kvkind::KIND_CHAR } else { target_char };
+        let k = if target_char.is_empty() {
+            kvkind::KIND_CHAR
+        } else {
+            target_char
+        };
         return ffi::new_char(k, s);
     }
     if val == "true" || val == "false" {
@@ -466,7 +553,9 @@ fn slot_value(val: &str, target_char: &str) -> Vec<u8> {
 }
 
 fn count_direct_insts(body: &[Stmt]) -> i32 {
-    body.iter().filter(|st| matches!(st, Stmt::Instruction(_))).count() as i32
+    body.iter()
+        .filter(|st| matches!(st, Stmt::Instruction(_)))
+        .count() as i32
 }
 
 fn is_literal(s: &str) -> bool {
@@ -501,15 +590,30 @@ mod tests {
 
     #[test]
     fn nested_lib_layout_and_merge() {
-        let mut kv = Kv::conn(&format!("fs:///tmp/kvlanglayout_nested_{}", std::process::id()));
+        let mut kv = Kv::conn(&format!(
+            "fs:///tmp/kvlanglayout_nested_{}",
+            std::process::id()
+        ));
         init_dirs(&mut kv).unwrap();
 
-        compile(&mut kv, "lib a {\nlib b {\nrwfunc f() -> (r:int64) {\n1 -> r\n}\n}\n}\n").unwrap();
+        compile(
+            &mut kv,
+            "lib a {\nlib b {\nrwfunc f() -> (r:int64) {\n1 -> r\n}\n}\n}\n",
+        )
+        .unwrap();
         assert_eq!(kvkind::kind(&kv.get_one("/lib/a/b·f/[0,0]")), "defrwfunc");
 
         // 同 lib a 下再 layout 另一嵌套 lib c，验证 b·f 未被整库删除（增量合并）
-        compile(&mut kv, "lib a {\nlib c {\nrwfunc g() -> (r:int64) {\n2 -> r\n}\n}\n}\n").unwrap();
-        assert_eq!(kvkind::kind(&kv.get_one("/lib/a/b·f/[0,0]")), "defrwfunc", "b·f 应保留");
+        compile(
+            &mut kv,
+            "lib a {\nlib c {\nrwfunc g() -> (r:int64) {\n2 -> r\n}\n}\n}\n",
+        )
+        .unwrap();
+        assert_eq!(
+            kvkind::kind(&kv.get_one("/lib/a/b·f/[0,0]")),
+            "defrwfunc",
+            "b·f 应保留"
+        );
         assert_eq!(kvkind::kind(&kv.get_one("/lib/a/c·g/[0,0]")), "defrwfunc");
     }
 }

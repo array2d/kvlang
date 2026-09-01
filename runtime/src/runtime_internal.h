@@ -37,10 +37,8 @@ extern int   kvspaceWatch(void *h, const char *key, const uint8_t *target, uint3
                            uint64_t tick_ns, uint8_t **out, uint32_t *out_len);
 extern int   kvspaceTlvEncode(const char *kind, const uint8_t *raw, uint32_t raw_len,
                                 const int32_t *dims, int32_t ndim, uint8_t **out, uint32_t *out_len);
-extern int   kvspaceTlvEncodePtr(const char *kind, const uint8_t *raw, uint32_t raw_len,
-                                    const int32_t *dims, int32_t ndim, uint8_t **out, uint32_t *out_len);
 extern int   kvspaceDecodeHead(const uint8_t *data, uint32_t data_len, kvspaceHead_t *out);
-extern int   kvspaceNewPtr(const char *kind, const char *target, int32_t array_len,
+extern int   kvspaceNewPtr(const char *target_kindexpr, const char *target,
                              uint8_t **out, uint32_t *out_len);
 extern int   kvspaceNewChar(const uint8_t *bytes, uint32_t len, uint8_t **out, uint32_t *out_len);
 extern int   kvspaceNewBool(uint8_t v, uint8_t **out, uint32_t *out_len);
@@ -58,7 +56,7 @@ extern int   kvspaceNewFloat64(double v, uint8_t **out, uint32_t *out_len);
 typedef struct {
     const char *kind;   /* base kind（kindexpr 子串，非 NUL 终止） */
     int32_t     kind_len;
-    int32_t     ref;    /* 0=内联 1=软链接 2=扩展句柄 */
+    int32_t     ref;    /* 0=内联 1=指针 2=扩展句柄 */
     int32_t     ndim;
     int32_t     dims[X_MAX_NDIM];
     int32_t     array_len;
@@ -121,8 +119,7 @@ void kvlangXvalueNewBool(kvlangXvalue_t *v, bool b);
 void kvlangXvalueNewCharUtf8(kvlangXvalue_t *v, const char *s);
 void kvlangXvalueNewCharUtf32(kvlangXvalue_t *v, const char *s);  /* UTF-8 → UTF-32 LE body */
 void kvlangXvalueNewCharKind(kvlangXvalue_t *v, const char *kind, const char *s);
-void kvlangXvalueNewPtr(kvlangXvalue_t *v, const char *kind, const char *target, int32_t al);
-void kvlangXvalueNewPtrDims(kvlangXvalue_t *v, const char *kind, const char *target, const int32_t *dims, int32_t ndim);
+void kvlangXvalueNewPtr(kvlangXvalue_t *v, const char *target_kindexpr, const char *target);
 void kvlangXvalueNewRwir(kvlangXvalue_t *v, int32_t nr, int32_t nw, const char *sig);
 void kvlangXvalueNewTlv(kvlangXvalue_t *v, const char *kind, const uint8_t *raw, uint32_t raw_len, int32_t al);
 void kvlangXvalueNewTlvDims(kvlangXvalue_t *v, const char *kind, const uint8_t *raw, uint32_t raw_len,

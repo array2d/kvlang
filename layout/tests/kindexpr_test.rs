@@ -19,5 +19,8 @@ fn parse_type_expression_signature() {
 fn reject_malformed_type_expression() {
     let src = "rwfunc f(A:[2,3) -> () {\n}\n";
     let (_, diags) = parser::parse_code(src).unwrap();
-    assert!(parser::has_errors(&diags), "expected errors for malformed type");
+    assert!(
+        parser::has_errors(&diags),
+        "expected errors for malformed type"
+    );
 }

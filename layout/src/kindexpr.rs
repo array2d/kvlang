@@ -14,9 +14,28 @@
 fn known_kind(k: &str) -> bool {
     matches!(
         k,
-        "bool" | "int8" | "int16" | "int32" | "int64" | "uint8" | "uint16" | "uint32" | "uint64"
-            | "float32" | "float64" | "char/utf32" | "char/utf8" | "char/ascii" | "object"
-            | "stringkeymap" | "index" | "extindex" | "rwir" | "rwfunc" | "scope" | "time"
+        "bool"
+            | "int8"
+            | "int16"
+            | "int32"
+            | "int64"
+            | "uint8"
+            | "uint16"
+            | "uint32"
+            | "uint64"
+            | "float32"
+            | "float64"
+            | "char/utf32"
+            | "char/utf8"
+            | "char/ascii"
+            | "object"
+            | "stringkeymap"
+            | "index"
+            | "extindex"
+            | "rwir"
+            | "rwfunc"
+            | "scope"
+            | "time"
             | "duration"
     )
 }
@@ -131,13 +150,31 @@ mod tests {
     #[test]
     fn valid() {
         for e in [
-            "int64", "uint8", "float32", "bool", "any",
-            "char/utf8", "char/utf32", "char/ascii", "object", "stringkeymap", "index",
-            "[]float32", "[2]float32", "[2,3]float32", "[2,3,4]float64",
-            "[?,768]float32", "[?,?]int8",
-            "int64|float64", "[2,3]float32|float32", "[]float32|[]float64",
-            "bool|char/utf8", "index|object",
-            "any...", "int64|float64...", "[]float32...",
+            "int64",
+            "uint8",
+            "float32",
+            "bool",
+            "any",
+            "char/utf8",
+            "char/utf32",
+            "char/ascii",
+            "object",
+            "stringkeymap",
+            "index",
+            "[]float32",
+            "[2]float32",
+            "[2,3]float32",
+            "[2,3,4]float64",
+            "[?,768]float32",
+            "[?,?]int8",
+            "int64|float64",
+            "[2,3]float32|float32",
+            "[]float32|[]float64",
+            "bool|char/utf8",
+            "index|object",
+            "any...",
+            "int64|float64...",
+            "[]float32...",
         ] {
             assert!(valid_kindexpr(e), "{e} should be valid");
         }
@@ -157,10 +194,35 @@ mod tests {
     #[test]
     fn invalid() {
         for e in [
-            "", "int|", "|int", "int||float64", "|", "[]", "[2]", "[?]",
-            "[2", "2]", "[2,]float32", "[,2]float32", "[2 3]float32",
-            "*int64", "@int64", "int64*", "float64|", "int ", "float32,float64",
-            "int", "uint", "float", "num", "char", "int4", "fp8", "fp16", "string", "charbyte",
+            "",
+            "int|",
+            "|int",
+            "int||float64",
+            "|",
+            "[]",
+            "[2]",
+            "[?]",
+            "[2",
+            "2]",
+            "[2,]float32",
+            "[,2]float32",
+            "[2 3]float32",
+            "*int64",
+            "@int64",
+            "int64*",
+            "float64|",
+            "int ",
+            "float32,float64",
+            "int",
+            "uint",
+            "float",
+            "num",
+            "char",
+            "int4",
+            "fp8",
+            "fp16",
+            "string",
+            "charbyte",
         ] {
             assert!(!valid_kindexpr(e), "{e} should be invalid");
         }
@@ -190,7 +252,10 @@ mod tests {
         ];
         for (expr, kind, ndim, dims, want) in cases {
             let got = match_kindexpr(expr, kind, ndim, dims);
-            assert_eq!(got, want, "match_kindexpr({expr}, {kind}, ndim={ndim}, dims={dims:?})");
+            assert_eq!(
+                got, want,
+                "match_kindexpr({expr}, {kind}, ndim={ndim}, dims={dims:?})"
+            );
         }
     }
 }

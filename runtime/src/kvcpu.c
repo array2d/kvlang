@@ -477,14 +477,14 @@ static int64_t handoff_seq = 0;
 
 int handoff_external_rwir(kvlangKv_t *kv, const char *vtid, const char *pc, kvlangRwirInst_t *inst) {
     char *base = kvlangKeytreeRwir(inst->opcode);
-    kvlangStrbuf_t todo, done; kvlangStrbufInit(&todo); kvlangStrbufInit(&done);
-    kvlangStrbufPrintf(&todo, "%s/todo/%s", base, vtid);
+    kvlangStrbuf_t vids, done; kvlangStrbufInit(&vids); kvlangStrbufInit(&done);
+    kvlangStrbufPrintf(&vids, "%s/vids/%s", base, vtid);
     kvlangStrbufPrintf(&done, "%s/done/%s", base, vtid);
     int64_t id = ++handoff_seq;
     kvlangStrbuf_t payload; kvlangStrbufInit(&payload);
     kvlangStrbufPrintf(&payload, "%s|%lld", pc, (long long)id);
     kvlangXvalue_t pv; kvlangXvalueNewCharUtf8(&pv, payload.p);
-    kvlangKvPair_t p = { todo.p, pv };
+    kvlangKvPair_t p = { vids.p, pv };
     char err[256];
     kvlangKvSet(kv, &p, 1, err, sizeof err);
     kvlangXvalueFree(&pv);
@@ -496,7 +496,7 @@ int handoff_external_rwir(kvlangKv_t *kv, const char *vtid, const char *pc, kvla
     char *got_s = kvlangXvalueNone(&got) ? strdup("") : kvlangXvalueValueString(&got);
     bool ok = strcmp(got_s, id_str) == 0;
     free(got_s); kvlangXvalueFree(&got); kvlangXvalueFree(&want);
-    kvlangStrbufFree(&todo); kvlangStrbufFree(&done); kvlangStrbufFree(&payload); free(base);
+    kvlangStrbufFree(&vids); kvlangStrbufFree(&done); kvlangStrbufFree(&payload); free(base);
     if (!ok) {
         char msg[256]; snprintf(msg, sizeof msg, "RuntimeError: external rwir %s timeout", inst->opcode);
         kvlangVthreadSetError(kv, vtid, pc, msg);

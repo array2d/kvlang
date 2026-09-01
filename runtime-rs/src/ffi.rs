@@ -147,6 +147,11 @@ unsafe extern "C" {
         pc: *const c_char,
         idx: c_int,
     ) -> *mut c_char;
+    pub fn kvlang_rwirextResolveReadPath(
+        kvspace: *mut c_void,
+        pc: *const c_char,
+        idx: c_int,
+    ) -> *mut c_char;
     pub fn kvlang_rwirextResolveWrite(
         kvspace: *mut c_void,
         pc: *const c_char,

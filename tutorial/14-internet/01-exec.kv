@@ -1,0 +1,26 @@
+# internet/proc·exec：同步执行外部命令到结束，返回 uint8 退出码
+#   exec(args, envs) -> exitcode。args/envs 为 stringkeymap（{..} 字面量），成员 []char/utf32
+#   args 首成员=可执行文件；envs 空(map())=继承父环境，非空=完整替换
+#   exitcode：正常=退出码；信号终止=128+signo；spawn 失败/无 argv=127（对齐 shell）
+# 期望输出:
+#   hello from child
+#   ok= 0
+#   seven= 7
+#   missing= 127
+#   FOO=bar123
+rwfunc test() -> () {
+	noenv = map()
+	echoargs = {"sh", "-c", "echo hello from child"}
+	internet/proc·exec(echoargs, noenv) -> ok
+	println("ok=", ok)
+	failargs = {"sh", "-c", "exit 7"}
+	internet/proc·exec(failargs, noenv) -> seven
+	println("seven=", seven)
+	badargs = {"/no/such/program"}
+	internet/proc·exec(badargs, noenv) -> missing
+	println("missing=", missing)
+	envargs = {"sh", "-c", "echo FOO=$FOO"}
+	envs = {"FOO=bar123"}
+	internet/proc·exec(envargs, envs) -> withenv
+	println("withenv=", withenv)
+}

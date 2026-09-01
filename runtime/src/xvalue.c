@@ -55,18 +55,22 @@ static int32_t al_to_dims(const char *kind, int32_t array_len, int32_t *dims) {
     return 0;
 }
 
-static uint8_t *kvlangXvalueEncodeTlv(const char *kind, int32_t ref, const uint8_t *raw,
+/* .so 分配的 TLV → 转交 runtime 所有权（统一 free 释放）。 */
+static uint8_t *kvlangXvalueOwn(uint8_t *tmp, uint32_t tl, uint32_t *out_len) {
+    if (!tmp) { *out_len = 0; return NULL; }
+    uint8_t *buf = malloc(tl);
+    memcpy(buf, tmp, tl);
+    kvspaceBytesFree(tmp, tl);
+    *out_len = tl;
+    return buf;
+}
+
+static uint8_t *kvlangXvalueEncodeTlv(const char *kind, const uint8_t *raw,
                               uint32_t raw_len, int32_t array_len, uint32_t *out_len) {
     int32_t dims[1]; int32_t ndim = al_to_dims(kind, array_len, dims);
     uint8_t *tmp = NULL; uint32_t tl = 0;
-    int rc = ref == 1 ? kvspaceTlvEncodePtr(kind, raw, raw_len, dims, ndim, &tmp, &tl)
-                      : kvspaceTlvEncode(kind, raw, raw_len, dims, ndim, &tmp, &tl);
-    if (rc != 0 || !tmp) { *out_len = 0; return NULL; }
-    uint8_t *buf = malloc(tl);          /* 转交 runtime 所有权（统一 free 释放） */
-    memcpy(buf, tmp, tl);
-    kvspaceBytesFree(tmp, tl);        /* .so 分配器配对释放 */
-    *out_len = tl;
-    return buf;
+    if (kvspaceTlvEncode(kind, raw, raw_len, dims, ndim, &tmp, &tl) != 0) { *out_len = 0; return NULL; }
+    return kvlangXvalueOwn(tmp, tl, out_len);
 }
 
 int kvlangXvalueHead(const kvlangXvalue_t *v, kvspaceHead_t *h) {
@@ -321,7 +325,7 @@ char *kvlangXvalueValueString(const kvlangXvalue_t *v) {
 
 void kvlangXvalueNewTlv(kvlangXvalue_t *v, const char *kind, const uint8_t *raw, uint32_t raw_len, int32_t al) {
     uint32_t len;
-    v->data = kvlangXvalueEncodeTlv(kind, 0, raw, raw_len, al, &len);
+    v->data = kvlangXvalueEncodeTlv(kind, raw, raw_len, al, &len);
     v->len = len;
 }
 
@@ -374,22 +378,12 @@ void kvlangXvalueNewCharUtf32(kvlangXvalue_t *v, const char *s) {
     kvlangXvalueNewTlv(v, KVSPACE_KIND_CHAR, (const uint8_t *)raw.p, (uint32_t)raw.len, (int32_t)(raw.len / 4));
     kvlangStrbufFree(&raw);
 }
-void kvlangXvalueNewPtr(kvlangXvalue_t *v, const char *kind, const char *target, int32_t al) {
-    uint32_t len;
-    v->data = kvlangXvalueEncodeTlv(kind, 1, (const uint8_t *)target, (uint32_t)strlen(target), al, &len);
+/* 指针：head kindexpr = "*" + target_kindexpr（目标完整 kindexpr），body = 目标 key。 */
+void kvlangXvalueNewPtr(kvlangXvalue_t *v, const char *target_kindexpr, const char *target) {
+    uint8_t *tmp = NULL; uint32_t tl = 0, len = 0;
+    if (kvspaceNewPtr(target_kindexpr, target, &tmp, &tl) != 0) { v->data = NULL; v->len = 0; return; }
+    v->data = kvlangXvalueOwn(tmp, tl, &len);
     v->len = len;
-}
-
-void kvlangXvalueNewPtrDims(kvlangXvalue_t *v, const char *kind, const char *target,
-                            const int32_t *dims, int32_t ndim) {
-    uint8_t *tmp = NULL; uint32_t tl = 0;
-    if (kvspaceTlvEncodePtr(kind, (const uint8_t *)target, (uint32_t)strlen(target), dims, ndim, &tmp, &tl) != 0 || !tmp) {
-        v->data = NULL; v->len = 0; return;
-    }
-    uint8_t *buf = malloc(tl);
-    memcpy(buf, tmp, tl);
-    kvspaceBytesFree(tmp, tl);
-    v->data = buf; v->len = tl;
 }
 void kvlangXvalueNewRwir(kvlangXvalue_t *v, int32_t nr, int32_t nw, const char *sig) {
     size_t sl = strlen(sig);
