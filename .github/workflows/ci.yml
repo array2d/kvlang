@@ -14,6 +14,7 @@ jobs:
           make layout
           sudo cp layout/target/release/libkvlanglayout.so /usr/lib/
           make runtime-rs
+          sudo make install
       - name: 测试
         env: { KVSPACE: "shm:///tmp/kvlang_ci" }
         run: python3 tutorial/test.py
