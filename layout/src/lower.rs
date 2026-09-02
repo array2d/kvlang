@@ -757,9 +757,10 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
     }
     match opcode {
         "kvlen" | "ndarray·numel" | "ndarray·dim" | "kv·listlen" | "string·len" | "string·ord"
-        | "string·cmp" | "string·find" | "string·parseint" => {
+        | "string·cmp" | "string·find" | "string·parseint" | "xv·bodylen" => {
             return "int64".to_string();
         }
+        "xv·kindexpr" => return "[]char/utf8".to_string(),
         "ndarray·shape" => return "[]int64".to_string(),
         "kv·list" => return "[]char/utf8".to_string(),
         "string·char" | "string·set" | "string·slice" | "string·concat" | "string·formatint"

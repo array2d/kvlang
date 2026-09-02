@@ -62,3 +62,4 @@ tutorial/test_failures.csv
 
 # ── layout dump 产物（审查 lower 后的 kvspace code）──
 *.kv.dump
+kvlanglayout
