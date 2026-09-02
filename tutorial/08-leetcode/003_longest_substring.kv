@@ -6,7 +6,7 @@
 #   5
 rwfunc length_of_longest(s:[]char/utf32) -> (max_len:int64) {
 	n <- string·len(s)
-	last = {}  # = 等价于 <-
+	last:[]char/utf8·int64 = {}  # = 等价于 <-
 	max_len = 0  # = 等价于 <-
 	left = 0  # = 等价于 <-
 	right <- 0
@@ -14,7 +14,7 @@ rwfunc length_of_longest(s:[]char/utf32) -> (max_len:int64) {
 		s[right] -> c
 		exists <- kv·get(last, c) != None
 		if (exists) {
-			prev = last[c]  # = 等价于 <-
+			prev <- kv·get(last, c)
 			cand <- prev + 1
 			if (cand > left) { left <- cand }
 		}

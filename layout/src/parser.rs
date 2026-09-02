@@ -791,6 +791,46 @@ impl Parser {
 
     /// 校验散 key 字面量 `{...}` 的出现位置。`top_legal` 表示当前上下文允许顶层出现
     /// （赋值右值 / for-in 源）；无论如何，其元素内部都不得再嵌套散 key 字面量。
+    // 空容器字面量 `{}` 不含任何类型信息，必须由写目标显式标注 kindexpr：
+    // 禁 `d = {}`，须 `d:[]char/utf8·int64 = {}`（非空 `{a=…}` 可由成员推断，放行）。
+    fn check_empty_container_typed(&mut self, inst: &Instruction) {
+        let Some(e) = &inst.expr else { return };
+        if e.op != "obj" || !e.args.is_empty() {
+            return;
+        }
+        if inst.writes.len() != 1 {
+            return;
+        }
+        // 仅约束简单局部变量目标；成员/下标目标（无类型标注语法）放行。
+        let target = &inst.writes[0];
+        if target.contains(keytree::MEMBER_SEP) || target.contains('[') {
+            return;
+        }
+        let ty = inst.write_types.first().map(String::as_str).unwrap_or("");
+        let t = self.peek();
+        if ty.is_empty() {
+            self.errors.push(Diagnostic {
+                pos: t.pos,
+                warn: false,
+                info: false,
+                message: "empty container literal {} needs a type annotation on its target, e.g. `d:[]char/utf8·int64 = {}`".to_string(),
+                source: String::new(),
+                src_file: String::new(),
+                src_name: String::new(),
+            });
+        } else if !super::kindexpr::valid_kindexpr(ty) {
+            self.errors.push(Diagnostic {
+                pos: t.pos,
+                warn: false,
+                info: false,
+                message: format!("invalid kindexpr {ty:?} on empty container literal target"),
+                source: String::new(),
+                src_file: String::new(),
+                src_name: String::new(),
+            });
+        }
+    }
+
     fn check_sparse_usage(&mut self, e: &Expr, top_legal: bool) {
         let top_is_sparse = e.op == "map";
         let bad = if top_is_sparse && top_legal {
@@ -891,6 +931,7 @@ impl Parser {
         }
         self.eat(Kind::Newline);
         self.check_write_type_match(&inst);
+        self.check_empty_container_typed(&inst);
         // 散 key 字面量 `{...}` 仅允许作赋值右值（单一写目标）；其余位置报错。
         let top_legal = inst.writes.len() == 1;
         if let Some(e) = &inst.expr {

@@ -27,7 +27,7 @@ rwfunc bubble_sort(n:int64) -> () {
 
 rwfunc merge(n:int64) -> (m:int64) {
 	bubble_sort(n)
-	result = {}  # = 等价于 <-
+	result:object = {}  # = 等价于 <-
 	ki = 0  # = 等价于 <-
 	/tmp/mi[0] -> cur
 	idx = 1  # = 等价于 <-

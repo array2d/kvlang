@@ -11,7 +11,7 @@ rwfunc is_anagram(s:[]char/utf32, t:[]char/utf32) -> () {
 	if (ns != nt) {
 		false -> ok
 	} else {
-		h = {}  # = 等价于 <-
+		h:[]char/utf8·int64 = {}  # = 等价于 <-
 		0 -> i
 		while (i < ns) {
 			string·char(s, i) -> c
