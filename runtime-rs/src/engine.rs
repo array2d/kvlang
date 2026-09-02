@@ -279,7 +279,7 @@ impl Engine {
             )
         };
         if rc != 0 {
-            eprintln!("kvlang: layout {name} 失败: {}", cbuf(&err));
+            crate::elog!("layout {name} 失败: {}", cbuf(&err));
             return Vec::new();
         }
         cbuf(&entry)
@@ -325,7 +325,7 @@ impl Engine {
         let vid =
             take(unsafe { kvlangRuntimeBootstrap(self.rt, cs(funcname).as_ptr(), null_mut(), 0) });
         if vid.is_empty() {
-            eprintln!("kvlang: bootstrap {funcname} 失败");
+            crate::elog!("bootstrap {funcname} 失败");
             return;
         }
         let vpc = format!("/vthread/{vid}/\u{2025}pc");
@@ -338,7 +338,7 @@ impl Engine {
             if rc != 1 {
                 let st = self.get_kv(&format!("/vthread/{vid}/\u{2025}status"));
                 let msg = self.get_kv(&format!("/vthread/{vid}/\u{2025}error/msg"));
-                eprintln!("kvlang: vthread {vid} 错误 rc={rc} {st}: {msg}");
+                crate::elog!("vthread {vid} 错误 rc={rc} {st}: {msg}");
                 break;
             }
             let c = take(pc);
@@ -353,7 +353,7 @@ impl Engine {
                 false
             };
             if !handled {
-                eprintln!("kvlang: 未知 rwir: {op} @ {c}");
+                crate::elog!("未知 rwir: {op} @ {c}");
             }
             let nxt = take(unsafe { kvlang_rwirextNextPc(cs(&c).as_ptr()) });
             self.set_kv(&vpc, &nxt);

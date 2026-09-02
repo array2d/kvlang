@@ -23,9 +23,17 @@ fn dsn() -> String {
     std::env::var("KVSPACE").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string())
 }
 
+/// info 级日志（对齐 C logx.c 的 LOG_LEVEL 门控）：默认 warn 静默，仅 LOG_LEVEL=info|debug 时以 `<exe>: ` 前缀输出到 stderr。
+fn log_info(msg: &str) {
+    match std::env::var("LOG_LEVEL").as_deref() {
+        Ok("info") | Ok("debug") => kvlang_rs::elog!("{msg}"),
+        _ => {}
+    }
+}
+
 fn read_file(path: &str) -> String {
     std::fs::read_to_string(path).unwrap_or_else(|e| {
-        eprintln!("kvlang: 读取 {path} 失败: {e}");
+        kvlang_rs::elog!("读取 {path} 失败: {e}");
         std::process::exit(1);
     })
 }
@@ -50,7 +58,7 @@ fn main() {
                 )
             };
             if rc != 0 {
-                eprintln!("kvlang: layout 失败: {}", cbuf(&err));
+                kvlang_rs::elog!("layout 失败: {}", cbuf(&err));
                 std::process::exit(1);
             }
             println!("ENTRY={}", cbuf(&entry));
@@ -86,7 +94,7 @@ fn main() {
                 )
             };
             if rc != 0 {
-                eprintln!("kvlang: format 失败: {}", cbuf(&err));
+                kvlang_rs::elog!("format 失败: {}", cbuf(&err));
                 std::process::exit(1);
             }
             print!("{}", cbuf(&out));
@@ -106,13 +114,16 @@ fn main() {
             drive(&eng, "test");
         }
 
+        // ── 崩溃恢复：按已有 vid 从持久化 pc 续跑（不 bootstrap，证明 runtime 无内存态）──
+        [cmd, vid] if cmd == "resume" => drive_vid(&boot(&dsn), vid),
+
         // ── 运行已入库的显式入口（tutorial 测试主路径：pkg·func 或裸名，pkg 可空）──
         [x] => drive(&boot(&dsn), x),
         // ── KVLANG_LIB=p1:p2:… → layout 各路径下所有 .kv（相对名=pkg），复用 stdlib 的 run init 引导──
         [] => {
             let lib = std::env::var("KVLANG_LIB").unwrap_or_default();
             if lib.is_empty() {
-                eprintln!("kvlang: need entry");
+                kvlang_rs::elog!("need entry");
                 std::process::exit(1);
             }
             let eng = boot(&dsn);
@@ -121,7 +132,7 @@ fn main() {
             eng.run_inits(&inits);
         }
         _ => {
-            eprintln!("kvlang: 参数不合法");
+            kvlang_rs::elog!("参数不合法");
             std::process::exit(1);
         }
     }
@@ -140,7 +151,7 @@ fn layout_code_or_die(src: &str, dsn: &str) {
         )
     };
     if rc != 0 {
-        eprintln!("kvlang: layout 失败: {}", cbuf(&err));
+        kvlang_rs::elog!("layout 失败: {}", cbuf(&err));
         std::process::exit(1);
     }
 }
@@ -194,7 +205,7 @@ fn layout_file_or_die(path: &str, dsn: &str) {
         )
     };
     if rc != 0 {
-        eprintln!("kvlang: layout 失败: {}", cbuf(&err));
+        kvlang_rs::elog!("layout 失败: {}", cbuf(&err));
         std::process::exit(1);
     }
 }
@@ -204,12 +215,12 @@ fn layout_file_or_die(path: &str, dsn: &str) {
 fn boot(dsn: &str) -> Engine {
     let rt = unsafe { kvlangRuntimeConnect(cs(dsn).as_ptr()) };
     if rt.is_null() {
-        eprintln!("kvlang: kvlangRuntimeConnect 失败: {dsn}");
+        kvlang_rs::elog!("kvlangRuntimeConnect 失败: {dsn}");
         std::process::exit(1);
     }
     let kv = unsafe { kvspaceConnect(cs(dsn).as_ptr()) };
     if kv.is_null() {
-        eprintln!("kvlang: kvspaceConnect 失败: {dsn}");
+        kvlang_rs::elog!("kvspaceConnect 失败: {dsn}");
         std::process::exit(1);
     }
     let eng = Engine {
@@ -226,17 +237,23 @@ fn boot(dsn: &str) -> Engine {
 
 /// 主导驱动 funcname 的 vthread 到结束（就地批处理纯净 rwir，外部 rwir handoff）。
 fn drive(eng: &Engine, funcname: &str) {
-    let (rt, kv) = (eng.rt, eng.kv);
-    let vid = take(unsafe { kvlangRuntimeBootstrap(rt, cs(funcname).as_ptr(), null_mut(), 0) });
+    let vid = take(unsafe { kvlangRuntimeBootstrap(eng.rt, cs(funcname).as_ptr(), null_mut(), 0) });
     if vid.is_empty() {
-        eprintln!("kvlang: bootstrap {funcname} 失败");
+        kvlang_rs::elog!("bootstrap {funcname} 失败");
         std::process::exit(1);
     }
+    log_info(&format!("vthread {vid}")); // 供崩溃恢复：LOG_LEVEL=info 时暴露 vid，可 `kvlang resume <vid>`
+    drive_vid(eng, &vid);
+}
+
+/// 从 kvspace 里 vid 的持久化 pc 续跑到结束（崩溃恢复入口，与 drive 共用循环，不 bootstrap）。
+fn drive_vid(eng: &Engine, vid: &str) {
+    let (rt, kv) = (eng.rt, eng.kv);
     let vpc = format!("/vthread/{vid}/\u{2025}pc");
 
     loop {
         let mut pc: *mut c_char = null_mut();
-        let rc = unsafe { kvlangRuntimeExecuteVthread(rt, cs(&vid).as_ptr(), &mut pc) };
+        let rc = unsafe { kvlangRuntimeExecuteVthread(rt, cs(vid).as_ptr(), &mut pc) };
         if rc == 0 {
             break; // vthread done
         }
@@ -244,7 +261,7 @@ fn drive(eng: &Engine, funcname: &str) {
             let st = eng.get_kv(&format!("/vthread/{vid}/\u{2025}status"));
             let msg = eng.get_kv(&format!("/vthread/{vid}/\u{2025}error/msg"));
             let st = if st.is_empty() { "error".into() } else { st };
-            eprintln!("kvlang: vthread {vid} {st}: {msg}");
+            kvlang_rs::elog!("vthread {vid} {st}: {msg}");
             std::process::exit(1);
         }
 
@@ -262,8 +279,8 @@ fn drive(eng: &Engine, funcname: &str) {
 
         // 外部扩展 rwir（如 numpy）：handoff；native/控制帧/帧结束：写回 pc 让 runtime 继续。
         if !stop_op.is_empty() && rwir::is_others_rwir(&stop_op) {
-            if unsafe { kvlang_rwirextHandoff(kv, cs(&vid).as_ptr(), cs(&c).as_ptr()) } != 0 {
-                eprintln!("kvlang: handoff {stop_op} 失败 @ {c}");
+            if unsafe { kvlang_rwirextHandoff(kv, cs(vid).as_ptr(), cs(&c).as_ptr()) } != 0 {
+                kvlang_rs::elog!("handoff {stop_op} 失败 @ {c}");
                 std::process::exit(1);
             }
         } else {

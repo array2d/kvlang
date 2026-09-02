@@ -332,14 +332,17 @@ pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) {
     lower::specialize(fn_, &type_map);
     let func_dir = keytree::lib_func(pkg, &fn_.sig.name);
 
-    // pkg 下同名 func 已存在（含签名槽 [0,0]）→ info 提示即将覆盖（严格按 lib 声明判定，非路径）。
-    if !kv.get_one(&format!("{func_dir}/[0,0]")).is_empty() {
+    // pkg 下同名 func 已存在（含签名槽 [0,0]）→ debug 提示即将覆盖（严格按 lib 声明判定，非路径）。
+    // 覆盖是 KVLANG_LIB 引导的常态（stdlib 每次重铺），故降到 debug 级：仅 LOG_LEVEL=debug 显示。
+    if !kv.get_one(&format!("{func_dir}/[0,0]")).is_empty()
+        && std::env::var("LOG_LEVEL").as_deref() == Ok("debug")
+    {
         let qual = if pkg.is_empty() {
             fn_.sig.name.clone()
         } else {
             format!("{pkg}/{}", fn_.sig.name)
         };
-        eprintln!("info: func {qual} already defined — overwriting");
+        eprintln!("debug: func {qual} already defined — overwriting");
     }
 
     // 按函数覆盖（文件夹复制式合并）：只 del_tree 本函数子树，不动 /lib 下其它函数。
