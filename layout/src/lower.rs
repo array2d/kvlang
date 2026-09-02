@@ -3,7 +3,83 @@
 use std::collections::{HashMap, HashSet};
 
 use super::ast::{self, Expr, Func, Instruction, LitKind, Stmt};
+use super::scanner::{Diagnostic, Pos};
 use super::{builtin, keytree, symbol};
+
+/// 容器类型（object / stringkeymap / mapexpr）不可用 `[]` 下标访问成员——
+/// `[]` 仅限 compact array（shaped kindexpr，含字符串 `[]char/*`）。
+fn is_container_type(t: &str) -> bool {
+    t == "object" || t == "stringkeymap" || t.contains(keytree::MEMBER_SEP)
+}
+
+/// `[]` 下标校验：xv·at/xv·set 基座若为容器类型 → 报错，逼用 kv·get/kv·set/`base·key`。
+pub fn check_container_subscript(fn_: &Func) -> Vec<Diagnostic> {
+    let tm = infer_types(fn_);
+    let mut diags = Vec::new();
+    check_subscript_body(&fn_.body, &tm, &mut diags);
+    diags
+}
+
+fn check_subscript_body(body: &[Stmt], tm: &HashMap<String, String>, diags: &mut Vec<Diagnostic>) {
+    for st in body {
+        match st {
+            Stmt::Instruction(s) => check_subscript_inst(s, tm, diags),
+            Stmt::Scope(s) => check_subscript_body(&s.body, tm, diags),
+            Stmt::If(s) => {
+                if let Some(c) = &s.cond {
+                    check_subscript_inst(c, tm, diags);
+                }
+                check_subscript_body(&s.then_, tm, diags);
+                check_subscript_body(&s.else_, tm, diags);
+            }
+            Stmt::While(s) => {
+                if let Some(c) = &s.cond {
+                    check_subscript_inst(c, tm, diags);
+                }
+                check_subscript_body(&s.body, tm, diags);
+            }
+            Stmt::For(s) => check_subscript_body(&s.body, tm, diags),
+            _ => {}
+        }
+    }
+}
+
+fn check_subscript_inst(
+    inst: &Instruction,
+    tm: &HashMap<String, String>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    if let Some(e) = &inst.expr {
+        check_subscript_expr(e, tm, diags);
+    }
+}
+
+fn check_subscript_expr(e: &Expr, tm: &HashMap<String, String>, diags: &mut Vec<Diagnostic>) {
+    if (e.op == "xv·at" || e.op == "xv·set") && !e.args.is_empty() {
+        let base = &e.args[0];
+        if base.is_leaf() {
+            if let Some(t) = tm.get(&base.val) {
+                if is_container_type(t) {
+                    diags.push(Diagnostic {
+                        pos: Pos { line: 0, col: 0 },
+                        message: format!(
+                            "`[]` 下标不能用于容器 `{}`（类型 {}）；容器成员访问用 kv·get/kv·set 或 `{}·key`，`[]` 仅限 compact array",
+                            base.val, t, base.val
+                        ),
+                        warn: false,
+                        info: false,
+                        source: String::new(),
+                        src_file: String::new(),
+                        src_name: String::new(),
+                    });
+                }
+            }
+        }
+    }
+    for a in &e.args {
+        check_subscript_expr(a, tm, diags);
+    }
+}
 
 // ── 控制流 lowering（续体传递风格） ──────────────────────────────────
 
@@ -887,19 +963,6 @@ fn specialize_inst(inst: &mut Instruction, tm: &HashMap<String, String>) {
     };
     if e.is_leaf() {
         return;
-    }
-    // xv.at/xv.set 基座是 obj → 降为 kv.get/kv.set（命名成员目录访问）。
-    // map 是散 key 数组（base[i]），保持 xv.at/xv.set 走散 key 下标路径。
-    if (e.op == "xv·at" || e.op == "xv·set") && !e.args.is_empty() {
-        if let Some(t) = tm.get(&e.args[0].val) {
-            if t == "object" {
-                e.op = if e.op == "xv·at" {
-                    "kv·get".to_string()
-                } else {
-                    "kv·set".to_string()
-                };
-            }
-        }
     }
     let opcode = e.op.clone();
     let mut word = symbol::lookup(&opcode).word.to_string();

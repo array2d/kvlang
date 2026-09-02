@@ -16,7 +16,7 @@ rwfunc build_lists() -> () {
 lib lc {
 rwfunc add(a:[]char/utf32, b:[]char/utf32) -> () {
 	carry = 0
-	result:object = {  }
+	result:[int64]·int64 = {  }
 	0 -> ri
 	pa <- a
 	pb = b
@@ -36,14 +36,14 @@ rwfunc add(a:[]char/utf32, b:[]char/utf32) -> () {
 		}
 
 		digit <- sum % 10
-		result[ri] = digit
+		kv·set(result, ri, digit) -> _
 		ri + 1 -> ri
 		sum ÷ 10 -> carry
 		sum ÷ 10 -> carry_m
 	}
 	i = ri - 1
 	while (i >= 0) {
-		v <- result[i]
+		v <- kv·get(result, i)
 		println(v)
 		i - 1 -> i
 	}
