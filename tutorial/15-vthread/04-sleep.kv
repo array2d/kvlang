@@ -3,6 +3,7 @@
 #   单进程模型下即阻塞驱动线程；与 vthread·setstatus("wait") 的挂起-恢复不同
 # 期望输出:
 #   slept >= 10ms: true
+# wip: 需 vthread·create/sleep rwir 实现
 rwfunc test() -> () {
 	time/duration·millis(10) -> d
 	time·now() -> t0
