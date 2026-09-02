@@ -1,20 +1,21 @@
 #include "kvlang_rwirext.h"
 #include "runtime_internal.h"
 
-/* 进程内已注册 rwir opcode 集合：isothersrwir 不读 /lib，直接本地过滤。 */
-static char *g_rwir_opcodes[256];
-static int g_rwir_n = 0;
-
 /* 共享队列根：第一个 rwir 的 /lib/<opcode>/vids 绝对路径。 */
 static char *g_first_vids = NULL;
 
-bool isothersrwir(const char *opcode) {
+/* kvspace 是能力的唯一事实源：/lib/<opcode> 存在且 kind=defrwir 即他人 rwir。
+ * 派发在独立 kvlang 进程内发生，进程内注册表恒空，只有 kvspace 可信。 */
+bool isothersrwir(kvlangKv_t *k, const char *opcode) {
   if (opcode[0] == '/')
     return false;
-  for (int i = 0; i < g_rwir_n; i++)
-    if (strcmp(g_rwir_opcodes[i], opcode) == 0)
-      return true;
-  return false;
+  char *key = kvlangKeytreeRwir(opcode);
+  kvlangXvalue_t v; kvlangXvalueZero(&v);
+  kvlangKvGetOne(k, key, &v);
+  bool yes = !kvlangXvalueNone(&v) && kvlangXvalueKindIs(&v, KVSPACE_KIND_DEF_RWIR);
+  kvlangXvalueFree(&v);
+  free(key);
+  return yes;
 }
 
 /* 建立 rwir 的 vids 队列：第一个 rwir 是真实 strkeymap，后续是 Ptr 指向第一个。
@@ -56,13 +57,7 @@ int kvlang_rwirextRegister(void *kvspace, const char *opcode, int32_t nr,
   int rc = kvlangKvSet(&k, &p, 1, err, sizeof err);
   kvlangXvalueFree(&v);
   free(key);
-  /* 进程内 map 也注册一份。 */
-  for (int i = 0; i < g_rwir_n; i++)
-    if (strcmp(g_rwir_opcodes[i], opcode) == 0)
-      return rc;
-  if (g_rwir_n < 256)
-    g_rwir_opcodes[g_rwir_n++] = strdup(opcode);
-  /* 建立共享 vids 队列（第一个真实 strkeymap，后续 Ptr 指向它）。 */
+  /* 建立共享 vids 队列（第一个真实 strkeymap，后续 Ptr 指向它；幂等查 kvspace）。 */
   register_vids(&k, opcode);
   return rc;
 }

@@ -542,7 +542,7 @@ static int kvlangBuiltinCastCharAscii(kvlangFrame_t *f) { return kvlangBuiltinCa
 
 /* 数字多类型运算融合为单条：派发前 strip_num_kind 剥掉 <numkind>. 前缀，
  * int64.add / float32.add … 全部归到同一条 add（union 语义），kvlangBuiltin* 按操作数 kind 归约。 */
-static const struct { const char *op; kvlangBuiltinFn fn; } builtins[] = {
+static const struct { const char *op; kvlangBuiltinFn fn; } myrwircaps[] = {
     {"add", kvlangBuiltinAdd}, {"+", kvlangBuiltinAdd},
     {"sub", kvlangBuiltinSub}, {"-", kvlangBuiltinSub},
     {"mul", kvlangBuiltinMul}, {"×", kvlangBuiltinMul},
@@ -612,7 +612,7 @@ static const struct { const char *op; kvlangBuiltinFn fn; } builtins[] = {
     {"debugger", kvlangBuiltinDebugger},
 };
 
-static const size_t builtins_n = sizeof(builtins) / sizeof(builtins[0]);
+static const size_t myrwircaps_n = sizeof(myrwircaps) / sizeof(myrwircaps[0]);
 
 /* 剥离 <numkind>. 前缀（int64.add → add），使融合后的单条 add 覆盖全部数字类型。
  * 非数字前缀（array./string./time/duration. 等）与裸类型 cast（int64）原样保留。 */
@@ -629,7 +629,7 @@ static const char *strip_num_kind(const char *op) {
 
 bool kvlangBuiltinIsNative(const char *opcode) {
     const char *op = strip_num_kind(opcode);
-    for (size_t i = 0; i < builtins_n; i++) if (strcmp(builtins[i].op, op) == 0) return true;
+    for (size_t i = 0; i < myrwircaps_n; i++) if (strcmp(myrwircaps[i].op, op) == 0) return true;
     return false;
 }
 
@@ -651,8 +651,8 @@ bool kvlangBuiltinNumOp(const char *opcode) {
 
 int kvlangBuiltinNative(kvlangFrame_t *f) {
     const char *op = strip_num_kind(f->inst->opcode);
-    for (size_t i = 0; i < builtins_n; i++) {
-        if (strcmp(builtins[i].op, op) == 0) return builtins[i].fn(f);
+    for (size_t i = 0; i < myrwircaps_n; i++) {
+        if (strcmp(myrwircaps[i].op, op) == 0) return myrwircaps[i].fn(f);
     }
     return kvlangBuiltinSetErr(f, "unknown builtin op: %s", f->inst->opcode);
 }

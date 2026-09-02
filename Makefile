@@ -28,9 +28,9 @@ runtime-rs:
 	cp runtime-rs/target/release/kvlang $(BIN)/kvlang
 
 layout:
-	cargo build --release --manifest-path layout/Cargo.toml --example kvlanglayout
 	cargo build --release --manifest-path layout/Cargo.toml
-	cp layout/target/release/examples/kvlanglayout $(BIN)/
+	cp layout/target/release/kvlanglayout $(BIN)/
+	cp layout/target/release/libkvlanglayout.so $(BIN)/
 
 install:
 	install -d /usr/lib /usr/bin /usr/include/kvlang

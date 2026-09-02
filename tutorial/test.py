@@ -19,19 +19,14 @@ from unittest import mock
 RED, GREEN, YELLOW, NC = "\033[0;31m", "\033[0;32m", "\033[1;33m", "\033[0m"
 ROOT = Path(__file__).resolve().parent.parent
 KV = str(ROOT / "kvlang")
-RUST_BIN = str(ROOT / "target" / "debug" / "kvlang")
 LAYOUT_BIN = os.environ.get("KVLANG_LAYOUT_BIN", str(ROOT / "bin" / "kvlanglayout"))
 TERM_BIN = os.environ.get("KVLANG_TERM_BIN", str(ROOT / "bin" / "kvlang"))
 _C_DSN = os.environ.get("KVSPACE", "redis://127.0.0.1:6379")
-SHM_PATH = "/tmp/kvlang_rust_test"
 FAIL_CSV = (ROOT / "tutorial" / "test_failures.csv").resolve()
 BENCH_CSV = (ROOT / "tutorial" / "benchmark.csv").resolve()
 MODULE = sys.modules[__name__]
 
 _KV_ENV = {**os.environ, "KVSPACE": os.environ.get("KVSPACE", "goheap://")}
-_SHM_ENV = {**os.environ, "KVSPACE": f"shm://{SHM_PATH}",
-            "LD_LIBRARY_PATH": str(ROOT.parent / "kvspace-c" / "build"),
-            "KVSPACE_SHM": SHM_PATH}
 
 
 def discover(root: Path) -> list[Path]:
@@ -196,37 +191,8 @@ def run_benchmarks(files: list[Path], errorexit: bool = False) -> int:
     return invalid
 
 
-def _rust_test_file(f: Path, expects: list[str], env: dict) -> tuple[bool, str]:
-    """Layout .kv to SHM, run Rust runtime, check output against expects."""
-    rel = str(f.relative_to(ROOT))
-    # Clean old SHM
-    try: os.unlink(SHM_PATH)
-    except OSError: pass
-
-    # Step 1: Go layout → SHM
-    layout = subprocess.run([KV, "layout", rel], capture_output=True, text=True,
-                            timeout=30, cwd=str(ROOT), env=env)
-    if layout.returncode != 0:
-        return False, f"layout failed: {layout.stderr.strip()[:100]}"
-
-    # Step 2: 约定入口 test（每个 tutorial 顶层 rwfunc test()）
-    try:
-        rust = subprocess.run([RUST_BIN, "test"], capture_output=True, text=True,
-                              timeout=30, cwd=str(ROOT), env=env)
-    except FileNotFoundError:
-        return False, f"rust binary not found at {RUST_BIN}"
-    if rust.returncode != 0:
-        return False, f"rust exit {rust.returncode}: {rust.stderr.strip()[:100]}"
-
-    # Step 3: Check output
-    for pat in expects:
-        if pat not in rust.stdout:
-            return False, f"want {pat!r}"
-    return True, rust.stdout[:200]
-
-
-def _c_test_file(f: Path, expects: list[str], env: dict) -> tuple[bool, str]:
-    """Rust layout → kvspace(redis/shm) → C runtime，检查输出。"""
+def _run_test_file(f: Path, expects: list[str], env: dict) -> tuple[bool, str]:
+    """Rust layout → kvspace(dsn) → runtime（bin/kvlang，链 C ABI），检查输出。"""
     rel = str(f.relative_to(ROOT))
     if _C_DSN.startswith("shm://"):
         try:
@@ -256,30 +222,23 @@ def _c_test_file(f: Path, expects: list[str], env: dict) -> tuple[bool, str]:
 
 
 def main():
+    global _C_DSN
     ap = argparse.ArgumentParser(description="tutorial test")
     ap.add_argument("--filter", default="", help="按路径子串过滤（如 11-string/01 / 08-leetcode/01）")
     ap.add_argument("--no-build", action="store_true", help="skip make build")
     ap.add_argument("--errorexit", action="store_true", help="exit on first error")
     ap.add_argument("--bench", action="store_true", help="benchmark matching .kv/.py/.c files")
-    ap.add_argument("--runtime", default="c", choices=("go", "rust", "c"),
-                    help="runtime to test (default: c; env KVLANG_RUNTIME=c 等价 --runtime c)")
+    ap.add_argument("--kvspace", default=_C_DSN,
+                    help="KVSPACE dsn（默认取环境变量 KVSPACE，未设时 redis://127.0.0.1:6379）")
     args = ap.parse_args()
-    if os.environ.get("KVLANG_RUNTIME") == "c":
-        args.runtime = "c"
-
-    if not args.no_build and args.runtime == "go":
-        r = subprocess.run(["make", "build"], capture_output=True, text=True,
-                           timeout=120, cwd=str(ROOT))
-        if r.returncode != 0:
-            print(f"{RED}❌ make build failed:{NC}\n{r.stderr}")
-            sys.exit(1)
-        print(f"{GREEN}✅ build ok{NC}")
+    _C_DSN = args.kvspace
 
     files = [f for f in discover(ROOT / "tutorial")
              if args.filter in str(f)]
 
     print(f"kvlang: {os.path.abspath(KV)}")
-    prefix = "🔧 rust" if args.runtime == "rust" else "kvlang"
+    print(f"KVSPACE: {_C_DSN}")
+    prefix = "kvlang"
 
     if args.bench:
         sys.exit(1 if run_benchmarks(files, args.errorexit) else 0)
@@ -300,57 +259,14 @@ def main():
         if not expects:
             continue
         try:
-            if args.runtime == "rust":
-                ok, detail = _rust_test_file(f, expects, _SHM_ENV)
-                if ok:
-                    print(f"{GREEN}✅ {prefix} {rel}{NC}")
-                    passed += 1
-                else:
-                    print(f"{RED}❌ {prefix} {rel}: {detail}{NC}")
-                    failures.append({"file": rel, "reason": detail, "expected": "", "stdout": ""})
-                    failed += 1
-            elif args.runtime == "c":
-                ok, detail = _c_test_file(f, expects, _KV_ENV)
-                if ok:
-                    print(f"{GREEN}✅ {prefix} {rel}{NC}")
-                    passed += 1
-                else:
-                    print(f"{RED}❌ {prefix} {rel}: {detail}{NC}")
-                    failures.append({"file": rel, "reason": detail, "expected": "", "stdout": ""})
-                    failed += 1
+            ok, detail = _run_test_file(f, expects, _KV_ENV)
+            if ok:
+                print(f"{GREEN}✅ {prefix} {rel}{NC}")
+                passed += 1
             else:
-                _flush_redis()
-                r = subprocess.run([KV, rel], capture_output=True, text=True,
-                                   timeout=60, cwd=str(ROOT), env=_KV_ENV)
-                all_ok = True
-                if r.returncode != 0:
-                    all_ok = False
-                    print(f"{RED}❌ {prefix} {rel}: exit code {r.returncode}{NC}")
-                    failures.append({"file": rel, "reason": f"exit code {r.returncode}",
-                                     "expected": "", "stdout": r.stdout[:500]})
-                if r.stderr.strip():
-                    all_ok = False
-                    print(f"{RED}❌ {prefix} {rel}: stderr — {r.stderr.strip()[:200]}{NC}")
-                    found = [x for x in failures if x["file"] == rel and x["reason"].startswith("exit code")]
-                    if not found:
-                        failures.append({"file": rel, "reason": f"stderr: {r.stderr.strip()[:200]}",
-                                         "expected": "", "stdout": r.stdout[:500]})
-                for pat in expects:
-                    if pat not in r.stdout:
-                        all_ok = False
-                        print(f"{RED}❌ {prefix} {rel}: want {pat!r}{NC}")
-                        print(f"   stdout: {r.stdout[:200]}")
-                        failures.append({"file": rel, "reason": "output mismatch",
-                                         "expected": pat, "stdout": r.stdout[:500]})
-                if all_ok:
-                    print(f"{GREEN}✅ {prefix} {rel}{NC}")
-                    passed += 1
-                else:
-                    failed += 1
-                    if args.errorexit:
-                        _write_csv(failures)
-                        print(f"\n{YELLOW}errorexit: stopping at first failure{NC}")
-                        sys.exit(1)
+                print(f"{RED}❌ {prefix} {rel}: {detail}{NC}")
+                failures.append({"file": rel, "reason": detail, "expected": "", "stdout": ""})
+                failed += 1
             if args.errorexit and failed:
                 _write_csv(failures)
                 print(f"\n{YELLOW}errorexit: stopping at first failure{NC}")

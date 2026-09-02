@@ -7,6 +7,7 @@
 //!   kvlang layout <file>   仅 layout，打印 ENTRY=<entry>
 //!   kvlang vet <file>      仅校验（parse+lower），打印 ok 或错误
 //!   kvlang format <file>   格式化输出到 stdout
+//!   kvlang dump <file> [prefix]  layout 该文件后，把 /lib（或 prefix）子树 dump 为可运行 kvlang + 槽位注释
 //!   kvlang（无参，设 KVLANG_LIB=p1:p2:…）  layout 各路径下所有 .kv → run 各 lib 的 init（pkg 取自源码 `lib` 声明，同 stdlib）
 //! 驱动循环：executeVthread 主导执行，遇 rwir 停下；就地 rwir（print/json/http/…）
 //! 连续批处理 + nextPc；外部 rwir（如 numpy）handoff 给扩展进程；native/控制帧写回 pc。
@@ -99,6 +100,9 @@ fn main() {
             }
             print!("{}", cbuf(&out));
         }
+        // ── layout 文件后 dump /lib（或 prefix）子树：审查 lower 产物、调坐标、验 round-trip ──
+        [cmd, file] if cmd == "dump" => dump_file(file, "/lib", &dsn),
+        [cmd, file, prefix] if cmd == "dump" => dump_file(file, prefix, &dsn),
 
         // ── stdlib 先 layout&run → 再 layout 内存源码 → 运行（散语句合成 init）──
         [cmd, src] if cmd == "-c" => {
@@ -148,6 +152,29 @@ fn main() {
             std::process::exit(1);
         }
     }
+}
+
+/// layout <file> 进 kvspace 后 dump `prefix` 子树到 stdout（审查 lower 产物用）。
+fn dump_file(path: &str, prefix: &str, dsn: &str) {
+    layout_file_or_die(path, dsn);
+    let src = read_file(path);
+    let mut out = vec![0u8; src.len() * 16 + 65536];
+    let mut err = [0u8; 4096];
+    let rc = unsafe {
+        kvlangLayoutDump(
+            cs(prefix).as_ptr(),
+            cs(dsn).as_ptr(),
+            out.as_mut_ptr() as *mut c_char,
+            out.len() as u32,
+            err.as_mut_ptr() as *mut c_char,
+            err.len() as u32,
+        )
+    };
+    if rc != 0 {
+        kvlang_rs::elog!("dump 失败: {}", cbuf(&err));
+        std::process::exit(1);
+    }
+    print!("{}", cbuf(&out));
 }
 
 fn layout_code_or_die(src: &str, dsn: &str) {

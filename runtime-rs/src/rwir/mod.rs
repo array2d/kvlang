@@ -25,7 +25,7 @@ pub struct Rwir {
 }
 
 /// rwir 注册表：key = 去 `/lib` 后的 opcode，value = 每槽 kindexpr（读参 rp / 写参 wp）。
-pub const REGS: &[(&str, Rwir)] = &[
+pub const MYRWIRCAPS: &[(&str, Rwir)] = &[
     (
         "input",
         Rwir {
@@ -176,11 +176,11 @@ pub const REGS: &[(&str, Rwir)] = &[
 /// opcode → &Rwir，供注册与逐槽 kindexpr 查询。
 static RWIRMAP: OnceLock<HashMap<&'static str, &'static Rwir>> = OnceLock::new();
 pub fn rwirmap() -> &'static HashMap<&'static str, &'static Rwir> {
-    RWIRMAP.get_or_init(|| REGS.iter().map(|(op, r)| (*op, r)).collect())
+    RWIRMAP.get_or_init(|| MYRWIRCAPS.iter().map(|(op, r)| (*op, r)).collect())
 }
 
 pub fn register(eng: &Engine) {
-    for (op, r) in REGS {
+    for (op, r) in MYRWIRCAPS {
         let sig =
             r.rp.iter()
                 .chain(r.wp.iter())

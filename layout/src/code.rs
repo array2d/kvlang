@@ -645,4 +645,33 @@ mod tests {
         );
         assert_eq!(kvkind::kind(&kv.get_one("/lib/a/c·g/[0,0]")), "defrwfunc");
     }
+
+    #[test]
+    fn dot_is_ordinary_char_contiguous_coords() {
+        // '.' 是普通字符（小数点/后缀等），foo.bar 视作单一 opcode，不再被切成 foo bar 两 token
+        // 而摊出畸形坐标（#106）。断言：opcode 原样保留，且指令坐标连续、无空缺行。
+        let mut kv = Kv::conn(&format!(
+            "fs:///tmp/kvlanglayout_dot_{}",
+            std::process::id()
+        ));
+        init_dirs(&mut kv).unwrap();
+        compile(
+            &mut kv,
+            "lib t {\nrwfunc main() -> () {\nfoo.bar(\"x\") -> y\nbaz(\"z\") -> w\n}\n}\n",
+        )
+        .unwrap();
+        assert_eq!(kvkind::kind(&kv.get_one("/lib/t·main/[0,0]")), "defrwfunc");
+        assert!(
+            kvkind::value_string(&kv.get_one("/lib/t·main/[1,0]")).contains("foo.bar"),
+            "'.' 应作普通字符保留在 opcode 内（单一 token foo.bar）"
+        );
+        assert!(
+            !kv.get_one("/lib/t·main/[2,0]").is_empty(),
+            "[2,0] 应有指令：坐标不得空缺"
+        );
+        assert!(
+            kv.get_one("/lib/t·main/[3,0]").is_empty(),
+            "[3,0] 应为帧末尾（连续无空缺）"
+        );
+    }
 }
