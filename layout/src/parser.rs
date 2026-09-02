@@ -409,11 +409,15 @@ impl Parser {
                     }
                 }
                 Kind::Dot if depth == 0 => {
-                    // 尾缀 "..." 变参：吞三个点，附加后结束（变参必在类型末尾）
+                    // 单 `·`：stringkeymap 的 key·value 分隔（可嵌套）；三点 `...`：尾缀变参。
                     let mut dots = 0;
                     while self.peek().kind == Kind::Dot {
                         self.advance();
                         dots += 1;
+                    }
+                    if dots == 1 {
+                        sb.push('·');
+                        continue;
                     }
                     if dots == 3 {
                         sb.push_str("...");

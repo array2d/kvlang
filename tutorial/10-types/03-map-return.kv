@@ -1,0 +1,20 @@
+# 语义: stringkeymap 作返回类型 —— rwfunc 返回槽 head 存 []char/utf8·int64。
+#       = Go map[string]int64。调用方拿到 map 后按键读；缺失键得 None。
+# 期望输出:
+#   n = 42
+#   x = 7
+#   miss = true
+rwfunc build() -> (m:[]char/utf8·int64) {
+	{} -> m
+	kv·set(m, "n", 42)
+	kv·set(m, "x", 7)
+}
+rwfunc test() -> () {
+	build() -> r
+	kv·get(r, "n") -> n
+	println("n =", n)
+	kv·get(r, "x") -> x
+	println("x =", x)
+	kv·get(r, "none") == None -> miss
+	println("miss =", miss)
+}

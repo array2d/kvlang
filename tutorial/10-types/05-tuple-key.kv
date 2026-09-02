@@ -1,0 +1,21 @@
+# 语义: 元组键 —— key 侧 [T1,T2,…] 声明标量元组键（物理以字符串格式落 key）。
+#       [int32,int32]·[]char/utf8 = 以「两个 int32 的字符串形式」为键、字符串为值的 map。
+#       [float32,float32]·int64 亦合法；layout 校验元组元素为标量 kind 并 round-trip。
+#       （本例证 layout 接受元组键签名；运行时按字符串键 kv·get 访问。）
+# 期望输出:
+#   cell = filled
+rwfunc grid_i(g:[int32,int32]·[]char/utf8) -> (n:int64) {
+	0 -> n
+}
+rwfunc grid_f(g:[float32,float32]·int64) -> (n:int64) {
+	0 -> n
+}
+rwfunc mixed(g:[float32,int8,uint32]·int64) -> (n:int64) {
+	0 -> n
+}
+rwfunc test() -> () {
+	m = {}
+	kv·set(m, "1,2", "filled")
+	kv·get(m, "1,2") -> v
+	println("cell =", v)
+}
