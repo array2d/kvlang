@@ -12,6 +12,8 @@ void kvlangBuiltinXvalueAt(const kvlangXvalue_t *v, int i, kvlangXvalue_t *out);
 char *kvlangBuiltinScatterKey(const char *base, const int64_t *coords, int ncoord);
 void kvlangBuiltinMemindex(kvlangXvalue_t *out, const char *const *names, int n);
 void kvlangBuiltinMapMarker(kvlangXvalue_t *out, const int32_t *dims, int ndim);
+/* char 拼接（+ 与 string·concat 共用）：均须 char kind；编码不同返 false（调用方 throw），相同则 out=拼接结果并保持该编码。 */
+bool kvlangBuiltinCharConcat(const kvlangXvalue_t *a, const kvlangXvalue_t *b, kvlangXvalue_t *out);
 
 /* ── 各 lib 的 rwir handler 原型（表在 builtin.c 引用）────────────── */
 int kvlangBuiltinArray(kvlangFrame_t *f), kvlangBuiltinNdarrayNumel(kvlangFrame_t *f), kvlangBuiltinNdarrayDim(kvlangFrame_t *f), kvlangBuiltinNdarrayShape(kvlangFrame_t *f),
