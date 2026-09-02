@@ -1,7 +1,11 @@
 //! 签名 kindexpr（runtime篇-07，修订：无家族简写）：语法校验 + 值匹配。
 //!
 //! type   = atom ("|" atom)*
-//! atom   = [dims] ( any | kind )
+//! atom   = shape | mapexpr
+//! shape  = [dims] ( any | kind )
+//! mapexpr= key "·" type      # stringkeymap；value 递归 → 嵌套 map[string]map[…]
+//! key    = "[]" char-enc     # 字符串键（= Go map[string]V）
+//!        | "[" scalar ("," scalar)* "]"   # 标量元组键（物理以字符串格式落 key）
 //! dims   = "[]" | "[" dim ("," dim)* "]"
 //! dim    = integer | "?"
 //! any    = "any"           # 通配，匹配任意 kind
@@ -58,7 +62,7 @@ fn valid_dims(s: &str) -> bool {
     s.is_empty() || s.split(',').all(valid_dim)
 }
 
-fn valid_atom(s: &str) -> bool {
+fn valid_shape(s: &str) -> bool {
     if s.is_empty() {
         return false;
     }
@@ -74,6 +78,52 @@ fn valid_atom(s: &str) -> bool {
         return !base.is_empty() && valid_base(base);
     }
     valid_base(s)
+}
+
+/// 标量 kind（可作元组键元素；不含 char/object/index 等）。
+fn valid_scalar(s: &str) -> bool {
+    matches!(
+        s,
+        "bool"
+            | "int8"
+            | "int16"
+            | "int32"
+            | "int64"
+            | "uint8"
+            | "uint16"
+            | "uint32"
+            | "uint64"
+            | "float32"
+            | "float64"
+    )
+}
+
+/// stringkeymap 的 key 恒 `[…]` 起头，两式：
+///   `[]char/<enc>`      —— 字符串键（= Go `map[string]V`）
+///   `[T1,T2,…]`         —— 标量元组键（元素为标量 kind，物理以字符串格式落 key）
+fn valid_key(s: &str) -> bool {
+    let rest = match s.strip_prefix('[') {
+        Some(r) => r,
+        None => return false,
+    };
+    let end = match rest.find(']') {
+        Some(e) => e,
+        None => return false,
+    };
+    let inner = &rest[..end];
+    let tail = &rest[end + 1..];
+    if inner.is_empty() {
+        return matches!(tail, "char/utf8" | "char/utf32" | "char/ascii");
+    }
+    tail.is_empty() && inner.split(',').all(valid_scalar)
+}
+
+/// atom = shape | mapexpr；mapexpr = key "·" type（value 可递归含容器，故支持嵌套 map）。
+fn valid_atom(s: &str) -> bool {
+    if let Some(i) = s.find('·') {
+        return valid_key(&s[..i]) && valid_kindexpr(&s[i + '·'.len_utf8()..]);
+    }
+    valid_shape(s)
 }
 
 /// 末参变参标记：`A:any...` 表 0..N 个同型实参。
@@ -120,6 +170,10 @@ fn match_shape(s: &str, ndim: i32, dims: &[i32]) -> bool {
 
 /// ndim = -1 表示「已消费 dims，不再判 ndim」（递归哨兵）。
 fn match_atom(s: &str, kind: &str, ndim: i32, dims: &[i32]) -> bool {
+    // mapexpr（含 `·`）：容器值的 kind 恒为 stringkeymap，key/value 型不在此判。
+    if s.contains('·') {
+        return kind == "stringkeymap";
+    }
     if let Some(rest) = s.strip_prefix('[') {
         let end = match rest.find(']') {
             Some(e) => e,
@@ -175,9 +229,30 @@ mod tests {
             "any...",
             "int64|float64...",
             "[]float32...",
+            "[]char/utf8·int64",
+            "[]char/utf32·[]char/utf8",
+            "[]char/utf8·[]char/utf8·int64",
+            "[int32,int32]·[]char/utf8",
+            "[float32,float32]·[]char/utf8",
+            "[float32,int8,uint32]·int64",
         ] {
             assert!(valid_kindexpr(e), "{e} should be valid");
         }
+        for e in [
+            "·int64",
+            "[]char/utf8·",
+            "char/utf8·int64",
+            "int·int64",
+            "[]char/utf8·nope",
+            "[]int32·int64",
+            "[?]·int64",
+            "[int32,]·int64",
+            "[foo,int32]·int64",
+        ] {
+            assert!(!valid_kindexpr(e), "{e} should be invalid");
+        }
+        assert!(match_kindexpr("[]char/utf8·int64", "stringkeymap", 1, &[3]));
+        assert!(!match_kindexpr("[]char/utf8·int64", "object", 0, &[]));
     }
 
     #[test]
