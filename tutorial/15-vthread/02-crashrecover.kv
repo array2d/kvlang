@@ -17,7 +17,7 @@ rwfunc test() -> () {
 		println("step", i)
 		noenv = map()
 		a = {"sleep", "0.2"}
-		internet/proc·exec(a, noenv) -> code
+		networld/proc·exec(a, noenv) -> code
 	}
 	kv·set("/crashtest/done", 1)
 	println("complete final=", i)

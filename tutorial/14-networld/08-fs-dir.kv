@@ -1,4 +1,4 @@
-# internet/fs·mkdir + list + del：目录创建、列举成员、删除
+# networld/fs·mkdir + list + del：目录创建、列举成员、删除
 #   fs·mkdir(d) -> 0       创建目录（含缺失父级，幂等）
 #   fs·list(d) -> names    列目录成员（名字序，[]stringkeymap）；散 key 两步遍历 kv·listn+kv·get 取名
 #   fs·del(p) -> 0         删文件或空目录；非空目录失败返回 -1
@@ -12,11 +12,11 @@ rwfunc test() -> () {
 	d = "/tmp/kvlang_fs_dir"
 	noenv = map()
 	clean = {"rm", "-rf", "/tmp/kvlang_fs_dir"}
-	internet/proc·exec(clean, noenv) -> rc
-	internet/fs·mkdir(d) -> mc
-	internet/fs·write("/tmp/kvlang_fs_dir/a.txt", xv·reinterpret("A", "[]uint8")) -> w1
-	internet/fs·write("/tmp/kvlang_fs_dir/b.txt", xv·reinterpret("B", "[]uint8")) -> w2
-	internet/fs·list(d) -> names
+	networld/proc·exec(clean, noenv) -> rc
+	networld/fs·mkdir(d) -> mc
+	networld/fs·write("/tmp/kvlang_fs_dir/a.txt", xv·reinterpret("A", "[]uint8")) -> w1
+	networld/fs·write("/tmp/kvlang_fs_dir/b.txt", xv·reinterpret("B", "[]uint8")) -> w2
+	networld/fs·list(d) -> names
 	kv·listlen(names) -> nc
 	println("count=", nc)
 	i = 0
@@ -26,9 +26,9 @@ rwfunc test() -> () {
 		println("name=", nm)
 		i = i + 1
 	}
-	internet/fs·del("/tmp/kvlang_fs_dir/a.txt") -> d1
-	internet/fs·del("/tmp/kvlang_fs_dir/b.txt") -> d2
-	internet/fs·del(d) -> dd
+	networld/fs·del("/tmp/kvlang_fs_dir/a.txt") -> d1
+	networld/fs·del("/tmp/kvlang_fs_dir/b.txt") -> d2
+	networld/fs·del(d) -> dd
 	println("delfile=", d1)
 	println("deldir=", dd)
 }

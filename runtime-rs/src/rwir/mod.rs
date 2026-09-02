@@ -4,11 +4,11 @@
 //!   json         : json·to / json·from                   KV 子树 ↔ JSON 文本
 //!   http         : http·call                             网络抓取（ureq 原生）
 //!   kvlanglayout : kvlanglayout·vet/format/layout/dump    自造 kv 代码入库（layout C ABI）
-//!   internet     : internet/proc·exec、internet/fs·size/read/write/append/list/del/mkdir/exists   外部进程 + 宿主文件系统
+//!   networld     : networld/proc·exec、networld/fs·size/read/write/append/list/del/mkdir/exists   外部进程 + 宿主文件系统
 //! 不纯 rwir（llm/shell/python/byteseek·run 等）留在 byteseek，依赖本库后自行叠加。
 
 pub mod http;
-pub mod internet;
+pub mod networld;
 pub mod json;
 pub mod kvlanglayout;
 pub mod term;
@@ -109,63 +109,63 @@ pub const REGS: &[(&str, Rwir)] = &[
         },
     ),
     (
-        "internet/proc·exec",
+        "networld/proc·exec",
         Rwir {
             rp: &["[]stringkeymap", "[]stringkeymap"],
             wp: &["uint8", "[]uint8", "[]uint8"],
         },
     ),
     (
-        "internet/fs·size",
+        "networld/fs·size",
         Rwir {
             rp: &["[]char/utf8|[]char/utf32"],
             wp: &["int64"],
         },
     ),
     (
-        "internet/fs·read",
+        "networld/fs·read",
         Rwir {
             rp: &["[]char/utf8|[]char/utf32", "int64", "int64"],
             wp: &["[]uint8"],
         },
     ),
     (
-        "internet/fs·write",
+        "networld/fs·write",
         Rwir {
             rp: &["[]char/utf8|[]char/utf32", "[]uint8"],
             wp: &["int64"],
         },
     ),
     (
-        "internet/fs·append",
+        "networld/fs·append",
         Rwir {
             rp: &["[]char/utf8|[]char/utf32", "[]uint8"],
             wp: &["int64"],
         },
     ),
     (
-        "internet/fs·list",
+        "networld/fs·list",
         Rwir {
             rp: &["[]char/utf8|[]char/utf32"],
             wp: &["[]stringkeymap"],
         },
     ),
     (
-        "internet/fs·del",
+        "networld/fs·del",
         Rwir {
             rp: &["[]char/utf8|[]char/utf32"],
             wp: &["int64"],
         },
     ),
     (
-        "internet/fs·mkdir",
+        "networld/fs·mkdir",
         Rwir {
             rp: &["[]char/utf8|[]char/utf32"],
             wp: &["int64"],
         },
     ),
     (
-        "internet/fs·exists",
+        "networld/fs·exists",
         Rwir {
             rp: &["[]char/utf8|[]char/utf32"],
             wp: &["bool"],
@@ -214,15 +214,15 @@ pub fn is_inproc(op: &str) -> bool {
             | "kvlanglayout·format"
             | "kvlanglayout·layout"
             | "kvlanglayout·dump"
-            | "internet/proc·exec"
-            | "internet/fs·size"
-            | "internet/fs·read"
-            | "internet/fs·write"
-            | "internet/fs·append"
-            | "internet/fs·list"
-            | "internet/fs·del"
-            | "internet/fs·mkdir"
-            | "internet/fs·exists"
+            | "networld/proc·exec"
+            | "networld/fs·size"
+            | "networld/fs·read"
+            | "networld/fs·write"
+            | "networld/fs·append"
+            | "networld/fs·list"
+            | "networld/fs·del"
+            | "networld/fs·mkdir"
+            | "networld/fs·exists"
     )
 }
 
@@ -239,15 +239,15 @@ pub fn dispatch(eng: &Engine, op: &str, pc: &str) {
         "json·to" => json::to(eng, pc),
         "json·from" => json::from(eng, pc),
         "http·call" => http::call(eng, pc),
-        "internet/proc·exec" => internet::proc::exec(eng, pc),
-        "internet/fs·size" => internet::fs::size(eng, pc),
-        "internet/fs·read" => internet::fs::read(eng, pc),
-        "internet/fs·write" => internet::fs::write(eng, pc),
-        "internet/fs·append" => internet::fs::append(eng, pc),
-        "internet/fs·list" => internet::fs::list(eng, pc),
-        "internet/fs·del" => internet::fs::del(eng, pc),
-        "internet/fs·mkdir" => internet::fs::mkdir(eng, pc),
-        "internet/fs·exists" => internet::fs::exists(eng, pc),
+        "networld/proc·exec" => networld::proc::exec(eng, pc),
+        "networld/fs·size" => networld::fs::size(eng, pc),
+        "networld/fs·read" => networld::fs::read(eng, pc),
+        "networld/fs·write" => networld::fs::write(eng, pc),
+        "networld/fs·append" => networld::fs::append(eng, pc),
+        "networld/fs·list" => networld::fs::list(eng, pc),
+        "networld/fs·del" => networld::fs::del(eng, pc),
+        "networld/fs·mkdir" => networld::fs::mkdir(eng, pc),
+        "networld/fs·exists" => networld::fs::exists(eng, pc),
         "kvlanglayout·vet" => {
             let out = kvlanglayout::vet(eng, &eng.read0(pc));
             eng.set_kv(&eng.write0(pc), &out);

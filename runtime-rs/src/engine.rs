@@ -88,7 +88,7 @@ impl Engine {
     }
 
     /// 扩展世界（@ ref=2）句柄编码写入：kind=目标完整 kindexpr（如 "[]uint8"），body=定位串。
-    /// 读取该 key 时由 read_at 按 body 前缀路由给对应 /lib/internet/* 兑现器还原真实字节。
+    /// 读取该 key 时由 read_at 按 body 前缀路由给对应 /lib/networld/* 兑现器还原真实字节。
     pub fn set_ext_handle(&self, key: &str, target_kindexpr: &str, locator: &str) {
         unsafe {
             let (mut buf, mut len) = (null_mut(), 0u32);
@@ -144,11 +144,11 @@ impl Engine {
         }
     }
 
-    /// 扩展句柄兑现：按 body 前缀路由 —— /internet/{host}/proc/... → 进程内 proc 兑现器
+    /// 扩展句柄兑现：按 body 前缀路由 —— /networld/{host}/proc/... → 进程内 proc 兑现器
     /// （逻辑路径 → /tmp/kvlangruntime-rs/{pid}/… 物理文件 → 读回字节）。其余前缀暂原样退化。
     fn resolve_ext_bytes(&self, locator: &str) -> Vec<u8> {
-        if locator.starts_with("/internet/") && locator.contains("/proc/") {
-            return rwir::internet::proc::resolve_read(locator);
+        if locator.starts_with("/networld/") && locator.contains("/proc/") {
+            return rwir::networld::proc::resolve_read(locator);
         }
         locator.as_bytes().to_vec()
     }
