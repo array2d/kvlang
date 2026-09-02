@@ -24,7 +24,10 @@ pub fn init_dirs(kv: &mut Kv) -> Result<(), String> {
 /// 返回本次写入的 init 函数名列表（pkg 严格取自 `lib` 声明：`lib X {…}` → `X·init`，
 /// 裸顶层语句 → `init`），供消费方按 lib 声明驱动 init（非文件系统路径推导）。
 pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
-    let (file, diags) = parser::parse_code(src)?;
+    let (file, mut diags) = parser::parse_code(src)?;
+    for f in subscript_check_funcs(&file) {
+        diags.extend(lower::check_container_subscript(&f));
+    }
     for d in &diags {
         eprintln!("{}", d.string());
     }
@@ -78,6 +81,28 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
     Ok(inits)
 }
 
+/// 待做 `[]` 下标校验的函数集合：显式 funcs + init_body/top_level_calls 合成的 init。
+fn subscript_check_funcs(file: &super::ast::File) -> Vec<Func> {
+    let mut funcs: Vec<Func> = file.funcs.clone();
+    let mut body = file.init_body.clone();
+    for c in &file.top_level_calls {
+        body.push(Stmt::Instruction(c.clone()));
+    }
+    if !body.is_empty() {
+        funcs.push(Func {
+            comments: Vec::new(),
+            sig: super::ast::FuncSig {
+                name: "init".to_string(),
+                params: Vec::new(),
+                returns: Vec::new(),
+            },
+            body,
+            pkg: String::new(),
+        });
+    }
+    funcs
+}
+
 /// pkg → init 函数名（运行时用名，无 /lib 前缀）：空 pkg → `init`，否则 `<pkg>·init`。
 fn init_fn_name(pkg: &str) -> String {
     if pkg.is_empty() {
@@ -102,7 +127,10 @@ pub fn format(src: &str) -> Result<String, String> {
 /// 校验源码是否可 layout（parse + lower），但不写入 kvspace。
 /// 供运行时 vet 闸门：LLM 生成的 kv 代码先过此关，失败不污染 /lib。
 pub fn vet(src: &str) -> Result<(), String> {
-    let (file, diags) = parser::parse_code(src)?;
+    let (file, mut diags) = parser::parse_code(src)?;
+    for f in subscript_check_funcs(&file) {
+        diags.extend(lower::check_container_subscript(&f));
+    }
     for d in &diags {
         eprintln!("{}", d.string());
     }

@@ -13,7 +13,7 @@ rwfunc build_tree() -> () {
 rwfunc inorder(root:[]char/utf32) -> () {
 	# iterative stack simulation
 	si = 0  # = 等价于 <-
-	stack:object = {}  # = 等价于 <-
+	stack:[int64]·[]char/utf32 = {}  # = 等价于 <-
 	cur <- root
 	while (cur != "" || si > 0) {
 		while (cur != "") {
@@ -22,7 +22,7 @@ rwfunc inorder(root:[]char/utf32) -> () {
 			cur·left -> cur
 		}
 		si - 1 -> si
-		stack[si] -> node
+		kv·get(stack, si) -> node
 		node·val -> v
 		println(v)
 		node·right -> cur

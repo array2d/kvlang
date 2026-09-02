@@ -4,7 +4,7 @@
 #   true
 #   false
 rwfunc is_pal(head:[]char/utf32) -> () {
-	arr:object = {}  # = 等价于 <-
+	arr:[int64]·int64 = {}  # = 等价于 <-
 	0 -> n
 	head -> p
 	while (p != "") {
@@ -17,8 +17,8 @@ rwfunc is_pal(head:[]char/utf32) -> () {
 	0 -> l
 	r <- n - 1
 	while (l < r) {
-		arr[l] -> x
-		arr[r] -> y
+		kv·get(arr, l) -> x
+		kv·get(arr, r) -> y
 
 		if (x != y) {
 			false -> ok
