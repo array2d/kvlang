@@ -12,7 +12,9 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${BIN_DIR}")
 
 add_library(kvlang_runtime SHARED
     src/strbuf.c src/xvalue.c src/kv.c src/keytree.c src/rwir.c
-    src/vthread.c src/logx.c src/builtin.c src/kvcpu.c src/runtime.c src/rwirext.c
+    src/vthread.c src/logx.c src/builtin.c src/builtin_coll.c src/builtin_string.c
+    src/builtin_time.c src/builtin_random.c src/builtin_kv.c src/builtin_vthread.c
+    src/kvcpu.c src/runtime.c src/rwirext.c
     src/kindexpr.c)
 target_include_directories(kvlang_runtime PUBLIC include src)
 target_compile_definitions(kvlang_runtime PRIVATE _GNU_SOURCE)

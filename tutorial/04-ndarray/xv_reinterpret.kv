@@ -1,0 +1,15 @@
+# 期望输出:
+#   before: [3]int64 24
+#   as-bytes: [24]uint8 24
+# xv·reinterpret 原样保留 body 字节（bodylen 不变），只替换 kindexpr；
+# 3 个 int64（24 字节）重解释为 24 个 uint8。
+rwfunc test() -> () {
+	a:[]int64 = [1, 2, 3]
+	xv·kindexpr(a) -> k0
+	xv·bodylen(a) -> b0
+	println("before:", k0, b0)
+	xv·reinterpret(a, "[]uint8") -> raw
+	xv·kindexpr(raw) -> k1
+	xv·bodylen(raw) -> b1
+	println("as-bytes:", k1, b1)
+}
