@@ -459,7 +459,7 @@ func init() {
 	kindFloat64 = cconst("KVSPACE_KIND_FLOAT64")
 	kindBool = cconst("KVSPACE_KIND_BOOL")
 
-	ops = []op{
+	myrwircaps = []op{
 		{"json" + sep + "to", 1, 1},
 		{"json" + sep + "from", 1, 1},
 	}
@@ -644,10 +644,10 @@ type op struct {
 	nw   int
 }
 
-var ops []op
+var myrwircaps []op
 
 func register(c unsafe.Pointer) {
-	for _, o := range ops {
+	for _, o := range myrwircaps {
 		sig := strings.TrimSuffix(strings.Repeat("any\n", o.nr+o.nw), "\n")
 		co := cstr(o.name)
 		cs := cstr(sig)
@@ -736,7 +736,7 @@ func Serve(dsn string) {
 	defer C.kvspaceClose(c)
 	register(c)
 	for {
-		for _, o := range ops {
+		for _, o := range myrwircaps {
 			serveOp(c, o)
 		}
 		time.Sleep(50 * time.Millisecond)

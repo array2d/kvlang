@@ -205,8 +205,8 @@ void kvlangRwirInstFree(kvlangRwirInst_t *inst);
 /* 外部扩展 handoff：写共享队列 /lib/<opcode>/vids/<vid>=pc，阻塞 watch 该 key 直至变 None
  * （外部执行器认领、驱动、置 nextpc 后删除该条目 → 本端解除阻塞）。 */
 int handoff_external_rwir(kvlangKv_t *kv, const char *vtid, const char *pc, kvlangRwirInst_t *inst);
-/* opcode 是否已注册的扩展 rwir（进程内 map，不读 /lib）。 */
-bool isothersrwir(const char *opcode);
+/* opcode 是否他人 rwir：读 kvspace /lib/<opcode>，kind=defrwir 即是（能力唯一事实源）。 */
+bool isothersrwir(kvlangKv_t *kv, const char *opcode);
 
 /* ── vthread ───────────────────────────────────────────────────────── */
 

@@ -658,7 +658,7 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode, char *
             }
         } else if (is_copy_op(inst.opcode)) {
             exec_err = kvlangBuiltinExecuteCopy(kv, vtid, cur, &inst);
-        } else if (isothersrwir(inst.opcode)) {
+        } else if (isothersrwir(kv, inst.opcode)) {
             char *rk = kvlangKeytreeRwir(inst.opcode);
             int def_nr = 0;
             char *def_sig = load_def_reads(kv, rk, &def_nr);
