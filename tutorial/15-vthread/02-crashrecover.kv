@@ -1,7 +1,7 @@
 # 崩溃恢复演示：每步把进度写进 kvspace(/crashtest/step)，再 sleep 造一个可被外部打断的窗口。
 # 直接 `kvlang 02-crashrecover.kv` → 完整跑完 step 1..5（下方期望输出，也是 tutorial 回归路径）。
 # 崩溃恢复场景由同目录 crashrecover.sh 编排：跑到 step3 时外部 SIGKILL 掉 kvlang，
-# 再另起进程 `kvlang resume <vid>` 从 kvspace 里持久化的 pc 续跑——只补打 step 4/5，不重演 1..3。
+# 再另起进程 `kvlang run <vid>` 从 kvspace 里持久化的 pc 续跑——只补打 step 4/5，不重演 1..3。
 # 期望输出:
 #   step 1
 #   step 2

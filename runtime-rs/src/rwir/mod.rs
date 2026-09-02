@@ -1,15 +1,16 @@
-//! rwir —— 注册进 kvlang runtime 的纯净 stdlib（无副作用外世界依赖，全部 in-process）：
-//!   term    : print / println / cerr / input     行输出 + 读 stdin
-//!   json    : json·to / json·from                 KV 子树 ↔ JSON 文本
-//!   http    : http·call                            网络抓取（ureq 原生）
-//!   kvlayout: kvlanglayout·vet/layout/src          自造 kv 代码入库（layout C ABI）
+//! rwir —— 注册进 kvlang runtime 的 stdlib，文件/模块按 kvlang lib 嵌套关系组织
+//! （lib 用 `/` 嵌套、成员用 `·`，文件树与之 1:1）：
+//!   term         : print / println / cerr / input        行输出 + 读 stdin（裸 rwir）
+//!   json         : json·to / json·from                   KV 子树 ↔ JSON 文本
+//!   http         : http·call                             网络抓取（ureq 原生）
+//!   kvlanglayout : kvlanglayout·vet/format/layout/dump    自造 kv 代码入库（layout C ABI）
+//!   internet     : internet/proc·exec、internet/fs·size/read/write/append/list/del/mkdir/exists   外部进程 + 宿主文件系统
 //! 不纯 rwir（llm/shell/python/byteseek·run 等）留在 byteseek，依赖本库后自行叠加。
 
-pub mod fs;
 pub mod http;
 pub mod internet;
 pub mod json;
-pub mod kvlayout;
+pub mod kvlanglayout;
 pub mod term;
 
 use crate::engine::Engine;
@@ -117,15 +118,57 @@ pub const REGS: &[(&str, Rwir)] = &[
     (
         "internet/fs·size",
         Rwir {
-            rp: &["[]char/utf8"],
+            rp: &["[]char/utf8|[]char/utf32"],
             wp: &["int64"],
         },
     ),
     (
         "internet/fs·read",
         Rwir {
-            rp: &["[]char/utf8", "int64", "int64"],
+            rp: &["[]char/utf8|[]char/utf32", "int64", "int64"],
             wp: &["[]uint8"],
+        },
+    ),
+    (
+        "internet/fs·write",
+        Rwir {
+            rp: &["[]char/utf8|[]char/utf32", "[]uint8"],
+            wp: &["int64"],
+        },
+    ),
+    (
+        "internet/fs·append",
+        Rwir {
+            rp: &["[]char/utf8|[]char/utf32", "[]uint8"],
+            wp: &["int64"],
+        },
+    ),
+    (
+        "internet/fs·list",
+        Rwir {
+            rp: &["[]char/utf8|[]char/utf32"],
+            wp: &["[]stringkeymap"],
+        },
+    ),
+    (
+        "internet/fs·del",
+        Rwir {
+            rp: &["[]char/utf8|[]char/utf32"],
+            wp: &["int64"],
+        },
+    ),
+    (
+        "internet/fs·mkdir",
+        Rwir {
+            rp: &["[]char/utf8|[]char/utf32"],
+            wp: &["int64"],
+        },
+    ),
+    (
+        "internet/fs·exists",
+        Rwir {
+            rp: &["[]char/utf8|[]char/utf32"],
+            wp: &["bool"],
         },
     ),
 ];
@@ -174,6 +217,12 @@ pub fn is_inproc(op: &str) -> bool {
             | "internet/proc·exec"
             | "internet/fs·size"
             | "internet/fs·read"
+            | "internet/fs·write"
+            | "internet/fs·append"
+            | "internet/fs·list"
+            | "internet/fs·del"
+            | "internet/fs·mkdir"
+            | "internet/fs·exists"
     )
 }
 
@@ -190,23 +239,29 @@ pub fn dispatch(eng: &Engine, op: &str, pc: &str) {
         "json·to" => json::to(eng, pc),
         "json·from" => json::from(eng, pc),
         "http·call" => http::call(eng, pc),
-        "internet/proc·exec" => internet::exec(eng, pc),
-        "internet/fs·size" => fs::size(eng, pc),
-        "internet/fs·read" => fs::read(eng, pc),
+        "internet/proc·exec" => internet::proc::exec(eng, pc),
+        "internet/fs·size" => internet::fs::size(eng, pc),
+        "internet/fs·read" => internet::fs::read(eng, pc),
+        "internet/fs·write" => internet::fs::write(eng, pc),
+        "internet/fs·append" => internet::fs::append(eng, pc),
+        "internet/fs·list" => internet::fs::list(eng, pc),
+        "internet/fs·del" => internet::fs::del(eng, pc),
+        "internet/fs·mkdir" => internet::fs::mkdir(eng, pc),
+        "internet/fs·exists" => internet::fs::exists(eng, pc),
         "kvlanglayout·vet" => {
-            let out = kvlayout::vet(eng, &eng.read0(pc));
+            let out = kvlanglayout::vet(eng, &eng.read0(pc));
             eng.set_kv(&eng.write0(pc), &out);
         }
         "kvlanglayout·format" => {
-            let out = kvlayout::format(eng, &eng.read0(pc));
+            let out = kvlanglayout::format(eng, &eng.read0(pc));
             eng.set_kv(&eng.write0(pc), &out);
         }
         "kvlanglayout·layout" => {
-            let out = kvlayout::layout(eng, &eng.read0(pc));
+            let out = kvlanglayout::layout(eng, &eng.read0(pc));
             eng.set_kv(&eng.write0(pc), &out);
         }
         "kvlanglayout·dump" => {
-            let out = kvlayout::dump(eng, &eng.read0(pc));
+            let out = kvlanglayout::dump(eng, &eng.read0(pc));
             eng.set_kv(&eng.write0(pc), &out);
         }
         other => crate::elog!("未知 rwir: {other} @ {pc}"),
