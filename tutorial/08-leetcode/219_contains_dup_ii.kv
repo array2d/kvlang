@@ -5,7 +5,7 @@
 #   false
 rwfunc near_dup(nums:[]int64, k:int64) -> () {
 	n <- ndarray·numel(nums)
-	h = {}  # = 等价于 <-
+	h:[]char/utf8·int64 = {}  # = 等价于 <-
 	found = false  # = 等价于 <-
 	0 -> i
 	while (i < n) {

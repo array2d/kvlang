@@ -5,7 +5,7 @@
 #   false
 rwfunc has_dup(a:[]int64) -> () {
 	ndarray·numel(a) -> n
-	seen = {}  # = 等价于 <-
+	seen:[]char/utf8·int64 = {}  # = 等价于 <-
 	found <- false
 	i = 0  # = 等价于 <-
 	while (i < n) {
@@ -32,7 +32,7 @@ rwfunc has_dup(a:[]int64) -> () {
 rwfunc no_dup() -> () {
 	a:[]int64 = [1, 2, 3, 4]  # = 等价于 <-
 	ndarray·numel(a) -> n
-	seen = {}  # = 等价于 <-
+	seen:[]char/utf8·int64 = {}  # = 等价于 <-
 	found <- false
 	i = 0  # = 等价于 <-
 	while (i < n) {
