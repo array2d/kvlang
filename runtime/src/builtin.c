@@ -21,8 +21,9 @@ int kvlangBuiltinArray(kvlangFrame_t *f), kvlangBuiltinNdarrayNumel(kvlangFrame_
     kvlangBuiltinKvGet(kvlangFrame_t *f), kvlangBuiltinKvSet(kvlangFrame_t *f), kvlangBuiltinKvDel(kvlangFrame_t *f),
     kvlangBuiltinKvDelTree(kvlangFrame_t *f), kvlangBuiltinKvList(kvlangFrame_t *f), kvlangBuiltinKvListLen(kvlangFrame_t *f), kvlangBuiltinKvListN(kvlangFrame_t *f), kvlangBuiltinKvMkindex(kvlangFrame_t *f),
     kvlangBuiltinKvExtIndex(kvlangFrame_t *f), kvlangBuiltinKvRmIndexExt(kvlangFrame_t *f), kvlangBuiltinKvWatch(kvlangFrame_t *f),
-    kvlangBuiltinDebugger(kvlangFrame_t *f), kvlangBuiltinVthreadRun(kvlangFrame_t *f),
-    kvlangBuiltinVthreadCall(kvlangFrame_t *f),
+    kvlangBuiltinDebugger(kvlangFrame_t *f), kvlangBuiltinVthreadCreate(kvlangFrame_t *f),
+    kvlangBuiltinVthreadRun(kvlangFrame_t *f),
+    kvlangBuiltinVthreadCall(kvlangFrame_t *f), kvlangBuiltinVthreadSleep(kvlangFrame_t *f),
     kvlangBuiltinVthreadSetstatus(kvlangFrame_t *f);
 
 /* ── 类型 helper（对齐 Go isIntKind 含 uint）────────────────────── */
@@ -622,8 +623,10 @@ static const struct { const char *op; kvlangBuiltinFn fn; } builtins[] = {
     {"kv·get", kvlangBuiltinKvGet}, {"kv·set", kvlangBuiltinKvSet}, {"kv·del", kvlangBuiltinKvDel},
     {"kv·deltree", kvlangBuiltinKvDelTree}, {"kv·list", kvlangBuiltinKvList}, {"kv·listlen", kvlangBuiltinKvListLen}, {"kv·listn", kvlangBuiltinKvListN}, {"kv·mkindex", kvlangBuiltinKvMkindex},
     {"kv·extindex", kvlangBuiltinKvExtIndex}, {"kv·rmindexext", kvlangBuiltinKvRmIndexExt}, {"kv·watch", kvlangBuiltinKvWatch},
+    {"vthread·create", kvlangBuiltinVthreadCreate},
     {"vthread·run", kvlangBuiltinVthreadRun},
     {"vthread·call", kvlangBuiltinVthreadCall},
+    {"vthread·sleep", kvlangBuiltinVthreadSleep},
     {"vthread·setstatus", kvlangBuiltinVthreadSetstatus},
     {"debugger", kvlangBuiltinDebugger},
 };
@@ -1711,18 +1714,44 @@ int kvlangBuiltinKvWatch(kvlangFrame_t *f) {
 
 /* ── vthread ─────────────────────────────────────────────────────── */
 
+/* vthread·create(funckey) -> vid：分配 vid、建栈索引、bootstrap 首指令、置 init，返回 vid 句柄。
+ * 只创建不运行——首指令不执行。运行交给 vthread·run(vid)。与 vthread·call 不同：新开独立 vid。 */
+int kvlangBuiltinVthreadCreate(kvlangFrame_t *f) {
+    kvlangXvalue_t in[1]; int n = read_inputs(f, in, 1);
+    if (n < 1 || !kvlangXvalueIsCharKind(kvlangXvalueKind(&in[0]))) {
+        free_inputs(in, n);
+        return set_err(f, "TypeError: vthread.create requires 1 string arg");
+    }
+    char *fn = kvlangXvalueValueString(&in[0]);
+    char *vid = kvlangVthreadSpawn(f->kv, fn, NULL, 0);
+    free(fn); free_inputs(in, n);
+    if (!vid) return set_err(f, "RuntimeError: vthread.create failed");
+    kvlangXvalue_t r; kvlangXvalueNewCharUtf8(&r, vid);
+    free(vid);
+    int rc = write_result(f, &r);
+    kvlangXvalueFree(&r);
+    return rc;
+}
+
+/* vthread·run(vid)：以 vid 为参数，从其持久化 pc 驱动到结束（阻塞）。子 vid 命中 ext rwir 时经
+ * yield_pc 冒泡给上层驱动派发、推进子 pc 后重入本指令续驱；子 vid done 后推进本指令 NextPc。 */
 int kvlangBuiltinVthreadRun(kvlangFrame_t *f) {
     kvlangXvalue_t in[1]; int n = read_inputs(f, in, 1);
     if (n < 1 || !kvlangXvalueIsCharKind(kvlangXvalueKind(&in[0]))) {
         free_inputs(in, n);
-        return set_err(f, "TypeError: vthread.run requires 1 string arg");
+        return set_err(f, "TypeError: vthread.run requires 1 string (vid) arg");
     }
-    char *fn = kvlangXvalueValueString(&in[0]);
-    char *ret = NULL;
-    char err[256];
-    int rc = kvlangRuntimeExecuteKv(f->kv, fn, NULL, 0, &ret, err, sizeof err);
-    free(fn); free(ret); free_inputs(in, n);
-    if (rc != 0) return set_err(f, "%s", err);
+    char *vid = kvlangXvalueValueString(&in[0]);
+    free_inputs(in, n);
+    char *subpc = NULL, *status = NULL;
+    kvlangVthreadGet(f->kv, vid, &subpc, &status);
+    free(status); free(vid);
+    if (!subpc || !subpc[0]) { free(subpc); next_pc(f); return 0; }
+    char *subout = NULL;
+    int rc = kvlangKvcpuExecuteMode(f->kv, subpc, KVMODE_RETURN, &subout);
+    free(subpc);
+    if (rc < 0) { free(subout); return set_err(f, "RuntimeError: vthread.run failed"); }
+    if (rc == 1) { *f->yield_pc = subout; return 0; }
     next_pc(f);
     return 0;
 }
@@ -1740,6 +1769,20 @@ int kvlangBuiltinVthreadCall(kvlangFrame_t *f) {
     int rc = kvlangKvcpuDynCall(f->kv, f->vtid, f->pc, fn);
     free(fn); free_inputs(in, n);
     return rc;
+}
+
+/* vthread·sleep(dur)：让当前 vthread 阻塞 dur（duration，纳秒），到点后 NextPc。
+ * 单进程模型下即 nanosleep 阻塞驱动线程。 */
+int kvlangBuiltinVthreadSleep(kvlangFrame_t *f) {
+    kvlangXvalue_t in[1]; int n = read_inputs(f, in, 1);
+    if (n < 1) { free_inputs(in, n); return set_err(f, "TypeError: vthread.sleep requires 1 duration arg"); }
+    int64_t ns = kvlangXvalueAsInt64(&in[0]);
+    free_inputs(in, n);
+    if (ns > 0) {
+        struct timespec ts = { .tv_sec = ns / 1000000000LL, .tv_nsec = ns % 1000000000LL };
+        nanosleep(&ts, NULL);
+    }
+    next_pc(f); return 0;
 }
 
 /* ── vthread 控制 / debugger ─────────────────────────────────────── */
