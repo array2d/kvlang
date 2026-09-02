@@ -628,12 +628,12 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode, char *
             }
             if (strcmp(ext_kind(kv, fr), KVSPACE_KIND_RWFUNC) != 0) {
                 char *parent = handle_scope_return(kv, cur);
-                if (!parent || !parent[0]) { free(parent); kvlangVthreadSetDone(kv, vtid, "ok"); kvlangStrbufFree(&vtroot); free(fr); kvlangRwirInstFree(&inst); break; }
+                if (!parent || !parent[0]) { free(parent); char msg[512]; snprintf(msg, sizeof msg, "RuntimeError: broken return chain: scope frame %s has no returnpc (pc=%s)", fr, cur); kvlangVthreadSetError(kv, vtid, cur, msg); kvlangStrbufFree(&vtroot); free(fr); kvlangRwirInstFree(&inst); rc = -1; break; }
                 kvlangVthreadSet(kv, vtid, parent, "running");
                 free(cur); cur = parent;
             } else {
                 char *parent = handle_return(kv, cur);
-                if (!parent || !parent[0]) { free(parent); kvlangVthreadSetDone(kv, vtid, "ok"); kvlangStrbufFree(&vtroot); free(fr); kvlangRwirInstFree(&inst); break; }
+                if (!parent || !parent[0]) { free(parent); char msg[512]; snprintf(msg, sizeof msg, "RuntimeError: broken return chain: frame %s has no returnpc (pc=%s)", fr, cur); kvlangVthreadSetError(kv, vtid, cur, msg); kvlangStrbufFree(&vtroot); free(fr); kvlangRwirInstFree(&inst); rc = -1; break; }
                 kvlangVthreadSet(kv, vtid, parent, "running");
                 free(cur); cur = parent;
             }
