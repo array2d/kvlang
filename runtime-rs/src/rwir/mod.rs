@@ -209,6 +209,6 @@ pub fn dispatch(eng: &Engine, op: &str, pc: &str) {
             let out = kvlayout::dump(eng, &eng.read0(pc));
             eng.set_kv(&eng.write0(pc), &out);
         }
-        other => eprintln!("kvlang: 未知 rwir: {other} @ {pc}"),
+        other => crate::elog!("未知 rwir: {other} @ {pc}"),
     }
 }
