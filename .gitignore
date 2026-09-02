@@ -64,6 +64,10 @@ tutorial/test_failures.csv
 *.kv.dump
 kvlanglayout
 
+# ── 本地 claude 说明（不入库）──
+/.claude/
+/claude.md
+
 # ── kvspace shm 测试误落仓库根（相对路径 DSN）──
 silent*
 dumptest*

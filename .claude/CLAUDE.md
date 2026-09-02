@@ -1,1 +1,0 @@
-../deepx-design/.claude/claude.md
