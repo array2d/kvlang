@@ -288,11 +288,10 @@ static int kvlangBuiltinAdd(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     int rc;
     if (n == 2 && kvlangXvalueIsCharKind(kvlangXvalueKind(&in[0])) && kvlangXvalueIsCharKind(kvlangXvalueKind(&in[1]))) {
-        char *a = kvlangXvalueValueString(&in[0]), *b = kvlangXvalueValueString(&in[1]);
-        kvlangStrbuf_t s; kvlangStrbufInit(&s); kvlangStrbufPuts(&s, a); kvlangStrbufPuts(&s, b);
-        kvlangXvalue_t r; kvlangXvalueNewCharUtf32(&r, s.p);
-        rc = kvlangBuiltinWriteResult(f, &r);
-        kvlangXvalueFree(&r); free(a); free(b); kvlangStrbufFree(&s);
+        kvlangXvalue_t r;
+        if (kvlangBuiltinCharConcat(&in[0], &in[1], &r)) {
+            rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r);
+        } else rc = kvlangBuiltinSetErr(f, "TypeError: cannot concat %s with %s; convert encoding explicitly (char/utf8|char/utf32|char/ascii)", kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1]));
     } else if (n >= 2 && is_numeric(&in[0]) && is_numeric(&in[1])) {
         if (is_int_kind(kvlangXvalueKind(&in[0])) && is_int_kind(kvlangXvalueKind(&in[1]))) {
             kvlangXvalue_t r; narrow_int(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1]), kvlangXvalueAsInt64(&in[0]) + kvlangXvalueAsInt64(&in[1]), &r);

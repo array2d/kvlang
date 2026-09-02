@@ -160,19 +160,42 @@ int kvlangBuiltinStringSlice(kvlangFrame_t *f) {
     return 0;
 }
 
+bool kvlangBuiltinCharConcat(const kvlangXvalue_t *a, const kvlangXvalue_t *b, kvlangXvalue_t *out) {
+    const char *ka = kvlangXvalueKind(a), *kb = kvlangXvalueKind(b);
+    /* utf32（4字节/码点布局）只能与 utf32 互拼；ascii ⊆ utf8 字节兼容，可互拼且不转码，
+       同种保持、异种取 utf8。utf32 与非 utf32 混拼须显式转码，返 false 让调用方 throw。 */
+    bool a32 = strcmp(ka, KVSPACE_KIND_CHAR) == 0, b32 = strcmp(kb, KVSPACE_KIND_CHAR) == 0;
+    if (a32 != b32) return false;
+    const char *rk = a32 ? KVSPACE_KIND_CHAR : (strcmp(ka, kb) == 0 ? ka : KVSPACE_KIND_CHAR_UTF8);
+    char *sa = kvlangXvalueValueString(a), *sb = kvlangXvalueValueString(b);
+    size_t la = strlen(sa), lb = strlen(sb);
+    char *cat = malloc(la + lb + 1);
+    memcpy(cat, sa, la); memcpy(cat + la, sb, lb); cat[la + lb] = 0;
+    if (a32) kvlangXvalueNewCharUtf32(out, cat);
+    else kvlangXvalueNewCharKind(out, rk, cat);
+    free(cat); free(sa); free(sb);
+    return true;
+}
+
 int kvlangBuiltinStringConcat(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
-    if (n < 2 || !kvlangXvalueIsCharKind(kvlangXvalueKind(&in[0])) || !kvlangXvalueIsCharKind(kvlangXvalueKind(&in[1]))) {
-        if (n >= 2) kvlangBuiltinSetErr(f, "TypeError: string.concat requires strings, got %s and %s", kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1]));
-        else { kvlangXvalue_t e; kvlangXvalueNewCharUtf32(&e, ""); kvlangBuiltinWriteResult(f, &e); kvlangXvalueFree(&e); }
-        kvlangBuiltinFreeInputs(in, n); return n < 2 ? 0 : -1;
+    if (n < 2) {
+        kvlangXvalue_t e; kvlangXvalueNewCharUtf32(&e, ""); kvlangBuiltinWriteResult(f, &e); kvlangXvalueFree(&e);
+        kvlangBuiltinFreeInputs(in, n); return 0;
     }
-    int a, b; uint32_t *ra = string_runes(&in[0], &a); uint32_t *rb = string_runes(&in[1], &b);
-    uint32_t *r = malloc(sizeof(uint32_t) * (a + b));
-    memcpy(r, ra, sizeof(uint32_t) * a); memcpy(r + a, rb, sizeof(uint32_t) * b);
-    write_char32(f, r, a + b);
-    free(r); free(ra); free(rb); kvlangBuiltinFreeInputs(in, n);
-    return 0;
+    const char *k0 = kvlangXvalueKind(&in[0]), *k1 = kvlangXvalueKind(&in[1]);
+    if (!kvlangXvalueIsCharKind(k0) || !kvlangXvalueIsCharKind(k1)) {
+        kvlangBuiltinSetErr(f, "TypeError: string.concat requires strings, got %s and %s", k0, k1);
+        kvlangBuiltinFreeInputs(in, n); return -1;
+    }
+    kvlangXvalue_t r;
+    if (!kvlangBuiltinCharConcat(&in[0], &in[1], &r)) {
+        kvlangBuiltinSetErr(f, "TypeError: cannot concat %s with %s; convert encoding explicitly (char/utf8|char/utf32|char/ascii)", k0, k1);
+        kvlangBuiltinFreeInputs(in, n); return -1;
+    }
+    int rc = kvlangBuiltinWriteResult(f, &r);
+    kvlangXvalueFree(&r); kvlangBuiltinFreeInputs(in, n);
+    return rc;
 }
 
 static int fmt_base(uint64_t u, int base, int neg, char *buf) {

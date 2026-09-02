@@ -58,15 +58,25 @@ xv·at(a,0) -> hi; 1 -> i
 while (i < ndarray·numel(a)) { xv·at(a,i) -> e; if (e > hi) { e -> hi }; i + 1 -> i }   # hi=9
 ```
 
-## dict / 成员 / 指针
+## 容器：stringkeymap / object（关键：`[]` 是数组专用，容器成员绝不用 `[]`）
+空容器字面量 `{}` **必须带类型标注**，裸 `d = {}` 会被拒。两种容器：
+- **stringkeymap**（一等 map 类型）：kindexpr 用 `·` 分隔 `key·value`，`[]char/utf8·int64` = Go `map[string]int64`。
+  key 侧恒 `[]char/<enc>` 字符串键，或 `[标量,…]` 元组键（如 `[int64]`、`[int32,int32]`，物理以字符串格式落 key）；value 可递归嵌套（`[]char/utf8·[]char/utf8·int64`）。
+- **object**：异构命名成员（类 struct/record）。
 ```kv
-d = {}                     # 空 object 容器
-d·name = "kv"; d·ver = 1   # 成员写（命名成员），成员在 p·name
-d·name -> x                # 成员读
-k = "name"; d·*k -> v      # 动态键：读 d·name
-a = {10, 20, 30}           # 散 key map（stringkeymap），成员名是坐标段 "[i]"
-a·[0] -> v0                # 坐标段成员读
-/n1 = {}                   # 跨函数共享的数据放绝对路径（object 容器）
+d:[]char/utf8·int64 = {}   # 空 map 必须标类型
+d·a = 10; d·b = 20         # 成员写（命名成员在 d·a）
+kv·get(d, "a") -> x        # 取值；缺失返回 None
+k = "a"; d·*k -> v         # 动态键：读 d·a
+kv·set(d, k, 99) -> _      # 动态键写
+m:[int64]·int64 = {}       # 整型键 map（key 落字符串）
+kv·set(m, 0, 7) -> _; kv·get(m, 0) -> e
+rec:object = {}            # 异构命名成员
+rec·name = "kv"; rec·ver = 1
+```
+**容器成员一律走 `·` / `kv·get` / `kv·set`，绝不用 `[]`**——`[]` 只索引 compact array（见「数组」），对容器用 `[]` 会 layout 报错。
+```kv
+/n1:object = {}            # 跨函数共享的数据放绝对路径
 /n1·val = 1; /n1·next = "/n2"
 "/n1" -> p; p·val -> v     # ✅ 引号=路径串（指针）·member 解引用；不加引号 /n1 读的是值非路径
 ```
