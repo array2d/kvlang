@@ -1,4 +1,4 @@
-//! rwir `internet/proc·exec`：同步执行外部命令到结束。
+//! lib `internet/proc` —— 外部进程。rwir `internet/proc·exec`：同步执行外部命令到结束。
 //!   internet/proc·exec(args, envs) -> exitcode, stdout, stderr
 //! args/envs 均为 stringkeymap（成员 ·[i] 为 []char/utf32）：args 首成员=可执行文件、
 //! 其余为参数；envs 每成员一条 "K=V"，空 = 继承父进程环境、非空 = 完整替换（execve 语义）。
@@ -41,7 +41,12 @@ struct Run {
 
 fn run(args: &[String], envs: &[String], cap_out: bool, cap_err: bool) -> Run {
     let Some(prog) = args.first() else {
-        return Run { code: 127, pid: 0, out: Vec::new(), err: Vec::new() };
+        return Run {
+            code: 127,
+            pid: 0,
+            out: Vec::new(),
+            err: Vec::new(),
+        };
     };
     let mut cmd = Command::new(OsStr::from_bytes(prog.as_bytes()));
     for a in &args[1..] {
@@ -58,11 +63,26 @@ fn run(args: &[String], envs: &[String], cap_out: bool, cap_err: bool) -> Run {
             }
         }
     }
-    cmd.stdout(if cap_out { Stdio::piped() } else { Stdio::inherit() });
-    cmd.stderr(if cap_err { Stdio::piped() } else { Stdio::inherit() });
+    cmd.stdout(if cap_out {
+        Stdio::piped()
+    } else {
+        Stdio::inherit()
+    });
+    cmd.stderr(if cap_err {
+        Stdio::piped()
+    } else {
+        Stdio::inherit()
+    });
     let child = match cmd.spawn() {
         Ok(c) => c,
-        Err(_) => return Run { code: 127, pid: 0, out: Vec::new(), err: Vec::new() },
+        Err(_) => {
+            return Run {
+                code: 127,
+                pid: 0,
+                out: Vec::new(),
+                err: Vec::new(),
+            }
+        }
     };
     let pid = child.id();
     match child.wait_with_output() {
@@ -72,9 +92,19 @@ fn run(args: &[String], envs: &[String], cap_out: bool, cap_err: bool) -> Run {
                 .code()
                 .map(|c| c as u8)
                 .unwrap_or_else(|| (128 + o.status.signal().unwrap_or(0)) as u8);
-            Run { code, pid, out: o.stdout, err: o.stderr }
+            Run {
+                code,
+                pid,
+                out: o.stdout,
+                err: o.stderr,
+            }
         }
-        Err(_) => Run { code: 127, pid, out: Vec::new(), err: Vec::new() },
+        Err(_) => Run {
+            code: 127,
+            pid,
+            out: Vec::new(),
+            err: Vec::new(),
+        },
     }
 }
 
@@ -83,7 +113,7 @@ fn write_handle(eng: &Engine, slot: &str, pid: u32, stream: &str, bytes: &[u8]) 
     let dir = phys_dir(pid);
     std::fs::create_dir_all(&dir).ok();
     std::fs::write(format!("{dir}/{stream}"), bytes).ok();
-    let locator = format!("/internet/{}/proc/{pid}/{stream}", hostname());
+    let locator = format!("/internet/{}/proc/{pid}/{stream}", super::hostname());
     eng.set_ext_handle(slot, "[]uint8", &locator);
 }
 
@@ -95,24 +125,14 @@ fn phys_dir(pid: u32) -> String {
 pub fn resolve_read(locator: &str) -> Vec<u8> {
     let parts: Vec<&str> = locator.trim_start_matches('/').split('/').collect();
     if parts.len() == 5 && parts[0] == "internet" && parts[2] == "proc" {
-        return std::fs::read(format!("{}/{}", phys_dir_str(parts[3]), parts[4])).unwrap_or_default();
+        return std::fs::read(format!("{}/{}", phys_dir_str(parts[3]), parts[4]))
+            .unwrap_or_default();
     }
     Vec::new()
 }
 
 fn phys_dir_str(pid: &str) -> String {
     format!("/tmp/kvlangruntime-rs/{pid}")
-}
-
-/// 裸 hostname（gethostname）。单机场景足够；多机唯一性由上层保证。
-pub fn hostname() -> String {
-    let mut buf = [0u8; 256];
-    let rc = unsafe { libc::gethostname(buf.as_mut_ptr() as *mut libc::c_char, buf.len()) };
-    if rc != 0 {
-        return "localhost".to_string();
-    }
-    let n = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
-    String::from_utf8_lossy(&buf[..n]).into_owned()
 }
 
 /// 取读参 idx 的容器 KV 路径（ResolveRead 对数组只返首元素，容器须用 ResolveReadPath）。

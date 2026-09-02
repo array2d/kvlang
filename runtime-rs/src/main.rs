@@ -114,8 +114,20 @@ fn main() {
             drive(&eng, "test");
         }
 
-        // ── 崩溃恢复：按已有 vid 从持久化 pc 续跑（不 bootstrap，证明 runtime 无内存态）──
-        [cmd, vid] if cmd == "resume" => drive_vid(&boot(&dsn), vid),
+        // ── vthread 两步分离：create 只创建（bootstrap）并把 vid 打到 stdout，不运行 ──
+        [cmd, funcname] if cmd == "create" => {
+            let eng = boot(&dsn);
+            let vid = take(unsafe {
+                kvlangRuntimeBootstrap(eng.rt, cs(funcname).as_ptr(), null_mut(), 0)
+            });
+            if vid.is_empty() {
+                kvlang_rs::elog!("create {funcname} 失败");
+                std::process::exit(1);
+            }
+            println!("{vid}"); // vid 是命令结果 → stdout（区别于运行诊断日志）
+        }
+        // ── run <vid>：以 vid 为参数从持久化 pc 跑到结束（也即崩溃恢复：续跑已有 vthread）──
+        [cmd, vid] if cmd == "run" => drive_vid(&boot(&dsn), vid),
 
         // ── 运行已入库的显式入口（tutorial 测试主路径：pkg·func 或裸名，pkg 可空）──
         [x] => drive(&boot(&dsn), x),
@@ -165,7 +177,11 @@ fn collect_libs(spec: &str) -> Vec<(String, String)> {
         if p.is_dir() {
             walk_kv(p, p, &mut out);
         } else if path.ends_with(".kv") && p.is_file() {
-            let name = p.file_name().unwrap_or_default().to_string_lossy().into_owned();
+            let name = p
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
             out.push((name, read_file(path)));
         }
     }
@@ -242,14 +258,13 @@ fn drive(eng: &Engine, funcname: &str) {
         kvlang_rs::elog!("bootstrap {funcname} 失败");
         std::process::exit(1);
     }
-    log_info(&format!("vthread {vid}")); // 供崩溃恢复：LOG_LEVEL=info 时暴露 vid，可 `kvlang resume <vid>`
+    log_info(&format!("vthread {vid}")); // 供崩溃恢复：LOG_LEVEL=info 时暴露 vid，可 `kvlang run <vid>`
     drive_vid(eng, &vid);
 }
 
 /// 从 kvspace 里 vid 的持久化 pc 续跑到结束（崩溃恢复入口，与 drive 共用循环，不 bootstrap）。
 fn drive_vid(eng: &Engine, vid: &str) {
     let (rt, kv) = (eng.rt, eng.kv);
-    let vpc = format!("/vthread/{vid}/\u{2025}pc");
 
     loop {
         let mut pc: *mut c_char = null_mut();
@@ -277,14 +292,16 @@ fn drive_vid(eng: &Engine, vid: &str) {
             c = take(unsafe { kvlang_rwirextNextPc(cs(&c).as_ptr()) });
         };
 
+        // pc 可能属子 vthread（native vthread·run 冒泡上来）：目标 vid 一律由 pc 导出，非固定主 vid。
+        let sub = c.split('/').nth(2).unwrap_or(vid);
         // 外部扩展 rwir（如 numpy）：handoff；native/控制帧/帧结束：写回 pc 让 runtime 继续。
         if !stop_op.is_empty() && rwir::is_others_rwir(&stop_op) {
-            if unsafe { kvlang_rwirextHandoff(kv, cs(vid).as_ptr(), cs(&c).as_ptr()) } != 0 {
+            if unsafe { kvlang_rwirextHandoff(kv, cs(sub).as_ptr(), cs(&c).as_ptr()) } != 0 {
                 kvlang_rs::elog!("handoff {stop_op} 失败 @ {c}");
                 std::process::exit(1);
             }
         } else {
-            eng.set_kv(&vpc, &c);
+            eng.set_kv(&format!("/vthread/{sub}/\u{2025}pc"), &c);
         }
     }
 

@@ -148,7 +148,7 @@ impl Engine {
     /// （逻辑路径 → /tmp/kvlangruntime-rs/{pid}/… 物理文件 → 读回字节）。其余前缀暂原样退化。
     fn resolve_ext_bytes(&self, locator: &str) -> Vec<u8> {
         if locator.starts_with("/internet/") && locator.contains("/proc/") {
-            return rwir::internet::resolve_read(locator);
+            return rwir::internet::proc::resolve_read(locator);
         }
         locator.as_bytes().to_vec()
     }
@@ -181,6 +181,58 @@ impl Engine {
     }
     pub fn write0(&self, pc: &str) -> String {
         self.write_at(pc, 0)
+    }
+    /// @-aware 读参整块原始字节（read_at 对数组只返首元素，取字节须走容器路径 + TLV body）：
+    /// 取读参 idx 容器路径 → 读 body 字节；@ 句柄按前缀兑现真实字节；无路径退化为 read_at 的 utf8。
+    /// 供 fs·write/append 等需要 []uint8 整块的 rwir 用。
+    pub fn read_bytes(&self, pc: &str, idx: i32) -> Vec<u8> {
+        let p = take(unsafe { kvlang_rwirextResolveReadPath(self.kv, cs(pc).as_ptr(), idx) });
+        if p.is_empty() {
+            return self.read_at(pc, idx).into_bytes();
+        }
+        let tlv = self.get_tlv(&p);
+        if tlv.is_empty() {
+            return Vec::new();
+        }
+        unsafe {
+            let mut h = KvspaceHead::default();
+            if kvspaceDecodeHead(tlv.as_ptr(), tlv.len() as u32, &mut h) != 0 {
+                return Vec::new();
+            }
+            let kx = String::from_utf8_lossy(&h.kindexpr)
+                .trim_end_matches('\0')
+                .to_string();
+            let (r, _, _) = parse_kindexpr(&kx);
+            let (bo, bl) = (h.body_offset as usize, h.body_len.max(0) as usize);
+            if bo + bl > tlv.len() {
+                return Vec::new();
+            }
+            if r == 2 {
+                let body = String::from_utf8_lossy(&tlv[bo..bo + bl]).into_owned();
+                return self.resolve_ext_bytes(&body);
+            }
+            tlv[bo..bo + bl].to_vec()
+        }
+    }
+
+    /// 写一个 stringkeymap 容器（对齐 C kv·list 表示，供 fs·list 等返回可 for-in 的字符串列表）：
+    ///   dst   = 容器标记：kind=stringkeymap，body 空，dims=[n]
+    ///   dst·  = memindex：kind=index，body=[4B count LE]["[0]\n[1]\n..."]（成员坐标名唯一权威）
+    ///   dst·[i] = 各成员字符串（char/utf32）
+    pub fn set_str_list(&self, dst: &str, items: &[String]) {
+        let n = items.len();
+        self.set_tlv_encoded(dst, "stringkeymap", &[], &[n as i32]);
+        let mut body = (n as u32).to_le_bytes().to_vec();
+        for i in 0..n {
+            if i > 0 {
+                body.push(b'\n');
+            }
+            body.extend_from_slice(format!("[{i}]").as_bytes());
+        }
+        self.set_tlv_encoded(&format!("{dst}\u{b7}"), "index", &body, &[]);
+        for (i, it) in items.iter().enumerate() {
+            self.set_kv(&format!("{dst}\u{b7}[{i}]"), it);
+        }
     }
 
     // ── kvspace 结构操作（json/http 扩展遍历子树用）────────────────────
@@ -328,10 +380,15 @@ impl Engine {
             crate::elog!("bootstrap {funcname} 失败");
             return;
         }
-        let vpc = format!("/vthread/{vid}/\u{2025}pc");
+        self.run_vid(&vid);
+    }
+
+    /// 主导驱动一个已 bootstrap 的 vid 从其持久化 pc 跑到结束（不 bootstrap、不 close kv，可重入）。
+    /// vthread·run rwir 与 run_fn 共用：前者驱动 create 出的独立子 vid，后者驱动 init。
+    pub fn run_vid(&self, vid: &str) {
         loop {
             let mut pc: *mut c_char = null_mut();
-            let rc = unsafe { kvlangRuntimeExecuteVthread(self.rt, cs(&vid).as_ptr(), &mut pc) };
+            let rc = unsafe { kvlangRuntimeExecuteVthread(self.rt, cs(vid).as_ptr(), &mut pc) };
             if rc == 0 {
                 break; // done
             }
@@ -356,7 +413,9 @@ impl Engine {
                 crate::elog!("未知 rwir: {op} @ {c}");
             }
             let nxt = take(unsafe { kvlang_rwirextNextPc(cs(&c).as_ptr()) });
-            self.set_kv(&vpc, &nxt);
+            // pc 可能属子 vthread（native vthread·run 冒泡上来）：nextpc 写回其所属 vid，不写主 vid。
+            let sub = c.split('/').nth(2).unwrap_or(vid);
+            self.set_kv(&format!("/vthread/{sub}/\u{2025}pc"), &nxt);
         }
     }
 }

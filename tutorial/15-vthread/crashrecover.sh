@@ -55,11 +55,11 @@ echo "  崩溃时: step=$step1 done=[$done1] status=$st1 pc=$pc1"
 grep -q '^step 3$' "$OUT1" || fail "Phase1 stdout 应含到 step 3"
 grep -q '^step 4$' "$OUT1" && fail "Phase1 不应跑到 step 4"
 
-echo "== Phase2：另起进程 kvlang resume $vid，从持久化 pc 续跑 =="
+echo "== Phase2：另起进程 kvlang run $vid，从持久化 pc 续跑 =="
 OUT2=$(mktemp)
-"$KVLANG" resume "$vid" >"$OUT2" 2>/dev/null
+"$KVLANG" run "$vid" >"$OUT2" 2>/dev/null
 rc2=$?
-[ "$rc2" = "0" ] || fail "resume 退出码 $rc2"
+[ "$rc2" = "0" ] || fail "run 退出码 $rc2"
 step2=$(val /crashtest/step)
 done2=$(val /crashtest/done)
 st2=$(val "$(printf "$ST_KEY" "$vid")")

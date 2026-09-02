@@ -69,9 +69,10 @@ static char *alloc_vtid(kvlangKv_t *kv) {
   return strdup(buf);
 }
 
-char *kvlangRuntimeBootstrap(kvlangRuntime_t *rt, const char *funcname,
-                             const char *const *args, int nargs) {
-  kvlangKv_t *kv = rt->kv;
+/* 创建一个 vthread（分配 vid + 建栈索引 + bootstrap 首指令 + 置 init），返回 vid（调用方 free）。
+ * 只创建不运行——运行由 kvlangRuntimeRunVid 按 vid 承接。RuntimeBootstrap/ExecuteKv/vthread·create 共用。 */
+char *kvlangVthreadSpawn(kvlangKv_t *kv, const char *funcname,
+                         const char *const *args, int nargs) {
   char *vtid = alloc_vtid(kv);
   kvlangStrbuf_t vtroot;
   kvlangStrbufInit(&vtroot);
@@ -93,47 +94,41 @@ char *kvlangRuntimeBootstrap(kvlangRuntime_t *rt, const char *funcname,
   return vtid;
 }
 
-int kvlangRuntimeExecuteKv(kvlangKv_t *kv, const char *funcname,
-                           const char *const *args, int nargs, char **ret,
-                           char *err, uint32_t err_cap) {
-  char *vtid = alloc_vtid(kv);
+char *kvlangRuntimeBootstrap(kvlangRuntime_t *rt, const char *funcname,
+                             const char *const *args, int nargs) {
+  return kvlangVthreadSpawn(rt->kv, funcname, args, nargs);
+}
 
-  kvlangStrbuf_t vtroot;
-  kvlangStrbufInit(&vtroot);
-  kvlangKeytreeVthread(vtid, &vtroot);
-  char *stack_vt = kvlangKeytreeStack(vtroot.p);
-  char e[256];
-  kvlangKvMkindex(kv, stack_vt, e, sizeof e);
-
-  char *first_pc = kvlangKvcpuBootstrap(kv, vtid, funcname, args, nargs);
-  if (!first_pc) {
+/* 按 vid 从其持久化 pc 跑到结束（WATCH 模式，阻塞）。读终态：error 时把消息写 err、*ret="error"。 */
+int kvlangRuntimeRunVid(kvlangKv_t *kv, const char *vid, char **ret, char *err,
+                        uint32_t err_cap) {
+  char *pc = read_vthread_pc(kv, vid);
+  if (!pc || !pc[0]) {
+    free(pc);
     if (err && err_cap)
-      snprintf(err, err_cap, "Bootstrap %s failed", funcname);
-    free(stack_vt);
-    free(vtid);
-    kvlangStrbufFree(&vtroot);
+      snprintf(err, err_cap, "vthread %s has no pc", vid);
     return -1;
   }
-  kvlangVthreadSet(kv, vtid, first_pc, "init");
-  int rc = kvlangKvcpuExecute(kv, first_pc);
-  free(first_pc);
+  int rc = kvlangKvcpuExecute(kv, pc);
+  free(pc);
 
   /* 读终态 */
   kvlangStrbuf_t st;
   kvlangStrbufInit(&st);
-  kvlangKeytreeVthreadStatus(vtid, &st);
+  kvlangKeytreeVthreadStatus(vid, &st);
   kvlangXvalue_t sv;
   kvlangXvalueZero(&sv);
   kvlangKvGetOne(kv, st.p, &sv);
   char *status =
       kvlangXvalueNone(&sv) ? strdup("") : kvlangXvalueValueString(&sv);
   kvlangXvalueFree(&sv);
+  kvlangStrbufFree(&st);
 
   if (ret) {
     if (strcmp(status, "error") == 0) {
       kvlangStrbuf_t mk;
       kvlangStrbufInit(&mk);
-      kvlangKeytreeVthreadStatusMsg(vtid, "error", &mk);
+      kvlangKeytreeVthreadStatusMsg(vid, "error", &mk);
       kvlangXvalue_t mv;
       kvlangXvalueZero(&mv);
       kvlangKvGetOne(kv, mk.p, &mv);
@@ -152,10 +147,19 @@ int kvlangRuntimeExecuteKv(kvlangKv_t *kv, const char *funcname,
   } else {
     free(status);
   }
+  return rc;
+}
 
-  kvlangStrbufFree(&st);
-  kvlangStrbufFree(&vtroot);
-  free(stack_vt);
+int kvlangRuntimeExecuteKv(kvlangKv_t *kv, const char *funcname,
+                           const char *const *args, int nargs, char **ret,
+                           char *err, uint32_t err_cap) {
+  char *vtid = kvlangVthreadSpawn(kv, funcname, args, nargs);
+  if (!vtid) {
+    if (err && err_cap)
+      snprintf(err, err_cap, "Bootstrap %s failed", funcname);
+    return -1;
+  }
+  int rc = kvlangRuntimeRunVid(kv, vtid, ret, err, err_cap);
   free(vtid);
   return rc;
 }

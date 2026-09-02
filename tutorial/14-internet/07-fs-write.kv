@@ -1,0 +1,21 @@
+# internet/fs·write + append：字节写入/追加，配 xv·reinterpret 做字符串往返
+#   fs·write(p, bytes) -> n    覆盖写（创建/截断），返回写入字节数
+#   fs·append(p, bytes) -> n   追加到末尾，返回追加字节数
+#   字符串是 char/utf32（每字符 4 字节）：reinterpret 成 []uint8 落盘，回读再 reinterpret 回 []char/utf32
+# 期望输出:
+#   write= 20
+#   append= 24
+#   size= 44
+#   text= hello world
+rwfunc test() -> () {
+	p = "/tmp/kvlang_fs_write.txt"
+	internet/fs·write(p, xv·reinterpret("hello", "[]uint8")) -> wn
+	println("write=", wn)
+	internet/fs·append(p, xv·reinterpret(" world", "[]uint8")) -> an
+	println("append=", an)
+	internet/fs·size(p) -> sz
+	println("size=", sz)
+	internet/fs·read(p, 0, sz) -> raw
+	xv·reinterpret(raw, "[]char/utf32") -> txt
+	println("text=", txt)
+}

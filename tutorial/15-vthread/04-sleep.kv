@@ -1,0 +1,15 @@
+# vthread·sleep(dur)：让当前 vthread 阻塞一个 duration（纳秒精度），到点后续跑下一指令
+#   dur 由 time/duration· 家族构造（nanos/millis/seconds/minutes/hours）
+#   单进程模型下即阻塞驱动线程；与 vthread·setstatus("wait") 的挂起-恢复不同
+# 期望输出:
+#   slept >= 10ms: true
+rwfunc test() -> () {
+	time/duration·millis(10) -> d
+	time·now() -> t0
+	vthread·sleep(d)
+	time·elapsed_ns(t0) -> ns
+	time/duration·as_nanos(d) -> want
+	ns >= want -> ok
+	print("slept >= 10ms: ")
+	println(ok)
+}

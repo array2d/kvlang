@@ -1,0 +1,18 @@
+# vthread 创建/运行两步分离，对应 2 个 rwir（与 2 个 kvlang 子命令 create/run 同形）：
+#   vthread·create(funckey) -> vid：只 bootstrap 首指令、置 init，返回 vid 句柄，不运行
+#   vthread·run(vid)：以 vid 为参数，从其持久化 pc 跑到结束（阻塞）
+#   vid 是两步之间的句柄；与 vthread·call 不同——create/run 新开独立 vid，call 是同 vid 内动态调用
+# 期望输出:
+#   created
+#   hello from vthread
+#   done
+rwfunc greet() -> () {
+	println("hello from vthread")
+}
+
+rwfunc test() -> () {
+	vthread·create("greet") -> vid
+	println("created")
+	vthread·run(vid)
+	println("done")
+}

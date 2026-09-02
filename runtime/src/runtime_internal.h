@@ -202,7 +202,8 @@ int kvlangRwirNextPc(const char *pc, kvlangStrbuf_t *out);
 int kvlangRwirExtractAddr0(const char *coord);
 int kvlangRwirDecode(kvlangKv_t *kv, const char *link_base, const char *pc, kvlangRwirInst_t *out, char *err, uint32_t err_cap);
 void kvlangRwirInstFree(kvlangRwirInst_t *inst);
-/* 外部扩展 handoff：写 /lib/<opcode>/.todo<vid> 并阻塞 watch .done<vid>（30s 超时）。 */
+/* 外部扩展 handoff：写共享队列 /lib/<opcode>/vids/<vid>=pc，阻塞 watch 该 key 直至变 None
+ * （外部执行器认领、驱动、置 nextpc 后删除该条目 → 本端解除阻塞）。 */
 int handoff_external_rwir(kvlangKv_t *kv, const char *vtid, const char *pc, kvlangRwirInst_t *inst);
 /* opcode 是否已注册的扩展 rwir（进程内 map，不读 /lib）。 */
 bool isothersrwir(const char *opcode);
@@ -216,7 +217,9 @@ void kvlangVthreadSetError(kvlangKv_t *kv, const char *vtid, const char *pc, con
 
 /* ── builtin ───────────────────────────────────────────────────────── */
 
-typedef struct { kvlangKv_t *kv; const char *vtid; const char *pc; kvlangRwirInst_t *inst; } kvlangFrame_t;
+/* yield_pc：native builtin 把「须交回上层驱动就地派发的 pc」写入 *yield_pc（否则留 NULL）。
+ * 唯 vthread·run 的 return 模式用：驱动一个子 vthread 遇非本执行器 rwir 时，把其 pc 冒泡给驱动。 */
+typedef struct { kvlangKv_t *kv; const char *vtid; const char *pc; kvlangRwirInst_t *inst; char **yield_pc; } kvlangFrame_t;
 
 bool kvlangBuiltinIsNative(const char *opcode);
 bool kvlangBuiltinNumOp(const char *opcode);
@@ -232,7 +235,7 @@ void kvlangDisplay(const kvlangXvalue_t *v, char **out);                     /* 
 /* ── kvcpu ─────────────────────────────────────────────────────────── */
 
 /* 两种执行模式（详见 runtime篇-05）：
- *   KVMODE_WATCH   模式1：runtime 主导，遇 ext rwir → handoff(.todo) + watch(.done) 阻塞（2 线程）
+ *   KVMODE_WATCH   模式1：runtime 主导，遇 ext rwir → handoff(vids) + watch(vids/<vid>==None) 阻塞
  *   KVMODE_RETURN  模式2：扩展主导，遇 ext rwir → 不 handoff 不 watch，返回该 ext rwir 的 PC（单线程函数调用）
  * kvlangKvcpuExecuteMode 返回值：-1 错误；0 正常结束(done)；1 遇 ext rwir（仅 KVMODE_RETURN，*out_pc=其 PC）。 */
 typedef enum { KVMODE_WATCH = 0, KVMODE_RETURN = 1 } kvmode_t;
@@ -241,7 +244,11 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode, char *
 int kvlangKvcpuExecute(kvlangKv_t *kv, const char *pc);   /* = KVMODE_WATCH，out_pc 忽略 */
 char *kvlangKvcpuBootstrap(kvlangKv_t *kv, const char *vtid, const char *funcname, const char *const *args, int nargs);
 int kvlangKvcpuDynCall(kvlangKv_t *kv, const char *vtid, const char *pc, const char *funckey);
-/* run funcname 到结束（alloc_vtid + bootstrap + KVMODE_WATCH），返回终态/错误。 */
+/* 创建 vthread（不运行），返回 vid（free）。运行由 RunVid 承接。vthread·create 用。 */
+char *kvlangVthreadSpawn(kvlangKv_t *kv, const char *funcname, const char *const *args, int nargs);
+/* 按 vid 从持久化 pc 跑到结束（KVMODE_WATCH），返回终态/错误。vthread·run 用。 */
+int kvlangRuntimeRunVid(kvlangKv_t *kv, const char *vid, char **ret, char *err, uint32_t err_cap);
+/* run funcname 到结束（Spawn + RunVid），返回终态/错误。 */
 int kvlangRuntimeExecuteKv(kvlangKv_t *kv, const char *funcname, const char *const *args, int nargs, char **ret, char *err, uint32_t err_cap);
 
 /* ── logx ──────────────────────────────────────────────────────────── */

@@ -1001,7 +1001,14 @@ int kvlangBuiltinXvReinterpret(kvlangFrame_t *f) {
     kvlang_kindexpr_t nkx; kvlang_kindexpr_parse((const uint8_t *)ke, &nkx);
     kvspaceHead_t h; kvspaceDecodeHead(in[0].data, in[0].len, &h);
     const uint8_t *body = in[0].data + h.body_offset;
-    kvlangXvalue_t nv; kvlangXvalueNewTlvDims(&nv, nkx.kind, body, (uint32_t)h.body_len, nkx.dims, nkx.ndim);
+    /* 动态 "[]kind"（parse 得 ndim0 但带方括号）：按 body 字节数补出一维长度，与落盘数组表示一致。 */
+    int32_t ndim = nkx.ndim;
+    if (nkx.ndim == 0 && strchr(ke, '[')) {
+        int32_t es = kvlangXvalueElemSize(nkx.kind);
+        nkx.dims[0] = es > 0 ? (int32_t)(h.body_len / es) : (int32_t)h.body_len;
+        ndim = 1;
+    }
+    kvlangXvalue_t nv; kvlangXvalueNewTlvDims(&nv, nkx.kind, body, (uint32_t)h.body_len, nkx.dims, ndim);
     int rc = write_result(f, &nv);
     kvlangXvalueFree(&nv); free(ke); free_inputs(in, n);
     return rc;

@@ -92,6 +92,6 @@ lib http {
     }
 }
 "#;
-        assert_eq!(crate::rwir::kvlayout::vet(&eng, src), "ok");
+        assert_eq!(crate::rwir::kvlanglayout::vet(&eng, src), "ok");
     }
 }

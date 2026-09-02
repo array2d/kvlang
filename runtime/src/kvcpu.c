@@ -489,32 +489,26 @@ static bool is_copy_op(const char *opcode) {
     return strcmp(opcode, "=") == 0;
 }
 
-static int64_t handoff_seq = 0;
-
 int handoff_external_rwir(kvlangKv_t *kv, const char *vtid, const char *pc, kvlangRwirInst_t *inst) {
+    /* handoff：把 pc 挂到共享队列 /lib/<opcode>/vids/<vtid>（各 rwir 的 vids 已 Ptr 统一到
+     * 第一个 rwir 的 vids 下，Set 经路径穿透落到同一 strkeymap）。外部执行器认领并驱动该 vthread，
+     * 完成后删除该条目。本端 watch 同一 key 直至变 None（== 认领方已完成），单键交接、无 id。 */
     char *base = kvlangKeytreeRwir(inst->opcode);
-    kvlangStrbuf_t vids, done; kvlangStrbufInit(&vids); kvlangStrbufInit(&done);
+    kvlangStrbuf_t vids; kvlangStrbufInit(&vids);
     kvlangStrbufPrintf(&vids, "%s/vids/%s", base, vtid);
-    kvlangStrbufPrintf(&done, "%s/done/%s", base, vtid);
-    int64_t id = ++handoff_seq;
-    kvlangStrbuf_t payload; kvlangStrbufInit(&payload);
-    kvlangStrbufPrintf(&payload, "%s|%lld", pc, (long long)id);
-    kvlangXvalue_t pv; kvlangXvalueNewCharUtf8(&pv, payload.p);
+    kvlangXvalue_t pv; kvlangXvalueNewCharUtf8(&pv, pc);
     kvlangKvPair_t p = { vids.p, pv };
     char err[256];
     kvlangKvSet(kv, &p, 1, err, sizeof err);
     kvlangXvalueFree(&pv);
 
-    char id_str[32]; snprintf(id_str, sizeof id_str, "%lld", (long long)id);
-    kvlangXvalue_t want; kvlangXvalueNewCharUtf8(&want, id_str);
+    kvlangXvalue_t none; kvlangXvalueZero(&none);   /* 目标 None：等条目被删除 */
     kvlangXvalue_t got; kvlangXvalueZero(&got);
-    kvlangKvWatch(kv, done.p, &want, 30000000000ULL, &got);
-    char *got_s = kvlangXvalueNone(&got) ? strdup("") : kvlangXvalueValueString(&got);
-    bool ok = strcmp(got_s, id_str) == 0;
-    free(got_s); kvlangXvalueFree(&got); kvlangXvalueFree(&want);
-    kvlangStrbufFree(&vids); kvlangStrbufFree(&done); kvlangStrbufFree(&payload); free(base);
-    if (!ok) {
-        char msg[256]; snprintf(msg, sizeof msg, "RuntimeError: external rwir %s timeout", inst->opcode);
+    int rc = kvlangKvWatch(kv, vids.p, &none, 30000000000ULL, &got);
+    kvlangXvalueFree(&got);
+    kvlangStrbufFree(&vids); free(base);
+    if (rc != 0) {
+        char msg[256]; snprintf(msg, sizeof msg, "RuntimeError: external rwir %s handoff failed", inst->opcode);
         kvlangVthreadSetError(kv, vtid, pc, msg);
         return -1;
     }
@@ -651,8 +645,17 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode, char *
         if (op_is_control(inst.opcode)) {
             exec_err = handle_control(kv, vtid, cur, &inst);
         } else if (kvlangBuiltinIsNative(inst.opcode)) {
-            kvlangFrame_t f = { kv, vtid, cur, &inst };
+            char *yield = NULL;
+            kvlangFrame_t f = { kv, vtid, cur, &inst, &yield };
             exec_err = kvlangBuiltinNative(&f);
+            if (exec_err == 0 && yield) {
+                /* native（vthread·run return 模式）冒泡一个子 vthread 的 rwir pc 给上层驱动。
+                 * 本 vthread（主）pc 未推进，驱动派发子 rwir 并推进子 pc 后重入即续跑。 */
+                if (out_pc) *out_pc = yield; else free(yield);
+                free(fr); kvlangRwirInstFree(&inst);
+                free(cur); kvlangStrbufFree(&vtid_b);
+                return 1;
+            }
         } else if (is_copy_op(inst.opcode)) {
             exec_err = kvlangBuiltinExecuteCopy(kv, vtid, cur, &inst);
         } else if (isothersrwir(inst.opcode)) {
