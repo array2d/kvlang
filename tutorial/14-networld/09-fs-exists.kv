@@ -1,4 +1,4 @@
-# internet/fs·exists：存在性判定，写入/删除前后对比
+# networld/fs·exists：存在性判定，写入/删除前后对比
 #   fs·exists(p) -> bool
 # 期望输出:
 #   before= false
@@ -8,13 +8,13 @@ rwfunc test() -> () {
 	p = "/tmp/kvlang_fs_exists.txt"
 	noenv = map()
 	rm = {"rm", "-f", "/tmp/kvlang_fs_exists.txt"}
-	internet/proc·exec(rm, noenv) -> rc
-	internet/fs·exists(p) -> b0
+	networld/proc·exec(rm, noenv) -> rc
+	networld/fs·exists(p) -> b0
 	println("before=", b0)
-	internet/fs·write(p, xv·reinterpret("x", "[]uint8")) -> w
-	internet/fs·exists(p) -> b1
+	networld/fs·write(p, xv·reinterpret("x", "[]uint8")) -> w
+	networld/fs·exists(p) -> b1
 	println("after_write=", b1)
-	internet/fs·del(p) -> dc
-	internet/fs·exists(p) -> b2
+	networld/fs·del(p) -> dc
+	networld/fs·exists(p) -> b2
 	println("after_del=", b2)
 }

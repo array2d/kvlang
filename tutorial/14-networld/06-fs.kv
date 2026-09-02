@@ -1,4 +1,4 @@
-# internet/fs·size + internet/fs·read + xv·reinterpret：文件 → 字符串
+# networld/fs·size + networld/fs·read + xv·reinterpret：文件 → 字符串
 #   fs·size(p) -> n           取字节大小
 #   fs·read(p, start, off) -> raw   从 start 起读 off 字节，返回 []uint8
 #   xv·reinterpret(raw, "[]char/utf8") -> s   body 字节原样，整个 kindexpr 换成传入的
@@ -9,10 +9,10 @@ rwfunc test() -> () {
 	p = "/tmp/kvlangfs_demo.txt"
 	noenv = map()
 	w = {"sh", "-c", "printf 'hello kvlang' > /tmp/kvlangfs_demo.txt"}
-	internet/proc·exec(w, noenv) -> wc
-	internet/fs·size(p) -> n
+	networld/proc·exec(w, noenv) -> wc
+	networld/fs·size(p) -> n
 	println("size=", n)
-	internet/fs·read(p, 0, n) -> raw
+	networld/fs·read(p, 0, n) -> raw
 	xv·reinterpret(raw, "[]char/utf8") -> s
 	println("text=", s)
 }
