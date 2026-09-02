@@ -1,8 +1,8 @@
 # kvlang 语法速览 —— 也是 KV 树里的数据。
-# 本文件在 kvlang stdlib，runtime-rs 启动时 layout&run：顶层写语句包进 byteseek·init，
-# 执行后把整份速览作为字符串落在 /lib/byteseek.kvlangbrief。
+# 本文件在 kvlang stdlib，runtime-rs 启动时 layout&run：顶层写语句包进 kvlang·init，
+# 执行后把整份速览作为字符串落在 /lib/kvlang/kvlangbrief。
 # 之后 byteseek 的 llm·call 生成 kv 代码时，把这份速览拼进系统提示。
-lib byteseek {
+lib kvlang {
 	"""# kvlang 速览
 
 kvlang 是一门全新语言，语法以下面示例为准，不要套用其它语言直觉。
@@ -119,6 +119,6 @@ debugger()                   # 内联断点：执行到此暂停（status 置 pa
 vthread·setstatus("paused")  # 等价：设 vthread 状态（paused 即停住）
 ```
 暂停后由外部把 `/vthread/{vid}/·status` 改回 `running` 续跑。
-""" -> /lib/byteseek.kvlangbrief
+""" -> /lib/kvlang/kvlangbrief
 }
 
