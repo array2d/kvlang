@@ -21,10 +21,19 @@ static char *path_arg(kvlangFrame_t *f, int idx, const kvlangXvalue_t *in) {
     return NULL;
 }
 
+/* 容器 base：object/map/index/extindex 或 struct 实例（kind=structref，以 / 起头）。
+ * 容器取其写槽路径拼成员 key；非容器把 base 值当 key 串。 */
+static bool base_is_container(const kvlangXvalue_t *base) {
+    if (kvlangXvalueNone(base)) return true;
+    const char *k = kvlangXvalueKind(base);
+    return k[0] == '/' || strcmp(k, KVSPACE_KIND_OBJ) == 0 || strcmp(k, KVSPACE_KIND_MAP) == 0 ||
+           strcmp(k, KVSPACE_KIND_INDEX) == 0 || strcmp(k, KVSPACE_KIND_EXT_INDEX) == 0;
+}
+
 static char *member_path(kvlangFrame_t *f, const kvlangXvalue_t *in, int n) {
     const kvlangXvalue_t *base = &in[0];
     char *fr = kvlangKeytreeFrameRoot(f->pc);
-    char *bp = kvlangXvalueNone(base) || (strcmp(kvlangXvalueKind(base), KVSPACE_KIND_OBJ) == 0 || strcmp(kvlangXvalueKind(base), KVSPACE_KIND_MAP) == 0 || strcmp(kvlangXvalueKind(base), KVSPACE_KIND_INDEX) == 0 || strcmp(kvlangXvalueKind(base), KVSPACE_KIND_EXT_INDEX) == 0) ? kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->reads[0].name) : kvlangXvalueValueString(base);
+    char *bp = base_is_container(base) ? kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->reads[0].name) : kvlangXvalueValueString(base);
     free(fr);
     /* 成员链：base 之后逐段拼 key（变参），每段可为静态字面量或动态键（运行时值）。 */
     for (int i = 1; i < n; i++) {
@@ -73,6 +82,41 @@ static int kv_path_void(kvlangFrame_t *f, const char *name,
 int kvlangBuiltinKvDel(kvlangFrame_t *f) { return kv_path_void(f, "kv.del", kvlangKvDel); }
 
 int kvlangBuiltinKvDelTree(kvlangFrame_t *f) { return kv_path_void(f, "kv.deltree", kvlangKvDelTree); }
+
+/* 绝对路径 / 路径字符串直取，否则裸标识符解析为本帧槽位 key（对齐 kv.list 的裸变量处理）。 */
+static char *resolve_path_arg(kvlangFrame_t *f, int idx, const kvlangXvalue_t *in) {
+    char *p = path_arg(f, idx, in);
+    if (p) return p;
+    char *fr = kvlangKeytreeFrameRoot(f->pc);
+    char *base = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->reads[idx].name);
+    free(fr);
+    return base;
+}
+
+static int kv_two_path_void(kvlangFrame_t *f, const char *name,
+                            int (*op)(kvlangKv_t *, const char *, const char *, char *, uint32_t)) {
+    kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
+    char *src = n >= 1 ? resolve_path_arg(f, 0, in) : NULL;
+    char *dst = n >= 2 ? resolve_path_arg(f, 1, in) : NULL;
+    if (!src || !dst) { free(src); free(dst); kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "TypeError: %s requires src,dst path args", name); }
+    char err[256]; int rc = op(f->kv, src, dst, err, sizeof err);
+    free(src); free(dst); kvlangBuiltinFreeInputs(in, n);
+    if (rc != 0) return kvlangBuiltinSetErr(f, "%s", err);
+    kvlangBuiltinNextPc(f); return 0;
+}
+
+int kvlangBuiltinKvCp(kvlangFrame_t *f) { return kv_two_path_void(f, "kv.cp", kvlangKvCp); }
+
+int kvlangBuiltinKvCpTree(kvlangFrame_t *f) { return kv_two_path_void(f, "kv.cpdir", kvlangKvCpTree); }
+
+int kvlangBuiltinKvAbs(kvlangFrame_t *f) {
+    kvlangXvalue_t in[1]; int n = kvlangBuiltinReadInputs(f, in, 1);
+    char *p = n >= 1 ? resolve_path_arg(f, 0, in) : NULL;
+    if (!p) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "TypeError: kv.abs requires a key"); }
+    kvlangXvalue_t r; kvlangXvalueNewCharUtf32(&r, p);
+    int rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r);
+    free(p); kvlangBuiltinFreeInputs(in, n); return rc;
+}
 
 int kvlangBuiltinKvList(kvlangFrame_t *f) {
     if (f->inst->nw == 0) return kvlangBuiltinSetErr(f, "TypeError: kv.list requires a write param");
