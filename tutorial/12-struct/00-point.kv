@@ -1,0 +1,21 @@
+# point: struct 声明 + 实例化 + 成员访问
+# 语义: struct Name { field:kindexpr=default } 注册 /lib/Name 原型；
+#       Name{f=v} 克隆原型子树、覆盖字段并做类型校验；p·f 成员访问。
+# 期望输出:
+#   x= 3.0  y= 4.0
+#   default x= 0.0  y= 0.0
+struct Point {
+	x:float64=0.0
+	y:float64=0.0
+}
+
+rwfunc test() -> () {
+	p = Point{x=3.0 y=4.0}
+	p·x -> a
+	p·y -> b
+	println("x=", a, " y=", b)
+	q = Point{}
+	q·x -> c
+	q·y -> d
+	println("default x=", c, " y=", d)
+}
