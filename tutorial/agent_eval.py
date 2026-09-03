@@ -83,7 +83,8 @@ def strip_fences(code: str) -> str:
 
 
 def run_kv(path: Path) -> tuple[str, str]:
-    subprocess.run(["kvspace", "--kvspace", DSN, "clear"], capture_output=True, timeout=10)
+    subprocess.run(["kvspace", "clear"], capture_output=True, timeout=10,
+                   env={**os.environ, "KVSPACE": DSN})
     lay = subprocess.run([LAYOUT_BIN, str(path), DSN], capture_output=True, text=True,
                          timeout=60, cwd=str(ROOT))
     if lay.returncode != 0:
