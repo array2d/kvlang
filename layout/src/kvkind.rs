@@ -18,6 +18,7 @@ pub const KIND_OBJ: &str = "object";
 pub const KIND_MAP: &str = "stringkeymap";
 pub const KIND_INDEX: &str = "index";
 pub const KIND_EXT_INDEX: &str = "extindex";
+pub const KIND_STRUCT: &str = "struct";
 
 // kvlang 自有 kind
 pub const KIND_RWIR: &str = "rwir";
@@ -243,6 +244,26 @@ pub fn new_rwir_union(sig: &str) -> Vec<u8> {
 
 pub fn new_defrwir(nr: i32, nw: i32, sig: &str) -> Vec<u8> {
     ffi::tlv_encode(KIND_DEF_RWIR, &rwir_body(nr, nw, sig), 1)
+}
+
+// ── struct 原型（对齐 runtime kvlangBuiltinMemindex）─────────────────
+//
+// /lib/Name       kind=struct，body="name:kindexpr\n..."（字段声明类型，供实例化类型校验）
+// /lib/Name·      kind=index，body=[4B count LE][name\n...]（字段名唯一权威）
+
+pub fn new_struct(fields: &[(String, String)]) -> Vec<u8> {
+    let body = fields
+        .iter()
+        .map(|(n, t)| format!("{n}:{t}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    ffi::tlv_encode(KIND_STRUCT, body.as_bytes(), 1)
+}
+
+pub fn new_memindex(names: &[String]) -> Vec<u8> {
+    let mut raw = (names.len() as u32).to_le_bytes().to_vec();
+    raw.extend_from_slice(names.join("\n").as_bytes());
+    ffi::tlv_encode(KIND_INDEX, &raw, 1)
 }
 
 // ── kvlang 自有 kind：rwfunc ────────────────────────────────────────

@@ -1,7 +1,7 @@
-//! layoutcode（对齐 layout/layout.go 的编译期部分）：把 AST 写到 /lib/ 下的结构化 KV。
+//! layoutcode（对齐 layout/layout.go）：检查 AST 并把结果布局写到 /lib/ 下的结构化 KV。
 //!
 //! 存储约定：
-//!   /lib/<pkg>·<name>/[0,0]         编译后签名（kind=rwfunc）
+//!   /lib/<pkg>·<name>/[0,0]         布局后签名（kind=rwfunc）
 //!   /lib/<pkg>·<name>/<param>       命名参数→slot 指针（kind=char, isptr=1）
 //!   /lib/<pkg>·<name>/[i,j]         编译后指令（kind=rwir），i 从 1 开始
 //!   /lib/<pkg>·<name>/‥labels/<l>   label → irseq
@@ -11,7 +11,7 @@
 
 use std::collections::HashMap;
 
-use super::ast::{Func, Instruction, RwirDecl, Stmt};
+use super::ast::{Expr, Func, Instruction, RwirDecl, Stmt, StructDecl};
 use super::ffi::Kv;
 use super::{builtin, ffi, keytree, kvkind, lower, parser};
 
@@ -39,6 +39,10 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
 
     let mut any_code = false;
     let mut inits: Vec<String> = Vec::new();
+    for decl in &file.structs {
+        write_struct_decl(kv, decl);
+        any_code = true;
+    }
     for func in &file.funcs {
         let pkg = if func.pkg.is_empty() {
             file.package.clone()
@@ -144,7 +148,7 @@ pub fn vet(src: &str) -> Result<(), String> {
         let _ = lower::lower_func(func);
         any_code = true;
     }
-    if !file.init_body.is_empty() || !file.top_level_calls.is_empty() {
+    if !file.init_body.is_empty() || !file.top_level_calls.is_empty() || !file.structs.is_empty() {
         any_code = true;
     }
     if !any_code {
@@ -428,6 +432,63 @@ pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) {
             })
             .collect();
         let _ = kv.set(&lpairs);
+    }
+}
+
+/// 写 struct 原型到 /lib/<Name>：基节点(kind=struct) + memindex(/lib/Name·) + 各字段默认值。
+/// 运行时 struct·new 以此为原型 cpdir 克隆，故字段默认值即实例初值。
+pub fn write_struct_decl(kv: &mut Kv, decl: &StructDecl) {
+    let mut name = decl.name.clone();
+    if !decl.pkg.is_empty() {
+        name = format!("{}{}{name}", decl.pkg, keytree::MEMBER_SEP);
+    }
+    let base = keytree::rwir(&name);
+    let _ = kv.del_tree(&base);
+    let fnames: Vec<String> = decl.fields.iter().map(|f| f.name.clone()).collect();
+    let ftypes: Vec<(String, String)> = decl
+        .fields
+        .iter()
+        .map(|f| (f.name.clone(), f.ty.clone()))
+        .collect();
+    let mut pairs: Vec<(String, Vec<u8>)> = Vec::new();
+    pairs.push((base.clone(), kvkind::new_struct(&ftypes)));
+    pairs.push((keytree::member(&base, ""), kvkind::new_memindex(&fnames)));
+    for fld in &decl.fields {
+        pairs.push((
+            keytree::member(&base, &fld.name),
+            field_default(&fld.ty, fld.default.as_ref()),
+        ));
+    }
+    let _ = kv.set(&pairs);
+}
+
+/// 字段默认值 XValue：head kind = 字段类型，body = 默认字面量（未给则零值）。
+/// 标量+char 直接编码；带 dims / structref 仅记录类型（空 body），嵌套 struct 待定。
+fn field_default(ty: &str, default: Option<&Expr>) -> Vec<u8> {
+    let (_, dims, base) = kvkind::parse_kindexpr(ty);
+    let s = default.map(|e| e.val.clone()).unwrap_or_default();
+    if base.starts_with("char/") {
+        return ffi::new_char(&base, &s);
+    }
+    if !dims.is_empty() {
+        return ffi::tlv_encode(&base, &[], dims.iter().product());
+    }
+    let i = || s.parse::<i64>().unwrap_or(0);
+    let u = || s.parse::<u64>().unwrap_or(0);
+    let f = || s.parse::<f64>().unwrap_or(0.0);
+    match base.as_str() {
+        "bool" => ffi::new_bool(s == "true"),
+        "int8" => ffi::tlv_encode("int8", &(i() as i8).to_le_bytes(), 1),
+        "int16" => ffi::tlv_encode("int16", &(i() as i16).to_le_bytes(), 1),
+        "int32" => ffi::tlv_encode("int32", &(i() as i32).to_le_bytes(), 1),
+        "int64" => ffi::new_int64(i()),
+        "uint8" => ffi::tlv_encode("uint8", &[u() as u8], 1),
+        "uint16" => ffi::tlv_encode("uint16", &(u() as u16).to_le_bytes(), 1),
+        "uint32" => ffi::tlv_encode("uint32", &(u() as u32).to_le_bytes(), 1),
+        "uint64" => ffi::tlv_encode("uint64", &u().to_le_bytes(), 1),
+        "float32" => ffi::tlv_encode("float32", &(f() as f32).to_le_bytes(), 1),
+        "float64" => ffi::new_float64(f()),
+        _ => ffi::tlv_encode(&base, &[], 1),
     }
 }
 

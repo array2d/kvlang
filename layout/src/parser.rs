@@ -2,7 +2,9 @@
 //!
 //! 入口：`parse_code(src) → Result<(File, Vec<Diagnostic>), String>`。
 
-use super::ast::{self, Expr, Func, FuncSig, Instruction, Param, RwirDecl, Stmt};
+use super::ast::{
+    self, Expr, Field, Func, FuncSig, Instruction, Param, RwirDecl, Stmt, StructDecl,
+};
 use super::keytree;
 use super::scanner::{scan, Diagnostic, Kind, Pos, Token};
 use super::symbol;
@@ -144,6 +146,17 @@ impl Parser {
                 continue;
             }
 
+            let is_struct = self.peek().kind == Kind::Ident
+                && self.peek().value == "struct"
+                && self.peek_at(1).kind == Kind::Ident
+                && self.peek_at(2).kind == Kind::LBrace;
+            if is_struct {
+                let mut decl = self.parse_struct_decl();
+                decl.comments = comments;
+                f.structs.push(decl);
+                continue;
+            }
+
             if self.peek().kind == Kind::Ident && self.peek().value == "rwir" {
                 let decl = self.parse_rwir_decl();
                 f.rwir_decls.push(decl);
@@ -258,6 +271,17 @@ impl Parser {
                 self.parse_lib_body(f, &pkg);
                 continue;
             }
+            let is_struct = self.peek().kind == Kind::Ident
+                && self.peek().value == "struct"
+                && self.peek_at(1).kind == Kind::Ident
+                && self.peek_at(2).kind == Kind::LBrace;
+            if is_struct {
+                let mut decl = self.parse_struct_decl();
+                decl.pkg = pkg.clone();
+                decl.comments = comments;
+                f.structs.push(decl);
+                continue;
+            }
             if self.peek().kind == Kind::Ident && self.peek().value == "rwir" {
                 let mut decl = self.parse_rwir_decl();
                 decl.pkg = pkg.clone();
@@ -349,6 +373,60 @@ impl Parser {
         self.check_param_types(&decl.sig);
         self.check_variadic(&decl.sig);
         decl
+    }
+
+    fn parse_struct_decl(&mut self) -> StructDecl {
+        self.advance(); // consume 'struct'
+        let name = self.advance().value; // struct 名
+        self.expect(Kind::LBrace);
+        let mut fields = Vec::new();
+        loop {
+            while matches!(
+                self.peek().kind,
+                Kind::Newline | Kind::Comma | Kind::Comment
+            ) {
+                self.advance();
+            }
+            if self.peek().kind == Kind::RBrace || self.peek().kind == Kind::EOF {
+                break;
+            }
+            if self.peek().kind != Kind::Ident {
+                let t = self.peek();
+                self.errors.push(Diagnostic {
+                    pos: t.pos,
+                    message: format!("struct {name:?}: expected field name, got {:?}", t.value),
+                    warn: false,
+                    info: false,
+                    source: String::new(),
+                    src_file: String::new(),
+                    src_name: String::new(),
+                });
+                break;
+            }
+            let fname = self.advance().value;
+            let mut ty = String::new();
+            if self.peek().kind == Kind::Colon {
+                self.advance();
+                ty = self.parse_type();
+            }
+            let mut default = None;
+            if self.peek().kind == Kind::Arrow && self.peek().value == "=" {
+                self.advance();
+                default = self.parse_pratt(0);
+            }
+            fields.push(Field {
+                name: fname,
+                ty,
+                default,
+            });
+        }
+        self.expect(Kind::RBrace);
+        StructDecl {
+            comments: Vec::new(),
+            name,
+            pkg: String::new(),
+            fields,
+        }
     }
 
     fn parse_func_sig(&mut self) -> FuncSig {
@@ -1163,6 +1241,76 @@ impl Parser {
             return Some(ast::call("array", elems));
         }
 
+        // struct 字面量 Name{...} 或 pkg.Name{...} → struct·new("/lib/…", "f", v, …)
+        let struct_lit = t.kind == Kind::Ident
+            && (self.peek_at(1).kind == Kind::LBrace || {
+                let mut j = 1isize;
+                while self.peek_at(j).kind == Kind::Dot && self.peek_at(j + 1).kind == Kind::Ident {
+                    j += 2;
+                }
+                j > 1 && self.peek_at(j).kind == Kind::LBrace
+            });
+        if struct_lit {
+            let mut path = format!("{}/{}", keytree::LIB_ROOT, self.advance().value);
+            while self.peek().kind == Kind::Dot && self.peek_at(1).kind == Kind::Ident {
+                self.advance(); // skip Dot
+                path.push_str(keytree::MEMBER_SEP);
+                path.push_str(&self.advance().value);
+            }
+            let mut args = vec![ast::str_lit(&path)];
+            self.advance(); // consume {
+            loop {
+                while matches!(
+                    self.peek().kind,
+                    Kind::Newline | Kind::Comma | Kind::Comment
+                ) {
+                    self.advance();
+                }
+                if self.peek().kind == Kind::RBrace || self.peek().kind == Kind::EOF {
+                    break;
+                }
+                if self.peek().kind != Kind::Ident {
+                    let bt = self.peek();
+                    self.errors.push(Diagnostic {
+                        pos: bt.pos,
+                        warn: false,
+                        info: false,
+                        message: format!("struct literal: expected field name, got {:?}", bt.value),
+                        source: String::new(),
+                        src_file: String::new(),
+                        src_name: String::new(),
+                    });
+                    break;
+                }
+                let key = self.advance().value;
+                if !(self.peek().kind == Kind::Arrow && self.peek().value == "=") {
+                    let bt = self.peek();
+                    self.errors.push(Diagnostic {
+                        pos: bt.pos,
+                        warn: false,
+                        info: false,
+                        message: format!("struct literal: expected '=' after {key:?}"),
+                        source: String::new(),
+                        src_file: String::new(),
+                        src_name: String::new(),
+                    });
+                    break;
+                }
+                self.advance(); // consume =
+                let val = match self.parse_pratt(0) {
+                    Some(v) => v,
+                    None => break,
+                };
+                args.push(ast::str_lit(&key));
+                args.push(val);
+            }
+            self.expect(Kind::RBrace);
+            return Some(ast::call(
+                &format!("struct{}new", keytree::MEMBER_SEP),
+                args,
+            ));
+        }
+
         // dict 字面量
         if t.kind == Kind::LBrace {
             let mut j = 1isize;
@@ -1701,6 +1849,21 @@ impl Parser {
         let s = inst.writes[0].clone();
         // 路径字面量（/ 开头）是完整 key，不是成员写，勿脱糖。
         if s.starts_with('/') {
+            return;
+        }
+        // struct 赋值（RHS = struct·new）：深拷整棵子树，lower 为 kv·cpdir(struct·new→temp, dst)。
+        // 不走 kv·set —— 后者只搬基值，struct 的成员子树会丢在临时槽。dst 传完整成员槽串，
+        // runtime ResolveWriteSlot 拼 <frame>+"base·key…" 即成员绝对路径。
+        let is_struct_new = inst
+            .expr
+            .as_ref()
+            .map(|e| e.op == format!("struct{}new", keytree::MEMBER_SEP))
+            .unwrap_or(false);
+        if is_struct_new && !s.contains('*') {
+            let e = inst.expr.take().unwrap();
+            inst.expr = Some(ast::call("kv·cpdir", vec![e, ast::leaf(&s)]));
+            inst.writes = Vec::new();
+            inst.write_types = Vec::new();
             return;
         }
         // 成员链写槽 p·a·b = v → 变参 kv·set(p, "a", "b", v)，与读侧 #110 一致逐段拼路径。

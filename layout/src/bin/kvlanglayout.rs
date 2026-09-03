@@ -1,4 +1,4 @@
-//! 读 .kv 文件，用 Rust layout 编译进 kvspace（默认 redis），并输出入口（ENTRY=...），
+//! 读 .kv 文件，用 Rust layout 检查语法并布局进 kvspace（默认 redis），并输出入口（ENTRY=...），
 //! 供 Go runtime 执行验证。
 //! 用法：
 //!   kvlanglayout <file.kv> [dsn]              仅 layout，打印 ENTRY=<entry>（默认子命令）

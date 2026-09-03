@@ -180,6 +180,43 @@ impl RwirDecl {
     }
 }
 
+// ── struct ───────────────────────────────────────────────────────────
+
+#[derive(Clone)]
+pub struct Field {
+    pub name: String,
+    pub ty: String,            // kindexpr（字段类型）
+    pub default: Option<Expr>, // 默认值字面量（None = 未给）
+}
+
+#[derive(Clone)]
+pub struct StructDecl {
+    pub comments: Vec<String>,
+    pub name: String,
+    pub pkg: String,
+    pub fields: Vec<Field>,
+}
+
+impl StructDecl {
+    pub fn sig_string(&self) -> String {
+        let mut sb = format!("struct {} {{", self.name);
+        for (i, fld) in self.fields.iter().enumerate() {
+            sb.push_str(if i > 0 { "; " } else { " " });
+            sb.push_str(&fld.name);
+            if !fld.ty.is_empty() {
+                sb.push(':');
+                sb.push_str(&fld.ty);
+            }
+            if let Some(d) = &fld.default {
+                sb.push('=');
+                sb.push_str(&d.to_string());
+            }
+        }
+        sb.push_str(" }");
+        sb
+    }
+}
+
 // ── Expr ─────────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -608,6 +645,7 @@ impl fmt::Display for ScopeStmt {
 pub struct File {
     pub package: String,
     pub rwir_decls: Vec<RwirDecl>,
+    pub structs: Vec<StructDecl>,
     pub funcs: Vec<Func>,
     pub top_level_calls: Vec<Instruction>,
     pub init_body: Vec<Stmt>,
@@ -617,6 +655,7 @@ pub struct File {
 #[derive(Default)]
 struct PkgNode {
     rwirs: Vec<RwirDecl>,
+    structs: Vec<StructDecl>,
     funcs: Vec<Func>,
     body: Vec<Stmt>,
     children: std::collections::BTreeMap<String, PkgNode>,
@@ -635,6 +674,17 @@ fn pkg_node<'a>(root: &'a mut PkgNode, pkg: &str) -> &'a mut PkgNode {
 
 fn emit_node(sb: &mut String, node: &PkgNode, indent: &str) {
     let mut items: Vec<String> = Vec::new();
+    for d in &node.structs {
+        let mut s = String::new();
+        for c in &d.comments {
+            s.push_str(indent);
+            s.push_str(c);
+            s.push('\n');
+        }
+        s.push_str(indent);
+        s.push_str(&d.sig_string());
+        items.push(s);
+    }
     for d in &node.rwirs {
         let mut s = String::new();
         for c in &d.comments {
@@ -684,6 +734,9 @@ impl File {
     /// 格式化为规范 kvlang 源码（重建 lib 分组，保留包名，round-trip 语义等价）。
     pub fn format(&self) -> String {
         let mut root = PkgNode::default();
+        for d in &self.structs {
+            pkg_node(&mut root, &d.pkg).structs.push(d.clone());
+        }
         for d in &self.rwir_decls {
             pkg_node(&mut root, &d.pkg).rwirs.push(d.clone());
         }

@@ -39,9 +39,23 @@ fn known_kind(k: &str) -> bool {
             | "rwir"
             | "rwfunc"
             | "scope"
+            | "struct"
             | "time"
             | "duration"
     )
+}
+
+/// structref = "/" path：指向 /lib 下类型定义节点的完整路径（实例 kindexpr、struct 字段类型）。
+/// 仅做语法承认（`/` + 合法路径段），不解析 /lib 是否存在该类型 —— 存在性/字段一致性留给 runtime。
+fn valid_structref(s: &str) -> bool {
+    let rest = match s.strip_prefix('/') {
+        Some(r) => r,
+        None => return false,
+    };
+    !rest.is_empty()
+        && rest.split('/').all(|seg| {
+            !seg.is_empty() && seg.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        })
 }
 
 fn valid_base(s: &str) -> bool {
@@ -118,8 +132,11 @@ fn valid_key(s: &str) -> bool {
     tail.is_empty() && inner.split(',').all(valid_scalar)
 }
 
-/// atom = shape | mapexpr；mapexpr = key "·" type（value 可递归含容器，故支持嵌套 map）。
+/// atom = shape | mapexpr | structref；mapexpr = key "·" type；structref = "/" path。
 fn valid_atom(s: &str) -> bool {
+    if s.starts_with('/') {
+        return valid_structref(s);
+    }
     if let Some(i) = s.find('·') {
         return valid_key(&s[..i]) && valid_kindexpr(&s[i + '·'.len_utf8()..]);
     }
@@ -235,6 +252,11 @@ mod tests {
             "[int32,int32]·[]char/utf8",
             "[float32,float32]·[]char/utf8",
             "[float32,int8,uint32]·int64",
+            "struct",
+            "/lib/Point",
+            "/lib/geom/Point",
+            "/lib/Node",
+            "/lib/Point|/lib/Node",
         ] {
             assert!(valid_kindexpr(e), "{e} should be valid");
         }
@@ -248,9 +270,16 @@ mod tests {
             "[?]·int64",
             "[int32,]·int64",
             "[foo,int32]·int64",
+            "/",
+            "/lib/",
+            "/lib//Point",
+            "lib/Point",
+            "/lib/Po int",
         ] {
             assert!(!valid_kindexpr(e), "{e} should be invalid");
         }
+        assert!(match_kindexpr("/lib/Point", "/lib/Point", 0, &[]));
+        assert!(!match_kindexpr("/lib/Point", "/lib/Node", 0, &[]));
         assert!(match_kindexpr("[]char/utf8·int64", "stringkeymap", 1, &[3]));
         assert!(!match_kindexpr("[]char/utf8·int64", "object", 0, &[]));
     }
