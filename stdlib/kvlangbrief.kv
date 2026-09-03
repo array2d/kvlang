@@ -20,7 +20,7 @@ main()
 ```
 
 ## 赋值三形式与调用
-- `x = e` / `x <- e`：写左边的槽；`e -> x`：写右边的槽。`=` 不是表达式，不能嵌进条件里。
+- `x = e` / `x <- e`：写左边的槽；`e -> x`：写右边的槽。`=` 不是表达式，不能嵌进条件里——条件相等判断一律用 `==`（写成 `if (x = 5)` 会卡住 layout）。
 - 调用只能通过写参映射拿结果，没有返回值：`f(a,b) -> r`；丢弃 `-> _`；多个 `-> x, y`。
 - 写槽必须是位置：裸名（帧局部）、`/绝对/路径`（全局）、`base·name`（成员）。字面量不能当写槽。
 
@@ -104,7 +104,8 @@ string·find(s,"ll") -> i      # 2（找不到返回 -1）
 string·slice(s,0,1) + "a" -> t; string·slice(s,2,5) -> u; t + u -> r   # "hallo"
 ```
 
-**`+` 不混类型（定宽类型无隐式转换）**：`+` 只在两边同 kind 时成立——字符串+字符串=拼接、数字+数字=相加。
+**`+` 只在同类别内成立（数值 vs 字符不可混）**：两边都是字符=拼接，两边都是数值=相加；数值与字符跨类别会 TypeError。
+数值类别内允许跨位宽混算：`int32 + int64`、`float32 + int64` 均成立，结果隐式提升到更宽的类型（`int32+int64 → int64`；混入浮点则走浮点）。
 `"标签" + 数字` 会 TypeError（`expected numeric, got char/utf32`）。
 打印带标签的数字，用 `println` 多参数（自动空格分隔），**不要**拼字符串：
 ```kv
@@ -120,7 +121,9 @@ kvlanglayout·vet(src) -> v        # 校验源码：合法 "ok"，否则错误�
 kvlanglayout·format(src) -> f     # 规范化源码（parse → 格式化文本）
 kvlanglayout·layout(src) -> e     # 源码入库 /lib：成功空串，失败 "error: …"
 kvlanglayout·dump("/lib") -> d    # /lib 子树导出为可运行源码（含 # 槽位注释）
-vthread·run("pkg·func")           # 运行已入库函数到结束（嵌套 vthread；裸名 = /lib/<名>）
+vthread·call("pkg·func")          # 在当前 vthread 直接调用已入库函数到结束再续跑（裸名 = /lib/<名>）
+vthread·create("pkg·func") -> vid # 新开独立子 vthread（只创建不运行），返回 vid 句柄
+vthread·run(vid)                  # 驱动某 vid（由 create 得到）到结束——参数是 vid，不是函数名
 ```
 
 ## 调试 / 暂停
