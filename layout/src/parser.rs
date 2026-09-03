@@ -636,9 +636,24 @@ impl Parser {
             if t.kind == Kind::RBrace || t.kind == Kind::EOF {
                 break;
             }
+            let before = self.pos;
             if let Some(st) = self.parse_stmt() {
                 let st = attach_comments(st, comments);
                 stmts.push(st);
+            }
+            // panic-mode 恢复：一轮没消费任何 token（如错误恢复后游标停在 parse_primary_expr
+            // 不消费即返回 None 的 token 上）——报诊断并跳过一个 token，保证前进性，杜绝死循环。
+            if self.pos == before {
+                let bad = self.advance();
+                self.errors.push(Diagnostic {
+                    pos: bad.pos,
+                    message: format!("unexpected token {} {:?} in block", bad.kind, bad.value),
+                    warn: false,
+                    info: false,
+                    source: String::new(),
+                    src_file: String::new(),
+                    src_name: String::new(),
+                });
             }
         }
         stmts
