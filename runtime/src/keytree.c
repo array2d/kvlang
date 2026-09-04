@@ -40,7 +40,25 @@ static char *trim_right_join(const char *root, const char *suffix) {
 }
 
 char *kvlangKeytreeEntryPc(const char *root) { return trim_right_join(root, "/[1,0]"); }
-char *kvlangKeytreeScopeEntryPc(const char *root) { return trim_right_join(root, "/[0,0]"); }
+
+static void keytree_die(const char *fmt, ...) {
+    fputs("panic: ", stderr);
+    va_list ap; va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    fputc('\n', stderr);
+    abort();
+}
+
+char *kvlangKeytreeIrseqPc(const char *frame_root, int irseq) {
+    if (irseq < 0) keytree_die("IrseqPC: irseq %d < 0", irseq);
+    kvlangStrbuf_t b; kvlangStrbufInit(&b);
+    size_t n = strlen(frame_root);
+    while (n > 0 && frame_root[n - 1] == '/') n--;
+    kvlangStrbufPutn(&b, frame_root, n);
+    kvlangStrbufPrintf(&b, "/[%d,0]", irseq);
+    return kvlangStrbufDetach(&b);
+}
 
 char *kvlangKeytreeParentFrame(const char *root) {
     size_t n = strlen(root);

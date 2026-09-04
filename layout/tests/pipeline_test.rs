@@ -26,7 +26,7 @@ fn compile_simple_func() {
     // 函数签名
     let sig_val = kv.get_one("/lib/sum/[0,0]");
     assert_eq!(kvkind::kind(&sig_val), "defrwfunc");
-    assert_eq!(kvkind::array_len(&sig_val), 1);
+    assert_eq!(kvkind::array_len(&sig_val), 2); // add + return
     let b = body(&sig_val);
     assert_eq!(kvkind::rwfunc_num_reads(b), 2);
     assert_eq!(kvkind::rwfunc_num_writes(b), 1);
@@ -51,6 +51,7 @@ fn compile_simple_func() {
     assert_eq!(sig(&kv.get_one("/lib/sum/[1,-1]")), "A");
     assert_eq!(sig(&kv.get_one("/lib/sum/[1,-2]")), "B");
     assert_eq!(sig(&kv.get_one("/lib/sum/[1,1]")), "C");
+    assert_eq!(sig(&kv.get_one("/lib/sum/[2,0]")), "return");
 
     // 源码副本
     let src_val = kv.get_one("/lib/sum.src");
@@ -95,15 +96,57 @@ fn compile_multiline_string_literal() {
 }
 
 #[test]
-fn compile_control_flow_lowers_to_blocks() {
+fn compile_control_flow_is_single_plane() {
     let mut kv = fresh_kv();
     let src = "rwfunc f(X:int64) -> (Y:int64) {\n    if (X > 0) {\n        X -> Y\n    } else {\n        0 -> Y\n    }\n}\n";
     compile(&mut kv, src).unwrap();
 
     let sig_val = kv.get_one("/lib/f/[0,0]");
     assert_eq!(kvkind::kind(&sig_val), "defrwfunc");
-    // 降级后存在 if/then 基本块（label 指令以 _label[coord] 扁平键存在；空 merge 块不落盘）
     let children = kv.list("/lib/f/", false, false);
-    assert!(children.iter().any(|c| c.contains("_if_")));
-    assert!(children.iter().any(|c| c.contains("_then_")));
+    let old_scope = children.iter().any(|c| {
+        let b = c.trim_end_matches('/');
+        b.contains("_if_") || b.contains("_then_") || b.contains("_else_") || b.contains("_merge_")
+    });
+    assert!(!old_scope, "scope keys still present: {children:?}");
+    assert!(children.iter().any(|c| c.contains("labels")), "missing ‥labels: {children:?}");
+
+    let labels = kv.list("/lib/f/\u{2025}labels/", false, false);
+    let if_name = labels.iter().map(|c| c.trim_end_matches('/')).find(|c| c.contains("_if_"));
+    assert!(if_name.is_some(), "‥labels={labels:?}");
+    let if_irseq = kv.get_one(&format!("/lib/f/\u{2025}labels/{}", if_name.unwrap()));
+    assert_eq!(kvkind::kind(&if_irseq), "int64", "label kind={} labels={labels:?}", kvkind::display(&if_irseq));
+
+    // irseq 1 is preamble goto; target is int64
+    let goto_op = kv.get_one("/lib/f/[1,0]");
+    assert_eq!(sig(&goto_op), "goto");
+    let tgt = kv.get_one("/lib/f/[1,-1]");
+    assert_eq!(kvkind::kind(&tgt), "int64", "goto target {}", kvkind::display(&tgt));
+}
+
+#[test]
+fn compile_while_goto_targets_are_int64() {
+    let mut kv = fresh_kv();
+    let src = "rwfunc sum_to(n:int64) -> (acc:int64) {\n    0 -> acc\n    1 -> i\n    while (i <= n) {\n        acc + i -> acc\n        i + 1 -> i\n    }\n}\n";
+    compile(&mut kv, src).unwrap();
+    let children = kv.list("/lib/sum_to/", false, false);
+    assert!(
+        !children.iter().any(|c| c.contains("_while_") || c.contains("_do_")),
+        "while still has scope keys: {children:?}"
+    );
+    let mut saw_int_goto = false;
+    for c in &children {
+        let t = c.trim_end_matches('/');
+        if !t.starts_with('[') || !t.ends_with(",0]") {
+            continue;
+        }
+        if sig(&kv.get_one(&format!("/lib/sum_to/{t}"))) != "goto" {
+            continue;
+        }
+        let row: i32 = t.trim_start_matches('[').split(',').next().unwrap().parse().unwrap();
+        let tgt = kv.get_one(&format!("/lib/sum_to/[{row},-1]"));
+        assert_eq!(kvkind::kind(&tgt), "int64");
+        saw_int_goto = true;
+    }
+    assert!(saw_int_goto, "no goto found in {children:?}");
 }

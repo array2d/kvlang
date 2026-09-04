@@ -28,6 +28,7 @@
 PC    = "/vthread/tid/[0,0]/[0,0]/[1,0]"   the program counter is a KV path
 fetch = kv.Get(PC)                           instruction fetch is one KV read
 call  = create subtree; return = clean it    crash? restart and resume from PC
+goto/br = rewrite irseq in the same frame    if/while do not create frames
 ```
 
 Every instruction occupies a 2-D coordinate `[s0, s1]`: `[s0,0]` is always the opcode, `[s0,-j]` read params, `[s0,+j]` write params.

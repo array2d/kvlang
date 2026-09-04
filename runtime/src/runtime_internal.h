@@ -161,8 +161,8 @@ const char *kvlangKeytreeVtidFromPc(const char *pc, kvlangStrbuf_t *out);   /* "
 char *kvlangKeytreeStack(const char *root);                            /* malloc */
 char *kvlangKeytreeFrameRoot(const char *pc);                         /* malloc，无效 NULL */
 char *kvlangKeytreeEntryPc(const char *root);                         /* malloc */
-char *kvlangKeytreeScopeEntryPc(const char *root);                   /* malloc */
 char *kvlangKeytreeParentFrame(const char *root);                     /* malloc，"" 顶层 */
+char *kvlangKeytreeIrseqPc(const char *frame_root, int irseq);        /* malloc */
 char *kvlangKeytreeMember(const char *base, const char *name);         /* malloc */
 char *kvlangKeytreeLibFunc(const char *pkg, const char *name);        /* malloc */
 char *kvlangKeytreeRwir(const char *opcode);                           /* malloc */

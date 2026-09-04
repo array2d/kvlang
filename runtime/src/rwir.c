@@ -18,67 +18,6 @@ int kvlangRwirNextPc(const char *pc, kvlangStrbuf_t *out) {
     return 0;
 }
 
-/* scopePrefixAndBase：从 linkBase 提取 scope 链与 rwfunc 帧 lookupBase。 */
-static void scope_prefix_and_base(const char *link_base, kvlangStrbuf_t *sp, kvlangStrbuf_t *lb) {
-    kvlangStrbufClear(sp);
-    kvlangStrbufClear(lb);
-    kvlangStrbufPuts(sp, "");
-    kvlangStrbufPuts(lb, link_base);
-
-    size_t n = strlen(link_base);
-    while (n > 0 && link_base[n - 1] == '/') n--;
-    if (n == 0) return;
-    bool has_bracket = false;
-    for (size_t i = 0; i < n; i++) if (link_base[i] == '[') { has_bracket = true; break; }
-    if (!has_bracket) {
-        /* 无 bracket：函数帧即 vthread 根 /vthread/<vtid>/（bootstrap 入口帧）。
-         * 锚点固定为根，其后各段皆为 scope（· 连接），使根上的 extindex 覆盖所有嵌套 scope。 */
-        int slashes = 0; size_t third = (size_t)-1;
-        for (size_t i = 0; i < n; i++) if (link_base[i] == '/') { if (++slashes == 3) { third = i; break; } }
-        if (third == (size_t)-1) return; /* 就是 vthread 根本身：sp="" lb=link_base */
-        kvlangStrbufClear(lb);
-        kvlangStrbufPutn(lb, link_base, third);
-        kvlangStrbufPutc(lb, '/');
-        for (size_t i = third + 1; i < n; ) {
-            size_t j = i; while (j < n && link_base[j] != '/') j++;
-            if (sp->len > 0) kvlangStrbufPuts(sp, MEMBER_SEP);
-            kvlangStrbufPutn(sp, link_base + i, j - i);
-            i = (j < n) ? j + 1 : j;
-        }
-        return;
-    }
-
-    char *scopes[MAX_STACK_DEPTH];
-    int nscopes = 0;
-    size_t rest = n;
-    while (rest > 0) {
-        size_t sep = (size_t)-1;
-        for (size_t i = 0; i < rest; i++) if (link_base[i] == '/') sep = i;
-        if (sep == (size_t)-1) break;
-        size_t start = sep + 1, len = rest - start;
-        rest = sep;
-        if (len > 0 && link_base[start] == '[') {
-            kvlangStrbufClear(lb);
-            kvlangStrbufPutn(lb, link_base, rest);
-            kvlangStrbufPutc(lb, '/');
-            kvlangStrbufPutn(lb, link_base + start, len);
-            kvlangStrbufPutc(lb, '/');
-            break;
-        }
-        if (nscopes < MAX_STACK_DEPTH) {
-            scopes[nscopes] = malloc(len + 1);
-            memcpy(scopes[nscopes], link_base + start, len);
-            scopes[nscopes][len] = 0;
-            nscopes++;
-        }
-    }
-    for (int i = nscopes - 1; i >= 0; i--) {
-        if (sp->len > 0) kvlangStrbufPuts(sp, MEMBER_SEP);
-        kvlangStrbufPuts(sp, scopes[i]);
-        free(scopes[i]);
-    }
-}
-
 void kvlangRwirInstFree(kvlangRwirInst_t *inst) {
     free(inst->opcode);
     for (int i = 0; i < inst->nr; i++) { free(inst->reads[i].name); kvlangXvalueFree(&inst->reads[i].val); }
@@ -96,24 +35,27 @@ int kvlangRwirDecode(kvlangKv_t *kv, const char *link_base, const char *pc, kvla
     if (!last) { snprintf(err, err_cap, "Decode: invalid pc (no /[coord]): %s", pc); return -1; }
     int addr0 = kvlangRwirExtractAddr0(last + 1);
 
-    kvlangStrbuf_t sp, lb, key;
-    kvlangStrbufInit(&sp); kvlangStrbufInit(&lb); kvlangStrbufInit(&key);
-    scope_prefix_and_base(link_base, &sp, &lb);
+    kvlangStrbuf_t key;
+    kvlangStrbufInit(&key);
 
     int nslots = 1 + 2 * MAX_PARAMS;
     char **names = malloc(sizeof(char *) * (size_t)nslots);
-    kvlangStrbufPrintf(&key, "%s[%d,0]", sp.p, addr0);
+    kvlangStrbufPrintf(&key, "[%d,0]", addr0);
     names[0] = kvlangStrbufDetach(&key);
     for (int i = 1; i <= MAX_PARAMS; i++) {
-        kvlangStrbufPrintf(&key, "%s[%d,-%d]", sp.p, addr0, i);
+        kvlangStrbufPrintf(&key, "[%d,-%d]", addr0, i);
         names[(i - 1) * 2 + 1] = kvlangStrbufDetach(&key);
-        kvlangStrbufPrintf(&key, "%s[%d,%d]", sp.p, addr0, i);
+        kvlangStrbufPrintf(&key, "[%d,%d]", addr0, i);
         names[(i - 1) * 2 + 2] = kvlangStrbufDetach(&key);
     }
-    kvlangStrbufFree(&key);
 
     kvlangXvalue_t *vals = malloc(sizeof(kvlangXvalue_t) * (size_t)nslots);
-    kvlangKvGetBatch(kv, lb.p, names, nslots, vals);
+    if (kvlangKvGetBatch(kv, link_base, names, nslots, vals) != 0) {
+        snprintf(err, err_cap, "Decode: GetBatch failed at %s", pc);
+        for (int i = 0; i < nslots; i++) free(names[i]);
+        free(names); free(vals); kvlangStrbufFree(&key);
+        return -1;
+    }
 
     if (!kvlangXvalueNone(&vals[0])) out->opcode = kvlangXvalueValueString(&vals[0]);
 
@@ -141,6 +83,6 @@ int kvlangRwirDecode(kvlangKv_t *kv, const char *link_base, const char *pc, kvla
     free(vals);
     for (int i = 0; i < nslots; i++) free(names[i]);
     free(names);
-    kvlangStrbufFree(&sp); kvlangStrbufFree(&lb);
+    kvlangStrbufFree(&key);
     return 0;
 }
