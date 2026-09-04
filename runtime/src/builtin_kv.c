@@ -24,9 +24,8 @@ static char *path_arg(kvlangFrame_t *f, int idx, const kvlangXvalue_t *in) {
 static char *member_path(kvlangFrame_t *f, const kvlangXvalue_t *in, int n) {
     const kvlangXvalue_t *base = &in[0];
     char *fr = kvlangKeytreeFrameRoot(f->pc);
-    char *ff = kvlangBuiltinFuncFrameRoot(f->kv, fr);
-    char *bp = kvlangXvalueNone(base) || (strcmp(kvlangXvalueKind(base), KVSPACE_KIND_OBJ) == 0 || strcmp(kvlangXvalueKind(base), KVSPACE_KIND_MAP) == 0 || strcmp(kvlangXvalueKind(base), KVSPACE_KIND_INDEX) == 0 || strcmp(kvlangXvalueKind(base), KVSPACE_KIND_EXT_INDEX) == 0) ? kvlangBuiltinResolveWriteSlot(f->kv, ff, f->inst->reads[0].name) : kvlangXvalueValueString(base);
-    free(ff); free(fr);
+    char *bp = kvlangXvalueNone(base) || (strcmp(kvlangXvalueKind(base), KVSPACE_KIND_OBJ) == 0 || strcmp(kvlangXvalueKind(base), KVSPACE_KIND_MAP) == 0 || strcmp(kvlangXvalueKind(base), KVSPACE_KIND_INDEX) == 0 || strcmp(kvlangXvalueKind(base), KVSPACE_KIND_EXT_INDEX) == 0) ? kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->reads[0].name) : kvlangXvalueValueString(base);
+    free(fr);
     /* 成员链：base 之后逐段拼 key（变参），每段可为静态字面量或动态键（运行时值）。 */
     for (int i = 1; i < n; i++) {
         char *kk = kvlangKvKey(&in[i]);
@@ -84,9 +83,8 @@ int kvlangBuiltinKvList(kvlangFrame_t *f) {
         const char *name = f->inst->reads[0].name;
         if (name[0] != '/') {
             char *fr = kvlangKeytreeFrameRoot(f->pc);
-            char *ff = kvlangBuiltinFuncFrameRoot(f->kv, fr);
-            char *base = kvlangBuiltinResolveWriteSlot(f->kv, ff, name);
-            free(ff); free(fr);
+            char *base = kvlangBuiltinResolveWriteSlot(f->kv, fr, name);
+            free(fr);
             key = kvlangKeytreeMember(base, "");
             free(base);
         }
@@ -141,9 +139,8 @@ static char *kv_list_dir(kvlangFrame_t *f, kvlangXvalue_t *in, int n) {
         const char *name = f->inst->reads[0].name;
         if (name[0] != '/') {
             char *fr = kvlangKeytreeFrameRoot(f->pc);
-            char *ff = kvlangBuiltinFuncFrameRoot(f->kv, fr);
-            char *base = kvlangBuiltinResolveWriteSlot(f->kv, ff, name);
-            free(ff); free(fr);
+            char *base = kvlangBuiltinResolveWriteSlot(f->kv, fr, name);
+            free(fr);
             key = kvlangKeytreeMember(base, "");
             free(base);
         }

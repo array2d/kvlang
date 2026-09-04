@@ -10,31 +10,31 @@ static const char *rfind_sep(const char *s) {
     return found;
 }
 
-static void die(const char *fmt, ...) {
-    fputs("panic: ", stderr);
-    va_list ap; va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
-    va_end(ap);
-    fputc('\n', stderr);
-    abort();
-}
-
+/* goto/br 目标：layout 已把 label 解析为 int64 irseq（≥1）。非 int64 / 越界返回 -1。 */
 static int irseq_of(const kvlangParam_t *p) {
-    if (kvlangXvalueNone(&p->val) || !kvlangXvalueKindIs(&p->val, KVSPACE_KIND_INT64)) {
-        die("goto/br target is not int64 irseq: name=%s kind=%s",
-            p->name ? p->name : "", kvlangXvalueKind(&p->val));
-    }
+    if (kvlangXvalueNone(&p->val) || !kvlangXvalueKindIs(&p->val, KVSPACE_KIND_INT64)) return -1;
     int64_t n = kvlangXvalueAsInt64(&p->val);
-    if (n < 1 || n > 0x7fffffff) die("irseq out of range: %lld", (long long)n);
+    if (n < 1 || n > 0x7fffffff) return -1;
     return (int)n;
 }
 
-static char *jump_irseq(const char *pc, int irseq) {
+/* 函数内跳转：只改 PC 的 [irseq]，帧不变。目标非法 → RuntimeError，返回 -1。 */
+static int jump_to(kvlangKv_t *kv, const char *vtid, const char *pc, const kvlangParam_t *target, const char *op) {
+    int irseq = irseq_of(target);
+    if (irseq < 0) {
+        char msg[256];
+        snprintf(msg, sizeof msg, "RuntimeError: %s target is not an int64 irseq: %s (kind=%s)",
+                 op, target->name ? target->name : "", kvlangXvalueKind(&target->val));
+        kvlangVthreadSetError(kv, vtid, pc, msg);
+        return -1;
+    }
     char *fr = kvlangKeytreeFrameRoot(pc);
-    if (!fr) die("jump: no frame root: %s", pc);
     char *np = kvlangKeytreeIrseqPc(fr, irseq);
     free(fr);
-    return np;
+    kvlangVthreadSet(kv, vtid, np, "running");
+    kvlangLogDebug("[%s] %s → %s", vtid, op, np);
+    free(np);
+    return 0;
 }
 
 static bool is_literal(const char *s) {
@@ -129,50 +129,48 @@ static char *frame_slot_key(const char *frame_root, const char *slot) {
     return kvlangStrbufDetach(&b);
 }
 
-static char *resolve_read_path(kvlangKv_t *kv, const char *frame_path, const char *name) {
+/* 实参名 → 其存储键（写入被调帧 [0,-k]/[0,k]）。字面量返回 NULL。
+ * 命名参数经 Ptr 指到本帧 [0,±k]，槽内是上层 handle_call 已 resolve 好的最终键路径；
+ * 之后只追显式 Ptr（ref==1）链，勿把 char 值当路径再追——否则字符串实参的内容会被
+ * 误当键（穿两层调用即变 None）。写侧 kvlangBuiltinResolveWriteSlot 同此纪律（#124）。 */
+static char *resolve_read_path(kvlangKv_t *kv, const char *frame_root, const char *name) {
     if (is_literal(name)) return NULL;
-    char *func_frame = kvlangBuiltinFuncFrameRoot(kv, frame_path);
-    char *stk = kvlangKeytreeStack(func_frame);
+    char *stk = kvlangKeytreeStack(frame_root);
     kvlangXvalue_t v; kvlangXvalueZero(&v);
     kvlangKvGetMember(kv, stk, name, &v);
     char *result = NULL;
-    if (kvlangXvalueNone(&v)) {
-        result = frame_slot_key(func_frame, name);
-    } else if (kvlangXvalueIsPtr(&v)) {
+    if (kvlangXvalueIsPtr(&v)) {
         char *target = kvlangXvaluePtrTarget(&v);
         kvlangXvalue_t nv; kvlangXvalueZero(&nv);
         kvlangKvGetMember(kv, stk, target, &nv);
         if (kvlangXvalueNone(&nv) || !kvlangXvalueIsCharKind(kvlangXvalueKind(&nv))) {
-            result = frame_slot_key(func_frame, target);
-            kvlangXvalueFree(&nv);
+            result = frame_slot_key(frame_root, target);
         } else {
             char *path = kvlangXvalueValueString(&nv);
-            kvlangXvalueFree(&nv);
             for (;;) {
                 kvlangXvalue_t hop; kvlangXvalueZero(&hop);
                 kvlangKvGetOne(kv, path, &hop);
-                if (kvlangXvalueNone(&hop) || !kvlangXvalueIsCharKind(kvlangXvalueKind(&hop))) {
-                    kvlangXvalueFree(&hop);
-                    result = path;
-                    break;
-                }
-                char *p2 = kvlangXvalueValueString(&hop);
+                if (!kvlangXvalueIsPtr(&hop)) { kvlangXvalueFree(&hop); result = path; break; }
+                char *p2 = kvlangXvaluePtrTarget(&hop);
                 kvlangXvalueFree(&hop);
                 free(path);
                 path = p2;
             }
         }
+        kvlangXvalueFree(&nv);
         free(target);
     } else {
-        result = frame_slot_key(func_frame, name);
+        result = frame_slot_key(frame_root, name);
     }
-    kvlangXvalueFree(&v); free(stk); free(func_frame);
+    kvlangXvalueFree(&v); free(stk);
     return result;
 }
 
-static char *handle_return(kvlangKv_t *kv, const char *pc) {
+/* return：弹出当前帧 [d]。d==1 → 顶层结束（*out_next=NULL）；否则 *out_next=‥returnpc。
+ * 返回链断裂（帧无 ‥returnpc）→ RuntimeError（#109），保留该帧供排查，返回 -1。 */
+static int handle_return(kvlangKv_t *kv, const char *vtid, const char *pc, char **out_next) {
+    *out_next = NULL;
     char *fr = kvlangKeytreeFrameRoot(pc);
-    if (!fr) die("HandleReturn: no frame root: %s", pc);
     int d = kvlangKeytreeFrameNum(fr);
     char *next = NULL;
     if (d > 1) {
@@ -180,18 +178,24 @@ static char *handle_return(kvlangKv_t *kv, const char *pc) {
         kvlangKeytreeFrameReturnpc(fr, &rk);
         kvlangXvalue_t v; kvlangXvalueZero(&v);
         kvlangKvGetOne(kv, rk.p, &v);
-        if (kvlangXvalueNone(&v)) die("HandleReturn: missing ‥returnpc at %s", fr);
-        next = kvlangXvalueValueString(&v);
+        if (!kvlangXvalueNone(&v)) next = kvlangXvalueValueString(&v);
         kvlangXvalueFree(&v);
         kvlangStrbufFree(&rk);
-        if (!next || !next[0]) die("HandleReturn: empty ‥returnpc at %s", fr);
+        if (!next || !next[0]) {
+            char msg[512];
+            snprintf(msg, sizeof msg, "RuntimeError: broken return chain: frame %s has no returnpc (pc=%s)", fr, pc);
+            kvlangVthreadSetError(kv, vtid, pc, msg);
+            free(next); free(fr);
+            return -1;
+        }
     }
     char *stk = kvlangKeytreeStack(fr);
     char err[256];
     kvlangKvDelExtIndex(kv, stk, err, sizeof err);
     kvlangKvDelTree(kv, fr, err, sizeof err);
     free(stk); free(fr);
-    return next;
+    *out_next = next;
+    return 0;
 }
 
 /* HandleCall：创建子帧。返回 EntryPC(frameRoot)，失败 NULL */
@@ -213,9 +217,7 @@ static char *handle_call(kvlangKv_t *kv, const char *pc, kvlangRwirInst_t *inst)
         else {
             /* 裸名调用（无 /lib/ 无 ·）：同 pkg 优先——当前函数所在 lib 下有同名 rwfunc 就用之
              * （lib aaa/bbb/math 内 sum(A,A) → /lib/aaa/bbb/math·sum），否则退回根 /lib/<fn>。 */
-            char *fr = kvlangKeytreeFrameRoot(pc);
-            char *ff = fr ? kvlangBuiltinFuncFrameRoot(kv, fr) : NULL;
-            free(fr);
+            char *ff = kvlangKeytreeFrameRoot(pc);
             if (ff) {
                 /* 函数目录在帧的 ‥lib 槽（/lib/aaa/bbb/math·double/）：由此取调用者 pkg。 */
                 kvlangStrbuf_t lk; kvlangStrbufInit(&lk);
@@ -389,22 +391,27 @@ static int handle_control(kvlangKv_t *kv, const char *vtid, const char *pc, kvla
         return 0;
     }
     if (strcmp(inst->opcode, OP_RETURN) == 0) {
-        char *parent = handle_return(kv, pc);
+        char *parent = NULL;
+        if (handle_return(kv, vtid, pc, &parent) != 0) return -1;
         if (!parent) { kvlangVthreadSetDone(kv, vtid, "ok"); return 0; }
         kvlangVthreadSet(kv, vtid, parent, "running");
         free(parent);
         return 0;
     }
     if (strcmp(inst->opcode, OP_GOTO) == 0) {
-        if (inst->nr != 1) die("goto requires 1 irseq, got %d", inst->nr);
-        char *np = jump_irseq(pc, irseq_of(&inst->reads[0]));
-        kvlangVthreadSet(kv, vtid, np, "running");
-        kvlangLogDebug("[%s] GOTO → %s", vtid, np);
-        free(np);
-        return 0;
+        if (inst->nr != 1) {
+            char msg[128]; snprintf(msg, sizeof msg, "RuntimeError: goto expects 1 irseq, got %d", inst->nr);
+            kvlangVthreadSetError(kv, vtid, pc, msg);
+            return -1;
+        }
+        return jump_to(kv, vtid, pc, &inst->reads[0], OP_GOTO);
     }
     if (strcmp(inst->opcode, OP_BR) == 0) {
-        if (inst->nr != 3) die("br requires 3 args: cond trueIrseq falseIrseq, got %d", inst->nr);
+        if (inst->nr != 3) {
+            char msg[128]; snprintf(msg, sizeof msg, "RuntimeError: br expects cond trueIrseq falseIrseq, got %d", inst->nr);
+            kvlangVthreadSetError(kv, vtid, pc, msg);
+            return -1;
+        }
         char *fr = kvlangKeytreeFrameRoot(pc);
         kvlangXvalue_t cond; kvlangXvalueZero(&cond);
         kvlangBuiltinResolveReadValue(kv, fr, inst->reads[0].name, &inst->reads[0].val, &cond);
@@ -414,12 +421,9 @@ static int handle_control(kvlangKv_t *kv, const char *vtid, const char *pc, kvla
             kvlangXvalueFree(&cond);
             return -1;
         }
-        int irseq = irseq_of(kvlangXvalueAsBool(&cond) ? &inst->reads[1] : &inst->reads[2]);
+        bool taken = kvlangXvalueAsBool(&cond);
         kvlangXvalueFree(&cond);
-        char *np = jump_irseq(pc, irseq);
-        kvlangVthreadSet(kv, vtid, np, "running");
-        free(np);
-        return 0;
+        return jump_to(kv, vtid, pc, &inst->reads[taken ? 1 : 2], OP_BR);
     }
     return -1;
 }
@@ -574,7 +578,14 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode, char *
         kvlangLogDebug("[%s] PC=%s OP=%s R=%d W=%d", vtid, cur, inst.opcode ? inst.opcode : "(empty)", inst.nr, inst.nw);
 
         if (!inst.opcode || !inst.opcode[0]) {
-            die("Execute: empty instruction at %s", cur);
+            /* layout 对每条路径都补了 return（lower::terminate），走到空槽只能是 /lib 损坏
+             * 或 goto/br 越界；报 RuntimeError 让该 vthread 停下，不拖垮整个进程。 */
+            char msg[512];
+            snprintf(msg, sizeof msg, "RuntimeError: no instruction at %s", cur);
+            kvlangVthreadSetError(kv, vtid, cur, msg);
+            free(fr); kvlangRwirInstFree(&inst);
+            rc = -1;
+            break;
         }
 
         int exec_err = 0;

@@ -227,10 +227,9 @@ bool kvlangBuiltinIsNative(const char *opcode);
 bool kvlangBuiltinNumOp(const char *opcode);
 int kvlangBuiltinNative(kvlangFrame_t *f);   /* dispatch + call，0 成功 */
 int kvlangBuiltinExecuteCopy(kvlangKv_t *kv, const char *vtid, const char *pc, kvlangRwirInst_t *inst);
-void kvlangBuiltinResolveReadValue(kvlangKv_t *kv, const char *frame_path, const char *name,
+void kvlangBuiltinResolveReadValue(kvlangKv_t *kv, const char *frame_root, const char *name,
                            const kvlangXvalue_t *val, kvlangXvalue_t *out);
-char *kvlangBuiltinResolveWriteSlot(kvlangKv_t *kv, const char *frame_path, const char *name);
-char *kvlangBuiltinFuncFrameRoot(kvlangKv_t *kv, const char *frame_root);   /* malloc */
+char *kvlangBuiltinResolveWriteSlot(kvlangKv_t *kv, const char *frame_root, const char *name);
 bool kvlangBuiltinTryParseNumber(const char *s, kvlangXvalue_t *out);          /* 成功 out 接管 */
 void kvlangDisplay(const kvlangXvalue_t *v, char **out);                     /* malloc，对齐 Go Display */
 

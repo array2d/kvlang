@@ -70,13 +70,9 @@ static int cmp_int(const kvlangXvalue_t *a, const kvlangXvalue_t *b) {
 }
 
 /* ── resolve ───────────────────────────────────────────────────────── */
+/* #116 后 if/while 不再建 scope 帧，当前帧 [d] 即 rwfunc 帧，frame_root 直接可用。 */
 
-char *kvlangBuiltinFuncFrameRoot(kvlangKv_t *kv, const char *frame_root) {
-    (void)kv;
-    return strdup(frame_root);
-}
-
-void kvlangBuiltinResolveReadValue(kvlangKv_t *kv, const char *frame_path, const char *name,
+void kvlangBuiltinResolveReadValue(kvlangKv_t *kv, const char *frame_root, const char *name,
                            const kvlangXvalue_t *val, kvlangXvalue_t *out) {
     kvlangXvalueZero(out);
     if (val && !kvlangXvalueNone(val) && !kvlangXvalueKindIs(val, KVSPACE_KIND_RWIR) && !kvlangXvalueKindIs(val, KVSPACE_KIND_RWFUNC)) {
@@ -87,8 +83,7 @@ void kvlangBuiltinResolveReadValue(kvlangKv_t *kv, const char *frame_path, const
     }
     if (!name || !name[0]) return;
     if (name[0] == '/') { kvlangKvGetOne(kv, name, out); return; }
-    char *rw = kvlangBuiltinFuncFrameRoot(kv, frame_path);
-    char *stk = kvlangKeytreeStack(rw);
+    char *stk = kvlangKeytreeStack(frame_root);
     kvlangXvalue_t pv; kvlangXvalueZero(&pv);
     kvlangKvGetMember(kv, stk, name, &pv);
     if (kvlangXvalueIsPtr(&pv)) {
@@ -105,13 +100,12 @@ void kvlangBuiltinResolveReadValue(kvlangKv_t *kv, const char *frame_path, const
     } else if (!kvlangXvalueNone(&pv)) {
         *out = pv; pv.data = NULL; pv.len = 0;
     }
-    kvlangXvalueFree(&pv); free(stk); free(rw);
+    kvlangXvalueFree(&pv); free(stk);
 }
 
-char *kvlangBuiltinResolveWriteSlot(kvlangKv_t *kv, const char *frame_path, const char *name) {
+char *kvlangBuiltinResolveWriteSlot(kvlangKv_t *kv, const char *frame_root, const char *name) {
     if (name[0] == '/') return strdup(name);
-    char *rw = kvlangBuiltinFuncFrameRoot(kv, frame_path);
-    char *stk = kvlangKeytreeStack(rw);
+    char *stk = kvlangKeytreeStack(frame_root);
     kvlangXvalue_t pv; kvlangXvalueZero(&pv);
     kvlangKvGetMember(kv, stk, name, &pv);
     char *result = NULL;
@@ -139,10 +133,10 @@ char *kvlangBuiltinResolveWriteSlot(kvlangKv_t *kv, const char *frame_path, cons
         kvlangXvalueFree(&av);
     }
     kvlangXvalueFree(&pv);
-    if (result) { free(stk); free(rw); return result; }
+    if (result) { free(stk); return result; }
     kvlangStrbuf_t o; kvlangStrbufInit(&o);
     kvlangStrbufPuts(&o, stk); kvlangStrbufPuts(&o, name);
-    free(stk); free(rw);
+    free(stk);
     return kvlangStrbufDetach(&o);
 }
 
@@ -213,14 +207,12 @@ void kvlangDisplay(const kvlangXvalue_t *v, char **out) {
 
 int kvlangBuiltinReadInputs(kvlangFrame_t *f, kvlangXvalue_t *out, int cap) {
     char *fr = kvlangKeytreeFrameRoot(f->pc);
-    char *ff = kvlangBuiltinFuncFrameRoot(f->kv, fr);
-    free(fr);
     int n = 0;
     for (int i = 0; i < f->inst->nr && n < cap; i++) {
-        kvlangBuiltinResolveReadValue(f->kv, ff, f->inst->reads[i].name, &f->inst->reads[i].val, &out[n]);
+        kvlangBuiltinResolveReadValue(f->kv, fr, f->inst->reads[i].name, &f->inst->reads[i].val, &out[n]);
         n++;
     }
-    free(ff);
+    free(fr);
     return n;
 }
 
@@ -636,10 +628,8 @@ int kvlangBuiltinExecuteCopy(kvlangKv_t *kv, const char *vtid, const char *pc, k
     char *fr = kvlangKeytreeFrameRoot(pc);
     kvlangFrame_t f = { kv, vtid, pc, inst };
     if (inst->nr == 0) { free(fr); kvlangBuiltinNextPc(&f); return 0; }
-    char *ff = kvlangBuiltinFuncFrameRoot(kv, fr);
     kvlangXvalue_t v; kvlangXvalueZero(&v);
-    kvlangBuiltinResolveReadValue(kv, ff, inst->reads[0].name, &inst->reads[0].val, &v);
-    free(ff);
+    kvlangBuiltinResolveReadValue(kv, fr, inst->reads[0].name, &inst->reads[0].val, &v);
     for (int i = 0; i < inst->nw; i++) {
         char *key = kvlangBuiltinResolveWriteSlot(kv, fr, inst->writes[i].name);
         kvlangKvPair_t pair = { key, v };
