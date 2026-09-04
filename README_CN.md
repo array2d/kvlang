@@ -3,7 +3,7 @@
 [![CI](https://github.com/array2d/kvlang/actions/workflows/ci.yml/badge.svg)](https://github.com/array2d/kvlang/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Tutorial Examples](https://img.shields.io/badge/tutorials-140%20examples-4c1)](tutorial/)
-[![Docs site](https://img.shields.io/badge/docs-stdlib-blueviolet)](https://array2d.github.io/kvlang/#/stdlib/kvlangbrief.kv)
+[![Docs site](https://img.shields.io/badge/docs-stdlib-blueviolet)](https://array2d.github.io/kvlang/#/stdlib/kvlang/kvlangbrief.kv)
 
 **以 kvspace 为寻址空间和内存空间、小核心、扩展主导的明文解释执行语言（原训推框架 deepx 的前端语言，前身 dxlang）。** 代码与数据统一在一棵 KV 树；PC 即 KV 路径、可崩溃恢复，源码即 IR、KV 皆明文。核心 runtime 只做执行循环与控制流，其余能力交由 rwirext 扩展承担（`term` / `json` 等为基础示例）。
 
