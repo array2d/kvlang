@@ -269,13 +269,9 @@ code.inline {
   border-top: 1px solid var(--border);
   background: var(--bg-alt);
   color: var(--fg-dim);
-  padding: 20px 40px;
-  font-size: 13px;
-}
-#agent-sources h2 {
-  font-size: 15px;
-  color: var(--fg);
-  margin: 0 0 8px;
+  padding: 6px 16px;
+  font-size: 12px;
+  line-height: 1.5;
 }
 #agent-sources code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
