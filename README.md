@@ -269,6 +269,24 @@ python3 tutorial/error_test.py               # all negative tests
 
 ---
 
+## Benchmark
+
+`benchmark/` is a cross-language, cross-backend performance harness. Each case is one
+algorithm implemented identically in kvlang / Python / Rust / C; kvlang runs on all three
+kvspace backends (`shm` / `fs` / `redis`) as separate columns, with the native/scripting
+versions as baselines. Scales are fixed for long-term comparability, and every run appends
+to a versioned `results.csv` — same host + case, sorted by version, gives the perf-evolution
+curve.
+
+```bash
+python3 benchmark/run.py            # all cases × three backends, appends results.csv
+python3 benchmark/run.py --show     # print recorded history
+```
+
+See [benchmark/README.md](benchmark/README.md) for cases, timing convention, and CSV schema.
+
+---
+
 ## Design Documentation
 
 In-depth design and implementation docs covering the full architecture:
