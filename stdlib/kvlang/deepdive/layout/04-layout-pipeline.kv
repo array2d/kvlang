@@ -1,6 +1,6 @@
 # 欢迎加入kvspace世界
-lib kvlang/deepdive/parser/04_compiler_pipeline {
-	"""# Compiler Pipeline（编译器流水线）
+lib kvlang/deepdive/layout/04_layout_pipeline {
+	"""# Layout Pipeline（layout 流水线）
 
 ## kvlang 流水线
 
@@ -10,11 +10,11 @@ lib kvlang/deepdive/parser/04_compiler_pipeline {
   → write_func           AST → KV 指令树（/lib/<pkg>·<name>/[i,j]）
 ```
 
-编译产物写入 `/lib/` 后由 kvcpu 执行。
+layout 产物写入 `/lib/` 后由 kvcpu 执行。
 
 关键特征：
 - **PC 是 KV 路径字符串**，不是整数
-- **指令存储在 KV 树**中，通过 `kv.Get` 获取
+- **指令存储在 KV 树**中，通过 `kv·get` 获取
 - **控制流块（ScopeStmt）**不建 extindex，由 Decode 拼接 scope 前缀 key 解析
 
 ## 与传统流水线的差异
@@ -33,5 +33,5 @@ kvlang：无字节码数组，无整数 PC，控制流通过 KV 路径跳转；�
 ## AST 类型标记——`quote` 字段
 
 `Expr.quote` 区分字符串字面量和变量名（替代旧的 `"` 前缀 hack）。`flat()` 在 KV 传输层对字符串字面量加 `"` 前缀，数字字面量不加引号。
-""" -> /lib/kvlang/deepdive/parser/04_compiler_pipeline
+""" -> /lib/kvlang/deepdive/layout/04_layout_pipeline
 }

@@ -1,5 +1,5 @@
 # 欢迎加入kvspace世界
-lib kvlang/deepdive/total/02_everything_is_plaintext {
+lib kvlang/deepdive/02_everything_is_plaintext {
 	"""# 一切皆明文
 
 ## 一切皆明文
@@ -21,7 +21,7 @@ PC 字符串即调用栈（路径深度 = 栈深度）。裸名即相对指针�
 
 ```
 传统：B8 01 00 00 00 (mov eax, 1)  调用 = call 0x400200 (符号表间接)
-kvlang：[0,0]="+" [0,-1]="A" [0,1]="C"  调用 = /lib/math.sum(3, 4) -> s
+kvlang：[0,0]="+" [0,-1]="A" [0,1]="C"  调用 = /lib/math·sum(3, 4) -> s
 ```
 
 opcode 是 `"+"` `"print"` `"call"` 字符串，`kvspace tree /lib/func` 即反汇编。lib 树即全局命名空间——调用即全路径，无 import/符号表/链接器重定位。
@@ -38,5 +38,5 @@ kvlang：XValue 带 kind "int64"   /vthread/7/.pc .status .rootfunc 直接 Get
 ### 代价与补偿
 
 明文化贯彻到 kvlang 的方方面面——PC 是字符串而非整数、opcode 是 `"+"` 而非单字节、指针是路径而非地址——这天然损失了解释执行的速度。但 kvlang 的定位是**调度层**，最耗时的 tensor 计算不在 kvlang 内执行：op-gpu 将计算编译为 GPU kernel（TileLang → AOT `.so` → dlopen），通过 GPU 硬件加速弥补。透明性在调度层兑现，算力在扩展引擎层找回。
-""" -> /lib/kvlang/deepdive/total/02_everything_is_plaintext
+""" -> /lib/kvlang/deepdive/02_everything_is_plaintext
 }

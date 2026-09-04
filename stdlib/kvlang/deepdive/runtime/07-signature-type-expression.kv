@@ -2,7 +2,7 @@
 lib kvlang/deepdive/runtime/07_signature_type_expression {
 	"""# runtime篇-07: 签名类型表达式（多态 + 高维数组）
 
-> 状态：设计定稿。代码：签名字符串存 `/lib/<pkg>.<name>`（kind=`defrwfunc`/`defrwir`），参数类型即本文件的「类型表达式」。
+> 状态：设计定稿。代码：签名字符串存 `/lib/<pkg>·<name>`（kind=`defrwfunc`/`defrwir`），参数类型即本文件的「类型表达式」。
 
 ## 一、动机
 
@@ -25,7 +25,7 @@ dims   := ε                                # 无 [] = 标量（0 维）
         | "[" dim ("," dim)* "]"
 dim    := int | "?"                        # 精确大小 或 动态维
 any    := "any"                            # 通配，匹配任意 kind
-kind   := 精确 kind 串（bool、int8..uint64、float32/64、char·、dict、index、extindex、rwir、defrwir、rwfunc、time、duration）
+kind   := 精确 kind 串（bool、int8..int64、uint8..uint64、float32/64、char/utf32|utf8|ascii、object、stringkeymap、scope、index、extindex、rwir、defrwir、rwfunc、defrwfunc）
 ```
 
 **变参 `...`**：仅**末**读参可带尾缀 `...`（如 `A:any...`、`A:int64|float64...`），表「0..N 个同型实参」。用于 `print`/`println`/`cerr`/`min`/`max` 等 arity 开放的 rwir。非末参带 `...` 是装载期错误。
@@ -52,7 +52,7 @@ A:[]float32|[]float64        # 多精度 1-D
 
 A:[2,3]float32|float32       # shape 或标量
 A:bool|char/utf8             # bool 或 单个 utf8 字符
-A:index|dict                 # 目录
+A:index|object               # 目录或命名成员容器
 ```
 
 ## 四、匹配语义
@@ -113,7 +113,7 @@ func matchAtom(atom, kind string, ndim int, dims []int32) bool {
 ## 七、多态派发
 
 - native 算子（`+`）内建多态，签名只做类型检查。
-- rwirext 扩展（numpy.add）经 `kvlang_rwirextResolveRead` 拿实参实际 kind，按精确 kind 分派；高维 shape 由扩展自行处理。
+- rwirext 扩展（numpy·add）经 `kvlang_rwirextResolveRead` 拿实参实际 kind，按精确 kind 分派；高维 shape 由扩展自行处理。
 - rwfunc 用户函数：并集声明接受集，函数体 `kind(x)` 分支。
 
 ## 八、参数 kindexpr 的落盘与运行时内联匹配

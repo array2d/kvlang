@@ -1,5 +1,5 @@
 # 欢迎加入kvspace世界
-lib kvlang/deepdive/parser/01_instruction_architecture {
+lib kvlang/deepdive/layout/01_instruction_architecture {
 	"""# Instruction Architecture（指令架构）
 
 ## 指令分类
@@ -22,9 +22,9 @@ lib kvlang/deepdive/parser/01_instruction_architecture {
 | `writes <- expr` | 左 | `C <- A + B` |
 | `writes = expr` | 左（≡ `<-`） | `C = A + B`、`p·val = 8` |
 
-**铁律**：`->` 右侧 / `<-`、`=` 左侧必须是**位置**（裸名、`/abs`、`base·名`）；字面量在写槽位置是语法错误，parser 报错拒绝。
+**铁律**：`->` 右侧 / `<-`、`=` 左侧必须是**位置**（裸名、`/abs`、`base·名`）；字面量在写槽位置是语法错误，layout 报错拒绝。
 
-调用时**写参 arity 强制匹配**（对齐 Go/Rust 阵营）：`f() -> s` 对多写参函数是编译错误；不需要的写参用 `_` 接收。
+调用时**写参 arity 强制匹配**（对齐 Go/Rust 阵营）：`f() -> s` 对多写参函数是 layout 错误；不需要的写参用 `_` 接收。
 
 ## 指令的二维空间模型：`[s0, s1]`
 
@@ -53,7 +53,7 @@ s0 = 2  │  [2,-1]         [2,0]  [2,1]
 ### 具体示例
 
 ```kv
-rwfunc add(A: int, B: int) -> (C: int) {
+rwfunc add(A: int64, B: int64) -> (C: int64) {
     A + B -> C
 }
 ```
@@ -61,12 +61,12 @@ rwfunc add(A: int, B: int) -> (C: int) {
 lower + layoutrwir 后写入 KV：
 
 ```
-/lib/main.add/[0,0]   = "+"      ← s1=0: opcode
-/lib/main.add/[0,-1]  = "A"      ← s1=-1: 第1个读参（left operand）
-/lib/main.add/[0,-2]  = "B"      ← s1=-2: 第2个读参（right operand）
-/lib/main.add/[0,1]   = "C"      ← s1=1:  第1个写参（result destination）
+/lib/main·add/[0,0]   = "+"      ← s1=0: opcode
+/lib/main·add/[0,-1]  = "A"      ← s1=-1: 第1个读参（left operand）
+/lib/main·add/[0,-2]  = "B"      ← s1=-2: 第2个读参（right operand）
+/lib/main·add/[0,1]   = "C"      ← s1=1:  第1个写参（result destination）
 
-/lib/main.add/[1,0]   = "return" ← s1=0: opcode（隐式 return，appendReturn 补充）
+/lib/main·add/[1,0]   = "return" ← s1=0: opcode（隐式 return，appendReturn 补充）
 ```
 
 图示为一张二维表格：
@@ -87,10 +87,10 @@ print("hello", x, y)
 ```
 
 ```
-/lib/main.foo/[3,0]   = "print"   ← opcode
-/lib/main.foo/[3,-1]  = "\"hello" ← 第1读参（字符串字面量，" 前缀编码）
-/lib/main.foo/[3,-2]  = "x"       ← 第2读参
-/lib/main.foo/[3,-3]  = "y"       ← 第3读参
+/lib/main·foo/[3,0]   = "print"   ← opcode
+/lib/main·foo/[3,-1]  = "\"hello" ← 第1读参（字符串字面量，" 前缀编码）
+/lib/main·foo/[3,-2]  = "x"       ← 第2读参
+/lib/main·foo/[3,-3]  = "y"       ← 第3读参
 （无写参，副作用是输出）
 
 `print` 多参数直接拼接（无空格分隔），末尾不追加换行。`println` 空格分隔参数，末尾追加换行（Go 风格）。
@@ -103,11 +103,11 @@ a + b -> sum, backup
 ```
 
 ```
-/lib/main.foo/[2,0]   = "+"
-/lib/main.foo/[2,-1]  = "a"
-/lib/main.foo/[2,-2]  = "b"
-/lib/main.foo/[2,1]   = "sum"    ← 第1写参
-/lib/main.foo/[2,2]   = "backup" ← 第2写参（扇出）
+/lib/main·foo/[2,0]   = "+"
+/lib/main·foo/[2,-1]  = "a"
+/lib/main·foo/[2,-2]  = "b"
+/lib/main·foo/[2,1]   = "sum"    ← 第1写参
+/lib/main·foo/[2,2]   = "backup" ← 第2写参（扇出）
 ```
 
 拷贝指令（叶表达式 → 写槽）编码为显式操作码 `=`，值引用放读槽：
@@ -130,10 +130,10 @@ kvcpu 沿 s1 轴向两侧扩展，直到遇到空 key 停止，参数数量**隐
 
 | 维度 | 传统字节码 | kvlang `[s0, s1]` |
 |------|-----------|-------------------|
-| 指令存储 | 线性数组 `code[PC]` | KV 树 `kv.Get(prefix + "[s0,0]")` |
+| 指令存储 | 线性数组 `code[PC]` | KV 树 `kv·get(prefix + "[s0,0]")` |
 | 操作数位置 | opcode 后紧跟操作数 | `s1<0`（读）/ `s1>0`（写）分离 |
 | 参数数量 | opcode 内编码 arity | 隐式：扫描到空 key 停止 |
 | 数据流方向 | 单向（操作数 → 结果） | 符号编码（负=读, 正=写） |
 | 可观察性 | 字节不可独立寻址 | 每个槽是独立 KV key，可单独 Get/Watch |
-""" -> /lib/kvlang/deepdive/parser/01_instruction_architecture
+""" -> /lib/kvlang/deepdive/layout/01_instruction_architecture
 }

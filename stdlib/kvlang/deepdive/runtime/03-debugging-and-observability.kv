@@ -2,127 +2,98 @@
 lib kvlang/deepdive/runtime/03_debugging_and_observability {
 	"""# Debugging and Observability（调试与可观测性）
 
-## 调试器实战：用 kvspace 静态观察栈与源码
+## 调试模型：暂停即落盘，观察即读 kvspace
 
-本节以 `tutorial/03-debugger/chain_array.kv` 为例，演示如何用 `kvlang --debug` 暂停程序，再用 `kvspace tree/list` 静态观察 vthread 栈帧（`/vthread`）和已 layout 源码（`/lib`）。
+kvlang 没有独立调试器进程，也没有 `--debug` 开关。调试就是**让 vthread 停在某处、把整个执行状态留在 kvspace，再用 kvspace 命令静态读取**。因为 PC 和栈帧本就是 kvspace 里的 KV 路径与值，暂停后进程可以直接退出——状态不丢，可崩溃恢复。
 
-### 启动调试
+### 暂停：`debugger()`
+
+`debugger()` 是 native builtin，等价于把当前 vthread 的 `‥status` 置 `paused`（`vthread·setstatus("paused")` 同义）。execute 循环只在 `init`/`running`/`wait` 状态下继续，读到 `paused` 即停机，进程正常退出。
+
+**关键：暂停时 PC 已前进到 `debugger()` 的下一条指令**——恢复后从下一条继续，不会重复执行断点。
+
+```kv
+rwfunc g() -> (s:int64) { debugger(); 30 -> s }
+rwfunc f() -> (s:int64) { g() -> s }
+rwfunc test() -> () { f() -> r; println(r) }   # 70
+```
 
 ```bash
-kvlang {vid} --debug tutorial/03-debugger/chain_array.kv
-# VM 在 debugger() 处暂停，进程阻塞等待 agent 命令
+kvlang prog.kv          # 跑到 debugger() 暂停，进程退出；输出 vthread 号（如 vthread 3）
 ```
 
-source:
+### 观察 PC 与状态
 
-```
-rwfunc f3() -> (a:int64, s:int64) {
-    debugger()
-    at(a, 0) -> v0
-    at(a, 1) -> v1
-    v0 + v1 -> s        # 30 + 40 = 70
-}
+vthread 的运行时保留字段以 `‥`（U+2025）为前缀，不进普通目录索引，故用 `kvspace get` 直接按 key 读，不用 `tree`：
 
-rwfunc f2() -> (a:int64, s:int64) {
-    a:int64 = [30, 40]
-    f3() -> (a, s)
-}
-
-rwfunc f1() -> (s:int64) {
-    f2() -> (_, s)
-}
-
-rwfunc init() -> () {
-    f1() -> r
-    print(r)            # 70
-}
+```bash
+kvspace get /vthread/3/‥status   # char/utf8:paused
+kvspace get /vthread/3/‥pc       # char/utf8:/vthread/3/[1,0]/[1,0]/[2,0]
 ```
 
-### 观察栈帧：`kvspace tree /vthread`
+### PC 字符串即调用栈
 
-暂停后，`kvspace tree /vthread` 输出（仅 `{vid}` vthread 相关部分）：
-
-```
-/vthread/{vid}
-├── .lib → rwfunc init() -> ()
-│   ├── [0]  rwir:f1  rwir:r
-│   ├── [1]  rwir:r   rwir:print
-│   └── [2]  rwir:return
-├── .rootfunc  string:init
-├── .pc        string:/vthread/{vid}/[0,0]/[0,0]/[1,0]/[0,0]
-├── .status    string:{vid}ning
-├── .debugger  string:break
-└── [0,0]                                    ← f1 调用帧
-    ├── .lib → rwfunc f1() -> (s:int64)
-    ├── .rootfunc  string:f1
-    ├── [0,0]                                ← f2 调用帧
-    │   ├── .lib → rwfunc f2() -> (a:int64, s:int64)
-    │   ├── .rootfunc  string:f2
-    │   └── [1,0]                            ← f3 调用帧（当前暂停位置）
-    │       ├── .lib → rwfunc f3() -> (a:int64, s:int64)
-    │       │   ├── [0]  rwir:debugger       ← PC 在此
-    │       │   ├── [1]  int64:0  int:0  rwir:at  rwir:v0
-    │       │   ├── [2]  int64:0  int:1  rwir:at  rwir:v1
-    │       │   ├── [3]  rwir:v0  rwir:v1  rwir:+  int64:0
-    │       │   └── [4]  int64:0  int64:0  rwir:return
-    │       └── .rootfunc  string:f3
-    └── _  int64[2]:30                       ← f1 的丢弃槽，存放 f2 产出的数组
-```
-
-### 关键发现
-
-**PC 字符串即调用栈**。PC = `/vthread/{vid}/[0,0]/[0,0]/[1,0]/[0,0]`，逐段解读：
+PC = `/vthread/3/[1,0]/[1,0]/[2,0]`，逐段解读（坐标 `[s0,s1]`：s0=指令行，行 0 为签名、指令从 1 起；s1=参数轴，0 为 opcode）：
 
 | 路径段 | 含义 |
 |--------|------|
-| `/vthread/{vid}/` | vthread 根帧（init） |
-| `[0,0]/` | init 指令 [0,0] 发起的调用 → f1 帧 |
-| `[0,0]/` | f1 指令 [0,0] 发起的调用 → f2 帧 |
-| `[1,0]/` | f2 指令 [1,0] 发起的调用 → f3 帧 |
-| `[0,0]` | f3 指令 [0,0] = `debugger()`，当前执行位置 |
+| `/vthread/3/` | 根帧（test） |
+| `[1,0]/` | test 指令行 1（`f() -> r`）发起的调用 → f 帧 |
+| `[1,0]/` | f 指令行 1（`g() -> s`）发起的调用 → g 帧 |
+| `[2,0]` | g 指令行 2（`30 -> s`）——`debugger()` 在行 1，PC 已前进到此 |
 
-**`.lib` 软链 = 零拷贝共享指令树**。所有帧的 `.lib` 均 Link 到 `/lib/<name>`，KV 存储中只存一份指令树，所有帧通过路径别名共享。
+嵌套帧路径即调用链，无需另存栈结构。单帧程序 PC 形如 `/vthread/3/[3,0]`。
 
-**零拷贝跨帧传参**。参数传递通过 Ptr 链实现路径别名——f3 执行 `at(a, 0)` 时，kvcpu 经解析后直接 Get 绝对路径，零中间拷贝。f3 写 `s` 时同理直接 Set 到 `/vthread/{vid}/r`。
+### 栈帧字段
 
-**`.rootfunc` 在 TCO 语义中保持根函数名**。每个帧独立记录 `.rootfunc`，即使 TCO 复用帧也不覆盖——`resolveLabel` 靠它解析裸标签。
+每个调用帧（`/vthread/<vid>/[s0,s1]/...`）的运行时字段，均 `‥` 前缀：
 
-### 观察源码：`kvspace tree /lib`
+| 字段 | 含义 |
+|------|------|
+| `‥lib` | 软链接到 `/lib/<pkg>·<name>`——指令树零拷贝共享，全帧只存一份 |
+| `‥callpc` | 发起本帧调用的指令 PC |
+| `‥returnpc` | 返回后继续的 PC |
+| `‥ro` | 只读读参绑定 |
+| `‥pc` / `‥status` | 仅根帧持有，记录整个 vthread 的当前 PC 与状态 |
 
-```
-/lib
-├── init   string:rwfunc init() -> ()
-├── f1     string:rwfunc f1() -> (s:int64)
-├── f2     string:rwfunc f2() -> (a:int64, s:int64)
-├── f3     string:rwfunc f3() -> (a:int64, s:int64)
-├── .init.src  string:rwfunc init() -> () { … }
-├── .f1.src    string:rwfunc f1() -> (s:int64) { … }
-├── .f2.src    string:rwfunc f2() -> (a:int64, s:int64) { … }
-├── .f3.src    string:rwfunc f3() -> (a:int64, s:int64) { … }
-└── .srcmap    bytes:{"1":"tutorial/03-debugger/chain_array.kv", …}
-```
-
-**`/lib/.src` 源码副本**：每个函数的完整 lower 后源码以 string 值存入 `/lib/.<name>.src`——这是 `kvspace tree` 能展示源码的原因。`.srcmap` 记录行号→文件路径映射，供错误定位。
-
-### 调试器协议要点
-
-| 键 | 方向 | 值 |
-|----|------|-----|
-| `.debugger` | agent→CPU（控制） | `""` 正常 / `"step"` 单步 / `"break"` 函数入口暂停 |
-| `.debugger.pause` | CPU→agent（事件） | JSON `{"pc","func","frame","op"}` |
-| `.debugger.resume` | agent→CPU（命令） | `"step"` / `"continue"` / `"abort"` |
-
-暂停后 agent 写入 `kvspace notify /vthread/<vtid>/.debugger.resume continue` 即可恢复执行。
-
-### 常用观察命令
+无 `rootfunc` 字段，也无 `.debugger` JSON 控制协议——这些是上一代设计的残留。
 
 ```bash
-kvspace tree /vthread/           # 栈帧全貌
-kvspace get /vthread/{vid}/.pc   # 当前 PC
-kvspace tree /vthread/{vid}/[0,0]/[0,0]/[1,0]   # 当前帧（按 PC 截取 frameRoot）
-kvspace tree /lib                # 已加载函数全览
-kvspace tree /lib/f3             # 某函数指令树
-kvspace get /lib/.f3.src         # 源码副本
+kvspace head /vthread/3/[1,0]/‥lib          # 子帧 f 的指令树软链
+kvspace head /vthread/3/[1,0]/[1,0]/[2,0]   # 当前指令槽
+```
+
+### 恢复执行
+
+暂停状态已落盘，恢复只需把状态改回 `running` 再驱动该 vid：
+
+```bash
+kvspace set /vthread/3/‥status string:running
+kvlang run 3            # 从持久化的 ‥pc 继续；子进程/重启后亦可，PC 可崩溃恢复
+```
+
+`kvlang run <vid>` 接 vid（整数句柄，非函数名），从帧里的 `‥pc` 续跑到结束。
+
+### 观察源码：`kvlang dump`
+
+`/lib` 顶层无目录索引，`tree /lib` 为空。查看已 layout 的函数用 `dump`——它把 `/lib` 子树逆向重建为可运行 kvlang，并以 `#` 注释标出每条指令的 `[s0,s1]` 槽位：
+
+```bash
+kvlang dump prog.kv           # 先 layout prog.kv，再把整个 /lib dump 为源码
+kvlang dump prog.kv /lib/g    # 只 dump 某函数子树
+```
+
+签名槽 `[0,0]`（kind=`defrwfunc`）、读参绑定 `[0,-1]..`、写参绑定 `[0,1]..`、指令从行 1 起——dump 输出与此坐标系一一对应，是核对 layout 结果与定位坐标 bug 的首选透视镜。
+
+### 完整调试闭环
+
+```
+kvlang prog.kv                              # 1. debugger() 暂停，进程退出
+kvspace get /vthread/<vid>/‥pc / ‥status    # 2. 读 PC、状态
+kvspace head /vthread/<vid>/<帧路径>         # 3. 读栈帧变量槽
+kvlang dump prog.kv                         # 4. 对照源码与槽位
+kvspace set /vthread/<vid>/‥status string:running
+kvlang run <vid>                            # 5. 恢复到结束
 ```
 """ -> /lib/kvlang/deepdive/runtime/03_debugging_and_observability
 }

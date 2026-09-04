@@ -24,8 +24,8 @@ kvlang 是**严格类型语言**。所有变量、参数、返回值必须有确
 
 | 归属 | 存放位置 |
 |------|---------|
-| **函数签名** | `/lib/<pkg>.<name>` — `defrwfunc` 值，kindexp 列表 |
-| **指令槽引用** | `/lib/<pkg>.<name>/[s0,s1]` — `rwir` 文本引用 |
+| **函数签名** | `/lib/<pkg>·<name>` — `defrwfunc` 值，kindexpr 列表 |
+| **指令槽引用** | `/lib/<pkg>·<name>/[s0,s1]` — `rwir` 文本引用 |
 | **运行时值** | `/vthread/<vtid>/<frame>/<var>` — 携带 kindexpr 的 XValue |
 
 **铁律**：
@@ -56,14 +56,17 @@ XValue 是 TLV 编码的字节串，编解码由链接的 kvspace .so（`kvspace
 | `"char/utf32"` | 码点，4B×N，**默认字符串**，定宽（可索引）|
 | `"char/utf8"` | UTF-8 字节串，1B×N，变宽（存储/交换，禁索引）|
 | `"char/ascii"` | ASCII 字节串，1B×N，定宽（可索引）|
-| `"dict"` | dict 成员目录（尾 `.` 的 key） |
+| `"object"` | 异构命名成员容器（类 struct/record），成员经 `·` 访问 |
+| `"stringkeymap"` | map 容器，kindexpr `key·value`（如 `[]char/utf8·int64`） |
+| `"scope"` | 词法作用域帧目录 |
 | `"index"` | 通用目录索引（尾 `/` 的 key） |
 | `"extindex"` | 扩展索引 |
 | `"rwir"` | 指令槽文本引用 |
 | `"defrwir"` | 扩展 rwir 定义（签名，存 `/lib/<opcode>`） |
-| `"rwfunc"` | 用户函数定义 |
-| `"None"` | None 值 |
-| ptr XValue | 软链接：kindexpr 前缀 `*`，body 为目标 key 路径 |
+| `"rwfunc"` | rwir 文本中的函数引用 |
+| `"defrwfunc"` | 用户函数定义（签名，存 `/lib/<pkg>·<name>`，kindexpr 列表） |
+
+kvkind 枚举即上表（源码 `layout/src/kvkind.rs`）。**None 不是 kvkind**——它是 kindexpr 为空的 XValue；**ptr 也不是 kvkind**——软链接以 kindexpr 前缀 `*` 表示、body 为目标 key 路径。
 
 **字符家族（`char/<编码>`）**：定宽编码（`utf32` 4B、`ascii` 1B）支持 O(1) 码点索引；变宽编码 `utf8` **拒绝索引操作**，仅用于存储/交换。判定：`IsCharKind(kind) = HasPrefix(kind, "char/")`。字符串字面量默认落 `char/utf32`。
 

@@ -2,80 +2,76 @@
 lib kvlang/deepdive/runtime/02_member_access_and_data_structures {
 	"""# Member Access and Data Structures（成员访问与数据结构）
 
-## 语法规则：`[]` vs `.`
+## 两个索引符号：`[]` 与 `·`
 
-| 运算符 | 目标 | kvspace 层 | desugar |
-|--------|------|-----------|---------|
-| `a[i]` | **XValue 数组下标** | `ElemSize>0` 同构数组，零拷贝 raw[i] | `at(a, i)` |
-| `a.key` | **dict 成员 key** | kind=dict，`SplitDictParent` 路由 | `at(a, "key")` |
-| `pkg.func` | **lib 函数** | `/lib/pkg.func` KV key | `at(pkg, "func")` |
-| `a.*key` | **dict 动态 key** | key 变量值作为成员名 | `at(a, key)` |
+kvlang 用两个符号访问复合数据，语义严格分离：
 
-**铁律**：
-- `[]` 只用于同构 XValue 数组，`ElemSize(kind)>0`，零拷贝读写 `raw[arridx]`
-- `.` 用于 dict 成员访问和 lib 函数限定名——二者共用 `.` 分隔符，语义统一
+| 符号 | 目标 | 说明 |
+|------|------|------|
+| `a[i]` | **数组下标** | `[]T` 数组的元素访问，`i` 为整数 |
+| `base·name` | **容器成员 / lib 函数** | `·`（U+00B7 中点）是成员访问符 |
 
-### `[]` — 数组下标
+`·` 之所以取代旧的 `.`：`.` 被释放给小数字面量与浮点 key。成员分隔符在 `layout/src/keytree.rs` 定义为 `MEMBER_SEP = "·"`，成员键 = `base·name`（`keytree::member`）。
 
-```kv
-a: int64 = [1, 2, 3]
-a[0] -> v0          # v0 = 1，零拷贝读 raw[0]
-99 -> a[1]           # a = [1, 99, 3]，零拷贝写 raw[1]
-```
+**铁律**：容器成员一律走 `·`（或 `kv·get`/`kv·set`），**绝不用 `[]`**；`[]` 只索引 `[]T` 数组。
 
-parser 将 `a[i]` desugar 为 `at(a, i)`，builtin `at` 检测 `ElemSize>0` → `TypedIndex` 零拷贝。
+## 容器类型：object 与 stringkeymap
 
-### `.` — dict 成员
+kvlang 没有 `dict`。复合命名数据只有两种 kind：
 
-```kv
-h = {x: 1, y: 2}    # 创建 dict 目录 /frame/h. → dict: ["x", "y"]
-h.x -> v             # kvspace 层：/frame/h.x → int64:1
-42 -> h.z            # 新增成员，/frame/h.z → int64:42
-```
+- **object**：异构命名成员，类 struct / record。成员名固定写在源码里。
+- **stringkeymap**（`kvkind.rs` KIND_MAP）：一等 map 类型，kindexpr 用 `·` 分隔 `key·value`——`[]char/utf8·int64` 即 `map[string]int64`；value 可递归嵌套（`[]char/utf8·[]char/utf8·int64`）。
 
-kvspace 层：`h.` 是 dict 目录（kind=dict），`h.x` 是成员 key。`SplitDictParent` 自动检测并路由 child 到 dict 目录。
+容器 = 值 + memindex，`·` 是唯一的 memindex 标记：`base` 持容器值，`base·name` 是其成员，成员在 kvspace 中作为独立 key 落库。
 
-### `.` — lib 函数
+### 构造与写成员
 
 ```kv
-math.sum(3, 4) -> s           # /lib/math.sum
-string.len(w) -> n             # /lib/string.len
+rec:object = {}            # 空容器字面量必须带类型标注（layout 生成 obj 构造指令）
+rec·name = "kv"            # 成员写：= 值拷贝，写槽是完整成员键 rec·name
+rec·ver = 1
+m:[]char/utf8·int64 = {}   # 空 map 同样须标注
+m·a = 10                   # 命名成员写
+kv·set(m, "b", 20) -> _    # 动态键写
 ```
 
-`. ` 是统一成员访问符：`pkg.func` 和 `obj.prop` 同构——都是 `base + MemberSep + name`。
+### 读成员
 
-### dict：`. ` 作为独立成员目录（kind="dict"）
-
-kvlang 的 dict 在 kvspace 中以 `.` 为成员分隔符，尾 `.` 的 key 是 dict 成员目录，与父 `/` index 隔离：
-
-```
-/dir/      → index: ["obj.", "other"]
-/dir/obj.  → dict: ["x", "y"]          ← 独立 dict 成员目录（kind="dict"）
-/dir/obj.x → int64:42                  ← member key = parent + DictSep + name
-/dir/obj.y → string:hello
+```kv
+rec·ver -> v               # 命名成员读，直接取 key rec·ver
+kv·get(m, "a") -> x        # 动态键读；缺失返回 None
+k = "a"; m·*k -> y         # 动态成员名：k 的值作为成员名（读 m·a）
 ```
 
-`/` 管层级（lib、vthread 栈），`.` 管结构（dict member）。dict 成员动态增删，无编译期固定字段约束，对齐 Python dict / JS object 语义。
+`·*k` 动态成员语法用于**局部**容器变量。
 
-**dict 字面量**：`a = {x: 1, y: 2}` 创建 dict 目录 `/frame/a.` (kind=dict) + 成员 `/frame/a.x` (int64:1)、`/frame/a.y` (int64:2)。
+## 指针解引用：按值优先，按名回退
 
-**静态字段 vs 动态字段**：
+`base·name`（读写同规则）中 base 的解析：
 
-| 语法 | kvspace 层 |
-|------|-----------|
-| `obj.prop` | `at(obj, "prop")` → `Get(obj., ["prop"])` |
-| `obj.*key` | `at(obj, key)` → key 变量值作为字段名 |
-| `a[i]` | `at(a, i)` → 整数下标作为字段名 |
+1. **按值解引用**：base 持有非空字符串值（路径指针）→ 成员键 = `值(base)·name`。如 `"/n0" -> p` 后 `p·next` 解析为 `/n0·next`。
+2. **按名回退**：base 无值（或非字符串）→ 成员键 = `解析(base)·name`，`解析()` 帧感知：裸名 → `帧根/base`，`/` 开头 → 直通。
 
-**成员分隔符**：`keytree.Member(base, name)` = `base + "." + name`。
+该规则让"局部结构体"与"指针解引用"共用一套语法：结构体的 base 保持无值（按名），指针变量存路径字符串（触发按值）。
 
-### 成员解析规则：按值优先，按名回退
+```kv
+/n1:object = {}            # 跨函数共享数据放绝对路径
+/n1·val = 1; /n1·next = "/n2"
+"/n1" -> p; p·val -> v     # 引号=路径串（指针），按值解引用
+```
 
-表达式 `base.名`（读写两侧同规则）中 base 的解析：
+## 数组元素读写（compact 形态）
 
-1. **按值解引用**：base 持有非空字符串值（路径指针）→ 成员键 = `值(base).名`。如 `"/n0" -> p` 后 `p.next` → `/n0.next`。
-2. **按名回退**：base 无值（或非字符串）→ 成员键 = `解析(base).名`，其中 `解析()` 为帧感知：裸名 → `帧根/base`，`/` 开头 → 直通。
+数组有两种存储形态：**compact**（`[...]` 字面量，元素连续打包进单个 XValue，head kind=元素类型）与 **stringkeymap**（`{...}` 字面量，散 key，每元素落 `base·i` 独立子 key、head kind=`stringkeymap`）。下标 `a[i]` / `xv·at` / `xv·set` 用于 **compact 形态**；stringkeymap 形态用 `for-in` / `kv·get` 遍历访问。compact 形态：
 
-该规则使"局部 struct"与"指针解引用"共用一套语法：键族的 base 永不赋值（保持按名），指针变量存路径字符串（触发按值）。
+```kv
+a:[]int64 = [7, 2, 9]
+a[1] -> e                  # 2（下标读，layout desugar 为 kv·get）
+a[2] = 99                  # 下标写，a = [7, 2, 99]
+xv·at(a, 1) -> e           # 显式读，等价
+xv·set(a, 2, 99) -> a      # 显式写，等价
+```
+
+下标写用赋值式 `a[i] = v`；`->` 形式的写槽不能带下标（`v -> a[i]` 被 layout 拒绝），改用 `a[i] = v` 或 `xv·set`。
 """ -> /lib/kvlang/deepdive/runtime/02_member_access_and_data_structures
 }

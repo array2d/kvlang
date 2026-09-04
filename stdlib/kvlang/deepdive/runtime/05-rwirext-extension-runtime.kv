@@ -12,16 +12,16 @@ kvlang runtime 是**中央调度 runtime**，默认执行全部 native rwir / rw
 
 | 类别 | rwir 示例 | 扩展运行时 |
 |------|----------|-----------|
-| 计算委托 | `tensor.matmul(a,b) -> c` | op-gpu |
-| API 封装 | `llm.chat(prompt) -> resp` | llm worker |
-| Agent 封装 | `agent.search(q) -> r` | sub-agent |
+| 计算委托 | `tensor·matmul(a,b) -> c` | op-gpu |
+| API 封装 | `llm·chat(prompt) -> resp` | llm worker |
+| Agent 封装 | `agent·search(q) -> r` | sub-agent |
 
 **核心公理**：
 
 1. **rwir 自描述**：opcode + 读写参已含执行所需全部信息。
 2. **注册即签名**：扩展运行时写 `/lib/<opcode>`（kind=`defrwir`，含签名），不再有 `/sys/`。
 3. **批量执行**：扩展运行时连续执行己方 rwir 到非己方指令，把最终 PC 写回 `/vthread/<vtid>/pc`。
-4. **被动消费**：扩展运行时只监控己方 `/lib/<opcode>/.vids` 队列。
+4. **被动消费**：扩展运行时只监控己方 `/lib/<opcode>/vids` 队列。
 
 ## 二、注册与发现
 
@@ -32,7 +32,7 @@ kvlang runtime 是**中央调度 runtime**，默认执行全部 native rwir / rw
 定义体格式 `[nr:u16 LE][nw:u16 LE][读参+写参 kindexpr，"\n" 连接]`（详见 [[runtime篇-07-签名类型表达式]] §八）：
 
 ```
-/lib/json.to  → defrwir(nr=1, nw=1, "char/utf8\n[]char/utf8")
+/lib/json·to  → defrwir(nr=1, nw=1, "char/utf8\n[]char/utf8")
 /lib/print    → defrwir(nr=1, nw=0, "any...")
 ```
 
@@ -40,9 +40,9 @@ kvlang runtime 是**中央调度 runtime**，默认执行全部 native rwir / rw
 
 ### 全局标记
 
-`kvlang_rwirextRegister` 标记裸 opcode（如 `print`/`input`）在 layout 阶段不被补 `pkg.` 前缀。dotted opcode（`json.to`）本就不被补前缀。
+`kvlang_rwirextRegister` 标记裸 opcode（如 `print`/`input`）在 layout 阶段不被补 `pkg·` 前缀。带 `·` 的限定 opcode（`json·to`）本就不被补前缀。
 
-term 在**进程启动时**注册全局：与中央 runtime 同进程，`vet`/`format` 也会 layout 用户代码，若不在启动期注册，裸 opcode 会被补 `pkg.` 前缀。
+term 在**进程启动时**注册全局：与中央 runtime 同进程，`vet`/`format` 也会 layout 用户代码，若不在启动期注册，裸 opcode 会被补 `pkg·` 前缀。
 
 ### 幂等重注册
 
@@ -101,9 +101,9 @@ Rust runtime（runtime-rs）中，就地 rwir（print/json/http）直接在 `dri
 
 | | term | json |
 |--|------|------|
-| op | print/println/cerr/input | json.to/json.from |
+| op | print/println/cerr/input | json·to/json·from |
 | 进程 | 与中央 runtime 同进程 | 独立进程 |
-| opcode | 裸名（启动期注册全局） | dotted（`json.to`） |
+| opcode | 裸名（启动期注册全局） | 带 `·` 限定（`json·to`） |
 
 两者结构统一：`kvlang_rwirextRegister` + `Serve` 循环 + `exec` 分发。livebyte/op-gpu 扩展照此模板。
 

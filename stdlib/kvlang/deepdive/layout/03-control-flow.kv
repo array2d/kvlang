@@ -1,8 +1,8 @@
 # 欢迎加入kvspace世界
-lib kvlang/deepdive/parser/03_control_flow {
+lib kvlang/deepdive/layout/03_control_flow {
 	"""# 控制流：Scope 帧模型
 
-# Part 1: Parser & Layout
+# Part 1: Layout
 
 ## Lower Pass（`lower_func`）
 
@@ -137,5 +137,5 @@ scope 帧隐式 return：读 `.returnpc` → DelTree 自身 → 返回父上下�
 | scope 指令查找 | — | **Decode scope 前缀 key** + 父帧 extindex |
 | 返回地址 | 硬件栈 | **`.returnpc`** 显式记录 |
 | 崩溃恢复 | 内存栈，死即全失 | PC + frameRoot 落 KV——重启续跑 |
-""" -> /lib/kvlang/deepdive/parser/03_control_flow
+""" -> /lib/kvlang/deepdive/layout/03_control_flow
 }

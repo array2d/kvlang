@@ -1,5 +1,5 @@
 # 欢迎加入kvspace世界
-lib kvlang/deepdive/total/01_storage_compute_separation_kv_tree {
+lib kvlang/deepdive/01_storage_compute_separation_kv_tree {
 	"""# 存、算、控制流严格分离的 kv 树计算架构
 
 
@@ -57,12 +57,12 @@ kvspace 元存（slot → XValue）
 
 数组元素访问因此只有两条路，二者都保持整存整取：
 
-| 数组形态 | kindexpr | 元素访问 | 是否整存整取 |
-|---------|---------|---------|-------------|
-| compact 数组 | `[10]int32` | 整读一个 XValue，内存内下标 | 是（一次整读） |
-| 散 key 数组 | `[]int32` | 读 `arr[i]` 这个 key 的标量 XValue | 是（每个 key 一个整 XValue） |
+| 存储形态 | head kind | 元素访问 | 是否整存整取 |
+|---------|-----------|---------|-------------|
+| compact 形态 | 元素类型（`int32`，`[10]int32`） | 整读单个 XValue，内存内下标 | 是（一次整读） |
+| stringkeymap 形态（散 key） | `stringkeymap`（`{1,2,3}`） | 每元素是独立子 key `base·i` 的标量 XValue | 是（每个 key 一个整 XValue） |
 
 理由：原子单位从"raw 字节区间"上移到"XValue"，使每次读写均为单 key 的原子替换，消除并发 RMW 竞态，与"元存全局公有"定位一致。
 
-""" -> /lib/kvlang/deepdive/total/01_storage_compute_separation_kv_tree
+""" -> /lib/kvlang/deepdive/01_storage_compute_separation_kv_tree
 }

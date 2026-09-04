@@ -30,13 +30,13 @@ kvspace 的树形 key 与 XValue 的 kindexp 共用一套分隔符语义，每�
 
 ## 索引目录符号
 
-kvspace 路径系统有 `/`（层级目录）与 `·`（成员目录）两个索引目录符号。散 key 数组的元素 key 用 `arr·i` 后缀作为**内部命名**——这是后端存储约定，不是用户语法；用户访问统一写 `arr[i]`（parser desugar 为 `xv·at`）。`[]` 不是索引符号——compact 数组打包在一个 body，无 key 族。
+kvspace 路径系统有 `/`（层级目录）与 `·`（成员目录）两个索引目录符号。stringkeymap 形态（散 key）的元素 key 用 `base·i` 后缀作为**内部命名**——后端存储约定，非用户语法；遍历经 `for-in`/`kv·get`。compact 形态无子 key——元素打包在单个 body，`arr[i]` desugar 为 `xv·at` 在 body 内定位。
 
 | 符号 | 位置 | 语义 |
 |------|------|------|
 | `/` | 后缀 | 层级目录 |
 | `·` | 后缀 | 成员目录 |
-| `·i` | 内部后缀 | 散 key 数组元素 key（存储层，`arr·0`, `arr·1` …） |
+| `·i` | 内部后缀 | stringkeymap 形态元素 key（存储层，`arr·0`, `arr·1` …） |
 
 ## kind 与 kindexp 二分
 
@@ -63,30 +63,29 @@ kind    ::= uint8 | int8 | int16 | uint16 | int32 | uint32 | int64 | uint64
          |  object | stringkeymap | index | extindex | rwir | rwfunc | scope
 ```
 
-## `[]`：一种访问语法，两种存储形态
+## 「数组」的两种存储形态：compact 与 stringkeymap
 
-| 写法 | 存储形态 | 元素位置 | XValue 数 |
-|------|---------|---------|----------|
-| `int32` | 标量 | — | 1 |
-| `[10]int32` | **compact**（定长） | 连续打包在一个 body | **1** |
-| `[]int32 = [1,2,3]` | **compact**（字面量定长） | 连续打包在一个 body | **1** |
-| `[]int32`（裸声明） | **散 key**（变长） | `arr·0`… 各自 key | N+1 |
-| `[256,256]uint8` | compact 多维数组 | 连续打包在一个 body | **1** |
+计算机理论中的数组（含多维数组）在 kvlang 有两种物理存储形态，落盘为不同 kind：
 
-- **compact**：`[N]T` 或字面量初始化——元素连续打包在一个 XValue，`raw_len = ∏dims × ElemSize`。对齐 C `int[10]`、Go `[10]int`、Rust `[i32;10]`。
-- **散 key**：裸声明 `[]T` 或 `array·append`/`array·slice` 触发——元素分散在 `arr·0..arr·N-1` 各 key。
+| 形态 | head kind | 触发写法 | 元素位置 | XValue 数 |
+|------|-----------|---------|---------|----------|
+| **compact 形态** | 元素 kind（`int64`…） | `[1,2,3]`、`[N]T`、`[d0,d1]T` | 连续打包进**单个 XValue** 的 body | **1** |
+| **stringkeymap 形态**（散 key） | `stringkeymap` | `{v0,v1,…}`、`array·append`/`slice`/`scatter` | 每元素落 `base·0`、`base·1`… **独立 key** | N+1 |
 
-## 数组字面量：`[...]` 与 `{...}`（括号种类即形态）
+- **compact 形态**：元素连续打包进一个 XValue，`raw_len = ∏dims × ElemSize`，head 的 kind **即元素类型**。对齐 C `int[10]`、Go `[10]int`、Rust `[i32;10]`。多维 `[256,256]uint8` = `ndim=2`，即 **ndarray/tensor** 连续布局（与 op-gpu 对齐）。要求元素定长同类型——含变长字符串字面量的 `[...]` 在 layout 阶段报错。支持 `arr[i]`/`xv·at`/`ndarray·numel/dim/shape` 随机访问，可零拷贝整块读。
+- **stringkeymap 形态**：head kind=`stringkeymap`、`ndim=1`、`dims=[n]`，每个元素是独立子 key `base·i`（`·` 内部后缀，见上）。变长、可增长、允许变长元素——**字符串数组、可追加数组走这里**。`array·append`/`array·slice` 作用于 compact 数组时会先自动转成 stringkeymap 形态（见「转换与变长」）。
+
+## 字面量括号即形态：`[...]` 与 `{...}`
 
 | 字面量 | 形态 | 约束 |
 |--------|------|------|
-| `[1, 2, 3]` | **compact** | 元素须定长（同 kind、固定字节宽）；含变长字符串成员时 layout 阶段报错 |
-| `{1, 2, 3}` | **散 key** | 变长/可增长；**字符串数组必须走这里** |
-| `{k = v; ...}` | object/stringkeymap | 靠有无 `=` 键值对与散 key 数组区分 |
+| `[1, 2, 3]` | **compact**（kind=元素类型） | 元素须定长同 kind、固定字节宽；含变长字符串成员时 layout 阶段报错 |
+| `{1, 2, 3}` / `{"a", "bb"}` | **stringkeymap**（散 key） | 变长/可增长；**字符串数组必须走这里** |
+| `{k = v; ...}` | object / stringkeymap（map） | 靠 `=` 键值对与散 key 数组区分；空 `{}` 须带类型标注 |
 
-- **为何字符串禁入 `[...]`**：compact 把元素连续打包，要求定长；变长字符串无法定长打包，`layout 阶段报错`。
+- **为何字符串禁入 `[...]`**：compact 要求元素定长连续打包，变长字符串无法定长打包，故 layout 阶段报错，改用 `{...}`。
 - **散 key 字面量位置约束**：`{...}` 只允许作赋值右值 `x = {...}` 或 for-in 源 `for (s in {...})`。
-- **已知限制**：`{...}` 字面量当前仅经 `for-in` 遍历验证；`len`/`arr[i]` 随机访问尚未打通。需 `len`/随机访问的数值数组请用 compact `[...]`。
+- **随机访问**：compact 形态支持 `arr[i]`/`xv·at`；stringkeymap 形态目前经 `for-in` 或 `kv·get`/`kv·list` 遍历访问。
 
 ## `@`：扩展存储句柄
 
@@ -104,7 +103,7 @@ kind    ::= uint8 | int8 | int16 | uint16 | int32 | uint32 | int64 | uint64
 
 ```
 XValue      =  XValueHead + body
-XValueHead  =  [1B kind_len][N B kind][1B ref][1B arr_flag][1B ndim][ndim×4B dims LE][4B raw_len LE]
+XValueHead  =  [1B kind_len][N B kind][1B ref][1B ndim][ndim×4B dims LE][4B raw_len LE]
 body        =  [M B raw]        M = raw_len，offset = HeadLen()
 ```
 
@@ -115,36 +114,38 @@ body        =  [M B raw]        M = raw_len，offset = HeadLen()
 | `kind_len` | 1B | kind 字符串字节数 |
 | `kind` | N B | 基础类型叶子（明文字符串） |
 | `ref` | 1B | 0=内联 1=`*`软链接 2=`@`扩展句柄 |
-| `arr_flag` | 1B | 0=标量 1=compact`[]` 2=散 key |
-| `ndim` | 1B | 0=变长（无固定维），N=定长 N 维 |
+| `ndim` | 1B | 0=标量，≥1=数组维数 |
 | `dims` | ndim×4B | 各维长度 LE |
 | `raw_len` | 4B | body 字节数 LE |
 
-`HeadLen() = 8 + kind_len + ndim*4`；派生字段：`isptr=(ref==1)`、`isext=(ref==2)`、`arraylength = ∏dims`（定长）。
+`HeadLen() = 7 + kind_len + ndim*4`；派生字段：`isptr=(ref==1)`、`isext=(ref==2)`、`arraylength = ∏dims`。
+
+**形态由 `kind` 与 `ndim` 表达，无独立 flag**：compact 形态 head 的 kind 是元素类型（`int32`…）、`ndim≥1`；stringkeymap 形态 head 的 kind 是 `stringkeymap`、`ndim=1`、body 只记形状而元素散落子 key；标量 `ndim=0`。
 
 **kindexp 字符串 ↔ 二进制 head 的映射**：
 
-| kindexp 字符串 | ref | arr_flag | ndim | dims | kind |
-|---------------|-----|----------|------|------|------|
-| `*[]int32` | 1 | 1 | 0 | — | `int32` |
-| `[10]int32` | 0 | 1 | 1 | [10] | `int32` |
-| `@[256,256]uint8` | 2 | 1 | 2 | [256,256] | `uint8` |
-| `int32` | 0 | 0 | 0 | — | `int32` |
+| kindexp 字符串 | ref | ndim | dims | kind |
+|---------------|-----|------|------|------|
+| `int32` | 0 | 0 | — | `int32` |
+| `[10]int32` | 0 | 1 | [10] | `int32` |
+| `[256,256]uint8` | 0 | 2 | [256,256] | `uint8` |
+| `*[]int32` | 1 | 1 | — | `int32` |
+| `@[256,256]uint8` | 2 | 2 | [256,256] | `uint8` |
 
 ## 转换与变长：`array·scatter` / `array·compact` / `array·append` / `array·slice`
 
 | rwir | 方向 | 语义 |
 |------|------|------|
-| `array·scatter(arr) -> dst` | compact → 散 key | 连续数组 `arr` 拆成 `dst·0..dst·N-1` 标量 key，不动 `arr` |
-| `array·compact(arr) -> dst` | 散 key → compact | 读 `arr·0..arr·N-1` 打包成连续数组 `dst`，不动 `arr` |
-| `array·append(arr, elem) -> arr` | 变长 +1 | 追加 `elem`；若 `arr` 为 compact 先自动 scatter |
-| `array·slice(arr, lo, hi) -> arr` | 变长截取 | 切片 `arr[lo:hi]`；若 `arr` 为 compact 先自动 scatter |
+| `array·scatter(arr) -> dst` | compact → stringkeymap | 连续数组 `arr` 拆成 `dst·0..dst·N-1` 标量 key，不动 `arr` |
+| `array·compact(arr) -> dst` | stringkeymap → compact | 读 `arr·0..arr·N-1` 打包成连续数组 `dst`，不动 `arr` |
+| `array·append(arr, elem) -> arr` | 变长 +1 | 追加 `elem`；若 `arr` 为 compact 先自动 scatter 成 stringkeymap |
+| `array·slice(arr, lo, hi) -> arr` | 变长截取 | 切片 `arr[lo:hi]`；若 `arr` 为 compact 先自动 scatter 成 stringkeymap |
 
 ## 待定项
 
-- 散 key 数组 arraykey 描述符的 body schema（shape/元素类型/稀疏索引）细化。
-- 连续多维 `[256,256]uint8` 的 row-major 排布约定（与 op-gpu tensor 连续布局对齐）。
-- 散 key 内部 key 约定统一：`for-in` 走成员式 `base·i`，而 `len`/`at` 走不同内部路径——两者不互通，需收敛为单一约定后，`{...}` 才能同时支持遍历与随机访问。
+- stringkeymap 形态 body schema（shape/元素类型/稀疏索引）细化。
+- compact 多维 `[256,256]uint8` 的 row-major 排布约定（与 op-gpu tensor 连续布局对齐）。
+- stringkeymap 形态随机访问：元素散落 `base·i` 子 key，`for-in`/`kv·get` 可遍历，但 `arr[i]`/`ndarray·numel` 随机访问尚未打通；需随机访问的数值数组用 compact 形态。
 - 扩展存储句柄 body 的位置 schema（device 枚举、shm_name/offset、fd、GPU ptr 的统一编码）。
 """ -> /lib/kvlang/deepdive/kvspace/05_key_system_and_array_access
 }

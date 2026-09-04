@@ -76,6 +76,6 @@ kvspaceNewPtr / NewChar / NewBool / NewInt64 / NewFloat64
 
 Go runtime 为 136/136 baseline（`goheap://` 进程内，无 RTT/文件 I/O）。
 
-fs 的 `inline.kv` 失败源于 fs 后端把 `.`（成员分隔）编码为 `./`（目录边界），dict 成员呈嵌套结构（`/lib/math./init`），而 redis/go 后端是扁平结构（`/lib/math.init`）。属 fs 后端 `.` 编码与扁平语义的差异，非执行语义 bug。
+**后端存储布局差异（非语义 bug）**：fs 后端（`kvspace-durable/src/fs`）把成员分隔符 `·`（OBJ_SEP）编码为 `·/`——尾中点目录 + `/` 目录边界，故限定名 `/lib/math·sum` 在 fs 上呈嵌套目录 `lib/math·/sum`，而 redis/shm 后端存为扁平单键 `/lib/math·sum`。读写经对称编解码还原（`·/`↔`·`），三后端语义一致。
 """ -> /lib/kvlang/deepdive/runtime/06_c_runtime_and_backend_abstraction
 }

@@ -1,5 +1,5 @@
 # 欢迎加入kvspace世界
-lib kvlang/deepdive/parser/02_functions {
+lib kvlang/deepdive/layout/02_functions {
 	"""# 函数
 
 > 签名参数/返回值的 `type` 用签名类型表达式（并集 `A|B`、通配 `any`、高维 shape `[2,3]`、动态维 `?`），见 `grammar.bnf`。
@@ -44,10 +44,10 @@ rwfunc sum(arr) -> (acc:int64) { acc + arr[0] -> acc }
 
 **调用时**：同变量可同时出现在读槽和写槽——`inc(x) -> x` 合法，HandleCall 对两者独立解析，不冲突。
 
-### Parser 写槽校验（`collect_write_list`）
+### layout 写槽校验（`collect_write_list`）
 
 - 字面量写槽（数字/引号串开头）→ warn「unexpected token in write slot position」
 - 写槽后紧跟 `(` → warn「function call on same line as write slot」
 - 合法写槽：裸名、`/abs`、`base·名`
-""" -> /lib/kvlang/deepdive/parser/02_functions
+""" -> /lib/kvlang/deepdive/layout/02_functions
 }
