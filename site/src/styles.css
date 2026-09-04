@@ -130,6 +130,28 @@ body {
   letter-spacing: 0.04em;
   margin: 10px 0 4px;
 }
+summary.dir-name {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+summary.dir-name::-webkit-details-marker {
+  display: none;
+}
+summary.dir-name::before {
+  content: "▸";
+  display: inline-block;
+  width: 1em;
+  font-size: 9px;
+  vertical-align: middle;
+  transition: transform 0.15s ease;
+}
+details[open] > summary.dir-name::before {
+  transform: rotate(90deg);
+}
+summary.dir-name:hover {
+  color: var(--accent);
+}
 .file a {
   display: block;
   padding: 5px 10px;

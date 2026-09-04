@@ -26,7 +26,7 @@ function inline(s: string): string {
     .join("");
 }
 
-export function renderMarkdown(src: string): string {
+export function renderMarkdown(src: string, breaks = false): string {
   const lines = src.split("\n");
   const out: string[] = [];
   let i = 0;
@@ -106,7 +106,10 @@ export function renderMarkdown(src: string): string {
       para.push(lines[i]);
       i++;
     }
-    out.push(`<p>${inline(para.join(" "))}</p>`);
+    const body = breaks
+      ? para.map((l) => inline(l)).join("<br>")
+      : inline(para.join(" "));
+    out.push(`<p>${body}</p>`);
   }
 
   closeList();

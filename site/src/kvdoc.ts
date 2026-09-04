@@ -18,7 +18,7 @@ function block(kind: Kind, text: string): string {
     .split("\n")
     .map((l) => l.replace(/^\s*#\s?/, ""))
     .join("\n");
-  return `<div class="md doc-comment">${renderMarkdown(stripped)}</div>`;
+  return `<div class="md doc-comment">${renderMarkdown(stripped, true)}</div>`;
 }
 
 export function renderKvDoc(src: string): string {
