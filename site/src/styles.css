@@ -226,6 +226,29 @@ code.inline {
   font-size: 0.9em;
 }
 
+.table-wrap {
+  overflow-x: auto;
+  margin: 14px 0;
+}
+.md table {
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+.md th,
+.md td {
+  border: 1px solid var(--border);
+  padding: 6px 11px;
+  text-align: left;
+  vertical-align: top;
+}
+.md thead th {
+  background: var(--bg-alt);
+  font-weight: 600;
+}
+.md tbody tr:nth-child(even) {
+  background: var(--bg-alt);
+}
+
 .tok-comment {
   color: var(--tok-comment);
   font-style: italic;

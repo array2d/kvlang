@@ -92,6 +92,38 @@ export function renderMarkdown(src: string, breaks = false): string {
       continue;
     }
 
+    // 表格（GFM：表头行 + |---|---| 分隔行）
+    if (
+      /\|/.test(line) &&
+      i + 1 < lines.length &&
+      /\|/.test(lines[i + 1]) &&
+      /^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$/.test(lines[i + 1])
+    ) {
+      closeList();
+      const cells = (r: string) =>
+        r
+          .trim()
+          .replace(/^\|/, "")
+          .replace(/\|$/, "")
+          .split("|")
+          .map((c) => c.trim());
+      const header = cells(line);
+      i += 2;
+      const rows: string[][] = [];
+      while (i < lines.length && /\|/.test(lines[i]) && !/^\s*$/.test(lines[i])) {
+        rows.push(cells(lines[i]));
+        i++;
+      }
+      const thead = `<tr>${header.map((c) => `<th>${inline(c)}</th>`).join("")}</tr>`;
+      const tbody = rows
+        .map((r) => `<tr>${r.map((c) => `<td>${inline(c)}</td>`).join("")}</tr>`)
+        .join("");
+      out.push(
+        `<div class="table-wrap"><table><thead>${thead}</thead><tbody>${tbody}</tbody></table></div>`,
+      );
+      continue;
+    }
+
     // 段落（合并连续非空、非特殊行）
     closeList();
     const para: string[] = [line];
