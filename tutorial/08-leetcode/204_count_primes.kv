@@ -1,19 +1,19 @@
-# 204: Count Primes — 埃氏筛计数 n 以内质数
-# 来源: LeetCode #204
-# 期望输出:
-#   4
+// 204: Count Primes — 埃氏筛计数 n 以内质数
+// 来源: LeetCode #204
+// 期望输出:
+//   4
 rwfunc count_primes(n:int64) -> () {
-	count = 0  # = 等价于 <-
+	count = 0  // = 等价于 <-
 	2 -> i
 	while (i < n) {
 		is_p <- true
-		d = 2  # = 等价于 <-
+		d = 2  // = 等价于 <-
 		while (d < i) {
 			i % d -> rem
 			div <- rem == 0
 
 			if (div) {
-				is_p = false  # = 等价于 <-
+				is_p = false  // = 等价于 <-
 				i -> d
 			} else {
 				d <- d + 1
@@ -21,7 +21,7 @@ rwfunc count_primes(n:int64) -> () {
 		}
 
 		if (is_p) {
-			count = count + 1  # = 等价于 <-
+			count = count + 1  // = 等价于 <-
 		}
 
 		i + 1 -> i

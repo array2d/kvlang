@@ -1,22 +1,22 @@
-# 007: Reverse Integer
-# 来源: LeetCode #7
-# 期望输出:
-#   321
-#   -321
+// 007: Reverse Integer
+// 来源: LeetCode #7
+// 期望输出:
+//   321
+//   -321
 rwfunc reverse(x:int64) -> (result:int64) {
-	neg = x < 0  # = 等价于 <-
+	neg = x < 0  // = 等价于 <-
 	x -> n
 
 	if (neg) {
 		n <- -x
 	}
 
-	rev = 0  # = 等价于 <-
+	rev = 0  // = 等价于 <-
 	while (n > 0) {
 		rev × 10 -> r
 		rev × 10 -> r_m
 		d <- n % 10
-		rev = r + d  # = 等价于 <-
+		rev = r + d  // = 等价于 <-
 		n ÷ 10 -> n
 		n ÷ 10 -> n_m
 	}
@@ -24,7 +24,7 @@ rwfunc reverse(x:int64) -> (result:int64) {
 	if (neg) {
 		result <- -rev
 	} else {
-		result = rev  # = 等价于 <-
+		result = rev  // = 等价于 <-
 	}
 }
 

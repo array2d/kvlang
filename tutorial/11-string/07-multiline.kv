@@ -1,16 +1,22 @@
-# 跨行字符串："""..."""（对标 Python，跨行 + 转义）与 `...`（对标 Go，跨行 + 零转义）
-# 期望输出:
-#   line1
-#   line2
-#   one
-#   two
-#   raw\nliteral
+// 字符串三形式（对齐 Rust）：
+//   "..."      转义串，\n \t 等转义生效，可跨行
+//   r"..."     原始串，零转义
+//   r#"..."#   原始串带井号栏，内容可含 "
+// 期望输出:
+//   line1
+//   line2
+//   one
+//   two
+//   raw\nliteral
+//   he said "hi"
 rwfunc test() -> () {
-	s <- """line1
-line2"""
+	s <- "line1
+line2"
 	println(s)
-	t <- """one\ntwo"""
+	t <- "one\ntwo"
 	println(t)
-	r <- `raw\nliteral`
+	r <- r"raw\nliteral"
 	println(r)
+	q <- r#"he said "hi""#
+	println(q)
 }

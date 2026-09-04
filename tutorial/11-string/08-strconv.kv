@@ -1,11 +1,11 @@
-# strconv：整数 ↔ 字符串（对齐 Go strconv，base 2..36）
-# formatint(有符号)/formatuint(无符号) -> []char/utf32；parseint -> int64、parseuint -> uint64
-# 期望输出:
-#   ff
-#   11111111
-#   -42
-#   255
-#   5
+// strconv：整数 ↔ 字符串（对齐 Go strconv，base 2..36）
+// formatint(有符号)/formatuint(无符号) -> []char/utf32；parseint -> int64、parseuint -> uint64
+// 期望输出:
+//   ff
+//   11111111
+//   -42
+//   255
+//   5
 rwfunc test() -> () {
 	string·formatint(255, 16) -> hex
 	println(hex)

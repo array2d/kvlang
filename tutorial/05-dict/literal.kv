@@ -1,9 +1,9 @@
-# literal: 字典字面量与成员访问
-# 语义: { k=v; ... } 创建 dict 目录；base·key 成员访问；has 检查存在性
-# 期望输出:
-#   h·x = 1
-#   h·z = 42
-#   has x: true
+// literal: 字典字面量与成员访问
+// 语义: { k=v; ... } 创建 dict 目录；base·key 成员访问；has 检查存在性
+// 期望输出:
+//   h·x = 1
+//   h·z = 42
+//   has x: true
 rwfunc test() -> () {
 	h = {x=1; y=2}
 	h·x -> v

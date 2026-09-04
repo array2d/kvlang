@@ -1,17 +1,17 @@
-# 242: Valid Anagram — dict 字符计数（动态键读写 h·*c，用 has 检存在）
-# 来源: LeetCode #242
-# 期望输出:
-#   true
-#   false
+// 242: Valid Anagram — dict 字符计数（动态键读写 h·*c，用 has 检存在）
+// 来源: LeetCode #242
+// 期望输出:
+//   true
+//   false
 rwfunc is_anagram(s:[]char/utf32, t:[]char/utf32) -> () {
-	ns = string·len(s)  # = 等价于 <-
+	ns = string·len(s)  // = 等价于 <-
 	nt <- string·len(t)
-	ok = true  # = 等价于 <-
+	ok = true  // = 等价于 <-
 
 	if (ns != nt) {
 		false -> ok
 	} else {
-		h:[]char/utf8·int64 = {}  # = 等价于 <-
+		h:[]char/utf8·int64 = {}  // = 等价于 <-
 		0 -> i
 		while (i < ns) {
 			string·char(s, i) -> c

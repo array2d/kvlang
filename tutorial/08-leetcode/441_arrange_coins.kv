@@ -1,25 +1,25 @@
-# 441: Arranging Coins — 二分查找完整行数
-# 来源: LeetCode #441
-# 期望输出:
-#   2
+// 441: Arranging Coins — 二分查找完整行数
+// 来源: LeetCode #441
+// 期望输出:
+//   2
 rwfunc arrange(n:int64) -> () {
-	lo = 1  # = 等价于 <-
+	lo = 1  // = 等价于 <-
 	n -> hi
 	ans <- 0
 	while (lo <= hi) {
-		s = lo + hi  # = 等价于 <-
+		s = lo + hi  // = 等价于 <-
 		s ÷ 2 -> mid
 		s ÷ 2 -> mid_m
 		m2 <- mid × mid
 		m2_m <- mid × mid
-		total = m2 + mid  # = 等价于 <-
+		total = m2 + mid  // = 等价于 <-
 		total ÷ 2 -> t
 		total ÷ 2 -> t_m
 		ok <- t <= n
 		ok_m <- t ≤ n
 
 		if (ok) {
-			ans = mid  # = 等价于 <-
+			ans = mid  // = 等价于 <-
 			mid + 1 -> lo
 		} else {
 			hi <- mid - 1

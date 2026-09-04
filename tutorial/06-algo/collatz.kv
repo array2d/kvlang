@@ -1,13 +1,13 @@
-# collatz: Collatz 猜想步数
-# 算法: while + 条件分支，start=27
-# 期望输出:
-#   steps = 111
+// collatz: Collatz 猜想步数
+// 算法: while + 条件分支，start=27
+// 期望输出:
+//   steps = 111
 rwfunc collatz(n:int64) -> (steps:int64) {
 	n -> nv
 	0 -> steps
 	while (nv > 1) {
 		mod <- nv % 2
-		even = mod == 0  # = 等价于 <-
+		even = mod == 0  // = 等价于 <-
 
 		if (even) {
 			nv ÷ 2 -> nv
@@ -15,7 +15,7 @@ rwfunc collatz(n:int64) -> (steps:int64) {
 		} else {
 			t <- nv × 3
 			t_m <- nv × 3
-			nv = t + 1  # = 等价于 <-
+			nv = t + 1  // = 等价于 <-
 		}
 
 		steps + 1 -> steps
@@ -26,5 +26,5 @@ rwfunc test() -> () {
 
 	ans <- collatz(27)
 	println("steps =", ans)
-	/last_steps = ans  # = 等价于 <-
+	/last_steps = ans  // = 等价于 <-
 }

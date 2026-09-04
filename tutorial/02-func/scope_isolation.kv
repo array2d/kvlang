@@ -1,17 +1,17 @@
-# scope_isolation: 帧隔离验证 SI-1~SI-3
-# 期望输出:
-#   PASS SI-1a: x=5 returns 5
-#   PASS SI-1b: x=10 returns 10
-#   PASS SI-2a: S= 8 D= 2
-#   PASS SI-2b: S= 15 D= 5
-#   PASS SI-3: chain = 10
+// scope_isolation: 帧隔离验证 SI-1~SI-3
+// 期望输出:
+//   PASS SI-1a: x=5 returns 5
+//   PASS SI-1b: x=10 returns 10
+//   PASS SI-2a: S= 8 D= 2
+//   PASS SI-2b: S= 15 D= 5
+//   PASS SI-3: chain = 10
 rwfunc id_val(x:int64) -> (R:int64) {
 	x + 0 -> R
 }
 
 rwfunc sum_diff(A:int64, B:int64) -> (S:int64, D:int64) {
 	S <- A + B
-	D = A - B  # = 等价于 <-
+	D = A - B  // = 等价于 <-
 }
 
 rwfunc chain_call(a:int64, b:int64) -> (r:int64) {
@@ -21,7 +21,7 @@ rwfunc chain_call(a:int64, b:int64) -> (r:int64) {
 rwfunc test() -> () {
 	v1 <- id_val(5)
 	println("PASS SI-1a: x=5 returns", v1)
-	v2 = id_val(10)  # = 等价于 <-
+	v2 = id_val(10)  // = 等价于 <-
 	println("PASS SI-1b: x=10 returns", v2)
 	sum_diff(5, 3) -> (s1, d1)
 	println("PASS SI-2a: S=", s1, "D=", d1)

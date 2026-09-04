@@ -1,9 +1,9 @@
-# 语义: []char/utf8·[]char/utf32 —— key 侧 []char/utf8 字符串键，value 侧完整 kindexpr。
-#       = Go map[string]string。建 map 用成员赋值 d·key = v；字符串恒 []char/<enc>。
-# 期望输出:
-#   en = hello
-#   zh = 你好
-#   missing: true
+// 语义: []char/utf8·[]char/utf32 —— key 侧 []char/utf8 字符串键，value 侧完整 kindexpr。
+//       = Go map[string]string。建 map 用成员赋值 d·key = v；字符串恒 []char/<enc>。
+// 期望输出:
+//   en = hello
+//   zh = 你好
+//   missing: true
 rwfunc lookup(dict:[]char/utf8·[]char/utf32, k:[]char/utf32) -> (v:[]char/utf32) {
 	kv·get(dict, k) -> v
 }

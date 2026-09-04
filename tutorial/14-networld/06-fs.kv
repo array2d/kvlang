@@ -1,10 +1,10 @@
-# networld/fs·size + networld/fs·read + xv·reinterpret：文件 → 字符串
-#   fs·size(p) -> n           取字节大小
-#   fs·read(p, start, off) -> raw   从 start 起读 off 字节，返回 []uint8
-#   xv·reinterpret(raw, "[]char/utf8") -> s   body 字节原样，整个 kindexpr 换成传入的
-# 期望输出:
-#   size= 12
-#   text= hello kvlang
+// networld/fs·size + networld/fs·read + xv·reinterpret：文件 → 字符串
+//   fs·size(p) -> n           取字节大小
+//   fs·read(p, start, off) -> raw   从 start 起读 off 字节，返回 []uint8
+//   xv·reinterpret(raw, "[]char/utf8") -> s   body 字节原样，整个 kindexpr 换成传入的
+// 期望输出:
+//   size= 12
+//   text= hello kvlang
 rwfunc test() -> () {
 	p = "/tmp/kvlangfs_demo.txt"
 	noenv = map()

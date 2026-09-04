@@ -1,28 +1,28 @@
-# 303: Range Sum Query — 前缀和
-# 来源: LeetCode #303
-# 期望输出:
-#   1
-#   -1
+// 303: Range Sum Query — 前缀和
+// 来源: LeetCode #303
+// 期望输出:
+//   1
+//   -1
 rwfunc range_sum() -> () {
 	a:[]int64 <- [-2, 0, 3, -5, 2, -1]
-	n = ndarray·numel(a)  # = 等价于 <-
-	# build prefix sums
+	n = ndarray·numel(a)  // = 等价于 <-
+	// build prefix sums
 	[0, 0, 0, 0, 0, 0] -> p:[]int64
 	s <- a[0]
 	p[0] <- s
-	i = 1  # = 等价于 <-
+	i = 1  // = 等价于 <-
 	while (i < n) {
 		a[i] -> v
 		s <- s + v
 		p[i] <- s
-		i = i + 1  # = 等价于 <-
+		i = i + 1  // = 等价于 <-
 	}
-	# sumRange(0, 2) = p[2]
+	// sumRange(0, 2) = p[2]
 	p[2] -> r1
 	println(r1)
-	# sumRange(2, 5) = p[5] - p[1]
+	// sumRange(2, 5) = p[5] - p[1]
 	t2 <- p[5]
-	t1 = p[1]  # = 等价于 <-
+	t1 = p[1]  // = 等价于 <-
 	t2 - t1 -> r2
 	println(r2)
 }

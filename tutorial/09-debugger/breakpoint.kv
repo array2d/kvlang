@@ -1,7 +1,7 @@
 rwfunc loop(n: int64) -> () {
     1 -> i
     while (i <= n) {
-        debugger()   # 内联断点：执行至此暂停，等待 agent 命令
+        debugger()   // 内联断点：执行至此暂停，等待 agent 命令
         println(i)
         i + 1 -> i
     }

@@ -1,35 +1,35 @@
-# 033: Search in Rotated Sorted Array
-# 算法: 二分查找 + 半区判断
-# 来源: LeetCode #33
-# 期望输出:
-#   4
+// 033: Search in Rotated Sorted Array
+// 算法: 二分查找 + 半区判断
+// 来源: LeetCode #33
+// 期望输出:
+//   4
 rwfunc search() -> () {
 	a:[]int64 <- [4, 5, 6, 7, 0, 1, 2]
-	n = ndarray·numel(a)  # = 等价于 <-
+	n = ndarray·numel(a)  // = 等价于 <-
 	0 -> target
 	lo <- 0
-	hi = n - 1  # = 等价于 <-
+	hi = n - 1  // = 等价于 <-
 	-1 -> result
 	while (lo <= hi) {
 		s <- lo + hi
-		mid = s ÷ 2  # = 等价于 <-
-		mid_m = s ÷ 2  # = 等价于 <-
+		mid = s ÷ 2  // = 等价于 <-
+		mid_m = s ÷ 2  // = 等价于 <-
 		a[mid] -> mv
 		eq <- mv == target
 
 		if (eq) {
-			result = mid  # = 等价于 <-
+			result = mid  // = 等价于 <-
 			hi + 1 -> lo
 		} else {
 			lv <- a[lo]
-			rv = a[hi]  # = 等价于 <-
+			rv = a[hi]  // = 等价于 <-
 			lv <= mv -> left_sorted
 			lv ≤ mv -> left_sorted_m
 
 			if (left_sorted) {
 				t1 <- lv <= target
 				t1_m <- lv ≤ target
-				t2 = target < mv  # = 等价于 <-
+				t2 = target < mv  // = 等价于 <-
 
 				if (t1 && t2) {
 					mid - 1 -> hi
@@ -37,15 +37,15 @@ rwfunc search() -> () {
 					lo <- mid + 1
 				}
 			} else {
-				t3 = mv <= target  # = 等价于 <-
-				t3_m = mv ≤ target  # = 等价于 <-
+				t3 = mv <= target  // = 等价于 <-
+				t3_m = mv ≤ target  // = 等价于 <-
 				target <= rv -> t4
 				target ≤ rv -> t4_m
 
 				if (t3 && t4) {
 					lo <- mid + 1
 				} else {
-					hi = mid - 1  # = 等价于 <-
+					hi = mid - 1  // = 等价于 <-
 				}
 			}
 		}

@@ -1,15 +1,15 @@
-# 050: Pow(x,n) — 快速幂
-# 来源: LeetCode #50
-# 期望输出:
-#   1024.0
+// 050: Pow(x,n) — 快速幂
+// 来源: LeetCode #50
+// 期望输出:
+//   1024.0
 rwfunc my_pow(x:float64, n:int64) -> () {
 	base <- x
-	exp = n  # = 等价于 <-
+	exp = n  // = 等价于 <-
 	1.0 -> result
 	neg <- exp < 0
 
 	if (neg) {
-		exp = -exp  # = 等价于 <-
+		exp = -exp  // = 等价于 <-
 	}
 
 	while (exp > 0) {
@@ -20,8 +20,8 @@ rwfunc my_pow(x:float64, n:int64) -> () {
 			result_m <- result × base
 		}
 
-		base = base × base  # = 等价于 <-
-		base_m = base × base  # = 等价于 <-
+		base = base × base  // = 等价于 <-
+		base_m = base × base  // = 等价于 <-
 		exp ÷ 2 -> exp
 		exp ÷ 2 -> exp_m
 	}

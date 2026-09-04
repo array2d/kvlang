@@ -213,7 +213,7 @@ pub struct Expr {
     pub op: String,      // 算子/函数名（"" = 叶节点）
     pub args: Vec<Expr>, // 操作数（叶节点为空）
     pub val: String,     // 叶节点值
-    pub quote: u8,       // 0=非字符串, '"'=双引号, '`'=反引号
+    pub quote: u8,       // 0=非字符串, '"'=字符串（转义或原始，由 lit 区分）
     pub lit: LitKind,    // 字面量类型（仅叶节点有意义）
 }
 
@@ -248,7 +248,7 @@ pub fn raw_str(v: &str) -> Expr {
         op: String::new(),
         args: Vec::new(),
         val: v.to_string(),
-        quote: b'`',
+        quote: b'"',
         lit: LitKind::LitRawString,
     }
 }
@@ -312,10 +312,10 @@ impl Expr {
     fn string_prec(&self, outer_prec: i32) -> String {
         if self.is_leaf() {
             if self.quote != 0 {
-                if self.quote == b'"' {
-                    return format!("\"{}\"", escape_string(&self.val));
+                if self.lit == LitKind::LitRawString {
+                    return raw_string_lit(&self.val);
                 }
-                return format!("`{}`", self.val);
+                return format!("\"{}\"", escape_string(&self.val));
             }
             return self.val.clone();
         }
@@ -797,6 +797,29 @@ fn escape_string(s: &str) -> String {
         }
     }
     b
+}
+
+/// 把值渲染为 Rust 原始字符串 `r#"..."#`，井号数取最小可行值（保证内容不与闭合定界符冲突）。
+fn raw_string_lit(v: &str) -> String {
+    let bytes = v.as_bytes();
+    let mut n = 0usize;
+    let mut k = 0;
+    while k < bytes.len() {
+        if bytes[k] == b'"' {
+            let mut h = 0;
+            let mut j = k + 1;
+            while j < bytes.len() && bytes[j] == b'#' {
+                h += 1;
+                j += 1;
+            }
+            if h + 1 > n {
+                n = h + 1;
+            }
+        }
+        k += 1;
+    }
+    let hashes = "#".repeat(n);
+    format!("r{hashes}\"{v}\"{hashes}")
 }
 
 fn is_operator_char(c: u8) -> bool {

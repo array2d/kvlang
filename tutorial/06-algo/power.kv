@@ -1,14 +1,14 @@
-# power: 快速幂（循环实现）
-# 算法: 循环 while + 条件更新，计算 2^10 = 1024
-# 期望输出:
-#   result = 1024
+// power: 快速幂（循环实现）
+// 算法: 循环 while + 条件更新，计算 2^10 = 1024
+// 期望输出:
+//   result = 1024
 rwfunc power(base:int64, exp:int64) -> (result:int64) {
-	result = 1  # = 等价于 <-
+	result = 1  // = 等价于 <-
 	0 -> e
 	while (e < exp) {
 		result <- result × base
 		result_m <- result × base
-		e = e + 1  # = 等价于 <-
+		e = e + 1  // = 等价于 <-
 	}
 }
 

@@ -197,7 +197,7 @@ pub fn dump(kv: &mut Kv, lib: &str) -> String {
     let mut out = String::new();
     emit_node(&mut out, &root, "");
     for d in decls {
-        out.push_str("# ");
+        out.push_str("// ");
         out.push_str(&d);
         out.push('\n');
     }
@@ -342,12 +342,12 @@ fn emit_func(out: &mut String, f: &DumpFunc, indent: &str) {
         out.push('\n');
     }
     out.push_str(indent);
-    out.push_str("# ");
+    out.push_str("// ");
     out.push_str(&f.dir);
     out.push('\n');
     for s in &f.slots {
         out.push_str(indent);
-        out.push_str("#   ");
+        out.push_str("//   ");
         out.push_str(s);
         out.push('\n');
     }

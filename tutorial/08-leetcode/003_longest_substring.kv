@@ -1,14 +1,14 @@
-# 003: Longest Substring Without Repeating Characters — 滑动窗口
-# 来源: LeetCode #3
-# 期望输出:
-#   3
-#   1
-#   5
+// 003: Longest Substring Without Repeating Characters — 滑动窗口
+// 来源: LeetCode #3
+// 期望输出:
+//   3
+//   1
+//   5
 rwfunc length_of_longest(s:[]char/utf32) -> (max_len:int64) {
 	n <- string·len(s)
-	last:[]char/utf8·int64 = {}  # = 等价于 <-
-	max_len = 0  # = 等价于 <-
-	left = 0  # = 等价于 <-
+	last:[]char/utf8·int64 = {}  // = 等价于 <-
+	max_len = 0  // = 等价于 <-
+	left = 0  // = 等价于 <-
 	right <- 0
 	while (right < n) {
 		s[right] -> c
@@ -18,7 +18,7 @@ rwfunc length_of_longest(s:[]char/utf32) -> (max_len:int64) {
 			cand <- prev + 1
 			if (cand > left) { left <- cand }
 		}
-		_ = kv·set(last, c, right)  # = 等价于 <-
+		_ = kv·set(last, c, right)  // = 等价于 <-
 		cur <- right - left + 1
 		if (cur > max_len) { cur -> max_len }
 		right + 1 -> right
@@ -26,7 +26,7 @@ rwfunc length_of_longest(s:[]char/utf32) -> (max_len:int64) {
 }
 
 rwfunc test() -> () {
-	r1 = length_of_longest("abcabcbb")  # = 等价于 <-
+	r1 = length_of_longest("abcabcbb")  // = 等价于 <-
 	println(r1)
 	println(length_of_longest("bbbbb"))
 	r3 <- length_of_longest("abcde")

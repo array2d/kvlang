@@ -1,9 +1,9 @@
-# 语义: stringkeymap 一等类型 —— kindexpr 用 `·` 声明 key·value 类型。
-#       []char/utf8·int64 = Go 的 map[string]int64（key 侧恒 []char/<enc> 字符串键）。
-#       建 map 用成员赋值 base·key = v；layout round-trip 类型进 defrwfunc 签名 head。
-# 期望输出:
-#   total = 30
-#   max = 20
+// 语义: stringkeymap 一等类型 —— kindexpr 用 `·` 声明 key·value 类型。
+//       []char/utf8·int64 = Go 的 map[string]int64（key 侧恒 []char/<enc> 字符串键）。
+//       建 map 用成员赋值 base·key = v；layout round-trip 类型进 defrwfunc 签名 head。
+// 期望输出:
+//   total = 30
+//   max = 20
 rwfunc total(m:[]char/utf8·int64) -> (s:int64) {
 	kv·get(m, "a") -> a
 	kv·get(m, "b") -> b

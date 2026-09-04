@@ -1,10 +1,10 @@
-# ❌ 错误：数组字面量放读参位置，函数内写 a[k] <- v 被 fix-027 拒绝。
-# expected:
-#   read param "a" cannot be used as write slot
-# kvlang 铁律：读参只读。要修改数组，必须放写参位置。
-# 正确: rwfunc mutate() -> (a) { array(10,20) -> a; 99 -> a[0]; ... }
+// ❌ 错误：数组字面量放读参位置，函数内写 a[k] <- v 被 fix-027 拒绝。
+// expected:
+//   read param "a" cannot be used as write slot
+// kvlang 铁律：读参只读。要修改数组，必须放写参位置。
+// 正确: rwfunc mutate() -> (a) { array(10,20) -> a; 99 -> a[0]; ... }
 rwfunc mutate(a) -> () {
-    99 -> a[0]   # ❌ a 是读参，a[0] 展开为 kv·set(a,0,99) -> a，写入读参槽被拒绝
+    99 -> a[0]   // ❌ a 是读参，a[0] 展开为 kv·set(a,0,99) -> a，写入读参槽被拒绝
 }
 
 rwfunc test() -> () {

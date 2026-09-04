@@ -1,29 +1,29 @@
-# 014: Longest Common Prefix — 逐字符比较
-# 来源: LeetCode #14
-# 期望输出:
-#   fl
+// 014: Longest Common Prefix — 逐字符比较
+// 来源: LeetCode #14
+// 期望输出:
+//   fl
 rwfunc lcp() -> () {
 	"flower" -> a
 	b <- "flow"
-	c = "flight"  # = 等价于 <-
+	c = "flight"  // = 等价于 <-
 	string·len(a) -> na
 	nb <- string·len(b)
-	nc = string·len(c)  # = 等价于 <-
+	nc = string·len(c)  // = 等价于 <-
 	0 -> i
 	ok <- true
 	while (ok) {
-		ca = i < na  # = 等价于 <-
+		ca = i < na  // = 等价于 <-
 		i < nb -> cb
 		cc <- i < nc
-		all_ok = ca && cb && cc  # = 等价于 <-
+		all_ok = ca && cb && cc  // = 等价于 <-
 
 		if (all_ok) {
 			string·char(a, i) -> va
 			vb <- string·char(b, i)
-			vc = string·char(c, i)  # = 等价于 <-
+			vc = string·char(c, i)  // = 等价于 <-
 			va == vb -> ab
 			bc <- vb == vc
-			match = ab && bc  # = 等价于 <-
+			match = ab && bc  // = 等价于 <-
 
 			if (match) {
 				i + 1 -> i
@@ -31,7 +31,7 @@ rwfunc lcp() -> () {
 				ok <- false
 			}
 		} else {
-			ok = false  # = 等价于 <-
+			ok = false  // = 等价于 <-
 		}
 	}
 	string·slice(a, 0, i) -> ans

@@ -1,8 +1,8 @@
-# 欢迎加入kvspace世界
-# lib http —— 网络抓取标准库。rwir 只有 http·call(method, header, url, body)；
-# get/post/put/del 都是 rwfunc 封装（kv 源码，可寻址/可自改）。
-# 字符串类型恒 []char/utf32（kvlang 字面量默认编码）。header 是 "K: V\nK2: V2" 原文块，
-# 空串 = 无 header；body 空串 = 无请求体。
+// 欢迎加入kvspace世界
+// lib http —— 网络抓取标准库。rwir 只有 http·call(method, header, url, body)；
+// get/post/put/del 都是 rwfunc 封装（kv 源码，可寻址/可自改）。
+// 字符串类型恒 []char/utf32（kvlang 字面量默认编码）。header 是 "K: V\nK2: V2" 原文块，
+// 空串 = 无 header；body 空串 = 无请求体。
 
 lib http {
 	rwfunc get(url:[]char/utf32) -> (resp:[]char/utf32) {

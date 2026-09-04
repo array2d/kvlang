@@ -1,6 +1,6 @@
-# 欢迎加入kvspace世界
+// 欢迎加入kvspace世界
 lib kvlang/deepdive/kvspace/04_system_variables {
-	"""# 系统变量
+	r#"# 系统变量
 
 ## `X/‥var` 影子键
 
@@ -62,5 +62,5 @@ VM 运行时为它管理的对象生成**内置变量（系统变量）**，以 
 1. **零冲突的专属命名空间**。用户成员语法只产生 `·` 中点键，标识符禁止 `‥` 开头；用户侧永远造不出 `‥` 序列。若系统变量也用 `·` 拼接，则需维护保留字表，且动态键注入可能命中系统键。
 2. **生命周期绑定**。`X/‥var` 在 X 的 `/` 子树内，`DelTree(X)` 连带清除全部系统变量；用户键族 `X·*` 由前缀删除管理。两个删除平面各归其主。
 3. **统一公理**。任何 kvspace 对象 X：VM 元数据在 `X/‥名`（引擎保留），帧根 extindex 指向 `/lib/` 代码区，用户数据在 `X·名`（成员），子级在 `X/名`（结构）。
-""" -> /lib/kvlang/deepdive/kvspace/04_system_variables
+"# -> /lib/kvlang/deepdive/kvspace/04_system_variables
 }

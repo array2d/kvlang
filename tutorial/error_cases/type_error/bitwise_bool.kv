@@ -1,6 +1,6 @@
-# expected
-#   TypeError: expected integer, got bool
-# 修复: todo-033 — bool | int 曾是静默 coerce 为 1|3=3
+// expected
+//   TypeError: expected integer, got bool
+// 修复: todo-033 — bool | int 曾是静默 coerce 为 1|3=3
 rwfunc test() -> () {
 	true | int64(3) -> x
 }

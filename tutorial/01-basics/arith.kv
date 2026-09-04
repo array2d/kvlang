@@ -1,14 +1,14 @@
-# 期望输出:
-#   add: 13
-#   sub: 7
-#   mul: 30
-#   mul(×): 30
-#   div: 3
-#   div(÷): 3
-#   mod: 1
-#   pow: 32.0
-#   sqrt: 12.0
-#   sqrt(√): 12.0
+// 期望输出:
+//   add: 13
+//   sub: 7
+//   mul: 30
+//   mul(×): 30
+//   div: 3
+//   div(÷): 3
+//   mod: 1
+//   pow: 32.0
+//   sqrt: 12.0
+//   sqrt(√): 12.0
 rwfunc test() -> () {
 	t0 <- time·now()
 	10 + 3 -> add_r
@@ -17,9 +17,9 @@ rwfunc test() -> () {
 	10 - 3 -> sub_r
 	println("sub:", sub_r)
 
-	mul_r = 10 × 3  # = 等价于 <-
+	mul_r = 10 × 3  // = 等价于 <-
 	println("mul:", mul_r)
-	mul_r2 = 10 × 3  # = 等价于 <-
+	mul_r2 = 10 × 3  // = 等价于 <-
 	println("mul(×):", mul_r2)
 
 	10 ÷ 3 -> div_r
@@ -33,9 +33,9 @@ rwfunc test() -> () {
 	pow_r <- pow(2, 5)
 	println("pow:", pow_r)
 
-	sqrt_r = sqrt(144)  # = 等价于 <-
+	sqrt_r = sqrt(144)  // = 等价于 <-
 	println("sqrt:", sqrt_r)
-	sqrt_r2 = √(144)  # = 等价于 <-
+	sqrt_r2 = √(144)  // = 等价于 <-
 	println("sqrt(√):", sqrt_r2)
 
 	t1 <- time·now()

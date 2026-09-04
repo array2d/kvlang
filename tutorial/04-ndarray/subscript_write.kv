@@ -1,9 +1,9 @@
-# subscript_write: 右箭头下标写 value -> a[i] / a[i,j]（读侧 a[i]→xv·at 的对称，#63）
-# 语义: value -> a[idx...] 脱糖为 xv·set(a, idx..., value) -> a；layout 不判维数，交给 runtime
-# 期望输出:
-#   a = 99 20 77
-#   m[1,0] = 7
-#   m[0,1] = 2
+// subscript_write: 右箭头下标写 value -> a[i] / a[i,j]（读侧 a[i]→xv·at 的对称，#63）
+// 语义: value -> a[idx...] 脱糖为 xv·set(a, idx..., value) -> a；layout 不判维数，交给 runtime
+// 期望输出:
+//   a = 99 20 77
+//   m[1,0] = 7
+//   m[0,1] = 2
 rwfunc test() -> () {
 	a:[]int64 = [10, 20, 30]
 	99 -> a[0]

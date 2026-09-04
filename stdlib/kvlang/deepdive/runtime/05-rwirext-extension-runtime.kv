@@ -1,6 +1,6 @@
-# 欢迎加入kvspace世界
+// 欢迎加入kvspace世界
 lib kvlang/deepdive/runtime/05_rwirext_extension_runtime {
-	"""# runtime篇-05: rwirext 扩展运行时
+	r#"# runtime篇-05: rwirext 扩展运行时
 
 > 状态：与实现同步。代码：`runtime/src/rwirext.c`（C 扩展 ABI）、`runtime-rwirext_example/rust/term`（Rust term）、`runtime-rwirext_example/go/json`（Go json）。C runtime 侧实现见 [[runtime篇-06-C运行时与后端抽象]]。
 
@@ -115,5 +115,5 @@ Rust runtime（runtime-rs）中，就地 rwir（print/json/http）直接在 `dri
 | `/ext/` | 在哪、怎么执行（拓扑） | 存储/计算/通信注册 |
 
 无状态扩展运行时（term/json）只写 `/lib/`；有状态扩展引擎（op-gpu/heap-plat）写 `/lib/` + `/ext/`。handoff 协议一致，后者多一次 `/ext/` 查表定位引擎。
-""" -> /lib/kvlang/deepdive/runtime/05_rwirext_extension_runtime
+"# -> /lib/kvlang/deepdive/runtime/05_rwirext_extension_runtime
 }

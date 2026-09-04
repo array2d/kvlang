@@ -1,9 +1,9 @@
-# 语义: stringkeymap 作返回类型 —— rwfunc 返回槽 head 存 []char/utf8·int64。
-#       = Go map[string]int64。用 dict 字面量 { … } 构造并返回；缺失键得 None。
-# 期望输出:
-#   n = 42
-#   x = 7
-#   miss = true
+// 语义: stringkeymap 作返回类型 —— rwfunc 返回槽 head 存 []char/utf8·int64。
+//       = Go map[string]int64。用 dict 字面量 { … } 构造并返回；缺失键得 None。
+// 期望输出:
+//   n = 42
+//   x = 7
+//   miss = true
 rwfunc build() -> (m:[]char/utf8·int64) {
 	{n=42; x=7} -> m
 }

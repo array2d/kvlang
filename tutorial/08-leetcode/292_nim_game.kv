@@ -1,9 +1,9 @@
-# 292: Nim Game — 巴什博弈，4的倍数必输
-# 来源: LeetCode #292
-# 期望输出:
-#   0
+// 292: Nim Game — 巴什博弈，4的倍数必输
+// 来源: LeetCode #292
+// 期望输出:
+//   0
 rwfunc can_win(n:int64) -> () {
-	rem = n % 4  # = 等价于 <-
+	rem = n % 4  // = 等价于 <-
 	rem == 0 -> lose
 
 	if (lose) {

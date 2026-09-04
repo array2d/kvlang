@@ -1,10 +1,10 @@
-# 期望输出:
-#   sum(1..10) = 55
-#   first div7 in [1,20] = 7
-#   sum odds(1..10) = 25
+// 期望输出:
+//   sum(1..10) = 55
+//   first div7 in [1,20] = 7
+//   sum odds(1..10) = 25
 rwfunc sum_to(n:int64) -> (total:int64) {
 	total <- 0
-	i = 1  # = 等价于 <-
+	i = 1  // = 等价于 <-
 	while (i <= n) {
 		total + i -> total
 		i <- i + 1
@@ -12,17 +12,17 @@ rwfunc sum_to(n:int64) -> (total:int64) {
 }
 
 rwfunc first_div7(n:int64) -> (result:int64) {
-	result = 0  # = 等价于 <-
+	result = 0  // = 等价于 <-
 	1 -> i
 	while (i <= n) {
 		rem <- i % 7
-		hit = rem == 0  # = 等价于 <-
+		hit = rem == 0  // = 等价于 <-
 
 		if (hit) {
 			i -> result
 			i <- n + 1
 		} else {
-			i = i + 1  # = 等价于 <-
+			i = i + 1  // = 等价于 <-
 		}
 	}
 }
@@ -31,14 +31,14 @@ rwfunc sum_odds(n:int64) -> (total:int64) {
 	0 -> total
 	i <- 1
 	while (i <= n) {
-		rem = i % 2  # = 等价于 <-
+		rem = i % 2  // = 等价于 <-
 		rem == 1 -> is_odd
 
 		if (is_odd) {
 			total <- total + i
 		}
 
-		i = i + 1  # = 等价于 <-
+		i = i + 1  // = 等价于 <-
 	}
 }
 
@@ -48,7 +48,7 @@ rwfunc test() -> () {
 	println("sum(1..10) =", a)
 	b <- first_div7(20)
 	println("first div7 in [1,20] =", b)
-	c = sum_odds(10)  # = 等价于 <-
+	c = sum_odds(10)  // = 等价于 <-
 	println("sum odds(1..10) =", c)
 	a + b -> ab
 	/last_sum <- ab + c

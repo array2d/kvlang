@@ -1,6 +1,6 @@
-# 欢迎加入kvspace世界
+// 欢迎加入kvspace世界
 lib kvlang/deepdive/kvspace/02_addressing_model_and_naming {
-	"""# 寻址模型与命名
+	r#"# 寻址模型与命名
 
 ## 寻址模型：KV 路径 vs 内存地址
 
@@ -72,5 +72,5 @@ kvlang 没有 `&` 取址运算符——**代码中对象的变量名，本身就
 全局变量 `/counter` 零成本——绝对指针不经过帧前缀拼接。数组能作为参数传递——`flattenNestedCalls` 将 `[1,2,3]` 展开为临时变量，再将临时变量（持有 XValue）作为普通参数传递。
 
 **参数不得同名（fix-032）**：变量名即指针——同一帧内两个同名参数将指向同一个 kvspace 位置。读参列表内部、写参列表内部、以及读写列表之间均不可同名。`rwfunc f(A:int64) -> (A:int64)` 签名非法。layout 的 `checkParamDup` 阻断源码路径，C runtime 兜底非法签名。
-""" -> /lib/kvlang/deepdive/kvspace/02_addressing_model_and_naming
+"# -> /lib/kvlang/deepdive/kvspace/02_addressing_model_and_naming
 }

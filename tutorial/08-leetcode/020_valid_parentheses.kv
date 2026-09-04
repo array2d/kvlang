@@ -1,66 +1,66 @@
-# 020: Valid Parentheses — 栈匹配括号
-# 来源: LeetCode #20
-# 期望输出:
-#   true
-#   true
-#   false
+// 020: Valid Parentheses — 栈匹配括号
+// 来源: LeetCode #20
+// 期望输出:
+//   true
+//   true
+//   false
 rwfunc is_valid(s:[]char/utf32) -> (ok:int64) {
 	ok <- 1
-	si = -1  # = 等价于 <-
-	n = string·len(s)  # = 等价于 <-
+	si = -1  // = 等价于 <-
+	n = string·len(s)  // = 等价于 <-
 	i <- 0
 	while (i < n) {
-		c = s[i]  # = 等价于 <-
+		c = s[i]  // = 等价于 <-
 		if (c == "(") {
 			si + 1 -> si
 			_ <- kv·set("/tmp/vp", si, 1)
 		}
 		if (c == "[") {
-			si = si + 1  # = 等价于 <-
+			si = si + 1  // = 等价于 <-
 			kv·set("/tmp/vp", si, 2) -> _
 		}
 		if (c == "{") {
 			si + 1 -> si
-			_ = kv·set("/tmp/vp", si, 3)  # = 等价于 <-
+			_ = kv·set("/tmp/vp", si, 3)  // = 等价于 <-
 		}
 		if (c == ")") {
 			if (si < 0) { 0 -> ok ; n -> i }
 			else {
 				/tmp/vp[si] -> top
 				si - 1 -> si
-				if (top != 1) { ok = 0 ; n -> i }  # = 等价于 <-
-				if (top ≠ 1) { ok_m = 0 ; n -> i }  # = 等价于 <-
+				if (top != 1) { ok = 0 ; n -> i }  // = 等价于 <-
+				if (top ≠ 1) { ok_m = 0 ; n -> i }  // = 等价于 <-
 			}
 		}
 		if (c == "]") {
-			if (si < 0) { ok = 0 ; i <- n }  # = 等价于 <-
+			if (si < 0) { ok = 0 ; i <- n }  // = 等价于 <-
 			else {
 				/tmp/vp[si] -> top
 				si - 1 -> si
-				if (top != 2) { 0 -> ok ; n -> i }  # = 等价于 <-
-				if (top ≠ 2) { 0 -> ok_m ; n -> i }  # = 等价于 <-
+				if (top != 2) { 0 -> ok ; n -> i }  // = 等价于 <-
+				if (top ≠ 2) { 0 -> ok_m ; n -> i }  // = 等价于 <-
 			}
 		}
 		if (c == "}") {
-			if (si < 0) { 0 -> ok ; i <- n }  # = 等价于 <-
+			if (si < 0) { 0 -> ok ; i <- n }  // = 等价于 <-
 			else {
 				/tmp/vp[si] -> top
-				si = si - 1  # = 等价于 <-
-				if (top != 3) { ok <- 0 ; i = n }  # = 等价于 <-
-				if (top ≠ 3) { ok_m <- 0 ; i = n }  # = 等价于 <-
+				si = si - 1  // = 等价于 <-
+				if (top != 3) { ok <- 0 ; i = n }  // = 等价于 <-
+				if (top ≠ 3) { ok_m <- 0 ; i = n }  // = 等价于 <-
 			}
 		}
-		i = i + 1  # = 等价于 <-
+		i = i + 1  // = 等价于 <-
 	}
 	if (si >= 0) { 0 -> ok }
 	if (si ≥ 0) { 0 -> ok_m }
 }
 
 rwfunc test() -> () {
-	r1 = is_valid("()")  # = 等价于 <-
+	r1 = is_valid("()")  // = 等价于 <-
 	if (r1 == 1) { println("true") } else { println("false") }
 	r2 <- is_valid("()[]{}")
 	if (r2 == 1) { println("true") } else { println("false") }
-	r3 = is_valid("(]")  # = 等价于 <-
+	r3 = is_valid("(]")  // = 等价于 <-
 	if (r3 == 1) { println("true") } else { println("false") }
 }

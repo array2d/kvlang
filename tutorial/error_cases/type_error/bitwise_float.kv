@@ -1,6 +1,6 @@
-# expected
-#   TypeError: expected integer, got float64
-# 修复: todo-033 — 位运算仅接受整数（五语言一致：C 警告、C++/Rust/Go 编译错误、JS 先 ToInt32 但逻辑无意义）
+// expected
+//   TypeError: expected integer, got float64
+// 修复: todo-033 — 位运算仅接受整数（五语言一致：C 警告、C++/Rust/Go 编译错误、JS 先 ToInt32 但逻辑无意义）
 rwfunc test() -> () {
 	float64(1.0) & int64(3) -> x
 }

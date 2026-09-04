@@ -1,6 +1,6 @@
-# 欢迎加入kvspace世界
+// 欢迎加入kvspace世界
 lib kvlang/deepdive/01_storage_compute_separation_kv_tree {
-	"""# 存、算、控制流严格分离的 kv 树计算架构
+	r#"# 存、算、控制流严格分离的 kv 树计算架构
 
 
 ## 存、算、控制流严格分离
@@ -64,5 +64,5 @@ kvspace 元存（slot → XValue）
 
 理由：原子单位从"raw 字节区间"上移到"XValue"，使每次读写均为单 key 的原子替换，消除并发 RMW 竞态，与"元存全局公有"定位一致。
 
-""" -> /lib/kvlang/deepdive/01_storage_compute_separation_kv_tree
+"# -> /lib/kvlang/deepdive/01_storage_compute_separation_kv_tree
 }

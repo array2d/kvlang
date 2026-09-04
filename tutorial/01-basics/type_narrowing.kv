@@ -1,57 +1,57 @@
-# type_narrowing: 算术结果类型窄化——保留输入位宽，不复全消灭为 int64/float64
-# 修复: fix-034。旧实现 int8+int8→int64、float32+float32→float64、uint8+uint8→int64，
-#       类型信息在第一次算术后即消灭。现在同类型→同类型、混合→向更宽提升。
-# 期望输出:
-#   -128
-#   0
-#   16777216.0
-#   200
-#   12
-#   12.0
-#   1
-#   -9223372036854775807
-#   10000
-#   10000
+// type_narrowing: 算术结果类型窄化——保留输入位宽，不复全消灭为 int64/float64
+// 修复: fix-034。旧实现 int8+int8→int64、float32+float32→float64、uint8+uint8→int64，
+//       类型信息在第一次算术后即消灭。现在同类型→同类型、混合→向更宽提升。
+// 期望输出:
+//   -128
+//   0
+//   16777216.0
+//   200
+//   12
+//   12.0
+//   1
+//   -9223372036854775807
+//   10000
+//   10000
 rwfunc test() -> () {
-        # int8(127) + int8(1) → -128（int8 回绕证明结果仍是 int8。若是 int64 则为 128）
+        // int8(127) + int8(1) → -128（int8 回绕证明结果仍是 int8。若是 int64 则为 128）
         int8(127) + int8(1) -> a
         println(a)
 
-        # uint8(255) + uint8(1) → 0（uint8 回绕证明 unsigned 语义保留）
+        // uint8(255) + uint8(1) → 0（uint8 回绕证明 unsigned 语义保留）
         uint8(255) + uint8(1) -> b
         println(b)
 
-        # float32(16777216) + float32(1) → 16777216（float32 精度不可表示 16777217，证明结果未升级 float64）
+        // float32(16777216) + float32(1) → 16777216（float32 精度不可表示 16777217，证明结果未升级 float64）
         float32(16777216) + float32(1) -> c
         println(c)
 
-        # int8(100) × int16(2) → 200（混合宽度向更宽提升→int16）
+        // int8(100) × int16(2) → 200（混合宽度向更宽提升→int16）
         int8(100) × int16(2) -> d
         int8(100) × int16(2) -> d_m
         println(d_m)
         println(d)
 
-        # int8(120) ÷ int8(10) → 12（整数整除 C/Go/Rust 阵营，结果窄化回 int8）
+        // int8(120) ÷ int8(10) → 12（整数整除 C/Go/Rust 阵营，结果窄化回 int8）
         int8(120) ÷ int8(10) -> e
         int8(120) ÷ int8(10) -> e_m
         println(e_m)
         println(e)
 
-        # int8(120) ÷ float32(10) → 12.0（含浮点→浮除，窄化回 float32）
+        // int8(120) ÷ float32(10) → 12.0（含浮点→浮除，窄化回 float32）
         int8(120) ÷ float32(10) -> f
         int8(120) ÷ float32(10) -> f_m
         println(f_m)
         println(f)
 
-        # int8(7) % int16(3) → 1（模运算窄化回更宽 int16）
+        // int8(7) % int16(3) → 1（模运算窄化回更宽 int16）
         int8(7) % int16(3) -> g
         println(g)
 
-        # neg(int64_max) − 纯整数路径，不经 float64（fix-020+fix-034）
+        // neg(int64_max) − 纯整数路径，不经 float64（fix-020+fix-034）
         neg(9223372036854775807) -> h
         println(h)
 
-        # int32(100) × int32(100) → 10000（同类型→同类型 int32）
+        // int32(100) × int32(100) → 10000（同类型→同类型 int32）
         int32(100) × int32(100) -> i
         int32(100) × int32(100) -> i_m
         println(i_m)

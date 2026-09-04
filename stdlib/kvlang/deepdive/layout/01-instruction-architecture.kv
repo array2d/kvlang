@@ -1,6 +1,6 @@
-# 欢迎加入kvspace世界
+// 欢迎加入kvspace世界
 lib kvlang/deepdive/layout/01_instruction_architecture {
-	"""# Instruction Architecture（指令架构）
+	r#"# Instruction Architecture（指令架构）
 
 ## 指令分类
 
@@ -135,5 +135,5 @@ kvcpu 沿 s1 轴向两侧扩展，直到遇到空 key 停止，参数数量**隐
 | 参数数量 | opcode 内编码 arity | 隐式：扫描到空 key 停止 |
 | 数据流方向 | 单向（操作数 → 结果） | 符号编码（负=读, 正=写） |
 | 可观察性 | 字节不可独立寻址 | 每个槽是独立 KV key，可单独 Get/Watch |
-""" -> /lib/kvlang/deepdive/layout/01_instruction_architecture
+"# -> /lib/kvlang/deepdive/layout/01_instruction_architecture
 }

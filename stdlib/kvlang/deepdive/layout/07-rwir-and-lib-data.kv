@@ -1,6 +1,6 @@
-# 欢迎加入kvspace世界
+// 欢迎加入kvspace世界
 lib kvlang/deepdive/layout/07_rwir_and_lib_data {
-	"""# rwir 与 lib 数据：注册布局
+	r#"# rwir 与 lib 数据：注册布局
 
 > 签名参数/返回值的 `type` 用签名类型表达式（并集 `A|B`、通配 `any`、高维 shape `[2,3]`、动态维 `?`），见 `grammar.bnf`。
 
@@ -82,5 +82,5 @@ rwir myop(A:int64, B:int64) -> (C:int64)
 | `runtime/src/rwirext.c` | `kvlang_rwirextRegister(opcode, nr, nw, sig)` → `/lib/<opcode>` |
 | `runtime/src/kvcpu.c` | execute 循环 `load_def_reads` + `check_read_types` 内联类型匹配 |
 | `runtime/src/type_expr.c` | `kvlang_rwirextTypeValid`（装载校验）+ `kvlang_rwirextTypeMatch`（运行时匹配） |
-""" -> /lib/kvlang/deepdive/layout/07_rwir_and_lib_data
+"# -> /lib/kvlang/deepdive/layout/07_rwir_and_lib_data
 }

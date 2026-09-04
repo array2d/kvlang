@@ -1,23 +1,23 @@
-# 169: Majority Element — Boyer-Moore 投票算法
-# 算法: 计数抵消，多数元素必然存活
-# 来源: LeetCode #169
-# 期望输出:
-#   3
+// 169: Majority Element — Boyer-Moore 投票算法
+// 算法: 计数抵消，多数元素必然存活
+// 来源: LeetCode #169
+// 期望输出:
+//   3
 rwfunc majority() -> () {
-	a:[]int64 = [3, 2, 3]  # = 等价于 <-
+	a:[]int64 = [3, 2, 3]  // = 等价于 <-
 	ndarray·numel(a) -> n
 	candidate <- a[0]
-	count = 1  # = 等价于 <-
+	count = 1  // = 等价于 <-
 	1 -> i
 	while (i < n) {
 		x <- a[i]
-		reset = count == 0  # = 等价于 <-
+		reset = count == 0  // = 等价于 <-
 
 		if (reset) {
 			x -> candidate
 			count <- 1
 		} else {
-			match = x == candidate  # = 等价于 <-
+			match = x == candidate  // = 等价于 <-
 
 			if (match) {
 				count + 1 -> count
@@ -26,7 +26,7 @@ rwfunc majority() -> () {
 			}
 		}
 
-		i = i + 1  # = 等价于 <-
+		i = i + 1  // = 等价于 <-
 	}
 	println(candidate)
 }

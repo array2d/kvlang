@@ -1,14 +1,14 @@
-# 变量名即地址，未赋值即 None
-#
-# 期望输出
-#   before
-#   after
-#   42
+// 变量名即地址，未赋值即 None
+//
+// 期望输出
+//   before
+//   after
+//   42
 rwfunc test() -> () {
   println("before")
-  x -> y       # x 未赋值 → None，y ← None
-  println(y)     # None → 输出空行
+  x -> y       // x 未赋值 → None，y ← None
+  println(y)     // None → 输出空行
   println("after")
-  42 -> x      # 显式赋值
+  42 -> x      // 显式赋值
   println(x)
 }

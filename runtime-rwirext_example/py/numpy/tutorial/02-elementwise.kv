@@ -1,15 +1,15 @@
-# numpy 第二类：elementwise（逐元素）
-# extern: 需 numpy 扩展引擎驱动
-#   python runtime-rwirext_example/py/numpy/numpy.py tutorial/14-numpy/02-elementwise.kv
-# 期望输出:
-#   add: [5.0, 5.0, 5.0, 5.0]
-#   sub: [-3.0, -1.0, 1.0, 3.0]
-#   mul: [4.0, 6.0, 6.0, 4.0]
-#   div: [0.25, 0.6666666666666666, 1.5, 4.0]
-#   maximum: [4.0, 3.0, 3.0, 4.0]
-#   neg: [-1.0, -2.0, -3.0, -4.0]
-#   sqrt: [1.0, 1.4142135623730951, 1.7320508075688772, 2.0]
-#   pow2: [1.0, 4.0, 9.0, 16.0]
+// numpy 第二类：elementwise（逐元素）
+// extern: 需 numpy 扩展引擎驱动
+//   python runtime-rwirext_example/py/numpy/numpy.py tutorial/14-numpy/02-elementwise.kv
+// 期望输出:
+//   add: [5.0, 5.0, 5.0, 5.0]
+//   sub: [-3.0, -1.0, 1.0, 3.0]
+//   mul: [4.0, 6.0, 6.0, 4.0]
+//   div: [0.25, 0.6666666666666666, 1.5, 4.0]
+//   maximum: [4.0, 3.0, 3.0, 4.0]
+//   neg: [-1.0, -2.0, -3.0, -4.0]
+//   sqrt: [1.0, 1.4142135623730951, 1.7320508075688772, 2.0]
+//   pow2: [1.0, 4.0, 9.0, 16.0]
 lib demo {
 	rwfunc main() -> () {
 		a:[]float64 = [1.0, 2.0, 3.0, 4.0]

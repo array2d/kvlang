@@ -27,12 +27,12 @@ def parse_expects(f: Path) -> list[str]:
     with open(f) as fh:
         for line in fh:
             line = line.rstrip("\n")
-            if line.startswith("# expected"):
+            if line.startswith("// expected"):
                 in_block = True
                 continue
             if in_block:
-                if line.startswith("#   ") or line.startswith("# \t"):
-                    p = line[2:].strip()
+                if line.startswith("//   ") or line.startswith("// \t"):
+                    p = line[3:].strip()
                     if p:
                         pats.append(p)
                 else:

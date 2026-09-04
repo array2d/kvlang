@@ -1,32 +1,32 @@
-# 414: Third Maximum Number — 找第三大的数
-# 来源: LeetCode #414
-# 期望输出:
-#   1
+// 414: Third Maximum Number — 找第三大的数
+// 来源: LeetCode #414
+// 期望输出:
+//   1
 rwfunc third_max() -> () {
-	a:[]int64 = [2, 2, 3, 1]  # = 等价于 <-
+	a:[]int64 = [2, 2, 3, 1]  // = 等价于 <-
 	ndarray·numel(a) -> n
-	# track top 3
+	// track top 3
 	first <- 0
-	second = 0  # = 等价于 <-
+	second = 0  // = 等价于 <-
 	0 -> third
 	i <- 0
 	while (i < n) {
-		x = a[i]  # = 等价于 <-
+		x = a[i]  // = 等价于 <-
 		x > first -> gt1
 
 		if (gt1) {
 			third <- second
-			second = first  # = 等价于 <-
+			second = first  // = 等价于 <-
 			x -> first
 		} else {
 			lt1 <- x < first
-			gt2 = x > second  # = 等价于 <-
+			gt2 = x > second  // = 等价于 <-
 
 			if (lt1 && gt2) {
 				second -> third
 				second <- x
 			} else {
-				lt2 = x < second  # = 等价于 <-
+				lt2 = x < second  // = 等价于 <-
 				x > third -> gt3
 
 				if (lt2 && gt3) {
@@ -35,7 +35,7 @@ rwfunc third_max() -> () {
 			}
 		}
 
-		i = i + 1  # = 等价于 <-
+		i = i + 1  // = 等价于 <-
 	}
 	third > 0 -> ok
 

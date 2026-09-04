@@ -1,7 +1,7 @@
-# networld/proc·exec 启动 bash：算术求值，取退出码
-# 期望输出:
-#   bash 42
-#   exit= 0
+// networld/proc·exec 启动 bash：算术求值，取退出码
+// 期望输出:
+//   bash 42
+//   exit= 0
 rwfunc test() -> () {
 	noenv = map()
 	args = {"bash", "-c", "echo bash $((6*7))"}

@@ -1,23 +1,23 @@
-# 125: Valid Palindrome — 双指针判断回文（用数组模拟字符）
-# 来源: LeetCode #125
-# 期望输出:
-#   1
-#   0
-# 用整数数组模拟字符串，1='a', 2='b', etc.
+// 125: Valid Palindrome — 双指针判断回文（用数组模拟字符）
+// 来源: LeetCode #125
+// 期望输出:
+//   1
+//   0
+// 用整数数组模拟字符串，1='a', 2='b', etc.
 rwfunc is_pal() -> () {
-	s:[]int64 = [1, 2, 1]  # = 等价于 <-
+	s:[]int64 = [1, 2, 1]  // = 等价于 <-
 	ndarray·numel(s) -> n
 	l <- 0
-	r = n - 1  # = 等价于 <-
+	r = n - 1  // = 等价于 <-
 	1 -> ok
 	while (l < r) {
 		lc <- s[l]
-		rc = s[r]  # = 等价于 <-
+		rc = s[r]  // = 等价于 <-
 		lc == rc -> match
 
 		if (match) {
 			l <- l + 1
-			r = r - 1  # = 等价于 <-
+			r = r - 1  // = 等价于 <-
 		} else {
 			0 -> ok
 			l <- n
@@ -27,19 +27,19 @@ rwfunc is_pal() -> () {
 }
 
 rwfunc not_pal() -> () {
-	s:[]int64 = [1, 2]  # = 等价于 <-
+	s:[]int64 = [1, 2]  // = 等价于 <-
 	ndarray·numel(s) -> n
 	l <- 0
-	r = n - 1  # = 等价于 <-
+	r = n - 1  // = 等价于 <-
 	1 -> ok
 	while (l < r) {
 		lc <- s[l]
-		rc = s[r]  # = 等价于 <-
+		rc = s[r]  // = 等价于 <-
 		lc == rc -> match
 
 		if (match) {
 			l <- l + 1
-			r = r - 1  # = 等价于 <-
+			r = r - 1  // = 等价于 <-
 		} else {
 			0 -> ok
 			l <- n

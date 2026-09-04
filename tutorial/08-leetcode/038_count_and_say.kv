@@ -1,18 +1,18 @@
-# 038: Count and Say — 报数序列
-# 来源: LeetCode #38
-# 存储：(val, count) 交替排列在数组中
-# 期望输出:
-#   1
-#   11
-#   21
-#   1211
-#   111221
+// 038: Count and Say — 报数序列
+// 来源: LeetCode #38
+// 存储：(val, count) 交替排列在数组中
+// 期望输出:
+//   1
+//   11
+//   21
+//   1211
+//   111221
 rwfunc next_seq(src_len:int64) -> (dst_len:int64) {
-	i = 0  # = 等价于 <-
-	di = 0  # = 等价于 <-
+	i = 0  // = 等价于 <-
+	di = 0  // = 等价于 <-
 	while (i < src_len) {
 		/tmp/s[i] -> cur
-		count = 1  # = 等价于 <-
+		count = 1  // = 等价于 <-
 		j <- i + 1
 		while (j < src_len) {
 			/tmp/s[j] -> v
@@ -28,11 +28,11 @@ rwfunc next_seq(src_len:int64) -> (dst_len:int64) {
 }
 
 rwfunc print_seq_len(seq_len:int64) -> () {
-	i = 0  # = 等价于 <-
+	i = 0  // = 等价于 <-
 	while (i < seq_len) {
 		cnt <- /tmp/s[i]
-		val = /tmp/s[i+1]  # = 等价于 <-
-		k = 0  # = 等价于 <-
+		val = /tmp/s[i+1]  // = 等价于 <-
+		k = 0  // = 等价于 <-
 		while (k < cnt) {
 			print(val)
 			k + 1 -> k
@@ -43,19 +43,19 @@ rwfunc print_seq_len(seq_len:int64) -> () {
 }
 
 rwfunc copy_from_s2_to_s(s2_len:int64) -> () {
-	i = 0  # = 等价于 <-
+	i = 0  // = 等价于 <-
 	while (i < s2_len) {
 		/tmp/s2[i] -> v
-		_ = kv·set("/tmp/s", i, v)  # = 等价于 <-
+		_ = kv·set("/tmp/s", i, v)  // = 等价于 <-
 		i + 1 -> i
 	}
 }
 
 rwfunc count_and_say(N:int64) -> () {
-	_ = kv·set("/tmp/s", 0, 1)   # count=1 of digit 1
+	_ = kv·set("/tmp/s", 0, 1)   // count=1 of digit 1
 	_ = kv·set("/tmp/s", 1, 1)
-	cur_len = 2  # = 等价于 <-
-	round = 1  # = 等价于 <-
+	cur_len = 2  // = 等价于 <-
+	round = 1  // = 等价于 <-
 	while (round < N) {
 		l <- next_seq(cur_len)
 		copy_from_s2_to_s(l)

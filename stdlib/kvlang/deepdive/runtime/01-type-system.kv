@@ -1,6 +1,6 @@
-# 欢迎加入kvspace世界
+// 欢迎加入kvspace世界
 lib kvlang/deepdive/runtime/01_type_system {
-	"""# Type System（类型系统）
+	r#"# Type System（类型系统）
 
 ## 类型系统
 
@@ -132,5 +132,5 @@ u <- char/ascii(t)    # 拒非 ASCII 码点 → TypeError
 隐式 coerce 会使控制流条件取决于运行时 kind，agent 无法静态判定控制流走向。强制显式比较使 br 指令的 cond 槽永远是 bool。
 
 **实现**：`kvlangXvalueAsBool`（`xvalue.c`）仅接受 `kind=="bool"`，其他 kind 直接 panic。
-""" -> /lib/kvlang/deepdive/runtime/01_type_system
+"# -> /lib/kvlang/deepdive/runtime/01_type_system
 }

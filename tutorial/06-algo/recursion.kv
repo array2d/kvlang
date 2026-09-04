@@ -1,26 +1,26 @@
-# 期望输出:
-#   fib(10) = 34
-#   fact(10) = 3628800
+// 期望输出:
+//   fib(10) = 34
+//   fact(10) = 3628800
 rwfunc fib(n:int64) -> (a:int64, b:int64) {
 	if (n <= 1) {
-		a = 0  # = 等价于 <-
+		a = 0  // = 等价于 <-
 		1 -> b
 	} else {
 		n1 <- n - 1
 		fib(n1) -> (a, b)
-		x = a + b  # = 等价于 <-
+		x = a + b  // = 等价于 <-
 		b -> a
 		b <- x
 	}
 }
 
 rwfunc factorial(n:int64) -> (r:int64) {
-	r = 1  # = 等价于 <-
+	r = 1  // = 等价于 <-
 	1 -> i
 	while (i <= n) {
 		r <- r × i
 		r_m <- r × i
-		i = i + 1  # = 等价于 <-
+		i = i + 1  // = 等价于 <-
 	}
 }
 
@@ -30,5 +30,5 @@ rwfunc test() -> () {
 	factorial(10) -> ans
 	println("fact(10) =", ans)
 	/last_fib <- f
-	/last_fact = ans  # = 等价于 <-
+	/last_fact = ans  // = 等价于 <-
 }

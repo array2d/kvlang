@@ -1,6 +1,6 @@
-# 欢迎加入kvspace世界
+// 欢迎加入kvspace世界
 lib kvlang/deepdive/runtime/02_member_access_and_data_structures {
-	"""# Member Access and Data Structures（成员访问与数据结构）
+	r#"# Member Access and Data Structures（成员访问与数据结构）
 
 ## 两个索引符号：`[]` 与 `·`
 
@@ -73,5 +73,5 @@ xv·set(a, 2, 99) -> a      # 显式写，等价
 ```
 
 下标写用赋值式 `a[i] = v`；`->` 形式的写槽不能带下标（`v -> a[i]` 被 layout 拒绝），改用 `a[i] = v` 或 `xv·set`。
-""" -> /lib/kvlang/deepdive/runtime/02_member_access_and_data_structures
+"# -> /lib/kvlang/deepdive/runtime/02_member_access_and_data_structures
 }

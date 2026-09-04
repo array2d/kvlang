@@ -1,10 +1,10 @@
-# continuous: 连续数组 []int64（一个 XValue，元素连续打包）
-# 语义: [] = 同构定长连续数组；at/set/len 整存整取，元素在内存内下标访问
-# 期望输出:
-#   len = 4
-#   [0] = 10
-#   after set: 10 99 30
-#   sum = 179
+// continuous: 连续数组 []int64（一个 XValue，元素连续打包）
+// 语义: [] = 同构定长连续数组；at/set/len 整存整取，元素在内存内下标访问
+// 期望输出:
+//   len = 4
+//   [0] = 10
+//   after set: 10 99 30
+//   sum = 179
 rwfunc test() -> () {
 	a:[]int64 = [10, 20, 30, 40]
 	ndarray·numel(a) -> n

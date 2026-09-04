@@ -1,8 +1,8 @@
-# math 常量：Pi / E / Tau（runtime 内嵌 stdlib，启动自动 layout+init）。读侧用绝对路径。
-# 期望输出:
-#   Pi= 3.141592653589793
-#   E= 2.718281828459045
-#   Tau= 6.283185307179586
+// math 常量：Pi / E / Tau（runtime 内嵌 stdlib，启动自动 layout+init）。读侧用绝对路径。
+// 期望输出:
+//   Pi= 3.141592653589793
+//   E= 2.718281828459045
+//   Tau= 6.283185307179586
 rwfunc test() -> () {
 	/lib/math·Pi -> pi
 	println("Pi=", pi)

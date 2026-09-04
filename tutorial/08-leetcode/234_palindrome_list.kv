@@ -1,10 +1,10 @@
-# 234: Palindrome Linked List — 链表复制到键族数组 + 双指针（dict 声明整型键）
-# 来源: LeetCode #234
-# 期望输出:
-#   true
-#   false
+// 234: Palindrome Linked List — 链表复制到键族数组 + 双指针（dict 声明整型键）
+// 来源: LeetCode #234
+// 期望输出:
+//   true
+//   false
 rwfunc is_pal(head:[]char/utf32) -> () {
-	arr:[int64]·int64 = {}  # = 等价于 <-
+	arr:[int64]·int64 = {}  // = 等价于 <-
 	0 -> n
 	head -> p
 	while (p != "") {
@@ -13,7 +13,7 @@ rwfunc is_pal(head:[]char/utf32) -> () {
 		n <- n + 1
 		p·next -> p
 	}
-	ok = true  # = 等价于 <-
+	ok = true  // = 等价于 <-
 	0 -> l
 	r <- n - 1
 	while (l < r) {
@@ -25,7 +25,7 @@ rwfunc is_pal(head:[]char/utf32) -> () {
 			r -> l
 		}
 		l <- l + 1
-		r = r - 1  # = 等价于 <-
+		r = r - 1  // = 等价于 <-
 	}
 	if (ok) {
 		println("true")
@@ -35,10 +35,10 @@ rwfunc is_pal(head:[]char/utf32) -> () {
 }
 
 rwfunc build() -> () {
-	/p0 = { val=1; next="/p1" }  # = 等价于 <-
+	/p0 = { val=1; next="/p1" }  // = 等价于 <-
 	/p1 <- { val=2; next="/p2" }
 	{ val=2; next="/p3" } -> /p2
-	/p3 = { val=1; next="" }  # = 等价于 <-
+	/p3 = { val=1; next="" }  // = 等价于 <-
 	/q0 <- { val=1; next="/q1" }
 	{ val=2; next="" } -> /q1
 }

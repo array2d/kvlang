@@ -1,9 +1,9 @@
-# networld/fs·exists：存在性判定，写入/删除前后对比
-#   fs·exists(p) -> bool
-# 期望输出:
-#   before= false
-#   after_write= true
-#   after_del= false
+// networld/fs·exists：存在性判定，写入/删除前后对比
+//   fs·exists(p) -> bool
+// 期望输出:
+//   before= false
+//   after_write= true
+//   after_del= false
 rwfunc test() -> () {
 	p = "/tmp/kvlang_fs_exists.txt"
 	noenv = map()

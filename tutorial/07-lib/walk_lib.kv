@@ -1,12 +1,12 @@
-# 递归打印 /lib 代码树：kv·listlen/kv·listn 逐层列举 + 自递归
-# 目录名以 "/" 结尾则下钻；kv·listn 返回 utf8，显式 char/utf32 转码后才能喂给 string·find（utf32）
-# 期望输出:
-#   /lib/
-#   print
-#   println
-#   kv
-#   string
-#   math
+// 递归打印 /lib 代码树：kv·listlen/kv·listn 逐层列举 + 自递归
+// 目录名以 "/" 结尾则下钻；kv·listn 返回 utf8，显式 char/utf32 转码后才能喂给 string·find（utf32）
+// 期望输出:
+//   /lib/
+//   print
+//   println
+//   kv
+//   string
+//   math
 rwfunc walk(path:[]char/utf32, indent:[]char/utf32) -> () {
 	kv·listlen(path) -> n
 	0 -> i

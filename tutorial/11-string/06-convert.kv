@@ -1,15 +1,15 @@
-# 编码转换：char/utf32 / char/utf8 / char/ascii 就是转换函数（kind(x)，同创建函数）
-# 转换函数有写参（读参只读）：t <- char/utf32(s)
-# utf8 转 utf32 后可索引；char/ascii 拒非 ASCII 码点（U+00E9 报错）
-# 期望输出:
-#   hello
-#   e
-#   world
+// 编码转换：char/utf32 / char/utf8 / char/ascii 就是转换函数（kind(x)，同创建函数）
+// 转换函数有写参（读参只读）：t <- char/utf32(s)
+// utf8 转 utf32 后可索引；char/ascii 拒非 ASCII 码点（U+00E9 报错）
+// 期望输出:
+//   hello
+//   e
+//   world
 rwfunc test() -> () {
-	s:[]char/utf8 = "hello"   # 变宽，禁索引
-	t <- char/utf32(s)      # 转 utf32 定宽，可索引
+	s:[]char/utf8 = "hello"   // 变宽，禁索引
+	t <- char/utf32(s)      // 转 utf32 定宽，可索引
 	println(t)
 	println(string·char(t, 1))
-	u <- char/ascii("world")  # 转 ascii（非 ASCII 会报错）
+	u <- char/ascii("world")  // 转 ascii（非 ASCII 会报错）
 	println(u)
 }

@@ -1,8 +1,8 @@
-# 语义: 嵌套 mapexpr —— []char/utf8·[]char/utf8·int64 右结合 = Go map[string]map[string]int。
-#       value 侧递归为完整 kindexpr，故类型可无限嵌套；layout 校验并 round-trip 进签名 head。
-#       （运行时值语义为内联标量/串，嵌套物化非本例范畴；本例证 layout 接受嵌套签名。）
-# 期望输出:
-#   nested signature accepted
+// 语义: 嵌套 mapexpr —— []char/utf8·[]char/utf8·int64 右结合 = Go map[string]map[string]int。
+//       value 侧递归为完整 kindexpr，故类型可无限嵌套；layout 校验并 round-trip 进签名 head。
+//       （运行时值语义为内联标量/串，嵌套物化非本例范畴；本例证 layout 接受嵌套签名。）
+// 期望输出:
+//   nested signature accepted
 rwfunc grid(g:[]char/utf8·[]char/utf8·int64) -> (n:int64) {
 	0 -> n
 }

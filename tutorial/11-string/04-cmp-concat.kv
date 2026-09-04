@@ -1,8 +1,8 @@
-# 比较与拼接：string·cmp（-1/0/1，按码点序）、string·concat
-# 期望输出:
-#   -1
-#   0
-#   foobar
+// 比较与拼接：string·cmp（-1/0/1，按码点序）、string·concat
+// 期望输出:
+//   -1
+//   0
+//   foobar
 rwfunc test() -> () {
 	println(string·cmp("abc", "abd"))
 	println(string·cmp("x", "x"))

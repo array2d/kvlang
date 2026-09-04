@@ -1,21 +1,28 @@
-# 欢迎加入kvspace世界
-# kvlang 语法速览 —— 也是 KV 树里的数据。
-# 本文件在 kvlang stdlib，runtime-rs 启动时 layout&run：顶层写语句包进 kvlang·init，
-# 执行后把整份速览作为字符串落在 /lib/kvlang/kvlangbrief。
-# 之后 byteseek 的 llm·call 生成 kv 代码时，把这份速览拼进系统提示。
+// 欢迎加入kvspace世界
+// kvlang 语法速览 —— 也是 KV 树里的数据。
+// 本文件在 kvlang stdlib，runtime-rs 启动时 layout&run：顶层写语句包进 kvlang·init，
+// 执行后把整份速览作为字符串落在 /lib/kvlang/kvlangbrief。
+// 之后 byteseek 的 llm·call 生成 kv 代码时，把这份速览拼进系统提示。
 lib kvlang {
-	"""# kvlang 速览
+	r###"# kvlang 速览
 
 kvlang 是一门全新语言，语法以下面示例为准，不要套用其它语言直觉。
+
+## 注释与字符串（对齐 Rust）
+- 注释：`//` 行注释、`/* … */` 块注释（可嵌套）。**没有 `#` 注释**。
+- 字符串三形式：
+  - `"…"` 转义串（`\n \t \" \\` 等生效，可直接跨行）。
+  - `r"…"` 原始串（零转义，内容不含 `"`）。
+  - `r#"…"#` / `r##"…"##` 原始串带井号栏，内容可含 `"`；井号越多可嵌套越深。**没有 `"""` 三引号、没有反引号串**。
 
 ## 程序结构
 文件入口约定是 `rwfunc test() -> () { … }`——`kvlang xxx.kv` 会自动运行 `test`，**不要**再手写 `test()` 调用。其它函数（含习惯叫的 `main`）必须被 `test` 直接或间接调用才会执行。
 ```kv
 rwfunc test() -> () {
-    total = 0            # = 等价 <-，写左边这个槽
-    1 -> i               # -> 写右边这个槽
+    total = 0            // = 等价 <-，写左边这个槽
+    1 -> i               // -> 写右边这个槽
     while (i <= 5) { total <- total + i; i + 1 -> i }
-    println(total)       # 15
+    println(total)       // 15
 }
 ```
 
@@ -35,8 +42,8 @@ rwfunc sum(arr:[]int64) -> (acc:int64) {
     while (i < ndarray·numel(arr)) { xv·at(arr,i) -> e; acc + e -> acc; i + 1 -> i }
 }
 rwfunc test() -> () {
-    mylib·add(3,4) -> s; println(s)          # 7
-    a:[]int64 = [1,2,3,4,5]; sum(a) -> t; println(t)   # 15
+    mylib·add(3,4) -> s; println(s)          // 7
+    a:[]int64 = [1,2,3,4,5]; sum(a) -> t; println(t)   // 15
 }
 ```
 
@@ -49,15 +56,15 @@ rwfunc test() -> () {
 - **compact**（`[...]`）：定长同类型元素连续打包进**单个 XValue**（head kind=元素类型），支持 `xv·at`/`ndarray·numel`/下标随机访问；多维 `[256,256]uint8` 即 ndarray/tensor。
 - **stringkeymap**（`{...}`）：每元素落 `base·i` 独立 key（head kind=`stringkeymap`），变长/可增长，**字符串数组、可追加数组走这里**，用 `for-in` 遍历（`w:[]char/utf8 = {"foo","bar"}`）。
 ```kv
-a:[]int64 = [7,2,9,4]     # ✅ compact：`[]` 前缀才是数组，裸 kind 是标量；写成 a:int64=[...] 会报错
-ndarray·numel(a) -> n               # 4
-xv·at(a,2) -> e              # 9（0 起）
-xv·set(a,1,99) -> a          # 改元素：a=[7,99,9,4]
+a:[]int64 = [7,2,9,4]     // ✅ compact：`[]` 前缀才是数组，裸 kind 是标量；写成 a:int64=[...] 会报错
+ndarray·numel(a) -> n               // 4
+xv·at(a,2) -> e              // 9（0 起）
+xv·set(a,1,99) -> a          // 改元素：a=[7,99,9,4]
 ```
 遍历/聚合用 `while + ndarray·numel + xv·at`。求最大值：
 ```kv
 xv·at(a,0) -> hi; 1 -> i
-while (i < ndarray·numel(a)) { xv·at(a,i) -> e; if (e > hi) { e -> hi }; i + 1 -> i }   # hi=9
+while (i < ndarray·numel(a)) { xv·at(a,i) -> e; if (e > hi) { e -> hi }; i + 1 -> i }   // hi=9
 ```
 
 ## 容器：stringkeymap / object（关键：`[]` 是数组专用，容器成员绝不用 `[]`）
@@ -66,21 +73,21 @@ while (i < ndarray·numel(a)) { xv·at(a,i) -> e; if (e > hi) { e -> hi }; i + 1
   key 侧恒 `[]char/<enc>` 字符串键，或 `[标量,…]` 元组键（如 `[int64]`、`[int32,int32]`，物理以字符串格式落 key）；value 可递归嵌套（`[]char/utf8·[]char/utf8·int64`）。
 - **object**：异构命名成员（类 struct/record）。
 ```kv
-d:[]char/utf8·int64 = {}   # 空 map 必须标类型
-d·a = 10; d·b = 20         # 成员写（命名成员在 d·a）
-kv·get(d, "a") -> x        # 取值；缺失返回 None
-k = "a"; d·*k -> v         # 动态键：读 d·a
-kv·set(d, k, 99) -> _      # 动态键写
-m:[int64]·int64 = {}       # 整型键 map（key 落字符串）
+d:[]char/utf8·int64 = {}   // 空 map 必须标类型
+d·a = 10; d·b = 20         // 成员写（命名成员在 d·a）
+kv·get(d, "a") -> x        // 取值；缺失返回 None
+k = "a"; d·*k -> v         // 动态键：读 d·a
+kv·set(d, k, 99) -> _      // 动态键写
+m:[int64]·int64 = {}       // 整型键 map（key 落字符串）
 kv·set(m, 0, 7) -> _; kv·get(m, 0) -> e
-rec:object = {}            # 异构命名成员
+rec:object = {}            // 异构命名成员
 rec·name = "kv"; rec·ver = 1
 ```
 **容器成员一律走 `·` / `kv·get` / `kv·set`，绝不用 `[]`**——`[]` 只索引 compact array（见「数组」），对容器用 `[]` 会 layout 报错。
 ```kv
-/n1:object = {}            # 跨函数共享的数据放绝对路径
+/n1:object = {}            // 跨函数共享的数据放绝对路径
 /n1·val = 1; /n1·next = "/n2"
-"/n1" -> p; p·val -> v     # ✅ 引号=路径串（指针）·member 解引用；不加引号 /n1 读的是值非路径
+"/n1" -> p; p·val -> v     // ✅ 引号=路径串（指针）·member 解引用；不加引号 /n1 读的是值非路径
 ```
 
 ## 扩展世界：`@` 前缀 kindexpr
@@ -98,12 +105,12 @@ rec·name = "kv"; rec·ver = 1
 `print` / `println` 可用（扩展 rwir）。字符串用 `+` 拼接：
 ```kv
 s = "hello"
-string·len(s) -> n            # 5
-string·char(s,1) -> c         # 'e'（读第 i 个字符）
-string·slice(s,0,2) -> p      # "he"
-string·find(s,"ll") -> i      # 2（找不到返回 -1）
-# 替换第 i 个字符：用 slice 拼接，不要用 string·char(s,i)=x
-string·slice(s,0,1) + "a" -> t; string·slice(s,2,5) -> u; t + u -> r   # "hallo"
+string·len(s) -> n            // 5
+string·char(s,1) -> c         // 'e'（读第 i 个字符）
+string·slice(s,0,2) -> p      // "he"
+string·find(s,"ll") -> i      // 2（找不到返回 -1）
+// 替换第 i 个字符：用 slice 拼接，不要用 string·char(s,i)=x
+string·slice(s,0,1) + "a" -> t; string·slice(s,2,5) -> u; t + u -> r   // "hallo"
 ```
 
 **`+` 只在同类别内成立（数值 vs 字符不可混）**：两边都是字符=拼接，两边都是数值=相加；数值与字符跨类别会 TypeError。
@@ -112,28 +119,28 @@ string·slice(s,0,1) + "a" -> t; string·slice(s,2,5) -> u; t + u -> r   # "hall
 打印带标签的数字，用 `println` 多参数（自动空格分隔），**不要**拼字符串：
 ```kv
 n = 42
-println("answer =", n)        # answer = 42（✅ 两个参数）
-# "answer = " + n -> s; println(s)   # ❌ TypeError：char + int
+println("answer =", n)        // answer = 42（✅ 两个参数）
+// "answer = " + n -> s; println(s)   // ❌ TypeError：char + int
 ```
 
 ## 自举：代码即数据（生成/校验/入库/运行）
 kv 代码是 KV 树里的数据，可运行时自产自运行：
 ```kv
-kvlanglayout·vet(src) -> v        # 校验源码：合法 "ok"，否则错误信息
-kvlanglayout·format(src) -> f     # 规范化源码（parse → 格式化文本）
-kvlanglayout·layout(src) -> e     # 源码入库 /lib：成功空串，失败 "error: …"
-kvlanglayout·dump("/lib") -> d    # /lib 子树导出为可运行源码（含 # 槽位注释）
-vthread·call("pkg·func")          # 在当前 vthread 直接调用已入库函数到结束再续跑（裸名 = /lib/<名>）
-vthread·create("pkg·func") -> vid # 新开独立子 vthread（只创建不运行），返回 vid 句柄
-vthread·run(vid)                  # 驱动某 vid（由 create 得到）到结束——参数是 vid，不是函数名
+kvlanglayout·vet(src) -> v        // 校验源码：合法 "ok"，否则错误信息
+kvlanglayout·format(src) -> f     // 规范化源码（parse → 格式化文本）
+kvlanglayout·layout(src) -> e     // 源码入库 /lib：成功空串，失败 "error: …"
+kvlanglayout·dump("/lib") -> d    // /lib 子树导出为可运行源码（含 // 槽位注释）
+vthread·call("pkg·func")          // 在当前 vthread 直接调用已入库函数到结束再续跑（裸名 = /lib/<名>）
+vthread·create("pkg·func") -> vid // 新开独立子 vthread（只创建不运行），返回 vid 句柄
+vthread·run(vid)                  // 驱动某 vid（由 create 得到）到结束——参数是 vid，不是函数名
 ```
 
 ## 调试 / 暂停
 ```kv
-debugger()                   # 内联断点：执行到此暂停（status 置 paused）
-vthread·setstatus("paused")  # 等价：设 vthread 状态（paused 即停住）
+debugger()                   // 内联断点：执行到此暂停（status 置 paused）
+vthread·setstatus("paused")  // 等价：设 vthread 状态（paused 即停住）
 ```
 暂停后由外部把 `/vthread/{vid}/·status` 改回 `running` 续跑。
-""" -> /lib/kvlang/kvlangbrief
+"### -> /lib/kvlang/kvlangbrief
 }
 
