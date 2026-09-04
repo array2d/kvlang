@@ -1,0 +1,66 @@
+// quicksort benchmark — 迭代 Lomuto 分区就地排序（数组访问 + 显式栈递归）
+// 数据由 LCG 确定生成，规模 N 由 __SCALE__ 占位，run.py 按扫描点替换（勿改逻辑）
+// 期望输出（N=64 时）:
+//   qsort: a0 = 1 amid = 52 alast = 99
+rwfunc test() -> () {
+	__SCALE__ -> n
+	arr:[int64]·int64 = {}
+	1 -> seed
+	0 -> i
+	while (i < n) {
+		seed × 1103515245 -> s1
+		s1 + 12345 -> s2
+		s2 % 2147483648 -> seed
+		seed % 100 -> v
+		v -> arr·*i
+		i + 1 -> i
+	}
+	t0 <- time·now()
+	st_lo:[int64]·int64 = {}
+	st_hi:[int64]·int64 = {}
+	0 -> top
+	0 -> st_lo·*top
+	n - 1 -> st_hi·*top
+	top + 1 -> top
+	while (top > 0) {
+		top - 1 -> top
+		kv·get(st_lo, top) -> lo
+		kv·get(st_hi, top) -> hi
+		if (lo < hi) {
+			kv·get(arr, hi) -> pivot
+			lo - 1 -> ii
+			lo -> jj
+			while (jj < hi) {
+				kv·get(arr, jj) -> aj
+				if (aj <= pivot) {
+					ii + 1 -> ii
+					kv·get(arr, ii) -> ai
+					aj -> arr·*ii
+					ai -> arr·*jj
+				}
+				jj + 1 -> jj
+			}
+			ii + 1 -> pp
+			kv·get(arr, pp) -> app
+			pivot -> arr·*pp
+			app -> arr·*hi
+			lo -> st_lo·*top
+			pp - 1 -> st_hi·*top
+			top + 1 -> top
+			pp + 1 -> st_lo·*top
+			hi -> st_hi·*top
+			top + 1 -> top
+		}
+	}
+	t1 <- time·now()
+	n ÷ 2 -> mid
+	n - 1 -> last
+	kv·get(arr, 0) -> a0
+	kv·get(arr, mid) -> am
+	kv·get(arr, last) -> al
+	println("qsort: a0 =", a0, "amid =", am, "alast =", al)
+	delta <- time·sub(t1, t0)
+	ns <- time/duration·as_nanos(delta)
+	println("__bench_ns:", ns)
+	println("__bench_input: N=__SCALE__,seed=1")
+}

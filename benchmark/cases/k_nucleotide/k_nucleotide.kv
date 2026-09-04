@@ -1,0 +1,39 @@
+// k-nucleotide benchmark — 统计 DNA 序列碱基频次（字符串 + 哈希表）
+// 65 字符基串重复 rep 次得定长序列，逐字符 ord 入 int 键哈希表计数。
+// 重复次数 rep 由 __SCALE__ 占位（勿改逻辑）
+// 期望输出（rep=5 时）:
+//   knuc: A = 80 C = 70 G = 90 T = 85
+rwfunc test() -> () {
+	"GGTATTGAGCACTGGCAATTGACGTCAGGTATCCGAATTGCACGTTAGCATGCATGCATGCACGT" -> base
+	"" -> s
+	0 -> r
+	while (r < __SCALE__) {
+		s + base -> s
+		r + 1 -> r
+	}
+	string·len(s) -> n
+	h:[int64]·int64 = {}
+	t0 <- time·now()
+	0 -> i
+	while (i < n) {
+		string·char(s, i) -> ch
+		string·ord(ch) -> c
+		kv·get(h, c) -> cur
+		if (cur == None) {
+			0 -> cur
+		}
+		cur + 1 -> cnt
+		cnt -> h·*c
+		i + 1 -> i
+	}
+	t1 <- time·now()
+	kv·get(h, 65) -> a
+	kv·get(h, 67) -> cc
+	kv·get(h, 71) -> g
+	kv·get(h, 84) -> t
+	println("knuc: A =", a, "C =", cc, "G =", g, "T =", t)
+	delta <- time·sub(t1, t0)
+	ns <- time/duration·as_nanos(delta)
+	println("__bench_ns:", ns)
+	println("__bench_input: rep=__SCALE__")
+}

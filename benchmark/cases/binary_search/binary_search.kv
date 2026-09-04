@@ -1,0 +1,50 @@
+// binary search benchmark — 有序数组二分查找（数组访问 + 循环 + 整除）
+// 建 arr[i]=i，对 0..N-1 逐个二分，累加命中下标；N 由 __SCALE__ 占位（勿改逻辑）
+// 期望输出（N=32 时）:
+//   bsearch: found = 32 sum = 496
+rwfunc bsearch(arr:[int64]·int64, n:int64, target:int64) -> (idx:int64) {
+	0 -> lo
+	n - 1 -> hi
+	-1 -> idx
+	while (lo <= hi) {
+		lo + hi -> s
+		s ÷ 2 -> mid
+		kv·get(arr, mid) -> mv
+		if (mv == target) {
+			mid -> idx
+			hi + 1 -> lo
+		} else if (mv < target) {
+			mid + 1 -> lo
+		} else {
+			mid - 1 -> hi
+		}
+	}
+}
+
+rwfunc test() -> () {
+	__SCALE__ -> n
+	arr:[int64]·int64 = {}
+	0 -> i
+	while (i < n) {
+		i -> arr·*i
+		i + 1 -> i
+	}
+	t0 <- time·now()
+	0 -> sum
+	0 -> found
+	0 -> q
+	while (q < n) {
+		bsearch(arr, n, q) -> idx
+		if (idx != -1) {
+			found + 1 -> found
+			sum + idx -> sum
+		}
+		q + 1 -> q
+	}
+	t1 <- time·now()
+	println("bsearch: found =", found, "sum =", sum)
+	delta <- time·sub(t1, t0)
+	ns <- time/duration·as_nanos(delta)
+	println("__bench_ns:", ns)
+	println("__bench_input: N=__SCALE__")
+}
