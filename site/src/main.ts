@@ -37,7 +37,7 @@ async function renderFile(path: string): Promise<void> {
     content.innerHTML = `<div class="error">未找到文档：${path}</div>`;
     return;
   }
-  sidebar.innerHTML = renderSidebar(files, path);
+  setSidebar(renderSidebar(files, path));
   content.innerHTML = `<div class="loading">加载 ${file.name}…</div>`;
   try {
     const src = await fetchRaw(file.path, file.sha);
@@ -55,11 +55,32 @@ function route(): void {
   if (path) {
     renderFile(path);
   } else {
-    sidebar.innerHTML = renderSidebar(files, "");
+    setSidebar(renderSidebar(files, ""));
     content.innerHTML = `<article class="doc"><h1 class="doc-title">kvlang 标准库文档</h1>
       <p>左侧选择一个 <code class="inline">.kv</code> 文档查看。内容实时取自
-      <code class="inline">array2d/kvlang</code> 仓库 <code class="inline">stdlib/</code> 目录。</p></article>`;
+      <code class="inline">array2d/kvlang</code> 仓库 <code class="inline">stdlib/</code> 目录。</p>
+      ${agentCard()}</article>`;
   }
+}
+
+// 侧边栏统一追加 Agent 源清单入口。
+function setSidebar(html: string): void {
+  sidebar.innerHTML =
+    html +
+    `<div class="side-agent"><a href="#agent-sources">⚙ 给 Agent 的源清单</a></div>`;
+}
+
+// 首页给人看的 Agent 源清单卡片（用 HEAD 跟随默认分支，避免分支名硬编码）。
+function agentCard(): string {
+  return `<section class="agent-card">
+    <h2>给 Agent / 爬虫</h2>
+    <p>本页客户端渲染，正文运行时拉取。不执行 JS 的 agent 请直接抓生数据源（<code class="inline">HEAD</code> 跟随默认分支）：</p>
+    <ul>
+      <li>目录清单：<a href="https://api.github.com/repos/array2d/kvlang/git/trees/HEAD?recursive=1">GitHub trees API</a>（取 <code class="inline">stdlib/*.kv</code>）</li>
+      <li>单文件全文：<code class="inline">https://raw.githubusercontent.com/array2d/kvlang/HEAD/&lt;path&gt;</code></li>
+      <li>可浏览目录：<a href="https://github.com/array2d/kvlang/tree/HEAD/stdlib">github.com/array2d/kvlang/tree/HEAD/stdlib</a></li>
+    </ul>
+  </section>`;
 }
 
 function initTheme(): void {

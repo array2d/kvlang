@@ -4,17 +4,63 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>kvlang stdlib</title>
+    <meta
+      name="description"
+      content="kvlang 标准库文档。本页客户端渲染；Agent/爬虫请抓生数据源，见页面底部或 <link rel=alternate>。"
+    />
+    <!-- Agent 源清单：均跟随仓库默认分支 (HEAD) -->
+    <link
+      rel="alternate"
+      type="application/json"
+      title="stdlib 源清单 (GitHub trees API, 过滤 stdlib/*.kv)"
+      href="https://api.github.com/repos/array2d/kvlang/git/trees/HEAD?recursive=1"
+    />
+    <link
+      rel="alternate"
+      type="text/plain"
+      title="stdlib 单文件全文 (raw, 将 <path> 换成清单中的路径)"
+      href="https://raw.githubusercontent.com/array2d/kvlang/HEAD/stdlib/"
+    />
+    <script type="module" src="/src/main.ts"></script>
   </head>
   <body>
     <header id="topbar">
       <a id="brand" href="#/">kvlang <span>stdlib</span></a>
       <span id="branch" class="branch"></span>
+      <a class="agent-link" href="#agent-sources" title="给 Agent/爬虫的源清单">⚙ Agent 源</a>
       <button id="theme" title="切换主题">◐</button>
     </header>
     <div id="app">
       <nav id="sidebar"><div class="loading">加载目录…</div></nav>
       <main id="content"><div class="loading">选择左侧文档</div></main>
     </div>
-    <script type="module" src="/src/main.ts"></script>
+
+    <!-- 静态源清单：不依赖 JS，curl/WebFetch/爬虫抓 HTML 即可见 -->
+    <footer id="agent-sources">
+      <h2>给 Agent / 爬虫的源清单</h2>
+      <p>
+        本页为客户端渲染 (SPA)，正文由浏览器运行时从 GitHub 拉取。<strong
+          >不执行 JS 的 agent 抓不到正文，请直接抓下列生数据源</strong
+        >（均以 <code>HEAD</code> 跟随仓库默认分支，无需关心分支名）：
+      </p>
+      <ul>
+        <li>
+          目录全量清单 (JSON，取 <code>tree[].path</code> 中以 <code>stdlib/</code> 开头、<code>.kv</code> 结尾者)：<br />
+          <a href="https://api.github.com/repos/array2d/kvlang/git/trees/HEAD?recursive=1"
+            >https://api.github.com/repos/array2d/kvlang/git/trees/HEAD?recursive=1</a
+          >
+        </li>
+        <li>
+          单文件全文 (raw，将 <code>&lt;path&gt;</code> 换成清单里的路径，如 <code>stdlib/string.kv</code>)：<br />
+          <code>https://raw.githubusercontent.com/array2d/kvlang/HEAD/&lt;path&gt;</code>
+        </li>
+        <li>
+          可浏览目录 (HTML)：<br />
+          <a href="https://github.com/array2d/kvlang/tree/HEAD/stdlib"
+            >https://github.com/array2d/kvlang/tree/HEAD/stdlib</a
+          >
+        </li>
+      </ul>
+    </footer>
   </body>
 </html>
