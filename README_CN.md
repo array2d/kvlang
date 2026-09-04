@@ -22,12 +22,12 @@
 
 ## 核心模型：一屏看懂
 
-**不分 IR 层，源码即 IR。** 程序计数器是 kvspace 路径字符串，调用栈深度 = 路径深度：
+**不分 IR 层，源码即 IR。** 程序计数器是 kvspace 路径字符串，调用栈深度是路径里的帧号：
 
 ```
-PC   = "/vthread/tid/[0,0]/[0,0]/[1,0]"   程序计数器是 KV 路径
-指令 = kv.Get(PC)                           取指是一次 KV 读
-调用 = 创建子树；返回 = 清理子树             崩溃后按 PC 重启继续
+PC   = "/vthread/tid/[1]/[3,0]"            vthread tid、第 1 帧、第 3 条指令
+取指 = GetBatch(帧目录/, ["[3,0]"])         从帧目录取 opcode（extindex → /lib）
+调用 = 创建 [d+1] 帧；返回 = DelTree        崩溃后按 PC 重启继续
 goto/br = 只改同一帧的 irseq                if/while 不建帧
 ```
 

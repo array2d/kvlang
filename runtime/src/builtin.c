@@ -72,21 +72,8 @@ static int cmp_int(const kvlangXvalue_t *a, const kvlangXvalue_t *b) {
 /* ── resolve ───────────────────────────────────────────────────────── */
 
 char *kvlangBuiltinFuncFrameRoot(kvlangKv_t *kv, const char *frame_root) {
-    char *cur = strdup(frame_root);
-    for (;;) {
-        kvlangStrbuf_t k; kvlangStrbufInit(&k);
-        char *stk = kvlangKeytreeStack(cur);
-        kvlangStrbufPuts(&k, stk); free(stk);
-        kvlangStrbufPuts(&k, SEG_LIB);
-        kvlangXvalue_t v; kvlangXvalueZero(&v);
-        kvlangKvGetOne(kv, k.p, &v);
-        bool found = !kvlangXvalueNone(&v);
-        kvlangXvalueFree(&v); kvlangStrbufFree(&k);
-        if (found) return cur;
-        char *parent = kvlangKeytreeParentFrame(cur);
-        if (parent[0] == 0) { free(parent); return cur; }
-        free(cur); cur = parent;
-    }
+    (void)kv;
+    return strdup(frame_root);
 }
 
 void kvlangBuiltinResolveReadValue(kvlangKv_t *kv, const char *frame_path, const char *name,
@@ -101,48 +88,38 @@ void kvlangBuiltinResolveReadValue(kvlangKv_t *kv, const char *frame_path, const
     if (!name || !name[0]) return;
     if (name[0] == '/') { kvlangKvGetOne(kv, name, out); return; }
     char *rw = kvlangBuiltinFuncFrameRoot(kv, frame_path);
-    kvlangStrbuf_t key; kvlangStrbufInit(&key);
     char *stk = kvlangKeytreeStack(rw);
-    kvlangStrbufPuts(&key, stk); free(stk); kvlangStrbufPuts(&key, name);
     kvlangXvalue_t pv; kvlangXvalueZero(&pv);
-    kvlangKvGetOne(kv, key.p, &pv);
+    kvlangKvGetMember(kv, stk, name, &pv);
     if (kvlangXvalueIsPtr(&pv)) {
         char *target = kvlangXvaluePtrTarget(&pv);
-        kvlangStrbuf_t ak; kvlangStrbufInit(&ak);
-        char *stk2 = kvlangKeytreeStack(rw);
-        kvlangStrbufPuts(&ak, stk2); free(stk2); kvlangStrbufPuts(&ak, target);
-        free(target);
         kvlangXvalue_t av; kvlangXvalueZero(&av);
-        kvlangKvGetOne(kv, ak.p, &av);
+        kvlangKvGetMember(kv, stk, target, &av);
+        free(target);
         if (!kvlangXvalueNone(&av)) {
             char *path = kvlangXvalueValueString(&av);
             kvlangKvGetOne(kv, path, out);
             free(path);
         }
-        kvlangXvalueFree(&av); kvlangStrbufFree(&ak);
+        kvlangXvalueFree(&av);
     } else if (!kvlangXvalueNone(&pv)) {
         *out = pv; pv.data = NULL; pv.len = 0;
     }
-    kvlangXvalueFree(&pv); kvlangStrbufFree(&key); free(rw);
+    kvlangXvalueFree(&pv); free(stk); free(rw);
 }
 
 char *kvlangBuiltinResolveWriteSlot(kvlangKv_t *kv, const char *frame_path, const char *name) {
     if (name[0] == '/') return strdup(name);
     char *rw = kvlangBuiltinFuncFrameRoot(kv, frame_path);
-    kvlangStrbuf_t key; kvlangStrbufInit(&key);
     char *stk = kvlangKeytreeStack(rw);
-    kvlangStrbufPuts(&key, stk); free(stk); kvlangStrbufPuts(&key, name);
     kvlangXvalue_t pv; kvlangXvalueZero(&pv);
-    kvlangKvGetOne(kv, key.p, &pv);
+    kvlangKvGetMember(kv, stk, name, &pv);
     char *result = NULL;
     if (kvlangXvalueIsPtr(&pv)) {
         char *target = kvlangXvaluePtrTarget(&pv);
-        kvlangStrbuf_t ak; kvlangStrbufInit(&ak);
-        char *stk2 = kvlangKeytreeStack(rw);
-        kvlangStrbufPuts(&ak, stk2); free(stk2); kvlangStrbufPuts(&ak, target);
-        free(target);
         kvlangXvalue_t av; kvlangXvalueZero(&av);
-        kvlangKvGetOne(kv, ak.p, &av);
+        kvlangKvGetMember(kv, stk, target, &av);
+        free(target);
         if (!kvlangXvalueNone(&av)) {
             /* 只追显式指针（ptr, ref==1）链；av 是 handle_call 已 resolve 好的
              * 最终写目标路径（普通 char），直接取字符串，勿再按值读下一跳——
@@ -159,16 +136,13 @@ char *kvlangBuiltinResolveWriteSlot(kvlangKv_t *kv, const char *frame_path, cons
             if (!kvlangXvalueNone(&v)) result = kvlangXvalueValueString(&v);
             kvlangXvalueFree(&v);
         }
-        kvlangXvalueFree(&av); kvlangStrbufFree(&ak);
+        kvlangXvalueFree(&av);
     }
-    kvlangXvalueFree(&pv); kvlangStrbufFree(&key); free(rw);
-    if (result) return result;
-    /* fallback: Stack(rw) + name */
-    char *rw2 = kvlangBuiltinFuncFrameRoot(kv, frame_path);
+    kvlangXvalueFree(&pv);
+    if (result) { free(stk); free(rw); return result; }
     kvlangStrbuf_t o; kvlangStrbufInit(&o);
-    char *stk3 = kvlangKeytreeStack(rw2);
-    kvlangStrbufPuts(&o, stk3); free(stk3); kvlangStrbufPuts(&o, name);
-    free(rw2);
+    kvlangStrbufPuts(&o, stk); kvlangStrbufPuts(&o, name);
+    free(stk); free(rw);
     return kvlangStrbufDetach(&o);
 }
 

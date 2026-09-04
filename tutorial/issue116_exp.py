@@ -18,6 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 LAYOUT = os.environ.get("KVLANG_LAYOUT_BIN", str(ROOT / "bin" / "kvlanglayout"))
 TERM = os.environ.get("KVLANG_TERM_BIN", str(ROOT / "bin" / "kvlang"))
+PC_FLAT = re.compile(r"^/vthread/[0-9]+/\[[0-9]+\]/\[[0-9]+,-?[0-9]+\]$")
 SCOPE_MARK = re.compile(
     r"_(then|else|while|do|if|merge|exit|for_init|for_cond|for_body|for_exit)_\d+"
 )
@@ -76,6 +77,18 @@ def read_pc(store: Path, vtid: str = "1") -> str:
     return tlv_char(p.read_bytes()).strip()
 
 
+def frame_dirs(store: Path, vtid: str = "1") -> list[str]:
+    vt = store / "vthread" / vtid
+    out = []
+    if not vt.is_dir():
+        return out
+    for c in vt.iterdir():
+        name = c.name
+        if c.is_dir() and name.startswith("[") and name.endswith("]") and "," not in name:
+            out.append(name)
+    return sorted(out, key=lambda s: int(s[1:-1]))
+
+
 def vthread_rels(store: Path) -> list[str]:
     return [r for r in all_rels(store) if r.startswith("/vthread/")]
 
@@ -98,13 +111,26 @@ def layout_and_run(src: str, store: Path, timeout: int = 30) -> subprocess.Compl
     return subprocess.run([TERM, "init"], capture_output=True, text=True, cwd=str(ROOT), timeout=timeout, env=e)
 
 
+def assert_pc_flat(pc: str, ctx: str) -> None:
+    if not PC_FLAT.match(pc):
+        raise AssertionError(f"{ctx}: PC not flat: {pc!r}")
+    if pc.count("[") != 2:
+        raise AssertionError(f"{ctx}: PC should have 2 coord segments: {pc!r}")
+    if SCOPE_MARK.search(pc):
+        raise AssertionError(f"{ctx}: PC still has scope segment: {pc!r}")
+
+
 def assert_no_vthread_scope(store: Path, ctx: str) -> None:
     hits = scope_hits(vthread_rels(store))
     if hits:
         raise AssertionError(f"{ctx}: vthread still has scope keys: {hits[:12]}")
-    pc = read_pc(store)
-    if pc and SCOPE_MARK.search(pc):
-        raise AssertionError(f"{ctx}: PC still has scope segment: {pc!r}")
+
+
+def assert_frames(store: Path, ctx: str, n: int) -> list[str]:
+    frames = frame_dirs(store)
+    if len(frames) != n:
+        raise AssertionError(f"{ctx}: extra frames {frames} want {n} pc={read_pc(store)}")
+    return frames
 
 
 def run_ok(src: str, expect: str, ctx: str) -> str:
@@ -120,20 +146,146 @@ def run_ok(src: str, expect: str, ctx: str) -> str:
         lib_hits = scope_hits([p for p in all_rels(store) if p.startswith("/lib/") and "/[" in p])
         if lib_hits:
             raise AssertionError(f"{ctx}: lib still has scope-flat keys: {lib_hits[:8]}")
-        print(f"  {ctx} stdout={r.stdout.strip()!r}")
+        print(f"  {ctx} stdout={r.stdout.strip()!r} frames={frame_dirs(store)}")
         return r.stdout
     finally:
         shutil.rmtree(store, ignore_errors=True)
 
 
-def run_crash(src: str, ctx: str) -> str:
+def run_crash(src: str, ctx: str, want_frames: int) -> str:
     store = Path(tempfile.mkdtemp(prefix=f"i116-{ctx}-"))
     try:
         r = layout_and_run(src, store)
         pc = read_pc(store)
+        assert_pc_flat(pc, ctx)
         assert_no_vthread_scope(store, ctx)
-        print(f"  {ctx} pc={pc} err={(r.stderr or '')[:80]!r}")
+        frames = assert_frames(store, ctx, want_frames)
+        n = int(re.search(r"/\[(\d+)\]/", pc).group(1))
+        if n != want_frames:
+            raise AssertionError(f"{ctx}: FrameNum={n} pc={pc} want {want_frames}")
+        print(f"  {ctx} pc={pc} frames={frames} err={(r.stderr or '')[:80]!r}")
         return pc
+    finally:
+        shutil.rmtree(store, ignore_errors=True)
+
+
+def exp_bootstrap_depth1() -> None:
+    store = Path(tempfile.mkdtemp(prefix="i116-boot-"))
+    try:
+        src = 'rwfunc main() -> () { 1 -> /ok }\nmain()\n'
+        layout_and_run(src, store)
+        pc = read_pc(store)
+        # done: last PC is return slot on frame [1] or [2]
+        frames = frame_dirs(store)
+        # after return of depth-1, frame may be deleted; bootstrap created [1]
+        keys = [rel(store, p) for p in store_files(store)]
+        if any("/vthread/" in k and "_else" in k for k in keys):
+            raise AssertionError(f"scope path under vthread: {keys}")
+        print(f"  bootstrap pc={pc!r} frames={frames} keys={len(keys)}")
+        if pc:
+            assert_pc_flat(pc, "bootstrap")
+    finally:
+        shutil.rmtree(store, ignore_errors=True)
+
+
+def exp_while_same_frame() -> None:
+    store = Path(tempfile.mkdtemp(prefix="i116-while-"))
+    try:
+        src = """rwfunc main() -> () {
+    1 -> i
+    while (i <= 3) {
+        i <- i + 1
+    }
+    1 ÷ 0 -> x
+}
+main()
+"""
+        r = layout_and_run(src, store)
+        pc = read_pc(store)
+        assert_pc_flat(pc, "while")
+        n = int(re.search(r"/\[(\d+)\]/", pc).group(1))
+        if n != 2:
+            raise AssertionError(f"while FrameNum={n} pc={pc} want 2 (init+main)")
+        frames = frame_dirs(store)
+        if len(frames) != 2:
+            raise AssertionError(f"while extra frames: {frames} pc={pc}")
+        print(f"  while pc={pc} frames={frames} stderr={r.stderr.strip()[:80]!r}")
+    finally:
+        shutil.rmtree(store, ignore_errors=True)
+
+
+def exp_else_recursion_flat() -> None:
+    store = Path(tempfile.mkdtemp(prefix="i116-rec-"))
+    try:
+        src = """rwfunc rec(n:int64) -> (r:int64) {
+    if (n <= 0) {
+        1 ÷ 0 -> r
+    } else {
+        n - 1 -> n1
+        rec(n1) -> r
+    }
+}
+rec(3)
+"""
+        layout_and_run(src, store)
+        pc = read_pc(store)
+        assert_pc_flat(pc, "else-rec")
+        n = int(re.search(r"/\[(\d+)\]/", pc).group(1))
+        if n != 5:
+            raise AssertionError(f"else-rec FrameNum={n} pc={pc} want 5 (init+rec×4)")
+        print(f"  else-rec pc={pc} FrameNum={n} len={len(pc)}")
+    finally:
+        shutil.rmtree(store, ignore_errors=True)
+
+
+def exp_pc_len_vs_depth() -> None:
+    """PC byte length must stay ~constant as depth grows (not +14B/level)."""
+    rows = []
+    for depth in (3, 8, 15):
+        store = Path(tempfile.mkdtemp(prefix=f"i116-d{depth}-"))
+        try:
+            src = f"""rwfunc rec(n:int64) -> (r:int64) {{
+    if (n <= 0) {{
+        1 ÷ 0 -> r
+    }} else {{
+        n - 1 -> n1
+        rec(n1) -> r
+    }}
+}}
+rec({depth})
+"""
+            layout_and_run(src, store)
+            pc = read_pc(store)
+            assert_pc_flat(pc, f"depth={depth}")
+            n = int(re.search(r"/\[(\d+)\]/", pc).group(1))
+            rows.append((depth, n, len(pc), pc))
+        finally:
+            shutil.rmtree(store, ignore_errors=True)
+    print("  depth  FrameNum  PClen  PC")
+    for depth, n, L, pc in rows:
+        print(f"  {depth:5d}  {n:8d}  {L:5d}  {pc}")
+    lengths = [L for _, _, L, _ in rows]
+    # old model PC(d) ≈ 22+14(d-1); d=15 → ~218. new: ~23–26.
+    if max(lengths) - min(lengths) > 4:
+        raise AssertionError(f"PC length grew too much across depths: {rows}")
+    if max(lengths) > 40:
+        raise AssertionError(f"PC still O(D)? {rows}")
+
+
+def exp_stack_overflow_flat() -> None:
+    store = Path(tempfile.mkdtemp(prefix="i116-ovf-"))
+    try:
+        src = Path(ROOT / "tutorial/error_cases/recursion_error/stack_overflow.kv").read_text()
+        r = layout_and_run(src, store)
+        pc = read_pc(store)
+        assert_pc_flat(pc, "overflow")
+        n = int(re.search(r"/\[(\d+)\]/", pc).group(1))
+        if n != 257:
+            raise AssertionError(f"overflow FrameNum={n} pc={pc} want 257 (MaxStackDepth+1)")
+        err = r.stderr + r.stdout
+        if "RecursionError" not in err and "stack overflow" not in err:
+            raise AssertionError(f"overflow missing RecursionError: {err[:300]}")
+        print(f"  overflow pc={pc} FrameNum={n} len={len(pc)}")
     finally:
         shutil.rmtree(store, ignore_errors=True)
 
@@ -197,6 +349,7 @@ def exp_if_crash_same_frame() -> None:
 main()
 """,
         "if-then-crash",
+        2,
     )
     run_crash(
         """rwfunc main() -> () {
@@ -209,6 +362,7 @@ main()
 main()
 """,
         "if-else-crash",
+        2,
     )
 
 
@@ -280,6 +434,7 @@ def exp_nested_while_if_crash() -> None:
 main()
 """,
         "nest-while-if-crash",
+        2,
     )
 
 
@@ -324,7 +479,7 @@ def exp_tutorial_control() -> None:
             if missing:
                 raise AssertionError(f"{f.name}: missing {missing} stdout={out[:400]!r}")
             assert_no_vthread_scope(store, f.name)
-            print(f"  tutorial {f.name} ok")
+            print(f"  tutorial {f.name} ok frames={frame_dirs(store)}")
         finally:
             shutil.rmtree(store, ignore_errors=True)
 
@@ -355,6 +510,11 @@ def main() -> int:
             return 2
     tests = [
         ("lib-no-scope-keys", exp_lib_no_scope_keys),
+        ("bootstrap-depth1", exp_bootstrap_depth1),
+        ("while-same-frame", exp_while_same_frame),
+        ("else-recursion-flat", exp_else_recursion_flat),
+        ("pc-len-vs-depth", exp_pc_len_vs_depth),
+        ("stack-overflow-flat", exp_stack_overflow_flat),
         ("if-then-result", exp_if_then_result),
         ("if-else-result", exp_if_else_result),
         ("if-crash-same-frame", exp_if_crash_same_frame),

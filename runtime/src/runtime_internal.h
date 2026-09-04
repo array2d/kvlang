@@ -133,6 +133,7 @@ kvlangKv_t *kvlangKvConnect(const char *dsn);
 void kvlangKvDisconnect(kvlangKv_t *k);
 int kvlangKvGetOne(kvlangKv_t *k, const char *key, kvlangXvalue_t *out);   /* None → out len=0 */
 int kvlangKvGetBatch(kvlangKv_t *k, const char *prefix, char **names, int n, kvlangXvalue_t *out);
+int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXvalue_t *out);
 int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, uint32_t err_cap);
 int kvlangKvDel(kvlangKv_t *k, const char *key, char *err, uint32_t err_cap);
 int kvlangKvDelTree(kvlangKv_t *k, const char *prefix, char *err, uint32_t err_cap);
@@ -161,7 +162,8 @@ const char *kvlangKeytreeVtidFromPc(const char *pc, kvlangStrbuf_t *out);   /* "
 char *kvlangKeytreeStack(const char *root);                            /* malloc */
 char *kvlangKeytreeFrameRoot(const char *pc);                         /* malloc，无效 NULL */
 char *kvlangKeytreeEntryPc(const char *root);                         /* malloc */
-char *kvlangKeytreeParentFrame(const char *root);                     /* malloc，"" 顶层 */
+char *kvlangKeytreeFrameAt(const char *vtid, int depth);             /* malloc */
+int   kvlangKeytreeFrameNum(const char *path);                        /* [d]; panics if invalid */
 char *kvlangKeytreeIrseqPc(const char *frame_root, int irseq);        /* malloc */
 char *kvlangKeytreeMember(const char *base, const char *name);         /* malloc */
 char *kvlangKeytreeLibFunc(const char *pkg, const char *name);        /* malloc */

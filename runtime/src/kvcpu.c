@@ -37,12 +37,6 @@ static char *jump_irseq(const char *pc, int irseq) {
     return np;
 }
 
-static int stack_depth(const char *pc) {
-    int d = 0;
-    for (; *pc; pc++) if (*pc == '[') d++;
-    return d;
-}
-
 static bool is_literal(const char *s) {
     if (!s || !s[0]) return false;
     return s[0] == '"' || s[0] == '/' || strcmp(s, "true") == 0 || strcmp(s, "false") == 0 ||
@@ -138,61 +132,65 @@ static char *frame_slot_key(const char *frame_root, const char *slot) {
 static char *resolve_read_path(kvlangKv_t *kv, const char *frame_path, const char *name) {
     if (is_literal(name)) return NULL;
     char *func_frame = kvlangBuiltinFuncFrameRoot(kv, frame_path);
-    kvlangStrbuf_t k; kvlangStrbufInit(&k);
     char *stk = kvlangKeytreeStack(func_frame);
-    kvlangStrbufPuts(&k, stk); free(stk);
-    kvlangStrbufPuts(&k, name);
     kvlangXvalue_t v; kvlangXvalueZero(&v);
-    kvlangKvGetOne(kv, k.p, &v);
+    kvlangKvGetMember(kv, stk, name, &v);
     char *result = NULL;
     if (kvlangXvalueNone(&v)) {
         result = frame_slot_key(func_frame, name);
     } else if (kvlangXvalueIsPtr(&v)) {
         char *target = kvlangXvaluePtrTarget(&v);
-        kvlangStrbuf_t path; kvlangStrbufInit(&path);
-        char *stk2 = kvlangKeytreeStack(func_frame);
-        kvlangStrbufPuts(&path, stk2); free(stk2);
-        kvlangStrbufPuts(&path, target);
-        free(target);
-        for (;;) {
-            kvlangXvalue_t nv; kvlangXvalueZero(&nv);
-            kvlangKvGetOne(kv, path.p, &nv);
-            if (kvlangXvalueNone(&nv) || !kvlangXvalueIsCharKind(kvlangXvalueKind(&nv))) { result = kvlangStrbufDetach(&path); kvlangXvalueFree(&nv); break; }
-            char *p2 = kvlangXvalueValueString(&nv);
+        kvlangXvalue_t nv; kvlangXvalueZero(&nv);
+        kvlangKvGetMember(kv, stk, target, &nv);
+        if (kvlangXvalueNone(&nv) || !kvlangXvalueIsCharKind(kvlangXvalueKind(&nv))) {
+            result = frame_slot_key(func_frame, target);
             kvlangXvalueFree(&nv);
-            kvlangStrbufClear(&path); kvlangStrbufPuts(&path, p2);
-            free(p2);
+        } else {
+            char *path = kvlangXvalueValueString(&nv);
+            kvlangXvalueFree(&nv);
+            for (;;) {
+                kvlangXvalue_t hop; kvlangXvalueZero(&hop);
+                kvlangKvGetOne(kv, path, &hop);
+                if (kvlangXvalueNone(&hop) || !kvlangXvalueIsCharKind(kvlangXvalueKind(&hop))) {
+                    kvlangXvalueFree(&hop);
+                    result = path;
+                    break;
+                }
+                char *p2 = kvlangXvalueValueString(&hop);
+                kvlangXvalueFree(&hop);
+                free(path);
+                path = p2;
+            }
         }
+        free(target);
     } else {
-        kvlangStrbuf_t b; kvlangStrbufInit(&b);
-        char *stk3 = kvlangKeytreeStack(func_frame);
-        kvlangStrbufPuts(&b, stk3); free(stk3);
-        kvlangStrbufPuts(&b, name);
-        result = kvlangStrbufDetach(&b);
+        result = frame_slot_key(func_frame, name);
     }
-    kvlangXvalueFree(&v); kvlangStrbufFree(&k); free(func_frame);
+    kvlangXvalueFree(&v); free(stk); free(func_frame);
     return result;
 }
 
 static char *handle_return(kvlangKv_t *kv, const char *pc) {
-    kvlangStrbuf_t vtid_b; kvlangStrbufInit(&vtid_b);
-    const char *vtid = kvlangKeytreeVtidFromPc(pc, &vtid_b);
-    kvlangStrbuf_t vtroot; kvlangStrbufInit(&vtroot);
-    kvlangKeytreeVthread(vtid, &vtroot);
     char *fr = kvlangKeytreeFrameRoot(pc);
-    if (strcmp(fr, vtroot.p) == 0) { free(fr); kvlangStrbufFree(&vtid_b); kvlangStrbufFree(&vtroot); return NULL; }
-    kvlangStrbuf_t rk; kvlangStrbufInit(&rk);
-    kvlangKeytreeFrameReturnpc(fr, &rk);
-    kvlangXvalue_t v; kvlangXvalueZero(&v);
-    kvlangKvGetOne(kv, rk.p, &v);
-    char *next = kvlangXvalueNone(&v) ? strdup("") : kvlangXvalueValueString(&v);
-    kvlangXvalueFree(&v);
+    if (!fr) die("HandleReturn: no frame root: %s", pc);
+    int d = kvlangKeytreeFrameNum(fr);
+    char *next = NULL;
+    if (d > 1) {
+        kvlangStrbuf_t rk; kvlangStrbufInit(&rk);
+        kvlangKeytreeFrameReturnpc(fr, &rk);
+        kvlangXvalue_t v; kvlangXvalueZero(&v);
+        kvlangKvGetOne(kv, rk.p, &v);
+        if (kvlangXvalueNone(&v)) die("HandleReturn: missing ‥returnpc at %s", fr);
+        next = kvlangXvalueValueString(&v);
+        kvlangXvalueFree(&v);
+        kvlangStrbufFree(&rk);
+        if (!next || !next[0]) die("HandleReturn: empty ‥returnpc at %s", fr);
+    }
     char *stk = kvlangKeytreeStack(fr);
     char err[256];
     kvlangKvDelExtIndex(kv, stk, err, sizeof err);
     kvlangKvDelTree(kv, fr, err, sizeof err);
-    free(stk); free(fr); kvlangStrbufFree(&rk);
-    kvlangStrbufFree(&vtid_b); kvlangStrbufFree(&vtroot);
+    free(stk); free(fr);
     return next;
 }
 
@@ -293,10 +291,11 @@ static char *handle_call(kvlangKv_t *kv, const char *pc, kvlangRwirInst_t *inst)
     }
 
     char *caller_fr = kvlangKeytreeFrameRoot(pc);
-    char *frame_root = strdup(pc);
-
-    char *stack_fr = kvlangKeytreeStack(frame_root);
+    int d = kvlangKeytreeFrameNum(pc);
+    char *frame_root = kvlangKeytreeFrameAt(vtid, d + 1);
     char err[256];
+    kvlangKvDelTree(kv, frame_root, err, sizeof err);
+    char *stack_fr = kvlangKeytreeStack(frame_root);
     kvlangKvMkindex(kv, stack_fr, err, sizeof err);
     kvlangKvExtIndex(kv, stack_fr, func_dir.p, err, sizeof err);
 
@@ -496,15 +495,15 @@ char *kvlangKvcpuBootstrap(kvlangKv_t *kv, const char *vtid, const char *funcnam
     const uint8_t *sbody = sig.data + h.body_offset;
     int nr = sbody[0] | (sbody[1] << 8);
 
-    kvlangStrbuf_t vtroot; kvlangStrbufInit(&vtroot); kvlangKeytreeVthread(vtid, &vtroot);
-    char *stack_vt = kvlangKeytreeStack(vtroot.p);
+    char *frame_root = kvlangKeytreeFrameAt(vtid, 1);
+    char *stack_fr = kvlangKeytreeStack(frame_root);
     char err[256];
-    kvlangKvMkindex(kv, stack_vt, err, sizeof err);
-    kvlangKvExtIndex(kv, stack_vt, func_dir.p, err, sizeof err);
+    kvlangKvMkindex(kv, stack_fr, err, sizeof err);
+    kvlangKvExtIndex(kv, stack_fr, func_dir.p, err, sizeof err);
 
-    char *ep = kvlangKeytreeEntryPc(vtroot.p);
-    kvlangStrbuf_t callpc; kvlangStrbufInit(&callpc); kvlangKeytreeFrameCallpc(vtroot.p, &callpc);
-    kvlangStrbuf_t seglib; kvlangStrbufInit(&seglib); kvlangStrbufPuts(&seglib, stack_vt); kvlangStrbufPuts(&seglib, SEG_LIB);
+    char *ep = kvlangKeytreeEntryPc(frame_root);
+    kvlangStrbuf_t callpc; kvlangStrbufInit(&callpc); kvlangKeytreeFrameCallpc(frame_root, &callpc);
+    kvlangStrbuf_t seglib; kvlangStrbufInit(&seglib); kvlangStrbufPuts(&seglib, stack_fr); kvlangStrbufPuts(&seglib, SEG_LIB);
     kvlangXvalue_t v_ep, v_fn; kvlangXvalueZero(&v_ep); kvlangXvalueZero(&v_fn);
     kvlangXvalueNewCharUtf8(&v_ep, ep);
     kvlangXvalueNewCharUtf8(&v_fn, func_key);
@@ -516,7 +515,7 @@ char *kvlangKvcpuBootstrap(kvlangKv_t *kv, const char *vtid, const char *funcnam
         kvlangKvPair_t pairs[128]; int np = 0;
         for (int i = 0; i < nr && i < nargs; i++) {
             kvlangStrbuf_t slot; kvlangStrbufInit(&slot);
-            kvlangStrbufPrintf(&slot, "%s/[0,-%d]", vtroot.p, i + 1);
+            kvlangStrbufPrintf(&slot, "%s/[0,-%d]", frame_root, i + 1);
             kvlangXvalue_t av; kvlangXvalueZero(&av);
             kvlangBuiltinResolveReadValue(kv, "", args[i], NULL, &av);
             pairs[np].key = kvlangStrbufDetach(&slot);
@@ -528,8 +527,8 @@ char *kvlangKvcpuBootstrap(kvlangKv_t *kv, const char *vtid, const char *funcnam
     }
 
     kvlangXvalueFree(&sig); kvlangStrbufFree(&sig_key); kvlangStrbufFree(&func_dir);
-    kvlangStrbufFree(&vtroot); kvlangStrbufFree(&callpc); kvlangStrbufFree(&seglib);
-    free(stack_vt); free(func_key); free(pkg); free(name);
+    kvlangStrbufFree(&callpc); kvlangStrbufFree(&seglib);
+    free(stack_fr); free(frame_root); free(func_key); free(pkg); free(name);
     return ep;
 }
 
@@ -550,7 +549,7 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode, char *
         }
         free(pcv); free(status);
 
-        int depth = stack_depth(cur);
+        int depth = kvlangKeytreeFrameNum(cur);
         if (depth > MAX_STACK_DEPTH) {
             char msg[256];
             snprintf(msg, sizeof msg, "RecursionError: stack overflow: depth=%d pc=%s", depth, cur);

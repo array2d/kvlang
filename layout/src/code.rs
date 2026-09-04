@@ -711,4 +711,30 @@ mod tests {
             &mut labels,
         );
     }
+
+    #[test]
+    fn frame_num_roundtrip() {
+        let root = keytree::frame_at("7", 3);
+        assert_eq!(root, "/vthread/7/[3]");
+        assert_eq!(keytree::frame_num(&root), 3);
+        let pc = keytree::entry_pc(&root);
+        assert_eq!(pc, "/vthread/7/[3]/[1,0]");
+        assert_eq!(keytree::frame_root(&pc), root);
+        assert_eq!(keytree::frame_num(&pc), 3);
+        assert_eq!(keytree::irseq_pc(&root, 5), "/vthread/7/[3]/[5,0]");
+        assert!(keytree::is_entry_pc(&pc));
+        assert!(!keytree::is_entry_pc(&keytree::irseq_pc(&root, 2)));
+    }
+
+    #[test]
+    #[should_panic(expected = "expected [d]")]
+    fn frame_num_rejects_old_nested_pc() {
+        let _ = keytree::frame_num("/vthread/7/[3,0]/[1,0]");
+    }
+
+    #[test]
+    #[should_panic(expected = "expected /[irseq,j]")]
+    fn frame_num_rejects_scope_segment() {
+        let _ = keytree::frame_num("/vthread/7/[1]/_else_1/[0,0]");
+    }
 }

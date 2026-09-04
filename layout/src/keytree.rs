@@ -81,7 +81,7 @@ pub fn return_pc(root: &str) -> String {
     frame_member(root, SEG_RETURNPC)
 }
 
-/// 从 PC 提取帧根（pc 形如 /vthread/42/[3,0] 或 /vthread/42/[3]/[5,0]）。
+/// Frame root of a PC (`/vthread/42/[3]/[5,0]` → `/vthread/42/[3]`).
 pub fn frame_root(pc: &str) -> &str {
     if let Some(idx) = pc.rfind("/[") {
         &pc[..idx]
@@ -96,6 +96,54 @@ pub fn entry_pc(root: &str) -> String {
 
 pub fn is_entry_pc(pc: &str) -> bool {
     pc.ends_with("/[1,0]")
+}
+
+/// `/vthread/<vtid>/[<depth>]`
+pub fn frame_at(vtid: &str, depth: i32) -> String {
+    if vtid.is_empty() {
+        panic!("frame_at: empty vtid");
+    }
+    if depth < 1 {
+        panic!("frame_at: depth {depth} < 1");
+    }
+    format!("{VTHREAD_ROOT}/{vtid}/[{depth}]")
+}
+
+/// Frame number from `/vthread/<vtid>/[<d>]` or `/vthread/<vtid>/[<d>]/[irseq,j]`.
+pub fn frame_num(path: &str) -> i32 {
+    let vtid = vtid_from_pc(path);
+    if vtid.is_empty() {
+        panic!("frame_num: not a vthread path: {path:?}");
+    }
+    let prefix = format!("{VTHREAD_ROOT}/{vtid}/");
+    let rest = path.strip_prefix(&prefix).unwrap_or_else(|| panic!("frame_num: not a vthread path: {path:?}"));
+    if !rest.starts_with('[') {
+        panic!("frame_num: no frame coord in {path:?}");
+    }
+    let end = rest.find(']').unwrap_or_else(|| panic!("frame_num: unterminated frame coord in {path:?}"));
+    let coord = &rest[1..end];
+    if coord.is_empty() || coord.contains(',') {
+        panic!("frame_num: expected [d] frame coord, got {:?} in {path:?}", &rest[..=end]);
+    }
+    let n: i32 = coord.parse().unwrap_or(0);
+    if n < 1 {
+        panic!("frame_num: invalid frame number {coord:?} in {path:?}");
+    }
+    let after = &rest[end + 1..];
+    match after {
+        "" | "/" => {}
+        s if s.starts_with("/[") => {
+            let tail = &s[1..];
+            if tail.contains('/') {
+                panic!("frame_num: nested path after [d]: {path:?}");
+            }
+            if !tail.contains(',') {
+                panic!("frame_num: expected [irseq,j] after [d] in {path:?}");
+            }
+        }
+        _ => panic!("frame_num: expected /[irseq,j] after [d], got {after:?} in {path:?}"),
+    }
+    n
 }
 
 pub fn irseq_pc(frame_root: &str, irseq: i32) -> String {

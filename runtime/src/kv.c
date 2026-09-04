@@ -33,6 +33,14 @@ int kvlangKvGetOne(kvlangKv_t *k, const char *key, kvlangXvalue_t *out) {
     return 0;
 }
 
+/* Frame member: GetBatch(dir, name). Full-path Get does not ext-fallback on [d] frames. */
+int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXvalue_t *out) {
+    kvlangXvalueZero(out);
+    if (!name || !name[0]) return 0;
+    char *nm = (char *)name;
+    return kvlangKvGetBatch(k, dir, &nm, 1, out);
+}
+
 int kvlangKvGetBatch(kvlangKv_t *k, const char *prefix, char **names, int n, kvlangXvalue_t *out) {
     for (int i = 0; i < n; i++) kvlangXvalueZero(&out[i]);
     const char **ns = malloc(sizeof(char *) * (size_t)n);

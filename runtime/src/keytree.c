@@ -50,6 +50,50 @@ static void keytree_die(const char *fmt, ...) {
     abort();
 }
 
+char *kvlangKeytreeFrameAt(const char *vtid, int depth) {
+    if (!vtid || !vtid[0]) keytree_die("FrameAt: empty vtid");
+    if (depth < 1) keytree_die("FrameAt: depth %d < 1", depth);
+    kvlangStrbuf_t b; kvlangStrbufInit(&b);
+    kvlangStrbufPrintf(&b, "%s/%s/[%d]", VTHREAD_ROOT, vtid, depth);
+    return kvlangStrbufDetach(&b);
+}
+
+int kvlangKeytreeFrameNum(const char *path) {
+    kvlangStrbuf_t vtid_b; kvlangStrbufInit(&vtid_b);
+    const char *vtid = kvlangKeytreeVtidFromPc(path, &vtid_b);
+    if (!vtid[0]) keytree_die("FrameNum: not a vthread path: %s", path);
+    kvlangStrbuf_t pfx; kvlangStrbufInit(&pfx);
+    kvlangKeytreeVthread(vtid, &pfx);
+    kvlangStrbufPutc(&pfx, '/');
+    if (strncmp(path, pfx.p, pfx.len) != 0) keytree_die("FrameNum: not a vthread path: %s", path);
+    const char *rest = path + pfx.len;
+    if (rest[0] != '[') keytree_die("FrameNum: no frame coord in %s", path);
+    const char *end = strchr(rest, ']');
+    if (!end) keytree_die("FrameNum: unterminated frame coord in %s", path);
+    size_t clen = (size_t)(end - (rest + 1));
+    if (clen == 0 || memchr(rest + 1, ',', clen)) {
+        keytree_die("FrameNum: expected [d] frame coord in %s", path);
+    }
+    char buf[32];
+    if (clen >= sizeof buf) keytree_die("FrameNum: frame coord too long in %s", path);
+    memcpy(buf, rest + 1, clen); buf[clen] = 0;
+    char *ep = NULL;
+    long n = strtol(buf, &ep, 10);
+    if (ep == buf || *ep != 0 || n < 1) keytree_die("FrameNum: invalid frame number %s in %s", buf, path);
+    const char *after = end + 1;
+    if (after[0] == 0 || (after[0] == '/' && after[1] == 0)) {
+        /* frame root */
+    } else if (after[0] == '/' && after[1] == '[') {
+        const char *tail = after + 1;
+        if (strchr(tail, '/')) keytree_die("FrameNum: nested path after [d]: %s", path);
+        if (!strchr(tail, ',')) keytree_die("FrameNum: expected [irseq,j] after [d] in %s", path);
+    } else {
+        keytree_die("FrameNum: expected /[irseq,j] after [d] in %s", path);
+    }
+    kvlangStrbufFree(&vtid_b); kvlangStrbufFree(&pfx);
+    return (int)n;
+}
+
 char *kvlangKeytreeIrseqPc(const char *frame_root, int irseq) {
     if (irseq < 0) keytree_die("IrseqPC: irseq %d < 0", irseq);
     kvlangStrbuf_t b; kvlangStrbufInit(&b);
@@ -58,19 +102,6 @@ char *kvlangKeytreeIrseqPc(const char *frame_root, int irseq) {
     kvlangStrbufPutn(&b, frame_root, n);
     kvlangStrbufPrintf(&b, "/[%d,0]", irseq);
     return kvlangStrbufDetach(&b);
-}
-
-char *kvlangKeytreeParentFrame(const char *root) {
-    size_t n = strlen(root);
-    while (n > 0 && root[n - 1] == '/') n--;
-    if (n == 0) return strdup("");
-    size_t last = (size_t)-1;
-    for (size_t i = 0; i < n; i++) if (root[i] == '/') last = i;
-    if (last == (size_t)-1) return strdup("");
-    size_t cut = last + 1;
-    char *r = malloc(cut + 1);
-    memcpy(r, root, cut); r[cut] = 0;
-    return r;
 }
 
 char *kvlangKeytreeMember(const char *base, const char *name) {
