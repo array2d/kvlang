@@ -1,15 +1,15 @@
-# json_local: 局部变量 object/stringkeymap → json 转换
-# extern: 需先启动 redis 与 json rwirext 两个外部进程
-#   1) make kvspace                                           # 起 redis 并清空 kvspace
-#   2) go build -o /tmp/json-rwirext ./rwirext/json/cmd/ && /tmp/json-rwirext &
-#   3) ./kvlang tutorial/10-rwirext/json_local.kv
-# 语义: json·to 接受局部 object/stringkeymap 变量（resolve 到帧槽路径后序列化）。
-#       object 局部变量（{} + kv·set）→ JSON 对象；stringkeymap 局部变量（{..} 散 key
-#       数组）→ JSON 数组。散 key 数组成员名是坐标段 "[i]"。
-# 期望输出:
-#   profile = {"active":true,"age":42,"name":"alice","nums":[1,2,3],"score":3.14}
-#   map = [10,20,30]
-#   tags = ["a","b","c"]
+// json_local: 局部变量 object/stringkeymap → json 转换
+// extern: 需先启动 redis 与 json rwirext 两个外部进程
+//   1) make kvspace                                           # 起 redis 并清空 kvspace
+//   2) go build -o /tmp/json-rwirext ./rwirext/json/cmd/ && /tmp/json-rwirext &
+//   3) ./kvlang tutorial/10-rwirext/json_local.kv
+// 语义: json·to 接受局部 object/stringkeymap 变量（resolve 到帧槽路径后序列化）。
+//       object 局部变量（{} + kv·set）→ JSON 对象；stringkeymap 局部变量（{..} 散 key
+//       数组）→ JSON 数组。散 key 数组成员名是坐标段 "[i]"。
+// 期望输出:
+//   profile = {"active":true,"age":42,"name":"alice","nums":[1,2,3],"score":3.14}
+//   map = [10,20,30]
+//   tags = ["a","b","c"]
 rwfunc main() -> () {
 	profile = {}
 	kv·set(profile, "name", "alice")

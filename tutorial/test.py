@@ -34,33 +34,33 @@ def discover(root: Path) -> list[Path]:
 
 
 def parse_expects(f: Path) -> list[str]:
-    """从 .kv 文件头提取 # 期望输出 行，去掉注释前缀和尾部说明。"""
+    """从 .kv 文件头提取 // 期望输出 行，去掉注释前缀和尾部说明。"""
     pats = []
     in_block = False
     with open(f) as fh:
         for line in fh:
             line = line.rstrip("\n")
-            if line.startswith("# 期望输出"):
+            if line.startswith("// 期望输出"):
                 in_block = True
                 continue
             if in_block:
-                if line.startswith("#   ") or line.startswith("# \t"):
-                    p = line[2:].strip()
+                if line.startswith("//   ") or line.startswith("// \t"):
+                    p = line[3:].strip()
                     p = re.sub(r"\s*\(.*\)\s*$", "", p)
                     if p:
                         pats.append(p)
-                elif not line.startswith("#"):
+                elif not line.startswith("//"):
                     break
     return pats
 
 
 def _needs_skip(f: Path) -> bool:
-    """文件头含 # extern 或 # wip 标记 = 不参与自动测试（外部 rwirext / 待实现特性）。"""
+    """文件头含 // extern 或 // wip 标记 = 不参与自动测试（外部 rwirext / 待实现特性）。"""
     with open(f) as fh:
         for line in fh:
-            if line.startswith("# extern") or line.startswith("# wip"):
+            if line.startswith("// extern") or line.startswith("// wip"):
                 return True
-            if line and not line.startswith("#"):
+            if line and not line.startswith("//"):
                 return False
     return False
 
@@ -335,7 +335,7 @@ class BenchmarkTest(unittest.TestCase):
 
     def write_fixture(self, python_output="answer 42", include_c=True):
         source = self.tutorial / "case.kv"
-        source.write_text("# 期望输出:\n#   answer 42\n", encoding="utf-8")
+        source.write_text("// 期望输出:\n//   answer 42\n", encoding="utf-8")
         source.with_suffix(".py").write_text(
             f"print({python_output!r})\n", encoding="utf-8",
         )

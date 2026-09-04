@@ -1,7 +1,7 @@
-# 期望输出:
-#   array kindexpr= [4]int64 bodylen= 32
-#   scalar kindexpr= int64 bodylen= 8
-#   string kindexpr= [2]char/utf8 bodylen= 2
+// 期望输出:
+//   array kindexpr= [4]int64 bodylen= 32
+//   scalar kindexpr= int64 bodylen= 8
+//   string kindexpr= [2]char/utf8 bodylen= 2
 rwfunc test() -> () {
 	a:[]int64 = [10, 20, 30, 40]
 	xv·kindexpr(a) -> ka

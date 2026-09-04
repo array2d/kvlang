@@ -1,6 +1,6 @@
-# 欢迎加入kvspace世界
+// 欢迎加入kvspace世界
 lib kvlang/deepdive/runtime/06_c_runtime_and_backend_abstraction {
-	"""# runtime篇-06: C 运行时与后端抽象
+	r#"# runtime篇-06: C 运行时与后端抽象
 
 > 状态：与实现同步。代码：`kvlang/runtime/`（纯 C）、`kvlang/runtime-rwirext_example/rust/term/`、`kvlang/runtime-rwirext_example/go/json/`、`kvlang/runtime-rwirext_example/py/numpy/`、`array2d/kvspace-c/`（SHM）、`array2d/kvspace-durable/`（fs/redis）。
 
@@ -77,5 +77,5 @@ kvspaceNewPtr / NewChar / NewBool / NewInt64 / NewFloat64
 Go runtime 为 136/136 baseline（`goheap://` 进程内，无 RTT/文件 I/O）。
 
 **后端存储布局差异（非语义 bug）**：fs 后端（`kvspace-durable/src/fs`）把成员分隔符 `·`（OBJ_SEP）编码为 `·/`——尾中点目录 + `/` 目录边界，故限定名 `/lib/math·sum` 在 fs 上呈嵌套目录 `lib/math·/sum`，而 redis/shm 后端存为扁平单键 `/lib/math·sum`。读写经对称编解码还原（`·/`↔`·`），三后端语义一致。
-""" -> /lib/kvlang/deepdive/runtime/06_c_runtime_and_backend_abstraction
+"# -> /lib/kvlang/deepdive/runtime/06_c_runtime_and_backend_abstraction
 }

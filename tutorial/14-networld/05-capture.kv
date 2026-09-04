@@ -1,11 +1,11 @@
-# networld/proc·exec：捕获子进程 stdout/stderr
-#   exec(args, envs) -> code, out, err。绑定 out/err 写槽即捕获（未绑定则继承父终端）
-#   out/err 是 @[]uint8 扩展句柄：body 指向 /networld/{host}/proc/{pid}/{stdout,stderr}
-#   读该句柄时按 body 前缀路由回 /lib/networld/proc 兑现物理字节
-# 期望输出:
-#   code= 0
-#   out= hi
-#   err= oops
+// networld/proc·exec：捕获子进程 stdout/stderr
+//   exec(args, envs) -> code, out, err。绑定 out/err 写槽即捕获（未绑定则继承父终端）
+//   out/err 是 @[]uint8 扩展句柄：body 指向 /networld/{host}/proc/{pid}/{stdout,stderr}
+//   读该句柄时按 body 前缀路由回 /lib/networld/proc 兑现物理字节
+// 期望输出:
+//   code= 0
+//   out= hi
+//   err= oops
 rwfunc test() -> () {
 	noenv = map()
 	a = {"sh", "-c", "echo hi; echo oops 1>&2"}

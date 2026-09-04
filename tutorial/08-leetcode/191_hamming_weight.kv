@@ -1,10 +1,10 @@
-# 191: Number of 1 Bits — 汉明重量
-# 来源: LeetCode #191
-# 期望输出:
-#   3
+// 191: Number of 1 Bits — 汉明重量
+// 来源: LeetCode #191
+// 期望输出:
+//   3
 rwfunc hamming(n:int64) -> () {
 	n -> nv
-	count = 0  # = 等价于 <-
+	count = 0  // = 等价于 <-
 	while (nv > 0) {
 		nv % 2 -> bit
 
@@ -12,7 +12,7 @@ rwfunc hamming(n:int64) -> () {
 			count <- count + 1
 		}
 
-		nv = nv ÷ 2  # = 等价于 <-
+		nv = nv ÷ 2  // = 等价于 <-
 	}
 	println(count)
 }

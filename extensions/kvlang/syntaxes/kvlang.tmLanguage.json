@@ -4,9 +4,9 @@
   "fileTypes": [],
   "patterns": [
     { "include": "#line_comment" },
-    { "include": "#string_triple" },
-    { "include": "#string_double" },
+    { "include": "#block_comment" },
     { "include": "#string_raw" },
+    { "include": "#string_double" },
     { "include": "#keypath_single" },
     { "include": "#keyword" },
     { "include": "#type" },
@@ -17,23 +17,27 @@
   ],
   "repository": {
     "line_comment": {
-      "name": "comment.line.kvlang",
-      "match": "(#|//).*$"
+      "name": "comment.line.double-slash.kvlang",
+      "match": "//.*$"
     },
-    "string_triple": {
-      "name": "string.quoted.triple.kvlang",
-      "begin": "\"\"\"",
-      "end": "\"\"\""
+    "block_comment": {
+      "name": "comment.block.kvlang",
+      "begin": "/\\*",
+      "end": "\\*/",
+      "patterns": [{ "include": "#block_comment" }]
+    },
+    "string_raw": {
+      "name": "string.quoted.raw.kvlang",
+      "begin": "r(#*)\"",
+      "end": "\"\\1"
     },
     "string_double": {
       "name": "string.quoted.double.kvlang",
       "begin": "\"",
-      "end": "\""
-    },
-    "string_raw": {
-      "name": "string.quoted.raw.kvlang",
-      "begin": "`",
-      "end": "`"
+      "end": "\"",
+      "patterns": [
+        { "name": "constant.character.escape.kvlang", "match": "\\\\." }
+      ]
     },
     "keypath_single": {
       "name": "string.quoted.single.kvlang",
@@ -42,7 +46,7 @@
     },
     "keyword": {
       "name": "keyword.control.kvlang",
-      "match": "\\b(rwfunc|rwir|if|else|for|while|break|continue|return)\\b"
+      "match": "\\b(rwfunc|rwir|lib|if|else|for|while|break|continue|return)\\b"
     },
     "block_label": {
       "name": "entity.name.label.kvlang",
@@ -50,7 +54,7 @@
     },
     "type": {
       "name": "storage.type.kvlang",
-      "match": "\\b(int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64|bool|charbyte)\\b"
+      "match": "\\b(int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64|bool|char|utf8|utf32|object|stringkeymap)\\b"
     },
     "number": {
       "name": "constant.numeric.kvlang",
@@ -58,7 +62,7 @@
     },
     "operator": {
       "name": "keyword.operator.kvlang",
-      "match": "[+\\-*/%]|==|!=|<=|>=|<|>|&&|\\|\\||!"
+      "match": "[+\\-×÷%]|==|!=|<=|>=|<|>|&&|\\|\\||!"
     },
     "arrow": {
       "name": "keyword.operator.arrow.kvlang",

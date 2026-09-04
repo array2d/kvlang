@@ -1,6 +1,6 @@
-# 欢迎加入kvspace世界
+// 欢迎加入kvspace世界
 lib kvlang/deepdive/runtime/04_function_call_builtin {
-	"""# 函数调用（layout → runtime）
+	r#"# 函数调用（layout → runtime）
 
 ## 三种调用形态，收敛到同一 KV key
 
@@ -76,5 +76,5 @@ native 算子按类别注册于 `runtime/src/builtin*.c`（无独立包目录）
 - 带 `·` 的方法：`string·* xv·* kv·* ndarray·* array·* vthread·* time·* random·intn`、`debugger`、`print`/`println`
 
 kind 的字节宽由 `kvlangXvalueElemSize(kind)` 决定（char/utf8=1，int32/float32=4，int64/float64=8 …），数组与字符串的元素访问据此零拷贝定位。
-""" -> /lib/kvlang/deepdive/runtime/04_function_call_builtin
+"# -> /lib/kvlang/deepdive/runtime/04_function_call_builtin
 }

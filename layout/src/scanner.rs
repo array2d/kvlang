@@ -115,7 +115,7 @@ pub struct Token {
     pub kind: Kind,
     pub value: String,
     pub pos: Pos,
-    pub quote: u8, // 0=无, '"'=", '`'=`
+    pub quote: u8, // 0=无, '"'=转义串 "...", 'r'=原始串 r#"..."#
 }
 
 impl Token {
@@ -188,28 +188,58 @@ fn scan_quoted(src: &[u8], mut i: usize, quote: u8) -> (String, usize) {
     (String::from_utf8_lossy(&b).into_owned(), src.len())
 }
 
-/// 三引号字符串 `"""..."""` —— 跨行，转义（对标 Python triple-quote）。
-/// 起始 `i` 指向开头的第一个 `"`，返回（内容，闭合 `"""` 之后的字节下标）。
-fn scan_triple_quoted(src: &[u8], mut i: usize) -> (String, usize) {
-    i += 3;
-    let mut b: Vec<u8> = Vec::new();
-    while i < src.len() {
-        let c = src[i];
-        if c == b'\\' {
-            i += 1;
-            if i < src.len() {
-                b.push(escaped_byte(src[i]));
-                i += 1;
+/// Rust 原始字符串 `r"..."` / `r#"..."#` / `r##"..."##` … —— 跨行，零转义。
+/// `i` 指向 `r`。成功返回（内容, 闭合之后下标, true）；非 raw 形式返回 (_, i, false)。
+fn scan_raw(src: &[u8], i: usize) -> (String, usize, bool) {
+    let mut j = i + 1;
+    let mut hashes = 0usize;
+    while j < src.len() && src[j] == b'#' {
+        hashes += 1;
+        j += 1;
+    }
+    if j >= src.len() || src[j] != b'"' {
+        return (String::new(), i, false);
+    }
+    let content_start = j + 1;
+    let mut k = content_start;
+    while k < src.len() {
+        if src[k] == b'"' {
+            let mut h = 0;
+            while h < hashes && k + 1 + h < src.len() && src[k + 1 + h] == b'#' {
+                h += 1;
             }
+            if h == hashes {
+                let val = String::from_utf8_lossy(&src[content_start..k]).into_owned();
+                return (val, k + 1 + hashes, true);
+            }
+        }
+        k += 1;
+    }
+    (
+        String::from_utf8_lossy(&src[content_start..]).into_owned(),
+        src.len(),
+        true,
+    )
+}
+
+/// Rust 块注释 `/* ... */`（可嵌套）。`i` 指向第一个 `/`，返回（整段含定界符, 之后下标）。
+fn scan_block_comment(src: &[u8], i: usize) -> (String, usize) {
+    let mut j = i + 2;
+    let mut depth = 1usize;
+    while j < src.len() && depth > 0 {
+        if j + 1 < src.len() && src[j] == b'/' && src[j + 1] == b'*' {
+            depth += 1;
+            j += 2;
             continue;
         }
-        if c == b'"' && i + 2 < src.len() && src[i + 1] == b'"' && src[i + 2] == b'"' {
-            return (String::from_utf8_lossy(&b).into_owned(), i + 3);
+        if j + 1 < src.len() && src[j] == b'*' && src[j + 1] == b'/' {
+            depth -= 1;
+            j += 2;
+            continue;
         }
-        b.push(c);
-        i += 1;
+        j += 1;
     }
-    (String::from_utf8_lossy(&b).into_owned(), src.len())
+    (String::from_utf8_lossy(&src[i..j]).into_owned(), j)
 }
 
 /// 跨行字面量消费后同步 line/line_start（字面量内部换行不产生 Newline Token，但行号需前进）。
@@ -321,65 +351,26 @@ pub fn scan(src: &str) -> Vec<Token> {
             i += 1;
             continue;
         }
-        // # 行注释
-        if c == b'#' {
-            let p = pos(i, line, line_start);
-            let start = i;
-            while i < src.len() && src[i] != b'\n' {
-                i += 1;
-            }
-            tokens.push(Token {
-                kind: Kind::Comment,
-                value: String::from_utf8_lossy(&src[start..i]).into_owned(),
-                pos: p,
-                quote: 0,
-            });
-            prev_newline = false;
-            continue;
-        }
-
         prev_newline = false;
         let p = pos(i, line, line_start);
 
-        // 反引号原始字符串 `...` — 跨行，零转义（对标 Go raw string）
-        if c == b'`' {
-            let next = if let Some(end) = find_byte(&src[i + 1..], b'`') {
+        // Rust 原始字符串 r"..." / r#"..."# — 跨行，零转义
+        if c == b'r' {
+            let (val, next, ok) = scan_raw(src, i);
+            if ok {
                 tokens.push(Token {
                     kind: Kind::Literal,
-                    value: String::from_utf8_lossy(&src[i + 1..i + 1 + end]).into_owned(),
+                    value: val,
                     pos: p,
-                    quote: b'`',
+                    quote: b'r',
                 });
-                i + end + 2
-            } else {
-                tokens.push(Token {
-                    kind: Kind::Literal,
-                    value: String::from_utf8_lossy(&src[i + 1..]).into_owned(),
-                    pos: p,
-                    quote: b'`',
-                });
-                src.len()
-            };
-            advance_line_count(src, i, next, &mut line, &mut line_start);
-            i = next;
-            continue;
+                advance_line_count(src, i, next, &mut line, &mut line_start);
+                i = next;
+                continue;
+            }
         }
 
-        // 三引号字符串 """...""" — 跨行，转义（对标 Python triple-quote）
-        if c == b'"' && i + 2 < src.len() && src[i + 1] == b'"' && src[i + 2] == b'"' {
-            let (val, next) = scan_triple_quoted(src, i);
-            tokens.push(Token {
-                kind: Kind::Literal,
-                value: val,
-                pos: p,
-                quote: b'"',
-            });
-            advance_line_count(src, i, next, &mut line, &mut line_start);
-            i = next;
-            continue;
-        }
-
-        // 引号字符串
+        // 引号字符串 "..." — 跨行，转义
         if c == b'\'' || c == b'"' {
             let (val, next) = scan_quoted(src, i, c);
             let quote = if c == b'"' { b'"' } else { 0 };
@@ -389,6 +380,7 @@ pub fn scan(src: &str) -> Vec<Token> {
                 pos: p,
                 quote,
             });
+            advance_line_count(src, i, next, &mut line, &mut line_start);
             i = next;
             continue;
         }
@@ -446,12 +438,31 @@ pub fn scan(src: &str) -> Vec<Token> {
             continue;
         }
 
-        // '/' — // 注释 或 绝对路径字面量 或 除法算子
+        // '/' — // 行注释 或 /* */ 块注释 或 绝对路径字面量 或 除法算子
         if c == b'/' {
             if i + 1 < src.len() && src[i + 1] == b'/' {
+                let start = i;
                 while i < src.len() && src[i] != b'\n' {
                     i += 1;
                 }
+                tokens.push(Token {
+                    kind: Kind::Comment,
+                    value: String::from_utf8_lossy(&src[start..i]).into_owned(),
+                    pos: p,
+                    quote: 0,
+                });
+                continue;
+            }
+            if i + 1 < src.len() && src[i + 1] == b'*' {
+                let (val, next) = scan_block_comment(src, i);
+                tokens.push(Token {
+                    kind: Kind::Comment,
+                    value: val,
+                    pos: p,
+                    quote: 0,
+                });
+                advance_line_count(src, i, next, &mut line, &mut line_start);
+                i = next;
                 continue;
             }
             if i + 1 < src.len() && is_abs_path_start(src[i + 1]) {
@@ -609,8 +620,4 @@ pub fn scan(src: &str) -> Vec<Token> {
 
     tokens.push(Token::eof(pos(i, line, line_start)));
     tokens
-}
-
-fn find_byte(s: &[u8], b: u8) -> Option<usize> {
-    s.iter().position(|&x| x == b)
 }

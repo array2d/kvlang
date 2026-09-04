@@ -1,18 +1,18 @@
-# 374: Guess Number Higher or Lower — 二分猜数字
-# 来源: LeetCode #374
-# 期望输出:
-#   6
+// 374: Guess Number Higher or Lower — 二分猜数字
+// 来源: LeetCode #374
+// 期望输出:
+//   6
 rwfunc guess_number(n:int64) -> () {
 	1 -> lo
 	hi <- n
 	while (lo <= hi) {
-		s = lo + hi  # = 等价于 <-
+		s = lo + hi  // = 等价于 <-
 		s ÷ 2 -> mid
 		s ÷ 2 -> mid_m
 		low <- mid < 6
 
 		if (low) {
-			lo = mid + 1  # = 等价于 <-
+			lo = mid + 1  // = 等价于 <-
 		} else {
 			mid > 6 -> high
 
@@ -20,7 +20,7 @@ rwfunc guess_number(n:int64) -> () {
 				hi <- mid - 1
 			} else {
 				println(mid)
-				lo = hi + 1  # = 等价于 <-
+				lo = hi + 1  // = 等价于 <-
 			}
 		}
 	}

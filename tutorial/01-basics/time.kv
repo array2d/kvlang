@@ -1,15 +1,15 @@
-# time: 时间与 duration 类型
-# 期望输出:
-#   before
-#   after
-#   t0 < t1: true
-#   t0 > t1: false
-#   delta >= 0 ns: true
-#   delta ms =
-#   delta s = 0
-#   t0 + delta == t1: true
-#   1000 ms
-#   1 s = 1000000000 ns
+// time: 时间与 duration 类型
+// 期望输出:
+//   before
+//   after
+//   t0 < t1: true
+//   t0 > t1: false
+//   delta >= 0 ns: true
+//   delta ms =
+//   delta s = 0
+//   t0 + delta == t1: true
+//   1000 ms
+//   1 s = 1000000000 ns
 rwfunc test() -> () {
     println("before")
     t0 <- time·now()
@@ -26,7 +26,7 @@ rwfunc test() -> () {
 
     delta <- time·sub(t1, t0)
     print("delta >= 0 ns: ")
-    zero = time/duration·nanos(0)  # = 等价于 <-
+    zero = time/duration·nanos(0)  // = 等价于 <-
     println(time/duration·before(zero, delta))
 
     ms <- time/duration·as_millis(delta)
@@ -43,7 +43,7 @@ rwfunc test() -> () {
     b <- not(time·after(sum, t1))
     println(and(a, b))
 
-    1000 -> n  # = 等价于 <-
+    1000 -> n  // = 等价于 <-
     print(n)
     println(" ms")
 

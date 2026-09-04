@@ -1,6 +1,6 @@
-# 欢迎加入kvspace世界
+// 欢迎加入kvspace世界
 lib kvlang/deepdive/runtime/07_signature_type_expression {
-	"""# runtime篇-07: 签名类型表达式（多态 + 高维数组）
+	r#"# runtime篇-07: 签名类型表达式（多态 + 高维数组）
 
 > 状态：设计定稿。代码：签名字符串存 `/lib/<pkg>·<name>`（kind=`defrwfunc`/`defrwir`），参数类型即本文件的「类型表达式」。
 
@@ -131,5 +131,5 @@ func matchAtom(atom, kind string, ndim int, dims []int32) bool {
 **扩展 op** 经 `kvlang_rwirextRegister(opcode, nr, nw, sig)` 注册，runtime 把 `sig` 按方括号感知切分为各参 kindexpr、做 `kvlang_rwirextKindexprValid` 校验（拒绝 `path` 等非 kind），并按上述定义体格式写入 `/lib/<opcode>`（kind=`defrwir`）。
 
 **运行时内联匹配**：execute 循环走到 `isothersrwir` 派发前，按 opcode 从 `/lib/<opcode>` 取定义体、解出读参 kindexpr，对每个已解析实参（kind/ndim/dims）跑 `kvlang_rwirextKindexprMatch`；变参 `...` 把尾随实参全部对末 kindexpr 判定。任一失配 → `TypeError` 写 vthread 错误并停机。
-""" -> /lib/kvlang/deepdive/runtime/07_signature_type_expression
+"# -> /lib/kvlang/deepdive/runtime/07_signature_type_expression
 }

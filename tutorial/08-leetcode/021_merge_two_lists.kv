@@ -1,31 +1,31 @@
-# 021: Merge Two Sorted Lists
-# 来源: LeetCode #21
-# 期望输出:
-#   1
-#   1
-#   2
-#   3
-#   4
-#   4
+// 021: Merge Two Sorted Lists
+// 来源: LeetCode #21
+// 期望输出:
+//   1
+//   1
+//   2
+//   3
+//   4
+//   4
 rwfunc build_lists() -> () {
-	/a0 = { val=1; next="/a1" }  # = 等价于 <-
+	/a0 = { val=1; next="/a1" }  // = 等价于 <-
 	/a1 <- { val=2; next="/a2" }
 	{ val=4; next="" } -> /a2
-	/b0 = { val=1; next="/b1" }  # = 等价于 <-
+	/b0 = { val=1; next="/b1" }  // = 等价于 <-
 	/b1 <- { val=3; next="/b2" }
 	{ val=4; next="" } -> /b2
 }
 
 rwfunc merge(a:[]char/utf32, b:[]char/utf32) -> () {
 	pa <- a
-	pb = b  # = 等价于 <-
+	pb = b  // = 等价于 <-
 	while (pa != "") {
 		pa·val -> av
 		pick_a <- pb == ""
 
 		if (pick_a) {
 			println(av)
-			pa = pa·next  # = 等价于 <-
+			pa = pa·next  // = 等价于 <-
 		} else {
 			pb·val -> bv
 			take <- av <= bv
@@ -33,7 +33,7 @@ rwfunc merge(a:[]char/utf32, b:[]char/utf32) -> () {
 
 			if (take) {
 				println(av)
-				pa = pa·next  # = 等价于 <-
+				pa = pa·next  // = 等价于 <-
 			} else {
 				println(bv)
 				pb·next -> pb
@@ -43,7 +43,7 @@ rwfunc merge(a:[]char/utf32, b:[]char/utf32) -> () {
 	while (pb != "") {
 		bv <- pb·val
 		println(bv)
-		pb = pb·next  # = 等价于 <-
+		pb = pb·next  // = 等价于 <-
 	}
 }
 

@@ -1,7 +1,7 @@
-# kv·set_default：路径不存在时写入，已存在则保留原值
-# 期望输出:
-#   set_default new: first_val
-#   set_default existing: first_val
+// kv·set_default：路径不存在时写入，已存在则保留原值
+// 期望输出:
+//   set_default new: first_val
+//   set_default existing: first_val
 
 rwfunc test() -> () {
 	kv·set_default("/sd_key", "first_val")

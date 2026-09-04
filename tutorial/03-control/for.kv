@@ -1,28 +1,28 @@
-# cels_to_fahr: 摄氏转华氏温度表（K&R C §1.2）
-# 算法: for 遍历器 + 浮点运算
-# 来源: C 语言 K&R §1.2 "The For Statement"
-# 期望输出:
-#   0 F = -17.77777777777778 C
-#   300 F = 148.88888888888889 C
+// cels_to_fahr: 摄氏转华氏温度表（K&R C §1.2）
+// 算法: for 遍历器 + 浮点运算
+// 来源: C 语言 K&R §1.2 "The For Statement"
+// 期望输出:
+//   0 F = -17.77777777777778 C
+//   300 F = 148.88888888888889 C
 rwfunc test() -> () {
 	data·0 <- 0
-	data·1 = 20  # = 等价于 <-
+	data·1 = 20  // = 等价于 <-
 	40 -> data·2
 	data·3 <- 60
-	data·4 = 80  # = 等价于 <-
+	data·4 = 80  // = 等价于 <-
 	100 -> data·5
 	data·6 <- 120
-	data·7 = 140  # = 等价于 <-
+	data·7 = 140  // = 等价于 <-
 	160 -> data·8
 	data·9 <- 180
-	data·10 = 200  # = 等价于 <-
+	data·10 = 200  // = 等价于 <-
 	220 -> data·11
 	data·12 <- 240
-	data·13 = 260  # = 等价于 <-
+	data·13 = 260  // = 等价于 <-
 	280 -> data·14
 	data·15 <- 300
 	for (fahr in data) {
-		factor = 5.0 ÷ 9.0  # = 等价于 <-
+		factor = 5.0 ÷ 9.0  // = 等价于 <-
 		fahr - 32 -> diff
 		cels <- factor × diff
 		println(fahr, "F =", cels, "C")

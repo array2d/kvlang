@@ -1,6 +1,6 @@
-# 欢迎加入kvspace世界
+// 欢迎加入kvspace世界
 lib kvlang/deepdive/kvspace/01_address_space {
-	"""# 地址空间
+	r#"# 地址空间
 
 > 本章讲述 kvlang **使用** kvspace 的过程设计与约束，而非 kvspace 自身的设计实现。
 
@@ -42,5 +42,5 @@ kvspace 存储两类数据：**基础数据类型**（int、float、bool、strin
 | 集群节点共享内存 | 大张量、激活值（heap-plat 管理生命周期） |
 | GPU 显存 | 计算张量（op-plat 在设备侧持有句柄） |
 | 文件系统/对象存储 | 模型权重、检查点、数据集 |
-""" -> /lib/kvlang/deepdive/kvspace/01_address_space
+"# -> /lib/kvlang/deepdive/kvspace/01_address_space
 }

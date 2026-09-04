@@ -1,17 +1,17 @@
-# 231: Power of Two — 判断是否为2的幂
-# 来源: LeetCode #231
-# 期望输出:
-#   1
-#   0
+// 231: Power of Two — 判断是否为2的幂
+// 来源: LeetCode #231
+// 期望输出:
+//   1
+//   0
 rwfunc is_power(n:int64) -> (r:int64) {
-	result = 0  # = 等价于 <-
+	result = 0  // = 等价于 <-
 	n > 0 -> pos
 
 	if (pos) {
 		t <- 1
 		while (t < n) {
-			t = t × 2  # = 等价于 <-
-			t_m = t × 2  # = 等价于 <-
+			t = t × 2  // = 等价于 <-
+			t_m = t × 2  // = 等价于 <-
 		}
 		t == n -> eq
 
@@ -20,7 +20,7 @@ rwfunc is_power(n:int64) -> (r:int64) {
 		}
 	}
 
-	r = result  # = 等价于 <-
+	r = result  // = 等价于 <-
 }
 
 rwfunc test() -> () {

@@ -1,14 +1,14 @@
-# 字符串编码：char/utf32（默认定宽）、char/ascii（定宽）、char/utf8（变宽，仅存储/打印）
-# 写槽类型标注反推字面量编码；utf8 禁索引（string·char/slice/s[i] 报错）
-# 期望输出:
-#   abc
-#   y
-#   héllo
+// 字符串编码：char/utf32（默认定宽）、char/ascii（定宽）、char/utf8（变宽，仅存储/打印）
+// 写槽类型标注反推字面量编码；utf8 禁索引（string·char/slice/s[i] 报错）
+// 期望输出:
+//   abc
+//   y
+//   héllo
 rwfunc test() -> () {
-	a = "abc"               # 默认 char/utf32
+	a = "abc"               // 默认 char/utf32
 	println(a)
-	b:[]char/ascii = "xyz"    # ASCII 定宽，可索引
+	b:[]char/ascii = "xyz"    // ASCII 定宽，可索引
 	println(string·char(b, 1))
-	c:[]char/utf8 = "héllo"   # UTF-8 变宽，打印 OK（索引会报错）
+	c:[]char/utf8 = "héllo"   // UTF-8 变宽，打印 OK（索引会报错）
 	println(c)
 }

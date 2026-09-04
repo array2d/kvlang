@@ -1,10 +1,10 @@
-# classify: 成绩分档
-# 算法: 嵌套 if，score=85 → grade=B
-# 期望输出:
-#   grade = B
+// classify: 成绩分档
+// 算法: 嵌套 if，score=85 → grade=B
+// 期望输出:
+//   grade = B
 rwfunc classify(score:int64) -> (grade:[]char/utf32) {
 	if (score >= 90) {
-		grade = "A"  # = 等价于 <-
+		grade = "A"  // = 等价于 <-
 	} else {
 		if (score >= 80) {
 			"B" -> grade
@@ -13,7 +13,7 @@ rwfunc classify(score:int64) -> (grade:[]char/utf32) {
 				grade <- "C"
 			} else {
 				if (score >= 60) {
-					grade = "D"  # = 等价于 <-
+					grade = "D"  // = 等价于 <-
 				} else {
 					"F" -> grade
 				}
@@ -26,5 +26,5 @@ rwfunc test() -> () {
 
 	ans <- classify(85)
 	println("grade =", ans)
-	/last_grade = ans  # = 等价于 <-
+	/last_grade = ans  // = 等价于 <-
 }

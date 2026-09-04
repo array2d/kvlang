@@ -1,13 +1,13 @@
-# numpy 第四类：reduce（归约）
-# extern: 需 numpy 扩展引擎驱动
-#   python runtime-rwirext_example/py/numpy/numpy.py tutorial/14-numpy/04-reduce.kv
-# 期望输出:
-#   m: [[0, 1, 2], [3, 4, 5]]
-#   sum: 15
-#   prod: 0
-#   max: 5
-#   min: 0
-#   mean: 2.5
+// numpy 第四类：reduce（归约）
+// extern: 需 numpy 扩展引擎驱动
+//   python runtime-rwirext_example/py/numpy/numpy.py tutorial/14-numpy/04-reduce.kv
+// 期望输出:
+//   m: [[0, 1, 2], [3, 4, 5]]
+//   sum: 15
+//   prod: 0
+//   max: 5
+//   min: 0
+//   mean: 2.5
 lib demo {
 	rwfunc main() -> () {
 		numpy.arange(6) -> r

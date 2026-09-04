@@ -1,16 +1,16 @@
-# 070: Climbing Stairs — 斐波那契爬楼梯
-# 来源: LeetCode #70
-# 期望输出:
-#   8
+// 070: Climbing Stairs — 斐波那契爬楼梯
+// 来源: LeetCode #70
+// 期望输出:
+//   8
 rwfunc climb(n:int64) -> () {
-	a = 1  # = 等价于 <-
+	a = 1  // = 等价于 <-
 	1 -> b
 	i <- 2
 	while (i <= n) {
-		c = a + b  # = 等价于 <-
+		c = a + b  // = 等价于 <-
 		b -> a
 		b <- c
-		i = i + 1  # = 等价于 <-
+		i = i + 1  // = 等价于 <-
 	}
 	println(c)
 }

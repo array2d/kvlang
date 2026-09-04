@@ -1,25 +1,25 @@
-# 013 Roman to Integer
-# 期望输出: 58, 1994
+// 013 Roman to Integer
+// 期望输出: 58, 1994
 rwfunc romanToInt(s:[]char/utf32) -> (val:int64) {
 	0 -> val
 	i <- 0
-	n = string·len(s)  # = 等价于 <-
+	n = string·len(s)  // = 等价于 <-
 	"" -> prev
 	while (i < n) {
 		c <- s[i]
-		isI = c == "I"  # = 等价于 <-
+		isI = c == "I"  // = 等价于 <-
 		c == "V" -> isV
 		isX <- c == "X"
-		isL = c == "L"  # = 等价于 <-
+		isL = c == "L"  // = 等价于 <-
 		c == "C" -> isC
 		isD <- c == "D"
-		isM = c == "M"  # = 等价于 <-
-		pI = prev == "I"  # = 等价于 <-
+		isM = c == "M"  // = 等价于 <-
+		pI = prev == "I"  // = 等价于 <-
 		prev == "X" -> pX
 		pC <- prev == "C"
 
 		if (isI) {
-			val = val + 1  # = 等价于 <-
+			val = val + 1  // = 等价于 <-
 		}
 
 		if (isV) {
@@ -31,7 +31,7 @@ rwfunc romanToInt(s:[]char/utf32) -> (val:int64) {
 		}
 
 		if (isL) {
-			val = val + 50  # = 等价于 <-
+			val = val + 50  // = 等价于 <-
 		}
 
 		if (isC) {
@@ -46,13 +46,13 @@ rwfunc romanToInt(s:[]char/utf32) -> (val:int64) {
 			val + 1000 -> val
 		}
 
-		subI = pI  # = 等价于 <-
+		subI = pI  // = 等价于 <-
 		pX -> subX
 		subC <- pC
 
 		if (isV) {
 			if (subI) {
-				val = val - 2  # = 等价于 <-
+				val = val - 2  // = 等价于 <-
 			}
 		}
 
@@ -70,7 +70,7 @@ rwfunc romanToInt(s:[]char/utf32) -> (val:int64) {
 
 		if (isC) {
 			if (subX) {
-				val = val - 20  # = 等价于 <-
+				val = val - 20  // = 等价于 <-
 			}
 		}
 
@@ -87,7 +87,7 @@ rwfunc romanToInt(s:[]char/utf32) -> (val:int64) {
 		}
 
 		prev <- c
-		i = i + 1  # = 等价于 <-
+		i = i + 1  // = 等价于 <-
 	}
 }
 
@@ -97,5 +97,5 @@ rwfunc test() -> () {
 	println("LVIII =", a)
 	b <- romanToInt("MCMXCIV")
 	println("MCMXCIV =", b)
-	/roman_lviii = a  # = 等价于 <-
+	/roman_lviii = a  // = 等价于 <-
 }

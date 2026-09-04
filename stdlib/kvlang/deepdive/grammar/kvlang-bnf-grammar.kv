@@ -1,6 +1,6 @@
-# 欢迎加入kvspace世界
+// 欢迎加入kvspace世界
 lib kvlang/deepdive/grammar/kvlang_bnf_grammar {
-	"""# kvlang 语法 (BNF)
+	r##"# kvlang 语法 (BNF)
 
 > 锚定于 kvlang-deep-dive（根设计文档）——每次 deep-dive 更新后需验证本文与实现一致。
 
@@ -15,13 +15,15 @@ float   = integer [ "." integer ] [ ("e" | "E") [ "+" | "-" ] integer ]
 path    = "/" ident { ("/" | ".") ident | "·" "[" integer { "," integer } "]" }
               (* 绝对路径字面量；/ 分隔段，. 为子键，· [i,j] 为 strkeymap 坐标段 *)
 
-string  = '"' { char } '"'
-        | \""" { char } \"""
+string  = '"' { char | escape } '"'
+        | "r" { "#" } '"' { char } '"' { "#" }
         | "'" { char } "'"
-        | "`" { char } "`"
-              (* 双引号/三引号/单引号支持 \ 转义；反引号为原始字符串（零转义） *)
-comment = "#" { char } newline    (* 产生 Comment token *)
-        | "//" { char } newline   (* 词法层丢弃，不产生 token *)
+              (* 双引号：\ 转义（\n \t \" \\ …），可直接跨行。
+                 r"…" 原始串（零转义）；开头 N 个 # 时须以 " 后接同样 N 个 # 闭合，
+                 故 r#"…"# 内容可含 "，# 越多可嵌套越深。单引号为 char/keypath。
+                 无三引号、无反引号原始串——完全对齐 Rust。 *)
+comment = "//" { char } newline           (* 行注释 *)
+        | "/*" { char | comment } "*/"    (* 块注释，可嵌套；无 # 注释 *)
 ```
 
 ## 程序结构
@@ -183,5 +185,5 @@ builtin_call = ("print" | "println"
 (* s[i] 读返单字符字符串, 越界返 ""; s[i]="X" 单字符替换写回新串 *)
 (* + 作用在 string∧string → 拼接 *)
 ```
-""" -> /lib/kvlang/deepdive/grammar/kvlang_bnf_grammar
+"## -> /lib/kvlang/deepdive/grammar/kvlang_bnf_grammar
 }

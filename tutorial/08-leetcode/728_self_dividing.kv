@@ -1,42 +1,42 @@
-# 728: Self Dividing Numbers
-# 来源: LeetCode #728
-# 期望输出:
-#   1
-#   2
-#   3
-#   4
-#   5
-#   6
-#   7
-#   8
-#   9
-#   11
-#   12
-#   15
+// 728: Self Dividing Numbers
+// 来源: LeetCode #728
+// 期望输出:
+//   1
+//   2
+//   3
+//   4
+//   5
+//   6
+//   7
+//   8
+//   9
+//   11
+//   12
+//   15
 rwfunc is_self(n:int64) -> (r:bool) {
 	n -> num
 	ok <- true
 	while (num > 0) {
-		d = num % 10  # = 等价于 <-
+		d = num % 10  // = 等价于 <-
 		d == 0 -> zero
 
 		if (zero) {
 			ok <- false
-			num = 0  # = 等价于 <-
+			num = 0  // = 等价于 <-
 		} else {
 			n % d -> rem
 			div <- rem == 0
 
 			if (div) {
-				num = num ÷ 10  # = 等价于 <-
-				num_m = num ÷ 10  # = 等价于 <-
+				num = num ÷ 10  // = 等价于 <-
+				num_m = num ÷ 10  // = 等价于 <-
 			} else {
 				false -> ok
 				num <- 0
 			}
 		}
 	}
-	r = ok  # = 等价于 <-
+	r = ok  // = 等价于 <-
 }
 
 rwfunc test() -> () {
@@ -48,6 +48,6 @@ rwfunc test() -> () {
 			println(i)
 		}
 
-		i = i + 1  # = 等价于 <-
+		i = i + 1  // = 等价于 <-
 	}
 }

@@ -1,15 +1,15 @@
-# numpy 第一类：创建与初始化
-# extern: 需 numpy 扩展引擎驱动
-#   python runtime-rwirext_example/py/numpy/numpy.py tutorial/14-numpy/01-creation.kv
-# 语义: ndarray 不是新类型，就是 [dims]dtype——shape 用一维数组字面量给出。
-#       numpy.rand 输出随机，故不列入期望输出。
-# 期望输出:
-#   zeros: [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
-#   ones: [1.0, 1.0, 1.0]
-#   full: [[5.0, 5.0], [5.0, 5.0]]
-#   eye: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
-#   arange: [0, 1, 2, 3, 4]
-#   linspace: [0.0, 0.25, 0.5, 0.75, 1.0]
+// numpy 第一类：创建与初始化
+// extern: 需 numpy 扩展引擎驱动
+//   python runtime-rwirext_example/py/numpy/numpy.py tutorial/14-numpy/01-creation.kv
+// 语义: ndarray 不是新类型，就是 [dims]dtype——shape 用一维数组字面量给出。
+//       numpy.rand 输出随机，故不列入期望输出。
+// 期望输出:
+//   zeros: [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
+//   ones: [1.0, 1.0, 1.0]
+//   full: [[5.0, 5.0], [5.0, 5.0]]
+//   eye: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+//   arange: [0, 1, 2, 3, 4]
+//   linspace: [0.0, 0.25, 0.5, 0.75, 1.0]
 lib demo {
 	rwfunc main() -> () {
 		numpy.zeros([2, 3]) -> z

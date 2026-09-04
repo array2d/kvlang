@@ -1356,7 +1356,7 @@ impl Parser {
             if t.quote == b'"' {
                 return Some(ast::str_lit(&v));
             }
-            if t.quote == b'`' {
+            if t.quote == b'r' {
                 return Some(ast::raw_str(&v));
             }
             if !v.is_empty() && v.as_bytes()[0] == b'/' {

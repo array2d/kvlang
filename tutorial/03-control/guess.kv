@@ -1,20 +1,20 @@
-# guess_number: 二分查找猜数字（Python Tutorial §4.4）
-# 算法: while 循环 + 二分查找，在 [1,100] 中找 target=73
-# 来源: Python Tutorial §4.4
-# 期望输出:
-#   found 73 in 6 guesses
+// guess_number: 二分查找猜数字（Python Tutorial §4.4）
+// 算法: while 循环 + 二分查找，在 [1,100] 中找 target=73
+// 来源: Python Tutorial §4.4
+// 期望输出:
+//   found 73 in 6 guesses
 rwfunc guess_number() -> () {
 	73 -> target
 	lo <- 1
-	hi = 100  # = 等价于 <-
+	hi = 100  // = 等价于 <-
 	0 -> tries
 	found <- 0
 	while (found == 0) {
-		s = lo + hi  # = 等价于 <-
+		s = lo + hi  // = 等价于 <-
 		s ÷ 2 -> mid_float
 		s ÷ 2 -> mid_float_m
 		mid <- int64(mid_float)
-		tries = tries + 1  # = 等价于 <-
+		tries = tries + 1  // = 等价于 <-
 		println("guess #", tries, ":", mid)
 		mid == target -> hit
 
@@ -22,7 +22,7 @@ rwfunc guess_number() -> () {
 			found <- 1
 			println("  correct!")
 		} else {
-			too_low = mid < target  # = 等价于 <-
+			too_low = mid < target  // = 等价于 <-
 
 			if (too_low) {
 				mid + 1 -> lo
@@ -34,7 +34,7 @@ rwfunc guess_number() -> () {
 		}
 	}
 	println("found", target, "in", tries, "guesses")
-	/last_guesses = tries  # = 等价于 <-
+	/last_guesses = tries  // = 等价于 <-
 }
 
 rwfunc test() -> () {

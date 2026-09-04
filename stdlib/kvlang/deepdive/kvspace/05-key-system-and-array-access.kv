@@ -1,6 +1,6 @@
-# 欢迎加入kvspace世界
+// 欢迎加入kvspace世界
 lib kvlang/deepdive/kvspace/05_key_system_and_array_access {
-	"""# key 系统与数组访问
+	r#"# key 系统与数组访问
 
 ## 背景：分隔符语义化
 
@@ -147,5 +147,5 @@ body        =  [M B raw]        M = raw_len，offset = HeadLen()
 - compact 多维 `[256,256]uint8` 的 row-major 排布约定（与 op-gpu tensor 连续布局对齐）。
 - stringkeymap 形态随机访问：元素散落 `base·i` 子 key，`for-in`/`kv·get` 可遍历，但 `arr[i]`/`ndarray·numel` 随机访问尚未打通；需随机访问的数值数组用 compact 形态。
 - 扩展存储句柄 body 的位置 schema（device 枚举、shm_name/offset、fd、GPU ptr 的统一编码）。
-""" -> /lib/kvlang/deepdive/kvspace/05_key_system_and_array_access
+"# -> /lib/kvlang/deepdive/kvspace/05_key_system_and_array_access
 }

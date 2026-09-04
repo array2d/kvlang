@@ -1,6 +1,6 @@
-# 欢迎加入kvspace世界
+// 欢迎加入kvspace世界
 lib kvlang/deepdive/kvspace/00_design_and_implementation {
-	"""# KVSpace 基础模型
+	r#"# KVSpace 基础模型
 
 ## 设计美学
 
@@ -59,5 +59,5 @@ ExtIndex 是写时复制叠加层：`ExtIndex("/merge/", "/base/")` 后，读 `/
 **路径工具**：`JoinPath` 拼路径避免 `//`；`SepPath` 拆前缀+末段。
 
 **常量集中管理**：所有路径/分隔符/kind 字符串在 `runtime/src/const.h`（C）与 `layout/src/keytree.rs`（Rust），禁止散落硬编码。
-""" -> /lib/kvlang/deepdive/kvspace/00_design_and_implementation
+"# -> /lib/kvlang/deepdive/kvspace/00_design_and_implementation
 }

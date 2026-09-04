@@ -1,6 +1,6 @@
-# 欢迎加入kvspace世界
+// 欢迎加入kvspace世界
 lib kvlang/deepdive/layout/04_layout_pipeline {
-	"""# Layout Pipeline（layout 流水线）
+	r#"# Layout Pipeline（layout 流水线）
 
 ## kvlang 流水线
 
@@ -33,5 +33,5 @@ kvlang：无字节码数组，无整数 PC，控制流通过 KV 路径跳转；�
 ## AST 类型标记——`quote` 字段
 
 `Expr.quote` 区分字符串字面量和变量名（替代旧的 `"` 前缀 hack）。`flat()` 在 KV 传输层对字符串字面量加 `"` 前缀，数字字面量不加引号。
-""" -> /lib/kvlang/deepdive/layout/04_layout_pipeline
+"# -> /lib/kvlang/deepdive/layout/04_layout_pipeline
 }

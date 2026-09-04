@@ -1,13 +1,13 @@
-# string_array: 字符串数组必须用花括号 {..} 散 key（compact [..] 只容定长元素）
-# 规约: 变长字符串成员不能进 compact [..]（layout 阶段报错），必须走散 key {..}
-# 语义: for (s in names) 遍历散 key 字符串，逐个 println
-# 期望输出:
-#   apple
-#   banana
-#   cherry
-#   -- inline --
-#   x
-#   y
+// string_array: 字符串数组必须用花括号 {..} 散 key（compact [..] 只容定长元素）
+// 规约: 变长字符串成员不能进 compact [..]（layout 阶段报错），必须走散 key {..}
+// 语义: for (s in names) 遍历散 key 字符串，逐个 println
+// 期望输出:
+//   apple
+//   banana
+//   cherry
+//   -- inline --
+//   x
+//   y
 rwfunc test() -> () {
 	names = {"apple", "banana", "cherry"}
 	for (s in names) {

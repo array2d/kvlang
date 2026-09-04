@@ -1,13 +1,13 @@
-# tco_depth: TCO 验证 TCO-1~TCO-2
-# 期望输出:
-#   sum = 5050
-#   fact = 3628800
+// tco_depth: TCO 验证 TCO-1~TCO-2
+// 期望输出:
+//   sum = 5050
+//   fact = 3628800
 rwfunc sum_while(N:int64) -> (total:int64) {
-	total = 0  # = 等价于 <-
+	total = 0  // = 等价于 <-
 	1 -> i
 	while (i <= N) {
 		total <- total + i
-		i = i + 1  # = 等价于 <-
+		i = i + 1  // = 等价于 <-
 	}
 }
 
@@ -17,7 +17,7 @@ rwfunc tailrec_fact(N:int64, acc:int64) -> (r:int64) {
 	} else {
 		acc1 <- acc × N
 		acc1_m <- acc × N
-		n1 = N - 1  # = 等价于 <-
+		n1 = N - 1  // = 等价于 <-
 		tailrec_fact(n1, acc1) -> r
 	}
 }
@@ -25,7 +25,7 @@ rwfunc tailrec_fact(N:int64, acc:int64) -> (r:int64) {
 rwfunc test() -> () {
 	s <- sum_while(100)
 	println("sum =", s)
-	f = tailrec_fact(10, 1)  # = 等价于 <-
+	f = tailrec_fact(10, 1)  // = 等价于 <-
 	println("fact =", f)
 	s -> /last_tco_sum
 	/last_tco_fact <- f

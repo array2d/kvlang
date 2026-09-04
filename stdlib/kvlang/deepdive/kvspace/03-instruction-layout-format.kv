@@ -1,6 +1,6 @@
-# 欢迎加入kvspace世界
+// 欢迎加入kvspace世界
 lib kvlang/deepdive/kvspace/03_instruction_layout_format {
-	"""# 代码指令的布局格式
+	r#"# 代码指令的布局格式
 
 > 签名参数/返回值的 `type` 用**签名类型表达式**（并集 `A|B`、通配 `any`、高维 shape `[2,3]`、动态维 `?`），BNF 见 `grammar.bnf`。
 
@@ -100,5 +100,5 @@ frameRoot/[1,0]      → ext→ "+"                        ← 指令
 | 参数模型 | 寄存器/栈槽传值 | Ptr 链：name→slot→arg→value（3 跳） |
 
 **`=` 操作码是值拷贝，不是函数调用**：`a -> b` 编码为 `[s0,0]="="`（值拷贝），函数调用 opcode 位是 `call`，ExtIndex 发生在调用处理函数内部。二者在 KV 层无歧义，opcode 位永远不放变量引用。
-""" -> /lib/kvlang/deepdive/kvspace/03_instruction_layout_format
+"# -> /lib/kvlang/deepdive/kvspace/03_instruction_layout_format
 }

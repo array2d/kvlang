@@ -1,10 +1,10 @@
-# 期望输出:
-#   v= 42
-#   has_data= true
-#   x= 42
-#   n= 2
-#   numel= 3 dim= 1
-#   shape0= 3
+// 期望输出:
+//   v= 42
+//   has_data= true
+//   x= 42
+//   n= 2
+//   numel= 3 dim= 1
+//   shape0= 3
 rwfunc test() -> () {
 	kv·set("/tmp/kvt·data", 42)
 	kv·get("/tmp/kvt·data") -> v
