@@ -4,12 +4,14 @@
 //!   /lib/<pkg>·<name>/[0,0]         编译后签名（kind=rwfunc）
 //!   /lib/<pkg>·<name>/<param>       命名参数→slot 指针（kind=char, isptr=1）
 //!   /lib/<pkg>·<name>/[i,j]         编译后指令（kind=rwir），i 从 1 开始
-//!   /lib/<pkg>·<name>/<label>/      基本块子路径（scope 指令）
+//!   /lib/<pkg>·<name>/‥labels/<l>   label → irseq
 //!   /lib/<pkg>·<name>.src           源码副本
+//!
+//! WriteBody: DFS-number insts (incl. ScopeStmt), emit [i,j], rewrite goto/br labels to irseq.
 
 use std::collections::HashMap;
 
-use super::ast::{Func, RwirDecl, Stmt};
+use super::ast::{Func, Instruction, RwirDecl, Stmt};
 use super::ffi::Kv;
 use super::{builtin, ffi, keytree, kvkind, lower, parser};
 
@@ -373,6 +375,10 @@ pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) {
         eprintln!("debug: func {qual} already defined — overwriting");
     }
 
+    let mut seq: Vec<Instruction> = Vec::new();
+    let mut labels: HashMap<String, i32> = HashMap::new();
+    collect_insts(&fn_.body, &mut seq, &mut labels);
+
     // 按函数覆盖（文件夹复制式合并）：只 del_tree 本函数子树，不动 /lib 下其它函数。
     // 禁止整库删除——layoutcode 必须可增量：多次 layout 各自覆盖其函数，不误删先前的函数。
     let _ = kv.del_tree(&func_dir);
@@ -385,7 +391,7 @@ pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) {
     let mut pairs: Vec<(String, Vec<u8>)> = Vec::new();
     pairs.push((
         format!("{func_dir}/[0,0]"),
-        kvkind::new_rwfunc(count_direct_insts(&fn_.body), nr, nw, &param_types),
+        kvkind::new_rwfunc(seq.len() as i32, nr, nw, &param_types),
     ));
     pairs.push((
         keytree::lib_src(pkg, &fn_.sig.name),
@@ -407,7 +413,17 @@ pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) {
     }
     let _ = kv.set(&pairs);
 
-    write_body(kv, pkg, &fn_.sig.name, &fn_.body, &mut type_map, 1);
+    for (i, inst) in seq.iter().enumerate() {
+        write_linear_inst(kv, &func_dir, (i as i32) + 1, inst, &labels, &mut type_map);
+    }
+    if !labels.is_empty() {
+        let _ = kv.mkindex(&keytree::lib_labels_dir(pkg, &fn_.sig.name));
+        let lpairs: Vec<(String, Vec<u8>)> = labels
+            .iter()
+            .map(|(label, irseq)| (keytree::lib_label(pkg, &fn_.sig.name, label), ffi::new_int64(*irseq as i64)))
+            .collect();
+        let _ = kv.set(&lpairs);
+    }
 }
 
 /// 写用户声明的 rwir（无体）到 /lib/<opcode>。
@@ -424,148 +440,96 @@ pub fn write_rwir_decl(kv: &mut Kv, decl: &RwirDecl) {
     let _ = kv.set(&[(keytree::rwir(&opcode), v)]);
 }
 
-/// 将 body 写入 /lib/<pkg>/<name>/ 下。offset 起始 idx（顶层函数=1）。
-fn write_body(
-    kv: &mut Kv,
-    pkg: &str,
-    name: &str,
-    body: &[Stmt],
-    type_map: &mut HashMap<String, String>,
-    offset: i32,
-) {
-    let prefix = keytree::lib_func(pkg, name);
-    let mut idx = offset;
+/// Flatten body into seq; ScopeStmt records label → irseq (1-based; [0,0] is the signature).
+fn collect_insts(body: &[Stmt], seq: &mut Vec<Instruction>, labels: &mut HashMap<String, i32>) {
     for st in body {
-        write_stmt(kv, st, &prefix, &mut idx, type_map, pkg);
+        match st {
+            Stmt::Instruction(s) => seq.push(s.clone()),
+            Stmt::Scope(s) => {
+                if s.label.is_empty() {
+                    panic!("WriteBody: ScopeStmt with empty label");
+                }
+                if labels.contains_key(&s.label) {
+                    panic!("WriteBody: duplicate label {}", s.label);
+                }
+                let start = seq.len() as i32 + 1;
+                if start > 1 && !inst_is_terminator(seq.last().unwrap()) {
+                    panic!("WriteBody: fall through into label {}", s.label);
+                }
+                labels.insert(s.label.clone(), start);
+                collect_insts(&s.body, seq, labels);
+                if (seq.len() as i32) < start || !inst_is_terminator(seq.last().unwrap()) {
+                    panic!("WriteBody: unterminated block {}", s.label);
+                }
+            }
+            _ => panic!("WriteBody: unexpected stmt {} after lower", st.first_line()),
+        }
     }
 }
 
-fn write_stmt(
+fn write_linear_inst(
     kv: &mut Kv,
-    st: &Stmt,
     prefix: &str,
-    idx: &mut i32,
+    n: i32,
+    s: &Instruction,
+    labels: &HashMap<String, i32>,
     type_map: &mut HashMap<String, String>,
-    pkg: &str,
 ) {
-    match st {
-        Stmt::Instruction(s) => {
-            let n = *idx;
-            for (j, w) in s.writes.iter().enumerate() {
-                if j < s.write_types.len() && !s.write_types[j].is_empty() {
-                    type_map.insert(w.clone(), s.write_types[j].clone());
-                }
-            }
-            let (opcode, reads) = s.flat();
-            let target_char = if s.writes.len() == 1
-                && !s.write_types.is_empty()
-                && kvkind::is_char_kind(&s.write_types[0])
-            {
-                s.write_types[0].as_str()
-            } else {
-                ""
-            };
-
-            let mut pairs: Vec<(String, Vec<u8>)> =
-                Vec::with_capacity(1 + reads.len() + s.writes.len());
-            if !opcode.is_empty() {
-                pairs.push((format!("{prefix}/[{n},0]"), opcode_value(&opcode)));
-            }
-            for (j, r) in reads.iter().enumerate() {
-                pairs.push((
-                    format!("{prefix}/[{n},-{}]", j + 1),
-                    slot_value(r, target_char),
-                ));
-            }
-            for (j, w) in s.writes.iter().enumerate() {
-                pairs.push((format!("{prefix}/[{n},{}]", j + 1), slot_value(w, "")));
-            }
-            if !pairs.is_empty() {
-                let _ = kv.set(&pairs);
-            }
-            *idx = n + 1;
+    for (j, w) in s.writes.iter().enumerate() {
+        if j < s.write_types.len() && !s.write_types[j].is_empty() {
+            type_map.insert(w.clone(), s.write_types[j].clone());
         }
-        Stmt::Scope(s) => {
-            let scope_prefix = format!("{prefix}/{}", s.label);
-            let mut scope_idx = 0;
-            for child in &s.body {
-                write_stmt_scope(
-                    kv,
-                    child,
-                    &scope_prefix,
-                    &mut scope_idx,
-                    type_map,
-                    pkg,
-                    prefix,
-                );
+    }
+    let (opcode, mut reads) = s.flat();
+    match opcode.as_str() {
+        "goto" => {
+            if reads.len() != 1 {
+                panic!("WriteBody: goto expects 1 read, got {}", reads.len());
             }
+            reads[0] = resolve_label(labels, &reads[0], "goto").to_string();
+        }
+        "br" => {
+            if reads.len() != 3 {
+                panic!("WriteBody: br expects 3 reads, got {}", reads.len());
+            }
+            reads[1] = resolve_label(labels, &reads[1], "br").to_string();
+            reads[2] = resolve_label(labels, &reads[2], "br").to_string();
         }
         _ => {}
     }
+    let target_char = if s.writes.len() == 1 && !s.write_types.is_empty() && kvkind::is_char_kind(&s.write_types[0]) {
+        s.write_types[0].as_str()
+    } else {
+        ""
+    };
+
+    let mut pairs: Vec<(String, Vec<u8>)> = Vec::with_capacity(1 + reads.len() + s.writes.len());
+    if !opcode.is_empty() {
+        pairs.push((format!("{prefix}/[{n},0]"), opcode_value(&opcode)));
+    }
+    for (j, r) in reads.iter().enumerate() {
+        pairs.push((format!("{prefix}/[{n},-{}]", j + 1), slot_value(r, target_char)));
+    }
+    for (j, w) in s.writes.iter().enumerate() {
+        pairs.push((format!("{prefix}/[{n},{}]", j + 1), slot_value(w, "")));
+    }
+    if !pairs.is_empty() {
+        let _ = kv.set(&pairs);
+    }
 }
 
-fn write_stmt_scope(
-    kv: &mut Kv,
-    st: &Stmt,
-    scope_prefix: &str,
-    idx: &mut i32,
-    type_map: &mut HashMap<String, String>,
-    pkg: &str,
-    func_prefix: &str,
-) {
-    match st {
-        Stmt::Instruction(s) => {
-            let n = *idx;
-            for (j, w) in s.writes.iter().enumerate() {
-                if j < s.write_types.len() && !s.write_types[j].is_empty() {
-                    type_map.insert(w.clone(), s.write_types[j].clone());
-                }
-            }
-            let (opcode, reads) = s.flat();
-            let target_char = if s.writes.len() == 1
-                && !s.write_types.is_empty()
-                && kvkind::is_char_kind(&s.write_types[0])
-            {
-                s.write_types[0].as_str()
-            } else {
-                ""
-            };
+fn inst_is_terminator(inst: &Instruction) -> bool {
+    match &inst.expr {
+        Some(e) if e.is_leaf() => e.val == "return",
+        Some(e) => matches!(e.op.as_str(), "return" | "goto" | "br"),
+        None => false,
+    }
+}
 
-            let mut pairs: Vec<(String, Vec<u8>)> =
-                Vec::with_capacity(1 + reads.len() + s.writes.len());
-            if !opcode.is_empty() {
-                pairs.push((format!("{scope_prefix}[{n},0]"), opcode_value(&opcode)));
-            }
-            for (j, r) in reads.iter().enumerate() {
-                pairs.push((
-                    format!("{scope_prefix}[{n},-{}]", j + 1),
-                    slot_value(r, target_char),
-                ));
-            }
-            for (j, w) in s.writes.iter().enumerate() {
-                pairs.push((format!("{scope_prefix}[{n},{}]", j + 1), slot_value(w, "")));
-            }
-            if !pairs.is_empty() {
-                let _ = kv.set(&pairs);
-            }
-            *idx = n + 1;
-        }
-        Stmt::Scope(s) => {
-            let child_prefix = format!("{func_prefix}/{}", s.label);
-            let mut child_idx = 0;
-            for child in &s.body {
-                write_stmt_scope(
-                    kv,
-                    child,
-                    &child_prefix,
-                    &mut child_idx,
-                    type_map,
-                    pkg,
-                    func_prefix,
-                );
-            }
-        }
-        _ => {}
+fn resolve_label(labels: &HashMap<String, i32>, name: &str, opcode: &str) -> i32 {
+    match labels.get(name) {
+        Some(&irseq) => irseq,
+        None => panic!("WriteBody: {opcode} unknown label {name:?}"),
     }
 }
 
@@ -607,12 +571,6 @@ fn slot_value(val: &str, target_char: &str) -> Vec<u8> {
         return builtin::try_parse_number(val).unwrap_or_else(|| ffi::new_int64(0));
     }
     kvkind::new_rwir(0, 0, val)
-}
-
-fn count_direct_insts(body: &[Stmt]) -> i32 {
-    body.iter()
-        .filter(|st| matches!(st, Stmt::Instruction(_)))
-        .count() as i32
 }
 
 fn is_literal(s: &str) -> bool {
@@ -678,6 +636,7 @@ mod tests {
     fn dot_is_ordinary_char_contiguous_coords() {
         // '.' 是普通字符（小数点/后缀等），foo.bar 视作单一 opcode，不再被切成 foo bar 两 token
         // 而摊出畸形坐标（#106）。断言：opcode 原样保留，且指令坐标连续、无空缺行。
+        // #116 flat 模型：终结符补全后 [3,0] 为 terminate 追加的 return，[4,0] 才是帧末尾。
         let mut kv = Kv::conn(&format!(
             "fs:///tmp/kvlanglayout_dot_{}",
             std::process::id()
@@ -698,8 +657,58 @@ mod tests {
             "[2,0] 应有指令：坐标不得空缺"
         );
         assert!(
-            kv.get_one("/lib/t·main/[3,0]").is_empty(),
-            "[3,0] 应为帧末尾（连续无空缺）"
+            kvkind::value_string(&kv.get_one("/lib/t·main/[3,0]")).contains("return"),
+            "[3,0] 应为 terminate 追加的 return（连续无空缺）"
+        );
+        assert!(
+            kv.get_one("/lib/t·main/[4,0]").is_empty(),
+            "[4,0] 应为帧末尾（连续无空缺）"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "fall through into label")]
+    fn fallthrough_into_label_panics() {
+        let mut seq = Vec::new();
+        let mut labels = HashMap::new();
+        collect_insts(
+            &[
+                Stmt::Instruction(Instruction {
+                    expr: Some(crate::ast::leaf("1")),
+                    writes: vec!["x".into()],
+                    ..Default::default()
+                }),
+                Stmt::Scope(crate::ast::ScopeStmt {
+                    comments: Vec::new(),
+                    label: "_open".into(),
+                    body: vec![Stmt::Instruction(Instruction {
+                        expr: Some(crate::ast::leaf("return")),
+                        ..Default::default()
+                    })],
+                }),
+            ],
+            &mut seq,
+            &mut labels,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "unterminated block")]
+    fn unterminated_block_panics() {
+        let mut seq = Vec::new();
+        let mut labels = HashMap::new();
+        collect_insts(
+            &[Stmt::Scope(crate::ast::ScopeStmt {
+                comments: Vec::new(),
+                label: "_open".into(),
+                body: vec![Stmt::Instruction(Instruction {
+                    expr: Some(crate::ast::leaf("1")),
+                    writes: vec!["x".into()],
+                    ..Default::default()
+                })],
+            })],
+            &mut seq,
+            &mut labels,
         );
     }
 }

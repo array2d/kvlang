@@ -110,12 +110,36 @@ pub fn lower_func(fn_: &Func) -> Func {
     // 收集已有 br/goto 的跳转目标：这些 label 已可达，lower 时不再补 fall-through goto（幂等）。
     let mut targets = HashSet::new();
     collect_goto_targets(&fn_.body, &mut targets);
-    let body = lower_body(&fn_.body, &mut lg, None, &tm, &targets);
-    Func {
+    let body = terminate(lower_body(&fn_.body, &mut lg, None, &tm, &targets));
+    Func { comments: Vec::new(), sig: fn_.sig.clone(), body, pkg: String::new() }
+}
+
+fn return_inst() -> Stmt {
+    Stmt::Instruction(Instruction {
         comments: Vec::new(),
-        sig: fn_.sig.clone(),
-        body,
-        pkg: String::new(),
+        expr: Some(ast::leaf("return")),
+        writes: Vec::new(),
+        write_types: Vec::new(),
+        arrow_left: false,
+        eq: false,
+    })
+}
+
+/// Append `return` on open paths. Layout panics if a block is still unterminated.
+fn terminate(mut body: Vec<Stmt>) -> Vec<Stmt> {
+    for st in &mut body {
+        if let Stmt::Scope(s) = st {
+            s.body = terminate(std::mem::take(&mut s.body));
+        }
+    }
+    match body.last() {
+        None => vec![return_inst()],
+        Some(Stmt::Instruction(s)) if is_terminator(s) => body,
+        Some(Stmt::Scope(_)) => body,
+        _ => {
+            body.push(return_inst());
+            body
+        }
     }
 }
 
@@ -638,6 +662,7 @@ fn inject_goto(mut body: Vec<Stmt>, label: &str) -> Vec<Stmt> {
 
 fn is_terminator(s: &Instruction) -> bool {
     match &s.expr {
+        Some(e) if e.is_leaf() => e.val == "return",
         Some(e) => matches!(e.op.as_str(), "return" | "goto" | "br"),
         None => false,
     }

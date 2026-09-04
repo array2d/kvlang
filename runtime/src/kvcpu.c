@@ -10,23 +10,31 @@ static const char *rfind_sep(const char *s) {
     return found;
 }
 
-static int stack_depth(const char *pc) {
-    int d = 0;
-    for (; *pc; pc++) if (*pc == '[') d++;
-    return d;
+/* goto/br 目标：layout 已把 label 解析为 int64 irseq（≥1）。非 int64 / 越界返回 -1。 */
+static int irseq_of(const kvlangParam_t *p) {
+    if (kvlangXvalueNone(&p->val) || !kvlangXvalueKindIs(&p->val, KVSPACE_KIND_INT64)) return -1;
+    int64_t n = kvlangXvalueAsInt64(&p->val);
+    if (n < 1 || n > 0x7fffffff) return -1;
+    return (int)n;
 }
 
-/* ExtKind：有 .lib → rwfunc，否则空 */
-static const char *ext_kind(kvlangKv_t *kv, const char *frame_root) {
-    kvlangStrbuf_t k; kvlangStrbufInit(&k);
-    char *stk = kvlangKeytreeStack(frame_root);
-    kvlangStrbufPuts(&k, stk); free(stk);
-    kvlangStrbufPuts(&k, SEG_LIB);
-    kvlangXvalue_t v; kvlangXvalueZero(&v);
-    kvlangKvGetOne(kv, k.p, &v);
-    bool has = !kvlangXvalueNone(&v);
-    kvlangXvalueFree(&v); kvlangStrbufFree(&k);
-    return has ? KVSPACE_KIND_RWFUNC : "";
+/* 函数内跳转：只改 PC 的 [irseq]，帧不变。目标非法 → RuntimeError，返回 -1。 */
+static int jump_to(kvlangKv_t *kv, const char *vtid, const char *pc, const kvlangParam_t *target, const char *op) {
+    int irseq = irseq_of(target);
+    if (irseq < 0) {
+        char msg[256];
+        snprintf(msg, sizeof msg, "RuntimeError: %s target is not an int64 irseq: %s (kind=%s)",
+                 op, target->name ? target->name : "", kvlangXvalueKind(&target->val));
+        kvlangVthreadSetError(kv, vtid, pc, msg);
+        return -1;
+    }
+    char *fr = kvlangKeytreeFrameRoot(pc);
+    char *np = kvlangKeytreeIrseqPc(fr, irseq);
+    free(fr);
+    kvlangVthreadSet(kv, vtid, np, "running");
+    kvlangLogDebug("[%s] %s → %s", vtid, op, np);
+    free(np);
+    return 0;
 }
 
 static bool is_literal(const char *s) {
@@ -121,125 +129,73 @@ static char *frame_slot_key(const char *frame_root, const char *slot) {
     return kvlangStrbufDetach(&b);
 }
 
-static char *resolve_read_path(kvlangKv_t *kv, const char *frame_path, const char *name) {
+/* 实参名 → 其存储键（写入被调帧 [0,-k]/[0,k]）。字面量返回 NULL。
+ * 命名参数经 Ptr 指到本帧 [0,±k]，槽内是上层 handle_call 已 resolve 好的最终键路径；
+ * 之后只追显式 Ptr（ref==1）链，勿把 char 值当路径再追——否则字符串实参的内容会被
+ * 误当键（穿两层调用即变 None）。写侧 kvlangBuiltinResolveWriteSlot 同此纪律（#124）。 */
+static char *resolve_read_path(kvlangKv_t *kv, const char *frame_root, const char *name) {
     if (is_literal(name)) return NULL;
-    char *func_frame = kvlangBuiltinFuncFrameRoot(kv, frame_path);
-    kvlangStrbuf_t k; kvlangStrbufInit(&k);
-    char *stk = kvlangKeytreeStack(func_frame);
-    kvlangStrbufPuts(&k, stk); free(stk);
-    kvlangStrbufPuts(&k, name);
+    char *stk = kvlangKeytreeStack(frame_root);
     kvlangXvalue_t v; kvlangXvalueZero(&v);
-    kvlangKvGetOne(kv, k.p, &v);
+    kvlangKvGetMember(kv, stk, name, &v);
     char *result = NULL;
-    if (kvlangXvalueNone(&v)) {
-        result = frame_slot_key(func_frame, name);
-    } else if (kvlangXvalueIsPtr(&v)) {
+    if (kvlangXvalueIsPtr(&v)) {
         char *target = kvlangXvaluePtrTarget(&v);
-        kvlangStrbuf_t path; kvlangStrbufInit(&path);
-        char *stk2 = kvlangKeytreeStack(func_frame);
-        kvlangStrbufPuts(&path, stk2); free(stk2);
-        kvlangStrbufPuts(&path, target);
-        free(target);
-        for (;;) {
-            kvlangXvalue_t nv; kvlangXvalueZero(&nv);
-            kvlangKvGetOne(kv, path.p, &nv);
-            if (kvlangXvalueNone(&nv) || !kvlangXvalueIsCharKind(kvlangXvalueKind(&nv))) { result = kvlangStrbufDetach(&path); kvlangXvalueFree(&nv); break; }
-            char *p2 = kvlangXvalueValueString(&nv);
-            kvlangXvalueFree(&nv);
-            kvlangStrbufClear(&path); kvlangStrbufPuts(&path, p2);
-            free(p2);
+        kvlangXvalue_t nv; kvlangXvalueZero(&nv);
+        kvlangKvGetMember(kv, stk, target, &nv);
+        if (kvlangXvalueNone(&nv) || !kvlangXvalueIsCharKind(kvlangXvalueKind(&nv))) {
+            result = frame_slot_key(frame_root, target);
+        } else {
+            char *path = kvlangXvalueValueString(&nv);
+            for (;;) {
+                kvlangXvalue_t hop; kvlangXvalueZero(&hop);
+                kvlangKvGetOne(kv, path, &hop);
+                if (!kvlangXvalueIsPtr(&hop)) { kvlangXvalueFree(&hop); result = path; break; }
+                char *p2 = kvlangXvaluePtrTarget(&hop);
+                kvlangXvalueFree(&hop);
+                free(path);
+                path = p2;
+            }
         }
+        kvlangXvalueFree(&nv);
+        free(target);
     } else {
-        kvlangStrbuf_t b; kvlangStrbufInit(&b);
-        char *stk3 = kvlangKeytreeStack(func_frame);
-        kvlangStrbufPuts(&b, stk3); free(stk3);
-        kvlangStrbufPuts(&b, name);
-        result = kvlangStrbufDetach(&b);
+        result = frame_slot_key(frame_root, name);
     }
-    kvlangXvalueFree(&v); kvlangStrbufFree(&k); free(func_frame);
+    kvlangXvalueFree(&v); free(stk);
     return result;
 }
 
-static char *handle_scope_return(kvlangKv_t *kv, const char *pc) {
+/* return：弹出当前帧 [d]。d==1 → 顶层结束（*out_next=NULL）；否则 *out_next=‥returnpc。
+ * 返回链断裂（帧无 ‥returnpc）→ RuntimeError（#109），保留该帧供排查，返回 -1。 */
+static int handle_return(kvlangKv_t *kv, const char *vtid, const char *pc, char **out_next) {
+    *out_next = NULL;
     char *fr = kvlangKeytreeFrameRoot(pc);
-    kvlangStrbuf_t rk; kvlangStrbufInit(&rk);
-    kvlangKeytreeFrameReturnpc(fr, &rk);
-    kvlangXvalue_t v; kvlangXvalueZero(&v);
-    kvlangKvGetOne(kv, rk.p, &v);
-    char *parent = kvlangXvalueNone(&v) ? NULL : kvlangXvalueValueString(&v);
-    kvlangXvalueFree(&v);
-    char *stk = kvlangKeytreeStack(fr);
-    char err[256];
-    kvlangKvDelExtIndex(kv, stk, err, sizeof err);
-    kvlangKvDelTree(kv, fr, err, sizeof err);
-    free(stk); free(fr); kvlangStrbufFree(&rk);
-    return parent;
-}
-
-static char *handle_return(kvlangKv_t *kv, const char *pc) {
-    kvlangStrbuf_t vtid_b; kvlangStrbufInit(&vtid_b);
-    const char *vtid = kvlangKeytreeVtidFromPc(pc, &vtid_b);
-    kvlangStrbuf_t vtroot; kvlangStrbufInit(&vtroot);
-    kvlangKeytreeVthread(vtid, &vtroot);
-    char *fr = kvlangKeytreeFrameRoot(pc);
-    if (strcmp(fr, vtroot.p) == 0) { free(fr); kvlangStrbufFree(&vtid_b); kvlangStrbufFree(&vtroot); return NULL; }
-    kvlangStrbuf_t rk; kvlangStrbufInit(&rk);
-    kvlangKeytreeFrameReturnpc(fr, &rk);
-    kvlangXvalue_t v; kvlangXvalueZero(&v);
-    kvlangKvGetOne(kv, rk.p, &v);
-    char *next = kvlangXvalueNone(&v) ? strdup("") : kvlangXvalueValueString(&v);
-    kvlangXvalueFree(&v);
-    char *stk = kvlangKeytreeStack(fr);
-    char err[256];
-    kvlangKvDelExtIndex(kv, stk, err, sizeof err);
-    kvlangKvDelTree(kv, fr, err, sizeof err);
-    free(stk); free(fr); kvlangStrbufFree(&rk);
-    kvlangStrbufFree(&vtid_b); kvlangStrbufFree(&vtroot);
-    return next;
-}
-
-static char *handle_scope(kvlangKv_t *kv, const char *pc, const char *scope_name) {
-    char *fr = kvlangKeytreeFrameRoot(pc);
-    char *rw_root = kvlangBuiltinFuncFrameRoot(kv, fr);
-    free(fr);
-    size_t n = strlen(rw_root);
-    while (n > 0 && rw_root[n - 1] == '/') n--;
-    kvlangStrbuf_t scope_frame; kvlangStrbufInit(&scope_frame);
-    kvlangStrbufPutn(&scope_frame, rw_root, n);
-    kvlangStrbufPutc(&scope_frame, '/');
-    kvlangStrbufPuts(&scope_frame, scope_name);
-    kvlangStrbufPutc(&scope_frame, '/');
-    free(rw_root);
-
-    kvlangStrbuf_t callpc; kvlangStrbufInit(&callpc);
-    kvlangKeytreeFrameCallpc(scope_frame.p, &callpc);
-    kvlangXvalue_t v; kvlangXvalueZero(&v);
-    kvlangKvGetOne(kv, callpc.p, &v);
-    bool exists = !kvlangXvalueNone(&v);
-    kvlangXvalueFree(&v);
-
-    char err[256];
-    if (!exists) {
-        kvlangKvMkindex(kv, scope_frame.p, err, sizeof err);
-        kvlangStrbuf_t npc; kvlangStrbufInit(&npc);
-        kvlangRwirNextPc(pc, &npc);
-        kvlangStrbuf_t retpc; kvlangStrbufInit(&retpc);
-        kvlangKeytreeFrameReturnpc(scope_frame.p, &retpc);
-        kvlangXvalue_t rv; kvlangXvalueNewCharUtf8(&rv, npc.p);
-        kvlangKvPair_t p = { retpc.p, rv };
-        kvlangKvSet(kv, &p, 1, err, sizeof err);
-        kvlangXvalueFree(&rv); kvlangStrbufFree(&npc); kvlangStrbufFree(&retpc);
+    int d = kvlangKeytreeFrameNum(fr);
+    char *next = NULL;
+    if (d > 1) {
+        kvlangStrbuf_t rk; kvlangStrbufInit(&rk);
+        kvlangKeytreeFrameReturnpc(fr, &rk);
+        kvlangXvalue_t v; kvlangXvalueZero(&v);
+        kvlangKvGetOne(kv, rk.p, &v);
+        if (!kvlangXvalueNone(&v)) next = kvlangXvalueValueString(&v);
+        kvlangXvalueFree(&v);
+        kvlangStrbufFree(&rk);
+        if (!next || !next[0]) {
+            char msg[512];
+            snprintf(msg, sizeof msg, "RuntimeError: broken return chain: frame %s has no returnpc (pc=%s)", fr, pc);
+            kvlangVthreadSetError(kv, vtid, pc, msg);
+            free(next); free(fr);
+            return -1;
+        }
     }
-    char *sep = kvlangKeytreeScopeEntryPc(scope_frame.p);
-    kvlangStrbuf_t callpc2; kvlangStrbufInit(&callpc2);
-    kvlangKeytreeFrameCallpc(scope_frame.p, &callpc2);
-    kvlangXvalue_t cv; kvlangXvalueNewCharUtf8(&cv, sep);
-    kvlangKvPair_t p = { callpc2.p, cv };
-    kvlangKvSet(kv, &p, 1, err, sizeof err);
-    kvlangXvalueFree(&cv);
-
-    kvlangStrbufFree(&callpc); kvlangStrbufFree(&callpc2); kvlangStrbufFree(&scope_frame);
-    return sep;
+    char *stk = kvlangKeytreeStack(fr);
+    char err[256];
+    kvlangKvDelExtIndex(kv, stk, err, sizeof err);
+    kvlangKvDelTree(kv, fr, err, sizeof err);
+    free(stk); free(fr);
+    *out_next = next;
+    return 0;
 }
 
 /* HandleCall：创建子帧。返回 EntryPC(frameRoot)，失败 NULL */
@@ -261,9 +217,7 @@ static char *handle_call(kvlangKv_t *kv, const char *pc, kvlangRwirInst_t *inst)
         else {
             /* 裸名调用（无 /lib/ 无 ·）：同 pkg 优先——当前函数所在 lib 下有同名 rwfunc 就用之
              * （lib aaa/bbb/math 内 sum(A,A) → /lib/aaa/bbb/math·sum），否则退回根 /lib/<fn>。 */
-            char *fr = kvlangKeytreeFrameRoot(pc);
-            char *ff = fr ? kvlangBuiltinFuncFrameRoot(kv, fr) : NULL;
-            free(fr);
+            char *ff = kvlangKeytreeFrameRoot(pc);
             if (ff) {
                 /* 函数目录在帧的 ‥lib 槽（/lib/aaa/bbb/math·double/）：由此取调用者 pkg。 */
                 kvlangStrbuf_t lk; kvlangStrbufInit(&lk);
@@ -339,10 +293,11 @@ static char *handle_call(kvlangKv_t *kv, const char *pc, kvlangRwirInst_t *inst)
     }
 
     char *caller_fr = kvlangKeytreeFrameRoot(pc);
-    char *frame_root = strdup(pc);
-
-    char *stack_fr = kvlangKeytreeStack(frame_root);
+    int d = kvlangKeytreeFrameNum(pc);
+    char *frame_root = kvlangKeytreeFrameAt(vtid, d + 1);
     char err[256];
+    kvlangKvDelTree(kv, frame_root, err, sizeof err);
+    char *stack_fr = kvlangKeytreeStack(frame_root);
     kvlangKvMkindex(kv, stack_fr, err, sizeof err);
     kvlangKvExtIndex(kv, stack_fr, func_dir.p, err, sizeof err);
 
@@ -436,35 +391,39 @@ static int handle_control(kvlangKv_t *kv, const char *vtid, const char *pc, kvla
         return 0;
     }
     if (strcmp(inst->opcode, OP_RETURN) == 0) {
-        char *parent = handle_return(kv, pc);
+        char *parent = NULL;
+        if (handle_return(kv, vtid, pc, &parent) != 0) return -1;
         if (!parent) { kvlangVthreadSetDone(kv, vtid, "ok"); return 0; }
         kvlangVthreadSet(kv, vtid, parent, "running");
         free(parent);
         return 0;
     }
     if (strcmp(inst->opcode, OP_GOTO) == 0) {
-        if (inst->nr == 0) return -1;
-        char *np = handle_scope(kv, pc, inst->reads[0].name);
-        if (!np) { kvlangVthreadSetError(kv, vtid, pc, "RuntimeError: goto failed"); return -1; }
-        kvlangVthreadSet(kv, vtid, np, "running");
-        free(np);
-        return 0;
+        if (inst->nr != 1) {
+            char msg[128]; snprintf(msg, sizeof msg, "RuntimeError: goto expects 1 irseq, got %d", inst->nr);
+            kvlangVthreadSetError(kv, vtid, pc, msg);
+            return -1;
+        }
+        return jump_to(kv, vtid, pc, &inst->reads[0], OP_GOTO);
     }
     if (strcmp(inst->opcode, OP_BR) == 0) {
-        if (inst->nr < 3) return -1;
+        if (inst->nr != 3) {
+            char msg[128]; snprintf(msg, sizeof msg, "RuntimeError: br expects cond trueIrseq falseIrseq, got %d", inst->nr);
+            kvlangVthreadSetError(kv, vtid, pc, msg);
+            return -1;
+        }
         char *fr = kvlangKeytreeFrameRoot(pc);
         kvlangXvalue_t cond; kvlangXvalueZero(&cond);
         kvlangBuiltinResolveReadValue(kv, fr, inst->reads[0].name, &inst->reads[0].val, &cond);
         free(fr);
-        if (kvlangXvalueNone(&cond)) { kvlangVthreadSetError(kv, vtid, pc, "TypeError: None in branch condition"); kvlangXvalueFree(&cond); return -1; }
-        const char *label = inst->reads[2].name;
-        if (kvlangXvalueAsBool(&cond)) label = inst->reads[1].name;
+        if (kvlangXvalueNone(&cond)) {
+            kvlangVthreadSetError(kv, vtid, pc, "TypeError: None in branch condition");
+            kvlangXvalueFree(&cond);
+            return -1;
+        }
+        bool taken = kvlangXvalueAsBool(&cond);
         kvlangXvalueFree(&cond);
-        char *np = handle_scope(kv, pc, label);
-        if (!np) { kvlangVthreadSetError(kv, vtid, pc, "RuntimeError: br failed"); return -1; }
-        kvlangVthreadSet(kv, vtid, np, "running");
-        free(np);
-        return 0;
+        return jump_to(kv, vtid, pc, &inst->reads[taken ? 1 : 2], OP_BR);
     }
     return -1;
 }
@@ -540,15 +499,15 @@ char *kvlangKvcpuBootstrap(kvlangKv_t *kv, const char *vtid, const char *funcnam
     const uint8_t *sbody = sig.data + h.body_offset;
     int nr = sbody[0] | (sbody[1] << 8);
 
-    kvlangStrbuf_t vtroot; kvlangStrbufInit(&vtroot); kvlangKeytreeVthread(vtid, &vtroot);
-    char *stack_vt = kvlangKeytreeStack(vtroot.p);
+    char *frame_root = kvlangKeytreeFrameAt(vtid, 1);
+    char *stack_fr = kvlangKeytreeStack(frame_root);
     char err[256];
-    kvlangKvMkindex(kv, stack_vt, err, sizeof err);
-    kvlangKvExtIndex(kv, stack_vt, func_dir.p, err, sizeof err);
+    kvlangKvMkindex(kv, stack_fr, err, sizeof err);
+    kvlangKvExtIndex(kv, stack_fr, func_dir.p, err, sizeof err);
 
-    char *ep = kvlangKeytreeEntryPc(vtroot.p);
-    kvlangStrbuf_t callpc; kvlangStrbufInit(&callpc); kvlangKeytreeFrameCallpc(vtroot.p, &callpc);
-    kvlangStrbuf_t seglib; kvlangStrbufInit(&seglib); kvlangStrbufPuts(&seglib, stack_vt); kvlangStrbufPuts(&seglib, SEG_LIB);
+    char *ep = kvlangKeytreeEntryPc(frame_root);
+    kvlangStrbuf_t callpc; kvlangStrbufInit(&callpc); kvlangKeytreeFrameCallpc(frame_root, &callpc);
+    kvlangStrbuf_t seglib; kvlangStrbufInit(&seglib); kvlangStrbufPuts(&seglib, stack_fr); kvlangStrbufPuts(&seglib, SEG_LIB);
     kvlangXvalue_t v_ep, v_fn; kvlangXvalueZero(&v_ep); kvlangXvalueZero(&v_fn);
     kvlangXvalueNewCharUtf8(&v_ep, ep);
     kvlangXvalueNewCharUtf8(&v_fn, func_key);
@@ -560,7 +519,7 @@ char *kvlangKvcpuBootstrap(kvlangKv_t *kv, const char *vtid, const char *funcnam
         kvlangKvPair_t pairs[128]; int np = 0;
         for (int i = 0; i < nr && i < nargs; i++) {
             kvlangStrbuf_t slot; kvlangStrbufInit(&slot);
-            kvlangStrbufPrintf(&slot, "%s/[0,-%d]", vtroot.p, i + 1);
+            kvlangStrbufPrintf(&slot, "%s/[0,-%d]", frame_root, i + 1);
             kvlangXvalue_t av; kvlangXvalueZero(&av);
             kvlangBuiltinResolveReadValue(kv, "", args[i], NULL, &av);
             pairs[np].key = kvlangStrbufDetach(&slot);
@@ -572,8 +531,8 @@ char *kvlangKvcpuBootstrap(kvlangKv_t *kv, const char *vtid, const char *funcnam
     }
 
     kvlangXvalueFree(&sig); kvlangStrbufFree(&sig_key); kvlangStrbufFree(&func_dir);
-    kvlangStrbufFree(&vtroot); kvlangStrbufFree(&callpc); kvlangStrbufFree(&seglib);
-    free(stack_vt); free(func_key); free(pkg); free(name);
+    kvlangStrbufFree(&callpc); kvlangStrbufFree(&seglib);
+    free(stack_fr); free(frame_root); free(func_key); free(pkg); free(name);
     return ep;
 }
 
@@ -594,7 +553,7 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode, char *
         }
         free(pcv); free(status);
 
-        int depth = stack_depth(cur);
+        int depth = kvlangKeytreeFrameNum(cur);
         if (depth > MAX_STACK_DEPTH) {
             char msg[256];
             snprintf(msg, sizeof msg, "RecursionError: stack overflow: depth=%d pc=%s", depth, cur);
@@ -616,29 +575,17 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode, char *
         }
         free(link_base);
 
-        kvlangLogDebug("[%s] PC=%s OP=%s R=%d W=%d", vtid, cur, inst.opcode ? inst.opcode : "(end)", inst.nr, inst.nw);
+        kvlangLogDebug("[%s] PC=%s OP=%s R=%d W=%d", vtid, cur, inst.opcode ? inst.opcode : "(empty)", inst.nr, inst.nw);
 
         if (!inst.opcode || !inst.opcode[0]) {
-            /* 帧结束 */
-            kvlangStrbuf_t vtroot; kvlangStrbufInit(&vtroot); kvlangKeytreeVthread(vtid, &vtroot);
-            if (strcmp(fr, vtroot.p) == 0) {
-                kvlangVthreadSetDone(kv, vtid, "ok");
-                kvlangStrbufFree(&vtroot); free(fr); kvlangRwirInstFree(&inst);
-                break;
-            }
-            if (strcmp(ext_kind(kv, fr), KVSPACE_KIND_RWFUNC) != 0) {
-                char *parent = handle_scope_return(kv, cur);
-                if (!parent || !parent[0]) { free(parent); char msg[512]; snprintf(msg, sizeof msg, "RuntimeError: broken return chain: scope frame %s has no returnpc (pc=%s)", fr, cur); kvlangVthreadSetError(kv, vtid, cur, msg); kvlangStrbufFree(&vtroot); free(fr); kvlangRwirInstFree(&inst); rc = -1; break; }
-                kvlangVthreadSet(kv, vtid, parent, "running");
-                free(cur); cur = parent;
-            } else {
-                char *parent = handle_return(kv, cur);
-                if (!parent || !parent[0]) { free(parent); char msg[512]; snprintf(msg, sizeof msg, "RuntimeError: broken return chain: frame %s has no returnpc (pc=%s)", fr, cur); kvlangVthreadSetError(kv, vtid, cur, msg); kvlangStrbufFree(&vtroot); free(fr); kvlangRwirInstFree(&inst); rc = -1; break; }
-                kvlangVthreadSet(kv, vtid, parent, "running");
-                free(cur); cur = parent;
-            }
-            kvlangStrbufFree(&vtroot); free(fr); kvlangRwirInstFree(&inst);
-            continue;
+            /* layout 对每条路径都补了 return（lower::terminate），走到空槽只能是 /lib 损坏
+             * 或 goto/br 越界；报 RuntimeError 让该 vthread 停下，不拖垮整个进程。 */
+            char msg[512];
+            snprintf(msg, sizeof msg, "RuntimeError: no instruction at %s", cur);
+            kvlangVthreadSetError(kv, vtid, cur, msg);
+            free(fr); kvlangRwirInstFree(&inst);
+            rc = -1;
+            break;
         }
 
         int exec_err = 0;

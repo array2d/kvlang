@@ -1,0 +1,38 @@
+// string_passthrough: 字符串变量作实参穿过多层调用不丢值
+// 实参槽 [0,-k] 存的是键路径；resolve 只追显式 Ptr，勿把 char 值当路径再追（否则第二层即 None）
+// 期望输出:
+//   L1: hello world
+//   L2: hello world
+//   L3: hello world
+//   L2 int: 42
+//   L2 path-like: /lib
+rwfunc show(x:[]char/utf32, tag:[]char/utf32) -> () {
+	println(tag, x)
+}
+
+rwfunc show2(x:[]char/utf32, tag:[]char/utf32) -> () {
+	show(x, tag)
+}
+
+rwfunc show3(x:[]char/utf32, tag:[]char/utf32) -> () {
+	show2(x, tag)
+}
+
+rwfunc showi(n:int64) -> () {
+	println("L2 int:", n)
+}
+
+rwfunc showi2(n:int64) -> () {
+	showi(n)
+}
+
+rwfunc test() -> () {
+	s = "hello world"
+	show(s, "L1:")
+	show2(s, "L2:")
+	show3(s, "L3:")
+	k = 42
+	showi2(k)
+	p = "/lib"
+	show2(p, "L2 path-like:")
+}
