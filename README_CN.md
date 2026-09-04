@@ -267,6 +267,22 @@ python3 tutorial/error_test.py               # 全部负例测试
 
 ---
 
+## Benchmark
+
+`benchmark/` 是跨语言、跨后端性能基准。每个 case 是同一算法的 kvlang / Python / Rust / C
+等价实现；kvlang 分别在三个 kvspace 后端（`shm` / `fs` / `redis`）上各跑一列，原生/脚本版本作基线。
+规模固定以保证长期可比，每次运行只追加到带版本号的 `results.csv`——按同机同 case、以 version
+排序即得性能演进曲线。
+
+```bash
+python3 benchmark/run.py            # 全部 case × 三后端，追加 results.csv
+python3 benchmark/run.py --show     # 打印历史记录
+```
+
+case、计时约定、CSV 字段见 [benchmark/README.md](benchmark/README.md)。
+
+---
+
 ## 设计文档
 
 深度设计与实现文档，覆盖全部架构：
