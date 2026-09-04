@@ -55,8 +55,8 @@ kvspace 路径系统有 `/`（层级目录）与 `·`（成员目录）两个索
 kindexp ::= kind                   # 标量
          |  '*' kindexp            # 指针/软链接（body = 目标 key 路径）
          |  '@' kindexp            # 扩展存储句柄（body = 位置信息，data 在扩展存储）
-         |  '[' ']' kindexp        # 变长数组（字面量初始化→compact；裸声明→散 key）
-         |  '[' dims ']' kindexp   # 定长/多维数组（一个 XValue，连续 body）
+         |  '[' ']' kindexp        # 变长一维数组类型；compact/stringkeymap 由初始化括号（[...]/{...}）定
+         |  '[' dims ']' kindexp   # 定长/多维数组（compact 形态，单 XValue 连续 body）
 dims    ::= INT (',' INT)*
 kind    ::= uint8 | int8 | int16 | uint16 | int32 | uint32 | int64 | uint64
          |  float32 | float64 | bool | char/utf32 | char/utf8 | char/ascii | time | duration
