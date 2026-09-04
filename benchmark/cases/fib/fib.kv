@@ -1,0 +1,26 @@
+// fib benchmark — naive 递归斐波那契（压调用/帧寻址深度，对齐 #116）
+// 递归深度 n 由 __SCALE__ 占位，run.py 按扫描点替换；naive 递归调用次数指数级
+// 期望输出（n=10 时）:
+//   fib = 55
+rwfunc fib(n:int64) -> (r:int64) {
+	if (n <= 1) {
+		n -> r
+	} else {
+		a <- n - 1
+		b <- n - 2
+		fib(a) -> x
+		fib(b) -> y
+		r <- x + y
+	}
+}
+
+rwfunc test() -> () {
+	t0 <- time·now()
+	fib(__SCALE__) -> ans
+	t1 <- time·now()
+	println("fib =", ans)
+	delta <- time·sub(t1, t0)
+	ns <- time/duration·as_nanos(delta)
+	println("__bench_ns:", ns)
+	println("__bench_input: n=__SCALE__")
+}

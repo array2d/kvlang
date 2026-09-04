@@ -1,0 +1,72 @@
+// binary trees benchmark — 建满二叉树并遍历计数（内存分配 + 指针/引用）
+// 节点用 L/R 子结点 id 映射表示（id 0 = 空），自顶向下显式栈建树，
+// 再用遍历栈跟随指针逐结点计数。深度 depth 由 __SCALE__ 占位（勿改逻辑）
+// 期望输出（depth=6 时）:
+//   bintree: nodes = 127
+rwfunc test() -> () {
+	__SCALE__ -> depth
+	L:[int64]·int64 = {}
+	R:[int64]·int64 = {}
+	bid:[int64]·int64 = {}
+	bdep:[int64]·int64 = {}
+	0 -> nid
+	t0 <- time·now()
+	nid + 1 -> nid
+	nid -> root
+	0 -> L·*root
+	0 -> R·*root
+	0 -> top
+	root -> bid·*top
+	depth -> bdep·*top
+	top + 1 -> top
+	while (top > 0) {
+		top - 1 -> top
+		kv·get(bid, top) -> cur
+		kv·get(bdep, top) -> d
+		if (d > 0) {
+			nid + 1 -> nid
+			nid -> lc
+			nid + 1 -> nid
+			nid -> rc
+			lc -> L·*cur
+			rc -> R·*cur
+			0 -> L·*lc
+			0 -> R·*lc
+			0 -> L·*rc
+			0 -> R·*rc
+			d - 1 -> nd
+			lc -> bid·*top
+			nd -> bdep·*top
+			top + 1 -> top
+			rc -> bid·*top
+			nd -> bdep·*top
+			top + 1 -> top
+		}
+	}
+	0 -> count
+	tid:[int64]·int64 = {}
+	0 -> tp
+	root -> tid·*tp
+	tp + 1 -> tp
+	while (tp > 0) {
+		tp - 1 -> tp
+		kv·get(tid, tp) -> cur
+		count + 1 -> count
+		kv·get(L, cur) -> lc
+		kv·get(R, cur) -> rc
+		if (lc != 0) {
+			lc -> tid·*tp
+			tp + 1 -> tp
+		}
+		if (rc != 0) {
+			rc -> tid·*tp
+			tp + 1 -> tp
+		}
+	}
+	t1 <- time·now()
+	println("bintree: nodes =", count)
+	delta <- time·sub(t1, t0)
+	ns <- time/duration·as_nanos(delta)
+	println("__bench_ns:", ns)
+	println("__bench_input: depth=__SCALE__")
+}

@@ -1,0 +1,65 @@
+// matrix multiplication benchmark — 稠密方阵乘（浮点运算 + 三重循环）
+// A/B 元素取 0.25 倍数（二进制精确），C 校验和 × 1e6 恒为精确整数、跨语言逐字节一致
+// 方阵阶 N 由 __SCALE__ 占位（O(N^3)，勿改逻辑）
+// 期望输出（N=6 时）:
+//   matmul: check = 82750000
+rwfunc test() -> () {
+	__SCALE__ -> n
+	A:[int64]·float64 = {}
+	B:[int64]·float64 = {}
+	0 -> i
+	while (i < n) {
+		0 -> j
+		while (j < n) {
+			i × n -> base
+			base + j -> idx
+			i + j -> ta
+			ta % 4 -> qa
+			float64(qa) -> qaf
+			qaf × 0.25 -> pa
+			pa + 0.25 -> av
+			av -> A·*idx
+			i × 2 -> i2
+			i2 + j -> tb
+			tb % 4 -> qb
+			float64(qb) -> qbf
+			qbf × 0.25 -> pb
+			pb + 0.25 -> bv
+			bv -> B·*idx
+			j + 1 -> j
+		}
+		i + 1 -> i
+	}
+	t0 <- time·now()
+	0.0 -> checksum
+	0 -> i
+	while (i < n) {
+		0 -> j
+		while (j < n) {
+			0.0 -> acc
+			0 -> k
+			while (k < n) {
+				i × n -> ba
+				ba + k -> ia
+				kv·get(A, ia) -> av
+				k × n -> bb
+				bb + j -> ib
+				kv·get(B, ib) -> bv
+				av × bv -> pr
+				acc + pr -> acc
+				k + 1 -> k
+			}
+			checksum + acc -> checksum
+			j + 1 -> j
+		}
+		i + 1 -> i
+	}
+	t1 <- time·now()
+	checksum × 1000000.0 -> scaled
+	int64(scaled) -> out
+	println("matmul: check =", out)
+	delta <- time·sub(t1, t0)
+	ns <- time/duration·as_nanos(delta)
+	println("__bench_ns:", ns)
+	println("__bench_input: N=__SCALE__")
+}

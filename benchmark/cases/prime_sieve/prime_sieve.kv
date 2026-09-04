@@ -1,0 +1,41 @@
+// prime_sieve benchmark — 试除法求 <=N 的质数（嵌套 while + 取模，计算/控制流密集）
+// 上界 N 由 __SCALE__ 占位（勿改逻辑）
+// 期望输出（N=100 时）:
+//   primes up to 100
+//   ...
+//   total primes up to 100 = 25
+rwfunc prime_sieve(limit:int64) -> () {
+	println("primes up to", limit)
+	count = 0
+	2 -> n
+	while (n <= limit) {
+		is_prime <- true
+		d = 2
+		while (d < n) {
+			n % d -> rem
+			divisible <- rem == 0
+			if (divisible) {
+				is_prime = false
+				break
+			} else {
+				d <- d + 1
+			}
+		}
+		if (is_prime) {
+			println("  prime:", n)
+			count = count + 1
+		}
+		n + 1 -> n
+	}
+	println("total primes up to", limit, "=", count)
+}
+
+rwfunc test() -> () {
+	t0 <- time·now()
+	prime_sieve(__SCALE__)
+	t1 <- time·now()
+	delta <- time·sub(t1, t0)
+	ns <- time/duration·as_nanos(delta)
+	println("__bench_ns:", ns)
+	println("__bench_input: N=__SCALE__")
+}

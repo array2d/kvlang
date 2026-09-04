@@ -1,0 +1,36 @@
+// hash table benchmark — 散列插入 + 查找（哈希表增删查）
+// 键由 Knuth 乘法散列生成，规模 N 由 __SCALE__ 占位（勿改逻辑）
+// 期望输出（N=100 时）:
+//   hash: hits = 100 sum = 4950
+rwfunc test() -> () {
+	__SCALE__ -> n
+	h:[int64]·int64 = {}
+	t0 <- time·now()
+	0 -> i
+	while (i < n) {
+		i × 2654435761 -> k0
+		k0 % 100003 -> key
+		i -> h·*key
+		i + 1 -> i
+	}
+	0 -> sum
+	0 -> hits
+	0 -> i
+	while (i < n) {
+		i × 2654435761 -> k0
+		k0 % 100003 -> key
+		kv·get(h, key) != None -> ex
+		if (ex) {
+			hits + 1 -> hits
+			kv·get(h, key) -> v
+			sum + v -> sum
+		}
+		i + 1 -> i
+	}
+	t1 <- time·now()
+	println("hash: hits =", hits, "sum =", sum)
+	delta <- time·sub(t1, t0)
+	ns <- time/duration·as_nanos(delta)
+	println("__bench_ns:", ns)
+	println("__bench_input: N=__SCALE__")
+}

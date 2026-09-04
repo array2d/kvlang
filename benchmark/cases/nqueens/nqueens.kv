@@ -1,0 +1,40 @@
+// n-queens benchmark — 位运算回溯数解（递归 + 整数位运算 + 分支）
+// 棋盘规模 N 由 __SCALE__ 占位，run.py 按扫描点替换（勿改逻辑）
+// 期望输出（N=5 时）:
+//   queens = 10
+rwfunc nq(cols:int64, d1:int64, d2:int64, all:int64) -> (cnt:int64) {
+	if (cols == all) {
+		1 -> cnt
+	} else {
+		0 -> cnt
+		cols | d1 -> occ0
+		occ0 | d2 -> occ1
+		occ1 & all -> occ
+		occ ^ all -> avail
+		while (avail != 0) {
+			0 - avail -> neg
+			avail & neg -> p
+			avail ^ p -> avail
+			cols | p -> nc
+			d1 | p -> u1
+			u1 << 1 -> nd1
+			d2 | p -> u2
+			u2 >> 1 -> nd2
+			nq(nc, nd1, nd2, all) -> sub
+			cnt <- cnt + sub
+		}
+	}
+}
+
+rwfunc test() -> () {
+	t0 <- time·now()
+	1 << __SCALE__ -> sh
+	sh - 1 -> all
+	nq(0, 0, 0, all) -> ans
+	t1 <- time·now()
+	println("queens =", ans)
+	delta <- time·sub(t1, t0)
+	ns <- time/duration·as_nanos(delta)
+	println("__bench_ns:", ns)
+	println("__bench_input: N=__SCALE__")
+}
