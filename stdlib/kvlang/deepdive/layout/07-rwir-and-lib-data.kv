@@ -1,5 +1,5 @@
 # 欢迎加入kvspace世界
-lib kvlang/deepdive/parser/07_rwir_and_lib_data {
+lib kvlang/deepdive/layout/07_rwir_and_lib_data {
 	"""# rwir 与 lib 数据：注册布局
 
 > 签名参数/返回值的 `type` 用签名类型表达式（并集 `A|B`、通配 `any`、高维 shape `[2,3]`、动态维 `?`），见 `grammar.bnf`。
@@ -31,18 +31,18 @@ lib kvlang/deepdive/parser/07_rwir_and_lib_data {
 `/lib/<name>` 存单个 XValue 常量，任意 kvlang 代码以绝对路径读写：
 
 ```
-/lib/math.Pi   float64 3.141592653589793
-/lib/math.E    float64 2.718281828459045
+/lib/math·Pi   float64 3.141592653589793
+/lib/math·E    float64 2.718281828459045
 ```
 
 ```kv
 lib math {
-    /lib/math.Pi = 3.141592653589793
-    /lib/math.E  = 2.718281828459045
+    /lib/math·Pi = 3.141592653589793
+    /lib/math·E  = 2.718281828459045
 }
 ```
 
-`lib` body 内的绝对路径赋值即写常量；kv 代码直接以绝对路径访问 `print(/lib/math.Pi)`。裸名（`Pi = 3.14`）是 `/vthread` 帧局部变量、跑完回收，不入 `/lib/`。
+`lib` body 内的绝对路径赋值即写常量；kv 代码直接以绝对路径访问 `print(/lib/math·Pi)`。裸名（`Pi = 3.14`）是 `/vthread` 帧局部变量、跑完回收，不入 `/lib/`。
 
 > 注：Go/oldhero 曾用 `//go:embed stdlib/*.kv` + 启动 layout+run 各 lib `init` 自举内置常量。当前 Rust layout + C runtime **不内置 stdlib 自举**；常量由用户/宿主显式 layout 写入 `/lib/`。
 
@@ -82,5 +82,5 @@ rwir myop(A:int64, B:int64) -> (C:int64)
 | `runtime/src/rwirext.c` | `kvlang_rwirextRegister(opcode, nr, nw, sig)` → `/lib/<opcode>` |
 | `runtime/src/kvcpu.c` | execute 循环 `load_def_reads` + `check_read_types` 内联类型匹配 |
 | `runtime/src/type_expr.c` | `kvlang_rwirextTypeValid`（装载校验）+ `kvlang_rwirextTypeMatch`（运行时匹配） |
-""" -> /lib/kvlang/deepdive/parser/07_rwir_and_lib_data
+""" -> /lib/kvlang/deepdive/layout/07_rwir_and_lib_data
 }

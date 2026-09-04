@@ -9,15 +9,14 @@ lib kvlang {
 kvlang 是一门全新语言，语法以下面示例为准，不要套用其它语言直觉。
 
 ## 程序结构
-顶层把代码包进 `rwfunc main() -> () { … }`，最后单独调用 `main()`。别把函数命名为 `init`。
+文件入口约定是 `rwfunc test() -> () { … }`——`kvlang xxx.kv` 会自动运行 `test`，**不要**再手写 `test()` 调用。其它函数（含习惯叫的 `main`）必须被 `test` 直接或间接调用才会执行。
 ```kv
-rwfunc main() -> () {
+rwfunc test() -> () {
     total = 0            # = 等价 <-，写左边这个槽
     1 -> i               # -> 写右边这个槽
     while (i <= 5) { total <- total + i; i + 1 -> i }
     println(total)       # 15
 }
-main()
 ```
 
 ## 赋值三形式与调用
@@ -35,20 +34,22 @@ rwfunc sum(arr:[]int64) -> (acc:int64) {
     0 -> acc; 0 -> i
     while (i < ndarray·numel(arr)) { xv·at(arr,i) -> e; acc + e -> acc; i + 1 -> i }
 }
-rwfunc main() -> () {
+rwfunc test() -> () {
     mylib·add(3,4) -> s; println(s)          # 7
     a:[]int64 = [1,2,3,4,5]; sum(a) -> t; println(t)   # 15
 }
-main()
 ```
 
 ## 数值类型（只有定宽类型）
 `int8/16/32/64 uint8/16/32/64 float32/64` 及 `char/utf8` 等；**没有 `int`/`float`**（会被拒）。
 构造器兼转换：`float32(3)`、`int8(300)`（窄化按补码回绕，float→int 向零截断）。变量声明 `x:int64 = 42`。
 
-## 数组（关键：`[]` 前缀才是数组，裸 kind 是标量）
+## 数组：两种存储形态（`[...]` compact / `{...}` stringkeymap 散 key）
+计算机意义的数组（含多维）有两种物理形态，由字面量括号选择：
+- **compact**（`[...]`）：定长同类型元素连续打包进**单个 XValue**（head kind=元素类型），支持 `xv·at`/`ndarray·numel`/下标随机访问；多维 `[256,256]uint8` 即 ndarray/tensor。
+- **stringkeymap**（`{...}`）：每元素落 `base·i` 独立 key（head kind=`stringkeymap`），变长/可增长，**字符串数组、可追加数组走这里**，用 `for-in` 遍历（`w:[]char/utf8 = {"foo","bar"}`）。
 ```kv
-a:[]int64 = [7,2,9,4]     # ✅ 一维数组。写成 a:int64=[...] 会报错（那是标量）
+a:[]int64 = [7,2,9,4]     # ✅ compact：`[]` 前缀才是数组，裸 kind 是标量；写成 a:int64=[...] 会报错
 ndarray·numel(a) -> n               # 4
 xv·at(a,2) -> e              # 9（0 起）
 xv·set(a,1,99) -> a          # 改元素：a=[7,99,9,4]

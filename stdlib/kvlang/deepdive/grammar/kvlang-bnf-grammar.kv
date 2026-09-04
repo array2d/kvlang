@@ -118,21 +118,25 @@ prefix_unary = "-" | "!"
 
 infix_primary = binary_op expr
 
-binary_op  = "+" | "-" | "*" | "/" | "%" | "==" | "!=" | "<" | ">" | "<=" | ">="
+binary_op  = "+" | "-" | "×" | "÷" | "%" | "==" | "!=" | "<" | ">" | "<=" | ">="
            | "&&" | "||" | "&" | "|" | "^" | "<<" | ">>"
+           (* 乘 = ×(U+00D7)，除 = ÷(U+00F7)；* 保留、/ 仅路径，均非算术符 *)
 
 arg_list    = expr { "," expr }
 
-literal     = integer | float | string | "null" | "true" | "false"
+literal     = integer | float | string | "None" | "true" | "false"
+              (* 空值字面量是 None，非 null *)
 
 array_literal  = "[" [ expr { "," expr } ] "]"
-               (* compact 定长数组；元素不可为字符串字面量 *)
+               (* compact 形态数组：元素连续打包进单个 XValue，head kind=元素类型；
+                  须定长同类型，元素不可为字符串字面量（变长）*)
 
 object_literal = "{" [ ident "=" expr { (";" | newline) ident "=" expr } ] "}"
-               (* 散 key 对象：{k1=v1; k2=v2}，key 为静态标识符 *)
+               (* 对象/映射字面量：{k1=v1; k2=v2}，key 为静态标识符，落 object 或 stringkeymap(map) *)
 
 map_literal    = "{" [ expr { (";" | newline | ",") expr } ] "}"
-               (* 散 key 值列表：{v0, v1, ...}；字符串数组等变长集合用此形式 *)
+               (* stringkeymap 形态数组（散 key）：{v0, v1, ...}，head kind=stringkeymap，
+                  每元素落 base·i 独立 key；字符串数组等变长集合用此形式 *)
 ```
 
 ## 控制流（仅限 rwfunc 体内）
@@ -157,24 +161,25 @@ return_stmt   = "return"    (* 无返回值；输出通过写参传递 *)
 ## 内建函数（部分）
 
 ```
-builtin_call = ("print" | "println" | "cerr" | "input"
+builtin_call = ("print" | "println"
               | "abs" | "neg" | "sign" | "pow" | "sqrt" | "exp" | "log"
               | "min" | "max"
-              | "int8" | "int16" | "int32" | "int64"
+              | "bool" | "int8" | "int16" | "int32" | "int64"
               | "uint8" | "uint16" | "uint32" | "uint64"
               | "float32" | "float64"
-              | "char/utf8" | "char/utf32"
-              | "ord" | "strlen" | "strcmp" | "strstr"
-              | "slice" | "concat"
-              | "array" | "len" | "at" | "set" | "has" | "sort"
-              | "dict" | "kvat" | "kvhas"
+              | "char/utf8" | "char/utf32" | "char/ascii"
+              | "array" | "obj" | "map"
               | "debugger") "(" [ arg_list ] ")"
 
+(* 裸名内建仅上表；string·len/char/slice/find、xv·at/set、kv·get/set/del、
+   ndarray·numel/dim/shape、array·append/slice、vthread·*、time·* 等一律走
+   primary 的 · 限定调用（base·method(...)），不是裸名终结符 *)
+(* 类型构造器兼转换：int8(x)/float32(x)/char/utf8(x)/bool(x) ... *)
 (* min/max 支持变参: min(a,b,c,...) *)
 (* print  : Go 风格——无空格拼接，不追加换行 *)
 (* println: Go 风格——空格分隔，追加换行 *)
 (* debugger(): 内联暂停, 非调试模式 no-op *)
-(* / : 两侧 int → 整除(C 风格); 任一侧 float → 浮除 *)
+(* ÷ : 两侧 int → 整除(C 风格); 任一侧 float → 浮除；/ 仅用于路径 *)
 (* s[i] 读返单字符字符串, 越界返 ""; s[i]="X" 单字符替换写回新串 *)
 (* + 作用在 string∧string → 拼接 *)
 ```

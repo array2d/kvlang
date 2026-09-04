@@ -21,14 +21,13 @@ KVSpace 是文件系统风格的 KV 存储抽象，`/` 管层级，`·` 管成�
 XValue = XValueHead + body：
 
 ```
-XValueHead  =  [1B kind_len][N B kind][1B ref][1B arr_flag][1B ndim][ndim×4B dims LE][4B raw_len LE]
+XValueHead  =  [1B kind_len][N B kind][1B ref][1B ndim][ndim×4B dims LE][4B raw_len LE]
 body        =  [M B raw]    M = raw_len
 ref:      0=内联  1=`*`软链接（body=目标key路径）  2=`@`扩展存储句柄（body=位置描述符）
-arr_flag: 0=标量  1=compact数组  2=散key数组
-ndim:     0=变长，N=定长N维
+ndim:     0=标量，≥1=数组维数（无独立 arr_flag，形态由 kind 表达：compact 形态 kind=元素类型；stringkeymap 形态 kind=stringkeymap）
 ```
 
-`HeadLen() = 8 + kind_len + ndim*4`；body 在 `value[HeadLen : HeadLen+raw_len]`。
+`HeadLen() = 7 + kind_len + ndim*4`；body 在 `value[HeadLen : HeadLen+raw_len]`。
 
 **kind 列表**（`runtime/src/const.h` 唯一事实源）：
 
