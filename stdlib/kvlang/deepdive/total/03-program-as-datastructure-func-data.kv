@@ -1,0 +1,14 @@
+# 来源: deepx-design/doc/kvlang-design-and-implementation/total篇-03-程序即数据结构加函数加数据.md
+# kvlang deepdive 设计与实现文档；kvlang 启动阶段以字符串写入 /lib/kvlang/deepdive/total/03_program_as_datastructure_func_data。
+lib kvlang/deepdive/total/03_program_as_datastructure_func_data {
+	"""# 程序 = 数据结构 + 函数 + 数据
+
+## 程序 = 数据结构 + 函数 + 数据
+
+Niklaus Wirth 的经典公式「程序 = 数据结构 + 算法」将程序员的精力引向"先设计数据结构，再编写算法"。
+
+kvlang 的主张：**程序 = 数据结构 + 函数 + 数据**。数据结构不再由用户自定义——kvlang 的全部数据结构都是 builtin：`struct`（键族前缀），compact 数组（`[N]T`，定长二进制编码），散 key 数组（`[]T`，整数键族），链表（`/n0.val`、`/n0.next` 平坦键，路径字符串作指针）。使用者只需声明 `lib`、编写 `rwfunc`，数据自然落地到 `/lib/` 与 `/vthread/` 及用户自定义路径。
+
+键族是 kvlang 唯一的数据结构机制，上层全部收敛为函数（rwfunc/rwir）与数据（kvspace slot）的组合。以 kvspace 树形路径为统一地址空间，同一语法同时承担 VM 指令、高级语言、编译器 IR 三种职能。
+""" -> /lib/kvlang/deepdive/total/03_program_as_datastructure_func_data
+}

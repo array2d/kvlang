@@ -1,0 +1,140 @@
+# 来源: deepx-design/doc/kvlang-design-and-implementation/parser篇-01-指令架构.md
+# kvlang deepdive 设计与实现文档；kvlang 启动阶段以字符串写入 /lib/kvlang/deepdive/parser/01_instruction_architecture。
+lib kvlang/deepdive/parser/01_instruction_architecture {
+	"""# Instruction Architecture（指令架构）
+
+## 指令分类
+
+指令分两层，kvcpu 只见执行层：
+
+**执行层**（kvcpu 直接处理）：
+1. **原子 rwir**：`writes <- opcode(reads...)` 或 `opcode(reads...) -> writes`。读/写角色由箭头方向决定，无隐式栈、无匿名寄存器。`writes = expr` 是 `<-` 的等价书写；`=` 不是表达式，不可嵌套在条件中。控制流原语 `call`/`return`/`br`/`goto` 是 rwir 的子集。
+2. **复合 rwir（rwfunc）**：`rwfunc funca(ra,rb) -> (wa,wb) { … }` 把多条 rwir 打包为命名单元，对外暴露相同的 `(reads) -> (writes)` 箭头接口。HandleCall 将实参绑入子帧读槽，HandleReturn 将子帧写槽写回父帧——没有"返回值"，只有槽位间的数据流动。调用时**必须匹配全部写参**，不需要的用 `_` 丢弃（与 Go/Rust `_` 约定一致，写入 `_` 帧槽，不影响语义）。
+
+**源码层**（lower 后消失）：`if`/`else`/`while`/`for`——lower pass 将其降级为 ScopeStmt + `br`/`goto`，kvcpu 不感知。
+
+### `->` / `<-` / `=` 与写槽
+
+三种书写形态，写槽约束完全一致：
+
+| 形态 | 写槽位置 | 例 |
+|------|---------|-----|
+| `expr -> writes` | 右 | `A + B -> C` |
+| `writes <- expr` | 左 | `C <- A + B` |
+| `writes = expr` | 左（≡ `<-`） | `C = A + B`、`p·val = 8` |
+
+**铁律**：`->` 右侧 / `<-`、`=` 左侧必须是**位置**（裸名、`/abs`、`base·名`）；字面量在写槽位置是语法错误，parser 报错拒绝。
+
+调用时**写参 arity 强制匹配**（对齐 Go/Rust 阵营）：`f() -> s` 对多写参函数是编译错误；不需要的写参用 `_` 接收。
+
+## 指令的二维空间模型：`[s0, s1]`
+
+### 两个轴的含义
+
+每条指令在 KV 树中占据一个**二维坐标** `[s0, s1]`：
+
+```
+s0 轴（横轴） — 执行顺序轴：第几条指令
+s1 轴（纵轴） — 参数轴：该槽的角色
+
+        s1 < 0           s1 = 0         s1 > 0
+      (读参，输入)        (操作码)       (写参，输出)
+           ←─────────────── 0 ───────────────→
+s0 = 0  │  [0,-2] [0,-1]  [0,0]  [0,1] [0,2]
+s0 = 1  │  [1,-2] [1,-1]  [1,0]  [1,1]
+s0 = 2  │  [2,-1]         [2,0]  [2,1]
+  ...
+```
+
+**铁律**：
+- `[s0, 0]` **永远是 opcode**（操作符或被调用函数名）
+- `[s0, -1], [s0, -2], ...` **读参**（read slots），负号代表"消费数据"
+- `[s0,  1], [s0,  2], ...` **写参**（write slots），正号代表"产出数据"
+
+### 具体示例
+
+```kv
+rwfunc add(A: int, B: int) -> (C: int) {
+    A + B -> C
+}
+```
+
+lower + layoutrwir 后写入 KV：
+
+```
+/lib/main.add/[0,0]   = "+"      ← s1=0: opcode
+/lib/main.add/[0,-1]  = "A"      ← s1=-1: 第1个读参（left operand）
+/lib/main.add/[0,-2]  = "B"      ← s1=-2: 第2个读参（right operand）
+/lib/main.add/[0,1]   = "C"      ← s1=1:  第1个写参（result destination）
+
+/lib/main.add/[1,0]   = "return" ← s1=0: opcode（隐式 return，appendReturn 补充）
+```
+
+图示为一张二维表格：
+
+```
+       s1=-2   s1=-1   s1=0      s1=1
+s0=0 │  "B"    "A"    "+"      "C"
+s0=1 │                "return"
+```
+
+数据流方向清晰：**从负轴读入，在零轴执行，向正轴写出**。
+
+
+### 多参数指令与扇出
+
+```kv
+print("hello", x, y)
+```
+
+```
+/lib/main.foo/[3,0]   = "print"   ← opcode
+/lib/main.foo/[3,-1]  = "\"hello" ← 第1读参（字符串字面量，" 前缀编码）
+/lib/main.foo/[3,-2]  = "x"       ← 第2读参
+/lib/main.foo/[3,-3]  = "y"       ← 第3读参
+（无写参，副作用是输出）
+
+`print` 多参数直接拼接（无空格分隔），末尾不追加换行。`println` 空格分隔参数，末尾追加换行（Go 风格）。
+```
+
+写参扇出（同一结果写入多个槽）：
+
+```kv
+a + b -> sum, backup
+```
+
+```
+/lib/main.foo/[2,0]   = "+"
+/lib/main.foo/[2,-1]  = "a"
+/lib/main.foo/[2,-2]  = "b"
+/lib/main.foo/[2,1]   = "sum"    ← 第1写参
+/lib/main.foo/[2,2]   = "backup" ← 第2写参（扇出）
+```
+
+拷贝指令（叶表达式 → 写槽）编码为显式操作码 `=`，值引用放读槽：
+
+```kv
+a -> b        # [s0,0]="="  [s0,-1]="a"   [s0,1]="b"
+42 -> x       # [s0,0]="="  [s0,-1]="42"  [s0,1]="x"
+```
+
+opcode 位**永远是操作码**，从不放变量引用——`=` 使拷贝与零参函数调用（`greet() -> x`，opcode="greet"）在 KV 层无歧义。
+
+
+### 解码与写函数约束
+
+kvcpu 沿 s1 轴向两侧扩展，直到遇到空 key 停止，参数数量**隐式编码**，无需在 opcode 中存储 arity。
+
+**WriteFunc 正确性约束**：写新函数前必须先 `del_tree` 清除旧数据。若旧函数在 `[0,-1]` 有遗留值，Decode 会误读为真实读参。
+
+### 与传统字节码的对比
+
+| 维度 | 传统字节码 | kvlang `[s0, s1]` |
+|------|-----------|-------------------|
+| 指令存储 | 线性数组 `code[PC]` | KV 树 `kv.Get(prefix + "[s0,0]")` |
+| 操作数位置 | opcode 后紧跟操作数 | `s1<0`（读）/ `s1>0`（写）分离 |
+| 参数数量 | opcode 内编码 arity | 隐式：扫描到空 key 停止 |
+| 数据流方向 | 单向（操作数 → 结果） | 符号编码（负=读, 正=写） |
+| 可观察性 | 字节不可独立寻址 | 每个槽是独立 KV key，可单独 Get/Watch |
+""" -> /lib/kvlang/deepdive/parser/01_instruction_architecture
+}

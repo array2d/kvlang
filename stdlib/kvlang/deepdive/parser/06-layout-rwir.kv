@@ -1,0 +1,54 @@
+# 来源: deepx-design/doc/kvlang-design-and-implementation/parser篇-06-layoutrwir.md
+# kvlang deepdive 设计与实现文档；kvlang 启动阶段以字符串写入 /lib/kvlang/deepdive/parser/06_layout_rwir。
+lib kvlang/deepdive/parser/06_layout_rwir {
+	"""# Layoutrwir: 装载与执行
+
+## lib 树与装载
+
+`write_func` 将多个 `.kv` 文件 parse → lower → 写入 `/lib/`。每个 `lib name { }` 块形成一个 lib 节点，每个 lib 有且仅有一个 `init` 函数（init 体 + 顶层代码合并）。
+
+**CLI 入口**：
+- `kvlang <file.kv>` → layout 后运行约定入口 `test`
+- `kvlang -c "<src>"` → layout 内存源码 → 运行 `init`
+- `kvlang layout <file>` → 仅 layout，打印 `ENTRY=<entry>`
+
+**跨 lib 调用**：全路径 `/lib/{childlib}·{func}()`，无 `import` 关键字。
+
+## `init` 函数
+
+裸顶层代码自动封装为 `rwfunc init() -> () { }`。`lib name { }` 中各函数注册在 `/lib/<name>·{func}`，无 lib 包裹的属匿名 lib（路径 `/lib/·{func}`）。源码副本写入 `/lib/<pkg>·<name>‥src`。
+
+## XValue Kind
+
+`/lib/` 下槽位的 XValue kind：
+
+| Kind | 示例 | 写入者 |
+|------|------|--------|
+| `rwir` | `/lib/func/[1,0] = "+"` | `write_body`（指令槽） |
+| `defrwfunc` | `/lib/func/[0,0]` | `write_func`（函数签名：`[nr\|nw][kindexp…]`） |
+| `ptr` | `/lib/func/A = →[0,-1]` | `write_func`（命名参数→slot 指针） |
+
+帧类型判定：`func_frame_root` 沿帧树向上查找 `‥lib` 标记 → rwfunc 帧；无则为 scope 帧。
+
+## `write_func`：函数布局
+
+1. `funcDir = /lib/<pkg>·<name>/`
+2. `[0,0]` → `defrwfunc` 签名（nr, nw, num_insts, kindexp 列表）
+3. 读参 `p`: `funcDir/p` → `Ptr("[0,-j]")`；写参 `r`: `funcDir/r` → `Ptr("[0,+j]")`
+4. `write_body(..., offset=1)` → 指令从 `[1,0]` 开始
+
+**EntryPC**：`root/[1,0]`（函数签名占 row 0）。
+
+## HandleCall：运行时调用
+
+1. 读 `[0,0]`（defrwfunc）→ nr, nw
+2. ExtIndex(frameRoot, funcDir)（帧→指令树）
+3. 写 `‥returnpc`、`‥callpc`、`‥lib`
+4. 读参绑入 `[0,-(i+1)]`，写参路径写入 `[0,+(i+1)]`
+5. 返回 EntryPC = `[1,0]`
+
+## `=` 操作码
+
+`a -> b` 编码为 `[s0,0]="="`（值拷贝）。函数调用 opcode 位为 `call`。opcode 槽位永远不放变量引用。
+""" -> /lib/kvlang/deepdive/parser/06_layout_rwir
+}

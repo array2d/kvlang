@@ -1,0 +1,54 @@
+# 来源: deepx-design/doc/kvlang-design-and-implementation/parser篇-02-函数.md
+# kvlang deepdive 设计与实现文档；kvlang 启动阶段以字符串写入 /lib/kvlang/deepdive/parser/02_functions。
+lib kvlang/deepdive/parser/02_functions {
+	"""# 函数
+
+> 签名参数/返回值的 `type` 用签名类型表达式（并集 `A|B`、通配 `any`、高维 shape `[2,3]`、动态维 `?`），见 `grammar.bnf`。
+
+## 函数无返回值：只有读参与写参
+
+kvlang 函数**没有返回值**，只有两种参数：
+
+| 参数类型 | KV 槽位 | 方向 |
+|---------|---------|------|
+| **读参** | `[s0, -1], [s0, -2], ...` | 调用方 → 被调方 |
+| **写参** | `[s0, +1], [s0, +2], ...` | 被调方 → 调用方 |
+
+`-> result` 是**写参的跨帧路径映射**：HandleReturn 将子帧写参直写调用方帧目标路径。没有"返回值"，只有槽位间的数据流动。
+
+### 写槽即位置
+
+写槽（`->` 右侧 / `<-`、`=` 左侧）必须是**位置**：裸名、`/abs`、`base·名`。字面量在写槽位置是语法错误。多写参逗号分隔，与签名写参一一对应：
+
+```kv
+divmod(17, 5) -> q, r      # q←商, r←余数
+add(a, b) -> _             # _ 丢弃（约定，写入 _ 帧槽）
+```
+
+### 读参只读
+
+读参是调用方 → 被调方的输入绑定。函数体内将读参裸名放入写槽（含 `for` 迭代变量）破坏 rwir 数据流方向——layout `check_read_only_params` 报 error 拒绝装载。成员写（`A·x = v`，脱糖为 set 本体回写）不写本体，豁免。
+
+**签名诚实原则**：若函数体内写了某参数，该参数必须在写参侧：
+
+```kv
+# ❌ 签名撒谎：acc 被写但在读参侧 → 报错
+rwfunc sum(arr, acc:int64) -> (r:int64) { acc + arr[0] -> acc }
+
+# ✅ 签名诚实：acc 在写参侧，体内可读可写
+rwfunc sum(arr) -> (acc:int64) { acc + arr[0] -> acc }
+```
+
+### 定义与调用的参数同名规则
+
+**定义时**：读参与写参不得同名——`rwfunc f(A:int64) -> (A:int64)` 非法，`check_param_dup` 报错拒绝。
+
+**调用时**：同变量可同时出现在读槽和写槽——`inc(x) -> x` 合法，HandleCall 对两者独立解析，不冲突。
+
+### Parser 写槽校验（`collect_write_list`）
+
+- 字面量写槽（数字/引号串开头）→ warn「unexpected token in write slot position」
+- 写槽后紧跟 `(` → warn「function call on same line as write slot」
+- 合法写槽：裸名、`/abs`、`base·名`
+""" -> /lib/kvlang/deepdive/parser/02_functions
+}

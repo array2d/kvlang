@@ -1,0 +1,69 @@
+# 来源: deepx-design/doc/kvlang-design-and-implementation/total篇-01-存算控制流严格分离的kv树计算架构.md
+# kvlang deepdive 设计与实现文档；kvlang 启动阶段以字符串写入 /lib/kvlang/deepdive/total/01_storage_compute_separation_kv_tree。
+lib kvlang/deepdive/total/01_storage_compute_separation_kv_tree {
+	"""# 存、算、控制流严格分离的 kv 树计算架构
+
+
+## 存、算、控制流严格分离
+
+kvlang 架构的顶层公理：**存储、计算、控制流三者严格分离，各司其职。**
+
+| 层 | 职责 | 载体 | 说明 |
+|----|------|------|------|
+| **存储** | 持有所有代码、数据、执行状态 | kvspace 树形路径 | 元存：kvspace 核心能力，管理 slot/索引/系统变量/指令树/帧栈 |
+| **计算** | 执行算子、张量运算 | op-plat（GPU/CPU 算子） | 不持有状态，只消费存储层的数据、产出写回存储层 |
+| **控制流** | 调度、跳转、调用/返回 | kvcpu（PC 路径导航） | 不产生数据，只改变 PC 在存储树中的位置 |
+
+与传统架构的对比：
+
+| | 传统 VM | kvlang |
+|--|---------|--------|
+| 存储 | 栈+堆+全局段，混在内存中 | **kvspace 树**，统一的路径地址空间 |
+| 计算 | 指令内联（ALU op + 寻址） | **rwir `<-`/`->`**：显式读参写参，计算与寻址解耦 |
+| 控制流 | PC 整数偏移，与数据同空间 | **PC = KV 路径字符串**，控制流即树导航 |
+
+分离的成果：崩溃恢复只需 PC 路径（已存 KV）；算子可独立替换；调试只需 `kvspace tree` 静态观察存储树，无需 attach 进程。
+
+### 存储再分：元存与扩展存储
+
+存储层内部进一步分为两层：
+
+| 存储层 | 存放内容 | 管理方 | 可见性 |
+|--------|---------|--------|--------|
+| **元存** | slot、索引、系统变量、指令树、帧栈、lib 签名 | **kvspace**（Redis/内存 KV） | **全局公有**：任意 kvspace 连接者均可读写 |
+| **扩展存储** | tensor data（权重、激活值、梯度） | heap-plat / op-plat | **连接者私有**：仅直连该存储的节点可访问 |
+
+二者关系：
+
+```
+kvspace 元存（slot → XValue）
+  ├── 基础类型：int/float/bool/string/bytes → XValue.raw 自包含
+  └── tensor 类型：XValue 只存元数据（shape + dtype + 扩展存储句柄）
+                    ↓ 句柄指向
+               扩展存储（tensor data 本体，不在 kvspace 内）
+```
+
+**元存全局公有**：任意节点直连 kvspace 即可读写任意 slot，所有 worker 共享同一份代码（`/lib/`）与执行状态（`/vthread/`），无需独立调度器元数据中心。
+
+**扩展存储连接者私有**：GPU 显存、本地 shm 仅直连进程可访问，跨卡 tensor 搬运由 op-plat 显式管理（AllReduce/all-to-all 等）。
+
+**铁律**：kvspace 只存 tensor 元数据与扩展存储句柄，不存 tensor 原始数据。
+
+### XValue 整存整取铁律
+
+**XValue 是 kvspace 存储的原子单位，只能整存整取——禁止对单个 XValue 的 raw 做部分读写。**
+
+- **禁止部分读**：不得按字节偏移读 XValue.raw 的片段。
+- **禁止部分写**：不得按字节偏移写 XValue.raw 的片段。
+
+数组元素访问因此只有两条路，二者都保持整存整取：
+
+| 数组形态 | kindexpr | 元素访问 | 是否整存整取 |
+|---------|---------|---------|-------------|
+| compact 数组 | `[10]int32` | 整读一个 XValue，内存内下标 | 是（一次整读） |
+| 散 key 数组 | `[]int32` | 读 `arr[i]` 这个 key 的标量 XValue | 是（每个 key 一个整 XValue） |
+
+理由：原子单位从"raw 字节区间"上移到"XValue"，使每次读写均为单 key 的原子替换，消除并发 RMW 竞态，与"元存全局公有"定位一致。
+
+""" -> /lib/kvlang/deepdive/total/01_storage_compute_separation_kv_tree
+}

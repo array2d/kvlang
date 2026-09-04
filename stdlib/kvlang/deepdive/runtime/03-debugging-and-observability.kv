@@ -1,0 +1,129 @@
+# 来源: deepx-design/doc/kvlang-design-and-implementation/runtime篇-03-调试与可观测性.md
+# kvlang deepdive 设计与实现文档；kvlang 启动阶段以字符串写入 /lib/kvlang/deepdive/runtime/03_debugging_and_observability。
+lib kvlang/deepdive/runtime/03_debugging_and_observability {
+	"""# Debugging and Observability（调试与可观测性）
+
+## 调试器实战：用 kvspace 静态观察栈与源码
+
+本节以 `tutorial/03-debugger/chain_array.kv` 为例，演示如何用 `kvlang --debug` 暂停程序，再用 `kvspace tree/list` 静态观察 vthread 栈帧（`/vthread`）和已 layout 源码（`/lib`）。
+
+### 启动调试
+
+```bash
+kvlang {vid} --debug tutorial/03-debugger/chain_array.kv
+# VM 在 debugger() 处暂停，进程阻塞等待 agent 命令
+```
+
+source:
+
+```
+rwfunc f3() -> (a:int64, s:int64) {
+    debugger()
+    at(a, 0) -> v0
+    at(a, 1) -> v1
+    v0 + v1 -> s        # 30 + 40 = 70
+}
+
+rwfunc f2() -> (a:int64, s:int64) {
+    a:int64 = [30, 40]
+    f3() -> (a, s)
+}
+
+rwfunc f1() -> (s:int64) {
+    f2() -> (_, s)
+}
+
+rwfunc init() -> () {
+    f1() -> r
+    print(r)            # 70
+}
+```
+
+### 观察栈帧：`kvspace tree /vthread`
+
+暂停后，`kvspace tree /vthread` 输出（仅 `{vid}` vthread 相关部分）：
+
+```
+/vthread/{vid}
+├── .lib → rwfunc init() -> ()
+│   ├── [0]  rwir:f1  rwir:r
+│   ├── [1]  rwir:r   rwir:print
+│   └── [2]  rwir:return
+├── .rootfunc  string:init
+├── .pc        string:/vthread/{vid}/[0,0]/[0,0]/[1,0]/[0,0]
+├── .status    string:{vid}ning
+├── .debugger  string:break
+└── [0,0]                                    ← f1 调用帧
+    ├── .lib → rwfunc f1() -> (s:int64)
+    ├── .rootfunc  string:f1
+    ├── [0,0]                                ← f2 调用帧
+    │   ├── .lib → rwfunc f2() -> (a:int64, s:int64)
+    │   ├── .rootfunc  string:f2
+    │   └── [1,0]                            ← f3 调用帧（当前暂停位置）
+    │       ├── .lib → rwfunc f3() -> (a:int64, s:int64)
+    │       │   ├── [0]  rwir:debugger       ← PC 在此
+    │       │   ├── [1]  int64:0  int:0  rwir:at  rwir:v0
+    │       │   ├── [2]  int64:0  int:1  rwir:at  rwir:v1
+    │       │   ├── [3]  rwir:v0  rwir:v1  rwir:+  int64:0
+    │       │   └── [4]  int64:0  int64:0  rwir:return
+    │       └── .rootfunc  string:f3
+    └── _  int64[2]:30                       ← f1 的丢弃槽，存放 f2 产出的数组
+```
+
+### 关键发现
+
+**PC 字符串即调用栈**。PC = `/vthread/{vid}/[0,0]/[0,0]/[1,0]/[0,0]`，逐段解读：
+
+| 路径段 | 含义 |
+|--------|------|
+| `/vthread/{vid}/` | vthread 根帧（init） |
+| `[0,0]/` | init 指令 [0,0] 发起的调用 → f1 帧 |
+| `[0,0]/` | f1 指令 [0,0] 发起的调用 → f2 帧 |
+| `[1,0]/` | f2 指令 [1,0] 发起的调用 → f3 帧 |
+| `[0,0]` | f3 指令 [0,0] = `debugger()`，当前执行位置 |
+
+**`.lib` 软链 = 零拷贝共享指令树**。所有帧的 `.lib` 均 Link 到 `/lib/<name>`，KV 存储中只存一份指令树，所有帧通过路径别名共享。
+
+**零拷贝跨帧传参**。参数传递通过 Ptr 链实现路径别名——f3 执行 `at(a, 0)` 时，kvcpu 经解析后直接 Get 绝对路径，零中间拷贝。f3 写 `s` 时同理直接 Set 到 `/vthread/{vid}/r`。
+
+**`.rootfunc` 在 TCO 语义中保持根函数名**。每个帧独立记录 `.rootfunc`，即使 TCO 复用帧也不覆盖——`resolveLabel` 靠它解析裸标签。
+
+### 观察源码：`kvspace tree /lib`
+
+```
+/lib
+├── init   string:rwfunc init() -> ()
+├── f1     string:rwfunc f1() -> (s:int64)
+├── f2     string:rwfunc f2() -> (a:int64, s:int64)
+├── f3     string:rwfunc f3() -> (a:int64, s:int64)
+├── .init.src  string:rwfunc init() -> () { … }
+├── .f1.src    string:rwfunc f1() -> (s:int64) { … }
+├── .f2.src    string:rwfunc f2() -> (a:int64, s:int64) { … }
+├── .f3.src    string:rwfunc f3() -> (a:int64, s:int64) { … }
+└── .srcmap    bytes:{"1":"tutorial/03-debugger/chain_array.kv", …}
+```
+
+**`/lib/.src` 源码副本**：每个函数的完整 lower 后源码以 string 值存入 `/lib/.<name>.src`——这是 `kvspace tree` 能展示源码的原因。`.srcmap` 记录行号→文件路径映射，供错误定位。
+
+### 调试器协议要点
+
+| 键 | 方向 | 值 |
+|----|------|-----|
+| `.debugger` | agent→CPU（控制） | `""` 正常 / `"step"` 单步 / `"break"` 函数入口暂停 |
+| `.debugger.pause` | CPU→agent（事件） | JSON `{"pc","func","frame","op"}` |
+| `.debugger.resume` | agent→CPU（命令） | `"step"` / `"continue"` / `"abort"` |
+
+暂停后 agent 写入 `kvspace notify /vthread/<vtid>/.debugger.resume continue` 即可恢复执行。
+
+### 常用观察命令
+
+```bash
+kvspace tree /vthread/           # 栈帧全貌
+kvspace get /vthread/{vid}/.pc   # 当前 PC
+kvspace tree /vthread/{vid}/[0,0]/[0,0]/[1,0]   # 当前帧（按 PC 截取 frameRoot）
+kvspace tree /lib                # 已加载函数全览
+kvspace tree /lib/f3             # 某函数指令树
+kvspace get /lib/.f3.src         # 源码副本
+```
+""" -> /lib/kvlang/deepdive/runtime/03_debugging_and_observability
+}
