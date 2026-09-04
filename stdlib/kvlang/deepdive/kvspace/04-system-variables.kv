@@ -1,0 +1,67 @@
+# 来源: deepx-design/doc/kvlang-design-and-implementation/kvspace篇-04-系统变量.md
+# kvlang deepdive 设计与实现文档；kvlang 启动阶段以字符串写入 /lib/kvlang/deepdive/kvspace/04_system_variables。
+lib kvlang/deepdive/kvspace/04_system_variables {
+	"""# 系统变量
+
+## `X/‥var` 影子键
+
+> **本节是全部 `‥` 系统键的唯一事实源。**
+> 任何代码变更（新增、修改、删除 `‥` 键）**必须先更新本节**，再改代码。
+
+VM 运行时为它管理的对象生成**内置变量（系统变量）**，以 `{对象key}/‥var` 形式存放：`/` 下探一层、键名以 `‥`（U+2025，`RUNTIME_MEMBER_SEP`）开头。kvlang 标识符不能以此字符开头，因此所有 `‥` 前缀键均为引擎保留，用户代码无法直接读写——类比 Unix 隐藏文件：默认视图不显示，引擎可见。
+
+**与用户成员键的区分**：`X·attr`（`·` 中点键，U+00B7，如 `obj·prop`、`lib·func`）是用户 kv 代码可访问的正常成员；`X/‥attr`（`/` + `‥` 前缀）是引擎专属。零交集：用户侧永远造不出 `‥` 开头的路径段。
+
+### 全量清单（按宿主对象分类）
+
+**vthread 对象**（宿主 = `/vthread/<vtid>`；代码 `runtime/src/keytree.c`、`layout/src/keytree.rs`）：
+
+| 键 | 语义 |
+|----|------|
+| `‥pc` | 当前执行 PC（绝对路径字符串） |
+| `‥status` | 运行状态：`init`/`running`/`wait`/`paused`；终态 Del + Notify(retVal) |
+| `‥debugger` | 调试控制：`""` 正常，`"paused"` 暂停；`debugger()` builtin 写此键 |
+
+**帧对象**（宿主 = frameRoot；代码 `runtime/src/keytree.c`、`layout/src/keytree.rs`）：
+
+| 键 | 语义 |
+|----|------|
+| *(帧根 extindex)* | rwfunc 帧根 extindex → `/lib/<pkg>·<name>` 只读指令区；scope 帧不建 extindex |
+| `‥lib` | rwfunc 帧的 lib 路径（如 `/lib/sum_to`），用于识别 rwfunc 帧边界 |
+| `‥callpc` | 每帧执行进度（每 op 更新）；scope 帧每次重入更新 |
+| `‥returnpc` | 返回地址（帧创建时固化）；scope 帧仅首次设置，重入不覆写 |
+| `‥ro` | 只读参数名单（逗号分隔），kvcpu 写槽检查用；无读参函数不写 |
+| `‥rparam/<name>` | 读参重定向：存调用方值的绝对路径；CPU 读参从此路径直读，零拷贝（layout 侧定义，C runtime 待对齐） |
+| `‥wparam/<name>` | 写参重定向：存调用方写目标的绝对路径；CPU 写参直写此路径（layout 侧定义，C runtime 待对齐） |
+
+**语法层保留名（不落盘，`frameSlotKey` 拦截）**：
+
+| 键 | 语义 |
+|----|------|
+| `._` | 丢弃槽——`frameSlotKey` 遇到此名返回空路径，不写入 kvspace |
+
+注意：`._` 与上述 `‥` 键不同，这是源码层的语法占位符，不落 kvspace。
+
+**内联暂停指令**：`debugger()`（对齐 V8/TypeScript `debugger;` 语句）——源码内联暂停点；非调试模式下 no-op，调试模式下将 `‥status` 置为 `paused`，外部驱动改回 `running` 恢复执行。
+
+注意区分：地址空间的系统**域**（`/lib/`、`/vthread/` 顶层树，见地址空间篇）与对象随身的 `‥var` 系统**变量**是两种机制。
+
+### 三种键形态：一眼判型
+
+任意 key 的形态唯一确定其性质：
+
+| 形态 | 例 | 性质 | 所有权 |
+|------|----|------|--------|
+| `X/名`（`/` + 普通名） | `/vthread/7/[3,0]`、`/_while_2/[0,0]` | 结构：帧、指令槽、scope 帧 | VM |
+| `X·名`（`·` 中点键） | `/c0·next`、`frame/obj·prop` | 用户数据成员 | 用户 |
+| `X/‥名`（`/` + `‥` 名） | `/vthread/7/‥pc`、`/vthread/7/‥status` | 系统变量（影子元数据） | VM |
+
+### 设计结论：系统变量维持 `/‥` 分隔
+
+系统变量用 `/‥` 分隔，与用户成员的 `·` 分隔形成正交：
+
+1. **零冲突的专属命名空间**。用户成员语法只产生 `·` 中点键，标识符禁止 `‥` 开头；用户侧永远造不出 `‥` 序列。若系统变量也用 `·` 拼接，则需维护保留字表，且动态键注入可能命中系统键。
+2. **生命周期绑定**。`X/‥var` 在 X 的 `/` 子树内，`DelTree(X)` 连带清除全部系统变量；用户键族 `X·*` 由前缀删除管理。两个删除平面各归其主。
+3. **统一公理**。任何 kvspace 对象 X：VM 元数据在 `X/‥名`（引擎保留），帧根 extindex 指向 `/lib/` 代码区，用户数据在 `X·名`（成员），子级在 `X/名`（结构）。
+""" -> /lib/kvlang/deepdive/kvspace/04_system_variables
+}

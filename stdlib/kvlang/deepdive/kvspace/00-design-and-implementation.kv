@@ -1,0 +1,65 @@
+# 来源: deepx-design/doc/kvlang-design-and-implementation/kvspace设计与实现.md
+# kvlang deepdive 设计与实现文档；kvlang 启动阶段以字符串写入 /lib/kvlang/deepdive/kvspace/00_design_and_implementation。
+lib kvlang/deepdive/kvspace/00_design_and_implementation {
+	"""# KVSpace 基础模型
+
+## 设计美学
+
+代码必须按唯一正确方式运行；遇非预期输入直接 fatal/panic，不用 if 包庇错误，不容许以奇怪方式成功运行。走唯一主干，砍一切分支。
+
+## 核心概念：KV 树
+
+KVSpace 是文件系统风格的 KV 存储抽象，`/` 管层级，`·` 管成员：
+
+- **文件 key**：普通值 key，例如 `/a/b` → `int64:42`
+- **目录 key**：以 `/` 结尾，value 为 index（子名列表），例如 `/a/` → `index: ["b"]`
+- 同一路径下 `/a` 与 `/a/` 可独立共存（文件与目录同名）
+
+分隔符：`/` = 层级；`·`（U+00B7）= 用户成员；`‥`（U+2025）= 运行时系统变量前缀（见系统变量篇）。
+
+## XValue 类型系统
+
+XValue = XValueHead + body：
+
+```
+XValueHead  =  [1B kind_len][N B kind][1B ref][1B arr_flag][1B ndim][ndim×4B dims LE][4B raw_len LE]
+body        =  [M B raw]    M = raw_len
+ref:      0=内联  1=`*`软链接（body=目标key路径）  2=`@`扩展存储句柄（body=位置描述符）
+arr_flag: 0=标量  1=compact数组  2=散key数组
+ndim:     0=变长，N=定长N维
+```
+
+`HeadLen() = 8 + kind_len + ndim*4`；body 在 `value[HeadLen : HeadLen+raw_len]`。
+
+**kind 列表**（`runtime/src/const.h` 唯一事实源）：
+
+| kind | 说明 | elemSize |
+|------|------|----------|
+| `uint8` / `bool` / `int8` / `char/utf8` | 字节类 | 1B |
+| `int16` / `uint16` | 2B 整数 | 2B |
+| `int32` / `uint32` / `float32` | 4B 数值 | 4B |
+| `int64` / `uint64` / `float64` / `char/utf32` | 8B/4B 数值 | 8B/4B |
+| `object` | 有序成员容器（`·` 成员访问） | — |
+| `stringkeymap` | 字符串键映射容器 | — |
+| `index` | 通用目录 | — |
+| `extindex` | 写时复制叠加层 | — |
+| `rwir` / `rwfunc` | 运行时指令/函数 | — |
+| `defrwir` / `defrwfunc` | 扩展注册指令/函数（/lib/<opcode> 类型） | — |
+| `scope` | 作用域帧签名 | — |
+| `None` | 空值 | — |
+
+**Ptr（软链接）**：ref=1，body=目标路径字符串。读/写/List 透明穿透，Del 末段作用于链接本体。
+
+## ExtIndex
+
+ExtIndex 是写时复制叠加层：`ExtIndex("/merge/", "/base/")` 后，读 `/merge/x` 先查本地、后回落 `/base/x`；写入本地不影响 `/base/`；List 合并两侧。不允许级联（exttarget 本身不能是 extindex）。
+
+## 辅助设施
+
+**Watch/Notify**：一次性通知机制，运行时用于 vthread 状态变更和外部 rwir 协调。
+
+**路径工具**：`JoinPath` 拼路径避免 `//`；`SepPath` 拆前缀+末段。
+
+**常量集中管理**：所有路径/分隔符/kind 字符串在 `runtime/src/const.h`（C）与 `layout/src/keytree.rs`（Rust），禁止散落硬编码。
+""" -> /lib/kvlang/deepdive/kvspace/00_design_and_implementation
+}

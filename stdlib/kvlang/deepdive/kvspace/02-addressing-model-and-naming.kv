@@ -1,0 +1,77 @@
+# 来源: deepx-design/doc/kvlang-design-and-implementation/kvspace篇-02-寻址模型与命名.md
+# kvlang deepdive 设计与实现文档；kvlang 启动阶段以字符串写入 /lib/kvlang/deepdive/kvspace/02_addressing_model_and_naming。
+lib kvlang/deepdive/kvspace/02_addressing_model_and_naming {
+	"""# 寻址模型与命名
+
+## 寻址模型：KV 路径 vs 内存地址
+
+### 传统 VM (Python/Lua/JVM)
+
+```
+程序计数器 PC = 0x7fff5fbff830 (64-bit 内存地址)
+指令    = 内存[PC] → 1 字节 opcode → 操作数
+跳转    = PC = 新地址 (直接修改寄存器)
+调用    = push 返回地址 → PC = 函数入口地址
+栈帧    = 连续内存 [rbp-8] = 局部变量
+```
+
+内存地址是**一维线性整数**，跳转和调用本质是整数算术。
+
+### kvlang
+
+```
+程序计数器 PC = "[0,0]/entry/[0,0]" (KV 路径字符串)
+指令    = kv.Get("/vthread/tid/[0,0]/entry/[0,0]")
+跳转    = PC = "[0,0]/merge/[0,0]" (字符串拼接)
+调用    = PC = "[0,0]/then/[0,0]" (路径嵌套)
+栈帧    = /vthread/tid/[0,0]/ 子树 (KV key 层级)
+```
+
+KV 路径是**树形层级字符串**，跳转和调用本质是路径拼接 + 子树导航。
+
+| 维度 | x86/ARM | Python | Lua | kvlang |
+|------|---------|--------|-----|--------|
+| PC 类型 | `uint64` | `*PyCodeObject + offset` | `Instruction*` | `string` (KV path) |
+| 指令获取 | `mov rax, [rip]` | `_PyEval_EvalFrameDefault` 循环 | `luaV_execute` 循环 | `kv.Get("/vthread/tid/" + pc)` |
+| 跳转 | `jmp 0x400100` | `next_instr += oparg` | `pc++` | `pc = new_path` |
+| 调用 | `call 0x400200` | `call_function` 压栈 | `luaD_precall` | `pc = pc + "/[0,0]"` |
+| 栈帧 | `push rbp; sub rsp, N` | `PyFrameObject` (堆分配) | `CallInfo + L->stack` | `/vthread/tid/<pc>/` KV 子树 |
+| 作用域 | 栈偏移 | `f_localsplus` 数组 | 寄存器索引 | KV key 子路径（裸名 `x`, `y`） |
+
+## 变量名即指针
+
+kvlang 没有 `&` 取址运算符——**代码中对象的变量名，本身就是这个变量的指针**（kvspace 路径）。指令槽里存的从来不是值，而是指针文本（`[0,-1] = "A"`、`[0,1] = "C"`），求值永远经过一次指针间接。
+
+指针分两种形态：
+
+| 形态 | 写法 | 语义 | 解析时机 |
+|------|------|------|---------|
+| **相对指针** | 裸标识符 `x` | 相对当前栈帧的偏移 | 运行时与栈路径拼接 |
+| **绝对指针** | `/counter` | kvspace 全局绝对路径 | 零拼接，直接 Get/Set |
+
+**局部变量的变量名就是相对指针**。运行时解析公式：
+
+```
+绝对路径指针 = FrameRoot(PC) + "/" + 相对指针
+
+例：PC = /vthread/7/[3,0]/[1,0]
+    FrameRoot(PC) = /vthread/7/[3,0]      ← 去掉末尾 /[coord]
+    x → /vthread/7/[3,0]/x
+```
+
+栈路径（帧根）不需要单独的寄存器——PC 本身是帧内路径（帧根本身是 extindex 指向 `/lib/` 指令树），`FrameRoot(PC)` 截取即得。这与 C 的 `rbp + offset` 同构：
+
+| | C/x86 | kvlang |
+|--|-------|--------|
+| 帧基址 | `rbp` 寄存器 | `FrameRoot(PC)`——从 PC 截取 |
+| 局部变量地址 | `rbp - 8`（基址 + 偏移） | `帧根 + "/x"`（栈路径 + 相对指针） |
+| 全局变量地址 | `.data` 固定地址 | `/` 开头绝对指针，零拼接 |
+| 指针变量 | 存整数地址 | 存路径字符串：`"/n0" -> ptr`，`ptr·val` 解引用 |
+
+`/lib/` 下的函数模板中只有相对指针，因此天然可重入：每次调用创建不同的帧路径，同一份相对指针拼接出互不干扰的绝对指针——递归、TCO（尾调用优化：goto/br 不建新帧）无需任何额外机制。
+
+全局变量 `/counter` 零成本——绝对指针不经过帧前缀拼接。数组能作为参数传递——`flattenNestedCalls` 将 `[1,2,3]` 展开为临时变量，再将临时变量（持有 XValue）作为普通参数传递。
+
+**参数不得同名（fix-032）**：变量名即指针——同一帧内两个同名参数将指向同一个 kvspace 位置。读参列表内部、写参列表内部、以及读写列表之间均不可同名。`rwfunc f(A:int64) -> (A:int64)` 签名非法。layout 的 `checkParamDup` 阻断源码路径，C runtime 兜底非法签名。
+""" -> /lib/kvlang/deepdive/kvspace/02_addressing_model_and_naming
+}

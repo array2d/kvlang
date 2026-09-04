@@ -1,0 +1,120 @@
+# 来源: deepx-design/doc/kvlang-design-and-implementation/runtime篇-05-rwirext扩展运行时.md
+# kvlang deepdive 设计与实现文档；kvlang 启动阶段以字符串写入 /lib/kvlang/deepdive/runtime/05_rwirext_extension_runtime。
+lib kvlang/deepdive/runtime/05_rwirext_extension_runtime {
+	"""# runtime篇-05: rwirext 扩展运行时
+
+> 状态：与实现同步。代码：`runtime/src/rwirext.c`（C 扩展 ABI）、`runtime-rwirext_example/rust/term`（Rust term）、`runtime-rwirext_example/go/json`（Go json）。C runtime 侧实现见 [[runtime篇-06-C运行时与后端抽象]]。
+
+## 一、核心模型
+
+kvlang runtime 是**中央调度 runtime**，默认执行全部 native rwir / rwfunc / 控制流。某些 rwir（tensor 计算、LLM 调用、agent 循环）不由它求值，而是交给**扩展运行时**。
+
+**扩展运行时 = 只解析己方 opcode 的迷你 kvcpu**：从中央 runtime 拿到 PC，连续执行己方 rwir，直到遇到非己方指令，把最终 PC 交还中央 runtime。
+
+| 类别 | rwir 示例 | 扩展运行时 |
+|------|----------|-----------|
+| 计算委托 | `tensor.matmul(a,b) -> c` | op-gpu |
+| API 封装 | `llm.chat(prompt) -> resp` | llm worker |
+| Agent 封装 | `agent.search(q) -> r` | sub-agent |
+
+**核心公理**：
+
+1. **rwir 自描述**：opcode + 读写参已含执行所需全部信息。
+2. **注册即签名**：扩展运行时写 `/lib/<opcode>`（kind=`defrwir`，含签名），不再有 `/sys/`。
+3. **批量执行**：扩展运行时连续执行己方 rwir 到非己方指令，把最终 PC 写回 `/vthread/<vtid>/pc`。
+4. **被动消费**：扩展运行时只监控己方 `/lib/<opcode>/.vids` 队列。
+
+## 二、注册与发现
+
+### 签名注册
+
+扩展运行时把己方每个 opcode 的签名写到 `/lib/<opcode>`（kind=`defrwir`，空函数体，仅签名）：
+
+定义体格式 `[nr:u16 LE][nw:u16 LE][读参+写参 kindexpr，"\n" 连接]`（详见 [[runtime篇-07-签名类型表达式]] §八）：
+
+```
+/lib/json.to  → defrwir(nr=1, nw=1, "char/utf8\n[]char/utf8")
+/lib/print    → defrwir(nr=1, nw=0, "any...")
+```
+
+**与 native builtin 的区分**：native 签名不落盘——内建在 C 注册表 `builtins[]`（`opcode → bi_fn`），直接查表；扩展签名落 `/lib/<opcode>`（kind=`defrwir`），C runtime 通过 `isothersrwir` 识别：读 `/lib/<opcode>` 的 kind，等于 `defrwir` 即为扩展 rwir。
+
+### 全局标记
+
+`kvlang_rwirextRegister` 标记裸 opcode（如 `print`/`input`）在 layout 阶段不被补 `pkg.` 前缀。dotted opcode（`json.to`）本就不被补前缀。
+
+term 在**进程启动时**注册全局：与中央 runtime 同进程，`vet`/`format` 也会 layout 用户代码，若不在启动期注册，裸 opcode 会被补 `pkg.` 前缀。
+
+### 幂等重注册
+
+`kvlang_rwirextRegister` 幂等。若 vids 队列已存在则跳过——否则重复注册时 Set 经路径穿透会把首队列改成自指 Ptr，令 `resolve_path` 死循环（共享 redis 时的挂起根因）。
+
+## 三、handoff 协议
+
+### 键布局
+
+```
+/lib/<opcode>/vids/<vtid>  = pc   # 中央 runtime 写，扩展运行时消费（strkeymap 队列）
+```
+
+第一个 rwir 的 vids 是真实 strkeymap；后续同 opcode 的 vids 是 Ptr 指向第一个（共享同一队列）。
+
+### 时序
+
+```
+kvlang runtime（C）                  扩展运行时
+─────────────────                   ──────────
+1. isothersrwir(opcode) 命中
+2. handoff_external_rwir:
+   Set /lib/<op>/vids/<vtid>=pc
+                                    3. 发现队列中的 vtid
+                                       RunSeq(pc)：逐条执行己方 rwir 到非己方指令
+                                       WriteFinalPC：Set /vthread/<vid>/pc = finalPC
+                                       Del /lib/<op>/vids/<vtid>
+4. Watch 直到 vtid 从队列消失（30s 超时）
+5. 继续（PC 已由扩展运行时写回）
+```
+
+中央 runtime **不推进 PC**——扩展运行时批量执行后已写回最终 PC，中央 runtime 直接读新 PC 继续。
+
+### RunSeq（顺序执行）
+
+扩展运行时从 PC 起逐条解码，只要 opcode ∈ 己方集合就执行，遇第一条非己方指令即停。**顺序执行，非并行 batch**：ext rwir 之间存在顺序依赖。
+
+## 四、kvcpu 集成（C dispatch 链）
+
+`kvcpu.c:kvlangRuntimeExecuteVthread` 的 dispatch 链：
+
+```
+1. op_is_control       → handle_control         （call/return/br/goto）
+2. kvlangBuiltinIsNative → kvlangBuiltinNative    （~50 native 算子，静态注册表）
+3. is_copy_op          → kvlangBuiltinExecuteCopy （= 赋值）
+4. isothersrwir        → handoff_external_rwir   （/lib/<op> kind=defrwir）
+5. else                → 重写为 call（用户函数）
+```
+
+`isothersrwir(kv, opcode)`：`opcode[0]=='/' → false`；否则读 `/lib/<opcode>`，kind==`defrwir` → true。
+`handoff_external_rwir`：Set 共享队列、Watch 直到消费完成（30s 超时），不推进 PC。
+
+Rust runtime（runtime-rs）中，就地 rwir（print/json/http）直接在 `drive_vid` 驱动循环里批处理，外部 rwir（如 numpy）通过 `kvlang_rwirextHandoff` 交给独立进程。
+
+## 五、标杆：term 与 json
+
+| | term | json |
+|--|------|------|
+| op | print/println/cerr/input | json.to/json.from |
+| 进程 | 与中央 runtime 同进程 | 独立进程 |
+| opcode | 裸名（启动期注册全局） | dotted（`json.to`） |
+
+两者结构统一：`kvlang_rwirextRegister` + `Serve` 循环 + `exec` 分发。livebyte/op-gpu 扩展照此模板。
+
+## 六、与 /ext/ 拓扑的关系
+
+| 目录 | 回答 | 内容 |
+|------|------|------|
+| `/lib/<opcode>` | 有什么 op（签名） | `defrwir` 签名（读参/写参/类型） |
+| `/ext/` | 在哪、怎么执行（拓扑） | 存储/计算/通信注册 |
+
+无状态扩展运行时（term/json）只写 `/lib/`；有状态扩展引擎（op-gpu/heap-plat）写 `/lib/` + `/ext/`。handoff 协议一致，后者多一次 `/ext/` 查表定位引擎。
+""" -> /lib/kvlang/deepdive/runtime/05_rwirext_extension_runtime
+}

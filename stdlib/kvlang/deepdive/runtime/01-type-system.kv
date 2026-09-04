@@ -1,0 +1,134 @@
+# 来源: deepx-design/doc/kvlang-design-and-implementation/runtime篇-01-类型系统.md
+# kvlang deepdive 设计与实现文档；kvlang 启动阶段以字符串写入 /lib/kvlang/deepdive/runtime/01_type_system。
+lib kvlang/deepdive/runtime/01_type_system {
+	"""# Type System（类型系统）
+
+## 类型系统
+
+kvlang 是**严格类型语言**。所有变量、参数、返回值必须有确定的类型——不允许无类型变量，不允许运行时类型隐式改变。
+
+### 数字类型：无 float/int，只有具体位宽类型
+
+**kvlang 没有 `float`、没有 `int`。** 只存在携带具体位数的数字类型：
+
+| 类别 | 类型 |
+|------|------|
+| 有符号整数 | `int8` `int16` `int32` `int64` |
+| 无符号整数 | `uint8` `uint16` `uint32` `uint64` |
+| IEEE 754 浮点 | `float32` `float64` |
+
+**设计理由**：位数是类型契约的核心部分。`int64` 跨 kvspace-go → kvspace-c → kvregion shm → op-gpu tensor dtype 传播时，每一层都依赖精确的位数。`float` / `int` 在不同语言/平台映射到不同位数，破坏跨语言类型契约。
+
+**实现约束**：XValue kindexpr 只接受上表所列 10 个精确名称。`"int"`、`"float"` 等短名在任何代码路径中均为非法 kind。
+
+### 类型归属规则
+
+| 归属 | 存放位置 |
+|------|---------|
+| **函数签名** | `/lib/<pkg>.<name>` — `defrwfunc` 值，kindexp 列表 |
+| **指令槽引用** | `/lib/<pkg>.<name>/[s0,s1]` — `rwir` 文本引用 |
+| **运行时值** | `/vthread/<vtid>/<frame>/<var>` — 携带 kindexpr 的 XValue |
+
+**铁律**：
+- `def` 签名中每个参数和返回值**必须声明类型**（`name:type`）
+- 签名缺类型的 rwfunc **拒绝装载**
+- 指令槽 `[s0,s1]` 是槽位描述符，类型信息在签名中
+- 运行时通过 kindexpr 标签自描述，无需查签名
+- 与五语言对齐：C/Rust/Go 必须声明——kvlang 选此阵营
+
+### XValue 与 kindexpr
+
+XValue 是 TLV 编码的字节串，编解码由链接的 kvspace .so（`kvspaceTlvEncode`/`kvspaceDecodeHead`）负责。解码后的 head（`kvspaceHead_t`）包含：
+
+- `kindexpr`：NUL 终止字符串，格式 `[*|@][dims]base_kind`
+  - 可选前缀 `*`（ptr）或 `@`（扩展句柄）
+  - 可选 `[d,d,...]` 维度列表
+  - 紧跟 base kind 字符串
+- `body_offset` / `body_len`：值数据在字节串中的位置
+
+**kind 完整清单**：
+
+| kind 字符串 | 说明 |
+|------------|------|
+| `"int8"` `"int16"` `"int32"` `"int64"` | 有符号整数，小端编码 |
+| `"uint8"` `"uint16"` `"uint32"` `"uint64"` | 无符号整数 |
+| `"float32"` `"float64"` | IEEE 754 浮点 |
+| `"bool"` | 1 字节：0=false, 1=true |
+| `"char/utf32"` | 码点，4B×N，**默认字符串**，定宽（可索引）|
+| `"char/utf8"` | UTF-8 字节串，1B×N，变宽（存储/交换，禁索引）|
+| `"char/ascii"` | ASCII 字节串，1B×N，定宽（可索引）|
+| `"dict"` | dict 成员目录（尾 `.` 的 key） |
+| `"index"` | 通用目录索引（尾 `/` 的 key） |
+| `"extindex"` | 扩展索引 |
+| `"rwir"` | 指令槽文本引用 |
+| `"defrwir"` | 扩展 rwir 定义（签名，存 `/lib/<opcode>`） |
+| `"rwfunc"` | 用户函数定义 |
+| `"None"` | None 值 |
+| ptr XValue | 软链接：kindexpr 前缀 `*`，body 为目标 key 路径 |
+
+**字符家族（`char/<编码>`）**：定宽编码（`utf32` 4B、`ascii` 1B）支持 O(1) 码点索引；变宽编码 `utf8` **拒绝索引操作**，仅用于存储/交换。判定：`IsCharKind(kind) = HasPrefix(kind, "char/")`。字符串字面量默认落 `char/utf32`。
+
+**kind 铁律——禁止别名**。`"int"`、`"float"` 等短名在任何代码路径中均非法。
+
+### 变量名即地址，未赋值即 None
+
+kvlang 的每个变量名即 kvspace 中的相对地址。声明变量即在当前帧分配一个 KV slot（如 `/vthread/<vtid>/<frame>/x`）：
+
+- **有变量名 ⇒ 有地址**
+- **有地址 ⇒ 有 XValue**
+- **未赋值 ⇒ XValue 为 None**（kindexpr 为空，`None()` 编码）
+
+None 参与算术/比较直接 TypeError，迫使代码显式初始化。
+
+**访问器分级**：
+- **宽容读取器**：`AsInt64()` 按 kind 实际宽度解码 + 符号扩展，`AsUint64()` 同理。算术/比较走宽容读取器。
+- **精确访问器**：`Int8()` `Float32()` 等严格校验 kind，不匹配返回零值。
+
+### 数字类型算子（构造器兼转换器）
+
+十个数字类型算子，**既是构造器也是转换器**：
+
+```kv
+f = float32(3)        # kind=float32
+i <- int8(0.1)        # 0（float→int 截断向零）
+int8(300) -> w        # 44（窄化 = 补码回绕）
+```
+
+| 语义 | 对齐阵营 |
+|------|---------|
+| float→int 截断向零 | 五语言一致 |
+| 窄化 = 补码回绕（`uint8(-1)`=255） | Go / Rust `as` / C |
+| None 输入直接 TypeError | strict None |
+
+### 字符编码转换
+
+字符家族三个 kind **既是构造器也是转换器**：
+
+```kv
+s:char/utf8 = "hello"
+t <- char/utf32(s)    # 转定宽（可索引）
+u <- char/ascii(t)    # 拒非 ASCII 码点 → TypeError
+```
+
+### 数值运算域
+
+1. **int ∧ int → 原生 int64 运算**，溢出 = 补码回绕
+2. **任一侧 float → float64 提升**；混合比较 `3 == 3.0` 为 true
+3. **None 参与算术直接 TypeError**
+
+### Bool 铁律
+
+**bool 只能是 `true`/`false`，禁止一切隐式 coerce。**
+
+| 输入 | kvlang |
+|------|--------|
+| `true`/`false` | ✅ |
+| `0`/`1` 整数 | panic — 必须写 `!= 0` |
+| 非空字符串 | panic — 必须写 `!= ""` |
+| None | panic |
+
+隐式 coerce 会使控制流条件取决于运行时 kind，agent 无法静态判定控制流走向。强制显式比较使 br 指令的 cond 槽永远是 bool。
+
+**实现**：`kvlangXvalueAsBool`（`xvalue.c`）仅接受 `kind=="bool"`，其他 kind 直接 panic。
+""" -> /lib/kvlang/deepdive/runtime/01_type_system
+}

@@ -1,0 +1,82 @@
+# 来源: deepx-design/doc/kvlang-design-and-implementation/runtime篇-02-成员访问与数据结构.md
+# kvlang deepdive 设计与实现文档；kvlang 启动阶段以字符串写入 /lib/kvlang/deepdive/runtime/02_member_access_and_data_structures。
+lib kvlang/deepdive/runtime/02_member_access_and_data_structures {
+	"""# Member Access and Data Structures（成员访问与数据结构）
+
+## 语法规则：`[]` vs `.`
+
+| 运算符 | 目标 | kvspace 层 | desugar |
+|--------|------|-----------|---------|
+| `a[i]` | **XValue 数组下标** | `ElemSize>0` 同构数组，零拷贝 raw[i] | `at(a, i)` |
+| `a.key` | **dict 成员 key** | kind=dict，`SplitDictParent` 路由 | `at(a, "key")` |
+| `pkg.func` | **lib 函数** | `/lib/pkg.func` KV key | `at(pkg, "func")` |
+| `a.*key` | **dict 动态 key** | key 变量值作为成员名 | `at(a, key)` |
+
+**铁律**：
+- `[]` 只用于同构 XValue 数组，`ElemSize(kind)>0`，零拷贝读写 `raw[arridx]`
+- `.` 用于 dict 成员访问和 lib 函数限定名——二者共用 `.` 分隔符，语义统一
+
+### `[]` — 数组下标
+
+```kv
+a: int64 = [1, 2, 3]
+a[0] -> v0          # v0 = 1，零拷贝读 raw[0]
+99 -> a[1]           # a = [1, 99, 3]，零拷贝写 raw[1]
+```
+
+parser 将 `a[i]` desugar 为 `at(a, i)`，builtin `at` 检测 `ElemSize>0` → `TypedIndex` 零拷贝。
+
+### `.` — dict 成员
+
+```kv
+h = {x: 1, y: 2}    # 创建 dict 目录 /frame/h. → dict: ["x", "y"]
+h.x -> v             # kvspace 层：/frame/h.x → int64:1
+42 -> h.z            # 新增成员，/frame/h.z → int64:42
+```
+
+kvspace 层：`h.` 是 dict 目录（kind=dict），`h.x` 是成员 key。`SplitDictParent` 自动检测并路由 child 到 dict 目录。
+
+### `.` — lib 函数
+
+```kv
+math.sum(3, 4) -> s           # /lib/math.sum
+string.len(w) -> n             # /lib/string.len
+```
+
+`. ` 是统一成员访问符：`pkg.func` 和 `obj.prop` 同构——都是 `base + MemberSep + name`。
+
+### dict：`. ` 作为独立成员目录（kind="dict"）
+
+kvlang 的 dict 在 kvspace 中以 `.` 为成员分隔符，尾 `.` 的 key 是 dict 成员目录，与父 `/` index 隔离：
+
+```
+/dir/      → index: ["obj.", "other"]
+/dir/obj.  → dict: ["x", "y"]          ← 独立 dict 成员目录（kind="dict"）
+/dir/obj.x → int64:42                  ← member key = parent + DictSep + name
+/dir/obj.y → string:hello
+```
+
+`/` 管层级（lib、vthread 栈），`.` 管结构（dict member）。dict 成员动态增删，无编译期固定字段约束，对齐 Python dict / JS object 语义。
+
+**dict 字面量**：`a = {x: 1, y: 2}` 创建 dict 目录 `/frame/a.` (kind=dict) + 成员 `/frame/a.x` (int64:1)、`/frame/a.y` (int64:2)。
+
+**静态字段 vs 动态字段**：
+
+| 语法 | kvspace 层 |
+|------|-----------|
+| `obj.prop` | `at(obj, "prop")` → `Get(obj., ["prop"])` |
+| `obj.*key` | `at(obj, key)` → key 变量值作为字段名 |
+| `a[i]` | `at(a, i)` → 整数下标作为字段名 |
+
+**成员分隔符**：`keytree.Member(base, name)` = `base + "." + name`。
+
+### 成员解析规则：按值优先，按名回退
+
+表达式 `base.名`（读写两侧同规则）中 base 的解析：
+
+1. **按值解引用**：base 持有非空字符串值（路径指针）→ 成员键 = `值(base).名`。如 `"/n0" -> p` 后 `p.next` → `/n0.next`。
+2. **按名回退**：base 无值（或非字符串）→ 成员键 = `解析(base).名`，其中 `解析()` 为帧感知：裸名 → `帧根/base`，`/` 开头 → 直通。
+
+该规则使"局部 struct"与"指针解引用"共用一套语法：键族的 base 永不赋值（保持按名），指针变量存路径字符串（触发按值）。
+""" -> /lib/kvlang/deepdive/runtime/02_member_access_and_data_structures
+}

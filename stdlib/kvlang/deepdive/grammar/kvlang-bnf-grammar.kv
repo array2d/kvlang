@@ -1,0 +1,183 @@
+# 来源: deepx-design/doc/kvlang-design-and-implementation/grammar.bnf
+# kvlang deepdive 设计与实现文档；kvlang 启动阶段以字符串写入 /lib/kvlang/deepdive/grammar/kvlang_bnf_grammar。
+lib kvlang/deepdive/grammar/kvlang_bnf_grammar {
+	"""# kvlang 语法 (BNF)
+
+> 锚定于 kvlang-deep-dive（根设计文档）——每次 deep-dive 更新后需验证本文与实现一致。
+
+## 词法
+
+```
+digit   = "0" … "9"
+letter  = "a" … "z" | "A" … "Z" | "_"
+ident   = letter { letter | digit }
+integer = digit { digit }
+float   = integer [ "." integer ] [ ("e" | "E") [ "+" | "-" ] integer ]
+path    = "/" ident { ("/" | ".") ident | "·" "[" integer { "," integer } "]" }
+              (* 绝对路径字面量；/ 分隔段，. 为子键，· [i,j] 为 strkeymap 坐标段 *)
+
+string  = '"' { char } '"'
+        | \""" { char } \"""
+        | "'" { char } "'"
+        | "`" { char } "`"
+              (* 双引号/三引号/单引号支持 \ 转义；反引号为原始字符串（零转义） *)
+comment = "#" { char } newline    (* 产生 Comment token *)
+        | "//" { char } newline   (* 词法层丢弃，不产生 token *)
+```
+
+## 程序结构
+
+```
+              (* 无 import——lib 树即全局命名空间，跨 lib 调用走全路径 /lib/{pkg}·{func}() *)
+
+file         = { lib_block | rwir_decl | rwfunc_decl | instruction }
+
+lib_block    = "lib" ident "{" { lib_item } "}"
+lib_item     = lib_block | rwir_decl | rwfunc_decl | instruction
+              (* lib 内的裸 instruction 收集为隐式 init 函数，无 init 关键字 *)
+
+rwfunc_decl  = "rwfunc" ident "(" [ param_list ] ")"
+              [ "->" ( "(" [ param_list ] ")" | param_list ) ]
+              "{" { statement } "}"
+
+rwir_decl    = "rwir" ident "(" [ param_list ] ")" [ "->" "(" [ param_list ] ")" ]
+              (* 仅签名，无函数体；绑定至扩展执行器 *)
+
+param_list  = param { "," param }
+param       = ident ":" type_expr    (* 类型必须标注；末参的 type_expr 可加 "..." 变参 *)
+
+statement   = instruction | if_stmt | while_stmt | for_stmt | block_stmt
+            | break_stmt | continue_stmt | return_stmt
+```
+
+## 类型表达式（签名参数/返回值类型，多态 + 高维数组）
+
+> 完整语义见 [[runtime篇-07-签名类型表达式]]。铁律：无家族简写（`int`/`uint`/`float`/`num`/`char`）——位宽是开放集合（int4/fp8/fp16…），编码须写明确；多态靠显式 `|` 枚举。
+
+```
+type_expr   = atom { "|" atom }                  (* 并集：A|B 表 A 或 B *)
+atom        = shape | mapexpr
+shape       = [ dims ] ( any | kind )
+mapexpr     = key "·" type_expr                  (* stringkeymap；value 可递归嵌套 *)
+key         = "[]" char_enc                      (* 字符串键，等价 Go map[string]V *)
+            | "[" scalar { "," scalar } "]"      (* 标量元组键，物理以字符串格式落 key *)
+char_enc    = "char/utf8" | "char/utf32" | "char/ascii"
+scalar      = "bool"
+            | "int8" | "int16" | "int32" | "int64"
+            | "uint8" | "uint16" | "uint32" | "uint64"
+            | "float32" | "float64"
+dims        = "[]"                               (* 1 维，长度任意，等价 [?] *)
+            | "[" dim { "," dim } "]"            (* 逗号分割的维；rank = 项数 *)
+dim         = integer | "?"                      (* 精确大小或动态维 *)
+any         = "any"                              (* 通配，匹配任意 kind *)
+kind        = "bool"
+            | "int8" | "int16" | "int32" | "int64"
+            | "uint8" | "uint16" | "uint32" | "uint64"
+            | "float32" | "float64"
+            | "char/utf8" | "char/utf32" | "char/ascii"
+            | "object" | "stringkeymap"
+            | "index" | "extindex"
+            | "rwir" | "rwfunc" | "scope" | "time" | "duration"
+variadic    = type_expr "..."                    (* 仅末参：0..N 个同型实参，每个按 type_expr 匹配 *)
+```
+
+## 指令
+
+```
+instruction = [ writes "=" ] expr
+            | [ writes "<-" ] expr
+            | expr [ "->" writes ]
+            | expr                     (* 纯副作用调用 *)
+
+writes      = write_slot { "," write_slot }
+write_slot  = ident                    (* 裸名：帧内变量 *)
+            | path                     (* 绝对路径 *)
+            | ident "·" ident          (* 成员写：base·field *)
+            | ident "·" "*" ident      (* 动态键写：base·*key *)
+            | ident "[" expr "]"       (* 下标写：arr[idx] *)
+```
+
+## 表达式
+
+```
+expr        = primary { infix_primary }
+            | prefix_unary primary
+
+primary     = literal | ident | path
+            | primary "·" ident                       (* 成员读：静态键 *)
+            | primary "·" "*" ident                   (* 成员读：动态键 *)
+            | primary "·" "[" expr { "," expr } "]"   (* strkeymap 坐标访问 *)
+            | primary "[" expr { "," expr } "]"       (* compact 下标读 *)
+            | "(" expr ")"                            (* 分组 *)
+            | ident "(" [ arg_list ] ")"              (* 函数调用 *)
+            | ident "·" ident { "·" ident } "(" [ arg_list ] ")"  (* 点号限定调用 *)
+            | array_literal
+            | object_literal
+            | map_literal
+
+prefix_unary = "-" | "!"
+
+infix_primary = binary_op expr
+
+binary_op  = "+" | "-" | "*" | "/" | "%" | "==" | "!=" | "<" | ">" | "<=" | ">="
+           | "&&" | "||" | "&" | "|" | "^" | "<<" | ">>"
+
+arg_list    = expr { "," expr }
+
+literal     = integer | float | string | "null" | "true" | "false"
+
+array_literal  = "[" [ expr { "," expr } ] "]"
+               (* compact 定长数组；元素不可为字符串字面量 *)
+
+object_literal = "{" [ ident "=" expr { (";" | newline) ident "=" expr } ] "}"
+               (* 散 key 对象：{k1=v1; k2=v2}，key 为静态标识符 *)
+
+map_literal    = "{" [ expr { (";" | newline | ",") expr } ] "}"
+               (* 散 key 值列表：{v0, v1, ...}；字符串数组等变长集合用此形式 *)
+```
+
+## 控制流（仅限 rwfunc 体内）
+
+```
+if_stmt     = "if" "(" expr ")" "{" { statement } "}"
+              { "else" "if" "(" expr ")" "{" { statement } "}" }
+              [ "else" "{" { statement } "}" ]
+
+while_stmt  = "while" "(" expr ")" "{" { statement } "}"
+
+for_stmt    = "for" "(" ident "in" expr ")" "{" { statement } "}"
+              (* iter 可为变量、路径或任意表达式（包括散 key 字面量） *)
+
+block_stmt    = ident ":" "{" { statement } "}"    (* 具名作用域 *)
+
+break_stmt    = "break"
+continue_stmt = "continue"
+return_stmt   = "return"    (* 无返回值；输出通过写参传递 *)
+```
+
+## 内建函数（部分）
+
+```
+builtin_call = ("print" | "println" | "cerr" | "input"
+              | "abs" | "neg" | "sign" | "pow" | "sqrt" | "exp" | "log"
+              | "min" | "max"
+              | "int8" | "int16" | "int32" | "int64"
+              | "uint8" | "uint16" | "uint32" | "uint64"
+              | "float32" | "float64"
+              | "char/utf8" | "char/utf32"
+              | "ord" | "strlen" | "strcmp" | "strstr"
+              | "slice" | "concat"
+              | "array" | "len" | "at" | "set" | "has" | "sort"
+              | "dict" | "kvat" | "kvhas"
+              | "debugger") "(" [ arg_list ] ")"
+
+(* min/max 支持变参: min(a,b,c,...) *)
+(* print  : Go 风格——无空格拼接，不追加换行 *)
+(* println: Go 风格——空格分隔，追加换行 *)
+(* debugger(): 内联暂停, 非调试模式 no-op *)
+(* / : 两侧 int → 整除(C 风格); 任一侧 float → 浮除 *)
+(* s[i] 读返单字符字符串, 越界返 ""; s[i]="X" 单字符替换写回新串 *)
+(* + 作用在 string∧string → 拼接 *)
+```
+""" -> /lib/kvlang/deepdive/grammar/kvlang_bnf_grammar
+}

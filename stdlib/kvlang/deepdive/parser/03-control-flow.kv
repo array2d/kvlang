@@ -1,0 +1,142 @@
+# 来源: deepx-design/doc/kvlang-design-and-implementation/parser&runtime-01控制流篇.md
+# kvlang deepdive 设计与实现文档；kvlang 启动阶段以字符串写入 /lib/kvlang/deepdive/parser/03_control_flow。
+lib kvlang/deepdive/parser/03_control_flow {
+	"""# 控制流：Scope 帧模型
+
+# Part 1: Parser & Layout
+
+## Lower Pass（`lower_func`）
+
+`lower_func` 将 `if`/`while`/`for` 降级为 ScopeStmt + `br`/`goto`，goto/br 目标用短名（如 `_while_2`）。
+
+```
+# 源                                       # lower 后
+while (found == 0) {                      goto(_while_2)
+    s = lo + hi                           _while_2: {
+    int(s/2) -> mid                           found == 0 -> _1
+    tries = tries + 1                         br(_1, _do_3, _exit_4)
+    mid == target -> hit                  }
+    if (hit) { ... }                      _do_3: {
+    else {                                    lo + hi -> s
+        too_low = mid < target                tries + 1 -> tries
+        if (too_low) {                        mid == target -> hit
+            mid + 1 -> lo                     goto(_if_5)
+        }                                 }
+}                                         _if_5: {
+                                              br(hit, _then_6, _else_7)
+                                          }
+                                          _then_6: { ... }
+                                          _else_7: {
+                                              mid < target -> too_low
+                                              goto(_if_9)
+                                          }
+                                          _if_9: {
+                                              br(too_low, _then_10, _else_11)
+                                          }
+                                          _then_10: { mid + 1 -> lo; goto(_merge_12) }
+```
+
+- 所有 ScopeStmt 为函数体平级兄弟节点
+- `inject_goto_blocks` 补全提升后缺失的 goto
+- break/continue → `goto exitLabel` / `goto condLabel`
+
+## 指令布局
+
+**函数指令**：`/lib/<func>/[i,j]`（标准格式，供 extindex 解析）
+
+**Scope 指令**：`/lib/<func>/<scopeName>[i,j]`（flat key，scope 名直接拼在 coord 前）
+
+```
+/lib/sum_to/[0,0]              ← 函数体指令
+/lib/sum_to/[1,0]              ← goto _while_2
+/lib/sum_to/_while_2[0,0]      ← scope 条件块
+/lib/sum_to/_while_2[1,0]      ← br(bool, _do_3, _exit_4)
+/lib/sum_to/_do_3[0,0]         ← scope 循环体
+```
+
+---
+
+# Part 2: Runtime
+
+## 帧类型
+
+| | rwfunc 帧 | scope 帧 |
+|--|----------|---------|
+| 创建者 | `call(func, args...)` | `goto(label)` / `br(cond, t, f)` |
+| extindex | ✅ → /lib/<func>/ | ❌ 不建 extindex |
+| `.rparam` / `.wparam` | ✅ | ❌ |
+| `.lib` 标记 | ✅ | ❌ |
+| `.returnpc` / `.callpc` | ✅ | ✅ |
+| 隐式 return | DelTree 整帧 | DelTree 自身，变量不可被父 scope 访问 |
+| 帧位置 | callPC | rwfunc 帧下平级子目录 |
+
+```
+/vthread/1/[0,0]/                   ← rwfunc 帧（call 创建）
+├── .lib = /lib/sum_to              ← rwfunc 标记（funcFrameRoot 检测用）
+├── .rparam/n → ...                 ← 读参零拷贝
+├── .wparam/total → ...             ← 写参零拷贝
+├── .returnpc / .callpc
+├── total = 0, i = 1                ← 局部变量（所有变量均在 rwfunc 帧）
+├── _while_2/                       ← scope 帧（goto/br 创建，平级）
+│   ├── .callpc                     ← 每次重入更新
+│   └── .returnpc                   ← 首次设置，不覆写
+├── _do_3/                          ← scope 帧（平级）
+│   ├── .callpc
+│   └── .returnpc
+└── _exit_4/                        ← scope 帧（平级）
+```
+
+## 变量作用域
+
+**所有变量存储于 rwfunc 帧 Stack**。`funcFrameRoot` 沿帧树向上查找 `.lib` 标记识别 rwfunc 帧。
+
+- 写：`resolveWriteSlot` 先查 `.wparam` 重定向，否则写 rwfunc Stack
+- 读：`resolveReadValue` 先查 `.rparam` 重定向，再查 rwfunc Stack
+- scope 帧不存储变量；scope 退出 DelTree 自身
+- 子 scope 可访问父变量（都在 rwfunc 帧），scope 退出后变量不可被父访问（scope 帧已删除）
+
+## Decode：scope 感知 key 构造
+
+scope 帧不建 extindex，Decode 手动拼接 scope 前缀 key（如 `_while_2[0,0]`），经父帧 extindex 解析到 `/lib/func/_while_2[0,0]`。
+
+## HandleScope（goto/br）
+
+`HandleScope` 在 rwfunc 帧下创建 scope 子目录，不建 extindex。`.returnpc` 仅首次设置（防止 while 循环退出路径错误），`.callpc` 每次更新。
+
+## HandleScopeReturn
+
+scope 帧隐式 return：读 `.returnpc` → DelTree 自身 → 返回父上下文。
+
+## 系统变量
+
+| 变量 | 位置 | 职责 |
+|------|------|------|
+| `.pc` | vthread 级 | 外部视图 |
+| `.callpc` | 每帧 | 本帧执行进度 |
+| `.returnpc` | 每帧 | 返回地址 |
+| `.lib` | rwfunc 帧 | extindex 目标路径（funcFrameRoot 检测用） |
+
+## HandleCall
+
+1. frameRoot = callPC，ExtIndex → /lib/<func>/
+2. 写 `.lib` = funcKey，`.returnpc`，`.callpc`
+3. 读参零拷贝：`.rparam/<name>` → 调用方值位置
+4. 写参零拷贝：从 inst.Writes 直接读 write target（不从帧路径查）
+
+## Bootstrap
+
+虚线程根 `/vthread/1/`，extindex → 入口函数。写 `.lib` = funcKey。
+
+## 与传统 VM 的关键差异
+
+| | 传统 VM | kvlang |
+|--|---------|--------|
+| 代码传递 | copy 字节码 | **ExtIndex**（共享 /lib/ 指令树） |
+| 帧模型 | 一种帧 | **两种帧**：rwfunc + scope |
+| rwfunc 帧检测 | — | **`.lib` 标记**（避免 extindex 层叠干扰） |
+| 变量作用域 | 词法作用域 | **rwfunc 帧集中存储**，funcFrameRoot 定位 |
+| scope 指令查找 | — | **Decode scope 前缀 key** + 父帧 extindex |
+| 返回地址 | 硬件栈 | **`.returnpc`** 显式记录 |
+| 崩溃恢复 | 内存栈，死即全失 | PC + frameRoot 落 KV——重启续跑 |
+""" -> /lib/kvlang/deepdive/parser/03_control_flow
+}

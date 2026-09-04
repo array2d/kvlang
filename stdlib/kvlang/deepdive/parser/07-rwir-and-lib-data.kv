@@ -1,0 +1,87 @@
+# 来源: deepx-design/doc/kvlang-design-and-implementation/parser篇-07-rwir与lib数据.md
+# kvlang deepdive 设计与实现文档；kvlang 启动阶段以字符串写入 /lib/kvlang/deepdive/parser/07_rwir_and_lib_data。
+lib kvlang/deepdive/parser/07_rwir_and_lib_data {
+	"""# rwir 与 lib 数据：注册布局
+
+> 签名参数/返回值的 `type` 用签名类型表达式（并集 `A|B`、通配 `any`、高维 shape `[2,3]`、动态维 `?`），见 `grammar.bnf`。
+
+## 三类 KV 内容
+
+`/lib/` 下统一三类内容：
+
+| 类别 | 语义 | 有指令体？ | KV Kind | 布局路径 |
+|------|------|-----------|---------|---------|
+| **rwfunc** | 用户函数 | ✅ 指令树 | `defrwfunc` | `/lib/<pkg>·<name>/` |
+| **lib 数据** | 常量 | ❌ 单个 XValue | 值类型 | `/lib/<name>` |
+| **rwir 声明** | 扩展/用户声明 rwir | ❌ 仅签名 | `defrwir` | `/lib/<opcode>` |
+
+## 铁律
+
+- **三类内容同存 `/lib/`**：无独立 `/rwir/{runtime}/` 命名空间。
+- **`defrwir` 与 `defrwfunc` 同定义体格式**：`[nr:u16 LE][nw:u16 LE][kindexp 以 "\n" 连接]`，区别仅在 KV kind 与有无指令体子节点（`[i,j]`）。
+- **native rwir 不落盘**：`+`/`==`/`array`/`sqrt` 等内建在 C runtime `builtins[]`（`opcode → bi_fn`），不写 kvspace、运行时不回查。
+
+## rwir：`/lib/<opcode>`
+
+**扩展 rwir**（宿主注入，如 `numpy.add`）经 `kvlang_rwirextRegister(opcode, nr, nw, sig)` 写入 `/lib/<opcode>`（kind=`defrwir`），写入前 `kvlang_rwirextTypeValid` 校验各参 kindexp。**用户 rwir 声明**（`rwir myop(A:int64) -> (C:int64)`）由 layout `write_rwir_decl` 写入同路径。
+
+**native rwir** 数值多类型算子在 `builtins[]` 中融合为单条（`add` 一条覆盖 int8…float64），派发前 `strip_num_kind` 剥掉 `<numkind>·` 前缀，输出 kind 由实参决定。
+
+## lib 数据：`/lib/<name>`
+
+`/lib/<name>` 存单个 XValue 常量，任意 kvlang 代码以绝对路径读写：
+
+```
+/lib/math.Pi   float64 3.141592653589793
+/lib/math.E    float64 2.718281828459045
+```
+
+```kv
+lib math {
+    /lib/math.Pi = 3.141592653589793
+    /lib/math.E  = 2.718281828459045
+}
+```
+
+`lib` body 内的绝对路径赋值即写常量；kv 代码直接以绝对路径访问 `print(/lib/math.Pi)`。裸名（`Pi = 3.14`）是 `/vthread` 帧局部变量、跑完回收，不入 `/lib/`。
+
+> 注：Go/oldhero 曾用 `//go:embed stdlib/*.kv` + 启动 layout+run 各 lib `init` 自举内置常量。当前 Rust layout + C runtime **不内置 stdlib 自举**；常量由用户/宿主显式 layout 写入 `/lib/`。
+
+## 落盘流程（Rust layout + C runtime）
+
+| 步骤 | 内容 |
+|------|------|
+| 建目录 | `init_dirs`：`mkindex("/lib/")`、`mkindex("/vthread/")` |
+| 写 rwfunc | `write_func` → `/lib/<pkg>·<name>/`：`[0,0]` 签名（defrwfunc）、参数 Ptr、`[i,j]` 指令（rwir，i≥1）、`‥src` 源码 |
+| 写用户 rwir | `write_rwir_decl` → `/lib/<opcode>`（kind=defrwir，无指令体） |
+| 注册 native | runtime `builtins[]`，不落盘 |
+| 注入扩展 rwir | `kvlang_rwirextRegister(opcode, nr, nw, sig)` → `/lib/<opcode>`（kind=defrwir） |
+
+## 示例
+
+宿主注入扩展 rwir（各参 kindexp 以 `\n` 连接）：
+
+```c
+kvlang_rwirextRegister(c, "numpy.add", 2, 1, "int64|float64\nint64|float64\nint64|float64");
+```
+
+用户在 kvlang 源码声明 rwir（无体，仅签名）→ layout 落 `/lib/myop`：
+
+```kv
+rwir myop(A:int64, B:int64) -> (C:int64)
+```
+
+## 实现要点（相关文件）
+
+| 文件 | 职责 |
+|------|------|
+| `layout/src/keytree.rs` | `LIB_ROOT`/`RWIR_ROOT` = `/lib`；`lib_func`/`rwir`/`lib_src` 路径构造 |
+| `layout/src/code.rs` | `init_dirs`、`write_func`（rwfunc→`/lib`）、`write_rwir_decl`（rwir→`/lib/<opcode>`） |
+| `layout/src/kvkind.rs` | `new_rwfunc` / `new_rwir` 定义体编码（`nr`u16 + `nw`u16 + `\n` 连接 kindexp） |
+| `runtime/src/keytree.c` | `kt_rwir(opcode)` = `/lib/<opcode>` |
+| `runtime/src/builtin.c` | native `builtins[]`（opcode→`bi_fn`，数字多类型融合）、`strip_num_kind` 派发 |
+| `runtime/src/rwirext.c` | `kvlang_rwirextRegister(opcode, nr, nw, sig)` → `/lib/<opcode>` |
+| `runtime/src/kvcpu.c` | execute 循环 `load_def_reads` + `check_read_types` 内联类型匹配 |
+| `runtime/src/type_expr.c` | `kvlang_rwirextTypeValid`（装载校验）+ `kvlang_rwirextTypeMatch`（运行时匹配） |
+""" -> /lib/kvlang/deepdive/parser/07_rwir_and_lib_data
+}

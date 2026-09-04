@@ -1,0 +1,165 @@
+# 来源: deepx-design/doc/kvlang-design-and-implementation/runtime篇-04-函数调用builtin.md
+# kvlang deepdive 设计与实现文档；kvlang 启动阶段以字符串写入 /lib/kvlang/deepdive/runtime/04_function_call_builtin。
+lib kvlang/deepdive/runtime/04_function_call_builtin {
+	"""# 函数调用（builtin 视角）
+
+## 调用形态总览
+
+用户自定义函数的调用有三种源码形态，最终都解析为同一 KV key `/lib/<pkg>.<name>`：
+
+| 源码形态 | 示例 | pkg 可为多级路径？ |
+|---------|------|-------------------|
+| 全路径 | `/lib/math.sum(3, 4) -> s` | ✅ `/lib/a/b.add(3, 4) -> s` |
+| 点号/斜杠限定 | `math.sum(3, 4) -> s` | ✅ `a/b.add(3, 4) -> s` |
+| 裸名 | `sum(3, 4) -> s` | ❌ 同 lib 内 |
+
+**核心结论**：全路径比点号限定仅多 4 个字符（`/lib`），两者在调用解析阶段完全等价。
+
+---
+
+## 前置：Scanner tokenization
+
+### `/` 的双重人格
+
+`/` 不是 token delimiter。`/` 的 tokenization 取决于上下文（`layout/src/scanner.rs`）：
+
+- `/ ` 后跟字母/数字/下划线 → **路径字面量**（读至真正 delimiter，`.` 不作分隔）：`/lib/a/b.add` 是单个 Literal token
+- `/ ` 单独出现 → **除法算子**
+
+### `/` 在标识符中
+
+由于 `/` 不在 token delimiter 集，标识符读取会把 `/` 读入：
+
+```
+a/b.add(10, 20)
+→ 标识符 IDENT("a/b")，DOT，IDENT("add")，LPAREN ...
+```
+
+**隐含约束**：多级 pkg 路径的段分隔符必须是 `/`，不能是 `.`。
+
+---
+
+## 阶段 1：Parser（源码 → AST opcode）
+
+文件 `layout/src/parser.rs`。
+
+### 全路径 `/lib/a/b.add(args)`
+
+Scanner 产出 `LITERAL("/lib/a/b.add") LPAREN ...` → 常规函数调用分支 → opcode = `"/lib/a/b.add"`
+
+### 点号限定 `math.sum(args)`
+
+Scanner 产出 `IDENT("math") DOT IDENT("sum") LPAREN ...` → 点号函数调用分支 → opcode = `"math.sum"`
+
+### 多级 pkg `a/b.add(args)`
+
+Scanner 产出 `IDENT("a/b") DOT IDENT("add") LPAREN ...` → 点号函数调用分支 → opcode = `"a/b.add"`
+
+### 裸名 `sum(args)`
+
+Scanner 产出 `IDENT("sum") LPAREN ...` → 常规函数调用分支 → opcode = `"sum"`
+
+---
+
+## 阶段 2：lower（AST → KV 指令槽）
+
+文件 `layout/src/lower.rs`。
+
+裸名补齐条件：opcode 必须同时满足——不含 `.`、不以 `/lib/` 开头、非 builtin/控制流/`=`。
+
+| 源码形态 | 进入 lower 的 opcode | 含 `.`？ | 补齐？ | KV `[s0,0]` 写入 |
+|---------|---------------------|---------|-------|-----------------|
+| `/lib/a/b.add(3,4)` | `/lib/a/b.add` | ✅ | ❌ | `/lib/a/b.add` |
+| `a/b.add(3,4)` | `a/b.add` | ✅ | ❌ | `a/b.add` |
+| `math.sum(3,4)` | `math.sum` | ✅ | ❌ | `math.sum` |
+| `sum(3,4)`（在 lib math 内） | `sum` | ❌ | ✅ → `math.sum` | `math.sum` |
+| `sum(3,4)`（顶层，无 lib） | `sum` | ❌ | ❌（pkg==""） | `sum` |
+
+---
+
+## 阶段 3：Execute 分发（C runtime `kvcpu.c`）
+
+Dispatch 优先级（`kvlangRuntimeExecuteVthread`）：
+
+1. `op_is_control` — call/return/br/goto
+2. `kvlangBuiltinIsNative` — native 算子（静态注册表，~50 个）
+3. `is_copy_op` — opcode="=" 赋值
+4. `isothersrwir` — 检查 `/lib/<opcode>` kind=`defrwir`（扩展 rwir）
+5. **else → 用户定义函数**：opcode 移到 reads[0]，改写为 call 指令
+
+---
+
+## 阶段 4：HandleCall（函数名 → KV key）
+
+```
+funcName = inst.reads[0]
+
+if HasPrefix(funcName, "/lib/"):
+    rest = funcName[5:]              # 去掉 "/lib/"
+    dot = LastIndex(rest, ".")
+    pkg = rest[:dot], funcName = rest[dot+1:]
+elif dot = LastIndex(funcName, "."); dot > 0:
+    pkg = funcName[:dot], funcName = funcName[dot+1:]
+
+funcKey = "/lib/" + pkg + "." + funcName  （pkg 空时直接 "/lib/" + funcName）
+```
+
+**所有形态最终收敛到同一个 KV key**：
+
+| 源码 | 最终 KV key |
+|------|-----------|
+| `/lib/a/b.add(3,4)` | `/lib/a/b.add` |
+| `a/b.add(3,4)` | `/lib/a/b.add` |
+| `math.sum(3,4)` | `/lib/math.sum` |
+
+---
+
+## 查找失败
+
+若 `funcKey` 对应的 `[0,0]` XValue 为 None（函数未注册），返回：
+
+```
+NameError: func not found: <funcName>
+```
+
+---
+
+## 阶段 5：Resolve（Ptr 链变量解析）
+
+调用后指令执行时，读写槽引用走 Ptr 链解析（`runtime/src/kvcpu.c:resolve_read_path`）：
+
+```
+resolve_read_path(kv, frame_path, name):
+  1. 绝对路径？→ 直取
+  2. funcFrameRoot 确定帧根
+  3. GetOne(rwRoot+"/"+name) → Ptr("[0,-j]")?
+     yes: Ptr 目标 → 参数地址 → 值（最多三跳）
+  4. fallback: rwRoot+"/"+name → 局部变量
+```
+
+**`.rparam`/`.wparam` 重定向表已移除**，当前用 Ptr 链路径别名实现零拷贝跨帧传参。
+
+---
+
+## builtin 包清单
+
+| 包 | 路径 | 说明 |
+|----|------|------|
+| `byte` | `rwir/builtin/byte/` | byte 派生 kind 通用方法（Len, At, Set, Slice） |
+| `utf8` | `rwir/builtin/utf8/` | UTF-8 编解码，仅 char/utf8 |
+| `unicode` | `rwir/builtin/unicode/` | Unicode 码点操作 |
+| `random` | `rwir/builtin/random/` | crypto/rand uint64 |
+
+### kind 继承树
+
+```
+uint8                         ← 基类，elemSize=1
+├── bool, int8, char/utf8, char/ascii   1B
+├── int16, uint16             2B
+├── int32, uint32, float32, char/utf32  4B
+└── int64, uint64, float64    8B
+```
+
+`IsByteDerived(kind)` / `ElemSize(kind)` 判定继承关系。
+""" -> /lib/kvlang/deepdive/runtime/04_function_call_builtin
+}

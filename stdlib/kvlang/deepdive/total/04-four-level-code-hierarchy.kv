@@ -1,0 +1,53 @@
+# 来源: deepx-design/doc/kvlang-design-and-implementation/total篇-04-代码四级层次.md
+# kvlang deepdive 设计与实现文档；kvlang 启动阶段以字符串写入 /lib/kvlang/deepdive/total/04_four_level_code_hierarchy。
+lib kvlang/deepdive/total/04_four_level_code_hierarchy {
+	"""# 代码四级层次
+
+kvlang 中所有代码组织为四个层级，从宏观到微观，每层在 kvspace 树中有对应路径。
+
+## 四级定义
+
+| 层 | 关键字 | 职责 | 拥有 |
+|----|--------|------|------|
+| **lib** | `lib name { }` | 包组织，管理命名空间下的所有 rwfunc | rwfunc 集合 |
+| **rwfunc** | `rwfunc name(...) -> (...) { }` | 函数级，拥有自己的 rwir 指令序列和变量 | rwir 序列 + scope 树 |
+| **scope** | （lower 产物，不可手写） | 域级，if/while/for 降级产生，拥有自己的指令序列和变量，可嵌套 | rwir 序列 + 子 scope |
+| **rwir** | `rwir name(...) -> (...)` | 指令级，执行由解释器直执行或委托后端引擎 | 无——原子不可分 |
+
+```
+/lib/leetcode/                   ← lib: 顶层包
+└── /lib/leetcode/search/        ← lib: 嵌套子包
+    ├── [rwfunc] binary(target)  ← rwfunc: 函数签名
+    ├── [0,0]: lo <- 0           ← rwir: 原子指令
+    ├── [1,0]: hi <- 100
+    ├── _while_1/                ← scope: while 循环域
+    │   ├── cond/
+    │   │   └── [0,0]: found == 0 -> _c
+    │   ├── body/
+    │   │   ├── [0,0]: lo + hi -> s
+    │   │   └── _if_1/           ← scope: 嵌套 if 域
+    │   │       ├── then/
+    │   │       └── else/
+    │   └── exit/
+    └── _exit_1/
+```
+
+## 层次约束
+
+- **lib** 可嵌套子 lib（`lib a { lib b { } }`），叶子 lib 包含 rwfunc。不可直接含 rwir 或 scope。对应 `/lib/<name>/` 路径，嵌套时路径级联 `/lib/a/b/`。
+- **rwfunc** 只包含 rwir 和 scope——不可含其他 rwfunc。函数调用不嵌入 body，走 `call`/`return` 跨帧机制。rwfunc 对应 `/lib/<pkg>/<name>/`，运行时实例化为 `/vthread/<vtid>/[N,0]/` 帧。
+- **scope** 只包含 rwir 和子 scope。语义同 rwfunc 但无独立调用栈——scope 的变量和指令序列平铺在所属 rwfunc 帧内。scope 由 lower 阶段从 if/while/for 产生，不可手写。
+- **rwir** 是最小执行单元，不可再分，由 C runtime 解释器或后端引擎原子执行。rwir 是**空函数体**（仅签名，无指令体），扩展 rwir 的签名与 rwfunc 统一存于 `/lib/<opcode>`（`<opcode>` 可带包前缀），运行时签名可供 agent 自省；native rwir 签名内联在 C runtime 注册表中、不落盘。
+
+## 与 KV 树的映射
+
+每一层在 kvspace 树中都有对应路径，`kvspace tree` 即完整自省：
+
+| 层 | KV Kind | `/lib/` 路径 | `/vthread/` 路径 |
+|----|---------|-------------|-----------------|
+| lib | — | `/lib/<pkg>/` | — |
+| rwfunc | `rwfunc` | `/lib/<pkg>/<name>/` | `/vthread/<vtid>/[N,0]/` |
+| scope | `scope` | `/lib/<pkg>/<name>/_while_N/` | `/vthread/<vtid>/[N,0]/_while_N/` |
+| rwir | `rwir` | `/lib/<opcode>`（扩展）；native 内联 C 表不落盘 | — |
+""" -> /lib/kvlang/deepdive/total/04_four_level_code_hierarchy
+}

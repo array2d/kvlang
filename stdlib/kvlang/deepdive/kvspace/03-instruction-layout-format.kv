@@ -1,0 +1,105 @@
+# 来源: deepx-design/doc/kvlang-design-and-implementation/kvspace篇-03-代码指令的布局格式.md
+# kvlang deepdive 设计与实现文档；kvlang 启动阶段以字符串写入 /lib/kvlang/deepdive/kvspace/03_instruction_layout_format。
+lib kvlang/deepdive/kvspace/03_instruction_layout_format {
+	"""# 代码指令的布局格式
+
+> 签名参数/返回值的 `type` 用**签名类型表达式**（并集 `A|B`、通配 `any`、高维 shape `[2,3]`、动态维 `?`），BNF 见 `grammar.bnf`。
+
+## layoutrwir 的设计原理与函数调用 extindex 机制
+
+传统 VM：编译器产线性字节码，call = push 返回地址 + 跳转到函数入口。kvlang 不用字节码拷贝——**函数体永不被复制，调用 = ExtIndex 将帧根设为扩展索引**指向 `/lib/` 下的指令树。
+
+layoutrwir 在五语言中的对标：
+
+| 语言 | 阶段名 | 产物 |
+|------|--------|------|
+| **C (GCC)** | codegen + assemble + link | 线性机器码 |
+| **Go** | compile (walk + SSA) | 线性机器码 |
+| **Rust** | codegen (MIR→LLVM IR) | 线性机器码 |
+| **Python** | compile | 线性字节码 `.pyc` |
+| **V8** | Ignition bytecode + TurboFan | 线性字节码→机器码 |
+| **kvlang** | **layoutrwir** | **树形 KV 键**，可逐槽寻址 |
+
+五种语言都在生成线性序列。kvlang 的 layoutrwir 不是序列化——是**空间布局**：每条指令展开为一组 `[s0,s1]` 坐标，读参负轴、写参正轴、opcode 零点。产物可逐槽 `kv·get`/`kv·list`，无需反汇编器。
+
+### 指针传址方案（φ1）
+
+函数定义利用 slot 坐标 row 0，指令从 row 1 开始。参数名通过命名 Ptr key 映射到 slot 坐标，运行时走 3 跳 Ptr 链解析。
+
+**Layout（`/lib/` 下，只读）：**
+
+```
+/lib/main·add/[0,0]   → Rwfunc(nr=2, nw=1, al=2)   ← 函数签名（仅计数）
+/lib/main·add/a       → Ptr(string, "[0,-1]", 1)    ← 命名参数→slot
+/lib/main·add/b       → Ptr(string, "[0,-2]", 1)
+/lib/main·add/c       → Ptr(string, "[0,1]", 1)     ← 命名返回值→slot
+/lib/main·add/[1,0]   → "+"                          ← 指令0（idx+1）
+/lib/main·add/[1,-1]  → Rwir("a")                    ← 指令0 read slot
+/lib/main·add/[1,-2]  → Rwir("b")
+/lib/main·add/[1,1]   → Rwir("c")
+/lib/main·add/[2,0]   → "return"                     ← 指令1
+```
+
+**Runtime（`/vthread/.../` 帧根，extindex → `/lib/main·add/`）：**
+
+```
+frameRoot/a          → ext→ Ptr("[0,-1]")              ← layout 写入，只读
+frameRoot/b          → ext→ Ptr("[0,-2]")              ← 只读
+frameRoot/c          → ext→ Ptr("[0,1]")               ← 只读
+frameRoot/[0,-1]     → Char("/vthread/1/_lit0")        ← runtime 写入，无 ext 冲突
+frameRoot/[0,-2]     → Char("/vthread/1/x")            ← runtime 写入
+frameRoot/[0,1]      → Char("/vthread/1/result")       ← runtime 写入
+frameRoot/[1,0]      → ext→ "+"                        ← 指令
+```
+
+**Resolve（3 跳 Ptr 链）：**
+
+```
+指令 [1,-1]=Rwir("a"):
+  1. GetOne(frameRoot+"/a") → ext→ Ptr("[0,-1]")      ← name→slot
+  2. GetOne(frameRoot+"/[0,-1]") → Char(path)          ← slot→arg地址
+  3. GetOne(path) → value                               ← 解引用
+```
+
+**XValueHead ref 字段**：`ref=0` 内联，`ref=1` 软链接（body=目标路径），`ref=2` 扩展存储句柄。完整格式见 key系统篇。
+
+### ExtIndex：帧根指向指令树
+
+函数调用时，不是把指令字节码拷贝到新帧——而是通过 **ExtIndex** 让帧根成为指向 `/lib/` 指令树的扩展索引：
+
+```
+编译期（WriteFunc）：
+  AST → KV 结构化写入 /lib/main·add/:
+    /lib/main·add/[0,0]       = Rwfunc(r2/w1)       ← 函数签名
+    /lib/main·add/a           = Ptr("[0,-1]")        ← 命名参数→slot
+    /lib/main·add/b           = Ptr("[0,-2]")
+    /lib/main·add/c           = Ptr("[0,1]")         ← 命名返回值→slot
+    /lib/main·add/[1,0]       = "+"                  ← 指令0
+    /lib/main·add/[1,-1]      = Rwir("a")
+    /lib/main·add/[1,-2]      = Rwir("b")
+    /lib/main·add/[1,1]       = Rwir("c")
+    /lib/main·add/[2,0]       = "return"             ← 指令1
+
+调用时：
+  kv·ExtIndex(frameRoot+"/", "/lib/main·add/")       ← 帧根→/lib/ 指令树
+  kv·Set(frameRoot+"/[0,-1]", Char(argAddr))         ← runtime arg 槽，无 ext 冲突
+  kv·Set(frameRoot+"/[0,-2]", Char(argAddr))
+  kv·Set(frameRoot+"/[0,1]", Char(resultAddr))
+  # 所有帧共享 /lib/ 下同一份指令树，零拷贝
+```
+
+**关键设计**：`[0,-j]` key 在 `/lib/` 下不存在（只有 named key `a`/`b`/`c`），因此 runtime 写入 `frameRoot/[0,-j]` 不会触发 extindex 写保护。
+
+### 与传统 VM 的关键差异
+
+| | 传统 VM | kvlang |
+|--|---------|--------|
+| 代码传递 | copy 字节码到新栈帧 | **ExtIndex**（所有帧共享 /lib/ 下同一份指令树） |
+| 帧模型 | 一种帧（call/return） | **两种帧**：rwfunc（函数调用）+ scope（goto/br，详见控制流篇） |
+| 崩溃恢复 | 栈帧在内存，进程死即全失 | PC=路径字符串、frameRoot=返回点落 KV——重启续跑 |
+| 可观测 | 需调试器 attach | `kvspace tree /vthread/…` 看 extindex 指向、frameRoot，局部变量直读帧根 |
+| 参数模型 | 寄存器/栈槽传值 | Ptr 链：name→slot→arg→value（3 跳） |
+
+**`=` 操作码是值拷贝，不是函数调用**：`a -> b` 编码为 `[s0,0]="="`（值拷贝），函数调用 opcode 位是 `call`，ExtIndex 发生在调用处理函数内部。二者在 KV 层无歧义，opcode 位永远不放变量引用。
+""" -> /lib/kvlang/deepdive/kvspace/03_instruction_layout_format
+}

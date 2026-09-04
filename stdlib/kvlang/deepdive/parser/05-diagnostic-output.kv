@@ -1,0 +1,27 @@
+# 来源: deepx-design/doc/kvlang-design-and-implementation/parser篇-05-诊断输出.md
+# kvlang deepdive 设计与实现文档；kvlang 启动阶段以字符串写入 /lib/kvlang/deepdive/parser/05_diagnostic_output。
+lib kvlang/deepdive/parser/05_diagnostic_output {
+	"""# Diagnostic Output（诊断输出规范）
+
+## 诊断输出架构（Rust layout + C runtime）
+
+诊断输出分两层，格式约定一致：无时间戳、无 key=value，对齐 GCC/Go/Rust 编译器风格。
+
+**Rust layout**：`Diagnostic.string()` 输出 `{kind}: {src}:{line}:{col}: {msg}`，kind 为 `error`/`warn`/`info`。`parser.errors: Vec<Diagnostic>` 累积全量诊断，不首错即止。
+
+**C runtime（`logx.c`）**：`kvlangLogDebug/Info/Error` 以 `{exe}: ` 或 `{exe}: error: ` 前缀输出到 stderr，由 `LOG_LEVEL` 环境变量控制（默认 `warn`，可选 `debug`/`info`/`error`）。
+
+## LOG_LEVEL 级别
+
+| 级别 | layout 可见 | runtime 可见 |
+|------|------------|-------------|
+| `debug` | info/warn/error 全量 | debug/info/warn/error |
+| `info` | info/warn/error | info/warn/error |
+| `warn`（默认） | warn/error | warn/error |
+| `error` | error | error |
+
+## 原则
+
+诊断（layout 报错/运行时错误）走各层的诊断接口；stdout 结果（`print` 输出、格式化内容、命令成功状态）不加前缀直接输出。
+""" -> /lib/kvlang/deepdive/parser/05_diagnostic_output
+}

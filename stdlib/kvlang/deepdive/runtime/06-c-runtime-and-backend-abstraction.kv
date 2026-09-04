@@ -1,0 +1,82 @@
+# 来源: deepx-design/doc/kvlang-design-and-implementation/runtime篇-06-C运行时与后端抽象.md
+# kvlang deepdive 设计与实现文档；kvlang 启动阶段以字符串写入 /lib/kvlang/deepdive/runtime/06_c_runtime_and_backend_abstraction。
+lib kvlang/deepdive/runtime/06_c_runtime_and_backend_abstraction {
+	"""# runtime篇-06: C 运行时与后端抽象
+
+> 状态：与实现同步。代码：`kvlang/runtime/`（纯 C）、`kvlang/runtime-rwirext_example/rust/term/`、`kvlang/runtime-rwirext_example/go/json/`、`kvlang/runtime-rwirext_example/py/numpy/`、`array2d/kvspace-c/`（SHM）、`array2d/kvspace-durable/`（fs/redis）。
+
+## 一、小 runtime 大扩展
+
+kvlang 是**小 runtime 大扩展**架构。中央 runtime 只实现最核心的 execute 大循环（fetch-decode-execute、call/return/br/goto、native rwir 派发、`=` 拷贝、用户函数调用），其余能力（tensor 计算、LLM、agent、print/println/cerr）全部交给**扩展 runtime**。
+
+扩展 runtime 从中央 runtime 拿到 PC，连续执行己方 rwir 到非己方指令，再把最终 PC 交还。op-gpu 扩展收到 handoff 后连续跑完整段 tensor 计算，不必每算一个 op 就回报中央。
+
+## 二、C 运行时（纯 C + extern "C" ABI）
+
+`kvlang/runtime/` 是通用嵌入式执行器，嵌入到 rwirext 项目（op-gpu、agent、livebyte）。
+
+**两组对外 C ABI**：
+- `kvlang_runtime.h`（`kvlangRuntimeConnect/Disconnect/Execute/Bootstrap/...`）：核心执行器
+- `kvlang_rwirext.h`：扩展 runtime 语义，**只暴露 kvspace 不提供的部分**。KV 存取（connect/get/set/del/list/tlv）**不在此**——扩展宿主自己连 kvspace ABI，把 kvspace 句柄（`void *`）传进带句柄的 rwirext 函数。
+
+`kvlang_rwirext.h` 现有 9 个符号：`Register`（写 `/lib/<op>` 签名）、`PrintLine`（print/println/cerr resolve+display）、`NextPc`（纯函数，下一条 PC）、`Params`（opcode + 读/写参名，\n 分隔）、`ResolveRead`/`ResolveReadPath`/`ResolveWrite`（读/写参解析，`ResolveReadPath` 供零拷贝读整块 ndarray）、`TypeValid`/`TypeMatch`（签名类型表达式校验与值判定）。
+
+**模块**（内部实现统一 `kvlang`/`kvspace` 前缀）：`xvalue.c`（TLV 编解码）、`kv.c`（kvspace ABI 封装）、`keytree.c`（路径构造）、`rwir.c`（PC 解析 + Decode）、`vthread.c`、`builtin.c`（~50 native 算子 + 静态注册表）、`kvcpu.c`（Execute 循环）、`runtime.c`（ABI 层）、`rwirext.c`（扩展 ABI，含 `isothersrwir`）。
+
+**注册表**：静态数组 + 线性查找（C 版，对应 Go 原 `map[string]nativeRwir`）。
+
+**print/println/cerr 是扩展 rwir**（不在 builtin），在 `/lib/<opcode>`（kind=`defrwir`）注册，dispatch 经 `isothersrwir` 命中。执行分两种模式：
+- **嵌入式**（`KVMODE_RETURN`）：runtime-rwirext 的 Rust `term` 与 runtime 同进程，execute 循环经 `out_pc` 把控制交回扩展，扩展直接写宿主进程 stdout/stderr，零轮询。
+- **handoff**：`handoff_external_rwir` 写 `/lib/<op>/vids/<vtid>`，watch 消费完成（30s 超时），供独立进程扩展（Go json、Py numpy）。
+
+## 三、kvspace 统一 C ABI（去特化）
+
+layout 与 runtime **都不对 kvspace 做特化处理**：不 dlopen、不双后端、不解析 scheme。二者只走一套 `kvspace*` 兼容 C ABI（无下划线 camelCase）：
+
+```
+kvspaceConnect / Close / BytesFree
+kvspaceSet / Get / GetBatch / List / Del / DelTree
+kvspaceMkindex / MkindexExt / RmindexExt / Watch
+kvspaceTlvEncode / TlvEncodeMode / DecodeHead
+kvspaceNewPtr / NewChar / NewBool / NewInt64 / NewFloat64
+```
+
+**后端由链接决定**：`KVLANG_KVSPACE_LIB` 环境变量在**构建期**选择链接哪个 kvspace 库（`kvspace-c` 或 `kvspace_durable`），两者导出同一 ABI。runtime 的 `kvlangKv_t` 只保留 `void *h`，代码零后端分支。
+
+**kvspace-c 补齐 ABI**：`kvspace-c/src/durable_abi.c` 导出完整符号（内部复用 `kvspaceShm*` + `kvspaceXvalue*`），其中 `GetBatch`（前缀批量读）与 `Watch`（轮询到值==target 或超时）为补齐的手工实现。
+
+## 四、三个后端
+
+| 后端 | 库 | 存储 | 场景 |
+|------|-----|------|------|
+| shm | kvspace-c（C） | ART 树 + slotsboxmalloc + file-backed mmap | 高性能（训练/推理） |
+| redis | kvspace-durable（Rust） | Redis | 基线验证 |
+| fs | kvspace-durable（Rust） | 文件系统 | 本地持久化 |
+
+`conn(dsn)` 按 scheme 选后端（`shm://`、`redis://`、`fs://`），DSN 是唯一的后端区分。
+
+## 五、numpy 扩展（零拷贝 buffer 在 kvspace）
+
+`runtime-rwirext_example/py/numpy/` 是第一个 tensor 类 rwirext（CPU 侧，为 op-gpu 铺垫）。tensor 本体较大，**走 kvspace-c SHM**（redis/fs 有 I/O 拷贝）。
+
+**零拷贝核心**（`numpy.py` 的 `Engine.view`）：tensor 存 kvspace 为 XValue 定长数组（`float64`/`int64` 等）。`view(key)` 经 `kvspaceShmGet` 拿 TLV 指针，`kvspaceDecodeHead` 解出 `kvspaceHead_t` 定位 body 段，用 `numpy.ctypeslib.as_array` 在该地址建 ndarray——ndarray 的 buffer 就是 SHM 的 raw data，读写 ndarray 即读写 kvspace，无拷贝；写走 `kvspaceTlvEncode` 直接 N 维落盘。
+
+**扩展宿主自连 kvspace**：`Engine` 自己 `kvspaceConnect(dsn)` 拿句柄，rwir handoff 只用 `kvlang_rwirext*` 的 runtime 语义（`Register/Params/ResolveRead/ResolveReadPath/ResolveWrite/NextPc`）。Go json 扩展同构。
+
+**测试**：`tutorial/14-numpy/`（六例：creation/elementwise/linalg/reduce/manipulation/pipeline，shm 全流程）。
+
+## 六、验证（Rust term 扩展 + C runtime）
+
+`tutorial/test.py --runtime c`（Rust layout → kvspace → C runtime），全量 tutorial：
+
+| 后端 | 结果 |
+|------|------|
+| shm | **136 PASS / 0 FAIL** |
+| redis | 134 PASS（`time.kv` delta ms RTT 时序 + `prime_sieve` 超时，非语义） |
+| fs | 133 PASS（`time.kv` 文件 I/O 时序 + `prime_sieve` 超时，非语义）|
+
+Go runtime 为 136/136 baseline（`goheap://` 进程内，无 RTT/文件 I/O）。
+
+fs 的 `inline.kv` 失败源于 fs 后端把 `.`（成员分隔）编码为 `./`（目录边界），dict 成员呈嵌套结构（`/lib/math./init`），而 redis/go 后端是扁平结构（`/lib/math.init`）。属 fs 后端 `.` 编码与扁平语义的差异，非执行语义 bug。
+""" -> /lib/kvlang/deepdive/runtime/06_c_runtime_and_backend_abstraction
+}

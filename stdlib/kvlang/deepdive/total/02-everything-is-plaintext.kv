@@ -1,0 +1,43 @@
+# 来源: deepx-design/doc/kvlang-design-and-implementation/total篇-02-一切皆明文.md
+# kvlang deepdive 设计与实现文档；kvlang 启动阶段以字符串写入 /lib/kvlang/deepdive/total/02_everything_is_plaintext。
+lib kvlang/deepdive/total/02_everything_is_plaintext {
+	"""# 一切皆明文
+
+## 一切皆明文
+
+传统 VM：PC 是整数、指令是字节码、指针是内存地址、类型在编译期丢失、调试需要反汇编器。kvlang 相反：**一切关键信息以明文字符串存于 kvspace 树**，`kvspace tree`/`kvspace get` 即完整系统自省。
+
+目标：让程序对人与 agent 彻底透明——人用 `kvspace tree` 直读，agent 用 `kv.Get` 程序读，同一份数据，零中间层。
+
+### 路径即 PC、指针、地址
+
+```
+传统：PC = 0x7fff5fbff830  指针 = 0x7fff9b3c  变量 = rbp-8
+kvlang：PC = "/vthread/run/[0,0]/[1,0]/[0,0]"  指针 = "/n0"  变量 = 帧根 + "/x"
+```
+
+PC 字符串即调用栈（路径深度 = 栈深度）。裸名即相对指针，`/` 开头即绝对指针。不存在 `&` 取址——变量名本身就是该变量的 kvspace 路径。`"/n0" -> p; p.next` 的值是路径字符串，`kvspace get` 直读。
+
+### 指令与调用：字符串 opcode，全路径调用
+
+```
+传统：B8 01 00 00 00 (mov eax, 1)  调用 = call 0x400200 (符号表间接)
+kvlang：[0,0]="+" [0,-1]="A" [0,1]="C"  调用 = /lib/math.sum(3, 4) -> s
+```
+
+opcode 是 `"+"` `"print"` `"call"` 字符串，`kvspace tree /lib/func` 即反汇编。lib 树即全局命名空间——调用即全路径，无 import/符号表/链接器重定位。
+
+### 类型与状态：kind 自描述，`/.` 暴露一切
+
+```
+传统：运行时值 = 裸字节  系统状态 = 需 ptrace
+kvlang：XValue 带 kind "int64"   /vthread/7/.pc .status .rootfunc 直接 Get
+```
+
+`kvspace get /x` 返回 `int64:42`——类型跟值一起存。VM 内部状态以 `X/.var` 影子键暴露：`.pc` `.status` `.rootfunc` `.rparam` `.wparam`。源码存 `/lib/.*.src` 与指令树同目录。
+
+### 代价与补偿
+
+明文化贯彻到 kvlang 的方方面面——PC 是字符串而非整数、opcode 是 `"+"` 而非单字节、指针是路径而非地址——这天然损失了解释执行的速度。但 kvlang 的定位是**调度层**，最耗时的 tensor 计算不在 kvlang 内执行：op-gpu 将计算编译为 GPU kernel（TileLang → AOT `.so` → dlopen），通过 GPU 硬件加速弥补。透明性在调度层兑现，算力在扩展引擎层找回。
+""" -> /lib/kvlang/deepdive/total/02_everything_is_plaintext
+}
