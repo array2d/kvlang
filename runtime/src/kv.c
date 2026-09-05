@@ -89,6 +89,10 @@ int kvlangKvCpTree(kvlangKv_t *k, const char *src, const char *dst, char *err, u
     return kvspaceCpTree(k->h, src, dst, err, err_cap);
 }
 
+int kvlangKvCpList(kvlangKv_t *k, const char *src, const char *dst, char *err, uint32_t err_cap) {
+    return kvspaceCpList(k->h, src, dst, err, err_cap);
+}
+
 int kvlangKvMkindex(kvlangKv_t *k, const char *path, char *err, uint32_t err_cap) {
     return kvspaceMkindex(k->h, path, err, err_cap);
 }
@@ -110,9 +114,9 @@ int kvlangKvList(kvlangKv_t *k, const char *prefix, bool expand_ext, bool resolv
     if (count <= 0) return 0;
     char **names = malloc(sizeof(char *) * (size_t)count);
     for (int32_t i = 0; i < count; i++) {
-        uint8_t *d = NULL; uint32_t len = 0;
-        if (kvspaceListAt(k->h, prefix, ex, rs, i, &d, &len) == 0 && d)
-            names[i] = strndup((const char *)d, len);
+        uint8_t buf[1024]; uint32_t len = 0;
+        if (kvspaceListAt(k->h, prefix, ex, rs, i, buf, sizeof buf, &len) == 0)
+            names[i] = strndup((const char *)buf, len);
         else
             names[i] = strdup("");
     }

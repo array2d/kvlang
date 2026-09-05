@@ -109,6 +109,8 @@ int kvlangBuiltinKvCp(kvlangFrame_t *f) { return kv_two_path_void(f, "kv.cp", kv
 
 int kvlangBuiltinKvCpTree(kvlangFrame_t *f) { return kv_two_path_void(f, "kv.cpdir", kvlangKvCpTree); }
 
+int kvlangBuiltinKvCpList(kvlangFrame_t *f) { return kv_two_path_void(f, "kv.cplist", kvlangKvCpList); }
+
 int kvlangBuiltinKvAbs(kvlangFrame_t *f) {
     kvlangXvalue_t in[1]; int n = kvlangBuiltinReadInputs(f, in, 1);
     char *p = n >= 1 ? resolve_path_arg(f, 0, in) : NULL;

@@ -62,7 +62,8 @@ extern "C" {
         expand_ext: c_int,
         resolve: c_int,
         idx: i32,
-        out: *mut *mut u8,
+        buf: *mut u8,
+        buf_cap: u32,
         out_len: *mut u32,
     ) -> c_int;
     fn kvspaceDel(
@@ -237,19 +238,22 @@ impl Kv {
         }
         let mut v = Vec::with_capacity(count as usize);
         for i in 0..count {
-            let bytes = call_borrow(|out, out_len| unsafe {
+            let mut buf = [0u8; 1024];
+            let mut out_len: u32 = 0;
+            let ok = unsafe {
                 kvspaceListAt(
                     self.h,
                     c.as_ptr(),
                     expand_ext as c_int,
                     resolve as c_int,
                     i,
-                    out,
-                    out_len,
+                    buf.as_mut_ptr(),
+                    buf.len() as u32,
+                    &mut out_len,
                 )
-            });
-            if !bytes.is_empty() {
-                v.push(String::from_utf8_lossy(&bytes).into_owned());
+            } == 0;
+            if ok && out_len > 0 {
+                v.push(String::from_utf8_lossy(&buf[..out_len as usize]).into_owned());
             }
         }
         v

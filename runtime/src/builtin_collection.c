@@ -448,8 +448,7 @@ int kvlangBuiltinStructNew(kvlangFrame_t *f) {
     char *fr = kvlangKeytreeFrameRoot(f->pc);
     for (int w = 0; w < f->inst->nw && rc == 0; w++) {
         char *ok = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->writes[w].name);
-        kvlangKvDelTree(f->kv, ok, err, sizeof err);
-        if (kvlangKvCpTree(f->kv, ref, ok, err, sizeof err) != 0) { rc = kvlangBuiltinSetErr(f, "%s", err); free(ok); break; }
+        if (kvlangKvCpList(f->kv, ref, ok, err, sizeof err) != 0) { rc = kvlangBuiltinSetErr(f, "%s", err); free(ok); break; }
         kvlangXvalue_t mark; kvlangXvalueNewTlv(&mark, ref, (const uint8_t *)"", 0, 1);
         kvlangKvPair_t p0 = { ok, mark }; kvlangKvSet(f->kv, &p0, 1, err, sizeof err); kvlangXvalueFree(&mark);
         for (int i = 1; i + 1 < n && rc == 0; i += 2) {

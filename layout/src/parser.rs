@@ -1851,8 +1851,8 @@ impl Parser {
         if s.starts_with('/') {
             return;
         }
-        // struct 赋值（RHS = struct·new）：深拷整棵子树，lower 为 kv·cpdir(struct·new→temp, dst)。
-        // 不走 kv·set —— 后者只搬基值，struct 的成员子树会丢在临时槽。dst 传完整成员槽串，
+        // struct 赋值（RHS = struct·new）：浅拷 base+一层成员，lower 为 kv·cplist(struct·new→temp, dst)。
+        // 不走 kv·set —— 后者只搬基值，struct 的成员会丢在临时槽。dst 传完整成员槽串，
         // runtime ResolveWriteSlot 拼 <frame>+"base·key…" 即成员绝对路径。
         let is_struct_new = inst
             .expr
@@ -1861,7 +1861,7 @@ impl Parser {
             .unwrap_or(false);
         if is_struct_new && !s.contains('*') {
             let e = inst.expr.take().unwrap();
-            inst.expr = Some(ast::call("kv·cpdir", vec![e, ast::leaf(&s)]));
+            inst.expr = Some(ast::call("kv·cplist", vec![e, ast::leaf(&s)]));
             inst.writes = Vec::new();
             inst.write_types = Vec::new();
             return;

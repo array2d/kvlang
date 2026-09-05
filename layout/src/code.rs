@@ -436,7 +436,7 @@ pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) {
 }
 
 /// 写 struct 原型到 /lib/<Name>：基节点(kind=struct) + memindex(/lib/Name·) + 各字段默认值。
-/// 运行时 struct·new 以此为原型 cpdir 克隆，故字段默认值即实例初值。
+/// 运行时 struct·new 以此为原型 cplist 克隆，故字段默认值即实例初值。
 pub fn write_struct_decl(kv: &mut Kv, decl: &StructDecl) {
     let mut name = decl.name.clone();
     if !decl.pkg.is_empty() {

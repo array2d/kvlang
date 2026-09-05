@@ -567,7 +567,7 @@ static const struct { const char *op; kvlangBuiltinFn fn; } myrwircaps[] = {
     {"time·before", kvlangBuiltinTimeCmp}, {"time·after", kvlangBuiltinTimeCmp},
     {"random·uint64", kvlangBuiltinRandUint64}, {"random·int63", kvlangBuiltinRandInt63}, {"random·intn", kvlangBuiltinRandIntn},
     {"kv·get", kvlangBuiltinKvGet}, {"kv·set", kvlangBuiltinKvSet}, {"kv·del", kvlangBuiltinKvDel},
-    {"kv·deltree", kvlangBuiltinKvDelTree}, {"kv·cp", kvlangBuiltinKvCp}, {"kv·cpdir", kvlangBuiltinKvCpTree}, {"kv·list", kvlangBuiltinKvList}, {"kv·listlen", kvlangBuiltinKvListLen}, {"kv·listn", kvlangBuiltinKvListN}, {"kv·mkindex", kvlangBuiltinKvMkindex},
+    {"kv·deltree", kvlangBuiltinKvDelTree}, {"kv·cp", kvlangBuiltinKvCp}, {"kv·cpdir", kvlangBuiltinKvCpTree}, {"kv·cplist", kvlangBuiltinKvCpList}, {"kv·list", kvlangBuiltinKvList}, {"kv·listlen", kvlangBuiltinKvListLen}, {"kv·listn", kvlangBuiltinKvListN}, {"kv·mkindex", kvlangBuiltinKvMkindex},
     {"kv·extindex", kvlangBuiltinKvExtIndex}, {"kv·rmindexext", kvlangBuiltinKvRmIndexExt}, {"kv·watch", kvlangBuiltinKvWatch}, {"kv·abs", kvlangBuiltinKvAbs},
     {"vthread·create", kvlangBuiltinVthreadCreate},
     {"vthread·run", kvlangBuiltinVthreadRun},

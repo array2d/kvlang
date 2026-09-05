@@ -31,7 +31,7 @@ int kvlangBuiltinArray(kvlangFrame_t *f), kvlangBuiltinNdarrayNumel(kvlangFrame_
     kvlangBuiltinDurArith(kvlangFrame_t *f), kvlangBuiltinDurCmp(kvlangFrame_t *f), kvlangBuiltinTimeCmp(kvlangFrame_t *f),
     kvlangBuiltinRandUint64(kvlangFrame_t *f), kvlangBuiltinRandInt63(kvlangFrame_t *f), kvlangBuiltinRandIntn(kvlangFrame_t *f),
     kvlangBuiltinKvGet(kvlangFrame_t *f), kvlangBuiltinKvSet(kvlangFrame_t *f), kvlangBuiltinKvDel(kvlangFrame_t *f),
-    kvlangBuiltinKvDelTree(kvlangFrame_t *f), kvlangBuiltinKvCp(kvlangFrame_t *f), kvlangBuiltinKvCpTree(kvlangFrame_t *f), kvlangBuiltinKvList(kvlangFrame_t *f), kvlangBuiltinKvListLen(kvlangFrame_t *f), kvlangBuiltinKvListN(kvlangFrame_t *f), kvlangBuiltinKvMkindex(kvlangFrame_t *f),
+    kvlangBuiltinKvDelTree(kvlangFrame_t *f), kvlangBuiltinKvCp(kvlangFrame_t *f), kvlangBuiltinKvCpTree(kvlangFrame_t *f), kvlangBuiltinKvCpList(kvlangFrame_t *f), kvlangBuiltinKvList(kvlangFrame_t *f), kvlangBuiltinKvListLen(kvlangFrame_t *f), kvlangBuiltinKvListN(kvlangFrame_t *f), kvlangBuiltinKvMkindex(kvlangFrame_t *f),
     kvlangBuiltinKvExtIndex(kvlangFrame_t *f), kvlangBuiltinKvRmIndexExt(kvlangFrame_t *f), kvlangBuiltinKvWatch(kvlangFrame_t *f), kvlangBuiltinKvAbs(kvlangFrame_t *f),
     kvlangBuiltinDebugger(kvlangFrame_t *f), kvlangBuiltinVthreadCreate(kvlangFrame_t *f),
     kvlangBuiltinVthreadRun(kvlangFrame_t *f),

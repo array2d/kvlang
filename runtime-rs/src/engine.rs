@@ -221,15 +221,21 @@ impl Engine {
             }
             let mut v = Vec::with_capacity(count as usize);
             for i in 0..count {
-                let (mut out, mut olen) = (null_mut(), 0u32);
-                if kvspaceListAt(self.kv, cp.as_ptr(), 0, 0, i, &mut out, &mut olen) == 0
-                    && !out.is_null()
+                let mut buf = [0u8; 1024];
+                let mut olen = 0u32;
+                if kvspaceListAt(
+                    self.kv,
+                    cp.as_ptr(),
+                    0,
+                    0,
+                    i,
+                    buf.as_mut_ptr(),
+                    buf.len() as u32,
+                    &mut olen,
+                ) == 0
                     && olen > 0
                 {
-                    v.push(
-                        String::from_utf8_lossy(std::slice::from_raw_parts(out, olen as usize))
-                            .into_owned(),
-                    );
+                    v.push(String::from_utf8_lossy(&buf[..olen as usize]).into_owned());
                 }
             }
             v

@@ -31,11 +31,12 @@ extern int   kvspaceWriteNewPlace(void *h, const char *key, const char *kindexpr
 /* 前缀遍历：listlen 定计数，逐 idx 取名（借用回收缓冲，不得 free），不一次性返回整段名单。 */
 extern int   kvspaceListLen(void *h, const char *prefix, int expand_ext, int resolve, int32_t *out_count);
 extern int   kvspaceListAt(void *h, const char *prefix, int expand_ext, int resolve, int32_t idx,
-                            uint8_t **out, uint32_t *out_len);
+                            uint8_t *buf, uint32_t buf_cap, uint32_t *out_len);
 extern int   kvspaceDel(void *h, const char *const *keys, uint32_t nkeys, char *err, uint32_t err_cap);
 extern int   kvspaceDelTree(void *h, const char *prefix, char *err, uint32_t err_cap);
 extern int   kvspaceCp(void *h, const char *src, const char *dst, char *err, uint32_t err_cap);
 extern int   kvspaceCpTree(void *h, const char *src, const char *dst, char *err, uint32_t err_cap);
+extern int   kvspaceCpList(void *h, const char *src, const char *dst, char *err, uint32_t err_cap);
 extern int   kvspaceMkindex(void *h, const char *path, char *err, uint32_t err_cap);
 extern int   kvspaceMkindexExt(void *h, const char *path, const char *ext_path, char *err, uint32_t err_cap);
 extern int   kvspaceRmindexExt(void *h, const char *path, char *err, uint32_t err_cap);
@@ -144,6 +145,7 @@ int kvlangKvDel(kvlangKv_t *k, const char *key, char *err, uint32_t err_cap);
 int kvlangKvDelTree(kvlangKv_t *k, const char *prefix, char *err, uint32_t err_cap);
 int kvlangKvCp(kvlangKv_t *k, const char *src, const char *dst, char *err, uint32_t err_cap);
 int kvlangKvCpTree(kvlangKv_t *k, const char *src, const char *dst, char *err, uint32_t err_cap);
+int kvlangKvCpList(kvlangKv_t *k, const char *src, const char *dst, char *err, uint32_t err_cap);
 int kvlangKvMkindex(kvlangKv_t *k, const char *path, char *err, uint32_t err_cap);
 int kvlangKvExtIndex(kvlangKv_t *k, const char *path, const char *ext, char *err, uint32_t err_cap);
 int kvlangKvDelExtIndex(kvlangKv_t *k, const char *path, char *err, uint32_t err_cap);

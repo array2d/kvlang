@@ -116,7 +116,8 @@ unsafe extern "C" {
         expand_ext: c_int,
         resolve: c_int,
         idx: i32,
-        out: *mut *mut u8,
+        buf: *mut u8,
+        buf_cap: u32,
         out_len: *mut u32,
     ) -> c_int;
     pub fn kvspaceTlvEncode(
