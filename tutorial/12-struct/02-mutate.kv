@@ -1,8 +1,8 @@
-# mutate: 实例成员可读可写
-# 语义: p·field 是普通 KV 成员，创建后可用 val -> p·field 改写。
-# 期望输出:
-#   before x= 1  y= 2
-#   after x= 5  y= 2
+// mutate: 实例成员可读可写
+// 语义: p·field 是普通 KV 成员，创建后可用 val -> p·field 改写。
+// 期望输出:
+//   before x= 1  y= 2
+//   after x= 5  y= 2
 struct P {
 	x:int64=0
 	y:int64=0

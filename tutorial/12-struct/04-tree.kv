@@ -1,10 +1,10 @@
-# tree: 二叉树存进 map（int 键、struct 值），左右孩子用绝对路径指针
-# 语义: /tree 是 [int64]·/lib/TNode 的 map；left/right 存孩子绝对路径（""=空）；
-#       inorder 递归中序遍历，node 是路径串，node·field 解引用。
-# 期望输出:
-#   3
-#   5
-#   8
+// tree: 二叉树存进 map（int 键、struct 值），左右孩子用绝对路径指针
+// 语义: /tree 是 [int64]·/lib/TNode 的 map；left/right 存孩子绝对路径（""=空）；
+//       inorder 递归中序遍历，node 是路径串，node·field 解引用。
+// 期望输出:
+//   3
+//   5
+//   8
 struct TNode {
 	val:int64=0
 	left:[]char/utf32=""

@@ -1,12 +1,12 @@
-# list-local: 用局部变量容器实现链表（不放全局绝对路径）
-# 语义: list 是局部 map（帧内，路径含动态 vthread id，源码写不死）；
-#       kv·abs(list) 取容器运行期绝对路径，拼 ·n 造节点指针串；
-#       struct 赋值 X{…} -> list·n 由 layout 下沉为 kv·cpdir 深拷子树（成员随之落位）。
-# 链表: 10→20→30
-# 期望输出:
-#   10
-#   20
-#   30
+// list-local: 用局部变量容器实现链表（不放全局绝对路径）
+// 语义: list 是局部 map（帧内，路径含动态 vthread id，源码写不死）；
+//       kv·abs(list) 取容器运行期绝对路径，拼 ·n 造节点指针串；
+//       struct 赋值 X{…} -> list·n 由 layout 下沉为 kv·cpdir 深拷子树（成员随之落位）。
+// 链表: 10→20→30
+// 期望输出:
+//   10
+//   20
+//   30
 struct Node {
 	val:int64=0
 	next:[]char/utf32=""

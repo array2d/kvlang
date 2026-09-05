@@ -1,9 +1,9 @@
-# fields: 多类型字段 + 默认值 + 部分覆盖
-# 语义: 字段声明 name:kindexpr=default；实例化只写给定字段，其余取默认；
-#       类型不符或字段不存在均在 runtime 报 TypeError。
-# 期望输出:
-#   alice 30 true
-#   anon 0 false
+// fields: 多类型字段 + 默认值 + 部分覆盖
+// 语义: 字段声明 name:kindexpr=default；实例化只写给定字段，其余取默认；
+//       类型不符或字段不存在均在 runtime 报 TypeError。
+// 期望输出:
+//   alice 30 true
+//   anon 0 false
 struct User {
 	name:[]char/utf32="anon"
 	age:int64=0
