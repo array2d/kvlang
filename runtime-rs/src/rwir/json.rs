@@ -297,7 +297,7 @@ fn tlv_encode_dims(kind: &str, raw: &[u8], dims: &[i32]) -> Vec<u8> {
             return Vec::new();
         }
         let v = std::slice::from_raw_parts(out, olen as usize).to_vec();
-        kvspaceBytesFree(out, olen);
+        libc::free(out as *mut std::ffi::c_void);
         v
     }
 }

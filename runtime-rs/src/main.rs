@@ -261,11 +261,9 @@ fn boot(dsn: &str) -> Engine {
         kvlang_rs::elog!("kvlangRuntimeConnect 失败: {dsn}");
         std::process::exit(1);
     }
-    let kv = unsafe { kvspaceConnect(cs(dsn).as_ptr()) };
-    if kv.is_null() {
-        kvlang_rs::elog!("kvspaceConnect 失败: {dsn}");
-        std::process::exit(1);
-    }
+    // 复用 rt 内部 kvspace 句柄，绝不另开连接——durable 惰性 flush 只在同句柄内相干，
+    // 跨句柄写不可见（曾致 fs/redis 外部 rwir 后 pc 陈旧、整段重跑；shm 共享 mmap 掩盖）。
+    let kv = unsafe { kvlangRuntimeKvspaceHandle(rt) };
     let eng = Engine {
         rt,
         kv,
@@ -331,6 +329,5 @@ fn drive_vid(eng: &Engine, vid: &str) {
             eng.set_kv(&format!("/vthread/{sub}/\u{2025}pc"), &c);
         }
     }
-
-    unsafe { kvspaceClose(kv) };
+    // kv 属 rt（kvlangRuntimeKvspaceHandle），进程退出时随 rt 回收，此处不 close。
 }

@@ -27,6 +27,30 @@ impl Default for KvspaceHead {
     }
 }
 
+/// 构造 kindexpr（parse_kindexpr 的逆）：ref 前缀（1→'*'/2→'@'）+ [dims] + base kind。
+/// 与 frontend.c::build_kindexpr byte-identical。
+pub fn build_kindexpr(kind: &str, r: i32, dims: &[i32]) -> String {
+    let mut s = String::new();
+    match r {
+        1 => s.push('*'),
+        2 => s.push('@'),
+        _ => {}
+    }
+    if !dims.is_empty() {
+        s.push('[');
+        s.push_str(
+            &dims
+                .iter()
+                .map(|d| d.to_string())
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+        s.push(']');
+    }
+    s.push_str(kind);
+    s
+}
+
 /// 解析 kindexpr 内容 → (ref, dims, base kind)。
 pub fn parse_kindexpr(kx: &str) -> (i32, Vec<i32>, String) {
     let (r, rest) = match kx.as_bytes().first() {
@@ -71,27 +95,33 @@ unsafe extern "C" {
         err: *mut c_char,
         err_cap: u32,
     ) -> c_int;
-    pub fn kvspaceBytesFree(p: *mut u8, len: u32);
-    pub fn kvspaceSet(
-        h: *mut c_void,
-        keys: *const *const c_char,
-        vals: *const u8,
-        lens: *const u32,
-        n: u32,
-        err: *mut c_char,
-        err_cap: u32,
-    ) -> c_int;
+    /// 借用读：*out 指向后端常驻/回收空间，调用方不得 free。resolve=1 穿透 link。
     pub fn kvspaceGet(
         h: *mut c_void,
         key: *const c_char,
+        resolve: c_int,
         out: *mut *mut u8,
         out_len: *mut u32,
     ) -> c_int;
-    pub fn kvspaceNewChar(
-        bytes: *const u8,
-        len: u32,
-        out: *mut *mut u8,
-        out_len: *mut u32,
+    /// 就地写：key 已存在、body_len==原 body_len → 返回原 box body 偏移指针；否则非 0。
+    pub fn kvspaceWriteInPlace(
+        h: *mut c_void,
+        key: *const c_char,
+        resolve: c_int,
+        body_len: u32,
+        body: *mut *mut u8,
+        err: *mut c_char,
+        err_cap: u32,
+    ) -> c_int;
+    /// 新位置写：按 (kindexpr, body_len) 分配新 box、写 head，返回 body 偏移指针。
+    pub fn kvspaceWriteNewPlace(
+        h: *mut c_void,
+        key: *const c_char,
+        kindexpr: *const c_char,
+        body_len: u32,
+        body: *mut *mut u8,
+        err: *mut c_char,
+        err_cap: u32,
     ) -> c_int;
     pub fn kvspaceDecodeHead(data: *const u8, data_len: u32, out: *mut KvspaceHead) -> c_int;
     pub fn kvspaceList(
@@ -117,22 +147,12 @@ unsafe extern "C" {
         out: *mut *mut u8,
         out_len: *mut u32,
     ) -> c_int;
-    pub fn kvspaceTlvEncodeMode(
-        kind: *const c_char,
-        raw: *const u8,
-        raw_len: u32,
-        dims: *const i32,
-        ndim: i32,
-        r#ref: i32,
-        ro: u8,
-        vid: u32,
-        out: *mut *mut u8,
-        out_len: *mut u32,
-    ) -> c_int;
 
     // ── kvlang runtime：模式2 执行 ───────────────────────────────────
     pub fn kvlangRuntimeConnect(dsn: *const c_char) -> *mut c_void;
     pub fn kvlangRuntimeDisconnect(rt: *mut c_void);
+    /// runtime 内部 kvspace 句柄——复用它而非另开连接（durable 惰性 flush 仅同句柄内相干）。
+    pub fn kvlangRuntimeKvspaceHandle(rt: *mut c_void) -> *mut c_void;
     pub fn kvlangRuntimeBootstrap(
         rt: *mut c_void,
         funcname: *const c_char,
@@ -216,8 +236,8 @@ pub fn cs(s: &str) -> CString {
     CString::new(s).unwrap_or_else(|_| CString::new("").unwrap())
 }
 
-/// 接管 C runtime（libc malloc）的字符串（读出后 libc::free）。
-/// 仅用于 kvlang runtime / rwirext 的返回值——kvspace（Rust）缓冲区必须走 kvspaceBytesFree。
+/// 接管 C runtime / rwirext 返回的字符串（libc malloc，读出后 libc::free）。
+/// kvspace 读为借用偏移指针（常驻空间，不 free）；codec 产出为 frontend malloc（libc::free）。
 pub fn take(p: *mut c_char) -> String {
     if p.is_null() {
         return String::new();

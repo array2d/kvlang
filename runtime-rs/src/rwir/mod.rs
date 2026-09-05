@@ -8,9 +8,9 @@
 //! 不纯 rwir（llm/shell/python/byteseek·run 等）留在 byteseek，依赖本库后自行叠加。
 
 pub mod http;
-pub mod networld;
 pub mod json;
 pub mod kvlanglayout;
+pub mod networld;
 pub mod term;
 
 use crate::engine::Engine;
