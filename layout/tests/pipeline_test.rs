@@ -109,19 +109,35 @@ fn compile_control_flow_is_single_plane() {
         b.contains("_if_") || b.contains("_then_") || b.contains("_else_") || b.contains("_merge_")
     });
     assert!(!old_scope, "scope keys still present: {children:?}");
-    assert!(children.iter().any(|c| c.contains("labels")), "missing ‥labels: {children:?}");
+    assert!(
+        children.iter().any(|c| c.contains("labels")),
+        "missing ‥labels: {children:?}"
+    );
 
     let labels = kv.list("/lib/f/\u{2025}labels/", false, false);
-    let if_name = labels.iter().map(|c| c.trim_end_matches('/')).find(|c| c.contains("_if_"));
+    let if_name = labels
+        .iter()
+        .map(|c| c.trim_end_matches('/'))
+        .find(|c| c.contains("_if_"));
     assert!(if_name.is_some(), "‥labels={labels:?}");
     let if_irseq = kv.get_one(&format!("/lib/f/\u{2025}labels/{}", if_name.unwrap()));
-    assert_eq!(kvkind::kind(&if_irseq), "int64", "label kind={} labels={labels:?}", kvkind::display(&if_irseq));
+    assert_eq!(
+        kvkind::kind(&if_irseq),
+        "int64",
+        "label kind={} labels={labels:?}",
+        kvkind::display(&if_irseq)
+    );
 
     // irseq 1 is preamble goto; target is int64
     let goto_op = kv.get_one("/lib/f/[1,0]");
     assert_eq!(sig(&goto_op), "goto");
     let tgt = kv.get_one("/lib/f/[1,-1]");
-    assert_eq!(kvkind::kind(&tgt), "int64", "goto target {}", kvkind::display(&tgt));
+    assert_eq!(
+        kvkind::kind(&tgt),
+        "int64",
+        "goto target {}",
+        kvkind::display(&tgt)
+    );
 }
 
 #[test]
@@ -131,7 +147,9 @@ fn compile_while_goto_targets_are_int64() {
     compile(&mut kv, src).unwrap();
     let children = kv.list("/lib/sum_to/", false, false);
     assert!(
-        !children.iter().any(|c| c.contains("_while_") || c.contains("_do_")),
+        !children
+            .iter()
+            .any(|c| c.contains("_while_") || c.contains("_do_")),
         "while still has scope keys: {children:?}"
     );
     let mut saw_int_goto = false;
@@ -143,7 +161,13 @@ fn compile_while_goto_targets_are_int64() {
         if sig(&kv.get_one(&format!("/lib/sum_to/{t}"))) != "goto" {
             continue;
         }
-        let row: i32 = t.trim_start_matches('[').split(',').next().unwrap().parse().unwrap();
+        let row: i32 = t
+            .trim_start_matches('[')
+            .split(',')
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap();
         let tgt = kv.get_one(&format!("/lib/sum_to/[{row},-1]"));
         assert_eq!(kvkind::kind(&tgt), "int64");
         saw_int_goto = true;

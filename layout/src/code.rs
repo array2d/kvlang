@@ -420,7 +420,12 @@ pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) {
         let _ = kv.mkindex(&keytree::lib_labels_dir(pkg, &fn_.sig.name));
         let lpairs: Vec<(String, Vec<u8>)> = labels
             .iter()
-            .map(|(label, irseq)| (keytree::lib_label(pkg, &fn_.sig.name, label), ffi::new_int64(*irseq as i64)))
+            .map(|(label, irseq)| {
+                (
+                    keytree::lib_label(pkg, &fn_.sig.name, label),
+                    ffi::new_int64(*irseq as i64),
+                )
+            })
             .collect();
         let _ = kv.set(&lpairs);
     }
@@ -497,7 +502,10 @@ fn write_linear_inst(
         }
         _ => {}
     }
-    let target_char = if s.writes.len() == 1 && !s.write_types.is_empty() && kvkind::is_char_kind(&s.write_types[0]) {
+    let target_char = if s.writes.len() == 1
+        && !s.write_types.is_empty()
+        && kvkind::is_char_kind(&s.write_types[0])
+    {
         s.write_types[0].as_str()
     } else {
         ""
@@ -508,7 +516,10 @@ fn write_linear_inst(
         pairs.push((format!("{prefix}/[{n},0]"), opcode_value(&opcode)));
     }
     for (j, r) in reads.iter().enumerate() {
-        pairs.push((format!("{prefix}/[{n},-{}]", j + 1), slot_value(r, target_char)));
+        pairs.push((
+            format!("{prefix}/[{n},-{}]", j + 1),
+            slot_value(r, target_char),
+        ));
     }
     for (j, w) in s.writes.iter().enumerate() {
         pairs.push((format!("{prefix}/[{n},{}]", j + 1), slot_value(w, "")));

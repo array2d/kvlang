@@ -16,9 +16,9 @@ kvlang 是**小 runtime 大扩展**架构。中央 runtime 只实现最核心的
 
 **两组对外 C ABI**：
 - `kvlang_runtime.h`（`kvlangRuntimeConnect/Disconnect/Execute/Bootstrap/...`）：核心执行器
-- `kvlang_rwirext.h`：扩展 runtime 语义，**只暴露 kvspace 不提供的部分**。KV 存取（connect/get/set/del/list/tlv）**不在此**——扩展宿主自己连 kvspace ABI，把 kvspace 句柄（`void *`）传进带句柄的 rwirext 函数。
+- `kvlang_rwirext.h`：扩展 runtime 语义，**只暴露 kvspace 不提供的部分**。KV 存取（connect/get/write/del/list/tlv）**不在此**——扩展宿主自己连 kvspace ABI，把 kvspace 句柄（`void *`）传进带句柄的 rwirext 函数。
 
-`kvlang_rwirext.h` 现有 9 个符号：`Register`（写 `/lib/<op>` 签名）、`PrintLine`（print/println/cerr resolve+display）、`NextPc`（纯函数，下一条 PC）、`Params`（opcode + 读/写参名，\n 分隔）、`ResolveRead`/`ResolveReadPath`/`ResolveWrite`（读/写参解析，`ResolveReadPath` 供零拷贝读整块 ndarray）、`TypeValid`/`TypeMatch`（签名类型表达式校验与值判定）。
+`kvlang_rwirext.h` 现有 9 个符号：`Register`（写 `/lib/<op>` 签名）、`Handoff`（把非己方 rwir 移交外部执行器）、`NextPc`（纯函数，下一条 PC）、`Params`（opcode + 读/写参名，\n 分隔）、`ResolveRead`/`ResolveReadPath`/`ResolveWrite`（读/写参解析，`ResolveReadPath` 供零拷贝读整块 ndarray）、`KindexprValid`/`KindexprMatch`（签名类型表达式校验与值判定）。**print/println/cerr 不在此**——term 扩展与中央 runtime 同进程，在 drive 循环里就地 `ResolveRead` + display，直写宿主 stdout/stderr，无专用打印 ABI。
 
 **模块**（内部实现统一 `kvlang`/`kvspace` 前缀）：`xvalue.c`（TLV 编解码）、`kv.c`（kvspace ABI 封装）、`keytree.c`（路径构造）、`rwir.c`（PC 解析 + Decode）、`vthread.c`、`builtin.c`（~50 native 算子 + 静态注册表）、`kvcpu.c`（Execute 循环）、`runtime.c`（ABI 层）、`rwirext.c`（扩展 ABI，含 `isothersrwir`）。
 
@@ -33,16 +33,21 @@ kvlang 是**小 runtime 大扩展**架构。中央 runtime 只实现最核心的
 layout 与 runtime **都不对 kvspace 做特化处理**：不 dlopen、不双后端、不解析 scheme。二者只走一套 `kvspace*` 兼容 C ABI（无下划线 camelCase）：
 
 ```
-kvspaceConnect / Close / BytesFree
-kvspaceSet / Get / GetBatch / List / Del / DelTree
+kvspaceConnect / Close
+kvspaceGet                       // 借用读：*out 指向后端常驻/回收空间，调用方不得 free
+kvspaceWriteInPlace              // key 已存在且 body_len 相等 → 返回原 box body 偏移指针
+kvspaceWriteNewPlace             // 否则按 (kindexpr, body_len) 分配新 box、写 head，返回 body 指针
+kvspaceListLen / ListAt / Del / DelTree / Cp / CpTree
 kvspaceMkindex / MkindexExt / RmindexExt / Watch
 kvspaceTlvEncode / TlvEncodeMode / DecodeHead
 kvspaceNewPtr / NewChar / NewBool / NewInt64 / NewFloat64
 ```
 
+**零拷贝写读模型**：读走 `kvspaceGet`——返回后端常驻内存的**借用偏移指针**，调用方只读、**不 free**（旧 `kvspaceBytesFree` 已删）。写不再有「先 encode 整条 TLV 再交后端」的 `kvspaceSet`（已删）：改为向后端**要一个可写 body 偏移指针**再直接写字节——`kvspaceWriteInPlace`（key 已存在且 body 尺寸不变，原 box 就地改）与 `kvspaceWriteNewPlace`（新建 / 换 kind / 换尺寸，分配新 box 并写 head）两条原语，各自唯一、无中转 buffer。前缀枚举同样不再一次性返回整段名单缓冲（旧 `kvspaceList` 已删，连同批量读的 `kvspaceGetBatch`）：`kvspaceListLen` 只返子项计数、无缓冲无需释放，`kvspaceListAt(idx)` 借用回收缓冲逐项取名——遍历即「先 ListLen 定计数、再逐 idx ListAt」，与借用读模型一致、绝不外泄大块名单。
+
 **后端由链接决定**：`KVLANG_KVSPACE_LIB` 环境变量在**构建期**选择链接哪个 kvspace 库（`kvspace-c` 或 `kvspace_durable`），两者导出同一 ABI。runtime 的 `kvlangKv_t` 只保留 `void *h`，代码零后端分支。
 
-**kvspace-c 补齐 ABI**：`kvspace-c/src/durable_abi.c` 导出完整符号（内部复用 `kvspaceShm*` + `kvspaceXvalue*`），其中 `GetBatch`（前缀批量读）与 `Watch`（轮询到值==target 或超时）为补齐的手工实现。
+**kvspace-c 补齐 ABI**：`kvspace-c/src/durable_abi.c` 导出完整符号（内部复用 `kvspaceShm*` + `kvspaceXvalue*`），其中 `Watch`（轮询到值==target 或超时）为补齐的手工实现。
 
 ## 四、三个后端
 
@@ -70,12 +75,28 @@ kvspaceNewPtr / NewChar / NewBool / NewInt64 / NewFloat64
 
 | 后端 | 结果 |
 |------|------|
-| shm | **136 PASS / 0 FAIL** |
-| redis | 134 PASS（`time.kv` delta ms RTT 时序 + `prime_sieve` 超时，非语义） |
-| fs | 133 PASS（`time.kv` 文件 I/O 时序 + `prime_sieve` 超时，非语义）|
+| shm | **185 PASS / 0 FAIL / 3 SKIP** |
+| redis | **185 PASS / 0 FAIL / 3 SKIP** |
+| fs | **185 PASS / 0 FAIL / 3 SKIP** |
 
-Go runtime 为 136/136 baseline（`goheap://` 进程内，无 RTT/文件 I/O）。
+三后端**语义完全一致**——早期 redis/fs 上 `prime_sieve` 的超时与 `time.kv` 的 RTT/文件 I/O 时序偏差已随指令重读稠密探查修复（`RwirDecode` 遇空槽即停，不再每步固定读满 257 槽），不再有后端专属失败。3 个 SKIP 为跨进程扩展 / WIP 用例，三后端一致跳过。
 
 **后端存储布局差异（非语义 bug）**：fs 后端（`kvspace-durable/src/fs`）把成员分隔符 `·`（OBJ_SEP）编码为 `·/`——尾中点目录 + `/` 目录边界，故限定名 `/lib/math·sum` 在 fs 上呈嵌套目录 `lib/math·/sum`，而 redis/shm 后端存为扁平单键 `/lib/math·sum`。读写经对称编解码还原（`·/`↔`·`），三后端语义一致。
+
+## 七、runtime-c 的边界与扩展的职责（单一正确路径）
+
+「小 runtime 大扩展」不是模糊分工，而是一条**不可越界**的职责线。runtime-c 独占三件事，扩展一件都不许重做：
+
+**runtime-c 拥有（唯一实现，扩展不得复刻）**：
+1. **执行核心**：fetch-decode-execute 大循环、call/return/br/goto、vthread 调度、native builtin 派发（~50 基础算子）、`=` 拷贝语义。
+2. **值语义与编解码**：TLV / kindexpr 的**唯一编解码器**在 kvspace 正典 codec（`kvspaceTlvEncode` / `kvspaceDecodeHead` / `kvspaceNewPtr/NewChar/NewBool/NewInt64/NewFloat64`），runtime-c 的 `xvalue.c` 只是其薄封装。kindexpr 串是类型的唯一真相，怎么拼、怎么解，只此一处。
+3. **指令解码与签名校验**：`rwir.c` 的 `RwirDecode`（稠密探查、遇空即停）、`/lib/<op>` 签名的读写码规范、`KindexprValid` / `KindexprMatch` 类型判定。
+
+**扩展只许做三件事（无论就地 rwir 还是独立进程）**：
+1. **拿 PC**：经 handoff / drive 循环从 runtime 拿到当前 PC 与后继 PC（`NextPc`），连续跑己方 rwir。
+2. **解析参数**：**只经 `kvlang_rwirext*` 宿主 ABI**（`Params` / `ResolveRead` / `ResolveReadPath` / `ResolveWrite`）拿读/写参名与值。不许自行解析 rwir 槽位。
+3. **读写 kvspace**：**只经上文的 `kvspace*` 正典 ABI**。要落一个类型化值，走 `kvspaceTlvEncode` + `WriteInPlace/WriteNewPlace`；**绝不自造 kindexpr 构造器、绝不手写 TLV/head**。
+
+**一条曾越界、已拉回的实例**：runtime-rs 早期在 Rust 侧有一份 `build_kindexpr`，与 `frontend.c` 逐字节等价——这是对编解码器的复刻，违反职责线，**已删除**，所有编码统一路由到 `kvspaceTlvEncode`（见 `ffi.rs::tlv_encode` 注释「唯一编码入口，不在 Rust 侧复刻 kindexpr 构造」）。**唯一保留的例外**是 json 扩展反序列化里的 kindexpr 串**解析器**（`json.rs::parse_kindexpr`）：kvspace 只导出编码器、不导出串解析器，而「把外部 JSON 文本按类型/形状分发写回子树」是扩展**自己的反序列化职责**，不属于 runtime-c 的值语义——故这份解析留在扩展侧，且只读 head 不造 head。这条例外恰恰印证边界：**能调用 kvspace 的，一律调用；kvspace 没提供、且属扩展自身语义的，才自理**。
 "# -> /lib/kvlang/deepdive/runtime/06_c_runtime_and_backend_abstraction
 }

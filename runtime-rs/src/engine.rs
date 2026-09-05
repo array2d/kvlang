@@ -53,7 +53,7 @@ impl Engine {
     /// 通用类型化写入：任意 kind + body 字节 + dims（空=标量 ndim0）。
     /// set_kv 与各 rwir 的类型化输出共用，避免每种 kind 一个专用写函数。
     pub fn set_tlv_encoded(&self, key: &str, kind: &str, raw: &[u8], dims: &[i32]) {
-        self.write_construct(key, &build_kindexpr(kind, 0, dims), raw);
+        self.set_tlv(key, &tlv_encode(kind, raw, dims));
     }
     pub fn set_kv(&self, key: &str, val: &str) {
         let utf32: Vec<u32> = val.chars().map(|c| c as u32).collect();
@@ -72,9 +72,8 @@ impl Engine {
             let kx = String::from_utf8_lossy(&head.kindexpr)
                 .trim_end_matches('\0')
                 .to_string();
-            let (_, _, kind) = parse_kindexpr(&kx);
             let (bo, bl) = (head.body_offset as usize, head.body_len.max(0) as usize);
-            if kind == "char/utf32" {
+            if kx.ends_with("char/utf32") {
                 std::slice::from_raw_parts(out.add(bo), bl)
                     .chunks_exact(4)
                     .map(|c| {
@@ -103,10 +102,11 @@ impl Engine {
         unsafe {
             let mut head = KvspaceHead::default();
             kvspaceDecodeHead(tlv.as_ptr(), tlv.len() as u32, &mut head);
-            let kx = String::from_utf8_lossy(&head.kindexpr)
-                .trim_end_matches('\0')
-                .to_string();
-            let (r, _, _) = parse_kindexpr(&kx);
+            let r = match head.kindexpr[0] {
+                b'@' => 2,
+                b'*' => 1,
+                _ => 0,
+            };
             if r != 2 {
                 return (r, String::new());
             }
@@ -172,10 +172,11 @@ impl Engine {
             if kvspaceDecodeHead(tlv.as_ptr(), tlv.len() as u32, &mut h) != 0 {
                 return Vec::new();
             }
-            let kx = String::from_utf8_lossy(&h.kindexpr)
-                .trim_end_matches('\0')
-                .to_string();
-            let (r, _, _) = parse_kindexpr(&kx);
+            let r = match h.kindexpr[0] {
+                b'@' => 2,
+                b'*' => 1,
+                _ => 0,
+            };
             let (bo, bl) = (h.body_offset as usize, h.body_len.max(0) as usize);
             if bo + bl > tlv.len() {
                 return Vec::new();
@@ -209,18 +210,29 @@ impl Engine {
     }
 
     // ── kvspace 结构操作（json/http 扩展遍历子树用）────────────────────
+    /// 前缀遍历：先 ListLen 定计数，再逐 idx ListAt 取名（借用回收缓冲，读出即自持），
+    /// 不经一次性整段名单缓冲。
     pub fn list_kv(&self, prefix: &str) -> Vec<String> {
         unsafe {
-            let (mut out, mut olen) = (null_mut(), 0u32);
-            kvspaceList(self.kv, cs(prefix).as_ptr(), 0, 0, &mut out, &mut olen);
-            if out.is_null() || olen == 0 {
+            let cp = cs(prefix);
+            let mut count = 0i32;
+            if kvspaceListLen(self.kv, cp.as_ptr(), 0, 0, &mut count) != 0 || count <= 0 {
                 return Vec::new();
             }
-            String::from_utf8_lossy(std::slice::from_raw_parts(out, olen as usize))
-                .split('\n')
-                .filter(|x| !x.is_empty())
-                .map(str::to_string)
-                .collect()
+            let mut v = Vec::with_capacity(count as usize);
+            for i in 0..count {
+                let (mut out, mut olen) = (null_mut(), 0u32);
+                if kvspaceListAt(self.kv, cp.as_ptr(), 0, 0, i, &mut out, &mut olen) == 0
+                    && !out.is_null()
+                    && olen > 0
+                {
+                    v.push(
+                        String::from_utf8_lossy(std::slice::from_raw_parts(out, olen as usize))
+                            .into_owned(),
+                    );
+                }
+            }
+            v
         }
     }
     pub fn del_tree(&self, prefix: &str) {

@@ -50,7 +50,7 @@ int kvlangRwirDecode(kvlangKv_t *kv, const char *link_base, const char *pc, kvla
 
     kvlangStrbufPrintf(&key, "[%d,0]", addr0);
     nm = kvlangStrbufDetach(&key);
-    kvlangKvGetBatch(kv, link_base, &nm, 1, &v);
+    kvlangKvGetMember(kv, link_base, nm, &v);
     free(nm);
     if (!kvlangXvalueNone(&v)) out->opcode = kvlangXvalueValueString(&v);
     kvlangXvalueFree(&v);
@@ -58,7 +58,7 @@ int kvlangRwirDecode(kvlangKv_t *kv, const char *link_base, const char *pc, kvla
     for (int i = 1; i <= MAX_PARAMS; i++) {
         kvlangStrbufPrintf(&key, "[%d,-%d]", addr0, i);
         nm = kvlangStrbufDetach(&key);
-        kvlangKvGetBatch(kv, link_base, &nm, 1, &v);
+        kvlangKvGetMember(kv, link_base, nm, &v);
         free(nm);
         if (kvlangXvalueNone(&v)) { kvlangXvalueFree(&v); break; }
         out->reads[out->nr].name = kvlangXvalueValueString(&v);
@@ -68,7 +68,7 @@ int kvlangRwirDecode(kvlangKv_t *kv, const char *link_base, const char *pc, kvla
     for (int i = 1; i <= MAX_PARAMS; i++) {
         kvlangStrbufPrintf(&key, "[%d,%d]", addr0, i);
         nm = kvlangStrbufDetach(&key);
-        kvlangKvGetBatch(kv, link_base, &nm, 1, &v);
+        kvlangKvGetMember(kv, link_base, nm, &v);
         free(nm);
         if (kvlangXvalueNone(&v)) { kvlangXvalueFree(&v); break; }
         out->writes[out->nw].name = kvlangXvalueValueString(&v);

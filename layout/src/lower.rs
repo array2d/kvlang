@@ -111,7 +111,12 @@ pub fn lower_func(fn_: &Func) -> Func {
     let mut targets = HashSet::new();
     collect_goto_targets(&fn_.body, &mut targets);
     let body = terminate(lower_body(&fn_.body, &mut lg, None, &tm, &targets));
-    Func { comments: Vec::new(), sig: fn_.sig.clone(), body, pkg: String::new() }
+    Func {
+        comments: Vec::new(),
+        sig: fn_.sig.clone(),
+        body,
+        pkg: String::new(),
+    }
 }
 
 fn return_inst() -> Stmt {

@@ -33,27 +33,18 @@ int kvlangKvGetOne(kvlangKv_t *k, const char *key, kvlangXvalue_t *out) {
     return 0;
 }
 
-/* Frame member: prefix 直连 name 组键，穿透 link（resolve=1）——全路径 Get(resolve=0) 不穿透 [d] 帧。 */
+/* Frame member: dir 直连 name 组键，借用读（resolve=1 穿透 link，全路径 Get(resolve=0) 不穿透 [d] 帧）
+ * → 拷贝自持。空值 → out len=0。 */
 int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXvalue_t *out) {
     kvlangXvalueZero(out);
     if (!name || !name[0]) return 0;
-    char *nm = (char *)name;
-    return kvlangKvGetBatch(k, dir, &nm, 1, out);
-}
-
-/* 逐名单值借用读（key=prefix+name，resolve=1 穿透 link）→ 拷贝自持。取代已删的 kvspaceGetBatch。 */
-int kvlangKvGetBatch(kvlangKv_t *k, const char *prefix, char **names, int n, kvlangXvalue_t *out) {
-    size_t pl = strlen(prefix);
-    for (int i = 0; i < n; i++) {
-        kvlangXvalueZero(&out[i]);
-        size_t nl = strlen(names[i]);
-        char *key = malloc(pl + nl + 1);
-        memcpy(key, prefix, pl); memcpy(key + pl, names[i], nl); key[pl + nl] = 0;
-        uint8_t *d; uint32_t len;
-        if (kvspaceGet(k->h, key, 1, &d, &len) == 0 && d && len > 0)
-            kvlangXvalueCopyMalloc(&out[i], d, len);
-        free(key);
-    }
+    size_t dl = strlen(dir), nl = strlen(name);
+    char *key = malloc(dl + nl + 1);
+    memcpy(key, dir, dl); memcpy(key + dl, name, nl); key[dl + nl] = 0;
+    uint8_t *d; uint32_t len;
+    if (kvspaceGet(k->h, key, 1, &d, &len) == 0 && d && len > 0)
+        kvlangXvalueCopyMalloc(out, d, len);
+    free(key);
     return 0;
 }
 
@@ -105,20 +96,19 @@ int kvlangKvDelExtIndex(kvlangKv_t *k, const char *path, char *err, uint32_t err
 int kvlangKvList(kvlangKv_t *k, const char *prefix, bool expand_ext, bool resolve,
             char ***out_names, int *out_count) {
     *out_names = NULL; *out_count = 0;
-    uint8_t *d; uint32_t len;
-    if (kvspaceList(k->h, prefix, expand_ext ? 1 : 0, resolve ? 1 : 0, &d, &len) != 0) return -1;
-    if (!d || len == 0) return 0;
-    char *s = malloc((size_t)len + 1);
-    memcpy(s, d, len); s[len] = 0;
-    int cnt = 1;
-    for (uint32_t i = 0; i < len; i++) if (s[i] == '\n') cnt++;
-    char **names = malloc(sizeof(char *) * (size_t)cnt);
-    int idx = 0;
-    char *save = NULL;
-    for (char *tok = strtok_r(s, "\n", &save); tok; tok = strtok_r(NULL, "\n", &save))
-        names[idx++] = strdup(tok);
-    free(s);
-    *out_names = names; *out_count = idx;
+    int ex = expand_ext ? 1 : 0, rs = resolve ? 1 : 0;
+    int32_t count = 0;
+    if (kvspaceListLen(k->h, prefix, ex, rs, &count) != 0) return -1;
+    if (count <= 0) return 0;
+    char **names = malloc(sizeof(char *) * (size_t)count);
+    for (int32_t i = 0; i < count; i++) {
+        uint8_t *d = NULL; uint32_t len = 0;
+        if (kvspaceListAt(k->h, prefix, ex, rs, i, &d, &len) == 0 && d)
+            names[i] = strndup((const char *)d, len);
+        else
+            names[i] = strdup("");
+    }
+    *out_names = names; *out_count = (int)count;
     return 0;
 }
 

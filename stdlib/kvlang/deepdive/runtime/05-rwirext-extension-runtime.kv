@@ -95,7 +95,18 @@ kvlang runtime（C）                  扩展运行时
 `isothersrwir(kv, opcode)`：`opcode[0]=='/' → false`；否则读 `/lib/<opcode>`，kind==`defrwir` → true。
 `handoff_external_rwir`：Set 共享队列、Watch 直到消费完成（30s 超时），不推进 PC。
 
-Rust runtime（runtime-rs）中，就地 rwir（print/json/http）直接在 `drive_vid` 驱动循环里批处理，外部 rwir（如 numpy）通过 `kvlang_rwirextHandoff` 交给独立进程。
+Rust runtime（runtime-rs）中，**就地 rwir**直接在 `run_vid` 驱动循环里派发（`rwir::is_inproc(op)` 命中 → `rwir::dispatch`），无 handoff、无 watch、与中央 runtime 同进程。当前就地集合（`rwir/mod.rs::is_inproc`）：
+
+```
+term      print / println / cerr / input
+json      json·to / json·from
+http      http·call
+layout    kvlanglayout·vet / ·format / ·layout / ·dump
+networld  networld/proc·exec
+          networld/fs·size / ·read / ·write / ·append / ·list / ·del / ·mkdir / ·exists
+```
+
+非就地 rwir（如 numpy tensor 计算）经 `kvlang_rwirextHandoff` 移交独立进程扩展。**注意**：就地与独立进程只是**执行位置**之别，职责线一致——两者都只经 `kvlang_rwirext*` 解析参数、只经 `kvspace*` 正典 ABI 读写与编解码（详见 [[runtime篇-06-C运行时与后端抽象]] §七）。
 
 ## 五、标杆：term 与 json
 
@@ -115,5 +126,17 @@ Rust runtime（runtime-rs）中，就地 rwir（print/json/http）直接在 `dri
 | `/ext/` | 在哪、怎么执行（拓扑） | 存储/计算/通信注册 |
 
 无状态扩展运行时（term/json）只写 `/lib/`；有状态扩展引擎（op-gpu/heap-plat）写 `/lib/` + `/ext/`。handoff 协议一致，后者多一次 `/ext/` 查表定位引擎。
+
+## 七、扩展的职责与不可越界
+
+扩展回答的唯一问题是「**算什么、怎么算**」——tensor 怎么乘、LLM 怎么调、JSON 怎么按类型分发写回子树。它**不回答**「值长什么样、指令怎么解码、类型怎么校验」——这些是 runtime-c 的值语义，扩展只**调用**、不**复刻**。
+
+扩展只有三个合法动作，一步都不许多做：
+
+1. **拿 PC**：从 handoff 队列 / drive 循环取当前 PC，跑己方 rwir，`NextPc` 求后继。
+2. **解析参数**：**只经** `kvlang_rwirext*`（`Params` / `ResolveRead` / `ResolveReadPath` / `ResolveWrite`）。不自行解析 rwir 槽位。
+3. **读写 kvspace**：**只经** `kvspace*` 正典 ABI（`Get` 借用读、`WriteInPlace`/`WriteNewPlace` 写、`TlvEncode`/`DecodeHead` 编解码）。**绝不自造 kindexpr 构造器、绝不手写 TLV/head。**
+
+**曾越界、已拉回**：runtime-rs 一度有 Rust 版 `build_kindexpr`（与 `frontend.c` 逐字节等价）——对编解码器的复刻，违反职责线，**已删**，编码统一走 `kvspaceTlvEncode`。唯一保留的例外是 json 反序列化里的 kindexpr 串**解析器**（`json.rs::parse_kindexpr`）：kvspace 只导出编码器不导出串解析器，而「按类型/形状把外部文本分发写回」是扩展**自身的反序列化职责**，故留在扩展侧，且只读 head、不造 head。runtime-c 侧的权威边界见 [[runtime篇-06-C运行时与后端抽象]] §七。
 "# -> /lib/kvlang/deepdive/runtime/05_rwirext_extension_runtime
 }

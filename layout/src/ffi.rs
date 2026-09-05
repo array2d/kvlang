@@ -48,12 +48,20 @@ extern "C" {
         err: *mut c_char,
         err_cap: u32,
     ) -> c_int;
-    /// 借用枚举：*out 指向后端常驻/回收缓冲（\n 连接名），调用方不得 free。
-    fn kvspaceList(
+    /// 前缀遍历：listlen 定计数，逐 idx 取名（借用回收缓冲，不得 free），不一次性返回整段名单。
+    fn kvspaceListLen(
         h: Handle,
         prefix: *const c_char,
         expand_ext: c_int,
         resolve: c_int,
+        out_count: *mut i32,
+    ) -> c_int;
+    fn kvspaceListAt(
+        h: Handle,
+        prefix: *const c_char,
+        expand_ext: c_int,
+        resolve: c_int,
+        idx: i32,
         out: *mut *mut u8,
         out_len: *mut u32,
     ) -> c_int;
@@ -213,23 +221,38 @@ impl Kv {
 
     pub fn list(&mut self, prefix: &str, expand_ext: bool, resolve: bool) -> Vec<String> {
         let c = CString::new(prefix).expect("no NUL in prefix");
-        let bytes = call_borrow(|out, out_len| unsafe {
-            kvspaceList(
+        let mut count: i32 = 0;
+        if unsafe {
+            kvspaceListLen(
                 self.h,
                 c.as_ptr(),
                 expand_ext as c_int,
                 resolve as c_int,
-                out,
-                out_len,
+                &mut count,
             )
-        });
-        if bytes.is_empty() {
+        } != 0
+            || count <= 0
+        {
             return Vec::new();
         }
-        String::from_utf8_lossy(&bytes)
-            .split('\n')
-            .map(|s| s.to_string())
-            .collect()
+        let mut v = Vec::with_capacity(count as usize);
+        for i in 0..count {
+            let bytes = call_borrow(|out, out_len| unsafe {
+                kvspaceListAt(
+                    self.h,
+                    c.as_ptr(),
+                    expand_ext as c_int,
+                    resolve as c_int,
+                    i,
+                    out,
+                    out_len,
+                )
+            });
+            if !bytes.is_empty() {
+                v.push(String::from_utf8_lossy(&bytes).into_owned());
+            }
+        }
+        v
     }
 
     pub fn del_tree(&mut self, prefix: &str) -> Result<(), String> {

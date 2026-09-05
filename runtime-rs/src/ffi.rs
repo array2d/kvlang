@@ -27,52 +27,30 @@ impl Default for KvspaceHead {
     }
 }
 
-/// 构造 kindexpr（parse_kindexpr 的逆）：ref 前缀（1→'*'/2→'@'）+ [dims] + base kind。
-/// 与 frontend.c::build_kindexpr byte-identical。
-pub fn build_kindexpr(kind: &str, r: i32, dims: &[i32]) -> String {
-    let mut s = String::new();
-    match r {
-        1 => s.push('*'),
-        2 => s.push('@'),
-        _ => {}
-    }
-    if !dims.is_empty() {
-        s.push('[');
-        s.push_str(
-            &dims
-                .iter()
-                .map(|d| d.to_string())
-                .collect::<Vec<_>>()
-                .join(","),
+/// 类型化 TLV 编码——唯一编码入口，直委托 kvspace 正典 codec kvspaceTlvEncode（不在 Rust
+/// 侧复刻 kindexpr 构造）。dims 空=标量。返回 frontend malloc 的 TLV 拷贝，随即 free。
+pub fn tlv_encode(kind: &str, raw: &[u8], dims: &[i32]) -> Vec<u8> {
+    unsafe {
+        let (mut out, mut olen) = (std::ptr::null_mut(), 0u32);
+        kvspaceTlvEncode(
+            cs(kind).as_ptr(),
+            raw.as_ptr(),
+            raw.len() as u32,
+            if dims.is_empty() {
+                std::ptr::null()
+            } else {
+                dims.as_ptr()
+            },
+            dims.len() as i32,
+            &mut out,
+            &mut olen,
         );
-        s.push(']');
-    }
-    s.push_str(kind);
-    s
-}
-
-/// 解析 kindexpr 内容 → (ref, dims, base kind)。
-pub fn parse_kindexpr(kx: &str) -> (i32, Vec<i32>, String) {
-    let (r, rest) = match kx.as_bytes().first() {
-        Some(b'*') => (1, &kx[1..]),
-        Some(b'@') => (2, &kx[1..]),
-        _ => (0, kx),
-    };
-    if rest.starts_with('[') {
-        match rest.find(']') {
-            Some(end) => (
-                r,
-                rest[1..end]
-                    .split(',')
-                    .filter(|d| !d.is_empty())
-                    .map(|d| d.parse().unwrap_or(0))
-                    .collect(),
-                rest[end + 1..].to_string(),
-            ),
-            None => (r, Vec::new(), rest.to_string()),
+        if out.is_null() || olen == 0 {
+            return Vec::new();
         }
-    } else {
-        (r, Vec::new(), rest.to_string())
+        let v = std::slice::from_raw_parts(out, olen as usize).to_vec();
+        libc::free(out as *mut c_void);
+        v
     }
 }
 
@@ -124,19 +102,22 @@ unsafe extern "C" {
         err_cap: u32,
     ) -> c_int;
     pub fn kvspaceDecodeHead(data: *const u8, data_len: u32, out: *mut KvspaceHead) -> c_int;
-    pub fn kvspaceList(
+    // 前缀遍历：listlen 定计数，逐 idx 取名（借用回收缓冲，不得 free），不一次性返回整段名单。
+    pub fn kvspaceListLen(
         h: *mut c_void,
         prefix: *const c_char,
         expand_ext: c_int,
         resolve: c_int,
+        out_count: *mut i32,
+    ) -> c_int;
+    pub fn kvspaceListAt(
+        h: *mut c_void,
+        prefix: *const c_char,
+        expand_ext: c_int,
+        resolve: c_int,
+        idx: i32,
         out: *mut *mut u8,
         out_len: *mut u32,
-    ) -> c_int;
-    pub fn kvspaceMkindex(
-        h: *mut c_void,
-        path: *const c_char,
-        err: *mut c_char,
-        err_cap: u32,
     ) -> c_int;
     pub fn kvspaceTlvEncode(
         kind: *const c_char,

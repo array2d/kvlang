@@ -28,9 +28,10 @@ extern int   kvspaceWriteInPlace(void *h, const char *key, int resolve, uint32_t
 /* 新位置写：按 (kindexpr, body_len) 分配新 box、写 head，返回 body 偏移指针。 */
 extern int   kvspaceWriteNewPlace(void *h, const char *key, const char *kindexpr, uint32_t body_len,
                                    uint8_t **body, char *err, uint32_t err_cap);
-/* 借用枚举：*out 指向后端常驻/回收缓冲（\n 连接名），调用方不得 free。 */
-extern int   kvspaceList(void *h, const char *prefix, int expand_ext, int resolve,
-                          uint8_t **out, uint32_t *out_len);
+/* 前缀遍历：listlen 定计数，逐 idx 取名（借用回收缓冲，不得 free），不一次性返回整段名单。 */
+extern int   kvspaceListLen(void *h, const char *prefix, int expand_ext, int resolve, int32_t *out_count);
+extern int   kvspaceListAt(void *h, const char *prefix, int expand_ext, int resolve, int32_t idx,
+                            uint8_t **out, uint32_t *out_len);
 extern int   kvspaceDel(void *h, const char *const *keys, uint32_t nkeys, char *err, uint32_t err_cap);
 extern int   kvspaceDelTree(void *h, const char *prefix, char *err, uint32_t err_cap);
 extern int   kvspaceMkindex(void *h, const char *path, char *err, uint32_t err_cap);
@@ -135,7 +136,6 @@ void kvlangFormatFloat(char *out, size_t cap, double v);
 kvlangKv_t *kvlangKvConnect(const char *dsn);
 void kvlangKvDisconnect(kvlangKv_t *k);
 int kvlangKvGetOne(kvlangKv_t *k, const char *key, kvlangXvalue_t *out);   /* None → out len=0 */
-int kvlangKvGetBatch(kvlangKv_t *k, const char *prefix, char **names, int n, kvlangXvalue_t *out);
 int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXvalue_t *out);
 int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, uint32_t err_cap);
 int kvlangKvDel(kvlangKv_t *k, const char *key, char *err, uint32_t err_cap);
