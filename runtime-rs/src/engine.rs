@@ -17,40 +17,43 @@ pub struct Engine {
 
 impl Engine {
     // ── kvspace 读写（绝对路径，char/utf8 与 char/utf32 编解码）─────────
-    /// 通用 TLV 编码写入：任意 kind + body 字节 + dims（空=标量 ndim0）。
-    /// set_kv 与各 rwir 的类型化输出共用，避免每种 kind 一个专用写函数。
-    pub fn set_tlv_encoded(&self, key: &str, kind: &str, raw: &[u8], dims: &[i32]) {
+    /// 写即构造：按 (kindexpr, body) 向 kvspace 要偏移指针后直接写 body 字节——
+    /// key 已存在且同 body_len → WriteInPlace（原 box 就地）；否则 WriteNewPlace（新 box）。
+    /// 两分支各调唯一原语、无预 encode 整条 TLV、无中转 buffer、无 free。
+    fn write_construct(&self, key: &str, kindexpr: &str, body: &[u8]) {
         unsafe {
-            let (dptr, ndim) = if dims.is_empty() {
-                (std::ptr::null(), 0)
-            } else {
-                (dims.as_ptr(), dims.len() as i32)
-            };
-            let (mut buf, mut len) = (null_mut(), 0u32);
-            kvspaceTlvEncode(
-                cs(kind).as_ptr(),
-                raw.as_ptr(),
-                raw.len() as u32,
-                dptr,
-                ndim,
-                &mut buf,
-                &mut len,
-            );
             let ck = cs(key);
-            let keys = [ck.as_ptr()];
-            let lens = [len];
+            let mut bp: *mut u8 = null_mut();
             let mut err = [0u8; 256];
-            kvspaceSet(
+            let rc = kvspaceWriteInPlace(
                 self.kv,
-                keys.as_ptr(),
-                buf,
-                lens.as_ptr(),
+                ck.as_ptr(),
                 1,
+                body.len() as u32,
+                &mut bp,
                 err.as_mut_ptr() as *mut c_char,
                 256,
             );
-            kvspaceBytesFree(buf, len);
+            if rc != 0 {
+                kvspaceWriteNewPlace(
+                    self.kv,
+                    ck.as_ptr(),
+                    cs(kindexpr).as_ptr(),
+                    body.len() as u32,
+                    &mut bp,
+                    err.as_mut_ptr() as *mut c_char,
+                    256,
+                );
+            }
+            if !body.is_empty() && !bp.is_null() {
+                std::ptr::copy_nonoverlapping(body.as_ptr(), bp, body.len());
+            }
         }
+    }
+    /// 通用类型化写入：任意 kind + body 字节 + dims（空=标量 ndim0）。
+    /// set_kv 与各 rwir 的类型化输出共用，避免每种 kind 一个专用写函数。
+    pub fn set_tlv_encoded(&self, key: &str, kind: &str, raw: &[u8], dims: &[i32]) {
+        self.set_tlv(key, &tlv_encode(kind, raw, dims));
     }
     pub fn set_kv(&self, key: &str, val: &str) {
         let utf32: Vec<u32> = val.chars().map(|c| c as u32).collect();
@@ -60,7 +63,7 @@ impl Engine {
     pub fn get_kv(&self, key: &str) -> String {
         unsafe {
             let (mut out, mut olen) = (null_mut(), 0u32);
-            kvspaceGet(self.kv, cs(key).as_ptr(), &mut out, &mut olen);
+            kvspaceGet(self.kv, cs(key).as_ptr(), 0, &mut out, &mut olen);
             if out.is_null() || olen == 0 {
                 return String::new();
             }
@@ -69,9 +72,8 @@ impl Engine {
             let kx = String::from_utf8_lossy(&head.kindexpr)
                 .trim_end_matches('\0')
                 .to_string();
-            let (_, _, kind) = parse_kindexpr(&kx);
             let (bo, bl) = (head.body_offset as usize, head.body_len.max(0) as usize);
-            let s = if kind == "char/utf32" {
+            if kx.ends_with("char/utf32") {
                 std::slice::from_raw_parts(out.add(bo), bl)
                     .chunks_exact(4)
                     .map(|c| {
@@ -81,44 +83,14 @@ impl Engine {
                     .collect()
             } else {
                 String::from_utf8_lossy(std::slice::from_raw_parts(out.add(bo), bl)).into_owned()
-            };
-            kvspaceBytesFree(out, olen);
-            s
+            }
         }
     }
 
     /// 扩展世界（@ ref=2）句柄编码写入：kind=目标完整 kindexpr（如 "[]uint8"），body=定位串。
     /// 读取该 key 时由 read_at 按 body 前缀路由给对应 /lib/networld/* 兑现器还原真实字节。
     pub fn set_ext_handle(&self, key: &str, target_kindexpr: &str, locator: &str) {
-        unsafe {
-            let (mut buf, mut len) = (null_mut(), 0u32);
-            kvspaceTlvEncodeMode(
-                cs(target_kindexpr).as_ptr(),
-                locator.as_ptr(),
-                locator.len() as u32,
-                std::ptr::null(),
-                0,
-                2,
-                0,
-                0,
-                &mut buf,
-                &mut len,
-            );
-            let ck = cs(key);
-            let keys = [ck.as_ptr()];
-            let lens = [len];
-            let mut err = [0u8; 256];
-            kvspaceSet(
-                self.kv,
-                keys.as_ptr(),
-                buf,
-                lens.as_ptr(),
-                1,
-                err.as_mut_ptr() as *mut c_char,
-                256,
-            );
-            kvspaceBytesFree(buf, len);
-        }
+        self.write_construct(key, &format!("@{target_kindexpr}"), locator.as_bytes());
     }
 
     /// 读 key 的 head，返回 (ref, body 串)。仅 ref==2 时 body 有意义（扩展句柄定位串）。
@@ -130,10 +102,11 @@ impl Engine {
         unsafe {
             let mut head = KvspaceHead::default();
             kvspaceDecodeHead(tlv.as_ptr(), tlv.len() as u32, &mut head);
-            let kx = String::from_utf8_lossy(&head.kindexpr)
-                .trim_end_matches('\0')
-                .to_string();
-            let (r, _, _) = parse_kindexpr(&kx);
+            let r = match head.kindexpr[0] {
+                b'@' => 2,
+                b'*' => 1,
+                _ => 0,
+            };
             if r != 2 {
                 return (r, String::new());
             }
@@ -199,10 +172,11 @@ impl Engine {
             if kvspaceDecodeHead(tlv.as_ptr(), tlv.len() as u32, &mut h) != 0 {
                 return Vec::new();
             }
-            let kx = String::from_utf8_lossy(&h.kindexpr)
-                .trim_end_matches('\0')
-                .to_string();
-            let (r, _, _) = parse_kindexpr(&kx);
+            let r = match h.kindexpr[0] {
+                b'@' => 2,
+                b'*' => 1,
+                _ => 0,
+            };
             let (bo, bl) = (h.body_offset as usize, h.body_len.max(0) as usize);
             if bo + bl > tlv.len() {
                 return Vec::new();
@@ -236,20 +210,29 @@ impl Engine {
     }
 
     // ── kvspace 结构操作（json/http 扩展遍历子树用）────────────────────
+    /// 前缀遍历：先 ListLen 定计数，再逐 idx ListAt 取名（借用回收缓冲，读出即自持），
+    /// 不经一次性整段名单缓冲。
     pub fn list_kv(&self, prefix: &str) -> Vec<String> {
         unsafe {
-            let (mut out, mut olen) = (null_mut(), 0u32);
-            kvspaceList(self.kv, cs(prefix).as_ptr(), 0, 0, &mut out, &mut olen);
-            if out.is_null() || olen == 0 {
+            let cp = cs(prefix);
+            let mut count = 0i32;
+            if kvspaceListLen(self.kv, cp.as_ptr(), 0, 0, &mut count) != 0 || count <= 0 {
                 return Vec::new();
             }
-            let s = String::from_utf8_lossy(std::slice::from_raw_parts(out, olen as usize))
-                .into_owned();
-            kvspaceBytesFree(out, olen);
-            s.split('\n')
-                .filter(|x| !x.is_empty())
-                .map(str::to_string)
-                .collect()
+            let mut v = Vec::with_capacity(count as usize);
+            for i in 0..count {
+                let (mut out, mut olen) = (null_mut(), 0u32);
+                if kvspaceListAt(self.kv, cp.as_ptr(), 0, 0, i, &mut out, &mut olen) == 0
+                    && !out.is_null()
+                    && olen > 0
+                {
+                    v.push(
+                        String::from_utf8_lossy(std::slice::from_raw_parts(out, olen as usize))
+                            .into_owned(),
+                    );
+                }
+            }
+            v
         }
     }
     pub fn del_tree(&self, prefix: &str) {
@@ -281,33 +264,28 @@ impl Engine {
     pub fn get_tlv(&self, key: &str) -> Vec<u8> {
         unsafe {
             let (mut out, mut olen) = (null_mut(), 0u32);
-            kvspaceGet(self.kv, cs(key).as_ptr(), &mut out, &mut olen);
+            kvspaceGet(self.kv, cs(key).as_ptr(), 0, &mut out, &mut olen);
             if out.is_null() || olen == 0 {
                 return Vec::new();
             }
-            let v = std::slice::from_raw_parts(out, olen as usize).to_vec();
-            kvspaceBytesFree(out, olen);
-            v
+            std::slice::from_raw_parts(out, olen as usize).to_vec()
         }
     }
+    /// 写预编码 TLV：解 head 取 (kindexpr, body) 后走写即构造（新建/换 kind/换尺寸唯一原语）。
     pub fn set_tlv(&self, key: &str, tlv: &[u8]) {
         if tlv.is_empty() {
             return;
         }
         unsafe {
-            let ck = cs(key);
-            let keys = [ck.as_ptr()];
-            let lens = [tlv.len() as u32];
-            let mut err = [0u8; 256];
-            kvspaceSet(
-                self.kv,
-                keys.as_ptr(),
-                tlv.as_ptr(),
-                lens.as_ptr(),
-                1,
-                err.as_mut_ptr() as *mut c_char,
-                256,
-            );
+            let mut head = KvspaceHead::default();
+            if kvspaceDecodeHead(tlv.as_ptr(), tlv.len() as u32, &mut head) != 0 {
+                return;
+            }
+            let kx = String::from_utf8_lossy(&head.kindexpr)
+                .trim_end_matches('\0')
+                .to_string();
+            let (bo, bl) = (head.body_offset as usize, head.body_len.max(0) as usize);
+            self.write_construct(key, &kx, &tlv[bo..bo + bl]);
         }
     }
 

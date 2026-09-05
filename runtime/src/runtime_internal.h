@@ -20,14 +20,18 @@ typedef struct {
 
 extern void *kvspaceConnect(const char *dsn);
 extern void  kvspaceClose(void *h);
-extern void  kvspaceBytesFree(uint8_t *p, uint32_t len);
-extern int   kvspaceSet(void *h, const char *const *keys, const uint8_t *vals,
-                         const uint32_t *lens, uint32_t n, char *err, uint32_t err_cap);
-extern int   kvspaceGet(void *h, const char *key, uint8_t **out, uint32_t *out_len);
-extern int   kvspaceGetBatch(void *h, const char *prefix, const char *const *names,
-                               uint32_t nnames, uint8_t **out, uint32_t *out_len);
-extern int   kvspaceList(void *h, const char *prefix, int expand_ext, int resolve,
-                          uint8_t **out, uint32_t *out_len);
+/* 借用读：*out 指向后端常驻/回收空间，调用方不得 free。resolve=1 穿透 link。 */
+extern int   kvspaceGet(void *h, const char *key, int resolve, uint8_t **out, uint32_t *out_len);
+/* 就地写：key 已存在、body_len==原 body_len → 返回原 box body 偏移指针；否则非 0 + err。 */
+extern int   kvspaceWriteInPlace(void *h, const char *key, int resolve, uint32_t body_len,
+                                  uint8_t **body, char *err, uint32_t err_cap);
+/* 新位置写：按 (kindexpr, body_len) 分配新 box、写 head，返回 body 偏移指针。 */
+extern int   kvspaceWriteNewPlace(void *h, const char *key, const char *kindexpr, uint32_t body_len,
+                                   uint8_t **body, char *err, uint32_t err_cap);
+/* 前缀遍历：listlen 定计数，逐 idx 取名（借用回收缓冲，不得 free），不一次性返回整段名单。 */
+extern int   kvspaceListLen(void *h, const char *prefix, int expand_ext, int resolve, int32_t *out_count);
+extern int   kvspaceListAt(void *h, const char *prefix, int expand_ext, int resolve, int32_t idx,
+                            uint8_t **out, uint32_t *out_len);
 extern int   kvspaceDel(void *h, const char *const *keys, uint32_t nkeys, char *err, uint32_t err_cap);
 extern int   kvspaceDelTree(void *h, const char *prefix, char *err, uint32_t err_cap);
 extern int   kvspaceMkindex(void *h, const char *path, char *err, uint32_t err_cap);
@@ -87,7 +91,7 @@ static inline void kvlangStrbufFree(kvlangStrbuf_t *b) { free(b->p); b->p = NULL
 
 static inline bool kvlangXvalueNone(const kvlangXvalue_t *v) { return v->data == NULL || v->len == 0; }
 static inline void kvlangXvalueZero(kvlangXvalue_t *v) { v->data = NULL; v->len = 0; }
-void kvlangXvalueFree(kvlangXvalue_t *v);          /* kvspaceBytesFree */
+void kvlangXvalueFree(kvlangXvalue_t *v);          /* free 自持 data（借用读已拷贝为自持） */
 void kvlangXvalueSetBytes(kvlangXvalue_t *v, uint8_t *data, uint32_t len);  /* 接管内存 */
 int  kvlangXvalueHead(const kvlangXvalue_t *v, kvspaceHead_t *h);                 /* decode head */
 const char *kvlangXvalueKind(const kvlangXvalue_t *v);                       /* 返回 kind，None="" */
@@ -132,7 +136,6 @@ void kvlangFormatFloat(char *out, size_t cap, double v);
 kvlangKv_t *kvlangKvConnect(const char *dsn);
 void kvlangKvDisconnect(kvlangKv_t *k);
 int kvlangKvGetOne(kvlangKv_t *k, const char *key, kvlangXvalue_t *out);   /* None → out len=0 */
-int kvlangKvGetBatch(kvlangKv_t *k, const char *prefix, char **names, int n, kvlangXvalue_t *out);
 int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXvalue_t *out);
 int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, uint32_t err_cap);
 int kvlangKvDel(kvlangKv_t *k, const char *key, char *err, uint32_t err_cap);

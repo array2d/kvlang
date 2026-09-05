@@ -38,51 +38,44 @@ int kvlangRwirDecode(kvlangKv_t *kv, const char *link_base, const char *pc, kvla
     kvlangStrbuf_t key;
     kvlangStrbufInit(&key);
 
-    int nslots = 1 + 2 * MAX_PARAMS;
-    char **names = malloc(sizeof(char *) * (size_t)nslots);
-    kvlangStrbufPrintf(&key, "[%d,0]", addr0);
-    names[0] = kvlangStrbufDetach(&key);
-    for (int i = 1; i <= MAX_PARAMS; i++) {
-        kvlangStrbufPrintf(&key, "[%d,-%d]", addr0, i);
-        names[(i - 1) * 2 + 1] = kvlangStrbufDetach(&key);
-        kvlangStrbufPrintf(&key, "[%d,%d]", addr0, i);
-        names[(i - 1) * 2 + 2] = kvlangStrbufDetach(&key);
-    }
-
-    kvlangXvalue_t *vals = malloc(sizeof(kvlangXvalue_t) * (size_t)nslots);
-    if (kvlangKvGetBatch(kv, link_base, names, nslots, vals) != 0) {
-        snprintf(err, err_cap, "Decode: GetBatch failed at %s", pc);
-        for (int i = 0; i < nslots; i++) free(names[i]);
-        free(names); free(vals); kvlangStrbufFree(&key);
-        return -1;
-    }
-
-    if (!kvlangXvalueNone(&vals[0])) out->opcode = kvlangXvalueValueString(&vals[0]);
-
     out->reads = malloc(sizeof(kvlangParam_t) * MAX_PARAMS);
     out->writes = malloc(sizeof(kvlangParam_t) * MAX_PARAMS);
     out->nr = out->nw = 0;
+
+    /* 指令槽是稠密数组：opcode 在 [addr0,0]，读参 [addr0,-1..]、写参 [addr0,1..] 各自从 1 连续，
+     * 首个缺失槽即终止。逐槽读、遇空即停，替代每步固定读满 1+2*MAX_PARAMS 个槽——durable 后端上
+     * 那些缺失槽会各触发一次祖先 ext-index 解析，放大成 syscall 风暴（prime_sieve fs/redis 超时根因）。 */
+    kvlangXvalue_t v;
+    char *nm;
+
+    kvlangStrbufPrintf(&key, "[%d,0]", addr0);
+    nm = kvlangStrbufDetach(&key);
+    kvlangKvGetMember(kv, link_base, nm, &v);
+    free(nm);
+    if (!kvlangXvalueNone(&v)) out->opcode = kvlangXvalueValueString(&v);
+    kvlangXvalueFree(&v);
+
     for (int i = 1; i <= MAX_PARAMS; i++) {
-        kvlangXvalue_t *rv = &vals[(i - 1) * 2 + 1];
-        if (!kvlangXvalueNone(rv)) {
-            out->reads[out->nr].name = kvlangXvalueValueString(rv);
-            out->reads[out->nr].val = *rv;
-            rv->data = NULL; rv->len = 0;
-            out->nr++;
-        }
-        kvlangXvalue_t *wv = &vals[(i - 1) * 2 + 2];
-        if (!kvlangXvalueNone(wv)) {
-            out->writes[out->nw].name = kvlangXvalueValueString(wv);
-            out->writes[out->nw].val = *wv;
-            wv->data = NULL; wv->len = 0;
-            out->nw++;
-        }
+        kvlangStrbufPrintf(&key, "[%d,-%d]", addr0, i);
+        nm = kvlangStrbufDetach(&key);
+        kvlangKvGetMember(kv, link_base, nm, &v);
+        free(nm);
+        if (kvlangXvalueNone(&v)) { kvlangXvalueFree(&v); break; }
+        out->reads[out->nr].name = kvlangXvalueValueString(&v);
+        out->reads[out->nr].val = v;
+        out->nr++;
+    }
+    for (int i = 1; i <= MAX_PARAMS; i++) {
+        kvlangStrbufPrintf(&key, "[%d,%d]", addr0, i);
+        nm = kvlangStrbufDetach(&key);
+        kvlangKvGetMember(kv, link_base, nm, &v);
+        free(nm);
+        if (kvlangXvalueNone(&v)) { kvlangXvalueFree(&v); break; }
+        out->writes[out->nw].name = kvlangXvalueValueString(&v);
+        out->writes[out->nw].val = v;
+        out->nw++;
     }
 
-    for (int i = 0; i < nslots; i++) kvlangXvalueFree(&vals[i]);
-    free(vals);
-    for (int i = 0; i < nslots; i++) free(names[i]);
-    free(names);
     kvlangStrbufFree(&key);
     return 0;
 }

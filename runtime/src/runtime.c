@@ -25,6 +25,11 @@ int kvlangRuntimeExecutePc(kvlangRuntime_t *rt, const char *pc) {
   return kvlangKvcpuExecute(rt->kv, pc);
 }
 
+/* runtime 与 runtime-rs 必须共用同一 kvspace 句柄——durable 惰性 flush
+ * 仅在同句柄内相干， 跨句柄写不可见（shm 共享 mmap
+ * 掩盖了此点）。暴露内部句柄，禁止调用方另开连接。 */
+void *kvlangRuntimeKvspaceHandle(kvlangRuntime_t *rt) { return rt->kv->h; }
+
 static char *read_vthread_pc(kvlangKv_t *kv, const char *vid) {
   kvlangStrbuf_t key;
   kvlangStrbufInit(&key);
@@ -69,8 +74,9 @@ static char *alloc_vtid(kvlangKv_t *kv) {
   return strdup(buf);
 }
 
-/* 创建一个 vthread（分配 vid + 建栈索引 + bootstrap 首指令 + 置 init），返回 vid（调用方 free）。
- * 只创建不运行——运行由 kvlangRuntimeRunVid 按 vid 承接。RuntimeBootstrap/ExecuteKv/vthread·create 共用。 */
+/* 创建一个 vthread（分配 vid + 建栈索引 + bootstrap 首指令 + 置 init），返回
+ * vid（调用方 free）。 只创建不运行——运行由 kvlangRuntimeRunVid 按 vid
+ * 承接。RuntimeBootstrap/ExecuteKv/vthread·create 共用。 */
 char *kvlangVthreadSpawn(kvlangKv_t *kv, const char *funcname,
                          const char *const *args, int nargs) {
   char *vtid = alloc_vtid(kv);
@@ -99,7 +105,8 @@ char *kvlangRuntimeBootstrap(kvlangRuntime_t *rt, const char *funcname,
   return kvlangVthreadSpawn(rt->kv, funcname, args, nargs);
 }
 
-/* 按 vid 从其持久化 pc 跑到结束（WATCH 模式，阻塞）。读终态：error 时把消息写 err、*ret="error"。 */
+/* 按 vid 从其持久化 pc 跑到结束（WATCH 模式，阻塞）。读终态：error 时把消息写
+ * err、*ret="error"。 */
 int kvlangRuntimeRunVid(kvlangKv_t *kv, const char *vid, char **ret, char *err,
                         uint32_t err_cap) {
   char *pc = read_vthread_pc(kv, vid);
@@ -167,5 +174,6 @@ int kvlangRuntimeExecuteKv(kvlangKv_t *kv, const char *funcname,
 int kvlangRuntimeExecute(kvlangRuntime_t *rt, const char *funcname,
                          const char *const *args, int nargs, char **ret,
                          char *err, uint32_t err_cap) {
-  return kvlangRuntimeExecuteKv(rt->kv, funcname, args, nargs, ret, err, err_cap);
+  return kvlangRuntimeExecuteKv(rt->kv, funcname, args, nargs, ret, err,
+                                err_cap);
 }

@@ -65,7 +65,7 @@ class kvlang_kindexpr_t(ctypes.Structure):
 def _bind():
     # kvspace ABI（扩展宿主自连）：句柄 = kvspaceConnect(dsn)，shm 下即 ShmOpen，可直传 Shm* 零拷贝
     _ks.kvspaceConnect.argtypes = [ctypes.c_char_p]; _ks.kvspaceConnect.restype = ctypes.c_void_p
-    _ks.kvspaceFree.argtypes = [ctypes.c_void_p]
+    _ks.kvspaceClose.argtypes = [ctypes.c_void_p]
     _ks.kvspaceShmGet.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_int32)]
     _ks.kvspaceShmGet.restype = ctypes.POINTER(ctypes.c_uint8)
     _ks.kvspaceShmSet.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.POINTER(ctypes.c_uint8), ctypes.c_int32]
@@ -75,10 +75,14 @@ def _bind():
                                       ctypes.POINTER(ctypes.c_int32), ctypes.c_int32,
                                       ctypes.POINTER(ctypes.POINTER(ctypes.c_uint8)), ctypes.POINTER(ctypes.c_uint32)]
     _ks.kvspaceTlvEncode.restype = ctypes.c_int
-    _ks.kvspaceBytesFree.argtypes = [ctypes.POINTER(ctypes.c_uint8), ctypes.c_uint32]
-    _ks.kvspaceList.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int, ctypes.c_int,
-                                ctypes.POINTER(ctypes.POINTER(ctypes.c_uint8)), ctypes.POINTER(ctypes.c_uint32)]
-    _ks.kvspaceList.restype = ctypes.c_int
+    # codec 产出为 frontend malloc 缓冲，拷出后以 libc free 释放（无 kvspaceBytesFree）。
+    _ks.kvspaceListLen.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int, ctypes.c_int,
+                                   ctypes.POINTER(ctypes.c_int32)]
+    _ks.kvspaceListLen.restype = ctypes.c_int
+    _ks.kvspaceListAt.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int, ctypes.c_int,
+                                  ctypes.c_int32, ctypes.POINTER(ctypes.POINTER(ctypes.c_uint8)),
+                                  ctypes.POINTER(ctypes.c_uint32)]
+    _ks.kvspaceListAt.restype = ctypes.c_int
     _ks.kvspaceNewChar.argtypes = [ctypes.POINTER(ctypes.c_uint8), ctypes.c_uint32,
                                    ctypes.POINTER(ctypes.POINTER(ctypes.c_uint8)), ctypes.POINTER(ctypes.c_uint32)]
     _ks.kvspaceNewChar.restype = ctypes.c_int
@@ -195,7 +199,7 @@ class Engine:
 
     def close(self):
         if self.kv:
-            _ks.kvspaceFree(self.kv); self.kv = None
+            _ks.kvspaceClose(self.kv); self.kv = None
 
     # ── 句柄自带的 KV 存取（handoff：list todo / read todo / write pc,done / del todo）──
     def kv_get(self, key):
@@ -215,18 +219,19 @@ class Engine:
         if _ks.kvspaceNewChar(b, len(b), ctypes.byref(out), ctypes.byref(ol)) != 0:
             return
         _ks.kvspaceShmSet(self.kv, key.encode(), out, ol.value)
-        _ks.kvspaceBytesFree(out, ol.value)
+        _libc.free(ctypes.cast(out, ctypes.c_void_p))
 
+    # 前缀枚举：ListLen 定计数 + 逐 idx ListAt 借用取名（借用不 free）。
     def kv_list(self, prefix):
-        out = ctypes.POINTER(ctypes.c_uint8)(); ol = ctypes.c_uint32()
-        if _ks.kvspaceList(self.kv, prefix.encode(), 0, 0, ctypes.byref(out), ctypes.byref(ol)) != 0 \
-                or not out or ol.value == 0:
-            if out:
-                _ks.kvspaceBytesFree(out, ol.value)
+        count = ctypes.c_int32()
+        if _ks.kvspaceListLen(self.kv, prefix.encode(), 0, 0, ctypes.byref(count)) != 0 or count.value <= 0:
             return []
-        s = ctypes.string_at(out, ol.value).decode("utf-8", "replace")
-        _ks.kvspaceBytesFree(out, ol.value)
-        return s.split("\n") if s else []
+        names = []
+        for i in range(count.value):
+            out = ctypes.POINTER(ctypes.c_uint8)(); ol = ctypes.c_uint32()
+            if _ks.kvspaceListAt(self.kv, prefix.encode(), 0, 0, i, ctypes.byref(out), ctypes.byref(ol)) == 0 and out:
+                names.append(ctypes.string_at(out, ol.value).decode("utf-8", "replace"))
+        return names
 
     def kv_del(self, key):
         keys = (ctypes.c_char_p * 1)(key.encode())
@@ -270,7 +275,7 @@ class Engine:
                                  dims, ndim, ctypes.byref(out), ctypes.byref(ol)) != 0:
             raise RuntimeError(f"tlv_encode failed: {key}")
         _ks.kvspaceShmSet(self.kv, key.encode(), out, ol.value)
-        _ks.kvspaceBytesFree(out, ol.value)
+        _libc.free(ctypes.cast(out, ctypes.c_void_p))
 
     # ── 读参：解析为帧槽路径后零拷贝 view；内联字面量回退 resolve_read ──
     def read_arg(self, pc, i):

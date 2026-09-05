@@ -60,7 +60,7 @@ static uint8_t *kvlangXvalueOwn(uint8_t *tmp, uint32_t tl, uint32_t *out_len) {
     if (!tmp) { *out_len = 0; return NULL; }
     uint8_t *buf = malloc(tl);
     memcpy(buf, tmp, tl);
-    kvspaceBytesFree(tmp, tl);
+    free(tmp);
     *out_len = tl;
     return buf;
 }
@@ -338,7 +338,7 @@ void kvlangXvalueNewTlvDims(kvlangXvalue_t *v, const char *kind, const uint8_t *
     }
     uint8_t *buf = malloc(tl);
     memcpy(buf, tmp, tl);
-    kvspaceBytesFree(tmp, tl);
+    free(tmp);
     v->data = buf; v->len = tl;
 }
 

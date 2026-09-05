@@ -239,12 +239,12 @@ fn value_to_tlv(v: &Value) -> Vec<u8> {
     match v {
         Value::Number(n) => {
             if let Some(i) = n.as_i64() {
-                tlv_encode("int64", &i.to_le_bytes(), 1)
+                tlv_encode("int64", &i.to_le_bytes(), &[])
             } else {
-                tlv_encode("float64", &n.as_f64().unwrap_or(0.0).to_le_bytes(), 1)
+                tlv_encode("float64", &n.as_f64().unwrap_or(0.0).to_le_bytes(), &[])
             }
         }
-        Value::Bool(b) => tlv_encode("bool", &[*b as u8], 1),
+        Value::Bool(b) => tlv_encode("bool", &[*b as u8], &[]),
         Value::String(s) => new_char_byte(s.as_bytes()),
         _ => Vec::new(),
     }
@@ -256,49 +256,42 @@ fn value_to_tlv(v: &Value) -> Vec<u8> {
 fn mk_mem_index(names: &[String]) -> Vec<u8> {
     let mut body = (names.len() as u32).to_le_bytes().to_vec();
     body.extend_from_slice(names.join("\n").as_bytes());
-    tlv_encode(KIND_INDEX, &body, 1)
+    tlv_encode(KIND_INDEX, &body, &[])
 }
 
 // object 容器值 p：body 空。
 fn mk_obj_value() -> Vec<u8> {
-    tlv_encode(KIND_OBJ, &[], 1)
+    tlv_encode(KIND_OBJ, &[], &[])
 }
 
 // stringkeymap 容器值 p：body 空，dims=[n]（恒一维坐标段）。
 fn mk_map_value(n: usize) -> Vec<u8> {
-    tlv_encode_dims(KIND_MAP, &[], &[n as i32])
+    tlv_encode(KIND_MAP, &[], &[n as i32])
 }
 
-// ── TLV 编码（权威 kvspace ABI）───────────────────────────────────
+// ── kindexpr 串解析（反序列化按类型/形状分发用；kvspace 未导出串解析器）─────────
 
-fn tlv_encode(kind: &str, raw: &[u8], arr_len: usize) -> Vec<u8> {
-    let dims = [arr_len as i32];
-    let ds: &[i32] = if arr_len > 1 { &dims } else { &[] };
-    tlv_encode_dims(kind, raw, ds)
-}
-
-fn tlv_encode_dims(kind: &str, raw: &[u8], dims: &[i32]) -> Vec<u8> {
-    unsafe {
-        let (mut out, mut olen) = (std::ptr::null_mut(), 0u32);
-        kvspaceTlvEncode(
-            cs(kind).as_ptr(),
-            raw.as_ptr(),
-            raw.len() as u32,
-            if dims.is_empty() {
-                std::ptr::null()
-            } else {
-                dims.as_ptr()
-            },
-            dims.len() as i32,
-            &mut out,
-            &mut olen,
-        );
-        if out.is_null() || olen == 0 {
-            return Vec::new();
+fn parse_kindexpr(kx: &str) -> (i32, Vec<i32>, String) {
+    let (r, rest) = match kx.as_bytes().first() {
+        Some(b'*') => (1, &kx[1..]),
+        Some(b'@') => (2, &kx[1..]),
+        _ => (0, kx),
+    };
+    if rest.starts_with('[') {
+        match rest.find(']') {
+            Some(end) => (
+                r,
+                rest[1..end]
+                    .split(',')
+                    .filter(|d| !d.is_empty())
+                    .map(|d| d.parse().unwrap_or(0))
+                    .collect(),
+                rest[end + 1..].to_string(),
+            ),
+            None => (r, Vec::new(), rest.to_string()),
         }
-        let v = std::slice::from_raw_parts(out, olen as usize).to_vec();
-        kvspaceBytesFree(out, olen);
-        v
+    } else {
+        (r, Vec::new(), rest.to_string())
     }
 }
 
@@ -308,7 +301,7 @@ fn new_char_byte(bytes: &[u8]) -> Vec<u8> {
         .map(|c| c as u32)
         .collect();
     let raw: Vec<u8> = utf32.iter().flat_map(|v| v.to_le_bytes()).collect();
-    tlv_encode_dims("char/utf32", &raw, &[utf32.len() as i32])
+    tlv_encode("char/utf32", &raw, &[utf32.len() as i32])
 }
 
 #[cfg(test)]
@@ -321,7 +314,9 @@ mod tests {
         for v in vals {
             raw.extend_from_slice(&v.to_le_bytes());
         }
-        tlv_encode("int64", &raw, vals.len())
+        let d = [vals.len() as i32];
+        let ds: &[i32] = if vals.len() > 1 { &d } else { &[] };
+        tlv_encode("int64", &raw, ds)
     }
 
     fn test_engine() -> Engine {
