@@ -1,6 +1,0 @@
-[package]
-name = "diagnostics"
-edition = "2024"
-license = "MIT OR Apache-2.0"
-
-[dependencies]
