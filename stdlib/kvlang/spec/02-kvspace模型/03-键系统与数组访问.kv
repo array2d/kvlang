@@ -1,0 +1,113 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/kvspace模型/键系统与数组访问 {
+	r##"# 键系统与数组访问
+
+本章界定 kvspace 键的三种形态、XValue 的 kindexpr 类型表达与线格式、数组的两种物理存储形态及其访问方式。
+
+## 键形态三分
+
+任一 key 的形态唯一确定其性质与所有权：
+
+| 形态 | 例 | 性质 | 所有权 |
+|------|----|------|--------|
+| `X/名`（`/` + 普通名） | `/vthread/7/[3,0]`、`/lib/f/[1,0]` | 结构：帧、指令槽、目录 | 核心 |
+| `X·名`（`·` 中点键） | `/c0·next`、`m·[0]` | 用户数据成员 | 用户 |
+| `X/‥名`（`/` + `‥` 名） | `/vthread/7/‥pc` | 系统变量（影子元数据） | 核心 |
+
+标识符禁以 `‥` 开头，故三类零交集。系统变量清单见 [[系统变量]]。
+
+## kind 与 kindexpr
+
+| 概念 | 内容 | 例 |
+|------|------|----|
+| **kind** | 基础类型字符串（标量或元素类型），是 kindexpr 的叶子 | `uint8` `int32` `float64` `bool` `char/utf32` `object` `stringkeymap` `rwir` `rwfunc` … |
+| **kindexpr** | 完整类型表达式：可选 ref 前缀 + 可选 `[dims]` + kind | `int8` `*int8` `[10]int32` `[256,256]uint8` `@[256,256]uint8` |
+
+kind 常量集中定义于 `kvspace/include/kvspace/const.h`（C）与 `kvspace-durable/src/const.rs`（Rust），两侧同名同值。剥掉 kindexpr 的所有前缀与 `[dims]` 修饰即得 kind。
+
+### kindexpr 文法
+
+kindexpr **全前缀**书写，最左符号为最外层构造器，无优先级歧义（对齐 Go/Rust 的 `*[]int`）：
+
+```
+kindexpr ::= [ ref ] [ dims ] kind
+ref      ::= '*'                     # 指针（软链接）：body = 目标 key 路径
+          |  '@'                     # 扩展存储句柄：body = 位置描述符
+dims     ::= '[' ']'                 # 变长一维
+          |  '[' INT ( ',' INT )* ']'  # 定长 / 多维（compact 连续布局）
+```
+
+ref 前缀、维数与各维长度全部编码进 kindexpr 字符串本身；线格式中**不再**有独立的 ref / ndim / dims 字段。完整签名类型表达式（并集 `A|B`、通配 `any`、动态维 `?`、stringkeymap 键类型）见 [[文法]] 与类型系统卷。
+
+## XValueHead 线格式
+
+XValue = head + body。head 以 kindexpr 串为唯一类型真相，body 靠偏移与长度定位（`kvspace/include/kvspace/kvspace.h`、`kvspace-c/src/xvalue.h`、`kvspace-durable/src/xvalue.rs`，三处 byte-identical）：
+
+```
+XValueHead = [1B kindexprlen][kindexpr 含 NUL 与 padding][1B ro][4B vid LE][4B raw_len LE]
+body       = [raw_len B raw]
+```
+
+| 字段 | 大小 | 含义 |
+|------|------|------|
+| `kindexprlen` | 1B | kindexpr 槽总长（内容 + 终止 NUL + padding） |
+| `kindexpr` | `kindexprlen` B | kindexpr 内容，首个 NUL 终止；含 ref 前缀与 `[dims]` |
+| `ro` | 1B | 1=只读，0=可写 |
+| `vid` | 4B LE | vthread id（默认 0） |
+| `raw_len` | 4B LE | body 字节数 |
+
+`HeadLen = kindexprlen + 10`；body 起始偏移即 HeadLen。ref、ndim、dims 从 kindexpr 串解析派生：首字节 `*` → 指针、`@` → 扩展句柄、否则内联；其后 `[d0,d1]kind` 承载维数与各维长度（裸 kind 为标量 ndim=0，`[n]kind` 一维，`[d0,d1]kind` 多维）。`char/*` kind 恒为一维序列（含空串、单字符）。因 `kindexprlen` 为含 padding 的槽总长，reshape 时只要新 kindexpr 不超过槽长即可原地改写、不搬 body。None 编码为 NULL / 长度 0。
+
+指针（`*`）的 head kindexpr = `*` + 目标完整 kindexpr（含目标自身的 `*`/`@`/`[dims]`），body = 目标 key 路径；由 `kvspaceNewPtr(target_kindexpr, target)` 构造，Set 时据此单跳类型检查。
+
+## 数组的两种物理形态
+
+理论上的数组（含多维）在 kvlang 有两种物理落盘形态：
+
+| 形态 | head kind | 触发写法 | 元素位置 | XValue 数 |
+|------|-----------|---------|---------|----------|
+| **compact** | 元素 kind（`int64`…） | `[1,2,3]`、`[N]T`、`[d0,d1]T` | 连续打包进单个 XValue 的 body | 1 |
+| **stringkeymap** | `stringkeymap` | `{v0,v1,…}`、`array·scatter` 等 | 每元素落独立子 key `base·[i]` | N+1 |
+
+- **compact**：元素连续打包进一个 XValue，`raw_len = ∏dims × 元素字节宽`，head kind 即元素类型、ndim≥1。对齐 C `int[10]`、Go `[10]int`、Rust `[i32;10]`；多维即连续布局的 ndarray/tensor。要求元素定长同类型——含变长字符串字面量的 `[…]` 在 layout 阶段报错。支持 `arr[i]` 随机访问（下标读经 `xv·at` 在 body 内定位），可零拷贝整块读。
+- **stringkeymap**：head kind=`stringkeymap`、ndim≥1，body 只记形状；每个元素是独立子 key，成员名为**坐标段**。变长、可增长、允许变长元素——字符串数组、可追加数组走此形态。stringkeymap **必须** ndim≥1（无维度的键值容器应为 `object`），且成员名**必须**是坐标段（`kvspace-durable/src/const.rs` 的 `ERR_MAP_NDIM`、`ERR_MAP_COORD`）。
+
+## 坐标段
+
+stringkeymap 元素的成员名是坐标段，物理 key 形如 `m·[i]`（一维）或 `m·[i,j]`（多维）——`·` 后紧跟方括号坐标，**不是** `m·0` 这类裸后缀。坐标段格式为 `[s0,s1,…]`：十进制、逗号分隔、无空格（`kvspace-durable/src/coord.rs` 的 `format_coord`）。
+
+- 结构判定 `is_coord`：`[` 开头、`]` 结尾、内部不含嵌套 `[`/`]`；判定不要求整数（允许含点或字符串坐标）。
+- 排序 `cmp_coord`（row-major）：坐标段恒排在非坐标段之前；两个可按整数解析的坐标段按数值升序，否则字典序。
+- 访问：源码 `m·[i]` 对散 key 元素走 `kv·get`（member 名 `[i]`）；compact 的 `arr[i]` 走 `xv·at`。二者由括号与形态区分。
+
+## 字面量括号即形态
+
+| 字面量 | 形态 | 约束 |
+|--------|------|------|
+| `[1, 2, 3]` | compact（head kind=元素类型） | 元素须定长同 kind；含变长字符串成员时 layout 报错 |
+| `{1, 2, 3}` | stringkeymap（散 key） | 变长 / 可增长；字符串数组必须走此形式 |
+| `{k = v; …}` | object 或 stringkeymap(map) | 由 `=` 键值对与散 key 数组区分；空 `{}` 须带类型标注 |
+
+## 形态转换
+
+| rwir | 方向 | 语义 |
+|------|------|------|
+| `array·scatter(arr) -> dst` | compact → stringkeymap | 连续数组拆成 `dst·[0]…dst·[N-1]` 独立 key |
+| `array·compact(arr) -> dst` | stringkeymap → compact | 读散 key 打包成连续数组 |
+| `array·append` / `array·slice` | 变长 | 作用于 compact 时先自动 scatter |
+
+## `@` 扩展句柄
+
+| ref | 语义 | body |
+|-----|------|------|
+| 无 | 内联值 | 数据本体 |
+| `*` | kvspace 内软链接 | 目标 key 路径 |
+| `@` | 扩展存储句柄 | 元存外位置描述符 |
+
+`@[256,256]uint8` 表示 256×256 uint8 张量的句柄，数据在 SHM/GPU/文件，body 记位置。`@` 只组合 `kind` 与 `[dims]kind`（compact 形态），外部分散数组无意义、拒绝。读取时按 body 前缀路由兑现（见 [[地址空间]] 扩展存储）。
+
+## memindex：定宽目录矩阵
+
+目录（`index`）可携带定宽矩阵形态用于增长型容器：body 记 `dims=[len, cap, M]`，`M` 向上 8 对齐；`len` 为当前项数、`cap` 为预留容量、`M` 为行宽。`kvspaceMkindex` 带 `capacity` 参数、构造器 `kvspaceXvalueNewIndexGrow(children, count, cap_hint, m_hint)`（`kvspace-c/src/xvalue.h`）据此保留容量与行宽，使增删可就地覆写、不重分配。
+"## -> /lib/kvlang/规范/kvspace模型/键系统与数组访问
+}

@@ -1,0 +1,92 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/runtime语义/执行模型 {
+	r##"# 执行模型
+
+runtime 是 kvlang 的**动态语义**阶段：对已由 layout 布进 kvspace 的指令做**纯解释执行**。runtime 不编译、不优化、不重排；它只按 PC 逐条取指、解码、执行。存在两套等价实现——C runtime（`kvlang/runtime/`，纯 C + `extern "C"`）与 Rust runtime（`kvlang/runtime-rs/`，二进制名 `kvlang`）——二者必须表现相同的动态语义（差异见 [[cruntime与后端abi]]）。
+
+## 一、状态皆在 kvspace
+
+runtime **不得**在 kvspace 之外持有执行状态。PC、栈帧、局部变量、调用链一律落 kvspace 的 KV 树；进程可在任意指令边界退出，其执行状态完整留在 kvspace，另起进程按同一 PC 续跑而语义不变（崩溃恢复）。
+
+- **PC 是一个 KV 路径字符串**，形如 `/vthread/<vid>/[s0,s1]`（含嵌套帧时逐段延长，见 §四）。PC 既是取指地址，也是当前帧的定位符。
+- **零拷贝读写**：runtime 读值经 `kvspaceGet` 取后端常驻内存的**借用指针**，只读、**不得** `free`；写值经 `kvspaceWriteInPlace`（key 已存在且 body 尺寸不变）或 `kvspaceWriteNewPlace`（新建 / 换 kind / 换尺寸）向后端要可写偏移指针后直接写字节。runtime **不得**自持堆缓冲中转整条 TLV。
+
+## 二、坐标系
+
+一条指令在其所属函数子树内由二元坐标 `[s0,s1]` 定位：`s0` 为指令行（行 0 为签名，指令从行 1 起），`s1` 为参数轴（0 为 opcode，负数为读参绑定 `[0,-k]`，正数为写参绑定 `[0,k]`）。签名槽 `[0,0]` 的 kind 为 `rwfunc`（用户函数）或 `defrwir`（扩展 rwir 声明，见 [[rwirext扩展]]）。
+
+## 三、指令解释循环
+
+runtime 对一个 vthread 的执行是如下循环（C 实现 `runtime/src/kvcpu.c:kvlangKvcpuExecuteMode`）：
+
+1. **状态门**：读该 vthread 的 `‥status`。仅当状态为 `init`、`running`、`wait` 之一时**继续**；其余状态（`paused` / `done` / `error` 等）即**停机**，进程可正常退出。
+2. **深度检查**：帧深超过实现上限（`MAX_STACK_DEPTH`）时置 `RecursionError` 并停该 vthread。
+3. **取指解码**：由 PC 定帧根、经帧的 `‥lib` 软链定位指令树，`RwirDecode` 稠密探查槽位、遇空即停，解出 opcode 与读/写参。空 opcode 视为 `/lib` 损坏或跳转越界，报 `RuntimeError` 停该 vthread。
+4. **派发执行**（见 §五）。
+5. **推进 PC**：多数指令执行后由自身写回新 PC（`NextPc` 求后继，或 call/return/br/goto 改写 PC）；循环回到 1。
+
+## 四、派发链
+
+每条指令按**固定优先级**派发，命中即止：
+
+1. **控制指令**（`op_is_control`）——`call` / `return` / `br` / `goto`。
+2. **native builtin**（`kvlangBuiltinIsNative`）——静态注册表内的核心算子（枚举见 [[函数调用与内建]]）。
+3. **`=` 拷贝**（`is_copy_op`）——值拷贝语义。
+4. **扩展 rwir**（`isothersrwir`）——`/lib/<opcode>` 存在且 kind=`defrwir`（见 [[rwirext扩展]]）。
+5. **否则视为用户函数调用**——opcode 移入 `reads[0]`，改写为 `call` 指令。
+
+实现**必须**遵循此优先级：native 注册表先于 `/lib` 查表，故与 native 同名的 `/lib/<op>` 不改变派发。
+
+## 五、调用即无返回值——输出走写参映射
+
+kvlang 的调用**没有返回值表达式**。函数/rwir 的输出一律经**写参映射** `f(a) -> r` 显式落到调用者指定的写槽；一条指令可有零个或多个写参。
+
+- **call**：创建子帧 `/vthread/<vid>/<父帧路径>/[s0,0]/`，把实参经 Ptr 链绑定进子帧的读参槽 `[0,-k]`、写参槽 `[0,k]`（零拷贝跨帧传参，不复制实参内容），子帧记 `‥callpc`（发起调用的 PC）与 `‥returnpc`（返回后继续的 PC），PC 进入子帧首指令。
+- **return**：弹出当前帧、删其子树；顶层帧返回则整个 vthread 结束（新 PC 为空）；否则新 PC 取本帧 `‥returnpc`。返回链断裂（帧无 `‥returnpc`）**必须**报 `RuntimeError` 并保留该帧供排查。
+- 读参**只读**、写参**可写可读**；修改型指令**必须**把结果显式写入其写槽（见 [[函数调用与内建]]）。
+
+## 六、栈帧字段
+
+每个调用帧的运行时字段以 `‥`（U+2025，TWO DOT LEADER）为前缀，不进普通目录索引：
+
+| 字段 | 含义 |
+|------|------|
+| `‥lib` | 软链接到 `/lib/<pkg>·<name>`——指令树零拷贝共享，全帧只存一份 |
+| `‥callpc` | 发起本帧调用的指令 PC |
+| `‥returnpc` | 返回后继续的 PC |
+| `‥ro` | 只读读参绑定 |
+| `‥pc` / `‥status` | **仅根帧**（`/vthread/<vid>/`）持有，记录整个 vthread 的当前 PC 与状态 |
+
+runtime **不得**另存独立的调用栈结构：嵌套帧路径本身即调用链。
+
+## 七、vthread
+
+vthread 是 kvlang 的执行线程，句柄为整数 `vid`，根在 `/vthread/<vid>/`。进程与 vid 为 1:1（当前驱动模型）。以下为 native 的 `vthread·*` 指令语义：
+
+- `vthread·create(funckey) -> vid`：分配新 vid、建栈索引、bootstrap 被调函数首指令、置 `init`，返回 vid 句柄。**只创建不运行**。
+- `vthread·run(vid)`：以 vid 为参数，从其持久化 `‥pc` 驱动到结束（阻塞）。这是 create 之外的独立子 vid 的运行入口，也是崩溃恢复入口（`kvlang run <vid>`）。子 vid 命中扩展 rwir 时经 `out_pc` 冒泡给上层驱动派发、推进子 pc 后重入续驱。
+- `vthread·call(funckey)`：在**当前 vthread（同 vid）**内按运行时 funckey 造一次动态 `call`，被调函数跑到结束再回本指令后继。**不新开 vid、不挂起**——被调里的 rwir 由当前驱动就地派发。
+- `vthread·sleep(dur)`：让当前 vthread 阻塞 `dur`（duration，纳秒），到点后推进 PC。
+- `vthread·setstatus(status)`：置本 vthread 状态并把 PC 前进到下一指令。恢复执行即把 `‥status` 改回 `running` 再驱动该 vid。
+
+`vthread·create` 与 `vthread·run` 是**两步分离**（对应 `kvlang create <fn>` / `kvlang run <vid>` 两个子命令）；`vthread·call` 是同 vid 内的动态调用。三者**不得**混同。锚例：`tutorial/15-vthread/`（`01-call.kv`、`03-create-run.kv`、`04-sleep.kv`、`02-crashrecover.kv`）。
+
+## 八、networld 与外部世界
+
+runtime 核心不含 I/O；与外部世界（进程、文件系统、网络）的交互一律经 `networld/*` 扩展 rwir（见 [[rwirext扩展]]）。`/networld/<host>` 是本机在该命名空间下的身份（`host` 取裸 hostname）。外部产物（如子进程 stdout/stderr）经**扩展世界 @ 前缀句柄**登记：写槽落 kind=`@<目标kindexpr>`、body 为逻辑定位串（如 `/networld/<host>/proc/<pid>/stdout`），读取时按前缀路由兑现真实字节。锚例：`tutorial/14-networld/`。
+
+> **实现现状**（规范外提示）：当前 Rust runtime 以 `bootstrap → run_vid` 循环主导驱动 vthread；尚未实现"启动自注册 `/networld/<ip>/proc/<pid>` + watch vthread strkeymap 驱动"的分布式派发。该分布式派发为规划方向，未落地部分不属本卷 normative 内容。
+
+## 九、调试与可观测性
+
+kvlang **没有独立调试器进程，也没有 `--debug` 开关**。调试模型是：**让 vthread 停在某处、把整个执行状态留在 kvspace，再用 kvspace 命令静态读取**。
+
+- **暂停**：`debugger()` 是 native builtin，等价 `vthread·setstatus("paused")`——置 `‥status=paused` 并**先把 PC 前进到下一条指令**，解释循环因状态门停机，进程正常退出。恢复后从下一条继续，**不得**重复执行断点处指令。
+- **观察 PC 与状态**：`‥` 前缀字段用 `kvspace get` 按 key 直读（不进目录索引）：`/vthread/<vid>/‥status`、`/vthread/<vid>/‥pc`。
+- **PC 即调用栈**：嵌套帧路径 `/vthread/<vid>/[1,0]/[1,0]/[2,0]` 逐段即调用链，无需另存栈结构。
+- **观察源码**：`kvlang dump` 把 `/lib` 子树逆向重建为可运行 kvlang，并以 `#` 注释标出每条指令的 `[s0,s1]` 槽位，是核对 layout 结果与坐标 bug 的透视镜。
+- **恢复**：`kvspace set /vthread/<vid>/‥status running` 后 `kvlang run <vid>` 从持久化 `‥pc` 续跑。
+
+锚例：`tutorial/09-debugger/`（`breakpoint.kv`、`fib.kv`、`sum_to.kv`、`chain_array.kv`）。
+"## -> /lib/kvlang/规范/runtime语义/执行模型
+}

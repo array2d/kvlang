@@ -1,0 +1,122 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/类型系统/种类与定宽类型 {
+	r##"# 种类与定宽类型
+
+kvlang 是**严格定宽类型语言**。每个变量、参数、返回值都有确定的种类（kind）；无无类型变量，运行时种类不隐式改变。类型信息随值自描述：一个 XValue 的种类由其 head 中的 kindexpr 表达（见 [[kindexpr签名类型表达式]] 与 [[kvspace模型]] 的 XValue 编码）。
+
+## 种类（kind）
+
+**种类**是值的运行时类别。种类字符串是 kindexpr 的基（base）部分（见 [[kindexpr签名类型表达式]]）。
+
+### 定宽数字种类
+
+kvlang 的数字种类**必须携带精确位宽**：
+
+| 类别 | 种类 |
+|------|------|
+| 有符号整数 | `int8` `int16` `int32` `int64` |
+| 无符号整数 | `uint8` `uint16` `uint32` `uint64` |
+| IEEE 754 浮点 | `float32` `float64` |
+
+整数按小端补码编码，浮点按 IEEE 754 编码。
+
+**铁律——无家族简写**。`int`、`uint`、`float`、`num`、`char` 这类不含位宽/编码的简写**不是**合法种类，在任何类型标注中均**不得**出现。位宽与字符编码是**开放集合**（未来可扩 `int4`、`fp8`、`fp16` 等），封闭的家族枚举必然漏项；多态**必须**靠 [[kindexpr签名类型表达式]] 的显式 `|` 枚举表达（如 `int8|int16|int32|int64`）。
+
+### bool 与字符种类
+
+| 种类 | 说明 |
+|------|------|
+| `bool` | 1 字节：`0`=false、`1`=true |
+| `char/utf32` | 码点序列，4B×N，定宽、可索引；**字符串字面量的默认种类** |
+| `char/ascii` | ASCII 字节序列，1B×N，定宽、可索引 |
+| `char/utf8` | UTF-8 字节序列，1B×N，变宽、**禁索引**（仅存储与交换） |
+
+字符三种编码的判定为前缀相等：某种类是字符种类当且仅当它以 `char/` 起始。定宽编码（`utf32`、`ascii`）**必须**支持 O(1) 码点索引；变宽编码 `utf8` 的按码点索引操作（`string·char`、`s[i]` 等）**必须**报 TypeError。单个字符标注为 `char/<编码>`（标量），字符串标注为 `[]char/<编码>`（序列）；字符种类的值恒为一维序列。
+
+### 容器与结构种类
+
+| 种类 | 说明 |
+|------|------|
+| `object` | 异构命名成员容器（类 struct/record），成员经 `·` 访问 |
+| `stringkeymap` | map 容器，kindexpr 为 `key·value`（如 `[]char/utf8·int64`） |
+| `struct` | 结构原型实例的种类（见 [[容器]] 与结构声明） |
+| `index` | 目录/成员索引（memindex；容器的成员名索引即此种类） |
+| `extindex` | 扩展索引，以 kindexpr 前缀 `@` 标记 |
+
+容器的物理组成（值 + memindex）见 [[容器]]。
+
+### 时间种类
+
+| 种类 | 说明 |
+|------|------|
+| `time` | 时刻，由 `time·now()` 等产生 |
+| `duration` | 时长，由 `time/duration·*` 产生 |
+
+`time`/`duration` 是不透明标量种类，其运算由 time 标准库提供，字节布局不由本卷规定。
+
+### 代码种类
+
+下列种类描述 KV 树中的代码与目录节点（见 [[kvspace模型]] 的指令布局）：`rwir`（指令槽文本引用）、`rwfunc`（函数引用，并作用户函数定义的签名槽 kind）、`scope`（词法作用域帧目录）。扩展算子定义所用的 `defrwir` 是**内部种类**，由 layout 落盘、runtime 消费，**不得**出现在用户书写的类型标注中；用户函数的定义与栈内调用统一用 `rwfunc`，不再有独立的 defrwfunc。（`def*` 内部种类仅保留 defrwir——扩展算子声明，并预留未来调度用途。）
+
+### None 与 ptr 不是种类
+
+- **None** 不是种类：它是 kindexpr 为空的 XValue（空字节）。任何有名变量都有地址、都有 XValue；未赋值即 None。None 参与算术、比较、分支条件、类型构造一律 TypeError（见下文与 [[runtime语义]]）。
+- **ptr（软链接）** 不是种类：它是 kindexpr 的前缀 `*`。ptr 的 head kindexpr 为 `*` 加目标的完整 kindexpr，body 存目标 key 路径（见 [[容器]]）。
+
+> 前缀 `*`（ptr）与 `@`（extindex）是 head 编码层的记法，**不属于**类型表达式文法：类型标注里不得书写 `*int64` 或 `@int64`（见 [[kindexpr签名类型表达式]]）。
+
+## 构造器兼转换器
+
+十个定宽数字种类名与三个字符编码名**既是构造器也是转换器**——同名一元调用把实参转换为该种类：
+
+```kv
+f = float32(3)          // kind=float32，值 3.0
+i <- int8(0.1)          // 0（float→int 向零截断）
+int8(300) -> w          // 44（窄化 = 补码回绕）
+t <- char/utf32(s)      // 变宽 utf8 转定宽 utf32（转后可索引）
+u <- char/ascii(t)      // 非 ASCII 码点 → TypeError
+```
+
+转换规则（对齐 C / Go / Rust `as`）：
+
+| 规则 | 语义 |
+|------|------|
+| float → int | 向零截断（`int32(3.9)`=3、`int32(-2.7)`=-2、`int64(0.5)`=0） |
+| 整数窄化 | 补码回绕（`int8(300)`=44、`uint8(-1)`=255、`int16(70000)`=4464、`int32(2147483648)`=-2147483648） |
+| float32 精度 | 收窄至单精度（`float32(3.141592653589793)`=3.1415927、`float32(16777217)`=16777216.0） |
+| None 输入 | TypeError（`int64(None)` 报错，不得静默产生 0） |
+
+构造器接受字面量与变量表达式（`42.9 -> x; int8(x)`）。种类构造的结果 XValue 以该种类名为 kindexpr 落盘，精度信息随值保留。
+
+## 数值运算域
+
+1. **同种类算术产生同种类结果**，溢出按补码回绕：`int8(127)+int8(1)`=-128、`uint8(255)+uint8(1)`=0、`int32(100)×int32(100)`=10000（kind 保持 `int32`）。float32 运算不升 float64：`float32(16777216)+float32(1)`=16777216.0。
+2. **混合宽度整数向更宽种类提升**：`int8(100)×int16(2)`=200（结果 `int16`）；`int8(7)%int16(3)`=1（结果 `int16`）。
+3. **任一侧浮点则提升为浮点**：`int8(120)÷float32(10)`=12.0（结果 `float32`）；两整数 `÷` 为整除（`int8(120)÷int8(10)`=12）。
+4. **无符号取负** `-(uint8 值)` TypeError（对齐 C 警告 / Rust、Go 编译错误）。
+5. **bool 不参与算术**：`true + false` TypeError。
+6. **None 参与算术** TypeError；**None 参与分支条件** TypeError。
+7. **跨种类比较** TypeError（`int64(5) == "hello"` 报错）；数值种类之间可跨宽度比较（`3 == 3.0` 为 true）。
+
+## bool 铁律
+
+`bool` 值**只能**为 `true`/`false`，**禁止**一切隐式布尔化：
+
+| 输入 | kvlang |
+|------|--------|
+| `true` / `false` | 合法 |
+| `0` / `1` 整数 | TypeError——须显式写 `!= 0` |
+| 非空字符串 | TypeError——须显式写 `!= ""` |
+| None | TypeError |
+
+分支条件（`if`/`while`/`br`）的条件槽**必须**是 `bool`。强制显式比较使控制流走向可被静态判定，不依赖运行时种类。
+
+## 锚例
+
+- 定宽构造与转换、float→int 截断、窄化回绕：`tutorial/01-basics/cast.kv`、`tutorial/01-basics/numtypes.kv`。
+- 算术保宽与混合提升：`tutorial/01-basics/type_narrowing.kv`。
+- 字符编码与索引：`tutorial/11-string/05-encodings.kv`、`06-convert.kv`、`02-char-ord.kv`。
+- 时间种类：`tutorial/01-basics/time.kv`、`tutorial/13-stdlib/time/`、`13-stdlib/duration/`。
+- 类型错误（bool 算术、跨种类比较、无符号取负、None、compact 变长串）：`tutorial/error_cases/type_error/`、`error_cases/none_type_error/`。
+"## -> /lib/kvlang/规范/类型系统/种类与定宽类型
+}

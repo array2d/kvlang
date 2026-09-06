@@ -1,0 +1,35 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/设计理由/代码层级 {
+	r##"# 设计理由：代码四级层次
+
+## 为什么需要四个层级
+
+代码组织层级是语言的骨架。层级太少则无法表达大型程序的模块化需求；层级太多则概念负担重、规则相互干扰。
+
+kvlang 选择四级：lib（包）、rwfunc（函数）、scope（控制流域）、rwir（原子指令）。选四级的根本理由是：这四级与 kvspace 树的层次结构天然对齐，每级都有对应的路径层次，没有一级是多余的抽象。
+
+## 为什么 lib 是最顶层
+
+lib 对应 `/lib/<name>/` 路径前缀，是 kvspace 树里代码的命名空间边界。lib 存在的理由不是"模块化"（那是大多数语言的解释），而是"lib 签名是 kvspace 里的一等公民"——layout 阶段把 lib 的完整签名（所有 rwfunc 的参数类型）写入 kvspace，任何节点可在运行时查询 lib 的接口，无需源码。lib 的存在使得"kvspace 即代码仓库"成立。
+
+## 为什么 scope 不可手写
+
+scope 是 if/while/for 等控制结构经 layout lower 阶段产生的内部产物，不在语法层暴露。这是一个有意为之的决定，而非限制。
+
+手写 scope 意味着用户在源码层直接操作控制流展开的内部表示——scope 是 layout 降级的内部产物，不在语法层暴露。lower 是 layout 内部的实现细节，把它暴露给用户会使 layout 语义规范变成两套：一套是高级控制流语法，一套是 scope 展开形式，维护者必须同时保证两者的一致性。禁止手写 scope 消除了这个负担。
+
+## 为什么 rwir 是原子不可分的
+
+rwir（read-write IR）是最小执行单元，原子性是其定义的一部分。
+
+原子不可分的动机来自扩展机制：扩展 rwir（rwirext）的实现可以是任意后端引擎（GPU kernel、numpy、OS 调用），runtime 对扩展 rwir 的唯一承诺是"单次原子调用"——它不能拆开扩展 rwir 的执行、在中间插入其他指令。若 rwir 可再分，这个承诺就无法成立，扩展引擎的实现自由度会大幅收窄。
+
+原子性还带来 layout 层面的好处：layout 对 rwir 签名做完整的类型检查，若 rwir 可拆分则类型检查边界模糊。
+
+## 为什么 native rwir 不落盘
+
+扩展 rwir 的签名存于 `/lib/<opcode>`（kindexpr 存入 kvspace），而 native rwir 的签名内联在 C runtime 注册表里不落盘。
+
+理由是：native rwir 是 kvlang runtime 的 ABI 契约，其签名由 runtime 版本唯一决定，不受 kvspace 内容影响。把它写入 kvspace 会造成"kvspace 里有一份 runtime 认为应该是什么样子"与"C 代码里实际注册的是什么"两份事实源，产生版本漂移风险。内联在 C 表里，签名与实现共生，不存在不一致的可能。
+"## -> /lib/kvlang/规范/设计理由/代码层级
+}

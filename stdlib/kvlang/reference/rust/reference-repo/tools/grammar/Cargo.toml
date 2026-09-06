@@ -1,0 +1,10 @@
+[package]
+name = "grammar"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+diagnostics = { path = "../diagnostics" }
+pathdiff =  "0.2.3"
+regex = "1.12.2"
+walkdir = "2.5.0"

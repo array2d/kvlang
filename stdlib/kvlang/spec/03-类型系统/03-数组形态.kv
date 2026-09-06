@@ -1,0 +1,109 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/类型系统/数组形态 {
+	r##"# 数组形态
+
+kvlang 的数组有**两种物理形态**：**compact**（连续打包进单个 XValue）与 **stringkeymap**（散 key，每元素独立落库）。两形态由字面量括号选定，访问算子不同，但都被 `ndarray·*` 元数据算子统一观测。
+
+## 括号规约
+
+| 字面量 | 形态 | 落库 | 约束 |
+|--------|------|------|------|
+| `[e0, e1, …]` | compact | 元素连续打包进单个 XValue，head 种类=元素种类 | 定长、同种类；元素**不得**为变长（字符串字面量禁入） |
+| `{v0, v1, …}` | stringkeymap | 每元素落 `base·i` 独立子 key，容器值 head 种类=`stringkeymap` | 变长/可增长；字符串数组等变长集合用此形式 |
+
+- compact 字面量降级为 `array(…)` 构造。变长字符串元素进 compact `[…]` 在 layout 语法检查期报错（`compact array [...] cannot hold variable-length string element`）。
+- stringkeymap 字面量降级为 `map(…)` 构造，只作赋值右值或 `for-in` 源。
+
+## compact 形态
+
+compact 数组是**单个 XValue**：head 种类为元素种类，维度 `dims` 落在 head 的 kindexpr 里，body 是连续的定宽元素字节。
+
+```kv
+a:[]int64 = [10, 20, 30, 40]   // head kindexpr = [4]int64，body = 4×8 字节
+```
+
+- head 种类 = 元素种类（此例 `int64`），**非** `array`；kindexpr 形如 `[4]int64`（见 `tutorial/04-ndarray/xv_meta.kv`）。
+- 字符串是 compact 的字符序列：`s:char/utf8 = "hi"` 的 kindexpr 为 `[2]char/utf8`。单个字符串是 compact；**字符串的数组**是变长集合，必须 stringkeymap。
+
+### compact 元素访问
+
+下标 `a[i]` 是 compact 元素访问：读降级为 `xv·at`，写（`a[i]=v` 或 `v -> a[i]`）降级为 `xv·set`。
+
+```kv
+a[1] -> e          // 等价 xv·at(a, 1) -> e
+a[2] = 99          // 等价 xv·set(a, 2, 99) -> a
+99 -> a[0]         // 右箭头下标写，等价 xv·set(a, 0, 99) -> a
+```
+
+`xv·at` / `xv·set` **仅接受 compact 数组**（维数非 0）：对 stringkeymap 或标量报 TypeError。索引个数**必须**等于维数，按 row-major 折算扁平偏移；越界报 IndexError。写回保持 dims 不变。
+
+### 多维 compact（tensor）
+
+多维 compact 由 `xv·reshape` 从一维铺开：
+
+```kv
+m = xv·reshape([1, 2, 3, 4], 2, 2)   // dims = [2,2]
+7 -> m[1, 0]                          // 多维下标写
+m[0, 1] -> x                          // 多维下标读
+```
+
+多维下标个数须等于维数（此例 2），按 row-major 折算（见 `tutorial/04-ndarray/subscript_write.kv`）。
+
+### head 观测与重解释
+
+| 算子 | 语义 |
+|------|------|
+| `xv·kindexpr(a)` | 返回 head 的 kindexpr 串（如 `[4]int64`） |
+| `xv·bodylen(a)` | 返回 body 字节数 |
+| `xv·reinterpret(a, "[]uint8")` | 原样保留 body 字节，只替换 kindexpr（`[3]int64` 24 字节 → `[24]uint8`） |
+
+## stringkeymap 形态
+
+stringkeymap 数组的**容器值**是一个 head 种类为 `stringkeymap` 的 XValue（body 空，成员数落 head 的 dims），**每个元素**是独立子 key `base·i`：
+
+```kv
+nums = {10, 20, 30, 40}    // 每元素落 nums·0 … nums·3
+for (x in nums) { … }      // 遍历散 key 元素
+names = {"apple", "banana", "cherry"}   // 变长字符串数组必须 stringkeymap
+```
+
+散 key 元素以坐标段 `base·[i]` 访问（经 `kv·get`），或以 `for-in` / `kv·listlen` / `kv·listn` 遍历。坐标段支持多值键（含小数）：`geo·[39.9,116.4] <- "Beijing"`，物理以字符串格式落 key（见 `tutorial/04-ndarray/geo_coord.kv`）。
+
+## 两形态互转
+
+| 算子 | 语义 |
+|------|------|
+| `array·scatter(a)` | compact → stringkeymap（散 key） |
+| `array·compact(b)` | stringkeymap → compact |
+
+字面量初始化默认按括号定形态；`scatter`/`compact` 显式转换（见 `tutorial/04-ndarray/separated.kv`）。
+
+## ndarray 元数据算子
+
+三个算子统一观测数组形状，对两形态均适用：
+
+| 算子 | 语义 |
+|------|------|
+| `ndarray·numel(a)` | 元素总数（compact 读 head array_len；stringkeymap 读成员数） |
+| `ndarray·dim(a)` | 维数（head ndim） |
+| `ndarray·shape(a)` | 各维长度，返回一维 `int64` compact 数组 |
+
+```kv
+a:[]int64 = [10, 20, 30, 40]
+ndarray·numel(a) -> n   // 4
+ndarray·dim(a)   -> d   // 1
+ndarray·shape(a) -> s   // [4]；s[0] = 4
+```
+
+## 锚例
+
+- compact 建/读/写/求和：`tutorial/04-ndarray/continuous.kv`。
+- head 种类与 kindexpr、reinterpret：`tutorial/04-ndarray/xv_meta.kv`、`xv_reinterpret.kv`。
+- numel/dim/shape、xv·at/set：`tutorial/04-ndarray/xv_shape.kv`。
+- 多维下标写、reshape：`tutorial/04-ndarray/subscript_write.kv`。
+- stringkeymap 字面量与遍历：`tutorial/04-ndarray/sparse_literal.kv`、`string_array.kv`。
+- 两形态互转：`tutorial/04-ndarray/separated.kv`。
+- 多值坐标段：`tutorial/04-ndarray/geo_coord.kv`。
+- 括号规约错误（compact 容变长串）：`tutorial/error_cases/type_error/compact_string_array.kv`。
+"## -> /lib/kvlang/规范/类型系统/数组形态
+}

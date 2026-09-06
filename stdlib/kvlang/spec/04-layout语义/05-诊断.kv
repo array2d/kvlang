@@ -1,0 +1,67 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/layout语义/诊断 {
+	r##"# 诊断
+
+layout 检查源码，产出诊断。诊断分三级，报格式对齐 GCC/Go/Rust 编译器风格：无时间戳、无 key=value。
+
+## 诊断等级
+
+layout 只有三级（**不是** p0–p7）：
+
+| 等级 | 含义 | 是否拒装载 |
+|------|------|-----------|
+| `error` | 违反规范、无法布局 | **是**——拒绝写入 `/lib` |
+| `warn` | 可疑但可布局 | 否 |
+| `info` | 提示 | 否 |
+
+判定规则：只要存在任一 `error` 级诊断（既非 `warn` 亦非 `info`），layout **必须**拒绝装载，返回错误 `parse: error-level diagnostics — refusing to load`。`warn`/`info` 不阻止装载。
+
+诊断**不首错即止**：解析器累积全量诊断，一次报出，便于批量修复。
+
+## 报格式
+
+每条诊断格式为：
+
+```
+{kind}: {src}:{line}:{col}: {message}
+```
+
+`kind` 为 `error` / `warn` / `info`；`src` 为源文件名（内存源码为 `<inline>`）；无位置信息时省略文件段。诊断输出到 stderr；stdout 只放结果（`print` 输出、格式化文本、`ENTRY=`）。
+
+## LOG_LEVEL 可见性
+
+环境变量 `LOG_LEVEL`（默认 `warn`）控制诊断可见性：
+
+| LOG_LEVEL | 可见 |
+|-----------|------|
+| `debug` | debug/info/warn/error |
+| `info` | info/warn/error |
+| `warn`（默认） | warn/error |
+| `error` | error |
+
+## 常见诊断
+
+**error**（拒装载）：
+
+- 参数缺类型标注——`param "x" has no type annotation` / `return value "r" has no type annotation`。
+- 读参被写——`read param "A" cannot be used as write slot (read params are read-only)`。
+- 读写参同名——`param "A" appears in both read-params and write-params`。
+- 变参位置非法——`variadic param "x" must be the last read-param` / `write-param "r" cannot be variadic`。
+- 顶层控制流——`top-level while is not supported — wrap in main()`。
+- 写类型与字面量不匹配——`write "x" declared scalar … but assigned an array literal` / `declared … but assigned a scalar literal`。
+- 裸 rwfunc 遮蔽 builtin——`function "…" shadows builtin`。
+- `[]` 下标用于容器——`"[]" 下标不能用于容器 …`。
+- `return` 带参数——`return cannot take a value — use write-params for output`。
+- 语法错误——`expected …, got …` / `unexpected token … in block` / `unexpected token … at top level`。
+
+**warn**（不拒装载）：
+
+- 写槽位置非法 token——`unexpected token … in write slot position`。
+- 同行函数调用——`function call … on same line as write slot`。
+
+**info**（提示）：
+
+- 裸顶层 rwfunc——`rwfunc outside lib block — registering under /lib/<name>`。
+- lib 名冲突——`package name "lib" expands to /lib/lib/`。
+"## -> /lib/kvlang/规范/layout语义/诊断
+}

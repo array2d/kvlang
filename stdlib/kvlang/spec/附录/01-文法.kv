@@ -1,0 +1,213 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/附录/文法 {
+	r##"# 文法（EBNF）
+
+本附录是 kvlang 的**唯一权威文法**。正文各章只引用其片段，不另立文法。每次修改本文法须同步验证实现与 tutorial 锚例。本文法以 layout（`layout/src`）与 C runtime（`runtime/src`）实现为准；标注「待收敛」处为实现间尚存分歧、以此处所写方向为规范目标。
+
+## 词法
+
+```
+digit   = "0" … "9"
+letter  = unicode_letter | "_"
+              (* Unicode 字母（含中文等），对齐 C/Go/Rust/Python/TS 五门参考语言，非仅 ASCII；
+                 lib / rwfunc / rwir / 变量名均可用 Unicode 字母。
+                 实现为「最长非分隔符匹配」，且 "." "/" 不在分隔符集合内，故裸词理论上可含 "."；
+                 规范目标为字符集校验，layout 待收敛。 *)
+ident   = letter { letter | digit }
+integer = digit { digit }
+              (* 仅十进制；无 hex/oct/bin 前缀、无 "_" 分隔、无前导点 *)
+float   = integer [ "." integer ] [ ("e" | "E") [ "+" | "-" ] integer ]
+path    = "/" ident { ("/" | ".") ident | "·" "[" integer { "," integer } "]" }
+              (* 绝对路径字面量；"/" 分隔段，"." 为子键，"·[i,j]" 为坐标段（stringkeymap 元素/张量坐标）。
+                 kindexpr 的 ref/dims 前缀语义由类型系统卷承载，不属 path。 *)
+
+string  = '"' { char | escape } '"'                   (* 转义串：\n \t \r \0 \" \\ 等；可直接跨行 *)
+        | "r" { "#" } '"' { char } '"' { "#" }        (* 原始串：零转义；开头 N 个 # 须以 " 后接同 N 个 # 闭合 *)
+        | "'" { char | escape } "'"                   (* char/keypath：与 "…" 同转义规则 *)
+              (* 无三引号、无反引号原始串——对齐 Rust *)
+
+stmt_sep = newline | ";"
+              (* ";" 与换行等价，均产生语句分隔；连续折叠、流首抑制、字面量内换行不产生 *)
+
+comment = "//" { char } newline           (* 行注释；不消费尾随换行 *)
+        | "/*" { char | comment } "*/"    (* 块注释，可嵌套（深度计数）；无 # 注释 *)
+```
+
+词法关键字仅 7 个：`return` `if` `else` `for` `while` `break` `continue`。
+`lib` `rwir` `rwfunc` `in` `any` `None` `true` `false` 为**上下文词（软关键字）**——由 parser 按位置识别，非词法保留字。
+
+## 程序结构
+
+```
+              (* 无 import——lib 树即全局命名空间，跨 lib 调用走全路径 /lib/{pkg}·{func}() *)
+
+file         = { lib_block | rwir_decl | rwfunc_decl | instruction }
+
+lib_block    = "lib" lib_path "{" { lib_item } "}"
+lib_path     = ident { "/" ident }         (* lib 名可为多段路径，如 kvlang/规范/词法 *)
+lib_item     = lib_block | rwir_decl | rwfunc_decl | instruction
+              (* lib 内的裸 instruction 收集为隐式 init 函数，无 init 关键字 *)
+
+rwfunc_decl  = "rwfunc" ident "(" [ param_list ] ")"
+              [ "->" ( "(" [ param_list ] ")" | param_list ) ]
+              "{" { statement } "}"
+
+rwir_decl    = "rwir" ident "(" [ param_list ] ")" [ "->" "(" [ param_list ] ")" ]
+              (* 仅签名，无函数体；绑定至扩展执行器 *)
+
+param_list  = param { "," param }
+param       = ident ":" type_expr          (* 类型必须标注 *)
+            | ident ":" type_expr "..."    (* 变参：仅限末位读参；写参不可变参 *)
+
+statement   = instruction | if_stmt | while_stmt | for_stmt | block_stmt
+            | break_stmt | continue_stmt | return_stmt
+              (* 控制流语句仅可出现在 rwfunc 体内；顶层/lib 直属处报错 *)
+```
+
+## 类型表达式（签名参数/返回值类型，多态 + 高维数组）
+
+> 完整语义见 [[kindexpr签名类型表达式]]（类型系统卷）。铁律：无家族简写（`int`/`uint`/`float`/`num`/`char`）——位宽是开放集合，编码须写明确；多态靠显式 `|` 枚举。
+
+```
+type_expr   = atom { "|" atom }                  (* 并集：A|B 表 A 或 B *)
+atom        = shape | mapexpr | structref
+shape       = [ dims ] ( any | kind )
+mapexpr     = key "·" type_expr                  (* stringkeymap；value 可递归嵌套 *)
+structref   = path                               (* struct 原型路径，如 /lib/Point *)
+key         = "[]" char_enc                      (* 字符串键，等价 Go map[string]V *)
+            | "[" scalar { "," scalar } "]"      (* 标量元组键，物理以字符串格式落 key *)
+char_enc    = "char/utf8" | "char/utf32" | "char/ascii"
+scalar      = "bool"
+            | "int8" | "int16" | "int32" | "int64"
+            | "uint8" | "uint16" | "uint32" | "uint64"
+            | "float32" | "float64"
+dims        = "[]"                               (* 恰一维，长度任意，等价 [?]；Rust layout 放宽为 rank≥1，已裁决待修 *)
+            | "[" dim { "," dim } "]"            (* 逗号分割的维；rank = 项数 *)
+dim         = integer | "?"                      (* 精确大小或动态维 *)
+any         = "any"                              (* 通配，匹配任意 kind *)
+kind        = "bool"
+            | "int8" | "int16" | "int32" | "int64"
+            | "uint8" | "uint16" | "uint32" | "uint64"
+            | "float32" | "float64"
+            | "char/utf8" | "char/utf32" | "char/ascii"
+            | "object" | "stringkeymap"
+            | "index" | "extindex"
+            | "struct"
+            | "rwir" | "rwfunc" | "scope" | "time" | "duration"
+              (* 标注可用 kind 白名单（layout known_kind）。rwfunc 兼作用户函数签名槽 kind；
+                 defrwir 是内部落盘 kind、不在标注白名单（无独立 defrwfunc，见 layout 语义卷 / kvspace 模型卷）。
+                 ptr(*前缀)/extindex(@前缀)/None 是 head 编码层，非 kindexpr 文法：
+                 *int64 / @int64 会被 valid_kindexpr 拒。 *)
+```
+
+## 指令
+
+```
+instruction = [ writes "=" ] expr
+            | [ writes "<-" ] expr
+            | expr [ "->" writes ]
+            | expr                     (* 纯副作用调用 *)
+
+writes      = write_slot { "," write_slot }
+write_slot  = ident                    (* 裸名：帧内变量 *)
+            | path                     (* 绝对路径 *)
+            | ident "·" ident          (* 成员写：base·field *)
+            | ident "·" "*" ident      (* 动态键写：base·*key *)
+            | ident "[" expr "]"       (* 下标写：仅限 "=" / "<-" 形式；-> 侧不接受带下标写槽 *)
+```
+
+## 表达式
+
+```
+expr        = primary { infix_primary }
+            | prefix_unary primary
+
+primary     = literal | ident | path
+            | primary "·" ident                       (* 成员读：静态键 *)
+            | primary "·" "*" ident                   (* 成员读：动态键 *)
+            | primary "·" "[" expr { "," expr } "]"   (* 坐标访问（stringkeymap 元素/张量坐标） *)
+            | primary "[" expr { "," expr } "]"       (* compact 下标读 *)
+            | "(" expr ")"                            (* 分组 *)
+            | ident "(" [ arg_list ] ")"              (* 函数调用 *)
+            | ident "·" ident { "·" ident } "(" [ arg_list ] ")"  (* 点号限定调用 *)
+            | array_literal
+            | object_literal
+            | map_literal
+
+prefix_unary = "-" | "!" | "√"                        (* √ = sqrt（U+221A），一元 *)
+
+infix_primary = binary_op expr
+
+binary_op  = "+" | "-" | "×" | "÷" | "%"
+           | "==" | "!=" | "≠" | "<" | ">" | "<=" | "≤" | ">=" | "≥"
+           | "&&" | "||" | "&" | "|" | "^" | "<<" | ">>"
+              (* 乘 = ×(U+00D7)，除 = ÷(U+00F7)；≠ ≤ ≥ 为 != <= >= 的等价字形。
+                 "*" 登记为 pointer（precedence 0、非算术）；"/" 不在符号表、仅用于路径/注释，无算术除法。 *)
+
+arg_list    = expr { "," expr }
+
+literal     = integer | float | string | "None" | "true" | "false"
+              (* 空值字面量是 None，非 null *)
+
+array_literal  = "[" [ expr { "," expr } ] "]"
+               (* compact 形态：元素连续打包进单个 XValue，head kind=元素类型；须定长同类型 *)
+
+object_literal = "{" [ ident "=" expr { (stmt_sep) ident "=" expr } ] "}"
+               (* {k1=v1; k2=v2}，key 为静态标识符，落 object 或 stringkeymap *)
+
+map_literal    = "{" [ expr { (stmt_sep | ",") expr } ] "}"
+               (* stringkeymap 散 key 形态：{v0, v1, ...}，head kind=stringkeymap，
+                  每元素落坐标段 base·[i] 独立 key；字符串数组等变长集合用此形式 *)
+```
+
+## 控制流（仅限 rwfunc 体内）
+
+```
+if_stmt     = "if" "(" expr ")" "{" { statement } "}"
+              { "else" "if" "(" expr ")" "{" { statement } "}" }
+              [ "else" "{" { statement } "}" ]
+
+while_stmt  = "while" "(" expr ")" "{" { statement } "}"
+
+for_stmt    = "for" "(" ident "in" expr ")" "{" { statement } "}"
+
+block_stmt    = ident ":" "{" { statement } "}"    (* 具名作用域 *)
+
+break_stmt    = "break"
+continue_stmt = "continue"
+return_stmt   = "return"    (* 无返回值；输出通过写参传递 *)
+```
+
+以上为**源语法**。layout 将其展平为线性 irseq `[1,0]…[N,0]`，控制流降级为 layout 产物 `goto(irseq)` / `br(cond, irseq, irseq)`（目标解析为整数 irseq，标签另存 `/lib/<func>/‥labels/<name>`）——`goto`/`br` 非源语法，见 layout 语义卷。
+
+## 内建函数
+
+裸名内建（native，权威全集见 `runtime/src/builtin.c` 注册表）：
+
+```
+builtin_call = ( "abs" | "neg" | "sign" | "pow" | "sqrt" | "exp" | "log"
+              | "min" | "max"                                    (* min/max 变参 *)
+              | "bool" | "int8" | "int16" | "int32" | "int64"
+              | "uint8" | "uint16" | "uint32" | "uint64"
+              | "float32" | "float64"
+              | "char/utf8" | "char/utf32" | "char/ascii"        (* 类型构造器兼转换 *)
+              | "array" | "obj" | "map"
+              | "debugger" ) "(" [ arg_list ] ")"
+```
+
+`print` / `println` / `cerr` / `input` **不是 native**——它们是 term 扩展 rwir（见 runtime 语义卷）。
+
+`·` 限定内建族（`base·method(...)`，非裸名终结符）：
+`string·*`、`xv·*`（at/set/reshape/reinterpret/kindexpr/bodylen…）、`kv·*`（get/set/del…）、`ndarray·*`（numel/dim/shape）、`array·*`（append/slice/scatter/compact）、`struct·new`、`vthread·*`（create/run/call/sleep/setstatus）、`time·*`、`time/duration·*`（包分隔用 `/` 分段、`·` 接方法）、`random·*`（uint64/int63/intn）。
+
+```
+(* 类型构造器兼转换：int8(x)/float32(x)/char/utf8(x)/bool(x) …；窄化按补码回绕，float→int 向零截断 *)
+(* 数值运算保宽（fix-034）：同宽→同宽（溢出回绕）、混宽→提升再窄化回结果 kind *)
+(* print 系（ext）：print 无空格拼接不换行；println 空格分隔加换行 *)
+(* debugger(): 内联暂停，非调试模式 no-op *)
+(* ÷ : 两侧 int → 整除(C 风格)；任一侧 float → 浮除 *)
+(* s[i] 读返单字符字符串，越界返 ""；s[i]="X" 单字符替换写回新串 *)
+(* + 作用在 string∧string → 拼接 *)
+```
+"## -> /lib/kvlang/规范/附录/文法
+}
