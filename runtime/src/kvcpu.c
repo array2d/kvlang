@@ -298,7 +298,7 @@ static char *handle_call(kvlangKv_t *kv, const char *pc, kvlangRwirInst_t *inst)
     char err[256];
     kvlangKvDelTree(kv, frame_root, err, sizeof err);
     char *stack_fr = kvlangKeytreeStack(frame_root);
-    kvlangKvMkindex(kv, stack_fr, err, sizeof err);
+    kvlangKvMkindex(kv, stack_fr, 0, err, sizeof err);
     kvlangKvExtIndex(kv, stack_fr, func_dir.p, err, sizeof err);
 
     /* 系统变量 */
@@ -502,7 +502,7 @@ char *kvlangKvcpuBootstrap(kvlangKv_t *kv, const char *vtid, const char *funcnam
     char *frame_root = kvlangKeytreeFrameAt(vtid, 1);
     char *stack_fr = kvlangKeytreeStack(frame_root);
     char err[256];
-    kvlangKvMkindex(kv, stack_fr, err, sizeof err);
+    kvlangKvMkindex(kv, stack_fr, 0, err, sizeof err);
     kvlangKvExtIndex(kv, stack_fr, func_dir.p, err, sizeof err);
 
     char *ep = kvlangKeytreeEntryPc(frame_root);

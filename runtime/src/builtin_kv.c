@@ -230,7 +230,16 @@ int kvlangBuiltinKvListN(kvlangFrame_t *f) {
     return rc;
 }
 
-int kvlangBuiltinKvMkindex(kvlangFrame_t *f) { return kv_path_void(f, "kv.mkindex", kvlangKvMkindex); }
+int kvlangBuiltinKvMkindex(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
+    char *key = n >= 1 ? path_arg(f, 0, in) : NULL;
+    if (!key) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "TypeError: kv.mkindex requires a path"); }
+    uint32_t capacity = n >= 2 ? (uint32_t)kvlangXvalueAsInt64(&in[1]) : 0;
+    char err[256]; int rc = kvlangKvMkindex(f->kv, key, capacity, err, sizeof err);
+    free(key); kvlangBuiltinFreeInputs(in, n);
+    if (rc != 0) return kvlangBuiltinSetErr(f, "%s", err);
+    kvlangBuiltinNextPc(f); return 0;
+}
 
 int kvlangBuiltinKvExtIndex(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);

@@ -74,7 +74,13 @@ extern "C" {
         err_cap: u32,
     ) -> c_int;
     fn kvspaceDelTree(h: Handle, prefix: *const c_char, err: *mut c_char, err_cap: u32) -> c_int;
-    fn kvspaceMkindex(h: Handle, path: *const c_char, err: *mut c_char, err_cap: u32) -> c_int;
+    fn kvspaceMkindex(
+        h: Handle,
+        path: *const c_char,
+        capacity: u32,
+        err: *mut c_char,
+        err_cap: u32,
+    ) -> c_int;
     fn kvspaceMkindexExt(
         h: Handle,
         path: *const c_char,
@@ -269,7 +275,8 @@ impl Kv {
     pub fn mkindex(&mut self, path: &str) -> Result<(), String> {
         let c = CString::new(path).expect("no NUL");
         let mut err: [c_char; 256] = [0; 256];
-        let ret = unsafe { kvspaceMkindex(self.h, c.as_ptr(), err.as_mut_ptr(), err.len() as u32) };
+        let ret =
+            unsafe { kvspaceMkindex(self.h, c.as_ptr(), 0, err.as_mut_ptr(), err.len() as u32) };
         err_ret(&mut err, ret)
     }
 

@@ -37,7 +37,7 @@ extern int   kvspaceDelTree(void *h, const char *prefix, char *err, uint32_t err
 extern int   kvspaceCp(void *h, const char *src, const char *dst, char *err, uint32_t err_cap);
 extern int   kvspaceCpTree(void *h, const char *src, const char *dst, char *err, uint32_t err_cap);
 extern int   kvspaceCpList(void *h, const char *src, const char *dst, char *err, uint32_t err_cap);
-extern int   kvspaceMkindex(void *h, const char *path, char *err, uint32_t err_cap);
+extern int   kvspaceMkindex(void *h, const char *path, uint32_t capacity, char *err, uint32_t err_cap);
 extern int   kvspaceMkindexExt(void *h, const char *path, const char *ext_path, char *err, uint32_t err_cap);
 extern int   kvspaceRmindexExt(void *h, const char *path, char *err, uint32_t err_cap);
 extern int   kvspaceWatch(void *h, const char *key, const uint8_t *target, uint32_t target_len,
@@ -146,7 +146,7 @@ int kvlangKvDelTree(kvlangKv_t *k, const char *prefix, char *err, uint32_t err_c
 int kvlangKvCp(kvlangKv_t *k, const char *src, const char *dst, char *err, uint32_t err_cap);
 int kvlangKvCpTree(kvlangKv_t *k, const char *src, const char *dst, char *err, uint32_t err_cap);
 int kvlangKvCpList(kvlangKv_t *k, const char *src, const char *dst, char *err, uint32_t err_cap);
-int kvlangKvMkindex(kvlangKv_t *k, const char *path, char *err, uint32_t err_cap);
+int kvlangKvMkindex(kvlangKv_t *k, const char *path, uint32_t capacity, char *err, uint32_t err_cap);
 int kvlangKvExtIndex(kvlangKv_t *k, const char *path, const char *ext, char *err, uint32_t err_cap);
 int kvlangKvDelExtIndex(kvlangKv_t *k, const char *path, char *err, uint32_t err_cap);
 int kvlangKvList(kvlangKv_t *k, const char *prefix, bool expand_ext, bool resolve,

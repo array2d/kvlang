@@ -93,8 +93,8 @@ int kvlangKvCpList(kvlangKv_t *k, const char *src, const char *dst, char *err, u
     return kvspaceCpList(k->h, src, dst, err, err_cap);
 }
 
-int kvlangKvMkindex(kvlangKv_t *k, const char *path, char *err, uint32_t err_cap) {
-    return kvspaceMkindex(k->h, path, err, err_cap);
+int kvlangKvMkindex(kvlangKv_t *k, const char *path, uint32_t capacity, char *err, uint32_t err_cap) {
+    return kvspaceMkindex(k->h, path, capacity, err, err_cap);
 }
 
 int kvlangKvExtIndex(kvlangKv_t *k, const char *path, const char *ext, char *err, uint32_t err_cap) {

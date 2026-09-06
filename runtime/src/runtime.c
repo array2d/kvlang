@@ -85,7 +85,7 @@ char *kvlangVthreadSpawn(kvlangKv_t *kv, const char *funcname,
   kvlangKeytreeVthread(vtid, &vtroot);
   char *stack_vt = kvlangKeytreeStack(vtroot.p);
   char e[256];
-  kvlangKvMkindex(kv, stack_vt, e, sizeof e);
+  kvlangKvMkindex(kv, stack_vt, 0, e, sizeof e);
   char *first_pc = kvlangKvcpuBootstrap(kv, vtid, funcname, args, nargs);
   if (!first_pc) {
     free(stack_vt);
