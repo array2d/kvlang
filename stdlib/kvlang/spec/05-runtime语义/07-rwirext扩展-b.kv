@@ -13,14 +13,14 @@ lib kvlang/spec/runtime语义/rwirext扩展_b {
 第一个 rwir 的 `vids` 是真实 strkeymap；后续同 opcode 的 `vids` 是 `Ptr` 指向第一个（共享同一队列）。时序：
 
 1. 中央 runtime `isothersrwir` 命中 → `handoff_external_rwir`：`Set /lib/<op>/vids/<vtid>=pc`。
-2. 扩展发现队列中的 vtid，`RunSeq(pc)`：从 PC 起逐条解码，只要 opcode ∈ 己方集合就执行，遇第一条非己方指令即停（**顺序执行，非并行 batch**）；写回最终 PC，删 `vids` 项。
+2. 扩展发现队列中的 vtid，`RunSeq(pc)`：从 PC 起逐条解码，只要 `opcode ∈ 本扩展.myrwircaps` 就执行，遇第一条不在 myrwircaps 内的指令即停（**顺序执行，非并行 batch**）；写回最终 PC，删 `vids` 项。
 3. 中央 runtime `Watch` 直到 vtid 从队列消失（30s 超时），继续。
 
 中央 runtime **不推进 PC**——扩展批量执行后已写回最终 PC，中央直接读新 PC 续跑。
 
 ## 就地扩展（同进程）
 
-同进程扩展在驱动循环里就地派发（Rust `run_vid`：`rwir::is_inproc(op)` 命中 → `rwir::dispatch`），无 handoff、无 watch。当前就地集合（`runtime-rs`）：
+同进程扩展在驱动循环里就地派发（Rust `run_vid`：`rwir::is_inproc(op)`——即 `op ∈ myrwircaps`——命中 → `rwir::dispatch`），无 handoff、无 watch。runtime-rs 的 myrwircaps（就地集合）当前登记：
 
 ```
 term      print / println / cerr / input
