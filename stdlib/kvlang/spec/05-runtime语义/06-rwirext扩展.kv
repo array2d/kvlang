@@ -6,13 +6,23 @@ kvlang 是**小核心 + 扩展主导**语言。中央 runtime 只实现执行核
 
 ## 扩展运行时模型
 
-**扩展运行时 = 只解析己方 opcode 的迷你执行器**：从中央 runtime 拿到 PC，连续执行己方 rwir，直到遇到非己方指令，把最终 PC 交还中央 runtime。
+**扩展运行时 = 只解析 myrwircaps 内 opcode 的迷你执行器**：从中央 runtime 拿到 PC，连续执行 myrwircaps 内的 rwir，直到遇到不在 myrwircaps 内的指令，把最终 PC 交还中央 runtime。
+
+### 关键术语：myrwircaps（本 runtime 的 rwir 能力表）
+
+**myrwircaps 是每个 runtime 都必须定义的一张 map/table**——登记本 runtime **能就地解释的全部 opcode**，映射 `opcode → 就地处理器`。它是 kvlang runtime 分层与派发的核心术语：一个 runtime「能跑什么」由且仅由它的 myrwircaps 界定。
+
+- **每个 runtime 必须声明自己的 myrwircaps**。核心 runtime-c 的 myrwircaps 就是其 **native 静态注册表**（数组 + 线性查找，见 [[cruntime与后端abi]]），登记 native builtin（+ 控制流 `call`/`return`/`br`/`goto` + `=` 拷贝，见 [[函数调用与内建]]）。
+- **每个扩展运行时各自定义一张 myrwircaps**，登记其自带的 rwir opcode。例：runtime-rs 为 `term`/`json`/`http`/`kvlanglayout`/`networld` 等（见 [[rwirext扩展_b]] 就地集合）；未来 deepx-gpu-compute 为 tensor 融合算子。
+- **派发判据**：`opcode ∈ 本 runtime.myrwircaps` → 查表取处理器**就地执行**；否则该 rwir 须经 def rwir 路由，**移交**给以它为 myrwircaps 的另一扩展（跨进程 handoff/watch，或嵌入式交回宿主，见 [[rwirext扩展_b]]、[[cruntime与后端abi_续]]）。实现里 `rwir::is_inproc(op)` 即「`op ∈ myrwircaps`」的查表判定。
+
+myrwircaps **只关乎执行位置**（哪张表登记了它、由谁就地跑），不改变 rwir 的动态语义——同一 rwir 无论落进哪个 runtime 的 myrwircaps，行为必须一致。
 
 核心公理（normative）：
 
 1. **rwir 自描述**：opcode + 读/写参已含执行所需全部信息。
 2. **注册即签名**：扩展把 `/lib/<opcode>`（kind=`def rwir`，主槽 body=[nr][nw][dynamic]，各参数类型在签名行 `[0,x]` 各槽）写进 kvspace 即完成声明——无 `/sys/`、无中心目录。
-3. **批量执行**：扩展连续执行己方 rwir 到非己方指令，把最终 PC 写回 vthread。
+3. **批量执行**：扩展连续执行 myrwircaps 内的 rwir 到不在 myrwircaps 内的指令，把最终 PC 写回 vthread。
 4. **被动消费**：跨进程扩展只监控己方 `/lib/<opcode>/vids` 队列。
 
 ## 注册与发现

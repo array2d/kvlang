@@ -12,11 +12,11 @@ lib kvlang/spec/runtime语义/cruntime与后端abi_续 {
 
 `conn(dsn)` 按 scheme（`shm://` / `redis://` / `fs://`）选后端，DSN 是唯一的后端区分。三后端**语义必须完全一致**：一致性判据是 `tutorial/` 全量三后端逐字节相同输出（见导言卷）。后端存储布局差异（如 fs 把 `·` 编码为 `·/` 嵌套目录）经对称编解码还原，**不是**语义差异。
 
-## C runtime 与 Rust runtime 一致性
+## 核心与扩展宿主的一致性（runtime-c ↔ runtime-rs）
 
-两套 runtime 必须表现相同动态语义，但**执行位置策略**允许不同：
+runtime-c 是唯一核心；runtime-rs 是套用该核心的扩展宿主（见 [[执行模型]]、[[cruntime与后端abi]]）。因套用同一核心，二者的核心动态语义**天然一致**、不存在两套需人工对齐的核心；差异**仅限**须经 def rwir 路由的 rwir 的**执行位置策略**，且对 kvlang 程序不可观测：
 
-- **C runtime**：须经 def rwir 路由的 rwir（不在本 runtime myrwircaps 内的 rwir）一律经 `handoff_external_rwir`（Set `/lib/<op>/vids/<vtid>` + Watch 30s 超时）移交，供独立进程扩展消费；嵌入式模式（`KVMODE_RETURN`）经 `out_pc` 把控制交回同进程扩展。
+- **C runtime**：须经 def rwir 路由的 rwir（不在本 runtime myrwircaps 内的 rwir，见 [[rwirext扩展]]）一律经 `handoff_external_rwir`（Set `/lib/<op>/vids/<vtid>` + Watch 30s 超时）移交，供独立进程扩展消费；嵌入式模式（`KVMODE_RETURN`）经 `out_pc` 把控制交回同进程扩展。
 - **Rust runtime**：`is_inproc(op)` 命中的 rwir 在驱动循环里就地 `dispatch`（无 handoff、无 watch）；非就地 rwir 经 `kvlang_rwirextHandoff` 移交独立进程扩展或委托宿主 `ext` 处理器。
 
 二者对 native builtin、控制流、`=` 拷贝、值语义的处理**必须**一致；差异仅限须经 def rwir 路由的 rwir 的**就地 vs 移交**这一执行位置维度，且对 kvlang 程序不可观测（同一 tutorial 三后端两 runtime 输出一致）。

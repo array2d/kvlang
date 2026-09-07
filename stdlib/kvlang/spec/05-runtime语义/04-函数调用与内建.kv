@@ -26,7 +26,7 @@ lib kvlang/spec/runtime语义/函数调用与内建 {
 
 ## native builtin 判定
 
-`kvlangBuiltinIsNative(opcode)`（`runtime/src/builtin.c`）先剥数字类型前缀（`int64·add` / `float32·add` … 经 `strip_num_kind` 归并到同一 `add`，按操作数 kind 归约），再在**静态注册表**线性查表。命中即为 native。native 判定**先于** `/lib` 查表，故 native opcode 不会被当须经 def rwir 路由的 rwir 或用户函数。
+`kvlangBuiltinIsNative(opcode)`（`runtime/src/builtin.c`）先剥数字类型前缀（`int64·add` / `float32·add` … 经 `strip_num_kind` 归并到同一 `add`，按操作数 kind 归约），再在**静态注册表**线性查表。命中即为 native。native 判定**先于** `/lib` 查表，故 native opcode 不会被当须经 def rwir 路由的 rwir 或用户函数。此静态注册表即**核心 runtime-c 的 myrwircaps**（见 [[rwirext扩展]]）——核心能就地跑的 opcode 全在这张表里。
 
 ## native builtin 全集（权威）
 
