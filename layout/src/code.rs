@@ -2,7 +2,7 @@
 //!
 //! 存储约定：
 //!   /lib/<pkg>·<name>/[0,0]         布局后签名（kind=rwfunc）
-//!   /lib/<pkg>·<name>/<param>       命名参数→slot 指针（kind=char, isptr=1）
+//!   /lib/<pkg>·<name>/<param>       命名参数→slot 指针（langtype=char, ref=1）
 //!   /lib/<pkg>·<name>/[i,j]         编译后指令（kind=rwir），i 从 1 开始
 //!   /lib/<pkg>·<name>/‥labels/<l>   label → irseq
 //!   /lib/<pkg>·<name>.src           源码副本

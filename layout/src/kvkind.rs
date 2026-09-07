@@ -38,7 +38,7 @@ pub fn head(data: &[u8]) -> ffi::kvspaceHead_t {
     ffi::decode_head(data)
 }
 
-/// 解析 kindexpr 内容 → (dims, base kind)。kindexpr 无前缀（ref/ptr 归 head.xkind）。
+/// 解析 kindexpr 内容 → (dims, base kind)。kindexpr 无前缀（ref/ptr 归 head.ref）。
 pub fn parse_kindexpr(kx: &str) -> (Vec<i32>, String) {
     if kx.starts_with('[') {
         match kx.find(']') {
@@ -64,11 +64,11 @@ pub fn kindexpr(data: &[u8]) -> String {
     }
     let h = ffi::decode_head(data);
     let end = h
-        .kindexpr
+        .langtype
         .iter()
         .position(|&b| b == 0)
-        .unwrap_or(h.kindexpr.len());
-    String::from_utf8_lossy(&h.kindexpr[..end]).into_owned()
+        .unwrap_or(h.langtype.len());
+    String::from_utf8_lossy(&h.langtype[..end]).into_owned()
 }
 
 pub fn kind(data: &[u8]) -> String {
@@ -79,7 +79,7 @@ pub fn kind(data: &[u8]) -> String {
 }
 
 pub fn is_ptr(data: &[u8]) -> bool {
-    !data.is_empty() && ffi::decode_head(data).xkind == 1
+    !data.is_empty() && ffi::decode_head(data).r#ref == 1
 }
 
 pub fn array_len(data: &[u8]) -> i32 {
@@ -128,7 +128,7 @@ pub fn display(data: &[u8]) -> String {
     }
     let h = ffi::decode_head(data);
     let b = body(data, &h);
-    if h.xkind == 1 {
+    if h.r#ref == 1 {
         return format!("→{}:{}", String::from_utf8_lossy(b), k);
     }
     format!("{}:{}", k, plain_value(&k, b))

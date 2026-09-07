@@ -10,23 +10,31 @@
 
 /* ── kvspace-durable C ABI ─────────────────────────────────────────── */
 
+/* 三正交轴 head（逐字段对齐 kvspace/include/kvspace/kvspace.h 的 kvspaceHead_t）。
+ * kindexpr 即该 ABI 的 langtype 槽（本 runtime 内部沿用 kindexpr 命名）。 */
 typedef struct {
-    uint8_t xkind;         /* 五分类：0=None 1=Ptr 2=ExtValue 3=DefKindexpr 4=RealValue */
-    uint8_t kindexpr[256]; /* NUL 终止（含 [dims]、无前缀，去 padding） */
-    int32_t kind_off;      /* base 种类在 kindexpr 内的起始字节偏移 */
-    int32_t ndim;          /* 维数（标量=0） */
-    int32_t dims[8];       /* 各维长度（X_MAX_NDIM=8） */
-    uint8_t ro;            /* 1=只读，0=可写 */
+    uint16_t headlen;      /* head 总字节数；body 起于偏移 headlen */
+    uint8_t  ref;          /* 存储位置：见 KVSPACE_REF_* */
+    uint8_t  storetype;    /* 物理布局：见 KVSPACE_STORETYPE_* */
+    uint8_t  ro;           /* 1=只读，0=可写 */
     uint32_t vid;          /* vthread id */
-    int32_t body_len;      /* body 字节数 */
-    int32_t body_offset;   /* body 在 data 内的起始偏移（= head_len） */
+    int32_t  body_len;     /* body 字节数 */
+    int32_t  ndim;         /* ARRAYND：维数；index/extindex：3；NONE/ATOM：0 */
+    int32_t  dims[8];      /* 各维长度 / [len,cap,M]（X_MAX_NDIM=8） */
+    uint8_t  kindexpr[256];/* 语义类型 kindexpr 串，NUL 终止（含 [dims]、无 ref/ext 前缀） */
+    int32_t  kindexpr_len; /* kindexpr 内容长度（去 padding） */
+    int32_t  body_offset;  /* body 在 data 内的起始偏移（= headlen） */
 } kvspaceHead_t;
 
-#define KVSPACE_XKIND_NONE        0
-#define KVSPACE_XKIND_PTR         1
-#define KVSPACE_XKIND_EXTVALUE    2
-#define KVSPACE_XKIND_DEFKINDEXPR 3
-#define KVSPACE_XKIND_REALVALUE   4
+#define KVSPACE_REF_INLINE 0
+#define KVSPACE_REF_PTR    1
+#define KVSPACE_REF_EXT    2
+
+#define KVSPACE_STORETYPE_NONE     0
+#define KVSPACE_STORETYPE_ATOM     1
+#define KVSPACE_STORETYPE_ARRAYND  2
+#define KVSPACE_STORETYPE_INDEX    3
+#define KVSPACE_STORETYPE_EXTINDEX 4
 
 extern void *kvspaceConnect(const char *dsn);
 extern void  kvspaceClose(void *h);
@@ -35,9 +43,10 @@ extern int   kvspaceGet(void *h, const char *key, int resolve, uint8_t **out, ui
 /* 就地写：key 已存在、body_len==原 body_len → 返回原 box body 偏移指针；否则非 0 + err。 */
 extern int   kvspaceWriteInPlace(void *h, const char *key, int resolve, uint32_t body_len,
                                   uint8_t **body, char *err, uint32_t err_cap);
-/* 新位置写：按 (xkind, kindexpr, body_len) 分配新 box、写 head，返回 body 偏移指针。 */
-extern int   kvspaceWriteNewPlace(void *h, const char *key, uint8_t xkind, const char *kindexpr,
-                                   uint32_t body_len, uint8_t **body, char *err, uint32_t err_cap);
+/* 新位置写：按 (ref, storetype, ro, vid, langtype, body_len) 分配新 box、写 head，返回 body 偏移指针。 */
+extern int   kvspaceWriteNewPlace(void *h, const char *key, uint8_t ref, uint8_t storetype,
+                                   uint8_t ro, uint32_t vid, const char *langtype, uint32_t body_len,
+                                   uint8_t **body, char *err, uint32_t err_cap);
 /* 前缀遍历：listlen 定计数，逐 idx 取名（借用回收缓冲，不得 free），不一次性返回整段名单。 */
 extern int   kvspaceListLen(void *h, const char *prefix, int expand_ext, int resolve, int32_t *out_count);
 extern int   kvspaceListAt(void *h, const char *prefix, int expand_ext, int resolve, int32_t idx,
