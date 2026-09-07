@@ -4,23 +4,23 @@
 //   6
 rwfunc guess_number(n:int64) -> () {
 	1 -> lo
-	hi <- n
+	hi = n
 	while (lo <= hi) {
-		s = lo + hi  // = 等价于 <-
+		s = lo + hi
 		s ÷ 2 -> mid
 		s ÷ 2 -> mid_m
-		low <- mid < 6
+		low = mid < 6
 
 		if (low) {
-			lo = mid + 1  // = 等价于 <-
+			lo = mid + 1
 		} else {
 			mid > 6 -> high
 
 			if (high) {
-				hi <- mid - 1
+				hi = mid - 1
 			} else {
 				println(mid)
-				lo = hi + 1  // = 等价于 <-
+				lo = hi + 1
 			}
 		}
 	}

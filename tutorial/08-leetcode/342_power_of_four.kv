@@ -3,15 +3,15 @@
 // 期望输出:
 //   1
 rwfunc is_power4(n:int64) -> () {
-	pos = n > 0  // = 等价于 <-
+	pos = n > 0
 
 	if (pos) {
 		1 -> t
 		while (t < n) {
-			t <- t × 4
-			t_m <- t × 4
+			t = t × 4
+			t_m = t × 4
 		}
-		eq = t == n  // = 等价于 <-
+		eq = t == n
 
 		if (eq) {
 			println(1)

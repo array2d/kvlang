@@ -4,33 +4,33 @@
 //   1
 //   0
 rwfunc is_square(n:int64) -> () {
-	small <- n < 2
+	small = n < 2
 
 	if (small) {
 		println(1)
 	} else {
-		lo = 1  // = 等价于 <-
+		lo = 1
 		n ÷ 2 -> hi
 		n ÷ 2 -> hi_m
-		ans <- 0
+		ans = 0
 		while (lo <= hi) {
-			s = lo + hi  // = 等价于 <-
+			s = lo + hi
 			s ÷ 2 -> mid
 			s ÷ 2 -> mid_m
-			sq <- mid × mid
-			sq_m <- mid × mid
-			eq = sq == n  // = 等价于 <-
+			sq = mid × mid
+			sq_m = mid × mid
+			eq = sq == n
 
 			if (eq) {
 				1 -> ans
-				lo <- hi + 1
+				lo = hi + 1
 			} else {
-				lt = sq < n  // = 等价于 <-
+				lt = sq < n
 
 				if (lt) {
 					mid + 1 -> lo
 				} else {
-					hi <- mid - 1
+					hi = mid - 1
 				}
 			}
 		}

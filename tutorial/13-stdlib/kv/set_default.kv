@@ -5,9 +5,9 @@
 
 rwfunc test() -> () {
 	kv·set_default("/sd_key", "first_val")
-	sd1 <- kv·get("/sd_key")
+	sd1 = kv·get("/sd_key")
 	println("set_default new:", sd1)
 	kv·set_default("/sd_key", "second_val")
-	sd2 <- kv·get("/sd_key")
+	sd2 = kv·get("/sd_key")
 	println("set_default existing:", sd2)
 }

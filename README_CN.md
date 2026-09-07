@@ -83,10 +83,10 @@ echo '40 + 2 -> x; print(x)' | ./kvlang      # pipe 模式（; 分隔同行语�
 
 ```kv
 rwfunc main() -> () {
-    total = 0  # = 等价于 <-
+    total = 0
     1 -> i
     while (i <= 5) {
-        total <- total + i
+        total = total + i
         i + 1 -> i
     }
     println(total)
@@ -95,11 +95,10 @@ rwfunc main() -> () {
 main()
 ```
 
-### rwir（读写码）：赋值三形态
+### rwir（读写码）：写入两形态
 
 ```kv
-x = 40 + 2            # = ：写槽在左（≡ <-）；= 不是表达式，不能嵌进条件里
-y <- x                # 左箭头：写槽在左
+x = 40 + 2            # = ：写槽在左；= 不是表达式，不能嵌进条件里
 x × y -> z            # 右箭头：写槽在右
 f(a, b) -> r          # 函数写参映射；多写参 -> x, y；丢弃用 -> _
 ```
@@ -109,9 +108,9 @@ f(a, b) -> r          # 函数写参映射；多写参 -> x, y；丢弃用 -> _
 **`rwfunc func(ra,rb) -> (wa,wb) { … }` = 自定义复合 rwir**，单条 rwir 如 `A + B -> C` 是原子 rwir（一个操作码 + 读参 + 写参）；`rwfunc` 把多条 rwir 打包成命名单元，对外暴露相同的箭头接口——`(ra,rb)` 是读参声明，`-> (wa,wb)` 是写参声明。调用 `add(3,4) -> s` 即把实参绑入读槽、写槽映射回调用方帧。没有返回值，只有写参映射。
 
 `rwfunc` 签名中 `-> (C:int64)` 是**写参声明**。函数把结果写进写参槽，调用方用 `-> r` 把写参映射到自己的位置。
-**读参只读**：函数体内不可把读参放进写槽（如 `A = A + 1`）。数组元素写同理——`a[i] <- v` 写穿 `a`，要修改的数组/字典必须放写参位置。
+**读参只读**：函数体内不可把读参放进写槽（如 `A = A + 1`）。数组元素写同理——`a[i] = v` 写穿 `a`，要修改的数组/字典必须放写参位置。
 ```kv
-# ❌ 错误：数组作读参，a[i] <- v 写读参槽 → parser 拒绝
+# ❌ 错误：数组作读参，a[i] = v 写读参槽 → parser 拒绝
 rwfunc bad(a:int64) -> () { 99 -> a[0] }
 
 # ✅ 正确：数组作写参，函数内读写自由
@@ -154,8 +153,8 @@ p.val -> v               # 读 /node.val → 42
 
 ```kv
 rwfunc build() -> () {
-    /n1 = { val=1; next="/n2" }  # = 等价于 <-
-    /n2 <- { val=2; next="/n3" }
+    /n1 = { val=1; next="/n2" }
+    /n2 = { val=2; next="/n3" }
     { val=3; next="" } -> /n3
 }
 
@@ -221,7 +220,7 @@ for (x in [7, 2, 9, 4]) { println(x) }
 **`print` / `println` / `cerr` 不是内建。** KV 世界里没有终端，只有 key 和 value——I/O 不是核心语言原语。它们是**扩展 rwir**：由 `term` 扩展运行时把签名注册到 `/lib/<opcode>`（kind=`rwir`），并写宿主进程的 `stdout`/`stderr`。核心 runtime 把任何"`/lib/<opcode>` 上带 `rwir` 签名、且不在 builtin 表里"的 opcode 识别为扩展 rwir，交给其扩展运行时执行。与 `json.to` / `json.from`（json 扩展）、tensor 算子（numpy / GPU 扩展）同一套机制。
 
 ```kv
-a:int64 = [7, 2, 9, 4]     # 带类型 1D 数组，= ≡ <-
+a:int64 = [7, 2, 9, 4]     # 带类型 1D 数组
 ndarray.numel(a) -> n         # 4
 at(a, 2) -> e            # 9
 set(a, 1, 99) -> a       # 修改元素：a 变为 [7, 99, 9, 4]

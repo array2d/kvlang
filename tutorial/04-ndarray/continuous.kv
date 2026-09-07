@@ -9,17 +9,17 @@ rwfunc test() -> () {
 	a:[]int64 = [10, 20, 30, 40]
 	ndarray·numel(a) -> n
 	println("len =", n)
-	v0 <- a[0]
+	v0 = a[0]
 	println("[0] =", v0)
-	a[1] <- 99
+	a[1] = 99
 	x0 = a[0]
 	a[1] -> x1
-	x2 <- a[2]
+	x2 = a[2]
 	println("after set:", x0, x1, x2)
 	total = 0
 	0 -> i
 	while (i < n) {
-		x <- a[i]
+		x = a[i]
 		total = total + x
 		i + 1 -> i
 	}

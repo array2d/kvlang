@@ -15,7 +15,7 @@ rwfunc test() -> () {
 		v -> arr·*i
 		i + 1 -> i
 	}
-	t0 <- time·now()
+	t0 = time·now()
 	st_lo:[int64]·int64 = {}
 	st_hi:[int64]·int64 = {}
 	0 -> top
@@ -52,15 +52,15 @@ rwfunc test() -> () {
 			top + 1 -> top
 		}
 	}
-	t1 <- time·now()
+	t1 = time·now()
 	n ÷ 2 -> mid
 	n - 1 -> last
 	kv·get(arr, 0) -> a0
 	kv·get(arr, mid) -> am
 	kv·get(arr, last) -> al
 	println("qsort: a0 =", a0, "amid =", am, "alast =", al)
-	delta <- time·sub(t1, t0)
-	ns <- time/duration·as_nanos(delta)
+	delta = time·sub(t1, t0)
+	ns = time/duration·as_nanos(delta)
 	println("__bench_ns:", ns)
 	println("__bench_input: N=__SCALE__,seed=1")
 }

@@ -10,7 +10,7 @@ rwfunc test() -> () {
 	bid:[int64]·int64 = {}
 	bdep:[int64]·int64 = {}
 	0 -> nid
-	t0 <- time·now()
+	t0 = time·now()
 	nid + 1 -> nid
 	nid -> root
 	0 -> L·*root
@@ -63,10 +63,10 @@ rwfunc test() -> () {
 			tp + 1 -> tp
 		}
 	}
-	t1 <- time·now()
+	t1 = time·now()
 	println("bintree: nodes =", count)
-	delta <- time·sub(t1, t0)
-	ns <- time/duration·as_nanos(delta)
+	delta = time·sub(t1, t0)
+	ns = time/duration·as_nanos(delta)
 	println("__bench_ns:", ns)
 	println("__bench_input: depth=__SCALE__")
 }

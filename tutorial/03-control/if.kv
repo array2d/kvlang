@@ -6,21 +6,21 @@ lib my {
         if (x < 0) {
             -x -> r
         } else {
-            r <- x
+            r = x
         }
     }
 }
 
 rwfunc test() -> () {
 
-	a = my·abs(-5)  // = 等价于 <-
+	a = my·abs(-5)
 	println("abs(-5) =", a)
 	my·abs(3) -> b
 	println("abs(3) =", b)
-	c <- my·abs(-10)
+	c = my·abs(-10)
 	println("abs(-10) =", c)
-	d = b >= 90  // = 等价于 <-
-	d_m = b ≥ 90  // = 等价于 <-
+	d = b >= 90
+	d_m = b ≥ 90
 	println(d_m)
 	println(d)
 	a -> /last_abs

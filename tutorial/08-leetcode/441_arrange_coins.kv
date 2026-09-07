@@ -3,26 +3,26 @@
 // 期望输出:
 //   2
 rwfunc arrange(n:int64) -> () {
-	lo = 1  // = 等价于 <-
+	lo = 1
 	n -> hi
-	ans <- 0
+	ans = 0
 	while (lo <= hi) {
-		s = lo + hi  // = 等价于 <-
+		s = lo + hi
 		s ÷ 2 -> mid
 		s ÷ 2 -> mid_m
-		m2 <- mid × mid
-		m2_m <- mid × mid
-		total = m2 + mid  // = 等价于 <-
+		m2 = mid × mid
+		m2_m = mid × mid
+		total = m2 + mid
 		total ÷ 2 -> t
 		total ÷ 2 -> t_m
-		ok <- t <= n
-		ok_m <- t ≤ n
+		ok = t <= n
+		ok_m = t ≤ n
 
 		if (ok) {
-			ans = mid  // = 等价于 <-
+			ans = mid
 			mid + 1 -> lo
 		} else {
-			hi <- mid - 1
+			hi = mid - 1
 		}
 	}
 	println(ans)

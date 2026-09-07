@@ -22,15 +22,15 @@ rwfunc generate(num_rows:int64) -> () {
 	_ = kv·set("/tmp/pt", 0, 1)
 	println(1)
 	if (num_rows == 1) { }
-	r = 1  // = 等价于 <-
+	r = 1
 	while (r < num_rows) {
 		println(1)
 		_ = kv·set("/tmp/cur", 0, 1)
-		i = 1  // = 等价于 <-
+		i = 1
 		while (i < r) {
 			/tmp/pt[i-1] -> a
 			/tmp/pt[i] -> b
-			v <- a + b
+			v = a + b
 			println(v)
 			_ = kv·set("/tmp/cur", i, v)
 			i + 1 -> i
@@ -38,7 +38,7 @@ rwfunc generate(num_rows:int64) -> () {
 		println(1)
 		_ = kv·set("/tmp/cur", r, 1)
 		// copy cur to pt
-		k = 0  // = 等价于 <-
+		k = 0
 		while (k <= r) {
 			/tmp/cur[k] -> val
 			_ = kv·set("/tmp/pt", k, val)

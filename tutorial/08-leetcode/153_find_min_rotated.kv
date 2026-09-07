@@ -3,21 +3,21 @@
 // 期望输出:
 //   0
 rwfunc find_min() -> () {
-	a:[]int64 <- [4, 5, 6, 7, 0, 1, 2]
-	n = ndarray·numel(a)  // = 等价于 <-
+	a:[]int64 = [4, 5, 6, 7, 0, 1, 2]
+	n = ndarray·numel(a)
 	0 -> lo
-	hi <- n - 1
+	hi = n - 1
 	while (lo < hi) {
-		s = lo + hi  // = 等价于 <-
+		s = lo + hi
 		s ÷ 2 -> mid
-		mv <- a[mid]
-		rv = a[hi]  // = 等价于 <-
+		mv = a[mid]
+		rv = a[hi]
 		mv < rv -> ok
 
 		if (ok) {
-			hi <- mid
+			hi = mid
 		} else {
-			lo = mid + 1  // = 等价于 <-
+			lo = mid + 1
 		}
 	}
 	a[lo] -> ans

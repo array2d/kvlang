@@ -4,15 +4,15 @@
 //   1
 //   0
 rwfunc is_power3(n:int64) -> () {
-	pos <- n > 0
+	pos = n > 0
 
 	if (pos) {
-		t = 1  // = 等价于 <-
+		t = 1
 		while (t < n) {
 			t × 3 -> t
 			t × 3 -> t_m
 		}
-		eq <- t == n
+		eq = t == n
 
 		if (eq) {
 			println(1)

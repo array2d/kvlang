@@ -4,27 +4,27 @@
 //   321
 //   -321
 rwfunc reverse(x:int64) -> (result:int64) {
-	neg = x < 0  // = 等价于 <-
+	neg = x < 0
 	x -> n
 
 	if (neg) {
-		n <- -x
+		n = -x
 	}
 
-	rev = 0  // = 等价于 <-
+	rev = 0
 	while (n > 0) {
 		rev × 10 -> r
 		rev × 10 -> r_m
-		d <- n % 10
-		rev = r + d  // = 等价于 <-
+		d = n % 10
+		rev = r + d
 		n ÷ 10 -> n
 		n ÷ 10 -> n_m
 	}
 
 	if (neg) {
-		result <- -rev
+		result = -rev
 	} else {
-		result = rev  // = 等价于 <-
+		result = rev
 	}
 }
 
@@ -32,6 +32,6 @@ rwfunc test() -> () {
 
 	reverse(123) -> r1
 	println(r1)
-	r2 <- reverse(-123)
+	r2 = reverse(-123)
 	println(r2)
 }

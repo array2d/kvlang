@@ -3,20 +3,20 @@
 // 期望输出:
 //   55
 rwfunc fib(n:int64) -> () {
-	base <- n <= 1
-	base_m <- n ≤ 1
+	base = n <= 1
+	base_m = n ≤ 1
 
 	if (base) {
 		println(n)
 	} else {
-		a = 0  // = 等价于 <-
+		a = 0
 		1 -> b
-		i <- 2
+		i = 2
 		while (i <= n) {
-			c = a + b  // = 等价于 <-
+			c = a + b
 			b -> a
-			b <- c
-			i = i + 1  // = 等价于 <-
+			b = c
+			i = i + 1
 		}
 		println(c)
 	}

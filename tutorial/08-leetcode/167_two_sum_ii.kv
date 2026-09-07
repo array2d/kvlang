@@ -4,28 +4,28 @@
 //   [ 1 , 2 ]
 rwfunc two_sum_ii() -> () {
 	[2, 7, 11, 15] -> a:[]int64
-	target <- 9
-	n = ndarray·numel(a)  // = 等价于 <-
+	target = 9
+	n = ndarray·numel(a)
 	0 -> l
-	r <- n - 1
+	r = n - 1
 	while (l < r) {
-		lv = a[l]  // = 等价于 <-
+		lv = a[l]
 		a[r] -> rv
-		s <- lv + rv
-		hit = s == target  // = 等价于 <-
+		s = lv + rv
+		hit = s == target
 
 		if (hit) {
 			l + 1 -> i1
-			i2 <- r + 1
+			i2 = r + 1
 			println("[", i1, ",", i2, "]")
-			l = n  // = 等价于 <-
+			l = n
 		} else {
 			s < target -> lt
 
 			if (lt) {
-				l <- l + 1
+				l = l + 1
 			} else {
-				r = r - 1  // = 等价于 <-
+				r = r - 1
 			}
 		}
 	}

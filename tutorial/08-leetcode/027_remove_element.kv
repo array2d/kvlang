@@ -7,29 +7,29 @@
 //   2
 //   2
 rwfunc remove_element() -> () {
-	a:[]int64 = [3, 2, 2, 3]  // = 等价于 <-
+	a:[]int64 = [3, 2, 2, 3]
 	3 -> val
-	n <- ndarray·numel(a)
-	k = 0  // = 等价于 <-
+	n = ndarray·numel(a)
+	k = 0
 	0 -> i
 	while (i < n) {
-		cur <- a[i]
-		skip = cur == val  // = 等价于 <-
+		cur = a[i]
+		skip = cur == val
 
 		if (skip) {
 			i + 1 -> i
 		} else {
-			a[k] <- cur
-			k <- k + 1
-			i = i + 1  // = 等价于 <-
+			a[k] = cur
+			k = k + 1
+			i = i + 1
 		}
 	}
 	println("k =", k)
 	0 -> j
 	while (j < k) {
-		v <- a[j]
+		v = a[j]
 		println(v)
-		j = j + 1  // = 等价于 <-
+		j = j + 1
 	}
 }
 

@@ -16,9 +16,9 @@
 //   45
 //   -2
 rwfunc test() -> () {
-	f = float32(3)  // = 等价于 <-
+	f = float32(3)
 	println(f)
-	i <- int8(0.1)
+	i = int8(0.1)
 	println(i)
 	int8(300) -> w
 	println(w)
@@ -29,11 +29,11 @@ rwfunc test() -> () {
 	println(uint32(-1))
 	println(uint64(18446744073709551615))
 
-	p32 = float32(0.1)  // = 等价于 <-（float32 精度域）
+	p32 = float32(0.1)
 	println(p32)
 	println(float32(16777217))
 
-	sum <- w + 1
+	sum = w + 1
 	println(sum)
 	int16(-2) -> n
 	println(n)

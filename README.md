@@ -83,10 +83,10 @@ echo '40 + 2 -> x; print(x)' | ./kvlang      # pipe mode (; separates statements
 
 ```kv
 rwfunc main() -> () {
-    total = 0  # = is equivalent to <-
+    total = 0
     1 -> i
     while (i <= 5) {
-        total <- total + i
+        total = total + i
         i + 1 -> i
     }
     println(total)
@@ -95,11 +95,10 @@ rwfunc main() -> () {
 main()
 ```
 
-### rwir（Read-Write IR）：Three Assignment Forms
+### rwir（Read-Write IR）：Two Write Forms
 
 ```kv
-x = 40 + 2            # = : write slot on the left (≡ <-); = is NOT an expression, cannot nest in conditions
-y <- x                # left arrow: write slot on the left
+x = 40 + 2            # = : write slot on the left; = is NOT an expression, cannot nest in conditions
 x × y -> z            # right arrow: write slot on the right
 f(a, b) -> r          # write-param mapping for calls; multiple: -> x, y; discard: -> _
 ```
@@ -109,9 +108,9 @@ A write slot must be a **location**: a bare name (frame-local), `/abs/path` (glo
 **`rwfunc func(ra,rb) -> (wa,wb) { … }` = composite rwir**, the named form. Single-line rwir like `A + B -> C` is atomic (one opcode + reads + writes); `rwfunc` packs multiple rwir into a named unit with the same arrow interface — `(ra,rb)` declare read params, `-> (wa,wb)` declare write params. Calling `add(3,4) -> s` binds arguments to read slots, maps write slots back to the caller frame. No return values, only write-param mapping.
 
 `-> (C:int64)` in a `rwfunc` signature is a **write-param declaration**. The function writes results into its write-param slots; the caller maps them with `-> r`.
-**Read params are read-only**: the body may not place a read param in a write slot (e.g. `A = A + 1`). This includes array element writes — `a[i] <- v` writes through `a`, so `a` must be a write param if you need to modify it. **Array/dict to mutate → write param; array/dict to read only → read param.**
+**Read params are read-only**: the body may not place a read param in a write slot (e.g. `A = A + 1`). This includes array element writes — `a[i] = v` writes through `a`, so `a` must be a write param if you need to modify it. **Array/dict to mutate → write param; array/dict to read only → read param.**
 ```kv
-# ❌ wrong: array as read param, a[i] <- v writes through read-param slot → parser rejects
+# ❌ wrong: array as read param, a[i] = v writes through read-param slot → parser rejects
 rwfunc bad(a:int64) -> () { 99 -> a[0] }
 
 # ✅ correct: array as write param, readable and writable inside the body
@@ -157,8 +156,8 @@ Data structures shared across functions (e.g. linked lists) create nodes at **ab
 
 ```kv
 rwfunc build() -> () {
-    /n1 = { val=1; next="/n2" }  # = is equivalent to <-
-    /n2 <- { val=2; next="/n3" }
+    /n1 = { val=1; next="/n2" }
+    /n2 = { val=2; next="/n3" }
     { val=3; next="" } -> /n3
 }
 
@@ -224,7 +223,7 @@ Conditions may be compound expressions: `if (7 % 2 != 0)` and `while (i < string
 **`print` / `println` / `cerr` are NOT builtins.** In the KV world there is no terminal — only keys and values — so I/O is not a core-language primitive. They are **extension rwir**: the `term` extension runtime registers them at `/lib/<opcode>` (kind `rwir`) and writes to the host process's `stdout`/`stderr`. The core runtime recognizes any `/lib/<opcode>` that carries an `rwir` signature and is not a builtin as an extension rwir, and hands it off to its extension runtime. Same mechanism as `json.to` / `json.from` (the `json` extension) and tensor ops (the numpy / GPU extensions).
 
 ```kv
-a:int64 = [7, 2, 9, 4]     # typed 1D array, = ≡ <-
+a:int64 = [7, 2, 9, 4]     # typed 1D array
 ndarray.numel(a) -> n         # 4
 at(a, 2) -> e            # 9 (0-indexed)
 set(a, 1, 99) -> a       # modify element: a becomes [7, 99, 9, 4]

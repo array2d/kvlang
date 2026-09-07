@@ -4,14 +4,14 @@
 //   true
 //   false
 rwfunc is_anagram(s:[]char/utf32, t:[]char/utf32) -> () {
-	ns = string·len(s)  // = 等价于 <-
-	nt <- string·len(t)
-	ok = true  // = 等价于 <-
+	ns = string·len(s)
+	nt = string·len(t)
+	ok = true
 
 	if (ns != nt) {
 		false -> ok
 	} else {
-		h:[]char/utf8·int64 = {}  // = 等价于 <-
+		h:[]char/utf8·int64 = {}
 		0 -> i
 		while (i < ns) {
 			string·char(s, i) -> c
@@ -21,7 +21,7 @@ rwfunc is_anagram(s:[]char/utf32, t:[]char/utf32) -> () {
 			} else {
 				1 -> h·*c
 			}
-			i <- i + 1
+			i = i + 1
 		}
 		0 -> i
 		while (i < nt) {
@@ -45,7 +45,7 @@ rwfunc is_anagram(s:[]char/utf32, t:[]char/utf32) -> () {
 				false -> ok
 				ns -> i
 			}
-			i <- i + 1
+			i = i + 1
 		}
 	}
 	if (ok) {

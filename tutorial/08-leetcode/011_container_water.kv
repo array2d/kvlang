@@ -4,29 +4,29 @@
 //   49
 rwfunc max_area(h:[]int64) -> (mx:int64) {
 	ndarray·numel(h) -> n
-	l <- 0
-	r = n - 1  // = 等价于 <-
+	l = 0
+	r = n - 1
 	0 -> mx
 	while (l < r) {
-		hl <- h[l]
-		hr = h[r]  // = 等价于 <-
+		hl = h[l]
+		hr = h[r]
 		r - l -> w
-		ls <- hl < hr
+		ls = hl < hr
 
 		if (ls) {
-			ar = hl × w  // = 等价于 <-
-			ar_m = hl × w  // = 等价于 <-
+			ar = hl × w
+			ar_m = hl × w
 			l + 1 -> l
 		} else {
-			ar <- hr × w
-			ar_m <- hr × w
-			r = r - 1  // = 等价于 <-
+			ar = hr × w
+			ar_m = hr × w
+			r = r - 1
 		}
 
 		ar > mx -> bg
 
 		if (bg) {
-			mx <- ar
+			mx = ar
 		}
 	}
 }
@@ -34,6 +34,6 @@ rwfunc max_area(h:[]int64) -> (mx:int64) {
 rwfunc test() -> () {
 
 	a:[]int64 = [1, 8, 6, 2, 5, 4, 8, 3, 7]
-	r = max_area(a)  // = 等价于 <-
+	r = max_area(a)
 	println(r)
 }

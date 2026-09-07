@@ -13,7 +13,7 @@ rwfunc test() -> () {
 	}
 	string·len(s) -> n
 	h:[int64]·int64 = {}
-	t0 <- time·now()
+	t0 = time·now()
 	0 -> i
 	while (i < n) {
 		string·char(s, i) -> ch
@@ -26,14 +26,14 @@ rwfunc test() -> () {
 		cnt -> h·*c
 		i + 1 -> i
 	}
-	t1 <- time·now()
+	t1 = time·now()
 	kv·get(h, 65) -> a
 	kv·get(h, 67) -> cc
 	kv·get(h, 71) -> g
 	kv·get(h, 84) -> t
 	println("knuc: A =", a, "C =", cc, "G =", g, "T =", t)
-	delta <- time·sub(t1, t0)
-	ns <- time/duration·as_nanos(delta)
+	delta = time·sub(t1, t0)
+	ns = time/duration·as_nanos(delta)
 	println("__bench_ns:", ns)
 	println("__bench_input: rep=__SCALE__")
 }

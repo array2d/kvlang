@@ -6,21 +6,21 @@ rwfunc fib(n:int64) -> (r:int64) {
 	if (n <= 1) {
 		n -> r
 	} else {
-		a <- n - 1
-		b <- n - 2
+		a = n - 1
+		b = n - 2
 		fib(a) -> x
 		fib(b) -> y
-		r <- x + y
+		r = x + y
 	}
 }
 
 rwfunc test() -> () {
-	t0 <- time·now()
+	t0 = time·now()
 	fib(__SCALE__) -> ans
-	t1 <- time·now()
+	t1 = time·now()
 	println("fib =", ans)
-	delta <- time·sub(t1, t0)
-	ns <- time/duration·as_nanos(delta)
+	delta = time·sub(t1, t0)
+	ns = time/duration·as_nanos(delta)
 	println("__bench_ns:", ns)
 	println("__bench_input: n=__SCALE__")
 }

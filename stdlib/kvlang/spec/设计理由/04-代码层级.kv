@@ -26,9 +26,9 @@ rwir（read-write IR）是最小执行单元，原子性是其定义的一部分
 
 原子性还带来 layout 层面的好处：layout 对 rwir 签名做完整的类型检查，若 rwir 可拆分则类型检查边界模糊。
 
-## 为什么 native rwir 不落盘
+## 为什么 native rwir 不落入 kvspace
 
-def rwir 路由头（各 runtime myrwircaps 对外的统一声明入口）存于 `/lib/<op>`（kindexpr 存入 kvspace），而 native rwir 的签名内联在 C runtime 注册表里不落盘。
+def rwir 路由头（各 runtime myrwircaps 对外的统一声明入口）存于 `/lib/<op>`（kindexpr 存入 kvspace），而 native rwir 的签名内联在 C runtime 注册表里不落入 kvspace。
 
 理由是：native rwir 是 kvlang runtime 的 ABI 契约，其签名由 runtime 版本唯一决定，不受 kvspace 内容影响。把它写入 kvspace 会造成"kvspace 里有一份 runtime 认为应该是什么样子"与"C 代码里实际注册的是什么"两份事实源，产生版本漂移风险。内联在 C 表里，签名与实现共生，不存在不一致的可能。
 	"#### -> /lib/kvlang/spec/设计理由/代码层级

@@ -10,16 +10,16 @@
 //   sqrt: 12.0
 //   sqrt(√): 12.0
 rwfunc test() -> () {
-	t0 <- time·now()
+	t0 = time·now()
 	10 + 3 -> add_r
 	println("add:", add_r)
 
 	10 - 3 -> sub_r
 	println("sub:", sub_r)
 
-	mul_r = 10 × 3  // = 等价于 <-
+	mul_r = 10 × 3
 	println("mul:", mul_r)
-	mul_r2 = 10 × 3  // = 等价于 <-
+	mul_r2 = 10 × 3
 	println("mul(×):", mul_r2)
 
 	10 ÷ 3 -> div_r
@@ -30,16 +30,16 @@ rwfunc test() -> () {
 	10 % 3 -> mod_r
 	println("mod:", mod_r)
 
-	pow_r <- pow(2, 5)
+	pow_r = pow(2, 5)
 	println("pow:", pow_r)
 
-	sqrt_r = sqrt(144)  // = 等价于 <-
+	sqrt_r = sqrt(144)
 	println("sqrt:", sqrt_r)
-	sqrt_r2 = √(144)  // = 等价于 <-
+	sqrt_r2 = √(144)
 	println("sqrt(√):", sqrt_r2)
 
-	t1 <- time·now()
-	delta <- time·sub(t1, t0)
-	ns <- time/duration·as_nanos(delta)
+	t1 = time·now()
+	delta = time·sub(t1, t0)
+	ns = time/duration·as_nanos(delta)
 	println("__bench_ns:", ns)
 }

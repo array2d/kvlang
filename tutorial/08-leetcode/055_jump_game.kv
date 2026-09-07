@@ -4,16 +4,16 @@
 //   true
 //   false
 rwfunc can_jump(nums:[]int64) -> (ok:int64) {
-	ok = 1  // = 等价于 <-
-	n <- ndarray·numel(nums)
+	ok = 1
+	n = ndarray·numel(nums)
 	0 -> reach
-	i = 0  // = 等价于 <-
+	i = 0
 	while (i < n) {
 		if (i > reach) {
 			0 -> ok
 			n -> i
 		} else {
-			dist <- nums[i] + i
+			dist = nums[i] + i
 			if (dist > reach) { dist -> reach }
 			if (reach >= n - 1) {
 				n -> i
@@ -25,9 +25,9 @@ rwfunc can_jump(nums:[]int64) -> (ok:int64) {
 
 rwfunc test() -> () {
 	a1:[]int64 = [2, 3, 1, 1, 4]
-	a2:[]int64 <- [3, 2, 1, 0, 4]
-	r1 = can_jump(a1)  // = 等价于 <-
+	a2:[]int64 = [3, 2, 1, 0, 4]
+	r1 = can_jump(a1)
 	if (r1 == 1) { println("true") } else { println("false") }
-	r2 <- can_jump(a2)
+	r2 = can_jump(a2)
 	if (r2 == 1) { println("true") } else { println("false") }
 }

@@ -24,7 +24,7 @@
 //   true
 rwfunc test() -> () {
 	// 算术 — 同类型 int64
-	5 + 3 -> a                    // = 等价于 <-
+	5 + 3 -> a
 	println(a)
 	7 - 2 - 2 -> b
 	println(b)
@@ -37,7 +37,7 @@ rwfunc test() -> () {
 	println(d)
 
 	// 位运算 — 仅整数
-	5 & 3 -> e                     // = 等价于 <-
+	5 & 3 -> e
 	println(e)
 	neg(2) -> f
 	println(f)
@@ -45,7 +45,7 @@ rwfunc test() -> () {
 	println(g)
 
 	// 比较 — 同类型
-	5 > 3 -> h                     // = 等价于 <-
+	5 > 3 -> h
 	println(h)
 	3 > 5 -> i
 	println(i)
@@ -70,7 +70,7 @@ rwfunc test() -> () {
 	println(o)
 
 	// 字符串拼接
-	"a" + "bc" -> p                // = 等价于 <-
+	"a" + "bc" -> p
 	println(p)
 
 	// 字符串比较（C 语义）
@@ -78,6 +78,6 @@ rwfunc test() -> () {
 	println(q)
 
 	// bool 显式比较
-	true == true -> r              // = 等价于 <-
+	true == true -> r
 	println(r)
 }

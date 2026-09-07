@@ -6,10 +6,10 @@ rwfunc get_sum(a:int64, b:int64) -> () {
 	a -> av
 	b -> bv
 	while (bv != 0) {
-		carry = av & bv  // = 等价于 <-
+		carry = av & bv
 		carry << 1 -> c2
-		av <- av ^ bv
-		bv = c2  // = 等价于 <-
+		av = av ^ bv
+		bv = c2
 	}
 	println(av)
 }

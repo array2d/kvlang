@@ -3,24 +3,24 @@
 //   fact(10) = 3628800
 rwfunc fib(n:int64) -> (a:int64, b:int64) {
 	if (n <= 1) {
-		a = 0  // = 等价于 <-
+		a = 0
 		1 -> b
 	} else {
-		n1 <- n - 1
+		n1 = n - 1
 		fib(n1) -> (a, b)
-		x = a + b  // = 等价于 <-
+		x = a + b
 		b -> a
-		b <- x
+		b = x
 	}
 }
 
 rwfunc factorial(n:int64) -> (r:int64) {
-	r = 1  // = 等价于 <-
+	r = 1
 	1 -> i
 	while (i <= n) {
-		r <- r × i
-		r_m <- r × i
-		i = i + 1  // = 等价于 <-
+		r = r × i
+		r_m = r × i
+		i = i + 1
 	}
 }
 
@@ -29,6 +29,6 @@ rwfunc test() -> () {
 	println("fib(10) =", f)
 	factorial(10) -> ans
 	println("fact(10) =", ans)
-	/last_fib <- f
-	/last_fact = ans  // = 等价于 <-
+	/last_fib = f
+	/last_fact = ans
 }

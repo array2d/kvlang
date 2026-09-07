@@ -30,7 +30,7 @@ rwfunc test() -> () {
 		}
 		i + 1 -> i
 	}
-	t0 <- time·now()
+	t0 = time·now()
 	0.0 -> checksum
 	0 -> i
 	while (i < n) {
@@ -54,12 +54,12 @@ rwfunc test() -> () {
 		}
 		i + 1 -> i
 	}
-	t1 <- time·now()
+	t1 = time·now()
 	checksum × 1000000.0 -> scaled
 	int64(scaled) -> out
 	println("matmul: check =", out)
-	delta <- time·sub(t1, t0)
-	ns <- time/duration·as_nanos(delta)
+	delta = time·sub(t1, t0)
+	ns = time/duration·as_nanos(delta)
 	println("__bench_ns:", ns)
 	println("__bench_input: N=__SCALE__")
 }

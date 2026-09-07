@@ -4,34 +4,34 @@
 //   3
 //   -2
 rwfunc divide(dividend:int64, divisor:int64) -> (result:int64) {
-	dend <- dividend
-	dsor = divisor  // = 等价于 <-
-	neg = 0  // = 等价于 <-
+	dend = dividend
+	dsor = divisor
+	neg = 0
 	if (dend < 0) {
-		neg <- 1 - neg
-		dend <- 0 - dend
+		neg = 1 - neg
+		dend = 0 - dend
 	}
 	if (dsor < 0) {
-		neg = 1 - neg  // = 等价于 <-
-		dsor <- 0 - dsor
+		neg = 1 - neg
+		dsor = 0 - dsor
 	}
-	result = 0  // = 等价于 <-
+	result = 0
 	while (dend >= dsor) {
-		temp <- dsor
-		multiple = 1  // = 等价于 <-
+		temp = dsor
+		multiple = 1
 		while (dend >= temp + temp) {
-			temp <- temp + temp
-			multiple <- multiple + multiple
+			temp = temp + temp
+			multiple = multiple + multiple
 		}
-		dend <- dend - temp
-		result = result + multiple  // = 等价于 <-
+		dend = dend - temp
+		result = result + multiple
 	}
-	if (neg == 1) { result <- 0 - result }
+	if (neg == 1) { result = 0 - result }
 }
 
 rwfunc test() -> () {
-	r1 = divide(10, 3)  // = 等价于 <-
+	r1 = divide(10, 3)
 	println(r1)
-	r2 <- divide(7, -3)
+	r2 = divide(7, -3)
 	println(r2)
 }

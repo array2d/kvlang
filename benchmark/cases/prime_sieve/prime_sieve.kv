@@ -9,16 +9,16 @@ rwfunc prime_sieve(limit:int64) -> () {
 	count = 0
 	2 -> n
 	while (n <= limit) {
-		is_prime <- true
+		is_prime = true
 		d = 2
 		while (d < n) {
 			n % d -> rem
-			divisible <- rem == 0
+			divisible = rem == 0
 			if (divisible) {
 				is_prime = false
 				break
 			} else {
-				d <- d + 1
+				d = d + 1
 			}
 		}
 		if (is_prime) {
@@ -31,11 +31,11 @@ rwfunc prime_sieve(limit:int64) -> () {
 }
 
 rwfunc test() -> () {
-	t0 <- time·now()
+	t0 = time·now()
 	prime_sieve(__SCALE__)
-	t1 <- time·now()
-	delta <- time·sub(t1, t0)
-	ns <- time/duration·as_nanos(delta)
+	t1 = time·now()
+	delta = time·sub(t1, t0)
+	ns = time/duration·as_nanos(delta)
 	println("__bench_ns:", ns)
 	println("__bench_input: N=__SCALE__")
 }

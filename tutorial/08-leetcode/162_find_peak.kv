@@ -3,22 +3,22 @@
 // 期望输出:
 //   2
 rwfunc find_peak() -> () {
-	a:[]int64 <- [1, 2, 3, 1]
-	n = ndarray·numel(a)  // = 等价于 <-
+	a:[]int64 = [1, 2, 3, 1]
+	n = ndarray·numel(a)
 	0 -> lo
-	hi <- n - 1
+	hi = n - 1
 	while (lo < hi) {
-		s = lo + hi  // = 等价于 <-
+		s = lo + hi
 		s ÷ 2 -> mid
 		s ÷ 2 -> mid_m
-		mv <- a[mid]
-		nv = a[mid + 1]  // = 等价于 <-
+		mv = a[mid]
+		nv = a[mid + 1]
 		mv < nv -> up
 
 		if (up) {
-			lo <- mid + 1
+			lo = mid + 1
 		} else {
-			hi = mid  // = 等价于 <-
+			hi = mid
 		}
 	}
 	println(lo)

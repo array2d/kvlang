@@ -4,16 +4,16 @@
 //   (())
 //   ()()
 rwfunc generate() -> () {
-	total <- 16
-	idx <- 0
+	total = 16
+	idx = 0
 	while (idx < total) {
-		bal <- 0
-		ok2 <- 1
-		s <- ""
-		pow <- 8
+		bal = 0
+		ok2 = 1
+		s = ""
+		pow = 8
 		while (pow > 0) {
-			bit <- (idx ÷ pow) % 2
-			bit_m <- (idx ÷ pow) % 2
+			bit = (idx ÷ pow) % 2
+			bit_m = (idx ÷ pow) % 2
 			if (bit == 0) {
 				s + "(" -> s
 				bal + 1 -> bal

@@ -3,11 +3,11 @@
 //   sum = 5050
 //   fact = 3628800
 rwfunc sum_while(N:int64) -> (total:int64) {
-	total = 0  // = 等价于 <-
+	total = 0
 	1 -> i
 	while (i <= N) {
-		total <- total + i
-		i = i + 1  // = 等价于 <-
+		total = total + i
+		i = i + 1
 	}
 }
 
@@ -15,18 +15,18 @@ rwfunc tailrec_fact(N:int64, acc:int64) -> (r:int64) {
 	if (N <= 1) {
 		acc + 0 -> r
 	} else {
-		acc1 <- acc × N
-		acc1_m <- acc × N
-		n1 = N - 1  // = 等价于 <-
+		acc1 = acc × N
+		acc1_m = acc × N
+		n1 = N - 1
 		tailrec_fact(n1, acc1) -> r
 	}
 }
 
 rwfunc test() -> () {
-	s <- sum_while(100)
+	s = sum_while(100)
 	println("sum =", s)
-	f = tailrec_fact(10, 1)  // = 等价于 <-
+	f = tailrec_fact(10, 1)
 	println("fact =", f)
 	s -> /last_tco_sum
-	/last_tco_fact <- f
+	/last_tco_fact = f
 }

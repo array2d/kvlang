@@ -4,35 +4,35 @@
 //   [ 0 , 1 ]
 //   [-1, -1]
 rwfunc two_sum(nums:[]int64, target:int64) -> () {
-	n <- ndarray·numel(nums)
-	found = 0  // = 等价于 <-
+	n = ndarray·numel(nums)
+	found = 0
 	0 -> i
 	while (i < n) {
-		j <- 0
+		j = 0
 		while (j < n) {
-			sk = i == j  // = 等价于 <-
+			sk = i == j
 
 			if (sk) {
 				j + 1 -> j
 			} else {
-				x <- nums[i]
-				y = nums[j]  // = 等价于 <-
+				x = nums[i]
+				y = nums[j]
 				x + y -> s
-				hit <- s == target
+				hit = s == target
 
 				if (hit) {
 					println("[", i, ",", j, "]")
-					found = 1  // = 等价于 <-
+					found = 1
 					n -> i
-					j <- n
+					j = n
 				} else {
-					j = j + 1  // = 等价于 <-
+					j = j + 1
 				}
 			}
 		}
 		i + 1 -> i
 	}
-	nf <- found == 0
+	nf = found == 0
 
 	if (nf) {
 		println("[-1, -1]")

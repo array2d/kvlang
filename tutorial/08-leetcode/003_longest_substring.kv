@@ -5,30 +5,30 @@
 //   1
 //   5
 rwfunc length_of_longest(s:[]char/utf32) -> (max_len:int64) {
-	n <- string·len(s)
-	last:[]char/utf8·int64 = {}  // = 等价于 <-
-	max_len = 0  // = 等价于 <-
-	left = 0  // = 等价于 <-
-	right <- 0
+	n = string·len(s)
+	last:[]char/utf8·int64 = {}
+	max_len = 0
+	left = 0
+	right = 0
 	while (right < n) {
 		s[right] -> c
-		exists <- kv·get(last, c) != None
+		exists = kv·get(last, c) != None
 		if (exists) {
-			prev <- kv·get(last, c)
-			cand <- prev + 1
-			if (cand > left) { left <- cand }
+			prev = kv·get(last, c)
+			cand = prev + 1
+			if (cand > left) { left = cand }
 		}
-		_ = kv·set(last, c, right)  // = 等价于 <-
-		cur <- right - left + 1
+		_ = kv·set(last, c, right)
+		cur = right - left + 1
 		if (cur > max_len) { cur -> max_len }
 		right + 1 -> right
 	}
 }
 
 rwfunc test() -> () {
-	r1 = length_of_longest("abcabcbb")  // = 等价于 <-
+	r1 = length_of_longest("abcabcbb")
 	println(r1)
 	println(length_of_longest("bbbbb"))
-	r3 <- length_of_longest("abcde")
+	r3 = length_of_longest("abcde")
 	println(r3)
 }

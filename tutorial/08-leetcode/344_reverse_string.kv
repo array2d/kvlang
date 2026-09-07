@@ -9,23 +9,23 @@
 rwfunc reverse_str() -> () {
 	// char 值数组: "hello" → ASCII [104, 101, 108, 108, 111]
 	a:[]int64 = [104, 101, 108, 108, 111]
-	n <- ndarray·numel(a)
-	l = 0  // = 等价于 <-
+	n = ndarray·numel(a)
+	l = 0
 	n - 1 -> r
 	while (l < r) {
-		tl <- a[l]
-		tr = a[r]  // = 等价于 <-
-		a[l] <- tr
-		a[r] <- tl
+		tl = a[l]
+		tr = a[r]
+		a[l] = tr
+		a[r] = tl
 		l + 1 -> l
-		r <- r - 1
+		r = r - 1
 	}
-	i = 0  // = 等价于 <-
+	i = 0
 	while (i < n) {
 		a[i] -> c
 		string·char("abcdefghijklmnopqrstuvwxyz", c - 97) -> s
 		println(s)
-		i <- i + 1
+		i = i + 1
 	}
 }
 

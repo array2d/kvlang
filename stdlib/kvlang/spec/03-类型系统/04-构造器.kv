@@ -21,6 +21,6 @@ u = char/ascii(t)      // 非 ASCII 码点 → TypeError
 | float32 精度 | 收窄至单精度（`float32(3.141592653589793)`=3.1415927、`float32(16777217)`=16777216.0） |
 | None 输入 | TypeError（`int64(None)` 报错，不得静默产生 0） |
 
-构造器接受字面量与变量表达式（`42.9 -> x; int8(x)`）。种类构造的结果 XValue 以该种类名为 kindexpr 落盘，精度信息随值保留。
+构造器接受字面量与变量表达式（`42.9 -> x; int8(x)`）。种类构造的结果 XValue 以该种类名为 kindexpr 落入 kvspace，精度信息随值保留。
 "#### -> /lib/kvlang/spec/类型系统/构造器
 }
