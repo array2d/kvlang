@@ -35,7 +35,7 @@ fn redis_compile() {
     compile(&mut kv, src).unwrap();
 
     let sig_val = kv.get_one("/lib/sum/[0,0]");
-    assert_eq!(kvkind::kind(&sig_val), "defrwfunc");
+    assert_eq!(kvkind::kind(&sig_val), "rwfunc");
     let b = body(&sig_val);
     assert_eq!(kvkind::rwfunc_num_reads(b), 2);
     assert_eq!(kvkind::rwfunc_num_writes(b), 1);

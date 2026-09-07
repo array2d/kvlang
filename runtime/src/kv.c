@@ -64,7 +64,7 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
         const uint8_t *body = v->data + h.body_offset;
         uint8_t *dst = NULL;
         if (kvspaceWriteInPlace(k->h, pairs[i].key, 1, body_len, &dst, err, err_cap) != 0) {
-            if (kvspaceWriteNewPlace(k->h, pairs[i].key, (const char *)h.kindexpr, body_len, &dst, err, err_cap) != 0)
+            if (kvspaceWriteNewPlace(k->h, pairs[i].key, h.xkind, (const char *)h.kindexpr, body_len, &dst, err, err_cap) != 0)
                 return -1;
         }
         if (body_len > 0 && dst) memcpy(dst, body, body_len);

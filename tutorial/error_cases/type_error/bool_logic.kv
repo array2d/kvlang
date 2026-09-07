@@ -1,0 +1,6 @@
+// expected
+//   TypeError: && requires bool, got int64
+// 修复: B2 铁律 — 逻辑运算只接受 bool，禁止 int 隐式真值化（用 != 0）
+rwfunc test() -> () {
+	int64(1) && true -> x
+}

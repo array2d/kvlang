@@ -319,7 +319,7 @@ fn collect_slots(kv: &mut Kv, prefix: &str, out: &mut Vec<String>) {
     }
 }
 
-/// 注释不允许换行：defrwfunc 的参数类型以 \n 连接，改 " | " 呈现。
+/// 注释不允许换行：rwfunc 签名的参数类型以 \n 连接，改 " | " 呈现。
 fn sanitize(s: &str) -> String {
     s.replace('\n', " | ")
 }
@@ -465,7 +465,7 @@ pub fn write_struct_decl(kv: &mut Kv, decl: &StructDecl) {
 /// 字段默认值 XValue：head kind = 字段类型，body = 默认字面量（未给则零值）。
 /// 标量+char 直接编码；带 dims / structref 仅记录类型（空 body），嵌套 struct 待定。
 fn field_default(ty: &str, default: Option<&Expr>) -> Vec<u8> {
-    let (_, dims, base) = kvkind::parse_kindexpr(ty);
+    let (dims, base) = kvkind::parse_kindexpr(ty);
     let s = default.map(|e| e.val.clone()).unwrap_or_default();
     if base.starts_with("char/") {
         return ffi::new_char(&base, &s);
@@ -654,7 +654,6 @@ fn is_literal(s: &str) -> bool {
         || b[0] == b'/'
         || s == "true"
         || s == "false"
-        || s == "null"
         || b[0].is_ascii_digit()
         || (b[0] == b'-' && s.len() > 1)
 }
@@ -676,6 +675,16 @@ mod tests {
     }
 
     #[test]
+    fn null_literal_rejected() {
+        // 空值只有 None；书写 null 是错误，layout 必须显式拒绝。
+        assert!(vet("lib t {\nrwfunc main() -> () {\nnull -> x\n}\n}\n").is_err());
+        assert!(vet("lib t {\nrwfunc main() -> () {\nprintln(null)\n}\n}\n").is_err());
+        // None、字符串 "null"、含 null 的路径不受影响。
+        assert!(vet("lib t {\nrwfunc main() -> () {\nNone -> x\n}\n}\n").is_ok());
+        assert!(vet("lib t {\nrwfunc main() -> () {\n\"null\" -> x\n}\n}\n").is_ok());
+    }
+
+    #[test]
     fn nested_lib_layout_and_merge() {
         let mut kv = Kv::conn(&format!(
             "fs:///tmp/kvlanglayout_nested_{}",
@@ -688,7 +697,7 @@ mod tests {
             "lib a {\nlib b {\nrwfunc f() -> (r:int64) {\n1 -> r\n}\n}\n}\n",
         )
         .unwrap();
-        assert_eq!(kvkind::kind(&kv.get_one("/lib/a/b·f/[0,0]")), "defrwfunc");
+        assert_eq!(kvkind::kind(&kv.get_one("/lib/a/b·f/[0,0]")), "rwfunc");
 
         // 同 lib a 下再 layout 另一嵌套 lib c，验证 b·f 未被整库删除（增量合并）
         compile(
@@ -698,10 +707,10 @@ mod tests {
         .unwrap();
         assert_eq!(
             kvkind::kind(&kv.get_one("/lib/a/b·f/[0,0]")),
-            "defrwfunc",
+            "rwfunc",
             "b·f 应保留"
         );
-        assert_eq!(kvkind::kind(&kv.get_one("/lib/a/c·g/[0,0]")), "defrwfunc");
+        assert_eq!(kvkind::kind(&kv.get_one("/lib/a/c·g/[0,0]")), "rwfunc");
     }
 
     #[test]
@@ -719,7 +728,7 @@ mod tests {
             "lib t {\nrwfunc main() -> () {\nfoo.bar(\"x\") -> y\nbaz(\"z\") -> w\n}\n}\n",
         )
         .unwrap();
-        assert_eq!(kvkind::kind(&kv.get_one("/lib/t·main/[0,0]")), "defrwfunc");
+        assert_eq!(kvkind::kind(&kv.get_one("/lib/t·main/[0,0]")), "rwfunc");
         assert!(
             kvkind::value_string(&kv.get_one("/lib/t·main/[1,0]")).contains("foo.bar"),
             "'.' 应作普通字符保留在 opcode 内（单一 token foo.bar）"

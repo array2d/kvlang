@@ -24,7 +24,6 @@ pub const KIND_STRUCT: &str = "struct";
 pub const KIND_RWIR: &str = "rwir";
 pub const KIND_RWFUNC: &str = "rwfunc";
 pub const KIND_DEF_RWIR: &str = "defrwir";
-pub const KIND_DEF_RWFUNC: &str = "defrwfunc";
 pub const KIND_RWIR_OR_RWFUNC: &str = "rwir|rwfunc";
 pub const KIND_SCOPE: &str = "scope";
 
@@ -39,28 +38,22 @@ pub fn head(data: &[u8]) -> ffi::kvspaceHead_t {
     ffi::decode_head(data)
 }
 
-/// 解析 head 的 kindexpr 内容 → (ref, dims, base kind)。
-pub fn parse_kindexpr(kx: &str) -> (i32, Vec<i32>, String) {
-    let (r, rest) = match kx.as_bytes().first() {
-        Some(b'*') => (1, &kx[1..]),
-        Some(b'@') => (2, &kx[1..]),
-        _ => (0, kx),
-    };
-    if rest.starts_with('[') {
-        match rest.find(']') {
+/// 解析 kindexpr 内容 → (dims, base kind)。kindexpr 无前缀（ref/ptr 归 head.xkind）。
+pub fn parse_kindexpr(kx: &str) -> (Vec<i32>, String) {
+    if kx.starts_with('[') {
+        match kx.find(']') {
             Some(end) => (
-                r,
-                rest[1..end]
+                kx[1..end]
                     .split(',')
                     .filter(|d| !d.is_empty())
                     .map(|d| d.parse().unwrap_or(0))
                     .collect(),
-                rest[end + 1..].to_string(),
+                kx[end + 1..].to_string(),
             ),
-            None => (r, Vec::new(), rest.to_string()),
+            None => (Vec::new(), kx.to_string()),
         }
     } else {
-        (r, Vec::new(), rest.to_string())
+        (Vec::new(), kx.to_string())
     }
 }
 
@@ -82,18 +75,18 @@ pub fn kind(data: &[u8]) -> String {
     if data.is_empty() {
         return String::new();
     }
-    parse_kindexpr(&kindexpr(data)).2
+    parse_kindexpr(&kindexpr(data)).1
 }
 
 pub fn is_ptr(data: &[u8]) -> bool {
-    !data.is_empty() && parse_kindexpr(&kindexpr(data)).0 == 1
+    !data.is_empty() && ffi::decode_head(data).xkind == 1
 }
 
 pub fn array_len(data: &[u8]) -> i32 {
     if data.is_empty() {
         return 0;
     }
-    let dims = parse_kindexpr(&kindexpr(data)).1;
+    let dims = parse_kindexpr(&kindexpr(data)).0;
     if dims.is_empty() {
         1
     } else {
@@ -129,13 +122,13 @@ pub fn display(data: &[u8]) -> String {
     if data.is_empty() {
         return "None".to_string();
     }
-    let (r, _, k) = parse_kindexpr(&kindexpr(data));
+    let (_, k) = parse_kindexpr(&kindexpr(data));
     if k.is_empty() {
         return "None".to_string();
     }
     let h = ffi::decode_head(data);
     let b = body(data, &h);
-    if r == 1 {
+    if h.xkind == 1 {
         return format!("→{}:{}", String::from_utf8_lossy(b), k);
     }
     format!("{}:{}", k, plain_value(&k, b))
@@ -195,7 +188,7 @@ fn plain_value(k: &str, b: &[u8]) -> String {
             .collect(),
         "index" => format!("({})", count_names(b)),
         // kvlang 自有 kind：body = [2B nr][2B nw][sig]；槽值/调用目标 nr=nw=0，取 sig 即可。
-        "rwir" | "rwir|rwfunc" | "defrwir" | "defrwfunc" => {
+        "rwir" | "rwir|rwfunc" | "rwfunc" | "defrwir" => {
             let (nr, nw) = if b.len() >= 4 {
                 (
                     u16::from_le_bytes([b[0], b[1]]),
@@ -275,7 +268,7 @@ pub fn new_rwfunc(num_insts: i32, nr: i32, nw: i32, param_types: &[String]) -> V
     raw.extend_from_slice(&(nr as u16).to_le_bytes());
     raw.extend_from_slice(&(nw as u16).to_le_bytes());
     raw.extend_from_slice(param_types.join("\n").as_bytes());
-    ffi::tlv_encode(KIND_DEF_RWFUNC, &raw, num_insts)
+    ffi::tlv_encode(KIND_RWFUNC, &raw, num_insts)
 }
 
 /// rwfunc body 访问器（layout 读回签名时用）。

@@ -5,7 +5,7 @@
 用法: python3 tutorial/error_test.py
 """
 from __future__ import annotations
-import os, re, subprocess, sys
+import os, subprocess, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -44,11 +44,6 @@ def _unescape_logx(stderr: str) -> str:
     """logx msg= 域为 JSON-style 引号串，\" → " 以利子串匹配。"""
     return stderr.replace('\\"', '"')
 
-def _detect_entry(out: str) -> str:
-    m = re.search(r"ENTRY=(\S+)", out)
-    return m.group(1) if m else "init"
-
-
 def collect_errors(rel: str) -> str:
     """layout（编译期诊断）+ run（运行时诊断），收集 stderr 合并。"""
     # 用 kvspace clear 隔离各 case
@@ -58,8 +53,7 @@ def collect_errors(rel: str) -> str:
                             text=True, timeout=60, cwd=str(ROOT))
     stderr += _unescape_logx(layout.stderr)
     if layout.returncode == 0:
-        entry = _detect_entry(layout.stdout)
-        crun = subprocess.run([TERM_BIN, entry], capture_output=True,
+        crun = subprocess.run([TERM_BIN, "test"], capture_output=True,
                               text=True, timeout=120, cwd=str(ROOT),
                               env={**os.environ, "KVSPACE": _C_DSN})
         stderr += "\n" + _unescape_logx(crun.stderr)

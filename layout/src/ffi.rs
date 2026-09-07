@@ -38,10 +38,11 @@ extern "C" {
         err: *mut c_char,
         err_cap: u32,
     ) -> c_int;
-    /// 新位置写：按 (kindexpr, body_len) 分配新 box、写 head，返回 body 偏移指针。
+    /// 新位置写：按 (xkind, kindexpr, body_len) 分配新 box、写 head，返回 body 偏移指针。
     fn kvspaceWriteNewPlace(
         h: Handle,
         key: *const c_char,
+        xkind: u8,
         kindexpr: *const c_char,
         body_len: u32,
         body: *mut *mut u8,
@@ -118,7 +119,11 @@ extern "C" {
 /// XValueHead 解码结果（与 kvspace-durable 的 kvspaceHead_t 布局一致）。kindexpr 为唯一类型真相。
 #[repr(C)]
 pub struct kvspaceHead_t {
+    pub xkind: u8,
     pub kindexpr: [u8; 256],
+    pub kind_off: i32,
+    pub ndim: i32,
+    pub dims: [i32; 8],
     pub ro: u8,
     pub vid: u32,
     pub body_len: i32,
@@ -201,6 +206,7 @@ impl Kv {
             kvspaceWriteNewPlace(
                 self.h,
                 ck.as_ptr(),
+                h.xkind,
                 kindexpr.as_ptr(),
                 body_len as u32,
                 &mut body,
@@ -344,7 +350,11 @@ pub fn tlv_encode(kind: &str, raw: &[u8], array_len: i32) -> Vec<u8> {
 /// 解码 XValueHead。
 pub fn decode_head(data: &[u8]) -> kvspaceHead_t {
     let mut h = kvspaceHead_t {
+        xkind: 0,
         kindexpr: [0u8; 256],
+        kind_off: 0,
+        ndim: 0,
+        dims: [0i32; 8],
         ro: 0,
         vid: 0,
         body_len: 0,

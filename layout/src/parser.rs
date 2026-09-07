@@ -1555,6 +1555,17 @@ impl Parser {
                 }
             }
         }
+        if t.kind == Kind::Ident && t.value == "null" {
+            self.errors.push(Diagnostic {
+                pos: t.pos,
+                message: "null 不是合法字面量；空值只有 None".to_string(),
+                warn: false,
+                info: false,
+                source: String::new(),
+                src_file: String::new(),
+                src_name: String::new(),
+            });
+        }
         Some(ast::leaf(&t.value))
     }
 

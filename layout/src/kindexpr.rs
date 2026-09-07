@@ -168,7 +168,7 @@ fn base_match(s: &str, kind: &str) -> bool {
 
 fn match_shape(s: &str, ndim: i32, dims: &[i32]) -> bool {
     if s.is_empty() {
-        return ndim >= 1;
+        return ndim == 1;
     }
     let parts: Vec<&str> = s.split(',').collect();
     if parts.len() as i32 != ndim {
@@ -344,6 +344,8 @@ mod tests {
             ("int64|float64", "float64", 0, &[], true),
             ("int64|float64", "bool", 0, &[], false),
             ("[]float32", "float32", 1, &[5], true),
+            ("[]float32", "float32", 2, &[2, 3], false),
+            ("[]float32", "float32", 0, &[], false),
             ("[2,3]float32", "float32", 2, &[2, 3], true),
             ("[2,3]float32", "float32", 2, &[2, 4], false),
             ("[?,768]float32", "float32", 2, &[100, 768], true),

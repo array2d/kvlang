@@ -1,0 +1,6 @@
+// expected
+//   TypeError: branch condition must be bool, got int64
+// 修复: B2 铁律 — 分支条件必须是 bool，禁止 int 隐式真值化（用 != 0）
+rwfunc test() -> () {
+	if (int64(1)) { }
+}
