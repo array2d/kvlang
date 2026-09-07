@@ -2,6 +2,7 @@ name: pages
 
 on:
   push:
+    branches: [master]
     paths:
       - "site/**"
       - "stdlib/**"
