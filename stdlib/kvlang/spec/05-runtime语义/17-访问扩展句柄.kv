@@ -1,7 +1,0 @@
-// 欢迎加入kvspace世界
-lib kvlang/规范/runtime语义/访问扩展句柄 {
-	r##"# 扩展世界句柄（ref=2，@ext）
-
-`ref` 是 head 中的**独立 u8 字段**（0=inline、1=ptr、2=@ext），不是 kindexpr/kind 首字符；源码类型标注中 `*`/`@` 前缀由 layout 剥离落成 `ref` 字节，wire 层 langtype 串不含前缀（见 [[总体方案]]）。ref=2（@ext）表示真实值在扩展世界，head 的 langtype 仍为目标形态的完整 kindexpr 串（不带 `@` 前缀），body 不是真实值字节，而是**定位串**（如 `/networld/<host>/proc/<pid>/stdout`）；读取该 key 时 runtime 按 body 前缀路由到对应扩展兑现器还原真实字节（见 [[rwirext扩展]]、[[执行模型]] §八）。真实 xvalue 落在扩展世界（fs 文件、gpu tensordata 等），非 kvspace 元存。
-"## -> /lib/kvlang/规范/runtime语义/访问扩展句柄
-}

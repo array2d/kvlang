@@ -1,7 +1,0 @@
-// 欢迎加入kvspace世界
-lib kvlang/规范/layout语义/写参初值 {
-	r##"# 写参初值 None
-
-写参在被调方帧内初值为 **None**（strict null）。函数体内**必须**先显式初始化写参再参与运算——对 None 做算术在 runtime 被拒。惯例以拷贝置零值起步（`0 -> acc`），此后写参在体内可读可写，退出时经箭头映射回调用方。
-"## -> /lib/kvlang/规范/layout语义/写参初值
-}

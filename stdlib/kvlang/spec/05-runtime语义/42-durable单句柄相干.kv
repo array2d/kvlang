@@ -1,7 +1,0 @@
-// 欢迎加入kvspace世界
-lib kvlang/规范/runtime语义/durable单句柄相干 {
-	r##"# durable 单句柄相干
-
-durable 后端（fs/redis）采用**惰性 flush**，只在**同一 kvspace 句柄内相干**。因此 C runtime 与其驱动的扩展（Rust `run_vid` 循环、层内 rwir）**必须共用同一 kvspace 句柄**（`kvlangRuntimeKvspaceHandle` 取出后传给 rwirext）。若各持独立句柄，一方的写对另一方不可见，fs/redis 的 PC / 值会读到陈旧快照，导致整段重跑或错乱。此为 normative 要求。
-"## -> /lib/kvlang/规范/runtime语义/durable单句柄相干
-}

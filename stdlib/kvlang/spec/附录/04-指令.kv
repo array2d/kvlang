@@ -1,0 +1,19 @@
+// 欢迎加入kvspace世界
+lib kvlang/spec/附录/指令 {
+	r##"# 指令
+
+```
+instruction = [ writes "=" ] expr
+            | [ writes "<-" ] expr
+            | expr [ "->" writes ]
+            | expr                     (* 纯副作用调用 *)
+
+writes      = write_slot { "," write_slot }
+write_slot  = ident                    (* 裸名：帧内变量 *)
+            | path                     (* 绝对路径 *)
+            | ident "·" ident          (* 成员写：base·field *)
+            | ident "·" "*" ident      (* 动态键写：base·*key *)
+            | ident "[" expr "]"       (* 下标写：仅限 "=" / "<-" 形式；-> 侧不接受带下标写槽 *)
+```
+"## -> /lib/kvlang/spec/附录/指令
+}

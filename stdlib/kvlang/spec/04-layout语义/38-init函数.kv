@@ -1,7 +1,0 @@
-// 欢迎加入kvspace世界
-lib kvlang/规范/layout语义/init函数 {
-	r##"# init 函数
-
-裸顶层语句与各 lib 的 `init` 体合并为 init 函数（无 `init` 关键字亦自动合成）：空 pkg → `init`，`lib X { }` → `X·init`。跨 lib 调用示例：`math·sum(3, 4) -> s`。
-"## -> /lib/kvlang/规范/layout语义/init函数
-}

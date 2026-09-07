@@ -1,0 +1,45 @@
+// 欢迎加入kvspace世界
+lib kvlang/spec/runtime语义/函数调用与内建 {
+	r####"# 函数调用与内建
+
+本章界定运行期的调用名解析、native builtin 全集、`·` 限定内建族，以及 native 与须经 def rwir 路由的 rwir 的判定。
+
+## 三种调用形态收敛到同一 KV key
+
+用户函数调用有三种源码形态，运行期一律解析为 `/lib/<pkg>·<name>`：
+
+| 源码形态 | 示例 | 多级 pkg |
+|---------|------|----------|
+| 全路径 | `/lib/a/b·add(3, 4) -> s` | 段用 `/` |
+| 限定名 | `math·sum(3, 4)` / `a/b·add(3, 4)` | 是 |
+| 裸名 | `sum(3, 4)` | 同 pkg 内 |
+
+`·`（U+00B7）是成员/包分隔符；`/` 是路径段分隔符。多级 pkg 的段用 `/`，末段用 `·` 接函数名。
+
+**HandleCall 的名解析**（`runtime/src/kvcpu.c:handle_call`）：
+
+- `fn` 以 `/lib/` 开头 → 剥前缀，余部 `rfind("·")` 切出 pkg、name。
+- `fn` 含 `·` → `rfind("·")` 切分。
+- 裸名（无 `/lib/`、无 `·`）→ **同 pkg 优先**：从帧的 `‥lib` 槽取调用者 pkg，补成 `/lib/<caller_pkg>·<fn>`；否则退回 `/lib/<fn>`。
+
+三形态收敛到同一 key（如 `/lib/a/b·add`）。查找失败（签名槽 `[0,0]` 为 `None`）**必须**报 `NameError: rwfunc not found: <fn>`（或签名不匹配、`不是 rwfunc` 等具体错）。锚例：`tutorial/02-func/`、`tutorial/07-lib/`。
+
+## native builtin 判定
+
+`kvlangBuiltinIsNative(opcode)`（`runtime/src/builtin.c`）先剥数字类型前缀（`int64·add` / `float32·add` … 经 `strip_num_kind` 归并到同一 `add`，按操作数 kind 归约），再在**静态注册表**线性查表。命中即为 native。native 判定**先于** `/lib` 查表，故 native opcode 不会被当须经 def rwir 路由的 rwir 或用户函数。
+
+## native builtin 全集（权威）
+
+以下为静态注册表的 opcode 全集（源码运算符号如 `+ - × ÷ % == < ≤ && ! √ …` 映射到对应裸名 opcode）：
+
+**算术 / 数学**：`add`(`+`)、`sub`(`-`)、`mul`(`×`)、`div`(`÷`)、`mod`(`%`)、`pow`、`sqrt`(`√`)、`exp`、`log`、`neg`、`abs`、`sign`、`max`、`min`。
+
+**比较 / 逻辑 / 位**：`eq`(`==`)、`neq`(`!=`/`≠`)、`lt`(`<`)、`gt`(`>`)、`le`(`<=`/`≤`)、`ge`(`>=`/`≥`)、`and`(`&&`)、`or`(`||`)、`not`(`!`)、`bitand`(`&`)、`bitor`(`|`)、`bitxor`(`^`)、`shl`(`<<`)、`shr`(`>>`)。
+
+**类型构造兼转换**（裸名）：`bool`、`int8`、`int16`、`int32`、`int64`、`uint8`、`uint16`、`uint32`、`uint64`、`float32`、`float64`、`char/utf32`、`char/utf8`、`char/ascii`。
+
+**容器构造**（裸名）：`map`（stringkeymap 构造）、`array`（数组构造）、`struct·new`（structref 实例）。
+
+**调试**：`debugger`（等价 `vthread·setstatus("paused")`）。
+	"#### -> /lib/kvlang/spec/runtime语义/函数调用与内建
+}

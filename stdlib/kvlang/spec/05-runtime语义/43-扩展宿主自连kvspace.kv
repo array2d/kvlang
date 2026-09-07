@@ -1,7 +1,0 @@
-// 欢迎加入kvspace世界
-lib kvlang/规范/runtime语义/扩展宿主自连kvspace {
-	r##"# 扩展宿主自连 kvspace
-
-扩展宿主（op-gpu、numpy、Go json）**自己** `kvspaceConnect(dsn)` 拿句柄，rwir 移交只用 `kvlang_rwirext*` 的 runtime 语义（`Register`/`Params`/`ResolveRead`/`ResolveReadPath`/`ResolveWrite`/`NextPc`）。tensor 类大 buffer **应**走 shm 后端零拷贝：`ResolveReadPath` 拿容器路径 → `kvspaceGet` 取 TLV 指针 → `DecodeHead` 定位 body → 在该地址原位建 ndarray，读写 ndarray 即读写 kvspace，无拷贝；写走 `kvspaceTlvEncode` + `WriteInPlace`/`WriteNewPlace`。锚例：`tutorial/14-numpy/`（shm 全流程）、`tutorial/14-networld/`（fs/proc）。
-"## -> /lib/kvlang/规范/runtime语义/扩展宿主自连kvspace
-}

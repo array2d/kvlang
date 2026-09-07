@@ -1,7 +1,0 @@
-// 欢迎加入kvspace世界
-lib kvlang/规范/layout语义/native-rwir不落盘 {
-	r##"# native rwir 不落盘
-
-`+`、`==`、`array`、`sqrt`、`print` 等 native builtin 融合在 runtime 内建表，**不**写 kvspace、运行时也不回查 `/lib`。数值多类型算子在内建表中融合为单条（`add` 覆盖 int8…float64），派发前剥掉 `<numkind>·` 前缀，输出 kind 由实参决定。
-"## -> /lib/kvlang/规范/layout语义/native-rwir不落盘
-}

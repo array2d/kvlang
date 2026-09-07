@@ -1,7 +1,0 @@
-// 欢迎加入kvspace世界
-lib kvlang/规范/导言/核心与扩展边界 {
-	r##"# 核心与扩展边界
-
-kvlang 是**小核心 + 扩展主导**的语言。本规范只界定语言核心必须保证的语义，以及核心与 rwir 兑现方之间的契约（def rwir 路由头与各 runtime 的 myrwircaps）。具体 runtime（numpy、fs、networld、gpu 等）提供的 rwir 实现不属本规范，由各 runtime 文档界定；kv 源码**不声明** rwir——`def rwir` 路由头由各 runtime 注册到 `/lib`，本规范只规定 kvlang 如何定位与调用 rwir、经 def rwir 路由兑现（见卷 05）。
-"## -> /lib/kvlang/规范/导言/核心与扩展边界
-}

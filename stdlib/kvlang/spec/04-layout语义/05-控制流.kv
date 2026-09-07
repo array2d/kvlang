@@ -1,0 +1,44 @@
+// 欢迎加入kvspace世界
+lib kvlang/spec/layout语义/控制流 {
+	r####"# 控制流
+
+kvlang 的结构化控制流有 `if`/`else`/`while`/`for … in`/具名 block/`break`/`continue`/`return`。它们**只能**出现在 rwfunc 体内；顶层出现是错误：
+
+```
+error: top-level while is not supported — wrap in main()
+```
+
+`return` **无参数**——输出经写参传递；`return x` 报错。
+
+## 降级为 goto/br（lower）
+
+layout 的 lower 阶段把结构化控制流降级为两条控制原语加具名作用域块（ScopeStmt）：
+
+- `goto(label)`——无条件跳转。
+- `br(cond, then_label, else_label)`——按 cond 二路分支。
+- `break` → `goto` 到循环 exit 块；`continue` → `goto` 到循环 cond 块。
+
+每个 `if`/`while`/`for` 展开为一组具名块（如 `_while_2`、`_do_3`、`_exit_4`、`_if_5`、`_then_6`、`_else_7`、`_merge_8`）。`else if` 链按嵌套 `if` 展开。开放路径尾部补 `return`（layout 保证每块以终结符 `return`/`goto`/`br` 收尾）。
+
+## 布局为线性 irseq
+
+lower 之后，layout 把**所有**块体展平进函数目录下的**单一线性指令序列** `[1,0]…[N,0]`——**不建 scope 子目录**。goto/br 的跳转目标在布局时解析为**整数 irseq**（目标块首指令的 s0 序号），写入其读槽。
+
+标签到 irseq 的映射另存于 `/lib/<pkg>·<name>/‥labels/<label>`（kind `int64`），供审查与工具还原。
+
+示例（`while (i <= n) { total + i -> total; i <- i + 1 }`，其中 `n` 为读参）布出：
+
+```
+[3,0]="goto"  [3,-1]=4              # 跳到条件块（irseq 4）
+[4,0]="int64·le"  [4,-1]="i" [4,-2]="n"  [4,1]="_1"
+[5,0]="br"  [5,-1]="_1" [5,-2]=6 [5,-3]=9   # 真→6(循环体) 假→9(出口)
+[6,0]="int64·add" [6,-1]="total" [6,-2]="i" [6,1]="total"
+[7,0]="int64·add" [7,-1]="i" [7,-2]=1 [7,1]="i"
+[8,0]="goto" [8,-1]=4               # 回条件块
+[9,0]="return"                      # 出口块（补 return）
+‥labels/_while_2=4  ‥labels/_do_3=6  ‥labels/_exit_4=9
+```
+
+> 注：早期 Go 实现（及仓库中部分 `.kv.dump` 快照）把每块布为 `<scope>[i,j]` scope 子目录、goto/br 存字符串标签。当前 Rust layout **不**如此——统一展平为线性 irseq + 整数目标。runtime 帧模型见 [[执行模型]]。
+	"#### -> /lib/kvlang/spec/layout语义/控制流
+}

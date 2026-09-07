@@ -1,7 +1,0 @@
-// 欢迎加入kvspace世界
-lib kvlang/规范/设计理由/lib最顶层 {
-	r##"# 为什么 lib 是最顶层
-
-lib 对应 `/lib/<name>/` 路径前缀，是 kvspace 树里代码的命名空间边界。lib 存在的理由不是"模块化"（那是大多数语言的解释），而是"lib 签名是 kvspace 里的一等公民"——layout 阶段把 lib 的完整签名（所有 rwfunc 的参数类型）写入 kvspace，任何节点可在运行时查询 lib 的接口，无需源码。lib 的存在使得"kvspace 即代码仓库"成立。
-"## -> /lib/kvlang/规范/设计理由/lib最顶层
-}

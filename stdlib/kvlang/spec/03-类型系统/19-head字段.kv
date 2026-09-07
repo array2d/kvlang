@@ -1,0 +1,18 @@
+// 欢迎加入kvspace世界
+lib kvlang/spec/类型系统/head字段 {
+	r####"# 通用 head 字段（一切 xvalue 皆有，按序）
+
+| 字段 | 宽 | 义 |
+|------|----|----|
+| `headlen` | u16 LE | head 总字节数；body 起于偏移 `headlen` |
+| `ref` | u8 | 存储位置（见下） |
+| `storetype` | u8 | 物理布局（见下） |
+| `ro` | u8 | `1`=只读、`0`=可写 |
+| `vid` | u32 LE | vthread id（默认 0） |
+| `body_len` | u32 LE | body 字节数 |
+| （storetype 物理字段） | 变 | 按 storetype 追加，见下表 |
+| `langtype` | 变长 | kindexpr 串，占至 `headlen`（长度 = `headlen` − 当前偏移，无需独立长度字段） |
+
+`langtype` 恒为 head 最后一段（body 之前）。旧 1 字节 kindcode 方案作废——语义类型回归完整 kindexpr 串，方能承载 `[dims]`、map 的 `key·value`、struct 原型路径、def 族定义节点等高级定义。
+"#### -> /lib/kvlang/spec/类型系统/head字段
+}
