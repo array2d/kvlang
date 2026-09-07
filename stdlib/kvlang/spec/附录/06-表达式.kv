@@ -1,0 +1,47 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/附录/表达式 {
+	r##"# 表达式
+
+```
+expr        = primary { infix_primary }
+            | prefix_unary primary
+
+primary     = literal | ident | path
+            | primary "·" ident                       (* 成员读：静态键 *)
+            | primary "·" "*" ident                   (* 成员读：动态键 *)
+            | primary "·" "[" expr { "," expr } "]"   (* 坐标访问（stringkeymap 元素/张量坐标） *)
+            | primary "[" expr { "," expr } "]"       (* compact 下标读 *)
+            | "(" expr ")"                            (* 分组 *)
+            | ident "(" [ arg_list ] ")"              (* 函数调用 *)
+            | ident "·" ident { "·" ident } "(" [ arg_list ] ")"  (* 点号限定调用 *)
+            | array_literal
+            | struct_literal
+            | map_literal
+
+prefix_unary = "-" | "!" | "√"                        (* √ = sqrt（U+221A），一元 *)
+
+infix_primary = binary_op expr
+
+binary_op  = "+" | "-" | "×" | "÷" | "%"
+           | "==" | "!=" | "≠" | "<" | ">" | "<=" | "≤" | ">=" | "≥"
+           | "&&" | "||" | "&" | "|" | "^" | "<<" | ">>"
+              (* 乘 = ×(U+00D7)，除 = ÷(U+00F7)；≠ ≤ ≥ 为 != <= >= 的等价字形。
+                 "*" 登记为 pointer（precedence 0、非算术）；"/" 不在符号表、仅用于路径/注释，无算术除法。 *)
+
+arg_list    = expr { "," expr }
+
+literal     = integer | float | string | "None" | "true" | "false"
+              (* 空值字面量是 None，非 null *)
+
+array_literal  = "[" [ expr { "," expr } ] "]"
+               (* compact 形态：元素连续打包进单个 XValue，head kind=元素类型；须定长同类型 *)
+
+struct_literal = "{" [ ident "=" expr { (stmt_sep) ident "=" expr } ] "}"
+               (* {k1=v1; k2=v2}，key 为静态标识符，落 struct *)
+
+map_literal    = "{" [ expr { (stmt_sep | ",") expr } ] "}"
+               (* stringkeymap 散 key 形态：{v0, v1, ...}，head kind=stringkeymap，
+                  每元素落坐标段 base·[i] 独立 key；字符串数组等变长集合用此形式 *)
+```
+"## -> /lib/kvlang/规范/附录/表达式
+}

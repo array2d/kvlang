@@ -1,0 +1,69 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/类型系统/种类 {
+	r##"# 种类（kind）
+
+**种类**是值的运行时类别。种类字符串是 kindexpr 的基（base）部分（见 [[kindexpr签名类型表达式]]）。
+
+### 定宽数字种类
+
+kvlang 的数字种类**必须携带精确位宽**：
+
+| 类别 | 种类 |
+|------|------|
+| 有符号整数 | `int8` `int16` `int32` `int64` |
+| 无符号整数 | `uint8` `uint16` `uint32` `uint64` |
+| IEEE 754 浮点 | `float32` `float64` |
+
+整数按小端补码编码，浮点按 IEEE 754 编码。
+
+**铁律——无家族简写**。`int`、`uint`、`float`、`num`、`char` 这类不含位宽/编码的简写**不是**合法种类，在任何类型标注中均**不得**出现。位宽与字符编码是**开放集合**（未来可扩 `int4`、`fp8`、`fp16` 等），封闭的家族枚举必然漏项；多态**必须**靠 [[kindexpr签名类型表达式]] 的显式 `|` 枚举表达（如 `int8|int16|int32|int64`）。
+
+### bool 与字符种类
+
+| 种类 | 说明 |
+|------|------|
+| `bool` | 1 字节：`0`=false、`1`=true |
+| `char/utf32` | 码点序列，4B×N，定宽、可索引；**字符串字面量的默认种类** |
+| `char/ascii` | ASCII 字节序列，1B×N，定宽、可索引 |
+| `char/utf8` | UTF-8 字节序列，1B×N，变宽、**禁索引**（仅存储与交换） |
+
+字符三种编码的判定为前缀相等：某种类是字符种类当且仅当它以 `char/` 起始。定宽编码（`utf32`、`ascii`）**必须**支持 O(1) 码点索引；变宽编码 `utf8` 的按码点索引操作（`string·char`、`s[i]` 等）**必须**报 TypeError。单个字符标注为 `char/<编码>`（标量），字符串标注为 `[]char/<编码>`（序列）；字符种类的值恒为一维序列。
+
+### 容器与结构种类
+
+| 种类 | 说明 |
+|------|------|
+| `stringkeymap` | map 容器，kindexpr 为 `key·value`（如 `[]char/utf8·int64`） |
+| `struct` | 结构原型实例的种类（见 [[容器]] 与结构声明） |
+| `index` | **storetype**：索引型节点（map/struct 值容器的 `{key}·` memindex、lib/rwfunc 目录节点）；物理=m×n 对齐字符串数组，dims=[len,cap,M]（M align8） |
+| `extindex` | **storetype**：可扩展索引型节点（vthread 运行栈等，cap 可增长）；与 `ref`/`@ext` 无关，extindex 是 storetype 不是 ref=2 |
+
+容器的物理组成（值 + memindex）见 [[容器]]。
+
+### 时间种类
+
+| 种类 | 说明 |
+|------|------|
+| `time` | 时刻，由 `time·now()` 等产生 |
+| `duration` | 时长，由 `time/duration·*` 产生 |
+
+`time`/`duration` 是不透明标量种类，其运算由 time 标准库提供，字节布局不由本卷规定。
+
+### 代码种类
+
+下列 langtype 描述 KV 树中的代码与目录节点（见 [[kvspace模型]] 的指令布局）：
+
+- `rwir`：无 kvlang 实现体，指令名文本，storetype=ARRAYND 叶子；由 runtime 经 def rwir 路由直接兑现。
+- `def rwir`：**路由头**，仅存于 `/lib/<op>`，是 rwir 统一调度入口，storetype=index（定义节点），**无 kvlang 实现体**；**不叫"扩展算子"**，**不得**出现在用户书写的类型标注中。每个 runtime 只声明 **myrwircaps**（该 runtime 能兑现的 rwir 能力集）；rwir 若不在本 runtime myrwircaps 内须经 `/lib/<op>` 的 def rwir 路由给能兑现它的其它 runtime。
+- `rwfunc`：有 kvlang 实现体（`/` 目录下的指令槽序列），storetype=index（静态定义）或 extindex（vthread 运行栈），可被任意 main-runtime 直接解释执行。
+
+**故有 def rwir 而无 def rwfunc**：rwfunc 有 kvlang 实现体（一串 rwir），任意 main-runtime 逐条解释即可，无需路由头；rwir 无实现体，不在本 runtime myrwircaps 内时必须路由，故需 def rwir。
+
+### None 与 ptr 不是种类
+
+- **None** 不是种类：它是 `storetype=NONE` 的空结构体 XValue。任何有名变量都有地址、都有 XValue；未赋值即 None。None 参与算术、比较、分支条件、类型构造一律 TypeError（见下文与 [[runtime语义]]）。
+- **ptr（软链接）** 不是种类：它是 head 的 `ref=1`（存储位置维），head 的 storetype/langtype 描述目标的完整形态，body 存目标 key 路径（见 [[容器]]）。
+
+> ptr（`ref=1`）是 head 的 ref 字段（存储位置维）；kvlang **源码**类型标注最前仍可书写 `*`/`@` 前缀（如 `*int64`、`@[256,256]uint8`），表 ref，layout 解析时剥离该前缀落成 head `ref` 独立字节；**wire 层 langtype 串不含 `*`/`@` 前缀**，存储位置一律经 head `ref` 字节表达。extindex 是 storetype（物理布局维），与 ref=2 无关（见 [[总体方案]]）。
+"## -> /lib/kvlang/规范/类型系统/种类
+}

@@ -1,0 +1,7 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/kvspace模型/后端与前端 {
+	r##"# 后端与前端
+
+kvspace 的 C ABI 由前端 dispatch 层（`kvspace` 仓 `src/frontend.c`）统一导出，运行期按连接串 scheme 选择后端：`shm://` 走 kvspace-c，`redis`/`fs`/`s3` 等走 kvspace-durable。三后端**必须**实现同一 ABI 与同一线格式（byte-identical），语义一致；一致性由 tutorial 三后端全绿判定（见 [[范围与一致性]]）。ABI 符号与 XValue 线格式见 [[寻址与命名]] 与 [[键系统与数组访问]]。
+"## -> /lib/kvlang/规范/kvspace模型/后端与前端
+}

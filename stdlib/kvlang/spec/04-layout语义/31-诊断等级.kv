@@ -1,0 +1,17 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/layout语义/诊断等级 {
+	r##"# 诊断等级
+
+layout 只有三级（**不是** p0–p7）：
+
+| 等级 | 含义 | 是否拒装载 |
+|------|------|-----------|
+| `error` | 违反规范、无法布局 | **是**——拒绝写入 `/lib` |
+| `warn` | 可疑但可布局 | 否 |
+| `info` | 提示 | 否 |
+
+判定规则：只要存在任一 `error` 级诊断（既非 `warn` 亦非 `info`），layout **必须**拒绝装载，返回错误 `parse: error-level diagnostics — refusing to load`。`warn`/`info` 不阻止装载。
+
+诊断**不首错即止**：解析器累积全量诊断，一次报出，便于批量修复。
+"## -> /lib/kvlang/规范/layout语义/诊断等级
+}

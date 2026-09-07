@@ -1,0 +1,11 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/layout语义/write_func步骤 {
+	r##"# write_func 步骤
+
+1. 推断类型并特化算子。
+2. `del_tree` 本函数目录（增量覆盖，仅本函数子树）。
+3. 写 `[0,0]` 签名锚点（langtype `rwfunc`，body `[nr][nw][dynamic]`）、签名行 `[0,x]` 各参数槽（`def kindexpr` xvalue，body=参数 kindexpr 串）、`.src` 源码副本、各命名参数 Ptr。
+4. 从 `[1,0]` 起写线性指令；goto/br 标签解析为整数 irseq。
+5. 若有标签，写 `‥labels/<label>` → irseq。
+"## -> /lib/kvlang/规范/layout语义/write_func步骤
+}

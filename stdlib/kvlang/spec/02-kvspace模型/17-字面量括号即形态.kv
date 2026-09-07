@@ -1,0 +1,11 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/kvspace模型/字面量括号即形态 {
+	r##"# 字面量括号即形态
+
+| 字面量 | 形态 | 约束 |
+|--------|------|------|
+| `[1, 2, 3]` | compact（head kind=元素类型） | 元素须定长同 kind；含变长字符串成员时 layout 报错 |
+| `{1, 2, 3}` | stringkeymap（散 key） | 变长 / 可增长；字符串数组必须走此形式 |
+| `{k = v; …}` | struct 或 stringkeymap | 由 `=` 键值对与散 key 数组区分；空 `{}` 须带类型标注 |
+"## -> /lib/kvlang/规范/kvspace模型/字面量括号即形态
+}

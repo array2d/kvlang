@@ -1,0 +1,15 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/类型系统/stringkeymap形态 {
+	r##"# stringkeymap 形态
+
+stringkeymap 数组的**容器值**是一个 storetype=index 的 XValue（langtype 为 map kindexpr，如 `[]char/utf8·int64`；body 空，成员名索引落 `base·` memindex，dims=[len,cap,M]），**每个元素**是独立子 key `base·i`：
+
+```kv
+nums = {10, 20, 30, 40}    // 每元素落 nums·0 … nums·3
+for (x in nums) { … }      // 遍历散 key 元素
+names = {"apple", "banana", "cherry"}   // 变长字符串数组必须 stringkeymap
+```
+
+散 key 元素以坐标段 `base·[i]` 访问（经 `kv·get`），或以 `for-in` / `kv·listlen` / `kv·listn` 遍历。坐标段支持多值键（含小数）：`geo·[39.9,116.4] <- "Beijing"`，物理以字符串格式落 key（见 `tutorial/04-ndarray/geo_coord.kv`）。
+"## -> /lib/kvlang/规范/类型系统/stringkeymap形态
+}

@@ -1,0 +1,13 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/runtime语义/判定边界 {
+	r##"# native vs 须经 def rwir 路由的 rwir 的判定边界
+
+一条非控制、非 `=` 的指令，其归属由两步判定：
+
+1. `kvlangBuiltinIsNative(op)` → true：native（见 [[native判定]]、[[native全集]]、[[限定内建族]]）。
+2. 否则 `isothersrwir(op)`：`op[0]=='/'` → false；否则读 `/lib/<op>`，kind==`def rwir` → 须经 def rwir 路由的 rwir（`is_ext_rwir`）。
+3. 二者皆否 → 用户 rwfunc（改写为 `call`）。
+
+layout **不预先**把 opcode 归为 native / user，归属判定全留给 runtime；同包内裸名调用须显式 `pkg·f()`（见 layout 语义卷）。数字类型的多态运算融合为单条 rwir（`int64·add` 与 `float32·add` 同归 `add`），由 native 实现按操作数 kind 在运行期归约（`kvlangBuiltinNumOp`）。
+"## -> /lib/kvlang/规范/runtime语义/判定边界
+}

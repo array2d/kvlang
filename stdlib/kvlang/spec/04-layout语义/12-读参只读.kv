@@ -1,0 +1,22 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/layout语义/读参只读 {
+	r##"# 读参只读
+
+读参是单向输入绑定。函数体内把读参裸名放入写槽（含 `for … in` 的迭代变量）会破坏数据流方向，layout 报错拒绝装载：
+
+```
+error: func f: read param "A" cannot be used as write slot (read params are read-only)
+```
+
+**签名诚实原则**：函数体内被写的参数**必须**声明在写参侧。
+
+```
+// 非法：acc 被写却在读参侧
+rwfunc sum(arr:[]int64, acc:int64) -> (r:int64) { acc + arr[0] -> acc }
+// 合法：acc 在写参侧，体内可读可写
+rwfunc sum(arr:[]int64) -> (acc:int64) { acc + arr[0] -> acc }
+```
+
+判定规则（实现）：写槽含 `/`、`[`、`·` 者视为路径/下标/成员写，不计入本检查；但 `kv·set(base, …)` 的 base 命中读参裸名同样拒绝（成员目录被改写）。
+"## -> /lib/kvlang/规范/layout语义/读参只读
+}

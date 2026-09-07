@@ -4,58 +4,11 @@ lib kvlang/规范/kvspace模型/地址空间 {
 
 kvspace 是 kvlang 的第一性前置概念：它**既是寻址空间也是内存空间**。程序计数器 PC 是一条 kvspace 路径字符串，指令是路径上的值，变量是路径上的值，代码与数据统一在同一棵 KV 树上。本卷其余各章（[[寻址与命名]]、[[键系统与数组访问]]、[[指令布局格式]]、[[系统变量]]）均以本章界定的地址空间为基础。
 
-## 存储铁律
+## 本篇分节
 
-kvspace 是文件系统风格的键值抽象。任一条目由 key 与 value 构成：
-
-- key **必须**是绝对、规范的字符串路径：以 `/` 开头，`/` 分隔层级；不得为相对路径。
-- value **必须**是一个 XValue 序列化后的字节串（TLV 编码，格式见 [[键系统与数组访问]]）。
-- **不得**向 kvspace 直接写入裸基础类型字节；所有值必须经 XValue 编解码。违反此铁律的写入，读取方在解码非法字节时行为未定义。
-
-目录以尾随 `/` 标记：key `/a/` 是目录（其 value 为 `index`），key `/a` 是普通值。同一路径的有尾斜杠与无尾斜杠形态可独立共存。
-
-## 结构域
-
-kvspace 的路径中，只有以下前缀由语言核心赋予固定结构语义；其余 `/` 路径全部自由，由用户代码定义，核心不预设 schema。
-
-| 前缀 | 语义 |
-|------|------|
-| `/lib` | 函数与扩展指令的单一事实源：layout 产物（签名 + 指令树）、`.src` 源码副本、扩展 rwir 注册项均落于此 |
-| `/vthread` | 虚线程运行时状态：每 vthread 一棵子树，栈帧、PC、状态等随身系统变量暴露执行现场 |
-| `/networld` | 与外部世界交互的名册域：本机与外部进程、文件等以 `/networld/{host}/…` 登记，供扩展 rwir 定位与兑现 |
-
-`/lib` 与 `/vthread` 的前缀常量由运行时与 layout 各自定义（C 运行时 `runtime/src/runtime_internal.h` 的 `LIB_ROOT`/`VTHREAD_ROOT`，Rust layout `layout/src/keytree.rs` 的 `LIB_ROOT`/`VTHREAD_ROOT`）。
-
-### `/lib`
-
-`/lib` 是全局命名空间，无 `import`——lib 树本身即命名空间。`lib name { … }` 块声明包；跨包调用走全路径 `/lib/{pkg}·{func}`。多文件经引导拼接后统一 layout 进 `/lib`，已加载条目去重。函数在 `/lib` 下只读，帧调用经 extindex 复用同一份指令树（见 [[指令布局格式]]）。
-
-### `/vthread`
-
-每个虚线程 `vid` 占一棵子树 `/vthread/{vid}/`，借用 Unix `/proc/<pid>/` 思想：栈帧为其下的 KV 子树，`‥pc`、`‥status` 等系统变量（前缀 `‥`，见 [[系统变量]]）暴露执行状态。PC 为路径字符串、帧根落 KV，故进程崩溃后可从 kvspace 续跑。
-
-### `/networld`
-
-`/networld` 是本机在网络命名空间下的身份域，`host` 取裸 hostname。外部进程执行、宿主文件系统读写等**不**经设备文件，而是登记在 `/networld/{host}/…` 下并由扩展 rwir 兑现：例如外部进程的 stdout/stderr 捕获为扩展存储句柄，其逻辑定位符形如 `/networld/{host}/proc/{pid}/{stream}`（`runtime-rs/src/rwir/networld/`）。
-
-### 没有设备域
-
-kvspace 世界中没有终端、没有设备文件，只有 key 与 value。`print`/`println` 等 I/O 不是地址空间的一个域，也不是核心内建，而是扩展 rwir（签名以 `defrwir` 注册于 `/lib/<opcode>`，见 [[指令布局格式]]），执行时直接作用于宿主 I/O。
-
-## 扩展存储
-
-kvspace 元存中的 value 分两类：**内联数据**（基础类型、容器元数据）与**扩展存储句柄**。句柄 value 的 kindexpr 以 `@` 前缀标记（见 [[键系统与数组访问]]），其 body 只记录目标位置描述符，真实字节位于元存之外：
-
-| 扩展位置 | 典型数据 |
-|---------|---------|
-| 集群/本机共享内存 | 大张量、激活值 |
-| GPU 显存 | 计算张量 |
-| 文件系统 / 对象存储 | 模型权重、检查点、数据集、外部进程输出 |
-
-读取一个 `@` 句柄 value 时，运行时按 body 定位符前缀路由到对应兑现器还原真实字节（`runtime-rs/src/engine.rs`）。
-
-## 后端与前端
-
-kvspace 的 C ABI 由前端 dispatch 层（`kvspace` 仓 `src/frontend.c`）统一导出，运行期按连接串 scheme 选择后端：`shm://` 走 kvspace-c，`redis`/`fs`/`s3` 等走 kvspace-durable。三后端**必须**实现同一 ABI 与同一线格式（byte-identical），语义一致；一致性由 tutorial 三后端全绿判定（见 [[范围与一致性]]）。ABI 符号与 XValue 线格式见 [[寻址与命名]] 与 [[键系统与数组访问]]。
+- [[存储铁律]]
+- [[结构域]]
+- [[扩展存储]]
+- [[后端与前端]]
 "## -> /lib/kvlang/规范/kvspace模型/地址空间
 }

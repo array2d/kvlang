@@ -1,0 +1,20 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/layout语义/控制流 {
+	r##"# 控制流
+
+kvlang 的结构化控制流有 `if`/`else`/`while`/`for … in`/具名 block/`break`/`continue`/`return`。它们**只能**出现在 rwfunc 体内；顶层出现是错误：
+
+```
+error: top-level while is not supported — wrap in main()
+```
+
+`return` **无参数**——输出经写参传递；`return x` 报错。
+
+## 本篇分节
+
+- [[降级为goto-br]]
+- [[布局为线性irseq]]
+- [[for-in脱糖]]
+- [[其它降级]]
+"## -> /lib/kvlang/规范/layout语义/控制流
+}

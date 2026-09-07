@@ -1,0 +1,14 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/layout语义/lib下四类内容 {
+	r##"# `/lib` 下的四类内容
+
+| 类别 | 语义 | 有指令体 | langtype | 布局路径 |
+|------|------|---------|---------|---------|
+| **rwfunc** | 用户函数 | 是 | `rwfunc` | `/lib/<pkg>·<name>/` |
+| **def rwir 路由头** | rwir 统一调度入口，各 runtime myrwircaps 对外入口 | 否，无 kvlang 实现体 | `def rwir` | `/lib/<opcode>` |
+| **lib 数据** | 常量 | 否，单 XValue | 值类型 | `/lib/<name>` |
+| **struct 原型** | 结构体原型 | 否 | `def struct` | `/lib/<Name>` |
+
+四类同存 `/lib`，无独立 `/rwir/` 命名空间。
+"## -> /lib/kvlang/规范/layout语义/lib下四类内容
+}

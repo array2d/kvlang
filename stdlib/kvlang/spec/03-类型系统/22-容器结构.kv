@@ -1,0 +1,13 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/类型系统/容器结构 {
+	r##"# 容器 = 值 + memindex
+
+容器在 kvspace 中分两部分落库，`·`（U+00B7 中点）是值容器唯一的 memindex 标记（注：`/lib/{pkg}·{func}` 中的 `·` 是包·函数命名分隔符，与 memindex 无关，详见 [[总体方案]]）：
+
+- **容器值**：落在裸 base 键，storetype=index，body 空；langtype 为 map kindexpr（如 `[]char/utf8·int64`）或 struct 原型路径（如 `/lib/Point`）。
+- **成员**：`base·name` 是独立子 key，各自持成员值。
+- **memindex**：落在 `base·` 键（尾中点），storetype=index，其 body 是成员名索引矩阵，是成员枚举的权威来源。
+
+memindex 的线格式为 dims = `[len, cap, M]` 的矩阵：`len` = 有效成员数、`cap` = 预留行数（`cap ≥ len`，满则翻倍扩容）、`M` = 成员名 UTF-8 字节最大长向上 8 对齐后的**行宽**；body 为 `cap × M` 字节，前 `len` 行是有序成员名（NUL 补齐），其余行全 NUL。容量内增删成员 body 长恒定、就地覆写。`M` 是行宽（行 stride），`cap` 是可翻倍的容量。
+"## -> /lib/kvlang/规范/类型系统/容器结构
+}

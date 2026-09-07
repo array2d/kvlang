@@ -1,0 +1,15 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/runtime语义/参数解析与零拷贝读 {
+	r##"# 参数解析与零拷贝读
+
+扩展**只经** `kvlang_rwirext*` 宿主 ABI 拿参数，**不得**自行解析 rwir 槽位：
+
+- `Params(pc)`：返回 opcode + 读/写参名（`\n` 分隔）。
+- `ResolveRead(pc, idx)`：读参解析为**字符串**（stringkeymap 值展开为 `[e0, e1, …]`）；**对数组只返首元素**。
+- `ResolveReadPath(pc, idx)`：读参解析为**KV 路径**（变量/临时 → 帧槽路径；绝对路径 → 直接返回；内联字面量 → 空串）——供**零拷贝读整块 ndarray**：拿到容器路径后经 `kvspaceGet` 取 TLV、`DecodeHead` 定位 body 段直接读字节。
+- `ResolveWrite(pc, idx)`：写参解析为 KV 路径。
+- `NextPc(pc)`：纯函数，求后继 PC。
+
+**规范要点**：需要整块字节（如 `[]uint8`）时**必须**走 `ResolveReadPath` + TLV body，**不得**用 `ResolveRead`（后者对数组只返首元素）。
+"## -> /lib/kvlang/规范/runtime语义/参数解析与零拷贝读
+}

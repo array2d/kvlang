@@ -1,0 +1,13 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/layout语义/报格式 {
+	r##"# 报格式
+
+每条诊断格式为：
+
+```
+{kind}: {src}:{line}:{col}: {message}
+```
+
+`kind` 为 `error` / `warn` / `info`；`src` 为源文件名（内存源码为 `<inline>`）；无位置信息时省略文件段。诊断输出到 stderr；stdout 只放结果（`print` 输出、格式化文本、`ENTRY=`）。
+"## -> /lib/kvlang/规范/layout语义/报格式
+}

@@ -1,0 +1,18 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/runtime语义/就地扩展 {
+	r##"# 就地扩展（同进程）
+
+同进程扩展在驱动循环里就地派发（Rust `run_vid`：`rwir::is_inproc(op)` 命中 → `rwir::dispatch`），无 handoff、无 watch。当前就地集合（`runtime-rs`）：
+
+```
+term      print / println / cerr / input
+json      json·to / json·from
+http      http·call
+layout    kvlanglayout·vet / ·format / ·layout / ·dump
+networld  networld/proc·exec
+          networld/fs·size / ·read / ·write / ·append / ·list / ·del / ·mkdir / ·exists
+```
+
+就地与跨进程只是**执行位置**之别，职责线一致——两者都只经 `kvlang_rwirext*` 解析参数、只经 `kvspace*` 正典 ABI 读写编解码。
+"## -> /lib/kvlang/规范/runtime语义/就地扩展
+}

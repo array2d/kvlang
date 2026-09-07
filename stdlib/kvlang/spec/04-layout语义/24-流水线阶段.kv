@@ -1,0 +1,19 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/layout语义/流水线阶段 {
+	r##"# 流水线阶段
+
+```
+源码 → scanner（scan）→ [Token]
+     → parser（parse_code）→ ast::File   （递归下降，累积全量诊断）
+     → lower（lower_func）  控制流降级 + 类型推断 + 特化
+     → write_func           AST → KV 指令树 /lib/<pkg>·<name>/[i,j]
+```
+
+关键性质：
+
+- **PC 是 KV 路径字符串**，不是整数偏移。
+- **指令存储在 KV 树**中，经 `kv·get` 逐槽读取；无字节码数组。
+- 换行是语句分隔符（`Newline` token），`{ }` 负责块结构；块结构由消费 `LBrace`/`RBrace` 追踪。
+- 诊断**不首错即止**：解析器累积全部诊断，最后统一判定（见 [[诊断]]）。
+"## -> /lib/kvlang/规范/layout语义/流水线阶段
+}

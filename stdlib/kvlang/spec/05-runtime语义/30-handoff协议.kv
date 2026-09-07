@@ -1,0 +1,19 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/runtime语义/handoff协议 {
+	r##"# handoff 协议（跨进程扩展）
+
+跨进程扩展（如 Go json、Py numpy、op-gpu）经共享队列 handoff：
+
+```
+/lib/<opcode>/vids/<vtid> = pc   # 中央 runtime 写，扩展消费（strkeymap 队列）
+```
+
+第一个 rwir 的 `vids` 是真实 strkeymap；后续同 opcode 的 `vids` 是 `Ptr` 指向第一个（共享同一队列）。时序：
+
+1. 中央 runtime `isothersrwir` 命中 → `handoff_external_rwir`：`Set /lib/<op>/vids/<vtid>=pc`。
+2. 扩展发现队列中的 vtid，`RunSeq(pc)`：从 PC 起逐条解码，只要 opcode ∈ 己方集合就执行，遇第一条非己方指令即停（**顺序执行，非并行 batch**）；写回最终 PC，删 `vids` 项。
+3. 中央 runtime `Watch` 直到 vtid 从队列消失（30s 超时），继续。
+
+中央 runtime **不推进 PC**——扩展批量执行后已写回最终 PC，中央直接读新 PC 续跑。
+"## -> /lib/kvlang/规范/runtime语义/handoff协议
+}

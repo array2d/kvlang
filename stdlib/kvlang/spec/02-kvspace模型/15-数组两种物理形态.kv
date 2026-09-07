@@ -1,0 +1,15 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/kvspace模型/数组两种物理形态 {
+	r##"# 数组的两种物理形态
+
+理论上的数组（含多维）在 kvlang 有两种物理落盘形态：
+
+| 形态 | langtype | 触发写法 | 元素位置 | XValue 数 |
+|------|----------|---------|---------|----------|
+| **compact** | 元素 kind（`int64`…） | `[1,2,3]`、`[N]T`、`[d0,d1]T` | 连续打包进单个 XValue 的 body | 1 |
+| **stringkeymap** | `stringkeymap` | `{v0,v1,…}`、`array·scatter` 等 | 每元素落独立子 key `base·[i]` | N+1 |
+
+- **compact**：元素连续打包进一个 XValue，`raw_len = ∏dims × 元素字节宽`，head kind 即元素类型、ndim≥1。对齐 C `int[10]`、Go `[10]int`、Rust `[i32;10]`；多维即连续布局的 ndarray/tensor。要求元素定长同类型——含变长字符串字面量的 `[…]` 在 layout 阶段报错。支持 `arr[i]` 随机访问（下标读经 `xv·at` 在 body 内定位），可零拷贝整块读。
+- **stringkeymap**：head kind=`stringkeymap`、ndim≥1，body 只记形状；每个元素是独立子 key，成员名为**坐标段**。变长、可增长、允许变长元素——字符串数组、可追加数组走此形态。stringkeymap **必须** ndim≥1（无维度的键值容器应为 `struct`），且成员名**必须**是坐标段（`kvspace-durable/src/const.rs` 的 `ERR_MAP_NDIM`、`ERR_MAP_COORD`）。
+"## -> /lib/kvlang/规范/kvspace模型/数组两种物理形态
+}

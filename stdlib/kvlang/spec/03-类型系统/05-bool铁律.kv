@@ -1,0 +1,18 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/类型系统/bool铁律 {
+	r##"# bool 铁律
+
+`bool` 值**只能**为 `true`/`false`，**禁止**一切隐式布尔化：
+
+| 输入 | kvlang |
+|------|--------|
+| `true` / `false` | 合法 |
+| `0` / `1` 整数 | TypeError——须显式写 `!= 0` |
+| 非空字符串 | TypeError——须显式写 `!= ""` |
+| None | TypeError |
+
+分支条件（`if`/`while`/`br`）的条件槽**必须**是 `bool`。强制显式比较使控制流走向可被静态判定，不依赖运行时种类。
+
+逻辑运算 `&&`/`||`/`!` 的操作数**必须**是 `bool`，非 bool 即 TypeError；`bool(x)` 构造器只接受 `true`/`false`，其余种类 TypeError（对整数须写 `!= 0`）。
+"## -> /lib/kvlang/规范/类型系统/bool铁律
+}

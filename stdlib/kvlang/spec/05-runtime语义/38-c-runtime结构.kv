@@ -1,0 +1,12 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/runtime语义/c-runtime结构 {
+	r##"# C runtime 结构
+
+`kvlang/runtime/` 是通用嵌入式执行器（纯 C + `extern "C"`），可嵌入 rwirext 项目（op-gpu、agent、livebyte）。两组对外 C ABI：
+
+- `kvlang_runtime.h`：核心执行器（`kvlangRuntimeConnect`/`Disconnect`/`Bootstrap`/`ExecuteVthread`/`KvspaceHandle` …）。
+- `kvlang_rwirext.h`：扩展 runtime 语义，**只暴露 kvspace 不提供的部分**。现有 9 个符号：`Register`、`Handoff`、`NextPc`、`Params`、`ResolveRead`、`ResolveReadPath`、`ResolveWrite`、`KindexprValid`、`KindexprMatch`。KV 存取（connect/get/write/del/list/tlv）**不在此**——扩展宿主自连 kvspace ABI，把句柄（`void *`）传进带句柄的 rwirext 函数。
+
+内部模块：`xvalue.c`（TLV 编解码薄封装）、`kindexpr.c`、`kv.c`（kvspace ABI 封装）、`keytree.c`（路径构造）、`rwir.c`（PC 解析 + Decode）、`vthread.c`、`builtin*.c`（native 算子 + 静态注册表）、`kvcpu.c`（Execute 循环）、`runtime.c`（ABI 层）、`rwirext.c`（扩展 ABI，含 `isothersrwir`）。native 注册表为**静态数组 + 线性查找**。
+"## -> /lib/kvlang/规范/runtime语义/c-runtime结构
+}

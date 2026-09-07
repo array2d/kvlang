@@ -1,0 +1,7 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/kvspace模型/memindex {
+	r##"# memindex：定宽目录矩阵
+
+storetype=index/extindex 的 head 物理字段记成员名 m×n 对齐字符串数组，参数 `dims=[len, cap, M]`，`M` 向上 8 对齐；`len` 为当前项数、`cap` 为预留容量、`M` 为行宽；主槽 body 恒空。`kvspaceMkindex` 带 `capacity` 参数、构造器 `kvspaceXvalueNewIndexGrow(children, count, cap_hint, m_hint)`（`kvspace-c/src/xvalue.h`）据此保留容量与行宽，使增删可就地覆写、不重分配。
+"## -> /lib/kvlang/规范/kvspace模型/memindex
+}

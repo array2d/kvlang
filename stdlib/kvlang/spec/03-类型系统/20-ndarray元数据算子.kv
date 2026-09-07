@@ -1,0 +1,20 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/类型系统/ndarray元数据算子 {
+	r##"# ndarray 元数据算子
+
+三个算子统一观测数组形状，对两形态均适用：
+
+| 算子 | 语义 |
+|------|------|
+| `ndarray·numel(a)` | 元素总数（compact 读 head array_len；stringkeymap 读成员数） |
+| `ndarray·dim(a)` | 维数（head ndim） |
+| `ndarray·shape(a)` | 各维长度，返回一维 `int64` compact 数组 |
+
+```kv
+a:[]int64 = [10, 20, 30, 40]
+ndarray·numel(a) -> n   // 4
+ndarray·dim(a)   -> d   // 1
+ndarray·shape(a) -> s   // [4]；s[0] = 4
+```
+"## -> /lib/kvlang/规范/类型系统/ndarray元数据算子
+}

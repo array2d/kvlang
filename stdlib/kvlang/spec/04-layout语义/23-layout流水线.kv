@@ -1,0 +1,16 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/layout语义/layout流水线 {
+	r##"# layout 流水线
+
+layout 是 kvlang 的静态语义阶段：**语法检查 + 布局 + 降级**。它把源码检查、降级，并把结果写进 kvspace 的 `/lib/` 子树，供 runtime 解释执行。layout 是 **o0 编译器**——做检查、布局与降级，**不做任何优化**：任何优化都会丢失高层语义，使扩展编译器无法按原语义在异构硬件上优化，故优化一律留给扩展编译器（见 [[范围与一致性]]）。实现是独立 Rust crate `kvlang/layout/`，产 `kvlanglayout` 可执行文件与 `libkvlanglayout` 动态库。
+
+## 本篇分节
+
+- [[流水线阶段]]
+- [[compile处理顺序]]
+- [[write_func步骤]]
+- [[C-ABI入口]]
+- [[vet闸门]]
+- [[lib引导与init入口]]
+"## -> /lib/kvlang/规范/layout语义/layout流水线
+}

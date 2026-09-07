@@ -1,0 +1,27 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/类型系统/数组形态 {
+	r##"# 数组形态
+
+kvlang 的数组有**两种物理形态**：**compact**（稠密：全量元素连续打包进单个 XValue）与 **stringkeymap**（稀疏：散 key，每元素独立落库，未 set 的 key 不存在）。两形态由字面量括号选定，访问算子不同，但都被 `ndarray·*` 元数据算子统一观测。
+
+## 本篇分节
+
+- [[括号规约]]
+- [[compact形态]]
+- [[stringkeymap形态]]
+- [[稠密vs稀疏]]
+- [[两形态互转]]
+- [[ndarray元数据算子]]
+
+## 锚例
+
+- compact 建/读/写/求和：`tutorial/04-ndarray/continuous.kv`。
+- head 种类与 kindexpr、reinterpret：`tutorial/04-ndarray/xv_meta.kv`、`xv_reinterpret.kv`。
+- numel/dim/shape、xv·at/set：`tutorial/04-ndarray/xv_shape.kv`。
+- 多维下标写、reshape：`tutorial/04-ndarray/subscript_write.kv`。
+- stringkeymap 字面量与遍历：`tutorial/04-ndarray/sparse_literal.kv`、`string_array.kv`。
+- 两形态互转：`tutorial/04-ndarray/separated.kv`。
+- 多值坐标段：`tutorial/04-ndarray/geo_coord.kv`。
+- 括号规约错误（compact 容变长串）：`tutorial/error_cases/type_error/compact_string_array.kv`。
+"## -> /lib/kvlang/规范/类型系统/数组形态
+}

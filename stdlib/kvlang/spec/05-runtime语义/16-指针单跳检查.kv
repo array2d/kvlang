@@ -1,0 +1,10 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/runtime语义/指针单跳检查 {
+	r##"# 指针：完整 kindexpr + 单跳类型检查
+
+指针（`Ptr`，head ref==1，源码前缀 `*`）在 kvspace 中存**目标的完整 kindexpr + 目标 key**（`kvspaceNewPtr` 是唯一构造入口，runtime **不得**自造 Ptr 编码）。
+
+- **单跳类型检查**：写入指针时，实现**必须**校验指针声明的目标 kindexpr 与被指向 key 的实际 kindexpr 一致——只查一跳，不递归展开链。
+- **读解引用链**：读参解析（`resolve_read_path`）从命名 Ptr 出发，只追显式 `Ptr`（ref==1）链到非指针值即停；**不得**把 char 字符串值误当路径继续追（否则字符串实参内容会被当键，穿两层调用即变 `None`）。写侧解析（`ResolveWriteSlot`）遵循同一纪律。
+"## -> /lib/kvlang/规范/runtime语义/指针单跳检查
+}

@@ -1,0 +1,13 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/runtime语义/核心扩展边界 {
+	r##"# 核心 / 扩展边界（不可越界的职责线）
+
+扩展回答的唯一问题是「**算什么、怎么算**」；它**不回答**「值长什么样、指令怎么解码、类型怎么校验」——这些是 runtime-c 的值语义（见 [[cruntime与后端abi]]）。扩展只有三个合法动作：
+
+1. **拿 PC**：经 handoff / 驱动循环取当前 PC，跑己方 rwir，`NextPc` 求后继。
+2. **解析参数**：**只经** `kvlang_rwirext*`（见 [[参数解析与零拷贝读]]）。
+3. **读写 kvspace**：**只经** `kvspace*` 正典 ABI（`Get` 借用读、`WriteInPlace`/`WriteNewPlace` 写、`TlvEncode`/`DecodeHead` 编解码）。**绝不自造 kindexpr 构造器、绝不手写 TLV/head。**
+
+唯一保留的例外是 json 反序列化里的 kindexpr **串解析器**：kvspace 只导出编码器、不导出串解析器，而「把外部文本按类型/形状分发写回子树」是扩展**自身的反序列化职责**，故留在扩展侧，且只读 head、不造 head。这条例外恰印证边界：**能调用 kvspace 的一律调用；kvspace 未提供且属扩展自身语义的才自理。**
+"## -> /lib/kvlang/规范/runtime语义/核心扩展边界
+}

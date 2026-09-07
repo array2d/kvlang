@@ -1,0 +1,12 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/layout语义/签名装载 {
+	r##"# 签名装载：主槽计数头 + 签名行 [0,x]
+
+rwfunc（layout 装载）与 def rwir（runtime 注册）的签名都分两处存放（见 [[总体方案]]）：
+
+1. **主槽计数头**：目录主槽 body 只记 `[nr:u16 LE][nw:u16 LE][dynamic:u8]`——读参个数 `nr`、写参个数 `nw`、是否变参 `dynamic`（末位读参 `...`）。**不含任何参数 kindexpr 串**。主槽 langtype 即裸种类名 `rwfunc` 或 `def rwir`。
+2. **签名行 `[0,x]` 各槽**：每个参数的类型定义落在签名行坐标 `[0,x]`——`x<0` 读参、`x>0` 写参、`[0,0]` 为签名行锚点（同 `s0=0` 签名行规约，见 [[指令架构]]）。每个 `[0,x]` 槽是一个 `def kindexpr` 类型的 xvalue，body 存该参数的完整 kindexpr 串（一个参数一槽）。
+
+两者区别：rwfunc 目录下有实现指令行子节点（`[s0>0,·]`，s0≥1）；def rwir 无实现指令行。
+"## -> /lib/kvlang/规范/layout语义/签名装载
+}

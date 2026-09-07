@@ -1,0 +1,25 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/类型系统/稠密vs稀疏 {
+	r##"# 稠密 compact vs 稀疏 stringkeymap：同一逻辑形状的两种落库
+
+同一个逻辑上的 `[1024,1024]int32` 二维数组，可按稀疏度选两种截然不同的物理存储：
+
+| 维度 | compact（稠密） | stringkeymap（稀疏） |
+|------|----------------|---------------------|
+| langtype | `[1024,1024]int32` | 坐标元组键 map，如 `[int32,int32]·int32` |
+| storetype | ARRAYND | index |
+| 落库 | 全量 1024×1024 元素连续打包进**单个** XValue 的 body（恒 1024×1024×4 = 4 MiB，未写元素亦占位） | 每个写过的坐标落一个独立子 key `base·[i,j]`；**未 set 的坐标子 key 根本不存在**，不占空间 |
+| 缺失元素 | 无「缺失」——全部就位（默认 0） | 读未写坐标返回 None（`kv·get` 缺失语义） |
+| 随机访问 | `a[i,j]` 按 row-major O(1) 偏移 | `base·[i,j]` / `kv·get` 按 key 查找 |
+| 适用 | 稠密张量、绝大多数元素有值、需连续内存与 O(1) 下标 | 稀疏矩阵、坐标空间极大而实际有值项稀少 |
+
+```kv
+dense:[]int32 = xv·reshape(array(…), 1024, 1024)   // 4 MiB 稠密块，storetype=ARRAYND
+sparse:[int32,int32]·int32 = {}                     // 稀疏，storetype=index
+99 -> sparse·[3,7]                                  // 仅此一项落子 key sparse·[3,7]
+sparse·[0,0] -> x                                   // 未写坐标 → None（子 key 不存在）
+```
+
+两种落库共享 `ndarray·*` 观测（`numel` 对稀疏形态返回**实存成员数**，非坐标空间容量），并经下节 `array·scatter`/`array·compact` 互转。
+"## -> /lib/kvlang/规范/类型系统/稠密vs稀疏
+}

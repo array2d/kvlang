@@ -1,0 +1,19 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/layout语义/lib与rwir数据 {
+	r##"# lib 与 rwir 数据
+
+`/lib` 树即 kvlang 的**全局命名空间**——无 `import`，跨 lib 调用一律走全路径 `/lib/{pkg}·{func}()`。本章界定 layout 往 `/lib` 写入的各类内容、其 KV 布局与 langtype；def rwir 路由头由各 runtime 注册（非 layout 写入），其表示一并在此界定。
+
+## 本篇分节
+
+- [[lib下四类内容]]
+- [[pkg与嵌套lib]]
+- [[init函数]]
+- [[签名装载]]
+- [[rwfunc布局细节]]
+- [[def-rwir路由头]]
+- [[native-rwir不落盘]]
+- [[lib数据常量]]
+- [[struct原型]]
+"## -> /lib/kvlang/规范/layout语义/lib与rwir数据
+}

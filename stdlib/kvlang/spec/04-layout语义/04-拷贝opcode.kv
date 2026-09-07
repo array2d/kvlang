@@ -1,0 +1,14 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/layout语义/拷贝opcode {
+	r##"# `=` 拷贝 opcode
+
+叶表达式写入写槽（拷贝）**必须**编码为显式 opcode `=`，被拷贝的值放读槽：
+
+```
+a -> b        [s0,0]="="   [s0,-1]="a"    [s0,1]="b"
+42 -> x       [s0,0]="="   [s0,-1]=42     [s0,1]="x"
+```
+
+opcode 位恒为操作码，故拷贝（opcode=`=`）与零参函数调用（`greet() -> x`，opcode=`greet`）在 KV 层无歧义。
+"## -> /lib/kvlang/规范/layout语义/拷贝opcode
+}

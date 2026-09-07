@@ -1,0 +1,22 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/词法/字面量 {
+	r####"# 字面量
+
+字面量是源码中直接书写的常量值。kvlang 有四类字面量：数值、字符串、绝对路径（词法见 [[标识符与路径]]），以及上下文空/布尔字面量。
+
+## 本篇分节
+
+- [[数值字面量]]
+- [[字符串字面量]]
+- [[空值与布尔字面量]]
+
+## 锚例
+
+- `tutorial/01-basics/float_literal.kv`——浮点字面量 `3.14`、结果 `6.28`。
+- `tutorial/01-basics/arith.kv`、`tutorial/01-basics/numtypes.kv`——整数字面量与定宽落定。
+- `tutorial/01-basics/strings.kv`——双引号串、`+` 拼接、单字符字符串。
+- `tutorial/11-string/07-multiline.kv`——字符串三形式（`"…"` 跨行、`r"…"`、`r#"…"#`）。
+- `tutorial/01-basics/none.kv`——`None` 空值。
+- `tutorial/01-basics/kv_tree.kv`、`tutorial/03-control/if.kv`——`true`/`false` 布尔字面量。
+"#### -> /lib/kvlang/规范/词法/字面量
+}

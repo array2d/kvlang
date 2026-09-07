@@ -1,0 +1,15 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/kvspace模型/vthread系统变量 {
+	r##"# vthread 系统变量
+
+宿主 = `/vthread/{vid}`（常量：`runtime/src/keytree.c`、`layout/src/keytree.rs`）：
+
+| 键 | 语义 |
+|----|------|
+| `‥pc` | 当前执行 PC（绝对路径字符串） |
+| `‥status` | 运行状态：`init` / `running` / `wait` / `paused`；进入终态时删除并 Notify 返回值 |
+| `‥status/msg` | 状态附带消息；错误时形如 `‥error/msg` 承载错误文本 |
+| `‥debugger` | 调试控制：空为正常，`paused` 为暂停；`debugger()` 内建写此键 |
+| `‥ctime` | 创建时刻 |
+"## -> /lib/kvlang/规范/kvspace模型/vthread系统变量
+}

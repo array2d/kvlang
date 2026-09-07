@@ -1,0 +1,11 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/设计理由/rwir原子性 {
+	r##"# 为什么 rwir 是原子不可分的
+
+rwir（read-write IR）是最小执行单元，原子性是其定义的一部分。
+
+原子不可分的动机来自 rwir 的兑现机制：rwir 可由任意后端引擎（GPU kernel、numpy、OS 调用）实现，runtime 对每条 rwir 的唯一承诺是"单次原子调用"——它不能拆开一条 rwir 的执行、在中间插入其他指令。若 rwir 可再分，这个承诺就无法成立，后端引擎的实现自由度会大幅收窄。
+
+原子性还带来 layout 层面的好处：layout 对 rwir 签名做完整的类型检查，若 rwir 可拆分则类型检查边界模糊。
+"## -> /lib/kvlang/规范/设计理由/rwir原子性
+}

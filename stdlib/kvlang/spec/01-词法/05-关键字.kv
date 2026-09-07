@@ -1,0 +1,15 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/词法/关键字 {
+	r####"# 关键字
+
+kvlang 只有 **7 个词法关键字**，它们在词法阶段即被识别，不得用作标识符：
+
+```
+return  if  else  for  while  break  continue
+```
+
+其余在语言中具有特殊含义的词（`lib`、`rwir`、`rwfunc`、`in`、`any`、`None`、`true`、`false`、种类名如 `int64`/`float32`/`struct` 等）**不是**词法关键字：它们一律词法化为 `Ident`，其含义由 layout 阶段依上下文赋予。这类词称为**上下文词**。
+
+`def` **不是** kvlang 关键字，kv 源码中永不出现：`def rwir`/`def struct`/`def kindexpr` 是 head 的 langtype 元层「定义节点」标记，只在 layout 之后（`def struct`、`def kindexpr`）或 runtime 注册时（`def rwir`）产生，与源码词法无关（见 [[langtype语义类型]]）。
+"#### -> /lib/kvlang/规范/词法/关键字
+}

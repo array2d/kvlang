@@ -1,0 +1,10 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/runtime语义/状态皆在kvspace {
+	r##"# 状态皆在 kvspace
+
+runtime **不得**在 kvspace 之外持有执行状态。PC、栈帧、局部变量、调用链一律落 kvspace 的 KV 树；进程可在任意指令边界退出，其执行状态完整留在 kvspace，另起进程按同一 PC 续跑而语义不变（崩溃恢复）。
+
+- **PC 是一个 KV 路径字符串**，形如 `/vthread/<vid>/[s0,s1]`（含嵌套帧时逐段延长，见 §四）。PC 既是取指地址，也是当前帧的定位符。
+- **零拷贝读写**：runtime 读值经 `kvspaceGet` 取后端常驻内存的**借用指针**，只读、**不得** `free`；写值经 `kvspaceWriteInPlace`（key 已存在且 body 尺寸不变）或 `kvspaceWriteNewPlace`（新建 / 换 kind / 换尺寸）向后端要可写偏移指针后直接写字节。runtime **不得**自持堆缓冲中转整条 TLV。
+"## -> /lib/kvlang/规范/runtime语义/状态皆在kvspace
+}

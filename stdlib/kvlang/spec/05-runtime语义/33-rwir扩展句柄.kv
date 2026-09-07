@@ -1,0 +1,7 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/runtime语义/rwir扩展句柄 {
+	r##"# 扩展世界句柄（ref=2，@ext）
+
+扩展的输出可以不是 kvspace 元存里的真实字节，而是**扩展世界句柄**：写槽 ref=2（@ext），langtype 为目标 kindexpr 串（不带 `@` 前缀），body 为**逻辑定位串**（如 `/networld/<host>/proc/<pid>/stdout`）。读取该 key 时按 body 前缀路由到对应 `/lib/networld/*` 兑现器还原真实字节（如 proc 兑现器把逻辑路径映射到 `/tmp/kvlangruntime-rs/<pid>/<stream>` 物理文件读回）。真实 xvalue 落在扩展世界（fs 文件、gpu tensordata），非 kvspace 元存。锚例：`tutorial/14-networld/05-capture.kv`。
+"## -> /lib/kvlang/规范/runtime语义/rwir扩展句柄
+}

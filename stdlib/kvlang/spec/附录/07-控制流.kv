@@ -1,0 +1,23 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/附录/控制流 {
+	r##"# 控制流（仅限 rwfunc 体内）
+
+```
+if_stmt     = "if" "(" expr ")" "{" { statement } "}"
+              { "else" "if" "(" expr ")" "{" { statement } "}" }
+              [ "else" "{" { statement } "}" ]
+
+while_stmt  = "while" "(" expr ")" "{" { statement } "}"
+
+for_stmt    = "for" "(" ident "in" expr ")" "{" { statement } "}"
+
+block_stmt    = ident ":" "{" { statement } "}"    (* 具名作用域 *)
+
+break_stmt    = "break"
+continue_stmt = "continue"
+return_stmt   = "return"    (* 无返回值；输出通过写参传递 *)
+```
+
+以上为**源语法**。layout 将其展平为线性 irseq `[1,0]…[N,0]`，控制流降级为 layout 产物 `goto(irseq)` / `br(cond, irseq, irseq)`（目标解析为整数 irseq，标签另存 `/lib/<func>/‥labels/<name>`）——`goto`/`br` 非源语法，见 layout 语义卷。
+"## -> /lib/kvlang/规范/附录/控制流
+}

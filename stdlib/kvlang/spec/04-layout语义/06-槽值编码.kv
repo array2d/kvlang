@@ -1,0 +1,10 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/layout语义/槽值编码 {
+	r##"# 读写槽的槽值编码
+
+读/写槽的槽值按内容编码为 XValue：
+
+- 字面量（整数、浮点、`true`/`false`、字符串、绝对路径）——按其类型编码为对应 kind 的 XValue（`int64` / `float64` / `bool` / `char/*` …）；字符串字面量在 KV 传输层以 `"` 前缀区分于变量名。
+- 变量名、标签等引用——langtype `rwir`，body 即该名字符串。
+"## -> /lib/kvlang/规范/layout语义/槽值编码
+}

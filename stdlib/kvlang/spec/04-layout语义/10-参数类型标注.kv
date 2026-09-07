@@ -1,0 +1,14 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/layout语义/参数类型标注 {
+	r##"# 参数类型必须标注
+
+每个读参与写参**必须**声明类型（`name:type_expr`，type_expr 见 [[kindexpr签名类型表达式]]）。type_expr 最前可写 `*`/`@` 前缀（如 `*int64`、`@[256,256]uint8`）表示 ptr/ext 存储位置；layout 解析时剥离该前缀并落成 head `ref` 字节，wire 层 kindexpr 串不含前缀（见 [[总体方案]]）。缺类型标注是错误：
+
+```
+error: func f: param "x" has no type annotation — every parameter must declare its type
+error: func f: return value "r" has no type annotation
+```
+
+末读参的 type_expr **可**加 `...` 声明变参（0..N 个同型实参）。变参**必须**是最后一个读参；写参**不得**变参。
+"## -> /lib/kvlang/规范/layout语义/参数类型标注
+}

@@ -1,0 +1,14 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/类型系统/stringkeymap {
+	r##"# stringkeymap
+
+**stringkeymap** 是一等 map 类型，kindexpr 为 `key·value`（见 [[kindexpr签名类型表达式]]）：`[]char/utf8·int64` 即 `map[string]int64`，value 可递归嵌套（`[]char/utf8·[]char/utf8·int64`）。
+
+```kv
+m:[]char/utf8·int64 = {}   // 空 map 同样须带类型标注
+m·a = 10                   // 命名成员写
+kv·set(m, "b", 20)         // 动态键写
+kv·get(m, "a") -> x        // 动态键读；缺失返回 None
+```
+"## -> /lib/kvlang/规范/类型系统/stringkeymap
+}

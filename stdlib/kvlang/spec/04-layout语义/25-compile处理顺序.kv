@@ -1,0 +1,7 @@
+// 欢迎加入kvspace世界
+lib kvlang/规范/layout语义/compile处理顺序 {
+	r##"# compile 的处理顺序
+
+顶层 `compile` 依次处理：`struct` 声明 → `rwfunc`（各自 lower + write_func）→ **init**。裸顶层语句与各 `init` 体合并为 init 函数：空 pkg → `init`，`lib X { }` → `X·init`。无任何可执行代码报 `no executable code found`。compile 返回本次写入的 init 函数名列表（供消费方按 lib 声明驱动 init，非文件系统路径推导）。
+"## -> /lib/kvlang/规范/layout语义/compile处理顺序
+}
