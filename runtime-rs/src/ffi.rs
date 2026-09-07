@@ -5,31 +5,36 @@
 
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 
-/// kvspaceDecodeHead 输出（与 kvspace-durable/src/ffi.rs::kvspaceHead_t 对齐）。kindexpr 为唯一类型真相。
+/// kvspaceDecodeHead 输出（逐字段对齐 kvspace/include/kvspace/kvspace.h 的 kvspaceHead_t）。
+/// 三正交轴 ref×storetype×langtype；kindexpr 即该 ABI 的 langtype 槽（本 runtime 内部沿用 kindexpr 命名）。
 #[repr(C)]
 pub struct KvspaceHead {
-    pub xkind: u8,
-    pub kindexpr: [u8; 256],
-    pub kind_off: i32,
-    pub ndim: i32,
-    pub dims: [i32; 8],
+    pub headlen: u16,
+    pub r#ref: u8,
+    pub storetype: u8,
     pub ro: u8,
     pub vid: u32,
     pub body_len: i32,
+    pub ndim: i32,
+    pub dims: [i32; 8],
+    pub kindexpr: [u8; 256],
+    pub kindexpr_len: i32,
     pub body_offset: i32,
 }
 
 impl Default for KvspaceHead {
     fn default() -> Self {
         KvspaceHead {
-            xkind: 0,
-            kindexpr: [0u8; 256],
-            kind_off: 0,
-            ndim: 0,
-            dims: [0i32; 8],
+            headlen: 0,
+            r#ref: 0,
+            storetype: 0,
             ro: 0,
             vid: 0,
             body_len: 0,
+            ndim: 0,
+            dims: [0i32; 8],
+            kindexpr: [0u8; 256],
+            kindexpr_len: 0,
             body_offset: 0,
         }
     }
@@ -99,12 +104,15 @@ unsafe extern "C" {
         err: *mut c_char,
         err_cap: u32,
     ) -> c_int;
-    /// 新位置写：按 (kindexpr, body_len) 分配新 box、写 head，返回 body 偏移指针。
+    /// 新位置写：按 (ref, storetype, ro, vid, langtype, body_len) 分配新 box、写 head，返回 body 偏移指针。
     pub fn kvspaceWriteNewPlace(
         h: *mut c_void,
         key: *const c_char,
-        xkind: u8,
-        kindexpr: *const c_char,
+        r#ref: u8,
+        storetype: u8,
+        ro: u8,
+        vid: u32,
+        langtype: *const c_char,
         body_len: u32,
         body: *mut *mut u8,
         err: *mut c_char,

@@ -7,6 +7,40 @@ use std::ptr::null_mut;
 use crate::ffi::*;
 use crate::rwir;
 
+const KVSPACE_REF_EXT: u8 = 2;
+const STORETYPE_ATOM: u8 = 1;
+const STORETYPE_ARRAYND: u8 = 2;
+const STORETYPE_INDEX: u8 = 3;
+const STORETYPE_EXTINDEX: u8 = 4;
+
+/// 由完整 langtype kindexpr 串推 storetype（镜像 kvspace-durable::storetype_from_kindexpr）：
+/// extindex / index(含 rwfunc/defrwir) / 对象(·)·路径(/) → INDEX 系；带 [dims] → ARRAYND；否则 ATOM。
+fn storetype_from_kindexpr(kx: &str) -> u8 {
+    if kx.is_empty() {
+        return 0;
+    }
+    let (has_dims, base) = match kx.strip_prefix('[') {
+        Some(_) => match kx.find(']') {
+            Some(e) => (true, &kx[e + 1..]),
+            None => (false, kx),
+        },
+        None => (false, kx),
+    };
+    if base == "extindex" {
+        return STORETYPE_EXTINDEX;
+    }
+    if matches!(base, "index" | "rwfunc" | "defrwir")
+        || base.starts_with('/')
+        || base.contains('\u{b7}')
+    {
+        return STORETYPE_INDEX;
+    }
+    if has_dims {
+        return STORETYPE_ARRAYND;
+    }
+    STORETYPE_ATOM
+}
+
 pub struct Engine {
     pub rt: *mut c_void, // kvlang runtime 句柄
     pub kv: *mut c_void, // kvspace 句柄（自持，同时传给 rwirext）
@@ -17,10 +51,19 @@ pub struct Engine {
 
 impl Engine {
     // ── kvspace 读写（绝对路径，char/utf8 与 char/utf32 编解码）─────────
-    /// 写即构造：按 (kindexpr, body) 向 kvspace 要偏移指针后直接写 body 字节——
+    /// 写即构造：按三正交轴 (ref, storetype, ro, vid, langtype) + body 向 kvspace 要偏移指针后直接写 body 字节——
     /// key 已存在且同 body_len → WriteInPlace（原 box 就地）；否则 WriteNewPlace（新 box）。
     /// 两分支各调唯一原语、无预 encode 整条 TLV、无中转 buffer、无 free。
-    fn write_construct(&self, key: &str, xkind: u8, kindexpr: &str, body: &[u8]) {
+    fn write_construct(
+        &self,
+        key: &str,
+        r#ref: u8,
+        storetype: u8,
+        ro: u8,
+        vid: u32,
+        langtype: &str,
+        body: &[u8],
+    ) {
         unsafe {
             let ck = cs(key);
             let mut bp: *mut u8 = null_mut();
@@ -38,8 +81,11 @@ impl Engine {
                 kvspaceWriteNewPlace(
                     self.kv,
                     ck.as_ptr(),
-                    xkind,
-                    cs(kindexpr).as_ptr(),
+                    r#ref,
+                    storetype,
+                    ro,
+                    vid,
+                    cs(langtype).as_ptr(),
                     body.len() as u32,
                     &mut bp,
                     err.as_mut_ptr() as *mut c_char,
@@ -91,7 +137,16 @@ impl Engine {
     /// 扩展世界（@ ref=2）句柄编码写入：kind=目标完整 kindexpr（如 "[]uint8"），body=定位串。
     /// 读取该 key 时由 read_at 按 body 前缀路由给对应 /lib/networld/* 兑现器还原真实字节。
     pub fn set_ext_handle(&self, key: &str, target_kindexpr: &str, locator: &str) {
-        self.write_construct(key, 2, target_kindexpr, locator.as_bytes());
+        let st = storetype_from_kindexpr(target_kindexpr);
+        self.write_construct(
+            key,
+            KVSPACE_REF_EXT,
+            st,
+            0,
+            0,
+            target_kindexpr,
+            locator.as_bytes(),
+        );
     }
 
     /// 读 key 的 head，返回 (ref, body 串)。仅 ref==2 时 body 有意义（扩展句柄定位串）。
@@ -103,7 +158,7 @@ impl Engine {
         unsafe {
             let mut head = KvspaceHead::default();
             kvspaceDecodeHead(tlv.as_ptr(), tlv.len() as u32, &mut head);
-            let r = match head.xkind {
+            let r = match head.r#ref {
                 2 => 2,
                 1 => 1,
                 _ => 0,
@@ -173,7 +228,7 @@ impl Engine {
             if kvspaceDecodeHead(tlv.as_ptr(), tlv.len() as u32, &mut h) != 0 {
                 return Vec::new();
             }
-            let r = match h.xkind {
+            let r = match h.r#ref {
                 2 => 2,
                 1 => 1,
                 _ => 0,
@@ -292,7 +347,15 @@ impl Engine {
                 .trim_end_matches('\0')
                 .to_string();
             let (bo, bl) = (head.body_offset as usize, head.body_len.max(0) as usize);
-            self.write_construct(key, head.xkind, &kx, &tlv[bo..bo + bl]);
+            self.write_construct(
+                key,
+                head.r#ref,
+                head.storetype,
+                head.ro,
+                head.vid,
+                &kx,
+                &tlv[bo..bo + bl],
+            );
         }
     }
 

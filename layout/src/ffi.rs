@@ -38,12 +38,15 @@ extern "C" {
         err: *mut c_char,
         err_cap: u32,
     ) -> c_int;
-    /// 新位置写：按 (xkind, kindexpr, body_len) 分配新 box、写 head，返回 body 偏移指针。
+    /// 新位置写：按 (ref, storetype, ro, vid, langtype, body_len) 分配新 box、写 head，返回 body 偏移指针。
     fn kvspaceWriteNewPlace(
         h: Handle,
         key: *const c_char,
-        xkind: u8,
-        kindexpr: *const c_char,
+        r#ref: u8,
+        storetype: u8,
+        ro: u8,
+        vid: u32,
+        langtype: *const c_char,
         body_len: u32,
         body: *mut *mut u8,
         err: *mut c_char,
@@ -116,17 +119,20 @@ extern "C" {
     fn kvspaceNewFloat64(v: f64, out: *mut *mut u8, out_len: *mut u32) -> c_int;
 }
 
-/// XValueHead 解码结果（与 kvspace-durable 的 kvspaceHead_t 布局一致）。kindexpr 为唯一类型真相。
+/// XValueHead 解码结果（与 kvspace/include/kvspace/kvspace.h 的 kvspaceHead_t 逐字段对齐）。
+/// 三正交轴 ref×storetype×langtype；langtype 为语义类型真相（含 [dims]、无 ptr/ext 前缀）。
 #[repr(C)]
 pub struct kvspaceHead_t {
-    pub xkind: u8,
-    pub kindexpr: [u8; 256],
-    pub kind_off: i32,
-    pub ndim: i32,
-    pub dims: [i32; 8],
+    pub headlen: u16,
+    pub r#ref: u8,
+    pub storetype: u8,
     pub ro: u8,
     pub vid: u32,
     pub body_len: i32,
+    pub ndim: i32,
+    pub dims: [i32; 8],
+    pub langtype: [u8; 256],
+    pub langtype_len: i32,
     pub body_offset: i32,
 }
 
@@ -195,8 +201,8 @@ impl Kv {
 
     fn write_new_place(&mut self, key: &str, tlv: &[u8]) -> Result<(), String> {
         let h = decode_head(tlv);
-        let klen = h.kindexpr.iter().position(|&b| b == 0).unwrap_or(0);
-        let kindexpr = CString::new(&h.kindexpr[..klen]).expect("no NUL in kindexpr");
+        let llen = h.langtype.iter().position(|&b| b == 0).unwrap_or(0);
+        let langtype = CString::new(&h.langtype[..llen]).expect("no NUL in langtype");
         let ck = CString::new(key).expect("no NUL in key");
         let body_off = h.body_offset as usize;
         let body_len = h.body_len.max(0) as usize;
@@ -206,8 +212,11 @@ impl Kv {
             kvspaceWriteNewPlace(
                 self.h,
                 ck.as_ptr(),
-                h.xkind,
-                kindexpr.as_ptr(),
+                h.r#ref,
+                h.storetype,
+                h.ro,
+                h.vid,
+                langtype.as_ptr(),
                 body_len as u32,
                 &mut body,
                 err.as_mut_ptr(),
@@ -350,14 +359,16 @@ pub fn tlv_encode(kind: &str, raw: &[u8], array_len: i32) -> Vec<u8> {
 /// 解码 XValueHead。
 pub fn decode_head(data: &[u8]) -> kvspaceHead_t {
     let mut h = kvspaceHead_t {
-        xkind: 0,
-        kindexpr: [0u8; 256],
-        kind_off: 0,
-        ndim: 0,
-        dims: [0i32; 8],
+        headlen: 0,
+        r#ref: 0,
+        storetype: 0,
         ro: 0,
         vid: 0,
         body_len: 0,
+        ndim: 0,
+        dims: [0i32; 8],
+        langtype: [0u8; 256],
+        langtype_len: 0,
         body_offset: 0,
     };
     unsafe {
