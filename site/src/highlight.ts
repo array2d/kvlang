@@ -6,7 +6,6 @@ const KEYWORDS = new Set([
   "rwfunc",
   "rwir",
   "defrwir",
-  "defrwfunc",
   "while",
   "if",
   "else",

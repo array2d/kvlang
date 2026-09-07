@@ -1,0 +1,44 @@
+// 欢迎加入kvspace世界
+lib kvlang/spec/layout语义/rwfunc布局与def_rwir {
+	r####"# rwfunc 布局与 def rwir
+
+## rwfunc 布局细节
+
+`write_func` 往 `/lib/<pkg>·<name>/` 写：
+
+- `[0,0]`——rwfunc 签名。
+- `.src`（ASCII 点后缀，`/lib/<pkg>·<name>.src`）——源码副本，kind `char`。
+- 每个命名参数——`funcDir/<param>` 存 Ptr（kind `char`）指向槽坐标串（读参 `[0,-j]`、写参 `[0,+j]`）。
+- `[i,j]`（i≥1）——线性指令（见 [[控制流]]）。
+- `‥labels/<label>`——标签到 irseq 映射（若有控制流）。
+
+## def rwir 路由头（rwir 统一调度入口）
+
+`/lib/<opcode>`（langtype `def rwir`）**只由 runtime 注册写入**，kv 源码不声明 rwir、layout 也不产生 def rwir：
+
+- **runtime 注册**——各 runtime 启动时经运行时注册接口把自身 myrwircaps 的每个 opcode 写入 `/lib/<opcode>`；注册前校验各参 kindexpr。主槽 body `[nr][nw][dynamic]`，各参数类型分别落入 `[0,x]` 签名行槽（`def kindexpr` xvalue），无实现指令行。
+
+layout **不**判定某 opcode 是否在本 runtime 的 myrwircaps 内——调用目标 opcode 槽统一 langtype `rwir|rwfunc`，判定推迟到 runtime 查 `/lib/<opcode>` 的 XValue langtype（见 [[执行模型]]）。def rwir 路由头仅落于 `/lib/<opcode>`，无 native/扩展/user 的静态归类——每个 runtime 只声明自身 myrwircaps，不在 layout 层区分。
+
+## native rwir 不落盘
+
+`+`、`==`、`array`、`sqrt`、`print` 等 native builtin 融合在 runtime 内建表，**不**写 kvspace、运行时也不回查 `/lib`。数值多类型算子在内建表中融合为单条（`add` 覆盖 int8…float64），派发前剥掉 `<numkind>·` 前缀，输出 kind 由实参决定。
+
+## lib 数据（常量）
+
+`/lib/<name>` 存单个 XValue 常量，以绝对路径读写。`lib` body 内的绝对路径赋值即写常量：
+
+```
+lib math {
+    /lib/math·Pi = 3.141592653589793
+    /lib/math·E  = 2.718281828459045
+}
+```
+
+任意 kvlang 代码以绝对路径访问 `print(/lib/math·Pi)`。裸名赋值（`Pi = 3.14`）是 `/vthread` 帧局部变量、跑完回收，**不**入 `/lib`。当前实现**不**内置 stdlib 自举；常量由用户或宿主显式 layout 写入。
+
+## struct 原型
+
+`struct` 声明布进 `/lib/<Name>`：原型定义节点（langtype `def struct`，body 为各字段 `name:kindexpr`）+ memindex（`/lib/<Name>·`，字段名唯一权威）+ 各字段默认值。runtime `struct·new` 以此原型克隆实例，字段默认值即实例初值。
+	"#### -> /lib/kvlang/spec/layout语义/rwfunc布局与def_rwir
+}

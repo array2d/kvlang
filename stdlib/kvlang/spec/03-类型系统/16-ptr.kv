@@ -1,0 +1,17 @@
+// 欢迎加入kvspace世界
+lib kvlang/spec/类型系统/ptr {
+	r####"# ptr（软链接）
+
+**ptr** 不是种类，而是 head 的 `ref=1`（存储位置维）：ptr 值的 head storetype/langtype 描述**目标的完整形态**，body 存**目标 key 路径**。源码类型标注最前可写 `*` 前缀（如 `*int64`）表 ref，layout 剥离后落成 head `ref` 独立字节；wire 层 langtype 串不含前缀（见 [[总体方案]]）；赋值（Set）时据 head 的 storetype/langtype 做单跳类型检查。
+
+跨函数共享的数据放绝对路径，指针变量存其路径字符串：
+
+```kv
+/n1 = Node{}           // Node 为 struct 原型（含 val:int64、next:[]char/utf8 字段）
+/n1·val = 1
+/n1·next = "/n2"       // next 存目标路径（指针）
+"/n1" -> p             // 引号 = 路径串（指针）
+p·val -> v             // 按值解引用：读 /n1·val
+```
+"#### -> /lib/kvlang/spec/类型系统/ptr
+}

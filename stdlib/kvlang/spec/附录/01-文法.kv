@@ -1,0 +1,39 @@
+// 欢迎加入kvspace世界
+lib kvlang/spec/附录/文法 {
+	r##"# 文法
+
+本附录是 kvlang 的**唯一权威文法**。正文各章只引用其片段，不另立文法。每次修改本文法须同步验证实现与 tutorial 锚例。本文法以 layout（`layout/src`）与 C runtime（`runtime/src`）实现为准；标注「待收敛」处为实现间尚存分歧、以此处所写方向为规范目标。
+
+## 词法
+
+```
+digit   = "0" … "9"
+letter  = unicode_letter | "_"
+              (* Unicode 字母（含中文等），对齐 C/Go/Rust/Python/TS 五门参考语言，非仅 ASCII；
+                 lib / rwfunc / rwir / 变量名均可用 Unicode 字母。
+                 实现为「最长非分隔符匹配」，且 "." "/" 不在分隔符集合内，故裸词理论上可含 "."；
+                 规范目标为字符集校验，layout 待收敛。 *)
+ident   = letter { letter | digit }
+integer = digit { digit }
+              (* 仅十进制；无 hex/oct/bin 前缀、无 "_" 分隔、无前导点 *)
+float   = integer [ "." integer ] [ ("e" | "E") [ "+" | "-" ] integer ]
+path    = "/" ident { ("/" | ".") ident | "·" "[" integer { "," integer } "]" }
+              (* 绝对路径字面量；"/" 分隔段，"." 为子键，"·[i,j]" 为坐标段（stringkeymap 元素/张量坐标）。
+                 kindexpr 的 ref/dims 前缀语义由类型系统卷承载，不属 path。 *)
+
+string  = '"' { char | escape } '"'                   (* 转义串：\n \t \r \0 \" \\ 等；可直接跨行 *)
+        | "r" { "#" } '"' { char } '"' { "#" }        (* 原始串：零转义；开头 N 个 # 须以 " 后接同 N 个 # 闭合 *)
+        | "'" { char | escape } "'"                   (* char/keypath：与 "…" 同转义规则 *)
+              (* 无三引号、无反引号原始串——对齐 Rust *)
+
+stmt_sep = newline | ";"
+              (* ";" 与换行等价，均产生语句分隔；连续折叠、流首抑制、字面量内换行不产生 *)
+
+comment = "//" { char } newline           (* 行注释；不消费尾随换行 *)
+        | "/*" { char | comment } "*/"    (* 块注释，可嵌套（深度计数）；无 # 注释 *)
+```
+
+词法关键字仅 7 个：`return` `if` `else` `for` `while` `break` `continue`。
+`lib` `rwir` `rwfunc` `in` `any` `None` `true` `false` 为**上下文词（软关键字）**——由 parser 按位置识别，非词法保留字。
+"## -> /lib/kvlang/spec/附录/文法
+}

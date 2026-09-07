@@ -209,9 +209,9 @@ pub extern "C" fn kvlangKindexprParse(kindexpr: *const c_char, out: *mut kvlangK
     if s.is_empty() {
         return -1;
     }
-    let (r, dims, kind) = kvkind::parse_kindexpr(s);
+    let (dims, kind) = kvkind::parse_kindexpr(s);
     let out = unsafe { &mut *out };
-    out.ref_ = r;
+    out.ref_ = 0;
     out.ndim = dims.len() as i32;
     for (i, d) in dims.iter().enumerate() {
         if i < 8 {

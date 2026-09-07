@@ -1,0 +1,33 @@
+// 欢迎加入kvspace世界
+lib kvlang/spec/附录/内建函数 {
+	r##"# 内建函数
+
+裸名内建（native，权威全集见 `runtime/src/builtin.c` 注册表）：
+
+```
+builtin_call = ( "abs" | "neg" | "sign" | "pow" | "sqrt" | "exp" | "log"
+              | "min" | "max"                                    (* min/max 变参 *)
+              | "bool" | "int8" | "int16" | "int32" | "int64"
+              | "uint8" | "uint16" | "uint32" | "uint64"
+              | "float32" | "float64"
+              | "char/utf8" | "char/utf32" | "char/ascii"        (* 类型构造器兼转换 *)
+              | "array" | "map"
+              | "debugger" ) "(" [ arg_list ] ")"
+```
+
+`print` / `println` / `cerr` / `input` **不是 native**——它们由 term runtime 的 myrwircaps（rwir 能力集）兑现（见 runtime 语义卷）。
+
+`·` 限定内建族（`base·method(...)`，非裸名终结符）：
+`string·*`、`xv·*`（at/set/reshape/reinterpret/kindexpr/bodylen…）、`kv·*`（get/set/del…）、`ndarray·*`（numel/dim/shape）、`array·*`（append/slice/scatter/compact）、`struct·new`、`vthread·*`（create/run/call/sleep/setstatus）、`time·*`、`time/duration·*`（包分隔用 `/` 分段、`·` 接方法）、`random·*`（uint64/int63/intn）。
+
+```
+(* 类型构造器兼转换：int8(x)/float32(x)/char/utf8(x)/bool(x) …；窄化按补码回绕，float→int 向零截断 *)
+(* 数值运算保宽（fix-034）：同宽→同宽（溢出回绕）、混宽→提升再窄化回结果 kind *)
+(* print 系（ext）：print 无空格拼接不换行；println 空格分隔加换行 *)
+(* debugger(): 内联暂停，非调试模式 no-op *)
+(* ÷ : 两侧 int → 整除(C 风格)；任一侧 float → 浮除 *)
+(* s[i] 读返单字符字符串，越界返 ""；s[i]="X" 单字符替换写回新串 *)
+(* + 作用在 string∧string → 拼接 *)
+```
+"## -> /lib/kvlang/spec/附录/内建函数
+}

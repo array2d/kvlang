@@ -1,0 +1,39 @@
+// 欢迎加入kvspace世界
+lib kvlang/spec/词法/词法单元 {
+	r####"# 词法单元
+
+## 词法单元种类
+
+词法分析把源码切分为下列种类的词法单元，末尾附一个 `EOF` 哨兵：
+
+- `Ident`——标识符，以及未被单独归类的符号运算符（见 [[运算符基础]]）；
+- `Literal`——字面量：数值、字符串、原始字符串、绝对路径（见 [[字面量基础]]、[[标识符]]）；
+- `Arrow`——两种赋值/方向记号 `=`、`->`（见 [[运算符基础]]）；
+- `Dot`——成员分隔符 `·`（U+00B7，见 [[标识符]]）；
+- `LParen` `RParen` `LBrace` `RBrace` `LBrack` `RBrack`——`( ) { } [ ]`；
+- `Comma` `Colon`——`,` `:`；
+- `Newline`——语句分隔（`\n` 或 `;`，见上）；
+- `Comment`——注释（见 [[注释]]）；
+- 关键字词法单元 `Return` `If` `Else` `For` `While` `Break` `Continue`；
+- `EOF`——源码结束哨兵。
+
+## 关键字
+
+kvlang 只有 **7 个词法关键字**，它们在词法阶段即被识别，不得用作标识符：
+
+```
+return  if  else  for  while  break  continue
+```
+
+其余在语言中具有特殊含义的词（`lib`、`rwir`、`rwfunc`、`in`、`any`、`None`、`true`、`false`、种类名如 `int64`/`float32`/`struct` 等）**不是**词法关键字：它们一律词法化为 `Ident`，其含义由 layout 阶段依上下文赋予。这类词称为**上下文词**。
+
+`def` **不是** kvlang 关键字，kv 源码中永不出现：`def rwir`/`def struct`/`def kindexpr` 是 head 的 langtype 元层「定义节点」标记，只在 layout 之后（`def struct`、`def kindexpr`）或 runtime 注册时（`def rwir`）产生，与源码词法无关（见 [[langtype语义类型]]）。
+
+## 最长匹配
+
+词法分析遵循**最长匹配**（maximal munch）：在每个位置，词法器取能构成合法词法单元的最长字符序列。特别地：
+
+- 以数字开头的序列必为数值字面量，不会被识别为标识符；
+- `-` 后紧跟 `>` 构成 `->`，`<` 后紧跟 `<` 构成 `<<`，依此类推——双字符运算符优先于其单字符成分。
+	"#### -> /lib/kvlang/spec/词法/词法单元
+}

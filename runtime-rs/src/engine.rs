@@ -20,7 +20,7 @@ impl Engine {
     /// 写即构造：按 (kindexpr, body) 向 kvspace 要偏移指针后直接写 body 字节——
     /// key 已存在且同 body_len → WriteInPlace（原 box 就地）；否则 WriteNewPlace（新 box）。
     /// 两分支各调唯一原语、无预 encode 整条 TLV、无中转 buffer、无 free。
-    fn write_construct(&self, key: &str, kindexpr: &str, body: &[u8]) {
+    fn write_construct(&self, key: &str, xkind: u8, kindexpr: &str, body: &[u8]) {
         unsafe {
             let ck = cs(key);
             let mut bp: *mut u8 = null_mut();
@@ -38,6 +38,7 @@ impl Engine {
                 kvspaceWriteNewPlace(
                     self.kv,
                     ck.as_ptr(),
+                    xkind,
                     cs(kindexpr).as_ptr(),
                     body.len() as u32,
                     &mut bp,
@@ -90,7 +91,7 @@ impl Engine {
     /// 扩展世界（@ ref=2）句柄编码写入：kind=目标完整 kindexpr（如 "[]uint8"），body=定位串。
     /// 读取该 key 时由 read_at 按 body 前缀路由给对应 /lib/networld/* 兑现器还原真实字节。
     pub fn set_ext_handle(&self, key: &str, target_kindexpr: &str, locator: &str) {
-        self.write_construct(key, &format!("@{target_kindexpr}"), locator.as_bytes());
+        self.write_construct(key, 2, target_kindexpr, locator.as_bytes());
     }
 
     /// 读 key 的 head，返回 (ref, body 串)。仅 ref==2 时 body 有意义（扩展句柄定位串）。
@@ -102,9 +103,9 @@ impl Engine {
         unsafe {
             let mut head = KvspaceHead::default();
             kvspaceDecodeHead(tlv.as_ptr(), tlv.len() as u32, &mut head);
-            let r = match head.kindexpr[0] {
-                b'@' => 2,
-                b'*' => 1,
+            let r = match head.xkind {
+                2 => 2,
+                1 => 1,
                 _ => 0,
             };
             if r != 2 {
@@ -172,9 +173,9 @@ impl Engine {
             if kvspaceDecodeHead(tlv.as_ptr(), tlv.len() as u32, &mut h) != 0 {
                 return Vec::new();
             }
-            let r = match h.kindexpr[0] {
-                b'@' => 2,
-                b'*' => 1,
+            let r = match h.xkind {
+                2 => 2,
+                1 => 1,
                 _ => 0,
             };
             let (bo, bl) = (h.body_offset as usize, h.body_len.max(0) as usize);
@@ -221,15 +222,21 @@ impl Engine {
             }
             let mut v = Vec::with_capacity(count as usize);
             for i in 0..count {
-                let (mut out, mut olen) = (null_mut(), 0u32);
-                if kvspaceListAt(self.kv, cp.as_ptr(), 0, 0, i, &mut out, &mut olen) == 0
-                    && !out.is_null()
+                let mut buf = [0u8; 1024];
+                let mut olen = 0u32;
+                if kvspaceListAt(
+                    self.kv,
+                    cp.as_ptr(),
+                    0,
+                    0,
+                    i,
+                    buf.as_mut_ptr(),
+                    buf.len() as u32,
+                    &mut olen,
+                ) == 0
                     && olen > 0
                 {
-                    v.push(
-                        String::from_utf8_lossy(std::slice::from_raw_parts(out, olen as usize))
-                            .into_owned(),
-                    );
+                    v.push(String::from_utf8_lossy(&buf[..olen as usize]).into_owned());
                 }
             }
             v
@@ -285,7 +292,7 @@ impl Engine {
                 .trim_end_matches('\0')
                 .to_string();
             let (bo, bl) = (head.body_offset as usize, head.body_len.max(0) as usize);
-            self.write_construct(key, &kx, &tlv[bo..bo + bl]);
+            self.write_construct(key, head.xkind, &kx, &tlv[bo..bo + bl]);
         }
     }
 

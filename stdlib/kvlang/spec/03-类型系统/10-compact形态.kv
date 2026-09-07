@@ -1,0 +1,46 @@
+// 欢迎加入kvspace世界
+lib kvlang/spec/类型系统/compact形态 {
+	r####"# compact 形态
+
+compact 数组是**单个 XValue**：head 的 langtype（kindexpr）形如 `[4]int64`（含维度+元素种类），storetype=ARRAYND，body 是连续的定宽元素字节。
+
+```kv
+a:[]int64 = [10, 20, 30, 40]   // head kindexpr = [4]int64，body = 4×8 字节
+```
+
+- head 的 langtype = kindexpr 串形如 `[4]int64`（元素种类为 `int64`，**非** `array`）；storetype=ARRAYND（见 `tutorial/04-ndarray/xv_meta.kv`）。
+- 字符串是 compact 的字符序列：`s:char/utf8 = "hi"` 的 kindexpr 为 `[2]char/utf8`。单个字符串是 compact；**字符串的数组**是变长集合，必须 stringkeymap。
+
+### compact 元素访问
+
+下标 `a[i]` 是 compact 元素访问：读降级为 `xv·at`，写（`a[i]=v` 或 `v -> a[i]`）降级为 `xv·set`。
+
+```kv
+a[1] -> e          // 等价 xv·at(a, 1) -> e
+a[2] = 99          // 等价 xv·set(a, 2, 99) -> a
+99 -> a[0]         // 右箭头下标写，等价 xv·set(a, 0, 99) -> a
+```
+
+`xv·at` / `xv·set` **仅接受 compact 数组**（维数非 0）：对 stringkeymap 或标量报 TypeError。索引个数**必须**等于维数，按 row-major 折算扁平偏移；越界报 IndexError。写回保持 dims 不变。
+
+### 多维 compact（tensor）
+
+多维 compact 由 `xv·reshape` 从一维铺开：
+
+```kv
+m = xv·reshape([1, 2, 3, 4], 2, 2)   // dims = [2,2]
+7 -> m[1, 0]                          // 多维下标写
+m[0, 1] -> x                          // 多维下标读
+```
+
+多维下标个数须等于维数（此例 2），按 row-major 折算（见 `tutorial/04-ndarray/subscript_write.kv`）。
+
+### head 观测与重解释
+
+| 算子 | 语义 |
+|------|------|
+| `xv·kindexpr(a)` | 返回 head 的 kindexpr 串（如 `[4]int64`） |
+| `xv·bodylen(a)` | 返回 body 字节数 |
+| `xv·reinterpret(a, "[]uint8")` | 原样保留 body 字节，只替换 kindexpr（`[3]int64` 24 字节 → `[24]uint8`） |
+"#### -> /lib/kvlang/spec/类型系统/compact形态
+}

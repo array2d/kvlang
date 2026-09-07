@@ -16,13 +16,11 @@ void kvlangXvalueSetBytes(kvlangXvalue_t *v, uint8_t *data, uint32_t len) {
     v->data = data; v->len = len;
 }
 
-/* 解析 kindexpr 内容 → (ref, dims, base kind)。kindexpr 为 NUL 终止串。 */
+/* 解析 kindexpr 内容 → (dims, base kind)。kindexpr 为 NUL 终止串、无前缀（ref 归 head.xkind）。 */
 void kvlang_kindexpr_parse(const uint8_t *kx, kvlang_kindexpr_t *out) {
     memset(out, 0, sizeof(*out));
     if (!kx) return;
     int32_t i = 0;
-    if (kx[0] == '*') { out->ref = 1; i = 1; }
-    else if (kx[0] == '@') { out->ref = 2; i = 1; }
     if (kx[i] == '[') {
         i++;
         while (kx[i] != ']' && kx[i] != 0 && out->ndim < X_MAX_NDIM) {
@@ -107,8 +105,7 @@ bool kvlangXvalueIsPtr(const kvlangXvalue_t *v) {
     if (kvlangXvalueNone(v)) return false;
     kvspaceHead_t h;
     if (kvlangXvalueHead(v, &h) < 0) return false;
-    kvlang_kindexpr_t kx; kvlang_kindexpr_parse(h.kindexpr, &kx);
-    return kx.ref == 1;
+    return h.xkind == KVSPACE_XKIND_PTR;
 }
 
 int32_t kvlangXvalueArrayLen(const kvlangXvalue_t *v) {
@@ -204,12 +201,6 @@ uint64_t kvlangXvalueAsUint64(const kvlangXvalue_t *v) {
     return (uint64_t)kvlangXvalueAsInt64(v);
 }
 
-bool kvlangXvalueAsBool(const kvlangXvalue_t *v) {
-    if (kvlangXvalueNone(v)) return false;
-    kvspaceHead_t h; const uint8_t *b = v_body(v, &h);
-    return b && h.body_len > 0 && b[0] != 0;
-}
-
 uint32_t kvlangXvalueChar32At(const kvlangXvalue_t *v, int32_t idx) {
     kvspaceHead_t h; const uint8_t *b = v_body(v, &h);
     if (!b) return 0;
@@ -275,9 +266,8 @@ char *kvlangXvalueValueString(const kvlangXvalue_t *v) {
     if (!body) return strdup(KVSPACE_KIND_NONE);
     int32_t blen = h.body_len;
     const char *k = kvlangXvalueKind(v);
-    kvlang_kindexpr_t kx; kvlang_kindexpr_parse(h.kindexpr, &kx);
 
-    if (kx.ref == 1) {
+    if (h.xkind == KVSPACE_XKIND_PTR) {
         kvlangStrbuf_t b; kvlangStrbufInit(&b);
         kvlangStrbufPutn(&b, "\xE2\x86\x92", 3);
         kvlangStrbufPutn(&b, (const char *)body, (size_t)blen);
@@ -311,9 +301,9 @@ char *kvlangXvalueValueString(const kvlangXvalue_t *v) {
     if (strcmp(k, KVSPACE_KIND_MAP) == 0) {
         kvlangStrbuf_t b; kvlangStrbufInit(&b);
         kvlangStrbufPuts(&b, "map[");
-        for (int d = 0; d < kx.ndim; d++) {
+        for (int d = 0; d < h.ndim; d++) {
             if (d) kvlangStrbufPutc(&b, ',');
-            kvlangStrbufPrintf(&b, "%d", kx.dims[d]);
+            kvlangStrbufPrintf(&b, "%d", h.dims[d]);
         }
         kvlangStrbufPutc(&b, ']');
         return kvlangStrbufDetach(&b);

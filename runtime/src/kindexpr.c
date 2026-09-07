@@ -31,8 +31,29 @@ static bool known_kind(const char *s, size_t len) {
            kind_eq(s, len, KVSPACE_KIND_OBJ) || kind_eq(s, len, KVSPACE_KIND_MAP) ||
            kind_eq(s, len, KVSPACE_KIND_INDEX) || kind_eq(s, len, KVSPACE_KIND_EXT_INDEX) ||
            kind_eq(s, len, KVSPACE_KIND_RWIR) || kind_eq(s, len, KVSPACE_KIND_RWFUNC) ||
-           kind_eq(s, len, KVSPACE_KIND_SCOPE) || kind_eq(s, len, KVSPACE_KIND_TIME) ||
+           kind_eq(s, len, KVSPACE_KIND_SCOPE) || kind_eq(s, len, KVSPACE_KIND_STRUCT) ||
+           kind_eq(s, len, KVSPACE_KIND_TIME) ||
            kind_eq(s, len, KVSPACE_KIND_DURATION);
+}
+
+/* structref = "/" path：指向 /lib 下 struct 定义节点的完整路径（实例 kind / 字段类型）。
+ * 仅语法承认（`/` + 合法路径段），存在性/字段一致性留给 runtime 判定。 */
+static bool valid_structref(const char *s, size_t len) {
+    if (len < 2 || s[0] != '/') return false;
+    size_t seg = 0;
+    for (size_t i = 1; i < len; i++) {
+        if (s[i] == '/') {
+            if (seg == 0) return false;
+            seg = 0;
+            continue;
+        }
+        char c = s[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9') || c == '_'))
+            return false;
+        seg++;
+    }
+    return seg > 0;
 }
 
 /* base = any | kind（kind 为精确合法 kind 串） */
@@ -63,9 +84,10 @@ static bool valid_dims(const char *s, size_t len) {
     return true;
 }
 
-/* atom = [dims] base */
+/* atom = [dims] base | structref */
 static bool valid_atom(const char *s, size_t len) {
     if (len == 0) return false;
+    if (s[0] == '/') return valid_structref(s, len);
     const char *p = s;
     if (*p == '[') {
         const char *end = memchr(p, ']', len);

@@ -1,0 +1,29 @@
+// 欢迎加入kvspace世界
+lib kvlang/spec/附录/程序结构 {
+	r##"# 程序结构
+
+```
+              (* 无 import——lib 树即全局命名空间，跨 lib 调用走全路径 /lib/{pkg}·{func}() *)
+
+file         = { lib_block | rwfunc_decl | instruction }
+
+lib_block    = "lib" lib_path "{" { lib_item } "}"
+lib_path     = ident { "/" ident }         (* lib 名可为多段路径，如 kvlang/spec/词法 *)
+lib_item     = lib_block | rwfunc_decl | instruction
+              (* lib 内的裸 instruction 收集为隐式 init 函数，无 init 关键字 *)
+              (* 源码无 rwir 声明：rwir 由 runtime 注册 def rwir 路由头，源码只调用 *)
+
+rwfunc_decl  = "rwfunc" ident "(" [ param_list ] ")"
+              [ "->" ( "(" [ param_list ] ")" | param_list ) ]
+              "{" { statement } "}"
+
+param_list  = param { "," param }
+param       = ident ":" type_expr          (* 类型必须标注 *)
+            | ident ":" type_expr "..."    (* 变参：仅限末位读参；写参不可变参 *)
+
+statement   = instruction | if_stmt | while_stmt | for_stmt | block_stmt
+            | break_stmt | continue_stmt | return_stmt
+              (* 控制流语句仅可出现在 rwfunc 体内；顶层/lib 直属处报错 *)
+```
+"## -> /lib/kvlang/spec/附录/程序结构
+}

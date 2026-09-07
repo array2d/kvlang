@@ -1,0 +1,52 @@
+// 欢迎加入kvspace世界
+lib kvlang/spec/类型系统/种类_标量时间容器 {
+	r####"# 种类（kind）
+
+**种类**是值的运行时类别。种类字符串是 kindexpr 的基（base）部分（见 [[kindexpr签名类型表达式]]）。
+
+### 定宽数字种类
+
+kvlang 的数字种类**必须携带精确位宽**：
+
+| 类别 | 种类 |
+|------|------|
+| 有符号整数 | `int8` `int16` `int32` `int64` |
+| 无符号整数 | `uint8` `uint16` `uint32` `uint64` |
+| IEEE 754 浮点 | `float32` `float64` |
+
+整数按小端补码编码，浮点按 IEEE 754 编码。
+
+**铁律——无家族简写**。`int`、`uint`、`float`、`num`、`char` 这类不含位宽/编码的简写**不是**合法种类，在任何类型标注中均**不得**出现。位宽与字符编码是**开放集合**（未来可扩 `int4`、`fp8`、`fp16` 等），封闭的家族枚举必然漏项；多态**必须**靠 [[kindexpr签名类型表达式]] 的显式 `|` 枚举表达（如 `int8|int16|int32|int64`）。
+
+### bool 与字符种类
+
+| 种类 | 说明 |
+|------|------|
+| `bool` | 1 字节：`0`=false、`1`=true |
+| `char/utf32` | 码点序列，4B×N，定宽、可索引；**字符串字面量的默认种类** |
+| `char/ascii` | ASCII 字节序列，1B×N，定宽、可索引 |
+| `char/utf8` | UTF-8 字节序列，1B×N，变宽、**禁索引**（仅存储与交换） |
+
+字符三种编码的判定为前缀相等：某种类是字符种类当且仅当它以 `char/` 起始。定宽编码（`utf32`、`ascii`）**必须**支持 O(1) 码点索引；变宽编码 `utf8` 的按码点索引操作（`string·char`、`s[i]` 等）**必须**报 TypeError。单个字符标注为 `char/<编码>`（标量），字符串标注为 `[]char/<编码>`（序列）；字符种类的值恒为一维序列。
+
+### 容器与结构种类
+
+| 种类 | 说明 |
+|------|------|
+| `stringkeymap` | map 容器，kindexpr 为 `key·value`（如 `[]char/utf8·int64`） |
+| `struct` | 结构原型实例的种类（见 [[容器]] 与结构声明） |
+| `index` | **storetype**：索引型节点（map/struct 值容器的 `{key}·` memindex、lib/rwfunc 目录节点）；物理=m×n 对齐字符串数组，dims=[len,cap,M]（M align8） |
+| `extindex` | **storetype**：可扩展索引型节点（vthread 运行栈等，cap 可增长）；与 `ref`/`@ext` 无关，extindex 是 storetype 不是 ref=2 |
+
+容器的物理组成（值 + memindex）见 [[容器]]。
+
+### 时间种类
+
+| 种类 | 说明 |
+|------|------|
+| `time` | 时刻，由 `time·now()` 等产生 |
+| `duration` | 时长，由 `time/duration·*` 产生 |
+
+`time`/`duration` 是不透明标量种类，其运算由 time 标准库提供，字节布局不由本卷规定。
+"#### -> /lib/kvlang/spec/类型系统/种类_标量时间容器
+}

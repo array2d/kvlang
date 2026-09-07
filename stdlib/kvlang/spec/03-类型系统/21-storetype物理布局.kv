@@ -1,0 +1,56 @@
+// 欢迎加入kvspace世界
+lib kvlang/spec/类型系统/storetype物理布局 {
+	r####"# storetype（物理布局维，codec 视角）
+
+决定 head 追加的物理字段与 body 切法。**codec 仅凭此 1 字节分派**。
+
+| storetype | 追加物理字段 | body（ref=0） | 承载的 langtype |
+|-----------|-------------|--------------|----------------|
+| `NONE` | 无 | 空 | None |
+| `ATOM` | 无 | 定宽 raw | 标量：bool、int/uint/float、单 char、time、duration |
+| `ARRAYND` | `ndim` u8 + `dims[ndim]` u32 LE | 稠密等宽元素数组 | 张量、`[]char/*` 字符串、rwir 指令行文本 |
+| `index` | 成员名 **m×n 对齐字符串数组**，`dims=[len,cap,M]`（len=成员数、M=对齐宽度 align8、cap 保留容量） | 见下（目录节点主槽 body 记计数头或空） | stringkeymap、struct（值容器）；lib、rwfunc、def 族（目录/定义节点） |
+| `extindex` | 同 index，`cap` 可增长（栈帧/运行栈扩容） | 同上 | rwfunc（vthread 运行栈等可扩展目录） |
+
+数值 `dims` 供 codec O(1) 切字节，与 langtype 串内的 `[dims]` 语法一致（由 codec 保证同步）。index/extindex 的物理载体沿用今日敲定的 m×n 对齐字符串数组（每成员名 padding 至 M，`cap` 预留扩容），存成员/子项名。
+
+### 成员如何枚举：`/` 目录 vs `·` memindex
+
+storetype=index/extindex 只表「这是有成员的索引节点」，成员的**组织方式按 langtype 分两类**：
+
+| 类别 | langtype | 成员载体 | 例 |
+|------|----------|---------|----|
+| 目录节点 | lib、rwfunc、def rwir | **`/` 子路径**（kvspace 目录枚举） | `/lib/funca/[1,0]`、`/lib/funca/[1,1]` 为 `/lib/funca/` 的指令槽成员 |
+| 值容器 | stringkeymap、struct | **`{key}·` memindex 兄弟槽** | `p·` 存 `p` 的成员名索引 |
+
+`{key}·` 中的 **memindex `·`** 是值容器（stringkeymap/struct）唯一的成员索引标记；rwfunc/lib/def 族是真目录，成员即 `/` 子路径，绝不用 memindex `·`。
+
+**注意 `·` 的两种独立含义**——两者正交、勿混：
+
+1. **memindex 标记**：值容器主槽 `{key}` 的兄弟槽 `{key}·`，存该容器的成员名索引。**仅** stringkeymap/struct 用。
+2. **包·函数命名分隔符**：`/lib/{pkg}·{func}`（如 `/lib/time·now`）中的 `·` 只是路径名里分隔包名与函数名的字符，是 rwfunc 所在**目录的名字的一部分**，与 memindex 无关。故 `/lib/time·now/` 仍是纯 `/` 目录，其成员是 `/` 子路径而非兄弟 `·` 槽。
+
+两类值容器底层皆为同一 m×n 对齐字符串数组：目录节点由 kvspace 目录直接持有并按 `/` 枚举，值容器把它放在 `{key}·` 兄弟槽。
+
+### rwir 无实现体（叶子）vs rwfunc 有实现体（目录）；def 族定义节点
+
+本质区别在「有无 kvlang 实现体」：
+
+| langtype | 有 kvlang 实现体？ | 位置 | 谁实现 | 形态 |
+|----------|------------------|------|--------|------|
+| `rwir` | 无 | `/vthread/<vid>/` 指令行 | runtime 直接兑现（经 def rwir 路由，myrwircaps） | ARRAYND 指令行叶子 |
+| `def rwir` | 无（仅签名，无指令行） | **仅 `/lib/<op>`** | runtime 直接兑现 | index **定义节点**（有签名行 `[0,x]`，无实现指令行） |
+| `rwfunc` | **有**（一串 rwir 指令行） | `/lib/<pkg>·<fn>/` | kvlang 指令序列自身 | index/extindex **目录**（签名行 `[0,x]` + 实现指令行 `[s0>0,·]`） |
+
+**def rwir 是路由头**（原 `defrwir`，现规范书写为带空格的 **`def rwir`**，见下「def 族」）：它只存在于 `/lib/<op>`，是每个 rwir 指令的统一声明入口。`/vthread/` 下执行的每条 rwir 都**引用** `/lib/<op>` 的 def rwir——为「rwir 统一调度」而设。def rwir 没有 kvlang 实现体（无 `s0>0` 的实现指令行），由 runtime 直接兑现。
+
+**没有「扩展 rwir」这个说法**：def rwir 不专指扩展算子。每个 runtime 只声明自己的 **myrwircaps**（该 runtime 能兑现的 rwir 能力集），`/lib/<op>` 的 def rwir 即这些能力对外的路由头。
+
+rwfunc 与之相反：它**有** kvlang 实现体——就是它 `/` 目录下的实现指令行子成员（`/lib/pkg·funca/[1,0]`…）。这正是 rwir/def rwir（无实现指令行、runtime 兑现）与 rwfunc（有实现指令行、`/` 目录）的本质区别。
+
+**为何有 def rwir 却无 def rwfunc**——根源在能力调度的不对称：
+
+- **rwfunc 可被任意 main-runtime 直接解释执行**：其实现体就是一串 rwir，main-runtime 逐条解释即可，不需路由头。故 rwfunc 无需、也没有 `def rwfunc`。
+- **rwir 若不在本 runtime 的 myrwircaps 内就执行不了**，必须依赖调度转发给**能兑现它的其它 runtime**。这份「按能力路由到其它 runtime」的需求，正由 `/lib/<op>` 的 **def rwir 路由头**承载——这就是 def rwir 存在的根本原因。
+"#### -> /lib/kvlang/spec/类型系统/storetype物理布局
+}

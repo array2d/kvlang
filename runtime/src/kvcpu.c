@@ -241,7 +241,7 @@ static char *handle_call(kvlangKv_t *kv, const char *pc, kvlangRwirInst_t *inst)
                         kvlangStrbufPrintf(&sk, "%s/[0,0]", cand);
                         kvlangXvalue_t sv; kvlangXvalueZero(&sv);
                         kvlangKvGetOne(kv, sk.p, &sv);
-                        bool ok = !kvlangXvalueNone(&sv) && kvlangXvalueKindIs(&sv, KVSPACE_KIND_DEF_RWFUNC);
+                        bool ok = !kvlangXvalueNone(&sv) && kvlangXvalueKindIs(&sv, KVSPACE_KIND_RWFUNC);
                         kvlangXvalueFree(&sv); kvlangStrbufFree(&sk);
                         if (ok) { free(pkg); pkg = cand_pkg; }
                         else free(cand_pkg);
@@ -261,7 +261,7 @@ static char *handle_call(kvlangKv_t *kv, const char *pc, kvlangRwirInst_t *inst)
     kvlangStrbufPrintf(&sig_key, "%s[0,0]", func_dir.p);
     kvlangXvalue_t sig; kvlangXvalueZero(&sig);
     kvlangKvGetOne(kv, sig_key.p, &sig);
-    if (kvlangXvalueNone(&sig) || !kvlangXvalueKindIs(&sig, KVSPACE_KIND_DEF_RWFUNC)) {
+    if (kvlangXvalueNone(&sig) || !kvlangXvalueKindIs(&sig, KVSPACE_KIND_RWFUNC)) {
         /* 按 xvalue 的 kind 精确区分缺 rwir 还是缺 rwfunc：
          * 到这里说明 opcode 已被 isothersrwir 判否（/lib/<op> 非 rwir）。 */
         char *rk = kvlangKeytreeRwir(fn);
@@ -298,7 +298,7 @@ static char *handle_call(kvlangKv_t *kv, const char *pc, kvlangRwirInst_t *inst)
     char err[256];
     kvlangKvDelTree(kv, frame_root, err, sizeof err);
     char *stack_fr = kvlangKeytreeStack(frame_root);
-    kvlangKvMkindex(kv, stack_fr, err, sizeof err);
+    kvlangKvMkindex(kv, stack_fr, 0, err, sizeof err);
     kvlangKvExtIndex(kv, stack_fr, func_dir.p, err, sizeof err);
 
     /* 系统变量 */
@@ -421,7 +421,13 @@ static int handle_control(kvlangKv_t *kv, const char *vtid, const char *pc, kvla
             kvlangXvalueFree(&cond);
             return -1;
         }
-        bool taken = kvlangXvalueAsBool(&cond);
+        if (!kvlangXvalueKindIs(&cond, KVSPACE_KIND_BOOL)) {
+            char msg[128]; snprintf(msg, sizeof msg, "TypeError: branch condition must be bool, got %s", kvlangXvalueKind(&cond));
+            kvlangVthreadSetError(kv, vtid, pc, msg);
+            kvlangXvalueFree(&cond);
+            return -1;
+        }
+        bool taken = kvlangXvalueAsInt64(&cond) != 0;
         kvlangXvalueFree(&cond);
         return jump_to(kv, vtid, pc, &inst->reads[taken ? 1 : 2], OP_BR);
     }
@@ -488,7 +494,7 @@ char *kvlangKvcpuBootstrap(kvlangKv_t *kv, const char *vtid, const char *funcnam
     kvlangStrbufPrintf(&sig_key, "%s[0,0]", func_dir.p);
     kvlangXvalue_t sig; kvlangXvalueZero(&sig);
     kvlangKvGetOne(kv, sig_key.p, &sig);
-    if (kvlangXvalueNone(&sig) || !kvlangXvalueKindIs(&sig, KVSPACE_KIND_DEF_RWFUNC)) {
+    if (kvlangXvalueNone(&sig) || !kvlangXvalueKindIs(&sig, KVSPACE_KIND_RWFUNC)) {
         char msg[256]; snprintf(msg, sizeof msg, "Bootstrap: rwir/rwfunc not found: %s", funcname);
         kvlangVthreadSetError(kv, vtid, "", msg);
         kvlangXvalueFree(&sig); kvlangStrbufFree(&sig_key); kvlangStrbufFree(&func_dir);
@@ -502,7 +508,7 @@ char *kvlangKvcpuBootstrap(kvlangKv_t *kv, const char *vtid, const char *funcnam
     char *frame_root = kvlangKeytreeFrameAt(vtid, 1);
     char *stack_fr = kvlangKeytreeStack(frame_root);
     char err[256];
-    kvlangKvMkindex(kv, stack_fr, err, sizeof err);
+    kvlangKvMkindex(kv, stack_fr, 0, err, sizeof err);
     kvlangKvExtIndex(kv, stack_fr, func_dir.p, err, sizeof err);
 
     char *ep = kvlangKeytreeEntryPc(frame_root);

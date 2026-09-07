@@ -1,0 +1,11 @@
+// 期望输出:
+//   n= 3
+rwfunc test() -> () {
+	kv·mkindex("/tmp/kvtc/", 8)
+	kv·set("/tmp/kvtc/a", 1)
+	kv·set("/tmp/kvtc/bb", 2)
+	kv·set("/tmp/kvtc/ccc", 3)
+	kv·list("/tmp/kvtc/") -> names
+	ndarray·numel(names) -> n
+	println("n=", n)
+}

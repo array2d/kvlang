@@ -1,0 +1,53 @@
+// 欢迎加入kvspace世界
+lib kvlang/spec/kvspace模型/数组两种物理形态 {
+	r####"# 数组的两种物理形态
+
+理论上的数组（含多维）在 kvlang 有两种物理落盘形态：
+
+| 形态 | langtype | 触发写法 | 元素位置 | XValue 数 |
+|------|----------|---------|---------|----------|
+| **compact** | 元素 kind（`int64`…） | `[1,2,3]`、`[N]T`、`[d0,d1]T` | 连续打包进单个 XValue 的 body | 1 |
+| **stringkeymap** | `stringkeymap` | `{v0,v1,…}`、`array·scatter` 等 | 每元素落独立子 key `base·[i]` | N+1 |
+
+- **compact**：元素连续打包进一个 XValue，`raw_len = ∏dims × 元素字节宽`，head kind 即元素类型、ndim≥1。对齐 C `int[10]`、Go `[10]int`、Rust `[i32;10]`；多维即连续布局的 ndarray/tensor。要求元素定长同类型——含变长字符串字面量的 `[…]` 在 layout 阶段报错。支持 `arr[i]` 随机访问（下标读经 `xv·at` 在 body 内定位），可零拷贝整块读。
+- **stringkeymap**：head kind=`stringkeymap`、ndim≥1，body 只记形状；每个元素是独立子 key，成员名为**坐标段**。变长、可增长、允许变长元素——字符串数组、可追加数组走此形态。stringkeymap **必须** ndim≥1（无维度的键值容器应为 `struct`），且成员名**必须**是坐标段（`kvspace-durable/src/const.rs` 的 `ERR_MAP_NDIM`、`ERR_MAP_COORD`）。
+
+## 坐标段
+
+stringkeymap 元素的成员名是坐标段，物理 key 形如 `m·[i]`（一维）或 `m·[i,j]`（多维）——`·` 后紧跟方括号坐标，**不是** `m·0` 这类裸后缀。坐标段格式为 `[s0,s1,…]`：十进制、逗号分隔、无空格（`kvspace-durable/src/coord.rs` 的 `format_coord`）。
+
+- 结构判定 `is_coord`：`[` 开头、`]` 结尾、内部不含嵌套 `[`/`]`；判定不要求整数（允许含点或字符串坐标）。
+- 排序 `cmp_coord`（row-major）：坐标段恒排在非坐标段之前；两个可按整数解析的坐标段按数值升序，否则字典序。
+- 访问：源码 `m·[i]` 对散 key 元素走 `kv·get`（member 名 `[i]`）；compact 的 `arr[i]` 走 `xv·at`。二者由括号与形态区分。
+
+## 字面量括号即形态
+
+| 字面量 | 形态 | 约束 |
+|--------|------|------|
+| `[1, 2, 3]` | compact（head kind=元素类型） | 元素须定长同 kind；含变长字符串成员时 layout 报错 |
+| `{1, 2, 3}` | stringkeymap（散 key） | 变长 / 可增长；字符串数组必须走此形式 |
+| `{k = v; …}` | struct 或 stringkeymap | 由 `=` 键值对与散 key 数组区分；空 `{}` 须带类型标注 |
+
+## 形态转换
+
+| rwir | 方向 | 语义 |
+|------|------|------|
+| `array·scatter(arr) -> dst` | compact → stringkeymap | 连续数组拆成 `dst·[0]…dst·[N-1]` 独立 key |
+| `array·compact(arr) -> dst` | stringkeymap → compact | 读散 key 打包成连续数组 |
+| `array·append` / `array·slice` | 变长 | 作用于 compact 时先自动 scatter |
+
+## ref（存储位置维）与扩展句柄
+
+| ref | 语义 | body |
+|-----|------|------|
+| 0（inline） | 内联值 | 数据本体 |
+| 1（ptr） | kvspace 内软链接 | 目标 key 路径 |
+| 2（@ext） | 扩展存储句柄 | 元存外位置描述符 |
+
+ref=2 表示值本体在扩展世界（SHM/GPU/文件），head 中 langtype 记录形态（如 `[256,256]uint8`），body 记位置描述符。@ext 只表**单个值**存于扩展世界（compact 形态），与 storetype=index/extindex 无关。读取时按 body 前缀路由兑现（见 [[地址空间]] 扩展存储）。
+
+## memindex：定宽目录矩阵
+
+storetype=index/extindex 的 head 物理字段记成员名 m×n 对齐字符串数组，参数 `dims=[len, cap, M]`，`M` 向上 8 对齐；`len` 为当前项数、`cap` 为预留容量、`M` 为行宽；主槽 body 恒空。`kvspaceMkindex` 带 `capacity` 参数、构造器 `kvspaceXvalueNewIndexGrow(children, count, cap_hint, m_hint)`（`kvspace-c/src/xvalue.h`）据此保留容量与行宽，使增删可就地覆写、不重分配。
+	"#### -> /lib/kvlang/spec/kvspace模型/数组两种物理形态
+}

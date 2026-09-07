@@ -53,7 +53,7 @@ void kvlangVthreadSetError(kvlangKv_t *kv, const char *vtid, const char *pc, con
         kvlangStrbuf_t dir; kvlangStrbufInit(&dir);
         kvlangStrbufPutn(&dir, msg_path.p, (size_t)(sep - msg_path.p) + 1);
         char err[256];
-        kvlangKvMkindex(kv, dir.p, err, sizeof err);
+        kvlangKvMkindex(kv, dir.p, 0, err, sizeof err);
         kvlangStrbufFree(&dir);
     }
 

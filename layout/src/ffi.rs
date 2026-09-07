@@ -38,10 +38,11 @@ extern "C" {
         err: *mut c_char,
         err_cap: u32,
     ) -> c_int;
-    /// 新位置写：按 (kindexpr, body_len) 分配新 box、写 head，返回 body 偏移指针。
+    /// 新位置写：按 (xkind, kindexpr, body_len) 分配新 box、写 head，返回 body 偏移指针。
     fn kvspaceWriteNewPlace(
         h: Handle,
         key: *const c_char,
+        xkind: u8,
         kindexpr: *const c_char,
         body_len: u32,
         body: *mut *mut u8,
@@ -62,7 +63,8 @@ extern "C" {
         expand_ext: c_int,
         resolve: c_int,
         idx: i32,
-        out: *mut *mut u8,
+        buf: *mut u8,
+        buf_cap: u32,
         out_len: *mut u32,
     ) -> c_int;
     fn kvspaceDel(
@@ -73,7 +75,13 @@ extern "C" {
         err_cap: u32,
     ) -> c_int;
     fn kvspaceDelTree(h: Handle, prefix: *const c_char, err: *mut c_char, err_cap: u32) -> c_int;
-    fn kvspaceMkindex(h: Handle, path: *const c_char, err: *mut c_char, err_cap: u32) -> c_int;
+    fn kvspaceMkindex(
+        h: Handle,
+        path: *const c_char,
+        capacity: u32,
+        err: *mut c_char,
+        err_cap: u32,
+    ) -> c_int;
     fn kvspaceMkindexExt(
         h: Handle,
         path: *const c_char,
@@ -111,7 +119,11 @@ extern "C" {
 /// XValueHead 解码结果（与 kvspace-durable 的 kvspaceHead_t 布局一致）。kindexpr 为唯一类型真相。
 #[repr(C)]
 pub struct kvspaceHead_t {
+    pub xkind: u8,
     pub kindexpr: [u8; 256],
+    pub kind_off: i32,
+    pub ndim: i32,
+    pub dims: [i32; 8],
     pub ro: u8,
     pub vid: u32,
     pub body_len: i32,
@@ -194,6 +206,7 @@ impl Kv {
             kvspaceWriteNewPlace(
                 self.h,
                 ck.as_ptr(),
+                h.xkind,
                 kindexpr.as_ptr(),
                 body_len as u32,
                 &mut body,
@@ -237,19 +250,22 @@ impl Kv {
         }
         let mut v = Vec::with_capacity(count as usize);
         for i in 0..count {
-            let bytes = call_borrow(|out, out_len| unsafe {
+            let mut buf = [0u8; 1024];
+            let mut out_len: u32 = 0;
+            let ok = unsafe {
                 kvspaceListAt(
                     self.h,
                     c.as_ptr(),
                     expand_ext as c_int,
                     resolve as c_int,
                     i,
-                    out,
-                    out_len,
+                    buf.as_mut_ptr(),
+                    buf.len() as u32,
+                    &mut out_len,
                 )
-            });
-            if !bytes.is_empty() {
-                v.push(String::from_utf8_lossy(&bytes).into_owned());
+            } == 0;
+            if ok && out_len > 0 {
+                v.push(String::from_utf8_lossy(&buf[..out_len as usize]).into_owned());
             }
         }
         v
@@ -265,7 +281,8 @@ impl Kv {
     pub fn mkindex(&mut self, path: &str) -> Result<(), String> {
         let c = CString::new(path).expect("no NUL");
         let mut err: [c_char; 256] = [0; 256];
-        let ret = unsafe { kvspaceMkindex(self.h, c.as_ptr(), err.as_mut_ptr(), err.len() as u32) };
+        let ret =
+            unsafe { kvspaceMkindex(self.h, c.as_ptr(), 0, err.as_mut_ptr(), err.len() as u32) };
         err_ret(&mut err, ret)
     }
 
@@ -333,7 +350,11 @@ pub fn tlv_encode(kind: &str, raw: &[u8], array_len: i32) -> Vec<u8> {
 /// 解码 XValueHead。
 pub fn decode_head(data: &[u8]) -> kvspaceHead_t {
     let mut h = kvspaceHead_t {
+        xkind: 0,
         kindexpr: [0u8; 256],
+        kind_off: 0,
+        ndim: 0,
+        dims: [0i32; 8],
         ro: 0,
         vid: 0,
         body_len: 0,

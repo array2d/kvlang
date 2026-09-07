@@ -118,7 +118,7 @@ fn parse_tlv(data: &[u8]) -> (String, Vec<u8>, usize) {
     let kx = String::from_utf8_lossy(&h.kindexpr)
         .trim_end_matches('\0')
         .to_string();
-    let (_, dims, kind) = parse_kindexpr(&kx);
+    let (dims, kind) = parse_kindexpr(&kx);
     let (bo, bl) = (h.body_offset as usize, h.body_len.max(0) as usize);
     let raw = if bo + bl <= data.len() {
         data[bo..bo + bl].to_vec()
@@ -271,27 +271,21 @@ fn mk_map_value(n: usize) -> Vec<u8> {
 
 // ── kindexpr 串解析（反序列化按类型/形状分发用；kvspace 未导出串解析器）─────────
 
-fn parse_kindexpr(kx: &str) -> (i32, Vec<i32>, String) {
-    let (r, rest) = match kx.as_bytes().first() {
-        Some(b'*') => (1, &kx[1..]),
-        Some(b'@') => (2, &kx[1..]),
-        _ => (0, kx),
-    };
-    if rest.starts_with('[') {
-        match rest.find(']') {
+fn parse_kindexpr(kx: &str) -> (Vec<i32>, String) {
+    if kx.starts_with('[') {
+        match kx.find(']') {
             Some(end) => (
-                r,
-                rest[1..end]
+                kx[1..end]
                     .split(',')
                     .filter(|d| !d.is_empty())
                     .map(|d| d.parse().unwrap_or(0))
                     .collect(),
-                rest[end + 1..].to_string(),
+                kx[end + 1..].to_string(),
             ),
-            None => (r, Vec::new(), rest.to_string()),
+            None => (Vec::new(), kx.to_string()),
         }
     } else {
-        (r, Vec::new(), rest.to_string())
+        (Vec::new(), kx.to_string())
     }
 }
 

@@ -1,0 +1,45 @@
+// 欢迎加入kvspace世界
+lib kvlang/spec/kvspace模型/指令布局格式 {
+	r####"# 指令布局格式
+
+本章界定函数经 layout 后在 `/lib` 下的 KV 布局：指令如何以坐标键落盘、签名与命名参数如何编码、调用如何经 extindex 复用指令树、参数如何经指针链解析。
+
+## 空间布局，非线性字节码
+
+传统 VM 编译产线性字节码，调用即压返回地址后跳入口。kvlang 的 layout 不产线性序列，而是**空间布局**：每条指令展开为一组 `[s0,s1]` 坐标键，可逐槽 `kv·get`/`kv·list` 寻址，无需反汇编器。函数体永不被复制——调用时经 extindex 令帧根指向 `/lib` 下同一份指令树（见下 [[调用extindex]] 调用机制）。
+
+## 坐标键 `[s0,s1]`
+
+函数 `/lib/{pkg}·{name}/` 目录下，每个槽以 `[s0,s1]` 坐标键寻址。约定：
+
+- `s0` = 行号：`[0,·]` 为签名行，`[1,·]` 起为指令行（指令 0 落 `[1,·]`）。
+- `s1` = 列：`0` 为 opcode 槽，负号 `-j` 为第 j 个读槽，正号 `+j` 为第 j 个写槽。
+
+入口 PC 为 `…/[1,0]`（`layout/src/keytree.rs` 的 `is_entry_pc`：PC 以 `/[1,0]` 结尾即入口）。
+
+### 签名行
+
+函数目录 `/lib/{pkg}·{name}/` 自身（主槽）：storetype = index、langtype = `rwfunc`（裸种类名，**不含签名**），body = `[nr:u16 LE][nw:u16 LE][dynamic:u8]`（读参个数 `nr`、写参个数 `nw`、是否变参 `dynamic`）。各参数真实类型**不**写进主槽 langtype，而落在**签名行 `[0,x]` 子槽**：`x<0` 读参、`x>0` 写参、`[0,0]` 为锚点；每个 `[0,x]`（`x≠0`）是 storetype=ARRAYND、langtype=`def kindexpr` 的 xvalue，body 为该参数完整 kindexpr 串（见 [[总体方案]]）。同理，`def rwir` 目录主槽 langtype = `def rwir`（裸种类名），body 同格式，签名行 `[0,x]` 亦为 `def kindexpr` 子槽，无实现指令行。
+
+- 命名参数 → 槽映射：`/lib/{pkg}·{name}/{param}` 是一个 char/utf32 值，内容为该参数的槽坐标串（如 `x` → `"[0,-1]"`、返回值 `R` → `"[0,1]"`）。读参映射到 `[0,-j]`、写参映射到 `[0,+j]`。
+
+### 指令行
+
+以 `id_val(x:int64) -> (R:int64) { int64·add(x, 0) -> R }` 为例，`/lib/id_val/` 下：
+
+```
+/lib/id_val/  storetype=index  langtype=rwfunc  body=[nr=1,nw=1,dyn=0]  ← 主槽；langtype 为裸种类名，不含签名
+[0,0]         （签名行锚点 s0=0）
+[0,-1]        storetype=ARRAYND  langtype=def kindexpr  body="int64"    ← 读参1 x 的类型
+[0,1]         storetype=ARRAYND  langtype=def kindexpr  body="int64"    ← 写参1 R 的类型
+x             char/utf32→[0,-1]                                         ← 命名读参 → 槽坐标（查表用）
+R             char/utf32→[0,1]                                          ← 命名写参 → 槽坐标（查表用）
+[1,0]         rwir:int64·add                                            ← 指令0 opcode
+[1,-1]        rwir:x                                                    ← 指令0 读槽1
+[1,-2]        int64:0                                                   ← 指令0 读槽2（内联字面量）
+[1,1]         rwir:R                                                    ← 指令0 写槽1
+```
+
+opcode 槽 langtype 为 `rwir`（可为 `rwfunc` 引用），body 记 opcode 名。读/写槽的值有两类：`rwir:name` 是对变量的引用（存名字文本，即相对指针），或内联字面量（如 `int64:0`、`char/utf32:"…"`）。opcode 槽永不存变量引用，故值拷贝 `=` 与函数调用 `call` 在 KV 层无歧义。
+	"#### -> /lib/kvlang/spec/kvspace模型/指令布局格式
+}

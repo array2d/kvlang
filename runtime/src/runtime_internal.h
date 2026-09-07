@@ -11,12 +11,22 @@
 /* ── kvspace-durable C ABI ─────────────────────────────────────────── */
 
 typedef struct {
-    uint8_t kindexpr[256]; /* NUL 终止（含 ref 前缀与 [dims]，去 padding） */
+    uint8_t xkind;         /* 五分类：0=None 1=Ptr 2=ExtValue 3=DefKindexpr 4=RealValue */
+    uint8_t kindexpr[256]; /* NUL 终止（含 [dims]、无前缀，去 padding） */
+    int32_t kind_off;      /* base 种类在 kindexpr 内的起始字节偏移 */
+    int32_t ndim;          /* 维数（标量=0） */
+    int32_t dims[8];       /* 各维长度（X_MAX_NDIM=8） */
     uint8_t ro;            /* 1=只读，0=可写 */
     uint32_t vid;          /* vthread id */
     int32_t body_len;      /* body 字节数 */
     int32_t body_offset;   /* body 在 data 内的起始偏移（= head_len） */
 } kvspaceHead_t;
+
+#define KVSPACE_XKIND_NONE        0
+#define KVSPACE_XKIND_PTR         1
+#define KVSPACE_XKIND_EXTVALUE    2
+#define KVSPACE_XKIND_DEFKINDEXPR 3
+#define KVSPACE_XKIND_REALVALUE   4
 
 extern void *kvspaceConnect(const char *dsn);
 extern void  kvspaceClose(void *h);
@@ -25,16 +35,19 @@ extern int   kvspaceGet(void *h, const char *key, int resolve, uint8_t **out, ui
 /* 就地写：key 已存在、body_len==原 body_len → 返回原 box body 偏移指针；否则非 0 + err。 */
 extern int   kvspaceWriteInPlace(void *h, const char *key, int resolve, uint32_t body_len,
                                   uint8_t **body, char *err, uint32_t err_cap);
-/* 新位置写：按 (kindexpr, body_len) 分配新 box、写 head，返回 body 偏移指针。 */
-extern int   kvspaceWriteNewPlace(void *h, const char *key, const char *kindexpr, uint32_t body_len,
-                                   uint8_t **body, char *err, uint32_t err_cap);
+/* 新位置写：按 (xkind, kindexpr, body_len) 分配新 box、写 head，返回 body 偏移指针。 */
+extern int   kvspaceWriteNewPlace(void *h, const char *key, uint8_t xkind, const char *kindexpr,
+                                   uint32_t body_len, uint8_t **body, char *err, uint32_t err_cap);
 /* 前缀遍历：listlen 定计数，逐 idx 取名（借用回收缓冲，不得 free），不一次性返回整段名单。 */
 extern int   kvspaceListLen(void *h, const char *prefix, int expand_ext, int resolve, int32_t *out_count);
 extern int   kvspaceListAt(void *h, const char *prefix, int expand_ext, int resolve, int32_t idx,
-                            uint8_t **out, uint32_t *out_len);
+                            uint8_t *buf, uint32_t buf_cap, uint32_t *out_len);
 extern int   kvspaceDel(void *h, const char *const *keys, uint32_t nkeys, char *err, uint32_t err_cap);
 extern int   kvspaceDelTree(void *h, const char *prefix, char *err, uint32_t err_cap);
-extern int   kvspaceMkindex(void *h, const char *path, char *err, uint32_t err_cap);
+extern int   kvspaceCp(void *h, const char *src, const char *dst, char *err, uint32_t err_cap);
+extern int   kvspaceCpTree(void *h, const char *src, const char *dst, char *err, uint32_t err_cap);
+extern int   kvspaceCpList(void *h, const char *src, const char *dst, char *err, uint32_t err_cap);
+extern int   kvspaceMkindex(void *h, const char *path, uint32_t capacity, char *err, uint32_t err_cap);
 extern int   kvspaceMkindexExt(void *h, const char *path, const char *ext_path, char *err, uint32_t err_cap);
 extern int   kvspaceRmindexExt(void *h, const char *path, char *err, uint32_t err_cap);
 extern int   kvspaceWatch(void *h, const char *key, const uint8_t *target, uint32_t target_len,
@@ -60,7 +73,6 @@ extern int   kvspaceNewFloat64(double v, uint8_t **out, uint32_t *out_len);
 typedef struct {
     const char *kind;   /* base kind（kindexpr 子串，非 NUL 终止） */
     int32_t     kind_len;
-    int32_t     ref;    /* 0=内联 1=指针 2=扩展句柄 */
     int32_t     ndim;
     int32_t     dims[X_MAX_NDIM];
     int32_t     array_len;
@@ -113,7 +125,6 @@ bool kvlang_rwirextKindexprVariadic(const char *expr);
 int64_t kvlangXvalueAsInt64(const kvlangXvalue_t *v);
 double  kvlangXvalueAsFloat64(const kvlangXvalue_t *v);
 uint64_t kvlangXvalueAsUint64(const kvlangXvalue_t *v);
-bool    kvlangXvalueAsBool(const kvlangXvalue_t *v);
 uint32_t kvlangXvalueChar32At(const kvlangXvalue_t *v, int32_t idx);
 int32_t kvlangXvalueElemSize(const char *kind);
 
@@ -140,7 +151,10 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
 int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, uint32_t err_cap);
 int kvlangKvDel(kvlangKv_t *k, const char *key, char *err, uint32_t err_cap);
 int kvlangKvDelTree(kvlangKv_t *k, const char *prefix, char *err, uint32_t err_cap);
-int kvlangKvMkindex(kvlangKv_t *k, const char *path, char *err, uint32_t err_cap);
+int kvlangKvCp(kvlangKv_t *k, const char *src, const char *dst, char *err, uint32_t err_cap);
+int kvlangKvCpTree(kvlangKv_t *k, const char *src, const char *dst, char *err, uint32_t err_cap);
+int kvlangKvCpList(kvlangKv_t *k, const char *src, const char *dst, char *err, uint32_t err_cap);
+int kvlangKvMkindex(kvlangKv_t *k, const char *path, uint32_t capacity, char *err, uint32_t err_cap);
 int kvlangKvExtIndex(kvlangKv_t *k, const char *path, const char *ext, char *err, uint32_t err_cap);
 int kvlangKvDelExtIndex(kvlangKv_t *k, const char *path, char *err, uint32_t err_cap);
 int kvlangKvList(kvlangKv_t *k, const char *prefix, bool expand_ext, bool resolve,

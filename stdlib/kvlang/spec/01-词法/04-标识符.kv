@@ -1,0 +1,42 @@
+// 欢迎加入kvspace世界
+lib kvlang/spec/词法/标识符 {
+	r####"# 标识符
+
+## 锚例
+
+- `tutorial/01-basics/vars.kv`——标识符 `x`、`y`。
+- `tutorial/01-basics/kv_tree.kv`——绝对路径 `/tmp/kvt`、子键路径 `/tmp/kvt·data`、层级路径 `/tmp/kvt/a`，以及成员/方法 `kv·set`、`kv·get`。
+
+## 标识符
+
+标识符命名帧内变量、参数、lib 段、rwir/rwfunc、成员键等。其规范形态为：
+
+```
+letter = unicode_letter | "_"
+ident  = letter { letter | digit }
+```
+
+其中 `unicode_letter` 为任意 Unicode 字母。因此标识符**可含非 ASCII 字母**，中文标识符合法：
+
+```
+变量数 = 42
+println("值 =", 变量数)
+```
+
+此决策使 kvlang 与 C99、Go、Python、Rust、TypeScript 在「允许 Unicode 标识符」上对齐。
+
+7 个词法关键字（`return if else for while break continue`）为保留字，不得用作标识符；其余上下文词（`lib`、`None`、`true`、`false`、种类名等）不保留，但用作普通标识符会遮蔽其上下文含义，不应如此使用。
+
+> 实现说明（非规范）：当前词法器以「最长非分隔符字节串」切分标识符，未逐字符校验上述字母表，故比本节所述更宽松。分隔符集合为空白、`; , ( ) { } [ ] :`、成员分隔符 `·`，以及运算符字符 `+ - * % ! = < > & | ^`。
+
+## 成员分隔符
+
+`·`（U+00B7，中点）是 kvlang 唯一的成员/方法分隔符，词法化为独立的 `Dot` 词法单元。它出现于：
+
+- 成员访问 `base·field`；
+- 方法/限定调用 `base·method(...)`、`pkg·func(...)`；
+- 坐标访问 `base·[i,j]`。
+
+kvlang **不使用** ASCII 句点 `.` 作成员分隔符（`.` 仅作路径子键，见下）。
+	"#### -> /lib/kvlang/spec/词法/标识符
+}

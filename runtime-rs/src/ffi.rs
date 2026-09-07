@@ -8,7 +8,11 @@ use std::ffi::{c_char, c_int, c_void, CStr, CString};
 /// kvspaceDecodeHead 输出（与 kvspace-durable/src/ffi.rs::kvspaceHead_t 对齐）。kindexpr 为唯一类型真相。
 #[repr(C)]
 pub struct KvspaceHead {
+    pub xkind: u8,
     pub kindexpr: [u8; 256],
+    pub kind_off: i32,
+    pub ndim: i32,
+    pub dims: [i32; 8],
     pub ro: u8,
     pub vid: u32,
     pub body_len: i32,
@@ -18,7 +22,11 @@ pub struct KvspaceHead {
 impl Default for KvspaceHead {
     fn default() -> Self {
         KvspaceHead {
+            xkind: 0,
             kindexpr: [0u8; 256],
+            kind_off: 0,
+            ndim: 0,
+            dims: [0i32; 8],
             ro: 0,
             vid: 0,
             body_len: 0,
@@ -95,6 +103,7 @@ unsafe extern "C" {
     pub fn kvspaceWriteNewPlace(
         h: *mut c_void,
         key: *const c_char,
+        xkind: u8,
         kindexpr: *const c_char,
         body_len: u32,
         body: *mut *mut u8,
@@ -116,7 +125,8 @@ unsafe extern "C" {
         expand_ext: c_int,
         resolve: c_int,
         idx: i32,
-        out: *mut *mut u8,
+        buf: *mut u8,
+        buf_cap: u32,
         out_len: *mut u32,
     ) -> c_int;
     pub fn kvspaceTlvEncode(
@@ -147,6 +157,8 @@ unsafe extern "C" {
     ) -> c_int;
 
     // ── kvlang runtime：rwirext 宿主 ABI（均传 kvspace 句柄）─────────
+    // C 头 kvlang_rwirext.h 导出 9 符号；此处声明 7：故意省略 KindexprValid/KindexprMatch
+    // ——kindexpr 校验属 layout 期、匹配属 C dispatch 内部，Rust term 侧不调用（非缺陷）。
     pub fn kvlang_rwirextRegister(
         kvspace: *mut c_void,
         opcode: *const c_char,
