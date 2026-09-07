@@ -26,7 +26,7 @@ lower 之后，layout 把**所有**块体展平进函数目录下的**单一线�
 
 标签到 irseq 的映射另存于 `/lib/<pkg>·<name>/‥labels/<label>`（kind `int64`），供审查与工具还原。
 
-示例（`while (i <= n) { total + i -> total; i <- i + 1 }`，其中 `n` 为读参）布出：
+示例（`while (i <= n) { total + i -> total; i = i + 1 }`，其中 `n` 为读参）布出：
 
 ```
 [3,0]="goto"  [3,-1]=4              # 跳到条件块（irseq 4）

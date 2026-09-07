@@ -6,10 +6,10 @@ lib kvlang/spec/类型系统/构造器 {
 
 ```kv
 f = float32(3)          // kind=float32，值 3.0
-i <- int8(0.1)          // 0（float→int 向零截断）
+i = int8(0.1)          // 0（float→int 向零截断）
 int8(300) -> w          // 44（窄化 = 补码回绕）
-t <- char/utf32(s)      // 变宽 utf8 转定宽 utf32（转后可索引）
-u <- char/ascii(t)      // 非 ASCII 码点 → TypeError
+t = char/utf32(s)      // 变宽 utf8 转定宽 utf32（转后可索引）
+u = char/ascii(t)      // 非 ASCII 码点 → TypeError
 ```
 
 转换规则（对齐 C / Go / Rust `as`）：

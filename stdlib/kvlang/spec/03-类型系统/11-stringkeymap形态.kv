@@ -10,7 +10,7 @@ for (x in nums) { … }      // 遍历散 key 元素
 names = {"apple", "banana", "cherry"}   // 变长字符串数组必须 stringkeymap
 ```
 
-散 key 元素以坐标段 `base·[i]` 访问（经 `kv·get`），或以 `for-in` / `kv·listlen` / `kv·listn` 遍历。坐标段支持多值键（含小数）：`geo·[39.9,116.4] <- "Beijing"`，物理以字符串格式落 key（见 `tutorial/04-ndarray/geo_coord.kv`）。
+散 key 元素以坐标段 `base·[i]` 访问（经 `kv·get`），或以 `for-in` / `kv·listlen` / `kv·listn` 遍历。坐标段支持多值键（含小数）：`geo·[39.9,116.4] = "Beijing"`，物理以字符串格式落 key（见 `tutorial/04-ndarray/geo_coord.kv`）。
 
 ## 两形态互转
 
