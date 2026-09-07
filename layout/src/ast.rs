@@ -388,17 +388,12 @@ pub struct Instruction {
     pub expr: Option<Expr>, // None = 空指令
     pub writes: Vec<String>,
     pub write_types: Vec<String>,
-    pub arrow_left: bool, // true = 写槽在左（<- 或 =）
-    pub eq: bool,         // true = 源码用 = 书写
+    pub arrow_left: bool, // true = 写槽在左（=）
 }
 
 impl Instruction {
     fn left_arrow(&self) -> &'static str {
-        if self.eq {
-            symbol::ARROW_EQ
-        } else {
-            symbol::ARROW_LEFT
-        }
+        symbol::ARROW_EQ
     }
 
     /// 扁平化 (opcode, reads)。前提：lower 已把复合子表达式展开为叶节点。
@@ -500,7 +495,7 @@ impl fmt::Display for Instruction {
             }
             return write!(f, "{s}");
         }
-        // set(base, idx, val) → a[idx] <- val（仅 <- 形式）
+        // set(base, idx, val) → a[idx] = val（仅左写形式）
         if e.op == "set" && e.args.len() >= 3 && self.arrow_left {
             let base = e.args[0].to_string();
             let idx = idx_string(&e.args[1]);

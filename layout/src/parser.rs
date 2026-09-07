@@ -987,13 +987,12 @@ impl Parser {
         let mut inst = Instruction::default();
 
         match self.find_top_level_arrow() {
-            Some(v) if v == "<-" || v == "=" => {
+            Some(v) if v == "=" => {
                 inst.arrow_left = true;
-                inst.eq = v == "=";
                 let (writes, wtypes) = self.collect_writes_until_arrow();
                 inst.writes = writes;
                 inst.write_types = wtypes;
-                self.advance(); // consume <- / =
+                self.advance(); // consume =
                 inst.expr = self.parse_pratt(0);
                 self.desugar_subscript_write(&mut inst);
                 self.desugar_member_write(&mut inst);
@@ -1813,7 +1812,7 @@ impl Parser {
 
     // 下标写脱糖：arr[i,j] 写槽 + 值 e → xv·set(arr, i, j, e) -> arr（compact 数组，
     // 读侧 arr[i,j]→xv·at 的对称）。arr· 前缀坐标或 / 路径 → kv·set。左右箭头共用：
-    // <- 时 e 是 pratt 右值，-> 时 e 是箭头左值，语义一致。layout 不判维数，交给 runtime。
+    // = 时 e 是 pratt 右值，-> 时 e 是箭头左值，语义一致。layout 不判维数，交给 runtime。
     fn desugar_subscript_write(&mut self, inst: &mut Instruction) {
         if inst.writes.len() != 1 || !inst.writes[0].contains('[') {
             return;

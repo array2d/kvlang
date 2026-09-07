@@ -2,7 +2,6 @@
 
 // ── 显示用字符串常量 ─────────────────────────────────────────────────
 
-pub const ARROW_LEFT: &str = " <- ";
 pub const ARROW_RIGHT: &str = " -> ";
 pub const ARROW_EQ: &str = " = ";
 
@@ -116,7 +115,7 @@ static ENTRIES: &[Entry] = &[
     // 箭头 / 赋值（= 兼作 copy opcode）
     Entry {
         word: "assign",
-        glyphs: &["<-", "->", "="],
+        glyphs: &["->", "="],
         precedence: 0,
         arith: false,
         cmp: false,

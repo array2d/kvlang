@@ -126,7 +126,6 @@ fn return_inst() -> Stmt {
         writes: Vec::new(),
         write_types: Vec::new(),
         arrow_left: false,
-        eq: false,
     })
 }
 
@@ -400,7 +399,6 @@ fn lower_for_with_cont(
             writes: vec![slot.clone()],
             write_types: Vec::new(),
             arrow_left: true,
-            eq: true,
         }));
         slot
     };
@@ -412,7 +410,6 @@ fn lower_for_with_cont(
             writes: vec![len_slot.clone()],
             write_types: Vec::new(),
             arrow_left: false,
-            eq: false,
         }));
     } else {
         init_body.push(Stmt::Instruction(Instruction {
@@ -421,7 +418,6 @@ fn lower_for_with_cont(
             writes: vec![len_slot.clone()],
             write_types: Vec::new(),
             arrow_left: false,
-            eq: false,
         }));
     }
     init_body.push(goto_label(&cond_label));
@@ -432,7 +428,6 @@ fn lower_for_with_cont(
         writes: vec![idx_slot.clone()],
         write_types: Vec::new(),
         arrow_left: false,
-        eq: false,
     };
     let lt_inst = Instruction {
         comments: Vec::new(),
@@ -443,7 +438,6 @@ fn lower_for_with_cont(
         writes: vec![cond_slot.clone()],
         write_types: Vec::new(),
         arrow_left: false,
-        eq: false,
     };
     let cond_body = vec![
         Stmt::Instruction(add_inst),
@@ -467,7 +461,6 @@ fn lower_for_with_cont(
             writes: vec![key_slot.clone()],
             write_types: Vec::new(),
             arrow_left: false,
-            eq: false,
         }));
         body_insts.push(Stmt::Instruction(Instruction {
             comments: Vec::new(),
@@ -478,7 +471,6 @@ fn lower_for_with_cont(
             writes: vec![s.var.clone()],
             write_types: Vec::new(),
             arrow_left: false,
-            eq: false,
         }));
     } else {
         body_insts.push(Stmt::Instruction(Instruction {
@@ -490,7 +482,6 @@ fn lower_for_with_cont(
             writes: vec![s.var.clone()],
             write_types: Vec::new(),
             arrow_left: false,
-            eq: false,
         }));
     }
     body_insts.extend(body_inner);
@@ -551,7 +542,6 @@ fn flatten_expr(e: &Expr, lg: &mut LabelGen, extra: &mut Vec<Stmt>) -> Expr {
                 writes: vec![tmp.clone()],
                 write_types: Vec::new(),
                 arrow_left: false,
-                eq: false,
             }));
             new_args.push(ast::leaf(&tmp));
         } else {
@@ -579,7 +569,6 @@ fn br_inst(cond: &str, t_label: &str, f_label: &str) -> Stmt {
         writes: Vec::new(),
         write_types: Vec::new(),
         arrow_left: false,
-        eq: false,
     })
 }
 
@@ -590,7 +579,6 @@ fn goto_label(label: &str) -> Stmt {
         writes: Vec::new(),
         write_types: Vec::new(),
         arrow_left: false,
-        eq: false,
     })
 }
 
@@ -603,7 +591,6 @@ fn expand_sparse(base: &str, e: &Expr, _lg: &mut LabelGen) -> Vec<Stmt> {
         writes: vec![base.to_string()],
         write_types: Vec::new(),
         arrow_left: true,
-        eq: false,
     };
     vec![Stmt::Instruction(inst)]
 }
@@ -615,7 +602,6 @@ fn make_copy_inst(val: &str, dest: &str) -> Stmt {
         writes: vec![dest.to_string()],
         write_types: Vec::new(),
         arrow_left: false,
-        eq: false,
     })
 }
 
