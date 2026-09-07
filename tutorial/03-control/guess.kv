@@ -5,36 +5,36 @@
 //   found 73 in 6 guesses
 rwfunc guess_number() -> () {
 	73 -> target
-	lo <- 1
-	hi = 100  // = 等价于 <-
+	lo = 1
+	hi = 100
 	0 -> tries
-	found <- 0
+	found = 0
 	while (found == 0) {
-		s = lo + hi  // = 等价于 <-
+		s = lo + hi
 		s ÷ 2 -> mid_float
 		s ÷ 2 -> mid_float_m
-		mid <- int64(mid_float)
-		tries = tries + 1  // = 等价于 <-
+		mid = int64(mid_float)
+		tries = tries + 1
 		println("guess #", tries, ":", mid)
 		mid == target -> hit
 
 		if (hit) {
-			found <- 1
+			found = 1
 			println("  correct!")
 		} else {
-			too_low = mid < target  // = 等价于 <-
+			too_low = mid < target
 
 			if (too_low) {
 				mid + 1 -> lo
 				println("  too low, range:", lo, "-", hi)
 			} else {
-				hi <- mid - 1
+				hi = mid - 1
 				println("  too high, range:", lo, "-", hi)
 			}
 		}
 	}
 	println("found", target, "in", tries, "guesses")
-	/last_guesses = tries  // = 等价于 <-
+	/last_guesses = tries
 }
 
 rwfunc test() -> () {

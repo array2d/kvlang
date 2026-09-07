@@ -15,39 +15,39 @@
 //   15
 rwfunc is_self(n:int64) -> (r:bool) {
 	n -> num
-	ok <- true
+	ok = true
 	while (num > 0) {
-		d = num % 10  // = 等价于 <-
+		d = num % 10
 		d == 0 -> zero
 
 		if (zero) {
-			ok <- false
-			num = 0  // = 等价于 <-
+			ok = false
+			num = 0
 		} else {
 			n % d -> rem
-			div <- rem == 0
+			div = rem == 0
 
 			if (div) {
-				num = num ÷ 10  // = 等价于 <-
-				num_m = num ÷ 10  // = 等价于 <-
+				num = num ÷ 10
+				num_m = num ÷ 10
 			} else {
 				false -> ok
-				num <- 0
+				num = 0
 			}
 		}
 	}
-	r = ok  // = 等价于 <-
+	r = ok
 }
 
 rwfunc test() -> () {
 	1 -> i
 	while (i <= 15) {
-		r <- is_self(i)
+		r = is_self(i)
 
 		if (r) {
 			println(i)
 		}
 
-		i = i + 1  // = 等价于 <-
+		i = i + 1
 	}
 }

@@ -385,17 +385,6 @@ pub fn scan(src: &str) -> Vec<Token> {
             continue;
         }
 
-        // 左箭头 <-
-        if c == b'<' && i + 1 < src.len() && src[i + 1] == b'-' {
-            tokens.push(Token {
-                kind: Kind::Arrow,
-                value: "<-".to_string(),
-                pos: p,
-                quote: 0,
-            });
-            i += 2;
-            continue;
-        }
         // 右箭头 ->
         if c == b'-' && i + 1 < src.len() && src[i + 1] == b'>' {
             tokens.push(Token {

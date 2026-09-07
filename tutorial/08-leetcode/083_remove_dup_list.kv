@@ -7,21 +7,21 @@
 //   2
 //   3
 rwfunc build() -> () {
-	/e0 = { val=1; next="/e1" }  // = 等价于 <-
-	/e1 <- { val=1; next="/e2" }
+	/e0 = { val=1; next="/e1" }
+	/e1 = { val=1; next="/e2" }
 	{ val=2; next="" } -> /e2
-	/f0 = { val=1; next="/f1" }  // = 等价于 <-
-	/f1 <- { val=1; next="/f2" }
+	/f0 = { val=1; next="/f1" }
+	/f1 = { val=1; next="/f2" }
 	{ val=2; next="/f3" } -> /f2
-	/f3 = { val=3; next="/f4" }  // = 等价于 <-
-	/f4 <- { val=3; next="" }
+	/f3 = { val=3; next="/f4" }
+	/f4 = { val=3; next="" }
 }
 
 rwfunc dedup(head:[]char/utf32) -> () {
 	head -> cur
 	while (cur != "") {
 		cur·next -> nxt
-		advance = true  // = 等价于 <-
+		advance = true
 
 		if (nxt != "") {
 			cur·val -> v
@@ -29,7 +29,7 @@ rwfunc dedup(head:[]char/utf32) -> () {
 
 			if (nv == v) {
 				nxt·next -> nn
-				cur·next <- nn
+				cur·next = nn
 				false -> advance
 			}
 		}

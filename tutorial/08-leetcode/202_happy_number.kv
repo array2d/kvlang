@@ -5,24 +5,24 @@
 rwfunc is_happy(n:int64) -> (result:int64) {
 	n -> nv
 	0 -> slow
-	fast <- nv
-	found = 0  // = 等价于 <-
+	fast = nv
+	found = 0
 	while (found == 0) {
 		nv -> x
-		s <- 0
+		s = 0
 		while (x > 0) {
-			d = x % 10  // = 等价于 <-
+			d = x % 10
 			d × d -> d2
 			d × d -> d2_m
-			s <- s + d2
-			x = x ÷ 10  // = 等价于 <-
-			x_m = x ÷ 10  // = 等价于 <-
+			s = s + d2
+			x = x ÷ 10
+			x_m = x ÷ 10
 		}
 		s -> nv
-		done <- nv == 1
+		done = nv == 1
 
 		if (done) {
-			found = 1  // = 等价于 <-
+			found = 1
 			1 -> result
 		}
 	}
@@ -30,6 +30,6 @@ rwfunc is_happy(n:int64) -> (result:int64) {
 
 rwfunc test() -> () {
 
-	r <- is_happy(19)
+	r = is_happy(19)
 	println(r)
 }

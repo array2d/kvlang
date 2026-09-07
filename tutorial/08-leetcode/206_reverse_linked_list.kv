@@ -7,27 +7,27 @@
 //   2
 //   1
 rwfunc build_list() -> () {
-	/n0 = { val=1; next="/n1" }  // = 等价于 <-
+	/n0 = { val=1; next="/n1" }
 	{ val=2; next="/n2" } -> /n1
-	/n2 <- { val=3; next="/n3" }
-	/n3 = { val=4; next="/n4" }  // = 等价于 <-
+	/n2 = { val=3; next="/n3" }
+	/n3 = { val=4; next="/n4" }
 	{ val=5; next="" } -> /n4
 }
 
 rwfunc reverse(head:[]char/utf32) -> () {
-	prev = ""  // = 等价于 <-
+	prev = ""
 	head -> cur
 	while (cur != "") {
-		nxt <- cur·next
-		cur·next = prev  // = 等价于 <-
+		nxt = cur·next
+		cur·next = prev
 		cur -> prev
-		cur <- nxt
+		cur = nxt
 	}
-	p = prev  // = 等价于 <-
+	p = prev
 	while (p != "") {
 		p·val -> v
 		println(v)
-		p <- p·next
+		p = p·next
 	}
 }
 

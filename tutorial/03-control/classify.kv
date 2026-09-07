@@ -4,16 +4,16 @@
 //   grade = B
 rwfunc classify(score:int64) -> (grade:[]char/utf32) {
 	if (score >= 90) {
-		grade = "A"  // = 等价于 <-
+		grade = "A"
 	} else {
 		if (score >= 80) {
 			"B" -> grade
 		} else {
 			if (score >= 70) {
-				grade <- "C"
+				grade = "C"
 			} else {
 				if (score >= 60) {
-					grade = "D"  // = 等价于 <-
+					grade = "D"
 				} else {
 					"F" -> grade
 				}
@@ -24,7 +24,7 @@ rwfunc classify(score:int64) -> (grade:[]char/utf32) {
 
 rwfunc test() -> () {
 
-	ans <- classify(85)
+	ans = classify(85)
 	println("grade =", ans)
-	/last_grade = ans  // = 等价于 <-
+	/last_grade = ans
 }

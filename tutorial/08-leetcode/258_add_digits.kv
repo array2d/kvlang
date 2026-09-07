@@ -5,15 +5,15 @@
 rwfunc add_digits(n:int64) -> () {
 	n -> nv
 	while (nv >= 10) {
-		s = 0  // = 等价于 <-
+		s = 0
 		nv -> x
 		while (x > 0) {
-			d <- x % 10
-			s = s + d  // = 等价于 <-
+			d = x % 10
+			s = s + d
 			x ÷ 10 -> x
 			x ÷ 10 -> x_m
 		}
-		nv <- s
+		nv = s
 	}
 	println(nv)
 }

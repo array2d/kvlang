@@ -5,7 +5,7 @@
 rwfunc test() -> () {
 	__SCALE__ -> n
 	h:[int64]·int64 = {}
-	t0 <- time·now()
+	t0 = time·now()
 	0 -> i
 	while (i < n) {
 		i × 2654435761 -> k0
@@ -27,10 +27,10 @@ rwfunc test() -> () {
 		}
 		i + 1 -> i
 	}
-	t1 <- time·now()
+	t1 = time·now()
 	println("hash: hits =", hits, "sum =", sum)
-	delta <- time·sub(t1, t0)
-	ns <- time/duration·as_nanos(delta)
+	delta = time·sub(t1, t0)
+	ns = time/duration·as_nanos(delta)
 	println("__bench_ns:", ns)
 	println("__bench_input: N=__SCALE__")
 }

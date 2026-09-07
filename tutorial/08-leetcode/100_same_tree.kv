@@ -4,11 +4,11 @@
 //   true
 //   false
 rwfunc build() -> () {
-	/t0 <- { val=1; left="/t1"; right="/t2" }
+	/t0 = { val=1; left="/t1"; right="/t2" }
 	{ val=2; left=""; right="" } -> /t1
-	/t2 <- { val=3; left=""; right="" }
-	/v0 <- { val=1; left="/v1"; right="/v2" }
-	/v1 <- { val=2; left=""; right="" }
+	/t2 = { val=3; left=""; right="" }
+	/v0 = { val=1; left="/v1"; right="/v2" }
+	/v1 = { val=2; left=""; right="" }
 	{ val=4; left=""; right="" } -> /v2
 }
 

@@ -4,36 +4,36 @@
 //   58
 rwfunc roman_to_int(s:[]char/utf32) -> () {
 	string·len(s) -> n
-	result <- 0
-	i = 0  // = 等价于 <-
+	result = 0
+	i = 0
 	while (i < n) {
 		string·char(s, i) -> c
-		is_I <- c == "I"
-		is_V = c == "V"  // = 等价于 <-
+		is_I = c == "I"
+		is_V = c == "V"
 		c == "X" -> is_X
-		is_L <- c == "L"
-		is_C = c == "C"  // = 等价于 <-
+		is_L = c == "L"
+		is_C = c == "C"
 		c == "D" -> is_D
-		is_M <- c == "M"
+		is_M = c == "M"
 
 		if (is_I) {
-			ni = i + 1  // = 等价于 <-
+			ni = i + 1
 			ni < n -> has_next
 
 			if (has_next) {
-				nc <- string·char(s, ni)
-				iv = nc == "V"  // = 等价于 <-
+				nc = string·char(s, ni)
+				iv = nc == "V"
 				nc == "X" -> ix
 
 				if (iv) {
-					val <- 4
-					i = i + 1  // = 等价于 <-
+					val = 4
+					i = i + 1
 				} else {
 					if (ix) {
 						9 -> val
-						i <- i + 1
+						i = i + 1
 					} else {
-						val = 1  // = 等价于 <-
+						val = 1
 					}
 				}
 			} else {
@@ -41,19 +41,19 @@ rwfunc roman_to_int(s:[]char/utf32) -> () {
 			}
 		} else {
 			if (is_V) {
-				val <- 5
+				val = 5
 			} else {
 				if (is_X) {
-					val = 10  // = 等价于 <-
+					val = 10
 				} else {
 					if (is_L) {
 						50 -> val
 					} else {
 						if (is_C) {
-							val <- 100
+							val = 100
 						} else {
 							if (is_D) {
-								val = 500  // = 等价于 <-
+								val = 500
 							} else {
 								1000 -> val
 							}
@@ -63,8 +63,8 @@ rwfunc roman_to_int(s:[]char/utf32) -> () {
 			}
 		}
 
-		result <- result + val
-		i = i + 1  // = 等价于 <-
+		result = result + val
+		i = i + 1
 	}
 	println(result)
 }

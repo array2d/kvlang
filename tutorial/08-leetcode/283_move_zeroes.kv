@@ -7,30 +7,30 @@
 //   0
 //   0
 rwfunc move_zeroes() -> () {
-	a:[]int64 = [0, 1, 0, 3, 12]  // = 等价于 <-
-	n <- ndarray·numel(a)
+	a:[]int64 = [0, 1, 0, 3, 12]
+	n = ndarray·numel(a)
 	0 -> w
 	0 -> i
 	while (i < n) {
 		a[i] -> x
-		nz = x != 0  // = 等价于 <-
-		nz_m = x ≠ 0  // = 等价于 <-
+		nz = x != 0
+		nz_m = x ≠ 0
 
 		if (nz) {
-			a[w] <- x
-			w <- w + 1
+			a[w] = x
+			w = w + 1
 		}
 		i + 1 -> i
 	}
 	while (w < n) {
-		a[w] <- 0
-		w = w + 1  // = 等价于 <-
+		a[w] = 0
+		w = w + 1
 	}
 	0 -> i
 	while (i < n) {
 		a[i] -> v
 		println(v)
-		i <- i + 1
+		i = i + 1
 	}
 }
 

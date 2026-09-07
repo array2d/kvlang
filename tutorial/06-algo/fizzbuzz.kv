@@ -5,13 +5,13 @@
 //   Buzz
 //   FizzBuzz
 rwfunc fizzbuzz(N:int64) -> () {
-	i = 1  // = 等价于 <-
+	i = 1
 	while (i <= N) {
 		i % 3 -> m3
-		m5 <- i % 5
-		d3 = m3 == 0  // = 等价于 <-
+		m5 = i % 5
+		d3 = m3 == 0
 		m5 == 0 -> d5
-		fb <- d3 && d5
+		fb = d3 && d5
 
 		if (fb) {
 			println("FizzBuzz")
@@ -27,7 +27,7 @@ rwfunc fizzbuzz(N:int64) -> () {
 			}
 		}
 
-		i = i + 1  // = 等价于 <-
+		i = i + 1
 	}
 }
 

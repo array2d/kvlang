@@ -5,13 +5,13 @@
 
 lib kv {
 	rwfunc has(path:[]char/utf32) -> (result:bool) {
-		v <- kv·get(path)
-		sentinel <- kv·get("/___kv_stdlib_null___")
+		v = kv·get(path)
+		sentinel = kv·get("/___kv_stdlib_null___")
 		result = !(v == sentinel)
 	}
 	rwfunc get_or(path:[]char/utf32, default_val:[]char/utf32) -> (result:[]char/utf32) {
-		v <- kv·get(path)
-		sentinel <- kv·get("/___kv_stdlib_null___")
+		v = kv·get(path)
+		sentinel = kv·get("/___kv_stdlib_null___")
 		if (v == sentinel) {
 			result = default_val
 		} else {
@@ -19,8 +19,8 @@ lib kv {
 		}
 	}
 	rwfunc set_default(path:[]char/utf32, val:[]char/utf32) -> () {
-		existing <- kv·get(path)
-		sentinel <- kv·get("/___kv_stdlib_null___")
+		existing = kv·get(path)
+		sentinel = kv·get("/___kv_stdlib_null___")
 		if (existing == sentinel) {
 			kv·set(path, val)
 		}

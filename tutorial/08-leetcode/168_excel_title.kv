@@ -6,22 +6,22 @@
 rwfunc convert(n:int64) -> () {
 	// Build reversed chars into array, then print in reverse
 	[0, 0, 0, 0, 0] -> a:[]int64
-	idx <- 0
-	num = n  // = 等价于 <-
+	idx = 0
+	num = n
 	while (num > 0) {
 		num - 1 -> n1
-		r <- n1 % 26
-		ch = 65 + r  // = 等价于 <-
-		a[idx] <- ch
+		r = n1 % 26
+		ch = 65 + r
+		a[idx] = ch
 		idx + 1 -> idx
-		num <- n1 ÷ 26
-		num_m <- n1 ÷ 26
+		num = n1 ÷ 26
+		num_m = n1 ÷ 26
 	}
-	k = idx - 1  // = 等价于 <-
+	k = idx - 1
 	while (k >= 0) {
 		a[k] -> v
 		println(v)
-		k <- k - 1
+		k = k - 1
 	}
 }
 

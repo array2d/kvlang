@@ -4,21 +4,21 @@
 // 期望输出:
 //   2
 rwfunc missing() -> () {
-	a:[]int64 <- [3, 0, 1]
-	n = ndarray·numel(a)  // = 等价于 <-
+	a:[]int64 = [3, 0, 1]
+	n = ndarray·numel(a)
 	0 -> s
-	i <- 0
+	i = 0
 	while (i < n) {
-		x = a[i]  // = 等价于 <-
+		x = a[i]
 		s + x -> s
-		i <- i + 1
+		i = i + 1
 	}
-	nn = n × n  // = 等价于 <-
-	nn_m = n × n  // = 等价于 <-
+	nn = n × n
+	nn_m = n × n
 	nn + n -> total
-	expected <- total ÷ 2
-	expected_m <- total ÷ 2
-	result = expected - s  // = 等价于 <-
+	expected = total ÷ 2
+	expected_m = total ÷ 2
+	result = expected - s
 	println(result)
 }
 

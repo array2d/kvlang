@@ -7,19 +7,19 @@
 //   4
 //   5
 rwfunc build_list() -> () {
-	/n0 <- { val=1; next="/n1" }
-	/n1 = { val=2; next="/n2" }  // = 等价于 <-
+	/n0 = { val=1; next="/n1" }
+	/n1 = { val=2; next="/n2" }
 	{ val=6; next="/n3" } -> /n2
-	/n3 <- { val=3; next="/n4" }
-	/n4 = { val=4; next="/n5" }  // = 等价于 <-
+	/n3 = { val=3; next="/n4" }
+	/n4 = { val=4; next="/n5" }
 	{ val=5; next="/n6" } -> /n5
-	/n6 <- { val=6; next="" }
+	/n6 = { val=6; next="" }
 }
 
 rwfunc remove(head:[]char/utf32, val:int64) -> () {
-	p <- "/n0"
+	p = "/n0"
 	while (p != "") {
-		v = p·val  // = 等价于 <-
+		v = p·val
 		v == val -> skip
 
 		if (skip) {
@@ -27,7 +27,7 @@ rwfunc remove(head:[]char/utf32, val:int64) -> () {
 			println(v)
 		}
 
-		p <- p·next
+		p = p·next
 	}
 }
 

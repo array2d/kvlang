@@ -6,23 +6,23 @@
 //   -42
 //   4193
 rwfunc my_atoi(s:[]char/utf32) -> (result:int64) {
-	result = 0  // = 等价于 <-
-	n = string·len(s)  // = 等价于 <-
-	i <- 0
-	sign = 1  // = 等价于 <-
+	result = 0
+	n = string·len(s)
+	i = 0
+	sign = 1
 	if (s[i] == "-") { -1 -> sign ; i + 1 -> i }
 	if (s[i] == "+") { i + 1 -> i }
 	while (i < n) {
-		c2 = s[i]  // = 等价于 <-
-		digit <- string·ord(c2) - 48
+		c2 = s[i]
+		digit = string·ord(c2) - 48
 		if (digit >= 0 && digit <= 9) {
-			result = result × 10 + digit  // = 等价于 <-
-			result_m = result × 10 + digit  // = 等价于 <-
+			result = result × 10 + digit
+			result_m = result × 10 + digit
 			i + 1 -> i
 		} else { n -> i }
 	}
-	result <- result × sign
-	result_m <- result × sign
+	result = result × sign
+	result_m = result × sign
 }
 
 rwfunc test() -> () {

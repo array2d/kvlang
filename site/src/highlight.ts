@@ -42,7 +42,7 @@ function esc(s: string): string {
 }
 
 const TOKEN =
-  /("""[\s\S]*?"""|#[^\n]*|"(?:\\.|[^"\\])*"|\/[A-Za-z0-9_/·.\-]+|\b\d+(?:\.\d+)?\b|->|<-|·|[A-Za-z_][A-Za-z0-9_]*)/g;
+  /("""[\s\S]*?"""|#[^\n]*|"(?:\\.|[^"\\])*"|\/[A-Za-z0-9_/·.\-]+|\b\d+(?:\.\d+)?\b|->|·|[A-Za-z_][A-Za-z0-9_]*)/g;
 
 export function highlightKv(code: string): string {
   let out = "";
@@ -55,7 +55,7 @@ export function highlightKv(code: string): string {
     if (t.startsWith("#")) cls = "tok-comment";
     else if (t.startsWith('"')) cls = "tok-string";
     else if (t.startsWith("/")) cls = "tok-path";
-    else if (t === "->" || t === "<-" || t === "·") cls = "tok-op";
+    else if (t === "->" || t === "·") cls = "tok-op";
     else if (/^\d/.test(t)) cls = "tok-num";
     else if (KEYWORDS.has(t)) cls = "tok-kw";
     else if (TYPES.has(t)) cls = "tok-type";

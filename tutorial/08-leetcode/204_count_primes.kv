@@ -3,25 +3,25 @@
 // 期望输出:
 //   4
 rwfunc count_primes(n:int64) -> () {
-	count = 0  // = 等价于 <-
+	count = 0
 	2 -> i
 	while (i < n) {
-		is_p <- true
-		d = 2  // = 等价于 <-
+		is_p = true
+		d = 2
 		while (d < i) {
 			i % d -> rem
-			div <- rem == 0
+			div = rem == 0
 
 			if (div) {
-				is_p = false  // = 等价于 <-
+				is_p = false
 				i -> d
 			} else {
-				d <- d + 1
+				d = d + 1
 			}
 		}
 
 		if (is_p) {
-			count = count + 1  // = 等价于 <-
+			count = count + 1
 		}
 
 		i + 1 -> i

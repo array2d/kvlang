@@ -29,7 +29,7 @@ rwfunc test() -> () {
 		i -> arr·*i
 		i + 1 -> i
 	}
-	t0 <- time·now()
+	t0 = time·now()
 	0 -> sum
 	0 -> found
 	0 -> q
@@ -41,10 +41,10 @@ rwfunc test() -> () {
 		}
 		q + 1 -> q
 	}
-	t1 <- time·now()
+	t1 = time·now()
 	println("bsearch: found =", found, "sum =", sum)
-	delta <- time·sub(t1, t0)
-	ns <- time/duration·as_nanos(delta)
+	delta = time·sub(t1, t0)
+	ns = time/duration·as_nanos(delta)
 	println("__bench_ns:", ns)
 	println("__bench_input: N=__SCALE__")
 }

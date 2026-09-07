@@ -3,37 +3,37 @@
 // 期望输出:
 //   2
 rwfunc intersection() -> () {
-	a:[]int64 = [1, 2, 2, 1]  // = 等价于 <-
+	a:[]int64 = [1, 2, 2, 1]
 	ndarray·numel(a) -> na
-	b:[]int64 <- [2, 2]
-	nb = ndarray·numel(b)  // = 等价于 <-
+	b:[]int64 = [2, 2]
+	nb = ndarray·numel(b)
 	[0, 0] -> r:[]int64
-	idx <- 0
-	count = 0  // = 等价于 <-
+	idx = 0
+	count = 0
 	0 -> i
 	while (i < na) {
-		av <- a[i]
-		j = 0  // = 等价于 <-
+		av = a[i]
+		j = 0
 		false -> found
 		while (j < nb) {
-			bv <- b[j]
-			match = av == bv  // = 等价于 <-
+			bv = b[j]
+			match = av == bv
 
 			if (match) {
 				true -> found
-				j <- nb
+				j = nb
 			} else {
-				j = j + 1  // = 等价于 <-
+				j = j + 1
 			}
 		}
 
 		if (found) {
-			r[idx] <- av
+			r[idx] = av
 			idx + 1 -> idx
-			count <- count + 1
+			count = count + 1
 		}
 
-		i = i + 1  // = 等价于 <-
+		i = i + 1
 	}
 	r[0] -> v
 	println(v)

@@ -24,53 +24,53 @@
 //   9007199254740993
 //   false
 rwfunc test() -> () {
-	a = 2 + 3  // = 等价于 <-
+	a = 2 + 3
 	println(a)
-	b <- 2 + 3.5
+	b = 2 + 3.5
 	println(b)
 	1.5 × 2 -> c
 	1.5 × 2 -> c_m
 	println(c_m)
 	println(c)
 
-	q = 7 ÷ 2  // = 等价于 <-（整除：两侧均 int）
-	q_m = 7 ÷ 2  // = 等价于 <-（整除：两侧均 int）
+	q = 7 ÷ 2
+	q_m = 7 ÷ 2
 	println(q_m)
 	println(q)
 	-9 ÷ 2 -> qz
 	-9 ÷ 2 -> qz_m
 	println(qz_m)
 	println(qz)
-	fq <- 7.0 ÷ 2
-	fq_m <- 7.0 ÷ 2
+	fq = 7.0 ÷ 2
+	fq_m = 7.0 ÷ 2
 	println(fq_m)
 	println(fq)
-	r = 7 % 3  // = 等价于 <-
+	r = 7 % 3
 	println(r)
 
-	ti <- int64(3.99)
+	ti = int64(3.99)
 	println(ti)
 	float64(7) -> tf
 	println(tf)
 
-	sci = 1e3  // = 等价于 <-（科学计数法字面量恒为 float）
+	sci = 1e3
 	println(sci)
-	small <- 2.5e-2
+	small = 2.5e-2
 	println(small)
 
 	0.1 + 0.2 -> sum
 	println(sum)
 
-	eq = 3 == 3.0  // = 等价于 <-（跨类型数值比较：值提升后相等）
+	eq = 3 == 3.0
 	println(eq)
 
-	big <- 9223372036854775807
+	big = 9223372036854775807
 	println(big)
 
 	big - 1 -> bm
 	println(bm)
-	precise = 9007199254740993 + 0  // = 等价于 <-（2^53+1：int 算术不经 float，精度保真）
+	precise = 9007199254740993 + 0
 	println(precise)
-	same <- big == 9223372036854775806
+	same = big == 9223372036854775806
 	println(same)
 }

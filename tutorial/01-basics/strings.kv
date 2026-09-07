@@ -15,12 +15,12 @@
 //   l
 //   108
 rwfunc test() -> () {
-	s = "hello"  // = 等价于 <-
+	s = "hello"
 	println(s[1])
-	s[0] = "H"  // = 等价于 <-
+	s[0] = "H"
 	println(s)
 
-	t <- "kv" + "lang"
+	t = "kv" + "lang"
 	println(t)
 	s + " " + t -> w
 	println(w)
@@ -31,7 +31,7 @@ rwfunc test() -> () {
 	println(string·find(w, "kv"))
 	println(string·find(w, "zz"))
 
-	c <- w[3]
+	c = w[3]
 	println(c)
 	println(string·ord(c))
 }

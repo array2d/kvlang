@@ -21,20 +21,20 @@ rwfunc nq(cols:int64, d1:int64, d2:int64, all:int64) -> (cnt:int64) {
 			d2 | p -> u2
 			u2 >> 1 -> nd2
 			nq(nc, nd1, nd2, all) -> sub
-			cnt <- cnt + sub
+			cnt = cnt + sub
 		}
 	}
 }
 
 rwfunc test() -> () {
-	t0 <- time·now()
+	t0 = time·now()
 	1 << __SCALE__ -> sh
 	sh - 1 -> all
 	nq(0, 0, 0, all) -> ans
-	t1 <- time·now()
+	t1 = time·now()
 	println("queens =", ans)
-	delta <- time·sub(t1, t0)
-	ns <- time/duration·as_nanos(delta)
+	delta = time·sub(t1, t0)
+	ns = time/duration·as_nanos(delta)
 	println("__bench_ns:", ns)
 	println("__bench_input: N=__SCALE__")
 }

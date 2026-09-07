@@ -6,9 +6,9 @@
 //   8
 rwfunc build_lists() -> () {
 	/l1_0 = { val=2; next="/l1_1" }
-	/l1_1 <- { val=4; next="/l1_2" }
+	/l1_1 = { val=4; next="/l1_2" }
 	{ val=3; next="" } -> /l1_2
-	/l2_0 <- { val=5; next="/l2_1" }
+	/l2_0 = { val=5; next="/l2_1" }
 	{ val=6; next="/l2_2" } -> /l2_1
 	/l2_2 = { val=4; next="" }
 }
@@ -18,10 +18,10 @@ rwfunc add(a:[]char/utf32, b:[]char/utf32) -> () {
 	carry = 0
 	result:[int64]·int64 = {  }
 	0 -> ri
-	pa <- a
+	pa = a
 	pb = b
 	while (pa != "" || pb != "" || carry != 0) {
-		sum <- carry
+		sum = carry
 
 		if (pa != "") {
 			pa·val -> av
@@ -35,7 +35,7 @@ rwfunc add(a:[]char/utf32, b:[]char/utf32) -> () {
 			pb·next -> pb
 		}
 
-		digit <- sum % 10
+		digit = sum % 10
 		kv·set(result, ri, digit) -> _
 		ri + 1 -> ri
 		sum ÷ 10 -> carry
@@ -43,7 +43,7 @@ rwfunc add(a:[]char/utf32, b:[]char/utf32) -> () {
 	}
 	i = ri - 1
 	while (i >= 0) {
-		v <- kv·get(result, i)
+		v = kv·get(result, i)
 		println(v)
 		i - 1 -> i
 	}

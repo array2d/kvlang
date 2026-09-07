@@ -3,9 +3,8 @@ lib kvlang/spec/附录/指令 {
 	r##"# 指令
 
 ```
-instruction = [ writes "=" ] expr
-            | [ writes "=" ] expr
-            | expr [ "->" writes ]
+instruction = [ writes "=" ] expr      (* 左写：writes = expr *)
+            | expr [ "->" writes ]     (* 右写：expr -> writes *)
             | expr                     (* 纯副作用调用 *)
 
 writes      = write_slot { "," write_slot }

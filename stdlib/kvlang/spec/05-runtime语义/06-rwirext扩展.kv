@@ -26,7 +26,7 @@ kvlang 是**小核心 + 扩展主导**语言。中央 runtime 只实现执行核
 
 例：`/lib/json·to`（nr=1, nw=1）→ 主槽 body=[1,1,0]，`[0,-1]=def kindexpr("char/utf8")`，`[0,1]=def kindexpr("[]char/utf8")`。
 
-- native builtin 的签名**不落盘**——在 C 注册表直接查表（见 [[函数调用与内建]]）。
+- native builtin 的签名**不落入 kvspace**——在 C 注册表直接查表（见 [[函数调用与内建]]）。
 - 扩展签名**落 `/lib/<opcode>`**，中央 runtime 经 `isothersrwir` 识别：`opcode[0]=='/'` → false；否则读 `/lib/<opcode>` 的 kind，等于 `def rwir` 即须经 def rwir 路由的 rwir。
 
 ### 全局标记与幂等

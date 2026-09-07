@@ -4,20 +4,20 @@
 //   1
 //   0
 rwfunc is_pal(s:[]char/utf32) -> () {
-	n = string·len(s)  // = 等价于 <-
+	n = string·len(s)
 	0 -> l
-	r <- n - 1
-	ok = 1  // = 等价于 <-
+	r = n - 1
+	ok = 1
 	while (l < r) {
 		string·char(s, l) -> lc
-		rc <- string·char(s, r)
-		match = lc == rc  // = 等价于 <-
+		rc = string·char(s, r)
+		match = lc == rc
 
 		if (match) {
 			l + 1 -> l
-			r <- r - 1
+			r = r - 1
 		} else {
-			ok = 0  // = 等价于 <-
+			ok = 0
 			n -> l
 		}
 	}

@@ -4,18 +4,18 @@
 //   true
 //   false
 rwfunc is_pal(head:[]char/utf32) -> () {
-	arr:[int64]·int64 = {}  // = 等价于 <-
+	arr:[int64]·int64 = {}
 	0 -> n
 	head -> p
 	while (p != "") {
 		p·val -> v
 		kv·set(arr, n, v) -> _
-		n <- n + 1
+		n = n + 1
 		p·next -> p
 	}
-	ok = true  // = 等价于 <-
+	ok = true
 	0 -> l
-	r <- n - 1
+	r = n - 1
 	while (l < r) {
 		kv·get(arr, l) -> x
 		kv·get(arr, r) -> y
@@ -24,8 +24,8 @@ rwfunc is_pal(head:[]char/utf32) -> () {
 			false -> ok
 			r -> l
 		}
-		l <- l + 1
-		r = r - 1  // = 等价于 <-
+		l = l + 1
+		r = r - 1
 	}
 	if (ok) {
 		println("true")
@@ -35,11 +35,11 @@ rwfunc is_pal(head:[]char/utf32) -> () {
 }
 
 rwfunc build() -> () {
-	/p0 = { val=1; next="/p1" }  // = 等价于 <-
-	/p1 <- { val=2; next="/p2" }
+	/p0 = { val=1; next="/p1" }
+	/p1 = { val=2; next="/p2" }
 	{ val=2; next="/p3" } -> /p2
-	/p3 = { val=1; next="" }  // = 等价于 <-
-	/q0 <- { val=1; next="/q1" }
+	/p3 = { val=1; next="" }
+	/q0 = { val=1; next="/q1" }
 	{ val=2; next="" } -> /q1
 }
 

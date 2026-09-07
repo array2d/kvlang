@@ -6,12 +6,12 @@
 //   Fizz
 rwfunc fizzbuzz(n:int64) -> () {
 	[1, 2, 3, 4, 5] -> a:[]int64
-	i <- 1
+	i = 1
 	while (i <= n) {
-		m3 = i % 3  // = 等价于 <-
+		m3 = i % 3
 		i % 5 -> m5
-		d3 <- m3 == 0
-		d5 = m5 == 0  // = 等价于 <-
+		d3 = m3 == 0
+		d5 = m5 == 0
 		d3 && d5 -> fb
 
 		if (fb) {
@@ -28,7 +28,7 @@ rwfunc fizzbuzz(n:int64) -> () {
 			}
 		}
 
-		i <- i + 1
+		i = i + 1
 	}
 }
 

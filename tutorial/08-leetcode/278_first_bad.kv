@@ -5,16 +5,16 @@
 rwfunc first_bad(n:int64) -> () {
 	// isBadVersion(i) = i >= 4
 	1 -> lo
-	hi <- n
+	hi = n
 	while (lo < hi) {
-		s = lo + hi  // = 等价于 <-
+		s = lo + hi
 		s ÷ 2 -> mid
 		s ÷ 2 -> mid_m
-		bad <- mid >= 4
-		bad_m <- mid ≥ 4
+		bad = mid >= 4
+		bad_m = mid ≥ 4
 
 		if (bad) {
-			hi = mid  // = 等价于 <-
+			hi = mid
 		} else {
 			mid + 1 -> lo
 		}

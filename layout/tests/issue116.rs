@@ -442,7 +442,7 @@ fn while_back_edge_is_goto_int64() {
 #[test]
 fn break_is_goto_exit() {
     let mut kv = compile_fn(
-        "rwfunc f() -> (i:int64) {\n    0 -> i\n    while (i < 10) {\n        if (i == 5) {\n            break\n        }\n        i <- i + 1\n    }\n}\n",
+        "rwfunc f() -> (i:int64) {\n    0 -> i\n    while (i < 10) {\n        if (i == 5) {\n            break\n        }\n        i = i + 1\n    }\n}\n",
     );
     assert_single_plane(&mut kv, "f");
     let p = plane(&mut kv, "f");
@@ -476,7 +476,7 @@ fn break_is_goto_exit() {
 #[test]
 fn continue_is_goto_cond() {
     let mut kv = compile_fn(
-        "rwfunc f() -> (acc:int64) {\n    0 -> acc\n    1 -> i\n    while (i <= 5) {\n        if (i == 3) {\n            i <- i + 1\n            continue\n        }\n        acc <- acc + i\n        i <- i + 1\n    }\n}\n",
+        "rwfunc f() -> (acc:int64) {\n    0 -> acc\n    1 -> i\n    while (i <= 5) {\n        if (i == 3) {\n            i = i + 1\n            continue\n        }\n        acc = acc + i\n        i = i + 1\n    }\n}\n",
     );
     assert_single_plane(&mut kv, "f");
     let p = plane(&mut kv, "f");
@@ -507,7 +507,7 @@ fn continue_is_goto_cond() {
 #[test]
 fn for_is_br_goto_single_plane() {
     let mut kv = compile_fn(
-        "rwfunc f() -> () {\n    data·0 <- 0\n    data·1 <- 1\n    for (x in data) {\n        x -> _\n    }\n}\n",
+        "rwfunc f() -> () {\n    data·0 = 0\n    data·1 = 1\n    for (x in data) {\n        x -> _\n    }\n}\n",
     );
     assert_single_plane(&mut kv, "f");
     let p = plane(&mut kv, "f");
@@ -534,7 +534,7 @@ fn for_is_br_goto_single_plane() {
 #[test]
 fn nested_if_while_single_plane() {
     let mut kv = compile_fn(
-        "rwfunc f() -> (acc:int64) {\n    0 -> acc\n    1 -> i\n    while (i <= 3) {\n        if (i == 2) {\n            acc <- acc + i\n        } else {\n            acc <- acc + 1\n        }\n        i <- i + 1\n    }\n}\n",
+        "rwfunc f() -> (acc:int64) {\n    0 -> acc\n    1 -> i\n    while (i <= 3) {\n        if (i == 2) {\n            acc = acc + i\n        } else {\n            acc = acc + 1\n        }\n        i = i + 1\n    }\n}\n",
     );
     assert_single_plane(&mut kv, "f");
     let p = plane(&mut kv, "f");

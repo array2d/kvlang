@@ -5,9 +5,9 @@
 
 lib xv {
 	rwfunc swap(arr:[]int64, i:int64, j:int64) -> (result:[]int64) {
-		vi <- xv·at(arr, i)
-		vj <- xv·at(arr, j)
-		tmp <- xv·set(arr, i, vj)
+		vi = xv·at(arr, i)
+		vj = xv·at(arr, j)
+		tmp = xv·set(arr, i, vj)
 		result = xv·set(tmp, j, vi)
 	}
 	rwfunc first(arr:[]int64) -> (result:int64) {

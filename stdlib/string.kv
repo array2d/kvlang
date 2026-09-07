@@ -18,8 +18,8 @@ lib string {
 		string·find(s, sub) != -1 -> r
 	}
 	rwfunc startswith(s:[]char/utf32, pre:[]char/utf32) -> (r:bool) {
-		sl <- string·len(s)
-		pl <- string·len(pre)
+		sl = string·len(s)
+		pl = string·len(pre)
 		if (pl > sl) {
 			false -> r
 		} else {
@@ -28,8 +28,8 @@ lib string {
 		}
 	}
 	rwfunc endswith(s:[]char/utf32, suf:[]char/utf32) -> (r:bool) {
-		sl <- string·len(s)
-		fl <- string·len(suf)
+		sl = string·len(s)
+		fl = string·len(suf)
 		if (fl > sl) {
 			false -> r
 		} else {
@@ -39,27 +39,27 @@ lib string {
 		}
 	}
 	rwfunc reverse(s:[]char/utf32) -> (r:[]char/utf32) {
-		n <- string·len(s)
+		n = string·len(s)
 		"" -> r
-		i <- n - 1
+		i = n - 1
 		while (i >= 0) {
 			string·char(s, i) -> c
 			string·concat(r, c) -> r
-			i <- i - 1
+			i = i - 1
 		}
 	}
 	rwfunc repeat(s:[]char/utf32, n:int64) -> (r:[]char/utf32) {
 		"" -> r
-		i <- 0
+		i = 0
 		while (i < n) {
 			string·concat(r, s) -> r
-			i <- i + 1
+			i = i + 1
 		}
 	}
 	rwfunc upper(s:[]char/utf32) -> (r:[]char/utf32) {
 		"" -> r
-		n <- string·len(s)
-		i <- 0
+		n = string·len(s)
+		i = 0
 		while (i < n) {
 			string·char(s, i) -> c
 			string·find("abcdefghijklmnopqrstuvwxyz", c) -> idx
@@ -69,13 +69,13 @@ lib string {
 			} else {
 				string·concat(r, c) -> r
 			}
-			i <- i + 1
+			i = i + 1
 		}
 	}
 	rwfunc lower(s:[]char/utf32) -> (r:[]char/utf32) {
 		"" -> r
-		n <- string·len(s)
-		i <- 0
+		n = string·len(s)
+		i = 0
 		while (i < n) {
 			string·char(s, i) -> c
 			string·find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c) -> idx
@@ -85,7 +85,7 @@ lib string {
 			} else {
 				string·concat(r, c) -> r
 			}
-			i <- i + 1
+			i = i + 1
 		}
 	}
 }
