@@ -125,7 +125,6 @@ bool kvlang_rwirextKindexprVariadic(const char *expr);
 int64_t kvlangXvalueAsInt64(const kvlangXvalue_t *v);
 double  kvlangXvalueAsFloat64(const kvlangXvalue_t *v);
 uint64_t kvlangXvalueAsUint64(const kvlangXvalue_t *v);
-bool    kvlangXvalueAsBool(const kvlangXvalue_t *v);
 uint32_t kvlangXvalueChar32At(const kvlangXvalue_t *v, int32_t idx);
 int32_t kvlangXvalueElemSize(const char *kind);
 

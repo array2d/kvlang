@@ -360,7 +360,7 @@ static int kvlangBuiltinCmp(kvlangFrame_t *f, cmp_op op) {
         r = op == CMP_EQ ? c == 0 : op == CMP_NEQ ? c != 0 : op == CMP_LT ? c < 0 : op == CMP_GT ? c > 0 : op == CMP_LE ? c <= 0 : c >= 0;
         free(a); free(b);
     } else if (strcmp(ka, KVSPACE_KIND_BOOL) == 0 && strcmp(kb, KVSPACE_KIND_BOOL) == 0) {
-        bool a = kvlangXvalueAsBool(&in[0]), b = kvlangXvalueAsBool(&in[1]);
+        bool a = kvlangXvalueAsInt64(&in[0]) != 0, b = kvlangXvalueAsInt64(&in[1]) != 0;
         r = op == CMP_EQ ? a == b : op == CMP_NEQ ? a != b : op == CMP_LT ? a < b : op == CMP_GT ? a > b : op == CMP_LE ? a <= b : a >= b;
     } else {
         kvlangBuiltinSetErr(f, "TypeError: cannot compare %s with %s", ka, kb); kvlangBuiltinFreeInputs(in, n); return -1;
@@ -390,21 +390,21 @@ static bool require_bool(kvlangFrame_t *f, const char *op, kvlangXvalue_t *in, i
 static int kvlangBuiltinAnd(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     if (!require_bool(f, "&&", in, n, 2)) { kvlangBuiltinFreeInputs(in, n); return -1; }
-    kvlangXvalue_t r; kvlangXvalueNewBool(&r, kvlangXvalueAsBool(&in[0]) && kvlangXvalueAsBool(&in[1]));
+    kvlangXvalue_t r; kvlangXvalueNewBool(&r, kvlangXvalueAsInt64(&in[0]) != 0 && kvlangXvalueAsInt64(&in[1]) != 0);
     int rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r); kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
 static int kvlangBuiltinOr(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     if (!require_bool(f, "||", in, n, 2)) { kvlangBuiltinFreeInputs(in, n); return -1; }
-    kvlangXvalue_t r; kvlangXvalueNewBool(&r, kvlangXvalueAsBool(&in[0]) || kvlangXvalueAsBool(&in[1]));
+    kvlangXvalue_t r; kvlangXvalueNewBool(&r, kvlangXvalueAsInt64(&in[0]) != 0 || kvlangXvalueAsInt64(&in[1]) != 0);
     int rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r); kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
 static int kvlangBuiltinNot(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     if (!require_bool(f, "!", in, n, 1)) { kvlangBuiltinFreeInputs(in, n); return -1; }
-    kvlangXvalue_t r; kvlangXvalueNewBool(&r, !kvlangXvalueAsBool(&in[0]));
+    kvlangXvalue_t r; kvlangXvalueNewBool(&r, kvlangXvalueAsInt64(&in[0]) == 0);
     int rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r); kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
@@ -485,7 +485,7 @@ static int kvlangBuiltinCastNum(kvlangFrame_t *f, const char *kind) {
     kvlangXvalue_t r;
     if (strcmp(kind, KVSPACE_KIND_BOOL) == 0) {
         if (!kvlangXvalueKindIs(&in[0], KVSPACE_KIND_BOOL)) { kvlangBuiltinSetErr(f, "TypeError: cannot cast %s to bool — use != 0", kvlangXvalueKind(&in[0])); kvlangBuiltinFreeInputs(in, n); return -1; }
-        kvlangXvalueNewBool(&r, kvlangXvalueAsBool(&in[0]));
+        kvlangXvalueNewBool(&r, kvlangXvalueAsInt64(&in[0]) != 0);
     }
     else if (strcmp(kind, KVSPACE_KIND_FLOAT32) == 0) { float fv = (float)kvlangXvalueAsFloat64(&in[0]); uint8_t b[4]; memcpy(b, &fv, 4); kvlangXvalueNewTlv(&r, KVSPACE_KIND_FLOAT32, b, 4, 1); }
     else if (strcmp(kind, KVSPACE_KIND_FLOAT64) == 0) kvlangXvalueNewFloat64(&r, kvlangXvalueAsFloat64(&in[0]));

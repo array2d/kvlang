@@ -201,12 +201,6 @@ uint64_t kvlangXvalueAsUint64(const kvlangXvalue_t *v) {
     return (uint64_t)kvlangXvalueAsInt64(v);
 }
 
-bool kvlangXvalueAsBool(const kvlangXvalue_t *v) {
-    if (kvlangXvalueNone(v)) return false;
-    kvspaceHead_t h; const uint8_t *b = v_body(v, &h);
-    return b && h.body_len > 0 && b[0] != 0;
-}
-
 uint32_t kvlangXvalueChar32At(const kvlangXvalue_t *v, int32_t idx) {
     kvspaceHead_t h; const uint8_t *b = v_body(v, &h);
     if (!b) return 0;

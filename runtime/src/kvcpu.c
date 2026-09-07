@@ -427,7 +427,7 @@ static int handle_control(kvlangKv_t *kv, const char *vtid, const char *pc, kvla
             kvlangXvalueFree(&cond);
             return -1;
         }
-        bool taken = kvlangXvalueAsBool(&cond);
+        bool taken = kvlangXvalueAsInt64(&cond) != 0;
         kvlangXvalueFree(&cond);
         return jump_to(kv, vtid, pc, &inst->reads[taken ? 1 : 2], OP_BR);
     }
