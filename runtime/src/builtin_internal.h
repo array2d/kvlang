@@ -16,7 +16,7 @@ void kvlangBuiltinMapMarker(kvlangXvalue_t *out, const int32_t *dims, int ndim);
 bool kvlangBuiltinCharConcat(const kvlangXvalue_t *a, const kvlangXvalue_t *b, kvlangXvalue_t *out);
 
 /* ── 各 lib 的 rwir handler 原型（表在 builtin.c 引用）────────────── */
-int kvlangBuiltinArray(kvlangFrame_t *f), kvlangBuiltinNdarrayNumel(kvlangFrame_t *f), kvlangBuiltinNdarrayDim(kvlangFrame_t *f), kvlangBuiltinNdarrayShape(kvlangFrame_t *f),
+int kvlangBuiltinArray(kvlangFrame_t *f), kvlangBuiltinArrayFill(kvlangFrame_t *f), kvlangBuiltinNdarrayNumel(kvlangFrame_t *f), kvlangBuiltinNdarrayDim(kvlangFrame_t *f), kvlangBuiltinNdarrayShape(kvlangFrame_t *f),
     kvlangBuiltinXvAt(kvlangFrame_t *f), kvlangBuiltinXvSet(kvlangFrame_t *f), kvlangBuiltinXvReshape(kvlangFrame_t *f), kvlangBuiltinXvReinterpret(kvlangFrame_t *f),
     kvlangBuiltinXvLangtype(kvlangFrame_t *f), kvlangBuiltinXvBodylen(kvlangFrame_t *f),
     kvlangBuiltinScatter(kvlangFrame_t *f), kvlangBuiltinCompact(kvlangFrame_t *f),

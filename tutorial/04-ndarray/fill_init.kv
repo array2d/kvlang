@@ -1,0 +1,26 @@
+// fill_init: 定长数组初始化 —— [] 全零、[v...] 全填 v（一条指令成型，无需逐元素赋值）
+// 语义: 写类型为定长 [N]T / [d0,d1]T 时，[] 分配全零，[v...] 每元素填 v
+// 期望输出:
+//   na = 4
+//   a0 = 0
+//   b12 = 5
+//   sum = 30
+rwfunc test() -> () {
+	a:[4]int32 = []
+	ndarray·numel(a) -> na
+	println("na =", na)
+	x0 = a[0]
+	println("a0 =", x0)
+	b:[2,3]int32 = [5...]
+	v12 = b[1,2]
+	println("b12 =", v12)
+	c:[6]int32 = [5...]
+	total = 0
+	0 -> i
+	while (i < 6) {
+		x = c[i]
+		total = total + x
+		i + 1 -> i
+	}
+	println("sum =", total)
+}

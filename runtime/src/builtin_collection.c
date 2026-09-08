@@ -95,6 +95,37 @@ int kvlangBuiltinArray(kvlangFrame_t *f) {
     return 0;
 }
 
+/* array·fill(langtype[, value]) -> a：按 langtype 的定长维度一次成型 compact 数组，
+ * 每元素填 value（缺省全零）。用于大数组初始化，无需逐元素赋值。 */
+int kvlangBuiltinArrayFill(kvlangFrame_t *f) {
+    if (f->inst->nw == 0) return kvlangBuiltinSetErr(f, "TypeError: array.fill requires a write param (-> a)");
+    kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
+    if (n < 1) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "TypeError: array.fill requires a langtype"); }
+    char *ke = kvlangXvalueValueString(&in[0]);
+    kvlangLangtype kx; kvlangLangtypeParse((const uint8_t *)ke, &kx);
+    int sz = kvlangXvalueElemSize(kx.kind);
+    if (sz <= 0 || sz > 8 || kx.ndim < 1 || kx.array_len < 0) {
+        int rc = kvlangBuiltinSetErr(f, "TypeError: array.fill: not a fixed-length array type %s", ke);
+        free(ke); kvlangBuiltinFreeInputs(in, n); return rc;
+    }
+    uint8_t elem[8] = { 0 };
+    if (n >= 2 && !kvlangXvalueNone(&in[1])) {
+        kvlangScalar_t s = kvlangXvalueScalar(&in[1]);
+        int tid = kvlangLangTypeId(kx.kind, kx.kind_len);
+        if (tid == KVLANG_LT_FLOAT32) { float v = (float)kvlangScalarF64(s); memcpy(elem, &v, 4); }
+        else if (tid == KVLANG_LT_FLOAT64) { double v = kvlangScalarF64(s); memcpy(elem, &v, 8); }
+        else { int64_t v = kvlangScalarI64(s); memcpy(elem, &v, (size_t)sz); }
+    }
+    size_t total = (size_t)sz * (size_t)kx.array_len;
+    uint8_t *raw = malloc(total > 0 ? total : 1);
+    for (int i = 0; i < kx.array_len; i++) memcpy(raw + (size_t)i * sz, elem, (size_t)sz);
+    kvlangXvalue_t arr; kvlangXvalueNewTlvDims(&arr, kx.kind, raw, (uint32_t)total, kx.dims, kx.ndim);
+    free(raw);
+    int rc = kvlangBuiltinWriteResult(f, &arr);
+    kvlangXvalueFree(&arr); free(ke); kvlangBuiltinFreeInputs(in, n);
+    return rc;
+}
+
 static int xv_head1(kvlangFrame_t *f, kvspaceHead_t *h);   /* GetHead-only 单读参 head，定义见下 */
 
 int kvlangBuiltinNdarrayNumel(kvlangFrame_t *f) {
