@@ -97,7 +97,7 @@ static const char *rfind_sep(const char *s) {
 /* goto/br 目标：layout 已把 label 解析为 int64 irseq（≥1）。非 int64 / 越界返回 -1。 */
 static int irseq_of(const kvlangParam_t *p) {
     if (kvlangXvalueNone(&p->val) || !kvlangXvalueKindIs(&p->val, KVSPACE_KIND_INT64)) return -1;
-    int64_t n = kvlangXvalueAsInt64(&p->val);
+    int64_t n = kvlangScalarI64(kvlangXvalueScalar(&p->val));
     if (n < 1 || n > 0x7fffffff) return -1;
     return (int)n;
 }
@@ -466,56 +466,58 @@ fail:
     return NULL;
 }
 
-static int handle_control(kvlangKv_t *kv, const char *vtid, const char *pc, kvlangRwirInst_t *inst) {
-    if (inst->op_id == OPID_CALL) {
-        char *sub = handle_call(kv, pc, inst);
-        if (!sub) return -1;
-        kvlangVthreadSet(kv, vtid, sub, "running");
-        free(sub);
-        return 0;
+int kvlangCtlCall(kvlangFrame_t *f) {
+    char *sub = handle_call(f->kv, f->pc, f->inst);
+    if (!sub) return -1;
+    kvlangVthreadSet(f->kv, f->vtid, sub, "running");
+    free(sub);
+    return 0;
+}
+
+int kvlangCtlReturn(kvlangFrame_t *f) {
+    char *parent = NULL;
+    if (handle_return(f->kv, f->vtid, f->pc, &parent) != 0) return -1;
+    if (!parent) { kvlangVthreadSetDone(f->kv, f->vtid, "ok"); return 0; }
+    kvlangVthreadSet(f->kv, f->vtid, parent, "running");
+    free(parent);
+    return 0;
+}
+
+int kvlangCtlGoto(kvlangFrame_t *f) {
+    kvlangRwirInst_t *inst = f->inst;
+    if (inst->nr != 1) {
+        char msg[128]; snprintf(msg, sizeof msg, "RuntimeError: goto expects 1 irseq, got %d", inst->nr);
+        kvlangVthreadSetError(f->kv, f->vtid, f->pc, msg);
+        return -1;
     }
-    if (inst->op_id == OPID_RETURN) {
-        char *parent = NULL;
-        if (handle_return(kv, vtid, pc, &parent) != 0) return -1;
-        if (!parent) { kvlangVthreadSetDone(kv, vtid, "ok"); return 0; }
-        kvlangVthreadSet(kv, vtid, parent, "running");
-        free(parent);
-        return 0;
+    return jump_to(f->kv, f->vtid, f->pc, &inst->reads[0], OP_GOTO);
+}
+
+int kvlangCtlBr(kvlangFrame_t *f) {
+    kvlangRwirInst_t *inst = f->inst;
+    if (inst->nr != 3) {
+        char msg[128]; snprintf(msg, sizeof msg, "RuntimeError: br expects cond trueIrseq falseIrseq, got %d", inst->nr);
+        kvlangVthreadSetError(f->kv, f->vtid, f->pc, msg);
+        return -1;
     }
-    if (inst->op_id == OPID_GOTO) {
-        if (inst->nr != 1) {
-            char msg[128]; snprintf(msg, sizeof msg, "RuntimeError: goto expects 1 irseq, got %d", inst->nr);
-            kvlangVthreadSetError(kv, vtid, pc, msg);
-            return -1;
-        }
-        return jump_to(kv, vtid, pc, &inst->reads[0], OP_GOTO);
-    }
-    if (inst->op_id == OPID_BR) {
-        if (inst->nr != 3) {
-            char msg[128]; snprintf(msg, sizeof msg, "RuntimeError: br expects cond trueIrseq falseIrseq, got %d", inst->nr);
-            kvlangVthreadSetError(kv, vtid, pc, msg);
-            return -1;
-        }
-        char *fr = kvlangKeytreeFrameRoot(pc);
-        kvlangXvalue_t cond; kvlangXvalueZero(&cond);
-        kvlangBuiltinResolveReadValue(kv, fr, inst->reads[0].name, &inst->reads[0].val, &cond);
-        free(fr);
-        if (kvlangXvalueNone(&cond)) {
-            kvlangVthreadSetError(kv, vtid, pc, "TypeError: None in branch condition");
-            kvlangXvalueFree(&cond);
-            return -1;
-        }
-        if (!kvlangXvalueKindIs(&cond, KVSPACE_KIND_BOOL)) {
-            char msg[128]; snprintf(msg, sizeof msg, "TypeError: branch condition must be bool, got %s", kvlangXvalueKind(&cond));
-            kvlangVthreadSetError(kv, vtid, pc, msg);
-            kvlangXvalueFree(&cond);
-            return -1;
-        }
-        bool taken = kvlangXvalueAsInt64(&cond) != 0;
+    char *fr = kvlangKeytreeFrameRoot(f->pc);
+    kvlangXvalue_t cond; kvlangXvalueZero(&cond);
+    kvlangBuiltinResolveReadValue(f->kv, fr, inst->reads[0].name, &inst->reads[0].val, &cond);
+    free(fr);
+    if (kvlangXvalueNone(&cond)) {
+        kvlangVthreadSetError(f->kv, f->vtid, f->pc, "TypeError: None in branch condition");
         kvlangXvalueFree(&cond);
-        return jump_to(kv, vtid, pc, &inst->reads[taken ? 1 : 2], OP_BR);
+        return -1;
     }
-    return -1;
+    if (!kvlangXvalueKindIs(&cond, KVSPACE_KIND_BOOL)) {
+        char msg[128]; snprintf(msg, sizeof msg, "TypeError: branch condition must be bool, got %s", kvlangXvalueKind(&cond));
+        kvlangVthreadSetError(f->kv, f->vtid, f->pc, msg);
+        kvlangXvalueFree(&cond);
+        return -1;
+    }
+    bool taken = kvlangScalarI64(kvlangXvalueScalar(&cond)) != 0;
+    kvlangXvalueFree(&cond);
+    return jump_to(f->kv, f->vtid, f->pc, &inst->reads[taken ? 1 : 2], OP_BR);
 }
 
 /* 动态调用：以运行时得到的 funckey 在当前 vthread 造一次 OP_CALL（不新开 vid），
@@ -523,14 +525,15 @@ static int handle_control(kvlangKv_t *kv, const char *vtid, const char *pc, kvla
 int kvlangKvcpuDynCall(kvlangKv_t *kv, const char *vtid, const char *pc, const char *funckey) {
     kvlangRwirInst_t ci;
     ci.opcode = strdup(OP_CALL);
-    ci.op_id = OPID_CALL;
+    ci.op_id = 0;
     ci.reads = malloc(sizeof(kvlangParam_t));
     ci.reads[0].name = strdup(funckey);
     kvlangXvalueZero(&ci.reads[0].val);
     ci.nr = 1;
     ci.writes = NULL;
     ci.nw = 0;
-    int rc = handle_control(kv, vtid, pc, &ci);
+    kvlangFrame_t f = { kv, vtid, pc, &ci, NULL };
+    int rc = kvlangCtlCall(&f);
     free(ci.opcode); free(ci.reads[0].name); free(ci.reads);
     return rc;
 }
@@ -633,6 +636,9 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode, char *
     char *cur_frame = NULL, *cur_funcdir = NULL;   /* 帧不变时 funcdir 只读一次，供缓存键 */
     int rc = 0;
     for (;;) {
+        /* 指令边界：回收上条指令执行期借出的读池（cache 指令的读参已 Materialize 自持，不受影响）。
+         * durable 惰性写不再清池，全靠此处回收；shm 常驻映射侧为 no-op。 */
+        kvlangKvReadReset(kv);
         char *pcv = NULL, *status = NULL;
         kvlangVthreadGet(kv, vtid, &pcv, &status);
         if (!status || (strcmp(status, "init") != 0 && strcmp(status, "running") != 0 && strcmp(status, "wait") != 0)) {
@@ -700,8 +706,9 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode, char *
         }
 
         int exec_err = 0;
+        char *yield = NULL;
         if (inst->op_id >= 0) {
-            char *yield = NULL;
+            /* 单表派发：native 算子与 control/copy 同居 myrwircaps，op_id 直查一跳到底。 */
             kvlangFrame_t f = { kv, vtid, cur, inst, &yield };
             exec_err = kvlangBuiltinNative(&f);
             if (exec_err == 0 && yield) {
@@ -712,11 +719,6 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode, char *
                 free(cur); free(cur_frame); free(cur_funcdir); kvlangStrbufFree(&vtid_b);
                 return 1;
             }
-        } else if (inst->op_id == OPID_CALL || inst->op_id == OPID_RETURN ||
-                   inst->op_id == OPID_GOTO || inst->op_id == OPID_BR) {
-            exec_err = handle_control(kv, vtid, cur, inst);
-        } else if (inst->op_id == OPID_COPY) {
-            exec_err = kvlangBuiltinExecuteCopy(kv, vtid, cur, inst);
         } else if (opmeta_get(kv, inst->opcode)->notinmyrwircaps) {
             opmeta_ent_t *m = opmeta_get(kv, inst->opcode);
             if (m->def_sig)
@@ -732,7 +734,7 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode, char *
             /* 用户函数 → call */
             kvlangRwirInst_t ci;
             ci.opcode = strdup(OP_CALL);
-            ci.op_id = OPID_CALL;
+            ci.op_id = 0;
             ci.nr = inst->nr + 1;
             ci.nw = inst->nw;
             ci.reads = malloc(sizeof(kvlangParam_t) * (size_t)ci.nr);
@@ -740,7 +742,8 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode, char *
             ci.reads[0].val.data = NULL; ci.reads[0].val.len = 0;
             for (int i = 0; i < inst->nr; i++) { ci.reads[i + 1] = inst->reads[i]; }
             ci.writes = inst->writes;
-            exec_err = handle_control(kv, vtid, cur, &ci);
+            kvlangFrame_t cf = { kv, vtid, cur, &ci, NULL };
+            exec_err = kvlangCtlCall(&cf);
             free(ci.opcode); free(ci.reads[0].name); free(ci.reads);
         }
 

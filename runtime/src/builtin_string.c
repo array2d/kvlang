@@ -92,7 +92,7 @@ int kvlangBuiltinStringChar(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     if (n < 2) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "TypeError: string.char requires string and index"); }
     if (var_len_char_err(kvlangXvalueKind(&in[0]))) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "%s", var_len_char_err(kvlangXvalueKind(&in[0]))); }
-    int idx = (int)kvlangXvalueAsInt64(&in[1]);
+    int idx = (int)kvlangScalarI64(kvlangXvalueScalar(&in[1]));
     int rn; uint32_t *r = string_runes(&in[0], &rn);
     int rc;
     if (idx < 0 || idx >= rn) rc = kvlangBuiltinSetErr(f, "IndexError: at: index %d out of bounds (char count=%d)", idx, rn);
@@ -152,7 +152,7 @@ int kvlangBuiltinStringSlice(kvlangFrame_t *f) {
     kvlangXvalue_t in[3]; int n = kvlangBuiltinReadInputs(f, in, 3);
     if (n < 3) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "TypeError: string.slice requires string, start, end"); }
     if (var_len_char_err(kvlangXvalueKind(&in[0]))) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "%s", var_len_char_err(kvlangXvalueKind(&in[0]))); }
-    int lo = (int)kvlangXvalueAsInt64(&in[1]), hi = (int)kvlangXvalueAsInt64(&in[2]);
+    int lo = (int)kvlangScalarI64(kvlangXvalueScalar(&in[1])), hi = (int)kvlangScalarI64(kvlangXvalueScalar(&in[2]));
     int rn; uint32_t *r = string_runes(&in[0], &rn);
     if (lo < 0 || hi > rn || lo > hi) { free(r); kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "IndexError: at: slice index out of bounds (lo=%d hi=%d char count=%d)", lo, hi, rn); }
     write_char32(f, r + lo, hi - lo);
@@ -217,8 +217,8 @@ static int write_ascii(kvlangFrame_t *f, const char *buf, int len) {
 
 int kvlangBuiltinStringFormatInt(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
-    int64_t v = kvlangXvalueAsInt64(&in[0]);
-    int base = n >= 2 ? (int)kvlangXvalueAsInt64(&in[1]) : 10;
+    int64_t v = kvlangScalarI64(kvlangXvalueScalar(&in[0]));
+    int base = n >= 2 ? (int)kvlangScalarI64(kvlangXvalueScalar(&in[1])) : 10;
     uint64_t u = v < 0 ? (uint64_t)(-(v + 1)) + 1 : (uint64_t)v;
     char buf[66]; int len = fmt_base(u, base, v < 0, buf);
     int rc = write_ascii(f, buf, len); kvlangBuiltinFreeInputs(in, n);
@@ -227,8 +227,8 @@ int kvlangBuiltinStringFormatInt(kvlangFrame_t *f) {
 
 int kvlangBuiltinStringFormatUint(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
-    uint64_t u = kvlangXvalueAsUint64(&in[0]);
-    int base = n >= 2 ? (int)kvlangXvalueAsInt64(&in[1]) : 10;
+    uint64_t u = kvlangScalarU64(kvlangXvalueScalar(&in[0]));
+    int base = n >= 2 ? (int)kvlangScalarI64(kvlangXvalueScalar(&in[1])) : 10;
     char buf[66]; int len = fmt_base(u, base, 0, buf);
     int rc = write_ascii(f, buf, len); kvlangBuiltinFreeInputs(in, n);
     return rc;
@@ -237,7 +237,7 @@ int kvlangBuiltinStringFormatUint(kvlangFrame_t *f) {
 int kvlangBuiltinStringParseInt(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     char *s = kvlangXvalueValueString(&in[0]);
-    int base = n >= 2 ? (int)kvlangXvalueAsInt64(&in[1]) : 10;
+    int base = n >= 2 ? (int)kvlangScalarI64(kvlangXvalueScalar(&in[1])) : 10;
     char *end = NULL; long long v = strtoll(s, &end, base);
     int bad = s[0] == '\0' || end == s || *end != '\0';
     free(s);
@@ -250,7 +250,7 @@ int kvlangBuiltinStringParseInt(kvlangFrame_t *f) {
 int kvlangBuiltinStringParseUint(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     char *s = kvlangXvalueValueString(&in[0]);
-    int base = n >= 2 ? (int)kvlangXvalueAsInt64(&in[1]) : 10;
+    int base = n >= 2 ? (int)kvlangScalarI64(kvlangXvalueScalar(&in[1])) : 10;
     char *end = NULL; unsigned long long v = strtoull(s, &end, base);
     int bad = s[0] == '\0' || end == s || *end != '\0';
     free(s);

@@ -27,7 +27,7 @@ int kvlangBuiltinRandInt63(kvlangFrame_t *f) {
 int kvlangBuiltinRandIntn(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     if (n < 1 || kvlangXvalueNone(&in[0])) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "TypeError: random.intn requires 1 int64 arg"); }
-    uint64_t m = (uint64_t)kvlangXvalueAsInt64(&in[0]);
+    uint64_t m = (uint64_t)kvlangScalarI64(kvlangXvalueScalar(&in[0]));
     uint64_t v = m == 0 ? 0 : crypto_rand_u64() % m;
     uint8_t r[8]; memcpy(r, &v, 8);
     kvlangXvalue_t e; kvlangXvalueNewTlv(&e, KVSPACE_KIND_UINT64, r, 8, 1);

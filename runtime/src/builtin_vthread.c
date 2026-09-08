@@ -65,7 +65,7 @@ int kvlangBuiltinVthreadCall(kvlangFrame_t *f) {
 int kvlangBuiltinVthreadSleep(kvlangFrame_t *f) {
     kvlangXvalue_t in[1]; int n = kvlangBuiltinReadInputs(f, in, 1);
     if (n < 1) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "TypeError: vthread.sleep requires 1 duration arg"); }
-    int64_t ns = kvlangXvalueAsInt64(&in[0]);
+    int64_t ns = kvlangScalarI64(kvlangXvalueScalar(&in[0]));
     kvlangBuiltinFreeInputs(in, n);
     if (ns > 0) {
         struct timespec ts = { .tv_sec = ns / 1000000000LL, .tv_nsec = ns % 1000000000LL };
