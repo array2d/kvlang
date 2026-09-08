@@ -115,10 +115,10 @@ fn parse_tlv(data: &[u8]) -> (String, Vec<u8>, usize) {
     {
         return (String::new(), Vec::new(), 1);
     }
-    let kx = String::from_utf8_lossy(&h.kindexpr)
+    let kx = String::from_utf8_lossy(&h.langtype)
         .trim_end_matches('\0')
         .to_string();
-    let (dims, kind) = parse_kindexpr(&kx);
+    let (dims, kind) = parse_langtype(&kx);
     let (bo, bl) = (h.body_offset as usize, h.body_len.max(0) as usize);
     let raw = if bo + bl <= data.len() {
         data[bo..bo + bl].to_vec()
@@ -269,9 +269,9 @@ fn mk_map_value(n: usize) -> Vec<u8> {
     tlv_encode(KIND_MAP, &[], &[n as i32])
 }
 
-// ── kindexpr 串解析（反序列化按类型/形状分发用；kvspace 未导出串解析器）─────────
+// ── langtype 串解析（反序列化按类型/形状分发用；kvspace 未导出串解析器）─────────
 
-fn parse_kindexpr(kx: &str) -> (Vec<i32>, String) {
+fn parse_langtype(kx: &str) -> (Vec<i32>, String) {
     if kx.starts_with('[') {
         match kx.find(']') {
             Some(end) => (

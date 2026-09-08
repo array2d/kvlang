@@ -6,7 +6,7 @@
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 
 /// kvspaceDecodeHead 输出（逐字段对齐 kvspace/include/kvspace/kvspace.h 的 kvspaceHead_t）。
-/// 三正交轴 ref×storetype×langtype；kindexpr 即该 ABI 的 langtype 槽（本 runtime 内部沿用 kindexpr 命名）。
+/// 三正交轴 ref×storetype×langtype；langtype 即该 ABI 的 langtype 槽（本 runtime 内部沿用 langtype 命名）。
 #[repr(C)]
 pub struct KvspaceHead {
     pub headlen: u16,
@@ -17,8 +17,8 @@ pub struct KvspaceHead {
     pub body_len: i32,
     pub ndim: i32,
     pub dims: [i32; 8],
-    pub kindexpr: [u8; 256],
-    pub kindexpr_len: i32,
+    pub langtype: [u8; 256],
+    pub langtype_len: i32,
     pub body_offset: i32,
 }
 
@@ -33,15 +33,15 @@ impl Default for KvspaceHead {
             body_len: 0,
             ndim: 0,
             dims: [0i32; 8],
-            kindexpr: [0u8; 256],
-            kindexpr_len: 0,
+            langtype: [0u8; 256],
+            langtype_len: 0,
             body_offset: 0,
         }
     }
 }
 
 /// 类型化 TLV 编码——唯一编码入口，直委托 kvspace 正典 codec kvspaceTlvEncode（不在 Rust
-/// 侧复刻 kindexpr 构造）。dims 空=标量。返回 frontend malloc 的 TLV 拷贝，随即 free。
+/// 侧复刻 langtype 构造）。dims 空=标量。返回 frontend malloc 的 TLV 拷贝，随即 free。
 pub fn tlv_encode(kind: &str, raw: &[u8], dims: &[i32]) -> Vec<u8> {
     unsafe {
         let (mut out, mut olen) = (std::ptr::null_mut(), 0u32);
@@ -165,8 +165,8 @@ unsafe extern "C" {
     ) -> c_int;
 
     // ── kvlang runtime：rwirext 宿主 ABI（均传 kvspace 句柄）─────────
-    // C 头 kvlang_rwirext.h 导出 9 符号；此处声明 7：故意省略 KindexprValid/KindexprMatch
-    // ——kindexpr 校验属 layout 期、匹配属 C dispatch 内部，Rust term 侧不调用（非缺陷）。
+    // C 头 kvlang_rwirext.h 导出 9 符号；此处声明 7：故意省略 LangtypeValid/LangtypeMatch
+    // ——langtype 校验属 layout 期、匹配属 C dispatch 内部，Rust term 侧不调用（非缺陷）。
     pub fn kvlang_rwirextRegister(
         kvspace: *mut c_void,
         opcode: *const c_char,

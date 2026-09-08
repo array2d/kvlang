@@ -18,13 +18,13 @@ use crate::ffi::*;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-/// 单个 rwir 的签名：读参 / 写参各自独立的 kindexpr 列表（逐槽一型，不假设同型）。
+/// 单个 rwir 的签名：读参 / 写参各自独立的 langtype 列表（逐槽一型，不假设同型）。
 pub struct Rwir {
     pub rp: &'static [&'static str],
     pub wp: &'static [&'static str],
 }
 
-/// rwir 注册表：key = 去 `/lib` 后的 opcode，value = 每槽 kindexpr（读参 rp / 写参 wp）。
+/// rwir 注册表：key = 去 `/lib` 后的 opcode，value = 每槽 langtype（读参 rp / 写参 wp）。
 pub const MYRWIRCAPS: &[(&str, Rwir)] = &[
     (
         "input",
@@ -173,7 +173,7 @@ pub const MYRWIRCAPS: &[(&str, Rwir)] = &[
     ),
 ];
 
-/// opcode → &Rwir，供注册与逐槽 kindexpr 查询。
+/// opcode → &Rwir，供注册与逐槽 langtype 查询。
 static RWIRMAP: OnceLock<HashMap<&'static str, &'static Rwir>> = OnceLock::new();
 pub fn rwirmap() -> &'static HashMap<&'static str, &'static Rwir> {
     RWIRMAP.get_or_init(|| MYRWIRCAPS.iter().map(|(op, r)| (*op, r)).collect())

@@ -37,13 +37,13 @@ static void rwir_cache_put(const char *funcdir, int addr0, kvlangRwirInst_t *ins
 }
 
 /* /lib 元信息 intern（P2-c）：opcode → {是否 notinmyrwircaps（须经 def rwir 路由到其它
- * runtime）、读参 kindexpr 签名}。/lib 布局后冻结，同 decode 缓存同理永不失效。命中即免去
- * OPID_notinmyrwircaps 分支每步两次元信息往返（notinmyrwircaps + load_def_reads）与签名 kindexpr 重解析。
+ * runtime）、读参 langtype 签名}。/lib 布局后冻结，同 decode 缓存同理永不失效。命中即免去
+ * OPID_notinmyrwircaps 分支每步两次元信息往返（notinmyrwircaps + load_def_reads）与签名 langtype 重解析。
  * langtype 签名串在此按 opcode 驻留一次（IV-0：进程私有，绝不入 kvspace）。 */
 typedef struct opmeta_ent {
     char *opcode;
     int notinmyrwircaps;   /* 1 = 不在本 runtime myrwircaps、须经 def rwir 路由；0 = 用户 rwfunc */
-    char *def_sig;         /* notinmyrwircaps 时的读参 kindexpr 签名（owned，可 NULL） */
+    char *def_sig;         /* notinmyrwircaps 时的读参 langtype 签名（owned，可 NULL） */
     int def_nr;
     struct opmeta_ent *next;
 } opmeta_ent_t;
@@ -145,7 +145,7 @@ static int check_read_types(kvlangKv_t *kv, const char *vtid, const char *pc,
         if (!nl) break;
         *nl = 0; s = nl + 1;
     }
-    bool var_last = rn > 0 && kvlang_rwirextKindexprVariadic(reads[rn - 1]);
+    bool var_last = rn > 0 && kvlangLangtypeVariadic(reads[rn - 1]);
     int min_args = var_last ? rn - 1 : rn;
     char *fr = kvlangKeytreeFrameRoot(pc);
     int rc = 0;
@@ -164,13 +164,13 @@ static int check_read_types(kvlangKv_t *kv, const char *vtid, const char *pc,
             rc = -1;
             break;
         }
-        if (!exp[0] || !kvlang_rwirextKindexprValid(exp)) continue;   /* 动态/非法 kindexp 跳过 */
+        if (!exp[0] || !kvlangLangtypeValid(exp)) continue;   /* 动态/非法 kindexp 跳过 */
         kvlangXvalue_t v; kvlangXvalueZero(&v);
         kvlangBuiltinResolveReadValue(kv, fr, args[i].name, &args[i].val, &v);
         const char *k = kvlangXvalueKind(&v);
         kvspaceHead_t h; kvlangXvalueHead(&v, &h);
-        kvlang_kindexpr_t kx; kvlang_kindexpr_parse(h.kindexpr, &kx);
-        bool ok = kvlang_rwirextKindexprMatch(exp, k, kx.ndim, kx.dims);
+        kvlangLangtype kx; kvlangLangtypeParse(h.langtype, &kx);
+        bool ok = kvlangLangtypeMatch(exp, k, kx.ndim, kx.dims);
         char kbuf[40]; snprintf(kbuf, sizeof kbuf, "%s", k[0] ? k : "None");
         kvlangXvalueFree(&v);
         if (!ok) {
@@ -419,7 +419,7 @@ static char *handle_call(kvlangKv_t *kv, const char *pc, kvlangRwirInst_t *inst)
                 /* 写字面量到 rk（拷贝，避免 double-free） */
                 kvspaceHead_t ah; kvspaceDecodeHead(arg->val.data, arg->val.len, &ah);
                 int32_t abl; const uint8_t *ab = kvlangXvalueBody(&arg->val, &ah, &abl);
-                kvlang_kindexpr_t akx; kvlang_kindexpr_parse(ah.kindexpr, &akx);
+                kvlangLangtype akx; kvlangLangtypeParse(ah.langtype, &akx);
                 pairs[np].key = strdup(rk);
                 kvspaceTlvEncode(kvlangXvalueKind(&arg->val), ab, (uint32_t)abl, akx.dims, akx.ndim,
                                    &pairs[np].val.data, &pairs[np].val.len);

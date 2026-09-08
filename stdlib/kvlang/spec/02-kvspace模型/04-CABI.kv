@@ -2,6 +2,8 @@
 lib kvlang/spec/kvspace模型/CABI {
 	r####"# C ABI
 
+**符号命名（normative）**：所有 C ABI 符号统一 `<前缀><PascalCase>` 无下划线（即 camelCase）——kvspace 层前缀 `kvspace`（`kvspaceGet` / `kvspaceWriteInPlace`），kvlang runtime 层前缀 `kvlang`（`kvlangRuntimeConnect` / `kvlangLangtypeParse`）。禁止下划线分词（不写 `kvspace_get` / `kvlang_runtime_connect`），头文件名可用下划线（`kvlang_runtime.h`），导出符号一律无下划线。
+
 访问 kvspace 的唯一 C ABI 由前端 dispatch 静态导出（`kvspace/include/kvspace/kvspace.h`）。读写采用**借用指针模型**：读返回指向后端常驻空间的指针，调用方不得释放；写返回 body 偏移指针供调用方直接填。核心符号：
 
 | 符号 | 语义 |

@@ -88,7 +88,7 @@ int kvlangKvGetHead(kvlangKv_t *k, const char *key, kvspaceHead_t *out) {
     return kvspaceGetHead(k->h, key, out);
 }
 
-/* 写即构造：逐条解 head 取 (kindexpr, body)——同 body_len 就地(WriteInPlace)，否则新位置
+/* 写即构造：逐条解 head 取 (langtype, body)——同 body_len 就地(WriteInPlace)，否则新位置
  * (WriteNewPlace)——向 kvspace 要 body 偏移指针后直接写字节，无预合并缓冲。 */
 int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, uint32_t err_cap) {
     /* 借用值全程有效：durable 惰性写不再清读池，读借用池由 VM 在指令边界统一 ReadReset 回收，
@@ -102,13 +102,13 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
             continue;
         }
         kvspaceHead_t h;
-        if (kvspaceDecodeHead(v->data, v->len, &h) != 0 || !h.kindexpr[0])
+        if (kvspaceDecodeHead(v->data, v->len, &h) != 0 || !h.langtype[0])
             continue;
         uint32_t body_len = h.body_len < 0 ? 0 : (uint32_t)h.body_len;
         const uint8_t *body = v->data + h.body_offset;
         uint8_t *dst = NULL;
         if (kvspaceWriteInPlace(k->h, pairs[i].key, 1, body_len, &dst, err, err_cap) != 0) {
-            if (kvspaceWriteNewPlace(k->h, pairs[i].key, h.ref, h.storetype, h.ro, h.vid, (const char *)h.kindexpr, body_len, &dst, err, err_cap) != 0) {
+            if (kvspaceWriteNewPlace(k->h, pairs[i].key, h.ref, h.storetype, h.ro, h.vid, (const char *)h.langtype, body_len, &dst, err, err_cap) != 0) {
                 rc = -1;
                 break;
             }

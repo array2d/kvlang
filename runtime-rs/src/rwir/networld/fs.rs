@@ -7,7 +7,7 @@
 //!   networld/fs·del(p) -> code              删除 p，0 成功/-1 失败；p 必须是文件或空目录（非空目录失败）
 //!   networld/fs·mkdir(p) -> code            创建目录 p（含缺失父级，幂等），0 成功/-1 失败
 //!   networld/fs·exists(p) -> b              p 是否存在（bool）
-//! 配套 `xv·reinterpret(raw, "[]char/utf8")`（runtime-c native，body 原样、换 kindexpr）串起
+//! 配套 `xv·reinterpret(raw, "[]char/utf8")`（runtime-c native，body 原样、换 langtype）串起
 //! 「文件 → 字符串」；反向「字符串 → 文件」由 reinterpret 成 []uint8 后 write。
 
 use std::io::{Read, Seek, SeekFrom, Write};

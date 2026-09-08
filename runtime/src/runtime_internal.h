@@ -11,7 +11,7 @@
 /* ── kvspace-durable C ABI ─────────────────────────────────────────── */
 
 /* 三正交轴 head（逐字段对齐 kvspace/include/kvspace/kvspace.h 的 kvspaceHead_t）。
- * kindexpr 即该 ABI 的 langtype 槽（本 runtime 内部沿用 kindexpr 命名）。 */
+ * langtype 即该 ABI 的 langtype 槽（本 runtime 内部沿用 langtype 命名）。 */
 typedef struct {
     uint16_t headlen;      /* head 总字节数；body 起于偏移 headlen */
     uint8_t  ref;          /* 存储位置：见 KVSPACE_REF_* */
@@ -21,8 +21,8 @@ typedef struct {
     int32_t  body_len;     /* body 字节数 */
     int32_t  ndim;         /* ARRAYND：维数；index/extindex：3；NONE/ATOM：0 */
     int32_t  dims[8];      /* 各维长度 / [len,cap,M]（X_MAX_NDIM=8） */
-    uint8_t  kindexpr[256];/* 语义类型 kindexpr 串，NUL 终止（含 [dims]、无 ref/ext 前缀） */
-    int32_t  kindexpr_len; /* kindexpr 内容长度（去 padding） */
+    uint8_t  langtype[256];/* 语义类型 langtype 串，NUL 终止（含 [dims]、无 ref/ext 前缀） */
+    int32_t  langtype_len; /* langtype 内容长度（去 padding） */
     int32_t  body_offset;  /* body 在 data 内的起始偏移（= headlen） */
 } kvspaceHead_t;
 
@@ -69,7 +69,7 @@ extern int   kvspaceWatch(void *h, const char *key, const uint8_t *target, uint3
 extern int   kvspaceTlvEncode(const char *kind, const uint8_t *raw, uint32_t raw_len,
                                 const int32_t *dims, int32_t ndim, uint8_t **out, uint32_t *out_len);
 extern int   kvspaceDecodeHead(const uint8_t *data, uint32_t data_len, kvspaceHead_t *out);
-extern int   kvspaceNewPtr(const char *target_kindexpr, const char *target,
+extern int   kvspaceNewPtr(const char *target_langtype, const char *target,
                              uint8_t **out, uint32_t *out_len);
 extern int   kvspaceNewChar(const uint8_t *bytes, uint32_t len, uint8_t **out, uint32_t *out_len);
 extern int   kvspaceNewBool(uint8_t v, uint8_t **out, uint32_t *out_len);
@@ -82,17 +82,17 @@ extern int   kvspaceNewFloat64(double v, uint8_t **out, uint32_t *out_len);
 #define MAX_STACK_DEPTH 256
 #define X_MAX_NDIM 8
 
-/* ── 派生 head：解析 kindexpr 得到（不落盘） ───────────────────────── */
+/* ── 派生 head：解析 langtype 得到（不落盘） ───────────────────────── */
 
 typedef struct {
-    const char *kind;   /* base kind（kindexpr 子串，非 NUL 终止） */
+    const char *kind;   /* base kind（langtype 子串，非 NUL 终止） */
     int32_t     kind_len;
     int32_t     ndim;
     int32_t     dims[X_MAX_NDIM];
     int32_t     array_len;
-} kvlang_kindexpr_t;
+} kvlangLangtype;
 
-void kvlang_kindexpr_parse(const uint8_t *kindexpr, kvlang_kindexpr_t *out);
+void kvlangLangtypeParse(const uint8_t *langtype, kvlangLangtype *out);
 
 /* ── 基础类型 ──────────────────────────────────────────────────────── */
 
@@ -174,10 +174,10 @@ static inline int kvlangLtElemSize(int id) {
     return 0;
 }
 
-/* 签名 kindexpr（runtime篇-07）校验/匹配 */
-bool kvlang_rwirextKindexprValid(const char *expr);
-bool kvlang_rwirextKindexprMatch(const char *expr, const char *kind, int32_t ndim, const int32_t *dims);
-bool kvlang_rwirextKindexprVariadic(const char *expr);
+/* 签名 langtype（runtime篇-07）校验/匹配 */
+bool kvlangLangtypeValid(const char *expr);
+bool kvlangLangtypeMatch(const char *expr, const char *kind, int32_t ndim, const int32_t *dims);
+bool kvlangLangtypeVariadic(const char *expr);
 /* 标量 0copy 视图（取代 kvlangXvalueAsInt64 等按值转换）：decode head 一次，
  * 持 langtype id + 指向 body 首字节的借用指针，热路径按 id 直读 body。 */
 typedef struct {
@@ -201,7 +201,7 @@ void kvlangXvalueNewBool(kvlangXvalue_t *v, bool b);
 void kvlangXvalueNewCharUtf8(kvlangXvalue_t *v, const char *s);
 void kvlangXvalueNewCharUtf32(kvlangXvalue_t *v, const char *s);  /* UTF-8 → UTF-32 LE body */
 void kvlangXvalueNewCharKind(kvlangXvalue_t *v, const char *kind, const char *s);
-void kvlangXvalueNewPtr(kvlangXvalue_t *v, const char *target_kindexpr, const char *target);
+void kvlangXvalueNewPtr(kvlangXvalue_t *v, const char *target_langtype, const char *target);
 void kvlangXvalueNewRwir(kvlangXvalue_t *v, int32_t nr, int32_t nw, const char *sig);
 void kvlangXvalueNewTlv(kvlangXvalue_t *v, const char *kind, const uint8_t *raw, uint32_t raw_len, int32_t al);
 void kvlangXvalueNewTlvDims(kvlangXvalue_t *v, const char *kind, const uint8_t *raw, uint32_t raw_len,

@@ -13,9 +13,9 @@ const STORETYPE_ARRAYND: u8 = 2;
 const STORETYPE_INDEX: u8 = 3;
 const STORETYPE_EXTINDEX: u8 = 4;
 
-/// 由完整 langtype kindexpr 串推 storetype（镜像 kvspace-durable::storetype_from_kindexpr）：
+/// 由完整 langtype langtype 串推 storetype（镜像 kvspace-durable::storetype_from_langtype）：
 /// extindex / index(含 rwfunc/defrwir) / 对象(·)·路径(/) → INDEX 系；带 [dims] → ARRAYND；否则 ATOM。
-fn storetype_from_kindexpr(kx: &str) -> u8 {
+fn storetype_from_langtype(kx: &str) -> u8 {
     if kx.is_empty() {
         return 0;
     }
@@ -116,7 +116,7 @@ impl Engine {
             }
             let mut head = KvspaceHead::default();
             kvspaceDecodeHead(out, olen, &mut head);
-            let kx = String::from_utf8_lossy(&head.kindexpr)
+            let kx = String::from_utf8_lossy(&head.langtype)
                 .trim_end_matches('\0')
                 .to_string();
             let (bo, bl) = (head.body_offset as usize, head.body_len.max(0) as usize);
@@ -134,17 +134,17 @@ impl Engine {
         }
     }
 
-    /// 扩展世界（@ ref=2）句柄编码写入：kind=目标完整 kindexpr（如 "[]uint8"），body=定位串。
+    /// 扩展世界（@ ref=2）句柄编码写入：kind=目标完整 langtype（如 "[]uint8"），body=定位串。
     /// 读取该 key 时由 read_at 按 body 前缀路由给对应 /lib/networld/* 兑现器还原真实字节。
-    pub fn set_ext_handle(&self, key: &str, target_kindexpr: &str, locator: &str) {
-        let st = storetype_from_kindexpr(target_kindexpr);
+    pub fn set_ext_handle(&self, key: &str, target_langtype: &str, locator: &str) {
+        let st = storetype_from_langtype(target_langtype);
         self.write_construct(
             key,
             KVSPACE_REF_EXT,
             st,
             0,
             0,
-            target_kindexpr,
+            target_langtype,
             locator.as_bytes(),
         );
     }
@@ -333,7 +333,7 @@ impl Engine {
             std::slice::from_raw_parts(out, olen as usize).to_vec()
         }
     }
-    /// 写预编码 TLV：解 head 取 (kindexpr, body) 后走写即构造（新建/换 kind/换尺寸唯一原语）。
+    /// 写预编码 TLV：解 head 取 (langtype, body) 后走写即构造（新建/换 kind/换尺寸唯一原语）。
     pub fn set_tlv(&self, key: &str, tlv: &[u8]) {
         if tlv.is_empty() {
             return;
@@ -343,7 +343,7 @@ impl Engine {
             if kvspaceDecodeHead(tlv.as_ptr(), tlv.len() as u32, &mut head) != 0 {
                 return;
             }
-            let kx = String::from_utf8_lossy(&head.kindexpr)
+            let kx = String::from_utf8_lossy(&head.langtype)
                 .trim_end_matches('\0')
                 .to_string();
             let (bo, bl) = (head.body_offset as usize, head.body_len.max(0) as usize);
