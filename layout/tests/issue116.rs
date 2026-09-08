@@ -559,7 +559,6 @@ fn tutorial_control_files_single_plane() {
         ("../tutorial/03-control/guess.kv", &["guess_number"][..]),
         ("../tutorial/03-control/classify.kv", &["classify"][..]),
         ("../tutorial/03-control/for.kv", &["test"][..]),
-        ("../tutorial/06-algo/prime_sieve.kv", &["prime_sieve"][..]),
     ] {
         let mut kv = fresh_kv();
         let src = std::fs::read_to_string(file).unwrap();

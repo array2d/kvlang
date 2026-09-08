@@ -15,7 +15,7 @@ Each numbered directory contains a standalone `main.kv` you can run immediately.
 | [05-if](05-if/) | Conditionals | `if/else`, boolean operators `&& \|\| !` |
 | [06-while](06-while/) | While Loops | `while`, `break`, `continue` |
 | [07-recursion](07-recursion/) | Recursion | multi-write params, tail-call optimization |
-| [08-algo/](08-algo/) | Algorithms | fibonacci, fizzbuzz, gcd, collatz, … |
+| [08-algo/](08-algo/) | Algorithms | fizzbuzz, gcd, collatz, power, … |
 
 ## Running
 
@@ -26,7 +26,6 @@ kvlang tutorial/06-while/main.kv
 # ...
 
 # algo showcase — any file is self-contained
-kvlang tutorial/08-algo/fibonacci.kv   # fib = 55
 kvlang tutorial/08-algo/fizzbuzz.kv    # FizzBuzz 1-15
 kvlang tutorial/08-algo/gcd.kv         # gcd = 6
 kvlang tutorial/08-algo/collatz.kv     # steps = 111
@@ -36,7 +35,6 @@ kvlang tutorial/08-algo/collatz.kv     # steps = 111
 
 | File | Algorithm | Key concepts |
 |------|-----------|--------------|
-| `fibonacci.kv` | Iterative Fibonacci | while, variable swap |
 | `factorial.kv` | Iterative Factorial | while accumulator |
 | `fizzbuzz.kv` | FizzBuzz 1–15 | modulo, nested if |
 | `gcd.kv` | GCD (Euclidean) | tail recursion |

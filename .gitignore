@@ -78,3 +78,6 @@ stdlib/kvlang/reference/
 
 # tutorial shm 测试产物（相对路径 DSN）
 kvtut*
+
+# tutorial bench 空产物
+/tutorial/benchmark.csv
