@@ -99,7 +99,7 @@ static int xv_head1(kvlangFrame_t *f, kvspaceHead_t *h);   /* GetHead-only 单�
 
 int kvlangBuiltinNdarrayNumel(kvlangFrame_t *f) {
     kvspaceHead_t h; int64_t n_el = 0;
-    if (xv_head1(f, &h) == 0) { kvlang_kindexpr_t kx; kvlang_kindexpr_parse(h.kindexpr, &kx); n_el = kx.array_len; }
+    if (xv_head1(f, &h) == 0) { kvlangLangtype kx; kvlangLangtypeParse(h.langtype, &kx); n_el = kx.array_len; }
     kvlangXvalue_t r; kvlangXvalueNewInt64(&r, n_el);
     int rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r);
     return rc;
@@ -107,7 +107,7 @@ int kvlangBuiltinNdarrayNumel(kvlangFrame_t *f) {
 
 int kvlangBuiltinNdarrayDim(kvlangFrame_t *f) {
     kvspaceHead_t h; int64_t ndim = 0;
-    if (xv_head1(f, &h) == 0) { kvlang_kindexpr_t kx; kvlang_kindexpr_parse(h.kindexpr, &kx); ndim = kx.ndim; }
+    if (xv_head1(f, &h) == 0) { kvlangLangtype kx; kvlangLangtypeParse(h.langtype, &kx); ndim = kx.ndim; }
     kvlangXvalue_t r; kvlangXvalueNewInt64(&r, ndim);
     int rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r);
     return rc;
@@ -117,7 +117,7 @@ int kvlangBuiltinNdarrayShape(kvlangFrame_t *f) {
     int32_t dims[8]; int32_t ndim = 0;
     kvspaceHead_t h;
     if (xv_head1(f, &h) == 0) {
-        kvlang_kindexpr_t kx; kvlang_kindexpr_parse(h.kindexpr, &kx);
+        kvlangLangtype kx; kvlangLangtypeParse(h.langtype, &kx);
         ndim = kx.ndim;
         for (int i = 0; i < ndim && i < 8; i++) dims[i] = kx.dims[i];
     }
@@ -134,7 +134,7 @@ int kvlangBuiltinNdarrayShape(kvlangFrame_t *f) {
 }
 
 /* 计算多维下标的 row-major 扁平索引，越界返回 -1。 */
-static int64_t flat_index(const kvlang_kindexpr_t *kx, const int64_t *idx, int nidx) {
+static int64_t flat_index(const kvlangLangtype *kx, const int64_t *idx, int nidx) {
     int64_t flat = 0;
     for (int i = 0; i < nidx; i++) {
         if (idx[i] < 0 || idx[i] >= kx->dims[i]) return -1;
@@ -144,7 +144,7 @@ static int64_t flat_index(const kvlang_kindexpr_t *kx, const int64_t *idx, int n
 }
 
 /* base kind（kx.kind 为非 NUL 终止子串）拷成 NUL 终止串，取元素字节大小；空 kind → 0。 */
-static int xv_elem_size(const kvlang_kindexpr_t *kx) {
+static int xv_elem_size(const kvlangLangtype *kx) {
     if (!kx->kind || kx->kind_len <= 0) return 0;
     char kb[64]; int kl = kx->kind_len < 63 ? kx->kind_len : 63;
     memcpy(kb, kx->kind, (size_t)kl); kb[kl] = 0;
@@ -193,9 +193,9 @@ int kvlangBuiltinXvAt(kvlangFrame_t *f) {
     char *fr = kvlangKeytreeFrameRoot(f->pc);
     kvspaceHead_t h; char *key; kvlangXvalue_t arr;
     if (xv_read_head(f, fr, 0, &h, &key, &arr) != 0) { free(fr); return kvlangBuiltinSetErr(f, "TypeError: xv.at requires a compact array"); }
-    kvlang_kindexpr_t kx; kvlang_kindexpr_parse(h.kindexpr, &kx);
+    kvlangLangtype kx; kvlangLangtypeParse(h.langtype, &kx);
     int sz = xv_elem_size(&kx);
-    if (sz <= 0 || kx.ndim == 0) { free(key); kvlangXvalueFree(&arr); free(fr); return kvlangBuiltinSetErr(f, "TypeError: xv.at requires a compact array, got %s", h.kindexpr); }
+    if (sz <= 0 || kx.ndim == 0) { free(key); kvlangXvalueFree(&arr); free(fr); return kvlangBuiltinSetErr(f, "TypeError: xv.at requires a compact array, got %s", h.langtype); }
     if (nidx != kx.ndim) { free(key); kvlangXvalueFree(&arr); free(fr); return kvlangBuiltinSetErr(f, "IndexError: xv.at: %d-dim array needs %d indices, got %d", kx.ndim, kx.ndim, nidx); }
     int64_t idx[X_MAX_NDIM]; xv_read_indices(f, fr, 1, nidx, idx);
     free(fr);
@@ -232,7 +232,7 @@ int kvlangBuiltinXvSet(kvlangFrame_t *f) {
 
     kvspaceHead_t h;
     if (rk && wk && strcmp(rk, wk) == 0 && kvlangKvGetHead(f->kv, wk, &h) == 0) {
-        kvlang_kindexpr_t kx; kvlang_kindexpr_parse(h.kindexpr, &kx);
+        kvlangLangtype kx; kvlangLangtypeParse(h.langtype, &kx);
         int sz = xv_elem_size(&kx);
         int64_t flat = (sz > 0 && kx.ndim && nidx == kx.ndim) ? flat_index(&kx, idx, nidx) : -1;
         const char *emsg = sz <= 0 || kx.ndim == 0 ? "TypeError: xv.set requires a compact array"
@@ -255,7 +255,7 @@ int kvlangBuiltinXvSet(kvlangFrame_t *f) {
     const char *k = kvlangXvalueKind(&arr);
     int sz = kvlangXvalueElemSize(k);
     kvspaceHead_t ah; kvspaceDecodeHead(arr.data, arr.len, &ah);
-    kvlang_kindexpr_t kx; kvlang_kindexpr_parse(ah.kindexpr, &kx);
+    kvlangLangtype kx; kvlangLangtypeParse(ah.langtype, &kx);
     const char *emsg = sz <= 0 || kx.ndim == 0 ? "TypeError: xv.set requires a compact array"
                      : nidx != kx.ndim ? "IndexError: xv.set: dim/index count mismatch" : NULL;
     int64_t flat = emsg ? -1 : flat_index(&kx, idx, nidx);
@@ -279,7 +279,7 @@ int kvlangBuiltinXvReshape(kvlangFrame_t *f) {
     const char *k = kvlangXvalueKind(&in[0]);
     if (kvlangXvalueElemSize(k) <= 0) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "TypeError: xv.reshape requires a compact array, got %s", k); }
     kvspaceHead_t h; kvspaceDecodeHead(in[0].data, in[0].len, &h);
-    kvlang_kindexpr_t kx; kvlang_kindexpr_parse(h.kindexpr, &kx);
+    kvlangLangtype kx; kvlangLangtypeParse(h.langtype, &kx);
     if (kx.ndim < 1) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "TypeError: xv.reshape requires a compact array, got scalar %s", k); }
     if (ndims > X_MAX_NDIM) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "IndexError: xv.reshape: at most %d dims, got %d", X_MAX_NDIM, ndims); }
     int32_t dims[X_MAX_NDIM]; int64_t numel = 1;
@@ -297,13 +297,13 @@ int kvlangBuiltinXvReshape(kvlangFrame_t *f) {
     return rc;
 }
 
-/* xv·reinterpret(arr, kindexpr) -> a：body 字节原样，整个 kindexpr 换成传入的（kind+dims 一起），不做校验。 */
+/* xv·reinterpret(arr, langtype) -> a：body 字节原样，整个 langtype 换成传入的（kind+dims 一起），不做校验。 */
 int kvlangBuiltinXvReinterpret(kvlangFrame_t *f) {
-    if (f->inst->nr < 2) return kvlangBuiltinSetErr(f, "TypeError: xv.reinterpret requires array and kindexpr");
+    if (f->inst->nr < 2) return kvlangBuiltinSetErr(f, "TypeError: xv.reinterpret requires array and langtype");
     if (f->inst->nw == 0) return kvlangBuiltinSetErr(f, "TypeError: xv.reinterpret requires a write param (-> a)");
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     char *ke = kvlangXvalueValueString(&in[1]);
-    kvlang_kindexpr_t nkx; kvlang_kindexpr_parse((const uint8_t *)ke, &nkx);
+    kvlangLangtype nkx; kvlangLangtypeParse((const uint8_t *)ke, &nkx);
     kvspaceHead_t h; kvspaceDecodeHead(in[0].data, in[0].len, &h);
     const uint8_t *body = in[0].data + h.body_offset;
     /* 动态 "[]kind"（parse 得 ndim0 但带方括号）：按 body 字节数补出一维长度，与落盘数组表示一致。 */
@@ -319,11 +319,11 @@ int kvlangBuiltinXvReinterpret(kvlangFrame_t *f) {
     return rc;
 }
 
-/* xv·kindexpr(v) -> s：返回 v 的 head kindexpr 串（含 ref 前缀与 [dims]），作为字符串。 */
-int kvlangBuiltinXvKindexpr(kvlangFrame_t *f) {
-    if (f->inst->nw == 0) return kvlangBuiltinSetErr(f, "TypeError: xv.kindexpr requires a write param (-> s)");
+/* xv·langtype(v) -> s：返回 v 的 head langtype 串（含 ref 前缀与 [dims]），作为字符串。 */
+int kvlangBuiltinXvLangtype(kvlangFrame_t *f) {
+    if (f->inst->nw == 0) return kvlangBuiltinSetErr(f, "TypeError: xv.langtype requires a write param (-> s)");
     kvspaceHead_t h; const char *ke = "";
-    if (xv_head1(f, &h) == 0) ke = (const char *)h.kindexpr;
+    if (xv_head1(f, &h) == 0) ke = (const char *)h.langtype;
     kvlangXvalue_t r; kvlangXvalueNewCharUtf8(&r, ke);
     int rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r);
     return rc;
@@ -487,7 +487,7 @@ static char *dupn(const char *s, size_t n) {
     return r;
 }
 
-/* 在 "name:kindexpr\n..." 声明串里查字段名，返回其类型（malloc）或 NULL（无此字段）。 */
+/* 在 "name:langtype\n..." 声明串里查字段名，返回其类型（malloc）或 NULL（无此字段）。 */
 static char *struct_field_type(const char *decl, const char *fname) {
     size_t fl = strlen(fname);
     const char *p = decl;
@@ -535,8 +535,8 @@ int kvlangBuiltinStructNew(kvlangFrame_t *f) {
             if (!ftype) { rc = kvlangBuiltinSetErr(f, "TypeError: struct %s has no field %s", ref, fname); free(fname); break; }
             const char *vk = kvlangXvalueKind(&in[i + 1]);
             kvspaceHead_t vh; kvlangXvalueHead(&in[i + 1], &vh);
-            kvlang_kindexpr_t vkx; kvlang_kindexpr_parse(vh.kindexpr, &vkx);
-            if (ftype[0] && !kvlang_rwirextKindexprMatch(ftype, vk, vkx.ndim, vkx.dims)) {
+            kvlangLangtype vkx; kvlangLangtypeParse(vh.langtype, &vkx);
+            if (ftype[0] && !kvlangLangtypeMatch(ftype, vk, vkx.ndim, vkx.dims)) {
                 rc = kvlangBuiltinSetErr(f, "TypeError: field %s: expected %s, got %s", fname, ftype, vk[0] ? vk : "None");
                 free(ftype); free(fname); break;
             }

@@ -580,7 +580,7 @@ static const struct { const char *op; kvlangBuiltinFn fn; } myrwircaps[] = {
     {"ndarray·numel", kvlangBuiltinNdarrayNumel}, {"ndarray·dim", kvlangBuiltinNdarrayDim}, {"ndarray·shape", kvlangBuiltinNdarrayShape},
     {"xv·at", kvlangBuiltinXvAt}, {"xv·set", kvlangBuiltinXvSet}, {"xv·reshape", kvlangBuiltinXvReshape},
     {"xv·reinterpret", kvlangBuiltinXvReinterpret},
-    {"xv·kindexpr", kvlangBuiltinXvKindexpr}, {"xv·bodylen", kvlangBuiltinXvBodylen},
+    {"xv·langtype", kvlangBuiltinXvLangtype}, {"xv·bodylen", kvlangBuiltinXvBodylen},
     {"string·set", kvlangBuiltinStringSet}, {"string·char", kvlangBuiltinStringChar}, {"string·ord", kvlangBuiltinStringOrd},
     {"string·cmp", kvlangBuiltinStringCmp}, {"string·find", kvlangBuiltinStringFind}, {"string·len", kvlangBuiltinStringLen},
     {"string·slice", kvlangBuiltinStringSlice}, {"string·concat", kvlangBuiltinStringConcat},

@@ -1,7 +1,7 @@
 #include "runtime_internal.h"
 
 /* langtypetable：base kind 串 ↔ int id 双向映射（runtime 本地，IV-0，不入
- * kvspace）。 decode 期把 head.kindexpr 的 base kind intern 成
+ * kvspace）。 decode 期把 head.langtype 的 base kind intern 成
  * id，此后热路径纯整数比较。 */
 
 typedef struct {
@@ -62,7 +62,7 @@ int kvlangXvalueLangTypeId(const kvlangXvalue_t *v) {
     kvspaceHead_t h;
     if (kvlangXvalueHead(v, &h) < 0)
         return KVLANG_LT_NONE;
-    kvlang_kindexpr_t kx;
-    kvlang_kindexpr_parse(h.kindexpr, &kx);
+    kvlangLangtype kx;
+    kvlangLangtypeParse(h.langtype, &kx);
     return kvlangLangTypeId(kx.kind, (size_t)kx.kind_len);
 }

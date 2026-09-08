@@ -18,7 +18,7 @@ bool kvlangBuiltinCharConcat(const kvlangXvalue_t *a, const kvlangXvalue_t *b, k
 /* ── 各 lib 的 rwir handler 原型（表在 builtin.c 引用）────────────── */
 int kvlangBuiltinArray(kvlangFrame_t *f), kvlangBuiltinNdarrayNumel(kvlangFrame_t *f), kvlangBuiltinNdarrayDim(kvlangFrame_t *f), kvlangBuiltinNdarrayShape(kvlangFrame_t *f),
     kvlangBuiltinXvAt(kvlangFrame_t *f), kvlangBuiltinXvSet(kvlangFrame_t *f), kvlangBuiltinXvReshape(kvlangFrame_t *f), kvlangBuiltinXvReinterpret(kvlangFrame_t *f),
-    kvlangBuiltinXvKindexpr(kvlangFrame_t *f), kvlangBuiltinXvBodylen(kvlangFrame_t *f),
+    kvlangBuiltinXvLangtype(kvlangFrame_t *f), kvlangBuiltinXvBodylen(kvlangFrame_t *f),
     kvlangBuiltinScatter(kvlangFrame_t *f), kvlangBuiltinCompact(kvlangFrame_t *f),
     kvlangBuiltinAppend(kvlangFrame_t *f), kvlangBuiltinSlice(kvlangFrame_t *f), kvlangBuiltinObj(kvlangFrame_t *f), kvlangBuiltinMap(kvlangFrame_t *f), kvlangBuiltinStructNew(kvlangFrame_t *f), kvlangBuiltinStringSet(kvlangFrame_t *f),
     kvlangBuiltinStringChar(kvlangFrame_t *f), kvlangBuiltinStringOrd(kvlangFrame_t *f), kvlangBuiltinStringCmp(kvlangFrame_t *f),
