@@ -65,11 +65,12 @@ def _needs_skip(f: Path) -> bool:
     return False
 
 
-def _flush_redis() -> None:
+def _flush_backend() -> None:
     try:
         subprocess.run(
-            ["redis-cli", "-p", "6379", "FLUSHALL"],
-            capture_output=True, timeout=5,
+            ["kvspace", "clear"],
+            capture_output=True, timeout=10,
+            env={**os.environ, "KVSPACE": _C_DSN},
         )
     except FileNotFoundError:
         pass
@@ -141,7 +142,7 @@ def _benchmark_file(f: Path, expects: list[str]) -> tuple[dict[str, str], str]:
             return invalid, "C compilation failed"
 
         try:
-            _flush_redis()
+            _flush_backend()
             kv_result, kv_ms = _timed_run([KV, rel], env=_KV_ENV)
             py_result, py_ms = _timed_run([sys.executable, str(f.with_suffix(".py"))])
             c_result, c_ms = _timed_run([str(executable)])
@@ -202,7 +203,7 @@ def _run_test_file(f: Path, expects: list[str], env: dict) -> tuple[bool, str]:
     elif _C_DSN.startswith("fs://"):
         shutil.rmtree(_C_DSN[len("fs://"):], ignore_errors=True)
     else:
-        _flush_redis()
+        _flush_backend()
     layout = subprocess.run([LAYOUT_BIN, rel, _C_DSN], capture_output=True, text=True,
                             timeout=60, cwd=str(ROOT), env=env)
     if layout.returncode != 0:
@@ -210,7 +211,7 @@ def _run_test_file(f: Path, expects: list[str], env: dict) -> tuple[bool, str]:
     entry = "test"  # 约定入口：每个 tutorial 顶层 rwfunc test()（pkg 空、裸名）
     try:
         crun = subprocess.run([TERM_BIN, entry], capture_output=True, text=True,
-                              timeout=120, cwd=str(ROOT), env={**env, "KVSPACE": _C_DSN})
+                              timeout=int(os.environ.get("KV_CASE_TIMEOUT", "120")), cwd=str(ROOT), env={**env, "KVSPACE": _C_DSN})
     except subprocess.TimeoutExpired:
         return False, "timeout"
     if crun.returncode != 0:
@@ -322,7 +323,7 @@ class BenchmarkTest(unittest.TestCase):
             mock.patch.object(MODULE, "KV", str(self.kvlang)),
             mock.patch.object(MODULE, "FAIL_CSV", self.tutorial / "test_failures.csv"),
             mock.patch.object(MODULE, "BENCH_CSV", self.tutorial / "benchmark.csv"),
-            mock.patch.object(MODULE, "_flush_redis"),
+            mock.patch.object(MODULE, "_flush_backend"),
             mock.patch("builtins.print"),
         ]
         for patcher in self.patchers:
