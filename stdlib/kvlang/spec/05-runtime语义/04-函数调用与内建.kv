@@ -26,7 +26,7 @@ lib kvlang/spec/runtime语义/函数调用与内建 {
 
 ## native builtin 判定
 
-查表函数 `kvlangBuiltinCapIndex(opcode)`（`runtime/src/builtin.c`）**两级查找**：先按完整 opcode 查（命中即专精实现，如 `fp8·add`、`time·add` 等成员算子），未命中且末段前缀是 **C 原生数值 langtype**（`int8..int64`/`uint8..uint64`/`float32`/`float64`）才剥前缀查裸算子（`int64·add → add`，通用实现，按操作数 kind 归约）。命中返回索引即在 myrwircaps 内；否则 `notinmycaps`。**保留精度前缀专精**：`int4`/`fp8`/`bf16` 等 C 表达不了的量化精度不剥离前缀，各走专精 fn 或路由。判定**先于** `/lib` 查表，故 myrwircaps 内 opcode 不会被当须经 def rwir 路由的 rwir 或用户函数。此静态注册表即**核心 runtime-c 的 myrwircaps**（见 [[rwirext扩展]]）——核心能就地跑的 opcode 全在这张表里；`notinmycaps(opcode)` 是其否定谓词。
+查表函数 `kvlangBuiltinCapIndex(opcode)`（`runtime/src/builtin.c`）**两级查找**：先按完整 opcode 查（命中即专精实现，如 `fp8·add`、`time·add` 等成员算子），未命中且末段前缀是 **C 原生数值 langtype**（`int8..int64`/`uint8..uint64`/`float32`/`float64`）才剥前缀查裸算子（`int64·add → add`，通用实现，按操作数 kind 归约）。命中返回索引即在 myrwircaps 内；否则 `notinmycaps`。**保留精度前缀专精**：`int4`/`fp8`/`bf16` 等 C 表达不了的量化精度不剥离前缀，各走专精 fn 或路由。判定**先于** `/lib` 查表，故 myrwircaps 内 opcode 不会被当须经 def rwir 路由的 rwir 或用户函数。此静态注册表即**核心 runtime-c 的 myrwircaps**（见 [[runtime开发规范]]）——核心能就地跑的 opcode 全在这张表里；`notinmycaps(opcode)` 是其否定谓词。
 
 ## native builtin 全集（权威）
 

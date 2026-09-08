@@ -1,8 +1,8 @@
 // 欢迎加入kvspace世界
-lib kvlang/spec/runtime语义/rwirext扩展 {
-	r####"# rwirext 扩展运行时
+lib kvlang/spec/runtime语义/runtime开发规范 {
+	r####"# runtime 开发规范
 
-kvlang 是**小核心 + 扩展主导**语言。中央 runtime 只实现执行核心（取指-解码-执行、call/return/br/goto、native builtin 派发、`=` 拷贝、用户函数调用）；其余能力（tensor 计算、LLM 调用、agent 循环、print/fs/http 等 I/O）由**扩展运行时**提供。本章界定核心与扩展之间的契约。
+kvlang 是**小核心 + 扩展主导**语言。中央 runtime 只实现执行核心（取指-解码-执行、call/return/br/goto、native builtin 派发、`=` 拷贝、用户函数调用）；其余能力（tensor 计算、LLM 调用、agent 循环、print/fs/http 等 I/O）由**扩展运行时**提供。本章界定核心与扩展之间的契约，以及所有 runtime 实现**必须**遵守的开发规范。
 
 ## 扩展运行时模型
 
@@ -17,6 +17,8 @@ kvlang 是**小核心 + 扩展主导**语言。中央 runtime 只实现执行核
 - **派发判据**：`opcode ∈ 本 runtime.myrwircaps` → 查表取处理器**就地执行**；否则该 rwir 须经 def rwir 路由，**移交**给以它为 myrwircaps 的另一扩展（跨进程 handoff/watch，或嵌入式交回宿主，见 [[notinmyrwircaps]]、[[cruntime与后端abi_续]]）。实现里 `rwir::is_inproc(op)` 即「`op ∈ myrwircaps`」的查表判定。
 
 myrwircaps **只关乎执行位置**（哪张表登记了它、由谁就地跑），不改变 rwir 的动态语义——同一 rwir 无论落进哪个 runtime 的 myrwircaps，行为必须一致。
+
+**命名规范（normative）**：每个 runtime 在代码中登记自身 rwir 能力的这张表，其标识符/定义**必须**命名为 `myrwircaps`，不得另起别名（大小写随各语言惯例，如 C/Go `myrwircaps`、Rust 常量 `MYRWIRCAPS`）。审阅任一 runtime 实现时，`myrwircaps` 即「本 runtime 自己实现的 rwir 列表」的唯一入口名。
 
 核心公理（normative）：
 
@@ -52,5 +54,5 @@ myrwircaps **只关乎执行位置**（哪张表登记了它、由谁就地跑�
 networld/proc·exec   rp=[[]stringkeymap, []stringkeymap]  wp=[uint8, []uint8, []uint8]
 networld/fs·read     rp=[[]char/utf8|[]char/utf32, int64, int64]  wp=[[]uint8]
 ```
-	"#### -> /lib/kvlang/spec/runtime语义/rwirext扩展
+	"#### -> /lib/kvlang/spec/runtime语义/runtime开发规范
 }
