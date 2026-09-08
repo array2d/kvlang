@@ -6,7 +6,7 @@ static bool is_int_kind(const char *k) { return kvlangXvalueIsIntKind(k) || kvla
 
 static char *kvlangKvKey(const kvlangXvalue_t *v) {
     if (kvlangXvalueIsCharKind(kvlangXvalueKind(v))) return kvlangXvalueValueString(v);
-    if (is_int_kind(kvlangXvalueKind(v))) { char buf[32]; snprintf(buf, sizeof buf, "%lld", (long long)kvlangXvalueAsInt64(v)); return strdup(buf); }
+    if (is_int_kind(kvlangXvalueKind(v))) { char buf[32]; snprintf(buf, sizeof buf, "%lld", (long long)kvlangScalarI64(kvlangXvalueScalar(v))); return strdup(buf); }
     return strdup("");
 }
 
@@ -214,7 +214,7 @@ int kvlangBuiltinKvListLen(kvlangFrame_t *f) {
 int kvlangBuiltinKvListN(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     char *key = kv_list_dir(f, in, n);
-    int idx = n >= 2 ? (int)kvlangXvalueAsInt64(&in[1]) : -1;
+    int idx = n >= 2 ? (int)kvlangScalarI64(kvlangXvalueScalar(&in[1])) : -1;
     kvlangXvalue_t r; kvlangXvalueZero(&r);
     if (key && idx >= 0) {
         char **names = NULL; int cnt = 0;
@@ -234,7 +234,7 @@ int kvlangBuiltinKvMkindex(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     char *key = n >= 1 ? path_arg(f, 0, in) : NULL;
     if (!key) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "TypeError: kv.mkindex requires a path"); }
-    uint32_t capacity = n >= 2 ? (uint32_t)kvlangXvalueAsInt64(&in[1]) : 0;
+    uint32_t capacity = n >= 2 ? (uint32_t)kvlangScalarI64(kvlangXvalueScalar(&in[1])) : 0;
     char err[256]; int rc = kvlangKvMkindex(f->kv, key, capacity, err, sizeof err);
     free(key); kvlangBuiltinFreeInputs(in, n);
     if (rc != 0) return kvlangBuiltinSetErr(f, "%s", err);

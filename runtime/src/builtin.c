@@ -6,66 +6,57 @@
 typedef int (*kvlangBuiltinFn)(kvlangFrame_t *f);
 
 
-/* ── 类型 helper（对齐 Go isIntKind 含 uint）────────────────────── */
+/* ── 类型 helper：全经 langtype id + 标量 0copy 视图，热路径零 strcmp、每值只 decode 一次 ── */
 
-static bool is_int_kind(const char *k) { return kvlangXvalueIsIntKind(k) || kvlangXvalueIsUintKind(k); }
-static bool is_float_kind(const char *k) { return kvlangXvalueIsFloatKind(k); }
-static bool is_unsigned_kind(const char *k) { return kvlangXvalueIsUintKind(k); }
-static bool is_numeric(const kvlangXvalue_t *v) { return kvlangXvalueIsNumKind(kvlangXvalueKind(v)); }
+static const kvlangScalar_t SCALAR_NONE = { KVLANG_LT_NONE, NULL, 0 };
 
-static int int_width(const char *k) {
-    if (strcmp(k, KVSPACE_KIND_INT8) == 0 || strcmp(k, KVSPACE_KIND_UINT8) == 0) return 8;
-    if (strcmp(k, KVSPACE_KIND_INT16) == 0 || strcmp(k, KVSPACE_KIND_UINT16) == 0) return 16;
-    if (strcmp(k, KVSPACE_KIND_INT32) == 0 || strcmp(k, KVSPACE_KIND_UINT32) == 0) return 32;
-    if (strcmp(k, KVSPACE_KIND_INT64) == 0 || strcmp(k, KVSPACE_KIND_UINT64) == 0) return 64;
-    return 0;
+/* 两操作数结果整型 id（对齐旧 wider_int_kind：同号取宽者，异号升一档有符号）。 */
+static int wider_int_id(int a, int b) {
+    int aw = kvlangLtIntWidth(a), bw = kvlangLtIntWidth(b);
+    bool au = kvlangLtIsUint(a), bu = kvlangLtIsUint(b);
+    if (au == bu) {
+        int w = aw >= bw ? aw : bw;
+        int off = w == 8 ? 0 : w == 16 ? 1 : w == 32 ? 2 : 3;
+        return (au ? KVLANG_LT_UINT8 : KVLANG_LT_INT8) + off;
+    }
+    int w = aw > bw ? aw : bw;
+    return w <= 8 ? KVLANG_LT_INT16 : w == 16 ? KVLANG_LT_INT32 : KVLANG_LT_INT64;
 }
 
-static const char *wider_int_kind(const char *a, const char *b) {
-    int aw = int_width(a), bw = int_width(b);
-    bool au = is_unsigned_kind(a), bu = is_unsigned_kind(b);
-    if (au && bu) return aw >= bw ? a : b;
-    if (!au && !bu) return aw >= bw ? a : b;
-    int w = aw > bw ? aw : bw;
-    switch (w) {
-    case 8: return KVSPACE_KIND_INT16;
-    case 16: return KVSPACE_KIND_INT32;
-    case 32: return KVSPACE_KIND_INT64;
-    default: return KVSPACE_KIND_INT64;
+static int wider_float_id(int a, int b) {
+    if (a == KVLANG_LT_FLOAT64 || b == KVLANG_LT_FLOAT64) return KVLANG_LT_FLOAT64;
+    if (a == KVLANG_LT_FLOAT32 || b == KVLANG_LT_FLOAT32) return KVLANG_LT_FLOAT32;
+    return KVLANG_LT_FLOAT64;
+}
+
+static void narrow_int(int a, int b, int64_t v, kvlangXvalue_t *out) {
+    int k = wider_int_id(a, b);
+    const char *kind = kvlangLangTypeKind(k);
+    switch (k) {
+    case KVLANG_LT_INT8: { int8_t x = (int8_t)v; kvlangXvalueNewTlv(out, kind, (uint8_t *)&x, 1, 1); return; }
+    case KVLANG_LT_INT16: { int16_t x = (int16_t)v; uint8_t r[2] = { x & 0xFF, (x >> 8) & 0xFF }; kvlangXvalueNewTlv(out, kind, r, 2, 1); return; }
+    case KVLANG_LT_INT32: { int32_t x = (int32_t)v; uint8_t r[4]; memcpy(r, &x, 4); kvlangXvalueNewTlv(out, kind, r, 4, 1); return; }
+    case KVLANG_LT_UINT8: { uint8_t x = (uint8_t)v; kvlangXvalueNewTlv(out, kind, &x, 1, 1); return; }
+    case KVLANG_LT_UINT16: { uint16_t x = (uint16_t)v; uint8_t r[2] = { x & 0xFF, (x >> 8) & 0xFF }; kvlangXvalueNewTlv(out, kind, r, 2, 1); return; }
+    case KVLANG_LT_UINT32: { uint32_t x = (uint32_t)v; uint8_t r[4]; memcpy(r, &x, 4); kvlangXvalueNewTlv(out, kind, r, 4, 1); return; }
+    case KVLANG_LT_UINT64: { uint64_t x = (uint64_t)v; uint8_t r[8]; memcpy(r, &x, 8); kvlangXvalueNewTlv(out, kind, r, 8, 1); return; }
+    default: kvlangXvalueNewInt64(out, v); return;   /* INT64 */
     }
 }
 
-static const char *wider_float_kind(const char *a, const char *b) {
-    if (strcmp(a, KVSPACE_KIND_FLOAT64) == 0 || strcmp(b, KVSPACE_KIND_FLOAT64) == 0) return KVSPACE_KIND_FLOAT64;
-    if (strcmp(a, KVSPACE_KIND_FLOAT32) == 0 || strcmp(b, KVSPACE_KIND_FLOAT32) == 0) return KVSPACE_KIND_FLOAT32;
-    return KVSPACE_KIND_FLOAT64;
-}
-
-static void narrow_int(const char *a, const char *b, int64_t v, kvlangXvalue_t *out) {
-    const char *k = wider_int_kind(a, b);
-    if (strcmp(k, KVSPACE_KIND_INT8) == 0) { int8_t x = (int8_t)v; kvlangXvalueNewTlv(out, KVSPACE_KIND_INT8, (uint8_t *)&x, 1, 1); return; }
-    if (strcmp(k, KVSPACE_KIND_INT16) == 0) { int16_t x = (int16_t)v; uint8_t r[2] = { x & 0xFF, (x >> 8) & 0xFF }; kvlangXvalueNewTlv(out, KVSPACE_KIND_INT16, r, 2, 1); return; }
-    if (strcmp(k, KVSPACE_KIND_INT32) == 0) { int32_t x = (int32_t)v; uint8_t r[4]; memcpy(r, &x, 4); kvlangXvalueNewTlv(out, KVSPACE_KIND_INT32, r, 4, 1); return; }
-    if (strcmp(k, KVSPACE_KIND_UINT8) == 0) { uint8_t x = (uint8_t)v; kvlangXvalueNewTlv(out, KVSPACE_KIND_UINT8, &x, 1, 1); return; }
-    if (strcmp(k, KVSPACE_KIND_UINT16) == 0) { uint16_t x = (uint16_t)v; uint8_t r[2] = { x & 0xFF, (x >> 8) & 0xFF }; kvlangXvalueNewTlv(out, KVSPACE_KIND_UINT16, r, 2, 1); return; }
-    if (strcmp(k, KVSPACE_KIND_UINT32) == 0) { uint32_t x = (uint32_t)v; uint8_t r[4]; memcpy(r, &x, 4); kvlangXvalueNewTlv(out, KVSPACE_KIND_UINT32, r, 4, 1); return; }
-    if (strcmp(k, KVSPACE_KIND_UINT64) == 0) { uint64_t x = (uint64_t)v; uint8_t r[8]; memcpy(r, &x, 8); kvlangXvalueNewTlv(out, KVSPACE_KIND_UINT64, r, 8, 1); return; }
-    kvlangXvalueNewInt64(out, v);
-}
-
-static void narrow_float(const char *a, const char *b, double v, kvlangXvalue_t *out) {
-    if (strcmp(wider_float_kind(a, b), KVSPACE_KIND_FLOAT32) == 0) {
+static void narrow_float(int a, int b, double v, kvlangXvalue_t *out) {
+    if (wider_float_id(a, b) == KVLANG_LT_FLOAT32) {
         float f = (float)v; uint8_t r[4]; memcpy(r, &f, 4);
         kvlangXvalueNewTlv(out, KVSPACE_KIND_FLOAT32, r, 4, 1);
     } else kvlangXvalueNewFloat64(out, v);
 }
 
-static int cmp_int(const kvlangXvalue_t *a, const kvlangXvalue_t *b) {
-    bool au = is_unsigned_kind(kvlangXvalueKind(a)), bu = is_unsigned_kind(kvlangXvalueKind(b));
-    if (!au && !bu) { int64_t ai = kvlangXvalueAsInt64(a), bi = kvlangXvalueAsInt64(b); return ai < bi ? -1 : ai > bi ? 1 : 0; }
-    if (au && bu) { uint64_t x = kvlangXvalueAsUint64(a), y = kvlangXvalueAsUint64(b); return x < y ? -1 : x > y ? 1 : 0; }
-    if (au && !bu) { int64_t bi = kvlangXvalueAsInt64(b); if (bi < 0) return 1; uint64_t x = kvlangXvalueAsUint64(a); return x < (uint64_t)bi ? -1 : x > (uint64_t)bi ? 1 : 0; }
-    int64_t ai = kvlangXvalueAsInt64(a); if (ai < 0) return -1; uint64_t y = kvlangXvalueAsUint64(b);
+static int cmp_int(kvlangScalar_t a, kvlangScalar_t b) {
+    bool au = kvlangLtIsUint(a.id), bu = kvlangLtIsUint(b.id);
+    if (!au && !bu) { int64_t ai = kvlangScalarI64(a), bi = kvlangScalarI64(b); return ai < bi ? -1 : ai > bi ? 1 : 0; }
+    if (au && bu) { uint64_t x = kvlangScalarU64(a), y = kvlangScalarU64(b); return x < y ? -1 : x > y ? 1 : 0; }
+    if (au && !bu) { int64_t bi = kvlangScalarI64(b); if (bi < 0) return 1; uint64_t x = kvlangScalarU64(a); return x < (uint64_t)bi ? -1 : x > (uint64_t)bi ? 1 : 0; }
+    int64_t ai = kvlangScalarI64(a); if (ai < 0) return -1; uint64_t y = kvlangScalarU64(b);
     return (uint64_t)ai < y ? -1 : (uint64_t)ai > y ? 1 : 0;
 }
 
@@ -76,9 +67,9 @@ void kvlangBuiltinResolveReadValue(kvlangKv_t *kv, const char *frame_root, const
                            const kvlangXvalue_t *val, kvlangXvalue_t *out) {
     kvlangXvalueZero(out);
     if (val && !kvlangXvalueNone(val) && !kvlangXvalueKindIs(val, KVSPACE_KIND_RWIR) && !kvlangXvalueKindIs(val, KVSPACE_KIND_RWFUNC)) {
-        out->data = malloc(val->len);
-        memcpy(out->data, val->data, val->len);
+        out->data = val->data; /* 借指令内冻结字面量（生命周期同 decode 缓存，永不 flush/free） */
         out->len = val->len;
+        out->borrowed = 1;
         return;
     }
     if (!name || !name[0]) return;
@@ -252,20 +243,18 @@ int kvlangBuiltinSetErr(kvlangFrame_t *f, const char *fmt, ...) {
 
 static int kvlangBuiltinAdd(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
+    kvlangScalar_t a = kvlangXvalueScalar(&in[0]), b = n >= 2 ? kvlangXvalueScalar(&in[1]) : SCALAR_NONE;
     int rc;
-    if (n == 2 && kvlangXvalueIsCharKind(kvlangXvalueKind(&in[0])) && kvlangXvalueIsCharKind(kvlangXvalueKind(&in[1]))) {
+    if (n == 2 && kvlangLtIsChar(a.id) && kvlangLtIsChar(b.id)) {
         kvlangXvalue_t r;
         if (kvlangBuiltinCharConcat(&in[0], &in[1], &r)) {
             rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r);
         } else rc = kvlangBuiltinSetErr(f, "TypeError: cannot concat %s with %s; convert encoding explicitly (char/utf8|char/utf32|char/ascii)", kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1]));
-    } else if (n >= 2 && is_numeric(&in[0]) && is_numeric(&in[1])) {
-        if (is_int_kind(kvlangXvalueKind(&in[0])) && is_int_kind(kvlangXvalueKind(&in[1]))) {
-            kvlangXvalue_t r; narrow_int(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1]), kvlangXvalueAsInt64(&in[0]) + kvlangXvalueAsInt64(&in[1]), &r);
-            rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r);
-        } else {
-            kvlangXvalue_t r; narrow_float(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1]), kvlangXvalueAsFloat64(&in[0]) + kvlangXvalueAsFloat64(&in[1]), &r);
-            rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r);
-        }
+    } else if (n >= 2 && kvlangLtIsNum(a.id) && kvlangLtIsNum(b.id)) {
+        kvlangXvalue_t r;
+        if (kvlangLtIsInt(a.id) && kvlangLtIsInt(b.id)) narrow_int(a.id, b.id, kvlangScalarI64(a) + kvlangScalarI64(b), &r);
+        else narrow_float(a.id, b.id, kvlangScalarF64(a) + kvlangScalarF64(b), &r);
+        rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r);
     } else rc = kvlangBuiltinSetErr(f, "TypeError: expected numeric, got %s", n ? kvlangXvalueKind(&in[0]) : "none");
     kvlangBuiltinFreeInputs(in, n);
     return rc;
@@ -273,15 +262,16 @@ static int kvlangBuiltinAdd(kvlangFrame_t *f) {
 
 static int kvlangBuiltinSub(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
+    kvlangScalar_t a = kvlangXvalueScalar(&in[0]), b = n >= 2 ? kvlangXvalueScalar(&in[1]) : SCALAR_NONE;
     int rc;
     if (n == 1) {
-        kvlangXvalue_t r; kvlangXvalueNewInt64(&r, -kvlangXvalueAsInt64(&in[0]));
+        kvlangXvalue_t r; kvlangXvalueNewInt64(&r, -kvlangScalarI64(a));
         rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r);
-    } else if (n >= 2 && is_int_kind(kvlangXvalueKind(&in[0])) && is_int_kind(kvlangXvalueKind(&in[1]))) {
-        kvlangXvalue_t r; narrow_int(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1]), kvlangXvalueAsInt64(&in[0]) - kvlangXvalueAsInt64(&in[1]), &r);
+    } else if (n >= 2 && kvlangLtIsInt(a.id) && kvlangLtIsInt(b.id)) {
+        kvlangXvalue_t r; narrow_int(a.id, b.id, kvlangScalarI64(a) - kvlangScalarI64(b), &r);
         rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r);
-    } else if (n >= 2 && is_numeric(&in[0]) && is_numeric(&in[1])) {
-        kvlangXvalue_t r; narrow_float(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1]), kvlangXvalueAsFloat64(&in[0]) - kvlangXvalueAsFloat64(&in[1]), &r);
+    } else if (n >= 2 && kvlangLtIsNum(a.id) && kvlangLtIsNum(b.id)) {
+        kvlangXvalue_t r; narrow_float(a.id, b.id, kvlangScalarF64(a) - kvlangScalarF64(b), &r);
         rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r);
     } else rc = kvlangBuiltinSetErr(f, "TypeError: expected numeric, got %s", n ? kvlangXvalueKind(&in[0]) : "none");
     kvlangBuiltinFreeInputs(in, n);
@@ -290,12 +280,13 @@ static int kvlangBuiltinSub(kvlangFrame_t *f) {
 
 static int kvlangBuiltinMul(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
+    kvlangScalar_t a = kvlangXvalueScalar(&in[0]), b = n >= 2 ? kvlangXvalueScalar(&in[1]) : SCALAR_NONE;
     int rc;
-    if (n >= 2 && is_int_kind(kvlangXvalueKind(&in[0])) && is_int_kind(kvlangXvalueKind(&in[1]))) {
-        kvlangXvalue_t r; narrow_int(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1]), kvlangXvalueAsInt64(&in[0]) * kvlangXvalueAsInt64(&in[1]), &r);
+    if (n >= 2 && kvlangLtIsInt(a.id) && kvlangLtIsInt(b.id)) {
+        kvlangXvalue_t r; narrow_int(a.id, b.id, kvlangScalarI64(a) * kvlangScalarI64(b), &r);
         rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r);
-    } else if (n >= 2 && is_numeric(&in[0]) && is_numeric(&in[1])) {
-        kvlangXvalue_t r; narrow_float(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1]), kvlangXvalueAsFloat64(&in[0]) * kvlangXvalueAsFloat64(&in[1]), &r);
+    } else if (n >= 2 && kvlangLtIsNum(a.id) && kvlangLtIsNum(b.id)) {
+        kvlangXvalue_t r; narrow_float(a.id, b.id, kvlangScalarF64(a) * kvlangScalarF64(b), &r);
         rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r);
     } else rc = kvlangBuiltinSetErr(f, "TypeError: expected numeric, got %s", n ? kvlangXvalueKind(&in[0]) : "none");
     kvlangBuiltinFreeInputs(in, n);
@@ -304,14 +295,15 @@ static int kvlangBuiltinMul(kvlangFrame_t *f) {
 
 static int kvlangBuiltinDiv(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
+    kvlangScalar_t a = kvlangXvalueScalar(&in[0]), b = n >= 2 ? kvlangXvalueScalar(&in[1]) : SCALAR_NONE;
     int rc;
     if (n < 2) { rc = kvlangBuiltinSetErr(f, "TypeError: binary op requires 2 inputs, got %d", n); kvlangBuiltinFreeInputs(in, n); return rc; }
-    if (kvlangXvalueAsFloat64(&in[1]) == 0) { rc = kvlangBuiltinSetErr(f, "ZeroDivisionError: division by zero"); kvlangBuiltinFreeInputs(in, n); return rc; }
-    if (is_int_kind(kvlangXvalueKind(&in[0])) && is_int_kind(kvlangXvalueKind(&in[1]))) {
-        kvlangXvalue_t r; narrow_int(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1]), kvlangXvalueAsInt64(&in[0]) / kvlangXvalueAsInt64(&in[1]), &r);
+    if (kvlangScalarF64(b) == 0) { rc = kvlangBuiltinSetErr(f, "ZeroDivisionError: division by zero"); kvlangBuiltinFreeInputs(in, n); return rc; }
+    if (kvlangLtIsInt(a.id) && kvlangLtIsInt(b.id)) {
+        kvlangXvalue_t r; narrow_int(a.id, b.id, kvlangScalarI64(a) / kvlangScalarI64(b), &r);
         rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r);
     } else {
-        kvlangXvalue_t r; narrow_float(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1]), kvlangXvalueAsFloat64(&in[0]) / kvlangXvalueAsFloat64(&in[1]), &r);
+        kvlangXvalue_t r; narrow_float(a.id, b.id, kvlangScalarF64(a) / kvlangScalarF64(b), &r);
         rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r);
     }
     kvlangBuiltinFreeInputs(in, n);
@@ -320,14 +312,15 @@ static int kvlangBuiltinDiv(kvlangFrame_t *f) {
 
 static int kvlangBuiltinMod(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
+    kvlangScalar_t a = kvlangXvalueScalar(&in[0]), b = n >= 2 ? kvlangXvalueScalar(&in[1]) : SCALAR_NONE;
     int rc;
-    if (n < 2 || !is_int_kind(kvlangXvalueKind(&in[0])) || !is_int_kind(kvlangXvalueKind(&in[1]))) {
+    if (n < 2 || !kvlangLtIsInt(a.id) || !kvlangLtIsInt(b.id)) {
         rc = kvlangBuiltinSetErr(f, "TypeError: expected integer, got %s", n ? kvlangXvalueKind(&in[0]) : "none");
         kvlangBuiltinFreeInputs(in, n); return rc;
     }
-    int64_t b = kvlangXvalueAsInt64(&in[1]);
-    if (b == 0) { rc = kvlangBuiltinSetErr(f, "ZeroDivisionError: modulo by zero"); kvlangBuiltinFreeInputs(in, n); return rc; }
-    kvlangXvalue_t r; narrow_int(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1]), kvlangXvalueAsInt64(&in[0]) % b, &r);
+    int64_t bv = kvlangScalarI64(b);
+    if (bv == 0) { rc = kvlangBuiltinSetErr(f, "ZeroDivisionError: modulo by zero"); kvlangBuiltinFreeInputs(in, n); return rc; }
+    kvlangXvalue_t r; narrow_int(a.id, b.id, kvlangScalarI64(a) % bv, &r);
     rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r);
     kvlangBuiltinFreeInputs(in, n);
     return rc;
@@ -347,23 +340,23 @@ static int kvlangBuiltinCmp(kvlangFrame_t *f, cmp_op op) {
         int rc = kvlangBuiltinWriteResult(f, &rv); kvlangXvalueFree(&rv); kvlangBuiltinFreeInputs(in, n); return rc;
     }
     bool r;
-    const char *ka = kvlangXvalueKind(&in[0]), *kb = kvlangXvalueKind(&in[1]);
-    if (is_int_kind(ka) && is_int_kind(kb)) {
-        int c = cmp_int(&in[0], &in[1]);
+    kvlangScalar_t a = kvlangXvalueScalar(&in[0]), b = kvlangXvalueScalar(&in[1]);
+    if (kvlangLtIsInt(a.id) && kvlangLtIsInt(b.id)) {
+        int c = cmp_int(a, b);
         r = op == CMP_EQ ? c == 0 : op == CMP_NEQ ? c != 0 : op == CMP_LT ? c < 0 : op == CMP_GT ? c > 0 : op == CMP_LE ? c <= 0 : c >= 0;
-    } else if (is_numeric(&in[0]) && is_numeric(&in[1])) {
-        double a = kvlangXvalueAsFloat64(&in[0]), b = kvlangXvalueAsFloat64(&in[1]);
-        r = op == CMP_EQ ? a == b : op == CMP_NEQ ? a != b : op == CMP_LT ? a < b : op == CMP_GT ? a > b : op == CMP_LE ? a <= b : a >= b;
-    } else if (kvlangXvalueIsCharKind(ka) && kvlangXvalueIsCharKind(kb)) {
-        char *a = kvlangXvalueValueString(&in[0]), *b = kvlangXvalueValueString(&in[1]);
-        int c = strcmp(a, b);
+    } else if (kvlangLtIsNum(a.id) && kvlangLtIsNum(b.id)) {
+        double av = kvlangScalarF64(a), bv = kvlangScalarF64(b);
+        r = op == CMP_EQ ? av == bv : op == CMP_NEQ ? av != bv : op == CMP_LT ? av < bv : op == CMP_GT ? av > bv : op == CMP_LE ? av <= bv : av >= bv;
+    } else if (kvlangLtIsChar(a.id) && kvlangLtIsChar(b.id)) {
+        char *as = kvlangXvalueValueString(&in[0]), *bs = kvlangXvalueValueString(&in[1]);
+        int c = strcmp(as, bs);
         r = op == CMP_EQ ? c == 0 : op == CMP_NEQ ? c != 0 : op == CMP_LT ? c < 0 : op == CMP_GT ? c > 0 : op == CMP_LE ? c <= 0 : c >= 0;
-        free(a); free(b);
-    } else if (strcmp(ka, KVSPACE_KIND_BOOL) == 0 && strcmp(kb, KVSPACE_KIND_BOOL) == 0) {
-        bool a = kvlangXvalueAsInt64(&in[0]) != 0, b = kvlangXvalueAsInt64(&in[1]) != 0;
-        r = op == CMP_EQ ? a == b : op == CMP_NEQ ? a != b : op == CMP_LT ? a < b : op == CMP_GT ? a > b : op == CMP_LE ? a <= b : a >= b;
+        free(as); free(bs);
+    } else if (a.id == KVLANG_LT_BOOL && b.id == KVLANG_LT_BOOL) {
+        bool av = kvlangScalarI64(a) != 0, bv = kvlangScalarI64(b) != 0;
+        r = op == CMP_EQ ? av == bv : op == CMP_NEQ ? av != bv : op == CMP_LT ? av < bv : op == CMP_GT ? av > bv : op == CMP_LE ? av <= bv : av >= bv;
     } else {
-        kvlangBuiltinSetErr(f, "TypeError: cannot compare %s with %s", ka, kb); kvlangBuiltinFreeInputs(in, n); return -1;
+        kvlangBuiltinSetErr(f, "TypeError: cannot compare %s with %s", kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1])); kvlangBuiltinFreeInputs(in, n); return -1;
     }
     kvlangXvalue_t rv; kvlangXvalueNewBool(&rv, r);
     int rc = kvlangBuiltinWriteResult(f, &rv); kvlangXvalueFree(&rv); kvlangBuiltinFreeInputs(in, n);
@@ -390,34 +383,35 @@ static bool require_bool(kvlangFrame_t *f, const char *op, kvlangXvalue_t *in, i
 static int kvlangBuiltinAnd(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     if (!require_bool(f, "&&", in, n, 2)) { kvlangBuiltinFreeInputs(in, n); return -1; }
-    kvlangXvalue_t r; kvlangXvalueNewBool(&r, kvlangXvalueAsInt64(&in[0]) != 0 && kvlangXvalueAsInt64(&in[1]) != 0);
+    kvlangXvalue_t r; kvlangXvalueNewBool(&r, kvlangScalarI64(kvlangXvalueScalar(&in[0])) != 0 && kvlangScalarI64(kvlangXvalueScalar(&in[1])) != 0);
     int rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r); kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
 static int kvlangBuiltinOr(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     if (!require_bool(f, "||", in, n, 2)) { kvlangBuiltinFreeInputs(in, n); return -1; }
-    kvlangXvalue_t r; kvlangXvalueNewBool(&r, kvlangXvalueAsInt64(&in[0]) != 0 || kvlangXvalueAsInt64(&in[1]) != 0);
+    kvlangXvalue_t r; kvlangXvalueNewBool(&r, kvlangScalarI64(kvlangXvalueScalar(&in[0])) != 0 || kvlangScalarI64(kvlangXvalueScalar(&in[1])) != 0);
     int rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r); kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
 static int kvlangBuiltinNot(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     if (!require_bool(f, "!", in, n, 1)) { kvlangBuiltinFreeInputs(in, n); return -1; }
-    kvlangXvalue_t r; kvlangXvalueNewBool(&r, kvlangXvalueAsInt64(&in[0]) == 0);
+    kvlangXvalue_t r; kvlangXvalueNewBool(&r, kvlangScalarI64(kvlangXvalueScalar(&in[0])) == 0);
     int rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r); kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
 
 static int kvlangBuiltinBit(kvlangFrame_t *f, int op) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
-    if (n < 2 || !is_int_kind(kvlangXvalueKind(&in[0])) || !is_int_kind(kvlangXvalueKind(&in[1]))) {
+    kvlangScalar_t sa = kvlangXvalueScalar(&in[0]), sb = n >= 2 ? kvlangXvalueScalar(&in[1]) : SCALAR_NONE;
+    if (n < 2 || !kvlangLtIsInt(sa.id) || !kvlangLtIsInt(sb.id)) {
         kvlangBuiltinSetErr(f, "TypeError: expected integer, got %s", n ? kvlangXvalueKind(&in[0]) : "none");
         kvlangBuiltinFreeInputs(in, n); return -1;
     }
-    int64_t a = kvlangXvalueAsInt64(&in[0]), b = kvlangXvalueAsInt64(&in[1]);
+    int64_t a = kvlangScalarI64(sa), b = kvlangScalarI64(sb);
     int64_t v = op == 0 ? a & b : op == 1 ? a | b : op == 2 ? a ^ b : op == 3 ? (a << (uint64_t)b) : (a >> (uint64_t)b);
-    kvlangXvalue_t r; narrow_int(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1]), v, &r);
+    kvlangXvalue_t r; narrow_int(sa.id, sb.id, v, &r);
     int rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r); kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
@@ -430,15 +424,16 @@ static int kvlangBuiltinShr(kvlangFrame_t *f) { return kvlangBuiltinBit(f, 4); }
 /* math */
 static int kvlangBuiltinMathUnary(kvlangFrame_t *f, int op) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
-    if (n < 1 || !is_numeric(&in[0])) { kvlangBuiltinSetErr(f, "TypeError: expected numeric, got %s", n ? kvlangXvalueKind(&in[0]) : "none"); kvlangBuiltinFreeInputs(in, n); return -1; }
+    kvlangScalar_t sa = kvlangXvalueScalar(&in[0]);
+    if (n < 1 || !kvlangLtIsNum(sa.id)) { kvlangBuiltinSetErr(f, "TypeError: expected numeric, got %s", n ? kvlangXvalueKind(&in[0]) : "none"); kvlangBuiltinFreeInputs(in, n); return -1; }
     kvlangXvalue_t r;
-    double x = kvlangXvalueAsFloat64(&in[0]);
+    double x = kvlangScalarF64(sa);
     switch (op) {
     case 0: kvlangXvalueNewFloat64(&r, sqrt(x)); break;
     case 1: kvlangXvalueNewFloat64(&r, exp(x)); break;
     case 2: kvlangXvalueNewFloat64(&r, log(x)); break;
-    case 3: /* neg */ if (is_float_kind(kvlangXvalueKind(&in[0]))) { narrow_float(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[0]), -x, &r); } else { narrow_int(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[0]), -kvlangXvalueAsInt64(&in[0]), &r); } break;
-    case 4: /* abs */ if (is_float_kind(kvlangXvalueKind(&in[0]))) { narrow_float(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[0]), fabs(x), &r); } else { narrow_int(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[0]), kvlangXvalueAsInt64(&in[0]) < 0 ? -kvlangXvalueAsInt64(&in[0]) : kvlangXvalueAsInt64(&in[0]), &r); } break;
+    case 3: /* neg */ if (kvlangLtIsFloat(sa.id)) { narrow_float(sa.id, sa.id, -x, &r); } else { narrow_int(sa.id, sa.id, -kvlangScalarI64(sa), &r); } break;
+    case 4: /* abs */ if (kvlangLtIsFloat(sa.id)) { narrow_float(sa.id, sa.id, fabs(x), &r); } else { int64_t iv = kvlangScalarI64(sa); narrow_int(sa.id, sa.id, iv < 0 ? -iv : iv, &r); } break;
     case 5: kvlangXvalueNewInt64(&r, x < 0 ? -1 : x > 0 ? 1 : 0); break;
     }
     int rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r); kvlangBuiltinFreeInputs(in, n);
@@ -453,8 +448,9 @@ static int kvlangBuiltinSign(kvlangFrame_t *f) { return kvlangBuiltinMathUnary(f
 
 static int kvlangBuiltinPow(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
-    if (n < 2 || !is_numeric(&in[0]) || !is_numeric(&in[1])) { kvlangBuiltinSetErr(f, "TypeError: expected numeric"); kvlangBuiltinFreeInputs(in, n); return -1; }
-    kvlangXvalue_t r; kvlangXvalueNewFloat64(&r, pow(kvlangXvalueAsFloat64(&in[0]), kvlangXvalueAsFloat64(&in[1])));
+    kvlangScalar_t sa = kvlangXvalueScalar(&in[0]), sb = n >= 2 ? kvlangXvalueScalar(&in[1]) : SCALAR_NONE;
+    if (n < 2 || !kvlangLtIsNum(sa.id) || !kvlangLtIsNum(sb.id)) { kvlangBuiltinSetErr(f, "TypeError: expected numeric"); kvlangBuiltinFreeInputs(in, n); return -1; }
+    kvlangXvalue_t r; kvlangXvalueNewFloat64(&r, pow(kvlangScalarF64(sa), kvlangScalarF64(sb)));
     int rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r); kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
@@ -463,14 +459,15 @@ static int kvlangBuiltinMaxmin(kvlangFrame_t *f, bool is_max) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     if (n < 2) { kvlangBuiltinSetErr(f, "TypeError: binary op requires 2 inputs, got %d", n); kvlangBuiltinFreeInputs(in, n); return -1; }
     kvlangXvalue_t r;
-    if (is_int_kind(kvlangXvalueKind(&in[0])) && is_int_kind(kvlangXvalueKind(&in[1]))) {
-        int c = cmp_int(&in[0], &in[1]);
+    kvlangScalar_t sa = kvlangXvalueScalar(&in[0]), sb = kvlangXvalueScalar(&in[1]);
+    if (kvlangLtIsInt(sa.id) && kvlangLtIsInt(sb.id)) {
+        int c = cmp_int(sa, sb);
         bool take_a = (is_max && c >= 0) || (!is_max && c <= 0);
-        narrow_int(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1]), take_a ? kvlangXvalueAsInt64(&in[0]) : kvlangXvalueAsInt64(&in[1]), &r);
-    } else if (is_numeric(&in[0]) && is_numeric(&in[1])) {
-        double a = kvlangXvalueAsFloat64(&in[0]), b = kvlangXvalueAsFloat64(&in[1]);
+        narrow_int(sa.id, sb.id, take_a ? kvlangScalarI64(sa) : kvlangScalarI64(sb), &r);
+    } else if (kvlangLtIsNum(sa.id) && kvlangLtIsNum(sb.id)) {
+        double a = kvlangScalarF64(sa), b = kvlangScalarF64(sb);
         bool take_a = (is_max && a >= b) || (!is_max && a <= b);
-        narrow_float(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1]), take_a ? a : b, &r);
+        narrow_float(sa.id, sb.id, take_a ? a : b, &r);
     } else { kvlangBuiltinSetErr(f, "TypeError: max/min requires numeric, got %s and %s", kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1])); kvlangBuiltinFreeInputs(in, n); return -1; }
     int rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r); kvlangBuiltinFreeInputs(in, n);
     return rc;
@@ -483,13 +480,15 @@ static int kvlangBuiltinCastNum(kvlangFrame_t *f, const char *kind) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     if (n < 1 || kvlangXvalueNone(&in[0])) { kvlangBuiltinSetErr(f, "TypeError: cannot cast None"); kvlangBuiltinFreeInputs(in, n); return -1; }
     kvlangXvalue_t r;
-    if (strcmp(kind, KVSPACE_KIND_BOOL) == 0) {
+    kvlangScalar_t sa = kvlangXvalueScalar(&in[0]);
+    int tid = kvlangLangTypeId(kind, strlen(kind));
+    if (tid == KVLANG_LT_BOOL) {
         if (!kvlangXvalueKindIs(&in[0], KVSPACE_KIND_BOOL)) { kvlangBuiltinSetErr(f, "TypeError: cannot cast %s to bool — use != 0", kvlangXvalueKind(&in[0])); kvlangBuiltinFreeInputs(in, n); return -1; }
-        kvlangXvalueNewBool(&r, kvlangXvalueAsInt64(&in[0]) != 0);
+        kvlangXvalueNewBool(&r, kvlangScalarI64(sa) != 0);
     }
-    else if (strcmp(kind, KVSPACE_KIND_FLOAT32) == 0) { float fv = (float)kvlangXvalueAsFloat64(&in[0]); uint8_t b[4]; memcpy(b, &fv, 4); kvlangXvalueNewTlv(&r, KVSPACE_KIND_FLOAT32, b, 4, 1); }
-    else if (strcmp(kind, KVSPACE_KIND_FLOAT64) == 0) kvlangXvalueNewFloat64(&r, kvlangXvalueAsFloat64(&in[0]));
-    else { int64_t v = kvlangXvalueAsInt64(&in[0]); narrow_int(kind, kind, v, &r); }
+    else if (tid == KVLANG_LT_FLOAT32) { float fv = (float)kvlangScalarF64(sa); uint8_t b[4]; memcpy(b, &fv, 4); kvlangXvalueNewTlv(&r, KVSPACE_KIND_FLOAT32, b, 4, 1); }
+    else if (tid == KVLANG_LT_FLOAT64) kvlangXvalueNewFloat64(&r, kvlangScalarF64(sa));
+    else { int64_t v = kvlangScalarI64(sa); narrow_int(tid, tid, v, &r); }
     int rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r); kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
@@ -523,7 +522,12 @@ static int kvlangBuiltinCastCharAscii(kvlangFrame_t *f) { return kvlangBuiltinCa
 
 /* 精度前缀（int64·add / float32·add …）保留：CapIndex 两级查表——先按完整 opcode 命中特化，
  * 未命中且前缀是 C native 数字 kind 时才剥前缀归到裸 op（如 add），kvlangBuiltin* 按操作数 kind 归约。 */
+static int kvlangCtlCopy(kvlangFrame_t *f) { return kvlangBuiltinExecuteCopy(f->kv, f->vtid, f->pc, f->inst); }
+
 static const struct { const char *op; kvlangBuiltinFn fn; } myrwircaps[] = {
+    /* control / copy：与 native 算子同表，op_id 单跳派发 */
+    {OP_CALL, kvlangCtlCall}, {OP_RETURN, kvlangCtlReturn}, {OP_GOTO, kvlangCtlGoto},
+    {OP_BR, kvlangCtlBr}, {OP_COPY, kvlangCtlCopy},
     {"add", kvlangBuiltinAdd}, {"+", kvlangBuiltinAdd},
     {"sub", kvlangBuiltinSub}, {"-", kvlangBuiltinSub},
     {"mul", kvlangBuiltinMul}, {"×", kvlangBuiltinMul},

@@ -91,7 +91,7 @@ void kvlang_kindexpr_parse(const uint8_t *kindexpr, kvlang_kindexpr_t *out);
 
 /* ── 基础类型 ──────────────────────────────────────────────────────── */
 
-typedef struct { uint8_t *data; uint32_t len; } kvlangXvalue_t;
+typedef struct { uint8_t *data; uint32_t len; uint8_t borrowed; } kvlangXvalue_t;
 
 typedef struct { char *key; kvlangXvalue_t val; } kvlangKvPair_t;
 
@@ -111,7 +111,7 @@ static inline void kvlangStrbufFree(kvlangStrbuf_t *b) { free(b->p); b->p = NULL
 /* ── XValue 操作 ───────────────────────────────────────────────────── */
 
 static inline bool kvlangXvalueNone(const kvlangXvalue_t *v) { return v->data == NULL || v->len == 0; }
-static inline void kvlangXvalueZero(kvlangXvalue_t *v) { v->data = NULL; v->len = 0; }
+static inline void kvlangXvalueZero(kvlangXvalue_t *v) { v->data = NULL; v->len = 0; v->borrowed = 0; }
 void kvlangXvalueFree(kvlangXvalue_t *v);          /* free 自持 data（借用读已拷贝为自持） */
 void kvlangXvalueSetBytes(kvlangXvalue_t *v, uint8_t *data, uint32_t len);  /* 接管内存 */
 int  kvlangXvalueHead(const kvlangXvalue_t *v, kvspaceHead_t *h);                 /* decode head */
@@ -127,13 +127,65 @@ bool kvlangXvalueIsIntKind(const char *kind);
 bool kvlangXvalueIsUintKind(const char *kind);
 bool kvlangXvalueIsFloatKind(const char *kind);
 bool kvlangXvalueIsNumKind(const char *kind);
+
+/* langtypetable：base kind 串 ↔ int id（runtime 本地，IV-0，不入 kvspace）。
+ * 枚举有序：数值家族连续 → 谓词即区间判定，int_width 由序号位移求得。 */
+enum {
+    KVLANG_LT_UNKNOWN = 0,
+    KVLANG_LT_NONE,
+    KVLANG_LT_BOOL,
+    KVLANG_LT_INT8, KVLANG_LT_INT16, KVLANG_LT_INT32, KVLANG_LT_INT64,
+    KVLANG_LT_UINT8, KVLANG_LT_UINT16, KVLANG_LT_UINT32, KVLANG_LT_UINT64,
+    KVLANG_LT_FLOAT32, KVLANG_LT_FLOAT64,
+    KVLANG_LT_CHAR_UTF32, KVLANG_LT_CHAR_UTF8, KVLANG_LT_CHAR_ASCII,
+    KVLANG_LT_OBJECT, KVLANG_LT_MAP, KVLANG_LT_INDEX, KVLANG_LT_EXTINDEX,
+    KVLANG_LT_RWIR, KVLANG_LT_RWFUNC, KVLANG_LT_SCOPE, KVLANG_LT_STRUCT,
+    KVLANG_LT_TIME, KVLANG_LT_DURATION,
+    KVLANG_LT_COUNT
+};
+int kvlangLangTypeId(const char *s, size_t len);
+const char *kvlangLangTypeKind(int id);
+int kvlangXvalueLangTypeId(const kvlangXvalue_t *v);
+static inline bool kvlangLtIsSint(int id) { return id >= KVLANG_LT_INT8 && id <= KVLANG_LT_INT64; }
+static inline bool kvlangLtIsUint(int id) { return id >= KVLANG_LT_UINT8 && id <= KVLANG_LT_UINT64; }
+static inline bool kvlangLtIsInt(int id) { return id >= KVLANG_LT_INT8 && id <= KVLANG_LT_UINT64; }
+static inline bool kvlangLtIsFloat(int id) { return id == KVLANG_LT_FLOAT32 || id == KVLANG_LT_FLOAT64; }
+static inline bool kvlangLtIsNum(int id) { return id >= KVLANG_LT_INT8 && id <= KVLANG_LT_FLOAT64; }
+static inline bool kvlangLtIsChar(int id) { return id >= KVLANG_LT_CHAR_UTF32 && id <= KVLANG_LT_CHAR_ASCII; }
+static inline int kvlangLtIntWidth(int id) {
+    if (id >= KVLANG_LT_INT8 && id <= KVLANG_LT_INT64) return 8 << (id - KVLANG_LT_INT8);
+    if (id >= KVLANG_LT_UINT8 && id <= KVLANG_LT_UINT64) return 8 << (id - KVLANG_LT_UINT8);
+    return 0;
+}
+static inline int kvlangLtElemSize(int id) {
+    if (kvlangLtIsInt(id)) return kvlangLtIntWidth(id) / 8;
+    if (id == KVLANG_LT_FLOAT32) return 4;
+    if (id == KVLANG_LT_FLOAT64) return 8;
+    if (id == KVLANG_LT_BOOL) return 1;
+    if (id == KVLANG_LT_CHAR_UTF32) return 4;
+    if (id == KVLANG_LT_CHAR_UTF8 || id == KVLANG_LT_CHAR_ASCII) return 1;
+    if (id == KVLANG_LT_TIME || id == KVLANG_LT_DURATION) return 8;
+    return 0;
+}
+
 /* 签名 kindexpr（runtime篇-07）校验/匹配 */
 bool kvlang_rwirextKindexprValid(const char *expr);
 bool kvlang_rwirextKindexprMatch(const char *expr, const char *kind, int32_t ndim, const int32_t *dims);
 bool kvlang_rwirextKindexprVariadic(const char *expr);
-int64_t kvlangXvalueAsInt64(const kvlangXvalue_t *v);
-double  kvlangXvalueAsFloat64(const kvlangXvalue_t *v);
-uint64_t kvlangXvalueAsUint64(const kvlangXvalue_t *v);
+/* 标量 0copy 视图（取代 kvlangXvalueAsInt64 等按值转换）：decode head 一次，
+ * 持 langtype id + 指向 body 首字节的借用指针，热路径按 id 直读 body。 */
+typedef struct {
+    int id;
+    const uint8_t *body;
+    int32_t len;
+} kvlangScalar_t;
+kvlangScalar_t kvlangXvalueScalar(const kvlangXvalue_t *v);
+int64_t kvlangScalarReadI64(int id, const uint8_t *body);
+double kvlangScalarReadF64(int id, const uint8_t *body);
+uint64_t kvlangScalarReadU64(int id, const uint8_t *body);
+static inline int64_t kvlangScalarI64(kvlangScalar_t s) { return kvlangScalarReadI64(s.id, s.body); }
+static inline double kvlangScalarF64(kvlangScalar_t s) { return kvlangScalarReadF64(s.id, s.body); }
+static inline uint64_t kvlangScalarU64(kvlangScalar_t s) { return kvlangScalarReadU64(s.id, s.body); }
 uint32_t kvlangXvalueChar32At(const kvlangXvalue_t *v, int32_t idx);
 int32_t kvlangXvalueElemSize(const char *kind);
 
@@ -215,26 +267,17 @@ bool kvlangKeytreeIsEntryPc(const char *pc);
 #define OP_COPY   "="
 
 /* op_id：decode 期一次固化的统一派发码（quickening），主循环据此纯整数跳表、热路径零 strcmp。
- * ≥0    = native，直查 myrwircaps[op_id]
- * 负值  = 保留派发类（control / copy / 待定），语义见下 */
+ * ≥0    = 在本 runtime myrwircaps（native 算子 + control/copy 均为其中一行），直查 myrwircaps[op_id].fn
+ * -1    = 不在表内（执行期查 /lib：def rwir 路由头→路由，否则用户 rwfunc→调用） */
 enum {
-    OPID_notinmyrwircaps = -1,   /* 不在本 runtime myrwircaps；执行期查 /lib：def rwir 路由头→路由，否则用户 rwfunc→调用 */
-    OPID_CALL   = -2,
-    OPID_RETURN = -3,
-    OPID_GOTO   = -4,
-    OPID_BR     = -5,
-    OPID_COPY   = -6,
+    OPID_notinmyrwircaps = -1,
 };
 
 int kvlangBuiltinCapIndex(const char *opcode);
 
-/* decode 期分类：control/copy 先于 native，miss 落 OPID_notinmyrwircaps（执行期再查 /lib）。 */
+/* decode 期分类：control/copy 与 native 同在 myrwircaps 一张表，全走 CapIndex；
+ * miss 落 OPID_notinmyrwircaps（执行期再查 /lib）。 */
 static inline int kvlangOpClassify(const char *op) {
-    if (strcmp(op, OP_CALL) == 0) return OPID_CALL;
-    if (strcmp(op, OP_RETURN) == 0) return OPID_RETURN;
-    if (strcmp(op, OP_GOTO) == 0) return OPID_GOTO;
-    if (strcmp(op, OP_BR) == 0) return OPID_BR;
-    if (strcmp(op, OP_COPY) == 0) return OPID_COPY;
     int n = kvlangBuiltinCapIndex(op);
     return n >= 0 ? n : OPID_notinmyrwircaps;
 }
@@ -277,6 +320,11 @@ bool notinmycaps(const char *opcode);
 bool kvlangBuiltinNumOp(const char *opcode);
 int kvlangBuiltinNative(kvlangFrame_t *f);   /* dispatch + call，0 成功 */
 int kvlangBuiltinExecuteCopy(kvlangKv_t *kv, const char *vtid, const char *pc, kvlangRwirInst_t *inst);
+/* control 算子：与 native 同居 myrwircaps 一张表，frame 签名统一派发（call/return/goto/br）。 */
+int kvlangCtlCall(kvlangFrame_t *f);
+int kvlangCtlReturn(kvlangFrame_t *f);
+int kvlangCtlGoto(kvlangFrame_t *f);
+int kvlangCtlBr(kvlangFrame_t *f);
 void kvlangBuiltinResolveReadValue(kvlangKv_t *kv, const char *frame_root, const char *name,
                            const kvlangXvalue_t *val, kvlangXvalue_t *out);
 char *kvlangBuiltinResolveWriteSlot(kvlangKv_t *kv, const char *frame_root, const char *name);

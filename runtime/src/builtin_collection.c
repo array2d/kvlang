@@ -142,7 +142,7 @@ int kvlangBuiltinNdarrayShape(kvlangFrame_t *f) {
 static int64_t flat_index(const kvlang_kindexpr_t *kx, const kvlangXvalue_t *in, int nidx) {
     int64_t flat = 0;
     for (int i = 0; i < nidx; i++) {
-        int64_t idx = kvlangXvalueAsInt64(&in[i + 1]);
+        int64_t idx = kvlangScalarI64(kvlangXvalueScalar(&in[i + 1]));
         if (idx < 0 || idx >= kx->dims[i]) return -1;
         flat = flat * kx->dims[i] + idx;
     }
@@ -206,7 +206,7 @@ int kvlangBuiltinXvReshape(kvlangFrame_t *f) {
     if (ndims > X_MAX_NDIM) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "IndexError: xv.reshape: at most %d dims, got %d", X_MAX_NDIM, ndims); }
     int32_t dims[X_MAX_NDIM]; int64_t numel = 1;
     for (int i = 0; i < ndims; i++) {
-        dims[i] = (int32_t)kvlangXvalueAsInt64(&in[i + 1]);
+        dims[i] = (int32_t)kvlangScalarI64(kvlangXvalueScalar(&in[i + 1]));
         if (dims[i] < 0) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "IndexError: xv.reshape: negative dim %d", dims[i]); }
         numel *= dims[i];
     }
@@ -334,7 +334,7 @@ int kvlangBuiltinSlice(kvlangFrame_t *f) {
     char *base = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->writes[0].name);
     ensure_scattered(f, base);
     int al = separated_len(f->kv, base);
-    int lo = (int)kvlangXvalueAsInt64(&in[1]), hi = (int)kvlangXvalueAsInt64(&in[2]);
+    int lo = (int)kvlangScalarI64(kvlangXvalueScalar(&in[1])), hi = (int)kvlangScalarI64(kvlangXvalueScalar(&in[2]));
     if (lo < 0 || hi < lo || hi > al) { free(base); free(fr); kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "IndexError: array.slice: bounds [%d:%d] out of range (len=%d)", lo, hi, al); }
     for (int i = lo; i < hi; i++) {
         int64_t sc[1] = { i }, dc[1] = { i - lo };
