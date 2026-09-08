@@ -7,6 +7,7 @@ kvlang 的数组有**两种物理形态**：**compact**（稠密：全量元素�
 ## 锚例
 
 - compact 建/读/写/求和：`tutorial/04-ndarray/continuous.kv`。
+- 定长初始化（`[]` 全零、`[v...]` 填充）：`tutorial/04-ndarray/fill_init.kv`。
 - head 种类与 langtype、reinterpret：`tutorial/04-ndarray/xv_meta.kv`、`xv_reinterpret.kv`。
 - numel/dim/shape、xv·at/set：`tutorial/04-ndarray/xv_shape.kv`。
 - 多维下标写、reshape：`tutorial/04-ndarray/subscript_write.kv`。
@@ -24,5 +25,18 @@ kvlang 的数组有**两种物理形态**：**compact**（稠密：全量元素�
 
 - compact 字面量降级为 `array(…)` 构造。变长字符串元素进 compact `[…]` 在 layout 语法检查期报错（`compact array [...] cannot hold variable-length string element`）。
 - stringkeymap 字面量降级为 `map(…)` 构造，只作赋值右值或 `for-in` 源。
+
+## 定长初始化（无需逐元素赋值）
+
+大数组不可能逐个 `a[i] = v` 赋值。写目标声明**定长维度**（`[N]T` / `[d0,d1]T`，方括号内全为正整数）时，两种简写把整块 compact 一次成型：
+
+| 字面量 | 语义 |
+|--------|------|
+| `a:[1024]int32 = []` | 空初始化：按声明维度分配，全零 |
+| `b:[256,256]float32 = [1...]` | 填充初始化：按声明维度分配，每元素填 `1`（填充值按元素种类编码，`1`→`float32 1.0`） |
+
+- 两者降级为 `array·fill(langtype[, v])`：`langtype` 即写类型（维度来源），`v` 为填充值（`[]` 省略即全零）。runtime 一条指令批量填充，不展开成 N 个字面量参数。
+- `[v...]` 只允许**单一**填充值，且写类型必须是定长数组（`[]T` 动态一维、`[?,N]T` 含未知维均报错）。
+- 动态一维 `a:[]int32 = []` 仍是**空数组**（0 长度），不触发填充。
 "#### -> /lib/kvlang/spec/类型系统/数组形态
 }

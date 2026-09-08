@@ -994,6 +994,7 @@ impl Parser {
                 inst.write_types = wtypes;
                 self.advance(); // consume =
                 inst.expr = self.parse_pratt(0);
+                self.lower_array_fill(&mut inst);
                 self.desugar_subscript_write(&mut inst);
                 self.desugar_member_write(&mut inst);
             }
@@ -1214,15 +1215,37 @@ impl Parser {
         if t.kind == Kind::LBrack {
             self.advance();
             let mut elems = Vec::new();
+            let mut fill = false;
             while self.peek().kind != Kind::RBrack && self.peek().kind != Kind::EOF {
                 if self.eat(Kind::Comma) {
                     continue;
+                }
+                // 尾缀 `...`（词法为单个 Ident "..."）：填充标记（`[v...]` 全填 v）。
+                if self.peek().kind == Kind::Ident && self.peek().value == "..." {
+                    self.advance();
+                    fill = true;
+                    break;
                 }
                 if let Some(e) = self.parse_pratt(0) {
                     elems.push(e);
                 }
             }
             self.expect(Kind::RBrack);
+            if fill {
+                if elems.len() != 1 {
+                    self.errors.push(Diagnostic {
+                        pos: t.pos,
+                        warn: false,
+                        info: false,
+                        message: "fill array [v...] requires exactly one fill value".to_string(),
+                        source: String::new(),
+                        src_file: String::new(),
+                        src_name: String::new(),
+                    });
+                }
+                // 填充值先挂 array·fill；langtype（维度来源）在指令级由写类型补齐。
+                return Some(ast::call("array·fill", elems));
+            }
             if let Some(bad) = elems.iter().find(|e| e.is_leaf() && e.quote != 0) {
                 self.errors.push(Diagnostic {
                     pos: t.pos,
@@ -1909,6 +1932,41 @@ impl Parser {
         inst.write_types = Vec::new();
     }
 
+    /// `[]` / `[v...]` 定长初始化：从写类型 `[N…]T` 取维度，降级为 `array·fill(langtype[, v])`。
+    /// 空 `[]` 配定长类型 → 全零；`[v...]` → 全填 v。非定长类型时不改写（沿用普通 array/空数组）。
+    fn lower_array_fill(&mut self, inst: &mut Instruction) {
+        if inst.writes.len() != 1 {
+            return;
+        }
+        let wt = inst.write_types.first().cloned().unwrap_or_default();
+        let fixed = is_fixed_dim_array(&wt);
+        let e = match &inst.expr {
+            Some(e) => e,
+            None => return,
+        };
+        if e.op == "array·fill" {
+            if !fixed {
+                self.errors.push(Diagnostic {
+                    pos: Pos { line: 0, col: 0 },
+                    warn: false,
+                    info: false,
+                    message: format!(
+                        "fill array [v...] needs a fixed-length array type, got {wt:?}"
+                    ),
+                    source: String::new(),
+                    src_file: String::new(),
+                    src_name: String::new(),
+                });
+                return;
+            }
+            let mut args = vec![ast::str_lit(&wt)];
+            args.extend(e.args.iter().cloned());
+            inst.expr = Some(ast::call("array·fill", args));
+        } else if e.op == "array" && e.args.is_empty() && fixed {
+            inst.expr = Some(ast::call("array·fill", vec![ast::str_lit(&wt)]));
+        }
+    }
+
     fn check_write_type_match(&mut self, inst: &Instruction) {
         let e = match &inst.expr {
             Some(e) => e,
@@ -1999,6 +2057,25 @@ fn attach_comments(st: Stmt, comments: Vec<String>) -> Stmt {
 
 fn is_array_kindexp(t: &str) -> bool {
     t.contains('[')
+}
+
+/// 定长数组类型：`[N]T` / `[d0,d1]T`，方括号内全为正整数（非空、无 `?`）。
+/// `[]T`（动态一维）与 `[?,N]T`（含未知维）不算。
+fn is_fixed_dim_array(t: &str) -> bool {
+    let t = t.trim();
+    if !t.starts_with('[') {
+        return false;
+    }
+    let close = match t.find(']') {
+        Some(i) => i,
+        None => return false,
+    };
+    let dims = &t[1..close];
+    if dims.is_empty() {
+        return false;
+    }
+    dims.split(',')
+        .all(|d| !d.trim().is_empty() && d.trim().bytes().all(|c| c.is_ascii_digit()))
 }
 
 fn type_error(_kind: &str) -> String {

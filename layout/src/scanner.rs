@@ -556,7 +556,8 @@ pub fn scan(src: &str) -> Vec<Token> {
             while i < src.len() && src[i].is_ascii_digit() {
                 i += 1;
             }
-            if i < src.len() && src[i] == b'.' {
+            // `.` 后紧跟另一 `.`（即 `...` 填充标记）时不并入小数点：`1...` = `1` + `...`。
+            if i < src.len() && src[i] == b'.' && !(i + 1 < src.len() && src[i + 1] == b'.') {
                 i += 1;
                 while i < src.len() && src[i].is_ascii_digit() {
                     i += 1;

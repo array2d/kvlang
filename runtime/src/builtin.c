@@ -573,7 +573,7 @@ static const struct { const char *op; kvlangBuiltinFn fn; } myrwircaps[] = {
     {"float32", kvlangBuiltinCastF32}, {"float64", kvlangBuiltinCastF64},
     {"char/utf32", kvlangBuiltinCastChar32}, {"char/utf8", kvlangBuiltinCastChar8}, {"char/ascii", kvlangBuiltinCastCharAscii},
     /* collection */
-    {"array", kvlangBuiltinArray},
+    {"array", kvlangBuiltinArray}, {"array·fill", kvlangBuiltinArrayFill},
     {"array·scatter", kvlangBuiltinScatter}, {"array·compact", kvlangBuiltinCompact},
     {"array·append", kvlangBuiltinAppend}, {"array·slice", kvlangBuiltinSlice},
     {"obj", kvlangBuiltinObj}, {"map", kvlangBuiltinMap}, {"struct·new", kvlangBuiltinStructNew},

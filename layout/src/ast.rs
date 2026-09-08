@@ -466,6 +466,20 @@ impl fmt::Display for Instruction {
             None => return write!(f, ""),
         };
         let writes = self.join_typed_writes();
+        // array·fill(langtype[, v]) → [] / [v...]（首参 langtype 由写类型隐含，不回显）
+        if e.op == "array·fill" {
+            let s = match e.args.get(1) {
+                Some(v) => format!("[{}...]", v),
+                None => "[]".to_string(),
+            };
+            if !self.writes.is_empty() {
+                if self.arrow_left {
+                    return write!(f, "{writes}{}{s}", self.left_arrow());
+                }
+                return write!(f, "{s}{}{writes}", symbol::ARROW_RIGHT);
+            }
+            return write!(f, "{s}");
+        }
         // array(...) → [...]
         if e.op == "array" {
             let args: Vec<String> = e.args.iter().map(|a| a.to_string()).collect();
