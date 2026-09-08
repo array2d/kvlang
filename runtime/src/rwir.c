@@ -54,6 +54,7 @@ int kvlangRwirDecode(kvlangKv_t *kv, const char *link_base, const char *pc, kvla
     free(nm);
     if (!kvlangXvalueNone(&v)) out->opcode = kvlangXvalueValueString(&v);
     kvlangXvalueFree(&v);
+    out->op_id = out->opcode ? kvlangOpClassify(out->opcode) : OPID_notinmyrwircaps;
 
     for (int i = 1; i <= MAX_PARAMS; i++) {
         kvlangStrbufPrintf(&key, "[%d,-%d]", addr0, i);

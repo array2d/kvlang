@@ -249,7 +249,7 @@ string.slice(s, 0, 2) -> p  # "he"
 02-func/          rwfunc, call, accumulator                       (2 files)
 03-control/       if, while, for, guess                           (5 files)
 03-debugger/      chain_array, debugger builtin                   (4 files)
-04-algo/          fibonacci, gcd, collatz, …                      (13 files)
+06-algo/          gcd, collatz, power, factorial, …               (8 files)
 06-lib/           lib block, nested, cross-lib, anon              (11 files)
 07-leetcode/      LeetCode solutions                              (90 files)
 error_cases/      type_error, index_error, zero_division, …       (36 files)
@@ -257,7 +257,7 @@ error_cases/      type_error, index_error, zero_division, …       (36 files)
 
 ```bash
 ./kvlang tutorial/01-basics/hello.kv         # hello kvlang
-./kvlang tutorial/04-algo/fibonacci.kv       # fib = 55
+./kvlang tutorial/06-algo/gcd.kv             # gcd = 6
 ./kvlang tutorial/07-leetcode/001_two_sum.kv # LeetCode
 
 python3 tutorial/test.py                     # 全部正例 — CI 验证

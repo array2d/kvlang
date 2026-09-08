@@ -4,9 +4,11 @@
 /* 共享队列根：第一个 rwir 的 /lib/<opcode>/vids 绝对路径。 */
 static char *g_first_vids = NULL;
 
-/* kvspace 是能力的唯一事实源：/lib/<opcode> 存在且 kind=defrwir 即他人 rwir。
- * 派发在独立 kvlang 进程内发生，进程内注册表恒空，只有 kvspace 可信。 */
-bool isothersrwir(kvlangKv_t *k, const char *opcode) {
+/* notinmyrwircaps：opcode 是一条不在本 runtime myrwircaps 内、须经 def rwir 路由给
+ * 能兑现它的其它 runtime 的 rwir。判据是 /lib/<opcode> 存在 def rwir 路由头
+ * （langtype=def rwir，storetype=index）。kvspace 是能力唯一事实源；本判定在独立
+ * kvlang 进程内发生，进程内 myrwircaps 恒不含它，故只有 /lib 路由头可信。 */
+bool notinmyrwircaps(kvlangKv_t *k, const char *opcode) {
   if (opcode[0] == '/')
     return false;
   char *key = kvlangKeytreeRwir(opcode);

@@ -319,8 +319,8 @@ fn drive_vid(eng: &Engine, vid: &str) {
 
         // pc 可能属子 vthread（native vthread·run 冒泡上来）：目标 vid 一律由 pc 导出，非固定主 vid。
         let sub = c.split('/').nth(2).unwrap_or(vid);
-        // 外部扩展 rwir（如 numpy）：handoff；native/控制帧/帧结束：写回 pc 让 runtime 继续。
-        if !stop_op.is_empty() && rwir::is_others_rwir(&stop_op) {
+        // 停在本 myrwircaps 内的 op：handoff；native/控制帧/帧结束：写回 pc 让 runtime 继续。
+        if !stop_op.is_empty() && rwir::in_myrwircaps(&stop_op) {
             if unsafe { kvlang_rwirextHandoff(kv, cs(sub).as_ptr(), cs(&c).as_ptr()) } != 0 {
                 kvlang_rs::elog!("handoff {stop_op} 失败 @ {c}");
                 std::process::exit(1);

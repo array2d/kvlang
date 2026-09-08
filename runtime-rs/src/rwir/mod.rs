@@ -226,8 +226,8 @@ pub fn is_inproc(op: &str) -> bool {
     )
 }
 
-/// 判「别人的 rwir」：opcode 是否已注册（进程内 map）。
-pub fn is_others_rwir(op: &str) -> bool {
+/// op ∈ 本 runtime myrwircaps（已登记进程内 map）；其取反即 notinmycaps。
+pub fn in_myrwircaps(op: &str) -> bool {
     rwirmap().contains_key(op)
 }
 

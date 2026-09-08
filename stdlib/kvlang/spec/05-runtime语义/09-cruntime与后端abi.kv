@@ -26,7 +26,7 @@ lib kvlang/spec/runtime语义/cruntime与后端abi {
 - `kvlang_runtime.h`：核心执行器（`kvlangRuntimeConnect`/`Disconnect`/`Bootstrap`/`ExecuteVthread`/`KvspaceHandle` …）。
 - `kvlang_rwirext.h`：扩展 runtime 语义，**只暴露 kvspace 不提供的部分**。现有 9 个符号：`Register`、`Handoff`、`NextPc`、`Params`、`ResolveRead`、`ResolveReadPath`、`ResolveWrite`、`KindexprValid`、`KindexprMatch`。KV 存取（connect/get/write/del/list/tlv）**不在此**——扩展宿主自连 kvspace ABI，把句柄（`void *`）传进带句柄的 rwirext 函数。
 
-内部模块：`xvalue.c`（TLV 编解码薄封装）、`kindexpr.c`、`kv.c`（kvspace ABI 封装）、`keytree.c`（路径构造）、`rwir.c`（PC 解析 + Decode）、`vthread.c`、`builtin*.c`（native 算子 + 静态注册表）、`kvcpu.c`（Execute 循环）、`runtime.c`（ABI 层）、`rwirext.c`（扩展 ABI，含 `isothersrwir`）。native 注册表为**静态数组 + 线性查找**。
+内部模块：`xvalue.c`（TLV 编解码薄封装）、`kindexpr.c`、`kv.c`（kvspace ABI 封装）、`keytree.c`（路径构造）、`rwir.c`（PC 解析 + Decode）、`vthread.c`、`builtin*.c`（native 算子 + 静态注册表）、`kvcpu.c`（Execute 循环）、`runtime.c`（ABI 层）、`rwirext.c`（扩展 ABI，含 `notinmyrwircaps`）。myrwircaps 为**静态数组 + 线性查找**。
 
 ## 统一 `kvspace*` C ABI（去特化）
 
@@ -48,6 +48,8 @@ kvspaceNewPtr / NewChar / NewBool / NewInt64 / NewFloat64
 - **读**走 `kvspaceGet`——返回后端常驻内存的**借用偏移指针**，调用方只读、**不得** `free`。
 - **写**不经「先 encode 整条 TLV 再交后端」：向后端要一个可写 body 偏移指针再直接写字节——`kvspaceWriteInPlace`（key 已存在且 body 尺寸不变，原 box 就地改）与 `kvspaceWriteNewPlace`（新建 / 换 kind / 换尺寸，分配新 box 并写 head）两条原语，各自唯一、无中转 buffer。
 - **前缀枚举**不一次性返回整段名单缓冲：`kvspaceListLen` 只返子项计数，`kvspaceListAt(idx)` 借用回收缓冲逐项取名——遍历即「先 ListLen 定计数、再逐 idx ListAt」。
+
+**native 读参：标量按值、整块借用**（normative，P2-d）——runtime-c native 算子（标量数值/逻辑/cast + `xv·*`/`array·*`/`string·*`）经 `ResolveReadValue` 取参，两条路径互斥：内联字面量（冻结于 code 槽）按值拷入（标量，纳秒级，无 KV 往返）；变量/KV 常驻值经 `GetMember` 一次取出后**移交所有权**（`*out = pv`，非二次拷贝，后端物化只发生在 `Get` 内部）。**整块字节零拷贝不在 native 侧另设机制**——它就是 [[notinmyrwircaps]] 的 `ResolveReadPath` + `kvspaceGet` body 指针那一条路径，由持有大 tensor 的扩展（numpy/op-gpu）承担；native 算子处理的是标量与中等 value，其拷贝相对每步 KV 往返可忽略（fib n=10：redis 1.5s / fs 320ms vs C 586ns，墙钟由 KV I/O 主导约六个数量级），故不为其增设借用管线。
 
 **后端由链接决定**：构建期经环境变量选择链接哪个 kvspace 库（`kvspace-c` 或 `kvspace_durable`），两者导出同一 ABI；runtime 的句柄结构只保留 `void *h`，代码零后端分支。
 	"#### -> /lib/kvlang/spec/runtime语义/cruntime与后端abi

@@ -20,14 +20,14 @@ lib kvlang/spec/runtime语义/函数调用与内建_续 {
 
 ## `print` / `println` / `cerr` / `input` 不是 native
 
-**规范要点**：`print`、`println`、`cerr`、`input` **不在** native 注册表——它们是 **term runtime 的 rwir（经 def rwir 路由，`/lib/<opcode>` kind=`def rwir`）**，经派发链第 4 级 `isothersrwir` 命中（见 [[rwirext扩展]]）。term 扩展与中央 runtime 同进程，就地 `ResolveRead` + display 直写宿主 stdout/stderr。实现**不得**把这四个 opcode 当 native 处理。
+**规范要点**：`print`、`println`、`cerr`、`input` **不在** myrwircaps——它们是 **term runtime 的 rwir（经 def rwir 路由，`/lib/<opcode>` kind=`def rwir`）**，经派发链第 4 级 `notinmyrwircaps` 命中（见 [[rwirext扩展]]）。term 扩展与中央 runtime 同进程，就地 `ResolveRead` + display 直写宿主 stdout/stderr。实现**不得**把这四个 opcode 当 myrwircaps 内处理。
 
-## native vs 须经 def rwir 路由的 rwir 的判定边界
+## myrwircaps vs 须经 def rwir 路由的 rwir 的判定边界
 
 一条非控制、非 `=` 的指令，其归属由两步判定：
 
-1. `kvlangBuiltinIsNative(op)` → true：native（见 [[函数调用与内建]]、[[函数调用与内建]]、[[函数调用与内建_续]]）。
-2. 否则 `isothersrwir(op)`：`op[0]=='/'` → false；否则读 `/lib/<op>`，kind==`def rwir` → 须经 def rwir 路由的 rwir（`is_ext_rwir`）。
+1. `opcode ∈ myrwircaps`（`!notinmycaps(op)`，查静态能力表）→ 本 runtime 就地兑现（见 [[函数调用与内建]]、[[函数调用与内建_续]]）。
+2. 否则 `notinmyrwircaps(op)`：`op[0]=='/'` → false；否则读 `/lib/<op>`，kind==`def rwir` → 不在本 runtime myrwircaps、须经 def rwir 路由到能兑现它的其它 runtime。
 3. 二者皆否 → 用户 rwfunc（改写为 `call`）。
 
 layout **不预先**把 opcode 归为 native / user，归属判定全留给 runtime；同包内裸名调用须显式 `pkg·f()`（见 layout 语义卷）。数字类型的多态运算融合为单条 rwir（`int64·add` 与 `float32·add` 同归 `add`），由 native 实现按操作数 kind 在运行期归约（`kvlangBuiltinNumOp`）。
