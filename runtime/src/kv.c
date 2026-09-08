@@ -184,6 +184,11 @@ int kvlangKvWatch(kvlangKv_t *k, const char *key, const kvlangXvalue_t *target, 
     uint32_t len;
     if (kvspaceWatch(k->h, key, t, tl, tick_ns, &d, &len) != 0)
         return -1;
-    kvlangXvalueCopyMalloc(out, d, len);
+    if (d && len) {
+        out->data = d;
+        out->len = len;
+        out->borrowed = 1;
+        kvlangXvalueMaterialize(out);
+    }
     return 0;
 }
