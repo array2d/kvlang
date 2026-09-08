@@ -4,7 +4,7 @@ lib kvlang/spec/runtime语义/执行模型 {
 
 runtime 是 kvlang 的**动态语义**阶段：对已由 layout 布进 kvspace 的指令做**纯解释执行**。runtime 不编译、不优化、不重排；它只按 PC 逐条取指、解码、执行。
 
-runtime 的核心**只有一套**：**C runtime（`kvlang/runtime/`，纯 C + `extern "C"`）是唯一的 runtime 核心与标准实现**——动态语义以它为准。其余 runtime 一律是**扩展运行时**：嵌入 C runtime 核心、套用其取指-解码-执行、native 派发与正典 codec，只在其上追加己方 opcode 的解释，绝不另起一套核心或编解码器（见 [[rwirext扩展]]、[[cruntime与后端abi]]）。Rust runtime（`kvlang/runtime-rs/`，二进制名 `kvlang`）即这一架构的**参考实现**——它是 rwirext 宿主，而非第二套等价核心；未来的 **deepx-gpu-compute（GPU 算子融合计算引擎）与之同架构**：同样嵌入 C runtime 核心，只把 tensor 融合算子作为己方 rwir 追加。扩展运行时**必须**与 C runtime 核心表现相同的核心动态语义。
+runtime 的核心**只有一套**：**C runtime（`kvlang/runtime/`，纯 C + `extern "C"`）是唯一的 runtime 核心与标准实现**——动态语义以它为准。其余 runtime 一律是**扩展运行时**：嵌入 C runtime 核心、套用其取指-解码-执行、native 派发与正典 codec，只在其上追加己方 opcode 的解释，绝不另起一套核心或编解码器（见 [[runtime开发规范]]、[[cruntime与后端abi]]）。Rust runtime（`kvlang/runtime-rs/`，二进制名 `kvlang`）即这一架构的**参考实现**——它是 rwirext 宿主，而非第二套等价核心；未来的 **deepx-gpu-compute（GPU 算子融合计算引擎）与之同架构**：同样嵌入 C runtime 核心，只把 tensor 融合算子作为己方 rwir 追加。扩展运行时**必须**与 C runtime 核心表现相同的核心动态语义。
 
 ## 状态皆在 kvspace
 
@@ -15,7 +15,7 @@ runtime **不得**在 kvspace 之外持有执行状态。PC、栈帧、局部变
 
 ## 坐标系
 
-一条指令在其所属函数子树内由二元坐标 `[s0,s1]` 定位：`s0` 为指令行（行 0 为签名，指令从行 1 起），`s1` 为参数轴（0 为 opcode，负数为读参绑定 `[0,-k]`，正数为写参绑定 `[0,k]`）。签名槽 `[0,0]` 为 opcode/签名行锚点；其所属函数目录主槽的 langtype 为 `rwfunc`（用户函数）或 `def rwir`（rwir 路由头，见 [[rwirext扩展]]；见 [[总体方案]]）。
+一条指令在其所属函数子树内由二元坐标 `[s0,s1]` 定位：`s0` 为指令行（行 0 为签名，指令从行 1 起），`s1` 为参数轴（0 为 opcode，负数为读参绑定 `[0,-k]`，正数为写参绑定 `[0,k]`）。签名槽 `[0,0]` 为 opcode/签名行锚点；其所属函数目录主槽的 langtype 为 `rwfunc`（用户函数）或 `def rwir`（rwir 路由头，见 [[runtime开发规范]]；见 [[总体方案]]）。
 
 ## 指令解释循环
 
@@ -34,7 +34,7 @@ runtime 对一个 vthread 的执行是如下循环（C 实现 `runtime/src/kvcpu
 1. **myrwircaps 内的核心算子**（`op_id ≥ 0`，直查静态能力表，枚举见 [[函数调用与内建]]）——本 runtime 就地兑现。
 2. **控制指令**（`op_id ∈ {OPID_CALL/RETURN/BR/GOTO}`）——`call` / `return` / `br` / `goto`。
 3. **`=` 拷贝**（`op_id == OPID_COPY`）——值拷贝语义。
-4. 以上皆否（`op_id == OPID_notinmyrwircaps`，即 `notinmycaps`）时查 `/lib`：**`notinmyrwircaps`**——`/lib/<opcode>` 存在 def rwir 路由头（kind=`def rwir`）→ 路由到能兑现它的其它 runtime（见 [[rwirext扩展]]）。
+4. 以上皆否（`op_id == OPID_notinmyrwircaps`，即 `notinmycaps`）时查 `/lib`：**`notinmyrwircaps`**——`/lib/<opcode>` 存在 def rwir 路由头（kind=`def rwir`）→ 路由到能兑现它的其它 runtime（见 [[runtime开发规范]]）。
 5. **否则视为用户 rwfunc 调用**——opcode 移入 `reads[0]`，改写为 `call` 指令。
 
 `op_id` 由 decode 期分类固化，控制/拷贝/myrwircaps 成员全折入同一整数字段，热路径无 opcode 字符串匹配。myrwircaps 判定先于 `/lib` 查表，故与核心算子同名的 `/lib/<op>` 不改变派发。
