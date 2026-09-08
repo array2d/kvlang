@@ -7,7 +7,7 @@ kvlang 是**严格定宽类型语言**。
 类型信息随值自描述：每个 XValue 的类别由 head 三个正交字段表达（见 [[总体方案]] 与 [[XValueHead线格式]]）：
 - `ref`（存储位置）：0=inline、1=ptr（软链）、2=@ext（单值在扩展世界）；
 - `storetype`（物理布局，codec 视角，闭合集：NONE/ATOM/ARRAYND/index/extindex）；
-- `langtype`（语义类型，即完整 kindexpr 串，变长，见 [[kindexpr签名类型表达式]]）。
+- `langtype`（语义类型，完整类型表达式串，变长，见 [[langtype签名类型表达式]]）。
 
 ## 锚例
 

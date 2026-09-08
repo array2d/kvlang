@@ -2,7 +2,7 @@
 lib kvlang/spec/附录/类型表达式文法 {
 	r##"# 类型表达式（签名参数/返回值类型，多态 + 高维数组）
 
-> 完整语义见 [[kindexpr签名类型表达式]]（类型系统卷）。铁律：无家族简写（`int`/`uint`/`float`/`num`/`char`）——位宽是开放集合，编码须写明确；多态靠显式 `|` 枚举。
+> 完整语义见 [[langtype签名类型表达式]]（类型系统卷）。铁律：无家族简写（`int`/`uint`/`float`/`num`/`char`）——位宽是开放集合，编码须写明确；多态靠显式 `|` 枚举。
 
 ```
 type_expr   = [ ref_prefix ] atom { "|" atom }   (* ref 前缀可选；layout 剥离前缀落 head ref 字节，wire langtype 不含前缀；见 [[总体方案]] *)
@@ -36,7 +36,7 @@ kind        = "bool"
                  无 def rwfunc：rwfunc 有 kvlang 实现体（一串 rwir 指令槽），可被 main-runtime 直接解释执行，无需路由头（见 [[总体方案]]）。
                  `object`/`scope` 彻底删除，无此种类名（见 [[总体方案]]）；异构命名容器一律 struct。
                  `*`/`@` 是源码 ref_prefix（见上方 type_expr/ref_prefix 产生式）；layout 剥离前缀落 head ref 字节，wire langtype 不含前缀；
-                 valid_kindexpr 校验剥离 ref_prefix 后的剩余部分；真正非法的是后缀 `int64*` 或前缀位置错误。 *)
+                 valid_langtype 校验剥离 ref_prefix 后的剩余部分；真正非法的是后缀 `int64*` 或前缀位置错误。 *)
 ```
 "## -> /lib/kvlang/spec/附录/类型表达式文法
 }

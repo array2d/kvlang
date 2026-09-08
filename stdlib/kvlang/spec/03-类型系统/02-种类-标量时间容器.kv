@@ -2,7 +2,7 @@
 lib kvlang/spec/类型系统/种类_标量时间容器 {
 	r####"# 种类（kind）
 
-**种类**是值的运行时类别。种类字符串是 kindexpr 的基（base）部分（见 [[kindexpr签名类型表达式]]）。
+**种类**是值的运行时类别。种类字符串是 langtype 的基（base）部分（见 [[langtype签名类型表达式]]）。
 
 ### 定宽数字种类
 
@@ -16,7 +16,7 @@ kvlang 的数字种类**必须携带精确位宽**：
 
 整数按小端补码编码，浮点按 IEEE 754 编码。
 
-**铁律——无家族简写**。`int`、`uint`、`float`、`num`、`char` 这类不含位宽/编码的简写**不是**合法种类，在任何类型标注中均**不得**出现。位宽与字符编码是**开放集合**（未来可扩 `int4`、`fp8`、`fp16` 等），封闭的家族枚举必然漏项；多态**必须**靠 [[kindexpr签名类型表达式]] 的显式 `|` 枚举表达（如 `int8|int16|int32|int64`）。
+**铁律——无家族简写**。`int`、`uint`、`float`、`num`、`char` 这类不含位宽/编码的简写**不是**合法种类，在任何类型标注中均**不得**出现。位宽与字符编码是**开放集合**（未来可扩 `int4`、`fp8`、`fp16` 等），封闭的家族枚举必然漏项；多态**必须**靠 [[langtype签名类型表达式]] 的显式 `|` 枚举表达（如 `int8|int16|int32|int64`）。
 
 ### bool 与字符种类
 
@@ -33,7 +33,7 @@ kvlang 的数字种类**必须携带精确位宽**：
 
 | 种类 | 说明 |
 |------|------|
-| `stringkeymap` | map 容器，kindexpr 为 `key·value`（如 `[]char/utf8·int64`） |
+| `stringkeymap` | map 容器，langtype 为 `key·value`（如 `[]char/utf8·int64`） |
 | `struct` | 结构原型实例的种类（见 [[容器]] 与结构声明） |
 | `index` | **storetype**：索引型节点（map/struct 值容器的 `{key}·` memindex、lib/rwfunc 目录节点）；物理=m×n 对齐字符串数组，dims=[len,cap,M]（M align8） |
 | `extindex` | **storetype**：可扩展索引型节点（vthread 运行栈等，cap 可增长）；与 `ref`/`@ext` 无关，extindex 是 storetype 不是 ref=2 |

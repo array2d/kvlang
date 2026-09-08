@@ -26,7 +26,7 @@ lib kvlang/spec/类型系统/文法与合法性 {
 | `[foo,int32]·int64` | 元组键含非标量元素 |
 | 裸 `[]` / 裸 `[?]` | 无基种类 |
 
-源码类型标注最前的 `*`/`@` 前缀（如 `*int64`、`@[256,256]uint8`）**合法**，layout 解析时剥离前缀落成 head `ref` 字节，再校验剩余 kindexpr；wire 层 langtype 串不含前缀（见 [[总体方案]]）。
+源码类型标注最前的 `*`/`@` 前缀（如 `*int64`、`@[256,256]uint8`）**合法**，layout 解析时剥离前缀落成 head `ref` 字节，再校验剩余 langtype；wire 层 langtype 串不含前缀（见 [[总体方案]]）。
 
 `def rwir` 是路由头 langtype（仅落于 `/lib/<op>`），**不得**作为类型标注书写；`rwfunc` 有 kvlang 实现体，可被任意 main-runtime 直接解释，**无需也没有** def rwfunc（见 [[种类与定宽类型]]）。
 "#### -> /lib/kvlang/spec/类型系统/文法与合法性

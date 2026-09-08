@@ -1,0 +1,24 @@
+// 欢迎加入kvspace世界
+lib kvlang/spec/runtime语义/myrwir扩展_c {
+	r####"# myrwir 扩展运行时（扩展边界）
+
+## 核心 / 扩展边界（不可越界的职责线）
+
+扩展回答的唯一问题是「**算什么、怎么算**」；它**不回答**「值长什么样、指令怎么解码、类型怎么校验」——这些是 runtime-c 的值语义（见 [[cruntime与后端abi]]）。扩展只有三个合法动作：
+
+1. **拿 PC**：经 handoff / 驱动循环取当前 PC，跑己方 rwir，`NextPc` 求后继。
+2. **解析参数**：**只经** `kvlang_myrwir*`（见 [[notinmyrwircaps]]）。
+3. **读写 kvspace**：**只经** `kvspace*` 正典 ABI（`Get` 借用读、`WriteInPlace`/`WriteNewPlace` 写、`TlvEncode`/`DecodeHead` 编解码）。**绝不自造 langtype 构造器、绝不手写 TLV/head。**
+
+唯一保留的例外是 json 反序列化里的 langtype **串解析器**：kvspace 只导出编码器、不导出串解析器，而「把外部文本按类型/形状分发写回子树」是扩展**自身的反序列化职责**，故留在扩展侧，且只读 head、不造 head。这条例外恰印证边界：**能调用 kvspace 的一律调用；kvspace 未提供且属扩展自身语义的才自理。**
+
+## `/lib` 与 `/ext` 拓扑
+
+| 目录 | 回答 | 内容 |
+|------|------|------|
+| `/lib/<opcode>` | 有什么 op（签名） | `def rwir` 路由头（主槽 body=[nr][nw][dynamic]，签名行 `[0,x]`） |
+| `/ext/` | 在哪、怎么执行（拓扑） | 存储 / 计算 / 通信引擎注册 |
+
+无状态扩展（term/json）只写 `/lib/`；有状态扩展引擎（op-gpu 等）写 `/lib/` + `/ext/`，handoff 协议一致，后者多一次 `/ext/` 查表定位引擎。
+	"#### -> /lib/kvlang/spec/runtime语义/myrwir扩展_c
+}

@@ -2,7 +2,7 @@
 lib kvlang/spec/runtime语义/成员访问 {
 	r####"# 成员访问（运行期语义）
 
-本章界定运行期对复合数据的访问语义：成员符 `·` 的解引用规则、动态键、指针的单跳类型检查、容器 memindex 的运行期行为、compact 数组下标。类型的静态形态（种类、kindexpr、数组形态）见类型系统卷；本章只讲 runtime **如何在 kvspace 中定位与读写**这些结构。
+本章界定运行期对复合数据的访问语义：成员符 `·` 的解引用规则、动态键、指针的单跳类型检查、容器 memindex 的运行期行为、compact 数组下标。类型的静态形态（种类、langtype、数组形态）见类型系统卷；本章只讲 runtime **如何在 kvspace 中定位与读写**这些结构。
 
 ## 两个索引符号
 
@@ -35,16 +35,16 @@ kvlang 用两个符号访问复合数据，语义严格分离，runtime **不得
 
 `base·*k` 用 `k` 的**值**作为成员名：读 `m·*k` 即以局部变量 `k` 当前的字符串值定位 `m·<k值>`。`·*` 用于局部容器变量的动态键访问；等价的显式形式为 `kv·get(m, k)` / `kv·set(m, k, v)`。
 
-## 指针：完整 kindexpr + 单跳类型检查
+## 指针：完整 langtype + 单跳类型检查
 
-指针（`Ptr`，head ref==1，源码前缀 `*`）在 kvspace 中存**目标的完整 kindexpr + 目标 key**（`kvspaceNewPtr` 是唯一构造入口，runtime **不得**自造 Ptr 编码）。
+指针（`Ptr`，head ref==1，源码前缀 `*`）在 kvspace 中存**目标的完整 langtype + 目标 key**（`kvspaceNewPtr` 是唯一构造入口，runtime **不得**自造 Ptr 编码）。
 
-- **单跳类型检查**：写入指针时，实现**必须**校验指针声明的目标 kindexpr 与被指向 key 的实际 kindexpr 一致——只查一跳，不递归展开链。
+- **单跳类型检查**：写入指针时，实现**必须**校验指针声明的目标 langtype 与被指向 key 的实际 langtype 一致——只查一跳，不递归展开链。
 - **读解引用链**：读参解析（`resolve_read_path`）从命名 Ptr 出发，只追显式 `Ptr`（ref==1）链到非指针值即停；**不得**把 char 字符串值误当路径继续追（否则字符串实参内容会被当键，穿两层调用即变 `None`）。写侧解析（`ResolveWriteSlot`）遵循同一纪律。
 
 ## 扩展世界句柄（ref=2，@ext）
 
-`ref` 是 head 中的**独立 u8 字段**（0=inline、1=ptr、2=@ext），不是 kindexpr/kind 首字符；源码类型标注中 `*`/`@` 前缀由 layout 剥离落成 `ref` 字节，wire 层 langtype 串不含前缀（见 [[总体方案]]）。ref=2（@ext）表示真实值在扩展世界，head 的 langtype 仍为目标形态的完整 kindexpr 串（不带 `@` 前缀），body 不是真实值字节，而是**定位串**（如 `/networld/<host>/proc/<pid>/stdout`）；读取该 key 时 runtime 按 body 前缀路由到对应扩展兑现器还原真实字节（见 [[runtime开发规范]]、[[执行模型]] §八）。真实 xvalue 落在扩展世界（fs 文件、gpu tensordata 等），非 kvspace 元存。
+`ref` 是 head 中的**独立 u8 字段**（0=inline、1=ptr、2=@ext），不是 langtype/kind 首字符；源码类型标注中 `*`/`@` 前缀由 layout 剥离落成 `ref` 字节，wire 层 langtype 串不含前缀（见 [[总体方案]]）。ref=2（@ext）表示真实值在扩展世界，head 的 langtype 仍为目标形态的完整 langtype 串（不带 `@` 前缀），body 不是真实值字节，而是**定位串**（如 `/networld/<host>/proc/<pid>/stdout`）；读取该 key 时 runtime 按 body 前缀路由到对应扩展兑现器还原真实字节（见 [[runtime开发规范]]、[[执行模型]] §八）。真实 xvalue 落在扩展世界（fs 文件、gpu tensordata 等），非 kvspace 元存。
 
 ## compact 数组下标
 

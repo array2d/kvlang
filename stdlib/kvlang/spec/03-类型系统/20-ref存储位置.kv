@@ -11,5 +11,9 @@ lib kvlang/spec/类型系统/ref存储位置 {
 | 2 @ext | 扩展句柄/定位符 | 单个值本体在扩展世界（fs 文件 / gpu tensordata），head 存元描述 |
 
 **源码书写与 wire 的分工**：kvlang **源码**里，指针/扩展引用仍以 `*`/`@` 前缀写在类型**最前**（`*int64`、`@[256,256]uint8`，见 tutorial 例），这是源码类型标注文法的一部分。layout 解析源码时把该前缀**剥离**并落成 head 的 `ref` 独立字节；故 **wire 层 langtype 串不含 `*`/`@` 前缀**，存储位置一律经 `ref` 字节表达。`ref=2` 只表**单值**存于扩展世界，与目录类型 `index`/`extindex` 无关。
+
+## 扩展世界句柄（ref=2 的 body 语义）
+
+ref=2 时 body **不是**真实值字节，而是**逻辑定位串**（如 `/networld/<host>/proc/<pid>/stdout`）；langtype 仍为目标 langtype 串（不带 `@` 前缀），head 只存元描述。读取该 key 时 runtime 按 body 前缀**路由**到对应兑现器还原真实字节——如 `/lib/networld/*` 的 proc 兑现器把逻辑路径映射到 `/tmp/kvlangruntime-rs/<pid>/<stream>` 物理文件读回。真实 xvalue 落在扩展世界（fs 文件、gpu tensordata），非 kvspace 元存；扩展算子的输出即以此形式写回其写槽。锚例：`tutorial/14-networld/05-capture.kv`。
 "#### -> /lib/kvlang/spec/类型系统/ref存储位置
 }

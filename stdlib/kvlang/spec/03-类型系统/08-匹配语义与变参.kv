@@ -2,6 +2,8 @@
 lib kvlang/spec/类型系统/匹配语义与变参 {
 	r####"# 匹配语义与变参
 
+本章匹配语义作用于 **def langtype**（模式）：把一个值的 value langtype `(kind,ndim,dims)` 与签名里的 def langtype 判定是否命中（两型见 [[langtype签名类型表达式]]）。
+
 ## 变参 `...`
 
 变参尾缀 `...` **仅**允许加在**末位读参**的类型表达式上（如 `A:any...`、`A:int64|float64...`），表「0..N 个同型实参」，用于 `print`/`println`/`min`/`max` 等 arity 开放的算子。
@@ -29,11 +31,11 @@ lib kvlang/spec/类型系统/匹配语义与变参 {
 
 `[]` **等价** `[?]`——均为「恰一维、任意长」。字符串标注 `[]char/<编码>` 即一维字符序列。
 
-> 规范注记：`[]` 恒为「恰一维」是 normative 规则。runtime 匹配器（`runtime/src/kindexpr.c`）已一致；layout 匹配器（`layout/src/kindexpr.rs`）当前放宽为「任意 rank ≥1」，为已裁决待修的实现偏差，须收敛至「恰一维」。
+> 规范注记：`[]` 恒为「恰一维」是 normative 规则。runtime 匹配器（`runtime/src/langtype.c`）已一致；layout 匹配器（`layout/src/langtype.rs`）当前放宽为「任意 rank ≥1」，为已裁决待修的实现偏差，须收敛至「恰一维」。
 
 任一失配即 TypeError：装载期由 layout 报诊断，运行期写 vthread 错误并停机。
 
-XValue head 三正交维编码见 [[总体方案]]（本卷只界定 langtype 作为 kindexpr 串的文法与匹配语义）。
+XValue head 三正交维编码见 [[总体方案]]（本卷只界定 langtype 串的文法与匹配语义）。
 
 ## 多态派发
 
