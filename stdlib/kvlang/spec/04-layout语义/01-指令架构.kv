@@ -2,7 +2,7 @@
 lib kvlang/spec/layout语义/指令架构 {
 	r####"# 指令架构
 
-layout 把每个函数体布进 kvspace 的一棵子树：**指令即路径**，每条指令占据一个二维坐标 `[s0, s1]`。本章界定该坐标系、opcode 与读写槽的角色、两种赋值书写形态，以及槽值的 XValue 编码。二维坐标的线格式（TLV、head kindexpr）见 [[指令布局格式]]（kvspace 模型卷）；本章只界定 layout 产出的槽位语义。
+layout 把每个函数体布进 kvspace 的一棵子树：**指令即路径**，每条指令占据一个二维坐标 `[s0, s1]`。本章界定该坐标系、opcode 与读写槽的角色、两种赋值书写形态，以及槽值的 XValue 编码。二维坐标的线格式（TLV、head langtype）见 [[指令布局格式]]（kvspace 模型卷）；本章只界定 layout 产出的槽位语义。
 
 ## 二维坐标系 `[s0, s1]`
 

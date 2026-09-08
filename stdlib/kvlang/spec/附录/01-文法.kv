@@ -19,7 +19,7 @@ integer = digit { digit }
 float   = integer [ "." integer ] [ ("e" | "E") [ "+" | "-" ] integer ]
 path    = "/" ident { ("/" | ".") ident | "·" "[" integer { "," integer } "]" }
               (* 绝对路径字面量；"/" 分隔段，"." 为子键，"·[i,j]" 为坐标段（stringkeymap 元素/张量坐标）。
-                 kindexpr 的 ref/dims 前缀语义由类型系统卷承载，不属 path。 *)
+                 langtype 的 ref/dims 前缀语义由类型系统卷承载，不属 path。 *)
 
 string  = '"' { char | escape } '"'                   (* 转义串：\n \t \r \0 \" \\ 等；可直接跨行 *)
         | "r" { "#" } '"' { char } '"' { "#" }        (* 原始串：零转义；开头 N 个 # 须以 " 后接同 N 个 # 闭合 *)

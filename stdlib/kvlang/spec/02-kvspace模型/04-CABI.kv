@@ -8,7 +8,7 @@ lib kvlang/spec/kvspace模型/CABI {
 |------|------|
 | `kvspaceGet` | 借用读：`*out` 指向后端常驻空间；`resolve=1` 穿透 link；不存在/空值 → `*out=NULL`、返回 0 |
 | `kvspaceWriteInPlace` | 就地写：key 已存在、kind 不变、body 长度不变；返回原 box body 偏移指针，违反前置条件即报错，绝不静默重分配 |
-| `kvspaceWriteNewPlace` | 新位置写：按 `(kindexpr, body_len)` 分配新 box、写好 head，返回 body 偏移指针；用于新建或 kind/尺寸变化 |
+| `kvspaceWriteNewPlace` | 新位置写：按 `(langtype, body_len)` 分配新 box、写好 head，返回 body 偏移指针；用于新建或 kind/尺寸变化 |
 | `kvspaceListLen` | 返回前缀下直接子项计数 |
 | `kvspaceListAt` | 取前缀下第 `idx` 个子项名，写入调用方自备缓冲；配合 `kvspaceListLen` 遍历 |
 | `kvspaceDel` | 批量删除给定 key 数组 |
@@ -19,8 +19,8 @@ lib kvlang/spec/kvspace模型/CABI {
 | `kvspaceClear` | 清空 |
 | `kvspaceWatch` | 一次性等待某 key 变为目标值 |
 
-无句柄的编解码符号（前端静态实现，byte-identical）：`kvspaceTlvEncode` / `kvspaceTlvEncodeMode` / `kvspaceDecodeHead`，以及构造器 `kvspaceNewPtr`（存目标完整 kindexpr + 目标 key）、`kvspaceNewChar` / `kvspaceNewBool` / `kvspaceNewInt64` / `kvspaceNewFloat64`。
+无句柄的编解码符号（前端静态实现，byte-identical）：`kvspaceTlvEncode` / `kvspaceTlvEncodeMode` / `kvspaceDecodeHead`，以及构造器 `kvspaceNewPtr`（存目标完整 langtype + 目标 key）、`kvspaceNewChar` / `kvspaceNewBool` / `kvspaceNewInt64` / `kvspaceNewFloat64`。
 
-读写各带 `resolve` 参数：`resolve=1` 时透明穿透 ref=1 指针（link）；`kvspaceListLen`/`kvspaceListAt` 另有 `expand_ext` 参数控制是否展开 extindex 子项。head 线格式与 kindexpr 编码见 [[键系统与数组访问]]。
+读写各带 `resolve` 参数：`resolve=1` 时透明穿透 ref=1 指针（link）；`kvspaceListLen`/`kvspaceListAt` 另有 `expand_ext` 参数控制是否展开 extindex 子项。head 线格式与 langtype 编码见 [[键系统与数组访问]]。
 	"#### -> /lib/kvlang/spec/kvspace模型/CABI
 }

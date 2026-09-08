@@ -11,22 +11,24 @@ lib kvlang/spec/runtime语义/cruntime与后端abi {
 **runtime-c 拥有（唯一实现，扩展不得复刻）**：
 
 1. **执行核心**：取指-解码-执行大循环、call/return/br/goto、vthread 调度、native builtin 派发、`=` 拷贝语义。
-2. **值语义与编解码**：TLV / kindexpr 的**唯一编解码器**在 kvspace 正典 codec（`kvspaceTlvEncode` / `kvspaceDecodeHead` / `kvspaceNewPtr`/`NewChar`/`NewBool`/`NewInt64`/`NewFloat64`）；runtime-c 的 `xvalue.c` 只是其薄封装。kindexpr 串是类型的唯一真相，怎么拼、怎么解，只此一处。
-3. **指令解码与签名校验**：`rwir.c:RwirDecode`（稠密探查、遇空即停）、`/lib/<op>` 签名的读写码规范、`KindexprValid`/`KindexprMatch` 类型判定。
+2. **值语义与编解码**：TLV / langtype 的**唯一编解码器**在 kvspace 正典 codec（`kvspaceTlvEncode` / `kvspaceDecodeHead` / `kvspaceNewPtr`/`NewChar`/`NewBool`/`NewInt64`/`NewFloat64`）；runtime-c 的 `xvalue.c` 只是其薄封装。langtype 串是类型的唯一真相，怎么拼、怎么解，只此一处。
+3. **指令解码与签名校验**：`rwir.c:RwirDecode`（稠密探查、遇空即停）、`/lib/<op>` 签名的读写码规范、`LangtypeValid`/`LangtypeMatch` 类型判定。
 
-**扩展运行时套用核心，不复刻**：runtime-c 把上述三件能力经嵌入式 C ABI（下节 `kvlang_runtime.h` + `kvlang_rwirext.h`）对外开放。扩展运行时**嵌入**这套核心、复用其执行循环、native 派发与正典 codec，只**自行解释己方 opcode**——不得另起执行核心、不得另写编解码器、不得复刻 native 算子。据此：
+**扩展运行时套用核心，不复刻**：runtime-c 把上述三件能力经嵌入式 C ABI（下节 `kvlang_runtime.h` + `kvlang_myrwir.h`）对外开放。扩展运行时**嵌入**这套核心、复用其执行循环、native 派发与正典 codec，只**自行解释己方 opcode**——不得另起执行核心、不得另写编解码器、不得复刻 native 算子。据此：
 
-- **runtime-rs 是扩展运行时的参考实现**，不是第二套等价核心。它作为 rwirext 宿主，套用 runtime-c 核心，在自己的 **myrwircaps**（见 [[runtime开发规范]]）里登记 print/fs/http/networld/vthread 等「OS 工具箱」rwir。其对 head/kindexpr 的读写**必须**走正典 codec，不得自持一份编解码。
+- **runtime-rs 是扩展运行时的参考实现**，不是第二套等价核心。它作为 myrwir 宿主，套用 runtime-c 核心，在自己的 **myrwircaps**（见 [[runtime开发规范]]）里登记 print/fs/http/networld/vthread 等「OS 工具箱」rwir。其对 head/langtype 的读写**必须**走正典 codec，不得自持一份编解码。
 - **未来的 deepx-gpu-compute（GPU 算子融合计算引擎）同架构**：同样嵌入 runtime-c 核心，只在其 **myrwircaps** 里登记 tensor 融合算子——算子融合发生在扩展侧（见 [[runtime开发规范]]），核心的解释语义不变。
 
 ## C runtime 结构
 
-`kvlang/runtime/` 是通用嵌入式执行器（纯 C + `extern "C"`），可嵌入 rwirext 项目（op-gpu、agent、livebyte）。两组对外 C ABI：
+`kvlang/runtime/` 是通用嵌入式执行器（纯 C + `extern "C"`），可嵌入 myrwir 项目（op-gpu、agent、livebyte）。两组对外 C ABI：
 
 - `kvlang_runtime.h`：核心执行器（`kvlangRuntimeConnect`/`Disconnect`/`Bootstrap`/`ExecuteVthread`/`KvspaceHandle` …）。
-- `kvlang_rwirext.h`：扩展 runtime 语义，**只暴露 kvspace 不提供的部分**。现有 9 个符号：`Register`、`Handoff`、`NextPc`、`Params`、`ResolveRead`、`ResolveReadPath`、`ResolveWrite`、`KindexprValid`、`KindexprMatch`。KV 存取（connect/get/write/del/list/tlv）**不在此**——扩展宿主自连 kvspace ABI，把句柄（`void *`）传进带句柄的 rwirext 函数。
+- `kvlang_myrwir.h`：扩展 runtime 语义，**只暴露 kvspace 不提供的部分**。现有 9 个符号：`Register`、`Handoff`、`NextPc`、`Params`、`ResolveRead`、`ResolveReadPath`、`ResolveWrite`、`LangtypeValid`、`LangtypeMatch`。KV 存取（connect/get/write/del/list/tlv）**不在此**——扩展宿主自连 kvspace ABI，把句柄（`void *`）传进带句柄的 myrwir 函数。
 
-内部模块：`xvalue.c`（TLV 编解码薄封装）、`kindexpr.c`、`kv.c`（kvspace ABI 封装）、`keytree.c`（路径构造）、`rwir.c`（PC 解析 + Decode）、`vthread.c`、`builtin*.c`（native 算子 + 静态注册表）、`kvcpu.c`（Execute 循环）、`runtime.c`（ABI 层）、`rwirext.c`（扩展 ABI，含 `notinmyrwircaps`）。myrwircaps 为**静态数组 + 线性查找**。
+其中 `LangtypeValid`/`LangtypeMatch` 与正典 codec 的 head 解码，正是 langtype **两型**对外的两条 ABI（两型 def/value 与 kindexpr 简写见 [[langtype签名类型表达式]]）：前者服务 **def langtype**（模式侧——校验签名 kindexpr、把一个值的 `(kind,ndim,dims)` 匹配进签名），后者服务 **value langtype**（具体侧——把 head 里一条 kindexpr 解析为 `(kind,ndim,dims,元素字节宽)`，事实源为 `kvspaceDecodeHead` 与 layout 的 `kvlangLangtypeParse`）。两者同吃一条 kindexpr 串、共用唯一文法与 codec，差别只在模式匹配 vs 具体解析。
+
+内部模块：`xvalue.c`（TLV 编解码薄封装）、`langtype.c`、`kv.c`（kvspace ABI 封装）、`keytree.c`（路径构造）、`rwir.c`（PC 解析 + Decode）、`vthread.c`、`builtin*.c`（native 算子 + 静态注册表）、`kvcpu.c`（Execute 循环）、`runtime.c`（ABI 层）、`myrwir.c`（扩展 ABI，含 `notinmyrwircaps`）。myrwircaps 为**静态数组 + 线性查找**。
 
 ## 统一 `kvspace*` C ABI（去特化）
 
@@ -36,7 +38,7 @@ layout 与 runtime **都不对 kvspace 做特化**：不 dlopen、不双后端�
 kvspaceConnect / Close / Clear
 kvspaceGet                       // 借用读：*out 指向后端常驻/回收空间，调用方不得 free
 kvspaceWriteInPlace              // key 已存在且 body_len 相等 → 返回原 box body 偏移指针
-kvspaceWriteNewPlace             // 否则按 (kindexpr, body_len) 分配新 box、写 head，返回 body 指针
+kvspaceWriteNewPlace             // 否则按 (langtype, body_len) 分配新 box、写 head，返回 body 指针
 kvspaceListLen / ListAt / Del / DelTree / Cp / CpTree
 kvspaceMkindex / MkindexExt / RmindexExt / Watch
 kvspaceTlvEncode / TlvEncodeMode / DecodeHead

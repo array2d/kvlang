@@ -2,16 +2,16 @@
 lib kvlang/spec/类型系统/已敲定 {
 	r####"# 已敲定
 
-- 三维正交：`ref` × `storetype` × `langtype`，codec 只认 storetype（1 字节）、语言层只认 langtype（kindexpr 串）。
-- **langtype = 旧 kindexpr 串**（变长），保留高级语言全部类型定义；1 字节 kindcode 方案作废。
+- 三维正交：`ref` × `storetype` × `langtype`，codec 只认 storetype（1 字节）、语言层只认 langtype（即类型表达式串）。
+- **langtype = 完整类型表达式串**（变长），保留高级语言全部类型定义；1 字节 kindcode 方案作废。
 - storetype 集：`NONE`/`ATOM`/`ARRAYND`/`index`/`extindex`（index/extindex 是 storetype，非 langtype）。
 - 容器语义类型只剩 `stringkeymap`/`struct`（口语「map」= stringkeymap；`object`/`scope` **彻底删除**，无此种类/关键字）；物理落 index。
 - 字符串：ascii/utf32 → ARRAYND；utf8 → ARRAYND(elem 1B)。
 - time/duration → ATOM；rwir 指令行 → ARRAYND 叶子（无实现体）。
 - **rwir vs rwfunc 的本质区别**：rwir 无实现指令行、由 runtime 直接兑现（myrwircaps）；rwfunc 有 kvlang 实现指令行（`/` 目录下的 `[s0>0,·]`）→ 目录。
 - **def rwir 是路由头**（原 defrwir）：仅存于 `/lib/<op>`，是 rwir 统一调度入口；`/vthread/` 的每条 rwir 引用 `/lib/` 的 def rwir。**无「扩展 rwir」之说**，只有各 runtime 的 myrwircaps。
-- **签名不入 langtype 串**：rwfunc/def rwir 主槽 langtype 即裸名 `rwfunc`/`def rwir`；主槽 body 只记 `[nr][nw][dynamic]`；各参数真实类型落在签名行 `[0,x]` 槽（`x<0` 读参、`x>0` 写参、`[0,0]` 锚点），每槽为 `def kindexpr` xvalue（body=该参数 kindexpr 串）。
-- **def 族带空格书写**：`def rwir`、`def struct`、`def kindexpr`——`def` 与 base 间强制空格，连写形式废除。
+- **签名不入 langtype 串**：rwfunc/def rwir 主槽 langtype 即裸名 `rwfunc`/`def rwir`；主槽 body 只记 `[nr][nw][dynamic]`；各参数真实类型落在签名行 `[0,x]` 槽（`x<0` 读参、`x>0` 写参、`[0,0]` 锚点），每槽为 `def langtype` xvalue（body=该参数 langtype 串）。
+- **def 族带空格书写**：`def rwir`、`def struct`、`def langtype`——`def` 与 base 间强制空格，连写形式废除。
 - **rwfunc/lib 是目录节点**：成员即 `/` 子路径；rwfunc 静态定义 → index、vthread 运行栈 → extindex。
 - **index/extindex 物理载体 = m×n 对齐字符串数组**（`dims=[len,cap,M]`，M align8、cap 扩容），沿用今日敲定方案，存成员/子项名。
 - **`·` 双义正交**：① memindex 标记 `{key}·` 仅 stringkeymap/struct 用；② `/lib/{pkg}·{func}` 里的 `·` 是包·函数命名分隔符（路径名一部分），与 memindex 无关，rwfunc 目录成员仍走 `/`。

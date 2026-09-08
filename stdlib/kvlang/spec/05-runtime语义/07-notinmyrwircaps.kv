@@ -1,6 +1,6 @@
 // 欢迎加入kvspace世界
 lib kvlang/spec/runtime语义/notinmyrwircaps {
-	r####"# rwirext 扩展运行时（handoff 与就地）
+	r####"# myrwir 扩展运行时（handoff 与就地）
 
 ## handoff 协议（跨进程扩展）
 
@@ -31,11 +31,11 @@ networld  networld/proc·exec
           networld/fs·size / ·read / ·write / ·append / ·list / ·del / ·mkdir / ·exists
 ```
 
-就地与跨进程只是**执行位置**之别，职责线一致——两者都只经 `kvlang_rwirext*` 解析参数、只经 `kvspace*` 正典 ABI 读写编解码。
+就地与跨进程只是**执行位置**之别，职责线一致——两者都只经 `kvlang_myrwir*` 解析参数、只经 `kvspace*` 正典 ABI 读写编解码。
 
 ## 参数解析与零拷贝读
 
-扩展**只经** `kvlang_rwirext*` 宿主 ABI 拿参数，**不得**自行解析 rwir 槽位：
+扩展**只经** `kvlang_myrwir*` 宿主 ABI 拿参数，**不得**自行解析 rwir 槽位：
 
 - `Params(pc)`：返回 opcode + 读/写参名（`\n` 分隔）。
 - `ResolveRead(pc, idx)`：读参解析为**字符串**（stringkeymap 值展开为 `[e0, e1, …]`）；**对数组只返首元素**。

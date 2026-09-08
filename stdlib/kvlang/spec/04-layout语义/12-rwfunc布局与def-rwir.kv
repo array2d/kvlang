@@ -16,7 +16,7 @@ lib kvlang/spec/layout语义/rwfunc布局与def_rwir {
 
 `/lib/<opcode>`（langtype `def rwir`）**只由 runtime 注册写入**，kv 源码不声明 rwir、layout 也不产生 def rwir：
 
-- **runtime 注册**——各 runtime 启动时经运行时注册接口把自身 myrwircaps 的每个 opcode 写入 `/lib/<opcode>`；注册前校验各参 kindexpr。主槽 body `[nr][nw][dynamic]`，各参数类型分别落入 `[0,x]` 签名行槽（`def kindexpr` xvalue），无实现指令行。
+- **runtime 注册**——各 runtime 启动时经运行时注册接口把自身 myrwircaps 的每个 opcode 写入 `/lib/<opcode>`；注册前校验各参 langtype。主槽 body `[nr][nw][dynamic]`，各参数类型分别落入 `[0,x]` 签名行槽（`def langtype` xvalue），无实现指令行。
 
 layout **不**判定某 opcode 是否在本 runtime 的 myrwircaps 内——调用目标 opcode 槽统一 langtype `rwir|rwfunc`，判定推迟到 runtime 查 `/lib/<opcode>` 的 XValue langtype（见 [[执行模型]]）。def rwir 路由头仅落于 `/lib/<opcode>`，无 native/扩展/user 的静态归类——每个 runtime 只声明自身 myrwircaps，不在 layout 层区分。
 
@@ -39,6 +39,6 @@ lib math {
 
 ## struct 原型
 
-`struct` 声明布进 `/lib/<Name>`：原型定义节点（langtype `def struct`，body 为各字段 `name:kindexpr`）+ memindex（`/lib/<Name>·`，字段名唯一权威）+ 各字段默认值。runtime `struct·new` 以此原型克隆实例，字段默认值即实例初值。
+`struct` 声明布进 `/lib/<Name>`：原型定义节点（langtype `def struct`，body 为各字段 `name:langtype`）+ memindex（`/lib/<Name>·`，字段名唯一权威）+ 各字段默认值。runtime `struct·new` 以此原型克隆实例，字段默认值即实例初值。
 	"#### -> /lib/kvlang/spec/layout语义/rwfunc布局与def_rwir
 }

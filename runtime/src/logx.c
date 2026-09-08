@@ -9,12 +9,16 @@ static const char *kvlangExe(void) {
 }
 
 static int kvlangLogLevel(void) {
+    /* LOG_LEVEL 运行期不变：首调解析后缓存，免每条日志（每指令一次）重复 getenv+strcmp。 */
+    static int cached = -1;
+    if (cached >= 0) return cached;
     const char *lv = getenv("LOG_LEVEL");
-    if (!lv || !lv[0] || strcmp(lv, "warn") == 0) return 2;
-    if (strcmp(lv, "debug") == 0) return 0;
-    if (strcmp(lv, "info") == 0) return 1;
-    if (strcmp(lv, "error") == 0) return 3;
-    return 2;
+    if (!lv || !lv[0] || strcmp(lv, "warn") == 0) cached = 2;
+    else if (strcmp(lv, "debug") == 0) cached = 0;
+    else if (strcmp(lv, "info") == 0) cached = 1;
+    else if (strcmp(lv, "error") == 0) cached = 3;
+    else cached = 2;
+    return cached;
 }
 
 void kvlangLogDebug(const char *fmt, ...) {

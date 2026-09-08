@@ -18,7 +18,7 @@ builtin_call = ( "abs" | "neg" | "sign" | "pow" | "sqrt" | "exp" | "log"
 `print` / `println` / `cerr` / `input` **不是 native**——它们由 term runtime 的 myrwircaps（rwir 能力集）兑现（见 runtime 语义卷）。
 
 `·` 限定内建族（`base·method(...)`，非裸名终结符）：
-`string·*`、`xv·*`（at/set/reshape/reinterpret/kindexpr/bodylen…）、`kv·*`（get/set/del…）、`ndarray·*`（numel/dim/shape）、`array·*`（append/slice/scatter/compact）、`struct·new`、`vthread·*`（create/run/call/sleep/setstatus）、`time·*`、`time/duration·*`（包分隔用 `/` 分段、`·` 接方法）、`random·*`（uint64/int63/intn）。
+`string·*`、`xv·*`（at/set/reshape/reinterpret/langtype/bodylen…）、`kv·*`（get/set/del…）、`ndarray·*`（numel/dim/shape）、`array·*`（append/slice/scatter/compact）、`struct·new`、`vthread·*`（create/run/call/sleep/setstatus）、`time·*`、`time/duration·*`（包分隔用 `/` 分段、`·` 接方法）、`random·*`（uint64/int63/intn）。
 
 ```
 (* 类型构造器兼转换：int8(x)/float32(x)/char/utf8(x)/bool(x) …；窄化按补码回绕，float→int 向零截断 *)
