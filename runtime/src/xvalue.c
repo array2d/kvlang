@@ -21,6 +21,17 @@ void kvlangXvalueSetBytes(kvlangXvalue_t *v, uint8_t *data, uint32_t len) {
     v->borrowed = 0;
 }
 
+/* 借用值 → 自持：凡要把读回的 XValue 存入生命周期超出本指令的结构（如 decode 缓存的指令
+ * 字面量），必须先落地，否则 kvspace 借用池回收后指针悬空。 */
+void kvlangXvalueMaterialize(kvlangXvalue_t *v) {
+    if (v->borrowed && v->data && v->len > 0) {
+        uint8_t *o = malloc(v->len);
+        memcpy(o, v->data, v->len);
+        v->data = o;
+    }
+    v->borrowed = 0;
+}
+
 /* 解析 kindexpr 内容 → (dims, base kind)。kindexpr 为 NUL 终止串、无前缀（ref 归 head.ref）。 */
 void kvlang_kindexpr_parse(const uint8_t *kx, kvlang_kindexpr_t *out) {
     memset(out, 0, sizeof(*out));

@@ -94,6 +94,17 @@ void kvlangBuiltinResolveReadValue(kvlangKv_t *kv, const char *frame_root, const
     kvlangXvalueFree(&pv); free(stk);
 }
 
+/* 读参 → 其最终存储键（malloc）：字面量（指令内冻结的具体值，无后端槽）返 NULL；
+ * 变量则复用 ResolveWriteSlot——读侧最终槽键与写侧同一路径（普通成员=stk+name，
+ * ptr 追链到最终目标），供 xv 系列对 key 直发 GetHead/GetPart/SetPart 做分片读写。 */
+char *kvlangBuiltinResolveReadKey(kvlangKv_t *kv, const char *frame_root, const char *name,
+                          const kvlangXvalue_t *val) {
+    if (val && !kvlangXvalueNone(val) && !kvlangXvalueKindIs(val, KVSPACE_KIND_RWIR) && !kvlangXvalueKindIs(val, KVSPACE_KIND_RWFUNC))
+        return NULL;
+    if (!name || !name[0]) return NULL;
+    return kvlangBuiltinResolveWriteSlot(kv, frame_root, name);
+}
+
 char *kvlangBuiltinResolveWriteSlot(kvlangKv_t *kv, const char *frame_root, const char *name) {
     if (name[0] == '/') return strdup(name);
     char *stk = kvlangKeytreeStack(frame_root);

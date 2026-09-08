@@ -636,6 +636,9 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode, char *
     char *cur_frame = NULL, *cur_funcdir = NULL;   /* 帧不变时 funcdir 只读一次，供缓存键 */
     int rc = 0;
     for (;;) {
+        /* 指令边界：回收上条指令执行期借出的读池（cache 指令的读参已 Materialize 自持，不受影响）。
+         * durable 惰性写不再清池，全靠此处回收；shm 常驻映射侧为 no-op。 */
+        kvlangKvReadReset(kv);
         char *pcv = NULL, *status = NULL;
         kvlangVthreadGet(kv, vtid, &pcv, &status);
         if (!status || (strcmp(status, "init") != 0 && strcmp(status, "running") != 0 && strcmp(status, "wait") != 0)) {

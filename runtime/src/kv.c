@@ -59,32 +59,53 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
     return 0;
 }
 
+/* 指令边界回收读借用池：VM 每条指令末调一次。 */
+void kvlangKvReadReset(kvlangKv_t *k) { kvspaceReadReset(k->h); }
+
+/* 定位读：借用读 key 值的 [off, off+len) 字节 → out(borrowed=1)。空/越界 → out len=0。 */
+int kvlangKvGetPart(kvlangKv_t *k, const char *key, uint32_t off, uint32_t len, kvlangXvalue_t *out) {
+    kvlangXvalueZero(out);
+    uint8_t *d;
+    uint32_t got;
+    if (kvspaceGetPart(k->h, key, off, len, &d, &got) != 0)
+        return -1;
+    if (d && got > 0) {
+        out->data = d;
+        out->len = got;
+        out->borrowed = 1;
+    }
+    return 0;
+}
+
+/* 定位写：就地写 buf 到 key 值的 [off, off+buf_len)（key 须已存在、不改结构）。 */
+int kvlangKvSetPart(kvlangKv_t *k, const char *key, uint32_t off, const uint8_t *buf, uint32_t buf_len,
+                     char *err, uint32_t err_cap) {
+    return kvspaceSetPart(k->h, key, off, buf, buf_len, err, err_cap);
+}
+
+/* 读 head：只读值前缀解码三正交轴 head（不取 body）。空/不存在 → 非 0。 */
+int kvlangKvGetHead(kvlangKv_t *k, const char *key, kvspaceHead_t *out) {
+    return kvspaceGetHead(k->h, key, out);
+}
+
 /* 写即构造：逐条解 head 取 (kindexpr, body)——同 body_len 就地(WriteInPlace)，否则新位置
  * (WriteNewPlace)——向 kvspace 要 body 偏移指针后直接写字节，无预合并缓冲。 */
 int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, uint32_t err_cap) {
-    /* 写会 flush kvspace 借用池令借用值悬空——先把借用值一次性快照为自持，再逐条写。 */
-    uint8_t **snap = NULL;
-    for (int i = 0; i < n; i++)
-        if (pairs[i].val.borrowed && pairs[i].val.data && pairs[i].val.len > 0) {
-            if (!snap)
-                snap = calloc((size_t)n, sizeof(uint8_t *));
-            snap[i] = malloc(pairs[i].val.len);
-            memcpy(snap[i], pairs[i].val.data, pairs[i].val.len);
-        }
+    /* 借用值全程有效：durable 惰性写不再清读池，读借用池由 VM 在指令边界统一 ReadReset 回收，
+     * 故写期直接用 v->data，不再需要防御性快照。 */
     int rc = 0;
     for (int i = 0; i < n; i++) {
         const kvlangXvalue_t *v = &pairs[i].val;
-        const uint8_t *vdata = snap && snap[i] ? snap[i] : v->data;
-        if (!vdata || v->len == 0) { /* None → 删键，令该槽读回 None（不可静默跳过留旧值） */
+        if (!v->data || v->len == 0) { /* None → 删键，令该槽读回 None（不可静默跳过留旧值） */
             const char *dk[1] = {pairs[i].key};
             kvspaceDel(k->h, dk, 1, err, err_cap);
             continue;
         }
         kvspaceHead_t h;
-        if (kvspaceDecodeHead(vdata, v->len, &h) != 0 || !h.kindexpr[0])
+        if (kvspaceDecodeHead(v->data, v->len, &h) != 0 || !h.kindexpr[0])
             continue;
         uint32_t body_len = h.body_len < 0 ? 0 : (uint32_t)h.body_len;
-        const uint8_t *body = vdata + h.body_offset;
+        const uint8_t *body = v->data + h.body_offset;
         uint8_t *dst = NULL;
         if (kvspaceWriteInPlace(k->h, pairs[i].key, 1, body_len, &dst, err, err_cap) != 0) {
             if (kvspaceWriteNewPlace(k->h, pairs[i].key, h.ref, h.storetype, h.ro, h.vid, (const char *)h.kindexpr, body_len, &dst, err, err_cap) != 0) {
@@ -94,11 +115,6 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
         }
         if (body_len > 0 && dst)
             memcpy(dst, body, body_len);
-    }
-    if (snap) {
-        for (int i = 0; i < n; i++)
-            free(snap[i]);
-        free(snap);
     }
     return rc;
 }

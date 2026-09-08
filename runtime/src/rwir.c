@@ -63,6 +63,7 @@ int kvlangRwirDecode(kvlangKv_t *kv, const char *link_base, const char *pc, kvla
         free(nm);
         if (kvlangXvalueNone(&v)) { kvlangXvalueFree(&v); break; }
         out->reads[out->nr].name = kvlangXvalueValueString(&v);
+        kvlangXvalueMaterialize(&v);   /* 指令进 rwir_cache 长存，字面量须自持 */
         out->reads[out->nr].val = v;
         out->nr++;
     }
@@ -73,6 +74,7 @@ int kvlangRwirDecode(kvlangKv_t *kv, const char *link_base, const char *pc, kvla
         free(nm);
         if (kvlangXvalueNone(&v)) { kvlangXvalueFree(&v); break; }
         out->writes[out->nw].name = kvlangXvalueValueString(&v);
+        kvlangXvalueMaterialize(&v);   /* 指令进 rwir_cache 长存，字面量须自持 */
         out->writes[out->nw].val = v;
         out->nw++;
     }

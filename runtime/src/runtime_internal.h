@@ -40,6 +40,11 @@ extern void *kvspaceConnect(const char *dsn);
 extern void  kvspaceClose(void *h);
 /* 借用读：*out 指向后端常驻/回收空间，调用方不得 free。resolve=1 穿透 link。 */
 extern int   kvspaceGet(void *h, const char *key, int resolve, uint8_t **out, uint32_t *out_len);
+/* 指令边界回收读借用池；定位读/写（分片）；只读 head 前缀。见 kvspace.h 契约。 */
+extern void  kvspaceReadReset(void *h);
+extern int   kvspaceGetPart(void *h, const char *key, uint32_t offset, uint32_t len, uint8_t **out, uint32_t *out_len);
+extern int   kvspaceSetPart(void *h, const char *key, uint32_t offset, const uint8_t *buf, uint32_t buf_len, char *err, uint32_t err_cap);
+extern int   kvspaceGetHead(void *h, const char *key, kvspaceHead_t *out);
 /* 就地写：key 已存在、body_len==原 body_len → 返回原 box body 偏移指针；否则非 0 + err。 */
 extern int   kvspaceWriteInPlace(void *h, const char *key, int resolve, uint32_t body_len,
                                   uint8_t **body, char *err, uint32_t err_cap);
@@ -114,6 +119,7 @@ static inline bool kvlangXvalueNone(const kvlangXvalue_t *v) { return v->data ==
 static inline void kvlangXvalueZero(kvlangXvalue_t *v) { v->data = NULL; v->len = 0; v->borrowed = 0; }
 void kvlangXvalueFree(kvlangXvalue_t *v);          /* free 自持 data（借用读已拷贝为自持） */
 void kvlangXvalueSetBytes(kvlangXvalue_t *v, uint8_t *data, uint32_t len);  /* 接管内存 */
+void kvlangXvalueMaterialize(kvlangXvalue_t *v);   /* 借用值落地为自持（存入跨指令结构前必调） */
 int  kvlangXvalueHead(const kvlangXvalue_t *v, kvspaceHead_t *h);                 /* decode head */
 const char *kvlangXvalueKind(const kvlangXvalue_t *v);                       /* 返回 kind，None="" */
 bool kvlangXvalueKindIs(const kvlangXvalue_t *v, const char *kind);
@@ -209,6 +215,10 @@ kvlangKv_t *kvlangKvConnect(const char *dsn);
 void kvlangKvDisconnect(kvlangKv_t *k);
 int kvlangKvGetOne(kvlangKv_t *k, const char *key, kvlangXvalue_t *out);   /* None → out len=0 */
 int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXvalue_t *out);
+void kvlangKvReadReset(kvlangKv_t *k);   /* 指令边界回收读借用池 */
+int kvlangKvGetPart(kvlangKv_t *k, const char *key, uint32_t off, uint32_t len, kvlangXvalue_t *out);  /* 借用读分片 body 字节 */
+int kvlangKvSetPart(kvlangKv_t *k, const char *key, uint32_t off, const uint8_t *buf, uint32_t buf_len, char *err, uint32_t err_cap);  /* 就地写分片 */
+int kvlangKvGetHead(kvlangKv_t *k, const char *key, kvspaceHead_t *out);   /* 只读 head，不取 body */
 int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, uint32_t err_cap);
 int kvlangKvDel(kvlangKv_t *k, const char *key, char *err, uint32_t err_cap);
 int kvlangKvDelTree(kvlangKv_t *k, const char *prefix, char *err, uint32_t err_cap);
@@ -328,6 +338,7 @@ int kvlangCtlBr(kvlangFrame_t *f);
 void kvlangBuiltinResolveReadValue(kvlangKv_t *kv, const char *frame_root, const char *name,
                            const kvlangXvalue_t *val, kvlangXvalue_t *out);
 char *kvlangBuiltinResolveWriteSlot(kvlangKv_t *kv, const char *frame_root, const char *name);
+char *kvlangBuiltinResolveReadKey(kvlangKv_t *kv, const char *frame_root, const char *name, const kvlangXvalue_t *val);
 bool kvlangBuiltinTryParseNumber(const char *s, kvlangXvalue_t *out);          /* 成功 out 接管 */
 void kvlangDisplay(const kvlangXvalue_t *v, char **out);                     /* malloc，对齐 Go Display */
 
