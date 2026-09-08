@@ -29,15 +29,15 @@ runtime 对一个 vthread 的执行是如下循环（C 实现 `runtime/src/kvcpu
 
 ## 派发链
 
-每条指令按**固定优先级**派发，命中即止：
+每条指令的归属互斥，decode 期一次固化为统一派发码 `op_id`（quickening），执行期据此纯整数跳表：
 
-1. **控制指令**（`op_is_control`）——`call` / `return` / `br` / `goto`。
-2. **native builtin**（`kvlangBuiltinIsNative`）——静态注册表内的核心算子（枚举见 [[函数调用与内建]]）。
-3. **`=` 拷贝**（`is_copy_op`）——值拷贝语义。
-4. **须经 def rwir 路由的 rwir**（`isothersrwir`）——`/lib/<opcode>` 存在且 kind=`def rwir`（见 [[rwirext扩展]]）。
-5. **否则视为用户函数调用**——opcode 移入 `reads[0]`，改写为 `call` 指令。
+1. **myrwircaps 内的核心算子**（`op_id ≥ 0`，直查静态能力表，枚举见 [[函数调用与内建]]）——本 runtime 就地兑现。
+2. **控制指令**（`op_id ∈ {OPID_CALL/RETURN/BR/GOTO}`）——`call` / `return` / `br` / `goto`。
+3. **`=` 拷贝**（`op_id == OPID_COPY`）——值拷贝语义。
+4. 以上皆否（`op_id == OPID_notinmyrwircaps`，即 `notinmycaps`）时查 `/lib`：**`notinmyrwircaps`**——`/lib/<opcode>` 存在 def rwir 路由头（kind=`def rwir`）→ 路由到能兑现它的其它 runtime（见 [[rwirext扩展]]）。
+5. **否则视为用户 rwfunc 调用**——opcode 移入 `reads[0]`，改写为 `call` 指令。
 
-实现**必须**遵循此优先级：native 注册表先于 `/lib` 查表，故与 native 同名的 `/lib/<op>` 不改变派发。
+`op_id` 由 decode 期分类固化，控制/拷贝/myrwircaps 成员全折入同一整数字段，热路径无 opcode 字符串匹配。myrwircaps 判定先于 `/lib` 查表，故与核心算子同名的 `/lib/<op>` 不改变派发。
 
 ## 调用即无返回值——输出走写参映射
 

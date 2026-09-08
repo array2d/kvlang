@@ -1,5 +1,5 @@
 // 欢迎加入kvspace世界
-lib kvlang/spec/runtime语义/rwirext扩展_b {
+lib kvlang/spec/runtime语义/notinmyrwircaps {
 	r####"# rwirext 扩展运行时（handoff 与就地）
 
 ## handoff 协议（跨进程扩展）
@@ -12,7 +12,7 @@ lib kvlang/spec/runtime语义/rwirext扩展_b {
 
 第一个 rwir 的 `vids` 是真实 strkeymap；后续同 opcode 的 `vids` 是 `Ptr` 指向第一个（共享同一队列）。时序：
 
-1. 中央 runtime `isothersrwir` 命中 → `handoff_external_rwir`：`Set /lib/<op>/vids/<vtid>=pc`。
+1. 中央 runtime `notinmyrwircaps` 命中 → `handoff_external_rwir`：`Set /lib/<op>/vids/<vtid>=pc`。
 2. 扩展发现队列中的 vtid，`RunSeq(pc)`：从 PC 起逐条解码，只要 `opcode ∈ 本扩展.myrwircaps` 就执行，遇第一条不在 myrwircaps 内的指令即停（**顺序执行，非并行 batch**）；写回最终 PC，删 `vids` 项。
 3. 中央 runtime `Watch` 直到 vtid 从队列消失（30s 超时），继续。
 
@@ -44,5 +44,5 @@ networld  networld/proc·exec
 - `NextPc(pc)`：纯函数，求后继 PC。
 
 **规范要点**：需要整块字节（如 `[]uint8`）时**必须**走 `ResolveReadPath` + TLV body，**不得**用 `ResolveRead`（后者对数组只返首元素）。
-	"#### -> /lib/kvlang/spec/runtime语义/rwirext扩展_b
+	"#### -> /lib/kvlang/spec/runtime语义/notinmyrwircaps
 }

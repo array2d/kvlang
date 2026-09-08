@@ -218,7 +218,7 @@ bool kvlangKeytreeIsEntryPc(const char *pc);
  * ≥0    = native，直查 myrwircaps[op_id]
  * 负值  = 保留派发类（control / copy / 待定），语义见下 */
 enum {
-    OPID_OTHER  = -1,   /* 未定：他人 rwir 或用户函数，执行期经 kvspace 查 /lib 才能区分 */
+    OPID_notinmyrwircaps = -1,   /* 不在本 runtime myrwircaps；执行期查 /lib：def rwir 路由头→路由，否则用户 rwfunc→调用 */
     OPID_CALL   = -2,
     OPID_RETURN = -3,
     OPID_GOTO   = -4,
@@ -226,14 +226,9 @@ enum {
     OPID_COPY   = -6,
 };
 
-static inline bool op_is_control(const char *op) {
-    return strcmp(op, OP_CALL) == 0 || strcmp(op, OP_RETURN) == 0 ||
-           strcmp(op, OP_BR) == 0 || strcmp(op, OP_GOTO) == 0;
-}
-
 int kvlangBuiltinCapIndex(const char *opcode);
 
-/* decode 期分类：control/copy 先于 native，miss 落 OPID_OTHER（执行期再查 /lib）。 */
+/* decode 期分类：control/copy 先于 native，miss 落 OPID_notinmyrwircaps（执行期再查 /lib）。 */
 static inline int kvlangOpClassify(const char *op) {
     if (strcmp(op, OP_CALL) == 0) return OPID_CALL;
     if (strcmp(op, OP_RETURN) == 0) return OPID_RETURN;
@@ -241,7 +236,7 @@ static inline int kvlangOpClassify(const char *op) {
     if (strcmp(op, OP_BR) == 0) return OPID_BR;
     if (strcmp(op, OP_COPY) == 0) return OPID_COPY;
     int n = kvlangBuiltinCapIndex(op);
-    return n >= 0 ? n : OPID_OTHER;
+    return n >= 0 ? n : OPID_notinmyrwircaps;
 }
 
 typedef struct { char *name; kvlangXvalue_t val; } kvlangParam_t;
@@ -260,8 +255,9 @@ void kvlangRwirInstFree(kvlangRwirInst_t *inst);
 /* 外部扩展 handoff：写共享队列 /lib/<opcode>/vids/<vid>=pc，阻塞 watch 该 key 直至变 None
  * （外部执行器认领、驱动、置 nextpc 后删除该条目 → 本端解除阻塞）。 */
 int handoff_external_rwir(kvlangKv_t *kv, const char *vtid, const char *pc, kvlangRwirInst_t *inst);
-/* opcode 是否他人 rwir：读 kvspace /lib/<opcode>，kind=defrwir 即是（能力唯一事实源）。 */
-bool isothersrwir(kvlangKv_t *kv, const char *opcode);
+/* notinmyrwircaps：opcode 是不在本 runtime myrwircaps 内、须经 def rwir 路由给能兑现它的
+ * 其它 runtime 的 rwir。判据=读 kvspace /lib/<opcode> 存在 def rwir 路由头（能力唯一事实源）。 */
+bool notinmyrwircaps(kvlangKv_t *kv, const char *opcode);
 
 /* ── vthread ───────────────────────────────────────────────────────── */
 
@@ -276,7 +272,8 @@ void kvlangVthreadSetError(kvlangKv_t *kv, const char *vtid, const char *pc, con
  * 唯 vthread·run 的 return 模式用：驱动一个子 vthread 遇非本执行器 rwir 时，把其 pc 冒泡给驱动。 */
 typedef struct { kvlangKv_t *kv; const char *vtid; const char *pc; kvlangRwirInst_t *inst; char **yield_pc; } kvlangFrame_t;
 
-bool kvlangBuiltinIsNative(const char *opcode);
+/* notinmycaps：查 myrwircaps table，opcode 不在本 runtime 能力表内 → true。 */
+bool notinmycaps(const char *opcode);
 bool kvlangBuiltinNumOp(const char *opcode);
 int kvlangBuiltinNative(kvlangFrame_t *f);   /* dispatch + call，0 成功 */
 int kvlangBuiltinExecuteCopy(kvlangKv_t *kv, const char *vtid, const char *pc, kvlangRwirInst_t *inst);

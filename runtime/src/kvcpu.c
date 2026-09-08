@@ -5,30 +5,69 @@
  * 递归/多帧同函数共享同一条），故缓存永不失效。命中即跳过 code 槽读 + decode + 分类。
  * runtime C 单线程驱动（全库无锁直改 kvspace），此缓存同样无锁。永不淘汰（≈代码大小上界）。 */
 typedef struct rwir_cache_ent {
-    char *key;
+    char *funcdir;
+    int addr0;
     kvlangRwirInst_t *inst;
     struct rwir_cache_ent *next;
 } rwir_cache_ent_t;
 #define RWIR_CACHE_BUCKETS 4096
 static rwir_cache_ent_t *g_rwir_cache[RWIR_CACHE_BUCKETS];
 
-static size_t rwir_hash(const char *s) {
+/* 直接对 (funcdir, addr0) 做 FNV——不拼 "funcdir#addr0" 串（那要每步 malloc+格式化+free，
+ * 在 shm 后端 decode 本已近乎免费的深递归热路径上纯属净开销）。 */
+static size_t rwir_hash(const char *funcdir, int addr0) {
     size_t h = 1469598103934665603ULL;
-    for (; *s; s++) { h ^= (unsigned char)*s; h *= 1099511628211ULL; }
+    for (const char *s = funcdir; *s; s++) { h ^= (unsigned char)*s; h *= 1099511628211ULL; }
+    h ^= (size_t)(unsigned)addr0; h *= 1099511628211ULL;
     return h & (RWIR_CACHE_BUCKETS - 1);
 }
-static kvlangRwirInst_t *rwir_cache_get(const char *key) {
-    for (rwir_cache_ent_t *e = g_rwir_cache[rwir_hash(key)]; e; e = e->next)
-        if (strcmp(e->key, key) == 0) return e->inst;
+static kvlangRwirInst_t *rwir_cache_get(const char *funcdir, int addr0) {
+    for (rwir_cache_ent_t *e = g_rwir_cache[rwir_hash(funcdir, addr0)]; e; e = e->next)
+        if (e->addr0 == addr0 && strcmp(e->funcdir, funcdir) == 0) return e->inst;
     return NULL;
 }
-static void rwir_cache_put(const char *key, kvlangRwirInst_t *inst) {
-    size_t b = rwir_hash(key);
+static void rwir_cache_put(const char *funcdir, int addr0, kvlangRwirInst_t *inst) {
+    size_t b = rwir_hash(funcdir, addr0);
     rwir_cache_ent_t *e = malloc(sizeof *e);
-    e->key = strdup(key);
+    e->funcdir = strdup(funcdir);
+    e->addr0 = addr0;
     e->inst = inst;
     e->next = g_rwir_cache[b];
     g_rwir_cache[b] = e;
+}
+
+/* /lib 元信息 intern（P2-c）：opcode → {是否 notinmyrwircaps（须经 def rwir 路由到其它
+ * runtime）、读参 kindexpr 签名}。/lib 布局后冻结，同 decode 缓存同理永不失效。命中即免去
+ * OPID_notinmyrwircaps 分支每步两次元信息往返（notinmyrwircaps + load_def_reads）与签名 kindexpr 重解析。
+ * langtype 签名串在此按 opcode 驻留一次（IV-0：进程私有，绝不入 kvspace）。 */
+typedef struct opmeta_ent {
+    char *opcode;
+    int notinmyrwircaps;   /* 1 = 不在本 runtime myrwircaps、须经 def rwir 路由；0 = 用户 rwfunc */
+    char *def_sig;         /* notinmyrwircaps 时的读参 kindexpr 签名（owned，可 NULL） */
+    int def_nr;
+    struct opmeta_ent *next;
+} opmeta_ent_t;
+static opmeta_ent_t *g_opmeta_cache[RWIR_CACHE_BUCKETS];
+
+static char *load_def_reads(kvlangKv_t *kv, const char *key, int *out_nr);
+
+static opmeta_ent_t *opmeta_get(kvlangKv_t *kv, const char *opcode) {
+    size_t b = rwir_hash(opcode, 0);
+    for (opmeta_ent_t *e = g_opmeta_cache[b]; e; e = e->next)
+        if (strcmp(e->opcode, opcode) == 0) return e;
+    opmeta_ent_t *e = malloc(sizeof *e);
+    e->opcode = strdup(opcode);
+    e->notinmyrwircaps = notinmyrwircaps(kv, opcode) ? 1 : 0;
+    e->def_sig = NULL;
+    e->def_nr = 0;
+    if (e->notinmyrwircaps) {
+        char *rk = kvlangKeytreeRwir(opcode);
+        e->def_sig = load_def_reads(kv, rk, &e->def_nr);
+        free(rk);
+    }
+    e->next = g_opmeta_cache[b];
+    g_opmeta_cache[b] = e;
+    return e;
 }
 
 /* 读帧的 ‥lib 槽 → funcdir（/lib/pkg·fn），供缓存键用；无则 NULL（不缓存该指令）。 */
@@ -308,7 +347,7 @@ static char *handle_call(kvlangKv_t *kv, const char *pc, kvlangRwirInst_t *inst)
     kvlangKvGetOne(kv, sig_key.p, &sig);
     if (kvlangXvalueNone(&sig) || !kvlangXvalueKindIs(&sig, KVSPACE_KIND_RWFUNC)) {
         /* 按 xvalue 的 kind 精确区分缺 rwir 还是缺 rwfunc：
-         * 到这里说明 opcode 已被 isothersrwir 判否（/lib/<op> 非 rwir）。 */
+         * 到这里说明 opcode 已被 notinmyrwircaps 判否（/lib/<op> 非 def rwir 路由头）。 */
         char *rk = kvlangKeytreeRwir(fn);
         kvlangXvalue_t rv; kvlangXvalueZero(&rv);
         kvlangKvGetOne(kv, rk, &rv);
@@ -623,8 +662,7 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode, char *
         kvlangRwirInst_t tmp;
         kvlangRwirInst_t *inst = NULL;
         bool tmp_owned = false;
-        kvlangStrbuf_t ck; kvlangStrbufInit(&ck);
-        if (cur_funcdir) { kvlangStrbufPrintf(&ck, "%s#%d", cur_funcdir, addr0); inst = rwir_cache_get(ck.p); }
+        if (cur_funcdir) inst = rwir_cache_get(cur_funcdir, addr0);
 
         if (!inst) {
             char *link_base = kvlangKeytreeStack(fr);
@@ -632,7 +670,7 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode, char *
             if (kvlangRwirDecode(kv, link_base, cur, &tmp, err, sizeof err) != 0) {
                 char msg[256]; snprintf(msg, sizeof msg, "decode: %s", err);
                 kvlangVthreadSetError(kv, vtid, cur, msg);
-                free(link_base); kvlangStrbufFree(&ck); free(fr);
+                free(link_base); free(fr);
                 rc = -1;
                 break;
             }
@@ -641,13 +679,12 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode, char *
                 /* 转移所有权入缓存：冻结指令永不失效、永不 free */
                 kvlangRwirInst_t *persist = malloc(sizeof *persist);
                 *persist = tmp;
-                rwir_cache_put(ck.p, persist);
+                rwir_cache_put(cur_funcdir, addr0, persist);
                 inst = persist;
             } else {
                 inst = &tmp; tmp_owned = true;
             }
         }
-        kvlangStrbufFree(&ck);
 
         kvlangLogDebug("[%s] PC=%s OP=%s R=%d W=%d", vtid, cur, inst->opcode ? inst->opcode : "(empty)", inst->nr, inst->nw);
 
@@ -680,15 +717,10 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode, char *
             exec_err = handle_control(kv, vtid, cur, inst);
         } else if (inst->op_id == OPID_COPY) {
             exec_err = kvlangBuiltinExecuteCopy(kv, vtid, cur, inst);
-        } else if (isothersrwir(kv, inst->opcode)) {
-            char *rk = kvlangKeytreeRwir(inst->opcode);
-            int def_nr = 0;
-            char *def_sig = load_def_reads(kv, rk, &def_nr);
-            free(rk);
-            if (def_sig) {
-                exec_err = check_read_types(kv, vtid, cur, inst->opcode, def_sig, def_nr, inst->reads, inst->nr);
-                free(def_sig);
-            }
+        } else if (opmeta_get(kv, inst->opcode)->notinmyrwircaps) {
+            opmeta_ent_t *m = opmeta_get(kv, inst->opcode);
+            if (m->def_sig)
+                exec_err = check_read_types(kv, vtid, cur, inst->opcode, m->def_sig, m->def_nr, inst->reads, inst->nr);
             if (exec_err == 0 && mode == KVMODE_RETURN) {
                 if (out_pc) *out_pc = strdup(cur);
                 free(fr); if (tmp_owned) kvlangRwirInstFree(&tmp);

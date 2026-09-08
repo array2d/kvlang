@@ -521,8 +521,8 @@ static int kvlangBuiltinCastCharAscii(kvlangFrame_t *f) { return kvlangBuiltinCa
 
 /* ── 注册表 ───────────────────────────────────────────────────────── */
 
-/* 数字多类型运算融合为单条：派发前 strip_num_kind 剥掉 <numkind>. 前缀，
- * int64.add / float32.add … 全部归到同一条 add（union 语义），kvlangBuiltin* 按操作数 kind 归约。 */
+/* 精度前缀（int64·add / float32·add …）保留：CapIndex 两级查表——先按完整 opcode 命中特化，
+ * 未命中且前缀是 C native 数字 kind 时才剥前缀归到裸 op（如 add），kvlangBuiltin* 按操作数 kind 归约。 */
 static const struct { const char *op; kvlangBuiltinFn fn; } myrwircaps[] = {
     {"add", kvlangBuiltinAdd}, {"+", kvlangBuiltinAdd},
     {"sub", kvlangBuiltinSub}, {"-", kvlangBuiltinSub},
@@ -620,8 +620,10 @@ int kvlangBuiltinCapIndex(const char *opcode) {
     return -1;
 }
 
-bool kvlangBuiltinIsNative(const char *opcode) {
-    return kvlangBuiltinCapIndex(opcode) >= 0;
+/* notinmycaps：查 myrwircaps table。opcode 不在本 runtime 能力表内 → true
+ * （即须经 /lib/<op> 的 def rwir 路由给能兑现它的其它 runtime，或为用户 rwfunc）。 */
+bool notinmycaps(const char *opcode) {
+    return kvlangBuiltinCapIndex(opcode) < 0;
 }
 
 bool kvlangBuiltinNumOp(const char *opcode) {

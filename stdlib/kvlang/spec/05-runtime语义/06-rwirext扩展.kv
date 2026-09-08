@@ -13,8 +13,8 @@ kvlang 是**小核心 + 扩展主导**语言。中央 runtime 只实现执行核
 **myrwircaps 是每个 runtime 都必须定义的一张 map/table**——登记本 runtime **能就地解释的全部 opcode**，映射 `opcode → 就地处理器`。它是 kvlang runtime 分层与派发的核心术语：一个 runtime「能跑什么」由且仅由它的 myrwircaps 界定。
 
 - **每个 runtime 必须声明自己的 myrwircaps**。核心 runtime-c 的 myrwircaps 就是其 **native 静态注册表**（数组 + 线性查找，见 [[cruntime与后端abi]]），登记 native builtin（+ 控制流 `call`/`return`/`br`/`goto` + `=` 拷贝，见 [[函数调用与内建]]）。
-- **每个扩展运行时各自定义一张 myrwircaps**，登记其自带的 rwir opcode。例：runtime-rs 为 `term`/`json`/`http`/`kvlanglayout`/`networld` 等（见 [[rwirext扩展_b]] 就地集合）；未来 deepx-gpu-compute 为 tensor 融合算子。
-- **派发判据**：`opcode ∈ 本 runtime.myrwircaps` → 查表取处理器**就地执行**；否则该 rwir 须经 def rwir 路由，**移交**给以它为 myrwircaps 的另一扩展（跨进程 handoff/watch，或嵌入式交回宿主，见 [[rwirext扩展_b]]、[[cruntime与后端abi_续]]）。实现里 `rwir::is_inproc(op)` 即「`op ∈ myrwircaps`」的查表判定。
+- **每个扩展运行时各自定义一张 myrwircaps**，登记其自带的 rwir opcode。例：runtime-rs 为 `term`/`json`/`http`/`kvlanglayout`/`networld` 等（见 [[notinmyrwircaps]] 就地集合）；未来 deepx-gpu-compute 为 tensor 融合算子。
+- **派发判据**：`opcode ∈ 本 runtime.myrwircaps` → 查表取处理器**就地执行**；否则该 rwir 须经 def rwir 路由，**移交**给以它为 myrwircaps 的另一扩展（跨进程 handoff/watch，或嵌入式交回宿主，见 [[notinmyrwircaps]]、[[cruntime与后端abi_续]]）。实现里 `rwir::is_inproc(op)` 即「`op ∈ myrwircaps`」的查表判定。
 
 myrwircaps **只关乎执行位置**（哪张表登记了它、由谁就地跑），不改变 rwir 的动态语义——同一 rwir 无论落进哪个 runtime 的 myrwircaps，行为必须一致。
 
@@ -36,8 +36,8 @@ myrwircaps **只关乎执行位置**（哪张表登记了它、由谁就地跑�
 
 例：`/lib/json·to`（nr=1, nw=1）→ 主槽 body=[1,1,0]，`[0,-1]=def kindexpr("char/utf8")`，`[0,1]=def kindexpr("[]char/utf8")`。
 
-- native builtin 的签名**不落入 kvspace**——在 C 注册表直接查表（见 [[函数调用与内建]]）。
-- 扩展签名**落 `/lib/<opcode>`**，中央 runtime 经 `isothersrwir` 识别：`opcode[0]=='/'` → false；否则读 `/lib/<opcode>` 的 kind，等于 `def rwir` 即须经 def rwir 路由的 rwir。
+- 本 runtime myrwircaps 内 opcode 的签名**不落入 kvspace**——在 C 注册表直接查表（见 [[函数调用与内建]]）。
+- 其它 runtime 的 rwir 签名**落 `/lib/<opcode>`**，中央 runtime 经 `notinmyrwircaps` 识别：`opcode[0]=='/'` → false；否则读 `/lib/<opcode>` 的 kind，等于 `def rwir` 即不在本 runtime myrwircaps、须经 def rwir 路由。
 
 ### 全局标记与幂等
 
