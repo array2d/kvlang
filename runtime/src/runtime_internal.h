@@ -212,16 +212,43 @@ bool kvlangKeytreeIsEntryPc(const char *pc);
 #define OP_BR     "br"
 #define OP_GOTO   "goto"
 #define OP_ASSIGN "assign"
+#define OP_COPY   "="
+
+/* op_id：decode 期一次固化的统一派发码（quickening），主循环据此纯整数跳表、热路径零 strcmp。
+ * ≥0    = native，直查 myrwircaps[op_id]
+ * 负值  = 保留派发类（control / copy / 待定），语义见下 */
+enum {
+    OPID_OTHER  = -1,   /* 未定：他人 rwir 或用户函数，执行期经 kvspace 查 /lib 才能区分 */
+    OPID_CALL   = -2,
+    OPID_RETURN = -3,
+    OPID_GOTO   = -4,
+    OPID_BR     = -5,
+    OPID_COPY   = -6,
+};
 
 static inline bool op_is_control(const char *op) {
     return strcmp(op, OP_CALL) == 0 || strcmp(op, OP_RETURN) == 0 ||
            strcmp(op, OP_BR) == 0 || strcmp(op, OP_GOTO) == 0;
 }
 
+int kvlangBuiltinCapIndex(const char *opcode);
+
+/* decode 期分类：control/copy 先于 native，miss 落 OPID_OTHER（执行期再查 /lib）。 */
+static inline int kvlangOpClassify(const char *op) {
+    if (strcmp(op, OP_CALL) == 0) return OPID_CALL;
+    if (strcmp(op, OP_RETURN) == 0) return OPID_RETURN;
+    if (strcmp(op, OP_GOTO) == 0) return OPID_GOTO;
+    if (strcmp(op, OP_BR) == 0) return OPID_BR;
+    if (strcmp(op, OP_COPY) == 0) return OPID_COPY;
+    int n = kvlangBuiltinCapIndex(op);
+    return n >= 0 ? n : OPID_OTHER;
+}
+
 typedef struct { char *name; kvlangXvalue_t val; } kvlangParam_t;
 
 typedef struct {
     char *opcode;
+    int op_id;   /* 统一派发码，见上 enum；decode 期固化，永不随帧变化 */
     kvlangParam_t *reads; int nr;
     kvlangParam_t *writes; int nw;
 } kvlangRwirInst_t;

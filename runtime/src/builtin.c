@@ -595,23 +595,33 @@ static const struct { const char *op; kvlangBuiltinFn fn; } myrwircaps[] = {
 
 static const size_t myrwircaps_n = sizeof(myrwircaps) / sizeof(myrwircaps[0]);
 
-/* 剥离 <numkind>. 前缀（int64.add → add），使融合后的单条 add 覆盖全部数字类型。
- * 非数字前缀（array./string./time/duration. 等）与裸类型 cast（int64）原样保留。 */
+/* C 原生数值 langtype 集：仅这些精度的算术走 kvlangBuiltinAdd 等通用实现。
+ * int4/fp8/bf16 等 C 表达不了的量化精度不在此列，其 <langtype>·op 走专精 fn 或 handoff。 */
 static const char *NUM_KINDS[] = {"int8", "int16", "int32", "int64", "uint8",
                                   "uint16", "uint32", "uint64", "float32", "float64"};
-static const char *strip_num_kind(const char *op) {
-    const char *dot = strstr(op, MEMBER_SEP);
-    if (!dot) return op;
-    size_t n = (size_t)(dot - op);
+static bool is_num_kind_prefix(const char *op, size_t n) {
     for (size_t i = 0; i < sizeof(NUM_KINDS) / sizeof(NUM_KINDS[0]); i++)
-        if (strlen(NUM_KINDS[i]) == n && strncmp(op, NUM_KINDS[i], n) == 0) return dot + MEMBER_SEP_LEN;
-    return op;
+        if (strlen(NUM_KINDS[i]) == n && strncmp(op, NUM_KINDS[i], n) == 0) return true;
+    return false;
+}
+
+/* rwirtable 两级查找：先查完整 opcode（命中=专精实现，如 fp8·add，或 time·add 等成员算子），
+ * 未命中且末段前缀是 C 原生数值 langtype 才拆前缀查裸算子（int64·add → add，通用实现）。
+ * 非数值前缀（time/duration·max 等用户 rwfunc）不剥离，两级皆 miss → 非本 runtime native。 */
+int kvlangBuiltinCapIndex(const char *opcode) {
+    for (size_t i = 0; i < myrwircaps_n; i++)
+        if (strcmp(myrwircaps[i].op, opcode) == 0) return (int)i;
+    const char *dot = strstr(opcode, MEMBER_SEP);
+    if (dot && is_num_kind_prefix(opcode, (size_t)(dot - opcode))) {
+        const char *bare = dot + MEMBER_SEP_LEN;
+        for (size_t i = 0; i < myrwircaps_n; i++)
+            if (strcmp(myrwircaps[i].op, bare) == 0) return (int)i;
+    }
+    return -1;
 }
 
 bool kvlangBuiltinIsNative(const char *opcode) {
-    const char *op = strip_num_kind(opcode);
-    for (size_t i = 0; i < myrwircaps_n; i++) if (strcmp(myrwircaps[i].op, op) == 0) return true;
-    return false;
+    return kvlangBuiltinCapIndex(opcode) >= 0;
 }
 
 bool kvlangBuiltinNumOp(const char *opcode) {
@@ -631,10 +641,8 @@ bool kvlangBuiltinNumOp(const char *opcode) {
 }
 
 int kvlangBuiltinNative(kvlangFrame_t *f) {
-    const char *op = strip_num_kind(f->inst->opcode);
-    for (size_t i = 0; i < myrwircaps_n; i++) {
-        if (strcmp(myrwircaps[i].op, op) == 0) return myrwircaps[i].fn(f);
-    }
+    int i = f->inst->op_id >= 0 ? f->inst->op_id : kvlangBuiltinCapIndex(f->inst->opcode);
+    if (i >= 0) return myrwircaps[i].fn(f);
     return kvlangBuiltinSetErr(f, "unknown builtin op: %s", f->inst->opcode);
 }
 
