@@ -47,22 +47,22 @@ rwfunc add(a:[]char/utf32, b:[]char/utf32) -> () {
 }
 
 rwfunc test() -> () {
-	l1:[int64]·/lib/Node = {}
+	l1:[int64]·Node = {}
 	kv·abs(l1) -> b1
 	b1 + "·2" -> a2
 	b1 + "·3" -> a3
-	Node{val=2 next=a2} -> l1·1
-	Node{val=4 next=a3} -> l1·2
-	Node{val=3 next=""} -> l1·3
+	l1·1:Node = {val=2 next=a2}
+	l1·2:Node = {val=4 next=a3}
+	l1·3:Node = {val=3 next=""}
 	b1 + "·1" -> h1
 
-	l2:[int64]·/lib/Node = {}
+	l2:[int64]·Node = {}
 	kv·abs(l2) -> b2
 	b2 + "·2" -> c2
 	b2 + "·3" -> c3
-	Node{val=5 next=c2} -> l2·1
-	Node{val=6 next=c3} -> l2·2
-	Node{val=4 next=""} -> l2·3
+	l2·1:Node = {val=5 next=c2}
+	l2·2:Node = {val=6 next=c3}
+	l2·3:Node = {val=4 next=""}
 	b2 + "·1" -> h2
 
 	lc·add(h1, h2)

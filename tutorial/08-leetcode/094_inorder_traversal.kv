@@ -30,13 +30,13 @@ rwfunc inorder(root:[]char/utf32) -> () {
 }
 
 rwfunc test() -> () {
-	t:[int64]·/lib/TNode = {}
+	t:[int64]·TNode = {}
 	kv·abs(t) -> tb
 	tb + "·2" -> t1
 	tb + "·3" -> t2
-	TNode{val=1 left=t1 right=t2} -> t·1
-	TNode{val=2} -> t·2
-	TNode{val=3} -> t·3
+	t·1:TNode = {val=1 left=t1 right=t2}
+	t·2:TNode = {val=2}
+	t·3:TNode = {val=3}
 	tb + "·1" -> root
 	inorder(root)
 }

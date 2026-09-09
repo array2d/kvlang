@@ -23,22 +23,22 @@ rwfunc same(a:[]char/utf32, b:[]char/utf32) -> (ok:int64) {
 }
 
 rwfunc test() -> () {
-	t:[int64]·/lib/TNode = {}
+	t:[int64]·TNode = {}
 	kv·abs(t) -> tb
 	tb + "·2" -> t1
 	tb + "·3" -> t2
-	TNode{val=1 left=t1 right=t2} -> t·1
-	TNode{val=2} -> t·2
-	TNode{val=3} -> t·3
+	t·1:TNode = {val=1 left=t1 right=t2}
+	t·2:TNode = {val=2}
+	t·3:TNode = {val=3}
 	tb + "·1" -> rt
 
-	v:[int64]·/lib/TNode = {}
+	v:[int64]·TNode = {}
 	kv·abs(v) -> vb
 	vb + "·2" -> v1
 	vb + "·3" -> v2
-	TNode{val=1 left=v1 right=v2} -> v·1
-	TNode{val=2} -> v·2
-	TNode{val=4} -> v·3
+	v·1:TNode = {val=1 left=v1 right=v2}
+	v·2:TNode = {val=2}
+	v·3:TNode = {val=4}
 	vb + "·1" -> rv
 
 	same(rt, rt) -> r1

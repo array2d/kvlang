@@ -29,17 +29,17 @@ rwfunc reverse(head:[]char/utf32) -> () {
 }
 
 rwfunc test() -> () {
-	n:[int64]·/lib/Node = {}
+	n:[int64]·Node = {}
 	kv·abs(n) -> nb
 	nb + "·2" -> p2
 	nb + "·3" -> p3
 	nb + "·4" -> p4
 	nb + "·5" -> p5
-	Node{val=1 next=p2} -> n·1
-	Node{val=2 next=p3} -> n·2
-	Node{val=3 next=p4} -> n·3
-	Node{val=4 next=p5} -> n·4
-	Node{val=5 next=""} -> n·5
+	n·1:Node = {val=1 next=p2}
+	n·2:Node = {val=2 next=p3}
+	n·3:Node = {val=3 next=p4}
+	n·4:Node = {val=4 next=p5}
+	n·5:Node = {val=5 next=""}
 	nb + "·1" -> h
 	reverse(h)
 }

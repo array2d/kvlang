@@ -1,5 +1,5 @@
 // tree: 二叉树存进 map（int 键、struct 值），左右孩子用绝对路径指针
-// 语义: /tree 是 [int64]·/lib/TNode 的 map；left/right 存孩子绝对路径（""=空）；
+// 语义: /tree 是 [int64]·TNode 的 map；left/right 存孩子绝对路径（""=空）；
 //       inorder 递归中序遍历，node 是路径串，node·field 解引用。
 // 期望输出:
 //   3
@@ -23,10 +23,10 @@ rwfunc inorder(node:[]char/utf32) -> () {
 }
 
 rwfunc test() -> () {
-	/tree:[int64]·/lib/TNode = {}
-	TNode{val=5} -> /tree·1
-	TNode{val=3} -> /tree·2
-	TNode{val=8} -> /tree·3
+	/tree:[int64]·TNode = {}
+	/tree·1:TNode = {val=5}
+	/tree·2:TNode = {val=3}
+	/tree·3:TNode = {val=8}
 	"/tree·2" -> /tree·1·left
 	"/tree·3" -> /tree·1·right
 	inorder("/tree·1")

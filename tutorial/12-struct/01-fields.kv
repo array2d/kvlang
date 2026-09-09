@@ -11,12 +11,12 @@ struct User {
 }
 
 rwfunc test() -> () {
-	u = User{name="alice" age=30 active=true}
+	u:User = {name="alice" age=30 active=true}
 	u·name -> n
 	u·age -> a
 	u·active -> ac
 	println(n, a, ac)
-	d = User{}
+	d:User = {}
 	d·name -> dn
 	d·age -> da
 	d·active -> dac

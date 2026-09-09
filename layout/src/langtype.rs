@@ -174,6 +174,35 @@ pub fn valid_langtype(expr: &str) -> bool {
     !expr.is_empty() && expr.split('|').all(valid_atom)
 }
 
+/// 隐式 struct 名解析：把 langtype 中裸 struct 名（非 known kind / any 的标识符）展开为
+/// `/lib/<name>`，使 kv 源可写 `x:Node` / `[int64]·Node`，runtime 恒收到完整 `/lib/…` 路径。
+/// 已 `/` 开头或 known kind 原样返回。mapexpr 只对 value 递归展开（key 恒 `[…]` 非 struct）。
+pub fn expand_struct_refs(s: &str) -> String {
+    s.split('|')
+        .map(expand_atom)
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+fn expand_atom(s: &str) -> String {
+    if s.starts_with('/') {
+        return s.to_string();
+    }
+    if s.starts_with('[') {
+        if let Some(i) = s.find('·') {
+            let key = &s[..i];
+            if valid_key(key) {
+                return format!("{key}·{}", expand_struct_refs(&s[i + '·'.len_utf8()..]));
+            }
+        }
+        return s.to_string();
+    }
+    if s.is_empty() || known_kind(s) || s == "any" {
+        return s.to_string();
+    }
+    format!("/lib/{s}")
+}
+
 fn base_match(s: &str, kind: &str) -> bool {
     match s {
         "any" => true,

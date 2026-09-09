@@ -12,10 +12,10 @@ struct Node {
 }
 
 rwfunc test() -> () {
-	/list:[int64]·/lib/Node = {}
-	Node{val=10 next="/list·2"} -> /list·1
-	Node{val=20 next="/list·3"} -> /list·2
-	Node{val=30} -> /list·3
+	/list:[int64]·Node = {}
+	/list·1:Node = {val=10 next="/list·2"}
+	/list·2:Node = {val=20 next="/list·3"}
+	/list·3:Node = {val=30}
 	prev = ""
 	cur = "/list·1"
 	while (cur != "") {

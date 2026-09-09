@@ -459,6 +459,11 @@ impl Parser {
     }
 
     fn parse_type(&mut self) -> String {
+        let raw = self.parse_type_raw();
+        super::langtype::expand_struct_refs(&raw)
+    }
+
+    fn parse_type_raw(&mut self) -> String {
         let mut sb = String::new();
         let mut depth = 0i32;
         loop {
@@ -1022,6 +1027,7 @@ impl Parser {
                 inst.write_types = wtypes;
                 self.advance(); // consume =
                 inst.expr = self.parse_pratt(0);
+                self.dispatch_obj_by_type(&mut inst);
                 self.lower_array_fill(&mut inst);
                 self.desugar_subscript_write(&mut inst);
                 self.desugar_member_write(&mut inst);
@@ -1032,6 +1038,7 @@ impl Parser {
                 let (writes, wtypes) = self.collect_write_list();
                 inst.writes = writes;
                 inst.write_types = wtypes;
+                self.dispatch_obj_by_type(&mut inst);
                 self.desugar_subscript_write(&mut inst);
                 self.desugar_member_write(&mut inst);
             }
@@ -1051,7 +1058,6 @@ impl Parser {
             self.advance();
         }
         self.eat(Kind::Newline);
-        self.dispatch_obj_by_type(&mut inst);
         self.check_write_type_match(&inst);
         self.check_empty_container_typed(&inst);
         // 散 key 字面量 `{...}` 仅允许作赋值右值（单一写目标）；其余位置报错。
@@ -1810,8 +1816,14 @@ impl Parser {
                         break;
                     }
                 }
+                // 成员写槽可带 langtype 注解 `a·1:Node = {…}`：struct 对象定义的推荐形态。
+                let mut ty = String::new();
+                if self.peek().kind == Kind::Colon {
+                    self.advance();
+                    ty = self.parse_type();
+                }
                 writes.push(w);
-                wtypes.push(String::new());
+                wtypes.push(ty);
                 continue;
             }
             if t.kind == Kind::Ident && self.peek_at(1).kind == Kind::LBrack {
