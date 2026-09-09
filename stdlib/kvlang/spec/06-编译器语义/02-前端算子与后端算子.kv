@@ -1,0 +1,47 @@
+// 欢迎加入kvspace世界
+lib kvlang/spec/编译器语义/前端算子与后端算子 {
+	r####"# 前端算子与后端算子
+
+一个 tensor 运算有**两层表示**：厂商中立的前端抽象算子，与 author 绑定的后端实现算子。前端代码只写前端算子，编译器据 `/lib` 已注册后端把它绑定到具体实现。
+
+## 两层表示
+
+| 层 | 键 | 例 | 内容 | 谁写入 |
+|---|---|---|---|---|
+| **前端算子**（抽象） | `/lib/<域>·<op>` | `deepx·argmax` | 仅签名（args/returns langtype）+ abstract 标记，**无实现**；无任何 runtime 在 myrwircaps 兑现 | 前端/编译器随附声明 |
+| **后端算子**（实现） | `/lib/<域>/<author>·<op>` | `deepx/miaobyte·argmax`、`deepx/cblas·matmul` | 普通 def rwir 路由头（有 myrwircaps 处理器 + vids 执行器） | 计算 runtime 启动时注册 |
+
+- 前端算子是前端代码面向的**稳定算子面**：厂商无关、无 author，只承诺语义与签名。
+- 后端算子由计算 runtime（deepx-cpu-compute 等）注册；同一 `<op>` 可有多个 author 各自实现，签名的 dtype 约束可不同（如 `deepx/cblas·matmul` 仅 float32/float64，`deepx/miaobyte·matmul` 覆盖 any）。
+- 非规范对照：前端算子 ≈ PyTorch `TORCH_LIBRARY m.def("argmax(...)")`（schema）；后端算子 ≈ `TORCH_LIBRARY_IMPL(deepx, <author>, m).impl("argmax", ...)`（按后端注册 kernel）。author 之于 kvlang 路径 ≈ DispatchKey 之于 Dispatcher。
+
+## 命名与解析
+
+`·`（U+00B7）是包/成员分隔符，`/` 是路径层级分隔符。二者组合即得两层键，**无需改词法**，现有 `handle_call` 取**最后一个** `·` 拆 pkg/name 即正确解析：
+
+- `deepx·argmax` → pkg=`deepx`，op=`argmax` → `/lib/deepx·argmax`。
+- `deepx/miaobyte·argmax` → pkg=`deepx/miaobyte`（含真实路径层级），op=`argmax` → `/lib/deepx/miaobyte·argmax`。
+
+## 抽象算子的派发
+
+前端算子 `/lib/<域>·<op>` 是 def rwir，但主槽携 **abstract** 标记。运行期语义：
+
+- **已编译**代码里调用点已是后端算子（`deepx/miaobyte·argmax`），正常经 def rwir 路由到计算 runtime，不触及抽象头。
+- **未编译**代码里直接调用抽象算子（`deepx·argmax`）：runtime 查 `/lib` 命中 abstract def rwir → 报明确诊断「抽象算子未绑定后端，需先经编译器」，**不**静默 handoff、**不**回退 NameError。抽象算子无 myrwircaps 兑现方，直接执行即错误。
+
+## 编译器后端绑定
+
+编译器扫 `/lib`，对每个抽象算子调用点 `<域>·<op>`，枚举已注册的 `<域>/*·<op>` 后端，按策略选一，**就地改写调用点 opcode** 为 `<域>/<author>·<op>`。选择策略（由计算引擎界定，典型）：
+
+1. 源码已显式写 author（`deepx/cblas·matmul`）→ 原样保留，不改写。
+2. 否则查默认 author 表（如 `matmul→cblas`、`argmax→miaobyte`）；默认 author 已注册该 op 则用之。
+3. 否则用唯一可用者。
+4. 皆无 → 诊断「`<op>` 无已注册后端」，编译失败。
+
+这是**编译期静态绑定**：绑定一次、写回 `/lib`，runtime 不再做后端选择（对照 PyTorch，这对应 Inductor 编译期 lowering，而非 Dispatcher 运行期派发）。
+
+## 锚例（待补）
+
+- `tutorial/16-compiler/backend_bind.kv`——`deepx·argmax(v0, axis0, false) -> vmax` 经编译改写为 `deepx/miaobyte·argmax(v0, axis0, false) -> vmax`。
+	"#### -> /lib/kvlang/spec/编译器语义/前端算子与后端算子
+}

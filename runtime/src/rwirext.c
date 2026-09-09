@@ -48,7 +48,7 @@ static void register_vids(kvlangKv_t *k, const char *opcode) {
   free(base);
 }
 
-int kvlang_rwirextRegister(void *kvspace, const char *opcode, int32_t nr,
+int kvlangRwirextRegister(void *kvspace, const char *opcode, int32_t nr,
                          int32_t nw, const char *sig) {
   kvlangKv_t k = {kvspace};
   char *key = kvlangKeytreeRwir(opcode);
@@ -64,7 +64,7 @@ int kvlang_rwirextRegister(void *kvspace, const char *opcode, int32_t nr,
   return rc;
 }
 
-int kvlang_rwirextHandoff(void *kvspace, const char *vtid, const char *pc) {
+int kvlangRwirextHandoff(void *kvspace, const char *vtid, const char *pc) {
   kvlangKv_t k = {kvspace};
   char *fr = kvlangKeytreeFrameRoot(pc);
   if (!fr)
@@ -84,14 +84,14 @@ int kvlang_rwirextHandoff(void *kvspace, const char *vtid, const char *pc) {
   return rc;
 }
 
-char *kvlang_rwirextNextPc(const char *pc) {
+char *kvlangRwirextNextPc(const char *pc) {
   kvlangStrbuf_t b;
   kvlangStrbufInit(&b);
   kvlangRwirNextPc(pc, &b);
   return kvlangStrbufDetach(&b);
 }
 
-char *kvlang_rwirextParams(void *kvspace, const char *pc) {
+char *kvlangRwirextParams(void *kvspace, const char *pc) {
   kvlangKv_t k = {kvspace};
   char *fr = kvlangKeytreeFrameRoot(pc);
   if (!fr)
@@ -158,7 +158,7 @@ static char *display_map(kvlangKv_t *k, const char *path) {
 }
 
 /* 解析读参 idx 为字符串（变量 → 帧槽值；路径 → 该路径下的值）。 */
-char *kvlang_rwirextResolveRead(void *kvspace, const char *pc, int idx) {
+char *kvlangRwirextResolveRead(void *kvspace, const char *pc, int idx) {
   kvlangKv_t k = {kvspace};
   char *fr = kvlangKeytreeFrameRoot(pc);
   if (!fr)
@@ -195,7 +195,7 @@ char *kvlang_rwirextResolveRead(void *kvspace, const char *pc, int idx) {
 
 /* 解析读参 idx 为 KV 路径（变量/临时 → 帧槽路径；路径 → 直接返回；内联字面量 →
  * ""）。 */
-char *kvlang_rwirextResolveReadPath(void *kvspace, const char *pc, int idx) {
+char *kvlangRwirextResolveReadPath(void *kvspace, const char *pc, int idx) {
   kvlangKv_t k = {kvspace};
   char *fr = kvlangKeytreeFrameRoot(pc);
   if (!fr)
@@ -226,7 +226,7 @@ char *kvlang_rwirextResolveReadPath(void *kvspace, const char *pc, int idx) {
 }
 
 /* 解析写参 idx 为 KV 路径（路径 → 直接返回；变量 → 帧槽路径）。 */
-char *kvlang_rwirextResolveWrite(void *kvspace, const char *pc, int idx) {
+char *kvlangRwirextResolveWrite(void *kvspace, const char *pc, int idx) {
   kvlangKv_t k = {kvspace};
   char *fr = kvlangKeytreeFrameRoot(pc);
   if (!fr)

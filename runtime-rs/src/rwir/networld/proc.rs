@@ -137,7 +137,7 @@ fn phys_dir_str(pid: &str) -> String {
 
 /// 取读参 idx 的容器 KV 路径（ResolveRead 对数组只返首元素，容器须用 ResolveReadPath）。
 fn read_path(eng: &Engine, pc: &str, idx: i32) -> String {
-    take(unsafe { kvlang_rwirextResolveReadPath(eng.kv, cs(pc).as_ptr(), idx) })
+    take(unsafe { kvlangRwirextResolveReadPath(eng.kv, cs(pc).as_ptr(), idx) })
 }
 
 /// stringkeymap 容器路径 p → 按坐标段 ·[i] 数值升序取各成员字符串（get_kv 解 char/utf32）。

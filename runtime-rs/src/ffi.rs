@@ -167,32 +167,32 @@ unsafe extern "C" {
     // ── kvlang runtime：rwirext 宿主 ABI（均传 kvspace 句柄）─────────
     // C 头 kvlang_rwirext.h 导出 9 符号；此处声明 7：故意省略 LangtypeValid/LangtypeMatch
     // ——langtype 校验属 layout 期、匹配属 C dispatch 内部，Rust term 侧不调用（非缺陷）。
-    pub fn kvlang_rwirextRegister(
+    pub fn kvlangRwirextRegister(
         kvspace: *mut c_void,
         opcode: *const c_char,
         nr: c_int,
         nw: c_int,
         sig: *const c_char,
     ) -> c_int;
-    pub fn kvlang_rwirextParams(kvspace: *mut c_void, pc: *const c_char) -> *mut c_char;
-    pub fn kvlang_rwirextResolveRead(
+    pub fn kvlangRwirextParams(kvspace: *mut c_void, pc: *const c_char) -> *mut c_char;
+    pub fn kvlangRwirextResolveRead(
         kvspace: *mut c_void,
         pc: *const c_char,
         idx: c_int,
     ) -> *mut c_char;
-    pub fn kvlang_rwirextResolveReadPath(
+    pub fn kvlangRwirextResolveReadPath(
         kvspace: *mut c_void,
         pc: *const c_char,
         idx: c_int,
     ) -> *mut c_char;
-    pub fn kvlang_rwirextResolveWrite(
+    pub fn kvlangRwirextResolveWrite(
         kvspace: *mut c_void,
         pc: *const c_char,
         idx: c_int,
     ) -> *mut c_char;
-    pub fn kvlang_rwirextNextPc(pc: *const c_char) -> *mut c_char;
+    pub fn kvlangRwirextNextPc(pc: *const c_char) -> *mut c_char;
     // Handoff：非己方处理的外部 rwir（如 numpy）移交给对应扩展进程。
-    pub fn kvlang_rwirextHandoff(
+    pub fn kvlangRwirextHandoff(
         kvspace: *mut c_void,
         vtid: *const c_char,
         pc: *const c_char,

@@ -17,7 +17,7 @@ pub fn call(eng: &Engine, pc: &str) {
 }
 
 fn read(eng: &Engine, pc: &str, idx: i32) -> String {
-    take(unsafe { kvlang_rwirextResolveRead(eng.kv, cs(pc).as_ptr(), idx) })
+    take(unsafe { kvlangRwirextResolveRead(eng.kv, cs(pc).as_ptr(), idx) })
 }
 
 fn agent() -> ureq::Agent {

@@ -9,7 +9,7 @@ use crate::engine::Engine;
 use crate::ffi::*;
 
 pub fn print_line(eng: &Engine, pc: &str) {
-    let params = take(unsafe { kvlang_rwirextParams(eng.kv, cs(pc).as_ptr()) });
+    let params = take(unsafe { kvlangRwirextParams(eng.kv, cs(pc).as_ptr()) });
     let mut it = params.split('\n');
     let opcode = it.next().unwrap_or("");
     let (sep, rawnl, cerr) = match opcode {

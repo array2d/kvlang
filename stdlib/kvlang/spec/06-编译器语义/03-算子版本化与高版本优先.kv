@@ -1,0 +1,39 @@
+// 欢迎加入kvspace世界
+lib kvlang/spec/编译器语义/算子版本化与高版本优先 {
+	r####"# 算子版本化与高版本优先
+
+复合算子（如 `softmax` = exp/sum/div 组合）可被编译器融合成单条自解释 rwir，获更优实现。融合产物**不覆盖**原函数，而作为**版本递增**并存；runtime 调用时**优先高版本**。类比 `.so.1` 版本后缀；对照 PyTorch，这把 autotune 的隐式择优显式化为可声明、可审计的静态版本号。
+
+## 版本键：`.<N>` 后缀
+
+基名 `<pkg>·<name>`（如 `softmax`）的第 N 个编译版本存 `/lib/<pkg>·<name>.<N>`——**ASCII 点后缀 `.<N>`**（N≥1 正整数，类 `.so.1`）。原始（基，可视作 v0）仍在 `/lib/<pkg>·<name>`。基键携**当前最高版本号**（head 字段或专用子键，由编译器维护）。
+
+## runtime 高版本优先解析
+
+`handle_call` 解析对 `<name>` 的调用、构出 `func_key = /lib/<pkg>·<name>` 之后、读签名 `[0,0]` 之前，读基键版本标记：
+
+- 有 → 把 `func_key` 重定向到最高版本 `/lib/<pkg>·<name>.<maxN>`。
+- 无（未编译）→ 用基键本身（**向后兼容**：未经编译的代码调基版正常跑）。
+
+对 caller 完全透明——调用点仍写基名，帧 `‥lib` 槽随之记选中版本的 func_key，帧内裸名回溯自然指向选中版本。解析结果按基名**缓存冻结**（同 opmeta 缓存的固化策略）。挂钩点：`runtime/src/kvcpu.c` 的 `handle_call` 构出 `func_key` 之后。
+
+## 版本记法用 `.` 而非 `·`
+
+版本段用 ASCII `.`（`.<N>`），**不用** `·`：
+
+- `·` 是包/成员分隔符，`rfind_sep` 会把 `softmax·1` 误拆为 `pkg=softmax, name=1`；`.` **不是**分隔符——词法上并入标识符，`handle_call` 不据它拆 pkg/name，故 `softmax.1` 整体即 name（pkg 拆分仍只认最后一个 `·`：`deepx/miaobyte·argmax.1` → pkg=`deepx/miaobyte`, name=`argmax.1`），无歧义。
+- 与既有 `.src`（源码副本 `/lib/<name>.src`）的 ASCII 点后缀约定一致。
+- 版本键由编译器产生、版本钩子以字符串拼接消费。因 `.` 无歧义，即便源码直接写 `softmax.1(...)` 也能正确解析到 `/lib/softmax.1`；但版本通常由编译器托管，不必在源码手写。
+
+## 与后端绑定正交
+
+- **后端绑定**改**调用点 opcode**（前端算子 → 后端算子，见 [[前端算子与后端算子]]）。
+- **版本化**改**被调函数的实现选择**（基 → 高版本）。
+
+二者正交，可叠加：`deepx·softmax` 先绑定为某后端组合，其融合版再登记为 `softmax·1`。
+
+## 锚例（待补）
+
+- `tutorial/16-compiler/op_version.kv`——编译前调 `softmax` 走基版；编译生成 `softmax·1` 后，同一 `softmax(...)` 调用走 `softmax·1`，输出与基版逐字节一致。
+	"#### -> /lib/kvlang/spec/编译器语义/算子版本化与高版本优先
+}
