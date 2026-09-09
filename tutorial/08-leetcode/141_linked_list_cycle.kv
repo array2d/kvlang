@@ -26,23 +26,29 @@ rwfunc has_cycle(head:[]char/utf32) -> (result:int64) {
 	}
 }
 
-rwfunc build_cycle() -> () {
-	{ val=3; next="/c1" } -> /c0
-	/c1 = { val=2; next="/c2" }
-	/c2 = { val=0; next="/c0" }
-}
-
-rwfunc build_no_cycle() -> () {
-	/n0 = { val=1; next="/n1" }
-	{ val=2; next="" } -> /n1
+struct Node {
+	val:int64=0
+	next:[]char/utf32=""
 }
 
 rwfunc test() -> () {
-
-	build_cycle()
-	r1 = has_cycle("/c0")
+	c:[int64]·/lib/Node = {}
+	kv·abs(c) -> cb
+	cb + "·1" -> c1
+	cb + "·2" -> c2
+	cb + "·3" -> c3
+	Node{val=3 next=c2} -> c·1
+	Node{val=2 next=c3} -> c·2
+	Node{val=0 next=c1} -> c·3
+	r1 = has_cycle(c1)
 	println(r1)
-	build_no_cycle()
-	has_cycle("/n0") -> r2
+
+	n:[int64]·/lib/Node = {}
+	kv·abs(n) -> nb
+	nb + "·1" -> n1
+	nb + "·2" -> n2
+	Node{val=1 next=n2} -> n·1
+	Node{val=2 next=""} -> n·2
+	has_cycle(n1) -> r2
 	println(r2)
 }

@@ -1,17 +1,19 @@
 //! layoutcode（对齐 layout/layout.go）：检查 AST 并把结果布局写到 /lib/ 下的结构化 KV。
 //!
 //! 存储约定：
-//!   /lib/<pkg>·<name>/[0,0]         布局后签名（kind=rwfunc）
-//!   /lib/<pkg>·<name>/<param>       命名参数→slot 指针（langtype=char, ref=1）
+//!   /lib/<pkg>·<name>/[0,0]         布局后签名锚点（kind=rwfunc，body=计数头 [nr,nw,dyn]）
+//!   /lib/<pkg>·<name>/<param>       命名参数→slot 指针（langtype=该参类型, ref=1, body=坐标）
 //!   /lib/<pkg>·<name>/[i,j]         编译后指令（kind=rwir），i 从 1 开始
 //!   /lib/<pkg>·<name>/‥labels/<l>   label → irseq
-//!   /lib/<pkg>·<name>.src           源码副本
+//!   /lib/<pkg>·<name>.src           源码副本（仅 write_func 保留写入，dump 不再依赖）
 //!
 //! WriteBody: DFS-number insts (incl. ScopeStmt), emit [i,j], rewrite goto/br labels to irseq.
+//! dump: 反向——严格读 /lib/<pkg> 子树重建 AST（签名读命名参数 Ptr、体读线性槽+‥labels），
+//!       不读 .src、不依赖签名行 [0,x] 静态槽。
 
 use std::collections::HashMap;
 
-use super::ast::{Expr, Func, Instruction, RwirDecl, Stmt, StructDecl};
+use super::ast::{self, Expr, Func, FuncSig, Instruction, Param, RwirDecl, ScopeStmt, Stmt, StructDecl};
 use super::ffi::Kv;
 use super::{builtin, ffi, keytree, kvkind, lower, parser};
 
@@ -173,15 +175,16 @@ pub fn dump(kv: &mut Kv, lib: &str) -> String {
         // prefix 本身就是函数目录：直接重建该函数（pkg/name 从路径反推）。
         let base = prefix.trim_start_matches("/lib/");
         let (fpkg, name) = func_identity("", base);
-        let src = kvkind::value_string(&kv.get_one(&format!("{prefix}.src")));
+        let dir = format!("{prefix}/");
+        let text = reconstruct(kv, &dir, &name);
         let mut slots = Vec::new();
-        collect_slots(kv, &format!("{prefix}/"), &mut slots);
+        collect_slots(kv, &dir, &mut slots);
         funcs.push(DumpFunc {
             pkg: fpkg,
             name,
-            src,
+            text,
             slots,
-            dir: format!("{prefix}/"),
+            dir,
         });
     } else {
         // 虚拟 pkg：func dir 以 prefix 为前缀（`/lib/foo` 匹配 `/lib/foo·*` 与 `/lib/foo/*`）。
@@ -210,11 +213,11 @@ pub fn dump(kv: &mut Kv, lib: &str) -> String {
     out
 }
 
-/// 一个可运行函数：源码（.src）+ 原始槽位注释。
+/// 一个可运行函数：从 /lib 子树重建的源码 + 原始槽位注释。
 struct DumpFunc {
     pkg: String,
     name: String,
-    src: String,
+    text: String,
     slots: Vec<String>,
     dir: String,
 }
@@ -262,13 +265,13 @@ fn collect_funcs(
         let mem_sub = format!("{prefix}{base}·");
         if is_func_dir(kv, &dir_sub) {
             let (fpkg, name) = func_identity(pkg, &base);
-            let src = kvkind::value_string(&kv.get_one(&format!("{prefix}{base}.src")));
+            let text = reconstruct(kv, &dir_sub, &name);
             let mut slots = Vec::new();
             collect_slots(kv, &dir_sub, &mut slots);
             funcs.push(DumpFunc {
                 pkg: fpkg,
                 name,
-                src,
+                text,
                 slots,
                 dir: dir_sub,
             });
@@ -342,7 +345,7 @@ fn emit_node(out: &mut String, node: &DumpNode, indent: &str) {
 }
 
 fn emit_func(out: &mut String, f: &DumpFunc, indent: &str) {
-    for line in f.src.lines() {
+    for line in f.text.lines() {
         out.push_str(indent);
         out.push_str(line);
         out.push('\n');
@@ -358,6 +361,251 @@ fn emit_func(out: &mut String, f: &DumpFunc, indent: &str) {
         out.push('\n');
     }
     out.push('\n');
+}
+
+// ── dump 重建：严格从 /lib 子树反出可运行 kvlang（不读 .src）─────────────
+//
+// 数据来源（对齐 write_func / spec「指令布局格式」）：
+//   签名  ← [0,0] 计数头(nr,nw,dyn) + 命名参数 Ptr 键（langtype=类型、body=[0,±k] 定位读/写与序）
+//   函数体 ← 线性指令槽 [n,0]=opcode、[n,-j]=读参、[n,j]=写参（n 连续、scope 已拍平）
+//   控制流 ← ‥labels/<label>=irseq；goto/br 的整数读参即 irseq，映射回 label 名并按 irseq 切块
+// 重建成 AST(Func) 后复用其 Display/full_text，箭头一律规范化为 `->`（源箭头风格不落盘）。
+
+/// 单个函数目录 → 可运行 kvlang 文本（签名 + 体）。
+fn reconstruct(kv: &mut Kv, dir: &str, name: &str) -> String {
+    let (nr, nw, dynamic) = kvkind::counts(&kv.get_one(&format!("{dir}[0,0]")));
+    let sig = reconstruct_sig(kv, dir, name, nr, nw, dynamic);
+    let labels = read_labels(kv, dir);
+    let insts = read_insts(kv, dir);
+    let body = build_body(&insts, &labels);
+    Func {
+        comments: Vec::new(),
+        sig,
+        body,
+        pkg: String::new(),
+    }
+    .full_text()
+}
+
+/// 从命名参数 Ptr 键重建签名：类型取 Ptr langtype，读/写与序取 body 坐标 [0,±k]。
+fn reconstruct_sig(kv: &mut Kv, dir: &str, name: &str, nr: i32, nw: i32, dynamic: bool) -> FuncSig {
+    let blank = || Param {
+        name: String::new(),
+        ty: String::new(),
+    };
+    let mut params: Vec<Param> = (0..nr).map(|_| blank()).collect();
+    let mut returns: Vec<Param> = (0..nw).map(|_| blank()).collect();
+    for c in kv.list(dir, false, true) {
+        if c.starts_with('[') || c.ends_with('/') || c.starts_with(keytree::RUNTIME_MEMBER_SEP) {
+            continue; // 指令槽 / labels 目录 / 运行时保留字段
+        }
+        let data = kv.get_one(&format!("{dir}{c}"));
+        if !kvkind::is_ptr(&data) {
+            continue;
+        }
+        let ty = kvkind::langtype(&data);
+        let (is_read, k) = match parse_slot_coord(&kvkind::ptr_target(&data)) {
+            Some(v) => v,
+            None => continue,
+        };
+        let slot = Param {
+            name: c.clone(),
+            ty,
+        };
+        let dst = if is_read { &mut params } else { &mut returns };
+        if k >= 1 && (k as usize) <= dst.len() {
+            dst[k as usize - 1] = slot;
+        }
+    }
+    if dynamic {
+        if let Some(p) = params.last_mut() {
+            if !p.ty.is_empty() {
+                p.ty.push_str("...");
+            }
+        }
+    }
+    FuncSig {
+        name: name.to_string(),
+        params,
+        returns,
+    }
+}
+
+/// 解析槽坐标 `[0,-1]`/`[0,1]` → (是否读参, |k|)。
+fn parse_slot_coord(s: &str) -> Option<(bool, i32)> {
+    let inner = s.strip_prefix('[')?.strip_suffix(']')?;
+    let col = inner.split(',').nth(1)?.trim();
+    let n: i32 = col.parse().ok()?;
+    Some((n < 0, n.abs()))
+}
+
+/// ‥labels/ 子树 → (irseq, label)，按 irseq 升序（体切块用）。
+fn read_labels(kv: &mut Kv, dir: &str) -> Vec<(i32, String)> {
+    let ldir = format!("{dir}{}{}/", keytree::RUNTIME_MEMBER_SEP, keytree::SEG_LABELS);
+    let mut out: Vec<(i32, String)> = kv
+        .list(&ldir, false, true)
+        .into_iter()
+        .filter(|c| !c.ends_with('/'))
+        .filter_map(|c| {
+            let irseq: i32 = kvkind::plain(&kv.get_one(&format!("{ldir}{c}"))).parse().ok()?;
+            Some((irseq, c))
+        })
+        .collect();
+    out.sort_by_key(|(irseq, _)| *irseq);
+    out
+}
+
+/// 一条重建指令：opcode + 读操作数 + 写目标名。
+struct RawInst {
+    opcode: String,
+    reads: Vec<Operand>,
+    writes: Vec<String>,
+}
+
+/// 操作数：引用（变量/opcode/路径）、字符串字面量、其它字面量（数值/bool）。
+enum Operand {
+    Ref(String),
+    Str(String),
+    Lit(String),
+}
+
+/// 线性读回 [n,*]（n 从 1 连续到首个空 opcode 前）。
+fn read_insts(kv: &mut Kv, dir: &str) -> Vec<RawInst> {
+    let mut out = Vec::new();
+    let mut n = 1;
+    loop {
+        let op = kv.get_one(&format!("{dir}[{n},0]"));
+        if op.is_empty() {
+            break;
+        }
+        let opcode = kvkind::rwir_sig(&op);
+        let mut reads = Vec::new();
+        let mut j = 1;
+        loop {
+            let d = kv.get_one(&format!("{dir}[{n},-{j}]"));
+            if d.is_empty() {
+                break;
+            }
+            reads.push(decode_operand(&d));
+            j += 1;
+        }
+        let mut writes = Vec::new();
+        let mut j = 1;
+        loop {
+            let d = kv.get_one(&format!("{dir}[{n},{j}]"));
+            if d.is_empty() {
+                break;
+            }
+            writes.push(kvkind::rwir_sig(&d));
+            j += 1;
+        }
+        out.push(RawInst {
+            opcode,
+            reads,
+            writes,
+        });
+        n += 1;
+    }
+    out
+}
+
+/// 槽值 → Operand：rwir 族为引用/opcode 名，char 为字符串字面量，其余为明文字面量。
+fn decode_operand(data: &[u8]) -> Operand {
+    let k = kvkind::kind(data);
+    if matches!(k.as_str(), "rwir" | "rwir|rwfunc" | "rwfunc" | "def rwir") {
+        Operand::Ref(kvkind::rwir_sig(data))
+    } else if kvkind::is_char_kind(&k) {
+        Operand::Str(kvkind::plain(data))
+    } else {
+        Operand::Lit(kvkind::plain(data))
+    }
+}
+
+fn operand_expr(o: &Operand) -> Expr {
+    match o {
+        Operand::Ref(s) | Operand::Lit(s) => ast::leaf(s),
+        Operand::Str(s) => ast::str_lit(s),
+    }
+}
+
+/// goto/br 的整数读参 → label 名（查不到则原样保留数字）。
+fn label_leaf(o: &Operand, by_irseq: &HashMap<i32, String>) -> Expr {
+    if let Operand::Lit(s) = o {
+        if let Ok(n) = s.parse::<i32>() {
+            if let Some(l) = by_irseq.get(&n) {
+                return ast::leaf(l);
+            }
+        }
+    }
+    operand_expr(o)
+}
+
+/// 线性指令 + labels → 语句序列：首 label 前为前导语句，各 label 段成 ScopeStmt。
+fn build_body(insts: &[RawInst], labels: &[(i32, String)]) -> Vec<Stmt> {
+    let by_irseq: HashMap<i32, String> = labels.iter().map(|(i, l)| (*i, l.clone())).collect();
+    let total = insts.len() as i32;
+    let first = labels.first().map(|(i, _)| *i).unwrap_or(total + 1);
+    let inst_stmt = |i: i32| Stmt::Instruction(build_inst(&insts[i as usize - 1], &by_irseq));
+    let mut body: Vec<Stmt> = (1..first).map(inst_stmt).collect();
+    for (bi, (start, label)) in labels.iter().enumerate() {
+        let end = labels.get(bi + 1).map(|(i, _)| *i).unwrap_or(total + 1);
+        body.push(Stmt::Scope(ScopeStmt {
+            comments: Vec::new(),
+            label: label.clone(),
+            body: (*start..end).map(inst_stmt).collect(),
+        }));
+    }
+    body
+}
+
+/// (opcode, reads, writes) → Instruction（箭头规范化为 `->`；复用 Display 还原算子/糖）。
+fn build_inst(inst: &RawInst, by_irseq: &HashMap<i32, String>) -> Instruction {
+    let expr = match inst.opcode.as_str() {
+        "" => None,
+        "return" => Some(ast::leaf("return")),
+        "=" => inst.reads.first().map(operand_expr),
+        "goto" => Some(ast::call(
+            "goto",
+            inst.reads
+                .iter()
+                .map(|o| label_leaf(o, by_irseq))
+                .collect(),
+        )),
+        "br" => {
+            let mut args = Vec::with_capacity(inst.reads.len());
+            for (i, o) in inst.reads.iter().enumerate() {
+                args.push(if i == 0 {
+                    operand_expr(o)
+                } else {
+                    label_leaf(o, by_irseq)
+                });
+            }
+            Some(ast::call("br", args))
+        }
+        op => Some(ast::call(op, inst.reads.iter().map(operand_expr).collect())),
+    };
+    // array·fill 首参即写目标 langtype（Display 隐去不回显），回填 write_types 恢复类型标注。
+    // 且须用前置 `=` 式（arrow_left=true）：parser 仅在前置标注式把写类型喂给 array·fill 首参，
+    // 后置箭头式 `[5...] -> b:TYPE` 会丢弃该类型（parser 不对称），故这里强制前置式以保幂等。
+    let is_fill = inst.opcode == "array·fill" && !inst.writes.is_empty();
+    let write_types = if is_fill {
+        let ty = match inst.reads.first() {
+            Some(Operand::Str(s)) | Some(Operand::Ref(s)) | Some(Operand::Lit(s)) => s.clone(),
+            None => String::new(),
+        };
+        let mut v = vec![String::new(); inst.writes.len()];
+        v[0] = ty;
+        v
+    } else {
+        Vec::new()
+    };
+    Instruction {
+        comments: Vec::new(),
+        expr,
+        writes: inst.writes.clone(),
+        write_types,
+        arrow_left: is_fill,
+    }
 }
 
 /// 写函数到 /lib/：签名（rwfunc）、源码、参数 Ptr、指令体。

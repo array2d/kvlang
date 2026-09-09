@@ -6,18 +6,13 @@
 //   3
 //   4
 //   5
-rwfunc build_list() -> () {
-	/n0 = { val=1; next="/n1" }
-	/n1 = { val=2; next="/n2" }
-	{ val=6; next="/n3" } -> /n2
-	/n3 = { val=3; next="/n4" }
-	/n4 = { val=4; next="/n5" }
-	{ val=5; next="/n6" } -> /n5
-	/n6 = { val=6; next="" }
+struct Node {
+	val:int64=0
+	next:[]char/utf32=""
 }
 
 rwfunc remove(head:[]char/utf32, val:int64) -> () {
-	p = "/n0"
+	head -> p
 	while (p != "") {
 		v = p·val
 		v == val -> skip
@@ -32,6 +27,21 @@ rwfunc remove(head:[]char/utf32, val:int64) -> () {
 }
 
 rwfunc test() -> () {
-	build_list()
-	remove("/n0", 6)
+	n:[int64]·/lib/Node = {}
+	kv·abs(n) -> nb
+	nb + "·2" -> n2
+	nb + "·3" -> n3
+	nb + "·4" -> n4
+	nb + "·5" -> n5
+	nb + "·6" -> n6
+	nb + "·7" -> n7
+	Node{val=1 next=n2} -> n·1
+	Node{val=2 next=n3} -> n·2
+	Node{val=6 next=n4} -> n·3
+	Node{val=3 next=n5} -> n·4
+	Node{val=4 next=n6} -> n·5
+	Node{val=5 next=n7} -> n·6
+	Node{val=6 next=""} -> n·7
+	nb + "·1" -> h
+	remove(h, 6)
 }

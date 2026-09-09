@@ -486,8 +486,9 @@ int kvlangBuiltinObj(kvlangFrame_t *f) {
             if (kvlangXvalueNone(&in[i + 1])) continue;
             names[j++] = kvlangXvalueValueString(&in[i]);
         }
-        /* 容器值 p：kind=object，body 空。 */
-        kvlangXvalue_t mark; kvlangXvalueNewTlv(&mark, KVSPACE_KIND_OBJ, (const uint8_t *)"", 0, 1);
+        /* 容器值 p：kind=stringkeymap，dims=[0]（命名字典无形状，成员在 memindex）。 */
+        int32_t odims[1] = { 0 };
+        kvlangXvalue_t mark; kvlangBuiltinMapMarker(&mark, odims, 1);
         kvlangKvPair_t p0 = { ok, mark };
         kvlangKvSet(f->kv, &p0, 1, err, sizeof err);
         kvlangXvalueFree(&mark);

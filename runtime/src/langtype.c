@@ -34,7 +34,7 @@ static bool known_kind(const char *s, size_t len) {
            kind_eq(s, len, KVSPACE_KIND_FLOAT8_E4M3) || kind_eq(s, len, KVSPACE_KIND_FLOAT8_E5M2) ||
            kind_eq(s, len, KVSPACE_KIND_CHAR) || kind_eq(s, len, KVSPACE_KIND_CHAR_UTF8) ||
            kind_eq(s, len, KVSPACE_KIND_CHAR_ASCII) ||
-           kind_eq(s, len, KVSPACE_KIND_OBJ) || kind_eq(s, len, KVSPACE_KIND_MAP) ||
+           kind_eq(s, len, KVSPACE_KIND_MAP) ||
            kind_eq(s, len, KVSPACE_KIND_INDEX) || kind_eq(s, len, KVSPACE_KIND_EXT_INDEX) ||
            kind_eq(s, len, KVSPACE_KIND_RWIR) || kind_eq(s, len, KVSPACE_KIND_RWFUNC) ||
            kind_eq(s, len, KVSPACE_KIND_SCOPE) || kind_eq(s, len, KVSPACE_KIND_STRUCT) ||

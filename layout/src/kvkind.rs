@@ -14,7 +14,6 @@ pub const KIND_CHAR_ASCII: &str = "char/ascii";
 pub const KIND_BOOL: &str = "bool";
 pub const KIND_INT64: &str = "int64";
 pub const KIND_FLOAT64: &str = "float64";
-pub const KIND_OBJ: &str = "object";
 pub const KIND_MAP: &str = "stringkeymap";
 pub const KIND_INDEX: &str = "index";
 pub const KIND_EXT_INDEX: &str = "extindex";
@@ -303,4 +302,42 @@ pub fn rwfunc_num_writes(body: &[u8]) -> i32 {
         return 0;
     }
     u16::from_le_bytes([body[2], body[3]]) as i32
+}
+
+/// 主槽计数头 (nr, nw, dynamic)——直接吃整条 XValue（rwfunc/def rwir）。
+pub fn counts(data: &[u8]) -> (i32, i32, bool) {
+    if data.is_empty() {
+        return (0, 0, false);
+    }
+    let h = ffi::decode_head(data);
+    let b = body(data, &h);
+    if b.len() >= 5 {
+        (
+            u16::from_le_bytes([b[0], b[1]]) as i32,
+            u16::from_le_bytes([b[2], b[3]]) as i32,
+            b[4] != 0,
+        )
+    } else {
+        (0, 0, false)
+    }
+}
+
+/// 字面量的明文源值（不含 kind 前缀、不含引号）；char/utf32 按码点正确解码。
+pub fn plain(data: &[u8]) -> String {
+    if data.is_empty() {
+        return String::new();
+    }
+    let (_, k) = parse_langtype(&langtype(data));
+    let h = ffi::decode_head(data);
+    plain_value(&k, body(data, &h))
+}
+
+/// rwir 族槽值的载荷串（opcode / 引用名）：body 去 5 字节计数头后的字节。
+pub fn rwir_sig(data: &[u8]) -> String {
+    if data.is_empty() {
+        return String::new();
+    }
+    let h = ffi::decode_head(data);
+    let b = body(data, &h);
+    String::from_utf8_lossy(&b[5.min(b.len())..]).into_owned()
 }

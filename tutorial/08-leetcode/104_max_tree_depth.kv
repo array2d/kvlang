@@ -2,12 +2,10 @@
 // 来源: LeetCode #104
 // 期望输出:
 //   3
-rwfunc build_tree() -> () {
-	/t0 = { val=3; left="/t1"; right="/t2" }
-	{ val=9; left=""; right="" } -> /t1
-	/t2 = { val=20; left="/t3"; right="/t4" }
-	/t3 = { val=15; left=""; right="" }
-	{ val=7; left=""; right="" } -> /t4
+struct TNode {
+	val:int64=0
+	left:[]char/utf32=""
+	right:[]char/utf32=""
 }
 
 rwfunc max_depth(root:[]char/utf32) -> (depth:int64) {
@@ -21,7 +19,18 @@ rwfunc max_depth(root:[]char/utf32) -> (depth:int64) {
 }
 
 rwfunc test() -> () {
-	build_tree()
-	d = max_depth("/t0")
+	t:[int64]·/lib/TNode = {}
+	kv·abs(t) -> tb
+	tb + "·2" -> t1
+	tb + "·3" -> t2
+	tb + "·4" -> t3
+	tb + "·5" -> t4
+	TNode{val=3 left=t1 right=t2} -> t·1
+	TNode{val=9} -> t·2
+	TNode{val=20 left=t3 right=t4} -> t·3
+	TNode{val=15} -> t·4
+	TNode{val=7} -> t·5
+	tb + "·1" -> root
+	d = max_depth(root)
 	println(d)
 }

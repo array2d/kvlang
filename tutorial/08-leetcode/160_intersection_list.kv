@@ -3,18 +3,9 @@
 // 双指针法: pA 走完走 B, pB 走完走 A, 相遇即交点
 // 期望输出:
 //   8
-rwfunc build_lists() -> () {
-	// common tail: 8→4→5
-	/t8 = { val=8; next="/t4" }
-	/t4 = { val=4; next="/t5" }
-	{ val=5; next="" } -> /t5
-	// list A: 4→1→/t8
-	/a0 = { val=4; next="/a1" }
-	{ val=1; next="/t8" } -> /a1
-	// list B: 5→6→1→/t8
-	/b0 = { val=5; next="/b1" }
-	/b1 = { val=6; next="/b2" }
-	{ val=1; next="/t8" } -> /b2
+struct Node {
+	val:int64=0
+	next:[]char/utf32=""
 }
 
 rwfunc get_intersection(ha:[]char/utf32, hb:[]char/utf32) -> () {
@@ -53,6 +44,33 @@ rwfunc get_intersection(ha:[]char/utf32, hb:[]char/utf32) -> () {
 }
 
 rwfunc test() -> () {
-	build_lists()
-	get_intersection("/a0", "/b0")
+	// common tail: 8→4→5
+	t:[int64]·/lib/Node = {}
+	kv·abs(t) -> tb
+	tb + "·1" -> t8
+	tb + "·2" -> t4
+	tb + "·3" -> t5
+	Node{val=8 next=t4} -> t·1
+	Node{val=4 next=t5} -> t·2
+	Node{val=5 next=""} -> t·3
+
+	// list A: 4→1→t8
+	a:[int64]·/lib/Node = {}
+	kv·abs(a) -> ab
+	ab + "·2" -> a2
+	Node{val=4 next=a2} -> a·1
+	Node{val=1 next=t8} -> a·2
+	ab + "·1" -> ha
+
+	// list B: 5→6→1→t8
+	b:[int64]·/lib/Node = {}
+	kv·abs(b) -> bb
+	bb + "·2" -> b2
+	bb + "·3" -> b3
+	Node{val=5 next=b2} -> b·1
+	Node{val=6 next=b3} -> b·2
+	Node{val=1 next=t8} -> b·3
+	bb + "·1" -> hb
+
+	get_intersection(ha, hb)
 }

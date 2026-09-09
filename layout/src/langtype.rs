@@ -38,7 +38,6 @@ fn known_kind(k: &str) -> bool {
             | "char/utf32"
             | "char/utf8"
             | "char/ascii"
-            | "object"
             | "stringkeymap"
             | "index"
             | "extindex"
@@ -121,7 +120,7 @@ fn valid_shape(s: &str) -> bool {
     valid_base(s)
 }
 
-/// 标量 kind（可作元组键元素；不含 char/object/index 等）。
+/// 标量 kind（可作元组键元素；不含 char/stringkeymap/index 等）。
 fn valid_scalar(s: &str) -> bool {
     matches!(
         s,
@@ -280,7 +279,6 @@ mod tests {
             "char/utf8",
             "char/utf32",
             "char/ascii",
-            "object",
             "stringkeymap",
             "index",
             "[]float32",
@@ -299,7 +297,7 @@ mod tests {
             "[2,3]float32|float32",
             "[]float32|[]float64",
             "bool|char/utf8",
-            "index|object",
+            "index|stringkeymap",
             "[]char/utf8·int64",
             "[]char/utf32·[]char/utf8",
             "[]char/utf8·[]char/utf8·int64",
@@ -340,7 +338,6 @@ mod tests {
         assert!(match_langtype("/lib/Point", "/lib/Point", 0, &[]));
         assert!(!match_langtype("/lib/Point", "/lib/Node", 0, &[]));
         assert!(match_langtype("[]char/utf8·int64", "stringkeymap", 1, &[3]));
-        assert!(!match_langtype("[]char/utf8·int64", "object", 0, &[]));
     }
 
     #[test]
@@ -406,7 +403,7 @@ mod tests {
         let cases = [
             ("int64", "int64", 0, &[][..], true),
             ("int64", "float64", 0, &[], false),
-            ("any", "object", 0, &[], true),
+            ("any", "stringkeymap", 0, &[], true),
             ("any", "int4", 0, &[], true),
             ("char/utf8", "char/utf8", 0, &[], true),
             ("char/utf8", "char/utf32", 0, &[], false),
@@ -423,7 +420,7 @@ mod tests {
             ("[2,3]float32|float32", "float64", 0, &[], false),
             ("[]float32|[]float64", "float64", 1, &[10], true),
             ("bool|char/utf8", "char/utf8", 0, &[], true),
-            ("index|object", "index", 0, &[], true),
+            ("index|stringkeymap", "index", 0, &[], true),
         ];
         for (expr, kind, ndim, dims, want) in cases {
             let got = match_langtype(expr, kind, ndim, dims);
