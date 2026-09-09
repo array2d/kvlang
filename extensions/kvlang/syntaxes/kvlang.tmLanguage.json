@@ -46,7 +46,7 @@
     },
     "keyword": {
       "name": "keyword.control.kvlang",
-      "match": "\\b(rwfunc|rwir|lib|if|else|for|while|break|continue|return)\\b"
+      "match": "\\b(rwfunc|rwir|lib|struct|if|else|for|while|break|continue|return)\\b"
     },
     "block_label": {
       "name": "entity.name.label.kvlang",
