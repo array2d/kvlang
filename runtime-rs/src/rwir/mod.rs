@@ -243,6 +243,7 @@ pub fn in_myrwircaps(op: &str) -> bool {
 pub fn dispatch(eng: &Engine, op: &str, pc: &str) {
     match op {
         "print" | "println" | "cerr" => term::print_line(eng, pc),
+        "printf" => term::printf(eng, pc),
         "input" => term::input(eng, pc),
         "json·to" => json::to(eng, pc),
         "json·from" => json::from(eng, pc),

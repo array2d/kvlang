@@ -556,36 +556,16 @@ void kvlangXvalueNewPtr(kvlangXvalue_t *v, const char *target_langtype, const ch
     v->len = len;
     v->borrowed = 0;
 }
-/* body = [nr:u16 LE][nw:u16 LE][dynamic:u8][clean_sig]。
- * 末读参尾缀 "..." 是签名层变参标记：此处剥离，置 dynamic=1，langtype 串保持纯净。 */
-void kvlangXvalueNewRwir(kvlangXvalue_t *v, int32_t nr, int32_t nw, const char *sig) {
-    size_t sl = strlen(sig);
-    uint8_t *raw = malloc(5 + sl);
-    raw[0] = nr & 0xFF;
-    raw[1] = (nr >> 8) & 0xFF;
-    raw[2] = nw & 0xFF;
-    raw[3] = (nw >> 8) & 0xFF;
-    raw[4] = 0;
-    memcpy(raw + 5, sig, sl);
-    /* 末读参尾缀 "..." 是签名层变参标记：此处剥离，置 dynamic=1，langtype 串保持纯净。 */
-    if (nr > 0) {
-        char *base = (char *)raw + 5;
-        char *p = base;
-        for (int i = 0; i < nr - 1; i++) {
-            char *nl = strchr(p, '\n');
-            if (!nl) { p = base + sl; break; }
-            p = nl + 1;
-        }
-        char *nl = strchr(p, '\n');
-        size_t seg = nl ? (size_t)(nl - p) : (size_t)(base + sl - p);
-        if (seg >= 3 && memcmp(p + seg - 3, "...", 3) == 0) {
-            raw[4] = 1;
-            memmove(p + seg - 3, p + seg, (size_t)(base + sl - (p + seg)));
-            sl -= 3;
-        }
-    }
-    kvlangXvalueNewTlv(v, KVSPACE_KIND_DEF_RWIR, raw, (uint32_t)(5 + sl), 1);
-    free(raw);
+/* def rwir 路由头：body 仅计数头 [nr:u16 LE][nw:u16 LE][dynamic:u8]，无参数载荷。
+ * 各参数类型由 kvlangRwirextRegister 落 /lib/<op>/[0,x] 签名行槽（def langtype）。 */
+void kvlangXvalueNewDefRwir(kvlangXvalue_t *v, int32_t nr, int32_t nw, int dynamic) {
+    uint8_t raw[5] = { nr & 0xFF, (nr >> 8) & 0xFF, nw & 0xFF, (nw >> 8) & 0xFF, dynamic ? 1 : 0 };
+    kvlangXvalueNewTlv(v, KVSPACE_KIND_DEF_RWIR, raw, 5, 1);
+}
+
+/* 签名行 [0,x] 槽：一个参数的类型定义，body=该参数完整 langtype 串。 */
+void kvlangXvalueNewDefLangtype(kvlangXvalue_t *v, const char *langtype) {
+    kvlangXvalueNewTlv(v, KVSPACE_KIND_DEF_LANGTYPE, (const uint8_t *)langtype, (uint32_t)strlen(langtype), 1);
 }
 
 void kvlangFormatFloat(char *out, size_t cap, double v) {

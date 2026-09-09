@@ -84,6 +84,7 @@ mod tests {
             rt: std::ptr::null_mut(),
             kv,
             dsn: dsn.to_string(),
+            ext: None,
         };
         let src = r#"
 lib http {

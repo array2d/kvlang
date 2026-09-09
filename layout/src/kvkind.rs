@@ -23,7 +23,8 @@ pub const KIND_STRUCT: &str = "struct";
 // kvlang 自有 kind
 pub const KIND_RWIR: &str = "rwir";
 pub const KIND_RWFUNC: &str = "rwfunc";
-pub const KIND_DEF_RWIR: &str = "defrwir";
+pub const KIND_DEF_RWIR: &str = "def rwir";
+pub const KIND_DEF_LANGTYPE: &str = "def langtype";
 pub const KIND_RWIR_OR_RWFUNC: &str = "rwir|rwfunc";
 pub const KIND_SCOPE: &str = "scope";
 
@@ -188,7 +189,7 @@ fn plain_value(k: &str, b: &[u8]) -> String {
             .collect(),
         "index" => format!("({})", count_names(b)),
         // kvlang 自有 kind：body = [2B nr][2B nw][1B dynamic][sig]；槽值/调用目标 nr=nw=0，取 sig 即可。
-        "rwir" | "rwir|rwfunc" | "rwfunc" | "defrwir" => {
+        "rwir" | "rwir|rwfunc" | "rwfunc" | "def rwir" => {
             let (nr, nw, dynamic) = if b.len() >= 5 {
                 (
                     u16::from_le_bytes([b[0], b[1]]),
@@ -214,32 +215,50 @@ pub fn is_char_kind(k: &str) -> bool {
     k.starts_with("char/")
 }
 
-// ── kvlang 自有 kind：rwir / defrwir ────────────────────────────────
+// ── kvlang 自有 kind：rwir / def rwir / def langtype ─────────────────
 //
-// body = [2B nr LE][2B nw LE][1B dynamic][sig]，array_len=1。
-// rwir=槽值（引用串/opcode），defrwir=定义（签名）。dynamic=末读参变参（arity，非 langtype）。
+// 铁律：任何 rwir/rwfunc 值的 body 只记计数头 [2B nr LE][2B nw LE][1B dynamic]，
+// 禁止携带具体参数。指令槽 [n,x] 的引用串（opcode/操作数名）是「每坐标一个值」，
+// 落于 rwir 槽值 body 的尾部载荷；定义（rwfunc/def rwir）的各参数类型分散落在
+// 签名行 [0,x] 槽（各为一个 def langtype 值，body=该参数 langtype 串）。
+// dynamic=末读参变参（arity，非 langtype）。
 
-fn rwir_body(nr: i32, nw: i32, dynamic: bool, sig: &str) -> Vec<u8> {
-    let mut raw = Vec::with_capacity(5 + sig.len());
+/// 计数头 [nr:u16 LE][nw:u16 LE][dynamic:u8]（定义体，无参数载荷）。
+fn counts_body(nr: i32, nw: i32, dynamic: bool) -> Vec<u8> {
+    let mut raw = Vec::with_capacity(5);
     raw.extend_from_slice(&(nr as u16).to_le_bytes());
     raw.extend_from_slice(&(nw as u16).to_le_bytes());
     raw.push(dynamic as u8);
+    raw
+}
+
+/// 指令槽值：计数头 + 单个引用串载荷（opcode/操作数名，每坐标一个值）。
+fn rwir_slot_body(sig: &str) -> Vec<u8> {
+    let mut raw = counts_body(0, 0, false);
     raw.extend_from_slice(sig.as_bytes());
     raw
 }
 
 pub fn new_rwir(nr: i32, nw: i32, sig: &str) -> Vec<u8> {
-    ffi::tlv_encode(KIND_RWIR, &rwir_body(nr, nw, false, sig), 1)
+    let mut raw = counts_body(nr, nw, false);
+    raw.extend_from_slice(sig.as_bytes());
+    ffi::tlv_encode(KIND_RWIR, &raw, 1)
 }
 
 /// 调用目标（看起来像函数调用的 opcode）→ langtype `rwir|rwfunc` 并列。
 /// 静态无法判定是扩展 rwir 还是用户 rwfunc，交 runtime 查 /lib/<op> 的 XValue kind 分派。
 pub fn new_rwir_union(sig: &str) -> Vec<u8> {
-    ffi::tlv_encode(KIND_RWIR_OR_RWFUNC, &rwir_body(0, 0, false, sig), 1)
+    ffi::tlv_encode(KIND_RWIR_OR_RWFUNC, &rwir_slot_body(sig), 1)
 }
 
-pub fn new_defrwir(nr: i32, nw: i32, dynamic: bool, sig: &str) -> Vec<u8> {
-    ffi::tlv_encode(KIND_DEF_RWIR, &rwir_body(nr, nw, dynamic, sig), 1)
+/// def rwir 路由头：仅计数头，无参数载荷。各参数落 [0,x] 签名行槽（def langtype）。
+pub fn new_defrwir(nr: i32, nw: i32, dynamic: bool) -> Vec<u8> {
+    ffi::tlv_encode(KIND_DEF_RWIR, &counts_body(nr, nw, dynamic), 1)
+}
+
+/// 签名行 [0,x] 槽：一个参数的类型定义，body=该参数完整 langtype 串。
+pub fn new_def_langtype(langtype: &str) -> Vec<u8> {
+    ffi::tlv_encode(KIND_DEF_LANGTYPE, langtype.as_bytes(), 1)
 }
 
 // ── struct 原型（对齐 runtime kvlangBuiltinMemindex）─────────────────
@@ -264,21 +283,11 @@ pub fn new_memindex(names: &[String]) -> Vec<u8> {
 
 // ── kvlang 自有 kind：rwfunc ────────────────────────────────────────
 //
-// body = [2B nr LE][2B nw LE][1B dynamic][param_types 以 \n 连接]，array_len=num_insts。
+// body = 计数头 [2B nr LE][2B nw LE][1B dynamic]，array_len=num_insts。
+// 各参数类型落签名行 [0,x] 槽（def langtype），不入 body（见上「铁律」）。
 
-pub fn new_rwfunc(
-    num_insts: i32,
-    nr: i32,
-    nw: i32,
-    dynamic: bool,
-    param_types: &[String],
-) -> Vec<u8> {
-    let mut raw = Vec::with_capacity(5 + param_types.iter().map(|s| s.len()).sum::<usize>());
-    raw.extend_from_slice(&(nr as u16).to_le_bytes());
-    raw.extend_from_slice(&(nw as u16).to_le_bytes());
-    raw.push(dynamic as u8);
-    raw.extend_from_slice(param_types.join("\n").as_bytes());
-    ffi::tlv_encode(KIND_RWFUNC, &raw, num_insts)
+pub fn new_rwfunc(num_insts: i32, nr: i32, nw: i32, dynamic: bool) -> Vec<u8> {
+    ffi::tlv_encode(KIND_RWFUNC, &counts_body(nr, nw, dynamic), num_insts)
 }
 
 /// rwfunc body 访问器（layout 读回签名时用）。
@@ -294,14 +303,4 @@ pub fn rwfunc_num_writes(body: &[u8]) -> i32 {
         return 0;
     }
     u16::from_le_bytes([body[2], body[3]]) as i32
-}
-
-pub fn rwfunc_param_types(body: &[u8]) -> Vec<String> {
-    if body.len() <= 5 {
-        return Vec::new();
-    }
-    String::from_utf8_lossy(&body[5..])
-        .split('\n')
-        .map(|s| s.to_string())
-        .collect()
 }

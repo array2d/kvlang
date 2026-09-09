@@ -1,5 +1,5 @@
 //! rwir `print` / `println` / `cerr` / `printf` / `input`。它们不是 kvlang runtime 的 builtin，
-//! 由本 runtime 就地实现：print* 拼行输出；`printf` C 风格格式化串（不自动换行，换行靠 `\n`）；
+//! 由本 runtime 就地实现：print* 拼行输出；`printf` C 风格格式化串到 stdout（不自动换行，换行靠 `\n`）；
 //! `input` 读一行 stdin 回填写槽。
 //! TTY 走 rustyline（方向键移动光标 / 上下翻历史 / 按字符退格）；管道走 read_line（脚本/测试）。
 
@@ -41,7 +41,7 @@ pub fn print_line(eng: &Engine, pc: &str) {
     }
 }
 
-/// printf(fmt, args...)：C 风格格式化串就地输出（不自动换行，换行靠 fmt 里的 `\n`）。
+/// printf(fmt, args...)：C 风格格式化串就地输出到 stdout（不自动换行，换行靠 fmt 里的 `\n`）。
 /// 支持转换 `d i u o x X f F e E g G c s %`、标志 `- 0 + 空格 #`、宽度、`.精度`；
 /// 实参经 read_at 取显示串，数值型转换按需 parse 回 i64/f64。
 pub fn printf(eng: &Engine, pc: &str) {
@@ -82,7 +82,8 @@ fn format_c(fmt: &str, args: &[String]) -> String {
             i += 1;
             continue;
         }
-        let (mut left, mut zero, mut plus, mut space, mut alt) = (false, false, false, false, false);
+        let (mut left, mut zero, mut plus, mut space, mut alt) =
+            (false, false, false, false, false);
         while i < c.len() {
             match c[i] {
                 '-' => left = true,
@@ -116,7 +117,16 @@ fn format_c(fmt: &str, args: &[String]) -> String {
             out.push('%');
             break;
         }
-        let spec = Spec { left, zero, plus, space, alt, width, prec, conv: c[i] };
+        let spec = Spec {
+            left,
+            zero,
+            plus,
+            space,
+            alt,
+            width,
+            prec,
+            conv: c[i],
+        };
         i += 1;
         let arg = args.get(ai).map(String::as_str).unwrap_or("");
         ai += 1;
@@ -174,15 +184,28 @@ fn render(s: &Spec, arg: &str) -> String {
             let mag = zpad_prec(mag, s.prec);
             pad(sign_of(v < 0, s.plus, s.space), &mag, s, true)
         }
-        'u' => pad("", &zpad_prec((as_i64(arg) as u64).to_string(), s.prec), s, true),
+        'u' => pad(
+            "",
+            &zpad_prec((as_i64(arg) as u64).to_string(), s.prec),
+            s,
+            true,
+        ),
         'o' => {
             let d = format!("{:o}", as_i64(arg) as u64);
-            let pfx = if s.alt && !d.starts_with('0') { "0" } else { "" };
+            let pfx = if s.alt && !d.starts_with('0') {
+                "0"
+            } else {
+                ""
+            };
             pad(pfx, &zpad_prec(d, s.prec), s, true)
         }
         'x' | 'X' => {
             let u = as_i64(arg) as u64;
-            let d = if s.conv == 'x' { format!("{u:x}") } else { format!("{u:X}") };
+            let d = if s.conv == 'x' {
+                format!("{u:x}")
+            } else {
+                format!("{u:X}")
+            };
             let pfx = match (s.alt && u != 0, s.conv == 'x') {
                 (true, true) => "0x",
                 (true, false) => "0X",
@@ -266,7 +289,11 @@ fn decompose(mag: f64, prec: usize) -> (String, i32) {
 /// C 风格 `%g`：按指数在 %e / %f 间取短者，精度=有效位数；除非 `#`，去尾零与尾点。
 fn fmt_g(mag: f64, prec: usize, upper: bool, alt: bool) -> String {
     let p = prec.max(1);
-    let exp = if mag == 0.0 { 0 } else { decompose(mag, p - 1).1 };
+    let exp = if mag == 0.0 {
+        0
+    } else {
+        decompose(mag, p - 1).1
+    };
     let mut d = if exp < -4 || exp >= p as i32 {
         fmt_e(mag, p - 1, upper)
     } else {
@@ -331,5 +358,52 @@ fn pipe_readline(prompt: &str) -> String {
         "exit".to_string()
     } else {
         line.trim_end_matches(['\n', '\r']).to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // 逐条对拍真实 C printf（gcc -O2）：实参以 read_at 的显示串形态传入。
+    fn f(fmt: &str, args: &[&str]) -> String {
+        super::format_c(fmt, &args.iter().map(|s| s.to_string()).collect::<Vec<_>>())
+    }
+    #[test]
+    fn c_printf_parity() {
+        assert_eq!(f("[%d,%d]", &["3", "7"]), "[3,7]");
+        assert_eq!(
+            f("|%5d|%-5d|%05d|%+d|% d|", &["42", "42", "42", "42", "42"]),
+            "|   42|42   |00042|+42| 42|"
+        );
+        assert_eq!(f("|%5d|%05d|", &["-42", "-42"]), "|  -42|-0042|");
+        assert_eq!(
+            f("|%x|%X|%#x|%08x|%o|", &["255", "255", "255", "255", "64"]),
+            "|ff|FF|0xff|000000ff|100|"
+        );
+        assert_eq!(f("|%u|", &["42"]), "|42|");
+        assert_eq!(
+            f(
+                "|%f|%.2f|%8.2f|%-8.2f|%+.1f|",
+                &["3.14159", "3.14159", "3.14159", "3.14159", "3.14159"]
+            ),
+            "|3.141590|3.14|    3.14|3.14    |+3.1|"
+        );
+        assert_eq!(f("|%f|", &["-2.5"]), "|-2.500000|");
+        assert_eq!(
+            f("|%e|%E|%.2e|", &["12345.678", "12345.678", "12345.678"]),
+            "|1.234568e+04|1.234568E+04|1.23e+04|"
+        );
+        assert_eq!(
+            f(
+                "|%g|%g|%g|%.3g|",
+                &["0.0001", "100000.0", "3.14159", "3.14159"]
+            ),
+            "|0.0001|100000|3.14159|3.14|"
+        );
+        assert_eq!(
+            f("|%s|%10s|%-10s|%.3s|", &["hi", "hi", "hi", "hello"]),
+            "|hi|        hi|hi        |hel|"
+        );
+        assert_eq!(f("|%c|%c|%%|", &["A", "66"]), "|A|B|%|");
+        assert_eq!(f("|%.3d|%6.3d|", &["42", "42"]), "|042|   042|");
     }
 }
