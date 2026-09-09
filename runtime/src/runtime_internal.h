@@ -201,7 +201,8 @@ void kvlangXvalueNewCharUtf8(kvlangXvalue_t *v, const char *s);
 void kvlangXvalueNewCharUtf32(kvlangXvalue_t *v, const char *s);  /* UTF-8 → UTF-32 LE body */
 void kvlangXvalueNewCharKind(kvlangXvalue_t *v, const char *kind, const char *s);
 void kvlangXvalueNewPtr(kvlangXvalue_t *v, const char *target_langtype, const char *target);
-void kvlangXvalueNewRwir(kvlangXvalue_t *v, int32_t nr, int32_t nw, const char *sig);
+void kvlangXvalueNewDefRwir(kvlangXvalue_t *v, int32_t nr, int32_t nw, int dynamic);
+void kvlangXvalueNewDefLangtype(kvlangXvalue_t *v, const char *langtype);
 void kvlangXvalueNewTlv(kvlangXvalue_t *v, const char *kind, const uint8_t *raw, uint32_t raw_len, int32_t al);
 void kvlangXvalueNewTlvDims(kvlangXvalue_t *v, const char *kind, const uint8_t *raw, uint32_t raw_len,
                             const int32_t *dims, int32_t ndim);

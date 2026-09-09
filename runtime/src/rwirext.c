@@ -48,17 +48,49 @@ static void register_vids(kvlangKv_t *k, const char *opcode) {
   free(base);
 }
 
-int kvlangRwirextRegister(void *kvspace, const char *opcode, int32_t nr,
-                         int32_t nw, const char *sig) {
-  kvlangKv_t k = {kvspace};
-  char *key = kvlangKeytreeRwir(opcode);
-  kvlangXvalue_t v;
-  kvlangXvalueNewRwir(&v, nr, nw, sig);
-  kvlangKvPair_t p = {key, v};
+/* 写 [0,x] 签名行槽 = def langtype（body 为该参数 langtype 串）。 */
+static void write_sig_slot(kvlangKv_t *k, const char *base, int x, const char *lt, size_t lt_len) {
+  kvlangStrbuf_t sk; kvlangStrbufInit(&sk);
+  kvlangStrbufPrintf(&sk, "%s/[0,%d]", base, x);
+  char *clean = strndup(lt, lt_len);
+  kvlangXvalue_t sv; kvlangXvalueNewDefLangtype(&sv, clean);
+  free(clean);
+  kvlangKvPair_t sp = {sk.p, sv};
   char err[256];
-  int rc = kvlangKvSet(&k, &p, 1, err, sizeof err);
-  kvlangXvalueFree(&v);
-  free(key);
+  kvlangKvSet(k, &sp, 1, err, sizeof err);
+  kvlangXvalueFree(&sv);
+  kvlangStrbufFree(&sk);
+}
+
+/* 注册一条 rwir：/lib/<op> 路由头（仅计数头）+ 各参数落 [0,x] 签名行槽（def langtype）。
+ * 参数类型逐条传入（读参 rp[0..nr]、写参 wp[0..nw]），不再拼签名串——避免其它 runtime
+ * 把「拼接 sig 串」误当注册标准。末读参尾缀 "..." → 变参 arity（落 dynamic 字节）。 */
+int kvlangRwirextRegister(void *kvspace, const char *opcode,
+                         const char *const *rp, int32_t nr,
+                         const char *const *wp, int32_t nw) {
+  kvlangKv_t k = {kvspace};
+  char *base = kvlangKeytreeRwir(opcode);
+  char err[256];
+
+  int dynamic = 0;
+  size_t last_len = (nr > 0 && rp[nr - 1]) ? strlen(rp[nr - 1]) : 0;
+  if (nr > 0 && last_len >= 3 && memcmp(rp[nr - 1] + last_len - 3, "...", 3) == 0) {
+    dynamic = 1;
+    last_len -= 3;
+  }
+
+  kvlangXvalue_t hv;
+  kvlangXvalueNewDefRwir(&hv, nr, nw, dynamic);
+  kvlangKvPair_t hp = {base, hv};
+  int rc = kvlangKvSet(&k, &hp, 1, err, sizeof err);
+  kvlangXvalueFree(&hv);
+
+  for (int32_t i = 0; i < nr; i++)
+    write_sig_slot(&k, base, -(i + 1), rp[i], (i == nr - 1) ? last_len : strlen(rp[i]));
+  for (int32_t i = 0; i < nw; i++)
+    write_sig_slot(&k, base, i + 1, wp[i], strlen(wp[i]));
+
+  free(base);
   /* 建立共享 vids 队列（第一个真实 strkeymap，后续 Ptr 指向它；幂等查 kvspace）。 */
   register_vids(&k, opcode);
   return rc;

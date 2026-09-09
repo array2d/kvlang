@@ -395,14 +395,20 @@ pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) {
     let mut pairs: Vec<(String, Vec<u8>)> = Vec::new();
     pairs.push((
         format!("{func_dir}/[0,0]"),
-        kvkind::new_rwfunc(seq.len() as i32, nr, nw, fn_.sig.dynamic(), &param_types),
+        kvkind::new_rwfunc(seq.len() as i32, nr, nw, fn_.sig.dynamic()),
     ));
     pairs.push((
         keytree::lib_src(pkg, &fn_.sig.name),
         ffi::new_char_byte(fn_.full_text().as_bytes()),
     ));
+    // 签名行：每个参数的类型定义落 [0,x] 槽（def langtype），x<0 读参、x>0 写参。
+    // 运行期 call 会用实参绑定覆盖同坐标的帧槽，静态类型定义仅供 layout 类型检查/dump。
     for (i, p) in fn_.sig.params.iter().enumerate() {
         let slot = format!("[0,-{}]", i + 1);
+        pairs.push((
+            format!("{func_dir}/{slot}"),
+            kvkind::new_def_langtype(&param_types[i]),
+        ));
         pairs.push((
             format!("{func_dir}/{}", p.name),
             ffi::new_ptr(kvkind::KIND_CHAR, &slot),
@@ -410,6 +416,10 @@ pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) {
     }
     for (i, r) in fn_.sig.returns.iter().enumerate() {
         let slot = format!("[0,{}]", i + 1);
+        pairs.push((
+            format!("{func_dir}/{slot}"),
+            kvkind::new_def_langtype(&param_types[nr as usize + i]),
+        ));
         pairs.push((
             format!("{func_dir}/{}", r.name),
             ffi::new_ptr(kvkind::KIND_CHAR, &slot),
@@ -498,13 +508,26 @@ pub fn write_rwir_decl(kv: &mut Kv, decl: &RwirDecl) {
     if !decl.pkg.is_empty() {
         opcode = format!("{}{}{opcode}", decl.pkg, keytree::MEMBER_SEP);
     }
-    let v = kvkind::new_defrwir(
-        decl.sig.num_reads(),
-        decl.sig.num_writes(),
-        decl.sig.dynamic(),
-        &decl.sig.langtype_list().join("\n"),
-    );
-    let _ = kv.set(&[(keytree::rwir(&opcode), v)]);
+    let nr = decl.sig.num_reads();
+    let nw = decl.sig.num_writes();
+    let param_types = decl.sig.langtype_list();
+    let base = keytree::rwir(&opcode);
+    // 路由头：仅计数头（无参数载荷）；各参数类型落 [0,x] 签名行槽（def langtype）。
+    let mut pairs: Vec<(String, Vec<u8>)> =
+        vec![(base.clone(), kvkind::new_defrwir(nr, nw, decl.sig.dynamic()))];
+    for i in 0..nr as usize {
+        pairs.push((
+            format!("{base}/[0,-{}]", i + 1),
+            kvkind::new_def_langtype(&param_types[i]),
+        ));
+    }
+    for i in 0..nw as usize {
+        pairs.push((
+            format!("{base}/[0,{}]", i + 1),
+            kvkind::new_def_langtype(&param_types[nr as usize + i]),
+        ));
+    }
+    let _ = kv.set(&pairs);
 }
 
 /// Flatten body into seq; ScopeStmt records label → irseq (1-based; [0,0] is the signature).

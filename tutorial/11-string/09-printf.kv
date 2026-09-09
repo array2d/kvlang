@@ -1,0 +1,22 @@
+// printf：C 风格格式化串输出到 stdout（runtime-rs term rwir，对齐 C printf / Go fmt.Printf）
+// 语义: printf(fmt, args...) 逐字节对齐 C printf；不自动换行，换行靠 fmt 里的 \n。
+//       转换 d i u o x X f F e E g G c s %；标志 - 0 + 空格 #；宽度；.精度。
+// 期望输出:
+//   [3,7]
+//   |   42|42   |00042|+42|
+//   |ff|FF|000000ff|100|
+//   pi=3.14
+//   |    3.14|3.14    |
+//   |hi|        hi|hi        |hel|
+//   AB
+//   50%
+rwfunc test() -> () {
+	printf("[%d,%d]\n", 3, 7)
+	printf("|%5d|%-5d|%05d|%+d|\n", 42, 42, 42, 42)
+	printf("|%x|%X|%08x|%o|\n", 255, 255, 255, 64)
+	printf("pi=%.2f\n", 3.14159)
+	printf("|%8.2f|%-8.2f|\n", 3.14159, 3.14159)
+	printf("|%s|%10s|%-10s|%.3s|\n", "hi", "hi", "hi", "hello")
+	printf("%c%c\n", 65, 66)
+	printf("%d%%\n", 50)
+}
