@@ -16,6 +16,8 @@ pub mod term;
 use crate::engine::Engine;
 use crate::ffi::*;
 use std::collections::HashMap;
+use std::ffi::CString;
+use std::os::raw::c_char;
 use std::sync::OnceLock;
 
 /// 单个 rwir 的签名：读参 / 写参各自独立的 langtype 列表（逐槽一型，不假设同型）。
@@ -188,19 +190,18 @@ pub fn rwirmap() -> &'static HashMap<&'static str, &'static Rwir> {
 
 pub fn register(eng: &Engine) {
     for (op, r) in MYRWIRCAPS {
-        let sig =
-            r.rp.iter()
-                .chain(r.wp.iter())
-                .copied()
-                .collect::<Vec<_>>()
-                .join("\n");
+        let rp: Vec<CString> = r.rp.iter().map(|s| cs(s)).collect();
+        let wp: Vec<CString> = r.wp.iter().map(|s| cs(s)).collect();
+        let rpp: Vec<*const c_char> = rp.iter().map(|c| c.as_ptr()).collect();
+        let wpp: Vec<*const c_char> = wp.iter().map(|c| c.as_ptr()).collect();
         unsafe {
-            kvlangRwirextRegister(
+            kvlangDefRwir(
                 eng.kv,
                 cs(op).as_ptr(),
-                r.rp.len() as i32,
-                r.wp.len() as i32,
-                cs(&sig).as_ptr(),
+                rpp.as_ptr(),
+                rpp.len() as i32,
+                wpp.as_ptr(),
+                wpp.len() as i32,
             )
         };
     }

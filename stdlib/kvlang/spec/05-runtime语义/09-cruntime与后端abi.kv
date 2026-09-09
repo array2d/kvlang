@@ -24,7 +24,7 @@ lib kvlang/spec/runtime语义/cruntime与后端abi {
 `kvlang/runtime/` 是通用嵌入式执行器（纯 C + `extern "C"`），可嵌入 myrwir 项目（op-gpu、agent、livebyte）。两组对外 C ABI：
 
 - `kvlang_runtime.h`：核心执行器（`kvlangRuntimeConnect`/`Disconnect`/`Bootstrap`/`ExecuteVthread`/`KvspaceHandle` …）。
-- `kvlang_myrwir.h`：扩展 runtime 语义，**只暴露 kvspace 不提供的部分**。现有 9 个符号：`Register`、`Handoff`、`NextPc`、`Params`、`ResolveRead`、`ResolveReadPath`、`ResolveWrite`、`LangtypeValid`、`LangtypeMatch`。KV 存取（connect/get/write/del/list/tlv）**不在此**——扩展宿主自连 kvspace ABI，把句柄（`void *`）传进带句柄的 myrwir 函数。
+- `kvlang_myrwir.h`：扩展 runtime 语义，**只暴露 kvspace 不提供的部分**。现有 9 个符号：`DefRwir`、`Handoff`、`NextPc`、`Params`、`ResolveRead`、`ResolveReadPath`、`ResolveWrite`、`LangtypeValid`、`LangtypeMatch`。KV 存取（connect/get/write/del/list/tlv）**不在此**——扩展宿主自连 kvspace ABI，把句柄（`void *`）传进带句柄的 myrwir 函数。
 
 其中 `LangtypeValid`/`LangtypeMatch` 与正典 codec 的 head 解码，正是 langtype **两型**对外的两条 ABI（两型 def/value 与 kindexpr 简写见 [[langtype签名类型表达式]]）：前者服务 **def langtype**（模式侧——校验签名 kindexpr、把一个值的 `(kind,ndim,dims)` 匹配进签名），后者服务 **value langtype**（具体侧——把 head 里一条 kindexpr 解析为 `(kind,ndim,dims,元素字节宽)`，事实源为 `kvspaceDecodeHead` 与 layout 的 `kvlangLangtypeParse`）。两者同吃一条 kindexpr 串、共用唯一文法与 codec，差别只在模式匹配 vs 具体解析。
 
@@ -303,7 +303,7 @@ kvspaceNewPtr / NewChar / NewBool / NewInt64 / NewFloat64
     kvlangRwirextHandoff
     kvlangRwirextNextPc
     kvlangRwirextParams
-    kvlangRwirextRegister
+    kvlangDefRwir
     kvlangRwirextResolveRead
     kvlangRwirextResolveReadPath
     kvlangRwirextResolveWrite
