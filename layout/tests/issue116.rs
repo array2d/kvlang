@@ -10,7 +10,7 @@ fn body(data: &[u8]) -> &[u8] {
 
 fn sig(data: &[u8]) -> String {
     let b = body(data);
-    String::from_utf8_lossy(&b[4.min(b.len())..]).into_owned()
+    String::from_utf8_lossy(&b[5.min(b.len())..]).into_owned()
 }
 
 fn slot_text(data: &[u8]) -> String {

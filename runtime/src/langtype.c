@@ -3,12 +3,16 @@
 /* ── 签名 langtype（runtime篇-07，修订：无家族简写）──────────────────
  * type   = atom ("|" atom)*
  * atom   = [dims] ( any | kind )
- * dims   = "[]" | "[" dim ("," dim)* "]"
- * dim    = integer | "?"
+ * dims   = "[]" | "[" elem ("," elem)* "]"   # 至多一个变元量词 ? 星 加
+ * elem   = integer | "." | "?" | 星 | 加     # 轴量词（借鉴正则的 . 及量词）
  * any    = "any"           # 通配，匹配任意 kind
  * kind   = 精确 kind 串    # 见 known_kind
  *
- * 铁律：不提供 int/uint/float/num 数值家族（位宽开放集合，int4/fp8/fp16…），
+ * 变参 "..." 是签名层 arity（吸收 0..N 个实参），不是 langtype 的一部分——
+ * 由主槽 body 的 dynamic 字节承载，本文件的 valid/match 永不见 "..."。
+ *
+ * 铁律：不提供 int/uint/float/num 数值家族简写（位宽开放，纳入须逐个显式命名，
+ * 如低精度浮点 float16/bfloat16/float8/e4m3/float8/e5m2；int4 等仍未纳入），
  * 也不提供 char 编码简写（编码须写明确，如 char/utf8、char/utf32）。
  * 多态靠显式 "|" 枚举（如 int8|int16|int32|int64）。
  */
@@ -26,6 +30,8 @@ static bool known_kind(const char *s, size_t len) {
            kind_eq(s, len, KVSPACE_KIND_UINT8) || kind_eq(s, len, KVSPACE_KIND_UINT16) ||
            kind_eq(s, len, KVSPACE_KIND_UINT32) || kind_eq(s, len, KVSPACE_KIND_UINT64) ||
            kind_eq(s, len, KVSPACE_KIND_FLOAT32) || kind_eq(s, len, KVSPACE_KIND_FLOAT64) ||
+           kind_eq(s, len, KVSPACE_KIND_FLOAT16) || kind_eq(s, len, KVSPACE_KIND_BFLOAT16) ||
+           kind_eq(s, len, KVSPACE_KIND_FLOAT8_E4M3) || kind_eq(s, len, KVSPACE_KIND_FLOAT8_E5M2) ||
            kind_eq(s, len, KVSPACE_KIND_CHAR) || kind_eq(s, len, KVSPACE_KIND_CHAR_UTF8) ||
            kind_eq(s, len, KVSPACE_KIND_CHAR_ASCII) ||
            kind_eq(s, len, KVSPACE_KIND_OBJ) || kind_eq(s, len, KVSPACE_KIND_MAP) ||
@@ -63,22 +69,29 @@ static bool valid_base(const char *s, size_t len) {
     return known_kind(s, len);
 }
 
-static bool valid_dim(const char *s, size_t len) {
+/* elem = integer | "." | "?" | "*" | "+"（借鉴正则的轴量词）。 */
+static bool elem_is_variable(const char *s, size_t len) {
+    return len == 1 && (s[0] == '?' || s[0] == '*' || s[0] == '+');
+}
+
+static bool valid_elem(const char *s, size_t len) {
     if (len == 0) return false;
-    if (len == 1 && s[0] == '?') return true;
+    if (len == 1 && (s[0] == '.' || s[0] == '?' || s[0] == '*' || s[0] == '+')) return true;
     for (size_t i = 0; i < len; i++)
         if (s[i] < '0' || s[i] > '9') return false;
     return true;
 }
 
-/* dims = ε（空 [] = 1 维任意，等价 [?]） | dim ("," dim)* */
+/* dims = ε（空 [] = 1 维任意，等价 [.]） | elem ("," elem)*；至多一个变元量词。 */
 static bool valid_dims(const char *s, size_t len) {
     if (len == 0) return true;
     const char *p = s, *end = s + len;
+    int nvar = 0;
     while (p < end) {
         const char *comma = memchr(p, ',', (size_t)(end - p));
         size_t seg = comma ? (size_t)(comma - p) : (size_t)(end - p);
-        if (!valid_dim(p, seg)) return false;
+        if (!valid_elem(p, seg)) return false;
+        if (elem_is_variable(p, seg) && ++nvar > 1) return false;
         p += seg + (comma ? 1 : 0);
     }
     return true;
@@ -99,26 +112,11 @@ static bool valid_atom(const char *s, size_t len) {
     return valid_base(p, (size_t)(s + len - p));
 }
 
-/* 末参变参标记：A:any... 表 0..N 个同型实参。 */
-bool kvlangLangtypeVariadic(const char *expr) {
-    if (!expr) return false;
-    size_t n = strlen(expr);
-    return n >= 3 && memcmp(expr + n - 3, "...", 3) == 0;
-}
-
-/* 去掉尾缀 "..." 后的有效长度。 */
-static size_t effective_len(const char *expr) {
-    size_t n = strlen(expr);
-    return (n >= 3 && memcmp(expr + n - 3, "...", 3) == 0) ? n - 3 : n;
-}
-
-/* 类型表达式语法校验（装载期）。允许末参尾缀 "..." 变参。 */
+/* 类型表达式语法校验（装载期）。变参 "..." 是签名层 arity、不入 langtype 串，此处永不见。 */
 bool kvlangLangtypeValid(const char *expr) {
     if (!expr || !*expr) return false;
-    size_t total = effective_len(expr);
-    if (total == 0) return false;
     const char *p = expr;
-    const char *end = expr + total;
+    const char *end = expr + strlen(expr);
     for (;;) {
         const char *pipe = memchr(p, '|', (size_t)(end - p));
         size_t len = pipe ? (size_t)(pipe - p) : (size_t)(end - p);
@@ -136,25 +134,48 @@ static bool base_match(const char *s, size_t len, const char *kind) {
     return kind_eq(s, len, kind);
 }
 
-/* match_shape：shape="" 等价 "[?]" → 恰一维（ndim==1）；否则维数须一致且逐维 ?（跳过）或精确相等。 */
+/* 定长元（整数或 "."）匹配单轴：. 任意长，整数须精确相等。 */
+static bool fixed_elem_match(const char *s, size_t len, int32_t d) {
+    if (len == 1 && s[0] == '.') return true;
+    long v = 0;
+    for (size_t j = 0; j < len; j++) v = v * 10 + (s[j] - '0');
+    return v == d;
+}
+
+/* match_shape：轴量词序列 → (ndim,dims)。空串等价 "[.]"（恰一维）。
+ * 至多一个变元量词，切分唯一无回溯：设定长元共 f 个，rem = ndim - f。 */
 static bool match_shape(const char *s, size_t len, int32_t ndim, const int32_t *dims) {
     if (len == 0) return ndim == 1;
-    int count = 1;
-    for (size_t i = 0; i < len; i++) if (s[i] == ',') count++;
-    if (count != ndim) return false;
+    /* 切分为 elem 段（最多 64 维）。 */
+    const char *seg[64]; size_t seglen[64]; int m = 0;
     const char *p = s, *end = s + len;
-    int i = 0;
-    while (p < end && i < ndim) {
+    int vpos = -1;
+    while (p < end && m < 64) {
         const char *comma = memchr(p, ',', (size_t)(end - p));
-        size_t seg = comma ? (size_t)(comma - p) : (size_t)(end - p);
-        if (!(seg == 1 && p[0] == '?')) {
-            long v = 0;
-            for (size_t j = 0; j < seg; j++) v = v * 10 + (p[j] - '0');
-            if (v != dims[i]) return false;
-        }
-        p += seg + (comma ? 1 : 0);
-        i++;
+        size_t l = comma ? (size_t)(comma - p) : (size_t)(end - p);
+        seg[m] = p; seglen[m] = l;
+        if (elem_is_variable(p, l)) vpos = m;
+        m++;
+        p += l + (comma ? 1 : 0);
     }
+    if (vpos < 0) {
+        if (ndim != m) return false;
+        for (int i = 0; i < m; i++)
+            if (!fixed_elem_match(seg[i], seglen[i], dims[i])) return false;
+        return true;
+    }
+    int f = m - 1;               /* 定长元个数 */
+    int rem = ndim - f;          /* 变元量词吸收的轴数 */
+    char q = seg[vpos][0];
+    if (q == '?' && !(rem == 0 || rem == 1)) return false;
+    if (q == '*' && rem < 0) return false;
+    if (q == '+' && rem < 1) return false;
+    for (int i = 0; i < vpos; i++)                    /* 前缀定长元 → dims[0..vpos] */
+        if (!fixed_elem_match(seg[i], seglen[i], dims[i])) return false;
+    int suf = m - 1 - vpos;                           /* 后缀定长元 → dims 末 suf 轴 */
+    for (int k = 0; k < suf; k++)
+        if (!fixed_elem_match(seg[vpos + 1 + k], seglen[vpos + 1 + k], dims[ndim - suf + k]))
+            return false;
     return true;
 }
 
@@ -172,10 +193,10 @@ static bool match_atom(const char *s, size_t len, const char *kind, int32_t ndim
 }
 
 /* 单值（kind/ndim/dims）是否匹配类型表达式：任一 atom 命中即 true。
- * 变参 "..." 按单元素判定（去尾缀后匹配），重复由派发循环处理。 */
+ * 变参 arity 不在此判（靠主槽 dynamic 字节 + 派发循环）。 */
 bool kvlangLangtypeMatch(const char *expr, const char *kind, int32_t ndim, const int32_t *dims) {
     if (!expr || !kind) return false;
-    const char *end = expr + effective_len(expr);
+    const char *end = expr + strlen(expr);
     const char *p = expr;
     while (p < end) {
         const char *pipe = memchr(p, '|', (size_t)(end - p));

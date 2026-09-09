@@ -30,10 +30,18 @@ lib kvlang/spec/编译器语义/算子版本化与高版本优先 {
 - **后端绑定**改**调用点 opcode**（前端算子 → 后端算子，见 [[前端算子与后端算子]]）。
 - **版本化**改**被调函数的实现选择**（基 → 高版本）。
 
-二者正交，可叠加：`deepx·softmax` 先绑定为某后端组合，其融合版再登记为 `softmax·1`。
+二者正交，可叠加：`deepx·softmax` 先绑定为某后端组合，其融合版再登记为 `softmax.1`。
+
+## 版本号与 shape 特化正交
+
+**语义版本号 `.<N>`（哪个实现更优）** 与 **shape 特化（为哪个具体 shape/dtype 编译的 kernel）** 是两个维度，不可混同：
+
+- runtime 的高版本优先解析**只认版本号** `.<N>`——它是可声明、可审计的语义择优。
+- 具体后端 / 融合 kernel 的 shape 特化多产物（同一 op 序列 × 不同 shape → 不同 kernel）由计算引擎 / kernel 编译器按 **shape-hash 缓存**管理，不进 runtime 的版本解析。
+- 完整的实现选择键是复合的：`(基 op, 版本 .N, shape-hash, dtype, author/backend)`。**别把 shape 特化冒充成版本号**。
 
 ## 锚例（待补）
 
-- `tutorial/16-compiler/op_version.kv`——编译前调 `softmax` 走基版；编译生成 `softmax·1` 后，同一 `softmax(...)` 调用走 `softmax·1`，输出与基版逐字节一致。
+- `tutorial/16-compiler/op_version.kv`——编译前调 `softmax` 走基版；编译生成 `softmax.1` 后，同一 `softmax(...)` 调用走 `softmax.1`，输出与基版逐字节一致。
 	"#### -> /lib/kvlang/spec/编译器语义/算子版本化与高版本优先
 }

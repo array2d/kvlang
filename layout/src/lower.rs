@@ -7,7 +7,7 @@ use super::scanner::{Diagnostic, Pos};
 use super::{builtin, keytree, symbol};
 
 /// 容器类型（object / stringkeymap / mapexpr）不可用 `[]` 下标访问成员——
-/// `[]` 仅限 compact array（shaped kindexpr，含字符串 `[]char/*`）。
+/// `[]` 仅限 compact array（shaped langtype，含字符串 `[]char/*`）。
 fn is_container_type(t: &str) -> bool {
     t == "object" || t == "stringkeymap" || t.contains(keytree::MEMBER_SEP)
 }
@@ -852,7 +852,7 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
         | "string·cmp" | "string·find" | "string·parseint" | "xv·bodylen" => {
             return "int64".to_string();
         }
-        "xv·kindexpr" => return "[]char/utf8".to_string(),
+        "xv·langtype" => return "[]char/utf8".to_string(),
         "ndarray·shape" => return "[]int64".to_string(),
         "kv·list" => return "[]char/utf8".to_string(),
         "string·char" | "string·set" | "string·slice" | "string·concat" | "string·formatint"

@@ -108,7 +108,7 @@ extern "C" {
     fn kvspaceDecodeHead(data: *const u8, data_len: u32, out: *mut kvspaceHead_t) -> c_int;
 
     fn kvspaceNewPtr(
-        target_kindexpr: *const c_char,
+        target_langtype: *const c_char,
         target: *const c_char,
         out: *mut *mut u8,
         out_len: *mut u32,
@@ -190,7 +190,7 @@ impl Kv {
         Kv { h }
     }
 
-    /// 写：pairs 的值为预编码 TLV；逐条解 head 取 (kindexpr, body)，经 WriteNewPlace
+    /// 写：pairs 的值为预编码 TLV；逐条解 head 取 (langtype, body)，经 WriteNewPlace
     /// 向 kvspace 要 body 偏移指针后直接写入 body 字节（新建/换 kind/换尺寸唯一原语）。
     pub fn set(&mut self, pairs: &[(String, Vec<u8>)]) -> Result<(), String> {
         for (key, tlv) in pairs {
@@ -379,8 +379,8 @@ pub fn decode_head(data: &[u8]) -> kvspaceHead_t {
 
 // ── 标准标量构造器 ───────────────────────────────────────────────────
 
-pub fn new_ptr(target_kindexpr: &str, target: &str) -> Vec<u8> {
-    let ck = CString::new(target_kindexpr).expect("no NUL");
+pub fn new_ptr(target_langtype: &str, target: &str) -> Vec<u8> {
+    let ck = CString::new(target_langtype).expect("no NUL");
     let ct = CString::new(target).expect("no NUL");
     call_codec(|out, out_len| unsafe { kvspaceNewPtr(ck.as_ptr(), ct.as_ptr(), out, out_len) })
 }

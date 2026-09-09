@@ -442,7 +442,7 @@ char *kvlangXvalueValueString(const kvlangXvalue_t *v) {
     if (strcmp(k, KVSPACE_KIND_CHAR) == 0)
         return utf32_to_utf8(body, blen);
     if (strcmp(k, KVSPACE_KIND_RWIR) == 0 || strcmp(k, KVSPACE_KIND_RWIR_OR_RWFUNC) == 0)
-        return strndup2(body + (blen >= 4 ? 4 : 0), blen >= 4 ? blen - 4 : 0);
+        return strndup2(body + (blen >= 5 ? 5 : 0), blen >= 5 ? blen - 5 : 0);
     if (strcmp(k, KVSPACE_KIND_RWFUNC) == 0) {
         kvlangStrbuf_t b;
         kvlangStrbufInit(&b);
@@ -556,15 +556,35 @@ void kvlangXvalueNewPtr(kvlangXvalue_t *v, const char *target_langtype, const ch
     v->len = len;
     v->borrowed = 0;
 }
+/* body = [nr:u16 LE][nw:u16 LE][dynamic:u8][clean_sig]。
+ * 末读参尾缀 "..." 是签名层变参标记：此处剥离，置 dynamic=1，langtype 串保持纯净。 */
 void kvlangXvalueNewRwir(kvlangXvalue_t *v, int32_t nr, int32_t nw, const char *sig) {
     size_t sl = strlen(sig);
-    uint8_t *raw = malloc(4 + sl);
+    uint8_t *raw = malloc(5 + sl);
     raw[0] = nr & 0xFF;
     raw[1] = (nr >> 8) & 0xFF;
     raw[2] = nw & 0xFF;
     raw[3] = (nw >> 8) & 0xFF;
-    memcpy(raw + 4, sig, sl);
-    kvlangXvalueNewTlv(v, KVSPACE_KIND_DEF_RWIR, raw, (uint32_t)(4 + sl), 1);
+    raw[4] = 0;
+    memcpy(raw + 5, sig, sl);
+    /* 末读参尾缀 "..." 是签名层变参标记：此处剥离，置 dynamic=1，langtype 串保持纯净。 */
+    if (nr > 0) {
+        char *base = (char *)raw + 5;
+        char *p = base;
+        for (int i = 0; i < nr - 1; i++) {
+            char *nl = strchr(p, '\n');
+            if (!nl) { p = base + sl; break; }
+            p = nl + 1;
+        }
+        char *nl = strchr(p, '\n');
+        size_t seg = nl ? (size_t)(nl - p) : (size_t)(base + sl - p);
+        if (seg >= 3 && memcmp(p + seg - 3, "...", 3) == 0) {
+            raw[4] = 1;
+            memmove(p + seg - 3, p + seg, (size_t)(base + sl - (p + seg)));
+            sl -= 3;
+        }
+    }
+    kvlangXvalueNewTlv(v, KVSPACE_KIND_DEF_RWIR, raw, (uint32_t)(5 + sl), 1);
     free(raw);
 }
 

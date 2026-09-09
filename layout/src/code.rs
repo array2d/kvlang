@@ -390,12 +390,12 @@ pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) {
 
     let nr = fn_.sig.num_reads();
     let nw = fn_.sig.num_writes();
-    let param_types: Vec<String> = fn_.sig.kindexp_list();
+    let param_types: Vec<String> = fn_.sig.langtype_list();
 
     let mut pairs: Vec<(String, Vec<u8>)> = Vec::new();
     pairs.push((
         format!("{func_dir}/[0,0]"),
-        kvkind::new_rwfunc(seq.len() as i32, nr, nw, &param_types),
+        kvkind::new_rwfunc(seq.len() as i32, nr, nw, fn_.sig.dynamic(), &param_types),
     ));
     pairs.push((
         keytree::lib_src(pkg, &fn_.sig.name),
@@ -465,7 +465,7 @@ pub fn write_struct_decl(kv: &mut Kv, decl: &StructDecl) {
 /// 字段默认值 XValue：head kind = 字段类型，body = 默认字面量（未给则零值）。
 /// 标量+char 直接编码；带 dims / structref 仅记录类型（空 body），嵌套 struct 待定。
 fn field_default(ty: &str, default: Option<&Expr>) -> Vec<u8> {
-    let (dims, base) = kvkind::parse_kindexpr(ty);
+    let (dims, base) = kvkind::parse_langtype(ty);
     let s = default.map(|e| e.val.clone()).unwrap_or_default();
     if base.starts_with("char/") {
         return ffi::new_char(&base, &s);
@@ -501,7 +501,8 @@ pub fn write_rwir_decl(kv: &mut Kv, decl: &RwirDecl) {
     let v = kvkind::new_defrwir(
         decl.sig.num_reads(),
         decl.sig.num_writes(),
-        &decl.sig.kindexp_list().join("\n"),
+        decl.sig.dynamic(),
+        &decl.sig.langtype_list().join("\n"),
     );
     let _ = kv.set(&[(keytree::rwir(&opcode), v)]);
 }

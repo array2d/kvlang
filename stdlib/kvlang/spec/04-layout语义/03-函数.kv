@@ -26,7 +26,13 @@ error: func f: param "x" has no type annotation — every parameter must declare
 error: func f: return value "r" has no type annotation
 ```
 
-末读参的 type_expr **可**加 `...` 声明变参（0..N 个同型实参）。变参**必须**是最后一个读参；写参**不得**变参。
+## 参数变参（arity，非类型）
+
+末读参**可**在参数上尾缀 `...` 声明变参（吸收 0..N 个同型实参，如 `A:int64|float64...`）。`...` 是**签名层 arity 构造，不是 type_expr 的一部分**（轴量词见 [[langtype签名类型表达式]]）：layout 解析时把它从参数上**剥离**,给该函数主槽置 `dynamic=1`（见 [[指令布局格式]]）,而参数的 langtype 子槽 `[0,x]` 存**纯净** langtype（不含 `...`）。故 `LangtypeValid`/`LangtypeMatch` 永不见 `...`。
+
+- 变参**必须**是最后一个读参；非末位读参带 `...`：装载期错误。
+- 写参（返回值）**不得**变参：装载期错误。
+- 派发时,主槽 `dynamic=1` 则末读参对每个尾随实参按其纯净 langtype 逐个判定（见 [[匹配语义与变参]]）。
 
 ## 写参初值 None
 

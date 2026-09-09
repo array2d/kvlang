@@ -183,12 +183,12 @@ pub extern "C" fn kvlangLayoutDump(
     }
 }
 
-// ── kindexpr 解析 ABI ──────────────────────────────────────────────────
-// kindexpr 语法唯一事实源在 layout（kindexpr.rs）；解析能力导出为 C ABI，
+// ── langtype 解析 ABI ──────────────────────────────────────────────────
+// langtype 语法唯一事实源在 layout（langtype.rs）；解析能力导出为 C ABI，
 // 供 runtime 之外的消费方（扩展宿主 term/numpy/json、byteseek…）读取 XValue head 时
 // 复用，杜绝各处手写 head 结构/解析造成的 ABI 漂移（#70 遗留的旧 kind[32] 结构即此类）。
 
-/// kindexpr 解析结果（repr(C)，内存布局 = i32,i32,[i32;8],i32,[u8;64]）。
+/// langtype 解析结果（repr(C)，内存布局 = i32,i32,[i32;8],i32,[u8;64]）。
 #[repr(C)]
 pub struct kvlangKindexpr {
     pub ref_: i32,      // 0=内联 1=指针(*) 2=扩展句柄(@)
@@ -198,18 +198,18 @@ pub struct kvlangKindexpr {
     pub kind: [u8; 64], // base kind，NUL 终止（如 "float64"、"char/utf8"、"rwir|rwfunc"）
 }
 
-/// 解析 XValue head 的 kindexpr 内容（NUL 终止串，含 */@ 前缀与 [dims]）。
+/// 解析 XValue head 的 langtype 内容（NUL 终止串，含 */@ 前缀与 [dims]）。
 /// 成功返回 0，失败（空指针/空串）返回 -1。
 #[no_mangle]
-pub extern "C" fn kvlangKindexprParse(kindexpr: *const c_char, out: *mut kvlangKindexpr) -> i32 {
-    if kindexpr.is_null() || out.is_null() {
+pub extern "C" fn kvlangKindexprParse(langtype: *const c_char, out: *mut kvlangKindexpr) -> i32 {
+    if langtype.is_null() || out.is_null() {
         return -1;
     }
-    let s = cstr(kindexpr);
+    let s = cstr(langtype);
     if s.is_empty() {
         return -1;
     }
-    let (dims, kind) = kvkind::parse_kindexpr(s);
+    let (dims, kind) = kvkind::parse_langtype(s);
     let out = unsafe { &mut *out };
     out.ref_ = 0;
     out.ndim = dims.len() as i32;
