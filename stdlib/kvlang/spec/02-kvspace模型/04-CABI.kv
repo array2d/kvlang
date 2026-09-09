@@ -24,15 +24,40 @@ lib kvlang/spec/kvspace模型/CABI {
 无句柄的编解码符号（前端静态实现，byte-identical）：`kvspaceTlvEncode` / `kvspaceTlvEncodeMode` / `kvspaceDecodeHead`，以及构造器 `kvspaceNewPtr`（存目标完整 langtype + 目标 key）、`kvspaceNewChar` / `kvspaceNewBool` / `kvspaceNewInt64` / `kvspaceNewFloat64`。
 
 读写各带 `resolve` 参数：`resolve=1` 时透明穿透 ref=1 指针（link）；`kvspaceListLen`/`kvspaceListAt` 另有 `expand_ext` 参数控制是否展开 extindex 子项。head 线格式与 langtype 编码见 [[键系统与数组访问]]。
-
-## 导出符号全集（nm -D 实测，31）
+## kvspace C ABI 导出符号全集（nm -D 实测，31）
 
 ```
-    kvspaceClear kvspaceClose kvspaceConnect kvspaceConst kvspaceCp kvspaceCpList
-    kvspaceCpTree kvspaceDecodeHead kvspaceDel kvspaceDelTree kvspaceDisconnect kvspaceGet
-    kvspaceGetHead kvspaceGetPart kvspaceListAt kvspaceListLen kvspaceMkindex kvspaceMkindexExt
-    kvspaceNewBool kvspaceNewChar kvspaceNewFloat64 kvspaceNewInt64 kvspaceNewPtr kvspaceReadReset
-    kvspaceRmindexExt kvspaceSetPart kvspaceTlvEncode kvspaceTlvEncodeMode kvspaceWatch kvspaceWriteInPlace
+    kvspaceClear
+    kvspaceClose
+    kvspaceConnect
+    kvspaceConst
+    kvspaceCp
+    kvspaceCpList
+    kvspaceCpTree
+    kvspaceDecodeHead
+    kvspaceDel
+    kvspaceDelTree
+    kvspaceDisconnect
+    kvspaceGet
+    kvspaceGetHead
+    kvspaceGetPart
+    kvspaceListAt
+    kvspaceListLen
+    kvspaceMkindex
+    kvspaceMkindexExt
+    kvspaceNewBool
+    kvspaceNewChar
+    kvspaceNewFloat64
+    kvspaceNewInt64
+    kvspaceNewPtr
+    kvspaceReadReset
+    kvspaceRmindexExt
+    kvspaceSetPart
+    kvspaceTlvEncode
+    kvspaceTlvEncodeMode
+    kvspaceWatch
+    kvspaceWriteInPlace
     kvspaceWriteNewPlace
-```	"#### -> /lib/kvlang/spec/kvspace模型/CABI
+```
+	"#### -> /lib/kvlang/spec/kvspace模型/CABI
 }
