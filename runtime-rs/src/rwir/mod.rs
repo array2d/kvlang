@@ -188,7 +188,7 @@ pub fn register(eng: &Engine) {
                 .collect::<Vec<_>>()
                 .join("\n");
         unsafe {
-            kvlang_rwirextRegister(
+            kvlangRwirextRegister(
                 eng.kv,
                 cs(op).as_ptr(),
                 r.rp.len() as i32,

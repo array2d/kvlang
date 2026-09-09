@@ -308,20 +308,20 @@ fn drive_vid(eng: &Engine, vid: &str) {
         // 连续批处理就地 rwir（print/json/http/kvlayout/input），遇非就地指令停下。
         let mut c = take(pc);
         let stop_op = loop {
-            let params = take(unsafe { kvlang_rwirextParams(kv, cs(&c).as_ptr()) });
+            let params = take(unsafe { kvlangRwirextParams(kv, cs(&c).as_ptr()) });
             let op = params.split('\n').next().unwrap_or("").to_string();
             if !rwir::is_inproc(&op) {
                 break op;
             }
             rwir::dispatch(eng, &op, &c);
-            c = take(unsafe { kvlang_rwirextNextPc(cs(&c).as_ptr()) });
+            c = take(unsafe { kvlangRwirextNextPc(cs(&c).as_ptr()) });
         };
 
         // pc 可能属子 vthread（native vthread·run 冒泡上来）：目标 vid 一律由 pc 导出，非固定主 vid。
         let sub = c.split('/').nth(2).unwrap_or(vid);
         // 停在本 myrwircaps 内的 op：handoff；native/控制帧/帧结束：写回 pc 让 runtime 继续。
         if !stop_op.is_empty() && rwir::in_myrwircaps(&stop_op) {
-            if unsafe { kvlang_rwirextHandoff(kv, cs(sub).as_ptr(), cs(&c).as_ptr()) } != 0 {
+            if unsafe { kvlangRwirextHandoff(kv, cs(sub).as_ptr(), cs(&c).as_ptr()) } != 0 {
                 kvlang_rs::elog!("handoff {stop_op} 失败 @ {c}");
                 std::process::exit(1);
             }

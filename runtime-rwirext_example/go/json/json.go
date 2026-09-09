@@ -167,31 +167,31 @@ func mkindex(c unsafe.Pointer, path string) {
 func resolveRead(c unsafe.Pointer, pc string, idx int) string {
 	cp := cstr(pc)
 	defer C.free(unsafe.Pointer(cp))
-	return gostr(C.kvlang_rwirextResolveRead(c, cp, C.int(idx)))
+	return gostr(C.kvlangRwirextResolveRead(c, cp, C.int(idx)))
 }
 
 func resolveReadPath(c unsafe.Pointer, pc string, idx int) string {
 	cp := cstr(pc)
 	defer C.free(unsafe.Pointer(cp))
-	return gostr(C.kvlang_rwirextResolveReadPath(c, cp, C.int(idx)))
+	return gostr(C.kvlangRwirextResolveReadPath(c, cp, C.int(idx)))
 }
 
 func resolveWrite(c unsafe.Pointer, pc string, idx int) string {
 	cp := cstr(pc)
 	defer C.free(unsafe.Pointer(cp))
-	return gostr(C.kvlang_rwirextResolveWrite(c, cp, C.int(idx)))
+	return gostr(C.kvlangRwirextResolveWrite(c, cp, C.int(idx)))
 }
 
 func nextPC(pc string) string {
 	cp := cstr(pc)
 	defer C.free(unsafe.Pointer(cp))
-	return gostr(C.kvlang_rwirextNextPc(cp))
+	return gostr(C.kvlangRwirextNextPc(cp))
 }
 
 func params(c unsafe.Pointer, pc string) []string {
 	cp := cstr(pc)
 	defer C.free(unsafe.Pointer(cp))
-	return strings.Split(gostr(C.kvlang_rwirextParams(c, cp)), "\n")
+	return strings.Split(gostr(C.kvlangRwirextParams(c, cp)), "\n")
 }
 
 // ── XValue 编解码（走权威 kvspace ABI：DecodeHead 读头 + TlvEncode/NewChar 编码）──
@@ -651,7 +651,7 @@ func register(c unsafe.Pointer) {
 		sig := strings.TrimSuffix(strings.Repeat("any\n", o.nr+o.nw), "\n")
 		co := cstr(o.name)
 		cs := cstr(sig)
-		C.kvlang_rwirextRegister(c, co, C.int32_t(o.nr), C.int32_t(o.nw), cs)
+		C.kvlangRwirextRegister(c, co, C.int32_t(o.nr), C.int32_t(o.nw), cs)
 		C.free(unsafe.Pointer(co))
 		C.free(unsafe.Pointer(cs))
 	}

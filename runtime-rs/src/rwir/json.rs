@@ -45,7 +45,7 @@ pub fn from(eng: &Engine, pc: &str) {
 }
 
 fn params(eng: &Engine, pc: &str) -> Vec<String> {
-    let s = take(unsafe { kvlang_rwirextParams(eng.kv, cs(pc).as_ptr()) });
+    let s = take(unsafe { kvlangRwirextParams(eng.kv, cs(pc).as_ptr()) });
     s.lines().map(str::to_string).collect()
 }
 

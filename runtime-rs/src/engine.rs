@@ -193,20 +193,20 @@ impl Engine {
     // ── rwir 派发时按下标解析读/写槽（rwirext 宿主 ABI，传 kvspace 句柄）─
     /// @-aware 读参：@ 句柄按 body 前缀路由兑现真实字节，其余（字面量/普通值/指针）沿用 C ResolveRead。
     pub fn read_at(&self, pc: &str, idx: i32) -> String {
-        let p = take(unsafe { kvlang_rwirextResolveReadPath(self.kv, cs(pc).as_ptr(), idx) });
+        let p = take(unsafe { kvlangRwirextResolveReadPath(self.kv, cs(pc).as_ptr(), idx) });
         if !p.is_empty() {
             let (r, body) = self.head_ref_body(&p);
             if r == 2 {
                 return self.resolve_ext(&body);
             }
         }
-        take(unsafe { kvlang_rwirextResolveRead(self.kv, cs(pc).as_ptr(), idx) })
+        take(unsafe { kvlangRwirextResolveRead(self.kv, cs(pc).as_ptr(), idx) })
     }
     pub fn read0(&self, pc: &str) -> String {
         self.read_at(pc, 0)
     }
     pub fn write_at(&self, pc: &str, idx: i32) -> String {
-        take(unsafe { kvlang_rwirextResolveWrite(self.kv, cs(pc).as_ptr(), idx) })
+        take(unsafe { kvlangRwirextResolveWrite(self.kv, cs(pc).as_ptr(), idx) })
     }
     pub fn write0(&self, pc: &str) -> String {
         self.write_at(pc, 0)
@@ -215,7 +215,7 @@ impl Engine {
     /// 取读参 idx 容器路径 → 读 body 字节；@ 句柄按前缀兑现真实字节；无路径退化为 read_at 的 utf8。
     /// 供 fs·write/append 等需要 []uint8 整块的 rwir 用。
     pub fn read_bytes(&self, pc: &str, idx: i32) -> Vec<u8> {
-        let p = take(unsafe { kvlang_rwirextResolveReadPath(self.kv, cs(pc).as_ptr(), idx) });
+        let p = take(unsafe { kvlangRwirextResolveReadPath(self.kv, cs(pc).as_ptr(), idx) });
         if p.is_empty() {
             return self.read_at(pc, idx).into_bytes();
         }
@@ -447,7 +447,7 @@ impl Engine {
                 break;
             }
             let c = take(pc);
-            let params = take(unsafe { kvlang_rwirextParams(self.kv, cs(&c).as_ptr()) });
+            let params = take(unsafe { kvlangRwirextParams(self.kv, cs(&c).as_ptr()) });
             let op = params.lines().next().unwrap_or("").to_string();
             let handled = if rwir::is_inproc(&op) {
                 rwir::dispatch(self, &op, &c);
@@ -460,7 +460,7 @@ impl Engine {
             if !handled {
                 crate::elog!("未知 rwir: {op} @ {c}");
             }
-            let nxt = take(unsafe { kvlang_rwirextNextPc(cs(&c).as_ptr()) });
+            let nxt = take(unsafe { kvlangRwirextNextPc(cs(&c).as_ptr()) });
             // pc 可能属子 vthread（native vthread·run 冒泡上来）：nextpc 写回其所属 vid，不写主 vid。
             let sub = c.split('/').nth(2).unwrap_or(vid);
             self.set_kv(&format!("/vthread/{sub}/\u{2025}pc"), &nxt);

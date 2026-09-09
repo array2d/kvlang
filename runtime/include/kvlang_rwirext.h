@@ -11,32 +11,32 @@
  * 语义：rwir 解码 + resolve + display + PC 推进 + 类型判定。 */
 
 /* 写 /lib/<opcode> = rwir 签名（幂等） */
-int kvlang_rwirextRegister(void *kvspace, const char *opcode, int32_t nr,
+int kvlangRwirextRegister(void *kvspace, const char *opcode, int32_t nr,
                          int32_t nw, const char *sig);
 
 /* 外部扩展 handoff：写 /lib/<opcode>/.todo<vid> 并阻塞 watch .done<vid>（30s
  * 超时）。RETURN 模式下 term 遇非己方 ext rwir（如 json.to/numpy）时调用，把
  * 该指令交给对应扩展进程，扩展处理后写回下一 PC 并 signal .done。返回 0 成功，
  * -1 失败/超时。 */
-int kvlang_rwirextHandoff(void *kvspace, const char *vtid, const char *pc);
+int kvlangRwirextHandoff(void *kvspace, const char *vtid, const char *pc);
 
 /* 当前指令的下一条 PC（malloc） */
-char *kvlang_rwirextNextPc(const char *pc);
+char *kvlangRwirextNextPc(const char *pc);
 
 /* 解码指令，返回 opcode + 读参名 + 写参名（\n 分隔：首行 opcode，接 nr
  * 行读参名，接 nw 行写参名，malloc）。 供 numpy/tensor 扩展按路径零拷贝读 raw
  * 数据。 */
-char *kvlang_rwirextParams(void *kvspace, const char *pc);
+char *kvlangRwirextParams(void *kvspace, const char *pc);
 
 /* 解析读参 idx 为字符串（变量 → 帧槽值；路径 → 该路径下的值）。 */
-char *kvlang_rwirextResolveRead(void *kvspace, const char *pc, int idx);
+char *kvlangRwirextResolveRead(void *kvspace, const char *pc, int idx);
 
 /* 解析读参 idx 为 KV 路径（变量 → 帧槽路径；路径 → 直接返回；字面量 → ""）。
  * 供 numpy/tensor 扩展按路径零拷贝读整块 ndarray raw 数据。 */
-char *kvlang_rwirextResolveReadPath(void *kvspace, const char *pc, int idx);
+char *kvlangRwirextResolveReadPath(void *kvspace, const char *pc, int idx);
 
 /* 解析写参 idx 为 KV 路径（路径 → 直接返回；变量 → 帧槽路径）。 */
-char *kvlang_rwirextResolveWrite(void *kvspace, const char *pc, int idx);
+char *kvlangRwirextResolveWrite(void *kvspace, const char *pc, int idx);
 
 /* 签名 langtype（runtime篇-07）——供扩展做实参类型判定。 */
 /* 语法校验：type = atom("|"atom)*, atom = [dims](family|kind),

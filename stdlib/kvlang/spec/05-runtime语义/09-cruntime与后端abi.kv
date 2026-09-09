@@ -54,5 +54,264 @@ kvspaceNewPtr / NewChar / NewBool / NewInt64 / NewFloat64
 **native 读参：标量按值、整块借用**（normative，P2-d）——runtime-c native 算子（标量数值/逻辑/cast + `xv·*`/`array·*`/`string·*`）经 `ResolveReadValue` 取参，两条路径互斥：内联字面量（冻结于 code 槽）按值拷入（标量，纳秒级，无 KV 往返）；变量/KV 常驻值经 `GetMember` 一次取出后**移交所有权**（`*out = pv`，非二次拷贝，后端物化只发生在 `Get` 内部）。**整块字节零拷贝不在 native 侧另设机制**——它就是 [[notinmyrwircaps]] 的 `ResolveReadPath` + `kvspaceGet` body 指针那一条路径，由持有大 tensor 的扩展（numpy/op-gpu）承担；native 算子处理的是标量与中等 value，其拷贝相对每步 KV 往返可忽略（fib n=10：redis 1.5s / fs 320ms vs C 586ns，墙钟由 KV I/O 主导约六个数量级），故不为其增设借用管线。
 
 **后端由链接决定**：构建期经环境变量选择链接哪个 kvspace 库（`kvspace-c` 或 `kvspace_durable`），两者导出同一 ABI；runtime 的句柄结构只保留 `void *h`，代码零后端分支。
+## runtime C（libkvlang_runtime）导出符号全集（nm -D 实测，203）
+
+### handoff_（1）
+```
+    handoff_external_rwir
+```
+### kvlangBuiltin（80）
+```
+    kvlangBuiltinAppend
+    kvlangBuiltinArray
+    kvlangBuiltinArrayFill
+    kvlangBuiltinCapIndex
+    kvlangBuiltinCharConcat
+    kvlangBuiltinCompact
+    kvlangBuiltinDebugger
+    kvlangBuiltinDurArith
+    kvlangBuiltinDurCmp
+    kvlangBuiltinDurFrom
+    kvlangBuiltinDurTo
+    kvlangBuiltinExecuteCopy
+    kvlangBuiltinFreeInputs
+    kvlangBuiltinKvAbs
+    kvlangBuiltinKvCp
+    kvlangBuiltinKvCpList
+    kvlangBuiltinKvCpTree
+    kvlangBuiltinKvDel
+    kvlangBuiltinKvDelTree
+    kvlangBuiltinKvExtIndex
+    kvlangBuiltinKvGet
+    kvlangBuiltinKvList
+    kvlangBuiltinKvListLen
+    kvlangBuiltinKvListN
+    kvlangBuiltinKvMkindex
+    kvlangBuiltinKvRmIndexExt
+    kvlangBuiltinKvSet
+    kvlangBuiltinKvWatch
+    kvlangBuiltinMap
+    kvlangBuiltinMapMarker
+    kvlangBuiltinMemindex
+    kvlangBuiltinNative
+    kvlangBuiltinNdarrayDim
+    kvlangBuiltinNdarrayNumel
+    kvlangBuiltinNdarrayShape
+    kvlangBuiltinNextPc
+    kvlangBuiltinNumOp
+    kvlangBuiltinObj
+    kvlangBuiltinRandInt63
+    kvlangBuiltinRandIntn
+    kvlangBuiltinRandUint64
+    kvlangBuiltinReadInputs
+    kvlangBuiltinResolveReadKey
+    kvlangBuiltinResolveReadValue
+    kvlangBuiltinResolveWriteSlot
+    kvlangBuiltinScatter
+    kvlangBuiltinScatterKey
+    kvlangBuiltinSetErr
+    kvlangBuiltinSlice
+    kvlangBuiltinStringChar
+    kvlangBuiltinStringCmp
+    kvlangBuiltinStringConcat
+    kvlangBuiltinStringFind
+    kvlangBuiltinStringFormatInt
+    kvlangBuiltinStringFormatUint
+    kvlangBuiltinStringLen
+    kvlangBuiltinStringOrd
+    kvlangBuiltinStringParseInt
+    kvlangBuiltinStringParseUint
+    kvlangBuiltinStringSet
+    kvlangBuiltinStringSlice
+    kvlangBuiltinStructNew
+    kvlangBuiltinTimeAdd
+    kvlangBuiltinTimeCmp
+    kvlangBuiltinTimeNow
+    kvlangBuiltinTimeSub
+    kvlangBuiltinTryParseNumber
+    kvlangBuiltinVthreadCall
+    kvlangBuiltinVthreadCreate
+    kvlangBuiltinVthreadRun
+    kvlangBuiltinVthreadSetstatus
+    kvlangBuiltinVthreadSleep
+    kvlangBuiltinWriteResult
+    kvlangBuiltinXvAt
+    kvlangBuiltinXvBodylen
+    kvlangBuiltinXvLangtype
+    kvlangBuiltinXvReinterpret
+    kvlangBuiltinXvReshape
+    kvlangBuiltinXvSet
+    kvlangBuiltinXvalueAt
+```
+### kvlangCtl（4）
+```
+    kvlangCtlBr
+    kvlangCtlCall
+    kvlangCtlGoto
+    kvlangCtlReturn
+```
+### (其它)（2）
+```
+    kvlangDisplay
+    kvlangFormatFloat
+```
+### kvlangKeytree（20）
+```
+    kvlangKeytreeEntryPc
+    kvlangKeytreeFrameAt
+    kvlangKeytreeFrameCallpc
+    kvlangKeytreeFrameNum
+    kvlangKeytreeFrameReturnpc
+    kvlangKeytreeFrameRo
+    kvlangKeytreeFrameRoot
+    kvlangKeytreeIrseqPc
+    kvlangKeytreeIsEntryPc
+    kvlangKeytreeLibFunc
+    kvlangKeytreeMember
+    kvlangKeytreeRwir
+    kvlangKeytreeStack
+    kvlangKeytreeVthread
+    kvlangKeytreeVthreadDebugger
+    kvlangKeytreeVthreadPc
+    kvlangKeytreeVthreadSlot
+    kvlangKeytreeVthreadStatus
+    kvlangKeytreeVthreadStatusMsg
+    kvlangKeytreeVtidFromPc
+```
+### kvlangKv（19）
+```
+    kvlangKvConnect
+    kvlangKvCp
+    kvlangKvCpList
+    kvlangKvCpTree
+    kvlangKvDel
+    kvlangKvDelExtIndex
+    kvlangKvDelTree
+    kvlangKvDisconnect
+    kvlangKvExtIndex
+    kvlangKvGetHead
+    kvlangKvGetMember
+    kvlangKvGetOne
+    kvlangKvGetPart
+    kvlangKvList
+    kvlangKvMkindex
+    kvlangKvReadReset
+    kvlangKvSet
+    kvlangKvSetPart
+    kvlangKvWatch
+```
+### kvlangKvcpu（4）
+```
+    kvlangKvcpuBootstrap
+    kvlangKvcpuDynCall
+    kvlangKvcpuExecute
+    kvlangKvcpuExecuteMode
+```
+### kvlangLangType（2）
+```
+    kvlangLangTypeId
+    kvlangLangTypeKind
+```
+### kvlangLangtype（4）
+```
+    kvlangLangtypeMatch
+    kvlangLangtypeParse
+    kvlangLangtypeValid
+    kvlangLangtypeVariadic
+```
+### kvlangLog（3）
+```
+    kvlangLogDebug
+    kvlangLogError
+    kvlangLogInfo
+```
+### kvlangRuntime（9）
+```
+    kvlangRuntimeBootstrap
+    kvlangRuntimeConnect
+    kvlangRuntimeDisconnect
+    kvlangRuntimeExecute
+    kvlangRuntimeExecuteKv
+    kvlangRuntimeExecutePc
+    kvlangRuntimeExecuteVthread
+    kvlangRuntimeKvspaceHandle
+    kvlangRuntimeRunVid
+```
+### kvlangRwir（4）
+```
+    kvlangRwirDecode
+    kvlangRwirExtractAddr0
+    kvlangRwirInstFree
+    kvlangRwirNextPc
+```
+### kvlangScalar（3）
+```
+    kvlangScalarReadF64
+    kvlangScalarReadI64
+    kvlangScalarReadU64
+```
+### kvlangStrbuf（4）
+```
+    kvlangStrbufDetach
+    kvlangStrbufPrintf
+    kvlangStrbufPutc
+    kvlangStrbufPutn
+```
+### kvlangVthread（5）
+```
+    kvlangVthreadGet
+    kvlangVthreadSet
+    kvlangVthreadSetDone
+    kvlangVthreadSetError
+    kvlangVthreadSpawn
+```
+### kvlangXvalue（30）
+```
+    kvlangXvalueArrayLen
+    kvlangXvalueBody
+    kvlangXvalueChar32At
+    kvlangXvalueElemSize
+    kvlangXvalueFree
+    kvlangXvalueHead
+    kvlangXvalueIsCharKind
+    kvlangXvalueIsFloatKind
+    kvlangXvalueIsIntKind
+    kvlangXvalueIsNumKind
+    kvlangXvalueIsPtr
+    kvlangXvalueIsUintKind
+    kvlangXvalueKind
+    kvlangXvalueKindIs
+    kvlangXvalueLangTypeId
+    kvlangXvalueMaterialize
+    kvlangXvalueNewBool
+    kvlangXvalueNewCharKind
+    kvlangXvalueNewCharUtf32
+    kvlangXvalueNewCharUtf8
+    kvlangXvalueNewFloat64
+    kvlangXvalueNewInt64
+    kvlangXvalueNewPtr
+    kvlangXvalueNewRwir
+    kvlangXvalueNewTlv
+    kvlangXvalueNewTlvDims
+    kvlangXvaluePtrTarget
+    kvlangXvalueScalar
+    kvlangXvalueSetBytes
+    kvlangXvalueValueString
+```
+### kvlang_（7）
+```
+    kvlangRwirextHandoff
+    kvlangRwirextNextPc
+    kvlangRwirextParams
+    kvlangRwirextRegister
+    kvlangRwirextResolveRead
+    kvlangRwirextResolveReadPath
+    kvlangRwirextResolveWrite
+```
+### notinmy（2）
+```
+    notinmycaps
+    notinmyrwircaps
+```
 	"#### -> /lib/kvlang/spec/runtime语义/cruntime与后端abi
 }

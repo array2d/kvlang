@@ -24,5 +24,16 @@ layout 能力经 cdylib 导出，第三方无需 fork 子进程即可布局（�
 ## KVLANG_LIB 引导与 init 入口
 
 `KVLANG_LIB` 引导 layout 与 run 各 lib 的 init。pkg **严格取自 `lib` 声明**（`lib X { … }` → `X`），不从文件名推导。layout 产出的 init 入口名列表即消费方驱动 init 的依据；tutorial 按约定跑 `test` 入口。
+
+## 导出符号全集（nm -D 实测，6）
+
+```
+    kvlangKindexprParse
+    kvlangLayoutCode
+    kvlangLayoutDump
+    kvlangLayoutFile
+    kvlangLayoutFormat
+    kvlangLayoutVet
+```
 	"#### -> /lib/kvlang/spec/layout语义/layout流水线接口
 }
