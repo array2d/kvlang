@@ -3,13 +3,10 @@
 // 期望输出:
 //   true
 //   false
-rwfunc build() -> () {
-	/t0 = { val=1; left="/t1"; right="/t2" }
-	{ val=2; left=""; right="" } -> /t1
-	/t2 = { val=3; left=""; right="" }
-	/v0 = { val=1; left="/v1"; right="/v2" }
-	/v1 = { val=2; left=""; right="" }
-	{ val=4; left=""; right="" } -> /v2
+struct TNode {
+	val:int64=0
+	left:[]char/utf32=""
+	right:[]char/utf32=""
 }
 
 rwfunc same(a:[]char/utf32, b:[]char/utf32) -> (ok:int64) {
@@ -26,9 +23,26 @@ rwfunc same(a:[]char/utf32, b:[]char/utf32) -> (ok:int64) {
 }
 
 rwfunc test() -> () {
-	build()
-	same("/t0", "/t0") -> r1
+	t:[int64]·TNode = {}
+	kv·abs(t) -> tb
+	tb + "·2" -> t1
+	tb + "·3" -> t2
+	t·1:TNode = {val=1 left=t1 right=t2}
+	t·2:TNode = {val=2}
+	t·3:TNode = {val=3}
+	tb + "·1" -> rt
+
+	v:[int64]·TNode = {}
+	kv·abs(v) -> vb
+	vb + "·2" -> v1
+	vb + "·3" -> v2
+	v·1:TNode = {val=1 left=v1 right=v2}
+	v·2:TNode = {val=2}
+	v·3:TNode = {val=4}
+	vb + "·1" -> rv
+
+	same(rt, rt) -> r1
 	if (r1 == 1) { println("true") } else { println("false") }
-	same("/t0", "/v0") -> r2
+	same(rt, rv) -> r2
 	if (r2 == 1) { println("true") } else { println("false") }
 }

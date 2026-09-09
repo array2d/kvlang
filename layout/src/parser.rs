@@ -459,6 +459,11 @@ impl Parser {
     }
 
     fn parse_type(&mut self) -> String {
+        let raw = self.parse_type_raw();
+        super::langtype::expand_struct_refs(&raw)
+    }
+
+    fn parse_type_raw(&mut self) -> String {
         let mut sb = String::new();
         let mut depth = 0i32;
         loop {
@@ -742,10 +747,14 @@ impl Parser {
     }
 
     fn parse_stmt(&mut self) -> Option<Stmt> {
-        // 块标签检测（优先级最高）
+        // 块标签检测（优先级最高）。排除类型注解写槽：`x:Type`（Ident）、`x:[…]`（LBrack）、
+        // `x:/lib/Name`（structref langtype，以 / 起头的路径 Literal）。
+        let t2 = self.peek_at(2);
+        let t2_structref = t2.kind == Kind::Literal && t2.value.starts_with('/');
         if self.peek_at(1).kind == Kind::Colon
-            && self.peek_at(2).kind != Kind::Ident
-            && self.peek_at(2).kind != Kind::LBrack
+            && t2.kind != Kind::Ident
+            && t2.kind != Kind::LBrack
+            && !t2_structref
         {
             return Some(self.parse_block_label());
         }
@@ -890,6 +899,26 @@ impl Parser {
     /// （赋值右值 / for-in 源）；无论如何，其元素内部都不得再嵌套散 key 字面量。
     // 空容器字面量 `{}` 不含任何类型信息，必须由写目标显式标注 langtype：
     // 禁 `d = {}`，须 `d:[]char/utf8·int64 = {}`（非空 `{a=…}` 可由成员推断，放行）。
+    /// `{}` 对应两种 langtype：写类型是 structref（`/lib/Name`）→ `struct·new(path, k, v, …)`；
+    /// 否则（stringkeymap / mapexpr）保留 `obj`（runtime 构 stringkeymap）。裸无类型 `{}` 由
+    /// check_empty_container_typed 报错。desugar 已把成员/下标写目标改成 kv·set，故此处只命中简单局部。
+    fn dispatch_obj_by_type(&mut self, inst: &mut Instruction) {
+        if inst.expr.as_ref().map(|e| e.op.as_str()) != Some("obj") {
+            return;
+        }
+        let ty = inst.write_types.first().map(String::as_str).unwrap_or("");
+        if !ty.starts_with('/') {
+            return;
+        }
+        let e = inst.expr.take().unwrap();
+        let mut args = vec![ast::str_lit(ty)];
+        args.extend(e.args);
+        inst.expr = Some(ast::call(
+            &format!("struct{}new", keytree::MEMBER_SEP),
+            args,
+        ));
+    }
+
     fn check_empty_container_typed(&mut self, inst: &Instruction) {
         let Some(e) = &inst.expr else { return };
         if e.op != "obj" || !e.args.is_empty() {
@@ -998,6 +1027,7 @@ impl Parser {
                 inst.write_types = wtypes;
                 self.advance(); // consume =
                 inst.expr = self.parse_pratt(0);
+                self.dispatch_obj_by_type(&mut inst);
                 self.lower_array_fill(&mut inst);
                 self.desugar_subscript_write(&mut inst);
                 self.desugar_member_write(&mut inst);
@@ -1008,6 +1038,7 @@ impl Parser {
                 let (writes, wtypes) = self.collect_write_list();
                 inst.writes = writes;
                 inst.write_types = wtypes;
+                self.dispatch_obj_by_type(&mut inst);
                 self.desugar_subscript_write(&mut inst);
                 self.desugar_member_write(&mut inst);
             }
@@ -1785,8 +1816,14 @@ impl Parser {
                         break;
                     }
                 }
+                // 成员写槽可带 langtype 注解 `a·1:Node = {…}`：struct 对象定义的推荐形态。
+                let mut ty = String::new();
+                if self.peek().kind == Kind::Colon {
+                    self.advance();
+                    ty = self.parse_type();
+                }
                 writes.push(w);
-                wtypes.push(String::new());
+                wtypes.push(ty);
                 continue;
             }
             if t.kind == Kind::Ident && self.peek_at(1).kind == Kind::LBrack {

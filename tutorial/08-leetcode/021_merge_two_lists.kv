@@ -7,13 +7,9 @@
 //   3
 //   4
 //   4
-rwfunc build_lists() -> () {
-	/a0 = { val=1; next="/a1" }
-	/a1 = { val=2; next="/a2" }
-	{ val=4; next="" } -> /a2
-	/b0 = { val=1; next="/b1" }
-	/b1 = { val=3; next="/b2" }
-	{ val=4; next="" } -> /b2
+struct Node {
+	val:int64=0
+	next:[]char/utf32=""
 }
 
 rwfunc merge(a:[]char/utf32, b:[]char/utf32) -> () {
@@ -48,6 +44,23 @@ rwfunc merge(a:[]char/utf32, b:[]char/utf32) -> () {
 }
 
 rwfunc test() -> () {
-	build_lists()
-	merge("/a0", "/b0")
+	a:[int64]·Node = {}
+	kv·abs(a) -> ab
+	ab + "·2" -> a2
+	ab + "·3" -> a3
+	a·1:Node = {val=1 next=a2}
+	a·2:Node = {val=2 next=a3}
+	a·3:Node = {val=4 next=""}
+	ab + "·1" -> ha
+
+	b:[int64]·Node = {}
+	kv·abs(b) -> bb
+	bb + "·2" -> b2
+	bb + "·3" -> b3
+	b·1:Node = {val=1 next=b2}
+	b·2:Node = {val=3 next=b3}
+	b·3:Node = {val=4 next=""}
+	bb + "·1" -> hb
+
+	merge(ha, hb)
 }

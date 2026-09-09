@@ -1,4 +1,4 @@
-// 083: Remove Duplicates from Sorted List — 链表去重（dict 字面量建表 + next 改写）
+// 083: Remove Duplicates from Sorted List — 链表去重（局部 map 建表 + next 改写）
 // 来源: LeetCode #83
 // 期望输出:
 //   1
@@ -6,15 +6,9 @@
 //   1
 //   2
 //   3
-rwfunc build() -> () {
-	/e0 = { val=1; next="/e1" }
-	/e1 = { val=1; next="/e2" }
-	{ val=2; next="" } -> /e2
-	/f0 = { val=1; next="/f1" }
-	/f1 = { val=1; next="/f2" }
-	{ val=2; next="/f3" } -> /f2
-	/f3 = { val=3; next="/f4" }
-	/f4 = { val=3; next="" }
+struct Node {
+	val:int64=0
+	next:[]char/utf32=""
 }
 
 rwfunc dedup(head:[]char/utf32) -> () {
@@ -49,9 +43,29 @@ rwfunc show(head:[]char/utf32) -> () {
 }
 
 rwfunc test() -> () {
-	build()
-	dedup("/e0")
-	show("/e0")
-	dedup("/f0")
-	show("/f0")
+	e:[int64]·Node = {}
+	kv·abs(e) -> eb
+	eb + "·2" -> e2
+	eb + "·3" -> e3
+	e·1:Node = {val=1 next=e2}
+	e·2:Node = {val=1 next=e3}
+	e·3:Node = {val=2 next=""}
+	eb + "·1" -> e1
+	dedup(e1)
+	show(e1)
+
+	f:[int64]·Node = {}
+	kv·abs(f) -> fb
+	fb + "·2" -> f2
+	fb + "·3" -> f3
+	fb + "·4" -> f4
+	fb + "·5" -> f5
+	f·1:Node = {val=1 next=f2}
+	f·2:Node = {val=1 next=f3}
+	f·3:Node = {val=2 next=f4}
+	f·4:Node = {val=3 next=f5}
+	f·5:Node = {val=3 next=""}
+	fb + "·1" -> f1
+	dedup(f1)
+	show(f1)
 }

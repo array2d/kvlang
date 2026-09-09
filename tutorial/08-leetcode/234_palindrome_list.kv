@@ -1,8 +1,13 @@
-// 234: Palindrome Linked List — 链表复制到键族数组 + 双指针（dict 声明整型键）
+// 234: Palindrome Linked List — 链表复制到键族数组 + 双指针
 // 来源: LeetCode #234
 // 期望输出:
 //   true
 //   false
+struct Node {
+	val:int64=0
+	next:[]char/utf32=""
+}
+
 rwfunc is_pal(head:[]char/utf32) -> () {
 	arr:[int64]·int64 = {}
 	0 -> n
@@ -34,17 +39,24 @@ rwfunc is_pal(head:[]char/utf32) -> () {
 	}
 }
 
-rwfunc build() -> () {
-	/p0 = { val=1; next="/p1" }
-	/p1 = { val=2; next="/p2" }
-	{ val=2; next="/p3" } -> /p2
-	/p3 = { val=1; next="" }
-	/q0 = { val=1; next="/q1" }
-	{ val=2; next="" } -> /q1
-}
-
 rwfunc test() -> () {
-	build()
-	is_pal("/p0")
-	is_pal("/q0")
+	p:[int64]·Node = {}
+	kv·abs(p) -> pb
+	pb + "·2" -> p2
+	pb + "·3" -> p3
+	pb + "·4" -> p4
+	p·1:Node = {val=1 next=p2}
+	p·2:Node = {val=2 next=p3}
+	p·3:Node = {val=2 next=p4}
+	p·4:Node = {val=1 next=""}
+	pb + "·1" -> hp
+	is_pal(hp)
+
+	q:[int64]·Node = {}
+	kv·abs(q) -> qb
+	qb + "·2" -> q2
+	q·1:Node = {val=1 next=q2}
+	q·2:Node = {val=2 next=""}
+	qb + "·1" -> hq
+	is_pal(hq)
 }

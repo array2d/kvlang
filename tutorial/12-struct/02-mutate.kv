@@ -9,7 +9,7 @@ struct P {
 }
 
 rwfunc test() -> () {
-	p = P{x=1 y=2}
+	p:P = {x=1 y=2}
 	p·x -> a
 	p·y -> b
 	println("before x=", a, " y=", b)

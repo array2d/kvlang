@@ -456,8 +456,6 @@ char *kvlangXvalueValueString(const kvlangXvalue_t *v) {
         kvlangStrbufPrintf(&b, "(%d)", n);
         return kvlangStrbufDetach(&b);
     }
-    if (strcmp(k, KVSPACE_KIND_OBJ) == 0)
-        return strdup(KVSPACE_KIND_OBJ);
     if (strcmp(k, KVSPACE_KIND_MAP) == 0) {
         kvlangStrbuf_t b;
         kvlangStrbufInit(&b);

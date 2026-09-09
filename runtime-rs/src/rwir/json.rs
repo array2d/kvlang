@@ -1,10 +1,10 @@
 //! rwir `json·to` / `json·from`：KV 子树 ↔ JSON 文本（对齐 kvlang go/json 的 · 成员形态）。
-//!   json·to(root)   -> str   root 整棵子树读成 JSON：object 容器（p + memindex p·）→
-//!                            嵌套对象；stringkeymap（散 key 数组 name·[i]）→ JSON 数组；
+//!   json·to(root)   -> str   root 整棵子树读成 JSON：stringkeymap 容器（p + memindex p·）
+//!                            按成员名形态分派——`[i]` 坐标段 → JSON 数组，命名键 → JSON 对象；
 //!                            / 目录树（kind=index）→ 嵌套对象；compact ndarray → 数组。
 //!   json·from(json) -> root  反序列化 JSON 写回 root 子树（覆盖语义，先 del_tree）。
-//! 容器值在 p（无后缀）：object body 空、stringkeymap dims=[n]；memindex p·（kind=index，
-//! body=[4B count LE][names]）是成员列表唯一权威。对象数组（choices/messages）递归支持。
+//! 容器值在 p（无后缀）：stringkeymap，命名字典 dims=[0]、坐标数组 dims=[n]；memindex p·
+//! （kind=index，body=[4B count LE][names]）是成员列表唯一权威。对象数组递归支持。
 //! 编码走权威 kvspace ABI：DecodeHead 读头、TlvEncode/NewCharByte 编码。
 
 use serde_json::{Map, Value};
@@ -15,7 +15,6 @@ use crate::ffi::*;
 // 常量与 kvlang go/json 的 cconst 对齐（直连 kvspace，无 kvspaceConst ABI）。
 const SEP: &str = "·";
 const DIR_SUF: &str = "/";
-const KIND_OBJ: &str = "object";
 const KIND_MAP: &str = "stringkeymap";
 const KIND_INDEX: &str = "index";
 
@@ -53,11 +52,8 @@ fn params(eng: &Engine, pc: &str) -> Vec<String> {
 
 fn read_value(eng: &Engine, path: &str) -> Value {
     let (kind, raw, arr_len) = parse_tlv(&eng.get_tlv(path));
-    if kind == KIND_OBJ {
-        return read_obj(eng, path);
-    }
     if kind == KIND_MAP {
-        return read_arr(eng, path);
+        return read_container(eng, path);
     }
     let dkind = parse_tlv(&eng.get_tlv(&format!("{path}{DIR_SUF}"))).0;
     if dkind == KIND_INDEX {
@@ -82,7 +78,25 @@ fn read_dir(eng: &Engine, path: &str) -> Value {
     Value::Object(map)
 }
 
-// read_obj：object 容器值 p → 遍历 memindex p· 成员。
+// read_container：stringkeymap 容器 p → 按 memindex 成员名形态分派。
+// 成员全为 `[i]` 坐标段 → JSON 数组；否则（命名键）→ JSON 对象。
+fn read_container(eng: &Engine, path: &str) -> Value {
+    let names = eng.list_kv(&format!("{path}{SEP}"));
+    let all_idx = !names.is_empty()
+        && names.iter().all(|n| {
+            n.strip_prefix('[')
+                .and_then(|r| r.strip_suffix(']'))
+                .map(|i| i.parse::<usize>().is_ok())
+                .unwrap_or(false)
+        });
+    if all_idx {
+        read_arr(eng, path)
+    } else {
+        read_obj(eng, path)
+    }
+}
+
+// read_obj：命名字典 stringkeymap p → 遍历 memindex p· 成员。
 fn read_obj(eng: &Engine, path: &str) -> Value {
     let mut map = Map::new();
     for name in eng.list_kv(&format!("{path}{SEP}")) {
@@ -259,9 +273,9 @@ fn mk_mem_index(names: &[String]) -> Vec<u8> {
     tlv_encode(KIND_INDEX, &body, &[])
 }
 
-// object 容器值 p：body 空。
+// 命名字典容器值 p：kind=stringkeymap，dims=[0]（无形状，成员在 memindex）。
 fn mk_obj_value() -> Vec<u8> {
-    tlv_encode(KIND_OBJ, &[], &[])
+    tlv_encode(KIND_MAP, &[], &[0])
 }
 
 // stringkeymap 容器值 p：body 空，dims=[n]（恒一维坐标段）。

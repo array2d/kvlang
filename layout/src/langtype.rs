@@ -38,7 +38,6 @@ fn known_kind(k: &str) -> bool {
             | "char/utf32"
             | "char/utf8"
             | "char/ascii"
-            | "object"
             | "stringkeymap"
             | "index"
             | "extindex"
@@ -121,7 +120,7 @@ fn valid_shape(s: &str) -> bool {
     valid_base(s)
 }
 
-/// 标量 kind（可作元组键元素；不含 char/object/index 等）。
+/// 标量 kind（可作元组键元素；不含 char/stringkeymap/index 等）。
 fn valid_scalar(s: &str) -> bool {
     matches!(
         s,
@@ -173,6 +172,35 @@ fn valid_atom(s: &str) -> bool {
 /// 类型表达式语法校验（装载期）。变参 `...` 是签名层 arity、不入 langtype 串，此处永不见。
 pub fn valid_langtype(expr: &str) -> bool {
     !expr.is_empty() && expr.split('|').all(valid_atom)
+}
+
+/// 隐式 struct 名解析：把 langtype 中裸 struct 名（非 known kind / any 的标识符）展开为
+/// `/lib/<name>`，使 kv 源可写 `x:Node` / `[int64]·Node`，runtime 恒收到完整 `/lib/…` 路径。
+/// 已 `/` 开头或 known kind 原样返回。mapexpr 只对 value 递归展开（key 恒 `[…]` 非 struct）。
+pub fn expand_struct_refs(s: &str) -> String {
+    s.split('|')
+        .map(expand_atom)
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+fn expand_atom(s: &str) -> String {
+    if s.starts_with('/') {
+        return s.to_string();
+    }
+    if s.starts_with('[') {
+        if let Some(i) = s.find('·') {
+            let key = &s[..i];
+            if valid_key(key) {
+                return format!("{key}·{}", expand_struct_refs(&s[i + '·'.len_utf8()..]));
+            }
+        }
+        return s.to_string();
+    }
+    if s.is_empty() || known_kind(s) || s == "any" {
+        return s.to_string();
+    }
+    format!("/lib/{s}")
 }
 
 fn base_match(s: &str, kind: &str) -> bool {
@@ -280,7 +308,6 @@ mod tests {
             "char/utf8",
             "char/utf32",
             "char/ascii",
-            "object",
             "stringkeymap",
             "index",
             "[]float32",
@@ -299,7 +326,7 @@ mod tests {
             "[2,3]float32|float32",
             "[]float32|[]float64",
             "bool|char/utf8",
-            "index|object",
+            "index|stringkeymap",
             "[]char/utf8·int64",
             "[]char/utf32·[]char/utf8",
             "[]char/utf8·[]char/utf8·int64",
@@ -340,7 +367,6 @@ mod tests {
         assert!(match_langtype("/lib/Point", "/lib/Point", 0, &[]));
         assert!(!match_langtype("/lib/Point", "/lib/Node", 0, &[]));
         assert!(match_langtype("[]char/utf8·int64", "stringkeymap", 1, &[3]));
-        assert!(!match_langtype("[]char/utf8·int64", "object", 0, &[]));
     }
 
     #[test]
@@ -406,7 +432,7 @@ mod tests {
         let cases = [
             ("int64", "int64", 0, &[][..], true),
             ("int64", "float64", 0, &[], false),
-            ("any", "object", 0, &[], true),
+            ("any", "stringkeymap", 0, &[], true),
             ("any", "int4", 0, &[], true),
             ("char/utf8", "char/utf8", 0, &[], true),
             ("char/utf8", "char/utf32", 0, &[], false),
@@ -423,7 +449,7 @@ mod tests {
             ("[2,3]float32|float32", "float64", 0, &[], false),
             ("[]float32|[]float64", "float64", 1, &[10], true),
             ("bool|char/utf8", "char/utf8", 0, &[], true),
-            ("index|object", "index", 0, &[], true),
+            ("index|stringkeymap", "index", 0, &[], true),
         ];
         for (expr, kind, ndim, dims, want) in cases {
             let got = match_langtype(expr, kind, ndim, dims);

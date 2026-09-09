@@ -21,12 +21,12 @@ static char *path_arg(kvlangFrame_t *f, int idx, const kvlangXvalue_t *in) {
     return NULL;
 }
 
-/* 容器 base：object/map/index/extindex 或 struct 实例（kind=structref，以 / 起头）。
+/* 容器 base：stringkeymap/index/extindex 或 struct 实例（kind=structref，以 / 起头）。
  * 容器取其写槽路径拼成员 key；非容器把 base 值当 key 串。 */
 static bool base_is_container(const kvlangXvalue_t *base) {
     if (kvlangXvalueNone(base)) return true;
     const char *k = kvlangXvalueKind(base);
-    return k[0] == '/' || strcmp(k, KVSPACE_KIND_OBJ) == 0 || strcmp(k, KVSPACE_KIND_MAP) == 0 ||
+    return k[0] == '/' || strcmp(k, KVSPACE_KIND_MAP) == 0 ||
            strcmp(k, KVSPACE_KIND_INDEX) == 0 || strcmp(k, KVSPACE_KIND_EXT_INDEX) == 0;
 }
 

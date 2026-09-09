@@ -6,10 +6,10 @@ use super::ast::{self, Expr, Func, Instruction, LitKind, Stmt};
 use super::scanner::{Diagnostic, Pos};
 use super::{builtin, keytree, symbol};
 
-/// 容器类型（object / stringkeymap / mapexpr）不可用 `[]` 下标访问成员——
+/// 容器类型（stringkeymap / mapexpr）不可用 `[]` 下标访问成员——
 /// `[]` 仅限 compact array（shaped langtype，含字符串 `[]char/*`）。
 fn is_container_type(t: &str) -> bool {
-    t == "object" || t == "stringkeymap" || t.contains(keytree::MEMBER_SEP)
+    t == "stringkeymap" || t.contains(keytree::MEMBER_SEP)
 }
 
 /// `[]` 下标校验：xv·at/xv·set 基座若为容器类型 → 报错，逼用 kv·get/kv·set/`base·key`。
@@ -381,7 +381,7 @@ fn lower_for_with_cont(
     let is_obj = s.iter.op == "obj"
         || s.iter.op == "map"
         || (s.iter.is_leaf()
-            && matches!(tm.get(&s.iter.val), Some(t) if t == "object" || t == "[]stringkeymap" || t == "stringkeymap"));
+            && matches!(tm.get(&s.iter.val), Some(t) if t == "[]stringkeymap" || t == "stringkeymap"));
 
     // 迭代源：裸标识符直接原地遍历；表达式（如数组字面量）先物化到临时槽。
     let mut init_body = Vec::new();
@@ -750,10 +750,10 @@ fn infer_inst(inst: &Instruction, tm: &mut HashMap<String, String>) {
         Some(e) => e,
         None => return,
     };
-    // kv.set 成员形（3 读：base, key, val）是 void 无写槽，但 base 仍须推断为 obj/map（供 for-in / 成员访问）
+    // kv.set 成员形（3 读：base, key, val）是 void 无写槽，但 base 仍须推断为 stringkeymap（供 for-in / 成员访问）
     if e.op == "kv·set" && e.args.len() >= 3 && !e.args[0].val.contains('/') {
         tm.entry(e.args[0].val.clone())
-            .or_insert_with(|| "object".to_string());
+            .or_insert_with(|| "stringkeymap".to_string());
     }
     if inst.writes.is_empty() {
         return;
@@ -834,16 +834,16 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
         return opcode.to_string();
     }
     if opcode == "obj" {
-        return "object".to_string();
+        return "stringkeymap".to_string();
     }
     if opcode == "map" {
         return "[]stringkeymap".to_string();
     }
     if opcode == "kv·set" {
-        // 成员写 base.key = v（3 reads：base, key, value）→ base 是 obj/map。
+        // 成员写 base.key = v（3 reads：base, key, value）→ base 是 stringkeymap。
         if reads.len() >= 3 {
             tm.entry(reads[0].clone())
-                .or_insert_with(|| "object".to_string());
+                .or_insert_with(|| "stringkeymap".to_string());
         }
         return String::new();
     }
