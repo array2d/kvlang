@@ -65,9 +65,9 @@ static void write_sig_slot(kvlangKv_t *k, const char *base, int x, const char *l
 /* 注册一条 rwir：/lib/<op> 路由头（仅计数头）+ 各参数落 [0,x] 签名行槽（def langtype）。
  * 参数类型逐条传入（读参 rp[0..nr]、写参 wp[0..nw]），不再拼签名串——避免其它 runtime
  * 把「拼接 sig 串」误当注册标准。末读参尾缀 "..." → 变参 arity（落 dynamic 字节）。 */
-int kvlangRwirextRegister(void *kvspace, const char *opcode,
-                         const char *const *rp, int32_t nr,
-                         const char *const *wp, int32_t nw) {
+int kvlangDefRwir(void *kvspace, const char *opcode,
+                  const char *const *rp, int32_t nr,
+                  const char *const *wp, int32_t nw) {
   kvlangKv_t k = {kvspace};
   char *base = kvlangKeytreeRwir(opcode);
   char err[256];

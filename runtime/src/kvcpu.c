@@ -186,8 +186,40 @@ static int check_read_types(kvlangKv_t *kv, const char *vtid, const char *pc,
     return rc;
 }
 
-/* 读取 rwir/rwfunc 定义体的 kindexp-list（nr/nw 前缀后的 \n 分隔串）。
- * 返回 malloc 串（调用方 free）并置 *out_nr；无定义返回 NULL。 */
+/* 读签名行 [0,x] 槽（def langtype）的 body 为 langtype 串（malloc；无槽返 NULL）。
+ * dir 带尾 /；x<0 读参、x>0 写参。 */
+static char *read_sig_slot(kvlangKv_t *kv, const char *dir, int x) {
+    kvlangStrbuf_t sk; kvlangStrbufInit(&sk);
+    kvlangStrbufPrintf(&sk, "%s[0,%d]", dir, x);
+    kvlangXvalue_t v; kvlangXvalueZero(&v);
+    kvlangKvGetOne(kv, sk.p, &v);
+    kvlangStrbufFree(&sk);
+    char *s = NULL;
+    if (!kvlangXvalueNone(&v)) {
+        kvspaceHead_t h; kvlangXvalueHead(&v, &h);
+        int32_t bl; const uint8_t *b = kvlangXvalueBody(&v, &h, &bl);
+        s = malloc((size_t)bl + 1);
+        memcpy(s, b, (size_t)bl); s[bl] = 0;
+    }
+    kvlangXvalueFree(&v);
+    return s;
+}
+
+/* 拼读参签名（\n 连接 [0,-1..-nr] 各 def langtype 槽）。dir 带尾 /。malloc 返回。 */
+static char *join_read_sig(kvlangKv_t *kv, const char *dir, int nr) {
+    kvlangStrbuf_t b; kvlangStrbufInit(&b);
+    for (int i = 1; i <= nr; i++) {
+        if (i > 1) kvlangStrbufPutc(&b, '\n');
+        char *s = read_sig_slot(kv, dir, -i);
+        kvlangStrbufPuts(&b, s ? s : "");
+        free(s);
+    }
+    return kvlangStrbufDetach(&b);
+}
+
+/* 读取 rwir/rwfunc 定义的读参签名：从主槽计数头取 nr/dynamic，读参 langtype 逐条
+ * 落在签名行 [0,-i] 槽（def langtype）。返回 \n 连接的 kindexp-list（调用方 free）
+ * 并置 *out_nr；无定义返回 NULL。 */
 static char *load_def_reads(kvlangKv_t *kv, const char *key, int *out_nr, int *out_dyn) {
     *out_nr = 0;
     *out_dyn = 0;
@@ -199,10 +231,11 @@ static char *load_def_reads(kvlangKv_t *kv, const char *key, int *out_nr, int *o
     if (bl < 5) { kvlangXvalueFree(&v); return NULL; }
     *out_nr = b[0] | (b[1] << 8);
     *out_dyn = b[4];
-    size_t sl = (size_t)(bl - 5);
-    char *sig = malloc(sl + 1);
-    memcpy(sig, b + 5, sl); sig[sl] = 0;
     kvlangXvalueFree(&v);
+    kvlangStrbuf_t dir; kvlangStrbufInit(&dir);
+    kvlangStrbufPrintf(&dir, "%s/", key);
+    char *sig = join_read_sig(kv, dir.p, *out_nr);
+    kvlangStrbufFree(&dir);
     return sig;
 }
 
@@ -372,10 +405,9 @@ static char *handle_call(kvlangKv_t *kv, const char *pc, kvlangRwirInst_t *inst)
     int nw = sbody[2] | (sbody[3] << 8);
     int dyn = h.body_len >= 5 ? sbody[4] : 0;
 
-    {   /* 读参类型校验：reads[0]=函数名，实参从 reads[1] 起 */
-        size_t sl = h.body_len >= 5 ? (size_t)(h.body_len - 5) : 0;
-        char *ds = malloc(sl + 1);
-        memcpy(ds, sbody + 5, sl); ds[sl] = 0;
+    {   /* 读参类型校验：reads[0]=函数名，实参从 reads[1] 起。
+         * 读参 langtype 逐条落签名行 [0,-i] 槽（def langtype），主槽 body 仅计数头。 */
+        char *ds = join_read_sig(kv, func_dir.p, nr);
         int crc = check_read_types(kv, vtid, pc, fn, ds, nr, dyn, inst->reads + 1, inst->nr - 1);
         free(ds);
         if (crc != 0) goto fail;

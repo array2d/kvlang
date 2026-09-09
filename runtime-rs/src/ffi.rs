@@ -167,12 +167,13 @@ unsafe extern "C" {
     // ── kvlang runtime：rwirext 宿主 ABI（均传 kvspace 句柄）─────────
     // C 头 kvlang_rwirext.h 导出 9 符号；此处声明 7：故意省略 LangtypeValid/LangtypeMatch
     // ——langtype 校验属 layout 期、匹配属 C dispatch 内部，Rust term 侧不调用（非缺陷）。
-    pub fn kvlangRwirextRegister(
+    pub fn kvlangDefRwir(
         kvspace: *mut c_void,
         opcode: *const c_char,
+        rp: *const *const c_char,
         nr: c_int,
+        wp: *const *const c_char,
         nw: c_int,
-        sig: *const c_char,
     ) -> c_int;
     pub fn kvlangRwirextParams(kvspace: *mut c_void, pc: *const c_char) -> *mut c_char;
     pub fn kvlangRwirextResolveRead(

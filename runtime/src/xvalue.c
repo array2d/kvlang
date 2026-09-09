@@ -557,7 +557,7 @@ void kvlangXvalueNewPtr(kvlangXvalue_t *v, const char *target_langtype, const ch
     v->borrowed = 0;
 }
 /* def rwir 路由头：body 仅计数头 [nr:u16 LE][nw:u16 LE][dynamic:u8]，无参数载荷。
- * 各参数类型由 kvlangRwirextRegister 落 /lib/<op>/[0,x] 签名行槽（def langtype）。 */
+ * 各参数类型由 kvlangDefRwir 落 /lib/<op>/[0,x] 签名行槽（def langtype）。 */
 void kvlangXvalueNewDefRwir(kvlangXvalue_t *v, int32_t nr, int32_t nw, int dynamic) {
     uint8_t raw[5] = { nr & 0xFF, (nr >> 8) & 0xFF, nw & 0xFF, (nw >> 8) & 0xFF, dynamic ? 1 : 0 };
     kvlangXvalueNewTlv(v, KVSPACE_KIND_DEF_RWIR, raw, 5, 1);

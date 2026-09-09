@@ -10,9 +10,12 @@
  * *）传进下列带句柄的函数即可。 本 ABI 只暴露 kvspace 不提供的 runtime
  * 语义：rwir 解码 + resolve + display + PC 推进 + 类型判定。 */
 
-/* 写 /lib/<opcode> = rwir 签名（幂等） */
-int kvlangRwirextRegister(void *kvspace, const char *opcode, int32_t nr,
-                         int32_t nw, const char *sig);
+/* 注册一条 rwir（幂等）：/lib/<opcode> 路由头（body 仅计数头 [nr][nw][dynamic]）+
+ * 各参数类型落签名行 [0,x] 槽（def langtype）。读参类型逐条 rp[0..nr]、写参 wp[0..nw]，
+ * 不拼签名串——避免其它 runtime 把「拼接 sig」误当注册标准。末读参尾缀 "..." → 变参。 */
+int kvlangDefRwir(void *kvspace, const char *opcode,
+                  const char *const *rp, int32_t nr,
+                  const char *const *wp, int32_t nw);
 
 /* 外部扩展 handoff：写 /lib/<opcode>/.todo<vid> 并阻塞 watch .done<vid>（30s
  * 超时）。RETURN 模式下 term 遇非己方 ext rwir（如 json.to/numpy）时调用，把
