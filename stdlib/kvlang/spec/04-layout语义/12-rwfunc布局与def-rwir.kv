@@ -6,12 +6,18 @@ lib kvlang/spec/layout语义/rwfunc布局与def_rwir {
 
 `write_func` 往 `/lib/<pkg>·<name>/` 写：
 
-- `[0,0]`——rwfunc 签名。
+- `[0,0]`——rwfunc 签名锚点，body 仅 `[nr][nw][dynamic]` 计数头；func 目录根**不**落 `[0,±k]` 参数
+  类型槽。
 - `.src`（ASCII 点后缀，`/lib/<pkg>·<name>.src`）——源码副本，kind `char`。
-- 每个命名参数——`funcDir/<param>` 存 Ptr（kind `char`）指向槽坐标串（读参 `[0,-j]`、写参
-  `[0,+j]`）。
+- 每个命名参数——`funcDir/<param>` 存 Ptr，body 为槽坐标串（读参 `[0,-j]`、写参 `[0,+j]`），**Ptr
+  langtype = 该参数类型**（类型随参数名承载）。
 - `[i,j]`（i≥1）——线性指令（见 [[控制流]]）。
 - `‥labels/<label>`——标签到 irseq 映射（若有控制流）。
+
+rwfunc 与 def rwir 的签名承载正交：rwfunc 以命名参数键 `{name}` 承载类型、按名在帧内解析（不在意参数
+**顺序**，只区分读/写参）；def rwir 以位置化 `[0,x]` 静态签名槽承载类型、跨 runtime 队列按位置收参。
+故
+rwfunc 无 `[0,x]` 槽、def rwir 无 `{name}` 键。
 
 ## def rwir 路由头（rwir 统一调度入口）
 

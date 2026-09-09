@@ -401,28 +401,20 @@ pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) {
         keytree::lib_src(pkg, &fn_.sig.name),
         ffi::new_char_byte(fn_.full_text().as_bytes()),
     ));
-    // 签名行：每个参数的类型定义落 [0,x] 槽（def langtype），x<0 读参、x>0 写参。
-    // 运行期 call 会用实参绑定覆盖同坐标的帧槽，静态类型定义仅供 layout 类型检查/dump。
+    // 命名参数键 funcDir/<name>：Ptr，body=帧坐标 [0,±k]（k<0 读参、k>0 写参），
+    // target_langtype=该参类型——类型随参数名承载。func dir 根不落 [0,±k] 静态槽：
+    // 那些坐标是 runtime call 期写入的帧本地实参地址，若 layout 提前落在 func dir 根，
+    // 建帧 extindex 时会把它们当只读扩展节点，令 call 期同坐标绑定触发 ext-write 保护。
     for (i, p) in fn_.sig.params.iter().enumerate() {
-        let slot = format!("[0,-{}]", i + 1);
-        pairs.push((
-            format!("{func_dir}/{slot}"),
-            kvkind::new_def_langtype(&param_types[i]),
-        ));
         pairs.push((
             format!("{func_dir}/{}", p.name),
-            ffi::new_ptr(kvkind::KIND_CHAR, &slot),
+            ffi::new_ptr(&param_types[i], &format!("[0,-{}]", i + 1)),
         ));
     }
     for (i, r) in fn_.sig.returns.iter().enumerate() {
-        let slot = format!("[0,{}]", i + 1);
-        pairs.push((
-            format!("{func_dir}/{slot}"),
-            kvkind::new_def_langtype(&param_types[nr as usize + i]),
-        ));
         pairs.push((
             format!("{func_dir}/{}", r.name),
-            ffi::new_ptr(kvkind::KIND_CHAR, &slot),
+            ffi::new_ptr(&param_types[nr as usize + i], &format!("[0,{}]", i + 1)),
         ));
     }
     let _ = kv.set(&pairs);
