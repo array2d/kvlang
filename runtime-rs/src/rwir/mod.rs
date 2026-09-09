@@ -1,6 +1,6 @@
 //! rwir —— 注册进 kvlang runtime 的 stdlib，文件/模块按 kvlang lib 嵌套关系组织
 //! （lib 用 `/` 嵌套、成员用 `·`，文件树与之 1:1）：
-//!   term         : print / println / cerr / input        行输出 + 读 stdin（裸 rwir）
+//!   term         : print / println / cerr / printf / input   行输出 + C 风格格式化 + 读 stdin（裸 rwir）
 //!   json         : json·to / json·from                   KV 子树 ↔ JSON 文本
 //!   http         : http·call                             网络抓取（ureq 原生）
 //!   kvlanglayout : kvlanglayout·vet/format/layout/dump    自造 kv 代码入库（layout C ABI）
@@ -51,6 +51,13 @@ pub const MYRWIRCAPS: &[(&str, Rwir)] = &[
         "cerr",
         Rwir {
             rp: &["any..."],
+            wp: &[],
+        },
+    ),
+    (
+        "printf",
+        Rwir {
+            rp: &["[]char/utf8|[]char/utf32", "any..."],
             wp: &[],
         },
     ),
@@ -206,6 +213,7 @@ pub fn is_inproc(op: &str) -> bool {
         "print"
             | "println"
             | "cerr"
+            | "printf"
             | "input"
             | "json·to"
             | "json·from"

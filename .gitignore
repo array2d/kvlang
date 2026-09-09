@@ -81,3 +81,6 @@ kvtut*
 
 # tutorial bench 空产物
 /tutorial/benchmark.csv
+
+# runtime-rs 测试 shm 产物
+kvlangtest*
