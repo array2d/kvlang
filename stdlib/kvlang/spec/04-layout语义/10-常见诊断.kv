@@ -7,13 +7,16 @@ lib kvlang/spec/layout语义/常见诊断 {
 - 参数缺类型标注——`param "x" has no type annotation` / `return value "r" has no type annotation`。
 - 读参被写——`read param "A" cannot be used as write slot (read params are read-only)`。
 - 读写参同名——`param "A" appears in both read-params and write-params`。
-- 变参位置非法——`variadic param "x" must be the last read-param` / `write-param "r" cannot be variadic`。
+- 变参位置非法——`variadic param "x" must be the last read-param` /
+  `write-param "r" cannot be variadic`。
 - 顶层控制流——`top-level while is not supported — wrap in main()`。
-- 写类型与字面量不匹配——`write "x" declared scalar … but assigned an array literal` / `declared … but assigned a scalar literal`。
+- 写类型与字面量不匹配——`write "x" declared scalar … but assigned an array literal` /
+  `declared … but assigned a scalar literal`。
 - 裸 rwfunc 遮蔽 builtin——`function "…" shadows builtin`。
 - `[]` 下标用于容器——`"[]" 下标不能用于容器 …`。
 - `return` 带参数——`return cannot take a value — use write-params for output`。
-- 语法错误——`expected …, got …` / `unexpected token … in block` / `unexpected token … at top level`。
+- 语法错误——`expected …, got …` / `unexpected token … in block` /
+  `unexpected token … at top level`。
 
 **warn**（不拒装载）：
 

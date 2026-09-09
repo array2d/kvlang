@@ -2,7 +2,8 @@
 lib kvlang/spec/kvspace模型/键系统与数组访问 {
 	r####"# 键系统与数组访问
 
-本章界定 kvspace 键的三种形态、XValue 的 langtype 类型表达与线格式、数组的两种物理存储形态及其访问方式。
+本章界定 kvspace 键的三种形态、XValue 的 langtype 类型表达与线格式、数组的两种物理存储形态及其访问方
+式。
 
 ## 键形态三分
 
@@ -23,7 +24,8 @@ lib kvlang/spec/kvspace模型/键系统与数组访问 {
 | **kind** | 基础类型字符串（标量或元素类型），是 langtype 的叶子 | `uint8` `int32` `float64` `bool` `char/utf32` `stringkeymap` `rwir` `rwfunc` … |
 | **langtype** | 完整类型表达式串：可选 `[dims]` + kind；ref 已独立为 head 字节字段，不再是 langtype 前缀 | `int8` `[10]int32` `[256,256]uint8` `[]char/utf8·int64` |
 
-kind 常量集中定义于 `kvspace/include/kvspace/const.h`（C）与 `kvspace-durable/src/const.rs`（Rust），两侧同名同值。剥掉 langtype 的所有前缀与 `[dims]` 修饰即得 kind。
+kind 常量集中定义于 `kvspace/include/kvspace/const.h`（C）与 `kvspace-durable/src/const.rs`
+（Rust），两侧同名同值。剥掉 langtype 的所有前缀与 `[dims]` 修饰即得 kind。
 
 ### langtype 文法
 
@@ -35,6 +37,10 @@ dims     ::= '[' ']'                 # 变长一维
           |  '[' INT ( ',' INT )* ']'  # 定长 / 多维（compact 连续布局）
 ```
 
-维数与各维长度编码进 langtype 串本身；ref（存储位置）已独立为 head 中的 ref u8 字段（见 [[XValueHead线格式]]），不再是 langtype 前缀——storetype 物理字段携带对应的 ndim/dims 结构。完整签名类型表达式（并集 `A|B`、通配 `any`、动态维 `?`、map 键值 `key·value`）见 [[文法]] 与类型系统卷。**源码**类型标注可在最前写 `*`/`@` 前缀表示 ref（如 `*int64`、`@[256,256]uint8`），layout 解析时剥离前缀落成 head `ref` 独立字节；wire 层 langtype 串不含 `*`/`@` 前缀（见 [[总体方案]]）。
+维数与各维长度编码进 langtype 串本身；ref（存储位置）已独立为 head 中的 ref u8 字段（见 [[XValueHead
+线格式]]），不再是 langtype 前缀——storetype 物理字段携带对应的 ndim/dims 结构。完整签名类型表达式
+（并集 `A|B`、通配 `any`、动态维 `?`、map 键值 `key·value`）见 [[文法]] 与类型系统卷。**源码**类型标
+注可在最前写 `*`/`@` 前缀表示 ref（如 `*int64`、`@[256,256]uint8`），layout 解析时剥离前缀落成 head
+`ref` 独立字节；wire 层 langtype 串不含 `*`/`@` 前缀（见 [[总体方案]]）。
 	"#### -> /lib/kvlang/spec/kvspace模型/键系统与数组访问
 }

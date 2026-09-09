@@ -2,7 +2,8 @@
 lib kvlang/spec/类型系统/struct {
 	r####"# struct
 
-`struct` 声明注册一个原型节点于 `/lib/<Name>`（storetype=index，langtype 为原型路径如 `/lib/Point`），字段带类型标注与默认值：
+`struct` 声明注册一个原型节点于 `/lib/<Name>`（storetype=index，langtype 为原型路径如
+`/lib/Point`），字段带类型标注与默认值：
 
 ```kv
 struct Point {
@@ -11,7 +12,9 @@ struct Point {
 }
 ```
 
-实例化 `Name{f=v}` 克隆原型子树、覆盖给定字段（其余取默认），并对每个字段做类型校验；实例是 struct 类型命名成员容器（storetype=index，成员在 `{key}·` memindex），成员经 `·` 访问。字段类型不符或写不存在的字段在 runtime 报 TypeError。
+实例化 `Name{f=v}` 克隆原型子树、覆盖给定字段（其余取默认），并对每个字段做类型校验；实例是 struct
+类型命名成员容器（storetype=index，成员在 `{key}·` memindex），成员经 `·` 访问。字段类型不符或写不存
+在的字段在 runtime 报 TypeError。
 
 ```kv
 p = Point{x=3.0 y=4.0}
@@ -19,6 +22,8 @@ p·x -> a               // 3.0
 q = Point{}            // 全取默认：0.0, 0.0
 ```
 
-在签名中，结构类型以原型路径 `/lib/<Name>`（**structref** 类型表达式 atom）标注（见 [[langtype签名类型表达式]]）。结构值可存进 map（int 键、struct 值）、以绝对路径指针连成链表/树/图（见 `tutorial/12-struct/`）。
+在签名中，结构类型以原型路径 `/lib/<Name>`（**structref** 类型表达式 atom）标注（见 [[langtype签名类
+型表达式]]）。结构值可存进 map（int 键、struct 值）、以绝对路径指针连成链表/树/图（见
+`tutorial/12-struct/`）。
 "#### -> /lib/kvlang/spec/类型系统/struct
 }

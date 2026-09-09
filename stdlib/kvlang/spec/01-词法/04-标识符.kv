@@ -5,7 +5,8 @@ lib kvlang/spec/词法/标识符 {
 ## 锚例
 
 - `tutorial/01-basics/vars.kv`——标识符 `x`、`y`。
-- `tutorial/01-basics/kv_tree.kv`——绝对路径 `/tmp/kvt`、子键路径 `/tmp/kvt·data`、层级路径 `/tmp/kvt/a`，以及成员/方法 `kv·set`、`kv·get`。
+- `tutorial/01-basics/kv_tree.kv`——绝对路径 `/tmp/kvt`、子键路径 `/tmp/kvt·data`、层级路径
+  `/tmp/kvt/a`，以及成员/方法 `kv·set`、`kv·get`。
 
 ## 标识符
 
@@ -25,9 +26,13 @@ println("值 =", 变量数)
 
 此决策使 kvlang 与 C99、Go、Python、Rust、TypeScript 在「允许 Unicode 标识符」上对齐。
 
-7 个词法关键字（`return if else for while break continue`）为保留字，不得用作标识符；其余上下文词（`lib`、`None`、`true`、`false`、种类名等）不保留，但用作普通标识符会遮蔽其上下文含义，不应如此使用。
+7 个词法关键字（`return if else for while break continue`）为保留字，不得用作标识符；其余上下文词
+（`lib`、`None`、`true`、`false`、种类名等）不保留，但用作普通标识符会遮蔽其上下文含义，不应如此使
+用。
 
-> 实现说明（非规范）：当前词法器以「最长非分隔符字节串」切分标识符，未逐字符校验上述字母表，故比本节所述更宽松。分隔符集合为空白、`; , ( ) { } [ ] :`、成员分隔符 `·`，以及运算符字符 `+ - * % ! = < > & | ^`。
+> 实现说明（非规范）：当前词法器以「最长非分隔符字节串」切分标识符，未逐字符校验上述字母表，故比本节
+  所述更宽松。分隔符集合为空白、`; , ( ) { } [ ] :`、成员分隔符 `·`，以及运算符字符
+  `+ - * % ! = < > & | ^`。
 
 ## 成员分隔符
 

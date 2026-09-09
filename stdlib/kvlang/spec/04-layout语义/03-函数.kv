@@ -2,9 +2,14 @@
 lib kvlang/spec/layout语义/函数 {
 	r####"# 函数
 
-kvlang 源码只有一种命名单元：**rwfunc**（有指令体的用户函数），暴露 `(读参) -> (写参)` 箭头接口。函数**没有返回值**，只有读参与写参。
+kvlang 源码只有一种命名单元：**rwfunc**（有指令体的用户函数），暴露 `(读参) -> (写参)` 箭头接口。函
+数**没有返回值**，只有读参与写参。
 
-签名与体内 rwir 落入 kvspace 的布局**一律**按 `->` 的「左读 / 右写」轴实现：读参在负轴、写参在正轴（见 [[指令架构]]）。`=` 只存在于 kvlang 上层 code 层，是单条指令「写左」的书写别名，不进入签名、也不改变槽位布局——所以没有 `=` 形式的 rwfunc 签名，接口只用 `(读参) -> (写参)` 表达。rwir 是 runtime 兑现的原子能力，源码**不声明**、只调用；其 `def rwir` 路由头由各 runtime 注册到 `/lib`（见 [[rwfunc布局与def_rwir]]）。
+签名与体内 rwir 落入 kvspace 的布局**一律**按 `->` 的「左读 / 右写」轴实现：读参在负轴、写参在正轴
+（见 [[指令架构]]）。`=` 只存在于 kvlang 上层 code 层，是单条指令「写左」的书写别名，不进入签名、也
+不改变槽位布局——所以没有 `=` 形式的 rwfunc 签名，接口只用 `(读参) -> (写参)` 表达。rwir 是 runtime
+兑现的原子能力，源码**不声明**、只调用；其 `def rwir` 路由头由各 runtime 注册到 `/lib`（见 [[rwfunc
+布局与def_rwir]]）。
 
 ## 读参与写参
 
@@ -13,13 +18,18 @@ kvlang 源码只有一种命名单元：**rwfunc**（有指令体的用户函数
 | **读参** | `[0,-1], [0,-2], …` | 调用方 → 被调方 |
 | **写参** | `[0,+1], [0,+2], …` | 被调方 → 调用方 |
 
-`-> result` 是**写参的跨帧路径映射**，不是返回值：runtime 将子帧写参直写调用方目标位置（见 [[函数调用与内建]]）。
+`-> result` 是**写参的跨帧路径映射**，不是返回值：runtime 将子帧写参直写调用方目标位置（见 [[函数调
+用]]）。
 
-调用时**写参 arity 必须全部匹配**（对齐 Go/Rust）：`f() -> s` 对多写参函数是错误；不需要的写参**必须**用 `_` 显式丢弃。
+调用时**写参 arity 必须全部匹配**（对齐 Go/Rust）：`f() -> s` 对多写参函数是错误；不需要的写参**必须
+**用 `_` 显式丢弃。
 
 ## 参数类型必须标注
 
-每个读参与写参**必须**声明类型（`name:type_expr`，type_expr 见 [[langtype签名类型表达式]]）。type_expr 最前可写 `*`/`@` 前缀（如 `*int64`、`@[256,256]uint8`）表示 ptr/ext 存储位置；layout 解析时剥离该前缀并落成 head `ref` 字节，wire 层 langtype 串不含前缀（见 [[总体方案]]）。缺类型标注是错误：
+每个读参与写参**必须**声明类型（`name:type_expr`，type_expr 见 [[langtype签名类型表达式]]）。
+type_expr 最前可写 `*`/`@` 前缀（如 `*int64`、`@[256,256]uint8`）表示 ptr/ext 存储位置；layout 解析
+时剥离该前缀并落成 head `ref` 字节，wire 层 langtype 串不含前缀（见 [[总体方案]]）。缺类型标注是错
+误：
 
 ```
 error: func f: param "x" has no type annotation — every parameter must declare its type
@@ -28,19 +38,27 @@ error: func f: return value "r" has no type annotation
 
 ## 参数变参（arity，非类型）
 
-末读参**可**在参数上尾缀 `...` 声明变参（吸收 0..N 个同型实参，如 `A:int64|float64...`）。`...` 是**签名层 arity 构造，不是 type_expr 的一部分**（轴量词见 [[langtype签名类型表达式]]）：layout 解析时把它从参数上**剥离**,给该函数主槽置 `dynamic=1`（见 [[指令布局格式]]）,而参数的 langtype 子槽 `[0,x]` 存**纯净** langtype（不含 `...`）。故 `LangtypeValid`/`LangtypeMatch` 永不见 `...`。
+末读参**可**在参数上尾缀 `...` 声明变参（吸收 0..N 个同型实参，如 `A:int64|float64...`）。`...` 是**
+签名层 arity 构造，不是 type_expr 的一部分**（轴量词见 [[langtype签名类型表达式]]）：layout 解析时把
+它从参数上**剥离**,给该函数主槽置 `dynamic=1`（见 [[指令布局格式]]）,而参数的**纯净** langtype（不含
+`...`）由承载点存放——def rwir 落 `[0,x]` 子槽、rwfunc 随 `{name}` Ptr 的 langtype。故
+`LangtypeValid`/`LangtypeMatch` 永不见 `...`。
 
 - 变参**必须**是最后一个读参；非末位读参带 `...`：装载期错误。
 - 写参（返回值）**不得**变参：装载期错误。
-- 派发时,主槽 `dynamic=1` 则末读参对每个尾随实参按其纯净 langtype 逐个判定（见 [[匹配语义与变参]]）。
+- 派发时,主槽 `dynamic=1` 则末读参对每个尾随实参按其纯净 langtype 逐个判定（见 [[匹配语义与变
+  参]]）。
 
 ## 写参初值 None
 
-写参在被调方帧内初值为 **None**（strict null）。函数体内**必须**先显式初始化写参再参与运算——对 None 做算术在 runtime 被拒。惯例以拷贝置零值起步（`0 -> acc`），此后写参在体内可读可写，退出时经箭头映射回调用方。
+写参在被调方帧内初值为 **None**（strict null）。函数体内**必须**先显式初始化写参再参与运算——对 None
+做算术在 runtime 被拒。惯例以拷贝置零值起步（`0 -> acc`），此后写参在体内可读可写，退出时经箭头映射
+回调用方。
 
 ## 读参只读
 
-读参是单向输入绑定。函数体内把读参裸名放入写槽（含 `for … in` 的迭代变量）会破坏数据流方向，layout 报错拒绝装载：
+读参是单向输入绑定。函数体内把读参裸名放入写槽（含 `for … in` 的迭代变量）会破坏数据流方向，layout
+报错拒绝装载：
 
 ```
 error: func f: read param "A" cannot be used as write slot (read params are read-only)
@@ -55,11 +73,13 @@ rwfunc sum(arr:[]int64, acc:int64) -> (r:int64) { acc + arr[0] -> acc }
 rwfunc sum(arr:[]int64) -> (acc:int64) { acc + arr[0] -> acc }
 ```
 
-判定规则（实现）：写槽含 `/`、`[`、`·` 者视为路径/下标/成员写，不计入本检查；但 `kv·set(base, …)` 的 base 命中读参裸名同样拒绝（成员目录被改写）。
+判定规则（实现）：写槽含 `/`、`[`、`·` 者视为路径/下标/成员写，不计入本检查；但 `kv·set(base, …)` 的
+base 命中读参裸名同样拒绝（成员目录被改写）。
 
 ## 参数同名规则
 
-- **定义时**：读参与写参**不得**同名——`rwfunc f(A:int64) -> (A:int64)` 非法，报 `param "A" appears in both read-params and write-params`。
+- **定义时**：读参与写参**不得**同名——`rwfunc f(A:int64) -> (A:int64)` 非法，报
+  `param "A" appears in both read-params and write-params`。
 - **调用时**：同一变量**可**同时出现在读槽与写槽——`inc(x) -> x` 合法，读写独立解析、互不冲突。
 	"#### -> /lib/kvlang/spec/layout语义/函数
 }

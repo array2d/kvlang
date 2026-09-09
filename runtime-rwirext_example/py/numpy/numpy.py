@@ -93,8 +93,10 @@ def _bind():
     for fn in ("kvlangRwirextParams", "kvlangRwirextResolveRead", "kvlangRwirextResolveReadPath",
                "kvlangRwirextResolveWrite", "kvlangRwirextNextPc"):
         getattr(_rt, fn).restype = ctypes.c_void_p
-    _rt.kvlangRwirextRegister.restype = ctypes.c_int
-    _rt.kvlangRwirextRegister.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int32, ctypes.c_int32, ctypes.c_char_p]
+    _rt.kvlangDefRwir.restype = ctypes.c_int
+    _rt.kvlangDefRwir.argtypes = [ctypes.c_void_p, ctypes.c_char_p,
+                                  ctypes.POINTER(ctypes.c_char_p), ctypes.c_int32,
+                                  ctypes.POINTER(ctypes.c_char_p), ctypes.c_int32]
     _rt.kvlangRwirextParams.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
     _rt.kvlangRwirextResolveRead.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
     _rt.kvlangRwirextResolveReadPath.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
@@ -288,9 +290,14 @@ class Engine:
 
     # ── 注册五大类 ─────────────────────────────────────────────────
     def register(self):
+        def _arr(lst):
+            return (ctypes.c_char_p * len(lst))(*[s.encode() for s in lst])
         for op, (nr, _) in OPS.items():
-            _rt.kvlangRwirextRegister(self.kv, op.encode(), nr, 1, ("\n".join(["any"] * (nr + 1))).encode())
-        _rt.kvlangRwirextRegister(self.kv, b"numpy.print", 1, 0, b"any...")
+            rp = _arr(["any"] * nr)
+            wp = _arr(["any"])
+            _rt.kvlangDefRwir(self.kv, op.encode(), rp, nr, wp, 1)
+        rp = _arr(["any..."])
+        _rt.kvlangDefRwir(self.kv, b"numpy.print", rp, 1, None, 0)
 
     def _handle(self, op, nr, fn, pc):
         params = _s(_rt.kvlangRwirextParams(self.kv, pc.encode())).split("\n")

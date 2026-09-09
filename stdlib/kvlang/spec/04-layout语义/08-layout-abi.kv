@@ -4,7 +4,8 @@ lib kvlang/spec/layout语义/layout流水线接口 {
 
 ## C ABI 入口
 
-layout 能力经 cdylib 导出，第三方无需 fork 子进程即可布局（各入口都用 catch_unwind 兜住内部 panic，坏输入只返回 -1）：
+layout 能力经 cdylib 导出，第三方无需 fork 子进程即可布局（各入口都用 catch_unwind 兜住内部 panic，
+坏输入只返回 -1）：
 
 | 符号 | 职责 |
 |------|------|
@@ -15,15 +16,19 @@ layout 能力经 cdylib 导出，第三方无需 fork 子进程即可布局（�
 | `kvlangLayoutDump(lib, dsn, …)` | 把 `/lib` 子树逆向重建为可运行 kvlang + 槽位注释 |
 | `kvlangLangtypeParse(langtype, out)` | 解析 XValue head 的 langtype（唯一事实源，供各消费方复用） |
 
-成功返回 0（`entry_out` 为 init 入口名列表，`\n` 分隔），失败返回 -1（`err_out` 为错误）。`kvlangLayoutFile` 是 `kvlangLayoutCode` 的薄封装。
+成功返回 0（`entry_out` 为 init 入口名列表，`\n` 分隔），失败返回 -1（`err_out` 为错误）。
+`kvlangLayoutFile` 是 `kvlangLayoutCode` 的薄封装。
 
 ## vet 闸门
 
-`vet` 走 parse + lower，但**不写 kvspace**。它是自造代码的装载前闸门：LLM 生成或外部注入的 `.kv` 先过 vet，失败不污染 `/lib`。
+`vet` 走 parse + lower，但**不写 kvspace**。它是自造代码的装载前闸门：LLM 生成或外部注入的 `.kv` 先
+过 vet，失败不污染 `/lib`。
 
 ## KVLANG_LIB 引导与 init 入口
 
-`KVLANG_LIB` 引导 layout 与 run 各 lib 的 init。pkg **严格取自 `lib` 声明**（`lib X { … }` → `X`），不从文件名推导。layout 产出的 init 入口名列表即消费方驱动 init 的依据；tutorial 按约定跑 `test` 入口。
+`KVLANG_LIB` 引导 layout 与 run 各 lib 的 init。pkg **严格取自 `lib` 声明**（`lib X { … }` → `X`），
+不从文件名推导。layout 产出的 init 入口名列表即消费方驱动 init 的依据；tutorial 按约定跑 `test` 入
+口。
 
 ## 导出符号全集（nm -D 实测，6）
 

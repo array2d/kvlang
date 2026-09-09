@@ -2,14 +2,20 @@
 lib kvlang/spec/类型系统/总体方案 {
 	r####"# 类型系统总体方案：xvalue head 三正交维
 
-> **本卷为新方案，待敲定。** 敲定后据此重构 [[种类与定宽类型]]、[[langtype签名类型表达式]]、[[数组形态]]、[[容器]]。
+> **本卷为新方案，待敲定。** 敲定后据此重构 [[种类与定宽类型]]、[[langtype签名类型表达式]]、[[数组形
+  态]]、[[容器]]。
 
-每个 XValue 落入 kvspace 时，其类别由 head 三个**正交**字段表达，彻底取代旧的单一 `kind` 分类与 langtype 首字符 `*`/`@` 前缀。
+每个 XValue 落入 kvspace 时，其类别由 head 三个**正交**字段表达，彻底取代旧的单一 `kind` 分类与
+langtype 首字符 `*`/`@` 前缀。
 
 - **`ref`（存储位置）** — 值放在哪：inline / 指针 / 扩展世界。1 字节。
 - **`storetype`（物理布局，codec 视角）** — 字节怎么切。**闭合小集**，1 字节。
-- **`langtype`（语义类型，语言视角）** — 值是什么类型。**即旧的 langtype 串**，变长，保留高级语言的全部类型定义。
+- **`langtype`（语义类型，语言视角）** — 值是什么类型。**即旧的 langtype 串**，变长，保留高级语言的
+  全部类型定义。
 
-**核心分层**：codec（[[XValueHead线格式]] 的编解码层）**只按 `storetype` 这 1 字节分派切字节**，完全不解析 `langtype` 串（对它只是一段透传字节）；body 对 codec 恒为不透明字节。语言层（layout/runtime 类型系统）只读 `langtype` 串做类型检查、匹配、显示。这把 kvspace（寻址+内存空间，只认 storetype 1 字节）与 kvlang 类型系统（只认 langtype 串）彻底解耦。
+**核心分层**：codec（[[XValueHead线格式]] 的编解码层）**只按 `storetype` 这 1 字节分派切字节**，完全
+不解析 `langtype` 串（对它只是一段透传字节）；body 对 codec 恒为不透明字节。语言层（layout/runtime
+类型系统）只读 `langtype` 串做类型检查、匹配、显示。这把 kvspace（寻址+内存空间，只认 storetype 1 字
+节）与 kvlang 类型系统（只认 langtype 串）彻底解耦。
 "#### -> /lib/kvlang/spec/类型系统/总体方案
 }

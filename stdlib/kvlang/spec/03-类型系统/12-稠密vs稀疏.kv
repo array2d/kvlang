@@ -20,6 +20,7 @@ sparse:[int32,int32]·int32 = {}                     // 稀疏，storetype=index
 sparse·[0,0] -> x                                   // 未写坐标 → None（子 key 不存在）
 ```
 
-两种落库共享 `ndarray·*` 观测（`numel` 对稀疏形态返回**实存成员数**，非坐标空间容量），并经下节 `array·scatter`/`array·compact` 互转。
+两种落库共享 `ndarray·*` 观测（`numel` 对稀疏形态返回**实存成员数**，非坐标空间容量），并经下节
+`array·scatter`/`array·compact` 互转。
 "#### -> /lib/kvlang/spec/类型系统/稠密vs稀疏
 }

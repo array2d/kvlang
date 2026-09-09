@@ -403,15 +403,11 @@ static char *handle_call(kvlangKv_t *kv, const char *pc, kvlangRwirInst_t *inst)
     const uint8_t *sbody = sig.data + h.body_offset;
     int nr = sbody[0] | (sbody[1] << 8);
     int nw = sbody[2] | (sbody[3] << 8);
-    int dyn = h.body_len >= 5 ? sbody[4] : 0;
 
-    {   /* 读参类型校验：reads[0]=函数名，实参从 reads[1] 起。
-         * 读参 langtype 逐条落签名行 [0,-i] 槽（def langtype），主槽 body 仅计数头。 */
-        char *ds = join_read_sig(kv, func_dir.p, nr);
-        int crc = check_read_types(kv, vtid, pc, fn, ds, nr, dyn, inst->reads + 1, inst->nr - 1);
-        free(ds);
-        if (crc != 0) goto fail;
-    }
+    /* rwfunc 不做派发期位置化读参校验：类型随命名参数键 funcDir/<name>（Ptr 的
+     * target_langtype）承载，函数体在帧内按名解析、各 native 算子在使用点自校验操作数
+     * kind。位置化的有序签名校验（join_read_sig+check_read_types）是 rwir 的需求——
+     * 跨 runtime 队列按位置收参，故仅 def rwir 路由路径保留（见本文件 m->def_sig）。 */
 
     char *caller_fr = kvlangKeytreeFrameRoot(pc);
     int d = kvlangKeytreeFrameNum(pc);

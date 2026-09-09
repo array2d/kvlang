@@ -2,7 +2,9 @@
 lib kvlang/spec/layout语义/lib与rwir数据 {
 	r####"# lib 与 rwir 数据
 
-`/lib` 树即 kvlang 的**全局命名空间**——无 `import`，跨 lib 调用一律走全路径 `/lib/{pkg}·{func}()`。本章界定 layout 往 `/lib` 写入的各类内容、其 KV 布局与 langtype；def rwir 路由头由各 runtime 注册（非 layout 写入），其表示一并在此界定。
+`/lib` 树即 kvlang 的**全局命名空间**——无 `import`，跨 lib 调用一律走全路径 `/lib/{pkg}·{func}()`。
+本章界定 layout 往 `/lib` 写入的各类内容、其 KV 布局与 langtype；def rwir 路由头由各 runtime 注册
+（非 layout 写入），其表示一并在此界定。
 
 ## `/lib` 下的四类内容
 
@@ -28,14 +30,19 @@ lib a { lib b { rwfunc f() -> (r:int64) { 1 -> r } } }
 
 ## init 函数
 
-裸顶层语句与各 lib 的 `init` 体合并为 init 函数（无 `init` 关键字亦自动合成）：空 pkg → `init`，`lib X { }` → `X·init`。跨 lib 调用示例：`math·sum(3, 4) -> s`。
+裸顶层语句与各 lib 的 `init` 体合并为 init 函数（无 `init` 关键字亦自动合成）：空 pkg → `init`，
+`lib X { }` → `X·init`。跨 lib 调用示例：`math·sum(3, 4) -> s`。
 
 ## 签名装载：主槽计数头 + 签名行 [0,x]
 
 rwfunc（layout 装载）与 def rwir（runtime 注册）的签名都分两处存放（见 [[总体方案]]）：
 
-1. **主槽计数头**：目录主槽 body 只记 `[nr:u16 LE][nw:u16 LE][dynamic:u8]`——读参个数 `nr`、写参个数 `nw`、是否变参 `dynamic`（末位读参 `...`）。**不含任何参数 langtype 串**。主槽 langtype 即裸种类名 `rwfunc` 或 `def rwir`。
-2. **签名行 `[0,x]` 各槽**：每个参数的类型定义落在签名行坐标 `[0,x]`——`x<0` 读参、`x>0` 写参、`[0,0]` 为签名行锚点（同 `s0=0` 签名行规约，见 [[指令架构]]）。每个 `[0,x]` 槽是一个 `def langtype` 类型的 xvalue，body 存该参数的完整 langtype 串（一个参数一槽）。
+1. **主槽计数头**：目录主槽 body 只记 `[nr:u16 LE][nw:u16 LE][dynamic:u8]`——读参个数 `nr`、写参个数
+   `nw`、是否变参 `dynamic`（末位读参 `...`）。**不含任何参数 langtype 串**。主槽 langtype 即裸种类
+   名 `rwfunc` 或 `def rwir`。
+2. **签名行 `[0,x]` 各槽**：每个参数的类型定义落在签名行坐标 `[0,x]`——`x<0` 读参、`x>0` 写参、
+   `[0,0]` 为签名行锚点（同 `s0=0` 签名行规约，见 [[指令架构]]）。每个 `[0,x]` 槽是一个
+   `def langtype` 类型的 xvalue，body 存该参数的完整 langtype 串（一个参数一槽）。
 
 两者区别：rwfunc 目录下有实现指令行子节点（`[s0>0,·]`，s0≥1）；def rwir 无实现指令行。
 	"#### -> /lib/kvlang/spec/layout语义/lib与rwir数据

@@ -84,3 +84,9 @@ kvtut*
 
 # runtime-rs 测试 shm 产物
 kvlangtest*
+
+# shm 测试残留（相对路径 DSN 标记 + slotsboxmalloc 后端文件）
+/tut
+/wptest
+*.sbo.data
+*.sbo.head

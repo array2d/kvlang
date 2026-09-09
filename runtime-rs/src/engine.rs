@@ -29,7 +29,7 @@ fn storetype_from_langtype(kx: &str) -> u8 {
     if base == "extindex" {
         return STORETYPE_EXTINDEX;
     }
-    if matches!(base, "index" | "rwfunc" | "defrwir")
+    if matches!(base, "index" | "rwfunc" | "def rwir")
         || base.starts_with('/')
         || base.contains('\u{b7}')
     {

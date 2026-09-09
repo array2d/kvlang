@@ -8,15 +8,24 @@ lib kvlang/spec/类型系统/归属与存储 {
 | def rwir 路由头 | `/lib/<opcode>` | `def rwir` |
 | native 算子签名 | C 注册表（不落入 kvspace） | —— |
 
-**铁律**：`rwfunc` 每个参数落入 kvspace 的 langtype 与源码里的类型标注**逐字节相同**（同一文法，含 `...`）；`def rwir` 源码不声明，其参数 langtype 由各 runtime 注册时按同一文法写入。签名**不写进 langtype 串**，也不塞进主槽 body，分两处存（详见 [[总体方案]]「签名不入 langtype 串」）：
+**铁律**：`rwfunc` 每个参数落入 kvspace 的 langtype 与源码里的类型标注**逐字节相同**（同一文法，含
+`...`）；`def rwir` 源码不声明，其参数 langtype 由各 runtime 注册时按同一文法写入。签名**不写进
+langtype 串**，也不塞进主槽 body，分两处存（详见 [[总体方案]]「签名不入 langtype 串」）：
 
-1. **主槽计数头**：主槽（如 `/lib/pkg·funca`）body 只记 `[nr:u16 LE][nw:u16 LE][dynamic:u8]`——读参个数 `nr`、写参个数 `nw`、是否变参 `dynamic`（末位读参 `...`）；**不含任何参数 langtype 串**。
-2. **签名行 `[0,x]` 各槽**：每个参数的 langtype 串落在签名行坐标 `[0,x]`（`x<0` 读参、`x>0` 写参、`[0,0]` 签名行锚点），每槽为一个 `def langtype` 类型的 xvalue，body 存该参数完整 langtype 串。
+1. **主槽计数头**：主槽（如 `/lib/pkg·funca`）body 只记 `[nr:u16 LE][nw:u16 LE][dynamic:u8]`——读参个
+   数 `nr`、写参个数 `nw`、是否变参 `dynamic`（末位读参 `...`）；**不含任何参数 langtype 串**。
+2. **签名行 `[0,x]` 各槽**：每个参数的 langtype 串落在签名行坐标 `[0,x]`（`x<0` 读参、`x>0` 写参、
+   `[0,0]` 签名行锚点），每槽为一个 `def langtype` 类型的 xvalue，body 存该参数完整 langtype 串。
 
-故 rwfunc/def rwir 主槽的 langtype 就是裸种类名 `rwfunc`/`def rwir` 本身，不再是「签名 langtype 串」。native 算子的 langtype 内联在 C 注册表中，是唯一权威来源，运行时匹配**直接读 C 表、不回查 kvspace**；数值多类型算子在 C 表中融合为单条（如 `add(a:int8|…|float64, b:…)`）。
+故 rwfunc/def rwir 主槽的 langtype 就是裸种类名 `rwfunc`/`def rwir` 本身，不再是「签名 langtype
+串」。native 算子的 langtype 内联在 C 注册表中，是唯一权威来源，运行时匹配**直接读 C 表、不回查
+kvspace**；数值多类型算子在 C 表中融合为单条（如 `add(a:int8|…|float64, b:…)`）。
 
 ## 强制类型标注
 
-`rwfunc` 签名中每个参数与每个返回值**必须**声明类型（`name:type_expr`）。缺标注的签名**拒绝装载**——layout 在语法检查期报错，指出该参数/返回值无类型标注。类型标注须通过 langtype 合法性校验（拒绝非种类名，见下）。`def rwir` 路由头由 runtime 注册（源码不声明），其参数类型在注册接口处按同一合法性规则校验。
+`rwfunc` 签名中每个参数与每个返回值**必须**声明类型（`name:type_expr`）。缺标注的签名**拒绝装载
+**——layout 在语法检查期报错，指出该参数/返回值无类型标注。类型标注须通过 langtype 合法性校验（拒绝非
+种类名，见下）。`def rwir` 路由头由 runtime 注册（源码不声明），其参数类型在注册接口处按同一合法性规
+则校验。
 "#### -> /lib/kvlang/spec/类型系统/归属与存储
 }
