@@ -54,16 +54,6 @@ kvspaceNewPtr / NewChar / NewBool / NewInt64 / NewFloat64
 **native 读参：标量按值、整块借用**（normative，P2-d）——runtime-c native 算子（标量数值/逻辑/cast + `xv·*`/`array·*`/`string·*`）经 `ResolveReadValue` 取参，两条路径互斥：内联字面量（冻结于 code 槽）按值拷入（标量，纳秒级，无 KV 往返）；变量/KV 常驻值经 `GetMember` 一次取出后**移交所有权**（`*out = pv`，非二次拷贝，后端物化只发生在 `Get` 内部）。**整块字节零拷贝不在 native 侧另设机制**——它就是 [[notinmyrwircaps]] 的 `ResolveReadPath` + `kvspaceGet` body 指针那一条路径，由持有大 tensor 的扩展（numpy/op-gpu）承担；native 算子处理的是标量与中等 value，其拷贝相对每步 KV 往返可忽略（fib n=10：redis 1.5s / fs 320ms vs C 586ns，墙钟由 KV I/O 主导约六个数量级），故不为其增设借用管线。
 
 **后端由链接决定**：构建期经环境变量选择链接哪个 kvspace 库（`kvspace-c` 或 `kvspace_durable`），两者导出同一 ABI；runtime 的句柄结构只保留 `void *h`，代码零后端分支。
-## layout cdylib（libkvlanglayout）导出符号全集（nm -D 实测，6）
-
-```
-    kvlangKindexprParse
-    kvlangLayoutCode
-    kvlangLayoutDump
-    kvlangLayoutFile
-    kvlangLayoutFormat
-    kvlangLayoutVet
-```
 ## runtime C（libkvlang_runtime）导出符号全集（nm -D 实测，203）
 
 ### handoff_（1）
