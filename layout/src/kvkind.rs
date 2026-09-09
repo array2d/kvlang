@@ -38,8 +38,8 @@ pub fn head(data: &[u8]) -> ffi::kvspaceHead_t {
     ffi::decode_head(data)
 }
 
-/// 解析 kindexpr 内容 → (dims, base kind)。kindexpr 无前缀（ref/ptr 归 head.ref）。
-pub fn parse_kindexpr(kx: &str) -> (Vec<i32>, String) {
+/// 解析 langtype 内容 → (dims, base kind)。langtype 无前缀（ref/ptr 归 head.ref）。
+pub fn parse_langtype(kx: &str) -> (Vec<i32>, String) {
     if kx.starts_with('[') {
         match kx.find(']') {
             Some(end) => (
@@ -57,8 +57,8 @@ pub fn parse_kindexpr(kx: &str) -> (Vec<i32>, String) {
     }
 }
 
-/// 读 head 的 kindexpr 内容（去 NUL）。
-pub fn kindexpr(data: &[u8]) -> String {
+/// 读 head 的 langtype 内容（去 NUL）。
+pub fn langtype(data: &[u8]) -> String {
     if data.is_empty() {
         return String::new();
     }
@@ -75,7 +75,7 @@ pub fn kind(data: &[u8]) -> String {
     if data.is_empty() {
         return String::new();
     }
-    parse_kindexpr(&kindexpr(data)).1
+    parse_langtype(&langtype(data)).1
 }
 
 pub fn is_ptr(data: &[u8]) -> bool {
@@ -86,7 +86,7 @@ pub fn array_len(data: &[u8]) -> i32 {
     if data.is_empty() {
         return 0;
     }
-    let dims = parse_kindexpr(&kindexpr(data)).0;
+    let dims = parse_langtype(&langtype(data)).0;
     if dims.is_empty() {
         1
     } else {
@@ -104,7 +104,7 @@ pub fn body<'a>(data: &'a [u8], h: &ffi::kvspaceHead_t) -> &'a [u8] {
     &data[off..off + len]
 }
 
-/// 指针目标 key（Ptr 的 body 即目标 key 路径；head 去 * 为目标完整 kindexpr）。
+/// 指针目标 key（Ptr 的 body 即目标 key 路径；head 去 * 为目标完整 langtype）。
 pub fn ptr_target(data: &[u8]) -> String {
     let h = ffi::decode_head(data);
     String::from_utf8_lossy(body(data, &h)).into_owned()
@@ -122,7 +122,7 @@ pub fn display(data: &[u8]) -> String {
     if data.is_empty() {
         return "None".to_string();
     }
-    let (_, k) = parse_kindexpr(&kindexpr(data));
+    let (_, k) = parse_langtype(&langtype(data));
     if k.is_empty() {
         return "None".to_string();
     }
@@ -187,21 +187,23 @@ fn plain_value(k: &str, b: &[u8]) -> String {
             .map(|c| char::from_u32(le_u32(c)).unwrap_or('\u{FFFD}'))
             .collect(),
         "index" => format!("({})", count_names(b)),
-        // kvlang 自有 kind：body = [2B nr][2B nw][sig]；槽值/调用目标 nr=nw=0，取 sig 即可。
+        // kvlang 自有 kind：body = [2B nr][2B nw][1B dynamic][sig]；槽值/调用目标 nr=nw=0，取 sig 即可。
         "rwir" | "rwir|rwfunc" | "rwfunc" | "defrwir" => {
-            let (nr, nw) = if b.len() >= 4 {
+            let (nr, nw, dynamic) = if b.len() >= 5 {
                 (
                     u16::from_le_bytes([b[0], b[1]]),
                     u16::from_le_bytes([b[2], b[3]]),
+                    b[4] != 0,
                 )
             } else {
-                (0, 0)
+                (0, 0, false)
             };
-            let sig = String::from_utf8_lossy(&b[4.min(b.len())..]).into_owned();
+            let sig = String::from_utf8_lossy(&b[5.min(b.len())..]).into_owned();
+            let var = if dynamic { "..." } else { "" };
             if nr == 0 && nw == 0 {
                 sig
             } else {
-                format!("(nr={nr},nw={nw}) {sig}")
+                format!("(nr={nr},nw={nw}{var}) {sig}")
             }
         }
         _ => String::from_utf8_lossy(b).into_owned(),
@@ -214,34 +216,35 @@ pub fn is_char_kind(k: &str) -> bool {
 
 // ── kvlang 自有 kind：rwir / defrwir ────────────────────────────────
 //
-// body = [2B nr LE][2B nw LE][sig]，array_len=1。
-// rwir=槽值（引用串/opcode），defrwir=定义（签名）。
+// body = [2B nr LE][2B nw LE][1B dynamic][sig]，array_len=1。
+// rwir=槽值（引用串/opcode），defrwir=定义（签名）。dynamic=末读参变参（arity，非 langtype）。
 
-fn rwir_body(nr: i32, nw: i32, sig: &str) -> Vec<u8> {
-    let mut raw = Vec::with_capacity(4 + sig.len());
+fn rwir_body(nr: i32, nw: i32, dynamic: bool, sig: &str) -> Vec<u8> {
+    let mut raw = Vec::with_capacity(5 + sig.len());
     raw.extend_from_slice(&(nr as u16).to_le_bytes());
     raw.extend_from_slice(&(nw as u16).to_le_bytes());
+    raw.push(dynamic as u8);
     raw.extend_from_slice(sig.as_bytes());
     raw
 }
 
 pub fn new_rwir(nr: i32, nw: i32, sig: &str) -> Vec<u8> {
-    ffi::tlv_encode(KIND_RWIR, &rwir_body(nr, nw, sig), 1)
+    ffi::tlv_encode(KIND_RWIR, &rwir_body(nr, nw, false, sig), 1)
 }
 
-/// 调用目标（看起来像函数调用的 opcode）→ kindexpr `rwir|rwfunc` 并列。
+/// 调用目标（看起来像函数调用的 opcode）→ langtype `rwir|rwfunc` 并列。
 /// 静态无法判定是扩展 rwir 还是用户 rwfunc，交 runtime 查 /lib/<op> 的 XValue kind 分派。
 pub fn new_rwir_union(sig: &str) -> Vec<u8> {
-    ffi::tlv_encode(KIND_RWIR_OR_RWFUNC, &rwir_body(0, 0, sig), 1)
+    ffi::tlv_encode(KIND_RWIR_OR_RWFUNC, &rwir_body(0, 0, false, sig), 1)
 }
 
-pub fn new_defrwir(nr: i32, nw: i32, sig: &str) -> Vec<u8> {
-    ffi::tlv_encode(KIND_DEF_RWIR, &rwir_body(nr, nw, sig), 1)
+pub fn new_defrwir(nr: i32, nw: i32, dynamic: bool, sig: &str) -> Vec<u8> {
+    ffi::tlv_encode(KIND_DEF_RWIR, &rwir_body(nr, nw, dynamic, sig), 1)
 }
 
 // ── struct 原型（对齐 runtime kvlangBuiltinMemindex）─────────────────
 //
-// /lib/Name       kind=struct，body="name:kindexpr\n..."（字段声明类型，供实例化类型校验）
+// /lib/Name       kind=struct，body="name:langtype\n..."（字段声明类型，供实例化类型校验）
 // /lib/Name·      kind=index，body=[4B count LE][name\n...]（字段名唯一权威）
 
 pub fn new_struct(fields: &[(String, String)]) -> Vec<u8> {
@@ -261,12 +264,19 @@ pub fn new_memindex(names: &[String]) -> Vec<u8> {
 
 // ── kvlang 自有 kind：rwfunc ────────────────────────────────────────
 //
-// body = [2B nr LE][2B nw LE][param_types 以 \n 连接]，array_len=num_insts。
+// body = [2B nr LE][2B nw LE][1B dynamic][param_types 以 \n 连接]，array_len=num_insts。
 
-pub fn new_rwfunc(num_insts: i32, nr: i32, nw: i32, param_types: &[String]) -> Vec<u8> {
-    let mut raw = Vec::with_capacity(4 + param_types.iter().map(|s| s.len()).sum::<usize>());
+pub fn new_rwfunc(
+    num_insts: i32,
+    nr: i32,
+    nw: i32,
+    dynamic: bool,
+    param_types: &[String],
+) -> Vec<u8> {
+    let mut raw = Vec::with_capacity(5 + param_types.iter().map(|s| s.len()).sum::<usize>());
     raw.extend_from_slice(&(nr as u16).to_le_bytes());
     raw.extend_from_slice(&(nw as u16).to_le_bytes());
+    raw.push(dynamic as u8);
     raw.extend_from_slice(param_types.join("\n").as_bytes());
     ffi::tlv_encode(KIND_RWFUNC, &raw, num_insts)
 }
@@ -287,10 +297,10 @@ pub fn rwfunc_num_writes(body: &[u8]) -> i32 {
 }
 
 pub fn rwfunc_param_types(body: &[u8]) -> Vec<String> {
-    if body.len() <= 4 {
+    if body.len() <= 5 {
         return Vec::new();
     }
-    String::from_utf8_lossy(&body[4..])
+    String::from_utf8_lossy(&body[5..])
         .split('\n')
         .map(|s| s.to_string())
         .collect()

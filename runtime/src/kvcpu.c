@@ -45,11 +45,12 @@ typedef struct opmeta_ent {
     int notinmyrwircaps;   /* 1 = 不在本 runtime myrwircaps、须经 def rwir 路由；0 = 用户 rwfunc */
     char *def_sig;         /* notinmyrwircaps 时的读参 langtype 签名（owned，可 NULL） */
     int def_nr;
+    int def_dyn;           /* 末读参变参（主槽 body 的 dynamic 字节） */
     struct opmeta_ent *next;
 } opmeta_ent_t;
 static opmeta_ent_t *g_opmeta_cache[RWIR_CACHE_BUCKETS];
 
-static char *load_def_reads(kvlangKv_t *kv, const char *key, int *out_nr);
+static char *load_def_reads(kvlangKv_t *kv, const char *key, int *out_nr, int *out_dyn);
 
 static opmeta_ent_t *opmeta_get(kvlangKv_t *kv, const char *opcode) {
     size_t b = rwir_hash(opcode, 0);
@@ -60,9 +61,10 @@ static opmeta_ent_t *opmeta_get(kvlangKv_t *kv, const char *opcode) {
     e->notinmyrwircaps = notinmyrwircaps(kv, opcode) ? 1 : 0;
     e->def_sig = NULL;
     e->def_nr = 0;
+    e->def_dyn = 0;
     if (e->notinmyrwircaps) {
         char *rk = kvlangKeytreeRwir(opcode);
-        e->def_sig = load_def_reads(kv, rk, &e->def_nr);
+        e->def_sig = load_def_reads(kv, rk, &e->def_nr, &e->def_dyn);
         free(rk);
     }
     e->next = g_opmeta_cache[b];
@@ -129,11 +131,11 @@ static bool is_literal(const char *s) {
 
 /* 派发期读参类型校验（runtime篇-07 第八节）：把每个实参的 kind 逐一匹配
  * rwir/rwfunc 定义的读参 kindexp。def_sig 为读参 kindexp 在前的 \n 分隔列表，
- * def_nr 为定义读参数。空 kindexp / any 跳过；末读参 "..." 变参吸收其后全部实参。
+ * def_nr 为定义读参数，dynamic=1 表末读参变参吸收其后全部实参。空 kindexp / any 跳过。
  * XValue 头只携带 array_len 不含多维 shape，故仅校验 kind 层。
  * 不匹配 → 置 TypeError，返回 -1；通过返回 0。 */
 static int check_read_types(kvlangKv_t *kv, const char *vtid, const char *pc,
-                            const char *opcode, const char *def_sig, int def_nr,
+                            const char *opcode, const char *def_sig, int def_nr, int dynamic,
                             kvlangParam_t *args, int nargs) {
     if (def_nr <= 0 || !def_sig || !*def_sig) return 0;
     char *dup = strdup(def_sig);
@@ -145,7 +147,7 @@ static int check_read_types(kvlangKv_t *kv, const char *vtid, const char *pc,
         if (!nl) break;
         *nl = 0; s = nl + 1;
     }
-    bool var_last = rn > 0 && kvlangLangtypeVariadic(reads[rn - 1]);
+    bool var_last = rn > 0 && dynamic;
     int min_args = var_last ? rn - 1 : rn;
     char *fr = kvlangKeytreeFrameRoot(pc);
     int rc = 0;
@@ -186,18 +188,20 @@ static int check_read_types(kvlangKv_t *kv, const char *vtid, const char *pc,
 
 /* 读取 rwir/rwfunc 定义体的 kindexp-list（nr/nw 前缀后的 \n 分隔串）。
  * 返回 malloc 串（调用方 free）并置 *out_nr；无定义返回 NULL。 */
-static char *load_def_reads(kvlangKv_t *kv, const char *key, int *out_nr) {
+static char *load_def_reads(kvlangKv_t *kv, const char *key, int *out_nr, int *out_dyn) {
     *out_nr = 0;
+    *out_dyn = 0;
     kvlangXvalue_t v; kvlangXvalueZero(&v);
     kvlangKvGetOne(kv, key, &v);
     if (kvlangXvalueNone(&v)) { kvlangXvalueFree(&v); return NULL; }
     kvspaceHead_t h; kvlangXvalueHead(&v, &h);
     int32_t bl; const uint8_t *b = kvlangXvalueBody(&v, &h, &bl);
-    if (bl < 4) { kvlangXvalueFree(&v); return NULL; }
+    if (bl < 5) { kvlangXvalueFree(&v); return NULL; }
     *out_nr = b[0] | (b[1] << 8);
-    size_t sl = (size_t)(bl - 4);
+    *out_dyn = b[4];
+    size_t sl = (size_t)(bl - 5);
     char *sig = malloc(sl + 1);
-    memcpy(sig, b + 4, sl); sig[sl] = 0;
+    memcpy(sig, b + 5, sl); sig[sl] = 0;
     kvlangXvalueFree(&v);
     return sig;
 }
@@ -366,12 +370,13 @@ static char *handle_call(kvlangKv_t *kv, const char *pc, kvlangRwirInst_t *inst)
     const uint8_t *sbody = sig.data + h.body_offset;
     int nr = sbody[0] | (sbody[1] << 8);
     int nw = sbody[2] | (sbody[3] << 8);
+    int dyn = h.body_len >= 5 ? sbody[4] : 0;
 
     {   /* 读参类型校验：reads[0]=函数名，实参从 reads[1] 起 */
-        size_t sl = h.body_len >= 4 ? (size_t)(h.body_len - 4) : 0;
+        size_t sl = h.body_len >= 5 ? (size_t)(h.body_len - 5) : 0;
         char *ds = malloc(sl + 1);
-        memcpy(ds, sbody + 4, sl); ds[sl] = 0;
-        int crc = check_read_types(kv, vtid, pc, fn, ds, nr, inst->reads + 1, inst->nr - 1);
+        memcpy(ds, sbody + 5, sl); ds[sl] = 0;
+        int crc = check_read_types(kv, vtid, pc, fn, ds, nr, dyn, inst->reads + 1, inst->nr - 1);
         free(ds);
         if (crc != 0) goto fail;
     }
@@ -723,7 +728,7 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode, char *
         } else if (opmeta_get(kv, inst->opcode)->notinmyrwircaps) {
             opmeta_ent_t *m = opmeta_get(kv, inst->opcode);
             if (m->def_sig)
-                exec_err = check_read_types(kv, vtid, cur, inst->opcode, m->def_sig, m->def_nr, inst->reads, inst->nr);
+                exec_err = check_read_types(kv, vtid, cur, inst->opcode, m->def_sig, m->def_nr, m->def_dyn, inst->reads, inst->nr);
             if (exec_err == 0 && mode == KVMODE_RETURN) {
                 if (out_pc) *out_pc = strdup(cur);
                 free(fr); if (tmp_owned) kvlangRwirInstFree(&tmp);

@@ -536,7 +536,9 @@ impl Parser {
 
     fn check_param_types(&mut self, sig: &FuncSig) {
         for param in &sig.params {
-            if !crate::kindexpr::valid_kindexpr(&param.ty) {
+            // 末读参 `...` 是签名层变参标记，校验前剥离（变参落 dynamic 字节，见 [[函数]]）。
+            let ty = param.ty.strip_suffix("...").unwrap_or(&param.ty);
+            if !crate::langtype::valid_langtype(ty) {
                 self.errors.push(Diagnostic {
                     pos: Pos { line: 0, col: 0 },
                     message: format!(
@@ -555,7 +557,9 @@ impl Parser {
             }
         }
         for ret in &sig.returns {
-            if !crate::kindexpr::valid_kindexpr(&ret.ty) {
+            // 变参标记剥离后校验；变参写参的非法性由 check_variadic 专门报错。
+            let ty = ret.ty.strip_suffix("...").unwrap_or(&ret.ty);
+            if !crate::langtype::valid_langtype(ty) {
                 self.errors.push(Diagnostic {
                     pos: Pos { line: 0, col: 0 },
                     message: format!(
@@ -604,7 +608,7 @@ impl Parser {
     fn check_variadic(&mut self, sig: &FuncSig) {
         let last = sig.params.len().saturating_sub(1);
         for (i, p) in sig.params.iter().enumerate() {
-            if crate::kindexpr::is_variadic(&p.ty) && i != last {
+            if p.ty.ends_with("...") && i != last {
                 self.errors.push(Diagnostic {
                     pos: Pos { line: 0, col: 0 },
                     message: format!(
@@ -620,7 +624,7 @@ impl Parser {
             }
         }
         for r in &sig.returns {
-            if crate::kindexpr::is_variadic(&r.ty) {
+            if r.ty.ends_with("...") {
                 self.errors.push(Diagnostic {
                     pos: Pos { line: 0, col: 0 },
                     message: format!(
@@ -884,7 +888,7 @@ impl Parser {
 
     /// 校验散 key 字面量 `{...}` 的出现位置。`top_legal` 表示当前上下文允许顶层出现
     /// （赋值右值 / for-in 源）；无论如何，其元素内部都不得再嵌套散 key 字面量。
-    // 空容器字面量 `{}` 不含任何类型信息，必须由写目标显式标注 kindexpr：
+    // 空容器字面量 `{}` 不含任何类型信息，必须由写目标显式标注 langtype：
     // 禁 `d = {}`，须 `d:[]char/utf8·int64 = {}`（非空 `{a=…}` 可由成员推断，放行）。
     fn check_empty_container_typed(&mut self, inst: &Instruction) {
         let Some(e) = &inst.expr else { return };
@@ -911,12 +915,12 @@ impl Parser {
                 src_file: String::new(),
                 src_name: String::new(),
             });
-        } else if !super::kindexpr::valid_kindexpr(ty) {
+        } else if !super::langtype::valid_langtype(ty) {
             self.errors.push(Diagnostic {
                 pos: t.pos,
                 warn: false,
                 info: false,
-                message: format!("invalid kindexpr {ty:?} on empty container literal target"),
+                message: format!("invalid langtype {ty:?} on empty container literal target"),
                 source: String::new(),
                 src_file: String::new(),
                 src_name: String::new(),
@@ -1985,7 +1989,7 @@ impl Parser {
                 continue;
             }
             let name = inst.writes.get(j).cloned().unwrap_or_default();
-            if !is_array_kindexp(wt) && expr_is_array {
+            if !is_array_langtype(wt) && expr_is_array {
                 self.errors.push(Diagnostic {
                     pos: Pos { line: 0, col: 0 },
                     message: format!("write {name:?} declared scalar {wt} but assigned an array literal — use []{wt} instead"),
@@ -1995,7 +1999,7 @@ impl Parser {
                     src_file: String::new(),
                     src_name: String::new(),
                 });
-            } else if is_array_kindexp(wt) && expr_is_scalar_lit {
+            } else if is_array_langtype(wt) && expr_is_scalar_lit {
                 self.errors.push(Diagnostic {
                     pos: Pos { line: 0, col: 0 },
                     message: format!("write {name:?} declared {wt} but assigned a scalar literal"),
@@ -2055,7 +2059,7 @@ fn attach_comments(st: Stmt, comments: Vec<String>) -> Stmt {
     st
 }
 
-fn is_array_kindexp(t: &str) -> bool {
+fn is_array_langtype(t: &str) -> bool {
     t.contains('[')
 }
 

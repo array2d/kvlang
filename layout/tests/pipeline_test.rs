@@ -7,7 +7,7 @@ fn body(data: &[u8]) -> &[u8] {
 
 fn sig(data: &[u8]) -> String {
     let b = body(data);
-    String::from_utf8_lossy(&b[4.min(b.len())..]).into_owned()
+    String::from_utf8_lossy(&b[5.min(b.len())..]).into_owned()
 }
 
 fn fresh_kv() -> Kv {
@@ -30,7 +30,7 @@ fn compile_simple_func() {
     let b = body(&sig_val);
     assert_eq!(kvkind::rwfunc_num_reads(b), 2);
     assert_eq!(kvkind::rwfunc_num_writes(b), 1);
-    // kindexp 列表：读参在前(nr=2)、写参在后(nw=1)
+    // langtype 列表：读参在前(nr=2)、写参在后(nw=1)
     assert_eq!(
         kvkind::rwfunc_param_types(b),
         vec!["int64", "int64", "int64"]

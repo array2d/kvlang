@@ -177,7 +177,6 @@ static inline int kvlangLtElemSize(int id) {
 /* 签名 langtype（runtime篇-07）校验/匹配 */
 bool kvlangLangtypeValid(const char *expr);
 bool kvlangLangtypeMatch(const char *expr, const char *kind, int32_t ndim, const int32_t *dims);
-bool kvlangLangtypeVariadic(const char *expr);
 /* 标量 0copy 视图（取代 kvlangXvalueAsInt64 等按值转换）：decode head 一次，
  * 持 langtype id + 指向 body 首字节的借用指针，热路径按 id 直读 body。 */
 typedef struct {

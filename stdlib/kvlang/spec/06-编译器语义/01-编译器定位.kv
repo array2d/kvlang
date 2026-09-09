@@ -29,6 +29,19 @@ kvlang 的三阶段：**layout（o0）→ 编译器（优化）→ runtime（纯
 2. **复合算子分解/融合**——把由基础算子组合的复合 rwfunc（如 `softmax` = exp/sum/div）融合成单条自解释 rwir。
 3. **算子版本化**——融合产物作为版本递增并存，runtime 调用时优先高版本，见 [[算子版本化与高版本优先]]。
 
+## 融合的层级：编排器 vs kernel 编译器
+
+融合不是一步，分**两层**，职责必须切开：
+
+- **kvlang 编译器（编排器）**：读整棵 `/lib`，做后端绑定、复合算子分解、**识别可融合的相邻 rwir 组**、编排、并把结果**回写**——把融合产物注册为 `/lib/<opcode>` def rwir + myrwircaps、改写调用点 opcode、登记版本。回写是编排器的职责。
+- **kernel 编译器（叶子 codegen）**：把「一组 rwir + shape + dtype」codegen 成**单个硬件 kernel**（如 op-gpu / TileLang，GPU 上多个 `deepx·{rwir/rwfunc}` 融成一次 kernel 调用 = 一条 rwir）。它是**纯函数式服务**：吃 `op序列 + shape + dtype`，吐 `.so + meta`，**不回写 kvspace、不感知调度/分布式**，便于独立测试与对拍。
+
+对照 PyTorch：编排器 ≈ Inductor 的 lowering + Scheduler（识别融合组）；kernel 编译器 ≈ Inductor 的 codegen 后端（Triton / C++）。
+
+**融合匹配须是子序列/滑窗匹配**（在 rwir 线性序列上），不可退化为整段 opcode 元组精确匹配（否则每种顺序/shape 变体都要新增一条规则、不可扩展）。切分边界的硬启发式：**重算子（GEMM/conv 一类）计数**——一个融合组内重算子超阈值（典型 ≥2 GEMM）即拆成多 kernel。融合规则宜用「规则即数据」的表 + 四态标签（可融单核 / 缺模板 / 须拆多核 / 不可融）。
+
+**GPU 融合产物走 AOT→`.so`→`dlopen`**（调用约定 `fn(ptr..., stream)`），运行时侧零 Python 依赖——这条约束决定必须 AOT 而非进程内 JIT，须作为独立可验收里程碑，不可停在 JIT 原型。
+
 ## 非规范对照（PyTorch）
 
 本编译器的「编译期读 `/lib` 静态绑定后端」≈ TorchInductor 的 lowering（编译期查表把抽象 ATen op 静态映射到具体 kernel），**不是** `c10::Dispatcher` 的运行期按 device 位图派发。后端绑定表 ≈ Inductor lowering 表；复合算子分解 ≈ `torch/_decomp`；融合 ≈ Inductor Scheduler 合并算子成单 kernel；版本择优 ≈ autotune 缓存最优（但 kvlang 把「谁更优」显式化为可声明、可审计的静态版本号）。

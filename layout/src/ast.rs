@@ -109,13 +109,19 @@ impl FuncSig {
         self.params.iter().map(|p| p.name.clone()).collect()
     }
 
-    /// 参数 kindexp 列表（读参在前、写参在后，源文法逐字节），落盘于 rwir/rwfunc body。
-    pub fn kindexp_list(&self) -> Vec<String> {
+    /// 参数 langtype 列表（读参在前、写参在后），落盘于 rwir/rwfunc body。
+    /// 末读参尾缀 `...` 是签名层变参标记：此处剥离，langtype 串保持纯净（变参落 dynamic 字节）。
+    pub fn langtype_list(&self) -> Vec<String> {
         self.params
             .iter()
             .chain(self.returns.iter())
-            .map(|p| p.ty.clone())
+            .map(|p| p.ty.strip_suffix("...").unwrap_or(&p.ty).to_string())
             .collect()
+    }
+
+    /// 末读参是否变参（源尾缀 `...`）→ 落成主槽 body 的 dynamic 字节。
+    pub fn dynamic(&self) -> bool {
+        self.params.last().is_some_and(|p| p.ty.ends_with("..."))
     }
 
     pub fn num_reads(&self) -> i32 {
@@ -185,7 +191,7 @@ impl RwirDecl {
 #[derive(Clone)]
 pub struct Field {
     pub name: String,
-    pub ty: String,            // kindexpr（字段类型）
+    pub ty: String,            // langtype（字段类型）
     pub default: Option<Expr>, // 默认值字面量（None = 未给）
 }
 
