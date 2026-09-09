@@ -4,28 +4,36 @@ lib kvlang/spec/类型系统/种类与定宽类型 {
 
 kvlang 是**严格定宽类型语言**。
 每个变量、参数、返回值都有确定的种类（kind）；无无类型变量，运行时种类不隐式改变。
-类型信息随值自描述：每个 XValue 的类别由 head 三个正交字段表达（见 [[总体方案]] 与 [[XValueHead线格式]]）：
+类型信息随值自描述：每个 XValue 的类别由 head 三个正交字段表达（见 [[总体方案]] 与 [[XValueHead线格
+式]]）：
 - `ref`（存储位置）：0=inline、1=ptr（软链）、2=@ext（单值在扩展世界）；
 - `storetype`（物理布局，codec 视角，闭合集：NONE/ATOM/ARRAYND/index/extindex）；
 - `langtype`（语义类型，完整类型表达式串，变长，见 [[langtype签名类型表达式]]）。
 
 ## 锚例
 
-- 定宽构造与转换、float→int 截断、窄化回绕：`tutorial/01-basics/cast.kv`、`tutorial/01-basics/numtypes.kv`。
+- 定宽构造与转换、float→int 截断、窄化回绕：`tutorial/01-basics/cast.kv`、
+  `tutorial/01-basics/numtypes.kv`。
 - 算术保宽与混合提升：`tutorial/01-basics/type_narrowing.kv`。
 - 字符编码与索引：`tutorial/11-string/05-encodings.kv`、`06-convert.kv`、`02-char-ord.kv`。
 - 时间种类：`tutorial/01-basics/time.kv`、`tutorial/13-stdlib/time/`、`13-stdlib/duration/`。
-- 类型错误（bool 算术、跨种类比较、无符号取负、None、compact 变长串）：`tutorial/error_cases/type_error/`、`error_cases/none_type_error/`。
+- 类型错误（bool 算术、跨种类比较、无符号取负、None、compact 变长串）：
+  `tutorial/error_cases/type_error/`、`error_cases/none_type_error/`。
 
 ## 数值运算域
 
-1. **同种类算术产生同种类结果**，溢出按补码回绕：`int8(127)+int8(1)`=-128、`uint8(255)+uint8(1)`=0、`int32(100)×int32(100)`=10000（kind 保持 `int32`）。float32 运算不升 float64：`float32(16777216)+float32(1)`=16777216.0。
-2. **混合宽度整数向更宽种类提升**：`int8(100)×int16(2)`=200（结果 `int16`）；`int8(7)%int16(3)`=1（结果 `int16`）。
-3. **任一侧浮点则提升为浮点**：`int8(120)÷float32(10)`=12.0（结果 `float32`）；两整数 `÷` 为整除（`int8(120)÷int8(10)`=12）。
+1. **同种类算术产生同种类结果**，溢出按补码回绕：`int8(127)+int8(1)`=-128、`uint8(255)+uint8(1)`=0、
+   `int32(100)×int32(100)`=10000（kind 保持 `int32`）。float32 运算不升 float64：
+   `float32(16777216)+float32(1)`=16777216.0。
+2. **混合宽度整数向更宽种类提升**：`int8(100)×int16(2)`=200（结果 `int16`）；`int8(7)%int16(3)`=1
+   （结果 `int16`）。
+3. **任一侧浮点则提升为浮点**：`int8(120)÷float32(10)`=12.0（结果 `float32`）；两整数 `÷` 为整除
+   （`int8(120)÷int8(10)`=12）。
 4. **无符号取负** `-(uint8 值)` TypeError（对齐 C 警告 / Rust、Go 编译错误）。
 5. **bool 不参与算术**：`true + false` TypeError。
 6. **None 参与算术** TypeError；**None 参与分支条件** TypeError。
-7. **跨种类比较** TypeError（`int64(5) == "hello"` 报错）；数值种类之间可跨宽度比较（`3 == 3.0` 为 true）。
+7. **跨种类比较** TypeError（`int64(5) == "hello"` 报错）；数值种类之间可跨宽度比较（`3 == 3.0` 为
+   true）。
 
 ## bool 铁律
 
@@ -38,8 +46,10 @@ kvlang 是**严格定宽类型语言**。
 | 非空字符串 | TypeError——须显式写 `!= ""` |
 | None | TypeError |
 
-分支条件（`if`/`while`/`br`）的条件槽**必须**是 `bool`。强制显式比较使控制流走向可被静态判定，不依赖运行时种类。
+分支条件（`if`/`while`/`br`）的条件槽**必须**是 `bool`。强制显式比较使控制流走向可被静态判定，不依赖
+运行时种类。
 
-逻辑运算 `&&`/`||`/`!` 的操作数**必须**是 `bool`，非 bool 即 TypeError；`bool(x)` 构造器只接受 `true`/`false`，其余种类 TypeError（对整数须写 `!= 0`）。
+逻辑运算 `&&`/`||`/`!` 的操作数**必须**是 `bool`，非 bool 即 TypeError；`bool(x)` 构造器只接受
+`true`/`false`，其余种类 TypeError（对整数须写 `!= 0`）。
 "#### -> /lib/kvlang/spec/类型系统/种类与定宽类型
 }

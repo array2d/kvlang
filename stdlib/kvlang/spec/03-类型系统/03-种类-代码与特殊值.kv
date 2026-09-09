@@ -6,17 +6,28 @@ lib kvlang/spec/类型系统/种类_代码与特殊值 {
 
 下列 langtype 描述 KV 树中的代码与目录节点（见 [[指令布局格式]]）：
 
-- `rwir`：无 kvlang 实现体，指令名文本，storetype=ARRAYND 叶子；由 runtime 经 def rwir 路由直接兑现。
-- `def rwir`：**路由头**，仅存于 `/lib/<op>`，是 rwir 统一调度入口，storetype=index（定义节点），**无 kvlang 实现体**；**不叫"扩展算子"**，**不得**出现在用户书写的类型标注中。每个 runtime 只声明 **myrwircaps**（该 runtime 能兑现的 rwir 能力集）；rwir 若不在本 runtime myrwircaps 内须经 `/lib/<op>` 的 def rwir 路由给能兑现它的其它 runtime。
-- `rwfunc`：有 kvlang 实现体（`/` 目录下的指令槽序列），storetype=index（静态定义）或 extindex（vthread 运行栈），可被任意 main-runtime 直接解释执行。
+- `rwir`：无 kvlang 实现体，指令名文本，storetype=ARRAYND 叶子；由 runtime 经 def rwir 路由直接兑
+  现。
+- `def rwir`：**路由头**，仅存于 `/lib/<op>`，是 rwir 统一调度入口，storetype=index（定义节点），**
+  无 kvlang 实现体**；**不叫"扩展算子"**，**不得**出现在用户书写的类型标注中。每个 runtime 只声明
+  **myrwircaps**（该 runtime 能兑现的 rwir 能力集）；rwir 若不在本 runtime myrwircaps 内须经
+  `/lib/<op>` 的 def rwir 路由给能兑现它的其它 runtime。
+- `rwfunc`：有 kvlang 实现体（`/` 目录下的指令槽序列），storetype=index（静态定义）或 extindex
+  （vthread 运行栈），可被任意 main-runtime 直接解释执行。
 
-**故有 def rwir 而无 def rwfunc**：rwfunc 有 kvlang 实现体（一串 rwir），任意 main-runtime 逐条解释即可，无需路由头；rwir 无实现体，不在本 runtime myrwircaps 内时必须路由，故需 def rwir。
+**故有 def rwir 而无 def rwfunc**：rwfunc 有 kvlang 实现体（一串 rwir），任意 main-runtime 逐条解释
+即可，无需路由头；rwir 无实现体，不在本 runtime myrwircaps 内时必须路由，故需 def rwir。
 
 ### None 与 ptr 不是种类
 
-- **None** 不是种类：它是 `storetype=NONE` 的空结构体 XValue。任何有名变量都有地址、都有 XValue；未赋值即 None。None 参与算术、比较、分支条件、类型构造一律 TypeError（见下文与 [[执行模型]]）。
-- **ptr（软链接）** 不是种类：它是 head 的 `ref=1`（存储位置维），head 的 storetype/langtype 描述目标的完整形态，body 存目标 key 路径（见 [[容器]]）。
+- **None** 不是种类：它是 `storetype=NONE` 的空结构体 XValue。任何有名变量都有地址、都有 XValue；未
+  赋值即 None。None 参与算术、比较、分支条件、类型构造一律 TypeError（见下文与 [[执行模型]]）。
+- **ptr（软链接）** 不是种类：它是 head 的 `ref=1`（存储位置维），head 的 storetype/langtype 描述目
+  标的完整形态，body 存目标 key 路径（见 [[容器]]）。
 
-> ptr（`ref=1`）是 head 的 ref 字段（存储位置维）；kvlang **源码**类型标注最前仍可书写 `*`/`@` 前缀（如 `*int64`、`@[256,256]uint8`），表 ref，layout 解析时剥离该前缀落成 head `ref` 独立字节；**wire 层 langtype 串不含 `*`/`@` 前缀**，存储位置一律经 head `ref` 字节表达。extindex 是 storetype（物理布局维），与 ref=2 无关（见 [[总体方案]]）。
+> ptr（`ref=1`）是 head 的 ref 字段（存储位置维）；kvlang **源码**类型标注最前仍可书写 `*`/`@` 前缀
+  （如 `*int64`、`@[256,256]uint8`），表 ref，layout 解析时剥离该前缀落成 head `ref` 独立字节；
+  **wire 层 langtype 串不含 `*`/`@` 前缀**，存储位置一律经 head `ref` 字节表达。extindex 是
+  storetype（物理布局维），与 ref=2 无关（见 [[总体方案]]）。
 "#### -> /lib/kvlang/spec/类型系统/种类_代码与特殊值
 }

@@ -2,7 +2,8 @@
 lib kvlang/spec/类型系统/wire布局示例 {
 	r####"# wire 布局示例
 
-通用前缀 `U = [headlen:u16][ref][storetype][ro][vid:u32][body_len:u32]`，其后按 storetype 追加物理字段，再接 langtype 串（占至 headlen），末接 body：
+通用前缀 `U = [headlen:u16][ref][storetype][ro][vid:u32][body_len:u32]`，其后按 storetype 追加物理字
+段，再接 langtype 串（占至 headlen），末接 body：
 
 ```
 None        : U(store=NONE)[lang=""]                                  | 空
@@ -15,7 +16,7 @@ def struct  : U(store=index)[count/cap…][lang="def struct"]           | Point 
 /lib/       : U(store=index)[count/cap…][lang="lib"]                  | 成员为 /lib/<pkg> 子路径
 /lib/pkg·funca : U(store=index)[count/cap…][lang="rwfunc"]           | body=[nr][nw][dyn]；签名在 [0,x]，实现在 [s0>0,·]
 /lib/<op>   : U(store=index)[count/cap…][lang="def rwir"]             | 路由头；body=[nr][nw][dyn]；签名在 [0,x]，无实现行
-签名行 [0,x]: U(store=ARRAYND)[lang="def langtype"]                   | body=该参数 langtype 串
+签名行 [0,x]: U(store=ATOM)[lang="def langtype"]                      | body=该参数 langtype 串
 /vthread/1/ : U(store=extindex)[ext 元数据][lang="rwfunc"]            | 运行栈，/vthread/1/<坐标> 子成员
 ptr→int64   : U(ref=1,store=ATOM)[lang="int64"]                       | body="/x/y"
 ptr→rwfunc  : U(ref=1,store=index)[lang="rwfunc"]                     | body="/lib/pkg·funca"（调用链）

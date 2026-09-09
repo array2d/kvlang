@@ -14,7 +14,8 @@ layout 只有三级（**不是** p0–p7）：
 | `warn` | 可疑但可布局 | 否 |
 | `info` | 提示 | 否 |
 
-判定规则：只要存在任一 `error` 级诊断（既非 `warn` 亦非 `info`），layout **必须**拒绝装载，返回错误 `parse: error-level diagnostics — refusing to load`。`warn`/`info` 不阻止装载。
+判定规则：只要存在任一 `error` 级诊断（既非 `warn` 亦非 `info`），layout **必须**拒绝装载，返回错误
+`parse: error-level diagnostics — refusing to load`。`warn`/`info` 不阻止装载。
 
 诊断**不首错即止**：解析器累积全量诊断，一次报出，便于批量修复。
 
@@ -26,7 +27,8 @@ layout 只有三级（**不是** p0–p7）：
 {kind}: {src}:{line}:{col}: {message}
 ```
 
-`kind` 为 `error` / `warn` / `info`；`src` 为源文件名（内存源码为 `<inline>`）；无位置信息时省略文件段。诊断输出到 stderr；stdout 只放结果（`print` 输出、格式化文本、`ENTRY=`）。
+`kind` 为 `error` / `warn` / `info`；`src` 为源文件名（内存源码为 `<inline>`）；无位置信息时省略文件
+段。诊断输出到 stderr；stdout 只放结果（`print` 输出、格式化文本、`ENTRY=`）。
 
 ## LOG_LEVEL 可见性
 

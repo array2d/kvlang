@@ -15,21 +15,26 @@ lib kvlang/spec/layout语义/函数写槽与布局 {
 
 rwfunc 布进 `/lib/<pkg>·<name>/`：
 
-1. `[0,0]`——签名行锚点，langtype `rwfunc`，body `[nr:u16 LE][nw:u16 LE][dynamic:u8]`（读参数/写参数/是否变参）；各参数类型落在签名行 `[0,x]` 槽（`x<0` 读参、`x>0` 写参），每槽为 `def langtype` xvalue，body 即该参数 langtype 串（见 [[总体方案]]）。
+1. `[0,0]`——签名行锚点，langtype `rwfunc`，body `[nr:u16 LE][nw:u16 LE][dynamic:u8]`（读参数/写参数/
+   是否变参）；各参数类型落在签名行 `[0,x]` 槽（`x<0` 读参、`x>0` 写参），每槽为 `def langtype`
+   xvalue，body 即该参数 langtype 串（见 [[总体方案]]）。
 2. `/lib/<pkg>·<name>.src`——源码副本（kind `char`）。
-3. 每个命名参数——`funcDir/<param>` 存 Ptr（kind `char`），指向其槽坐标串（读参 `[0,-j]`、写参 `[0,+j]`）。
+3. 每个命名参数——`funcDir/<param>` 存 Ptr（kind `char`），指向其槽坐标串（读参 `[0,-j]`、写参
+   `[0,+j]`）。
 4. 指令体从 `[1,0]` 起（`[0,*]` 为签名行占用）。
 
 写参不需要值的调用以 `_` 接收，`_` 写入帧内 `_` 槽、不影响语义。
 
 ## rwfunc 声明位置
 
-rwfunc 应包裹在 `lib pkg { }` 内。裸顶层 rwfunc **可**声明，但产生提示（`info`）并登记到 `/lib/<name>`（无 pkg）：
+rwfunc 应包裹在 `lib pkg { }` 内。裸顶层 rwfunc **可**声明，但产生提示（`info`）并登记到
+`/lib/<name>`（无 pkg）：
 
 ```
 info: rwfunc outside lib block — registering under /lib/<name>; consider wrapping in 'lib pkgname { }'
 ```
 
-裸顶层 rwfunc 名与 native builtin 同名是错误（`function "…" shadows builtin`）——须包裹进 lib 或改名。
+裸顶层 rwfunc 名与 native builtin 同名是错误（`function "…" shadows builtin`）——须包裹进 lib 或改
+名。
 	"#### -> /lib/kvlang/spec/layout语义/函数写槽与布局
 }

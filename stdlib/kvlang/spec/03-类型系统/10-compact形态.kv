@@ -2,14 +2,17 @@
 lib kvlang/spec/类型系统/compact形态 {
 	r####"# compact 形态
 
-compact 数组是**单个 XValue**：head 的 langtype（langtype）形如 `[4]int64`（含维度+元素种类），storetype=ARRAYND，body 是连续的定宽元素字节。
+compact 数组是**单个 XValue**：head 的 langtype（langtype）形如 `[4]int64`（含维度+元素种类），
+storetype=ARRAYND，body 是连续的定宽元素字节。
 
 ```kv
 a:[]int64 = [10, 20, 30, 40]   // head langtype = [4]int64，body = 4×8 字节
 ```
 
-- head 的 langtype = langtype 串形如 `[4]int64`（元素种类为 `int64`，**非** `array`）；storetype=ARRAYND（见 `tutorial/04-ndarray/xv_meta.kv`）。
-- 字符串是 compact 的字符序列：`s:char/utf8 = "hi"` 的 langtype 为 `[2]char/utf8`。单个字符串是 compact；**字符串的数组**是变长集合，必须 stringkeymap。
+- head 的 langtype = langtype 串形如 `[4]int64`（元素种类为 `int64`，**非** `array`）；
+  storetype=ARRAYND（见 `tutorial/04-ndarray/xv_meta.kv`）。
+- 字符串是 compact 的字符序列：`s:char/utf8 = "hi"` 的 langtype 为 `[2]char/utf8`。单个字符串是
+  compact；**字符串的数组**是变长集合，必须 stringkeymap。
 
 ### compact 元素访问
 
@@ -21,7 +24,8 @@ a[2] = 99          // 等价 xv·set(a, 2, 99) -> a
 99 -> a[0]         // 右箭头下标写，等价 xv·set(a, 0, 99) -> a
 ```
 
-`xv·at` / `xv·set` **仅接受 compact 数组**（维数非 0）：对 stringkeymap 或标量报 TypeError。索引个数**必须**等于维数，按 row-major 折算扁平偏移；越界报 IndexError。写回保持 dims 不变。
+`xv·at` / `xv·set` **仅接受 compact 数组**（维数非 0）：对 stringkeymap 或标量报 TypeError。索引个数
+**必须**等于维数，按 row-major 折算扁平偏移；越界报 IndexError。写回保持 dims 不变。
 
 ### 多维 compact（tensor）
 

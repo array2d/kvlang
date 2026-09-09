@@ -2,37 +2,64 @@
 lib kvlang/spec/runtime语义/cruntime与后端abi {
 	r####"# C runtime 与后端 ABI
 
-本章界定 runtime 的实现契约：统一的 `kvspace*` C ABI、C runtime 与 Rust runtime 的一致性要求、durable 单句柄相干、后端装载。
+本章界定 runtime 的实现契约：统一的 `kvspace*` C ABI、C runtime 与 Rust runtime 的一致性要求、
+durable 单句柄相干、后端装载。
 
 ## 小 runtime 大扩展
 
-中央 runtime 只实现执行核心（取指-解码-执行、call/return/br/goto、native builtin 派发、`=` 拷贝、用户函数调用）；tensor / LLM / agent / print / fs / http 全部交给扩展运行时（见 [[runtime开发规范]]）。这条分工是**不可越界的职责线**：runtime-c 独占三件事，扩展一件都不许重做。
+中央 runtime 只实现执行核心（取指-解码-执行、call/return/br/goto、native builtin 派发、`=` 拷贝、用
+户函数调用）；tensor / LLM / agent / print / fs / http 全部交给扩展运行时（见 [[runtime开发规
+范]]）。这条分工是**不可越界的职责线**：runtime-c 独占三件事，扩展一件都不许重做。
 
 **runtime-c 拥有（唯一实现，扩展不得复刻）**：
 
-1. **执行核心**：取指-解码-执行大循环、call/return/br/goto、vthread 调度、native builtin 派发、`=` 拷贝语义。
-2. **值语义与编解码**：TLV / langtype 的**唯一编解码器**在 kvspace 正典 codec（`kvspaceTlvEncode` / `kvspaceDecodeHead` / `kvspaceNewPtr`/`NewChar`/`NewBool`/`NewInt64`/`NewFloat64`）；runtime-c 的 `xvalue.c` 只是其薄封装。langtype 串是类型的唯一真相，怎么拼、怎么解，只此一处。
-3. **指令解码与签名校验**：`rwir.c:RwirDecode`（稠密探查、遇空即停）、`/lib/<op>` 签名的读写码规范、`LangtypeValid`/`LangtypeMatch` 类型判定。
+1. **执行核心**：取指-解码-执行大循环、call/return/br/goto、vthread 调度、native builtin 派发、`=`
+   拷贝语义。
+2. **值语义与编解码**：TLV / langtype 的**唯一编解码器**在 kvspace 正典 codec（`kvspaceTlvEncode` /
+   `kvspaceDecodeHead` / `kvspaceNewPtr`/`NewChar`/`NewBool`/`NewInt64`/`NewFloat64`）；runtime-c 的
+   `xvalue.c` 只是其薄封装。langtype 串是类型的唯一真相，怎么拼、怎么解，只此一处。
+3. **指令解码与签名校验**：`rwir.c:RwirDecode`（稠密探查、遇空即停）、`/lib/<op>` 签名的读写码规范、
+   `LangtypeValid`/`LangtypeMatch` 类型判定。
 
-**扩展运行时套用核心，不复刻**：runtime-c 把上述三件能力经嵌入式 C ABI（下节 `kvlang_runtime.h` + `kvlang_myrwir.h`）对外开放。扩展运行时**嵌入**这套核心、复用其执行循环、native 派发与正典 codec，只**自行解释己方 opcode**——不得另起执行核心、不得另写编解码器、不得复刻 native 算子。据此：
+**扩展运行时套用核心，不复刻**：runtime-c 把上述三件能力经嵌入式 C ABI（下节 `kvlang_runtime.h` +
+`kvlang_myrwir.h`）对外开放。扩展运行时**嵌入**这套核心、复用其执行循环、native 派发与正典 codec，只
+**自行解释己方 opcode**——不得另起执行核心、不得另写编解码器、不得复刻 native 算子。据此：
 
-- **runtime-rs 是扩展运行时的参考实现**，不是第二套等价核心。它作为 myrwir 宿主，套用 runtime-c 核心，在自己的 **myrwircaps**（见 [[runtime开发规范]]）里登记 print/fs/http/networld/vthread 等「OS 工具箱」rwir。其对 head/langtype 的读写**必须**走正典 codec，不得自持一份编解码。
-- **未来的 deepx-gpu-compute（GPU 算子融合计算引擎）同架构**：同样嵌入 runtime-c 核心，只在其 **myrwircaps** 里登记 tensor 融合算子——算子融合发生在扩展侧（见 [[runtime开发规范]]），核心的解释语义不变。
+- **runtime-rs 是扩展运行时的参考实现**，不是第二套等价核心。它作为 myrwir 宿主，套用 runtime-c 核
+  心，在自己的 **myrwircaps**（见 [[runtime开发规范]]）里登记 print/fs/http/networld/vthread 等「OS
+  工具箱」rwir。其对 head/langtype 的读写**必须**走正典 codec，不得自持一份编解码。
+- **未来的 deepx-gpu-compute（GPU 算子融合计算引擎）同架构**：同样嵌入 runtime-c 核心，只在其
+  **myrwircaps** 里登记 tensor 融合算子——算子融合发生在扩展侧（见 [[runtime开发规范]]），核心的解释
+  语义不变。
 
 ## C runtime 结构
 
-`kvlang/runtime/` 是通用嵌入式执行器（纯 C + `extern "C"`），可嵌入 myrwir 项目（op-gpu、agent、livebyte）。两组对外 C ABI：
+`kvlang/runtime/` 是通用嵌入式执行器（纯 C + `extern "C"`），可嵌入 myrwir 项目（op-gpu、agent、
+livebyte）。两组对外 C ABI：
 
-- `kvlang_runtime.h`：核心执行器（`kvlangRuntimeConnect`/`Disconnect`/`Bootstrap`/`ExecuteVthread`/`KvspaceHandle` …）。
-- `kvlang_myrwir.h`：扩展 runtime 语义，**只暴露 kvspace 不提供的部分**。现有 9 个符号：`DefRwir`、`Handoff`、`NextPc`、`Params`、`ResolveRead`、`ResolveReadPath`、`ResolveWrite`、`LangtypeValid`、`LangtypeMatch`。KV 存取（connect/get/write/del/list/tlv）**不在此**——扩展宿主自连 kvspace ABI，把句柄（`void *`）传进带句柄的 myrwir 函数。
+- `kvlang_runtime.h`：核心执行器（`kvlangRuntimeConnect`/`Disconnect`/`Bootstrap`/`ExecuteVthread`/
+  `KvspaceHandle` …）。
+- `kvlang_myrwir.h`：扩展 runtime 语义，**只暴露 kvspace 不提供的部分**。现有 9 个符号：`DefRwir`、
+  `Handoff`、`NextPc`、`Params`、`ResolveRead`、`ResolveReadPath`、`ResolveWrite`、`LangtypeValid`、
+  `LangtypeMatch`。KV 存取（connect/get/write/del/list/tlv）**不在此**——扩展宿主自连 kvspace ABI，把
+  句柄（`void *`）传进带句柄的 myrwir 函数。
 
-其中 `LangtypeValid`/`LangtypeMatch` 与正典 codec 的 head 解码，正是 langtype **两型**对外的两条 ABI（两型 def/value 与 kindexpr 简写见 [[langtype签名类型表达式]]）：前者服务 **def langtype**（模式侧——校验签名 kindexpr、把一个值的 `(kind,ndim,dims)` 匹配进签名），后者服务 **value langtype**（具体侧——把 head 里一条 kindexpr 解析为 `(kind,ndim,dims,元素字节宽)`，事实源为 `kvspaceDecodeHead` 与 layout 的 `kvlangLangtypeParse`）。两者同吃一条 kindexpr 串、共用唯一文法与 codec，差别只在模式匹配 vs 具体解析。
+其中 `LangtypeValid`/`LangtypeMatch` 与正典 codec 的 head 解码，正是 langtype **两型**对外的两条 ABI
+（两型 def/value 与 kindexpr 简写见 [[langtype签名类型表达式]]）：前者服务 **def langtype**（模式
+侧——校验签名 kindexpr、把一个值的 `(kind,ndim,dims)` 匹配进签名），后者服务 **value langtype**（具体
+侧——把 head 里一条 kindexpr 解析为 `(kind,ndim,dims,元素字节宽)`，事实源为 `kvspaceDecodeHead` 与
+layout 的 `kvlangLangtypeParse`）。两者同吃一条 kindexpr 串、共用唯一文法与 codec，差别只在模式匹配
+vs 具体解析。
 
-内部模块：`xvalue.c`（TLV 编解码薄封装）、`langtype.c`、`kv.c`（kvspace ABI 封装）、`keytree.c`（路径构造）、`rwir.c`（PC 解析 + Decode）、`vthread.c`、`builtin*.c`（native 算子 + 静态注册表）、`kvcpu.c`（Execute 循环）、`runtime.c`（ABI 层）、`myrwir.c`（扩展 ABI，含 `notinmyrwircaps`）。myrwircaps 为**静态数组 + 线性查找**。
+内部模块：`xvalue.c`（TLV 编解码薄封装）、`langtype.c`、`kv.c`（kvspace ABI 封装）、`keytree.c`（路
+径构造）、`rwir.c`（PC 解析 + Decode）、`vthread.c`、`builtin*.c`（native 算子 + 静态注册表）、
+`kvcpu.c`（Execute 循环）、`runtime.c`（ABI 层）、`myrwir.c`（扩展 ABI，含 `notinmyrwircaps`）。
+myrwircaps 为**静态数组 + 线性查找**。
 
 ## 统一 `kvspace*` C ABI（去特化）
 
-layout 与 runtime **都不对 kvspace 做特化**：不 dlopen、不双后端分支、不解析 scheme。二者只走一套 `kvspace*` 兼容 C ABI（无下划线 camelCase）：
+layout 与 runtime **都不对 kvspace 做特化**：不 dlopen、不双后端分支、不解析 scheme。二者只走一套
+`kvspace*` 兼容 C ABI（无下划线 camelCase）：
 
 ```
 kvspaceConnect / Close / Clear
@@ -48,12 +75,22 @@ kvspaceNewPtr / NewChar / NewBool / NewInt64 / NewFloat64
 **零拷贝写读模型**（normative）：
 
 - **读**走 `kvspaceGet`——返回后端常驻内存的**借用偏移指针**，调用方只读、**不得** `free`。
-- **写**不经「先 encode 整条 TLV 再交后端」：向后端要一个可写 body 偏移指针再直接写字节——`kvspaceWriteInPlace`（key 已存在且 body 尺寸不变，原 box 就地改）与 `kvspaceWriteNewPlace`（新建 / 换 kind / 换尺寸，分配新 box 并写 head）两条原语，各自唯一、无中转 buffer。
-- **前缀枚举**不一次性返回整段名单缓冲：`kvspaceListLen` 只返子项计数，`kvspaceListAt(idx)` 借用回收缓冲逐项取名——遍历即「先 ListLen 定计数、再逐 idx ListAt」。
+- **写**不经「先 encode 整条 TLV 再交后端」：向后端要一个可写 body 偏移指针再直接写字节——
+  `kvspaceWriteInPlace`（key 已存在且 body 尺寸不变，原 box 就地改）与 `kvspaceWriteNewPlace`（新建
+  / 换 kind / 换尺寸，分配新 box 并写 head）两条原语，各自唯一、无中转 buffer。
+- **前缀枚举**不一次性返回整段名单缓冲：`kvspaceListLen` 只返子项计数，`kvspaceListAt(idx)` 借用回收
+  缓冲逐项取名——遍历即「先 ListLen 定计数、再逐 idx ListAt」。
 
-**native 读参：标量按值、整块借用**（normative，P2-d）——runtime-c native 算子（标量数值/逻辑/cast + `xv·*`/`array·*`/`string·*`）经 `ResolveReadValue` 取参，两条路径互斥：内联字面量（冻结于 code 槽）按值拷入（标量，纳秒级，无 KV 往返）；变量/KV 常驻值经 `GetMember` 一次取出后**移交所有权**（`*out = pv`，非二次拷贝，后端物化只发生在 `Get` 内部）。**整块字节零拷贝不在 native 侧另设机制**——它就是 [[notinmyrwircaps]] 的 `ResolveReadPath` + `kvspaceGet` body 指针那一条路径，由持有大 tensor 的扩展（numpy/op-gpu）承担；native 算子处理的是标量与中等 value，其拷贝相对每步 KV 往返可忽略（fib n=10：redis 1.5s / fs 320ms vs C 586ns，墙钟由 KV I/O 主导约六个数量级），故不为其增设借用管线。
+**native 读参：标量按值、整块借用**（normative，P2-d）——runtime-c native 算子（标量数值/逻辑/cast +
+`xv·*`/`array·*`/`string·*`）经 `ResolveReadValue` 取参，两条路径互斥：内联字面量（冻结于 code 槽）
+按值拷入（标量，纳秒级，无 KV 往返）；变量/KV 常驻值经 `GetMember` 一次取出后**移交所有权**
+（`*out = pv`，非二次拷贝，后端物化只发生在 `Get` 内部）。**整块字节零拷贝不在 native 侧另设机制**——
+它就是 [[notinmyrwircaps]] 的 `ResolveReadPath` + `kvspaceGet` body 指针那一条路径，由持有大 tensor
+的扩展（numpy/op-gpu）承担；native 算子处理的是标量与中等 value，其拷贝相对每步 KV 往返可忽略（fib
+n=10：redis 1.5s / fs 320ms vs C 586ns，墙钟由 KV I/O 主导约六个数量级），故不为其增设借用管线。
 
-**后端由链接决定**：构建期经环境变量选择链接哪个 kvspace 库（`kvspace-c` 或 `kvspace_durable`），两者导出同一 ABI；runtime 的句柄结构只保留 `void *h`，代码零后端分支。
+**后端由链接决定**：构建期经环境变量选择链接哪个 kvspace 库（`kvspace-c` 或 `kvspace_durable`），两
+者导出同一 ABI；runtime 的句柄结构只保留 `void *h`，代码零后端分支。
 ## runtime C（libkvlang_runtime）导出符号全集（nm -D 实测，203）
 
 ### handoff_（1）

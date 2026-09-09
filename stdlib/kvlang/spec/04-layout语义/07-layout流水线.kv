@@ -2,7 +2,11 @@
 lib kvlang/spec/layout语义/layout流水线 {
 	r####"# layout 流水线
 
-layout 是 kvlang 的静态语义阶段：**语法检查 + 布局 + 降级**。它把源码检查、降级，并把结果写进 kvspace 的 `/lib/` 子树，供 runtime 解释执行。layout 是 **o0 编译器**——做检查、布局与降级，**不做任何优化**：任何优化都会丢失高层语义，使扩展编译器无法按原语义在异构硬件上优化，故优化一律留给扩展编译器（见 [[范围与一致性]]）。实现是独立 Rust crate `kvlang/layout/`，产 `kvlanglayout` 可执行文件与 `libkvlanglayout` 动态库。
+layout 是 kvlang 的静态语义阶段：**语法检查 + 布局 + 降级**。它把源码检查、降级，并把结果写进
+kvspace 的 `/lib/` 子树，供 runtime 解释执行。layout 是 **o0 编译器**——做检查、布局与降级，**不做任
+何优化**：任何优化都会丢失高层语义，使扩展编译器无法按原语义在异构硬件上优化，故优化一律留给扩展编译
+器（见 [[范围与一致性]]）。实现是独立 Rust crate `kvlang/layout/`，产 `kvlanglayout` 可执行文件与
+`libkvlanglayout` 动态库。
 
 ## 流水线阶段
 
@@ -22,13 +26,17 @@ layout 是 kvlang 的静态语义阶段：**语法检查 + 布局 + 降级**。�
 
 ## compile 的处理顺序
 
-顶层 `compile` 依次处理：`struct` 声明 → `rwfunc`（各自 lower + write_func）→ **init**。裸顶层语句与各 `init` 体合并为 init 函数：空 pkg → `init`，`lib X { }` → `X·init`。无任何可执行代码报 `no executable code found`。compile 返回本次写入的 init 函数名列表（供消费方按 lib 声明驱动 init，非文件系统路径推导）。
+顶层 `compile` 依次处理：`struct` 声明 → `rwfunc`（各自 lower + write_func）→ **init**。裸顶层语句与
+各 `init` 体合并为 init 函数：空 pkg → `init`，`lib X { }` → `X·init`。无任何可执行代码报
+`no executable code found`。compile 返回本次写入的 init 函数名列表（供消费方按 lib 声明驱动 init，非
+文件系统路径推导）。
 
 ## write_func 步骤
 
 1. 推断类型并特化算子。
 2. `del_tree` 本函数目录（增量覆盖，仅本函数子树）。
-3. 写 `[0,0]` 签名锚点（langtype `rwfunc`，body `[nr][nw][dynamic]`）、签名行 `[0,x]` 各参数槽（`def langtype` xvalue，body=参数 langtype 串）、`.src` 源码副本、各命名参数 Ptr。
+3. 写 `[0,0]` 签名锚点（langtype `rwfunc`，body `[nr][nw][dynamic]`）、签名行 `[0,x]` 各参数槽
+   （`def langtype` xvalue，body=参数 langtype 串）、`.src` 源码副本、各命名参数 Ptr。
 4. 从 `[1,0]` 起写线性指令；goto/br 标签解析为整数 irseq。
 5. 若有标签，写 `‥labels/<label>` → irseq。
 	"#### -> /lib/kvlang/spec/layout语义/layout流水线

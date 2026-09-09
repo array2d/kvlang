@@ -13,6 +13,7 @@ lib kvlang/spec/类型系统/head字段 {
 | （storetype 物理字段） | 变 | 按 storetype 追加，见下表 |
 | `langtype` | 变长 | 类型表达式串，占至 `headlen`（长度 = `headlen` − 当前偏移，无需独立长度字段） |
 
-`langtype` 恒为 head 最后一段（body 之前）。旧 1 字节 kindcode 方案作废——语义类型回归完整类型表达式串，方能承载 `[dims]`、map 的 `key·value`、struct 原型路径、def 族定义节点等高级定义。
+`langtype` 恒为 head 最后一段（body 之前）。旧 1 字节 kindcode 方案作废——语义类型回归完整类型表达式
+串，方能承载 `[dims]`、map 的 `key·value`、struct 原型路径、def 族定义节点等高级定义。
 "#### -> /lib/kvlang/spec/类型系统/head字段
 }

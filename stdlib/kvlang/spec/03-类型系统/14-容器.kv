@@ -2,29 +2,40 @@
 lib kvlang/spec/类型系统/容器 {
 	r####"# 容器
 
-kvlang 的复合命名数据只有两种容器语义类型：**stringkeymap**（键-值映射）与 **struct**（异构命名成员）。kvlang **没有** `dict` 种类，也没有 `object` 或 `scope` 种类（见 [[总体方案]]）。容器物理落 storetype=index，成员经 `{key}·` memindex 兄弟槽枚举（与 lib/rwfunc 目录节点用 `/` 子路径不同）。此外 **ptr**（软链接）是 ref=1 的值形态，指向另一 key。
+kvlang 的复合命名数据只有两种容器语义类型：**stringkeymap**（键-值映射）与 **struct**（异构命名成
+员）。kvlang **没有** `dict` 种类，也没有 `object` 或 `scope` 种类（见 [[总体方案]]）。容器物理落
+storetype=index，成员经 `{key}·` memindex 兄弟槽枚举（与 lib/rwfunc 目录节点用 `/` 子路径不同）。此
+外 **ptr**（软链接）是 ref=1 的值形态，指向另一 key。
 
 ## 锚例
 
 - stringkeymap 字面量与访问：`tutorial/10-types/01-typed-map.kv`、`tutorial/05-dict/literal.kv`。
-- stringkeymap 与动态键、缺失返 None：`tutorial/10-types/02-string-map.kv`、`05-dict/kv_has_string_key.kv`。
+- stringkeymap 与动态键、缺失返 None：`tutorial/10-types/02-string-map.kv`、
+  `05-dict/kv_has_string_key.kv`。
 - 嵌套 map 与元组键签名：`tutorial/10-types/04-nested-type.kv`、`05-tuple-key.kv`。
 - struct 声明/实例化/默认值/多类型字段：`tutorial/12-struct/00-point.kv`、`01-fields.kv`。
 - 指针解引用、局部结构体、链表/树/图：`tutorial/12-struct/03-linked-list.kv`~`07-list-local.kv`。
 
 ## 容器结构
 
-容器在 kvspace 中分两部分落库，`·`（U+00B7 中点）是值容器唯一的 memindex 标记（注：`/lib/{pkg}·{func}` 中的 `·` 是包·函数命名分隔符，与 memindex 无关，详见 [[总体方案]]）：
+容器在 kvspace 中分两部分落库，`·`（U+00B7 中点）是值容器唯一的 memindex 标记（注：
+`/lib/{pkg}·{func}` 中的 `·` 是包·函数命名分隔符，与 memindex 无关，详见 [[总体方案]]）：
 
-- **容器值**：落在裸 base 键，storetype=index，body 空；langtype 为 map langtype（如 `[]char/utf8·int64`）或 struct 原型路径（如 `/lib/Point`）。
+- **容器值**：落在裸 base 键，storetype=index，body 空；langtype 为 map langtype（如
+  `[]char/utf8·int64`）或 struct 原型路径（如 `/lib/Point`）。
 - **成员**：`base·name` 是独立子 key，各自持成员值。
-- **memindex**：落在 `base·` 键（尾中点），storetype=index，其 body 是成员名索引矩阵，是成员枚举的权威来源。
+- **memindex**：落在 `base·` 键（尾中点），storetype=index，其 body 是成员名索引矩阵，是成员枚举的权
+  威来源。
 
-memindex 的线格式为 dims = `[len, cap, M]` 的矩阵：`len` = 有效成员数、`cap` = 预留行数（`cap ≥ len`，满则翻倍扩容）、`M` = 成员名 UTF-8 字节最大长向上 8 对齐后的**行宽**；body 为 `cap × M` 字节，前 `len` 行是有序成员名（NUL 补齐），其余行全 NUL。容量内增删成员 body 长恒定、就地覆写。`M` 是行宽（行 stride），`cap` 是可翻倍的容量。
+memindex 的线格式为 dims = `[len, cap, M]` 的矩阵：`len` = 有效成员数、`cap` = 预留行数
+（`cap ≥ len`，满则翻倍扩容）、`M` = 成员名 UTF-8 字节最大长向上 8 对齐后的**行宽**；body 为
+`cap × M` 字节，前 `len` 行是有序成员名（NUL 补齐），其余行全 NUL。容量内增删成员 body 长恒定、就地
+覆写。`M` 是行宽（行 stride），`cap` 是可翻倍的容量。
 
 ## stringkeymap
 
-**stringkeymap** 是一等 map 类型，langtype 为 `key·value`（见 [[langtype签名类型表达式]]）：`[]char/utf8·int64` 即 `map[string]int64`，value 可递归嵌套（`[]char/utf8·[]char/utf8·int64`）。
+**stringkeymap** 是一等 map 类型，langtype 为 `key·value`（见 [[langtype签名类型表达式]]）：
+`[]char/utf8·int64` 即 `map[string]int64`，value 可递归嵌套（`[]char/utf8·[]char/utf8·int64`）。
 
 ```kv
 m:[]char/utf8·int64 = {}   // 空 map 同样须带类型标注
@@ -35,6 +46,7 @@ kv·get(m, "a") -> x        // 动态键读；缺失返回 None
 
 ## 空容器字面量须带类型标注
 
-`{}` 空 stringkeymap 字面量**必须**在赋值目标处带类型标注（如 `x:[]char/utf8·int64 = {}`）；无标注时 layout 报错——空字面量本身无法推断 key/value 类型。
+`{}` 空 stringkeymap 字面量**必须**在赋值目标处带类型标注（如 `x:[]char/utf8·int64 = {}`）；无标注时
+layout 报错——空字面量本身无法推断 key/value 类型。
 "#### -> /lib/kvlang/spec/类型系统/容器
 }

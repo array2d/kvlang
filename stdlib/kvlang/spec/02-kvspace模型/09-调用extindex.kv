@@ -2,9 +2,13 @@
 lib kvlang/spec/kvspace模型/调用extindex {
 	r####"# 调用：extindex 复用指令树
 
-调用一个函数时，运行时**不**拷贝指令，而是为本次调用建帧子树，令帧根成为指向 `/lib/{pkg}·{name}/` 指令树的 extindex 叠加层，再把实参 / 结果地址写进帧根下的 `[0,±j]` 槽：
+调用一个函数时，运行时**不**拷贝指令，而是为本次调用建帧子树，令帧根成为指向 `/lib/{pkg}·{name}/` 指
+令树的 extindex 叠加层，再把实参 / 结果地址写进帧根下的 `[0,±j]` 槽：
 
-- `/lib` 下只有命名参数键（如 `x`、`R`），坐标键 `[0,-j]` / `[0,+j]` 不存在；故运行时向 `frameRoot/[0,±j]` 写入不与只读指令树冲突。
+- `/lib` 下既有命名参数键（`x` → `[0,-1]` 的 Ptr），也有签名行坐标键 `[0,-j]` / `[0,+j]`
+  （`def langtype` 静态类型定义，一参一槽，见 [[指令布局格式]] 签名行）。运行时向 `frameRoot/[0,±j]`
+  写实参地址 Ptr 时，帧本地键在 extindex 叠加层中**优先于继承键**——帧本地写**遮蔽**同坐标的静态签名
+  槽，故不与只读指令树冲突，实参内容零拷贝。
 - 所有帧共享 `/lib` 下同一份指令树，零拷贝；帧根下叠加各自的实参槽与局部变量。
 
 崩溃恢复由此自然成立：PC 是路径字符串、帧根落 KV、返回点落 KV——进程重启后可从 kvspace 续跑。
@@ -19,13 +23,17 @@ lib kvlang/spec/kvspace模型/调用extindex {
 3. 读该路径              → 值                 解引用
 ```
 
-第 1 跳的 `frameRoot/x` 由 `/lib` 指令树经 extindex 透出（layout 写入、只读），第 2 跳的 `frameRoot/[0,-1]` 由运行时在调用点写入。读参地址可指向调用方值以实现零拷贝重定向（见 [[系统变量]] 的 `‥rparam` / `‥wparam`）。
+第 1 跳的 `frameRoot/x` 由 `/lib` 指令树经 extindex 透出（layout 写入、只读），第 2 跳的
+`frameRoot/[0,-1]` 由运行时在调用点写入。读参地址可指向调用方值以实现零拷贝重定向（见 [[系统变量]]
+的 `‥rparam` / `‥wparam`）。
 
 ## init 与标签
 
 - lib 内的裸指令收集为隐式 `init` 函数（无 `init` 关键字），同样以上述布局落 `/lib/{pkg}·init/`。
-- 具名块的标签落 `/lib/{pkg}·{name}/‥labels/{label}` → 指令序号（`layout/src/code.rs`、`layout/src/keytree.rs`）。
+- 具名块的标签落 `/lib/{pkg}·{name}/‥labels/{label}` → 指令序号（`layout/src/code.rs`、
+  `layout/src/keytree.rs`）。
 
-签名类型表达式文法见 [[文法]]；帧的系统变量见 [[系统变量]]；坐标键与 langtype 的分隔符语义见 [[键系统与数组访问]]。
+签名类型表达式文法见 [[文法]]；帧的系统变量见 [[系统变量]]；坐标键与 langtype 的分隔符语义见 [[键系
+统与数组访问]]。
 	"#### -> /lib/kvlang/spec/kvspace模型/调用extindex
 }

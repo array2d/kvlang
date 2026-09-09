@@ -2,7 +2,8 @@
 lib kvlang/spec/附录/类型表达式文法 {
 	r##"# 类型表达式（签名参数/返回值类型，多态 + 高维数组）
 
-> 完整语义见 [[langtype签名类型表达式]]（类型系统卷）。铁律：无家族简写（`int`/`uint`/`float`/`num`/`char`）——位宽是开放集合，编码须写明确；多态靠显式 `|` 枚举。
+> 完整语义见 [[langtype签名类型表达式]]（类型系统卷）。铁律：无家族简写（`int`/`uint`/`float`/`num`/
+  `char`）——位宽是开放集合，编码须写明确；多态靠显式 `|` 枚举。
 
 ```
 type_expr   = [ ref_prefix ] atom { "|" atom }   (* ref 前缀可选；layout 剥离前缀落 head ref 字节，wire langtype 不含前缀；见 [[总体方案]] *)

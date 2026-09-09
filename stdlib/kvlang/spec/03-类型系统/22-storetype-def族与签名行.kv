@@ -4,18 +4,27 @@ lib kvlang/spec/类型系统/storetype_def族与签名行 {
 
 ### 签名不入 langtype 串，而入签名行 `[0,x]` 槽
 
-> **铁律**：任何 rwir/rwfunc 值的 body = `[nr][nw][dynamic]` 计数,仅此而已;每个具体参数各自独占一个 `[s,x]` 参数轴坐标 key。
+> **铁律**：任何 rwir/rwfunc 值的 body = `[nr][nw][dynamic]` 计数,仅此而已;每个具体参数各自独占一个
+  `[s,x]` 参数轴坐标 key。
 
 rwfunc / def rwir 的**签名（各参数类型）不写进 langtype 串**，也不塞进主槽 body。分两处存：
 
-1. **主槽计数头**：目录节点主槽 `{fn}`（如 `/lib/pkg·funca`）的 body 只记 `[nr:u16 LE][nw:u16 LE][dynamic:u8]`——读参个数 `nr`、写参个数 `nw`、是否变参 `dynamic`（末位读参 `...`）。**不含任何参数 langtype 串**。
-2. **签名行 `[0,x]` 各槽**：每个参数的真实类型定义落在该目录的**签名行**坐标 `[0,x]`——`x<0` 为读参、`x>0` 为写参、`[0,0]` 为 opcode/签名行锚点（见 [[指令布局格式]] 的二元坐标 `[s0,s1]`：`s0=0` 即签名行）。每个 `[0,x]` 槽是一个 **`def langtype`** 类型的 xvalue，其 body 存该参数的完整 langtype 串（一个参数一槽），**纯净、不含参数变参 `...`**——变参是 arity,只落主槽 `dynamic` 字节（见 [[函数]]）。
+1. **主槽计数头**：目录节点主槽 `{fn}`（如 `/lib/pkg·funca`）的 body 只记
+   `[nr:u16 LE][nw:u16 LE][dynamic:u8]`——读参个数 `nr`、写参个数 `nw`、是否变参 `dynamic`（末位读参
+   `...`）。**不含任何参数 langtype 串**。
+2. **签名行 `[0,x]` 各槽**：每个参数的真实类型定义落在该目录的**签名行**坐标 `[0,x]`——`x<0` 为读参、
+   `x>0` 为写参、`[0,0]` 为 opcode/签名行锚点（见 [[指令布局格式]] 的二元坐标 `[s0,s1]`：`s0=0` 即签
+   名行）。每个 `[0,x]` 槽是一个 **`def langtype`** 类型的 xvalue，其 body 存该参数的完整 langtype
+   串（一个参数一槽），**纯净、不含参数变参 `...`**——变参是 arity,只落主槽 `dynamic` 字节（见 [[函
+   数]]）。
 
-于是 rwfunc/def rwir 主槽的 langtype 就是裸种类名 `rwfunc` / `def rwir` 本身，**不再是「签名 langtype 串」**。签名分散在 `[0,x]` 签名行槽里，实现指令行（若有）在 `[s0>0,·]`。
+于是 rwfunc/def rwir 主槽的 langtype 就是裸种类名 `rwfunc` / `def rwir` 本身，**不再是「签名
+langtype 串」**。签名分散在 `[0,x]` 签名行槽里，实现指令行（若有）在 `[s0>0,·]`。
 
 ### def 族：定义节点的 langtype（带空格书写）
 
-「某类型的定义节点」自身的 langtype 用 **`def <base>`** 家族名，**中间保留空格**（读作「`base` 的定义」）：
+「某类型的定义节点」自身的 langtype 用 **`def <base>`** 家族名，**中间保留空格**（读作「`base` 的定
+义」）：
 
 | langtype | 落点 | 表示 |
 |----------|------|------|

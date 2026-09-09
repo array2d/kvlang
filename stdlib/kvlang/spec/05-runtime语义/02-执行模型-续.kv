@@ -18,30 +18,49 @@ runtime **不得**另存独立的调用栈结构：嵌套帧路径本身即调�
 
 ## vthread
 
-vthread 是 kvlang 的执行线程，句柄为整数 `vid`，根在 `/vthread/<vid>/`。进程与 vid 为 1:1（当前驱动模型）。以下为 native 的 `vthread·*` 指令语义：
+vthread 是 kvlang 的执行线程，句柄为整数 `vid`，根在 `/vthread/<vid>/`。进程与 vid 为 1:1（当前驱动
+模型）。以下为 native 的 `vthread·*` 指令语义：
 
-- `vthread·create(funckey) -> vid`：分配新 vid、建栈索引、bootstrap 被调函数首指令、置 `init`，返回 vid 句柄。**只创建不运行**。
-- `vthread·run(vid)`：以 vid 为参数，从其持久化 `‥pc` 驱动到结束（阻塞）。这是 create 之外的独立子 vid 的运行入口，也是崩溃恢复入口（`kvlang run <vid>`）。子 vid 命中须经 def rwir 路由的 rwir 时经 `out_pc` 冒泡给上层驱动派发、推进子 pc 后重入续驱。
-- `vthread·call(funckey)`：在**当前 vthread（同 vid）**内按运行时 funckey 造一次动态 `call`，被调函数跑到结束再回本指令后继。**不新开 vid、不挂起**——被调里的 rwir 由当前驱动就地派发。
+- `vthread·create(funckey) -> vid`：分配新 vid、建栈索引、bootstrap 被调函数首指令、置 `init`，返回
+  vid 句柄。**只创建不运行**。
+- `vthread·run(vid)`：以 vid 为参数，从其持久化 `‥pc` 驱动到结束（阻塞）。这是 create 之外的独立子
+  vid 的运行入口，也是崩溃恢复入口（`kvlang run <vid>`）。子 vid 命中须经 def rwir 路由的 rwir 时经
+  `out_pc` 冒泡给上层驱动派发、推进子 pc 后重入续驱。
+- `vthread·call(funckey)`：在**当前 vthread（同 vid）**内按运行时 funckey 造一次动态 `call`，被调函
+  数跑到结束再回本指令后继。**不新开 vid、不挂起**——被调里的 rwir 由当前驱动就地派发。
 - `vthread·sleep(dur)`：让当前 vthread 阻塞 `dur`（duration，纳秒），到点后推进 PC。
-- `vthread·setstatus(status)`：置本 vthread 状态并把 PC 前进到下一指令。恢复执行即把 `‥status` 改回 `running` 再驱动该 vid。
+- `vthread·setstatus(status)`：置本 vthread 状态并把 PC 前进到下一指令。恢复执行即把 `‥status` 改回
+  `running` 再驱动该 vid。
 
-`vthread·create` 与 `vthread·run` 是**两步分离**（对应 `kvlang create <fn>` / `kvlang run <vid>` 两个子命令）；`vthread·call` 是同 vid 内的动态调用。三者**不得**混同。锚例：`tutorial/15-vthread/`（`01-call.kv`、`03-create-run.kv`、`04-sleep.kv`、`02-crashrecover.kv`）。
+`vthread·create` 与 `vthread·run` 是**两步分离**（对应 `kvlang create <fn>` / `kvlang run <vid>` 两
+个子命令）；`vthread·call` 是同 vid 内的动态调用。三者**不得**混同。锚例：`tutorial/15-vthread/`
+（`01-call.kv`、`03-create-run.kv`、`04-sleep.kv`、`02-crashrecover.kv`）。
 
 ## networld 与外部世界
 
-runtime 核心不含 I/O；与外部世界（进程、文件系统、网络）的交互一律经 `networld/*` rwir（见 [[runtime开发规范]]）。`/networld/<host>` 是本机在该命名空间下的身份（`host` 取裸 hostname）。外部产物（如子进程 stdout/stderr）经**扩展世界句柄（ref=2，@ext）**登记：写槽 ref=2、langtype 为目标 langtype 串（不带 `@` 前缀）、body 为逻辑定位串（如 `/networld/<host>/proc/<pid>/stdout`），读取时按 body 前缀路由兑现真实字节。锚例：`tutorial/14-networld/`。
+runtime 核心不含 I/O；与外部世界（进程、文件系统、网络）的交互一律经 `networld/*` rwir（见 [[runtime
+开发规范]]）。`/networld/<host>` 是本机在该命名空间下的身份（`host` 取裸 hostname）。外部产物（如子
+进程 stdout/stderr）经**扩展世界句柄（ref=2，@ext）**登记：写槽 ref=2、langtype 为目标 langtype 串
+（不带 `@` 前缀）、body 为逻辑定位串（如 `/networld/<host>/proc/<pid>/stdout`），读取时按 body 前缀
+路由兑现真实字节。锚例：`tutorial/14-networld/`。
 
-> **实现现状**（规范外提示）：当前 Rust runtime 以 `bootstrap → run_vid` 循环主导驱动 vthread；尚未实现"启动自注册 `/networld/<ip>/proc/<pid>` + watch vthread strkeymap 驱动"的分布式派发。该分布式派发为规划方向，未落地部分不属本卷 normative 内容。
+> **实现现状**（规范外提示）：当前 Rust runtime 以 `bootstrap → run_vid` 循环主导驱动 vthread；尚未
+  实现"启动自注册 `/networld/<ip>/proc/<pid>` + watch vthread strkeymap 驱动"的分布式派发。该分布式
+  派发为规划方向，未落地部分不属本卷 normative 内容。
 
 ## 调试与可观测性
 
-kvlang **没有独立调试器进程，也没有 `--debug` 开关**。调试模型是：**让 vthread 停在某处、把整个执行状态留在 kvspace，再用 kvspace 命令静态读取**。
+kvlang **没有独立调试器进程，也没有 `--debug` 开关**。调试模型是：**让 vthread 停在某处、把整个执行
+状态留在 kvspace，再用 kvspace 命令静态读取**。
 
-- **暂停**：`debugger()` 是 native builtin，等价 `vthread·setstatus("paused")`——置 `‥status=paused` 并**先把 PC 前进到下一条指令**，解释循环因状态门停机，进程正常退出。恢复后从下一条继续，**不得**重复执行断点处指令。
-- **观察 PC 与状态**：`‥` 前缀字段用 `kvspace get` 按 key 直读（不进目录索引）：`/vthread/<vid>/‥status`、`/vthread/<vid>/‥pc`。
+- **暂停**：`debugger()` 是 native builtin，等价 `vthread·setstatus("paused")`——置 `‥status=paused`
+  并**先把 PC 前进到下一条指令**，解释循环因状态门停机，进程正常退出。恢复后从下一条继续，**不得**重
+  复执行断点处指令。
+- **观察 PC 与状态**：`‥` 前缀字段用 `kvspace get` 按 key 直读（不进目录索引）：
+  `/vthread/<vid>/‥status`、`/vthread/<vid>/‥pc`。
 - **PC 即调用栈**：嵌套帧路径 `/vthread/<vid>/[1,0]/[1,0]/[2,0]` 逐段即调用链，无需另存栈结构。
-- **观察源码**：`kvlang dump` 把 `/lib` 子树逆向重建为可运行 kvlang，并以 `#` 注释标出每条指令的 `[s0,s1]` 槽位，是核对 layout 结果与坐标 bug 的透视镜。
+- **观察源码**：`kvlang dump` 把 `/lib` 子树逆向重建为可运行 kvlang，并以 `#` 注释标出每条指令的
+  `[s0,s1]` 槽位，是核对 layout 结果与坐标 bug 的透视镜。
 - **恢复**：`kvspace set /vthread/<vid>/‥status running` 后 `kvlang run <vid>` 从持久化 `‥pc` 续跑。
 
 锚例：`tutorial/09-debugger/`（`breakpoint.kv`、`fib.kv`、`sum_to.kv`、`chain_array.kv`）。
