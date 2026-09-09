@@ -646,14 +646,30 @@ type op struct {
 
 var myrwircaps []op
 
+func cstrArr(n int) (**C.char, []*C.char) {
+	if n == 0 {
+		return nil, nil
+	}
+	arr := make([]*C.char, n)
+	for i := range arr {
+		arr[i] = cstr("any")
+	}
+	return (**C.char)(unsafe.Pointer(&arr[0])), arr
+}
+
 func register(c unsafe.Pointer) {
 	for _, o := range myrwircaps {
-		sig := strings.TrimSuffix(strings.Repeat("any\n", o.nr+o.nw), "\n")
 		co := cstr(o.name)
-		cs := cstr(sig)
-		C.kvlangRwirextRegister(c, co, C.int32_t(o.nr), C.int32_t(o.nw), cs)
+		rp, ra := cstrArr(o.nr)
+		wp, wa := cstrArr(o.nw)
+		C.kvlangDefRwir(c, co, rp, C.int32_t(o.nr), wp, C.int32_t(o.nw))
 		C.free(unsafe.Pointer(co))
-		C.free(unsafe.Pointer(cs))
+		for _, p := range ra {
+			C.free(unsafe.Pointer(p))
+		}
+		for _, p := range wa {
+			C.free(unsafe.Pointer(p))
+		}
 	}
 }
 
