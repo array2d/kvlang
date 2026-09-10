@@ -1,6 +1,6 @@
 // list-local: 局部 struct 节点变量 + & 建链，遍历求和
 // 语义: 节点是帧内 struct 局部变量，next 存下一节点地址（&node ≡ kv·abs(node)）；
-//       None=尾；尾节点先建，&node 恒指向已存在节点。遍历累加各节点 val。
+//       None=尾；sum_list 接收 *Node 头指针，遍历累加各节点 val。
 // 链表: 10→20→30
 // 期望输出:
 //   60
@@ -9,16 +9,20 @@ struct Node {
 	next:*Node=None
 }
 
-rwfunc test() -> () {
-	n3:Node = {val=30}
-	n2:Node = {val=20 next=&n3}
-	n1:Node = {val=10 next=&n2}
-	cur = &n1
-	sum = 0
+rwfunc sum_list(head:*Node) -> (sum:int64) {
+	head -> cur
+	0 -> sum
 	while (cur != None) {
 		cur·val -> v
 		sum + v -> sum
 		cur·next -> cur
 	}
-	println(sum)
+}
+
+rwfunc test() -> () {
+	n3:Node = {val=30}
+	n2:Node = {val=20 next=&n3}
+	n1:Node = {val=10 next=&n2}
+	sum_list(&n1) -> s
+	println(s)
 }

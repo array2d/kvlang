@@ -1,11 +1,16 @@
 // time·since：从指定时刻到现在的时长（确定 >= 0）
 // 期望输出:
 //   since >= 0: true
-rwfunc test() -> () {
-	time·now() -> t0
+// 自 t0 至今经过的时长非负
+rwfunc since_nonneg(t0:time) -> (ok:bool) {
 	time·since(t0) -> dur
 	time/duration·as_nanos(dur) -> ns
 	ns >= 0 -> ok
+}
+
+rwfunc test() -> () {
+	time·now() -> t0
+	since_nonneg(t0) -> ok
 	print("since >= 0: ")
 	println(ok)
 }

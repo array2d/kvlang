@@ -63,10 +63,47 @@ int kvlangBuiltinKvGet(kvlangFrame_t *f) {
     free(key); kvlangBuiltinFreeInputs(in, n); return rc;
 }
 
+/* 成员写的 base 若是未初始化的局部容器变量（`m·k = v` 而 m 尚无值），先落空 stringkeymap
+ * 值。建容器是**语言层语义**（layout 已把 m 推断为 stringkeymap），故在 runtime 做——
+ * 存储层只认字节，`/lib/pkg·fn` 那类 `·` 它无从分辨，交给存储层猜必然要靠特判兜底。
+ * base 在 `/lib` 下时不介入——`/lib` 是 layout/runtime 的结构域（见 [[结构域]]），那里的
+ * `·` 是包·函数命名分隔符而非成员写，由 layout 全权写入。 */
+static void ensure_local_container(kvlangFrame_t *f, const char *name) {
+    char *fr = kvlangKeytreeFrameRoot(f->pc);
+    kvlangBuiltinEnsureMemberBase(f->kv, fr, name);
+    free(fr);
+}
+
+
+/* 成员写的 base（容器名，裸名或绝对路径）尚无值 → 先落空 stringkeymap 值。
+ * 建容器是**语言层语义**，故在 runtime 做——存储层只认字节，`/lib/pkg·fn` 那类 `·` 它
+ * 无从分辨，交给它猜必然要靠特判兜底。
+ * base 在 `/lib` 下时跳过：`/lib` 是 layout/runtime 的结构域（见 [[结构域]]），那里的 `·`
+ * 是包·函数命名分隔符而非成员写，由 layout 全权写入。 */
+void kvlangBuiltinEnsureMemberBase(kvlangKv_t *kv, const char *frame_root, const char *base) {
+    if (!base || !base[0] || strncmp(base, "/lib", 4) == 0) return;
+    char *path = kvlangBuiltinResolveWriteSlot(kv, frame_root, base);
+    kvlangXvalue_t cur; kvlangXvalueZero(&cur);
+    kvlangKvGetOne(kv, path, &cur);
+    if (kvlangXvalueNone(&cur)) {
+        kvlangXvalue_t empty; kvlangXvalueNewTlv(&empty, KVSPACE_KIND_MAP, NULL, 0, 1);
+        kvlangKvPair_t p = { path, empty };
+        char err[256];
+        kvlangKvSet(kv, &p, 1, err, sizeof err);
+        kvlangXvalueFree(&empty);
+    }
+    kvlangXvalueFree(&cur);
+    free(path);
+}
+
 int kvlangBuiltinKvSet(kvlangFrame_t *f) {
     kvlangXvalue_t in[MAX_PARAMS]; int n = kvlangBuiltinReadInputs(f, in, MAX_PARAMS);
     char *key; kvlangXvalue_t *val;
-    if (f->inst->nr >= 3) { key = member_path(f, in, n - 1); val = &in[n - 1]; }
+    if (f->inst->nr >= 3) {
+        const char *base = f->inst->reads[0].name;
+        if (strncmp(base, "/lib", 4) != 0) ensure_local_container(f, base);
+        key = member_path(f, in, n - 1); val = &in[n - 1];
+    }
     else { key = n >= 1 ? path_arg(f, 0, in) : NULL; val = &in[1]; }
     if (!key || (f->inst->nr < 3 && n < 2)) { free(key); kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "TypeError: kv.set requires path and value"); }
     kvlangKvPair_t p = { key, *val };

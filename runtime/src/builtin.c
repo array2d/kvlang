@@ -75,15 +75,19 @@ void kvlangBuiltinResolveReadValue(kvlangKv_t *kv, const char *frame_root, const
     if (!name || !name[0]) return;
     if (name[0] == '/') { kvlangKvGetOne(kv, name, out); return; }
     if (name[0] == '*') {
-        /* 显式解引用：*[0,±k] → 读 frame_root/[0,±k]（ref=1 Ptr）→ 解引用到实参值。 */
+        /* 显式解引用：*[0,±k] → 读 frame_root/[0,±k]（ref=1 Ptr）→ 解引用到实参值。
+         * 同 ResolveWriteSlot：帧槽必有 Ptr，读不到即传参链路已坏 → panic，
+         * 绝不静默留 None（那会让形参读成空值，把真因藏到几层之外）。 */
         char *stk = kvlangKeytreeStack(frame_root);
         kvlangXvalue_t pv; kvlangXvalueZero(&pv);
         kvlangKvGetMember(kv, stk, name + 1, &pv);
-        if (kvlangXvalueIsPtr(&pv)) {
-            char *target = kvlangXvaluePtrTarget(&pv);
-            kvlangKvGetOne(kv, target, out);
-            free(target);
+        if (!kvlangXvalueIsPtr(&pv)) {
+            fprintf(stderr, "panic: %s%s is not a Ptr — frame slot missing, param passing broken\n", stk, name + 1);
+            abort();
         }
+        char *target = kvlangXvaluePtrTarget(&pv);
+        kvlangKvGetOne(kv, target, out);
+        free(target);
         kvlangXvalueFree(&pv); free(stk);
         return;
     }
@@ -113,18 +117,23 @@ char *kvlangBuiltinResolveReadKey(kvlangKv_t *kv, const char *frame_root, const 
 char *kvlangBuiltinResolveWriteSlot(kvlangKv_t *kv, const char *frame_root, const char *name) {
     if (name[0] == '/') return strdup(name);
     char *stk = kvlangKeytreeStack(frame_root);
-    const char *seg = name;
     if (name[0] == '*') {
-        /* 显式解引用：*[0,±k] → 读 frame_root/[0,±k]（ref=1 Ptr）→ target=写槽路径。 */
+        /* 显式解引用：*[0,±k] → 读 frame_root/[0,±k]（ref=1 Ptr）→ target=写槽路径。
+         * `*[0,±k]` 是 layout 编译期生成的形参引用，帧槽必有调用点写入的 Ptr；读不到
+         * 即传参链路已坏（不变量违反，非用户错误）→ panic，绝不回退成字面路径——
+         * 回退会把「写形参」静默变成「写一个叫 *[0,±k] 的键」，掩盖真因。 */
         kvlangXvalue_t pv; kvlangXvalueZero(&pv);
         kvlangKvGetMember(kv, stk, name + 1, &pv);
-        char *result = kvlangXvalueIsPtr(&pv) ? kvlangXvaluePtrTarget(&pv) : NULL;
-        kvlangXvalueFree(&pv);
-        if (result) { free(stk); return result; }
-        seg = name + 1;
+        if (!kvlangXvalueIsPtr(&pv)) {
+            fprintf(stderr, "panic: %s%s is not a Ptr — frame slot missing, param passing broken\n", stk, name + 1);
+            abort();
+        }
+        char *target = kvlangXvaluePtrTarget(&pv);
+        kvlangXvalueFree(&pv); free(stk);
+        return target;
     }
     kvlangStrbuf_t o; kvlangStrbufInit(&o);
-    kvlangStrbufPuts(&o, stk); kvlangStrbufPuts(&o, seg);
+    kvlangStrbufPuts(&o, stk); kvlangStrbufPuts(&o, name);
     free(stk);
     return kvlangStrbufDetach(&o);
 }
@@ -675,7 +684,14 @@ int kvlangBuiltinExecuteCopy(kvlangKv_t *kv, const char *vtid, const char *pc, k
     kvlangXvalue_t v; kvlangXvalueZero(&v);
     kvlangBuiltinResolveReadValue(kv, fr, inst->reads[0].name, &inst->reads[0].val, &v);
     for (int i = 0; i < inst->nw; i++) {
-        char *key = kvlangBuiltinResolveWriteSlot(kv, fr, inst->writes[i].name);
+        const char *slot = inst->writes[i].name;
+        const char *dot = strstr(slot, MEMBER_SEP);
+        if (dot && dot != slot) {
+            char *b = strndup(slot, (size_t)(dot - slot));
+            kvlangBuiltinEnsureMemberBase(kv, fr, b);
+            free(b);
+        }
+        char *key = kvlangBuiltinResolveWriteSlot(kv, fr, slot);
         kvlangKvPair_t pair = { key, v };
         char err[256];
         kvlangKvSet(kv, &pair, 1, err, sizeof err);

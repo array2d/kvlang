@@ -6,10 +6,17 @@
 //   code= 0
 //   out= hi
 //   err= oops
+// run_capture 把 code/out/err 三个结果一并带回调用方；
+// 捕获句柄无 kindexpr 类型，写参声明为 any
+rwfunc run_capture(args:[]char/utf8·[]char/utf32,
+		envs:[]char/utf8·[]char/utf32) -> (code:uint8, out:any, err:any) {
+	networld/proc·exec(args, envs) -> code, out, err
+}
+
 rwfunc test() -> () {
 	noenv = map()
 	a = {"sh", "-c", "echo hi; echo oops 1>&2"}
-	networld/proc·exec(a, noenv) -> code, out, err
+	run_capture(a, noenv) -> (code, out, err)
 	println("code=", code)
 	println("out=", out)
 	println("err=", err)

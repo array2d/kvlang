@@ -1,7 +1,8 @@
 // list-reverse: C 风格 struct 指针变量，切换链表指向（原地反转）
 // 语义: cur/prev/nxt 都是指针变量（绝对路径串），等价 C 的 Node*；
-//       cur·next 即 C 的 cur->next。反转 = 逐节点把 next 指回前驱。
-// 链表: 10→20→30  反转后从新头 prev 遍历得 30→20→10
+//       cur·next 即 C 的 cur->next。reverse_list 接收头指针，逐节点把
+//       next 指回前驱并返回新头；test 从新头遍历打印。
+// 链表: 10→20→30  反转后从新头遍历得 30→20→10
 // 期望输出:
 //   30
 //   20
@@ -11,19 +12,25 @@ struct Node {
 	next:*Node=None
 }
 
-rwfunc test() -> () {
-	n3:Node = {val=30}
-	n2:Node = {val=20 next=&n3}
-	n1:Node = {val=10 next=&n2}
+rwfunc reverse_list(head:*Node) -> (new_head:*Node) {
 	prev = None
-	cur = &n1
+	head -> cur
 	while (cur != None) {
 		cur·next -> nxt
 		prev -> cur·next
 		cur -> prev
 		nxt -> cur
 	}
-	cur = prev
+	prev -> new_head
+}
+
+rwfunc test() -> () {
+	n3:Node = {val=30}
+	n2:Node = {val=20 next=&n3}
+	n1:Node = {val=10 next=&n2}
+	&n1 -> h
+	reverse_list(h) -> head
+	head -> cur
 	while (cur != None) {
 		cur·val -> v
 		println(v)

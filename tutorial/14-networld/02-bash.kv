@@ -2,9 +2,14 @@
 // 期望输出:
 //   bash 42
 //   exit= 0
+rwfunc run_proc(args:[]char/utf8·[]char/utf32,
+		envs:[]char/utf8·[]char/utf32) -> (code:uint8) {
+	networld/proc·exec(args, envs) -> code
+}
+
 rwfunc test() -> () {
 	noenv = map()
 	args = {"bash", "-c", "echo bash $((6*7))"}
-	networld/proc·exec(args, noenv) -> code
+	run_proc(args, noenv) -> code
 	println("exit=", code)
 }

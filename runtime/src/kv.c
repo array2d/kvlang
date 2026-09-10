@@ -103,7 +103,10 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
             continue;
         }
         kvspaceHead_t h;
-        if (kvspaceDecodeHead(v->data, v->len, &h) != 0 || !h.langtype[0])
+        /* head 解码失败才跳过：langtype 为空**不是**跳过理由——空 langtype 的 Ptr 仍是
+         * 指针（如跨帧传一个值为 None 的容器实参时，runtime 推不出类型）。None 由上面
+         * 的 len==0 分支处理，二者不是一回事。曾因这里静默跳过，致 fs 后端帧槽丢参数。 */
+        if (kvspaceDecodeHead(v->data, v->len, &h) != 0)
             continue;
         uint32_t body_len = h.body_len < 0 ? 0 : (uint32_t)h.body_len;
         const uint8_t *body = v->data + h.body_offset;

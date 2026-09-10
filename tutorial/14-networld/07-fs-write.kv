@@ -7,15 +7,29 @@
 //   append= 24
 //   size= 44
 //   text= hello world
+// write_text/append_text 把字符串整体重解释为 []uint8 后写入磁盘，返回字节数
+rwfunc write_text(p:[]char/utf32, s:[]char/utf32) -> (n:int64) {
+	networld/fs·write(p, xv·reinterpret(s, "[]uint8")) -> n
+}
+
+rwfunc append_text(p:[]char/utf32, s:[]char/utf32) -> (n:int64) {
+	networld/fs·append(p, xv·reinterpret(s, "[]uint8")) -> n
+}
+
+// read_text 读回整个文件并还原为 []char/utf32 字符串，同时带回字节大小
+rwfunc read_text(p:[]char/utf32) -> (s:[]char/utf32, n:int64) {
+	networld/fs·size(p) -> n
+	networld/fs·read(p, 0, n) -> raw
+	xv·reinterpret(raw, "[]char/utf32") -> s
+}
+
 rwfunc test() -> () {
 	p = "/tmp/kvlang_fs_write.txt"
-	networld/fs·write(p, xv·reinterpret("hello", "[]uint8")) -> wn
+	write_text(p, "hello") -> wn
 	println("write=", wn)
-	networld/fs·append(p, xv·reinterpret(" world", "[]uint8")) -> an
+	append_text(p, " world") -> an
 	println("append=", an)
-	networld/fs·size(p) -> sz
+	read_text(p) -> (txt, sz)
 	println("size=", sz)
-	networld/fs·read(p, 0, sz) -> raw
-	xv·reinterpret(raw, "[]char/utf32") -> txt
 	println("text=", txt)
 }

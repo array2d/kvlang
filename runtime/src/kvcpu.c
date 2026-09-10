@@ -432,22 +432,12 @@ static char *handle_call(kvlangKv_t *kv, const char *pc, kvlangRwirInst_t *inst)
                 rk = kvlangStrbufDetach(&lk);
                 /* 写字面量到 rk（拷贝，避免 double-free） */
                 kvspaceHead_t ah; kvspaceDecodeHead(arg->val.data, arg->val.len, &ah);
-                if (ah.langtype[0]) snprintf(lt, sizeof lt, "%s", ah.langtype);
                 int32_t abl; const uint8_t *ab = kvlangXvalueBody(&arg->val, &ah, &abl);
                 kvlangLangtype akx; kvlangLangtypeParse(ah.langtype, &akx);
                 pairs[np].key = strdup(rk);
                 kvspaceTlvEncode(kvlangXvalueKind(&arg->val), ab, (uint32_t)abl, akx.dims, akx.ndim,
                                    &pairs[np].val.data, &pairs[np].val.len);
                 np++;
-            } else if (rk) {
-                kvlangXvalue_t hv; kvlangXvalueZero(&hv);
-                kvlangKvGetOne(kv, rk, &hv);
-                if (!kvlangXvalueNone(&hv)) {
-                    kvspaceHead_t ah;
-                    if (kvlangXvalueHead(&hv, &ah) == 0 && ah.langtype[0])
-                        snprintf(lt, sizeof lt, "%s", ah.langtype);
-                }
-                kvlangXvalueFree(&hv);
             }
             if (rk) {
                 kvlangXvalue_t rv; kvlangXvalueNewPtr(&rv, lt, rk);
@@ -492,8 +482,14 @@ static char *handle_call(kvlangKv_t *kv, const char *pc, kvlangRwirInst_t *inst)
         }
         kvlangStrbufFree(&slot);
     }
-    if (np > 0) kvlangKvSet(kv, pairs, np, err, sizeof err);
+    /* 实参绑定写失败必须报错——绝不静默：丢的是一整个参数，症状会漂到很远的地方
+     * （曾表现为 fs 后端下函数读到空参数）。 */
+    int wrc = np > 0 ? kvlangKvSet(kv, pairs, np, err, sizeof err) : 0;
     for (int i = 0; i < np; i++) { free(pairs[i].key); kvlangXvalueFree(&pairs[i].val); }
+    if (wrc != 0) {
+        kvlangVthreadSetError(kv, vtid, pc, err);
+        goto fail;
+    }
 
     free(caller_fr); free(stack_fr);
     kvlangStrbufFree(&npc); kvlangStrbufFree(&retpc); kvlangStrbufFree(&callpc); kvlangStrbufFree(&seglib);

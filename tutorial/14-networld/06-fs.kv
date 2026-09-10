@@ -5,14 +5,19 @@
 // 期望输出:
 //   size= 12
 //   text= hello kvlang
+// read_text 读取整个文件的字节并整体重解释为 utf8 字符串，同时带回字节大小
+rwfunc read_text(p:[]char/utf32) -> (s:[]char/utf8, n:int64) {
+	networld/fs·size(p) -> n
+	networld/fs·read(p, 0, n) -> raw
+	xv·reinterpret(raw, "[]char/utf8") -> s
+}
+
 rwfunc test() -> () {
 	p = "/tmp/kvlangfs_demo.txt"
 	noenv = map()
 	w = {"sh", "-c", "printf 'hello kvlang' > /tmp/kvlangfs_demo.txt"}
 	networld/proc·exec(w, noenv) -> wc
-	networld/fs·size(p) -> n
+	read_text(p) -> (s, n)
 	println("size=", n)
-	networld/fs·read(p, 0, n) -> raw
-	xv·reinterpret(raw, "[]char/utf8") -> s
 	println("text=", s)
 }
