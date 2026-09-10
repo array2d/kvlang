@@ -5,10 +5,10 @@
 //   8
 struct Node {
 	val:int64=0
-	next:[]char/utf32=""
+	next:*Node=""
 }
 
-rwfunc get_intersection(ha:[]char/utf32, hb:[]char/utf32) -> () {
+rwfunc get_intersection(ha:*Node, hb:*Node) -> () {
 	pa = ha
 	pb = hb
 	switch_a = 0

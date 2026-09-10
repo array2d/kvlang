@@ -6,14 +6,14 @@
 //   3
 struct TNode {
 	val:int64=0
-	left:[]char/utf32=""
-	right:[]char/utf32=""
+	left:*TNode=""
+	right:*TNode=""
 }
 
-rwfunc inorder(root:[]char/utf32) -> () {
+rwfunc inorder(root:*TNode) -> () {
 	// iterative stack simulation
 	si = 0
-	stack:[int64]·[]char/utf32 = {}
+	stack:[int64]·*TNode = {}
 	cur = root
 	while (cur != "" || si > 0) {
 		while (cur != "") {

@@ -32,9 +32,17 @@ static bool base_is_container(const kvlangXvalue_t *base) {
 
 static char *member_path(kvlangFrame_t *f, const kvlangXvalue_t *in, int n) {
     const kvlangXvalue_t *base = &in[0];
-    char *fr = kvlangKeytreeFrameRoot(f->pc);
-    char *bp = base_is_container(base) ? kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->reads[0].name) : kvlangXvalueValueString(base);
-    free(fr);
+    char *bp = NULL;
+    if (kvlangXvalueIsPtr(base)) {
+        /* 数据 Ptr（&x）作成员 base：直接取其目标路径，逐段下钻。 */
+        bp = kvlangXvaluePtrTarget(base);
+    } else if (base_is_container(base)) {
+        char *fr = kvlangKeytreeFrameRoot(f->pc);
+        bp = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->reads[0].name);
+        free(fr);
+    } else {
+        bp = kvlangXvalueValueString(base);
+    }
     /* 成员链：base 之后逐段拼 key（变参），每段可为静态字面量或动态键（运行时值）。 */
     for (int i = 1; i < n; i++) {
         char *kk = kvlangKvKey(&in[i]);
@@ -112,8 +120,10 @@ int kvlangBuiltinKvCpTree(kvlangFrame_t *f) { return kv_two_path_void(f, "kv.cpd
 int kvlangBuiltinKvCpList(kvlangFrame_t *f) { return kv_two_path_void(f, "kv.cplist", kvlangKvCpList); }
 
 int kvlangBuiltinKvAbs(kvlangFrame_t *f) {
-    kvlangXvalue_t in[1]; int n = kvlangBuiltinReadInputs(f, in, 1);
-    char *p = n >= 1 ? resolve_path_arg(f, 0, in) : NULL;
+    kvlangXvalue_t in[MAX_PARAMS]; int n = kvlangBuiltinReadInputs(f, in, MAX_PARAMS);
+    char *p = NULL;
+    if (n >= 2) p = member_path(f, in, n);
+    else if (n >= 1) p = resolve_path_arg(f, 0, in);
     if (!p) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "TypeError: kv.abs requires a key"); }
     /* 产出 Ptr（ref=1）：langtype = 目标 kindexpr、body = 目标绝对路径。
      * &x ≡ kv.abs(x)：取址返回指向 x 所在节点的软链接（单跳同型），不再产 char 路径串。 */

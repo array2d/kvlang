@@ -12,7 +12,7 @@ lib kvlang/spec/类型系统/langtype签名类型表达式 {
 
 | 型 | 出现位置 | 角色 | 表达力 |
 |----|---------|------|--------|
-| **def langtype** | def rwir 签名行 `[0,x]` 槽（storetype=`def langtype`）；rwfunc 则随命名参数键 `{name}` 的 Ptr langtype 承载同一模式（见 [[storetype_def族与签名行]]） | **模式**：描述一个参数「可接受的一类值」 | 完整——并集 `A\|B`、轴量词 `.`/`?`/`*`/`+`、`any`、mapexpr（见 [[匹配语义与变参]]）。参数变参 `...` 是签名层 arity、**不在** langtype 内（见 [[函数]]） |
+| **def langtype** | def rwir 签名行 `[0,x]` 槽（storetype=`def langtype`）；rwfunc 则随参数定义键 `.[0,±j]`（body=名字+NUL+类型串）承载同一模式（见 [[storetype_def族与签名行]]） | **模式**：描述一个参数「可接受的一类值」 | 完整——并集 `A\|B`、轴量词 `.`/`?`/`*`/`+`、`any`、mapexpr（见 [[匹配语义与变参]]）。参数变参 `...` 是签名层 arity、**不在** langtype 内（见 [[函数]]） |
 | **value langtype** | 一个具体 XValue 的 head langtype（见 [[langtype语义类型]]） | **实例**：描述这个值**是什么** | 具体固定——单一种类 + 确定 `[dims]`（每维具体整数），不含并集与任何轴量词 |
 
 def langtype 是「值域」，value langtype 是值域里「一个点」；类型检查即判定后者是否落进前者（匹配语义

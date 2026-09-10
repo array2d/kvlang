@@ -8,10 +8,10 @@
 //   3
 struct Node {
 	val:int64=0
-	next:[]char/utf32=""
+	next:*Node=""
 }
 
-rwfunc dedup(head:[]char/utf32) -> () {
+rwfunc dedup(head:*Node) -> () {
 	head -> cur
 	while (cur != "") {
 		cur·next -> nxt
@@ -33,7 +33,7 @@ rwfunc dedup(head:[]char/utf32) -> () {
 	}
 }
 
-rwfunc show(head:[]char/utf32) -> () {
+rwfunc show(head:*Node) -> () {
 	head -> p
 	while (p != "") {
 		p·val -> v

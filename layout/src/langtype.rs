@@ -182,10 +182,7 @@ pub fn valid_langtype(expr: &str) -> bool {
 /// `/lib/<name>`，使 kv 源可写 `x:Node` / `[int64]·Node`，runtime 恒收到完整 `/lib/…` 路径。
 /// 已 `/` 开头或 known kind 原样返回。mapexpr 只对 value 递归展开（key 恒 `[…]` 非 struct）。
 pub fn expand_struct_refs(s: &str) -> String {
-    s.split('|')
-        .map(expand_atom)
-        .collect::<Vec<_>>()
-        .join("|")
+    s.split('|').map(expand_atom).collect::<Vec<_>>().join("|")
 }
 
 fn expand_atom(s: &str) -> String {

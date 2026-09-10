@@ -4,11 +4,11 @@
 //   3
 struct TNode {
 	val:int64=0
-	left:[]char/utf32=""
-	right:[]char/utf32=""
+	left:*TNode=""
+	right:*TNode=""
 }
 
-rwfunc max_depth(root:[]char/utf32) -> (depth:int64) {
+rwfunc max_depth(root:*TNode) -> (depth:int64) {
 	if (root == "") { 0 -> depth }
 	else {
 		ld = max_depth(root·left)
@@ -20,17 +20,12 @@ rwfunc max_depth(root:[]char/utf32) -> (depth:int64) {
 
 rwfunc test() -> () {
 	t:[int64]·TNode = {}
-	kv·abs(t) -> tb
-	tb + "·2" -> t1
-	tb + "·3" -> t2
-	tb + "·4" -> t3
-	tb + "·5" -> t4
-	t·1:TNode = {val=3 left=t1 right=t2}
 	t·2:TNode = {val=9}
-	t·3:TNode = {val=20 left=t3 right=t4}
 	t·4:TNode = {val=15}
 	t·5:TNode = {val=7}
-	tb + "·1" -> root
+	t·3:TNode = {val=20 left=&t·4 right=&t·5}
+	t·1:TNode = {val=3 left=&t·2 right=&t·3}
+	&t·1 -> root
 	d = max_depth(root)
 	println(d)
 }

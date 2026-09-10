@@ -9,10 +9,10 @@
 //   4
 struct Node {
 	val:int64=0
-	next:[]char/utf32=""
+	next:*Node=""
 }
 
-rwfunc merge(a:[]char/utf32, b:[]char/utf32) -> () {
+rwfunc merge(a:*Node, b:*Node) -> () {
 	pa = a
 	pb = b
 	while (pa != "") {

@@ -74,20 +74,25 @@ void kvlangBuiltinResolveReadValue(kvlangKv_t *kv, const char *frame_root, const
     }
     if (!name || !name[0]) return;
     if (name[0] == '/') { kvlangKvGetOne(kv, name, out); return; }
+    if (name[0] == '*') {
+        /* 显式解引用：*[0,±k] → 读 frame_root/[0,±k]（ref=1 Ptr）→ 解引用到实参值。 */
+        char *stk = kvlangKeytreeStack(frame_root);
+        kvlangXvalue_t pv; kvlangXvalueZero(&pv);
+        kvlangKvGetMember(kv, stk, name + 1, &pv);
+        if (kvlangXvalueIsPtr(&pv)) {
+            char *target = kvlangXvaluePtrTarget(&pv);
+            kvlangKvGetOne(kv, target, out);
+            free(target);
+        }
+        kvlangXvalueFree(&pv); free(stk);
+        return;
+    }
     char *stk = kvlangKeytreeStack(frame_root);
     kvlangXvalue_t pv; kvlangXvalueZero(&pv);
     kvlangKvGetMember(kv, stk, name, &pv);
     if (kvlangXvalueIsPtr(&pv)) {
-        char *target = kvlangXvaluePtrTarget(&pv);
-        kvlangXvalue_t av; kvlangXvalueZero(&av);
-        kvlangKvGetMember(kv, stk, target, &av);
-        free(target);
-        if (!kvlangXvalueNone(&av)) {
-            char *path = kvlangXvalueValueString(&av);
-            kvlangKvGetOne(kv, path, out);
-            free(path);
-        }
-        kvlangXvalueFree(&av);
+        /* 数据 Ptr（&x）：地址值本体，读值不解引用。成员访问另走 kv·get 的 member_path。 */
+        *out = pv; pv.data = NULL; pv.len = 0;
     } else if (!kvlangXvalueNone(&pv)) {
         *out = pv; pv.data = NULL; pv.len = 0;
     }
@@ -108,36 +113,18 @@ char *kvlangBuiltinResolveReadKey(kvlangKv_t *kv, const char *frame_root, const 
 char *kvlangBuiltinResolveWriteSlot(kvlangKv_t *kv, const char *frame_root, const char *name) {
     if (name[0] == '/') return strdup(name);
     char *stk = kvlangKeytreeStack(frame_root);
-    kvlangXvalue_t pv; kvlangXvalueZero(&pv);
-    kvlangKvGetMember(kv, stk, name, &pv);
-    char *result = NULL;
-    if (kvlangXvalueIsPtr(&pv)) {
-        char *target = kvlangXvaluePtrTarget(&pv);
-        kvlangXvalue_t av; kvlangXvalueZero(&av);
-        kvlangKvGetMember(kv, stk, target, &av);
-        free(target);
-        if (!kvlangXvalueNone(&av)) {
-            /* 只追显式指针（ptr, ref==1）链；av 是 handle_call 已 resolve 好的
-             * 最终写目标路径（普通 char），直接取字符串，勿再按值读下一跳——
-             * 否则会把已写数据（char）误当路径再追，导致二次调用写回旧值。 */
-            kvlangXvalue_t v = av; av.data = NULL; av.len = 0;
-            while (kvlangXvalueIsPtr(&v)) {
-                char *np = kvlangXvaluePtrTarget(&v);
-                kvlangXvalue_t nxt; kvlangXvalueZero(&nxt);
-                kvlangKvGetOne(kv, np, &nxt);
-                free(np);
-                kvlangXvalueFree(&v);
-                v = nxt;
-            }
-            if (!kvlangXvalueNone(&v)) result = kvlangXvalueValueString(&v);
-            kvlangXvalueFree(&v);
-        }
-        kvlangXvalueFree(&av);
+    const char *seg = name;
+    if (name[0] == '*') {
+        /* 显式解引用：*[0,±k] → 读 frame_root/[0,±k]（ref=1 Ptr）→ target=写槽路径。 */
+        kvlangXvalue_t pv; kvlangXvalueZero(&pv);
+        kvlangKvGetMember(kv, stk, name + 1, &pv);
+        char *result = kvlangXvalueIsPtr(&pv) ? kvlangXvaluePtrTarget(&pv) : NULL;
+        kvlangXvalueFree(&pv);
+        if (result) { free(stk); return result; }
+        seg = name + 1;
     }
-    kvlangXvalueFree(&pv);
-    if (result) { free(stk); return result; }
     kvlangStrbuf_t o; kvlangStrbufInit(&o);
-    kvlangStrbufPuts(&o, stk); kvlangStrbufPuts(&o, name);
+    kvlangStrbufPuts(&o, stk); kvlangStrbufPuts(&o, seg);
     free(stk);
     return kvlangStrbufDetach(&o);
 }
@@ -796,4 +783,3 @@ int kvlangBuiltinExecuteCopy(kvlangKv_t *kv, const char *vtid, const char *pc, k
 
 
 /* ── vthread 控制 / debugger ─────────────────────────────────────── */
-
