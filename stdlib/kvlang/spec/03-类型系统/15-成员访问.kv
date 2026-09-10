@@ -11,15 +11,16 @@ lib kvlang/spec/类型系统/成员访问 {
 容器成员一律走 `·`（或 `kv·get`/`kv·set`），**不得**用 `[]`；`[]` 只索引 compact 数组（见 [[数组形
 态]]）。
 
-### `base·name` 的 base 解析：按值优先、按名回退
+### `base·name` 的 base 解析：按指针优先、按名回退
 
 `base·name`（读写同规则）中 base 的解析：
 
-1. **按值解引用**：base 持有非空字符串值（路径指针）→ 成员键 = `值(base)·name`。如 `"/n1" -> p` 后
-   `p·next` 解析为 `/n1·next`。
-2. **按名回退**：base 无值（或非字符串）→ 成员键 = `解析(base)·name`；解析帧感知：裸名 →
+1. **按指针解引用**：base 是 ref=1 Ptr → 成员键 = `target(base)·name`。如 `&n1 -> p` 后
+   `p·next` 解析为 `/…/n1·next`。
+2. **按名回退**：base 非 Ptr（局部 struct 实例等）→ 成员键 = `解析(base)·name`；解析帧感知：裸名 →
    `帧根/base`，`/` 开头 → 直通。
 
-该规则让「局部结构体」（base 无值，按名）与「指针解引用」（base 存路径字符串，按值）共用一套语法。
+该规则让「局部结构体」（base 非 Ptr，按名）与「指针成员访问」（base 是 Ptr，按其 target）共用一套语
+法。
 "#### -> /lib/kvlang/spec/类型系统/成员访问
 }

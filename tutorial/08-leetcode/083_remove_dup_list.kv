@@ -8,16 +8,16 @@
 //   3
 struct Node {
 	val:int64=0
-	next:*Node=""
+	next:*Node=None
 }
 
 rwfunc dedup(head:*Node) -> () {
 	head -> cur
-	while (cur != "") {
+	while (cur != None) {
 		cur·next -> nxt
 		advance = true
 
-		if (nxt != "") {
+		if (nxt != None) {
 			cur·val -> v
 			nxt·val -> nv
 
@@ -35,7 +35,7 @@ rwfunc dedup(head:*Node) -> () {
 
 rwfunc show(head:*Node) -> () {
 	head -> p
-	while (p != "") {
+	while (p != None) {
 		p·val -> v
 		println(v)
 		p·next -> p

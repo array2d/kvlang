@@ -7,20 +7,20 @@ rwfunc has_cycle(head:*Node) -> (result:int64) {
 	result = 0
 	head -> slow
 	fast = head
-	while (fast != "") {
+	while (fast != None) {
 		slow = slow·next
 		fast·next -> n1
-		at_end = n1 == ""
+		at_end = n1 == None
 
 		if (at_end) {
-			fast = ""
+			fast = None
 		} else {
 			n1·next -> fast
 			match = slow == fast
 
 			if (match) {
 				result = 1
-				"" -> fast
+				None -> fast
 			}
 		}
 	}
@@ -28,7 +28,7 @@ rwfunc has_cycle(head:*Node) -> (result:int64) {
 
 struct Node {
 	val:int64=0
-	next:*Node=""
+	next:*Node=None
 }
 
 rwfunc test() -> () {

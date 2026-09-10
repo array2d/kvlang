@@ -354,18 +354,18 @@ static int kvlangBuiltinCmp(kvlangFrame_t *f, cmp_op op) {
         bool av = kvlangScalarI64(a) != 0, bv = kvlangScalarI64(b) != 0;
         r = op == CMP_EQ ? av == bv : op == CMP_NEQ ? av != bv : op == CMP_LT ? av < bv : op == CMP_GT ? av > bv : op == CMP_LE ? av <= bv : av >= bv;
     } else if (kvlangXvalueIsPtr(&in[0]) || kvlangXvalueIsPtr(&in[1])) {
-        // 指针比较恒判身份（target 串）。空指针 target=""；另一方须是 Ptr 或 char 哨兵。
+        // 指针比较恒判身份（target 串），且只允许 Ptr 对 Ptr——空指针即 None，已在上方
+        // None 分支处理；不设 char 哨兵（`p == ""` 是非法比较，正是被砍掉的歧义分支）。
         if (op != CMP_EQ && op != CMP_NEQ) {
             kvlangBuiltinSetErr(f, "TypeError: cannot order ptr with %s", kvlangXvalueKind(&in[0])); kvlangBuiltinFreeInputs(in, n); return -1;
         }
-        if (!kvlangXvalueIsPtr(&in[0]) && !kvlangLtIsChar(a.id)) {
-            kvlangBuiltinSetErr(f, "TypeError: cannot compare %s with ptr", kvlangXvalueKind(&in[0])); kvlangBuiltinFreeInputs(in, n); return -1;
+        if (!kvlangXvalueIsPtr(&in[0]) || !kvlangXvalueIsPtr(&in[1])) {
+            kvlangBuiltinSetErr(f, "TypeError: cannot compare %s with ptr; use None for a null pointer",
+                                kvlangXvalueIsPtr(&in[0]) ? kvlangXvalueKind(&in[1]) : kvlangXvalueKind(&in[0]));
+            kvlangBuiltinFreeInputs(in, n); return -1;
         }
-        if (!kvlangXvalueIsPtr(&in[1]) && !kvlangLtIsChar(b.id)) {
-            kvlangBuiltinSetErr(f, "TypeError: cannot compare %s with ptr", kvlangXvalueKind(&in[1])); kvlangBuiltinFreeInputs(in, n); return -1;
-        }
-        char *as = kvlangXvalueIsPtr(&in[0]) ? kvlangXvaluePtrTarget(&in[0]) : kvlangXvalueValueString(&in[0]);
-        char *bs = kvlangXvalueIsPtr(&in[1]) ? kvlangXvaluePtrTarget(&in[1]) : kvlangXvalueValueString(&in[1]);
+        char *as = kvlangXvaluePtrTarget(&in[0]);
+        char *bs = kvlangXvaluePtrTarget(&in[1]);
         int c = strcmp(as, bs);
         r = op == CMP_EQ ? c == 0 : c != 0;
         free(as); free(bs);

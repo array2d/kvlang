@@ -28,8 +28,8 @@ kvlang 源码只有一种命名单元：**rwfunc**（有指令体的用户函数
 
 每个读参与写参**必须**声明类型（`name:type_expr`，type_expr 见 [[langtype签名类型表达式]]）。
 type_expr 最前可写 `*`/`@` 前缀（如 `*int64`、`@[256,256]uint8`）表示 ptr/ext 存储位置；layout 解析
-时剥离该前缀并落成 head `ref` 字节，wire 层 langtype 串不含前缀（见 [[总体方案]]）。缺类型标注是错
-误：
+时剥离该前缀并落成 head `ref` 字节，wire 层 langtype 串不含前缀（见 [[总体方案]]）。`*T` 参数可接受
+**None**（空指针），判定恒写 `p != None`（见 [[ptr]]）。缺类型标注是错误：
 
 ```
 error: func f: param "x" has no type annotation — every parameter must declare its type

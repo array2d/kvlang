@@ -8,23 +8,23 @@
 //   10
 struct Node {
 	val:int64=0
-	next:*Node=""
+	next:*Node=None
 }
 
 rwfunc test() -> () {
 	n3:Node = {val=30}
 	n2:Node = {val=20 next=&n3}
 	n1:Node = {val=10 next=&n2}
-	prev = ""
+	prev = None
 	cur = &n1
-	while (cur != "") {
+	while (cur != None) {
 		cur·next -> nxt
 		prev -> cur·next
 		cur -> prev
 		nxt -> cur
 	}
 	cur = prev
-	while (cur != "") {
+	while (cur != None) {
 		cur·val -> v
 		println(v)
 		cur·next -> cur

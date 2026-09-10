@@ -6,7 +6,7 @@
 //   8
 struct Node {
 	val:int64=0
-	next:*Node=""
+	next:*Node=None
 }
 
 lib lc {
@@ -16,16 +16,16 @@ rwfunc add(a:*Node, b:*Node) -> () {
 	0 -> ri
 	pa = a
 	pb = b
-	while (pa != "" || pb != "" || carry != 0) {
+	while (pa != None || pb != None || carry != 0) {
 		sum = carry
 
-		if (pa != "") {
+		if (pa != None) {
 			pa·val -> av
 			sum + av -> sum
 			pa = pa·next
 		}
 
-		if (pb != "") {
+		if (pb != None) {
 			pb·val -> bv
 			bv + sum -> sum
 			pb·next -> pb
