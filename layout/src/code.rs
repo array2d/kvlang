@@ -33,6 +33,7 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
     let (file, mut diags) = parser::parse_code(src)?;
     for f in subscript_check_funcs(&file) {
         diags.extend(lower::check_container_subscript(&f));
+        diags.extend(lower::check_map_defined(&f));
     }
     for d in &diags {
         eprintln!("{}", d.string());
@@ -140,6 +141,7 @@ pub fn vet(src: &str) -> Result<(), String> {
     let (file, mut diags) = parser::parse_code(src)?;
     for f in subscript_check_funcs(&file) {
         diags.extend(lower::check_container_subscript(&f));
+        diags.extend(lower::check_map_defined(&f));
     }
     for d in &diags {
         eprintln!("{}", d.string());

@@ -299,6 +299,8 @@ static int handle_return(kvlangKv_t *kv, const char *vtid, const char *pc, char 
     return 0;
 }
 
+static void param_decl_type(kvlangKv_t *kv, const char *func_key, int x, char *lt, size_t cap);
+
 /* HandleCall：创建子帧。返回 EntryPC(frameRoot)，失败 NULL */
 static char *handle_call(kvlangKv_t *kv, const char *pc, kvlangRwirInst_t *inst) {
     kvlangStrbuf_t vtid_b; kvlangStrbufInit(&vtid_b);
@@ -423,6 +425,7 @@ static char *handle_call(kvlangKv_t *kv, const char *pc, kvlangRwirInst_t *inst)
             char *rk = resolve_read_path(kv, caller_fr, arg->name);
             bool concrete = !kvlangXvalueNone(&arg->val) && !kvlangXvalueKindIs(&arg->val, KVSPACE_KIND_RWIR) && !kvlangXvalueKindIs(&arg->val, KVSPACE_KIND_RWFUNC);
             char lt[256] = {0};
+            param_decl_type(kv, func_key, -(i + 1), lt, sizeof lt);
             if (concrete) {
                 /* 字面量无变量槽，一律写 ._litN；勿沿用 resolve_read_path 的返回值——
                  * 否则字面量内容（如 "https://x" 里的 //）会被当路径段，二次读回即丢。 */
@@ -456,23 +459,7 @@ static char *handle_call(kvlangKv_t *kv, const char *pc, kvlangRwirInst_t *inst)
             char *wk = resolve_read_path(kv, caller_fr, inst->writes[i].name);
             if (wk) {
                 char lt[256] = {0};
-                kvlangStrbuf_t pk; kvlangStrbufInit(&pk);
-                kvlangStrbufPrintf(&pk, "%s.[0,%d]", func_key, i + 1);
-                kvlangXvalue_t dv; kvlangXvalueZero(&dv);
-                kvlangKvGetOne(kv, pk.p, &dv);
-                kvlangStrbufFree(&pk);
-                if (!kvlangXvalueNone(&dv)) {
-                    kvspaceHead_t ah;
-                    if (kvlangXvalueHead(&dv, &ah) == 0) {
-                        int32_t al; const uint8_t *ab = kvlangXvalueBody(&dv, &ah, &al);
-                        for (int bi = 0; ab && bi < al; bi++) if (ab[bi] == 0) {
-                            int tl = al - bi - 1;
-                            if (tl > 0 && tl < (int)sizeof lt) { memcpy(lt, ab + bi + 1, tl); lt[tl] = 0; }
-                            break;
-                        }
-                    }
-                }
-                kvlangXvalueFree(&dv);
+                param_decl_type(kv, func_key, i + 1, lt, sizeof lt);
                 kvlangXvalue_t wv; kvlangXvalueNewPtr(&wv, lt, wk);
                 pairs[np].key = kvlangStrbufDetach(&slot);
                 pairs[np].val = wv;
@@ -502,6 +489,30 @@ fail:
     kvlangStrbufFree(&func_dir); kvlangStrbufFree(&sig_key); kvlangStrbufFree(&vtid_b);
     kvlangXvalueFree(&sig); free(func_key); free(pkg); free(name);
     return NULL;
+}
+
+/* 帧槽实参 Ptr 的类型来自**形参声明**：读参数定义键 funcDir.[0,±x] 的 body
+ * （名字\x00类型串），取出类型串。绝不从实参值的 head 反推——实参可以是 None
+ * （如递归传空子树），那时无值可取，Ptr 会因空 langtype 构造失败而整个参数丢失。 */
+static void param_decl_type(kvlangKv_t *kv, const char *func_key, int x, char *lt, size_t cap) {
+    kvlangStrbuf_t pk; kvlangStrbufInit(&pk);
+    kvlangStrbufPrintf(&pk, "%s.[0,%d]", func_key, x);
+    kvlangXvalue_t dv; kvlangXvalueZero(&dv);
+    kvlangKvGetOne(kv, pk.p, &dv);
+    kvlangStrbufFree(&pk);
+    if (!kvlangXvalueNone(&dv)) {
+        kvspaceHead_t ah;
+        if (kvlangXvalueHead(&dv, &ah) == 0) {
+            int32_t al; const uint8_t *ab = kvlangXvalueBody(&dv, &ah, &al);
+            for (int bi = 0; ab && bi < al; bi++) {
+                if (ab[bi] != 0) continue;
+                int tl = al - bi - 1;
+                if (tl > 0 && tl < (int)cap) { memcpy(lt, ab + bi + 1, (size_t)tl); lt[tl] = 0; }
+                break;
+            }
+        }
+    }
+    kvlangXvalueFree(&dv);
 }
 
 int kvlangCtlCall(kvlangFrame_t *f) {

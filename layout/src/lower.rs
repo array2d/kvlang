@@ -13,6 +13,105 @@ fn is_container_type(t: &str) -> bool {
 }
 
 /// `[]` 下标校验：xv·at/xv·set 基座若为容器类型 → 报错，逼用 kv·get/kv·set/`base·key`。
+fn is_container_ty(ty: &str) -> bool {
+    ty.contains(keytree::MEMBER_SEP) || ty.starts_with('/')
+}
+
+/// 容器成员写的前置条件：base 必须**已声明且类型明确为容器**。
+/// 禁止未定义类型的 map —— `m·k = v` 而 m 无显式声明即 error，不做任何自动推断。
+pub fn check_map_defined(fn_: &Func) -> Vec<Diagnostic> {
+    let mut defined: HashSet<String> = HashSet::new();
+    for p in fn_.sig.params.iter().chain(fn_.sig.returns.iter()) {
+        if is_container_ty(&p.ty) {
+            defined.insert(p.name.clone());
+        }
+    }
+    collect_container_decls(&fn_.body, &mut defined);
+    let mut diags = Vec::new();
+    check_map_body(&fn_.body, &defined, &mut diags);
+    diags
+}
+
+/// 收集「带容器类型标注的写槽」声明（`m:T = ...`，T 为 map/structref）。
+fn collect_container_decls(body: &[Stmt], out: &mut HashSet<String>) {
+    for st in body {
+        match st {
+            Stmt::Instruction(s) => {
+                // 带容器类型标注的写槽（`m:T = ...`）即容器声明；被赋过值的名字一律算已定义
+                // （指针别名 `n = node` 后 `n·field` 是合法成员访问，不是未定义 map）。
+                for w in &s.writes {
+                    out.insert(w.clone());
+                }
+            }
+            Stmt::Scope(s) => collect_container_decls(&s.body, out),
+            Stmt::If(s) => {
+                collect_container_decls(&s.then_, out);
+                collect_container_decls(&s.else_, out);
+            }
+            Stmt::While(s) => collect_container_decls(&s.body, out),
+            Stmt::For(s) => collect_container_decls(&s.body, out),
+            _ => {}
+        }
+    }
+}
+
+fn check_map_body(body: &[Stmt], defined: &HashSet<String>, diags: &mut Vec<Diagnostic>) {
+    for st in body {
+        match st {
+            Stmt::Instruction(s) => check_map_inst(s, defined, diags),
+            Stmt::Scope(s) => check_map_body(&s.body, defined, diags),
+            Stmt::If(s) => {
+                if let Some(c) = &s.cond {
+                    check_map_inst(c, defined, diags);
+                }
+                check_map_body(&s.then_, defined, diags);
+                check_map_body(&s.else_, defined, diags);
+            }
+            Stmt::While(s) => {
+                if let Some(c) = &s.cond {
+                    check_map_inst(c, defined, diags);
+                }
+                check_map_body(&s.body, defined, diags);
+            }
+            Stmt::For(s) => check_map_body(&s.body, defined, diags),
+            _ => {}
+        }
+    }
+}
+
+fn check_map_base(base: &str, defined: &HashSet<String>, pos: Pos, diags: &mut Vec<Diagnostic>) {
+    if base.is_empty() || base.starts_with("/lib") || defined.contains(base) {
+        return;
+    }
+    diags.push(Diagnostic {
+        pos,
+        warn: false,
+        info: false,
+        message: format!(
+            "member write on undefined container {base:?} — declare it first with an explicit type, e.g. `{base}:[]char/utf8·int64 = {{}}`"
+        ),
+        source: String::new(),
+        src_file: String::new(),
+        src_name: String::new(),
+    });
+}
+
+fn check_map_inst(s: &Instruction, defined: &HashSet<String>, diags: &mut Vec<Diagnostic>) {
+    for w in &s.writes {
+        if let Some(i) = w.find(keytree::MEMBER_SEP) {
+            if i > 0 {
+                check_map_base(&w[..i], defined, Pos { line: 0, col: 0 }, diags);
+            }
+        }
+    }
+    // kv·set(base, key, val) 成员形
+    if let Some(e) = &s.expr {
+        if e.op == "kv·set" && e.args.len() >= 3 && !e.args[0].val.contains('/') {
+            check_map_base(&e.args[0].val, defined, Pos { line: 0, col: 0 }, diags);
+        }
+    }
+}
+
 pub fn check_container_subscript(fn_: &Func) -> Vec<Diagnostic> {
     let tm = infer_types(fn_);
     let mut diags = Vec::new();
@@ -378,10 +477,14 @@ fn lower_for_with_cont(
     let cond_slot = lg.tmp();
     let len_slot = lg.tmp();
     let key_slot = lg.tmp();
+    // 容器源（stringkeymap/struct）用 kv·listlen/kv·listn/kv·get 遍历，compact 数组源用
+    // ndarray·numel/xv·at（见 spec 控制流脱糖）。判据看**声明的类型**：map 的 kindexpr 恒含
+    // `key·value` 的那个 `·`（`[int64]·int64`、`[]char/utf8·int64`），compact 数组不含。
     let is_obj = s.iter.op == "obj"
         || s.iter.op == "map"
         || (s.iter.is_leaf()
-            && matches!(tm.get(&s.iter.val), Some(t) if t == "[]stringkeymap" || t == "stringkeymap"));
+            && matches!(tm.get(&s.iter.val),
+                Some(t) if t == "stringkeymap" || t.contains(keytree::MEMBER_SEP)));
 
     // 迭代源：裸标识符直接原地遍历；表达式（如数组字面量）先物化到临时槽。
     let mut init_body = Vec::new();
@@ -750,11 +853,6 @@ fn infer_inst(inst: &Instruction, tm: &mut HashMap<String, String>) {
         Some(e) => e,
         None => return,
     };
-    // kv.set 成员形（3 读：base, key, val）是 void 无写槽，但 base 仍须推断为 stringkeymap（供 for-in / 成员访问）
-    if e.op == "kv·set" && e.args.len() >= 3 && !e.args[0].val.contains('/') {
-        tm.entry(e.args[0].val.clone())
-            .or_insert_with(|| "stringkeymap".to_string());
-    }
     if inst.writes.is_empty() {
         return;
     }
@@ -840,11 +938,8 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
         return "[]stringkeymap".to_string();
     }
     if opcode == "kv·set" {
-        // 成员写 base.key = v（3 reads：base, key, value）→ base 是 stringkeymap。
-        if reads.len() >= 3 {
-            tm.entry(reads[0].clone())
-                .or_insert_with(|| "stringkeymap".to_string());
-        }
+        // 成员写的 base 类型**不在此推断**：map 必须显式声明准确类型
+        // （`m:[]char/utf8·int64 = {}`），由 check_map_defined 静态拦截未定义者。
         return String::new();
     }
     match opcode {

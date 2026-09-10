@@ -687,9 +687,18 @@ int kvlangBuiltinExecuteCopy(kvlangKv_t *kv, const char *vtid, const char *pc, k
         const char *slot = inst->writes[i].name;
         const char *dot = strstr(slot, MEMBER_SEP);
         if (dot && dot != slot) {
+            /* 成员写前置条件：memhead 必须已存在（同 kv·set，见 builtin_kv.c）。 */
             char *b = strndup(slot, (size_t)(dot - slot));
-            kvlangBuiltinEnsureMemberBase(kv, fr, b);
+            int ok = kvlangBuiltinCheckMemhead(kv, fr, b);
+            char msg[320];
+            if (ok != 0)
+                snprintf(msg, sizeof msg, "TypeError: memhead %s does not exist — declare the container first (e.g. `%s:T = {}`)", b, b);
             free(b);
+            if (ok != 0) {
+                kvlangXvalueFree(&v); free(fr);
+                kvlangVthreadSetError(kv, vtid, pc, msg);
+                return -1;
+            }
         }
         char *key = kvlangBuiltinResolveWriteSlot(kv, fr, slot);
         kvlangKvPair_t pair = { key, v };

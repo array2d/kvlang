@@ -339,7 +339,8 @@ void kvlangBuiltinResolveReadValue(kvlangKv_t *kv, const char *frame_root, const
                            const kvlangXvalue_t *val, kvlangXvalue_t *out);
 char *kvlangBuiltinResolveWriteSlot(kvlangKv_t *kv, const char *frame_root, const char *name);
 /* 成员写的 base 尚无值 → 落空 stringkeymap 值（`/lib` 下跳过，见 builtin_kv.c）。 */
-void kvlangBuiltinEnsureMemberBase(kvlangKv_t *kv, const char *frame_root, const char *base);
+/* 成员写（memitem）前置条件：memhead（base 容器值）必须已存在；缺则返回 -1 拒绝写入。 */
+int kvlangBuiltinCheckMemhead(kvlangKv_t *kv, const char *frame_root, const char *base);
 char *kvlangBuiltinResolveReadKey(kvlangKv_t *kv, const char *frame_root, const char *name, const kvlangXvalue_t *val);
 bool kvlangBuiltinTryParseNumber(const char *s, kvlangXvalue_t *out);          /* 成功 out 接管 */
 void kvlangDisplay(const kvlangXvalue_t *v, char **out);                     /* malloc，对齐 Go Display */

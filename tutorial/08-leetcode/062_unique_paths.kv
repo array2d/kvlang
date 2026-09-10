@@ -4,6 +4,7 @@
 //   28
 //   3
 rwfunc dp(m:int64, n:int64) -> (result:int64) {
+	/tmp/up:[int64]·int64 = {}
 	i = 0
 	while (i < n) {
 		_ = kv·set("/tmp/up", i, 1)
@@ -13,14 +14,14 @@ rwfunc dp(m:int64, n:int64) -> (result:int64) {
 	while (j < m) {
 		k = 1
 		while (k < n) {
-			/tmp/up[k] -> v
-			/tmp/up[k-1] -> prev
+			kv·get("/tmp/up", k) -> v
+			kv·get("/tmp/up", k-1) -> prev
 			_ = kv·set("/tmp/up", k, prev + v)
 			k + 1 -> k
 		}
 		j + 1 -> j
 	}
-	/tmp/up[n-1] -> result
+	kv·get("/tmp/up", n-1) -> result
 }
 
 rwfunc test() -> () {

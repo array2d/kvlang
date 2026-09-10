@@ -29,6 +29,7 @@ rwfunc word_count(chars:[int64]·[]char/utf32) -> (nw:int64) {
 }
 
 rwfunc test() -> () {
+	chars:[int64]·[]char/utf32 = {}
 	chars·0 = "h"
 	"e" -> chars·1
 	chars·2 = "l"

@@ -4,12 +4,23 @@ lib kvlang/spec/类型系统/成员访问 {
 
 | 语法 | 语义 |
 |------|------|
-| `base·name` | 静态键成员读/写 |
-| `base·*k` | 动态键：变量 `k` 的值作成员名（用于局部容器） |
-| `kv·get(base, k)` / `kv·set(base, k, v)` | 动态字符串键读/写 |
+| `base·name` | 静态字符串键成员读/写 |
+| `base·200` | 裸标量 memitemkey：访问键即标量字面量本身（禁 `base·[200]`） |
+| `base·[342.124,23.2345]` | 标量元组 memitemkey：访问键即元组字面量本身 |
+| `base·*k` | 动态键：`*` 令 runtime-c 解引用/求值 `k`，其值作 memitemkey |
+| `kv·get(base, k)` / `kv·set(base, k, v)` | 动态键读/写 |
 
-容器成员一律走 `·`（或 `kv·get`/`kv·set`），**不得**用 `[]`；`[]` 只索引 compact 数组（见 [[数组形
-态]]）。
+**指针作 key 必须 `*` 开头**：当作为 memitemkey 的操作数是指针（ref=1 Ptr）时，**必须**写 `base·*k`，
+由 runtime-c 沿 Ptr 解引用取被指向值作键；省略 `*` 非法（不自动解引用）。这是**显式** deref、非自动改
+键（运行期语义见 [[成员访问]]（runtime 卷））。
+
+`base` 即 map 的 memheadname（或 struct 实例名）。访问键**逐字即 memitemkey 值**：kvspace 与
+kvlangruntime 均不得归一化、改写或自动加壳（详见 [[文法与合法性]] 的逐字铁律，术语见 [[map容器]]）。裸
+标量键 `base·200` 与 1 元元组键 `base·[200]` 是**不同** memitemkey，不得互转。
+
+容器成员一律走 `·`（或 `kv·get`/`kv·set`）作**索引**，**不得**用 `[]` 索引运算符；`[]` 只索引 compact
+数组（见 [[数组形态]]）。注意：元组键 `base·[…]` 里的 `[…]` 是 **memitemkey 值字面量**、不是索引运算
+符——它整体是 `·` 右侧的那一个键。
 
 ### `base·name` 的 base 解析：按指针优先、按名回退
 

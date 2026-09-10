@@ -9,12 +9,13 @@
 //   x
 //   y
 rwfunc test() -> () {
-	names = {"apple", "banana", "cherry"}
+	names:[int64]·[]char/utf32 = {"apple", "banana", "cherry"}
 	for (s in names) {
 		println(s)
 	}
 	println("-- inline --")
-	for (s in {"x", "y"}) {
+	inline_names:[int64]·[]char/utf32 = {"x", "y"}
+	for (s in inline_names) {
 		println(s)
 	}
 }

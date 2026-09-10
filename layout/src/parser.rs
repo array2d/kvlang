@@ -1220,30 +1220,26 @@ impl Parser {
                     chain_segs.push(ast::str_lit(&field));
                     continue;
                 }
-                // strkeymap 坐标访问 m·[i,j]：坐标段是单个成员名 "[i,j]"（字符串键）。
+                // 元组/坐标 key：`m·[i,j]` 的成员名**取源码原样文本**（`[39.90,116.40]` 就是
+                // `[39.90,116.40]`，不重建、不规范化——key 是独立 langtype 的字面表示，
+                // 改写会让写入与读取的 key 对不上）。逐 token 取原文拼接。
                 if self.peek().kind == Kind::LBrack {
                     self.advance();
-                    let mut idxs = Vec::new();
+                    let mut parts: Vec<String> = vec!["[".to_string()];
                     while self.peek().kind != Kind::RBrack && self.peek().kind != Kind::EOF {
-                        if self.eat(Kind::Comma) {
-                            continue;
-                        }
-                        if let Some(idx) = self.parse_pratt(0) {
-                            idxs.push(idx);
+                        let t = self.advance();
+                        if t.kind == Kind::Comma {
+                            parts.push(",".to_string());
+                        } else if t.kind != Kind::Newline && t.kind != Kind::Comment {
+                            parts.push(t.value.clone());
                         }
                     }
                     self.expect(Kind::RBrack);
-                    let coord = format!(
-                        "[{}]",
-                        idxs.iter()
-                            .map(|e| e.to_string())
-                            .collect::<Vec<_>>()
-                            .join(",")
-                    );
+                    parts.push("]".to_string());
                     if chain_base.is_none() {
                         chain_base = Some(left.clone());
                     }
-                    chain_segs.push(ast::str_lit(&coord));
+                    chain_segs.push(ast::str_lit(&parts.concat()));
                     continue;
                 }
             }

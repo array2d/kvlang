@@ -23,7 +23,7 @@ lib kvlang/spec/类型系统/种类_代码与特殊值 {
 - **None** 不是种类：它是 `storetype=NONE` 的空结构体 XValue。任何有名变量都有地址、都有 XValue；未
   赋值即 None。None 参与算术、比较、分支条件、类型构造一律 TypeError（见下文与 [[执行模型]]）。
 - **ptr（指针）** 不是种类：它是 head 的 `ref=1`（存储位置维），head 的 storetype/langtype 描述目
-  标的完整形态，body 存目标 key 路径（见 [[容器]]）。**空指针就是 None**（无值），不设"空 Ptr"、也
+  标的完整形态，body 存目标 key 路径（见 [[map容器]]）。**空指针就是 None**（无值），不设"空 Ptr"、也
   不用 `""` 冒充（见 [[ptr]]）。
 
 > ptr（`ref=1`）是 head 的 ref 字段（存储位置维）；kvlang **源码**类型标注最前仍可书写 `*`/`@` 前缀
