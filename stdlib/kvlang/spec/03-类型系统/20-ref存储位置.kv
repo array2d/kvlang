@@ -7,7 +7,7 @@ lib kvlang/spec/类型系统/ref存储位置 {
 | ref | body | 义 |
 |-----|------|----|
 | 0 inline | 值 raw 本体 | 就地落入 kvspace |
-| 1 ptr | 目标 key 路径 | 软链接，单跳指向同型目标（head 的 storetype/langtype 即目标形态）；`ptr → rwfunc` 即函数调用链 |
+| 1 ptr | 目标 key 路径 | 指针，单跳指向同型目标（head 的 storetype/langtype 即目标形态）；`ptr → rwfunc` 即函数调用链。**空指针即 None**（无值、不落键），非"空 Ptr"（见 [[ptr]]） |
 | 2 @ext | 扩展句柄/定位符 | 单个值本体在扩展世界（fs 文件 / gpu tensordata），head 存元描述 |
 
 **源码书写与 wire 的分工**：kvlang **源码**里，指针/扩展引用仍以 `*`/`@` 前缀写在类型**最前**

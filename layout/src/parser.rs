@@ -132,7 +132,7 @@ impl Parser {
     fn parse_file(&mut self) -> ast::File {
         let mut f = ast::File::default();
         loop {
-            let comments = self.collect_leading_comments();
+            let mut comments = self.collect_leading_comments();
             if self.peek().kind == Kind::EOF {
                 break;
             }
@@ -203,11 +203,15 @@ impl Parser {
                 self.advance();
             } else {
                 let prev_pos = self.pos;
-                let inst = self.parse_inst();
-                if let Some(mut inst) = inst {
-                    if inst.expr.is_some() {
-                        inst.comments = comments;
-                        f.top_level_calls.push(inst);
+                let insts = self.parse_inst();
+                if !insts.is_empty() {
+                    for (k, mut inst) in insts.into_iter().enumerate() {
+                        if inst.expr.is_some() {
+                            if k == 0 {
+                                inst.comments = comments.clone();
+                            }
+                            f.top_level_calls.push(inst);
+                        }
                     }
                 } else if self.pos == prev_pos {
                     if self.peek().kind != Kind::EOF {
@@ -259,7 +263,7 @@ impl Parser {
         self.expect(Kind::LBrace);
         let mut body: Vec<Stmt> = Vec::new();
         loop {
-            let comments = self.collect_leading_comments();
+            let mut comments = self.collect_leading_comments();
             if self.peek().kind == Kind::RBrace || self.peek().kind == Kind::EOF {
                 break;
             }
@@ -295,9 +299,13 @@ impl Parser {
                 f.funcs.push(func);
                 continue;
             }
-            match self.parse_stmt() {
-                Some(st) => body.push(attach_comments(st, comments)),
-                None => break,
+            let sts = self.parse_stmt();
+            if sts.is_empty() {
+                break;
+            }
+            for st in sts {
+                let cs = std::mem::take(&mut comments);
+                body.push(attach_comments(st, cs));
             }
         }
         self.expect(Kind::RBrace);
@@ -718,15 +726,15 @@ impl Parser {
     fn parse_body(&mut self) -> Vec<Stmt> {
         let mut stmts = Vec::new();
         loop {
-            let comments = self.collect_leading_comments();
+            let mut comments = self.collect_leading_comments();
             let t = self.peek();
             if t.kind == Kind::RBrace || t.kind == Kind::EOF {
                 break;
             }
             let before = self.pos;
-            if let Some(st) = self.parse_stmt() {
-                let st = attach_comments(st, comments);
-                stmts.push(st);
+            for st in self.parse_stmt() {
+                let cs = std::mem::take(&mut comments);
+                stmts.push(attach_comments(st, cs));
             }
             // panic-mode 恢复：一轮没消费任何 token（如错误恢复后游标停在 parse_primary_expr
             // 不消费即返回 None 的 token 上）——报诊断并跳过一个 token，保证前进性，杜绝死循环。
@@ -746,7 +754,9 @@ impl Parser {
         stmts
     }
 
-    fn parse_stmt(&mut self) -> Option<Stmt> {
+    /// 解析一条语句，返回**一或 N 条** Stmt（多赋值展开为多条指令，其余语句恒 1 条）。
+    /// 空 Vec = 解析不出语句（调用方据此结束块 / break）。
+    fn parse_stmt(&mut self) -> Vec<Stmt> {
         // 块标签检测（优先级最高）。排除类型注解写槽：`x:Type`（Ident）、`x:[…]`（LBrack）、
         // `x:/lib/Name`（structref langtype，以 / 起头的路径 Literal）。
         let t2 = self.peek_at(2);
@@ -756,27 +766,27 @@ impl Parser {
             && t2.kind != Kind::LBrack
             && !t2_structref
         {
-            return Some(self.parse_block_label());
+            return vec![self.parse_block_label()];
         }
         match self.peek().kind {
-            Kind::If => Some(self.parse_if()),
-            Kind::For => Some(self.parse_for()),
-            Kind::While => Some(self.parse_while()),
+            Kind::If => vec![self.parse_if()],
+            Kind::For => vec![self.parse_for()],
+            Kind::While => vec![self.parse_while()],
             Kind::Break => {
                 self.advance();
                 self.eat(Kind::Newline);
-                Some(Stmt::Break(ast::BreakStmt {
+                vec![Stmt::Break(ast::BreakStmt {
                     comments: Vec::new(),
-                }))
+                })]
             }
             Kind::Continue => {
                 self.advance();
                 self.eat(Kind::Newline);
-                Some(Stmt::Continue(ast::ContinueStmt {
+                vec![Stmt::Continue(ast::ContinueStmt {
                     comments: Vec::new(),
-                }))
+                })]
             }
-            _ => self.parse_inst().map(Stmt::Instruction),
+            _ => self.parse_inst().into_iter().map(Stmt::Instruction).collect(),
         }
     }
 
@@ -1016,31 +1026,44 @@ impl Parser {
 
     // ── 指令级（Pratt） ────────────────────────────────────────────
 
-    fn parse_inst(&mut self) -> Option<Instruction> {
+    /// 解析一条「语句级指令」，返回**一或 N 条** Instruction：读槽侧写顶层逗号列表时，
+    /// 按位置配对 `writes`、展开为 N 条独立单赋值（见 spec「多赋值」）。个数不等 → error。
+    fn parse_inst(&mut self) -> Vec<Instruction> {
         let mut inst = Instruction::default();
+        let mut multi: Vec<Instruction> = Vec::new();
 
         match self.find_top_level_arrow() {
             Some(v) if v == "=" => {
                 inst.arrow_left = true;
                 let (writes, wtypes) = self.collect_writes_until_arrow();
-                inst.writes = writes;
-                inst.write_types = wtypes;
                 self.advance(); // consume =
-                inst.expr = self.parse_pratt(0);
-                self.dispatch_obj_by_type(&mut inst);
-                self.lower_array_fill(&mut inst);
-                self.desugar_subscript_write(&mut inst);
-                self.desugar_member_write(&mut inst);
+                let reads = self.parse_read_list();
+                if reads.len() > 1 {
+                    multi = self.expand_multi(reads, &writes, &wtypes, true);
+                } else {
+                    inst.writes = writes;
+                    inst.write_types = wtypes;
+                    inst.expr = reads.into_iter().next().flatten();
+                    self.dispatch_obj_by_type(&mut inst);
+                    self.lower_array_fill(&mut inst);
+                    self.desugar_subscript_write(&mut inst);
+                    self.desugar_member_write(&mut inst);
+                }
             }
             Some(_) => {
-                inst.expr = self.parse_pratt(0);
+                let reads = self.parse_read_list();
                 self.advance(); // consume ->
                 let (writes, wtypes) = self.collect_write_list();
-                inst.writes = writes;
-                inst.write_types = wtypes;
-                self.dispatch_obj_by_type(&mut inst);
-                self.desugar_subscript_write(&mut inst);
-                self.desugar_member_write(&mut inst);
+                if reads.len() > 1 {
+                    multi = self.expand_multi(reads, &writes, &wtypes, false);
+                } else {
+                    inst.expr = reads.into_iter().next().flatten();
+                    inst.writes = writes;
+                    inst.write_types = wtypes;
+                    self.dispatch_obj_by_type(&mut inst);
+                    self.desugar_subscript_write(&mut inst);
+                    self.desugar_member_write(&mut inst);
+                }
             }
             None => {
                 if self.peek().kind == Kind::Ident && self.peek_at(1).kind == Kind::Colon {
@@ -1058,17 +1081,82 @@ impl Parser {
             self.advance();
         }
         self.eat(Kind::Newline);
-        self.check_write_type_match(&inst);
-        self.check_empty_container_typed(&inst);
-        // 散 key 字面量 `{...}` 仅允许作赋值右值（单一写目标）；其余位置报错。
-        let top_legal = inst.writes.len() == 1;
-        if let Some(e) = &inst.expr {
-            self.check_sparse_usage(e, top_legal);
+
+        let mut out = if multi.is_empty() { vec![inst] } else { multi };
+        // 逐条检查：先 mem::take 移出以避开 &mut self 与 &inst 的借用冲突。
+        for k in 0..out.len() {
+            let i = std::mem::take(&mut out[k]);
+            self.check_write_type_match(&i);
+            self.check_empty_container_typed(&i);
+            // 散 key 字面量 `{...}` 仅允许作赋值右值（单一写目标）；其余位置报错。
+            let top_legal = i.writes.len() == 1;
+            if let Some(e) = &i.expr {
+                self.check_sparse_usage(e, top_legal);
+            }
+            out[k] = i;
         }
-        if inst.expr.is_none() && inst.writes.is_empty() {
-            return None;
+        out.retain(|i| i.expr.is_some() || !i.writes.is_empty());
+        out
+    }
+
+    /// 读槽侧：顶层逗号分隔的表达式列表（多赋值）。单表达式即普通赋值。
+    fn parse_read_list(&mut self) -> Vec<Option<Expr>> {
+        let mut reads = Vec::new();
+        loop {
+            reads.push(self.parse_pratt(0));
+            if self.peek().kind == Kind::Comma {
+                self.advance();
+            } else {
+                break;
+            }
         }
-        Some(inst)
+        reads
+    }
+
+    /// 多赋值展开：reads 与 writes 按位置配对，各成一条单赋值指令；个数不等 → error。
+    fn expand_multi(
+        &mut self,
+        reads: Vec<Option<Expr>>,
+        writes: &[String],
+        wtypes: &[String],
+        arrow_left: bool,
+    ) -> Vec<Instruction> {
+        if reads.len() != writes.len() {
+            let pos = self.peek().pos;
+            self.errors.push(Diagnostic {
+                pos,
+                warn: false,
+                info: false,
+                message: format!(
+                    "multi-assignment arity mismatch: {} reads vs {} writes",
+                    reads.len(),
+                    writes.len()
+                ),
+                source: String::new(),
+                src_file: String::new(),
+                src_name: String::new(),
+            });
+            return Vec::new();
+        }
+        let mut out = Vec::with_capacity(reads.len());
+        for (r, (w, wt)) in reads
+            .into_iter()
+            .zip(writes.iter().cloned().zip(wtypes.iter().cloned()))
+        {
+            let mut i = Instruction {
+                comments: Vec::new(),
+                expr: r,
+                writes: vec![w],
+                write_types: vec![wt],
+                arrow_left,
+            };
+            self.dispatch_obj_by_type(&mut i);
+            self.lower_array_fill(&mut i);
+            self.desugar_subscript_write(&mut i);
+            self.desugar_member_write(&mut i);
+            out.push(i);
+        }
+        out
     }
 
     fn find_top_level_arrow(&self) -> Option<String> {

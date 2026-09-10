@@ -11,11 +11,9 @@ struct Point {
 
 rwfunc test() -> () {
 	p:Point = {x=3.0 y=4.0}
-	p·x -> a
-	p·y -> b
+	p·x, p·y -> a, b
 	println("x=", a, " y=", b)
 	q:Point = {}
-	q·x -> c
-	q·y -> d
+	q·x, q·y -> c, d
 	println("default x=", c, " y=", d)
 }

@@ -5,14 +5,14 @@
 //   false
 struct Node {
 	val:int64=0
-	next:*Node=""
+	next:*Node=None
 }
 
 rwfunc is_pal(head:*Node) -> () {
 	arr:[int64]·int64 = {}
 	0 -> n
 	head -> p
-	while (p != "") {
+	while (p != None) {
 		p·val -> v
 		kv·set(arr, n, v) -> _
 		n = n + 1

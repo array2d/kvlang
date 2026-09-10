@@ -6,8 +6,8 @@
 //   3
 struct TNode {
 	val:int64=0
-	left:*TNode=""
-	right:*TNode=""
+	left:*TNode=None
+	right:*TNode=None
 }
 
 rwfunc inorder(root:*TNode) -> () {
@@ -15,8 +15,8 @@ rwfunc inorder(root:*TNode) -> () {
 	si = 0
 	stack:[int64]·*TNode = {}
 	cur = root
-	while (cur != "" || si > 0) {
-		while (cur != "") {
+	while (cur != None || si > 0) {
+		while (cur != None) {
 			_ = kv·set(stack, si, cur)
 			si + 1 -> si
 			cur·left -> cur

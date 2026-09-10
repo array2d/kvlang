@@ -5,7 +5,7 @@ lib kvlang/spec/类型系统/容器 {
 kvlang 的复合命名数据只有两种容器语义类型：**stringkeymap**（键-值映射）与 **struct**（异构命名成
 员）。kvlang **没有** `dict` 种类，也没有 `object` 或 `scope` 种类（见 [[总体方案]]）。容器物理落
 storetype=index，成员经 `{key}·` memindex 兄弟槽枚举（与 lib/rwfunc 目录节点用 `/` 子路径不同）。此
-外 **ptr**（软链接）是 ref=1 的值形态，指向另一 key。
+外 **ptr**（指针）是 ref=1 的值形态，指向另一 key。
 
 ## 锚例
 

@@ -8,20 +8,20 @@
 //   1
 struct Node {
 	val:int64=0
-	next:*Node=""
+	next:*Node=None
 }
 
 rwfunc reverse(head:*Node) -> () {
-	prev = ""
+	prev = None
 	head -> cur
-	while (cur != "") {
+	while (cur != None) {
 		nxt = cur·next
 		cur·next = prev
 		cur -> prev
 		cur = nxt
 	}
 	p = prev
-	while (p != "") {
+	while (p != None) {
 		p·val -> v
 		println(v)
 		p = p·next
