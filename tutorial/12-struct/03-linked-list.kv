@@ -1,6 +1,6 @@
-// linked-list: struct 节点存进 map（int 键、struct 值），指针用绝对路径
-// 语义: /list 是 [int64]·Node 的 map；节点存在自增整数键 ·1 ·2 ·3；
-//       next 字段存下一节点的绝对路径串（""=尾）；"路径"·field 解引用。
+// linked-list: 局部 struct 节点变量 + & 取址串成链表
+// 语义: 每个节点是帧内 struct 局部变量；next 存下一节点地址（&node ≡ kv·abs(node)）；
+//       ""=尾；cur·field 按 next 路径解引用遍历。尾节点先建，&node 恒指向已存在节点。
 // 期望输出:
 //   10
 //   20
@@ -11,11 +11,10 @@ struct Node {
 }
 
 rwfunc test() -> () {
-	/list:[int64]·Node = {}
-	/list·1:Node = {val=10 next="/list·2"}
-	/list·2:Node = {val=20 next="/list·3"}
-	/list·3:Node = {val=30}
-	cur = "/list·1"
+	n3:Node = {val=30}
+	n2:Node = {val=20 next=&n3}
+	n1:Node = {val=10 next=&n2}
+	cur = &n1
 	while (cur != "") {
 		cur·val -> v
 		println(v)

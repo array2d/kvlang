@@ -32,23 +32,19 @@ struct Node {
 }
 
 rwfunc test() -> () {
-	c:[int64]·Node = {}
-	kv·abs(c) -> cb
-	cb + "·1" -> c1
-	cb + "·2" -> c2
-	cb + "·3" -> c3
-	c·1:Node = {val=3 next=c2}
-	c·2:Node = {val=2 next=c3}
-	c·3:Node = {val=0 next=c1}
-	r1 = has_cycle(c1)
+	c1:Node = {val=3}
+	c2:Node = {val=2}
+	c3:Node = {val=0}
+	c1·next = &c2
+	c2·next = &c3
+	c3·next = &c1
+	&c1 -> h1
+	r1 = has_cycle(h1)
 	println(r1)
 
-	n:[int64]·Node = {}
-	kv·abs(n) -> nb
-	nb + "·1" -> n1
-	nb + "·2" -> n2
-	n·1:Node = {val=1 next=n2}
-	n·2:Node = {val=2 next=""}
-	has_cycle(n1) -> r2
+	d2:Node = {val=2}
+	d1:Node = {val=1 next=&d2}
+	&d1 -> h2
+	has_cycle(h2) -> r2
 	println(r2)
 }

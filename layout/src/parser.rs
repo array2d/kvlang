@@ -1239,6 +1239,12 @@ impl Parser {
             if symbol::lookup(&t.value).word == "add" {
                 return self.parse_pratt(UNARY_PREC);
             }
+            // 一元前缀 & = 取址：&x ≡ kv·abs(x)（中缀 & 仍为按位与，走 pratt 中缀路径）。
+            if symbol::lookup(&t.value).word == "bitand" {
+                let arg = self.parse_pratt(UNARY_PREC)?;
+                let op = format!("kv{}abs", keytree::MEMBER_SEP);
+                return Some(ast::call(&op, vec![arg]));
+            }
             let arg = self.parse_pratt(UNARY_PREC)?;
             return Some(ast::call(&t.value, vec![arg]));
         }

@@ -27,21 +27,13 @@ rwfunc remove(head:[]char/utf32, val:int64) -> () {
 }
 
 rwfunc test() -> () {
-	n:[int64]·Node = {}
-	kv·abs(n) -> nb
-	nb + "·2" -> n2
-	nb + "·3" -> n3
-	nb + "·4" -> n4
-	nb + "·5" -> n5
-	nb + "·6" -> n6
-	nb + "·7" -> n7
-	n·1:Node = {val=1 next=n2}
-	n·2:Node = {val=2 next=n3}
-	n·3:Node = {val=6 next=n4}
-	n·4:Node = {val=3 next=n5}
-	n·5:Node = {val=4 next=n6}
-	n·6:Node = {val=5 next=n7}
-	n·7:Node = {val=6 next=""}
-	nb + "·1" -> h
+	n7:Node = {val=6}
+	n6:Node = {val=5 next=&n7}
+	n5:Node = {val=4 next=&n6}
+	n4:Node = {val=3 next=&n5}
+	n3:Node = {val=6 next=&n4}
+	n2:Node = {val=2 next=&n3}
+	n1:Node = {val=1 next=&n2}
+	&n1 -> h
 	remove(h, 6)
 }

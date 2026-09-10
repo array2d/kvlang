@@ -44,23 +44,15 @@ rwfunc merge(a:[]char/utf32, b:[]char/utf32) -> () {
 }
 
 rwfunc test() -> () {
-	a:[int64]·Node = {}
-	kv·abs(a) -> ab
-	ab + "·2" -> a2
-	ab + "·3" -> a3
-	a·1:Node = {val=1 next=a2}
-	a·2:Node = {val=2 next=a3}
-	a·3:Node = {val=4 next=""}
-	ab + "·1" -> ha
+	a3:Node = {val=4}
+	a2:Node = {val=2 next=&a3}
+	a1:Node = {val=1 next=&a2}
+	&a1 -> ha
 
-	b:[int64]·Node = {}
-	kv·abs(b) -> bb
-	bb + "·2" -> b2
-	bb + "·3" -> b3
-	b·1:Node = {val=1 next=b2}
-	b·2:Node = {val=3 next=b3}
-	b·3:Node = {val=4 next=""}
-	bb + "·1" -> hb
+	b3:Node = {val=4}
+	b2:Node = {val=3 next=&b3}
+	b1:Node = {val=1 next=&b2}
+	&b1 -> hb
 
 	merge(ha, hb)
 }

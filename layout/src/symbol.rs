@@ -260,7 +260,7 @@ static ENTRIES: &[Entry] = &[
         precedence: 80,
         arith: true,
         cmp: false,
-        unary: false,
+        unary: true,
     },
     Entry {
         word: "bitor",
