@@ -22,12 +22,14 @@ rwfunc / def rwir 的**签名（各参数类型）不写进 langtype 串**，也
    **`def langtype`** xvalue，body 存该参数完整 langtype 串（一参一槽），**纯净、不含变参 `...`**——
    变
    参是 arity，只落主槽 `dynamic` 字节。跨 runtime 队列按位置收参，故须有序签名。
-3. **rwfunc——命名参数键 `{name}` 承载**：func 目录根**不**落 `[0,x]` 槽；每个参数类型随命名参数键
-   `funcDir/{name}` 的 Ptr 承载——该 Ptr body 为槽坐标（读参 `[0,-j]`、写参 `[0,+j]`），**其 langtype
-   即该参数完整类型串**。rwfunc 按名在帧内解析，不在意参数顺序、仅区分读/写参。
+3. **rwfunc——参数定义键 `funcDir.[0,±j]` 承载**：func 目录根**不**落 `/` 坐标槽；每个参数随点后缀
+   键 `funcDir.[0,-j]`（读参）/ `funcDir.[0,+j]`（写参）承载——langtype `def langtype`，body = 参数
+   名 + NUL + 该参数完整类型串。点后缀与坐标斜杠键 `/[0,±j]` 不同名，故运行期向帧根
+   `frameRoot/[0,±j]` 写实参地址 Ptr 时不会撞上只读静态节点；参数顺序由键中的 `±j` 显式记录（命名
+   键不保序），rwfunc 按位置取参、只区分读/写。
 
 于是 rwfunc/def rwir 主槽 langtype 都是裸种类名 `rwfunc` / `def rwir` 本身，**非「签名 langtype
-串」**。def rwir 的签名散在 `[0,x]` 槽、rwfunc 的散在 `{name}` Ptr；实现指令行（若有）在
+串」**。def rwir 的签名散在 `[0,x]` 槽、rwfunc 的散在 `.[0,±j]` 键；实现指令行（若有）在
 `[s0>0,·]`。
 
 ### def 族：定义节点的 langtype（带空格书写）
@@ -39,7 +41,7 @@ rwfunc / def rwir 的**签名（各参数类型）不写进 langtype 串**，也
 |----------|------|------|
 | `def rwir` | `/lib/<op>` | 一条 rwir 的路由头/签名定义（原 `defrwir`，废连写） |
 | `def struct` | `/lib/<Name>` | 一个 struct 原型的定义节点（字段类型定义在其子槽） |
-| `def langtype` | def rwir 签名行 `[0,x]` 槽 | 一个参数的类型定义（body=该参数 langtype 串；rwfunc 不用此槽，类型随 `{name}` Ptr 的 langtype 承载） |
+| `def langtype` | def rwir 签名行 `[0,x]` 槽 / rwfunc 参数定义键 `.[0,±j]` | 一个参数的类型定义（def rwir body=该参数 langtype 串；rwfunc body=参数名+NUL+langtype 串） |
 
 `def` 与 base 间的空格是**规范强制**：连写形式 `defrwir`/`defstruct`/`deflangtype` 一律废除。
 
@@ -50,7 +52,7 @@ KV 树中的目录路径（尾 `/`）本身是 xvalue，storetype ∈ {index, ex
 | 路径 | langtype | storetype | 成员 |
 |------|----------|-----------|------|
 | `/lib/` | `lib` | index | `/lib/<pkg>` 各包目录（`/` 子路径） |
-| `/lib/pkg·funca/` | `rwfunc` | index（静态函数定义目录） | 命名参数键 `{name}`（Ptr，langtype=参类型）+ 实现指令行 `[s0>0,·]` |
+| `/lib/pkg·funca/` | `rwfunc` | index（静态函数定义目录） | 参数定义键 `.[0,±j]`（def langtype，body=名字+NUL+类型）+ 实现指令行 `[s0>0,·]` |
 | `/lib/<op>` | `def rwir` | index（路由头，只有签名行） | 签名行 `[0,x]`（def langtype），无实现指令行 |
 | `/vthread/1/` | `rwfunc` | extindex（运行栈，可扩展） | `/vthread/1/<坐标>` 栈帧/指令 |
 

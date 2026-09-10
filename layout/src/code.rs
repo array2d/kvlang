@@ -2,18 +2,20 @@
 //!
 //! 存储约定：
 //!   /lib/<pkg>·<name>/[0,0]         布局后签名锚点（kind=rwfunc，body=计数头 [nr,nw,dyn]）
-//!   /lib/<pkg>·<name>/<param>       命名参数→slot 指针（langtype=该参类型, ref=1, body=坐标）
+//!   /lib/<pkg>·<name>.[0,±k]        参数定义键（langtype=def langtype, body=名字\x00类型）
 //!   /lib/<pkg>·<name>/[i,j]         编译后指令（kind=rwir），i 从 1 开始
 //!   /lib/<pkg>·<name>/‥labels/<l>   label → irseq
 //!   /lib/<pkg>·<name>.src           源码副本（仅 write_func 保留写入，dump 不再依赖）
 //!
 //! WriteBody: DFS-number insts (incl. ScopeStmt), emit [i,j], rewrite goto/br labels to irseq.
-//! dump: 反向——严格读 /lib/<pkg> 子树重建 AST（签名读命名参数 Ptr、体读线性槽+‥labels），
+//! dump: 反向——严格读 /lib/<pkg> 子树重建 AST（签名读参数定义键 .[0,±k]、体读线性槽+‥labels），
 //!       不读 .src、不依赖签名行 [0,x] 静态槽。
 
 use std::collections::HashMap;
 
-use super::ast::{self, Expr, Func, FuncSig, Instruction, Param, RwirDecl, ScopeStmt, Stmt, StructDecl};
+use super::ast::{
+    self, Expr, Func, FuncSig, Instruction, Param, RwirDecl, ScopeStmt, Stmt, StructDecl,
+};
 use super::ffi::Kv;
 use super::{builtin, ffi, keytree, kvkind, lower, parser};
 
@@ -387,7 +389,7 @@ fn reconstruct(kv: &mut Kv, dir: &str, name: &str) -> String {
     .full_text()
 }
 
-/// 从命名参数 Ptr 键重建签名：类型取 Ptr langtype，读/写与序取 body 坐标 [0,±k]。
+/// 从参数定义键 base.[0,±k]（点后缀）重建签名：body=名字\x00类型串。
 fn reconstruct_sig(kv: &mut Kv, dir: &str, name: &str, nr: i32, nw: i32, dynamic: bool) -> FuncSig {
     let blank = || Param {
         name: String::new(),
@@ -395,26 +397,24 @@ fn reconstruct_sig(kv: &mut Kv, dir: &str, name: &str, nr: i32, nw: i32, dynamic
     };
     let mut params: Vec<Param> = (0..nr).map(|_| blank()).collect();
     let mut returns: Vec<Param> = (0..nw).map(|_| blank()).collect();
-    for c in kv.list(dir, false, true) {
-        if c.starts_with('[') || c.ends_with('/') || c.starts_with(keytree::RUNTIME_MEMBER_SEP) {
-            continue; // 指令槽 / labels 目录 / 运行时保留字段
+    let base = dir.trim_end_matches('/');
+    for k in 1..=nr {
+        if let Some((pname, pty)) =
+            kvkind::def_param_parts(&kv.get_one(&format!("{base}.[0,-{k}]")))
+        {
+            params[(k - 1) as usize] = Param {
+                name: pname,
+                ty: pty,
+            };
         }
-        let data = kv.get_one(&format!("{dir}{c}"));
-        if !kvkind::is_ptr(&data) {
-            continue;
-        }
-        let ty = kvkind::langtype(&data);
-        let (is_read, k) = match parse_slot_coord(&kvkind::ptr_target(&data)) {
-            Some(v) => v,
-            None => continue,
-        };
-        let slot = Param {
-            name: c.clone(),
-            ty,
-        };
-        let dst = if is_read { &mut params } else { &mut returns };
-        if k >= 1 && (k as usize) <= dst.len() {
-            dst[k as usize - 1] = slot;
+    }
+    for k in 1..=nw {
+        if let Some((rname, rty)) = kvkind::def_param_parts(&kv.get_one(&format!("{base}.[0,{k}]")))
+        {
+            returns[(k - 1) as usize] = Param {
+                name: rname,
+                ty: rty,
+            };
         }
     }
     if dynamic {
@@ -431,23 +431,21 @@ fn reconstruct_sig(kv: &mut Kv, dir: &str, name: &str, nr: i32, nw: i32, dynamic
     }
 }
 
-/// 解析槽坐标 `[0,-1]`/`[0,1]` → (是否读参, |k|)。
-fn parse_slot_coord(s: &str) -> Option<(bool, i32)> {
-    let inner = s.strip_prefix('[')?.strip_suffix(']')?;
-    let col = inner.split(',').nth(1)?.trim();
-    let n: i32 = col.parse().ok()?;
-    Some((n < 0, n.abs()))
-}
-
 /// ‥labels/ 子树 → (irseq, label)，按 irseq 升序（体切块用）。
 fn read_labels(kv: &mut Kv, dir: &str) -> Vec<(i32, String)> {
-    let ldir = format!("{dir}{}{}/", keytree::RUNTIME_MEMBER_SEP, keytree::SEG_LABELS);
+    let ldir = format!(
+        "{dir}{}{}/",
+        keytree::RUNTIME_MEMBER_SEP,
+        keytree::SEG_LABELS
+    );
     let mut out: Vec<(i32, String)> = kv
         .list(&ldir, false, true)
         .into_iter()
         .filter(|c| !c.ends_with('/'))
         .filter_map(|c| {
-            let irseq: i32 = kvkind::plain(&kv.get_one(&format!("{ldir}{c}"))).parse().ok()?;
+            let irseq: i32 = kvkind::plain(&kv.get_one(&format!("{ldir}{c}")))
+                .parse()
+                .ok()?;
             Some((irseq, c))
         })
         .collect();
@@ -566,10 +564,7 @@ fn build_inst(inst: &RawInst, by_irseq: &HashMap<i32, String>) -> Instruction {
         "=" => inst.reads.first().map(operand_expr),
         "goto" => Some(ast::call(
             "goto",
-            inst.reads
-                .iter()
-                .map(|o| label_leaf(o, by_irseq))
-                .collect(),
+            inst.reads.iter().map(|o| label_leaf(o, by_irseq)).collect(),
         )),
         "br" => {
             let mut args = Vec::with_capacity(inst.reads.len());
@@ -631,6 +626,15 @@ pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) {
     let mut labels: HashMap<String, i32> = HashMap::new();
     collect_insts(&fn_.body, &mut seq, &mut labels);
 
+    // 参数名 → *[0,±k]（显式解引用坐标）：函数体形参引用编译期替换，删命名参数 Ptr 运行时角色。
+    let mut param_coord: HashMap<String, String> = HashMap::new();
+    for (i, p) in fn_.sig.params.iter().enumerate() {
+        param_coord.insert(p.name.clone(), format!("*[0,-{}]", i + 1));
+    }
+    for (i, r) in fn_.sig.returns.iter().enumerate() {
+        param_coord.insert(r.name.clone(), format!("*[0,{}]", i + 1));
+    }
+
     // 按函数覆盖（文件夹复制式合并）：只 del_tree 本函数子树，不动 /lib 下其它函数。
     // 禁止整库删除——layoutcode 必须可增量：多次 layout 各自覆盖其函数，不误删先前的函数。
     let _ = kv.del_tree(&func_dir);
@@ -649,26 +653,33 @@ pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) {
         keytree::lib_src(pkg, &fn_.sig.name),
         ffi::new_char_byte(fn_.full_text().as_bytes()),
     ));
-    // 命名参数键 funcDir/<name>：Ptr，body=帧坐标 [0,±k]（k<0 读参、k>0 写参），
-    // target_langtype=该参类型——类型随参数名承载。func dir 根不落 [0,±k] 静态槽：
-    // 那些坐标是 runtime call 期写入的帧本地实参地址，若 layout 提前落在 func dir 根，
-    // 建帧 extindex 时会把它们当只读扩展节点，令 call 期同坐标绑定触发 ext-write 保护。
+    // 参数定义键 funcDir.[0,±k]（点后缀，与坐标斜杠键 /[0,±k] 区分）：langtype=def langtype，
+    // body=名字\x00类型串。坐标斜杠键 [0,±k] 留给 runtime call 期写实参地址 Ptr；点后缀键
+    // 不同名、不触发 extindex 写保护。函数体形参引用已替换为 *[0,±k] 显式解引用。
     for (i, p) in fn_.sig.params.iter().enumerate() {
         pairs.push((
-            format!("{func_dir}/{}", p.name),
-            ffi::new_ptr(&param_types[i], &format!("[0,-{}]", i + 1)),
+            format!("{func_dir}.[0,-{}]", i + 1),
+            kvkind::new_def_param(&p.name, &param_types[i]),
         ));
     }
     for (i, r) in fn_.sig.returns.iter().enumerate() {
         pairs.push((
-            format!("{func_dir}/{}", r.name),
-            ffi::new_ptr(&param_types[nr as usize + i], &format!("[0,{}]", i + 1)),
+            format!("{func_dir}.[0,{}]", i + 1),
+            kvkind::new_def_param(&r.name, &param_types[nr as usize + i]),
         ));
     }
     let _ = kv.set(&pairs);
 
     for (i, inst) in seq.iter().enumerate() {
-        write_linear_inst(kv, &func_dir, (i as i32) + 1, inst, &labels, &mut type_map);
+        write_linear_inst(
+            kv,
+            &func_dir,
+            (i as i32) + 1,
+            inst,
+            &labels,
+            &mut type_map,
+            &param_coord,
+        );
     }
     if !labels.is_empty() {
         let _ = kv.mkindex(&keytree::lib_labels_dir(pkg, &fn_.sig.name));
@@ -715,6 +726,10 @@ pub fn write_struct_decl(kv: &mut Kv, decl: &StructDecl) {
 /// 字段默认值 XValue：head kind = 字段类型，body = 默认字面量（未给则零值）。
 /// 标量+char 直接编码；带 dims / structref 仅记录类型（空 body），嵌套 struct 待定。
 fn field_default(ty: &str, default: Option<&Expr>) -> Vec<u8> {
+    // *T 指针字段：默认空指针（ref=1、langtype=目标 kindexpr、body 空）。
+    if let Some(target) = ty.strip_prefix('*') {
+        return ffi::new_ptr(target, "");
+    }
     let (dims, base) = kvkind::parse_langtype(ty);
     let s = default.map(|e| e.val.clone()).unwrap_or_default();
     if base.starts_with("char/") {
@@ -753,8 +768,10 @@ pub fn write_rwir_decl(kv: &mut Kv, decl: &RwirDecl) {
     let param_types = decl.sig.langtype_list();
     let base = keytree::rwir(&opcode);
     // 路由头：仅计数头（无参数载荷）；各参数类型落 [0,x] 签名行槽（def langtype）。
-    let mut pairs: Vec<(String, Vec<u8>)> =
-        vec![(base.clone(), kvkind::new_defrwir(nr, nw, decl.sig.dynamic()))];
+    let mut pairs: Vec<(String, Vec<u8>)> = vec![(
+        base.clone(),
+        kvkind::new_defrwir(nr, nw, decl.sig.dynamic()),
+    )];
     for i in 0..nr as usize {
         pairs.push((
             format!("{base}/[0,-{}]", i + 1),
@@ -804,6 +821,7 @@ fn write_linear_inst(
     s: &Instruction,
     labels: &HashMap<String, i32>,
     type_map: &mut HashMap<String, String>,
+    params: &HashMap<String, String>,
 ) {
     for (j, w) in s.writes.iter().enumerate() {
         if j < s.write_types.len() && !s.write_types[j].is_empty() {
@@ -841,13 +859,21 @@ fn write_linear_inst(
         pairs.push((format!("{prefix}/[{n},0]"), opcode_value(&opcode)));
     }
     for (j, r) in reads.iter().enumerate() {
+        let rv = params
+            .get(r.as_str())
+            .map(String::as_str)
+            .unwrap_or(r.as_str());
         pairs.push((
             format!("{prefix}/[{n},-{}]", j + 1),
-            slot_value(r, target_char),
+            slot_value(rv, target_char),
         ));
     }
     for (j, w) in s.writes.iter().enumerate() {
-        pairs.push((format!("{prefix}/[{n},{}]", j + 1), slot_value(w, "")));
+        let wv = params
+            .get(w.as_str())
+            .map(String::as_str)
+            .unwrap_or(w.as_str());
+        pairs.push((format!("{prefix}/[{n},{}]", j + 1), slot_value(wv, "")));
     }
     if !pairs.is_empty() {
         let _ = kv.set(&pairs);

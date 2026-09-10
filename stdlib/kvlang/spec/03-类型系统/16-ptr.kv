@@ -1,23 +1,41 @@
 // 欢迎加入kvspace世界
 lib kvlang/spec/类型系统/ptr {
-	r####"# ptr（软链接）
+	r####"# ptr（指针）
 
 **ptr** 不是种类，而是 head 的 `ref=1`（存储位置维）：ptr 值的 head storetype/langtype 描述**目标的
-完整形态**，body 存**目标 key 路径**。源码类型标注最前可写 `*` 前缀（如 `*int64`）表 ref，layout 剥
-离后落成 head `ref` 独立字节；wire 层 langtype 串不含前缀（见 [[总体方案]]）；赋值（Set）时据 head
-的 storetype/langtype 做单跳类型检查。
+完整形态**，body 存**目标 key 路径**。源码类型标注最前可写 `*` 前缀（如 `*int64`）表 ref，`*` 后可
+跟任意 langtype 基（kind 或 structref，如 `*Node`、`[int64]·*Node`）；layout 剥离后落成 head `ref`
+独立字节；wire 层 langtype 串不含前缀（见 [[总体方案]]）；赋值（Set）时据 head 的 storetype/langtype
+做单跳类型检查。
 
-跨函数共享的数据放绝对路径，指针变量存其路径字符串：
+指针是**值**：读一个 `*T` 变量得到**地址值本身**（ref=1 Ptr，不解引用），解引用是**显式**的——用一元
+前缀 `*`。三者与 C 对齐：
+
+| 形态 | 语义 |
+|------|------|
+| `&x` | 取地址 → ref=1 Ptr（`&x ≡ kv·abs(x)`，返回绝对路径串） |
+| `p`（`*T` 变量读值） | 得地址值本身（不穿透） |
+| `*p` | 解引用 → 读 body 目标地址的值 |
+
+`&` 对**裸名** `&x` 取帧槽地址（`≡ kv·abs(x)`）、对**成员链** `&t·2` 取成员路径地址（`≡
+kv·abs(t, "2")`），均产 ref=1 Ptr、body 为目标 key 路径。
 
 ```kv
-/n1 = Node{}           // Node 为 struct 原型（含 val:int64、next:[]char/utf8 字段）
-/n1·val = 1
-/n1·next = "/n2"       // next 存目标路径（指针）
-"/n1" -> p             // 引号 = 路径串（指针）
-p·val -> v             // 按值解引用：读 /n1·val
+struct Node {
+	val:int64=0
+	next:*Node=""        // 指针字段：ref=1 + langtype=/lib/Node，body 存目标路径
+}
+/n1 = Node{val=1}       // 绝对路径建节点
+/n2 = Node{val=2 next=/n1}  // next 存 /n1 绝对路径（指针）
+/n2 -> p                // p 为指针变量（存路径串）
+*p -> q                 // q = 解引用 p = n2 的实例值
+p·val -> v              // 成员访问经指针自动解引用：读 /n1·val
 ```
 
-局部变量/容器成员取指针用一元前缀 `&`（`&x ≡ kv·abs(x)`，返回绝对路径串），与 `*` ref 标注互补——
-`&` 造路径、`*` 标注目标形态（见 [[逻辑位运算与优先级]] 取址运算符）。
+成员访问 `p·field` 经指针**自动解引用**（对齐 Go/Rust 的 `p.field`）；需要「指针指向的整值」（如指针
+指向标量）时用显式 `*p`。二者不冲突：`*p` 取整值、`p·field` 取成员。
+
+嵌套指针（`**T`）不在本模型内：wire 层 langtype 串不含 `*`、ref 仅单字节，无法表达层数。链表/树/取址
+皆一层指针，已覆盖；C 里 `**` 的「out 参数传地址」由 kvlang 写参（`-> (r:T)`）取代，无需 `**`。
 "#### -> /lib/kvlang/spec/类型系统/ptr
 }

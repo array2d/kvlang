@@ -5,11 +5,11 @@
 //   false
 struct TNode {
 	val:int64=0
-	left:[]char/utf32=""
-	right:[]char/utf32=""
+	left:*TNode=""
+	right:*TNode=""
 }
 
-rwfunc same(a:[]char/utf32, b:[]char/utf32) -> (ok:int64) {
+rwfunc same(a:*TNode, b:*TNode) -> (ok:int64) {
 	if (a == "" || b == "") {
 		if (a == b) { 1 -> ok } else { 0 -> ok }
 	} else {
@@ -24,22 +24,16 @@ rwfunc same(a:[]char/utf32, b:[]char/utf32) -> (ok:int64) {
 
 rwfunc test() -> () {
 	t:[int64]·TNode = {}
-	kv·abs(t) -> tb
-	tb + "·2" -> t1
-	tb + "·3" -> t2
-	t·1:TNode = {val=1 left=t1 right=t2}
 	t·2:TNode = {val=2}
 	t·3:TNode = {val=3}
-	tb + "·1" -> rt
+	t·1:TNode = {val=1 left=&t·2 right=&t·3}
+	&t·1 -> rt
 
 	v:[int64]·TNode = {}
-	kv·abs(v) -> vb
-	vb + "·2" -> v1
-	vb + "·3" -> v2
-	v·1:TNode = {val=1 left=v1 right=v2}
 	v·2:TNode = {val=2}
 	v·3:TNode = {val=4}
-	vb + "·1" -> rv
+	v·1:TNode = {val=1 left=&v·2 right=&v·3}
+	&v·1 -> rv
 
 	same(rt, rt) -> r1
 	if (r1 == 1) { println("true") } else { println("false") }

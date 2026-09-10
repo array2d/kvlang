@@ -251,40 +251,20 @@ static char *frame_slot_key(const char *frame_root, const char *slot) {
 }
 
 /* 实参名 → 其存储键（写入被调帧 [0,-k]/[0,k]）。字面量返回 NULL。
- * 命名参数经 Ptr 指到本帧 [0,±k]，槽内是上层 handle_call 已 resolve 好的最终键路径；
- * 之后只追显式 Ptr（ref==1）链，勿把 char 值当路径再追——否则字符串实参的内容会被
- * 误当键（穿两层调用即变 None）。写侧 kvlangBuiltinResolveWriteSlot 同此纪律（#124）。 */
+ * *[0,±k] 显式解引用：读本帧 [0,±k]（ref=1 Ptr，body=实参地址），取 target 即实参存储键。
+ * 普通名/绝对路径走 frame_slot_key（绝对路径直通、·成员返回 NULL）。 */
 static char *resolve_read_path(kvlangKv_t *kv, const char *frame_root, const char *name) {
     if (is_literal(name)) return NULL;
-    char *stk = kvlangKeytreeStack(frame_root);
-    kvlangXvalue_t v; kvlangXvalueZero(&v);
-    kvlangKvGetMember(kv, stk, name, &v);
-    char *result = NULL;
-    if (kvlangXvalueIsPtr(&v)) {
-        char *target = kvlangXvaluePtrTarget(&v);
-        kvlangXvalue_t nv; kvlangXvalueZero(&nv);
-        kvlangKvGetMember(kv, stk, target, &nv);
-        if (kvlangXvalueNone(&nv) || !kvlangXvalueIsCharKind(kvlangXvalueKind(&nv))) {
-            result = frame_slot_key(frame_root, target);
-        } else {
-            char *path = kvlangXvalueValueString(&nv);
-            for (;;) {
-                kvlangXvalue_t hop; kvlangXvalueZero(&hop);
-                kvlangKvGetOne(kv, path, &hop);
-                if (!kvlangXvalueIsPtr(&hop)) { kvlangXvalueFree(&hop); result = path; break; }
-                char *p2 = kvlangXvaluePtrTarget(&hop);
-                kvlangXvalueFree(&hop);
-                free(path);
-                path = p2;
-            }
-        }
-        kvlangXvalueFree(&nv);
-        free(target);
-    } else {
-        result = frame_slot_key(frame_root, name);
+    if (name[0] == '*') {
+        char *stk = kvlangKeytreeStack(frame_root);
+        kvlangXvalue_t pv; kvlangXvalueZero(&pv);
+        kvlangKvGetMember(kv, stk, name + 1, &pv);
+        char *result = kvlangXvalueIsPtr(&pv) ? kvlangXvaluePtrTarget(&pv) : NULL;
+        kvlangXvalueFree(&pv);
+        free(stk);
+        return result;
     }
-    kvlangXvalueFree(&v); free(stk);
-    return result;
+    return frame_slot_key(frame_root, name);
 }
 
 /* return：弹出当前帧 [d]。d==1 → 顶层结束（*out_next=NULL）；否则 *out_next=‥returnpc。
@@ -442,6 +422,7 @@ static char *handle_call(kvlangKv_t *kv, const char *pc, kvlangRwirInst_t *inst)
             kvlangParam_t *arg = &inst->reads[i + 1];
             char *rk = resolve_read_path(kv, caller_fr, arg->name);
             bool concrete = !kvlangXvalueNone(&arg->val) && !kvlangXvalueKindIs(&arg->val, KVSPACE_KIND_RWIR) && !kvlangXvalueKindIs(&arg->val, KVSPACE_KIND_RWFUNC);
+            char lt[256] = {0};
             if (concrete) {
                 /* 字面量无变量槽，一律写 ._litN；勿沿用 resolve_read_path 的返回值——
                  * 否则字面量内容（如 "https://x" 里的 //）会被当路径段，二次读回即丢。 */
@@ -451,15 +432,25 @@ static char *handle_call(kvlangKv_t *kv, const char *pc, kvlangRwirInst_t *inst)
                 rk = kvlangStrbufDetach(&lk);
                 /* 写字面量到 rk（拷贝，避免 double-free） */
                 kvspaceHead_t ah; kvspaceDecodeHead(arg->val.data, arg->val.len, &ah);
+                if (ah.langtype[0]) snprintf(lt, sizeof lt, "%s", ah.langtype);
                 int32_t abl; const uint8_t *ab = kvlangXvalueBody(&arg->val, &ah, &abl);
                 kvlangLangtype akx; kvlangLangtypeParse(ah.langtype, &akx);
                 pairs[np].key = strdup(rk);
                 kvspaceTlvEncode(kvlangXvalueKind(&arg->val), ab, (uint32_t)abl, akx.dims, akx.ndim,
                                    &pairs[np].val.data, &pairs[np].val.len);
                 np++;
+            } else if (rk) {
+                kvlangXvalue_t hv; kvlangXvalueZero(&hv);
+                kvlangKvGetOne(kv, rk, &hv);
+                if (!kvlangXvalueNone(&hv)) {
+                    kvspaceHead_t ah;
+                    if (kvlangXvalueHead(&hv, &ah) == 0 && ah.langtype[0])
+                        snprintf(lt, sizeof lt, "%s", ah.langtype);
+                }
+                kvlangXvalueFree(&hv);
             }
             if (rk) {
-                kvlangXvalue_t rv; kvlangXvalueNewCharUtf8(&rv, rk);
+                kvlangXvalue_t rv; kvlangXvalueNewPtr(&rv, lt, rk);
                 pairs[np].key = kvlangStrbufDetach(&slot);
                 pairs[np].val = rv;
                 np++;
@@ -474,7 +465,25 @@ static char *handle_call(kvlangKv_t *kv, const char *pc, kvlangRwirInst_t *inst)
         if (i < inst->nw) {
             char *wk = resolve_read_path(kv, caller_fr, inst->writes[i].name);
             if (wk) {
-                kvlangXvalue_t wv; kvlangXvalueNewCharUtf8(&wv, wk);
+                char lt[256] = {0};
+                kvlangStrbuf_t pk; kvlangStrbufInit(&pk);
+                kvlangStrbufPrintf(&pk, "%s.[0,%d]", func_key, i + 1);
+                kvlangXvalue_t dv; kvlangXvalueZero(&dv);
+                kvlangKvGetOne(kv, pk.p, &dv);
+                kvlangStrbufFree(&pk);
+                if (!kvlangXvalueNone(&dv)) {
+                    kvspaceHead_t ah;
+                    if (kvlangXvalueHead(&dv, &ah) == 0) {
+                        int32_t al; const uint8_t *ab = kvlangXvalueBody(&dv, &ah, &al);
+                        for (int bi = 0; ab && bi < al; bi++) if (ab[bi] == 0) {
+                            int tl = al - bi - 1;
+                            if (tl > 0 && tl < (int)sizeof lt) { memcpy(lt, ab + bi + 1, tl); lt[tl] = 0; }
+                            break;
+                        }
+                    }
+                }
+                kvlangXvalueFree(&dv);
+                kvlangXvalue_t wv; kvlangXvalueNewPtr(&wv, lt, wk);
                 pairs[np].key = kvlangStrbufDetach(&slot);
                 pairs[np].val = wv;
                 np++;

@@ -8,10 +8,10 @@
 //   1
 struct Node {
 	val:int64=0
-	next:[]char/utf32=""
+	next:*Node=""
 }
 
-rwfunc reverse(head:[]char/utf32) -> () {
+rwfunc reverse(head:*Node) -> () {
 	prev = ""
 	head -> cur
 	while (cur != "") {

@@ -260,6 +260,27 @@ pub fn new_def_langtype(langtype: &str) -> Vec<u8> {
     ffi::tlv_encode(KIND_DEF_LANGTYPE, langtype.as_bytes(), 1)
 }
 
+/// rwfunc 参数定义键（点后缀 .[0,-k]）：body=名字\x00类型串，langtype=def langtype。
+pub fn new_def_param(name: &str, langtype: &str) -> Vec<u8> {
+    let mut body = name.as_bytes().to_vec();
+    body.push(0);
+    body.extend_from_slice(langtype.as_bytes());
+    ffi::tlv_encode(KIND_DEF_LANGTYPE, &body, 1)
+}
+
+/// 解析参数定义键 body（名字\x00类型串）→ (名字, 类型)。
+pub fn def_param_parts(data: &[u8]) -> Option<(String, String)> {
+    if data.is_empty() {
+        return None;
+    }
+    let h = ffi::decode_head(data);
+    let b = body(data, &h);
+    let nul = b.iter().position(|&x| x == 0)?;
+    let name = String::from_utf8_lossy(&b[..nul]).into_owned();
+    let ty = String::from_utf8_lossy(&b[nul + 1..]).into_owned();
+    Some((name, ty))
+}
+
 // ── struct 原型（对齐 runtime kvlangBuiltinMemindex）─────────────────
 //
 // /lib/Name       kind=struct，body="name:langtype\n..."（字段声明类型，供实例化类型校验）

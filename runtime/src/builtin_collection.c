@@ -568,7 +568,12 @@ int kvlangBuiltinStructNew(kvlangFrame_t *f) {
             const char *vk = kvlangXvalueKind(&in[i + 1]);
             kvspaceHead_t vh; kvlangXvalueHead(&in[i + 1], &vh);
             kvlangLangtype vkx; kvlangLangtypeParse(vh.langtype, &vkx);
-            if (ftype[0] && !kvlangLangtypeMatch(ftype, vk, vkx.ndim, vkx.dims)) {
+            // *T 指针字段：字段类型剥离前导 * 后与值的 langtype 比对，并校验值 ref=1。
+            const char *fx = (ftype[0] == '*') ? ftype + 1 : ftype;
+            bool type_ok = ftype[0] ? kvlangLangtypeMatch(fx, vk, vkx.ndim, vkx.dims) : true;
+            if (ftype[0] == '*' && vh.ref != KVSPACE_REF_PTR)
+                type_ok = false;
+            if (ftype[0] && !type_ok) {
                 rc = kvlangBuiltinSetErr(f, "TypeError: field %s: expected %s, got %s", fname, ftype, vk[0] ? vk : "None");
                 free(ftype); free(fname); break;
             }

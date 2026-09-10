@@ -16,11 +16,13 @@ lib kvlang/spec/layout语义/函数写槽与布局 {
 rwfunc 布进 `/lib/<pkg>·<name>/`：
 
 1. `[0,0]`——签名行锚点，langtype `rwfunc`，body `[nr:u16 LE][nw:u16 LE][dynamic:u8]`（读参数/写参数/
-   是否变参），仅此计数头。rwfunc **不**在 func 目录根落 `[0,±k]` 参数类型槽——各参类型改由命名参数
-   键承载（见下）。
+   是否变参），仅此计数头。rwfunc **不**在 func 目录根落 `[0,±k]` 参数类型槽。
 2. `/lib/<pkg>·<name>.src`——源码副本（kind `char`）。
-3. 每个命名参数——`funcDir/<param>` 存 Ptr，body 为其帧坐标串（读参 `[0,-j]`、写参 `[0,+j]`），
-   **Ptr 的 langtype 即该参数类型**（target_langtype）——类型随参数名承载，非固定 `char`。
+3. 每个参数定义键——`funcDir.[0,-j]`（读参）/ `funcDir.[0,+j]`（写参），点后缀、与坐标斜杠键
+   `/[0,±j]` 不同名；langtype=`def langtype`，body = 参数名 + NUL + 该参类型串。此键是**签名元数
+   据**（dump / 类型检查 / 调用期类型检查用），**不参与运行时形参解析**——函数体指令里的形参引用
+   已在编译期替换为帧坐标的显式解引用 `*[0,-j]`/`*[0,+j]`，运行期直接读帧槽解引用到实参值（见
+   [[调用extindex]]）。
 4. 指令体从 `[1,0]` 起（`[0,0]` 为签名行锚点）。
 
 func 目录根之所以**不**预落 `[0,±k]`：这些坐标是 runtime 调用期写入的帧本地实参地址；若 layout 提前

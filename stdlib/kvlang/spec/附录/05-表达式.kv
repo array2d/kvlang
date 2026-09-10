@@ -18,7 +18,7 @@ primary     = literal | ident | path
             | struct_literal
             | map_literal
 
-prefix_unary = "-" | "!" | "√" | "&"                  (* √ = sqrt（U+221A）；&x ≡ kv·abs(x) 取址 *)
+prefix_unary = "-" | "!" | "√" | "&" | "*"           (* √ = sqrt（U+221A）；&x ≡ kv·abs(x) 取址；*p 解引用 *)
 
 infix_primary = binary_op expr
 
@@ -26,7 +26,8 @@ binary_op  = "+" | "-" | "×" | "÷" | "%"
            | "==" | "!=" | "≠" | "<" | ">" | "<=" | "≤" | ">=" | "≥"
            | "&&" | "||" | "&" | "|" | "^" | "<<" | ">>"
               (* 乘 = ×(U+00D7)，除 = ÷(U+00F7)；≠ ≤ ≥ 为 != <= >= 的等价字形。
-                 "*" 登记为 pointer（precedence 0、非算术）；"/" 不在符号表、仅用于路径/注释，无算术除法。 *)
+                 "*" 在类型位置登记为 pointer（precedence 0、非算术）、在表达式前缀位置为解引用；
+                 "/" 不在符号表、仅用于路径/注释，无算术除法。 *)
 
 arg_list    = expr { "," expr }
 

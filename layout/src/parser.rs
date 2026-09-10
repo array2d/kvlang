@@ -1240,9 +1240,14 @@ impl Parser {
                 return self.parse_pratt(UNARY_PREC);
             }
             // 一元前缀 & = 取址：&x ≡ kv·abs(x)（中缀 & 仍为按位与，走 pratt 中缀路径）。
+            // & 对成员链 kv·get(base, segs...) → kv·abs(base, segs...)：取成员路径地址，非读值取址。
             if symbol::lookup(&t.value).word == "bitand" {
                 let arg = self.parse_pratt(UNARY_PREC)?;
                 let op = format!("kv{}abs", keytree::MEMBER_SEP);
+                let get = format!("kv{}get", keytree::MEMBER_SEP);
+                if arg.op == get && arg.args.len() >= 2 {
+                    return Some(ast::call(&op, arg.args));
+                }
                 return Some(ast::call(&op, vec![arg]));
             }
             let arg = self.parse_pratt(UNARY_PREC)?;

@@ -37,8 +37,9 @@ int kvlangKvGetOne(kvlangKv_t *k, const char *key, kvlangXvalue_t *out) {
     return 0;
 }
 
-/* Frame member: dir 直连 name 组键，借用读（resolve=1 穿透 link，全路径 Get(resolve=0) 不穿透 [d] 帧）
- * → out 借 kvspace 指针（borrowed=1）。空值 → out len=0。 */
+/* Frame member: dir 直连 name 组键，借用读（resolve=0：拿 Ptr 本体，不穿透 link——
+ * 解引用由 runtime 显式按 target 形态判别，见 ResolveReadValue/ResolveWriteSlot）；
+ * 空值 → out len=0。 */
 int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXvalue_t *out) {
     kvlangXvalueZero(out);
     if (!name || !name[0])
@@ -50,7 +51,7 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
     key[dl + nl] = 0;
     uint8_t *d;
     uint32_t len;
-    if (kvspaceGet(k->h, key, 1, &d, &len) == 0 && d && len > 0) {
+    if (kvspaceGet(k->h, key, 0, &d, &len) == 0 && d && len > 0) {
         out->data = d;
         out->len = len;
         out->borrowed = 1;
@@ -107,7 +108,7 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
         uint32_t body_len = h.body_len < 0 ? 0 : (uint32_t)h.body_len;
         const uint8_t *body = v->data + h.body_offset;
         uint8_t *dst = NULL;
-        if (kvspaceWriteInPlace(k->h, pairs[i].key, 1, body_len, &dst, err, err_cap) != 0) {
+        if (kvspaceWriteInPlace(k->h, pairs[i].key, 0, body_len, &dst, err, err_cap) != 0) {
             if (kvspaceWriteNewPlace(k->h, pairs[i].key, h.ref, h.storetype, h.ro, h.vid, (const char *)h.langtype, body_len, &dst, err, err_cap) != 0) {
                 rc = -1;
                 break;

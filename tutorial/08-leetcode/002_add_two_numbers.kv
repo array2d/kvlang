@@ -6,11 +6,11 @@
 //   8
 struct Node {
 	val:int64=0
-	next:[]char/utf32=""
+	next:*Node=""
 }
 
 lib lc {
-rwfunc add(a:[]char/utf32, b:[]char/utf32) -> () {
+rwfunc add(a:*Node, b:*Node) -> () {
 	carry = 0
 	result:[int64]·int64 = {  }
 	0 -> ri
