@@ -45,32 +45,20 @@ rwfunc get_intersection(ha:[]char/utf32, hb:[]char/utf32) -> () {
 
 rwfunc test() -> () {
 	// common tail: 8→4→5
-	t:[int64]·Node = {}
-	kv·abs(t) -> tb
-	tb + "·1" -> t8
-	tb + "·2" -> t4
-	tb + "·3" -> t5
-	t·1:Node = {val=8 next=t4}
-	t·2:Node = {val=4 next=t5}
-	t·3:Node = {val=5 next=""}
+	t5:Node = {val=5}
+	t4:Node = {val=4 next=&t5}
+	t8:Node = {val=8 next=&t4}
 
 	// list A: 4→1→t8
-	a:[int64]·Node = {}
-	kv·abs(a) -> ab
-	ab + "·2" -> a2
-	a·1:Node = {val=4 next=a2}
-	a·2:Node = {val=1 next=t8}
-	ab + "·1" -> ha
+	a2:Node = {val=1 next=&t8}
+	a1:Node = {val=4 next=&a2}
+	&a1 -> ha
 
 	// list B: 5→6→1→t8
-	b:[int64]·Node = {}
-	kv·abs(b) -> bb
-	bb + "·2" -> b2
-	bb + "·3" -> b3
-	b·1:Node = {val=5 next=b2}
-	b·2:Node = {val=6 next=b3}
-	b·3:Node = {val=1 next=t8}
-	bb + "·1" -> hb
+	b3:Node = {val=1 next=&t8}
+	b2:Node = {val=6 next=&b3}
+	b1:Node = {val=5 next=&b2}
+	&b1 -> hb
 
 	get_intersection(ha, hb)
 }

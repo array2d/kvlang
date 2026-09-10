@@ -43,29 +43,19 @@ rwfunc show(head:[]char/utf32) -> () {
 }
 
 rwfunc test() -> () {
-	e:[int64]·Node = {}
-	kv·abs(e) -> eb
-	eb + "·2" -> e2
-	eb + "·3" -> e3
-	e·1:Node = {val=1 next=e2}
-	e·2:Node = {val=1 next=e3}
-	e·3:Node = {val=2 next=""}
-	eb + "·1" -> e1
-	dedup(e1)
-	show(e1)
+	e3:Node = {val=2}
+	e2:Node = {val=1 next=&e3}
+	e1:Node = {val=1 next=&e2}
+	&e1 -> eh
+	dedup(eh)
+	show(eh)
 
-	f:[int64]·Node = {}
-	kv·abs(f) -> fb
-	fb + "·2" -> f2
-	fb + "·3" -> f3
-	fb + "·4" -> f4
-	fb + "·5" -> f5
-	f·1:Node = {val=1 next=f2}
-	f·2:Node = {val=1 next=f3}
-	f·3:Node = {val=2 next=f4}
-	f·4:Node = {val=3 next=f5}
-	f·5:Node = {val=3 next=""}
-	fb + "·1" -> f1
-	dedup(f1)
-	show(f1)
+	f5:Node = {val=3}
+	f4:Node = {val=3 next=&f5}
+	f3:Node = {val=2 next=&f4}
+	f2:Node = {val=1 next=&f3}
+	f1:Node = {val=1 next=&f2}
+	&f1 -> fh
+	dedup(fh)
+	show(fh)
 }
