@@ -1,146 +1,250 @@
 // 欢迎加入kvspace世界
-// kvlang 语法速览 —— 也是 KV 树里的数据。
+// kvlang 语法速览 —— 也是 KV 树里的数据，也是 LLM 生成 kvlang 代码时的权威提示。
 // 本文件在 kvlang stdlib，runtime-rs 启动时 layout&run：顶层写语句包进 kvlang·init，
-// 执行后把整份速览作为字符串落在 /lib/kvlang/kvlangbrief。
-// 之后 byteseek 的 llm·call 生成 kv 代码时，把这份速览拼进系统提示。
+// 执行后把整份速览作为字符串落在 /lib/kvlang/kvlangbrief，供 byteseek 的 llm·call 拼接进 system prompt。
 lib kvlang {
-	r###"# kvlang 速览
+	r###"# kvlang 速览（LLM 代码生成版）
 
-kvlang 是一门全新语言，语法以下面示例为准，不要套用其它语言直觉。
+你是 kvlang 代码生成器：把用户需求翻译成一段 kvlang 程序。你只输出一个顶层函数体
+`rwfunc main() -> () { ... }`（不要 `main()` 调用、不要 `lib` 块、不要 markdown 围栏），
+最终结果用 `println(...)` 打印。下面语法以示例为准，不要套用其它语言直觉。
 
-## 注释与字符串（对齐 Rust）
-- 注释：`//` 行注释、`/* … */` 块注释（可嵌套）。**没有 `#` 注释**。
-- 字符串三形式：
-  - `"…"` 转义串（`\n \t \" \\` 等生效，可直接跨行）。
-  - `r"…"` 原始串（零转义，内容不含 `"`）。
-  - `r#"…"#` / `r##"…"##` 原始串带井号栏，内容可含 `"`；井号越多可嵌套越深。**没有 `"""` 三引号、没有反引号串**。
+## 0. 十条铁律（最影响正确率，先背下来）
 
-## 程序结构
-文件入口约定是 `rwfunc test() -> () { … }`——`kvlang xxx.kv` 会自动运行 `test`，**不要**再手写 `test()` 调用。其它函数（含习惯叫的 `main`）必须被 `test` 直接或间接调用才会执行。
+1. 乘用 `×`、除用 `÷`。`*` 不是乘（是取址/指针位），`/` 不是除（是路径/注释）。
+2. 没有 `int`/`float`/`char` 简写，也没有 `object`：数值写 `int64`/`float64` 等定宽；字符串恒 `[]char/utf32`；异构记录用 `{k=v}` 或 `struct`。
+3. 赋值两个方向：右写 `表达式 -> 槽`、左写 `槽 = 表达式`；`=` 不是表达式，判断相等用 `==`。
+4. 每条指令一行最清晰；`;` 与换行等价（`a = 1; b = 2` 合法）。
+5. 注释是 `//` 行注释、`/* */` 块注释；没有 `#` 注释。
+6. 字符串只有 `"…"`（转义）和 `r"…"` / `r#"…"#`（原始）；没有 `"""` 三引号、没有反引号。
+7. 写参初值是 `None` 不是 0：累加前先 `0 -> acc`，否则 `None + x` 报错。
+8. 数组要带 `[]` 前缀：`a:[]int64 = [1,2,3]`；写成 `a:int64 = [..]` 会报错。空容器必须标类型（`d:[]char/utf32·int64 = {}`）。
+9. `+` 只允许同类：字符+字符=拼接，数值+数值=相加；`"标签" + 数字` 会 TypeError。带标签打印用 `println("answer =", n)` 多参数（自动空格）。
+10. 函数没有返回值，结果通过写参传出：`rwfunc f(x:int64) -> (r:int64) { x + 1 -> r }`；调用 `f(3) -> y`。
+
+## 1. 骨架与常见任务
+
 ```kv
-rwfunc test() -> () {
-    total = 0
-    1 -> i               // -> 写右边这个槽
-    while (i <= 5) { total = total + i; i + 1 -> i }
-    println(total)       // 15
+rwfunc main() -> () {
+    3 + 4 -> s
+    println(s)              // 7
 }
 ```
 
-## 赋值三形式与调用
-- `x = e` / `x = e`：写左边的槽；`e -> x`：写右边的槽。`=` 不是表达式，不能嵌进条件里——条件相等判断一律用 `==`。
-- 调用只能通过写参映射拿结果，没有返回值：`f(a,b) -> r`；丢弃 `-> _`；多个 `-> x, y`。
-- 写槽必须是位置：裸名（帧局部）、`/绝对/路径`（全局）、`base·name`（成员）。字面量不能当写槽。
-
-## rwfunc 读参/写参
-- 读参 `(a:int64)` 只读，函数体内不能把读参放进写槽（含 `a[i] = v`）。
-- 写参 `-> (acc:int64)` 体内可读可写——累加器、要被修改的数组都声明为写参。
-- **写参初值是 None，不是 0**：累加前必须先显式 `0 -> acc`，否则首次 `acc + x` 是 `None + x` 直接失败。
 ```kv
-lib mylib { rwfunc add(A:int64, B:int64) -> (C:int64) { A + B -> C } }
-rwfunc sum(arr:[]int64) -> (acc:int64) {
-    0 -> acc; 0 -> i
-    while (i < ndarray·numel(arr)) { xv·at(arr,i) -> e; acc + e -> acc; i + 1 -> i }
+rwfunc main() -> () {
+    // 字符串
+    s = "hello"
+    string·len(s) -> n
+    println(n)              // 5
+
+    // 数组求和
+    a:[]int64 = [1,2,3,4]
+    0 -> acc
+    0 -> i
+    while (i < ndarray·numel(a)) {
+        xv·at(a, i) -> e
+        acc + e -> acc
+        i + 1 -> i
+    }
+    println(acc)            // 10
+
+    // map 读写
+    d:[]char/utf32·int64 = {}
+    d·a = 10
+    d·b = 20
+    kv·get(d, "a") -> x
+    println(x)              // 10
 }
-rwfunc test() -> () {
-    mylib·add(3,4) -> s; println(s)          // 7
-    a:[]int64 = [1,2,3,4,5]; sum(a) -> t; println(t)   // 15
-}
 ```
 
-## 数值类型（只有定宽类型）
-`int8/16/32/64 uint8/16/32/64 float32/64` 及 `char/utf8` 等；**没有 `int`/`float`**（会被拒）。
-构造器兼转换：`float32(3)`、`int8(300)`（窄化按补码回绕，float→int 向零截断）。变量声明 `x:int64 = 42`。
+## 2. 类型与构造器
 
-## 数组：两种存储形态（`[...]` compact / `{...}` stringkeymap 散 key）
-计算机意义的数组（含多维）有两种物理形态，由字面量括号选择：
-- **compact**（`[...]`）：定长同类型元素连续打包进**单个 XValue**（head kind=元素类型），支持 `xv·at`/`ndarray·numel`/下标随机访问；多维 `[256,256]uint8` 即 ndarray/tensor。
-- **stringkeymap**（`{...}`）：每元素落 `base·i` 独立 key（head kind=`stringkeymap`），变长/可增长，**字符串数组、可追加数组走这里**，用 `for-in` 遍历（`w:[]char/utf8 = {"foo","bar"}`）。
+数值定宽：`int8 int16 int32 int64 uint8 uint16 uint32 uint64 float32 float64`。
+其它：`bool`、`char/utf8` `char/utf32` `char/ascii`、`stringkeymap`、`index`、`struct`、`time`、`duration`、`any`。
+
 ```kv
-a:[]int64 = [7,2,9,4]     // ✅ compact：`[]` 前缀才是数组，裸 kind 是标量；写成 a:int64=[...] 会报错
-ndarray·numel(a) -> n               // 4
-xv·at(a,2) -> e              // 9（0 起）
-xv·set(a,1,99) -> a          // 改元素：a=[7,99,9,4]
-```
-遍历/聚合用 `while + ndarray·numel + xv·at`。求最大值：
-```kv
-xv·at(a,0) -> hi; 1 -> i
-while (i < ndarray·numel(a)) { xv·at(a,i) -> e; if (e > hi) { e -> hi }; i + 1 -> i }   // hi=9
+float64(3) -> f          // 3.0
+int64(3.9) -> i          // 3（向零截断）
+int64("42") -> n         // 42
+bool(1) -> b             // true
+char/utf32(x) -> s       // 字符串编码转换（如 char/utf8 → char/utf32）
 ```
 
-## 容器：stringkeymap / object（关键：`[]` 是数组专用，容器成员绝不用 `[]`）
-空容器字面量 `{}` **必须带类型标注**，裸 `d = {}` 会被拒。两种容器：
-- **stringkeymap**（一等 map 类型）：kindexpr 用 `·` 分隔 `key·value`，`[]char/utf8·int64` = Go `map[string]int64`。
-  key 侧恒 `[]char/<enc>` 字符串键，或 `[标量,…]` 元组键（如 `[int64]`、`[int32,int32]`，物理以字符串格式落 key）；value 可递归嵌套（`[]char/utf8·[]char/utf8·int64`）。
-- **object**：异构命名成员（类 struct/record）。
-```kv
-d:[]char/utf8·int64 = {}   // 空 map 必须标类型
-d·a = 10; d·b = 20         // 成员写（命名成员在 d·a）
-kv·get(d, "a") -> x        // 取值；缺失返回 None
-k = "a"; d·*k -> v         // 动态键：读 d·a
-kv·set(d, k, 99) -> _      // 动态键写
-m:[int64]·int64 = {}       // 整型键 map（key 落字符串）
-kv·set(m, 0, 7) -> _; kv·get(m, 0) -> e
-rec:object = {}            // 异构命名成员
-rec·name = "kv"; rec·ver = 1
-```
-**容器成员一律走 `·` / `kv·get` / `kv·set`，绝不用 `[]`**——`[]` 只索引 compact array（见「数组」），对容器用 `[]` 会 layout 报错。
-```kv
-/n1:object = {}            // 跨函数共享的数据放绝对路径
-/n1·val = 1; /n1·next = "/n2"
-"/n1" -> p; p·val -> v     // ✅ 引号=路径串（指针）·member 解引用；不加引号 /n1 读的是值非路径
-```
+`string·formatint(n, base)` / `string·formatuint(n, base)` 整数按进制转字符串；
+`string·parseint(s, base)` / `string·parseuint(s, base)` 字符串转整数（base 2..36）。
 
-## 扩展世界：`@` 前缀 kindexpr
-`@` 开头的 kindexpr 标记「元信息 key」——其真实 xvalue **不属于 kvspace 元存储**（kvspace 世界），而在 kvspace 的扩展世界。
-文件系统里的文件、GPU 里的 tensordata 都**不直接存进 kvspace**，kvspace 只存一条元信息（如大小、设备、外部路径），实体读写走扩展存储。
+## 3. 运算符
 
-## 控制流（只能在 rwfunc 体内）
-`while (c) {…}`、`if (c) {…} else {…}`。条件可为复合表达式。数组遍历用 `while` 配 `ndarray·numel`/`xv·at`（见上），不要用 for-in。
+算术：`+ - × ÷ %`。`÷` 两整数为整除（`7÷2`=3），任一侧浮点则浮点除。
+一元：`-x` `!b` `√x`（sqrt） `&x`（取址，得到指向 x 的软链接/指针）。
+比较：`== != < > <= >=`（`≠ ≤ ≥` 是等价字形）。
+逻辑/位：`&& || !`、`& | ^ << >>`。
+内建：`pow(x,y)` `sqrt(x)` `exp(x)` `log(x)` `abs(x)` `sign(x)` `neg(x)` `min(a,b,…)` `max(a,b,…)`。
+注意：`min`/`max` 是**标量变参**，不是数组；对数组求最值用 while 循环。
+数值保宽：同宽运算同宽（溢出回绕）；混宽提升到更宽（`int32+int64 → int64`；混入浮点走浮点）。
 
-## 运算符（注意乘除号）
-算术 `+ - × ÷ %`：**乘用 `×`、除用 `÷`，不要用 `*` `/`**（`/` 只用于路径，`*` 保留）。
-`÷`：两整数为整除（`7÷2`=3），任一为浮点则浮点除。比较 `== != < > <= >=`，逻辑 `&& || !`。
+## 4. 字符串（恒 `[]char/utf32`）
 
-## IO 与字符串
-`print` / `println` 可用（扩展 rwir）。字符串用 `+` 拼接：
 ```kv
 s = "hello"
-string·len(s) -> n            // 5
-string·char(s,1) -> c         // 'e'（读第 i 个字符）
-string·slice(s,0,2) -> p      // "he"
-string·find(s,"ll") -> i      // 2（找不到返回 -1）
-// 替换第 i 个字符：用 slice 拼接，不要用 string·char(s,i)=x
-string·slice(s,0,1) + "a" -> t; string·slice(s,2,5) -> u; t + u -> r   // "hallo"
+string·len(s) -> n           // 5
+string·char(s, 1) -> c       // "e"（单字符字符串）
+string·ord(s, 0) -> o        // 104（码点）
+string·cmp("a","b") -> c     // 相等返回 0
+string·find(s, "ll") -> i    // 2；找不到 -1
+string·slice(s, 0, 2) -> p   // "he"
+s + "!" -> t                 // 拼接（同类才可）
+s[1] -> x                    // "e"；越界返回 ""
+s[1] = "X"                   // 替换单字符，s 变 "hXllo"
 ```
 
-**`+` 只在同类别内成立（数值 vs 字符不可混）**：两边都是字符=拼接，两边都是数值=相加；数值与字符跨类别会 TypeError。
-数值类别内允许跨位宽混算：`int32 + int64`、`float32 + int64` 均成立，结果隐式提升到更宽的类型（`int32+int64 → int64`；混入浮点则走浮点）。
-`"标签" + 数字` 会 TypeError（`expected numeric, got char/utf32`）。
-打印带标签的数字，用 `println` 多参数（自动空格分隔），**不要**拼字符串：
+## 5. 数组（compact `[..]` 定长同型）
+
 ```kv
-n = 42
-println("answer =", n)        // answer = 42（✅ 两个参数）
-// "answer = " + n -> s; println(s)   // ❌ TypeError：char + int
+a:[]int64 = [7,2,9,4]
+ndarray·numel(a) -> n     // 4（元素数）
+ndarray·dim(a) -> d       // 1（维数）
+ndarray·shape(a) -> sh    // 各轴长度
+xv·at(a, 2) -> e          // 9（越界报错）
+xv·set(a, 1, 99) -> b     // 改元素，返回新数组 [7,99,9,4]
+a[0] -> head              // 7
+xv·langtype(a) -> lt      // "[4]int64"
+xv·bodylen(a) -> bl       // 32（body 字节数）
 ```
 
-## 自举：代码即数据（生成/校验/入库/运行）
-kv 代码是 KV 树里的数据，可运行时自产自运行：
+遍历用 `while + ndarray·numel + xv·at`。多维 `[2,3]int64` 也是 compact ndarray。
+字符串数组 / 变长集合用 `{}` stringkeymap 形态（见下），不要用 `[]`。
+`array·append/slice/fill/scatter/compact` 当前行为未稳定，数组任务优先用 compact + 下标/`xv·*`。
+
+## 6. 容器：stringkeymap / map / struct（成员一律用 `·`，绝不用 `[]`）
+
 ```kv
-kvlanglayout·vet(src) -> v        // 校验源码：合法 "ok"，否则错误信息
-kvlanglayout·format(src) -> f     // 规范化源码（parse → 格式化文本）
-kvlanglayout·layout(src) -> e     // 源码入库 /lib：成功空串，失败 "error: …"
-kvlanglayout·dump("/lib") -> d    // /lib 子树导出为可运行源码（含 // 槽位注释）
-vthread·call("pkg·func")          // 在当前 vthread 直接调用已入库函数到结束再续跑（裸名 = /lib/<名>）
-vthread·create("pkg·func") -> vid // 新开独立子 vthread（只创建不运行），返回 vid 句柄
-vthread·run(vid)                  // 驱动某 vid（由 create 得到）到结束——参数是 vid，不是函数名
+d:[]char/utf32·int64 = {}    // 空 stringkeymap 必须标类型
+d·a = 10                      // 静态成员写
+d·b = 20
+kv·get(d, "a") -> x           // 读（缺失返回 None）
+k = "a"
+d·*k -> v                     // 动态键读
+kv·set(d, "c", 30) -> _       // 动态键写
+
+m = map()                     // stringkeymap
+m·k = 5
+
+m2:[int64]·int64 = {}         // 整型键 map（键落字符串）
+kv·set(m2, 0, 7) -> _
+
+r = {name="kv", ver=1}        // struct 字面量（异构记录；没有 object）
+r·name -> n
+5 -> r·ver                    // struct 成员可写
 ```
 
-## 调试 / 暂停
+命名 struct（需要字段默认值 / 复用类型时）：
+
 ```kv
-debugger()                   // 内联断点：执行到此暂停（status 置 paused）
-vthread·setstatus("paused")  // 等价：设 vthread 状态（paused 即停住）
+struct Point { x:int64=0 y:int64=0 }
+rwfunc main() -> () {
+    p:Point = {x=3 y=4}
+    println(p·x, p·y)      // 3 4
+}
 ```
-暂停后由外部把 `/vthread/{vid}/·status` 改回 `running` 续跑。
+
+跨函数共享的数据放绝对路径：`/n1·val = 1`；取槽的地址用 `&x`，按 `p·member` 解引用。
+
+## 7. 控制流（只能在 rwfunc 体内）
+
+```kv
+if (c) { ... } else if (c2) { ... } else { ... }
+while (c) { ... }
+for (e in arr) { ... }     // 遍历 compact 数组
+break / continue
+return                     // 无返回值
+```
+
+map 遍历用 `while + kv·listlen + kv·listn`（for-in 对 map 不可靠）。
+
+## 8. 函数（lib 内定义；跨库调用走全路径）
+
+```kv
+lib mylib {
+    rwfunc add(a:int64, b:int64) -> (c:int64) { a + b -> c }
+}
+rwfunc main() -> () {
+    mylib·add(3,4) -> s
+    println(s)           // 7
+}
+```
+
+读参只读（不能放进写槽）；写参可读可写（初值 None，先置初值）；变参 `x:int64...` 仅限末位读参。
+
+## 9. 完整内建/rwir 速查（runtime-rs）
+
+### 输出/输入（term）
+- `print(x,…)` 无空格无换行；`println(x,…)` 空格分隔并换行；`cerr(x,…)` 同 println 但写 stderr。
+- `printf(fmt,…)` C 风格格式化，支持 `%d %i %u %o %x %X %f %e %g %c %s %`；不自动换行（换行写 `\n`）。
+- `input(prompt) -> line` 读一行 stdin。
+
+### JSON
+- `json·to(path) -> str`：path 处值转 JSON 文本（字符串会加引号转义，常用于拼 JSON 请求体）。
+- `json·from(str) -> root`：JSON 文本解析写入 root 子树（覆盖语义）。
+
+### 网络
+- `http·call(method, header, url, body) -> resp`；`http·get(url)`/`post(url,body)`/`put(url,body)`/`del(url)`。
+
+### 自举（kvlanglayout）
+- `kvlanglayout·vet(src) -> "ok"/err`：只校验，不写库。
+- `kvlanglayout·format(src) -> 规范化源码`。
+- `kvlanglayout·layout(src) -> entry`：源码 layout 入库，返回入口。
+- `kvlanglayout·dump("/lib") -> 源码`：/lib 子树导出为可运行源码。
+
+### 外部进程/文件系统（networld）
+- `networld/proc·exec(args, envs) -> code[, out, err]`：args/envs 是 `{...}` 数组字面量，args 首元素=可执行文件；out/err 是 `@[]uint8` 捕获句柄（绑定即捕获）。
+- `networld/fs·size(p)->n`、`·read(p,start,len)->raw`、`·write(p,bytes)->n`、`·append(p,bytes)->n`、`·list(p)->names`、`·del(p)->code`、`·mkdir(p)->code`、`·exists(p)->b`。
+- 字符串↔字节：`xv·reinterpret("s","[]uint8")` 或 `xv·reinterpret(raw,"[]char/utf8")`。
+
+```kv
+noenv = map()
+a = {"sh", "-c", "echo hi; echo oops 1>&2"}
+networld/proc·exec(a, noenv) -> code, out, err
+println(code, out, err)
+networld/fs·write("/tmp/x.txt", xv·reinterpret("hi", "[]uint8")) -> n
+```
+
+### KV 树（kv·*）
+- `kv·get(path)`、`kv·set(path,val)`、`kv·del(path)`、`kv·deltree(path)`。
+- `kv·list("/dir/")`、`kv·listlen("/dir/")`、`kv·listn("/dir/",i)`（列目录 path 要带尾 `/`）。
+- `kv·abs(x)`（= `&x`，取址）、`kv·cp(src,dst)`、`kv·cpdir(src,dst)`、`kv·cplist(src,dst)`、`kv·has(path)`。
+
+### 字符串（string·*）
+- `len / char / ord / cmp / find / slice / concat / formatint / formatuint / parseint / parseuint`。
+
+### 数组（ndarray·* / xv·*）
+- `ndarray·numel / dim / shape`；`xv·at / set / reshape / reinterpret / langtype / bodylen`。
+
+### 数学
+- 运算符见上；`pow / sqrt / exp / log / abs / sign / neg / min / max`；常量 `/lib/math·Pi` `/lib/math·E` `/lib/math·Tau`。
+
+### 时间/时长/随机
+- `time·now()`、`time·sub/add/before/after`；`time/duration·nanos/millis/seconds/minutes/hours(...)`、`time/duration·as_nanos/...`。
+- `random·intn(n)`、`random·uint64()`、`random·int63()`。
+
+### 线程/调试
+- `vthread·create(funckey)->vid`、`vthread·run(vid)`、`vthread·call(funckey)`、`vthread·sleep(dur)`、`vthread·setstatus("paused")`。
+- `debugger()` 内联断点（非调试模式 no-op）。
+
+## 10. 常见错误对照表
+
+| 想写 | 错 | 对 |
+|------|-----|-----|
+| 乘法 | `a * b` | `a × b` |
+| 除法 | `a / b` | `a ÷ b` |
+| 整数类型 | `int` | `int64` |
+| 三引号串 | `"""..."""` | `r#"..."#` |
+| 井号注释 | `# x` | `// x` |
+| 异构记录 | `object` | `{k=v}` 或 `struct` |
+| 数组类型 | `a:int64=[..]` | `a:[]int64=[..]` |
+| 写参累加 | 直接 `acc + x -> acc` | 先 `0 -> acc` |
+| 标签+数字 | `"x=" + 1` | `println("x=", 1)` |
+| 返回结果 | `return 42` | 写参传出 |
 "### -> /lib/kvlang/kvlangbrief
 }
-

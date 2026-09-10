@@ -159,7 +159,11 @@ fn valid_key(s: &str) -> bool {
 }
 
 /// atom = shape | mapexpr | structref；mapexpr = key "·" type；structref = "/" path。
+/// 最前 `*` 是 ref 前缀（Ptr 存储位置），校验剥离后剩余部分（见 [[类型表达式文法]]）。
 fn valid_atom(s: &str) -> bool {
+    if let Some(rest) = s.strip_prefix('*') {
+        return !rest.is_empty() && valid_atom(rest);
+    }
     if s.starts_with('/') {
         return valid_structref(s);
     }
@@ -185,6 +189,9 @@ pub fn expand_struct_refs(s: &str) -> String {
 }
 
 fn expand_atom(s: &str) -> String {
+    if let Some(rest) = s.strip_prefix('*') {
+        return format!("*{}", expand_atom(rest));
+    }
     if s.starts_with('/') {
         return s.to_string();
     }

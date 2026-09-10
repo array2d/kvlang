@@ -3,18 +3,22 @@ lib kvlang/spec/类型系统/ptr {
 	r####"# ptr（软链接）
 
 **ptr** 不是种类，而是 head 的 `ref=1`（存储位置维）：ptr 值的 head storetype/langtype 描述**目标的
-完整形态**，body 存**目标 key 路径**。源码类型标注最前可写 `*` 前缀（如 `*int64`）表 ref，layout 剥
-离后落成 head `ref` 独立字节；wire 层 langtype 串不含前缀（见 [[总体方案]]）；赋值（Set）时据 head
-的 storetype/langtype 做单跳类型检查。
+完整形态**，body 存**目标 key 路径**。源码类型标注最前可写 `*` 前缀（如 `*int64`）表 ref，`*` 后可
+跟任意 langtype 基（kind 或 structref，如 `*Node`、`[int64]·*Node`）；layout 剥离后落成 head `ref`
+独立字节；wire 层 langtype 串不含前缀（见 [[总体方案]]）；赋值（Set）时据 head 的 storetype/langtype
+做单跳类型检查。
 
-跨函数共享的数据放绝对路径，指针变量存其路径字符串：
+跨函数共享的数据放绝对路径，指针变量/字段存其路径字符串：
 
 ```kv
-/n1 = Node{}           // Node 为 struct 原型（含 val:int64、next:[]char/utf8 字段）
-/n1·val = 1
-/n1·next = "/n2"       // next 存目标路径（指针）
-"/n1" -> p             // 引号 = 路径串（指针）
-p·val -> v             // 按值解引用：读 /n1·val
+struct Node {
+	val:int64=0
+	next:*Node=""        // 指针字段：ref=1 + langtype=/lib/Node，body 存目标路径
+}
+/n1 = Node{val=1}       // 绝对路径建节点
+/n2 = Node{val=2 next=/n1}  // next 存 /n1 绝对路径（指针）
+/n1 -> p                // p 为指针变量（存路径串）
+p·val -> v              // 按值解引用：读 /n1·val
 ```
 
 局部变量/容器成员取指针用一元前缀 `&`（`&x ≡ kv·abs(x)`，返回绝对路径串），与 `*` ref 标注互补——

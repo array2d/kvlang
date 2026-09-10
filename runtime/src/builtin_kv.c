@@ -115,8 +115,23 @@ int kvlangBuiltinKvAbs(kvlangFrame_t *f) {
     kvlangXvalue_t in[1]; int n = kvlangBuiltinReadInputs(f, in, 1);
     char *p = n >= 1 ? resolve_path_arg(f, 0, in) : NULL;
     if (!p) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "TypeError: kv.abs requires a key"); }
-    kvlangXvalue_t r; kvlangXvalueNewCharUtf32(&r, p);
-    int rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r);
+    /* 产出 Ptr（ref=1）：langtype = 目标 kindexpr、body = 目标绝对路径。
+     * &x ≡ kv.abs(x)：取址返回指向 x 所在节点的软链接（单跳同型），不再产 char 路径串。 */
+    kvlangXvalue_t tg; kvlangXvalueZero(&tg);
+    kvlangKvGetOne(f->kv, p, &tg);
+    char lt[256] = {0};
+    if (!kvlangXvalueNone(&tg)) {
+        kvspaceHead_t h;
+        if (kvlangXvalueHead(&tg, &h) == 0 && h.langtype[0]) {
+            size_t llen = strlen((const char *)h.langtype);
+            if (llen > sizeof lt - 1)
+                llen = sizeof lt - 1;
+            memcpy(lt, h.langtype, llen);
+        }
+    }
+    kvlangXvalue_t r; kvlangXvalueNewPtr(&r, lt, p);
+    int rc = kvlangBuiltinWriteResult(f, &r);
+    kvlangXvalueFree(&r); kvlangXvalueFree(&tg);
     free(p); kvlangBuiltinFreeInputs(in, n); return rc;
 }
 

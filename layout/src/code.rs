@@ -715,6 +715,10 @@ pub fn write_struct_decl(kv: &mut Kv, decl: &StructDecl) {
 /// 字段默认值 XValue：head kind = 字段类型，body = 默认字面量（未给则零值）。
 /// 标量+char 直接编码；带 dims / structref 仅记录类型（空 body），嵌套 struct 待定。
 fn field_default(ty: &str, default: Option<&Expr>) -> Vec<u8> {
+    // *T 指针字段：默认空指针（ref=1、langtype=目标 kindexpr、body 空）。
+    if let Some(target) = ty.strip_prefix('*') {
+        return ffi::new_ptr(target, "");
+    }
     let (dims, base) = kvkind::parse_langtype(ty);
     let s = default.map(|e| e.val.clone()).unwrap_or_default();
     if base.starts_with("char/") {
