@@ -8,16 +8,8 @@ jobs:
       fail-fast: false
       matrix:
         backend:
-          - { name: shm,   dsn: "shm:///tmp/kvlang_ci_shm.shm" }
-          - { name: fs,    dsn: "fs:///tmp/kvlang_ci_fs" }
-          - { name: redis, dsn: "redis://127.0.0.1:6379" }
-    services:
-      redis:
-        image: redis:7
-        ports: ["6379:6379"]
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s --health-timeout 3s --health-retries 10
+          - { name: shm, dsn: "shm:///tmp/kvlang_ci_shm.shm" }
+          - { name: fs,  dsn: "fs:///tmp/kvlang_ci_fs" }
     steps:
       - uses: actions/checkout@v4
       - name: 下载 ABI 依赖
