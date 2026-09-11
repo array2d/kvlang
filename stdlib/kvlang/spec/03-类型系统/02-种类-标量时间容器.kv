@@ -51,14 +51,14 @@ kvlang 的数字种类**必须携带精确位宽**：
 必须**报 TypeError。单个字符标注为 `char/<编码>`（标量），字符串标注为 `[]char/<编码>`（序列）；字符
 种类的值恒为一维序列。
 
-### 容器与结构种类
+### 容器与结构
 
-| 种类 | 说明 |
-|------|------|
-| `stringkeymap` | map 容器，langtype 为 `key·value`（如 `[]char/utf8·int64`） |
-| `struct` | 结构原型实例的种类（见 [[struct]]） |
-| `index` | **storetype**：索引型节点（map/struct 值容器的 `{key}·` memindex、lib/rwfunc 目录节点）；物理=m×n 对齐字符串数组，dims=[len,cap,M]（M align8） |
-| `extindex` | **storetype**：可扩展索引型节点（vthread 运行栈等，cap 可增长）；与 `ref`/`@ext` 无关，extindex 是 storetype 不是 ref=2 |
+| 名 | 性质 | 说明 |
+|----|------|------|
+| `stringkeymap` | 种类（kind） | map 容器，langtype 为 `key·value`（如 `[]char/utf8·int64`） |
+| `struct` | 种类（kind） | 结构原型实例的种类（见 [[struct]]） |
+| `index` | **storetype**（非 kind） | 索引型节点（map/struct 值容器的 `{key}·` memindex、lib/rwfunc 目录节点）；成员枚举载体 |
+| `extindex` | **storetype**（非 kind） | 可扩展索引型节点（vthread 运行栈等，cap 可增长）；与 `ref=2`(@ext) 无关 |
 
 容器的物理组成（值 + memindex）见 [[map容器]]（struct 同此物理模型）。
 

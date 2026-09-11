@@ -24,7 +24,7 @@ rwir 路由的 rwir 的**执行位置策略**，且对 kvlang 程序不可观测
   范]]）一律经 `handoff_external_rwir`（Set `/lib/<op>/vids/<vtid>` + Watch 30s 超时）移交，供独立进
   程扩展消费；嵌入式模式（`KVMODE_RETURN`）经 `out_pc` 把控制交回同进程扩展。
 - **Rust runtime**：`is_inproc(op)` 命中的 rwir 在驱动循环里就地 `dispatch`（无 handoff、无
-  watch）；非就地 rwir 经 `kvlang_myrwirHandoff` 移交独立进程扩展或委托宿主 `ext` 处理器。
+  watch）；非就地 rwir 经 `kvlangRwirextHandoff` 移交独立进程扩展或委托宿主 `ext` 处理器。
 
 二者对 native builtin、控制流、`=` 拷贝、值语义的处理**必须**一致；差异仅限须经 def rwir 路由的 rwir
 的**就地 vs 移交**这一执行位置维度，且对 kvlang 程序不可观测（同一 tutorial 三后端两 runtime 输出一
@@ -40,7 +40,7 @@ durable 后端（fs/redis）采用**惰性 flush**，只在**同一 kvspace 句�
 ## 扩展宿主自连 kvspace
 
 扩展宿主（op-gpu、numpy、Go json）**自己** `kvspaceConnect(dsn)` 拿句柄，rwir 移交只用
-`kvlang_myrwir*` 的 runtime 语义（`Register`/`Params`/`ResolveRead`/`ResolveReadPath`/`ResolveWrite`
+`kvlangRwirext*` 的 runtime 语义（`kvlangDefRwir`/`Params`/`ResolveRead`/`ResolveReadPath`/`ResolveWrite`
 /`NextPc`）。tensor 类大 buffer **应**走 shm 后端零拷贝：`ResolveReadPath` 拿容器路径 → `kvspaceGet`
 取 TLV 指针 → `DecodeHead` 定位 body → 在该地址原位建 ndarray，读写 ndarray 即读写 kvspace，无拷贝；
 写走 `kvspaceTlvEncode` + `WriteInPlace`/`WriteNewPlace`。锚例：`tutorial/14-numpy/`（shm 全流程）、

@@ -19,9 +19,9 @@ opcode 位恒为操作码，故拷贝（opcode=`=`）与零参函数调用（`gr
 opcode 槽 `[s0,0]` 的 langtype 由 layout 按 opcode 类别决定：
 
 - 控制流与拷贝原语（`return` / `goto` / `br` / `call` / `=`）——langtype `rwir`。
-- 其余（运算符、函数/rwir 调用目标）——langtype `rwir|rwfunc`。layout **不**静态判定该目标是否在本
-  runtime 的 myrwircaps 内（rwir）或为 rwfunc；判定推迟到 runtime 查 `/lib/<opcode>` 分派（见 [[lib
-  与rwir数据]]）。
+- 其余（运算符、函数/rwir 调用目标）——langtype `rwir|rwfunc`。这是**派发标记**（非值类型）：layout
+  **不**静态判定该目标是否在本 runtime 的 myrwircaps 内（rwir）或为 rwfunc；判定推迟到 runtime 查
+  `/lib/<opcode>` 分派（见 [[lib与rwir数据]]）。
 
 ## 读写槽的槽值编码
 

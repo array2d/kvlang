@@ -14,9 +14,10 @@ map         : U(store=index)[count/cap…][lang="[]char/utf8·int64"]    | 主�
 struct 实例 : U(store=index)[count/cap…][lang="/lib/Point"]           | 主槽空；成员在 {key}·
 def struct  : U(store=index)[count/cap…][lang="def struct"]           | Point 原型；字段定义在子槽
 /lib/       : U(store=index)[count/cap…][lang="lib"]                  | 成员为 /lib/<pkg> 子路径
-/lib/pkg·funca : U(store=index)[count/cap…][lang="rwfunc"]           | body=[nr][nw][dyn]；签名在 [0,x]，实现在 [s0>0,·]
+/lib/pkg·funca : 目录节点 U(store=index)[lang="index"]（无值）；其 [0,0] : U(store=index)[lang="rwfunc"] | body=[nr][nw][dyn]；签名在 .[0,±j]，实现在 [s0>0,·]
 /lib/<op>   : U(store=index)[count/cap…][lang="def rwir"]             | 路由头；body=[nr][nw][dyn]；签名在 [0,x]，无实现行
 签名行 [0,x]: U(store=ATOM)[lang="def langtype"]                      | body=该参数 langtype 串
+rwir 指令行 : U(store=ATOM)[lang="rwir"]                              | body=[nr][nw][dyn]（指令槽恒 0）+ 指令名/引用文本
 /vthread/1/ : U(store=extindex)[ext 元数据][lang="rwfunc"]            | 运行栈，/vthread/1/<坐标> 子成员
 ptr→int64   : U(ref=1,store=ATOM)[lang="int64"]                       | body="/x/y"
 ptr→rwfunc  : U(ref=1,store=index)[lang="rwfunc"]                     | body="/lib/pkg·funca"（调用链）

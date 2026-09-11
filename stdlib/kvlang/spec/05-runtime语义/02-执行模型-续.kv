@@ -11,7 +11,6 @@ lib kvlang/spec/runtime语义/执行模型_续 {
 | `‥lib` | 软链接到 `/lib/<pkg>·<name>`——指令树零拷贝共享，全帧只存一份 |
 | `‥callpc` | 发起本帧调用的指令 PC |
 | `‥returnpc` | 返回后继续的 PC |
-| `‥ro` | 只读读参绑定 |
 | `‥pc` / `‥status` | **仅根帧**（`/vthread/<vid>/`）持有，记录整个 vthread 的当前 PC 与状态 |
 
 runtime **不得**另存独立的调用栈结构：嵌套帧路径本身即调用链。
@@ -41,8 +40,9 @@ vthread 是 kvlang 的执行线程，句柄为整数 `vid`，根在 `/vthread/<v
 runtime 核心不含 I/O；与外部世界（进程、文件系统、网络）的交互一律经 `networld/*` rwir（见 [[runtime
 开发规范]]）。`/networld/<host>` 是本机在该命名空间下的身份（`host` 取裸 hostname）。外部产物（如子
 进程 stdout/stderr）经**扩展世界句柄（ref=2，@ext）**登记：写槽 ref=2、langtype 为目标 langtype 串
-（不带 `@` 前缀）、body 为逻辑定位串（如 `/networld/<host>/proc/<pid>/stdout`），读取时按 body 前缀
-路由兑现真实字节。锚例：`tutorial/14-networld/`。
+（不带 `@` 前缀）、body 为逻辑定位串（如 `/networld/<host>/proc/<pid>/stdout`），读取时由**支持 `@` 的
+rwir**（如 runtime-rs 的 networld/proc、networld/fs 一族）按该定位串兑现真实字节。锚例：
+`tutorial/14-networld/`。
 
 > **实现现状**（规范外提示）：当前 Rust runtime 以 `bootstrap → run_vid` 循环主导驱动 vthread；尚未
   实现"启动自注册 `/networld/<ip>/proc/<pid>` + watch vthread strkeymap 驱动"的分布式派发。该分布式

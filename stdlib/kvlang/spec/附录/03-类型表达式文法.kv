@@ -2,12 +2,14 @@
 lib kvlang/spec/附录/类型表达式文法 {
 	r##"# 类型表达式（签名参数/返回值类型，多态 + 高维数组）
 
-> 完整语义见 [[langtype签名类型表达式]]（类型系统卷）。铁律：无家族简写（`int`/`uint`/`float`/`num`/
-  `char`）——位宽是开放集合，编码须写明确；多态靠显式 `|` 枚举。
+> 完整语义见 [[langtype签名类型表达式]]（类型系统卷）。**签名位（参数/返回值）写的是 `def langtype`（定义处
+  的匹配类型）**，它可含并集/轴量词/`any`，因而能匹配多种调用时的 `langtype`（值的真实类型）；两者区别
+  见该章。铁律：无家族简写（`int`/`uint`/`float`/`num`/`char`）——位宽是开放集合，编码须写明确；多态靠
+  显式 `|` 枚举。
 
 ```
 type_expr   = [ ref_prefix ] atom { "|" atom }   (* ref 前缀可选；layout 剥离前缀落 head ref 字节，wire langtype 不含前缀；见 [[总体方案]] *)
-ref_prefix  = "*" | "@"                          (* * → ref=ptr（指针）；@ → ref=@ext（扩展世界）。**签名位置禁写 `*`**：参数引用由 layout 自动 lower 成 `*[0,±k]`（只有地址传递），见 [[函数]] *)
+ref_prefix  = "*" | "@"                          (* * → ref=1（kvspace 内间接）；@ → ref=2（扩展世界，值在 kvspace 之外，runtime-c 不可直达、由支持 @ 的 rwir 兑现）。签名位置可写：`T` 值传、`*T` 址传、`@T` 扩展存储；值容器（map/struct）无值本体可拷，必须带 `*`/`@`，见 [[函数]] *)
 atom        = shape | mapexpr | structref
 shape       = [ dims ] ( any | kind )
 mapexpr     = memitemkey "·" memitemvalue        (* stringkeymap；`·` 连接两条独立 langtype：左=item 键类型、右=item 值类型。声明形如 memheadname:memitemkey·memitemvalue={}，见 [[map容器]] *)
@@ -36,13 +38,13 @@ kind        = "bool"
             | "float32" | "float64"
             | "char/utf8" | "char/utf32" | "char/ascii"
             | "stringkeymap"
-            | "index" | "extindex"
             | "struct"
             | "rwir" | "rwfunc" | "time" | "duration"
               (* 标注可用 kind 白名单（layout known_kind）。rwfunc 兼作用户函数签名槽 kind；
                  def rwir 是 /lib/<op> 路由头（rwir 统一调度入口，仅存于 /lib/ 目录），不在标注白名单。
                  无 def rwfunc：rwfunc 有 kvlang 实现体（一串 rwir 指令槽），可被 main-runtime 直接解释执行，无需路由头（见 [[总体方案]]）。
                  `object`/`scope` 彻底删除，无此种类名（见 [[总体方案]]）；异构命名容器一律 struct。
+                 index/extindex 是 storetype 名，不是 kind，故不在标注白名单；
                  `*`/`@` 是源码 ref_prefix（见上方 type_expr/ref_prefix 产生式）；layout 剥离前缀落 head ref 字节，wire langtype 不含前缀；
                  valid_langtype 校验剥离 ref_prefix 后的剩余部分；真正非法的是后缀 `int64*` 或前缀位置错误。 *)
 ```

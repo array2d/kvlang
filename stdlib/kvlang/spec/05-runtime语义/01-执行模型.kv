@@ -28,15 +28,16 @@ runtime **不得**在 kvspace 之外持有执行状态。PC、栈帧、局部变
 
 一条指令在其所属函数子树内由二元坐标 `[s0,s1]` 定位：`s0` 为指令行（行 0 为签名，指令从行 1 起），
 `s1` 为参数轴（0 为 opcode，负数为读参绑定 `[0,-k]`，正数为写参绑定 `[0,k]`）。签名槽 `[0,0]` 为
-opcode/签名行锚点；其所属函数目录主槽的 langtype 为 `rwfunc`（用户函数）或 `def rwir`（rwir 路由头，
-见 [[runtime开发规范]]；见 [[总体方案]]）。
+opcode/签名行锚点；计数头落该锚点——rwfunc 的计数头在 `/lib/<pkg>·<name>/[0,0]`（langtype `rwfunc`），
+rwir 路由头的在 `/lib/<op>` 节点自身（langtype `def rwir`，见 [[runtime开发规范]]）。
 
 ## 指令解释循环
 
 runtime 对一个 vthread 的执行是如下循环（C 实现 `runtime/src/kvcpu.c:kvlangKvcpuExecuteMode`）：
 
 1. **状态门**：读该 vthread 的 `‥status`。仅当状态为 `init`、`running`、`wait` 之一时**继续**；其余
-   状态（`paused` / `done` / `error` 等）即**停机**，进程可正常退出。
+   状态即**停机**——`paused` 为调试暂停、`error` 为出错，其余为**终态返回值串**（默认 `"ok"`），进程可
+   正常退出。
 2. **深度检查**：帧深超过实现上限（`MAX_STACK_DEPTH`）时置 `RecursionError` 并停该 vthread。
 3. **取指解码**：由 PC 定帧根、经帧的 `‥lib` 软链定位指令树，`RwirDecode` 稠密探查槽位、遇空即停，解
    出 opcode 与读/写参。空 opcode 视为 `/lib` 损坏或跳转越界，报 `RuntimeError` 停该 vthread。

@@ -68,7 +68,7 @@ myrwircaps **只关乎执行位置**（哪张表登记了它、由谁就地跑�
 
 ### 全局标记与幂等
 
-- 裸 opcode（如 `print`/`input`）须在**进程启动期**经 `kvlang_myrwirRegister` 注册全局，使 layout 阶
+- 裸 opcode（如 `print`/`input`）须在**进程启动期**经 `kvlangDefRwir` 注册全局，使 layout 阶
   段不给它补 `pkg·` 前缀；带 `·` 的限定 opcode（`json·to`）本就不补前缀。
 - 注册**必须幂等**：`vids` 队列已存在则跳过。重复注册会破坏既有队列内容（父子 kvlang 共享同一
   redis 时的挂起根因）。

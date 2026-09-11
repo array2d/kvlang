@@ -51,9 +51,9 @@ lib kvlang/spec/编译器语义/前端算子与后端算子 {
 这是**编译期静态绑定**：绑定一次、写回 `/lib`，runtime 不再做后端选择（对照 PyTorch，这对应 Inductor
 编译期 lowering，而非 Dispatcher 运行期派发）。
 
-## 锚例（待补）
+## 锚例（未落地）
 
-- `tutorial/16-compiler/backend_bind.kv`——`deepx·argmax(v0, axis0, false) -> vmax` 经编译改写为
-  `deepx/miaobyte·argmax(v0, axis0, false) -> vmax`。
+- 待补：`tutorial/16-compiler/backend_bind.kv`——`deepx·argmax(v0, axis0, false) -> vmax` 经编译改写为
+  `deepx/miaobyte·argmax(v0, axis0, false) -> vmax`（`tutorial/16-compiler/` 尚未建立，见本卷状态说明）。
 	"#### -> /lib/kvlang/spec/编译器语义/前端算子与后端算子
 }

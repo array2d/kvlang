@@ -8,7 +8,7 @@ lib kvlang/spec/runtime语义/myrwir扩展_c {
 这些是 runtime-c 的值语义（见 [[cruntime与后端abi]]）。扩展只有三个合法动作：
 
 1. **拿 PC**：经 handoff / 驱动循环取当前 PC，跑己方 rwir，`NextPc` 求后继。
-2. **解析参数**：**只经** `kvlang_myrwir*`（见 [[notinmyrwircaps]]）。
+2. **解析参数**：**只经** `kvlangRwirext*`（见 [[notinmyrwircaps]]）。
 3. **读写 kvspace**：**只经** `kvspace*` 正典 ABI（`Get` 借用读、`WriteInPlace`/`WriteNewPlace` 写、
    `TlvEncode`/`DecodeHead` 编解码）。**绝不自造 langtype 构造器、绝不手写 TLV/head。**
 
