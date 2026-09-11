@@ -1,8 +1,23 @@
 name: ci
 on: [push, pull_request, repository_dispatch]
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
+    name: test-${{ matrix.backend.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        backend:
+          - { name: shm,   dsn: "shm:///tmp/kvlang_ci_shm.shm" }
+          - { name: fs,    dsn: "fs:///tmp/kvlang_ci_fs" }
+          - { name: redis, dsn: "redis://127.0.0.1:6379" }
+    services:
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - name: 下载 ABI 依赖
@@ -15,6 +30,6 @@ jobs:
           sudo cp layout/target/release/libkvlanglayout.so /usr/lib/
           make runtime-rs
           sudo make install
-      - name: 测试
-        env: { KVSPACE: "shm:///tmp/kvlang_ci" }
+      - name: 测试 (${{ matrix.backend.name }})
+        env: { KVSPACE: "${{ matrix.backend.dsn }}" }
         run: python3 tutorial/test.py
