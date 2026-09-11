@@ -6,7 +6,7 @@ package json
 // 后端（kvspace-c=shm / kvspace_durable=redis|fs）由 Makefile 经 CGO_LDFLAGS 注入，
 // 对齐 term 的 KVLANG_KVSPACE_LIB；扩展宿主自连 kvspace，不经 runtime。
 #cgo CFLAGS: -I${SRCDIR}/../../../runtime/include
-#cgo LDFLAGS: -L${SRCDIR}/../../../bin -lkvlang_runtime -L${SRCDIR}/../../../layout/target/release -lkvlang_layout -Wl,-rpath,${SRCDIR}/../../../bin -Wl,-rpath,${SRCDIR}/../../../layout/target/release
+#cgo LDFLAGS: -L${SRCDIR}/../../../bin -lkvlang_runtime -L${SRCDIR}/../../../layout/target/release -lkvlanglayout -Wl,-rpath,${SRCDIR}/../../../bin -Wl,-rpath,${SRCDIR}/../../../layout/target/release
 #include "kvlang_rwirext.h"
 #include <stdint.h>
 #include <stdlib.h>

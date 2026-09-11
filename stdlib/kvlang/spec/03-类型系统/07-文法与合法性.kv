@@ -21,11 +21,13 @@ lib kvlang/spec/类型系统/文法与合法性 {
   空 `[]` **等价** `[.]`（恰一维、任意长）——字符串标注 `[]char/<编码>` 即此形。一个 dims 内**至多一
   个**变元量词（`?`/`*`/`+`），其余须为定长元（整数或 `.`）——保证匹配 O(n) 确定、无回溯（见 [[匹配语
   义与变参]]）。
-- **mapexpr** = `memitemkeylangtype·memitemvaluelangtype`——`·`（U+00B7 中点）连接**两条各自独立的
-  langtype**：左侧是 item **键**类型、右侧是 item **值/body** 类型。值类型递归为完整类型表达式（故
-  map 可无限嵌套）。map 声明形如 `memheadname:memitemkeylangtype·memitemvaluelangtype={}`，术语与形态
-  详见 [[map容器]]。
-- **memitemkey**（键类型，三选一，各自独立可校验）：
+- **mapexpr** = `memitemkey_langtype_formatter·memitemvalue_langtype`——`·`（U+00B7 中点）连接**两条各
+  自独立**的类型表达式：左侧是 item **键**的格式器、右侧是 item **值/body** 类型。值类型递归为完整类型
+  表达式（故 map 可无限嵌套）。map 声明形如
+  `memheadname:memitemkey_langtype_formatter·memitemvalue_langtype={}`，术语与形态详见 [[map容器]]。
+- **memitemkey_langtype_formatter**（键侧格式器，三选一，各自独立可校验）：key 只在**路径系统**里、无
+  XValue body，故键侧描述的不是「值的类型」而是「把 key 值格式化成路径段字符串的格式器」——其输出即访问
+  键（见 [[map容器]]）：
   - **裸标量** `scalar`——如 `int64`、`float64`、`bool`；`scalar` 限 `bool` 与十个定宽数字种类。
   - **字符串键** `[]char/<编码>`——等价 Go `map[string]V`。
   - **标量元组键** `[scalar,…]`——括号内是**种类名序列**（如 `[float64,float64]`），元素须全为标量。
@@ -51,6 +53,10 @@ lib kvlang/spec/类型系统/文法与合法性 {
 + 尾随种类**（`[2]float64`）是 shape 的 `dims`——1 维、长度 2 的 float64 数组（见 [[数组形态]]）。二者
 语义差别巨大（定长异构位置元组 vs 一维定长向量），layout 与 runtime **不得**将元组键与数组形状互相塌
 缩或推断转换。
+
+**形状不可作键**：`b:[2]int32·[]char/utf8` 非法——形状 `[2]int32` 是 value/body 的 langtype（描述连续
+打包的元素），而键无 body；表达「两个 int32 的 key」只能用元组键 `[int32,int32]`，其 formatter 产出
+`b·[1,2]`（见 [[map容器]]）。
 - **any** = 通配，匹配任意种类；是**唯一**简写。
 - **structref** = 以 `/` 起始的原型路径（如 `/lib/Point`），作为 atom 标注结构类型（见 [[struct]]）。
 
@@ -83,6 +89,7 @@ structref 放行——裸名已被隐式展开为 `/lib/<name>`，正是靠「�
 | `char/utf8·int64` | `char/*` 只能作 `[]char/*` 字符串键，不可裸作键（裸键仅限标量 `scalar`，如 `int64·int64` 合法） |
 | `[]int32·int64` | map 字符串键的编码非 `char/*` |
 | `[.]·int64` | map 键含维度 |
+| `[2]int32·int64` | 数组形状不可作键（键无 body；要表达两个 int32 的 key 用 `[int32,int32]`） |
 | `[foo,int32]·int64` | 元组键含非标量元素 |
 | 裸 `[]` / 裸 `[.]` | 无基种类 |
 | `[*,+]int64`、`[?,*]int64` | 一个 dims 含多于一个变元量词（`?`/`*`/`+`） |
