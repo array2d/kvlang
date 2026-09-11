@@ -14,7 +14,10 @@ fn is_container_type(t: &str) -> bool {
 
 /// `[]` 下标校验：xv·at/xv·set 基座若为容器类型 → 报错，逼用 kv·get/kv·set/`base·key`。
 fn is_container_ty(ty: &str) -> bool {
-    ty.contains(keytree::MEMBER_SEP) || ty.starts_with('/')
+    // 剥掉间接性前缀 `*`/`@` 再判：签名里 `p:*Point`、`m:*[int64]·int64` 的 `*` 是传递方式，
+    // 类型本体仍是值容器——不剥会把这类参数误判为"未定义容器"，成员写全部被拒。
+    let t = ty.trim_start_matches(['*', '@']);
+    t.contains(keytree::MEMBER_SEP) || t.starts_with('/')
 }
 
 /// 容器字面量的写目标必须带**完整 map langtype**（`{memitemkeylangtype}·{memitemvaluelangtype}`）。

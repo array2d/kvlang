@@ -359,6 +359,47 @@ static int handle_return(kvlangKv_t *kv, const char *vtid, const char *pc,
             return -1;
         }
     }
+    /* 值写参 copy-out：‥wdst 第 i 行给出第 i 个写参的调用方目标 key，把本帧 `[0,+i]` 的
+     * 值复制回去（地址写参留空行，不在此列）。表不存在 = 本帧无值写参，一次读即跳过。 */
+    if (d > 1) {
+        kvlangStrbuf_t dk;
+        kvlangStrbufInit(&dk);
+        kvlangStrbufPrintf(&dk, "%s/", fr);
+        kvlangStrbufPuts(&dk, RUNTIME_MEMBER_SEP "wdst");
+        kvlangXvalue_t dv;
+        kvlangXvalueZero(&dv);
+        kvlangKvGetOne(kv, dk.p, &dv);
+        kvlangStrbufFree(&dk);
+        if (!kvlangXvalueNone(&dv)) {
+            char *table = kvlangXvalueValueString(&dv);
+            char *cur = table;
+            int i = 1;
+            while (cur) {
+                char *nl = strchr(cur, '\n');
+                if (nl)
+                    *nl = 0;
+                if (cur[0]) {
+                    kvlangStrbuf_t sk;
+                    kvlangStrbufInit(&sk);
+                    kvlangStrbufPrintf(&sk, "%s/[0,%d]", fr, i);
+                    kvlangXvalue_t sv;
+                    kvlangXvalueZero(&sv);
+                    kvlangKvGetOne(kv, sk.p, &sv);
+                    kvlangStrbufFree(&sk);
+                    if (!kvlangXvalueNone(&sv)) {
+                        kvlangKvPair_t wp = {cur, sv};
+                        char werr[256];
+                        kvlangKvSet(kv, &wp, 1, werr, sizeof werr);
+                    }
+                    kvlangXvalueFree(&sv);
+                }
+                i++;
+                cur = nl ? nl + 1 : NULL;
+            }
+            free(table);
+        }
+        kvlangXvalueFree(&dv);
+    }
     char *stk = kvlangKeytreeStack(fr);
     char err[256];
     kvlangKvDelExtIndex(kv, stk, err, sizeof err);
@@ -546,12 +587,27 @@ static char *handle_call(kvlangKv_t *kv, const char *pc,
         kvlangStrbufPrintf(&slot, "%s/[0,-%d]", frame_root, i + 1);
         if (i + 1 < inst->nr) {
             kvlangParam_t *arg = &inst->reads[i + 1];
-            char *rk = resolve_read_path(kv, caller_fr, arg->name);
             bool concrete = !kvlangXvalueNone(&arg->val) &&
                             !kvlangXvalueKindIs(&arg->val, KVSPACE_KIND_RWIR) &&
                             !kvlangXvalueKindIs(&arg->val, KVSPACE_KIND_RWFUNC);
             char lt[256] = {0};
             param_decl_type(kv, func_key, -(i + 1), lt, sizeof lt);
+            /* 传递方式由形参声明里的 `*` 定（见 spec [[函数]]）：带 `*` 按地址（槽存实参地址
+             * Ptr），不带按值（槽存实参值本体）。值传递直接落槽——字面量不必再造 ._litN 临时槽。 */
+            if (lt[0] != '*') {
+                kvlangXvalue_t av;
+                kvlangXvalueZero(&av);
+                kvlangBuiltinResolveReadValue(kv, caller_fr, arg->name, &arg->val, &av);
+                if (!kvlangXvalueNone(&av)) {
+                    pairs[np].key = kvlangStrbufDetach(&slot);
+                    pairs[np].val = av;
+                    np++;
+                } else {
+                    kvlangStrbufFree(&slot);
+                }
+                continue;
+            }
+            char *rk = resolve_read_path(kv, caller_fr, arg->name);
             if (concrete) {
                 /* 字面量无变量槽，一律写 ._litN；勿沿用 resolve_read_path 的返回值——
                  * 否则字面量内容（如 "https://x" 里的 //）会被当路径段，二次读回即丢。 */
@@ -576,7 +632,7 @@ static char *handle_call(kvlangKv_t *kv, const char *pc,
             }
             if (rk) {
                 kvlangXvalue_t rv;
-                kvlangXvalueNewPtr(&rv, lt, rk);
+                kvlangXvalueNewPtr(&rv, lt + 1, rk);
                 pairs[np].key = kvlangStrbufDetach(&slot);
                 pairs[np].val = rv;
                 np++;
@@ -585,24 +641,75 @@ static char *handle_call(kvlangKv_t *kv, const char *pc,
         }
         kvlangStrbufFree(&slot);
     }
+    char *wds = NULL; /* 值写参目标表：第 i 行 = 第 i 个写参的目标 key（地址写参留空行） */
     for (int i = 0; i < nw; i++) {
         kvlangStrbuf_t slot;
         kvlangStrbufInit(&slot);
         kvlangStrbufPrintf(&slot, "%s/[0,%d]", frame_root, i + 1);
-        if (i < inst->nw) {
-            char *wk = resolve_read_path(kv, caller_fr, inst->writes[i].name);
-            if (wk) {
-                char lt[256] = {0};
-                param_decl_type(kv, func_key, i + 1, lt, sizeof lt);
+        char *wk = NULL;
+        if (i < inst->nw)
+            wk = resolve_read_path(kv, caller_fr, inst->writes[i].name);
+        char lt[256] = {0};
+        param_decl_type(kv, func_key, i + 1, lt, sizeof lt);
+        const char *dst = NULL;
+        if (wk) {
+            if (lt[0] == '*' || lt[0] == '@') {
+                /* 地址写参：槽存调用方目标的地址 Ptr，体内 `*[0,+k]` 直写（现状） */
                 kvlangXvalue_t wv;
-                kvlangXvalueNewPtr(&wv, lt, wk);
+                kvlangXvalueNewPtr(&wv, lt + 1, wk);
                 pairs[np].key = kvlangStrbufDetach(&slot);
                 pairs[np].val = wv;
                 np++;
-                free(wk);
+            } else {
+                /* 值写参：copy-in —— 把调用方该位置当前值拷进槽（累加器据此拿初值），
+                 * 目标 key 记进 ‥wdst，返回时 copy-out 拷回。 */
+                kvlangXvalue_t cur;
+                kvlangXvalueZero(&cur);
+                kvlangKvGetOne(kv, wk, &cur);
+                if (!kvlangXvalueNone(&cur)) {
+                    pairs[np].key = kvlangStrbufDetach(&slot);
+                    pairs[np].val = cur;
+                    np++;
+                } else {
+                    kvlangStrbufFree(&slot);
+                }
+                dst = wk;
             }
+        } else {
+            kvlangStrbufFree(&slot);
         }
-        kvlangStrbufFree(&slot);
+        /* 逐写参追加一行（空行为地址写参），行序即槽序 */
+        {
+            kvlangStrbuf_t wd;
+            kvlangStrbufInit(&wd);
+            if (wds)
+                kvlangStrbufPuts(&wd, wds);
+            if (i)
+                kvlangStrbufPutc(&wd, '\n');
+            if (dst)
+                kvlangStrbufPuts(&wd, dst);
+            free(wds);
+            wds = kvlangStrbufDetach(&wd);
+        }
+        free(wk);
+    }
+    if (wds) {
+        /* 至少有一个值写参才落表；全空表不必落（省掉返回期的一次读） */
+        if (strspn(wds, "\n") != strlen(wds)) {
+            kvlangStrbuf_t wk;
+            kvlangStrbufInit(&wk);
+            kvlangStrbufPrintf(&wk, "%s/", frame_root);
+            kvlangStrbufPuts(&wk, RUNTIME_MEMBER_SEP "wdst");
+            char *wks = kvlangStrbufDetach(&wk);
+            kvlangXvalue_t wv;
+            kvlangXvalueNewCharUtf8(&wv, wds);
+            kvlangKvPair_t wp = { wks, wv };
+            char werr[256];
+            kvlangKvSet(kv, &wp, 1, werr, sizeof werr);
+            kvlangXvalueFree(&wv);
+            free(wks);
+        }
+        free(wds);
     }
     /* 实参绑定写失败必须报错——绝不静默：丢的是一整个参数，症状会漂到很远的地方
      * （曾表现为 fs 后端下函数读到空参数）。 */
@@ -663,15 +770,12 @@ static void param_decl_type(kvlangKv_t *kv, const char *func_key, int x,
             for (int bi = 0; ab && bi < al; bi++) {
                 if (ab[bi] != 0)
                     continue;
-                /* 声明的 `*T`/`@T` 只表引用性，**wire langtype 不带 `*`/`@` 前缀**（ref 归 head.ref）。
-                 * 剥掉再拿去构造实参 Ptr，否则 Ptr 目标类型串会多一个 `*` 而与真实值对不上
-                 * （曾致指针形参 validate_ptr 拒绝写入、帧槽整个参数丢失）。 */
-                int s = bi + 1;
-                while (s < al && (ab[s] == '*' || ab[s] == '@'))
-                    s++;
-                int tl = al - s;
+                /* 返回**原始声明串**（含 `*`/`@` 前缀）：调用点据此判定传递方式——带 `*`
+                 * 按地址（写实参地址 Ptr），不带按值（写值本体）。前缀只在构造 Ptr 时剥掉
+                 * （wire langtype 不含它，ref 归 head.ref）。 */
+                int tl = al - (bi + 1);
                 if (tl > 0 && tl < (int)cap) {
-                    memcpy(lt, ab + s, (size_t)tl);
+                    memcpy(lt, ab + bi + 1, (size_t)tl);
                     lt[tl] = 0;
                 }
                 break;

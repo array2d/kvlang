@@ -11,7 +11,7 @@ struct Node {
 	next:*Node=None
 }
 
-rwfunc show_list(head:Node) -> () {
+rwfunc show_list(head:*Node) -> () {
 	head -> cur
 	while (cur != None) {
 		cur·val -> v

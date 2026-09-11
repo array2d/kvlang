@@ -548,29 +548,32 @@ impl Parser {
     }
 
     fn check_param_types(&mut self, sig: &FuncSig) {
-        // 指针形参一律拒：kvlang 只有地址传递，且**由 layout 自动落到地址**——函数体里每个形参
-        // 引用都被 lower 成 `*[0,±k]`（参数轴槽存的是实参地址，显式解引用才取到值）。
-        // 故声明写 `p:*Point` 与 `p:Point` 完全等价，那个 `*` 是纯噪声，只会让人以为
-        // 「值/地址」在签名层可选。`*T` 仍用于 struct 字段与局部标注——那里确实要区分
-        // 「指向节点的引用」与节点本身。
+        // 签名里的 `*` 是**作者书写的传递方式**：写 `*T` = 按地址传（帧槽存实参地址 Ptr），
+        // 不写 = 按值传（帧槽存值本体）。唯一硬约束：**值容器类型必须写 `*`**——map langtype
+        // （含 `·`）与 structref（`/` 开头）的成员落在兄弟槽 `{key}·`，单槽不是完备值，没有
+        // 可拷贝的"值"，只能按地址传。
         for (slot, ret) in sig
             .params
             .iter()
             .map(|p| ("param", p))
             .chain(sig.returns.iter().map(|r| ("return value", r)))
         {
-            if ptr_prefixed(&ret.ty) {
+            if is_value_container_ty(&ret.ty) && !ptr_prefixed(&ret.ty) {
                 self.errors.push(Diagnostic {
                     pos: Pos { line: 0, col: 0 },
                     message: format!(
-                        "func {}: {slot} {:?}: pointer type {:?} is not allowed — parameter \
-                         references are already lowered to `*[0,±k]` (the axis slot holds the \
-                         argument address), so write {:?}",
+                        "func {}: {slot} {:?}: 值容器类型只能按地址传递 —— 写 `{:?}`",
                         sig.name,
                         ret.name,
-                        ret.ty,
-                        ret.ty.split(['|', '·']).map(|a| a.trim_start_matches('*'))
-                            .collect::<Vec<_>>().join("·")
+                        ret.ty
+                            .split('|')
+                            .map(|a| if !a.starts_with('*') && (a.starts_with('/') || a.contains('·')) {
+                                format!("*{a}")
+                            } else {
+                                a.to_string()
+                            })
+                            .collect::<Vec<_>>()
+                            .join("|")
                     ),
                     warn: false,
                     info: false,
@@ -708,9 +711,13 @@ impl Parser {
     }
 
     fn check_read_only_params(&mut self, func: &Func) {
+        // 只读只对**地址读参**（声明带 `*`/`@`）生效：它的槽是调用方对象的地址，写它就是写
+        // 调用方的对象。**值读参**（不带前缀）的槽是自己的副本，体内可自由读写，不进本检查。
         let mut ro = std::collections::HashSet::new();
-        for n in func.sig.param_names() {
-            ro.insert(n);
+        for p in func.sig.params.iter() {
+            if super::langtype::is_addr_param(&p.ty) {
+                ro.insert(p.name.clone());
+            }
         }
         if ro.is_empty() {
             return;
@@ -2072,8 +2079,10 @@ impl Parser {
             return;
         }
         let s = inst.writes[0].clone();
-        // 路径字面量（/ 开头）是完整 key，不是成员写，勿脱糖。
-        if s.starts_with('/') {
+        // 路径字面量（/ 开头）是完整 key，不是成员写，勿脱糖——**但含动态键段 `·*k` 的除外**：
+        // 那时 `·` 之后是运行期求值的段，必须脱糖成 kv·set(base, k, v) 才能取到 k 的值
+        // （否则会被当成字面 key `/tmp/ts·*k` 整段写下去）。
+        if s.starts_with('/') && !s.contains(&format!("{}*", keytree::MEMBER_SEP)) {
             return;
         }
         // struct 赋值（RHS = struct·new）：浅拷 base+一层成员，lower 为 kv·cplist(struct·new→temp, dst)。
@@ -2270,9 +2279,16 @@ fn is_fixed_dim_array(t: &str) -> bool {
         .all(|d| !d.trim().is_empty() && d.trim().bytes().all(|c| c.is_ascii_digit()))
 }
 
-/// 类型串里是否有原子以 `*`（Ptr 前缀）起头——以 `|`（并）与 `·`（map 键值）切分后逐段看。
+/// 类型串里是否有原子以 `*`（间接性前缀）起头——以 `|`（并）与 `·`（map 键值）切分后逐段看。
 fn ptr_prefixed(ty: &str) -> bool {
     ty.split(['|', '·']).any(|a| a.starts_with('*'))
+}
+
+/// 值容器类型：成员落在兄弟槽 `{key}·` 的类型——map langtype（含 `·`）或 structref（`/` 开头）。
+/// 这类值没有可拷贝的单槽值，只能按地址传递（见 spec [[函数]]）。
+fn is_value_container_ty(ty: &str) -> bool {
+    ty.split('|')
+        .any(|a| a.trim_start_matches('*').starts_with('/') || a.contains('·'))
 }
 
 fn type_error(_kind: &str) -> String {

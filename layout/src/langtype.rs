@@ -185,6 +185,14 @@ fn valid_atom(s: &str) -> bool {
     valid_shape(s)
 }
 
+/// 形参是否按**地址传递**：声明带 `*`（指针）或 `@`（扩展句柄）前缀。两者都不是可拷的值本体
+/// （`*` 指别处的 key、`@` 指 kvspace 之外的位置），故槽里放间接值、体内解引用；不带前缀则按值传
+/// （槽存值本体）。见 spec [[函数]]。
+pub fn is_addr_param(ty: &str) -> bool {
+    let t = ty.trim_start();
+    t.starts_with('*') || t.starts_with('@')
+}
+
 /// 类型表达式语法校验（装载期）。变参 `...` 是签名层 arity、不入 langtype 串，此处永不见。
 pub fn valid_langtype(expr: &str) -> bool {
     !expr.is_empty() && expr.split('|').all(valid_atom)

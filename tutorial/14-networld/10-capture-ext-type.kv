@@ -5,8 +5,8 @@
 // 期望输出:
 //   hi
 //   oops
-rwfunc run_capture(args:[int64]·[]char/utf32,
-		envs:[int64]·[]char/utf32) -> (c:uint8, out:@[]char/utf32,
+rwfunc run_capture(args:*[int64]·[]char/utf32,
+		envs:*[int64]·[]char/utf32) -> (c:uint8, out:@[]char/utf32,
 		err:@[]char/utf32) {
 	networld/proc·exec(args, envs) -> c, out, err
 }

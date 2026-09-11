@@ -2,8 +2,8 @@
 // 期望输出:
 //   python 1024
 //   exit= 0
-rwfunc run_proc(args:[int64]·[]char/utf32,
-		envs:[int64]·[]char/utf32) -> (code:uint8) {
+rwfunc run_proc(args:*[int64]·[]char/utf32,
+		envs:*[int64]·[]char/utf32) -> (code:uint8) {
 	networld/proc·exec(args, envs) -> code
 }
 

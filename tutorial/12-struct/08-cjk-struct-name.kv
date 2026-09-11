@@ -9,10 +9,10 @@ struct 点 {
 	x:int64=0
 	y:int64=0
 }
-rwfunc 求和(p:点) -> (s:int64) {
+rwfunc 求和(p:*点) -> (s:int64) {
 	p·x + p·y -> s
 }
-rwfunc 造点(a:int64, b:int64) -> (r:点) {
+rwfunc 造点(a:int64, b:int64) -> (r:*点) {
 	a -> r·x
 	b -> r·y
 }

@@ -17,7 +17,7 @@ use super::ast::{
     self, Expr, Func, FuncSig, Instruction, Param, RwirDecl, ScopeStmt, Stmt, StructDecl,
 };
 use super::ffi::Kv;
-use super::{builtin, ffi, keytree, kvkind, lower, parser};
+use super::{builtin, ffi, keytree, kvkind, langtype, lower, parser};
 
 /// 创建基础目录 /lib/ 与 /vthread/（layout 前必须存在）。
 pub fn init_dirs(kv: &mut Kv) -> Result<(), String> {
@@ -622,30 +622,20 @@ pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) {
     lower::specialize(fn_, &type_map);
     let func_dir = keytree::lib_func(pkg, &fn_.sig.name);
 
-    // pkg 下同名 func 已存在（含签名槽 [0,0]）→ debug 提示即将覆盖（严格按 lib 声明判定，非路径）。
-    // 覆盖是 KVLANG_LIB 引导的常态（stdlib 每次重铺），故降到 debug 级：仅 LOG_LEVEL=debug 显示。
-    if !kv.get_one(&format!("{func_dir}/[0,0]")).is_empty()
-        && std::env::var("LOG_LEVEL").as_deref() == Ok("debug")
-    {
-        let qual = if pkg.is_empty() {
-            fn_.sig.name.clone()
-        } else {
-            format!("{pkg}/{}", fn_.sig.name)
-        };
-        eprintln!("debug: func {qual} already defined — overwriting");
-    }
-
     let mut seq: Vec<Instruction> = Vec::new();
     let mut labels: HashMap<String, i32> = HashMap::new();
     collect_insts(&fn_.body, &mut seq, &mut labels);
 
-    // 参数名 → *[0,±k]（显式解引用坐标）：函数体形参引用编译期替换，删命名参数 Ptr 运行时角色。
+    // 形参引用 → 帧坐标（编译期替换，运行时无命名参数角色）。带 `*` 的形参按**地址传递**（槽存实参地址，体内显式解引用 `*[0,-k]`）；
+    // 不带 `*` 的按**值传递**（槽存值本体，体内裸坐标 `[0,-k]` 直读）。见 spec [[函数]]。
     let mut param_coord: HashMap<String, String> = HashMap::new();
     for (i, p) in fn_.sig.params.iter().enumerate() {
-        param_coord.insert(p.name.clone(), format!("*[0,-{}]", i + 1));
+        let d = if langtype::is_addr_param(&p.ty) { "*" } else { "" };
+        param_coord.insert(p.name.clone(), format!("{d}[0,-{}]", i + 1));
     }
     for (i, r) in fn_.sig.returns.iter().enumerate() {
-        param_coord.insert(r.name.clone(), format!("*[0,{}]", i + 1));
+        let d = if langtype::is_addr_param(&r.ty) { "*" } else { "" };
+        param_coord.insert(r.name.clone(), format!("{d}[0,{}]", i + 1));
     }
 
     // 按函数覆盖（文件夹复制式合并）：只 del_tree 本函数子树，不动 /lib 下其它函数。
