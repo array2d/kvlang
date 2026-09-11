@@ -16,9 +16,8 @@ lib kvlang/spec/kvspace模型/系统变量 {
 | 键 | 语义 |
 |----|------|
 | `‥pc` | 当前执行 PC（绝对路径字符串） |
-| `‥status` | 运行状态：`init` / `running` / `wait` / `paused`；进入终态时删除并 Notify 返回值 |
+| `‥status` | 运行状态：`init` / `running` / `wait` / `paused` / `error`；**终态写入的是返回值串**（默认 `"ok"`）并 Notify |
 | `‥status/msg` | 状态附带消息；错误时形如 `‥error/msg` 承载错误文本 |
-| `‥debugger` | 调试控制：空为正常，`paused` 为暂停；`debugger()` 内建写此键 |
 | `‥ctime` | 创建时刻 |
 
 ## 帧系统变量
@@ -31,7 +30,6 @@ lib kvlang/spec/kvspace模型/系统变量 {
 | `‥lib` | rwfunc 帧的 lib 路径，用于识别 rwfunc 帧边界 |
 | `‥callpc` | 帧内执行进度（每 op 更新；块帧重入亦更新） |
 | `‥returnpc` | 返回地址（帧创建时固化；块帧仅首次设置，重入不覆写） |
-| `‥ro` | 只读参数名单，写槽检查用 |
 | `‥wdst` | **值写参的目标表**（仅当本帧有值写参时落）：每行一个写参的调用方目标 key，行序即写参槽序，地址写参留空行。返回时据此 copy-out |
 
 **值写参的 copy-in / copy-out**（见 [[函数]]）：调用点把调用方该位置的当前值**复制**进帧槽
@@ -46,15 +44,16 @@ runtime 按 `‥wdst` 把 `[0,+k]` **复制回**目标。地址写参（声明�
 具名作用域的标签不落在帧上，而落在函数的 `/lib` 定义处：`/lib/{pkg}·{name}/‥labels/{label}` → 指令序
 号（`layout/src/keytree.rs`、`layout/src/code.rs`）。
 
-## 语法层保留名 `._`
+## 丢弃槽 `_`
 
-`._` 是源码层的丢弃槽占位符：写目标为 `._` 时不落 kvspace（帧槽键构造遇此名返回空路径）。它是语法占
-位符，**不**是 `‥` 系统变量，不落入 kvspace。
+写槽写 `_` 即丢弃该位置（见 [[指令架构]]）：它是普通裸名，落帧内 `_` 槽。runtime 内部另为字面量实参建
+`._litN` 临时槽（见 [[函数调用]]），与丢弃槽无关、也不属 `‥` 系统变量命名空间。
 
 ## `debugger()`
 
 `debugger()` 内建对齐 V8/TypeScript 的 `debugger;` 语句：源码内联暂停点。非调试模式下为 no-op；调试
-模式下将 `‥status` 置 `paused`，由外部驱动改回 `running` 恢复执行。
+模式下将 `‥status` 置 `paused`，由外部驱动改回 `running` 恢复执行——**暂停能力就是 `‥status=paused`**
+（`debugger()` ≡ `vthread·setstatus("paused")`），**不会另设** `‥debugger` 之类的独立系统变量。
 
 ## 域与变量之别
 

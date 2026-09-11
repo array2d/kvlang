@@ -24,7 +24,7 @@ kvlang 源码只有一种命名单元：**rwfunc**（有指令体的用户函数
 调用时**写参 arity 必须全部匹配**（对齐 Go/Rust）：`f() -> s` 对多写参函数是错误；不需要的写参**必须
 **用 `_` 显式丢弃。
 
-## 参数类型必须标注，且**不得**写指针前缀
+## 参数类型除了值类型，还可以标注 `*` 传址、`@` 扩展存储
 
 每个读参与写参**必须**声明类型（`name:type_expr`，type_expr 见 [[langtype签名类型表达式]]）。
 缺类型标注是错误：
@@ -34,81 +34,104 @@ error: func f: param "x" has no type annotation — every parameter must declare
 error: func f: return value "r" has no type annotation
 ```
 
-参数类型**禁止**写 `*` 前缀（如 `p:*Point` 是错误）。kvlang 只有**地址传递**，而这件事由 layout
-自动完成：函数体里每个形参引用都被 lower 成 `*[0,±k]`（参数轴槽存的是实参地址，显式解引用才取到
-值，见 [[指令架构]]）。故 `p:*Point` 与 `p:Point` 完全等价，签名里那个 `*` 是纯噪声，只会让人误以为
-「值传递 / 地址传递」在签名层可选：
+参数类型除了值类型（不写前缀，实参值拷进帧槽），还可以在类型最前标注 `*`/`@`——它们是 head 的 `ref`
+前缀（见 [[ref存储位置]]），两个**正交维**：`*` 说「多一跳间接」，`@` 说「值不在 kvspace」：
 
-```
-error: func f: param "p": pointer type "*/lib/Point" is not allowed — parameter references are
-       already lowered to `*[0,±k]` (the axis slot holds the argument address), so write "/lib/Point"
-```
+| 签名写法 | 值在哪 | 帧槽 `[0,±k]` 存什么 | 体内形参引用 |
+|---------|--------|--------------------|-------------|
+| `x:T` | 本帧 | 调用方该位置的值**复制**进槽 | `[0,±k]` **只读**（`param<0` 只读，见下） |
+| `p:*T` | kvspace 内某个 key | 该 key 的路径（ref=1 Ptr） | `*[0,±k]` 解引用一次取实参值（**只读**） |
+| `h:@T` | **kvspace 之外**（fs 文件、GPU 显存、外部进程输出…） | 扩展世界定位串（ref=2） | runtime-c **不可**直接读写；由**支持 `@` 的 rwir**（如 runtime-rs 的 fs/networld 一族）按定位串兑现 |
 
-由此，`p:Point` 的 `p·field = v` 改的是**调用方那个对象**（参数槽本身没动）；`*T` 仍用于 struct
-字段与局部标注——那里确实要区分「指向节点的引用」与节点本身。`@` 前缀（ref=@ext）不受此限。
+`*T` 与 `@T` 都"不是值本体"，但性质不同：`*` 是**间接**——指针的值（那段 key 路径）本身就存在 kvspace
+的 body 里，故 layout 与 runtime-c 都能直接寻址、解引用；`@` 是**位置陈述**——值本体不在 kvspace，
+runtime-c 寻不到，**由支持 `@` 的 rwir 自己兑现**——这些 rwir 在其实现里按 head 的 ref=2 定位串读写扩展
+世界的真实字节（如 runtime-rs 的 networld/fs 一族 rwir 直接以 `@` 开头的扩展 key 为输入）。核心
+runtime-c 不解引用 `@`，也不设通用 extresolver。
+
+值容器（map langtype、struct 原型路径）**没有可复制的值本体**，**必须**带 `*`（值在 kvspace）或 `@`
+（值在扩展世界）——`p:/lib/Point` 是错误，须写 `p:*/lib/Point`；标量、compact 数组、`[]char/*` 字符串
+写 `T` 即按值传递。
+
+参数声明的类型串是 **def langtype**（定义处的匹配类型，见 [[langtype签名类型表达式]]）：它可含并集与
+`any`，故**同一参数可接受多种 `langtype` 的实参**（如 `a:int8|int16` 同时接受 int8 与 int16 值）。
+
+由此：读参（`param<0`，不论值传/址传）**只读**——`p:*Point` 的 `p·field = v`、值参 `x:int64` 的
+`x = x + 1` 都是写槽命中读参，layout 报错。要改值就先拷到新局部变量（`x -> local`，此后写 `local`）；要
+改调用方对象就把该参数放到写参侧（`-> (p:*/lib/Point)`）。写参（`param>0`）可读可写：`-> (p:*/lib/Point)`
+直写调用方对象，`-> (acc:int64)` 值写参按 [[系统变量]] 的 `‥wdst` 表 copy-in / copy-out。
 
 ## 参数变参（arity，非类型）
 
 末读参**可**在参数上尾缀 `...` 声明变参（吸收 0..N 个同型实参，如 `A:int64|float64...`）。`...` 是**
 签名层 arity 构造，不是 type_expr 的一部分**（轴量词见 [[langtype签名类型表达式]]）：layout 解析时把
-它从参数上**剥离**,给该函数主槽置 `dynamic=1`（见 [[指令布局格式]]）,而参数的**纯净** langtype（不含
-`...`）由承载点存放——def rwir 落 `[0,x]` 子槽、rwfunc 随 `{name}` Ptr 的 langtype（此键为签名元数
-据，不参与运行时形参解析，见 [[调用extindex]]）。故 `LangtypeValid`/`LangtypeMatch` 永不见 `...`。
+它从参数上**剥离**,给该函数的签名行锚点 `[0,0]` 置 `dynamic=1`（见 [[指令布局格式]]）,而参数的**纯净** langtype（不含
+`...`）由承载点存放——def rwir 落位置化签名槽 `[0,x]`、rwfunc 落参数定义键 `.[0,±j]`（两者都是
+`def langtype`，rwfunc 的 body = 参数名 + NUL + 类型串；此键为签名元数据，不参与运行时形参解析，见
+[[调用extindex]]）。故 `LangtypeValid`/`LangtypeMatch` 永不见 `...`。
 
 - 变参**必须**是最后一个读参；非末位读参带 `...`：装载期错误。
 - 写参（返回值）**不得**变参：装载期错误。
-- 派发时,主槽 `dynamic=1` 则末读参对每个尾随实参按其纯净 langtype 逐个判定（见 [[匹配语义与变
+- 派发时,签名行锚点 `dynamic=1` 则末读参对每个尾随实参按其纯净 langtype 逐个判定（见 [[匹配语义与变
   参]]）。
 
-## 写参初值 None
+## 写参初值
 
-写参在被调方帧内初值为 **None**（strict null）。函数体内**必须**先显式初始化写参再参与运算——对 None
-做算术在 runtime 被拒。惯例以拷贝置零值起步（`0 -> acc`），此后写参在体内可读可写，退出时经箭头映射
-回调用方。
+值写参（`-> (acc:int64)`）的初值是**调用方该位置的当前值**——调用点把它 copy-in 进帧槽 `[0,+k]`，返回时
+按 `‥wdst` copy-out 回目标（累加器写法 `acc + x -> acc` 据此拿初值）。地址写参（`-> (p:*T)`）的帧槽存
+调用方目标地址，`*[0,+k]` 解引用即调用方当前值。调用方位置尚未赋值时初值即 None——对 None 做算术在
+runtime 被拒，故累加器写法前须保证目标已有值（如 `0 -> acc` 起步）。
 
-## 读参只读
+## 读参只读（`param<0` 一律只读）
 
-读参是单向输入绑定。函数体内把读参裸名放入写槽（含 `for … in` 的迭代变量）会破坏数据流方向，layout
-报错拒绝装载：
+**永久规定**：参数定义键 `.[op,param]` 中 `param<0` 是**只读参数**（读参）、`param>0` 是**要写的参**
+（写参，见 [[storetype_def族与签名行]]）。函数体内读参的裸名**一律**不得作写槽（含 `for … in` 的迭代
+变量、成员/下标写、`kv·set(base, …)` 的 base），layout 报错拒绝装载：
 
 ```
 error: func f: read param "A" cannot be used as write slot (read params are read-only)
 ```
 
-**只读覆盖到子成员，且别名不洗白**：`p·field = v`、`p[k] = v`、`kv·set(p, k, v)` 同样命中该检查
-——经 desugar 后 base 就是读参裸名。只读性还沿别名传播：`q = p` / `p -> q` 使 `q` 指到**同一个
-对象**，此后 `q·field = v` 写的仍是 `p` 的对象，layout 一并拒绝（否则一句话就能绕开本规则）：
+只读与**值传/址传无关**：值读参的槽是本帧副本、地址读参（声明带 `*`/`@`）的槽是调用方对象的地址，两者
+都只读——写值读参就是写一个只读的帧槽，写地址读参还会破坏数据流方向。要改值就先拷到新局部变量
+（`x -> local`，此后写 `local`）；要就地改调用方对象就把该参数放到写参侧（`-> (p:*/lib/Point)`）。
+
+**只读覆盖到子成员，且别名不洗白**：`p·field = v`、`p[k] = v`、`kv·set(p, k, v)` 同样命中该检查——经
+desugar 后 base 就是读参裸名；对地址读参，只读性还沿别名传播：`q = p` / `p -> q` 使 `q` 指到**同一个对
+象**，此后 `q·field = v` 写的仍是 `p` 的对象，layout 一并拒绝（否则一句话就能绕开本规则）：
 
 ```
 error: func f: read param "p" cannot be used as write slot (read params are read-only)
 error: func f: "q" aliases read param "p" (`q = p`); writing its members writes that object
-       — put it on the write side: `-> (p:/lib/Point)`
+       — put it on the write side: `-> (p:*/lib/Point)`
 ```
 
-（`q·next -> q` 这类**重绑别名本身**的写槽是裸名、不碰调用方对象，不受影响。）
-
-**签名诚实原则**：函数体内被写的参数**必须**声明在写参侧。要就地改调用方的对象，就把该参数写到
-`-> (p:Point)` 里——kvlang 只有地址传递，写参 `p` 拿到的就是调用方对象的地址：
+**签名诚实原则**：要就地改调用方的对象，就把该参数写到写参侧、并按地址声明：
 
 ```kv
-rwfunc shift(dx:int64) -> (p:*Point) { p·x + dx -> p·x }
+rwfunc shift(dx:int64) -> (p:*/lib/Point) { p·x + dx -> p·x }
 rwfunc test() -> () { a:Point = {x=1 y=2}  shift(10) -> a }
 ```
 
 ```
-// 非法：acc 被写却在读参侧
-rwfunc sum(arr:[]int64, acc:int64) -> (r:int64) { acc + arr[0] -> acc }
-// 合法：acc 在写参侧，体内可读可写
-rwfunc sum(arr:[]int64) -> (acc:int64) { acc + arr[0] -> acc }
+// 非法：读参 p 是地址参（*），写它的成员就是写调用方对象
+rwfunc bump(p:*/lib/Point) -> () { p·x + 1 -> p·x }
+// 非法：读参 x 按值传也只读（param<0）——要改先拷到新局部变量
+rwfunc inc(x:int64) -> (r:int64) { x = x + 1  x -> r }
+// 合法：同一个对象放到写参侧（地址写参直写调用方）
+rwfunc bump() -> (p:*/lib/Point) { p·x + 1 -> p·x }
+// 合法：先拷到局部变量再改
+rwfunc inc(x:int64) -> (r:int64) { x -> local  local = local + 1  local -> r }
 ```
 
-判定规则（实现）：写槽含 `/`、`[`、`·` 者视为路径/下标/成员写，不计入本检查；但 `kv·set(base, …)` 的
-base 命中读参裸名同样拒绝（成员目录被改写）。
+（`q·next -> q` 这类**重绑别名本身**的写槽是裸名、不碰调用方对象，不受影响。）判定规则（实现）：写槽
+含 `/`、`[`、`·` 者视为路径/下标/成员写，不计入本检查；但 `kv·set(base, …)` 的 base 命中读参裸名同样
+拒绝（成员目录被改写）。
 
 ## 参数同名规则
 
-- **定义时**：读参与写参**不得**同名——`rwfunc f(A:int64) -> (A:int64)` 非法，报
-  `param "A" appears in both read-params and write-params`。
+- **定义时**：读参列表内、写参列表内、以及读写列表之间均**不得**同名（变量名即指针，同名即同址）——
+  `rwfunc f(A:int64) -> (A:int64)` 报 `param "A" appears in both read-params and write-params`。
 - **调用时**：同一变量**可**同时出现在读槽与写槽——`inc(x) -> x` 合法，读写独立解析、互不冲突。
 	"#### -> /lib/kvlang/spec/layout语义/函数
 }

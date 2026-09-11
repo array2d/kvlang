@@ -4,7 +4,7 @@ lib kvlang/spec/类型系统/stringkeymap形态 {
 
 stringkeymap 数组的**容器值**是一个 storetype=index 的 XValue（langtype 为 map langtype，如
 `[]char/utf8·int64`；body 空，成员名索引落 `base·` memindex，dims=[len,cap,M]），**每个元素**是独立
-子 key `base·i`：
+子 key `base·[i]`（坐标段，见 [[数组两种物理形态]]）：
 
 ```kv
 nums:[int64]·int64 = {10, 20, 30, 40}    // 每元素落 nums·[0] … nums·[3]

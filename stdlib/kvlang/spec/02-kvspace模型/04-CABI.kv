@@ -38,7 +38,11 @@ camelCase）——kvspace 层前缀 `kvspace`（`kvspaceGet` / `kvspaceWriteInPl
 `kvspaceDelTree` 对**最终组件**不解析 link——写/删 Ptr 键只作用该键本体，不重定向到 target
 （`Del`/`DelTree` 为 POSIX rm 式：删指针本身，不删被指向者）。解引用由 runtime 显式 `*` 掌控（见
 [[ptr]]）。否则「写实参地址 Ptr 到帧槽」会被重定向到 target，导致丢参 / 写坏被指向的值。
-## kvspace C ABI 导出符号全集（nm -D 实测，30）
+## kvspace C ABI 导出符号（快照）
+
+权威来源是**构建产物**——`nm -D --defined-only /usr/lib/kvspace/libkvspace.so | grep '^kvspace'`（前端
+dispatch 静态导出；后端 `kvspace-c` / `kvspace-durable` 各导出同一集合）。下列快照仅作阅读导航，改 ABI 时
+不必同步本文：
 
 ```
     kvspaceClear

@@ -6,8 +6,8 @@ lib kvlang/spec/类型系统/种类_代码与特殊值 {
 
 下列 langtype 描述 KV 树中的代码与目录节点（见 [[指令布局格式]]）：
 
-- `rwir`：无 kvlang 实现体，指令名文本，storetype=ARRAYND 叶子；由 runtime 经 def rwir 路由直接兑
-  现。
+- `rwir`：无 kvlang 实现体，storetype=ATOM，body = `[nr:u16 LE][nw:u16 LE][dynamic:u8]`（指令槽恒
+  `0,0,0`）+ 指令名/引用文本；由 runtime 经 def rwir 路由直接兑现。
 - `def rwir`：**路由头**，仅存于 `/lib/<op>`，是 rwir 统一调度入口，storetype=index（定义节点），**
   无 kvlang 实现体**；**不叫"扩展算子"**，**不得**出现在用户书写的类型标注中。每个 runtime 只声明
   **myrwircaps**（该 runtime 能兑现的 rwir 能力集）；rwir 若不在本 runtime myrwircaps 内须经

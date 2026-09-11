@@ -13,10 +13,11 @@ lib kvlang/spec/kvspace模型/数组两种物理形态 {
   ndim≥1。对齐 C `int[10]`、Go `[10]int`、Rust `[i32;10]`；多维即连续布局的 ndarray/tensor。要求元素
   定长同类型——含变长字符串字面量的 `[…]` 在 layout 阶段报错。支持 `arr[i]` 随机访问（下标读经
   `xv·at` 在 body 内定位），可零拷贝整块读。
-- **stringkeymap**：head kind=`stringkeymap`、ndim≥1，body 只记形状；每个元素是独立子 key，成员名为
-  **坐标段**。变长、可增长、允许变长元素——字符串数组、可追加数组走此形态。stringkeymap **必须**
-  ndim≥1（无维度的键值容器应为 `struct`），且成员名**必须**是坐标段（`kvspace-durable/src/const.rs`
-  的 `ERR_MAP_NDIM`、`ERR_MAP_COORD`）。
+- **stringkeymap**：head kind=`stringkeymap`、ndim≥1，body 只记形状；每个元素是独立子 key，成员名即
+  **memitemkey 值逐字**（逐字铁律见 [[文法与合法性]]）：裸标量键落 `b·200`、标量元组键落
+  `a·[342.124,23.2345]`、字符串键落 `m·a`；由 `scatter` 展开的数组元素落坐标段 `base·[i]`。变长、可
+  增长、允许变长元素——字符串数组、可追加数组走此形态。stringkeymap **必须** ndim≥1（无维度的键值容器
+  应为 `struct`）。
 
 ## 坐标段
 
@@ -57,7 +58,7 @@ stringkeymap 元素的成员名是坐标段，物理 key 形如 `m·[i]`（一�
 
 ref=2 表示值本体在扩展世界（SHM/GPU/文件），head 中 langtype 记录形态（如 `[256,256]uint8`），body
 记位置描述符。@ext 只表**单个值**存于扩展世界（compact 形态），与 storetype=index/extindex 无关。读
-取时按 body 前缀路由兑现（见 [[地址空间]] 扩展存储）。
+取时由支持 `@` 的 rwir（如 runtime-rs 的 fs/networld 一族）按定位串兑现（见 [[地址空间]] 扩展存储）。
 
 ## memindex：定宽目录矩阵
 

@@ -2,10 +2,10 @@
 lib kvlang/spec/类型系统/匹配语义与变参 {
 	r####"# 匹配语义与变参
 
-本章匹配语义作用于 **def langtype**（模式）：把一个值的 value langtype `(kind,ndim,dims)` 与签名里的
-def langtype 判定是否命中（两型见 [[langtype签名类型表达式]]）。匹配**恒逐值、无状态**：只看单个值,
-不在参数间携带任何环境（跨操作数的维相等/输出推断不在类型层,归 op 的 shape function,见 [[runtimec内
-建]]）。
+本章匹配语义作用于 **def langtype**（定义处的匹配类型）：把一个值的 **langtype** `(kind,ndim,dims)` 与签名
+里的 def langtype 判定是否命中（两者区别见 [[langtype签名类型表达式]]）。匹配**恒逐值、无状态**：只看单个
+值,不在参数间携带任何环境（跨操作数的维相等/输出推断不在类型层,归 op 的 shape function,见
+[[runtimec内建]]）。
 
 ## 匹配语义
 
@@ -36,10 +36,9 @@ def langtype 判定是否命中（两型见 [[langtype签名类型表达式]]）
 ## 参数变参（签名层,非类型）
 
 一个**参数位**吸收 0..N 个同型实参（`print`/`println`/`min`/`max` 等 arity 开放算子）是**签名**的
-arity 属性,**不属于类型表达式**——源码在末读参尾缀 `...` 声明,由签名解析器剥离,落成函数主槽的
-`dynamic` 字节,该参数 langtype 子槽保持纯净（见 [[函数]]、[[指令布局格式]]）。派发时:主槽
-`dynamic=1` → 末读参对**每个**尾随实参按其（纯净）langtype 逐个判定。`LangtypeValid`/`LangtypeMatch`
-永不见 `...`。
+arity 属性,**不属于类型表达式**——源码在末读参尾缀 `...` 声明,由签名解析器剥离,落成签名行锚点 `[0,0]`
+的 `dynamic` 字节,该参数 langtype 子槽保持纯净（见 [[函数]]、[[指令布局格式]]）。派发时:`dynamic=1` →
+末读参对**每个**尾随实参按其（纯净）langtype 逐个判定。`LangtypeValid`/`LangtypeMatch` 永不见 `...`。
 
 XValue head 三正交维编码见 [[总体方案]]（本卷只界定 langtype 串的文法与匹配语义）。
 
