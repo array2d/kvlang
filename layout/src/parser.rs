@@ -567,10 +567,12 @@ impl Parser {
                         ret.name,
                         ret.ty
                             .split('|')
-                            .map(|a| if !a.starts_with('*') && (a.starts_with('/') || a.contains('·')) {
-                                format!("*{a}")
-                            } else {
-                                a.to_string()
+                            .map(|a| {
+                                if !a.starts_with('*') && (a.starts_with('/') || a.contains('·')) {
+                                    format!("*{a}")
+                                } else {
+                                    a.to_string()
+                                }
                             })
                             .collect::<Vec<_>>()
                             .join("|")
@@ -737,7 +739,8 @@ impl Parser {
         // 于是经 q 写成员就是在写读参的对象。只读性沿别名传播，否则 `q = p; q·x = v`
         // 一句话就把「签名诚实原则」洗白了。
         // 别名 → 源头读参（`q = p` 记 q→p；再 `r = q` 追到 p），供诊断点名真凶。
-        let mut tainted: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let mut tainted: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
         let mut all: Vec<&Instruction> = Vec::new();
         collect_body_insts(&func.body, &mut all);
         loop {

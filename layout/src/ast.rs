@@ -316,26 +316,6 @@ pub fn float_lit(v: &str) -> Expr {
     }
 }
 
-pub fn bool_lit(v: &str) -> Expr {
-    Expr {
-        op: String::new(),
-        args: Vec::new(),
-        val: v.to_string(),
-        quote: 0,
-        lit: LitKind::LitBool,
-    }
-}
-
-pub fn none_lit() -> Expr {
-    Expr {
-        op: String::new(),
-        args: Vec::new(),
-        val: "None".to_string(),
-        quote: 0,
-        lit: LitKind::LitNil,
-    }
-}
-
 pub fn call(op: &str, args: Vec<Expr>) -> Expr {
     Expr {
         op: op.to_string(),

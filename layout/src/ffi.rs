@@ -13,7 +13,6 @@ pub type Handle = *mut c_void;
 
 // ── extern "C" 声明 ─────────────────────────────────────────────────────
 
-#[allow(dead_code)]
 extern "C" {
     fn kvspaceConnect(dsn: *const c_char) -> Handle;
     fn kvspaceClose(h: Handle);
@@ -27,16 +26,6 @@ extern "C" {
         resolve: c_int,
         out: *mut *mut u8,
         out_len: *mut u32,
-    ) -> c_int;
-    /// 就地写：key 已存在、body_len==原 body_len → 返回原 box body 偏移指针；否则非 0。
-    fn kvspaceWriteInPlace(
-        h: Handle,
-        key: *const c_char,
-        resolve: c_int,
-        body_len: u32,
-        body: *mut *mut u8,
-        err: *mut c_char,
-        err_cap: u32,
     ) -> c_int;
     /// 新位置写：按 (ref, storetype, ro, vid, langtype, body_len) 分配新 box、写 head，返回 body 偏移指针。
     fn kvspaceWriteNewPlace(
@@ -70,13 +59,6 @@ extern "C" {
         buf_cap: u32,
         out_len: *mut u32,
     ) -> c_int;
-    fn kvspaceDel(
-        h: Handle,
-        keys: *const *const c_char,
-        nkeys: u32,
-        err: *mut c_char,
-        err_cap: u32,
-    ) -> c_int;
     fn kvspaceDelTree(h: Handle, prefix: *const c_char, err: *mut c_char, err_cap: u32) -> c_int;
     fn kvspaceMkindex(
         h: Handle,
@@ -85,17 +67,6 @@ extern "C" {
         err: *mut c_char,
         err_cap: u32,
     ) -> c_int;
-    fn kvspaceMkindexExt(
-        h: Handle,
-        path: *const c_char,
-        ext_path: *const c_char,
-        err: *mut c_char,
-        err_cap: u32,
-    ) -> c_int;
-    fn kvspaceRmindexExt(h: Handle, path: *const c_char, err: *mut c_char, err_cap: u32) -> c_int;
-    fn kvspaceClear(h: Handle, err: *mut c_char, err_cap: u32) -> c_int;
-    fn kvspaceDisconnect(h: Handle, err: *mut c_char, err_cap: u32) -> c_int;
-
     fn kvspaceTlvEncode(
         kind: *const c_char,
         raw: *const u8,
@@ -107,12 +78,6 @@ extern "C" {
     ) -> c_int;
     fn kvspaceDecodeHead(data: *const u8, data_len: u32, out: *mut kvspaceHead_t) -> c_int;
 
-    fn kvspaceNewPtr(
-        target_langtype: *const c_char,
-        target: *const c_char,
-        out: *mut *mut u8,
-        out_len: *mut u32,
-    ) -> c_int;
     fn kvspaceNewChar(bytes: *const u8, len: u32, out: *mut *mut u8, out_len: *mut u32) -> c_int;
     fn kvspaceNewBool(v: u8, out: *mut *mut u8, out_len: *mut u32) -> c_int;
     fn kvspaceNewInt64(v: i64, out: *mut *mut u8, out_len: *mut u32) -> c_int;
@@ -294,30 +259,6 @@ impl Kv {
             unsafe { kvspaceMkindex(self.h, c.as_ptr(), 0, err.as_mut_ptr(), err.len() as u32) };
         err_ret(&mut err, ret)
     }
-
-    pub fn ext_index(&mut self, path: &str, ext_path: &str) -> Result<(), String> {
-        let cp = CString::new(path).expect("no NUL");
-        let ce = CString::new(ext_path).expect("no NUL");
-        let mut err: [c_char; 256] = [0; 256];
-        let ret = unsafe {
-            kvspaceMkindexExt(
-                self.h,
-                cp.as_ptr(),
-                ce.as_ptr(),
-                err.as_mut_ptr(),
-                err.len() as u32,
-            )
-        };
-        err_ret(&mut err, ret)
-    }
-
-    pub fn del_ext_index(&mut self, path: &str) -> Result<(), String> {
-        let c = CString::new(path).expect("no NUL");
-        let mut err: [c_char; 256] = [0; 256];
-        let ret =
-            unsafe { kvspaceRmindexExt(self.h, c.as_ptr(), err.as_mut_ptr(), err.len() as u32) };
-        err_ret(&mut err, ret)
-    }
 }
 
 impl Drop for Kv {
@@ -378,12 +319,6 @@ pub fn decode_head(data: &[u8]) -> kvspaceHead_t {
 }
 
 // ── 标准标量构造器 ───────────────────────────────────────────────────
-
-pub fn new_ptr(target_langtype: &str, target: &str) -> Vec<u8> {
-    let ck = CString::new(target_langtype).expect("no NUL");
-    let ct = CString::new(target).expect("no NUL");
-    call_codec(|out, out_len| unsafe { kvspaceNewPtr(ck.as_ptr(), ct.as_ptr(), out, out_len) })
-}
 
 pub fn new_char(kind: &str, s: &str) -> Vec<u8> {
     let bytes = s.as_bytes();

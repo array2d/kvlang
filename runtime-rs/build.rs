@@ -24,6 +24,7 @@ fn main() {
     let bin = format!("{manifest}/../bin"); // kvlang/bin（新构建的 libkvlang_runtime.so）
 
     println!("cargo:rustc-link-search=native={bin}");
+    println!("cargo:rustc-link-search=native=/usr/lib/kvspace");
     println!("cargo:rustc-link-search=native=/usr/lib");
     println!("cargo:rustc-link-lib=dylib=kvlang_runtime");
     println!("cargo:rustc-link-lib=dylib=kvspace");
@@ -32,6 +33,7 @@ fn main() {
     println!("cargo:rustc-link-arg=-Wl,--disable-new-dtags"); // rpath 转 DT_RPATH，传递解析子依赖
     println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN");
     println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN/../lib");
+    println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/kvspace");
     println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib");
 
     // 内嵌顶层 stdlib/**/*.kv → EMBEDDED_KV。

@@ -30,11 +30,16 @@ fn compile_simple_func() {
     let b = body(&sig_val);
     assert_eq!(kvkind::rwfunc_num_reads(b), 2);
     assert_eq!(kvkind::rwfunc_num_writes(b), 1);
-    // langtype 列表：读参在前(nr=2)、写参在后(nw=1)
-    assert_eq!(
-        kvkind::rwfunc_param_types(b),
-        vec!["int64", "int64", "int64"]
-    );
+    // langtype 列表：读参在前(nr=2)、写参在后(nw=1)，落参数定义键 .[0,±k]
+    let types: Vec<String> = ["[0,-1]", "[0,-2]", "[0,1]"]
+        .iter()
+        .map(|k| {
+            kvkind::def_param_parts(&kv.get_one(&format!("/lib/sum.{k}")))
+                .unwrap()
+                .1
+        })
+        .collect();
+    assert_eq!(types, vec!["int64", "int64", "int64"]);
 
     // 参数 Ptr
     let a = kv.get_one("/lib/sum/A");

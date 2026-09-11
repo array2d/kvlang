@@ -630,11 +630,19 @@ pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) {
     // 不带 `*` 的按**值传递**（槽存值本体，体内裸坐标 `[0,-k]` 直读）。见 spec [[函数]]。
     let mut param_coord: HashMap<String, String> = HashMap::new();
     for (i, p) in fn_.sig.params.iter().enumerate() {
-        let d = if langtype::is_addr_param(&p.ty) { "*" } else { "" };
+        let d = if langtype::is_addr_param(&p.ty) {
+            "*"
+        } else {
+            ""
+        };
         param_coord.insert(p.name.clone(), format!("{d}[0,-{}]", i + 1));
     }
     for (i, r) in fn_.sig.returns.iter().enumerate() {
-        let d = if langtype::is_addr_param(&r.ty) { "*" } else { "" };
+        let d = if langtype::is_addr_param(&r.ty) {
+            "*"
+        } else {
+            ""
+        };
         param_coord.insert(r.name.clone(), format!("{d}[0,{}]", i + 1));
     }
 
