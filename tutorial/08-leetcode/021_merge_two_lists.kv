@@ -9,15 +9,15 @@
 //   4
 struct Node {
 	val:int64=0
-	next:*Node=""
+	next:*Node=None
 }
 
 rwfunc merge(a:*Node, b:*Node) -> () {
 	pa = a
 	pb = b
-	while (pa != "") {
+	while (pa != None) {
 		pa·val -> av
-		pick_a = pb == ""
+		pick_a = pb == None
 
 		if (pick_a) {
 			println(av)
@@ -36,7 +36,7 @@ rwfunc merge(a:*Node, b:*Node) -> () {
 			}
 		}
 	}
-	while (pb != "") {
+	while (pb != None) {
 		bv = pb·val
 		println(bv)
 		pb = pb·next

@@ -56,6 +56,8 @@ kvlang 是被测对象，**分别在三个 kvspace 后端上各跑一遍，占�
 | `k_nucleotide` | 字符串 + 哈希表 | 逐字符 `ord` 入哈希表统计碱基频次 |
 | `iops` | 最小寻址单元往返地板价 | 单 key 读-改-写 `a=a+1`，per-op 延迟（对齐 #204，参考基线） |
 | `prime_sieve` | 计算 / 控制流密集 | 嵌套 `while` + 取模，O(n²) 内层迭代（参考基线） |
+| `matmul_compact` | **数组物理形态**（compact） | 同 `matmul` 算法，矩阵落单个 `[N,N]float64`（storetype=ARRAYND，元素连续打包），对照「每元素一个 key 的散 key map」 |
+| `quicksort_compact` | **数组物理形态**（compact） | 同 `quicksort` 算法，待排数组与显式栈都落单个 `[N]int64`，全程在 compact 数组里直接交换 |
 
 kvlang 的性能瓶颈是「PC/帧/局部全落 KV 树、每步一次往返」的架构本质（见 kvlang#194 #204 #116），
 不是某个热点函数；`iops`/`prime_sieve` 单独隔离出这条地板价，其余八例是跨语言等价算法对照。

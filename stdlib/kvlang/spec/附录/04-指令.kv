@@ -3,16 +3,22 @@ lib kvlang/spec/附录/指令 {
 	r##"# 指令
 
 ```
-instruction = [ writes "=" ] expr      (* 左写：writes = expr *)
-            | expr [ "->" writes ]     (* 右写：expr -> writes *)
-            | expr                     (* 纯副作用调用 *)
+instruction = [ writes "=" read_list ]      (* 左写：writes = read_list *)
+            | read_list [ "->" writes ]     (* 右写：read_list -> writes *)
+            | expr                          (* 纯副作用调用 *)
+
+read_list   = expr { "," expr }             (* 顶层逗号=多赋值：展开为 N 条单赋值；单 expr 即普通赋值 *)
 
 writes      = write_slot { "," write_slot }
 write_slot  = ident                    (* 裸名：帧内变量 *)
             | path                     (* 绝对路径 *)
             | ident "·" ident          (* 成员写：base·field *)
             | ident "·" "*" ident      (* 动态键写：base·*key *)
-            | ident "[" expr "]"       (* 下标写：仅限 "=" 形式；-> 侧不接受带下标写槽 *)
+            | ident "[" expr "]"       (* 下标写；`=`/`->` 两种书写等价，见 [[指令架构]] *)
 ```
+
+多赋值：左右逗号列表按位置配对、个数必须相等，展开为 N 条独立赋值（见 [[指令架构]]）。`->` 右侧的逗
+号列表若左侧是**单个**表达式，则是写参扇出（一条指令多写槽），不是多赋值——判据是读槽侧顶层是否含逗
+号。
 "## -> /lib/kvlang/spec/附录/指令
 }

@@ -5,12 +5,16 @@
 //   20
 //   30
 //   sum = 60
-rwfunc test() -> () {
-	a:[]int64 = [10, 20, 30]
+rwfunc print_sum(a:[]int64) -> (total:int64) {
 	total = 0
 	for (x in a) {
 		println(x)
 		total = total + x
 	}
+}
+
+rwfunc test() -> () {
+	a:[]int64 = [10, 20, 30]
+	print_sum(a) -> total
 	println("sum =", total)
 }

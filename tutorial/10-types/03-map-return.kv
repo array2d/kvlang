@@ -4,7 +4,7 @@
 //   n = 42
 //   x = 7
 //   miss = true
-rwfunc build() -> (m:[]char/utf8·int64) {
+rwfunc build() -> (m:*[]char/utf8·int64) {
 	{n=42; x=7} -> m
 }
 rwfunc test() -> () {

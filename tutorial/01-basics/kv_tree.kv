@@ -5,19 +5,31 @@
 //   n= 2
 //   numel= 3 dim= 1
 //   shape0= 3
+
+// path 下是否存在字段 key
+rwfunc has_field(path:[]char/utf32, key:[]char/utf32) -> (ok:bool) {
+	kv·get(path, key) != None -> ok
+}
+
+// 列出 prefix 下的子键并计数（成员数查 memindex，非 ndarray 形状）
+rwfunc count_children(prefix:[]char/utf32) -> (n:int64) {
+	kv·list(prefix) -> names
+	kv·listlen(names) -> n
+}
+
 rwfunc test() -> () {
+	/tmp/kvt:int64·int64 = {}
 	kv·set("/tmp/kvt·data", 42)
 	kv·get("/tmp/kvt·data") -> v
 	println("v=", v)
-	kv·get("/tmp/kvt", "data") != None -> h
+	has_field("/tmp/kvt", "data") -> h
 	println("has_data=", h)
 	kv·get("/tmp/kvt", "data") -> x
 	println("x=", x)
 	kv·mkindex("/tmp/kvt/")
 	kv·set("/tmp/kvt/a", 1)
 	kv·set("/tmp/kvt/b", 2)
-	kv·list("/tmp/kvt/") -> names
-	ndarray·numel(names) -> n
+	count_children("/tmp/kvt/") -> n
 	println("n=", n)
 	ndarray·numel([10,20,30]) -> m
 	ndarray·dim([10,20,30]) -> d

@@ -1,0 +1,19 @@
+// 语义: 就地改**调用方的对象**。函数体内被写的参数**必须**声明在写参侧
+//       （签名诚实原则，见 04-layout语义/03-函数）；kvlang 只有地址传递，
+//       写参 p 拿到的就是调用方对象的地址，`p·x = v` 写的就是它。
+// 期望输出:
+//   11
+//   2
+struct Point {
+	x:int64=0
+	y:int64=0
+}
+rwfunc shift(dx:int64) -> (p:*Point) {
+	p·x + dx -> p·x
+}
+rwfunc test() -> () {
+	a:Point = {x=1 y=2}
+	shift(10) -> a
+	println(a·x)
+	println(a·y)
+}

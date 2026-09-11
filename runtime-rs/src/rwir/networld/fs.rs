@@ -3,7 +3,7 @@
 //!   networld/fs·read(p, start, offset) -> raw   从 start 起读 offset 字节，返回 []uint8
 //!   networld/fs·write(p, data) -> n         把 data([]uint8) 覆盖写入 p（创建/截断），返回写入字节数（失败 -1）
 //!   networld/fs·append(p, data) -> n        把 data([]uint8) 追加到 p 末尾，返回写入字节数（失败 -1）
-//!   networld/fs·list(p) -> names            列目录 p 的成员名（[]stringkeymap，名字序）；p 必须是目录
+//!   networld/fs·list(p) -> names            列目录 p 的成员名（[int64]·[]char/utf32，名字序）；p 必须是目录
 //!   networld/fs·del(p) -> code              删除 p，0 成功/-1 失败；p 必须是文件或空目录（非空目录失败）
 //!   networld/fs·mkdir(p) -> code            创建目录 p（含缺失父级，幂等），0 成功/-1 失败
 //!   networld/fs·exists(p) -> b              p 是否存在（bool）

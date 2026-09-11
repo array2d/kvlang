@@ -25,5 +25,8 @@ q = Point{}            // 全取默认：0.0, 0.0
 在签名中，结构类型以原型路径 `/lib/<Name>`（**structref** 类型表达式 atom）标注（见 [[langtype签名类
 型表达式]]）。结构值可存进 map（int 键、struct 值）、以绝对路径指针连成链表/树/图（见
 `tutorial/12-struct/`）。
+
+struct 原型**不是**平行于 kvspace 的类型注册表——它就是 KV 树里的一个索引节点（`/lib/<Name>`，字段类型
+与默认值都是 KV 数据），故不与「数据结构全在 KV 树」的原则冲突（见 [[程序即数据结构]]）。
 "#### -> /lib/kvlang/spec/类型系统/struct
 }

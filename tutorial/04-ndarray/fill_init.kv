@@ -5,6 +5,13 @@
 //   a0 = 0
 //   b12 = 5
 //   sum = 30
+rwfunc sum6(a:[6]int32) -> (total:int64) {
+	total = 0
+	for (x in a) {
+		total = total + x
+	}
+}
+
 rwfunc test() -> () {
 	a:[4]int32 = []
 	ndarray·numel(a) -> na
@@ -15,12 +22,6 @@ rwfunc test() -> () {
 	v12 = b[1,2]
 	println("b12 =", v12)
 	c:[6]int32 = [5...]
-	total = 0
-	0 -> i
-	while (i < 6) {
-		x = c[i]
-		total = total + x
-		i + 1 -> i
-	}
+	sum6(c) -> total
 	println("sum =", total)
 }

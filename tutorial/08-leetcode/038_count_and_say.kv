@@ -8,19 +8,20 @@
 //   1211
 //   111221
 rwfunc next_seq(src_len:int64) -> (dst_len:int64) {
+	/tmp/s2:[int64]·int64 = {}
 	i = 0
 	di = 0
 	while (i < src_len) {
-		/tmp/s[i] -> cur
+		kv·get("/tmp/s", i) -> cur
 		count = 1
 		j = i + 1
 		while (j < src_len) {
-			/tmp/s[j] -> v
+			kv·get("/tmp/s", j) -> v
 			if (v == cur) { count + 1 -> count ; j + 1 -> j }
 			else { src_len -> j }
 		}
-		_ = kv·set("/tmp/s2", di, count)
-		_ = kv·set("/tmp/s2", di+1, cur)
+			_ = kv·set("/tmp/s2", di, count)
+			_ = kv·set("/tmp/s2", di+1, cur)
 		di + 2 -> di
 		i + count -> i
 	}
@@ -30,8 +31,8 @@ rwfunc next_seq(src_len:int64) -> (dst_len:int64) {
 rwfunc print_seq_len(seq_len:int64) -> () {
 	i = 0
 	while (i < seq_len) {
-		cnt = /tmp/s[i]
-		val = /tmp/s[i+1]
+		kv·get("/tmp/s", i) -> cnt
+		kv·get("/tmp/s", i+1) -> val
 		k = 0
 		while (k < cnt) {
 			print(val)
@@ -52,6 +53,7 @@ rwfunc copy_from_s2_to_s(s2_len:int64) -> () {
 }
 
 rwfunc count_and_say(N:int64) -> () {
+	/tmp/s:[int64]·int64 = {}
 	_ = kv·set("/tmp/s", 0, 1)   // count=1 of digit 1
 	_ = kv·set("/tmp/s", 1, 1)
 	cur_len = 2

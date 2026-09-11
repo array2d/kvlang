@@ -17,16 +17,23 @@ static rwir_cache_ent_t *g_rwir_cache[RWIR_CACHE_BUCKETS];
  * 在 shm 后端 decode 本已近乎免费的深递归热路径上纯属净开销）。 */
 static size_t rwir_hash(const char *funcdir, int addr0) {
     size_t h = 1469598103934665603ULL;
-    for (const char *s = funcdir; *s; s++) { h ^= (unsigned char)*s; h *= 1099511628211ULL; }
-    h ^= (size_t)(unsigned)addr0; h *= 1099511628211ULL;
+    for (const char *s = funcdir; *s; s++) {
+        h ^= (unsigned char)*s;
+        h *= 1099511628211ULL;
+    }
+    h ^= (size_t)(unsigned)addr0;
+    h *= 1099511628211ULL;
     return h & (RWIR_CACHE_BUCKETS - 1);
 }
 static kvlangRwirInst_t *rwir_cache_get(const char *funcdir, int addr0) {
-    for (rwir_cache_ent_t *e = g_rwir_cache[rwir_hash(funcdir, addr0)]; e; e = e->next)
-        if (e->addr0 == addr0 && strcmp(e->funcdir, funcdir) == 0) return e->inst;
+    for (rwir_cache_ent_t *e = g_rwir_cache[rwir_hash(funcdir, addr0)]; e;
+         e = e->next)
+        if (e->addr0 == addr0 && strcmp(e->funcdir, funcdir) == 0)
+            return e->inst;
     return NULL;
 }
-static void rwir_cache_put(const char *funcdir, int addr0, kvlangRwirInst_t *inst) {
+static void rwir_cache_put(const char *funcdir, int addr0,
+                           kvlangRwirInst_t *inst) {
     size_t b = rwir_hash(funcdir, addr0);
     rwir_cache_ent_t *e = malloc(sizeof *e);
     e->funcdir = strdup(funcdir);
@@ -42,20 +49,23 @@ static void rwir_cache_put(const char *funcdir, int addr0, kvlangRwirInst_t *ins
  * langtype 签名串在此按 opcode 驻留一次（IV-0：进程私有，绝不入 kvspace）。 */
 typedef struct opmeta_ent {
     char *opcode;
-    int notinmyrwircaps;   /* 1 = 不在本 runtime myrwircaps、须经 def rwir 路由；0 = 用户 rwfunc */
-    char *def_sig;         /* notinmyrwircaps 时的读参 langtype 签名（owned，可 NULL） */
+    int notinmyrwircaps; /* 1 = 不在本 runtime myrwircaps、须经 def rwir 路由；0 = 用户 rwfunc */
+    char
+        *def_sig; /* notinmyrwircaps 时的读参 langtype 签名（owned，可 NULL） */
     int def_nr;
-    int def_dyn;           /* 末读参变参（主槽 body 的 dynamic 字节） */
+    int def_dyn; /* 末读参变参（主槽 body 的 dynamic 字节） */
     struct opmeta_ent *next;
 } opmeta_ent_t;
 static opmeta_ent_t *g_opmeta_cache[RWIR_CACHE_BUCKETS];
 
-static char *load_def_reads(kvlangKv_t *kv, const char *key, int *out_nr, int *out_dyn);
+static char *load_def_reads(kvlangKv_t *kv, const char *key, int *out_nr,
+                            int *out_dyn);
 
 static opmeta_ent_t *opmeta_get(kvlangKv_t *kv, const char *opcode) {
     size_t b = rwir_hash(opcode, 0);
     for (opmeta_ent_t *e = g_opmeta_cache[b]; e; e = e->next)
-        if (strcmp(e->opcode, opcode) == 0) return e;
+        if (strcmp(e->opcode, opcode) == 0)
+            return e;
     opmeta_ent_t *e = malloc(sizeof *e);
     e->opcode = strdup(opcode);
     e->notinmyrwircaps = notinmyrwircaps(kv, opcode) ? 1 : 0;
@@ -75,10 +85,13 @@ static opmeta_ent_t *opmeta_get(kvlangKv_t *kv, const char *opcode) {
 /* 读帧的 ‥lib 槽 → funcdir（/lib/pkg·fn），供缓存键用；无则 NULL（不缓存该指令）。 */
 static char *read_seglib(kvlangKv_t *kv, const char *fr) {
     char *stk = kvlangKeytreeStack(fr);
-    kvlangStrbuf_t k; kvlangStrbufInit(&k);
-    kvlangStrbufPuts(&k, stk); kvlangStrbufPuts(&k, SEG_LIB);
+    kvlangStrbuf_t k;
+    kvlangStrbufInit(&k);
+    kvlangStrbufPuts(&k, stk);
+    kvlangStrbufPuts(&k, SEG_LIB);
     free(stk);
-    kvlangXvalue_t v; kvlangXvalueZero(&v);
+    kvlangXvalue_t v;
+    kvlangXvalueZero(&v);
     kvlangKvGetOne(kv, k.p, &v);
     kvlangStrbufFree(&k);
     char *r = kvlangXvalueNone(&v) ? NULL : kvlangXvalueValueString(&v);
@@ -98,19 +111,25 @@ static const char *rfind_sep(const char *s) {
 
 /* goto/br 目标：layout 已把 label 解析为 int64 irseq（≥1）。非 int64 / 越界返回 -1。 */
 static int irseq_of(const kvlangParam_t *p) {
-    if (kvlangXvalueNone(&p->val) || !kvlangXvalueKindIs(&p->val, KVSPACE_KIND_INT64)) return -1;
+    if (kvlangXvalueNone(&p->val) ||
+        !kvlangXvalueKindIs(&p->val, KVSPACE_KIND_INT64))
+        return -1;
     int64_t n = kvlangScalarI64(kvlangXvalueScalar(&p->val));
-    if (n < 1 || n > 0x7fffffff) return -1;
+    if (n < 1 || n > 0x7fffffff)
+        return -1;
     return (int)n;
 }
 
 /* 函数内跳转：只改 PC 的 [irseq]，帧不变。目标非法 → RuntimeError，返回 -1。 */
-static int jump_to(kvlangKv_t *kv, const char *vtid, const char *pc, const kvlangParam_t *target, const char *op) {
+static int jump_to(kvlangKv_t *kv, const char *vtid, const char *pc,
+                   const kvlangParam_t *target, const char *op) {
     int irseq = irseq_of(target);
     if (irseq < 0) {
         char msg[256];
-        snprintf(msg, sizeof msg, "RuntimeError: %s target is not an int64 irseq: %s (kind=%s)",
-                 op, target->name ? target->name : "", kvlangXvalueKind(&target->val));
+        snprintf(msg, sizeof msg,
+                 "RuntimeError: %s target is not an int64 irseq: %s (kind=%s)",
+                 op, target->name ? target->name : "",
+                 kvlangXvalueKind(&target->val));
         kvlangVthreadSetError(kv, vtid, pc, msg);
         return -1;
     }
@@ -124,9 +143,11 @@ static int jump_to(kvlangKv_t *kv, const char *vtid, const char *pc, const kvlan
 }
 
 static bool is_literal(const char *s) {
-    if (!s || !s[0]) return false;
-    return s[0] == '"' || s[0] == '/' || strcmp(s, "true") == 0 || strcmp(s, "false") == 0 ||
-           strcmp(s, "null") == 0 || (s[0] >= '0' && s[0] <= '9') || (s[0] == '-' && s[1]);
+    if (!s || !s[0])
+        return false;
+    return s[0] == '"' || s[0] == '/' || strcmp(s, "true") == 0 ||
+           strcmp(s, "false") == 0 || strcmp(s, "null") == 0 ||
+           (s[0] >= '0' && s[0] <= '9') || (s[0] == '-' && s[1]);
 }
 
 /* 派发期读参类型校验（runtime篇-07 第八节）：把每个实参的 kind 逐一匹配
@@ -135,17 +156,20 @@ static bool is_literal(const char *s) {
  * XValue 头只携带 array_len 不含多维 shape，故仅校验 kind 层。
  * 不匹配 → 置 TypeError，返回 -1；通过返回 0。 */
 static int check_read_types(kvlangKv_t *kv, const char *vtid, const char *pc,
-                            const char *opcode, const char *def_sig, int def_nr, int dynamic,
-                            kvlangParam_t *args, int nargs) {
-    if (def_nr <= 0 || !def_sig || !*def_sig) return 0;
+                            const char *opcode, const char *def_sig, int def_nr,
+                            int dynamic, kvlangParam_t *args, int nargs) {
+    if (def_nr <= 0 || !def_sig || !*def_sig)
+        return 0;
     char *dup = strdup(def_sig);
     char *reads[128];
     int rn = 0;
-    for (char *s = dup; rn < def_nr && rn < 128; ) {
+    for (char *s = dup; rn < def_nr && rn < 128;) {
         reads[rn++] = s;
         char *nl = strchr(s, '\n');
-        if (!nl) break;
-        *nl = 0; s = nl + 1;
+        if (!nl)
+            break;
+        *nl = 0;
+        s = nl + 1;
     }
     bool var_last = rn > 0 && dynamic;
     int min_args = var_last ? rn - 1 : rn;
@@ -153,7 +177,8 @@ static int check_read_types(kvlangKv_t *kv, const char *vtid, const char *pc,
     int rc = 0;
     if (nargs < min_args) {
         char msg[256];
-        snprintf(msg, sizeof msg, "TypeError: %s expects %d args, got %d", opcode, min_args, nargs);
+        snprintf(msg, sizeof msg, "TypeError: %s expects %d args, got %d",
+                 opcode, min_args, nargs);
         kvlangVthreadSetError(kv, vtid, pc, msg);
         rc = -1;
     }
@@ -161,45 +186,59 @@ static int check_read_types(kvlangKv_t *kv, const char *vtid, const char *pc,
         const char *exp = i < rn ? reads[i] : (var_last ? reads[rn - 1] : NULL);
         if (!exp) {
             char msg[256];
-            snprintf(msg, sizeof msg, "TypeError: %s expects %d args, got %d", opcode, rn, nargs);
+            snprintf(msg, sizeof msg, "TypeError: %s expects %d args, got %d",
+                     opcode, rn, nargs);
             kvlangVthreadSetError(kv, vtid, pc, msg);
             rc = -1;
             break;
         }
-        if (!exp[0] || !kvlangLangtypeValid(exp)) continue;   /* 动态/非法 kindexp 跳过 */
-        kvlangXvalue_t v; kvlangXvalueZero(&v);
+        if (!exp[0] || !kvlangLangtypeValid(exp))
+            continue; /* 动态/非法 kindexp 跳过 */
+        kvlangXvalue_t v;
+        kvlangXvalueZero(&v);
         kvlangBuiltinResolveReadValue(kv, fr, args[i].name, &args[i].val, &v);
         const char *k = kvlangXvalueKind(&v);
-        kvspaceHead_t h; kvlangXvalueHead(&v, &h);
-        kvlangLangtype kx; kvlangLangtypeParse(h.langtype, &kx);
+        kvspaceHead_t h;
+        kvlangXvalueHead(&v, &h);
+        kvlangLangtype kx;
+        kvlangLangtypeParse(h.langtype, &kx);
         bool ok = kvlangLangtypeMatch(exp, k, kx.ndim, kx.dims);
-        char kbuf[40]; snprintf(kbuf, sizeof kbuf, "%s", k[0] ? k : "None");
+        char kbuf[40];
+        snprintf(kbuf, sizeof kbuf, "%s", k[0] ? k : "None");
         kvlangXvalueFree(&v);
         if (!ok) {
             char msg[256];
-            snprintf(msg, sizeof msg, "TypeError: %s arg %d: expected %s, got %s", opcode, i + 1, exp, kbuf);
+            snprintf(msg, sizeof msg,
+                     "TypeError: %s arg %d: expected %s, got %s", opcode, i + 1,
+                     exp, kbuf);
             kvlangVthreadSetError(kv, vtid, pc, msg);
             rc = -1;
         }
     }
-    free(fr); free(dup);
+    free(fr);
+    free(dup);
     return rc;
 }
 
 /* 读签名行 [0,x] 槽（def langtype）的 body 为 langtype 串（malloc；无槽返 NULL）。
  * dir 带尾 /；x<0 读参、x>0 写参。 */
 static char *read_sig_slot(kvlangKv_t *kv, const char *dir, int x) {
-    kvlangStrbuf_t sk; kvlangStrbufInit(&sk);
+    kvlangStrbuf_t sk;
+    kvlangStrbufInit(&sk);
     kvlangStrbufPrintf(&sk, "%s[0,%d]", dir, x);
-    kvlangXvalue_t v; kvlangXvalueZero(&v);
+    kvlangXvalue_t v;
+    kvlangXvalueZero(&v);
     kvlangKvGetOne(kv, sk.p, &v);
     kvlangStrbufFree(&sk);
     char *s = NULL;
     if (!kvlangXvalueNone(&v)) {
-        kvspaceHead_t h; kvlangXvalueHead(&v, &h);
-        int32_t bl; const uint8_t *b = kvlangXvalueBody(&v, &h, &bl);
+        kvspaceHead_t h;
+        kvlangXvalueHead(&v, &h);
+        int32_t bl;
+        const uint8_t *b = kvlangXvalueBody(&v, &h, &bl);
         s = malloc((size_t)bl + 1);
-        memcpy(s, b, (size_t)bl); s[bl] = 0;
+        memcpy(s, b, (size_t)bl);
+        s[bl] = 0;
     }
     kvlangXvalueFree(&v);
     return s;
@@ -207,9 +246,11 @@ static char *read_sig_slot(kvlangKv_t *kv, const char *dir, int x) {
 
 /* 拼读参签名（\n 连接 [0,-1..-nr] 各 def langtype 槽）。dir 带尾 /。malloc 返回。 */
 static char *join_read_sig(kvlangKv_t *kv, const char *dir, int nr) {
-    kvlangStrbuf_t b; kvlangStrbufInit(&b);
+    kvlangStrbuf_t b;
+    kvlangStrbufInit(&b);
     for (int i = 1; i <= nr; i++) {
-        if (i > 1) kvlangStrbufPutc(&b, '\n');
+        if (i > 1)
+            kvlangStrbufPutc(&b, '\n');
         char *s = read_sig_slot(kv, dir, -i);
         kvlangStrbufPuts(&b, s ? s : "");
         free(s);
@@ -220,19 +261,30 @@ static char *join_read_sig(kvlangKv_t *kv, const char *dir, int nr) {
 /* 读取 rwir/rwfunc 定义的读参签名：从主槽计数头取 nr/dynamic，读参 langtype 逐条
  * 落在签名行 [0,-i] 槽（def langtype）。返回 \n 连接的 kindexp-list（调用方 free）
  * 并置 *out_nr；无定义返回 NULL。 */
-static char *load_def_reads(kvlangKv_t *kv, const char *key, int *out_nr, int *out_dyn) {
+static char *load_def_reads(kvlangKv_t *kv, const char *key, int *out_nr,
+                            int *out_dyn) {
     *out_nr = 0;
     *out_dyn = 0;
-    kvlangXvalue_t v; kvlangXvalueZero(&v);
+    kvlangXvalue_t v;
+    kvlangXvalueZero(&v);
     kvlangKvGetOne(kv, key, &v);
-    if (kvlangXvalueNone(&v)) { kvlangXvalueFree(&v); return NULL; }
-    kvspaceHead_t h; kvlangXvalueHead(&v, &h);
-    int32_t bl; const uint8_t *b = kvlangXvalueBody(&v, &h, &bl);
-    if (bl < 5) { kvlangXvalueFree(&v); return NULL; }
+    if (kvlangXvalueNone(&v)) {
+        kvlangXvalueFree(&v);
+        return NULL;
+    }
+    kvspaceHead_t h;
+    kvlangXvalueHead(&v, &h);
+    int32_t bl;
+    const uint8_t *b = kvlangXvalueBody(&v, &h, &bl);
+    if (bl < 5) {
+        kvlangXvalueFree(&v);
+        return NULL;
+    }
     *out_nr = b[0] | (b[1] << 8);
     *out_dyn = b[4];
     kvlangXvalueFree(&v);
-    kvlangStrbuf_t dir; kvlangStrbufInit(&dir);
+    kvlangStrbuf_t dir;
+    kvlangStrbufInit(&dir);
     kvlangStrbufPrintf(&dir, "%s/", key);
     char *sig = join_read_sig(kv, dir.p, *out_nr);
     kvlangStrbufFree(&dir);
@@ -240,12 +292,17 @@ static char *load_def_reads(kvlangKv_t *kv, const char *key, int *out_nr, int *o
 }
 
 static char *frame_slot_key(const char *frame_root, const char *slot) {
-    if (!slot || !slot[0]) return NULL;
-    if (slot[0] == '/') return strdup(slot);
-    if (strncmp(slot, MEMBER_SEP, MEMBER_SEP_LEN) == 0) return NULL;
-    kvlangStrbuf_t b; kvlangStrbufInit(&b);
+    if (!slot || !slot[0])
+        return NULL;
+    if (slot[0] == '/')
+        return strdup(slot);
+    if (strncmp(slot, MEMBER_SEP, MEMBER_SEP_LEN) == 0)
+        return NULL;
+    kvlangStrbuf_t b;
+    kvlangStrbufInit(&b);
     char *stk = kvlangKeytreeStack(frame_root);
-    kvlangStrbufPuts(&b, stk); free(stk);
+    kvlangStrbufPuts(&b, stk);
+    free(stk);
     kvlangStrbufPuts(&b, slot);
     return kvlangStrbufDetach(&b);
 }
@@ -253,13 +310,17 @@ static char *frame_slot_key(const char *frame_root, const char *slot) {
 /* 实参名 → 其存储键（写入被调帧 [0,-k]/[0,k]）。字面量返回 NULL。
  * *[0,±k] 显式解引用：读本帧 [0,±k]（ref=1 Ptr，body=实参地址），取 target 即实参存储键。
  * 普通名/绝对路径走 frame_slot_key（绝对路径直通、·成员返回 NULL）。 */
-static char *resolve_read_path(kvlangKv_t *kv, const char *frame_root, const char *name) {
-    if (is_literal(name)) return NULL;
+static char *resolve_read_path(kvlangKv_t *kv, const char *frame_root,
+                               const char *name) {
+    if (is_literal(name))
+        return NULL;
     if (name[0] == '*') {
         char *stk = kvlangKeytreeStack(frame_root);
-        kvlangXvalue_t pv; kvlangXvalueZero(&pv);
+        kvlangXvalue_t pv;
+        kvlangXvalueZero(&pv);
         kvlangKvGetMember(kv, stk, name + 1, &pv);
-        char *result = kvlangXvalueIsPtr(&pv) ? kvlangXvaluePtrTarget(&pv) : NULL;
+        char *result =
+            kvlangXvalueIsPtr(&pv) ? kvlangXvaluePtrTarget(&pv) : NULL;
         kvlangXvalueFree(&pv);
         free(stk);
         return result;
@@ -269,39 +330,94 @@ static char *resolve_read_path(kvlangKv_t *kv, const char *frame_root, const cha
 
 /* return：弹出当前帧 [d]。d==1 → 顶层结束（*out_next=NULL）；否则 *out_next=‥returnpc。
  * 返回链断裂（帧无 ‥returnpc）→ RuntimeError（#109），保留该帧供排查，返回 -1。 */
-static int handle_return(kvlangKv_t *kv, const char *vtid, const char *pc, char **out_next) {
+static int handle_return(kvlangKv_t *kv, const char *vtid, const char *pc,
+                         char **out_next) {
     *out_next = NULL;
     char *fr = kvlangKeytreeFrameRoot(pc);
     int d = kvlangKeytreeFrameNum(fr);
     char *next = NULL;
     if (d > 1) {
-        kvlangStrbuf_t rk; kvlangStrbufInit(&rk);
+        kvlangStrbuf_t rk;
+        kvlangStrbufInit(&rk);
         kvlangKeytreeFrameReturnpc(fr, &rk);
-        kvlangXvalue_t v; kvlangXvalueZero(&v);
+        kvlangXvalue_t v;
+        kvlangXvalueZero(&v);
         kvlangKvGetOne(kv, rk.p, &v);
-        if (!kvlangXvalueNone(&v)) next = kvlangXvalueValueString(&v);
+        if (!kvlangXvalueNone(&v))
+            next = kvlangXvalueValueString(&v);
         kvlangXvalueFree(&v);
         kvlangStrbufFree(&rk);
         if (!next || !next[0]) {
             char msg[512];
-            snprintf(msg, sizeof msg, "RuntimeError: broken return chain: frame %s has no returnpc (pc=%s)", fr, pc);
+            snprintf(msg, sizeof msg,
+                     "RuntimeError: broken return chain: frame %s has no "
+                     "returnpc (pc=%s)",
+                     fr, pc);
             kvlangVthreadSetError(kv, vtid, pc, msg);
-            free(next); free(fr);
+            free(next);
+            free(fr);
             return -1;
         }
+    }
+    /* 值写参 copy-out：‥wdst 第 i 行给出第 i 个写参的调用方目标 key，把本帧 `[0,+i]` 的
+     * 值复制回去（地址写参留空行，不在此列）。表不存在 = 本帧无值写参，一次读即跳过。 */
+    if (d > 1) {
+        kvlangStrbuf_t dk;
+        kvlangStrbufInit(&dk);
+        kvlangStrbufPrintf(&dk, "%s/", fr);
+        kvlangStrbufPuts(&dk, RUNTIME_MEMBER_SEP "wdst");
+        kvlangXvalue_t dv;
+        kvlangXvalueZero(&dv);
+        kvlangKvGetOne(kv, dk.p, &dv);
+        kvlangStrbufFree(&dk);
+        if (!kvlangXvalueNone(&dv)) {
+            char *table = kvlangXvalueValueString(&dv);
+            char *cur = table;
+            int i = 1;
+            while (cur) {
+                char *nl = strchr(cur, '\n');
+                if (nl)
+                    *nl = 0;
+                if (cur[0]) {
+                    kvlangStrbuf_t sk;
+                    kvlangStrbufInit(&sk);
+                    kvlangStrbufPrintf(&sk, "%s/[0,%d]", fr, i);
+                    kvlangXvalue_t sv;
+                    kvlangXvalueZero(&sv);
+                    kvlangKvGetOne(kv, sk.p, &sv);
+                    kvlangStrbufFree(&sk);
+                    if (!kvlangXvalueNone(&sv)) {
+                        kvlangKvPair_t wp = {cur, sv};
+                        char werr[256];
+                        kvlangKvSet(kv, &wp, 1, werr, sizeof werr);
+                    }
+                    kvlangXvalueFree(&sv);
+                }
+                i++;
+                cur = nl ? nl + 1 : NULL;
+            }
+            free(table);
+        }
+        kvlangXvalueFree(&dv);
     }
     char *stk = kvlangKeytreeStack(fr);
     char err[256];
     kvlangKvDelExtIndex(kv, stk, err, sizeof err);
     kvlangKvDelTree(kv, fr, err, sizeof err);
-    free(stk); free(fr);
+    free(stk);
+    free(fr);
     *out_next = next;
     return 0;
 }
 
+static void param_decl_type(kvlangKv_t *kv, const char *func_key, int x,
+                            char *lt, size_t cap);
+
 /* HandleCall：创建子帧。返回 EntryPC(frameRoot)，失败 NULL */
-static char *handle_call(kvlangKv_t *kv, const char *pc, kvlangRwirInst_t *inst) {
-    kvlangStrbuf_t vtid_b; kvlangStrbufInit(&vtid_b);
+static char *handle_call(kvlangKv_t *kv, const char *pc,
+                         kvlangRwirInst_t *inst) {
+    kvlangStrbuf_t vtid_b;
+    kvlangStrbufInit(&vtid_b);
     const char *vtid = kvlangKeytreeVtidFromPc(pc, &vtid_b);
     const char *fn = inst->reads[0].name;
     char *pkg = strdup("");
@@ -310,42 +426,65 @@ static char *handle_call(kvlangKv_t *kv, const char *pc, kvlangRwirInst_t *inst)
     if (strncmp(fn, lp, 5) == 0) {
         const char *rest = fn + 5;
         const char *dot = rfind_sep(rest);
-        if (dot) { free(pkg); pkg = strndup(rest, (size_t)(dot - rest)); free(name); name = strdup(dot + MEMBER_SEP_LEN); }
-        else { free(name); name = strdup(rest); }
+        if (dot) {
+            free(pkg);
+            pkg = strndup(rest, (size_t)(dot - rest));
+            free(name);
+            name = strdup(dot + MEMBER_SEP_LEN);
+        } else {
+            free(name);
+            name = strdup(rest);
+        }
     } else {
         const char *dot = rfind_sep(fn);
-        if (dot) { free(pkg); pkg = strndup(fn, (size_t)(dot - fn)); free(name); name = strdup(dot + MEMBER_SEP_LEN); }
-        else {
+        if (dot) {
+            free(pkg);
+            pkg = strndup(fn, (size_t)(dot - fn));
+            free(name);
+            name = strdup(dot + MEMBER_SEP_LEN);
+        } else {
             /* 裸名调用（无 /lib/ 无 ·）：同 pkg 优先——当前函数所在 lib 下有同名 rwfunc 就用之
              * （lib aaa/bbb/math 内 sum(A,A) → /lib/aaa/bbb/math·sum），否则退回根 /lib/<fn>。 */
             char *ff = kvlangKeytreeFrameRoot(pc);
             if (ff) {
                 /* 函数目录在帧的 ‥lib 槽（/lib/aaa/bbb/math·double/）：由此取调用者 pkg。 */
-                kvlangStrbuf_t lk; kvlangStrbufInit(&lk);
+                kvlangStrbuf_t lk;
+                kvlangStrbufInit(&lk);
                 char *stk = kvlangKeytreeStack(ff);
-                kvlangStrbufPuts(&lk, stk); free(stk);
+                kvlangStrbufPuts(&lk, stk);
+                free(stk);
                 kvlangStrbufPuts(&lk, SEG_LIB);
-                kvlangXvalue_t lv; kvlangXvalueZero(&lv);
+                kvlangXvalue_t lv;
+                kvlangXvalueZero(&lv);
                 kvlangKvGetOne(kv, lk.p, &lv);
                 kvlangStrbufFree(&lk);
-                char *funcdir = kvlangXvalueNone(&lv) ? NULL : kvlangXvalueValueString(&lv);
+                char *funcdir =
+                    kvlangXvalueNone(&lv) ? NULL : kvlangXvalueValueString(&lv);
                 kvlangXvalueFree(&lv);
                 if (funcdir) {
                     char *rel = funcdir + 5; // 剥 /lib/
                     size_t rl = strlen(rel);
-                    if (rl > 0 && rel[rl - 1] == '/') rel[rl - 1] = '\0'; // 剥尾 /
+                    if (rl > 0 && rel[rl - 1] == '/')
+                        rel[rl - 1] = '\0'; // 剥尾 /
                     const char *sep = rfind_sep(rel);
                     if (sep) {
                         char *cand_pkg = strndup(rel, (size_t)(sep - rel));
                         char *cand = kvlangKeytreeLibFunc(cand_pkg, fn);
-                        kvlangStrbuf_t sk; kvlangStrbufInit(&sk);
+                        kvlangStrbuf_t sk;
+                        kvlangStrbufInit(&sk);
                         kvlangStrbufPrintf(&sk, "%s/[0,0]", cand);
-                        kvlangXvalue_t sv; kvlangXvalueZero(&sv);
+                        kvlangXvalue_t sv;
+                        kvlangXvalueZero(&sv);
                         kvlangKvGetOne(kv, sk.p, &sv);
-                        bool ok = !kvlangXvalueNone(&sv) && kvlangXvalueKindIs(&sv, KVSPACE_KIND_RWFUNC);
-                        kvlangXvalueFree(&sv); kvlangStrbufFree(&sk);
-                        if (ok) { free(pkg); pkg = cand_pkg; }
-                        else free(cand_pkg);
+                        bool ok = !kvlangXvalueNone(&sv) &&
+                                  kvlangXvalueKindIs(&sv, KVSPACE_KIND_RWFUNC);
+                        kvlangXvalueFree(&sv);
+                        kvlangStrbufFree(&sk);
+                        if (ok) {
+                            free(pkg);
+                            pkg = cand_pkg;
+                        } else
+                            free(cand_pkg);
                         free(cand);
                     }
                     free(funcdir);
@@ -355,31 +494,42 @@ static char *handle_call(kvlangKv_t *kv, const char *pc, kvlangRwirInst_t *inst)
         }
     }
     char *func_key = kvlangKeytreeLibFunc(pkg, name);
-    kvlangStrbuf_t func_dir; kvlangStrbufInit(&func_dir);
-    kvlangStrbufPuts(&func_dir, func_key); kvlangStrbufPutc(&func_dir, '/');
+    kvlangStrbuf_t func_dir;
+    kvlangStrbufInit(&func_dir);
+    kvlangStrbufPuts(&func_dir, func_key);
+    kvlangStrbufPutc(&func_dir, '/');
 
-    kvlangStrbuf_t sig_key; kvlangStrbufInit(&sig_key);
+    kvlangStrbuf_t sig_key;
+    kvlangStrbufInit(&sig_key);
     kvlangStrbufPrintf(&sig_key, "%s[0,0]", func_dir.p);
-    kvlangXvalue_t sig; kvlangXvalueZero(&sig);
+    kvlangXvalue_t sig;
+    kvlangXvalueZero(&sig);
     kvlangKvGetOne(kv, sig_key.p, &sig);
-    if (kvlangXvalueNone(&sig) || !kvlangXvalueKindIs(&sig, KVSPACE_KIND_RWFUNC)) {
+    if (kvlangXvalueNone(&sig) ||
+        !kvlangXvalueKindIs(&sig, KVSPACE_KIND_RWFUNC)) {
         /* 按 xvalue 的 kind 精确区分缺 rwir 还是缺 rwfunc：
          * 到这里说明 opcode 已被 notinmyrwircaps 判否（/lib/<op> 非 def rwir 路由头）。 */
         char *rk = kvlangKeytreeRwir(fn);
-        kvlangXvalue_t rv; kvlangXvalueZero(&rv);
+        kvlangXvalue_t rv;
+        kvlangXvalueZero(&rv);
         kvlangKvGetOne(kv, rk, &rv);
         char msg[256];
-        if (!kvlangXvalueNone(&rv) && kvlangXvalueKindIs(&rv, KVSPACE_KIND_DEF_RWIR))
-            snprintf(msg, sizeof msg, "NameError: rwir 未注册/签名不匹配: %s", fn);
+        if (!kvlangXvalueNone(&rv) &&
+            kvlangXvalueKindIs(&rv, KVSPACE_KIND_DEF_RWIR))
+            snprintf(msg, sizeof msg, "NameError: rwir 未注册/签名不匹配: %s",
+                     fn);
         else if (!kvlangXvalueNone(&sig))
-            snprintf(msg, sizeof msg, "NameError: %s 不是 rwfunc (kind=%s)", fn, kvlangXvalueKind(&sig));
+            snprintf(msg, sizeof msg, "NameError: %s 不是 rwfunc (kind=%s)", fn,
+                     kvlangXvalueKind(&sig));
         else
             snprintf(msg, sizeof msg, "NameError: rwfunc not found: %s", fn);
-        kvlangXvalueFree(&rv); free(rk);
+        kvlangXvalueFree(&rv);
+        free(rk);
         kvlangVthreadSetError(kv, vtid, pc, msg);
         goto fail;
     }
-    kvspaceHead_t h; kvspaceDecodeHead(sig.data, sig.len, &h);
+    kvspaceHead_t h;
+    kvspaceDecodeHead(sig.data, sig.len, &h);
     const uint8_t *sbody = sig.data + h.body_offset;
     int nr = sbody[0] | (sbody[1] << 8);
     int nw = sbody[2] | (sbody[3] << 8);
@@ -399,58 +549,90 @@ static char *handle_call(kvlangKv_t *kv, const char *pc, kvlangRwirInst_t *inst)
     kvlangKvExtIndex(kv, stack_fr, func_dir.p, err, sizeof err);
 
     /* 系统变量 */
-    kvlangStrbuf_t npc; kvlangStrbufInit(&npc); kvlangRwirNextPc(pc, &npc);
-    kvlangStrbuf_t retpc; kvlangStrbufInit(&retpc); kvlangKeytreeFrameReturnpc(frame_root, &retpc);
-    kvlangStrbuf_t callpc; kvlangStrbufInit(&callpc); kvlangKeytreeFrameCallpc(frame_root, &callpc);
+    kvlangStrbuf_t npc;
+    kvlangStrbufInit(&npc);
+    kvlangRwirNextPc(pc, &npc);
+    kvlangStrbuf_t retpc;
+    kvlangStrbufInit(&retpc);
+    kvlangKeytreeFrameReturnpc(frame_root, &retpc);
+    kvlangStrbuf_t callpc;
+    kvlangStrbufInit(&callpc);
+    kvlangKeytreeFrameCallpc(frame_root, &callpc);
     char *ep = kvlangKeytreeEntryPc(frame_root);
-    kvlangStrbuf_t seglib; kvlangStrbufInit(&seglib); kvlangStrbufPuts(&seglib, stack_fr); kvlangStrbufPuts(&seglib, SEG_LIB);
-    kvlangXvalue_t v_npc, v_ep, v_fn; kvlangXvalueZero(&v_npc); kvlangXvalueZero(&v_ep); kvlangXvalueZero(&v_fn);
+    kvlangStrbuf_t seglib;
+    kvlangStrbufInit(&seglib);
+    kvlangStrbufPuts(&seglib, stack_fr);
+    kvlangStrbufPuts(&seglib, SEG_LIB);
+    kvlangXvalue_t v_npc, v_ep, v_fn;
+    kvlangXvalueZero(&v_npc);
+    kvlangXvalueZero(&v_ep);
+    kvlangXvalueZero(&v_fn);
     kvlangXvalueNewCharUtf8(&v_npc, npc.p);
     kvlangXvalueNewCharUtf8(&v_ep, ep);
     kvlangXvalueNewCharUtf8(&v_fn, func_key);
-    kvlangKvPair_t sys[3] = { { retpc.p, v_npc }, { callpc.p, v_ep }, { seglib.p, v_fn } };
+    kvlangKvPair_t sys[3] = {
+        {retpc.p, v_npc}, {callpc.p, v_ep}, {seglib.p, v_fn}};
     kvlangKvSet(kv, sys, 3, err, sizeof err);
-    kvlangXvalueFree(&v_npc); kvlangXvalueFree(&v_ep); kvlangXvalueFree(&v_fn);
+    kvlangXvalueFree(&v_npc);
+    kvlangXvalueFree(&v_ep);
+    kvlangXvalueFree(&v_fn);
 
     /* 读参 + 写参 */
-    kvlangKvPair_t pairs[512]; int np = 0;
+    kvlangKvPair_t pairs[512];
+    int np = 0;
     int lit_seq = 0;
     for (int i = 0; i < nr; i++) {
-        kvlangStrbuf_t slot; kvlangStrbufInit(&slot);
+        kvlangStrbuf_t slot;
+        kvlangStrbufInit(&slot);
         kvlangStrbufPrintf(&slot, "%s/[0,-%d]", frame_root, i + 1);
         if (i + 1 < inst->nr) {
             kvlangParam_t *arg = &inst->reads[i + 1];
-            char *rk = resolve_read_path(kv, caller_fr, arg->name);
-            bool concrete = !kvlangXvalueNone(&arg->val) && !kvlangXvalueKindIs(&arg->val, KVSPACE_KIND_RWIR) && !kvlangXvalueKindIs(&arg->val, KVSPACE_KIND_RWFUNC);
+            bool concrete = !kvlangXvalueNone(&arg->val) &&
+                            !kvlangXvalueKindIs(&arg->val, KVSPACE_KIND_RWIR) &&
+                            !kvlangXvalueKindIs(&arg->val, KVSPACE_KIND_RWFUNC);
             char lt[256] = {0};
+            param_decl_type(kv, func_key, -(i + 1), lt, sizeof lt);
+            /* 传递方式由形参声明里的 `*` 定（见 spec [[函数]]）：带 `*` 按地址（槽存实参地址
+             * Ptr），不带按值（槽存实参值本体）。值传递直接落槽——字面量不必再造 ._litN 临时槽。 */
+            if (lt[0] != '*') {
+                kvlangXvalue_t av;
+                kvlangXvalueZero(&av);
+                kvlangBuiltinResolveReadValue(kv, caller_fr, arg->name, &arg->val, &av);
+                if (!kvlangXvalueNone(&av)) {
+                    pairs[np].key = kvlangStrbufDetach(&slot);
+                    pairs[np].val = av;
+                    np++;
+                } else {
+                    kvlangStrbufFree(&slot);
+                }
+                continue;
+            }
+            char *rk = resolve_read_path(kv, caller_fr, arg->name);
             if (concrete) {
                 /* 字面量无变量槽，一律写 ._litN；勿沿用 resolve_read_path 的返回值——
                  * 否则字面量内容（如 "https://x" 里的 //）会被当路径段，二次读回即丢。 */
-                if (rk) free(rk);
-                kvlangStrbuf_t lk; kvlangStrbufInit(&lk);
+                if (rk)
+                    free(rk);
+                kvlangStrbuf_t lk;
+                kvlangStrbufInit(&lk);
                 kvlangStrbufPrintf(&lk, "%s/._lit%d", caller_fr, lit_seq++);
                 rk = kvlangStrbufDetach(&lk);
                 /* 写字面量到 rk（拷贝，避免 double-free） */
-                kvspaceHead_t ah; kvspaceDecodeHead(arg->val.data, arg->val.len, &ah);
-                if (ah.langtype[0]) snprintf(lt, sizeof lt, "%s", ah.langtype);
-                int32_t abl; const uint8_t *ab = kvlangXvalueBody(&arg->val, &ah, &abl);
-                kvlangLangtype akx; kvlangLangtypeParse(ah.langtype, &akx);
+                kvspaceHead_t ah;
+                kvspaceDecodeHead(arg->val.data, arg->val.len, &ah);
+                int32_t abl;
+                const uint8_t *ab = kvlangXvalueBody(&arg->val, &ah, &abl);
+                kvlangLangtype akx;
+                kvlangLangtypeParse(ah.langtype, &akx);
                 pairs[np].key = strdup(rk);
-                kvspaceTlvEncode(kvlangXvalueKind(&arg->val), ab, (uint32_t)abl, akx.dims, akx.ndim,
-                                   &pairs[np].val.data, &pairs[np].val.len);
+                kvspaceTlvEncode(kvlangXvalueKind(&arg->val), ab, (uint32_t)abl,
+                                 akx.dims, akx.ndim, &pairs[np].val.data,
+                                 &pairs[np].val.len);
                 np++;
-            } else if (rk) {
-                kvlangXvalue_t hv; kvlangXvalueZero(&hv);
-                kvlangKvGetOne(kv, rk, &hv);
-                if (!kvlangXvalueNone(&hv)) {
-                    kvspaceHead_t ah;
-                    if (kvlangXvalueHead(&hv, &ah) == 0 && ah.langtype[0])
-                        snprintf(lt, sizeof lt, "%s", ah.langtype);
-                }
-                kvlangXvalueFree(&hv);
             }
             if (rk) {
-                kvlangXvalue_t rv; kvlangXvalueNewPtr(&rv, lt, rk);
+                kvlangXvalue_t rv;
+                kvlangXvalueNewPtr(&rv, lt + 1, rk);
                 pairs[np].key = kvlangStrbufDetach(&slot);
                 pairs[np].val = rv;
                 np++;
@@ -459,58 +641,154 @@ static char *handle_call(kvlangKv_t *kv, const char *pc, kvlangRwirInst_t *inst)
         }
         kvlangStrbufFree(&slot);
     }
+    char *wds = NULL; /* 值写参目标表：第 i 行 = 第 i 个写参的目标 key（地址写参留空行） */
     for (int i = 0; i < nw; i++) {
-        kvlangStrbuf_t slot; kvlangStrbufInit(&slot);
+        kvlangStrbuf_t slot;
+        kvlangStrbufInit(&slot);
         kvlangStrbufPrintf(&slot, "%s/[0,%d]", frame_root, i + 1);
-        if (i < inst->nw) {
-            char *wk = resolve_read_path(kv, caller_fr, inst->writes[i].name);
-            if (wk) {
-                char lt[256] = {0};
-                kvlangStrbuf_t pk; kvlangStrbufInit(&pk);
-                kvlangStrbufPrintf(&pk, "%s.[0,%d]", func_key, i + 1);
-                kvlangXvalue_t dv; kvlangXvalueZero(&dv);
-                kvlangKvGetOne(kv, pk.p, &dv);
-                kvlangStrbufFree(&pk);
-                if (!kvlangXvalueNone(&dv)) {
-                    kvspaceHead_t ah;
-                    if (kvlangXvalueHead(&dv, &ah) == 0) {
-                        int32_t al; const uint8_t *ab = kvlangXvalueBody(&dv, &ah, &al);
-                        for (int bi = 0; ab && bi < al; bi++) if (ab[bi] == 0) {
-                            int tl = al - bi - 1;
-                            if (tl > 0 && tl < (int)sizeof lt) { memcpy(lt, ab + bi + 1, tl); lt[tl] = 0; }
-                            break;
-                        }
-                    }
-                }
-                kvlangXvalueFree(&dv);
-                kvlangXvalue_t wv; kvlangXvalueNewPtr(&wv, lt, wk);
+        char *wk = NULL;
+        if (i < inst->nw)
+            wk = resolve_read_path(kv, caller_fr, inst->writes[i].name);
+        char lt[256] = {0};
+        param_decl_type(kv, func_key, i + 1, lt, sizeof lt);
+        const char *dst = NULL;
+        if (wk) {
+            if (lt[0] == '*' || lt[0] == '@') {
+                /* 地址写参：槽存调用方目标的地址 Ptr，体内 `*[0,+k]` 直写（现状） */
+                kvlangXvalue_t wv;
+                kvlangXvalueNewPtr(&wv, lt + 1, wk);
                 pairs[np].key = kvlangStrbufDetach(&slot);
                 pairs[np].val = wv;
                 np++;
-                free(wk);
+            } else {
+                /* 值写参：copy-in —— 把调用方该位置当前值拷进槽（累加器据此拿初值），
+                 * 目标 key 记进 ‥wdst，返回时 copy-out 拷回。 */
+                kvlangXvalue_t cur;
+                kvlangXvalueZero(&cur);
+                kvlangKvGetOne(kv, wk, &cur);
+                if (!kvlangXvalueNone(&cur)) {
+                    pairs[np].key = kvlangStrbufDetach(&slot);
+                    pairs[np].val = cur;
+                    np++;
+                } else {
+                    kvlangStrbufFree(&slot);
+                }
+                dst = wk;
             }
+        } else {
+            kvlangStrbufFree(&slot);
         }
-        kvlangStrbufFree(&slot);
+        /* 逐写参追加一行（空行为地址写参），行序即槽序 */
+        {
+            kvlangStrbuf_t wd;
+            kvlangStrbufInit(&wd);
+            if (wds)
+                kvlangStrbufPuts(&wd, wds);
+            if (i)
+                kvlangStrbufPutc(&wd, '\n');
+            if (dst)
+                kvlangStrbufPuts(&wd, dst);
+            free(wds);
+            wds = kvlangStrbufDetach(&wd);
+        }
+        free(wk);
     }
-    if (np > 0) kvlangKvSet(kv, pairs, np, err, sizeof err);
-    for (int i = 0; i < np; i++) { free(pairs[i].key); kvlangXvalueFree(&pairs[i].val); }
+    if (wds) {
+        /* 至少有一个值写参才落表；全空表不必落（省掉返回期的一次读） */
+        if (strspn(wds, "\n") != strlen(wds)) {
+            kvlangStrbuf_t wk;
+            kvlangStrbufInit(&wk);
+            kvlangStrbufPrintf(&wk, "%s/", frame_root);
+            kvlangStrbufPuts(&wk, RUNTIME_MEMBER_SEP "wdst");
+            char *wks = kvlangStrbufDetach(&wk);
+            kvlangXvalue_t wv;
+            kvlangXvalueNewCharUtf8(&wv, wds);
+            kvlangKvPair_t wp = { wks, wv };
+            char werr[256];
+            kvlangKvSet(kv, &wp, 1, werr, sizeof werr);
+            kvlangXvalueFree(&wv);
+            free(wks);
+        }
+        free(wds);
+    }
+    /* 实参绑定写失败必须报错——绝不静默：丢的是一整个参数，症状会漂到很远的地方
+     * （曾表现为 fs 后端下函数读到空参数）。 */
+    int wrc = np > 0 ? kvlangKvSet(kv, pairs, np, err, sizeof err) : 0;
+    for (int i = 0; i < np; i++) {
+        free(pairs[i].key);
+        kvlangXvalueFree(&pairs[i].val);
+    }
+    if (wrc != 0) {
+        kvlangVthreadSetError(kv, vtid, pc, err);
+        goto fail;
+    }
 
-    free(caller_fr); free(stack_fr);
-    kvlangStrbufFree(&npc); kvlangStrbufFree(&retpc); kvlangStrbufFree(&callpc); kvlangStrbufFree(&seglib);
-    kvlangStrbufFree(&func_dir); kvlangStrbufFree(&sig_key); kvlangStrbufFree(&vtid_b);
-    kvlangXvalueFree(&sig); free(func_key); free(pkg); free(name);
+    free(caller_fr);
+    free(stack_fr);
+    kvlangStrbufFree(&npc);
+    kvlangStrbufFree(&retpc);
+    kvlangStrbufFree(&callpc);
+    kvlangStrbufFree(&seglib);
+    kvlangStrbufFree(&func_dir);
+    kvlangStrbufFree(&sig_key);
+    kvlangStrbufFree(&vtid_b);
+    kvlangXvalueFree(&sig);
+    free(func_key);
+    free(pkg);
+    free(name);
     free(frame_root);
     return ep;
 
 fail:
-    kvlangStrbufFree(&func_dir); kvlangStrbufFree(&sig_key); kvlangStrbufFree(&vtid_b);
-    kvlangXvalueFree(&sig); free(func_key); free(pkg); free(name);
+    kvlangStrbufFree(&func_dir);
+    kvlangStrbufFree(&sig_key);
+    kvlangStrbufFree(&vtid_b);
+    kvlangXvalueFree(&sig);
+    free(func_key);
+    free(pkg);
+    free(name);
     return NULL;
+}
+
+/* 帧槽实参 Ptr 的类型来自**形参声明**：读参数定义键 funcDir.[0,±x] 的 body
+ * （名字\x00类型串），取出类型串。绝不从实参值的 head 反推——实参可以是 None
+ * （如递归传空子树），那时无值可取，Ptr 会因空 langtype 构造失败而整个参数丢失。 */
+static void param_decl_type(kvlangKv_t *kv, const char *func_key, int x,
+                            char *lt, size_t cap) {
+    kvlangStrbuf_t pk;
+    kvlangStrbufInit(&pk);
+    kvlangStrbufPrintf(&pk, "%s.[0,%d]", func_key, x);
+    kvlangXvalue_t dv;
+    kvlangXvalueZero(&dv);
+    kvlangKvGetOne(kv, pk.p, &dv);
+    kvlangStrbufFree(&pk);
+    if (!kvlangXvalueNone(&dv)) {
+        kvspaceHead_t ah;
+        if (kvlangXvalueHead(&dv, &ah) == 0) {
+            int32_t al;
+            const uint8_t *ab = kvlangXvalueBody(&dv, &ah, &al);
+            for (int bi = 0; ab && bi < al; bi++) {
+                if (ab[bi] != 0)
+                    continue;
+                /* 返回**原始声明串**（含 `*`/`@` 前缀）：调用点据此判定传递方式——带 `*`
+                 * 按地址（写实参地址 Ptr），不带按值（写值本体）。前缀只在构造 Ptr 时剥掉
+                 * （wire langtype 不含它，ref 归 head.ref）。 */
+                int tl = al - (bi + 1);
+                if (tl > 0 && tl < (int)cap) {
+                    memcpy(lt, ab + bi + 1, (size_t)tl);
+                    lt[tl] = 0;
+                }
+                break;
+            }
+        }
+    }
+    kvlangXvalueFree(&dv);
 }
 
 int kvlangCtlCall(kvlangFrame_t *f) {
     char *sub = handle_call(f->kv, f->pc, f->inst);
-    if (!sub) return -1;
+    if (!sub)
+        return -1;
     kvlangVthreadSet(f->kv, f->vtid, sub, "running");
     free(sub);
     return 0;
@@ -518,8 +796,12 @@ int kvlangCtlCall(kvlangFrame_t *f) {
 
 int kvlangCtlReturn(kvlangFrame_t *f) {
     char *parent = NULL;
-    if (handle_return(f->kv, f->vtid, f->pc, &parent) != 0) return -1;
-    if (!parent) { kvlangVthreadSetDone(f->kv, f->vtid, "ok"); return 0; }
+    if (handle_return(f->kv, f->vtid, f->pc, &parent) != 0)
+        return -1;
+    if (!parent) {
+        kvlangVthreadSetDone(f->kv, f->vtid, "ok");
+        return 0;
+    }
     kvlangVthreadSet(f->kv, f->vtid, parent, "running");
     free(parent);
     return 0;
@@ -528,7 +810,9 @@ int kvlangCtlReturn(kvlangFrame_t *f) {
 int kvlangCtlGoto(kvlangFrame_t *f) {
     kvlangRwirInst_t *inst = f->inst;
     if (inst->nr != 1) {
-        char msg[128]; snprintf(msg, sizeof msg, "RuntimeError: goto expects 1 irseq, got %d", inst->nr);
+        char msg[128];
+        snprintf(msg, sizeof msg, "RuntimeError: goto expects 1 irseq, got %d",
+                 inst->nr);
         kvlangVthreadSetError(f->kv, f->vtid, f->pc, msg);
         return -1;
     }
@@ -538,21 +822,30 @@ int kvlangCtlGoto(kvlangFrame_t *f) {
 int kvlangCtlBr(kvlangFrame_t *f) {
     kvlangRwirInst_t *inst = f->inst;
     if (inst->nr != 3) {
-        char msg[128]; snprintf(msg, sizeof msg, "RuntimeError: br expects cond trueIrseq falseIrseq, got %d", inst->nr);
+        char msg[128];
+        snprintf(msg, sizeof msg,
+                 "RuntimeError: br expects cond trueIrseq falseIrseq, got %d",
+                 inst->nr);
         kvlangVthreadSetError(f->kv, f->vtid, f->pc, msg);
         return -1;
     }
     char *fr = kvlangKeytreeFrameRoot(f->pc);
-    kvlangXvalue_t cond; kvlangXvalueZero(&cond);
-    kvlangBuiltinResolveReadValue(f->kv, fr, inst->reads[0].name, &inst->reads[0].val, &cond);
+    kvlangXvalue_t cond;
+    kvlangXvalueZero(&cond);
+    kvlangBuiltinResolveReadValue(f->kv, fr, inst->reads[0].name,
+                                  &inst->reads[0].val, &cond);
     free(fr);
     if (kvlangXvalueNone(&cond)) {
-        kvlangVthreadSetError(f->kv, f->vtid, f->pc, "TypeError: None in branch condition");
+        kvlangVthreadSetError(f->kv, f->vtid, f->pc,
+                              "TypeError: None in branch condition");
         kvlangXvalueFree(&cond);
         return -1;
     }
     if (!kvlangXvalueKindIs(&cond, KVSPACE_KIND_BOOL)) {
-        char msg[128]; snprintf(msg, sizeof msg, "TypeError: branch condition must be bool, got %s", kvlangXvalueKind(&cond));
+        char msg[128];
+        snprintf(msg, sizeof msg,
+                 "TypeError: branch condition must be bool, got %s",
+                 kvlangXvalueKind(&cond));
         kvlangVthreadSetError(f->kv, f->vtid, f->pc, msg);
         kvlangXvalueFree(&cond);
         return -1;
@@ -564,7 +857,8 @@ int kvlangCtlBr(kvlangFrame_t *f) {
 
 /* 动态调用：以运行时得到的 funckey 在当前 vthread 造一次 OP_CALL（不新开 vid），
  * pc 落在被调入口，帧结束回到本指令 NextPc。供 native vthread·call 用。 */
-int kvlangKvcpuDynCall(kvlangKv_t *kv, const char *vtid, const char *pc, const char *funckey) {
+int kvlangKvcpuDynCall(kvlangKv_t *kv, const char *vtid, const char *pc,
+                       const char *funckey) {
     kvlangRwirInst_t ci;
     ci.opcode = strdup(OP_CALL);
     ci.op_id = 0;
@@ -574,60 +868,88 @@ int kvlangKvcpuDynCall(kvlangKv_t *kv, const char *vtid, const char *pc, const c
     ci.nr = 1;
     ci.writes = NULL;
     ci.nw = 0;
-    kvlangFrame_t f = { kv, vtid, pc, &ci, NULL };
+    kvlangFrame_t f = {kv, vtid, pc, &ci, NULL};
     int rc = kvlangCtlCall(&f);
-    free(ci.opcode); free(ci.reads[0].name); free(ci.reads);
+    free(ci.opcode);
+    free(ci.reads[0].name);
+    free(ci.reads);
     return rc;
 }
 
-int handoff_external_rwir(kvlangKv_t *kv, const char *vtid, const char *pc, kvlangRwirInst_t *inst) {
+int handoff_external_rwir(kvlangKv_t *kv, const char *vtid, const char *pc,
+                          kvlangRwirInst_t *inst) {
     /* handoff：把 pc 挂到共享队列 /lib/<opcode>/vids/<vtid>（各 rwir 的 vids 已 Ptr 统一到
      * 第一个 rwir 的 vids 下，Set 经路径穿透落到同一 strkeymap）。外部执行器认领并驱动该 vthread，
      * 完成后删除该条目。本端 watch 同一 key 直至变 None（== 认领方已完成），单键交接、无 id。 */
     char *base = kvlangKeytreeRwir(inst->opcode);
-    kvlangStrbuf_t vids; kvlangStrbufInit(&vids);
+    kvlangStrbuf_t vids;
+    kvlangStrbufInit(&vids);
     kvlangStrbufPrintf(&vids, "%s/vids/%s", base, vtid);
-    kvlangXvalue_t pv; kvlangXvalueNewCharUtf8(&pv, pc);
-    kvlangKvPair_t p = { vids.p, pv };
+    kvlangXvalue_t pv;
+    kvlangXvalueNewCharUtf8(&pv, pc);
+    kvlangKvPair_t p = {vids.p, pv};
     char err[256];
     kvlangKvSet(kv, &p, 1, err, sizeof err);
     kvlangXvalueFree(&pv);
 
-    kvlangXvalue_t none; kvlangXvalueZero(&none);   /* 目标 None：等条目被删除 */
-    kvlangXvalue_t got; kvlangXvalueZero(&got);
+    kvlangXvalue_t none;
+    kvlangXvalueZero(&none); /* 目标 None：等条目被删除 */
+    kvlangXvalue_t got;
+    kvlangXvalueZero(&got);
     int rc = kvlangKvWatch(kv, vids.p, &none, 30000000000ULL, &got);
     kvlangXvalueFree(&got);
-    kvlangStrbufFree(&vids); free(base);
+    kvlangStrbufFree(&vids);
+    free(base);
     if (rc != 0) {
-        char msg[256]; snprintf(msg, sizeof msg, "RuntimeError: external rwir %s handoff failed", inst->opcode);
+        char msg[256];
+        snprintf(msg, sizeof msg,
+                 "RuntimeError: external rwir %s handoff failed", inst->opcode);
         kvlangVthreadSetError(kv, vtid, pc, msg);
         return -1;
     }
     return 0;
 }
 
-char *kvlangKvcpuBootstrap(kvlangKv_t *kv, const char *vtid, const char *funcname,
-                      const char *const *args, int nargs) {
+char *kvlangKvcpuBootstrap(kvlangKv_t *kv, const char *vtid,
+                           const char *funcname, const char *const *args,
+                           int nargs) {
     char *pkg = strdup("");
     char *name = strdup(funcname);
     const char *dot = rfind_sep(funcname);
-    if (dot) { free(pkg); pkg = strndup(funcname, (size_t)(dot - funcname)); free(name); name = strdup(dot + MEMBER_SEP_LEN); }
+    if (dot) {
+        free(pkg);
+        pkg = strndup(funcname, (size_t)(dot - funcname));
+        free(name);
+        name = strdup(dot + MEMBER_SEP_LEN);
+    }
     char *func_key = kvlangKeytreeLibFunc(pkg, name);
-    kvlangStrbuf_t func_dir; kvlangStrbufInit(&func_dir);
-    kvlangStrbufPuts(&func_dir, func_key); kvlangStrbufPutc(&func_dir, '/');
+    kvlangStrbuf_t func_dir;
+    kvlangStrbufInit(&func_dir);
+    kvlangStrbufPuts(&func_dir, func_key);
+    kvlangStrbufPutc(&func_dir, '/');
 
-    kvlangStrbuf_t sig_key; kvlangStrbufInit(&sig_key);
+    kvlangStrbuf_t sig_key;
+    kvlangStrbufInit(&sig_key);
     kvlangStrbufPrintf(&sig_key, "%s[0,0]", func_dir.p);
-    kvlangXvalue_t sig; kvlangXvalueZero(&sig);
+    kvlangXvalue_t sig;
+    kvlangXvalueZero(&sig);
     kvlangKvGetOne(kv, sig_key.p, &sig);
-    if (kvlangXvalueNone(&sig) || !kvlangXvalueKindIs(&sig, KVSPACE_KIND_RWFUNC)) {
-        char msg[256]; snprintf(msg, sizeof msg, "Bootstrap: rwir/rwfunc not found: %s", funcname);
+    if (kvlangXvalueNone(&sig) ||
+        !kvlangXvalueKindIs(&sig, KVSPACE_KIND_RWFUNC)) {
+        char msg[256];
+        snprintf(msg, sizeof msg, "Bootstrap: rwir/rwfunc not found: %s",
+                 funcname);
         kvlangVthreadSetError(kv, vtid, "", msg);
-        kvlangXvalueFree(&sig); kvlangStrbufFree(&sig_key); kvlangStrbufFree(&func_dir);
-        free(func_key); free(pkg); free(name);
+        kvlangXvalueFree(&sig);
+        kvlangStrbufFree(&sig_key);
+        kvlangStrbufFree(&func_dir);
+        free(func_key);
+        free(pkg);
+        free(name);
         return NULL;
     }
-    kvspaceHead_t h; kvspaceDecodeHead(sig.data, sig.len, &h);
+    kvspaceHead_t h;
+    kvspaceDecodeHead(sig.data, sig.len, &h);
     const uint8_t *sbody = sig.data + h.body_offset;
     int nr = sbody[0] | (sbody[1] << 8);
 
@@ -638,62 +960,100 @@ char *kvlangKvcpuBootstrap(kvlangKv_t *kv, const char *vtid, const char *funcnam
     kvlangKvExtIndex(kv, stack_fr, func_dir.p, err, sizeof err);
 
     char *ep = kvlangKeytreeEntryPc(frame_root);
-    kvlangStrbuf_t callpc; kvlangStrbufInit(&callpc); kvlangKeytreeFrameCallpc(frame_root, &callpc);
-    kvlangStrbuf_t seglib; kvlangStrbufInit(&seglib); kvlangStrbufPuts(&seglib, stack_fr); kvlangStrbufPuts(&seglib, SEG_LIB);
-    kvlangXvalue_t v_ep, v_fn; kvlangXvalueZero(&v_ep); kvlangXvalueZero(&v_fn);
+    kvlangStrbuf_t callpc;
+    kvlangStrbufInit(&callpc);
+    kvlangKeytreeFrameCallpc(frame_root, &callpc);
+    kvlangStrbuf_t seglib;
+    kvlangStrbufInit(&seglib);
+    kvlangStrbufPuts(&seglib, stack_fr);
+    kvlangStrbufPuts(&seglib, SEG_LIB);
+    kvlangXvalue_t v_ep, v_fn;
+    kvlangXvalueZero(&v_ep);
+    kvlangXvalueZero(&v_fn);
     kvlangXvalueNewCharUtf8(&v_ep, ep);
     kvlangXvalueNewCharUtf8(&v_fn, func_key);
-    kvlangKvPair_t sys[2] = { { callpc.p, v_ep }, { seglib.p, v_fn } };
+    kvlangKvPair_t sys[2] = {{callpc.p, v_ep}, {seglib.p, v_fn}};
     kvlangKvSet(kv, sys, 2, err, sizeof err);
-    kvlangXvalueFree(&v_ep); kvlangXvalueFree(&v_fn);
+    kvlangXvalueFree(&v_ep);
+    kvlangXvalueFree(&v_fn);
 
     if (nargs > 0) {
-        kvlangKvPair_t pairs[128]; int np = 0;
+        kvlangKvPair_t pairs[128];
+        int np = 0;
         for (int i = 0; i < nr && i < nargs; i++) {
-            kvlangStrbuf_t slot; kvlangStrbufInit(&slot);
+            kvlangStrbuf_t slot;
+            kvlangStrbufInit(&slot);
             kvlangStrbufPrintf(&slot, "%s/[0,-%d]", frame_root, i + 1);
-            kvlangXvalue_t av; kvlangXvalueZero(&av);
+            kvlangXvalue_t av;
+            kvlangXvalueZero(&av);
             kvlangBuiltinResolveReadValue(kv, "", args[i], NULL, &av);
             pairs[np].key = kvlangStrbufDetach(&slot);
             pairs[np].val = av;
             np++;
         }
-        if (np > 0) kvlangKvSet(kv, pairs, np, err, sizeof err);
-        for (int i = 0; i < np; i++) { free(pairs[i].key); kvlangXvalueFree(&pairs[i].val); }
+        if (np > 0)
+            kvlangKvSet(kv, pairs, np, err, sizeof err);
+        for (int i = 0; i < np; i++) {
+            free(pairs[i].key);
+            kvlangXvalueFree(&pairs[i].val);
+        }
     }
 
-    kvlangXvalueFree(&sig); kvlangStrbufFree(&sig_key); kvlangStrbufFree(&func_dir);
-    kvlangStrbufFree(&callpc); kvlangStrbufFree(&seglib);
-    free(stack_fr); free(frame_root); free(func_key); free(pkg); free(name);
+    kvlangXvalueFree(&sig);
+    kvlangStrbufFree(&sig_key);
+    kvlangStrbufFree(&func_dir);
+    kvlangStrbufFree(&callpc);
+    kvlangStrbufFree(&seglib);
+    free(stack_fr);
+    free(frame_root);
+    free(func_key);
+    free(pkg);
+    free(name);
     return ep;
 }
 
-int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode, char **out_pc) {
-    if (out_pc) *out_pc = NULL;
-    kvlangStrbuf_t vtid_b; kvlangStrbufInit(&vtid_b);
+int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode,
+                           char **out_pc) {
+    if (out_pc)
+        *out_pc = NULL;
+    kvlangStrbuf_t vtid_b;
+    kvlangStrbufInit(&vtid_b);
     const char *vtid = kvlangKeytreeVtidFromPc(pc, &vtid_b);
-    if (vtid[0] == 0) { kvlangStrbufFree(&vtid_b); return -1; }
+    if (vtid[0] == 0) {
+        kvlangStrbufFree(&vtid_b);
+        return -1;
+    }
 
     char *cur = strdup(pc);
-    char *cur_frame = NULL, *cur_funcdir = NULL;   /* 帧不变时 funcdir 只读一次，供缓存键 */
+    char *cur_frame = NULL,
+         *cur_funcdir = NULL; /* 帧不变时 funcdir 只读一次，供缓存键 */
     int rc = 0;
     /* status 跨轮携带：尾部 VthreadGet 已连 pc 一并取出，下轮直接复用，省掉背靠背重读
      * （vthread 记录在两次 get 之间不被改写；status 串由 ValueString 自持，跨 ReadReset 存活）。 */
     char *status = NULL;
-    { char *pcv = NULL; kvlangVthreadGet(kv, vtid, &pcv, &status); free(pcv); }
+    {
+        char *pcv = NULL;
+        kvlangVthreadGet(kv, vtid, &pcv, &status);
+        free(pcv);
+    }
     for (;;) {
         /* 指令边界：回收上条指令执行期借出的读池（cache 指令的读参已 Materialize 自持，不受影响）。
          * durable 惰性写不再清池，全靠此处回收；shm 常驻映射侧为 no-op。 */
         kvlangKvReadReset(kv);
-        if (!status || (strcmp(status, "init") != 0 && strcmp(status, "running") != 0 && strcmp(status, "wait") != 0)) {
+        if (!status ||
+            (strcmp(status, "init") != 0 && strcmp(status, "running") != 0 &&
+             strcmp(status, "wait") != 0)) {
             break;
         }
-        free(status); status = NULL;
+        free(status);
+        status = NULL;
 
         int depth = kvlangKeytreeFrameNum(cur);
         if (depth > MAX_STACK_DEPTH) {
             char msg[256];
-            snprintf(msg, sizeof msg, "RecursionError: stack overflow: depth=%d pc=%s", depth, cur);
+            snprintf(msg, sizeof msg,
+                     "RecursionError: stack overflow: depth=%d pc=%s", depth,
+                     cur);
             kvlangVthreadSetError(kv, vtid, cur, msg);
             rc = -1;
             break;
@@ -701,25 +1061,32 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode, char *
 
         char *fr = kvlangKeytreeFrameRoot(cur);
         if (!cur_frame || strcmp(cur_frame, fr) != 0) {
-            free(cur_frame); cur_frame = strdup(fr);
-            free(cur_funcdir); cur_funcdir = read_seglib(kv, fr);
+            free(cur_frame);
+            cur_frame = strdup(fr);
+            free(cur_funcdir);
+            cur_funcdir = read_seglib(kv, fr);
         }
         const char *lastc = NULL;
-        for (const char *p = cur; (p = strstr(p, "/[")) != NULL; p += 2) lastc = p;
+        for (const char *p = cur; (p = strstr(p, "/[")) != NULL; p += 2)
+            lastc = p;
         int addr0 = lastc ? kvlangRwirExtractAddr0(lastc + 1) : 0;
 
         kvlangRwirInst_t tmp;
         kvlangRwirInst_t *inst = NULL;
         bool tmp_owned = false;
-        if (cur_funcdir) inst = rwir_cache_get(cur_funcdir, addr0);
+        if (cur_funcdir)
+            inst = rwir_cache_get(cur_funcdir, addr0);
 
         if (!inst) {
             char *link_base = kvlangKeytreeStack(fr);
             char err[256];
-            if (kvlangRwirDecode(kv, link_base, cur, &tmp, err, sizeof err) != 0) {
-                char msg[256]; snprintf(msg, sizeof msg, "decode: %s", err);
+            if (kvlangRwirDecode(kv, link_base, cur, &tmp, err, sizeof err) !=
+                0) {
+                char msg[256];
+                snprintf(msg, sizeof msg, "decode: %s", err);
                 kvlangVthreadSetError(kv, vtid, cur, msg);
-                free(link_base); free(fr);
+                free(link_base);
+                free(fr);
                 rc = -1;
                 break;
             }
@@ -731,19 +1098,25 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode, char *
                 rwir_cache_put(cur_funcdir, addr0, persist);
                 inst = persist;
             } else {
-                inst = &tmp; tmp_owned = true;
+                inst = &tmp;
+                tmp_owned = true;
             }
         }
 
-        kvlangLogDebug("[%s] PC=%s OP=%s R=%d W=%d", vtid, cur, inst->opcode ? inst->opcode : "(empty)", inst->nr, inst->nw);
+        kvlangLogDebug("[%s] PC=%s OP=%s R=%d W=%d", vtid, cur,
+                       inst->opcode ? inst->opcode : "(empty)", inst->nr,
+                       inst->nw);
 
         if (!inst->opcode || !inst->opcode[0]) {
             /* layout 对每条路径都补了 return（lower::terminate），走到空槽只能是 /lib 损坏
              * 或 goto/br 越界；报 RuntimeError 让该 vthread 停下，不拖垮整个进程。 */
             char msg[512];
-            snprintf(msg, sizeof msg, "RuntimeError: no instruction at %s", cur);
+            snprintf(msg, sizeof msg, "RuntimeError: no instruction at %s",
+                     cur);
             kvlangVthreadSetError(kv, vtid, cur, msg);
-            free(fr); if (tmp_owned) kvlangRwirInstFree(&tmp);
+            free(fr);
+            if (tmp_owned)
+                kvlangRwirInstFree(&tmp);
             rc = -1;
             break;
         }
@@ -752,27 +1125,46 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode, char *
         char *yield = NULL;
         if (inst->op_id >= 0) {
             /* 单表派发：native 算子与 control/copy 同居 myrwircaps，op_id 直查一跳到底。 */
-            kvlangFrame_t f = { kv, vtid, cur, inst, &yield };
+            kvlangFrame_t f = {kv, vtid, cur, inst, &yield};
             exec_err = kvlangBuiltinNative(&f);
             if (exec_err == 0 && yield) {
                 /* native（vthread·run return 模式）冒泡一个子 vthread 的 rwir pc 给上层驱动。
                  * 本 vthread（主）pc 未推进，驱动派发子 rwir 并推进子 pc 后重入即续跑。 */
-                if (out_pc) *out_pc = yield; else free(yield);
-                free(fr); if (tmp_owned) kvlangRwirInstFree(&tmp);
-                free(cur); free(cur_frame); free(cur_funcdir); free(status); kvlangStrbufFree(&vtid_b);
+                if (out_pc)
+                    *out_pc = yield;
+                else
+                    free(yield);
+                free(fr);
+                if (tmp_owned)
+                    kvlangRwirInstFree(&tmp);
+                free(cur);
+                free(cur_frame);
+                free(cur_funcdir);
+                free(status);
+                kvlangStrbufFree(&vtid_b);
                 return 1;
             }
         } else if (opmeta_get(kv, inst->opcode)->notinmyrwircaps) {
             opmeta_ent_t *m = opmeta_get(kv, inst->opcode);
             if (m->def_sig)
-                exec_err = check_read_types(kv, vtid, cur, inst->opcode, m->def_sig, m->def_nr, m->def_dyn, inst->reads, inst->nr);
+                exec_err = check_read_types(kv, vtid, cur, inst->opcode,
+                                            m->def_sig, m->def_nr, m->def_dyn,
+                                            inst->reads, inst->nr);
             if (exec_err == 0 && mode == KVMODE_RETURN) {
-                if (out_pc) *out_pc = strdup(cur);
-                free(fr); if (tmp_owned) kvlangRwirInstFree(&tmp);
-                free(cur); free(cur_frame); free(cur_funcdir); free(status); kvlangStrbufFree(&vtid_b);
+                if (out_pc)
+                    *out_pc = strdup(cur);
+                free(fr);
+                if (tmp_owned)
+                    kvlangRwirInstFree(&tmp);
+                free(cur);
+                free(cur_frame);
+                free(cur_funcdir);
+                free(status);
+                kvlangStrbufFree(&vtid_b);
                 return 1;
             }
-            if (exec_err == 0) exec_err = handoff_external_rwir(kv, vtid, cur, inst);
+            if (exec_err == 0)
+                exec_err = handoff_external_rwir(kv, vtid, cur, inst);
         } else {
             /* 用户函数 → call */
             kvlangRwirInst_t ci;
@@ -782,31 +1174,50 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode, char *
             ci.nw = inst->nw;
             ci.reads = malloc(sizeof(kvlangParam_t) * (size_t)ci.nr);
             ci.reads[0].name = strdup(inst->opcode);
-            ci.reads[0].val.data = NULL; ci.reads[0].val.len = 0;
-            for (int i = 0; i < inst->nr; i++) { ci.reads[i + 1] = inst->reads[i]; }
+            ci.reads[0].val.data = NULL;
+            ci.reads[0].val.len = 0;
+            for (int i = 0; i < inst->nr; i++) {
+                ci.reads[i + 1] = inst->reads[i];
+            }
             ci.writes = inst->writes;
-            kvlangFrame_t cf = { kv, vtid, cur, &ci, NULL };
+            kvlangFrame_t cf = {kv, vtid, cur, &ci, NULL};
             exec_err = kvlangCtlCall(&cf);
-            free(ci.opcode); free(ci.reads[0].name); free(ci.reads);
+            free(ci.opcode);
+            free(ci.reads[0].name);
+            free(ci.reads);
         }
 
-        if (exec_err != 0) { free(fr); if (tmp_owned) kvlangRwirInstFree(&tmp); rc = -1; break; }
+        if (exec_err != 0) {
+            free(fr);
+            if (tmp_owned)
+                kvlangRwirInstFree(&tmp);
+            rc = -1;
+            break;
+        }
 
         char *newpc = NULL;
-        kvlangVthreadGet(kv, vtid, &newpc, &status);   /* status 连 pc 一并取出，供下轮直接复用 */
+        kvlangVthreadGet(kv, vtid, &newpc,
+                         &status); /* status 连 pc 一并取出，供下轮直接复用 */
         free(fr);
-        if (tmp_owned) kvlangRwirInstFree(&tmp);
-        if (!newpc || !newpc[0]) { free(newpc); break; }
+        if (tmp_owned)
+            kvlangRwirInstFree(&tmp);
+        if (!newpc || !newpc[0]) {
+            free(newpc);
+            break;
+        }
         free(cur);
         cur = newpc;
     }
 
-    free(cur); free(cur_frame); free(cur_funcdir); free(status);
+    free(cur);
+    free(cur_frame);
+    free(cur_funcdir);
+    free(status);
     kvlangStrbufFree(&vtid_b);
     return rc;
 }
 
 int kvlangKvcpuExecute(kvlangKv_t *kv, const char *pc) {
     int rc = kvlangKvcpuExecuteMode(kv, pc, KVMODE_WATCH, NULL);
-    return rc == 1 ? 0 : rc;   /* WATCH 模式不返回 1，防御性归一 */
+    return rc == 1 ? 0 : rc; /* WATCH 模式不返回 1，防御性归一 */
 }

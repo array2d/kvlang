@@ -1,0 +1,80 @@
+// 欢迎加入kvspace世界
+lib kvlang/spec/类型系统/map容器 {
+	r####"# map 容器
+
+**map**（种类 `stringkeymap`）是 kvlang 的一等键-值容器。异构命名成员容器 **struct** 是另一种容器语义
+类型，见 [[struct]]（本卷不再涉及）；kvlang **没有** `dict` 种类，也没有 `object`/`scope` 种类（见
+[[总体方案]]）。
+
+## 标准 map 定义
+
+一个 map 的 kvlang 代码形式：
+
+```
+memheadname : memitemkeylangtype · memitemvaluelangtype = {}
+```
+
+| 位置 | 名称 | 含义 |
+|------|------|------|
+| `:` 之前 | **memheadname** | map 的名字（头名，命名整族成员） |
+| `:` 与 `·` 之间 | **memitemkeylangtype** | item **键**的 langtype（独立 langtype） |
+| `·` 之后 | **memitemvaluelangtype** | item **值/body** 的 langtype（独立 langtype，可递归嵌套） |
+
+`·`（U+00B7 中点）连接 item 的键类型与值类型两条**各自独立**的 langtype。**通过 item 的 key 访问 item
+的 body**：写 `memheadname·<memitemkey 的字符串形式>` 即取到该 item 的 body（memitemvalue）。
+
+**memitemkey** 是 key-eligible langtype，三选一：**裸标量**（`int64`）、**字符串键**
+`[]char/<编码>`、**标量元组键** `[scalar,…]`。memitemkey 逐字落键——访问键就是 memitemkey 值按其
+langtype 的**字面量本身**，kvspace 与 kvlangruntime 均**不得**加壳、归一化或改键（逐字铁律与
+`[float64,float64]`（元组键）≠ `[2]float64`（数组形状）的区分见 [[文法与合法性]]）。
+
+## 例子
+
+```kv
+m:[]char/utf8·int64 = {}   // 字符串键 map；空字面量须带类型标注
+m·a = 10                   // 命名成员写
+kv·set(m, "b", 20)         // 动态键写
+kv·get(m, "a") -> x        // 动态键读；缺失返回 None
+
+b:int64·int64 = {}         // 裸标量键 map
+b·200 = 7                  // 访问键就是 200，禁止写成 b·[200]
+
+a:[float64,float64]·int32 = {}          // 标量元组键 map（[float64,float64] ≠ [2]float64）
+a·[342.124,23.2345] = 1                 // 访问键就是元组字面量本身
+```
+
+memitemvalue 可递归嵌套（`[]char/utf8·[]char/utf8·int64` 即 `map[string]map[string]int64`）。
+
+## 锚例
+
+- 字面量与访问：`tutorial/10-types/01-typed-map.kv`、`tutorial/05-dict/literal.kv`。
+- 动态键、缺失返 None：`tutorial/10-types/02-string-map.kv`、`05-dict/kv_has_string_key.kv`。
+- 嵌套 map 与元组键签名：`tutorial/10-types/04-nested-type.kv`、`05-tuple-key.kv`。
+
+## 容器物理结构
+
+map 在 kvspace 中分两部分落库，`·` 是值容器唯一的 memindex 标记（注：`/lib/{pkg}·{func}` 中的 `·` 是
+包·函数命名分隔符，与 memindex 无关，详见 [[总体方案]]）：
+
+- **容器值**：落在裸 base 键（memheadname），storetype=index，body 空；langtype 为 map langtype（如
+  `[]char/utf8·int64`）。
+- **成员（item）**：`base·memitemkey` 是独立子 key，各自持该 item 的 body（memitemvalue）。
+- **memindex**：落在 `base·` 键（尾中点），storetype=index，其 body 是成员键索引矩阵，是成员枚举的权
+  威来源。
+
+memindex 的线格式为 dims = `[len, cap, M]` 的矩阵：`len` = 有效成员数、`cap` = 预留行数
+（`cap ≥ len`，满则翻倍扩容）、`M` = 成员键 UTF-8 字节最大长向上 8 对齐后的**行宽**；body 为
+`cap × M` 字节，前 `len` 行是有序成员键（NUL 补齐），其余行全 NUL。容量内增删成员 body 长恒定、就地覆
+写。`M` 是行宽（行 stride），`cap` 是可翻倍的容量。（此物理模型 struct 同样适用。）
+
+## 容器字面量须带类型标注
+
+**任何**容器字面量都必须在写目标处带完整 map langtype（如 `x:[]char/utf8·int64 = {}`、
+`nums:[int64]·int64 = {10, 20, 30}`）；无标注时 layout 报错。类型来源二选一：写目标的 `:` 标注，
+或签名里形参/写参的声明类型（`{n=42} -> m`，`m:[]char/utf8·int64`）。
+
+容器值的 langtype **就是**该 map langtype，kvspace 里**不存在**「langtype = 种类名 `stringkeymap` 的
+值」——runtime 也**不得**在缺类型时退化兜底（无类型即 layout 漏检，直接 fatal）。空字面量 `{}` 尤其无
+法推断：它不含任何成员。
+"#### -> /lib/kvlang/spec/类型系统/map容器
+}

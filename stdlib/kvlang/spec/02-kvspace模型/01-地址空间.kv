@@ -29,8 +29,9 @@ ref=2（@ext，见 [[键系统与数组访问]]），其 body 只记录目标位
 | GPU 显存 | 计算张量 |
 | 文件系统 / 对象存储 | 模型权重、检查点、数据集、外部进程输出 |
 
-读取一个 ref=2 扩展句柄 value 时，运行时按 body 定位符前缀路由到对应兑现器还原真实字节
-（`runtime-rs/src/engine.rs`）。
+读取一个 ref=2 扩展句柄 value 时，由**支持 `@` 的 rwir** 按定位串还原真实字节——例如 runtime-rs 的
+networld/fs 一族 rwir 直接以 `@` 开头的扩展 key 为输入（`runtime-rs/src/engine.rs` 的 `read_at` /
+`resolve_ext`）。核心 runtime-c 不解引用 `@`。
 
 ## 后端与前端
 

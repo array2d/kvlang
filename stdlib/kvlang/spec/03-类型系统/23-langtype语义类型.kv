@@ -2,7 +2,7 @@
 lib kvlang/spec/类型系统/langtype语义类型 {
 	r####"# langtype（语义类型维，语言视角）
 
-本章界定 **value langtype**——一个具体值 head 的 langtype（两型 def/value 与 kindexpr 简写见
+本章界定 **langtype**——一个具体值 head 的**真实类型**（它与定义处匹配类型 `def langtype` 的区别见
 [[langtype签名类型表达式]]）。langtype 是完整的类型表达式串，逐字节即类型标注文法，天然含 base 种
 类、`[dims]`、map 键值、struct 原型路径。各 langtype 的串形态与其落定的 storetype：
 
@@ -12,13 +12,13 @@ lib kvlang/spec/类型系统/langtype语义类型 {
 | `[]char/utf8` | ARRAYND(elem 1B) | **utf8 变宽 → 物理即 [n]uint8**；禁码点索引是 langtype 层规则，物理按字节切 |
 | `[]char/utf32` `[]char/ascii` | ARRAYND | 定宽，物理可 O(1) 码点索引 |
 | `[3,4]float32` | ARRAYND | 张量 |
-| `rwir`（指令行，`/vthread/`） | ARRAYND | 指令行叶子，**无实现体，由 runtime 经 def rwir 路由直接兑现（myrwircaps）** |
+| `rwir`（指令行，`/vthread/`） | ATOM | 指令叶子（body = 计数头 + 指令名/引用文本），**无实现体，由 runtime 经 def rwir 路由直接兑现（myrwircaps）** |
 | `def rwir`（路由头，仅 `/lib/<op>`） | index | 定义节点：签名行 `[0,x]`，无实现指令行 |
 | `[]char/utf8·int64`（map） | index | **stringkeymap**，键值经 `·` mapexpr；成员在 `{key}·` |
 | `/lib/Point`（struct 原型路径） | index | 结构实例，字段固定；成员在 `{key}·` |
 | `def struct`（原型定义节点） | index | struct 原型自身；字段类型定义在其子槽 |
-| `rwfunc` | index / extindex | 函数即 `/` 目录：签名行 `[0,x]` + 实现指令行；主槽 body 只记 nr/nw/dynamic |
-| `def langtype`（签名行 `[0,x]` 槽） | ATOM | 单个参数类型定义，body=该参数 langtype 串 |
+| `rwfunc` | index / extindex | 函数即 `/` 目录：签名行锚点 `[0,0]`（langtype `rwfunc`，body 只记 nr/nw/dynamic）+ 参数定义键 `.[0,±j]` + 实现指令行；目录节点自身为 `index`、无值 |
+| `def langtype`（签名行 `[0,x]` 槽） | ATOM | 单个参数的**匹配类型**定义，body=该参数的 def langtype 串 |
 | `lib`（包目录） | index | `/lib/` 及各 pkg 目录；成员为 `/` 子路径 |
 
 **def 族的来源**（`def` 不是 kvlang 关键字、不在 kv 源码书写）：`def struct`（源码 `struct Name{}`，
@@ -26,8 +26,8 @@ layout 落原型定义节点）、`def langtype`（源码参数标注 `x:int64`�
 **layout** 产生；`def rwir`（`/lib/<op>` 路由头）**由各 runtime 注册**——kv 源码不声明 rwir，layout
 也不产生 def rwir（见 [[rwfunc布局与def_rwir]]）。
 
-`object`/`scope` **彻底不存在**——无此种类名、无此关键字；异构命名容器一律是 `struct`（见 [[容
-器]]）。容器**语义类型**只剩 `stringkeymap`、`struct`（口语称「map」指的即 stringkeymap，规范一律书
+`object`/`scope` **彻底不存在**——无此种类名、无此关键字；异构命名容器一律是 `struct`（见
+[[struct]]）。容器**语义类型**只剩 `stringkeymap`、`struct`（口语称「map」指的即 stringkeymap，规范一律书
 写种类名 `stringkeymap`）。
 
 **一对多正是拆分的价值**：同为 rwfunc，静态函数定义落 `index`、vthread 运行栈落 `extindex`；语言层看

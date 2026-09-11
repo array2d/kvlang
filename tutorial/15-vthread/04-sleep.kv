@@ -3,13 +3,18 @@
 //   单进程模型下即阻塞驱动线程；与 vthread·setstatus("wait") 的挂起-恢复不同
 // 期望输出:
 //   slept >= 10ms: true
-rwfunc test() -> () {
-	time/duration·millis(10) -> d
+// sleep_at_least 睡 ms 毫秒，并核对实际耗时是否达到请求值，返回 bool
+rwfunc sleep_at_least(ms:int64) -> (ok:bool) {
+	time/duration·millis(ms) -> d
 	time·now() -> t0
 	vthread·sleep(d)
 	time·elapsed_ns(t0) -> ns
 	time/duration·as_nanos(d) -> want
 	ns >= want -> ok
+}
+
+rwfunc test() -> () {
+	sleep_at_least(10) -> ok
 	print("slept >= 10ms: ")
 	println(ok)
 }

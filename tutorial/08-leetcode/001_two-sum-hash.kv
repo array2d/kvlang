@@ -1,11 +1,13 @@
-// 001: Two Sum — O(n) hash map (h·*key 动态解引用，has 检存在)
+// 001: Two Sum — O(n) hash map。two_sum 用 kv·get/kv·set；
+// two_sum2 用动态成员名 `·*k` 直接读写路径成员。
 // 来源: LeetCode #1
 // 期望输出:
 //   [ 0 , 1 ]
 rwfunc two_sum(nums:[]int64, target:int64) -> () {
 	n = ndarray·numel(nums)
 	i = 0
-	"/tmp" -> h
+	/tmp/two_sum:int64·int64 = {}
+	"/tmp/two_sum" -> h
 	while (i < n) {
 		x = nums[i]
 		need = target - x
@@ -24,8 +26,35 @@ rwfunc two_sum(nums:[]int64, target:int64) -> () {
 	}
 }
 
+// 同 two_sum，但用**动态成员名** `·*k` 直接读写路径成员：
+// `base·*k` 取 k 的值作 memitemkey（等价 kv·get(base,k)/kv·set(base,k,v)）；
+// 裸 `base·k` 用的是**字面名** k，两者不可混（见 05-runtime语义/03-成员访问）。
+rwfunc two_sum2(nums:[]int64, target:int64) -> () {
+	n = ndarray·numel(nums)
+	i = 0
+	/tmp/two_sum:int64·int64 = {}
+	while (i < n) {
+		x = nums[i]
+		need = target - x
+		// * 令 need 的**值**作成员键（不是字面名 need）
+		exists = /tmp/two_sum·*need != None
+
+		if (exists) {
+			j = /tmp/two_sum·*need
+			k = j - 1
+			println("[", k, ",", i, "]")
+			n -> i
+		} else {
+			v = i + 1
+			/tmp/two_sum·*x = v
+			i + 1 -> i
+		}
+	}
+}
+
 rwfunc test() -> () {
 
 	a:[]int64 = [2, 7, 11, 15]
 	two_sum(a, 9)
+	two_sum2(a, 9)
 }

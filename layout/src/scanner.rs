@@ -258,7 +258,10 @@ fn advance_line_count(
     }
 }
 
-fn is_token_delim(c: u8) -> bool {
+/// 标识符/路径段的合法字节判定：凡**不是**分隔符者皆可入标识符（CJK 等多字节字符的
+/// 各字节都不在分隔符集内，故中文标识符天然合法，见 tutorial/01-basics/chinese_ident.kv）。
+/// langtype 的 structref 校验复用它，保证「标识符能写」与「类型名能写」同一套字符集。
+pub(crate) fn is_token_delim(c: u8) -> bool {
     matches!(
         c,
         b' ' | b'\t'
@@ -460,6 +463,12 @@ pub fn scan(src: &str) -> Vec<Token> {
                 while i < src.len() {
                     // ·（U+00B7）与 .（释放给小数 key）是路径字符；· 后的坐标段 [0,1] 是成员链。
                     if src[i] == 0xC2 && i + 1 < src.len() && src[i + 1] == 0xB7 {
+                        // `·*`（动态成员名）不并入路径：让 `·`/`*`/`k` 单独成 token，交成员链解析
+                        // 成 `kv·get/kv·set(base, k)`。`·` 后接名字的情况（`/lib/json·to` 的
+                        // 包·函数分隔符、`/tmp/ts·5` 的静态成员）仍按原样整段吃进路径 token。
+                        if i + 2 < src.len() && src[i + 2] == b'*' {
+                            break;
+                        }
                         i += 2;
                         if i < src.len() && src[i] == b'[' {
                             while i < src.len() && src[i] != b']' {

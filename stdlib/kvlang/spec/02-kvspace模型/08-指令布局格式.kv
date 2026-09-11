@@ -22,16 +22,18 @@ lib kvlang/spec/kvspace模型/指令布局格式 {
 
 ### 签名行
 
-函数目录 `/lib/{pkg}·{name}/` 自身（主槽）：storetype = index、langtype = `rwfunc`（裸种类名，**不含
-签名**），body = `[nr:u16 LE][nw:u16 LE][dynamic:u8]`（读参个数 `nr`、写参个数 `nw`、是否变参
-`dynamic`）。
+函数目录 `/lib/{pkg}·{name}/` 自身是普通**目录节点**：storetype = index、langtype = `index`、**无值**
+（body 空）。rwfunc 的**计数头**落签名行锚点 `/lib/{pkg}·{name}/[0,0]`——storetype = index、langtype =
+`rwfunc`（裸种类名，**不含签名**），body = `[nr:u16 LE][nw:u16 LE][dynamic:u8]`（读参个数 `nr`、写参
+个数 `nw`、是否变参 `dynamic`）。
 
 rwfunc 的各参数类型**不**落 `/[0,x]` 静态槽，而随**参数定义键**承载：`/lib/{pkg}·{name}.[0,-j]`
 （读参）/ `.[0,+j]`（写参）——点后缀、与坐标斜杠键 `/[0,±j]` 不同名——langtype `def langtype`，
-body = 参数名 + NUL + 该参数完整类型串。参数顺序由键中的 `±j` 显式记录（命名键不保序），故 func 目录
+body = 参数名 + NUL + 该参数的 **def langtype**（匹配类型）串——一个参数定义可匹配多种值的 langtype。参
+数顺序由键中的 `±j` 显式记录（命名键不保序），故 func 目录
 根**不**落 `/[0,x]` 子槽。
 
-`def rwir` 则相反：主槽 langtype = `def rwir`（裸种类名）、body 同计数格式，各参数类型落**位置化**签
+`def rwir` 则相反：`/lib/<op>` 节点自身 langtype = `def rwir`（裸种类名）、body 同计数格式，各参数类型落**位置化**签
 名
 行 `[0,x]` 子槽（`x<0` 读参、`x>0` 写参，storetype=ATOM、langtype=`def langtype`，body 为该参数
 langtype 串），无 `{param}` 命名键、无实现指令行——跨 runtime 队列按位置收参故须有序签名（见 [[总体方
@@ -42,18 +44,23 @@ langtype 串），无 `{param}` 命名键、无实现指令行——跨 runtime 
 以 `id_val(x:int64) -> (R:int64) { int64·add(x, 0) -> R }` 为例，`/lib/id_val/` 下：
 
 ```
-/lib/id_val/  storetype=index  langtype=rwfunc  body=[nr=1,nw=1,dyn=0]  ← 主槽；langtype 裸种类名，不含签名
-[0,0]         签名行锚点（s0=0），body=[nr,nw,dyn] 计数头
-x             ptr(langtype=int64)→"[0,-1]"     ← 命名读参：body=坐标、langtype=该参类型
-R             ptr(langtype=int64)→"[0,1]"      ← 命名写参：body=坐标、langtype=该参类型
-[1,0]         rwir:int64·add                   ← 指令0 opcode
-[1,-1]        rwir:x                            ← 指令0 读槽1
-[1,-2]        int64:0                           ← 指令0 读槽2（内联字面量）
-[1,1]         rwir:R                            ← 指令0 写槽1
+/lib/id_val/  storetype=index  langtype=index   ← 普通目录节点（无值）
+[0,0]         storetype=index  langtype=rwfunc  body=[nr,nw,dyn]        ← 签名行锚点（s0=0），只记计数头
+.[0,-1]       def langtype:"x\0int64"          ← 参数定义键（点后缀）：参数名 + NUL + def langtype 串
+.[0,1]        def langtype:"R\0int64"          ← 参数定义键（写参）
+[1,0]         storetype=ATOM  langtype=rwir|rwfunc  body=counts+"int64·add"  ← 指令0 opcode
+[1,-1]        storetype=ATOM  langtype=rwir    body=counts+"[0,-1]"   ← 指令0 读槽1（形参已换成帧坐标）
+[1,-2]        storetype=ATOM  langtype=int64   body=raw(8B)           ← 指令0 读槽2（内联字面量，非 rwir、无 counts）
+[1,1]         storetype=ATOM  langtype=rwir    body=counts+"[0,1]"    ← 指令0 写槽1
 ```
 
-opcode 槽 langtype 为 `rwir`（可为 `rwfunc` 引用），body 记 opcode 名。读/写槽的值有两类：
-`rwir:name` 是对变量的引用（存名字文本，即相对指针），或内联字面量（如 `int64:0`、
-`char/utf32:"…"`）。opcode 槽永不存变量引用，故值拷贝 `=` 与函数调用 `call` 在 KV 层无歧义。
+opcode 槽 langtype 为 `rwir|rwfunc`——这是**派发标记**（layout 不静态判定目标是 runtime 兑现的 rwir 还
+是用户 rwfunc，判定推迟到 runtime 查 `/lib/<opcode>`，见 [[指令槽编码]]），非值语言类型。
+
+**`rwir` 值的 body 格式（唯一）**：`counts` = `[nr:u16 LE][nw:u16 LE][dynamic:u8]`（5 字节，指令槽恒
+`0,0,0`）+ 槽文本；文本是 opcode 名，或变量引用（相对指针 `[0,±k]`）。**内联字面量不是 `rwir`**——按字
+面量自身的 kind 编码（如 `int64` 的 8 字节 raw），**无** `counts`。故读/写槽的值两类：`rwir`（counts +
+文本）或内联字面量（如 `int64raw`、`char/utf32` 串）。opcode 槽永不存变量引用，故值拷贝 `=` 与函数调用
+`call` 在 KV 层无歧义。
 	"#### -> /lib/kvlang/spec/kvspace模型/指令布局格式
 }

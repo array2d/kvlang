@@ -8,12 +8,12 @@
 //   5
 struct Node {
 	val:int64=0
-	next:*Node=""
+	next:*Node=None
 }
 
 rwfunc remove(head:*Node, val:int64) -> () {
 	head -> p
-	while (p != "") {
+	while (p != None) {
 		v = p·val
 		v == val -> skip
 

@@ -1,6 +1,8 @@
 // networld/proc·exec：同步执行外部命令到结束，返回 uint8 退出码
-//   exec(args, envs) -> exitcode。args/envs 为 stringkeymap（{..} 字面量），成员 []char/utf32
-//   args 首成员=可执行文件；envs 空(map())=继承父环境，非空=完整替换
+//   exec(args, envs) -> exitcode。args/envs 为位置型 map（{..} 字面量），容器
+//   langtype 如 [int64]·[]char/utf32；成员 []char/utf32
+//   args 首成员=可执行文件；envs 空（`envs:[int64]·[]char/utf32 = {}`）
+//   =继承父环境，非空=完整替换
 //   exitcode：正常=退出码；信号终止=128+signo；spawn 失败/无 argv=127（对齐 shell）
 // 期望输出:
 //   hello from child
@@ -8,19 +10,25 @@
 //   seven= 7
 //   missing= 127
 //   FOO=bar123
+// run_proc 封装一次命令执行：输入 args/envs，输出退出码
+rwfunc run_proc(args:*[int64]·[]char/utf32,
+		envs:*[int64]·[]char/utf32) -> (code:uint8) {
+	networld/proc·exec(args, envs) -> code
+}
+
 rwfunc test() -> () {
-	noenv = map()
-	echoargs = {"sh", "-c", "echo hello from child"}
-	networld/proc·exec(echoargs, noenv) -> ok
+	noenv:[int64]·[]char/utf32 = {}
+	echoargs:[int64]·[]char/utf32 = {"sh", "-c", "echo hello from child"}
+	run_proc(echoargs, noenv) -> ok
 	println("ok=", ok)
-	failargs = {"sh", "-c", "exit 7"}
-	networld/proc·exec(failargs, noenv) -> seven
+	failargs:[int64]·[]char/utf32 = {"sh", "-c", "exit 7"}
+	run_proc(failargs, noenv) -> seven
 	println("seven=", seven)
-	badargs = {"/no/such/program"}
-	networld/proc·exec(badargs, noenv) -> missing
+	badargs:[int64]·[]char/utf32 = {"/no/such/program"}
+	run_proc(badargs, noenv) -> missing
 	println("missing=", missing)
-	envargs = {"sh", "-c", "echo FOO=$FOO"}
-	envs = {"FOO=bar123"}
-	networld/proc·exec(envargs, envs) -> withenv
+	envargs:[int64]·[]char/utf32 = {"sh", "-c", "echo FOO=$FOO"}
+	envs:[int64]·[]char/utf32 = {"FOO=bar123"}
+	run_proc(envargs, envs) -> withenv
 	println("withenv=", withenv)
 }

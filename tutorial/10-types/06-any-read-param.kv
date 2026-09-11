@@ -1,0 +1,21 @@
+// wip —— 挂起：`any` 的传递方式待定（any 可能收到值容器，按值传没东西可拷）。
+// 待 `any` 规则敲定后去掉本行。参见 todo「any 参数传递方式」。
+// 语义: any 读参接受任意类型实参——Ptr 的目标类型检查对 any 放行
+//       （any 是合法基类型，见 [[文法与合法性]]；写参写 any 已可用）。
+//       实测缺陷: any 读参一律 panic「[0,-1] is not a Ptr」——实参 Ptr 的
+//       目标 langtype 与声明的 any 逐字比较不等，被 validate_ptr 拒写。
+// 期望输出:
+//   3
+//   42
+rwfunc size_of(a:any) -> (n:int64) {
+	kv·listlen(a) -> n
+}
+rwfunc print_any(a:any) -> () {
+	println(a)
+}
+rwfunc test() -> () {
+	m:[int64]·[]char/utf32 = {"a", "b", "c"}
+	size_of(m) -> n
+	println(n)
+	print_any(42)
+}

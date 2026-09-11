@@ -61,6 +61,10 @@ SWEEP = {
     "hash_table":    [50, 100, 200],
     "matmul":        [4, 6, 8],
     "k_nucleotide":  [3, 5, 8],
+    # 同一算法的 compact 形态：数组落单个 ARRAYND XValue（`[N]T`），而非每元素一个 key 的散 key map。
+    # 与 matmul / quicksort 同规模、同基线（native 三份与原 case 算法完全一致，仅输出标签不同）。
+    "matmul_compact":    [4, 6, 8],
+    "quicksort_compact": [32, 64, 128],
 }
 SCALE_ENV = "BENCH_SCALE"   # python/rust/c 从此环境变量读规模
 SCALE_TOKEN = "__SCALE__"   # kvlang 源码里的规模占位符
