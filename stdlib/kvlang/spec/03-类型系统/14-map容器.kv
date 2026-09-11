@@ -11,22 +11,37 @@ lib kvlang/spec/类型系统/map容器 {
 一个 map 的 kvlang 代码形式：
 
 ```
-memheadname : memitemkeylangtype · memitemvaluelangtype = {}
+memheadname : memitemkey_langtype_formatter · memitemvalue_langtype = {}
 ```
 
 | 位置 | 名称 | 含义 |
 |------|------|------|
 | `:` 之前 | **memheadname** | map 的名字（头名，命名整族成员） |
-| `:` 与 `·` 之间 | **memitemkeylangtype** | item **键**的 langtype（独立 langtype） |
-| `·` 之后 | **memitemvaluelangtype** | item **值/body** 的 langtype（独立 langtype，可递归嵌套） |
+| `:` 与 `·` 之间 | **memitemkey_langtype_formatter** | item **键**的 langtype——键侧是**格式器**（见下），不是值类型 |
+| `·` 之后 | **memitemvalue_langtype** | item **值/body** 的 langtype（独立 langtype，可递归嵌套） |
 
-`·`（U+00B7 中点）连接 item 的键类型与值类型两条**各自独立**的 langtype。**通过 item 的 key 访问 item
-的 body**：写 `memheadname·<memitemkey 的字符串形式>` 即取到该 item 的 body（memitemvalue）。
+`·`（U+00B7 中点）连接 item 的键侧与值侧两条**各自独立**的类型表达式。**通过 item 的 key 访问 item 的
+body**：写 `memheadname·<memitemkey 的字符串形式>` 即取到该 item 的 body（memitemvalue）。
 
-**memitemkey** 是 key-eligible langtype，三选一：**裸标量**（`int64`）、**字符串键**
-`[]char/<编码>`、**标量元组键** `[scalar,…]`。memitemkey 逐字落键——访问键就是 memitemkey 值按其
-langtype 的**字面量本身**，kvspace 与 kvlangruntime 均**不得**加壳、归一化或改键（逐字铁律与
-`[float64,float64]`（元组键）≠ `[2]float64`（数组形状）的区分见 [[文法与合法性]]）。
+### 键侧是 formatter，不是值类型
+
+**memitemkey_langtype_formatter**：memitemkey 侧不是「值的类型」，而是**把 key 值格式化成路径段字符串的
+格式器**——因为 memitemkey 永远活在**路径系统**里（`memhead·<key 文本>`），**从不进入任何 XValue 的
+body**。key 侧没有 body 可承载类型，key 的类型完全是字符串层面的事，故必须由 formatter 规定「什么值的
+key 格式化成什么字面量文本」：
+
+| memitemkey 类型 | formatter 输出（= 访问键） | 例 |
+|-----------------|---------------------------|-----|
+| 裸标量（`bool` + 十个定宽数字种类） | 该标量的字面量文本 | `b·200` |
+| 标量元组 `[scalar,…]` | `[v0,v1,…]`（逗号分隔、无空格） | `a·[3.252,235124.23]` |
+| `[]char/<编码>` | 字符串本身（裸名） | `m·a` / `kv·set(m,"a",v)` |
+
+**不得**用数组形状 `[N]T` / `[d0,d1]T` 作键：形状描述「一段连续打包进 body 的等宽元素」，属 **value 的
+langtype**；key 无 body、纯路径文本，形状对它没有意义。故 `b:[2]int32·[]char/utf8 = {}` 报错，而表达同
+样「两个 int32」的元组键 `b2:[int32,int32]·[]char/utf8 = {}` 合法（formatter 产出 `b2·[1,2]`）。
+
+`a:int32·int32 = {}`（裸标量键，访问键 `a·200`）与 `a:[int32]·int32 = {}`（一元元组键，访问键
+`a·[200]`）是**两个不同的 formatter**，不得互相转换（逐字铁律见 [[文法与合法性]]）。
 
 ## 例子
 
@@ -41,6 +56,10 @@ b·200 = 7                  // 访问键就是 200，禁止写成 b·[200]
 
 a:[float64,float64]·int32 = {}          // 标量元组键 map（[float64,float64] ≠ [2]float64）
 a·[342.124,23.2345] = 1                 // 访问键就是元组字面量本身
+
+b2:[int32,int32]·[]char/utf8 = {}       // 元组键 + 字符串值（两元素都是标量，合法）
+b2·[1,2] = "x"                          // 访问键 = formatter 输出 "[1,2]"
+// b:[2]int32·[]char/utf8 = {}          // 非法：数组形状 [2]int32 不是键（键无 body 可承载）
 ```
 
 memitemvalue 可递归嵌套（`[]char/utf8·[]char/utf8·int64` 即 `map[string]map[string]int64`）。

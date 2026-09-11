@@ -12,11 +12,11 @@ type_expr   = [ ref_prefix ] atom { "|" atom }   (* ref 前缀可选；layout �
 ref_prefix  = "*" | "@"                          (* * → ref=1（kvspace 内间接）；@ → ref=2（扩展世界，值在 kvspace 之外，runtime-c 不可直达、由支持 @ 的 rwir 兑现）。签名位置可写：`T` 值传、`*T` 址传、`@T` 扩展存储；值容器（map/struct）无值本体可拷，必须带 `*`/`@`，见 [[函数]] *)
 atom        = shape | mapexpr | structref
 shape       = [ dims ] ( any | kind )
-mapexpr     = memitemkey "·" memitemvalue        (* stringkeymap；`·` 连接两条独立 langtype：左=item 键类型、右=item 值类型。声明形如 memheadname:memitemkey·memitemvalue={}，见 [[map容器]] *)
+mapexpr     = memitemkey "·" memitemvalue        (* stringkeymap；`·` 左=item 键侧的**格式器**（memitemkey_langtype_formatter）、右=item 值类型。声明形如 memheadname:memitemkey_langtype_formatter·memitemvalue_langtype={}，见 [[map容器]] *)
 memitemvalue = type_expr                         (* item 值/body 类型，递归为完整 type_expr，故 map 可无限嵌套 *)
-memitemkey  = scalar                             (* 裸标量键：访问键即该标量字面量本身，如 b·200；禁止包成 [200]（见 [[文法与合法性]]） *)
-            | "[]" char_enc                      (* 字符串键，等价 Go map[string]V *)
-            | "[" scalar { "," scalar } "]"      (* 标量元组键：括号内是种类名序列，访问键即括号元组字面量本身，如 a·[342.124,23.2345] *)
+memitemkey  = scalar                             (* 裸标量键：键只在路径系统、无 body，故这是"格式器"——输出该标量字面量本身，如 b·200；禁止包成 [200]（见 [[文法与合法性]]） *)
+            | "[]" char_enc                      (* 字符串键（格式器输出裸名字符串），等价 Go map[string]V *)
+            | "[" scalar { "," scalar } "]"      (* 标量元组键（格式器输出 `[v0,v1,…]`），如 a·[342.124,23.2345]；与数组形状 [2]float64 不同——形状不可作键 *)
 structref   = path                               (* struct 原型路径，如 /lib/Point *)
 char_enc    = "char/utf8" | "char/utf32" | "char/ascii"
 scalar      = "bool"
