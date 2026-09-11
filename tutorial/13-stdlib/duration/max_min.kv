@@ -2,15 +2,20 @@
 // 期望输出:
 //   max: 3
 //   min: 1
+// 取两 duration 的极值，并以小时为单位返回（大者、小者）
+rwfunc extremes(d1:duration, d2:duration) -> (hi:int64, lo:int64) {
+	time/duration·max(d1, d2) -> mx
+	time/duration·min(d1, d2) -> mn
+	time/duration·as_hours(mx) -> hi
+	time/duration·as_hours(mn) -> lo
+}
+
 rwfunc test() -> () {
 	time/duration·hours(1) -> h1
 	time/duration·hours(3) -> h3
-	time/duration·max(h1, h3) -> mx
-	time/duration·as_hours(mx) -> mx_h
+	extremes(h1, h3) -> (mx, mn)
 	print("max: ")
-	println(mx_h)
-	time/duration·min(h1, h3) -> mn
-	time/duration·as_hours(mn) -> mn_h
+	println(mx)
 	print("min: ")
-	println(mn_h)
+	println(mn)
 }

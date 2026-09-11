@@ -245,13 +245,13 @@ impl Engine {
         }
     }
 
-    /// 写一个 stringkeymap 容器（对齐 C kv·list 表示，供 fs·list 等返回可 for-in 的字符串列表）：
-    ///   dst   = 容器标记：kind=stringkeymap，body 空，dims=[n]
+    /// 写一个字符串列表容器（供 fs·list 等返回可 for-in 的字符串列表，对齐 C kv·list 表示）：
+    ///   dst   = 容器值：langtype=`[int64]·[]char/utf32`（见 [[map容器]]），body 空，dims=[n]
     ///   dst·  = memindex：kind=index，body=[4B count LE]["[0]\n[1]\n..."]（成员坐标名唯一权威）
     ///   dst·[i] = 各成员字符串（char/utf32）
     pub fn set_str_list(&self, dst: &str, items: &[String]) {
         let n = items.len();
-        self.set_tlv_encoded(dst, "stringkeymap", &[], &[n as i32]);
+        self.set_tlv_encoded(dst, "[int64]·[]char/utf32", &[], &[n as i32]);
         let mut body = (n as u32).to_le_bytes().to_vec();
         for i in 0..n {
             if i > 0 {

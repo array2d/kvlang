@@ -1,6 +1,7 @@
 // linked-list: 局部 struct 节点变量 + & 取址串成链表
 // 语义: 每个节点是帧内 struct 局部变量；next 存下一节点地址（&node ≡ kv·abs(node)）；
-//       None=尾；cur·field 按 next 路径解引用遍历。尾节点先建，&node 恒指向已存在节点。
+//       None=尾；show_list 接收 *Node 头指针，按 next 路径解引用逐节点打印。
+//       尾节点先建，&node 恒指向已存在节点。
 // 期望输出:
 //   10
 //   20
@@ -10,14 +11,18 @@ struct Node {
 	next:*Node=None
 }
 
-rwfunc test() -> () {
-	n3:Node = {val=30}
-	n2:Node = {val=20 next=&n3}
-	n1:Node = {val=10 next=&n2}
-	cur = &n1
+rwfunc show_list(head:Node) -> () {
+	head -> cur
 	while (cur != None) {
 		cur·val -> v
 		println(v)
 		cur·next -> cur
 	}
+}
+
+rwfunc test() -> () {
+	n3:Node = {val=30}
+	n2:Node = {val=20 next=&n3}
+	n1:Node = {val=10 next=&n2}
+	show_list(&n1)
 }

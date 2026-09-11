@@ -82,7 +82,7 @@ myrwircaps **只关乎执行位置**（哪张表登记了它、由谁就地跑�
 写槽（见 [[执行模型]] §五）。示例（networld）：
 
 ```
-networld/proc·exec   rp=[[]stringkeymap, []stringkeymap]  wp=[uint8, []uint8, []uint8]
+networld/proc·exec   rp=[[int64]·[]char/utf32, [int64]·[]char/utf32]  wp=[uint8, []uint8, []uint8]
 networld/fs·read     rp=[[]char/utf8|[]char/utf32, int64, int64]  wp=[[]uint8]
 ```
 	"#### -> /lib/kvlang/spec/runtime语义/runtime开发规范

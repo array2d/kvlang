@@ -258,7 +258,10 @@ fn advance_line_count(
     }
 }
 
-fn is_token_delim(c: u8) -> bool {
+/// 标识符/路径段的合法字节判定：凡**不是**分隔符者皆可入标识符（CJK 等多字节字符的
+/// 各字节都不在分隔符集内，故中文标识符天然合法，见 tutorial/01-basics/chinese_ident.kv）。
+/// langtype 的 structref 校验复用它，保证「标识符能写」与「类型名能写」同一套字符集。
+pub(crate) fn is_token_delim(c: u8) -> bool {
     matches!(
         c,
         b' ' | b'\t'

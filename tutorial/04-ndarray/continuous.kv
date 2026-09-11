@@ -5,6 +5,13 @@
 //   [0] = 10
 //   after set: 10 99 30
 //   sum = 179
+rwfunc sum(a:[]int64) -> (total:int64) {
+	total = 0
+	for (x in a) {
+		total = total + x
+	}
+}
+
 rwfunc test() -> () {
 	a:[]int64 = [10, 20, 30, 40]
 	ndarray·numel(a) -> n
@@ -16,12 +23,6 @@ rwfunc test() -> () {
 	a[1] -> x1
 	x2 = a[2]
 	println("after set:", x0, x1, x2)
-	total = 0
-	0 -> i
-	while (i < n) {
-		x = a[i]
-		total = total + x
-		i + 1 -> i
-	}
+	sum(a) -> total
 	println("sum =", total)
 }

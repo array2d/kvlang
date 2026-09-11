@@ -39,17 +39,32 @@ pub fn head(data: &[u8]) -> ffi::kvspaceHead_t {
 }
 
 /// 解析 langtype 内容 → (dims, base kind)。langtype 无前缀（ref/ptr 归 head.ref）。
+/// **map langtype 无形状段**：`{keylt}·{valt}` 里 `·` 之前的方括号是键类型（`[int64]`、
+/// `[float64,float64]`），不是维度——与 `[2]float64`（数组形状）截然不同，故整串即基 kind。
+/// 非 map 串也只把**纯数字/空/?**的方括号当形状（见 [[map容器]]）。
 pub fn parse_langtype(kx: &str) -> (Vec<i32>, String) {
+    if kx.contains(super::keytree::MEMBER_SEP) {
+        return (Vec::new(), kx.to_string());
+    }
     if kx.starts_with('[') {
         match kx.find(']') {
-            Some(end) => (
-                kx[1..end]
-                    .split(',')
-                    .filter(|d| !d.is_empty())
-                    .map(|d| d.parse().unwrap_or(0))
-                    .collect(),
-                kx[end + 1..].to_string(),
-            ),
+            Some(end) => {
+                let inner = &kx[1..end];
+                if inner.split(',').all(|d| {
+                    let d = d.trim();
+                    d.is_empty() || d == "?" || d.parse::<i32>().is_ok()
+                }) {
+                    return (
+                        inner
+                            .split(',')
+                            .filter(|d| !d.is_empty())
+                            .map(|d| d.parse().unwrap_or(0))
+                            .collect(),
+                        kx[end + 1..].to_string(),
+                    );
+                }
+                (Vec::new(), kx.to_string())
+            }
             None => (Vec::new(), kx.to_string()),
         }
     } else {
@@ -354,6 +369,20 @@ pub fn plain(data: &[u8]) -> String {
 }
 
 /// rwir 族槽值的载荷串（opcode / 引用名）：body 去 5 字节计数头后的字节。
+/// 写槽值 → (名字, 声明类型)：写目标带 map langtype 标注（`x:{keylt}·{valt} = {}`）时，槽的
+/// langtype 即该 map langtype、body 即变量名（见 [[map容器]]）；其余写槽走 rwir 引用载荷
+/// （跳过 5B 计数头）。dump 逆向时据此还原 `-> x:<type>`，使 round-trip 不丢容器类型。
+pub fn write_slot_name(data: &[u8]) -> (String, String) {
+    if data.is_empty() {
+        return (String::new(), String::new());
+    }
+    let k = kind(data);
+    if k.contains(super::keytree::MEMBER_SEP) {
+        return (value_string(data), k);
+    }
+    (rwir_sig(data), String::new())
+}
+
 pub fn rwir_sig(data: &[u8]) -> String {
     if data.is_empty() {
         return String::new();

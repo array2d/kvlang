@@ -9,16 +9,23 @@
 //   step 4
 //   step 5
 //   complete final= 5
-rwfunc test() -> () {
+// run_steps 跑 limit 个带检查点的步骤：每步先落盘 step 再打印、
+// sleep 出中断窗口，返回完成步数
+rwfunc run_steps(limit:int64) -> (final:int64) {
 	0 -> i
-	while (i < 5) {
+	while (i < limit) {
 		i + 1 -> i
 		kv·set("/crashtest/step", i)
 		println("step", i)
-		noenv = map()
-		a = {"sleep", "0.2"}
+		noenv:[int64]·[]char/utf32 = {}
+		a:[int64]·[]char/utf32 = {"sleep", "0.2"}
 		networld/proc·exec(a, noenv) -> code
 	}
+	i -> final
+}
+
+rwfunc test() -> () {
+	run_steps(5) -> i
 	kv·set("/crashtest/done", 1)
 	println("complete final=", i)
 }

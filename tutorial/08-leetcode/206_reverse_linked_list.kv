@@ -11,7 +11,7 @@ struct Node {
 	next:*Node=None
 }
 
-rwfunc reverse(head:*Node) -> () {
+rwfunc reverse() -> (head:Node) {
 	prev = None
 	head -> cur
 	while (cur != None) {
@@ -35,5 +35,5 @@ rwfunc test() -> () {
 	n2:Node = {val=2 next=&n3}
 	n1:Node = {val=1 next=&n2}
 	&n1 -> h
-	reverse(h)
+	reverse() -> h
 }
