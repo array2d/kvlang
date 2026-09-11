@@ -4,13 +4,13 @@
 //       layout 校验元组元素为标量 kind 并 round-trip 进签名 head（本例证签名接受）。
 // 期望输出:
 //   tuple-key signatures accepted
-rwfunc grid_i(g:[int32,int32]·[]char/utf8) -> (n:int64) {
+rwfunc grid_i(g:*[int32,int32]·[]char/utf8) -> (n:int64) {
 	0 -> n
 }
-rwfunc grid_f(g:[float32,float32]·int64) -> (n:int64) {
+rwfunc grid_f(g:*[float32,float32]·int64) -> (n:int64) {
 	0 -> n
 }
-rwfunc mixed(g:[float32,int8,uint32]·int64) -> (n:int64) {
+rwfunc mixed(g:*[float32,int8,uint32]·int64) -> (n:int64) {
 	0 -> n
 }
 rwfunc test() -> () {

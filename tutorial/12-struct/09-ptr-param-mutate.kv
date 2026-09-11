@@ -8,7 +8,7 @@ struct Point {
 	x:int64=0
 	y:int64=0
 }
-rwfunc shift(dx:int64) -> (p:Point) {
+rwfunc shift(dx:int64) -> (p:*Point) {
 	p·x + dx -> p·x
 }
 rwfunc test() -> () {

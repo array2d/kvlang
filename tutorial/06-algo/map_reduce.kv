@@ -5,7 +5,7 @@
 //   sum of squares: 165
 // 散 key 数组作实参时 for-in 在 layout 脱糖成 compact 取值（xv·at），
 // 函数内改用 kv·listlen/kv·listn/kv·get 显式遍历。
-rwfunc map_reduce(nums:[int64]·int64) -> (count:int64, total:int64) {
+rwfunc map_reduce(nums:*[int64]·int64) -> (count:int64, total:int64) {
 	0 -> count
 	total = 0
 	kv·listlen(nums) -> n

@@ -548,29 +548,32 @@ impl Parser {
     }
 
     fn check_param_types(&mut self, sig: &FuncSig) {
-        // 指针形参一律拒：kvlang 只有地址传递，且**由 layout 自动落到地址**——函数体里每个形参
-        // 引用都被 lower 成 `*[0,±k]`（参数轴槽存的是实参地址，显式解引用才取到值）。
-        // 故声明写 `p:*Point` 与 `p:Point` 完全等价，那个 `*` 是纯噪声，只会让人以为
-        // 「值/地址」在签名层可选。`*T` 仍用于 struct 字段与局部标注——那里确实要区分
-        // 「指向节点的引用」与节点本身。
+        // 签名里的 `*` 是**作者书写的传递方式**：写 `*T` = 按地址传（帧槽存实参地址 Ptr），
+        // 不写 = 按值传（帧槽存值本体）。唯一硬约束：**值容器类型必须写 `*`**——map langtype
+        // （含 `·`）与 structref（`/` 开头）的成员落在兄弟槽 `{key}·`，单槽不是完备值，没有
+        // 可拷贝的"值"，只能按地址传。
         for (slot, ret) in sig
             .params
             .iter()
             .map(|p| ("param", p))
             .chain(sig.returns.iter().map(|r| ("return value", r)))
         {
-            if ptr_prefixed(&ret.ty) {
+            if is_value_container_ty(&ret.ty) && !ptr_prefixed(&ret.ty) {
                 self.errors.push(Diagnostic {
                     pos: Pos { line: 0, col: 0 },
                     message: format!(
-                        "func {}: {slot} {:?}: pointer type {:?} is not allowed — parameter \
-                         references are already lowered to `*[0,±k]` (the axis slot holds the \
-                         argument address), so write {:?}",
+                        "func {}: {slot} {:?}: 值容器类型只能按地址传递 —— 写 `{:?}`",
                         sig.name,
                         ret.name,
-                        ret.ty,
-                        ret.ty.split(['|', '·']).map(|a| a.trim_start_matches('*'))
-                            .collect::<Vec<_>>().join("·")
+                        ret.ty
+                            .split('|')
+                            .map(|a| if !a.starts_with('*') && (a.starts_with('/') || a.contains('·')) {
+                                format!("*{a}")
+                            } else {
+                                a.to_string()
+                            })
+                            .collect::<Vec<_>>()
+                            .join("|")
                     ),
                     warn: false,
                     info: false,
@@ -2272,9 +2275,16 @@ fn is_fixed_dim_array(t: &str) -> bool {
         .all(|d| !d.trim().is_empty() && d.trim().bytes().all(|c| c.is_ascii_digit()))
 }
 
-/// 类型串里是否有原子以 `*`（Ptr 前缀）起头——以 `|`（并）与 `·`（map 键值）切分后逐段看。
+/// 类型串里是否有原子以 `*`（间接性前缀）起头——以 `|`（并）与 `·`（map 键值）切分后逐段看。
 fn ptr_prefixed(ty: &str) -> bool {
     ty.split(['|', '·']).any(|a| a.starts_with('*'))
+}
+
+/// 值容器类型：成员落在兄弟槽 `{key}·` 的类型——map langtype（含 `·`）或 structref（`/` 开头）。
+/// 这类值没有可拷贝的单槽值，只能按地址传递（见 spec [[函数]]）。
+fn is_value_container_ty(ty: &str) -> bool {
+    ty.split('|')
+        .any(|a| a.trim_start_matches('*').starts_with('/') || a.contains('·'))
 }
 
 fn type_error(_kind: &str) -> String {

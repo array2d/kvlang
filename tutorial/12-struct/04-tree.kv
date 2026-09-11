@@ -11,7 +11,7 @@ struct TNode {
 	right:*TNode=None
 }
 
-rwfunc inorder(node:TNode) -> () {
+rwfunc inorder(node:*TNode) -> () {
 	if (node != None) {
 		node·left -> l
 		inorder(l)

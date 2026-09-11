@@ -10,7 +10,7 @@ struct TNode {
 	right:*TNode=None
 }
 
-rwfunc inorder(root:TNode) -> () {
+rwfunc inorder(root:*TNode) -> () {
 	// iterative stack simulation
 	si = 0
 	stack:[int64]·*TNode = {}

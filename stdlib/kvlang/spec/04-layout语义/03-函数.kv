@@ -91,7 +91,7 @@ error: func f: "q" aliases read param "p" (`q = p`); writing its members writes 
 `-> (p:Point)` 里——kvlang 只有地址传递，写参 `p` 拿到的就是调用方对象的地址：
 
 ```kv
-rwfunc shift(dx:int64) -> (p:Point) { p·x + dx -> p·x }
+rwfunc shift(dx:int64) -> (p:*Point) { p·x + dx -> p·x }
 rwfunc test() -> () { a:Point = {x=1 y=2}  shift(10) -> a }
 ```
 

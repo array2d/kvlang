@@ -8,7 +8,7 @@ struct Node {
 	next:*Node=None
 }
 
-rwfunc is_pal(head:Node) -> () {
+rwfunc is_pal(head:*Node) -> () {
 	arr:[int64]·int64 = {}
 	0 -> n
 	head -> p

@@ -13,7 +13,7 @@ struct GNode {
 	seen:bool=false
 }
 
-rwfunc dfs() -> (node:GNode) {
+rwfunc dfs() -> (node:*GNode) {
 	if (node != None) {
 		node·seen -> s
 		if (!s) {
