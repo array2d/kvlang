@@ -9,7 +9,7 @@ struct Node {
 	next:*Node=None
 }
 
-rwfunc sum_list(head:*Node) -> (sum:int64) {
+rwfunc sum_list(head:Node) -> (sum:int64) {
 	head -> cur
 	0 -> sum
 	while (cur != None) {

@@ -548,6 +548,38 @@ impl Parser {
     }
 
     fn check_param_types(&mut self, sig: &FuncSig) {
+        // 指针形参一律拒：kvlang 只有地址传递，且**由 layout 自动落到地址**——函数体里每个形参
+        // 引用都被 lower 成 `*[0,±k]`（参数轴槽存的是实参地址，显式解引用才取到值）。
+        // 故声明写 `p:*Point` 与 `p:Point` 完全等价，那个 `*` 是纯噪声，只会让人以为
+        // 「值/地址」在签名层可选。`*T` 仍用于 struct 字段与局部标注——那里确实要区分
+        // 「指向节点的引用」与节点本身。
+        for (slot, ret) in sig
+            .params
+            .iter()
+            .map(|p| ("param", p))
+            .chain(sig.returns.iter().map(|r| ("return value", r)))
+        {
+            if ptr_prefixed(&ret.ty) {
+                self.errors.push(Diagnostic {
+                    pos: Pos { line: 0, col: 0 },
+                    message: format!(
+                        "func {}: {slot} {:?}: pointer type {:?} is not allowed — parameter \
+                         references are already lowered to `*[0,±k]` (the axis slot holds the \
+                         argument address), so write {:?}",
+                        sig.name,
+                        ret.name,
+                        ret.ty,
+                        ret.ty.split(['|', '·']).map(|a| a.trim_start_matches('*'))
+                            .collect::<Vec<_>>().join("·")
+                    ),
+                    warn: false,
+                    info: false,
+                    source: String::new(),
+                    src_file: String::new(),
+                    src_name: String::new(),
+                });
+            }
+        }
         for param in &sig.params {
             // 末读参 `...` 是签名层变参标记，校验前剥离（变参落 dynamic 字节，见 [[函数]]）。
             let ty = param.ty.strip_suffix("...").unwrap_or(&param.ty);
@@ -694,11 +726,48 @@ impl Parser {
                 src_name: String::new(),
             });
         };
+        // 别名污染：`q = p` / `p -> q`（p 是读参或已污染）使 q 指到**同一个对象**，
+        // 于是经 q 写成员就是在写读参的对象。只读性沿别名传播，否则 `q = p; q·x = v`
+        // 一句话就把「签名诚实原则」洗白了。
+        // 别名 → 源头读参（`q = p` 记 q→p；再 `r = q` 追到 p），供诊断点名真凶。
+        let mut tainted: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let mut all: Vec<&Instruction> = Vec::new();
+        collect_body_insts(&func.body, &mut all);
+        loop {
+            let mut grew = false;
+            for inst in &all {
+                let Some(e) = &inst.expr else { continue };
+                if !e.is_leaf() {
+                    continue;
+                }
+                let src = if ro.contains(&e.val) {
+                    e.val.clone()
+                } else {
+                    match tainted.get(&e.val) {
+                        Some(s0) => s0.clone(),
+                        None => continue,
+                    }
+                };
+                for w in &inst.writes {
+                    if w.contains('/') || w.contains('[') || w.contains(keytree::MEMBER_SEP) {
+                        continue;
+                    }
+                    if !ro.contains(w) && !tainted.contains_key(w) {
+                        tainted.insert(w.clone(), src.clone());
+                        grew = true;
+                    }
+                }
+            }
+            if !grew {
+                break;
+            }
+        }
         let check = |p: &mut Self,
                      inst: &Instruction,
                      ro: &std::collections::HashSet<String>,
                      fname: &str| {
-            // 写槽命中读参（非路径/索引/成员）
+            // 写槽命中读参（非路径/索引/成员）——把参数槽重绑成别的地址，拒绝。
+            // 别名局部量不在此列：`cur·next -> cur` 重绑的是局部别名本身，没碰调用方对象。
             for w in inst.writes.iter() {
                 if w.contains('/') || w.contains('[') || w.contains(keytree::MEMBER_SEP) {
                     continue;
@@ -707,12 +776,36 @@ impl Parser {
                     bad(p, w, fname);
                 }
             }
-            // kv.set 成员形（3 读：base, key, val）改写 base 的成员目录，命中读参即拒绝
+            // kv.set 成员形（3 读：base, key, val）改写 base 的成员目录，命中读参**或别名**即拒绝。
+            // 被写的参数**必须**声明在写参侧（签名诚实原则）——要就地改调用方的对象，
+            // 就把该参数写到 `-> (p:Point)` 里，而不是留在读参侧靠别名绕。
             if let Some(e) = &inst.expr {
                 if e.op == "kv·set" && e.args.len() >= 3 {
                     let base = &e.args[0].val;
-                    if !base.contains('/') && ro.contains(base) {
-                        bad(p, base, fname);
+                    if !base.contains('/') && (ro.contains(base) || tainted.contains_key(base)) {
+                        if ro.contains(base) {
+                            bad(p, base, fname);
+                        } else {
+                            let src = &tainted[base];
+                            let ty = func
+                                .sig
+                                .params
+                                .iter()
+                                .find(|pp| &pp.name == src)
+                                .map(|pp| pp.ty.clone())
+                                .unwrap_or_default();
+                            p.errors.push(Diagnostic {
+                                pos: Pos { line: 1, col: 1 },
+                                message: format!(
+                                    "func {fname}: {base:?} aliases read param {src:?} (`{base} = {src}`); writing its members writes that object — put it on the write side: `-> ({src}:{ty})`"
+                                ),
+                                warn: false,
+                                info: false,
+                                source: String::new(),
+                                src_file: String::new(),
+                                src_name: String::new(),
+                            });
+                        }
                     }
                 }
             }
@@ -2177,8 +2270,38 @@ fn is_fixed_dim_array(t: &str) -> bool {
         .all(|d| !d.trim().is_empty() && d.trim().bytes().all(|c| c.is_ascii_digit()))
 }
 
+/// 类型串里是否有原子以 `*`（Ptr 前缀）起头——以 `|`（并）与 `·`（map 键值）切分后逐段看。
+fn ptr_prefixed(ty: &str) -> bool {
+    ty.split(['|', '·']).any(|a| a.starts_with('*'))
+}
+
 fn type_error(_kind: &str) -> String {
     "unknown type — valid: int8/16/32/64, uint8/16/32/64, float32/64, bool, char/utf32, obj, map, index, char, any, []T, [2,3]T, [?,N]T, A|B".to_string()
+}
+
+/// 收集函数体（含嵌套块/分支/循环）里的全部指令，供别名污染的不动点迭代用。
+fn collect_body_insts<'a>(body: &'a [Stmt], out: &mut Vec<&'a Instruction>) {
+    for st in body {
+        match st {
+            Stmt::Instruction(s) => out.push(s),
+            Stmt::Scope(s) => collect_body_insts(&s.body, out),
+            Stmt::If(s) => {
+                if let Some(c) = &s.cond {
+                    out.push(c);
+                }
+                collect_body_insts(&s.then_, out);
+                collect_body_insts(&s.else_, out);
+            }
+            Stmt::While(s) => {
+                if let Some(c) = &s.cond {
+                    out.push(c);
+                }
+                collect_body_insts(&s.body, out);
+            }
+            Stmt::For(s) => collect_body_insts(&s.body, out),
+            _ => {}
+        }
+    }
 }
 
 fn walk_read_only(

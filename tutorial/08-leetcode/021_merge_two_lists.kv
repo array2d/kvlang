@@ -12,7 +12,7 @@ struct Node {
 	next:*Node=None
 }
 
-rwfunc merge(a:*Node, b:*Node) -> () {
+rwfunc merge(a:Node, b:Node) -> () {
 	pa = a
 	pb = b
 	while (pa != None) {

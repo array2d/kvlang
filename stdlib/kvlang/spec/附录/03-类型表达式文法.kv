@@ -7,7 +7,7 @@ lib kvlang/spec/附录/类型表达式文法 {
 
 ```
 type_expr   = [ ref_prefix ] atom { "|" atom }   (* ref 前缀可选；layout 剥离前缀落 head ref 字节，wire langtype 不含前缀；见 [[总体方案]] *)
-ref_prefix  = "*" | "@"                          (* * → ref=ptr（指针）；@ → ref=@ext（扩展世界） *)
+ref_prefix  = "*" | "@"                          (* * → ref=ptr（指针）；@ → ref=@ext（扩展世界）。**签名位置禁写 `*`**：参数引用由 layout 自动 lower 成 `*[0,±k]`（只有地址传递），见 [[函数]] *)
 atom        = shape | mapexpr | structref
 shape       = [ dims ] ( any | kind )
 mapexpr     = memitemkey "·" memitemvalue        (* stringkeymap；`·` 连接两条独立 langtype：左=item 键类型、右=item 值类型。声明形如 memheadname:memitemkey·memitemvalue={}，见 [[map容器]] *)

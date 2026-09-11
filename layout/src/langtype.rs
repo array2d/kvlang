@@ -57,9 +57,14 @@ fn valid_structref(s: &str) -> bool {
         Some(r) => r,
         None => return false,
     };
+    // 段名字符集与**标识符**同一套（见 scanner::is_token_delim）——否则 `点` 这类 CJK
+    // struct 名能作标识符、能作 struct 名，却单单不能出现在参数/返回的类型位置。
     !rest.is_empty()
         && rest.split('/').all(|seg| {
-            !seg.is_empty() && seg.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+            !seg.is_empty()
+                && seg
+                    .bytes()
+                    .all(|b| !super::scanner::is_token_delim(b) && b != b'"' && b != b'\'')
         })
 }
 
@@ -161,7 +166,9 @@ fn valid_key(s: &str) -> bool {
 /// atom = shape | mapexpr | structref；mapexpr = key "·" type；structref = "/" path。
 /// 最前 `*` 是 ref 前缀（Ptr 存储位置），校验剥离后剩余部分（见 [[类型表达式文法]]）。
 fn valid_atom(s: &str) -> bool {
-    if let Some(rest) = s.strip_prefix('*') {
+    // `*`=ref ptr、`@`=ref @ext（见 [[ref存储位置]]）：两者都只是**源码**前缀，
+    // layout 解析时剥离并落成 head.ref 字节，wire langtype 不含前缀。
+    if let Some(rest) = s.strip_prefix('*').or_else(|| s.strip_prefix('@')) {
         return !rest.is_empty() && valid_atom(rest);
     }
     if s.starts_with('/') {
@@ -188,6 +195,9 @@ pub fn expand_struct_refs(s: &str) -> String {
 fn expand_atom(s: &str) -> String {
     if let Some(rest) = s.strip_prefix('*') {
         return format!("*{}", expand_atom(rest));
+    }
+    if let Some(rest) = s.strip_prefix('@') {
+        return format!("@{}", expand_atom(rest));
     }
     if s.starts_with('/') {
         return s.to_string();

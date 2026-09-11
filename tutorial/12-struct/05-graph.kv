@@ -13,7 +13,7 @@ struct GNode {
 	seen:bool=false
 }
 
-rwfunc dfs(node:*GNode) -> () {
+rwfunc dfs() -> (node:GNode) {
 	if (node != None) {
 		node·seen -> s
 		if (!s) {
@@ -22,9 +22,9 @@ rwfunc dfs(node:*GNode) -> () {
 			node·val -> v
 			println(v)
 			node·e0 -> a
-			dfs(a)
+			dfs() -> a
 			node·e1 -> b
-			dfs(b)
+			dfs() -> b
 		}
 	}
 }
@@ -37,5 +37,6 @@ rwfunc test() -> () {
 	&/graph·2 -> /graph·1·e0
 	&/graph·3 -> /graph·1·e1
 	&/graph·3 -> /graph·2·e0
-	dfs(&/graph·1)
+	&/graph·1 -> g1
+	dfs() -> g1
 }

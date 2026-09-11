@@ -12,7 +12,7 @@ struct Node {
 	next:*Node=None
 }
 
-rwfunc reverse_list(head:*Node) -> (new_head:*Node) {
+rwfunc reverse_list() -> (head:Node, new_head:Node) {
 	prev = None
 	head -> cur
 	while (cur != None) {
@@ -29,7 +29,7 @@ rwfunc test() -> () {
 	n2:Node = {val=20 next=&n3}
 	n1:Node = {val=10 next=&n2}
 	&n1 -> h
-	reverse_list(h) -> head
+	reverse_list() -> h, head
 	head -> cur
 	while (cur != None) {
 		cur·val -> v

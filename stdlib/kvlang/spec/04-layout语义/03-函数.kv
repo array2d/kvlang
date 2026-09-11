@@ -24,17 +24,28 @@ kvlang 源码只有一种命名单元：**rwfunc**（有指令体的用户函数
 调用时**写参 arity 必须全部匹配**（对齐 Go/Rust）：`f() -> s` 对多写参函数是错误；不需要的写参**必须
 **用 `_` 显式丢弃。
 
-## 参数类型必须标注
+## 参数类型必须标注，且**不得**写指针前缀
 
 每个读参与写参**必须**声明类型（`name:type_expr`，type_expr 见 [[langtype签名类型表达式]]）。
-type_expr 最前可写 `*`/`@` 前缀（如 `*int64`、`@[256,256]uint8`）表示 ptr/ext 存储位置；layout 解析
-时剥离该前缀并落成 head `ref` 字节，wire 层 langtype 串不含前缀（见 [[总体方案]]）。`*T` 参数可接受
-**None**（空指针），判定恒写 `p != None`（见 [[ptr]]）。缺类型标注是错误：
+缺类型标注是错误：
 
 ```
 error: func f: param "x" has no type annotation — every parameter must declare its type
 error: func f: return value "r" has no type annotation
 ```
+
+参数类型**禁止**写 `*` 前缀（如 `p:*Point` 是错误）。kvlang 只有**地址传递**，而这件事由 layout
+自动完成：函数体里每个形参引用都被 lower 成 `*[0,±k]`（参数轴槽存的是实参地址，显式解引用才取到
+值，见 [[指令架构]]）。故 `p:*Point` 与 `p:Point` 完全等价，签名里那个 `*` 是纯噪声，只会让人误以为
+「值传递 / 地址传递」在签名层可选：
+
+```
+error: func f: param "p": pointer type "*/lib/Point" is not allowed — parameter references are
+       already lowered to `*[0,±k]` (the axis slot holds the argument address), so write "/lib/Point"
+```
+
+由此，`p:Point` 的 `p·field = v` 改的是**调用方那个对象**（参数槽本身没动）；`*T` 仍用于 struct
+字段与局部标注——那里确实要区分「指向节点的引用」与节点本身。`@` 前缀（ref=@ext）不受此限。
 
 ## 参数变参（arity，非类型）
 
@@ -64,7 +75,25 @@ error: func f: return value "r" has no type annotation
 error: func f: read param "A" cannot be used as write slot (read params are read-only)
 ```
 
-**签名诚实原则**：函数体内被写的参数**必须**声明在写参侧。
+**只读覆盖到子成员，且别名不洗白**：`p·field = v`、`p[k] = v`、`kv·set(p, k, v)` 同样命中该检查
+——经 desugar 后 base 就是读参裸名。只读性还沿别名传播：`q = p` / `p -> q` 使 `q` 指到**同一个
+对象**，此后 `q·field = v` 写的仍是 `p` 的对象，layout 一并拒绝（否则一句话就能绕开本规则）：
+
+```
+error: func f: read param "p" cannot be used as write slot (read params are read-only)
+error: func f: "q" aliases read param "p" (`q = p`); writing its members writes that object
+       — put it on the write side: `-> (p:/lib/Point)`
+```
+
+（`q·next -> q` 这类**重绑别名本身**的写槽是裸名、不碰调用方对象，不受影响。）
+
+**签名诚实原则**：函数体内被写的参数**必须**声明在写参侧。要就地改调用方的对象，就把该参数写到
+`-> (p:Point)` 里——kvlang 只有地址传递，写参 `p` 拿到的就是调用方对象的地址：
+
+```kv
+rwfunc shift(dx:int64) -> (p:Point) { p·x + dx -> p·x }
+rwfunc test() -> () { a:Point = {x=1 y=2}  shift(10) -> a }
+```
 
 ```
 // 非法：acc 被写却在读参侧
