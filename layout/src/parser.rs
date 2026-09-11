@@ -711,9 +711,13 @@ impl Parser {
     }
 
     fn check_read_only_params(&mut self, func: &Func) {
+        // 只读只对**地址读参**（声明带 `*`/`@`）生效：它的槽是调用方对象的地址，写它就是写
+        // 调用方的对象。**值读参**（不带前缀）的槽是自己的副本，体内可自由读写，不进本检查。
         let mut ro = std::collections::HashSet::new();
-        for n in func.sig.param_names() {
-            ro.insert(n);
+        for p in func.sig.params.iter() {
+            if super::langtype::is_addr_param(&p.ty) {
+                ro.insert(p.name.clone());
+            }
         }
         if ro.is_empty() {
             return;
