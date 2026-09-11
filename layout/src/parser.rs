@@ -380,6 +380,7 @@ impl Parser {
         }
         self.check_param_types(&decl.sig);
         self.check_variadic(&decl.sig);
+        self.check_param_dup(&decl.sig);
         decl
     }
 
@@ -420,7 +421,14 @@ impl Parser {
             let mut default = None;
             if self.peek().kind == Kind::Arrow && self.peek().value == "=" {
                 self.advance();
+                let pos = self.peek().pos;
                 default = self.parse_pratt(0);
+                // 字段默认值同样是字面量给的类型（`f:int=0` 的 `0` 即 int64），标注须是已知种类名。
+                if default.as_ref().is_some_and(expr_is_scalar_lit)
+                    && !super::langtype::is_plain_kind(&ty)
+                {
+                    self.push_unknown_type("struct field", &fname, &ty, pos);
+                }
             }
             fields.push(Field {
                 name: fname,
@@ -691,24 +699,34 @@ impl Parser {
         }
     }
 
+    /// 参数名在函数内**全局唯一**（见 [[函数]] 的参数同名规则）：读参列表内、写参列表内、读写之间
+    /// 均不得同名——变量名即指针，同名即同址。**调用**时不受限：同一变量可同时占读槽与写槽
+    /// （`inc(x) -> x` 合法）。
     fn check_param_dup(&mut self, sig: &FuncSig) {
-        let mut seen = std::collections::HashSet::new();
-        for name in sig.param_names() {
-            seen.insert(name);
-        }
-        for ret in &sig.returns {
-            if seen.contains(&ret.name) {
-                self.errors.push(Diagnostic {
-                    pos: Pos { line: 0, col: 0 },
-                    message: format!("func {}: param {:?} appears in both read-params and write-params — a param is either read-only or write-only, pick one", sig.name, ret.name),
-                    warn: false,
-                    info: false,
-                    source: String::new(),
-                    src_file: String::new(),
-                    src_name: String::new(),
-                });
+        let mut reads = std::collections::HashSet::new();
+        let mut writes = std::collections::HashSet::new();
+        let err = |p: &mut Self, msg: String| {
+            p.errors.push(Diagnostic {
+                pos: Pos { line: 0, col: 0 },
+                message: msg,
+                warn: false,
+                info: false,
+                source: String::new(),
+                src_file: String::new(),
+                src_name: String::new(),
+            });
+        };
+        for p in &sig.params {
+            if !reads.insert(p.name.as_str()) {
+                err(self, format!("func {}: duplicate param {:?} in read-params — read-params, write-params and their union must all be name-unique (a name is an address)", sig.name, p.name));
             }
-            seen.insert(ret.name.clone());
+        }
+        for r in &sig.returns {
+            if reads.contains(r.name.as_str()) {
+                err(self, format!("func {}: param {:?} appears in both read-params and write-params — a param is either read-only or write-only, pick one", sig.name, r.name));
+            } else if !writes.insert(r.name.as_str()) {
+                err(self, format!("func {}: duplicate param {:?} in write-params — read-params, write-params and their union must all be name-unique (a name is an address)", sig.name, r.name));
+            }
         }
     }
 
@@ -2177,12 +2195,7 @@ impl Parser {
             None => return,
         };
         let expr_is_array = e.op == "array";
-        // 字符串字面量恒一维 []char/编码（非标量），故排除；仅 int/float/bool 字面量算标量。
-        let expr_is_scalar_lit = e.is_leaf()
-            && e.lit != ast::LitKind::LitNone
-            && e.lit != ast::LitKind::LitNil
-            && e.lit != ast::LitKind::LitString
-            && e.lit != ast::LitKind::LitRawString;
+        let scalar_lit = expr_is_scalar_lit(e);
 
         for (j, wt) in inst.write_types.iter().enumerate() {
             if wt.is_empty() {
@@ -2199,7 +2212,7 @@ impl Parser {
                     src_file: String::new(),
                     src_name: String::new(),
                 });
-            } else if is_array_langtype(wt) && expr_is_scalar_lit {
+            } else if is_array_langtype(wt) && scalar_lit {
                 self.errors.push(Diagnostic {
                     pos: Pos { line: 0, col: 0 },
                     message: format!("write {name:?} declared {wt} but assigned a scalar literal"),
@@ -2209,8 +2222,30 @@ impl Parser {
                     src_file: String::new(),
                     src_name: String::new(),
                 });
+            } else if !write_type_ok(wt, scalar_lit, expr_is_array) {
+                self.push_unknown_type("write", &name, wt, Pos { line: 0, col: 0 });
             }
         }
+    }
+
+    /// 「标注收不住它收的字面量」的统一诊断：`int`/`intg64` 这类不是种类名的标注在此落网
+    /// （裸名已被 [`super::langtype::expand_struct_refs`] 展开成 `/lib/<name>`，显示时剥回原名）。
+    fn push_unknown_type(&mut self, ctx: &str, name: &str, ty: &str, pos: Pos) {
+        let disp = ty.strip_prefix("/lib/").unwrap_or(ty);
+        self.errors.push(Diagnostic {
+            pos,
+            message: format!(
+                "{ctx} {name:?}: unknown type {disp:?} — 不是已知种类名，\
+                 kvlang 无 int/uint/float/num/char 家族简写，数字须带位宽\
+                 （int8/int16/int32/int64、uint8/uint16/uint32/uint64、float32/float64），\
+                 字符须带编码（char/utf8、char/utf32、char/ascii）"
+            ),
+            warn: false,
+            info: false,
+            source: String::new(),
+            src_file: String::new(),
+            src_name: String::new(),
+        });
     }
 }
 
@@ -2261,6 +2296,34 @@ fn attach_comments(st: Stmt, comments: Vec<String>) -> Stmt {
 
 fn is_array_langtype(t: &str) -> bool {
     t.contains('[')
+}
+
+/// 标量字面量：`1`/`1.5`/`true`。字符串字面量恒一维 `[]char/<编码>`（非标量），故排除。
+fn expr_is_scalar_lit(e: &Expr) -> bool {
+    e.is_leaf()
+        && e.lit != ast::LitKind::LitNone
+        && e.lit != ast::LitKind::LitNil
+        && e.lit != ast::LitKind::LitString
+        && e.lit != ast::LitKind::LitRawString
+}
+
+/// 字面量右值的标注必须收得住该字面量，**按右值形态分三类**（见 [[文法与合法性]]）：
+///   `1`/`1.5`/`true`（标量字面量）→ 标注须是已知种类名或 `any`——类型由字面量自己给出；
+///   `[1,2]`（数组字面量）        → 标注须是合法 langtype（`[2]int64`）；
+///   `{…}`（结构/容器字面量）     → 标注是 struct 名或 map langtype，**裸名在此合法**（它就是
+///                                struct 名，已展开成 `/lib/<name>`）；不判种类名；
+///   其余（非字面量右值如 `x:int = y`）无从推断 → 放行。
+/// 前两类里裸名 `int`/`intg64` 已由 [`super::langtype::expand_struct_refs`] 变成 `/lib/int`，
+/// 既非种类名也非合法形状 → 在此落网。layout 只判种类名，不查 kvspace 里 `/lib/…` 有无原型
+/// （存在性/字段一致性归 runtime：`x:int = {}` 放行，runtime 报 "/lib/int is not a struct type"）。
+fn write_type_ok(wt: &str, scalar_lit: bool, array_lit: bool) -> bool {
+    if scalar_lit {
+        super::langtype::is_plain_kind(wt)
+    } else if array_lit {
+        super::langtype::valid_langtype(wt)
+    } else {
+        true
+    }
 }
 
 /// 定长数组类型：`[N]T` / `[d0,d1]T`，方括号内全为正整数（非空、无 `?`）。

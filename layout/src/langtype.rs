@@ -198,6 +198,19 @@ pub fn valid_langtype(expr: &str) -> bool {
     !expr.is_empty() && expr.split('|').all(valid_atom)
 }
 
+/// 是否只由**已知种类名**（或 `any`）构成——即「标量字面量可写入的类型」。
+/// `*`/`@` 前缀先剥（源码传递方式，不是类型本体）；structref（`/lib/…`）与形状、mapexpr 皆否。
+/// 用途见 `parser`（局部声明的写目标、struct 字段默认值）：裸名 `int`/`intg64` 经
+/// [`expand_struct_refs`] 变成 `/lib/int` 后，正是靠这条落网——它**不是**种类名，标量写不进去
+/// （见 [[文法与合法性]]）。
+pub fn is_plain_kind(ty: &str) -> bool {
+    !ty.is_empty()
+        && ty.split('|').all(|a| {
+            let a = a.trim_start_matches(['*', '@']);
+            a == "any" || known_kind(a)
+        })
+}
+
 /// 隐式 struct 名解析：把 langtype 中裸 struct 名（非 known kind / any 的标识符）展开为
 /// `/lib/<name>`，使 kv 源可写 `x:Node` / `[int64]·Node`，runtime 恒收到完整 `/lib/…` 路径。
 /// 已 `/` 开头或 known kind 原样返回。mapexpr 只对 value 递归展开（key 恒 `[…]` 非 struct）。
@@ -367,6 +380,11 @@ mod tests {
             "/lib/geom/Point",
             "/lib/Node",
             "/lib/Point|/lib/Node",
+            // `*`/`@` 是**源码**前缀（layout 剥离落 head.ref），书于类型标注最前——合法（见 [[文法与合法性]]）。
+            "*int64",
+            "@int64",
+            "@[256,256]uint8",
+            "*[int32,int32]·[]char/utf8",
         ] {
             assert!(valid_langtype(e), "{e} should be valid");
         }
@@ -435,8 +453,6 @@ mod tests {
             "[2,]float32",
             "[,2]float32",
             "[2 3]float32",
-            "*int64",
-            "@int64",
             "int64*",
             "float64|",
             "int ",
