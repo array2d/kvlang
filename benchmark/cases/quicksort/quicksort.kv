@@ -3,7 +3,7 @@
 // 对比点：同一算法的两种 kv 物理形态。
 // 数据由 LCG 确定生成，规模 N 由 __SCALE__ 占位，run.py 按扫描点替换（勿改逻辑）
 // 期望输出（N=64 时）:
-//   qsort_compact: a0 = 1 amid = 52 alast = 99
+//   qsort: a0 = 1 amid = 52 alast = 99
 rwfunc test() -> () {
 	__SCALE__ -> n
 	arr:[__SCALE__]int64 = []
@@ -61,7 +61,7 @@ rwfunc test() -> () {
 	arr[0] -> a0
 	arr[mid] -> am
 	arr[last] -> al
-	println("qsort_compact: a0 =", a0, "amid =", am, "alast =", al)
+	println("qsort: a0 =", a0, "amid =", am, "alast =", al)
 	delta = time·sub(t1, t0)
 	ns = time/duration·as_nanos(delta)
 	println("__bench_ns:", ns)
