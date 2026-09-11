@@ -5,7 +5,8 @@
 rwfunc two_sum(nums:[]int64, target:int64) -> () {
 	n = ndarray·numel(nums)
 	i = 0
-	"/tmp" -> h
+	/tmp/two_sum:int64·int64 = {}
+	"/tmp/two_sum" -> h
 	while (i < n) {
 		x = nums[i]
 		need = target - x

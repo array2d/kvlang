@@ -147,6 +147,11 @@ fn valid_scalar(s: &str) -> bool {
 ///   `[]char/<enc>`      —— 字符串键（= Go `map[string]V`）
 ///   `[T1,T2,…]`         —— 标量元组键（元素为标量 kind，物理以字符串格式落 key）
 fn valid_key(s: &str) -> bool {
+    // memitemkey 三选一（见 [[map容器]]）：裸标量（`int64`）、字符串键 `[]char/<enc>`、
+    // 标量元组键 `[scalar,…]`。裸标量必须认——`b:int64·int64 = {}` 是 spec 的标准写法。
+    if valid_scalar(s) {
+        return true;
+    }
     let rest = match s.strip_prefix('[') {
         Some(r) => r,
         None => return false,
@@ -202,13 +207,15 @@ fn expand_atom(s: &str) -> String {
     if s.starts_with('/') {
         return s.to_string();
     }
-    if s.starts_with('[') {
-        if let Some(i) = s.find('·') {
-            let key = &s[..i];
-            if valid_key(key) {
-                return format!("{key}·{}", expand_struct_refs(&s[i + '·'.len_utf8()..]));
-            }
+    // mapexpr `key·value`：键可以是 `[` 起头（字符串键/标量元组键）或**裸标量**，
+    // 只有 value 侧需要展开 struct 名；整串当 structref 包成 `/lib/<key·value>` 是错的。
+    if let Some(i) = s.find('·') {
+        let key = &s[..i];
+        if valid_key(key) {
+            return format!("{key}·{}", expand_struct_refs(&s[i + '·'.len_utf8()..]));
         }
+    }
+    if s.starts_with('[') {
         return s.to_string();
     }
     if s.is_empty() || known_kind(s) || s == "any" {

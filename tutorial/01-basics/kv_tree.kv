@@ -18,6 +18,7 @@ rwfunc count_children(prefix:[]char/utf32) -> (n:int64) {
 }
 
 rwfunc test() -> () {
+	/tmp/kvt:int64·int64 = {}
 	kv·set("/tmp/kvt·data", 42)
 	kv·get("/tmp/kvt·data") -> v
 	println("v=", v)
