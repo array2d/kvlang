@@ -1,6 +1,6 @@
 // networld/fs·mkdir + list + del：目录创建、列举成员、删除
 //   fs·mkdir(d) -> 0       创建目录（含缺失父级，幂等）
-//   fs·list(d) -> names    列目录成员（名字序，[]stringkeymap）；散 key 两步遍历 kv·listn+kv·get 取名
+//   fs·list(d) -> names    列目录成员（名字序，[int64]·[]char/utf32）；散 key 两步遍历 kv·listn+kv·get 取名
 //   fs·del(p) -> 0         删文件或空目录；非空目录失败返回 -1
 // 期望输出:
 //   count= 2
@@ -8,7 +8,7 @@
 //   name= b.txt
 //   delfile= 0
 //   deldir= 0
-// print_dir 列目录成员（stringkeymap 两步遍历）并打印成员数与逐个名字
+// print_dir 列目录成员（map 两步遍历）并打印成员数与逐个名字
 rwfunc print_dir(d:[]char/utf32) -> () {
 	networld/fs·list(d) -> names
 	kv·listlen(names) -> nc
@@ -26,8 +26,8 @@ rwfunc test() -> () {
 	d = "/tmp/kvlang_fs_dir"
 	da = "/tmp/kvlang_fs_dir/a.txt"
 	db = "/tmp/kvlang_fs_dir/b.txt"
-	noenv = map()
-	clean = {"rm", "-rf", "/tmp/kvlang_fs_dir"}
+	noenv:[int64]·[]char/utf32 = {}
+	clean:[int64]·[]char/utf32 = {"rm", "-rf", "/tmp/kvlang_fs_dir"}
 	networld/proc·exec(clean, noenv) -> rc
 	networld/fs·mkdir(d) -> mc
 	networld/fs·write(da, xv·reinterpret("A", "[]uint8")) -> w1

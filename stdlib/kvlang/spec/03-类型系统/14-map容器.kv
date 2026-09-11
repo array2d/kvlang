@@ -67,9 +67,14 @@ memindex 的线格式为 dims = `[len, cap, M]` 的矩阵：`len` = 有效成员
 `cap × M` 字节，前 `len` 行是有序成员键（NUL 补齐），其余行全 NUL。容量内增删成员 body 长恒定、就地覆
 写。`M` 是行宽（行 stride），`cap` 是可翻倍的容量。（此物理模型 struct 同样适用。）
 
-## 空 map 字面量须带类型标注
+## 容器字面量须带类型标注
 
-`{}` 空 map 字面量**必须**在赋值目标处带类型标注（如 `x:[]char/utf8·int64 = {}`）；无标注时 layout 报
-错——空字面量本身无法推断 memitemkey/memitemvalue 类型。
+**任何**容器字面量都必须在写目标处带完整 map langtype（如 `x:[]char/utf8·int64 = {}`、
+`nums:[int64]·int64 = {10, 20, 30}`）；无标注时 layout 报错。类型来源二选一：写目标的 `:` 标注，
+或签名里形参/写参的声明类型（`{n=42} -> m`，`m:[]char/utf8·int64`）。
+
+容器值的 langtype **就是**该 map langtype，kvspace 里**不存在**「langtype = 种类名 `stringkeymap` 的
+值」——runtime 也**不得**在缺类型时退化兜底（无类型即 layout 漏检，直接 fatal）。空字面量 `{}` 尤其无
+法推断：它不含任何成员。
 "#### -> /lib/kvlang/spec/类型系统/map容器
 }

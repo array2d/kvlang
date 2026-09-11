@@ -41,7 +41,7 @@ struct_literal = "{" [ ident "=" expr { (stmt_sep) ident "=" expr } ] "}"
                (* {k1=v1; k2=v2}，key 为静态标识符，落 struct *)
 
 map_literal    = "{" [ expr { (stmt_sep | ",") expr } ] "}"
-               (* stringkeymap 散 key 形态：{v0, v1, ...}，head kind=stringkeymap，
+               (* 散 key 容器形态：{v0, v1, ...}（写目标须标注 map langtype），
                   每元素落坐标段 base·[i] 独立 key；字符串数组等变长集合用此形式 *)
 ```
 "## -> /lib/kvlang/spec/附录/表达式

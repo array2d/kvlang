@@ -17,8 +17,8 @@ rwfunc run_steps(limit:int64) -> (final:int64) {
 		i + 1 -> i
 		kv·set("/crashtest/step", i)
 		println("step", i)
-		noenv = map()
-		a = {"sleep", "0.2"}
+		noenv:[int64]·[]char/utf32 = {}
+		a:[int64]·[]char/utf32 = {"sleep", "0.2"}
 		networld/proc·exec(a, noenv) -> code
 	}
 	i -> final

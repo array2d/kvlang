@@ -11,8 +11,8 @@ rwfunc file_exists(p:[]char/utf32) -> (b:bool) {
 
 rwfunc test() -> () {
 	p = "/tmp/kvlang_fs_exists.txt"
-	noenv = map()
-	rm = {"rm", "-f", "/tmp/kvlang_fs_exists.txt"}
+	noenv:[int64]·[]char/utf32 = {}
+	rm:[int64]·[]char/utf32 = {"rm", "-f", "/tmp/kvlang_fs_exists.txt"}
 	networld/proc·exec(rm, noenv) -> rc
 	file_exists(p) -> b0
 	println("before=", b0)

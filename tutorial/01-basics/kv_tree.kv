@@ -11,10 +11,10 @@ rwfunc has_field(path:[]char/utf32, key:[]char/utf32) -> (ok:bool) {
 	kv·get(path, key) != None -> ok
 }
 
-// 列出 prefix 下的子键并计数
+// 列出 prefix 下的子键并计数（成员数查 memindex，非 ndarray 形状）
 rwfunc count_children(prefix:[]char/utf32) -> (n:int64) {
 	kv·list(prefix) -> names
-	ndarray·numel(names) -> n
+	kv·listlen(names) -> n
 }
 
 rwfunc test() -> () {

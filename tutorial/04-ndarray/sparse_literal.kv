@@ -23,7 +23,7 @@ rwfunc print_sum(nums:[int64]·int64) -> (total:int64) {
 }
 
 rwfunc test() -> () {
-	nums = {10, 20, 30, 40}
+	nums:[int64]·int64 = {10, 20, 30, 40}
 	print_sum(nums) -> total
 	println("sum =", total)
 }

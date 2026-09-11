@@ -10,17 +10,13 @@ rwfunc bubble_sort(n:int64) -> () {
 	while (i < n - 1) {
 		j = 0
 		while (j < n - 1 - i) {
-			kv·get("/tmp/mi", j) -> _t
-			_t[0] -> a
-			kv·get("/tmp/mi", j+1) -> _t
-			_t[0] -> b
+			kv·get("/tmp/mi", j) -> ta
+			kv·get("/tmp/mi", j+1) -> tb
+			ta[0] -> a
+			tb[0] -> b
 			if (a > b) {
-				// swap start
-				kv·get("/tmp/mi", j) -> _t
-			_t[1] -> a1
-				kv·get("/tmp/mi", j+1) -> _t
-			_t[1] -> b1
-				/tmp/mi:[int64]·[2]int64 = {}
+				ta[1] -> a1
+				tb[1] -> b1
 				_ = kv·set("/tmp/mi", j, [b, b1])
 				_ = kv·set("/tmp/mi", j+1, [a, a1])
 			}
@@ -33,7 +29,6 @@ rwfunc bubble_sort(n:int64) -> () {
 rwfunc merge(n:int64) -> (m:int64) {
 	bubble_sort(n)
 	ki = 0
-	/tmp/mi:[int64]·[2]int64 = {}
 	kv·get("/tmp/mi", 0) -> cur
 	idx = 1
 	while (idx < n) {

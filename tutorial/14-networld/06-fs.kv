@@ -14,8 +14,8 @@ rwfunc read_text(p:[]char/utf32) -> (s:[]char/utf8, n:int64) {
 
 rwfunc test() -> () {
 	p = "/tmp/kvlangfs_demo.txt"
-	noenv = map()
-	w = {"sh", "-c", "printf 'hello kvlang' > /tmp/kvlangfs_demo.txt"}
+	noenv:[int64]·[]char/utf32 = {}
+	w:[int64]·[]char/utf32 = {"sh", "-c", "printf 'hello kvlang' > /tmp/kvlangfs_demo.txt"}
 	networld/proc·exec(w, noenv) -> wc
 	read_text(p) -> (s, n)
 	println("size=", n)

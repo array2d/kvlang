@@ -7,10 +7,13 @@ stringkeymap 数组的**容器值**是一个 storetype=index 的 XValue（langty
 子 key `base·i`：
 
 ```kv
-nums = {10, 20, 30, 40}    // 每元素落 nums·0 … nums·3
-for (x in nums) { … }      // 遍历散 key 元素
-names = {"apple", "banana", "cherry"}   // 变长字符串数组必须 stringkeymap
+nums:[int64]·int64 = {10, 20, 30, 40}    // 每元素落 nums·[0] … nums·[3]
+for (x in nums) { … }                    // 遍历散 key 元素
+names:[int64]·[]char/utf32 = {"apple", "banana", "cherry"}   // 变长字符串数组
 ```
+
+容器字面量的写目标**必须带 map langtype**（见 [[map容器]]）——容器值的 langtype 就是它，缺标注
+layout 报错；`{}` 尤其无法推断（空字面量不含任何成员）。
 
 散 key 元素以坐标段 `base·[i]` 访问（经 `kv·get`），或以 `for-in` / `kv·listlen` / `kv·listn` 遍历。
 坐标段支持多值键（含小数）：`geo·[39.9,116.4] = "Beijing"`，物理以字符串格式落 key（见
