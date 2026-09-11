@@ -2072,8 +2072,10 @@ impl Parser {
             return;
         }
         let s = inst.writes[0].clone();
-        // 路径字面量（/ 开头）是完整 key，不是成员写，勿脱糖。
-        if s.starts_with('/') {
+        // 路径字面量（/ 开头）是完整 key，不是成员写，勿脱糖——**但含动态键段 `·*k` 的除外**：
+        // 那时 `·` 之后是运行期求值的段，必须脱糖成 kv·set(base, k, v) 才能取到 k 的值
+        // （否则会被当成字面 key `/tmp/ts·*k` 整段写下去）。
+        if s.starts_with('/') && !s.contains(&format!("{}*", keytree::MEMBER_SEP)) {
             return;
         }
         // struct 赋值（RHS = struct·new）：浅拷 base+一层成员，lower 为 kv·cplist(struct·new→temp, dst)。
