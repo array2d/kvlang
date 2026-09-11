@@ -67,11 +67,9 @@ pub fn tlv_encode(kind: &str, raw: &[u8], dims: &[i32]) -> Vec<u8> {
     }
 }
 
-#[allow(dead_code)]
 unsafe extern "C" {
     // ── kvspace：KV 存取 + TLV ────────────────────────────────────────
     pub fn kvspaceConnect(dsn: *const c_char) -> *mut c_void;
-    pub fn kvspaceClose(h: *mut c_void);
     pub fn kvspaceClear(h: *mut c_void, err: *mut c_char, err_cap: u32) -> c_int;
     pub fn kvspaceDelTree(
         h: *mut c_void,
@@ -149,7 +147,6 @@ unsafe extern "C" {
 
     // ── kvlang runtime：模式2 执行 ───────────────────────────────────
     pub fn kvlangRuntimeConnect(dsn: *const c_char) -> *mut c_void;
-    pub fn kvlangRuntimeDisconnect(rt: *mut c_void);
     /// runtime 内部 kvspace 句柄——复用它而非另开连接（durable 惰性 flush 仅同句柄内相干）。
     pub fn kvlangRuntimeKvspaceHandle(rt: *mut c_void) -> *mut c_void;
     pub fn kvlangRuntimeBootstrap(

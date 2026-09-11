@@ -9,14 +9,7 @@ use super::ffi;
 // ── kind 常量 ─────────────────────────────────────────────────────────
 
 pub const KIND_CHAR: &str = "char/utf32";
-pub const KIND_CHAR_UTF8: &str = "char/utf8";
-pub const KIND_CHAR_ASCII: &str = "char/ascii";
-pub const KIND_BOOL: &str = "bool";
-pub const KIND_INT64: &str = "int64";
-pub const KIND_FLOAT64: &str = "float64";
-pub const KIND_MAP: &str = "stringkeymap";
 pub const KIND_INDEX: &str = "index";
-pub const KIND_EXT_INDEX: &str = "extindex";
 pub const KIND_STRUCT: &str = "struct";
 
 // kvlang 自有 kind
@@ -25,7 +18,6 @@ pub const KIND_RWFUNC: &str = "rwfunc";
 pub const KIND_DEF_RWIR: &str = "def rwir";
 pub const KIND_DEF_LANGTYPE: &str = "def langtype";
 pub const KIND_RWIR_OR_RWFUNC: &str = "rwir|rwfunc";
-pub const KIND_SCOPE: &str = "scope";
 
 // ── 通用 XValue 字节访问器 ───────────────────────────────────────────
 
