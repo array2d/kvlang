@@ -3,6 +3,43 @@
 /* kv 访问统一走 kvspace-durable 兼容 C ABI（kvspace*）。
  * 后端由链接的 kvspace 库决定（kvspace-durable / kvspace-c 均导出同一 ABI）。 */
 
+static kvlangRefEnt_t *ref_find(kvlangKv_t *k, const char *key) {
+    for (int i = 0; i < k->nref; i++)
+        if (k->ref[i].key && strcmp(k->ref[i].key, key) == 0) return &k->ref[i];
+    return NULL;
+}
+
+static void ref_put(kvlangKv_t *k, const char *key, const kvspaceRef_t *r) {
+    kvlangRefEnt_t *e = ref_find(k, key);
+    if (!e) {
+        if (k->nref < KVLANG_REF_CAP) e = &k->ref[k->nref++];
+        else { e = &k->ref[0]; free(e->key); }
+        e->key = strdup(key);
+    }
+    e->block_id = r->block_id;
+    e->gen = r->gen;
+}
+
+static int ref_ok(kvlangKv_t *k) {
+    return k->ref_on && kvspaceResolveRef && kvspaceGetByRef;
+}
+
+void kvlangKvInvalidateFrame(kvlangKv_t *k, const char *fr) {
+    if (!k || !k->ref_on || !fr || !fr[0]) return;
+    size_t n = strlen(fr);
+    int w = 0;
+    for (int i = 0; i < k->nref; i++) {
+        char *key = k->ref[i].key;
+        if (key && strncmp(key, fr, n) == 0 && (key[n] == 0 || key[n] == '/')) {
+            free(key);
+            continue;
+        }
+        if (w != i) k->ref[w] = k->ref[i];
+        w++;
+    }
+    k->nref = w;
+}
+
 kvlangKv_t *kvlangKvConnect(const char *dsn) {
     kvlangKv_t *k = calloc(1, sizeof(*k));
     k->h = kvspaceConnect(dsn);
@@ -10,12 +47,14 @@ kvlangKv_t *kvlangKvConnect(const char *dsn) {
         free(k);
         return NULL;
     }
+    k->ref_on = 1;
     return k;
 }
 
 void kvlangKvDisconnect(kvlangKv_t *k) {
     if (!k)
         return;
+    for (int i = 0; i < k->nref; i++) free(k->ref[i].key);
     if (k->h)
         kvspaceClose(k->h);
     free(k);
@@ -51,10 +90,27 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
     key[dl + nl] = 0;
     uint8_t *d;
     uint32_t len;
+    kvlangRefEnt_t *e = ref_ok(k) ? ref_find(k, key) : NULL;
+    if (e) {
+        kvspaceRef_t r = { e->block_id, e->gen };
+        if (kvspaceGetByRef(k->h, &r, key, &d, &len) == 0 && d && len > 0) {
+            e->block_id = r.block_id;
+            e->gen = r.gen;
+            out->data = d;
+            out->len = len;
+            out->borrowed = 1;
+            free(key);
+            return 0;
+        }
+    }
     if (kvspaceGet(k->h, key, 0, &d, &len) == 0 && d && len > 0) {
         out->data = d;
         out->len = len;
         out->borrowed = 1;
+        if (ref_ok(k)) {
+            kvspaceRef_t r;
+            if (kvspaceResolveRef(k->h, key, &r) == 0) ref_put(k, key, &r);
+        }
     }
     free(key);
     return 0;
@@ -95,6 +151,19 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
     /* 借用值全程有效：durable 惰性写不再清读池，读借用池由 VM 在指令边界统一 ReadReset 回收，
      * 故写期直接用 v->data，不再需要防御性快照。 */
     int rc = 0;
+    if (n == 1 && ref_ok(k) && kvspaceSetPartByRef && pairs[0].key && pairs[0].val.data &&
+        pairs[0].val.len) {
+        kvlangRefEnt_t *e = ref_find(k, pairs[0].key);
+        if (e) {
+            kvspaceRef_t r = { e->block_id, e->gen };
+            if (kvspaceSetPartByRef(k->h, &r, pairs[0].key, 0, pairs[0].val.data,
+                                    pairs[0].val.len, err, err_cap) == 0) {
+                e->block_id = r.block_id;
+                e->gen = r.gen;
+                return 0;
+            }
+        }
+    }
     for (int i = 0; i < n; i++) {
         const kvlangXvalue_t *v = &pairs[i].val;
         if (!v->data || v->len == 0) { /* None → 删键，令该槽读回 None（不可静默跳过留旧值） */
@@ -119,6 +188,11 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
         }
         if (body_len > 0 && dst)
             memcpy(dst, body, body_len);
+        if (rc == 0 && n == 1 && ref_ok(k) && pairs[i].key) {
+            kvspaceRef_t rr;
+            if (kvspaceResolveRef(k->h, pairs[i].key, &rr) == 0)
+                ref_put(k, pairs[i].key, &rr);
+        }
     }
     return rc;
 }
@@ -129,6 +203,7 @@ int kvlangKvDel(kvlangKv_t *k, const char *key, char *err, uint32_t err_cap) {
 }
 
 int kvlangKvDelTree(kvlangKv_t *k, const char *prefix, char *err, uint32_t err_cap) {
+    kvlangKvInvalidateFrame(k, prefix);
     return kvspaceDelTree(k->h, prefix, err, err_cap);
 }
 

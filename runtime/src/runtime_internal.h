@@ -42,6 +42,20 @@ extern void kvspaceClose(void *h);
 /* 借用读：*out 指向后端常驻/回收空间，调用方不得 free。resolve=1 穿透 link。 */
 extern int kvspaceGet(void *h, const char *key, int resolve, uint8_t **out,
                       uint32_t *out_len);
+
+typedef struct {
+    uint32_t block_id;
+    uint32_t gen;
+} kvspaceRef_t;
+extern int kvspaceResolveRef(void *h, const char *key, kvspaceRef_t *ref)
+    __attribute__((weak));
+extern int kvspaceGetByRef(void *h, kvspaceRef_t *ref, const char *key_fallback,
+                           uint8_t **out, uint32_t *out_len)
+    __attribute__((weak));
+extern int kvspaceSetPartByRef(void *h, kvspaceRef_t *ref,
+                               const char *key_fallback, uint32_t offset,
+                               const uint8_t *buf, uint32_t buf_len, char *err,
+                               uint32_t err_cap) __attribute__((weak));
 /* 指令边界回收读借用池；定位读/写（分片）；只读 head 前缀。见 kvspace.h 契约。 */
 extern void kvspaceReadReset(void *h);
 extern int kvspaceGetPart(void *h, const char *key, uint32_t offset,
@@ -128,8 +142,16 @@ typedef struct {
     kvlangXvalue_t val;
 } kvlangKvPair_t;
 
+#define KVLANG_REF_CAP 64
+typedef struct {
+    char *key;
+    uint32_t block_id, gen;
+} kvlangRefEnt_t;
 typedef struct {
     void *h;
+    kvlangRefEnt_t ref[KVLANG_REF_CAP];
+    int nref;
+    int ref_on;
 } kvlangKv_t;
 
 /* growable string buffer */
@@ -339,6 +361,7 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err,
 int kvlangKvDel(kvlangKv_t *k, const char *key, char *err, uint32_t err_cap);
 int kvlangKvDelTree(kvlangKv_t *k, const char *prefix, char *err,
                     uint32_t err_cap);
+void kvlangKvInvalidateFrame(kvlangKv_t *k, const char *frame_root);
 int kvlangKvCp(kvlangKv_t *k, const char *src, const char *dst, char *err,
                uint32_t err_cap);
 int kvlangKvCpTree(kvlangKv_t *k, const char *src, const char *dst, char *err,
