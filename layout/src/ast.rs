@@ -105,10 +105,6 @@ impl FuncSig {
         sb
     }
 
-    pub fn param_names(&self) -> Vec<String> {
-        self.params.iter().map(|p| p.name.clone()).collect()
-    }
-
     /// 参数 langtype 列表（读参在前、写参在后），落盘于 rwir/rwfunc body。
     /// 末读参尾缀 `...` 是签名层变参标记：此处剥离，langtype 串保持纯净（变参落 dynamic 字节）。
     pub fn langtype_list(&self) -> Vec<String> {

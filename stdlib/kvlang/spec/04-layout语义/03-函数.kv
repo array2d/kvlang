@@ -131,7 +131,9 @@ rwfunc inc(x:int64) -> (r:int64) { x -> local  local = local + 1  local -> r }
 ## 参数同名规则
 
 - **定义时**：读参列表内、写参列表内、以及读写列表之间均**不得**同名（变量名即指针，同名即同址）——
-  `rwfunc f(A:int64) -> (A:int64)` 报 `param "A" appears in both read-params and write-params`。
+  `rwfunc f(A:int64) -> (A:int64)` 报 `param "A" appears in both read-params and write-params`；
+  `rwfunc f(a:int64, a:int64)` 报 `duplicate param "a" in read-params`（写参列表内同理报
+  `in write-params`）。
 - **调用时**：同一变量**可**同时出现在读槽与写槽——`inc(x) -> x` 合法，读写独立解析、互不冲突。
 	"#### -> /lib/kvlang/spec/layout语义/函数
 }
