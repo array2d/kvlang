@@ -406,8 +406,6 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
                    memcmp(k->fpar.key, dir, dl) == 0) {
             kvspaceRef_t r = { k->fpar.block_id, k->fpar.gen, 0, 0 };
             hit = kvspaceGetByRef(k->h, &r, key, &d, &len) == 0 && d && len > 0;
-            if (hit)
-                hot_put(k, name, key, k->fpar.block_id, k->fpar.gen);
         }
         if (hit) {
             out->data = d;
