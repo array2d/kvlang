@@ -24,22 +24,6 @@ static int ref_ok(kvlangKv_t *k) {
     return k->ref_on && kvspaceResolveRef && kvspaceGetByRef;
 }
 
-static void parent_put(kvlangKv_t *k, const char *dir, size_t dl, const kvspaceRef_t *rr) {
-    if (!dir || !dl || rr->depth == 0)
-        return;
-    if (!k->pdir || k->pdl != dl || memcmp(k->pdir, dir, dl) != 0) {
-        free(k->pdir);
-        k->pdir = malloc(dl + 1);
-        if (!k->pdir)
-            return;
-        memcpy(k->pdir, dir, dl);
-        k->pdir[dl] = 0;
-        k->pdl = dl;
-    }
-    k->pblock = rr->parent_id;
-    k->pgen = rr->depth;
-}
-
 void kvlangKvInvalidateFrame(kvlangKv_t *k, const char *fr) {
     if (!k || !k->ref_on || !fr || !fr[0]) return;
     size_t n = strlen(fr);
@@ -54,12 +38,6 @@ void kvlangKvInvalidateFrame(kvlangKv_t *k, const char *fr) {
         w++;
     }
     k->nref = w;
-    if (k->pdir && strncmp(k->pdir, fr, n) == 0 && (k->pdir[n] == 0 || k->pdir[n] == '/')) {
-        free(k->pdir);
-        k->pdir = NULL;
-        k->pdl = 0;
-        k->pblock = k->pgen = 0;
-    }
 }
 
 kvlangKv_t *kvlangKvConnect(const char *dsn) {
@@ -77,24 +55,9 @@ void kvlangKvDisconnect(kvlangKv_t *k) {
     if (!k)
         return;
     for (int i = 0; i < k->nref; i++) free(k->ref[i].key);
-    free(k->pdir);
     if (k->h)
         kvspaceClose(k->h);
     free(k);
-}
-
-static int parent_hit(kvlangKv_t *k, const char *key, uint8_t **d, uint32_t *len) {
-    if (!k->pdir || !k->pgen || !key)
-        return 0;
-    if (strncmp(key, k->pdir, k->pdl) != 0 || key[k->pdl] != '[')
-        return 0;
-    if (strchr(key + k->pdl, '/'))
-        return 0;
-    /* "[ab]" and shorter (ASCII codes, small ids): parent walk is not cheaper. */
-    if (!key[k->pdl + 4])
-        return 0;
-    kvspaceRef_t r = { k->pblock, k->pgen };
-    return kvspaceGetByRef(k->h, &r, key, d, len) == 0 && *d && *len > 0;
 }
 
 /* 借用读（resolve=0，raw）：out 直接借 kvspace 常驻/借用池指针（borrowed=1，不 free、不入
@@ -103,12 +66,6 @@ int kvlangKvGetOne(kvlangKv_t *k, const char *key, kvlangXvalue_t *out) {
     kvlangXvalueZero(out);
     uint8_t *d;
     uint32_t len;
-    if (k->pdir && k->pgen && parent_hit(k, key, &d, &len)) {
-        out->data = d;
-        out->len = len;
-        out->borrowed = 1;
-        return 0;
-    }
     if (kvspaceGet(k->h, key, 0, &d, &len) != 0)
         return -1;
     if (d && len > 0) {
@@ -234,14 +191,8 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
             memcpy(dst, body, body_len);
         if (rc == 0 && n == 1 && ref_ok(k) && pairs[i].key) {
             kvspaceRef_t rr;
-            if (kvspaceResolveRef(k->h, pairs[i].key, &rr) == 0) {
+            if (kvspaceResolveRef(k->h, pairs[i].key, &rr) == 0)
                 ref_put(k, pairs[i].key, &rr);
-                const char *sl = strrchr(pairs[i].key, '/');
-                /* Last component "[xxx…" (len>=5): map keys whose parent walk
-                 * beats Get. Skip "[a]"/"[ab]" (quicksort indices, ASCII). */
-                if (sl && sl[1] == '[' && sl[5])
-                    parent_put(k, pairs[i].key, (size_t)(sl - pairs[i].key) + 1, &rr);
-            }
         }
     }
     return rc;
