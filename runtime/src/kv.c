@@ -383,7 +383,14 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
         out->borrowed = 1;
         return 0;
     }
-    size_t dl = strlen(dir), nl = strlen(name);
+    size_t dl, nl;
+    /* Multi-char frame siblings: reuse fpar.klen instead of strlen(dir). */
+    if (name[1] && dir && k->fpar.key && k->fpar.klen &&
+        memcmp(k->fpar.key, dir, k->fpar.klen) == 0 && dir[k->fpar.klen] == 0)
+        dl = k->fpar.klen;
+    else
+        dl = strlen(dir);
+    nl = strlen(name);
     char stack[256];
     char *heap = NULL;
     char *key = stack;
