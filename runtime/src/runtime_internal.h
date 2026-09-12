@@ -114,15 +114,15 @@ typedef struct { uint8_t *data; uint32_t len; uint8_t borrowed; } kvlangXvalue_t
 typedef struct { char *key; kvlangXvalue_t val; } kvlangKvPair_t;
 
 #define KVLANG_REF_CAP 64
-#define KVLANG_PREF_CAP 8
 typedef struct { char *key; uint32_t block_id, gen; } kvlangRefEnt_t;
 typedef struct {
     void *h;
     kvlangRefEnt_t ref[KVLANG_REF_CAP];
     int nref;
     int ref_on;
-    kvlangRefEnt_t pref[KVLANG_PREF_CAP];
-    int npref;
+    char *pdir;
+    size_t pdl;
+    uint32_t pblock, pgen;
 } kvlangKv_t;
 
 /* growable string buffer */
