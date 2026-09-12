@@ -64,9 +64,9 @@ int main(void) {
     char path[256], dsn[288];
     kvlangKv_t *k;
     const char *frm = "/vthread/vt0/[0]/";
-    static const char *names[] = {"a", "i", "n", "x", "y"};
-    static const int64_t want[] = {11, 22, 33, 44, 55};
-    const int n = 5;
+    static const char *names[] = {"a", "i", "n", "x", "y", "lo", "hi"};
+    static const int64_t want[] = {11, 22, 33, 44, 55, 66, 77};
+    const int n = 7;
     int i;
     kvlangXvalue_t out;
 
