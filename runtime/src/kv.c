@@ -308,15 +308,17 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
         }
         if (body_len > 0 && dst)
             memcpy(dst, body, body_len);
+        /* Leaf+parent cache only for `·` member slots. Frame locals (`/name`)
+         * skip ResolveRef — that extra walk is the iops regression. */
         if (rc == 0 && n == 1 && ref_ok(k) && pairs[i].key) {
-            kvspaceRef_t rr;
-            if (kvspaceResolveRef(k->h, pairs[i].key, &rr) == 0) {
-                ref_put(k, pairs[i].key, &rr);
-                size_t seplen = 0;
-                int si = last_dir_sep(pairs[i].key, &seplen);
-                /* Member slots (`·k` / `·[k]`), not frame locals (`/name`). */
-                if (si >= 0 && seplen == MEMBER_SEP_LEN)
+            size_t seplen = 0;
+            int si = last_dir_sep(pairs[i].key, &seplen);
+            if (si >= 0 && seplen == MEMBER_SEP_LEN) {
+                kvspaceRef_t rr;
+                if (kvspaceResolveRef(k->h, pairs[i].key, &rr) == 0) {
+                    ref_put(k, pairs[i].key, &rr);
                     parent_put(k, pairs[i].key, (size_t)si + seplen, &rr);
+                }
             }
         }
     }
