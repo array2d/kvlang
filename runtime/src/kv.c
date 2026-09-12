@@ -284,7 +284,8 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
             free(heap);
             return 0;
         }
-    } else if (ref_ok(k)) {
+    }
+    if (ref_ok(k)) {
         int hit = 0;
         if (nl >= MEMBER_SEP_LEN && memchr(name, 0xC2, nl)) {
             if (k->npref)
