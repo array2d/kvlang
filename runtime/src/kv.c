@@ -538,14 +538,7 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
             const char *key = pairs[i].key;
             const char *slash = strrchr(key, '/');
             const char *rest = slash ? slash + 1 : key;
-            const char *mid = NULL;
-            if (rest) {
-                for (const char *p = rest; *p; p++) {
-                    if ((unsigned char)p[0] == 0xC2 && (unsigned char)p[1] == 0xB7)
-                        mid = p;
-                }
-            }
-            int is_member = mid != NULL;
+            int is_member = rest && memchr(rest, 0xC2, strlen(rest)) != NULL;
             /* Unique `·` slots share one ART parent; do not fill the leaf table
              * (that walk + 64-slot scan was the unique-key miss). */
             if (is_member && (pref_cover(k, key) ||
@@ -557,9 +550,7 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
                     ref_put(k, key, &rr);
                     hot_put(k, rest, key, rr.block_id, rr.gen);
                 }
-                if (is_member) {
-                    parent_put(k, key, (size_t)(mid - key) + MEMBER_SEP_LEN, &rr);
-                } else if (!k->fpar.key) {
+                if (is_member || !k->fpar.key) {
                     size_t seplen = 0;
                     int si = last_dir_sep(key, &seplen);
                     if (si >= 0)
