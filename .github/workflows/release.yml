@@ -62,6 +62,9 @@ jobs:
           done
           git clone --depth 1 https://github.com/array2d/kvspace-durable.git /tmp/kvspace-durable
           cargo build --release --manifest-path /tmp/kvspace-durable/Cargo.toml
+          # durable 为 Rust（无 install 规则），手动装入后端目录，供 frontend dlopen
+          sudo mkdir -p "$PREFIX/lib/kvspace"
+          sudo cp /tmp/kvspace-durable/target/release/libkvspace_durable.dylib "$PREFIX/lib/kvspace/"
       - name: 构建 runtime + layout
         run: |
           cmake -S runtime -B build/runtime -DCMAKE_BUILD_TYPE=Release -DKVSPACE_LIB_DIR="$KVSPACE_LIB_DIR"
