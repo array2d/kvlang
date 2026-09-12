@@ -38,15 +38,40 @@ static void parent_clear(kvlangKv_t *k) {
         free(k->pref[i].key);
     k->npref = 0;
     k->pref_i = 0;
+    free(k->fpar.key);
+    k->fpar.key = NULL;
+    k->fpar.block_id = k->fpar.gen = 0;
+}
+
+static int dir_is_member(const char *dir, size_t dl) {
+    return dl >= MEMBER_SEP_LEN &&
+           (unsigned char)dir[dl - 2] == 0xC2 &&
+           (unsigned char)dir[dl - 1] == 0xB7;
 }
 
 static void parent_put(kvlangKv_t *k, const char *dir, size_t dl, const kvspaceRef_t *rr) {
     kvlangRefEnt_t *e;
     if (!dir || !dl || !rr->parent_id || !rr->depth)
         return;
-    /* Stdlib `/lib/…·` constants would occupy a slot for the whole process. */
+    /* Stdlib `/lib/…` would occupy a slot for the whole process. */
     if (dl >= 5 && memcmp(dir, "/lib/", 5) == 0)
         return;
+    if (!dir_is_member(dir, dl)) {
+        if (k->fpar.key && (strlen(k->fpar.key) != dl || memcmp(k->fpar.key, dir, dl) != 0)) {
+            free(k->fpar.key);
+            k->fpar.key = NULL;
+        }
+        if (!k->fpar.key) {
+            k->fpar.key = malloc(dl + 1);
+            if (!k->fpar.key)
+                return;
+            memcpy(k->fpar.key, dir, dl);
+            k->fpar.key[dl] = 0;
+        }
+        k->fpar.block_id = rr->parent_id;
+        k->fpar.gen = rr->depth;
+        return;
+    }
     e = pref_find(k, dir, dl);
     if (!e) {
         if (k->npref < KVLANG_PREF_CAP)
@@ -87,35 +112,38 @@ static int last_dir_sep(const char *key, size_t *seplen) {
     return -1;
 }
 
+static int parent_hit_ent(kvlangKv_t *k, const kvlangRefEnt_t *e, const char *key,
+                          uint8_t **d, uint32_t *len) {
+    size_t dl;
+    const char *p;
+    if (!e || !e->key || !e->gen || !key)
+        return 0;
+    dl = strlen(e->key);
+    if (memcmp(key, e->key, dl) != 0 || !key[dl])
+        return 0;
+    for (p = key + dl; *p; p++) {
+        if (*p == '/' ||
+            ((unsigned char)p[0] == 0xC2 && (unsigned char)p[1] == 0xB7))
+            return 0;
+    }
+    {
+        kvspaceRef_t r = { e->block_id, e->gen, 0, 0 };
+        return kvspaceGetByRef(k->h, &r, key, d, len) == 0 && *d && *len > 0;
+    }
+}
+
 static int parent_hit(kvlangKv_t *k, const char *key, uint8_t **d, uint32_t *len) {
-    if (!k->npref || !key)
+    if (!key)
         return 0;
     for (int i = 0; i < k->npref; i++) {
-        const char *pk = k->pref[i].key;
-        size_t dl;
-        const char *p;
-        if (!pk || !k->pref[i].gen)
-            continue;
-        dl = strlen(pk);
-        if (memcmp(key, pk, dl) != 0 || !key[dl])
-            continue;
-        for (p = key + dl; *p; p++) {
-            if (*p == '/' ||
-                ((unsigned char)p[0] == 0xC2 && (unsigned char)p[1] == 0xB7))
-                goto next_pref;
-        }
-        {
-            kvspaceRef_t r = { k->pref[i].block_id, k->pref[i].gen, 0, 0 };
-            if (kvspaceGetByRef(k->h, &r, key, d, len) == 0 && *d && *len > 0) {
-                if (i != 0) {
-                    kvlangRefEnt_t tmp = k->pref[0];
-                    k->pref[0] = k->pref[i];
-                    k->pref[i] = tmp;
-                }
-                return 1;
+        if (parent_hit_ent(k, &k->pref[i], key, d, len)) {
+            if (i != 0) {
+                kvlangRefEnt_t tmp = k->pref[0];
+                k->pref[0] = k->pref[i];
+                k->pref[i] = tmp;
             }
+            return 1;
         }
-    next_pref:;
     }
     return 0;
 }
@@ -149,6 +177,12 @@ void kvlangKvInvalidateFrame(kvlangKv_t *k, const char *fr) {
         k->npref = pw;
         if (k->pref_i >= k->npref)
             k->pref_i = 0;
+    }
+    if (k->fpar.key && strncmp(k->fpar.key, fr, n) == 0 &&
+        (k->fpar.key[n] == 0 || k->fpar.key[n] == '/')) {
+        free(k->fpar.key);
+        k->fpar.key = NULL;
+        k->fpar.block_id = k->fpar.gen = 0;
     }
 }
 
@@ -231,7 +265,8 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
             return 0;
         }
     }
-    if (ref_ok(k) && parent_hit(k, key, &d, &len)) {
+    if (ref_ok(k) && (parent_hit(k, key, &d, &len) ||
+                      parent_hit_ent(k, &k->fpar, key, &d, &len))) {
         out->data = d;
         out->len = len;
         out->borrowed = 1;

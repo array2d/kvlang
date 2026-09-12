@@ -121,10 +121,12 @@ typedef struct {
     kvlangRefEnt_t ref[KVLANG_REF_CAP];
     int nref;
     int ref_on;
-    /* ART dir ancestors of recent frame `/` and `·` member maps. */
+    /* ART dir ancestors of recent `·` member maps (hash/qsort). */
     kvlangRefEnt_t pref[KVLANG_PREF_CAP];
     int npref;
     int pref_i;
+    /* Sticky frame `/` parent for GetMember siblings; not mixed with `·` maps. */
+    kvlangRefEnt_t fpar;
 } kvlangKv_t;
 
 /* growable string buffer */
