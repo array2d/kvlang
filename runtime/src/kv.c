@@ -345,8 +345,9 @@ int kvlangKvGetOne(kvlangKv_t *k, const char *key, kvlangXvalue_t *out) {
     uint32_t len;
     /* kv.get map slots (`base·k`); frame locals go through GetMember. */
     if (ref_ok(k) && k->npref && key) {
-        kvlangRefEnt_t *pe = parent_prefix_ok(&k->pref[0], key) ? &k->pref[0]
-                                 : (k->npref > 1 ? pref_cover(k, key) : NULL);
+        kvlangRefEnt_t *pe = (k->npref == 1)
+                                 ? (parent_prefix_ok(&k->pref[0], key) ? &k->pref[0] : NULL)
+                                 : pref_cover(k, key);
         if (pe) {
             kvspaceRef_t r = { pe->block_id, pe->gen, 0, 0 };
             if (kvspaceGetByRef(k->h, &r, key, &d, &len) == 0 && d && len > 0) {
@@ -382,7 +383,7 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
         out->borrowed = 1;
         return 0;
     }
-    size_t dl = strlen(dir), nl = strlen(name);
+    size_t dl = strlen(dir), nl = (name[1] && !name[2]) ? 2 : strlen(name);
     char stack[256];
     char *heap = NULL;
     char *key = stack;
