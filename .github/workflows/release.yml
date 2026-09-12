@@ -23,12 +23,16 @@ jobs:
           set -euo pipefail
           v="${GITHUB_REF_NAME}"
           d="kvlang-abi-$v-linux-x86_64"
-          mkdir -p "$d/include" "$d/lib"
+          mkdir -p "$d/include" "$d/lib/kvspace"
           cp runtime/include/*.h "$d/include/"
           cp bin/libkvlang_runtime.so "$d/lib/"
           cp layout/target/release/libkvlanglayout.so "$d/lib/"
+          # 自带全部 ABI 依赖（deps.json 所列）→ 解包即 /usr/lib + /usr/lib/kvspace 布局
+          cp /usr/lib/libkvspace.so* /usr/lib/libblockmalloc.so* /usr/lib/libslotsboxmalloc.so* "$d/lib/"
+          cp /usr/lib/kvspace/libkvspace-c.so* /usr/lib/kvspace/libkvspace_durable.so* "$d/lib/kvspace/"
           printf '{"abi":"%s"}\n' "$v" > "$d/abi-manifest.json"
           tar czf "$d.tar.gz" "$d"
+          tar tzf "$d.tar.gz"
           sha256sum "$d.tar.gz" > SHA256SUMS
       - name: 发布 release
         run: gh release create "${GITHUB_REF_NAME}" kvlang-abi-*.tar.gz SHA256SUMS --generate-notes
