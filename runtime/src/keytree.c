@@ -20,6 +20,18 @@ char *kvlangKeytreeStack(const char *root) {
     return r;
 }
 
+/* 栈缓冲版：把 root（去尾 /）拷进 buf 并补 '/'，返回写入长度（含尾 /）；cap 不足返回 0。
+ * 读参热路径复用调用方缓冲，免每操作一次 malloc。 */
+size_t kvlangKeytreeStackBuf(const char *root, char *buf, size_t cap) {
+    size_t n = strlen(root);
+    while (n > 0 && root[n - 1] == '/') n--;
+    if (n + 2 > cap) return 0;
+    memcpy(buf, root, n);
+    buf[n] = '/';
+    buf[n + 1] = 0;
+    return n + 1;
+}
+
 char *kvlangKeytreeFrameRoot(const char *pc) {
     const char *last = NULL;
     for (const char *p = pc; (p = strstr(p, "/[")) != NULL; p += 2) last = p;
@@ -28,6 +40,13 @@ char *kvlangKeytreeFrameRoot(const char *pc) {
     char *r = malloc(n + 1);
     memcpy(r, pc, n); r[n] = 0;
     return r;
+}
+
+/* 帧根长度（末个 "/[" 之前），无分配：循环每步据之判断帧是否变化，免一次 malloc。 */
+size_t kvlangKeytreeFrameRootLen(const char *pc) {
+    const char *last = NULL;
+    for (const char *p = pc; (p = strstr(p, "/[")) != NULL; p += 2) last = p;
+    return last ? (size_t)(last - pc) : 0;
 }
 
 static char *trim_right_join(const char *root, const char *suffix) {
@@ -59,14 +78,15 @@ char *kvlangKeytreeFrameAt(const char *vtid, int depth) {
 }
 
 int kvlangKeytreeFrameNum(const char *path) {
-    kvlangStrbuf_t vtid_b; kvlangStrbufInit(&vtid_b);
-    const char *vtid = kvlangKeytreeVtidFromPc(path, &vtid_b);
-    if (!vtid[0]) keytree_die("FrameNum: not a vthread path: %s", path);
-    kvlangStrbuf_t pfx; kvlangStrbufInit(&pfx);
-    kvlangKeytreeVthread(vtid, &pfx);
-    kvlangStrbufPutc(&pfx, '/');
-    if (strncmp(path, pfx.p, pfx.len) != 0) keytree_die("FrameNum: not a vthread path: %s", path);
-    const char *rest = path + pfx.len;
+    /* 免分配：/vthread/<vtid>/[d][/...] —— 直接定位 vtid 后的帧坐标，不构造前缀串。 */
+    const size_t rl = sizeof(VTHREAD_ROOT) - 1;
+    if (strncmp(path, VTHREAD_ROOT PATH_SEP, rl + 1) != 0)
+        keytree_die("FrameNum: not a vthread path: %s", path);
+    const char *vtid = path + rl + 1;
+    const char *slash = strchr(vtid, '/');
+    if (!slash || slash == vtid)
+        keytree_die("FrameNum: not a vthread path: %s", path);
+    const char *rest = slash + 1;
     if (rest[0] != '[') keytree_die("FrameNum: no frame coord in %s", path);
     const char *end = strchr(rest, ']');
     if (!end) keytree_die("FrameNum: unterminated frame coord in %s", path);
@@ -90,7 +110,6 @@ int kvlangKeytreeFrameNum(const char *path) {
     } else {
         keytree_die("FrameNum: expected /[irseq,j] after [d] in %s", path);
     }
-    kvlangStrbufFree(&vtid_b); kvlangStrbufFree(&pfx);
     return (int)n;
 }
 

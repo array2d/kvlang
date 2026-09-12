@@ -121,8 +121,7 @@ static int irseq_of(const kvlangParam_t *p) {
 }
 
 /* 函数内跳转：只改 PC 的 [irseq]，帧不变。目标非法 → RuntimeError，返回 -1。 */
-static int jump_to(kvlangKv_t *kv, const char *vtid, const char *pc,
-                   const kvlangParam_t *target, const char *op) {
+static int jump_to(kvlangFrame_t *f, const kvlangParam_t *target, const char *op) {
     int irseq = irseq_of(target);
     if (irseq < 0) {
         char msg[256];
@@ -130,14 +129,17 @@ static int jump_to(kvlangKv_t *kv, const char *vtid, const char *pc,
                  "RuntimeError: %s target is not an int64 irseq: %s (kind=%s)",
                  op, target->name ? target->name : "",
                  kvlangXvalueKind(&target->val));
-        kvlangVthreadSetError(kv, vtid, pc, msg);
+        kvlangVthreadSetError(f->kv, f->vtid, f->pc, msg);
         return -1;
     }
-    char *fr = kvlangKeytreeFrameRoot(pc);
+    /* 帧根优先用主循环缓存的（br/goto 帧不变，借它免每次 malloc）。 */
+    char *owned = NULL;
+    const char *fr = f->frame_root;
+    if (!fr) { owned = kvlangKeytreeFrameRoot(f->pc); fr = owned; }
     char *np = kvlangKeytreeIrseqPc(fr, irseq);
-    free(fr);
-    kvlangVthreadSet(kv, vtid, np, "running");
-    kvlangLogDebug("[%s] %s → %s", vtid, op, np);
+    free(owned);
+    kvlangVthreadAdvance(f, np, "running");
+    kvlangLogDebug("[%s] %s → %s", f->vtid, op, np);
     free(np);
     return 0;
 }
@@ -789,7 +791,7 @@ int kvlangCtlCall(kvlangFrame_t *f) {
     char *sub = handle_call(f->kv, f->pc, f->inst);
     if (!sub)
         return -1;
-    kvlangVthreadSet(f->kv, f->vtid, sub, "running");
+    kvlangVthreadAdvance(f, sub, "running");
     free(sub);
     return 0;
 }
@@ -802,7 +804,7 @@ int kvlangCtlReturn(kvlangFrame_t *f) {
         kvlangVthreadSetDone(f->kv, f->vtid, "ok");
         return 0;
     }
-    kvlangVthreadSet(f->kv, f->vtid, parent, "running");
+    kvlangVthreadAdvance(f, parent, "running");
     free(parent);
     return 0;
 }
@@ -816,7 +818,7 @@ int kvlangCtlGoto(kvlangFrame_t *f) {
         kvlangVthreadSetError(f->kv, f->vtid, f->pc, msg);
         return -1;
     }
-    return jump_to(f->kv, f->vtid, f->pc, &inst->reads[0], OP_GOTO);
+    return jump_to(f, &inst->reads[0], OP_GOTO);
 }
 
 int kvlangCtlBr(kvlangFrame_t *f) {
@@ -852,7 +854,7 @@ int kvlangCtlBr(kvlangFrame_t *f) {
     }
     bool taken = kvlangScalarI64(kvlangXvalueScalar(&cond)) != 0;
     kvlangXvalueFree(&cond);
-    return jump_to(f->kv, f->vtid, f->pc, &inst->reads[taken ? 1 : 2], OP_BR);
+    return jump_to(f, &inst->reads[taken ? 1 : 2], OP_BR);
 }
 
 /* 动态调用：以运行时得到的 funckey 在当前 vthread 造一次 OP_CALL（不新开 vid），
@@ -1027,28 +1029,40 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode,
     char *cur = strdup(pc);
     char *cur_frame = NULL,
          *cur_funcdir = NULL; /* 帧不变时 funcdir 只读一次，供缓存键 */
+    int cur_depth = 0;        /* 帧深度，随 cur_frame 一起缓存 */
     int rc = 0;
-    /* status 跨轮携带：尾部 VthreadGet 已连 pc 一并取出，下轮直接复用，省掉背靠背重读
-     * （vthread 记录在两次 get 之间不被改写；status 串由 ValueString 自持，跨 ReadReset 存活）。 */
+    /* status：每步从 kvspace 回读的**源值**，不当缓存用（下轮开头即重读）。
+     * 同时借给本步的 kvlangFrame_t.status_known，供 Advance 判断是否真要写 status。 */
     char *status = NULL;
-    {
-        char *pcv = NULL;
-        kvlangVthreadGet(kv, vtid, &pcv, &status);
-        free(pcv);
-    }
     for (;;) {
         /* 指令边界：回收上条指令执行期借出的读池（cache 指令的读参已 Materialize 自持，不受影响）。
          * durable 惰性写不再清池，全靠此处回收；shm 常驻映射侧为 no-op。 */
         kvlangKvReadReset(kv);
+        /* 状态门（spec [[执行模型]] 步骤 1）：每指令边界从 kvspace 回读 ‥status，只读 1 个 key
+         * （走 vtid key 缓存）。不得改用进程内副本——那是状态的第二份事实源：外部把 ‥status
+         * 置 paused/error（暂停、接管、终止）必须在下一步就被看见，且 kvspace 始终等于真实状态。 */
+        free(status);
+        status = NULL;
+        kvlangVthreadStatusGet(kv, vtid, &status);
         if (!status ||
             (strcmp(status, "init") != 0 && strcmp(status, "running") != 0 &&
              strcmp(status, "wait") != 0)) {
             break;
         }
-        free(status);
-        status = NULL;
 
-        int depth = kvlangKeytreeFrameNum(cur);
+        /* 帧变（call/return/goto 跨帧）才重算根/深度/funcdir；帧内每步只比较前缀，免分配。 */
+        size_t frlen = kvlangKeytreeFrameRootLen(cur);
+        if (!cur_frame || strlen(cur_frame) != frlen ||
+            strncmp(cur_frame, cur, frlen) != 0) {
+            free(cur_frame);
+            cur_frame = malloc(frlen + 1);
+            memcpy(cur_frame, cur, frlen);
+            cur_frame[frlen] = 0;
+            free(cur_funcdir);
+            cur_funcdir = read_seglib(kv, cur_frame);
+            cur_depth = kvlangKeytreeFrameNum(cur);
+        }
+        int depth = cur_depth;
         if (depth > MAX_STACK_DEPTH) {
             char msg[256];
             snprintf(msg, sizeof msg,
@@ -1059,13 +1073,7 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode,
             break;
         }
 
-        char *fr = kvlangKeytreeFrameRoot(cur);
-        if (!cur_frame || strcmp(cur_frame, fr) != 0) {
-            free(cur_frame);
-            cur_frame = strdup(fr);
-            free(cur_funcdir);
-            cur_funcdir = read_seglib(kv, fr);
-        }
+        const char *fr = cur_frame;   /* 借用（随 cur_frame 缓存同步），循环内无需 free */
         const char *lastc = NULL;
         for (const char *p = cur; (p = strstr(p, "/[")) != NULL; p += 2)
             lastc = p;
@@ -1086,7 +1094,6 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode,
                 snprintf(msg, sizeof msg, "decode: %s", err);
                 kvlangVthreadSetError(kv, vtid, cur, msg);
                 free(link_base);
-                free(fr);
                 rc = -1;
                 break;
             }
@@ -1114,7 +1121,6 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode,
             snprintf(msg, sizeof msg, "RuntimeError: no instruction at %s",
                      cur);
             kvlangVthreadSetError(kv, vtid, cur, msg);
-            free(fr);
             if (tmp_owned)
                 kvlangRwirInstFree(&tmp);
             rc = -1;
@@ -1123,9 +1129,12 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode,
 
         int exec_err = 0;
         char *yield = NULL;
+        char *fb_pc = NULL;     /* 本指令的 PC 回传槽（见 kvlangFrame_t），免写后回读 */
         if (inst->op_id >= 0) {
             /* 单表派发：native 算子与 control/copy 同居 myrwircaps，op_id 直查一跳到底。 */
-            kvlangFrame_t f = {kv, vtid, cur, inst, &yield};
+            kvlangFrame_t f = {kv, vtid, cur, inst, &yield, &fb_pc};
+            f.frame_root = cur_frame;  /* 复用循环缓存的帧根，免每步重算 */
+            f.status_known = status;   /* 本步开始前读到的 ‥status（源值，借用） */
             exec_err = kvlangBuiltinNative(&f);
             if (exec_err == 0 && yield) {
                 /* native（vthread·run return 模式）冒泡一个子 vthread 的 rwir pc 给上层驱动。
@@ -1134,9 +1143,9 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode,
                     *out_pc = yield;
                 else
                     free(yield);
-                free(fr);
                 if (tmp_owned)
                     kvlangRwirInstFree(&tmp);
+                free(fb_pc);
                 free(cur);
                 free(cur_frame);
                 free(cur_funcdir);
@@ -1153,9 +1162,9 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode,
             if (exec_err == 0 && mode == KVMODE_RETURN) {
                 if (out_pc)
                     *out_pc = strdup(cur);
-                free(fr);
                 if (tmp_owned)
                     kvlangRwirInstFree(&tmp);
+                free(fb_pc);
                 free(cur);
                 free(cur_frame);
                 free(cur_funcdir);
@@ -1181,6 +1190,7 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode,
             }
             ci.writes = inst->writes;
             kvlangFrame_t cf = {kv, vtid, cur, &ci, NULL};
+            cf.status_known = status;
             exec_err = kvlangCtlCall(&cf);
             free(ci.opcode);
             free(ci.reads[0].name);
@@ -1188,17 +1198,23 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode,
         }
 
         if (exec_err != 0) {
-            free(fr);
             if (tmp_owned)
                 kvlangRwirInstFree(&tmp);
+            free(fb_pc);
             rc = -1;
             break;
         }
 
         char *newpc = NULL;
-        kvlangVthreadGet(kv, vtid, &newpc,
-                         &status); /* status 连 pc 一并取出，供下轮直接复用 */
-        free(fr);
+        if (fb_pc) {
+            /* 本指令经帧回传了新 PC：直接用（它就是本指令刚写进 kvspace 的值）。
+             * status 不回传——下一轮状态门照旧从 kvspace 回读。 */
+            newpc = fb_pc;
+            fb_pc = NULL;
+        } else {
+            /* 无回传（ext rwir / 用户 call / done 等）：从 kvspace 回读 PC。 */
+            kvlangVthreadPcGet(kv, vtid, &newpc);
+        }
         if (tmp_owned)
             kvlangRwirInstFree(&tmp);
         if (!newpc || !newpc[0]) {

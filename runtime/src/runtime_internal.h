@@ -336,6 +336,7 @@ int kvlangKvGetHead(kvlangKv_t *k, const char *key,
                     kvspaceHead_t *out); /* 只读 head，不取 body */
 int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err,
                 uint32_t err_cap);
+int kvlangKvSetChar(kvlangKv_t *k, const char *key, const char *s);
 int kvlangKvDel(kvlangKv_t *k, const char *key, char *err, uint32_t err_cap);
 int kvlangKvDelTree(kvlangKv_t *k, const char *prefix, char *err,
                     uint32_t err_cap);
@@ -378,7 +379,9 @@ static inline void kvlangStrbufClear(kvlangStrbuf_t *b) {
 const char *kvlangKeytreeVtidFromPc(const char *pc,
                                     kvlangStrbuf_t *out); /* "" 无效 */
 char *kvlangKeytreeStack(const char *root);               /* malloc */
+size_t kvlangKeytreeStackBuf(const char *root, char *buf, size_t cap); /* 栈缓冲，返长度 */
 char *kvlangKeytreeFrameRoot(const char *pc); /* malloc，无效 NULL */
+size_t kvlangKeytreeFrameRootLen(const char *pc); /* 帧根长度，无分配 */
 char *kvlangKeytreeEntryPc(const char *root); /* malloc */
 char *kvlangKeytreeFrameAt(const char *vtid, int depth); /* malloc */
 int kvlangKeytreeFrameNum(const char *path); /* [d]; panics if invalid */
@@ -439,6 +442,7 @@ typedef struct {
 } kvlangRwirInst_t;
 
 int kvlangRwirNextPc(const char *pc, kvlangStrbuf_t *out);
+size_t kvlangRwirNextPcBuf(const char *pc, char *buf, size_t cap); /* 栈缓冲，返长度 */
 int kvlangRwirExtractAddr0(const char *coord);
 int kvlangRwirDecode(kvlangKv_t *kv, const char *link_base, const char *pc,
                      kvlangRwirInst_t *out, char *err, uint32_t err_cap);
@@ -455,6 +459,8 @@ bool notinmyrwircaps(kvlangKv_t *kv, const char *opcode);
 
 void kvlangVthreadGet(kvlangKv_t *kv, const char *vtid, char **pc,
                       char **status);
+void kvlangVthreadPcGet(kvlangKv_t *kv, const char *vtid, char **pc);
+void kvlangVthreadStatusGet(kvlangKv_t *kv, const char *vtid, char **status);
 void kvlangVthreadSet(kvlangKv_t *kv, const char *vtid, const char *pc,
                       const char *status);
 void kvlangVthreadSetDone(kvlangKv_t *kv, const char *vtid, const char *ret);
@@ -464,21 +470,31 @@ void kvlangVthreadSetError(kvlangKv_t *kv, const char *vtid, const char *pc,
 /* ── builtin ───────────────────────────────────────────────────────── */
 
 /* yield_pc：native builtin 把「须交回上层驱动就地派发的 pc」写入 *yield_pc（否则留 NULL）。
- * 唯 vthread·run 的 return 模式用：驱动一个子 vthread 遇非本执行器 rwir 时，把其 pc 冒泡给驱动。 */
+ * 唯 vthread·run 的 return 模式用：驱动一个子 vthread 遇非本执行器 rwir 时，把其 pc 冒泡给驱动。
+ * fb_pc：主循环给的 **PC 回传槽**（非 NULL 时）。新 PC 照旧先写 kvspace（崩溃恢复），同时回传此槽，
+ * 令主循环直接用之、免掉「刚写就回读」的那次后端 Get + 路径重建；回传值就是本指令自己刚写进去的
+ * 值，不引入第二份事实源。**status 不回传**——状态门每步从 kvspace 回读（见 kvlangVthreadAdvance）。
+ * fb_pc 由 Advance malloc 写入、循环接管所有权。 */
 typedef struct {
     kvlangKv_t *kv;
     const char *vtid;
     const char *pc;
     kvlangRwirInst_t *inst;
     char **yield_pc;
+    char **fb_pc;
+    const char *frame_root;   /* 主循环已缓存的帧根（借用）；NULL 时各 helper 自行计算 */
+    const char *status_known; /* 本步开始前从 kvspace 读到的 ‥status（借用）；NULL = 未知 */
 } kvlangFrame_t;
+
+/* 循环内 PC/status 推进：PC 恒写 kvspace；status 与 f->status_known（来自 kvspace 的**源值**）
+ * 不同才写——绝不拿进程内副本当依据，故不会与 kvspace 分叉；fb_pc 非 NULL 时回传新 PC。 */
+void kvlangVthreadAdvance(kvlangFrame_t *f, const char *pc, const char *status);
 
 /* notinmycaps：查 myrwircaps table，opcode 不在本 runtime 能力表内 → true。 */
 bool notinmycaps(const char *opcode);
 bool kvlangBuiltinNumOp(const char *opcode);
 int kvlangBuiltinNative(kvlangFrame_t *f); /* dispatch + call，0 成功 */
-int kvlangBuiltinExecuteCopy(kvlangKv_t *kv, const char *vtid, const char *pc,
-                             kvlangRwirInst_t *inst);
+int kvlangBuiltinExecuteCopy(kvlangFrame_t *f);
 /* control 算子：与 native 同居 myrwircaps 一张表，frame 签名统一派发（call/return/goto/br）。 */
 int kvlangCtlCall(kvlangFrame_t *f);
 int kvlangCtlReturn(kvlangFrame_t *f);

@@ -19,6 +19,20 @@ int kvlangRwirNextPc(const char *pc, kvlangStrbuf_t *out) {
     return 0;
 }
 
+/* 免分配版：把 pc 末段 [n,0] 换成 [n+1,0] 写入 buf，返回长度；cap 不足返回 0。
+ * 供每指令的 PC 推进热路径复用调用方缓冲，免 strbuf 的 realloc + Printf。 */
+size_t kvlangRwirNextPcBuf(const char *pc, char *buf, size_t cap) {
+    const char *slash = strrchr(pc, '/');
+    size_t plen = slash ? (size_t)(slash - pc) + 1 : 0;
+    int num = kvlangRwirExtractAddr0(slash ? slash + 1 : pc);
+    char tail[32];
+    int tl = snprintf(tail, sizeof tail, "[%d,0]", num + 1);
+    if (plen + (size_t)tl + 1 > cap) return 0;
+    memcpy(buf, pc, plen);
+    memcpy(buf + plen, tail, (size_t)tl + 1);
+    return plen + (size_t)tl;
+}
+
 void kvlangRwirInstFree(kvlangRwirInst_t *inst) {
     free(inst->opcode);
     for (int i = 0; i < inst->nr; i++) {
