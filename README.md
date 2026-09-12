@@ -2,14 +2,14 @@
 
 [![CI](https://github.com/array2d/kvlang/actions/workflows/ci.yml/badge.svg)](https://github.com/array2d/kvlang/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Tutorial Examples](https://img.shields.io/badge/tutorials-140%20examples-4c1)](tutorial/)
-[![Docs site](https://img.shields.io/badge/docs-stdlib-blueviolet)](https://array2d.github.io/kvlang/#/stdlib/kvlang/kvlangbrief.kv)
+[![Tutorial Examples](https://img.shields.io/badge/tutorials-210%20examples-4c1)](tutorial/)
+[![Spec](https://img.shields.io/badge/spec-84%20chapters-blueviolet)](stdlib/kvlang/spec/)
 
-**A plaintext, interpreted language whose addressing space and memory space are both kvspace — a small core with extensions on top (the front-end language of deepx, formerly dxlang).** Code and data live in one KV tree; the PC is a KV path (crash-resumable), the source is the IR, and every KV value is plaintext. The core runtime does only the execute loop and control flow; all other capabilities are carried by rwirext extensions (`term` / `json` are example base extensions).
+**A plaintext, interpreted language whose addressing space and memory space are both kvspace — a small core with extensions on top (the front-end language of deepx, formerly dxlang).** Code and data live in one KV tree; the PC is a KV path (crash-resumable), the source is the IR, and every KV value is plaintext. The core runtime does only the execute loop and control flow; every other capability is supplied by other runtimes and registered at `/lib/<opcode>`.
 
-> 中文文档: [README_CN.md](README_CN.md) | Design: [deep-dive](https://github.com/array2d/deepx-design/blob/master/doc/kvlang/kvlang-design-and-implementation) — root design doc; README is the teaching derivative. All behavior norms (p0–p7), instruction model (§2), Link call mechanism (§6), type system (§9), diagnostics (§12) live there.
+> 中文文档: [README_CN.md](README_CN.md)
 >
-> Design docs (CN): [deepx-design/doc/kvlang-design-and-implementation](https://github.com/array2d/deepx-design/tree/master/doc/kvlang-design-and-implementation) · (EN): [deepx-design/doc-en/kvlang-design-and-implementation](https://github.com/array2d/deepx-design/tree/master/doc-en/kvlang-design-and-implementation) — 19 chapters covering architecture, parser, runtime, kvspace, and language design reference.
+> **The specification is the single source of truth.** Language facts live in [`stdlib/kvlang/spec/`](stdlib/kvlang/spec/) — 84 chapters of normative text plus the authoritative grammar, written in kvlang itself and laid out into `/lib/kvlang/spec/…`. Any change to language behavior is spec-driven: edit the spec clause and its anchored example first, then the implementation, until the anchored tutorials pass on every backend. When spec and implementation disagree, the spec wins and the implementation is the defect. This README is a teaching derivative.
 
 ---
 
@@ -25,26 +25,30 @@
 **No IR layers — source IS the IR.** The program counter is a kvspace path string; call-stack depth is the frame number in that path:
 
 ```
-PC    = "/vthread/tid/[1]/[3,0]"              vthread tid, frame 1, instruction 3
+PC    = "/vthread/<vid>/[1]/[3,0]"            vthread vid, frame 1, instruction 3
 fetch = GetBatch(frame/, ["[3,0]"])           take opcode from the frame dir (extindex → /lib)
 call  = create frame [d+1]; return = DelTree  crash? restart and resume from PC
 goto/br = rewrite the irseq in the same frame  if/while do not create frames
 ```
 
-Every instruction occupies a 2-D coordinate `[s0, s1]`: `[s0,0]` is always the opcode, `[s0,-j]` read params, `[s0,+j]` write params.
+Every instruction occupies a 2-D coordinate `[s0, s1]`: `s0=0` is the signature row, `s0≥1` the instructions (the **irseq**); along `s1`, `[s0,0]` is always the opcode, `[s0,-j]` read params, `[s0,+j]` write params.
+
+Code has three levels — `lib` (package) / `rwfunc` (function) / `rwir` (atomic instruction) — each aligned with a level of the KV tree. `if` / `while` / `for` are not a fourth level: layout lowers them to `goto`/`br`.
 
 ```kv
 lib main {
-    rwfunc add(A:int64, B:int64) -> (C:int64) { A + B -> C }
+    rwfunc add(a:int64, b:int64) -> (c:int64) { a + b -> c }
 }
 ```
 
 ```
-/lib/main.add/[0,0]  = "+"     /lib/main.add/[0,-1] = "A"
-/lib/main.add/[0,-2] = "B"     /lib/main.add/[0,1]  = "C"
+/lib/main·add/[0,0]  = "+"     /lib/main·add/[0,-1] = "a"
+/lib/main·add/[0,-2] = "b"     /lib/main·add/[0,1]  = "c"
 ```
 
-Two address-space domains exist: `/lib` (function library — signatures, instruction trees, `.src`) and `/vthread` (runtime frames). Everything else under `/` is user-defined. There is **no `/dev` device domain and no terminal** — the KV world holds only keys and values; I/O such as `print` is an [extension rwir](#builtins-and-extension-rwir), not an address-space domain.
+Three address-space domains have fixed structural semantics: `/lib` (function library — signatures, instruction trees, and the `def rwir` route headers), `/vthread` (runtime frames) and `/networld` (external-world registry). Everything else under `/` is user-defined, with no core schema. There is **no `/dev` device domain and no terminal** — the KV world holds only keys and values; I/O such as `print` is not a core-language primitive.
+
+Key forms are three-way split, and the three classes never overlap: `X/name` (structure — frames, slots, directories; core-owned), `X·name` (user data member), `X/‥name` (system variable — shadow metadata; core-owned).
 
 ---
 
@@ -54,232 +58,296 @@ kvspace is the addressing and memory space at the core; the language is a small 
 
 ![kvlang ecosystem architecture](docs/kvlang-ecosystem-architecture.png)
 
-- **kvspace** — one C ABI (`kvspace_*`, 24 symbols), two implementations selected by DSN: `kvspace-c` (C, `shm://`, links `blockmalloc` + `slotsboxmalloc`) and `kvspace-durable` (Rust, `redis://` / `fs://`, s3/tikv planned).
-- **kvlang** — `layout` (Rust, compile) and `runtime` (C, execute), both depending only on the `kvspace_*` C ABI.
-- **rwirext** — extensions on top of the runtime. Embedded (Rust `term`, links `libkvlang_runtime` via `kvlang_runtime.h`) or process-separated by handoff (Go `json`, Python `numpy`). `term` / `json` are example base extensions, not headline features.
+- **kvspace** — one C ABI in PascalCase with no underscores (`kvspaceGet`, `kvspaceWriteInPlace`, `kvlangRuntimeConnect`); two implementations selected at run time by DSN: `kvspace-c` (C, `shm://`) and `kvspace-durable` (Rust, `redis://` / `fs://`; s3 planned). Backends must be byte-identical.
+- **layout** — Rust crate (`bin/libkvlanglayout.so`, CLI `bin/kvlanglayout`). The **o0 compiler**: scan → parse → lower (control-flow lowering, type inference, specialization) → write the KV instruction tree into `/lib`. It performs **no optimization** — optimizing here would erase the high-level semantics that other runtimes rely on to optimize on heterogeneous hardware. It writes only to `/lib`, and diagnoses at three levels: `error` / `warn` / `info`.
+- **runtime-c** — the core interpreter (`bin/libkvlang_runtime.so`, C11). Pure interpretation: fetch-decode-execute, native rwir dispatch, the copy opcode `=`, call/return/br/goto, and the user-function call. It does not compile, optimize, or reorder. Depends only on the `kvspace*` C ABI.
+- **runtime-rs** — Rust (`bin/kvlang`, the `kvlang` CLI). A reference **myrwir host**: it links layout and runtime-c, interprets its own opcodes, and routes the rest. Its in-process families: `term`, `json`, `http`, `networld`, `kvlang·*`.
+- **Three stages** — layout (o0) → compiler (an extension) → runtime (pure interpretation). The compiler is not part of the language core; §06 of the spec defines only its contract with the core (front-end/back-end operators, backend binding, operator versioning). Uncompiled `/lib` runs as-is.
+
+### myrwircaps: how an opcode is fulfilled
+
+Each runtime declares **`myrwircaps`** — the table of opcodes it can interpret in place (`opcode → handler`). Dispatch is a fixed integer jump table: an opcode in `myrwircaps` is fulfilled locally; control ops, the copy opcode, and user-function calls are handled by the core; anything else is `notinmyrwircaps` — the runtime looks up `/lib/<opcode>`, where a **`def rwir` route header** registers the op, and hands it to a runtime whose `myrwircaps` contains it. `def rwir` exists only at `/lib/<op>`: it is never declared in kv source and never produced by layout. Because an `rwfunc` carries an interpretable body, it needs no route header — hence `def rwir` exists but there is no `def rwfunc`.
+
+Cross-process handoff uses the queue `/lib/<opcode>/vids/<vtid> = pc`: the calling runtime `kvspace·watch`es until the item disappears; an in-process opcode dispatches in the driver loop with no handoff.
 
 ---
 
 ## Quick Start
 
-```bash
-# Requirements: Go 1.24+, Redis
-make build
+Requirements: a C toolchain + cmake, Rust (cargo), and the kvspace ABI libraries installed to `/usr/lib/kvspace` (fetched by [`ci/deps.sh`](ci/deps.sh) from the tags in [`deps.json`](deps.json)). Go is needed only for the Go `json` example extension.
 
-./kvlang tutorial/01-basics/hello.kv         # run a file
-./kvlang -c 'print("hello, world")'          # inline mode
-echo '40 + 2 -> x; print(x)' | ./kvlang      # pipe mode (; separates statements on one line)
-./kvlang vet my.kv                           # syntax check
-./kvlang format my.kv                        # format
+```bash
+git clone git@github.com:array2d/kvlang.git
+cd kvlang
+make all                                     # runtime(C) + layout(Rust) + runtime-rs(Rust) + json(Go)
+
+./bin/kvlang tutorial/01-basics/hello.kv     # run a file (entry rwfunc test)
+./bin/kvlang -c 'println("hello, world")'    # inline mode (entry init)
+./bin/kvlang vet my.kv                       # parse + lower only
+./bin/kvlang format my.kv                    # format to stdout
+./bin/kvlang layout my.kv                    # print the entry point
+./bin/kvlang dump my.kv                      # reconstruct /lib as runnable kvlang
 ```
+
+`make` targets: `all` · `runtime` · `layout` · `runtime-rs` · `json` · `oldhero` · `test` · `install` · `clean`. `make install` places the libraries in `/usr/lib`, the CLIs (`kvlang`, `kvlanglayout`) in `/usr/bin`, and headers in `/usr/include/kvlang`.
+
+**Backends** are chosen by the `KVSPACE` DSN (default `redis://127.0.0.1:6379`):
+
+```bash
+KVSPACE=shm:///tmp/kvlang.shm ./bin/kvlang tutorial/01-basics/hello.kv   # kvspace-c
+KVSPACE=fs:///tmp/kvlang-fs   ./bin/kvlang tutorial/01-basics/hello.kv   # kvspace-durable
+```
+
+Two more modes: `kvlang create <func>` prints a vthread `vid`, and `kvlang run <vid>` resumes from the persisted PC (crash recovery). With no arguments and `KVLANG_LIB=p1:p2:…` set, kvlang lays out every `.kv` under those paths and runs each lib's `init`.
 
 ---
 
 ## Language Guide
 
-### Program Structure (read this first)
+### Ten Rules (read this first)
 
-**Top level: `lib name { }`, `rwfunc`, and single instructions.** Always wrap code in `rwfunc main() -> () { … }; main()`. Bare `if` / `while` / `for` at top level may auto-wrap into implicit `init()` but this is unreliable — explicitly wrapping in `main()` is the only guaranteed pattern. Never name your function `init` to avoid conflicts with implicit wrapping.
+1. Multiplication is `×`, division is `÷`. `*` is not multiply (it is the pointer / dereference operator). `/` is not divide (it is the path separator and comment marker).
+2. There is no `int` / `float` / `char` shorthand and no `object`. Numbers are exact-width (`int64`, `float64`, …); a string is `[]char/<encoding>`; heterogeneous records are `{k=v}` literals or `struct`.
+3. Assignment goes both ways: `expr -> slot` (write slot on the right) and `slot = expr` (write slot on the left). `=` is not an expression — equality is `==`. There is no `<-`.
+4. One instruction per line, clearest; `;` is equivalent to a newline (`a = 1; b = 2` is legal).
+5. Comments are `//` line and `/* */` block (block comments nest). There is no `#` comment.
+6. Strings are only `"…"` (escaped) or `r"…"` / `r#"…"#` (raw). No `"""` triple quotes, no backticks.
+7. A write param copies in the caller's current value, which is `None` if the position is unassigned — so initialize before accumulating: `0 -> acc`, or `None + x` errors.
+8. Arrays carry a `[]` prefix: `a:[]int64 = [1, 2, 3]`. Empty containers must be typed: `d:[]char/utf32·int64 = {}`.
+9. `+` only joins like with like: char+char concatenates, number+number adds; `"label" + n` is a TypeError. For labeled output use multiple arguments: `println("answer =", n)` (space-separated).
+10. Functions have no return value; results leave through write params: `rwfunc f(x:int64) -> (r:int64) { x + 1 -> r }`, called as `f(3) -> y`.
+
+### Program Structure
+
+A file is a sequence of `lib` blocks, `rwfunc` declarations, and instructions. There is **no `import`** — the `/lib` tree itself is the global namespace, and a cross-lib call is written with the full path or the qualified name `pkg·func`. Every parameter must carry a type annotation.
 
 ```kv
-rwfunc main() -> () {
+rwfunc test() -> () {
     total = 0
     1 -> i
     while (i <= 5) {
-        total = total + i
+        total + i -> total
         i + 1 -> i
     }
-    println(total)
+    println(total)          // 15
 }
 
-main()
+test()
 ```
 
-### rwir（Read-Write IR）：Two Write Forms
+The entry point is conventionally `rwfunc test()` for a file and `init` for inline source; bare instructions at lib level are combined into the implicit `init`. `if` / `while` / `for` may appear only inside an `rwfunc` body.
+
+### Write Forms (`=` and `->`)
 
 ```kv
-x = 40 + 2            # = : write slot on the left; = is NOT an expression, cannot nest in conditions
-x × y -> z            # right arrow: write slot on the right
-f(a, b) -> r          # write-param mapping for calls; multiple: -> x, y; discard: -> _
+x = 40 + 2                  // = : write slot on the left
+x × y -> z                  // -> : write slot on the right
+f(a, b) -> r                // write-param mapping for calls; multiple: -> x, y; discard: -> _
 ```
 
-A write slot must be a **location**: a bare name (frame-local), `/abs/path` (global key), or `base.name` (member). Literals are not locations.
+`=` is only a source-level alias for "write left"; what lands in kvspace is always the `->` axis structure, with read params on the negative axis and write params on the positive axis. A write slot must be a **location**: a bare name (frame-local), `/abs/path` (global key), or `base·member`. Literals are not locations.
 
-**`rwfunc func(ra,rb) -> (wa,wb) { … }` = composite rwir**, the named form. Single-line rwir like `A + B -> C` is atomic (one opcode + reads + writes); `rwfunc` packs multiple rwir into a named unit with the same arrow interface — `(ra,rb)` declare read params, `-> (wa,wb)` declare write params. Calling `add(3,4) -> s` binds arguments to read slots, maps write slots back to the caller frame. No return values, only write-param mapping.
+**Read params are read-only** — including through member/index writes and `kvspace·set(base, …)`, and aliasing does not launder them. Write params are readable and writable. To mutate an array or map inside a function, declare it as a write param: `a[i] = v` writes through `a`.
 
-`-> (C:int64)` in a `rwfunc` signature is a **write-param declaration**. The function writes results into its write-param slots; the caller maps them with `-> r`.
-**Read params are read-only**: the body may not place a read param in a write slot (e.g. `A = A + 1`). This includes array element writes — `a[i] = v` writes through `a`, so `a` must be a write param if you need to modify it. **Array/dict to mutate → write param; array/dict to read only → read param.**
+### Types
+
+Exact-width numbers: `int8 int16 int32 int64 uint8 uint16 uint32 uint64 float32 float64`. Low-precision kinds for tensor annotation (the runtime moves bytes, it does not arithmetic them): `float16` `bfloat16` `float8/e4m3` `float8/e5m2`. Others: `bool`, `char/utf8` `char/utf32` `char/ascii`, `stringkeymap`, `index`, `struct`, `time`, `duration`, `any`.
+
 ```kv
-# ❌ wrong: array as read param, a[i] = v writes through read-param slot → parser rejects
-rwfunc bad(a:int64) -> () { 99 -> a[0] }
-
-# ✅ correct: array as write param, readable and writable inside the body
-rwfunc good() -> (a:int64) { a:int64 = [10, 20]; 99 -> a[0]; a }
+float64(3) -> f          // 3.0
+int64(3.9) -> i          // 3 (truncates toward zero)
+int64("42") -> n         // 42
+bool(1) -> b             // true
+char/utf32(x) -> s       // string encoding conversion (e.g. char/utf8 → char/utf32)
 ```
 
-Decide the role first —
-**an accumulator is an output, so declare it as a write param** (write params start at zero, are readable and writable in the body — like Go named return values): `rwfunc sum(arr:int64) -> (acc:int64) { acc + arr[i] -> acc }`.
-A pure working variable is copied to a local first (`A -> a`, then use `a`):
+The ten numeric operators are both constructors and converters. Arithmetic keeps width (same-width ops stay same-width and wrap on overflow); mixed widths promote to the wider (`int32 + int64 → int64`), and any float promotes to float. `index` and `extindex` are **storetypes**, not kinds; `p` (ptr) and `None` are not kinds either.
+
+`string·formatint(n, base)` / `string·formatuint(n, base)` render integers in a base; `string·parseint(s, base)` / `string·parseuint(s, base)` parse them (base 2..36).
+
+### langtype: two forms
+
+A **langtype** is a value's real type: one concrete kind plus determinate `[dims]`, with no unions and no axis quantifiers. A **def langtype** is the matching type at a definition site (a `def rwir` signature row, or an `rwfunc` param definition) and may contain unions `A|B`, the axis quantifiers `.` `?` `*` `+`, `any`, and mapexpr — one def langtype can match many langtypes. Both roles share one grammar (the appendix grammar is authoritative), and both are called a **kindexpr** when the emphasis is on "one concrete type-expression string".
+
+### Arrays (compact `[…]`)
 
 ```kv
-lib mylib {
-    rwfunc add(A:int64, B:int64) -> (C:int64) {
-        A + B -> C
-    }
+a:[]int64 = [7, 2, 9, 4]
+ndarray·numel(a) -> n     // 4 (element count)
+ndarray·dim(a) -> d       // 1 (rank)
+ndarray·shape(a) -> sh    // per-axis lengths
+xv·at(a, 2) -> e          // 9 (out of range errors)
+xv·set(a, 1, 99) -> b     // new array [7, 99, 9, 4]
+a[0] -> head              // 7
+xv·langtype(a) -> lt      // "[4]int64"
+xv·bodylen(a) -> bl       // 32 (body bytes)
+```
+
+An array has two physical forms, and **the literal brackets determine which**: `[1,2,3]` is **compact** (fixed-length, same-type elements packed contiguously in one XValue; `[N]T` / `[d0,d1]T`), while `{v0,v1,…}` is **stringkeymap** form (each element an independent child key, growable; variable-length strings live here, not in `[…]`). Multi-dimensional `[2,3]int64` is a compact ndarray. Fixed-length initialization is written `a:[1024]int32 = []` (all zero). Conversions are `array·scatter` (compact → stringkeymap) and `array·compact` (reverse).
+
+Traverse a compact array with `while` + `ndarray·numel` + `xv·at`. A string array or a variable-length collection uses the `{}` form.
+
+### Maps, Member Access, and struct
+
+Container members are accessed with `·` (U+00B7) — **never** `[]`, which indexes only compact arrays. The access key is, verbatim, the key formatter's output; kvspace and the runtime must not rewrite, normalize, or auto-wrap it. A bare-scalar key and a 1-tuple key are different formatters and never interconvert: `b:int64·int64 = {}` is reached as `b·200`, not `b·[200]`. An array shape (`[N]T`) may not be a key at all.
+
+```kv
+d:[]char/utf32·int64 = {}     // empty stringkeymap must be typed
+d·a = 10                      // static member write
+kvspace·get(d, "a") -> x      // dynamic read (missing → None)
+k = "a"
+d·*k -> v                     // dynamic member read: k's value becomes the key
+kvspace·set(d, "c", 30) -> _  // dynamic member write
+
+m = map()                     // stringkeymap constructed empty
+
+r = {name="kv", ver=1}        // struct literal (heterogeneous record; there is no object)
+r·name -> n                   // member read
+5 -> r·ver                    // struct members are writable
+```
+
+A map's declaration form is `memheadname : memitemkey_formatter · memitemvalue = {}` — the key side is a **formatter** (a key lives only in the path system, never in an XValue body), choosing among a bare scalar, a string key `[]char/<encoding>`, or a scalar tuple `[scalar,…]`. The value side recurses, so maps nest.
+
+Named struct (for field defaults or a reusable type):
+
+```kv
+struct Point { x:int64=0 y:int64=0 }
+rwfunc test() -> () {
+    p:Point = {x=3 y=4}
+    println(p·x, p·y)         // 3 4
 }
-
-rwfunc main() -> () {
-    mylib.add(3, 4) -> s
-    println(s)          # 7
-}
-
-main()
 ```
 
-### dict, Member Access, and Linked Lists
+`struct Name { field:type=default }` registers a prototype at `/lib/Name`; instantiating `Name{f=v}` clones the prototype, overrides the given fields, and type-checks them. A struct is not a parallel type registry — the prototype is itself KV data.
 
-```kv
-d = { name="kv"; ver=1 }    # dict literal: members are the flat key-family d.name, d.ver
-println(d.name)               # member read
-d.ver = 2                   # member write
-k = "name"; d.*k -> v       # dynamic key: reads d.name (k's value becomes the key)
-```
+Data shared across functions lives at **absolute paths** (frame-locals die when the frame returns): `/n1·val = 1`.
 
-**Pointer via path string**: store an absolute path in a variable, then use `.member` to read/write at that path — the variable's string value becomes the path prefix.
-```kv
-/node = { val=42 }       # dict at absolute path
-"/node" -> p             # p holds the path string
-p.val -> v               # reads /node.val → 42
-```
+### Pointers
 
-Data structures shared across functions (e.g. linked lists) create nodes at **absolute paths** (frame-locals die when the frame returns):
+`&x` is the **absolute-address** operator (`&x ≡ kvlang·abs(x)`): it yields a pointer, a `ref=1` value whose head storetype/langtype describe the target's full form and whose body is the target key path. `*p` dereferences; `p·field` auto-derefs for member access. Assignment checks the pointer's declared target langtype against the pointed-to key's actual langtype for **one hop only**. Value containers (a map langtype or a struct prototype path) have no body to copy and must be passed as `*T`. **An empty pointer is `None`** — there is no `""` sentinel, and `p == ""` is illegal; test `p != None`. A plain string variable is not a pointer.
 
-```kv
-rwfunc build() -> () {
-    /n1 = { val=1; next="/n2" }
-    /n2 = { val=2; next="/n3" }
-    { val=3; next="" } -> /n3
-}
-
-rwfunc main() -> () {
-    build()
-    "/n1" -> p                   # p holds a path string (a pointer)
-    while (p != "") {
-        p.val -> v               # pointer deref: reads /n1.val
-        println(v)
-        p.next -> p
-    }
-}
-
-main()
-```
-
-### Numeric Types (exact-width only — no `int` or `float`)
-
-```kv
-f = float32(3)        # ten constructors: int8/16/32/64 uint8/16/32/64 float32/64 — they construct AND convert
-w = int8(300)         # 44: narrowing wraps (two's complement); float→int truncates toward zero; arithmetic domain is int64/float64
-x:int64 = 42          # type-annotated variable declaration
-```
-
-`int` and `float` are **rejected** by the parser — use exact-width types only. The ten precision operators are both constructors and converters.
+A pointer used as a map key must be written with a leading `*` (`base·*k`); omitting it is illegal, because there is no auto-dereference. This is explicit dereference, not automatic key rewriting.
 
 ### Control Flow (inside rwfunc bodies only)
 
 ```kv
-i = 1; sum = 0
-while (i <= 10) { sum + i -> sum; i + 1 -> i }
-if (sum > 50) { println("big") } else { println("small") }   # sum=55 → big
-for (x in [7, 2, 9, 4]) { println(x) }
+if (c) { … } else if (c2) { … } else { … }
+while (c) { … }
+for (e in arr) { … }        // iterates a compact array
+break / continue
+return                      // no return value
 ```
 
-Conditions may be compound expressions: `if (7 % 2 != 0)` and `while (i < string.len(s))` both work (auto-flattened to temp slots at compile time).
+Map traversal uses `while` + `kvspace·listlen` + `kvspace·listn` (`for`-`in` is not reliable on maps) — note the directory path needs a trailing `/`. Control flow is source syntax only; layout flattens it into a linear irseq and lowers it to `goto` / `br`.
 
 ### Operators
 
 | Category | Symbols |
 |------|------|
 | Arithmetic | `+` `-` `×` `÷` `%` |
-| Comparison | `==` `!=` `<` `>` `<=` `>=` |
-| Logic | `&&` `\|\|` `!` |
-| Bitwise | `&` `\|` `^` `<<` `>>` |
+| Unary prefix | `-` `!` `√` (sqrt) `&` (absolute address) `*` (dereference) |
+| Comparison | `==` `!=` `<` `>` `<=` `>=` (and `≠` `≤` `≥`) |
+| Logic / bitwise | `&&` `\|\|` `!` and `&` `\|` `^` `<<` `>>` |
 
-> `÷`: both ints → integer division (C-style, `7÷2`=3, `-9÷2`=-4); either side float → float division (`7.0÷2`=3.5).
-> `/` is reserved for paths and path separators. `*` is reserved for future pointer dereference.
+> `÷`: both operands integers → integer division (`7÷2`=3); either side float → float division (`7.0÷2`=3.5).
+> `/` is reserved for paths and comments; `*` is the pointer/dereference operator, not multiplication.
 
-### Builtins and Extension rwir
+### Builtins
 
-**Builtins** are the rwir the runtime evaluates in-process (the `bi_is_native` set). They are pure KV→KV computations — no I/O:
+**Builtins** are the rwir in the core runtime's `myrwircaps`: pure KV→KV computation, no I/O.
 
-**Scalar:** `abs` `neg` `sign` `pow` `sqrt` `exp` `log` `min` `max` (variadic, e.g. `max(a,b,c)`) `debugger`\
-**Types:** `bool` `int8` `int16` `int32` `int64` `uint8` `uint16` `uint32` `uint64` `float32` `float64` `char/utf8` `char/utf32` `char/ascii`\
-**Collections:** `array` `at` `set` `has` `array.sort` `array.slice` `array.append` `dict`\
-**Shape:** `ndarray.numel` `ndarray.dim` `ndarray.shape` `xv.at` `xv.set`\
-**KV tree:** `kv.get` `kv.set` `kv.del` `kv.deltree` `kv.list` `kv.mkindex` `kv.extindex` `kv.rmindexext` `kv.watch` `kv.has` `kv.at`\
-**Strings:** `string.char` `string.ord` `string.len` `string.cmp` `string.find` `string.slice` `string.concat` `string.set`\
-**Time:** `time.now` `time.sub` `time.add` `time.before` `time.after` `time/duration.nanos` `time/duration.as_nanos` (and `millis`/`seconds`/`minutes`/`hours` variants)\
-**Random:** `random.uint64` `random.int63` `random.intn`
+**Math / compare / logic / bit:** `add`(`+`) `sub`(`-`) `mul`(`×`) `div`(`÷`) `mod`(`%`) `pow` `sqrt`(`√`) `exp` `log` `neg` `abs` `sign` `min` `max`; `eq` `neq` `lt` `gt` `le` `ge` `and` `or` `not` `bitand` `bitor` `bitxor` `shl` `shr`
+**Type constructors:** `bool` `int8` … `int64` `uint8` … `uint64` `float32` `float64` `char/utf32` `char/utf8` `char/ascii`; container constructors `map` `array` `struct·new`
+**`array·`:** `scatter` `compact` `append` `slice` `fill`  ·  **`ndarray·`:** `numel` `dim` `shape`
+**`xv·`:** `at` `set` `reshape` `reinterpret` `langtype` `bodylen`
+**`string·`:** `len` `char` `ord` `cmp` `find` `slice` `concat` `set` `formatint` `formatuint` `parseint` `parseuint`
+**`kvspace·`:** `get` `set` `del` `deltree` `cp` `cpdir` `cplist` `list` `listlen` `listn` `mkindex` `extindex` `rmindexext` `watch`
+**`time·` / `time/duration·` / `random·`:** `now` `sub` `add` `before` `after`; `nanos` `millis` `seconds` `minutes` `hours` and the `as_*` forms; `uint64` `int63` `intn`
+**`vthread·` / debug:** `create` `run` `call` `sleep` `setstatus`; `debugger` (≡ `vthread·setstatus("paused")`)
 
-**`print` / `println` / `cerr` are NOT builtins.** In the KV world there is no terminal — only keys and values — so I/O is not a core-language primitive. They are **extension rwir**: the `term` extension runtime registers them at `/lib/<opcode>` (kind `rwir`) and writes to the host process's `stdout`/`stderr`. The core runtime recognizes any `/lib/<opcode>` that carries an `rwir` signature and is not a builtin as an extension rwir, and hands it off to its extension runtime. Same mechanism as `json.to` / `json.from` (the `json` extension) and tensor ops (the numpy / GPU extensions).
-
-```kv
-a:int64 = [7, 2, 9, 4]     # typed 1D array
-ndarray.numel(a) -> n         # 4
-at(a, 2) -> e            # 9 (0-indexed)
-set(a, 1, 99) -> a       # modify element: a becomes [7, 99, 9, 4]
-sort(a) -> sorted         # sorted copy: [2, 4, 7, 9]
-```
+`print` / `println` / `cerr` / `printf` / `input` are **not** builtins. In the KV world there is no terminal — only keys and values — so I/O is not a core-language primitive. They are opcodes of the `term` runtime, reached through the `def rwir` route-header mechanism described above. The same mechanism covers `json·to` / `json·from`, `http·call` / `http·get|post|put|del`, `networld/proc·exec`, `networld/fs·size|read|write|append|list|del|mkdir|exists`, and the self-hosting `kvlang·vet|format|layout|dump`.
 
 ```kv
-s = "hello"
-string.char(s, 1) = "a"     # replace char at index 1 → "hallo"
-s + " world" -> t           # concatenation → "hallo world"
-string.len(s) -> n          # 5
-string.find(s, "ll") -> i   # 2 (first index of substring, -1 if absent)
-string.slice(s, 0, 2) -> p  # "he"
+print(x,…)              // no spaces, no newline
+println(x,…)            // space-separated, newline
+cerr(x,…)               // like println, to stderr
+printf(fmt,…)           // C-style: %d %i %u %o %x %X %f %e %g %c %s %%; no newline
+input(prompt) -> line   // read one line of stdin
 ```
 
-Strings support indexing and concatenation with `+`; `at(s, i)` reads the i-th char, `string.char(s, i)` reads it, `string.char(s, i) = "X"` replaces one char.
+String↔bytes goes through `xv·reinterpret`. A small kvlang-level stdlib wraps common patterns as rwfuncs: the [`stdlib/`](stdlib/) libs `kvspace` (`has`, `get_or`, `set_default`), `string`, `math`, `time`, `time/duration`, `xv`, `http`.
+
+### Worked Example
+
+```kv
+rwfunc test() -> () {
+    s = "hello"
+    string·len(s) -> n
+    println(n)                  // 5
+
+    a:[]int64 = [1,2,3,4]
+    0 -> acc
+    0 -> i
+    while (i < ndarray·numel(a)) {
+        xv·at(a, i) -> e
+        acc + e -> acc
+        i + 1 -> i
+    }
+    println(acc)                // 10
+
+    d:[]char/utf32·int64 = {}
+    d·a = 10
+    kvspace·get(d, "a") -> x
+    println(x)                  // 10
+}
+```
+
+For an LLM-oriented one-page summary of the language, see [`stdlib/kvlang/kvlangbrief.kv`](stdlib/kvlang/kvlangbrief.kv).
 
 ---
 
 ## Tutorial
 
-140 self-contained examples (129 with expected output, fully CI-verified), organized by topic:
+210 self-contained examples (`// 期望输出` headers give expected output for 202 of them), organized by topic:
 
 ```
-01-basics/        hello, arith, precision, numtypes, strings, …  (15 files)
-02-func/          rwfunc, call, accumulator                       (2 files)
-03-control/       if, while, for, guess                           (5 files)
-03-debugger/      chain_array, debugger builtin                   (4 files)
-06-algo/          gcd, collatz, power, factorial, …               (8 files)
-06-lib/           lib block, nested, cross-lib, anon              (11 files)
-07-leetcode/      LeetCode solutions                              (90 files)
-error_cases/      type_error, index_error, zero_division, …       (36 files)
+01-basics/      hello, arith, precision, numtypes, strings, …     (18)
+02-func/        rwfunc, call, accumulator                         (4)
+03-control/     if, while, for, guess                             (5)
+04-ndarray/     compact arrays, subscript, multi-dim              (12)
+05-dict/        maps, dynamic keys, missing-key → None            (3)
+06-algo/        gcd, collatz, power, factorial, …                 (8)
+07-lib/         lib blocks, nested, cross-lib, anonymous          (13)
+08-leetcode/    LeetCode solutions                                (88)
+09-debugger/    debugger builtin                                  (3)
+10-types/       typed maps, nested types, tuple keys              (8)
+11-string/      string operations                                 (9)
+12-struct/      struct declaration, fields, pointers, lists       (10)
+13-stdlib/      stdlib libs: time, duration, kv, xv, math, string (15)
+14-networld/    process exec, filesystem, http                    (10)
+15-vthread/     vthread create/call/run                           (4)
 ```
 
 ```bash
-./kvlang tutorial/01-basics/hello.kv         # hello kvlang
-./kvlang tutorial/06-algo/gcd.kv             # gcd = 6
-./kvlang tutorial/07-leetcode/001_two_sum.kv # LeetCode
+./bin/kvlang tutorial/01-basics/hello.kv          # run one example
+./bin/kvlang tutorial/06-algo/gcd.kv              # gcd = 6
 
-python3 tutorial/test.py                     # all positive examples — CI verification
-python3 tutorial/error_test.py               # all negative tests
+python3 tutorial/test.py                          # whole suite — the conformance test
+python3 error_cases/error_test.py                 # expected-diagnostic cases
 ```
+
+`tutorial/test.py` discovers every `.kv` under `tutorial/`, extracts the `// 期望输出` expectations, lays the file out with `bin/kvlanglayout` and runs it, then matches stdout. The tutorial suite **is** the conformance test: an implementation conforms when, for each anchored example, the output is byte-identical on every backend. `error_cases/` holds 37 cases across 10 diagnostic categories.
 
 ---
 
 ## Benchmark
 
-`benchmark/` is a cross-language, cross-backend performance harness. Each case is one
-algorithm implemented identically in kvlang / Python / Rust / C; kvlang runs on all three
-kvspace backends (`shm` / `fs` / `redis`) as separate columns, with the native/scripting
-versions as baselines. Scales are fixed for long-term comparability, and every run appends
-to a versioned `results.csv` — same host + case, sorted by version, gives the perf-evolution
-curve.
+`benchmark/` is a cross-language, cross-backend performance harness. Each case is one algorithm implemented identically in kvlang / Python / Rust / C; kvlang runs on all three kvspace backends (`shm` / `fs` / `redis`) as separate columns, with the native/scripting versions as baselines. Scales are fixed for long-term comparability, and every run appends to a versioned CSV — same host + case, sorted by version, gives the perf-evolution curve.
+
+Ten cases: `binary_search`, `binary_trees`, `fib`, `hash_table`, `iops`, `k_nucleotide`, `matmul`, `nqueens`, `prime_sieve`, `quicksort`.
 
 ```bash
-python3 benchmark/run.py            # all cases × three backends, appends results.csv
+python3 benchmark/run.py            # all cases × three backends, appends a versioned CSV
 python3 benchmark/run.py --show     # print recorded history
 ```
 
@@ -287,33 +355,25 @@ See [benchmark/README.md](benchmark/README.md) for cases, timing convention, and
 
 ---
 
-## Design Documentation
+## Specification
 
-In-depth design and implementation docs covering the full architecture:
+The normative language definition lives in [`stdlib/kvlang/spec/`](stdlib/kvlang/spec/), written in kvlang and laid out into `/lib/kvlang/spec/…`. It is the single source of truth; this README is a derivative.
 
-| Chapter | EN | CN |
-|---------|-----|-----|
-| Architecture — storage/compute/control separation | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/architecture-01-storage-compute-control-flow-separation.md) | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/total篇-01-存算控制流严格分离的kv树计算架构.md) |
-| Architecture — everything is plaintext | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/architecture-02-everything-is-plaintext.md) | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/total篇-02-一切皆明文.md) |
-| Architecture — program as data + functions | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/architecture-03-program-is-data-plus-functions.md) | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/total篇-03-程序即数据结构加函数加数据.md) |
-| Architecture — four-level code hierarchy | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/architecture-04-four-level-code-hierarchy.md) | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/total篇-04-代码四级层次.md) |
-| Parser — instruction architecture | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/parser-01-instruction-architecture.md) | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/parser篇-01-指令架构.md) |
-| Parser — functions | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/parser-02-functions.md) | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/parser篇-02-函数.md) |
-| Parser — compiler pipeline | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/parser-04-compiler-pipeline.md) | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/parser篇-04-编译器流水线.md) |
-| Parser — diagnostics | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/parser-05-diagnostics.md) | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/parser篇-05-诊断输出.md) |
-| Parser — layoutrwir | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/parser-06-layoutrwir.md) | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/parser篇-06-layoutrwir.md) |
-| Parser & Runtime — control flow | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/parser-runtime-01-control-flow.md) | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/parser&runtime-01控制流篇.md) |
-| Runtime — type system | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/runtime-01-type-system.md) | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/runtime篇-01-类型系统.md) |
-| Runtime — member access & data structures | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/runtime-02-member-access-and-data-structures.md) | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/runtime篇-02-成员访问与数据结构.md) |
-| Runtime — debugging & observability | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/runtime-03-debugging-and-observability.md) | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/runtime篇-03-调试与可观测性.md) |
-| Runtime — function calls & builtins | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/runtime-04-function-calls-and-builtins.md) | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/runtime篇-04-函数调用builtin.md) |
-| KVSpace — address space | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/kvspace-01-address-space.md) | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/kvspace篇-01-地址空间.md) |
-| KVSpace — addressing & naming | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/kvspace-02-addressing-model-and-naming.md) | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/kvspace篇-02-寻址模型与命名.md) |
-| KVSpace — code instruction layout | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/kvspace-03-code-instruction-layout.md) | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/kvspace篇-03-代码指令的布局格式.md) |
-| KVSpace — system variables | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/kvspace-04-system-variables.md) | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/kvspace篇-04-系统变量.md) |
-| Reference — how to design a programming language | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/reference-01-how-to-design-a-programming-language.md) | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/reference篇-01-如何设计编程语言.md) |
+| Volume | Contents |
+|--------|----------|
+| [00-导言](stdlib/kvlang/spec/00-导言/) | Scope, normative language, reading conventions |
+| [01-词法](stdlib/kvlang/spec/01-词法/) | Source structure, tokens, comments, identifiers, path literals, literals, operators and precedence |
+| [02-kvspace模型](stdlib/kvlang/spec/02-kvspace模型/) | Address space, structure domains, addressing and naming, the C ABI, XValue head wire format, the two array forms, instruction layout, vthread, system variables |
+| [03-类型系统](stdlib/kvlang/spec/03-类型系统/) | Kinds and fixed-width types, langtype, the map container, member access, ptr, struct, the head's three axes, wire layout, string encodings |
+| [04-layout语义](stdlib/kvlang/spec/04-layout语义/) | Instruction architecture, slot encoding, functions and write slots, control flow and its lowering, the layout pipeline and ABI, diagnostics |
+| [05-runtime语义](stdlib/kvlang/spec/05-runtime语义/) | Execution model, member access, calls, runtime-c builtins, runtime development norms, notinmyrwircaps, the C ABI |
+| [06-编译器语义](stdlib/kvlang/spec/06-编译器语义/) | The contract between the core and extension compilers: front-end/back-end operators, backend binding, operator versioning |
+| [附录](stdlib/kvlang/spec/附录/) | The authoritative grammar: program structure, type expressions, instructions, expressions, control flow, builtins |
+| [设计理由](stdlib/kvlang/spec/设计理由/) | Non-normative rationale: storage/compute separation, everything is plaintext, program as data, code hierarchy, how to design a language |
 
-Each English translation includes **Implementation Consistency Notes** cross-checked against the Go source.
+A rendered view of the stdlib and spec is published at [array2d.github.io/kvlang](https://array2d.github.io/kvlang/).
+
+---
 
 ## License
 
