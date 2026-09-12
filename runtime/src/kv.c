@@ -115,6 +115,11 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
         out->data = d;
         out->len = len;
         out->borrowed = 1;
+        if (ref_ok(k)) {
+            kvspaceRef_t r;
+            if (kvspaceResolveRef(k->h, key, &r) == 0)
+                ref_put(k, key, &r);
+        }
     }
     free(heap);
     return 0;
