@@ -115,8 +115,7 @@ static int last_dir_sep(const char *key, size_t *seplen) {
     return -1;
 }
 
-static int parent_hit_ent(kvlangKv_t *k, const kvlangRefEnt_t *e, const char *key,
-                          uint8_t **d, uint32_t *len) {
+static int parent_prefix_ok(const kvlangRefEnt_t *e, const char *key) {
     size_t dl;
     const char *p;
     if (!e || !e->key || !e->gen || !key)
@@ -129,6 +128,30 @@ static int parent_hit_ent(kvlangKv_t *k, const kvlangRefEnt_t *e, const char *ke
             ((unsigned char)p[0] == 0xC2 && (unsigned char)p[1] == 0xB7))
             return 0;
     }
+    return 1;
+}
+
+/* Covering `·` map parent, or NULL. Does not use the sticky frame `/` slot. */
+static kvlangRefEnt_t *pref_cover(kvlangKv_t *k, const char *key) {
+    if (!key)
+        return NULL;
+    for (int i = 0; i < k->npref; i++) {
+        if (parent_prefix_ok(&k->pref[i], key)) {
+            if (i != 0) {
+                kvlangRefEnt_t tmp = k->pref[0];
+                k->pref[0] = k->pref[i];
+                k->pref[i] = tmp;
+            }
+            return &k->pref[0];
+        }
+    }
+    return NULL;
+}
+
+static int parent_hit_ent(kvlangKv_t *k, const kvlangRefEnt_t *e, const char *key,
+                          uint8_t **d, uint32_t *len) {
+    if (!parent_prefix_ok(e, key))
+        return 0;
     {
         kvspaceRef_t r = { e->block_id, e->gen, 0, 0 };
         return kvspaceGetByRef(k->h, &r, key, d, len) == 0 && *d && *len > 0;
@@ -136,19 +159,13 @@ static int parent_hit_ent(kvlangKv_t *k, const kvlangRefEnt_t *e, const char *ke
 }
 
 static int parent_hit(kvlangKv_t *k, const char *key, uint8_t **d, uint32_t *len) {
-    if (!key)
+    kvlangRefEnt_t *e = pref_cover(k, key);
+    if (!e)
         return 0;
-    for (int i = 0; i < k->npref; i++) {
-        if (parent_hit_ent(k, &k->pref[i], key, d, len)) {
-            if (i != 0) {
-                kvlangRefEnt_t tmp = k->pref[0];
-                k->pref[0] = k->pref[i];
-                k->pref[i] = tmp;
-            }
-            return 1;
-        }
+    {
+        kvspaceRef_t r = { e->block_id, e->gen, 0, 0 };
+        return kvspaceGetByRef(k->h, &r, key, d, len) == 0 && *d && *len > 0;
     }
-    return 0;
 }
 
 void kvlangKvInvalidateFrame(kvlangKv_t *k, const char *fr) {
@@ -267,7 +284,8 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
             free(heap);
             return 0;
         }
-    } else if (ref_ok(k)) {
+    }
+    if (ref_ok(k)) {
         int hit = 0;
         if (nl >= MEMBER_SEP_LEN && memchr(name, 0xC2, nl))
             hit = parent_hit(k, key, &d, &len);
@@ -360,13 +378,20 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
         if (body_len > 0 && dst)
             memcpy(dst, body, body_len);
         if (rc == 0 && n == 1 && ref_ok(k) && pairs[i].key) {
+            const char *key = pairs[i].key;
+            const char *slash = strrchr(key, '/');
+            const char *rest = slash ? slash + 1 : key;
+            int is_member = rest && memchr(rest, 0xC2, strlen(rest)) != NULL;
+            /* Unique `·` slots share one ART parent; do not fill the leaf table
+             * (that walk + 64-slot scan was the unique-key miss). */
+            if (is_member && (pref_cover(k, key) ||
+                              (key[0] == '/' && strncmp(key, "/lib/", 5) == 0)))
+                continue;
             kvspaceRef_t rr;
-            if (kvspaceResolveRef(k->h, pairs[i].key, &rr) == 0) {
-                ref_put(k, pairs[i].key, &rr);
-                const char *key = pairs[i].key;
-                const char *slash = strrchr(key, '/');
-                const char *rest = slash ? slash + 1 : key;
-                if (!k->fpar.key || memchr(rest, 0xC2, strlen(rest))) {
+            if (kvspaceResolveRef(k->h, key, &rr) == 0) {
+                if (!is_member)
+                    ref_put(k, key, &rr);
+                if (is_member || !k->fpar.key) {
                     size_t seplen = 0;
                     int si = last_dir_sep(key, &seplen);
                     if (si >= 0)
