@@ -234,11 +234,19 @@ int kvlangKvGetOne(kvlangKv_t *k, const char *key, kvlangXvalue_t *out) {
     uint8_t *d;
     uint32_t len;
     /* kv.get map slots (`base·k`); frame locals go through GetMember. */
-    if (ref_ok(k) && k->npref && key && parent_hit(k, key, &d, &len)) {
-        out->data = d;
-        out->len = len;
-        out->borrowed = 1;
-        return 0;
+    if (ref_ok(k) && k->npref && key) {
+        kvlangRefEnt_t *pe = (k->npref == 1)
+                                 ? (parent_prefix_ok(&k->pref[0], key) ? &k->pref[0] : NULL)
+                                 : pref_cover(k, key);
+        if (pe) {
+            kvspaceRef_t r = { pe->block_id, pe->gen, 0, 0 };
+            if (kvspaceGetByRef(k->h, &r, key, &d, &len) == 0 && d && len > 0) {
+                out->data = d;
+                out->len = len;
+                out->borrowed = 1;
+                return 0;
+            }
+        }
     }
     if (kvspaceGet(k->h, key, 0, &d, &len) != 0)
         return -1;
