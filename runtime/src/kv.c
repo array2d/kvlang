@@ -44,6 +44,9 @@ static void parent_put(kvlangKv_t *k, const char *dir, size_t dl, const kvspaceR
     kvlangRefEnt_t *e;
     if (!dir || !dl || !rr->parent_id || !rr->depth)
         return;
+    /* Stdlib `/lib/…·` constants would occupy a slot for the whole process. */
+    if (dl >= 5 && memcmp(dir, "/lib/", 5) == 0)
+        return;
     e = pref_find(k, dir, dl);
     if (!e) {
         if (k->npref < KVLANG_PREF_CAP)
