@@ -230,13 +230,6 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
             return 0;
         }
     }
-    if (ref_ok(k) && parent_hit(k, key, &d, &len)) {
-        out->data = d;
-        out->len = len;
-        out->borrowed = 1;
-        free(heap);
-        return 0;
-    }
     if (kvspaceGet(k->h, key, 0, &d, &len) == 0 && d && len > 0) {
         out->data = d;
         out->len = len;
