@@ -1,10 +1,16 @@
 #define _GNU_SOURCE
 #include <errno.h>
+#include <stdlib.h>   /* getprogname（macOS/BSD） */
 #include "runtime_internal.h"
 
 /* 可执行文件名（basename）：runtime 诊断日志前缀，区别于 kvcode print（stdout、无前缀）。 */
 static const char *kvlangExe(void) {
+#if defined(__APPLE__)
+    /* macOS/BSD 无 glibc 的 program_invocation_short_name，用 getprogname()。 */
+    const char *p = getprogname();
+#else
     const char *p = program_invocation_short_name;
+#endif
     return (p && p[0]) ? p : "kvlang";
 }
 
