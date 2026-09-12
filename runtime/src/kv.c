@@ -100,6 +100,12 @@ int kvlangKvGetOne(kvlangKv_t *k, const char *key, kvlangXvalue_t *out) {
     kvlangXvalueZero(out);
     uint8_t *d;
     uint32_t len;
+    if (ref_ok(k) && parent_hit(k, key, &d, &len)) {
+        out->data = d;
+        out->len = len;
+        out->borrowed = 1;
+        return 0;
+    }
     if (kvspaceGet(k->h, key, 0, &d, &len) != 0)
         return -1;
     if (d && len > 0) {
@@ -118,7 +124,15 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
     if (!name || !name[0])
         return 0;
     size_t dl = strlen(dir), nl = strlen(name);
-    char *key = malloc(dl + nl + 1);
+    char stack[2048];
+    char *heap = NULL;
+    char *key = stack;
+    if (dl + nl + 1 > sizeof stack) {
+        heap = malloc(dl + nl + 1);
+        if (!heap)
+            return -1;
+        key = heap;
+    }
     memcpy(key, dir, dl);
     memcpy(key + dl, name, nl);
     key[dl + nl] = 0;
@@ -133,7 +147,7 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
             out->data = d;
             out->len = len;
             out->borrowed = 1;
-            free(key);
+            free(heap);
             return 0;
         }
     }
@@ -141,7 +155,7 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
         out->data = d;
         out->len = len;
         out->borrowed = 1;
-        free(key);
+        free(heap);
         return 0;
     }
     if (kvspaceGet(k->h, key, 0, &d, &len) == 0 && d && len > 0) {
@@ -149,7 +163,7 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
         out->len = len;
         out->borrowed = 1;
     }
-    free(key);
+    free(heap);
     return 0;
 }
 
