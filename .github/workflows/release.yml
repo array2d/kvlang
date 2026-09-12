@@ -82,7 +82,8 @@ jobs:
           }
           EOF
           cc /tmp/conn.c -o /tmp/conn -I/usr/local/include -L/usr/local/lib/kvspace -lkvspace
-          DYLD_FALLBACK_LIBRARY_PATH=/usr/local/lib /tmp/conn
+          # libkvspace 在 /usr/local/lib/kvspace；后端依赖 libblockmalloc 在 /usr/local/lib
+          DYLD_FALLBACK_LIBRARY_PATH=/usr/local/lib:/usr/local/lib/kvspace /tmp/conn
       - name: 打包 ABI 产物
         run: |
           set -euo pipefail
