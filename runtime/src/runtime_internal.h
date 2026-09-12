@@ -124,6 +124,7 @@ typedef struct {
     /* ART dir ancestors of recent `·` member maps (hash/qsort stacks). */
     kvlangRefEnt_t pref[KVLANG_PREF_CAP];
     int npref;
+    int pref_i;
 } kvlangKv_t;
 
 /* growable string buffer */

@@ -37,6 +37,7 @@ static void parent_clear(kvlangKv_t *k) {
     for (int i = 0; i < k->npref; i++)
         free(k->pref[i].key);
     k->npref = 0;
+    k->pref_i = 0;
 }
 
 static void parent_put(kvlangKv_t *k, const char *dir, size_t dl, const kvspaceRef_t *rr) {
@@ -48,8 +49,9 @@ static void parent_put(kvlangKv_t *k, const char *dir, size_t dl, const kvspaceR
         if (k->npref < KVLANG_PREF_CAP)
             e = &k->pref[k->npref++];
         else {
-            e = &k->pref[0];
+            e = &k->pref[k->pref_i];
             free(e->key);
+            k->pref_i = (k->pref_i + 1) % KVLANG_PREF_CAP;
         }
         e->key = malloc(dl + 1);
         if (!e->key)
@@ -61,15 +63,16 @@ static void parent_put(kvlangKv_t *k, const char *dir, size_t dl, const kvspaceR
     e->gen = rr->depth;
 }
 
-/* Last '/' or member '·'; *seplen is 1 or 2. */
+/* Rightmost '/' or member '·'; only the last path component is scanned for '·'. */
 static int last_dir_sep(const char *key, size_t *seplen) {
     const char *slash = strrchr(key, '/');
+    const char *start = slash ? slash + 1 : key;
     const char *mid = NULL;
-    for (const char *p = key; *p; p++) {
+    for (const char *p = start; *p; p++) {
         if ((unsigned char)p[0] == 0xC2 && (unsigned char)p[1] == 0xB7)
             mid = p;
     }
-    if (mid && (!slash || mid > slash)) {
+    if (mid) {
         *seplen = MEMBER_SEP_LEN;
         return (int)(mid - key);
     }
@@ -82,19 +85,36 @@ static int last_dir_sep(const char *key, size_t *seplen) {
 }
 
 static int parent_hit(kvlangKv_t *k, const char *key, uint8_t **d, uint32_t *len) {
-    size_t seplen = 0;
-    int si;
-    kvlangRefEnt_t *e;
     if (!k->npref || !key)
         return 0;
-    si = last_dir_sep(key, &seplen);
-    if (si < 0 || seplen != MEMBER_SEP_LEN)
-        return 0;
-    e = pref_find(k, key, (size_t)si + seplen);
-    if (!e)
-        return 0;
-    kvspaceRef_t r = { e->block_id, e->gen, 0, 0 };
-    return kvspaceGetByRef(k->h, &r, key, d, len) == 0 && *d && *len > 0;
+    for (int i = 0; i < k->npref; i++) {
+        const char *pk = k->pref[i].key;
+        size_t dl;
+        const char *p;
+        if (!pk || !k->pref[i].gen)
+            continue;
+        dl = strlen(pk);
+        if (memcmp(key, pk, dl) != 0 || !key[dl])
+            continue;
+        for (p = key + dl; *p; p++) {
+            if (*p == '/' ||
+                ((unsigned char)p[0] == 0xC2 && (unsigned char)p[1] == 0xB7))
+                goto next_pref;
+        }
+        {
+            kvspaceRef_t r = { k->pref[i].block_id, k->pref[i].gen, 0, 0 };
+            if (kvspaceGetByRef(k->h, &r, key, d, len) == 0 && *d && *len > 0) {
+                if (i != 0) {
+                    kvlangRefEnt_t tmp = k->pref[0];
+                    k->pref[0] = k->pref[i];
+                    k->pref[i] = tmp;
+                }
+                return 1;
+            }
+        }
+    next_pref:;
+    }
+    return 0;
 }
 
 void kvlangKvInvalidateFrame(kvlangKv_t *k, const char *fr) {
@@ -124,6 +144,8 @@ void kvlangKvInvalidateFrame(kvlangKv_t *k, const char *fr) {
             pw++;
         }
         k->npref = pw;
+        if (k->pref_i >= k->npref)
+            k->pref_i = 0;
     }
 }
 
@@ -204,6 +226,13 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
             free(heap);
             return 0;
         }
+    }
+    if (ref_ok(k) && parent_hit(k, key, &d, &len)) {
+        out->data = d;
+        out->len = len;
+        out->borrowed = 1;
+        free(heap);
+        return 0;
     }
     if (kvspaceGet(k->h, key, 0, &d, &len) == 0 && d && len > 0) {
         out->data = d;
