@@ -383,17 +383,13 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
         out->borrowed = 1;
         return 0;
     }
-    /* Sticky frame parent: reuse klen instead of strlen(dir) when dir matches. */
-    int fmatch = 0;
-    size_t dl, nl;
-    if (dir && k->fpar.key) {
+    size_t dl, nl = strlen(name);
+    /* 2-char names (qsort lo/hi/ii/jj): reuse fpar.klen; other names stay strlen. */
+    if (name[1] && !name[2] && dir && k->fpar.key &&
+        strncmp(k->fpar.key, dir, k->fpar.klen) == 0 && dir[k->fpar.klen] == 0)
         dl = k->fpar.klen;
-        if (strncmp(k->fpar.key, dir, dl) == 0 && dir[dl] == 0)
-            fmatch = 1;
-    }
-    if (!fmatch)
+    else
         dl = strlen(dir);
-    nl = name[1] == 0 ? 1 : (name[2] == 0 ? 2 : strlen(name));
     char stack[256];
     char *heap = NULL;
     char *key = stack;
@@ -407,7 +403,8 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
     memcpy(key + dl, name, nl);
     key[dl + nl] = 0;
     /* Non-a/i/n frame siblings: ART parent before the 64-slot leaf scan. */
-    if (ref_ok(k) && !hot_name_ok(name) && fmatch) {
+    if (ref_ok(k) && !hot_name_ok(name) && k->fpar.key &&
+        k->fpar.klen == (uint32_t)dl && memcmp(k->fpar.key, dir, dl) == 0) {
         kvspaceRef_t r = { k->fpar.block_id, k->fpar.gen, 0, 0 };
         if (kvspaceGetByRef(k->h, &r, key, &d, &len) == 0 && d && len > 0) {
             out->data = d;
@@ -436,7 +433,8 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
         if (nl >= MEMBER_SEP_LEN && memchr(name, 0xC2, nl)) {
             if (k->npref)
                 hit = parent_hit(k, key, &d, &len);
-        } else if (hot_name_ok(name) && fmatch) {
+        } else if (hot_name_ok(name) && k->fpar.key && k->fpar.klen == (uint32_t)dl &&
+                   memcmp(k->fpar.key, dir, dl) == 0) {
             kvspaceRef_t r = { k->fpar.block_id, k->fpar.gen, 0, 0 };
             hit = kvspaceGetByRef(k->h, &r, key, &d, &len) == 0 && d && len > 0;
         }
