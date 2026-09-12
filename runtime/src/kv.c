@@ -396,8 +396,9 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
     memcpy(key, dir, dl);
     memcpy(key + dl, name, nl);
     key[dl + nl] = 0;
-    /* Non-a/i/n frame siblings: ART parent before the 64-slot leaf scan. */
-    if (ref_ok(k) && !hot_name_ok(name) && k->fpar.key &&
+    /* Multi-char siblings (bsearch lo/hi): ART parent before the 64-slot scan.
+     * 1-char non-hot (sieve d) stays leaf-first; parent is the miss path. */
+    if (ref_ok(k) && name[1] && k->fpar.key &&
         memcmp(k->fpar.key, dir, k->fpar.klen) == 0 && dir[k->fpar.klen] == 0) {
         kvspaceRef_t r = { k->fpar.block_id, k->fpar.gen, 0, 0 };
         if (kvspaceGetByRef(k->h, &r, key, &d, &len) == 0 && d && len > 0) {
@@ -427,7 +428,7 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
         if (nl >= MEMBER_SEP_LEN && memchr(name, 0xC2, nl)) {
             if (k->npref)
                 hit = parent_hit(k, key, &d, &len);
-        } else if (hot_name_ok(name) && k->fpar.key &&
+        } else if (!name[1] && k->fpar.key &&
                    memcmp(k->fpar.key, dir, k->fpar.klen) == 0 && dir[k->fpar.klen] == 0) {
             kvspaceRef_t r = { k->fpar.block_id, k->fpar.gen, 0, 0 };
             hit = kvspaceGetByRef(k->h, &r, key, &d, &len) == 0 && d && len > 0;
