@@ -214,7 +214,8 @@ int kvlangKvGetOne(kvlangKv_t *k, const char *key, kvlangXvalue_t *out) {
     uint8_t *d;
     uint32_t len;
     /* kv.get map slots (`base·k`); frame locals go through GetMember. */
-    if (ref_ok(k) && key && strstr(key, MEMBER_SEP) && parent_hit(k, key, &d, &len)) {
+    if (ref_ok(k) && k->npref && key && strstr(key, MEMBER_SEP) &&
+        parent_hit(k, key, &d, &len)) {
         out->data = d;
         out->len = len;
         out->borrowed = 1;
