@@ -383,16 +383,7 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
         out->borrowed = 1;
         return 0;
     }
-    size_t dl, nl = strlen(name);
-    int fmatch = 0;
-    /* Multi-char siblings: reuse fpar.klen (one memcmp, no strlen(dir)). */
-    if (name[1] && dir && k->fpar.key &&
-        memcmp(k->fpar.key, dir, k->fpar.klen) == 0 && dir[k->fpar.klen] == 0) {
-        dl = k->fpar.klen;
-        fmatch = 1;
-    } else {
-        dl = strlen(dir);
-    }
+    size_t dl = strlen(dir), nl = strlen(name);
     char stack[256];
     char *heap = NULL;
     char *key = stack;
@@ -406,10 +397,8 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
     memcpy(key + dl, name, nl);
     key[dl + nl] = 0;
     /* Non-a/i/n frame siblings: ART parent before the 64-slot leaf scan. */
-    if (ref_ok(k) && k->fpar.key &&
-        (fmatch || (!hot_name_ok(name) &&
-                    memcmp(k->fpar.key, dir, k->fpar.klen) == 0 &&
-                    dir[k->fpar.klen] == 0))) {
+    if (ref_ok(k) && !hot_name_ok(name) && k->fpar.key &&
+        memcmp(k->fpar.key, dir, k->fpar.klen) == 0 && dir[k->fpar.klen] == 0) {
         kvspaceRef_t r = { k->fpar.block_id, k->fpar.gen, 0, 0 };
         if (kvspaceGetByRef(k->h, &r, key, &d, &len) == 0 && d && len > 0) {
             out->data = d;
