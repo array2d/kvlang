@@ -164,13 +164,7 @@ static int parent_hit_ent(kvlangKv_t *k, const kvlangRefEnt_t *e, const char *ke
 }
 
 static int parent_hit(kvlangKv_t *k, const char *key, uint8_t **d, uint32_t *len) {
-    kvlangRefEnt_t *e = pref_cover(k, key);
-    if (!e)
-        return 0;
-    {
-        kvspaceRef_t r = { e->block_id, e->gen, 0, 0 };
-        return kvspaceGetByRef(k->h, &r, key, d, len) == 0 && *d && *len > 0;
-    }
+    return parent_hit_ent(k, pref_cover(k, key), key, d, len);
 }
 
 void kvlangKvInvalidateFrame(kvlangKv_t *k, const char *fr) {
@@ -295,8 +289,12 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
         int hit = 0;
         if (nl >= MEMBER_SEP_LEN && memchr(name, 0xC2, nl))
             hit = parent_hit(k, key, &d, &len);
-        else if (k->fpar.key)
-            hit = parent_hit_ent(k, &k->fpar, key, &d, &len);
+        else if (k->fpar.key && k->fpar.klen == (uint32_t)dl &&
+                 memcmp(k->fpar.key, dir, dl) == 0) {
+            /* Frame siblings share `dir`; skip suffix scan. */
+            kvspaceRef_t r = { k->fpar.block_id, k->fpar.gen, 0, 0 };
+            hit = kvspaceGetByRef(k->h, &r, key, &d, &len) == 0 && d && len > 0;
+        }
         if (hit) {
             out->data = d;
             out->len = len;
@@ -362,6 +360,8 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
             }
         } else {
             kvlangRefEnt_t *pe = pref_cover(k, pairs[0].key);
+            if (!pe && parent_prefix_ok(&k->fpar, pairs[0].key))
+                pe = &k->fpar;
             if (pe) {
                 kvspaceRef_t r = { pe->block_id, pe->gen, 0, 0 };
                 if (kvspaceSetPartByRef(k->h, &r, pairs[0].key, 0, pairs[0].val.data,
