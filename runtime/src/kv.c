@@ -544,6 +544,11 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
             if (is_member && (pref_cover(k, key) ||
                               (key[0] == '/' && strncmp(key, "/lib/", 5) == 0)))
                 continue;
+            /* Non-hot frame locals already under sticky fpar: skip ResolveRef
+             * (GetMember serves them via the cached ART parent). */
+            if (!is_member && rest && !hot_name_ok(rest) &&
+                parent_prefix_ok(&k->fpar, key))
+                continue;
             kvspaceRef_t rr;
             if (kvspaceResolveRef(k->h, key, &rr) == 0) {
                 if (!is_member) {
