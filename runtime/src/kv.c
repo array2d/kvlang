@@ -396,7 +396,24 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
     memcpy(key, dir, dl);
     memcpy(key + dl, name, nl);
     key[dl + nl] = 0;
-    /* Non-a/i/n frame siblings: ART parent before the 64-slot leaf scan. */
+    kvlangRefEnt_t *e = NULL;
+    /* 2-char locals (bsearch lo/hi): leaf O(1) before a parent walk. */
+    if (ref_ok(k) && name[1] && !name[2]) {
+        e = ref_find(k, key);
+        if (e) {
+            kvspaceRef_t r = { e->block_id, e->gen, 0, 0 };
+            if (kvspaceGetByRef(k->h, &r, key, &d, &len) == 0 && d && len > 0) {
+                e->block_id = r.block_id;
+                e->gen = r.gen;
+                out->data = d;
+                out->len = len;
+                out->borrowed = 1;
+                free(heap);
+                return 0;
+            }
+        }
+    }
+    /* Other non-a/i/n frame siblings: ART parent before the 64-slot leaf scan. */
     if (ref_ok(k) && !hot_name_ok(name) && k->fpar.key &&
         memcmp(k->fpar.key, dir, k->fpar.klen) == 0 && dir[k->fpar.klen] == 0) {
         kvspaceRef_t r = { k->fpar.block_id, k->fpar.gen, 0, 0 };
@@ -408,7 +425,8 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
             return 0;
         }
     }
-    kvlangRefEnt_t *e = ref_ok(k) ? ref_find(k, key) : NULL;
+    if (!e)
+        e = ref_ok(k) ? ref_find(k, key) : NULL;
     if (e) {
         kvspaceRef_t r = { e->block_id, e->gen, 0, 0 };
         if (kvspaceGetByRef(k->h, &r, key, &d, &len) == 0 && d && len > 0) {
@@ -496,14 +514,6 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
                 he->gen = r.gen;
                 return 0;
             }
-        }
-        /* Frame locals (bsearch lo/hi/mid/idx): ART parent before the 64-slot scan.
-         * `·` map keys fail parent_prefix_ok on the sticky frame `/` slot. */
-        if (parent_prefix_ok(&k->fpar, key)) {
-            kvspaceRef_t r = { k->fpar.block_id, k->fpar.gen, 0, 0 };
-            if (kvspaceSetPartByRef(k->h, &r, key, 0, pairs[0].val.data,
-                                    pairs[0].val.len, err, err_cap) == 0)
-                return 0;
         }
         kvlangRefEnt_t *e = ref_find(k, key);
         if (e) {
