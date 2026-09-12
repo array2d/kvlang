@@ -396,38 +396,19 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
     memcpy(key, dir, dl);
     memcpy(key + dl, name, nl);
     key[dl + nl] = 0;
-    kvlangRefEnt_t *e = NULL;
-    /* Non-a/i/n: 2-char (bsearch lo/hi) try leaf before parent walk. */
+    /* Non-a/i/n frame siblings: ART parent before the 64-slot leaf scan. */
     if (ref_ok(k) && !hot_name_ok(name) && k->fpar.key &&
         memcmp(k->fpar.key, dir, k->fpar.klen) == 0 && dir[k->fpar.klen] == 0) {
-        if (name[1] && !name[2]) {
-            e = ref_find(k, key);
-            if (e) {
-                kvspaceRef_t r = { e->block_id, e->gen, 0, 0 };
-                if (kvspaceGetByRef(k->h, &r, key, &d, &len) == 0 && d && len > 0) {
-                    e->block_id = r.block_id;
-                    e->gen = r.gen;
-                    out->data = d;
-                    out->len = len;
-                    out->borrowed = 1;
-                    free(heap);
-                    return 0;
-                }
-            }
-        }
-        {
-            kvspaceRef_t r = { k->fpar.block_id, k->fpar.gen, 0, 0 };
-            if (kvspaceGetByRef(k->h, &r, key, &d, &len) == 0 && d && len > 0) {
-                out->data = d;
-                out->len = len;
-                out->borrowed = 1;
-                free(heap);
-                return 0;
-            }
+        kvspaceRef_t r = { k->fpar.block_id, k->fpar.gen, 0, 0 };
+        if (kvspaceGetByRef(k->h, &r, key, &d, &len) == 0 && d && len > 0) {
+            out->data = d;
+            out->len = len;
+            out->borrowed = 1;
+            free(heap);
+            return 0;
         }
     }
-    if (!e)
-        e = ref_ok(k) ? ref_find(k, key) : NULL;
+    kvlangRefEnt_t *e = ref_ok(k) ? ref_find(k, key) : NULL;
     if (e) {
         kvspaceRef_t r = { e->block_id, e->gen, 0, 0 };
         if (kvspaceGetByRef(k->h, &r, key, &d, &len) == 0 && d && len > 0) {
