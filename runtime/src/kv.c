@@ -550,8 +550,7 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
                     ref_put(k, key, &rr);
                     hot_put(k, rest, key, rr.block_id, rr.gen);
                 }
-                /* Frame locals too: refresh sticky fpar when the frame dir changes. */
-                {
+                if (is_member || !k->fpar.key) {
                     size_t seplen = 0;
                     int si = last_dir_sep(key, &seplen);
                     if (si >= 0)
