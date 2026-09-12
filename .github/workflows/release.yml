@@ -5,7 +5,8 @@ on:
 permissions:
   contents: write
 jobs:
-  publish:
+  # Linux：deps.json 所列依赖有预编译 ABI tarball，直接下载安装后打包（自包含）。
+  linux:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
@@ -27,12 +28,59 @@ jobs:
           cp runtime/include/*.h "$d/include/"
           cp bin/libkvlang_runtime.so "$d/lib/"
           cp layout/target/release/libkvlanglayout.so "$d/lib/"
-          # 自带全部 ABI 依赖（deps.json 所列）→ 解包即 /usr/lib + /usr/lib/kvspace 布局
-          cp /usr/lib/libkvspace.so* /usr/lib/libblockmalloc.so* /usr/lib/libslotsboxmalloc.so* "$d/lib/"
-          cp /usr/lib/kvspace/libkvspace-c.so* /usr/lib/kvspace/libkvspace_durable.so* "$d/lib/kvspace/"
+          # 自带全部 ABI 依赖 → 解包即 /usr/lib + /usr/lib/kvspace 布局
+          cp /usr/lib/libblockmalloc.so* /usr/lib/libslotsboxmalloc.so* "$d/lib/"
+          cp /usr/lib/libkvspace.so* /usr/lib/kvspace/libkvspace-c.so* /usr/lib/kvspace/libkvspace_durable.so* "$d/lib/kvspace/"
           printf '{"abi":"%s"}\n' "$v" > "$d/abi-manifest.json"
           tar czf "$d.tar.gz" "$d"
           tar tzf "$d.tar.gz"
-          sha256sum "$d.tar.gz" > SHA256SUMS
+          sha256sum "$d.tar.gz" > SHA256SUMS-linux
       - name: 发布 release
-        run: gh release create "${GITHUB_REF_NAME}" kvlang-abi-*.tar.gz SHA256SUMS --generate-notes
+        run: gh release create "${GITHUB_REF_NAME}" kvlang-abi-*-linux-*.tar.gz SHA256SUMS-linux --generate-notes
+
+  # macOS：各仓只有 linux ABI tarball，依赖全部源码构建（装 /usr/local）后打包（自包含）。
+  macos:
+    needs: linux
+    runs-on: macos-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      KVSPACE_LIB_DIR: /usr/local/lib/kvspace # /usr 受 SIP 保护
+    steps:
+      - uses: actions/checkout@v4
+      - name: 构建依赖链（blockmalloc / slotsboxmalloc / kvspace / kvspace-c / kvspace-durable）
+        run: |
+          set -euo pipefail
+          PREFIX=/usr/local
+          for repo in blockmalloc slotsboxmalloc kvspace kvspace-c; do
+            git clone --depth 1 "https://github.com/array2d/$repo.git" "/tmp/$repo"
+            cmake -S "/tmp/$repo" -B "/tmp/$repo/build" \
+              -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PREFIX
+            cmake --build "/tmp/$repo/build" -j
+            sudo cmake --install "/tmp/$repo/build"
+          done
+          git clone --depth 1 https://github.com/array2d/kvspace-durable.git /tmp/kvspace-durable
+          cargo build --release --manifest-path /tmp/kvspace-durable/Cargo.toml
+      - name: 构建 runtime + layout
+        run: |
+          cmake -S runtime -B build/runtime -DCMAKE_BUILD_TYPE=Release -DKVSPACE_LIB_DIR="$KVSPACE_LIB_DIR"
+          cmake --build build/runtime --target kvlang_runtime -j
+          cargo build --release --manifest-path layout/Cargo.toml
+      - name: 打包 ABI 产物
+        run: |
+          set -euo pipefail
+          v="${GITHUB_REF_NAME}"
+          d="kvlang-abi-$v-darwin-arm64"
+          mkdir -p "$d/include" "$d/lib/kvspace"
+          cp runtime/include/*.h "$d/include/"
+          cp bin/libkvlang_runtime.dylib "$d/lib/"
+          cp layout/target/release/libkvlanglayout.dylib "$d/lib/"
+          # 自带全部 ABI 依赖 → 解包即 /usr/local/lib + /usr/local/lib/kvspace 布局
+          cp /usr/local/lib/libblockmalloc*.dylib /usr/local/lib/libslotsboxmalloc*.dylib "$d/lib/"
+          cp /usr/local/lib/kvspace/*.dylib "$d/lib/kvspace/"
+          cp /tmp/kvspace-durable/target/release/libkvspace_durable.dylib "$d/lib/kvspace/"
+          printf '{"abi":"%s"}\n' "$v" > "$d/abi-manifest.json"
+          tar czf "$d.tar.gz" "$d"
+          tar tzf "$d.tar.gz"
+          sha256sum "$d.tar.gz" > SHA256SUMS-macos
+      - name: 上传到 release
+        run: gh release upload "${GITHUB_REF_NAME}" kvlang-abi-*-darwin-*.tar.gz SHA256SUMS-macos --clobber
