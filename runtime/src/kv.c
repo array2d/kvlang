@@ -364,23 +364,13 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
         return 0;
     uint8_t *d;
     uint32_t len;
-    size_t dl = strlen(dir), nl = strlen(name);
-    if (ref_ok(k) && dir && !name[1] && k->nhot) {
-        int same = 0;
-        for (int i = 0; i < k->nhot; i++) {
-            if (k->hot[i].dlen == (uint32_t)dl && k->hot[i].key &&
-                memcmp(k->hot[i].key, dir, dl) == 0) {
-                same = 1;
-                break;
-            }
-        }
-        if (same && hot_get(k, dir, name, &d, &len)) {
-            out->data = d;
-            out->len = len;
-            out->borrowed = 1;
-            return 0;
-        }
+    if (ref_ok(k) && dir && !name[1] && hot_get(k, dir, name, &d, &len)) {
+        out->data = d;
+        out->len = len;
+        out->borrowed = 1;
+        return 0;
     }
+    size_t dl = strlen(dir), nl = strlen(name);
     char stack[256];
     char *heap = NULL;
     char *key = stack;
