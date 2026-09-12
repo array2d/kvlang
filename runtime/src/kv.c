@@ -35,6 +35,85 @@ static kvlangRefEnt_t *pref_find(kvlangKv_t *k, const char *dir, size_t dl) {
     return NULL;
 }
 
+static void hot_clear(kvlangKv_t *k) {
+    for (int i = 0; i < k->nhot; i++) {
+        free(k->hot[i].name);
+        free(k->hot[i].key);
+        k->hot[i].name = k->hot[i].key = NULL;
+        k->hot[i].block_id = k->hot[i].gen = k->hot[i].dlen = 0;
+    }
+    k->nhot = 0;
+}
+
+static int hot_get(kvlangKv_t *k, const char *dir, const char *name,
+                   uint8_t **d, uint32_t *len) {
+    if (!dir || !name)
+        return 0;
+    for (int i = 0; i < k->nhot; i++) {
+        uint32_t dl;
+        if (!k->hot[i].name || k->hot[i].name[0] != name[0] || k->hot[i].name[1] != 0)
+            continue;
+        dl = k->hot[i].dlen;
+        if (!k->hot[i].key || strncmp(dir, k->hot[i].key, dl) != 0 || dir[dl] != 0)
+            continue;
+        kvspaceRef_t r = { k->hot[i].block_id, k->hot[i].gen, 0, 0 };
+        if (kvspaceGetByRef(k->h, &r, k->hot[i].key, d, len) == 0 && *d && *len > 0) {
+            k->hot[i].block_id = r.block_id;
+            k->hot[i].gen = r.gen;
+            if (i != 0) {
+                kvlangHotEnt_t tmp = k->hot[0];
+                k->hot[0] = k->hot[i];
+                k->hot[i] = tmp;
+            }
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Leaf-only (gen==0), one-char names, skip /lib/. Parent refs stick GetMember on a walk. */
+static void hot_put(kvlangKv_t *k, const char *name, const char *key,
+                    uint32_t block_id, uint32_t gen) {
+    kvlangHotEnt_t *e;
+    size_t nl, kl;
+    if (!name || !name[0] || name[1] != 0 || !key || !block_id || gen != 0)
+        return;
+    if (strncmp(key, "/lib/", 5) == 0)
+        return;
+    nl = 1;
+    kl = strlen(key);
+    if (kl < nl)
+        return;
+    for (int i = 0; i < k->nhot; i++) {
+        if (k->hot[i].name && k->hot[i].name[0] == name[0] && k->hot[i].name[1] == 0 &&
+            k->hot[i].key && strcmp(k->hot[i].key, key) == 0) {
+            k->hot[i].block_id = block_id;
+            k->hot[i].gen = gen;
+            return;
+        }
+    }
+    if (k->nhot < KVLANG_HOT_CAP)
+        e = &k->hot[k->nhot++];
+    else {
+        e = &k->hot[KVLANG_HOT_CAP - 1];
+        free(e->name);
+        free(e->key);
+    }
+    e->name = strdup(name);
+    e->key = strdup(key);
+    if (!e->name || !e->key) {
+        free(e->name);
+        free(e->key);
+        e->name = e->key = NULL;
+        if (k->nhot > 0 && e == &k->hot[k->nhot - 1])
+            k->nhot--;
+        return;
+    }
+    e->block_id = block_id;
+    e->gen = gen;
+    e->dlen = (uint32_t)(kl - nl);
+}
+
 static void parent_clear(kvlangKv_t *k) {
     for (int i = 0; i < k->npref; i++)
         free(k->pref[i].key);
@@ -43,6 +122,7 @@ static void parent_clear(kvlangKv_t *k) {
     free(k->fpar.key);
     k->fpar.key = NULL;
     k->fpar.block_id = k->fpar.gen = k->fpar.klen = 0;
+    hot_clear(k);
 }
 
 static int dir_is_member(const char *dir, size_t dl) {
@@ -200,6 +280,21 @@ void kvlangKvInvalidateFrame(kvlangKv_t *k, const char *fr) {
         k->fpar.key = NULL;
         k->fpar.block_id = k->fpar.gen = k->fpar.klen = 0;
     }
+    {
+        int hw = 0;
+        for (int i = 0; i < k->nhot; i++) {
+            char *key = k->hot[i].key;
+            if (key && strncmp(key, fr, n) == 0 && (key[n] == 0 || key[n] == '/')) {
+                free(k->hot[i].name);
+                free(key);
+                continue;
+            }
+            if (hw != i)
+                k->hot[hw] = k->hot[i];
+            hw++;
+        }
+        k->nhot = hw;
+    }
 }
 
 kvlangKv_t *kvlangKvConnect(const char *dsn) {
@@ -261,6 +356,14 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
     kvlangXvalueZero(out);
     if (!name || !name[0])
         return 0;
+    uint8_t *d;
+    uint32_t len;
+    if (ref_ok(k) && dir && !name[1] && hot_get(k, dir, name, &d, &len)) {
+        out->data = d;
+        out->len = len;
+        out->borrowed = 1;
+        return 0;
+    }
     size_t dl = strlen(dir), nl = strlen(name);
     char stack[256];
     char *heap = NULL;
@@ -274,14 +377,13 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
     memcpy(key, dir, dl);
     memcpy(key + dl, name, nl);
     key[dl + nl] = 0;
-    uint8_t *d;
-    uint32_t len;
     kvlangRefEnt_t *e = ref_ok(k) ? ref_find(k, key) : NULL;
     if (e) {
         kvspaceRef_t r = { e->block_id, e->gen, 0, 0 };
         if (kvspaceGetByRef(k->h, &r, key, &d, &len) == 0 && d && len > 0) {
             e->block_id = r.block_id;
             e->gen = r.gen;
+            hot_put(k, name, key, r.block_id, r.gen);
             out->data = d;
             out->len = len;
             out->borrowed = 1;
