@@ -1,0 +1,28 @@
+name: ci-macos
+on: [push, pull_request]
+jobs:
+  build:
+    runs-on: macos-latest
+    env:
+      # /usr 受 SIP 保护，kvspace 装到 /usr/local（本仓 runtime/layout/runtime-rs 均读该变量）
+      KVSPACE_LIB_DIR: /usr/local/lib/kvspace
+    steps:
+      - uses: actions/checkout@v4
+      - name: 构建依赖 kvspace（macOS 无预编译 ABI，从源码装到 /usr/local）
+        run: |
+          git clone --depth 1 https://github.com/array2d/kvspace.git /tmp/kvspace
+          cmake -S /tmp/kvspace -B /tmp/kvspace/build \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
+          cmake --build /tmp/kvspace/build -j
+          sudo cmake --install /tmp/kvspace/build
+      - name: 构建 layout（Rust；macOS 产物后缀为 .dylib）
+        run: |
+          cargo build --release --manifest-path layout/Cargo.toml
+          mkdir -p bin && cp layout/target/release/libkvlanglayout.dylib bin/
+      - name: 构建 runtime（C）
+        run: |
+          cmake -S runtime -B build/runtime -DCMAKE_BUILD_TYPE=Release \
+            -DKVSPACE_LIB_DIR="$KVSPACE_LIB_DIR"
+          cmake --build build/runtime --target kvlang_runtime -j
+      - name: 构建 runtime-rs（Rust）
+        run: cargo build --release --manifest-path runtime-rs/Cargo.toml
