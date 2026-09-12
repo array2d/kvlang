@@ -237,8 +237,14 @@ static kvlangRefEnt_t *pref_cover(kvlangKv_t *k, const char *key) {
     if (!key)
         return NULL;
     for (int i = 0; i < k->npref; i++) {
-        if (parent_prefix_ok(&k->pref[i], key))
-            return &k->pref[i];
+        if (parent_prefix_ok(&k->pref[i], key)) {
+            if (i != 0) {
+                kvlangRefEnt_t tmp = k->pref[0];
+                k->pref[0] = k->pref[i];
+                k->pref[i] = tmp;
+            }
+            return &k->pref[0];
+        }
     }
     return NULL;
 }
