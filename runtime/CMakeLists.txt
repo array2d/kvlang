@@ -20,3 +20,18 @@ target_link_libraries(kvlang_runtime PRIVATE kvspace m pthread)
 
 # --export-dynamic 供 kvlang（term 扩展）找符号；--disable-new-dtags 使 rpath 转 DT_RPATH（传递）。
 set_target_properties(kvlang_runtime PROPERTIES LINK_FLAGS "-Wl,--export-dynamic -Wl,--disable-new-dtags")
+
+# Link kvspace first (--no-as-needed) so dispatch loads before runtime's DT_RPATH.
+add_custom_command(
+    OUTPUT "${BIN_DIR}/test_getmember_siblings"
+    COMMAND ${CMAKE_C_COMPILER} -O2 -D_GNU_SOURCE
+        -I${CMAKE_SOURCE_DIR}/include -I${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests/test_getmember_siblings.c
+        -o ${BIN_DIR}/test_getmember_siblings
+        -L${BIN_DIR}
+        -Wl,--disable-new-dtags
+        -Wl,-rpath,${BIN_DIR}
+        -Wl,--no-as-needed -lkvspace -Wl,--as-needed -lkvlang_runtime
+    DEPENDS kvlang_runtime "${CMAKE_SOURCE_DIR}/tests/test_getmember_siblings.c"
+    VERBATIM)
+add_custom_target(test_getmember_siblings ALL DEPENDS "${BIN_DIR}/test_getmember_siblings")
