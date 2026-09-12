@@ -268,9 +268,11 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
             return 0;
         }
     } else if (ref_ok(k)) {
-        int hit = memchr(name, 0xC2, nl)
-                      ? parent_hit(k, key, &d, &len)
-                      : parent_hit_ent(k, &k->fpar, key, &d, &len);
+        int hit = 0;
+        if (nl >= MEMBER_SEP_LEN && memchr(name, 0xC2, nl))
+            hit = parent_hit(k, key, &d, &len);
+        else if (k->fpar.key)
+            hit = parent_hit_ent(k, &k->fpar, key, &d, &len);
         if (hit) {
             out->data = d;
             out->len = len;
