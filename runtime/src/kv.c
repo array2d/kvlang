@@ -237,14 +237,8 @@ static kvlangRefEnt_t *pref_cover(kvlangKv_t *k, const char *key) {
     if (!key)
         return NULL;
     for (int i = 0; i < k->npref; i++) {
-        if (parent_prefix_ok(&k->pref[i], key)) {
-            if (i != 0) {
-                kvlangRefEnt_t tmp = k->pref[0];
-                k->pref[0] = k->pref[i];
-                k->pref[i] = tmp;
-            }
-            return &k->pref[0];
-        }
+        if (parent_prefix_ok(&k->pref[i], key))
+            return &k->pref[i];
     }
     return NULL;
 }
@@ -345,9 +339,8 @@ int kvlangKvGetOne(kvlangKv_t *k, const char *key, kvlangXvalue_t *out) {
     uint32_t len;
     /* kv.get map slots (`base·k`); frame locals go through GetMember. */
     if (ref_ok(k) && k->npref && key) {
-        kvlangRefEnt_t *pe = (k->npref == 1)
-                                 ? (parent_prefix_ok(&k->pref[0], key) ? &k->pref[0] : NULL)
-                                 : pref_cover(k, key);
+        kvlangRefEnt_t *pe = parent_prefix_ok(&k->pref[0], key) ? &k->pref[0]
+                                 : (k->npref > 1 ? pref_cover(k, key) : NULL);
         if (pe) {
             kvspaceRef_t r = { pe->block_id, pe->gen, 0, 0 };
             if (kvspaceGetByRef(k->h, &r, key, &d, &len) == 0 && d && len > 0) {
