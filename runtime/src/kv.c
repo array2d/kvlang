@@ -267,9 +267,8 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
             free(heap);
             return 0;
         }
-    }
-    if (ref_ok(k)) {
-        int hit = strstr(key, MEMBER_SEP)
+    } else if (ref_ok(k)) {
+        int hit = memchr(name, 0xC2, nl)
                       ? parent_hit(k, key, &d, &len)
                       : parent_hit_ent(k, &k->fpar, key, &d, &len);
         if (hit) {
@@ -362,10 +361,15 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
             kvspaceRef_t rr;
             if (kvspaceResolveRef(k->h, pairs[i].key, &rr) == 0) {
                 ref_put(k, pairs[i].key, &rr);
-                size_t seplen = 0;
-                int si = last_dir_sep(pairs[i].key, &seplen);
-                if (si >= 0)
-                    parent_put(k, pairs[i].key, (size_t)si + seplen, &rr);
+                const char *key = pairs[i].key;
+                const char *slash = strrchr(key, '/');
+                const char *rest = slash ? slash + 1 : key;
+                if (!k->fpar.key || memchr(rest, 0xC2, strlen(rest))) {
+                    size_t seplen = 0;
+                    int si = last_dir_sep(key, &seplen);
+                    if (si >= 0)
+                        parent_put(k, key, (size_t)si + seplen, &rr);
+                }
             }
         }
     }
