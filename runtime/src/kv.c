@@ -60,11 +60,6 @@ static int hot_get(kvlangKv_t *k, const char *dir, const char *name,
         if (kvspaceGetByRef(k->h, &r, k->hot[i].key, d, len) == 0 && *d && *len > 0) {
             k->hot[i].block_id = r.block_id;
             k->hot[i].gen = r.gen;
-            if (i != 0) {
-                kvlangHotEnt_t tmp = k->hot[0];
-                k->hot[0] = k->hot[i];
-                k->hot[i] = tmp;
-            }
             return 1;
         }
     }
