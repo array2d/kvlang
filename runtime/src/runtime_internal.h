@@ -120,6 +120,10 @@ typedef struct {
     kvlangRefEnt_t ref[KVLANG_REF_CAP];
     int nref;
     int ref_on;
+    /* Sticky ART dir ancestor of the last coord key (`…/[k]`). */
+    char *pdir;
+    size_t pdl;
+    uint32_t pblock, pgen;
 } kvlangKv_t;
 
 /* growable string buffer */
