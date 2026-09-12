@@ -21,7 +21,7 @@ utf32 是码点序列（4B×N），**定宽、可索引**，供用户 kv 代码�
 
 ```
 // 存储读出的串默认 utf8；要逐码点处理，先显式转 utf32
-kv·get(d, "name") -> s8          // s8: []char/utf8
+kvspace·get(d, "name") -> s8          // s8: []char/utf8
 char/utf32(s8) -> s32            // s32: []char/utf32，定宽可索引
 s32[0] -> c                      // O(1) 码点取
 ```

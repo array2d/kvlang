@@ -53,7 +53,7 @@ rwfunc main() -> () {
     d:[]char/utf32·int64 = {}
     d·a = 10
     d·b = 20
-    kv·get(d, "a") -> x
+    kvspace·get(d, "a") -> x
     println(x)              // 10
 }
 ```
@@ -123,16 +123,16 @@ xv·bodylen(a) -> bl       // 32（body 字节数）
 d:[]char/utf32·int64 = {}    // 空 stringkeymap 必须标类型
 d·a = 10                      // 静态成员写
 d·b = 20
-kv·get(d, "a") -> x           // 读（缺失返回 None）
+kvspace·get(d, "a") -> x           // 读（缺失返回 None）
 k = "a"
 d·*k -> v                     // 动态键读
-kv·set(d, "c", 30) -> _       // 动态键写
+kvspace·set(d, "c", 30) -> _       // 动态键写
 
 m = map()                     // stringkeymap
 m·k = 5
 
 m2:[int64]·int64 = {}         // 整型键 map（键落字符串）
-kv·set(m2, 0, 7) -> _
+kvspace·set(m2, 0, 7) -> _
 
 r = {name="kv", ver=1}        // struct 字面量（异构记录；没有 object）
 r·name -> n
@@ -161,7 +161,7 @@ break / continue
 return                     // 无返回值
 ```
 
-map 遍历用 `while + kv·listlen + kv·listn`（for-in 对 map 不可靠）。
+map 遍历用 `while + kvspace·listlen + kvspace·listn`（for-in 对 map 不可靠）。
 
 ## 8. 函数（lib 内定义；跨库调用走全路径）
 
@@ -191,11 +191,11 @@ rwfunc main() -> () {
 ### 网络
 - `http·call(method, header, url, body) -> resp`；`http·get(url)`/`post(url,body)`/`put(url,body)`/`del(url)`。
 
-### 自举（kvlanglayout）
-- `kvlanglayout·vet(src) -> "ok"/err`：只校验，不写库。
-- `kvlanglayout·format(src) -> 规范化源码`。
-- `kvlanglayout·layout(src) -> entry`：源码 layout 入库，返回入口。
-- `kvlanglayout·dump("/lib") -> 源码`：/lib 子树导出为可运行源码。
+### 自举（kvlang·*）
+- `kvlang·vet(src) -> "ok"/err`：只校验，不写库。
+- `kvlang·format(src) -> 规范化源码`。
+- `kvlang·layout(src) -> entry`：源码 layout 入库，返回入口。
+- `kvlang·dump("/lib") -> 源码`：/lib 子树导出为可运行源码。
 
 ### 外部进程/文件系统（networld）
 - `networld/proc·exec(args, envs) -> code[, out, err]`：args/envs 是 `{...}` 数组字面量，args 首元素=可执行文件；out/err 是 `@[]uint8` 捕获句柄（绑定即捕获）。
@@ -210,10 +210,10 @@ println(code, out, err)
 networld/fs·write("/tmp/x.txt", xv·reinterpret("hi", "[]uint8")) -> n
 ```
 
-### KV 树（kv·*）
-- `kv·get(path)`、`kv·set(path,val)`、`kv·del(path)`、`kv·deltree(path)`。
-- `kv·list("/dir/")`、`kv·listlen("/dir/")`、`kv·listn("/dir/",i)`（列目录 path 要带尾 `/`）。
-- `kv·abs(x)`（= `&x`，取址）、`kv·cp(src,dst)`、`kv·cpdir(src,dst)`、`kv·cplist(src,dst)`、`kv·has(path)`。
+### KV 树（kvspace·*）
+- `kvspace·get(path)`、`kvspace·set(path,val)`、`kvspace·del(path)`、`kvspace·deltree(path)`。
+- `kvspace·list("/dir/")`、`kvspace·listlen("/dir/")`、`kvspace·listn("/dir/",i)`（列目录 path 要带尾 `/`）。
+- `kvlang·abs(x)`（= `&x`，取址）、`kvspace·cp(src,dst)`、`kvspace·cpdir(src,dst)`、`kvspace·cplist(src,dst)`、`kvspace·has(path)`。
 
 ### 字符串（string·*）
 - `len / char / ord / cmp / find / slice / concat / formatint / formatuint / parseint / parseuint`。

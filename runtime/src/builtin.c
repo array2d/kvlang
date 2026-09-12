@@ -95,7 +95,7 @@ void kvlangBuiltinResolveReadValue(kvlangKv_t *kv, const char *frame_root, const
     kvlangXvalue_t pv; kvlangXvalueZero(&pv);
     kvlangKvGetMember(kv, stk, name, &pv);
     if (kvlangXvalueIsPtr(&pv)) {
-        /* 数据 Ptr（&x）：地址值本体，读值不解引用。成员访问另走 kv·get 的 member_path。 */
+        /* 数据 Ptr（&x）：地址值本体，读值不解引用。成员访问另走 kvspace·get 的 member_path。 */
         *out = pv; pv.data = NULL; pv.len = 0;
     } else if (!kvlangXvalueNone(&pv)) {
         *out = pv; pv.data = NULL; pv.len = 0;
@@ -609,9 +609,9 @@ static const struct { const char *op; kvlangBuiltinFn fn; } myrwircaps[] = {
     {"time/duration·before", kvlangBuiltinDurCmp}, {"time/duration·after", kvlangBuiltinDurCmp},
     {"time·before", kvlangBuiltinTimeCmp}, {"time·after", kvlangBuiltinTimeCmp},
     {"random·uint64", kvlangBuiltinRandUint64}, {"random·int63", kvlangBuiltinRandInt63}, {"random·intn", kvlangBuiltinRandIntn},
-    {"kv·get", kvlangBuiltinKvGet}, {"kv·set", kvlangBuiltinKvSet}, {"kv·del", kvlangBuiltinKvDel},
-    {"kv·deltree", kvlangBuiltinKvDelTree}, {"kv·cp", kvlangBuiltinKvCp}, {"kv·cpdir", kvlangBuiltinKvCpTree}, {"kv·cplist", kvlangBuiltinKvCpList}, {"kv·list", kvlangBuiltinKvList}, {"kv·listlen", kvlangBuiltinKvListLen}, {"kv·listn", kvlangBuiltinKvListN}, {"kv·mkindex", kvlangBuiltinKvMkindex},
-    {"kv·extindex", kvlangBuiltinKvExtIndex}, {"kv·rmindexext", kvlangBuiltinKvRmIndexExt}, {"kv·watch", kvlangBuiltinKvWatch}, {"kv·abs", kvlangBuiltinKvAbs},
+    {"kvspace·get", kvlangCGet}, {"kvspace·set", kvlangCSet}, {"kvspace·del", kvlangCDel},
+    {"kvspace·deltree", kvlangCDelTree}, {"kvspace·cp", kvlangCCp}, {"kvspace·cpdir", kvlangCCpTree}, {"kvspace·cplist", kvlangCCpList}, {"kvspace·list", kvlangCList}, {"kvspace·listlen", kvlangCListLen}, {"kvspace·listn", kvlangCListN}, {"kvspace·mkindex", kvlangCMkindex},
+    {"kvspace·extindex", kvlangCExtIndex}, {"kvspace·rmindexext", kvlangCRmIndexExt}, {"kvspace·watch", kvlangCWatch}, {"kvlang·abs", kvlangCAbs},
     {"vthread·create", kvlangBuiltinVthreadCreate},
     {"vthread·run", kvlangBuiltinVthreadRun},
     {"vthread·call", kvlangBuiltinVthreadCall},
@@ -687,7 +687,7 @@ int kvlangBuiltinExecuteCopy(kvlangKv_t *kv, const char *vtid, const char *pc, k
         const char *slot = inst->writes[i].name;
         const char *dot = strstr(slot, MEMBER_SEP);
         if (dot && dot != slot) {
-            /* 成员写前置条件：memhead 必须已存在（同 kv·set，见 builtin_kv.c）。 */
+            /* 成员写前置条件：memhead 必须已存在（同 kvspace·set，见 builtin_kv.c）。 */
             char *b = strndup(slot, (size_t)(dot - slot));
             int ok = kvlangBuiltinCheckMemhead(kv, fr, b);
             char msg[320];
@@ -784,7 +784,7 @@ int kvlangBuiltinExecuteCopy(kvlangKv_t *kv, const char *vtid, const char *pc, k
 
 
 
-/* ── kv.* ─────────────────────────────────────────────────────────── */
+/* ── kvspace·* ─────────────────────────────────────────────── */
 
 
 

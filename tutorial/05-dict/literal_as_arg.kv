@@ -5,10 +5,10 @@
 //   3
 //   hi
 rwfunc count(a:*[int64]·[]char/utf32) -> (n:int64) {
-	kv·listlen(a) -> n
+	kvspace·listlen(a) -> n
 }
 rwfunc first(a:*[int64]·[]char/utf32) -> (v:[]char/utf32) {
-	kv·get(a, "[0]") -> v
+	kvspace·get(a, "[0]") -> v
 }
 rwfunc test() -> () {
 	args:[int64]·[]char/utf32 = {"a", "b", "c"}

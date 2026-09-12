@@ -3,7 +3,7 @@
 //!   term         : print / println / cerr / printf / input   行输出 + C 风格格式化 + 读 stdin（裸 rwir）
 //!   json         : json·to / json·from                   KV 子树 ↔ JSON 文本
 //!   http         : http·call                             网络抓取（ureq 原生）
-//!   kvlanglayout : kvlanglayout·vet/format/layout/dump    自造 kv 代码入库（layout C ABI）
+//!   kvlanglayout : kvlang·vet/format/layout/dump    自造 kv 代码入库（layout C ABI）
 //!   networld     : networld/proc·exec、networld/fs·size/read/write/append/list/del/mkdir/exists   外部进程 + 宿主文件系统
 //! 不纯 rwir（llm/shell/python/byteseek·run 等）留在 byteseek，依赖本库后自行叠加。
 
@@ -90,28 +90,28 @@ pub const MYRWIRCAPS: &[(&str, Rwir)] = &[
         },
     ),
     (
-        "kvlanglayout·vet",
+        "kvlang·vet",
         Rwir {
             rp: &["[]char/utf32"],
             wp: &["[]char/utf32"],
         },
     ),
     (
-        "kvlanglayout·format",
+        "kvlang·format",
         Rwir {
             rp: &["[]char/utf32"],
             wp: &["[]char/utf32"],
         },
     ),
     (
-        "kvlanglayout·layout",
+        "kvlang·layout",
         Rwir {
             rp: &["[]char/utf32"],
             wp: &["[]char/utf32"],
         },
     ),
     (
-        "kvlanglayout·dump",
+        "kvlang·dump",
         Rwir {
             rp: &["[]char/utf32"],
             wp: &["[]char/utf32"],
@@ -219,10 +219,10 @@ pub fn is_inproc(op: &str) -> bool {
             | "json·to"
             | "json·from"
             | "http·call"
-            | "kvlanglayout·vet"
-            | "kvlanglayout·format"
-            | "kvlanglayout·layout"
-            | "kvlanglayout·dump"
+            | "kvlang·vet"
+            | "kvlang·format"
+            | "kvlang·layout"
+            | "kvlang·dump"
             | "networld/proc·exec"
             | "networld/fs·size"
             | "networld/fs·read"
@@ -258,19 +258,19 @@ pub fn dispatch(eng: &Engine, op: &str, pc: &str) {
         "networld/fs·del" => networld::fs::del(eng, pc),
         "networld/fs·mkdir" => networld::fs::mkdir(eng, pc),
         "networld/fs·exists" => networld::fs::exists(eng, pc),
-        "kvlanglayout·vet" => {
+        "kvlang·vet" => {
             let out = kvlanglayout::vet(eng, &eng.read0(pc));
             eng.set_kv(&eng.write0(pc), &out);
         }
-        "kvlanglayout·format" => {
+        "kvlang·format" => {
             let out = kvlanglayout::format(eng, &eng.read0(pc));
             eng.set_kv(&eng.write0(pc), &out);
         }
-        "kvlanglayout·layout" => {
+        "kvlang·layout" => {
             let out = kvlanglayout::layout(eng, &eng.read0(pc));
             eng.set_kv(&eng.write0(pc), &out);
         }
-        "kvlanglayout·dump" => {
+        "kvlang·dump" => {
             let out = kvlanglayout::dump(eng, &eng.read0(pc));
             eng.set_kv(&eng.write0(pc), &out);
         }

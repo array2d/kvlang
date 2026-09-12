@@ -8,14 +8,14 @@
 //   40
 //   sum = 100
 // 散 key 数组作实参时 for-in 在 layout 脱糖成 compact 取值（xv·at），
-// 函数内改用 kv·listlen/kv·listn/kv·get 显式遍历。
+// 函数内改用 kvspace·listlen/kvspace·listn/kvspace·get 显式遍历。
 rwfunc print_sum(nums:*[int64]·int64) -> (total:int64) {
 	total = 0
-	kv·listlen(nums) -> n
+	kvspace·listlen(nums) -> n
 	0 -> i
 	while (i < n) {
-		kv·listn(nums, i) -> k
-		kv·get(nums, k) -> x
+		kvspace·listn(nums, i) -> k
+		kvspace·get(nums, k) -> x
 		println(x)
 		total = total + x
 		i = i + 1

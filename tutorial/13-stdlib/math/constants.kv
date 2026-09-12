@@ -6,8 +6,8 @@
 rwfunc test() -> () {
 	/lib/math·Pi -> pi
 	println("Pi=", pi)
-	kv·get("/lib/math·E") -> e
+	kvspace·get("/lib/math·E") -> e
 	println("E=", e)
-	kv·get("/lib/math·Tau") -> tau
+	kvspace·get("/lib/math·Tau") -> tau
 	println("Tau=", tau)
 }

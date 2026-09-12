@@ -11,9 +11,9 @@ lib kvlang/spec/词法/绝对路径字面量 {
 - 其余非分隔符字符构成段名（同样允许非 ASCII）。
 
 ```
-kv·set("/tmp/kvt·data", 42)
-kv·get("/tmp/kvt", "data") -> x
-kv·set("/tmp/kvt/a", 1)
+kvspace·set("/tmp/kvt·data", 42)
+kvspace·get("/tmp/kvt", "data") -> x
+kvspace·set("/tmp/kvt/a", 1)
 ```
 
 路径的完整寻址语义见 [[寻址与命名]]；本节只界定其词法形态。裸 `/`（其后不接字母/数字/下划线，且非

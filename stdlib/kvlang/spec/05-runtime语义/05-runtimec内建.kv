@@ -51,8 +51,9 @@ runtime-c 的 myrwircaps**（见 [[runtime开发规范]]）——核心能就地
 - `time/duration·`：`nanos`、`millis`、`seconds`、`minutes`、`hours`、`as_nanos`、`as_millis`、
   `as_seconds`、`as_minutes`、`as_hours`、`add`、`sub`、`before`、`after`。
 - `random·`：`uint64`、`int63`、`intn`。
-- `kv·`：`get`、`set`、`del`、`deltree`、`cp`、`cpdir`、`cplist`、`list`、`listlen`、`listn`、
-  `mkindex`、`extindex`、`rmindexext`、`watch`、`abs`。
+- `kvspace·`：`get`、`set`、`del`、`deltree`、`cp`、`cpdir`、`cplist`、`list`、`listlen`、`listn`、
+  `mkindex`、`extindex`、`rmindexext`、`watch`。
+- `kvlang·`：`abs`（取址；`&x ≡ kvlang·abs(x)`）。
 - `vthread·`：`create`、`run`、`call`、`sleep`、`setstatus`（语义见 [[执行模型]] §七）。
 
 锚例：`tutorial/13-stdlib/`（`kv`、`string`、`xv`、`math`、`time`、`duration` 六族）、

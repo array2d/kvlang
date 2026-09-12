@@ -18,7 +18,7 @@ primary     = literal | ident | path
             | struct_literal
             | map_literal
 
-prefix_unary = "-" | "!" | "√" | "&" | "*"           (* √ = sqrt（U+221A）；&x ≡ kv·abs(x) 绝对地址（产 ref=1 Ptr）；*p 解引用 *)
+prefix_unary = "-" | "!" | "√" | "&" | "*"           (* √ = sqrt（U+221A）；&x ≡ kvlang·abs(x) 绝对地址（产 ref=1 Ptr）；*p 解引用 *)
 
 infix_primary = binary_op expr
 

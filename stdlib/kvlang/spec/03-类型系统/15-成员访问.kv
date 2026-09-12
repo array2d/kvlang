@@ -8,7 +8,7 @@ lib kvlang/spec/类型系统/成员访问 {
 | `base·200` | 裸标量 memitemkey：访问键即标量字面量本身（禁 `base·[200]`） |
 | `base·[342.124,23.2345]` | 标量元组 memitemkey：访问键即元组字面量本身 |
 | `base·*k` | 动态键：`*` 令 runtime-c 解引用/求值 `k`，其值作 memitemkey |
-| `kv·get(base, k)` / `kv·set(base, k, v)` | 动态键读/写 |
+| `kvspace·get(base, k)` / `kvspace·set(base, k, v)` | 动态键读/写 |
 
 **指针作 key 必须 `*` 开头**：当作为 memitemkey 的操作数是指针（ref=1 Ptr）时，**必须**写 `base·*k`，
 由 runtime-c 沿 Ptr 解引用取被指向值作键；省略 `*` 非法（不自动解引用）。这是**显式** deref、非自动改
@@ -19,7 +19,7 @@ lib kvlang/spec/类型系统/成员访问 {
 [[文法与合法性]] 的逐字铁律）。裸标量键 `base·200` 与 1 元元组键 `base·[200]` 是**不同** formatter，
 不得互转。
 
-容器成员一律走 `·`（或 `kv·get`/`kv·set`）作**索引**，**不得**用 `[]` 索引运算符；`[]` 只索引 compact
+容器成员一律走 `·`（或 `kvspace·get`/`kvspace·set`）作**索引**，**不得**用 `[]` 索引运算符；`[]` 只索引 compact
 数组（见 [[数组形态]]）。注意：元组键 `base·[…]` 里的 `[…]` 是 **memitemkey 值字面量**、不是索引运算
 符——它整体是 `·` 右侧的那一个键。
 

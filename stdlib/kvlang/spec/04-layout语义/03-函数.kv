@@ -86,7 +86,7 @@ runtime 被拒，故累加器写法前须保证目标已有值（如 `0 -> acc` 
 
 **永久规定**：参数定义键 `.[op,param]` 中 `param<0` 是**只读参数**（读参）、`param>0` 是**要写的参**
 （写参，见 [[storetype_def族与签名行]]）。函数体内读参的裸名**一律**不得作写槽（含 `for … in` 的迭代
-变量、成员/下标写、`kv·set(base, …)` 的 base），layout 报错拒绝装载：
+变量、成员/下标写、`kvspace·set(base, …)` 的 base），layout 报错拒绝装载：
 
 ```
 error: func f: read param "A" cannot be used as write slot (read params are read-only)
@@ -96,7 +96,7 @@ error: func f: read param "A" cannot be used as write slot (read params are read
 都只读——写值读参就是写一个只读的帧槽，写地址读参还会破坏数据流方向。要改值就先拷到新局部变量
 （`x -> local`，此后写 `local`）；要就地改调用方对象就把该参数放到写参侧（`-> (p:*/lib/Point)`）。
 
-**只读覆盖到子成员，且别名不洗白**：`p·field = v`、`p[k] = v`、`kv·set(p, k, v)` 同样命中该检查——经
+**只读覆盖到子成员，且别名不洗白**：`p·field = v`、`p[k] = v`、`kvspace·set(p, k, v)` 同样命中该检查——经
 desugar 后 base 就是读参裸名；对地址读参，只读性还沿别名传播：`q = p` / `p -> q` 使 `q` 指到**同一个对
 象**，此后 `q·field = v` 写的仍是 `p` 的对象，layout 一并拒绝（否则一句话就能绕开本规则）：
 
@@ -125,7 +125,7 @@ rwfunc inc(x:int64) -> (r:int64) { x -> local  local = local + 1  local -> r }
 ```
 
 （`q·next -> q` 这类**重绑别名本身**的写槽是裸名、不碰调用方对象，不受影响。）判定规则（实现）：写槽
-含 `/`、`[`、`·` 者视为路径/下标/成员写，不计入本检查；但 `kv·set(base, …)` 的 base 命中读参裸名同样
+含 `/`、`[`、`·` 者视为路径/下标/成员写，不计入本检查；但 `kvspace·set(base, …)` 的 base 命中读参裸名同样
 拒绝（成员目录被改写）。
 
 ## 参数同名规则

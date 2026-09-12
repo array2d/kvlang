@@ -21,29 +21,29 @@ rwfunc generate(num_rows:int64) -> () {
 	/tmp/cur:[int64]·int64 = {}
 	// store prev row in dict
 	/tmp/pt:[int64]·int64 = {}
-	_ = kv·set("/tmp/pt", 0, 1)
+	_ = kvspace·set("/tmp/pt", 0, 1)
 	println(1)
 	if (num_rows == 1) { }
 	r = 1
 	while (r < num_rows) {
 		println(1)
-		_ = kv·set("/tmp/cur", 0, 1)
+		_ = kvspace·set("/tmp/cur", 0, 1)
 		i = 1
 		while (i < r) {
-			kv·get("/tmp/pt", i-1) -> a
-			kv·get("/tmp/pt", i) -> b
+			kvspace·get("/tmp/pt", i-1) -> a
+			kvspace·get("/tmp/pt", i) -> b
 			v = a + b
 			println(v)
-			_ = kv·set("/tmp/cur", i, v)
+			_ = kvspace·set("/tmp/cur", i, v)
 			i + 1 -> i
 		}
 		println(1)
-		_ = kv·set("/tmp/cur", r, 1)
+		_ = kvspace·set("/tmp/cur", r, 1)
 		// copy cur to pt
 		k = 0
 		while (k <= r) {
-			kv·get("/tmp/cur", k) -> val
-			_ = kv·set("/tmp/pt", k, val)
+			kvspace·get("/tmp/cur", k) -> val
+			_ = kvspace·set("/tmp/pt", k, val)
 			k + 1 -> k
 		}
 		r + 1 -> r

@@ -19,7 +19,8 @@ builtin_call = ( "abs" | "neg" | "sign" | "pow" | "sqrt" | "exp" | "log"
 集）兑现（见 runtime 语义卷）。
 
 `·` 限定内建族（`base·method(...)`，非裸名终结符）：
-`string·*`、`xv·*`（at/set/reshape/reinterpret/langtype/bodylen…）、`kv·*`（get/set/del…）、
+`string·*`、`xv·*`（at/set/reshape/reinterpret/langtype/bodylen…）、`kvspace·*`（get/set/del…）、
+`kvlang·*`（abs 取址）、
 `ndarray·*`（numel/dim/shape）、`array·*`（append/slice/scatter/compact）、`struct·new`、`vthread·*`
 （create/run/call/sleep/setstatus）、`time·*`、`time/duration·*`（包分隔用 `/` 分段、`·` 接方法）、
 `random·*`（uint64/int63/intn）。
@@ -32,7 +33,7 @@ builtin_call = ( "abs" | "neg" | "sign" | "pow" | "sqrt" | "exp" | "log"
 (* ÷ : 两侧 int → 整除(C 风格)；任一侧 float → 浮除 *)
 (* s[i] 读返单字符字符串，越界返 ""；s[i]="X" 单字符替换写回新串 *)
 (* + 作用在 string∧string → 拼接 *)
-(* &x ≡ kv·abs(x)：一元前缀**绝对地址**运算符，产指向 x 的 Ptr（ref=1，body=绝对路径）；与中缀按位与 a & b 靠位置区分 *)
+(* &x ≡ kvlang·abs(x)：一元前缀**绝对地址**运算符，产指向 x 的 Ptr（ref=1，body=绝对路径）；与中缀按位与 a & b 靠位置区分 *)
 ```
 "## -> /lib/kvlang/spec/附录/内建函数
 }

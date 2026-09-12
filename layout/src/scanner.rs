@@ -464,7 +464,7 @@ pub fn scan(src: &str) -> Vec<Token> {
                     // ·（U+00B7）与 .（释放给小数 key）是路径字符；· 后的坐标段 [0,1] 是成员链。
                     if src[i] == 0xC2 && i + 1 < src.len() && src[i + 1] == 0xB7 {
                         // `·*`（动态成员名）不并入路径：让 `·`/`*`/`k` 单独成 token，交成员链解析
-                        // 成 `kv·get/kv·set(base, k)`。`·` 后接名字的情况（`/lib/json·to` 的
+                        // 成 `kvspace·get/kvspace·set(base, k)`。`·` 后接名字的情况（`/lib/json·to` 的
                         // 包·函数分隔符、`/tmp/ts·5` 的静态成员）仍按原样整段吃进路径 token。
                         if i + 2 < src.len() && src[i + 2] == b'*' {
                             break;

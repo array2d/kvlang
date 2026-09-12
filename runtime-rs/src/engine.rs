@@ -245,7 +245,7 @@ impl Engine {
         }
     }
 
-    /// 写一个字符串列表容器（供 fs·list 等返回可 for-in 的字符串列表，对齐 C kv·list 表示）：
+    /// 写一个字符串列表容器（供 fs·list 等返回可 for-in 的字符串列表，对齐 C kvspace·list 表示）：
     ///   dst   = 容器值：langtype=`[int64]·[]char/utf32`（见 [[map容器]]），body 空，dims=[n]
     ///   dst·  = memindex：kind=index，body=[4B count LE]["[0]\n[1]\n..."]（成员坐标名唯一权威）
     ///   dst·[i] = 各成员字符串（char/utf32）

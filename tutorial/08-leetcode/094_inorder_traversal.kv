@@ -17,12 +17,12 @@ rwfunc inorder(root:*TNode) -> () {
 	cur = root
 	while (cur != None || si > 0) {
 		while (cur != None) {
-			_ = kv·set(stack, si, cur)
+			_ = kvspace·set(stack, si, cur)
 			si + 1 -> si
 			cur·left -> cur
 		}
 		si - 1 -> si
-		kv·get(stack, si) -> node
+		kvspace·get(stack, si) -> node
 		node·val -> v
 		println(v)
 		node·right -> cur
