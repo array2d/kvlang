@@ -354,6 +354,14 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
                 e->gen = r.gen;
                 return 0;
             }
+        } else {
+            kvlangRefEnt_t *pe = pref_cover(k, pairs[0].key);
+            if (pe) {
+                kvspaceRef_t r = { pe->block_id, pe->gen, 0, 0 };
+                if (kvspaceSetPartByRef(k->h, &r, pairs[0].key, 0, pairs[0].val.data,
+                                        pairs[0].val.len, err, err_cap) == 0)
+                    return 0;
+            }
         }
     }
     for (int i = 0; i < n; i++) {
