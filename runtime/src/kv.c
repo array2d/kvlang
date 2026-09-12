@@ -9,22 +9,8 @@ static kvlangRefEnt_t *ref_find(kvlangKv_t *k, const char *key) {
     return NULL;
 }
 
-/* Last path component starting with '[' is a unique coord; do not occupy the
- * 64-slot leaf table. Directory parent entries still cover those siblings. */
-static int cacheable(const char *key) {
-    const char *sl, *s;
-    if (!key || !key[0])
-        return 0;
-    sl = strrchr(key, '/');
-    s = sl ? sl + 1 : key;
-    return s[0] != '[';
-}
-
 static void ref_put(kvlangKv_t *k, const char *key, const kvspaceRef_t *r) {
-    kvlangRefEnt_t *e;
-    if (!cacheable(key))
-        return;
-    e = ref_find(k, key);
+    kvlangRefEnt_t *e = ref_find(k, key);
     if (!e) {
         if (k->nref < KVLANG_REF_CAP) e = &k->ref[k->nref++];
         else { e = &k->ref[0]; free(e->key); }
@@ -117,7 +103,7 @@ int kvlangKvGetOne(kvlangKv_t *k, const char *key, kvlangXvalue_t *out) {
     kvlangXvalueZero(out);
     uint8_t *d;
     uint32_t len;
-    if (ref_ok(k) && parent_hit(k, key, &d, &len)) {
+    if (k->pdir && k->pgen && parent_hit(k, key, &d, &len)) {
         out->data = d;
         out->len = len;
         out->borrowed = 1;
