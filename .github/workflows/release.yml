@@ -24,8 +24,10 @@ jobs:
           set -euo pipefail
           v="${GITHUB_REF_NAME}"
           d="kvlang-abi-$v-linux-x86_64"
-          mkdir -p "$d/include" "$d/lib/kvspace"
-          cp runtime/include/*.h "$d/include/"
+          mkdir -p "$d/include/kvlang" "$d/lib/kvspace"
+          cp runtime/include/*.h "$d/include/kvlang/"
+          # 自带全部 ABI 依赖的头 → 解包即 /usr/include 布局（扩展编译需要 kvspace.h 等）
+          cp -r /usr/include/kvspace /usr/include/blockmalloc /usr/include/slotsboxmalloc "$d/include/"
           cp bin/libkvlang_runtime.so "$d/lib/"
           cp layout/target/release/libkvlanglayout.so "$d/lib/"
           # 自带全部 ABI 依赖 → 解包即 /usr/lib + /usr/lib/kvspace 布局
@@ -70,8 +72,10 @@ jobs:
           set -euo pipefail
           v="${GITHUB_REF_NAME}"
           d="kvlang-abi-$v-darwin-arm64"
-          mkdir -p "$d/include" "$d/lib/kvspace"
-          cp runtime/include/*.h "$d/include/"
+          mkdir -p "$d/include/kvlang" "$d/lib/kvspace"
+          cp runtime/include/*.h "$d/include/kvlang/"
+          # 自带全部 ABI 依赖的头 → 解包即 /usr/local/include 布局
+          cp -r /usr/local/include/kvspace /usr/local/include/blockmalloc /usr/local/include/slotsboxmalloc "$d/include/"
           cp bin/libkvlang_runtime.dylib "$d/lib/"
           cp layout/target/release/libkvlanglayout.dylib "$d/lib/"
           # 自带全部 ABI 依赖 → 解包即 /usr/local/lib + /usr/local/lib/kvspace 布局
