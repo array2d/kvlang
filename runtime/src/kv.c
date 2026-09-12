@@ -497,6 +497,14 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
                 return 0;
             }
         }
+        /* Frame locals (bsearch lo/hi/mid/idx): ART parent before the 64-slot scan.
+         * `·` map keys fail parent_prefix_ok on the sticky frame `/` slot. */
+        if (parent_prefix_ok(&k->fpar, key)) {
+            kvspaceRef_t r = { k->fpar.block_id, k->fpar.gen, 0, 0 };
+            if (kvspaceSetPartByRef(k->h, &r, key, 0, pairs[0].val.data,
+                                    pairs[0].val.len, err, err_cap) == 0)
+                return 0;
+        }
         kvlangRefEnt_t *e = ref_find(k, key);
         if (e) {
             kvspaceRef_t r = { e->block_id, e->gen, 0, 0 };

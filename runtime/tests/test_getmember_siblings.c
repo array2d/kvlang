@@ -110,6 +110,20 @@ int main(void) {
     printf("GetMember siblings via cached ART parent: %d keys, distinct values\n", n);
     printf("fpar block_id=%u depth=%u\n", k->fpar.block_id, k->fpar.gen);
 
+    /* Set a 2-char sibling with leaf/hot empty so the write uses fpar. */
+    {
+        char lokey[128];
+        snprintf(lokey, sizeof lokey, "%slo", frm);
+        CHECK(set_i64(k, lokey, 88) == 0);
+        CHECK(kvlangKvGetMember(k, frm, "lo", &out) == 0);
+        CHECK(xv_i64(&out) == 88);
+        kvlangKvReadReset(k);
+        CHECK(kvlangKvGetMember(k, frm, "hi", &out) == 0);
+        CHECK(xv_i64(&out) == 77);
+        kvlangKvReadReset(k);
+        printf("Set sibling via cached ART parent: lo=88 hi=77\n");
+    }
+
     kvlangKvDisconnect(k);
     if (failures) {
         fprintf(stderr, "%d checks failed\n", failures);
