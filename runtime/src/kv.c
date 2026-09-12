@@ -20,6 +20,25 @@ static void ref_put(kvlangKv_t *k, const char *key, const kvspaceRef_t *r) {
     e->gen = r->gen;
 }
 
+static kvlangRefEnt_t *ref_find_dir(kvlangKv_t *k, const char *key) {
+    kvlangRefEnt_t *e = ref_find(k, key);
+    if (e) return e;
+    if (!key) return NULL;
+    kvlangRefEnt_t *best = NULL;
+    size_t bestn = 0, kl = strlen(key);
+    for (int i = 0; i < k->nref; i++) {
+        char *d = k->ref[i].key;
+        if (!d) continue;
+        size_t n = strlen(d);
+        if (n == 0 || n > kl || n <= bestn) continue;
+        if (d[n - 1] == '/' && memcmp(d, key, n) == 0) {
+            best = &k->ref[i];
+            bestn = n;
+        }
+    }
+    return best;
+}
+
 static int ref_ok(kvlangKv_t *k) {
     return k->ref_on && kvspaceResolveRef && kvspaceGetByRef;
 }
@@ -90,7 +109,7 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
     key[dl + nl] = 0;
     uint8_t *d;
     uint32_t len;
-    kvlangRefEnt_t *e = ref_ok(k) ? ref_find(k, key) : NULL;
+    kvlangRefEnt_t *e = ref_ok(k) ? ref_find(k, dir) : NULL;
     if (e) {
         kvspaceRef_t r = { e->block_id, e->gen };
         if (kvspaceGetByRef(k->h, &r, key, &d, &len) == 0 && d && len > 0) {
@@ -107,9 +126,10 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
         out->data = d;
         out->len = len;
         out->borrowed = 1;
-        if (ref_ok(k)) {
-            kvspaceRef_t r;
-            if (kvspaceResolveRef(k->h, key, &r) == 0) ref_put(k, key, &r);
+        if (ref_ok(k) && dir) {
+            kvspaceRef_t rr;
+            if (kvspaceResolveRef(k->h, key, &rr) == 0 && rr.gen <= (uint32_t)dl)
+                ref_put(k, dir, &rr);
         }
     }
     free(key);
@@ -153,7 +173,7 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
     int rc = 0;
     if (n == 1 && ref_ok(k) && kvspaceSetPartByRef && pairs[0].key && pairs[0].val.data &&
         pairs[0].val.len) {
-        kvlangRefEnt_t *e = ref_find(k, pairs[0].key);
+        kvlangRefEnt_t *e = ref_find_dir(k, pairs[0].key);
         if (e) {
             kvspaceRef_t r = { e->block_id, e->gen };
             if (kvspaceSetPartByRef(k->h, &r, pairs[0].key, 0, pairs[0].val.data,
@@ -187,8 +207,19 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
             memcpy(dst, body, body_len);
         if (rc == 0 && n == 1 && ref_ok(k) && pairs[i].key) {
             kvspaceRef_t rr;
-            if (kvspaceResolveRef(k->h, pairs[i].key, &rr) == 0)
-                ref_put(k, pairs[i].key, &rr);
+            if (kvspaceResolveRef(k->h, pairs[i].key, &rr) == 0) {
+                const char *sl = strrchr(pairs[i].key, '/');
+                if (sl && sl[1]) {
+                    size_t dn = (size_t)(sl - pairs[i].key) + 1;
+                    if (rr.gen <= (uint32_t)dn) {
+                        char dir[dn + 1];
+                        memcpy(dir, pairs[i].key, dn);
+                        dir[dn] = 0;
+                        ref_put(k, dir, &rr);
+                    }
+                } else
+                    ref_put(k, pairs[i].key, &rr);
+            }
         }
     }
     return rc;
