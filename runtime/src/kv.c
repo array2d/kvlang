@@ -78,16 +78,18 @@ static void hot_put(kvlangKv_t *k, const char *name, const char *key,
                     uint32_t block_id, uint32_t gen) {
     kvlangHotEnt_t *e;
     size_t nl, kl;
-    if (!name || !name[0] || name[1] != 0 || !key || !block_id)
+    if (!name || !name[0] || !key || !block_id)
+        return;
+    nl = strlen(name);
+    if (nl >= MEMBER_SEP_LEN && memchr(name, 0xC2, nl))
         return;
     if (strncmp(key, "/lib/", 5) == 0)
         return;
-    nl = 1;
     kl = strlen(key);
     if (kl < nl)
         return;
     for (int i = 0; i < k->nhot; i++) {
-        if (k->hot[i].name && k->hot[i].name[0] == name[0] &&
+        if (k->hot[i].name && strcmp(k->hot[i].name, name) == 0 &&
             k->hot[i].key && strcmp(k->hot[i].key, key) == 0) {
             k->hot[i].block_id = block_id;
             k->hot[i].gen = gen;
@@ -361,7 +363,8 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
         return 0;
     uint8_t *d;
     uint32_t len;
-    if (ref_ok(k) && !name[1] && hot_get(k, dir, name, &d, &len)) {
+    if (ref_ok(k) && dir && !(name[0] == (char)0xC2 && name[1] == (char)0xB7) &&
+        hot_get(k, dir, name, &d, &len)) {
         out->data = d;
         out->len = len;
         out->borrowed = 1;
