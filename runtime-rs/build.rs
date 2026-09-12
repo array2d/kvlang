@@ -1,7 +1,7 @@
 // 链接 stock 三方 .so（camelCase，符合 deepx-design/doc/abi-naming-standard.md）：
 //   kvlang_runtime  —— 模式2 主导执行 + rwirext 宿主 ABI（kvlang/bin 新构建优先，回落 /usr/lib）
 //   kvspace         —— dispatch 前端，按 DSN 运行时选后端（/usr/lib）
-//   kvlanglayout    —— .kv 编译入库（kvlanglayout·* rwir + 启动 layout stdlib 用，/usr/lib）
+//   kvlanglayout    —— .kv 编译入库（kvlang·* rwir + 启动 layout stdlib 用，/usr/lib）
 // 并把 stdlib/**/*.kv（顶层语言级标准库）全部 include_str! 进二进制（EMBEDDED_KV），启动时 layout 进 kvspace。
 use std::path::{Path, PathBuf};
 

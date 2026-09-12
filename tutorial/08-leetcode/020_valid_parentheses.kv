@@ -14,15 +14,15 @@ rwfunc is_valid(s:[]char/utf32) -> (ok:int64) {
 		if (c == "(") {
 			si + 1 -> si
 			/tmp/vp:[int64]·int64 = {}
-			_ = kv·set("/tmp/vp", si, 1)
+			_ = kvspace·set("/tmp/vp", si, 1)
 		}
 		if (c == "[") {
 			si = si + 1
-			kv·set("/tmp/vp", si, 2) -> _
+			kvspace·set("/tmp/vp", si, 2) -> _
 		}
 		if (c == "{") {
 			si + 1 -> si
-			_ = kv·set("/tmp/vp", si, 3)
+			_ = kvspace·set("/tmp/vp", si, 3)
 		}
 		if (c == ")") {
 			if (si < 0) { 0 -> ok ; n -> i }

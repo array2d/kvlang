@@ -1,8 +1,8 @@
-//! rwir `kvlanglayout·*`：自造 kv 代码入库/导出（直连 layout 的 C ABI）。
-//!   kvlanglayout·vet(src)     -> "ok" | 错误信息      只校验（parse+lower），不写 kvspace
-//!   kvlanglayout·format(src)  -> 规范化源码 | "error: …"  格式化（parse→规范化），不写 kvspace
-//!   kvlanglayout·layout(src)  -> entry | "error: …"   把内存源码 layout 进 kvspace
-//!   kvlanglayout·dump(lib)    -> dump 文本 | "error: …"  把 /lib 子树重构为可运行 kvlang 源码
+//! rwir `kvlang·*`：自造 kv 代码入库/导出（直连 layout 的 C ABI）。
+//!   kvlang·vet(src)     -> "ok" | 错误信息      只校验（parse+lower），不写 kvspace
+//!   kvlang·format(src)  -> 规范化源码 | "error: …"  格式化（parse→规范化），不写 kvspace
+//!   kvlang·layout(src)  -> entry | "error: …"   把内存源码 layout 进 kvspace
+//!   kvlang·dump(lib)    -> dump 文本 | "error: …"  把 /lib 子树重构为可运行 kvlang 源码
 //! 四者都在 C 边界 catch_unwind：坏代码返回 -1，绝不打崩宿主进程。
 
 use std::ffi::c_char;

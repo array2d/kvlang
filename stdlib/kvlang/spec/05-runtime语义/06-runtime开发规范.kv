@@ -22,7 +22,7 @@ opcode**，映射 `opcode → 就地处理器`。它是 kvlang runtime 分层与
   表**（数组 + 线性查找，见 [[cruntime与后端abi]]），登记 native builtin（+ 控制流 `call`/`return`/
   `br`/`goto` + `=` 拷贝，见 [[runtimec内建]]）。
 - **每个扩展运行时各自定义一张 myrwircaps**，登记其自带的 rwir opcode。例：runtime-rs 为 `term`/
-  `json`/`http`/`kvlanglayout`/`networld` 等（见 [[notinmyrwircaps]] 就地集合）；未来
+  `json`/`http`/`kvlang`/`networld` 等（见 [[notinmyrwircaps]] 就地集合）；未来
   deepx-gpu-compute 为 tensor 融合算子。
 - **派发判据**：`opcode ∈ 本 runtime.myrwircaps` → 查表取处理器**就地执行**；否则该 rwir 须经 def
   rwir 路由，**移交**给以它为 myrwircaps 的另一扩展（跨进程 handoff/watch，或嵌入式交回宿主，见

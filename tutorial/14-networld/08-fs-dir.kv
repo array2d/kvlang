@@ -1,6 +1,6 @@
 // networld/fs·mkdir + list + del：目录创建、列举成员、删除
 //   fs·mkdir(d) -> 0       创建目录（含缺失父级，幂等）
-//   fs·list(d) -> names    列目录成员（名字序，[int64]·[]char/utf32）；散 key 两步遍历 kv·listn+kv·get 取名
+//   fs·list(d) -> names    列目录成员（名字序，[int64]·[]char/utf32）；散 key 两步遍历 kvspace·listn+kvspace·get 取名
 //   fs·del(p) -> 0         删文件或空目录；非空目录失败返回 -1
 // 期望输出:
 //   count= 2
@@ -11,12 +11,12 @@
 // print_dir 列目录成员（map 两步遍历）并打印成员数与逐个名字
 rwfunc print_dir(d:[]char/utf32) -> () {
 	networld/fs·list(d) -> names
-	kv·listlen(names) -> nc
+	kvspace·listlen(names) -> nc
 	println("count=", nc)
 	i = 0
 	while (i < nc) {
-		kv·listn(names, i) -> key
-		kv·get(names, key) -> nm
+		kvspace·listn(names, i) -> key
+		kvspace·get(names, key) -> nm
 		println("name=", nm)
 		i = i + 1
 	}

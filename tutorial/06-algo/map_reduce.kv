@@ -4,15 +4,15 @@
 //   odd squares count: 5
 //   sum of squares: 165
 // 散 key 数组作实参时 for-in 在 layout 脱糖成 compact 取值（xv·at），
-// 函数内改用 kv·listlen/kv·listn/kv·get 显式遍历。
+// 函数内改用 kvspace·listlen/kvspace·listn/kvspace·get 显式遍历。
 rwfunc map_reduce(nums:*[int64]·int64) -> (count:int64, total:int64) {
 	0 -> count
 	total = 0
-	kv·listlen(nums) -> n
+	kvspace·listlen(nums) -> n
 	0 -> i
 	while (i < n) {
-		kv·listn(nums, i) -> k
-		kv·get(nums, k) -> nv
+		kvspace·listn(nums, i) -> k
+		kvspace·get(nums, k) -> nv
 		rem = nv % 2
 		rem == 1 -> is_odd
 

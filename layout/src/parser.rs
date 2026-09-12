@@ -804,11 +804,11 @@ impl Parser {
                     bad(p, w, fname);
                 }
             }
-            // kv.set 成员形（3 读：base, key, val）改写 base 的成员目录，命中读参**或别名**即拒绝。
+            // kvspace·set 成员形（3 读：base, key, val）改写 base 的成员目录，命中读参**或别名**即拒绝。
             // 被写的参数**必须**声明在写参侧（签名诚实原则）——要就地改调用方的对象，
             // 就把该参数写到 `-> (p:Point)` 里，而不是留在读参侧靠别名绕。
             if let Some(e) = &inst.expr {
-                if e.op == "kv·set" && e.args.len() >= 3 {
+                if e.op == "kvspace·set" && e.args.len() >= 3 {
                     let base = &e.args[0].val;
                     if !base.contains('/') && (ro.contains(base) || tainted.contains_key(base)) {
                         if ro.contains(base) {
@@ -1274,8 +1274,8 @@ impl Parser {
 
     fn parse_pratt(&mut self, min_prec: i32) -> Option<Expr> {
         let mut left = self.parse_primary_expr()?;
-        // 成员链：base + 各段收集成单个变参 kv·get(base, seg1, seg2, ...)，runtime 直接拼路径。
-        // 不在 layout 摊成嵌套 kv·get（内层返回的是值，丢路径，#110）。每段为静态字面量或
+        // 成员链：base + 各段收集成单个变参 kvspace·get(base, seg1, seg2, ...)，runtime 直接拼路径。
+        // 不在 layout 摊成嵌套 kvspace·get（内层返回的是值，丢路径，#110）。每段为静态字面量或
         // 动态键（*k 的变量）。
         let mut chain_base: Option<Expr> = None;
         let mut chain_segs: Vec<Expr> = Vec::new();
@@ -1327,11 +1327,11 @@ impl Parser {
                     continue;
                 }
             }
-            // 成员链被打断（下标/中缀/循环尾）：flush 成单个变参 kv·get。
+            // 成员链被打断（下标/中缀/循环尾）：flush 成单个变参 kvspace·get。
             if let Some(base) = chain_base.take() {
                 let mut args = vec![base];
                 args.append(&mut chain_segs);
-                left = ast::call("kv·get", args);
+                left = ast::call("kvspace·get", args);
             }
             // 后缀索引
             if self.peek().kind == Kind::LBrack {
@@ -1349,8 +1349,8 @@ impl Parser {
                 let is_path = left.is_leaf() && left.val.starts_with('/');
                 let mut args = vec![left];
                 args.extend(indices);
-                // 路径字面量 + [idx] → kv.get（KV 路径成员访问）；否则 xv.at（compact 数组元素）。
-                left = ast::call(if is_path { "kv·get" } else { "xv·at" }, args);
+                // 路径字面量 + [idx] → kvspace·get（KV 路径成员访问）；否则 xv.at（compact 数组元素）。
+                left = ast::call(if is_path { "kvspace·get" } else { "xv·at" }, args);
                 continue;
             }
             let t = self.peek();
@@ -1368,7 +1368,7 @@ impl Parser {
         if let Some(base) = chain_base.take() {
             let mut args = vec![base];
             args.append(&mut chain_segs);
-            left = ast::call("kv·get", args);
+            left = ast::call("kvspace·get", args);
         }
         Some(left)
     }
@@ -1407,12 +1407,12 @@ impl Parser {
             if symbol::lookup(&t.value).word == "add" {
                 return self.parse_pratt(UNARY_PREC);
             }
-            // 一元前缀 & = 取址：&x ≡ kv·abs(x)（中缀 & 仍为按位与，走 pratt 中缀路径）。
-            // & 对成员链 kv·get(base, segs...) → kv·abs(base, segs...)：取成员路径地址，非读值取址。
+            // 一元前缀 & = 取址：&x ≡ kvlang·abs(x)（中缀 & 仍为按位与，走 pratt 中缀路径）。
+            // & 对成员链 kvspace·get(base, segs...) → kvlang·abs(base, segs...)：取成员路径地址，非读值取址。
             if symbol::lookup(&t.value).word == "bitand" {
                 let arg = self.parse_pratt(UNARY_PREC)?;
-                let op = format!("kv{}abs", keytree::MEMBER_SEP);
-                let get = format!("kv{}get", keytree::MEMBER_SEP);
+                let op = format!("kvlang{}abs", keytree::MEMBER_SEP);
+                let get = format!("kvspace{}get", keytree::MEMBER_SEP);
                 if arg.op == get && arg.args.len() >= 2 {
                     return Some(ast::call(&op, arg.args));
                 }
@@ -1897,7 +1897,7 @@ impl Parser {
             if (t.kind == Kind::Ident || is_path_literal) && self.peek_at(1).kind == Kind::Dot {
                 let mut w = self.advance().value;
                 // 成员链写槽：整段 p·obj·deep 收成单个 write 槽，交给 desugar_member_write
-                // 拆成 kv·set(base, "obj·deep", v)。勿在每段 · 处截断（否则 deep 被当独立写槽）。
+                // 拆成 kvspace·set(base, "obj·deep", v)。勿在每段 · 处截断（否则 deep 被当独立写槽）。
                 while self.peek().kind == Kind::Dot {
                     self.advance(); // .
                     w.push_str(keytree::MEMBER_SEP);
@@ -2054,7 +2054,7 @@ impl Parser {
     }
 
     // 下标写脱糖：arr[i,j] 写槽 + 值 e → xv·set(arr, i, j, e) -> arr（compact 数组，
-    // 读侧 arr[i,j]→xv·at 的对称）。arr· 前缀坐标或 / 路径 → kv·set。左右箭头共用：
+    // 读侧 arr[i,j]→xv·at 的对称）。arr· 前缀坐标或 / 路径 → kvspace·set。左右箭头共用：
     // = 时 e 是 pratt 右值，-> 时 e 是箭头左值，语义一致。layout 不判维数，交给 runtime。
     fn desugar_subscript_write(&mut self, inst: &mut Instruction) {
         if inst.writes.len() != 1 || !inst.writes[0].contains('[') {
@@ -2068,7 +2068,7 @@ impl Parser {
         let dot_coord = arr.ends_with(keytree::MEMBER_SEP);
         let arr = arr.trim_end_matches(keytree::MEMBER_SEP).to_string();
         let op = if dot_coord || arr.starts_with('/') {
-            "kv·set"
+            "kvspace·set"
         } else {
             "xv·set"
         };
@@ -2101,13 +2101,13 @@ impl Parser {
         }
         let s = inst.writes[0].clone();
         // 路径字面量（/ 开头）是完整 key，不是成员写，勿脱糖——**但含动态键段 `·*k` 的除外**：
-        // 那时 `·` 之后是运行期求值的段，必须脱糖成 kv·set(base, k, v) 才能取到 k 的值
+        // 那时 `·` 之后是运行期求值的段，必须脱糖成 kvspace·set(base, k, v) 才能取到 k 的值
         // （否则会被当成字面 key `/tmp/ts·*k` 整段写下去）。
         if s.starts_with('/') && !s.contains(&format!("{}*", keytree::MEMBER_SEP)) {
             return;
         }
-        // struct 赋值（RHS = struct·new）：浅拷 base+一层成员，lower 为 kv·cplist(struct·new→temp, dst)。
-        // 不走 kv·set —— 后者只搬基值，struct 的成员会丢在临时槽。dst 传完整成员槽串，
+        // struct 赋值（RHS = struct·new）：浅拷 base+一层成员，lower 为 kvspace·cplist(struct·new→temp, dst)。
+        // 不走 kvspace·set —— 后者只搬基值，struct 的成员会丢在临时槽。dst 传完整成员槽串，
         // runtime ResolveWriteSlot 拼 <frame>+"base·key…" 即成员绝对路径。
         let is_struct_new = inst
             .expr
@@ -2116,13 +2116,13 @@ impl Parser {
             .unwrap_or(false);
         if is_struct_new && !s.contains('*') {
             let e = inst.expr.take().unwrap();
-            inst.expr = Some(ast::call("kv·cplist", vec![e, ast::leaf(&s)]));
+            inst.expr = Some(ast::call("kvspace·cplist", vec![e, ast::leaf(&s)]));
             inst.writes = Vec::new();
             inst.write_types = Vec::new();
             return;
         }
-        // 成员链写槽 p·a·b = v → 变参 kv·set(p, "a", "b", v)，与读侧 #110 一致逐段拼路径。
-        // 不再按首个 · 压扁成 kv·set(p, "a·b", v)：扁平段把「成员链」与「含 · 的成员名」混为一谈。
+        // 成员链写槽 p·a·b = v → 变参 kvspace·set(p, "a", "b", v)，与读侧 #110 一致逐段拼路径。
+        // 不再按首个 · 压扁成 kvspace·set(p, "a·b", v)：扁平段把「成员链」与「含 · 的成员名」混为一谈。
         let mut parts = s.split(keytree::MEMBER_SEP);
         let base = parts.next().unwrap_or("").to_string();
         let mut args = vec![ast::leaf(&base)];
@@ -2148,8 +2148,8 @@ impl Parser {
         }
         let e = inst.expr.take();
         args.push(e.unwrap_or(ast::leaf("")));
-        // base.a.b = v 脱糖为 kv·set(base, "a", "b", v)：kv·set 是 void（副作用写成员），无写槽
-        inst.expr = Some(ast::call("kv·set", args));
+        // base.a.b = v 脱糖为 kvspace·set(base, "a", "b", v)：kvspace·set 是 void（副作用写成员），无写槽
+        inst.expr = Some(ast::call("kvspace·set", args));
         inst.writes = Vec::new();
         inst.write_types = Vec::new();
     }

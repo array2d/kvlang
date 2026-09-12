@@ -5,7 +5,7 @@
 //   zh = 你好
 //   missing: true
 rwfunc lookup(dict:*[]char/utf8·[]char/utf32, k:[]char/utf32) -> (v:[]char/utf32) {
-	kv·get(dict, k) -> v
+	kvspace·get(dict, k) -> v
 }
 rwfunc test() -> () {
 	d:[]char/utf8·[]char/utf32 = {}
@@ -15,6 +15,6 @@ rwfunc test() -> () {
 	println("en =", a)
 	lookup(d, "zh") -> b
 	println("zh =", b)
-	kv·get(d, "fr") == None -> gone
+	kvspace·get(d, "fr") == None -> gone
 	println("missing:", gone)
 }

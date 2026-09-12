@@ -29,7 +29,7 @@ stringkeymap 元素的成员名是坐标段，物理 key 形如 `m·[i]`（一�
   标）。
 - 排序 `cmp_coord`（row-major）：坐标段恒排在非坐标段之前；两个可按整数解析的坐标段按数值升序，否则
   字典序。
-- 访问：源码 `m·[i]` 对散 key 元素走 `kv·get`（member 名 `[i]`）；compact 的 `arr[i]` 走 `xv·at`。二
+- 访问：源码 `m·[i]` 对散 key 元素走 `kvspace·get`（member 名 `[i]`）；compact 的 `arr[i]` 走 `xv·at`。二
   者由括号与形态区分。
 
 ## 字面量括号即形态

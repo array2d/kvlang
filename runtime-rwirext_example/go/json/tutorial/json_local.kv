@@ -4,7 +4,7 @@
 //   2) go build -o /tmp/json-rwirext ./rwirext/json/cmd/ && /tmp/json-rwirext &
 //   3) ./kvlang tutorial/10-rwirext/json_local.kv
 // 语义: json·to 接受局部 object/stringkeymap 变量（resolve 到帧槽路径后序列化）。
-//       object 局部变量（{} + kv·set）→ JSON 对象；stringkeymap 局部变量（{..} 散 key
+//       object 局部变量（{} + kvspace·set）→ JSON 对象；stringkeymap 局部变量（{..} 散 key
 //       数组）→ JSON 数组。散 key 数组成员名是坐标段 "[i]"。
 // 期望输出:
 //   profile = {"active":true,"age":42,"name":"alice","nums":[1,2,3],"score":3.14}
@@ -12,12 +12,12 @@
 //   tags = ["a","b","c"]
 rwfunc main() -> () {
 	profile = {}
-	kv·set(profile, "name", "alice")
-	kv·set(profile, "age", 42)
-	kv·set(profile, "active", true)
-	kv·set(profile, "score", 3.14)
+	kvspace·set(profile, "name", "alice")
+	kvspace·set(profile, "age", 42)
+	kvspace·set(profile, "active", true)
+	kvspace·set(profile, "score", 3.14)
 	nums = [1, 2, 3]
-	kv·set(profile, "nums", nums)
+	kvspace·set(profile, "nums", nums)
 	json·to(profile) -> j1
 	println("profile =", j1)
 

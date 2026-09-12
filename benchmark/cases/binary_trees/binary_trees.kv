@@ -21,8 +21,8 @@ rwfunc test() -> () {
 	top + 1 -> top
 	while (top > 0) {
 		top - 1 -> top
-		kv·get(bid, top) -> cur
-		kv·get(bdep, top) -> d
+		kvspace·get(bid, top) -> cur
+		kvspace·get(bdep, top) -> d
 		if (d > 0) {
 			nid + 1 -> nid
 			nid -> lc
@@ -50,10 +50,10 @@ rwfunc test() -> () {
 	tp + 1 -> tp
 	while (tp > 0) {
 		tp - 1 -> tp
-		kv·get(tid, tp) -> cur
+		kvspace·get(tid, tp) -> cur
 		count + 1 -> count
-		kv·get(L, cur) -> lc
-		kv·get(R, cur) -> rc
+		kvspace·get(L, cur) -> lc
+		kvspace·get(R, cur) -> rc
 		if (lc != 0) {
 			lc -> tid·*tp
 			tp + 1 -> tp

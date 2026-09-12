@@ -223,7 +223,7 @@ static int xv_head1(kvlangFrame_t *f,
                     kvspaceHead_t *h); /* GetHead-only 单读参 head，定义见下 */
 
 /* ndarray 形状算子只认带形状段的 langtype。map 容器（langtype=`{keylt}·{valt}`）无形状段——
- * 成员数在 memindex（`p·`）而非容器值，用 ndarray·numel 取是范畴错误，直接报错逼用 kv·listlen。 */
+ * 成员数在 memindex（`p·`）而非容器值，用 ndarray·numel 取是范畴错误，直接报错逼用 kvspace·listlen。 */
 static int ndarray_shape_guard(kvlangFrame_t *f, const char *op,
                                const kvspaceHead_t *h) {
     kvlangLangtype kx;
@@ -233,7 +233,7 @@ static int ndarray_shape_guard(kvlangFrame_t *f, const char *op,
     if (kvlangKindIsMap(kx.kind))
         return kvlangBuiltinSetErr(f,
                                    "TypeError: %s: container %s has no shape; "
-                                   "use kv·listlen for member count",
+                                   "use kvspace·listlen for member count",
                                    op, kx.kind);
     return 0;
 }

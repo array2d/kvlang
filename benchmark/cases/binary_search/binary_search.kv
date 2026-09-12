@@ -9,7 +9,7 @@ rwfunc bsearch(arr:*[int64]·int64, n:int64, target:int64) -> (idx:int64) {
 	while (lo <= hi) {
 		lo + hi -> s
 		s ÷ 2 -> mid
-		kv·get(arr, mid) -> mv
+		kvspace·get(arr, mid) -> mv
 		if (mv == target) {
 			mid -> idx
 			hi + 1 -> lo

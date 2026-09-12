@@ -15,7 +15,7 @@ kvlang 用两个符号访问复合数据，语义严格分离，runtime **不得
 | `a[i]` | **数组下标** | compact 数组的元素访问，`i` 为整数 |
 | `base·name` | **容器成员 / 限定名** | `·`（U+00B7，中点）是成员访问符 |
 
-容器成员一律走 `·`（或 `kv·get`/`kv·set`）；`[]` 只索引 compact 数组。
+容器成员一律走 `·`（或 `kvspace·get`/`kvspace·set`）；`[]` 只索引 compact 数组。
 
 ## 容器 = 值 + memindex
 
@@ -25,7 +25,7 @@ kvlang 用两个符号访问复合数据，语义严格分离，runtime **不得
 是成员集合的唯一权威，遍历成员**必须**据此枚举，**不得**假设成员键连续或有序之外的布局。
 
 - **写成员**：`rec·name = 值` 的写槽是完整成员键 `rec·name`，`=` 为值拷贝。
-- **读成员**：`rec·name -> v` 直接取 key `rec·name`；缺失成员的动态读（`kv·get`）返回 `None`。
+- **读成员**：`rec·name -> v` 直接取 key `rec·name`；缺失成员的动态读（`kvspace·get`）返回 `None`。
 
 ## `·` 的解引用：按指针优先，按名回退
 
@@ -42,7 +42,7 @@ kvlang 用两个符号访问复合数据，语义严格分离，runtime **不得
 ## 动态成员名 `·*`：解引用操作数取 memitemkey
 
 `base·*k` 用 `k` 的**值**作为成员键：`·*` 令 runtime-c **解引用/求值**操作数 `k`，以其值定位
-`base·<k 值>`（等价显式形式 `kv·get(base, k)` / `kv·set(base, k, v)`）。裸 `base·k`（无 `*`）用字面
+`base·<k 值>`（等价显式形式 `kvspace·get(base, k)` / `kvspace·set(base, k, v)`）。裸 `base·k`（无 `*`）用字面
 名 `k`；`base·*k` 才取 `k` 的值。
 
 **指针作 memitemkey 必须 `*` 开头**：当作为 key 的操作数是**指针**（ref=1 Ptr）时，**必须**写
@@ -75,9 +75,9 @@ ref=2（@ext）表示真实值在扩展世界，head 的 langtype 仍为目标�
 
 数组有两种存储形态：**compact**（`[...]` 字面量，元素连续打包进单个 XValue，head kind = 元素类型）与
 **stringkeymap**（`{...}` 字面量，散 key，每元素落 `base·[i]` 坐标段独立子 key）。下标 `a[i]` / `xv·at` /
-`xv·set` 用于 **compact** 形态；stringkeymap 形态用 `for-in` / `kv·get` 遍历访问。
+`xv·set` 用于 **compact** 形态；stringkeymap 形态用 `for-in` / `kvspace·get` 遍历访问。
 
-- **下标读**：`a[i] -> e`（layout 脱糖为 `xv·at`/`kv·get`），按 `kvlangXvalueElemSize(kind)` 定的元
+- **下标读**：`a[i] -> e`（layout 脱糖为 `xv·at`/`kvspace·get`），按 `kvlangXvalueElemSize(kind)` 定的元
   素字节宽零拷贝定位第 `i` 个元素。
 - **下标写**：`a[i] = v` / `v -> a[i]`（两种书写等价，脱糖为 `xv·set`，见 [[指令架构]]），就地改第 `i`
   个元素；索引个数须等于维数，越界报 IndexError。

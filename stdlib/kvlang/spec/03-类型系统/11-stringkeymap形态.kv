@@ -15,7 +15,7 @@ names:[int64]·[]char/utf32 = {"apple", "banana", "cherry"}   // 变长字符串
 容器字面量的写目标**必须带 map langtype**（见 [[map容器]]）——容器值的 langtype 就是它，缺标注
 layout 报错；`{}` 尤其无法推断（空字面量不含任何成员）。
 
-散 key 元素以坐标段 `base·[i]` 访问（经 `kv·get`），或以 `for-in` / `kv·listlen` / `kv·listn` 遍历。
+散 key 元素以坐标段 `base·[i]` 访问（经 `kvspace·get`），或以 `for-in` / `kvspace·listlen` / `kvspace·listn` 遍历。
 坐标段支持多值键（含小数）：`geo·[39.9,116.4] = "Beijing"`，物理以字符串格式落 key（见
 `tutorial/04-ndarray/geo_coord.kv`）。
 

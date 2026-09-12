@@ -1,5 +1,5 @@
 // list-local: 局部 struct 节点变量 + & 建链，遍历求和
-// 语义: 节点是帧内 struct 局部变量，next 存下一节点地址（&node ≡ kv·abs(node)）；
+// 语义: 节点是帧内 struct 局部变量，next 存下一节点地址（&node ≡ kvlang·abs(node)）；
 //       None=尾；sum_list 接收 *Node 头指针，遍历累加各节点 val。
 // 链表: 10→20→30
 // 期望输出:

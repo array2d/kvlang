@@ -19,10 +19,10 @@ rwfunc test() -> () {
 	while (i < n) {
 		i × 2654435761 -> k0
 		k0 % 100003 -> key
-		kv·get(h, key) != None -> ex
+		kvspace·get(h, key) != None -> ex
 		if (ex) {
 			hits + 1 -> hits
-			kv·get(h, key) -> v
+			kvspace·get(h, key) -> v
 			sum + v -> sum
 		}
 		i + 1 -> i

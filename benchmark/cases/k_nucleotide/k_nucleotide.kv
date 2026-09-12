@@ -18,7 +18,7 @@ rwfunc test() -> () {
 	while (i < n) {
 		string·char(s, i) -> ch
 		string·ord(ch) -> c
-		kv·get(h, c) -> cur
+		kvspace·get(h, c) -> cur
 		if (cur == None) {
 			0 -> cur
 		}
@@ -27,10 +27,10 @@ rwfunc test() -> () {
 		i + 1 -> i
 	}
 	t1 = time·now()
-	kv·get(h, 65) -> a
-	kv·get(h, 67) -> cc
-	kv·get(h, 71) -> g
-	kv·get(h, 84) -> t
+	kvspace·get(h, 65) -> a
+	kvspace·get(h, 67) -> cc
+	kvspace·get(h, 71) -> g
+	kvspace·get(h, 84) -> t
 	println("knuc: A =", a, "C =", cc, "G =", g, "T =", t)
 	delta = time·sub(t1, t0)
 	ns = time/duration·as_nanos(delta)

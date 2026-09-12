@@ -12,7 +12,7 @@ fn is_container_type(t: &str) -> bool {
     t == "stringkeymap" || t.contains(keytree::MEMBER_SEP)
 }
 
-/// `[]` 下标校验：xv·at/xv·set 基座若为容器类型 → 报错，逼用 kv·get/kv·set/`base·key`。
+/// `[]` 下标校验：xv·at/xv·set 基座若为容器类型 → 报错，逼用 kvspace·get/kvspace·set/`base·key`。
 fn is_container_ty(ty: &str) -> bool {
     // 剥掉间接性前缀 `*`/`@` 再判：签名里 `p:*Point`、`m:*[int64]·int64` 的 `*` 是传递方式，
     // 类型本体仍是值容器——不剥会把这类参数误判为"未定义容器"，成员写全部被拒。
@@ -185,9 +185,9 @@ fn check_map_inst(s: &Instruction, defined: &HashSet<String>, diags: &mut Vec<Di
             }
         }
     }
-    // kv·set(base, key, val) 成员形
+    // kvspace·set(base, key, val) 成员形
     if let Some(e) = &s.expr {
-        if e.op == "kv·set" && e.args.len() >= 3 && !e.args[0].val.contains('/') {
+        if e.op == "kvspace·set" && e.args.len() >= 3 && !e.args[0].val.contains('/') {
             check_map_base(&e.args[0].val, defined, Pos { line: 0, col: 0 }, diags);
         }
     }
@@ -243,7 +243,7 @@ fn check_subscript_expr(e: &Expr, tm: &HashMap<String, String>, diags: &mut Vec<
                     diags.push(Diagnostic {
                         pos: Pos { line: 0, col: 0 },
                         message: format!(
-                            "`[]` 下标不能用于容器 `{}`（类型 {}）；容器成员访问用 kv·get/kv·set 或 `{}·key`，`[]` 仅限 compact array",
+                            "`[]` 下标不能用于容器 `{}`（类型 {}）；容器成员访问用 kvspace·get/kvspace·set 或 `{}·key`，`[]` 仅限 compact array",
                             base.val, t, base.val
                         ),
                         warn: false,
@@ -558,7 +558,7 @@ fn lower_for_with_cont(
     let cond_slot = lg.tmp();
     let len_slot = lg.tmp();
     let key_slot = lg.tmp();
-    // 容器源（stringkeymap/struct）用 kv·listlen/kv·listn/kv·get 遍历，compact 数组源用
+    // 容器源（stringkeymap/struct）用 kvspace·listlen/kvspace·listn/kvspace·get 遍历，compact 数组源用
     // ndarray·numel/xv·at（见 spec 控制流脱糖）。判据看**声明的类型**：map 的 kindexpr 恒含
     // `key·value` 的那个 `·`（`[int64]·int64`、`[]char/utf8·int64`），compact 数组不含。
     let is_obj = s.iter.op == "obj"
@@ -592,7 +592,7 @@ fn lower_for_with_cont(
     if is_obj {
         init_body.push(Stmt::Instruction(Instruction {
             comments: Vec::new(),
-            expr: Some(ast::call("kv·listlen", vec![ast::leaf(&iter_slot)])),
+            expr: Some(ast::call("kvspace·listlen", vec![ast::leaf(&iter_slot)])),
             writes: vec![len_slot.clone()],
             write_types: Vec::new(),
             arrow_left: false,
@@ -641,7 +641,7 @@ fn lower_for_with_cont(
         body_insts.push(Stmt::Instruction(Instruction {
             comments: Vec::new(),
             expr: Some(ast::call(
-                "kv·listn",
+                "kvspace·listn",
                 vec![ast::leaf(&iter_slot), ast::leaf(&idx_slot)],
             )),
             writes: vec![key_slot.clone()],
@@ -651,7 +651,7 @@ fn lower_for_with_cont(
         body_insts.push(Stmt::Instruction(Instruction {
             comments: Vec::new(),
             expr: Some(ast::call(
-                "kv·get",
+                "kvspace·get",
                 vec![ast::leaf(&iter_slot), ast::leaf(&key_slot)],
             )),
             writes: vec![s.var.clone()],
@@ -1043,19 +1043,19 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
     if opcode == "map" {
         return "[]stringkeymap".to_string();
     }
-    if opcode == "kv·set" {
+    if opcode == "kvspace·set" {
         // 成员写的 base 类型**不在此推断**：map 必须显式声明准确类型
         // （`m:[]char/utf8·int64 = {}`），由 check_map_defined 静态拦截未定义者。
         return String::new();
     }
     match opcode {
-        "kvlen" | "ndarray·numel" | "ndarray·dim" | "kv·listlen" | "string·len" | "string·ord"
+        "kvlen" | "ndarray·numel" | "ndarray·dim" | "kvspace·listlen" | "string·len" | "string·ord"
         | "string·cmp" | "string·find" | "string·parseint" | "xv·bodylen" => {
             return "int64".to_string();
         }
         "xv·langtype" => return "[]char/utf8".to_string(),
         "ndarray·shape" => return "[]int64".to_string(),
-        "kv·list" => return "[]char/utf8".to_string(),
+        "kvspace·list" => return "[]char/utf8".to_string(),
         "string·char" | "string·set" | "string·slice" | "string·concat" | "string·formatint"
         | "string·formatuint" => return "char/utf32".to_string(),
         "random.int63" => return "int64".to_string(),

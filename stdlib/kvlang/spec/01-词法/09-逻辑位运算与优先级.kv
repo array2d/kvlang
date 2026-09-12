@@ -24,7 +24,7 @@ lib kvlang/spec/词法/逻辑位运算与优先级 {
 ## 绝对地址运算符 `&`
 
 一元前缀 `&loc` 求值为指向 `loc` 所在节点的**指针**（ref=1 Ptr：head 的 langtype = 目标 kindexpr、
-body = 目标绝对路径），等价 `kv·abs(loc)`——故它是**绝对地址运算符**，不是 C 式取址（kvspace 无进程私有
+body = 目标绝对路径），等价 `kvlang·abs(loc)`——故它是**绝对地址运算符**，不是 C 式取址（kvspace 无进程私有
 内存地址）。操作数须为位置（location）：帧内裸名、容器/成员链（`x`、`list·1`、`base·field`）。
 
 产物是**指针值**（不是 `char` 路径串）：可 `-> p` 存进 `*T` 变量、可 `p·field` 经指针访问成员；需要目
@@ -33,7 +33,7 @@ body = 目标绝对路径），等价 `kv·abs(loc)`——故它是**绝对地�
 
 ```
 list·1 -> x
-&x -> p          // p = 指向 x 的 Ptr（ref=1），等价 kv·abs(x)
+&x -> p          // p = 指向 x 的 Ptr（ref=1），等价 kvlang·abs(x)
 *p -> q          // 解引用：取 x 的整值
 p·field -> v     // 经指针访问成员（自动解引用，见 [[ptr]]）
 ```

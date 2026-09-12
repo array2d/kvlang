@@ -15,7 +15,7 @@ rwfunc run_steps(limit:int64) -> (final:int64) {
 	0 -> i
 	while (i < limit) {
 		i + 1 -> i
-		kv·set("/crashtest/step", i)
+		kvspace·set("/crashtest/step", i)
 		println("step", i)
 		noenv:[int64]·[]char/utf32 = {}
 		a:[int64]·[]char/utf32 = {"sleep", "0.2"}
@@ -26,6 +26,6 @@ rwfunc run_steps(limit:int64) -> (final:int64) {
 
 rwfunc test() -> () {
 	run_steps(5) -> i
-	kv·set("/crashtest/done", 1)
+	kvspace·set("/crashtest/done", 1)
 	println("complete final=", i)
 }

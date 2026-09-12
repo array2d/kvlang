@@ -1,4 +1,4 @@
-// 001: Two Sum — O(n) hash map。two_sum 用 kv·get/kv·set；
+// 001: Two Sum — O(n) hash map。two_sum 用 kvspace·get/kvspace·set；
 // two_sum2 用动态成员名 `·*k` 直接读写路径成员。
 // 来源: LeetCode #1
 // 期望输出:
@@ -11,23 +11,23 @@ rwfunc two_sum(nums:[]int64, target:int64) -> () {
 	while (i < n) {
 		x = nums[i]
 		need = target - x
-		kv·get(h, need) != None -> exists
+		kvspace·get(h, need) != None -> exists
 
 		if (exists) {
-			kv·get(h, need) -> j
+			kvspace·get(h, need) -> j
 			k = j - 1
 			println("[", k, ",", i, "]")
 			n -> i
 		} else {
 			v = i + 1
-			_ = kv·set(h, x, v)
+			_ = kvspace·set(h, x, v)
 			i + 1 -> i
 		}
 	}
 }
 
 // 同 two_sum，但用**动态成员名** `·*k` 直接读写路径成员：
-// `base·*k` 取 k 的值作 memitemkey（等价 kv·get(base,k)/kv·set(base,k,v)）；
+// `base·*k` 取 k 的值作 memitemkey（等价 kvspace·get(base,k)/kvspace·set(base,k,v)）；
 // 裸 `base·k` 用的是**字面名** k，两者不可混（见 05-runtime语义/03-成员访问）。
 rwfunc two_sum2(nums:[]int64, target:int64) -> () {
 	n = ndarray·numel(nums)

@@ -5,13 +5,13 @@
 //   total = 30
 //   max = 20
 rwfunc total(m:*[]char/utf8·int64) -> (s:int64) {
-	kv·get(m, "a") -> a
-	kv·get(m, "b") -> b
+	kvspace·get(m, "a") -> a
+	kvspace·get(m, "b") -> b
 	(a + b) -> s
 }
 rwfunc max2(m:*[]char/utf8·int64) -> (mx:int64) {
-	kv·get(m, "a") -> a
-	kv·get(m, "b") -> b
+	kvspace·get(m, "a") -> a
+	kvspace·get(m, "b") -> b
 	max(a, b) -> mx
 }
 rwfunc test() -> () {
