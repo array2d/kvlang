@@ -121,6 +121,7 @@ typedef struct {
     kvlangRefEnt_t ref[KVLANG_REF_CAP];
     int nref;
     int ref_on;
+    kvlangRefEnt_t *rlat;
     /* ART dir ancestors of recent `·` member maps (hash/qsort). */
     kvlangRefEnt_t pref[KVLANG_PREF_CAP];
     int npref;

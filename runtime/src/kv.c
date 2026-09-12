@@ -4,8 +4,12 @@
  * 后端由链接的 kvspace 库决定（kvspace-durable / kvspace-c 均导出同一 ABI）。 */
 
 static kvlangRefEnt_t *ref_find(kvlangKv_t *k, const char *key) {
-    for (int i = 0; i < k->nref; i++)
-        if (k->ref[i].key && strcmp(k->ref[i].key, key) == 0) return &k->ref[i];
+    if (k->rlat && k->rlat->key && strcmp(k->rlat->key, key) == 0)
+        return k->rlat;
+    for (int i = 0; i < k->nref; i++) {
+        if (k->ref[i].key && strcmp(k->ref[i].key, key) == 0)
+            return (k->rlat = &k->ref[i]);
+    }
     return NULL;
 }
 
@@ -18,6 +22,7 @@ static void ref_put(kvlangKv_t *k, const char *key, const kvspaceRef_t *r) {
     }
     e->block_id = r->block_id;
     e->gen = r->gen;
+    k->rlat = e;
 }
 
 static int ref_ok(kvlangKv_t *k) {
@@ -170,6 +175,7 @@ static int parent_hit(kvlangKv_t *k, const char *key, uint8_t **d, uint32_t *len
 
 void kvlangKvInvalidateFrame(kvlangKv_t *k, const char *fr) {
     if (!k || !k->ref_on || !fr || !fr[0]) return;
+    k->rlat = NULL;
     size_t n = strlen(fr);
     int w = 0;
     for (int i = 0; i < k->nref; i++) {
