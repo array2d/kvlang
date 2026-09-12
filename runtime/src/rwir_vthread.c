@@ -79,7 +79,7 @@ int kvlangBuiltinVthreadSleep(kvlangFrame_t *f) {
 static int set_status(kvlangFrame_t *f, const char *status) {
     kvlangStrbuf_t npc; kvlangStrbufInit(&npc);
     kvlangRwirNextPc(f->pc, &npc);
-    kvlangVthreadSet(f->kv, f->vtid, npc.p, status);
+    kvlangVthreadAdvance(f, npc.p, status);
     kvlangStrbufFree(&npc);
     return 0;
 }

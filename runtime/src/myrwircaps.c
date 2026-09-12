@@ -96,7 +96,7 @@ int kvlangDefRwir(void *kvspace, const char *opcode, const char *const *rp,
 
 /* 精度前缀（int64·add / float32·add …）保留：CapIndex 两级查表——先按完整 opcode 命中特化，
  * 未命中且前缀是 C native 数字 kind 时才剥前缀归到裸 op（如 add），kvlangBuiltin* 按操作数 kind 归约。 */
-static int kvlangCtlCopy(kvlangFrame_t *f) { return kvlangBuiltinExecuteCopy(f->kv, f->vtid, f->pc, f->inst); }
+static int kvlangCtlCopy(kvlangFrame_t *f) { return kvlangBuiltinExecuteCopy(f); }
 
 static const struct { const char *op; kvlangBuiltinFn fn; } myrwircaps[] = {
     /* control / copy：与 native 算子同表，op_id 单跳派发 */

@@ -19,7 +19,10 @@ void kvlangBuiltinResolveReadValue(kvlangKv_t *kv, const char *frame_root, const
         /* 显式解引用：*[0,±k] → 读 frame_root/[0,±k]（ref=1 Ptr）→ 解引用到实参值。
          * 同 ResolveWriteSlot：帧槽必有 Ptr，读不到即传参链路已坏 → panic，
          * 绝不静默留 None（那会让形参读成空值，把真因藏到几层之外）。 */
-        char *stk = kvlangKeytreeStack(frame_root);
+        char stkbuf[512];
+        char *stk = kvlangKeytreeStackBuf(frame_root, stkbuf, sizeof stkbuf)
+                        ? stkbuf
+                        : kvlangKeytreeStack(frame_root);
         kvlangXvalue_t pv; kvlangXvalueZero(&pv);
         kvlangKvGetMember(kv, stk, name + 1, &pv);
         if (!kvlangXvalueIsPtr(&pv)) {
@@ -29,10 +32,15 @@ void kvlangBuiltinResolveReadValue(kvlangKv_t *kv, const char *frame_root, const
         char *target = kvlangXvaluePtrTarget(&pv);
         kvlangKvGetOne(kv, target, out);
         free(target);
-        kvlangXvalueFree(&pv); free(stk);
+        kvlangXvalueFree(&pv);
+        if (stk != stkbuf)
+            free(stk);
         return;
     }
-    char *stk = kvlangKeytreeStack(frame_root);
+    char stkbuf[512];
+    char *stk = kvlangKeytreeStackBuf(frame_root, stkbuf, sizeof stkbuf)
+                    ? stkbuf
+                    : kvlangKeytreeStack(frame_root);
     kvlangXvalue_t pv; kvlangXvalueZero(&pv);
     kvlangKvGetMember(kv, stk, name, &pv);
     if (kvlangXvalueIsPtr(&pv)) {
@@ -41,7 +49,9 @@ void kvlangBuiltinResolveReadValue(kvlangKv_t *kv, const char *frame_root, const
     } else if (!kvlangXvalueNone(&pv)) {
         *out = pv; pv.data = NULL; pv.len = 0;
     }
-    kvlangXvalueFree(&pv); free(stk);
+    kvlangXvalueFree(&pv);
+    if (stk != stkbuf)
+        free(stk);
 }
 
 /* 读参 → 其最终存储键（malloc）：字面量（指令内冻结的具体值，无后端槽）返 NULL；
@@ -57,7 +67,10 @@ char *kvlangBuiltinResolveReadKey(kvlangKv_t *kv, const char *frame_root, const 
 
 char *kvlangBuiltinResolveWriteSlot(kvlangKv_t *kv, const char *frame_root, const char *name) {
     if (name[0] == '/') return strdup(name);
-    char *stk = kvlangKeytreeStack(frame_root);
+    char stkbuf[512];
+    char *stk = kvlangKeytreeStackBuf(frame_root, stkbuf, sizeof stkbuf)
+                    ? stkbuf
+                    : kvlangKeytreeStack(frame_root);
     if (name[0] == '*') {
         /* 显式解引用：*[0,±k] → 读 frame_root/[0,±k]（ref=1 Ptr）→ target=写槽路径。
          * `*[0,±k]` 是 layout 编译期生成的形参引用，帧槽必有调用点写入的 Ptr；读不到
@@ -70,13 +83,28 @@ char *kvlangBuiltinResolveWriteSlot(kvlangKv_t *kv, const char *frame_root, cons
             abort();
         }
         char *target = kvlangXvaluePtrTarget(&pv);
-        kvlangXvalueFree(&pv); free(stk);
+        kvlangXvalueFree(&pv);
+        if (stk != stkbuf)
+            free(stk);
         return target;
     }
-    kvlangStrbuf_t o; kvlangStrbufInit(&o);
-    kvlangStrbufPuts(&o, stk); kvlangStrbufPuts(&o, name);
-    free(stk);
-    return kvlangStrbufDetach(&o);
+    /* 存 stk+name 到栈缓冲后 strdup（返回值须自持）；过长才回落 strbuf。 */
+    size_t sl = strlen(stk), nl = strlen(name);
+    char outbuf[640];
+    char *r;
+    if (sl + nl + 1 <= sizeof outbuf) {
+        memcpy(outbuf, stk, sl);
+        memcpy(outbuf + sl, name, nl);
+        outbuf[sl + nl] = 0;
+        r = strdup(outbuf);
+    } else {
+        kvlangStrbuf_t o; kvlangStrbufInit(&o);
+        kvlangStrbufPuts(&o, stk); kvlangStrbufPuts(&o, name);
+        r = kvlangStrbufDetach(&o);
+    }
+    if (stk != stkbuf)
+        free(stk);
+    return r;
 }
 
 /* ── coerce / kvlangDisplay ─────────────────────────────────────────────── */
@@ -145,30 +173,40 @@ void kvlangDisplay(const kvlangXvalue_t *v, char **out) {
 /* ── frame helper ─────────────────────────────────────────────────── */
 
 int kvlangBuiltinReadInputs(kvlangFrame_t *f, kvlangXvalue_t *out, int cap) {
-    char *fr = kvlangKeytreeFrameRoot(f->pc);
+    /* 帧根优先用主循环缓存（免每步 malloc + 扫描）。 */
+    char *owned = NULL;
+    const char *fr = f->frame_root;
+    if (!fr) { owned = kvlangKeytreeFrameRoot(f->pc); fr = owned; }
     int n = 0;
     for (int i = 0; i < f->inst->nr && n < cap; i++) {
         kvlangBuiltinResolveReadValue(f->kv, fr, f->inst->reads[i].name, &f->inst->reads[i].val, &out[n]);
         n++;
     }
-    free(fr);
+    free(owned);
     return n;
 }
 
 void kvlangBuiltinFreeInputs(kvlangXvalue_t *in, int n) { for (int i = 0; i < n; i++) kvlangXvalueFree(&in[i]); }
 
 void kvlangBuiltinNextPc(kvlangFrame_t *f) {
+    char buf[512];
+    if (kvlangRwirNextPcBuf(f->pc, buf, sizeof buf)) {
+        kvlangVthreadAdvance(f, buf, "running");
+        return;
+    }
     kvlangStrbuf_t npc; kvlangStrbufInit(&npc);
     kvlangRwirNextPc(f->pc, &npc);
-    kvlangVthreadSet(f->kv, f->vtid, npc.p, "running");
+    kvlangVthreadAdvance(f, npc.p, "running");
     kvlangStrbufFree(&npc);
 }
 
 int kvlangBuiltinWriteResult(kvlangFrame_t *f, const kvlangXvalue_t *result) {
     if (f->inst->nw > 0) {
-        char *fr = kvlangKeytreeFrameRoot(f->pc);
+        char *owned = NULL;
+        const char *fr = f->frame_root;
+        if (!fr) { owned = kvlangKeytreeFrameRoot(f->pc); fr = owned; }
         char *key = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->writes[0].name);
-        free(fr);
+        free(owned);
         kvlangKvPair_t pair = { key, *result };
         char err[256];
         kvlangKvSet(f->kv, &pair, 1, err, sizeof err);
@@ -187,10 +225,14 @@ int kvlangBuiltinSetErr(kvlangFrame_t *f, const char *fmt, ...) {
     return -1;
 }
 
-int kvlangBuiltinExecuteCopy(kvlangKv_t *kv, const char *vtid, const char *pc, kvlangRwirInst_t *inst) {
-    char *fr = kvlangKeytreeFrameRoot(pc);
-    kvlangFrame_t f = { kv, vtid, pc, inst };
-    if (inst->nr == 0) { free(fr); kvlangBuiltinNextPc(&f); return 0; }
+int kvlangBuiltinExecuteCopy(kvlangFrame_t *f) {
+    kvlangKv_t *kv = f->kv;
+    kvlangRwirInst_t *inst = f->inst;
+    /* 帧根优先用主循环缓存；status_known/fb_pc 随 f 透传（走同一套 PC 推进语义）。 */
+    char *owned = NULL;
+    const char *fr = f->frame_root;
+    if (!fr) { owned = kvlangKeytreeFrameRoot(f->pc); fr = owned; }
+    if (inst->nr == 0) { free(owned); kvlangBuiltinNextPc(f); return 0; }
     kvlangXvalue_t v; kvlangXvalueZero(&v);
     kvlangBuiltinResolveReadValue(kv, fr, inst->reads[0].name, &inst->reads[0].val, &v);
     for (int i = 0; i < inst->nw; i++) {
@@ -205,8 +247,8 @@ int kvlangBuiltinExecuteCopy(kvlangKv_t *kv, const char *vtid, const char *pc, k
                 snprintf(msg, sizeof msg, "TypeError: memhead %s does not exist — declare the container first (e.g. `%s:T = {}`)", b, b);
             free(b);
             if (ok != 0) {
-                kvlangXvalueFree(&v); free(fr);
-                kvlangVthreadSetError(kv, vtid, pc, msg);
+                kvlangXvalueFree(&v); free(owned);
+                kvlangVthreadSetError(kv, f->vtid, f->pc, msg);
                 return -1;
             }
         }
@@ -217,7 +259,7 @@ int kvlangBuiltinExecuteCopy(kvlangKv_t *kv, const char *vtid, const char *pc, k
         free(key);
     }
     kvlangXvalueFree(&v);
-    free(fr);
-    kvlangBuiltinNextPc(&f);
+    free(owned);
+    kvlangBuiltinNextPc(f);
     return 0;
 }

@@ -20,6 +20,8 @@ bool kvlangBuiltinCharConcat(const kvlangXvalue_t *a, const kvlangXvalue_t *b,
                              kvlangXvalue_t *out);
 
 /* ── 各 lib 的 rwir handler 原型（表在 rwir_func.c 引用）────────────── */
+/* 单读参 head（定义在 rwir_xvalue.c，rwir_ndarray.c 复用） */
+int xv_head1(kvlangFrame_t *f, kvspaceHead_t *h);
 /* 算术 / 位 / cast（rwir_int.c） */
 int cmp_int(kvlangScalar_t a, kvlangScalar_t b);
 int kvlangBuiltinAdd(kvlangFrame_t *f), kvlangBuiltinSub(kvlangFrame_t *f),

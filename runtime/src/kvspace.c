@@ -45,7 +45,11 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
     if (!name || !name[0])
         return 0;
     size_t dl = strlen(dir), nl = strlen(name);
-    char *key = malloc(dl + nl + 1);
+    /* 短 key 走栈缓冲，免读参热路径每步一次 malloc。 */
+    char stackbuf[512];
+    char *key = stackbuf;
+    if (dl + nl + 1 > sizeof stackbuf)
+        key = malloc(dl + nl + 1);
     memcpy(key, dir, dl);
     memcpy(key + dl, name, nl);
     key[dl + nl] = 0;
@@ -56,7 +60,8 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
         out->len = len;
         out->borrowed = 1;
     }
-    free(key);
+    if (key != stackbuf)
+        free(key);
     return 0;
 }
 
@@ -121,6 +126,24 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
             memcpy(dst, body, body_len);
     }
     return rc;
+}
+
+/* 直写 char/utf8 值：跳过「TLV 编码 → KvSet 再解 head」的往返，直接向后端要 body 指针填字节。
+ * 供 PC 推进热路径（每指令一次）用；语义等价于 NewCharUtf8 + KvSet。 */
+int kvlangKvSetChar(kvlangKv_t *k, const char *key, const char *s) {
+    uint32_t len = (uint32_t)strlen(s);
+    uint8_t *dst = NULL;
+    char err[256];
+    if (kvspaceWriteInPlace(k->h, key, 0, len, &dst, err, sizeof err) != 0) {
+        if (kvspaceWriteNewPlace(k->h, key, KVSPACE_REF_INLINE,
+                                 KVSPACE_STORETYPE_ATOM, 0, 0,
+                                 KVSPACE_KIND_CHAR_UTF8, len, &dst, err,
+                                 sizeof err) != 0)
+            return -1;
+    }
+    if (len && dst)
+        memcpy(dst, s, len);
+    return 0;
 }
 
 int kvlangKvDel(kvlangKv_t *k, const char *key, char *err, uint32_t err_cap) {
