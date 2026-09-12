@@ -462,7 +462,12 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
     if (n == 1 && ref_ok(k) && kvspaceSetPartByRef && pairs[0].key && pairs[0].val.data &&
         pairs[0].val.len) {
         const char *key = pairs[0].key;
-        kvlangHotEnt_t *he = k->nhot ? hot_find_key(k, key) : NULL;
+        kvlangHotEnt_t *he = NULL;
+        if (k->nhot) {
+            size_t kl = strlen(key);
+            if (kl >= 2 && key[kl - 2] == '/')
+                he = hot_find_key(k, key);
+        }
         if (he) {
             kvspaceRef_t r = { he->block_id, he->gen, 0, 0 };
             if (kvspaceSetPartByRef(k->h, &r, key, 0, pairs[0].val.data,
