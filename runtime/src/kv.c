@@ -70,10 +70,13 @@ static int last_dir_sep(const char *key, size_t *seplen) {
 static int parent_hit(kvlangKv_t *k, const char *key, uint8_t **d, uint32_t *len) {
     if (!k->pdir || !k->pgen || !key)
         return 0;
-    if (strncmp(key, k->pdir, k->pdl) != 0 || !key[k->pdl])
+    if (memcmp(key, k->pdir, k->pdl) != 0 || !key[k->pdl])
         return 0;
-    if (strchr(key + k->pdl, '/') || strstr(key + k->pdl, MEMBER_SEP))
-        return 0;
+    for (const char *p = key + k->pdl; *p; p++) {
+        if (*p == '/' ||
+            ((unsigned char)p[0] == 0xC2 && (unsigned char)p[1] == 0xB7))
+            return 0;
+    }
     kvspaceRef_t r = { k->pblock, k->pgen, 0, 0 };
     return kvspaceGetByRef(k->h, &r, key, d, len) == 0 && *d && *len > 0;
 }
@@ -178,11 +181,6 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
         out->data = d;
         out->len = len;
         out->borrowed = 1;
-        if (ref_ok(k)) {
-            kvspaceRef_t r;
-            if (kvspaceResolveRef(k->h, key, &r) == 0)
-                ref_put(k, key, &r);
-        }
     }
     free(heap);
     return 0;
