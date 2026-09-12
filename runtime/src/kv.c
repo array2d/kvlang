@@ -45,7 +45,7 @@ static void hot_clear(kvlangKv_t *k) {
     k->nhot = 0;
 }
 
-static int hot_get(kvlangKv_t *k, const char *dir, const char *name,
+static inline int hot_get(kvlangKv_t *k, const char *dir, const char *name,
                    uint8_t **d, uint32_t *len) {
     if (!dir || !name)
         return 0;
@@ -109,7 +109,7 @@ static void hot_put(kvlangKv_t *k, const char *name, const char *key,
     e->dlen = (uint32_t)(kl - nl);
 }
 
-static kvlangHotEnt_t *hot_find_key(kvlangKv_t *k, const char *key) {
+static inline kvlangHotEnt_t *hot_find_key(kvlangKv_t *k, const char *key) {
     if (!key)
         return NULL;
     for (int i = 0; i < k->nhot; i++) {
