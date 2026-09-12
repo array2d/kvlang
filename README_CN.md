@@ -2,14 +2,14 @@
 
 [![CI](https://github.com/array2d/kvlang/actions/workflows/ci.yml/badge.svg)](https://github.com/array2d/kvlang/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Tutorial Examples](https://img.shields.io/badge/tutorials-140%20examples-4c1)](tutorial/)
-[![Docs site](https://img.shields.io/badge/docs-stdlib-blueviolet)](https://array2d.github.io/kvlang/#/stdlib/kvlang/kvlangbrief.kv)
+[![Tutorial Examples](https://img.shields.io/badge/tutorials-210%20examples-4c1)](tutorial/)
+[![Spec](https://img.shields.io/badge/spec-84%20chapters-blueviolet)](stdlib/kvlang/spec/)
 
-**以 kvspace 为寻址空间和内存空间、小核心、扩展主导的明文解释执行语言（原训推框架 deepx 的前端语言，前身 dxlang）。** 代码与数据统一在一棵 KV 树；PC 即 KV 路径、可崩溃恢复，源码即 IR、KV 皆明文。核心 runtime 只做执行循环与控制流，其余能力交由 rwirext 扩展承担（`term` / `json` 等为基础示例）。
+**以 kvspace 为寻址空间和内存空间、小核心、扩展主导的明文解释执行语言（原训推框架 deepx 的前端语言，前身 dxlang）。** 代码与数据统一在一棵 KV 树；PC 即 KV 路径、可崩溃恢复，源码即 IR、KV 皆明文。核心 runtime 只做执行循环与控制流，其余能力由其它 runtime 提供、注册在 `/lib/<opcode>`。
 
-> English: [README.md](README.md) | 设计：[deep-dive](https://github.com/array2d/deepx-design/blob/master/doc/kvlang/deep-dive.md) — 根设计文档；README 为教学衍生。全部行为规范（p0–p7）、指令模型（§2）、Link 调用机制（§6）、类型系统（§9）、诊断体系（§12）均在其中。
+> English: [README.md](README.md)
 >
-> 设计文档 (CN): [deepx-design/doc/kvlang-design-and-implementation](https://github.com/array2d/deepx-design/tree/master/doc/kvlang-design-and-implementation) · (EN): [deepx-design/doc-en/kvlang-design-and-implementation](https://github.com/array2d/deepx-design/tree/master/doc-en/kvlang-design-and-implementation) — 19 章覆盖架构、parser、runtime、kvspace 及语言设计参考。
+> **规范是唯一事实源。** 语言事实在 [`stdlib/kvlang/spec/`](stdlib/kvlang/spec/)——84 章规范性条文加唯一权威文法，以 kvlang 自身书写、layout 落进 `/lib/kvlang/spec/…`。语言行为的任何改动一律规范驱动：先改规范条款及其锚定示例，再改实现，直至锚定 tutorial 在所有后端通过。规范与实现不符时以规范为准，实现视为缺陷。本 README 为教学衍生。
 
 ---
 
@@ -25,26 +25,30 @@
 **不分 IR 层，源码即 IR。** 程序计数器是 kvspace 路径字符串，调用栈深度是路径里的帧号：
 
 ```
-PC   = "/vthread/tid/[1]/[3,0]"            vthread tid、第 1 帧、第 3 条指令
+PC   = "/vthread/<vid>/[1]/[3,0]"          vthread vid、第 1 帧、第 3 条指令
 取指 = GetBatch(帧目录/, ["[3,0]"])         从帧目录取 opcode（extindex → /lib）
 调用 = 创建 [d+1] 帧；返回 = DelTree        崩溃后按 PC 重启继续
 goto/br = 只改同一帧的 irseq                if/while 不建帧
 ```
 
-每条指令占据二维坐标 `[s0, s1]`：`[s0,0]` 恒为操作码，`[s0,-j]` 读参，`[s0,+j]` 写参。
+每条指令占据二维坐标 `[s0, s1]`：`s0=0` 是签名行，`s0≥1` 是指令（即 **irseq**）；沿 `s1` 轴，`[s0,0]` 恒为操作码，`[s0,-j]` 读参，`[s0,+j]` 写参。
+
+代码三级——`lib`（包）/ `rwfunc`（函数）/ `rwir`（原子指令）——每级与 KV 树的层次对齐。`if` / `while` / `for` 不是第四级：由 layout lower 成 `goto`/`br`。
 
 ```kv
 lib main {
-    rwfunc add(A:int64, B:int64) -> (C:int64) { A + B -> C }
+    rwfunc add(a:int64, b:int64) -> (c:int64) { a + b -> c }
 }
 ```
 
 ```
-/lib/main.add/[0,0]  = "+"     /lib/main.add/[0,-1] = "A"
-/lib/main.add/[0,-2] = "B"     /lib/main.add/[0,1]  = "C"
+/lib/main·add/[0,0]  = "+"     /lib/main·add/[0,-1] = "a"
+/lib/main·add/[0,-2] = "b"     /lib/main·add/[0,1]  = "c"
 ```
 
-地址空间只有两个域：`/lib`（函数库——签名、指令树、`.src` 源码）和 `/vthread`（运行时栈帧）。`/` 下其余路径全部由用户自定义。**没有 `/dev` 设备域，也没有终端**——KV 世界里只有 key 和 value；`print` 这类 I/O 是[扩展 rwir](#内建函数与扩展-rwir)，不是地址空间域。
+三个地址空间域有固定的结构语义：`/lib`（函数库——签名、指令树、`def rwir` 路由头）、`/vthread`（运行时栈帧）、`/networld`（外部世界登记域）。`/` 下其余路径全部由用户自定义，无核心约定。**没有 `/dev` 设备域，也没有终端**——KV 世界里只有 key 和 value；`print` 这类 I/O 不是核心语言原语。
+
+键形态三分，三类零交集：`X/名`（结构——帧、指令槽、目录；核心所有）、`X·名`（用户数据成员）、`X/‥名`（系统变量——影子元数据；核心所有）。
 
 ---
 
@@ -54,215 +58,285 @@ kvspace 是核心的寻址空间与内存空间；语言本体是小核心 runti
 
 ![kvlang 生态架构](docs/kvlang-ecosystem-architecture.png)
 
-- **kvspace** — 一套 C ABI（`kvspace_*`，24 符号），由 DSN 选择两种实现：`kvspace-c`（C，`shm://`，链接 `blockmalloc` + `slotsboxmalloc`）与 `kvspace-durable`（Rust，`redis://` / `fs://`，s3/tikv 规划中）。
-- **kvlang** — `layout`（Rust，语法检查+布局）与 `runtime`（C，执行），二者都只依赖 `kvspace_*` C ABI。
-- **rwirext** — 构建在 runtime 之上的扩展。嵌入式（Rust `term`，经 `kvlang_runtime.h` 链接 `libkvlang_runtime`）或独立进程 handoff（Go `json`、Python `numpy`）。`term` / `json` 只是基础示例扩展，不是招牌能力。
+- **kvspace** — 一套 PascalCase、无下划线的 C ABI（`kvspaceGet`、`kvspaceWriteInPlace`、`kvlangRuntimeConnect`）；两种实现由运行期 DSN 选择：`kvspace-c`（C，`shm://`）与 `kvspace-durable`（Rust，`redis://` / `fs://`；s3 规划中）。各后端必须逐字节一致。
+- **layout** — Rust crate（`bin/libkvlanglayout.so`，CLI `bin/kvlanglayout`）。**o0 编译器**：scan → parse → lower（控制流降级、类型推断、特化）→ 把 KV 指令树写进 `/lib`。它**不做任何优化**——在此优化会丢掉其它 runtime 赖以在异构硬件上优化所需的高层语义。只写 `/lib`，诊断三级：`error` / `warn` / `info`。
+- **runtime-c** — 核心解释器（`bin/libkvlang_runtime.so`，C11）。纯解释：取指-译码-执行、native rwir 派发、拷贝操作码 `=`、call/return/br/goto、用户函数调用。不编译、不优化、不重排。只依赖 `kvspace*` C ABI。
+- **runtime-rs** — Rust（`bin/kvlang`，即 `kvlang` CLI）。一个参考 **myrwir 宿主**：链接 layout 与 runtime-c，解释自己的操作码、路由其余。其进程内 families：`term`、`json`、`http`、`networld`、`kvlang·*`。
+- **三个阶段** — layout（o0）→ 编译器（一种扩展）→ runtime（纯解释）。编译器不属语言核心；规范卷 06 只界定它与核心的契约（前端算子/后端算子、后端绑定、算子版本化）。未编译的 `/lib` 可直接运行。
+
+### myrwircaps：一个操作码如何被兑现
+
+每个 runtime 声明 **`myrwircaps`**——它能就地解释的操作码表（`opcode → handler`）。派发是固定的整数跳转表：在 `myrwircaps` 内的操作码本地兑现；控制类操作码、拷贝操作码、用户函数调用由核心处理；其余走 `notinmyrwircaps`——runtime 查 `/lib/<opcode>`，那里由 **`def rwir` 路由头**登记该 op，再交给 `myrwircaps` 含它的 runtime。`def rwir` 只存在于 `/lib/<op>`：绝不在 kv 源码中声明、也绝不由 layout 产生。`rwfunc` 自带可解释的实现体，故无需路由头——所以有 `def rwir` 而无 `def rwfunc`。
+
+跨进程 handoff 走队列 `/lib/<opcode>/vids/<vtid> = pc`：调用方 runtime `kvspace·watch` 到该项消失为止；进程内操作码在驱动循环里直接派发，无 handoff。
 
 ---
 
 ## Quick Start
 
-```bash
-# 依赖: Go 1.24+, Redis
-make build
+依赖：C 工具链 + cmake、Rust（cargo），以及装到 `/usr/lib/kvspace` 的 kvspace ABI 库（由 [`ci/deps.sh`](ci/deps.sh) 按 [`deps.json`](deps.json) 里的 tag 拉取）。Go 仅 Go `json` 示例扩展需要。
 
-./kvlang tutorial/01-basics/hello.kv         # 运行文件
-./kvlang -c 'print("hello, world")'          # inline 模式
-echo '40 + 2 -> x; print(x)' | ./kvlang      # pipe 模式（; 分隔同行语句）
-./kvlang vet my.kv                           # 语法检查
-./kvlang format my.kv                        # 格式化
+```bash
+git clone git@github.com:array2d/kvlang.git
+cd kvlang
+make all                                     # runtime(C) + layout(Rust) + runtime-rs(Rust) + json(Go)
+
+./bin/kvlang tutorial/01-basics/hello.kv     # 运行文件（入口 rwfunc test）
+./bin/kvlang -c 'println("hello, world")'    # inline 模式（入口 init）
+./bin/kvlang vet my.kv                       # 只 parse + lower
+./bin/kvlang format my.kv                    # 格式化到 stdout
+./bin/kvlang layout my.kv                    # 打印入口点
+./bin/kvlang dump my.kv                      # 把 /lib 逆向重建为可运行 kvlang
 ```
+
+`make` 目标：`all` · `runtime` · `layout` · `runtime-rs` · `json` · `oldhero` · `test` · `install` · `clean`。`make install` 把库装到 `/usr/lib`、CLI（`kvlang`、`kvlanglayout`）装到 `/usr/bin`、头文件装到 `/usr/include/kvlang`。
+
+**后端**由 `KVSPACE` DSN 选择（默认 `redis://127.0.0.1:6379`）：
+
+```bash
+KVSPACE=shm:///tmp/kvlang.shm ./bin/kvlang tutorial/01-basics/hello.kv   # kvspace-c
+KVSPACE=fs:///tmp/kvlang-fs   ./bin/kvlang tutorial/01-basics/hello.kv   # kvspace-durable
+```
+
+另有两种模式：`kvlang create <func>` 打印 vthread `vid`，`kvlang run <vid>` 从持久化的 PC 继续（崩溃恢复）。无参数且设了 `KVLANG_LIB=p1:p2:…` 时，kvlang 会 layout 这些路径下的所有 `.kv` 并运行各 lib 的 `init`。
 
 ---
 
 ## Language Guide
 
-### 程序结构（先读这条）
+### 十条铁律（先读这条）
 
-**顶层：`lib name { }`、`rwfunc`、单条指令。** 始终用 `rwfunc main() -> () { … }; main()` 包裹代码。裸 `if` / `while` / `for` 在顶层可能触发隐式 `init()` 包装，但不可靠——显式包裹 `main()` 是唯一保证模式。切勿将函数命名为 `init`，以避免与隐式包装冲突。
+1. 乘用 `×`、除用 `÷`。`*` 不是乘（是指针/解引用运算符）。`/` 不是除（是路径分隔符与注释标记）。
+2. 没有 `int` / `float` / `char` 简写，也没有 `object`。数值写定宽（`int64`、`float64` 等）；字符串是 `[]char/<编码>`；异构记录用 `{k=v}` 字面量或 `struct`。
+3. 赋值两个方向：`表达式 -> 槽`（写槽在右）、`槽 = 表达式`（写槽在左）。`=` 不是表达式——判断相等用 `==`。没有 `<-`。
+4. 每条指令一行最清晰；`;` 与换行等价（`a = 1; b = 2` 合法）。
+5. 注释是 `//` 行注释、`/* */` 块注释（块注释可嵌套）。没有 `#` 注释。
+6. 字符串只有 `"…"`（转义）和 `r"…"` / `r#"…"#`（原始）。没有 `"""` 三引号、没有反引号。
+7. 写参会拷入调用方当前位置的当前值，该位置未赋值时初值为 `None`——故累加前必须先置初值：`0 -> acc`，否则 `None + x` 报错。
+8. 数组要带 `[]` 前缀：`a:[]int64 = [1, 2, 3]`。空容器必须标类型：`d:[]char/utf32·int64 = {}`。
+9. `+` 只允许同类：字符+字符=拼接，数值+数值=相加；`"标签" + 数字` 会 TypeError。带标签打印用多参数：`println("answer =", n)`（自动空格）。
+10. 函数没有返回值，结果通过写参传出：`rwfunc f(x:int64) -> (r:int64) { x + 1 -> r }`，调用 `f(3) -> y`。
+
+### 程序结构
+
+一个文件由 `lib` 块、`rwfunc` 声明与指令构成。**没有 `import`**——`/lib` 树本身就是全局命名空间，跨库调用写全路径或限定名 `pkg·func`。每个参数都必须带类型标注。
 
 ```kv
-rwfunc main() -> () {
+rwfunc test() -> () {
     total = 0
     1 -> i
     while (i <= 5) {
-        total = total + i
+        total + i -> total
         i + 1 -> i
     }
-    println(total)
+    println(total)          // 15
 }
 
-main()
+test()
 ```
 
-### rwir（读写码）：写入两形态
+入口约定：文件为 `rwfunc test()`，inline 源码为 `init`；lib 层的裸指令会被合并进隐式的 `init`。`if` / `while` / `for` 只能出现在 `rwfunc` 体内。
+
+### 写入两形态（`=` 与 `->`）
 
 ```kv
-x = 40 + 2            # = ：写槽在左；= 不是表达式，不能嵌进条件里
-x × y -> z            # 右箭头：写槽在右
-f(a, b) -> r          # 函数写参映射；多写参 -> x, y；丢弃用 -> _
+x = 40 + 2                  // = ：写槽在左
+x × y -> z                  // -> ：写槽在右
+f(a, b) -> r                // 函数写参映射；多写参 -> x, y；丢弃用 -> _
 ```
 
-写槽必须是**位置**：裸名（帧内变量）、`/abs/path`（全局键）、`base.名`（成员）。字面量不是位置。
+`=` 只是"写左"的源码别名；落进 kvspace 的**永远**是 `->` 轴结构——读参在负轴、写参在正轴。写槽必须是**位置**：裸名（帧内变量）、`/abs/path`（全局键）或 `base·成员`。字面量不是位置。
 
-**`rwfunc func(ra,rb) -> (wa,wb) { … }` = 自定义复合 rwir**，单条 rwir 如 `A + B -> C` 是原子 rwir（一个操作码 + 读参 + 写参）；`rwfunc` 把多条 rwir 打包成命名单元，对外暴露相同的箭头接口——`(ra,rb)` 是读参声明，`-> (wa,wb)` 是写参声明。调用 `add(3,4) -> s` 即把实参绑入读槽、写槽映射回调用方帧。没有返回值，只有写参映射。
+**读参只读**——经成员/下标写、`kvspace·set(base, …)` 写、以及别名（`q = p` 后写 `q`）都不豁免。写参可读可写。要在函数内修改数组或 map，须把它声明为写参：`a[i] = v` 写穿 `a`。
 
-`rwfunc` 签名中 `-> (C:int64)` 是**写参声明**。函数把结果写进写参槽，调用方用 `-> r` 把写参映射到自己的位置。
-**读参只读**：函数体内不可把读参放进写槽（如 `A = A + 1`）。数组元素写同理——`a[i] = v` 写穿 `a`，要修改的数组/字典必须放写参位置。
+### 类型
+
+定宽数值：`int8 int16 int32 int64 uint8 uint16 uint32 uint64 float32 float64`。用于 tensor 标注的低精度种类（runtime 只搬字节，不对其做算术）：`float16` `bfloat16` `float8/e4m3` `float8/e5m2`。其它：`bool`、`char/utf8` `char/utf32` `char/ascii`、`stringkeymap`、`index`、`struct`、`time`、`duration`、`any`。
+
 ```kv
-# ❌ 错误：数组作读参，a[i] = v 写读参槽 → parser 拒绝
-rwfunc bad(a:int64) -> () { 99 -> a[0] }
-
-# ✅ 正确：数组作写参，函数内读写自由
-rwfunc good() -> (a:int64) { a:int64 = [10, 20]; 99 -> a[0]; a }
+float64(3) -> f          // 3.0
+int64(3.9) -> i          // 3（向零截断）
+int64("42") -> n         // 42
+bool(1) -> b             // true
+char/utf32(x) -> s       // 字符串编码转换（如 char/utf8 → char/utf32）
 ```
-需要体内反复更新的量先想清角色——
-**累加器是输出，声明为写参**（写参零值起步、体内可读可写，同 Go 命名返回值）：`rwfunc sum(arr:int64) -> (acc:int64) { acc + arr[i] -> acc }`；
-纯工作变量则拷贝局部（`A -> a` 后用 `a`）：
+
+十个数值算子既是构造函数也是类型转换。算术保宽（同宽运算保持同宽、溢出回绕）；混宽提升到更宽（`int32 + int64 → int64`），混入浮点走浮点。`index` 与 `extindex` 是 **storetype**、不是 kind；`p`（ptr）与 `None` 也不是 kind。
+
+`string·formatint(n, base)` / `string·formatuint(n, base)` 整数按进制转字符串；`string·parseint(s, base)` / `string·parseuint(s, base)` 字符串转整数（base 2..36）。
+
+### langtype：两型
+
+**langtype** 是一个值的真实类型：单一具体 kind 加确定的 `[dims]`，不含并集与轴量词。**def langtype** 是定义处的匹配类型（`def rwir` 签名行、或 `rwfunc` 参数定义），可含并集 `A|B`、轴量词 `.` `?` `*` `+`、`any` 与 mapexpr——一条 def langtype 可匹配许多 langtype。两型共用同一套文法（附录文法为唯一权威）；强调"一条具体类型表达式串"时统称 **kindexpr**。
+
+### 数组（compact `[…]`）
 
 ```kv
-rwfunc add(A:int64, B:int64) -> (C:int64) {
-    A + B -> C
+a:[]int64 = [7, 2, 9, 4]
+ndarray·numel(a) -> n     // 4（元素数）
+ndarray·dim(a) -> d       // 1（维数）
+ndarray·shape(a) -> sh    // 各轴长度
+xv·at(a, 2) -> e          // 9（越界报错）
+xv·set(a, 1, 99) -> b     // 新数组 [7, 99, 9, 4]
+a[0] -> head              // 7
+xv·langtype(a) -> lt      // "[4]int64"
+xv·bodylen(a) -> bl       // 32（body 字节数）
+```
+
+数组有两种物理形态，**由字面量括号决定**：`[1,2,3]` 是 **compact**（定长同型元素连续打包进单个 XValue；`[N]T` / `[d0,d1]T`），`{v0,v1,…}` 是 **stringkeymap** 形态（每元素独立子 key、可增长；变长字符串落这里，不落 `[…]`）。多维 `[2,3]int64` 也是 compact ndarray。定长初始化写 `a:[1024]int32 = []`（全零）。互转是 `array·scatter`（compact → stringkeymap）与 `array·compact`（反向）。
+
+遍历 compact 数组用 `while` + `ndarray·numel` + `xv·at`。字符串数组或变长集合用 `{}` 形态。
+
+### map、成员访问与 struct
+
+容器成员一律用 `·`（U+00B7）访问，**绝不用 `[]`**——`[]` 只索引 compact 数组。访问键**逐字即键侧 formatter 的输出**；kvspace 与 runtime 均不得改写、归一化或自动加壳。裸标量键与 1 元元组键是不同 formatter，永不互转：`b:int64·int64 = {}` 的访问键是 `b·200`，不是 `b·[200]`。数组形状（`[N]T`）根本不能作键。
+
+```kv
+d:[]char/utf32·int64 = {}     // 空 stringkeymap 必须标类型
+d·a = 10                      // 静态成员写
+kvspace·get(d, "a") -> x      // 动态读（缺失返回 None）
+k = "a"
+d·*k -> v                     // 动态成员读：k 的值作键
+kvspace·set(d, "c", 30) -> _  // 动态成员写
+
+m = map()                     // 构造空 stringkeymap
+
+r = {name="kv", ver=1}        // struct 字面量（异构记录；没有 object）
+r·name -> n                   // 成员读
+5 -> r·ver                    // struct 成员可写
+```
+
+map 的声明形式是 `memheadname : memitemkey_formatter · memitemvalue = {}`——键侧是**格式器**（key 只活在路径系统里、从不进入 XValue body），三选一：裸标量、字符串键 `[]char/<编码>`、标量元组 `[scalar,…]`。值侧递归，故 map 可嵌套。
+
+具名 struct（需字段默认值或复用类型时）：
+
+```kv
+struct Point { x:int64=0 y:int64=0 }
+rwfunc test() -> () {
+    p:Point = {x=3 y=4}
+    println(p·x, p·y)         // 3 4
 }
-
-rwfunc main() -> () {
-    add(3, 4) -> s
-    println(s)          # 7
-}
-
-main()
 ```
 
-### dict、成员访问与链表
+`struct Name { field:type=default }` 在 `/lib/Name` 注册一个原型；实例化 `Name{f=v}` 克隆原型、覆盖给定字段并做类型校验。struct 不是平行的类型注册表——原型本身就是 KV 数据。
 
-```kv
-d = { name="kv"; ver=1 }    # dict 字面量：成员是平坦键族 d.name、d.ver
-println(d.name)               # 成员读
-d.ver = 2                   # 成员写
-k = "name"; d.*k -> v       # 动态键：读 d.name（k 的值作键名）
-```
+跨函数共享的数据放**绝对路径**（帧内变量随帧返回销毁）：`/n1·val = 1`。
 
-**路径即指针**：把绝对路径字符串存到变量，再用 `.成员` 语法读写该路径下的键——变量的字符串值会成为路径前缀。
-```kv
-/node = { val=42 }       # dict 节点位于绝对路径
-"/node" -> p             # p 存路径字符串
-p.val -> v               # 读 /node.val → 42
-```
+### 指针
 
-链表等跨函数共享的数据结构，节点用**绝对路径**创建（帧内变量随函数返回销毁）：
+`&x` 是**绝对地址**运算符（`&x ≡ kvlang·abs(x)`）：产生一个指针，即 `ref=1` 的值，其 head 的 storetype/langtype 描述目标的完整形态、body 是目标 key 路径。`*p` 解引用；`p·字段` 自动解引用取成员。赋值时只做**单跳**类型检查——指针声明的目标 langtype 对所指 key 的实际 langtype，不递归展开链。值容器（map langtype 或 struct 原型路径）没有 body 可拷贝，必须以 `*T` 传递。**空指针就是 `None`**——没有 `""` 哨兵，`p == ""` 非法；判空写 `p != None`。普通字符串变量不是指针。
 
-```kv
-rwfunc build() -> () {
-    /n1 = { val=1; next="/n2" }
-    /n2 = { val=2; next="/n3" }
-    { val=3; next="" } -> /n3
-}
-
-rwfunc main() -> () {
-    build()
-    "/n1" -> p                   # p 存路径字符串（指针）
-    while (p != "") {
-        p.val -> v               # 指针解引用：读 /n1.val
-        println(v)
-        p.next -> p
-    }
-}
-
-main()
-```
-
-### 数字类型（仅精确宽度——无 `int` / `float`）
-
-```kv
-f = float32(3)        # int8/16/32/64 uint8/16/32/64 float32/64 十算子，既创建也转换
-w = int8(300)         # 44：窄化补码回绕；float→int 截断向零；算术域统一 int64/float64
-x:int64 = 42          # 带类型标注的变量声明
-```
-
-`int` 和 `float` 被 parser **拒绝**——必须使用精确宽度类型。十个精度算子既是构造函数也是类型转换。
+指针作 map 键必须写前导 `*`（`base·*k`）；省略非法，因为不会自动解引用。这是**显式**解引用，不是自动改键。
 
 ### 控制流（仅限 rwfunc 体内）
 
 ```kv
-i = 1; sum = 0
-while (i <= 10) { sum + i -> sum; i + 1 -> i }
-if (sum > 50) { println("big") } else { println("small") }
-for (x in [7, 2, 9, 4]) { println(x) }
+if (c) { … } else if (c2) { … } else { … }
+while (c) { … }
+for (e in arr) { … }        // 遍历 compact 数组
+break / continue
+return                      // 无返回值
 ```
 
-条件支持复合表达式：`if (7 % 2 != 0)`、`while (i < string.len(s))` 均可（布局期自动展平为临时槽）。
+map 遍历用 `while` + `kvspace·listlen` + `kvspace·listn`（`for`-`in` 对 map 不可靠）——注意目录路径要带尾 `/`。控制流只是源码语法；layout 把它展平成线性 irseq，再 lower 成 `goto` / `br`。
 
 ### 操作符
 
 | 类别 | 符号 |
 |------|------|
 | 算术 | `+` `-` `×` `÷` `%` |
-| 比较 | `==` `!=` `<` `>` `<=` `>=` |
-| 逻辑 | `&&` `\|\|` `!` |
-| 位运算 | `&` `\|` `^` `<<` `>>` |
+| 一元前缀 | `-` `!` `√`（sqrt） `&`（绝对地址） `*`（解引用） |
+| 比较 | `==` `!=` `<` `>` `<=` `>=`（及 `≠` `≤` `≥`） |
+| 逻辑 / 位运算 | `&&` `\|\|` `!` 及 `&` `\|` `^` `<<` `>>` |
 
-> `÷`：两侧均 int → 整除（C 风格，`7÷2`=3、`-9÷2`=-4）；任一侧 float → 浮除（`7.0÷2`=3.5）。
-> `/` 保留用于路径及路径分隔。`*` 保留用于后续指针解引用。
+> `÷`：两侧均 int → 整除（`7÷2`=3）；任一侧 float → 浮除（`7.0÷2`=3.5）。
+> `/` 保留用于路径与注释；`*` 是指针/解引用运算符，不是乘。
 
-### 内建函数与扩展 rwir
+### 内建函数
 
-**内建（builtin）** 是 runtime 在进程内直接求值的 rwir（`bi_is_native` 集合），全部是纯 KV→KV 计算，不做 I/O：
+**内建**是核心 runtime `myrwircaps` 里的 rwir：纯 KV→KV 计算，不做 I/O。
 
-**标量：** `abs` `neg` `sign` `pow` `sqrt` `exp` `log` `min` `max`（变参，如 `max(a,b,c)`）`debugger`\
-**类型：** `bool` `int8` `int16` `int32` `int64` `uint8` `uint16` `uint32` `uint64` `float32` `float64` `char/utf8` `char/utf32` `char/ascii`\
-**容器：** `array` `at` `set` `has` `array.sort` `array.slice` `array.append` `dict`\
-**形状：** `ndarray.numel` `ndarray.dim` `ndarray.shape` `xv.at` `xv.set`\
-**KV 树：** `kv.get` `kv.set` `kv.del` `kv.deltree` `kv.list` `kv.mkindex` `kv.extindex` `kv.rmindexext` `kv.watch` `kv.has` `kv.at`\
-**字符串：** `string.char` `string.ord` `string.len` `string.cmp` `string.find` `string.slice` `string.concat` `string.set`\
-**时间：** `time.now` `time.sub` `time.add` `time.before` `time.after` `time/duration.nanos` `time/duration.as_nanos`（及 `millis`/`seconds`/`minutes`/`hours` 变体）\
-**随机：** `random.uint64` `random.int63` `random.intn`
+**算术 / 比较 / 逻辑 / 位：** `add`(`+`) `sub`(`-`) `mul`(`×`) `div`(`÷`) `mod`(`%`) `pow` `sqrt`(`√`) `exp` `log` `neg` `abs` `sign` `min` `max`；`eq` `neq` `lt` `gt` `le` `ge` `and` `or` `not` `bitand` `bitor` `bitxor` `shl` `shr`
+**类型构造：** `bool` `int8` … `int64` `uint8` … `uint64` `float32` `float64` `char/utf32` `char/utf8` `char/ascii`；容器构造 `map` `array` `struct·new`
+**`array·`：** `scatter` `compact` `append` `slice` `fill`  ·  **`ndarray·`：** `numel` `dim` `shape`
+**`xv·`：** `at` `set` `reshape` `reinterpret` `langtype` `bodylen`
+**`string·`：** `len` `char` `ord` `cmp` `find` `slice` `concat` `set` `formatint` `formatuint` `parseint` `parseuint`
+**`kvspace·`：** `get` `set` `del` `deltree` `cp` `cpdir` `cplist` `list` `listlen` `listn` `mkindex` `extindex` `rmindexext` `watch`
+**`time·` / `time/duration·` / `random·`：** `now` `sub` `add` `before` `after`；`nanos` `millis` `seconds` `minutes` `hours` 及各 `as_*` 形式；`uint64` `int63` `intn`
+**`vthread·` / 调试：** `create` `run` `call` `sleep` `setstatus`；`debugger`（≡ `vthread·setstatus("paused")`）
 
-**`print` / `println` / `cerr` 不是内建。** KV 世界里没有终端，只有 key 和 value——I/O 不是核心语言原语。它们是**扩展 rwir**：由 `term` 扩展运行时把签名注册到 `/lib/<opcode>`（kind=`rwir`），并写宿主进程的 `stdout`/`stderr`。核心 runtime 把任何"`/lib/<opcode>` 上带 `rwir` 签名、且不在 builtin 表里"的 opcode 识别为扩展 rwir，交给其扩展运行时执行。与 `json.to` / `json.from`（json 扩展）、tensor 算子（numpy / GPU 扩展）同一套机制。
-
-```kv
-a:int64 = [7, 2, 9, 4]     # 带类型 1D 数组
-ndarray.numel(a) -> n         # 4
-at(a, 2) -> e            # 9
-set(a, 1, 99) -> a       # 修改元素：a 变为 [7, 99, 9, 4]
-sort(a) -> sorted         # 排序副本：[2, 4, 7, 9]
-```
+`print` / `println` / `cerr` / `printf` / `input` **不是**内建。KV 世界里没有终端，只有 key 和 value——I/O 不是核心语言原语。它们是 `term` runtime 的操作码，经上文所述的 `def rwir` 路由头机制到达。同一机制覆盖 `json·to` / `json·from`、`http·call` / `http·get|post|put|del`、`networld/proc·exec`、`networld/fs·size|read|write|append|list|del|mkdir|exists`，以及自举的 `kvlang·vet|format|layout|dump`。
 
 ```kv
-s = "hello"
-string.char(s, 1) = "a"     # 替换下标 1 的字符 → "hallo"
-s + " world" -> t           # 拼接 → "hallo world"
-string.len(s) -> n          # 5
-string.find(s, "ll") -> i   # 2（子串首次下标，未找到 -1）
-string.slice(s, 0, 2) -> p  # "he"
+print(x,…)              // 无空格、无换行
+println(x,…)            // 空格分隔、换行
+cerr(x,…)               // 同 println，写 stderr
+printf(fmt,…)           // C 风格：%d %i %u %o %x %X %f %e %g %c %s %%；不换行
+input(prompt) -> line   // 读一行 stdin
 ```
 
-字符串支持索引和 `+` 拼接：`at(s, i)` 读字符，`string.char(s, i)` 读字符，`string.char(s, i) = "X"` 单字符替换。
+字符串↔字节走 `xv·reinterpret`。一小层 kvlang 级 stdlib 把常见模式包成 rwfunc：[`stdlib/`](stdlib/) 下的 `kvspace`（`has`、`get_or`、`set_default`）、`string`、`math`、`time`、`time/duration`、`xv`、`http`。
+
+### 完整示例
+
+```kv
+rwfunc test() -> () {
+    s = "hello"
+    string·len(s) -> n
+    println(n)                  // 5
+
+    a:[]int64 = [1,2,3,4]
+    0 -> acc
+    0 -> i
+    while (i < ndarray·numel(a)) {
+        xv·at(a, i) -> e
+        acc + e -> acc
+        i + 1 -> i
+    }
+    println(acc)                // 10
+
+    d:[]char/utf32·int64 = {}
+    d·a = 10
+    kvspace·get(d, "a") -> x
+    println(x)                  // 10
+}
+```
+
+面向 LLM 的一页语法速览见 [`stdlib/kvlang/kvlangbrief.kv`](stdlib/kvlang/kvlangbrief.kv)。
 
 ---
 
 ## Tutorial
 
-140 个自包含示例（129 例带期望输出，CI 全量验证），按主题组织：
+210 个自包含示例（其中 202 个用 `// 期望输出` 头给出期望输出），按主题组织：
 
 ```
-01-basics/        hello, arith, precision, numtypes, strings, …  (15 files)
-02-func/          rwfunc, call, accumulator                       (2 files)
-03-control/       if, while, for, guess                           (5 files)
-03-debugger/      chain_array, debugger builtin                   (4 files)
-06-algo/          gcd, collatz, power, factorial, …               (8 files)
-06-lib/           lib block, nested, cross-lib, anon              (11 files)
-07-leetcode/      LeetCode solutions                              (90 files)
-error_cases/      type_error, index_error, zero_division, …       (36 files)
+01-basics/      hello, arith, precision, numtypes, strings, …     (18)
+02-func/        rwfunc, call, accumulator                         (4)
+03-control/     if, while, for, guess                             (5)
+04-ndarray/     compact 数组、下标、多维                           (12)
+05-dict/        map、动态键、缺失键 → None                         (3)
+06-algo/        gcd, collatz, power, factorial, …                 (8)
+07-lib/         lib 块、嵌套、跨库、匿名                            (13)
+08-leetcode/    LeetCode 题解                                     (88)
+09-debugger/    debugger 内建                                     (3)
+10-types/       带类型 map、嵌套类型、元组键                        (8)
+11-string/      字符串操作                                        (9)
+12-struct/      struct 声明、字段、指针、链表                       (10)
+13-stdlib/      stdlib：time、duration、kv、xv、math、string       (15)
+14-networld/    进程 exec、文件系统、http                          (10)
+15-vthread/     vthread create/call/run                           (4)
 ```
 
 ```bash
-./kvlang tutorial/01-basics/hello.kv         # hello kvlang
-./kvlang tutorial/06-algo/gcd.kv             # gcd = 6
-./kvlang tutorial/07-leetcode/001_two_sum.kv # LeetCode
+./bin/kvlang tutorial/01-basics/hello.kv          # 运行一个示例
+./bin/kvlang tutorial/06-algo/gcd.kv              # gcd = 6
 
-python3 tutorial/test.py                     # 全部正例 — CI 验证
-python3 tutorial/error_test.py               # 全部负例测试
+python3 tutorial/test.py                          # 全套 — 即一致性测试
+python3 error_cases/error_test.py                 # 期望诊断用例
 ```
+
+`tutorial/test.py` 发现 `tutorial/` 下所有 `.kv`，提取 `// 期望输出` 期望，用 `bin/kvlanglayout` layout 后运行，再比对 stdout。tutorial 套件**就是**一致性测试：每条锚定示例的输出在所有后端逐字节一致，即为符合。`error_cases/` 有 37 个用例、覆盖 10 个诊断类别。
 
 ---
 
@@ -270,11 +344,13 @@ python3 tutorial/error_test.py               # 全部负例测试
 
 `benchmark/` 是跨语言、跨后端性能基准。每个 case 是同一算法的 kvlang / Python / Rust / C
 等价实现；kvlang 分别在三个 kvspace 后端（`shm` / `fs` / `redis`）上各跑一列，原生/脚本版本作基线。
-规模固定以保证长期可比，每次运行只追加到带版本号的 `results.csv`——按同机同 case、以 version
+规模固定以保证长期可比，每次运行只追加到带版本号的 CSV——按同机同 case、以 version
 排序即得性能演进曲线。
 
+十个 case：`binary_search`、`binary_trees`、`fib`、`hash_table`、`iops`、`k_nucleotide`、`matmul`、`nqueens`、`prime_sieve`、`quicksort`。
+
 ```bash
-python3 benchmark/run.py            # 全部 case × 三后端，追加 results.csv
+python3 benchmark/run.py            # 全部 case × 三后端，追加带版本号 CSV
 python3 benchmark/run.py --show     # 打印历史记录
 ```
 
@@ -282,33 +358,25 @@ case、计时约定、CSV 字段见 [benchmark/README.md](benchmark/README.md)�
 
 ---
 
-## 设计文档
+## 规范
 
-深度设计与实现文档，覆盖全部架构：
+语言的规范性定义在 [`stdlib/kvlang/spec/`](stdlib/kvlang/spec/)，以 kvlang 书写、layout 落进 `/lib/kvlang/spec/…`。它是唯一事实源；本 README 为衍生。
 
-| 章节 | CN | EN |
-|------|-----|-----|
-| 总论 — 存算控制流分离 | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/total篇-01-存算控制流严格分离的kv树计算架构.md) | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/architecture-01-storage-compute-control-flow-separation.md) |
-| 总论 — 一切皆明文 | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/total篇-02-一切皆明文.md) | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/architecture-02-everything-is-plaintext.md) |
-| 总论 — 程序即数据结构+函数+数据 | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/total篇-03-程序即数据结构加函数加数据.md) | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/architecture-03-program-is-data-plus-functions.md) |
-| 总论 — 代码四级层次 | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/total篇-04-代码四级层次.md) | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/architecture-04-four-level-code-hierarchy.md) |
-| Parser — 指令架构 | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/parser篇-01-指令架构.md) | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/parser-01-instruction-architecture.md) |
-| Parser — 函数 | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/parser篇-02-函数.md) | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/parser-02-functions.md) |
-| Parser — 编译器流水线 | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/parser篇-04-编译器流水线.md) | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/parser-04-compiler-pipeline.md) |
-| Parser — 诊断输出 | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/parser篇-05-诊断输出.md) | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/parser-05-diagnostics.md) |
-| Parser — layoutrwir | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/parser篇-06-layoutrwir.md) | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/parser-06-layoutrwir.md) |
-| Parser & Runtime — 控制流 | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/parser&runtime-01控制流篇.md) | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/parser-runtime-01-control-flow.md) |
-| Runtime — 类型系统 | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/runtime篇-01-类型系统.md) | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/runtime-01-type-system.md) |
-| Runtime — 成员访问与数据结构 | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/runtime篇-02-成员访问与数据结构.md) | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/runtime-02-member-access-and-data-structures.md) |
-| Runtime — 调试与可观测性 | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/runtime篇-03-调试与可观测性.md) | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/runtime-03-debugging-and-observability.md) |
-| Runtime — 函数调用与builtin | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/runtime篇-04-函数调用builtin.md) | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/runtime-04-function-calls-and-builtins.md) |
-| KVSpace — 地址空间 | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/kvspace篇-01-地址空间.md) | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/kvspace-01-address-space.md) |
-| KVSpace — 寻址模型与命名 | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/kvspace篇-02-寻址模型与命名.md) | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/kvspace-02-addressing-model-and-naming.md) |
-| KVSpace — 代码指令布局 | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/kvspace篇-03-代码指令的布局格式.md) | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/kvspace-03-code-instruction-layout.md) |
-| KVSpace — 系统变量 | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/kvspace篇-04-系统变量.md) | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/kvspace-04-system-variables.md) |
-| Reference — 如何设计编程语言 | [cn](https://github.com/array2d/deepx-design/blob/master/doc/kvlang-design-and-implementation/reference篇-01-如何设计编程语言.md) | [en](https://github.com/array2d/deepx-design/blob/master/doc-en/kvlang-design-and-implementation/reference-01-how-to-design-a-programming-language.md) |
+| 卷 | 内容 |
+|----|------|
+| [00-导言](stdlib/kvlang/spec/00-导言/) | 范围、规范用语、阅读约定 |
+| [01-词法](stdlib/kvlang/spec/01-词法/) | 源码结构、词法单元、注释、标识符、路径字面量、字面量、运算符与优先级 |
+| [02-kvspace模型](stdlib/kvlang/spec/02-kvspace模型/) | 地址空间、结构域、寻址与命名、C ABI、XValue head 线格式、数组两种形态、指令布局、vthread、系统变量 |
+| [03-类型系统](stdlib/kvlang/spec/03-类型系统/) | 种类与定宽类型、langtype、map 容器、成员访问、ptr、struct、head 三正交维、wire 布局、字符串编码 |
+| [04-layout语义](stdlib/kvlang/spec/04-layout语义/) | 指令架构、指令槽编码、函数与写槽、控制流及其降级、layout 流水线与 ABI、诊断 |
+| [05-runtime语义](stdlib/kvlang/spec/05-runtime语义/) | 执行模型、成员访问、函数调用、runtime-c 内建、runtime 开发规范、notinmyrwircaps、C ABI |
+| [06-编译器语义](stdlib/kvlang/spec/06-编译器语义/) | 核心与扩展编译器的契约：前端算子/后端算子、后端绑定、算子版本化 |
+| [附录](stdlib/kvlang/spec/附录/) | 唯一权威文法：程序结构、类型表达式、指令、表达式、控制流、内建函数 |
+| [设计理由](stdlib/kvlang/spec/设计理由/) | 非规范动机说明：存算分离、一切皆明文、程序即数据结构、代码层级、如何设计一门语言 |
 
-每篇英文翻译附带 **Implementation Consistency Notes**，已与 Go 源码逐条交叉核验。
+stdlib 与 spec 的渲染视图发布在 [array2d.github.io/kvlang](https://array2d.github.io/kvlang/)。
+
+---
 
 ## License
 
