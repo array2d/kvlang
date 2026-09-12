@@ -213,26 +213,13 @@ int kvlangKvGetOne(kvlangKv_t *k, const char *key, kvlangXvalue_t *out) {
     kvlangXvalueZero(out);
     uint8_t *d;
     uint32_t len;
-    if (ref_ok(k) && key) {
-        kvlangRefEnt_t *e = ref_find(k, key);
-        if (e) {
-            kvspaceRef_t r = { e->block_id, e->gen, 0, 0 };
-            if (kvspaceGetByRef(k->h, &r, key, &d, &len) == 0 && d && len > 0) {
-                e->block_id = r.block_id;
-                e->gen = r.gen;
-                out->data = d;
-                out->len = len;
-                out->borrowed = 1;
-                return 0;
-            }
-        }
-        /* kv.get map slots (`base·k`); frame locals go through GetMember. */
-        if (k->npref && strstr(key, MEMBER_SEP) && parent_hit(k, key, &d, &len)) {
-            out->data = d;
-            out->len = len;
-            out->borrowed = 1;
-            return 0;
-        }
+    /* kv.get map slots (`base·k`); frame locals go through GetMember. */
+    if (ref_ok(k) && k->npref && key && strstr(key, MEMBER_SEP) &&
+        parent_hit(k, key, &d, &len)) {
+        out->data = d;
+        out->len = len;
+        out->borrowed = 1;
+        return 0;
     }
     if (kvspaceGet(k->h, key, 0, &d, &len) != 0)
         return -1;
