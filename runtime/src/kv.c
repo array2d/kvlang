@@ -24,27 +24,41 @@ static int ref_ok(kvlangKv_t *k) {
     return k->ref_on && kvspaceResolveRef && kvspaceGetByRef;
 }
 
+static kvlangRefEnt_t *pref_find(kvlangKv_t *k, const char *dir, size_t dl) {
+    for (int i = 0; i < k->npref; i++) {
+        const char *pk = k->pref[i].key;
+        if (pk && k->pref[i].gen && strlen(pk) == dl && memcmp(pk, dir, dl) == 0)
+            return &k->pref[i];
+    }
+    return NULL;
+}
+
 static void parent_clear(kvlangKv_t *k) {
-    free(k->pdir);
-    k->pdir = NULL;
-    k->pdl = 0;
-    k->pblock = k->pgen = 0;
+    for (int i = 0; i < k->npref; i++)
+        free(k->pref[i].key);
+    k->npref = 0;
 }
 
 static void parent_put(kvlangKv_t *k, const char *dir, size_t dl, const kvspaceRef_t *rr) {
+    kvlangRefEnt_t *e;
     if (!dir || !dl || !rr->parent_id || !rr->depth)
         return;
-    if (!k->pdir || k->pdl != dl || memcmp(k->pdir, dir, dl) != 0) {
-        free(k->pdir);
-        k->pdir = malloc(dl + 1);
-        if (!k->pdir)
+    e = pref_find(k, dir, dl);
+    if (!e) {
+        if (k->npref < KVLANG_PREF_CAP)
+            e = &k->pref[k->npref++];
+        else {
+            e = &k->pref[0];
+            free(e->key);
+        }
+        e->key = malloc(dl + 1);
+        if (!e->key)
             return;
-        memcpy(k->pdir, dir, dl);
-        k->pdir[dl] = 0;
-        k->pdl = dl;
+        memcpy(e->key, dir, dl);
+        e->key[dl] = 0;
     }
-    k->pblock = rr->parent_id;
-    k->pgen = rr->depth;
+    e->block_id = rr->parent_id;
+    e->gen = rr->depth;
 }
 
 /* Last '/' or member '·'; *seplen is 1 or 2. */
@@ -68,16 +82,18 @@ static int last_dir_sep(const char *key, size_t *seplen) {
 }
 
 static int parent_hit(kvlangKv_t *k, const char *key, uint8_t **d, uint32_t *len) {
-    if (!k->pdir || !k->pgen || !key)
+    size_t seplen = 0;
+    int si;
+    kvlangRefEnt_t *e;
+    if (!k->npref || !key)
         return 0;
-    if (memcmp(key, k->pdir, k->pdl) != 0 || !key[k->pdl])
+    si = last_dir_sep(key, &seplen);
+    if (si < 0 || seplen != MEMBER_SEP_LEN)
         return 0;
-    for (const char *p = key + k->pdl; *p; p++) {
-        if (*p == '/' ||
-            ((unsigned char)p[0] == 0xC2 && (unsigned char)p[1] == 0xB7))
-            return 0;
-    }
-    kvspaceRef_t r = { k->pblock, k->pgen, 0, 0 };
+    e = pref_find(k, key, (size_t)si + seplen);
+    if (!e)
+        return 0;
+    kvspaceRef_t r = { e->block_id, e->gen, 0, 0 };
     return kvspaceGetByRef(k->h, &r, key, d, len) == 0 && *d && *len > 0;
 }
 
@@ -95,8 +111,20 @@ void kvlangKvInvalidateFrame(kvlangKv_t *k, const char *fr) {
         w++;
     }
     k->nref = w;
-    if (k->pdir && strncmp(k->pdir, fr, n) == 0 && (k->pdir[n] == 0 || k->pdir[n] == '/'))
-        parent_clear(k);
+    {
+        int pw = 0;
+        for (int i = 0; i < k->npref; i++) {
+            char *key = k->pref[i].key;
+            if (key && strncmp(key, fr, n) == 0 && (key[n] == 0 || key[n] == '/')) {
+                free(key);
+                continue;
+            }
+            if (pw != i)
+                k->pref[pw] = k->pref[i];
+            pw++;
+        }
+        k->npref = pw;
+    }
 }
 
 kvlangKv_t *kvlangKvConnect(const char *dsn) {
