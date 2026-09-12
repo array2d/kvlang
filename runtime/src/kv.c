@@ -78,11 +78,13 @@ static void hot_put(kvlangKv_t *k, const char *name, const char *key,
                     uint32_t block_id, uint32_t gen) {
     kvlangHotEnt_t *e;
     size_t nl, kl;
-    if (!name || !name[0] || name[1] != 0 || !key || !block_id)
+    if (!name || !name[0] || !key || !block_id || gen != 0)
+        return;
+    nl = strlen(name);
+    if (nl >= MEMBER_SEP_LEN && memchr(name, 0xC2, nl))
         return;
     if (strncmp(key, "/lib/", 5) == 0)
         return;
-    nl = 1;
     kl = strlen(key);
     if (kl < nl)
         return;
@@ -361,7 +363,8 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
         return 0;
     uint8_t *d;
     uint32_t len;
-    if (ref_ok(k) && dir && !name[1] && hot_get(k, dir, name, &d, &len)) {
+    if (ref_ok(k) && dir && !memchr(name, 0xC2, 2) &&
+        hot_get(k, dir, name, &d, &len)) {
         out->data = d;
         out->len = len;
         out->borrowed = 1;
