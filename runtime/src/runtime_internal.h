@@ -116,6 +116,7 @@ typedef struct { char *key; kvlangXvalue_t val; } kvlangKvPair_t;
 #define KVLANG_REF_CAP 64
 #define KVLANG_PREF_CAP 5
 #define KVLANG_HOT_CAP 4
+#define KVLANG_TWO_CAP 2
 typedef struct { char *key; uint32_t block_id, gen, klen; } kvlangRefEnt_t;
 typedef struct { char *name; char *key; uint32_t block_id, gen, dlen; } kvlangHotEnt_t;
 typedef struct {
@@ -132,6 +133,12 @@ typedef struct {
     /* Frame locals `a`/`i`/`n` (iops/hash loops); dir-checked, leaf refs only. */
     kvlangHotEnt_t hot[KVLANG_HOT_CAP];
     int nhot;
+    /* 2-char frame locals (qsort/bsearch lo/hi); leaf refs, dir-checked. */
+    kvlangHotEnt_t two[KVLANG_TWO_CAP];
+    int ntwo;
+    /* fpar prefix + last GetMember name; avoids strlen(dir)+memcpy dir. */
+    char mkey[256];
+    uint32_t mdl;
 } kvlangKv_t;
 
 /* growable string buffer */
