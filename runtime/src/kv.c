@@ -104,6 +104,9 @@ static int parent_hit(kvlangKv_t *k, const char *key, uint8_t **d, uint32_t *len
         return 0;
     if (strchr(key + k->pdl, '/'))
         return 0;
+    /* "[ab]" and shorter (ASCII codes, small ids): parent walk is not cheaper. */
+    if (!key[k->pdl + 4])
+        return 0;
     kvspaceRef_t r = { k->pblock, k->pgen };
     return kvspaceGetByRef(k->h, &r, key, d, len) == 0 && *d && *len > 0;
 }
@@ -248,7 +251,9 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
             if (kvspaceResolveRef(k->h, pairs[i].key, &rr) == 0) {
                 ref_put(k, pairs[i].key, &rr);
                 const char *sl = strrchr(pairs[i].key, '/');
-                if (sl && sl[1] == '[')
+                /* Last component "[xxx…" (len>=5): map keys whose parent walk
+                 * beats Get. Skip "[a]"/"[ab]" (quicksort indices, ASCII). */
+                if (sl && sl[1] == '[' && sl[5])
                     parent_put(k, pairs[i].key, (size_t)(sl - pairs[i].key) + 1, &rr);
             }
         }
