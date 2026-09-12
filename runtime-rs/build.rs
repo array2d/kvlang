@@ -23,18 +23,28 @@ fn main() {
     let manifest = env!("CARGO_MANIFEST_DIR");
     let bin = format!("{manifest}/../bin"); // kvlang/bin（新构建的 libkvlang_runtime.so）
 
+    // KVSPACE_LIB_DIR 可覆盖安装目录：macOS 的 /usr 受 SIP 保护，应指向 <prefix>/lib/kvspace。
+    let kvspace_dir = std::env::var("KVSPACE_LIB_DIR").unwrap_or_else(|_| "/usr/lib/kvspace".into());
+
     println!("cargo:rustc-link-search=native={bin}");
-    println!("cargo:rustc-link-search=native=/usr/lib/kvspace");
-    println!("cargo:rustc-link-search=native=/usr/lib");
+    println!("cargo:rustc-link-search=native={kvspace_dir}");
     println!("cargo:rustc-link-lib=dylib=kvlang_runtime");
     println!("cargo:rustc-link-lib=dylib=kvspace");
     println!("cargo:rustc-link-lib=dylib=kvlanglayout");
 
-    println!("cargo:rustc-link-arg=-Wl,--disable-new-dtags"); // rpath 转 DT_RPATH，传递解析子依赖
-    println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN");
-    println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN/../lib");
-    println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/kvspace");
-    println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib");
+    if cfg!(target_os = "macos") {
+        // macOS：ld64 无 --disable-new-dtags；$ORIGIN 对应 @loader_path
+        println!("cargo:rustc-link-arg=-Wl,-rpath,@loader_path");
+        println!("cargo:rustc-link-arg=-Wl,-rpath,@loader_path/../lib");
+        println!("cargo:rustc-link-arg=-Wl,-rpath,{kvspace_dir}");
+    } else {
+        println!("cargo:rustc-link-search=native=/usr/lib");
+        println!("cargo:rustc-link-arg=-Wl,--disable-new-dtags"); // rpath 转 DT_RPATH，传递解析子依赖
+        println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN");
+        println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN/../lib");
+        println!("cargo:rustc-link-arg=-Wl,-rpath,{kvspace_dir}");
+        println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib");
+    }
 
     // 内嵌顶层 stdlib/**/*.kv → EMBEDDED_KV。
     let libdir = format!("{manifest}/../stdlib");
