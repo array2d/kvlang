@@ -67,6 +67,22 @@ jobs:
           cmake -S runtime -B build/runtime -DCMAKE_BUILD_TYPE=Release -DKVSPACE_LIB_DIR="$KVSPACE_LIB_DIR"
           cmake --build build/runtime --target kvlang_runtime -j
           cargo build --release --manifest-path layout/Cargo.toml
+      - name: 后端装载冒烟（frontend 的 dlopen 真能加载后端）
+        run: |
+          cat > /tmp/conn.c <<'EOF'
+          #include <kvspace/kvspace.h>
+          #include <stdio.h>
+          int main(void) {
+              void *shm = kvspaceConnect("shm:///tmp/ks_rel_macos");
+              void *fs  = kvspaceConnect("fs:///tmp/ks_rel_fs");
+              printf("shm=%p fs=%p\n", shm, fs);
+              if (shm) kvspaceClose(shm);
+              if (fs)  kvspaceClose(fs);
+              return (shm && fs) ? 0 : 1;
+          }
+          EOF
+          cc /tmp/conn.c -o /tmp/conn -I/usr/local/include -L/usr/local/lib/kvspace -lkvspace
+          DYLD_FALLBACK_LIBRARY_PATH=/usr/local/lib /tmp/conn
       - name: 打包 ABI 产物
         run: |
           set -euo pipefail
