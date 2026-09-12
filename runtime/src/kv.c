@@ -383,21 +383,50 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
         out->borrowed = 1;
         return 0;
     }
-    size_t dl = strlen(dir), nl = strlen(name);
+    size_t dl, nl = strlen(name);
     char stack[256];
     char *heap = NULL;
     char *key = stack;
-    if (dl + nl + 1 > sizeof stack) {
-        heap = malloc(dl + nl + 1);
-        if (!heap)
-            return -1;
-        key = heap;
+    int fpar_tried = 0;
+    /* Multi-char siblings (bsearch lo/hi/mid): reuse fpar.klen, one parent GetByRef. */
+    if (ref_ok(k) && name[1] && k->fpar.key &&
+        memcmp(k->fpar.key, dir, k->fpar.klen) == 0 && dir[k->fpar.klen] == 0) {
+        dl = k->fpar.klen;
+        if (dl + nl + 1 > sizeof stack) {
+            heap = malloc(dl + nl + 1);
+            if (!heap)
+                return -1;
+            key = heap;
+        }
+        memcpy(key, dir, dl);
+        memcpy(key + dl, name, nl);
+        key[dl + nl] = 0;
+        fpar_tried = 1;
+        {
+            kvspaceRef_t r = { k->fpar.block_id, k->fpar.gen, 0, 0 };
+            if (kvspaceGetByRef(k->h, &r, key, &d, &len) == 0 && d && len > 0) {
+                out->data = d;
+                out->len = len;
+                out->borrowed = 1;
+                free(heap);
+                return 0;
+            }
+        }
     }
-    memcpy(key, dir, dl);
-    memcpy(key + dl, name, nl);
-    key[dl + nl] = 0;
-    /* Non-a/i/n frame siblings: ART parent before the 64-slot leaf scan. */
-    if (ref_ok(k) && !hot_name_ok(name) && k->fpar.key &&
+    if (!fpar_tried) {
+        dl = strlen(dir);
+        if (dl + nl + 1 > sizeof stack) {
+            heap = malloc(dl + nl + 1);
+            if (!heap)
+                return -1;
+            key = heap;
+        }
+        memcpy(key, dir, dl);
+        memcpy(key + dl, name, nl);
+        key[dl + nl] = 0;
+    }
+    /* 1-char non-a/i/n (sieve d): ART parent before the 64-slot leaf scan. */
+    if (ref_ok(k) && !fpar_tried && !hot_name_ok(name) && k->fpar.key &&
         memcmp(k->fpar.key, dir, k->fpar.klen) == 0 && dir[k->fpar.klen] == 0) {
         kvspaceRef_t r = { k->fpar.block_id, k->fpar.gen, 0, 0 };
         if (kvspaceGetByRef(k->h, &r, key, &d, &len) == 0 && d && len > 0) {
