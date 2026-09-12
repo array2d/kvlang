@@ -224,11 +224,6 @@ static int parent_prefix_ok(const kvlangRefEnt_t *e, const char *key) {
     dl = e->klen ? e->klen : strlen(e->key);
     if (memcmp(key, e->key, dl) != 0 || !key[dl])
         return 0;
-    /* `·` map prefix: remainder is the last component; no nested sep. */
-    if (dl >= MEMBER_SEP_LEN &&
-        (unsigned char)e->key[dl - 2] == 0xC2 &&
-        (unsigned char)e->key[dl - 1] == 0xB7)
-        return 1;
     for (p = key + dl; *p; p++) {
         if (*p == '/' ||
             ((unsigned char)p[0] == 0xC2 && (unsigned char)p[1] == 0xB7))
