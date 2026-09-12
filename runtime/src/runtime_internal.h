@@ -114,7 +114,7 @@ typedef struct { uint8_t *data; uint32_t len; uint8_t borrowed; } kvlangXvalue_t
 typedef struct { char *key; kvlangXvalue_t val; } kvlangKvPair_t;
 
 #define KVLANG_REF_CAP 64
-#define KVLANG_PREF_CAP 4
+#define KVLANG_PREF_CAP 8
 typedef struct { char *key; uint32_t block_id, gen, klen; } kvlangRefEnt_t;
 typedef struct {
     void *h;
@@ -122,7 +122,7 @@ typedef struct {
     int nref;
     int ref_on;
     kvlangRefEnt_t *rlat;
-    /* ART dir ancestors of recent `·` member maps (hash/qsort). */
+    /* ART dir ancestors of recent `·` maps (hash/qsort/trees L,R,bid,bdep,tid). */
     kvlangRefEnt_t pref[KVLANG_PREF_CAP];
     int npref;
     int pref_i;
