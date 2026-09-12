@@ -92,19 +92,8 @@ static void hot_put(kvlangKv_t *k, const char *name, const char *key,
             if (k->hot[i].key && strcmp(k->hot[i].key, key) == 0) {
                 k->hot[i].block_id = block_id;
                 k->hot[i].gen = gen;
-                return;
             }
-            /* Same name, other frame: replace so recursive Gets hit. */
-            free(k->hot[i].key);
-            k->hot[i].key = strdup(key);
-            if (!k->hot[i].key) {
-                free(k->hot[i].name);
-                k->hot[i].name = NULL;
-                return;
-            }
-            k->hot[i].block_id = block_id;
-            k->hot[i].gen = gen;
-            k->hot[i].dlen = (uint32_t)(kl - nl);
+            /* Same name, other frame: keep the first key (fib recursion). */
             return;
         }
     }
