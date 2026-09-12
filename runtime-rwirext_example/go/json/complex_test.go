@@ -352,10 +352,10 @@ func TestKindStability(t *testing.T) {
 	for _, cc := range cases {
 		r1 := "/ks/a-" + cc.name
 		out1, _ := rt(c, r1, cc.in)
-		k1, _, _ := parseTLV(getTLV(c, r1+cc.path))
+		k1, _, _ := parseTLV(getTLV(c, r1+cc.path, 0))
 		r2 := "/ks/b-" + cc.name
 		out2, _ := rt(c, r2, out1)
-		k2, _, _ := parseTLV(getTLV(c, r2+cc.path))
+		k2, _, _ := parseTLV(getTLV(c, r2+cc.path, 0))
 		status := "OK  "
 		if k1 != k2 {
 			status = "DRIFT"

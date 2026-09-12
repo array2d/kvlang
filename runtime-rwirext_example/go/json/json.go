@@ -1,52 +1,51 @@
 // Package json 是 rwirext 扩展运行时（json.to/json.from）。经 C runtime 的
-// rwirext_* ABI 与 kvspace 交互（不依赖 kvspace-go）。独立进程常驻 serve。
+// rwirext_* ABI 取指令语义，经 kvspace 正典 ABI 读写 KV（扩展宿主自连，不经 runtime）。
 package json
 
 /*
-// 后端（kvspace-c=shm / kvspace_durable=redis|fs）由 Makefile 经 CGO_LDFLAGS 注入，
-// 对齐 term 的 KVLANG_KVSPACE_LIB；扩展宿主自连 kvspace，不经 runtime。
+// 后端（shm→kvspace-c / redis|fs→kvspace_durable）由 libkvspace dispatch 前端按 DSN 选，
+// 经 CGO_LDFLAGS 注入。
 #cgo CFLAGS: -I${SRCDIR}/../../../runtime/include
-#cgo LDFLAGS: -L${SRCDIR}/../../../bin -lkvlang_runtime -L${SRCDIR}/../../../layout/target/release -lkvlanglayout -Wl,-rpath,${SRCDIR}/../../../bin -Wl,-rpath,${SRCDIR}/../../../layout/target/release
-#include "kvlang_rwirext.h"
+#cgo LDFLAGS: -L${SRCDIR}/../../../bin -lkvlang_runtime -Wl,-rpath,${SRCDIR}/../../../bin
+#include "kvlang_runtime.h"
 #include <stdint.h>
 #include <stdlib.h>
 
-// kvspace ABI（扩展宿主自连，不经 runtime）——runtime .so 传递解析其后端实现。
+// kvspace 正典 ABI（30 符号）。读恒借用（不得 free）；codec 产出为前端 malloc（libc free）。
 extern void *kvspaceConnect(const char *dsn);
 extern void  kvspaceClose(void *h);
-extern void  kvspaceBytesFree(uint8_t *p, uint32_t len);
-extern int   kvspaceGet(void *h, const char *key, uint8_t **out, uint32_t *out_len);
-extern int   kvspaceSet(void *h, const char *const *keys, const uint8_t *vals,
-                        const uint32_t *lens, uint32_t n, char *err, uint32_t err_cap);
-extern int   kvspaceList(void *h, const char *prefix, int expand_ext, int resolve,
-                         uint8_t **out, uint32_t *out_len);
+extern int   kvspaceGet(void *h, const char *key, int resolve, uint8_t **out, uint32_t *out_len);
+extern int   kvspaceWriteInPlace(void *h, const char *key, int resolve, uint32_t body_len,
+                                 uint8_t **body, char *err, uint32_t err_cap);
+extern int   kvspaceWriteNewPlace(void *h, const char *key, uint8_t ref, uint8_t storetype,
+                                  uint8_t ro, uint32_t vid, const char *langtype, uint32_t body_len,
+                                  uint8_t **body, char *err, uint32_t err_cap);
+extern int   kvspaceListLen(void *h, const char *prefix, int expand_ext, int resolve, int32_t *out_count);
+extern int   kvspaceListAt(void *h, const char *prefix, int expand_ext, int resolve, int32_t idx,
+                           uint8_t *buf, uint32_t buf_cap, uint32_t *out_len);
 extern int   kvspaceDel(void *h, const char *const *keys, uint32_t nkeys, char *err, uint32_t err_cap);
 extern int   kvspaceDelTree(void *h, const char *prefix, char *err, uint32_t err_cap);
-extern int   kvspaceMkindex(void *h, const char *path, char *err, uint32_t err_cap);
+extern int   kvspaceMkindex(void *h, const char *path, uint32_t capacity, char *err, uint32_t err_cap);
+extern int   kvspaceTlvEncode(const char *kind, const uint8_t *raw, uint32_t raw_len,
+                              const int32_t *dims, int32_t ndim, uint8_t **out, uint32_t *out_len);
 extern int   kvspaceNewChar(const uint8_t *bytes, uint32_t len, uint8_t **out, uint32_t *out_len);
 extern const char *kvspaceConst(const char *name);
 
-// XValue 头（repr(C)，对齐 kvspace ABI）：kindexpr 为唯一类型真相，body 段靠 offset/len 定位。
+// XValue 头（逐字段对齐 kvspace/include/kvspace/kvspace.h）：三正交轴 ref×storetype×langtype。
 typedef struct {
-    uint8_t  kindexpr[256];
+    uint16_t headlen;
+    uint8_t  ref;
+    uint8_t  storetype;
     uint8_t  ro;
     uint32_t vid;
     int32_t  body_len;
+    int32_t  ndim;
+    int32_t  dims[8];
+    char     langtype[256];
+    int32_t  langtype_len;
     int32_t  body_offset;
 } kvspaceHead_t;
-extern int   kvspaceDecodeHead(const uint8_t *data, uint32_t data_len, kvspaceHead_t *out);
-extern int   kvspaceTlvEncode(const char *kind, const uint8_t *raw, uint32_t raw_len,
-                              const int32_t *dims, int32_t ndim, uint8_t **out, uint32_t *out_len);
-
-// kindexpr 解析（kvlang/layout 提供 ABI，唯一事实源）：ref/ndim/dims/kind。
-typedef struct {
-    int32_t ref;
-    int32_t ndim;
-    int32_t dims[8];
-    int32_t array_len;
-    uint8_t kind[64];
-} kvlangKindexpr;
-extern int   kvlangKindexprParse(const char *kindexpr, kvlangKindexpr *out);
+extern int kvspaceDecodeHead(const uint8_t *data, uint32_t data_len, kvspaceHead_t *out);
 */
 import "C"
 
@@ -63,6 +62,13 @@ import (
 	"unsafe"
 )
 
+// storetype：容器值恒 index（spec map容器）；extindex 同 index 系，读判共用。
+const (
+	storetypeIndex    = 3
+	storetypeExtIndex = 4
+	refPtr            = 1
+)
+
 // ── cgo 封装 ────────────────────────────────────────────────────────
 
 func cstr(s string) *C.char { return C.CString(s) }
@@ -71,75 +77,148 @@ func gostr(s *C.char) string {
 	if s == nil {
 		return ""
 	}
-	defer C.free(unsafe.Pointer(s))
+	defer C.free(unsafe.Pointer(s)) // rwirext ABI 产出为 malloc，须 free
 	return C.GoString(s)
 }
 
-func list(c unsafe.Pointer, prefix string) []string {
-	cp := cstr(prefix)
-	defer C.free(unsafe.Pointer(cp))
-	var out *C.uint8_t
-	var outLen C.uint32_t
-	if C.kvspaceList(c, cp, 0, 0, &out, &outLen) != 0 || out == nil || outLen == 0 {
-		if out != nil {
-			C.kvspaceBytesFree(out, outLen)
+func headOf(data []byte) (C.kvspaceHead_t, bool) {
+	var h C.kvspaceHead_t
+	if len(data) == 0 {
+		return h, false
+	}
+	if C.kvspaceDecodeHead((*C.uint8_t)(unsafe.Pointer(&data[0])), C.uint32_t(len(data)), &h) != 0 {
+		return h, false
+	}
+	return h, true
+}
+
+// langtypeOf：head 的完整 kindexpr 串（含 [dims] 前缀）。
+func langtypeOf(h *C.kvspaceHead_t) string { return C.GoString(&h.langtype[0]) }
+
+// baseKind：剥去 [dims] 形状前缀后的种类名。`·` 分隔的 map langtype 原样返回（键侧方括号是
+// 键类型，不是形状，见 spec map容器）。
+func baseKind(lt string) string {
+	if strings.Contains(lt, sep) {
+		return lt
+	}
+	if strings.HasPrefix(lt, "[") {
+		if i := strings.IndexByte(lt, ']'); i >= 0 {
+			return lt[i+1:]
 		}
-		return nil
 	}
-	defer C.kvspaceBytesFree(out, outLen)
-	str := C.GoStringN((*C.char)(unsafe.Pointer(out)), C.int(outLen))
-	if str == "" {
-		return nil
-	}
-	return strings.Split(str, "\n")
+	return lt
 }
 
-func get(c unsafe.Pointer, key string) string {
-	_, raw, _ := parseTLV(getTLV(c, key))
-	return string(raw)
+// isMapLangtype：值容器判定 —— 裸种类名 stringkeymap，或完整 map langtype（含 ·）。
+func isMapLangtype(lt string) bool {
+	k := baseKind(lt)
+	return k == kindMap || strings.Contains(k, sep)
 }
 
-func getTLV(c unsafe.Pointer, key string) []byte {
+// getTLV：借用读。resolve=1 穿透 link（handoff 队列经 Ptr 统一到首个 op，须穿透）。
+// 返回拷贝，调用方持有；借用指针不得 free。
+func getTLV(c unsafe.Pointer, key string, resolve int) []byte {
 	ck := cstr(key)
 	defer C.free(unsafe.Pointer(ck))
 	var out *C.uint8_t
 	var outLen C.uint32_t
-	if C.kvspaceGet(c, ck, &out, &outLen) != 0 || out == nil || outLen == 0 {
-		if out != nil {
-			C.kvspaceBytesFree(out, outLen)
-		}
+	if C.kvspaceGet(c, ck, C.int(resolve), &out, &outLen) != 0 || out == nil || outLen == 0 {
 		return nil
 	}
-	defer C.kvspaceBytesFree(out, outLen)
 	return C.GoBytes(unsafe.Pointer(out), C.int(outLen))
 }
 
-func setTLV(c unsafe.Pointer, key string, tlv []byte) {
-	ck := cstr(key)
-	defer C.free(unsafe.Pointer(ck))
-	buf := C.CBytes(tlv)
-	defer C.free(buf)
-	keys := [1]*C.char{ck}
-	lens := [1]C.uint32_t{C.uint32_t(len(tlv))}
-	var err [256]C.char
-	C.kvspaceSet(c, &keys[0], (*C.uint8_t)(buf), &lens[0], 1, &err[0], 256)
+func headAt(c unsafe.Pointer, key string) (C.kvspaceHead_t, bool) {
+	return headOf(getTLV(c, key, 0))
 }
 
-func setChar(c unsafe.Pointer, key, val string) {
-	cv := C.CBytes([]byte(val))
-	defer C.free(cv)
-	var out *C.uint8_t
-	var outLen C.uint32_t
-	if C.kvspaceNewChar((*C.uint8_t)(cv), C.uint32_t(len(val)), &out, &outLen) != 0 || out == nil {
+// get：key 的 body 字节（借用读 → 拷贝）。
+func get(c unsafe.Pointer, key string, resolve int) string {
+	data := getTLV(c, key, resolve)
+	h, ok := headOf(data)
+	if !ok {
+		return ""
+	}
+	bo, bl := int(h.body_offset), int(h.body_len)
+	if bo < 0 || bl < 0 || bo+bl > len(data) {
+		return ""
+	}
+	return string(data[bo : bo+bl])
+}
+
+// writeBody：写即构造——按三正交轴 (ref, storetype, ro, vid, langtype) + body 向后端要
+// body 偏移指针后直接写字节。key 已存在且三轴与 body_len 全同 → WriteInPlace（原 box 就地）；
+// 否则 WriteNewPlace（新 box）。
+func writeBody(c unsafe.Pointer, key string, ref, storetype, ro C.uint8_t, vid C.uint32_t,
+	langtype string, body []byte) {
+	ck := cstr(key)
+	defer C.free(unsafe.Pointer(ck))
+	cl := cstr(langtype)
+	defer C.free(unsafe.Pointer(cl))
+	n := C.uint32_t(len(body))
+	var dst *C.uint8_t
+	var err [256]C.char
+	place := C.int(1)
+	if cur, ok := headAt(c, key); ok &&
+		cur.ref == ref && cur.storetype == storetype &&
+		int(cur.body_len) == len(body) && langtypeOf(&cur) == langtype {
+		place = C.kvspaceWriteInPlace(c, ck, 0, n, &dst, &err[0], 256)
+	}
+	if place != 0 {
+		if C.kvspaceWriteNewPlace(c, ck, ref, storetype, ro, vid, cl, n, &dst, &err[0], 256) != 0 {
+			return
+		}
+	}
+	if len(body) > 0 && dst != nil {
+		copy(unsafe.Slice((*byte)(unsafe.Pointer(dst)), len(body)), body)
+	}
+}
+
+// setTLV：解 head 取三轴 + body，走写即构造。
+func setTLV(c unsafe.Pointer, key string, tlv []byte) {
+	h, ok := headOf(tlv)
+	if !ok {
 		return
 	}
-	defer C.kvspaceBytesFree(out, outLen)
-	kek := cstr(key)
-	defer C.free(unsafe.Pointer(kek))
-	keys := [1]*C.char{kek}
-	lens := [1]C.uint32_t{outLen}
-	var err [256]C.char
-	C.kvspaceSet(c, &keys[0], out, &lens[0], 1, &err[0], 256)
+	bo, bl := int(h.body_offset), int(h.body_len)
+	var body []byte
+	if bo >= 0 && bl >= 0 && bo+bl <= len(tlv) {
+		body = tlv[bo : bo+bl]
+	}
+	writeBody(c, key, h.ref, h.storetype, h.ro, h.vid, langtypeOf(&h), body)
+}
+
+// setNone：None（JSON null）落 storetype=NONE、langtype=""、body 空。
+func setNone(c unsafe.Pointer, key string) {
+	writeBody(c, key, 0, 0, 0, 0, "", nil)
+}
+
+// list：前缀直接子项名（ListLen 定计数 + 逐 idx ListAt 取名，借用缓冲不 free）。
+func list(c unsafe.Pointer, prefix string, resolve int) []string {
+	cp := cstr(prefix)
+	defer C.free(unsafe.Pointer(cp))
+	var count C.int32_t
+	if C.kvspaceListLen(c, cp, 0, C.int(resolve), &count) != 0 || count <= 0 {
+		return nil
+	}
+	names := make([]string, 0, int(count))
+	buf := make([]byte, 1024)
+	for i := C.int32_t(0); i < count; i++ {
+		var n C.uint32_t
+		if C.kvspaceListAt(c, cp, 0, C.int(resolve), i, (*C.uint8_t)(unsafe.Pointer(&buf[0])), C.uint32_t(len(buf)), &n) != 0 {
+			if n <= C.uint32_t(len(buf)) {
+				continue
+			}
+			buf = make([]byte, int(n))
+			if C.kvspaceListAt(c, cp, 0, C.int(resolve), i, (*C.uint8_t)(unsafe.Pointer(&buf[0])), C.uint32_t(len(buf)), &n) != 0 {
+				continue
+			}
+		}
+		if n > 0 {
+			names = append(names, string(buf[:n]))
+		}
+	}
+	return names
 }
 
 func del(c unsafe.Pointer, key string) {
@@ -161,7 +240,7 @@ func mkindex(c unsafe.Pointer, path string) {
 	cp := cstr(path)
 	defer C.free(unsafe.Pointer(cp))
 	var err [256]C.char
-	C.kvspaceMkindex(c, cp, &err[0], 256)
+	C.kvspaceMkindex(c, cp, 0, &err[0], 256)
 }
 
 func resolveRead(c unsafe.Pointer, pc string, idx int) string {
@@ -194,34 +273,23 @@ func params(c unsafe.Pointer, pc string) []string {
 	return strings.Split(gostr(C.kvlangRwirextParams(c, cp)), "\n")
 }
 
-// ── XValue 编解码（走权威 kvspace ABI：DecodeHead 读头 + TlvEncode/NewChar 编码）──
+// ── XValue 编解码（走权威 codec：DecodeHead 读头 + TlvEncode/NewChar 编码）──
 
-// parseTLV：kvspaceDecodeHead 解出 kind/ndim/dims，body 段即元素平铺；arrLen = ∏dims（标量为 1）。
+// parseTLV：解 head 得 kind/body/arrLen。arrLen = ∏物理 dims（标量为 1；容器值 body 空）。
 func parseTLV(data []byte) (kind string, raw []byte, arrLen int) {
-	if len(data) == 0 {
+	h, ok := headOf(data)
+	if !ok {
 		return "", nil, 0
 	}
-	var h C.kvspaceHead_t
-	if C.kvspaceDecodeHead((*C.uint8_t)(unsafe.Pointer(&data[0])), C.uint32_t(len(data)), &h) != 0 {
-		return "", nil, 0
-	}
-	var kx C.kvlangKindexpr
-	if C.kvlangKindexprParse((*C.char)(unsafe.Pointer(&h.kindexpr[0])), &kx) != 0 {
-		return "", nil, 0
-	}
-	kb := C.GoBytes(unsafe.Pointer(&kx.kind[0]), 64)
-	if i := bytes.IndexByte(kb, 0); i >= 0 {
-		kb = kb[:i]
-	}
-	kind = string(kb)
+	kind = baseKind(langtypeOf(&h))
 	bo, bl := int(h.body_offset), int(h.body_len)
 	if bo < 0 || bl < 0 || bo+bl > len(data) {
 		return kind, nil, 1
 	}
 	raw = data[bo : bo+bl]
 	arrLen = 1
-	for i := 0; i < int(kx.ndim); i++ {
-		arrLen *= int(kx.dims[i])
+	for i := 0; i < int(h.ndim) && i < 8; i++ {
+		arrLen *= int(h.dims[i])
 	}
 	if arrLen < 1 {
 		arrLen = 1
@@ -229,45 +297,8 @@ func parseTLV(data []byte) (kind string, raw []byte, arrLen int) {
 	return kind, raw, arrLen
 }
 
-// constructTLV：char/utf8 走 kvspaceNewChar（显式长度，NUL 安全），
-// 其余（数值/布尔/object 等）走 kvspaceTlvEncode（arrLen>1 → 一维 [arrLen]）。
-func constructTLV(kind string, raw []byte, arrLen int) []byte {
-	if kind == kindChar8 {
-		buf := C.CBytes(raw)
-		defer C.free(buf)
-		var out *C.uint8_t
-		var ol C.uint32_t
-		if C.kvspaceNewChar((*C.uint8_t)(buf), C.uint32_t(len(raw)), &out, &ol) != 0 || out == nil {
-			return nil
-		}
-		defer C.kvspaceBytesFree(out, ol)
-		return C.GoBytes(unsafe.Pointer(out), C.int(ol))
-	}
-	ck := cstr(kind)
-	defer C.free(unsafe.Pointer(ck))
-	var buf unsafe.Pointer
-	if len(raw) > 0 {
-		buf = C.CBytes(raw)
-		defer C.free(buf)
-	}
-	d := [1]C.int32_t{C.int32_t(arrLen)}
-	var dims *C.int32_t
-	var ndim C.int32_t
-	if arrLen > 1 {
-		dims = &d[0]
-		ndim = 1
-	}
-	var out *C.uint8_t
-	var ol C.uint32_t
-	if C.kvspaceTlvEncode(ck, (*C.uint8_t)(buf), C.uint32_t(len(raw)), dims, ndim, &out, &ol) != 0 || out == nil {
-		return nil
-	}
-	defer C.kvspaceBytesFree(out, ol)
-	return C.GoBytes(unsafe.Pointer(out), C.int(ol))
-}
-
-// encodeTLVDims：显式 dims/ndim 编码（供 stringkeymap 容器值落 dims）。
-func encodeTLVDims(kind string, raw []byte, dims []int32) []byte {
+// encodeTLV：类型化编码（唯一编码入口，委托 kvspace 正典 codec，不手拼 head）。
+func encodeTLV(kind string, raw []byte, dims []int32) []byte {
 	ck := cstr(kind)
 	defer C.free(unsafe.Pointer(ck))
 	var buf unsafe.Pointer
@@ -279,12 +310,44 @@ func encodeTLVDims(kind string, raw []byte, dims []int32) []byte {
 	for i, d := range dims {
 		carr[i] = C.int32_t(d)
 	}
+	var dp *C.int32_t
+	if len(dims) > 0 {
+		dp = &carr[0]
+	}
 	var out *C.uint8_t
 	var ol C.uint32_t
-	if C.kvspaceTlvEncode(ck, (*C.uint8_t)(buf), C.uint32_t(len(raw)), &carr[0], C.int32_t(len(carr)), &out, &ol) != 0 || out == nil {
+	if C.kvspaceTlvEncode(ck, (*C.uint8_t)(buf), C.uint32_t(len(raw)), dp, C.int32_t(len(dims)), &out, &ol) != 0 || out == nil {
 		return nil
 	}
-	defer C.kvspaceBytesFree(out, ol)
+	defer C.free(unsafe.Pointer(out)) // codec 产出为前端 malloc
+	return C.GoBytes(unsafe.Pointer(out), C.int(ol))
+}
+
+// constructTLV：标量（arrLen==1）或一维数组（arrLen>1 → dims=[arrLen]）。
+func constructTLV(kind string, raw []byte, arrLen int) []byte {
+	if arrLen > 1 {
+		return encodeTLV(kind, raw, []int32{int32(arrLen)})
+	}
+	return encodeTLV(kind, raw, nil)
+}
+
+// constructChar：字符串走 codec 的 NewChar（显式长度，NUL 安全）。空串亦须给非空指针。
+func constructChar(raw []byte) []byte {
+	n := len(raw)
+	if n == 0 {
+		n = 1
+	}
+	buf := C.malloc(C.size_t(n))
+	defer C.free(buf)
+	if len(raw) > 0 {
+		copy(unsafe.Slice((*byte)(buf), len(raw)), raw)
+	}
+	var out *C.uint8_t
+	var ol C.uint32_t
+	if C.kvspaceNewChar((*C.uint8_t)(buf), C.uint32_t(len(raw)), &out, &ol) != 0 || out == nil {
+		return nil
+	}
+	defer C.free(unsafe.Pointer(out))
 	return C.GoBytes(unsafe.Pointer(out), C.int(ol))
 }
 
@@ -338,6 +401,9 @@ func tlvToJSONValue(kind string, raw []byte, arrLen int) interface{} {
 			}
 			return arr
 		}
+		if len(raw) == 0 {
+			return false
+		}
 		return raw[0] != 0
 	case "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64":
 		if arrLen > 1 {
@@ -347,6 +413,9 @@ func tlvToJSONValue(kind string, raw []byte, arrLen int) interface{} {
 			}
 			return arr
 		}
+		if len(raw) < es {
+			return int64(0)
+		}
 		return readInt(raw[:es])
 	case "float32", "float64":
 		if arrLen > 1 {
@@ -355,6 +424,9 @@ func tlvToJSONValue(kind string, raw []byte, arrLen int) interface{} {
 				arr[i] = floatJSON(float64From(raw[i*es : i*es+es]))
 			}
 			return arr
+		}
+		if len(raw) < es {
+			return floatJSON(0)
 		}
 		return floatJSON(float64From(raw[:es]))
 	case "char/utf8", "char/ascii":
@@ -369,6 +441,9 @@ func tlvToJSONValue(kind string, raw []byte, arrLen int) interface{} {
 func float64From(raw []byte) float64 {
 	if len(raw) == 4 {
 		return float64(math.Float32frombits(binary.LittleEndian.Uint32(raw)))
+	}
+	if len(raw) < 8 {
+		return 0
 	}
 	return math.Float64frombits(binary.LittleEndian.Uint64(raw))
 }
@@ -409,7 +484,7 @@ func jsonValueToTLV(v interface{}) ([]byte, error) {
 		}
 		return constructTLV(kindBool, []byte{b}, 1), nil
 	case string:
-		return constructTLV(kindChar8, []byte(t), 1), nil
+		return constructChar([]byte(t)), nil
 	default:
 		return nil, fmt.Errorf("json: unsupported value type %T", v)
 	}
@@ -426,21 +501,18 @@ func u64bits(f float64) []byte {
 	return u64(bits)
 }
 
-// ── KV 子树 ↔ map[string]any ───────────────────────────────────────
-// 值/索引分离：容器值（object/stringkeymap）存 p（无后缀，body 空，stringkeymap 的 dims 在 head）；
-// memindex 存 p·（kind=index，body=[4B count][names]，成员列表唯一权威）；成员在 p·<key>
-// （key 恒字符串，数组下标为坐标段 [i]）。后端按 · 成员自动维护 index 与 stringkeymap 兜底。
+// ── KV 子树 ↔ JSON ─────────────────────────────────────────────────
+// 容器值落裸 base（p，body 空）；成员落 p·<key>（· 成员目录）；memindex p· 由后端按成员自动维护
+// （nv= 值容器写入时建，成员写入时增删），扩展不手写索引。
+// 容器判定与对象/数组分派只看容器值 head：map langtype（或裸种类名 stringkeymap）即容器；
+// 成员名全为坐标段 `[i]` → JSON 数组，否则命名字典 → JSON 对象；空容器按 dims（数组 dims=[n]、
+// 对象无 dims）分派，使空对象 {} 与空数组 [] 往返不混。
 
-// 从 kvspace ABI（kvspaceConst）取的常量，扩展不硬编码分隔符/kind 字面量（#111）。
 var (
 	sep         string
 	runtimeSep  string
 	dirSuf      string
-	indexSep    string
-	kindObj     string
 	kindMap     string
-	kindIndex   string
-	kindChar8   string
 	kindInt64   string
 	kindFloat64 string
 	kindBool    string
@@ -450,11 +522,7 @@ func init() {
 	sep = cconst("KVSPACE_MEMBER_SEP")
 	runtimeSep = cconst("KVSPACE_RUNTIME_MEMBER_SEP")
 	dirSuf = cconst("KVSPACE_DIR_INDEX_SUF")
-	indexSep = cconst("KVSPACE_INDEX_VALUE_SEP")
-	kindObj = cconst("KVSPACE_KIND_OBJ")
 	kindMap = cconst("KVSPACE_KIND_MAP")
-	kindIndex = cconst("KVSPACE_KIND_INDEX")
-	kindChar8 = cconst("KVSPACE_KIND_CHAR_UTF8")
 	kindInt64 = cconst("KVSPACE_KIND_INT64")
 	kindFloat64 = cconst("KVSPACE_KIND_FLOAT64")
 	kindBool = cconst("KVSPACE_KIND_BOOL")
@@ -476,40 +544,38 @@ func cconst(name string) string {
 	return C.GoString(s)
 }
 
-// memindex p·：kind=index，body=[4B count LE][names]，成员列表唯一权威。
-func mkMemIndex(names []string) []byte {
-	body := make([]byte, 4)
-	binary.LittleEndian.PutUint32(body, uint32(len(names)))
-	body = append(body, []byte(strings.Join(names, "\n"))...)
-	return constructTLV(kindIndex, body, 1)
-}
-
-// 容器值（无后缀 p）：object body 空。
-func mkObjValue() []byte { return constructTLV(kindObj, nil, 1) }
-
-// 容器值（无后缀 p）：stringkeymap body 空，dims=[n]（恒一维坐标段 [i]）。
-func mkMapValue(n int) []byte { return encodeTLVDims(kindMap, nil, []int32{int32(n)}) }
-
-// validateKey：JSON 对象 key 不能含影响 kvspace 存储分隔的字符（§5.4）。
-// 空串、/ · [ ] \n \r \0 U+2025 及 ASCII 控制字符一律拒绝（不静默丢键、不转义）。
+// validateKey：JSON 对象 key 不能含影响 kvspace 存储分隔的字符（spec 成员名字符约束）。
+// 空串、/ · [ ] \n \r \0 U+2025 U+2026 及 ASCII 控制字符一律拒绝（不静默丢键、不转义）。
 // '.' 已释放给小数 key，可作成员名。
 func validateKey(k string) error {
 	if k == "" {
 		return fmt.Errorf("json: empty key rejected")
 	}
 	for _, r := range k {
-		if r == '[' || r == ']' || r == '\r' || r == 0 || r < 0x20 ||
-			strings.ContainsRune(sep+dirSuf+indexSep+runtimeSep, r) {
+		if r == '[' || r == ']' || r == '\r' || r == 0 || r < 0x20 || r == 0x2025 || r == 0x2026 ||
+			strings.ContainsRune(sep+dirSuf, r) {
 			return fmt.Errorf("json: forbidden char %q in key %q", r, k)
 		}
 	}
 	return nil
 }
 
+// coordIndex：坐标段 `[i]` → i；非单一整数坐标返回 false。
+func coordIndex(name string) (int, bool) {
+	if len(name) < 3 || name[0] != '[' || name[len(name)-1] != ']' {
+		return 0, false
+	}
+	i, err := strconv.Atoi(name[1 : len(name)-1])
+	if err != nil || i < 0 {
+		return 0, false
+	}
+	return i, true
+}
+
 func writeValue(c unsafe.Pointer, path string, v interface{}) error {
 	switch t := v.(type) {
 	case nil:
-		setTLV(c, path, nil) // None：key 存在、值为空字节（JSON null）
+		setNone(c, path) // None：key 存在、body 空（JSON null）
 	case map[string]any:
 		return writeObj(c, path, t)
 	case []interface{}:
@@ -524,6 +590,17 @@ func writeValue(c unsafe.Pointer, path string, v interface{}) error {
 	return nil
 }
 
+// writeContainer：容器值落裸 base（body 空）。dims 空 = 命名字典（对象）；dims=[n] = 坐标数组。
+// storetype 恒 index（spec map容器）；langtype 由 codec 产出（裸 stringkeymap）。
+func writeContainer(c unsafe.Pointer, path string, dims []int32) {
+	tlv := encodeTLV(kindMap, nil, dims)
+	h, ok := headOf(tlv)
+	if !ok {
+		return
+	}
+	writeBody(c, path, 0, storetypeIndex, 0, 0, langtypeOf(&h), nil)
+}
+
 func writeObj(c unsafe.Pointer, path string, m map[string]any) error {
 	keys := make([]string, 0, len(m))
 	for k := range m {
@@ -533,8 +610,7 @@ func writeObj(c unsafe.Pointer, path string, m map[string]any) error {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	setTLV(c, path, mkObjValue())
-	setTLV(c, path+sep, mkMemIndex(keys))
+	writeContainer(c, path, nil)
 	for _, k := range keys {
 		if err := writeValue(c, path+sep+k, m[k]); err != nil {
 			return err
@@ -544,12 +620,7 @@ func writeObj(c unsafe.Pointer, path string, m map[string]any) error {
 }
 
 func writeArr(c unsafe.Pointer, path string, arr []interface{}) error {
-	keys := make([]string, len(arr))
-	for i := range arr {
-		keys[i] = fmt.Sprintf("[%d]", i)
-	}
-	setTLV(c, path, mkMapValue(len(arr)))
-	setTLV(c, path+sep, mkMemIndex(keys))
+	writeContainer(c, path, []int32{int32(len(arr))})
 	for i, v := range arr {
 		if err := writeValue(c, path+sep+fmt.Sprintf("[%d]", i), v); err != nil {
 			return err
@@ -558,51 +629,97 @@ func writeArr(c unsafe.Pointer, path string, arr []interface{}) error {
 	return nil
 }
 
+// isContainer：容器值在 p（body 空，map langtype），或 memindex 落 p·（成员已写）。
+func isContainer(c unsafe.Pointer, path string) bool {
+	if h, ok := headAt(c, path); ok && h.ref == 0 && isMapLangtype(langtypeOf(&h)) {
+		return true
+	}
+	h, ok := headAt(c, path+sep)
+	return ok && (h.storetype == storetypeIndex || h.storetype == storetypeExtIndex)
+}
+
+// isDir：p/ 是 index/extindex 目录（层级目录，与 · 成员目录并列）。
+func isDir(c unsafe.Pointer, path string) bool {
+	h, ok := headAt(c, path+dirSuf)
+	return ok && (h.storetype == storetypeIndex || h.storetype == storetypeExtIndex)
+}
+
 func readValue(c unsafe.Pointer, path string) interface{} {
-	// 容器值在 p（无后缀）：object/stringkeymap（body 空，成员在 memindex p·）
-	kind, _, _ := parseTLV(getTLV(c, path))
-	if kind == kindObj {
-		return readObj(c, path)
+	if path != "/" {
+		if isContainer(c, path) {
+			return readContainer(c, path)
+		}
 	}
-	if kind == kindMap {
-		return readArr(c, path)
-	}
-	// / 目录树（kind=index）
-	if dkind, _, _ := parseTLV(getTLV(c, path+dirSuf)); dkind == kindIndex {
+	if isDir(c, path) {
 		return readDir(c, path)
 	}
-	// 单值（标量 / compact ndarray / 字符串）
-	kind, raw, arrLen := parseTLV(getTLV(c, path))
+	kind, raw, arrLen := parseTLV(getTLV(c, path, 0))
 	if kind == "" {
 		return nil // None → JSON null
 	}
 	return tlvToJSONValue(kind, raw, arrLen)
 }
 
-// readDir：/ 目录树（kind=index）→ JSON object，子节点递归；子名带尾 /（子目录）或 ·（成员目录）先 strip。
+// readDir：/ 目录树 → JSON object；子名带尾 /（子目录）或 ·（成员目录）先 strip。
 func readDir(c unsafe.Pointer, path string) map[string]any {
 	m := map[string]any{}
-	for _, name := range list(c, path+dirSuf) {
+	for _, name := range list(c, dirPrefix(path), 0) {
 		key := strings.TrimSuffix(strings.TrimSuffix(name, dirSuf), sep)
-		m[key] = readValue(c, path+dirSuf+key)
+		m[key] = readValue(c, childPath(path, key))
 	}
 	return m
 }
 
-func readObj(c unsafe.Pointer, path string) map[string]any {
+// memberNames：p· 的成员名。尾 `·` 项是成员的 memindex 目录（fs 后端按原始目录项列出），
+// 成员名本身禁 `·`（spec 成员名字符约束），故剥尾 `·` 并按名字去重。
+func memberNames(c unsafe.Pointer, prefix string) []string {
+	var names []string
+	seen := map[string]bool{}
+	for _, n := range list(c, prefix, 0) {
+		n = strings.TrimSuffix(n, sep)
+		if n == "" || seen[n] {
+			continue
+		}
+		seen[n] = true
+		names = append(names, n)
+	}
+	return names
+}
+
+// readContainer：p· 成员枚举 → 数组或对象。
+func readContainer(c unsafe.Pointer, path string) interface{} {
+	names := memberNames(c, path+sep)
+	if len(names) == 0 {
+		if h, ok := headAt(c, path); ok && h.ndim >= 1 {
+			return []interface{}{} // 数组：容器值带 dims=[n]
+		}
+		return map[string]any{}
+	}
+	allIdx := true
+	for _, n := range names {
+		if _, ok := coordIndex(n); !ok {
+			allIdx = false
+			break
+		}
+	}
+	if allIdx {
+		return readArr(c, path, names)
+	}
+	return readObj(c, path, names)
+}
+
+func readObj(c unsafe.Pointer, path string, names []string) map[string]any {
 	m := map[string]any{}
-	for _, name := range list(c, path+sep) {
+	for _, name := range names {
 		m[name] = readValue(c, path+sep+name)
 	}
 	return m
 }
 
-func readArr(c unsafe.Pointer, path string) []interface{} {
-	idxs := make([]int, 0, 8)
-	for _, n := range list(c, path+sep) {
-		s := strings.TrimPrefix(n, "[")
-		s = strings.TrimSuffix(s, "]")
-		if i, err := strconv.Atoi(s); err == nil {
+func readArr(c unsafe.Pointer, path string, names []string) []interface{} {
+	idxs := make([]int, 0, len(names))
+	for _, n := range names {
+		if i, ok := coordIndex(n); ok {
 			idxs = append(idxs, i)
 		}
 	}
@@ -614,6 +731,46 @@ func readArr(c unsafe.Pointer, path string) []interface{} {
 	return arr
 }
 
+func dirPrefix(path string) string {
+	if path == "" || path == "/" {
+		return dirSuf
+	}
+	return path + dirSuf
+}
+
+func childPath(path, name string) string {
+	if path == "" || path == "/" {
+		return dirSuf + name
+	}
+	return path + dirSuf + name
+}
+
+// ptrTarget：路径上是 Ptr（ref=1）时取其 body（目标 key），否则原样返回。
+func ptrTarget(c unsafe.Pointer, path string) string {
+	data := getTLV(c, path, 0)
+	h, ok := headOf(data)
+	if !ok || h.ref != refPtr {
+		return path
+	}
+	bo, bl := int(h.body_offset), int(h.body_len)
+	if bo < 0 || bl < 0 || bo+bl > len(data) {
+		return path
+	}
+	return string(data[bo : bo+bl])
+}
+
+// rootOf：读参 idx 解析为可遍历的绝对路径（变量 → 帧槽路径，Ptr → 其目标）。
+func rootOf(c unsafe.Pointer, pc string, name string, idx int) string {
+	root := name
+	if !strings.HasPrefix(root, "/") {
+		root = resolveReadPath(c, pc, idx)
+	}
+	if root == "" {
+		return ""
+	}
+	return ptrTarget(c, root)
+}
+
 // write：顶层写入（覆盖语义，root 子树等于 src）。v 可为 map/slice/标量/nil。
 func write(c unsafe.Pointer, root string, v interface{}) error {
 	if root != "" && root != "/" {
@@ -622,9 +779,7 @@ func write(c unsafe.Pointer, root string, v interface{}) error {
 	return writeValue(c, root, v)
 }
 
-func build(c unsafe.Pointer, root string) interface{} {
-	return readValue(c, root)
-}
+func build(c unsafe.Pointer, root string) interface{} { return readValue(c, root) }
 
 func fromJSON(data []byte) (interface{}, error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
@@ -673,17 +828,22 @@ func register(c unsafe.Pointer) {
 	}
 }
 
-func doTo(c unsafe.Pointer, pc string, readNames, writeNames []string) {
-	root := readNames[0]
-	if !strings.HasPrefix(root, "/") {
-		root = resolveReadPath(c, pc, 0)
+func doTo(c unsafe.Pointer, pc string, readNames []string) {
+	root := rootOf(c, pc, readNames[0], 0)
+	if root == "" {
+		return
 	}
 	data, _ := json.Marshal(build(c, root))
-	dest := resolveWrite(c, pc, 0)
-	setChar(c, dest, string(data))
+	setTLV(c, resolveWrite(c, pc, 0), constructChar(data))
 }
 
-func doFrom(c unsafe.Pointer, pc string, readNames, writeNames []string, vid string) {
+func fail(c unsafe.Pointer, vid string, msg string) {
+	setNone(c, "/vthread/"+vid+"/"+runtimeSep+"error")
+	setTLV(c, "/vthread/"+vid+"/"+runtimeSep+"error/msg", constructChar([]byte(msg)))
+	setTLV(c, "/vthread/"+vid+"/"+runtimeSep+"status", constructChar([]byte("error")))
+}
+
+func doFrom(c unsafe.Pointer, pc string, writeNames []string, vid string) {
 	src := resolveRead(c, pc, 0)
 	root := writeNames[0]
 	if !strings.HasPrefix(root, "/") {
@@ -691,45 +851,53 @@ func doFrom(c unsafe.Pointer, pc string, readNames, writeNames []string, vid str
 	}
 	v, err := fromJSON([]byte(src))
 	if err != nil {
-		setChar(c, "/vthread/"+vid+"/"+runtimeSep+"status", "error")
-		setChar(c, "/vthread/"+vid+"/"+runtimeSep+"error/msg", err.Error())
+		fail(c, vid, err.Error())
 		return
 	}
 	if err := write(c, root, v); err != nil {
-		setChar(c, "/vthread/"+vid+"/"+runtimeSep+"status", "error")
-		setChar(c, "/vthread/"+vid+"/"+runtimeSep+"error/msg", err.Error())
-		return
+		fail(c, vid, err.Error())
 	}
 }
 
-func serveOp(c unsafe.Pointer, o op) {
-	base := "/lib/" + o.name
-	for _, child := range list(c, base+"/") {
-		if !strings.HasPrefix(child, ".todo<") || !strings.HasSuffix(child, ">") {
-			continue
+// specOf：opcode → 本扩展的 op 签名（非本扩展的 rwir 返回 false）。
+func specOf(name string) (op, bool) {
+	for _, o := range myrwircaps {
+		if o.name == name {
+			return o, true
 		}
-		vid := child[6 : len(child)-1]
-		todo := base + "/" + child
-		pcid := get(c, todo)
-		pc, id := pcid, ""
-		if i := strings.LastIndex(pcid, "|"); i >= 0 {
-			pc, id = pcid[:i], pcid[i+1:]
-		}
+	}
+	return op{}, false
+}
 
-		ps := params(c, pc)
-		opcode := ps[0]
-		readNames := ps[1 : 1+o.nr]
-		writeNames := ps[1+o.nr : 1+o.nr+o.nw]
-		if opcode == "json"+sep+"to" {
-			doTo(c, pc, readNames, writeNames)
-		} else {
-			doFrom(c, pc, readNames, writeNames, vid)
+// serveOp：认领 handoff 条目（/lib/<op>/vids/<vid>，值为 pc），执行后推进 vthread PC 并删除该
+// 条目（runtime 端 watch 该键直至变 None）。各 rwir 的 vids 队列被 Ptr 统一到最早注册者，故按
+// params 首行的 opcode 分派——他 runtime 的条目一律不认领、不删除。
+func serveOp(c unsafe.Pointer) {
+	claimed := map[string]bool{}
+	for _, o := range myrwircaps {
+		for _, vid := range list(c, "/lib/"+o.name+"/vids/", 1) {
+			if claimed[vid] {
+				continue
+			}
+			claimed[vid] = true
+			pc := get(c, "/lib/"+o.name+"/vids/"+vid, 1)
+			if pc == "" {
+				continue // 已被其它进程认领
+			}
+			ps := params(c, pc)
+			spec, mine := specOf(ps[0])
+			if !mine || len(ps) < 1+spec.nr+spec.nw {
+				continue
+			}
+			key := "/lib/" + spec.name + "/vids/" + vid
+			if spec.name == "json"+sep+"to" {
+				doTo(c, pc, ps[1:1+spec.nr])
+			} else {
+				doFrom(c, pc, ps[1+spec.nr:1+spec.nr+spec.nw], vid)
+			}
+			setTLV(c, "/vthread/"+vid+"/"+runtimeSep+"pc", constructChar([]byte(nextPC(pc))))
+			del(c, key)
 		}
-
-		nxt := nextPC(pc)
-		setChar(c, "/vthread/"+vid+"/"+runtimeSep+"pc", nxt)
-		setChar(c, base+"/.done<"+vid+">", id)
-		del(c, todo)
 	}
 }
 
@@ -739,11 +907,9 @@ func connect(dsn string) unsafe.Pointer {
 	return C.kvspaceConnect(cd)
 }
 
-func disconnect(c unsafe.Pointer) {
-	C.kvspaceClose(c)
-}
+func disconnect(c unsafe.Pointer) { C.kvspaceClose(c) }
 
-// Serve 常驻循环：注册 + 监控 .todo + 批量执行 + 交还 PC。
+// Serve 常驻循环：注册 + 认领 handoff 条目 + 批量执行 + 交还 PC。
 func Serve(dsn string) {
 	c := connect(dsn)
 	if c == nil {
@@ -752,9 +918,7 @@ func Serve(dsn string) {
 	defer C.kvspaceClose(c)
 	register(c)
 	for {
-		for _, o := range myrwircaps {
-			serveOp(c, o)
-		}
-		time.Sleep(50 * time.Millisecond)
+		serveOp(c)
+		time.Sleep(20 * time.Millisecond)
 	}
 }
