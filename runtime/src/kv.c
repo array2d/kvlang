@@ -284,14 +284,13 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
             free(heap);
             return 0;
         }
-    }
-    if (ref_ok(k)) {
+    } else if (ref_ok(k)) {
         int hit = 0;
-        if (nl >= MEMBER_SEP_LEN && memchr(name, 0xC2, nl))
-            hit = parent_hit(k, key, &d, &len);
-        else if (k->fpar.key && k->fpar.klen == (uint32_t)dl &&
-                 memcmp(k->fpar.key, dir, dl) == 0) {
-            /* Frame siblings share `dir`; skip suffix scan. */
+        if (nl >= MEMBER_SEP_LEN && memchr(name, 0xC2, nl)) {
+            if (k->npref)
+                hit = parent_hit(k, key, &d, &len);
+        } else if (k->fpar.key && k->fpar.klen == (uint32_t)dl &&
+                   memcmp(k->fpar.key, dir, dl) == 0) {
             kvspaceRef_t r = { k->fpar.block_id, k->fpar.gen, 0, 0 };
             hit = kvspaceGetByRef(k->h, &r, key, &d, &len) == 0 && d && len > 0;
         }
