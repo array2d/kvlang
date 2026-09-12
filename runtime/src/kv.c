@@ -50,7 +50,7 @@ static int hot_name_ok(const char *name) {
     if (!name || name[1] != 0)
         return 0;
     c = name[0];
-    return c == 'a' || c == 'i' || c == 'n';
+    return c == 'a' || c == 'i';
 }
 
 static inline int hot_get(kvlangKv_t *k, const char *dir, const char *name,
