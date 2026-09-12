@@ -41,7 +41,12 @@ extern void  kvspaceClose(void *h);
 /* 借用读：*out 指向后端常驻/回收空间，调用方不得 free。resolve=1 穿透 link。 */
 extern int   kvspaceGet(void *h, const char *key, int resolve, uint8_t **out, uint32_t *out_len);
 
-typedef struct { uint32_t block_id; uint32_t gen; } kvspaceRef_t;
+typedef struct {
+    uint32_t block_id;
+    uint32_t gen;
+    uint32_t parent_id;
+    uint32_t depth;
+} kvspaceRef_t;
 extern int kvspaceResolveRef(void *h, const char *key, kvspaceRef_t *ref) __attribute__((weak));
 extern int kvspaceGetByRef(void *h, kvspaceRef_t *ref, const char *key_fallback,
                            uint8_t **out, uint32_t *out_len) __attribute__((weak));

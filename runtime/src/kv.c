@@ -81,10 +81,24 @@ void kvlangKvDisconnect(kvlangKv_t *k) {
 
 /* 借用读（resolve=0，raw）：out 直接借 kvspace 常驻/借用池指针（borrowed=1，不 free、不入
  * kvlangKvSet 前不跨写）。空值 → out len=0。 */
-int kvlangKvGetOne(kvlangKv_t *k, const char *key, kvlangXvalue_t *out) {
+static int get_cached(kvlangKv_t *k, const char *key, const char *dir, size_t dl,
+                      kvlangXvalue_t *out) {
+    (void)dl;
     kvlangXvalueZero(out);
     uint8_t *d;
     uint32_t len;
+    kvlangRefEnt_t *e = ref_ok(k) ? ref_find(k, key) : NULL;
+    if (!e && ref_ok(k) && dir)
+        e = ref_find(k, dir);
+    if (e) {
+        kvspaceRef_t r = { e->block_id, e->gen };
+        if (kvspaceGetByRef(k->h, &r, key, &d, &len) == 0 && d && len > 0) {
+            out->data = d;
+            out->len = len;
+            out->borrowed = 1;
+            return 0;
+        }
+    }
     if (kvspaceGet(k->h, key, 0, &d, &len) != 0)
         return -1;
     if (d && len > 0) {
@@ -93,6 +107,22 @@ int kvlangKvGetOne(kvlangKv_t *k, const char *key, kvlangXvalue_t *out) {
         out->borrowed = 1;
     }
     return 0;
+}
+
+int kvlangKvGetOne(kvlangKv_t *k, const char *key, kvlangXvalue_t *out) {
+    if (!key || !key[0]) {
+        kvlangXvalueZero(out);
+        return 0;
+    }
+    const char *sl = strrchr(key, '/');
+    if (sl && sl[1]) {
+        size_t dl = (size_t)(sl - key) + 1;
+        char dir[dl + 1];
+        memcpy(dir, key, dl);
+        dir[dl] = 0;
+        return get_cached(k, key, dir, dl, out);
+    }
+    return get_cached(k, key, NULL, 0, out);
 }
 
 /* Frame member: dir 直连 name 组键，借用读（resolve=0：拿 Ptr 本体，不穿透 link——
@@ -107,33 +137,9 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
     memcpy(key, dir, dl);
     memcpy(key + dl, name, nl);
     key[dl + nl] = 0;
-    uint8_t *d;
-    uint32_t len;
-    kvlangRefEnt_t *e = ref_ok(k) ? ref_find(k, dir) : NULL;
-    if (e) {
-        kvspaceRef_t r = { e->block_id, e->gen };
-        if (kvspaceGetByRef(k->h, &r, key, &d, &len) == 0 && d && len > 0) {
-            e->block_id = r.block_id;
-            e->gen = r.gen;
-            out->data = d;
-            out->len = len;
-            out->borrowed = 1;
-            free(key);
-            return 0;
-        }
-    }
-    if (kvspaceGet(k->h, key, 0, &d, &len) == 0 && d && len > 0) {
-        out->data = d;
-        out->len = len;
-        out->borrowed = 1;
-        if (ref_ok(k) && dir) {
-            kvspaceRef_t rr;
-            if (kvspaceResolveRef(k->h, key, &rr) == 0 && rr.gen <= (uint32_t)dl)
-                ref_put(k, dir, &rr);
-        }
-    }
+    int rc = get_cached(k, key, dir, dl, out);
     free(key);
-    return 0;
+    return rc;
 }
 
 /* 指令边界回收读借用池：VM 每条指令末调一次。 */
@@ -173,13 +179,20 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
     int rc = 0;
     if (n == 1 && ref_ok(k) && kvspaceSetPartByRef && pairs[0].key && pairs[0].val.data &&
         pairs[0].val.len) {
-        kvlangRefEnt_t *e = ref_find_dir(k, pairs[0].key);
+        kvlangRefEnt_t *e = ref_find(k, pairs[0].key);
+        int from_dir = 0;
+        if (!e) {
+            e = ref_find_dir(k, pairs[0].key);
+            from_dir = e != NULL;
+        }
         if (e) {
             kvspaceRef_t r = { e->block_id, e->gen };
             if (kvspaceSetPartByRef(k->h, &r, pairs[0].key, 0, pairs[0].val.data,
                                     pairs[0].val.len, err, err_cap) == 0) {
-                e->block_id = r.block_id;
-                e->gen = r.gen;
+                if (!from_dir) {
+                    e->block_id = r.block_id;
+                    e->gen = r.gen;
+                }
                 return 0;
             }
         }
@@ -208,17 +221,18 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
         if (rc == 0 && n == 1 && ref_ok(k) && pairs[i].key) {
             kvspaceRef_t rr;
             if (kvspaceResolveRef(k->h, pairs[i].key, &rr) == 0) {
+                ref_put(k, pairs[i].key, &rr);
                 const char *sl = strrchr(pairs[i].key, '/');
-                if (sl && sl[1]) {
+                if (sl && sl[1] && rr.depth > 0) {
                     size_t dn = (size_t)(sl - pairs[i].key) + 1;
-                    if (rr.gen <= (uint32_t)dn) {
+                    if (rr.depth <= (uint32_t)dn) {
                         char dir[dn + 1];
                         memcpy(dir, pairs[i].key, dn);
                         dir[dn] = 0;
-                        ref_put(k, dir, &rr);
+                        kvspaceRef_t pr = { rr.parent_id, rr.depth };
+                        ref_put(k, dir, &pr);
                     }
-                } else
-                    ref_put(k, pairs[i].key, &rr);
+                }
             }
         }
     }
