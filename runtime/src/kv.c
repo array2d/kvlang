@@ -41,6 +41,8 @@ static void hot_clear(kvlangKv_t *k) {
         k->hot[i].block_id = k->hot[i].gen = 0;
     }
     k->nhot = 0;
+    free(k->hot_dir);
+    k->hot_dir = NULL;
 }
 
 static int hot_get(kvlangKv_t *k, const char *name, uint8_t **d, uint32_t *len) {
@@ -323,11 +325,17 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
         return 0;
     uint8_t *d;
     uint32_t len;
-    if (ref_ok(k) && hot_get(k, name, &d, &len)) {
-        out->data = d;
-        out->len = len;
-        out->borrowed = 1;
-        return 0;
+    if (ref_ok(k) && dir) {
+        if (k->hot_dir && strcmp(k->hot_dir, dir) != 0)
+            hot_clear(k);
+        if (!k->hot_dir)
+            k->hot_dir = strdup(dir);
+        if (hot_get(k, name, &d, &len)) {
+            out->data = d;
+            out->len = len;
+            out->borrowed = 1;
+            return 0;
+        }
     }
     size_t dl = strlen(dir), nl = strlen(name);
     char stack[256];

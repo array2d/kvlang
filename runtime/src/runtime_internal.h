@@ -129,9 +129,10 @@ typedef struct {
     int pref_i;
     /* Sticky frame `/` parent for GetMember siblings; not mixed with `·` maps. */
     kvlangRefEnt_t fpar;
-    /* Last two GetMember names (iops `a`/`i`); skip key concat on hit. */
+    /* GetMember names in the current frame dir; skip key concat on hit. */
     kvlangHotEnt_t hot[KVLANG_HOT_CAP];
     int nhot;
+    char *hot_dir;
 } kvlangKv_t;
 
 /* growable string buffer */
