@@ -115,7 +115,7 @@ typedef struct { char *key; kvlangXvalue_t val; } kvlangKvPair_t;
 
 #define KVLANG_REF_CAP 64
 #define KVLANG_PREF_CAP 4
-#define KVLANG_HOT_CAP 2
+#define KVLANG_HOT_CAP 3
 typedef struct { char *key; uint32_t block_id, gen, klen; } kvlangRefEnt_t;
 typedef struct { char *name; char *key; uint32_t block_id, gen, dlen; } kvlangHotEnt_t;
 typedef struct {
@@ -129,7 +129,7 @@ typedef struct {
     int pref_i;
     /* Sticky frame `/` parent for GetMember siblings; not mixed with `·` maps. */
     kvlangRefEnt_t fpar;
-    /* iops `a`/`i` only; sieve/fib `n` uses leaf/fpar. Dir-checked, leaf refs. */
+    /* Frame locals `a`/`i`/`n` (iops/hash loops); dir-checked, leaf refs only. */
     kvlangHotEnt_t hot[KVLANG_HOT_CAP];
     int nhot;
 } kvlangKv_t;
