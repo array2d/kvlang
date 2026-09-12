@@ -45,9 +45,17 @@ static void hot_clear(kvlangKv_t *k) {
     k->nhot = 0;
 }
 
+static int hot_name_ok(const char *name) {
+    char c;
+    if (!name || name[1] != 0)
+        return 0;
+    c = name[0];
+    return c == 'a' || c == 'i' || c == 'n';
+}
+
 static inline int hot_get(kvlangKv_t *k, const char *dir, const char *name,
                    uint8_t **d, uint32_t *len) {
-    if (!dir || !name)
+    if (!dir || !hot_name_ok(name))
         return 0;
     for (int i = 0; i < k->nhot; i++) {
         uint32_t dl;
@@ -71,7 +79,7 @@ static void hot_put(kvlangKv_t *k, const char *name, const char *key,
                     uint32_t block_id, uint32_t gen) {
     kvlangHotEnt_t *e;
     size_t nl, kl;
-    if (!name || !name[0] || name[1] != 0 || !key || !block_id || gen != 0)
+    if (!hot_name_ok(name) || !key || !block_id || gen != 0)
         return;
     if (strncmp(key, "/lib/", 5) == 0)
         return;
@@ -80,10 +88,12 @@ static void hot_put(kvlangKv_t *k, const char *name, const char *key,
     if (kl < nl)
         return;
     for (int i = 0; i < k->nhot; i++) {
-        if (k->hot[i].name && k->hot[i].name[0] == name[0] && k->hot[i].name[1] == 0 &&
-            k->hot[i].key && strcmp(k->hot[i].key, key) == 0) {
-            k->hot[i].block_id = block_id;
-            k->hot[i].gen = gen;
+        if (k->hot[i].name && k->hot[i].name[0] == name[0] && k->hot[i].name[1] == 0) {
+            if (k->hot[i].key && strcmp(k->hot[i].key, key) == 0) {
+                k->hot[i].block_id = block_id;
+                k->hot[i].gen = gen;
+            }
+            /* Same name, other frame: keep the first key (fib recursion). */
             return;
         }
     }
@@ -364,7 +374,7 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
         return 0;
     uint8_t *d;
     uint32_t len;
-    if (ref_ok(k) && dir && !name[1] && k->nhot && hot_get(k, dir, name, &d, &len)) {
+    if (ref_ok(k) && dir && k->nhot && hot_get(k, dir, name, &d, &len)) {
         out->data = d;
         out->len = len;
         out->borrowed = 1;
