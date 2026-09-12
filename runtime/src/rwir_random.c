@@ -1,6 +1,6 @@
-// builtin_random —— random·* 随机数 rwir
+// rwir_random —— random·* 随机数 rwir
 
-#include "builtin_internal.h"
+#include "rwir_internal.h"
 
 static uint64_t crypto_rand_u64(void) {
     uint64_t v = 0;

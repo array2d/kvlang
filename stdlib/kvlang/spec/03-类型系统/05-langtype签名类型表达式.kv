@@ -32,7 +32,7 @@ rwfunc，交 runtime 查 `/lib/<opcode>` 定，见 [[指令槽编码]]），既�
 
 ## 两条 runtime-c ABI（供外部调用）
 
-runtime-c 对外开放两组类型能力，一一对应这两者（`kvlang_rwirext.h` 与正典 codec，见 [[cruntime与后端
+runtime-c 对外开放两组类型能力，一一对应这两者（`kvlang_runtime.h` 与正典 codec，见 [[cruntime与后端
 abi]]），供扩展运行时与嵌入方调用：
 
 - **def langtype 侧（匹配）**：`LangtypeValid` 校验一条 def langtype 串合法、`LangtypeMatch` 把一个值的

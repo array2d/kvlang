@@ -1,7 +1,7 @@
 #include "runtime_internal.h"
 
 /* 后端无关的 XValue TLV 编解码（对齐 kvspace-durable/kvspace-c 的 kindexp TLV）。
- * xval.data 一律 malloc（free 释放），后端在 kv.c 层负责拷贝。 */
+ * xval.data 一律 malloc（free 释放），后端在 kvspace.c 层负责拷贝。 */
 
 static uint32_t rd32(const uint8_t *p) {
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) |

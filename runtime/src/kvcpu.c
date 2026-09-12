@@ -1221,3 +1221,43 @@ int kvlangKvcpuExecute(kvlangKv_t *kv, const char *pc) {
     int rc = kvlangKvcpuExecuteMode(kv, pc, KVMODE_WATCH, NULL);
     return rc == 1 ? 0 : rc; /* WATCH 模式不返回 1，防御性归一 */
 }
+
+/* ── 路由判定 + 扩展 handoff（自 rwirext.c 迁入）────────────── */
+
+/* notinmyrwircaps：opcode 是一条不在本 runtime myrwircaps 内、须经 def rwir 路由给
+ * 能兑现它的其它 runtime 的 rwir。判据是 /lib/<opcode> 存在 def rwir 路由头
+ * （langtype=def rwir，storetype=index）。kvspace 是能力唯一事实源；本判定在独立
+ * kvlang 进程内发生，进程内 myrwircaps 恒不含它，故只有 /lib 路由头可信。 */
+bool notinmyrwircaps(kvlangKv_t *k, const char *opcode) {
+    if (opcode[0] == '/')
+        return false;
+    char *key = kvlangKeytreeRwir(opcode);
+    kvlangXvalue_t v;
+    kvlangXvalueZero(&v);
+    kvlangKvGetOne(k, key, &v);
+    bool yes =
+        !kvlangXvalueNone(&v) && kvlangXvalueKindIs(&v, KVSPACE_KIND_DEF_RWIR);
+    kvlangXvalueFree(&v);
+    free(key);
+    return yes;
+}
+
+int kvlangRwirextHandoff(void *kvspace, const char *vtid, const char *pc) {
+    kvlangKv_t k = {kvspace};
+    char *fr = kvlangKeytreeFrameRoot(pc);
+    if (!fr)
+        return -1;
+    char *lb = kvlangKeytreeStack(fr);
+    kvlangRwirInst_t inst;
+    char err[256];
+    if (kvlangRwirDecode(&k, lb, pc, &inst, err, sizeof err) != 0) {
+        free(fr);
+        free(lb);
+        return -1;
+    }
+    free(lb);
+    int rc = handoff_external_rwir(&k, vtid, pc, &inst);
+    free(fr);
+    kvlangRwirInstFree(&inst);
+    return rc;
+}

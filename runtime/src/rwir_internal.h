@@ -2,7 +2,7 @@
 #include "runtime_internal.h"
 
 /* ── 跨模块共享 helper ─────────────────────────────────────────────
-   frame I/O 与 xvalue_at 定义在 builtin.c；容器 key/index helper 定义在 builtin_coll.c。*/
+   frame I/O 与 xvalue_at 定义在 rwir_func.c；容器 key/index helper 定义在 rwir_array.c / rwir_map.c。*/
 int kvlangBuiltinReadInputs(kvlangFrame_t *f, kvlangXvalue_t *out, int cap);
 void kvlangBuiltinFreeInputs(kvlangXvalue_t *in, int n);
 void kvlangBuiltinNextPc(kvlangFrame_t *f);
@@ -19,7 +19,32 @@ void kvlangBuiltinMapMarker(kvlangXvalue_t *out, const char *langtype,
 bool kvlangBuiltinCharConcat(const kvlangXvalue_t *a, const kvlangXvalue_t *b,
                              kvlangXvalue_t *out);
 
-/* ── 各 lib 的 rwir handler 原型（表在 builtin.c 引用）────────────── */
+/* ── 各 lib 的 rwir handler 原型（表在 rwir_func.c 引用）────────────── */
+/* 算术 / 位 / cast（rwir_int.c） */
+int cmp_int(kvlangScalar_t a, kvlangScalar_t b);
+int kvlangBuiltinAdd(kvlangFrame_t *f), kvlangBuiltinSub(kvlangFrame_t *f),
+    kvlangBuiltinMul(kvlangFrame_t *f), kvlangBuiltinDiv(kvlangFrame_t *f),
+    kvlangBuiltinMod(kvlangFrame_t *f), kvlangBuiltinBitand(kvlangFrame_t *f),
+    kvlangBuiltinBitor(kvlangFrame_t *f), kvlangBuiltinBitxor(kvlangFrame_t *f),
+    kvlangBuiltinShl(kvlangFrame_t *f), kvlangBuiltinShr(kvlangFrame_t *f),
+    kvlangBuiltinSqrt(kvlangFrame_t *f), kvlangBuiltinExp(kvlangFrame_t *f),
+    kvlangBuiltinLog(kvlangFrame_t *f), kvlangBuiltinNeg(kvlangFrame_t *f),
+    kvlangBuiltinAbs(kvlangFrame_t *f), kvlangBuiltinSign(kvlangFrame_t *f),
+    kvlangBuiltinPow(kvlangFrame_t *f), kvlangBuiltinMax(kvlangFrame_t *f),
+    kvlangBuiltinMin(kvlangFrame_t *f),
+    kvlangBuiltinCastBool(kvlangFrame_t *f), kvlangBuiltinCastInt8(kvlangFrame_t *f),
+    kvlangBuiltinCastInt16(kvlangFrame_t *f), kvlangBuiltinCastInt32(kvlangFrame_t *f),
+    kvlangBuiltinCastInt64(kvlangFrame_t *f), kvlangBuiltinCastUint8(kvlangFrame_t *f),
+    kvlangBuiltinCastUint16(kvlangFrame_t *f), kvlangBuiltinCastUint32(kvlangFrame_t *f),
+    kvlangBuiltinCastUint64(kvlangFrame_t *f), kvlangBuiltinCastF32(kvlangFrame_t *f),
+    kvlangBuiltinCastF64(kvlangFrame_t *f), kvlangBuiltinCastChar32(kvlangFrame_t *f),
+    kvlangBuiltinCastChar8(kvlangFrame_t *f), kvlangBuiltinCastCharAscii(kvlangFrame_t *f);
+/* 比较 / 逻辑（rwir_bool.c） */
+int kvlangBuiltinEq(kvlangFrame_t *f), kvlangBuiltinNeq(kvlangFrame_t *f),
+    kvlangBuiltinLt(kvlangFrame_t *f), kvlangBuiltinGt(kvlangFrame_t *f),
+    kvlangBuiltinLe(kvlangFrame_t *f), kvlangBuiltinGe(kvlangFrame_t *f),
+    kvlangBuiltinAnd(kvlangFrame_t *f), kvlangBuiltinOr(kvlangFrame_t *f),
+    kvlangBuiltinNot(kvlangFrame_t *f);
 int kvlangBuiltinArray(kvlangFrame_t *f),
     kvlangBuiltinArrayFill(kvlangFrame_t *f),
     kvlangBuiltinNdarrayNumel(kvlangFrame_t *f),

@@ -145,7 +145,7 @@ unsafe extern "C" {
         out_len: *mut u32,
     ) -> c_int;
 
-    // ── kvlang runtime：模式2 执行 ───────────────────────────────────
+    // ── kvlang runtime：模式2 执行（kvlang_vthread.h）───────────────
     pub fn kvlangRuntimeConnect(dsn: *const c_char) -> *mut c_void;
     /// runtime 内部 kvspace 句柄——复用它而非另开连接（durable 惰性 flush 仅同句柄内相干）。
     pub fn kvlangRuntimeKvspaceHandle(rt: *mut c_void) -> *mut c_void;
@@ -161,8 +161,8 @@ unsafe extern "C" {
         out_pc: *mut *mut c_char,
     ) -> c_int;
 
-    // ── kvlang runtime：rwirext 宿主 ABI（均传 kvspace 句柄）─────────
-    // C 头 kvlang_rwirext.h 导出 9 符号；此处声明 7：故意省略 LangtypeValid/LangtypeMatch
+    // ── kvlang runtime：rwirext 宿主 ABI（均传 kvspace 句柄；kvlang_runtime.h）──
+    // C 头 kvlang_runtime.h 导出 9 符号；此处声明 7：故意省略 LangtypeValid/LangtypeMatch
     // ——langtype 校验属 layout 期、匹配属 C dispatch 内部，Rust term 侧不调用（非缺陷）。
     pub fn kvlangDefRwir(
         kvspace: *mut c_void,

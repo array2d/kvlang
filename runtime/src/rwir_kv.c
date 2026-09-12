@@ -1,6 +1,6 @@
-// builtin_kv —— kvspace·* KV 树 rwir
+// rwir_kv —— kvspace·* KV 树 rwir
 
-#include "builtin_internal.h"
+#include "rwir_internal.h"
 
 static bool is_int_kind(const char *k) {
     return kvlangXvalueIsIntKind(k) || kvlangXvalueIsUintKind(k);

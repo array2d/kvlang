@@ -7,7 +7,7 @@ lib kvlang/spec/runtime语义/runtimec内建 {
 
 ## native builtin 判定
 
-查表函数 `kvlangBuiltinCapIndex(opcode)`（`runtime/src/builtin.c`）**两级查找**：先按完整 opcode 查
+查表函数 `kvlangBuiltinCapIndex(opcode)`（`runtime/src/rwir_func.c`）**两级查找**：先按完整 opcode 查
 （命中即专精实现，如 `float8/e4m3·add`、`time·add` 等成员算子），未命中且末段前缀是 **C 原生数值 langtype**
 （`int8..int64`/`uint8..uint64`/`float32`/`float64`）才剥前缀查裸算子（`int64·add → add`，通用实现，
 按操作数 kind 归约）。命中返回索引即在 myrwircaps 内；否则 `notinmycaps`。**保留精度前缀专精**：

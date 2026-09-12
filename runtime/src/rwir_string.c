@@ -1,6 +1,6 @@
-// builtin_string —— string·* 字符串 rwir
+// rwir_string —— string·* 字符串 rwir
 
-#include "builtin_internal.h"
+#include "rwir_internal.h"
 
 static uint32_t utf8_decode_next(const char *s, size_t *i, size_t len) {
     const unsigned char *p = (const unsigned char *)s;
