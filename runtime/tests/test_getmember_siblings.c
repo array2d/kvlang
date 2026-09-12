@@ -57,12 +57,6 @@ static void drop_leaf_hot(kvlangKv_t *k) {
         k->hot[i].name = k->hot[i].key = NULL;
     }
     k->nhot = 0;
-    for (i = 0; i < k->ntwo; i++) {
-        free(k->two[i].name);
-        free(k->two[i].key);
-        k->two[i].name = k->two[i].key = NULL;
-    }
-    k->ntwo = 0;
 }
 
 int main(void) {

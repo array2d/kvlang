@@ -43,13 +43,6 @@ static void hot_clear(kvlangKv_t *k) {
         k->hot[i].block_id = k->hot[i].gen = k->hot[i].dlen = 0;
     }
     k->nhot = 0;
-    for (int i = 0; i < k->ntwo; i++) {
-        free(k->two[i].name);
-        free(k->two[i].key);
-        k->two[i].name = k->two[i].key = NULL;
-        k->two[i].block_id = k->two[i].gen = k->two[i].dlen = 0;
-    }
-    k->ntwo = 0;
 }
 
 static int hot_name_ok(const char *name) {
@@ -129,79 +122,6 @@ static void hot_put(kvlangKv_t *k, const char *name, const char *key,
     e->dlen = (uint32_t)(kl - nl);
 }
 
-static int two_name_ok(const char *name) {
-    return name && name[0] && name[1] && !name[2];
-}
-
-static inline int two_get(kvlangKv_t *k, const char *dir, const char *name,
-                          uint8_t **d, uint32_t *len) {
-    if (!dir || !two_name_ok(name))
-        return 0;
-    for (int i = 0; i < k->ntwo; i++) {
-        uint32_t dl;
-        if (!k->two[i].name || k->two[i].name[0] != name[0] ||
-            k->two[i].name[1] != name[1] || k->two[i].name[2] != 0)
-            continue;
-        dl = k->two[i].dlen;
-        if (!k->two[i].key || strncmp(dir, k->two[i].key, dl) != 0 || dir[dl] != 0)
-            continue;
-        kvspaceRef_t r = { k->two[i].block_id, k->two[i].gen, 0, 0 };
-        if (kvspaceGetByRef(k->h, &r, k->two[i].key, d, len) == 0 && *d && *len > 0) {
-            k->two[i].block_id = r.block_id;
-            k->two[i].gen = r.gen;
-            return 1;
-        }
-    }
-    return 0;
-}
-
-static void two_put(kvlangKv_t *k, const char *name, const char *key,
-                    uint32_t block_id, uint32_t gen) {
-    kvlangHotEnt_t *e;
-    size_t nl, kl;
-    if (!two_name_ok(name) || !key || !block_id || gen != 0)
-        return;
-    if (strncmp(key, "/lib/", 5) == 0)
-        return;
-    nl = 2;
-    kl = strlen(key);
-    if (kl < nl)
-        return;
-    for (int i = 0; i < k->ntwo; i++) {
-        if (k->two[i].name && k->two[i].name[0] == name[0] &&
-            k->two[i].name[1] == name[1] && k->two[i].name[2] == 0) {
-            free(k->two[i].key);
-            k->two[i].key = strdup(key);
-            if (!k->two[i].key)
-                return;
-            k->two[i].block_id = block_id;
-            k->two[i].gen = gen;
-            k->two[i].dlen = (uint32_t)(kl - nl);
-            return;
-        }
-    }
-    if (k->ntwo < KVLANG_TWO_CAP)
-        e = &k->two[k->ntwo++];
-    else {
-        e = &k->two[0];
-        free(e->name);
-        free(e->key);
-    }
-    e->name = strdup(name);
-    e->key = strdup(key);
-    if (!e->name || !e->key) {
-        free(e->name);
-        free(e->key);
-        e->name = e->key = NULL;
-        if (k->ntwo > 0 && e == &k->two[k->ntwo - 1])
-            k->ntwo--;
-        return;
-    }
-    e->block_id = block_id;
-    e->gen = gen;
-    e->dlen = (uint32_t)(kl - nl);
-}
-
 static inline kvlangHotEnt_t *hot_find_key(kvlangKv_t *k, const char *key) {
     if (!key)
         return NULL;
@@ -252,11 +172,6 @@ static void parent_put(kvlangKv_t *k, const char *dir, size_t dl, const kvspaceR
         k->fpar.block_id = rr->parent_id;
         k->fpar.gen = rr->depth;
         k->fpar.klen = (uint32_t)dl;
-        if (dl + 1 <= sizeof k->mkey) {
-            memcpy(k->mkey, dir, dl);
-            k->mkey[dl] = 0;
-            k->mdl = (uint32_t)dl;
-        }
         return;
     }
     e = pref_find(k, dir, dl);
@@ -468,34 +383,19 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
         out->borrowed = 1;
         return 0;
     }
-    if (ref_ok(k) && dir && k->ntwo && two_get(k, dir, name, &d, &len)) {
-        out->data = d;
-        out->len = len;
-        out->borrowed = 1;
-        return 0;
-    }
-    size_t nl = strlen(name), dl;
+    size_t dl = strlen(dir), nl = strlen(name);
     char stack[256];
     char *heap = NULL;
     char *key = stack;
-    int fmatch = dir && k->fpar.key && k->mdl == k->fpar.klen &&
-                 memcmp(k->fpar.key, dir, k->fpar.klen) == 0 && dir[k->fpar.klen] == 0;
-    if (fmatch && k->mdl + nl + 1 <= sizeof k->mkey) {
-        memcpy(k->mkey + k->mdl, name, nl + 1);
-        key = k->mkey;
-        dl = k->mdl;
-    } else {
-        dl = strlen(dir);
-        if (dl + nl + 1 > sizeof stack) {
-            heap = malloc(dl + nl + 1);
-            if (!heap)
-                return -1;
-            key = heap;
-        }
-        memcpy(key, dir, dl);
-        memcpy(key + dl, name, nl);
-        key[dl + nl] = 0;
+    if (dl + nl + 1 > sizeof stack) {
+        heap = malloc(dl + nl + 1);
+        if (!heap)
+            return -1;
+        key = heap;
     }
+    memcpy(key, dir, dl);
+    memcpy(key + dl, name, nl);
+    key[dl + nl] = 0;
     /* Non-a/i/n frame siblings: ART parent before the 64-slot leaf scan. */
     if (ref_ok(k) && !hot_name_ok(name) && k->fpar.key &&
         memcmp(k->fpar.key, dir, k->fpar.klen) == 0 && dir[k->fpar.klen] == 0) {
@@ -515,7 +415,6 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
             e->block_id = r.block_id;
             e->gen = r.gen;
             hot_put(k, name, key, r.block_id, r.gen);
-            two_put(k, name, key, r.block_id, r.gen);
             out->data = d;
             out->len = len;
             out->borrowed = 1;
@@ -609,7 +508,6 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
                     const char *slash = strrchr(key, '/');
                     const char *nm = slash ? slash + 1 : key;
                     hot_put(k, nm, key, r.block_id, r.gen);
-                    two_put(k, nm, key, r.block_id, r.gen);
                 }
                 return 0;
             }
@@ -646,16 +544,11 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
             if (is_member && (pref_cover(k, key) ||
                               (key[0] == '/' && strncmp(key, "/lib/", 5) == 0)))
                 continue;
-            /* 3+ char frame locals already under fpar: skip ResolveRef. */
-            if (!is_member && rest && rest[1] && rest[2] &&
-                parent_prefix_ok(&k->fpar, key))
-                continue;
             kvspaceRef_t rr;
             if (kvspaceResolveRef(k->h, key, &rr) == 0) {
                 if (!is_member) {
                     ref_put(k, key, &rr);
                     hot_put(k, rest, key, rr.block_id, rr.gen);
-                    two_put(k, rest, key, rr.block_id, rr.gen);
                 }
                 if (is_member || !k->fpar.key) {
                     size_t seplen = 0;
