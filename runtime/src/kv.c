@@ -364,7 +364,7 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
         return 0;
     uint8_t *d;
     uint32_t len;
-    if (ref_ok(k) && dir && !name[1] && hot_get(k, dir, name, &d, &len)) {
+    if (ref_ok(k) && dir && !name[1] && k->nhot && hot_get(k, dir, name, &d, &len)) {
         out->data = d;
         out->len = len;
         out->borrowed = 1;
