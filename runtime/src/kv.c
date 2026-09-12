@@ -114,6 +114,17 @@ static void hot_put(kvlangKv_t *k, const char *name, const char *key,
     e->dlen = (uint32_t)(kl - nl);
 }
 
+static kvlangHotEnt_t *hot_find_key(kvlangKv_t *k, const char *key) {
+    if (!key)
+        return NULL;
+    for (int i = 0; i < k->nhot; i++) {
+        if (k->hot[i].key && k->hot[i].gen == 0 &&
+            strcmp(k->hot[i].key, key) == 0)
+            return &k->hot[i];
+    }
+    return NULL;
+}
+
 static void parent_clear(kvlangKv_t *k) {
     for (int i = 0; i < k->npref; i++)
         free(k->pref[i].key);
@@ -455,13 +466,29 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
     int rc = 0;
     if (n == 1 && ref_ok(k) && kvspaceSetPartByRef && pairs[0].key && pairs[0].val.data &&
         pairs[0].val.len) {
-        kvlangRefEnt_t *e = ref_find(k, pairs[0].key);
+        const char *key = pairs[0].key;
+        kvlangHotEnt_t *he = hot_find_key(k, key);
+        if (he) {
+            kvspaceRef_t r = { he->block_id, he->gen, 0, 0 };
+            if (kvspaceSetPartByRef(k->h, &r, key, 0, pairs[0].val.data,
+                                    pairs[0].val.len, err, err_cap) == 0) {
+                he->block_id = r.block_id;
+                he->gen = r.gen;
+                return 0;
+            }
+        }
+        kvlangRefEnt_t *e = ref_find(k, key);
         if (e) {
             kvspaceRef_t r = { e->block_id, e->gen, 0, 0 };
-            if (kvspaceSetPartByRef(k->h, &r, pairs[0].key, 0, pairs[0].val.data,
+            if (kvspaceSetPartByRef(k->h, &r, key, 0, pairs[0].val.data,
                                     pairs[0].val.len, err, err_cap) == 0) {
                 e->block_id = r.block_id;
                 e->gen = r.gen;
+                {
+                    const char *slash = strrchr(key, '/');
+                    const char *nm = slash ? slash + 1 : key;
+                    hot_put(k, nm, key, r.block_id, r.gen);
+                }
                 return 0;
             }
         }
@@ -499,8 +526,10 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
                 continue;
             kvspaceRef_t rr;
             if (kvspaceResolveRef(k->h, key, &rr) == 0) {
-                if (!is_member)
+                if (!is_member) {
                     ref_put(k, key, &rr);
+                    hot_put(k, rest, key, rr.block_id, rr.gen);
+                }
                 if (is_member || !k->fpar.key) {
                     size_t seplen = 0;
                     int si = last_dir_sep(key, &seplen);
