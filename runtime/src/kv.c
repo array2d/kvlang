@@ -216,7 +216,7 @@ static int last_dir_sep(const char *key, size_t *seplen) {
     return -1;
 }
 
-static inline int parent_prefix_ok(const kvlangRefEnt_t *e, const char *key) {
+static int parent_prefix_ok(const kvlangRefEnt_t *e, const char *key) {
     size_t dl;
     const char *p;
     if (!e || !e->key || !e->gen || !key)
