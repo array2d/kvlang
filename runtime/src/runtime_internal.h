@@ -489,7 +489,7 @@ void kvlangBuiltinResolveReadValue(kvlangKv_t *kv, const char *frame_root,
                                    kvlangXvalue_t *out);
 char *kvlangBuiltinResolveWriteSlot(kvlangKv_t *kv, const char *frame_root,
                                     const char *name);
-/* 成员写的 base 尚无值 → 落空 stringkeymap 值（`/lib` 下跳过，见 builtin_kv.c）。 */
+/* 成员写的 base 尚无值 → 落空 stringkeymap 值（`/lib` 下跳过，见 rwir_kv.c）。 */
 /* 成员写（memitem）前置条件：memhead（base 容器值）必须已存在；缺则返回 -1 拒绝写入。 */
 int kvlangBuiltinCheckMemhead(kvlangKv_t *kv, const char *frame_root,
                               const char *base);

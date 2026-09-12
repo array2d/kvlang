@@ -1,6 +1,6 @@
-// builtin_time —— time·* / time/duration·* 时间与时长 rwir
+// rwir_time —— time·* / time/duration·* 时间与时长 rwir
 
-#include "builtin_internal.h"
+#include "rwir_internal.h"
 #include <time.h>
 
 static int64_t now_nanos(void) {

@@ -18,11 +18,11 @@ durable 单句柄相干、后端装载。
 2. **值语义与编解码**：TLV / langtype 的**唯一编解码器**在 kvspace 正典 codec（`kvspaceTlvEncode` /
    `kvspaceDecodeHead` / `kvspaceNewPtr`/`NewChar`/`NewBool`/`NewInt64`/`NewFloat64`）；runtime-c 的
    `xvalue.c` 只是其薄封装。langtype 串是类型的唯一真相，怎么拼、怎么解，只此一处。
-3. **指令解码与签名校验**：`rwir.c:RwirDecode`（稠密探查、遇空即停）、`/lib/<op>` 签名的读写码规范、
+3. **指令解码与签名校验**：`rwir_decode.c:RwirDecode`（稠密探查、遇空即停）、`/lib/<op>` 签名的读写码规范、
    `LangtypeValid`/`LangtypeMatch` 类型判定。
 
-**扩展运行时套用核心，不复刻**：runtime-c 把上述三件能力经嵌入式 C ABI（下节 `kvlang_runtime.h` +
-`kvlang_rwirext.h`）对外开放。扩展运行时**嵌入**这套核心、复用其执行循环、native 派发与正典 codec，只
+**扩展运行时套用核心，不复刻**：runtime-c 把上述三件能力经嵌入式 C ABI（下节 `kvlang_vthread.h` +
+`kvlang_runtime.h`）对外开放。扩展运行时**嵌入**这套核心、复用其执行循环、native 派发与正典 codec，只
 **自行解释己方 opcode**——不得另起执行核心、不得另写编解码器、不得复刻 native 算子。据此：
 
 - **runtime-rs 是扩展运行时的参考实现**，不是第二套等价核心。它作为 myrwir 宿主，套用 runtime-c 核
@@ -37,9 +37,9 @@ durable 单句柄相干、后端装载。
 `kvlang/runtime/` 是通用嵌入式执行器（纯 C + `extern "C"`），可嵌入 myrwir 项目（op-gpu、agent、
 livebyte）。两组对外 C ABI：
 
-- `kvlang_runtime.h`：核心执行器（`kvlangRuntimeConnect`/`Disconnect`/`Bootstrap`/`ExecuteVthread`/
+- `kvlang_vthread.h`：核心执行器（`kvlangRuntimeConnect`/`Disconnect`/`Bootstrap`/`ExecuteVthread`/
   `KvspaceHandle` …）。
-- `kvlang_rwirext.h`：扩展 runtime 语义，**只暴露 kvspace 不提供的部分**。现有 9 个符号：`kvlangDefRwir`、
+- `kvlang_runtime.h`：扩展 runtime 语义，**只暴露 kvspace 不提供的部分**。现有 9 个符号：`kvlangDefRwir`、
   `kvlangRwirextHandoff`、`kvlangRwirextNextPc`、`kvlangRwirextParams`、`kvlangRwirextResolveRead`、
   `kvlangRwirextResolveReadPath`、`kvlangRwirextResolveWrite`、`kvlangLangtypeValid`、
   `kvlangLangtypeMatch`。KV 存取（connect/get/write/del/list/tlv）**不在此**——扩展宿主自连 kvspace ABI，把
@@ -52,8 +52,8 @@ livebyte）。两组对外 C ABI：
 类型表达式串、共用唯一文法与 codec，差别只在**匹配** vs **解析**。
 
 内部模块：`xvalue.c`（TLV 编解码薄封装）、`langtype.c` + `langtypetable.c`（langtype 校验/匹配与我
-表格）、`kv.c`（kvspace ABI 封装）、`keytree.c`（路径构造）、`rwir.c`（PC 解析 + Decode）、
-`vthread.c`、`builtin*.c`（native 算子 + 静态注册表）、`kvcpu.c`（Execute 循环）、`runtime.c`（ABI
+表格）、`kvspace.c`（kvspace ABI 封装）、`keytree.c`（路径构造）、`rwir_decode.c`（PC 解析 + Decode）、
+`vthread.c`、`rwir*.c`（native 算子 + 静态注册表）、`kvcpu.c`（Execute 循环）、`runtime.c`（ABI
 层）、`rwirext.c`（扩展宿主 ABI，含 `notinmyrwircaps`）、`logx.c`、`strbuf.c`、`const.h`。
 myrwircaps 为**静态数组 + 线性查找**。
 

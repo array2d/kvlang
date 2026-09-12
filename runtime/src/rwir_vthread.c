@@ -1,6 +1,6 @@
-// builtin_vthread —— vthread·* 虚拟线程 rwir
+// rwir_vthread —— vthread·* 虚拟线程 rwir
 
-#include "builtin_internal.h"
+#include "rwir_internal.h"
 #include <time.h>
 
 /* vthread·create(funckey) -> vid：分配 vid、建栈索引、bootstrap 首指令、置 init，返回 vid 句柄。

@@ -37,7 +37,7 @@ install:
 	install -m 755 $(BIN)/libkvlang_runtime.so /usr/lib/
 	install -m 755 layout/target/release/libkvlanglayout.so /usr/lib/
 	install -m 755 $(BIN)/kvlang $(BIN)/kvlanglayout /usr/bin/
-	install -m 644 runtime/include/kvlang_runtime.h runtime/include/kvlang_rwirext.h /usr/include/kvlang/
+	install -m 644 runtime/include/kvlang_vthread.h runtime/include/kvlang_runtime.h /usr/include/kvlang/
 
 json:
 	cd runtime-rwirext_example/go/json && CGO_LDFLAGS="-lkvspace" go build -o ../../../bin/json-rwirext ./cmd/

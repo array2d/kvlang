@@ -1,28 +1,51 @@
 #pragma once
+#include <stdbool.h>
 #include <stdint.h>
 
-typedef struct kvlangRuntime_t kvlangRuntime_t;
+/* kvlang 扩展 runtime ABI：供第三方语言（Rust/Python/Go）通过 C ABI 嵌入 C
+ * runtime， 实现自定义 rwirext（如 term 的 print）。
+ *
+ * KV 存取（connect/get/set/del/list/mkindex/tlv）不在此——扩展宿主自己连 kvspace
+ * ABI （kvspaceConnect/Get/Set/...），把拿到的 kvspace 句柄（void
+ * *）传进下列带句柄的函数即可。 本 ABI 只暴露 kvspace 不提供的 runtime
+ * 语义：rwir 解码 + resolve + display + PC 推进 + 类型判定。 */
 
-kvlangRuntime_t *kvlangRuntimeConnect(const char *dsn);
-void kvlangRuntimeDisconnect(kvlangRuntime_t *rt);
+/* 注册一条 rwir（幂等）：/lib/<opcode> 路由头（body 仅计数头 [nr][nw][dynamic]）+
+ * 各参数类型落签名行 [0,x] 槽（def langtype）。读参类型逐条 rp[0..nr]、写参 wp[0..nw]，
+ * 不拼签名串——避免其它 runtime 把「拼接 sig」误当注册标准。末读参尾缀 "..." → 变参。 */
+int kvlangDefRwir(void *kvspace, const char *opcode,
+                  const char *const *rp, int32_t nr,
+                  const char *const *wp, int32_t nw);
 
-int kvlangRuntimeExecutePc(kvlangRuntime_t *rt, const char *pc);
+/* 外部扩展 handoff：写 /lib/<opcode>/.todo<vid> 并阻塞 watch .done<vid>（30s
+ * 超时）。RETURN 模式下 term 遇非己方 ext rwir（如 json.to/numpy）时调用，把
+ * 该指令交给对应扩展进程，扩展处理后写回下一 PC 并 signal .done。返回 0 成功，
+ * -1 失败/超时。 */
+int kvlangRwirextHandoff(void *kvspace, const char *vtid, const char *pc);
 
-/* runtime 内部 kvspace 句柄——runtime-rs 须复用它而非另开连接（durable 惰性
- * flush 只在同句柄内相干）。返回句柄生命周期同 rt，调用方不得 close。 */
-void *kvlangRuntimeKvspaceHandle(kvlangRuntime_t *rt);
+/* 当前指令的下一条 PC（malloc） */
+char *kvlangRwirextNextPc(const char *pc);
 
-/* 模式2（runtime 主导 + term 嵌入）：分配 vthread 并 bootstrap，返回
- * vid（malloc）。 term 专注这一个 vid 的 ext rwir 处理。 */
-char *kvlangRuntimeBootstrap(kvlangRuntime_t *rt, const char *funcname,
-                             const char *const *args, int nargs);
+/* 解码指令，返回 opcode + 读参名 + 写参名（\n 分隔：首行 opcode，接 nr
+ * 行读参名，接 nw 行写参名，malloc）。 供 numpy/tensor 扩展按路径零拷贝读 raw
+ * 数据。 */
+char *kvlangRwirextParams(void *kvspace, const char *pc);
 
-/* 模式2：从 vid 的当前 pc 执行 vthread，遇 ext rwir 不再
- * handoff/watch，直接返回。 返回值：1=遇 ext rwir（*out_pc=该
- * PC，malloc，调用方 free）；0=vthread done；-1=错误。 */
-int kvlangRuntimeExecuteVthread(kvlangRuntime_t *rt, const char *vid,
-                                char **out_pc);
+/* 解析读参 idx 为字符串（变量 → 帧槽值；路径 → 该路径下的值）。 */
+char *kvlangRwirextResolveRead(void *kvspace, const char *pc, int idx);
 
-int kvlangRuntimeExecute(kvlangRuntime_t *rt, const char *funcname,
-                         const char *const *args, int nargs, char **ret,
-                         char *err, uint32_t err_cap);
+/* 解析读参 idx 为 KV 路径（变量 → 帧槽路径；路径 → 直接返回；字面量 → ""）。
+ * 供 numpy/tensor 扩展按路径零拷贝读整块 ndarray raw 数据。 */
+char *kvlangRwirextResolveReadPath(void *kvspace, const char *pc, int idx);
+
+/* 解析写参 idx 为 KV 路径（路径 → 直接返回；变量 → 帧槽路径）。 */
+char *kvlangRwirextResolveWrite(void *kvspace, const char *pc, int idx);
+
+/* 签名 langtype（runtime篇-07）——供扩展做实参类型判定。 */
+/* 语法校验：type = atom("|"atom)*, atom = [dims](family|kind),
+ * dims="[]"|"["dim(","dim)*"]", dim=int|"?"。 */
+bool kvlangLangtypeValid(const char *expr);
+/* 值判定：kind 为实际落盘 kind 串，ndim 为秩（标量 0），dims 为各维长（标量传
+ * NULL）。 */
+bool kvlangLangtypeMatch(const char *expr, const char *kind, int32_t ndim,
+                           const int32_t *dims);
