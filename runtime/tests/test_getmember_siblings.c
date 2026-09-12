@@ -124,6 +124,29 @@ int main(void) {
         printf("Set sibling via cached ART parent: lo=88 hi=77\n");
     }
 
+    /* New frame dir must replace sticky fpar so siblings resolve from that parent. */
+    {
+        const char *frm2 = "/vthread/vt0/[1]/";
+        static const char *n2[] = {"x", "y"};
+        static const int64_t w2[] = {101, 202};
+        char key[128];
+        int j;
+        for (j = 0; j < 2; j++) {
+            snprintf(key, sizeof key, "%s%s", frm2, n2[j]);
+            CHECK(set_i64(k, key, w2[j]) == 0);
+        }
+        CHECK(k->fpar.key != NULL);
+        CHECK(k->fpar.klen == (uint32_t)strlen(frm2));
+        CHECK(memcmp(k->fpar.key, frm2, k->fpar.klen) == 0);
+        drop_leaf_hot(k);
+        for (j = 0; j < 2; j++) {
+            CHECK(kvlangKvGetMember(k, frm2, n2[j], &out) == 0);
+            CHECK(xv_i64(&out) == w2[j]);
+            kvlangKvReadReset(k);
+        }
+        printf("fpar refreshed for frame [1]: x=101 y=202\n");
+    }
+
     kvlangKvDisconnect(k);
     if (failures) {
         fprintf(stderr, "%d checks failed\n", failures);
