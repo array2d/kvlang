@@ -147,7 +147,7 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
     if (!name || !name[0])
         return 0;
     size_t dl = strlen(dir), nl = strlen(name);
-    char stack[2048];
+    char stack[256];
     char *heap = NULL;
     char *key = stack;
     if (dl + nl + 1 > sizeof stack) {
