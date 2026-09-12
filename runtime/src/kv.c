@@ -45,15 +45,17 @@ static void hot_clear(kvlangKv_t *k) {
     k->nhot = 0;
 }
 
-static int hot_probe(kvlangKv_t *k, int i, const char *dir, const char *name,
-                     uint8_t **d, uint32_t *len) {
-    uint32_t dl;
-    if (!k->hot[i].name || k->hot[i].name[0] != name[0] || k->hot[i].name[1] != 0)
+static int hot_get(kvlangKv_t *k, const char *dir, const char *name,
+                   uint8_t **d, uint32_t *len) {
+    if (!dir || !name)
         return 0;
-    dl = k->hot[i].dlen;
-    if (!k->hot[i].key || strncmp(dir, k->hot[i].key, dl) != 0 || dir[dl] != 0)
-        return 0;
-    {
+    for (int i = 0; i < k->nhot; i++) {
+        uint32_t dl;
+        if (!k->hot[i].name || k->hot[i].name[0] != name[0] || k->hot[i].name[1] != 0)
+            continue;
+        dl = k->hot[i].dlen;
+        if (!k->hot[i].key || strncmp(dir, k->hot[i].key, dl) != 0 || dir[dl] != 0)
+            continue;
         kvspaceRef_t r = { k->hot[i].block_id, k->hot[i].gen, 0, 0 };
         if (kvspaceGetByRef(k->h, &r, k->hot[i].key, d, len) == 0 && *d && *len > 0) {
             k->hot[i].block_id = r.block_id;
@@ -61,17 +63,6 @@ static int hot_probe(kvlangKv_t *k, int i, const char *dir, const char *name,
             return 1;
         }
     }
-    return 0;
-}
-
-static int hot_get(kvlangKv_t *k, const char *dir, const char *name,
-                   uint8_t **d, uint32_t *len) {
-    if (!dir || !name || k->nhot <= 0)
-        return 0;
-    if (hot_probe(k, 0, dir, name, d, len))
-        return 1;
-    if (k->nhot > 1 && hot_probe(k, 1, dir, name, d, len))
-        return 1;
     return 0;
 }
 
