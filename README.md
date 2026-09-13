@@ -72,7 +72,21 @@ Cross-process handoff uses the queue `/lib/<opcode>/vids/<vtid> = pc`: the calli
 
 ---
 
-## Quick Start
+## Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/array2d/kvlang/master/install.sh | sh
+```
+
+Detects OS/arch and fetches the **latest** release — `linux-x86_64` or `darwin-arm64`. Each tarball is self-contained (kvlang runtime + layout, the kvspace dispatch front end, both backends, and every header), and installs to `/usr` on Linux, `/usr/local` on macOS (`/usr` is SIP-protected there).
+
+```bash
+PREFIX=/opt/kvlang VERSION=v0.2.18 sh install.sh   # override prefix / pin a version
+```
+
+It installs `kvlang` (runtime CLI), `kvlanglayout` (layout CLI) and `kvspace` (backend CLI) into `<prefix>/bin`, the libraries into `<prefix>/lib` + `<prefix>/lib/kvspace`, and the headers into `<prefix>/include/{kvlang,kvspace,…}`.
+
+## Quick Start (from source)
 
 Requirements: a C toolchain + cmake, Rust (cargo), and the kvspace ABI libraries installed to `/usr/lib/kvspace` (fetched by [`ci/deps.sh`](ci/deps.sh) from the tags in [`deps.json`](deps.json)). Go is needed only for the Go `json` example extension.
 

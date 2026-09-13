@@ -15,17 +15,21 @@ jobs:
       - name: 下载 ABI 依赖
         env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
         run: ./ci/deps.sh
-      - name: 构建 runtime + layout
+      - name: 构建 runtime + layout + runtime-rs（产 bin/ 下的 CLI）
         run: |
           make runtime
-          cargo build --release --manifest-path layout/Cargo.toml
+          make layout      # cargo build + cp kvlanglayout / libkvlanglayout.so → bin/
+          make runtime-rs  # → bin/kvlang
       - name: 打包 ABI 产物
         run: |
           set -euo pipefail
           v="${GITHUB_REF_NAME}"
           d="kvlang-abi-$v-linux-x86_64"
-          mkdir -p "$d/include/kvlang" "$d/lib/kvspace"
+          mkdir -p "$d/include/kvlang" "$d/lib/kvspace" "$d/bin"
           cp runtime/include/*.h "$d/include/kvlang/"
+          # CLI：kvlang（Rust runtime）+ kvlanglayout（layout CLI）+ kvspace（dispatch 前端 CLI，随依赖装入）
+          cp bin/kvlang bin/kvlanglayout "$d/bin/"
+          cp /usr/bin/kvspace "$d/bin/"
           # 自带全部 ABI 依赖的头 → 解包即 /usr/include 布局（扩展编译需要 kvspace.h 等）
           cp -r /usr/include/kvspace /usr/include/blockmalloc /usr/include/slotsboxmalloc "$d/include/"
           cp bin/libkvlang_runtime.so "$d/lib/"
@@ -65,11 +69,18 @@ jobs:
           # durable 为 Rust（无 install 规则），手动装入后端目录，供 frontend dlopen
           sudo mkdir -p "$PREFIX/lib/kvspace"
           sudo cp /tmp/kvspace-durable/target/release/libkvspace_durable.dylib "$PREFIX/lib/kvspace/"
-      - name: 构建 runtime + layout
+      - name: 构建 runtime + layout + runtime-rs + kvspace CLI
         run: |
           cmake -S runtime -B build/runtime -DCMAKE_BUILD_TYPE=Release -DKVSPACE_LIB_DIR="$KVSPACE_LIB_DIR"
           cmake --build build/runtime --target kvlang_runtime -j
           cargo build --release --manifest-path layout/Cargo.toml
+          cargo build --release --manifest-path runtime-rs/Cargo.toml
+          # kvspace CLI 是本步 clone 到 /tmp/kvspace 的 cli/（独立 Cargo 项目）
+          cargo build --release --manifest-path /tmp/kvspace/cli/Cargo.toml
+          mkdir -p bin
+          cp layout/target/release/libkvlanglayout.dylib bin/
+          cp layout/target/release/kvlanglayout bin/
+          cp runtime-rs/target/release/kvlang bin/
       - name: 后端装载冒烟（frontend 的 dlopen 真能加载后端）
         run: |
           cat > /tmp/conn.c <<'EOF'
@@ -92,8 +103,11 @@ jobs:
           set -euo pipefail
           v="${GITHUB_REF_NAME}"
           d="kvlang-abi-$v-darwin-arm64"
-          mkdir -p "$d/include/kvlang" "$d/lib/kvspace"
+          mkdir -p "$d/include/kvlang" "$d/lib/kvspace" "$d/bin"
           cp runtime/include/*.h "$d/include/kvlang/"
+          # CLI：kvlang（Rust runtime）+ kvlanglayout（layout CLI）+ kvspace（dispatch 前端 CLI）
+          cp bin/kvlang bin/kvlanglayout "$d/bin/"
+          cp /tmp/kvspace/cli/target/release/kvspace "$d/bin/"
           # 自带全部 ABI 依赖的头 → 解包即 /usr/local/include 布局
           cp -r /usr/local/include/kvspace /usr/local/include/blockmalloc /usr/local/include/slotsboxmalloc "$d/include/"
           cp bin/libkvlang_runtime.dylib "$d/lib/"
