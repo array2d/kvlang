@@ -5,7 +5,7 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# ── 输出统一到 bin/ ──────────────────────────────────────────────
+# Outputs go under bin/.
 set(BIN_DIR "${CMAKE_SOURCE_DIR}/../bin")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${BIN_DIR}")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${BIN_DIR}")
@@ -31,3 +31,17 @@ else()
     set_target_properties(kvlang_runtime PROPERTIES
         LINK_FLAGS "-Wl,--export-dynamic -Wl,--disable-new-dtags -Wl,-rpath,${KVSPACE_LIB_DIR}")
 endif()
+
+add_custom_command(
+    OUTPUT "${BIN_DIR}/test_getmember_siblings"
+    COMMAND ${CMAKE_C_COMPILER} -O2 -D_GNU_SOURCE
+        -I${CMAKE_SOURCE_DIR}/include -I${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests/test_getmember_siblings.c
+        -o ${BIN_DIR}/test_getmember_siblings
+        -L${BIN_DIR}
+        -Wl,--disable-new-dtags
+        -Wl,-rpath,${BIN_DIR}
+        -Wl,--no-as-needed -lkvspace -Wl,--as-needed -lkvlang_runtime
+    DEPENDS kvlang_runtime "${CMAKE_SOURCE_DIR}/tests/test_getmember_siblings.c"
+    VERBATIM)
+add_custom_target(test_getmember_siblings ALL DEPENDS "${BIN_DIR}/test_getmember_siblings")

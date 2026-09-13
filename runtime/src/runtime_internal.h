@@ -46,6 +46,8 @@ extern int kvspaceGet(void *h, const char *key, int resolve, uint8_t **out,
 typedef struct {
     uint32_t block_id;
     uint32_t gen;
+    uint32_t parent_id;
+    uint32_t depth;
 } kvspaceRef_t;
 extern int kvspaceResolveRef(void *h, const char *key, kvspaceRef_t *ref)
     __attribute__((weak));
@@ -143,15 +145,21 @@ typedef struct {
 } kvlangKvPair_t;
 
 #define KVLANG_REF_CAP 64
-typedef struct {
-    char *key;
-    uint32_t block_id, gen;
-} kvlangRefEnt_t;
+#define KVLANG_PREF_CAP 5
+#define KVLANG_HOT_CAP 4
+typedef struct { char *key; uint32_t block_id, gen, klen; } kvlangRefEnt_t;
+typedef struct { char *name; char *key; uint32_t block_id, gen, dlen; } kvlangHotEnt_t;
 typedef struct {
     void *h;
     kvlangRefEnt_t ref[KVLANG_REF_CAP];
     int nref;
     int ref_on;
+    kvlangRefEnt_t pref[KVLANG_PREF_CAP]; /* · map ART parents */
+    int npref;
+    int pref_i;
+    kvlangRefEnt_t fpar; /* frame `/` parent for GetMember siblings */
+    kvlangHotEnt_t hot[KVLANG_HOT_CAP]; /* a/i/n leaf refs */
+    int nhot;
 } kvlangKv_t;
 
 /* growable string buffer */
