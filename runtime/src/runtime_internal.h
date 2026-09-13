@@ -123,14 +123,11 @@ typedef struct {
     kvlangRefEnt_t ref[KVLANG_REF_CAP];
     int nref;
     int ref_on;
-    /* ART dir ancestors of recent `·` maps (hash/qsort/trees L,R,bid,bdep,tid). */
-    kvlangRefEnt_t pref[KVLANG_PREF_CAP];
+    kvlangRefEnt_t pref[KVLANG_PREF_CAP]; /* · map ART parents */
     int npref;
     int pref_i;
-    /* Sticky frame `/` parent for GetMember siblings; not mixed with `·` maps. */
-    kvlangRefEnt_t fpar;
-    /* Frame locals `a`/`i`/`n` (iops/hash loops); dir-checked, leaf refs only. */
-    kvlangHotEnt_t hot[KVLANG_HOT_CAP];
+    kvlangRefEnt_t fpar; /* frame `/` parent for GetMember siblings */
+    kvlangHotEnt_t hot[KVLANG_HOT_CAP]; /* a/i/n leaf refs */
     int nhot;
 } kvlangKv_t;
 

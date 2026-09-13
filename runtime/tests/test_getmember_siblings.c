@@ -110,7 +110,7 @@ int main(void) {
     printf("GetMember siblings via cached ART parent: %d keys, distinct values\n", n);
     printf("fpar block_id=%u depth=%u\n", k->fpar.block_id, k->fpar.gen);
 
-    /* Set a 2-char sibling with leaf/hot empty so the write uses fpar. */
+    /* Set lo with leaf/hot empty; hi must stay distinct. */
     {
         char lokey[128];
         snprintf(lokey, sizeof lokey, "%slo", frm);

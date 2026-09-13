@@ -59,7 +59,7 @@ static inline int hot_get(kvlangKv_t *k, const char *dir, const char *name,
         return 0;
     for (int i = 0; i < k->nhot; i++) {
         uint32_t dl;
-        if (!k->hot[i].name || k->hot[i].name[0] != name[0] || k->hot[i].name[1] != 0)
+        if (!k->hot[i].name || k->hot[i].name[0] != name[0])
             continue;
         dl = k->hot[i].dlen;
         if (!k->hot[i].key || strncmp(dir, k->hot[i].key, dl) != 0 || dir[dl] != 0)
@@ -74,18 +74,17 @@ static inline int hot_get(kvlangKv_t *k, const char *dir, const char *name,
     return 0;
 }
 
-/* Leaf-only (gen==0), one-char names, skip /lib/. Parent refs stick GetMember on a walk. */
+/* Leaf refs only (gen==0). Skip /lib/. */
 static void hot_put(kvlangKv_t *k, const char *name, const char *key,
                     uint32_t block_id, uint32_t gen) {
     kvlangHotEnt_t *e;
-    size_t nl, kl;
+    size_t kl;
     if (!hot_name_ok(name) || !key || !block_id || gen != 0)
         return;
     if (strncmp(key, "/lib/", 5) == 0)
         return;
-    nl = 1;
     kl = strlen(key);
-    if (kl < nl)
+    if (kl < 1)
         return;
     for (int i = 0; i < k->nhot; i++) {
         if (k->hot[i].name && k->hot[i].name[0] == name[0] && k->hot[i].name[1] == 0) {
@@ -119,7 +118,7 @@ static void hot_put(kvlangKv_t *k, const char *name, const char *key,
     }
     e->block_id = block_id;
     e->gen = gen;
-    e->dlen = (uint32_t)(kl - nl);
+    e->dlen = (uint32_t)(kl - 1);
 }
 
 static inline kvlangHotEnt_t *hot_find_key(kvlangKv_t *k, const char *key) {
@@ -154,7 +153,6 @@ static void parent_put(kvlangKv_t *k, const char *dir, size_t dl, const kvspaceR
     kvlangRefEnt_t *e;
     if (!dir || !dl || !rr->parent_id || !rr->depth)
         return;
-    /* Stdlib `/lib/…` would occupy a slot for the whole process. */
     if (dl >= 5 && memcmp(dir, "/lib/", 5) == 0)
         return;
     if (!dir_is_member(dir, dl)) {
@@ -188,14 +186,12 @@ static void parent_put(kvlangKv_t *k, const char *dir, size_t dl, const kvspaceR
             return;
         memcpy(e->key, dir, dl);
         e->key[dl] = 0;
-        e->klen = (uint32_t)dl;
     }
     e->block_id = rr->parent_id;
     e->gen = rr->depth;
     e->klen = (uint32_t)dl;
 }
 
-/* Rightmost '/' or member '·'; only the last path component is scanned for '·'. */
 static int last_dir_sep(const char *key, size_t *seplen) {
     const char *slash = strrchr(key, '/');
     const char *start = slash ? slash + 1 : key;
@@ -221,7 +217,7 @@ static int parent_prefix_ok(const kvlangRefEnt_t *e, const char *key) {
     const char *p;
     if (!e || !e->key || !e->gen || !key)
         return 0;
-    dl = e->klen ? e->klen : strlen(e->key);
+    dl = e->klen;
     if (memcmp(key, e->key, dl) != 0 || !key[dl])
         return 0;
     for (p = key + dl; *p; p++) {
@@ -232,7 +228,6 @@ static int parent_prefix_ok(const kvlangRefEnt_t *e, const char *key) {
     return 1;
 }
 
-/* Covering `·` map parent, or NULL. Does not use the sticky frame `/` slot. */
 static kvlangRefEnt_t *pref_cover(kvlangKv_t *k, const char *key) {
     if (!key)
         return NULL;
@@ -253,10 +248,8 @@ static int parent_hit_ent(kvlangKv_t *k, const kvlangRefEnt_t *e, const char *ke
                           uint8_t **d, uint32_t *len) {
     if (!parent_prefix_ok(e, key))
         return 0;
-    {
-        kvspaceRef_t r = { e->block_id, e->gen, 0, 0 };
-        return kvspaceGetByRef(k->h, &r, key, d, len) == 0 && *d && *len > 0;
-    }
+    kvspaceRef_t r = { e->block_id, e->gen, 0, 0 };
+    return kvspaceGetByRef(k->h, &r, key, d, len) == 0 && *d && *len > 0;
 }
 
 static int parent_hit(kvlangKv_t *k, const char *key, uint8_t **d, uint32_t *len) {
@@ -343,7 +336,6 @@ int kvlangKvGetOne(kvlangKv_t *k, const char *key, kvlangXvalue_t *out) {
     kvlangXvalueZero(out);
     uint8_t *d;
     uint32_t len;
-    /* kv.get map slots (`base·k`); frame locals go through GetMember. */
     if (ref_ok(k) && k->npref && key) {
         kvlangRefEnt_t *pe = (k->npref == 1)
                                  ? (parent_prefix_ok(&k->pref[0], key) ? &k->pref[0] : NULL)
@@ -396,7 +388,6 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
     memcpy(key, dir, dl);
     memcpy(key + dl, name, nl);
     key[dl + nl] = 0;
-    /* Non-a/i/n frame siblings: ART parent before the 64-slot leaf scan. */
     if (ref_ok(k) && !hot_name_ok(name) && k->fpar.key &&
         memcmp(k->fpar.key, dir, k->fpar.klen) == 0 && dir[k->fpar.klen] == 0) {
         kvspaceRef_t r = { k->fpar.block_id, k->fpar.gen, 0, 0 };
@@ -539,8 +530,6 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
             const char *slash = strrchr(key, '/');
             const char *rest = slash ? slash + 1 : key;
             int is_member = rest && memchr(rest, 0xC2, strlen(rest)) != NULL;
-            /* Unique `·` slots share one ART parent; do not fill the leaf table
-             * (that walk + 64-slot scan was the unique-key miss). */
             if (is_member && (pref_cover(k, key) ||
                               (key[0] == '/' && strncmp(key, "/lib/", 5) == 0)))
                 continue;
