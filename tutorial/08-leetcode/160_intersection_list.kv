@@ -5,7 +5,7 @@
 //   8
 struct Node {
 	val:int64=0
-	next:*Node=""
+	next:*Node=None
 }
 
 rwfunc get_intersection(ha:*Node, hb:*Node) -> () {
@@ -15,29 +15,29 @@ rwfunc get_intersection(ha:*Node, hb:*Node) -> () {
 	switch_b = 0
 	while (pa != pb) {
 		pa·next -> nxt
-		if (nxt == "") {
+		if (nxt == None) {
 			if (switch_a == 0) {
 				hb -> pa
 				1 -> switch_a
 			} else {
-				"" -> pa
+				None -> pa
 			}
 		} else {
 			nxt -> pa
 		}
 		pb·next -> nxt2
-		if (nxt2 == "") {
+		if (nxt2 == None) {
 			if (switch_b == 0) {
 				ha -> pb
 				switch_b = 1
 			} else {
-				"" -> pb
+				None -> pb
 			}
 		} else {
 			nxt2 -> pb
 		}
 	}
-	if (pa != "") {
+	if (pa != None) {
 		pa·val -> v
 		println(v)
 	}

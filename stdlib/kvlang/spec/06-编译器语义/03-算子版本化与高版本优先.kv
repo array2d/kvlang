@@ -53,9 +53,9 @@ PyTorch，这把 autotune 的隐式择优显式化为可声明、可审计的静
 - 完整的实现选择键是复合的：`(基 op, 版本 .N, shape-hash, dtype, author/backend)`。**别把 shape 特化
   冒充成版本号**。
 
-## 锚例（待补）
+## 锚例（未落地）
 
-- `tutorial/16-compiler/op_version.kv`——编译前调 `softmax` 走基版；编译生成 `softmax.1` 后，同一
-  `softmax(...)` 调用走 `softmax.1`，输出与基版逐字节一致。
+- 待补：`tutorial/16-compiler/op_version.kv`——编译前调 `softmax` 走基版；编译生成 `softmax.1` 后，同
+  一 `softmax(...)` 调用走 `softmax.1`，输出与基版逐字节一致（`tutorial/16-compiler/` 尚未建立）。
 	"#### -> /lib/kvlang/spec/编译器语义/算子版本化与高版本优先
 }

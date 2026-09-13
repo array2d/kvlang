@@ -14,10 +14,18 @@
 //   -1
 //   l
 //   108
+
+// 替换第 i 个字符，返回新串（值语义：实参不被修改）
+rwfunc replace_at(s:[]char/utf32, i:int64,
+		ch:[]char/utf32) -> (r:[]char/utf32) {
+	s -> r
+	r[i] = ch
+}
+
 rwfunc test() -> () {
 	s = "hello"
 	println(s[1])
-	s[0] = "H"
+	replace_at(s, 0, "H") -> s
 	println(s)
 
 	t = "kv" + "lang"

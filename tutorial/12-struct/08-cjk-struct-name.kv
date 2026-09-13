@@ -1,0 +1,27 @@
+// 语义: struct 名（含 CJK）可用于参数/返回类型位置，与 ASCII 名同等——
+//       chinese_ident.kv 头部宣称「中文可用于任意标识符位置，包括结构体名」。
+//       容器由**调用方**先声明（memhead 不存在时禁止写 memitem，
+//       见 tutorial/12-struct/02-mutate.kv 同款约定）。
+// 期望输出:
+//   7
+//   3
+struct 点 {
+	x:int64=0
+	y:int64=0
+}
+rwfunc 求和(p:*点) -> (s:int64) {
+	p·x + p·y -> s
+}
+rwfunc 造点(a:int64, b:int64) -> (r:*点) {
+	a -> r·x
+	b -> r·y
+}
+rwfunc test() -> () {
+	a:点 = {x=3 y=4}
+	求和(a) -> s
+	println(s)
+	r0:点 = {}
+	造点(1, 2) -> r0
+	求和(r0) -> s2
+	println(s2)
+}

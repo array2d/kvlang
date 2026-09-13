@@ -17,7 +17,7 @@ use super::ast::{
     self, Expr, Func, FuncSig, Instruction, Param, RwirDecl, ScopeStmt, Stmt, StructDecl,
 };
 use super::ffi::Kv;
-use super::{builtin, ffi, keytree, kvkind, lower, parser};
+use super::{builtin, ffi, keytree, kvkind, langtype, lower, parser};
 
 /// 创建基础目录 /lib/ 与 /vthread/（layout 前必须存在）。
 pub fn init_dirs(kv: &mut Kv) -> Result<(), String> {
@@ -33,6 +33,8 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
     let (file, mut diags) = parser::parse_code(src)?;
     for f in subscript_check_funcs(&file) {
         diags.extend(lower::check_container_subscript(&f));
+        diags.extend(lower::check_map_defined(&f));
+        diags.extend(lower::check_container_typed(&f));
     }
     for d in &diags {
         eprintln!("{}", d.string());
@@ -140,6 +142,8 @@ pub fn vet(src: &str) -> Result<(), String> {
     let (file, mut diags) = parser::parse_code(src)?;
     for f in subscript_check_funcs(&file) {
         diags.extend(lower::check_container_subscript(&f));
+        diags.extend(lower::check_map_defined(&f));
+        diags.extend(lower::check_container_typed(&f));
     }
     for d in &diags {
         eprintln!("{}", d.string());
@@ -458,6 +462,7 @@ struct RawInst {
     opcode: String,
     reads: Vec<Operand>,
     writes: Vec<String>,
+    write_types: Vec<String>,
 }
 
 /// 操作数：引用（变量/opcode/路径）、字符串字面量、其它字面量（数值/bool）。
@@ -488,19 +493,23 @@ fn read_insts(kv: &mut Kv, dir: &str) -> Vec<RawInst> {
             j += 1;
         }
         let mut writes = Vec::new();
+        let mut wtypes = Vec::new();
         let mut j = 1;
         loop {
             let d = kv.get_one(&format!("{dir}[{n},{j}]"));
             if d.is_empty() {
                 break;
             }
-            writes.push(kvkind::rwir_sig(&d));
+            let (w, ty) = kvkind::write_slot_name(&d);
+            writes.push(w);
+            wtypes.push(ty);
             j += 1;
         }
         out.push(RawInst {
             opcode,
             reads,
             writes,
+            write_types: wtypes,
         });
         n += 1;
     }
@@ -592,14 +601,18 @@ fn build_inst(inst: &RawInst, by_irseq: &HashMap<i32, String>) -> Instruction {
         v[0] = ty;
         v
     } else {
-        Vec::new()
+        let mut v = inst.write_types.clone();
+        if v.iter().all(String::is_empty) {
+            v = Vec::new();
+        }
+        v
     };
     Instruction {
         comments: Vec::new(),
         expr,
         writes: inst.writes.clone(),
         write_types,
-        arrow_left: is_fill,
+        arrow_left: is_fill || inst.write_types.iter().any(|t| !t.is_empty()),
     }
 }
 
@@ -609,30 +622,28 @@ pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) {
     lower::specialize(fn_, &type_map);
     let func_dir = keytree::lib_func(pkg, &fn_.sig.name);
 
-    // pkg 下同名 func 已存在（含签名槽 [0,0]）→ debug 提示即将覆盖（严格按 lib 声明判定，非路径）。
-    // 覆盖是 KVLANG_LIB 引导的常态（stdlib 每次重铺），故降到 debug 级：仅 LOG_LEVEL=debug 显示。
-    if !kv.get_one(&format!("{func_dir}/[0,0]")).is_empty()
-        && std::env::var("LOG_LEVEL").as_deref() == Ok("debug")
-    {
-        let qual = if pkg.is_empty() {
-            fn_.sig.name.clone()
-        } else {
-            format!("{pkg}/{}", fn_.sig.name)
-        };
-        eprintln!("debug: func {qual} already defined — overwriting");
-    }
-
     let mut seq: Vec<Instruction> = Vec::new();
     let mut labels: HashMap<String, i32> = HashMap::new();
     collect_insts(&fn_.body, &mut seq, &mut labels);
 
-    // 参数名 → *[0,±k]（显式解引用坐标）：函数体形参引用编译期替换，删命名参数 Ptr 运行时角色。
+    // 形参引用 → 帧坐标（编译期替换，运行时无命名参数角色）。带 `*` 的形参按**地址传递**（槽存实参地址，体内显式解引用 `*[0,-k]`）；
+    // 不带 `*` 的按**值传递**（槽存值本体，体内裸坐标 `[0,-k]` 直读）。见 spec [[函数]]。
     let mut param_coord: HashMap<String, String> = HashMap::new();
     for (i, p) in fn_.sig.params.iter().enumerate() {
-        param_coord.insert(p.name.clone(), format!("*[0,-{}]", i + 1));
+        let d = if langtype::is_addr_param(&p.ty) {
+            "*"
+        } else {
+            ""
+        };
+        param_coord.insert(p.name.clone(), format!("{d}[0,-{}]", i + 1));
     }
     for (i, r) in fn_.sig.returns.iter().enumerate() {
-        param_coord.insert(r.name.clone(), format!("*[0,{}]", i + 1));
+        let d = if langtype::is_addr_param(&r.ty) {
+            "*"
+        } else {
+            ""
+        };
+        param_coord.insert(r.name.clone(), format!("{d}[0,{}]", i + 1));
     }
 
     // 按函数覆盖（文件夹复制式合并）：只 del_tree 本函数子树，不动 /lib 下其它函数。
@@ -643,6 +654,15 @@ pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) {
     let nr = fn_.sig.num_reads();
     let nw = fn_.sig.num_writes();
     let param_types: Vec<String> = fn_.sig.langtype_list();
+    // 形参/写参的**声明类型**：容器字面量写给带类型标注的形参时（`{…} -> m`，m:[]char/utf8·int64），
+    // 写槽须承载该 map langtype——否则 runtime 无从得知容器值 langtype（签名即声明处，见 [[map容器]]）。
+    let mut param_langtype: HashMap<String, String> = HashMap::new();
+    for (i, p) in fn_.sig.params.iter().enumerate() {
+        param_langtype.insert(p.name.clone(), param_types[i].clone());
+    }
+    for (i, r) in fn_.sig.returns.iter().enumerate() {
+        param_langtype.insert(r.name.clone(), param_types[nr as usize + i].clone());
+    }
 
     let mut pairs: Vec<(String, Vec<u8>)> = Vec::new();
     pairs.push((
@@ -679,6 +699,7 @@ pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) {
             &labels,
             &mut type_map,
             &param_coord,
+            &param_langtype,
         );
     }
     if !labels.is_empty() {
@@ -715,6 +736,11 @@ pub fn write_struct_decl(kv: &mut Kv, decl: &StructDecl) {
     pairs.push((base.clone(), kvkind::new_struct(&ftypes)));
     pairs.push((keytree::member(&base, ""), kvkind::new_memindex(&fnames)));
     for fld in &decl.fields {
+        // *T 字段的默认值是空指针 None——不落键。None 在 kvspace 即"无值"（键不存在），
+        // 故原型不带该字段、实例读回 None（见 [[ptr]]）；不造"空 Ptr"这第二种空值表示。
+        if fld.ty.starts_with('*') {
+            continue;
+        }
         pairs.push((
             keytree::member(&base, &fld.name),
             field_default(&fld.ty, fld.default.as_ref()),
@@ -726,10 +752,7 @@ pub fn write_struct_decl(kv: &mut Kv, decl: &StructDecl) {
 /// 字段默认值 XValue：head kind = 字段类型，body = 默认字面量（未给则零值）。
 /// 标量+char 直接编码；带 dims / structref 仅记录类型（空 body），嵌套 struct 待定。
 fn field_default(ty: &str, default: Option<&Expr>) -> Vec<u8> {
-    // *T 指针字段：默认空指针（ref=1、langtype=目标 kindexpr、body 空）。
-    if let Some(target) = ty.strip_prefix('*') {
-        return ffi::new_ptr(target, "");
-    }
+    // *T 指针字段不在此列——write_struct_decl 已按"空指针 = None = 不落键"跳过。
     let (dims, base) = kvkind::parse_langtype(ty);
     let s = default.map(|e| e.val.clone()).unwrap_or_default();
     if base.starts_with("char/") {
@@ -822,6 +845,7 @@ fn write_linear_inst(
     labels: &HashMap<String, i32>,
     type_map: &mut HashMap<String, String>,
     params: &HashMap<String, String>,
+    param_langtype: &HashMap<String, String>,
 ) {
     for (j, w) in s.writes.iter().enumerate() {
         if j < s.write_types.len() && !s.write_types[j].is_empty() {
@@ -869,11 +893,19 @@ fn write_linear_inst(
         ));
     }
     for (j, w) in s.writes.iter().enumerate() {
-        let wv = params
-            .get(w.as_str())
+        let orig = w.as_str();
+        let wv = params.get(orig).map(String::as_str).unwrap_or(orig);
+        let ty = s
+            .write_types
+            .get(j)
             .map(String::as_str)
-            .unwrap_or(w.as_str());
-        pairs.push((format!("{prefix}/[{n},{}]", j + 1), slot_value(wv, "")));
+            .filter(|t| !t.is_empty())
+            .or_else(|| param_langtype.get(orig).map(String::as_str))
+            .unwrap_or("");
+        pairs.push((
+            format!("{prefix}/[{n},{}]", j + 1),
+            write_slot_value(wv, ty),
+        ));
     }
     if !pairs.is_empty() {
         let _ = kv.set(&pairs);
@@ -903,6 +935,17 @@ fn opcode_value(opcode: &str) -> Vec<u8> {
     } else {
         kvkind::new_rwir_union(opcode)
     }
+}
+
+/// 写槽值：写目标带 **map langtype** 标注时（`x:{keylt}·{valt} = {}`），槽的 langtype 即该 map
+/// langtype、body 即变量名——runtime 据此把容器值按 [[map容器]] 落成「langtype=map langtype、
+/// storetype=index、body 空」，成员索引落兄弟槽 `x·`。其余写槽仍是 rwir 引用（body 带计数头）。
+/// 参数替换过的写槽（rwfunc 写参轴）不承载类型：声明类型已落 `/lib/<fn>.[0,k]` 参数定义键。
+fn write_slot_value(name: &str, ty: &str) -> Vec<u8> {
+    if ty.contains(keytree::MEMBER_SEP) {
+        return ffi::tlv_encode(ty, name.as_bytes(), 1);
+    }
+    slot_value(name, "")
 }
 
 /// 将字面量/引用字符串编码为 XValue TLV（rwir 槽值）。

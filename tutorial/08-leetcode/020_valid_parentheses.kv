@@ -13,6 +13,7 @@ rwfunc is_valid(s:[]char/utf32) -> (ok:int64) {
 		c = s[i]
 		if (c == "(") {
 			si + 1 -> si
+			/tmp/vp:[int64]·int64 = {}
 			_ = kv·set("/tmp/vp", si, 1)
 		}
 		if (c == "[") {

@@ -1,0 +1,26 @@
+// 语义: 两种传参由签名里的 `*` 决定，layout 与 runtime 完全对齐——
+//       写 `T` 按值（帧槽是调用方值的副本），写 `*T` 按地址（槽是调用方地址/句柄）。
+//       体内引用随之：值参 `[0,±k]` 直读直写，地址参 `*[0,±k]` 解引用。
+// 期望输出:
+//   inc r= 4  v= 3
+//   bump v= 4
+//   own v= 104
+rwfunc inc(x:int64) -> (r:int64) {
+	x = x + 1
+	x -> r
+}
+rwfunc bump() -> (p:*int64) {
+	p + 1 -> p
+}
+rwfunc own() -> (t:int64) {
+	t = t + 100
+}
+rwfunc test() -> () {
+	3 -> v
+	inc(v) -> r
+	println("inc r=", r, " v=", v)
+	bump() -> v
+	println("bump v=", v)
+	own() -> v
+	println("own v=", v)
+}

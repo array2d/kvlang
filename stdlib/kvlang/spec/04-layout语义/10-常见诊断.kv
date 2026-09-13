@@ -6,7 +6,14 @@ lib kvlang/spec/layout语义/常见诊断 {
 
 - 参数缺类型标注——`param "x" has no type annotation` / `return value "r" has no type annotation`。
 - 读参被写——`read param "A" cannot be used as write slot (read params are read-only)`。
-- 读写参同名——`param "A" appears in both read-params and write-params`。
+- 值容器按值传参——`param "p": 值容器类型只能按地址传递 —— 写 "*/lib/Point"`（值容器无值本体可拷，须带
+  `*`/`@`）。
+- 参数名重复（读参列表内、写参列表内、读写之间均不得同名，见 [[函数]]）——读写之间
+  `param "A" appears in both read-params and write-params`；列表内 `duplicate param "a" in read-params`
+  / `in write-params`。**调用**时不受限：`inc(x) -> x` 合法。
+- 标注不是种类名——`write "x": unknown type "int"` / `struct field "f": unknown type "intg64"`：
+  标量字面量右值处标注须是已知种类名或 `any`，数组字面量右值处须是合法 langtype；**大括号右值
+  除外**——那里裸名是 struct 名，存在性归 runtime（见 [[文法与合法性]]）。
 - 变参位置非法——`variadic param "x" must be the last read-param` /
   `write-param "r" cannot be variadic`。
 - 顶层控制流——`top-level while is not supported — wrap in main()`。

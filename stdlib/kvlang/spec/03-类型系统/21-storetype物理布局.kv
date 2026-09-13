@@ -7,9 +7,9 @@ lib kvlang/spec/类型系统/storetype物理布局 {
 | storetype | 追加物理字段 | body（ref=0） | 承载的 langtype |
 |-----------|-------------|--------------|----------------|
 | `NONE` | 无 | 空 | None |
-| `ATOM` | 无 | 定宽 raw | 标量：bool、int/uint/float、单 char、time、duration |
-| `ARRAYND` | `ndim` u8 + `dims[ndim]` u32 LE | 稠密等宽元素数组 | 张量、`[]char/*` 字符串、rwir 指令行文本 |
-| `index` | 成员名 **m×n 对齐字符串数组**，`dims=[len,cap,M]`（len=成员数、M=对齐宽度 align8、cap 保留容量） | 见下（目录节点主槽 body 记计数头或空） | stringkeymap、struct（值容器）；lib、rwfunc、def 族（目录/定义节点） |
+| `ATOM` | 无 | 单段不可切分 raw：定宽标量，或变长文本（`rwir` 槽 = 计数头 + 文本；`def langtype` 类型串） | 标量：bool、int/uint/float、time、duration；代码叶子 `rwir`、签名定义槽 `def langtype` |
+| `ARRAYND` | `ndim` u8 + `dims[ndim]` u32 LE | 稠密等宽元素数组 | 张量、`[]char/*` 字符串（`.src` 源码副本亦此形） |
+| `index` | 成员名 **m×n 对齐字符串数组**，`dims=[len,cap,M]`（len=成员数、M=对齐宽度 align8、cap 保留容量） | 空（rwfunc 的计数头在 `[0,0]`、值容器在 `{key}·`） | stringkeymap、struct（值容器）；lib、rwfunc、def 族（目录/定义节点） |
 | `extindex` | 同 index，`cap` 可增长（栈帧/运行栈扩容） | 同上 | rwfunc（vthread 运行栈等可扩展目录） |
 
 数值 `dims` 供 codec O(1) 切字节，与 langtype 串内的 `[dims]` 语法一致（由 codec 保证同步）。
@@ -45,9 +45,9 @@ storetype=index/extindex 只表「这是有成员的索引节点」，成员的*
 
 | langtype | 有 kvlang 实现体？ | 位置 | 谁实现 | 形态 |
 |----------|------------------|------|--------|------|
-| `rwir` | 无 | `/vthread/<vid>/` 指令行 | runtime 直接兑现（经 def rwir 路由，myrwircaps） | ARRAYND 指令行叶子 |
+| `rwir` | 无 | `/vthread/<vid>/` 指令行 | runtime 直接兑现（经 def rwir 路由，myrwircaps） | ATOM 指令叶子（body = 计数头 + 指令名/引用文本） |
 | `def rwir` | 无（仅签名，无指令行） | **仅 `/lib/<op>`** | runtime 直接兑现 | index **定义节点**（有签名行 `[0,x]`，无实现指令行） |
-| `rwfunc` | **有**（一串 rwir 指令行） | `/lib/<pkg>·<fn>/` | kvlang 指令序列自身 | index/extindex **目录**（签名行 `[0,x]` + 实现指令行 `[s0>0,·]`） |
+| `rwfunc` | **有**（一串 rwir 指令行） | `/lib/<pkg>·<fn>/` | kvlang 指令序列自身 | index/extindex **目录**（参数定义键 `.[0,±j]` + 实现指令行 `[s0>0,·]`） |
 
 **def rwir 是路由头**（原 `defrwir`，现规范书写为带空格的 **`def rwir`**，见下「def 族」）：它只存在
 于 `/lib/<op>`，是每个 rwir 指令的统一声明入口。`/vthread/` 下执行的每条 rwir 都**引用** `/lib/<op>`

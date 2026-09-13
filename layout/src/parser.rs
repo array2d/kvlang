@@ -132,7 +132,7 @@ impl Parser {
     fn parse_file(&mut self) -> ast::File {
         let mut f = ast::File::default();
         loop {
-            let comments = self.collect_leading_comments();
+            let mut comments = self.collect_leading_comments();
             if self.peek().kind == Kind::EOF {
                 break;
             }
@@ -203,11 +203,15 @@ impl Parser {
                 self.advance();
             } else {
                 let prev_pos = self.pos;
-                let inst = self.parse_inst();
-                if let Some(mut inst) = inst {
-                    if inst.expr.is_some() {
-                        inst.comments = comments;
-                        f.top_level_calls.push(inst);
+                let insts = self.parse_inst();
+                if !insts.is_empty() {
+                    for (k, mut inst) in insts.into_iter().enumerate() {
+                        if inst.expr.is_some() {
+                            if k == 0 {
+                                inst.comments = comments.clone();
+                            }
+                            f.top_level_calls.push(inst);
+                        }
                     }
                 } else if self.pos == prev_pos {
                     if self.peek().kind != Kind::EOF {
@@ -259,7 +263,7 @@ impl Parser {
         self.expect(Kind::LBrace);
         let mut body: Vec<Stmt> = Vec::new();
         loop {
-            let comments = self.collect_leading_comments();
+            let mut comments = self.collect_leading_comments();
             if self.peek().kind == Kind::RBrace || self.peek().kind == Kind::EOF {
                 break;
             }
@@ -295,9 +299,13 @@ impl Parser {
                 f.funcs.push(func);
                 continue;
             }
-            match self.parse_stmt() {
-                Some(st) => body.push(attach_comments(st, comments)),
-                None => break,
+            let sts = self.parse_stmt();
+            if sts.is_empty() {
+                break;
+            }
+            for st in sts {
+                let cs = std::mem::take(&mut comments);
+                body.push(attach_comments(st, cs));
             }
         }
         self.expect(Kind::RBrace);
@@ -372,6 +380,7 @@ impl Parser {
         }
         self.check_param_types(&decl.sig);
         self.check_variadic(&decl.sig);
+        self.check_param_dup(&decl.sig);
         decl
     }
 
@@ -412,7 +421,14 @@ impl Parser {
             let mut default = None;
             if self.peek().kind == Kind::Arrow && self.peek().value == "=" {
                 self.advance();
+                let pos = self.peek().pos;
                 default = self.parse_pratt(0);
+                // 字段默认值同样是字面量给的类型（`f:int=0` 的 `0` 即 int64），标注须是已知种类名。
+                if default.as_ref().is_some_and(expr_is_scalar_lit)
+                    && !super::langtype::is_plain_kind(&ty)
+                {
+                    self.push_unknown_type("struct field", &fname, &ty, pos);
+                }
             }
             fields.push(Field {
                 name: fname,
@@ -540,6 +556,43 @@ impl Parser {
     }
 
     fn check_param_types(&mut self, sig: &FuncSig) {
+        // 签名里的 `*` 是**作者书写的传递方式**：写 `*T` = 按地址传（帧槽存实参地址 Ptr），
+        // 不写 = 按值传（帧槽存值本体）。唯一硬约束：**值容器类型必须写 `*`**——map langtype
+        // （含 `·`）与 structref（`/` 开头）的成员落在兄弟槽 `{key}·`，单槽不是完备值，没有
+        // 可拷贝的"值"，只能按地址传。
+        for (slot, ret) in sig
+            .params
+            .iter()
+            .map(|p| ("param", p))
+            .chain(sig.returns.iter().map(|r| ("return value", r)))
+        {
+            if is_value_container_ty(&ret.ty) && !ptr_prefixed(&ret.ty) {
+                self.errors.push(Diagnostic {
+                    pos: Pos { line: 0, col: 0 },
+                    message: format!(
+                        "func {}: {slot} {:?}: 值容器类型只能按地址传递 —— 写 `{:?}`",
+                        sig.name,
+                        ret.name,
+                        ret.ty
+                            .split('|')
+                            .map(|a| {
+                                if !a.starts_with('*') && (a.starts_with('/') || a.contains('·')) {
+                                    format!("*{a}")
+                                } else {
+                                    a.to_string()
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                            .join("|")
+                    ),
+                    warn: false,
+                    info: false,
+                    source: String::new(),
+                    src_file: String::new(),
+                    src_name: String::new(),
+                });
+            }
+        }
         for param in &sig.params {
             // 末读参 `...` 是签名层变参标记，校验前剥离（变参落 dynamic 字节，见 [[函数]]）。
             let ty = param.ty.strip_suffix("...").unwrap_or(&param.ty);
@@ -646,31 +699,45 @@ impl Parser {
         }
     }
 
+    /// 参数名在函数内**全局唯一**（见 [[函数]] 的参数同名规则）：读参列表内、写参列表内、读写之间
+    /// 均不得同名——变量名即指针，同名即同址。**调用**时不受限：同一变量可同时占读槽与写槽
+    /// （`inc(x) -> x` 合法）。
     fn check_param_dup(&mut self, sig: &FuncSig) {
-        let mut seen = std::collections::HashSet::new();
-        for name in sig.param_names() {
-            seen.insert(name);
-        }
-        for ret in &sig.returns {
-            if seen.contains(&ret.name) {
-                self.errors.push(Diagnostic {
-                    pos: Pos { line: 0, col: 0 },
-                    message: format!("func {}: param {:?} appears in both read-params and write-params — a param is either read-only or write-only, pick one", sig.name, ret.name),
-                    warn: false,
-                    info: false,
-                    source: String::new(),
-                    src_file: String::new(),
-                    src_name: String::new(),
-                });
+        let mut reads = std::collections::HashSet::new();
+        let mut writes = std::collections::HashSet::new();
+        let err = |p: &mut Self, msg: String| {
+            p.errors.push(Diagnostic {
+                pos: Pos { line: 0, col: 0 },
+                message: msg,
+                warn: false,
+                info: false,
+                source: String::new(),
+                src_file: String::new(),
+                src_name: String::new(),
+            });
+        };
+        for p in &sig.params {
+            if !reads.insert(p.name.as_str()) {
+                err(self, format!("func {}: duplicate param {:?} in read-params — read-params, write-params and their union must all be name-unique (a name is an address)", sig.name, p.name));
             }
-            seen.insert(ret.name.clone());
+        }
+        for r in &sig.returns {
+            if reads.contains(r.name.as_str()) {
+                err(self, format!("func {}: param {:?} appears in both read-params and write-params — a param is either read-only or write-only, pick one", sig.name, r.name));
+            } else if !writes.insert(r.name.as_str()) {
+                err(self, format!("func {}: duplicate param {:?} in write-params — read-params, write-params and their union must all be name-unique (a name is an address)", sig.name, r.name));
+            }
         }
     }
 
     fn check_read_only_params(&mut self, func: &Func) {
+        // 只读只对**地址读参**（声明带 `*`/`@`）生效：它的槽是调用方对象的地址，写它就是写
+        // 调用方的对象。**值读参**（不带前缀）的槽是自己的副本，体内可自由读写，不进本检查。
         let mut ro = std::collections::HashSet::new();
-        for n in func.sig.param_names() {
-            ro.insert(n);
+        for p in func.sig.params.iter() {
+            if super::langtype::is_addr_param(&p.ty) {
+                ro.insert(p.name.clone());
+            }
         }
         if ro.is_empty() {
             return;
@@ -686,11 +753,49 @@ impl Parser {
                 src_name: String::new(),
             });
         };
+        // 别名污染：`q = p` / `p -> q`（p 是读参或已污染）使 q 指到**同一个对象**，
+        // 于是经 q 写成员就是在写读参的对象。只读性沿别名传播，否则 `q = p; q·x = v`
+        // 一句话就把「签名诚实原则」洗白了。
+        // 别名 → 源头读参（`q = p` 记 q→p；再 `r = q` 追到 p），供诊断点名真凶。
+        let mut tainted: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        let mut all: Vec<&Instruction> = Vec::new();
+        collect_body_insts(&func.body, &mut all);
+        loop {
+            let mut grew = false;
+            for inst in &all {
+                let Some(e) = &inst.expr else { continue };
+                if !e.is_leaf() {
+                    continue;
+                }
+                let src = if ro.contains(&e.val) {
+                    e.val.clone()
+                } else {
+                    match tainted.get(&e.val) {
+                        Some(s0) => s0.clone(),
+                        None => continue,
+                    }
+                };
+                for w in &inst.writes {
+                    if w.contains('/') || w.contains('[') || w.contains(keytree::MEMBER_SEP) {
+                        continue;
+                    }
+                    if !ro.contains(w) && !tainted.contains_key(w) {
+                        tainted.insert(w.clone(), src.clone());
+                        grew = true;
+                    }
+                }
+            }
+            if !grew {
+                break;
+            }
+        }
         let check = |p: &mut Self,
                      inst: &Instruction,
                      ro: &std::collections::HashSet<String>,
                      fname: &str| {
-            // 写槽命中读参（非路径/索引/成员）
+            // 写槽命中读参（非路径/索引/成员）——把参数槽重绑成别的地址，拒绝。
+            // 别名局部量不在此列：`cur·next -> cur` 重绑的是局部别名本身，没碰调用方对象。
             for w in inst.writes.iter() {
                 if w.contains('/') || w.contains('[') || w.contains(keytree::MEMBER_SEP) {
                     continue;
@@ -699,12 +804,36 @@ impl Parser {
                     bad(p, w, fname);
                 }
             }
-            // kv.set 成员形（3 读：base, key, val）改写 base 的成员目录，命中读参即拒绝
+            // kv.set 成员形（3 读：base, key, val）改写 base 的成员目录，命中读参**或别名**即拒绝。
+            // 被写的参数**必须**声明在写参侧（签名诚实原则）——要就地改调用方的对象，
+            // 就把该参数写到 `-> (p:Point)` 里，而不是留在读参侧靠别名绕。
             if let Some(e) = &inst.expr {
                 if e.op == "kv·set" && e.args.len() >= 3 {
                     let base = &e.args[0].val;
-                    if !base.contains('/') && ro.contains(base) {
-                        bad(p, base, fname);
+                    if !base.contains('/') && (ro.contains(base) || tainted.contains_key(base)) {
+                        if ro.contains(base) {
+                            bad(p, base, fname);
+                        } else {
+                            let src = &tainted[base];
+                            let ty = func
+                                .sig
+                                .params
+                                .iter()
+                                .find(|pp| &pp.name == src)
+                                .map(|pp| pp.ty.clone())
+                                .unwrap_or_default();
+                            p.errors.push(Diagnostic {
+                                pos: Pos { line: 1, col: 1 },
+                                message: format!(
+                                    "func {fname}: {base:?} aliases read param {src:?} (`{base} = {src}`); writing its members writes that object — put it on the write side: `-> ({src}:{ty})`"
+                                ),
+                                warn: false,
+                                info: false,
+                                source: String::new(),
+                                src_file: String::new(),
+                                src_name: String::new(),
+                            });
+                        }
                     }
                 }
             }
@@ -718,15 +847,15 @@ impl Parser {
     fn parse_body(&mut self) -> Vec<Stmt> {
         let mut stmts = Vec::new();
         loop {
-            let comments = self.collect_leading_comments();
+            let mut comments = self.collect_leading_comments();
             let t = self.peek();
             if t.kind == Kind::RBrace || t.kind == Kind::EOF {
                 break;
             }
             let before = self.pos;
-            if let Some(st) = self.parse_stmt() {
-                let st = attach_comments(st, comments);
-                stmts.push(st);
+            for st in self.parse_stmt() {
+                let cs = std::mem::take(&mut comments);
+                stmts.push(attach_comments(st, cs));
             }
             // panic-mode 恢复：一轮没消费任何 token（如错误恢复后游标停在 parse_primary_expr
             // 不消费即返回 None 的 token 上）——报诊断并跳过一个 token，保证前进性，杜绝死循环。
@@ -746,7 +875,9 @@ impl Parser {
         stmts
     }
 
-    fn parse_stmt(&mut self) -> Option<Stmt> {
+    /// 解析一条语句，返回**一或 N 条** Stmt（多赋值展开为多条指令，其余语句恒 1 条）。
+    /// 空 Vec = 解析不出语句（调用方据此结束块 / break）。
+    fn parse_stmt(&mut self) -> Vec<Stmt> {
         // 块标签检测（优先级最高）。排除类型注解写槽：`x:Type`（Ident）、`x:[…]`（LBrack）、
         // `x:/lib/Name`（structref langtype，以 / 起头的路径 Literal）。
         let t2 = self.peek_at(2);
@@ -756,27 +887,31 @@ impl Parser {
             && t2.kind != Kind::LBrack
             && !t2_structref
         {
-            return Some(self.parse_block_label());
+            return vec![self.parse_block_label()];
         }
         match self.peek().kind {
-            Kind::If => Some(self.parse_if()),
-            Kind::For => Some(self.parse_for()),
-            Kind::While => Some(self.parse_while()),
+            Kind::If => vec![self.parse_if()],
+            Kind::For => vec![self.parse_for()],
+            Kind::While => vec![self.parse_while()],
             Kind::Break => {
                 self.advance();
                 self.eat(Kind::Newline);
-                Some(Stmt::Break(ast::BreakStmt {
+                vec![Stmt::Break(ast::BreakStmt {
                     comments: Vec::new(),
-                }))
+                })]
             }
             Kind::Continue => {
                 self.advance();
                 self.eat(Kind::Newline);
-                Some(Stmt::Continue(ast::ContinueStmt {
+                vec![Stmt::Continue(ast::ContinueStmt {
                     comments: Vec::new(),
-                }))
+                })]
             }
-            _ => self.parse_inst().map(Stmt::Instruction),
+            _ => self
+                .parse_inst()
+                .into_iter()
+                .map(Stmt::Instruction)
+                .collect(),
         }
     }
 
@@ -897,11 +1032,9 @@ impl Parser {
 
     /// 校验散 key 字面量 `{...}` 的出现位置。`top_legal` 表示当前上下文允许顶层出现
     /// （赋值右值 / for-in 源）；无论如何，其元素内部都不得再嵌套散 key 字面量。
-    // 空容器字面量 `{}` 不含任何类型信息，必须由写目标显式标注 langtype：
-    // 禁 `d = {}`，须 `d:[]char/utf8·int64 = {}`（非空 `{a=…}` 可由成员推断，放行）。
     /// `{}` 对应两种 langtype：写类型是 structref（`/lib/Name`）→ `struct·new(path, k, v, …)`；
-    /// 否则（stringkeymap / mapexpr）保留 `obj`（runtime 构 stringkeymap）。裸无类型 `{}` 由
-    /// check_empty_container_typed 报错。desugar 已把成员/下标写目标改成 kv·set，故此处只命中简单局部。
+    /// 否则（容器字面量）保留 `obj`（runtime 构 map 容器）。容器字面量必须有 map langtype，
+    /// 由 lower::check_container_typed 统一把关（那里能看见签名里的参数/返回类型）。
     fn dispatch_obj_by_type(&mut self, inst: &mut Instruction) {
         if inst.expr.as_ref().map(|e| e.op.as_str()) != Some("obj") {
             return;
@@ -917,44 +1050,6 @@ impl Parser {
             &format!("struct{}new", keytree::MEMBER_SEP),
             args,
         ));
-    }
-
-    fn check_empty_container_typed(&mut self, inst: &Instruction) {
-        let Some(e) = &inst.expr else { return };
-        if e.op != "obj" || !e.args.is_empty() {
-            return;
-        }
-        if inst.writes.len() != 1 {
-            return;
-        }
-        // 仅约束简单局部变量目标；成员/下标目标（无类型标注语法）放行。
-        let target = &inst.writes[0];
-        if target.contains(keytree::MEMBER_SEP) || target.contains('[') {
-            return;
-        }
-        let ty = inst.write_types.first().map(String::as_str).unwrap_or("");
-        let t = self.peek();
-        if ty.is_empty() {
-            self.errors.push(Diagnostic {
-                pos: t.pos,
-                warn: false,
-                info: false,
-                message: "empty container literal {} needs a type annotation on its target, e.g. `d:[]char/utf8·int64 = {}`".to_string(),
-                source: String::new(),
-                src_file: String::new(),
-                src_name: String::new(),
-            });
-        } else if !super::langtype::valid_langtype(ty) {
-            self.errors.push(Diagnostic {
-                pos: t.pos,
-                warn: false,
-                info: false,
-                message: format!("invalid langtype {ty:?} on empty container literal target"),
-                source: String::new(),
-                src_file: String::new(),
-                src_name: String::new(),
-            });
-        }
     }
 
     fn check_sparse_usage(&mut self, e: &Expr, top_legal: bool) {
@@ -1016,31 +1111,44 @@ impl Parser {
 
     // ── 指令级（Pratt） ────────────────────────────────────────────
 
-    fn parse_inst(&mut self) -> Option<Instruction> {
+    /// 解析一条「语句级指令」，返回**一或 N 条** Instruction：读槽侧写顶层逗号列表时，
+    /// 按位置配对 `writes`、展开为 N 条独立单赋值（见 spec「多赋值」）。个数不等 → error。
+    fn parse_inst(&mut self) -> Vec<Instruction> {
         let mut inst = Instruction::default();
+        let mut multi: Vec<Instruction> = Vec::new();
 
         match self.find_top_level_arrow() {
             Some(v) if v == "=" => {
                 inst.arrow_left = true;
                 let (writes, wtypes) = self.collect_writes_until_arrow();
-                inst.writes = writes;
-                inst.write_types = wtypes;
                 self.advance(); // consume =
-                inst.expr = self.parse_pratt(0);
-                self.dispatch_obj_by_type(&mut inst);
-                self.lower_array_fill(&mut inst);
-                self.desugar_subscript_write(&mut inst);
-                self.desugar_member_write(&mut inst);
+                let reads = self.parse_read_list();
+                if reads.len() > 1 {
+                    multi = self.expand_multi(reads, &writes, &wtypes, true);
+                } else {
+                    inst.writes = writes;
+                    inst.write_types = wtypes;
+                    inst.expr = reads.into_iter().next().flatten();
+                    self.dispatch_obj_by_type(&mut inst);
+                    self.lower_array_fill(&mut inst);
+                    self.desugar_subscript_write(&mut inst);
+                    self.desugar_member_write(&mut inst);
+                }
             }
             Some(_) => {
-                inst.expr = self.parse_pratt(0);
+                let reads = self.parse_read_list();
                 self.advance(); // consume ->
                 let (writes, wtypes) = self.collect_write_list();
-                inst.writes = writes;
-                inst.write_types = wtypes;
-                self.dispatch_obj_by_type(&mut inst);
-                self.desugar_subscript_write(&mut inst);
-                self.desugar_member_write(&mut inst);
+                if reads.len() > 1 {
+                    multi = self.expand_multi(reads, &writes, &wtypes, false);
+                } else {
+                    inst.expr = reads.into_iter().next().flatten();
+                    inst.writes = writes;
+                    inst.write_types = wtypes;
+                    self.dispatch_obj_by_type(&mut inst);
+                    self.desugar_subscript_write(&mut inst);
+                    self.desugar_member_write(&mut inst);
+                }
             }
             None => {
                 if self.peek().kind == Kind::Ident && self.peek_at(1).kind == Kind::Colon {
@@ -1058,17 +1166,81 @@ impl Parser {
             self.advance();
         }
         self.eat(Kind::Newline);
-        self.check_write_type_match(&inst);
-        self.check_empty_container_typed(&inst);
-        // 散 key 字面量 `{...}` 仅允许作赋值右值（单一写目标）；其余位置报错。
-        let top_legal = inst.writes.len() == 1;
-        if let Some(e) = &inst.expr {
-            self.check_sparse_usage(e, top_legal);
+
+        let mut out = if multi.is_empty() { vec![inst] } else { multi };
+        // 逐条检查：先 mem::take 移出以避开 &mut self 与 &inst 的借用冲突。
+        for k in 0..out.len() {
+            let i = std::mem::take(&mut out[k]);
+            self.check_write_type_match(&i);
+            // 散 key 字面量 `{...}` 仅允许作赋值右值（单一写目标）；其余位置报错。
+            let top_legal = i.writes.len() == 1;
+            if let Some(e) = &i.expr {
+                self.check_sparse_usage(e, top_legal);
+            }
+            out[k] = i;
         }
-        if inst.expr.is_none() && inst.writes.is_empty() {
-            return None;
+        out.retain(|i| i.expr.is_some() || !i.writes.is_empty());
+        out
+    }
+
+    /// 读槽侧：顶层逗号分隔的表达式列表（多赋值）。单表达式即普通赋值。
+    fn parse_read_list(&mut self) -> Vec<Option<Expr>> {
+        let mut reads = Vec::new();
+        loop {
+            reads.push(self.parse_pratt(0));
+            if self.peek().kind == Kind::Comma {
+                self.advance();
+            } else {
+                break;
+            }
         }
-        Some(inst)
+        reads
+    }
+
+    /// 多赋值展开：reads 与 writes 按位置配对，各成一条单赋值指令；个数不等 → error。
+    fn expand_multi(
+        &mut self,
+        reads: Vec<Option<Expr>>,
+        writes: &[String],
+        wtypes: &[String],
+        arrow_left: bool,
+    ) -> Vec<Instruction> {
+        if reads.len() != writes.len() {
+            let pos = self.peek().pos;
+            self.errors.push(Diagnostic {
+                pos,
+                warn: false,
+                info: false,
+                message: format!(
+                    "multi-assignment arity mismatch: {} reads vs {} writes",
+                    reads.len(),
+                    writes.len()
+                ),
+                source: String::new(),
+                src_file: String::new(),
+                src_name: String::new(),
+            });
+            return Vec::new();
+        }
+        let mut out = Vec::with_capacity(reads.len());
+        for (r, (w, wt)) in reads
+            .into_iter()
+            .zip(writes.iter().cloned().zip(wtypes.iter().cloned()))
+        {
+            let mut i = Instruction {
+                comments: Vec::new(),
+                expr: r,
+                writes: vec![w],
+                write_types: vec![wt],
+                arrow_left,
+            };
+            self.dispatch_obj_by_type(&mut i);
+            self.lower_array_fill(&mut i);
+            self.desugar_subscript_write(&mut i);
+            self.desugar_member_write(&mut i);
+            out.push(i);
+        }
+        out
     }
 
     fn find_top_level_arrow(&self) -> Option<String> {
@@ -1132,30 +1304,26 @@ impl Parser {
                     chain_segs.push(ast::str_lit(&field));
                     continue;
                 }
-                // strkeymap 坐标访问 m·[i,j]：坐标段是单个成员名 "[i,j]"（字符串键）。
+                // 元组/坐标 key：`m·[i,j]` 的成员名**取源码原样文本**（`[39.90,116.40]` 就是
+                // `[39.90,116.40]`，不重建、不规范化——key 是独立 langtype 的字面表示，
+                // 改写会让写入与读取的 key 对不上）。逐 token 取原文拼接。
                 if self.peek().kind == Kind::LBrack {
                     self.advance();
-                    let mut idxs = Vec::new();
+                    let mut parts: Vec<String> = vec!["[".to_string()];
                     while self.peek().kind != Kind::RBrack && self.peek().kind != Kind::EOF {
-                        if self.eat(Kind::Comma) {
-                            continue;
-                        }
-                        if let Some(idx) = self.parse_pratt(0) {
-                            idxs.push(idx);
+                        let t = self.advance();
+                        if t.kind == Kind::Comma {
+                            parts.push(",".to_string());
+                        } else if t.kind != Kind::Newline && t.kind != Kind::Comment {
+                            parts.push(t.value.clone());
                         }
                     }
                     self.expect(Kind::RBrack);
-                    let coord = format!(
-                        "[{}]",
-                        idxs.iter()
-                            .map(|e| e.to_string())
-                            .collect::<Vec<_>>()
-                            .join(",")
-                    );
+                    parts.push("]".to_string());
                     if chain_base.is_none() {
                         chain_base = Some(left.clone());
                     }
-                    chain_segs.push(ast::str_lit(&coord));
+                    chain_segs.push(ast::str_lit(&parts.concat()));
                     continue;
                 }
             }
@@ -1932,8 +2100,10 @@ impl Parser {
             return;
         }
         let s = inst.writes[0].clone();
-        // 路径字面量（/ 开头）是完整 key，不是成员写，勿脱糖。
-        if s.starts_with('/') {
+        // 路径字面量（/ 开头）是完整 key，不是成员写，勿脱糖——**但含动态键段 `·*k` 的除外**：
+        // 那时 `·` 之后是运行期求值的段，必须脱糖成 kv·set(base, k, v) 才能取到 k 的值
+        // （否则会被当成字面 key `/tmp/ts·*k` 整段写下去）。
+        if s.starts_with('/') && !s.contains(&format!("{}*", keytree::MEMBER_SEP)) {
             return;
         }
         // struct 赋值（RHS = struct·new）：浅拷 base+一层成员，lower 为 kv·cplist(struct·new→temp, dst)。
@@ -2025,12 +2195,7 @@ impl Parser {
             None => return,
         };
         let expr_is_array = e.op == "array";
-        // 字符串字面量恒一维 []char/编码（非标量），故排除；仅 int/float/bool 字面量算标量。
-        let expr_is_scalar_lit = e.is_leaf()
-            && e.lit != ast::LitKind::LitNone
-            && e.lit != ast::LitKind::LitNil
-            && e.lit != ast::LitKind::LitString
-            && e.lit != ast::LitKind::LitRawString;
+        let scalar_lit = expr_is_scalar_lit(e);
 
         for (j, wt) in inst.write_types.iter().enumerate() {
             if wt.is_empty() {
@@ -2047,7 +2212,7 @@ impl Parser {
                     src_file: String::new(),
                     src_name: String::new(),
                 });
-            } else if is_array_langtype(wt) && expr_is_scalar_lit {
+            } else if is_array_langtype(wt) && scalar_lit {
                 self.errors.push(Diagnostic {
                     pos: Pos { line: 0, col: 0 },
                     message: format!("write {name:?} declared {wt} but assigned a scalar literal"),
@@ -2057,8 +2222,30 @@ impl Parser {
                     src_file: String::new(),
                     src_name: String::new(),
                 });
+            } else if !write_type_ok(wt, scalar_lit, expr_is_array) {
+                self.push_unknown_type("write", &name, wt, Pos { line: 0, col: 0 });
             }
         }
+    }
+
+    /// 「标注收不住它收的字面量」的统一诊断：`int`/`intg64` 这类不是种类名的标注在此落网
+    /// （裸名已被 [`super::langtype::expand_struct_refs`] 展开成 `/lib/<name>`，显示时剥回原名）。
+    fn push_unknown_type(&mut self, ctx: &str, name: &str, ty: &str, pos: Pos) {
+        let disp = ty.strip_prefix("/lib/").unwrap_or(ty);
+        self.errors.push(Diagnostic {
+            pos,
+            message: format!(
+                "{ctx} {name:?}: unknown type {disp:?} — 不是已知种类名，\
+                 kvlang 无 int/uint/float/num/char 家族简写，数字须带位宽\
+                 （int8/int16/int32/int64、uint8/uint16/uint32/uint64、float32/float64），\
+                 字符须带编码（char/utf8、char/utf32、char/ascii）"
+            ),
+            warn: false,
+            info: false,
+            source: String::new(),
+            src_file: String::new(),
+            src_name: String::new(),
+        });
     }
 }
 
@@ -2111,6 +2298,34 @@ fn is_array_langtype(t: &str) -> bool {
     t.contains('[')
 }
 
+/// 标量字面量：`1`/`1.5`/`true`。字符串字面量恒一维 `[]char/<编码>`（非标量），故排除。
+fn expr_is_scalar_lit(e: &Expr) -> bool {
+    e.is_leaf()
+        && e.lit != ast::LitKind::LitNone
+        && e.lit != ast::LitKind::LitNil
+        && e.lit != ast::LitKind::LitString
+        && e.lit != ast::LitKind::LitRawString
+}
+
+/// 字面量右值的标注必须收得住该字面量，**按右值形态分三类**（见 [[文法与合法性]]）：
+///   `1`/`1.5`/`true`（标量字面量）→ 标注须是已知种类名或 `any`——类型由字面量自己给出；
+///   `[1,2]`（数组字面量）        → 标注须是合法 langtype（`[2]int64`）；
+///   `{…}`（结构/容器字面量）     → 标注是 struct 名或 map langtype，**裸名在此合法**（它就是
+///                                struct 名，已展开成 `/lib/<name>`）；不判种类名；
+///   其余（非字面量右值如 `x:int = y`）无从推断 → 放行。
+/// 前两类里裸名 `int`/`intg64` 已由 [`super::langtype::expand_struct_refs`] 变成 `/lib/int`，
+/// 既非种类名也非合法形状 → 在此落网。layout 只判种类名，不查 kvspace 里 `/lib/…` 有无原型
+/// （存在性/字段一致性归 runtime：`x:int = {}` 放行，runtime 报 "/lib/int is not a struct type"）。
+fn write_type_ok(wt: &str, scalar_lit: bool, array_lit: bool) -> bool {
+    if scalar_lit {
+        super::langtype::is_plain_kind(wt)
+    } else if array_lit {
+        super::langtype::valid_langtype(wt)
+    } else {
+        true
+    }
+}
+
 /// 定长数组类型：`[N]T` / `[d0,d1]T`，方括号内全为正整数（非空、无 `?`）。
 /// `[]T`（动态一维）与 `[?,N]T`（含未知维）不算。
 fn is_fixed_dim_array(t: &str) -> bool {
@@ -2130,8 +2345,45 @@ fn is_fixed_dim_array(t: &str) -> bool {
         .all(|d| !d.trim().is_empty() && d.trim().bytes().all(|c| c.is_ascii_digit()))
 }
 
+/// 类型串里是否有原子以 `*`（间接性前缀）起头——以 `|`（并）与 `·`（map 键值）切分后逐段看。
+fn ptr_prefixed(ty: &str) -> bool {
+    ty.split(['|', '·']).any(|a| a.starts_with('*'))
+}
+
+/// 值容器类型：成员落在兄弟槽 `{key}·` 的类型——map langtype（含 `·`）或 structref（`/` 开头）。
+/// 这类值没有可拷贝的单槽值，只能按地址传递（见 spec [[函数]]）。
+fn is_value_container_ty(ty: &str) -> bool {
+    ty.split('|')
+        .any(|a| a.trim_start_matches('*').starts_with('/') || a.contains('·'))
+}
+
 fn type_error(_kind: &str) -> String {
     "unknown type — valid: int8/16/32/64, uint8/16/32/64, float32/64, bool, char/utf32, obj, map, index, char, any, []T, [2,3]T, [?,N]T, A|B".to_string()
+}
+
+/// 收集函数体（含嵌套块/分支/循环）里的全部指令，供别名污染的不动点迭代用。
+fn collect_body_insts<'a>(body: &'a [Stmt], out: &mut Vec<&'a Instruction>) {
+    for st in body {
+        match st {
+            Stmt::Instruction(s) => out.push(s),
+            Stmt::Scope(s) => collect_body_insts(&s.body, out),
+            Stmt::If(s) => {
+                if let Some(c) = &s.cond {
+                    out.push(c);
+                }
+                collect_body_insts(&s.then_, out);
+                collect_body_insts(&s.else_, out);
+            }
+            Stmt::While(s) => {
+                if let Some(c) = &s.cond {
+                    out.push(c);
+                }
+                collect_body_insts(&s.body, out);
+            }
+            Stmt::For(s) => collect_body_insts(&s.body, out),
+            _ => {}
+        }
+    }
 }
 
 fn walk_read_only(

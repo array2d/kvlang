@@ -29,18 +29,16 @@ kind 常量集中定义于 `kvspace/include/kvspace/const.h`（C）与 `kvspace-
 
 ### langtype 文法
 
-langtype 串**全前缀**书写，最左符号为最外层构造器，无优先级歧义（对齐 Go/Rust 的 `[]int`）：
-
-```
-langtype ::= [ dims ] kind
-dims     ::= '[' ']'                 # 变长一维
-          |  '[' INT ( ',' INT )* ']'  # 定长 / 多维（compact 连续布局）
-```
+langtype 串**全前缀**书写，最左符号为最外层构造器，无优先级歧义（对齐 Go/Rust 的 `[]int`）。完整文法
+（shape 与轴量词 `.`/`?`/`*`/`+`、并集 `A|B`、通配 `any`、mapexpr `key·value`、structref）**只在附录
+[[文法]] 一处定义**，本章与其它卷只引用、不另立。
+**`langtype` 与 `def langtype` 是两回事**：值处写的是 `langtype`（值的**真实类型**），定义处（函数参数/返回
+值）写的是 `def langtype`（**匹配类型**）——后者是模式，**一个参数定义可匹配多种实际 `langtype`**（见
+[[langtype签名类型表达式]] 与 [[匹配语义与变参]]）。
 
 维数与各维长度编码进 langtype 串本身；ref（存储位置）已独立为 head 中的 ref u8 字段（见 [[XValueHead
-线格式]]），不再是 langtype 前缀——storetype 物理字段携带对应的 ndim/dims 结构。完整签名类型表达式
-（并集 `A|B`、通配 `any`、动态维 `?`、map 键值 `key·value`）见 [[文法]] 与类型系统卷。**源码**类型标
-注可在最前写 `*`/`@` 前缀表示 ref（如 `*int64`、`@[256,256]uint8`），layout 解析时剥离前缀落成 head
-`ref` 独立字节；wire 层 langtype 串不含 `*`/`@` 前缀（见 [[总体方案]]）。
+线格式]]），不再是 langtype 前缀——storetype 物理字段携带对应的 ndim/dims 结构。**源码**类型标注可在最
+前写 `*`/`@` 前缀表示 ref（如 `*int64`、`@[256,256]uint8`），layout 解析时剥离前缀落成 head `ref` 独立
+字节；wire 层 langtype 串不含 `*`/`@` 前缀（见 [[总体方案]]）。
 	"#### -> /lib/kvlang/spec/kvspace模型/键系统与数组访问
 }

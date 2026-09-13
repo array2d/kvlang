@@ -2,7 +2,7 @@
 // 语义: 字面量初始化默认 compact；array·scatter 把 compact 转散 key，array·compact 反向
 // 散 key 元素访问用 b·[i]（走 kv·get），compact 用 b[i]（走 xv·at）
 // 期望输出:
-//   ndarray·numel(b) = 3
+//   kv·listlen(b) = 3
 //   b[0] = 10
 //   b[2] = 30
 //   ndarray·numel(c) = 3
@@ -10,8 +10,8 @@
 rwfunc test() -> () {
 	a:[]int64 = [10, 20, 30]       // 字面量初始化 → compact
 	b = array·scatter(a)          // 显式 scatter：compact a → 散 key b（b·[0]..b·[2]）
-	ndarray·numel(b) -> n1
-	println("ndarray·numel(b) =", n1)
+	kv·listlen(b) -> n1
+	println("kv·listlen(b) =", n1)
 	println("b[0] =", b·[0])       // 散 key 元素访问 ·[i]
 	println("b[2] =", b·[2])
 	c = array·compact(b)          // 显式 compact：散 key b → compact c

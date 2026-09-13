@@ -1,42 +1,47 @@
 // 欢迎加入kvspace世界
 lib kvlang/spec/类型系统/langtype签名类型表达式 {
-	r####"# langtype（两型与 kindexpr）
+	r####"# langtype 与 def langtype（定义处的匹配类型）
 
 **langtype** 是 XValue head 的语义类型维（见 [[总体方案]]、[[head字段]]），逐字节是一段**类型表达式
 串**——base 种类、可选形状 `[dims]`、mapexpr、原型路径等（文法见 [[文法与合法性]]）。它既供人和工具读
 写，也落入 kvspace 作运行期匹配依据，贯穿 layout（静态校验）与 runtime（值匹配），是类型的唯一真相。
 
-## langtype 两型：def langtype 与 value langtype
+## langtype 与 def langtype
 
-同一套文法，按**角色**分两型：
+**langtype 是值的真实类型；def langtype 是定义函数时参数/返回值的匹配类型。** 两者同吃一套文法（附录
+[[文法]]），但角色与表达力不同：
 
-| 型 | 出现位置 | 角色 | 表达力 |
+| | 出现位置 | 角色 | 表达力 |
 |----|---------|------|--------|
-| **def langtype** | def rwir 签名行 `[0,x]` 槽（storetype=`def langtype`）；rwfunc 则随参数定义键 `.[0,±j]`（body=名字+NUL+类型串）承载同一模式（见 [[storetype_def族与签名行]]） | **模式**：描述一个参数「可接受的一类值」 | 完整——并集 `A\|B`、轴量词 `.`/`?`/`*`/`+`、`any`、mapexpr（见 [[匹配语义与变参]]）。参数变参 `...` 是签名层 arity、**不在** langtype 内（见 [[函数]]） |
-| **value langtype** | 一个具体 XValue 的 head langtype（见 [[langtype语义类型]]） | **实例**：描述这个值**是什么** | 具体固定——单一种类 + 确定 `[dims]`（每维具体整数），不含并集与任何轴量词 |
+| **langtype** | 一个具体 XValue 的 head langtype（见 [[langtype语义类型]]） | 值**是什么**：一个具体实例的类型 | 具体固定——单一种类 + 确定 `[dims]`（每维具体整数），**不含**并集与任何轴量词 |
+| **def langtype** | 函数定义处——`def rwir` 的签名行 `[0,x]` 槽、`rwfunc` 的参数定义键 `.[0,±j]`（承载节点的 head langtype 都是 `def langtype`，见 [[storetype_def族与签名行]]） | 参数**可接受的一类值**：**匹配类型** | 完整——并集 `A\|B`、轴量词 `.`/`?`/`*`/`+`、`any`、mapexpr（见 [[匹配语义与变参]]） |
 
-def langtype 是「值域」，value langtype 是值域里「一个点」；类型检查即判定后者是否落进前者（匹配语义
-见 [[匹配语义与变参]]）。
+**一个 def langtype 可匹配多种 langtype**——这正是参数多态的来源：`x:int8|int16|int32|int64` 接受四种整数，
+`a:[.,*]float32` 接受首维任意、秩 ≥1 的 float32 数组，`v:any` 接受一切。装载与调用时，把**实参值的
+langtype** 对参数定义的 **def langtype** 逐值判定：命中即通过，失配报 TypeError（见 [[匹配语义与变参]]）。
+参数变参 `...` 是签名层 arity 构造，**不在** def langtype 串内（见 [[函数]]）。
+
+**唯一例外**是 opcode 槽 `[s0,0]` 的 `rwir|rwfunc`——它是**派发标记**（layout 不静态判定目标是 rwir 还是
+rwfunc，交 runtime 查 `/lib/<opcode>` 定，见 [[指令槽编码]]），既不是值类型、也不属 def langtype。
 
 ## kindexpr（简写）
 
-一段**具体的 langtype 串**——无论是某个 value 的 langtype，还是某条 def 签名里某参数的 langtype——统称
-**kindexpr**。故 kindexpr 与 langtype 指同一文法产物：`langtype` 强调 head 的语义类型维，`kindexpr`
-强调「一条具体的类型表达式串」。def langtype 是允许模式构造（并集 `|` 与轴量词 `.`/`?`/`*`/`+`）的
-kindexpr，value langtype 是不含模式构造的 kindexpr。下文与各卷凡书「kindexpr」即指一条具体 langtype
-串。
+一条**类型表达式串**——无论写在值处（`langtype`）还是定义处（`def langtype`）——统称 **kindexpr**。故三者
+同文法、只差角色：`langtype` 强调「值的真实类型」，`def langtype` 强调「定义处的匹配类型」，`kindexpr` 强
+调「一条具体的类型表达式串」。下文与各卷凡书「kindexpr」即指一条类型表达式串。
 
 ## 两条 runtime-c ABI（供外部调用）
 
-runtime-c 对外开放两组 langtype 能力，一一对应两型（`kvlang_myrwir.h` 与正典 codec，见 [[cruntime与
-后端abi]]），供扩展运行时与嵌入方调用：
+runtime-c 对外开放两组类型能力，一一对应这两者（`kvlang_rwirext.h` 与正典 codec，见 [[cruntime与后端
+abi]]），供扩展运行时与嵌入方调用：
 
-- **模式侧（def langtype）**：`LangtypeValid` 校验一条 def kindexpr 合法、`LangtypeMatch` 把一个值的
-  `(kind,ndim,dims)` 对一条 def kindexpr 作**逐值无状态**模式匹配。用于签名校验与派发（参数变参判定
-  不在此,靠主槽 `dynamic` 字节,见 [[函数]]）。
-- **具体侧（value langtype）**：把一条具体 kindexpr 解析/解码为 `(kind, ndim, dims, 元素字节宽)`——唯
-  一事实源为正典 codec `kvspaceDecodeHead`（读 head 的 value langtype）与 layout 的
-  `kvlangLangtypeParse`（见 [[layout流水线接口]]）。用于零拷贝定位、显示、round-trip。
+- **def langtype 侧（匹配）**：`LangtypeValid` 校验一条 def langtype 串合法、`LangtypeMatch` 把一个值的
+  `(kind,ndim,dims)` 对一条 def langtype 作**逐值无状态**匹配。用于签名校验与派发（参数变参判定不在此,
+  靠签名行锚点 `[0,0]` 的 `dynamic` 字节,见 [[函数]]）。
+- **langtype 侧（解析）**：把一条 langtype 串解析/解码为 `(kind, ndim, dims, 元素字节宽)`——唯一事实源为
+  正典 codec `kvspaceDecodeHead`（读 head 的 langtype）与 `kvlangKindexprParse`（layout 侧入口；runtime 侧
+  同一能力名为 `kvlangLangtypeParse`，两处 ABI 名待统一，见 [[layout流水线接口]]）。用于零拷贝定位、显
+  示、round-trip。
 
 两 ABI 同源同文法（都吃一条 kindexpr 串），差别只在角色：**模式匹配** vs **具体解析**。runtime-c **
 不得**为二者各造一份编解码——文法与 codec 只此一处。

@@ -27,22 +27,28 @@ kvlang 用两个符号访问复合数据，语义严格分离，runtime **不得
 - **写成员**：`rec·name = 值` 的写槽是完整成员键 `rec·name`，`=` 为值拷贝。
 - **读成员**：`rec·name -> v` 直接取 key `rec·name`；缺失成员的动态读（`kv·get`）返回 `None`。
 
-## `·` 的解引用：按值优先，按名回退
+## `·` 的解引用：按指针优先，按名回退
 
 `base·name`（读写同规则）中 `base` 的解析在 runtime 按以下顺序确定成员键：
 
-1. **按值解引用**：`base` 持有非空字符串值（路径指针）时，成员键 = `值(base)·name`。例：`"/n1" -> p`
-   后 `p·val` 解析为 `/n1·val`。
-2. **按名回退**：`base` 无值（或非字符串）时，成员键 = `解析(base)·name`；`解析()` 帧感知——裸名 →
-   `帧根/base`，`/` 开头 → 直通绝对路径。
+1. **按指针解引用**：`base` 是 ref=1 Ptr（`base` 的 head `ref` 字节为 1）时，成员键 =
+   `target(base)·name`。例：`&n1 -> p` 后 `p·val` 解析为 `/…/n1·val`。
+2. **按名回退**：`base` 非 Ptr（局部 struct 实例等）时，成员键 = `解析(base)·name`；`解析()` 帧感知
+   ——裸名 → `帧根/base`，`/` 开头 → 直通绝对路径。
 
-该规则让"局部结构体"与"指针解引用"共用一套语法：结构体的 `base` 保持无值（走按名），指针变量存路径字
-符串（触发按值）。跨函数共享的数据**应**放绝对路径（`/n1`），使不同帧的指针都能解引用到同一 key。
+该规则让"局部结构体"与"指针成员访问"共用一套语法：结构体的 `base` 非 Ptr（走按名），指针变量持 Ptr（按
+其 target）。跨函数共享的数据**应**放绝对路径（`/n1`），使不同帧的指针都解引用到同一 key。
 
-## 动态成员名 `·*`
+## 动态成员名 `·*`：解引用操作数取 memitemkey
 
-`base·*k` 用 `k` 的**值**作为成员名：读 `m·*k` 即以局部变量 `k` 当前的字符串值定位 `m·<k值>`。`·*`
-用于局部容器变量的动态键访问；等价的显式形式为 `kv·get(m, k)` / `kv·set(m, k, v)`。
+`base·*k` 用 `k` 的**值**作为成员键：`·*` 令 runtime-c **解引用/求值**操作数 `k`，以其值定位
+`base·<k 值>`（等价显式形式 `kv·get(base, k)` / `kv·set(base, k, v)`）。裸 `base·k`（无 `*`）用字面
+名 `k`；`base·*k` 才取 `k` 的值。
+
+**指针作 memitemkey 必须 `*` 开头**：当作为 key 的操作数是**指针**（ref=1 Ptr）时，**必须**写
+`base·*k`，由 runtime-c 沿 Ptr 解引用到被指向值、再以该值作 memitemkey；对指针操作数省略 `*` 非法（不
+会自动解引用）。解引用得到的值随后**逐字**作键——`*` 是**显式** deref，与逐字铁律（[[文法与合法性]]，
+禁止**自动**改键）不冲突：改写由源码 `*` 显式授权，非 runtime 擅自所为。
 
 ## 指针：完整 langtype + 单跳类型检查
 
@@ -61,19 +67,20 @@ kvlang 用两个符号访问复合数据，语义严格分离，runtime **不得
 注中 `*`/`@` 前缀由 layout 剥离落成 `ref` 字节，wire 层 langtype 串不含前缀（见 [[总体方案]]）。
 ref=2（@ext）表示真实值在扩展世界，head 的 langtype 仍为目标形态的完整 langtype 串（不带 `@` 前
 缀），body 不是真实值字节，而是**定位串**（如 `/networld/<host>/proc/<pid>/stdout`）；读取该 key 时
-runtime 按 body 前缀路由到对应扩展兑现器还原真实字节（见 [[runtime开发规范]]、[[执行模型]] §八）。真
+由支持 `@` 的 rwir（如 runtime-rs 的 fs/networld 一族）按 body 定位串还原真实字节（见 [[runtime开发规
+范]]、[[执行模型]] §八）。真
 实 xvalue 落在扩展世界（fs 文件、gpu tensordata 等），非 kvspace 元存。
 
 ## compact 数组下标
 
 数组有两种存储形态：**compact**（`[...]` 字面量，元素连续打包进单个 XValue，head kind = 元素类型）与
-**stringkeymap**（`{...}` 字面量，散 key，每元素落 `base·i` 独立子 key）。下标 `a[i]` / `xv·at` /
+**stringkeymap**（`{...}` 字面量，散 key，每元素落 `base·[i]` 坐标段独立子 key）。下标 `a[i]` / `xv·at` /
 `xv·set` 用于 **compact** 形态；stringkeymap 形态用 `for-in` / `kv·get` 遍历访问。
 
 - **下标读**：`a[i] -> e`（layout 脱糖为 `xv·at`/`kv·get`），按 `kvlangXvalueElemSize(kind)` 定的元
   素字节宽零拷贝定位第 `i` 个元素。
-- **下标写**：`a[i] = v`（脱糖为 `xv·set`），就地改第 `i` 个元素。写下标**必须**用赋值式
-  `a[i] = v`；`->` 形式的写槽不得带下标（`v -> a[i]` 由 layout 拒绝）。
+- **下标写**：`a[i] = v` / `v -> a[i]`（两种书写等价，脱糖为 `xv·set`，见 [[指令架构]]），就地改第 `i`
+  个元素；索引个数须等于维数，越界报 IndexError。
 - `xv·at(a, i) -> e` / `xv·set(a, i, v) -> a` 是显式等价形式。
 
 元素字节宽由 kind 决定（`char/utf8`=1，`int32`/`float32`=4，`int64`/`float64`=8……），数组与字符串的

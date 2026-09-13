@@ -120,7 +120,7 @@ pub const MYRWIRCAPS: &[(&str, Rwir)] = &[
     (
         "networld/proc·exec",
         Rwir {
-            rp: &["[]stringkeymap", "[]stringkeymap"],
+            rp: &["*[int64]·[]char/utf32", "*[int64]·[]char/utf32"],
             wp: &["uint8", "[]uint8", "[]uint8"],
         },
     ),
@@ -156,7 +156,7 @@ pub const MYRWIRCAPS: &[(&str, Rwir)] = &[
         "networld/fs·list",
         Rwir {
             rp: &["[]char/utf8|[]char/utf32"],
-            wp: &["[]stringkeymap"],
+            wp: &["*[int64]·[]char/utf32"],
         },
     ),
     (

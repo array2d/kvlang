@@ -31,8 +31,8 @@ rwfunc has_dup(a:[]int64) -> () {
 
 rwfunc no_dup() -> () {
 	a:[]int64 = [1, 2, 3, 4]
-	ndarray·numel(a) -> n
 	seen:[]char/utf8·int64 = {}
+	ndarray·numel(a) -> n
 	found = false
 	i = 0
 	while (i < n) {

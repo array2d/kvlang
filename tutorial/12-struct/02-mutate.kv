@@ -10,11 +10,9 @@ struct P {
 
 rwfunc test() -> () {
 	p:P = {x=1 y=2}
-	p·x -> a
-	p·y -> b
+	p·x, p·y -> a, b
 	println("before x=", a, " y=", b)
 	5 -> p·x
-	p·x -> c
-	p·y -> d
+	p·x, p·y -> c, d
 	println("after x=", c, " y=", d)
 }

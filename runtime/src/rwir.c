@@ -2,7 +2,8 @@
 
 int kvlangRwirExtractAddr0(const char *coord) {
     const char *p = coord;
-    while (*p == '[' || *p == ' ' || *p == '\t') p++;
+    while (*p == '[' || *p == ' ' || *p == '\t')
+        p++;
     char *end;
     long n = strtol(p, &end, 10);
     return end == p ? 0 : (int)n;
@@ -20,19 +21,32 @@ int kvlangRwirNextPc(const char *pc, kvlangStrbuf_t *out) {
 
 void kvlangRwirInstFree(kvlangRwirInst_t *inst) {
     free(inst->opcode);
-    for (int i = 0; i < inst->nr; i++) { free(inst->reads[i].name); kvlangXvalueFree(&inst->reads[i].val); }
-    for (int i = 0; i < inst->nw; i++) { free(inst->writes[i].name); kvlangXvalueFree(&inst->writes[i].val); }
+    for (int i = 0; i < inst->nr; i++) {
+        free(inst->reads[i].name);
+        kvlangXvalueFree(&inst->reads[i].val);
+    }
+    for (int i = 0; i < inst->nw; i++) {
+        free(inst->writes[i].name);
+        kvlangXvalueFree(&inst->writes[i].val);
+    }
     free(inst->reads);
     free(inst->writes);
-    inst->opcode = NULL; inst->reads = NULL; inst->writes = NULL; inst->nr = inst->nw = 0;
+    inst->opcode = NULL;
+    inst->reads = NULL;
+    inst->writes = NULL;
+    inst->nr = inst->nw = 0;
 }
 
-int kvlangRwirDecode(kvlangKv_t *kv, const char *link_base, const char *pc, kvlangRwirInst_t *out,
-                char *err, uint32_t err_cap) {
+int kvlangRwirDecode(kvlangKv_t *kv, const char *link_base, const char *pc,
+                     kvlangRwirInst_t *out, char *err, uint32_t err_cap) {
     memset(out, 0, sizeof(*out));
     const char *last = NULL;
-    for (const char *p = pc; (p = strstr(p, "/[")) != NULL; p += 2) last = p;
-    if (!last) { snprintf(err, err_cap, "Decode: invalid pc (no /[coord]): %s", pc); return -1; }
+    for (const char *p = pc; (p = strstr(p, "/[")) != NULL; p += 2)
+        last = p;
+    if (!last) {
+        snprintf(err, err_cap, "Decode: invalid pc (no /[coord]): %s", pc);
+        return -1;
+    }
     int addr0 = kvlangRwirExtractAddr0(last + 1);
 
     kvlangStrbuf_t key;
@@ -52,18 +66,23 @@ int kvlangRwirDecode(kvlangKv_t *kv, const char *link_base, const char *pc, kvla
     nm = kvlangStrbufDetach(&key);
     kvlangKvGetMember(kv, link_base, nm, &v);
     free(nm);
-    if (!kvlangXvalueNone(&v)) out->opcode = kvlangXvalueValueString(&v);
+    if (!kvlangXvalueNone(&v))
+        out->opcode = kvlangXvalueValueString(&v);
     kvlangXvalueFree(&v);
-    out->op_id = out->opcode ? kvlangOpClassify(out->opcode) : OPID_notinmyrwircaps;
+    out->op_id =
+        out->opcode ? kvlangOpClassify(out->opcode) : OPID_notinmyrwircaps;
 
     for (int i = 1; i <= MAX_PARAMS; i++) {
         kvlangStrbufPrintf(&key, "[%d,-%d]", addr0, i);
         nm = kvlangStrbufDetach(&key);
         kvlangKvGetMember(kv, link_base, nm, &v);
         free(nm);
-        if (kvlangXvalueNone(&v)) { kvlangXvalueFree(&v); break; }
-        out->reads[out->nr].name = kvlangXvalueValueString(&v);
-        kvlangXvalueMaterialize(&v);   /* 指令进 rwir_cache 长存，字面量须自持 */
+        if (kvlangXvalueNone(&v)) {
+            kvlangXvalueFree(&v);
+            break;
+        }
+        out->reads[out->nr].name = kvlangXvalueSlotName(&v);
+        kvlangXvalueMaterialize(&v); /* 指令进 rwir_cache 长存，字面量须自持 */
         out->reads[out->nr].val = v;
         out->nr++;
     }
@@ -72,9 +91,12 @@ int kvlangRwirDecode(kvlangKv_t *kv, const char *link_base, const char *pc, kvla
         nm = kvlangStrbufDetach(&key);
         kvlangKvGetMember(kv, link_base, nm, &v);
         free(nm);
-        if (kvlangXvalueNone(&v)) { kvlangXvalueFree(&v); break; }
-        out->writes[out->nw].name = kvlangXvalueValueString(&v);
-        kvlangXvalueMaterialize(&v);   /* 指令进 rwir_cache 长存，字面量须自持 */
+        if (kvlangXvalueNone(&v)) {
+            kvlangXvalueFree(&v);
+            break;
+        }
+        out->writes[out->nw].name = kvlangXvalueSlotName(&v);
+        kvlangXvalueMaterialize(&v); /* 指令进 rwir_cache 长存，字面量须自持 */
         out->writes[out->nw].val = v;
         out->nw++;
     }

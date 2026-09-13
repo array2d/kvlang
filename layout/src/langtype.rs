@@ -57,9 +57,14 @@ fn valid_structref(s: &str) -> bool {
         Some(r) => r,
         None => return false,
     };
+    // 段名字符集与**标识符**同一套（见 scanner::is_token_delim）——否则 `点` 这类 CJK
+    // struct 名能作标识符、能作 struct 名，却单单不能出现在参数/返回的类型位置。
     !rest.is_empty()
         && rest.split('/').all(|seg| {
-            !seg.is_empty() && seg.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+            !seg.is_empty()
+                && seg
+                    .bytes()
+                    .all(|b| !super::scanner::is_token_delim(b) && b != b'"' && b != b'\'')
         })
 }
 
@@ -142,6 +147,11 @@ fn valid_scalar(s: &str) -> bool {
 ///   `[]char/<enc>`      —— 字符串键（= Go `map[string]V`）
 ///   `[T1,T2,…]`         —— 标量元组键（元素为标量 kind，物理以字符串格式落 key）
 fn valid_key(s: &str) -> bool {
+    // memitemkey 三选一（见 [[map容器]]）：裸标量（`int64`）、字符串键 `[]char/<enc>`、
+    // 标量元组键 `[scalar,…]`。裸标量必须认——`b:int64·int64 = {}` 是 spec 的标准写法。
+    if valid_scalar(s) {
+        return true;
+    }
     let rest = match s.strip_prefix('[') {
         Some(r) => r,
         None => return false,
@@ -161,7 +171,9 @@ fn valid_key(s: &str) -> bool {
 /// atom = shape | mapexpr | structref；mapexpr = key "·" type；structref = "/" path。
 /// 最前 `*` 是 ref 前缀（Ptr 存储位置），校验剥离后剩余部分（见 [[类型表达式文法]]）。
 fn valid_atom(s: &str) -> bool {
-    if let Some(rest) = s.strip_prefix('*') {
+    // `*`=ref ptr、`@`=ref @ext（见 [[ref存储位置]]）：两者都只是**源码**前缀，
+    // layout 解析时剥离并落成 head.ref 字节，wire langtype 不含前缀。
+    if let Some(rest) = s.strip_prefix('*').or_else(|| s.strip_prefix('@')) {
         return !rest.is_empty() && valid_atom(rest);
     }
     if s.starts_with('/') {
@@ -173,9 +185,30 @@ fn valid_atom(s: &str) -> bool {
     valid_shape(s)
 }
 
+/// 形参是否按**地址传递**：声明带 `*`（指针）或 `@`（扩展句柄）前缀。两者都不是可拷的值本体
+/// （`*` 指别处的 key、`@` 指 kvspace 之外的位置），故槽里放间接值、体内解引用；不带前缀则按值传
+/// （槽存值本体）。见 spec [[函数]]。
+pub fn is_addr_param(ty: &str) -> bool {
+    let t = ty.trim_start();
+    t.starts_with('*') || t.starts_with('@')
+}
+
 /// 类型表达式语法校验（装载期）。变参 `...` 是签名层 arity、不入 langtype 串，此处永不见。
 pub fn valid_langtype(expr: &str) -> bool {
     !expr.is_empty() && expr.split('|').all(valid_atom)
+}
+
+/// 是否只由**已知种类名**（或 `any`）构成——即「标量字面量可写入的类型」。
+/// `*`/`@` 前缀先剥（源码传递方式，不是类型本体）；structref（`/lib/…`）与形状、mapexpr 皆否。
+/// 用途见 `parser`（局部声明的写目标、struct 字段默认值）：裸名 `int`/`intg64` 经
+/// [`expand_struct_refs`] 变成 `/lib/int` 后，正是靠这条落网——它**不是**种类名，标量写不进去
+/// （见 [[文法与合法性]]）。
+pub fn is_plain_kind(ty: &str) -> bool {
+    !ty.is_empty()
+        && ty.split('|').all(|a| {
+            let a = a.trim_start_matches(['*', '@']);
+            a == "any" || known_kind(a)
+        })
 }
 
 /// 隐式 struct 名解析：把 langtype 中裸 struct 名（非 known kind / any 的标识符）展开为
@@ -189,16 +222,21 @@ fn expand_atom(s: &str) -> String {
     if let Some(rest) = s.strip_prefix('*') {
         return format!("*{}", expand_atom(rest));
     }
+    if let Some(rest) = s.strip_prefix('@') {
+        return format!("@{}", expand_atom(rest));
+    }
     if s.starts_with('/') {
         return s.to_string();
     }
-    if s.starts_with('[') {
-        if let Some(i) = s.find('·') {
-            let key = &s[..i];
-            if valid_key(key) {
-                return format!("{key}·{}", expand_struct_refs(&s[i + '·'.len_utf8()..]));
-            }
+    // mapexpr `key·value`：键可以是 `[` 起头（字符串键/标量元组键）或**裸标量**，
+    // 只有 value 侧需要展开 struct 名；整串当 structref 包成 `/lib/<key·value>` 是错的。
+    if let Some(i) = s.find('·') {
+        let key = &s[..i];
+        if valid_key(key) {
+            return format!("{key}·{}", expand_struct_refs(&s[i + '·'.len_utf8()..]));
         }
+    }
+    if s.starts_with('[') {
         return s.to_string();
     }
     if s.is_empty() || known_kind(s) || s == "any" {
@@ -342,6 +380,11 @@ mod tests {
             "/lib/geom/Point",
             "/lib/Node",
             "/lib/Point|/lib/Node",
+            // `*`/`@` 是**源码**前缀（layout 剥离落 head.ref），书于类型标注最前——合法（见 [[文法与合法性]]）。
+            "*int64",
+            "@int64",
+            "@[256,256]uint8",
+            "*[int32,int32]·[]char/utf8",
         ] {
             assert!(valid_langtype(e), "{e} should be valid");
         }
@@ -410,8 +453,6 @@ mod tests {
             "[2,]float32",
             "[,2]float32",
             "[2 3]float32",
-            "*int64",
-            "@int64",
             "int64*",
             "float64|",
             "int ",

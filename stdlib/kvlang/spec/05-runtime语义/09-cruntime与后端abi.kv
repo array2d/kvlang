@@ -22,7 +22,7 @@ durable 单句柄相干、后端装载。
    `LangtypeValid`/`LangtypeMatch` 类型判定。
 
 **扩展运行时套用核心，不复刻**：runtime-c 把上述三件能力经嵌入式 C ABI（下节 `kvlang_runtime.h` +
-`kvlang_myrwir.h`）对外开放。扩展运行时**嵌入**这套核心、复用其执行循环、native 派发与正典 codec，只
+`kvlang_rwirext.h`）对外开放。扩展运行时**嵌入**这套核心、复用其执行循环、native 派发与正典 codec，只
 **自行解释己方 opcode**——不得另起执行核心、不得另写编解码器、不得复刻 native 算子。据此：
 
 - **runtime-rs 是扩展运行时的参考实现**，不是第二套等价核心。它作为 myrwir 宿主，套用 runtime-c 核
@@ -39,21 +39,22 @@ livebyte）。两组对外 C ABI：
 
 - `kvlang_runtime.h`：核心执行器（`kvlangRuntimeConnect`/`Disconnect`/`Bootstrap`/`ExecuteVthread`/
   `KvspaceHandle` …）。
-- `kvlang_myrwir.h`：扩展 runtime 语义，**只暴露 kvspace 不提供的部分**。现有 9 个符号：`DefRwir`、
-  `Handoff`、`NextPc`、`Params`、`ResolveRead`、`ResolveReadPath`、`ResolveWrite`、`LangtypeValid`、
-  `LangtypeMatch`。KV 存取（connect/get/write/del/list/tlv）**不在此**——扩展宿主自连 kvspace ABI，把
+- `kvlang_rwirext.h`：扩展 runtime 语义，**只暴露 kvspace 不提供的部分**。现有 9 个符号：`kvlangDefRwir`、
+  `kvlangRwirextHandoff`、`kvlangRwirextNextPc`、`kvlangRwirextParams`、`kvlangRwirextResolveRead`、
+  `kvlangRwirextResolveReadPath`、`kvlangRwirextResolveWrite`、`kvlangLangtypeValid`、
+  `kvlangLangtypeMatch`。KV 存取（connect/get/write/del/list/tlv）**不在此**——扩展宿主自连 kvspace ABI，把
   句柄（`void *`）传进带句柄的 myrwir 函数。
 
-其中 `LangtypeValid`/`LangtypeMatch` 与正典 codec 的 head 解码，正是 langtype **两型**对外的两条 ABI
-（两型 def/value 与 kindexpr 简写见 [[langtype签名类型表达式]]）：前者服务 **def langtype**（模式
-侧——校验签名 kindexpr、把一个值的 `(kind,ndim,dims)` 匹配进签名），后者服务 **value langtype**（具体
-侧——把 head 里一条 kindexpr 解析为 `(kind,ndim,dims,元素字节宽)`，事实源为 `kvspaceDecodeHead` 与
-layout 的 `kvlangLangtypeParse`）。两者同吃一条 kindexpr 串、共用唯一文法与 codec，差别只在模式匹配
-vs 具体解析。
+其中 `LangtypeValid`/`LangtypeMatch` 与正典 codec 的 head 解码，正是 **def langtype 与 langtype** 对外的
+两条 ABI（两者区别见 [[langtype签名类型表达式]]）：前者服务 **def langtype**（匹配侧——校验一条签名匹配
+类型、把一个值的 `(kind,ndim,dims)` 匹配进它），后者服务 **langtype**（解析侧——把 head 里一条类型串解析
+为 `(kind,ndim,dims,元素字节宽)`，事实源为 `kvspaceDecodeHead` 与 `kvlangKindexprParse`）。两者同吃一条
+类型表达式串、共用唯一文法与 codec，差别只在**匹配** vs **解析**。
 
-内部模块：`xvalue.c`（TLV 编解码薄封装）、`langtype.c`、`kv.c`（kvspace ABI 封装）、`keytree.c`（路
-径构造）、`rwir.c`（PC 解析 + Decode）、`vthread.c`、`builtin*.c`（native 算子 + 静态注册表）、
-`kvcpu.c`（Execute 循环）、`runtime.c`（ABI 层）、`myrwir.c`（扩展 ABI，含 `notinmyrwircaps`）。
+内部模块：`xvalue.c`（TLV 编解码薄封装）、`langtype.c` + `langtypetable.c`（langtype 校验/匹配与我
+表格）、`kv.c`（kvspace ABI 封装）、`keytree.c`（路径构造）、`rwir.c`（PC 解析 + Decode）、
+`vthread.c`、`builtin*.c`（native 算子 + 静态注册表）、`kvcpu.c`（Execute 循环）、`runtime.c`（ABI
+层）、`rwirext.c`（扩展宿主 ABI，含 `notinmyrwircaps`）、`logx.c`、`strbuf.c`、`const.h`。
 myrwircaps 为**静态数组 + 线性查找**。
 
 ## 统一 `kvspace*` C ABI（去特化）
@@ -91,264 +92,13 @@ n=10：redis 1.5s / fs 320ms vs C 586ns，墙钟由 KV I/O 主导约六个数量
 
 **后端由链接决定**：构建期经环境变量选择链接哪个 kvspace 库（`kvspace-c` 或 `kvspace_durable`），两
 者导出同一 ABI；runtime 的句柄结构只保留 `void *h`，代码零后端分支。
-## runtime C（libkvlang_runtime）导出符号全集（nm -D 实测，203）
 
-### handoff_（1）
-```
-    handoff_external_rwir
-```
-### kvlangBuiltin（80）
-```
-    kvlangBuiltinAppend
-    kvlangBuiltinArray
-    kvlangBuiltinArrayFill
-    kvlangBuiltinCapIndex
-    kvlangBuiltinCharConcat
-    kvlangBuiltinCompact
-    kvlangBuiltinDebugger
-    kvlangBuiltinDurArith
-    kvlangBuiltinDurCmp
-    kvlangBuiltinDurFrom
-    kvlangBuiltinDurTo
-    kvlangBuiltinExecuteCopy
-    kvlangBuiltinFreeInputs
-    kvlangBuiltinKvAbs
-    kvlangBuiltinKvCp
-    kvlangBuiltinKvCpList
-    kvlangBuiltinKvCpTree
-    kvlangBuiltinKvDel
-    kvlangBuiltinKvDelTree
-    kvlangBuiltinKvExtIndex
-    kvlangBuiltinKvGet
-    kvlangBuiltinKvList
-    kvlangBuiltinKvListLen
-    kvlangBuiltinKvListN
-    kvlangBuiltinKvMkindex
-    kvlangBuiltinKvRmIndexExt
-    kvlangBuiltinKvSet
-    kvlangBuiltinKvWatch
-    kvlangBuiltinMap
-    kvlangBuiltinMapMarker
-    kvlangBuiltinMemindex
-    kvlangBuiltinNative
-    kvlangBuiltinNdarrayDim
-    kvlangBuiltinNdarrayNumel
-    kvlangBuiltinNdarrayShape
-    kvlangBuiltinNextPc
-    kvlangBuiltinNumOp
-    kvlangBuiltinObj
-    kvlangBuiltinRandInt63
-    kvlangBuiltinRandIntn
-    kvlangBuiltinRandUint64
-    kvlangBuiltinReadInputs
-    kvlangBuiltinResolveReadKey
-    kvlangBuiltinResolveReadValue
-    kvlangBuiltinResolveWriteSlot
-    kvlangBuiltinScatter
-    kvlangBuiltinScatterKey
-    kvlangBuiltinSetErr
-    kvlangBuiltinSlice
-    kvlangBuiltinStringChar
-    kvlangBuiltinStringCmp
-    kvlangBuiltinStringConcat
-    kvlangBuiltinStringFind
-    kvlangBuiltinStringFormatInt
-    kvlangBuiltinStringFormatUint
-    kvlangBuiltinStringLen
-    kvlangBuiltinStringOrd
-    kvlangBuiltinStringParseInt
-    kvlangBuiltinStringParseUint
-    kvlangBuiltinStringSet
-    kvlangBuiltinStringSlice
-    kvlangBuiltinStructNew
-    kvlangBuiltinTimeAdd
-    kvlangBuiltinTimeCmp
-    kvlangBuiltinTimeNow
-    kvlangBuiltinTimeSub
-    kvlangBuiltinTryParseNumber
-    kvlangBuiltinVthreadCall
-    kvlangBuiltinVthreadCreate
-    kvlangBuiltinVthreadRun
-    kvlangBuiltinVthreadSetstatus
-    kvlangBuiltinVthreadSleep
-    kvlangBuiltinWriteResult
-    kvlangBuiltinXvAt
-    kvlangBuiltinXvBodylen
-    kvlangBuiltinXvLangtype
-    kvlangBuiltinXvReinterpret
-    kvlangBuiltinXvReshape
-    kvlangBuiltinXvSet
-    kvlangBuiltinXvalueAt
-```
-### kvlangCtl（4）
-```
-    kvlangCtlBr
-    kvlangCtlCall
-    kvlangCtlGoto
-    kvlangCtlReturn
-```
-### (其它)（2）
-```
-    kvlangDisplay
-    kvlangFormatFloat
-```
-### kvlangKeytree（20）
-```
-    kvlangKeytreeEntryPc
-    kvlangKeytreeFrameAt
-    kvlangKeytreeFrameCallpc
-    kvlangKeytreeFrameNum
-    kvlangKeytreeFrameReturnpc
-    kvlangKeytreeFrameRo
-    kvlangKeytreeFrameRoot
-    kvlangKeytreeIrseqPc
-    kvlangKeytreeIsEntryPc
-    kvlangKeytreeLibFunc
-    kvlangKeytreeMember
-    kvlangKeytreeRwir
-    kvlangKeytreeStack
-    kvlangKeytreeVthread
-    kvlangKeytreeVthreadDebugger
-    kvlangKeytreeVthreadPc
-    kvlangKeytreeVthreadSlot
-    kvlangKeytreeVthreadStatus
-    kvlangKeytreeVthreadStatusMsg
-    kvlangKeytreeVtidFromPc
-```
-### kvlangKv（19）
-```
-    kvlangKvConnect
-    kvlangKvCp
-    kvlangKvCpList
-    kvlangKvCpTree
-    kvlangKvDel
-    kvlangKvDelExtIndex
-    kvlangKvDelTree
-    kvlangKvDisconnect
-    kvlangKvExtIndex
-    kvlangKvGetHead
-    kvlangKvGetMember
-    kvlangKvGetOne
-    kvlangKvGetPart
-    kvlangKvList
-    kvlangKvMkindex
-    kvlangKvReadReset
-    kvlangKvSet
-    kvlangKvSetPart
-    kvlangKvWatch
-```
-### kvlangKvcpu（4）
-```
-    kvlangKvcpuBootstrap
-    kvlangKvcpuDynCall
-    kvlangKvcpuExecute
-    kvlangKvcpuExecuteMode
-```
-### kvlangLangType（2）
-```
-    kvlangLangTypeId
-    kvlangLangTypeKind
-```
-### kvlangLangtype（4）
-```
-    kvlangLangtypeMatch
-    kvlangLangtypeParse
-    kvlangLangtypeValid
-    kvlangLangtypeVariadic
-```
-### kvlangLog（3）
-```
-    kvlangLogDebug
-    kvlangLogError
-    kvlangLogInfo
-```
-### kvlangRuntime（9）
-```
-    kvlangRuntimeBootstrap
-    kvlangRuntimeConnect
-    kvlangRuntimeDisconnect
-    kvlangRuntimeExecute
-    kvlangRuntimeExecuteKv
-    kvlangRuntimeExecutePc
-    kvlangRuntimeExecuteVthread
-    kvlangRuntimeKvspaceHandle
-    kvlangRuntimeRunVid
-```
-### kvlangRwir（4）
-```
-    kvlangRwirDecode
-    kvlangRwirExtractAddr0
-    kvlangRwirInstFree
-    kvlangRwirNextPc
-```
-### kvlangScalar（3）
-```
-    kvlangScalarReadF64
-    kvlangScalarReadI64
-    kvlangScalarReadU64
-```
-### kvlangStrbuf（4）
-```
-    kvlangStrbufDetach
-    kvlangStrbufPrintf
-    kvlangStrbufPutc
-    kvlangStrbufPutn
-```
-### kvlangVthread（5）
-```
-    kvlangVthreadGet
-    kvlangVthreadSet
-    kvlangVthreadSetDone
-    kvlangVthreadSetError
-    kvlangVthreadSpawn
-```
-### kvlangXvalue（30）
-```
-    kvlangXvalueArrayLen
-    kvlangXvalueBody
-    kvlangXvalueChar32At
-    kvlangXvalueElemSize
-    kvlangXvalueFree
-    kvlangXvalueHead
-    kvlangXvalueIsCharKind
-    kvlangXvalueIsFloatKind
-    kvlangXvalueIsIntKind
-    kvlangXvalueIsNumKind
-    kvlangXvalueIsPtr
-    kvlangXvalueIsUintKind
-    kvlangXvalueKind
-    kvlangXvalueKindIs
-    kvlangXvalueLangTypeId
-    kvlangXvalueMaterialize
-    kvlangXvalueNewBool
-    kvlangXvalueNewCharKind
-    kvlangXvalueNewCharUtf32
-    kvlangXvalueNewCharUtf8
-    kvlangXvalueNewFloat64
-    kvlangXvalueNewInt64
-    kvlangXvalueNewPtr
-    kvlangXvalueNewRwir
-    kvlangXvalueNewTlv
-    kvlangXvalueNewTlvDims
-    kvlangXvaluePtrTarget
-    kvlangXvalueScalar
-    kvlangXvalueSetBytes
-    kvlangXvalueValueString
-```
-### kvlang_（7）
-```
-    kvlangRwirextHandoff
-    kvlangRwirextNextPc
-    kvlangRwirextParams
-    kvlangDefRwir
-    kvlangRwirextResolveRead
-    kvlangRwirextResolveReadPath
-    kvlangRwirextResolveWrite
-```
-### notinmy（2）
-```
-    notinmycaps
-    notinmyrwircaps
-```
+## 导出符号
+
+符号清单的权威来源是**构建产物**——`nm -D --defined-only runtime/build/libkvlang_runtime.so | grep
+'^kvlang'`。本文只约定各模块的语义与 ABI 分组，不抄清单（抄清单必漂移）：`kvlangRuntime*` 执行入口、
+`kvlangKvcpu*` 取指-解码-执行循环、`kvlangCtl*` 控制流原语、`kvlangBuiltin*` native 算子（myrwircaps）、
+`kvlangKv*` kvspace ABI 封装、`kvlangRwirext*`/`kvlangDefRwir` 扩展宿主 ABI、`kvlangXvalue*`/
+`kvlangLangtype*` 值语义，以及 **def langtype（匹配）与 langtype（真实类型）**两组能力。
 	"#### -> /lib/kvlang/spec/runtime语义/cruntime与后端abi
 }

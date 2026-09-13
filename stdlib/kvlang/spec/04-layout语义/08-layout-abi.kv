@@ -14,7 +14,7 @@ layout 能力经 cdylib 导出，第三方无需 fork 子进程即可布局（�
 | `kvlangLayoutVet(src, …)` | 只校验（parse + lower），不写 kvspace |
 | `kvlangLayoutFormat(src, …)` | 格式化（parse → 规范化源码），不写 kvspace |
 | `kvlangLayoutDump(lib, dsn, …)` | 把 `/lib` 子树逆向重建为可运行 kvlang + 槽位注释 |
-| `kvlangLangtypeParse(langtype, out)` | 解析 XValue head 的 langtype（唯一事实源，供各消费方复用） |
+| `kvlangKindexprParse(langtype, out)` | 解析一条 langtype（kindexpr）串为 `(kind, ndim, dims, 元素宽)`；与 runtime 侧 `kvlangLangtypeParse` 同一文法、同一语义（两个 ABI 名待统一） |
 
 成功返回 0（`entry_out` 为 init 入口名列表，`\n` 分隔），失败返回 -1（`err_out` 为错误）。
 `kvlangLayoutFile` 是 `kvlangLayoutCode` 的薄封装。
@@ -30,15 +30,10 @@ layout 能力经 cdylib 导出，第三方无需 fork 子进程即可布局（�
 不从文件名推导。layout 产出的 init 入口名列表即消费方驱动 init 的依据；tutorial 按约定跑 `test` 入
 口。
 
-## 导出符号全集（nm -D 实测，6）
+## 导出符号
 
-```
-    kvlangKindexprParse
-    kvlangLayoutCode
-    kvlangLayoutDump
-    kvlangLayoutFile
-    kvlangLayoutFormat
-    kvlangLayoutVet
-```
+layout 导出五个 `kvlangLayout*` 入口（file / code / vet / format / dump）与 `kvlangKindexprParse`。**符号
+清单的权威来源是构建产物**——`nm -D --defined-only layout/target/release/libkvlanglayout.so | grep
+'^kvlang'`；本文只约定语义，不抄清单（抄清单必漂移）。
 	"#### -> /lib/kvlang/spec/layout语义/layout流水线接口
 }

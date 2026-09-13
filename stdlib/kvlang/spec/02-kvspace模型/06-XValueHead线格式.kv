@@ -20,13 +20,17 @@ body = [body_len B raw]
 | `ro` | 1B | 1=只读，0=可写 |
 | `vid` | 4B LE | vthread id（默认 0） |
 | `body_len` | 4B LE | body 字节数 |
-| （storetype 物理字段） | 变 | ARRAYND：ndim u8 + dims[ndim] u32 LE；index/extindex：成员名 m×n 对齐字符串数组 dims=[len,cap,M]（len=成员数、M align8、cap 预留容量）；主槽 body 恒空 |
+| （storetype 物理字段） | 变 | ARRAYND：ndim u8 + dims[ndim] u32 LE；index/extindex：**成员枚举载体**（shm 载体为成员名 m×n 对齐字符串数组，dims=[len,cap,M]，len=成员数、M align8、cap 预留容量；fs 载体把成员落成 `{key}·/` 子目录）；值容器主槽 body 恒空、dims 空 |
 | `langtype` | 变长 | 类型表达式串，占至 `headlen`（长度 = headlen − 当前偏移，无独立长度字段） |
 
 `langtype` 恒为 head 最后一段，无独立长度字段；body 起始偏移 = `headlen`。ref 与 storetype 各为独立
 u8 字节，不再编码进 langtype 串。ARRAYND 的 ndim、dims 直接读自 storetype 物理字段，与 langtype 串内
 `[dims]` 保持同步（由 codec 保证）。`char/*` kind 恒为 ARRAYND（ndim=1）。None 编码：
 storetype=NONE、langtype=""、body 空。
+
+index/extindex 的**语义是"可枚举成员"**（`kvspaceListLen` / `kvspaceListAt`），物理载体按后端而异：shm 把
+成员名收进 head 的 m×n 矩阵，fs 把成员落成 `{key}·/` 子目录——载体差异经对称编解码还原，**不构成 ABI
+语义差异**（见 [[地址空间]]）。值容器（stringkeymap/struct）主槽只持类型与形状，成员在 `{key}·`。
 
 指针（ref=1）的 head langtype = 目标完整 langtype（langtype，含 `[dims]`），storetype = 目标
 storetype，body = 目标 key 路径；由 `kvspaceNewPtr(target_langtype, target)` 构造，Set 时据此单跳类
