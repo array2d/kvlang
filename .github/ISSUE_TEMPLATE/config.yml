@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 设计规范（spec）
+    url: https://github.com/array2d/kvlang/tree/master/stdlib/kvlang/spec
+    about: 语言事实以 stdlib/kvlang/spec/ 为唯一真相源；提 issue 前先查对应条款
