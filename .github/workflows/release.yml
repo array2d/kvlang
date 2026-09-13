@@ -74,11 +74,11 @@ jobs:
           cmake -S runtime -B build/runtime -DCMAKE_BUILD_TYPE=Release -DKVSPACE_LIB_DIR="$KVSPACE_LIB_DIR"
           cmake --build build/runtime --target kvlang_runtime -j
           cargo build --release --manifest-path layout/Cargo.toml
-          cargo build --release --manifest-path runtime-rs/Cargo.toml
-          # kvspace CLI 是本步 clone 到 /tmp/kvspace 的 cli/（独立 Cargo 项目）
-          cargo build --release --manifest-path /tmp/kvspace/cli/Cargo.toml
+          # runtime-rs 的 build.rs 在 ../bin 找 libkvlang_runtime/libkvlanglayout，必须先就位
           mkdir -p bin
           cp layout/target/release/libkvlanglayout.dylib bin/
+          cargo build --release --manifest-path runtime-rs/Cargo.toml
+          cargo build --release --manifest-path /tmp/kvspace/cli/Cargo.toml
           cp layout/target/release/kvlanglayout bin/
           cp runtime-rs/target/release/kvlang bin/
       - name: 后端装载冒烟（frontend 的 dlopen 真能加载后端）
