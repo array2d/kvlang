@@ -78,7 +78,8 @@ jobs:
           mkdir -p bin
           cp layout/target/release/libkvlanglayout.dylib bin/
           cargo build --release --manifest-path runtime-rs/Cargo.toml
-          cargo build --release --manifest-path /tmp/kvspace/cli/Cargo.toml
+          # kvspace CLI 用 #[link(name = "kvspace")]，前端装在 /usr/local/lib/kvspace
+          RUSTFLAGS="-L native=/usr/local/lib/kvspace" cargo build --release --manifest-path /tmp/kvspace/cli/Cargo.toml
           cp layout/target/release/kvlanglayout bin/
           cp runtime-rs/target/release/kvlang bin/
       - name: 后端装载冒烟（frontend 的 dlopen 真能加载后端）
