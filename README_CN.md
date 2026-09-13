@@ -72,7 +72,21 @@ kvspace 是核心的寻址空间与内存空间；语言本体是小核心 runti
 
 ---
 
-## Quick Start
+## 安装
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/array2d/kvlang/master/install.sh | sh
+```
+
+自动识别 OS/架构并拉取**最新** release —— `linux-x86_64` 或 `darwin-arm64`。每个包都是自包含的（kvlang runtime + layout、kvspace dispatch 前端、两个后端、全部头文件），Linux 装到 `/usr`，macOS 装到 `/usr/local`（该平台 `/usr` 受 SIP 保护）。
+
+```bash
+PREFIX=/opt/kvlang VERSION=v0.2.18 sh install.sh   # 覆盖前缀 / 指定版本
+```
+
+安装内容：`kvlang`（runtime CLI）、`kvlanglayout`（layout CLI）、`kvspace`（后端 CLI）→ `<prefix>/bin`；库 → `<prefix>/lib` + `<prefix>/lib/kvspace`；头 → `<prefix>/include/{kvlang,kvspace,…}`。
+
+## Quick Start（从源码）
 
 依赖：C 工具链 + cmake、Rust（cargo），以及装到 `/usr/lib/kvspace` 的 kvspace ABI 库（由 [`ci/deps.sh`](ci/deps.sh) 按 [`deps.json`](deps.json) 里的 tag 拉取）。Go 仅 Go `json` 示例扩展需要。
 

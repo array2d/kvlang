@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# 下载 ABI 依赖（deps.json: repo → tag），安装到 /usr/lib + /usr/include。本地与 CI 共用。
+# 下载 ABI 依赖（deps.json: repo → tag），安装到 /usr/lib + /usr/lib/kvspace + /usr/include + /usr/bin。
+# 本地与 CI 共用。tarball 可选带 bin/（如 kvspace 的 CLI）。
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 for repo in $(jq -r 'keys[]' "$ROOT/deps.json"); do
@@ -14,6 +15,11 @@ for repo in $(jq -r 'keys[]' "$ROOT/deps.json"); do
   else
     sudo cp "$tmp/lib/"*.so* /usr/lib/
   fi
+  # 可选可执行（kvspace 的 CLI）→ /usr/bin
+  if [ -d "$tmp/bin" ]; then
+    sudo cp "$tmp/bin/"* /usr/bin/
+    sudo chmod 755 /usr/bin/"$(ls "$tmp/bin/" | head -1)"
+  fi
   rm -rf "$tmp"
 done
-echo "✅ ABI deps → /usr/lib + /usr/include"
+echo "✅ ABI deps → /usr/lib + /usr/lib/kvspace + /usr/include + /usr/bin"
