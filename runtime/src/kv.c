@@ -1,7 +1,6 @@
 #include "runtime_internal.h"
 
-/* kv 访问统一走 kvspace-durable 兼容 C ABI（kvspace*）。
- * 后端由链接的 kvspace 库决定（kvspace-durable / kvspace-c 均导出同一 ABI）。 */
+/* KV access via the kvspace C ABI. Backend is chosen at runtime from the DSN. */
 
 static kvlangRefEnt_t *ref_find(kvlangKv_t *k, const char *key) {
     for (int i = 0; i < k->nref; i++) {
@@ -330,8 +329,7 @@ void kvlangKvDisconnect(kvlangKv_t *k) {
     free(k);
 }
 
-/* 借用读（resolve=0，raw）：out 直接借 kvspace 常驻/借用池指针（borrowed=1，不 free、不入
- * kvlangKvSet 前不跨写）。空值 → out len=0。 */
+/* Borrowed read (resolve=0). Empty -> out len=0. */
 int kvlangKvGetOne(kvlangKv_t *k, const char *key, kvlangXvalue_t *out) {
     kvlangXvalueZero(out);
     uint8_t *d;
@@ -360,9 +358,7 @@ int kvlangKvGetOne(kvlangKv_t *k, const char *key, kvlangXvalue_t *out) {
     return 0;
 }
 
-/* Frame member: dir 直连 name 组键，借用读（resolve=0：拿 Ptr 本体，不穿透 link——
- * 解引用由 runtime 显式按 target 形态判别，见 ResolveReadValue/ResolveWriteSlot）；
- * 空值 → out len=0。 */
+/* Frame member: concat dir+name, borrowed read. Empty -> out len=0. */
 int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXvalue_t *out) {
     kvlangXvalueZero(out);
     if (!name || !name[0])
@@ -440,10 +436,10 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
     return 0;
 }
 
-/* 指令边界回收读借用池：VM 每条指令末调一次。 */
+/* Recycle the read-borrow pool at instruction boundaries. */
 void kvlangKvReadReset(kvlangKv_t *k) { kvspaceReadReset(k->h); }
 
-/* 定位读：借用读 key 值的 [off, off+len) 字节 → out(borrowed=1)。空/越界 → out len=0。 */
+/* Borrowed slice of the value body. Empty/OOB -> out len=0. */
 int kvlangKvGetPart(kvlangKv_t *k, const char *key, uint32_t off, uint32_t len, kvlangXvalue_t *out) {
     kvlangXvalueZero(out);
     uint8_t *d;
@@ -458,22 +454,19 @@ int kvlangKvGetPart(kvlangKv_t *k, const char *key, uint32_t off, uint32_t len, 
     return 0;
 }
 
-/* 定位写：就地写 buf 到 key 值的 [off, off+buf_len)（key 须已存在、不改结构）。 */
+/* In-place write into an existing value. Key must already exist. */
 int kvlangKvSetPart(kvlangKv_t *k, const char *key, uint32_t off, const uint8_t *buf, uint32_t buf_len,
                      char *err, uint32_t err_cap) {
     return kvspaceSetPart(k->h, key, off, buf, buf_len, err, err_cap);
 }
 
-/* 读 head：只读值前缀解码三正交轴 head（不取 body）。空/不存在 → 非 0。 */
+/* Read head only (no body). Missing/empty -> non-zero. */
 int kvlangKvGetHead(kvlangKv_t *k, const char *key, kvspaceHead_t *out) {
     return kvspaceGetHead(k->h, key, out);
 }
 
-/* 写即构造：逐条解 head 取 (langtype, body)——同 body_len 就地(WriteInPlace)，否则新位置
- * (WriteNewPlace)——向 kvspace 要 body 偏移指针后直接写字节，无预合并缓冲。 */
+/* Write each pair: same body_len -> in place, else new place. */
 int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, uint32_t err_cap) {
-    /* 借用值全程有效：durable 惰性写不再清读池，读借用池由 VM 在指令边界统一 ReadReset 回收，
-     * 故写期直接用 v->data，不再需要防御性快照。 */
     int rc = 0;
     if (n == 1 && ref_ok(k) && kvspaceSetPartByRef && pairs[0].key && pairs[0].val.data &&
         pairs[0].val.len) {
@@ -506,15 +499,13 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
     }
     for (int i = 0; i < n; i++) {
         const kvlangXvalue_t *v = &pairs[i].val;
-        if (!v->data || v->len == 0) { /* None → 删键，令该槽读回 None（不可静默跳过留旧值） */
+        if (!v->data || v->len == 0) { /* None deletes the key */
             const char *dk[1] = {pairs[i].key};
             kvspaceDel(k->h, dk, 1, err, err_cap);
             continue;
         }
         kvspaceHead_t h;
-        /* head 解码失败才跳过：langtype 为空**不是**跳过理由——空 langtype 的 Ptr 仍是
-         * 指针（如跨帧传一个值为 None 的容器实参时，runtime 推不出类型）。None 由上面
-         * 的 len==0 分支处理，二者不是一回事。曾因这里静默跳过，致 fs 后端帧槽丢参数。 */
+        /* Skip only if head decode fails. Empty langtype is still a valid Ptr. */
         if (kvspaceDecodeHead(v->data, v->len, &h) != 0)
             continue;
         uint32_t body_len = h.body_len < 0 ? 0 : (uint32_t)h.body_len;
