@@ -1,0 +1,41 @@
+name: 性能（测量 / 回归 / 优化）
+description: 微基准、性能回归、热点优化
+title: "[PERF] "
+labels: ["PERF"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        kvlang 的性能瓶颈是架构本质（PC/帧/局部全落 KV 树、每步一次往返），
+        报数据时请区分「后端原语地板价」与「runtime 自身开销」。
+  - type: textarea
+    id: measurement
+    attributes:
+      label: 测量
+      description: 复现命令 + 数据（ns/op 或总耗时），标注后端与规模
+      placeholder: |
+        `python3 benchmark/run.py -k iops --backends shm`
+        N=2000: kv-shm 15.996ms / python 91.4µs
+    validations:
+      required: true
+  - type: dropdown
+    id: backend
+    attributes:
+      label: 后端
+      options: [shm, fs, redis, 多个（请说明）]
+    validations:
+      required: true
+  - type: textarea
+    id: analysis
+    attributes:
+      label: 分析
+      description: 瓶颈定位（用 perf/rdtsc 定位到具体路径，而非猜测）
+    validations:
+      required: true
+  - type: textarea
+    id: expectation
+    attributes:
+      label: 目标与代价
+      description: 期望收益、可接受代价（是否牺牲可读性/可恢复性），以及是否属既定地板价
+    validations:
+      required: true

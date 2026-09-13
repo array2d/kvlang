@@ -1,0 +1,41 @@
+name: Roadmap（路线图 / 里程碑追踪）
+description: 项目级方向与里程碑追踪，汇总若干 Epic
+title: "[Roadmap] "
+labels: ["EPIC"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Roadmap 是**顶层追踪 issue**：描述一段时间内的方向与里程碑，下挂若干 Epic。
+        只在方向调整时编辑，不记录日常进展（进展看子 issue）。
+  - type: textarea
+    id: theme
+    attributes:
+      label: 主题
+      description: 这一阶段的主线（一句话），以及为什么是现在。
+    validations:
+      required: true
+  - type: textarea
+    id: epics
+    attributes:
+      label: 里程碑与 Epic
+      description: 每行 `- [ ] 里程碑 M1（目标日期）— #N Epic 描述`
+      placeholder: |
+        - [ ] M1 三后端 ABI 收敛 — #123 / #124
+        - [ ] M2 编译器扩展可用 — #273
+    validations:
+      required: true
+  - type: textarea
+    id: exit
+    attributes:
+      label: 完成判据
+      description: 满足什么条件算这一阶段结束（发布 tag / 指标达标 / 跨仓一致）
+    validations:
+      required: true
+  - type: textarea
+    id: notdoing
+    attributes:
+      label: 明确不做
+      description: 本阶段排除的方向，避免范围蔓延
+    validations:
+      required: false
