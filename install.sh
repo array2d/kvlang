@@ -41,7 +41,8 @@ if [ -z "$tag" ]; then
 fi
 
 # ── 下载 ─────────────────────────────────────────────────────────────
-base="https://github.com/$REPO/releases/download/$tag"
+# BASE_URL 可覆盖下载源（镜像 / 内网 / file:// 离线安装）
+base="${BASE_URL:-https://github.com/$REPO/releases/download/$tag}"
 tarball="kvlang-abi-$tag-$plat.tar.gz"
 case "$plat" in
   linux-*)  sums=SHA256SUMS-linux ;;
