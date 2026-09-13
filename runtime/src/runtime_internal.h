@@ -43,21 +43,28 @@ extern void kvspaceClose(void *h);
 extern int kvspaceGet(void *h, const char *key, int resolve, uint8_t **out,
                       uint32_t *out_len);
 
+/* 对齐 kvspace/include/kvspace/kvspace.h。parent_id/depth 由 ResolveRef 填；
+ * 后端只写前 8 字节时 parent_id 保持 0，runtime 永久关闭父缓存。 */
 typedef struct {
     uint32_t block_id;
     uint32_t gen;
     uint32_t parent_id;
     uint32_t depth;
 } kvspaceRef_t;
+#if defined(__APPLE__)
+#define KVLANG_KVSPACE_WEAK __attribute__((weak_import))
+#else
+#define KVLANG_KVSPACE_WEAK __attribute__((weak))
+#endif
 extern int kvspaceResolveRef(void *h, const char *key, kvspaceRef_t *ref)
-    __attribute__((weak));
+    KVLANG_KVSPACE_WEAK;
 extern int kvspaceGetByRef(void *h, kvspaceRef_t *ref, const char *key_fallback,
                            uint8_t **out, uint32_t *out_len)
-    __attribute__((weak));
+    KVLANG_KVSPACE_WEAK;
 extern int kvspaceSetPartByRef(void *h, kvspaceRef_t *ref,
                                const char *key_fallback, uint32_t offset,
                                const uint8_t *buf, uint32_t buf_len, char *err,
-                               uint32_t err_cap) __attribute__((weak));
+                               uint32_t err_cap) KVLANG_KVSPACE_WEAK;
 /* 指令边界回收读借用池；定位读/写（分片）；只读 head 前缀。见 kvspace.h 契约。 */
 extern void kvspaceReadReset(void *h);
 extern int kvspaceGetPart(void *h, const char *key, uint32_t offset,
@@ -154,6 +161,8 @@ typedef struct {
     kvlangRefEnt_t ref[KVLANG_REF_CAP];
     int nref;
     int ref_on;
+    int parent_on;     /* 嵌套 ResolveRef 后 parent_id==0 则永久关闭 */
+    int parent_probed;
     kvlangRefEnt_t pref[KVLANG_PREF_CAP]; /* · map ART parents */
     int npref;
     int pref_i;

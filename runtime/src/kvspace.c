@@ -25,6 +25,10 @@ static int ref_ok(kvlangKv_t *k) {
     return k->ref_on && kvspaceResolveRef && kvspaceGetByRef;
 }
 
+static int parent_ok(kvlangKv_t *k) {
+    return ref_ok(k) && k->parent_on;
+}
+
 static kvlangRefEnt_t *pref_find(kvlangKv_t *k, const char *dir, size_t dl) {
     for (int i = 0; i < k->npref; i++) {
         const char *pk = k->pref[i].key;
@@ -150,7 +154,7 @@ static int dir_is_member(const char *dir, size_t dl) {
 
 static void parent_put(kvlangKv_t *k, const char *dir, size_t dl, const kvspaceRef_t *rr) {
     kvlangRefEnt_t *e;
-    if (!dir || !dl || !rr->parent_id || !rr->depth)
+    if (!parent_ok(k) || !dir || !dl || !rr->parent_id || !rr->depth)
         return;
     if (dl >= 5 && memcmp(dir, "/lib/", 5) == 0)
         return;
@@ -209,6 +213,18 @@ static int last_dir_sep(const char *key, size_t *seplen) {
     }
     *seplen = 0;
     return -1;
+}
+
+/* Nested key + parent_id==0 → backend only wrote leaf fields; disable parent cache. */
+static void parent_note(kvlangKv_t *k, const char *key, const kvspaceRef_t *rr) {
+    size_t seplen = 0;
+    if (k->parent_probed || !key)
+        return;
+    if (last_dir_sep(key, &seplen) < 0)
+        return;
+    k->parent_probed = 1;
+    if (!rr->parent_id)
+        k->parent_on = 0;
 }
 
 static int parent_prefix_ok(const kvlangRefEnt_t *e, const char *key) {
@@ -316,6 +332,7 @@ kvlangKv_t *kvlangKvConnect(const char *dsn) {
         return NULL;
     }
     k->ref_on = 1;
+    k->parent_on = 1;
     return k;
 }
 
@@ -334,7 +351,7 @@ int kvlangKvGetOne(kvlangKv_t *k, const char *key, kvlangXvalue_t *out) {
     kvlangXvalueZero(out);
     uint8_t *d;
     uint32_t len;
-    if (ref_ok(k) && k->npref && key) {
+    if (parent_ok(k) && k->npref && key) {
         kvlangRefEnt_t *pe = (k->npref == 1)
                                  ? (parent_prefix_ok(&k->pref[0], key) ? &k->pref[0] : NULL)
                                  : pref_cover(k, key);
@@ -383,7 +400,7 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
     memcpy(key, dir, dl);
     memcpy(key + dl, name, nl);
     key[dl + nl] = 0;
-    if (ref_ok(k) && !hot_name_ok(name) && k->fpar.key &&
+    if (parent_ok(k) && !hot_name_ok(name) && k->fpar.key &&
         memcmp(k->fpar.key, dir, k->fpar.klen) == 0 && dir[k->fpar.klen] == 0) {
         kvspaceRef_t r = { k->fpar.block_id, k->fpar.gen, 0, 0 };
         if (kvspaceGetByRef(k->h, &r, key, &d, &len) == 0 && d && len > 0) {
@@ -410,7 +427,7 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name, kvlangXv
             return 0;
         }
     }
-    if (ref_ok(k)) {
+    if (parent_ok(k)) {
         int hit = 0;
         if (nl >= MEMBER_SEP_LEN && memchr(name, 0xC2, nl)) {
             if (k->npref)
@@ -527,16 +544,17 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
             const char *slash = strrchr(key, '/');
             const char *rest = slash ? slash + 1 : key;
             int is_member = rest && memchr(rest, 0xC2, strlen(rest)) != NULL;
-            if (is_member && (pref_cover(k, key) ||
+            if (is_member && (!parent_ok(k) || pref_cover(k, key) ||
                               (key[0] == '/' && strncmp(key, "/lib/", 5) == 0)))
                 continue;
-            kvspaceRef_t rr;
+            kvspaceRef_t rr = {0};
             if (kvspaceResolveRef(k->h, key, &rr) == 0) {
+                parent_note(k, key, &rr);
                 if (!is_member) {
                     ref_put(k, key, &rr);
                     hot_put(k, rest, key, rr.block_id, rr.gen);
                 }
-                if (is_member || !k->fpar.key) {
+                if (parent_ok(k) && (is_member || !k->fpar.key)) {
                     size_t seplen = 0;
                     int si = last_dir_sep(key, &seplen);
                     if (si >= 0)
