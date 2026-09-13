@@ -1,0 +1,9 @@
+// expected:
+//   error: 0:0: `[]` 下标不能用于指针 `p`（类型 *[]int64）；先解引用 `*p` 再下标
+
+rwfunc test() -> () {
+	list:[]int64 = [11, 22, 33]
+	&list -> p
+	p[0] -> q
+	println("q=", q)
+}

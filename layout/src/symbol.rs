@@ -144,7 +144,7 @@ static ENTRIES: &[Entry] = &[
         precedence: 0,
         arith: false,
         cmp: false,
-        unary: false,
+        unary: true, // 表达式前缀位置 = 解引用（类型位置仍是 ref 标注，由 parse_type 剥离）
     },
     Entry {
         word: "mul",

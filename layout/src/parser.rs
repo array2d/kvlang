@@ -6,6 +6,7 @@ use super::ast::{
     self, Expr, Field, Func, FuncSig, Instruction, Param, RwirDecl, Stmt, StructDecl,
 };
 use super::keytree;
+use super::langtype;
 use super::scanner::{scan, Diagnostic, Kind, Pos, Token};
 use super::symbol;
 
@@ -23,6 +24,7 @@ pub fn parse_code(src: &str) -> Result<(ast::File, Vec<Diagnostic>), String> {
         tokens: scan(src),
         pos: 0,
         errors: Vec::new(),
+        addr_params: Vec::new(),
     };
     let f = p.parse_file();
     for d in &mut p.errors {
@@ -40,6 +42,9 @@ struct Parser {
     tokens: Vec<Token>,
     pos: usize,
     errors: Vec<Diagnostic>,
+    // 当前函数体的地址形参名（声明带 `*`/`@`）：体内名字已被 layout 解引用一次（即实参值），
+    // 故体里再写 `*p` 就是两层间接——当前参数模型不支持（见 issue #286），报错不静默降级。
+    addr_params: Vec<String>,
 }
 
 impl Parser {
@@ -329,10 +334,18 @@ impl Parser {
         self.check_param_types(&sig);
         self.check_variadic(&sig);
         self.check_param_dup(&sig);
+        self.addr_params = sig
+            .params
+            .iter()
+            .chain(sig.returns.iter())
+            .filter(|p| langtype::is_addr_param(&p.ty))
+            .map(|p| p.name.clone())
+            .collect();
         self.skip_newlines_and_comments();
         self.expect(Kind::LBrace);
         let body = self.parse_body();
         self.expect(Kind::RBrace);
+        self.addr_params.clear();
         let func = Func {
             comments: Vec::new(),
             sig,
@@ -1407,6 +1420,14 @@ impl Parser {
             if symbol::lookup(&t.value).word == "add" {
                 return self.parse_pratt(UNARY_PREC);
             }
+            // 一元前缀 * = 解引用：*p 读/写该 Ptr 槽的目标（与形参槽 *[0,±k] 同一读参命名约定，
+            // 见 spec [[ptr]]）。操作数先按 UNARY_PREC 结合（*p·x ≡ *(p·x)，同 C），非叶操作数由
+            // lower 展开成临时槽后再取 *名——runtime 一律按「读该槽 → 槽里是 Ptr → 落其目标」。
+            if symbol::lookup(&t.value).word == "pointer" {
+                let arg = self.parse_pratt(UNARY_PREC)?;
+                self.check_deref_operand(&arg, t.pos);
+                return Some(ast::call(ast::DEREF_OP, vec![arg]));
+            }
             // 一元前缀 & = 取址：&x ≡ kvlang·abs(x)（中缀 & 仍为按位与，走 pratt 中缀路径）。
             // & 对成员链 kvspace·get(base, segs...) → kvlang·abs(base, segs...)：取成员路径地址，非读值取址。
             if symbol::lookup(&t.value).word == "bitand" {
@@ -1924,8 +1945,72 @@ impl Parser {
         (writes, wtypes)
     }
 
+    /// 解引用操作数检查：须是名字（Ptr 槽）；地址形参名不可再 `*`（体内已解引用一次 = 两层间接）。
+    fn check_deref_operand(&mut self, arg: &Expr, pos: Pos) {
+        if !arg.is_leaf() {
+            return;
+        }
+        let msg = if arg.quote != 0 {
+            "`*` 解引用要求 Ptr 槽（名字），不能作用于字符串字面量".to_string()
+        } else if self.addr_params.contains(&arg.val) {
+            format!(
+                "`*{}` 是两层间接：地址形参在体内已被解引用一次（名字即实参值）；先 `{} -> local` 再 `*local`（见 issue #286）",
+                arg.val, arg.val
+            )
+        } else {
+            return;
+        };
+        self.errors.push(Diagnostic {
+            pos,
+            message: msg,
+            warn: false,
+            info: false,
+            source: String::new(),
+            src_file: String::new(),
+            src_name: String::new(),
+        });
+    }
+
     fn parse_write_slot(&mut self) -> (String, String) {
-        let name = self.advance().value;
+        // 解引用写槽 `*p`：写穿该 Ptr 槽的目标（与读参 `*p` 同一约定，见 spec [[ptr]]）。
+        // 只接**名字**——成员写 `p·x` 自带按指针优先、下标写先 `*p` 解引用到变量，故 `*` 后
+        // 跟 `·`/`[` 一律报错，不静默错拼成两个写槽。
+        let mut name = String::new();
+        if self.peek().kind == Kind::Ident
+            && self.peek().value == ast::DEREF_OP
+            && self.peek_at(1).kind == Kind::Ident
+        {
+            self.advance();
+            name.push_str(ast::DEREF_OP);
+        }
+        name.push_str(&self.advance().value);
+        if name.starts_with(ast::DEREF_OP) && self.addr_params.contains(&name[1..].to_string()) {
+            self.errors.push(Diagnostic {
+                pos: self.peek().pos,
+                message: format!(
+                    "`{}` 是两层间接：地址形参在体内已被解引用一次（名字即实参值）；先 `{} -> local` 再写 `*local`（见 issue #286）",
+                    name, &name[1..]
+                ),
+                warn: false,
+                info: false,
+                source: String::new(),
+                src_file: String::new(),
+                src_name: String::new(),
+            });
+        }
+        if name.starts_with(ast::DEREF_OP) && matches!(self.peek().kind, Kind::Dot | Kind::LBrack) {
+            self.errors.push(Diagnostic {
+                pos: self.peek().pos,
+                message:
+                    "`*` 解引用写槽只接名字（如 `*p`）：成员写用 `p·x`，下标写先 `*p` 解引用到变量"
+                        .to_string(),
+                warn: false,
+                info: false,
+                source: String::new(),
+                src_file: String::new(),
+                src_name: String::new(),
+            });
+        }
         let mut typ = String::new();
         if self.peek().kind == Kind::Colon {
             self.advance();

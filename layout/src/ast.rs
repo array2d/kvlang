@@ -256,6 +256,10 @@ pub struct Expr {
     pub lit: LitKind,    // 字面量类型（仅叶节点有意义）
 }
 
+/// 一元前缀 `*` 解引用在 AST 里的算子名。落成读参/写槽名时前缀到名字上（`*p`），
+/// runtime 按该槽里的 Ptr 解引用到目标——与形参槽 `*[0,±k]` 同一约定（见 spec [[ptr]]）。
+pub const DEREF_OP: &str = "*";
+
 impl Expr {
     pub fn is_leaf(&self) -> bool {
         self.op.is_empty()
@@ -393,6 +397,15 @@ impl Instruction {
                 return ("=".to_string(), vec![format!("\"{v}")]);
             }
             return ("=".to_string(), vec![v.clone()]);
+        }
+        // 解引用：`*<叶>` → 读参/写槽名 `*name`（与形参槽 `*[0,±k]` 同一约定，runtime 按该槽里的
+        // Ptr 解引用到目标）。非叶操作数由 lower 先展开成临时槽，故此处必为叶。
+        if e.op == DEREF_OP {
+            let a = match e.args.first() {
+                Some(a) if a.is_leaf() => a,
+                _ => panic!("flat: `*` 解引用要求叶操作数（lower 未展开？）"),
+            };
+            return ("=".to_string(), vec![format!("*{}", a.val)]);
         }
         let opcode = e.op.clone();
         let reads: Vec<String> = e

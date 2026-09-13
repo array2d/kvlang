@@ -34,5 +34,10 @@ lib kvlang/spec/类型系统/成员访问 {
 
 该规则让「局部结构体」（base 非 Ptr，按名）与「指针成员访问」（base 是 Ptr，按其 target）共用一套语
 法。
+
+**base 必须是容器**（struct 实例 / `map` / index）或**路径串**（`[]char/*` 的值即父路径本身，如
+`kvspace·get("/a/b", k)` 的基座）：compact 数组与标量两者都不是，用 `·` 访问报 TypeError（compact 数组用
+`[]` 下标，见 [[数组形态]]）。这条在解引用之后判定——`p·[0]` 里 base 是 `p` 指向的 compact 数组，虽 `p`
+是 Ptr 仍报错。
 "#### -> /lib/kvlang/spec/类型系统/成员访问
 }

@@ -24,7 +24,9 @@ static int xv_elem_size(const kvlangLangtype *kx) {
 }
 
 /* 读参 ri 的 head：变量走 GetHead 只读前缀（不借 body，*key=malloc'd 键），字面量数组借整块
- * 解 head（*key=NULL，*borrow 持整块，调用方 kvlangXvalueFree）。返回 0 成功、非 0 空/不存在。 */
+ * 解 head（*key=NULL，*borrow 持整块，调用方 kvlangXvalueFree）。
+ * 下标操作数须是 compact 数组**值**本身：Ptr（ref=1）是寻址间接层，不是数组（见 spec [[ptr]]）。
+ * 返回 0 成功、-1 空/不存在、-2 是 Ptr（下标须先 `*p` 解引用）。 */
 static int xv_read_head(kvlangFrame_t *f, const char *fr, int ri,
                         kvspaceHead_t *h, char **key, kvlangXvalue_t *borrow) {
     kvlangXvalueZero(borrow);
@@ -36,6 +38,10 @@ static int xv_read_head(kvlangFrame_t *f, const char *fr, int ri,
             free(k);
             return -1;
         }
+        if (h->ref == KVSPACE_REF_PTR) {
+            free(k);
+            return -2;
+        }
         *key = k;
         return 0;
     }
@@ -43,6 +49,8 @@ static int xv_read_head(kvlangFrame_t *f, const char *fr, int ri,
                                   &f->inst->reads[ri].val, borrow);
     if (kvlangXvalueNone(borrow))
         return -1;
+    if (kvlangXvalueIsPtr(borrow))
+        return -2;
     return kvspaceDecodeHead(borrow->data, borrow->len, h) == 0 ? 0 : -1;
 }
 
@@ -81,10 +89,13 @@ int kvlangBuiltinXvAt(kvlangFrame_t *f) {
     kvspaceHead_t h;
     char *key;
     kvlangXvalue_t arr;
-    if (xv_read_head(f, fr, 0, &h, &key, &arr) != 0) {
+    int hrc = xv_read_head(f, fr, 0, &h, &key, &arr);
+    if (hrc != 0) {
         free(fr);
-        return kvlangBuiltinSetErr(f,
-                                   "TypeError: xv.at requires a compact array");
+        return kvlangBuiltinSetErr(
+            f, hrc == -2 ? "TypeError: xv.at: pointer cannot be indexed — "
+                           "dereference it first (*p)"
+                         : "TypeError: xv.at requires a compact array");
     }
     kvlangLangtype kx;
     kvlangLangtypeParse(h.langtype, &kx);
@@ -169,7 +180,10 @@ int kvlangBuiltinXvSet(kvlangFrame_t *f) {
                            ? flat_index(&kx, idx, nidx)
                            : -1;
         const char *emsg =
-            sz <= 0 || kx.ndim == 0
+            h.ref == KVSPACE_REF_PTR
+                ? "TypeError: xv.set: pointer cannot be indexed — "
+                  "dereference it first (*p)"
+            : sz <= 0 || kx.ndim == 0
                 ? "TypeError: xv.set requires a compact array"
             : nidx != kx.ndim ? "IndexError: xv.set: dim/index count mismatch"
             : flat < 0        ? "IndexError: xv.set: index out of bounds"
@@ -204,9 +218,12 @@ int kvlangBuiltinXvSet(kvlangFrame_t *f) {
     kvlangLangtype kx;
     kvlangLangtypeParse(ah.langtype, &kx);
     const char *emsg =
-        sz <= 0 || kx.ndim == 0 ? "TypeError: xv.set requires a compact array"
-        : nidx != kx.ndim       ? "IndexError: xv.set: dim/index count mismatch"
-                                : NULL;
+        kvlangXvalueIsPtr(&arr)
+            ? "TypeError: xv.set: pointer cannot be indexed — "
+              "dereference it first (*p)"
+        : sz <= 0 || kx.ndim == 0 ? "TypeError: xv.set requires a compact array"
+        : nidx != kx.ndim ? "IndexError: xv.set: dim/index count mismatch"
+                          : NULL;
     int64_t flat = emsg ? -1 : flat_index(&kx, idx, nidx);
     if (!emsg && flat < 0)
         emsg = "IndexError: xv.set: index out of bounds";
@@ -351,4 +368,3 @@ int kvlangBuiltinXvBodylen(kvlangFrame_t *f) {
     kvlangXvalueFree(&r);
     return rc;
 }
-

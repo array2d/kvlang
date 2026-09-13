@@ -39,6 +39,12 @@ kvlang 用两个符号访问复合数据，语义严格分离，runtime **不得
 该规则让"局部结构体"与"指针成员访问"共用一套语法：结构体的 `base` 非 Ptr（走按名），指针变量持 Ptr（按
 其 target）。跨函数共享的数据**应**放绝对路径（`/n1`），使不同帧的指针都解引用到同一 key。
 
+3. **base 形态判定**：解析出的 `base`（Ptr 则取其**目标**）**必须**是容器——struct 实例（kindexpr 以
+   `/` 开头）、`stringkeymap`/`index`/`extindex`；或**路径串**（`[]char/*`，显式形式 `kvspace·get(path,
+   k)` 的 base 就是它，其值即成员键的父路径）。compact 数组与标量两者都不是，报 TypeError（`·` 要求容
+   器；compact 数组用 `[]` 索引）；None 是动态读，返回 None。**不得**把非容器、非路径串的 body 字节当路
+   径串拼成员键——那会静默给出脏值或 None。
+
 ## 动态成员名 `·*`：解引用操作数取 memitemkey
 
 `base·*k` 用 `k` 的**值**作为成员键：`·*` 令 runtime-c **解引用/求值**操作数 `k`，以其值定位
@@ -76,6 +82,9 @@ ref=2（@ext）表示真实值在扩展世界，head 的 langtype 仍为目标�
 数组有两种存储形态：**compact**（`[...]` 字面量，元素连续打包进单个 XValue，head kind = 元素类型）与
 **stringkeymap**（`{...}` 字面量，散 key，每元素落 `base·[i]` 坐标段独立子 key）。下标 `a[i]` / `xv·at` /
 `xv·set` 用于 **compact** 形态；stringkeymap 形态用 `for-in` / `kvspace·get` 遍历访问。
+
+下标的操作数**必须**是 compact 数组**值**本身。Ptr（ref=1）是寻址用的间接层，不是数组：`p[i]`（`p:*[]T`）
+报 TypeError——先显式解引用 `*p` 再下标（`*` 是唯一解引用路径，`[]` 不做隐式解引用，见 [[ptr]]）。
 
 - **下标读**：`a[i] -> e`（layout 脱糖为 `xv·at`/`kvspace·get`），按 `kvlangXvalueElemSize(kind)` 定的元
   素字节宽零拷贝定位第 `i` 个元素。

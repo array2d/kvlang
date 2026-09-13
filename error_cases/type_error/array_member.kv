@@ -1,0 +1,8 @@
+// expected:
+//   error: TypeError: kvspace·get: member access requires a container (struct/map), got [3]int64; compact arrays use [] indexing
+
+rwfunc test() -> () {
+	list:[]int64 = [11, 22, 33]
+	list·[0] -> q
+	println("q=", q)
+}

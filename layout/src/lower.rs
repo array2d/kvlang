@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::ast::{self, Expr, Func, Instruction, LitKind, Stmt};
 use super::scanner::{Diagnostic, Pos};
-use super::{builtin, keytree, symbol};
+use super::{builtin, keytree, langtype, symbol};
 
 /// 容器类型（stringkeymap / mapexpr）不可用 `[]` 下标访问成员——
 /// `[]` 仅限 compact array（shaped langtype，含字符串 `[]char/*`）。
@@ -195,30 +195,45 @@ fn check_map_inst(s: &Instruction, defined: &HashSet<String>, diags: &mut Vec<Di
 
 pub fn check_container_subscript(fn_: &Func) -> Vec<Diagnostic> {
     let tm = infer_types(fn_);
+    // 地址传参/返回的 `*` 是**传递方式**而非指针值：layout 体内已把它解引用（名字指称实参本体），
+    // 故 `p[i]`/`p·x` 是对实操本体的下标/成员，不是「指针当数组」。
+    let addr: Vec<&str> = fn_
+        .sig
+        .params
+        .iter()
+        .chain(fn_.sig.returns.iter())
+        .filter(|p| langtype::is_addr_param(&p.ty))
+        .map(|p| p.name.as_str())
+        .collect();
     let mut diags = Vec::new();
-    check_subscript_body(&fn_.body, &tm, &mut diags);
+    check_subscript_body(&fn_.body, &tm, &addr, &mut diags);
     diags
 }
 
-fn check_subscript_body(body: &[Stmt], tm: &HashMap<String, String>, diags: &mut Vec<Diagnostic>) {
+fn check_subscript_body(
+    body: &[Stmt],
+    tm: &HashMap<String, String>,
+    addr: &[&str],
+    diags: &mut Vec<Diagnostic>,
+) {
     for st in body {
         match st {
-            Stmt::Instruction(s) => check_subscript_inst(s, tm, diags),
-            Stmt::Scope(s) => check_subscript_body(&s.body, tm, diags),
+            Stmt::Instruction(s) => check_subscript_inst(s, tm, addr, diags),
+            Stmt::Scope(s) => check_subscript_body(&s.body, tm, addr, diags),
             Stmt::If(s) => {
                 if let Some(c) = &s.cond {
-                    check_subscript_inst(c, tm, diags);
+                    check_subscript_inst(c, tm, addr, diags);
                 }
-                check_subscript_body(&s.then_, tm, diags);
-                check_subscript_body(&s.else_, tm, diags);
+                check_subscript_body(&s.then_, tm, addr, diags);
+                check_subscript_body(&s.else_, tm, addr, diags);
             }
             Stmt::While(s) => {
                 if let Some(c) = &s.cond {
-                    check_subscript_inst(c, tm, diags);
+                    check_subscript_inst(c, tm, addr, diags);
                 }
-                check_subscript_body(&s.body, tm, diags);
+                check_subscript_body(&s.body, tm, addr, diags);
             }
-            Stmt::For(s) => check_subscript_body(&s.body, tm, diags),
+            Stmt::For(s) => check_subscript_body(&s.body, tm, addr, diags),
             _ => {}
         }
     }
@@ -227,25 +242,42 @@ fn check_subscript_body(body: &[Stmt], tm: &HashMap<String, String>, diags: &mut
 fn check_subscript_inst(
     inst: &Instruction,
     tm: &HashMap<String, String>,
+    addr: &[&str],
     diags: &mut Vec<Diagnostic>,
 ) {
     if let Some(e) = &inst.expr {
-        check_subscript_expr(e, tm, diags);
+        check_subscript_expr(e, tm, addr, diags);
     }
 }
 
-fn check_subscript_expr(e: &Expr, tm: &HashMap<String, String>, diags: &mut Vec<Diagnostic>) {
+fn check_subscript_expr(
+    e: &Expr,
+    tm: &HashMap<String, String>,
+    addr: &[&str],
+    diags: &mut Vec<Diagnostic>,
+) {
     if (e.op == "xv·at" || e.op == "xv·set") && !e.args.is_empty() {
         let base = &e.args[0];
-        if base.is_leaf() {
+        if base.is_leaf() && !addr.contains(&base.val.as_str()) {
             if let Some(t) = tm.get(&base.val) {
-                if is_container_type(t) {
+                let msg = if is_container_type(t) {
+                    Some(format!(
+                        "`[]` 下标不能用于容器 `{}`（类型 {}）；容器成员访问用 kvspace·get/kvspace·set 或 `{}·key`，`[]` 仅限 compact array",
+                        base.val, t, base.val
+                    ))
+                } else if t.starts_with('*') {
+                    // 指针不是数组：`[]` 不对指针隐式解引用（见 spec [[ptr]]）。
+                    Some(format!(
+                        "`[]` 下标不能用于指针 `{}`（类型 {}）；先解引用 `*{}` 再下标",
+                        base.val, t, base.val
+                    ))
+                } else {
+                    None
+                };
+                if let Some(message) = msg {
                     diags.push(Diagnostic {
                         pos: Pos { line: 0, col: 0 },
-                        message: format!(
-                            "`[]` 下标不能用于容器 `{}`（类型 {}）；容器成员访问用 kvspace·get/kvspace·set 或 `{}·key`，`[]` 仅限 compact array",
-                            base.val, t, base.val
-                        ),
+                        message,
                         warn: false,
                         info: false,
                         source: String::new(),
@@ -257,7 +289,7 @@ fn check_subscript_expr(e: &Expr, tm: &HashMap<String, String>, diags: &mut Vec<
         }
     }
     for a in &e.args {
-        check_subscript_expr(a, tm, diags);
+        check_subscript_expr(a, tm, addr, diags);
     }
 }
 
@@ -1034,6 +1066,12 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
     if symbol::lookup(opcode).cmp {
         return "bool".to_string();
     }
+    if opcode == "kvlang·abs" {
+        // `&x` 取址产 Ptr：类型记 `*<目标类型>`（目标类型未知则记裸 `*`）——`*` 前缀即 ref 轴标记，
+        // 供 `[]` 下标校验拦下「指针当数组」（见 [[ptr]]）。
+        let t = reads.first().map(|r| slot_type(r, tm)).unwrap_or_default();
+        return format!("*{t}");
+    }
     if is_cast_op(opcode) {
         return opcode.to_string();
     }
@@ -1049,8 +1087,8 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
         return String::new();
     }
     match opcode {
-        "kvlen" | "ndarray·numel" | "ndarray·dim" | "kvspace·listlen" | "string·len" | "string·ord"
-        | "string·cmp" | "string·find" | "string·parseint" | "xv·bodylen" => {
+        "kvlen" | "ndarray·numel" | "ndarray·dim" | "kvspace·listlen" | "string·len"
+        | "string·ord" | "string·cmp" | "string·find" | "string·parseint" | "xv·bodylen" => {
             return "int64".to_string();
         }
         "xv·langtype" => return "[]char/utf8".to_string(),

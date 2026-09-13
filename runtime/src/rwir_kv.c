@@ -42,18 +42,41 @@ static bool base_is_container(const kvlangXvalue_t *base) {
            strcmp(k, KVSPACE_KIND_EXT_INDEX) == 0;
 }
 
-static char *member_path(kvlangFrame_t *f, const kvlangXvalue_t *in, int n) {
+/* 非容器 base 的统一报错（返回 NULL 供调用方判定失败）：带上实际 langtype 便于定位。 */
+static char *member_not_container(const kvlangXvalue_t *v, char *err,
+                                  size_t errsz) {
+    kvspaceHead_t h;
+    const char *lt =
+        kvlangXvalueHead(v, &h) == 0 ? (const char *)h.langtype : "";
+    snprintf(err, errsz,
+             "member access requires a container (struct/map), got %s; "
+             "compact arrays use [] indexing",
+             lt);
+    return NULL;
+}
+
+/* 成员访问的 base 解析（spec [[成员访问]] 的「按指针优先、按名回退」+ 形态判定）：
+ *   Ptr → 取其目标路径（目标须是容器）；容器/None → 取 base 的写槽路径；路径串（char/）→ 其值即父路径；
+ *   其余（compact 数组、标量）不是容器 → 报错，绝不把 body 字节冒充路径串拼键。 */
+static char *member_path(kvlangFrame_t *f, const kvlangXvalue_t *in, int n,
+                         char *err, size_t errsz) {
     const kvlangXvalue_t *base = &in[0];
     char *bp = NULL;
+    err[0] = 0;
     if (kvlangXvalueIsPtr(base)) {
-        /* 数据 Ptr（&x）作成员 base：直接取其目标路径，逐段下钻。 */
+        /* 数据 Ptr（&x）作成员 base：直接取其目标路径，逐段下钻。Ptr 的 head 即目标 kindexpr，
+         * 故容器判定即对目标判定——`p·val`（目标 struct）通过，`p·[0]`（目标 compact 数组）报错。 */
+        if (!base_is_container(base))
+            return member_not_container(base, err, errsz);
         bp = kvlangXvaluePtrTarget(base);
     } else if (base_is_container(base)) {
         char *fr = kvlangKeytreeFrameRoot(f->pc);
         bp = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->reads[0].name);
         free(fr);
-    } else {
+    } else if (kvlangXvalueIsCharKind(kvlangXvalueKind(base))) {
         bp = kvlangXvalueValueString(base);
+    } else {
+        return member_not_container(base, err, errsz);
     }
     /* 成员链：base 之后逐段拼 key（变参），每段可为静态字面量或动态键（运行时值）。 */
     for (int i = 1; i < n; i++) {
@@ -69,11 +92,13 @@ static char *member_path(kvlangFrame_t *f, const kvlangXvalue_t *in, int n) {
 int kvlangCGet(kvlangFrame_t *f) {
     kvlangXvalue_t in[MAX_PARAMS];
     int n = kvlangBuiltinReadInputs(f, in, MAX_PARAMS);
-    char *key = f->inst->nr >= 2 ? member_path(f, in, n)
+    char merr[512];
+    char *key = f->inst->nr >= 2 ? member_path(f, in, n, merr, sizeof merr)
                                  : (n >= 1 ? path_arg(f, 0, in) : NULL);
     if (!key) {
         kvlangBuiltinFreeInputs(in, n);
-        return kvlangBuiltinSetErr(f, "TypeError: kvspace·get requires a path");
+        return kvlangBuiltinSetErr(f, "TypeError: kvspace·get: %s",
+                                   merr[0] ? merr : "requires a path");
     }
     kvlangXvalue_t v;
     kvlangXvalueZero(&v);
@@ -109,6 +134,7 @@ int kvlangCSet(kvlangFrame_t *f) {
     int n = kvlangBuiltinReadInputs(f, in, MAX_PARAMS);
     char *key;
     kvlangXvalue_t *val;
+    char merr[512];
     if (f->inst->nr >= 3) {
         const char *base = f->inst->reads[0].name;
         char *fr = kvlangKeytreeFrameRoot(f->pc);
@@ -122,17 +148,18 @@ int kvlangCSet(kvlangFrame_t *f) {
                 "first (e.g. `%s:T = {}`)",
                 base, base);
         }
-        key = member_path(f, in, n - 1);
+        key = member_path(f, in, n - 1, merr, sizeof merr);
         val = &in[n - 1];
     } else {
         key = n >= 1 ? path_arg(f, 0, in) : NULL;
+        merr[0] = 0;
         val = &in[1];
     }
     if (!key || (f->inst->nr < 3 && n < 2)) {
         free(key);
         kvlangBuiltinFreeInputs(in, n);
-        return kvlangBuiltinSetErr(f,
-                                   "TypeError: kvspace·set requires path and value");
+        return kvlangBuiltinSetErr(f, "TypeError: kvspace·set: %s",
+                                   merr[0] ? merr : "requires path and value");
     }
     kvlangKvPair_t p = {key, *val};
     char err[256];
@@ -228,13 +255,15 @@ int kvlangCAbs(kvlangFrame_t *f) {
     kvlangXvalue_t in[MAX_PARAMS];
     int n = kvlangBuiltinReadInputs(f, in, MAX_PARAMS);
     char *p = NULL;
+    char merr[512];
     if (n >= 2)
-        p = member_path(f, in, n);
+        p = member_path(f, in, n, merr, sizeof merr);
     else if (n >= 1)
         p = resolve_path_arg(f, 0, in);
     if (!p) {
         kvlangBuiltinFreeInputs(in, n);
-        return kvlangBuiltinSetErr(f, "TypeError: kvlang·abs requires a key");
+        return kvlangBuiltinSetErr(f, "TypeError: kvlang·abs: %s",
+                                   n >= 2 && merr[0] ? merr : "requires a key");
     }
     /* 产出 Ptr（ref=1）：langtype = 目标 kindexpr、body = 目标绝对路径。
      * &x ≡ kvlang·abs(x)：取址返回指向 x 所在节点的软链接（单跳同型），不再产 char 路径串。 */
@@ -263,8 +292,8 @@ int kvlangCAbs(kvlangFrame_t *f) {
 
 int kvlangCList(kvlangFrame_t *f) {
     if (f->inst->nw == 0)
-        return kvlangBuiltinSetErr(f,
-                                   "TypeError: kvspace·list requires a write param");
+        return kvlangBuiltinSetErr(
+            f, "TypeError: kvspace·list requires a write param");
     kvlangXvalue_t in[1];
     int n = kvlangBuiltinReadInputs(f, in, 1);
     char *key = n >= 1 ? path_arg(f, 0, in) : NULL;
@@ -281,7 +310,8 @@ int kvlangCList(kvlangFrame_t *f) {
     }
     if (!key) {
         kvlangBuiltinFreeInputs(in, n);
-        return kvlangBuiltinSetErr(f, "TypeError: kvspace·list requires 1 path arg");
+        return kvlangBuiltinSetErr(
+            f, "TypeError: kvspace·list requires 1 path arg");
     }
     char **names = NULL;
     int count = 0;
@@ -420,7 +450,8 @@ int kvlangCMkindex(kvlangFrame_t *f) {
     char *key = n >= 1 ? path_arg(f, 0, in) : NULL;
     if (!key) {
         kvlangBuiltinFreeInputs(in, n);
-        return kvlangBuiltinSetErr(f, "TypeError: kvspace·mkindex requires a path");
+        return kvlangBuiltinSetErr(
+            f, "TypeError: kvspace·mkindex requires a path");
     }
     uint32_t capacity =
         n >= 2 ? (uint32_t)kvlangScalarI64(kvlangXvalueScalar(&in[1])) : 0;
