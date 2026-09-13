@@ -1,0 +1,47 @@
+name: RFC（设计提案）
+description: 需要讨论与裁决的设计变更（含语言语义、ABI、架构定位）
+title: "[RFC] "
+labels: ["RFC"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        RFC 是**待裁决**的提案，不是已定方案。语言行为改动落地前必须先在
+        `stdlib/kvlang/spec/` 写入条款，故提案里应指明要改哪些条款。
+  - type: textarea
+    id: motivation
+    attributes:
+      label: 动机
+      description: 现状哪里不对/不够用？举具体场景。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 提案
+      description: 具体改成什么。语言/ABI 层面的写法、签名、命名尽量给出。
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: 影响面
+      description: |
+        涉及哪些 spec 条款、哪些仓（kvlang / kvspace / kvspace-c / kvspace-durable）、
+        是否破坏兼容、是否需同步升 tag。
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 备选方案与取舍
+      description: 考虑过但未采纳的方案，以及为什么。只留唯一正确方向时也要说明淘汰理由。
+    validations:
+      required: true
+  - type: textarea
+    id: decision
+    attributes:
+      label: 裁决记录
+      description: 讨论后填写：采纳/否决/改动后的结论（收敛后回填本条并更新标题/标签）
+    validations:
+      required: false

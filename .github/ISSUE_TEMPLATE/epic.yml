@@ -1,0 +1,41 @@
+name: Epic（大特性 / 父 issue）
+description: 跨模块或多仓的大特性，由多个子 issue 组成，持续迭代
+title: "[EPIC] "
+labels: ["EPIC"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Epic 是**追踪用父 issue**：本身不直接实现，只维护子任务清单与验收标准。
+        子任务各自单独开 issue，并在下方清单里链接。
+  - type: textarea
+    id: goal
+    attributes:
+      label: 目标
+      description: 这个 Epic 完成后，系统能达到什么状态？（可验证的表述）
+    validations:
+      required: true
+  - type: textarea
+    id: children
+    attributes:
+      label: 子任务
+      description: 每行一条，用 `- [ ] #N 描述` 勾选式清单，便于追踪进度
+      placeholder: |
+        - [ ] #123 子任务 A
+        - [ ] #124 子任务 B
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收标准
+      description: 满足哪些条件可关闭本 Epic（回归通过 / 三后端一致 / tag 已发等）
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: 依赖与顺序
+      description: 前置 issue、跨仓顺序约束（如后端先于 kvlang 发 tag）
+    validations:
+      required: false

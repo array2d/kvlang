@@ -1,0 +1,51 @@
+name: Bug 报告
+description: 行为与 spec 或预期不符
+title: "[BUG] "
+labels: ["BUG"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        先搜索是否已有同类 issue。spec 与实现不符时 **spec 为准**，实现是缺陷。
+  - type: textarea
+    id: symptom
+    attributes:
+      label: 现象
+      description: 实际发生了什么？与预期差在哪？
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现
+      description: 最小 kvlang 片段 + 运行命令 + 后端 DSN
+      placeholder: |
+        ```kv
+        rwfunc test() -> () { ... }
+        ```
+
+        `KVSPACE=shm:///tmp/x kvlang repro.kv`
+    validations:
+      required: true
+  - type: input
+    id: spec
+    attributes:
+      label: 对应 spec 条款
+      description: 违反的是哪一条（`/lib/kvlang/spec/…` 路径或标题）
+    validations:
+      required: true
+  - type: dropdown
+    id: backend
+    attributes:
+      label: 后端
+      description: 三后端不一致时请注明各自表现
+      options: [shm, fs, redis, 多个（请说明差异）]
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: git tag 或 commit（v0.2.18 等）
+    validations:
+      required: true

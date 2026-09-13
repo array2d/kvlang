@@ -1,0 +1,37 @@
+name: 功能请求
+description: 新增能力 / 语法 / 原语（含 stdlib 补全、原语新增）
+title: "[FEAT] "
+labels: ["FEAT"]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: 需求
+      description: 想要什么能力？给出期望的 kvlang 写法（函数名/签名/示例）。
+      placeholder: |
+        ```kv
+        kvspace·find(path, pattern) -> (keys:...)
+        ```
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: 动机
+      description: 没有它会怎样？现有能力为何不足（而不是换个写法就能解决）。
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: 落点
+      description: 属哪一层（kvspace 原语 / layout 语法 / runtime rwir / stdlib rwfunc），是否需改 spec 条款
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 备选方案
+      description: 现有写法能否替代？为什么不够。
+    validations:
+      required: false
