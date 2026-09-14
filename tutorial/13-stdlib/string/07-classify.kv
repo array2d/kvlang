@@ -1,0 +1,28 @@
+// string 字符分类：isalpha / isdigit / isalnum / isspace / isupper / islower /
+//   isxdigit / ispunct（一律 ASCII；空串一律 false；
+//   至少一个字母且无相反大小写，数字与符号不影响判定）
+// 期望输出:
+//   isalpha true false false
+//   isdigit true false
+//   isalnum true false
+//   isspace true false
+//   isupper true false false
+//   islower true false
+//   isxdigit true false
+//   ispunct true false
+rwfunc test() -> () {
+	a1 = string·isalpha("ab")
+	a2 = string·isalpha("ab1")
+	a3 = string·isalpha("")
+	println("isalpha", a1, a2, a3)
+	println("isdigit", string·isdigit("123"), string·isdigit("12a"))
+	println("isalnum", string·isalnum("ab1"), string·isalnum("a b"))
+	println("isspace", string·isspace(" \t"), string·isspace(""))
+	u1 = string·isupper("AB1")
+	u2 = string·isupper("Ab")
+	u3 = string·isupper("1")
+	println("isupper", u1, u2, u3)
+	println("islower", string·islower("ab1"), string·islower("aB"))
+	println("isxdigit", string·isxdigit("1aF"), string·isxdigit("1g"))
+	println("ispunct", string·ispunct("!?,."), string·ispunct("a!"))
+}

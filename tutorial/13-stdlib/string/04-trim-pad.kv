@@ -1,0 +1,16 @@
+// string 修剪与填充：trim / trimstart / trimend / padstart / padend
+// 期望输出:
+//   trim=[hi]
+//   tstart=[hi  ]
+//   tend=[  hi]
+//   padstart= 121abc
+//   padend= abc121
+//   padshort= abcdef
+rwfunc test() -> () {
+	println("trim=[" + string·trim("  hi\t\n") + "]")
+	println("tstart=[" + string·trimstart("  hi  ") + "]")
+	println("tend=[" + string·trimend("  hi  ") + "]")
+	println("padstart=", string·padstart("abc", 6, "12"))
+	println("padend=", string·padend("abc", 6, "12"))
+	println("padshort=", string·padstart("abcdef", 3, "0"))
+}

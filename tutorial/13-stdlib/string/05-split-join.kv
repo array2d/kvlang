@@ -1,0 +1,25 @@
+// string 切分与连接：split / splitn / lines / fields / join
+//   散 key 容器由调用方先声明，rwfunc 往写参里填成员（array·append）
+// 期望输出:
+//   split a-b-c
+//   split-empty a|b|c
+//   splitn a/b,c
+//   lines a/b/c
+//   fields a/b/c
+rwfunc test() -> () {
+	p:[int64]·[]char/utf32 = {}
+	string·split("a,b,c", ",") -> (p, np)
+	println("split", string·join(p, "-"))
+	q:[int64]·[]char/utf32 = {}
+	string·split("abc", "") -> (q, nq)
+	println("split-empty", string·join(q, "|"))
+	s2:[int64]·[]char/utf32 = {}
+	string·splitn("a,b,c", ",", 2) -> (s2, ns)
+	println("splitn", string·join(s2, "/"))
+	l:[int64]·[]char/utf32 = {}
+	string·lines("a\nb\r\nc\n") -> (l, nl)
+	println("lines", string·join(l, "/"))
+	f:[int64]·[]char/utf32 = {}
+	string·fields("  a  b\tc ") -> (f, nf)
+	println("fields", string·join(f, "/"))
+}
