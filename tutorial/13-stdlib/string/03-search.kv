@@ -1,0 +1,29 @@
+// string 查找与替换：count / rfind / replace / replacen / cut
+// 期望输出:
+//   l x 3
+//   aa x 1
+//   empty x 4
+//   rfind 4
+//   rfind-miss -1
+//   rep a+b+c 2
+//   insert xaxbxcx 4
+//   replacen a-bXc 1
+//   cut a b=c true
+//   cut-miss a=b=c false
+rwfunc test() -> () {
+	println("l x", string·count("hello world", "l"))
+	println("aa x", string·count("aaa", "aa"))
+	println("empty x", string·count("abc", ""))
+	println("rfind", string·rfind("abcabc", "bc"))
+	println("rfind-miss", string·rfind("abc", "zz"))
+	string·replace("a-b-c", "-", "+") -> (r, n)
+	println("rep", r, n)
+	string·replace("abc", "", "x") -> (r2, n2)
+	println("insert", r2, n2)
+	string·replacen("aXbXc", "X", "-", 1) -> (r3, n3)
+	println("replacen", r3, n3)
+	string·cut("a=b=c", "=") -> (before, after, found)
+	println("cut", before, after, found)
+	string·cut("a=b=c", "z") -> (b2, a2, f2)
+	println("cut-miss", b2, f2)
+}

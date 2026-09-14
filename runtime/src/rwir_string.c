@@ -260,3 +260,19 @@ int kvlangBuiltinStringParseUint(kvlangFrame_t *f) {
     int rc = kvlangBuiltinWriteResult(f, &e); kvlangXvalueFree(&e); kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
+
+/* string·parsefloat(s) -> f：对齐 Go strconv.ParseFloat / Python float() / Rust parse::<f64>()。
+ * 与 parseint 同形：整串须消费完（无尾随空白/垃圾），否则 ValueError；无 base（浮点无进制）。 */
+int kvlangBuiltinStringParseFloat(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
+    if (n < 1) return kvlangBuiltinSetErr(f, "TypeError: string.parsefloat requires a string");
+    char *s = kvlangXvalueValueString(&in[0]);
+    char *end = NULL; double v = strtod(s, &end);
+    int bad = s[0] == '\0' || end == s || *end != '\0';
+    free(s);
+    if (bad) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "ValueError: string.parsefloat: invalid syntax"); }
+    uint8_t r[8]; memcpy(r, &v, 8);
+    kvlangXvalue_t e; kvlangXvalueNewTlv(&e, KVSPACE_KIND_FLOAT64, r, 8, 1);
+    int rc = kvlangBuiltinWriteResult(f, &e); kvlangXvalueFree(&e); kvlangBuiltinFreeInputs(in, n);
+    return rc;
+}

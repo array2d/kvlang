@@ -1,0 +1,17 @@
+// string 大小写：upper / lower / capitalize / title / swapcase / eqfold
+//   （一律 ASCII，见 stdlib/string.kv）
+// 期望输出:
+//   upper HELLO
+//   lower hello
+//   cap Hello
+//   title Hello World Foo-Bar
+//   swap hELLO wORLD
+//   eqfold true false
+rwfunc test() -> () {
+	println("upper", string·upper("Hello"))
+	println("lower", string·lower("Hello"))
+	println("cap", string·capitalize("hELLO"))
+	println("title", string·title("hello wORLD foo-bar"))
+	println("swap", string·swapcase("Hello World"))
+	println("eqfold", string·eqfold("AbC", "aBc"), string·eqfold("ab", "ac"))
+}

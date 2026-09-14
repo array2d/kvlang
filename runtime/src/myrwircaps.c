@@ -149,6 +149,7 @@ static const struct { const char *op; kvlangBuiltinFn fn; } myrwircaps[] = {
     {"string·slice", kvlangBuiltinStringSlice}, {"string·concat", kvlangBuiltinStringConcat},
     {"string·formatint", kvlangBuiltinStringFormatInt}, {"string·formatuint", kvlangBuiltinStringFormatUint},
     {"string·parseint", kvlangBuiltinStringParseInt}, {"string·parseuint", kvlangBuiltinStringParseUint},
+    {"string·parsefloat", kvlangBuiltinStringParseFloat},
     {"time·now", kvlangBuiltinTimeNow}, {"time·sub", kvlangBuiltinTimeSub}, {"time·add", kvlangBuiltinTimeAdd},
     {"time/duration·nanos", kvlangBuiltinDurFrom}, {"time/duration·millis", kvlangBuiltinDurFrom},
     {"time/duration·seconds", kvlangBuiltinDurFrom}, {"time/duration·minutes", kvlangBuiltinDurFrom},

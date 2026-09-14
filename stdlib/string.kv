@@ -1,10 +1,13 @@
 // 欢迎加入kvspace世界
-// lib string —— 字符串便利标准库。string native rwir 提供 len/char/ord/cmp/concat/find/slice
-// 及 strconv 家族 formatint/formatuint/parseint/parseuint（base 2..36，对齐 Go strconv）；
-// 以下 rwfunc 封装常用组合操作（判断 / 变换）。
-// 字符串类型恒 []char/utf32（kvlang 字面量默认编码）。
+// lib string —— 字符串便利标准库。native rwir：len/char/ord/cmp/find/slice/
+// concat/set；strconv 家族 formatint/formatuint/parseint/parseuint/parsefloat
+// （base 2..36，对齐 Go strconv）。
+// 以下 rwfunc 封装组合操作：命名取 C/Python/Rust/TypeScript/Go 五语言共识名，
+// 分歧处按族选阵营并在注释里记明（见 kvlang#157）。
+// 字符串类型恒 []char/utf32（kvlang 字面量默认编码）；大小写与分类一律 ASCII。
 
 lib string {
+	// ── 判定 ──────────────────────────────────────────────────────────
 	rwfunc eq(a:[]char/utf32, b:[]char/utf32) -> (r:bool) {
 		string·cmp(a, b) == 0 -> r
 	}
@@ -38,6 +41,333 @@ lib string {
 			string·cmp(tail, suf) == 0 -> r
 		}
 	}
+	// eqfold(a, b) -> r：忽略 ASCII 大小写相等（Go EqualFold / Rust
+	// eq_ignore_ascii_case）
+	rwfunc eqfold(a:[]char/utf32, b:[]char/utf32) -> (r:bool) {
+		string·upper(a) -> ua
+		string·upper(b) -> ub
+		string·cmp(ua, ub) == 0 -> r
+	}
+
+	// ── 查找与计数 ────────────────────────────────────────────────────
+	// count(s, sub) -> n：sub 不重叠出现次数；sub 空 = len+1（Py/Go/Rust/JS 一致）
+	rwfunc count(s:[]char/utf32, sub:[]char/utf32) -> (n:int64) {
+		ln = string·len(s)
+		m = string·len(sub)
+		n = 0
+		if (m == 0) {
+			n = ln + 1
+		} else {
+			pos = 0
+			while (pos + m <= ln) {
+				string·slice(s, pos, ln) -> rest
+				string·find(rest, sub) -> i
+				if (i == -1) {
+					break
+				}
+				n = n + 1
+				pos = pos + i + m
+			}
+		}
+	}
+	// rfind(s, sub) -> i：最后一次出现的下标，无则 -1（Py/Rust rfind、Go
+	// LastIndex、C strrchr）
+	rwfunc rfind(s:[]char/utf32, sub:[]char/utf32) -> (i:int64) {
+		ln = string·len(s)
+		m = string·len(sub)
+		i = -1
+		pos = 0
+		while (pos + m <= ln) {
+			string·slice(s, pos, ln) -> rest
+			string·find(rest, sub) -> k
+			if (k == -1) {
+				break
+			}
+			i = pos + k
+			pos = pos + k + 1
+		}
+	}
+
+	// ── 修剪与填充 ────────────────────────────────────────────────────
+	// trim(s) -> r：去两侧空白（Go TrimSpace / Rust trim / TS trim； 空白集同 C
+	// isspace）
+	rwfunc trim(s:[]char/utf32) -> (r:[]char/utf32) {
+		string·trimstart(s) -> t
+		string·trimend(t) -> r
+	}
+	// trimstart(s) -> r：去左侧空白（Python lstrip / Go TrimLeft / Rust
+	// trim_start）
+	rwfunc trimstart(s:[]char/utf32) -> (r:[]char/utf32) {
+		lo = 0
+		hi = string·len(s)
+		while (lo < hi) {
+			string·char(s, lo) -> c
+			string·find(" \t\n\r\v\f", c) -> w
+			if (w == -1) {
+				break
+			}
+			lo = lo + 1
+		}
+		string·slice(s, lo, hi) -> r
+	}
+	// trimend(s) -> r：去右侧空白（Python rstrip / Go TrimRight / Rust trim_end）
+	rwfunc trimend(s:[]char/utf32) -> (r:[]char/utf32) {
+		lo = 0
+		hi = string·len(s)
+		while (hi > lo) {
+			string·char(s, hi - 1) -> c
+			string·find(" \t\n\r\v\f", c) -> w
+			if (w == -1) {
+				break
+			}
+			hi = hi - 1
+		}
+		string·slice(s, lo, hi) -> r
+	}
+	// padstart(s, n, pad) -> r：左侧补到长度 n（TS padStart / Python rjust），
+	// pad 超长取前段
+	rwfunc padstart(s:[]char/utf32, n:int64,
+	                pad:[]char/utf32) -> (r:[]char/utf32) {
+		need = n - string·len(s)
+		pl = string·len(pad)
+		"" -> pre
+		while (need > 0 && pl > 0 && string·len(pre) < need) {
+			string·concat(pre, pad) -> pre
+		}
+		string·len(pre) -> q
+		if (need > 0 && q > need) {
+			string·slice(pre, 0, need) -> pre
+		}
+		string·concat(pre, s) -> r
+	}
+	// padend(s, n, pad) -> r：右侧补到长度 n（TS padEnd / Python ljust）
+	rwfunc padend(s:[]char/utf32, n:int64,
+	              pad:[]char/utf32) -> (r:[]char/utf32) {
+		s -> r
+		need = n - string·len(s)
+		pl = string·len(pad)
+		"" -> suf
+		while (need > 0 && pl > 0 && string·len(suf) < need) {
+			string·concat(suf, pad) -> suf
+		}
+		string·len(suf) -> q
+		if (need > 0 && q > need) {
+			string·slice(suf, 0, need) -> suf
+		}
+		string·concat(r, suf) -> r
+	}
+
+	// ── 切分与连接 ────────────────────────────────────────────────────
+	// splitn(s, sep, n) -> (parts, k) ：最多 n 段，末段为剩余； n <= 0 =
+	// 全切（Go SplitN）
+	// sep 空 = 逐码点切（Go/TS 阵营； Python 此处报错）。parts
+	// 由调用方先声明空容器。
+	rwfunc splitn(s:[]char/utf32, sep:[]char/utf32, n:int64) -> (
+	              parts:*[int64]·[]char/utf32, k:int64) {
+		k = 0
+		if (n != 0) {
+			ln = string·len(s)
+			m = string·len(sep)
+			pos = 0
+			if (m == 0) {
+				while (pos < ln) {
+					if (n > 0 && k == n - 1) {
+						string·slice(s, pos, ln) -> seg
+						array·append(parts, seg) -> parts
+						k = k + 1
+						pos = ln
+					} else {
+						string·char(s, pos) -> c
+						array·append(parts, c) -> parts
+						k = k + 1
+						pos = pos + 1
+					}
+				}
+			} else {
+				while (pos <= ln) {
+					if (n > 0 && k == n - 1) {
+						string·slice(s, pos, ln) -> seg
+						array·append(parts, seg) -> parts
+						k = k + 1
+						pos = ln + 1
+					} else {
+						string·slice(s, pos, ln) -> rest
+						string·find(rest, sep) -> j
+						if (j == -1) {
+							rest -> seg
+							array·append(parts, seg) -> parts
+							k = k + 1
+							pos = ln + 1
+						} else {
+							string·slice(s, pos, pos + j) -> seg
+							array·append(parts, seg) -> parts
+							k = k + 1
+							pos = pos + j + m
+						}
+					}
+				}
+			}
+		}
+	}
+	// split(s, sep) -> (parts, k) ：全切（Go Split / Python split / TS split /
+	// Rust split）
+	rwfunc split(s:[]char/utf32, sep:[]char/utf32) -> (
+	             parts:*[int64]·[]char/utf32, k:int64) {
+		string·splitn(s, sep, -1) -> (parts, k)
+	}
+	// lines(s) -> (parts, k) ：按 \n 切行，行尾 \r 剥除，末尾空行丢弃（Go Lines
+	// / Rust lines）
+	rwfunc lines(s:[]char/utf32) -> (
+	             parts:*[int64]·[]char/utf32, k:int64) {
+		k = 0
+		ln = string·len(s)
+		pos = 0
+		while (pos < ln) {
+			string·slice(s, pos, ln) -> rest
+			string·find(rest, "\n") -> j
+			line = rest
+			if (j != -1) {
+				string·slice(s, pos, pos + j) -> line2
+				line2 -> line
+				pos = pos + j + 1
+			} else {
+				pos = ln
+			}
+			string·len(line) -> llen
+			if (llen > 0) {
+				string·char(line, llen - 1) -> last
+				if (string·cmp(last, "\r") == 0) {
+					string·slice(line, 0, llen - 1) -> line3
+					line3 -> line
+				}
+			}
+			array·append(parts, line) -> parts
+			k = k + 1
+		}
+	}
+	// fields(s) -> (parts, k) ：按空白连续段切词，跳过首尾空白（Go Fields /
+	// Python s.split())
+	rwfunc fields(s:[]char/utf32) -> (
+	              parts:*[int64]·[]char/utf32, k:int64) {
+		k = 0
+		ln = string·len(s)
+		i = 0
+		while (i < ln) {
+			while (i < ln) {
+				string·char(s, i) -> c
+				string·find(" \t\n\r\v\f", c) -> w
+				if (w == -1) {
+					break
+				}
+				i = i + 1
+			}
+			if (i < ln) {
+				start = i
+				while (i < ln) {
+					string·char(s, i) -> c2
+					string·find(" \t\n\r\v\f", c2) -> w2
+					if (w2 != -1) {
+						break
+					}
+					i = i + 1
+				}
+				string·slice(s, start, i) -> word
+				array·append(parts, word) -> parts
+				k = k + 1
+			}
+		}
+	}
+	// join(parts, sep) -> r：用 sep 连接各成员（Go Join / Rust join）
+	rwfunc join(parts:*[int64]·[]char/utf32,
+	            sep:[]char/utf32) -> (r:[]char/utf32) {
+		"" -> r
+		kvspace·listlen(parts) -> c
+		i = 0
+		while (i < c) {
+			if (i > 0) {
+				string·concat(r, sep) -> r
+			}
+			kvspace·listn(parts, i) -> key
+			kvspace·get(parts, key) -> v
+			string·concat(r, v) -> r
+			i = i + 1
+		}
+	}
+	// cut(s, sep) -> (before, after, found) ：首次出现处切成两段（Go Cut； sep
+	// 空同 Go 语义）
+	rwfunc cut(s:[]char/utf32, sep:[]char/utf32) -> (
+	            before:[]char/utf32, after:[]char/utf32, found:bool) {
+		string·find(s, sep) -> j
+		m = string·len(sep)
+		ln = string·len(s)
+		if (j == -1) {
+			s -> before
+			"" -> after
+			found = false
+		} else {
+			string·slice(s, 0, j) -> before
+			string·slice(s, j + m, ln) -> after
+			found = true
+		}
+	}
+
+	// ── 替换 ──────────────────────────────────────────────────────────
+	// replacen(s, old, new, limit) -> (out, k) ：替换前 limit 处（limit < 0 =
+	// 全部，Go Replace）
+	// old 空 = 在每个码点边界插入 new（Py/Go/Rust/JS 一致）；k = 实际替换处数
+	rwfunc replacen(s:[]char/utf32, old:[]char/utf32, new:[]char/utf32,
+	                limit:int64) -> (out:[]char/utf32, k:int64) {
+		ln = string·len(s)
+		m = string·len(old)
+		"" -> out
+		k = 0
+		if (m == 0) {
+			i = 0
+			while (i <= ln) {
+				if (limit >= 0 && k >= limit) {
+					break
+				}
+				string·concat(out, new) -> out
+				k = k + 1
+				if (i < ln) {
+					string·char(s, i) -> c
+					string·concat(out, c) -> out
+				}
+				i = i + 1
+			}
+			if (i < ln) {
+				string·slice(s, i, ln) -> tail
+				string·concat(out, tail) -> out
+			}
+		} else {
+			pos = 0
+			while (pos + m <= ln) {
+				if (limit >= 0 && k >= limit) {
+					break
+				}
+				string·slice(s, pos, ln) -> rest
+				string·find(rest, old) -> j
+				if (j == -1) {
+					break
+				}
+				string·slice(s, pos, pos + j) -> seg
+				string·concat(out, seg) -> out
+				string·concat(out, new) -> out
+				k = k + 1
+				pos = pos + j + m
+			}
+			string·slice(s, pos, ln) -> tail
+			string·concat(out, tail) -> out
+		}
+	}
+	// replace(s, old, new) -> (out, k) ：全部替换（Go ReplaceAll / Py replace /
+	// Rust replace）
+	rwfunc replace(s:[]char/utf32, old:[]char/utf32,
+	               new:[]char/utf32) -> (out:[]char/utf32, k:int64) {
+		string·replacen(s, old, new, -1) -> (out, k)
+	}
+
+	// ── 变换 ──────────────────────────────────────────────────────────
 	rwfunc reverse(s:[]char/utf32) -> (r:[]char/utf32) {
 		n = string·len(s)
 		"" -> r
@@ -84,6 +414,153 @@ lib string {
 				string·concat(r, lc) -> r
 			} else {
 				string·concat(r, c) -> r
+			}
+			i = i + 1
+		}
+	}
+	// capitalize(s) -> r：首字母大写、其余小写（Python capitalize）
+	rwfunc capitalize(s:[]char/utf32) -> (r:[]char/utf32) {
+		ln = string·len(s)
+		if (ln == 0) {
+			"" -> r
+		} else {
+			string·char(s, 0) -> c0
+			string·slice(s, 1, ln) -> rest
+			string·upper(c0) -> uc
+			string·lower(rest) -> lr
+			string·concat(uc, lr) -> r
+		}
+	}
+	// title(s) -> r：每个字母词首字母大写、其余小写（Python title；
+	// 非字母即词边界）
+	rwfunc title(s:[]char/utf32) -> (r:[]char/utf32) {
+		"" -> r
+		n = string·len(s)
+		i = 0
+		prev = false
+		while (i < n) {
+			string·char(s, i) -> c
+			string·isalpha(c) -> a
+			if (a) {
+				if (prev) {
+					string·lower(c) -> x
+				} else {
+					string·upper(c) -> x
+				}
+				prev = true
+			} else {
+				c -> x
+				prev = false
+			}
+			string·concat(r, x) -> r
+			i = i + 1
+		}
+	}
+	// swapcase(s) -> r：字母大小写互换（Python swapcase）
+	rwfunc swapcase(s:[]char/utf32) -> (r:[]char/utf32) {
+		"" -> r
+		n = string·len(s)
+		i = 0
+		while (i < n) {
+			string·char(s, i) -> c
+			string·upper(c) -> u
+			string·lower(c) -> l
+			if (string·cmp(u, c) == 0) {
+				string·concat(r, l) -> r
+			} else {
+				string·concat(r, u) -> r
+			}
+			i = i + 1
+		}
+	}
+
+	// ── 字符分类（ASCII）─────────────────────────────────────────────
+	// allinset(s, set) -> r：s 非空且每个码点都在 set 中（各 is* 的分类原语）
+	rwfunc allinset(s:[]char/utf32, set:[]char/utf32) -> (r:bool) {
+		n = string·len(s)
+		r = n > 0
+		i = 0
+		while (i < n) {
+			string·char(s, i) -> c
+			string·find(set, c) -> k
+			if (k == -1) {
+				r = false
+				break
+			}
+			i = i + 1
+		}
+	}
+	rwfunc isalpha(s:[]char/utf32) -> (r:bool) {
+		set = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+		string·allinset(s, set) -> r
+	}
+	rwfunc isdigit(s:[]char/utf32) -> (r:bool) {
+		string·allinset(s, "0123456789") -> r
+	}
+	rwfunc isalnum(s:[]char/utf32) -> (r:bool) {
+		set = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+		string·allinset(s, set) -> r
+	}
+	rwfunc isxdigit(s:[]char/utf32) -> (r:bool) {
+		string·allinset(s, "0123456789abcdefABCDEF") -> r
+	}
+	rwfunc isspace(s:[]char/utf32) -> (r:bool) {
+		string·allinset(s, " \t\n\r\v\f") -> r
+	}
+	// isupper(s) -> r：至少一个字母且无小写（Python isupper：数字/符号不影响判定）
+	rwfunc isupper(s:[]char/utf32) -> (r:bool) {
+		up = false
+		bad = false
+		n = string·len(s)
+		i = 0
+		while (i < n) {
+			string·char(s, i) -> c
+			string·find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c) -> u
+			string·find("abcdefghijklmnopqrstuvwxyz", c) -> l
+			if (u != -1) {
+				up = true
+			}
+			if (l != -1) {
+				bad = true
+			}
+			i = i + 1
+		}
+		r = up && !bad
+	}
+	// islower(s) -> r：至少一个字母且无大写（Python islower）
+	rwfunc islower(s:[]char/utf32) -> (r:bool) {
+		lo = false
+		bad = false
+		n = string·len(s)
+		i = 0
+		while (i < n) {
+			string·char(s, i) -> c
+			string·find("abcdefghijklmnopqrstuvwxyz", c) -> l
+			string·find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c) -> u
+			if (l != -1) {
+				lo = true
+			}
+			if (u != -1) {
+				bad = true
+			}
+			i = i + 1
+		}
+		r = lo && !bad
+	}
+	// ispunct(s) -> r：非空且全为可见 ASCII 标点（C ispunct：33..126
+	// 中非字母数字）
+	rwfunc ispunct(s:[]char/utf32) -> (r:bool) {
+		al = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+		n = string·len(s)
+		r = n > 0
+		i = 0
+		while (i < n) {
+			string·char(s, i) -> c
+			string·ord(c) -> o
+			string·find(al, c) -> a
+			if (o < 33 || o > 126 || a != -1) {
+				r = false
+				break
 			}
 			i = i + 1
 		}

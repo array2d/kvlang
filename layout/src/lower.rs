@@ -1098,7 +1098,7 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
         | "string·formatuint" => return "char/utf32".to_string(),
         "random.int63" => return "int64".to_string(),
         "random·intn" | "random.uint64" | "string·parseuint" => return "uint64".to_string(),
-        "pow" | "sqrt" | "exp" | "log" => return "float64".to_string(),
+        "pow" | "sqrt" | "exp" | "log" | "string·parsefloat" => return "float64".to_string(),
         "sign" => return "int64".to_string(),
         "abs" | "neg" | "max" | "min" => {
             return if !reads.is_empty() {

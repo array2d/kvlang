@@ -200,6 +200,7 @@ rwfunc main() -> () {
 ### 外部进程/文件系统（networld）
 - `networld/proc·exec(args, envs) -> code[, out, err]`：args/envs 是 `{...}` 数组字面量，args 首元素=可执行文件；out/err 是 `@[]uint8` 捕获句柄（绑定即捕获）。
 - `networld/fs·size(p)->n`、`·read(p,start,len)->raw`、`·write(p,bytes)->n`、`·append(p,bytes)->n`、`·list(p)->names`、`·del(p)->code`、`·mkdir(p)->code`、`·exists(p)->b`。
+- 文本级（rwfunc）：`readtext(p)->(t,sz)`、`writetext(p,t)->n`（UTF-8 往返）、`match(name,pat)->b`（`*`/`?` 通配）、`glob(pat)->paths`、`grep(pat,path,glob)->hits`（`路径:行号:文本`）、`multi(path,olds,news)->(done,bad)`（逐条精确替换，全成才落盘）。
 - 字符串↔字节：`xv·reinterpret("s","[]uint8")` 或 `xv·reinterpret(raw,"[]char/utf8")`。
 
 ```kv
@@ -216,7 +217,10 @@ networld/fs·write("/tmp/x.txt", xv·reinterpret("hi", "[]uint8")) -> n
 - `kvlang·abs(x)`（= `&x`，取址）、`kvspace·cp(src,dst)`、`kvspace·cpdir(src,dst)`、`kvspace·cplist(src,dst)`、`kvspace·has(path)`。
 
 ### 字符串（string·*）
-- `len / char / ord / cmp / find / slice / concat / formatint / formatuint / parseint / parseuint`。
+- `len / char / ord / cmp / find / slice / concat / set / formatint / formatuint / parseint / parseuint / parsefloat`。
+- rwfunc 判定/查找/替换：`eq / ne / empty / contains / startswith / endswith / eqfold`、`count / rfind`、`replace / replacen / cut`。
+- rwfunc 修剪/切分：`trim / trimstart / trimend / padstart / padend`、`split / splitn / lines / fields / join`。
+- rwfunc 变换/分类：`reverse / repeat / upper / lower / capitalize / title / swapcase`、`allinset / isalpha / isdigit / isalnum / isspace / isupper / islower / isxdigit / ispunct`（大小写与分类一律 ASCII）。
 
 ### 数组（ndarray·* / xv·*）
 - `ndarray·numel / dim / shape`；`xv·at / set / reshape / reinterpret / langtype / bodylen`。
