@@ -1,0 +1,208 @@
+// 欢迎加入kvspace世界
+// lib networld/fs —— 宿主文件系统的文本级工具（rwfunc，kv 源码）。
+// native rwir（字节级，runtime-rs）：size / read(p,start,off) / write(p,bytes)
+//   / append / list / del / mkdir / exists。本库在其上补文本级组合：
+//   readtext / writetext  文件 ↔ []char/utf32 文本（UTF-8 解码 / 编码往返）
+//   match                名字段 shell 通配（* 任意串、? 单字符）
+//   glob                 按通配展开路径
+//   grep                 逐行查找（文件或目录下匹配 glob 的成员）
+//   multi                事务式多处编辑（逐条精确替换，全部成功才落盘）
+// 文本约定：文件按 UTF-8 解码为 []char/utf32 后操作（只有定宽的 char/utf32 可
+// 索引 / 切片）；落盘再编码回 UTF-8。字节级 I/O 仍走 native rwir。
+
+lib networld/fs {
+	// readtext(p) -> (t, sz)：整文件读为文本；sz = 字节数（缺失 = -1，t = ""）
+	rwfunc readtext(p:[]char/utf32) -> (t:[]char/utf32, sz:int64) {
+		networld/fs·size(p) -> sz
+		"" -> t
+		if (sz > 0) {
+			networld/fs·read(p, 0, sz) -> raw
+			xv·reinterpret(raw, "[]char/utf8") -> u8
+			char/utf32(u8) -> t
+		}
+	}
+	// writetext(p, t) -> n：文本按 UTF-8 覆盖写盘，返回字节数（失败 -1）
+	rwfunc writetext(p:[]char/utf32, t:[]char/utf32) -> (n:int64) {
+		char/utf8(t) -> u8
+		xv·reinterpret(u8, "[]uint8") -> bytes
+		networld/fs·write(p, bytes) -> n
+	}
+	// match(name, pat) -> b：名字段通配匹配（* 任意串、? 单字符，其余按字面）
+	rwfunc match(name:[]char/utf32, pat:[]char/utf32) -> (b:bool) {
+		nn = string·len(name)
+		pn = string·len(pat)
+		if (pn == 0) {
+			b = nn == 0
+		} else {
+			string·slice(pat, 1, pn) -> ptail
+			if (string·startswith(pat, "*")) {
+				networld/fs·match(name, ptail) -> b
+				if (!b && nn > 0) {
+					string·slice(name, 1, nn) -> ntail
+					networld/fs·match(ntail, pat) -> b
+				}
+			} else {
+				if (nn == 0) {
+					b = false
+				} else {
+					string·slice(name, 1, nn) -> ntail
+					if (string·startswith(pat, "?")) {
+						networld/fs·match(ntail, ptail) -> b
+					} else {
+						string·slice(name, 0, 1) -> nc
+						string·slice(pat, 0, 1) -> pc
+						if (string·cmp(nc, pc) == 0) {
+							networld/fs·match(ntail, ptail) -> b
+						} else {
+							b = false
+						}
+					}
+				}
+			}
+		}
+	}
+	// glob(pat) -> paths：按通配展开路径（\n 连接；无匹配 = 空串）。
+	// 仅最后一段可含 *?，其前目录须为字面路径，如 "/tmp/*.kv"、"src/*.c"。
+	rwfunc glob(pat:[]char/utf32) -> (paths:[]char/utf32) {
+		"" -> paths
+		ln = string·len(pat)
+		cut = -1
+		i = 0
+		while (i < ln) {
+			string·slice(pat, i, i + 1) -> c
+			if (string·cmp(c, "/") == 0) {
+				cut = i
+			}
+			i = i + 1
+		}
+		if (cut < 0) {
+			"." -> dir
+			pat -> np
+		} else {
+			string·slice(pat, 0, cut) -> dir
+			string·slice(pat, cut + 1, ln) -> np
+		}
+		dir -> scan
+		if (string·len(dir) == 0) {
+			"/" -> scan
+		}
+		networld/fs·list(scan) -> ns
+		kvspace·listlen(ns) -> nc
+		i = 0
+		while (i < nc) {
+			kvspace·listn(ns, i) -> k
+			kvspace·get(ns, k) -> nm
+			networld/fs·match(nm, np) -> ok
+			if (ok) {
+				string·concat(dir, "/") -> d
+				string·concat(d, nm) -> cp
+				string·concat(paths, cp) -> paths
+				string·concat(paths, "\n") -> paths
+			}
+			i = i + 1
+		}
+	}
+	// scan(text, path, pat) -> hits：逐行找含 pat 的行，输出 "path:行号:文本"\n
+	rwfunc scan(text:[]char/utf32, path:[]char/utf32,
+	            pat:[]char/utf32) -> (hits:[]char/utf32) {
+		"" -> hits
+		ln = string·len(text)
+		pos = 0
+		no = 0
+		while (pos < ln) {
+			string·slice(text, pos, ln) -> rest
+			string·find(rest, "\n") -> e
+			no = no + 1
+			if (e == -1) {
+				string·slice(text, pos, ln) -> line
+				pos = ln
+			} else {
+				string·slice(text, pos, pos + e) -> line
+				pos = pos + e + 1
+			}
+			string·find(line, pat) -> h
+			if (h != -1) {
+				string·concat(hits, path) -> hits
+				string·concat(hits, ":") -> hits
+				string·formatint(no, 10) -> sn
+				string·concat(hits, sn) -> hits
+				string·concat(hits, ":") -> hits
+				string·concat(hits, line) -> hits
+				string·concat(hits, "\n") -> hits
+			}
+		}
+	}
+	// grep(pat, path, glob) -> hits：path 是文件则扫它本身；是目录则扫其下匹配
+	// glob 的成员（glob 空 = 全部成员）。命中输出 "路径:行号:文本"，多行 \n 连接。
+	rwfunc grep(pat:[]char/utf32, path:[]char/utf32,
+	            glob:[]char/utf32) -> (hits:[]char/utf32) {
+		"" -> hits
+		networld/fs·list(path) -> ns
+		kvspace·listlen(ns) -> nc
+		if (nc == 0) {
+			networld/fs·readtext(path) -> (t, sz)
+			if (sz > 0) {
+				networld/fs·scan(t, path, pat) -> h
+				string·concat(hits, h) -> hits
+			}
+		} else {
+			gl = string·len(glob)
+			i = 0
+			while (i < nc) {
+				kvspace·listn(ns, i) -> k
+				kvspace·get(ns, k) -> nm
+				networld/fs·match(nm, glob) -> ok
+				if (gl == 0 || ok) {
+					string·concat(path, "/") -> d
+					string·concat(d, nm) -> cp
+					networld/fs·readtext(cp) -> (t, sz)
+					if (sz > 0) {
+						networld/fs·scan(t, cp, pat) -> h
+						string·concat(hits, h) -> hits
+					}
+				}
+				i = i + 1
+			}
+		}
+	}
+	// multi(path, olds, news) -> (done, bad)：事务式多处编辑。按序对文件文本做
+	// 逐条精确替换，每条 old 须恰命中 1 处；全部成功才落盘。
+	//   bad = -1  全部成功，done = 条数（文件已落盘）
+	//   bad >= 0  该下标编辑失败（未命中或多处命中），文件不变
+	//   bad = -2  文件不可读    bad = -3  olds / news 长度不等
+	rwfunc multi(path:[]char/utf32, olds:*[int64]·[]char/utf32,
+	             news:*[int64]·[]char/utf32) -> (done:int64, bad:int64) {
+		kvspace·listlen(olds) -> cnt
+		kvspace·listlen(news) -> m
+		done = 0
+		bad = -1
+		if (cnt != m) {
+			bad = -3
+		} else {
+			networld/fs·readtext(path) -> (t, sz)
+			if (sz < 0) {
+				bad = -2
+			} else {
+				i = 0
+				while (i < cnt) {
+					kvspace·listn(olds, i) -> ko
+					kvspace·listn(news, i) -> kn
+					kvspace·get(olds, ko) -> o
+					kvspace·get(news, kn) -> w
+					string·count(t, o) -> c
+					if (c != 1) {
+						bad = i
+						break
+					}
+					string·replace(t, o, w) -> (t2, _)
+					t = t2
+					done = done + 1
+					i = i + 1
+				}
+				if (bad < 0) {
+					networld/fs·writetext(path, t) -> wn
+				}
+			}
+		}
+	}
+}
