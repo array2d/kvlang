@@ -12,7 +12,8 @@ for repo in $(jq -r 'keys[]' "$ROOT/deps.json"); do
   if [ "$repo" = "kvspace-c" ] || [ "$repo" = "kvspace-durable" ]; then
     sudo mkdir -p /usr/lib/kvspace
     sudo cp "$tmp/lib/"*.so* /usr/lib/kvspace/
-  else
+  elif [ -d "$tmp/lib" ]; then
+    # blockmalloc / slotsboxmalloc 是 header-only：只有头、无 lib
     sudo cp "$tmp/lib/"*.so* /usr/lib/
   fi
   # 可选可执行（kvspace 的 CLI）→ /usr/bin

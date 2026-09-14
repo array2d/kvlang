@@ -33,7 +33,7 @@ jobs:
           done
           # 库（递归扫）：本仓两个产物 + 依赖顶层库 + 后端库（dispatch 的 dlopen 目录）
           find bin layout/target/release -maxdepth 1 \( -name 'lib*.so*' -o -name 'lib*.dylib' \) -exec cp -P {} "$d/lib/" \;
-          find /usr/lib -maxdepth 1 \( -name 'libblockmalloc.so*' -o -name 'libslotsboxmalloc.so*' \) -exec cp -P {} "$d/lib/" \;
+          # blockmalloc / slotsboxmalloc 是 header-only（只发头、无 lib），故不收集它们的 .so
           find /usr/lib/kvspace -maxdepth 1 -name '*.so*' -exec cp -P {} "$d/lib/kvspace/" \;
           # 可执行：本仓 CLI + 依赖带来的 CLI
           cp bin/kvlang bin/kvlanglayout "$d/bin/"
@@ -113,7 +113,6 @@ jobs:
           done
           # 库（递归扫）：本仓产物 + 依赖顶层 dylib + 后端 dylib（dispatch 的 dlopen 目录）
           find bin layout/target/release -maxdepth 1 -name '*.dylib' -exec cp -P {} "$d/lib/" \;
-          find /usr/local/lib -maxdepth 1 \( -name 'libblockmalloc*.dylib' -o -name 'libslotsboxmalloc*.dylib' \) -exec cp -P {} "$d/lib/" \;
           find /usr/local/lib/kvspace -maxdepth 1 -name '*.dylib' -exec cp -P {} "$d/lib/kvspace/" \;
           cp /tmp/kvspace-durable/target/release/libkvspace_durable.dylib "$d/lib/kvspace/"
           # 可执行：本仓 CLI + 依赖带来的 CLI
