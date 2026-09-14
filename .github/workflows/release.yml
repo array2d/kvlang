@@ -26,17 +26,18 @@ jobs:
           v="${GITHUB_REF_NAME}"
           d="kvlang-abi-$v-linux-x86_64"
           mkdir -p "$d/include/kvlang" "$d/lib/kvspace" "$d/bin"
-          cp runtime/include/*.h "$d/include/kvlang/"
-          # CLI：kvlang（Rust runtime）+ kvlanglayout（layout CLI）+ kvspace（dispatch 前端 CLI，随依赖装入）
+          # 头（递归）：自己的 runtime 头 + deps.json 各依赖的头（/usr/include/<repo>/）
+          cp -R runtime/include/. "$d/include/kvlang/"
+          for h in kvspace blockmalloc slotsboxmalloc; do
+            [ -d "/usr/include/$h" ] && cp -R "/usr/include/$h" "$d/include/"
+          done
+          # 库（递归扫）：本仓两个产物 + 依赖顶层库 + 后端库（dispatch 的 dlopen 目录）
+          find bin layout/target/release -maxdepth 1 \( -name 'lib*.so*' -o -name 'lib*.dylib' \) -exec cp -P {} "$d/lib/" \;
+          find /usr/lib -maxdepth 1 \( -name 'libblockmalloc.so*' -o -name 'libslotsboxmalloc.so*' \) -exec cp -P {} "$d/lib/" \;
+          find /usr/lib/kvspace -maxdepth 1 -name '*.so*' -exec cp -P {} "$d/lib/kvspace/" \;
+          # 可执行：本仓 CLI + 依赖带来的 CLI
           cp bin/kvlang bin/kvlanglayout "$d/bin/"
           cp /usr/bin/kvspace "$d/bin/"
-          # 自带全部 ABI 依赖的头 → 解包即 /usr/include 布局（扩展编译需要 kvspace.h 等）
-          cp -r /usr/include/kvspace /usr/include/blockmalloc /usr/include/slotsboxmalloc "$d/include/"
-          cp bin/libkvlang_runtime.so "$d/lib/"
-          cp layout/target/release/libkvlanglayout.so "$d/lib/"
-          # 自带全部 ABI 依赖 → 解包即 /usr/lib + /usr/lib/kvspace 布局
-          cp /usr/lib/libblockmalloc.so* /usr/lib/libslotsboxmalloc.so* "$d/lib/"
-          cp /usr/lib/libkvspace.so* /usr/lib/kvspace/libkvspace-c.so* /usr/lib/kvspace/libkvspace_durable.so* "$d/lib/kvspace/"
           printf '{"abi":"%s"}\n' "$v" > "$d/abi-manifest.json"
           tar czf "$d.tar.gz" "$d"
           tar tzf "$d.tar.gz"
@@ -105,18 +106,19 @@ jobs:
           v="${GITHUB_REF_NAME}"
           d="kvlang-abi-$v-darwin-arm64"
           mkdir -p "$d/include/kvlang" "$d/lib/kvspace" "$d/bin"
-          cp runtime/include/*.h "$d/include/kvlang/"
-          # CLI：kvlang（Rust runtime）+ kvlanglayout（layout CLI）+ kvspace（dispatch 前端 CLI）
+          # 头（递归）：自己的 runtime 头 + 各依赖的头（/usr/local/include/<repo>/）
+          cp -R runtime/include/. "$d/include/kvlang/"
+          for h in kvspace blockmalloc slotsboxmalloc; do
+            [ -d "/usr/local/include/$h" ] && cp -R "/usr/local/include/$h" "$d/include/"
+          done
+          # 库（递归扫）：本仓产物 + 依赖顶层 dylib + 后端 dylib（dispatch 的 dlopen 目录）
+          find bin layout/target/release -maxdepth 1 -name '*.dylib' -exec cp -P {} "$d/lib/" \;
+          find /usr/local/lib -maxdepth 1 \( -name 'libblockmalloc*.dylib' -o -name 'libslotsboxmalloc*.dylib' \) -exec cp -P {} "$d/lib/" \;
+          find /usr/local/lib/kvspace -maxdepth 1 -name '*.dylib' -exec cp -P {} "$d/lib/kvspace/" \;
+          cp /tmp/kvspace-durable/target/release/libkvspace_durable.dylib "$d/lib/kvspace/"
+          # 可执行：本仓 CLI + 依赖带来的 CLI
           cp bin/kvlang bin/kvlanglayout "$d/bin/"
           cp /tmp/kvspace/cli/target/release/kvspace "$d/bin/"
-          # 自带全部 ABI 依赖的头 → 解包即 /usr/local/include 布局
-          cp -r /usr/local/include/kvspace /usr/local/include/blockmalloc /usr/local/include/slotsboxmalloc "$d/include/"
-          cp bin/libkvlang_runtime.dylib "$d/lib/"
-          cp layout/target/release/libkvlanglayout.dylib "$d/lib/"
-          # 自带全部 ABI 依赖 → 解包即 /usr/local/lib + /usr/local/lib/kvspace 布局
-          cp /usr/local/lib/libblockmalloc*.dylib /usr/local/lib/libslotsboxmalloc*.dylib "$d/lib/"
-          cp /usr/local/lib/kvspace/*.dylib "$d/lib/kvspace/"
-          cp /tmp/kvspace-durable/target/release/libkvspace_durable.dylib "$d/lib/kvspace/"
           printf '{"abi":"%s"}\n' "$v" > "$d/abi-manifest.json"
           tar czf "$d.tar.gz" "$d"
           tar tzf "$d.tar.gz"
