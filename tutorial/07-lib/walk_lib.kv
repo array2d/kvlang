@@ -1,21 +1,29 @@
-// 递归遍历代码树 /lib：逐层列举成员名 + 其值的 langtype（目录为 index）。
-// 目录判定不看 list 的尾斜杠（三后端不统一）：<名>/ 是结构目录，
-// <名>· 是成员前缀目录（pkg 成员容器，如 /lib/string· 装 string·upper…）。
-// 两种拼写都试，先 / 后 ·。kvspace·listn 返回 utf8，须显式转 char/utf32
-// 才能喂给 string·find（utf32）。
+// 递归遍历一棵 lib 子树：列举成员名 + 叶子的 langtype（目录只列名），并下钻一层。
+// 粒度按实测定：本 pod 上单次 kvspace 操作约 17ms（redis RTT 主导），所以整棵 /lib
+// （含 84 章规范树）或 string 包全下钻（3k+ 叶子）都是分钟级。这里：
+//   1) 列 string 包自身成员（38 个函数的签名键 / 源码 / 目录条目，192 条）；
+//   2) 只挑一个函数目录（count/）下钻，演示递归 + 指令槽与标签的 langtype。
+// 成员经 `kvspace·members` 取：值与同名目录共存时后端会同时给出裸名与目录名（两个实体，
+// 后端不去重），members 折成一条，遍历侧不必各自去重（见 lib kvspace 注释）。
+// 目录判定不看 list 的尾斜杠（三后端不统一）：<名>/ 是结构目录，<名>· 是成员前缀目录。
+// 两种拼写都试，先 / 后 ·。kvspace·listn 返回 utf8，须显式转 char/utf32 才能索引（utf32）。
 // 期望输出:
-//   /lib/
-//   print
-//   println
-//   kvspace
-//   string
-//   math
-rwfunc walk(path:[]char/utf32, indent:[]char/utf32) -> () {
-	kvspace·listlen(path) -> n
+//   /lib/string·
+//   upper
+//   upper.src
+//   count/
+//   [0,-1]
+//   /lib/string·count/
+//   [0,0] rwfunc
+//   ‥labels/
+//   _do_9
+rwfunc walk(path:[]char/utf32, indent:[]char/utf32, down:int64) -> () {
+	ms:[int64]·[]char/utf32 = {}
+	kvspace·members(path) -> (ms, n)
 	0 -> i
-	"" -> last
 	while (i < n) {
-		kvspace·listn(path, i) -> nm8
+		kvspace·listn(ms, i) -> mk
+		kvspace·get(ms, mk) -> nm8
 		char/utf32(nm8) -> nm
 		path + nm -> full
 		"" -> child
@@ -35,24 +43,27 @@ rwfunc walk(path:[]char/utf32, indent:[]char/utf32) -> () {
 				}
 			}
 		}
-		kvspace·get(full) -> v
-		if (v == None) {
-			println(indent, nm)
+		if (child == "") {
+			kvspace·get(full) -> v
+			if (v == None) {
+				println(indent, nm)
+			} else {
+				xv·langtype(v) -> lt
+				char/utf32(lt) -> lts
+				println(indent, nm, lts)
+			}
 		} else {
-			xv·langtype(v) -> lt
-			char/utf32(lt) -> lts
-			println(indent, nm, lts)
-		}
-		// 孪生条目去重：fs 会同时给出 X 与 X/（都指向同一目录），只走一次。
-		string·cmp(child, last) != 0 -> fresh
-		if (string·len(child) > 0 && fresh) {
-			walk(child, indent + "  ")
-			child -> last
+			println(indent, nm)
+			if (down > 0) {
+				walk(child, indent + "  ", down - 1)
+			}
 		}
 		i + 1 -> i
 	}
 }
 rwfunc test() -> () {
-	println("/lib/")
-	walk("/lib/", "  ")
+	println("/lib/string·")
+	walk("/lib/string·", "  ", 0)
+	println("/lib/string·count/")
+	walk("/lib/string·count/", "  ", 1)
 }
