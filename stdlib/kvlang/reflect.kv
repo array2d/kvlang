@@ -1,0 +1,53 @@
+// 欢迎加入kvspace世界
+// lib kvlang/reflect —— kvlang 自省（rwfunc，kv 源码）。
+//   fnlist(name) -> listing：枚举 /lib/<name> 下的能力名，逗号连接。
+// 分类看 xvalue 的 langtype（三轴正交：ref / storetype / langtype），不看名字猜——
+// 用 `xv·parselangtype(v) -> kind` 拿基名（剥掉 [dims] 与 "def " 前缀）：
+//   langtype     形参 / 返回槽（def langtype）—— 不是能力，跳过
+//   rwir         rwir 路由头（def rwir）—— 能力，名字原样
+//   rwfunc       函数签名槽 —— 能力
+//   其他数据      常量等普通 key —— 能力，名字原样
+// 每个 rwfunc 在容器里有三条成员：`<fn>.[0,±k]`（形参）、`<fn>.src`（源码副本）、
+//   `<fn>/`（函数目录条目）。前者按 langtype 跳过，中者是源码副本跳过，后者去尾斜杠即函数名。
+// 成员一律经 `kvspace·members` 取：值与同名目录共存时后端会同时给出裸名与目录名（两个实体，
+//   后端不去重），members 把它折成一条，这里就不必再猜「裸名是不是目录的孪生」。
+// 用途：把一棵 lib 子树的「有什么能力」压成一行文本，供 LLM 生成能力记忆 / 工具清单。
+// 命名沿用 Go/Rust 的 reflect（自省）；不占用 `lib kvlang`——那是 kvlangbrief 与
+// kvlang·vet/·layout/·format/·dump 四个 def rwir 路由头的命名空间。
+
+lib kvlang/reflect {
+	rwfunc fnlist(name:[]char/utf32) -> (listing:[]char/utf32) {
+		"" -> listing
+		"/lib/" + name + "·" -> mdir
+		ms:[int64]·[]char/utf32 = {}
+		kvspace·members(mdir) -> (ms, n)
+		i = 0
+		while (i < n) {
+			kvspace·listn(ms, i) -> mk
+			kvspace·get(ms, mk) -> k8
+			char/utf32(k8) -> key
+			string·concat(mdir, key) -> kp
+			kvspace·get(kp) -> v
+			xv·parselangtype(v) -> k
+			if (k != "langtype") {
+				string·find(key, ".src") -> src
+				if (src < 0) {
+					string·len(key) -> klen
+					string·char(key, klen - 1) -> tail
+					if (tail == "/") {
+						klen - 1 -> cut
+						string·slice(key, 0, cut) -> cap
+					} else {
+						key -> cap
+					}
+					if (listing == "") {
+						cap -> listing
+					} else {
+						listing + ", " + cap -> listing
+					}
+				}
+			}
+			i + 1 -> i
+		}
+	}
+}

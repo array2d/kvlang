@@ -368,3 +368,62 @@ int kvlangBuiltinXvBodylen(kvlangFrame_t *f) {
     kvlangXvalueFree(&r);
     return rc;
 }
+
+/* 写第 i 个写参槽（多输出用；kvlangBuiltinWriteResult 只写 writes[0]）。 */
+static void xv_write_slot(kvlangFrame_t *f, int i, const kvlangXvalue_t *v) {
+    char *owned = NULL;
+    const char *fr = f->frame_root;
+    if (!fr) {
+        owned = kvlangKeytreeFrameRoot(f->pc);
+        fr = owned;
+    }
+    char *key = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->writes[i].name);
+    kvlangKvPair_t pair = {key, *v};
+    char err[256];
+    kvlangKvSet(f->kv, &pair, 1, err, sizeof err);
+    free(key);
+    free(owned);
+}
+
+/* xv·parselangtype(v) -> (kind[, ndim])：解析 v 的 langtype（三轴正交的第三轴）。
+ *   kind —— 剥掉前导 [dims] 与 "def " 前缀后的基名：char / char/utf8 / float64 /
+ *           rwfunc / rwir / langtype / stringkeymap / index …
+ *   ndim —— 维数（可省：只绑一个写参时不出）
+ * 用途：按类型给 KV 成员分类（如 def langtype = 形参槽、def rwir = 路由头），
+ *       调用方不必对 langtype 串做字符串手术。 */
+int kvlangBuiltinXvParselangtype(kvlangFrame_t *f) {
+    if (f->inst->nw == 0)
+        return kvlangBuiltinSetErr(
+            f, "TypeError: xv.parselangtype requires a write param (-> kind[, ndim])");
+    kvspaceHead_t h;
+    const char *lt = "";
+    if (xv_head1(f, &h) == 0)
+        lt = (const char *)h.langtype;
+    kvlangLangtype p;
+    kvlangLangtypeParse((const uint8_t *)lt, &p);
+    const char *k = p.kind ? p.kind : "";
+    int32_t kl = p.kind_len;
+    if (kl >= 4 && strncmp(k, "def ", 4) == 0) {
+        k += 4;
+        kl -= 4;
+    }
+    char buf[256];
+    if (kl < 0)
+        kl = 0;
+    if ((size_t)kl >= sizeof buf)
+        kl = (int32_t)sizeof buf - 1;
+    memcpy(buf, k, (size_t)kl);
+    buf[kl] = 0;
+    kvlangXvalue_t vk;
+    kvlangXvalueNewCharUtf8(&vk, buf);
+    xv_write_slot(f, 0, &vk);
+    kvlangXvalueFree(&vk);
+    if (f->inst->nw > 1) {
+        kvlangXvalue_t vn;
+        kvlangXvalueNewInt64(&vn, p.ndim);
+        xv_write_slot(f, 1, &vn);
+        kvlangXvalueFree(&vn);
+    }
+    kvlangBuiltinNextPc(f);
+    return 0;
+}

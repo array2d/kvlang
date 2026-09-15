@@ -565,4 +565,31 @@ lib string {
 			i = i + 1
 		}
 	}
+	// lang(s) -> lg：语言子标签（BCP-47 短码）—— 按文字系统判：
+	// 假名 > 谚文 > 汉字 > 拉丁；都不命中（数字 / 标点 / 空串）= "other"。
+	// 命名对齐主流：HTML `lang`、ICU `uloc_getLanguage`、Go `x/text/language`、
+	// JS `Intl.Locale.language`（不叫 script——与「脚本」撞词，且 script ≠ 语言）。
+	rwfunc lang(s:[]char/utf32) -> (lg:[]char/utf32) {
+		han = false
+		kana = false
+		hangul = false
+		latin = false
+		n = string·len(s)
+		i = 0
+		while (i < n) {
+			string·char(s, i) -> c
+			string·ord(c) -> o
+			if (o >= 12352) { if (o <= 12543) { kana = true } }     // 平/片假名
+			if (o >= 19968) { if (o <= 40959) { han = true } }      // 汉字
+			if (o >= 44032) { if (o <= 55215) { hangul = true } }   // 谚文
+			if (o >= 65) { if (o <= 90) { latin = true } }          // A-Z
+			if (o >= 97) { if (o <= 122) { latin = true } }         // a-z
+			i = i + 1
+		}
+		"other" -> lg
+		if (latin) { "en" -> lg }
+		if (han) { "zh" -> lg }
+		if (hangul) { "ko" -> lg }
+		if (kana) { "ja" -> lg }
+	}
 }

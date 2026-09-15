@@ -34,12 +34,24 @@ int kvlangBuiltinVthreadRun(kvlangFrame_t *f) {
     kvlangBuiltinFreeInputs(in, n);
     char *subpc = NULL, *status = NULL;
     kvlangVthreadGet(f->kv, vid, &subpc, &status);
-    free(status); free(vid);
+    free(status);
     if (!subpc || !subpc[0]) { free(subpc); kvlangBuiltinNextPc(f); return 0; }
     char *subout = NULL;
     int rc = kvlangKvcpuExecuteMode(f->kv, subpc, KVMODE_RETURN, &subout);
     free(subpc);
-    if (rc < 0) { free(subout); return kvlangBuiltinSetErr(f, "RuntimeError: vthread.run failed"); }
+    if (rc < 0) {
+        /* 子 vthread 自己失败（status=error）是**子**的终态：监督者要能活着检视
+         * /vthread/<vid>/‥status 与 ‥error/msg（一个子任务失败不该杀掉整条会话）。
+         * 只有驱动本身失败才冒泡给父。 */
+        char *sp = NULL, *st = NULL;
+        kvlangVthreadGet(f->kv, vid, &sp, &st);
+        free(sp);
+        int child_failed = st && strcmp(st, "error") == 0;
+        free(st); free(vid); free(subout);
+        if (child_failed) { kvlangBuiltinNextPc(f); return 0; }
+        return kvlangBuiltinSetErr(f, "RuntimeError: vthread.run failed");
+    }
+    free(vid);
     if (rc == 1) { *f->yield_pc = subout; return 0; }
     kvlangBuiltinNextPc(f);
     return 0;

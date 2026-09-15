@@ -144,6 +144,7 @@ static const struct { const char *op; kvlangBuiltinFn fn; } myrwircaps[] = {
     {"xv·at", kvlangBuiltinXvAt}, {"xv·set", kvlangBuiltinXvSet}, {"xv·reshape", kvlangBuiltinXvReshape},
     {"xv·reinterpret", kvlangBuiltinXvReinterpret},
     {"xv·langtype", kvlangBuiltinXvLangtype}, {"xv·bodylen", kvlangBuiltinXvBodylen},
+    {"xv·parselangtype", kvlangBuiltinXvParselangtype},
     {"string·set", kvlangBuiltinStringSet}, {"string·char", kvlangBuiltinStringChar}, {"string·ord", kvlangBuiltinStringOrd},
     {"string·cmp", kvlangBuiltinStringCmp}, {"string·find", kvlangBuiltinStringFind}, {"string·len", kvlangBuiltinStringLen},
     {"string·slice", kvlangBuiltinStringSlice}, {"string·concat", kvlangBuiltinStringConcat},

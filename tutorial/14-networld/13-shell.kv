@@ -1,0 +1,10 @@
+// networld/shell·run(cmd) -> out：bash -c 的 stdout 文本（stderr 不返回）
+// 期望输出:
+//   out= hello shell
+//   vars= 42
+rwfunc test() -> () {
+	networld/shell·run("echo hello shell") -> o
+	println("out=", o)
+	networld/shell·run("x=42; echo $x") -> v
+	println("vars=", v)
+}

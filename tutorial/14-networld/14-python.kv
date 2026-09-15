@@ -1,0 +1,10 @@
+// networld/python·run(code) -> out：python3 -c 的 stdout 文本（stderr 不返回）
+// 期望输出:
+//   out= 42
+//   str= abc
+rwfunc test() -> () {
+	networld/python·run("print(6*7)") -> o
+	println("out=", o)
+	networld/python·run("print('a'+'bc')") -> s
+	println("str=", s)
+}

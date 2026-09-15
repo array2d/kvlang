@@ -1,0 +1,72 @@
+// networld/edit：文件编辑语义 —— 行号窗口读 / 精确替换（唯一命中）/ 事务式多处替换
+//   read    行号窗口视图（from 行起 lines 行，lines <= 0 = 到末尾）
+//   write   覆盖写 + 回读校验
+//   replace 单处精确替换：old 须恰命中 1 处，否则一个字节都不动（dry = 1 只预演）
+//   multi   事务式多处替换：全部成功才落盘
+//   code    0 成功 / 1 未找到 / 2 歧义 / 3 不可读 / 4 写失败 / 5 回读不一致 / 6 长度不等
+// 期望输出:
+//   window= 2: beta
+//   3: alpha
+//   (total,sz)=( 4 , 23 )
+//   dry= ( 1 , 1 , 0 )
+//   unchanged= alpha
+//   ambiguous= ( 0 , 2 , 2 )
+//   missing= ( 0 , 0 , 1 )
+//   ok= ( 1 , 1 , 0 )
+//   after= alpha
+//   multi= ( 2 , -1 , 0 )
+//   rolled= ( 1 , 1 , 2 )
+//   keep= alpha
+//   lenbad= ( 0 , -1 , 6 )
+//   final= x
+//   tmpleft= 0
+//   bin-total= -2
+//   bin-code= 7
+rwfunc test() -> () {
+	d = "/tmp/kvlang_edit"
+	p = "/tmp/kvlang_edit/t.txt"
+	noenv:[int64]·[]char/utf32 = {}
+	clean:[int64]·[]char/utf32 = {"rm", "-rf", "/tmp/kvlang_edit"}
+	networld/proc·exec(clean, noenv) -> rc
+	networld/fs·mkdir(d) -> mc
+	networld/fs·writetext(p, "alpha\nbeta\nalpha\ngamma\n") -> w0
+	networld/edit·read(p, 2, 2) -> (v1, t1, s1)
+	println("window=", v1)
+	println("(total,sz)=(", t1, ",", s1, ")")
+	networld/edit·replace(p, "beta", "BETA", 1) -> (d1, h1, c1)
+	println("dry= (", d1, ",", h1, ",", c1, ")")
+	networld/fs·readtext(p) -> (unchanged, _)
+	println("unchanged=", unchanged)
+	networld/edit·replace(p, "alpha", "A", 0) -> (d2, h2, c2)
+	println("ambiguous= (", d2, ",", h2, ",", c2, ")")
+	networld/edit·replace(p, "zzz", "A", 0) -> (d3, h3, c3)
+	println("missing= (", d3, ",", h3, ",", c3, ")")
+	networld/edit·replace(p, "beta", "BETA", 0) -> (d4, h4, c4)
+	println("ok= (", d4, ",", h4, ",", c4, ")")
+	networld/fs·readtext(p) -> (after, _)
+	println("after=", after)
+	olds:[int64]·[]char/utf32 = {"BETA", "gamma"}
+	news:[int64]·[]char/utf32 = {"B", "G"}
+	networld/edit·multi(p, olds, news, 0) -> (md, mb, mc2)
+	println("multi= (", md, ",", mb, ",", mc2, ")")
+	olds2:[int64]·[]char/utf32 = {"B", "alpha"}
+	news2:[int64]·[]char/utf32 = {"C", "D"}
+	networld/edit·multi(p, olds2, news2, 0) -> (rd, rb, rc2)
+	println("rolled= (", rd, ",", rb, ",", rc2, ")")
+	networld/fs·readtext(p) -> (keep, _)
+	println("keep=", keep)
+	olds3:[int64]·[]char/utf32 = {"B"}
+	news3:[int64]·[]char/utf32 = {"C", "D"}
+	networld/edit·multi(p, olds3, news3, 0) -> (ld, lb, lc)
+	println("lenbad= (", ld, ",", lb, ",", lc, ")")
+	networld/edit·write(p, "x\n") -> (wn, wc)
+	networld/fs·readtext(p) -> (final, _)
+	println("final=", final)
+	networld/fs·glob("/tmp/kvlang_edit/*.tmp") -> left
+	println("tmpleft=", string·len(left))
+	networld/shell·run("printf '\\377\\376' > /tmp/kvlang_edit/bin.dat") -> binw
+	networld/edit·read("/tmp/kvlang_edit/bin.dat", 1, 0) -> (bv, bt, bs)
+	println("bin-total=", bt)
+	networld/edit·replace("/tmp/kvlang_edit/bin.dat", "x", "y", 0) -> (bd, bh, bc)
+	println("bin-code=", bc)
+}
