@@ -52,6 +52,15 @@ pub fn append(eng: &Engine, pc: &str) {
     eng.set_tlv_encoded(&eng.write0(pc), "int64", &n.to_le_bytes(), &[]);
 }
 
+/// networld/fs·rename(src, dst) -> code：改名/移动（POSIX rename 语义，同文件系统内原子）；
+/// 0 成功 / -1 失败。配合 write 临时文件 + rename 可得「要么全有要么全无」的原子落盘。
+pub fn rename(eng: &Engine, pc: &str) {
+    let src = eng.read0(pc);
+    let dst = eng.read_at(pc, 1);
+    let code = std::fs::rename(&src, &dst).map(|_| 0i64).unwrap_or(-1);
+    eng.set_tlv_encoded(&eng.write0(pc), "int64", &code.to_le_bytes(), &[]);
+}
+
 /// networld/fs·list(p) -> names：列目录 p 的成员名（名字序）。p 必须是目录，否则空列表。
 pub fn list(eng: &Engine, pc: &str) {
     let path = eng.read0(pc);
@@ -93,6 +102,17 @@ pub fn mkdir(eng: &Engine, pc: &str) {
 pub fn exists(eng: &Engine, pc: &str) {
     let path = eng.read0(pc);
     let b = std::path::Path::new(&path).exists();
+    eng.set_tlv_encoded(&eng.write0(pc), "bool", &[b as u8], &[]);
+}
+
+/// networld/fs·isutf8(p) -> b：p 的内容是否是合法 UTF-8（缺失/不可读 = false）。
+/// 文本级改写（networld/edit）在落盘前用它把二进制文件挡在外面——解码成 []char/utf32
+/// 再写回是有损的，非法字节会被替换字符吃掉。
+pub fn isutf8(eng: &Engine, pc: &str) {
+    let path = eng.read0(pc);
+    let b = std::fs::read(&path)
+        .map(|bytes| std::str::from_utf8(&bytes).is_ok())
+        .unwrap_or(false);
     eng.set_tlv_encoded(&eng.write0(pc), "bool", &[b as u8], &[]);
 }
 

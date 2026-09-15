@@ -146,6 +146,20 @@ pub const MYRWIRCAPS: &[(&str, Rwir)] = &[
         },
     ),
     (
+        "networld/fs·rename",
+        Rwir {
+            rp: &["[]char/utf8|[]char/utf32", "[]char/utf8|[]char/utf32"],
+            wp: &["int64"],
+        },
+    ),
+    (
+        "networld/fs·isutf8",
+        Rwir {
+            rp: &["[]char/utf8|[]char/utf32"],
+            wp: &["bool"],
+        },
+    ),
+    (
         "networld/fs·append",
         Rwir {
             rp: &["[]char/utf8|[]char/utf32", "[]uint8"],
@@ -190,6 +204,11 @@ pub fn rwirmap() -> &'static HashMap<&'static str, &'static Rwir> {
 
 pub fn register(eng: &Engine) {
     for (op, r) in MYRWIRCAPS {
+        // 一致性闸门：登记了签名却漏了 is_inproc 的 op，调用会被当外部 rwir 排队等别人兑现
+        // （表现为调用挂起，不是报错）——这里一次性喊出来。
+        if !is_inproc(op) {
+            eprintln!("[rwir] {op} 在 MYRWIRCAPS 但不在 is_inproc：调用会挂起，请补登记");
+        }
         let rp: Vec<CString> = r.rp.iter().map(|s| cs(s)).collect();
         let wp: Vec<CString> = r.wp.iter().map(|s| cs(s)).collect();
         let rpp: Vec<*const c_char> = rp.iter().map(|c| c.as_ptr()).collect();
@@ -228,10 +247,12 @@ pub fn is_inproc(op: &str) -> bool {
             | "networld/fs·read"
             | "networld/fs·write"
             | "networld/fs·append"
+            | "networld/fs·rename"
             | "networld/fs·list"
             | "networld/fs·del"
             | "networld/fs·mkdir"
             | "networld/fs·exists"
+            | "networld/fs·isutf8"
     )
 }
 
@@ -254,10 +275,12 @@ pub fn dispatch(eng: &Engine, op: &str, pc: &str) {
         "networld/fs·read" => networld::fs::read(eng, pc),
         "networld/fs·write" => networld::fs::write(eng, pc),
         "networld/fs·append" => networld::fs::append(eng, pc),
+        "networld/fs·rename" => networld::fs::rename(eng, pc),
         "networld/fs·list" => networld::fs::list(eng, pc),
         "networld/fs·del" => networld::fs::del(eng, pc),
         "networld/fs·mkdir" => networld::fs::mkdir(eng, pc),
         "networld/fs·exists" => networld::fs::exists(eng, pc),
+        "networld/fs·isutf8" => networld::fs::isutf8(eng, pc),
         "kvlang·vet" => {
             let out = kvlanglayout::vet(eng, &eng.read0(pc));
             eng.set_kv(&eng.write0(pc), &out);

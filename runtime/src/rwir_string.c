@@ -91,7 +91,7 @@ int kvlangBuiltinStringSet(kvlangFrame_t *f) {
 int kvlangBuiltinStringChar(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     if (n < 2) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "TypeError: string.char requires string and index"); }
-    if (var_len_char_err(kvlangXvalueKind(&in[0]))) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "%s", var_len_char_err(kvlangXvalueKind(&in[0]))); }
+    { const char *cerr = var_len_char_err(kvlangXvalueKind(&in[0])); if (cerr) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "%s", cerr); } }
     int idx = (int)kvlangScalarI64(kvlangXvalueScalar(&in[1]));
     int rn; uint32_t *r = string_runes(&in[0], &rn);
     int rc;
@@ -104,7 +104,7 @@ int kvlangBuiltinStringChar(kvlangFrame_t *f) {
 int kvlangBuiltinStringOrd(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     if (n < 1) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "TypeError: string.ord requires a string"); }
-    if (var_len_char_err(kvlangXvalueKind(&in[0]))) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "%s", var_len_char_err(kvlangXvalueKind(&in[0]))); }
+    { const char *cerr = var_len_char_err(kvlangXvalueKind(&in[0])); if (cerr) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "%s", cerr); } }
     int rn; uint32_t *r = string_runes(&in[0], &rn);
     kvlangXvalue_t e; kvlangXvalueNewInt64(&e, rn == 0 ? -1 : (int64_t)r[0]);
     int rc = kvlangBuiltinWriteResult(f, &e); kvlangXvalueFree(&e); free(r); kvlangBuiltinFreeInputs(in, n);
@@ -124,7 +124,7 @@ int kvlangBuiltinStringCmp(kvlangFrame_t *f) {
 int kvlangBuiltinStringFind(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     if (n < 2) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "TypeError: string.find requires two strings"); }
-    if (var_len_char_err(kvlangXvalueKind(&in[0]))) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "%s", var_len_char_err(kvlangXvalueKind(&in[0]))); }
+    { const char *cerr = var_len_char_err(kvlangXvalueKind(&in[0])); if (cerr) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "%s", cerr); } }
     int hn; uint32_t *hay = string_runes(&in[0], &hn);
     int nn; uint32_t *needle = string_runes(&in[1], &nn);
     int64_t r = -1;
@@ -139,7 +139,7 @@ int kvlangBuiltinStringLen(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     int len = 0;
     if (n > 0) {
-        if (var_len_char_err(kvlangXvalueKind(&in[0]))) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "%s", var_len_char_err(kvlangXvalueKind(&in[0]))); }
+        { const char *cerr = var_len_char_err(kvlangXvalueKind(&in[0])); if (cerr) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "%s", cerr); } }
         if (kvlangXvalueKindIs(&in[0], KVSPACE_KIND_CHAR)) len = kvlangXvalueArrayLen(&in[0]);
         else { uint32_t *r = string_runes(&in[0], &len); free(r); }
     }
@@ -151,7 +151,7 @@ int kvlangBuiltinStringLen(kvlangFrame_t *f) {
 int kvlangBuiltinStringSlice(kvlangFrame_t *f) {
     kvlangXvalue_t in[3]; int n = kvlangBuiltinReadInputs(f, in, 3);
     if (n < 3) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "TypeError: string.slice requires string, start, end"); }
-    if (var_len_char_err(kvlangXvalueKind(&in[0]))) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "%s", var_len_char_err(kvlangXvalueKind(&in[0]))); }
+    { const char *cerr = var_len_char_err(kvlangXvalueKind(&in[0])); if (cerr) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "%s", cerr); } }
     int lo = (int)kvlangScalarI64(kvlangXvalueScalar(&in[1])), hi = (int)kvlangScalarI64(kvlangXvalueScalar(&in[2]));
     int rn; uint32_t *r = string_runes(&in[0], &rn);
     if (lo < 0 || hi > rn || lo > hi) { free(r); kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "IndexError: at: slice index out of bounds (lo=%d hi=%d char count=%d)", lo, hi, rn); }
