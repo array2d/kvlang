@@ -42,6 +42,29 @@ extern void kvspaceClose(void *h);
 /* 借用读：*out 指向后端常驻/回收空间，调用方不得 free。resolve=1 穿透 link。 */
 extern int kvspaceGet(void *h, const char *key, int resolve, uint8_t **out,
                       uint32_t *out_len);
+
+/* 对齐 kvspace/include/kvspace/kvspace.h。parent_id/depth 由 ResolveRef 填；
+ * 后端只写前 8 字节时 parent_id 保持 0，runtime 永久关闭父缓存。 */
+typedef struct {
+    uint32_t block_id;
+    uint32_t gen;
+    uint32_t parent_id;
+    uint32_t depth;
+} kvspaceRef_t;
+#if defined(__APPLE__)
+#define KVLANG_KVSPACE_WEAK __attribute__((weak_import))
+#else
+#define KVLANG_KVSPACE_WEAK __attribute__((weak))
+#endif
+extern int kvspaceResolveRef(void *h, const char *key, kvspaceRef_t *ref)
+    KVLANG_KVSPACE_WEAK;
+extern int kvspaceGetByRef(void *h, kvspaceRef_t *ref, const char *key_fallback,
+                           uint8_t **out, uint32_t *out_len)
+    KVLANG_KVSPACE_WEAK;
+extern int kvspaceSetPartByRef(void *h, kvspaceRef_t *ref,
+                               const char *key_fallback, uint32_t offset,
+                               const uint8_t *buf, uint32_t buf_len, char *err,
+                               uint32_t err_cap) KVLANG_KVSPACE_WEAK;
 /* 指令边界回收读借用池；定位读/写（分片）；只读 head 前缀。见 kvspace.h 契约。 */
 extern void kvspaceReadReset(void *h);
 extern int kvspaceGetPart(void *h, const char *key, uint32_t offset,
@@ -128,8 +151,24 @@ typedef struct {
     kvlangXvalue_t val;
 } kvlangKvPair_t;
 
+#define KVLANG_REF_CAP 64
+#define KVLANG_PREF_CAP 5
+#define KVLANG_HOT_CAP 4
+typedef struct { char *key; uint32_t block_id, gen, klen; } kvlangRefEnt_t;
+typedef struct { char *name; char *key; uint32_t block_id, gen, dlen; } kvlangHotEnt_t;
 typedef struct {
     void *h;
+    kvlangRefEnt_t ref[KVLANG_REF_CAP];
+    int nref;
+    int ref_on;
+    int parent_on;     /* 嵌套 ResolveRef 后 parent_id==0 则永久关闭 */
+    int parent_probed;
+    kvlangRefEnt_t pref[KVLANG_PREF_CAP]; /* · map ART parents */
+    int npref;
+    int pref_i;
+    kvlangRefEnt_t fpar; /* frame `/` parent for GetMember siblings */
+    kvlangHotEnt_t hot[KVLANG_HOT_CAP]; /* a/i/n leaf refs */
+    int nhot;
 } kvlangKv_t;
 
 /* growable string buffer */
@@ -340,6 +379,7 @@ int kvlangKvSetChar(kvlangKv_t *k, const char *key, const char *s);
 int kvlangKvDel(kvlangKv_t *k, const char *key, char *err, uint32_t err_cap);
 int kvlangKvDelTree(kvlangKv_t *k, const char *prefix, char *err,
                     uint32_t err_cap);
+void kvlangKvInvalidateFrame(kvlangKv_t *k, const char *frame_root);
 int kvlangKvCp(kvlangKv_t *k, const char *src, const char *dst, char *err,
                uint32_t err_cap);
 int kvlangKvCpTree(kvlangKv_t *k, const char *src, const char *dst, char *err,
