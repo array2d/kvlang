@@ -1,7 +1,7 @@
-// networld/fs 文本级 rwfunc：readtext / writetext / match / glob / grep / multi
+// networld/fs 文本级 rwfunc：readtext / writetext / match / glob / grep
 //   文件 ↔ 文本按 UTF-8 往返（字节级 read/write 仍是 native rwir）
 //   match：名字段通配（* 任意串、? 单字符）  glob：按通配展开路径（\n 连接）
-//   grep：文件或目录下匹配 glob 的成员逐行查找  multi：事务式多处编辑
+//   grep：文件或目录下匹配 glob 的成员逐行查找
 // 期望输出:
 //   size= 12
 //   text= hello world
@@ -9,10 +9,6 @@
 //   match= true false
 //   glob= /tmp/kvlang_fs_text/a.txt
 //   grep= /tmp/kvlang_fs_text/a.txt:1:hello world
-//   multi= 1 -1
-//   after= HELLO world
-//   bad= 0
-//   keep= HELLO world
 rwfunc test() -> () {
 	d = "/tmp/kvlang_fs_text"
 	a = "/tmp/kvlang_fs_text/a.txt"
@@ -37,16 +33,4 @@ rwfunc test() -> () {
 	println("glob=", g)
 	networld/fs·grep("world", d, "*.txt") -> hits
 	println("grep=", hits)
-	olds:[int64]·[]char/utf32 = {"hello"}
-	news:[int64]·[]char/utf32 = {"HELLO"}
-	networld/fs·multi(a, olds, news) -> (done, bad)
-	println("multi=", done, bad)
-	networld/fs·readtext(a) -> (t2, sz2)
-	println("after=", t2)
-	old2:[int64]·[]char/utf32 = {"L"}
-	new2:[int64]·[]char/utf32 = {"X"}
-	networld/fs·multi(a, old2, new2) -> (d2, bad2)
-	println("bad=", bad2)
-	networld/fs·readtext(a) -> (t3, sz3)
-	println("keep=", t3)
 }

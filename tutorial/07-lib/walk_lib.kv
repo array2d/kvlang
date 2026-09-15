@@ -1,5 +1,8 @@
-// 递归打印 /lib 代码树：kvspace·listlen/kvspace·listn 逐层列举 + 自递归
-// 目录名以 "/" 结尾则下钻；kvspace·listn 返回 utf8，显式 char/utf32 转码后才能喂给 string·find（utf32）
+// 递归遍历代码树 /lib：逐层列举成员名 + 其值的 langtype（目录为 index）。
+// 目录判定不看 list 的尾斜杠（三后端不统一）：<名>/ 是结构目录，
+// <名>· 是成员前缀目录（pkg 成员容器，如 /lib/string· 装 string·upper…）。
+// 两种拼写都试，先 / 后 ·。kvspace·listn 返回 utf8，须显式转 char/utf32
+// 才能喂给 string·find（utf32）。
 // 期望输出:
 //   /lib/
 //   print
@@ -10,15 +13,41 @@
 rwfunc walk(path:[]char/utf32, indent:[]char/utf32) -> () {
 	kvspace·listlen(path) -> n
 	0 -> i
+	"" -> last
 	while (i < n) {
 		kvspace·listn(path, i) -> nm8
 		char/utf32(nm8) -> nm
-		println(indent, nm)
+		path + nm -> full
+		"" -> child
 		string·find(nm, "/") -> sl
 		if (sl >= 0) {
-			path + nm -> child
-			indent + "  " -> ind2
-			walk(child, ind2)
+			full -> child
+		} else {
+			full + "/" -> d1
+			kvspace·listlen(d1) -> c1
+			if (c1 > 0) {
+				d1 -> child
+			} else {
+				full + "·" -> d2
+				kvspace·listlen(d2) -> c2
+				if (c2 > 0) {
+					d2 -> child
+				}
+			}
+		}
+		kvspace·get(full) -> v
+		if (v == None) {
+			println(indent, nm)
+		} else {
+			xv·langtype(v) -> lt
+			char/utf32(lt) -> lts
+			println(indent, nm, lts)
+		}
+		// 孪生条目去重：fs 会同时给出 X 与 X/（都指向同一目录），只走一次。
+		string·cmp(child, last) != 0 -> fresh
+		if (string·len(child) > 0 && fresh) {
+			walk(child, indent + "  ")
+			child -> last
 		}
 		i + 1 -> i
 	}

@@ -1,0 +1,26 @@
+// kvlang/reflect：自省 —— 枚举一棵 lib 子树的能力名
+//   fnlist(name) -> listing：/lib/<name>· 下的能力名，逗号连接
+//   分类看 xvalue 的 langtype（三轴正交：ref / storetype / langtype），不看名字猜：
+//   def langtype（形参 / 返回槽）跳过；def rwir（路由头）与普通数据（常量）保留
+// 期望输出:
+//   math= E, Pi, Tau
+//   kvlang= dump, format, layout, vet
+//   has-allinset= true
+//   has-param= false
+//   string-nonempty= true
+//   missing-len= 0
+rwfunc test() -> () {
+	kvlang/reflect·fnlist("math") -> m
+	println("math=", m)
+	kvlang/reflect·fnlist("kvlang") -> k
+	println("kvlang=", k)
+	kvlang/reflect·fnlist("string") -> s
+	string·contains(s, "allinset") -> a
+	println("has-allinset=", a)
+	string·contains(s, "[0,") -> p
+	println("has-param=", p)
+	string·len(s) -> sl
+	println("string-nonempty=", sl > 0)
+	kvlang/reflect·fnlist("no_such_lib_xyz") -> e
+	println("missing-len=", string·len(e))
+}

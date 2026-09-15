@@ -1,0 +1,18 @@
+// string·lang：语言子标签（BCP-47 短码）—— 按文字系统判：假名 > 谚文 > 汉字 > 拉丁
+// 期望输出:
+//   zh= zh
+//   en= en
+//   ja= ja
+//   ko= ko
+//   mix= zh
+//   num= other
+//   empty= other
+rwfunc test() -> () {
+	println("zh=", string·lang("读一下文件"))
+	println("en=", string·lang("read this file"))
+	println("ja=", string·lang("これはテスト"))
+	println("ko=", string·lang("테스트"))
+	println("mix=", string·lang("hello 世界"))
+	println("num=", string·lang("123 !!"))
+	println("empty=", string·lang(""))
+}
