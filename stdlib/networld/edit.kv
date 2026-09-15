@@ -1,0 +1,165 @@
+// 欢迎加入kvspace世界
+// lib networld/edit —— 文件编辑语义（rwfunc，kv 源码）。
+// 与 networld/fs 的分工：fs 管字节与只读检索（size/read/write/readtext/writetext/match/
+// glob/scan/grep），edit 管「改写」这一层语义——
+//   read    行号窗口视图（给 agent 看，不是全文 dump）
+//   write   覆盖写
+//   replace 单处精确替换：old 必须恰命中 1 处，绝不「尽力而为」地改第一处
+//   multi   事务式多处替换：全部成功才落盘
+//   commit  原子落盘（写 <p>.tmp → fs·rename 覆盖 p → 回读校验）；write/replace/multi 都走它
+// 返回码 code：0 成功 / 1 未找到 / 2 歧义（命中多处）/ 3 文件不可读 / 4 写失败 /
+//   5 回读不一致 / 6 两数组长度不等 / 7 非 UTF-8（拒绝改写二进制文件）。
+// 文案由调用方（harness）决定，本库不出话术。
+// 文本约定同 fs：文件按 UTF-8 解码为 []char/utf32 后操作，落盘再编码回 UTF-8。
+
+lib networld/edit {
+	// read(p, from, lines) -> (view, total, sz)：行号窗口视图。
+	//   从第 from 行（1 起）起取 lines 行，每行前缀 "N: "；
+	//   from < 1 视为 1，lines <= 0 视为到末尾。sz = 字节数（-1 = 不可读）；
+	//   超过 8MB 不返回内容：view 空、total = -1（改用 fs·read 分片读）；
+	//   非 UTF-8 文件同样不返回：view 空、total = -2。
+	rwfunc read(p:[]char/utf32, from:int64, lines:int64) -> (
+	          view:[]char/utf32, total:int64, sz:int64) {
+		networld/fs·readtext(p) -> (t, sz)
+		"" -> view
+		total = 0
+		if (sz >= 0) {
+			networld/fs·isutf8(p) -> u8ok
+			if (u8ok == false) {
+				total = -2
+			} else {
+			if (sz > 8388608) {
+				total = -1
+			} else {
+				parts:[int64]·[]char/utf32 = {}
+				string·lines(t) -> (parts, total)
+				lo = from
+				if (lo < 1) { lo = 1 }
+				hi = total
+				if (lines > 0 && lo + lines - 1 < total) { hi = lo + lines - 1 }
+				i = lo
+				while (i <= hi) {
+					kvspace·listn(parts, i - 1) -> kk
+					kvspace·get(parts, kk) -> ln
+					string·formatint(i, 10) -> no
+					string·concat(view, no) -> view
+					string·concat(view, ": ") -> view
+					string·concat(view, ln) -> view
+					string·concat(view, "\n") -> view
+					i + 1 -> i
+				}
+			}
+			}
+		}
+	}
+
+	// commit(p, t) -> code：**原子落盘** —— 写 `<p>.tmp` → rename 覆盖 p → 回读校验。
+	//   4 写失败 / 5 回读不一致 / 0 成功；失败时 p 保持原样（不留半截文件）。
+	rwfunc commit(p:[]char/utf32, t:[]char/utf32) -> (code:int64) {
+		code = 4
+		string·concat(p, ".tmp") -> tp
+		networld/fs·writetext(tp, t) -> wn
+		if (wn >= 0) {
+			networld/fs·rename(tp, p) -> rc
+			if (rc == 0) {
+				networld/fs·readtext(p) -> (back, _)
+				if (string·cmp(back, t) == 0) { code = 0 } else { code = 5 }
+			}
+		}
+	}
+
+	// write(p, t) -> (n, code)：UTF-8 覆盖写（原子：临时文件 + rename）+ 回读校验。
+	//   n = 写入字节数（失败 -1）
+	rwfunc write(p:[]char/utf32, t:[]char/utf32) -> (n:int64, code:int64) {
+		n = 0
+		networld/edit·commit(p, t) -> code
+		if (code == 0) { string·len(t) -> n }
+	}
+
+	// replace(p, old, new, dry) -> (done, hit, code)：单处精确替换。
+	//   dry = 1 只预演（不落盘）；old 命中数必须恰为 1，否则一个字节都不动。
+	rwfunc replace(p:[]char/utf32, old:[]char/utf32, new:[]char/utf32,
+	               dry:int64) -> (done:int64, hit:int64, code:int64) {
+		done = 0
+		hit = 0
+		networld/fs·isutf8(p) -> u8ok
+		if (u8ok == false) {
+			code = 7
+		} else {
+		networld/fs·readtext(p) -> (t, sz)
+		if (sz < 0) {
+			code = 3
+		} else {
+			string·count(t, old) -> hit
+			if (hit == 0) {
+				code = 1
+			} else {
+				if (hit > 1) {
+					code = 2
+				} else {
+					string·replace(t, old, new) -> (t2, _)
+					if (dry == 1) {
+						done = 1
+						code = 0
+					} else {
+						networld/edit·commit(p, t2) -> code
+						if (code == 0) { done = 1 }
+					}
+				}
+			}
+		}
+		}
+	}
+
+	// multi(p, olds, news, dry) -> (done, bad, code)：事务式多处替换。
+	//   逐条精确替换（每条 old 须恰命中 1 处），全部成功才落盘；
+	//   bad = 失败下标（-1 = 无失败），dry = 1 只预演。
+	rwfunc multi(p:[]char/utf32, olds:*[int64]·[]char/utf32,
+	             news:*[int64]·[]char/utf32, dry:int64) -> (
+	             done:int64, bad:int64, code:int64) {
+		kvspace·listlen(olds) -> cnt
+		kvspace·listlen(news) -> m
+		done = 0
+		bad = -1
+		networld/fs·isutf8(p) -> u8ok
+		if (u8ok == false) {
+			code = 7
+		} else {
+		if (cnt != m) {
+			code = 6
+		} else {
+			networld/fs·readtext(p) -> (t, sz)
+			if (sz < 0) {
+				code = 3
+			} else {
+				code = 0
+				i = 0
+				while (i < cnt) {
+					kvspace·listn(olds, i) -> ko
+					kvspace·listn(news, i) -> kn
+					kvspace·get(olds, ko) -> o
+					kvspace·get(news, kn) -> w
+					string·count(t, o) -> c
+					if (c == 0) {
+						bad = i
+						code = 1
+						break
+					}
+					if (c > 1) {
+						bad = i
+						code = 2
+						break
+					}
+					string·replace(t, o, w) -> (t2, _)
+					t = t2
+					done = done + 1
+					i = i + 1
+				}
+				if (bad < 0 && dry != 1) {
+					networld/edit·commit(p, t) -> code
+				}
+			}
+		}
+		}
+	}
+}

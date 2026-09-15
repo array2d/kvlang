@@ -224,6 +224,8 @@ networld/fs·write("/tmp/x.txt", xv·reinterpret("hi", "[]uint8")) -> n
 
 ### 数组（ndarray·* / xv·*）
 - `ndarray·numel / dim / shape`；`xv·at / set / reshape / reinterpret / langtype / bodylen`。
+- `xv·parselangtype(v) -> (kind[, ndim])`：解析 langtype 基名（剥 `[dims]` 与 `def ` 前缀），
+  如 `def langtype`→`langtype`、`def rwir`→`rwir`、`[508]char/utf8`→`char/utf8`；用于按类型分类 KV 成员。
 
 ### 数学
 - 运算符见上；`pow / sqrt / exp / log / abs / sign / neg / min / max`；常量 `/lib/math·Pi` `/lib/math·E` `/lib/math·Tau`。

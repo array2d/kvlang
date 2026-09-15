@@ -6,7 +6,6 @@
 //   match                名字段 shell 通配（* 任意串、? 单字符）
 //   glob                 按通配展开路径
 //   grep                 逐行查找（文件或目录下匹配 glob 的成员）
-//   multi                事务式多处编辑（逐条精确替换，全部成功才落盘）
 // 文本约定：文件按 UTF-8 解码为 []char/utf32 后操作（只有定宽的 char/utf32 可
 // 索引 / 切片）；落盘再编码回 UTF-8。字节级 I/O 仍走 native rwir。
 
@@ -161,48 +160,8 @@ lib networld/fs {
 						string·concat(hits, h) -> hits
 					}
 				}
-				i = i + 1
-			}
-		}
-	}
-	// multi(path, olds, news) -> (done, bad)：事务式多处编辑。按序对文件文本做
-	// 逐条精确替换，每条 old 须恰命中 1 处；全部成功才落盘。
-	//   bad = -1  全部成功，done = 条数（文件已落盘）
-	//   bad >= 0  该下标编辑失败（未命中或多处命中），文件不变
-	//   bad = -2  文件不可读    bad = -3  olds / news 长度不等
-	rwfunc multi(path:[]char/utf32, olds:*[int64]·[]char/utf32,
-	             news:*[int64]·[]char/utf32) -> (done:int64, bad:int64) {
-		kvspace·listlen(olds) -> cnt
-		kvspace·listlen(news) -> m
-		done = 0
-		bad = -1
-		if (cnt != m) {
-			bad = -3
-		} else {
-			networld/fs·readtext(path) -> (t, sz)
-			if (sz < 0) {
-				bad = -2
-			} else {
-				i = 0
-				while (i < cnt) {
-					kvspace·listn(olds, i) -> ko
-					kvspace·listn(news, i) -> kn
-					kvspace·get(olds, ko) -> o
-					kvspace·get(news, kn) -> w
-					string·count(t, o) -> c
-					if (c != 1) {
-						bad = i
-						break
-					}
-					string·replace(t, o, w) -> (t2, _)
-					t = t2
-					done = done + 1
 					i = i + 1
 				}
-				if (bad < 0) {
-					networld/fs·writetext(path, t) -> wn
-				}
 			}
 		}
-	}
 }

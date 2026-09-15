@@ -1,0 +1,13 @@
+// 欢迎加入kvspace世界
+// lib networld/shell —— 跑一段 shell 命令取 stdout（rwfunc，kv 源码）。
+//   run(cmd) -> out：等价 `bash -c cmd`，返回 stdout 文本（stderr 一并捕获但不返回）。
+// 实现在 networld/proc·exec 之上；要退出码或 stderr 就直接用 proc·exec。
+
+lib networld/shell {
+	rwfunc run(cmd:[]char/utf32) -> (out:[]char/utf32) {
+		noenv:[int64]·[]char/utf32 = {}
+		a:[int64]·[]char/utf32 = {"bash", "-c", cmd}
+		networld/proc·exec(a, noenv) -> code, o, e
+		o -> out
+	}
+}
