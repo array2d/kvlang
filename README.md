@@ -100,7 +100,7 @@ make all                                     # runtime(C) + layout(Rust) + runti
 ./bin/kvlang vet my.kv                       # parse + lower only
 ./bin/kvlang format my.kv                    # format to stdout
 ./bin/kvlang layout my.kv                    # print the entry point
-./bin/kvlang dump my.kv                      # reconstruct /lib as runnable kvlang
+./bin/kvlang printlib my.kv                  # reconstruct /lib as runnable kvlang (layout result, no .src)
 ```
 
 `make` targets: `all` · `runtime` · `layout` · `runtime-rs` · `json` · `oldhero` · `test` · `install` · `clean`. `make install` places the libraries in `/usr/lib`, the CLIs (`kvlang`, `kvlanglayout`) in `/usr/bin`, and headers in `/usr/include/kvlang`.
@@ -279,7 +279,7 @@ Map traversal uses `while` + `kvspace·listlen` + `kvspace·listn` (`for`-`in` i
 **`time·` / `time/duration·` / `random·`:** `now` `sub` `add` `before` `after`; `nanos` `millis` `seconds` `minutes` `hours` and the `as_*` forms; `uint64` `int63` `intn`
 **`vthread·` / debug:** `create` `run` `call` `sleep` `setstatus`; `debugger` (≡ `vthread·setstatus("paused")`)
 
-`print` / `println` / `cerr` / `printf` / `input` are **not** builtins. In the KV world there is no terminal — only keys and values — so I/O is not a core-language primitive. They are opcodes of the `term` runtime, reached through the `def rwir` route-header mechanism described above. The same mechanism covers `json·to` / `json·from`, `http·call` / `http·get|post|put|del`, `networld/proc·exec`, `networld/fs·size|read|write|append|list|del|mkdir|exists`, and the self-hosting `kvlang·vet|format|layout|dump`.
+`print` / `println` / `cerr` / `printf` / `input` are **not** builtins. In the KV world there is no terminal — only keys and values — so I/O is not a core-language primitive. They are opcodes of the `term` runtime, reached through the `def rwir` route-header mechanism described above. The same mechanism covers `json·to` / `json·from`, `http·call` / `http·get|post|put|del`, `networld/proc·exec`, `networld/fs·size|read|write|append|list|del|mkdir|exists`, and the self-hosting `kvlang·vet|format|layout|printlib|printstack`.
 
 ```kv
 print(x,…)              // no spaces, no newline

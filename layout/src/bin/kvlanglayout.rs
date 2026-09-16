@@ -4,12 +4,12 @@
 //!   kvlanglayout <file.kv> [dsn]              仅 layout，打印 ENTRY=<entry>（默认子命令）
 //!   kvlanglayout vet <file.kv>                仅校验（parse+lower），打印 ok 或错误
 //!   kvlanglayout format <file.kv>             格式化输出到 stdout
-//!   kvlanglayout dump <file.kv> [prefix] [dsn]  layout 后把 /lib（或 prefix）子树 dump 为可运行 kvlang + 槽位注释
+//!   kvlanglayout printlib <file.kv> [prefix] [dsn]  layout 后把 /lib（或 prefix）子树重建为可运行 kvlang + 槽位注释（不读 .src）
 
 use std::env;
 use std::fs;
 
-use kvlanglayout::{compile, dump, format, init_dirs, vet, Kv};
+use kvlanglayout::{compile, format, init_dirs, printlib, vet, Kv};
 
 /// 复刻 Go runtime 的 findEntry：DFS /lib/ 找首个 init（顶层 `init` 或 lib 块内 `pkg·init`）。
 fn find_entry(kv: &mut Kv, prefix: &str, pkg: &str) -> String {
@@ -69,7 +69,7 @@ fn main() {
         }
         return;
     }
-    if args.len() >= 3 && args[1] == "dump" {
+    if args.len() >= 3 && args[1] == "printlib" {
         let prefix = args.get(3).map(String::as_str).unwrap_or("/lib");
         let dsn = args
             .get(4)
@@ -79,11 +79,11 @@ fn main() {
         let mut kv = Kv::conn(dsn);
         init_dirs(&mut kv).expect("init_dirs");
         compile(&mut kv, &src).expect("compile");
-        print!("{}", dump(&mut kv, prefix));
+        print!("{}", printlib(&mut kv, prefix));
         return;
     }
     if args.len() < 2 {
-        eprintln!("usage: kvlanglayout <file.kv> [dsn]  |  kvlanglayout {{vet|format}} <file.kv>  |  kvlanglayout dump <file.kv> [prefix] [dsn]");
+        eprintln!("usage: kvlanglayout <file.kv> [dsn]  |  kvlanglayout {{vet|format}} <file.kv>  |  kvlanglayout printlib <file.kv> [prefix] [dsn]");
         std::process::exit(1);
     }
     let dsn = args

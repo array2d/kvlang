@@ -100,7 +100,7 @@ make all                                     # runtime(C) + layout(Rust) + runti
 ./bin/kvlang vet my.kv                       # 只 parse + lower
 ./bin/kvlang format my.kv                    # 格式化到 stdout
 ./bin/kvlang layout my.kv                    # 打印入口点
-./bin/kvlang dump my.kv                      # 把 /lib 逆向重建为可运行 kvlang
+./bin/kvlang printlib my.kv                  # 把 /lib 重建为可运行 kvlang（看 layout 结果，不读 .src）
 ```
 
 `make` 目标：`all` · `runtime` · `layout` · `runtime-rs` · `json` · `oldhero` · `test` · `install` · `clean`。`make install` 把库装到 `/usr/lib`、CLI（`kvlang`、`kvlanglayout`）装到 `/usr/bin`、头文件装到 `/usr/include/kvlang`。
@@ -279,7 +279,7 @@ map 遍历用 `while` + `kvspace·listlen` + `kvspace·listn`（`for`-`in` 对 m
 **`time·` / `time/duration·` / `random·`：** `now` `sub` `add` `before` `after`；`nanos` `millis` `seconds` `minutes` `hours` 及各 `as_*` 形式；`uint64` `int63` `intn`
 **`vthread·` / 调试：** `create` `run` `call` `sleep` `setstatus`；`debugger`（≡ `vthread·setstatus("paused")`）
 
-`print` / `println` / `cerr` / `printf` / `input` **不是**内建。KV 世界里没有终端，只有 key 和 value——I/O 不是核心语言原语。它们是 `term` runtime 的操作码，经上文所述的 `def rwir` 路由头机制到达。同一机制覆盖 `json·to` / `json·from`、`http·call` / `http·get|post|put|del`、`networld/proc·exec`、`networld/fs·size|read|write|append|list|del|mkdir|exists`，以及自举的 `kvlang·vet|format|layout|dump`。
+`print` / `println` / `cerr` / `printf` / `input` **不是**内建。KV 世界里没有终端，只有 key 和 value——I/O 不是核心语言原语。它们是 `term` runtime 的操作码，经上文所述的 `def rwir` 路由头机制到达。同一机制覆盖 `json·to` / `json·from`、`http·call` / `http·get|post|put|del`、`networld/proc·exec`、`networld/fs·size|read|write|append|list|del|mkdir|exists`，以及自举的 `kvlang·vet|format|layout|printlib|printstack`。
 
 ```kv
 print(x,…)              // 无空格、无换行

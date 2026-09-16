@@ -195,7 +195,8 @@ rwfunc main() -> () {
 - `kvlang·vet(src) -> "ok"/err`：只校验，不写库。
 - `kvlang·format(src) -> 规范化源码`。
 - `kvlang·layout(src) -> entry`：源码 layout 入库，返回入口。
-- `kvlang·dump("/lib") -> 源码`：/lib 子树导出为可运行源码。
+- `kvlang·printlib("/lib") -> 源码`：把 /lib 子树重建为可运行源码（**只看 layout 结果，不读 `.src`**）。
+- `kvlang·printstack(vid) -> 文本`：把 /vthread 活动栈渲染成文本（帧链 + 实参 + 当前指令；vid 空 = 当前 vthread）。
 
 ### 外部进程/文件系统（networld）
 - `networld/proc·exec(args, envs) -> code[, out, err]`：args/envs 是 `{...}` 数组字面量，args 首元素=可执行文件；out/err 是 `@[]uint8` 捕获句柄（绑定即捕获）。

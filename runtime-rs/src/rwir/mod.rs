@@ -111,7 +111,14 @@ pub const MYRWIRCAPS: &[(&str, Rwir)] = &[
         },
     ),
     (
-        "kvlang·dump",
+        "kvlang·printlib",
+        Rwir {
+            rp: &["[]char/utf32"],
+            wp: &["[]char/utf32"],
+        },
+    ),
+    (
+        "kvlang·printstack",
         Rwir {
             rp: &["[]char/utf32"],
             wp: &["[]char/utf32"],
@@ -241,7 +248,8 @@ pub fn is_inproc(op: &str) -> bool {
             | "kvlang·vet"
             | "kvlang·format"
             | "kvlang·layout"
-            | "kvlang·dump"
+            | "kvlang·printlib"
+            | "kvlang·printstack"
             | "networld/proc·exec"
             | "networld/fs·size"
             | "networld/fs·read"
@@ -293,8 +301,12 @@ pub fn dispatch(eng: &Engine, op: &str, pc: &str) {
             let out = kvlanglayout::layout(eng, &eng.read0(pc));
             eng.set_kv(&eng.write0(pc), &out);
         }
-        "kvlang·dump" => {
-            let out = kvlanglayout::dump(eng, &eng.read0(pc));
+        "kvlang·printlib" => {
+            let out = kvlanglayout::printlib(eng, &eng.read0(pc));
+            eng.set_kv(&eng.write0(pc), &out);
+        }
+        "kvlang·printstack" => {
+            let out = kvlanglayout::printstack(eng, pc, &eng.read0(pc));
             eng.set_kv(&eng.write0(pc), &out);
         }
         other => crate::elog!("未知 rwir: {other} @ {pc}"),

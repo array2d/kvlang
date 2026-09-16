@@ -1,0 +1,29 @@
+// kvlang·printstack(vid)：把 /vthread 的活动栈渲染成文本（帧链 + 实参 + 当前指令）
+//   只读：调用后 ‥pc/‥status 不变；vid 传空串 = 当前 vthread
+// 期望输出:
+//   status= true
+//   frames= true
+//   outer-lib= true
+//   inner-lib= true
+//   arg= true
+//   cur= true
+rwfunc ps_inner(n:int64) -> (r:int64) {
+	no_such·thing(n) -> x
+}
+
+rwfunc ps_outer() -> () {
+	ps_inner(3) -> out
+}
+
+rwfunc test() -> () {
+	vthread·create("ps_outer") -> vid
+	char/utf32(vid) -> vid
+	vthread·run(vid)
+	kvlang·printstack(vid) -> st
+	println("status=", string·contains(st, "status=error"))
+	println("frames=", string·contains(st, "frames=2"))
+	println("outer-lib=", string·contains(st, "/lib/ps_outer"))
+	println("inner-lib=", string·contains(st, "/lib/ps_inner"))
+	println("arg=", string·contains(st, "int64:3"))
+	println("cur=", string·contains(st, "cur = rwir|rwfunc:no_such·thing"))
+}

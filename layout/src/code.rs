@@ -5,11 +5,11 @@
 //!   /lib/<pkg>·<name>.[0,±k]        参数定义键（langtype=def langtype, body=名字\x00类型）
 //!   /lib/<pkg>·<name>/[i,j]         编译后指令（kind=rwir），i 从 1 开始
 //!   /lib/<pkg>·<name>/‥labels/<l>   label → irseq
-//!   /lib/<pkg>·<name>.src           源码副本（仅 write_func 保留写入，dump 不再依赖）
+//!   /lib/<pkg>·<name>.src           源码副本（仅 write_func 保留写入，printlib 不再依赖）
 //!
 //! WriteBody: DFS-number insts (incl. ScopeStmt), emit [i,j], rewrite goto/br labels to irseq.
-//! dump: 反向——严格读 /lib/<pkg> 子树重建 AST（签名读参数定义键 .[0,±k]、体读线性槽+‥labels），
-//!       不读 .src、不依赖签名行 [0,x] 静态槽。
+//! printlib: 反向——严格读 /lib/<pkg> 子树重建 AST（签名读参数定义键 .[0,±k]、体读线性槽+‥labels），
+//!       不读 .src、不依赖签名行 [0,x] 静态槽。printstack: /vthread/<vid> 活动栈渲染（只读）。
 
 use std::collections::HashMap;
 
@@ -165,9 +165,10 @@ pub fn vet(src: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// dump：把 /lib 子树重构为可运行的 kvlang 源码（还原 `lib {}` 与 `rwfunc`），
-/// lower 后的原始槽位（`key kind:value`）以 `#` 注释附在各自函数后，供审查。
-pub fn dump(kv: &mut Kv, lib: &str) -> String {
+/// printlib：把 /lib 子树重构为可运行的 kvlang 源码（**只看 layout 结果，不读 `.src`**：
+/// 签名读参数定义键、函数体读线性指令槽），lower 后的原始槽位（`key kind:value`）
+/// 以 `#` 注释附在各自函数后，供审查。
+pub fn printlib(kv: &mut Kv, lib: &str) -> String {
     // lib 是 /lib 下任意 prefix，只 dump 该子树。三种情形：
     //   /lib           → 全量
     //   /lib/foo       → 虚拟 pkg（func 存于 /lib/foo·* 扁平目录）：走全树后过滤
@@ -369,7 +370,7 @@ fn emit_func(out: &mut String, f: &DumpFunc, indent: &str) {
     out.push('\n');
 }
 
-// ── dump 重建：严格从 /lib 子树反出可运行 kvlang（不读 .src）─────────────
+// ── printlib 重建：严格从 /lib 子树反出可运行 kvlang（**不读 .src**）───────
 //
 // 数据来源（对齐 write_func / spec「指令布局格式」）：
 //   签名  ← [0,0] 计数头(nr,nw,dyn) + 命名参数 Ptr 键（langtype=类型、body=[0,±k] 定位读/写与序）
@@ -989,6 +990,136 @@ fn is_literal(s: &str) -> bool {
         || s == "false"
         || b[0].is_ascii_digit()
         || (b[0] == b'-' && s.len() > 1)
+}
+
+// ── printstack：/vthread 活动栈渲染（帧链 + 每帧实参 + 顶帧当前指令）──────────
+//
+// 实测帧布局（2026-09）：
+//   /vthread/<vid>/‥pc / ‥status / ‥error/msg        vthread 头（仅根）
+//   /vthread/<vid>/[k]/‥lib / ‥callpc / ‥returnpc    第 k 帧（帧目录，k 为帧号）
+//   /vthread/<vid>/[k]/[0,±j]                        该帧绑定的实参 / 写参
+//   /vthread/<vid>/[k]/[s0,s1]                       帧内指令槽；PC 指向当前那一条
+// 只读：不碰 ‥pc/‥status，不写任何槽——暂停/恢复是调用方（harness）的事。
+
+/// 帧目录按帧号升序：`/vthread/<vid>/[k]/`（k 为整数）。
+fn frame_dirs(kv: &mut Kv, root: &str) -> Vec<String> {
+    let mut v: Vec<(i64, String)> = kv
+        .list(&format!("{root}/"), false, false)
+        .into_iter()
+        .filter_map(|n| {
+            let t = n.trim_end_matches('/');
+            if !(t.starts_with('[') && t.ends_with(']')) {
+                return None;
+            }
+            t[1..t.len() - 1]
+                .parse::<i64>()
+                .ok()
+                .map(|k| (k, format!("{root}/{t}")))
+        })
+        .collect();
+    v.sort();
+    v.into_iter().map(|(_, p)| p).collect()
+}
+
+/// 值截断到 200 字符（整份文件内容躺在槽里时不该刷屏）。
+fn clip(s: String) -> String {
+    let n = s.chars().count();
+    if n <= 200 {
+        return s;
+    }
+    let mut out: String = s.chars().take(200).collect();
+    out.push('…');
+    out
+}
+
+/// 字符串键的纯值（char 类给内容，其余给 kind:value / 空串）。
+fn plain_of(kv: &mut Kv, key: &str) -> String {
+    let d = kv.get_one(key);
+    if d.is_empty() {
+        return String::new();
+    }
+    let k = kvkind::kind(&d);
+    if kvkind::is_char_kind(&k) {
+        kvkind::value_string(&d)
+    } else {
+        let s = kvkind::display(&d);
+        if s == "None" {
+            String::new()
+        } else {
+            s
+        }
+    }
+}
+
+/// printstack：把 /vthread/<vid> 的活动栈渲染成可读文本；vid 必填
+/// （「当前 vthread」由调用方从自己的 PC 前缀取，见 runtime 侧 rwir）。
+pub fn printstack(kv: &mut Kv, vid: &str) -> String {
+    if vid.is_empty() {
+        return "error: printstack requires vid".to_string();
+    }
+    let root = format!("/vthread/{vid}");
+    // 头部字段都是字符串值：给纯值（不带 kind 前缀）；槽位值才用 kind:value（类型有意义）。
+    let status = plain_of(kv, &format!("{root}/‥status"));
+    let pc = plain_of(kv, &format!("{root}/‥pc"));
+    let emsg = plain_of(kv, &format!("{root}/‥error/msg"));
+    let frames = frame_dirs(kv, &root);
+    let mut out = String::new();
+    out.push_str(&format!(
+        "vthread {vid} status={status} frames={}\n",
+        frames.len()
+    ));
+    if !emsg.is_empty() {
+        out.push_str(&format!("error: {emsg}\n"));
+    }
+    if !pc.is_empty() {
+        out.push_str(&format!("pc: {pc}\n"));
+    }
+    // 顶帧 = 其路径是 PC 前缀的那个（帧号最大者优先）。帧内**指令槽不是帧成员**
+    // （帧只存自己的实参/写参），指令经 `‥lib` 软链到函数指令树、由 PC 定位——
+    // 所以当前指令直接读 PC 那个键。
+    let cur = frames
+        .iter()
+        .rev()
+        .find(|f| pc.contains(f.as_str()))
+        .cloned();
+    for (i, f) in frames.iter().enumerate() {
+        let lib = plain_of(kv, &format!("{f}/‥lib"));
+        out.push_str(&format!("frame[{i}] {lib}\n"));
+        for key in ["‥callpc", "‥returnpc"] {
+            let v = plain_of(kv, &format!("{f}/{key}"));
+            if !v.is_empty() {
+                out.push_str(&format!("  {key} = {v}\n"));
+            }
+        }
+        // 帧成员 = 实参槽 `[0,±j]` + **命名局部**（变量名即成员名，如 text/total/sz）
+        // + `‥*`。命名局部要用 expand_ext 才列得出来（kvspace·list 默认不展开）。
+        let mut names: Vec<String> = kv
+            .list(&format!("{f}/"), true, true)
+            .into_iter()
+            .map(|n| n.trim_end_matches('/').to_string())
+            .collect();
+        names.sort();
+        for n in names {
+            if n.starts_with('‥') {
+                continue;
+            }
+            if n == "[0,0]" {
+                continue; // 帧的签名锚点，不是值槽
+            }
+            let is_arg = n.starts_with("[0,");
+            let is_local = !is_arg && !n.starts_with('[');
+            if !(is_arg || is_local) {
+                continue;
+            }
+            let v = kvkind::display(&kv.get_one(&format!("{f}/{n}")));
+            out.push_str(&format!("  {n} = {}\n", clip(v)));
+        }
+        if cur.as_deref() == Some(f.as_str()) && !pc.is_empty() {
+            let v = kvkind::display(&kv.get_one(&pc));
+            out.push_str(&format!("  cur = {}\n", clip(v)));
+        }
+    }
+    out
 }
 
 #[cfg(test)]

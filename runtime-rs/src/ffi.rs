@@ -221,8 +221,16 @@ unsafe extern "C" {
         err_cap: u32,
     ) -> c_int;
     pub fn kvlangLayoutVet(src: *const c_char, err: *mut c_char, err_cap: u32) -> c_int;
-    pub fn kvlangLayoutDump(
+    pub fn kvlangLayoutPrintlib(
         lib: *const c_char,
+        dsn: *const c_char,
+        out: *mut c_char,
+        out_cap: u32,
+        err: *mut c_char,
+        err_cap: u32,
+    ) -> c_int;
+    pub fn kvlangLayoutPrintstack(
+        vid: *const c_char,
         dsn: *const c_char,
         out: *mut c_char,
         out_cap: u32,
