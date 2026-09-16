@@ -13,7 +13,8 @@ layout 能力经 cdylib 导出，第三方无需 fork 子进程即可布局（�
 | `kvlangLayoutCode(src, dsn, …)` | 内存源码串 layout 进 kvspace |
 | `kvlangLayoutVet(src, …)` | 只校验（parse + lower），不写 kvspace |
 | `kvlangLayoutFormat(src, …)` | 格式化（parse → 规范化源码），不写 kvspace |
-| `kvlangLayoutDump(lib, dsn, …)` | 把 `/lib` 子树逆向重建为可运行 kvlang + 槽位注释 |
+| `kvlangLayoutPrintlib(lib, dsn, …)` | 把 `/lib` 子树重建为可运行 kvlang + 槽位注释（只看 layout 结果，不读 `.src`） |
+| `kvlangLayoutPrintstack(vid, dsn, …)` | 把 `/vthread/<vid>` 活动栈渲染为文本（帧链 + 实参 + 当前指令） |
 | `kvlangKindexprParse(langtype, out)` | 解析一条 langtype（kindexpr）串为 `(kind, ndim, dims, 元素宽)`；与 runtime 侧 `kvlangLangtypeParse` 同一文法、同一语义（两个 ABI 名待统一） |
 
 成功返回 0（`entry_out` 为 init 入口名列表，`\n` 分隔），失败返回 -1（`err_out` 为错误）。

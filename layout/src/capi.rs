@@ -5,7 +5,8 @@
 //!   kvlangLayoutVet(src,…)       只校验（parse+lower），不写 kvspace —— 自造代码闸门
 //!   kvlangLayoutFormat(src,…)    格式化（parse → 规范化源码），不写 kvspace
 //!   kvlangLayoutCode(src,dsn,…)  从源码串 layout 进 kvspace（LLM 生成即插入，不落盘）
-//!   kvlangLayoutDump(lib,dsn,…)  把 /lib 子树递归导出为可读文本（审查 lower 后的 code）
+//!   kvlangLayoutPrintlib(lib,dsn,…)  把 /lib 子树逆向重建为可运行 kvlang（审查 layout 结果，不读 .src）
+//!   kvlangLayoutPrintstack(vid,dsn,…) 把 /vthread 活动栈渲染成可读文本（帧链 + 实参 + 当前指令）
 //! kvlangLayoutFile(path,…) 是 Code 的薄封装（读文件后走同一 core）。源码读回（`.src`）
 //! 是纯 KV 读（/lib/<fn>.src），不在此 ABI。
 //!
@@ -17,7 +18,7 @@ use std::fs;
 use std::os::raw::c_char;
 use std::panic::catch_unwind;
 
-use crate::{compile, dump, format, init_dirs, kvkind, vet, Kv};
+use crate::{compile, format, init_dirs, kvkind, printlib, printstack, vet, Kv};
 
 fn cstr<'a>(p: *const c_char) -> &'a str {
     if p.is_null() {
@@ -149,11 +150,12 @@ pub extern "C" fn kvlangLayoutFormat(
     }
 }
 
-/// dump：把 lib 前缀下的整棵子树重构为可运行的 kvlang 源码（还原 `lib {}` 与 `rwfunc`），
+/// printlib：把 lib 前缀下的整棵子树重构为可运行的 kvlang 源码（还原 `lib {}` 与 `rwfunc`），
 /// lower 后的原始槽位以 `#` 注释附在各自函数后，供审查。
-/// 成功返回 0（out=dump 文本），失败返回 -1（err_out=错误）。
+/// **只看 layout 结果**：签名读参数定义键、体读线性指令槽，不读 `.src` 源码副本。
+/// 成功返回 0（out=printlib 文本），失败返回 -1（err_out=错误）。
 #[no_mangle]
-pub extern "C" fn kvlangLayoutDump(
+pub extern "C" fn kvlangLayoutPrintlib(
     lib: *const c_char,
     dsn: *const c_char,
     out: *mut c_char,
@@ -165,7 +167,7 @@ pub extern "C" fn kvlangLayoutDump(
     let dsn = cstr(dsn).to_string();
     let r = catch_unwind(|| -> Result<String, String> {
         let mut kv = Kv::conn(&dsn);
-        Ok(dump(&mut kv, &lib))
+        Ok(printlib(&mut kv, &lib))
     });
     match r {
         Ok(Ok(s)) => {
@@ -177,7 +179,41 @@ pub extern "C" fn kvlangLayoutDump(
             -1
         }
         Err(_) => {
-            write_out(err_out, err_cap, "dump panicked");
+            write_out(err_out, err_cap, "printlib panicked");
+            -1
+        }
+    }
+}
+
+/// printstack：把 /vthread/<vid> 的活动栈渲染成可读文本（帧链 + 每帧实参 + 顶帧当前指令）。
+/// 只读，不改 ‥pc/‥status；暂停/恢复由调用方（harness）负责。
+/// 成功返回 0（out=printstack 文本），失败返回 -1（err_out=错误）。
+#[no_mangle]
+pub extern "C" fn kvlangLayoutPrintstack(
+    vid: *const c_char,
+    dsn: *const c_char,
+    out: *mut c_char,
+    out_cap: u32,
+    err_out: *mut c_char,
+    err_cap: u32,
+) -> i32 {
+    let vid = cstr(vid).to_string();
+    let dsn = cstr(dsn).to_string();
+    let r = catch_unwind(|| -> Result<String, String> {
+        let mut kv = Kv::conn(&dsn);
+        Ok(printstack(&mut kv, &vid))
+    });
+    match r {
+        Ok(Ok(s)) => {
+            write_out(out, out_cap, &s);
+            0
+        }
+        Ok(Err(e)) => {
+            write_out(err_out, err_cap, &e);
+            -1
+        }
+        Err(_) => {
+            write_out(err_out, err_cap, "printstack panicked");
             -1
         }
     }
