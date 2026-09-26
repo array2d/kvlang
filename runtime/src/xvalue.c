@@ -1,7 +1,6 @@
 #include "runtime_internal.h"
 
-/* 后端无关的 XValue TLV 编解码（对齐 kvspace-durable/kvspace-c 的 kindexp TLV）。
- * xval.data 一律 malloc（free 释放），后端在 kvspace.c 层负责拷贝。 */
+/* XValue helpers use the shared KVSpace codec. */
 
 static uint32_t rd32(const uint8_t *p) {
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) |
@@ -28,8 +27,7 @@ void kvlangXvalueSetBytes(kvlangXvalue_t *v, uint8_t *data, uint32_t len) {
     v->borrowed = 0;
 }
 
-/* 借用值 → 自持：凡要把读回的 XValue 存入生命周期超出本指令的结构（如 decode 缓存的指令
- * 字面量），必须先落地，否则 kvspace 借用池回收后指针悬空。 */
+/* Own borrowed values across reads within an instruction. */
 void kvlangXvalueMaterialize(kvlangXvalue_t *v) {
     if (v->borrowed && v->data && v->len > 0) {
         uint8_t *o = malloc(v->len);
@@ -75,15 +73,13 @@ void kvlangLangtypeParse(const uint8_t *kx, kvlangLangtype *out) {
         out->array_len *= out->dims[d];
 }
 
-/* head 编解码统一委托给链接的 kvspace .so（kvspace-c / kvspace-durable 同一 ABI），
- * runtime 不再私持 TLV head 布局，杜绝多份手写偏移不一致。 */
+/* Decode through the shared KVSpace ABI. */
 static int kvlangXvalueDecodeHeadRaw(const uint8_t *d, uint32_t len,
                                      kvspaceHead_t *h) {
     memset(h, 0, sizeof(*h));
     if (!d || len == 0)
         return -1;
-    kvspaceDecodeHead(d, len, h);
-    return h->langtype[0] ? 0 : -1;
+    return kvspaceDecodeHead(d, len, h) == 0 && h->langtype[0] ? 0 : -1;
 }
 
 /* array_len → dims：char/* 恒一维（含空串/单字符）；其余标量(≤1)=0 维、多元素=1 维。 */
@@ -99,7 +95,7 @@ static int32_t al_to_dims(const char *kind, int32_t array_len, int32_t *dims) {
     return 0;
 }
 
-/* .so 分配的 TLV → 转交 runtime 所有权（统一 free 释放）。 */
+/* Copy codec-owned bytes into runtime-owned storage. */
 static uint8_t *kvlangXvalueOwn(uint8_t *tmp, uint32_t tl, uint32_t *out_len) {
     if (!tmp) {
         *out_len = 0;
@@ -189,12 +185,10 @@ int kvlangXvalueLangtype(const kvlangXvalue_t *v, char *buf, size_t cap) {
 
 static char *strndup2(const uint8_t *p, int32_t n);
 
-/* 指令槽名：rwir 族槽跳过 5B 计数头取 sig；带 map langtype 标注的写槽 body 即变量名
- * （layout 的 write_slot_value 把声明容器类型落在槽的 langtype），其余交给 ValueString。 */
+/* Code slots store a five-byte prefix before the target name. */
 char *kvlangXvalueSlotName(const kvlangXvalue_t *v) {
     const char *k = kvlangXvalueKind(v);
-    if (strcmp(k, KVSPACE_KIND_RWIR) == 0 ||
-        strcmp(k, KVSPACE_KIND_RWIR_OR_RWFUNC) == 0) {
+    if (strcmp(k, KVSPACE_KIND_RWIR) == 0 || strcmp(k, KVSPACE_KIND_RWFUNC) == 0) {
         kvspaceHead_t h;
         if (kvlangXvalueHead(v, &h) < 0)
             return strdup("");
@@ -208,8 +202,7 @@ char *kvlangXvalueSlotName(const kvlangXvalue_t *v) {
 /* 值容器判定：裸种类名 `stringkeymap`，或完整 map langtype `{keylt}·{valt}`（见 [[map容器]]）。
  * 后者 `·` 之前是键类型（可能是 `[int64]`/`[float64,float64]`），故不能与 KIND_MAP 比串。 */
 bool kvlangKindIsMap(const char *kind) {
-    return kind && (strcmp(kind, KVSPACE_KIND_MAP) == 0 ||
-                    strstr(kind, MEMBER_SEP) != NULL);
+    return kind && strstr(kind, MEMBER_SEP) != NULL;
 }
 
 bool kvlangXvalueIsPtr(const kvlangXvalue_t *v) {
@@ -538,35 +531,19 @@ char *kvlangXvalueValueString(const kvlangXvalue_t *v) {
         return strndup2(body, blen);
     if (strcmp(k, KVSPACE_KIND_CHAR) == 0)
         return utf32_to_utf8(body, blen);
-    if (strcmp(k, KVSPACE_KIND_RWIR) == 0 ||
-        strcmp(k, KVSPACE_KIND_RWIR_OR_RWFUNC) == 0)
+    if (strcmp(k, KVSPACE_KIND_RWIR) == 0)
         return strndup2(body + (blen >= 5 ? 5 : 0), blen >= 5 ? blen - 5 : 0);
     if (strcmp(k, KVSPACE_KIND_RWFUNC) == 0) {
+        if (blen > 5)
+            return strndup2(body + 5, blen - 5);
         kvlangStrbuf_t b;
         kvlangStrbufInit(&b);
         kvlangStrbufPrintf(&b, "r%d/w%d", (blen >= 2 ? rd16(body) : 0),
                            (blen >= 4 ? rd16(body + 2) : 0));
         return kvlangStrbufDetach(&b);
     }
-    if (strcmp(k, KVSPACE_KIND_INDEX) == 0) {
-        int n = blen >= 4 ? (int)rd32(body) : 0;
-        kvlangStrbuf_t b;
-        kvlangStrbufInit(&b);
-        kvlangStrbufPrintf(&b, "(%d)", n);
-        return kvlangStrbufDetach(&b);
-    }
-    if (strcmp(k, KVSPACE_KIND_MAP) == 0) {
-        kvlangStrbuf_t b;
-        kvlangStrbufInit(&b);
-        kvlangStrbufPuts(&b, "map[");
-        for (int d = 0; d < h.ndim; d++) {
-            if (d)
-                kvlangStrbufPutc(&b, ',');
-            kvlangStrbufPrintf(&b, "%d", h.dims[d]);
-        }
-        kvlangStrbufPutc(&b, ']');
-        return kvlangStrbufDetach(&b);
-    }
+    if (kvlangKindIsMap(k))
+        return strdup("map");
     return strndup2(body, blen);
 }
 

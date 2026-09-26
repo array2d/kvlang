@@ -20,9 +20,8 @@ runtime **不得**在 kvspace 之外持有执行状态。PC、栈帧、局部变
 
 - **PC 是一个 KV 路径字符串**，形如 `/vthread/<vid>/[s0,s1]`（含嵌套帧时逐段延长，见 §四）。PC 既是
   取指地址，也是当前帧的定位符。
-- **零拷贝读写**：runtime 读值经 `kvspaceGet` 取后端常驻内存的**借用指针**，只读、**不得** `free`；
-  写值经 `kvspaceWriteInPlace`（key 已存在且 body 尺寸不变）或 `kvspaceWriteNewPlace`（新建 / 换
-  kind / 换尺寸）向后端要可写偏移指针后直接写字节。runtime **不得**自持堆缓冲中转整条 TLV。
+- **读写**：runtime 经 `kvspaceGet` 借用读值，借用在下一次读写前失效；写值经 `kvspaceSetValue`
+  同步提交完整 XValue。PC 和变量每条指令都从 kvspace 读回，不保留私有事实副本。
 
 ## 坐标系
 
@@ -39,15 +38,16 @@ runtime 对一个 vthread 的执行是如下循环（C 实现 `runtime/src/kvcpu
    状态即**停机**——`paused` 为调试暂停、`error` 为出错，其余为**终态返回值串**（默认 `"ok"`），进程可
    正常退出。
 2. **深度检查**：帧深超过实现上限（`MAX_STACK_DEPTH`）时置 `RecursionError` 并停该 vthread。
-3. **取指解码**：由 PC 定帧根、经帧的 `‥lib` 软链定位指令树，`RwirDecode` 稠密探查槽位、遇空即停，解
-   出 opcode 与读/写参。空 opcode 视为 `/lib` 损坏或跳转越界，报 `RuntimeError` 停该 vthread。
+3. **取指解码**：由 PC 定帧根、经帧的 `‥lib` 软链定位共享指令树。`RwirDecode` 首次读取读写槽时
+   将模板描述实体化为执行帧同坐标的 `*T`，之后读取物理槽并回读目标 KV 值；稠密探查遇空即停。
+   opcode 仍从共享指令树读取。空 opcode 视为 `/lib` 损坏或跳转越界，报 `RuntimeError` 停该 vthread。
 4. **派发执行**（见 §五）。
 5. **推进 PC**：多数指令执行后由自身写回新 PC（`NextPc` 求后继，或 call/return/br/goto 改写 PC）；循
    环回到 1。
 
 ## 派发链
 
-每条指令的归属互斥，decode 期一次固化为统一派发码 `op_id`（quickening），执行期据此纯整数跳表：
+每条指令的归属互斥。decode 期从当前 KV 指令槽计算派发码 `op_id`，执行期据此查静态能力表：
 
 1. **myrwircaps 内的核心算子**（`op_id ≥ 0`，直查静态能力表，枚举见 [[runtimec内建]]）——本 runtime
    就地兑现。
@@ -58,7 +58,7 @@ runtime 对一个 vthread 的执行是如下循环（C 实现 `runtime/src/kvcpu
    [[runtime开发规范]]）。
 5. **否则视为用户 rwfunc 调用**——opcode 移入 `reads[0]`，改写为 `call` 指令。
 
-`op_id` 由 decode 期分类固化，控制/拷贝/myrwircaps 成员全折入同一整数字段，热路径无 opcode 字符串匹
+`op_id` 每条指令重新计算，控制/拷贝/myrwircaps 成员全折入同一整数字段，热路径无 opcode 字符串匹
 配。myrwircaps 判定先于 `/lib` 查表，故与核心算子同名的 `/lib/<op>` 不改变派发。
 
 ## 调用即无返回值——输出走写参映射
@@ -69,8 +69,8 @@ kvlang 的调用**没有返回值表达式**。函数/rwir 的输出一律经**�
 - **call**：创建子帧 `/vthread/<vid>/<父帧路径>/[s0,0]/`，把实参经 Ptr 链绑定进子帧的读参槽
   `[0,-k]`、写参槽 `[0,k]`（零拷贝跨帧传参，不复制实参内容），子帧记 `‥callpc`（发起调用的 PC）与
   `‥returnpc`（返回后继续的 PC），PC 进入子帧首指令。
-- **return**：弹出当前帧、删其子树；顶层帧返回则整个 vthread 结束（新 PC 为空）；否则新 PC 取本帧
-  `‥returnpc`。返回链断裂（帧无 `‥returnpc`）**必须**报 `RuntimeError` 并保留该帧供排查。
+- **return**：先把父 PC 或终态写入 kvspace，再清理子帧；顶层帧返回使整个 vthread 结束。
+  返回链断裂（帧无 `‥returnpc`）**必须**报 `RuntimeError` 并保留该帧供排查。
 - 读参**只读**、写参**可写可读**；修改型指令**必须**把结果显式写入其写槽（见 [[函数调用]]）。
 	"#### -> /lib/kvlang/spec/runtime语义/执行模型
 }

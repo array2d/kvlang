@@ -8,8 +8,8 @@ lib kvlang/spec/附录/类型表达式文法 {
   显式 `|` 枚举。
 
 ```
-type_expr   = [ ref_prefix ] atom { "|" atom }   (* ref 前缀可选；layout 剥离前缀落 head ref 字节，wire langtype 不含前缀；见 [[总体方案]] *)
-ref_prefix  = "*" | "@"                          (* * → ref=1（kvspace 内间接）；@ → ref=2（扩展世界，值在 kvspace 之外，runtime-c 不可直达、由支持 @ 的 rwir 兑现）。签名位置可写：`T` 值传、`*T` 址传、`@T` 扩展存储；值容器（map/struct）无值本体可拷，必须带 `*`/`@`，见 [[函数]] *)
+type_expr   = [ ref_prefix ] atom { "|" atom }   (* 前缀描述目标位置；调用一律传地址 *)
+ref_prefix  = "*" | "@"                          (* * 使用 storetype bit2；@ 使用 storage class 3，见 [[XValueHead线格式]] *)
 atom        = shape | mapexpr | structref
 shape       = [ dims ] ( any | kind )
 mapexpr     = memitemkey "·" memitemvalue        (* stringkeymap；`·` 左=item 键侧的**格式器**（memitemkey_langtype_formatter）、右=item 值类型。声明形如 memheadname:memitemkey_langtype_formatter·memitemvalue_langtype={}，见 [[map容器]] *)
@@ -44,7 +44,7 @@ kind        = "bool"
                  def rwir 是 /lib/<op> 路由头（rwir 统一调度入口，仅存于 /lib/ 目录），不在标注白名单。
                  无 def rwfunc：rwfunc 有 kvlang 实现体（一串 rwir 指令槽），可被 main-runtime 直接解释执行，无需路由头（见 [[总体方案]]）。
                  `object`/`scope` 彻底删除，无此种类名（见 [[总体方案]]）；异构命名容器一律 struct。
-                 index/extindex 是 storetype 名，不是 kind，故不在标注白名单；
+                 目录成员由物理 key 前缀枚举，`index`/`extindex` 不再是 XValue 类型；
                  `*`/`@` 是源码 ref_prefix（见上方 type_expr/ref_prefix 产生式）；layout 剥离前缀落 head ref 字节，wire langtype 不含前缀；
                  valid_langtype 校验剥离 ref_prefix 后的剩余部分；真正非法的是后缀 `int64*` 或前缀位置错误。 *)
 ```

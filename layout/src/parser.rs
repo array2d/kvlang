@@ -6,7 +6,6 @@ use super::ast::{
     self, Expr, Field, Func, FuncSig, Instruction, Param, RwirDecl, Stmt, StructDecl,
 };
 use super::keytree;
-use super::langtype;
 use super::scanner::{scan, Diagnostic, Kind, Pos, Token};
 use super::symbol;
 
@@ -137,7 +136,7 @@ impl Parser {
     fn parse_file(&mut self) -> ast::File {
         let mut f = ast::File::default();
         loop {
-            let mut comments = self.collect_leading_comments();
+            let comments = self.collect_leading_comments();
             if self.peek().kind == Kind::EOF {
                 break;
             }
@@ -338,7 +337,6 @@ impl Parser {
             .params
             .iter()
             .chain(sig.returns.iter())
-            .filter(|p| langtype::is_addr_param(&p.ty))
             .map(|p| p.name.clone())
             .collect();
         self.skip_newlines_and_comments();
@@ -744,13 +742,9 @@ impl Parser {
     }
 
     fn check_read_only_params(&mut self, func: &Func) {
-        // 只读只对**地址读参**（声明带 `*`/`@`）生效：它的槽是调用方对象的地址，写它就是写
-        // 调用方的对象。**值读参**（不带前缀）的槽是自己的副本，体内可自由读写，不进本检查。
         let mut ro = std::collections::HashSet::new();
         for p in func.sig.params.iter() {
-            if super::langtype::is_addr_param(&p.ty) {
-                ro.insert(p.name.clone());
-            }
+            ro.insert(p.name.clone());
         }
         if ro.is_empty() {
             return;

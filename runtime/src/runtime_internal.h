@@ -8,63 +8,35 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ── kvspace-durable C ABI ─────────────────────────────────────────── */
-
-/* 三正交轴 head（逐字段对齐 kvspace/include/kvspace/kvspace.h 的 kvspaceHead_t）。
- * langtype 即该 ABI 的 langtype 槽（本 runtime 内部沿用 langtype 命名）。 */
+/* Match kvspaceHead_t in the KVSpace C ABI. */
 typedef struct {
-    uint16_t headlen;  /* head 总字节数；body 起于偏移 headlen */
-    uint8_t ref;       /* 存储位置：见 KVSPACE_REF_* */
-    uint8_t storetype; /* 物理布局：见 KVSPACE_STORETYPE_* */
-    uint8_t ro;        /* 1=只读，0=可写 */
-    uint32_t vid;      /* vthread id */
-    int32_t body_len;  /* body 字节数 */
-    int32_t ndim;    /* ARRAYND：维数；index/extindex：3；NONE/ATOM：0 */
-    int32_t dims[8]; /* 各维长度 / [len,cap,M]（X_MAX_NDIM=8） */
-    uint8_t langtype
-        [256]; /* 语义类型 langtype 串，NUL 终止（含 [dims]、无 ref/ext 前缀） */
-    int32_t langtype_len; /* langtype 内容长度（去 padding） */
-    int32_t body_offset;  /* body 在 data 内的起始偏移（= headlen） */
+    uint16_t headlen;
+    uint8_t ref;
+    uint8_t storetype;
+    uint8_t ro;
+    uint32_t vid;
+    int32_t body_len;
+    int32_t ndim;
+    int32_t dims[8];
+    uint8_t langtype[256];
+    int32_t langtype_len;
+    int32_t body_offset;
+    uint64_t body_cap;
 } kvspaceHead_t;
 
 #define KVSPACE_REF_INLINE 0
 #define KVSPACE_REF_PTR 1
 #define KVSPACE_REF_EXT 2
 
-#define KVSPACE_STORETYPE_NONE 0
-#define KVSPACE_STORETYPE_ATOM 1
-#define KVSPACE_STORETYPE_ARRAYND 2
-#define KVSPACE_STORETYPE_INDEX 3
-#define KVSPACE_STORETYPE_EXTINDEX 4
-
 extern void *kvspaceConnect(const char *dsn);
 extern void kvspaceClose(void *h);
 /* 借用读：*out 指向后端常驻/回收空间，调用方不得 free。resolve=1 穿透 link。 */
 extern int kvspaceGet(void *h, const char *key, int resolve, uint8_t **out,
                       uint32_t *out_len);
+extern int kvspaceSetValue(void *h, const char *key, const uint8_t *value,
+                           uint32_t value_len, uint8_t ro, uint32_t vid,
+                           char *err, uint32_t err_cap);
 
-/* 对齐 kvspace/include/kvspace/kvspace.h。parent_id/depth 由 ResolveRef 填；
- * 后端只写前 8 字节时 parent_id 保持 0，runtime 永久关闭父缓存。 */
-typedef struct {
-    uint32_t block_id;
-    uint32_t gen;
-    uint32_t parent_id;
-    uint32_t depth;
-} kvspaceRef_t;
-#if defined(__APPLE__)
-#define KVLANG_KVSPACE_WEAK __attribute__((weak_import))
-#else
-#define KVLANG_KVSPACE_WEAK __attribute__((weak))
-#endif
-extern int kvspaceResolveRef(void *h, const char *key, kvspaceRef_t *ref)
-    KVLANG_KVSPACE_WEAK;
-extern int kvspaceGetByRef(void *h, kvspaceRef_t *ref, const char *key_fallback,
-                           uint8_t **out, uint32_t *out_len)
-    KVLANG_KVSPACE_WEAK;
-extern int kvspaceSetPartByRef(void *h, kvspaceRef_t *ref,
-                               const char *key_fallback, uint32_t offset,
-                               const uint8_t *buf, uint32_t buf_len, char *err,
-                               uint32_t err_cap) KVLANG_KVSPACE_WEAK;
 /* 指令边界回收读借用池；定位读/写（分片）；只读 head 前缀。见 kvspace.h 契约。 */
 extern void kvspaceReadReset(void *h);
 extern int kvspaceGetPart(void *h, const char *key, uint32_t offset,
@@ -73,15 +45,6 @@ extern int kvspaceSetPart(void *h, const char *key, uint32_t offset,
                           const uint8_t *buf, uint32_t buf_len, char *err,
                           uint32_t err_cap);
 extern int kvspaceGetHead(void *h, const char *key, kvspaceHead_t *out);
-/* 就地写：key 已存在、body_len==原 body_len → 返回原 box body 偏移指针；否则非 0 + err。 */
-extern int kvspaceWriteInPlace(void *h, const char *key, int resolve,
-                               uint32_t body_len, uint8_t **body, char *err,
-                               uint32_t err_cap);
-/* 新位置写：按 (ref, storetype, ro, vid, langtype, body_len) 分配新 box、写 head，返回 body 偏移指针。 */
-extern int kvspaceWriteNewPlace(void *h, const char *key, uint8_t ref,
-                                uint8_t storetype, uint8_t ro, uint32_t vid,
-                                const char *langtype, uint32_t body_len,
-                                uint8_t **body, char *err, uint32_t err_cap);
 /* 前缀遍历：listlen 定计数，逐 idx 取名（借用回收缓冲，不得 free），不一次性返回整段名单。 */
 extern int kvspaceListLen(void *h, const char *prefix, int expand_ext,
                           int resolve, int32_t *out_count);
@@ -151,24 +114,8 @@ typedef struct {
     kvlangXvalue_t val;
 } kvlangKvPair_t;
 
-#define KVLANG_REF_CAP 64
-#define KVLANG_PREF_CAP 5
-#define KVLANG_HOT_CAP 4
-typedef struct { char *key; uint32_t block_id, gen, klen; } kvlangRefEnt_t;
-typedef struct { char *name; char *key; uint32_t block_id, gen, dlen; } kvlangHotEnt_t;
 typedef struct {
     void *h;
-    kvlangRefEnt_t ref[KVLANG_REF_CAP];
-    int nref;
-    int ref_on;
-    int parent_on;     /* 嵌套 ResolveRef 后 parent_id==0 则永久关闭 */
-    int parent_probed;
-    kvlangRefEnt_t pref[KVLANG_PREF_CAP]; /* · map ART parents */
-    int npref;
-    int pref_i;
-    kvlangRefEnt_t fpar; /* frame `/` parent for GetMember siblings */
-    kvlangHotEnt_t hot[KVLANG_HOT_CAP]; /* a/i/n leaf refs */
-    int nhot;
 } kvlangKv_t;
 
 /* growable string buffer */
@@ -198,7 +145,13 @@ static inline void kvlangStrbufFree(kvlangStrbuf_t *b) {
 /* ── XValue 操作 ───────────────────────────────────────────────────── */
 
 static inline bool kvlangXvalueNone(const kvlangXvalue_t *v) {
-    return v->data == NULL || v->len == 0;
+    if (!v->data || v->len == 0)
+        return true;
+    if (v->len != 32 || v->data[0] != 5 || v->data[1] != 0 ||
+        v->data[18] != 0)
+        return false;
+    kvspaceHead_t h;
+    return kvspaceDecodeHead(v->data, v->len, &h) == 0 && h.langtype_len == 0;
 }
 static inline void kvlangXvalueZero(kvlangXvalue_t *v) {
     v->data = NULL;
@@ -253,8 +206,6 @@ enum {
     KVLANG_LT_CHAR_UTF8,
     KVLANG_LT_CHAR_ASCII,
     KVLANG_LT_MAP,
-    KVLANG_LT_INDEX,
-    KVLANG_LT_EXTINDEX,
     KVLANG_LT_RWIR,
     KVLANG_LT_RWFUNC,
     KVLANG_LT_SCOPE,
@@ -379,7 +330,6 @@ int kvlangKvSetChar(kvlangKv_t *k, const char *key, const char *s);
 int kvlangKvDel(kvlangKv_t *k, const char *key, char *err, uint32_t err_cap);
 int kvlangKvDelTree(kvlangKv_t *k, const char *prefix, char *err,
                     uint32_t err_cap);
-void kvlangKvInvalidateFrame(kvlangKv_t *k, const char *frame_root);
 int kvlangKvCp(kvlangKv_t *k, const char *src, const char *dst, char *err,
                uint32_t err_cap);
 int kvlangKvCpTree(kvlangKv_t *k, const char *src, const char *dst, char *err,
@@ -421,7 +371,6 @@ const char *kvlangKeytreeVtidFromPc(const char *pc,
 char *kvlangKeytreeStack(const char *root);               /* malloc */
 size_t kvlangKeytreeStackBuf(const char *root, char *buf, size_t cap); /* 栈缓冲，返长度 */
 char *kvlangKeytreeFrameRoot(const char *pc); /* malloc，无效 NULL */
-size_t kvlangKeytreeFrameRootLen(const char *pc); /* 帧根长度，无分配 */
 char *kvlangKeytreeEntryPc(const char *root); /* malloc */
 char *kvlangKeytreeFrameAt(const char *vtid, int depth); /* malloc */
 int kvlangKeytreeFrameNum(const char *path); /* [d]; panics if invalid */
@@ -469,6 +418,8 @@ static inline int kvlangOpClassify(const char *op) {
 
 typedef struct {
     char *name;
+    char *type;
+    int address;
     kvlangXvalue_t val;
 } kvlangParam_t;
 
@@ -501,33 +452,27 @@ void kvlangVthreadGet(kvlangKv_t *kv, const char *vtid, char **pc,
                       char **status);
 void kvlangVthreadPcGet(kvlangKv_t *kv, const char *vtid, char **pc);
 void kvlangVthreadStatusGet(kvlangKv_t *kv, const char *vtid, char **status);
-void kvlangVthreadSet(kvlangKv_t *kv, const char *vtid, const char *pc,
-                      const char *status);
-void kvlangVthreadSetDone(kvlangKv_t *kv, const char *vtid, const char *ret);
+int kvlangVthreadSet(kvlangKv_t *kv, const char *vtid, const char *pc,
+                     const char *status);
+int kvlangVthreadSetDone(kvlangKv_t *kv, const char *vtid, const char *ret);
 void kvlangVthreadSetError(kvlangKv_t *kv, const char *vtid, const char *pc,
                            const char *msg);
 
 /* ── builtin ───────────────────────────────────────────────────────── */
 
-/* yield_pc：native builtin 把「须交回上层驱动就地派发的 pc」写入 *yield_pc（否则留 NULL）。
- * 唯 vthread·run 的 return 模式用：驱动一个子 vthread 遇非本执行器 rwir 时，把其 pc 冒泡给驱动。
- * fb_pc：主循环给的 **PC 回传槽**（非 NULL 时）。新 PC 照旧先写 kvspace（崩溃恢复），同时回传此槽，
- * 令主循环直接用之、免掉「刚写就回读」的那次后端 Get + 路径重建；回传值就是本指令自己刚写进去的
- * 值，不引入第二份事实源。**status 不回传**——状态门每步从 kvspace 回读（见 kvlangVthreadAdvance）。
- * fb_pc 由 Advance malloc 写入、循环接管所有权。 */
+/* yield_pc returns a child PC to the external runtime. */
 typedef struct {
     kvlangKv_t *kv;
     const char *vtid;
     const char *pc;
     kvlangRwirInst_t *inst;
     char **yield_pc;
-    char **fb_pc;
-    const char *frame_root;   /* 主循环已缓存的帧根（借用）；NULL 时各 helper 自行计算 */
+    const char *frame_root;   /* Borrowed for this instruction. */
     const char *status_known; /* 本步开始前从 kvspace 读到的 ‥status（借用）；NULL = 未知 */
+    bool persist_failed;
 } kvlangFrame_t;
 
-/* 循环内 PC/status 推进：PC 恒写 kvspace；status 与 f->status_known（来自 kvspace 的**源值**）
- * 不同才写——绝不拿进程内副本当依据，故不会与 kvspace 分叉；fb_pc 非 NULL 时回传新 PC。 */
+/* Write PC to kvspace; write status when it changes. */
 void kvlangVthreadAdvance(kvlangFrame_t *f, const char *pc, const char *status);
 
 /* notinmycaps：查 myrwircaps table，opcode 不在本 runtime 能力表内 → true。 */

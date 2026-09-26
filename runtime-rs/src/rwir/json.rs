@@ -1,22 +1,14 @@
-//! rwir `json·to` / `json·from`：KV 子树 ↔ JSON 文本（对齐 kvlang go/json 的 · 成员形态）。
-//!   json·to(root)   -> str   root 整棵子树读成 JSON：stringkeymap 容器（p + memindex p·）
-//!                            按成员名形态分派——`[i]` 坐标段 → JSON 数组，命名键 → JSON 对象；
-//!                            / 目录树（kind=index）→ 嵌套对象；compact ndarray → 数组。
-//!   json·from(json) -> root  反序列化 JSON 写回 root 子树（覆盖语义，先 del_tree）。
-//! 容器值在 p（无后缀）：stringkeymap，命名字典 dims=[0]、坐标数组 dims=[n]；memindex p·
-//! （kind=index，body=[4B count LE][names]）是成员列表唯一权威。对象数组递归支持。
-//! 编码走权威 kvspace ABI：DecodeHead 读头、TlvEncode/NewCharByte 编码。
+//! JSON conversion over physical KVSpace members.
 
 use serde_json::{Map, Value};
 
 use crate::engine::Engine;
 use crate::ffi::*;
 
-// 常量与 kvlang go/json 的 cconst 对齐（直连 kvspace，无 kvspaceConst ABI）。
 const SEP: &str = "·";
 const DIR_SUF: &str = "/";
-const KIND_MAP: &str = "stringkeymap";
-const KIND_INDEX: &str = "index";
+const OBJECT_TYPE: &str = "[]char/utf32·any";
+const ARRAY_TYPE: &str = "[int64]·any";
 
 pub fn to(eng: &Engine, pc: &str) {
     let names = params(eng, pc);
@@ -48,15 +40,12 @@ fn params(eng: &Engine, pc: &str) -> Vec<String> {
     s.lines().map(str::to_string).collect()
 }
 
-// ── KV 子树 → JSON ────────────────────────────────────────────────
-
 fn read_value(eng: &Engine, path: &str) -> Value {
     let (kind, raw, arr_len) = parse_tlv(&eng.get_tlv(path));
-    if kind == KIND_MAP {
-        return read_container(eng, path);
+    if kind.contains(SEP) {
+        return read_container(eng, path, &kind);
     }
-    let dkind = parse_tlv(&eng.get_tlv(&format!("{path}{DIR_SUF}"))).0;
-    if dkind == KIND_INDEX {
+    if !eng.list_kv(&format!("{path}{DIR_SUF}")).is_empty() {
         return read_dir(eng, path);
     }
     if kind.is_empty() {
@@ -65,7 +54,6 @@ fn read_value(eng: &Engine, path: &str) -> Value {
     tlv_to_json(&kind, &raw, arr_len)
 }
 
-// read_dir：/ 目录树（kind=index）→ JSON object，子名带尾 / 先 strip。
 fn read_dir(eng: &Engine, path: &str) -> Value {
     let mut map = Map::new();
     for name in eng.list_kv(&format!("{path}{DIR_SUF}")) {
@@ -78,25 +66,21 @@ fn read_dir(eng: &Engine, path: &str) -> Value {
     Value::Object(map)
 }
 
-// read_container：stringkeymap 容器 p → 按 memindex 成员名形态分派。
-// 成员全为 `[i]` 坐标段 → JSON 数组；否则（命名键）→ JSON 对象。
-fn read_container(eng: &Engine, path: &str) -> Value {
+fn read_container(eng: &Engine, path: &str, langtype: &str) -> Value {
     let names = eng.list_kv(&format!("{path}{SEP}"));
-    let all_idx = !names.is_empty()
+    if langtype.starts_with("[int64]·")
         && names.iter().all(|n| {
             n.strip_prefix('[')
                 .and_then(|r| r.strip_suffix(']'))
-                .map(|i| i.parse::<usize>().is_ok())
-                .unwrap_or(false)
-        });
-    if all_idx {
+                .is_some_and(|i| i.parse::<usize>().is_ok())
+        })
+    {
         read_arr(eng, path)
     } else {
         read_obj(eng, path)
     }
 }
 
-// read_obj：命名字典 stringkeymap p → 遍历 memindex p· 成员。
 fn read_obj(eng: &Engine, path: &str) -> Value {
     let mut map = Map::new();
     for name in eng.list_kv(&format!("{path}{SEP}")) {
@@ -105,7 +89,6 @@ fn read_obj(eng: &Engine, path: &str) -> Value {
     Value::Object(map)
 }
 
-// read_arr：stringkeymap 容器值 p → 遍历 memindex p· 坐标段 [i]，按数值升序。
 fn read_arr(eng: &Engine, path: &str) -> Value {
     let mut idxs: Vec<usize> = Vec::new();
     for n in eng.list_kv(&format!("{path}{SEP}")) {
@@ -218,32 +201,24 @@ fn utf32_to_string(raw: &[u8]) -> String {
         .collect()
 }
 
-// ── JSON → KV 子树 ────────────────────────────────────────────────
-
 fn write_value(eng: &Engine, path: &str, v: &Value) {
     match v {
         Value::Object(m) => write_obj(eng, path, m),
         Value::Array(arr) => write_arr(eng, path, arr),
-        Value::Null => eng.set_tlv(path, &[]),
+        Value::Null => eng.set_tlv(path, &tlv_encode("None", &[], &[])),
         _ => eng.set_tlv(path, &value_to_tlv(v)),
     }
 }
 
 fn write_obj(eng: &Engine, path: &str, m: &Map<String, Value>) {
-    let mut keys: Vec<&String> = m.keys().collect();
-    keys.sort();
     eng.set_tlv(path, &mk_obj_value());
-    let names: Vec<String> = keys.iter().map(|k| k.to_string()).collect();
-    eng.set_tlv(&format!("{path}{SEP}"), &mk_mem_index(&names));
-    for k in keys {
+    for k in m.keys() {
         write_value(eng, &format!("{path}{SEP}{k}"), &m[k]);
     }
 }
 
 fn write_arr(eng: &Engine, path: &str, arr: &[Value]) {
-    let names: Vec<String> = (0..arr.len()).map(|i| format!("[{i}]")).collect();
-    eng.set_tlv(path, &mk_map_value(arr.len()));
-    eng.set_tlv(&format!("{path}{SEP}"), &mk_mem_index(&names));
+    eng.set_tlv(path, &mk_map_value());
     for (i, v) in arr.iter().enumerate() {
         write_value(eng, &format!("{path}{SEP}[{i}]"), v);
     }
@@ -264,28 +239,18 @@ fn value_to_tlv(v: &Value) -> Vec<u8> {
     }
 }
 
-// ── 容器值 / memindex 编码 ─────────────────────────────────────────
-
-// memindex p·：kind=index，body=[4B count LE][names]。
-fn mk_mem_index(names: &[String]) -> Vec<u8> {
-    let mut body = (names.len() as u32).to_le_bytes().to_vec();
-    body.extend_from_slice(names.join("\n").as_bytes());
-    tlv_encode(KIND_INDEX, &body, &[])
-}
-
-// 命名字典容器值 p：kind=stringkeymap，dims=[0]（无形状，成员在 memindex）。
 fn mk_obj_value() -> Vec<u8> {
-    tlv_encode(KIND_MAP, &[], &[0])
+    tlv_encode(OBJECT_TYPE, &[], &[])
 }
 
-// stringkeymap 容器值 p：body 空，dims=[n]（恒一维坐标段）。
-fn mk_map_value(n: usize) -> Vec<u8> {
-    tlv_encode(KIND_MAP, &[], &[n as i32])
+fn mk_map_value() -> Vec<u8> {
+    tlv_encode(ARRAY_TYPE, &[], &[])
 }
-
-// ── langtype 串解析（反序列化按类型/形状分发用；kvspace 未导出串解析器）─────────
 
 fn parse_langtype(kx: &str) -> (Vec<i32>, String) {
+    if kx.contains(SEP) {
+        return (Vec::new(), kx.to_string());
+    }
     if kx.starts_with('[') {
         match kx.find(']') {
             Some(end) => (
@@ -328,15 +293,17 @@ mod tests {
     }
 
     fn test_engine() -> Engine {
-        let dsn = "redis://127.0.0.1:6379";
-        let kv = unsafe { kvspaceConnect(cs(dsn).as_ptr()) };
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dsn = format!("fs:///tmp/kvlang-json-{}-{n}", std::process::id());
+        let kv = unsafe { kvspaceConnect(cs(&dsn).as_ptr()) };
         assert!(!kv.is_null());
         let mut err = [0u8; 256];
         unsafe { kvspaceClear(kv, err.as_mut_ptr() as *mut c_char, 256) };
         Engine {
             rt: std::ptr::null_mut(),
             kv,
-            dsn: dsn.to_string(),
+            dsn,
             ext: None,
         }
     }
@@ -362,19 +329,10 @@ mod tests {
     #[test]
     fn native_data_to() {
         let eng = test_engine();
-        // 用户 kv 代码写 · 成员（object 容器 + memindex），json·to 读回。
         eng.set_tlv("/data", &mk_obj_value());
-        eng.set_tlv(
-            "/data·",
-            &mk_mem_index(&["age".into(), "name".into(), "scat".into()]),
-        );
         eng.set_tlv("/data·age", &i64_tlv(&[42]));
         eng.set_tlv("/data·name", &new_char_byte(b"alice"));
-        eng.set_tlv("/data·scat", &mk_map_value(3));
-        eng.set_tlv(
-            "/data·scat·",
-            &mk_mem_index(&["[0]".into(), "[1]".into(), "[2]".into()]),
-        );
+        eng.set_tlv("/data·scat", &mk_map_value());
         eng.set_tlv("/data·scat·[0]", &i64_tlv(&[10]));
         eng.set_tlv("/data·scat·[1]", &i64_tlv(&[20]));
         eng.set_tlv("/data·scat·[2]", &i64_tlv(&[30]));

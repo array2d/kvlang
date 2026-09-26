@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::ast::{self, Expr, Func, Instruction, LitKind, Stmt};
 use super::scanner::{Diagnostic, Pos};
-use super::{builtin, keytree, langtype, symbol};
+use super::{builtin, keytree, symbol};
 
 /// 容器类型（stringkeymap / mapexpr）不可用 `[]` 下标访问成员——
 /// `[]` 仅限 compact array（shaped langtype，含字符串 `[]char/*`）。
@@ -195,14 +195,11 @@ fn check_map_inst(s: &Instruction, defined: &HashSet<String>, diags: &mut Vec<Di
 
 pub fn check_container_subscript(fn_: &Func) -> Vec<Diagnostic> {
     let tm = infer_types(fn_);
-    // 地址传参/返回的 `*` 是**传递方式**而非指针值：layout 体内已把它解引用（名字指称实参本体），
-    // 故 `p[i]`/`p·x` 是对实操本体的下标/成员，不是「指针当数组」。
     let addr: Vec<&str> = fn_
         .sig
         .params
         .iter()
         .chain(fn_.sig.returns.iter())
-        .filter(|p| langtype::is_addr_param(&p.ty))
         .map(|p| p.name.as_str())
         .collect();
     let mut diags = Vec::new();

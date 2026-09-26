@@ -21,8 +21,8 @@ lib kvlang/spec/类型系统/langtype签名类型表达式 {
 langtype** 对参数定义的 **def langtype** 逐值判定：命中即通过，失配报 TypeError（见 [[匹配语义与变参]]）。
 参数变参 `...` 是签名层 arity 构造，**不在** def langtype 串内（见 [[函数]]）。
 
-**唯一例外**是 opcode 槽 `[s0,0]` 的 `rwir|rwfunc`——它是**派发标记**（layout 不静态判定目标是 rwir 还是
-rwfunc，交 runtime 查 `/lib/<opcode>` 定，见 [[指令槽编码]]），既不是值类型、也不属 def langtype。
+opcode 槽 `[s0,0]` 使用实际的 `rwir` 或 `rwfunc` langtype；layout 在生成时区分已知调用目标，
+runtime 再查 `/lib/<opcode>` 分派（见 [[指令槽编码]]）。
 
 ## kindexpr（简写）
 

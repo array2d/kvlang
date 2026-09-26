@@ -72,19 +72,7 @@ memitemvalue 可递归嵌套（`[]char/utf8·[]char/utf8·int64` 即 `map[string
 
 ## 容器物理结构
 
-map 在 kvspace 中分两部分落库，`·` 是值容器唯一的 memindex 标记（注：`/lib/{pkg}·{func}` 中的 `·` 是
-包·函数命名分隔符，与 memindex 无关，详见 [[总体方案]]）：
-
-- **容器值**：落在裸 base 键（memheadname），storetype=index，body 空；langtype 为 map langtype（如
-  `[]char/utf8·int64`）。
-- **成员（item）**：`base·memitemkey` 是独立子 key，各自持该 item 的 body（memitemvalue）。
-- **memindex**：落在 `base·` 键（尾中点），storetype=index，其 body 是成员键索引矩阵，是成员枚举的权
-  威来源。
-
-memindex 的线格式为 dims = `[len, cap, M]` 的矩阵：`len` = 有效成员数、`cap` = 预留行数
-（`cap ≥ len`，满则翻倍扩容）、`M` = 成员键 UTF-8 字节最大长向上 8 对齐后的**行宽**；body 为
-`cap × M` 字节，前 `len` 行是有序成员键（NUL 补齐），其余行全 NUL。容量内增删成员 body 长恒定、就地覆
-写。`M` 是行宽（行 stride），`cap` 是可翻倍的容量。（此物理模型 struct 同样适用。）
+map 的 base key 存 class 0、body 为空，langtype 为完整 map 类型（例如 `[]char/utf8·int64`）。每个成员落在 `base·memitemkey` 的独立 KV key，保存该成员自己的 XValue。成员通过物理 key 前缀枚举；不存放 `base·` 索引矩阵。struct 成员遵循同一物理规则。`/lib/{pkg}·{func}` 中的 `·` 是函数命名字符，函数成员则位于 `/` 目录下。
 
 ## 容器字面量须带类型标注
 

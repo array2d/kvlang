@@ -26,7 +26,7 @@ fn compile_simple_func() {
     // 函数签名
     let sig_val = kv.get_one("/lib/sum/[0,0]");
     assert_eq!(kvkind::kind(&sig_val), "rwfunc");
-    assert_eq!(kvkind::array_len(&sig_val), 2); // add + return
+    assert_eq!(body(&sig_val).len(), 5);
     let b = body(&sig_val);
     assert_eq!(kvkind::rwfunc_num_reads(b), 2);
     assert_eq!(kvkind::rwfunc_num_writes(b), 1);
@@ -41,21 +41,13 @@ fn compile_simple_func() {
         .collect();
     assert_eq!(types, vec!["int64", "int64", "int64"]);
 
-    // 参数 Ptr
-    let a = kv.get_one("/lib/sum/A");
-    assert!(kvkind::is_ptr(&a));
-    assert_eq!(kvkind::ptr_target(&a), "[0,-1]");
-    let c = kv.get_one("/lib/sum/C");
-    assert!(kvkind::is_ptr(&c));
-    assert_eq!(kvkind::ptr_target(&c), "[0,1]");
-
     // 指令（特化后 opcode = int64·add）
     let op = kv.get_one("/lib/sum/[1,0]");
-    assert_eq!(kvkind::kind(&op), "rwir|rwfunc");
+    assert_eq!(kvkind::kind(&op), "rwir");
     assert_eq!(sig(&op), "int64·add");
-    assert_eq!(sig(&kv.get_one("/lib/sum/[1,-1]")), "A");
-    assert_eq!(sig(&kv.get_one("/lib/sum/[1,-2]")), "B");
-    assert_eq!(sig(&kv.get_one("/lib/sum/[1,1]")), "C");
+    assert_eq!(sig(&kv.get_one("/lib/sum/[1,-1]")), "*[0,-1]\0int64");
+    assert_eq!(sig(&kv.get_one("/lib/sum/[1,-2]")), "*[0,-2]\0int64");
+    assert_eq!(sig(&kv.get_one("/lib/sum/[1,1]")), "*[0,1]\0int64");
     assert_eq!(sig(&kv.get_one("/lib/sum/[2,0]")), "return");
 
     // 源码副本
@@ -87,7 +79,7 @@ fn compile_string_literal_and_lib() {
 #[test]
 fn compile_multiline_string_literal() {
     let mut kv = fresh_kv();
-    let src = "lib m { rwfunc ml() -> () {\n    \"\"\"hello\nworld\"\"\" -> _\n} }\n";
+    let src = "lib m { rwfunc ml() -> () {\n    r#\"hello\nworld\"# -> _\n} }\n";
     compile(&mut kv, src).unwrap();
 
     let r = kv.get_one("/lib/m·ml/[1,-1]");

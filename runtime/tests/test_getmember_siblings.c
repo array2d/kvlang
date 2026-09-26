@@ -45,20 +45,6 @@ static int set_i64(kvlangKv_t *k, const char *key, int64_t n) {
     return 0;
 }
 
-/* Drop leaf/hot so GetMember cannot use per-key block_id. Keep fpar. */
-static void drop_leaf_hot(kvlangKv_t *k) {
-    int i;
-    for (i = 0; i < k->nref; i++)
-        free(k->ref[i].key);
-    k->nref = 0;
-    for (i = 0; i < k->nhot; i++) {
-        free(k->hot[i].name);
-        free(k->hot[i].key);
-        k->hot[i].name = k->hot[i].key = NULL;
-    }
-    k->nhot = 0;
-}
-
 int main(void) {
     char dir[] = "/tmp/kvs-gm-XXXXXX";
     char path[256], dsn[288];
@@ -80,23 +66,15 @@ int main(void) {
         fprintf(stderr, "kvlangKvConnect failed dsn=%s\n", dsn);
         return 1;
     }
-    CHECK(k->ref_on);
-
     for (i = 0; i < n; i++) {
         char key[128];
         snprintf(key, sizeof key, "%s%s", frm, names[i]);
         CHECK(set_i64(k, key, want[i]) == 0);
     }
-    CHECK(k->fpar.key != NULL);
-    CHECK(k->fpar.klen == (uint32_t)strlen(frm));
-    CHECK(memcmp(k->fpar.key, frm, k->fpar.klen) == 0);
-    CHECK(k->fpar.block_id != 0);
-    CHECK(k->fpar.gen != 0);
-
-    drop_leaf_hot(k);
-    CHECK(k->nref == 0);
-    CHECK(k->nhot == 0);
-    CHECK(k->fpar.block_id != 0);
+    kvlangKvDisconnect(k);
+    k = kvlangKvConnect(dsn);
+    if (!k)
+        return 1;
 
     for (i = 0; i < n; i++) {
         int64_t got;
@@ -107,21 +85,23 @@ int main(void) {
         kvlangKvReadReset(k);
     }
 
-    printf("GetMember siblings via cached ART parent: %d keys, distinct values\n", n);
-    printf("fpar block_id=%u depth=%u\n", k->fpar.block_id, k->fpar.gen);
+    printf("GetMember siblings after reconnect: %d keys, distinct values\n", n);
 
-    /* Set lo with leaf/hot empty; hi must stay distinct. */
     {
         char lokey[128];
         snprintf(lokey, sizeof lokey, "%slo", frm);
         CHECK(set_i64(k, lokey, 88) == 0);
+        kvlangKvDisconnect(k);
+        k = kvlangKvConnect(dsn);
+        if (!k)
+            return 1;
         CHECK(kvlangKvGetMember(k, frm, "lo", &out) == 0);
         CHECK(xv_i64(&out) == 88);
         kvlangKvReadReset(k);
         CHECK(kvlangKvGetMember(k, frm, "hi", &out) == 0);
         CHECK(xv_i64(&out) == 77);
         kvlangKvReadReset(k);
-        printf("Set sibling via cached ART parent: lo=88 hi=77\n");
+        printf("Set sibling after reconnect: lo=88 hi=77\n");
     }
 
     kvlangKvDisconnect(k);

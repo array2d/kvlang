@@ -1,28 +1,11 @@
 // 欢迎加入kvspace世界
 lib kvlang/spec/类型系统/ref存储位置 {
-	r####"# ref（存储位置维）
+	r####"# 值、指针与扩展定位
 
-只决定 body 语义与是否间接寻址；**不改变** storetype/langtype 描述——head 恒携带完整形态。
+wire 的 flags 低两位为 storage class，bit 2 表示指针。普通值按 class 0/1/2 存 body；指针使用 class 1 加指针位，body 是目标 KV key 的 UTF-8 路径，a 为路径字节数、b 为容量。目标 key 若也是指针，沿路径再次读取即可表示多层间接；每格只保存一层。空指针用 None。
 
-| ref | body | 义 |
-|-----|------|----|
-| 0 inline | 值 raw 本体 | 就地落入 kvspace |
-| 1 ptr | 目标 key 路径 | 指针，单跳指向同型目标（head 的 storetype/langtype 即目标形态）；`ptr → rwfunc` 即函数调用链。**空指针即 None**（无值、不落键），非"空 Ptr"（见 [[ptr]]） |
-| 2 @ext | 扩展句柄/定位符 | 单个值本体在扩展世界（fs 文件 / gpu tensordata），head 存元描述 |
+`@T` 使用 class 3：langtype 是真实目标类型，body 是扩展定位串，a 为定位串 UTF-8 字节数、b 为容量。核心 runtime-c 不兑现扩展存储；声明支持它的 rwir 按定位串读写实际内容。源码中的 `*`/`@` 类型前缀不进入 wire langtype。
 
-**源码书写与 wire 的分工**：kvlang **源码**里，指针/扩展引用仍以 `*`/`@` 前缀写在类型**最前**
-（`*int64`、`@[256,256]uint8`，见 tutorial 例），这是源码类型标注文法的一部分。layout 解析源码时把该
-前缀**剥离**并落成 head 的 `ref` 独立字节；故 **wire 层 langtype 串不含 `*`/`@` 前缀**，存储位置一律
-经 `ref` 字节表达。`ref=2` 只表**单值**存于扩展世界，与目录类型 `index`/`extindex` 无关。
-
-## 扩展世界句柄（ref=2 的 body 语义）
-
-ref=2 时 body **不是**真实值字节，而是**逻辑定位串**（如 `/networld/<host>/proc/<pid>/stdout`）；
-langtype 仍为目标 langtype 串（不带 `@` 前缀），head 只存元描述。**`@` 的兑现交给支持它的 rwir**：如
-runtime-rs 的 `networld/proc` rwir 把逻辑路径 `/networld/<host>/proc/<pid>/<stream>` 映射到
-`/tmp/kvlangruntime-rs/<pid>/<stream>` 物理文件读回，`networld/fs` 一族 rwir 也直接以 `@` 开头的扩展 key
-为输入；核心 runtime-c 不解引用 `@`。真实 xvalue 落在扩展世界（fs 文件、gpu
-tensordata），非 kvspace 元存；扩展算子的输出即以此形式写回其写槽。锚例：
-`tutorial/14-networld/05-capture.kv`。
+C ABI 的 `kvspaceHead_t.ref` 是从 flags 解码出的兼容视图，不是独立的 wire 字节。`ro`/`vid` 存于独立元数据 key。
 "#### -> /lib/kvlang/spec/类型系统/ref存储位置
 }

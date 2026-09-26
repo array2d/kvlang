@@ -8,11 +8,11 @@ lib kvlang/spec/layout语义/rwfunc布局与def_rwir {
 
 - `[0,0]`——rwfunc 签名锚点，body 仅 `[nr][nw][dynamic]` 计数头；func 目录根**不**落 `[0,±k]` 参数
   类型槽。
-- `.src`（ASCII 点后缀，`/lib/<pkg>·<name>.src`）——源码副本，langtype `[]char/utf8`（storetype ARRAYND）。
+- `.src`（ASCII 点后缀，`/lib/<pkg>·<name>.src`）——源码副本，langtype `[n]char/utf8`（class 1）。
 - 每个参数定义键——`funcDir.[0,-j]`（读参）/ `funcDir.[0,+j]`（写参），点后缀、与坐标斜杠键
   `/[0,±j]` 不同名；langtype=`def langtype`，body = 参数名 + NUL + 该参的 def langtype（匹配类型）串。此键为签名元数据
   （dump / 类型检查用），不参与运行时形参解析——函数体指令里的形参引用已编译期替换为帧坐标的显式解
-  引用 `*[0,-j]`/`*[0,+j]`，运行期直接读帧槽解引用到实参值（见 [[调用extindex]]）。
+  引用 `*[0,-j]`/`*[0,+j]`，运行期沿帧槽 `**T` 与实参键 `*T` 指向调用方值（见 [[调用extindex]]）。
 - `[i,j]`（i≥1）——线性指令（见 [[控制流]]）。
 - `‥labels/<label>`——标签到 irseq 映射（若有控制流）。
 
@@ -23,15 +23,13 @@ rwfunc 无 `[0,x]` 槽、def rwir 无 `{name}` 键。
 
 ## def rwir 路由头（rwir 统一调度入口）
 
-`/lib/<opcode>`（langtype `def rwir`）**只由 runtime 注册写入**，kv 源码不声明 rwir、layout 也不产生
-def rwir：
+`/lib/<opcode>`（langtype `def rwir`）由 layout 的声明或 runtime 注册写入：
 
 - **runtime 注册**——各 runtime 启动时经运行时注册接口把自身 myrwircaps 的每个 opcode 写入
   `/lib/<opcode>`；注册前校验各参 langtype。主槽 body `[nr][nw][dynamic]`，各参数类型分别落入
   `[0,x]` 签名行槽（`def langtype` xvalue），无实现指令行。
 
-layout **不**判定某 opcode 是否在本 runtime 的 myrwircaps 内——调用目标 opcode 槽统一 langtype
-`rwir|rwfunc`，判定推迟到 runtime 查 `/lib/<opcode>` 的 XValue langtype（见 [[执行模型]]）。def rwir
+layout 在生成 opcode 槽时区分 `rwir` 与已知的 `rwfunc`；runtime 仍查 `/lib/<opcode>` 分派。def rwir
 路由头仅落于 `/lib/<opcode>`，无 native/扩展/user 的静态归类——每个 runtime 只声明自身 myrwircaps，不
 在 layout 层区分。
 
@@ -57,8 +55,7 @@ lib math {
 
 ## struct 原型
 
-`struct` 声明布进 `/lib/<Name>`：原型定义节点（langtype `def struct`，body 为各字段
-`name:langtype`）+ memindex（`/lib/<Name>·`，字段名唯一权威）+ 各字段默认值。runtime `struct·new` 以
-此原型克隆实例，字段默认值即实例初值。
+`struct` 声明布进 `/lib/<Name>`：原型定义节点是 class-0 空 body 的 `def struct`；字段类型在
+`/lib/<Name>/field`，默认值在 `/lib/<Name>·field`。runtime `struct·new` 以此原型创建实例。
 	"#### -> /lib/kvlang/spec/layout语义/rwfunc布局与def_rwir
 }

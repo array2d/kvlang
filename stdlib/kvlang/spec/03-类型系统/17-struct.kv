@@ -2,7 +2,7 @@
 lib kvlang/spec/类型系统/struct {
 	r####"# struct
 
-`struct` 声明注册一个原型节点于 `/lib/<Name>`（storetype=index，langtype 为原型路径如
+`struct` 声明注册一个原型节点于 `/lib/<Name>`（class 0，实例 langtype 为原型路径如
 `/lib/Point`），字段带类型标注与默认值：
 
 ```kv
@@ -13,7 +13,7 @@ struct Point {
 ```
 
 实例化 `Name{f=v}` 克隆原型子树、覆盖给定字段（其余取默认），并对每个字段做类型校验；实例是 struct
-类型命名成员容器（storetype=index，成员在 `{key}·` memindex），成员经 `·` 访问。字段类型不符或写不存
+类型命名成员容器（base key 为 class 0 空值，字段落独立 `{key}·field` key），成员经 `·` 访问。字段类型不符或写不存
 在的字段在 runtime 报 TypeError。
 
 ```kv
@@ -26,7 +26,7 @@ q = Point{}            // 全取默认：0.0, 0.0
 型表达式]]）。结构值可存进 map（int 键、struct 值）、以绝对路径指针连成链表/树/图（见
 `tutorial/12-struct/`）。
 
-struct 原型**不是**平行于 kvspace 的类型注册表——它就是 KV 树里的一个索引节点（`/lib/<Name>`，字段类型
+struct 原型**不是**平行于 kvspace 的类型注册表——它就是 KV 树里的一个 KV 目录节点（`/lib/<Name>`，字段类型
 与默认值都是 KV 数据），故不与「数据结构全在 KV 树」的原则冲突（见 [[程序即数据结构]]）。
 "#### -> /lib/kvlang/spec/类型系统/struct
 }

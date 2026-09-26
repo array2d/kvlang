@@ -4,42 +4,48 @@
 
 typedef int (*kvlangBuiltinFn)(kvlangFrame_t *f);
 
-/* 共享队列根：第一个 rwir 的 /lib/<opcode>/vids 绝对路径。 */
-static char *g_first_vids = NULL;
-
-/* 建立 rwir 的 vids 队列：第一个 rwir 是真实 strkeymap，后续是 Ptr 指向第一个。
- * 幂等：vids 已存在则跳过——否则脏 kvspace 上重复注册时，Set 经路径穿透会把首队列
- * 改成自指 Ptr，令 resolve_path 死循环（父子 kvlang 共享同一 redis 的挂起根因）。 */
-static void register_vids(kvlangKv_t *k, const char *opcode) {
+/* Keep the shared queue in KVSpace. */
+static int register_vids(kvlangKv_t *k, const char *opcode) {
+    char queue[] = "/vthread/‥vids";
+    const char *queue_type = "[]char/utf32·[]char/utf32";
+    kvlangXvalue_t root;
+    kvlangXvalueZero(&root);
+    bool root_exists = kvlangKvGetOne(k, queue, &root) == 0 && !kvlangXvalueNone(&root);
+    kvlangXvalueFree(&root);
+    if (!root_exists) {
+        kvlangXvalue_t value;
+        kvlangXvalueZero(&value);
+        kvlangXvalueNewTlv(&value, queue_type, NULL, 0, 1);
+        kvlangKvPair_t pair = {queue, value};
+        char err[256];
+        int rc = kvlangKvSet(k, &pair, 1, err, sizeof err);
+        kvlangXvalueFree(&value);
+        if (rc != 0)
+            return rc;
+    }
     char *base = kvlangKeytreeRwir(opcode);
     kvlangStrbuf_t tk;
     kvlangStrbufInit(&tk);
     kvlangStrbufPuts(&tk, base);
     kvlangStrbufPuts(&tk, "/vids");
-    bool first = (g_first_vids == NULL);
-    if (first)
-        g_first_vids = strdup(tk.p);
     kvlangXvalue_t cur;
     kvlangXvalueZero(&cur);
     bool exists =
         (kvlangKvGetOne(k, tk.p, &cur) == 0 && !kvlangXvalueNone(&cur));
     kvlangXvalueFree(&cur);
+    int rc = 0;
     if (!exists) {
         kvlangXvalue_t v;
         kvlangXvalueZero(&v);
-        int32_t dims[1] = {0};
-        if (first)
-            kvlangXvalueNewTlvDims(&v, KVSPACE_KIND_MAP, (const uint8_t *)"", 0,
-                                   dims, 1);
-        else
-            kvlangXvalueNewPtr(&v, KVSPACE_KIND_MAP, g_first_vids);
+        kvlangXvalueNewPtr(&v, queue_type, queue);
         kvlangKvPair_t p = {tk.p, v};
         char err[256];
-        kvlangKvSet(k, &p, 1, err, sizeof err);
+        rc = kvlangKvSet(k, &p, 1, err, sizeof err);
         kvlangXvalueFree(&v);
     }
     kvlangStrbufFree(&tk);
     free(base);
+    return rc;
 }
 
 /* 写 [0,x] 签名行槽 = def langtype（body 为该参数 langtype 串）。 */
@@ -89,8 +95,9 @@ int kvlangDefRwir(void *kvspace, const char *opcode, const char *const *rp,
         write_sig_slot(&k, base, i + 1, wp[i], strlen(wp[i]));
 
     free(base);
-    /* 建立共享 vids 队列（第一个真实 strkeymap，后续 Ptr 指向它；幂等查 kvspace）。 */
-    register_vids(&k, opcode);
+    /* Register the shared KVSpace queue. */
+    if (rc == 0)
+        rc = register_vids(&k, opcode);
     return rc;
 }
 

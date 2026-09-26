@@ -2,118 +2,18 @@
 lib kvlang/spec/runtime语义/函数调用 {
 	r####"# 函数调用
 
-本章界定运行期的用户函数调用：三种源码形态的名解析、调用的**实现模型**（建帧 + extindex 复用指令树 +
-一层引用传参），以及一条指令归属 myrwircaps / def rwir 路由 / 用户 rwfunc 的判定边界。native 内建全集
-见 [[runtimec内建]]。
+调用 `/lib/<pkg>·<name>` 下的 rwfunc。源码可以写绝对路径、`pkg·name`，或同包优先的裸名。layout 根据已知目标将 opcode 槽写成 `rwfunc`；runtime 从 KVSpace 读取函数的 `[0,0]` 锚点及参数定义。
 
-## 三种调用形态收敛到同一 KV key
+调用时在 `/vthread/<vid>/[depth]` 创建子帧，使用 class 3 扩展定位叠加函数目录的只读指令树。帧内 `‥lib`、`‥callpc`、`‥returnpc` 都写在 KVSpace；PC 也只存于 KVSpace。每条指令边界重新读取 PC 和状态。
 
-用户函数调用有三种源码形态，运行期一律解析为 `/lib/<pkg>·<name>`：
+## 参数绑定
 
-| 源码形态 | 示例 | 多级 pkg |
-|---------|------|----------|
-| 全路径 | `/lib/a/b·add(3, 4) -> s` | 段用 `/` |
-| 限定名 | `math·sum(3, 4)` / `a/b·add(3, 4)` | 是 |
-| 裸名 | `sum(3, 4)` | 同 pkg 内 |
+调用点把每个实参的实际 KV 路径写为 `*T` 参数指针；字面量先落临时 KV key。子帧 `[0,±k]` 存指向该参数指针的第二层指针 `**T`。被调函数体的形参引用是 `*[0,±k]`，runtime 先从帧槽读参数指针，再由普通 rwir 读取目标值。写参沿同一链直达调用方目标，返回时无需拷贝。读参只读，由 layout 验证。
 
-`·`（U+00B7）是成员/包分隔符；`/` 是路径段分隔符。多级 pkg 的段用 `/`，末段用 `·` 接函数名。
+参数签名在函数旁的 `.[0,±k]` key，类型为 `def langtype`，body 为参数名、NUL、匹配类型串。它们不覆盖帧内 `/[0,±k]` 绑定键。`[0,0]` 锚点单独存 5 字节读参、写参和变参计数头。普通 rwir 的路由头在 `/lib/<opcode>`，签名在它的 `[0,x]` 子 key。
 
-**HandleCall 的名解析**（`runtime/src/kvcpu.c:handle_call`）：
+## 调度
 
-- `fn` 以 `/lib/` 开头 → 剥前缀，余部 `rfind("·")` 切出 pkg、name。
-- `fn` 含 `·` → `rfind("·")` 切分。
-- 裸名（无 `/lib/`、无 `·`）→ **同 pkg 优先**：从帧的 `‥lib` 槽取调用者 pkg，补成
-  `/lib/<caller_pkg>·<fn>`；否则退回 `/lib/<fn>`。
-
-三形态收敛到同一 key（如 `/lib/a/b·add`）。查找失败（签名槽 `[0,0]` 为 `None`）**必须**报
-`NameError: rwfunc not found: <fn>`（或签名不匹配、`不是 rwfunc` 等具体错）。锚例：
-`tutorial/02-func/`、`tutorial/07-lib/`。
-
-## 函数调用实现模型
-
-调用**不复制指令**：为本次调用建帧子树，令帧根经 extindex 叠加指向 `/lib/<pkg>·<name>/` 只读指令树，
-再经指针链把实参**地址**绑进帧本地坐标槽。全程零拷贝、崩溃可恢复。分四步：
-
-### 一、建帧与指令树复用
-
-`call` 在 `/vthread/<vid>/<父帧>/[s0,0]/` 建子帧，帧根 extindex 指向函数目录 `/lib/<pkg>·<name>/`。
-全帧共享同一份指令行 `[s>0,·]` 与签名行 `[0,·]`，永不拷贝。子帧记系统变量 `‥lib`（软链函数目录）、
-`‥callpc`（发起调用的 PC）、`‥returnpc`（返回后继）（见 [[执行模型_续]] 栈帧字段）。
-
-### 二、签名元数据（layout 落、只读继承，不参与运行时解析）
-
-rwfunc 函数目录下与签名相关的静态键有两类，都经 extindex 只读透进帧根：
-
-- **计数头 `[0,0]`**（langtype `rwfunc`，body `[nr][nw][dynamic]`）——签名行锚点，见 [[指令布局格式]]。
-- **参数定义键 `funcDir.[0,±k]`**：点后缀键（读参 `.[0,-k]`、写参 `.[0,+k]`），langtype `def
-  langtype`，body = 参数名 + NUL + 该参的 **def langtype**（匹配类型）串——即“坐标 → 名字 + 匹配类型”映
-  射。此键是**签名元数据**
-  （dump / 类型检查用），**不参与运行时形参解析**——函数体指令里的形参引用已在 layout 编译期替换为
-  帧坐标：值参 `[0,-k]`、地址参 `*[0,-k]`（写参对称 `[0,+k]`/`*[0,+k]`，见 [[函数]]）。
-
-rwfunc **不**落 `[0,±k]` 静态签名槽（那是 def rwir 的位置化派发需要，见 [[函数写槽与布局]]、[[执行模
-型]]）。因此调用期帧本地 `[0,±k]` 是**在扩展层缺席的坐标上新建绑定**，非遮蔽——见 §三。
-
-### 三、实参绑定：值参拷入、地址参写地址
-
-帧槽 `frameRoot/[0,±k]` 在只读 extindex 目标（rwfunc 函数树）中**不存在**，故这是在帧根新建键：
-extindex 写保护正因该名在扩展层缺席而**放行**此写。按形参声明分三路（值类型 / `*` 传址 / `@` 扩展存
-储，见 [[函数]]）：
-
-- **值参** `x:T`——把调用方该位置的当前值**拷进**槽（字面量直接落值，不必造临时槽）；槽里是**本帧副
-  本**，但体内 `[0,±k]` **只读**（`param<0` 一律只读，见 [[函数]]）。
-- **地址参** `p:*T`——把调用方目标的 **key 路径**写成 ref=1 Ptr 落进槽（字面量则先物化到 `._litN` 临
-  时槽）；体内 `*[0,±k]` 解引用。传参不复制内容，零拷贝跨帧传参。
-- **扩展参** `h:@T`——槽落 ref=2 扩展定位串；值不在 kvspace，runtime-c 不可直达，读它须交**支持 `@` 的
-  rwir**（在支持它的 runtime 里，如 runtime-rs 的 fs/networld 一族）按定位串兑现（见 [[ref存储位置]]）。
-
-（若 layout 误在函数树落了 `[0,±k]` 静态槽，写保护会因扩展层已有同名只读节点而拒写、丢参——这正是
-rwfunc 目录根不落 `[0,±k]` 的原因。）
-
-### 四、形参解析：值参直读、地址参一层引用
-
-layout 编译期已把参数名替换为帧槽坐标——值参 `[0,-k]`、地址参 `*[0,-k]`（见 [[函数]]）：
-
-```
-值参   frameRoot/[0,-k] → 值本体（本帧副本）   体内 [0,-k] 只读（param<0）
-地址参 frameRoot/[0,-k] → 实参 key 路径 Ptr    体内 *[0,-k] 解引用一次（只读）
-扩展参 frameRoot/[0,-k] → 扩展定位串（ref=2）   由支持 @ 的 rwir 按定位串兑现
-```
-
-**读参（`param<0`）一律只读**——值传/址传都一样，写它或其成员由 layout 拒绝（见 [[函数]]）。写参
-（`param>0`）对称地可读可写：地址写参经 `*[0,+k]` 指回调用者写槽、直写调用方目标位置；值写参按
-[[系统变量]] 的 `‥wdst` 表 copy-in / copy-out（`f(a) -> r` 是写参的跨帧路径映射，非返回值，见
-[[函数]]）。修改型指令**必须**把结果显式写入其写槽。
-
-形参类型随帧槽的 XValue langtype 承载（调用点写帧槽时已带参数类型），运行期形参解析不再查参数定义键。
-
-**实参类型匹配（规范要求）**：绑定实参前，把每个实参值的 **langtype** 对参数定义的 **def langtype** 逐值
-判定——命中才绑定，失配报 TypeError。这正是参数定义键承载 def langtype（匹配类型）的意义：一个参数可接受
-多种 langtype（并集 / `any` / 轴量词，见 [[langtype签名类型表达式]]）。
-
-位置化的有序签名校验（`join_read_sig`+`check_read_types`）是 def rwir 的**额外**需求：跨 runtime 队列按位
-置收参，故须有序签名（见 [[执行模型]]）。rwfunc 按名在帧内解析、不需要位置化签名，但**不因此免除**上面的
-实参类型匹配。
-
-> **实现现状（规范外提示）**：rwfunc 调用点的实参类型匹配尚未落地——值参会静默收下类型不符的实参（实测
-> `rwfunc f(x:int64)` 收 `"hi"` 通过并输出 `r= hi`），目前只靠各 native 算子在使用点自校验操作数 kind。
-> 缺口与动作见 `SPEC-ALIGNMENT-TODO.md`。
-
-调用机制的 kvspace 视角（extindex 复用、坐标键不冲突）见 [[调用extindex]]；帧的系统变量见 [[系统变
-量]]。
-
-## 调用归属判定边界
-
-一条非控制、非 `=` 的指令，其归属由三步判定（decode 期固化为整数派发码，见 [[执行模型]] 派发链）：
-
-1. `opcode ∈ myrwircaps`（`!notinmycaps(op)`，查核心静态能力表）→ 本 runtime 就地兑现（全集见
-   [[runtimec内建]]）。
-2. 否则 `notinmyrwircaps(op)`：`op[0]=='/'` → false；否则读 `/lib/<op>`，kind==`def rwir` → 不在本
-   runtime myrwircaps、须经 def rwir 路由到能兑现它的其它 runtime。
-3. 二者皆否 → 用户 rwfunc（opcode 移入 `reads[0]`、改写为 `call`）。
-
-layout **不预先**把 opcode 归为 native / user，归属判定全留给 runtime；裸名调用按**同 pkg 优先**解析
-（见上文 §HandleCall 的名解析）。数字类型的多态运算融合为单条 rwir（`int64·add` 与 `float32·add` 同
-归 `add`），由 native 实现按操作数 kind 在运行期归约（`kvlangBuiltinNumOp`）。
-	"#### -> /lib/kvlang/spec/runtime语义/函数调用
+runtime 先按 myrwircaps 兑现本地 rwir；不在能力集内而有 `def rwir` 路由头的指令交给对应外部 runtime；其余已知函数按 rwfunc 调用。外部 rwir 也从 KVSpace 读写 PC 与参数，不依赖进程私有的执行状态。
+"#### -> /lib/kvlang/spec/runtime语义/函数调用
 }

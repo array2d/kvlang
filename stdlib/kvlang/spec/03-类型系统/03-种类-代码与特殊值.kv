@@ -1,34 +1,14 @@
 // 欢迎加入kvspace世界
 lib kvlang/spec/类型系统/种类_代码与特殊值 {
-	r####"# 种类（kind）—— 代码节点与特殊值
+	r####"# 代码类型与特殊值
 
-### 代码种类
+- `rwir`：无 kvlang 实现体，调用槽为 class 1，body 为 5 字节计数头加目标名，由 runtime 兑现。
+- `rwfunc`：有 kvlang 实现体。目录值为 class 0 空 body；`[0,0]` 签名锚点为 class 1、5 字节；调用槽为 class 1、计数头加函数名。
+- `def rwir`：仅位于 `/lib/<op>` 的 class 0 路由头，body 为 5 字节计数头。各 runtime 用 myrwircaps 声明可兑现能力。
+- `None`：class 0、空 langtype、空 body。缺值运算报 TypeError。
+- ptr：class 1 加指针标志，langtype 为目标真实类型，body 为目标 KV 路径。空指针用 None。
+- `@ext`：class 3，langtype 为目标真实类型，body 为 UTF-8 定位串。
 
-下列 langtype 描述 KV 树中的代码与目录节点（见 [[指令布局格式]]）：
-
-- `rwir`：无 kvlang 实现体，storetype=ATOM，body = `[nr:u16 LE][nw:u16 LE][dynamic:u8]`（指令槽恒
-  `0,0,0`）+ 指令名/引用文本；由 runtime 经 def rwir 路由直接兑现。
-- `def rwir`：**路由头**，仅存于 `/lib/<op>`，是 rwir 统一调度入口，storetype=index（定义节点），**
-  无 kvlang 实现体**；**不叫"扩展算子"**，**不得**出现在用户书写的类型标注中。每个 runtime 只声明
-  **myrwircaps**（该 runtime 能兑现的 rwir 能力集）；rwir 若不在本 runtime myrwircaps 内须经
-  `/lib/<op>` 的 def rwir 路由给能兑现它的其它 runtime。
-- `rwfunc`：有 kvlang 实现体（`/` 目录下的指令槽序列），storetype=index（静态定义）或 extindex
-  （vthread 运行栈），可被任意 main-runtime 直接解释执行。
-
-**故有 def rwir 而无 def rwfunc**：rwfunc 有 kvlang 实现体（一串 rwir），任意 main-runtime 逐条解释
-即可，无需路由头；rwir 无实现体，不在本 runtime myrwircaps 内时必须路由，故需 def rwir。
-
-### None 与 ptr 不是种类
-
-- **None** 不是种类：它是 `storetype=NONE` 的空结构体 XValue。任何有名变量都有地址、都有 XValue；未
-  赋值即 None。None 参与算术、比较、分支条件、类型构造一律 TypeError（见下文与 [[执行模型]]）。
-- **ptr（指针）** 不是种类：它是 head 的 `ref=1`（存储位置维），head 的 storetype/langtype 描述目
-  标的完整形态，body 存目标 key 路径（见 [[map容器]]）。**空指针就是 None**（无值），不设"空 Ptr"、也
-  不用 `""` 冒充（见 [[ptr]]）。
-
-> ptr（`ref=1`）是 head 的 ref 字段（存储位置维）；kvlang **源码**类型标注最前仍可书写 `*`/`@` 前缀
-  （如 `*int64`、`@[256,256]uint8`），表 ref，layout 解析时剥离该前缀落成 head `ref` 独立字节；
-  **wire 层 langtype 串不含 `*`/`@` 前缀**，存储位置一律经 head `ref` 字节表达。extindex 是
-  storetype（物理布局维），与 ref=2 无关（见 [[总体方案]]）。
+源码 `*`/`@` 前缀不写入 wire langtype。ro/vid 位于独立元数据 key。
 "#### -> /lib/kvlang/spec/类型系统/种类_代码与特殊值
 }

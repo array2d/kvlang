@@ -10,6 +10,10 @@ kvlangRuntime_t *kvlangRuntimeConnect(const char *dsn) {
   if (!kv)
     return NULL;
   kvlangRuntime_t *rt = malloc(sizeof(*rt));
+  if (!rt) {
+    kvlangKvDisconnect(kv);
+    return NULL;
+  }
   rt->kv = kv;
   return rt;
 }
@@ -68,10 +72,11 @@ static char *alloc_vtid(kvlangKv_t *kv) {
   kvlangXvalueNewCharUtf8(&nv, buf);
   kvlangKvPair_t p = {seq.p, nv};
   char err[256];
-  kvlangKvSet(kv, &p, 1, err, sizeof err);
+  int rc = kvlangXvalueNone(&nv) ? -1 :
+           kvlangKvSet(kv, &p, 1, err, sizeof err);
   kvlangXvalueFree(&nv);
   kvlangStrbufFree(&seq);
-  return strdup(buf);
+  return rc == 0 ? strdup(buf) : NULL;
 }
 
 /* 创建一个 vthread（分配 vid + 建栈索引 + bootstrap 首指令 + 置 init），返回
@@ -80,12 +85,19 @@ static char *alloc_vtid(kvlangKv_t *kv) {
 char *kvlangVthreadSpawn(kvlangKv_t *kv, const char *funcname,
                          const char *const *args, int nargs) {
   char *vtid = alloc_vtid(kv);
+  if (!vtid)
+    return NULL;
   kvlangStrbuf_t vtroot;
   kvlangStrbufInit(&vtroot);
   kvlangKeytreeVthread(vtid, &vtroot);
   char *stack_vt = kvlangKeytreeStack(vtroot.p);
   char e[256];
-  kvlangKvMkindex(kv, stack_vt, 0, e, sizeof e);
+  if (kvlangKvMkindex(kv, stack_vt, 0, e, sizeof e) != 0) {
+    free(stack_vt);
+    free(vtid);
+    kvlangStrbufFree(&vtroot);
+    return NULL;
+  }
   char *first_pc = kvlangKvcpuBootstrap(kv, vtid, funcname, args, nargs);
   if (!first_pc) {
     free(stack_vt);
@@ -93,10 +105,14 @@ char *kvlangVthreadSpawn(kvlangKv_t *kv, const char *funcname,
     kvlangStrbufFree(&vtroot);
     return NULL;
   }
-  kvlangVthreadSet(kv, vtid, first_pc, "init");
+  int persisted = kvlangVthreadSet(kv, vtid, first_pc, "init");
   free(first_pc);
   free(stack_vt);
   kvlangStrbufFree(&vtroot);
+  if (persisted != 0) {
+    free(vtid);
+    return NULL;
+  }
   return vtid;
 }
 

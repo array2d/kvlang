@@ -1,23 +1,17 @@
-//! kvlang 自有 kind（rwir/rwfunc/scope）+ XValue TLV 字节访问器。
-//!
-//! 标准 kind（char/utf8、int64、bool、index…）由 kvspace-durable 编解码；
-//! rwir/rwfunc/scope 是 kvlang 自己的 kind，body 格式由本模块定义，
-//! head 复用 kvspace-durable 暴露的 TLV head（见 [`super::ffi`]）。
+//! kvlang code values over the shared headlenpow XValue codec.
 
 use super::ffi;
 
 // ── kind 常量 ─────────────────────────────────────────────────────────
 
 pub const KIND_CHAR: &str = "char/utf32";
-pub const KIND_INDEX: &str = "index";
-pub const KIND_STRUCT: &str = "struct";
+pub const KIND_DEF_STRUCT: &str = "def struct";
 
 // kvlang 自有 kind
 pub const KIND_RWIR: &str = "rwir";
 pub const KIND_RWFUNC: &str = "rwfunc";
 pub const KIND_DEF_RWIR: &str = "def rwir";
 pub const KIND_DEF_LANGTYPE: &str = "def langtype";
-pub const KIND_RWIR_OR_RWFUNC: &str = "rwir|rwfunc";
 
 // ── 通用 XValue 字节访问器 ───────────────────────────────────────────
 
@@ -123,7 +117,7 @@ pub fn value_string(data: &[u8]) -> String {
     String::from_utf8_lossy(body(data, &h)).into_owned()
 }
 
-/// 把 XValue TLV 解码成可读文本，形如 "kind:value"（指针 "→target:kind"、空 "None"）。
+/// Format an XValue for inspection.
 /// 对齐 kvspace CLI 的 format_value/plain，供 dump 审查 lower 后的 /lib。
 pub fn display(data: &[u8]) -> String {
     if data.is_empty() {
@@ -161,13 +155,6 @@ fn fmt_float(v: f64) -> String {
         format!("{s}.0")
     }
 }
-fn count_names(b: &[u8]) -> usize {
-    if b.len() < 4 {
-        0
-    } else {
-        le_u32(b) as usize
-    }
-}
 fn arr<const N: usize>(b: &[u8]) -> [u8; N] {
     let mut a = [0u8; N];
     let n = b.len().min(N);
@@ -193,9 +180,8 @@ fn plain_value(k: &str, b: &[u8]) -> String {
             .chunks(4)
             .map(|c| char::from_u32(le_u32(c)).unwrap_or('\u{FFFD}'))
             .collect(),
-        "index" => format!("({})", count_names(b)),
-        // kvlang 自有 kind：body = [2B nr][2B nw][1B dynamic][sig]；槽值/调用目标 nr=nw=0，取 sig 即可。
-        "rwir" | "rwir|rwfunc" | "rwfunc" | "def rwir" => {
+        // Code bodies store counts before the name.
+        "rwir" | "rwfunc" | "def rwir" => {
             let (nr, nw, dynamic) = if b.len() >= 5 {
                 (
                     u16::from_le_bytes([b[0], b[1]]),
@@ -232,16 +218,11 @@ pub fn is_char_kind(k: &str) -> bool {
 /// 计数头 [nr:u16 LE][nw:u16 LE][dynamic:u8]（定义体，无参数载荷）。
 fn counts_body(nr: i32, nw: i32, dynamic: bool) -> Vec<u8> {
     let mut raw = Vec::with_capacity(5);
-    raw.extend_from_slice(&(nr as u16).to_le_bytes());
-    raw.extend_from_slice(&(nw as u16).to_le_bytes());
+    let nr = u16::try_from(nr).expect("read count exceeds u16");
+    let nw = u16::try_from(nw).expect("write count exceeds u16");
+    raw.extend_from_slice(&nr.to_le_bytes());
+    raw.extend_from_slice(&nw.to_le_bytes());
     raw.push(dynamic as u8);
-    raw
-}
-
-/// 指令槽值：计数头 + 单个引用串载荷（opcode/操作数名，每坐标一个值）。
-fn rwir_slot_body(sig: &str) -> Vec<u8> {
-    let mut raw = counts_body(0, 0, false);
-    raw.extend_from_slice(sig.as_bytes());
     raw
 }
 
@@ -251,10 +232,18 @@ pub fn new_rwir(nr: i32, nw: i32, sig: &str) -> Vec<u8> {
     ffi::tlv_encode(KIND_RWIR, &raw, 1)
 }
 
-/// 调用目标（看起来像函数调用的 opcode）→ langtype `rwir|rwfunc` 并列。
-/// 静态无法判定是扩展 rwir 还是用户 rwfunc，交 runtime 查 /lib/<op> 的 XValue kind 分派。
-pub fn new_rwir_union(sig: &str) -> Vec<u8> {
-    ffi::tlv_encode(KIND_RWIR_OR_RWFUNC, &rwir_slot_body(sig), 1)
+pub fn new_rwfunc_call(nr: i32, nw: i32, sig: &str) -> Vec<u8> {
+    let mut raw = counts_body(nr, nw, false);
+    raw.extend_from_slice(sig.as_bytes());
+    ffi::tlv_encode(KIND_RWFUNC, &raw, 1)
+}
+
+pub fn new_typed_rwir(name: &str, langtype: &str) -> Vec<u8> {
+    let mut raw = counts_body(0, 0, false);
+    raw.extend_from_slice(name.as_bytes());
+    raw.push(0);
+    raw.extend_from_slice(langtype.as_bytes());
+    ffi::tlv_encode(KIND_RWIR, &raw, 1)
 }
 
 /// def rwir 路由头：仅计数头，无参数载荷。各参数落 [0,x] 签名行槽（def langtype）。
@@ -288,33 +277,18 @@ pub fn def_param_parts(data: &[u8]) -> Option<(String, String)> {
     Some((name, ty))
 }
 
-// ── struct 原型（对齐 runtime kvlangBuiltinMemindex）─────────────────
-//
-// /lib/Name       kind=struct，body="name:langtype\n..."（字段声明类型，供实例化类型校验）
-// /lib/Name·      kind=index，body=[4B count LE][name\n...]（字段名唯一权威）
-
-pub fn new_struct(fields: &[(String, String)]) -> Vec<u8> {
-    let body = fields
-        .iter()
-        .map(|(n, t)| format!("{n}:{t}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    ffi::tlv_encode(KIND_STRUCT, body.as_bytes(), 1)
-}
-
-pub fn new_memindex(names: &[String]) -> Vec<u8> {
-    let mut raw = (names.len() as u32).to_le_bytes().to_vec();
-    raw.extend_from_slice(names.join("\n").as_bytes());
-    ffi::tlv_encode(KIND_INDEX, &raw, 1)
+pub fn new_struct() -> Vec<u8> {
+    ffi::tlv_encode(KIND_DEF_STRUCT, &[], 1)
 }
 
 // ── kvlang 自有 kind：rwfunc ────────────────────────────────────────
 //
-// body = 计数头 [2B nr LE][2B nw LE][1B dynamic]，array_len=num_insts。
-// 各参数类型落签名行 [0,x] 槽（def langtype），不入 body（见上「铁律」）。
+pub fn new_rwfunc_dir() -> Vec<u8> {
+    ffi::tlv_encode(KIND_RWFUNC, &[], 1)
+}
 
-pub fn new_rwfunc(num_insts: i32, nr: i32, nw: i32, dynamic: bool) -> Vec<u8> {
-    ffi::tlv_encode(KIND_RWFUNC, &counts_body(nr, nw, dynamic), num_insts)
+pub fn new_rwfunc_anchor(nr: i32, nw: i32, dynamic: bool) -> Vec<u8> {
+    ffi::tlv_encode(KIND_RWFUNC, &counts_body(nr, nw, dynamic), 1)
 }
 
 /// rwfunc body 访问器（layout 读回签名时用）。
@@ -368,9 +342,14 @@ pub fn write_slot_name(data: &[u8]) -> (String, String) {
     if data.is_empty() {
         return (String::new(), String::new());
     }
-    let k = kind(data);
-    if k.contains(super::keytree::MEMBER_SEP) {
-        return (value_string(data), k);
+    let h = ffi::decode_head(data);
+    let b = body(data, &h);
+    if b.len() > 5 {
+        if let Some(split) = b[5..].iter().position(|&x| x == 0) {
+            let name = String::from_utf8_lossy(&b[5..5 + split]).into_owned();
+            let ty = String::from_utf8_lossy(&b[6 + split..]).into_owned();
+            return (name, ty);
+        }
     }
     (rwir_sig(data), String::new())
 }
@@ -381,5 +360,7 @@ pub fn rwir_sig(data: &[u8]) -> String {
     }
     let h = ffi::decode_head(data);
     let b = body(data, &h);
-    String::from_utf8_lossy(&b[5.min(b.len())..]).into_owned()
+    let text = &b[5.min(b.len())..];
+    let end = text.iter().position(|&x| x == 0).unwrap_or(text.len());
+    String::from_utf8_lossy(&text[..end]).into_owned()
 }

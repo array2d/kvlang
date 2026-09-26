@@ -152,7 +152,7 @@ pub fn num_op(opcode: &str) -> bool {
 
 // ── 字面量解析 ───────────────────────────────────────────────────────
 
-/// 将数字字面量解析为 int64/uint64/float64 的 TLV 字节。
+/// Encode a numeric literal.
 pub fn try_parse_number(s: &str) -> Option<Vec<u8>> {
     if s.is_empty() {
         return None;

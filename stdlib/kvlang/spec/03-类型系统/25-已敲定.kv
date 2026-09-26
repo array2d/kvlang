@@ -2,58 +2,14 @@
 lib kvlang/spec/类型系统/已敲定 {
 	r####"# 已敲定
 
-- 三维正交：`ref` × `storetype` × `langtype`，codec 只认 storetype（1 字节）、语言层只认 langtype
-  （即类型表达式串）。
-- **langtype = 完整类型表达式串**（变长），保留高级语言全部类型定义；1 字节 kindcode 方案作废。
-- storetype 集：`NONE`/`ATOM`/`ARRAYND`/`index`/`extindex`（index/extindex 是 storetype，非
-  langtype）。
-- 容器语义类型只剩 `stringkeymap`/`struct`（口语「map」= stringkeymap；`object`/`scope` **彻底删除
-  **，无此种类/关键字）；物理落 index。
-- 字符串：ascii/utf32 → ARRAYND；utf8 → ARRAYND(elem 1B)。
-- time/duration → ATOM；rwir 指令行 → ATOM（body = 计数头 + 指令名文本，无实现体）。
-- **rwir vs rwfunc 的本质区别**：rwir 无实现指令行、由 runtime 直接兑现（myrwircaps）；rwfunc 有
-  kvlang 实现指令行（`/` 目录下的 `[s0>0,·]`）→ 目录。
-- **def rwir 是路由头**（原 defrwir）：仅存于 `/lib/<op>`，是 rwir 统一调度入口；`/vthread/` 的每条
-  rwir 引用 `/lib/` 的 def rwir。**无「扩展 rwir」之说**，只有各 runtime 的 myrwircaps。
-- **签名不入 langtype 串**：计数头节点的 langtype 为裸名 `rwfunc`（`/lib/<pkg>·<name>/[0,0]`）/
-  `def rwir`（`/lib/<op>` 节点自身）；其 body 只记 `[nr][nw][dynamic]`；参数真实类型按符号分两路承
-  载——`def rwir` 落位置化签名行 `[0,x]` 槽（`x<0` 读参、`x>0` 写参、`[0,0]` 锚点），`rwfunc` 落参数定
-  义键 `.[0,±j]`；两者都是 `def langtype` xvalue。
-- **ATOM = 单段不可切分 raw**：定宽标量（bool/int/uint/float/time/duration）与**变长文本**（`rwir` 槽 =
-  计数头 + 文本、`def langtype` 类型串）同落 ATOM；ARRAYND 只承载带 `ndim`/`dims` 的稠密数组（张量、
-  `[]char/*`）。
-- **`rwir` 槽 body 的唯一格式**：`[nr:u16 LE][nw:u16 LE][dynamic:u8]`（指令槽恒 `0,0,0`，5 字节）+
-  槽文本（opcode 名或相对指针）。构造侧 `kvkind::rwir_slot_body`、读取侧 `kvlangXvalueSlotName` 均按此
-  约定（`body + 5`）；内联字面量不是 `rwir`，按自身 kind 编码、无计数头。
-- **参数传递由签名 ref 前缀定**（见 [[函数]]）：`T` 值传（帧槽存副本）、`*T` 址传（值在 kvspace，体内解
-  引用一层）、`@T` 扩展存储（值在 kvspace 之外，runtime-c 不可直达，由**支持 `@` 的 rwir** 按定位串兑现
-  ——如 runtime-rs 的 fs/networld 一族）；值容器（map langtype / struct 原型路径）无值本体可拷，**必
-  须**带 `*`/`@`。**读参一律只读**：参数定义键 `.[0,param]` 中 `param<0` 是只读参数、`param>0` 是要写
-  的参——与值传/址传无关（见 [[函数]]）。
-- **opcode 槽的 `rwir|rwfunc` 是派发标记**，不是值类型（见 [[指令槽编码]]）。
-- **`langtype` 与 `def langtype` 的区别**：`langtype` 是值的**真实类型**（具体、单一种类 + 确定
-  `[dims]`）；`def langtype` 是定义函数时参数/返回值的**匹配类型**（可含并集/轴量词/`any`），**一个
-  def langtype 可匹配多种 langtype**——调用时按它逐值判定（见 [[langtype签名类型表达式]]、[[匹配语义与
-  变参]]）。承载 def langtype 的节点 kind 就叫 `def langtype`。
-- **def 族带空格书写**：`def rwir`、`def struct`、`def langtype`——`def` 与 base 间强制空格，连写形式
-  废除。
-- **rwfunc/lib 是目录节点**：成员即 `/` 子路径；rwfunc 静态定义 → index、vthread 运行栈 → extindex。
-- **index/extindex 物理载体 = m×n 对齐字符串数组**（`dims=[len,cap,M]`，M align8、cap 扩容），沿用今
-  日敲定方案，存成员/子项名；载体**语义是可枚举成员**（`kvspaceListLen`/`ListAt`），shm 用矩阵、fs 用
-  `{key}·/` 子目录，载体差异不影响 ABI 语义。
-- **`·` 双义正交**：① memindex 标记 `{key}·` 仅 stringkeymap/struct 用；② `/lib/{pkg}·{func}` 里的
-  `·` 是包·函数命名分隔符（路径名一部分），与 memindex 无关，rwfunc 目录成员仍走 `/`。
-- 索引型容器（stringkeymap/struct）主槽 `{key}` body 恒空。
-- **源码 `*`/`@` 前缀保留**：kvlang 源码类型标注最前可写 `*`/`@`（表 ref），layout 剥离前缀落成 head
-  `ref` 字节；wire 层 langtype 串不含前缀。
-- `headlen` u16 LE；`body_len` 保留为显式 u32 LE 字段；langtype 串占至 headlen，无独立长度字段。
-- `ref=2`（@ext）与 index/extindex 无关。
-- in-memory head struct 按 storetype 拆分——**属实现层，本规范只定 wire 与字段语义**。
-
-## 仍待敲定
-
-（本卷所有类型分歧已敲定。剩余仅实现层细节——如 index/extindex m×n 数组各字段精确偏移、签名行 `[0,x]`
-坐标与 [[指令布局格式]] 二元坐标的具体编码、extindex 扩容策略——随 01-04 重构与 [[map容器]] memindex 线
-格式对齐后落定，不属本卷规范分歧。）
+- 线格式为 18 字节固定前缀 `[pow][flags][a:u64 LE][b:u64 LE]`，后接 langtype、零填充及 body；head 长度为 `1 << pow`。flags 低两位为 storage class，bit 2 为指针。
+- class 0 为短定长值；class 1 为有冗余的长度值（a=有效字节数，b=容量）；class 2 为张量（a=元素数，b=元素宽度）；class 3 为 @ext（a=定位串 UTF-8 字节数，b=容量）。
+- langtype 是完整语义类型。源码类型标注的 `*`/`@` 前缀在 wire 中分别表示为指针标志和 class 3，不进入 langtype 串。
+- `ro`/`vid` 存于独立 KV key `/.kvspace-meta/` 加原 key 字节的小写十六进制编码，不占 XValue head。
+- map/struct 的 base key 存 class 0 空 body，成员直接在 `base·member`；函数和 lib 使用 `/` 目录。成员由物理 key 前缀枚举，无 index/extindex 矩阵或 memindex body。
+- rwfunc 目录值为 class 0、body 空；`[0,0]` 锚点为 class 1、a=5、b≥5。def rwir 路由头为 class 0、5 字节。调用槽由 layout 判定为 rwir 或 rwfunc，均使用 class 1，body 为计数头加目标名。
+- 字符串与 byte 数组使用 class 1；UTF-8 的 a 是字节数，langtype 的形状记录码点数，解码同时校验。定宽张量使用 class 2。
+- 指针 class 1 的 body 是目标 KV 路径；@ext class 3 的 body 是扩展定位串，langtype 为实际目标类型。
+- runtime 每次从 kvspace 读取变量和 PC，完成指令后写回；进程内不保留其私有状态副本。
 "#### -> /lib/kvlang/spec/类型系统/已敲定
 }

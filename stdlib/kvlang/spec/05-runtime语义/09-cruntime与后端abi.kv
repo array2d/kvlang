@@ -15,7 +15,7 @@ durable 单句柄相干、后端装载。
 
 1. **执行核心**：取指-解码-执行大循环、call/return/br/goto、vthread 调度、native builtin 派发、`=`
    拷贝语义。
-2. **值语义与编解码**：TLV / langtype 的**唯一编解码器**在 kvspace 正典 codec（`kvspaceTlvEncode` /
+2. **值语义与编解码**：headlenpow / langtype 的**唯一编解码器**在 kvspace 正典 codec（`kvspaceTlvEncode` /
    `kvspaceDecodeHead` / `kvspaceNewPtr`/`NewChar`/`NewBool`/`NewInt64`/`NewFloat64`）；runtime-c 的
    `xvalue.c` 只是其薄封装。langtype 串是类型的唯一真相，怎么拼、怎么解，只此一处。
 3. **指令解码与签名校验**：`rwir_decode.c:RwirDecode`（稠密探查、遇空即停）、`/lib/<op>` 签名的读写码规范、
@@ -51,7 +51,7 @@ livebyte）。两组对外 C ABI：
 为 `(kind,ndim,dims,元素字节宽)`，事实源为 `kvspaceDecodeHead` 与 `kvlangKindexprParse`）。两者同吃一条
 类型表达式串、共用唯一文法与 codec，差别只在**匹配** vs **解析**。
 
-内部模块：`xvalue.c`（TLV 编解码薄封装）、`langtype.c` + `langtypetable.c`（langtype 校验/匹配与我
+内部模块：`xvalue.c`（XValue 编解码薄封装）、`langtype.c` + `langtypetable.c`（langtype 校验/匹配与我
 表格）、`kvspace.c`（kvspace ABI 封装）、`keytree.c`（路径构造）、`rwir_decode.c`（PC 解析 + Decode）、
 `vthread.c`、`rwir*.c`（native 算子 + 静态注册表）、`kvcpu.c`（Execute 循环）、`runtime.c`（ABI
 层）、`rwirext.c`（扩展宿主 ABI，含 `notinmyrwircaps`）、`logx.c`、`strbuf.c`、`const.h`。
@@ -65,30 +65,26 @@ layout 与 runtime **都不对 kvspace 做特化**：不 dlopen、不双后端�
 ```
 kvspaceConnect / Close / Clear
 kvspaceGet                       // 借用读：*out 指向后端常驻/回收空间，调用方不得 free
-kvspaceWriteInPlace              // key 已存在且 body_len 相等 → 返回原 box body 偏移指针
-kvspaceWriteNewPlace             // 否则按 (langtype, body_len) 分配新 box、写 head，返回 body 指针
+kvspaceSetValue                  // 验证并同步写入完整 XValue 与 ro/vid 元数据
+kvspaceGetHead                   // 读 head 与独立 KV key 上的 ro/vid
 kvspaceListLen / ListAt / Del / DelTree / Cp / CpTree
 kvspaceMkindex / MkindexExt / RmindexExt / Watch
 kvspaceTlvEncode / TlvEncodeMode / DecodeHead
 kvspaceNewPtr / NewChar / NewBool / NewInt64 / NewFloat64
 ```
 
-**零拷贝写读模型**（normative）：
+**读写模型**：
 
 - **读**走 `kvspaceGet`——返回后端常驻内存的**借用偏移指针**，调用方只读、**不得** `free`。
-- **写**不经「先 encode 整条 TLV 再交后端」：向后端要一个可写 body 偏移指针再直接写字节——
-  `kvspaceWriteInPlace`（key 已存在且 body 尺寸不变，原 box 就地改）与 `kvspaceWriteNewPlace`（新建
-  / 换 kind / 换尺寸，分配新 box 并写 head）两条原语，各自唯一、无中转 buffer。
+- **写**走 `kvspaceSetValue`，在调用返回前完成整条 XValue 写入。worker 不能把尚未写完的 body
+  保留在进程内，避免进程退出后 PC 已推进而变量仍为空。底层 `WriteInPlace` / `WriteNewPlace`
+  为其他 ABI 调用方保留，runtime 不依赖其待填充缓冲。
 - **前缀枚举**不一次性返回整段名单缓冲：`kvspaceListLen` 只返子项计数，`kvspaceListAt(idx)` 借用回收
   缓冲逐项取名——遍历即「先 ListLen 定计数、再逐 idx ListAt」。
 
-**native 读参：标量按值、整块借用**（normative，P2-d）——runtime-c native 算子（标量数值/逻辑/cast +
-`xv·*`/`array·*`/`string·*`）经 `ResolveReadValue` 取参，两条路径互斥：内联字面量（冻结于 code 槽）
-按值拷入（标量，纳秒级，无 KV 往返）；变量/KV 常驻值经 `GetMember` 一次取出后**移交所有权**
-（`*out = pv`，非二次拷贝，后端物化只发生在 `Get` 内部）。**整块字节零拷贝不在 native 侧另设机制**——
-它就是 [[notinmyrwircaps]] 的 `ResolveReadPath` + `kvspaceGet` body 指针那一条路径，由持有大 tensor
-的扩展（numpy/op-gpu）承担；native 算子处理的是标量与中等 value，其拷贝相对每步 KV 往返可忽略（fib
-n=10：redis 1.5s / fs 320ms vs C 586ns，墙钟由 KV I/O 主导约六个数量级），故不为其增设借用管线。
+**native 读参**：函数调用统一传地址；帧参数槽 `**T` 经实参键 `*T` 指向调用方 key。
+`ResolveReadValue` 在执行当前指令时从 KVSpace 读取目标值。初始化 XValue 的指令可直接使用代码槽
+中的内联字面量。读取后的临时解码值只在当前指令内有效，下一条指令重新读取 KVSpace。
 
 **后端由链接决定**：构建期经环境变量选择链接哪个 kvspace 库（`kvspace-c` 或 `kvspace_durable`），两
 者导出同一 ABI；runtime 的句柄结构只保留 `void *h`，代码零后端分支。

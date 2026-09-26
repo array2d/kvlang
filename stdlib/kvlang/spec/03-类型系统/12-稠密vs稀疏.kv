@@ -7,15 +7,15 @@ lib kvlang/spec/类型系统/稠密vs稀疏 {
 | 维度 | compact（稠密） | stringkeymap（稀疏） |
 |------|----------------|---------------------|
 | langtype | `[1024,1024]int32` | 坐标元组键 map，如 `[int32,int32]·int32` |
-| storetype | ARRAYND | index |
+| storetype | class 2 长定长 | class 0 短定长 |
 | 落库 | 全量 1024×1024 元素连续打包进**单个** XValue 的 body（恒 1024×1024×4 = 4 MiB，未写元素亦占位） | 每个写过的坐标落一个独立子 key `base·[i,j]`；**未 set 的坐标子 key 根本不存在**，不占空间 |
 | 缺失元素 | 无「缺失」——全部就位（默认 0） | 读未写坐标返回 None（`kvspace·get` 缺失语义） |
 | 随机访问 | `a[i,j]` 按 row-major O(1) 偏移 | `base·[i,j]` / `kvspace·get` 按 key 查找 |
 | 适用 | 稠密张量、绝大多数元素有值、需连续内存与 O(1) 下标 | 稀疏矩阵、坐标空间极大而实际有值项稀少 |
 
 ```kv
-dense:[]int32 = xv·reshape(array(…), 1024, 1024)   // 4 MiB 稠密块，storetype=ARRAYND
-sparse:[int32,int32]·int32 = {}                     // 稀疏，storetype=index
+dense:[]int32 = xv·reshape(array(…), 1024, 1024)   // 4 MiB 稠密块，class 2
+sparse:[int32,int32]·int32 = {}                     // 稀疏，class 0 容器头与物理成员 key
 99 -> sparse·[3,7]                                  // 仅此一项落子 key sparse·[3,7]
 sparse·[0,0] -> x                                   // 未写坐标 → None（子 key 不存在）
 ```

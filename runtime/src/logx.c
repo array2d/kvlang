@@ -1,4 +1,3 @@
-#define _GNU_SOURCE
 #include <errno.h>
 #include <stdlib.h>   /* getprogname（macOS/BSD） */
 #include "runtime_internal.h"

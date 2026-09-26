@@ -42,7 +42,7 @@ durable 后端（fs/redis）采用**惰性 flush**，只在**同一 kvspace 句�
 扩展宿主（op-gpu、numpy、Go json）**自己** `kvspaceConnect(dsn)` 拿句柄，rwir 移交只用
 `kvlangRwirext*` 的 runtime 语义（`kvlangDefRwir`/`Params`/`ResolveRead`/`ResolveReadPath`/`ResolveWrite`
 /`NextPc`）。tensor 类大 buffer **应**走 shm 后端零拷贝：`ResolveReadPath` 拿容器路径 → `kvspaceGet`
-取 TLV 指针 → `DecodeHead` 定位 body → 在该地址原位建 ndarray，读写 ndarray 即读写 kvspace，无拷贝；
+取 XValue 指针 → `DecodeHead` 定位 body → 在该地址原位建 ndarray，读写 ndarray 即读写 kvspace，无拷贝；
 写走 `kvspaceTlvEncode` + `WriteInPlace`/`WriteNewPlace`。锚例：`tutorial/14-numpy/`（shm 全流程）、
 `tutorial/14-networld/`（fs/proc）。
 	"#### -> /lib/kvlang/spec/runtime语义/cruntime与后端abi_续

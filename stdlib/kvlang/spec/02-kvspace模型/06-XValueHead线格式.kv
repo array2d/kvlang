@@ -2,38 +2,25 @@
 lib kvlang/spec/kvspace模型/XValueHead线格式 {
 	r####"# XValueHead 线格式
 
-XValue = head + body。head 由三正交字段（ref × storetype × langtype）与辅助字段构成，langtype 串为语
-义类型真相（`kvspace/include/kvspace/kvspace.h`、`kvspace-c/src/xvalue.h`、
-`kvspace-durable/src/xvalue.rs`，三处 byte-identical）：
+XValue 由 head 与 body 组成。所有后端使用同一线格式：
 
 ```
-head = [headlen u16 LE][ref u8][storetype u8][ro u8][vid u32 LE][body_len u32 LE]
-       [storetype 物理字段（变长，按 storetype）][langtype 串（占至 headlen）]
-body = [body_len B raw]
+[pow:u8][flags:u8][a:u64 LE][b:u64 LE][langtype UTF-8][zero padding][body]
 ```
 
-| 字段 | 大小 | 含义 |
-|------|------|------|
-| `headlen` | 2B LE | head 总字节数；body 起于偏移 `headlen` |
-| `ref` | 1B | 存储位置：0=inline、1=ptr（body=目标 key 路径）、2=@ext（body=扩展世界定位符） |
-| `storetype` | 1B | 物理布局（codec 唯一分派）：NONE/ATOM/ARRAYND/index/extindex |
-| `ro` | 1B | 1=只读，0=可写 |
-| `vid` | 4B LE | vthread id（默认 0） |
-| `body_len` | 4B LE | body 字节数 |
-| （storetype 物理字段） | 变 | ARRAYND：ndim u8 + dims[ndim] u32 LE；index/extindex：**成员枚举载体**（shm 载体为成员名 m×n 对齐字符串数组，dims=[len,cap,M]，len=成员数、M align8、cap 预留容量；fs 载体把成员落成 `{key}·/` 子目录）；值容器主槽 body 恒空、dims 空 |
-| `langtype` | 变长 | 类型表达式串，占至 `headlen`（长度 = headlen − 当前偏移，无独立长度字段） |
+固定前缀为 18 字节。head 长度是 `1 << pow`，body 从该偏移开始。flags 低两位为 storage class；bit 2 为指针标志。未使用的标志位必须为零。langtype 为真实目标类型，不含源码的 `*`/`@` 前缀，后面以零填充至 head 末尾。解码须校验填充、长度和类型。
 
-`langtype` 恒为 head 最后一段，无独立长度字段；body 起始偏移 = `headlen`。ref 与 storetype 各为独立
-u8 字节，不再编码进 langtype 串。ARRAYND 的 ndim、dims 直接读自 storetype 物理字段，与 langtype 串内
-`[dims]` 保持同步（由 codec 保证）。`char/*` kind 恒为 ARRAYND（ndim=1）。None 编码：
-storetype=NONE、langtype=""、body 空。
+| class | a | b | body |
+|-------|---|---|------|
+| 0（短定长） | 0 | 0 | None、标量、目录、map 头等的定长内容；rwfunc 目录值为空 |
+| 1（有冗余的长度） | 有效字节数 | 容量，且 ≥ a | 字符/字节数组、代码槽、指针路径；`[0,0]` rwfunc 锚点的 a=5、b≥5 |
+| 2（大定长） | 元素数 | 元素宽度 | 张量元素按行主序连续存储 |
+| 3（扩展定位） | UTF-8 定位串字节数 | 容量，且 ≥ a | `@ext` 定位串 |
 
-index/extindex 的**语义是"可枚举成员"**（`kvspaceListLen` / `kvspaceListAt`），物理载体按后端而异：shm 把
-成员名收进 head 的 m×n 矩阵，fs 把成员落成 `{key}·/` 子目录——载体差异经对称编解码还原，**不构成 ABI
-语义差异**（见 [[地址空间]]）。值容器（stringkeymap/struct）主槽只持类型与形状，成员在 `{key}·`。
+UTF-8 字符数组使用 class 1，`a` 是**字节数**，langtype 里的长度是 Unicode 码点数；两者独立校验。指针使用 class 1 加 flags bit 2，body 是目标 KV 路径；目标类型写入 langtype。
 
-指针（ref=1）的 head langtype = 目标完整 langtype（langtype，含 `[dims]`），storetype = 目标
-storetype，body = 目标 key 路径；由 `kvspaceNewPtr(target_langtype, target)` 构造，Set 时据此单跳类
-型检查。
-	"#### -> /lib/kvlang/spec/kvspace模型/XValueHead线格式
+`ro` 与 `vid` 不在 XValue 中。它们存于独立的 KV key：`/.kvspace-meta/` 加原 key UTF-8 字节的小写十六进制编码。读 head 时后端合并这两个元数据字段，复制和删除 key 时同步处理 sidecar。枚举成员按实际物理 key 前缀进行，不存在 index/extindex 成员矩阵或 memindex 载体。
+
+目录 key 以 `/` 结尾，值与不带斜杠的 base key 独立。例如 `/lib/f/` 的 rwfunc 目录值为 class 0、空 body；`/lib/f/[0,0]` 是 class 1、5 字节计数头。map 的 base key 为 class 0、空 body，成员位于 `base·name` 的独立 key。扩展目录叠加通过 class 3 定位串表示。
+"#### -> /lib/kvlang/spec/kvspace模型/XValueHead线格式
 }

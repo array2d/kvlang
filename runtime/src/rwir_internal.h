@@ -11,10 +11,7 @@ int kvlangBuiltinSetErr(kvlangFrame_t *f, const char *fmt, ...);
 void kvlangBuiltinXvalueAt(const kvlangXvalue_t *v, int i, kvlangXvalue_t *out);
 char *kvlangBuiltinScatterKey(const char *base, const int64_t *coords,
                               int ncoord);
-void kvlangBuiltinMemindex(kvlangXvalue_t *out, const char *const *names,
-                           int n);
-void kvlangBuiltinMapMarker(kvlangXvalue_t *out, const char *langtype,
-                            const int32_t *dims, int ndim);
+void kvlangBuiltinMapMarker(kvlangXvalue_t *out, const char *langtype);
 /* char 拼接（+ 与 string·concat 共用）：均须 char kind；编码不同返 false（调用方 throw），相同则 out=拼接结果并保持该编码。 */
 bool kvlangBuiltinCharConcat(const kvlangXvalue_t *a, const kvlangXvalue_t *b,
                              kvlangXvalue_t *out);
