@@ -20,12 +20,26 @@ int kvlangBuiltinNdarrayNumel(kvlangFrame_t *f) {
     kvspaceHead_t h;
     int64_t n_el = 0;
     if (xv_head1(f, &h) == 0) {
-        int g = ndarray_shape_guard(f, "ndarray·numel", &h);
-        if (g)
-            return g;
         kvlangLangtype kx;
         kvlangLangtypeParse(h.langtype, &kx);
-        n_el = kx.array_len;
+        if (kvlangKindIsMap(kx.kind)) {
+            char *fr = kvlangKeytreeFrameRoot(f->pc);
+            char *base = kvlangBuiltinResolveWriteSlot(f->kv, fr,
+                                                        f->inst->reads[0].name);
+            char *dir = kvlangKeytreeMember(base, "");
+            char **names = NULL;
+            int count = 0;
+            kvlangKvList(f->kv, dir, false, false, &names, &count);
+            for (int i = 0; i < count; i++)
+                free(names[i]);
+            free(names);
+            free(dir);
+            free(base);
+            free(fr);
+            n_el = count;
+        } else {
+            n_el = kx.array_len;
+        }
     }
     kvlangXvalue_t r;
     kvlangXvalueNewInt64(&r, n_el);

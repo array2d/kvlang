@@ -1,0 +1,22 @@
+// 期望输出:
+//   inc r= 4  v= 3
+//   bump v= 4
+//   own v= 104
+rwfunc inc(x:int64) -> (r:int64) {
+    x + 1 -> r
+}
+rwfunc bump() -> (p:int64) {
+    p + 1 -> p
+}
+rwfunc own() -> (t:int64) {
+    t + 100 -> t
+}
+rwfunc test() -> () {
+    3 -> v
+    inc(v) -> r
+    println("inc r=", r, " v=", v)
+    bump() -> v
+    println("bump v=", v)
+    own() -> v
+    println("own v=", v)
+}

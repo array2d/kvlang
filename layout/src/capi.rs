@@ -231,7 +231,7 @@ pub struct kvlangKindexpr {
     pub ndim: i32,      // 维数（0=标量）
     pub dims: [i32; 8], // 各维大小（前 ndim 项有效）
     pub array_len: i32, // 元素总数（标量=1，多维=各维乘积）
-    pub kind: [u8; 64], // base kind，NUL 终止（如 "float64"、"char/utf8"、"rwir|rwfunc"）
+    pub kind: [u8; 64], // NUL-terminated type.
 }
 
 /// 解析 XValue head 的 langtype 内容（NUL 终止串，含 */@ 前缀与 [dims]）。

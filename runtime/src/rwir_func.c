@@ -7,34 +7,21 @@
 void kvlangBuiltinResolveReadValue(kvlangKv_t *kv, const char *frame_root, const char *name,
                            const kvlangXvalue_t *val, kvlangXvalue_t *out) {
     kvlangXvalueZero(out);
+    if (name && name[0] == '/') {
+        kvlangKvGetOne(kv, name, out);
+        return;
+    }
     if (val && !kvlangXvalueNone(val) && !kvlangXvalueKindIs(val, KVSPACE_KIND_RWIR) && !kvlangXvalueKindIs(val, KVSPACE_KIND_RWFUNC)) {
-        out->data = val->data; /* 借指令内冻结字面量（生命周期同 decode 缓存，永不 flush/free） */
+        out->data = val->data; /* Borrowed for this instruction. */
         out->len = val->len;
         out->borrowed = 1;
         return;
     }
     if (!name || !name[0]) return;
-    if (name[0] == '/') { kvlangKvGetOne(kv, name, out); return; }
     if (name[0] == '*') {
-        /* 显式解引用：*[0,±k] → 读 frame_root/[0,±k]（ref=1 Ptr）→ 解引用到实参值。
-         * 同 ResolveWriteSlot：帧槽必有 Ptr，读不到即传参链路已坏 → panic，
-         * 绝不静默留 None（那会让形参读成空值，把真因藏到几层之外）。 */
-        char stkbuf[512];
-        char *stk = kvlangKeytreeStackBuf(frame_root, stkbuf, sizeof stkbuf)
-                        ? stkbuf
-                        : kvlangKeytreeStack(frame_root);
-        kvlangXvalue_t pv; kvlangXvalueZero(&pv);
-        kvlangKvGetMember(kv, stk, name + 1, &pv);
-        if (!kvlangXvalueIsPtr(&pv)) {
-            fprintf(stderr, "panic: %s%s is not a Ptr — frame slot missing, param passing broken\n", stk, name + 1);
-            abort();
-        }
-        char *target = kvlangXvaluePtrTarget(&pv);
+        char *target = kvlangBuiltinResolveWriteSlot(kv, frame_root, name);
         kvlangKvGetOne(kv, target, out);
         free(target);
-        kvlangXvalueFree(&pv);
-        if (stk != stkbuf)
-            free(stk);
         return;
     }
     char stkbuf[512];
@@ -59,6 +46,8 @@ void kvlangBuiltinResolveReadValue(kvlangKv_t *kv, const char *frame_root, const
  * ptr 追链到最终目标），供 xv 系列对 key 直发 GetHead/GetPart/SetPart 做分片读写。 */
 char *kvlangBuiltinResolveReadKey(kvlangKv_t *kv, const char *frame_root, const char *name,
                           const kvlangXvalue_t *val) {
+    if (name && name[0] == '/')
+        return strdup(name);
     if (val && !kvlangXvalueNone(val) && !kvlangXvalueKindIs(val, KVSPACE_KIND_RWIR) && !kvlangXvalueKindIs(val, KVSPACE_KIND_RWFUNC))
         return NULL;
     if (!name || !name[0]) return NULL;
@@ -72,10 +61,6 @@ char *kvlangBuiltinResolveWriteSlot(kvlangKv_t *kv, const char *frame_root, cons
                     ? stkbuf
                     : kvlangKeytreeStack(frame_root);
     if (name[0] == '*') {
-        /* 显式解引用：*[0,±k] → 读 frame_root/[0,±k]（ref=1 Ptr）→ target=写槽路径。
-         * `*[0,±k]` 是 layout 编译期生成的形参引用，帧槽必有调用点写入的 Ptr；读不到
-         * 即传参链路已坏（不变量违反，非用户错误）→ panic，绝不回退成字面路径——
-         * 回退会把「写形参」静默变成「写一个叫 *[0,±k] 的键」，掩盖真因。 */
         kvlangXvalue_t pv; kvlangXvalueZero(&pv);
         kvlangKvGetMember(kv, stk, name + 1, &pv);
         if (!kvlangXvalueIsPtr(&pv)) {
@@ -84,6 +69,19 @@ char *kvlangBuiltinResolveWriteSlot(kvlangKv_t *kv, const char *frame_root, cons
         }
         char *target = kvlangXvaluePtrTarget(&pv);
         kvlangXvalueFree(&pv);
+        if (strncmp(name + 1, "[0,", 3) == 0) {
+            kvlangXvalue_t arg;
+            kvlangXvalueZero(&arg);
+            kvlangKvGetOne(kv, target, &arg);
+            if (!kvlangXvalueIsPtr(&arg)) {
+                fprintf(stderr, "panic: %s is not an argument Ptr\n", target);
+                abort();
+            }
+            char *value_key = kvlangXvaluePtrTarget(&arg);
+            kvlangXvalueFree(&arg);
+            free(target);
+            target = value_key;
+        }
         if (stk != stkbuf)
             free(stk);
         return target;
@@ -173,7 +171,7 @@ void kvlangDisplay(const kvlangXvalue_t *v, char **out) {
 /* ── frame helper ─────────────────────────────────────────────────── */
 
 int kvlangBuiltinReadInputs(kvlangFrame_t *f, kvlangXvalue_t *out, int cap) {
-    /* 帧根优先用主循环缓存（免每步 malloc + 扫描）。 */
+    /* Reuse this instruction's frame root. */
     char *owned = NULL;
     const char *fr = f->frame_root;
     if (!fr) { owned = kvlangKeytreeFrameRoot(f->pc); fr = owned; }
@@ -228,7 +226,6 @@ int kvlangBuiltinSetErr(kvlangFrame_t *f, const char *fmt, ...) {
 int kvlangBuiltinExecuteCopy(kvlangFrame_t *f) {
     kvlangKv_t *kv = f->kv;
     kvlangRwirInst_t *inst = f->inst;
-    /* 帧根优先用主循环缓存；status_known/fb_pc 随 f 透传（走同一套 PC 推进语义）。 */
     char *owned = NULL;
     const char *fr = f->frame_root;
     if (!fr) { owned = kvlangKeytreeFrameRoot(f->pc); fr = owned; }

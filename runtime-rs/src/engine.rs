@@ -1,45 +1,10 @@
-//! Engine —— kvlang runtime 核心原语：kvspace 读写、TLV 编解码、rwir 读写槽解析、结构操作。
-//! 模式2 驱动循环在二进制 main.rs（含 print 批处理 + 外部 rwir handoff）；具体纯净 rwir 见 `crate::rwir`。
+//! KVSpace access and rwir primitives.
 
 use std::ffi::{c_char, c_void};
 use std::ptr::null_mut;
 
 use crate::ffi::*;
 use crate::rwir;
-
-const KVSPACE_REF_EXT: u8 = 2;
-const STORETYPE_ATOM: u8 = 1;
-const STORETYPE_ARRAYND: u8 = 2;
-const STORETYPE_INDEX: u8 = 3;
-const STORETYPE_EXTINDEX: u8 = 4;
-
-/// 由完整 langtype langtype 串推 storetype（镜像 kvspace-durable::storetype_from_langtype）：
-/// extindex / index(含 rwfunc/defrwir) / 对象(·)·路径(/) → INDEX 系；带 [dims] → ARRAYND；否则 ATOM。
-fn storetype_from_langtype(kx: &str) -> u8 {
-    if kx.is_empty() {
-        return 0;
-    }
-    let (has_dims, base) = match kx.strip_prefix('[') {
-        Some(_) => match kx.find(']') {
-            Some(e) => (true, &kx[e + 1..]),
-            None => (false, kx),
-        },
-        None => (false, kx),
-    };
-    if base == "extindex" {
-        return STORETYPE_EXTINDEX;
-    }
-    if matches!(base, "index" | "rwfunc" | "def rwir")
-        || base.starts_with('/')
-        || base.contains('\u{b7}')
-    {
-        return STORETYPE_INDEX;
-    }
-    if has_dims {
-        return STORETYPE_ARRAYND;
-    }
-    STORETYPE_ATOM
-}
 
 pub struct Engine {
     pub rt: *mut c_void, // kvlang runtime 句柄
@@ -51,56 +16,12 @@ pub struct Engine {
 
 impl Engine {
     // ── kvspace 读写（绝对路径，char/utf8 与 char/utf32 编解码）─────────
-    /// 写即构造：按三正交轴 (ref, storetype, ro, vid, langtype) + body 向 kvspace 要偏移指针后直接写 body 字节——
-    /// key 已存在且同 body_len → WriteInPlace（原 box 就地）；否则 WriteNewPlace（新 box）。
-    /// 两分支各调唯一原语、无预 encode 整条 TLV、无中转 buffer、无 free。
-    fn write_construct(
-        &self,
-        key: &str,
-        r#ref: u8,
-        storetype: u8,
-        ro: u8,
-        vid: u32,
-        langtype: &str,
-        body: &[u8],
-    ) {
-        unsafe {
-            let ck = cs(key);
-            let mut bp: *mut u8 = null_mut();
-            let mut err = [0u8; 256];
-            let rc = kvspaceWriteInPlace(
-                self.kv,
-                ck.as_ptr(),
-                1,
-                body.len() as u32,
-                &mut bp,
-                err.as_mut_ptr() as *mut c_char,
-                256,
-            );
-            if rc != 0 {
-                kvspaceWriteNewPlace(
-                    self.kv,
-                    ck.as_ptr(),
-                    r#ref,
-                    storetype,
-                    ro,
-                    vid,
-                    cs(langtype).as_ptr(),
-                    body.len() as u32,
-                    &mut bp,
-                    err.as_mut_ptr() as *mut c_char,
-                    256,
-                );
-            }
-            if !body.is_empty() && !bp.is_null() {
-                std::ptr::copy_nonoverlapping(body.as_ptr(), bp, body.len());
-            }
-        }
-    }
     /// 通用类型化写入：任意 kind + body 字节 + dims（空=标量 ndim0）。
     /// set_kv 与各 rwir 的类型化输出共用，避免每种 kind 一个专用写函数。
     pub fn set_tlv_encoded(&self, key: &str, kind: &str, raw: &[u8], dims: &[i32]) {
-        self.set_tlv(key, &tlv_encode(kind, raw, dims));
+        let value = tlv_encode(kind, raw, dims);
+        assert!(!value.is_empty(), "invalid XValue for {key}");
+        self.set_tlv(key, &value);
     }
     pub fn set_kv(&self, key: &str, val: &str) {
         let utf32: Vec<u32> = val.chars().map(|c| c as u32).collect();
@@ -134,19 +55,27 @@ impl Engine {
         }
     }
 
-    /// 扩展世界（@ ref=2）句柄编码写入：kind=目标完整 langtype（如 "[]uint8"），body=定位串。
-    /// 读取该 key 时由 read_at 按 body 前缀路由给对应 /lib/networld/* 兑现器还原真实字节。
     pub fn set_ext_handle(&self, key: &str, target_langtype: &str, locator: &str) {
-        let st = storetype_from_langtype(target_langtype);
-        self.write_construct(
-            key,
-            KVSPACE_REF_EXT,
-            st,
-            0,
-            0,
-            target_langtype,
-            locator.as_bytes(),
-        );
+        unsafe {
+            let mut out = null_mut();
+            let mut len = 0u32;
+            let rc = kvspaceTlvEncodeMode(
+                cs(target_langtype).as_ptr(),
+                locator.as_ptr(),
+                locator.len() as u32,
+                std::ptr::null(),
+                0,
+                2,
+                0,
+                0,
+                &mut out,
+                &mut len,
+            );
+            assert_eq!(rc, 0, "invalid ext locator for {key}");
+            let value = std::slice::from_raw_parts(out, len as usize).to_vec();
+            libc::free(out as *mut c_void);
+            self.set_tlv(key, &value);
+        }
     }
 
     /// 读 key 的 head，返回 (ref, body 串)。仅 ref==2 时 body 有意义（扩展句柄定位串）。
@@ -211,9 +140,7 @@ impl Engine {
     pub fn write0(&self, pc: &str) -> String {
         self.write_at(pc, 0)
     }
-    /// @-aware 读参整块原始字节（read_at 对数组只返首元素，取字节须走容器路径 + TLV body）：
-    /// 取读参 idx 容器路径 → 读 body 字节；@ 句柄按前缀兑现真实字节；无路径退化为 read_at 的 utf8。
-    /// 供 fs·write/append 等需要 []uint8 整块的 rwir 用。
+    /// Read the complete operand body, resolving external handles.
     pub fn read_bytes(&self, pc: &str, idx: i32) -> Vec<u8> {
         let p = take(unsafe { kvlangRwirextResolveReadPath(self.kv, cs(pc).as_ptr(), idx) });
         if p.is_empty() {
@@ -245,21 +172,8 @@ impl Engine {
         }
     }
 
-    /// 写一个字符串列表容器（供 fs·list 等返回可 for-in 的字符串列表，对齐 C kvspace·list 表示）：
-    ///   dst   = 容器值：langtype=`[int64]·[]char/utf32`（见 [[map容器]]），body 空，dims=[n]
-    ///   dst·  = memindex：kind=index，body=[4B count LE]["[0]\n[1]\n..."]（成员坐标名唯一权威）
-    ///   dst·[i] = 各成员字符串（char/utf32）
     pub fn set_str_list(&self, dst: &str, items: &[String]) {
-        let n = items.len();
-        self.set_tlv_encoded(dst, "[int64]·[]char/utf32", &[], &[n as i32]);
-        let mut body = (n as u32).to_le_bytes().to_vec();
-        for i in 0..n {
-            if i > 0 {
-                body.push(b'\n');
-            }
-            body.extend_from_slice(format!("[{i}]").as_bytes());
-        }
-        self.set_tlv_encoded(&format!("{dst}\u{b7}"), "index", &body, &[]);
+        self.set_tlv_encoded(dst, "[int64]·[]char/utf32", &[], &[]);
         for (i, it) in items.iter().enumerate() {
             self.set_kv(&format!("{dst}\u{b7}[{i}]"), it);
         }
@@ -333,29 +247,24 @@ impl Engine {
             std::slice::from_raw_parts(out, olen as usize).to_vec()
         }
     }
-    /// 写预编码 TLV：解 head 取 (langtype, body) 后走写即构造（新建/换 kind/换尺寸唯一原语）。
     pub fn set_tlv(&self, key: &str, tlv: &[u8]) {
         if tlv.is_empty() {
+            self.del(key);
             return;
         }
         unsafe {
-            let mut head = KvspaceHead::default();
-            if kvspaceDecodeHead(tlv.as_ptr(), tlv.len() as u32, &mut head) != 0 {
-                return;
-            }
-            let kx = String::from_utf8_lossy(&head.langtype)
-                .trim_end_matches('\0')
-                .to_string();
-            let (bo, bl) = (head.body_offset as usize, head.body_len.max(0) as usize);
-            self.write_construct(
-                key,
-                head.r#ref,
-                head.storetype,
-                head.ro,
-                head.vid,
-                &kx,
-                &tlv[bo..bo + bl],
+            let mut err = [0u8; 256];
+            let rc = kvspaceSetValue(
+                self.kv,
+                cs(key).as_ptr(),
+                tlv.as_ptr(),
+                tlv.len() as u32,
+                0,
+                0,
+                err.as_mut_ptr() as *mut c_char,
+                err.len() as u32,
             );
+            assert_eq!(rc, 0, "kvspace set {key}: {}", cbuf(&err));
         }
     }
 

@@ -18,10 +18,52 @@ static char *kvlangKvKey(const kvlangXvalue_t *v) {
     return strdup("");
 }
 
+static char *original_absolute_arg(kvlangFrame_t *f, int idx) {
+    char *fr = kvlangKeytreeFrameRoot(f->pc);
+    if (!fr)
+        return NULL;
+    kvlangStrbuf_t key;
+    kvlangStrbufInit(&key);
+    kvlangStrbufPrintf(&key, "%s/%slib", fr, RUNTIME_MEMBER_SEP);
+    kvlangXvalue_t lib;
+    kvlangXvalueZero(&lib);
+    kvlangKvGetOne(f->kv, key.p, &lib);
+    char *root = kvlangXvalueNone(&lib) ? NULL : kvlangXvalueValueString(&lib);
+    kvlangXvalueFree(&lib);
+    if (!root || root[0] != '/') {
+        free(root);
+        free(fr);
+        kvlangStrbufFree(&key);
+        return NULL;
+    }
+    int row = kvlangRwirExtractAddr0(strrchr(f->pc, '/') + 1);
+    kvlangStrbufClear(&key);
+    kvlangStrbufPrintf(&key, "%s/[%d,-%d]", root, row, idx + 1);
+    kvlangXvalue_t source;
+    kvlangXvalueZero(&source);
+    kvlangKvGetOne(f->kv, key.p, &source);
+    char *name = kvlangXvalueKindIs(&source, KVSPACE_KIND_RWIR) ?
+                 kvlangXvalueSlotName(&source) : NULL;
+    if (name && name[0] != '/') {
+        free(name);
+        name = NULL;
+    }
+    kvlangXvalueFree(&source);
+    kvlangStrbufFree(&key);
+    free(root);
+    free(fr);
+    return name;
+}
+
 static char *path_arg(kvlangFrame_t *f, int idx, const kvlangXvalue_t *in) {
     const char *name = f->inst->reads[idx].name;
-    if (name[0] == '/')
-        return strdup(name);
+    if (name[0] == '/') {
+        if (strncmp(name, "/vthread/", 9) != 0)
+            return strdup(name);
+        char *source = original_absolute_arg(f, idx);
+        if (source)
+            return source;
+    }
     if (!kvlangXvalueNone(&in[idx])) {
         char *s = kvlangXvalueValueString(&in[idx]);
         if (s[0] == '/')
@@ -31,15 +73,12 @@ static char *path_arg(kvlangFrame_t *f, int idx, const kvlangXvalue_t *in) {
     return NULL;
 }
 
-/* 容器 base：stringkeymap/index/extindex 或 struct 实例（kind=structref，以 / 起头）。
- * 容器取其写槽路径拼成员 key；非容器把 base 值当 key 串。 */
+/* Container members use physical key prefixes. */
 static bool base_is_container(const kvlangXvalue_t *base) {
     if (kvlangXvalueNone(base))
         return true;
     const char *k = kvlangXvalueKind(base);
-    return k[0] == '/' || kvlangKindIsMap(k) ||
-           strcmp(k, KVSPACE_KIND_INDEX) == 0 ||
-           strcmp(k, KVSPACE_KIND_EXT_INDEX) == 0;
+    return k[0] == '/' || kvlangKindIsMap(k);
 }
 
 /* 非容器 base 的统一报错（返回 NULL 供调用方判定失败）：带上实际 langtype 便于定位。 */
@@ -298,15 +337,12 @@ int kvlangCList(kvlangFrame_t *f) {
     int n = kvlangBuiltinReadInputs(f, in, 1);
     char *key = n >= 1 ? path_arg(f, 0, in) : NULL;
     if (!key && f->inst->nr >= 1) {
-        /* 裸变量（obj/map 成员目录）：解析为 <frame>/<name>. 目录。 */
         const char *name = f->inst->reads[0].name;
-        if (name[0] != '/') {
-            char *fr = kvlangKeytreeFrameRoot(f->pc);
-            char *base = kvlangBuiltinResolveWriteSlot(f->kv, fr, name);
-            free(fr);
-            key = kvlangKeytreeMember(base, "");
-            free(base);
-        }
+        char *fr = kvlangKeytreeFrameRoot(f->pc);
+        char *base = kvlangBuiltinResolveWriteSlot(f->kv, fr, name);
+        free(fr);
+        key = kvlangKeytreeMember(base, "");
+        free(base);
     }
     if (!key) {
         kvlangBuiltinFreeInputs(in, n);
@@ -320,32 +356,13 @@ int kvlangCList(kvlangFrame_t *f) {
     char *dst =
         kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->writes[0].name);
     free(fr);
-    /* 结果是一个 stringkeymap：容器值在 dst（body 空，dims=[count] 落 head），
-     * kvlangBuiltinMemindex 在 dst·，成员名是坐标段 [i]，值是对应的成员名字符串。 */
-    char **coords = malloc(sizeof(char *) * (size_t)(count > 0 ? count : 1));
-    for (int i = 0; i < count; i++) {
-        kvlangStrbuf_t s;
-        kvlangStrbufInit(&s);
-        kvlangStrbufPrintf(&s, "[%d]", i);
-        coords[i] = kvlangStrbufDetach(&s);
-    }
+    /* Members are physical keys under dst·. */
     char err[256];
-    int32_t dims[1] = {count};
     kvlangXvalue_t mark;
-    kvlangBuiltinMapMarker(&mark, "[int64]" MEMBER_SEP "[]char/utf8", dims, 1);
+    kvlangBuiltinMapMarker(&mark, "[int64]" MEMBER_SEP "[]char/utf8");
     kvlangKvPair_t p0 = {dst, mark};
     kvlangKvSet(f->kv, &p0, 1, err, sizeof err);
     kvlangXvalueFree(&mark);
-    char *dir = kvlangKeytreeMember(dst, "");
-    kvlangXvalue_t mi;
-    kvlangBuiltinMemindex(&mi, (const char *const *)coords, count);
-    kvlangKvPair_t p1 = {dir, mi};
-    kvlangKvSet(f->kv, &p1, 1, err, sizeof err);
-    kvlangXvalueFree(&mi);
-    free(dir);
-    for (int i = 0; i < count; i++)
-        free(coords[i]);
-    free(coords);
     for (int i = 0; i < count; i++) {
         int64_t c[1] = {i};
         char *k = kvlangBuiltinScatterKey(dst, c, 1);
@@ -385,13 +402,11 @@ static char *kv_list_dir(kvlangFrame_t *f, kvlangXvalue_t *in, int n) {
     char *key = n >= 1 ? path_arg(f, 0, in) : NULL;
     if (!key && f->inst->nr >= 1) {
         const char *name = f->inst->reads[0].name;
-        if (name[0] != '/') {
-            char *fr = kvlangKeytreeFrameRoot(f->pc);
-            char *base = kvlangBuiltinResolveWriteSlot(f->kv, fr, name);
-            free(fr);
-            key = kvlangKeytreeMember(base, "");
-            free(base);
-        }
+        char *fr = kvlangKeytreeFrameRoot(f->pc);
+        char *base = kvlangBuiltinResolveWriteSlot(f->kv, fr, name);
+        free(fr);
+        key = kvlangKeytreeMember(base, "");
+        free(base);
     }
     return key;
 }

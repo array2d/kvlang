@@ -42,13 +42,6 @@ char *kvlangKeytreeFrameRoot(const char *pc) {
     return r;
 }
 
-/* 帧根长度（末个 "/[" 之前），无分配：循环每步据之判断帧是否变化，免一次 malloc。 */
-size_t kvlangKeytreeFrameRootLen(const char *pc) {
-    const char *last = NULL;
-    for (const char *p = pc; (p = strstr(p, "/[")) != NULL; p += 2) last = p;
-    return last ? (size_t)(last - pc) : 0;
-}
-
 static char *trim_right_join(const char *root, const char *suffix) {
     size_t n = strlen(root);
     while (n > 0 && root[n - 1] == '/') n--;

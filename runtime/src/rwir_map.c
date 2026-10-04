@@ -2,29 +2,10 @@
 
 /* ── 容器值 / 成员索引 ──────────────────────────────────────────── */
 
-/* kvlangBuiltinMemindex（p·）：kind=index，body=[4B count LE][name\n...]，成员列表唯一权威。 */
-void kvlangBuiltinMemindex(kvlangXvalue_t *out, const char *const *names,
-                           int n) {
-    kvlangStrbuf_t body;
-    kvlangStrbufInit(&body);
-    char count[4] = {(char)(n & 0xFF), (char)((n >> 8) & 0xFF),
-                     (char)((n >> 16) & 0xFF), (char)((n >> 24) & 0xFF)};
-    kvlangStrbufPutn(&body, count, 4);
-    for (int i = 0; i < n; i++) {
-        if (i)
-            kvlangStrbufPutc(&body, '\n');
-        kvlangStrbufPuts(&body, names[i]);
-    }
-    kvlangXvalueNewTlv(out, KVSPACE_KIND_INDEX, (const uint8_t *)body.p,
-                       (uint32_t)body.len, 1);
-    kvlangStrbufFree(&body);
-}
-
 /* map 容器值（p）：body 空、storetype=index，langtype 为 map langtype（见 [[map容器]]）。
  * langtype 恒非空——layout 强制容器字面量写目标带 map langtype（缺则 layout 报错）。 */
-void kvlangBuiltinMapMarker(kvlangXvalue_t *out, const char *langtype,
-                            const int32_t *dims, int ndim) {
-    kvlangXvalueNewTlvDims(out, langtype, (const uint8_t *)"", 0, dims, ndim);
+void kvlangBuiltinMapMarker(kvlangXvalue_t *out, const char *langtype) {
+    kvlangXvalueNewTlv(out, langtype, (const uint8_t *)"", 0, 1);
 }
 
 /* 写槽 `w` 的声明容器类型：layout 的 write_slot_value 把 map langtype 落进写槽的 langtype
@@ -36,16 +17,26 @@ static char *declared_map_langtype(kvlangFrame_t *f, int w) {
                 f->inst->nw);
         abort();
     }
-    char buf[256];
-    kvlangXvalueLangtype(&f->inst->writes[w].val, buf, sizeof buf);
-    if (!strstr(buf, MEMBER_SEP)) {
+    if (f->inst->writes[w].type &&
+        strstr(f->inst->writes[w].type, MEMBER_SEP))
+        return strdup(f->inst->writes[w].type);
+    kvspaceHead_t head;
+    if (kvlangXvalueHead(&f->inst->writes[w].val, &head) != 0)
+        abort();
+    int32_t len = 0;
+    const uint8_t *body = kvlangXvalueBody(&f->inst->writes[w].val,
+                                          &head, &len);
+    const uint8_t *split = len > 5 ? memchr(body + 5, 0, (size_t)len - 5) : NULL;
+    char *type = split ? strndup((const char *)split + 1,
+                                 (size_t)(body + len - split - 1)) : strdup("");
+    if (!strstr(type, MEMBER_SEP)) {
         fprintf(stderr,
                 "panic: container literal target %s has no map langtype "
                 "(layout must reject)\n",
                 f->inst->writes[w].name);
         abort();
     }
-    return strdup(buf);
+    return type;
 }
 
 /* ── obj / map ─────────────────────────────────────────────────── */
@@ -83,22 +74,13 @@ int kvlangBuiltinObj(kvlangFrame_t *f) {
             names[j++] = kvlangXvalueValueString(&in[i]);
         }
         /* 容器值 p：langtype=声明的 map langtype，dims=[0]（命名字典无形状，成员在 memindex）。 */
-        int32_t odims[1] = {0};
         char *wty = declared_map_langtype(f, w);
         kvlangXvalue_t mark;
-        kvlangBuiltinMapMarker(&mark, wty, odims, 1);
+        kvlangBuiltinMapMarker(&mark, wty);
         free(wty);
         kvlangKvPair_t p0 = {ok, mark};
         kvlangKvSet(f->kv, &p0, 1, err, sizeof err);
         kvlangXvalueFree(&mark);
-        /* kvlangBuiltinMemindex p·：kind=index，body=[4B count][names]。 */
-        char *mip = kvlangKeytreeMember(ok, "");
-        kvlangXvalue_t mi;
-        kvlangBuiltinMemindex(&mi, (const char *const *)names, cnt);
-        kvlangKvPair_t p1 = {mip, mi};
-        kvlangKvSet(f->kv, &p1, 1, err, sizeof err);
-        kvlangXvalueFree(&mi);
-        free(mip);
         for (int i = 0, j = 0; i + 1 < n; i += 2) {
             if (kvlangXvalueNone(&in[i + 1]))
                 continue;
@@ -149,22 +131,13 @@ int kvlangBuiltinMap(kvlangFrame_t *f) {
             names[i] = kvlangStrbufDetach(&s);
         }
         /* 容器值 p：langtype=声明的 map langtype，body 空，dims=[n] 落 head。 */
-        int32_t dims[1] = {n};
         char *wty = declared_map_langtype(f, w);
         kvlangXvalue_t mark;
-        kvlangBuiltinMapMarker(&mark, wty, dims, 1);
+        kvlangBuiltinMapMarker(&mark, wty);
         free(wty);
         kvlangKvPair_t p0 = {ok, mark};
         kvlangKvSet(f->kv, &p0, 1, err, sizeof err);
         kvlangXvalueFree(&mark);
-        /* kvlangBuiltinMemindex p·：kind=index，body=[4B count][[0]\n[1]...]。 */
-        char *mip = kvlangKeytreeMember(ok, "");
-        kvlangXvalue_t mi;
-        kvlangBuiltinMemindex(&mi, (const char *const *)names, n);
-        kvlangKvPair_t p1 = {mip, mi};
-        kvlangKvSet(f->kv, &p1, 1, err, sizeof err);
-        kvlangXvalueFree(&mi);
-        free(mip);
         for (int i = 0; i < n; i++) {
             int64_t c[1] = {i};
             char *k = kvlangBuiltinScatterKey(ok, c, 1);

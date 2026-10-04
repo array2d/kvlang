@@ -11,13 +11,13 @@
 //! printlib: 反向——严格读 /lib/<pkg> 子树重建 AST（签名读参数定义键 .[0,±k]、体读线性槽+‥labels），
 //!       不读 .src、不依赖签名行 [0,x] 静态槽。printstack: /vthread/<vid> 活动栈渲染（只读）。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::ast::{
     self, Expr, Func, FuncSig, Instruction, Param, RwirDecl, ScopeStmt, Stmt, StructDecl,
 };
 use super::ffi::Kv;
-use super::{builtin, ffi, keytree, kvkind, langtype, lower, parser};
+use super::{builtin, ffi, keytree, kvkind, lower, parser};
 
 /// 创建基础目录 /lib/ 与 /vthread/（layout 前必须存在）。
 pub fn init_dirs(kv: &mut Kv) -> Result<(), String> {
@@ -45,6 +45,22 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
 
     let mut any_code = false;
     let mut inits: Vec<String> = Vec::new();
+    let local_funcs: HashSet<String> = file
+        .funcs
+        .iter()
+        .map(|f| {
+            let pkg = if f.pkg.is_empty() {
+                &file.package
+            } else {
+                &f.pkg
+            };
+            if pkg.is_empty() {
+                f.sig.name.clone()
+            } else {
+                format!("{pkg}{}{name}", keytree::MEMBER_SEP, name = f.sig.name)
+            }
+        })
+        .collect();
     for decl in &file.structs {
         write_struct_decl(kv, decl);
         any_code = true;
@@ -56,7 +72,7 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
             func.pkg.clone()
         };
         let mut lowered = lower::lower_func(func);
-        write_func(kv, &pkg, &mut lowered);
+        write_func(kv, &pkg, &mut lowered, &local_funcs);
         any_code = true;
         if func.sig.name == "init" {
             inits.push(init_fn_name(&pkg));
@@ -82,7 +98,7 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
             pkg: String::new(),
         };
         let mut lowered = lower::lower_func(&init_fn);
-        write_func(kv, "", &mut lowered);
+        write_func(kv, "", &mut lowered, &local_funcs);
         any_code = true;
         inits.push(init_fn_name(""));
     }
@@ -520,7 +536,7 @@ fn read_insts(kv: &mut Kv, dir: &str) -> Vec<RawInst> {
 /// 槽值 → Operand：rwir 族为引用/opcode 名，char 为字符串字面量，其余为明文字面量。
 fn decode_operand(data: &[u8]) -> Operand {
     let k = kvkind::kind(data);
-    if matches!(k.as_str(), "rwir" | "rwir|rwfunc" | "rwfunc" | "def rwir") {
+    if matches!(k.as_str(), "rwir" | "rwfunc" | "def rwir") {
         Operand::Ref(kvkind::rwir_sig(data))
     } else if kvkind::is_char_kind(&k) {
         Operand::Str(kvkind::plain(data))
@@ -618,8 +634,8 @@ fn build_inst(inst: &RawInst, by_irseq: &HashMap<i32, String>) -> Instruction {
 }
 
 /// 写函数到 /lib/：签名（rwfunc）、源码、参数 Ptr、指令体。
-pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) {
-    let mut type_map = lower::infer_types(fn_);
+pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func, local_funcs: &HashSet<String>) {
+    let type_map = lower::infer_types(fn_);
     lower::specialize(fn_, &type_map);
     let func_dir = keytree::lib_func(pkg, &fn_.sig.name);
 
@@ -627,24 +643,12 @@ pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) {
     let mut labels: HashMap<String, i32> = HashMap::new();
     collect_insts(&fn_.body, &mut seq, &mut labels);
 
-    // 形参引用 → 帧坐标（编译期替换，运行时无命名参数角色）。带 `*` 的形参按**地址传递**（槽存实参地址，体内显式解引用 `*[0,-k]`）；
-    // 不带 `*` 的按**值传递**（槽存值本体，体内裸坐标 `[0,-k]` 直读）。见 spec [[函数]]。
     let mut param_coord: HashMap<String, String> = HashMap::new();
     for (i, p) in fn_.sig.params.iter().enumerate() {
-        let d = if langtype::is_addr_param(&p.ty) {
-            "*"
-        } else {
-            ""
-        };
-        param_coord.insert(p.name.clone(), format!("{d}[0,-{}]", i + 1));
+        param_coord.insert(p.name.clone(), format!("*[0,-{}]", i + 1));
     }
     for (i, r) in fn_.sig.returns.iter().enumerate() {
-        let d = if langtype::is_addr_param(&r.ty) {
-            "*"
-        } else {
-            ""
-        };
-        param_coord.insert(r.name.clone(), format!("{d}[0,{}]", i + 1));
+        param_coord.insert(r.name.clone(), format!("*[0,{}]", i + 1));
     }
 
     // 按函数覆盖（文件夹复制式合并）：只 del_tree 本函数子树，不动 /lib 下其它函数。
@@ -666,9 +670,10 @@ pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) {
     }
 
     let mut pairs: Vec<(String, Vec<u8>)> = Vec::new();
+    pairs.push((format!("{func_dir}/"), kvkind::new_rwfunc_dir()));
     pairs.push((
         format!("{func_dir}/[0,0]"),
-        kvkind::new_rwfunc(seq.len() as i32, nr, nw, fn_.sig.dynamic()),
+        kvkind::new_rwfunc_anchor(nr, nw, fn_.sig.dynamic()),
     ));
     pairs.push((
         keytree::lib_src(pkg, &fn_.sig.name),
@@ -698,9 +703,11 @@ pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) {
             (i as i32) + 1,
             inst,
             &labels,
-            &mut type_map,
+            &type_map,
             &param_coord,
             &param_langtype,
+            pkg,
+            local_funcs,
         );
     }
     if !labels.is_empty() {
@@ -718,8 +725,7 @@ pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) {
     }
 }
 
-/// 写 struct 原型到 /lib/<Name>：基节点(kind=struct) + memindex(/lib/Name·) + 各字段默认值。
-/// 运行时 struct·new 以此为原型 cplist 克隆，故字段默认值即实例初值。
+/// Store field types under the prototype and defaults under member keys.
 pub fn write_struct_decl(kv: &mut Kv, decl: &StructDecl) {
     let mut name = decl.name.clone();
     if !decl.pkg.is_empty() {
@@ -727,16 +733,13 @@ pub fn write_struct_decl(kv: &mut Kv, decl: &StructDecl) {
     }
     let base = keytree::rwir(&name);
     let _ = kv.del_tree(&base);
-    let fnames: Vec<String> = decl.fields.iter().map(|f| f.name.clone()).collect();
-    let ftypes: Vec<(String, String)> = decl
-        .fields
-        .iter()
-        .map(|f| (f.name.clone(), f.ty.clone()))
-        .collect();
     let mut pairs: Vec<(String, Vec<u8>)> = Vec::new();
-    pairs.push((base.clone(), kvkind::new_struct(&ftypes)));
-    pairs.push((keytree::member(&base, ""), kvkind::new_memindex(&fnames)));
+    pairs.push((base.clone(), kvkind::new_struct()));
     for fld in &decl.fields {
+        pairs.push((
+            format!("{base}/{}", fld.name),
+            kvkind::new_def_langtype(&fld.ty),
+        ));
         // *T 字段的默认值是空指针 None——不落键。None 在 kvspace 即"无值"（键不存在），
         // 故原型不带该字段、实例读回 None（见 [[ptr]]）；不造"空 Ptr"这第二种空值表示。
         if fld.ty.starts_with('*') {
@@ -844,15 +847,12 @@ fn write_linear_inst(
     n: i32,
     s: &Instruction,
     labels: &HashMap<String, i32>,
-    type_map: &mut HashMap<String, String>,
+    type_map: &HashMap<String, String>,
     params: &HashMap<String, String>,
     param_langtype: &HashMap<String, String>,
+    pkg: &str,
+    local_funcs: &HashSet<String>,
 ) {
-    for (j, w) in s.writes.iter().enumerate() {
-        if j < s.write_types.len() && !s.write_types[j].is_empty() {
-            type_map.insert(w.clone(), s.write_types[j].clone());
-        }
-    }
     let (opcode, mut reads) = s.flat();
     match opcode.as_str() {
         "goto" => {
@@ -881,16 +881,31 @@ fn write_linear_inst(
 
     let mut pairs: Vec<(String, Vec<u8>)> = Vec::with_capacity(1 + reads.len() + s.writes.len());
     if !opcode.is_empty() {
-        pairs.push((format!("{prefix}/[{n},0]"), opcode_value(&opcode)));
+        pairs.push((
+            format!("{prefix}/[{n},0]"),
+            opcode_value(
+                kv,
+                &opcode,
+                reads.len() as i32,
+                s.writes.len() as i32,
+                pkg,
+                local_funcs,
+            ),
+        ));
     }
     for (j, r) in reads.iter().enumerate() {
         let rv = params
             .get(r.as_str())
             .map(String::as_str)
             .unwrap_or(r.as_str());
+        let ty = param_langtype
+            .get(r)
+            .or_else(|| type_map.get(r))
+            .map(String::as_str)
+            .unwrap_or("");
         pairs.push((
             format!("{prefix}/[{n},-{}]", j + 1),
-            slot_value(rv, target_char),
+            typed_slot_value(rv, ty, target_char),
         ));
     }
     for (j, w) in s.writes.iter().enumerate() {
@@ -902,10 +917,11 @@ fn write_linear_inst(
             .map(String::as_str)
             .filter(|t| !t.is_empty())
             .or_else(|| param_langtype.get(orig).map(String::as_str))
+            .or_else(|| type_map.get(orig).map(String::as_str))
             .unwrap_or("");
         pairs.push((
             format!("{prefix}/[{n},{}]", j + 1),
-            write_slot_value(wv, ty),
+            typed_slot_value(wv, ty, ""),
         ));
     }
     if !pairs.is_empty() {
@@ -928,28 +944,42 @@ fn resolve_label(labels: &HashMap<String, i32>, name: &str, opcode: &str) -> i32
     }
 }
 
-/// 调用目标 opcode 槽值：函数调用/运算符 → `rwir|rwfunc` 并列；
-/// 控制/拷贝 opcode（return/goto/br/call/=）原样 `rwir`（非调用目标）。
-fn opcode_value(opcode: &str) -> Vec<u8> {
-    if matches!(opcode, "return" | "goto" | "br" | "call" | "=") {
-        kvkind::new_rwir(0, 0, opcode)
+fn opcode_value(
+    kv: &mut Kv,
+    opcode: &str,
+    nr: i32,
+    nw: i32,
+    pkg: &str,
+    local_funcs: &HashSet<String>,
+) -> Vec<u8> {
+    let name = opcode.strip_prefix("/lib/").unwrap_or(opcode);
+    let qualified = if pkg.is_empty() || name.contains(keytree::MEMBER_SEP) || name.contains('/') {
+        name.to_string()
     } else {
-        kvkind::new_rwir_union(opcode)
+        format!("{pkg}{}{name}", keytree::MEMBER_SEP)
+    };
+    let is_func = local_funcs.contains(name)
+        || local_funcs.contains(&qualified)
+        || [name, qualified.as_str()].iter().any(|candidate| {
+            let dir = format!("/lib/{candidate}/");
+            kvkind::kind(&kv.get_one(&dir)) == kvkind::KIND_RWFUNC
+        });
+    if is_func {
+        kvkind::new_rwfunc_call(nr, nw, opcode)
+    } else {
+        kvkind::new_rwir(nr, nw, opcode)
     }
 }
 
-/// 写槽值：写目标带 **map langtype** 标注时（`x:{keylt}·{valt} = {}`），槽的 langtype 即该 map
-/// langtype、body 即变量名——runtime 据此把容器值按 [[map容器]] 落成「langtype=map langtype、
-/// storetype=index、body 空」，成员索引落兄弟槽 `x·`。其余写槽仍是 rwir 引用（body 带计数头）。
-/// 参数替换过的写槽（rwfunc 写参轴）不承载类型：声明类型已落 `/lib/<fn>.[0,k]` 参数定义键。
-fn write_slot_value(name: &str, ty: &str) -> Vec<u8> {
-    if ty.contains(keytree::MEMBER_SEP) {
-        return ffi::tlv_encode(ty, name.as_bytes(), 1);
+/// Preserve the target type.
+fn typed_slot_value(name: &str, ty: &str, target_char: &str) -> Vec<u8> {
+    if !ty.is_empty() && (name.starts_with('/') || !is_literal(name)) {
+        return kvkind::new_typed_rwir(name, ty);
     }
-    slot_value(name, "")
+    slot_value(name, target_char)
 }
 
-/// 将字面量/引用字符串编码为 XValue TLV（rwir 槽值）。
+/// Encode an instruction operand.
 fn slot_value(val: &str, target_char: &str) -> Vec<u8> {
     if !is_literal(val) {
         return kvkind::new_rwir(0, 0, val);
@@ -1111,11 +1141,26 @@ pub fn printstack(kv: &mut Kv, vid: &str) -> String {
             if !(is_arg || is_local) {
                 continue;
             }
-            let v = kvkind::display(&kv.get_one(&format!("{f}/{n}")));
+            let mut v = kv.get_one(&format!("{f}/{n}"));
+            if is_arg {
+                for _ in 0..2 {
+                    if !kvkind::is_ptr(&v) {
+                        break;
+                    }
+                    v = kv.get_one(&kvkind::ptr_target(&v));
+                }
+            }
+            let v = kvkind::display(&v);
             out.push_str(&format!("  {n} = {}\n", clip(v)));
         }
         if cur.as_deref() == Some(f.as_str()) && !pc.is_empty() {
-            let v = kvkind::display(&kv.get_one(&pc));
+            let opcode = kv.get_one(&pc);
+            let kind = kvkind::kind(&opcode);
+            let v = if kind == "rwir" || kind == "rwfunc" {
+                format!("{kind}:{}", kvkind::rwir_sig(&opcode))
+            } else {
+                kvkind::display(&opcode)
+            };
             out.push_str(&format!("  cur = {}\n", clip(v)));
         }
     }
@@ -1161,7 +1206,11 @@ mod tests {
             "lib a {\nlib b {\nrwfunc f() -> (r:int64) {\n1 -> r\n}\n}\n}\n",
         )
         .unwrap();
+        let dir = kv.get_one("/lib/a/b·f/");
+        assert_eq!(kvkind::kind(&dir), "rwfunc");
+        assert_eq!(kvkind::head(&dir).storetype, 0);
         assert_eq!(kvkind::kind(&kv.get_one("/lib/a/b·f/[0,0]")), "rwfunc");
+        assert_eq!(kvkind::head(&kv.get_one("/lib/a/b·f/[0,0]")).storetype, 1);
 
         // 同 lib a 下再 layout 另一嵌套 lib c，验证 b·f 未被整库删除（增量合并）
         compile(
@@ -1175,6 +1224,64 @@ mod tests {
             "b·f 应保留"
         );
         assert_eq!(kvkind::kind(&kv.get_one("/lib/a/c·g/[0,0]")), "rwfunc");
+    }
+
+    #[test]
+    fn call_slots_use_target_type() {
+        let mut kv = Kv::conn(&format!(
+            "fs:///tmp/kvlanglayout_call_kind_{}",
+            std::process::id()
+        ));
+        init_dirs(&mut kv).unwrap();
+        compile(&mut kv, "rwfunc caller() -> () {\ncallee(1) -> y\nprintln(y)\n}\nrwfunc callee(x:int64) -> (r:int64) {\nx -> r\n}\n").unwrap();
+        assert_eq!(kvkind::kind(&kv.get_one("/lib/caller/[1,0]")), "rwfunc");
+        assert_eq!(
+            kvkind::counts(&kv.get_one("/lib/caller/[1,0]")),
+            (1, 1, false)
+        );
+        assert_eq!(kvkind::kind(&kv.get_one("/lib/caller/[2,0]")), "rwir");
+        assert_eq!(
+            kvkind::counts(&kv.get_one("/lib/caller/[2,0]")),
+            (1, 0, false)
+        );
+        compile(&mut kv, "rwfunc later() -> () {\ncallee(1) -> y\n}\n").unwrap();
+        assert_eq!(kvkind::kind(&kv.get_one("/lib/later/[1,0]")), "rwfunc");
+        compile(
+            &mut kv,
+            "rwfunc absolute() -> () {\n/lib/callee(1) -> y\n}\n",
+        )
+        .unwrap();
+        assert_eq!(kvkind::kind(&kv.get_one("/lib/absolute/[1,0]")), "rwfunc");
+        compile(
+            &mut kv,
+            "lib p {\nrwfunc caller() -> () {\ntarget()\n}\nrwfunc target() -> () {}\n}\n",
+        )
+        .unwrap();
+        assert_eq!(kvkind::kind(&kv.get_one("/lib/p·caller/[1,0]")), "rwfunc");
+    }
+
+    #[test]
+    fn struct_definition_uses_child_keys() {
+        let mut kv = Kv::conn(&format!(
+            "fs:///tmp/kvlanglayout_struct_{}",
+            std::process::id()
+        ));
+        init_dirs(&mut kv).unwrap();
+        compile(
+            &mut kv,
+            "struct Point {\n\tx:int64=3\n\tnext:*Point=None\n}\n",
+        )
+        .unwrap();
+        let proto = kv.get_one("/lib/Point");
+        assert_eq!(kvkind::kind(&proto), "def struct");
+        assert!(kvkind::body(&proto, &kvkind::head(&proto)).is_empty());
+        assert_eq!(kvkind::value_string(&kv.get_one("/lib/Point/x")), "int64");
+        assert_eq!(
+            kvkind::value_string(&kv.get_one("/lib/Point/next")),
+            "*/lib/Point"
+        );
+        assert_eq!(kvkind::kind(&kv.get_one("/lib/Point·x")), "int64");
+        assert!(kv.get_one("/lib/Point·next").is_empty());
     }
 
     #[test]

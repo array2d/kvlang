@@ -6,8 +6,7 @@ lib kvlang/spec/layout语义/常见诊断 {
 
 - 参数缺类型标注——`param "x" has no type annotation` / `return value "r" has no type annotation`。
 - 读参被写——`read param "A" cannot be used as write slot (read params are read-only)`。
-- 值容器按值传参——`param "p": 值容器类型只能按地址传递 —— 写 "*/lib/Point"`（值容器无值本体可拷，须带
-  `*`/`@`）。
+- 值容器参数须标注其实际目标类型；调用统一传地址，见 [[函数]]。
 - 参数名重复（读参列表内、写参列表内、读写之间均不得同名，见 [[函数]]）——读写之间
   `param "A" appears in both read-params and write-params`；列表内 `duplicate param "a" in read-params`
   / `in write-params`。**调用**时不受限：`inc(x) -> x` 合法。

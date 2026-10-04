@@ -1,7 +1,4 @@
-//! kvspace-durable 的 C ABI 绑定 + 安全封装。
-//!
-//! 布局侧不依赖 kvspace-durable 的 Rust 类型，只通过 `extern "C"` 符号表调用。
-//! 所有 XValue 以 TLV 字节（`Vec<u8>`）跨边界；空字节 = None。
+//! KVSpace C ABI bindings for layout.
 
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_void};
@@ -27,17 +24,20 @@ extern "C" {
         out: *mut *mut u8,
         out_len: *mut u32,
     ) -> c_int;
-    /// 新位置写：按 (ref, storetype, ro, vid, langtype, body_len) 分配新 box、写 head，返回 body 偏移指针。
-    fn kvspaceWriteNewPlace(
+    fn kvspaceSetValue(
         h: Handle,
         key: *const c_char,
-        r#ref: u8,
-        storetype: u8,
+        value: *const u8,
+        value_len: u32,
         ro: u8,
         vid: u32,
-        langtype: *const c_char,
-        body_len: u32,
-        body: *mut *mut u8,
+        err: *mut c_char,
+        err_cap: u32,
+    ) -> c_int;
+    fn kvspaceDel(
+        h: Handle,
+        keys: *const *const c_char,
+        nkeys: u32,
         err: *mut c_char,
         err_cap: u32,
     ) -> c_int;
@@ -99,6 +99,7 @@ pub struct kvspaceHead_t {
     pub langtype: [u8; 256],
     pub langtype_len: i32,
     pub body_offset: i32,
+    pub body_cap: u64,
 }
 
 // ── 内部助手 ─────────────────────────────────────────────────────────
@@ -155,47 +156,32 @@ impl Kv {
         Kv { h }
     }
 
-    /// 写：pairs 的值为预编码 TLV；逐条解 head 取 (langtype, body)，经 WriteNewPlace
-    /// 向 kvspace 要 body 偏移指针后直接写入 body 字节（新建/换 kind/换尺寸唯一原语）。
     pub fn set(&mut self, pairs: &[(String, Vec<u8>)]) -> Result<(), String> {
         for (key, tlv) in pairs {
-            self.write_new_place(key, tlv)?;
-        }
-        Ok(())
-    }
-
-    fn write_new_place(&mut self, key: &str, tlv: &[u8]) -> Result<(), String> {
-        let h = decode_head(tlv);
-        let llen = h.langtype.iter().position(|&b| b == 0).unwrap_or(0);
-        let langtype = CString::new(&h.langtype[..llen]).expect("no NUL in langtype");
-        let ck = CString::new(key).expect("no NUL in key");
-        let body_off = h.body_offset as usize;
-        let body_len = h.body_len.max(0) as usize;
-        let mut body: *mut u8 = std::ptr::null_mut();
-        let mut err: [c_char; 256] = [0; 256];
-        let ret = unsafe {
-            kvspaceWriteNewPlace(
-                self.h,
-                ck.as_ptr(),
-                h.r#ref,
-                h.storetype,
-                h.ro,
-                h.vid,
-                langtype.as_ptr(),
-                body_len as u32,
-                &mut body,
-                err.as_mut_ptr(),
-                err.len() as u32,
-            )
-        };
-        err_ret(&mut err, ret)?;
-        if body_len > 0 {
-            if body.is_null() {
-                return Err(format!("kvspace: WriteNewPlace null body at {key}"));
-            }
-            unsafe {
-                std::ptr::copy_nonoverlapping(tlv[body_off..].as_ptr(), body, body_len);
-            }
+            let ck = CString::new(key.as_str()).expect("no NUL in key");
+            let mut err: [c_char; 256] = [0; 256];
+            let mut head: kvspaceHead_t = unsafe { std::mem::zeroed() };
+            let is_none = tlv.is_empty()
+                || unsafe { kvspaceDecodeHead(tlv.as_ptr(), tlv.len() as u32, &mut head) == 0 }
+                    && head.langtype_len == 0;
+            let ret = if is_none {
+                let key_ptr = ck.as_ptr();
+                unsafe { kvspaceDel(self.h, &key_ptr, 1, err.as_mut_ptr(), err.len() as u32) }
+            } else {
+                unsafe {
+                    kvspaceSetValue(
+                        self.h,
+                        ck.as_ptr(),
+                        tlv.as_ptr(),
+                        tlv.len() as u32,
+                        0,
+                        0,
+                        err.as_mut_ptr(),
+                        err.len() as u32,
+                    )
+                }
+            };
+            err_ret(&mut err, ret)?;
         }
         Ok(())
     }
@@ -267,7 +253,7 @@ impl Drop for Kv {
     }
 }
 
-// ── XValue TLV 编解码（供 kvkind 使用） ─────────────────────────────
+// XValue codec.
 
 /// array_len → dims：char/* 恒一维（含空串/单字符）；其余标量(≤1)=0 维、多元素=1 维。
 fn al_to_dims(kind: &str, array_len: i32) -> Vec<i32> {
@@ -280,7 +266,7 @@ fn al_to_dims(kind: &str, array_len: i32) -> Vec<i32> {
     }
 }
 
-/// 通用 TLV 编码（内联，ref=0）。
+/// Encode an inline XValue.
 pub fn tlv_encode(kind: &str, raw: &[u8], array_len: i32) -> Vec<u8> {
     let ck = CString::new(kind).expect("no NUL in kind");
     let dims = al_to_dims(kind, array_len);
@@ -311,6 +297,7 @@ pub fn decode_head(data: &[u8]) -> kvspaceHead_t {
         langtype: [0u8; 256],
         langtype_len: 0,
         body_offset: 0,
+        body_cap: 0,
     };
     unsafe {
         kvspaceDecodeHead(data.as_ptr(), data.len() as u32, &mut h);

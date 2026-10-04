@@ -3,7 +3,7 @@ lib kvlang/spec/runtime语义/成员访问 {
 	r####"# 成员访问（运行期语义）
 
 本章界定运行期对复合数据的访问语义：成员符 `·` 的解引用规则、动态键、指针的单跳类型检查、容器
-memindex 的运行期行为、compact 数组下标。类型的静态形态（种类、langtype、数组形态）见类型系统卷；本
+物理成员键的运行期行为、compact 数组下标。类型的静态形态（种类、langtype、数组形态）见类型系统卷；本
 章只讲 runtime **如何在 kvspace 中定位与读写**这些结构。
 
 ## 两个索引符号
@@ -17,12 +17,10 @@ kvlang 用两个符号访问复合数据，语义严格分离，runtime **不得
 
 容器成员一律走 `·`（或 `kvspace·get`/`kvspace·set`）；`[]` 只索引 compact 数组。
 
-## 容器 = 值 + memindex
+## 容器值与物理成员键
 
-复合命名数据（`stringkeymap`、`struct`）在 kvspace 中的运行期表示为**值 + memindex**：`base` 键持容
-器值（含 dims、容量等头信息），成员 `base·name` 作为**独立子 key** 落库。`·`（memindex 标记）分出容
-器的成员空间；memindex 的成员坐标名（`stringkeymap` → stringkeymap index、`struct` → struct index）
-是成员集合的唯一权威，遍历成员**必须**据此枚举，**不得**假设成员键连续或有序之外的布局。
+复合命名数据（`stringkeymap`、`struct`）的 `base` 键只存本格的 class-0 空 body 值。
+成员 `base·name` 是独立物理 key；kvspace 按 `base·` 前缀枚举成员名，不维护 memindex 矩阵。
 
 - **写成员**：`rec·name = 值` 的写槽是完整成员键 `rec·name`，`=` 为值拷贝。
 - **读成员**：`rec·name -> v` 直接取 key `rec·name`；缺失成员的动态读（`kvspace·get`）返回 `None`。
@@ -31,7 +29,7 @@ kvlang 用两个符号访问复合数据，语义严格分离，runtime **不得
 
 `base·name`（读写同规则）中 `base` 的解析在 runtime 按以下顺序确定成员键：
 
-1. **按指针解引用**：`base` 是 ref=1 Ptr（`base` 的 head `ref` 字节为 1）时，成员键 =
+1. **按指针解引用**：`base` 的 head 指针位为 1 时，成员键 =
    `target(base)·name`。例：`&n1 -> p` 后 `p·val` 解析为 `/…/n1·val`。
 2. **按名回退**：`base` 非 Ptr（局部 struct 实例等）时，成员键 = `解析(base)·name`；`解析()` 帧感知
    ——裸名 → `帧根/base`，`/` 开头 → 直通绝对路径。
@@ -40,7 +38,7 @@ kvlang 用两个符号访问复合数据，语义严格分离，runtime **不得
 其 target）。跨函数共享的数据**应**放绝对路径（`/n1`），使不同帧的指针都解引用到同一 key。
 
 3. **base 形态判定**：解析出的 `base`（Ptr 则取其**目标**）**必须**是容器——struct 实例（kindexpr 以
-   `/` 开头）、`stringkeymap`/`index`/`extindex`；或**路径串**（`[]char/*`，显式形式 `kvspace·get(path,
+   `/` 开头）或 typed map；或**路径串**（`[]char/*`，显式形式 `kvspace·get(path,
    k)` 的 base 就是它，其值即成员键的父路径）。compact 数组与标量两者都不是，报 TypeError（`·` 要求容
    器；compact 数组用 `[]` 索引）；None 是动态读，返回 None。**不得**把非容器、非路径串的 body 字节当路
    径串拼成员键——那会静默给出脏值或 None。
@@ -67,12 +65,11 @@ kvlang 用两个符号访问复合数据，语义严格分离，runtime **不得
   值即停；**不得**把 char 字符串值误当路径继续追（否则字符串实参内容会被当键，穿两层调用即变
   `None`）。写侧解析（`ResolveWriteSlot`）遵循同一纪律。
 
-## 扩展世界句柄（ref=2，@ext）
+## 扩展世界句柄（class 3，@ext）
 
-`ref` 是 head 中的**独立 u8 字段**（0=inline、1=ptr、2=@ext），不是 langtype/kind 首字符；源码类型标
-注中 `*`/`@` 前缀由 layout 剥离落成 `ref` 字节，wire 层 langtype 串不含前缀（见 [[总体方案]]）。
-ref=2（@ext）表示真实值在扩展世界，head 的 langtype 仍为目标形态的完整 langtype 串（不带 `@` 前
-缀），body 不是真实值字节，而是**定位串**（如 `/networld/<host>/proc/<pid>/stdout`）；读取该 key 时
+`@ext` 使用 storage class=3，不使用独立 `ref` 字节。head 的 langtype 是目标类型（不带 `@` 前缀），
+两个 u64 分别记录定位串字节长度与容量；body 是 UTF-8 **定位串**（如
+`/networld/<host>/proc/<pid>/stdout`），不是真实值字节。读取该 key 时
 由支持 `@` 的 rwir（如 runtime-rs 的 fs/networld 一族）按 body 定位串还原真实字节（见 [[runtime开发规
 范]]、[[执行模型]] §八）。真
 实 xvalue 落在扩展世界（fs 文件、gpu tensordata 等），非 kvspace 元存。

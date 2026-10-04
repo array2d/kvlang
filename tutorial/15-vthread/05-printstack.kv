@@ -25,5 +25,5 @@ rwfunc test() -> () {
 	println("outer-lib=", string·contains(st, "/lib/ps_outer"))
 	println("inner-lib=", string·contains(st, "/lib/ps_inner"))
 	println("arg=", string·contains(st, "int64:3"))
-	println("cur=", string·contains(st, "cur = rwir|rwfunc:no_such·thing"))
+	println("cur=", string·contains(st, "cur = rwir:no_such·thing"))
 }

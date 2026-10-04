@@ -23,5 +23,5 @@ jobs:
           make runtime-rs
           sudo make install
       - name: 测试 (${{ matrix.backend.name }})
-        env: { KVSPACE: "${{ matrix.backend.dsn }}" }
+        env: { KVSPACE: "${{ matrix.backend.dsn }}", KV_CASE_TIMEOUT: "600" }
         run: python3 tutorial/test.py

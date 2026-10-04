@@ -39,7 +39,7 @@ vthread 是 kvlang 的执行线程，句柄为整数 `vid`，根在 `/vthread/<v
 
 runtime 核心不含 I/O；与外部世界（进程、文件系统、网络）的交互一律经 `networld/*` rwir（见 [[runtime
 开发规范]]）。`/networld/<host>` 是本机在该命名空间下的身份（`host` 取裸 hostname）。外部产物（如子
-进程 stdout/stderr）经**扩展世界句柄（ref=2，@ext）**登记：写槽 ref=2、langtype 为目标 langtype 串
+进程 stdout/stderr）经**扩展世界句柄（class 3，@ext）**登记：写槽 storage class=3、langtype 为目标 langtype 串
 （不带 `@` 前缀）、body 为逻辑定位串（如 `/networld/<host>/proc/<pid>/stdout`），读取时由**支持 `@` 的
 rwir**（如 runtime-rs 的 networld/proc、networld/fs 一族）按该定位串兑现真实字节。锚例：
 `tutorial/14-networld/`。

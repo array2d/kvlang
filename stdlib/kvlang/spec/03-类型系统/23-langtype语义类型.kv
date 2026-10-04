@@ -4,22 +4,20 @@ lib kvlang/spec/类型系统/langtype语义类型 {
 
 本章界定 **langtype**——一个具体值 head 的**真实类型**（它与定义处匹配类型 `def langtype` 的区别见
 [[langtype签名类型表达式]]）。langtype 是完整的类型表达式串，逐字节即类型标注文法，天然含 base 种
-类、`[dims]`、map 键值、struct 原型路径。各 langtype 的串形态与其落定的 storetype：
+类、`[dims]`、map 键值、struct 原型路径。各 langtype 与 storage class 的典型关系：
 
-| langtype（示例串） | storetype | 说明 |
-|--------------------------|-----------|------|
-| `int64` `bool` `time` `duration` | ATOM | 定宽标量 |
-| `[]char/utf8` | ARRAYND(elem 1B) | **utf8 变宽 → 物理即 [n]uint8**；禁码点索引是 langtype 层规则，物理按字节切 |
-| `[]char/utf32` `[]char/ascii` | ARRAYND | 定宽，物理可 O(1) 码点索引 |
-| `[3,4]float32` | ARRAYND | 张量 |
-| `rwir`（指令行，`/vthread/`） | ATOM | 指令叶子（body = 计数头 + 指令名/引用文本），**无实现体，由 runtime 经 def rwir 路由直接兑现（myrwircaps）** |
-| `def rwir`（路由头，仅 `/lib/<op>`） | index | 定义节点：签名行 `[0,x]`，无实现指令行 |
-| `[]char/utf8·int64`（map） | index | **stringkeymap**，键值经 `·` mapexpr；成员在 `{key}·` |
-| `/lib/Point`（struct 原型路径） | index | 结构实例，字段固定；成员在 `{key}·` |
-| `def struct`（原型定义节点） | index | struct 原型自身；字段类型定义在其子槽 |
-| `rwfunc` | index / extindex | 函数即 `/` 目录：签名行锚点 `[0,0]`（langtype `rwfunc`，body 只记 nr/nw/dynamic）+ 参数定义键 `.[0,±j]` + 实现指令行；目录节点自身为 `index`、无值 |
-| `def langtype`（签名行 `[0,x]` 槽） | ATOM | 单个参数的**匹配类型**定义，body=该参数的 def langtype 串 |
-| `lib`（包目录） | index | `/lib/` 及各 pkg 目录；成员为 `/` 子路径 |
+| langtype（示例） | class | 说明 |
+|------------------|-------|------|
+| `int64` `bool` `time` `duration` | 0 | 定宽标量 |
+| `[N]char/utf8`、`[N]char/utf32`、`[N]char/ascii` | 1 | 字符序列；UTF-8 的 a 为字节数，N 为码点数 |
+| `[3,4]float32` | 2 | 定宽张量 |
+| `rwir` / `rwfunc` 调用槽 | 1 | 5 字节计数头加目标名 |
+| `def rwir` | 0 | 5 字节路由头 |
+| `[]char/utf8·int64`、`/lib/Point` | 0 | map/struct 空 body 头，成员为物理 `·` key |
+| `def struct`、`lib`、`rwfunc` 目录 | 0 | 空 body 目录值，成员为物理 `/` key |
+| `rwfunc` 的 `[0,0]` 锚点、`def langtype` | 1 | 5 字节计数头或类型定义文本 |
+
+指针为 class 1 加指针标志；@ext 使用 class 3，langtype 仍为目标真实类型。
 
 **def 族的来源**（`def` 不是 kvlang 关键字、不在 kv 源码书写）：`def struct`（源码 `struct Name{}`，
 layout 落原型定义节点）、`def langtype`（源码参数标注 `x:int64`，layout 铺签名行时逐参生成）由
@@ -30,7 +28,6 @@ layout 落原型定义节点）、`def langtype`（源码参数标注 `x:int64`�
 [[struct]]）。容器**语义类型**只剩 `stringkeymap`、`struct`（口语称「map」指的即 stringkeymap，规范一律书
 写种类名 `stringkeymap`）。
 
-**一对多正是拆分的价值**：同为 rwfunc，静态函数定义落 `index`、vthread 运行栈落 `extindex`；语言层看
-到的是同一 langtype，物理层按场景选载体。
+同一 langtype 可出现在不同 class；例如 rwfunc 目录值为 class 0，而其签名锚点和调用槽为 class 1。
 "#### -> /lib/kvlang/spec/类型系统/langtype语义类型
 }

@@ -1,12 +1,8 @@
-//! C ABI —— 直连 stock 三方 .so（camelCase，符合 deepx-design/doc/abi-naming-standard.md）：
-//!   kvspace-durable / dispatch : 地址空间 + KV 存取 + TLV 编解码
-//!   kvlang runtime  : 模式2 主导执行 + rwirext 宿主 ABI（含 IsExt/Handoff 供外部 rwir 移交）
-//!   kvlang layout   : .kv 编译入库（文件 / 内存源码 / 只校验 / 格式化）
+//! C ABI bindings for kvspace, kvlang runtime, and layout.
 
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 
-/// kvspaceDecodeHead 输出（逐字段对齐 kvspace/include/kvspace/kvspace.h 的 kvspaceHead_t）。
-/// 三正交轴 ref×storetype×langtype；langtype 即该 ABI 的 langtype 槽（本 runtime 内部沿用 langtype 命名）。
+/// Matches kvspaceHead_t.
 #[repr(C)]
 pub struct KvspaceHead {
     pub headlen: u16,
@@ -20,6 +16,7 @@ pub struct KvspaceHead {
     pub langtype: [u8; 256],
     pub langtype_len: i32,
     pub body_offset: i32,
+    pub body_cap: u64,
 }
 
 impl Default for KvspaceHead {
@@ -36,12 +33,12 @@ impl Default for KvspaceHead {
             langtype: [0u8; 256],
             langtype_len: 0,
             body_offset: 0,
+            body_cap: 0,
         }
     }
 }
 
-/// 类型化 TLV 编码——唯一编码入口，直委托 kvspace 正典 codec kvspaceTlvEncode（不在 Rust
-/// 侧复刻 langtype 构造）。dims 空=标量。返回 frontend malloc 的 TLV 拷贝，随即 free。
+/// Encode through the kvspace codec.
 pub fn tlv_encode(kind: &str, raw: &[u8], dims: &[i32]) -> Vec<u8> {
     unsafe {
         let (mut out, mut olen) = (std::ptr::null_mut(), 0u32);
@@ -68,7 +65,7 @@ pub fn tlv_encode(kind: &str, raw: &[u8], dims: &[i32]) -> Vec<u8> {
 }
 
 unsafe extern "C" {
-    // ── kvspace：KV 存取 + TLV ────────────────────────────────────────
+    // kvspace ABI.
     pub fn kvspaceConnect(dsn: *const c_char) -> *mut c_void;
     pub fn kvspaceClear(h: *mut c_void, err: *mut c_char, err_cap: u32) -> c_int;
     pub fn kvspaceDelTree(
@@ -92,27 +89,13 @@ unsafe extern "C" {
         out: *mut *mut u8,
         out_len: *mut u32,
     ) -> c_int;
-    /// 就地写：key 已存在、body_len==原 body_len → 返回原 box body 偏移指针；否则非 0。
-    pub fn kvspaceWriteInPlace(
+    pub fn kvspaceSetValue(
         h: *mut c_void,
         key: *const c_char,
-        resolve: c_int,
-        body_len: u32,
-        body: *mut *mut u8,
-        err: *mut c_char,
-        err_cap: u32,
-    ) -> c_int;
-    /// 新位置写：按 (ref, storetype, ro, vid, langtype, body_len) 分配新 box、写 head，返回 body 偏移指针。
-    pub fn kvspaceWriteNewPlace(
-        h: *mut c_void,
-        key: *const c_char,
-        r#ref: u8,
-        storetype: u8,
+        value: *const u8,
+        value_len: u32,
         ro: u8,
         vid: u32,
-        langtype: *const c_char,
-        body_len: u32,
-        body: *mut *mut u8,
         err: *mut c_char,
         err_cap: u32,
     ) -> c_int;
@@ -141,6 +124,18 @@ unsafe extern "C" {
         raw_len: u32,
         dims: *const i32,
         ndim: i32,
+        out: *mut *mut u8,
+        out_len: *mut u32,
+    ) -> c_int;
+    pub fn kvspaceTlvEncodeMode(
+        kind: *const c_char,
+        raw: *const u8,
+        raw_len: u32,
+        dims: *const i32,
+        ndim: i32,
+        r#ref: i32,
+        ro: u8,
+        vid: u32,
         out: *mut *mut u8,
         out_len: *mut u32,
     ) -> c_int;
