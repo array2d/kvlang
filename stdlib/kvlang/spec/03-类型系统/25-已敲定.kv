@@ -8,7 +8,9 @@ lib kvlang/spec/类型系统/已敲定 {
 - `ro`/`vid` 存于独立 KV key `/.kvspace-meta/` 加原 key 字节的小写十六进制编码，不占 XValue head。
 - map/struct 的 base key 存 class 0 空 body，成员直接在 `base·member`；函数和 lib 使用 `/` 目录。成员由物理 key 前缀枚举，无 index/extindex 矩阵或 memindex body。
 - rwfunc 目录值为 class 0、body 空；`[0,0]` 锚点为 class 1、a=5、b≥5。def rwir 路由头为 class 0、5 字节。调用槽由 layout 判定为 rwir 或 rwfunc，均使用 class 1，body 为计数头加目标名。
-- 字符串与 byte 数组使用 class 1；UTF-8 的 a 是字节数，langtype 的形状记录码点数，解码同时校验。定宽张量使用 class 2。
+- 字符串（`[n]char/utf8` 等）使用 class 1；UTF-8 的 a 是字节数，langtype 的形状记录码点数，解码同时校验。
+- 语言层面的 `[]uint8` / `[N]uint8`（`ndim ≥ 1`）是定长张量，使用 class 2。
+- ro/vid sidecar 的 `[5]uint8` 是带长度冗余的定长字节序列，走 class 1（与字符串同族）。
 - 指针 class 1 的 body 是目标 KV 路径；@ext class 3 的 body 是扩展定位串，langtype 为实际目标类型。
 - runtime 每次从 kvspace 读取变量和 PC，完成指令后写回；进程内不保留其私有状态副本。
 "#### -> /lib/kvlang/spec/类型系统/已敲定
