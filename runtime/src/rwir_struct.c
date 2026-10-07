@@ -14,10 +14,8 @@ static char *struct_field_type(kvlangKv_t *kv, const char *base,
         kvlangXvalueFree(&value);
         return NULL;
     }
-    kvspaceHead_t head;
-    kvlangXvalueHead(&value, &head);
-    int32_t len = 0;
-    const uint8_t *body = kvlangXvalueBody(&value, &head, &len);
+    const uint8_t *body = xh_body_of(&value);
+    int32_t len = xh_content_len_of(&value);
     char *type = strndup((const char *)body, (size_t)len);
     kvlangXvalueFree(&value);
     return type;
@@ -74,10 +72,9 @@ int kvlangBuiltinStructNew(kvlangFrame_t *f) {
                 break;
             }
             const char *vk = kvlangXvalueKind(&in[i + 1]);
-            kvspaceHead_t vh;
-            kvlangXvalueHead(&in[i + 1], &vh);
             kvlangLangtype vkx;
-            kvlangLangtypeParse(vh.langtype, &vkx);
+            kvlangLangtypeParse(xh_langtype_of(&in[i + 1]),
+                                (int32_t)xh_langtype_len_of(&in[i + 1]), &vkx);
             // *T 指针字段：字段类型剥离前导 * 后与值的 langtype 比对，并校验值 ref=1；
             // None 是合法空指针（见 [[ptr]]），不算类型不符。
             const char *fx = (ftype[0] == '*') ? ftype + 1 : ftype;
@@ -85,7 +82,7 @@ int kvlangBuiltinStructNew(kvlangFrame_t *f) {
                                ? kvlangLangtypeMatch(fx, vk, vkx.ndim, vkx.dims)
                                : true;
             if (ftype[0] == '*' && !kvlangXvalueNone(&in[i + 1]) &&
-                vh.ref != KVSPACE_REF_PTR)
+                !xh_is_ptr(in[i + 1].data))
                 type_ok = false;
             if (ftype[0] && !type_ok) {
                 rc = kvlangBuiltinSetErr(

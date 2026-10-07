@@ -37,49 +37,51 @@ void kvlangXvalueMaterialize(kvlangXvalue_t *v) {
     v->borrowed = 0;
 }
 
-/* 解析 langtype 内容 → (dims, base kind)。langtype 为 NUL 终止串、无前缀（ref 归 head.ref）。
- * **map langtype 无形状段**：`{keylt}·{valt}` 里 `·` 之前的方括号是键类型（`[int64]`、
- * `[float64,float64]`），不是维度——与 `[2]float64`（数组形状）截然不同，故整串即 base kind。 */
-void kvlangLangtypeParse(const uint8_t *kx, kvlangLangtype *out) {
+/* 有界查找 MEMBER_SEP（多字节）；无则 -1。 */
+static int32_t find_member_sep(const uint8_t *p, int32_t n) {
+    for (int32_t i = 0; i + MEMBER_SEP_LEN <= n; i++)
+        if (memcmp(p + i, MEMBER_SEP, MEMBER_SEP_LEN) == 0)
+            return i;
+    return -1;
+}
+
+/* 解析 langtype 内容 → (dims, base kind)。langtype 为「指针 + 长度」、无前缀（ref 归 head.ref）；
+ * 区内无 NUL 保证，禁止按 C 串读。**map langtype 无形状段**：`{keylt}·{valt}` 里 `·` 之前的
+ * 方括号是键类型（`[int64]`、`[float64,float64]`），不是维度——与 `[2]float64`（数组形状）
+ * 截然不同，故整串即 base kind。 */
+void kvlangLangtypeParse(const uint8_t *kx, int32_t klen, kvlangLangtype *out) {
     memset(out, 0, sizeof(*out));
     if (!kx)
         return;
+    if (klen < 0)
+        klen = 0;
     int32_t i = 0;
-    if (strstr((const char *)kx, MEMBER_SEP) != NULL) {
+    if (find_member_sep(kx, klen) >= 0) {
         out->kind = (const char *)kx;
-        out->kind_len = (int32_t)strlen((const char *)kx);
+        out->kind_len = klen;
         out->array_len = 1;
         return;
     }
-    if (kx[i] == '[') {
-        i++;
-        while (kx[i] != ']' && kx[i] != 0 && out->ndim < X_MAX_NDIM) {
+    if (klen > 0 && kx[0] == '[') {
+        i = 1;
+        while (i < klen && kx[i] != ']' && out->ndim < X_MAX_NDIM) {
             int32_t d = 0;
-            while (kx[i] >= '0' && kx[i] <= '9') {
+            while (i < klen && kx[i] >= '0' && kx[i] <= '9') {
                 d = d * 10 + (kx[i] - '0');
                 i++;
             }
             out->dims[out->ndim++] = d;
-            if (kx[i] == ',')
+            if (i < klen && kx[i] == ',')
                 i++;
         }
-        if (kx[i] == ']')
+        if (i < klen && kx[i] == ']')
             i++;
     }
     out->kind = (const char *)(kx + i);
-    out->kind_len = (int32_t)strlen((const char *)(kx + i));
+    out->kind_len = klen - i;
     out->array_len = 1;
     for (int d = 0; d < out->ndim; d++)
         out->array_len *= out->dims[d];
-}
-
-/* Decode through the shared KVSpace ABI. */
-static int kvlangXvalueDecodeHeadRaw(const uint8_t *d, uint32_t len,
-                                     kvspaceHead_t *h) {
-    memset(h, 0, sizeof(*h));
-    if (!d || len == 0)
-        return -1;
-    return kvspaceDecodeHead(d, len, h) == 0 && h->langtype[0] ? 0 : -1;
 }
 
 /* array_len → dims：char/* 恒一维（含空串/单字符）；其余标量(≤1)=0 维、多元素=1 维。 */
@@ -122,11 +124,38 @@ static uint8_t *kvlangXvalueEncodeTlv(const char *kind, const uint8_t *raw,
     return kvlangXvalueOwn(tmp, tl, out_len);
 }
 
-int kvlangXvalueHead(const kvlangXvalue_t *v, kvspaceHead_t *h) {
+/* head 视图：原位取偏移与 langtype（不建 328B head、不校验）。
+ * 仅供按 head 取值的使用方（测试/外部）；热路径直接走 xh_* 访问器。 */
+static void xh_fill_head(const uint8_t *d, kvspaceHead_t *h) {
     memset(h, 0, sizeof(*h));
+    uint32_t headlen = xh_headlen(d);
+    h->headlen = (uint16_t)headlen;
+    h->ref = xh_is_ptr(d)                   ? KVSPACE_REF_PTR
+             : (d[1] & 3u) == 3u            ? KVSPACE_REF_EXT
+                                            : KVSPACE_REF_INLINE;
+    h->storetype = xh_class(d);
+    h->body_len = xh_content_len(d);
+    h->body_cap = (uint64_t)h->body_len;
+    h->body_offset = (int32_t)headlen;
+    const uint8_t *lt = xh_langtype(d);
+    uint32_t ltlen = xh_langtype_len(d);
+    if (ltlen > sizeof(h->langtype) - 1)
+        ltlen = (uint32_t)sizeof(h->langtype) - 1;
+    memcpy(h->langtype, lt, (size_t)ltlen);
+    h->langtype[ltlen] = 0;
+    h->langtype_len = (int32_t)ltlen;
+    kvlangLangtype kx;
+    kvlangLangtypeParse(lt, (int32_t)xh_langtype_len(d), &kx);
+    h->ndim = kx.ndim;
+    for (int i = 0; i < kx.ndim && i < X_MAX_NDIM; i++)
+        h->dims[i] = kx.dims[i];
+}
+
+int kvlangXvalueHead(const kvlangXvalue_t *v, kvspaceHead_t *h) {
     if (kvlangXvalueNone(v))
         return -1;
-    return kvlangXvalueDecodeHeadRaw(v->data, v->len, h);
+    xh_fill_head(v->data, h);
+    return 0;
 }
 
 const char *kvlangXvalueKind(const kvlangXvalue_t *v) {
@@ -138,13 +167,9 @@ const char *kvlangXvalueKind(const kvlangXvalue_t *v) {
         b[0] = 0;
         return b;
     }
-    kvspaceHead_t h;
-    if (kvlangXvalueHead(v, &h) < 0) {
-        b[0] = 0;
-        return b;
-    }
     kvlangLangtype kx;
-    kvlangLangtypeParse(h.langtype, &kx);
+    kvlangLangtypeParse(xh_langtype(v->data),
+                        (int32_t)xh_langtype_len(v->data), &kx);
     int32_t kl = kx.kind_len;
     if (kl > 64)
         kl = 64;
@@ -156,11 +181,9 @@ const char *kvlangXvalueKind(const kvlangXvalue_t *v) {
 bool kvlangXvalueKindIs(const kvlangXvalue_t *v, const char *kind) {
     if (kvlangXvalueNone(v))
         return kind[0] == 0;
-    kvspaceHead_t h;
-    if (kvlangXvalueHead(v, &h) < 0)
-        return false;
     kvlangLangtype kx;
-    kvlangLangtypeParse(h.langtype, &kx);
+    kvlangLangtypeParse(xh_langtype(v->data),
+                        (int32_t)xh_langtype_len(v->data), &kx);
     return (size_t)kx.kind_len == strlen(kind) &&
            memcmp(kx.kind, kind, (size_t)kx.kind_len) == 0;
 }
@@ -170,11 +193,9 @@ int kvlangXvalueLangtype(const kvlangXvalue_t *v, char *buf, size_t cap) {
     buf[0] = 0;
     if (cap == 0 || kvlangXvalueNone(v))
         return -1;
-    kvspaceHead_t h;
-    if (kvlangXvalueHead(v, &h) < 0)
-        return -1;
     kvlangLangtype kx;
-    kvlangLangtypeParse(h.langtype, &kx);
+    kvlangLangtypeParse(xh_langtype(v->data),
+                        (int32_t)xh_langtype_len(v->data), &kx);
     size_t n = (size_t)kx.kind_len;
     if (n >= cap)
         n = cap - 1;
@@ -185,15 +206,19 @@ int kvlangXvalueLangtype(const kvlangXvalue_t *v, char *buf, size_t cap) {
 
 static char *strndup2(const uint8_t *p, int32_t n);
 
+/* 有界拷出完整 langtype（malloc，调用方 free）。None → ""。 */
+char *kvlangXvalueLangtypeDup(const kvlangXvalue_t *v) {
+    if (kvlangXvalueNone(v))
+        return strdup("");
+    return strndup2(xh_langtype(v->data), (int32_t)xh_langtype_len(v->data));
+}
+
 /* Code slots store a five-byte prefix before the target name. */
 char *kvlangXvalueSlotName(const kvlangXvalue_t *v) {
     const char *k = kvlangXvalueKind(v);
     if (strcmp(k, KVSPACE_KIND_RWIR) == 0 || strcmp(k, KVSPACE_KIND_RWFUNC) == 0) {
-        kvspaceHead_t h;
-        if (kvlangXvalueHead(v, &h) < 0)
-            return strdup("");
-        int32_t blen = h.body_len;
-        const uint8_t *body = v->data + h.body_offset;
+        const uint8_t *body = xh_body(v->data);
+        int32_t blen = xh_content_len(v->data);
         return strndup2(body + (blen >= 5 ? 5 : 0), blen >= 5 ? blen - 5 : 0);
     }
     return kvlangXvalueValueString(v);
@@ -208,19 +233,15 @@ bool kvlangKindIsMap(const char *kind) {
 bool kvlangXvalueIsPtr(const kvlangXvalue_t *v) {
     if (kvlangXvalueNone(v))
         return false;
-    kvspaceHead_t h;
-    if (kvlangXvalueHead(v, &h) < 0)
-        return false;
-    return h.ref == KVSPACE_REF_PTR;
+    return xh_is_ptr(v->data);
 }
 
 int32_t kvlangXvalueArrayLen(const kvlangXvalue_t *v) {
     if (kvlangXvalueNone(v))
         return 0;
-    kvspaceHead_t h;
-    kvlangXvalueDecodeHeadRaw(v->data, v->len, &h);
     kvlangLangtype kx;
-    kvlangLangtypeParse(h.langtype, &kx);
+    kvlangLangtypeParse(xh_langtype(v->data),
+                        (int32_t)xh_langtype_len(v->data), &kx);
     return kx.array_len;
 }
 
@@ -258,26 +279,17 @@ int32_t kvlangXvalueElemSize(const char *kind) {
     return kvlangLtElemSize(kvlangLangTypeId(kind, strlen(kind)));
 }
 
-static const uint8_t *v_body(const kvlangXvalue_t *v, kvspaceHead_t *h) {
-    if (kvlangXvalueDecodeHeadRaw(v->data, v->len, h) < 0)
-        return NULL;
-    return v->data + h->body_offset;
-}
-
-/* 0copy 标量视图：decode head 一次，返回 langtype id + 指向 body 首字节的借用指针。 */
+/* 0copy 标量视图：原位取 langtype id + 指向 body 首字节的借用指针。 */
 kvlangScalar_t kvlangXvalueScalar(const kvlangXvalue_t *v) {
     kvlangScalar_t s = {KVLANG_LT_NONE, NULL, 0};
     if (kvlangXvalueNone(v))
         return s;
-    kvspaceHead_t h;
-    const uint8_t *b = v_body(v, &h);
-    if (!b)
-        return s;
     kvlangLangtype kx;
-    kvlangLangtypeParse(h.langtype, &kx);
+    kvlangLangtypeParse(xh_langtype(v->data),
+                        (int32_t)xh_langtype_len(v->data), &kx);
     s.id = kvlangLangTypeId(kx.kind, (size_t)kx.kind_len);
-    s.body = b;
-    s.len = h.body_len;
+    s.body = xh_body(v->data);
+    s.len = xh_content_len(v->data);
     return s;
 }
 
@@ -360,15 +372,14 @@ uint64_t kvlangScalarReadU64(int id, const uint8_t *b) {
 }
 
 uint32_t kvlangXvalueChar32At(const kvlangXvalue_t *v, int32_t idx) {
-    kvspaceHead_t h;
-    const uint8_t *b = v_body(v, &h);
-    if (!b)
+    if (kvlangXvalueNone(v))
         return 0;
     kvlangLangtype kx;
-    kvlangLangtypeParse(h.langtype, &kx);
+    kvlangLangtypeParse(xh_langtype(v->data),
+                        (int32_t)xh_langtype_len(v->data), &kx);
     if (idx < 0 || idx >= kx.array_len)
         return 0;
-    return rd32(b + idx * 4);
+    return rd32(xh_body(v->data) + idx * 4);
 }
 
 /* ── UTF-8 ↔ UTF-32 ────────────────────────────────────────────────── */
@@ -436,11 +447,9 @@ static char *strndup2(const uint8_t *p, int32_t n) {
 }
 
 char *kvlangXvaluePtrTarget(const kvlangXvalue_t *v) {
-    kvspaceHead_t h;
-    const uint8_t *b = v_body(v, &h);
-    if (!b)
+    if (kvlangXvalueNone(v))
         return strdup("");
-    return strndup2(b, h.body_len);
+    return strndup2(xh_body(v->data), xh_content_len(v->data));
 }
 
 /* ── value_string（对齐 Go ValueString）────────────────────────────── */
@@ -455,14 +464,11 @@ static void append_num_uint(kvlangStrbuf_t *b, uint64_t n) {
 char *kvlangXvalueValueString(const kvlangXvalue_t *v) {
     if (kvlangXvalueNone(v))
         return strdup(KVSPACE_KIND_NONE);
-    kvspaceHead_t h;
-    const uint8_t *body = v_body(v, &h);
-    if (!body)
-        return strdup(KVSPACE_KIND_NONE);
-    int32_t blen = h.body_len;
+    const uint8_t *body = xh_body(v->data);
+    int32_t blen = xh_content_len(v->data);
     const char *k = kvlangXvalueKind(v);
 
-    if (h.ref == KVSPACE_REF_PTR) {
+    if (xh_is_ptr(v->data)) {
         kvlangStrbuf_t b;
         kvlangStrbufInit(&b);
         kvlangStrbufPutn(&b, "\xE2\x86\x92", 3);

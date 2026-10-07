@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import itertools
 import os
 import re
 import shutil
@@ -27,6 +28,48 @@ BENCH_CSV = (ROOT / "tutorial" / "benchmark.csv").resolve()
 MODULE = sys.modules[__name__]
 
 _KV_ENV = {**os.environ, "KVSPACE": os.environ.get("KVSPACE", "goheap://")}
+
+# shm/fs 后端每用例一个独立文件，见 _case_dsn。
+_BACKEND_TMP = None
+_CASE_SEQ = itertools.count()
+_LAST_BACKEND = None
+
+
+def _drop_backend(dsn: str) -> None:
+    """删掉某个后端 DSN 对应的私有文件（只用于本进程自己造的那些）。"""
+    path = dsn.split("://", 1)[1]
+    if dsn.startswith("shm://"):
+        for suf in ("", ".sbo.data", ".sbo.head"):
+            try:
+                os.unlink(path + suf)
+            except OSError:
+                pass
+    else:
+        shutil.rmtree(path, ignore_errors=True)
+
+
+def _case_dsn() -> str:
+    """每个用例一个独立的后端文件。
+
+    原实现是在共享路径上 unlink/rmtree 清空。若此时仍有残留进程 mmap 着该文件
+    （上一用例的 kvlanglayout 未完全退出、或并发的另一轮测试），内核要等映射
+    撤销、映射持有者又在等锁，进程会卡在不可中断等待（ps 的 U 态），kill -9
+    无效、只能重启。
+
+    改为各用例写自己的文件：进入新用例时清掉**上一个用例的**（它的进程此时
+    已退出，删它安全），既不碰别人的文件，磁盘也只驻留一份。
+    """
+    global _LAST_BACKEND
+    if _BACKEND_TMP is None:
+        return _C_DSN
+    if _LAST_BACKEND:
+        _drop_backend(_LAST_BACKEND)
+        _LAST_BACKEND = None
+    n = next(_CASE_SEQ)
+    dsn = (f"shm://{_BACKEND_TMP.name}/{n}.shm"
+           if _C_DSN.startswith("shm://") else f"fs://{_BACKEND_TMP.name}/{n}.fs")
+    _LAST_BACKEND = dsn
+    return dsn
 
 
 def discover(root: Path) -> list[Path]:
@@ -195,23 +238,17 @@ def run_benchmarks(files: list[Path], errorexit: bool = False) -> int:
 def _run_test_file(f: Path, expects: list[str], env: dict) -> tuple[bool, str]:
     """Rust layout → kvspace(dsn) → runtime（bin/kvlang，链 C ABI），检查输出。"""
     rel = str(f.relative_to(ROOT))
-    if _C_DSN.startswith("shm://"):
-        try:
-            os.unlink(_C_DSN[len("shm://"):])
-        except OSError:
-            pass
-    elif _C_DSN.startswith("fs://"):
-        shutil.rmtree(_C_DSN[len("fs://"):], ignore_errors=True)
-    else:
-        _flush_backend()
-    layout = subprocess.run([LAYOUT_BIN, rel, _C_DSN], capture_output=True, text=True,
+    dsn = _case_dsn()
+    if dsn == _C_DSN:
+        _flush_backend()  # 只有共享后端（redis 等）才需要显式清空
+    layout = subprocess.run([LAYOUT_BIN, rel, dsn], capture_output=True, text=True,
                             timeout=60, cwd=str(ROOT), env=env)
     if layout.returncode != 0:
         return False, f"layout failed: {layout.stderr.strip()[:100]}"
     entry = "test"  # 约定入口：每个 tutorial 顶层 rwfunc test()（pkg 空、裸名）
     try:
         crun = subprocess.run([TERM_BIN, entry], capture_output=True, text=True,
-                              timeout=int(os.environ.get("KV_CASE_TIMEOUT", "120")), cwd=str(ROOT), env={**env, "KVSPACE": _C_DSN})
+                              timeout=int(os.environ.get("KV_CASE_TIMEOUT", "120")), cwd=str(ROOT), env={**env, "KVSPACE": dsn})
     except subprocess.TimeoutExpired:
         return False, "timeout"
     if crun.returncode != 0:
@@ -223,7 +260,7 @@ def _run_test_file(f: Path, expects: list[str], env: dict) -> tuple[bool, str]:
 
 
 def main():
-    global _C_DSN
+    global _C_DSN, _BACKEND_TMP
     ap = argparse.ArgumentParser(description="tutorial test")
     ap.add_argument("--filter", default="", help="按路径子串过滤（如 11-string/01 / 08-leetcode/01）")
     ap.add_argument("--no-build", action="store_true", help="skip make build")
@@ -233,6 +270,8 @@ def main():
                     help="KVSPACE dsn（默认取环境变量 KVSPACE，未设时 redis://127.0.0.1:6379）")
     args = ap.parse_args()
     _C_DSN = args.kvspace
+    if _C_DSN.startswith(("shm://", "fs://")):
+        _BACKEND_TMP = tempfile.TemporaryDirectory(prefix="kvlang-tut-")
 
     files = [f for f in discover(ROOT / "tutorial")
              if args.filter in str(f)]

@@ -9,10 +9,8 @@ static void pack_typed_array(const char *kind, const kvlangXvalue_t *elems,
     for (int i = 0; i < n; i++) {
         const uint8_t *b;
         int32_t blen;
-        kvspaceHead_t h;
-        kvspaceDecodeHead(elems[i].data, elems[i].len, &h);
-        b = elems[i].data + h.body_offset;
-        blen = h.body_len;
+        b = xh_body_of(&elems[i]);
+        blen = xh_content_len_of(&elems[i]);
         int c = blen < sz ? blen : sz;
         memcpy(raw + i * sz, b, (size_t)c);
         for (int j = c; j < sz; j++)
@@ -203,7 +201,7 @@ int kvlangBuiltinArrayFill(kvlangFrame_t *f) {
     }
     char *ke = kvlangXvalueValueString(&in[0]);
     kvlangLangtype kx;
-    kvlangLangtypeParse((const uint8_t *)ke, &kx);
+    kvlangLangtypeParse((const uint8_t *)ke, (int32_t)strlen(ke), &kx);
     int sz = kvlangXvalueElemSize(kx.kind);
     if (sz <= 0 || sz > 8 || kx.ndim < 1 || kx.array_len < 0) {
         int rc = kvlangBuiltinSetErr(

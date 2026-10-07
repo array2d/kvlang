@@ -1,6 +1,45 @@
 #pragma once
 #include "runtime_internal.h"
 
+/* 读参 head 的原位视图：变量（GetHead）路径解出 head；字面量路径直接持 wire 指针。
+ * 不建 328B head、不校验——调用方按 langtype/body_offset/body_len/is_ptr 直取。 */
+typedef struct {
+    kvspaceHead_t head; /* 变量路径的数据源（其 langtype 为 langtype 宿主） */
+    const uint8_t *langtype;
+    int32_t langtype_len; /* langtype 字节数（不含 NUL），langtype 无 NUL 保证 */
+    int32_t body_offset;
+    int32_t body_len;
+    bool is_ptr;
+} xv_head_t;
+
+static inline void xv_head_from_head(xv_head_t *o) {
+    o->langtype = (const uint8_t *)o->head.langtype;
+    o->langtype_len = o->head.langtype_len;
+    o->body_offset = o->head.body_offset;
+    o->body_len = o->head.body_len;
+    o->is_ptr = o->head.ref == KVSPACE_REF_PTR;
+}
+/* 有界拷 head.langtype 成 NUL 终止串（langtype 本身无 NUL 保证）。 */
+static inline void xv_head_langtype_str(const xv_head_t *o, char *buf,
+                                        size_t cap) {
+    if (cap == 0)
+        return;
+    int32_t n = o->langtype_len;
+    if (n < 0)
+        n = 0;
+    if ((size_t)n > cap - 1)
+        n = (int32_t)(cap - 1);
+    memcpy(buf, o->langtype, (size_t)n);
+    buf[n] = 0;
+}
+static inline void xv_head_from_data(xv_head_t *o, const uint8_t *d) {
+    o->langtype = xh_langtype(d);
+    o->langtype_len = (int32_t)xh_langtype_len(d);
+    o->body_offset = (int32_t)xh_headlen(d);
+    o->body_len = xh_content_len(d);
+    o->is_ptr = xh_is_ptr(d);
+}
+
 /* ── 跨模块共享 helper ─────────────────────────────────────────────
    frame I/O 与 xvalue_at 定义在 rwir_func.c；容器 key/index helper 定义在 rwir_array.c / rwir_map.c。*/
 int kvlangBuiltinReadInputs(kvlangFrame_t *f, kvlangXvalue_t *out, int cap);
@@ -18,7 +57,7 @@ bool kvlangBuiltinCharConcat(const kvlangXvalue_t *a, const kvlangXvalue_t *b,
 
 /* ── 各 lib 的 rwir handler 原型（表在 rwir_func.c 引用）────────────── */
 /* 单读参 head（定义在 rwir_xvalue.c，rwir_ndarray.c 复用） */
-int xv_head1(kvlangFrame_t *f, kvspaceHead_t *h);
+int xv_head1(kvlangFrame_t *f, xv_head_t *h);
 /* 算术 / 位 / cast（rwir_int.c） */
 int cmp_int(kvlangScalar_t a, kvlangScalar_t b);
 int kvlangBuiltinAdd(kvlangFrame_t *f), kvlangBuiltinSub(kvlangFrame_t *f),

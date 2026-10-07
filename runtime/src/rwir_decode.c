@@ -54,18 +54,18 @@ void kvlangRwirInstFree(kvlangRwirInst_t *inst) {
 }
 
 static char *operand_type(const kvlangXvalue_t *v) {
-    kvspaceHead_t h;
-    if (kvlangXvalueHead(v, &h) != 0)
+    if (kvlangXvalueNone(v))
         return NULL;
     if (!kvlangXvalueKindIs(v, KVSPACE_KIND_RWIR) &&
         !kvlangXvalueKindIs(v, KVSPACE_KIND_RWFUNC))
-        return strdup((const char *)h.langtype);
-    int32_t len = 0;
-    const uint8_t *body = kvlangXvalueBody(v, &h, &len);
-    const uint8_t *end = body && len > 5 ?
-        memchr(body + 5, 0, (size_t)len - 5) : NULL;
-    return end && end + 1 < body + len ?
-        strndup((const char *)end + 1, (size_t)(body + len - end - 1)) : NULL;
+        return kvlangXvalueLangtypeDup(v);
+    const uint8_t *body = xh_body(v->data);
+    int32_t len = xh_content_len(v->data);
+    const uint8_t *end =
+        len > 5 ? memchr(body + 5, 0, (size_t)len - 5) : NULL;
+    return end && end + 1 < body + len
+               ? strndup((const char *)end + 1, (size_t)(body + len - end - 1))
+               : NULL;
 }
 
 static int materialize_operand(kvlangKv_t *kv, const char *link_base,
@@ -170,15 +170,14 @@ static int decode_operand(kvlangKv_t *kv, const char *link_base,
     }
     kvlangXvalueMaterialize(&v);
     out->name = kvlangXvaluePtrTarget(&v);
-    kvspaceHead_t h;
-    if (!out->name || kvlangXvalueHead(&v, &h) != 0) {
+    if (!out->name || kvlangXvalueNone(&v)) {
         snprintf(err, err_cap, "Decode: invalid pointer at %s", slot);
         kvlangXvalueFree(&v);
         free(out->name);
         out->name = NULL;
         return -1;
     }
-    out->type = strdup((const char *)h.langtype);
+    out->type = kvlangXvalueLangtypeDup(&v);
     out->address = 1;
     if (!out->type ||
         (read_target && kvlangKvGetOne(kv, out->name, &out->val) != 0)) {
@@ -221,10 +220,8 @@ int kvlangRwirDecode(kvlangKv_t *kv, const char *link_base, const char *pc,
         goto fail;
     }
     if (!kvlangXvalueNone(&v)) {
-        kvspaceHead_t h;
-        int32_t len = 0;
-        const uint8_t *body = kvlangXvalueHead(&v, &h) == 0 ?
-            kvlangXvalueBody(&v, &h, &len) : NULL;
+        const uint8_t *body = xh_body(v.data);
+        int32_t len = xh_content_len(v.data);
         if (!body || len < 5) {
             snprintf(err, err_cap, "Decode: invalid opcode at %s", pc);
             kvlangXvalueFree(&v);

@@ -76,6 +76,7 @@ extern "C" {
         out: *mut *mut u8,
         out_len: *mut u32,
     ) -> c_int;
+    #[allow(dead_code)] // 保留绑定（外部 ABI 用）；调用点已改为原位字节访问。
     fn kvspaceDecodeHead(data: *const u8, data_len: u32, out: *mut kvspaceHead_t) -> c_int;
 
     fn kvspaceNewChar(bytes: *const u8, len: u32, out: *mut *mut u8, out_len: *mut u32) -> c_int;
@@ -100,6 +101,87 @@ pub struct kvspaceHead_t {
     pub langtype_len: i32,
     pub body_offset: i32,
     pub body_cap: u64,
+}
+
+// ── 原位 head 访问（与 C 侧 xh_* 对齐：偏移直取，不建 328B head、不校验）──
+
+/// wire: [pow:u8][flags:u8][a:u64le][b:u64le][langtype][padding][body]。
+pub const XH_PREFIX: usize = 18;
+
+#[inline]
+fn xh_headlen(data: &[u8]) -> usize {
+    1usize << data[0]
+}
+#[inline]
+fn xh_class(data: &[u8]) -> u8 {
+    data[1] & 3
+}
+#[inline]
+pub fn xh_is_ptr(data: &[u8]) -> bool {
+    data[1] & 4 != 0
+}
+#[inline]
+pub fn xh_is_none(data: &[u8]) -> bool {
+    data.len() > XH_PREFIX && data[1] == 0 && data[XH_PREFIX] == 0
+}
+#[inline]
+fn xh_a(data: &[u8]) -> u64 {
+    u64::from_le_bytes(data[2..10].try_into().unwrap())
+}
+#[inline]
+fn xh_b(data: &[u8]) -> u64 {
+    u64::from_le_bytes(data[10..18].try_into().unwrap())
+}
+
+/// wire 内 langtype 串（headlen 内首个 NUL 前）。data 过短 → ""。
+pub fn xh_langtype(data: &[u8]) -> String {
+    if data.len() <= XH_PREFIX {
+        return String::new();
+    }
+    let hl = xh_headlen(data).min(data.len());
+    let end = data[XH_PREFIX..hl]
+        .iter()
+        .position(|&b| b == 0)
+        .map(|i| XH_PREFIX + i)
+        .unwrap_or(hl);
+    String::from_utf8_lossy(&data[XH_PREFIX..end]).into_owned()
+}
+
+/// class0 标量宽度（按 base kind 查表；def rwir 特例 5；其余 0）。
+fn scalar_width(kind: &str) -> usize {
+    match kind {
+        "bool" | "int8" | "uint8" => 1,
+        "int16" | "uint16" => 2,
+        "int32" | "uint32" | "float32" => 4,
+        "int64" | "uint64" | "float64" | "time" | "duration" => 8,
+        "def rwir" => 5,
+        _ => 0,
+    }
+}
+
+/// body 内容长度：class0 标量宽度 / class1 slack 与 class3 ext = a / class2 tensor = a*b。
+pub fn xh_content_len(data: &[u8]) -> usize {
+    if data.len() < XH_PREFIX {
+        return 0;
+    }
+    match xh_class(data) {
+        0 => scalar_width(&xh_langtype(data)),
+        2 => (xh_a(data) * xh_b(data)) as usize,
+        _ => xh_a(data) as usize,
+    }
+}
+
+/// body 切片（按 headlen 偏移 + class 推导长度）；越界 → 空。
+pub fn xh_body_slice(data: &[u8]) -> &[u8] {
+    if data.len() < XH_PREFIX {
+        return &[];
+    }
+    let off = xh_headlen(data);
+    let len = xh_content_len(data);
+    if off + len > data.len() {
+        return &[];
+    }
+    &data[off..off + len]
 }
 
 // ── 内部助手 ─────────────────────────────────────────────────────────
@@ -160,10 +242,7 @@ impl Kv {
         for (key, tlv) in pairs {
             let ck = CString::new(key.as_str()).expect("no NUL in key");
             let mut err: [c_char; 256] = [0; 256];
-            let mut head: kvspaceHead_t = unsafe { std::mem::zeroed() };
-            let is_none = tlv.is_empty()
-                || unsafe { kvspaceDecodeHead(tlv.as_ptr(), tlv.len() as u32, &mut head) == 0 }
-                    && head.langtype_len == 0;
+            let is_none = tlv.is_empty() || xh_is_none(tlv);
             let ret = if is_none {
                 let key_ptr = ck.as_ptr();
                 unsafe { kvspaceDel(self.h, &key_ptr, 1, err.as_mut_ptr(), err.len() as u32) }
@@ -283,7 +362,7 @@ pub fn tlv_encode(kind: &str, raw: &[u8], array_len: i32) -> Vec<u8> {
     })
 }
 
-/// 解码 XValueHead。
+/// 按 wire 字节原位填 head 视图（不调用 kvspaceDecodeHead、不校验）。
 pub fn decode_head(data: &[u8]) -> kvspaceHead_t {
     let mut h = kvspaceHead_t {
         headlen: 0,
@@ -299,9 +378,27 @@ pub fn decode_head(data: &[u8]) -> kvspaceHead_t {
         body_offset: 0,
         body_cap: 0,
     };
-    unsafe {
-        kvspaceDecodeHead(data.as_ptr(), data.len() as u32, &mut h);
+    if data.len() < XH_PREFIX {
+        return h;
     }
+    let hl = xh_headlen(data);
+    h.headlen = hl as u16;
+    h.r#ref = if xh_is_ptr(data) {
+        1
+    } else if xh_class(data) == 3 {
+        2
+    } else {
+        0
+    };
+    h.storetype = xh_class(data);
+    let bl = xh_content_len(data);
+    h.body_len = bl as i32;
+    h.body_offset = hl as i32;
+    h.body_cap = bl as u64;
+    let lt = xh_langtype(data);
+    let n = lt.len().min(255);
+    h.langtype[..n].copy_from_slice(&lt.as_bytes()[..n]);
+    h.langtype_len = n as i32;
     h
 }
 

@@ -105,10 +105,8 @@ static int check_read_types(kvlangKv_t *kv, const char *vtid, const char *pc,
         kvlangXvalueZero(&v);
         kvlangBuiltinResolveReadValue(kv, fr, args[i].name, &args[i].val, &v);
         const char *k = kvlangXvalueKind(&v);
-        kvspaceHead_t h;
-        kvlangXvalueHead(&v, &h);
         kvlangLangtype kx;
-        kvlangLangtypeParse(h.langtype, &kx);
+        kvlangLangtypeParse(xh_langtype_of(&v), (int32_t)xh_langtype_len_of(&v), &kx);
         bool ok = kvlangLangtypeMatch(exp, k, kx.ndim, kx.dims);
         char kbuf[40];
         snprintf(kbuf, sizeof kbuf, "%s", k[0] ? k : "None");
@@ -139,10 +137,8 @@ static char *read_sig_slot(kvlangKv_t *kv, const char *dir, int x) {
     kvlangStrbufFree(&sk);
     char *s = NULL;
     if (!kvlangXvalueNone(&v)) {
-        kvspaceHead_t h;
-        kvlangXvalueHead(&v, &h);
-        int32_t bl;
-        const uint8_t *b = kvlangXvalueBody(&v, &h, &bl);
+        const uint8_t *b = xh_body_of(&v);
+        int32_t bl = xh_content_len_of(&v);
         s = malloc((size_t)bl + 1);
         memcpy(s, b, (size_t)bl);
         s[bl] = 0;
@@ -179,10 +175,8 @@ static char *load_def_reads(kvlangKv_t *kv, const char *key, int *out_nr,
         kvlangXvalueFree(&v);
         return NULL;
     }
-    kvspaceHead_t h;
-    kvlangXvalueHead(&v, &h);
-    int32_t bl;
-    const uint8_t *b = kvlangXvalueBody(&v, &h, &bl);
+    const uint8_t *b = xh_body_of(&v);
+    int32_t bl = xh_content_len_of(&v);
     if (bl < 5) {
         kvlangXvalueFree(&v);
         return NULL;
@@ -410,9 +404,7 @@ static char *handle_call(kvlangKv_t *kv, const char *pc,
         kvlangVthreadSetError(kv, vtid, pc, msg);
         goto fail;
     }
-    kvspaceHead_t h;
-    kvspaceDecodeHead(sig.data, sig.len, &h);
-    const uint8_t *sbody = sig.data + h.body_offset;
+    const uint8_t *sbody = xh_body(sig.data);
     int nr = sbody[0] | (sbody[1] << 8);
     int nw = sbody[2] | (sbody[3] << 8);
     if (nr > MAX_PARAMS || nw > MAX_PARAMS) {
@@ -593,20 +585,17 @@ static void param_decl_type(kvlangKv_t *kv, const char *func_key, int x,
     kvlangKvGetOne(kv, pk.p, &dv);
     kvlangStrbufFree(&pk);
     if (!kvlangXvalueNone(&dv)) {
-        kvspaceHead_t ah;
-        if (kvlangXvalueHead(&dv, &ah) == 0) {
-            int32_t al;
-            const uint8_t *ab = kvlangXvalueBody(&dv, &ah, &al);
-            for (int bi = 0; ab && bi < al; bi++) {
-                if (ab[bi] != 0)
-                    continue;
-                int tl = al - (bi + 1);
-                if (tl > 0 && tl < (int)cap) {
-                    memcpy(lt, ab + bi + 1, (size_t)tl);
-                    lt[tl] = 0;
-                }
-                break;
+        const uint8_t *ab = xh_body_of(&dv);
+        int32_t al = xh_content_len_of(&dv);
+        for (int bi = 0; ab && bi < al; bi++) {
+            if (ab[bi] != 0)
+                continue;
+            int tl = al - (bi + 1);
+            if (tl > 0 && tl < (int)cap) {
+                memcpy(lt, ab + bi + 1, (size_t)tl);
+                lt[tl] = 0;
             }
+            break;
         }
     }
     kvlangXvalueFree(&dv);
@@ -793,9 +782,7 @@ char *kvlangKvcpuBootstrap(kvlangKv_t *kv, const char *vtid,
         free(name);
         return NULL;
     }
-    kvspaceHead_t h;
-    kvspaceDecodeHead(sig.data, sig.len, &h);
-    const uint8_t *sbody = sig.data + h.body_offset;
+    const uint8_t *sbody = xh_body(sig.data);
     int nr = sbody[0] | (sbody[1] << 8);
 
     char *frame_root = kvlangKeytreeFrameAt(vtid, 1);

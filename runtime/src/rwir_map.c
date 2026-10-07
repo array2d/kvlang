@@ -20,12 +20,10 @@ static char *declared_map_langtype(kvlangFrame_t *f, int w) {
     if (f->inst->writes[w].type &&
         strstr(f->inst->writes[w].type, MEMBER_SEP))
         return strdup(f->inst->writes[w].type);
-    kvspaceHead_t head;
-    if (kvlangXvalueHead(&f->inst->writes[w].val, &head) != 0)
+    if (kvlangXvalueNone(&f->inst->writes[w].val))
         abort();
-    int32_t len = 0;
-    const uint8_t *body = kvlangXvalueBody(&f->inst->writes[w].val,
-                                          &head, &len);
+    const uint8_t *body = xh_body(f->inst->writes[w].val.data);
+    int32_t len = xh_content_len(f->inst->writes[w].val.data);
     const uint8_t *split = len > 5 ? memchr(body + 5, 0, (size_t)len - 5) : NULL;
     char *type = split ? strndup((const char *)split + 1,
                                  (size_t)(body + len - split - 1)) : strdup("");

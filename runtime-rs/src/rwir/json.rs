@@ -106,22 +106,12 @@ fn read_arr(eng: &Engine, path: &str) -> Value {
 }
 
 fn parse_tlv(data: &[u8]) -> (String, Vec<u8>, usize) {
-    let mut h = KvspaceHead::default();
-    if data.is_empty()
-        || unsafe { kvspaceDecodeHead(data.as_ptr(), data.len() as u32, &mut h) } != 0
-    {
+    if data.is_empty() {
         return (String::new(), Vec::new(), 1);
     }
-    let kx = String::from_utf8_lossy(&h.langtype)
-        .trim_end_matches('\0')
-        .to_string();
+    let kx = xh_langtype(data);
     let (dims, kind) = parse_langtype(&kx);
-    let (bo, bl) = (h.body_offset as usize, h.body_len.max(0) as usize);
-    let raw = if bo + bl <= data.len() {
-        data[bo..bo + bl].to_vec()
-    } else {
-        Vec::new()
-    };
+    let raw = xh_body_slice(data).to_vec();
     let mut arr_len = 1usize;
     for d in &dims {
         arr_len *= (*d).max(1) as usize;
