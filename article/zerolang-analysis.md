@@ -167,7 +167,7 @@ kvlang 的 KV-path 天然 agent-friendly（GET 任何变量、SET 任何指令�
 
 **kvlang 是否有同类问题？** 有，但程度轻得多：
 
-kvlang 的类型系统是 `Value{kind string, raw []byte}` — kind 也是字符串。不同之处在于 kvlang 没有泛型、没有类型推断、没有 subtyping。类型冲突的场景少得多。但存在潜在风险：
+kvlang 的类型系统是 `Value{kind string, raw []uint8}` — kind 也是字符串。不同之处在于 kvlang 没有泛型、没有类型推断、没有 subtyping。类型冲突的场景少得多。但存在潜在风险：
 
 - `Value{kind: "int", raw: ...}` — 如果 kind 字符串拼错，不会编译报错，只会运行时返回零值
 - 类型检查全在访问器层（`v.Int()` 里检查 `v.kind != "int"`），分散而非集中
