@@ -42,6 +42,19 @@ char *kvlangKeytreeFrameRoot(const char *pc) {
     return r;
 }
 
+/* 栈缓冲版：帧根（末个 "/[" 之前）拷进 buf 并 NUL 终止，返回长度（不含 NUL）。
+ * 无 "/[" 或 cap 不足返回 0（buf 内容不可用），调用方回退 kvlangKeytreeFrameRoot。 */
+size_t kvlangKeytreeFrameRootBuf(const char *pc, char *buf, size_t cap) {
+    const char *last = NULL;
+    for (const char *p = pc; (p = strstr(p, "/[")) != NULL; p += 2) last = p;
+    if (!last) return 0;
+    size_t n = (size_t)(last - pc);
+    if (n + 1 > cap || n == 0) return 0;
+    memcpy(buf, pc, n);
+    buf[n] = 0;
+    return n;
+}
+
 static char *trim_right_join(const char *root, const char *suffix) {
     size_t n = strlen(root);
     while (n > 0 && root[n - 1] == '/') n--;
