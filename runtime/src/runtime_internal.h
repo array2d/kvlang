@@ -142,21 +142,53 @@ static inline void kvlangStrbufFree(kvlangStrbuf_t *b) {
     b->len = b->cap = 0;
 }
 
+/* ── xvalue head 零解码访问 ──────────────────────────────────────────
+ * wire: [pow:u8][flags:u8][a:u64le][b:u64le][langtype][padding][body]
+ * headlen = 1 << pow；body 起于 headlen；langtype 起于 18。
+ * 不建 328B head 结构体、不拷贝 langtype、不校验——全部原位取。 */
+
+#define XH_PREFIX 18u
+
+static inline uint32_t xh_rd32(const uint8_t *p) {
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) |
+           ((uint32_t)p[3] << 24);
+}
+static inline uint64_t xh_rd64(const uint8_t *p) {
+    return (uint64_t)xh_rd32(p) | ((uint64_t)xh_rd32(p + 4) << 32);
+}
+
+static inline uint32_t xh_headlen(const uint8_t *d) { return 1u << d[0]; }
+static inline const uint8_t *xh_body(const uint8_t *d) {
+    return d + (1u << d[0]);
+}
+static inline const char *xh_langtype(const uint8_t *d) {
+    return (const char *)(d + XH_PREFIX);
+}
+static inline uint8_t xh_class(const uint8_t *d) { return d[1] & 3u; }
+static inline bool xh_is_ptr(const uint8_t *d) { return (d[1] & 4u) != 0; }
+static inline bool xh_is_none(const uint8_t *d) {
+    return d[1] == 0u && d[XH_PREFIX] == 0u;
+}
+static inline uint64_t xh_a(const uint8_t *d) { return xh_rd64(d + 2); }
+static inline uint64_t xh_b(const uint8_t *d) { return xh_rd64(d + 10); }
+
 /* ── XValue 操作 ───────────────────────────────────────────────────── */
 
 static inline bool kvlangXvalueNone(const kvlangXvalue_t *v) {
     if (!v->data || v->len == 0)
         return true;
-    if (v->len != 32 || v->data[0] != 5 || v->data[1] != 0 ||
-        v->data[18] != 0)
-        return false;
-    kvspaceHead_t h;
-    return kvspaceDecodeHead(v->data, v->len, &h) == 0 && h.langtype_len == 0;
+    /* flags 无 class/ptr 位 且 langtype 首字节为 0 ⇒ langtype 长度 0 ⇒ None。 */
+    return xh_is_none(v->data);
 }
 static inline void kvlangXvalueZero(kvlangXvalue_t *v) {
     v->data = NULL;
     v->len = 0;
     v->borrowed = 0;
+}
+
+/* langtype 原位指针；None（data 空）返回 ""。 */
+static inline const char *xh_langtype_of(const kvlangXvalue_t *v) {
+    return kvlangXvalueNone(v) ? "" : xh_langtype(v->data);
 }
 void kvlangXvalueFree(
     kvlangXvalue_t *v); /* free 自持 data（借用读已拷贝为自持） */
@@ -286,6 +318,27 @@ static inline uint64_t kvlangScalarU64(kvlangScalar_t s) {
 }
 uint32_t kvlangXvalueChar32At(const kvlangXvalue_t *v, int32_t idx);
 int32_t kvlangXvalueElemSize(const char *kind);
+
+/* body 内容长度：按 storage class 原位推导（不读 head.body_len、不校验）。
+ *   class0 短定长 → 标量宽度（def rwir 特例 5）；class1 slack / class3 ext → a；class2 tensor → a*b。 */
+static inline int32_t xh_content_len(const uint8_t *d) {
+    uint8_t cls = d[1] & 3u;
+    if (cls == 0u) {
+        const char *lt = xh_langtype(d);
+        if (strcmp(lt, "def rwir") == 0)
+            return 5;
+        return kvlangXvalueElemSize(lt);
+    }
+    if (cls == 2u)
+        return (int32_t)(xh_a(d) * xh_b(d));
+    return (int32_t)xh_a(d);
+}
+static inline const uint8_t *xh_body_of(const kvlangXvalue_t *v) {
+    return kvlangXvalueNone(v) ? NULL : xh_body(v->data);
+}
+static inline int32_t xh_content_len_of(const kvlangXvalue_t *v) {
+    return kvlangXvalueNone(v) ? 0 : xh_content_len(v->data);
+}
 
 void kvlangXvalueNewInt64(kvlangXvalue_t *v, int64_t n);
 void kvlangXvalueNewFloat64(kvlangXvalue_t *v, double f);

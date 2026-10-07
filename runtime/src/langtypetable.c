@@ -56,10 +56,7 @@ const char *kvlangLangTypeKind(int id) {
 int kvlangXvalueLangTypeId(const kvlangXvalue_t *v) {
     if (kvlangXvalueNone(v))
         return KVLANG_LT_NONE;
-    kvspaceHead_t h;
-    if (kvlangXvalueHead(v, &h) < 0)
-        return KVLANG_LT_NONE;
     kvlangLangtype kx;
-    kvlangLangtypeParse(h.langtype, &kx);
+    kvlangLangtypeParse((const uint8_t *)xh_langtype(v->data), &kx);
     return kvlangLangTypeId(kx.kind, (size_t)kx.kind_len);
 }

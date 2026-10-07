@@ -9,10 +9,8 @@ static void pack_typed_array(const char *kind, const kvlangXvalue_t *elems,
     for (int i = 0; i < n; i++) {
         const uint8_t *b;
         int32_t blen;
-        kvspaceHead_t h;
-        kvspaceDecodeHead(elems[i].data, elems[i].len, &h);
-        b = elems[i].data + h.body_offset;
-        blen = h.body_len;
+        b = xh_body_of(&elems[i]);
+        blen = xh_content_len_of(&elems[i]);
         int c = blen < sz ? blen : sz;
         memcpy(raw + i * sz, b, (size_t)c);
         for (int j = c; j < sz; j++)

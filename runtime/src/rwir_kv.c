@@ -84,9 +84,7 @@ static bool base_is_container(const kvlangXvalue_t *base) {
 /* 非容器 base 的统一报错（返回 NULL 供调用方判定失败）：带上实际 langtype 便于定位。 */
 static char *member_not_container(const kvlangXvalue_t *v, char *err,
                                   size_t errsz) {
-    kvspaceHead_t h;
-    const char *lt =
-        kvlangXvalueHead(v, &h) == 0 ? (const char *)h.langtype : "";
+    const char *lt = xh_langtype_of(v);
     snprintf(err, errsz,
              "member access requires a container (struct/map), got %s; "
              "compact arrays use [] indexing",
@@ -311,13 +309,11 @@ int kvlangCAbs(kvlangFrame_t *f) {
     kvlangKvGetOne(f->kv, p, &tg);
     char lt[256] = {0};
     if (!kvlangXvalueNone(&tg)) {
-        kvspaceHead_t h;
-        if (kvlangXvalueHead(&tg, &h) == 0 && h.langtype[0]) {
-            size_t llen = strlen((const char *)h.langtype);
-            if (llen > sizeof lt - 1)
-                llen = sizeof lt - 1;
-            memcpy(lt, h.langtype, llen);
-        }
+        const char *tlt = xh_langtype(tg.data);
+        size_t llen = strlen(tlt);
+        if (llen > sizeof lt - 1)
+            llen = sizeof lt - 1;
+        memcpy(lt, tlt, llen);
     }
     kvlangXvalue_t r;
     kvlangXvalueNewPtr(&r, lt, p);

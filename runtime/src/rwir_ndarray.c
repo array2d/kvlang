@@ -3,9 +3,9 @@
 /* ndarray 形状算子只认带形状段的 langtype。map 容器（langtype=`{keylt}·{valt}`）无形状段——
  * 成员数在 memindex（`p·`）而非容器值，用 ndarray·numel 取是范畴错误，直接报错逼用 kvspace·listlen。 */
 static int ndarray_shape_guard(kvlangFrame_t *f, const char *op,
-                               const kvspaceHead_t *h) {
+                               const xv_head_t *h) {
     kvlangLangtype kx;
-    kvlangLangtypeParse(h->langtype, &kx);
+    kvlangLangtypeParse((const uint8_t *)h->langtype, &kx);
     if (kx.ndim > 0)
         return 0;
     if (kvlangKindIsMap(kx.kind))
@@ -17,11 +17,11 @@ static int ndarray_shape_guard(kvlangFrame_t *f, const char *op,
 }
 
 int kvlangBuiltinNdarrayNumel(kvlangFrame_t *f) {
-    kvspaceHead_t h;
+    xv_head_t h;
     int64_t n_el = 0;
     if (xv_head1(f, &h) == 0) {
         kvlangLangtype kx;
-        kvlangLangtypeParse(h.langtype, &kx);
+        kvlangLangtypeParse((const uint8_t *)h.langtype, &kx);
         if (kvlangKindIsMap(kx.kind)) {
             char *fr = kvlangKeytreeFrameRoot(f->pc);
             char *base = kvlangBuiltinResolveWriteSlot(f->kv, fr,
@@ -49,14 +49,14 @@ int kvlangBuiltinNdarrayNumel(kvlangFrame_t *f) {
 }
 
 int kvlangBuiltinNdarrayDim(kvlangFrame_t *f) {
-    kvspaceHead_t h;
+    xv_head_t h;
     int64_t ndim = 0;
     if (xv_head1(f, &h) == 0) {
         int g = ndarray_shape_guard(f, "ndarray·dim", &h);
         if (g)
             return g;
         kvlangLangtype kx;
-        kvlangLangtypeParse(h.langtype, &kx);
+        kvlangLangtypeParse((const uint8_t *)h.langtype, &kx);
         ndim = kx.ndim;
     }
     kvlangXvalue_t r;
@@ -69,13 +69,13 @@ int kvlangBuiltinNdarrayDim(kvlangFrame_t *f) {
 int kvlangBuiltinNdarrayShape(kvlangFrame_t *f) {
     int32_t dims[8];
     int32_t ndim = 0;
-    kvspaceHead_t h;
+    xv_head_t h;
     if (xv_head1(f, &h) == 0) {
         int g = ndarray_shape_guard(f, "ndarray·shape", &h);
         if (g)
             return g;
         kvlangLangtype kx;
-        kvlangLangtypeParse(h.langtype, &kx);
+        kvlangLangtypeParse((const uint8_t *)h.langtype, &kx);
         ndim = kx.ndim;
         for (int i = 0; i < ndim && i < 8; i++)
             dims[i] = kx.dims[i];

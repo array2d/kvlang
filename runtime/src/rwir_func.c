@@ -141,8 +141,7 @@ void kvlangBuiltinXvalueAt(const kvlangXvalue_t *v, int i, kvlangXvalue_t *out) 
     const char *k = kvlangXvalueKind(v);
     int sz = kvlangXvalueElemSize(k);
     if (sz <= 0) return;
-    kvspaceHead_t h; kvspaceDecodeHead(v->data, v->len, &h);
-    const uint8_t *body = v->data + h.body_offset;
+    const uint8_t *body = xh_body_of(v);
     kvlangXvalueNewTlv(out, k, body + i * sz, (uint32_t)sz, 1);
 }
 

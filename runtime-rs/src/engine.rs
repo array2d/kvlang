@@ -35,22 +35,18 @@ impl Engine {
             if out.is_null() || olen == 0 {
                 return String::new();
             }
-            let mut head = KvspaceHead::default();
-            kvspaceDecodeHead(out, olen, &mut head);
-            let kx = String::from_utf8_lossy(&head.langtype)
-                .trim_end_matches('\0')
-                .to_string();
-            let (bo, bl) = (head.body_offset as usize, head.body_len.max(0) as usize);
+            let d = std::slice::from_raw_parts(out, olen as usize);
+            let kx = xh_langtype(d);
+            let body = xh_body_slice(d);
             if kx.ends_with("char/utf32") {
-                std::slice::from_raw_parts(out.add(bo), bl)
-                    .chunks_exact(4)
+                body.chunks_exact(4)
                     .map(|c| {
                         char::from_u32(u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
                             .unwrap_or('\u{FFFD}')
                     })
                     .collect()
             } else {
-                String::from_utf8_lossy(std::slice::from_raw_parts(out.add(bo), bl)).into_owned()
+                String::from_utf8_lossy(body).into_owned()
             }
         }
     }
@@ -84,22 +80,18 @@ impl Engine {
         if tlv.is_empty() {
             return (0, String::new());
         }
-        unsafe {
-            let mut head = KvspaceHead::default();
-            kvspaceDecodeHead(tlv.as_ptr(), tlv.len() as u32, &mut head);
-            let r = match head.r#ref {
-                2 => 2,
-                1 => 1,
-                _ => 0,
-            };
-            if r != 2 {
-                return (r, String::new());
-            }
-            let bo = head.body_offset as usize;
-            let bl = head.body_len.max(0) as usize;
-            let body = String::from_utf8_lossy(&tlv[bo..bo + bl]).into_owned();
-            (r, body)
+        let r = if xh_is_ptr(&tlv) {
+            1
+        } else if xh_class(&tlv) == 3 {
+            2
+        } else {
+            0
+        };
+        if r != 2 {
+            return (r, String::new());
         }
+        let body = String::from_utf8_lossy(xh_body_slice(&tlv)).into_owned();
+        (r, body)
     }
 
     /// 扩展句柄兑现：按 body 前缀路由 —— /networld/{host}/proc/... → 进程内 proc 兑现器
@@ -150,26 +142,18 @@ impl Engine {
         if tlv.is_empty() {
             return Vec::new();
         }
-        unsafe {
-            let mut h = KvspaceHead::default();
-            if kvspaceDecodeHead(tlv.as_ptr(), tlv.len() as u32, &mut h) != 0 {
-                return Vec::new();
-            }
-            let r = match h.r#ref {
-                2 => 2,
-                1 => 1,
-                _ => 0,
-            };
-            let (bo, bl) = (h.body_offset as usize, h.body_len.max(0) as usize);
-            if bo + bl > tlv.len() {
-                return Vec::new();
-            }
-            if r == 2 {
-                let body = String::from_utf8_lossy(&tlv[bo..bo + bl]).into_owned();
-                return self.resolve_ext_bytes(&body);
-            }
-            tlv[bo..bo + bl].to_vec()
+        let r = if xh_is_ptr(&tlv) {
+            1
+        } else if xh_class(&tlv) == 3 {
+            2
+        } else {
+            0
+        };
+        let body = xh_body_slice(&tlv);
+        if r == 2 {
+            return self.resolve_ext_bytes(&String::from_utf8_lossy(body));
         }
+        body.to_vec()
     }
 
     pub fn set_str_list(&self, dst: &str, items: &[String]) {

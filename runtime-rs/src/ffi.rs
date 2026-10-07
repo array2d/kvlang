@@ -38,9 +38,89 @@ impl Default for KvspaceHead {
     }
 }
 
+// ── 原位 head 访问（与 C 侧 xh_* 对齐：偏移直取，不建 328B head、不校验）──
+
+/// wire: [pow:u8][flags:u8][a:u64le][b:u64le][langtype][padding][body]。
+pub const XH_PREFIX: usize = 18;
+
+#[inline]
+pub fn xh_headlen(data: &[u8]) -> usize {
+    1usize << data[0]
+}
+#[inline]
+pub fn xh_class(data: &[u8]) -> u8 {
+    data[1] & 3
+}
+#[inline]
+pub fn xh_is_ptr(data: &[u8]) -> bool {
+    data[1] & 4 != 0
+}
+#[inline]
+pub fn xh_is_none(data: &[u8]) -> bool {
+    data.len() > XH_PREFIX && data[1] == 0 && data[XH_PREFIX] == 0
+}
+#[inline]
+fn xh_a(data: &[u8]) -> u64 {
+    u64::from_le_bytes(data[2..10].try_into().unwrap())
+}
+#[inline]
+fn xh_b(data: &[u8]) -> u64 {
+    u64::from_le_bytes(data[10..18].try_into().unwrap())
+}
+
+/// wire 内 langtype 串（headlen 内首个 NUL 前）。data 过短 → ""。
+pub fn xh_langtype(data: &[u8]) -> String {
+    if data.len() <= XH_PREFIX {
+        return String::new();
+    }
+    let hl = xh_headlen(data).min(data.len());
+    let end = data[XH_PREFIX..hl]
+        .iter()
+        .position(|&b| b == 0)
+        .map(|i| XH_PREFIX + i)
+        .unwrap_or(hl);
+    String::from_utf8_lossy(&data[XH_PREFIX..end]).into_owned()
+}
+
+/// class0 标量宽度（按 base kind 查表；def rwir 特例 5；其余 0）。
+fn scalar_width(kind: &str) -> usize {
+    match kind {
+        "bool" | "int8" | "uint8" => 1,
+        "int16" | "uint16" => 2,
+        "int32" | "uint32" | "float32" => 4,
+        "int64" | "uint64" | "float64" | "time" | "duration" => 8,
+        "def rwir" => 5,
+        _ => 0,
+    }
+}
+
+/// body 内容长度：class0 标量宽度 / class1 slack 与 class3 ext = a / class2 tensor = a*b。
+pub fn xh_content_len(data: &[u8]) -> usize {
+    if data.len() < XH_PREFIX {
+        return 0;
+    }
+    match xh_class(data) {
+        0 => scalar_width(&xh_langtype(data)),
+        2 => (xh_a(data) * xh_b(data)) as usize,
+        _ => xh_a(data) as usize,
+    }
+}
+
+/// body 切片（按 headlen 偏移 + class 推导长度）；越界 → 空。
+pub fn xh_body_slice(data: &[u8]) -> &[u8] {
+    if data.len() < XH_PREFIX {
+        return &[];
+    }
+    let off = xh_headlen(data);
+    let len = xh_content_len(data);
+    if off + len > data.len() {
+        return &[];
+    }
+    &data[off..off + len]
+}
+
 /// Encode through the kvspace codec.
-pub fn tlv_encode(kind: &str, raw: &[u8], dims: &[i32]) -> Vec<u8> {
-    unsafe {
+pub fn tlv_encode(kind: &str, raw: &[u8], dims: &[i32]) -> Vec<u8> {    unsafe {
         let (mut out, mut olen) = (std::ptr::null_mut(), 0u32);
         kvspaceTlvEncode(
             cs(kind).as_ptr(),
