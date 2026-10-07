@@ -7,14 +7,16 @@
 void kvlangBuiltinResolveReadValue(kvlangKv_t *kv, const char *frame_root, const char *name,
                            const kvlangXvalue_t *val, kvlangXvalue_t *out) {
     kvlangXvalueZero(out);
-    if (name && name[0] == '/') {
-        kvlangKvGetOne(kv, name, out);
-        return;
-    }
+    /* decode 期已按 read_target 取回目标值（out->name 是绝对路径时亦然），直接借用即可。
+     * 这一支必须排在绝对路径之前：否则每步都会把已经拿到的值丢掉、再去后端读一遍。 */
     if (val && !kvlangXvalueNone(val) && !kvlangXvalueKindIs(val, KVSPACE_KIND_RWIR) && !kvlangXvalueKindIs(val, KVSPACE_KIND_RWFUNC)) {
         out->data = val->data; /* Borrowed for this instruction. */
         out->len = val->len;
         out->borrowed = 1;
+        return;
+    }
+    if (name && name[0] == '/') {
+        kvlangKvGetOne(kv, name, out);
         return;
     }
     if (!name || !name[0]) return;
