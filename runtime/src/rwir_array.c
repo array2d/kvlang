@@ -201,7 +201,7 @@ int kvlangBuiltinArrayFill(kvlangFrame_t *f) {
     }
     char *ke = kvlangXvalueValueString(&in[0]);
     kvlangLangtype kx;
-    kvlangLangtypeParse((const uint8_t *)ke, &kx);
+    kvlangLangtypeParse((const uint8_t *)ke, (int32_t)strlen(ke), &kx);
     int sz = kvlangXvalueElemSize(kx.kind);
     if (sz <= 0 || sz > 8 || kx.ndim < 1 || kx.array_len < 0) {
         int rc = kvlangBuiltinSetErr(

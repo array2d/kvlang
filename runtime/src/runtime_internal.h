@@ -99,7 +99,8 @@ typedef struct {
     int32_t array_len;
 } kvlangLangtype;
 
-void kvlangLangtypeParse(const uint8_t *langtype, kvlangLangtype *out);
+void kvlangLangtypeParse(const uint8_t *langtype, int32_t langtype_len,
+                         kvlangLangtype *out);
 
 /* ── 基础类型 ──────────────────────────────────────────────────────── */
 
@@ -161,8 +162,17 @@ static inline uint32_t xh_headlen(const uint8_t *d) { return 1u << d[0]; }
 static inline const uint8_t *xh_body(const uint8_t *d) {
     return d + (1u << d[0]);
 }
-static inline const char *xh_langtype(const uint8_t *d) {
-    return (const char *)(d + XH_PREFIX);
+/* langtype 区起始（无 NUL 保证；长度见 xh_langtype_len）。 */
+static inline const uint8_t *xh_langtype(const uint8_t *d) {
+    return d + XH_PREFIX;
+}
+/* langtype 字节数（不含 NUL）。等于 headlen-18 表示填满、区内无 NUL。 */
+static inline uint32_t xh_langtype_len(const uint8_t *d) {
+    uint32_t region = xh_headlen(d) - XH_PREFIX;
+    uint32_t n = 0;
+    while (n < region && d[XH_PREFIX + n])
+        n++;
+    return n;
 }
 static inline uint8_t xh_class(const uint8_t *d) { return d[1] & 3u; }
 static inline bool xh_is_ptr(const uint8_t *d) { return (d[1] & 4u) != 0; }
@@ -186,10 +196,27 @@ static inline void kvlangXvalueZero(kvlangXvalue_t *v) {
     v->borrowed = 0;
 }
 
-/* langtype 原位指针；None（data 空）返回 ""。 */
-static inline const char *xh_langtype_of(const kvlangXvalue_t *v) {
-    return kvlangXvalueNone(v) ? "" : xh_langtype(v->data);
+/* langtype 原位指针 + 字节数；None → 空串 / 0。指针无 NUL 保证，勿当 C 串用。 */
+static inline const uint8_t *xh_langtype_of(const kvlangXvalue_t *v) {
+    return kvlangXvalueNone(v) ? (const uint8_t *)"" : xh_langtype(v->data);
 }
+static inline uint32_t xh_langtype_len_of(const kvlangXvalue_t *v) {
+    return kvlangXvalueNone(v) ? 0u : xh_langtype_len(v->data);
+}
+/* 有界拷进调用方缓冲并 NUL 终止，返回写入长度（不含 NUL）。 */
+static inline uint32_t xh_langtype_copy_of(const kvlangXvalue_t *v, char *buf,
+                                           size_t cap) {
+    if (cap == 0)
+        return 0;
+    uint32_t n = xh_langtype_len_of(v);
+    if (n > cap - 1)
+        n = (uint32_t)(cap - 1);
+    memcpy(buf, xh_langtype_of(v), n);
+    buf[n] = 0;
+    return n;
+}
+/* 有界拷出完整 langtype（malloc，调用方 free）。None → ""。 */
+char *kvlangXvalueLangtypeDup(const kvlangXvalue_t *v);
 void kvlangXvalueFree(
     kvlangXvalue_t *v); /* free 自持 data（借用读已拷贝为自持） */
 void kvlangXvalueSetBytes(kvlangXvalue_t *v, uint8_t *data,
@@ -324,10 +351,12 @@ int32_t kvlangXvalueElemSize(const char *kind);
 static inline int32_t xh_content_len(const uint8_t *d) {
     uint8_t cls = d[1] & 3u;
     if (cls == 0u) {
-        const char *lt = xh_langtype(d);
-        if (strcmp(lt, "def rwir") == 0)
+        uint32_t n = xh_langtype_len(d);
+        if (n == sizeof(KVSPACE_KIND_DEF_RWIR) - 1 &&
+            memcmp(d + XH_PREFIX, KVSPACE_KIND_DEF_RWIR, n) == 0)
             return 5;
-        return kvlangXvalueElemSize(lt);
+        return kvlangLtElemSize(
+            kvlangLangTypeId((const char *)(d + XH_PREFIX), n));
     }
     if (cls == 2u)
         return (int32_t)(xh_a(d) * xh_b(d));

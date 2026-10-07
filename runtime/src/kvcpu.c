@@ -106,7 +106,7 @@ static int check_read_types(kvlangKv_t *kv, const char *vtid, const char *pc,
         kvlangBuiltinResolveReadValue(kv, fr, args[i].name, &args[i].val, &v);
         const char *k = kvlangXvalueKind(&v);
         kvlangLangtype kx;
-        kvlangLangtypeParse((const uint8_t *)xh_langtype_of(&v), &kx);
+        kvlangLangtypeParse(xh_langtype_of(&v), (int32_t)xh_langtype_len_of(&v), &kx);
         bool ok = kvlangLangtypeMatch(exp, k, kx.ndim, kx.dims);
         char kbuf[40];
         snprintf(kbuf, sizeof kbuf, "%s", k[0] ? k : "None");

@@ -57,6 +57,7 @@ int kvlangXvalueLangTypeId(const kvlangXvalue_t *v) {
     if (kvlangXvalueNone(v))
         return KVLANG_LT_NONE;
     kvlangLangtype kx;
-    kvlangLangtypeParse((const uint8_t *)xh_langtype(v->data), &kx);
+    kvlangLangtypeParse(xh_langtype(v->data),
+                        (int32_t)xh_langtype_len(v->data), &kx);
     return kvlangLangTypeId(kx.kind, (size_t)kx.kind_len);
 }

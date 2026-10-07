@@ -5,20 +5,36 @@
  * 不建 328B head、不校验——调用方按 langtype/body_offset/body_len/is_ptr 直取。 */
 typedef struct {
     kvspaceHead_t head; /* 变量路径的数据源（其 langtype 为 langtype 宿主） */
-    const char *langtype;
+    const uint8_t *langtype;
+    int32_t langtype_len; /* langtype 字节数（不含 NUL），langtype 无 NUL 保证 */
     int32_t body_offset;
     int32_t body_len;
     bool is_ptr;
 } xv_head_t;
 
 static inline void xv_head_from_head(xv_head_t *o) {
-    o->langtype = (const char *)o->head.langtype;
+    o->langtype = (const uint8_t *)o->head.langtype;
+    o->langtype_len = o->head.langtype_len;
     o->body_offset = o->head.body_offset;
     o->body_len = o->head.body_len;
     o->is_ptr = o->head.ref == KVSPACE_REF_PTR;
 }
+/* 有界拷 head.langtype 成 NUL 终止串（langtype 本身无 NUL 保证）。 */
+static inline void xv_head_langtype_str(const xv_head_t *o, char *buf,
+                                        size_t cap) {
+    if (cap == 0)
+        return;
+    int32_t n = o->langtype_len;
+    if (n < 0)
+        n = 0;
+    if ((size_t)n > cap - 1)
+        n = (int32_t)(cap - 1);
+    memcpy(buf, o->langtype, (size_t)n);
+    buf[n] = 0;
+}
 static inline void xv_head_from_data(xv_head_t *o, const uint8_t *d) {
     o->langtype = xh_langtype(d);
+    o->langtype_len = (int32_t)xh_langtype_len(d);
     o->body_offset = (int32_t)xh_headlen(d);
     o->body_len = xh_content_len(d);
     o->is_ptr = xh_is_ptr(d);

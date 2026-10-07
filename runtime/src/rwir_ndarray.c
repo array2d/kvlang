@@ -5,7 +5,7 @@
 static int ndarray_shape_guard(kvlangFrame_t *f, const char *op,
                                const xv_head_t *h) {
     kvlangLangtype kx;
-    kvlangLangtypeParse((const uint8_t *)h->langtype, &kx);
+    kvlangLangtypeParse(h->langtype, h->langtype_len, &kx);
     if (kx.ndim > 0)
         return 0;
     if (kvlangKindIsMap(kx.kind))
@@ -21,7 +21,7 @@ int kvlangBuiltinNdarrayNumel(kvlangFrame_t *f) {
     int64_t n_el = 0;
     if (xv_head1(f, &h) == 0) {
         kvlangLangtype kx;
-        kvlangLangtypeParse((const uint8_t *)h.langtype, &kx);
+        kvlangLangtypeParse(h.langtype, h.langtype_len, &kx);
         if (kvlangKindIsMap(kx.kind)) {
             char *fr = kvlangKeytreeFrameRoot(f->pc);
             char *base = kvlangBuiltinResolveWriteSlot(f->kv, fr,
@@ -56,7 +56,7 @@ int kvlangBuiltinNdarrayDim(kvlangFrame_t *f) {
         if (g)
             return g;
         kvlangLangtype kx;
-        kvlangLangtypeParse((const uint8_t *)h.langtype, &kx);
+        kvlangLangtypeParse(h.langtype, h.langtype_len, &kx);
         ndim = kx.ndim;
     }
     kvlangXvalue_t r;
@@ -75,7 +75,7 @@ int kvlangBuiltinNdarrayShape(kvlangFrame_t *f) {
         if (g)
             return g;
         kvlangLangtype kx;
-        kvlangLangtypeParse((const uint8_t *)h.langtype, &kx);
+        kvlangLangtypeParse(h.langtype, h.langtype_len, &kx);
         ndim = kx.ndim;
         for (int i = 0; i < ndim && i < 8; i++)
             dims[i] = kx.dims[i];

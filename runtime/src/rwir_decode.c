@@ -56,10 +56,9 @@ void kvlangRwirInstFree(kvlangRwirInst_t *inst) {
 static char *operand_type(const kvlangXvalue_t *v) {
     if (kvlangXvalueNone(v))
         return NULL;
-    const char *lt = xh_langtype(v->data);
     if (!kvlangXvalueKindIs(v, KVSPACE_KIND_RWIR) &&
         !kvlangXvalueKindIs(v, KVSPACE_KIND_RWFUNC))
-        return strdup(lt);
+        return kvlangXvalueLangtypeDup(v);
     const uint8_t *body = xh_body(v->data);
     int32_t len = xh_content_len(v->data);
     const uint8_t *end =
@@ -178,7 +177,7 @@ static int decode_operand(kvlangKv_t *kv, const char *link_base,
         out->name = NULL;
         return -1;
     }
-    out->type = strdup(xh_langtype(v.data));
+    out->type = kvlangXvalueLangtypeDup(&v);
     out->address = 1;
     if (!out->type ||
         (read_target && kvlangKvGetOne(kv, out->name, &out->val) != 0)) {
