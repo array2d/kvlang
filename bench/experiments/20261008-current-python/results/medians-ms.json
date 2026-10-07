@@ -1,0 +1,92 @@
+{
+  "iops": {
+    "main": 33.230698,
+    "runtime": 34.249536,
+    "backend": 29.299886,
+    "combined": 27.683865,
+    "allocator": 33.217073,
+    "all": 26.754023,
+    "python": 0.094775
+  },
+  "prime_sieve": {
+    "main": 43.124912,
+    "runtime": 40.354541,
+    "backend": 34.861587,
+    "combined": 34.631411,
+    "allocator": 41.596825,
+    "all": 33.188722,
+    "python": 0.078565
+  },
+  "fib": {
+    "main": 116.614486,
+    "runtime": 117.200918,
+    "backend": 116.315874,
+    "combined": 115.574115,
+    "allocator": 41.433727,
+    "all": 39.435195,
+    "python": 0.019457
+  },
+  "nqueens": {
+    "main": 319.365155,
+    "runtime": 316.669465,
+    "backend": 314.260717,
+    "combined": 313.492908,
+    "allocator": 108.160385,
+    "all": 103.437525,
+    "python": 0.080029
+  },
+  "quicksort": {
+    "main": 50.026257,
+    "runtime": 48.435898,
+    "backend": 42.536906,
+    "combined": 41.607775,
+    "allocator": 47.376373,
+    "all": 38.34567,
+    "python": 0.089687
+  },
+  "binary_search": {
+    "main": 141.625351,
+    "runtime": 140.764034,
+    "backend": 137.777669,
+    "combined": 136.834907,
+    "allocator": 59.21245,
+    "all": 53.83428,
+    "python": 0.048057
+  },
+  "binary_trees": {
+    "main": 27.805124,
+    "runtime": 27.389447,
+    "backend": 24.894097,
+    "combined": 24.337998,
+    "allocator": 20.466159,
+    "all": 16.575519,
+    "python": 0.036597
+  },
+  "hash_table": {
+    "main": 21.035234,
+    "runtime": 20.501664,
+    "backend": 18.208816,
+    "combined": 17.612647,
+    "allocator": 17.221449,
+    "all": 13.793723,
+    "python": 0.090475
+  },
+  "matmul": {
+    "main": 21.446574,
+    "runtime": 20.88364,
+    "backend": 18.069819,
+    "combined": 17.603285,
+    "allocator": 20.361865,
+    "all": 16.184711,
+    "python": 0.09259
+  },
+  "k_nucleotide": {
+    "main": 33.396298,
+    "runtime": 33.060279,
+    "backend": 28.868662,
+    "combined": 28.413805,
+    "allocator": 32.910521,
+    "all": 27.585147,
+    "python": 0.071613
+  }
+}

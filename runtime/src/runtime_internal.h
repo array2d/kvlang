@@ -556,6 +556,8 @@ typedef struct {
     const char *frame_root;   /* Borrowed for this instruction. */
     const char *status_known; /* 本步开始前从 kvspace 读到的 ‥status（借用）；NULL = 未知 */
     bool persist_failed;
+    const char *pc_key;
+    const char *status_key;
 } kvlangFrame_t;
 
 /* Write PC to kvspace; write status when it changes. */

@@ -1,0 +1,144 @@
+{
+  "cpu": 24,
+  "pairs": 9,
+  "python": "3.10.12",
+  "cpu_model": "Intel(R) Xeon(R) Gold 6418H",
+  "variants": {
+    "main": {
+      "binary": "/tmp/kvlang-perf-current-baseline/bin/kvlang",
+      "backend_path": "/tmp/kvlang-perf-experiment/backend-main",
+      "binary_sha256": "931157271cc79507b6a33c0e9c3fc72013ceb65ff5520c046b887955bce49d7a",
+      "libraries": {
+        "/tmp/kvlang-perf-deps/prefix/lib/kvspace/libkvspace.so.1": "b6230a008bfbc2326797c361f589f35b8129f32522bc6fe55a1808fbae42aa73",
+        "/tmp/kvlang-perf-current-baseline/bin/libkvlanglayout.so": "30af52956c24a10bf98ee6b5dc1507003993e79606a40aef43457516012599ef",
+        "/tmp/kvlang-perf-current-baseline/bin/libkvlang_runtime.so": "abea1bd6c985a70b648ce55c04de6fc1c3d7220b40c7e7bf19c5730e6eea3faa",
+        "/tmp/kvlang-perf-experiment/backend-main/libkvspace-c.so.1": "a6a8d894675173fc6c005bd29b45e857d0da16f4a40c50cd669f4e39416e91bf"
+      }
+    },
+    "runtime": {
+      "binary": "/tmp/kvlang-perf-current/bin/kvlang",
+      "backend_path": "/tmp/kvlang-perf-experiment/backend-main",
+      "binary_sha256": "931157271cc79507b6a33c0e9c3fc72013ceb65ff5520c046b887955bce49d7a",
+      "libraries": {
+        "/tmp/kvlang-perf-deps/prefix/lib/kvspace/libkvspace.so.1": "b6230a008bfbc2326797c361f589f35b8129f32522bc6fe55a1808fbae42aa73",
+        "/tmp/kvlang-perf-current/bin/libkvlanglayout.so": "30af52956c24a10bf98ee6b5dc1507003993e79606a40aef43457516012599ef",
+        "/tmp/kvlang-perf-current/bin/libkvlang_runtime.so": "77134092e1713357b88aa04db2d5a4b8470ae0cbdc79e7ae39f909b2869d73c9",
+        "/tmp/kvlang-perf-experiment/backend-main/libkvspace-c.so.1": "a6a8d894675173fc6c005bd29b45e857d0da16f4a40c50cd669f4e39416e91bf"
+      }
+    },
+    "backend": {
+      "binary": "/tmp/kvlang-perf-current-baseline/bin/kvlang",
+      "backend_path": "/tmp/kvspace-c-perf-write-build",
+      "binary_sha256": "931157271cc79507b6a33c0e9c3fc72013ceb65ff5520c046b887955bce49d7a",
+      "libraries": {
+        "/tmp/kvlang-perf-deps/prefix/lib/kvspace/libkvspace.so.1": "b6230a008bfbc2326797c361f589f35b8129f32522bc6fe55a1808fbae42aa73",
+        "/tmp/kvlang-perf-current-baseline/bin/libkvlanglayout.so": "30af52956c24a10bf98ee6b5dc1507003993e79606a40aef43457516012599ef",
+        "/tmp/kvlang-perf-current-baseline/bin/libkvlang_runtime.so": "abea1bd6c985a70b648ce55c04de6fc1c3d7220b40c7e7bf19c5730e6eea3faa",
+        "/tmp/kvspace-c-perf-write-build/libkvspace-c.so.1": "dfa5fd3b3ef9a8393fb7bb142767e592c979276c23a2cf7ce65bc1dee5abf65a"
+      }
+    },
+    "combined": {
+      "binary": "/tmp/kvlang-perf-current/bin/kvlang",
+      "backend_path": "/tmp/kvspace-c-perf-write-build",
+      "binary_sha256": "931157271cc79507b6a33c0e9c3fc72013ceb65ff5520c046b887955bce49d7a",
+      "libraries": {
+        "/tmp/kvlang-perf-deps/prefix/lib/kvspace/libkvspace.so.1": "b6230a008bfbc2326797c361f589f35b8129f32522bc6fe55a1808fbae42aa73",
+        "/tmp/kvlang-perf-current/bin/libkvlanglayout.so": "30af52956c24a10bf98ee6b5dc1507003993e79606a40aef43457516012599ef",
+        "/tmp/kvlang-perf-current/bin/libkvlang_runtime.so": "77134092e1713357b88aa04db2d5a4b8470ae0cbdc79e7ae39f909b2869d73c9",
+        "/tmp/kvspace-c-perf-write-build/libkvspace-c.so.1": "dfa5fd3b3ef9a8393fb7bb142767e592c979276c23a2cf7ce65bc1dee5abf65a"
+      }
+    },
+    "allocator": {
+      "binary": "/tmp/kvlang-perf-current-baseline/bin/kvlang",
+      "backend_path": "/tmp/kvspace-c-perf-leaf-build",
+      "binary_sha256": "931157271cc79507b6a33c0e9c3fc72013ceb65ff5520c046b887955bce49d7a",
+      "libraries": {
+        "/tmp/kvlang-perf-deps/prefix/lib/kvspace/libkvspace.so.1": "b6230a008bfbc2326797c361f589f35b8129f32522bc6fe55a1808fbae42aa73",
+        "/tmp/kvlang-perf-current-baseline/bin/libkvlanglayout.so": "30af52956c24a10bf98ee6b5dc1507003993e79606a40aef43457516012599ef",
+        "/tmp/kvlang-perf-current-baseline/bin/libkvlang_runtime.so": "abea1bd6c985a70b648ce55c04de6fc1c3d7220b40c7e7bf19c5730e6eea3faa",
+        "/tmp/kvspace-c-perf-leaf-build/libkvspace-c.so.1": "9f3b419a89a5021c8a2a01dfc27ba3f6c792e58940b0e79272278d77fa8a0869"
+      }
+    },
+    "all": {
+      "binary": "/tmp/kvlang-perf-current/bin/kvlang",
+      "backend_path": "/tmp/kvspace-c-perf-total-build",
+      "binary_sha256": "931157271cc79507b6a33c0e9c3fc72013ceb65ff5520c046b887955bce49d7a",
+      "libraries": {
+        "/tmp/kvlang-perf-deps/prefix/lib/kvspace/libkvspace.so.1": "b6230a008bfbc2326797c361f589f35b8129f32522bc6fe55a1808fbae42aa73",
+        "/tmp/kvlang-perf-current/bin/libkvlanglayout.so": "30af52956c24a10bf98ee6b5dc1507003993e79606a40aef43457516012599ef",
+        "/tmp/kvlang-perf-current/bin/libkvlang_runtime.so": "77134092e1713357b88aa04db2d5a4b8470ae0cbdc79e7ae39f909b2869d73c9",
+        "/tmp/kvspace-c-perf-total-build/libkvspace-c.so.1": "6b143b678a0d1be7761401809b08c6d9093f9501ec261da3aaa2bcbd96b433c0"
+      }
+    }
+  },
+  "sources": {
+    "iops": {
+      "scale": 2000,
+      "kv_sha256": "360d3a2b7bd4d014255ba34cd86f6c72ee72a46b4787ed248ee5a6db96887dd7",
+      "python_sha256": "e53ef1d628cf1b39be8e2ee2e7ee04a9e0517403226e5f8f18ada9a44ce12d04"
+    },
+    "prime_sieve": {
+      "scale": 100,
+      "kv_sha256": "e0dd66398f3027ccd02ea9615089e57693840c037e4674f492f46c4cd6aae346",
+      "python_sha256": "7365d00a931b3332c68021f14646d651cabbb208c0a2dd6cdd5635bed9475af9"
+    },
+    "fib": {
+      "scale": 10,
+      "kv_sha256": "f9f308e2939ecd712442586ee87b8340f55331e75bcd6a6c6ffc12aea3a7bab4",
+      "python_sha256": "63a329cd3bbc9271f9142f9fa762b3389c17525679763a14e21a7138e12987fa"
+    },
+    "nqueens": {
+      "scale": 6,
+      "kv_sha256": "e4ba6073d1cd9e76949e3b81b46604e28b97e712afd6f6158db811f7e97c169b",
+      "python_sha256": "61ebaeccf79bf06a85e213180930552748cca126ec60b8636a7ed7849765a8af"
+    },
+    "quicksort": {
+      "scale": 128,
+      "kv_sha256": "7e50702ad83e4a9e4e9b9627a92f2a6d22abe3219f830bb17320a6bc400f7f16",
+      "python_sha256": "048c1991bb5e6f528fbacfa8167abe5d860a71117142e736613ced91b8a1a92d"
+    },
+    "binary_search": {
+      "scale": 64,
+      "kv_sha256": "42e05e05ccbbdb4af0e5b175ad4f87a367d00a97ddcd4ae0ff4d25edfc7ac153",
+      "python_sha256": "64e43b7a2a8b0fd928bb93cc8b57cd3f5fd45daf97f46ea269090a395ac6e6dc"
+    },
+    "binary_trees": {
+      "scale": 6,
+      "kv_sha256": "39add5228fab5953224b0959b0b8b176586a866179608909390108189f6b46d8",
+      "python_sha256": "454f14208f826ef084a593953b6780ab29f94f5d565e8b55d5a322f037323b13"
+    },
+    "hash_table": {
+      "scale": 200,
+      "kv_sha256": "606feac126238d1908a787ba46f1a7a8d4fd2858cf6a69e327c2acc2f6605541",
+      "python_sha256": "b19fbe72320375471e91ad31093b37b385f8ef5be46a29465381bac05391ced0"
+    },
+    "matmul": {
+      "scale": 8,
+      "kv_sha256": "ba5437bb1dc4f702073fc8c9c8519b28ee502cb27b51d1e5ba09b69262d1ac89",
+      "python_sha256": "103b272337bff44df02001a52dea61d6c9db8e843245dbc869afe673203764f8"
+    },
+    "k_nucleotide": {
+      "scale": 8,
+      "kv_sha256": "9d4cc69ee5455b0902f47b7b6a2e60bbd6d3432084b6e15c252ecbbfbcd5a694",
+      "python_sha256": "c35d8d9fe4cb2be7065befed69a1c763a7d3ab6e5c569857249b21bbf8a8a6ec"
+    }
+  },
+  "build": {
+    "compiler": "GCC 14.3.0",
+    "c_flags": "-O3 -g -DNDEBUG",
+    "runtime_base": "774e5315eff9ec39caa1cd6e9791620811845a9d",
+    "backend_base": "0e5660c37d5584fe774b1c75d71eca3777115671",
+    "allocator_base": "e2c4c6bf67648a7c200d0354ff25e5f65c417a00",
+    "allocator_baseline_version": "v0.1.5",
+    "blockmalloc": "v0.1.4",
+    "frontend": "kvspace v0.3.0 release",
+    "candidate_source_sha256": {
+      "runtime/src/xvalue.c": "d2f24c94c99b1a317657ac43c619e4aad5b0e39741cd05b97f331e4ad7b14ff1",
+      "runtime/src/kvcpu.c": "2fb04432b3e393ef0de94188a0fcf829dc9c4c1c4ae4802a4bbb7a31094b8222",
+      "runtime/src/vthread.c": "e39840c88d879db821815430e01ccaac9d74788f146419169e5827808b3a3dc2",
+      "runtime/src/runtime_internal.h": "90095626f698d221e1cf6b2ec9e771417d1e4a28caf4814965c8473017bc1ae0"
+    },
+    "backend_candidate_source_sha256": "6c6d6b93a5c5856616460280d0d8f63dad9539e68d5387ad769aaf2a758e73ab",
+    "allocator_candidate_header_sha256": "d424a34e0ef92d13d063d6631df7174bb37d6cfd129e3423b97241d0e3f7b14b"
+  }
+}

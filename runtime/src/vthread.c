@@ -66,14 +66,18 @@ int kvlangVthreadSet(kvlangKv_t *kv, const char *vtid, const char *pc, const cha
 void kvlangVthreadAdvance(kvlangFrame_t *f, const char *pc, const char *status) {
     kvlangStrbuf_t k1, k2;
     kvlangStrbufInit(&k1); kvlangStrbufInit(&k2);
-    kvlangKeytreeVthreadPc(f->vtid, &k1);
-    kvlangKeytreeVthreadStatus(f->vtid, &k2);
-    if (kvlangKvSetChar(f->kv, k1.p, pc) != 0)
+    if (!f->pc_key)
+        kvlangKeytreeVthreadPc(f->vtid, &k1);
+    if (kvlangKvSetChar(f->kv, f->pc_key ? f->pc_key : k1.p, pc) != 0)
         f->persist_failed = true;
     if (!f->persist_failed &&
-        (!f->status_known || strcmp(f->status_known, status) != 0) &&
-        kvlangKvSetChar(f->kv, k2.p, status) != 0)
-        f->persist_failed = true;
+        (!f->status_known || strcmp(f->status_known, status) != 0)) {
+        if (!f->status_key)
+            kvlangKeytreeVthreadStatus(f->vtid, &k2);
+        if (kvlangKvSetChar(f->kv, f->status_key ? f->status_key : k2.p,
+                             status) != 0)
+            f->persist_failed = true;
+    }
     kvlangStrbufFree(&k1); kvlangStrbufFree(&k2);
 }
 

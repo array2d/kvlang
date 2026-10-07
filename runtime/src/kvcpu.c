@@ -1314,6 +1314,8 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode,
             /* 单表派发：native 算子与 control/copy 同居 myrwircaps，op_id 直查一跳到底。 */
             kvlangFrame_t f = {kv, vtid, cur, inst, &yield};
             f.frame_root = cur_frame;
+            f.pc_key = pc_key.p;
+            f.status_key = st_key.p;
             f.status_known = status;   /* 本步开始前读到的 ‥status（源值，借用） */
             exec_err = kvlangBuiltinNative(&f);
             if (f.persist_failed)
@@ -1374,6 +1376,8 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode,
             }
             ci.writes = inst->writes;
             kvlangFrame_t cf = {kv, vtid, cur, &ci, NULL};
+            cf.pc_key = pc_key.p;
+            cf.status_key = st_key.p;
             cf.status_known = status;
             exec_err = kvlangCtlCall(&cf);
             if (cf.persist_failed)

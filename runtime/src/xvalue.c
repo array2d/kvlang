@@ -97,19 +97,6 @@ static int32_t al_to_dims(const char *kind, int32_t array_len, int32_t *dims) {
     return 0;
 }
 
-/* Copy codec-owned bytes into runtime-owned storage. */
-static uint8_t *kvlangXvalueOwn(uint8_t *tmp, uint32_t tl, uint32_t *out_len) {
-    if (!tmp) {
-        *out_len = 0;
-        return NULL;
-    }
-    uint8_t *buf = malloc(tl);
-    memcpy(buf, tmp, tl);
-    free(tmp);
-    *out_len = tl;
-    return buf;
-}
-
 static uint8_t *kvlangXvalueEncodeTlv(const char *kind, const uint8_t *raw,
                                       uint32_t raw_len, int32_t array_len,
                                       uint32_t *out_len) {
@@ -121,7 +108,8 @@ static uint8_t *kvlangXvalueEncodeTlv(const char *kind, const uint8_t *raw,
         *out_len = 0;
         return NULL;
     }
-    return kvlangXvalueOwn(tmp, tl, out_len);
+    *out_len = tl;
+    return tmp;
 }
 
 /* head 视图：原位取偏移与 langtype（不建 328B head、不校验）。
@@ -574,10 +562,7 @@ void kvlangXvalueNewTlvDims(kvlangXvalue_t *v, const char *kind,
         kvlangXvalueZero(v);
         return;
     }
-    uint8_t *buf = malloc(tl);
-    memcpy(buf, tmp, tl);
-    free(tmp);
-    v->data = buf;
+    v->data = tmp;
     v->len = tl;
     v->borrowed = 0;
 }
@@ -635,13 +620,13 @@ void kvlangXvalueNewCharUtf32(kvlangXvalue_t *v, const char *s) {
 void kvlangXvalueNewPtr(kvlangXvalue_t *v, const char *target_langtype,
                         const char *target) {
     uint8_t *tmp = NULL;
-    uint32_t tl = 0, len = 0;
+    uint32_t tl = 0;
     if (kvspaceNewPtr(target_langtype, target, &tmp, &tl) != 0) {
         kvlangXvalueZero(v);
         return;
     }
-    v->data = kvlangXvalueOwn(tmp, tl, &len);
-    v->len = len;
+    v->data = tmp;
+    v->len = tl;
     v->borrowed = 0;
 }
 /* def rwir 路由头：body 仅计数头 [nr:u16 LE][nw:u16 LE][dynamic:u8]，无参数载荷。
