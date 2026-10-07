@@ -21,6 +21,10 @@ use std::os::raw::c_char;
 use std::sync::OnceLock;
 
 /// 单个 rwir 的签名：读参 / 写参各自独立的 langtype 列表（逐槽一型，不假设同型）。
+/// 读参、写参默认 `*T`（一层指针，见 #329 评论「关于五.7 指针」）——参数 key 是 `[s,i]`，
+/// i 正为写参、负为读参，`*T` 约定覆盖两者。union 逐 branch 加 `*`，变参尾缀 `...` 保持在最后。
+/// 例外：xvalue 初始化类 rwir 的参数是真实值 `T`（`input`/`json·from`，见
+/// runtime/src/kvcpu.c 的 rwir_init_byval）。
 pub struct Rwir {
     pub rp: &'static [&'static str],
     pub wp: &'static [&'static str],
@@ -28,177 +32,181 @@ pub struct Rwir {
 
 /// rwir 注册表：key = 去 `/lib` 后的 opcode，value = 每槽 langtype（读参 rp / 写参 wp）。
 pub const MYRWIRCAPS: &[(&str, Rwir)] = &[
+    // input：xvalue 初始化类（读 stdin 初值写入写槽）。读参豁免 *T → 真实值（prompt）；
+    // 写参是「写到哪」= 指针靶，仍守 *T 约定。
     (
         "input",
         Rwir {
             rp: &["any"],
-            wp: &["any"],
+            wp: &["*any"],
         },
     ),
     (
         "print",
         Rwir {
-            rp: &["any..."],
+            rp: &["*any..."],
             wp: &[],
         },
     ),
     (
         "println",
         Rwir {
-            rp: &["any..."],
+            rp: &["*any..."],
             wp: &[],
         },
     ),
     (
         "cerr",
         Rwir {
-            rp: &["any..."],
+            rp: &["*any..."],
             wp: &[],
         },
     ),
     (
         "printf",
         Rwir {
-            rp: &["[]char/utf8|[]char/utf32", "any..."],
+            rp: &["*[]char/utf8|*[]char/utf32", "*any..."],
             wp: &[],
         },
     ),
     (
         "json·to",
         Rwir {
-            rp: &["any"],
-            wp: &["any"],
+            rp: &["*any"],
+            wp: &["*any"],
         },
     ),
+    // json·from：xvalue 初始化类（以源 JSON 文本为初值构造 xvalue 树）。读参豁免 *T →
+    // 真实值（源文本）；写参是「写到哪」= 指针靶，仍守 *T 约定。
     (
         "json·from",
         Rwir {
             rp: &["any"],
-            wp: &["any"],
+            wp: &["*any"],
         },
     ),
     (
         "http·call",
         Rwir {
             rp: &[
-                "[]char/utf32",
-                "[]char/utf32",
-                "[]char/utf32",
-                "[]char/utf32",
+                "*[]char/utf32",
+                "*[]char/utf32",
+                "*[]char/utf32",
+                "*[]char/utf32",
             ],
-            wp: &["[]char/utf32"],
+            wp: &["*[]char/utf32"],
         },
     ),
     (
         "kvlang·vet",
         Rwir {
-            rp: &["[]char/utf32"],
-            wp: &["[]char/utf32"],
+            rp: &["*[]char/utf32"],
+            wp: &["*[]char/utf32"],
         },
     ),
     (
         "kvlang·format",
         Rwir {
-            rp: &["[]char/utf32"],
-            wp: &["[]char/utf32"],
+            rp: &["*[]char/utf32"],
+            wp: &["*[]char/utf32"],
         },
     ),
     (
         "kvlang·layout",
         Rwir {
-            rp: &["[]char/utf32"],
-            wp: &["[]char/utf32"],
+            rp: &["*[]char/utf32"],
+            wp: &["*[]char/utf32"],
         },
     ),
     (
         "kvlang·printlib",
         Rwir {
-            rp: &["[]char/utf32"],
-            wp: &["[]char/utf32"],
+            rp: &["*[]char/utf32"],
+            wp: &["*[]char/utf32"],
         },
     ),
     (
         "kvlang·printstack",
         Rwir {
-            rp: &["[]char/utf32"],
-            wp: &["[]char/utf32"],
+            rp: &["*[]char/utf32"],
+            wp: &["*[]char/utf32"],
         },
     ),
     (
         "networld/proc·exec",
         Rwir {
             rp: &["*[int64]·[]char/utf32", "*[int64]·[]char/utf32"],
-            wp: &["uint8", "[]uint8", "[]uint8"],
+            wp: &["*uint8", "*[]uint8", "*[]uint8"],
         },
     ),
     (
         "networld/fs·size",
         Rwir {
-            rp: &["[]char/utf8|[]char/utf32"],
-            wp: &["int64"],
+            rp: &["*[]char/utf8|*[]char/utf32"],
+            wp: &["*int64"],
         },
     ),
     (
         "networld/fs·read",
         Rwir {
-            rp: &["[]char/utf8|[]char/utf32", "int64", "int64"],
-            wp: &["[]uint8"],
+            rp: &["*[]char/utf8|*[]char/utf32", "*int64", "*int64"],
+            wp: &["*[]uint8"],
         },
     ),
     (
         "networld/fs·write",
         Rwir {
-            rp: &["[]char/utf8|[]char/utf32", "[]uint8"],
-            wp: &["int64"],
+            rp: &["*[]char/utf8|*[]char/utf32", "*[]uint8"],
+            wp: &["*int64"],
         },
     ),
     (
         "networld/fs·rename",
         Rwir {
-            rp: &["[]char/utf8|[]char/utf32", "[]char/utf8|[]char/utf32"],
-            wp: &["int64"],
+            rp: &["*[]char/utf8|*[]char/utf32", "*[]char/utf8|*[]char/utf32"],
+            wp: &["*int64"],
         },
     ),
     (
         "networld/fs·isutf8",
         Rwir {
-            rp: &["[]char/utf8|[]char/utf32"],
-            wp: &["bool"],
+            rp: &["*[]char/utf8|*[]char/utf32"],
+            wp: &["*bool"],
         },
     ),
     (
         "networld/fs·append",
         Rwir {
-            rp: &["[]char/utf8|[]char/utf32", "[]uint8"],
-            wp: &["int64"],
+            rp: &["*[]char/utf8|*[]char/utf32", "*[]uint8"],
+            wp: &["*int64"],
         },
     ),
     (
         "networld/fs·list",
         Rwir {
-            rp: &["[]char/utf8|[]char/utf32"],
+            rp: &["*[]char/utf8|*[]char/utf32"],
             wp: &["*[int64]·[]char/utf32"],
         },
     ),
     (
         "networld/fs·del",
         Rwir {
-            rp: &["[]char/utf8|[]char/utf32"],
-            wp: &["int64"],
+            rp: &["*[]char/utf8|*[]char/utf32"],
+            wp: &["*int64"],
         },
     ),
     (
         "networld/fs·mkdir",
         Rwir {
-            rp: &["[]char/utf8|[]char/utf32"],
-            wp: &["int64"],
+            rp: &["*[]char/utf8|*[]char/utf32"],
+            wp: &["*int64"],
         },
     ),
     (
         "networld/fs·exists",
         Rwir {
-            rp: &["[]char/utf8|[]char/utf32"],
-            wp: &["bool"],
+            rp: &["*[]char/utf8|*[]char/utf32"],
+            wp: &["*bool"],
         },
     ),
 ];
