@@ -453,6 +453,7 @@ const char *kvlangKeytreeVtidFromPc(const char *pc,
 char *kvlangKeytreeStack(const char *root);               /* malloc */
 size_t kvlangKeytreeStackBuf(const char *root, char *buf, size_t cap); /* 栈缓冲，返长度 */
 char *kvlangKeytreeFrameRoot(const char *pc); /* malloc，无效 NULL */
+size_t kvlangKeytreeFrameRootBuf(const char *pc, char *buf, size_t cap); /* 栈缓冲，返长度 */
 char *kvlangKeytreeEntryPc(const char *root); /* malloc */
 char *kvlangKeytreeFrameAt(const char *vtid, int depth); /* malloc */
 int kvlangKeytreeFrameNum(const char *path); /* [d]; panics if invalid */
@@ -534,6 +535,9 @@ void kvlangVthreadGet(kvlangKv_t *kv, const char *vtid, char **pc,
                       char **status);
 void kvlangVthreadPcGet(kvlangKv_t *kv, const char *vtid, char **pc);
 void kvlangVthreadStatusGet(kvlangKv_t *kv, const char *vtid, char **status);
+/* 复用调用方 strbuf 读成员值；false = 键缺失 / None。 */
+bool kvlangVthreadMemberGetBuf(kvlangKv_t *kv, const char *key,
+                               kvlangStrbuf_t *out);
 int kvlangVthreadSet(kvlangKv_t *kv, const char *vtid, const char *pc,
                      const char *status);
 int kvlangVthreadSetDone(kvlangKv_t *kv, const char *vtid, const char *ret);
