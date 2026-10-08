@@ -1,0 +1,242 @@
+{
+  "iops(500)": {
+    "medians_us": {
+      "lookup-all": 1762.874,
+      "lookup-pc": 446.729,
+      "cached": 51.692,
+      "python": 25.869
+    },
+    "paired_speedups": {
+      "lookup-all": {
+        "median": 35.0801477984988,
+        "minimum": 29.621743230054093,
+        "maximum": 38.05278331743692
+      },
+      "lookup-pc": {
+        "median": 8.531108462455304,
+        "minimum": 7.731948189442689,
+        "maximum": 9.761011878956039
+      }
+    }
+  },
+  "iops(1000)": {
+    "medians_us": {
+      "lookup-all": 3584.655,
+      "lookup-pc": 887.8,
+      "cached": 98.441,
+      "python": 49.078
+    },
+    "paired_speedups": {
+      "lookup-all": {
+        "median": 36.42991868935707,
+        "minimum": 20.918294900790414,
+        "maximum": 41.971934056155305
+      },
+      "lookup-pc": {
+        "median": 9.001581879918186,
+        "minimum": 5.211138054046492,
+        "maximum": 10.444582347844413
+      }
+    }
+  },
+  "iops(2000)": {
+    "medians_us": {
+      "lookup-all": 7043.003,
+      "lookup-pc": 1757.887,
+      "cached": 194.247,
+      "python": 95.043
+    },
+    "paired_speedups": {
+      "lookup-all": {
+        "median": 36.658921899088085,
+        "minimum": 34.15667653428169,
+        "maximum": 38.69584570547265
+      },
+      "lookup-pc": {
+        "median": 9.049751090106925,
+        "minimum": 8.307531837959191,
+        "maximum": 9.718595805638952
+      }
+    }
+  },
+  "iops(200000)": {
+    "medians_us": {
+      "lookup-all": 626759.425,
+      "lookup-pc": 156723.349,
+      "cached": 17939.414,
+      "python": 8896.198
+    },
+    "paired_speedups": {
+      "lookup-all": {
+        "median": 35.35096403990036,
+        "minimum": 33.852642643659884,
+        "maximum": 36.52896405426693
+      },
+      "lookup-pc": {
+        "median": 8.820349557181089,
+        "minimum": 8.589877403066618,
+        "maximum": 9.30531339844363
+      }
+    }
+  },
+  "fib(8)": {
+    "medians_us": {
+      "lookup-all": 353.337,
+      "lookup-pc": 98.437,
+      "cached": 17.115,
+      "python": 9.936
+    },
+    "paired_speedups": {
+      "lookup-all": {
+        "median": 20.687297567869972,
+        "minimum": 16.500298425233,
+        "maximum": 21.7339291033661
+      },
+      "lookup-pc": {
+        "median": 5.687525562372188,
+        "minimum": 4.519305816996464,
+        "maximum": 5.944408456510217
+      }
+    }
+  },
+  "fib(9)": {
+    "medians_us": {
+      "lookup-all": 577.859,
+      "lookup-pc": 158.609,
+      "cached": 25.009,
+      "python": 14.605
+    },
+    "paired_speedups": {
+      "lookup-all": {
+        "median": 23.335279299452196,
+        "minimum": 19.72241155183923,
+        "maximum": 27.544165757906217
+      },
+      "lookup-pc": {
+        "median": 6.349274261265944,
+        "minimum": 5.386701009964075,
+        "maximum": 6.8486981303165075
+      }
+    }
+  },
+  "fib(10)": {
+    "medians_us": {
+      "lookup-all": 925.635,
+      "lookup-pc": 251.366,
+      "cached": 35.961,
+      "python": 19.246
+    },
+    "paired_speedups": {
+      "lookup-all": {
+        "median": 25.744307038570494,
+        "minimum": 25.07375094830389,
+        "maximum": 27.479686326854093
+      },
+      "lookup-pc": {
+        "median": 7.004504880286977,
+        "minimum": 6.574374119432101,
+        "maximum": 7.175735084213532
+      }
+    }
+  },
+  "fib(18)": {
+    "medians_us": {
+      "lookup-all": 40668.795,
+      "lookup-pc": 11343.391,
+      "cached": 1439.064,
+      "python": 524.684
+    },
+    "paired_speedups": {
+      "lookup-all": {
+        "median": 28.083120073914586,
+        "minimum": 26.097461543313653,
+        "maximum": 29.373803705859974
+      },
+      "lookup-pc": {
+        "median": 7.922959318174072,
+        "minimum": 7.7681423137363526,
+        "maximum": 8.87077515022532
+      }
+    }
+  },
+  "nqueens(4)": {
+    "medians_us": {
+      "lookup-all": 289.481,
+      "lookup-pc": 84.534,
+      "cached": 20.238,
+      "python": 19.769
+    },
+    "paired_speedups": {
+      "lookup-all": {
+        "median": 14.434249684741488,
+        "minimum": 13.174447174447174,
+        "maximum": 15.080717252984172
+      },
+      "lookup-pc": {
+        "median": 4.195925944508555,
+        "minimum": 3.8838255064670157,
+        "maximum": 4.452805384655834
+      }
+    }
+  },
+  "nqueens(5)": {
+    "medians_us": {
+      "lookup-all": 893.383,
+      "lookup-pc": 249.466,
+      "cached": 45.91,
+      "python": 36.404
+    },
+    "paired_speedups": {
+      "lookup-all": {
+        "median": 19.601661757594407,
+        "minimum": 17.650114969869964,
+        "maximum": 21.367963141061484
+      },
+      "lookup-pc": {
+        "median": 5.426910406304502,
+        "minimum": 4.912821122740247,
+        "maximum": 5.799132204602894
+      }
+    }
+  },
+  "nqueens(6)": {
+    "medians_us": {
+      "lookup-all": 2660.631,
+      "lookup-pc": 729.688,
+      "cached": 118.0,
+      "python": 77.599
+    },
+    "paired_speedups": {
+      "lookup-all": {
+        "median": 22.261330508474575,
+        "minimum": 21.703427021696253,
+        "maximum": 23.645539049604725
+      },
+      "lookup-pc": {
+        "median": 6.314255551132725,
+        "minimum": 5.918737055870289,
+        "maximum": 6.903260576663972
+      }
+    }
+  },
+  "nqueens(8)": {
+    "medians_us": {
+      "lookup-all": 32712.011,
+      "lookup-pc": 9551.643,
+      "cached": 1507.4,
+      "python": 795.46
+    },
+    "paired_speedups": {
+      "lookup-all": {
+        "median": 21.686073769220265,
+        "minimum": 20.462694042722568,
+        "maximum": 26.34803080882338
+      },
+      "lookup-pc": {
+        "median": 6.360004852716679,
+        "minimum": 6.2082316707072085,
+        "maximum": 7.221969274094856
+      }
+    }
+  }
+}

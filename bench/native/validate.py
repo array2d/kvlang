@@ -37,7 +37,10 @@ def main():
     for name in ['kvlang', 'frontend', 'backend', 'include', 'binaries']:
         ap.add_argument('--' + name, type=Path, required=True)
     ap.add_argument('--cpu', type=int, default=24)
+    ap.add_argument('--sigkill-restarts', type=int, default=24)
     args = ap.parse_args()
+    if args.sigkill_restarts < 0:
+        ap.error('--sigkill-restarts must be nonnegative')
     os.environ.update(KVSPACE_BACKEND_PATH=str(args.backend), LOG_LEVEL='warn')
     env, checks = dict(os.environ), 0
     with tempfile.TemporaryDirectory(prefix='native-validation-') as td:
@@ -125,7 +128,7 @@ def main():
             journal[0] = 3
         finish('iops', 6)
         rng = random.Random(20261008)
-        for _ in range(24):
+        for _ in range(args.sigkill_restarts):
             init('iops', 2000000)
             proc = subprocess.Popen(['taskset', '-c', str(args.cpu), str(args.binaries / 'iops'), dsn, 'run'], env=env, stdout=subprocess.PIPE)
             try:
@@ -148,15 +151,20 @@ def main():
                 proc.stdout.close()
             finish('iops', 2000000)
         init('iops', 10000000)
-        proc = subprocess.Popen([str(args.binaries / 'iops'), dsn, 'run'], env=env, stdout=subprocess.PIPE)
+        proc = subprocess.Popen([str(args.binaries / 'iops'), dsn, 'run', '10000000'], env=env, stdout=subprocess.PIPE)
         try:
             time.sleep(0.02)
             finish('iops', None, 6)
             run([args.binaries / 'iops', dsn, 'init', 1], env, args.cpu, 6)
         finally:
-            proc.kill()
-            proc.wait()
-            proc.stdout.close()
+            try:
+                if proc.wait(timeout=20) != 75:
+                    raise AssertionError('lock holder did not stop at instruction boundary')
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait()
+                proc.stdout.close()
         source = Path(td) / 'types.kv'
         source.write_text('''rwfunc negative(n:int64) -> (r:int64) {
     n >> 1 -> r
@@ -201,7 +209,7 @@ rwfunc boolean(n:int64) -> (r:int64) {
         finish('iops', None, 1)
         init('iops', 2)
         finish('iops', 2)
-        print(json.dumps({'checks': checks, 'boundary_restarts': 32, 'sigkill_restarts': 24,
+        print(json.dumps({'checks': checks, 'boundary_restarts': 32, 'sigkill_restarts': args.sigkill_restarts,
                           'prepared_partial_commit_replay': 'passed', 'visibility_and_rejections': 'passed'}))
 
 

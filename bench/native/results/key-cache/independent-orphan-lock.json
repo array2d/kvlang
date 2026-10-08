@@ -1,0 +1,28 @@
+{
+  "cpu": 25,
+  "lock_offset": 112,
+  "attempts": [
+    {
+      "attempt": 1,
+      "killed_exit": -9,
+      "pool_lock_after_death": 0
+    },
+    {
+      "attempt": 2,
+      "killed_exit": -9,
+      "pool_lock_after_death": 0
+    },
+    {
+      "attempt": 3,
+      "killed_exit": -9,
+      "pool_lock_after_death": 1,
+      "one_instruction_restart": "blocked > 0.5s",
+      "backtrace_exit": 0,
+      "backtrace_contains_sbo_lock": true,
+      "backtrace_contains_sbo_allocated_size": true,
+      "backtrace_contains_read_tlv": true,
+      "pool_lock_after_restart": 1
+    }
+  ],
+  "reproduced": true
+}

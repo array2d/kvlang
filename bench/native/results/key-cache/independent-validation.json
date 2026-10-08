@@ -1,0 +1,9 @@
+{
+  "worker_invocations": 97,
+  "cpu": 25,
+  "outputs_and_exact_final_state": "3 cases x 3 modes passed",
+  "cross_mode_restart_pairs": 9,
+  "live_argument_constant_and_pc_checks": "all 3 modes passed",
+  "prepared_partial_redo_replay": "all 3 modes passed",
+  "kvspaceGet_and_WriteInPlace_body_addresses": "all 5 keys identical"
+}

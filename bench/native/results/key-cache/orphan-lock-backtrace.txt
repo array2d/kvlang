@@ -1,0 +1,14 @@
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib/x86_64-linux-gnu/libthread_db.so.1".
+0x000072b41a6c1ce2 in sbo_lock (lk=<optimized out>) at /tmp/slotsboxmalloc-perf-leaf/include/slotsboxmalloc/slotsboxobj.h:88
+88	    while (!atomic_compare_exchange_weak(&lk->lock, &e, 1)) {
+
+Thread 1 (Thread 0x72b41a6ac740 (LWP 1265728) "iops"):
+#0  0x000072b41a6c1ce2 in sbo_lock (lk=<optimized out>) at /tmp/slotsboxmalloc-perf-leaf/include/slotsboxmalloc/slotsboxobj.h:88
+#1  sbo_allocated_size (metaptr=0x72341a400000, obj_offset=104) at /tmp/slotsboxmalloc-perf-leaf/include/slotsboxmalloc/slotsboxobj.h:558
+#2  0x000072b41a6c3cc1 in read_tlv (kv=0x5a3f1125b350, off=<optimized out>, out=0x7ffe2c675cc8, ol=0x7ffe2c675cbc) at /tmp/kvspace-c-perf-write/src/kvspace.c:1232
+#3  kvspaceShmGet (kv=0x5a3f1125b350, key=<optimized out>, resolve=<optimized out>, ol=ol@entry=0x7ffe2c676584) at /tmp/kvspace-c-perf-write/src/kvspace.c:1378
+#4  0x000072b41a6c6a90 in kvspaceGet (h=<optimized out>, key=<optimized out>, resolve=<optimized out>, out=0x7ffe2c6765c0, out_len=0x7ffe2c6765bc) at /tmp/kvspace-c-perf-write/src/durable_abi.c:80
+#5  0x00005a3f0e608415 in body ()
+#6  0x00005a3f0e6075a3 in main ()
+[Inferior 1 (process 1265728) detached]

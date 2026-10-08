@@ -154,11 +154,34 @@ static uint64_t now(void) {
     return (uint64_t)t.tv_sec * 1000000000 + t.tv_nsec;
 }
 
+#if defined(BENCH_KEY_LOOKUP)
+static uint8_t *lookup_body(void *h, const char *key, uint32_t expected) {
+    uint8_t *wire = NULL;
+    uint32_t len = 0;
+    if (kvspaceGet(h, key, 0, &wire, &len) || !wire || !len || wire[0] > 15)
+        return NULL;
+    uint32_t headlen = UINT32_C(1) << wire[0];
+    if (len < headlen || len - headlen != expected) return NULL;
+    return wire + headlen;
+}
+#endif
+
 static int execute(void *h, volatile uint64_t *state, volatile uint64_t *constants __attribute__((unused)),
                    volatile uint64_t *journal, volatile uint8_t *pc,
                    volatile uint8_t *status, uint64_t budget) {
     uint64_t steps = 0;
     for (;;) {
+#if defined(BENCH_KEY_LOOKUP)
+        pc = lookup_body(h, PC_KEY, strlen(initial_pc));
+#if BENCH_KEY_LOOKUP == 2
+        state = (volatile uint64_t *)lookup_body(h, STATE_KEY, DEPTH * STRIDE * 8);
+        constants = (volatile uint64_t *)lookup_body(h, CONST_KEY, sizeof(initial_constants));
+        journal = (volatile uint64_t *)lookup_body(h, JOURNAL_KEY, JOURNAL_WORDS * 8);
+        status = lookup_body(h, STATUS_KEY, 7);
+#endif
+        if (!pc || !state || !constants || !journal || !status)
+            return fail(h, "invalid state lookup");
+#endif
         if (status[0] != 'r' || status[1] != 'u' || status[2] != 'n' ||
             status[3] != 'n' || status[4] != 'i' || status[5] != 'n' || status[6] != 'g')
             return 1;
