@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 import time
 
-from compile import KV
+from compile import KV, STRATEGIES
 from run import compile_worker, run
 
 ROOT = '/vthread/native/'
@@ -38,6 +38,7 @@ def main():
         ap.add_argument('--' + name, type=Path, required=True)
     ap.add_argument('--cpu', type=int, default=24)
     ap.add_argument('--sigkill-restarts', type=int, default=24)
+    ap.add_argument('--strategy', choices=STRATEGIES)
     args = ap.parse_args()
     if args.sigkill_restarts < 0:
         ap.error('--sigkill-restarts must be nonnegative')

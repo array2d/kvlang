@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Compare scalar native workers, the interpreter, and unchanged Python fixtures."""
 import argparse
+from contextlib import closing
 import csv
 import hashlib
 import importlib.util
@@ -13,6 +14,8 @@ import statistics
 import subprocess
 import tempfile
 import time
+
+from compile import KV
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location('benchmark', ROOT / 'benchmark/run.py')
@@ -35,9 +38,12 @@ def run(command, env, cpu, expected=0):
 
 
 def compile_worker(args, source, entry, binary):
-    run(['python3', Path(__file__).with_name('compile.py'), '--kvlang', args.kvlang,
+    command = ['python3', Path(__file__).with_name('compile.py'), '--kvlang', args.kvlang,
          '--frontend', args.frontend, '--backend', args.backend, '--include', args.include,
-         '--source', source, '--entry', entry, '--output', binary], os.environ, args.cpu)
+         '--source', source, '--entry', entry, '--output', binary]
+    if getattr(args, 'strategy', None):
+        command += ['--strategy', args.strategy]
+    run(command, os.environ, args.cpu)
 
 
 def compile_case(args, case, binary):
@@ -65,6 +71,61 @@ def loaded_libraries(result, frontend):
     if not any(Path(p).resolve() == frontend.resolve() for p in paths):
         raise RuntimeError('frontend was not loaded: ' + str(frontend))
     return {p: sha(p) for p in paths if 'libkv' in Path(p).name}
+
+
+def final_state_digest(frontend, dsn):
+    members = ['pc', 'status', 'frames', 'constants', 'journal', 'program']
+    with closing(KV(frontend, dsn)) as store:
+        return hashlib.sha256(b''.join(store.get('/vthread/native/‥' + m)[1] for m in members)).hexdigest()
+
+
+def measure_pairs(args, scales, variants, workers, jit=False):
+
+    def sample(case, scale, variant):
+        with tempfile.TemporaryDirectory(prefix='native-paired-') as td:
+            env = dict(os.environ, BENCH_SCALE=str(scale))
+            if variant == 'python':
+                result, wall = run(['python3', ROOT / 'benchmark/cases' / case / (case + '.py')], env, args.cpu)
+                digest = ''
+            else:
+                dsn = 'shm://' + td + '/store'
+                worker = workers[case][variant]
+                _, init_wall = run([worker, dsn, 'init', scale], env, args.cpu)
+                result, wall = run([worker, dsn, 'run'], env, args.cpu)
+                wall += init_wall
+                digest = final_state_digest(args.frontend, dsn)
+            ns, value = output(result)
+            data = dict(kernel_ns=ns, wall_ns=wall, result=value, state_sha256=digest)
+            if jit:
+                match = re.search(r'__jit_ns:\s*(\d+)', result.stdout)
+                data['jit_ns'] = int(match[1]) if match else 0
+            return data
+
+    fields = ['case', 'scale', 'pair', 'variant', 'kernel_ns', 'wall_ns', 'result', 'state_sha256']
+    if jit:
+        fields.append('jit_ns')
+    rows = []
+    with (args.output / 'samples.csv').open('w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=fields, lineterminator='\n')
+        writer.writeheader()
+        for case, points in scales.items():
+            for scale in points:
+                for variant in variants:
+                    sample(case, scale, variant)
+                for pair in range(args.pairs):
+                    order = variants if pair % 2 == 0 else variants[::-1]
+                    samples = {v: sample(case, scale, v) for v in order}
+                    if len({s['result'] for s in samples.values()}) != 1:
+                        raise RuntimeError('output mismatch')
+                    if len({s['state_sha256'] for v, s in samples.items() if v != 'python'}) != 1:
+                        raise RuntimeError('final KV state mismatch')
+                    for variant, data in samples.items():
+                        row = dict(case=case, scale=scale, pair=pair, variant=variant, **data)
+                        rows.append(row)
+                        writer.writerow(row)
+                    f.flush()
+                    print(f'{case}({scale}) pair {pair + 1}/{args.pairs}: output and KV state equal', flush=True)
+    return rows
 
 
 def main():

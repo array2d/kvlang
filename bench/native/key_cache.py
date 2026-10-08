@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 """Isolate shared-memory address caching on unchanged scalar benchmark fixtures."""
 import argparse
-from contextlib import closing
-import csv
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -13,11 +10,9 @@ import statistics
 import subprocess
 import tempfile
 
-from compile import KV
-from run import ROOT, CASES, benchmark, compile_case, loaded_libraries, output, run, sha
+from run import CASES, benchmark, compile_case, loaded_libraries, measure_pairs, run, sha
 
 VARIANTS = ['lookup-all', 'lookup-pc', 'cached', 'python']
-MEMBERS = ['pc', 'status', 'frames', 'constants', 'journal', 'program']
 
 
 def main():
@@ -65,46 +60,7 @@ def main():
                         dict(env, LD_DEBUG='libs'), args.cpu)
     metadata['loaded'] = loaded_libraries(loaded, args.frontend)
 
-    def sample(case, scale, variant):
-        with tempfile.TemporaryDirectory(prefix='key-cache-sample-') as td:
-            dsn = 'shm://' + td + '/store'
-            if variant == 'python':
-                result, wall = run(['python3', ROOT / 'benchmark/cases' / case / (case + '.py')],
-                                   dict(env, BENCH_SCALE=str(scale)), args.cpu)
-                digest = ''
-            else:
-                worker = workers[case][variant]
-                _, init_wall = run([worker, dsn, 'init', scale], env, args.cpu)
-                result, wall = run([worker, dsn, 'run'], env, args.cpu)
-                wall += init_wall
-                with closing(KV(args.frontend, dsn)) as store:
-                    digest = hashlib.sha256(b''.join(store.get('/vthread/native/‥' + m)[1]
-                                                    for m in MEMBERS)).hexdigest()
-            ns, value = output(result)
-            return dict(kernel_ns=ns, wall_ns=wall, result=value, state_sha256=digest)
-
-    rows = []
-    with (args.output / 'samples.csv').open('w', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=['case', 'scale', 'pair', 'variant', 'kernel_ns',
-                                              'wall_ns', 'result', 'state_sha256'], lineterminator='\n')
-        writer.writeheader()
-        for case, points in scales.items():
-            for scale in points:
-                for variant in VARIANTS:
-                    sample(case, scale, variant)
-                for pair in range(args.pairs):
-                    order = VARIANTS if pair % 2 == 0 else VARIANTS[::-1]
-                    samples = {v: sample(case, scale, v) for v in order}
-                    if len({s['result'] for s in samples.values()}) != 1:
-                        raise RuntimeError('output mismatch')
-                    if len({samples[v]['state_sha256'] for v in VARIANTS[:-1]}) != 1:
-                        raise RuntimeError('final KV state mismatch')
-                    for variant, data in samples.items():
-                        row = dict(case=case, scale=scale, pair=pair, variant=variant, **data)
-                        rows.append(row)
-                        writer.writerow(row)
-                    f.flush()
-                    print(f'{case}({scale}) pair {pair + 1}/{args.pairs}: output and KV state equal', flush=True)
+    rows = measure_pairs(args, scales, VARIANTS, workers)
     summary = {}
     for case, points in scales.items():
         for scale in points:

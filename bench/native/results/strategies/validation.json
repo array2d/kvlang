@@ -1,0 +1,57 @@
+{
+  "suites": {
+    "aot": {
+      "checks": 147,
+      "boundary_restarts": 32,
+      "sigkill_restarts": 24,
+      "prepared_partial_commit_replay": "passed",
+      "visibility_and_rejections": "passed"
+    },
+    "decoded": {
+      "checks": 147,
+      "boundary_restarts": 32,
+      "sigkill_restarts": 24,
+      "prepared_partial_commit_replay": "passed",
+      "visibility_and_rejections": "passed"
+    },
+    "partial": {
+      "checks": 147,
+      "boundary_restarts": 32,
+      "sigkill_restarts": 24,
+      "prepared_partial_commit_replay": "passed",
+      "visibility_and_rejections": "passed"
+    },
+    "guarded": {
+      "checks": 147,
+      "boundary_restarts": 32,
+      "sigkill_restarts": 24,
+      "prepared_partial_commit_replay": "passed",
+      "visibility_and_rejections": "passed"
+    },
+    "copy-patch": {
+      "checks": 147,
+      "boundary_restarts": 32,
+      "sigkill_restarts": 24,
+      "prepared_partial_commit_replay": "passed",
+      "visibility_and_rejections": "passed"
+    },
+    "copy-patch-guarded": {
+      "checks": 147,
+      "boundary_restarts": 32,
+      "sigkill_restarts": 24,
+      "prepared_partial_commit_replay": "passed",
+      "visibility_and_rejections": "passed"
+    },
+    "address-cache": {
+      "checks": 147,
+      "boundary_restarts": 32,
+      "sigkill_restarts": 24,
+      "prepared_partial_commit_replay": "passed",
+      "visibility_and_rejections": "passed"
+    }
+  },
+  "cross_method_restarts": 49,
+  "live_edit_groups": 7,
+  "prepared_call_replays": 7,
+  "address_cache_groups": 3
+}

@@ -11,6 +11,8 @@ import struct
 import subprocess
 import tempfile
 
+STRATEGIES = ['decoded', 'partial', 'guarded', 'copy-patch', 'copy-patch-guarded', 'address-cache']
+
 
 class KV:
     def __init__(self, frontend, dsn):
@@ -36,6 +38,81 @@ class KV:
 
     def close(self):
         self.lib.kvspaceClose(self.handle)
+
+
+def instruction_code(fn, row, instruction, functions, bindings=None):
+    op, reads, writes, call = instruction
+    code = []
+    bindings = bindings or {}
+    binary = {'bitand': '&', 'bitor': '|', 'bitxor': '^', '&': '&', '|': '|', '^': '^',
+              'eq': '==', 'neq': '!=', 'lt': '<', 'le': '<=', 'gt': '>', 'ge': '>='}
+    arithmetic = {'+': 'add', 'add': 'add', '-': 'sub', 'sub': 'sub', '*': 'mul', 'mul': 'mul'}
+    comparisons = {'eq', 'neq', 'lt', 'le', 'gt', 'ge'}
+    for i, (mode, value) in enumerate(reads):
+        expr = f'load_constant(constants, {value})' if mode == 'constant' else f'load_cell(state, base + {2 + 2 * fn["slots"][value]})'
+        expr = bindings.get('reads', {}).get(i, expr)
+        code.append(f'cell_t a{i} = {expr}; if (!a{i}.tag) return fail(h, "undefined operand");')
+    dest = 'base + ' + str(2 + 2 * fn['slots'][writes[0][1]]) if writes else None
+    dest = bindings.get('dest', dest)
+    prefix, sep, bare = op.rpartition('·')
+    if not sep:
+        bare = op
+    elif prefix != 'int64':
+        raise ValueError('unsupported opcode type: ' + op)
+    next_row = bindings.get('next_row', str(row + 1))
+    target_depth, target_row = 'depth', next_row
+    if call:
+        child = functions[op]
+        if len(reads) != child['nr'] or not dest:
+            raise ValueError('call arity mismatch')
+        code += [f'if (a{i}.tag != 1) return fail(h, "expected int64");' for i in range(len(reads))]
+        code += ['if (depth + 1 >= DEPTH) return fail(h, "stack overflow");',
+                 'size_t next = (depth + 1) * STRIDE;',
+                 'for (size_t j = 2; j < STRIDE; j += 2) stage(journal, &count, next + j, 0);',
+                 f'stage(journal, &count, next, {bindings.get("callee", child["id"])});',
+                 f'stage(journal, &count, next + 1, {next_row});',
+                 f'stage(journal, &count, next + {2 + 2 * child["nr"]}, 3);',
+                 f'stage(journal, &count, next + {3 + 2 * child["nr"]}, {dest});']
+        for i, (mode, value) in enumerate(reads):
+            reference = f'a{i}.value' if mode == 'constant' else 'base + ' + str(2 + 2 * fn['slots'][value])
+            reference = bindings.get('references', {}).get(i, reference)
+            tag = bindings.get('tags', {}).get(i, 1 if mode == 'constant' else 3)
+            code += [f'stage(journal, &count, next + {2 + 2 * i}, {tag});',
+                     f'stage(journal, &count, next + {3 + 2 * i}, {reference});']
+        target_depth, target_row = 'depth + 1', '1'
+    elif bare == 'return' and not reads and not writes:
+        target_depth, target_row = 'depth ? depth - 1 : 0', 'depth ? state[base + 1] : 0'
+    elif bare in ('goto', 'br') and not writes:
+        if len(reads) != (1 if bare == 'goto' else 3):
+            raise ValueError('branch arity mismatch')
+        if bare == 'goto':
+            code.append('if (a0.tag != 1 || !a0.value) return fail(h, "invalid branch");')
+            target_row = 'a0.value'
+        else:
+            code.append('if (a0.tag != 2 || a1.tag != 1 || a2.tag != 1 || !a1.value || !a2.value) return fail(h, "invalid branch");')
+            target_row = 'a0.value ? a1.value : a2.value'
+    else:
+        if not dest:
+            raise ValueError('missing output')
+        if bare == '=' and len(reads) == 1:
+            expression, tag = 'a0.value', 'a0.tag'
+        elif bare in (*binary, *arithmetic, 'shl', 'shr') and len(reads) == 2:
+            code.append('if (a0.tag != 1 || a1.tag != 1) return fail(h, "expected int64");')
+            tag = '2' if bare in comparisons else '1'
+            if bare in arithmetic:
+                code += ['int64_t value;', f'if (__builtin_{arithmetic[bare]}_overflow((int64_t)a0.value, (int64_t)a1.value, &value)) return fail(h, "integer overflow");']
+                expression = '(uint64_t)value'
+            elif bare in ('shl', 'shr'):
+                code.append('if (a1.value >= 64) return fail(h, "invalid shift");')
+                expression = 'a0.value << a1.value' if bare == 'shl' else '(uint64_t)((int64_t)a0.value >> a1.value)'
+            else:
+                expression = f'((int64_t)a0.value {binary[bare]} (int64_t)a1.value)'
+        else:
+            raise ValueError('unsupported opcode: ' + op)
+        code.append(f'if (store_cell(state, journal, &count, {dest}, (cell_t){{{expression}, {tag}}})) return fail(h, "invalid output");')
+    tail = bindings.get('tail', 'break;')
+    code.append(f'if (commit(h, state, journal, pc, count, {target_depth}, {target_row})) return -1;\n{tail}')
+    return code
 
 
 def generate(kv, entry):
@@ -113,72 +190,11 @@ def generate(kv, entry):
     load(entry)
     stride = 2 + 2 * max(len(f['slots']) for f in functions.values())
     code = []
-    binary = {'bitand': '&', 'bitor': '|', 'bitxor': '^', '&': '&', '|': '|', '^': '^',
-              'eq': '==', 'neq': '!=', 'lt': '<', 'le': '<=', 'gt': '>', 'ge': '>='}
-    arithmetic = {'+': 'add', 'add': 'add', '-': 'sub', 'sub': 'sub', '*': 'mul', 'mul': 'mul'}
-    comparisons = {'eq', 'neq', 'lt', 'le', 'gt', 'ge'}
     for fn in functions.values():
         code.append(f'case {fn["id"]}: switch (row) {{')
         for row, (op, reads, writes, call) in enumerate(fn['instructions'], 1):
             code.append(f'case {row}: {{')
-            for i, (mode, value) in enumerate(reads):
-                expr = f'load_constant(constants, {value})' if mode == 'constant' else f'load_cell(state, base + {2 + 2 * fn["slots"][value]})'
-                code.append(f'cell_t a{i} = {expr}; if (!a{i}.tag) return fail(h, "undefined operand");')
-            dest = 'base + ' + str(2 + 2 * fn['slots'][writes[0][1]]) if writes else None
-            prefix, sep, bare = op.rpartition('·')
-            if not sep:
-                bare = op
-            elif prefix != 'int64':
-                raise ValueError('unsupported opcode type: ' + op)
-            target_depth, target_row = 'depth', str(row + 1)
-            if call:
-                child = functions[op]
-                if len(reads) != child['nr'] or not dest:
-                    raise ValueError('call arity mismatch')
-                code += [f'if (a{i}.tag != 1) return fail(h, "expected int64");' for i in range(len(reads))]
-                code += ['if (depth + 1 >= DEPTH) return fail(h, "stack overflow");',
-                         'size_t next = (depth + 1) * STRIDE;',
-                         'for (size_t j = 2; j < STRIDE; j += 2) stage(journal, &count, next + j, 0);',
-                         f'stage(journal, &count, next, {child["id"]});',
-                         f'stage(journal, &count, next + 1, {row + 1});',
-                         f'stage(journal, &count, next + {2 + 2 * child["nr"]}, 3);',
-                         f'stage(journal, &count, next + {3 + 2 * child["nr"]}, {dest});']
-                for i, (mode, value) in enumerate(reads):
-                    reference = f'a{i}.value' if mode == 'constant' else 'base + ' + str(2 + 2 * fn['slots'][value])
-                    code += [f'stage(journal, &count, next + {2 + 2 * i}, {1 if mode == "constant" else 3});',
-                             f'stage(journal, &count, next + {3 + 2 * i}, {reference});']
-                target_depth, target_row = 'depth + 1', '1'
-            elif bare == 'return' and not reads and not writes:
-                target_depth, target_row = 'depth ? depth - 1 : 0', 'depth ? state[base + 1] : 0'
-            elif bare in ('goto', 'br') and not writes:
-                if len(reads) != (1 if bare == 'goto' else 3):
-                    raise ValueError('branch arity mismatch')
-                if bare == 'goto':
-                    code.append('if (a0.tag != 1 || !a0.value) return fail(h, "invalid branch");')
-                    target_row = 'a0.value'
-                else:
-                    code.append('if (a0.tag != 2 || a1.tag != 1 || a2.tag != 1 || !a1.value || !a2.value) return fail(h, "invalid branch");')
-                    target_row = 'a0.value ? a1.value : a2.value'
-            else:
-                if not dest:
-                    raise ValueError('missing output')
-                if bare == '=' and len(reads) == 1:
-                    expression, tag = 'a0.value', 'a0.tag'
-                elif bare in (*binary, *arithmetic, 'shl', 'shr') and len(reads) == 2:
-                    code.append('if (a0.tag != 1 || a1.tag != 1) return fail(h, "expected int64");')
-                    tag = '2' if bare in comparisons else '1'
-                    if bare in arithmetic:
-                        code += ['int64_t value;', f'if (__builtin_{arithmetic[bare]}_overflow((int64_t)a0.value, (int64_t)a1.value, &value)) return fail(h, "integer overflow");']
-                        expression = '(uint64_t)value'
-                    elif bare in ('shl', 'shr'):
-                        code.append('if (a1.value >= 64) return fail(h, "invalid shift");')
-                        expression = 'a0.value << a1.value' if bare == 'shl' else '(uint64_t)((int64_t)a0.value >> a1.value)'
-                    else:
-                        expression = f'((int64_t)a0.value {binary[bare]} (int64_t)a1.value)'
-                else:
-                    raise ValueError('unsupported opcode: ' + op)
-                code.append(f'if (store_cell(state, journal, &count, {dest}, (cell_t){{{expression}, {tag}}})) return fail(h, "invalid output");')
-            code.append(f'if (commit(h, state, journal, pc, count, {target_depth}, {target_row})) return -1;\nbreak;')
+            code += instruction_code(fn, row, (op, reads, writes, call), functions)
             code.append('}')
         code.append('default: return fail(h, "invalid PC row"); } break;')
     schema = dict(entry=entry, stride=stride, functions=functions, constants=constants)
@@ -192,6 +208,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     for flag in ['kvlang', 'frontend', 'backend', 'include', 'source', 'entry', 'output']:
         ap.add_argument('--' + flag, required=True)
+    ap.add_argument('--strategy', choices=STRATEGIES)
     args = ap.parse_args()
     os.environ['KVSPACE_BACKEND_PATH'] = args.backend
     with tempfile.TemporaryDirectory(prefix='kvlang-native-layout-') as td:
@@ -207,6 +224,9 @@ def main():
         finally:
             kv.close()
     out = Path(args.output).resolve()
+    if args.strategy:
+        from strategies import generate as generate_strategy
+        text, _ = generate_strategy(text, schema, args.strategy)
     out.with_suffix('.c').write_text(text)
     out.with_suffix('.schema.json').write_text(json.dumps(schema, indent=2) + '\n')
     frontend = Path(args.frontend).resolve()

@@ -1,0 +1,698 @@
+{
+  "iops(500)": {
+    "medians_us": {
+      "aot": 52.001,
+      "decoded": 63.924,
+      "partial": 57.149,
+      "guarded": 49.552,
+      "copy-patch": 54.148,
+      "copy-patch-guarded": 52.609,
+      "address-cache": 47.408,
+      "python": 25.877
+    },
+    "wall_medians_ms": {
+      "aot": 7.625876,
+      "decoded": 7.703428,
+      "partial": 7.615447,
+      "guarded": 7.729145,
+      "copy-patch": 7.527831,
+      "copy-patch-guarded": 7.684689,
+      "address-cache": 7.591197,
+      "python": 26.027448
+    },
+    "paired_aot_speedups": {
+      "decoded": {
+        "median": 0.8137307078233103,
+        "minimum": 0.7713154978629096,
+        "maximum": 1.0557301141061683
+      },
+      "partial": {
+        "median": 0.9143276114896921,
+        "minimum": 0.7915008365957862,
+        "maximum": 1.2324540620228506
+      },
+      "guarded": {
+        "median": 1.053350353575264,
+        "minimum": 0.8319406183042547,
+        "maximum": 1.4329089128305583
+      },
+      "copy-patch": {
+        "median": 0.960072394178917,
+        "minimum": 0.8671079917052161,
+        "maximum": 1.2856122878640865
+      },
+      "copy-patch-guarded": {
+        "median": 0.998348916236297,
+        "minimum": 0.9154000789073214,
+        "maximum": 1.3672897196261682
+      },
+      "address-cache": {
+        "median": 1.1103662007463158,
+        "minimum": 1.0002874153151304,
+        "maximum": 1.189250759365508
+      }
+    },
+    "jit_medians_us": {
+      "copy-patch": 4.756,
+      "copy-patch-guarded": 4.786
+    }
+  },
+  "iops(1000)": {
+    "medians_us": {
+      "aot": 100.345,
+      "decoded": 123.692,
+      "partial": 110.805,
+      "guarded": 93.67,
+      "copy-patch": 103.024,
+      "copy-patch-guarded": 97.555,
+      "address-cache": 90.114,
+      "python": 48.54
+    },
+    "wall_medians_ms": {
+      "aot": 7.629492,
+      "decoded": 7.581909,
+      "partial": 7.630691,
+      "guarded": 7.611463,
+      "copy-patch": 7.695149,
+      "copy-patch-guarded": 7.684138,
+      "address-cache": 7.617875,
+      "python": 26.262317
+    },
+    "paired_aot_speedups": {
+      "decoded": {
+        "median": 0.8134322308690013,
+        "minimum": 0.7552066244824623,
+        "maximum": 0.9508043851967176
+      },
+      "partial": {
+        "median": 0.905599927801092,
+        "minimum": 0.8468007857719156,
+        "maximum": 1.126442192228253
+      },
+      "guarded": {
+        "median": 1.0677879883665637,
+        "minimum": 0.9098522435084924,
+        "maximum": 1.2518095441443364
+      },
+      "copy-patch": {
+        "median": 0.949749313548408,
+        "minimum": 0.9169334739711195,
+        "maximum": 1.1568375937859492
+      },
+      "copy-patch-guarded": {
+        "median": 1.0064092934755395,
+        "minimum": 0.681951013972707,
+        "maximum": 1.2079834166046561
+      },
+      "address-cache": {
+        "median": 1.0809246613679615,
+        "minimum": 1.0387939054392095,
+        "maximum": 1.301207359566771
+      }
+    },
+    "jit_medians_us": {
+      "copy-patch": 4.959,
+      "copy-patch-guarded": 4.63
+    }
+  },
+  "iops(2000)": {
+    "medians_us": {
+      "aot": 191.34,
+      "decoded": 245.305,
+      "partial": 216.777,
+      "guarded": 182.545,
+      "copy-patch": 205.109,
+      "copy-patch-guarded": 189.913,
+      "address-cache": 173.29,
+      "python": 95.057
+    },
+    "wall_medians_ms": {
+      "aot": 8.169009,
+      "decoded": 7.810361,
+      "partial": 8.007476,
+      "guarded": 7.846353,
+      "copy-patch": 7.92321,
+      "copy-patch-guarded": 7.787748,
+      "address-cache": 7.746156,
+      "python": 26.448429
+    },
+    "paired_aot_speedups": {
+      "decoded": {
+        "median": 0.7709620755956101,
+        "minimum": 0.7127520425391527,
+        "maximum": 1.0688024358083796
+      },
+      "partial": {
+        "median": 0.8773117913188332,
+        "minimum": 0.8079947200527995,
+        "maximum": 1.16879088088935
+      },
+      "guarded": {
+        "median": 1.0595932734106517,
+        "minimum": 0.9865363226599544,
+        "maximum": 1.334978543002317
+      },
+      "copy-patch": {
+        "median": 0.9203802998709165,
+        "minimum": 0.8910524528118783,
+        "maximum": 1.3300171846207995
+      },
+      "copy-patch-guarded": {
+        "median": 1.01726580065609,
+        "minimum": 0.90222907874244,
+        "maximum": 1.3336205196342008
+      },
+      "address-cache": {
+        "median": 1.1190389304973904,
+        "minimum": 1.0101648249035542,
+        "maximum": 1.3921914958172599
+      }
+    },
+    "jit_medians_us": {
+      "copy-patch": 4.916,
+      "copy-patch-guarded": 4.844
+    }
+  },
+  "iops(200000)": {
+    "medians_us": {
+      "aot": 17833.929,
+      "decoded": 22663.596,
+      "partial": 20945.871,
+      "guarded": 16533.0,
+      "copy-patch": 18634.073,
+      "copy-patch-guarded": 17483.228,
+      "address-cache": 16510.243,
+      "python": 8903.252
+    },
+    "wall_medians_ms": {
+      "aot": 25.669002,
+      "decoded": 30.586502,
+      "partial": 28.644734,
+      "guarded": 24.552152,
+      "copy-patch": 26.251257,
+      "copy-patch-guarded": 25.288196,
+      "address-cache": 24.416927,
+      "python": 34.937348
+    },
+    "paired_aot_speedups": {
+      "decoded": {
+        "median": 0.7795597051583287,
+        "minimum": 0.7290193723948107,
+        "maximum": 0.8504307642282927
+      },
+      "partial": {
+        "median": 0.880480454670034,
+        "minimum": 0.8038433942850722,
+        "maximum": 0.903622029272938
+      },
+      "guarded": {
+        "median": 1.0773897054376096,
+        "minimum": 0.9776080808604181,
+        "maximum": 1.1524773322830013
+      },
+      "copy-patch": {
+        "median": 0.9642667975565398,
+        "minimum": 0.9148068964424109,
+        "maximum": 1.0134972258941992
+      },
+      "copy-patch-guarded": {
+        "median": 1.026058932837209,
+        "minimum": 0.9444267629676163,
+        "maximum": 1.0836108003772675
+      },
+      "address-cache": {
+        "median": 1.0795655835978988,
+        "minimum": 0.9652170266692419,
+        "maximum": 1.2004859012760953
+      }
+    },
+    "jit_medians_us": {
+      "copy-patch": 4.745,
+      "copy-patch-guarded": 4.942
+    }
+  },
+  "fib(8)": {
+    "medians_us": {
+      "aot": 17.801,
+      "decoded": 20.078,
+      "partial": 17.559,
+      "guarded": 18.105,
+      "copy-patch": 18.271,
+      "copy-patch-guarded": 18.09,
+      "address-cache": 17.678,
+      "python": 10.435
+    },
+    "wall_medians_ms": {
+      "aot": 7.814561,
+      "decoded": 7.729074,
+      "partial": 7.727608,
+      "guarded": 7.75796,
+      "copy-patch": 7.654348,
+      "copy-patch-guarded": 7.621502,
+      "address-cache": 7.797265,
+      "python": 25.959711
+    },
+    "paired_aot_speedups": {
+      "decoded": {
+        "median": 0.8867417073413687,
+        "minimum": 0.733531914893617,
+        "maximum": 1.3123617984626723
+      },
+      "partial": {
+        "median": 0.9817187766957116,
+        "minimum": 0.9342989084802686,
+        "maximum": 1.4329979879275654
+      },
+      "guarded": {
+        "median": 0.9649574563367667,
+        "minimum": 0.9399714904176126,
+        "maximum": 1.419694726050803
+      },
+      "copy-patch": {
+        "median": 0.9704910812596345,
+        "minimum": 0.769095895337859,
+        "maximum": 1.3561286110657744
+      },
+      "copy-patch-guarded": {
+        "median": 0.9823438534539837,
+        "minimum": 0.7078368090036412,
+        "maximum": 1.3664620107444359
+      },
+      "address-cache": {
+        "median": 1.0074613815214224,
+        "minimum": 0.9587208353728177,
+        "maximum": 1.4033892579664453
+      }
+    },
+    "jit_medians_us": {
+      "copy-patch": 4.51,
+      "copy-patch-guarded": 4.905
+    }
+  },
+  "fib(9)": {
+    "medians_us": {
+      "aot": 24.783,
+      "decoded": 28.97,
+      "partial": 25.084,
+      "guarded": 25.882,
+      "copy-patch": 24.909,
+      "copy-patch-guarded": 24.839,
+      "address-cache": 24.898,
+      "python": 14.799
+    },
+    "wall_medians_ms": {
+      "aot": 7.99038,
+      "decoded": 7.914073,
+      "partial": 7.722027,
+      "guarded": 7.723562,
+      "copy-patch": 7.884177,
+      "copy-patch-guarded": 7.848667,
+      "address-cache": 7.94337,
+      "python": 26.19002
+    },
+    "paired_aot_speedups": {
+      "decoded": {
+        "median": 0.8511218501898515,
+        "minimum": 0.5931660039761432,
+        "maximum": 0.9060548860171337
+      },
+      "partial": {
+        "median": 0.9860156435174212,
+        "minimum": 0.9525880991339746,
+        "maximum": 1.0620090122422938
+      },
+      "guarded": {
+        "median": 0.9415618448637316,
+        "minimum": 0.7230092388913331,
+        "maximum": 1.056699599254057
+      },
+      "copy-patch": {
+        "median": 0.9949415873780562,
+        "minimum": 0.9605753435634441,
+        "maximum": 1.0611626887675818
+      },
+      "copy-patch-guarded": {
+        "median": 0.9987104573846464,
+        "minimum": 0.8238159328334295,
+        "maximum": 1.0616279996810971
+      },
+      "address-cache": {
+        "median": 0.994543081972399,
+        "minimum": 0.7974408659628491,
+        "maximum": 1.0325327335528958
+      }
+    },
+    "jit_medians_us": {
+      "copy-patch": 4.83,
+      "copy-patch-guarded": 4.724
+    }
+  },
+  "fib(10)": {
+    "medians_us": {
+      "aot": 36.451,
+      "decoded": 42.732,
+      "partial": 37.572,
+      "guarded": 39.512,
+      "copy-patch": 35.962,
+      "copy-patch-guarded": 35.938,
+      "address-cache": 36.335,
+      "python": 19.168
+    },
+    "wall_medians_ms": {
+      "aot": 7.690734,
+      "decoded": 7.789066,
+      "partial": 7.630757,
+      "guarded": 7.632858,
+      "copy-patch": 7.777207,
+      "copy-patch-guarded": 7.65027,
+      "address-cache": 7.75532,
+      "python": 26.132394
+    },
+    "paired_aot_speedups": {
+      "decoded": {
+        "median": 0.8622932312374221,
+        "minimum": 0.8146459349778852,
+        "maximum": 0.949198606271777
+      },
+      "partial": {
+        "median": 0.9654103874778187,
+        "minimum": 0.9327799096770825,
+        "maximum": 1.0603025506629649
+      },
+      "guarded": {
+        "median": 0.9269995877138735,
+        "minimum": 0.7021803865139796,
+        "maximum": 1.026297481563935
+      },
+      "copy-patch": {
+        "median": 0.9951680388716426,
+        "minimum": 0.9840082899232622,
+        "maximum": 1.1362827428952784
+      },
+      "copy-patch-guarded": {
+        "median": 1.014274680321538,
+        "minimum": 0.9783156280801665,
+        "maximum": 1.1518166699551822
+      },
+      "address-cache": {
+        "median": 0.9864655218531001,
+        "minimum": 0.4094467846110643,
+        "maximum": 1.1379598429363111
+      }
+    },
+    "jit_medians_us": {
+      "copy-patch": 4.785,
+      "copy-patch-guarded": 4.706
+    }
+  },
+  "fib(18)": {
+    "medians_us": {
+      "aot": 1427.003,
+      "decoded": 1703.371,
+      "partial": 1513.618,
+      "guarded": 1478.858,
+      "copy-patch": 1358.149,
+      "copy-patch-guarded": 1349.109,
+      "address-cache": 1470.5,
+      "python": 513.928
+    },
+    "wall_medians_ms": {
+      "aot": 9.161707,
+      "decoded": 9.591008,
+      "partial": 9.102126,
+      "guarded": 8.985723,
+      "copy-patch": 8.965606,
+      "copy-patch-guarded": 8.966626,
+      "address-cache": 9.162385,
+      "python": 26.663494
+    },
+    "paired_aot_speedups": {
+      "decoded": {
+        "median": 0.841182486699972,
+        "minimum": 0.7961406306466509,
+        "maximum": 0.9173191245049417
+      },
+      "partial": {
+        "median": 0.9612265052899213,
+        "minimum": 0.904269188544697,
+        "maximum": 1.0053049349119525
+      },
+      "guarded": {
+        "median": 0.955203856709764,
+        "minimum": 0.8963657218439027,
+        "maximum": 1.0547297858313291
+      },
+      "copy-patch": {
+        "median": 1.0530058524361436,
+        "minimum": 1.0125290903387245,
+        "maximum": 1.1280635255078109
+      },
+      "copy-patch-guarded": {
+        "median": 1.057737365920767,
+        "minimum": 1.0182844160568962,
+        "maximum": 1.1127713228891407
+      },
+      "address-cache": {
+        "median": 0.96648000950571,
+        "minimum": 0.9415755385092363,
+        "maximum": 0.994822078383446
+      }
+    },
+    "jit_medians_us": {
+      "copy-patch": 4.906,
+      "copy-patch-guarded": 4.782
+    }
+  },
+  "nqueens(4)": {
+    "medians_us": {
+      "aot": 20.337,
+      "decoded": 21.638,
+      "partial": 19.691,
+      "guarded": 20.104,
+      "copy-patch": 21.385,
+      "copy-patch-guarded": 21.505,
+      "address-cache": 19.359,
+      "python": 20.33
+    },
+    "wall_medians_ms": {
+      "aot": 7.983957,
+      "decoded": 7.948847,
+      "partial": 7.941297,
+      "guarded": 7.972209,
+      "copy-patch": 7.814703,
+      "copy-patch-guarded": 7.830715,
+      "address-cache": 7.721296,
+      "python": 26.213553
+    },
+    "paired_aot_speedups": {
+      "decoded": {
+        "median": 0.9450455173728611,
+        "minimum": 0.696768262499116,
+        "maximum": 0.9799542900676126
+      },
+      "partial": {
+        "median": 1.028021978021978,
+        "minimum": 0.9411709159584514,
+        "maximum": 1.0625666548169215
+      },
+      "guarded": {
+        "median": 1.0115897333863908,
+        "minimum": 0.8186675047140164,
+        "maximum": 1.0387678122380553
+      },
+      "copy-patch": {
+        "median": 0.9410536307546274,
+        "minimum": 0.9151741517415174,
+        "maximum": 0.9806457703927492
+      },
+      "copy-patch-guarded": {
+        "median": 0.942664496628691,
+        "minimum": 0.4953830855194621,
+        "maximum": 1.046141975308642
+      },
+      "address-cache": {
+        "median": 1.0612310840648393,
+        "minimum": 0.7259021885583191,
+        "maximum": 1.200828519750277
+      }
+    },
+    "jit_medians_us": {
+      "copy-patch": 5.037,
+      "copy-patch-guarded": 4.948
+    }
+  },
+  "nqueens(5)": {
+    "medians_us": {
+      "aot": 45.369,
+      "decoded": 50.048,
+      "partial": 44.351,
+      "guarded": 42.892,
+      "copy-patch": 42.927,
+      "copy-patch-guarded": 41.693,
+      "address-cache": 41.798,
+      "python": 36.352
+    },
+    "wall_medians_ms": {
+      "aot": 7.875865,
+      "decoded": 7.780675,
+      "partial": 7.8049,
+      "guarded": 7.836159,
+      "copy-patch": 7.770746,
+      "copy-patch-guarded": 7.863821,
+      "address-cache": 7.771477,
+      "python": 26.185784
+    },
+    "paired_aot_speedups": {
+      "decoded": {
+        "median": 0.9043053617699821,
+        "minimum": 0.8310090083298782,
+        "maximum": 1.0800889184360327
+      },
+      "partial": {
+        "median": 1.0200092528336804,
+        "minimum": 1.0046751750420988,
+        "maximum": 1.1588649636663546
+      },
+      "guarded": {
+        "median": 1.0543958798596236,
+        "minimum": 0.5267482623761373,
+        "maximum": 1.0703191388915116
+      },
+      "copy-patch": {
+        "median": 1.0575910209526438,
+        "minimum": 0.9381763257536571,
+        "maximum": 1.220828930374545
+      },
+      "copy-patch-guarded": {
+        "median": 1.0811271818118093,
+        "minimum": 1.0353855546163238,
+        "maximum": 1.2557729468599035
+      },
+      "address-cache": {
+        "median": 1.0954427390791026,
+        "minimum": 1.0663266505276519,
+        "maximum": 1.24527533593619
+      }
+    },
+    "jit_medians_us": {
+      "copy-patch": 5.062,
+      "copy-patch-guarded": 4.857
+    }
+  },
+  "nqueens(6)": {
+    "medians_us": {
+      "aot": 117.306,
+      "decoded": 132.859,
+      "partial": 115.842,
+      "guarded": 111.302,
+      "copy-patch": 106.676,
+      "copy-patch-guarded": 103.925,
+      "address-cache": 109.607,
+      "python": 79.402
+    },
+    "wall_medians_ms": {
+      "aot": 7.963852,
+      "decoded": 7.927107,
+      "partial": 7.867713,
+      "guarded": 7.875472,
+      "copy-patch": 7.695301,
+      "copy-patch-guarded": 7.803407,
+      "address-cache": 7.898714,
+      "python": 26.597549
+    },
+    "paired_aot_speedups": {
+      "decoded": {
+        "median": 0.8870386867371723,
+        "minimum": 0.8646008174079287,
+        "maximum": 0.9534783352804173
+      },
+      "partial": {
+        "median": 1.0040572689130152,
+        "minimum": 0.9056210482432777,
+        "maximum": 1.1196186881263817
+      },
+      "guarded": {
+        "median": 1.0559736219320872,
+        "minimum": 1.0307233996733844,
+        "maximum": 1.1613028938090793
+      },
+      "copy-patch": {
+        "median": 1.0950776982082708,
+        "minimum": 1.0026709961244369,
+        "maximum": 1.187839516472922
+      },
+      "copy-patch-guarded": {
+        "median": 1.1370679607940541,
+        "minimum": 1.0214843402635745,
+        "maximum": 1.2440968581304128
+      },
+      "address-cache": {
+        "median": 1.0702418641145182,
+        "minimum": 1.0220730797912005,
+        "maximum": 1.2243636294144626
+      }
+    },
+    "jit_medians_us": {
+      "copy-patch": 4.867,
+      "copy-patch-guarded": 5.029
+    }
+  },
+  "nqueens(8)": {
+    "medians_us": {
+      "aot": 1506.645,
+      "decoded": 1711.761,
+      "partial": 1523.178,
+      "guarded": 1430.915,
+      "copy-patch": 1320.037,
+      "copy-patch-guarded": 1273.721,
+      "address-cache": 1378.065,
+      "python": 791.003
+    },
+    "wall_medians_ms": {
+      "aot": 9.335716,
+      "decoded": 9.532702,
+      "partial": 9.203524,
+      "guarded": 9.198626,
+      "copy-patch": 9.007466,
+      "copy-patch-guarded": 8.959359,
+      "address-cache": 9.208602,
+      "python": 26.705892
+    },
+    "paired_aot_speedups": {
+      "decoded": {
+        "median": 0.8687340113485469,
+        "minimum": 0.8254821870070754,
+        "maximum": 0.9016990761449568
+      },
+      "partial": {
+        "median": 0.987354217698089,
+        "minimum": 0.9331448634173455,
+        "maximum": 1.0155379473804258
+      },
+      "guarded": {
+        "median": 1.0403032506989014,
+        "minimum": 0.9925977434019491,
+        "maximum": 1.0850972385591824
+      },
+      "copy-patch": {
+        "median": 1.1265328168831632,
+        "minimum": 1.0316754012268334,
+        "maximum": 1.2172499181980134
+      },
+      "copy-patch-guarded": {
+        "median": 1.1717929111332326,
+        "minimum": 1.1139324155723318,
+        "maximum": 1.2389277634811469
+      },
+      "address-cache": {
+        "median": 1.0776692345041996,
+        "minimum": 1.046120215055723,
+        "maximum": 1.1816686604021063
+      }
+    },
+    "jit_medians_us": {
+      "copy-patch": 4.852,
+      "copy-patch-guarded": 4.707
+    }
+  }
+}
