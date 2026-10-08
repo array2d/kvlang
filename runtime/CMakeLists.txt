@@ -24,7 +24,7 @@ if(APPLE)
     # macOS：数学/线程符号在 libSystem 内（无 -lm/-lpthread）；ld64 无 --disable-new-dtags。
     target_link_libraries(kvlang_runtime PRIVATE kvspace)
     set_target_properties(kvlang_runtime PROPERTIES
-        LINK_FLAGS "-Wl,-export_dynamic -Wl,-rpath,${KVSPACE_LIB_DIR}")
+        LINK_FLAGS "-Wl,-export_dynamic -Wl,-U,_kvspaceSetValueByRef -Wl,-rpath,${KVSPACE_LIB_DIR}")
 else()
     target_link_libraries(kvlang_runtime PRIVATE kvspace m pthread)
     # --export-dynamic 供 kvlang（term 扩展）找符号；--disable-new-dtags 使 rpath 转 DT_RPATH（传递）。
