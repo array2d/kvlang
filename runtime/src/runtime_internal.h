@@ -49,7 +49,12 @@ extern int kvspaceSetValue(void *h, const char *key, const uint8_t *value,
 extern int kvspaceSetValueByRef(void *h, kvspaceRef_t *ref, const char *key,
                                 const uint8_t *value, uint32_t value_len,
                                 uint8_t ro, uint32_t vid, char *err,
-                                uint32_t err_cap) __attribute__((weak));
+                                uint32_t err_cap)
+#ifdef __APPLE__
+    __attribute__((weak_import));
+#else
+    __attribute__((weak));
+#endif
 
 /* 指令边界回收读借用池；定位读/写（分片）；只读 head 前缀。见 kvspace.h 契约。 */
 extern void kvspaceReadReset(void *h);
