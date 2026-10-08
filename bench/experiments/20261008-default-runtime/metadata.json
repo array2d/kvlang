@@ -1,0 +1,161 @@
+{
+  "cpu": 24,
+  "cpu_model": "Intel(R) Xeon(R) Gold 6418H",
+  "python": "3.10.12",
+  "scheme": "shm",
+  "pairs": 9,
+  "command": [
+    "bench/experiments/20261008-default-runtime/run.py",
+    "--binary",
+    "/tmp/kvlang-perf-current/bin/kvlang",
+    "--baseline",
+    "/tmp/kvlang-overall-baseline/bin/libkvlang_runtime.so",
+    "--candidate",
+    "/tmp/kvlang-overall/bin/libkvlang_runtime.so",
+    "--frontend",
+    "/tmp/kvspace-overall-build/libkvspace.so.1",
+    "--baseline-backend",
+    "/tmp/kvspace-c-perf-total-build",
+    "--backend",
+    "/tmp/kvspace-c-overall-build",
+    "--output",
+    "/tmp/kvlang-overall-final4-shm",
+    "--pairs",
+    "9",
+    "--builds",
+    "/tmp/kvlang-overall-baseline-build",
+    "/tmp/kvlang-overall-build",
+    "/tmp/kvspace-c-perf-total-build",
+    "/tmp/kvspace-c-overall-build",
+    "/tmp/kvspace-overall-build"
+  ],
+  "files": {
+    "/tmp/kvlang-perf-current/bin/kvlang": "931157271cc79507b6a33c0e9c3fc72013ceb65ff5520c046b887955bce49d7a",
+    "/tmp/kvlang-overall-baseline/bin/libkvlang_runtime.so": "5d4b02633175f64bde033257146e8bab162068219b6e7809b5e3e2487830f6aa",
+    "/tmp/kvlang-overall/bin/libkvlang_runtime.so": "a1fde46f645b80ecad9d722d6e366e7e88dfc62493bc870fb89d9703cb1aecb4",
+    "/tmp/kvspace-overall-build/libkvspace.so.1": "b8d536cd6f6176e90a5de6c84ffd09114e220b89d5ad0f8466321d06cb177af4"
+  },
+  "loaded": {
+    "baseline": {
+      "/tmp/kvspace-overall-build/libkvspace.so.1": "b8d536cd6f6176e90a5de6c84ffd09114e220b89d5ad0f8466321d06cb177af4",
+      "/tmp/kvlang-overall-baseline/bin/libkvlang_runtime.so": "5d4b02633175f64bde033257146e8bab162068219b6e7809b5e3e2487830f6aa",
+      "/tmp/kvlang-perf-current/bin/libkvlanglayout.so": "30af52956c24a10bf98ee6b5dc1507003993e79606a40aef43457516012599ef",
+      "/tmp/kvspace-c-perf-total-build/libkvspace-c.so.1": "6b143b678a0d1be7761401809b08c6d9093f9501ec261da3aaa2bcbd96b433c0"
+    },
+    "candidate": {
+      "/tmp/kvspace-overall-build/libkvspace.so.1": "b8d536cd6f6176e90a5de6c84ffd09114e220b89d5ad0f8466321d06cb177af4",
+      "/tmp/kvlang-overall/bin/libkvlang_runtime.so": "a1fde46f645b80ecad9d722d6e366e7e88dfc62493bc870fb89d9703cb1aecb4",
+      "/tmp/kvlang-perf-current/bin/libkvlanglayout.so": "30af52956c24a10bf98ee6b5dc1507003993e79606a40aef43457516012599ef",
+      "/tmp/kvspace-c-overall-build/libkvspace-c.so.1": "747a2d9d327007f1228a0c7481f31eb8aa34aebbe7dff08c83842411d253f37c"
+    }
+  },
+  "sources": {
+    "iops": {
+      "kv": "360d3a2b7bd4d014255ba34cd86f6c72ee72a46b4787ed248ee5a6db96887dd7",
+      "py": "e53ef1d628cf1b39be8e2ee2e7ee04a9e0517403226e5f8f18ada9a44ce12d04"
+    },
+    "prime_sieve": {
+      "kv": "e0dd66398f3027ccd02ea9615089e57693840c037e4674f492f46c4cd6aae346",
+      "py": "7365d00a931b3332c68021f14646d651cabbb208c0a2dd6cdd5635bed9475af9"
+    },
+    "fib": {
+      "kv": "f9f308e2939ecd712442586ee87b8340f55331e75bcd6a6c6ffc12aea3a7bab4",
+      "py": "63a329cd3bbc9271f9142f9fa762b3389c17525679763a14e21a7138e12987fa"
+    },
+    "nqueens": {
+      "kv": "e4ba6073d1cd9e76949e3b81b46604e28b97e712afd6f6158db811f7e97c169b",
+      "py": "61ebaeccf79bf06a85e213180930552748cca126ec60b8636a7ed7849765a8af"
+    },
+    "quicksort": {
+      "kv": "7e50702ad83e4a9e4e9b9627a92f2a6d22abe3219f830bb17320a6bc400f7f16",
+      "py": "048c1991bb5e6f528fbacfa8167abe5d860a71117142e736613ced91b8a1a92d"
+    },
+    "binary_search": {
+      "kv": "42e05e05ccbbdb4af0e5b175ad4f87a367d00a97ddcd4ae0ff4d25edfc7ac153",
+      "py": "64e43b7a2a8b0fd928bb93cc8b57cd3f5fd45daf97f46ea269090a395ac6e6dc"
+    },
+    "binary_trees": {
+      "kv": "39add5228fab5953224b0959b0b8b176586a866179608909390108189f6b46d8",
+      "py": "454f14208f826ef084a593953b6780ab29f94f5d565e8b55d5a322f037323b13"
+    },
+    "hash_table": {
+      "kv": "606feac126238d1908a787ba46f1a7a8d4fd2858cf6a69e327c2acc2f6605541",
+      "py": "b19fbe72320375471e91ad31093b37b385f8ef5be46a29465381bac05391ced0"
+    },
+    "matmul": {
+      "kv": "ba5437bb1dc4f702073fc8c9c8519b28ee502cb27b51d1e5ba09b69262d1ac89",
+      "py": "103b272337bff44df02001a52dea61d6c9db8e843245dbc869afe673203764f8"
+    },
+    "k_nucleotide": {
+      "kv": "9d4cc69ee5455b0902f47b7b6a2e60bbd6d3432084b6e15c252ecbbfbcd5a694",
+      "py": "c35d8d9fe4cb2be7065befed69a1c763a7d3ab6e5c569857249b21bbf8a8a6ec"
+    }
+  },
+  "builds": {
+    "/tmp/kvlang-overall-baseline-build": {
+      "CMAKE_BUILD_TYPE": "Release",
+      "CMAKE_C_COMPILER": "/usr/bin/cc",
+      "CMAKE_C_FLAGS": "",
+      "CMAKE_C_FLAGS_DEBUG": "-g",
+      "CMAKE_C_FLAGS_MINSIZEREL": "-Os -DNDEBUG",
+      "CMAKE_C_FLAGS_RELEASE": "-O3 -DNDEBUG",
+      "CMAKE_C_FLAGS_RELWITHDEBINFO": "-O2 -g -DNDEBUG",
+      "CMAKE_HOME_DIRECTORY": "/tmp/kvlang-overall-baseline/runtime",
+      "head": "ddac99ab9bf58d8cc43133137fff7639da5ede2d",
+      "diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiler": "cc (Ubuntu 14.3.0-12ubuntu1~22~ppa2) 14.3.0"
+    },
+    "/tmp/kvlang-overall-build": {
+      "CMAKE_BUILD_TYPE": "Release",
+      "CMAKE_C_COMPILER": "/usr/bin/cc",
+      "CMAKE_C_FLAGS": "",
+      "CMAKE_C_FLAGS_DEBUG": "-g",
+      "CMAKE_C_FLAGS_MINSIZEREL": "-Os -DNDEBUG",
+      "CMAKE_C_FLAGS_RELEASE": "-O3 -DNDEBUG",
+      "CMAKE_C_FLAGS_RELWITHDEBINFO": "-O2 -g -DNDEBUG",
+      "CMAKE_HOME_DIRECTORY": "/tmp/kvlang-overall/runtime",
+      "head": "ddac99ab9bf58d8cc43133137fff7639da5ede2d",
+      "diff_sha256": "cd37c846c226246482068e9330a9c66aad52432112b2402a95021bae6e884873",
+      "compiler": "cc (Ubuntu 14.3.0-12ubuntu1~22~ppa2) 14.3.0"
+    },
+    "/tmp/kvspace-c-perf-total-build": {
+      "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+      "CMAKE_C_COMPILER": "/usr/bin/cc",
+      "CMAKE_C_FLAGS": "-I/tmp/slotsboxmalloc-perf-leaf/include -I/tmp/kvspace-direct-child-deps/include",
+      "CMAKE_C_FLAGS_DEBUG": "-g",
+      "CMAKE_C_FLAGS_MINSIZEREL": "-Os -DNDEBUG",
+      "CMAKE_C_FLAGS_RELEASE": "-O3 -DNDEBUG",
+      "CMAKE_C_FLAGS_RELWITHDEBINFO": "-O3 -g -DNDEBUG",
+      "CMAKE_HOME_DIRECTORY": "/tmp/kvspace-c-perf-write",
+      "head": "703797b95bd27086975df609433c94347832df37",
+      "diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiler": "cc (Ubuntu 14.3.0-12ubuntu1~22~ppa2) 14.3.0"
+    },
+    "/tmp/kvspace-c-overall-build": {
+      "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+      "CMAKE_C_COMPILER": "/usr/bin/cc",
+      "CMAKE_C_FLAGS": "-I/tmp/slotsboxmalloc-perf-leaf/include -I/tmp/kvspace-direct-child-deps/include",
+      "CMAKE_C_FLAGS_DEBUG": "-g",
+      "CMAKE_C_FLAGS_MINSIZEREL": "-Os -DNDEBUG",
+      "CMAKE_C_FLAGS_RELEASE": "-O3 -DNDEBUG",
+      "CMAKE_C_FLAGS_RELWITHDEBINFO": "-O3 -g -DNDEBUG",
+      "CMAKE_HOME_DIRECTORY": "/tmp/kvspace-c-overall",
+      "head": "703797b95bd27086975df609433c94347832df37",
+      "diff_sha256": "3fd827782cf71476356795df257e54b4bf755e5ad9f784c74f37d8eb6b8764c3",
+      "compiler": "cc (Ubuntu 14.3.0-12ubuntu1~22~ppa2) 14.3.0"
+    },
+    "/tmp/kvspace-overall-build": {
+      "CMAKE_BUILD_TYPE": "Release",
+      "CMAKE_C_COMPILER": "/usr/bin/cc",
+      "CMAKE_C_FLAGS": "",
+      "CMAKE_C_FLAGS_DEBUG": "-g",
+      "CMAKE_C_FLAGS_MINSIZEREL": "-Os -DNDEBUG",
+      "CMAKE_C_FLAGS_RELEASE": "-O3 -DNDEBUG",
+      "CMAKE_C_FLAGS_RELWITHDEBINFO": "-O2 -g -DNDEBUG",
+      "CMAKE_HOME_DIRECTORY": "/tmp/kvspace-overall",
+      "head": "b3e9f3fa6692dacbfefe6e8892ffc48edefd854d",
+      "diff_sha256": "42fc09c5fdca0c40db72610cd34451be8999e14c81ebf2242f371b0f26390ede",
+      "compiler": "cc (Ubuntu 14.3.0-12ubuntu1~22~ppa2) 14.3.0"
+    }
+  }
+}

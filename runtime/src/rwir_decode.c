@@ -89,20 +89,21 @@ static int materialize_operand(kvlangKv_t *kv, const char *link_base,
         target = kvlangBuiltinResolveWriteSlot(kv, frame_root, name);
         free(name);
         if (target && (!type || strcmp(type, "any") != 0)) {
-            kvspaceHead_t actual;
-            if (kvlangKvGetHead(kv, target, &actual) == 0 &&
-                actual.langtype_len > 0 &&
-                (size_t)actual.langtype_len <= sizeof actual.langtype) {
-                char *actual_type = strndup((const char *)actual.langtype,
-                                            (size_t)actual.langtype_len);
-                if (!actual_type) {
-                    snprintf(err, err_cap, "Decode: out of memory");
-                    free(target);
+            uint8_t *data = NULL;
+            uint32_t len = 0;
+            if (kvspaceGet(kv->h, target, 1, &data, &len) == 0 && data && len) {
+                uint32_t type_len = xh_langtype_len(data);
+                if (type_len > 0 && type_len <= 256) {
+                    char *actual_type = strndup((const char *)xh_langtype(data), type_len);
+                    if (!actual_type) {
+                        snprintf(err, err_cap, "Decode: out of memory");
+                        free(target);
+                        free(type);
+                        return -1;
+                    }
                     free(type);
-                    return -1;
+                    type = actual_type;
                 }
-                free(type);
-                type = actual_type;
             }
         }
     } else {

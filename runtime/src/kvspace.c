@@ -35,6 +35,26 @@ int kvlangKvGetOne(kvlangKv_t *k, const char *key, kvlangXvalue_t *out) {
     return 0;
 }
 
+/* Cache addresses only; missing local values still use normal resolution. */
+int kvlangKvGetOneRef(kvlangKv_t *k, const char *key, kvlangKvRef_t *ref,
+                      kvlangXvalue_t *out) {
+    if (!ref->attempted) {
+        ref->resolved = kvspaceResolveRef(k->h, key, &ref->ref) == 0;
+        ref->attempted = true;
+    }
+    if (!ref->resolved)
+        return kvlangKvGetOne(k, key, out);
+    kvlangXvalueZero(out);
+    uint8_t *data = NULL;
+    uint32_t len = 0;
+    if (kvspaceGetByRef(k->h, &ref->ref, NULL, &data, &len) != 0)
+        return -1;
+    if (!data || !len)
+        return kvlangKvGetOne(k, key, out);
+    *out = (kvlangXvalue_t){data, len, 1};
+    return 0;
+}
+
 int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name,
                       kvlangXvalue_t *out) {
     kvlangXvalueZero(out);
@@ -101,13 +121,32 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
 }
 
 int kvlangKvSetChar(kvlangKv_t *k, const char *key, const char *s) {
+    return kvlangKvSetCharRef(k, key, NULL, s);
+}
+
+int kvlangKvSetOneRef(kvlangKv_t *k, const char *key, kvlangKvRef_t *ref,
+                      const kvlangXvalue_t *value, char *err, uint32_t err_cap) {
+    if (ref && kvspaceSetValueByRef && !kvlangXvalueNone(value)) {
+        if (!ref->attempted) {
+            ref->resolved = kvspaceResolveRef(k->h, key, &ref->ref) == 0;
+            ref->attempted = true;
+        }
+        if (ref->resolved)
+            return kvspaceSetValueByRef(k->h, &ref->ref, key, value->data,
+                                        value->len, 0, 0, err, err_cap);
+    }
+    kvlangKvPair_t pair = {(char *)key, *value};
+    return kvlangKvSet(k, &pair, 1, err, err_cap);
+}
+
+int kvlangKvSetCharRef(kvlangKv_t *k, const char *key, kvlangKvRef_t *ref,
+                       const char *s) {
     kvlangXvalue_t value;
     kvlangXvalueNewCharUtf8(&value, s);
     if (!value.data || value.len == 0)
         return -1;
-    kvlangKvPair_t pair = {(char *)key, value};
     char err[256];
-    int rc = kvlangKvSet(k, &pair, 1, err, sizeof err);
+    int rc = kvlangKvSetOneRef(k, key, ref, &value, err, sizeof err);
     kvlangXvalueFree(&value);
     return rc;
 }

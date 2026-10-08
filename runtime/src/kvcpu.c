@@ -546,8 +546,7 @@ static char *handle_call(kvlangKv_t *kv, const char *pc,
     char err[256];
     kvlangKvDelTree(kv, frame_root, err, sizeof err);
     char *stack_fr = kvlangKeytreeStack(frame_root);
-    if (kvlangKvMkindex(kv, stack_fr, 0, err, sizeof err) != 0 ||
-        kvlangKvExtIndex(kv, stack_fr, func_dir.p, err, sizeof err) != 0) {
+    if (kvlangKvExtIndex(kv, stack_fr, func_dir.p, err, sizeof err) != 0) {
         kvlangVthreadSetError(kv, vtid, pc, err);
         free(caller_fr);
         free(stack_fr);
@@ -911,8 +910,7 @@ char *kvlangKvcpuBootstrap(kvlangKv_t *kv, const char *vtid,
     char *frame_root = kvlangKeytreeFrameAt(vtid, 1);
     char *stack_fr = kvlangKeytreeStack(frame_root);
     char err[256];
-    if (kvlangKvMkindex(kv, stack_fr, 0, err, sizeof err) != 0 ||
-        kvlangKvExtIndex(kv, stack_fr, func_dir.p, err, sizeof err) != 0) {
+    if (kvlangKvExtIndex(kv, stack_fr, func_dir.p, err, sizeof err) != 0) {
         kvlangVthreadSetError(kv, vtid, "", err);
         kvlangXvalueFree(&sig);
         kvlangStrbufFree(&sig_key);
@@ -1017,6 +1015,7 @@ char *kvlangKvcpuBootstrap(kvlangKv_t *kv, const char *vtid,
 
 typedef struct {
     char *pc;              /* NULL = 空槽 */
+    char *next_pc;
     int depth;
     kvlangRwirInst_t inst; /* 自持 opcode/name/type；val 恒空 */
     bool load_write_value;
@@ -1053,6 +1052,7 @@ static rwir_cache_entry_t *rwir_cache_get(rwir_cache_t *c, const char *pc) {
 
 static void rwir_cache_entry_free(rwir_cache_entry_t *e) {
     free(e->pc);
+    free(e->next_pc);
     free(e->inst.opcode);
     for (int i = 0; i < e->inst.nr; i++) {
         free(e->inst.reads[i].name);
@@ -1103,6 +1103,10 @@ static void rwir_cache_put(rwir_cache_t *c, const char *pc, int depth,
     else
         c->n++;
     e->pc = strdup(pc);
+    kvlangStrbuf_t next;
+    kvlangStrbufInit(&next);
+    kvlangRwirNextPc(pc, &next);
+    e->next_pc = kvlangStrbufDetach(&next);
     e->depth = depth;
     e->load_write_value = load_write_value;
     e->inst.opcode = strdup(inst->opcode);
@@ -1115,12 +1119,16 @@ static void rwir_cache_put(rwir_cache_t *c, const char *pc, int depth,
         e->inst.reads[k].name = strdup(inst->reads[k].name);
         e->inst.reads[k].type = inst->reads[k].type ? strdup(inst->reads[k].type) : NULL;
         e->inst.reads[k].address = inst->reads[k].address;
+        e->inst.reads[k].ref = (kvlangKvRef_t){0};
+        memset(e->inst.reads[k].scratch, 0, sizeof e->inst.reads[k].scratch);
         kvlangXvalueZero(&e->inst.reads[k].val);
     }
     for (int k = 0; k < inst->nw; k++) {
         e->inst.writes[k].name = strdup(inst->writes[k].name);
         e->inst.writes[k].type = inst->writes[k].type ? strdup(inst->writes[k].type) : NULL;
         e->inst.writes[k].address = inst->writes[k].address;
+        e->inst.writes[k].ref = (kvlangKvRef_t){0};
+        memset(e->inst.writes[k].scratch, 0, sizeof e->inst.writes[k].scratch);
         kvlangXvalueZero(&e->inst.writes[k].val);
     }
 }
@@ -1129,9 +1137,19 @@ static void rwir_cache_put(rwir_cache_t *c, const char *pc, int depth,
 static void rwir_cache_drop(rwir_cache_t *c, int floor, bool inclusive) {
     for (size_t i = 0; i < c->cap; i++) {
         rwir_cache_entry_t *e = &c->slot[i];
-        if (e->pc && (inclusive ? e->depth >= floor : e->depth > floor)) {
+        while (e->pc && (inclusive ? e->depth >= floor : e->depth > floor)) {
             rwir_cache_entry_free(e);
             c->n--;
+            /* Preserve probe chains when deleting a frame's metadata. */
+            size_t hole = i, mask = c->cap - 1;
+            for (size_t j = (i + 1) & mask; c->slot[j].pc; j = (j + 1) & mask) {
+                size_t home = rwir_cache_hash(c->slot[j].pc) & mask;
+                if (((j - home) & mask) >= ((j - hole) & mask)) {
+                    c->slot[hole] = c->slot[j];
+                    hole = j;
+                }
+            }
+            c->slot[hole] = (rwir_cache_entry_t){0};
         }
     }
 }
@@ -1146,26 +1164,36 @@ static void rwir_cache_free(rwir_cache_t *c) {
 
 /* 命中后按 name 现读值：缓存只存派生数据，值必须每步回 KVSpace 取。
  * 读参恒取值；写参与 decode 一致——仅 obj/map 指令取值。 */
+/* Snapshot inputs for one instruction without allocating small values. */
+static void rwir_param_snapshot(kvlangParam_t *p) {
+    if (p->val.data && p->val.borrowed && p->val.len <= sizeof p->scratch) {
+        memcpy(p->scratch, p->val.data, p->val.len);
+        p->val.data = p->scratch;
+    } else {
+        kvlangXvalueMaterialize(&p->val);
+    }
+}
+
 static int rwir_cache_load_vals(kvlangKv_t *kv, kvlangRwirInst_t *inst,
                                 bool load_write_value, char *err,
                                 uint32_t err_cap) {
     for (int i = 0; i < inst->nr; i++) {
         kvlangParam_t *p = &inst->reads[i];
-        if (kvlangKvGetOne(kv, p->name, &p->val) != 0) {
+        if (kvlangKvGetOneRef(kv, p->name, &p->ref, &p->val) != 0) {
             snprintf(err, err_cap, "Decode: cannot read target for %s", p->name);
             return -1;
         }
-        kvlangXvalueMaterialize(&p->val);
+        rwir_param_snapshot(p);
     }
     if (load_write_value) {
         for (int i = 0; i < inst->nw; i++) {
             kvlangParam_t *p = &inst->writes[i];
-            if (kvlangKvGetOne(kv, p->name, &p->val) != 0) {
+            if (kvlangKvGetOneRef(kv, p->name, &p->ref, &p->val) != 0) {
                 snprintf(err, err_cap, "Decode: cannot read target for %s",
                          p->name);
                 return -1;
             }
-            kvlangXvalueMaterialize(&p->val);
+            rwir_param_snapshot(p);
         }
     }
     return 0;
@@ -1177,10 +1205,14 @@ static void rwir_inst_release(kvlangRwirInst_t *inst, bool from_cache) {
         kvlangRwirInstFree(inst);
         return;
     }
-    for (int i = 0; i < inst->nr; i++)
+    for (int i = 0; i < inst->nr; i++) {
+        memset(inst->reads[i].scratch, 0, sizeof inst->reads[i].scratch);
         kvlangXvalueFree(&inst->reads[i].val);
-    for (int i = 0; i < inst->nw; i++)
+    }
+    for (int i = 0; i < inst->nw; i++) {
+        memset(inst->writes[i].scratch, 0, sizeof inst->writes[i].scratch);
         kvlangXvalueFree(&inst->writes[i].val);
+    }
 }
 
 int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode,
@@ -1208,18 +1240,19 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode,
     char *cur_frame = NULL; /* fr_stk，或超长帧根的 malloc 回退 */
     rwir_cache_t cache = {0};
     int last_depth = 0; /* 0 = 尚未进入任何帧 */
+    kvlangKvRef_t pc_ref = {0}, status_ref = {0};
 
     int rc = 0;
     for (;;) {
         /* Release borrowed values from the previous instruction. */
         kvlangKvReadReset(kv);
-        if (!kvlangVthreadMemberGetBuf(kv, pc_key.p, &cur_b) || !cur_b.p[0]) {
+        if (!kvlangVthreadMemberGetBuf(kv, pc_key.p, &pc_ref, &cur_b) || !cur_b.p[0]) {
             rc = -1;
             break;
         }
         const char *cur = cur_b.p;
         /* Observe external status changes on every step. */
-        if (!kvlangVthreadMemberGetBuf(kv, st_key.p, &status_b))
+        if (!kvlangVthreadMemberGetBuf(kv, st_key.p, &status_ref, &status_b))
             break;
         const char *status = status_b.p;
         if (strcmp(status, "init") != 0 && strcmp(status, "running") != 0 &&
@@ -1317,6 +1350,9 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode,
             f.pc_key = pc_key.p;
             f.status_key = st_key.p;
             f.status_known = status;   /* 本步开始前读到的 ‥status（源值，借用） */
+            f.next_pc = hit ? hit->next_pc : NULL;
+            f.pc_ref = &pc_ref;
+            f.cached_targets = from_cache;
             exec_err = kvlangBuiltinNative(&f);
             if (f.persist_failed)
                 exec_err = -1;
@@ -1377,6 +1413,7 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode,
             ci.writes = inst->writes;
             kvlangFrame_t cf = {kv, vtid, cur, &ci, NULL};
             cf.pc_key = pc_key.p;
+            cf.pc_ref = &pc_ref;
             cf.status_key = st_key.p;
             cf.status_known = status;
             exec_err = kvlangCtlCall(&cf);

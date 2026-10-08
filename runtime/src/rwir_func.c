@@ -188,6 +188,10 @@ int kvlangBuiltinReadInputs(kvlangFrame_t *f, kvlangXvalue_t *out, int cap) {
 void kvlangBuiltinFreeInputs(kvlangXvalue_t *in, int n) { for (int i = 0; i < n; i++) kvlangXvalueFree(&in[i]); }
 
 void kvlangBuiltinNextPc(kvlangFrame_t *f) {
+    if (f->next_pc) {
+        kvlangVthreadAdvance(f, f->next_pc, "running");
+        return;
+    }
     char buf[512];
     if (kvlangRwirNextPcBuf(f->pc, buf, sizeof buf)) {
         kvlangVthreadAdvance(f, buf, "running");
@@ -204,12 +208,17 @@ int kvlangBuiltinWriteResult(kvlangFrame_t *f, const kvlangXvalue_t *result) {
         char *owned = NULL;
         const char *fr = f->frame_root;
         if (!fr) { owned = kvlangKeytreeFrameRoot(f->pc); fr = owned; }
-        char *key = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->writes[0].name);
+        const char *name = f->inst->writes[0].name;
+        char *key = name[0] == '/' ? NULL : kvlangBuiltinResolveWriteSlot(f->kv, fr, name);
         free(owned);
-        kvlangKvPair_t pair = { key, *result };
         char err[256];
-        kvlangKvSet(f->kv, &pair, 1, err, sizeof err);
+        int rc = kvlangKvSetOneRef(f->kv, key ? key : name,
+                                   f->cached_targets && name[0] == '/'
+                                       ? &f->inst->writes[0].ref : NULL, result,
+                                   err, sizeof err);
         free(key);
+        if (rc != 0)
+            return kvlangBuiltinSetErr(f, "%s", err);
     }
     kvlangBuiltinNextPc(f);
     return 0;

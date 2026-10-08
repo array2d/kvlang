@@ -19,11 +19,12 @@ VT_MEMBER_GET(kvlangVthreadStatusGet, true)
 
 /* 复用缓冲版：把 key 的成员值读进调用方 strbuf（容量跨步保留），免每步 strdup + free。
  * 返回 false = 键缺失或 None（out 清空）。供执行循环每步读 pc / status。 */
-bool kvlangVthreadMemberGetBuf(kvlangKv_t *kv, const char *key, kvlangStrbuf_t *out) {
+bool kvlangVthreadMemberGetBuf(kvlangKv_t *kv, const char *key,
+                              kvlangKvRef_t *ref, kvlangStrbuf_t *out) {
     kvlangStrbufClear(out);
     kvlangXvalue_t v;
     kvlangXvalueZero(&v);
-    if (kvlangKvGetOne(kv, key, &v) != 0)
+    if (kvlangKvGetOneRef(kv, key, ref, &v) != 0)
         return false;
     if (kvlangXvalueNone(&v)) {
         kvlangXvalueFree(&v);
@@ -68,7 +69,7 @@ void kvlangVthreadAdvance(kvlangFrame_t *f, const char *pc, const char *status) 
     kvlangStrbufInit(&k1); kvlangStrbufInit(&k2);
     if (!f->pc_key)
         kvlangKeytreeVthreadPc(f->vtid, &k1);
-    if (kvlangKvSetChar(f->kv, f->pc_key ? f->pc_key : k1.p, pc) != 0)
+    if (kvlangKvSetCharRef(f->kv, f->pc_key ? f->pc_key : k1.p, f->pc_ref, pc) != 0)
         f->persist_failed = true;
     if (!f->persist_failed &&
         (!f->status_known || strcmp(f->status_known, status) != 0)) {

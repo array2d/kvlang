@@ -33,9 +33,23 @@ extern void kvspaceClose(void *h);
 /* 借用读：*out 指向后端常驻/回收空间，调用方不得 free。resolve=1 穿透 link。 */
 extern int kvspaceGet(void *h, const char *key, int resolve, uint8_t **out,
                       uint32_t *out_len);
+typedef struct {
+    uint32_t block_id, gen, parent_id, depth;
+} kvspaceRef_t;
+typedef struct {
+    kvspaceRef_t ref;
+    bool attempted, resolved;
+} kvlangKvRef_t;
+extern int kvspaceResolveRef(void *h, const char *key, kvspaceRef_t *ref);
+extern int kvspaceGetByRef(void *h, kvspaceRef_t *ref, const char *key,
+                          uint8_t **out, uint32_t *out_len);
 extern int kvspaceSetValue(void *h, const char *key, const uint8_t *value,
                            uint32_t value_len, uint8_t ro, uint32_t vid,
                            char *err, uint32_t err_cap);
+extern int kvspaceSetValueByRef(void *h, kvspaceRef_t *ref, const char *key,
+                                const uint8_t *value, uint32_t value_len,
+                                uint8_t ro, uint32_t vid, char *err,
+                                uint32_t err_cap) __attribute__((weak));
 
 /* 指令边界回收读借用池；定位读/写（分片）；只读 head 前缀。见 kvspace.h 契约。 */
 extern void kvspaceReadReset(void *h);
@@ -187,8 +201,9 @@ static inline uint64_t xh_b(const uint8_t *d) { return xh_rd64(d + 10); }
 static inline bool kvlangXvalueNone(const kvlangXvalue_t *v) {
     if (!v->data || v->len == 0)
         return true;
-    /* flags 无 class/ptr 位 且 langtype 首字节为 0 ⇒ langtype 长度 0 ⇒ None。 */
-    return xh_is_none(v->data);
+    /* None has a complete 32-byte scalar head and zero counts. */
+    return v->len == 32 && v->data[0] == 5 && xh_is_none(v->data) &&
+           xh_a(v->data) == 0 && xh_b(v->data) == 0;
 }
 static inline void kvlangXvalueZero(kvlangXvalue_t *v) {
     v->data = NULL;
@@ -393,6 +408,12 @@ void kvlangFormatFloat(char *out, size_t cap, double v);
 /* ── KV 操作（封装 durable ABI）────────────────────────────────────── */
 
 kvlangKv_t *kvlangKvConnect(const char *dsn);
+int kvlangKvGetOneRef(kvlangKv_t *k, const char *key, kvlangKvRef_t *ref,
+                      kvlangXvalue_t *out);
+int kvlangKvSetOneRef(kvlangKv_t *k, const char *key, kvlangKvRef_t *ref,
+                      const kvlangXvalue_t *value, char *err, uint32_t err_cap);
+int kvlangKvSetCharRef(kvlangKv_t *k, const char *key, kvlangKvRef_t *ref,
+                       const char *value);
 void kvlangKvDisconnect(kvlangKv_t *k);
 int kvlangKvGetOne(kvlangKv_t *k, const char *key,
                    kvlangXvalue_t *out); /* None → out len=0 */
@@ -504,6 +525,8 @@ typedef struct {
     char *type;
     int address;
     kvlangXvalue_t val;
+    kvlangKvRef_t ref;
+    uint8_t scratch[64];
 } kvlangParam_t;
 
 typedef struct {
@@ -537,7 +560,7 @@ void kvlangVthreadPcGet(kvlangKv_t *kv, const char *vtid, char **pc);
 void kvlangVthreadStatusGet(kvlangKv_t *kv, const char *vtid, char **status);
 /* 复用调用方 strbuf 读成员值；false = 键缺失 / None。 */
 bool kvlangVthreadMemberGetBuf(kvlangKv_t *kv, const char *key,
-                               kvlangStrbuf_t *out);
+                               kvlangKvRef_t *ref, kvlangStrbuf_t *out);
 int kvlangVthreadSet(kvlangKv_t *kv, const char *vtid, const char *pc,
                      const char *status);
 int kvlangVthreadSetDone(kvlangKv_t *kv, const char *vtid, const char *ret);
@@ -558,6 +581,9 @@ typedef struct {
     bool persist_failed;
     const char *pc_key;
     const char *status_key;
+    const char *next_pc;
+    kvlangKvRef_t *pc_ref;
+    bool cached_targets;
 } kvlangFrame_t;
 
 /* Write PC to kvspace; write status when it changes. */
