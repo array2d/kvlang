@@ -40,6 +40,33 @@ def compile_worker(args, source, entry, binary):
          '--source', source, '--entry', entry, '--output', binary], os.environ, args.cpu)
 
 
+def compile_case(args, case, binary):
+    directory = ROOT / 'benchmark/cases' / case
+    kv_source, py_source = directory / (case + '.kv'), directory / (case + '.py')
+    body = '1 << n -> sh\nsh - 1 -> all\nnq(0, 0, 0, all) -> r' if case == 'nqueens' else f'{case}(n) -> r'
+    wrapper = '\nrwfunc bench_native(n:int64) -> (r:int64) {\n' + body + '\n}\n'
+    source = binary.with_suffix('.kv')
+    source.write_text(kv_source.read_text() + wrapper)
+    compile_worker(args, source, 'bench_native', binary)
+    return dict(kv_sha256=sha(kv_source), python_sha256=sha(py_source), wrapper=wrapper,
+                generated_c_sha256=sha(binary.with_suffix('.c')))
+
+
+def output(result):
+    ns = re.search(r'__bench_ns:\s*(\d+)', result.stdout)
+    value = re.search(r'(?:iops a|fib|queens|result) =\s*(-?\d+)', result.stdout)
+    if not ns or not value or int(ns[1]) <= 0:
+        raise RuntimeError('invalid output: ' + result.stdout)
+    return int(ns[1]), int(value[1])
+
+
+def loaded_libraries(result, frontend):
+    paths = re.findall(r'calling init:\s*(/\S+)', result.stderr)
+    if not any(Path(p).resolve() == frontend.resolve() for p in paths):
+        raise RuntimeError('frontend was not loaded: ' + str(frontend))
+    return {p: sha(p) for p in paths if 'libkv' in Path(p).name}
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     for name in ['kvlang', 'frontend', 'baseline-frontend', 'backend', 'include', 'output']:
@@ -62,35 +89,20 @@ def main():
                 'kvlang': {'path': str(args.kvlang), 'sha256': sha(args.kvlang)}}
     workers = {}
     for case in CASES:
-        directory = ROOT / 'benchmark/cases' / case
-        kv_source = directory / (case + '.kv')
-        py_source = directory / (case + '.py')
-        body = '1 << n -> sh\nsh - 1 -> all\nnq(0, 0, 0, all) -> r' if case == 'nqueens' else f'{case}(n) -> r'
-        wrapper = '\nrwfunc bench_native(n:int64) -> (r:int64) {\n' + body + '\n}\n'
-        source = binaries / (case + '.kv')
-        source.write_text(kv_source.read_text() + wrapper)
         binary = binaries / case
-        compile_worker(args, source, 'bench_native', binary)
+        metadata['inputs'][case] = dict(compile_case(args, case, binary), scales=CASES[case],
+                                        worker_sha256=sha(binary),
+                                        schema=json.loads(binary.with_suffix('.schema.json').read_text()))
         workers[case] = binary
-        metadata['inputs'][case] = {'scales': CASES[case], 'kv_sha256': sha(kv_source),
-                                    'python_sha256': sha(py_source), 'wrapper': wrapper,
-                                    'worker_sha256': sha(binary), 'generated_c_sha256': sha(binary.with_suffix('.c')),
-                                    'schema': json.loads(binary.with_suffix('.schema.json').read_text())}
     for variant, frontend in [('interpreter', args.baseline_frontend), ('release', args.frontend)]:
         with tempfile.TemporaryDirectory(prefix='native-libs-') as td:
             env = dict(os.environ, KVSPACE='shm://' + td + '/store', LD_PRELOAD=str(frontend), LD_DEBUG='libs')
             result, _ = run([args.kvlang, '-c', 'println("ready")'], env, args.cpu)
-        paths = re.findall(r'calling init:\s*(/\S+)', result.stderr)
-        metadata[variant + '_loaded'] = {p: sha(p) for p in paths if 'libkv' in Path(p).name}
-        if not any(Path(p).resolve() == frontend.resolve() for p in paths):
-            raise RuntimeError('frontend was not loaded: ' + variant)
+        metadata[variant + '_loaded'] = loaded_libraries(result, frontend)
     with tempfile.TemporaryDirectory(prefix='native-worker-libs-') as td:
         result, _ = run([workers['iops'], 'shm://' + td + '/store', 'init', 1],
                         dict(os.environ, LD_DEBUG='libs'), args.cpu)
-    paths = re.findall(r'calling init:\s*(/\S+)', result.stderr)
-    metadata['native_loaded'] = {p: sha(p) for p in paths if 'libkv' in Path(p).name}
-    if not any(Path(p).resolve() == args.frontend.resolve() for p in paths):
-        raise RuntimeError('native frontend was not loaded')
+    metadata['native_loaded'] = loaded_libraries(result, args.frontend)
     rows = []
     with (args.output / 'samples.csv').open('w', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=['case', 'scale', 'pair', 'variant', 'kernel_ns', 'wall_ns', 'result'], lineterminator='\n')
@@ -118,15 +130,11 @@ def main():
                                 source.write_text((ROOT / 'benchmark/cases' / case / (case + '.kv')).read_text().replace('__SCALE__', str(scale)))
                                 env.update(KVSPACE='shm://' + td + '/store', LD_PRELOAD=str(args.frontend if name == 'release' else args.baseline_frontend))
                                 result, wall = run([args.kvlang, source], env, args.cpu)
-                        ns = re.search(r'__bench_ns:\s*(\d+)', result.stdout)
-                        value = re.search(r'(?:iops a|fib|queens|result) =\s*(-?\d+)', result.stdout)
-                        if not ns or not value or int(ns[1]) <= 0:
-                            raise RuntimeError('invalid output: ' + result.stdout)
-                        value = int(value[1])
+                        kernel_ns, value = output(result)
                         if expected is not None and value != expected:
                             raise RuntimeError(f'result mismatch: {case}/{scale}/{name}: {value} != {expected}')
                         expected = value
-                        row = dict(case=case, scale=scale, pair=pair, variant=name, kernel_ns=int(ns[1]), wall_ns=wall, result=value)
+                        row = dict(case=case, scale=scale, pair=pair, variant=name, kernel_ns=kernel_ns, wall_ns=wall, result=value)
                         rows.append(row)
                         writer.writerow(row)
                         f.flush()

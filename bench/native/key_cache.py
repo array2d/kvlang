@@ -8,25 +8,16 @@ import json
 import os
 from pathlib import Path
 import platform
-import re
 import shutil
 import statistics
 import subprocess
 import tempfile
 
-from run import ROOT, CASES, benchmark, compile_worker, run, sha
-from validate import Store
+from compile import KV
+from run import ROOT, CASES, benchmark, compile_case, loaded_libraries, output, run, sha
 
 VARIANTS = ['lookup-all', 'lookup-pc', 'cached', 'python']
 MEMBERS = ['pc', 'status', 'frames', 'constants', 'journal', 'program']
-
-
-def output(result):
-    ns = re.search(r'__bench_ns:\s*(\d+)', result.stdout)
-    value = re.search(r'(?:iops a|fib|queens|result) =\s*(-?\d+)', result.stdout)
-    if not ns or not value or int(ns[1]) <= 0:
-        raise RuntimeError('invalid output: ' + result.stdout)
-    return int(ns[1]), int(value[1])
 
 
 def main():
@@ -57,14 +48,8 @@ def main():
     scales = {case: [*benchmark.SWEEP[case], CASES[case][-1]] for case in CASES}
     workers = {}
     for case in scales:
-        directory = ROOT / 'benchmark/cases' / case
-        kv_source, py_source = directory / (case + '.kv'), directory / (case + '.py')
-        body = '1 << n -> sh\nsh - 1 -> all\nnq(0, 0, 0, all) -> r' if case == 'nqueens' else f'{case}(n) -> r'
-        wrapper = '\nrwfunc bench_native(n:int64) -> (r:int64) {\n' + body + '\n}\n'
-        source = binaries / 'cached' / (case + '.kv')
-        source.write_text(kv_source.read_text() + wrapper)
         cached = binaries / 'cached' / case
-        compile_worker(args, source, 'bench_native', cached)
+        inputs = compile_case(args, case, cached)
         workers[case] = {'cached': cached}
         for variant, level in [('lookup-pc', 1), ('lookup-all', 2)]:
             binary = binaries / variant / case
@@ -73,17 +58,12 @@ def main():
                  args.frontend, '-Wl,-rpath,' + str(args.frontend.parent), '-o', binary], env, args.cpu)
             shutil.copyfile(cached.with_suffix('.schema.json'), binary.with_suffix('.schema.json'))
             workers[case][variant] = binary
-        metadata['inputs'][case] = dict(scales=scales[case], kv_sha256=sha(kv_source),
-                                      python_sha256=sha(py_source), wrapper=wrapper,
-                                      generated_c_sha256=sha(cached.with_suffix('.c')),
+        metadata['inputs'][case] = dict(inputs, scales=scales[case],
                                       workers={k: sha(p) for k, p in workers[case].items()})
     with tempfile.TemporaryDirectory(prefix='key-cache-libraries-') as td:
         loaded, _ = run([workers['iops']['cached'], 'shm://' + td + '/store', 'init', 1],
                         dict(env, LD_DEBUG='libs'), args.cpu)
-    paths = re.findall(r'calling init:\s*(/\S+)', loaded.stderr)
-    metadata['loaded'] = {p: sha(p) for p in paths if 'libkv' in Path(p).name}
-    if not any(Path(p).resolve() == args.frontend.resolve() for p in paths):
-        raise RuntimeError('requested frontend not loaded')
+    metadata['loaded'] = loaded_libraries(loaded, args.frontend)
 
     def sample(case, scale, variant):
         with tempfile.TemporaryDirectory(prefix='key-cache-sample-') as td:
@@ -97,7 +77,7 @@ def main():
                 _, init_wall = run([worker, dsn, 'init', scale], env, args.cpu)
                 result, wall = run([worker, dsn, 'run'], env, args.cpu)
                 wall += init_wall
-                with closing(Store(args.frontend, dsn)) as store:
+                with closing(KV(args.frontend, dsn)) as store:
                     digest = hashlib.sha256(b''.join(store.get('/vthread/native/‥' + m)[1]
                                                     for m in MEMBERS)).hexdigest()
             ns, value = output(result)
@@ -129,13 +109,11 @@ def main():
     for case, points in scales.items():
         for scale in points:
             samples = [r for r in rows if r['case'] == case and r['scale'] == scale]
-            medians = {v: statistics.median(r['kernel_ns'] for r in samples if r['variant'] == v) / 1e3
-                       for v in VARIANTS}
+            timings = {v: [r['kernel_ns'] for r in samples if r['variant'] == v] for v in VARIANTS}
+            medians = {v: statistics.median(values) / 1e3 for v, values in timings.items()}
             ratios = {}
             for variant in VARIANTS[:2]:
-                paired = [next(r['kernel_ns'] for r in samples if r['pair'] == p and r['variant'] == variant) /
-                          next(r['kernel_ns'] for r in samples if r['pair'] == p and r['variant'] == 'cached')
-                          for p in range(args.pairs)]
+                paired = [lookup / cached for lookup, cached in zip(timings[variant], timings['cached'])]
                 ratios[variant] = dict(median=statistics.median(paired), minimum=min(paired), maximum=max(paired))
             summary[f'{case}({scale})'] = dict(medians_us=medians, paired_speedups=ratios)
     metadata['samples'] = len(rows)
