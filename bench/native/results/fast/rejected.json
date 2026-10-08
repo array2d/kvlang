@@ -1,0 +1,129 @@
+{
+  "scope": "Exploratory sequential trials; implementations not retained. Different rounds must not be pooled with the final benchmark. Raw individual timings are not retained for the two nine-pair trials.",
+  "trials": {
+    "unchanged_tag": {
+      "pairs": 3,
+      "warmups": 1,
+      "cpu": 24,
+      "state_comparison": "ignore inactive journal payload",
+      "large_input_medians_us": {
+        "iops(200000)": {
+          "fast": 11375.948,
+          "fast-tag": 12012.936,
+          "fast-tag-guarded": 15121.454
+        },
+        "fib(18)": {
+          "fast": 860.3,
+          "fast-tag": 859.373,
+          "fast-tag-guarded": 728.784
+        },
+        "nqueens(8)": {
+          "fast": 859.431,
+          "fast-tag": 869.544,
+          "fast-tag-guarded": 1084.028
+        }
+      },
+      "generated_c_sha256": {
+        "iops": {
+          "fast": "ed867297100ba7e48e24766f81d577f00daf28ab7f5609d41284e01c3b56c2e4",
+          "fast-tag": "3fc8cbf18a45f352966b277b42e37964ccb05f146abe2a5a3be4ed5ad965f15c",
+          "fast-tag-guarded": "759bd0c74ecf4155affe81647b8fe0627ff902081be1ae1d274a7c8af7349eae"
+        },
+        "fib": {
+          "fast": "e9171d6d2f4f7954658b6f01a780aeed659bb5cd74c6d6097cf5d8fb5c3ca4b4",
+          "fast-tag": "2971a92fa65c9f53374bdef0a2841d9713fdd12d0bc7e724fcfc656f61709ebb",
+          "fast-tag-guarded": "7f4ff886db31eb2d14e2be245b040a8f5f0210130128545e99b4efcb6b1808f6"
+        },
+        "nqueens": {
+          "fast": "c32c6615591a62fdd1dc7bf66999278c6091fd9970c7a587a8abc41d76beb9ec",
+          "fast-tag": "88b5ae00c70c8dcd0a8dac5fea6135973daf68357023dd6c3dc3ba5a076b4030",
+          "fast-tag-guarded": "cc4747d2d5cf3e7fc982a2b7a0cf7b447bf7e1cf8171c06f81189b20092c7812"
+        }
+      }
+    },
+    "ascii_row_dispatch": {
+      "pairs": 3,
+      "warmups": 1,
+      "cpu": 24,
+      "state_comparison": "all six raw KV bodies",
+      "large_input_medians_us": {
+        "iops(200000)": {
+          "fast-slots": 10338.149,
+          "fast-dispatch": 11589.859
+        },
+        "fib(18)": {
+          "fast-slots": 746.995,
+          "fast-dispatch": 847.891
+        },
+        "nqueens(8)": {
+          "fast-slots": 801.906,
+          "fast-dispatch": 890.446
+        }
+      },
+      "generated_c_sha256": {
+        "iops": {
+          "fast-slots": "efb56fd62c98a113a7db94172cda113ae16b0c6010dfdf56a9f433d5a4dddd9d",
+          "fast-dispatch": "9eb078c84ef64dd4343bb8a65d7553ce8f41faa35a2d324745e359e580ec2eac"
+        },
+        "fib": {
+          "fast-slots": "5810e0a9223662904f6585818009e1a53694483717875c1cba440094bf32bf4e",
+          "fast-dispatch": "8c973dfb95033b6f7ccc81cb62ad1641a0fa9e963586175966657ea0e78f06ed"
+        },
+        "nqueens": {
+          "fast-slots": "da6982e5a4f1c347768d1a0771942683b1c34b27a3aeda67b5aac062c43ca236",
+          "fast-dispatch": "c30d8ed3f62aa685692f9aa5b5ebe6cb7f823a88554518b4d6058b8437bdb832"
+        }
+      }
+    },
+    "frame_generations": {
+      "pairs": 9,
+      "warmups": 0,
+      "cpu": 24,
+      "state_comparison": "logical frames, PC, constants, status, journal marker; distinct program IDs",
+      "large_input_medians_ms": {
+        "iops": {
+          "slots": 10.031082,
+          "epoch": 12.024624
+        },
+        "fib": {
+          "slots": 0.73512,
+          "epoch": 0.700077
+        },
+        "nqueens": {
+          "slots": 0.801759,
+          "epoch": 0.880173
+        }
+      },
+      "generated_c_sha256": {
+        "iops": "6ce8495ef29b5bb06038c775cad54f3fdc47f082d02219beb00752b848409632",
+        "fib": "853464caeb5ed7008282311f602e1e392e0a7b34a284ee9ebfaef790f2ab0fce",
+        "nqueens": "2529f3f2e8e874db43ce3d076b0dd47ab8496884f6e6f65c2301e6207565f7fa"
+      }
+    },
+    "direct_generated_application": {
+      "pairs": 9,
+      "warmups": 0,
+      "cpu": 24,
+      "state_comparison": "all six raw KV bodies",
+      "large_input_medians_ms": {
+        "iops": {
+          "slots": 10.170046,
+          "direct": 9.866833
+        },
+        "fib": {
+          "slots": 0.755063,
+          "direct": 0.770076
+        },
+        "nqueens": {
+          "slots": 0.802015,
+          "direct": 0.807806
+        }
+      },
+      "generated_c_sha256": {
+        "iops": "924e470115b3e072baacc5831cc9b9bc797cdbfed9d047182fc709cce0b8c0f0",
+        "fib": "aafed2266de01be91f0aa354d188a86079b0aa5f6a973fe745bbb59269224168",
+        "nqueens": "0c2bfd6ed47353ca12b3a26772f64a98f92eae3c6ac86acb44a325b52dfc74f1"
+      }
+    }
+  }
+}

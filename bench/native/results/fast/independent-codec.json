@@ -1,0 +1,70 @@
+{
+  "cpu": 25,
+  "scope": "Current decimal PC codec and exact seven-byte status; removed raw-token dispatch excluded",
+  "coverage": [
+    "all 2^24 depth-byte combinations",
+    "all 16^4 relevant row-nibble combinations",
+    "all legal depth/row values at eight alignments",
+    "all 256 byte replacements at every PC digit/status byte",
+    "guard-page exact body boundaries",
+    "PC updates preserve every non-digit byte"
+  ],
+  "source_sha256": {
+    "fast.py": "8cf24f4bc38addba0f9ce074b2140c330f708eb2049498360a6c3281f0ba4473",
+    "fast.c.in": "a0f8f31996dc453ca1695da0ffcf0f05793f34d170377eef1f2835466d13fa7c",
+    "worker.c.in": "c52890d0108cb1900bc534dc3567237e428a524314e70b16918e922cd3f6c385"
+  },
+  "harness_sha256": "b755aced49398e46add93023c26436a2bd4864ba7e1b36623ac1cb2b21584237",
+  "runs": [
+    {
+      "compiler": "cc (Ubuntu 14.3.0-12ubuntu1~22~ppa2) 14.3.0",
+      "flags": [
+        "-O3"
+      ],
+      "stdout": "codec checks=16953475 passed",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "compiler": "Ubuntu clang version 14.0.0-1ubuntu1.1",
+      "flags": [
+        "-O1",
+        "-fsanitize=address,undefined",
+        "-fno-omit-frame-pointer",
+        "-fno-pie",
+        "-no-pie"
+      ],
+      "stdout": "codec checks=16953475 passed",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "compiler": "Ubuntu clang version 14.0.0-1ubuntu1.1",
+      "flags": [
+        "-O1",
+        "-fsanitize=address,undefined",
+        "-fno-omit-frame-pointer",
+        "-fno-pie",
+        "-no-pie"
+      ],
+      "stdout": "codec checks=16953475 passed",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "compiler": "Ubuntu clang version 14.0.0-1ubuntu1.1",
+      "flags": [
+        "-O1",
+        "-fsanitize=address,undefined",
+        "-fno-omit-frame-pointer",
+        "-fno-pie",
+        "-no-pie"
+      ],
+      "stdout": "codec checks=16953475 passed",
+      "stderr": "",
+      "exit": 0
+    }
+  ],
+  "prior_attempt": "One Clang PIE sanitizer invocation exited with SIGSEGV without a retained diagnostic; its immediate rerun passed. Current evidence uses three separate non-PIE sanitizer builds and runs.",
+  "script_sha256": "696ca7c94856ac5b190bd8ad5d497bc7ab1e6f25a52608f473f5ee9b0ce65948"
+}

@@ -2,6 +2,8 @@
 
 For guarded specialization, compiler-assisted partial evaluation, and opcode-helper copy-and-patch JIT comparisons, see [Native execution strategies](strategies.md).
 
+For faster PC codecs, redo application, and loop-selective address caching, see [Reduced instruction overhead](fast.md).
+
 `compile.py` runs the existing layout frontend, reads its RWIR from KVSpace, and emits a C worker. The source algorithms are unchanged. This is an opt-in benchmark prototype, with a separate packed frame ABI; it is not integrated into the interpreter or a claim about all kvlang programs.
 
 ## State and recovery

@@ -1,0 +1,24 @@
+#if __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
+#error "PC word codec requires little-endian storage"
+#endif
+typedef struct __attribute__((packed, may_alias)) { uint32_t value; } word_t;
+static const uint32_t depth_words[] = {@DEPTH@};
+static const uint32_t row_words[] = {@ROW@};
+
+static inline unsigned digits(volatile uint8_t *pc, int offset, int width) {
+    uint32_t word = ((volatile word_t *)(pc + offset))->value;
+    uint32_t mask = width == 3 ? UINT32_C(0x00ffffff) : UINT32_MAX;
+    uint32_t d = (word ^ UINT32_C(0x30303030)) & mask;
+    if ((d & (UINT32_C(0xf0f0f0f0) & mask)) ||
+        ((d + (UINT32_C(0x06060606) & mask)) & (UINT32_C(0x10101010) & mask)))
+        return UINT32_MAX;
+    unsigned result = (d & 255) * 100 + ((d >> 8) & 255) * 10 + ((d >> 16) & 255);
+    return width == 3 ? result : result * 10 + (d >> 24);
+}
+
+static inline void set_pc(volatile uint8_t *pc, unsigned depth, unsigned row) {
+    volatile word_t *depth_word = (volatile word_t *)(pc + DEPTH_POS);
+    uint32_t separator = depth_word->value & UINT32_C(0xff000000);
+    depth_word->value = separator | depth_words[depth];
+    ((volatile word_t *)(pc + ROW_POS))->value = row_words[row];
+}

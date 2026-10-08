@@ -10,13 +10,16 @@ import subprocess
 import tempfile
 
 from compile import STRATEGIES, instruction_code
+from fast import MODES, generate as fast_generate
 from run import CASES, benchmark, compile_case, loaded_libraries, measure_pairs, run, sha
 
-VARIANTS = ['aot', *STRATEGIES, 'python']
+VARIANTS = ['aot', *[v for v in STRATEGIES if v not in MODES], 'python']
 FLAGS = ['-O3', '-std=c11', '-Wall', '-Wextra', '-Werror']
 
 
 def generate(source, schema, variant):
+    if variant in MODES:
+        return fast_generate(source, variant, schema)
     guarded = variant in ('guarded', 'copy-patch-guarded')
     variant = 'copy-patch' if variant == 'copy-patch-guarded' else variant
     shapes, descriptors, positions = {}, [], {}
@@ -137,11 +140,11 @@ def build(args, aot, binary, variant):
     return dict(details, compile_ns=wall, text_bytes=int(size[0]), worker_sha256=sha(binary), generated_c_sha256=sha(binary.with_suffix('.c')))
 
 
-def codegen_evidence(binaries, metadata):
+def codegen_evidence(binaries, metadata, variants):
     evidence = {}
     for case in CASES:
         evidence[case] = {}
-        for variant in VARIANTS[:-1]:
+        for variant in variants[:-1]:
             binary = binaries / variant / case
             symbols = subprocess.check_output(['nm', '-S', str(binary)], text=True).splitlines()
             table = any(line.split()[-1] == 'instructions' for line in symbols)
@@ -160,7 +163,11 @@ def main():
         ap.add_argument('--' + name, type=Path, required=True)
     ap.add_argument('--cpu', type=int, default=24)
     ap.add_argument('--pairs', type=int, default=9)
+    ap.add_argument('--variants', nargs='+', choices=[*VARIANTS, *MODES], default=VARIANTS)
     args = ap.parse_args()
+    selected = args.variants
+    if selected[0] != 'aot' or selected[-1] != 'python' or len(set(selected)) != len(selected):
+        ap.error('--variants must start with aot, end with python, and contain no duplicates')
     if args.pairs < 1:
         ap.error('--pairs must be positive')
     if platform.machine() != 'x86_64':
@@ -168,11 +175,11 @@ def main():
     os.environ.update(KVSPACE_BACKEND_PATH=str(args.backend), LOG_LEVEL='warn')
     env = dict(os.environ)
     binaries = args.output / 'binaries'
-    for variant in VARIANTS[:-1]:
+    for variant in selected[:-1]:
         (binaries / variant).mkdir(parents=True, exist_ok=True)
     metadata = dict(cpu=args.cpu, cpu_model=benchmark.cpu_model(), python=platform.python_version(),
                     compiler=subprocess.check_output(['cc', '--version'], text=True).splitlines()[0],
-                    flags=FLAGS, pairs=args.pairs, warmups=1, inputs={},
+                    flags=FLAGS, pairs=args.pairs, warmups=1, inputs={}, variants=selected,
                     timing='execute includes redo; JIT preparation separate; wall includes init and run; build timings are one observation',
                     libraries={str(p): sha(p) for p in [args.frontend, args.backend / 'libkvspace-c.so.1']},
                     kvlang=dict(path=str(args.kvlang), sha256=sha(args.kvlang)))
@@ -183,38 +190,38 @@ def main():
         inputs = compile_case(args, case, aot)
         workers[case] = {'aot': aot}
         variants = {}
-        for variant in VARIANTS[1:-1]:
+        for variant in selected[1:-1]:
             binary = binaries / variant / case
             variants[variant] = build(args, aot, binary, variant)
             workers[case][variant] = binary
         metadata['inputs'][case] = dict(inputs, scales=scales[case], variants=variants, aot_sha256=sha(aot))
         metadata['inputs'][case]['aot_text_bytes'] = int(subprocess.check_output(['size', str(aot)], text=True).splitlines()[1].split()[0])
     with tempfile.TemporaryDirectory(prefix='strategies-libraries-') as td:
-        loaded, _ = run([workers['iops']['partial'], 'shm://' + td + '/store', 'init', 1],
+        loaded, _ = run([workers['iops']['aot'], 'shm://' + td + '/store', 'init', 1],
                         dict(env, LD_DEBUG='libs'), args.cpu)
     metadata['loaded'] = loaded_libraries(loaded, args.frontend)
 
-    rows = measure_pairs(args, scales, VARIANTS, workers, jit=True)
+    rows = measure_pairs(args, scales, selected, workers, jit=True)
     summary = {}
     for case, points in scales.items():
         for scale in points:
             samples = [r for r in rows if r['case'] == case and r['scale'] == scale]
-            medians = {v: statistics.median(r['kernel_ns'] for r in samples if r['variant'] == v) / 1e3 for v in VARIANTS}
+            medians = {v: statistics.median(r['kernel_ns'] for r in samples if r['variant'] == v) / 1e3 for v in selected}
             paired = {}
             aot = [r['kernel_ns'] for r in samples if r['variant'] == 'aot']
-            for variant in VARIANTS[1:-1]:
+            for variant in selected[1:-1]:
                 times = [r['kernel_ns'] for r in samples if r['variant'] == variant]
                 ratios = [base / value for base, value in zip(aot, times)]
                 paired[variant] = dict(median=statistics.median(ratios), minimum=min(ratios), maximum=max(ratios))
             summary[f'{case}({scale})'] = dict(medians_us=medians,
-                wall_medians_ms={v: statistics.median(r['wall_ns'] for r in samples if r['variant'] == v) / 1e6 for v in VARIANTS},
+                wall_medians_ms={v: statistics.median(r['wall_ns'] for r in samples if r['variant'] == v) / 1e6 for v in selected},
                 paired_aot_speedups=paired,
                 jit_medians_us={v: statistics.median(r['jit_ns'] for r in samples if r['variant'] == v) / 1e3
-                                for v in ['copy-patch', 'copy-patch-guarded']})
-    metadata.update(samples=len(rows), equal_final_state_groups=len(rows) // len(VARIANTS))
+                                for v in ['copy-patch', 'copy-patch-guarded'] if v in selected})
+    metadata.update(samples=len(rows), equal_final_state_groups=len(rows) // len(selected))
     metadata['generator_sha256'] = {name: sha(Path(__file__).with_name(name))
-        for name in ['compile.py', 'strategies.py', 'strategies.c.in', 'worker.c.in', 'run.py']}
-    (args.output / 'codegen.json').write_text(json.dumps(codegen_evidence(binaries, metadata), indent=2) + '\n')
+        for name in ['compile.py', 'strategies.py', 'strategies.c.in', 'worker.c.in', 'run.py', 'fast.py', 'fast.c.in']}
+    (args.output / 'codegen.json').write_text(json.dumps(codegen_evidence(binaries, metadata, selected), indent=2) + '\n')
     (args.output / 'metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')
     (args.output / 'medians-us.json').write_text(json.dumps(summary, indent=2) + '\n')
     print(json.dumps(summary, indent=2))

@@ -11,7 +11,9 @@ import struct
 import subprocess
 import tempfile
 
-STRATEGIES = ['decoded', 'partial', 'guarded', 'copy-patch', 'copy-patch-guarded', 'address-cache']
+from fast import MODES
+
+STRATEGIES = ['decoded', 'partial', 'guarded', 'copy-patch', 'copy-patch-guarded', 'address-cache', *MODES]
 
 
 class KV:

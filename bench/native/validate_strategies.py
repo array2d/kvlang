@@ -11,6 +11,7 @@ import tempfile
 
 from run import compile_worker, final_state_digest, output, run
 from strategies import VARIANTS
+from fast import MODES
 from validate import Store
 
 
@@ -19,10 +20,13 @@ def main():
     for name in ['kvlang', 'frontend', 'backend', 'include', 'binaries', 'output']:
         ap.add_argument('--' + name, type=Path, required=True)
     ap.add_argument('--cpu', type=int, default=24)
+    ap.add_argument('--variants', nargs='+', choices=[*VARIANTS[:-1], *MODES], default=VARIANTS[:-1])
     args = ap.parse_args()
     os.environ.update(KVSPACE_BACKEND_PATH=str(args.backend), LOG_LEVEL='warn')
     env = dict(os.environ)
-    variants = VARIANTS[:-1]
+    variants = args.variants
+    if 'aot' not in variants or len(set(variants)) != len(variants):
+        ap.error('--variants must include aot and contain no duplicates')
     report = {'suites': {}, 'cross_method_restarts': 0, 'live_edit_groups': 0,
               'prepared_call_replays': 0, 'address_cache_groups': 0}
     for variant in variants:

@@ -1,0 +1,113 @@
+{
+  "iops": {
+    "aot": {
+      "instruction_table_retained": false,
+      "opcode_helpers": 0,
+      "worker_sha256": "9a3fe6451d94d3cc2f8cb4e3c135c89d49efa41c7b9f9496bc9fc7aeec3a1360"
+    },
+    "fast-commit": {
+      "instruction_table_retained": false,
+      "opcode_helpers": 0,
+      "worker_sha256": "cf28a7c5d31ed81affda2d42f01b0b3c2bdabb97d3845860664fec437abd4e31"
+    },
+    "fast-pc": {
+      "instruction_table_retained": false,
+      "opcode_helpers": 0,
+      "worker_sha256": "65f4c15f3e2f496875db3fdd57abbede5724e258f6cf3c0d905379d553e7b7e8"
+    },
+    "fast": {
+      "instruction_table_retained": false,
+      "opcode_helpers": 0,
+      "worker_sha256": "d0c902fb48f8d25c4a3326e7480990fd18c156dca414ba252e3f0ec1b35068a7"
+    },
+    "fast-slots": {
+      "instruction_table_retained": false,
+      "opcode_helpers": 0,
+      "worker_sha256": "826ab61144e67165fbd5457ab043ac005647947cee49445915f7b71633b2e5b4"
+    },
+    "fast-address": {
+      "instruction_table_retained": false,
+      "opcode_helpers": 0,
+      "worker_sha256": "ae84af0da900fb7ac8cb97fab664d2188cb5aabd326a7c41a023928e25939b1e"
+    },
+    "fast-loop": {
+      "instruction_table_retained": false,
+      "opcode_helpers": 0,
+      "worker_sha256": "0a21d3408e19815a9387727f860f9204b1639534d707e4536224894ba2d95030"
+    }
+  },
+  "fib": {
+    "aot": {
+      "instruction_table_retained": false,
+      "opcode_helpers": 0,
+      "worker_sha256": "1fbf2a34bc09aaab00fedb9746d502e9be8a12bc87f4e5119e41018fd7ada24a"
+    },
+    "fast-commit": {
+      "instruction_table_retained": false,
+      "opcode_helpers": 0,
+      "worker_sha256": "806be4408591ed586641c83f4f2b5868a7a63991abf38ecc5243f913103433eb"
+    },
+    "fast-pc": {
+      "instruction_table_retained": false,
+      "opcode_helpers": 0,
+      "worker_sha256": "dc6d0c93542b31cb8dcf603a8e68788ed0d56c3cc7bf4eb267303555bf3a3b55"
+    },
+    "fast": {
+      "instruction_table_retained": false,
+      "opcode_helpers": 0,
+      "worker_sha256": "0a33fb2f00a1b660f09af222f03100a0bb89626e375c55a63e577f8de8807cd1"
+    },
+    "fast-slots": {
+      "instruction_table_retained": false,
+      "opcode_helpers": 0,
+      "worker_sha256": "c384e1d17b39d2f096d475ab523dbf9be5ede19c92440d75bc7b24d463811025"
+    },
+    "fast-address": {
+      "instruction_table_retained": false,
+      "opcode_helpers": 0,
+      "worker_sha256": "2a66740f2cae4773f80b228d62b2393a3a34834908520e51b45a056a0652b6f0"
+    },
+    "fast-loop": {
+      "instruction_table_retained": false,
+      "opcode_helpers": 0,
+      "worker_sha256": "c384e1d17b39d2f096d475ab523dbf9be5ede19c92440d75bc7b24d463811025"
+    }
+  },
+  "nqueens": {
+    "aot": {
+      "instruction_table_retained": false,
+      "opcode_helpers": 0,
+      "worker_sha256": "ff84d32d14ee89a49a0928f21f3029a1599e3b03dc4a2cb436e9dc3dd15e3118"
+    },
+    "fast-commit": {
+      "instruction_table_retained": false,
+      "opcode_helpers": 0,
+      "worker_sha256": "1985fa7e0c4a531b5a46305ed17dfcc7da028a01b6680e17f44b292ede75a47e"
+    },
+    "fast-pc": {
+      "instruction_table_retained": false,
+      "opcode_helpers": 0,
+      "worker_sha256": "1048df7b6bec14879985e89c094b9ec9108c69f9237130df99327578244a030f"
+    },
+    "fast": {
+      "instruction_table_retained": false,
+      "opcode_helpers": 0,
+      "worker_sha256": "cb1ed8b353dcf14f2220eadcb3b4b87bd0b7994bcfc01a41c14c8a9a112f157d"
+    },
+    "fast-slots": {
+      "instruction_table_retained": false,
+      "opcode_helpers": 0,
+      "worker_sha256": "87d212423814a80ab89568ef79815d9c680e4f962138a162b07fed409b51bce8"
+    },
+    "fast-address": {
+      "instruction_table_retained": false,
+      "opcode_helpers": 0,
+      "worker_sha256": "6a64b42d07f234abd442e19380ac103cc16ed41fbe65c4d7ecbfe175c6725503"
+    },
+    "fast-loop": {
+      "instruction_table_retained": false,
+      "opcode_helpers": 0,
+      "worker_sha256": "15556bda9e4557146a74b2f0eb9ebb99ad84bd17b1a85783c8d94b3884ea999f"
+    }
+  }
+}

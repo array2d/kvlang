@@ -1,0 +1,247 @@
+{
+  "cpu": 24,
+  "cpu_model": "Intel(R) Xeon(R) Gold 6418H",
+  "python": "3.10.12",
+  "compiler": "cc (Ubuntu 14.3.0-12ubuntu1~22~ppa2) 14.3.0",
+  "flags": [
+    "-O3",
+    "-std=c11",
+    "-Wall",
+    "-Wextra",
+    "-Werror"
+  ],
+  "pairs": 9,
+  "warmups": 1,
+  "inputs": {
+    "iops": {
+      "kv_sha256": "360d3a2b7bd4d014255ba34cd86f6c72ee72a46b4787ed248ee5a6db96887dd7",
+      "python_sha256": "e53ef1d628cf1b39be8e2ee2e7ee04a9e0517403226e5f8f18ada9a44ce12d04",
+      "wrapper": "\nrwfunc bench_native(n:int64) -> (r:int64) {\niops(n) -> r\n}\n",
+      "generated_c_sha256": "ef929eb7f7dea1fe901fcbac9fa5fc18af13919e96c57d129744caf3dd0e781b",
+      "scales": [
+        500,
+        1000,
+        2000,
+        200000
+      ],
+      "variants": {
+        "fast-commit": {
+          "jit_bytes": 0,
+          "loop_cached_functions": [],
+          "compile_ns": 230663608,
+          "text_bytes": 11093,
+          "worker_sha256": "cf28a7c5d31ed81affda2d42f01b0b3c2bdabb97d3845860664fec437abd4e31",
+          "generated_c_sha256": "bc71a283d8add0e5908e9bb943e0118951938e7093fd84a49b363ab451b4e847"
+        },
+        "fast-pc": {
+          "jit_bytes": 0,
+          "loop_cached_functions": [],
+          "compile_ns": 210490286,
+          "text_bytes": 51120,
+          "worker_sha256": "65f4c15f3e2f496875db3fdd57abbede5724e258f6cf3c0d905379d553e7b7e8",
+          "generated_c_sha256": "3055cf364055dc41c5752e0ee80b3d813182e51f9862af7a331d5f5c1942015e"
+        },
+        "fast": {
+          "jit_bytes": 0,
+          "loop_cached_functions": [],
+          "compile_ns": 232163865,
+          "text_bytes": 51685,
+          "worker_sha256": "d0c902fb48f8d25c4a3326e7480990fd18c156dca414ba252e3f0ec1b35068a7",
+          "generated_c_sha256": "e93ee99a0f254a48706801e3fabcd69c2eff74aab4a2c98b251e33f434723dd0"
+        },
+        "fast-slots": {
+          "jit_bytes": 0,
+          "loop_cached_functions": [],
+          "compile_ns": 246384927,
+          "text_bytes": 51921,
+          "worker_sha256": "826ab61144e67165fbd5457ab043ac005647947cee49445915f7b71633b2e5b4",
+          "generated_c_sha256": "644bb50a88656900060512209b770f1bf7631e9bc11512393c4477a6661ea855"
+        },
+        "fast-address": {
+          "jit_bytes": 0,
+          "loop_cached_functions": [],
+          "compile_ns": 253863571,
+          "text_bytes": 52624,
+          "worker_sha256": "ae84af0da900fb7ac8cb97fab664d2188cb5aabd326a7c41a023928e25939b1e",
+          "generated_c_sha256": "c09bcf5e98cd23ef52b8e949e89c9add5592581303ff82549af8966b6768dfc1"
+        },
+        "fast-loop": {
+          "jit_bytes": 0,
+          "loop_cached_functions": [
+            "iops"
+          ],
+          "compile_ns": 284299705,
+          "text_bytes": 53968,
+          "worker_sha256": "0a21d3408e19815a9387727f860f9204b1639534d707e4536224894ba2d95030",
+          "generated_c_sha256": "e72fd66ab20f4951537ee41387ad6af41aa858c270168740c2db5355774c50c9"
+        }
+      },
+      "aot_sha256": "9a3fe6451d94d3cc2f8cb4e3c135c89d49efa41c7b9f9496bc9fc7aeec3a1360",
+      "aot_text_bytes": 10316
+    },
+    "fib": {
+      "kv_sha256": "f9f308e2939ecd712442586ee87b8340f55331e75bcd6a6c6ffc12aea3a7bab4",
+      "python_sha256": "63a329cd3bbc9271f9142f9fa762b3389c17525679763a14e21a7138e12987fa",
+      "wrapper": "\nrwfunc bench_native(n:int64) -> (r:int64) {\nfib(n) -> r\n}\n",
+      "generated_c_sha256": "07b55ab8792de8104e5df323ebae83bbb64e6ce22c75c4d6fe9ca374146ccf95",
+      "scales": [
+        8,
+        9,
+        10,
+        18
+      ],
+      "variants": {
+        "fast-commit": {
+          "jit_bytes": 0,
+          "loop_cached_functions": [],
+          "compile_ns": 264232056,
+          "text_bytes": 11661,
+          "worker_sha256": "806be4408591ed586641c83f4f2b5868a7a63991abf38ecc5243f913103433eb",
+          "generated_c_sha256": "c3b011978a7fc2b5d07a27fa05d661d68fe33b866b891257216242e04e43411a"
+        },
+        "fast-pc": {
+          "jit_bytes": 0,
+          "loop_cached_functions": [],
+          "compile_ns": 223066487,
+          "text_bytes": 51529,
+          "worker_sha256": "dc6d0c93542b31cb8dcf603a8e68788ed0d56c3cc7bf4eb267303555bf3a3b55",
+          "generated_c_sha256": "e7daf1cec0677ee8092a5b8b3efc50d607523a73a83c75989b225fa806df61f9"
+        },
+        "fast": {
+          "jit_bytes": 0,
+          "loop_cached_functions": [],
+          "compile_ns": 252543689,
+          "text_bytes": 52093,
+          "worker_sha256": "0a33fb2f00a1b660f09af222f03100a0bb89626e375c55a63e577f8de8807cd1",
+          "generated_c_sha256": "05b08635846f8bbf602c2e51561fe04029d4ecca7f9e67d7bbe17f8a4baa1fbd"
+        },
+        "fast-slots": {
+          "jit_bytes": 0,
+          "loop_cached_functions": [],
+          "compile_ns": 258287662,
+          "text_bytes": 52194,
+          "worker_sha256": "c384e1d17b39d2f096d475ab523dbf9be5ede19c92440d75bc7b24d463811025",
+          "generated_c_sha256": "566d37b387f2de14f666e06e7b98d4dbd4a7fd796b29942c82dd7985e5cfacf7"
+        },
+        "fast-address": {
+          "jit_bytes": 0,
+          "loop_cached_functions": [],
+          "compile_ns": 284183787,
+          "text_bytes": 52941,
+          "worker_sha256": "2a66740f2cae4773f80b228d62b2393a3a34834908520e51b45a056a0652b6f0",
+          "generated_c_sha256": "5767ed134cbcc7e31a5a8cc3ba5dca3f5d6119cc2aa4ca09628e3ad9123946e7"
+        },
+        "fast-loop": {
+          "jit_bytes": 0,
+          "loop_cached_functions": [],
+          "compile_ns": 263952256,
+          "text_bytes": 52194,
+          "worker_sha256": "c384e1d17b39d2f096d475ab523dbf9be5ede19c92440d75bc7b24d463811025",
+          "generated_c_sha256": "566d37b387f2de14f666e06e7b98d4dbd4a7fd796b29942c82dd7985e5cfacf7"
+        }
+      },
+      "aot_sha256": "1fbf2a34bc09aaab00fedb9746d502e9be8a12bc87f4e5119e41018fd7ada24a",
+      "aot_text_bytes": 10765
+    },
+    "nqueens": {
+      "kv_sha256": "e4ba6073d1cd9e76949e3b81b46604e28b97e712afd6f6158db811f7e97c169b",
+      "python_sha256": "61ebaeccf79bf06a85e213180930552748cca126ec60b8636a7ed7849765a8af",
+      "wrapper": "\nrwfunc bench_native(n:int64) -> (r:int64) {\n1 << n -> sh\nsh - 1 -> all\nnq(0, 0, 0, all) -> r\n}\n",
+      "generated_c_sha256": "0d3c595d6ba9f9df24fe1e13c52c551859609ae64ce3e7acd64d272848e421e0",
+      "scales": [
+        4,
+        5,
+        6,
+        8
+      ],
+      "variants": {
+        "fast-commit": {
+          "jit_bytes": 0,
+          "loop_cached_functions": [],
+          "compile_ns": 460243041,
+          "text_bytes": 22725,
+          "worker_sha256": "1985fa7e0c4a531b5a46305ed17dfcc7da028a01b6680e17f44b292ede75a47e",
+          "generated_c_sha256": "c91ee4354fc0ddd7a0ad6e85d809b03edf111f35d55bbeda3ceb4eb052770118"
+        },
+        "fast-pc": {
+          "jit_bytes": 0,
+          "loop_cached_functions": [],
+          "compile_ns": 353801709,
+          "text_bytes": 61185,
+          "worker_sha256": "1048df7b6bec14879985e89c094b9ec9108c69f9237130df99327578244a030f",
+          "generated_c_sha256": "9810bb4a4529343b58db5d3edbd66904676ed2935fa159578bd6a65e9d7a2713"
+        },
+        "fast": {
+          "jit_bytes": 0,
+          "loop_cached_functions": [],
+          "compile_ns": 623149412,
+          "text_bytes": 63433,
+          "worker_sha256": "cb1ed8b353dcf14f2220eadcb3b4b87bd0b7994bcfc01a41c14c8a9a112f157d",
+          "generated_c_sha256": "3e53d6932c0fc97f601d70b581082d77d3c65f49690fb19974b675dcb377dbce"
+        },
+        "fast-slots": {
+          "jit_bytes": 0,
+          "loop_cached_functions": [],
+          "compile_ns": 446442707,
+          "text_bytes": 63741,
+          "worker_sha256": "87d212423814a80ab89568ef79815d9c680e4f962138a162b07fed409b51bce8",
+          "generated_c_sha256": "39d043bdfb095b951ffbca33f56613c62871a03fd0c216a5be630e468efc2c32"
+        },
+        "fast-address": {
+          "jit_bytes": 0,
+          "loop_cached_functions": [],
+          "compile_ns": 464726286,
+          "text_bytes": 64412,
+          "worker_sha256": "6a64b42d07f234abd442e19380ac103cc16ed41fbe65c4d7ecbfe175c6725503",
+          "generated_c_sha256": "c3adbfa512979f54704382f5d0adb0564cbe86531f701841a0c69e730acc81af"
+        },
+        "fast-loop": {
+          "jit_bytes": 0,
+          "loop_cached_functions": [
+            "nq"
+          ],
+          "compile_ns": 579677888,
+          "text_bytes": 66422,
+          "worker_sha256": "15556bda9e4557146a74b2f0eb9ebb99ad84bd17b1a85783c8d94b3884ea999f",
+          "generated_c_sha256": "bf693b036f8500a73385d914951ffd45d13fc3a9fab71e6b7b880cad4ec4b2bb"
+        }
+      },
+      "aot_sha256": "ff84d32d14ee89a49a0928f21f3029a1599e3b03dc4a2cb436e9dc3dd15e3118",
+      "aot_text_bytes": 20157
+    }
+  },
+  "variants": [
+    "aot",
+    "fast-commit",
+    "fast-pc",
+    "fast",
+    "fast-slots",
+    "fast-address",
+    "fast-loop",
+    "python"
+  ],
+  "timing": "execute includes redo; JIT preparation separate; wall includes init and run; build timings are one observation",
+  "libraries": {
+    "/tmp/kvspace-frontend-main-release/libkvspace.so.1": "f5abbbf1fe9493d56c11ecb428269f5b2f540c1d47d69b050e4e5e5743628f3f",
+    "/tmp/kvspace-c-perf-total-build/libkvspace-c.so.1": "6b143b678a0d1be7761401809b08c6d9093f9501ec261da3aaa2bcbd96b433c0"
+  },
+  "kvlang": {
+    "path": "/tmp/kvlang-perf-current/bin/kvlang",
+    "sha256": "931157271cc79507b6a33c0e9c3fc72013ceb65ff5520c046b887955bce49d7a"
+  },
+  "loaded": {
+    "/tmp/kvspace-frontend-main-release/libkvspace.so.1": "f5abbbf1fe9493d56c11ecb428269f5b2f540c1d47d69b050e4e5e5743628f3f",
+    "/tmp/kvspace-c-perf-total-build/libkvspace-c.so.1": "6b143b678a0d1be7761401809b08c6d9093f9501ec261da3aaa2bcbd96b433c0"
+  },
+  "samples": 864,
+  "equal_final_state_groups": 108,
+  "generator_sha256": {
+    "compile.py": "d45998c321000947c0504e77c02896fd2ad0cf0a424e1eeaa3b13a5d50998c34",
+    "strategies.py": "db0b8e0cb8125e082572bde0954cb9658d522de04395c7dba28c8871edc0864c",
+    "strategies.c.in": "471fe04023854f2e2e7d3f5466f0309a6b25870c9114b930226038315a982b81",
+    "worker.c.in": "c52890d0108cb1900bc534dc3567237e428a524314e70b16918e922cd3f6c385",
+    "run.py": "840ea3d9d879b3be393fd5fd9b3d14b52af84611112b5b7959cbfde0e7049070",
+    "fast.py": "8cf24f4bc38addba0f9ce074b2140c330f708eb2049498360a6c3281f0ba4473",
+    "fast.c.in": "a0f8f31996dc453ca1695da0ffcf0f05793f34d170377eef1f2835466d13fa7c"
+  }
+}

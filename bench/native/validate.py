@@ -77,7 +77,7 @@ def main():
             finish('fib', 55)
         init('fib', 260)
         finish('fib', None, 4)
-        for fault in ['argument', 'constant', 'status', 'pc', 'reference', 'tag', 'path', 'program', 'journal']:
+        for fault in ['argument', 'constant', 'status', 'pc', 'reference', 'tag', 'path', 'journal_path', 'program', 'journal']:
             init('iops', 6)
             finish('iops', None, 75, 1)
             with closing(Store(args.frontend, dsn)) as store:
@@ -98,6 +98,9 @@ def main():
                     frames[2] = 9
                 elif fault == 'path':
                     store.view('pc', c.c_uint8)[0] = ord('x')
+                elif fault == 'journal_path':
+                    store.view('pc', c.c_uint8)[-10] = ord('x')
+                    store.view('journal')[:3] = [1, 1, 1]
                 elif fault == 'program':
                     store.view('program', c.c_uint8)[0] ^= 1
                 elif fault == 'journal':
