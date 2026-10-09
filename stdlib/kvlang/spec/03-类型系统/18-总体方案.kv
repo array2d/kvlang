@@ -1,21 +1,36 @@
 // 欢迎加入kvspace世界
 lib kvlang/spec/类型系统/总体方案 {
-	r####"# 类型系统总体方案：xvalue head 三正交维
+	r####"# 类型系统总体方案：xvalue head 的定长头
 
-> **本卷即现行方案**（原「待敲定」状态已解除）：head 三正交维 `ref` × `storetype` × `langtype` 已落
-> 地，本卷各章与其它各卷均据此书写。
+> **本卷即现行方案**：#329 已把 head 改为**定长头**（32 / 64 / 128），取代 v0.2.9 的
+> 「三正交各占独立字节」。本卷各章与其它各卷均据此书写。
 
-每个 XValue 落入 kvspace 时，其类别由 head 三个**正交**字段表达，彻底取代旧的单一 `kind` 分类与
-langtype 首字符 `*`/`@` 前缀。
+每个 XValue 落入 kvspace 时，head 定长、body 紧随其后：
 
-- **`ref`（存储位置）** — 值放在哪：inline / 指针 / 扩展世界。1 字节。
-- **`storetype`（物理布局，codec 视角）** — 字节怎么切。**闭合小集**，1 字节。
-- **`langtype`（语义类型，语言视角）** — 值是什么类型。**即旧的 langtype 串**，变长，保留高级语言的
-  全部类型定义。
+	head = [pow:u8][flags:u8][a:u64 LE][b:u64 LE][langtype][padding]
+	headlen = 1 << pow
+	body = head + headlen
 
-**核心分层**：codec（[[XValueHead线格式]] 的编解码层）**只按 `storetype` 这 1 字节分派切字节**，完全
-不解析 `langtype` 串（对它只是一段透传字节）；body 对 codec 恒为不透明字节。语言层（layout/runtime
-类型系统）只读 `langtype` 串做类型检查、匹配、显示。这把 kvspace（寻址+内存空间，只认 storetype 1 字
-节）与 kvlang 类型系统（只认 langtype 串）彻底解耦。
+- **`pow`（偏移 0）** — headlen 的以 2 为底对数。**body 偏移 = `1 << pow`**，一步移位即得，
+  无需解码。
+- **`flags`（偏移 1）** — 低 2 位是 **storage class**：0 短定长 / 1 有冗余的长度 / 2 长定长 /
+  3 扩展世界；**bit2 是指针位**。`ref` 不是独立字节，而是这个字节的派生视图。
+- **`a` / `b`（偏移 2 / 10）** — 按 class 解释：class 1 =（有效字节数, 容量），class 2 =
+  （numel, 元素宽），class 0 / 3 按类型定。
+- **`langtype`（偏移 18 起）** — 语义类型串，**占满到 headlen 为止**（无独立长度字段、
+  无 NUL 终止符）；类型串过长时由 codec 选更大的 pow 档。
+
+**codec 会解析 langtype**（`short_width` 查标量宽度、`parse_tensor` 解析 `[d0,d1]T`、
+`slack_count` 统计字符数）——它是分类与定位的依据，不是透传字节。
+
+## 与 v0.2.9（#239）的差异
+
+| | v0.2.9 | 现行（#329） |
+|---|---|---|
+| head 长度 | `headlen u16`，变长 | `1 << pow`，32 / 64 / 128 |
+| ref | 独立 1 字节 | 并入 `flags` bit2 |
+| storetype | 独立 1 字节 | 并入 `flags` 低 2 位 |
+| body 长度 | `body_len u32` + storetype 物理字段 | `a` / `b` 按 class 解释 |
+| ro / vid | head 内联 | 移入 `/.kvspace-meta/` sidecar |
 "#### -> /lib/kvlang/spec/类型系统/总体方案
 }

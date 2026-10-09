@@ -15,7 +15,8 @@ camelCase）——kvspace 层前缀 `kvspace`（`kvspaceGet` / `kvspaceWriteInPl
 |------|------|
 | `kvspaceGet` | 借用读：`*out` 指向后端常驻空间；`resolve=1` 穿透 link；不存在/空值 → `*out=NULL`、返回 0 |
 | `kvspaceWriteInPlace` | 就地写：key 已存在、kind 不变、body 长度不变；返回原 box body 偏移指针，违反前置条件即报错，绝不静默重分配 |
-| `kvspaceWriteNewPlace` | 新位置写：按 `(langtype, body_len)` 分配新 box、写好 head，返回 body 偏移指针；用于新建或 kind/尺寸变化 |
+| `kvspaceWriteNewPlace` | 新位置写：按 `(ref, storetype, langtype, body_len, body_cap)` 分配新 box、写好 head，返回 body 偏移指针；用于新建或 kind/尺寸变化。`body_cap` 是 v0.3.0 起的容量下界（预留冗余，减少后续扩容） |
+| `kvspaceSetValue` | 整值写：给定完整 xvalue 字节，由后端编码 head 并写入。runtime 侧的写出口走它，而非上面的偏移指针原语 |
 | `kvspaceListLen` | 返回前缀下直接子项计数 |
 | `kvspaceListAt` | 取前缀下第 `idx` 个子项名，写入调用方自备缓冲；配合 `kvspaceListLen` 遍历 |
 | `kvspaceDel` | 批量删除给定 key 数组 |
