@@ -91,3 +91,6 @@ kvlangtest*
 /wptest
 *.sbo.data
 *.sbo.head
+
+# CodeGraph 索引（本地知识图，不入库）
+.codegraph/
