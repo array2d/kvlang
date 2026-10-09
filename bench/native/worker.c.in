@@ -1,0 +1,271 @@
+#define _POSIX_C_SOURCE 200809L
+#include <kvspace/kvspace.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <stdatomic.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/file.h>
+#include <time.h>
+#include <unistd.h>
+
+#define DEPTH 256
+#define STRIDE @STRIDE@
+#define ARG_COUNT @ARGS@
+#define JOURNAL_CAP (2 * STRIDE)
+#define JOURNAL_WORDS (3 + 2 * JOURNAL_CAP)
+#define ROOT "/vthread/native"
+#define PC_KEY ROOT "/‥pc"
+#define STATE_KEY ROOT "/‥frames"
+#define CONST_KEY ROOT "/‥constants"
+#define STATUS_KEY ROOT "/‥status"
+#define JOURNAL_KEY ROOT "/‥journal"
+static const uint64_t initial_constants[] = {@CONSTANTS@};
+static const char initial_pc[] = ROOT "/[000]/[0001,0]";
+static const char program[] = "@PROGRAM@";
+#define DEPTH_POS (sizeof(ROOT) + 1)
+#define ROW_POS (DEPTH_POS + 6)
+
+typedef struct { uint64_t value, tag; } cell_t;
+
+static inline cell_t load_constant(volatile uint64_t *constants, size_t index) {
+    uint64_t tag = constants[index * 2], value = constants[index * 2 + 1];
+    if (tag == 1 || (tag == 2 && value <= 1)) return (cell_t){value, tag};
+    return (cell_t){0, 0};
+}
+
+static cell_t load_cell(volatile uint64_t *state, size_t index) {
+    for (int hops = 0; hops < DEPTH; hops++) {
+        if (index >= DEPTH * STRIDE - 1 || index % STRIDE < 2 || (index % STRIDE - 2) % 2)
+            break;
+        uint64_t tag = state[index], value = state[index + 1];
+        if (tag == 1 || (tag == 2 && value <= 1)) return (cell_t){value, tag};
+        if (tag != 3) break;
+        index = value;
+    }
+    return (cell_t){0, 0};
+}
+
+static void stage(volatile uint64_t *journal, unsigned *count, size_t index, uint64_t value) {
+    journal[3 + *count * 2] = index;
+    journal[4 + *count * 2] = value;
+    ++*count;
+}
+
+static int store_cell(volatile uint64_t *state, volatile uint64_t *journal, unsigned *count,
+                      size_t index, cell_t value) {
+    for (int hops = 0; hops < DEPTH; hops++) {
+        if (index >= DEPTH * STRIDE - 1 || index % STRIDE < 2 || (index % STRIDE - 2) % 2)
+            return -1;
+        if (state[index] != 3) {
+            if (state[index] > 3) return -1;
+            stage(journal, count, index + 1, value.value);
+            stage(journal, count, index, value.tag);
+            return 0;
+        }
+        index = state[index + 1];
+    }
+    return -1;
+}
+
+static int set_string(void *h, const char *key, const char *s) {
+    uint8_t *wire = NULL;
+    uint32_t len = 0;
+    char err[256];
+    if (kvspaceNewChar((const uint8_t *)s, strlen(s), &wire, &len)) return -1;
+    int rc = kvspaceSetValue(h, key, wire, len, 0, 0, err, sizeof err);
+    free(wire);
+    return rc;
+}
+
+static int fail(void *h, const char *message) {
+    set_string(h, ROOT "/‥error", message);
+    set_string(h, STATUS_KEY, "error");
+    return -1;
+}
+
+static int tensor(void *h, const char *key, const uint64_t *data, int32_t size) {
+    uint8_t *wire = NULL;
+    uint32_t len = 0;
+    char err[256];
+    if (kvspaceTlvEncode("uint64", (const uint8_t *)data, size * 8, &size, 1, &wire, &len)) return -1;
+    int rc = kvspaceSetValue(h, key, wire, len, 0, 0, err, sizeof err);
+    free(wire);
+    return rc;
+}
+
+static uint8_t *body(void *h, const char *key, const char *type, uint32_t expected) {
+    uint8_t *wire = NULL, *out = NULL;
+    uint32_t len = 0;
+    kvspaceHead_t head;
+    char err[256];
+    if (kvspaceGet(h, key, 0, &wire, &len) || !wire ||
+        kvspaceDecodeHead(wire, len, &head) || strcmp(head.langtype, type) ||
+        head.body_len != (int32_t)expected ||
+        kvspaceWriteInPlace(h, key, 0, expected, &out, err, sizeof err)) return NULL;
+    return out;
+}
+
+static unsigned digits(volatile uint8_t *pc, int offset, int width) {
+    unsigned v = 0;
+    for (int i = 0; i < width; i++) {
+        uint8_t digit = pc[offset + i];
+        if (digit < '0' || digit > '9') return UINT32_MAX;
+        v = v * 10 + digit - '0';
+    }
+    return v;
+}
+
+static void set_pc(volatile uint8_t *pc, unsigned depth, unsigned row) {
+    for (int i = 2; i >= 0; i--) { pc[DEPTH_POS + i] = '0' + depth % 10; depth /= 10; }
+    for (int i = 3; i >= 0; i--) { pc[ROW_POS + i] = '0' + row % 10; row /= 10; }
+}
+
+static int replay(void *h, volatile uint64_t *state, volatile uint64_t *journal, volatile uint8_t *pc) {
+    uint64_t marker = atomic_load_explicit((_Atomic uint64_t *)journal, memory_order_acquire);
+    if (!marker) return 0;
+    if (marker > JOURNAL_CAP + 1 || journal[1] >= DEPTH || journal[2] >= 10000 ||
+        (!journal[2] && journal[1])) return fail(h, "invalid journal");
+    for (unsigned i = 0; i < marker - 1; i++)
+        if (journal[3 + i * 2] >= DEPTH * STRIDE) return fail(h, "invalid journal index");
+    for (unsigned i = 0; i < marker - 1; i++)
+        state[journal[3 + i * 2]] = journal[4 + i * 2];
+    set_pc(pc, journal[1], journal[2]);
+    atomic_store_explicit((_Atomic uint64_t *)journal, 0, memory_order_release);
+    return 0;
+}
+
+static int commit(void *h, volatile uint64_t *state, volatile uint64_t *journal,
+                  volatile uint8_t *pc, unsigned count, uint64_t depth, uint64_t row) {
+    if (count > JOURNAL_CAP || depth >= DEPTH || row >= 10000 || (!row && depth))
+        return fail(h, "invalid next PC");
+    journal[1] = depth;
+    journal[2] = row;
+    /* Publish redo before changing live state or PC. */
+    atomic_store_explicit((_Atomic uint64_t *)journal, count + 1, memory_order_release);
+    return replay(h, state, journal, pc);
+}
+
+static uint64_t now(void) {
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (uint64_t)t.tv_sec * 1000000000 + t.tv_nsec;
+}
+
+#if defined(BENCH_KEY_LOOKUP)
+static uint8_t *lookup_body(void *h, const char *key, uint32_t expected) {
+    uint8_t *wire = NULL;
+    uint32_t len = 0;
+    if (kvspaceGet(h, key, 0, &wire, &len) || !wire || !len || wire[0] > 15)
+        return NULL;
+    uint32_t headlen = UINT32_C(1) << wire[0];
+    if (len < headlen || len - headlen != expected) return NULL;
+    return wire + headlen;
+}
+#endif
+
+static int execute(void *h, volatile uint64_t *state, volatile uint64_t *constants __attribute__((unused)),
+                   volatile uint64_t *journal, volatile uint8_t *pc,
+                   volatile uint8_t *status, uint64_t budget) {
+    uint64_t steps = 0;
+    for (;;) {
+#if defined(BENCH_KEY_LOOKUP)
+        pc = lookup_body(h, PC_KEY, strlen(initial_pc));
+#if BENCH_KEY_LOOKUP == 2
+        state = (volatile uint64_t *)lookup_body(h, STATE_KEY, DEPTH * STRIDE * 8);
+        constants = (volatile uint64_t *)lookup_body(h, CONST_KEY, sizeof(initial_constants));
+        journal = (volatile uint64_t *)lookup_body(h, JOURNAL_KEY, JOURNAL_WORDS * 8);
+        status = lookup_body(h, STATUS_KEY, 7);
+#endif
+        if (!pc || !state || !constants || !journal || !status)
+            return fail(h, "invalid state lookup");
+#endif
+        if (status[0] != 'r' || status[1] != 'u' || status[2] != 'n' ||
+            status[3] != 'n' || status[4] != 'i' || status[5] != 'n' || status[6] != 'g')
+            return 1;
+        unsigned depth = digits(pc, DEPTH_POS, 3), row = digits(pc, ROW_POS, 4), count = 0;
+        if (depth >= DEPTH || row >= 10000 || (!row && depth)) return fail(h, "invalid PC");
+        if (!row) return 0;
+        size_t base = depth * STRIDE;
+        switch (state[base]) {
+@DISPATCH@
+        default: return fail(h, "invalid function");
+        }
+        if (budget && ++steps == budget) _exit(75);
+    }
+}
+
+static int number(const char *s, int64_t *out) {
+    char *end;
+    errno = 0;
+    *out = strtoll(s, &end, 10);
+    return !*s || *end || errno;
+}
+
+int main(int argc, char **argv) {
+    if (argc < 3 || strncmp(argv[1], "shm:///", 7)) return 2;
+    char lock_path[4096];
+    if (snprintf(lock_path, sizeof lock_path, "%s.native.lock", argv[1] + 6) >= (int)sizeof lock_path) return 2;
+    int lock = open(lock_path, O_CREAT | O_RDWR | O_CLOEXEC, 0600);
+    if (lock < 0 || flock(lock, LOCK_EX | LOCK_NB)) return 6;
+    void *h = kvspaceConnect(argv[1]);
+    if (!h) return 3;
+    int result = 0;
+    if (!strcmp(argv[2], "init")) {
+        if (argc != 3 + ARG_COUNT) { result = 2; goto done; }
+        uint64_t *data = calloc(DEPTH * STRIDE, 8), journal[JOURNAL_WORDS] = {0};
+        if (!data) { result = 3; goto done; }
+        for (int i = 0; i < ARG_COUNT; i++) {
+            int64_t value;
+            if (number(argv[3 + i], &value)) { free(data); result = 2; goto done; }
+            data[2 + i * 2] = 1;
+            data[3 + i * 2] = (uint64_t)value;
+        }
+        result = set_string(h, STATUS_KEY, "initial") || tensor(h, STATE_KEY, data, DEPTH * STRIDE) ||
+            tensor(h, CONST_KEY, initial_constants, sizeof(initial_constants) / sizeof(*initial_constants)) ||
+            tensor(h, JOURNAL_KEY, journal, JOURNAL_WORDS) ||
+            set_string(h, ROOT "/‥program", program) || set_string(h, PC_KEY, initial_pc) ||
+            set_string(h, STATUS_KEY, "running") ? 3 : 0;
+        free(data);
+        goto done;
+    }
+    int64_t parsed = 0;
+    if (strcmp(argv[2], "run") || argc > 4 ||
+        (argc == 4 && (number(argv[3], &parsed) || parsed <= 0))) { result = 2; goto done; }
+    char frame_type[64], const_type[64], journal_type[64], pc_type[64];
+    snprintf(frame_type, sizeof frame_type, "[%u]uint64", DEPTH * STRIDE);
+    snprintf(const_type, sizeof const_type, "[%zu]uint64", sizeof(initial_constants) / sizeof(*initial_constants));
+    snprintf(journal_type, sizeof journal_type, "[%u]uint64", JOURNAL_WORDS);
+    snprintf(pc_type, sizeof pc_type, "[%zu]char/utf8", strlen(initial_pc));
+    uint8_t *identity = body(h, ROOT "/‥program", "[64]char/utf8", 64);
+    volatile uint64_t *state = (volatile uint64_t *)body(h, STATE_KEY, frame_type, DEPTH * STRIDE * 8);
+    volatile uint64_t *constants = (volatile uint64_t *)body(h, CONST_KEY, const_type, sizeof(initial_constants));
+    volatile uint64_t *journal = (volatile uint64_t *)body(h, JOURNAL_KEY, journal_type, JOURNAL_WORDS * 8);
+    volatile uint8_t *pc = body(h, PC_KEY, pc_type, strlen(initial_pc));
+    volatile uint8_t *status = body(h, STATUS_KEY, "[7]char/utf8", 7);
+    if (!identity || memcmp(identity, program, 64) || !state || !constants || !journal || !pc || !status ||
+        !atomic_is_lock_free((_Atomic uint64_t *)journal)) {
+        fputs("invalid store schema or program\n", stderr); result = 4; goto done;
+    }
+    if (replay(h, state, journal, pc)) { result = 4; goto done; }
+    for (unsigned i = 0; i < strlen(initial_pc); i++) {
+        if ((i >= DEPTH_POS && i < DEPTH_POS + 3) || (i >= ROW_POS && i < ROW_POS + 4)) continue;
+        if (pc[i] != (uint8_t)initial_pc[i]) { fail(h, "invalid PC path"); result = 4; goto done; }
+    }
+    uint64_t start = now();
+    int rc = execute(h, state, constants, journal, pc, status, parsed);
+    uint64_t elapsed = now() - start;
+    result = rc < 0 ? 4 : rc;
+    if (!rc) {
+        cell_t value = load_cell(state, @RESULT@);
+        if (value.tag != 1) { fail(h, "invalid result"); result = 4; goto done; }
+        printf("result = %lld\n__bench_ns: %llu\n", (long long)(int64_t)value.value, (unsigned long long)elapsed);
+        if (set_string(h, STATUS_KEY, "ok")) result = 4;
+    }
+done:
+    kvspaceClose(h);
+    close(lock);
+    return result;
+}

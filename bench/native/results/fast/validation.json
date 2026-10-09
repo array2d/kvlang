@@ -1,0 +1,57 @@
+{
+  "suites": {
+    "aot": {
+      "checks": 149,
+      "boundary_restarts": 32,
+      "sigkill_restarts": 24,
+      "prepared_partial_commit_replay": "passed",
+      "visibility_and_rejections": "passed"
+    },
+    "fast-commit": {
+      "checks": 149,
+      "boundary_restarts": 32,
+      "sigkill_restarts": 24,
+      "prepared_partial_commit_replay": "passed",
+      "visibility_and_rejections": "passed"
+    },
+    "fast-pc": {
+      "checks": 149,
+      "boundary_restarts": 32,
+      "sigkill_restarts": 24,
+      "prepared_partial_commit_replay": "passed",
+      "visibility_and_rejections": "passed"
+    },
+    "fast": {
+      "checks": 149,
+      "boundary_restarts": 32,
+      "sigkill_restarts": 24,
+      "prepared_partial_commit_replay": "passed",
+      "visibility_and_rejections": "passed"
+    },
+    "fast-slots": {
+      "checks": 149,
+      "boundary_restarts": 32,
+      "sigkill_restarts": 24,
+      "prepared_partial_commit_replay": "passed",
+      "visibility_and_rejections": "passed"
+    },
+    "fast-address": {
+      "checks": 149,
+      "boundary_restarts": 32,
+      "sigkill_restarts": 24,
+      "prepared_partial_commit_replay": "passed",
+      "visibility_and_rejections": "passed"
+    },
+    "fast-loop": {
+      "checks": 149,
+      "boundary_restarts": 32,
+      "sigkill_restarts": 24,
+      "prepared_partial_commit_replay": "passed",
+      "visibility_and_rejections": "passed"
+    }
+  },
+  "cross_method_restarts": 49,
+  "live_edit_groups": 7,
+  "prepared_call_replays": 7,
+  "address_cache_groups": 3
+}

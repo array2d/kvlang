@@ -1,0 +1,38 @@
+{
+  "iops(2000)": {
+    "interpreter": 25361.682,
+    "release": 17972.874,
+    "native": 193.259,
+    "python": 94.309
+  },
+  "iops(200000)": {
+    "interpreter": 2290596.472,
+    "release": 1623716.852,
+    "native": 17437.164,
+    "python": 9058.167
+  },
+  "fib(10)": {
+    "interpreter": 34910.716,
+    "release": 29551.701,
+    "native": 37.299,
+    "python": 19.163
+  },
+  "fib(18)": {
+    "interpreter": 1690095.766,
+    "release": 1392759.088,
+    "native": 1420.688,
+    "python": 519.151
+  },
+  "nqueens(6)": {
+    "interpreter": 91250.42,
+    "release": 77563.669,
+    "native": 117.273,
+    "python": 80.177
+  },
+  "nqueens(8)": {
+    "interpreter": 1182105.968,
+    "release": 989394.443,
+    "native": 1504.573,
+    "python": 796.319
+  }
+}

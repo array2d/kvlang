@@ -1,0 +1,32 @@
+{
+  "cached": {
+    "checks": 147,
+    "boundary_restarts": 32,
+    "sigkill_restarts": 24,
+    "prepared_partial_commit_replay": "passed",
+    "visibility_and_rejections": "passed"
+  },
+  "lookup-pc": {
+    "checks": 123,
+    "boundary_restarts": 32,
+    "sigkill_restarts": 0,
+    "prepared_partial_commit_replay": "passed",
+    "visibility_and_rejections": "passed",
+    "sigkill_scope": "skipped: lookup-PC Get left a shared allocator spinlock held after SIGKILL; these lookup ablations are not claimed recovery-safe"
+  },
+  "lookup-all": {
+    "checks": 123,
+    "boundary_restarts": 32,
+    "sigkill_restarts": 0,
+    "prepared_partial_commit_replay": "passed",
+    "visibility_and_rejections": "passed",
+    "sigkill_scope": "skipped: lookup-PC Get left a shared allocator spinlock held after SIGKILL; these lookup ablations are not claimed recovery-safe"
+  },
+  "lookup_pc_sigkill_failure": {
+    "status": "failed",
+    "resume_timeout_seconds": 120,
+    "reproduced": true,
+    "trace": "sbo_lock -> sbo_allocated_size -> read_tlv -> kvspaceShmGet -> kvspaceGet -> body -> main",
+    "scope": "per-instruction Get baseline, shared allocator read lock has no owner-death recovery"
+  }
+}

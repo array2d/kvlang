@@ -1,0 +1,250 @@
+{
+  "review_type": "independent read-only implementation and measurement review; separate final publication review still required",
+  "verdict": "approved",
+  "blockers": [],
+  "head": "90b441ba34b84f47653d3ebf248160440e6bcf7f",
+  "reviewed_generator_sha256": {
+    "compile.py": "09b83220b66fc996658f46b72de307a2cc502e7e1f7d803956866e0d35c6bc68",
+    "strategies.py": "c073f1278285576f173aa1ca4a9a12a1f96ccc9adfff0f610f777d6e94f006f5",
+    "strategies.c.in": "471fe04023854f2e2e7d3f5466f0309a6b25870c9114b930226038315a982b81",
+    "worker.c.in": "c52890d0108cb1900bc534dc3567237e428a524314e70b16918e922cd3f6c385",
+    "run.py": "840ea3d9d879b3be393fd5fd9b3d14b52af84611112b5b7959cbfde0e7049070"
+  },
+  "final_recorded_evidence": {
+    "samples": 864,
+    "native_methods": 7,
+    "input_sizes": 12,
+    "alternating_pairs": 9,
+    "equal_final_state_groups": 108,
+    "independent_oracle_outputs": "passed",
+    "pair_order_and_kernel_wall_jit_summary_recomputation": "passed",
+    "paired_aot_ratios": "passed",
+    "generated_c_recreated_from_current_source": 18,
+    "worker_hashes_verified": 21,
+    "codegen_symbol_records_verified": 21,
+    "generator_hashes_verified": 5,
+    "historical_evidence_files_unchanged": 11,
+    "samples_sha256": "b563b3362965f7642818379e533d8f3d6ec17599d34b6beb2cb02ec9c81bd774",
+    "metadata_sha256": "f6579fb808dc1984e2e5673fce2b0302cbe3d2264a1578d2138ee80835995697"
+  },
+  "implementation_review": {
+    "state_ownership": "PC, operands, constants, user frames and redo remain in KVSpace; local context and values last one instruction",
+    "address_cache": "terminal pointers only; every cached edge strictly decreases frame depth; child-frame reuse clears its entries; same/forward chains use generic traversal without intermediate cache lookups",
+    "guard_fallback_and_bounds": "preserve original traversal and validation",
+    "copy_patch": "26-byte copied x86-64 SysV stencil patches descriptor and opcode-helper addresses; mapping changes RW to RX; no RWX interval",
+    "partial_evaluation": "constant-descriptor/opcode specialization; descriptor symbols eliminated in partial, guarded and address-cache binaries",
+    "named_method_limits": "copy-patch is an opcode-helper dispatch JIT; offline cc compilation remains required; JIT timing measures mmap/copy/patch/mprotect only",
+    "redundancy": "shared instruction emitter, paired sampling and final-state digest remove duplicate semantics/verification logic; no remaining unnecessary logic identified"
+  },
+  "current_snapshot_independent_cpu25": {
+    "samples": 72,
+    "alternating_pairs": 3,
+    "groups": 9,
+    "inputs": [
+      "iops(200000)",
+      "fib(18)",
+      "nqueens(8)"
+    ],
+    "native_methods": 7,
+    "outputs_and_final_state_digests": "all equal",
+    "oracle_results": "passed",
+    "scope": "three large inputs only; trend check, separate from final CPU24 results",
+    "samples_sha256": "874bce66a57b320eaae0cefb347c7cfd31792a7964222679992d5a375789ab60",
+    "large_input_summary": {
+      "iops": {
+        "medians_us": {
+          "aot": 17868.933,
+          "decoded": 22749.6,
+          "partial": 21153.214,
+          "guarded": 17422.787,
+          "copy-patch": 18990.512,
+          "copy-patch-guarded": 17713.345,
+          "address-cache": 17486.683,
+          "python": 9301.387
+        },
+        "paired_speedups": {
+          "aot/decoded": {
+            "median": 0.8104021656163671,
+            "minimum": 0.7771306666026485,
+            "maximum": 0.8270269367373493
+          },
+          "aot/partial": {
+            "median": 0.8447384402200063,
+            "minimum": 0.7893228850033607,
+            "maximum": 0.8961502494827182
+          },
+          "aot/guarded": {
+            "median": 1.0153415507231176,
+            "minimum": 0.9993286952311361,
+            "maximum": 1.0810148726984985
+          },
+          "aot/copy-patch": {
+            "median": 0.9498016592595963,
+            "minimum": 0.9020918151721921,
+            "maximum": 0.990733267223127
+          },
+          "aot/copy-patch-guarded": {
+            "median": 1.031206982986608,
+            "minimum": 0.9829363680321249,
+            "maximum": 1.0598230493672955
+          },
+          "aot/address-cache": {
+            "median": 1.0315140682356232,
+            "minimum": 1.00613163206041,
+            "maximum": 1.0759348699807734
+          },
+          "partial/address-cache": {
+            "median": 1.200618836631281,
+            "minimum": 1.1910569996061382,
+            "maximum": 1.306834107858448
+          }
+        }
+      },
+      "fib": {
+        "medians_us": {
+          "aot": 1444.387,
+          "decoded": 1673.12,
+          "partial": 1504.745,
+          "guarded": 1444.538,
+          "copy-patch": 1361.905,
+          "copy-patch-guarded": 1330.984,
+          "address-cache": 1468.789,
+          "python": 517.103
+        },
+        "paired_speedups": {
+          "aot/decoded": {
+            "median": 0.8638065410729655,
+            "minimum": 0.8156767002198443,
+            "maximum": 0.8647387679936012
+          },
+          "aot/partial": {
+            "median": 0.959888220263234,
+            "minimum": 0.9034717344866305,
+            "maximum": 0.9848744214445759
+          },
+          "aot/guarded": {
+            "median": 0.9875752662789071,
+            "minimum": 0.9780008761731681,
+            "maximum": 1.0005600774831545
+          },
+          "aot/copy-patch": {
+            "median": 1.051018904622276,
+            "minimum": 1.0279595559322783,
+            "maximum": 1.061198835454749
+          },
+          "aot/copy-patch-guarded": {
+            "median": 1.0858522717027401,
+            "minimum": 0.989688189841646,
+            "maximum": 1.092162431512391
+          },
+          "aot/address-cache": {
+            "median": 0.9828577335376233,
+            "minimum": 0.9781575731977735,
+            "maximum": 0.9833863134868248
+          },
+          "partial/address-cache": {
+            "median": 1.0244800308281177,
+            "minimum": 0.9979523400516438,
+            "maximum": 1.082665384937118
+          }
+        }
+      },
+      "nqueens": {
+        "medians_us": {
+          "aot": 1480.959,
+          "decoded": 1753.7,
+          "partial": 1509.852,
+          "guarded": 1461.015,
+          "copy-patch": 1353.356,
+          "copy-patch-guarded": 1285.36,
+          "address-cache": 1384.081,
+          "python": 787.606
+        },
+        "paired_speedups": {
+          "aot/decoded": {
+            "median": 0.8431442093858699,
+            "minimum": 0.8066427590233742,
+            "maximum": 0.882672282986015
+          },
+          "aot/partial": {
+            "median": 0.9867632530387431,
+            "minimum": 0.9793158534743802,
+            "maximum": 0.9906676656119766
+          },
+          "aot/guarded": {
+            "median": 1.0120512109731934,
+            "minimum": 0.9905828480613871,
+            "maximum": 1.0731363677597858
+          },
+          "aot/copy-patch": {
+            "median": 1.1188512113590217,
+            "minimum": 1.0887358820241968,
+            "maximum": 1.1277877537592698
+          },
+          "aot/copy-patch-guarded": {
+            "median": 1.1780388373685193,
+            "minimum": 1.126464977454864,
+            "maximum": 1.182858802231287
+          },
+          "aot/address-cache": {
+            "median": 1.0755607813972945,
+            "minimum": 1.0683059734220757,
+            "maximum": 1.083837182918336
+          },
+          "partial/address-cache": {
+            "median": 1.0908696817599548,
+            "minimum": 1.0856928299288702,
+            "maximum": 1.0983761095487221
+          }
+        }
+      }
+    }
+  },
+  "current_snapshot_independent_custom_checks": {
+    "checks": 28,
+    "native_methods": 7,
+    "inputs": [
+      -4,
+      0,
+      7
+    ],
+    "coverage": [
+      "same child frame reused with different caller argument/output slots",
+      "zero-arity callee",
+      "live constant edited from5 to6"
+    ],
+    "outputs_and_exact_final_digest_equivalence": "passed",
+    "fixture_sha256": "bc1f3aa9de6a717907f4cf39b3b5527043563fa239407ea92e229d8603c1779a",
+    "expected_output": "2*n+17; edited-constant result32 at n7"
+  },
+  "recorded_full_validation_reviewed": {
+    "scope": "validation.json reviewed; full suites were not independently rerun by this reviewer",
+    "native_suites": 7,
+    "checks_per_suite": 147,
+    "sigkill_restarts_per_suite": 24,
+    "boundary_restarts_per_suite": 32,
+    "cross_method_resumes": 49,
+    "live_edit_groups": 7,
+    "prepared_call_replays": 7,
+    "address_cache_fixture_groups": 3
+  },
+  "prior_pre_address_cache_checks": {
+    "scope": "prior six-native-method snapshot; not final address-cache validation",
+    "cpu25_large_samples": 63,
+    "cross_method_resumes_at_instruction37": 36,
+    "negative_state_groups": 7,
+    "negative_state_exact_comparison": "included error KV",
+    "forced_rx_denial_modes": [
+      "copy-patch",
+      "copy-patch-guarded"
+    ],
+    "forced_rx_denial_result": "exit3, clean-store KV unchanged, AOT resumed successfully"
+  },
+  "scope_limits": [
+    "Linux x86-64 SHM",
+    "fixed value shapes and exclusive worker",
+    "scalar accepted subset only",
+    "execution death/restart checks do not establish death safety during attach/init/reporting",
+    "CPU25 trends do not support a uniform AOT win or end-to-end compilation advantage"
+  ]
+}

@@ -1,0 +1,105 @@
+#include <sys/mman.h>
+
+typedef struct { size_t index; unsigned literal; } operand_t;
+typedef struct {
+    unsigned opcode, row, callee;
+    size_t dest;
+    operand_t reads[@MAX_READS@];
+} instruction_t;
+typedef struct {
+    void *handle;
+    volatile uint64_t *state, *constants, *journal;
+    volatile uint8_t *pc;
+    size_t base;
+    unsigned depth;
+} context_t;
+
+static const instruction_t instructions[] = {
+@INSTRUCTIONS@
+};
+
+#ifdef STRATEGY_ADDRESS_CACHE
+static volatile uint64_t *slot_addresses[DEPTH * STRIDE / 2];
+
+static volatile uint64_t *slot_address(volatile uint64_t *state, size_t index) {
+    if (state[index] != 3) return state + index;
+    if (slot_addresses[index / 2]) return slot_addresses[index / 2];
+    size_t cursor = index;
+    for (int hops = 0; hops < DEPTH; hops++) {
+        if (cursor >= DEPTH * STRIDE - 1 || cursor % STRIDE < 2 || (cursor % STRIDE - 2) % 2)
+            break;
+        uint64_t tag = state[cursor];
+        if (tag <= 2) return slot_addresses[index / 2] = state + cursor;
+        if (tag != 3) break;
+        size_t next = state[cursor + 1];
+        if (next / STRIDE >= cursor / STRIDE) break;
+        cursor = next;
+    }
+    return NULL;
+}
+#endif
+
+static inline void invalidate_frame(size_t base __attribute__((unused))) {
+#ifdef STRATEGY_ADDRESS_CACHE
+    memset(slot_addresses + base / 2, 0, STRIDE / 2 * sizeof(*slot_addresses));
+#endif
+}
+
+static inline cell_t read_slot(volatile uint64_t *state, size_t index) {
+#ifdef STRATEGY_ADDRESS_CACHE
+    volatile uint64_t *address = slot_address(state, index);
+    if (address) {
+        uint64_t tag = address[0], value = address[1];
+        if (tag == 1 || (tag == 2 && value <= 1)) return (cell_t){value, tag};
+    }
+#endif
+#ifdef STRATEGY_GUARDED
+    uint64_t tag = state[index];
+    if (tag == 1) return (cell_t){state[index + 1], 1};
+    if (tag == 2) {
+        uint64_t value = state[index + 1];
+        if (value <= 1) return (cell_t){value, 2};
+    }
+#endif
+    return load_cell(state, index);
+}
+
+static inline int write_slot(volatile uint64_t *state, volatile uint64_t *journal,
+                             unsigned *count, size_t index, cell_t value) {
+#ifdef STRATEGY_ADDRESS_CACHE
+    volatile uint64_t *address = slot_address(state, index);
+    if (address && address[0] <= 2) {
+        stage(journal, count, address - state + 1, value.value);
+        stage(journal, count, address - state, value.tag);
+        return 0;
+    }
+#endif
+#ifdef STRATEGY_GUARDED
+    if (state[index] <= 2) {
+        stage(journal, count, index + 1, value.value);
+        stage(journal, count, index, value.tag);
+        return 0;
+    }
+#endif
+    return store_cell(state, journal, count, index, value);
+}
+
+static inline __attribute__((always_inline)) cell_t read_operand(context_t *ctx, const operand_t *op) {
+    return op->literal ? load_constant(ctx->constants, op->index)
+                       : read_slot(ctx->state, ctx->base + op->index);
+}
+
+static inline __attribute__((always_inline)) int evaluate(context_t *ctx, const instruction_t *inst,
+                                                         unsigned opcode) {
+    void *h = ctx->handle;
+    volatile uint64_t *state = ctx->state, *journal = ctx->journal;
+    volatile uint8_t *pc = ctx->pc;
+    size_t base = ctx->base;
+    unsigned depth = ctx->depth, count = 0;
+    switch (opcode) {
+@OPERATIONS@
+    default: return fail(h, "invalid opcode");
+    }
+}
+
+@BACKEND@

@@ -1,0 +1,39 @@
+{
+  "cpu": 24,
+  "scope": "Decimal PC codec and exact seven-byte status",
+  "coverage": [
+    "all 2^24 depth-byte combinations",
+    "all 16^4 relevant row-nibble combinations",
+    "all legal depth/row values at eight alignments",
+    "all 256 byte replacements at every PC digit/status byte",
+    "guard-page exact body boundaries"
+  ],
+  "source_sha256": {
+    "fast.py": "8cf24f4bc38addba0f9ce074b2140c330f708eb2049498360a6c3281f0ba4473",
+    "fast.c.in": "a0f8f31996dc453ca1695da0ffcf0f05793f34d170377eef1f2835466d13fa7c",
+    "worker.c.in": "c52890d0108cb1900bc534dc3567237e428a524314e70b16918e922cd3f6c385"
+  },
+  "harness_sha256": "00712cae6b36f647d1ef89ae49a1707a9f15e3fd5f194170976a8052fabba614",
+  "runs": [
+    {
+      "compiler": "cc (Ubuntu 14.3.0-12ubuntu1~22~ppa2) 14.3.0",
+      "flags": [
+        "-O3"
+      ],
+      "stdout": "codec checks=16955522 passed",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "compiler": "Ubuntu clang version 14.0.0-1ubuntu1.1",
+      "flags": [
+        "-O1",
+        "-fsanitize=address,undefined",
+        "-fno-omit-frame-pointer"
+      ],
+      "stdout": "codec checks=16955522 passed",
+      "stderr": "",
+      "exit": 0
+    }
+  ]
+}

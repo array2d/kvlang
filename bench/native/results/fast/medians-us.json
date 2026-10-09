@@ -1,0 +1,662 @@
+{
+  "iops(500)": {
+    "medians_us": {
+      "aot": 51.717,
+      "fast-commit": 50.899,
+      "fast-pc": 42.061,
+      "fast": 33.603,
+      "fast-slots": 33.664,
+      "fast-address": 28.455,
+      "fast-loop": 24.868,
+      "python": 25.842
+    },
+    "wall_medians_ms": {
+      "aot": 7.851549,
+      "fast-commit": 7.752053,
+      "fast-pc": 7.624238,
+      "fast": 7.582896,
+      "fast-slots": 7.786924,
+      "fast-address": 7.783844,
+      "fast-loop": 7.753601,
+      "python": 26.456271
+    },
+    "paired_aot_speedups": {
+      "fast-commit": {
+        "median": 1.006523422377081,
+        "minimum": 0.970887602031741,
+        "maximum": 1.0725576675383475
+      },
+      "fast-pc": {
+        "median": 1.2233140980756694,
+        "minimum": 0.8666021836781533,
+        "maximum": 1.32744004057677
+      },
+      "fast": {
+        "median": 1.5585859803507927,
+        "minimum": 0.9801323254981056,
+        "maximum": 1.620330788053893
+      },
+      "fast-slots": {
+        "median": 1.5318562838778471,
+        "minimum": 1.2979350308149384,
+        "maximum": 1.609181940621889
+      },
+      "fast-address": {
+        "median": 1.764418272662384,
+        "minimum": 1.5633917775090689,
+        "maximum": 1.9314707432788614
+      },
+      "fast-loop": {
+        "median": 2.061834708766894,
+        "minimum": 1.800625488663018,
+        "maximum": 2.2573623033638643
+      }
+    },
+    "jit_medians_us": {}
+  },
+  "iops(1000)": {
+    "medians_us": {
+      "aot": 98.222,
+      "fast-commit": 97.106,
+      "fast-pc": 79.26,
+      "fast": 61.736,
+      "fast-slots": 61.563,
+      "fast-address": 52.315,
+      "fast-loop": 44.891,
+      "python": 49.532
+    },
+    "wall_medians_ms": {
+      "aot": 7.634731,
+      "fast-commit": 7.56858,
+      "fast-pc": 7.708155,
+      "fast": 7.691308,
+      "fast-slots": 7.620966,
+      "fast-address": 7.662072,
+      "fast-loop": 7.790753,
+      "python": 26.402811
+    },
+    "paired_aot_speedups": {
+      "fast-commit": {
+        "median": 1.017306915516152,
+        "minimum": 0.8356913014585009,
+        "maximum": 1.1793479930763953
+      },
+      "fast-pc": {
+        "median": 1.2589820167399413,
+        "minimum": 1.1738603591595376,
+        "maximum": 1.3984284864162446
+      },
+      "fast": {
+        "median": 1.5822057372090803,
+        "minimum": 1.2717295700689202,
+        "maximum": 1.8651678113256447
+      },
+      "fast-slots": {
+        "median": 1.589677483741122,
+        "minimum": 1.3782273322660457,
+        "maximum": 1.8218178941539436
+      },
+      "fast-address": {
+        "median": 1.8700935310922397,
+        "minimum": 1.3428983337492029,
+        "maximum": 2.255813497894015
+      },
+      "fast-loop": {
+        "median": 2.211933057373036,
+        "minimum": 2.097965233795984,
+        "maximum": 2.6188450954081284
+      }
+    },
+    "jit_medians_us": {}
+  },
+  "iops(2000)": {
+    "medians_us": {
+      "aot": 188.828,
+      "fast-commit": 192.529,
+      "fast-pc": 147.084,
+      "fast": 115.234,
+      "fast-slots": 116.385,
+      "fast-address": 98.886,
+      "fast-loop": 85.272,
+      "python": 95.076
+    },
+    "wall_medians_ms": {
+      "aot": 7.866996,
+      "fast-commit": 7.69268,
+      "fast-pc": 7.792817,
+      "fast": 7.572723,
+      "fast-slots": 7.582217,
+      "fast-address": 7.697096,
+      "fast-loop": 7.804833,
+      "python": 26.623626
+    },
+    "paired_aot_speedups": {
+      "fast-commit": {
+        "median": 0.9800965049421126,
+        "minimum": 0.9339429943939401,
+        "maximum": 1.0690278776597995
+      },
+      "fast-pc": {
+        "median": 1.2653487904576828,
+        "minimum": 1.185318208831813,
+        "maximum": 1.3783356286731119
+      },
+      "fast": {
+        "median": 1.6240672788243762,
+        "minimum": 1.5924466737247687,
+        "maximum": 1.7719249040265044
+      },
+      "fast-slots": {
+        "median": 1.6035155234281553,
+        "minimum": 1.527821154919777,
+        "maximum": 1.7567431352102885
+      },
+      "fast-address": {
+        "median": 1.9347982117955869,
+        "minimum": 1.0904846952308536,
+        "maximum": 2.0347843591163
+      },
+      "fast-loop": {
+        "median": 2.2091084898725444,
+        "minimum": 2.1079646627683895,
+        "maximum": 2.4074832686307666
+      }
+    },
+    "jit_medians_us": {}
+  },
+  "iops(200000)": {
+    "medians_us": {
+      "aot": 17726.252,
+      "fast-commit": 17915.935,
+      "fast-pc": 14070.054,
+      "fast": 10955.043,
+      "fast-slots": 10832.367,
+      "fast-address": 9229.388,
+      "fast-loop": 8091.197,
+      "python": 9073.459
+    },
+    "wall_medians_ms": {
+      "aot": 25.552604,
+      "fast-commit": 25.656855,
+      "fast-pc": 21.988793,
+      "fast": 18.485718,
+      "fast-slots": 18.428185,
+      "fast-address": 16.773889,
+      "fast-loop": 15.989496,
+      "python": 35.221875
+    },
+    "paired_aot_speedups": {
+      "fast-commit": {
+        "median": 0.9919778188202276,
+        "minimum": 0.9404691857446142,
+        "maximum": 1.0990033729099418
+      },
+      "fast-pc": {
+        "median": 1.264387178023641,
+        "minimum": 1.2042374650440943,
+        "maximum": 1.3501145059984812
+      },
+      "fast": {
+        "median": 1.623494137226638,
+        "minimum": 1.5641606009905622,
+        "maximum": 1.7253384266774916
+      },
+      "fast-slots": {
+        "median": 1.6434616151660684,
+        "minimum": 1.5661499747819474,
+        "maximum": 1.7687961458469788
+      },
+      "fast-address": {
+        "median": 1.9025447247833143,
+        "minimum": 1.8597821342977685,
+        "maximum": 2.0718266807583654
+      },
+      "fast-loop": {
+        "median": 2.189723609201556,
+        "minimum": 2.1195692177544005,
+        "maximum": 2.3737136924705564
+      }
+    },
+    "jit_medians_us": {}
+  },
+  "fib(8)": {
+    "medians_us": {
+      "aot": 17.169,
+      "fast-commit": 17.1,
+      "fast-pc": 14.51,
+      "fast": 12.556,
+      "fast-slots": 12.642,
+      "fast-address": 13.479,
+      "fast-loop": 12.735,
+      "python": 10.308
+    },
+    "wall_medians_ms": {
+      "aot": 7.802186,
+      "fast-commit": 7.655618,
+      "fast-pc": 7.757929,
+      "fast": 7.795822,
+      "fast-slots": 7.607935,
+      "fast-address": 7.596098,
+      "fast-loop": 7.873433,
+      "python": 26.595588
+    },
+    "paired_aot_speedups": {
+      "fast-commit": {
+        "median": 1.0045029239766081,
+        "minimum": 0.8180865603644647,
+        "maximum": 1.0737591114196459
+      },
+      "fast-pc": {
+        "median": 1.2003706607741107,
+        "minimum": 0.8033721673302856,
+        "maximum": 1.3198464054611392
+      },
+      "fast": {
+        "median": 1.359692867885696,
+        "minimum": 1.2848443328004873,
+        "maximum": 1.4336139646250097
+      },
+      "fast-slots": {
+        "median": 1.3587248853029583,
+        "minimum": 1.275999375390381,
+        "maximum": 1.4646098003629764
+      },
+      "fast-address": {
+        "median": 1.2736489004845322,
+        "minimum": 0.8443275658670861,
+        "maximum": 1.3322204911343571
+      },
+      "fast-loop": {
+        "median": 1.3282184450739691,
+        "minimum": 1.0070570395427505,
+        "maximum": 1.420873555942396
+      }
+    },
+    "jit_medians_us": {}
+  },
+  "fib(9)": {
+    "medians_us": {
+      "aot": 24.56,
+      "fast-commit": 23.02,
+      "fast-pc": 19.896,
+      "fast": 16.421,
+      "fast-slots": 16.789,
+      "fast-address": 18.218,
+      "fast-loop": 16.582,
+      "python": 15.045
+    },
+    "wall_medians_ms": {
+      "aot": 7.808717,
+      "fast-commit": 7.831735,
+      "fast-pc": 7.714605,
+      "fast": 7.809249,
+      "fast-slots": 7.880256,
+      "fast-address": 7.800138,
+      "fast-loop": 7.80275,
+      "python": 26.391781
+    },
+    "paired_aot_speedups": {
+      "fast-commit": {
+        "median": 1.069733002308463,
+        "minimum": 1.0104096426163183,
+        "maximum": 1.5464391066160978
+      },
+      "fast-pc": {
+        "median": 1.2365258651812883,
+        "minimum": 0.8316811446090956,
+        "maximum": 1.8958979127918991
+      },
+      "fast": {
+        "median": 1.4890552666171344,
+        "minimum": 1.427637190787603,
+        "maximum": 2.1586470588235294
+      },
+      "fast-slots": {
+        "median": 1.4745437079731027,
+        "minimum": 1.014601674898003,
+        "maximum": 2.1857764012150813
+      },
+      "fast-address": {
+        "median": 1.344621513944223,
+        "minimum": 0.9598624301403056,
+        "maximum": 2.0223189683676845
+      },
+      "fast-loop": {
+        "median": 1.4811241104812447,
+        "minimum": 1.4332079592331959,
+        "maximum": 2.2150660952495924
+      }
+    },
+    "jit_medians_us": {}
+  },
+  "fib(10)": {
+    "medians_us": {
+      "aot": 35.817,
+      "fast-commit": 34.175,
+      "fast-pc": 28.484,
+      "fast": 23.045,
+      "fast-slots": 22.94,
+      "fast-address": 24.977,
+      "fast-loop": 23.331,
+      "python": 19.751
+    },
+    "wall_medians_ms": {
+      "aot": 7.997636,
+      "fast-commit": 7.89336,
+      "fast-pc": 7.792399,
+      "fast": 7.644143,
+      "fast-slots": 7.784267,
+      "fast-address": 7.702926,
+      "fast-loop": 7.970528,
+      "python": 26.731555
+    },
+    "paired_aot_speedups": {
+      "fast-commit": {
+        "median": 1.0456001397705434,
+        "minimum": 0.8109815464734518,
+        "maximum": 1.443818457402694
+      },
+      "fast-pc": {
+        "median": 1.2584726457084778,
+        "minimum": 0.9439077260684561,
+        "maximum": 1.8016558418385553
+      },
+      "fast": {
+        "median": 1.5621003175708008,
+        "minimum": 1.1811559991906657,
+        "maximum": 2.238549195229016
+      },
+      "fast-slots": {
+        "median": 1.5511236202119707,
+        "minimum": 1.4427836708453874,
+        "maximum": 2.2007846556233654
+      },
+      "fast-address": {
+        "median": 1.4121382636655948,
+        "minimum": 1.364184877199768,
+        "maximum": 1.6254954558193537
+      },
+      "fast-loop": {
+        "median": 1.5313608961477618,
+        "minimum": 1.2072294952410405,
+        "maximum": 2.0472830494728305
+      }
+    },
+    "jit_medians_us": {}
+  },
+  "fib(18)": {
+    "medians_us": {
+      "aot": 1453.177,
+      "fast-commit": 1293.408,
+      "fast-pc": 1058.203,
+      "fast": 771.736,
+      "fast-slots": 802.1,
+      "fast-address": 892.262,
+      "fast-loop": 787.231,
+      "python": 514.244
+    },
+    "wall_medians_ms": {
+      "aot": 9.464194,
+      "fast-commit": 9.158392,
+      "fast-pc": 8.874648,
+      "fast": 8.76657,
+      "fast-slots": 8.467554,
+      "fast-address": 8.472119,
+      "fast-loop": 8.438876,
+      "python": 27.074297
+    },
+    "paired_aot_speedups": {
+      "fast-commit": {
+        "median": 1.1173720580286053,
+        "minimum": 1.0693624767449106,
+        "maximum": 1.1555102187691166
+      },
+      "fast-pc": {
+        "median": 1.375592566298722,
+        "minimum": 1.2485496226451838,
+        "maximum": 1.4410469868545972
+      },
+      "fast": {
+        "median": 1.851748282289048,
+        "minimum": 1.5870702635639815,
+        "maximum": 1.9370549315599543
+      },
+      "fast-slots": {
+        "median": 1.8648809375389603,
+        "minimum": 1.6612130908626472,
+        "maximum": 1.9004590555395446
+      },
+      "fast-address": {
+        "median": 1.6342584615105564,
+        "minimum": 1.5133130269929844,
+        "maximum": 1.6846057855157333
+      },
+      "fast-loop": {
+        "median": 1.8543040309531098,
+        "minimum": 1.7658987905951875,
+        "maximum": 1.9397226487125754
+      }
+    },
+    "jit_medians_us": {}
+  },
+  "nqueens(4)": {
+    "medians_us": {
+      "aot": 20.839,
+      "fast-commit": 20.748,
+      "fast-pc": 18.274,
+      "fast": 17.454,
+      "fast-slots": 17.693,
+      "fast-address": 16.632,
+      "fast-loop": 17.087,
+      "python": 21.17
+    },
+    "wall_medians_ms": {
+      "aot": 8.025917,
+      "fast-commit": 7.836484,
+      "fast-pc": 7.819315,
+      "fast": 7.748676,
+      "fast-slots": 8.192489,
+      "fast-address": 7.974402,
+      "fast-loop": 8.066837,
+      "python": 26.136798
+    },
+    "paired_aot_speedups": {
+      "fast-commit": {
+        "median": 0.9749084497490845,
+        "minimum": 0.7453992175047095,
+        "maximum": 1.0686666666666667
+      },
+      "fast-pc": {
+        "median": 1.1589047121570353,
+        "minimum": 1.0853566824237215,
+        "maximum": 1.2101010101010101
+      },
+      "fast": {
+        "median": 1.203731515711645,
+        "minimum": 1.1074117272823667,
+        "maximum": 1.2513201415888122
+      },
+      "fast-slots": {
+        "median": 1.16802438348573,
+        "minimum": 0.9211225583888863,
+        "maximum": 1.2376889601465872
+      },
+      "fast-address": {
+        "median": 1.2867237821274466,
+        "minimum": 1.141718935412782,
+        "maximum": 1.314514602914275
+      },
+      "fast-loop": {
+        "median": 1.2497971484873074,
+        "minimum": 1.1451484924053503,
+        "maximum": 1.376839289126696
+      }
+    },
+    "jit_medians_us": {}
+  },
+  "nqueens(5)": {
+    "medians_us": {
+      "aot": 45.075,
+      "fast-commit": 41.962,
+      "fast-pc": 37.465,
+      "fast": 33.094,
+      "fast-slots": 33.518,
+      "fast-address": 30.146,
+      "fast-loop": 30.476,
+      "python": 36.982
+    },
+    "wall_medians_ms": {
+      "aot": 7.946678,
+      "fast-commit": 7.841,
+      "fast-pc": 7.725122,
+      "fast": 7.825514,
+      "fast-slots": 7.807144,
+      "fast-address": 7.755864,
+      "fast-loop": 7.954606,
+      "python": 26.231738
+    },
+    "paired_aot_speedups": {
+      "fast-commit": {
+        "median": 1.080834698383306,
+        "minimum": 0.8165169190638359,
+        "maximum": 1.4445377736054152
+      },
+      "fast-pc": {
+        "median": 1.2033022332236216,
+        "minimum": 1.1533260233918128,
+        "maximum": 1.3833305732333387
+      },
+      "fast": {
+        "median": 1.3730130273694274,
+        "minimum": 0.9159147869674186,
+        "maximum": 1.8107831903626397
+      },
+      "fast-slots": {
+        "median": 1.3605617568551323,
+        "minimum": 1.2280940731680197,
+        "maximum": 1.676808809612572
+      },
+      "fast-address": {
+        "median": 1.4952232468652558,
+        "minimum": 1.4271209606560578,
+        "maximum": 1.9676941714901064
+      },
+      "fast-loop": {
+        "median": 1.4626208449212026,
+        "minimum": 1.1545525645230466,
+        "maximum": 1.9444647667187656
+      }
+    },
+    "jit_medians_us": {}
+  },
+  "nqueens(6)": {
+    "medians_us": {
+      "aot": 116.956,
+      "fast-commit": 105.083,
+      "fast-pc": 94.632,
+      "fast": 76.601,
+      "fast-slots": 77.364,
+      "fast-address": 71.031,
+      "fast-loop": 70.885,
+      "python": 78.917
+    },
+    "wall_medians_ms": {
+      "aot": 8.10764,
+      "fast-commit": 7.922762,
+      "fast-pc": 7.780097,
+      "fast": 7.695335,
+      "fast-slots": 7.810447,
+      "fast-address": 7.815204,
+      "fast-loop": 7.882181,
+      "python": 26.039688
+    },
+    "paired_aot_speedups": {
+      "fast-commit": {
+        "median": 1.1025773442356428,
+        "minimum": 1.0101079654298755,
+        "maximum": 1.173128901628464
+      },
+      "fast-pc": {
+        "median": 1.2456671311618186,
+        "minimum": 1.1769478903247645,
+        "maximum": 1.2728428660658517
+      },
+      "fast": {
+        "median": 1.507998378088499,
+        "minimum": 1.270264253433959,
+        "maximum": 1.6178550109438217
+      },
+      "fast-slots": {
+        "median": 1.4902409389380074,
+        "minimum": 1.3345961929403067,
+        "maximum": 1.5958390578999018
+      },
+      "fast-address": {
+        "median": 1.632355886139322,
+        "minimum": 1.385840894703524,
+        "maximum": 1.708414461611733
+      },
+      "fast-loop": {
+        "median": 1.644997046330417,
+        "minimum": 1.5801642671828582,
+        "maximum": 1.7214941022280472
+      }
+    },
+    "jit_medians_us": {}
+  },
+  "nqueens(8)": {
+    "medians_us": {
+      "aot": 1506.605,
+      "fast-commit": 1308.514,
+      "fast-pc": 1150.653,
+      "fast": 957.467,
+      "fast-slots": 1007.802,
+      "fast-address": 847.675,
+      "fast-loop": 839.05,
+      "python": 806.565
+    },
+    "wall_medians_ms": {
+      "aot": 9.369523,
+      "fast-commit": 9.117301,
+      "fast-pc": 8.971438,
+      "fast": 8.570237,
+      "fast-slots": 8.791951,
+      "fast-address": 8.60825,
+      "fast-loop": 8.763933,
+      "python": 27.136678
+    },
+    "paired_aot_speedups": {
+      "fast-commit": {
+        "median": 1.1483529201941356,
+        "minimum": 1.13973725459343,
+        "maximum": 1.1894798221494
+      },
+      "fast-pc": {
+        "median": 1.3147018904763326,
+        "minimum": 1.2581444913226916,
+        "maximum": 1.3609792858855883
+      },
+      "fast": {
+        "median": 1.5942390356260543,
+        "minimum": 1.519173119215268,
+        "maximum": 1.6654496855716048
+      },
+      "fast-slots": {
+        "median": 1.50418927376394,
+        "minimum": 1.4587399661148777,
+        "maximum": 1.6816626312812284
+      },
+      "fast-address": {
+        "median": 1.7804382769476597,
+        "minimum": 1.7412461035248472,
+        "maximum": 1.836667720831878
+      },
+      "fast-loop": {
+        "median": 1.789799303883221,
+        "minimum": 1.6199856226037672,
+        "maximum": 1.846354951142469
+      }
+    },
+    "jit_medians_us": {}
+  }
+}

@@ -1,0 +1,1160 @@
+{
+  "cpu": 24,
+  "cpu_model": "Intel(R) Xeon(R) Gold 6418H",
+  "python": "3.10.12",
+  "pairs": 9,
+  "compiler": "cc (Ubuntu 14.3.0-12ubuntu1~22~ppa2) 14.3.0",
+  "worker_flags": "-O3 -std=c11 -Wall -Wextra -Werror",
+  "timing": "fresh init each sample; native execute includes every redo commit, excludes init/attach/schema/result/status; wall includes init and run; interpreter/Python use fixture timers",
+  "inputs": {
+    "iops": {
+      "scales": [
+        2000,
+        200000
+      ],
+      "kv_sha256": "360d3a2b7bd4d014255ba34cd86f6c72ee72a46b4787ed248ee5a6db96887dd7",
+      "python_sha256": "e53ef1d628cf1b39be8e2ee2e7ee04a9e0517403226e5f8f18ada9a44ce12d04",
+      "wrapper": "\nrwfunc bench_native(n:int64) -> (r:int64) {\niops(n) -> r\n}\n",
+      "worker_sha256": "ee6fe783d752f1984f0a898549973856f33ee2ce6b984e210004af9e4a63b39f",
+      "generated_c_sha256": "9ce910579aa24143786534b5f0c1967928d65a8543b7dc0de4aaefe0f5bc7e94",
+      "schema": {
+        "entry": "bench_native",
+        "stride": 10,
+        "functions": {
+          "bench_native": {
+            "id": 0,
+            "nr": 1,
+            "slots": {
+              "*[0,-1]": 0,
+              "*[0,1]": 1
+            },
+            "instructions": [
+              [
+                "iops",
+                [
+                  [
+                    "slot",
+                    "*[0,-1]"
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "*[0,1]"
+                  ]
+                ],
+                true
+              ],
+              [
+                "return",
+                [],
+                [],
+                false
+              ]
+            ]
+          },
+          "iops": {
+            "id": 1,
+            "nr": 1,
+            "slots": {
+              "*[0,-1]": 0,
+              "*[0,1]": 1,
+              "i": 2,
+              "_1": 3
+            },
+            "instructions": [
+              [
+                "=",
+                [
+                  [
+                    "constant",
+                    0
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "*[0,1]"
+                  ]
+                ],
+                false
+              ],
+              [
+                "=",
+                [
+                  [
+                    "constant",
+                    1
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "i"
+                  ]
+                ],
+                false
+              ],
+              [
+                "goto",
+                [
+                  [
+                    "constant",
+                    2
+                  ]
+                ],
+                [],
+                false
+              ],
+              [
+                "int64\u00b7le",
+                [
+                  [
+                    "slot",
+                    "i"
+                  ],
+                  [
+                    "slot",
+                    "*[0,-1]"
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "_1"
+                  ]
+                ],
+                false
+              ],
+              [
+                "br",
+                [
+                  [
+                    "slot",
+                    "_1"
+                  ],
+                  [
+                    "constant",
+                    3
+                  ],
+                  [
+                    "constant",
+                    4
+                  ]
+                ],
+                [],
+                false
+              ],
+              [
+                "int64\u00b7add",
+                [
+                  [
+                    "slot",
+                    "*[0,1]"
+                  ],
+                  [
+                    "constant",
+                    1
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "*[0,1]"
+                  ]
+                ],
+                false
+              ],
+              [
+                "int64\u00b7add",
+                [
+                  [
+                    "slot",
+                    "i"
+                  ],
+                  [
+                    "constant",
+                    1
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "i"
+                  ]
+                ],
+                false
+              ],
+              [
+                "goto",
+                [
+                  [
+                    "constant",
+                    2
+                  ]
+                ],
+                [],
+                false
+              ],
+              [
+                "return",
+                [],
+                [],
+                false
+              ]
+            ]
+          }
+        },
+        "constants": [
+          [
+            1,
+            0
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            4
+          ],
+          [
+            1,
+            6
+          ],
+          [
+            1,
+            9
+          ]
+        ],
+        "program_sha256": "061928f4d2ae534ff0064cc4cc1475975d6f94c6d3cc1abe19b503ca40b214c3"
+      }
+    },
+    "fib": {
+      "scales": [
+        10,
+        18
+      ],
+      "kv_sha256": "f9f308e2939ecd712442586ee87b8340f55331e75bcd6a6c6ffc12aea3a7bab4",
+      "python_sha256": "63a329cd3bbc9271f9142f9fa762b3389c17525679763a14e21a7138e12987fa",
+      "wrapper": "\nrwfunc bench_native(n:int64) -> (r:int64) {\nfib(n) -> r\n}\n",
+      "worker_sha256": "10804d0ece609d22c9467f0db04981447464a4a82f7e4462d4343fd71b3f6fc8",
+      "generated_c_sha256": "95b78c2c7c4a1e16b991dd0a175732617072ae20322628aae1be84cab3470e8e",
+      "schema": {
+        "entry": "bench_native",
+        "stride": 16,
+        "functions": {
+          "bench_native": {
+            "id": 0,
+            "nr": 1,
+            "slots": {
+              "*[0,-1]": 0,
+              "*[0,1]": 1
+            },
+            "instructions": [
+              [
+                "fib",
+                [
+                  [
+                    "slot",
+                    "*[0,-1]"
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "*[0,1]"
+                  ]
+                ],
+                true
+              ],
+              [
+                "return",
+                [],
+                [],
+                false
+              ]
+            ]
+          },
+          "fib": {
+            "id": 1,
+            "nr": 1,
+            "slots": {
+              "*[0,-1]": 0,
+              "*[0,1]": 1,
+              "_1": 2,
+              "a": 3,
+              "b": 4,
+              "x": 5,
+              "y": 6
+            },
+            "instructions": [
+              [
+                "goto",
+                [
+                  [
+                    "constant",
+                    0
+                  ]
+                ],
+                [],
+                false
+              ],
+              [
+                "int64\u00b7le",
+                [
+                  [
+                    "slot",
+                    "*[0,-1]"
+                  ],
+                  [
+                    "constant",
+                    1
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "_1"
+                  ]
+                ],
+                false
+              ],
+              [
+                "br",
+                [
+                  [
+                    "slot",
+                    "_1"
+                  ],
+                  [
+                    "constant",
+                    2
+                  ],
+                  [
+                    "constant",
+                    3
+                  ]
+                ],
+                [],
+                false
+              ],
+              [
+                "=",
+                [
+                  [
+                    "slot",
+                    "*[0,-1]"
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "*[0,1]"
+                  ]
+                ],
+                false
+              ],
+              [
+                "goto",
+                [
+                  [
+                    "constant",
+                    4
+                  ]
+                ],
+                [],
+                false
+              ],
+              [
+                "int64\u00b7sub",
+                [
+                  [
+                    "slot",
+                    "*[0,-1]"
+                  ],
+                  [
+                    "constant",
+                    1
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "a"
+                  ]
+                ],
+                false
+              ],
+              [
+                "int64\u00b7sub",
+                [
+                  [
+                    "slot",
+                    "*[0,-1]"
+                  ],
+                  [
+                    "constant",
+                    0
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "b"
+                  ]
+                ],
+                false
+              ],
+              [
+                "fib",
+                [
+                  [
+                    "slot",
+                    "a"
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "x"
+                  ]
+                ],
+                true
+              ],
+              [
+                "fib",
+                [
+                  [
+                    "slot",
+                    "b"
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "y"
+                  ]
+                ],
+                true
+              ],
+              [
+                "+",
+                [
+                  [
+                    "slot",
+                    "x"
+                  ],
+                  [
+                    "slot",
+                    "y"
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "*[0,1]"
+                  ]
+                ],
+                false
+              ],
+              [
+                "goto",
+                [
+                  [
+                    "constant",
+                    4
+                  ]
+                ],
+                [],
+                false
+              ],
+              [
+                "return",
+                [],
+                [],
+                false
+              ]
+            ]
+          }
+        },
+        "constants": [
+          [
+            1,
+            2
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            4
+          ],
+          [
+            1,
+            6
+          ],
+          [
+            1,
+            12
+          ]
+        ],
+        "program_sha256": "cbb5cc962a77407c132badedfb26c68c16044b730e8c314d5646f7578b39af4d"
+      }
+    },
+    "nqueens": {
+      "scales": [
+        6,
+        8
+      ],
+      "kv_sha256": "e4ba6073d1cd9e76949e3b81b46604e28b97e712afd6f6158db811f7e97c169b",
+      "python_sha256": "61ebaeccf79bf06a85e213180930552748cca126ec60b8636a7ed7849765a8af",
+      "wrapper": "\nrwfunc bench_native(n:int64) -> (r:int64) {\n1 << n -> sh\nsh - 1 -> all\nnq(0, 0, 0, all) -> r\n}\n",
+      "worker_sha256": "6ad0ee255994f969039822aa0dfca3668433d028f1ff53242db321d439cf5e83",
+      "generated_c_sha256": "9489b22c91024398f33838ab385d13ebd39f4eb28eae5270b7f512bfe3315885",
+      "schema": {
+        "entry": "bench_native",
+        "stride": 40,
+        "functions": {
+          "bench_native": {
+            "id": 0,
+            "nr": 1,
+            "slots": {
+              "*[0,-1]": 0,
+              "*[0,1]": 1,
+              "sh": 2,
+              "all": 3
+            },
+            "instructions": [
+              [
+                "int64\u00b7shl",
+                [
+                  [
+                    "constant",
+                    0
+                  ],
+                  [
+                    "slot",
+                    "*[0,-1]"
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "sh"
+                  ]
+                ],
+                false
+              ],
+              [
+                "int64\u00b7sub",
+                [
+                  [
+                    "slot",
+                    "sh"
+                  ],
+                  [
+                    "constant",
+                    0
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "all"
+                  ]
+                ],
+                false
+              ],
+              [
+                "nq",
+                [
+                  [
+                    "constant",
+                    1
+                  ],
+                  [
+                    "constant",
+                    1
+                  ],
+                  [
+                    "constant",
+                    1
+                  ],
+                  [
+                    "slot",
+                    "all"
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "*[0,1]"
+                  ]
+                ],
+                true
+              ],
+              [
+                "return",
+                [],
+                [],
+                false
+              ]
+            ]
+          },
+          "nq": {
+            "id": 1,
+            "nr": 4,
+            "slots": {
+              "*[0,-1]": 0,
+              "*[0,-2]": 1,
+              "*[0,-3]": 2,
+              "*[0,-4]": 3,
+              "*[0,1]": 4,
+              "_1": 5,
+              "occ0": 6,
+              "occ1": 7,
+              "occ": 8,
+              "avail": 9,
+              "_6": 10,
+              "neg": 11,
+              "p": 12,
+              "nc": 13,
+              "u1": 14,
+              "nd1": 15,
+              "u2": 16,
+              "nd2": 17,
+              "sub": 18
+            },
+            "instructions": [
+              [
+                "goto",
+                [
+                  [
+                    "constant",
+                    2
+                  ]
+                ],
+                [],
+                false
+              ],
+              [
+                "int64\u00b7eq",
+                [
+                  [
+                    "slot",
+                    "*[0,-1]"
+                  ],
+                  [
+                    "slot",
+                    "*[0,-4]"
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "_1"
+                  ]
+                ],
+                false
+              ],
+              [
+                "br",
+                [
+                  [
+                    "slot",
+                    "_1"
+                  ],
+                  [
+                    "constant",
+                    3
+                  ],
+                  [
+                    "constant",
+                    4
+                  ]
+                ],
+                [],
+                false
+              ],
+              [
+                "=",
+                [
+                  [
+                    "constant",
+                    0
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "*[0,1]"
+                  ]
+                ],
+                false
+              ],
+              [
+                "goto",
+                [
+                  [
+                    "constant",
+                    5
+                  ]
+                ],
+                [],
+                false
+              ],
+              [
+                "=",
+                [
+                  [
+                    "constant",
+                    1
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "*[0,1]"
+                  ]
+                ],
+                false
+              ],
+              [
+                "int64\u00b7bitor",
+                [
+                  [
+                    "slot",
+                    "*[0,-1]"
+                  ],
+                  [
+                    "slot",
+                    "*[0,-2]"
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "occ0"
+                  ]
+                ],
+                false
+              ],
+              [
+                "int64\u00b7bitor",
+                [
+                  [
+                    "slot",
+                    "occ0"
+                  ],
+                  [
+                    "slot",
+                    "*[0,-3]"
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "occ1"
+                  ]
+                ],
+                false
+              ],
+              [
+                "int64\u00b7bitand",
+                [
+                  [
+                    "slot",
+                    "occ1"
+                  ],
+                  [
+                    "slot",
+                    "*[0,-4]"
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "occ"
+                  ]
+                ],
+                false
+              ],
+              [
+                "int64\u00b7bitxor",
+                [
+                  [
+                    "slot",
+                    "occ"
+                  ],
+                  [
+                    "slot",
+                    "*[0,-4]"
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "avail"
+                  ]
+                ],
+                false
+              ],
+              [
+                "goto",
+                [
+                  [
+                    "constant",
+                    6
+                  ]
+                ],
+                [],
+                false
+              ],
+              [
+                "return",
+                [],
+                [],
+                false
+              ],
+              [
+                "int64\u00b7neq",
+                [
+                  [
+                    "slot",
+                    "avail"
+                  ],
+                  [
+                    "constant",
+                    1
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "_6"
+                  ]
+                ],
+                false
+              ],
+              [
+                "br",
+                [
+                  [
+                    "slot",
+                    "_6"
+                  ],
+                  [
+                    "constant",
+                    7
+                  ],
+                  [
+                    "constant",
+                    8
+                  ]
+                ],
+                [],
+                false
+              ],
+              [
+                "int64\u00b7sub",
+                [
+                  [
+                    "constant",
+                    1
+                  ],
+                  [
+                    "slot",
+                    "avail"
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "neg"
+                  ]
+                ],
+                false
+              ],
+              [
+                "int64\u00b7bitand",
+                [
+                  [
+                    "slot",
+                    "avail"
+                  ],
+                  [
+                    "slot",
+                    "neg"
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "p"
+                  ]
+                ],
+                false
+              ],
+              [
+                "int64\u00b7bitxor",
+                [
+                  [
+                    "slot",
+                    "avail"
+                  ],
+                  [
+                    "slot",
+                    "p"
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "avail"
+                  ]
+                ],
+                false
+              ],
+              [
+                "int64\u00b7bitor",
+                [
+                  [
+                    "slot",
+                    "*[0,-1]"
+                  ],
+                  [
+                    "slot",
+                    "p"
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "nc"
+                  ]
+                ],
+                false
+              ],
+              [
+                "int64\u00b7bitor",
+                [
+                  [
+                    "slot",
+                    "*[0,-2]"
+                  ],
+                  [
+                    "slot",
+                    "p"
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "u1"
+                  ]
+                ],
+                false
+              ],
+              [
+                "int64\u00b7shl",
+                [
+                  [
+                    "slot",
+                    "u1"
+                  ],
+                  [
+                    "constant",
+                    0
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "nd1"
+                  ]
+                ],
+                false
+              ],
+              [
+                "int64\u00b7bitor",
+                [
+                  [
+                    "slot",
+                    "*[0,-3]"
+                  ],
+                  [
+                    "slot",
+                    "p"
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "u2"
+                  ]
+                ],
+                false
+              ],
+              [
+                "int64\u00b7shr",
+                [
+                  [
+                    "slot",
+                    "u2"
+                  ],
+                  [
+                    "constant",
+                    0
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "nd2"
+                  ]
+                ],
+                false
+              ],
+              [
+                "nq",
+                [
+                  [
+                    "slot",
+                    "nc"
+                  ],
+                  [
+                    "slot",
+                    "nd1"
+                  ],
+                  [
+                    "slot",
+                    "nd2"
+                  ],
+                  [
+                    "slot",
+                    "*[0,-4]"
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "sub"
+                  ]
+                ],
+                true
+              ],
+              [
+                "int64\u00b7add",
+                [
+                  [
+                    "slot",
+                    "*[0,1]"
+                  ],
+                  [
+                    "slot",
+                    "sub"
+                  ]
+                ],
+                [
+                  [
+                    "slot",
+                    "*[0,1]"
+                  ]
+                ],
+                false
+              ],
+              [
+                "goto",
+                [
+                  [
+                    "constant",
+                    6
+                  ]
+                ],
+                [],
+                false
+              ],
+              [
+                "goto",
+                [
+                  [
+                    "constant",
+                    5
+                  ]
+                ],
+                [],
+                false
+              ]
+            ]
+          }
+        },
+        "constants": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            1,
+            2
+          ],
+          [
+            1,
+            4
+          ],
+          [
+            1,
+            6
+          ],
+          [
+            1,
+            12
+          ],
+          [
+            1,
+            13
+          ],
+          [
+            1,
+            15
+          ],
+          [
+            1,
+            26
+          ]
+        ],
+        "program_sha256": "65472c50d9070ae66cde783ccd390fbf4b172521679f090839d6138a7a3c9d1c"
+      }
+    }
+  },
+  "libraries": {
+    "/tmp/kvspace-frontend-main-release/libkvspace.so.1": "f5abbbf1fe9493d56c11ecb428269f5b2f540c1d47d69b050e4e5e5743628f3f",
+    "/tmp/kvspace-frontend-main-default/libkvspace.so.1": "f8307c3a6125da96c02b04c2ad2fbf11bdf6aa3cb3534bfbfa20369531771122",
+    "/tmp/kvspace-c-perf-total-build/libkvspace-c.so.1": "6b143b678a0d1be7761401809b08c6d9093f9501ec261da3aaa2bcbd96b433c0"
+  },
+  "kvlang": {
+    "path": "/tmp/kvlang-perf-current/bin/kvlang",
+    "sha256": "931157271cc79507b6a33c0e9c3fc72013ceb65ff5520c046b887955bce49d7a"
+  },
+  "interpreter_loaded": {
+    "/tmp/kvspace-frontend-main-default/libkvspace.so.1": "f8307c3a6125da96c02b04c2ad2fbf11bdf6aa3cb3534bfbfa20369531771122",
+    "/tmp/kvlang-perf-current/bin/libkvlanglayout.so": "30af52956c24a10bf98ee6b5dc1507003993e79606a40aef43457516012599ef",
+    "/tmp/kvlang-perf-current/bin/libkvlang_runtime.so": "77134092e1713357b88aa04db2d5a4b8470ae0cbdc79e7ae39f909b2869d73c9",
+    "/tmp/kvspace-c-perf-total-build/libkvspace-c.so.1": "6b143b678a0d1be7761401809b08c6d9093f9501ec261da3aaa2bcbd96b433c0"
+  },
+  "release_loaded": {
+    "/tmp/kvspace-frontend-main-release/libkvspace.so.1": "f5abbbf1fe9493d56c11ecb428269f5b2f540c1d47d69b050e4e5e5743628f3f",
+    "/tmp/kvlang-perf-current/bin/libkvlanglayout.so": "30af52956c24a10bf98ee6b5dc1507003993e79606a40aef43457516012599ef",
+    "/tmp/kvlang-perf-current/bin/libkvlang_runtime.so": "77134092e1713357b88aa04db2d5a4b8470ae0cbdc79e7ae39f909b2869d73c9",
+    "/tmp/kvspace-c-perf-total-build/libkvspace-c.so.1": "6b143b678a0d1be7761401809b08c6d9093f9501ec261da3aaa2bcbd96b433c0"
+  },
+  "native_loaded": {
+    "/tmp/kvspace-frontend-main-release/libkvspace.so.1": "f5abbbf1fe9493d56c11ecb428269f5b2f540c1d47d69b050e4e5e5743628f3f",
+    "/tmp/kvspace-c-perf-total-build/libkvspace-c.so.1": "6b143b678a0d1be7761401809b08c6d9093f9501ec261da3aaa2bcbd96b433c0"
+  }
+}

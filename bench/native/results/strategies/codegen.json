@@ -1,0 +1,113 @@
+{
+  "iops": {
+    "aot": {
+      "instruction_table_retained": false,
+      "opcode_helpers": 0,
+      "worker_sha256": "9a3fe6451d94d3cc2f8cb4e3c135c89d49efa41c7b9f9496bc9fc7aeec3a1360"
+    },
+    "decoded": {
+      "instruction_table_retained": true,
+      "opcode_helpers": 0,
+      "worker_sha256": "f2077e885b65a9cdb9b2f0dbf60d615b83615f63b9b8788804efd2a54e8634be"
+    },
+    "partial": {
+      "instruction_table_retained": false,
+      "opcode_helpers": 0,
+      "worker_sha256": "ea91c0183d83d667476ccacf06179d6f2a19ffb20623200376516a07a0a03c97"
+    },
+    "guarded": {
+      "instruction_table_retained": false,
+      "opcode_helpers": 0,
+      "worker_sha256": "8ff77a1d37932076756f526a201455b324a8c6892028a867ae2f78670b36bc47"
+    },
+    "copy-patch": {
+      "instruction_table_retained": true,
+      "opcode_helpers": 7,
+      "worker_sha256": "28e6bc93e37d056eeb0f74772f428827a8d8cf6de624ef707bbbd6b776e83e46"
+    },
+    "copy-patch-guarded": {
+      "instruction_table_retained": true,
+      "opcode_helpers": 7,
+      "worker_sha256": "843a116a2377d3fac166bb6cb9fbdf53965d8922434c8108d6cc4abbd35c2fe9"
+    },
+    "address-cache": {
+      "instruction_table_retained": false,
+      "opcode_helpers": 0,
+      "worker_sha256": "27769f9d5af968d3f162f5726fa46e7f4e98aa5bc7938ae137df414ed790045e"
+    }
+  },
+  "fib": {
+    "aot": {
+      "instruction_table_retained": false,
+      "opcode_helpers": 0,
+      "worker_sha256": "1fbf2a34bc09aaab00fedb9746d502e9be8a12bc87f4e5119e41018fd7ada24a"
+    },
+    "decoded": {
+      "instruction_table_retained": true,
+      "opcode_helpers": 0,
+      "worker_sha256": "8cc453ea2965135f716143076791937b57bae06cdc0245d9637270fa777d7dd9"
+    },
+    "partial": {
+      "instruction_table_retained": false,
+      "opcode_helpers": 0,
+      "worker_sha256": "8528cf5e8e15969208ee32eaef80c7b28c4f1f508180013a342e0661f4090095"
+    },
+    "guarded": {
+      "instruction_table_retained": false,
+      "opcode_helpers": 0,
+      "worker_sha256": "c7ee7494561ac85f7c83fc668a6c6626b1d73630f8a7c9f4e00d214e0402d326"
+    },
+    "copy-patch": {
+      "instruction_table_retained": true,
+      "opcode_helpers": 8,
+      "worker_sha256": "dae54d06d240ca7f585efb8b0eb64ab1f39d8936cb454693b7b88f2f8393d11b"
+    },
+    "copy-patch-guarded": {
+      "instruction_table_retained": true,
+      "opcode_helpers": 8,
+      "worker_sha256": "403cf563bc8e5975af0f54a9278404aa613eb55f6b40d10db4f35d2ab88ba3e0"
+    },
+    "address-cache": {
+      "instruction_table_retained": false,
+      "opcode_helpers": 0,
+      "worker_sha256": "6eda38fccd1bdb2ec148a691a670f9dc9ced4d3faf04d59082d167345bcd7ffb"
+    }
+  },
+  "nqueens": {
+    "aot": {
+      "instruction_table_retained": false,
+      "opcode_helpers": 0,
+      "worker_sha256": "ff84d32d14ee89a49a0928f21f3029a1599e3b03dc4a2cb436e9dc3dd15e3118"
+    },
+    "decoded": {
+      "instruction_table_retained": true,
+      "opcode_helpers": 0,
+      "worker_sha256": "ea9e929987b61d81aa5e045d052a9d24ac8deb02a0185235d446a53bdc8ba70c"
+    },
+    "partial": {
+      "instruction_table_retained": false,
+      "opcode_helpers": 0,
+      "worker_sha256": "b6e07cd2aa6828c4e2ef6d16dc32b1ad52185dea5c6d9223eef13b6f2f5552de"
+    },
+    "guarded": {
+      "instruction_table_retained": false,
+      "opcode_helpers": 0,
+      "worker_sha256": "a4c1aee9b10a7e3958b1da80a5fc7e4c62f340abdf0c867a9910f244d48e14b5"
+    },
+    "copy-patch": {
+      "instruction_table_retained": true,
+      "opcode_helpers": 14,
+      "worker_sha256": "66e6c59f239d2d8d42e3ed6859bd031a7b438f2895aa26931d45ef0d42cec894"
+    },
+    "copy-patch-guarded": {
+      "instruction_table_retained": true,
+      "opcode_helpers": 14,
+      "worker_sha256": "162996df80b815c5f971e176a3e5edc257ac8531352e0c9d2339cba333e32924"
+    },
+    "address-cache": {
+      "instruction_table_retained": false,
+      "opcode_helpers": 0,
+      "worker_sha256": "425a118d1489718137d2991844cf6ec75cea0fae68c09b96fa552182d5052790"
+    }
+  }
+}
