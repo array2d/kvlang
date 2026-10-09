@@ -22,8 +22,9 @@ lib kvlang/spec/kvspace模型/指令布局格式 {
 
 ### 签名行
 
-函数目录 `/lib/{pkg}·{name}/` 自身是普通**目录节点**：storetype = index、langtype = `index`、**无值**
-（body 空）。rwfunc 的**计数头**落签名行锚点 `/lib/{pkg}·{name}/[0,0]`——storetype = index、langtype =
+函数目录 `/lib/{pkg}·{name}/` 自身是**目录节点**：storage class 0、langtype = `rwfunc`、**无值**
+（body 空）。rwfunc 的**计数头**落签名行锚点 `/lib/{pkg}·{name}/[0,0]`——**class 1（有冗余的长度）、
+a = 5、b ≥ 5**，langtype =
 `rwfunc`（裸种类名，**不含签名**），body = `[nr:u16 LE][nw:u16 LE][dynamic:u8]`（读参个数 `nr`、写参
 个数 `nw`、是否变参 `dynamic`）。
 
