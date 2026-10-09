@@ -133,16 +133,12 @@ static int materialize_operand(kvlangKv_t *kv, const char *link_base,
         snprintf(err, err_cap, "Decode: invalid pointer at %s", slot);
         return -1;
     }
-    kvlangStrbuf_t physical;
-    kvlangStrbufInit(&physical);
-    kvlangStrbufPrintf(&physical, "%s%s", link_base, slot);
-    kvlangKvPair_t pair = {physical.p, ptr};
-    int rc = kvlangKvSet(kv, &pair, 1, err, err_cap);
-    kvlangStrbufFree(&physical);
-    if (rc != 0) {
-        kvlangXvalueFree(&ptr);
-        return -1;
-    }
+    /* 物化结果只留在本步内存，不写回操作数槽 `<link_base><slot>`：该槽只被「本指令的重解码」
+     * 读回（layout 从不生成引用操作数槽的 `*[addr0,-i]` 描述符；指向的是变量名或形参槽
+     * `*[0,±k]`），而同一次执行循环调用内重解码已被按 PC 的指令缓存挡掉，写回只是帧内
+     * 一次性 memo。递归每层建新帧、每帧只执行一次指令，写回纯属开销（fib 实测约占执行时间
+     * 29%）。跨执行循环调用（每次外部 rwir handoff 重启一次）时帧仍在、缓存重建，写回曾起
+     * memo 作用（prime_sieve 因此微增 2~4%），但整体收益远大于此。目标 key/类型语义不变。 */
     kvlangXvalueFree(v);
     *v = ptr;
     return 0;
