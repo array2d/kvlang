@@ -437,6 +437,8 @@ size_t kvlangRwirNextPcBuf(const char *pc, char *buf, size_t cap); /* 栈缓冲�
 int kvlangRwirExtractAddr0(const char *coord);
 int kvlangRwirDecode(kvlangKv_t *kv, const char *link_base, const char *pc,
                      kvlangRwirInst_t *out, char *err, uint32_t err_cap);
+int kvlangRwirDecodeTemplate(kvlangKv_t *kv, const char *link_base, const char *pc,
+                             kvlangRwirInst_t *out, char *err, uint32_t err_cap);
 void kvlangRwirInstFree(kvlangRwirInst_t *inst);
 /* 外部扩展 handoff：写共享队列 /lib/<opcode>/vids/<vid>=pc，阻塞 watch 该 key 直至变 None
  * （外部执行器认领、驱动、置 nextpc 后删除该条目 → 本端解除阻塞）。 */

@@ -196,8 +196,9 @@ static int decode_operand(kvlangKv_t *kv, const char *link_base,
     return 1;
 }
 
-int kvlangRwirDecode(kvlangKv_t *kv, const char *link_base, const char *pc,
-                     kvlangRwirInst_t *out, char *err, uint32_t err_cap) {
+static int decode_inst(kvlangKv_t *kv, const char *link_base, const char *pc,
+                        kvlangRwirInst_t *out, bool read_values,
+                        char *err, uint32_t err_cap) {
     memset(out, 0, sizeof(*out));
     const char *last = NULL;
     for (const char *p = pc; (p = strstr(p, "/[")) != NULL; p += 2)
@@ -252,7 +253,7 @@ int kvlangRwirDecode(kvlangKv_t *kv, const char *link_base, const char *pc,
     for (int i = 1; i <= nr; i++) {
         snprintf(slot, sizeof slot, "[%d,-%d]", addr0, i);
         int rc = decode_operand(kv, link_base, frame_root, slot,
-                                &out->reads[out->nr], true, err, err_cap);
+                                &out->reads[out->nr], read_values, err, err_cap);
         if (rc < 0)
             goto fail;
         if (rc == 0) {
@@ -284,4 +285,14 @@ fail:
     free(frame_root);
     kvlangRwirInstFree(out);
     return -1;
+}
+
+int kvlangRwirDecode(kvlangKv_t *kv, const char *link_base, const char *pc,
+                     kvlangRwirInst_t *out, char *err, uint32_t err_cap) {
+    return decode_inst(kv, link_base, pc, out, true, err, err_cap);
+}
+
+int kvlangRwirDecodeTemplate(kvlangKv_t *kv, const char *link_base, const char *pc,
+                             kvlangRwirInst_t *out, char *err, uint32_t err_cap) {
+    return decode_inst(kv, link_base, pc, out, false, err, err_cap);
 }

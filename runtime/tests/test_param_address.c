@@ -165,6 +165,18 @@ int main(void) {
          kvlangScalarI64(kvlangXvalueScalar(&decoded.reads[0].val)) == 17;
     kvlangRwirInstFree(&decoded);
 
+    if (kvlangRwirDecodeTemplate(kv, base, any_pc, &decoded, err, sizeof err) != 0)
+        return 1;
+    ok = ok && decoded.nr == 1 && !decoded.reads[0].val.data &&
+         set_i64(kv, absolute, 23) == 0;
+    kvlangXvalue_t current;
+    kvlangBuiltinResolveReadValue(kv, "/vthread/vt0/[2]",
+                                  decoded.reads[0].name, &decoded.reads[0].val,
+                                  &current);
+    ok = ok && kvlangScalarI64(kvlangXvalueScalar(&current)) == 23;
+    kvlangXvalueFree(&current);
+    kvlangRwirInstFree(&decoded);
+
     kvlangXvalue_t outer, inner;
     kvlangXvalueZero(&outer);
     kvlangXvalueZero(&inner);
@@ -225,6 +237,20 @@ int main(void) {
     kvlangKvGetOne(kv, "/vthread/vt0/[2]/[0,-1]", &got);
     ok = ok && kvlangXvalueNone(&got);
     kvlangXvalueFree(&got);
+
+    kvlangParam_t target = {.name = "/jump"};
+    kvlangXvalueNewInt64(&target.val, 99);
+    kvlangRwirInst_t jump = {.reads = &target, .nr = 1};
+    kvlangFrame_t jumping = {.kv = kv, .vtid = "vt0",
+                             .pc = "/vthread/vt0/[1]/[1,0]", .inst = &jump};
+    ok = ok && set_i64(kv, "/jump", 3) == 0 &&
+         kvlangCtlGoto(&jumping) == 0 && !jumping.persist_failed;
+    char *jump_pc = NULL;
+    kvlangVthreadPcGet(kv, "vt0", &jump_pc);
+    ok = ok && jump_pc && strcmp(jump_pc, "/vthread/vt0/[1]/[3,0]") == 0;
+    free(jump_pc);
+    kvlangXvalueFree(&target.val);
+
     kvlangKvDisconnect(kv);
     return ok ? 0 : 1;
 }

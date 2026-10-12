@@ -3,6 +3,108 @@
 static char *load_def_reads(kvlangKv_t *kv, const char *key, int *out_nr,
                             int *out_dyn);
 
+/* Frozen instruction paths only; never retain operand values. */
+typedef struct rwir_cache_ent {
+    char *frame;
+    char *funcdir;
+    int addr0;
+    kvlangRwirInst_t inst;
+    struct rwir_cache_ent *next;
+} rwir_cache_ent_t;
+#define RWIR_CACHE_BUCKETS 4096
+typedef struct {
+    rwir_cache_ent_t *buckets[RWIR_CACHE_BUCKETS];
+} rwir_cache_t;
+
+static size_t rwir_hash(const char *frame, const char *funcdir, int addr0) {
+    size_t h = 1469598103934665603ULL;
+    for (const char *s = frame; *s; s++) {
+        h ^= (unsigned char)*s;
+        h *= 1099511628211ULL;
+    }
+    for (const char *s = funcdir; *s; s++) {
+        h ^= (unsigned char)*s;
+        h *= 1099511628211ULL;
+    }
+    h ^= (size_t)(unsigned)addr0;
+    h *= 1099511628211ULL;
+    return h & (RWIR_CACHE_BUCKETS - 1);
+}
+
+static kvlangRwirInst_t *rwir_cache_get(rwir_cache_t *cache,
+                                       const char *frame, const char *funcdir,
+                                       int addr0) {
+    for (rwir_cache_ent_t *e = cache->buckets[rwir_hash(frame, funcdir, addr0)]; e;
+         e = e->next)
+        if (e->addr0 == addr0 && strcmp(e->frame, frame) == 0 &&
+            strcmp(e->funcdir, funcdir) == 0)
+            return &e->inst;
+    return NULL;
+}
+
+static void rwir_cache_drop_frame(rwir_cache_t *cache, const char *frame) {
+    for (int b = 0; b < RWIR_CACHE_BUCKETS; b++) {
+        rwir_cache_ent_t **pp = &cache->buckets[b];
+        while (*pp) {
+            if (frame && strcmp((*pp)->frame, frame) != 0) {
+                pp = &(*pp)->next;
+                continue;
+            }
+            rwir_cache_ent_t *dead = *pp;
+            *pp = dead->next;
+            kvlangRwirInstFree(&dead->inst);
+            free(dead->frame);
+            free(dead->funcdir);
+            free(dead);
+        }
+    }
+}
+
+/* Transfer ownership only when every operand value is empty. */
+static kvlangRwirInst_t *rwir_cache_put(rwir_cache_t *cache,
+                                       const char *frame, const char *funcdir,
+                                       int addr0, kvlangRwirInst_t *inst) {
+    for (int i = 0; i < inst->nr; i++)
+        if (inst->reads[i].val.data)
+            return NULL;
+    for (int i = 0; i < inst->nw; i++)
+        if (inst->writes[i].val.data)
+            return NULL;
+    rwir_cache_ent_t *e = malloc(sizeof *e);
+    if (!e)
+        return NULL;
+    e->frame = strdup(frame);
+    e->funcdir = strdup(funcdir);
+    if (!e->frame || !e->funcdir) {
+        free(e->frame);
+        free(e->funcdir);
+        free(e);
+        return NULL;
+    }
+    e->addr0 = addr0;
+    e->inst = *inst;
+    size_t b = rwir_hash(frame, funcdir, addr0);
+    e->next = cache->buckets[b];
+    cache->buckets[b] = e;
+    return &e->inst;
+}
+
+static char *read_seglib(kvlangKv_t *kv, const char *fr) {
+    char *stk = kvlangKeytreeStack(fr);
+    kvlangStrbuf_t k;
+    kvlangStrbufInit(&k);
+    kvlangStrbufPuts(&k, stk);
+    kvlangStrbufPuts(&k, SEG_LIB);
+    free(stk);
+    kvlangXvalue_t v;
+    kvlangXvalueZero(&v);
+    kvlangKvGetOne(kv, k.p, &v);
+    kvlangStrbufFree(&k);
+    char *r = kvlangXvalueNone(&v) ? NULL : kvlangXvalueValueString(&v);
+    kvlangXvalueFree(&v);
+    return r;
+}
+
 /* 找末个成员分隔符（·，多字节），对齐 strrchr('.') 的单字节旧语义。 */
 static const char *rfind_sep(const char *s) {
     const char *found = NULL, *p = s;
@@ -14,11 +116,11 @@ static const char *rfind_sep(const char *s) {
 }
 
 /* goto/br 目标：layout 已把 label 解析为 int64 irseq（≥1）。非 int64 / 越界返回 -1。 */
-static int irseq_of(const kvlangParam_t *p) {
-    if (kvlangXvalueNone(&p->val) ||
-        !kvlangXvalueKindIs(&p->val, KVSPACE_KIND_INT64))
+static int irseq_of(const kvlangXvalue_t *value) {
+    if (kvlangXvalueNone(value) ||
+        !kvlangXvalueKindIs(value, KVSPACE_KIND_INT64))
         return -1;
-    int64_t n = kvlangScalarI64(kvlangXvalueScalar(&p->val));
+    int64_t n = kvlangScalarI64(kvlangXvalueScalar(value));
     if (n < 1 || n > 0x7fffffff)
         return -1;
     return (int)n;
@@ -26,16 +128,21 @@ static int irseq_of(const kvlangParam_t *p) {
 
 /* 函数内跳转：只改 PC 的 [irseq]，帧不变。目标非法 → RuntimeError，返回 -1。 */
 static int jump_to(kvlangFrame_t *f, const kvlangParam_t *target, const char *op) {
-    int irseq = irseq_of(target);
+    kvlangXvalue_t value;
+    kvlangBuiltinResolveReadValue(f->kv, f->frame_root, target->name,
+                                  &target->val, &value);
+    int irseq = irseq_of(&value);
     if (irseq < 0) {
         char msg[256];
         snprintf(msg, sizeof msg,
                  "RuntimeError: %s target is not an int64 irseq: %s (kind=%s)",
                  op, target->name ? target->name : "",
-                 kvlangXvalueKind(&target->val));
+                 kvlangXvalueKind(&value));
+        kvlangXvalueFree(&value);
         kvlangVthreadSetError(f->kv, f->vtid, f->pc, msg);
         return -1;
     }
+    kvlangXvalueFree(&value);
     /* Reuse this instruction's frame root. */
     char *owned = NULL;
     const char *fr = f->frame_root;
@@ -907,8 +1014,11 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode,
 
     char *cur = NULL;
     char *cur_frame = NULL;
+    char *cur_funcdir = NULL;
+    int cur_depth = 0;
+    rwir_cache_t cache = {0};
     int rc = 0;
-    /* Reload status each step. */
+    /* Reload status each step. PC is also re-read from kvspace each step. */
     char *status = NULL;
     for (;;) {
         /* Release borrowed values from the previous instruction. */
@@ -930,8 +1040,36 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode,
             break;
         }
 
-        cur_frame = kvlangKeytreeFrameRoot(cur);
+        const char *lastc = NULL;
+        for (const char *p = cur; (p = strstr(p, "/[")) != NULL; p += 2)
+            lastc = p;
+        if (!lastc) {
+            kvlangVthreadSetError(kv, vtid, cur, "RuntimeError: pc has no frame");
+            rc = -1;
+            break;
+        }
+        size_t frlen = (size_t)(lastc - cur);
         int depth = kvlangKeytreeFrameNum(cur);
+        if (!cur_frame || strlen(cur_frame) != frlen ||
+            memcmp(cur_frame, cur, frlen) != 0) {
+            char *nfr = malloc(frlen + 1);
+            if (!nfr) {
+                rc = -1;
+                break;
+            }
+            memcpy(nfr, cur, frlen);
+            nfr[frlen] = 0;
+            /* Rebinding a frame invalidates its resolved paths. */
+            if (depth > cur_depth)
+                rwir_cache_drop_frame(&cache, nfr);
+            else if (cur_frame && depth < cur_depth)
+                rwir_cache_drop_frame(&cache, cur_frame);
+            free(cur_frame);
+            cur_frame = nfr;
+            free(cur_funcdir);
+            cur_funcdir = read_seglib(kv, cur_frame);
+            cur_depth = depth;
+        }
         if (depth > MAX_STACK_DEPTH) {
             char msg[256];
             snprintf(msg, sizeof msg,
@@ -943,19 +1081,36 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode,
         }
 
         const char *fr = cur_frame;
+        int addr0 = kvlangRwirExtractAddr0(lastc + 1);
         kvlangRwirInst_t tmp;
-        char *link_base = kvlangKeytreeStack(fr);
-        char err[256];
-        if (kvlangRwirDecode(kv, link_base, cur, &tmp, err, sizeof err) != 0) {
-            char msg[256];
-            snprintf(msg, sizeof msg, "decode: %.247s", err);
-            kvlangVthreadSetError(kv, vtid, cur, msg);
+        memset(&tmp, 0, sizeof tmp);
+        bool owned = false;
+        kvlangRwirInst_t *inst = NULL;
+        if (cur_funcdir)
+            inst = rwir_cache_get(&cache, cur_frame, cur_funcdir, addr0);
+        if (!inst) {
+            char *link_base = kvlangKeytreeStack(fr);
+            char err[256];
+            if (kvlangRwirDecodeTemplate(kv, link_base, cur, &tmp, err, sizeof err) != 0) {
+                char msg[256];
+                snprintf(msg, sizeof msg, "decode: %.247s", err);
+                kvlangVthreadSetError(kv, vtid, cur, msg);
+                free(link_base);
+                rc = -1;
+                break;
+            }
             free(link_base);
-            rc = -1;
-            break;
+            if (cur_funcdir && tmp.opcode && tmp.opcode[0]) {
+                inst = rwir_cache_put(&cache, cur_frame, cur_funcdir, addr0, &tmp);
+                if (!inst) {
+                    inst = &tmp;
+                    owned = true;
+                }
+            } else {
+                inst = &tmp;
+                owned = true;
+            }
         }
-        free(link_base);
-        kvlangRwirInst_t *inst = &tmp;
 
         kvlangLogDebug("[%s] PC=%s OP=%s R=%d W=%d", vtid, cur,
                        inst->opcode ? inst->opcode : "(empty)", inst->nr,
@@ -968,7 +1123,8 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode,
             snprintf(msg, sizeof msg, "RuntimeError: no instruction at %s",
                      cur);
             kvlangVthreadSetError(kv, vtid, cur, msg);
-            kvlangRwirInstFree(&tmp);
+            if (owned)
+                kvlangRwirInstFree(&tmp);
             rc = -1;
             break;
         }
@@ -990,12 +1146,10 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode,
                     *out_pc = yield;
                 else
                     free(yield);
-                kvlangRwirInstFree(&tmp);
-                free(cur);
-                free(cur_frame);
-                free(status);
-                kvlangStrbufFree(&vtid_b);
-                return 1;
+                if (owned)
+                    kvlangRwirInstFree(&tmp);
+                rc = 1;
+                break;
             }
         } else if (notinmyrwircaps(kv, inst->opcode)) {
             int def_nr = 0, def_dyn = 0;
@@ -1010,12 +1164,10 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode,
             if (exec_err == 0 && mode == KVMODE_RETURN) {
                 if (out_pc)
                     *out_pc = strdup(cur);
-                kvlangRwirInstFree(&tmp);
-                free(cur);
-                free(cur_frame);
-                free(status);
-                kvlangStrbufFree(&vtid_b);
-                return 1;
+                if (owned)
+                    kvlangRwirInstFree(&tmp);
+                rc = 1;
+                break;
             }
             if (exec_err == 0)
                 exec_err = handoff_external_rwir(kv, vtid, cur, inst);
@@ -1047,20 +1199,20 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode,
         }
 
         if (exec_err != 0) {
-            kvlangRwirInstFree(&tmp);
+            if (owned)
+                kvlangRwirInstFree(&tmp);
             rc = -1;
             break;
         }
 
-        kvlangRwirInstFree(&tmp);
-        free(cur_frame);
-        cur_frame = NULL;
-        free(status);
-        status = NULL;
+        if (owned)
+            kvlangRwirInstFree(&tmp);
     }
 
     free(cur);
     free(cur_frame);
+    free(cur_funcdir);
+    rwir_cache_drop_frame(&cache, NULL);
     free(status);
     kvlangStrbufFree(&vtid_b);
     return rc;
