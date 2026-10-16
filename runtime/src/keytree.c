@@ -205,12 +205,10 @@ bool kvlangKeytreeIsEntryPc(const char *pc) {
     return slash && strcmp(slash, "/[1,0]") == 0;
 }
 
-char *kvlangKeytreeCanonOp(const char *opcode) {
+const char *kvlangKeytreeCanonOp(const char *opcode) {
     const char *p = opcode ? opcode : "";
     size_t pl = strlen(LIB_ROOT PATH_SEP);
-    if (strncmp(p, LIB_ROOT PATH_SEP, pl) == 0)
-        p += pl;
-    return strdup(p);
+    return strncmp(p, LIB_ROOT PATH_SEP, pl) == 0 ? p + pl : p;
 }
 
 bool kvlangKeytreeValidSegment(const char *s) {

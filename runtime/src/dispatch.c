@@ -210,18 +210,15 @@ static void neg_put(kvlangKv_t *kv, const char *op) {
 }
 
 bool kvlangDispatchIsDelegatedOp(kvlangKv_t *kv, const char *opcode) {
-    char *op = kvlangKeytreeCanonOp(opcode);
-    if (neg_hit(kv, op)) {
-        free(op);
+    const char *op = kvlangKeytreeCanonOp(opcode);
+    if (neg_hit(kv, op))
         return false;
-    }
     strlist_t duty = {0};
     backends_for(kv, op, NULL, &duty);
     bool ok = duty.n > 0;
     if (!ok)
         neg_put(kv, op);
     sl_free(&duty);
-    free(op);
     return ok;
 }
 
@@ -257,7 +254,6 @@ static int select_backend(kvlangKv_t *kv, const char *op, char **out, char *err,
         sl_free(&duty);
         return -1;
     }
-    /* 负载相同保留 List 返回序的前者。kvspace 0.3 的 List 按名字排序，没有注册序号。 */
     char *best = duty.v[0];
     double best_load = parse_load(kv, best);
     for (int i = 1; i < duty.n; i++) {
@@ -317,6 +313,8 @@ static void json_esc(kvlangStrbuf_t *b, const char *s) {
             kvlangStrbufPuts(b, "\\r");
         else if (c == '\t')
             kvlangStrbufPuts(b, "\\t");
+        else if (c < 0x20)
+            kvlangStrbufPrintf(b, "\\u%04x", (unsigned)c);
         else
             kvlangStrbufPutc(b, (char)c);
     }
@@ -324,11 +322,10 @@ static void json_esc(kvlangStrbuf_t *b, const char *s) {
 }
 
 static bool is_var_slot(const kvlangParam_t *p) {
-    if (!p->name || !p->name[0])
+    if (!p->name || !p->name[0] || strstr(p->name, "/" RUNTIME_MEMBER_SEP "operand["))
         return false;
-    if (p->name[0] == '/')
-        return true;
-    return kvlangXvalueKindIs(&p->val, KVSPACE_KIND_RWIR) || kvlangXvalueNone(&p->val);
+    return p->name[0] == '/' || kvlangXvalueKindIs(&p->val, KVSPACE_KIND_RWIR) ||
+           kvlangXvalueNone(&p->val);
 }
 
 static bool keyset_has(char **keys, int n, const char *k) {
@@ -371,8 +368,6 @@ static void init_boot(void) {
     g_boot_ns = (uint64_t)t.tv_sec * 1000000000ULL + (uint64_t)t.tv_nsec;
 }
 
-/* kvspace 0.3 没有 Incr。id = 后端 + vtid + pid + 进程启动时刻 + 进程内序号。
- * 已存在的 status 键直接 abort，不许撞上还在的去重锚点。 */
 static void make_task_id(char *out, size_t cap, const char *backend, const char *vtid) {
     static pthread_once_t once = PTHREAD_ONCE_INIT;
     static _Atomic uint64_t seq;
@@ -387,7 +382,7 @@ static void make_task_id(char *out, size_t cap, const char *backend, const char 
 }
 
 int kvlangDispatchDelegate(kvlangKv_t *kv, const char *vtid, const char *pc, kvlangRwirInst_t *inst) {
-    char *op = kvlangKeytreeCanonOp(inst->opcode);
+    const char *op = kvlangKeytreeCanonOp(inst->opcode);
 
     char *sigk = kvlangKeytreeLibSig(op);
     kvlangXvalue_t sig;
@@ -400,7 +395,6 @@ int kvlangDispatchDelegate(kvlangKv_t *kv, const char *vtid, const char *pc, kvl
         if (duty.n == 0) {
             sl_free(&duty);
             kvlangXvalueFree(&sig);
-            free(op);
             return KVLANG_DELEGATE_LOCAL;
         }
         kvlangStrbuf_t names;
@@ -416,7 +410,6 @@ int kvlangDispatchDelegate(kvlangKv_t *kv, const char *vtid, const char *pc, kvl
                           op, names.p ? names.p : "");
         kvlangStrbufFree(&names);
         kvlangXvalueFree(&sig);
-        free(op);
         return rc;
     }
     kvlangXvalueFree(&sig);
@@ -430,54 +423,42 @@ int kvlangDispatchDelegate(kvlangKv_t *kv, const char *vtid, const char *pc, kvl
         int dnr = 0, dnw = 0, dynamic = 0;
         if (lib_arity(&decl, &dnr, &dnw, &dynamic) != 0) {
             kvlangXvalueFree(&decl);
-            int rc = fail_msg(kv, vtid, pc, "%s: def rwir body is not a signature", op);
-            free(op);
-            return rc;
+            return fail_msg(kv, vtid, pc, "%s: def rwir body is not a signature", op);
         }
         int min_r = dynamic && dnr > 0 ? dnr - 1 : dnr;
         if (inst->nr < min_r || (!dynamic && inst->nr != dnr)) {
             kvlangXvalueFree(&decl);
-            int rc = fail_msg(kv, vtid, pc,
-                              "%s: read arity mismatch: call site has %d, declaration has %d", op,
-                              inst->nr, dnr);
-            free(op);
-            return rc;
+            return fail_msg(kv, vtid, pc,
+                            "%s: read arity mismatch: call site has %d, declaration has %d", op,
+                            inst->nr, dnr);
         }
         if (inst->nw != dnw) {
             kvlangXvalueFree(&decl);
-            int rc = fail_msg(kv, vtid, pc,
-                              "%s: write arity mismatch: call site has %d, declaration has %d", op,
-                              inst->nw, dnw);
-            free(op);
-            return rc;
+            return fail_msg(kv, vtid, pc,
+                            "%s: write arity mismatch: call site has %d, declaration has %d", op,
+                            inst->nw, dnw);
         }
     } else if (!kvlangXvalueNone(&decl)) {
         const char *k = kvlangXvalueKind(&decl);
         int rc = fail_msg(kv, vtid, pc, "%s: /lib entry holds kind %s, which is not callable", op,
                           k[0] ? k : "?");
         kvlangXvalueFree(&decl);
-        free(op);
         return rc;
     }
     kvlangXvalueFree(&decl);
 
     char selerr[256];
     char *backend = NULL;
-    if (select_backend(kv, op, &backend, selerr, sizeof selerr) != 0) {
-        int rc = fail_msg(kv, vtid, pc, "%s", selerr);
-        free(op);
-        return rc;
-    }
+    if (select_backend(kv, op, &backend, selerr, sizeof selerr) != 0)
+        return fail_msg(kv, vtid, pc, "%s", selerr);
 
     char task_id[256];
     make_task_id(task_id, sizeof task_id, backend, vtid);
 
     char *fr = kvlangKeytreeFrameRoot(pc);
     if (!fr) {
-        int rc = fail_msg(kv, vtid, pc, "%s: pc has no frame: %s", op, pc);
         free(backend);
-        free(op);
-        return rc;
+        return fail_msg(kv, vtid, pc, "%s: pc has no frame: %s", op, pc);
     }
 
     char **out_keys = inst->nw > 0 ? calloc((size_t)inst->nw, sizeof(char *)) : NULL;
@@ -510,33 +491,24 @@ int kvlangDispatchDelegate(kvlangKv_t *kv, const char *vtid, const char *pc, kvl
         if (i)
             kvlangStrbufPutc(&json, ',');
         kvlangStrbufPutc(&json, '{');
-        if (is_var_slot(&inst->reads[i]) && inst->reads[i].name[0] == '/') {
+        char *rk = is_var_slot(&inst->reads[i])
+                       ? kvlangBuiltinResolveWriteSlot(kv, fr, inst->reads[i].name)
+                       : NULL;
+        if (rk && !keyset_has(out_keys, inst->nw, rk)) {
             kvlangStrbufPuts(&json, "\"key\":");
-            json_esc(&json, inst->reads[i].name);
-        } else if (is_var_slot(&inst->reads[i])) {
-            char *rk = kvlangBuiltinResolveWriteSlot(kv, fr, inst->reads[i].name);
-            if (keyset_has(out_keys, inst->nw, rk)) {
-                kvlangXvalue_t val;
-                kvlangXvalueZero(&val);
-                kvlangBuiltinResolveReadValue(kv, fr, inst->reads[i].name, &inst->reads[i].val, &val);
-                char *disp = NULL;
-                kvlangDisplay(&val, &disp);
-                kvlangStrbufPuts(&json, "\"value\":");
-                json_esc(&json, disp ? disp : "");
-                free(disp);
-                kvlangXvalueFree(&val);
-            } else {
-                kvlangStrbufPuts(&json, "\"key\":");
-                json_esc(&json, rk);
-            }
-            free(rk);
+            json_esc(&json, rk);
         } else {
+            kvlangXvalue_t val;
+            kvlangXvalueZero(&val);
+            kvlangBuiltinResolveReadValue(kv, fr, inst->reads[i].name, &inst->reads[i].val, &val);
             char *disp = NULL;
-            kvlangDisplay(&inst->reads[i].val, &disp);
+            kvlangDisplay(&val, &disp);
             kvlangStrbufPuts(&json, "\"value\":");
             json_esc(&json, disp ? disp : "");
             free(disp);
+            kvlangXvalueFree(&val);
         }
+        free(rk);
         kvlangStrbufPutc(&json, '}');
     }
     kvlangStrbufPuts(&json, "],\"outputs\":[");
@@ -550,6 +522,7 @@ int kvlangDispatchDelegate(kvlangKv_t *kv, const char *vtid, const char *pc, kvl
     char *done_key = kvlangKeytreeDoneRwir(task_id);
     kvlangStrbufPuts(&json, "],\"done_key\":");
     json_esc(&json, done_key);
+    free(done_key);
     kvlangStrbufPutc(&json, '}');
 
     char *status_key = kvlangKeytreeSysTask(task_id, SEG_STATUS);
@@ -574,7 +547,6 @@ int kvlangDispatchDelegate(kvlangKv_t *kv, const char *vtid, const char *pc, kvl
         }
     }
 
-    /* cmd/<task_id> 是持久任务。kvspace 0.3 的 Notify 不是队列，忙着的后端收不到。 */
     char *cmd = kvlangKeytreeSysRwirBackendCmd(backend);
     kvlangStrbuf_t cmdk;
     kvlangStrbufInit(&cmdk);
@@ -629,10 +601,8 @@ int kvlangDispatchDelegate(kvlangKv_t *kv, const char *vtid, const char *pc, kvl
     kvlangVthreadSet(kv, vtid, npc.p, "running");
     kvlangStrbufFree(&npc);
     kvlangLogDebug("[%s] DONE %s task=%s", vtid, inst->opcode, task_id);
-    /* status=done 留下当去重锚点。0.3 没有 Expire，不能从 List 摘掉还让 Get 看得见。 */
 
 enqueue_done:
-    free(done_key);
     free(status_key);
     kvlangStrbufFree(&json);
 done:
@@ -643,6 +613,5 @@ done:
     }
     free(fr);
     free(backend);
-    free(op);
     return rc;
 }

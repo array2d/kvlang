@@ -28,6 +28,17 @@ static kvlangKv_t *open_kv(void) {
     return kv;
 }
 
+static void set_tlv(kvlangKv_t *kv, const char *key, const char *kind, const uint8_t *raw, uint32_t len) {
+    kvlangXvalue_t v;
+    kvlangXvalueZero(&v);
+    kvlangXvalueNewTlv(&v, kind, raw, len, 1);
+    kvlangKvPair_t p = {(char *)key, v};
+    char err[256];
+    if (kvlangKvSet(kv, &p, 1, err, sizeof err) != 0)
+        fail(err[0] ? err : "set");
+    kvlangXvalueFree(&v);
+}
+
 static void set_char(kvlangKv_t *kv, const char *key, const char *s) {
     kvlangXvalue_t v;
     kvlangXvalueZero(&v);
@@ -57,7 +68,6 @@ static char *error_msg(kvlangKv_t *kv, const char *vtid) {
     return s;
 }
 
-/* 后端从 cmd/ 子键取一条任务。0.3 没有 Take。 */
 static char *take_cmd(kvlangKv_t *kv, const char *cmd_dir, uint64_t ns) {
     char *pref = kvlangKeytreeStack(cmd_dir);
     struct timespec t0, tn;
@@ -139,12 +149,15 @@ typedef struct {
     char *cmd;
     char *out_key;
     int write_out;
-    volatile int ran;
+    int mark_done;
+    char *json;
 } exec_arg_t;
 
-static void finish_task(kvlangKv_t *kv, const char *json, const char *out_key, int write_out) {
+static void finish_task(kvlangKv_t *kv, const char *json, const char *out_key, int write_out, int mark_done) {
     if (write_out)
         set_char(kv, out_key, "ok");
+    if (!mark_done)
+        return;
     const char *rid = strstr(json, "\"request_id\":\"");
     if (!rid)
         return;
@@ -168,9 +181,8 @@ static void *executor(void *p) {
     char *json = take_cmd(a->kv, a->cmd, 2000000000ULL);
     if (!json)
         return NULL;
-    finish_task(a->kv, json, a->out_key, a->write_out);
-    free(json);
-    a->ran = 1;
+    finish_task(a->kv, json, a->out_key, a->write_out, a->mark_done);
+    a->json = json;
     return NULL;
 }
 
@@ -221,13 +233,14 @@ static void test_stale_heartbeat(kvlangKv_t *kv) {
 static void test_delegate_ok(kvlangKv_t *kv) {
     register_backend(kv, "okb", "ok.echo", "ready");
     char *cmd = kvlangKeytreeSysRwirBackendCmd("okb");
-    exec_arg_t a = {kv, cmd, "/data/out", 1, 0};
+    exec_arg_t a = {kv, cmd, "/data/out", 1, 1, NULL};
     pthread_t th;
     pthread_create(&th, NULL, executor, &a);
     kvlangRwirInst_t inst = make_inst("ok.echo", "/data/out");
     kvlangVthreadSet(kv, "1", PC, "running");
     int rc = kvlangDispatchDelegate(kv, "1", PC, &inst);
     pthread_join(th, NULL);
+    free(a.json);
     expect(rc == KVLANG_DELEGATE_OK, "delegate ok");
     char *out = get_char(kv, "/data/out");
     expect(out && strcmp(out, "ok") == 0, "output written");
@@ -269,13 +282,14 @@ static void test_write_target(kvlangKv_t *kv) {
 static void test_done_without_output(kvlangKv_t *kv) {
     register_backend(kv, "nb", "n.echo", "ready");
     char *cmd = kvlangKeytreeSysRwirBackendCmd("nb");
-    exec_arg_t a = {kv, cmd, "/data/nout", 0, 0};
+    exec_arg_t a = {kv, cmd, "/data/nout", 0, 1, NULL};
     pthread_t th;
     pthread_create(&th, NULL, executor, &a);
     kvlangRwirInst_t inst = make_inst("n.echo", "/data/nout");
     kvlangVthreadSet(kv, "1", PC, "running");
     int rc = kvlangDispatchDelegate(kv, "1", PC, &inst);
     pthread_join(th, NULL);
+    free(a.json);
     expect(rc == KVLANG_DELEGATE_ERR, "empty output is failure");
     kvlangRwirInstFree(&inst);
     free(cmd);
@@ -295,15 +309,8 @@ static void test_timeout(kvlangKv_t *kv) {
 static void test_one_definition(kvlangKv_t *kv) {
     register_backend(kv, "db", "dup.op", "ready");
     uint8_t raw[5] = {0, 0, 0, 0, 0};
-    kvlangXvalue_t v;
-    kvlangXvalueZero(&v);
-    kvlangXvalueNewTlv(&v, KVSPACE_KIND_RWFUNC, raw, 5, 1);
     char *sk = kvlangKeytreeLibSig("dup.op");
-    kvlangKvPair_t p = {sk, v};
-    char err[256];
-    if (kvlangKvSet(kv, &p, 1, err, sizeof err) != 0)
-        fail(err[0] ? err : "set rwfunc");
-    kvlangXvalueFree(&v);
+    set_tlv(kv, sk, KVSPACE_KIND_RWFUNC, raw, sizeof raw);
     kvlangRwirInst_t inst = make_inst("dup.op", "/data/dup");
     kvlangVthreadSet(kv, "1", PC, "running");
     int rc = kvlangDispatchDelegate(kv, "1", PC, &inst);
@@ -315,28 +322,18 @@ static void test_one_definition(kvlangKv_t *kv) {
     free(sk);
 }
 
-static void *executor_out_only(void *p) {
-    exec_arg_t *a = p;
-    char *json = take_cmd(a->kv, a->cmd, 2000000000ULL);
-    if (json) {
-        set_char(a->kv, a->out_key, "ok");
-        free(json);
-        a->ran = 1;
-    }
-    return NULL;
-}
-
 static void test_output_without_done(kvlangKv_t *kv) {
     register_backend(kv, "od", "od.echo", "ready");
     char *cmd = kvlangKeytreeSysRwirBackendCmd("od");
-    exec_arg_t a = {kv, cmd, "/data/odout", 1, 0};
+    exec_arg_t a = {kv, cmd, "/data/odout", 1, 0, NULL};
     pthread_t th;
-    pthread_create(&th, NULL, executor_out_only, &a);
+    pthread_create(&th, NULL, executor, &a);
     kvlangDispatchSetDefaultTimeoutNs(80000000LL);
     kvlangRwirInst_t inst = make_inst("od.echo", "/data/odout");
     kvlangVthreadSet(kv, "1", PC, "running");
     int rc = kvlangDispatchDelegate(kv, "1", PC, &inst);
     pthread_join(th, NULL);
+    free(a.json);
     kvlangDispatchSetDefaultTimeoutNs(30LL * 1000000000LL);
     expect(rc == KVLANG_DELEGATE_ERR, "output without done is failure");
     kvlangRwirInstFree(&inst);
@@ -361,6 +358,40 @@ static void test_missing_heartbeat(kvlangKv_t *kv) {
     expect(!kvlangDispatchIsDelegatedOp(kv, "nohb.op"), "missing heartbeat is off duty");
 }
 
+static void test_decoded_inputs(kvlangKv_t *kv) {
+    char err[256];
+    kvlangKvMkindex(kv, "/vthread/1/[1]/", 0, err, sizeof err);
+    const uint8_t op_raw[] = {3, 0, 1, 0, 0, 'd', 'e', 'c', '.', 'o', 'p'};
+    const uint8_t x_raw[] = {0, 0, 0, 0, 0, 'x', 0, 'c', 'h', 'a', 'r', '/', 'u', 't', 'f', '8'};
+    const uint8_t y_raw[] = {0, 0, 0, 0, 0, 'y', 0, 'c', 'h', 'a', 'r', '/', 'u', 't', 'f', '8'};
+    set_tlv(kv, "/vthread/1/[1]/[1,0]", KVSPACE_KIND_RWIR, op_raw, sizeof op_raw);
+    set_char(kv, "/vthread/1/[1]/[1,-1]", "lit-val");
+    set_tlv(kv, "/vthread/1/[1]/[1,-2]", KVSPACE_KIND_RWIR, x_raw, sizeof x_raw);
+    set_tlv(kv, "/vthread/1/[1]/[1,-3]", KVSPACE_KIND_RWIR, y_raw, sizeof y_raw);
+    set_tlv(kv, "/vthread/1/[1]/[1,1]", KVSPACE_KIND_RWIR, y_raw, sizeof y_raw);
+    set_char(kv, "/vthread/1/[1]/x", "x-val");
+    set_char(kv, "/vthread/1/[1]/y", "before");
+
+    kvlangRwirInst_t inst;
+    if (kvlangRwirDecode(kv, "/vthread/1/[1]/", PC, &inst, err, sizeof err) != 0)
+        fail(err[0] ? err : "decode");
+
+    register_backend(kv, "decb", "dec.op", "ready");
+    char *cmd = kvlangKeytreeSysRwirBackendCmd("decb");
+    exec_arg_t a = {kv, cmd, "/vthread/1/[1]/y", 1, 1, NULL};
+    pthread_t th;
+    pthread_create(&th, NULL, executor, &a);
+    kvlangVthreadSet(kv, "1", PC, "running");
+    int rc = kvlangDispatchDelegate(kv, "1", PC, &inst);
+    pthread_join(th, NULL);
+    expect(rc == KVLANG_DELEGATE_OK, "decoded delegate ok");
+    expect(a.json && strstr(a.json, "\"inputs\":[{\"value\":\"lit-val\"},{\"key\":\"/vthread/1/[1]/x\"},{\"value\":\"before\"}]") != NULL,
+           "decoded literal is value, var is key, aliased rw var is value");
+    free(a.json);
+    free(cmd);
+    kvlangRwirInstFree(&inst);
+}
+
 int main(void) {
     test_check_write_key();
     kvlangKv_t *kv = open_kv();
@@ -373,6 +404,7 @@ int main(void) {
     test_one_definition(kv);
     test_output_without_done(kv);
     test_missing_heartbeat(kv);
+    test_decoded_inputs(kv);
     kvlangKvDisconnect(kv);
     fprintf(stderr, "ok\n");
     return 0;

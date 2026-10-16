@@ -1333,8 +1333,6 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode,
                 return 1;
             }
         } else if (kvlangDispatchIsDelegatedOp(kv, inst->opcode)) {
-            /* native / control / copy 之后、扩展 handoff 与用户 call 之前。
-             * Delegate 自己推进 PC；LOCAL 表示在岗表在两次读取之间清空，回落本地函数。 */
             exec_err = kvlangDispatchDelegate(kv, vtid, cur, inst);
             if (exec_err == KVLANG_DELEGATE_LOCAL) {
                 exec_err = 0;
