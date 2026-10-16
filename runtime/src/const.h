@@ -43,3 +43,16 @@
 #define INDEX_VALUE_SEP    "\n"
 #define RUNTIME_MEMBER_SEP "\xE2\x80\xA5"   /* ‥ U+2025 */
 #define EXT_INDEX_HEAD     "\xE2\x80\xA6"   /* … U+2026 */
+
+/* 委托注册表。运行时字段走 RUNTIME_MEMBER_SEP，与 /vthread/<id>/‥status 同一规则。 */
+#define SYS_ROOT            "/sys"
+#define DEV_ROOT            "/dev"
+#define DONE_ROOT           "/done"
+#define SEG_RWIR_BACKEND    "rwir-backend"
+#define SEG_LAST_HEARTBEAT  "last_heartbeat"
+#define SEG_CATEGORY        "category"
+#define SEG_LOAD            "load"
+#define SEG_CMD             "cmd"
+#define SEG_OP              "op"
+#define SEG_TASK            "task"
+#define SEG_RWIR            "rwir"

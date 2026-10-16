@@ -461,6 +461,20 @@ char *kvlangKeytreeIrseqPc(const char *frame_root, int irseq); /* malloc */
 char *kvlangKeytreeMember(const char *base, const char *name); /* malloc */
 char *kvlangKeytreeLibFunc(const char *pkg, const char *name); /* malloc */
 char *kvlangKeytreeRwir(const char *opcode);                   /* malloc */
+char *kvlangKeytreeCanonOp(const char *opcode);                /* malloc，剥 /lib/ */
+bool kvlangKeytreeValidSegment(const char *s);
+char *kvlangKeytreeCheckWriteKey(const char *vtid, const char *key); /* NULL 放行，否则 malloc 的错误句 */
+char *kvlangKeytreeSysRwirBackendRoot(void);
+char *kvlangKeytreeSysRwirBackend(const char *name);
+char *kvlangKeytreeSysRwirBackendOp(const char *name, const char *opcode);
+char *kvlangKeytreeSysRwirBackendCmd(const char *name);
+char *kvlangKeytreeSysRwirBackendStatus(const char *name);
+char *kvlangKeytreeSysRwirBackendLoad(const char *name);
+char *kvlangKeytreeSysRwirBackendHeartbeat(const char *name);
+char *kvlangKeytreeSysRwirBackendCategoryRoot(const char *name);
+char *kvlangKeytreeSysTask(const char *task_id, const char *field);
+char *kvlangKeytreeDoneRwir(const char *task_id);
+char *kvlangKeytreeLibSig(const char *opcode); /* /lib/<opcode>/[0,0] */
 void kvlangKeytreeVthread(const char *vtid, kvlangStrbuf_t *out);
 void kvlangKeytreeVthreadSlot(const char *vtid, const char *frame, int i, int j,
                               kvlangStrbuf_t *out);
@@ -543,6 +557,15 @@ int kvlangVthreadSet(kvlangKv_t *kv, const char *vtid, const char *pc,
 int kvlangVthreadSetDone(kvlangKv_t *kv, const char *vtid, const char *ret);
 void kvlangVthreadSetError(kvlangKv_t *kv, const char *vtid, const char *pc,
                            const char *msg);
+
+#define KVLANG_DELEGATE_OK 0
+#define KVLANG_DELEGATE_ERR -1
+#define KVLANG_DELEGATE_LOCAL 1 /* 在岗后端已下线，调用方改走本地 rwfunc */
+
+bool kvlangDispatchIsDelegatedOp(kvlangKv_t *kv, const char *opcode);
+int kvlangDispatchDelegate(kvlangKv_t *kv, const char *vtid, const char *pc,
+                           kvlangRwirInst_t *inst);
+void kvlangDispatchSetDefaultTimeoutNs(int64_t ns);
 
 /* ── builtin ───────────────────────────────────────────────────────── */
 

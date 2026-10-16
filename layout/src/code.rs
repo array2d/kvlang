@@ -72,14 +72,15 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
             func.pkg.clone()
         };
         let mut lowered = lower::lower_func(func);
-        write_func(kv, &pkg, &mut lowered, &local_funcs);
+        write_func(kv, &pkg, &mut lowered, &local_funcs)?;
         any_code = true;
         if func.sig.name == "init" {
             inits.push(init_fn_name(&pkg));
         }
     }
     for decl in &file.rwir_decls {
-        write_rwir_decl(kv, decl);
+        write_rwir_decl(kv, decl)?;
+        any_code = true;
     }
 
     let mut body = file.init_body.clone();
@@ -98,7 +99,7 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
             pkg: String::new(),
         };
         let mut lowered = lower::lower_func(&init_fn);
-        write_func(kv, "", &mut lowered, &local_funcs);
+        write_func(kv, "", &mut lowered, &local_funcs)?;
         any_code = true;
         inits.push(init_fn_name(""));
     }
@@ -634,10 +635,25 @@ fn build_inst(inst: &RawInst, by_irseq: &HashMap<i32, String>) -> Instruction {
 }
 
 /// 写函数到 /lib/：签名（rwfunc）、源码、参数 Ptr、指令体。
-pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func, local_funcs: &HashSet<String>) {
+pub fn write_func(
+    kv: &mut Kv,
+    pkg: &str,
+    fn_: &mut Func,
+    local_funcs: &HashSet<String>,
+) -> Result<(), String> {
     let type_map = lower::infer_types(fn_);
     lower::specialize(fn_, &type_map);
     let func_dir = keytree::lib_func(pkg, &fn_.sig.name);
+    let opcode = if pkg.is_empty() {
+        fn_.sig.name.clone()
+    } else {
+        format!("{pkg}{}{}", keytree::MEMBER_SEP, fn_.sig.name)
+    };
+    if kvkind::kind(&kv.get_one(&keytree::rwir(&opcode))) == kvkind::KIND_DEF_RWIR {
+        return Err(format!(
+            "{opcode}: rwir declaration and rwfunc body both define it; one opcode, one definition"
+        ));
+    }
 
     let mut seq: Vec<Instruction> = Vec::new();
     let mut labels: HashMap<String, i32> = HashMap::new();
@@ -723,6 +739,7 @@ pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func, local_funcs: &HashSet<
             .collect();
         let _ = kv.set(&lpairs);
     }
+    Ok(())
 }
 
 /// Store field types under the prototype and defaults under member keys.
@@ -785,10 +802,16 @@ fn field_default(ty: &str, default: Option<&Expr>) -> Vec<u8> {
 }
 
 /// 写用户声明的 rwir（无体）到 /lib/<opcode>。
-pub fn write_rwir_decl(kv: &mut Kv, decl: &RwirDecl) {
+pub fn write_rwir_decl(kv: &mut Kv, decl: &RwirDecl) -> Result<(), String> {
     let mut opcode = decl.sig.name.clone();
     if !decl.pkg.is_empty() {
         opcode = format!("{}{}{opcode}", decl.pkg, keytree::MEMBER_SEP);
+    }
+    let anchor = format!("{}/[0,0]", keytree::lib_func("", &opcode));
+    if kvkind::kind(&kv.get_one(&anchor)) == kvkind::KIND_RWFUNC {
+        return Err(format!(
+            "{opcode}: rwir declaration and rwfunc body both define it; one opcode, one definition"
+        ));
     }
     let nr = decl.sig.num_reads();
     let nw = decl.sig.num_writes();
@@ -812,6 +835,7 @@ pub fn write_rwir_decl(kv: &mut Kv, decl: &RwirDecl) {
         ));
     }
     let _ = kv.set(&pairs);
+    Ok(())
 }
 
 /// Flatten body into seq; ScopeStmt records label → irseq (1-based; [0,0] is the signature).
