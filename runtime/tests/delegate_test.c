@@ -140,6 +140,14 @@ static void test_check_write_key(void) {
     e = kvlangKeytreeCheckWriteKey("1", "rel");
     expect(e && strncmp(e, "ValueError", 10) == 0, "relative rejected");
     free(e);
+    e = kvlangKeytreeCheckWriteKey("1", "/vthread/1");
+    expect(e && strstr(e, "vthread root"), "vthread root is a directory");
+    free(e);
+    e = kvlangKeytreeCheckWriteKey("1", "/vthread/1/[1]");
+    expect(e && strstr(e, "frame directory"), "frame dir is a directory");
+    free(e);
+    e = kvlangKeytreeCheckWriteKey("1", "/vthread/1/[1]/x");
+    expect(e == NULL, "frame-local leaf allowed");
 }
 
 static void test_is_delegated(kvlangKv_t *kv) {
@@ -170,8 +178,8 @@ static void test_delegate_ok(kvlangKv_t *kv) {
     pthread_t th;
     pthread_create(&th, NULL, executor, &a);
     kvlangRwirInst_t inst = make_inst("ok.echo", "/data/out");
-    kvlangVthreadSet(kv, "1", "/vthread/1/[1,0]", "running");
-    int rc = kvlangDispatchDelegate(kv, "1", "/vthread/1/[1,0]", &inst);
+    kvlangVthreadSet(kv, "1", "/vthread/1/[1]/[1,0]", "running");
+    int rc = kvlangDispatchDelegate(kv, "1", "/vthread/1/[1]/[1,0]", &inst);
     pthread_join(th, NULL);
     expect(rc == KVLANG_DELEGATE_OK, "delegate ok");
     char *out = get_char(kv, "/data/out");
@@ -189,8 +197,8 @@ static void test_delegate_ok(kvlangKv_t *kv) {
 static void test_write_target(kvlangKv_t *kv) {
     register_backend(kv, "wb", "w.echo", "ready");
     kvlangRwirInst_t inst = make_inst("w.echo", "/lib/evil");
-    kvlangVthreadSet(kv, "1", "/vthread/1/[1,0]", "running");
-    int rc = kvlangDispatchDelegate(kv, "1", "/vthread/1/[1,0]", &inst);
+    kvlangVthreadSet(kv, "1", "/vthread/1/[1]/[1,0]", "running");
+    int rc = kvlangDispatchDelegate(kv, "1", "/vthread/1/[1]/[1,0]", &inst);
     expect(rc == KVLANG_DELEGATE_ERR, "write-target fails");
     char *pc = NULL, *st = NULL;
     kvlangVthreadGet(kv, "1", &pc, &st);
@@ -209,8 +217,8 @@ static void test_done_without_output(kvlangKv_t *kv) {
     pthread_t th;
     pthread_create(&th, NULL, executor, &a);
     kvlangRwirInst_t inst = make_inst("n.echo", "/data/nout");
-    kvlangVthreadSet(kv, "1", "/vthread/1/[1,0]", "running");
-    int rc = kvlangDispatchDelegate(kv, "1", "/vthread/1/[1,0]", &inst);
+    kvlangVthreadSet(kv, "1", "/vthread/1/[1]/[1,0]", "running");
+    int rc = kvlangDispatchDelegate(kv, "1", "/vthread/1/[1]/[1,0]", &inst);
     pthread_join(th, NULL);
     expect(rc == KVLANG_DELEGATE_ERR, "empty output is failure");
     kvlangRwirInstFree(&inst);
@@ -221,8 +229,8 @@ static void test_timeout(kvlangKv_t *kv) {
     register_backend(kv, "tb", "t.echo", "ready");
     kvlangDispatchSetDefaultTimeoutNs(40000000LL);
     kvlangRwirInst_t inst = make_inst("t.echo", "/data/tout");
-    kvlangVthreadSet(kv, "1", "/vthread/1/[1,0]", "running");
-    int rc = kvlangDispatchDelegate(kv, "1", "/vthread/1/[1,0]", &inst);
+    kvlangVthreadSet(kv, "1", "/vthread/1/[1]/[1,0]", "running");
+    int rc = kvlangDispatchDelegate(kv, "1", "/vthread/1/[1]/[1,0]", &inst);
     kvlangDispatchSetDefaultTimeoutNs(30LL * 1000000000LL);
     expect(rc == KVLANG_DELEGATE_ERR, "timeout");
     kvlangRwirInstFree(&inst);
@@ -247,8 +255,8 @@ static void test_one_definition(kvlangKv_t *kv) {
     kvlangKvSet(kv, &p, 1, err, sizeof err);
     kvlangXvalueFree(&v);
     kvlangRwirInst_t inst = make_inst("dup.op", "/data/dup");
-    kvlangVthreadSet(kv, "1", "/vthread/1/[1,0]", "running");
-    int rc = kvlangDispatchDelegate(kv, "1", "/vthread/1/[1,0]", &inst);
+    kvlangVthreadSet(kv, "1", "/vthread/1/[1]/[1,0]", "running");
+    int rc = kvlangDispatchDelegate(kv, "1", "/vthread/1/[1]/[1,0]", &inst);
     expect(rc == KVLANG_DELEGATE_ERR, "rwfunc + backend conflict");
     char *msg = error_msg(kv, "1");
     expect(msg && strstr(msg, "one opcode, one definition"), "conflict names both definitions");
@@ -276,8 +284,8 @@ static void test_output_without_done(kvlangKv_t *kv) {
     pthread_create(&th, NULL, executor_out_only, &a);
     kvlangDispatchSetDefaultTimeoutNs(80000000LL);
     kvlangRwirInst_t inst = make_inst("od.echo", "/data/odout");
-    kvlangVthreadSet(kv, "1", "/vthread/1/[1,0]", "running");
-    int rc = kvlangDispatchDelegate(kv, "1", "/vthread/1/[1,0]", &inst);
+    kvlangVthreadSet(kv, "1", "/vthread/1/[1]/[1,0]", "running");
+    int rc = kvlangDispatchDelegate(kv, "1", "/vthread/1/[1]/[1,0]", &inst);
     pthread_join(th, NULL);
     kvlangDispatchSetDefaultTimeoutNs(30LL * 1000000000LL);
     expect(rc == KVLANG_DELEGATE_ERR, "output without done is failure");

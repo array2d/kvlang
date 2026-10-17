@@ -16,7 +16,7 @@ fn known_kind(k: &str) -> bool {
         k,
         "bool" | "int8" | "int16" | "int32" | "int64" | "uint8" | "uint16" | "uint32" | "uint64"
             | "float32" | "float64" | "char/utf32" | "char/utf8" | "char/ascii" | "objindex"
-            | "strkeymapindex" | "index" | "extindex" | "rwir" | "rwfunc" | "scope" | "time"
+            | "strkeymapindex" | "index" | "extindex" | "rwir" | "rwfunc" | "time"
             | "duration"
     )
 }

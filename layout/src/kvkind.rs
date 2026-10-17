@@ -1,9 +1,3 @@
-//! kvlang 自有 kind（rwir/rwfunc/scope）+ XValue TLV 字节访问器。
-//!
-//! 标准 kind（char/utf8、int64、bool、index…）由 kvspace-durable 编解码；
-//! rwir/rwfunc/scope 是 kvlang 自己的 kind，body 格式由本模块定义，
-//! head 复用 kvspace-durable 暴露的 TLV head（见 [`super::ffi`]）。
-
 use super::ffi;
 
 // ── kind 常量 ─────────────────────────────────────────────────────────
@@ -25,7 +19,6 @@ pub const KIND_RWFUNC: &str = "rwfunc";
 pub const KIND_DEF_RWIR: &str = "defrwir";
 pub const KIND_DEF_RWFUNC: &str = "defrwfunc";
 pub const KIND_RWIR_OR_RWFUNC: &str = "rwir|rwfunc";
-pub const KIND_SCOPE: &str = "scope";
 
 // ── 通用 XValue 字节访问器 ───────────────────────────────────────────
 

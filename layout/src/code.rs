@@ -1,17 +1,6 @@
-//! layoutcode（对齐 layout/layout.go 的编译期部分）：把 AST 写到 /lib/ 下的结构化 KV。
-//!
-//! 存储约定：
-//!   /lib/<pkg>.<name>/[0,0]         编译后签名（kind=rwfunc）
-//!   /lib/<pkg>.<name>/<param>       命名参数→slot 指针（kind=char, isptr=1）
-//!   /lib/<pkg>.<name>/[i,j]         编译后指令（kind=rwir），i 从 1 开始
-//!   /lib/<pkg>.<name>/<label>/      基本块子路径（scope 指令）
-//!   /lib/<pkg>.<name>.src           源码副本
-
-use std::collections::HashMap;
-
-use super::ast::{Func, RwirDecl, Stmt};
+use super::ast::{Func, Instruction, RwirDecl, Stmt};
 use super::ffi::Kv;
-use super::{builtin, ffi, keytree, kvkind, lower, parser};
+use super::{builtin, ffi, flatten, keytree, kvkind, lower, parser};
 
 /// 创建基础目录 /lib/ 与 /vthread/（layout 前必须存在）。
 pub fn init_dirs(kv: &mut Kv) -> Result<(), String> {
@@ -100,9 +89,8 @@ pub fn vet(src: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// 写函数到 /lib/：签名（rwfunc）、源码、参数 Ptr、指令体。
 pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) -> Result<(), String> {
-    let mut type_map = lower::infer_types(fn_);
+    let type_map = lower::infer_types(fn_);
     lower::specialize(fn_, &type_map);
     let func_dir = keytree::lib_func(pkg, &fn_.sig.name);
     let opcode = if pkg.is_empty() {
@@ -117,19 +105,20 @@ pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) -> Result<(), String> 
         ));
     }
 
-    // 按函数覆盖（文件夹复制式合并）：只 del_tree 本函数子树，不动 /lib 下其它函数。
-    // 禁止整库删除——layoutcode 必须可增量：多次 layout 各自覆盖其函数，不误删先前的函数。
     let _ = kv.del_tree(&func_dir);
     let _ = kv.mkindex(&format!("{func_dir}/"));
+
+    let (mut insts, labels) = flatten::flatten_linear(&fn_.body);
+    flatten::rewrite_jumps(&mut insts, &labels);
 
     let nr = fn_.sig.num_reads();
     let nw = fn_.sig.num_writes();
     let param_types: Vec<String> = fn_.sig.kindexp_list();
 
-    let mut pairs: Vec<(String, Vec<u8>)> = Vec::new();
+    let mut pairs: Vec<(String, Vec<u8>)> = Vec::with_capacity(2 + fn_.sig.params.len() + fn_.sig.returns.len() + labels.len() + insts.len() * 3);
     pairs.push((
         format!("{func_dir}/[0,0]"),
-        kvkind::new_rwfunc(count_direct_insts(&fn_.body), nr, nw, &param_types),
+        kvkind::new_rwfunc(insts.len() as i32, nr, nw, &param_types),
     ));
     pairs.push((
         keytree::lib_src(pkg, &fn_.sig.name),
@@ -143,13 +132,19 @@ pub fn write_func(kv: &mut Kv, pkg: &str, fn_: &mut Func) -> Result<(), String> 
         let slot = format!("[0,{}]", i + 1);
         pairs.push((format!("{func_dir}/{}", r.name), ffi::new_ptr(kvkind::KIND_CHAR, &slot, 1)));
     }
-    let _ = kv.set(&pairs);
-
-    write_body(kv, pkg, &fn_.sig.name, &fn_.body, &mut type_map, 1);
-    Ok(())
+    if !labels.is_empty() {
+        kv.mkindex(&keytree::labels_dir(&func_dir))?;
+        for (name, n) in &labels {
+            pairs.push((
+                keytree::label_key(&func_dir, name),
+                ffi::new_char_byte(format!("[{n},0]").as_bytes()),
+            ));
+        }
+    }
+    append_inst_pairs(&func_dir, &insts, &mut pairs);
+    kv.set(&pairs)
 }
 
-/// 写用户声明的 rwir（无体）到 /lib/<opcode>。
 pub fn write_rwir_decl(kv: &mut Kv, decl: &RwirDecl) -> Result<(), String> {
     let mut opcode = decl.sig.name.clone();
     if !decl.pkg.is_empty() {
@@ -165,111 +160,24 @@ pub fn write_rwir_decl(kv: &mut Kv, decl: &RwirDecl) -> Result<(), String> {
     kv.set(&[(keytree::rwir(&opcode), v)])
 }
 
-/// 将 body 写入 /lib/<pkg>/<name>/ 下。offset 起始 idx（顶层函数=1）。
-fn write_body(kv: &mut Kv, pkg: &str, name: &str, body: &[Stmt], type_map: &mut HashMap<String, String>, offset: i32) {
-    let prefix = keytree::lib_func(pkg, name);
-    let mut idx = offset;
-    for st in body {
-        write_stmt(kv, st, &prefix, &mut idx, type_map, pkg);
-    }
-}
-
-fn write_stmt(
-    kv: &mut Kv,
-    st: &Stmt,
-    prefix: &str,
-    idx: &mut i32,
-    type_map: &mut HashMap<String, String>,
-    pkg: &str,
-) {
-    match st {
-        Stmt::Instruction(s) => {
-            let n = *idx;
-            for (j, w) in s.writes.iter().enumerate() {
-                if j < s.write_types.len() && !s.write_types[j].is_empty() {
-                    type_map.insert(w.clone(), s.write_types[j].clone());
-                }
-            }
-            let (opcode, reads) = s.flat();
-            let target_char = if s.writes.len() == 1 && !s.write_types.is_empty() && kvkind::is_char_kind(&s.write_types[0]) {
-                s.write_types[0].as_str()
-            } else {
-                ""
-            };
-
-            let mut pairs: Vec<(String, Vec<u8>)> = Vec::with_capacity(1 + reads.len() + s.writes.len());
-            if !opcode.is_empty() {
-                pairs.push((format!("{prefix}/[{n},0]"), opcode_value(&opcode)));
-            }
-            for (j, r) in reads.iter().enumerate() {
-                pairs.push((format!("{prefix}/[{n},-{}]", j + 1), slot_value(r, target_char)));
-            }
-            for (j, w) in s.writes.iter().enumerate() {
-                pairs.push((format!("{prefix}/[{n},{}]", j + 1), slot_value(w, "")));
-            }
-            if !pairs.is_empty() {
-                let _ = kv.set(&pairs);
-            }
-            *idx = n + 1;
+fn append_inst_pairs(prefix: &str, insts: &[Instruction], pairs: &mut Vec<(String, Vec<u8>)>) {
+    for (i, s) in insts.iter().enumerate() {
+        let n = (i as i32) + 1;
+        let (opcode, reads) = s.flat();
+        let target_char = if s.writes.len() == 1 && !s.write_types.is_empty() && kvkind::is_char_kind(&s.write_types[0]) {
+            s.write_types[0].as_str()
+        } else {
+            ""
+        };
+        if !opcode.is_empty() {
+            pairs.push((format!("{prefix}/[{n},0]"), opcode_value(&opcode)));
         }
-        Stmt::Scope(s) => {
-            let scope_prefix = format!("{prefix}/{}", s.label);
-            let mut scope_idx = 0;
-            for child in &s.body {
-                write_stmt_scope(kv, child, &scope_prefix, &mut scope_idx, type_map, pkg, prefix);
-            }
+        for (j, r) in reads.iter().enumerate() {
+            pairs.push((format!("{prefix}/[{n},-{}]", j + 1), slot_value(r, target_char)));
         }
-        _ => {}
-    }
-}
-
-fn write_stmt_scope(
-    kv: &mut Kv,
-    st: &Stmt,
-    scope_prefix: &str,
-    idx: &mut i32,
-    type_map: &mut HashMap<String, String>,
-    pkg: &str,
-    func_prefix: &str,
-) {
-    match st {
-        Stmt::Instruction(s) => {
-            let n = *idx;
-            for (j, w) in s.writes.iter().enumerate() {
-                if j < s.write_types.len() && !s.write_types[j].is_empty() {
-                    type_map.insert(w.clone(), s.write_types[j].clone());
-                }
-            }
-            let (opcode, reads) = s.flat();
-            let target_char = if s.writes.len() == 1 && !s.write_types.is_empty() && kvkind::is_char_kind(&s.write_types[0]) {
-                s.write_types[0].as_str()
-            } else {
-                ""
-            };
-
-            let mut pairs: Vec<(String, Vec<u8>)> = Vec::with_capacity(1 + reads.len() + s.writes.len());
-            if !opcode.is_empty() {
-                pairs.push((format!("{scope_prefix}[{n},0]"), opcode_value(&opcode)));
-            }
-            for (j, r) in reads.iter().enumerate() {
-                pairs.push((format!("{scope_prefix}[{n},-{}]", j + 1), slot_value(r, target_char)));
-            }
-            for (j, w) in s.writes.iter().enumerate() {
-                pairs.push((format!("{scope_prefix}[{n},{}]", j + 1), slot_value(w, "")));
-            }
-            if !pairs.is_empty() {
-                let _ = kv.set(&pairs);
-            }
-            *idx = n + 1;
+        for (j, w) in s.writes.iter().enumerate() {
+            pairs.push((format!("{prefix}/[{n},{}]", j + 1), slot_value(w, "")));
         }
-        Stmt::Scope(s) => {
-            let child_prefix = format!("{func_prefix}/{}", s.label);
-            let mut child_idx = 0;
-            for child in &s.body {
-                write_stmt_scope(kv, child, &child_prefix, &mut child_idx, type_map, pkg, func_prefix);
-            }
-        }
-        _ => {}
     }
 }
 
@@ -307,10 +215,6 @@ fn slot_value(val: &str, target_char: &str) -> Vec<u8> {
         return builtin::try_parse_number(val).unwrap_or_else(|| ffi::new_int64(0));
     }
     kvkind::new_rwir(0, 0, val)
-}
-
-fn count_direct_insts(body: &[Stmt]) -> i32 {
-    body.iter().filter(|st| matches!(st, Stmt::Instruction(_))).count() as i32
 }
 
 fn is_literal(s: &str) -> bool {

@@ -24,7 +24,7 @@ runtime:
 	cmake -S runtime -B build/runtime -DCMAKE_BUILD_TYPE=Release
 	cmake --build build/runtime --target kvlang_runtime \
 		kvlang_delegate_test kvlang_notify_test kvlang_incr_test \
-		kvlang_expire_test kvlang_watchany_test -j
+		kvlang_expire_test kvlang_watchany_test kvlang_keytree_pc_test -j
 
 test-rwir:
 	./$(BIN)/kvlang_delegate_test
@@ -32,6 +32,8 @@ test-rwir:
 	./$(BIN)/kvlang_incr_test
 	./$(BIN)/kvlang_expire_test
 	./$(BIN)/kvlang_watchany_test
+	./$(BIN)/kvlang_keytree_pc_test
+	cargo test --manifest-path layout/Cargo.toml --lib flatten:: -- --nocapture
 	cargo test --manifest-path layout/Cargo.toml --test pipeline_test refuse_rwir_and_rwfunc -- --nocapture
 
 term:

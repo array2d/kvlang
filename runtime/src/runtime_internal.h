@@ -79,7 +79,46 @@ typedef struct { uint8_t *data; uint32_t len; } kvlangXvalue_t;
 
 typedef struct { char *key; kvlangXvalue_t val; } kvlangKvPair_t;
 
-typedef struct { void *h; } kvlangKv_t;
+typedef struct { char *name; kvlangXvalue_t val; } kvlangParam_t;
+
+typedef struct {
+    char *opcode;
+    kvlangParam_t *reads; int nr;
+    kvlangParam_t *writes; int nw;
+} kvlangRwirInst_t;
+
+typedef struct {
+    char **keys;
+    int nr, nw;
+    bool valid;
+} kvlangInstKeys_t;
+
+typedef struct {
+    char *func_dir;
+    kvlangInstKeys_t *insts;
+    int inst_cap;
+} kvlangLibFunc_t;
+
+typedef struct {
+    char *name;
+    char *resolved_key;
+} kvlangVarKey_t;
+
+typedef struct {
+    char *frame_stk;
+    char *func_dir;
+    kvlangLibFunc_t *func;
+    kvlangVarKey_t *vars;
+    int nvars, vars_cap;
+} kvlangFrameMap_t;
+
+typedef struct {
+    void *h;
+    kvlangLibFunc_t *funcs;
+    int nfuncs, funcs_cap;
+    kvlangFrameMap_t *frames;
+    int nframes, frames_cap;
+} kvlangKv_t;
 
 /* growable string buffer */
 typedef struct { char *p; size_t len, cap; } kvlangStrbuf_t;
@@ -185,17 +224,17 @@ int kvlangKvWatchAny(kvlangKv_t *k, const char *const *keys, int n, uint64_t tim
 
 static inline void kvlangStrbufClear(kvlangStrbuf_t *b) { b->len = 0; if (b->p) b->p[0] = 0; }
 
-const char *kvlangKeytreeVtidFromPc(const char *pc, kvlangStrbuf_t *out);   /* "" 无效 */
-char *kvlangKeytreeStack(const char *root);                            /* malloc */
-char *kvlangKeytreeFrameRoot(const char *pc);                         /* malloc，无效 NULL */
-char *kvlangKeytreeEntryPc(const char *root);                         /* malloc */
-char *kvlangKeytreeScopeEntryPc(const char *root);                   /* malloc */
-char *kvlangKeytreeParentFrame(const char *root);                     /* malloc，"" 顶层 */
-char *kvlangKeytreeMember(const char *base, const char *name);         /* malloc */
-char *kvlangKeytreeLibFunc(const char *pkg, const char *name);        /* malloc */
-char *kvlangKeytreeRwir(const char *opcode);                           /* malloc */
+const char *kvlangKeytreeVtidFromPc(const char *pc, kvlangStrbuf_t *out);
+char *kvlangKeytreeStack(const char *root);
+char *kvlangKeytreeFrameRoot(const char *pc);
+char *kvlangKeytreeEntryPc(const char *root);
+void kvlangKeytreeParsePc(const char *pc, kvlangStrbuf_t *vtid, int *d, int *irseq, int *params);
+int kvlangKeytreeFrameDepth(const char *frame_or_pc);
+char *kvlangKeytreeFrameAt(const char *vtid, int d);
+char *kvlangKeytreeMember(const char *base, const char *name);
+char *kvlangKeytreeLibFunc(const char *pkg, const char *name);
+char *kvlangKeytreeRwir(const char *opcode);
 void kvlangKeytreeVthread(const char *vtid, kvlangStrbuf_t *out);
-void kvlangKeytreeVthreadSlot(const char *vtid, const char *frame, int i, int j, kvlangStrbuf_t *out);
 void kvlangKeytreeVthreadPc(const char *vtid, kvlangStrbuf_t *out);
 void kvlangKeytreeVthreadStatus(const char *vtid, kvlangStrbuf_t *out);
 void kvlangKeytreeVthreadStatusMsg(const char *vtid, const char *status, kvlangStrbuf_t *out);
@@ -203,7 +242,6 @@ void kvlangKeytreeVthreadDebugger(const char *vtid, kvlangStrbuf_t *out);
 void kvlangKeytreeFrameCallpc(const char *root, kvlangStrbuf_t *out);
 void kvlangKeytreeFrameReturnpc(const char *root, kvlangStrbuf_t *out);
 void kvlangKeytreeFrameRo(const char *root, kvlangStrbuf_t *out);
-bool kvlangKeytreeIsEntryPc(const char *pc);
 
 char *kvlangKeytreeCanonOp(const char *opcode);
 bool kvlangKeytreeValidSegment(const char *s);
@@ -234,21 +272,17 @@ static inline bool op_is_control(const char *op) {
            strcmp(op, OP_BR) == 0 || strcmp(op, OP_GOTO) == 0;
 }
 
-typedef struct { char *name; kvlangXvalue_t val; } kvlangParam_t;
-
-typedef struct {
-    char *opcode;
-    kvlangParam_t *reads; int nr;
-    kvlangParam_t *writes; int nw;
-} kvlangRwirInst_t;
-
 int kvlangRwirNextPc(const char *pc, kvlangStrbuf_t *out);
 int kvlangRwirExtractAddr0(const char *coord);
 int kvlangRwirDecode(kvlangKv_t *kv, const char *link_base, const char *pc, kvlangRwirInst_t *out, char *err, uint32_t err_cap);
 void kvlangRwirInstFree(kvlangRwirInst_t *inst);
-/* 外部扩展 handoff：写 /lib/<opcode>/.todo<vid> 并阻塞 watch .done<vid>（30s 超时）。 */
+kvlangFrameMap_t *kvlangFrameLookup(kvlangKv_t *kv, const char *frame_stk);
+const char *kvlangFrameVarKeyLookup(kvlangFrameMap_t *fm, const char *name);
+const char *kvlangFrameVarKeyPut(kvlangFrameMap_t *fm, const char *name, char *resolved_key);
+kvlangLibFunc_t *kvlangLibGetFunc(kvlangKv_t *kv, const char *func_dir);
+void kvlangCacheClearFuncs(kvlangKv_t *kv);
+void kvlangCacheClearFrames(kvlangKv_t *kv);
 int handoff_external_rwir(kvlangKv_t *kv, const char *vtid, const char *pc, kvlangRwirInst_t *inst);
-/* opcode 是否外部扩展 rwir（/lib/<opcode> kind=rwir）。 */
 bool is_ext_rwir(kvlangKv_t *kv, const char *opcode);
 
 /* ── vthread ───────────────────────────────────────────────────────── */

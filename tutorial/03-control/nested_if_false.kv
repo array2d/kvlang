@@ -1,0 +1,13 @@
+# 期望输出:
+#   hit = 0
+rwfunc main() -> () {
+	0 -> hit
+	if (false) {
+		if (true) {
+			1 -> hit
+		}
+	}
+	println("hit =", hit)
+}
+
+main()

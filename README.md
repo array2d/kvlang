@@ -21,12 +21,12 @@
 
 ## Core Model in One Screen
 
-**No IR layers — source IS the IR.** The program counter is a kvspace path string; call-stack depth equals path depth:
+**No IR layers — source IS the IR.** The program counter is a kvspace path string; the frame number in the path is the call-stack depth:
 
 ```
-PC    = "/vthread/tid/[0,0]/[0,0]/[1,0]"   the program counter is a KV path
-fetch = kv.Get(PC)                           instruction fetch is one KV read
-call  = create subtree; return = clean it    crash? restart and resume from PC
+PC    = "/vthread/tid/[2]/[5,0]"   the program counter is a KV path (depth=2)
+fetch = kv.Get(PC)                   instruction fetch is one KV read
+call  = create /vthread/tid/[3]/     crash? restart and resume from PC
 ```
 
 Every instruction occupies a 2-D coordinate `[s0, s1]`: `[s0,0]` is always the opcode, `[s0,-j]` read params, `[s0,+j]` write params.

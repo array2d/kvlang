@@ -19,15 +19,13 @@ pub const SEG_STATUS: &str = "status";
 pub const SEG_CTIME: &str = "ctime";
 pub const SEG_DEBUGGER: &str = "debugger";
 
-pub const SEG_LIB: &str = "\u{2025}lib"; // 帧 extindex 标记
-pub const SCOPE_SEP: &str = "/\u{2025}"; // scope 帧路径前缀
-pub const SRC_EXT: &str = ".src"; // 函数源码文件后缀
+pub const SEG_LIB: &str = "\u{2025}lib";
+pub const SEG_LABELS: &str = "labels";
+pub const SRC_EXT: &str = ".src";
 
 pub const LIB_ROOT: &str = "/lib";
 pub const RWIR_ROOT: &str = "/lib";
 pub const VTHREAD_ROOT: &str = "/vthread";
-
-// ── /lib ─────────────────────────────────────────────────────────────
 
 pub fn lib_func(pkg: &str, name: &str) -> String {
     if pkg.is_empty() {
@@ -49,8 +47,6 @@ pub fn rwir(opcode: &str) -> String {
     format!("{RWIR_ROOT}/{opcode}")
 }
 
-// ── 帧路径 ───────────────────────────────────────────────────────────
-
 fn frame_member(root: &str, seg: &str) -> String {
     format!("{}{}{}", stack(root), RUNTIME_MEMBER_SEP, seg)
 }
@@ -71,34 +67,15 @@ pub fn return_pc(root: &str) -> String {
     frame_member(root, SEG_RETURNPC)
 }
 
-/// 父帧根（label 帧返回上级目录）。
-pub fn parent_frame(frame_root: &str) -> String {
-    let trimmed = frame_root.trim_end_matches(PATH_SEG_SEP);
-    match trimmed.rfind(PATH_SEG_SEP) {
-        None => String::new(),
-        Some(i) => format!("{}/", &trimmed[..i]),
-    }
+pub fn labels_dir(func_dir: &str) -> String {
+    format!("{}/{RUNTIME_MEMBER_SEP}{SEG_LABELS}/", func_dir.trim_end_matches(PATH_SEG_SEP))
 }
 
-/// 从 PC 提取帧根（pc 形如 /vthread/42/[3,0]）。
-pub fn frame_root(pc: &str) -> &str {
-    if let Some(idx) = pc.rfind("/[") {
-        &pc[..idx]
-    } else {
-        panic!("frame_root: pc has no /[coord] segment: {pc:?}")
-    }
-}
-
-pub fn entry_pc(root: &str) -> String {
-    format!("{}/[1,0]", root.trim_end_matches(PATH_SEG_SEP))
-}
-
-pub fn is_entry_pc(pc: &str) -> bool {
-    pc.ends_with("/[1,0]")
-}
-
-pub fn scope_entry_pc(root: &str) -> String {
-    format!("{}/[0,0]", root.trim_end_matches(PATH_SEG_SEP))
+pub fn label_key(func_dir: &str, name: &str) -> String {
+    format!(
+        "{}/{RUNTIME_MEMBER_SEP}{SEG_LABELS}/{name}",
+        func_dir.trim_end_matches(PATH_SEG_SEP)
+    )
 }
 
 // ── 成员 ─────────────────────────────────────────────────────────────

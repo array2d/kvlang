@@ -572,9 +572,22 @@ impl Parser {
             if t.kind == Kind::RBrace || t.kind == Kind::EOF {
                 break;
             }
+            let prev_pos = self.pos;
             if let Some(st) = self.parse_stmt() {
                 let st = attach_comments(st, comments);
                 stmts.push(st);
+            } else if self.pos == prev_pos {
+                let t = self.peek();
+                self.errors.push(Diagnostic {
+                    pos: t.pos,
+                    message: format!("unexpected token {} {:?}", t.kind, t.value),
+                    warn: false,
+                    info: false,
+                    source: String::new(),
+                    src_file: String::new(),
+                    src_name: String::new(),
+                });
+                self.advance();
             }
         }
         stmts
@@ -876,6 +889,8 @@ impl Parser {
                         }
                         if let Some(idx) = self.parse_pratt(0) {
                             idxs.push(idx);
+                        } else {
+                            break;
                         }
                     }
                     self.expect(Kind::RBrack);
@@ -897,6 +912,8 @@ impl Parser {
                     }
                     if let Some(idx) = self.parse_pratt(0) {
                         indices.push(idx);
+                    } else {
+                        break;
                     }
                 }
                 self.expect(Kind::RBrack);
@@ -967,6 +984,8 @@ impl Parser {
                 }
                 if let Some(e) = self.parse_pratt(0) {
                     elems.push(e);
+                } else {
+                    break;
                 }
             }
             self.expect(Kind::RBrack);
@@ -1097,6 +1116,8 @@ impl Parser {
                 }
                 if let Some(a) = self.parse_pratt(0) {
                     args.push(a);
+                } else {
+                    break;
                 }
             }
             self.expect(Kind::RParen);
@@ -1132,6 +1153,8 @@ impl Parser {
                 }
                 if let Some(a) = self.parse_pratt(0) {
                     args.push(a);
+                } else {
+                    break;
                 }
             }
             self.expect(Kind::RParen);
@@ -1155,6 +1178,8 @@ impl Parser {
                 }
                 if let Some(a) = self.parse_pratt(0) {
                     args.push(a);
+                } else {
+                    break;
                 }
             }
             self.expect(Kind::RParen);
@@ -1246,7 +1271,8 @@ impl Parser {
             }
             let is_path_literal = t.kind == Kind::Literal && !t.value.is_empty() && t.value.as_bytes()[0] == b'/';
             let is_ident = t.kind == Kind::Ident;
-            let is_call_start = is_ident && self.peek_at(1).kind == Kind::LParen;
+            let is_dotted_call = is_ident && self.peek_at(1).kind == Kind::Dot && self.peek_at(2).kind == Kind::Ident && self.peek_at(3).kind == Kind::LParen;
+            let is_call_start = (is_ident && self.peek_at(1).kind == Kind::LParen) || is_dotted_call;
             let is_invalid_literal = t.kind == Kind::Literal && !is_path_literal;
 
             if is_call_start {

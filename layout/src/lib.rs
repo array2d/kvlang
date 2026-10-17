@@ -13,6 +13,7 @@ pub mod parser;
 pub mod builtin;
 pub mod kindexpr;
 pub mod lower;
+pub mod flatten;
 pub mod code;
 pub mod capi;
 

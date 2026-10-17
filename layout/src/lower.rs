@@ -74,13 +74,35 @@ fn lower_body(stmts: &[Stmt], lg: &mut LabelGen, lc: Option<&LoopCtx>, tm: &Hash
             }
             Stmt::Scope(s) => {
                 let mut s = s.clone();
-                s.body = lower_body(&s.body, lg, lc, tm);
+                let next_is_scope = matches!(stmts.get(i + 1), Some(Stmt::Scope(_)));
+                let cont = lower_body(&stmts[i + 1..], lg, lc, tm);
                 if !preamble_ends_with_terminator(&preamble) {
                     preamble.push(goto_label(&s.label));
                 }
                 let mut out = preamble;
-                out.push(Stmt::Scope(s));
-                out.extend(lower_body(&stmts[i + 1..], lg, lc, tm));
+                if cont.is_empty() || next_is_scope {
+                    let body_ = lower_body(&s.body, lg, lc, tm);
+                    let (body_insts, body_blocks) = split_insts_and_blocks(body_);
+                    s.body = body_insts;
+                    out.push(Stmt::Scope(s));
+                    out.extend(body_blocks);
+                    out.extend(cont);
+                } else {
+                    let merge_label = lg.next("merge");
+                    let body_ = inject_goto(lower_body(&s.body, lg, lc, tm), &merge_label);
+                    let (body_insts, mut body_blocks) = split_insts_and_blocks(body_);
+                    inject_goto_blocks(&mut body_blocks, &merge_label);
+                    let (cont_insts, cont_blocks) = split_insts_and_blocks(cont);
+                    s.body = body_insts;
+                    out.push(Stmt::Scope(s));
+                    out.push(Stmt::Scope(ast::ScopeStmt {
+                        comments: Vec::new(),
+                        label: merge_label,
+                        body: cont_insts,
+                    }));
+                    out.extend(body_blocks);
+                    out.extend(cont_blocks);
+                }
                 return out;
             }
             Stmt::Break(_) => {
@@ -437,6 +459,7 @@ fn inject_goto(mut body: Vec<Stmt>, label: &str) -> Vec<Stmt> {
 
 fn is_terminator(s: &Instruction) -> bool {
     match &s.expr {
+        Some(e) if e.is_leaf() => e.val == "return",
         Some(e) => matches!(e.op.as_str(), "return" | "goto" | "br"),
         None => false,
     }

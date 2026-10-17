@@ -51,8 +51,16 @@ def _detect_entry(out: str) -> str:
 
 def collect_errors(rel: str) -> str:
     """layout（编译期诊断）+ run（运行时诊断），收集 stderr 合并。"""
-    # 用 kvspace clear 隔离各 case
-    subprocess.run(["kvspace", "clear"], capture_output=True, timeout=10)
+    if _C_DSN.startswith("shm://"):
+        try:
+            os.unlink(_C_DSN[len("shm://"):])
+        except FileNotFoundError:
+            pass
+    else:
+        try:
+            subprocess.run(["kvspace", "clear", "--kvspace", _C_DSN], capture_output=True, timeout=10)
+        except FileNotFoundError:
+            pass
     stderr = ""
     layout = subprocess.run([LAYOUT_BIN, rel, _C_DSN], capture_output=True,
                             text=True, timeout=60, cwd=str(ROOT))

@@ -161,6 +161,7 @@ impl Kv {
     pub fn conn(dsn: &str) -> Kv {
         let c = CString::new(dsn).expect("no NUL in dsn");
         let h = unsafe { kvspaceConnect(c.as_ptr()) };
+        assert!(!h.is_null(), "kvspaceConnect failed for dsn: {dsn}");
         Kv { h }
     }
 

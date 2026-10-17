@@ -20,6 +20,8 @@ kvlangKv_t *kvlangKvConnect(const char *dsn) {
 
 void kvlangKvDisconnect(kvlangKv_t *k) {
     if (!k) return;
+    kvlangCacheClearFrames(k);
+    kvlangCacheClearFuncs(k);
     if (k->h) kvspaceClose(k->h);
     free(k);
 }
@@ -58,11 +60,14 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
     const char **keys = malloc(sizeof(char *) * (size_t)n);
     uint32_t *lens = malloc(sizeof(uint32_t) * (size_t)n);
     size_t total = 0;
+    bool lib_mod = false;
     for (int i = 0; i < n; i++) {
         keys[i] = pairs[i].key;
         lens[i] = pairs[i].val.len;
         total += pairs[i].val.len;
+        if (!lib_mod && strncmp(pairs[i].key, "/lib/", 5) == 0) lib_mod = true;
     }
+    if (lib_mod) kvlangCacheClearFuncs(k);
     uint8_t *vals = malloc(total ? total : 1);
     size_t off = 0;
     for (int i = 0; i < n; i++) {
@@ -75,11 +80,13 @@ int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, ui
 }
 
 int kvlangKvDel(kvlangKv_t *k, const char *key, char *err, uint32_t err_cap) {
+    if (strncmp(key, "/lib/", 5) == 0) kvlangCacheClearFuncs(k);
     const char *keys[1] = { key };
     return kvspaceDel(k->h, keys, 1, err, err_cap);
 }
 
 int kvlangKvDelTree(kvlangKv_t *k, const char *prefix, char *err, uint32_t err_cap) {
+    if (strncmp(prefix, "/lib", 4) == 0) kvlangCacheClearFuncs(k);
     return kvspaceDelTree(k->h, prefix, err, err_cap);
 }
 
@@ -88,10 +95,45 @@ int kvlangKvMkindex(kvlangKv_t *k, const char *path, char *err, uint32_t err_cap
 }
 
 int kvlangKvExtIndex(kvlangKv_t *k, const char *path, const char *ext, char *err, uint32_t err_cap) {
-    return kvspaceMkindexExt(k->h, path, ext, err, err_cap);
+    int rc = kvspaceMkindexExt(k->h, path, ext, err, err_cap);
+    if (rc == 0 && strncmp(ext, "/lib/", 5) == 0) {
+        kvlangFrameMap_t *fm = kvlangFrameLookup(k, path);
+        if (!fm) {
+            if (k->nframes == k->frames_cap) {
+                k->frames_cap = k->frames_cap ? k->frames_cap * 2 : 16;
+                k->frames = realloc(k->frames, sizeof(kvlangFrameMap_t) * (size_t)k->frames_cap);
+            }
+            fm = &k->frames[k->nframes++];
+            memset(fm, 0, sizeof(*fm));
+            fm->frame_stk = strdup(path);
+        } else {
+            free(fm->func_dir);
+            for (int i = 0; i < fm->nvars; i++) {
+                free(fm->vars[i].name);
+                free(fm->vars[i].resolved_key);
+            }
+            fm->nvars = 0;
+        }
+        fm->func_dir = strdup(ext);
+        fm->func = NULL;
+    }
+    return rc;
 }
 
 int kvlangKvDelExtIndex(kvlangKv_t *k, const char *path, char *err, uint32_t err_cap) {
+    for (int i = k->nframes - 1; i >= 0; i--) {
+        if (strcmp(k->frames[i].frame_stk, path) == 0) {
+            free(k->frames[i].frame_stk);
+            free(k->frames[i].func_dir);
+            for (int j = 0; j < k->frames[i].nvars; j++) {
+                free(k->frames[i].vars[j].name);
+                free(k->frames[i].vars[j].resolved_key);
+            }
+            free(k->frames[i].vars);
+            k->frames[i] = k->frames[--k->nframes];
+            break;
+        }
+    }
     return kvspaceRmindexExt(k->h, path, err, err_cap);
 }
 

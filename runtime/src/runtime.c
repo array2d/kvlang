@@ -47,25 +47,9 @@ int kvlangRuntimeExecuteVthread(kvlangRuntime_t *rt, const char *vid,
 }
 
 static char *alloc_vtid(kvlangKv_t *kv) {
-  kvlangStrbuf_t seq;
-  kvlangStrbufInit(&seq);
-  kvlangStrbufPuts(&seq, VTHREAD_ROOT "/" RUNTIME_MEMBER_SEP "seq");
-  kvlangXvalue_t v;
-  kvlangXvalueZero(&v);
-  kvlangKvGetOne(kv, seq.p, &v);
-  char *s = kvlangXvalueNone(&v) ? strdup("") : kvlangXvalueValueString(&v);
-  kvlangXvalueFree(&v);
-  int64_t n = atoll(s) + 1;
-  free(s);
+  int64_t n = kvlangVthreadNextSeq(kv, VTHREAD_ROOT "/" RUNTIME_MEMBER_SEP "seq");
   char buf[32];
   snprintf(buf, sizeof buf, "%lld", (long long)n);
-  kvlangXvalue_t nv;
-  kvlangXvalueNewCharUtf8(&nv, buf);
-  kvlangKvPair_t p = {seq.p, nv};
-  char err[256];
-  kvlangKvSet(kv, &p, 1, err, sizeof err);
-  kvlangXvalueFree(&nv);
-  kvlangStrbufFree(&seq);
   return strdup(buf);
 }
 

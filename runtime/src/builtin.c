@@ -15,7 +15,7 @@ int kvlangBuiltinArray(kvlangFrame_t *f), kvlangBuiltinNdarrayNumel(kvlangFrame_
     kvlangBuiltinTimeAdd(kvlangFrame_t *f), kvlangBuiltinDurFrom(kvlangFrame_t *f), kvlangBuiltinDurTo(kvlangFrame_t *f),
     kvlangBuiltinDurArith(kvlangFrame_t *f), kvlangBuiltinDurCmp(kvlangFrame_t *f), kvlangBuiltinTimeCmp(kvlangFrame_t *f),
     kvlangBuiltinRandUint64(kvlangFrame_t *f), kvlangBuiltinRandInt63(kvlangFrame_t *f), kvlangBuiltinRandIntn(kvlangFrame_t *f),
-    kvlangBuiltinKvGet(kvlangFrame_t *f), kvlangBuiltinKvSet(kvlangFrame_t *f), kvlangBuiltinKvDel(kvlangFrame_t *f),
+    kvlangBuiltinKvGet(kvlangFrame_t *f), kvlangBuiltinKvAt(kvlangFrame_t *f), kvlangBuiltinKvSet(kvlangFrame_t *f), kvlangBuiltinKvDel(kvlangFrame_t *f),
     kvlangBuiltinKvDelTree(kvlangFrame_t *f), kvlangBuiltinKvList(kvlangFrame_t *f), kvlangBuiltinKvListLen(kvlangFrame_t *f), kvlangBuiltinKvListN(kvlangFrame_t *f), kvlangBuiltinKvMkindex(kvlangFrame_t *f),
     kvlangBuiltinKvExtIndex(kvlangFrame_t *f), kvlangBuiltinKvRmIndexExt(kvlangFrame_t *f), kvlangBuiltinKvWatch(kvlangFrame_t *f),
     kvlangBuiltinDebugger(kvlangFrame_t *f);
@@ -85,22 +85,33 @@ static int cmp_int(const kvlangXvalue_t *a, const kvlangXvalue_t *b) {
 
 /* ── resolve ───────────────────────────────────────────────────────── */
 
-char *kvlangBuiltinFuncFrameRoot(kvlangKv_t *kv, const char *frame_root) {
-    char *cur = strdup(frame_root);
-    for (;;) {
-        kvlangStrbuf_t k; kvlangStrbufInit(&k);
-        char *stk = kvlangKeytreeStack(cur);
-        kvlangStrbufPuts(&k, stk); free(stk);
-        kvlangStrbufPuts(&k, SEG_LIB);
-        kvlangXvalue_t v; kvlangXvalueZero(&v);
-        kvlangKvGetOne(kv, k.p, &v);
-        bool found = !kvlangXvalueNone(&v);
-        kvlangXvalueFree(&v); kvlangStrbufFree(&k);
-        if (found) return cur;
-        char *parent = kvlangKeytreeParentFrame(cur);
-        if (parent[0] == 0) { free(parent); return cur; }
-        free(cur); cur = parent;
+static void frame_stack_buf(const char *frame_root, char *buf, size_t cap) {
+    size_t n = strlen(frame_root);
+    if (n + 2 > cap) {
+        fprintf(stderr, "frame path exceeds %zu: %s\n", cap, frame_root);
+        abort();
     }
+    memcpy(buf, frame_root, n);
+    buf[n] = '/';
+    buf[n + 1] = 0;
+}
+
+char *kvlangBuiltinFuncFrameRoot(kvlangKv_t *kv, const char *frame_root) {
+    char sbuf[256];
+    frame_stack_buf(frame_root, sbuf, sizeof(sbuf));
+    if (kvlangFrameLookup(kv, sbuf)) return strdup(frame_root);
+    kvlangStrbuf_t k; kvlangStrbufInit(&k);
+    kvlangStrbufPuts(&k, sbuf);
+    kvlangStrbufPuts(&k, SEG_LIB);
+    kvlangXvalue_t v; kvlangXvalueZero(&v);
+    kvlangKvGetOne(kv, k.p, &v);
+    bool found = !kvlangXvalueNone(&v);
+    kvlangXvalueFree(&v); kvlangStrbufFree(&k);
+    if (!found) {
+        fprintf(stderr, "FuncFrameRoot: %s has no ‥lib\n", frame_root);
+        abort();
+    }
+    return strdup(frame_root);
 }
 
 void kvlangBuiltinResolveReadValue(kvlangKv_t *kv, const char *frame_path, const char *name,
@@ -114,6 +125,44 @@ void kvlangBuiltinResolveReadValue(kvlangKv_t *kv, const char *frame_path, const
     }
     if (!name || !name[0]) return;
     if (name[0] == '/') { kvlangKvGetOne(kv, name, out); return; }
+    char sbuf[256];
+    frame_stack_buf(frame_path, sbuf, sizeof(sbuf));
+    kvlangFrameMap_t *fm = kvlangFrameLookup(kv, sbuf);
+    if (fm) {
+        const char *rk = kvlangFrameVarKeyLookup(fm, name);
+        if (rk) {
+            kvlangKvGetOne(kv, rk, out);
+            return;
+        }
+        kvlangStrbuf_t key; kvlangStrbufInit(&key);
+        kvlangStrbufPuts(&key, sbuf);
+        kvlangStrbufPuts(&key, name);
+        kvlangXvalue_t pv; kvlangXvalueZero(&pv);
+        kvlangKvGetOne(kv, key.p, &pv);
+        if (kvlangXvalueIsPtr(&pv)) {
+            char *target = kvlangXvaluePtrTarget(&pv);
+            kvlangStrbuf_t ak; kvlangStrbufInit(&ak);
+            kvlangStrbufPuts(&ak, sbuf);
+            kvlangStrbufPuts(&ak, target);
+            free(target);
+            kvlangXvalue_t av; kvlangXvalueZero(&av);
+            kvlangKvGetOne(kv, ak.p, &av);
+            if (!kvlangXvalueNone(&av)) {
+                char *path = kvlangXvalueValueString(&av);
+                kvlangKvGetOne(kv, path, out);
+                kvlangFrameVarKeyPut(fm, name, path);
+            }
+            kvlangXvalueFree(&av); kvlangStrbufFree(&ak);
+            kvlangXvalueFree(&pv); kvlangStrbufFree(&key);
+            return;
+        }
+        if (!kvlangXvalueNone(&pv)) {
+            *out = pv; pv.data = NULL; pv.len = 0;
+        }
+        kvlangFrameVarKeyPut(fm, name, kvlangStrbufDetach(&key));
+        kvlangXvalueFree(&pv);
+        return;
+    }
     char *rw = kvlangBuiltinFuncFrameRoot(kv, frame_path);
     kvlangStrbuf_t key; kvlangStrbufInit(&key);
     char *stk = kvlangKeytreeStack(rw);
@@ -142,7 +191,14 @@ void kvlangBuiltinResolveReadValue(kvlangKv_t *kv, const char *frame_path, const
 
 char *kvlangBuiltinResolveWriteSlot(kvlangKv_t *kv, const char *frame_path, const char *name) {
     if (name[0] == '/') return strdup(name);
-    char *rw = kvlangBuiltinFuncFrameRoot(kv, frame_path);
+    char sbuf[256];
+    frame_stack_buf(frame_path, sbuf, sizeof(sbuf));
+    kvlangFrameMap_t *fm = kvlangFrameLookup(kv, sbuf);
+    if (fm) {
+        const char *rk = kvlangFrameVarKeyLookup(fm, name);
+        if (rk) return strdup(rk);
+    }
+    char *rw = fm ? strdup(frame_path) : kvlangBuiltinFuncFrameRoot(kv, frame_path);
     kvlangStrbuf_t key; kvlangStrbufInit(&key);
     char *stk = kvlangKeytreeStack(rw);
     kvlangStrbufPuts(&key, stk); free(stk); kvlangStrbufPuts(&key, name);
@@ -164,7 +220,11 @@ char *kvlangBuiltinResolveWriteSlot(kvlangKv_t *kv, const char *frame_path, cons
                 char *p = kvlangXvalueValueString(&v);
                 kvlangXvalue_t next; kvlangXvalueZero(&next);
                 kvlangKvGetOne(kv, p, &next);
-                if (kvlangXvalueNone(&next) || !kvlangXvalueIsCharKind(kvlangXvalueKind(&next))) { result = p; break; }
+                if (kvlangXvalueNone(&next) || !kvlangXvalueIsCharKind(kvlangXvalueKind(&next))) {
+                    result = p;
+                    kvlangXvalueFree(&next);
+                    break;
+                }
                 free(p);
                 kvlangXvalueFree(&v); v = next;
             }
@@ -172,18 +232,20 @@ char *kvlangBuiltinResolveWriteSlot(kvlangKv_t *kv, const char *frame_path, cons
         }
         kvlangXvalueFree(&av); kvlangStrbufFree(&ak);
     }
-    kvlangXvalueFree(&pv); kvlangStrbufFree(&key); free(rw);
-    if (result) return result;
-    /* fallback: Stack(rw) + name */
-    char *rw2 = kvlangBuiltinFuncFrameRoot(kv, frame_path);
+    kvlangXvalueFree(&pv); kvlangStrbufFree(&key);
+    if (result) {
+        free(rw);
+        if (fm) kvlangFrameVarKeyPut(fm, name, strdup(result));
+        return result;
+    }
     kvlangStrbuf_t o; kvlangStrbufInit(&o);
-    char *stk3 = kvlangKeytreeStack(rw2);
+    char *stk3 = kvlangKeytreeStack(rw);
     kvlangStrbufPuts(&o, stk3); free(stk3); kvlangStrbufPuts(&o, name);
-    free(rw2);
-    return kvlangStrbufDetach(&o);
+    free(rw);
+    char *res = kvlangStrbufDetach(&o);
+    if (fm) kvlangFrameVarKeyPut(fm, name, strdup(res));
+    return res;
 }
-
-/* ── coerce / kvlangDisplay ─────────────────────────────────────────────── */
 
 static bool try_parse_int(const char *s, int64_t *out) {
     if (!s || !s[0]) return false;
@@ -246,18 +308,14 @@ void kvlangDisplay(const kvlangXvalue_t *v, char **out) {
     *out = kvlangXvalueValueString(v);
 }
 
-/* ── frame helper ─────────────────────────────────────────────────── */
-
 static int read_inputs(kvlangFrame_t *f, kvlangXvalue_t *out, int cap) {
     char *fr = kvlangKeytreeFrameRoot(f->pc);
-    char *ff = kvlangBuiltinFuncFrameRoot(f->kv, fr);
-    free(fr);
     int n = 0;
     for (int i = 0; i < f->inst->nr && n < cap; i++) {
-        kvlangBuiltinResolveReadValue(f->kv, ff, f->inst->reads[i].name, &f->inst->reads[i].val, &out[n]);
+        kvlangBuiltinResolveReadValue(f->kv, fr, f->inst->reads[i].name, &f->inst->reads[i].val, &out[n]);
         n++;
     }
-    free(ff);
+    free(fr);
     return n;
 }
 
@@ -298,7 +356,9 @@ static int set_err(kvlangFrame_t *f, const char *fmt, ...) {
 static int kvlangBuiltinAdd(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
     int rc;
-    if (n == 2 && kvlangXvalueIsCharKind(kvlangXvalueKind(&in[0])) && kvlangXvalueIsCharKind(kvlangXvalueKind(&in[1]))) {
+    if (n >= 2 && (kvlangXvalueNone(&in[0]) || kvlangXvalueNone(&in[1]))) {
+        rc = set_err(f, "TypeError: None in arithmetic");
+    } else if (n == 2 && kvlangXvalueIsCharKind(kvlangXvalueKind(&in[0])) && kvlangXvalueIsCharKind(kvlangXvalueKind(&in[1]))) {
         char *a = kvlangXvalueValueString(&in[0]), *b = kvlangXvalueValueString(&in[1]);
         kvlangStrbuf_t s; kvlangStrbufInit(&s); kvlangStrbufPuts(&s, a); kvlangStrbufPuts(&s, b);
         kvlangXvalue_t r; kvlangXvalueNewCharUtf32(&r, s.p);
@@ -320,9 +380,15 @@ static int kvlangBuiltinAdd(kvlangFrame_t *f) {
 static int kvlangBuiltinSub(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
     int rc;
-    if (n == 1) {
-        kvlangXvalue_t r; kvlangXvalueNewInt64(&r, -kvlangXvalueAsInt64(&in[0]));
-        rc = write_result(f, &r); kvlangXvalueFree(&r);
+    if ((n == 1 && kvlangXvalueNone(&in[0])) || (n >= 2 && (kvlangXvalueNone(&in[0]) || kvlangXvalueNone(&in[1])))) {
+        rc = set_err(f, "TypeError: None in arithmetic");
+    } else if (n == 1) {
+        if (is_unsigned_kind(kvlangXvalueKind(&in[0]))) {
+            rc = set_err(f, "TypeError: cannot negate unsigned %s", kvlangXvalueKind(&in[0]));
+        } else {
+            kvlangXvalue_t r; kvlangXvalueNewInt64(&r, -kvlangXvalueAsInt64(&in[0]));
+            rc = write_result(f, &r); kvlangXvalueFree(&r);
+        }
     } else if (n >= 2 && is_int_kind(kvlangXvalueKind(&in[0])) && is_int_kind(kvlangXvalueKind(&in[1]))) {
         kvlangXvalue_t r; narrow_int(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1]), kvlangXvalueAsInt64(&in[0]) - kvlangXvalueAsInt64(&in[1]), &r);
         rc = write_result(f, &r); kvlangXvalueFree(&r);
@@ -337,7 +403,9 @@ static int kvlangBuiltinSub(kvlangFrame_t *f) {
 static int kvlangBuiltinMul(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
     int rc;
-    if (n >= 2 && is_int_kind(kvlangXvalueKind(&in[0])) && is_int_kind(kvlangXvalueKind(&in[1]))) {
+    if (n >= 2 && (kvlangXvalueNone(&in[0]) || kvlangXvalueNone(&in[1]))) {
+        rc = set_err(f, "TypeError: None in arithmetic");
+    } else if (n >= 2 && is_int_kind(kvlangXvalueKind(&in[0])) && is_int_kind(kvlangXvalueKind(&in[1]))) {
         kvlangXvalue_t r; narrow_int(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1]), kvlangXvalueAsInt64(&in[0]) * kvlangXvalueAsInt64(&in[1]), &r);
         rc = write_result(f, &r); kvlangXvalueFree(&r);
     } else if (n >= 2 && is_numeric(&in[0]) && is_numeric(&in[1])) {
@@ -352,6 +420,7 @@ static int kvlangBuiltinDiv(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
     int rc;
     if (n < 2) { rc = set_err(f, "TypeError: binary op requires 2 inputs, got %d", n); free_inputs(in, n); return rc; }
+    if (kvlangXvalueNone(&in[0]) || kvlangXvalueNone(&in[1])) { rc = set_err(f, "TypeError: None in arithmetic"); free_inputs(in, n); return rc; }
     if (kvlangXvalueAsFloat64(&in[1]) == 0) { rc = set_err(f, "ZeroDivisionError: division by zero"); free_inputs(in, n); return rc; }
     if (is_int_kind(kvlangXvalueKind(&in[0])) && is_int_kind(kvlangXvalueKind(&in[1]))) {
         kvlangXvalue_t r; narrow_int(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1]), kvlangXvalueAsInt64(&in[0]) / kvlangXvalueAsInt64(&in[1]), &r);
@@ -367,6 +436,10 @@ static int kvlangBuiltinDiv(kvlangFrame_t *f) {
 static int kvlangBuiltinMod(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
     int rc;
+    if (n >= 2 && (kvlangXvalueNone(&in[0]) || kvlangXvalueNone(&in[1]))) {
+        rc = set_err(f, "TypeError: None in arithmetic");
+        free_inputs(in, n); return rc;
+    }
     if (n < 2 || !is_int_kind(kvlangXvalueKind(&in[0])) || !is_int_kind(kvlangXvalueKind(&in[1]))) {
         rc = set_err(f, "TypeError: expected integer, got %s", n ? kvlangXvalueKind(&in[0]) : "none");
         free_inputs(in, n); return rc;
@@ -463,14 +536,29 @@ static int kvlangBuiltinShr(kvlangFrame_t *f) { return kvlangBuiltinBit(f, 4); }
 /* math */
 static int kvlangBuiltinMathUnary(kvlangFrame_t *f, int op) {
     kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
+    if (n >= 1 && kvlangXvalueNone(&in[0])) { set_err(f, "TypeError: None in arithmetic"); free_inputs(in, n); return -1; }
     if (n < 1 || !is_numeric(&in[0])) { set_err(f, "TypeError: expected numeric, got %s", n ? kvlangXvalueKind(&in[0]) : "none"); free_inputs(in, n); return -1; }
     kvlangXvalue_t r;
     double x = kvlangXvalueAsFloat64(&in[0]);
     switch (op) {
-    case 0: kvlangXvalueNewFloat64(&r, sqrt(x)); break;
+    case 0:
+        if (x < 0) { set_err(f, "ValueError: sqrt of negative number"); free_inputs(in, n); return -1; }
+        kvlangXvalueNewFloat64(&r, sqrt(x));
+        break;
     case 1: kvlangXvalueNewFloat64(&r, exp(x)); break;
-    case 2: kvlangXvalueNewFloat64(&r, log(x)); break;
-    case 3: /* neg */ if (is_float_kind(kvlangXvalueKind(&in[0]))) { narrow_float(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[0]), -x, &r); } else { narrow_int(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[0]), -kvlangXvalueAsInt64(&in[0]), &r); } break;
+    case 2:
+        if (x <= 0) { set_err(f, "ValueError: log of non-positive number"); free_inputs(in, n); return -1; }
+        kvlangXvalueNewFloat64(&r, log(x));
+        break;
+    case 3: /* neg */
+        if (is_unsigned_kind(kvlangXvalueKind(&in[0]))) {
+            set_err(f, "TypeError: cannot negate unsigned %s", kvlangXvalueKind(&in[0]));
+            free_inputs(in, n);
+            return -1;
+        }
+        if (is_float_kind(kvlangXvalueKind(&in[0]))) { narrow_float(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[0]), -x, &r); }
+        else { narrow_int(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[0]), -kvlangXvalueAsInt64(&in[0]), &r); }
+        break;
     case 4: /* abs */ if (is_float_kind(kvlangXvalueKind(&in[0]))) { narrow_float(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[0]), fabs(x), &r); } else { narrow_int(kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[0]), kvlangXvalueAsInt64(&in[0]) < 0 ? -kvlangXvalueAsInt64(&in[0]) : kvlangXvalueAsInt64(&in[0]), &r); } break;
     case 5: kvlangXvalueNewInt64(&r, x < 0 ? -1 : x > 0 ? 1 : 0); break;
     }
@@ -608,7 +696,7 @@ static const struct { const char *op; kvlangBuiltinFn fn; } builtins[] = {
     {"time/duration.before", kvlangBuiltinDurCmp}, {"time/duration.after", kvlangBuiltinDurCmp},
     {"time.before", kvlangBuiltinTimeCmp}, {"time.after", kvlangBuiltinTimeCmp},
     {"random.uint64", kvlangBuiltinRandUint64}, {"random.int63", kvlangBuiltinRandInt63}, {"random.intn", kvlangBuiltinRandIntn},
-    {"kv.get", kvlangBuiltinKvGet}, {"kv.set", kvlangBuiltinKvSet}, {"kv.del", kvlangBuiltinKvDel},
+    {"kv.get", kvlangBuiltinKvGet}, {"kv.at", kvlangBuiltinKvAt}, {"kv.set", kvlangBuiltinKvSet}, {"kv.del", kvlangBuiltinKvDel},
     {"kv.deltree", kvlangBuiltinKvDelTree}, {"kv.list", kvlangBuiltinKvList}, {"kv.listlen", kvlangBuiltinKvListLen}, {"kv.listn", kvlangBuiltinKvListN}, {"kv.mkindex", kvlangBuiltinKvMkindex},
     {"kv.extindex", kvlangBuiltinKvExtIndex}, {"kv.rmindexext", kvlangBuiltinKvRmIndexExt}, {"kv.watch", kvlangBuiltinKvWatch},
     {"debugger", kvlangBuiltinDebugger},
@@ -665,10 +753,8 @@ int kvlangBuiltinExecuteCopy(kvlangKv_t *kv, const char *vtid, const char *pc, k
     char *fr = kvlangKeytreeFrameRoot(pc);
     kvlangFrame_t f = { kv, vtid, pc, inst };
     if (inst->nr == 0) { free(fr); next_pc(&f); return 0; }
-    char *ff = kvlangBuiltinFuncFrameRoot(kv, fr);
     kvlangXvalue_t v; kvlangXvalueZero(&v);
-    kvlangBuiltinResolveReadValue(kv, ff, inst->reads[0].name, &inst->reads[0].val, &v);
-    free(ff);
+    kvlangBuiltinResolveReadValue(kv, fr, inst->reads[0].name, &inst->reads[0].val, &v);
     for (int i = 0; i < inst->nw; i++) {
         char *key = kvlangBuiltinResolveWriteSlot(kv, fr, inst->writes[i].name);
         kvlangKvPair_t pair = { key, v };
@@ -843,7 +929,7 @@ static void ensure_scattered(kvlangFrame_t *f, const char *base) {
 }
 
 int kvlangBuiltinArray(kvlangFrame_t *f) {
-    kvlangXvalue_t in[64]; int n = read_inputs(f, in, 64);
+    kvlangXvalue_t in[MAX_PARAMS]; int n = read_inputs(f, in, MAX_PARAMS);
     if (f->inst->nw == 0 || n == 0) { next_pc(f); free_inputs(in, n); return 0; }
     const char *kind = kvlangXvalueKind(&in[0]);
     if (kvlangXvalueElemSize(kind) <= 0) { free_inputs(in, n); return set_err(f, "array: unsupported element kind %s", kind); }
@@ -924,6 +1010,13 @@ int kvlangBuiltinXvAt(kvlangFrame_t *f) {
     kvlang_kindexpr_t kx; kvlang_kindexpr_parse(h.kindexpr, &kx);
     if (sz <= 0 || kx.ndim == 0) { free_inputs(in, n); return set_err(f, "TypeError: xv.at requires a compact array, got %s", k); }
     if (nidx != kx.ndim) { free_inputs(in, n); return set_err(f, "IndexError: xv.at: %d-dim array needs %d indices, got %d", kx.ndim, kx.ndim, nidx); }
+    for (int i = 0; i < nidx; i++) {
+        if (!is_int_kind(kvlangXvalueKind(&in[i + 1]))) {
+            const char *ik = kvlangXvalueKind(&in[i + 1]);
+            int rc = set_err(f, "IndexError: xv.at: index must be integer, got %s", ik[0] ? ik : "None");
+            free_inputs(in, n); return rc;
+        }
+    }
     int64_t flat = flat_index(&kx, in, nidx);
     if (flat < 0) { free_inputs(in, n); return set_err(f, "IndexError: xv.at: index out of bounds"); }
     const uint8_t *body = in[0].data + h.body_offset;
@@ -1020,20 +1113,26 @@ int kvlangBuiltinCompact(kvlangFrame_t *f) {
     if (f->inst->nr == 0 || f->inst->nw == 0) return set_err(f, "TypeError: array.compact requires read and write params");
     char *fr = kvlangKeytreeFrameRoot(f->pc);
     char *src = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->reads[0].name);
-    kvlangXvalue_t elems[1024]; int n = 0;
+    int cap = 64, n = 0;
+    kvlangXvalue_t *elems = malloc(sizeof(kvlangXvalue_t) * (size_t)cap);
     for (int i = 0; ; i++) {
         int64_t c[1] = { i };
         char *k = scatter_key(src, c, 1);
         kvlangXvalue_t v; kvlangXvalueZero(&v); kvlangKvGetOne(f->kv, k, &v);
         bool none = kvlangXvalueNone(&v); free(k);
         if (none) break;
+        if (n >= cap) {
+            cap *= 2;
+            elems = realloc(elems, sizeof(kvlangXvalue_t) * (size_t)cap);
+        }
         elems[n++] = v;
     }
-    if (n == 0) { free(src); free(fr); next_pc(f); return 0; }
+    if (n == 0) { free(elems); free(src); free(fr); next_pc(f); return 0; }
     kvlangXvalue_t arr; pack_typed_array(kvlangXvalueKind(&elems[0]), elems, n, &arr);
     char *dst = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->writes[0].name);
     kvlangKvPair_t p = { dst, arr }; char err[256]; kvlangKvSet(f->kv, &p, 1, err, sizeof err);
     for (int i = 0; i < n; i++) kvlangXvalueFree(&elems[i]);
+    free(elems);
     kvlangXvalueFree(&arr);
     free(dst); free(src); free(fr);
     next_pc(f); return 0;
@@ -1085,7 +1184,7 @@ int kvlangBuiltinSlice(kvlangFrame_t *f) {
 /* ── dict ─────────────────────────────────────────────────────────── */
 
 int kvlangBuiltinObj(kvlangFrame_t *f) {
-    kvlangXvalue_t in[64]; int n = read_inputs(f, in, 64);
+    kvlangXvalue_t in[MAX_PARAMS]; int n = read_inputs(f, in, MAX_PARAMS);
     char *fr = kvlangKeytreeFrameRoot(f->pc);
     for (int w = 0; w < f->inst->nw; w++) {
         char *ok = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->writes[w].name);
@@ -1108,7 +1207,7 @@ int kvlangBuiltinObj(kvlangFrame_t *f) {
 }
 
 int kvlangBuiltinMap(kvlangFrame_t *f) {
-    kvlangXvalue_t in[64]; int n = read_inputs(f, in, 64);
+    kvlangXvalue_t in[MAX_PARAMS]; int n = read_inputs(f, in, MAX_PARAMS);
     char *fr = kvlangKeytreeFrameRoot(f->pc);
     for (int w = 0; w < f->inst->nw; w++) {
         char *ok = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->writes[w].name);
@@ -1414,6 +1513,22 @@ int kvlangBuiltinKvGet(kvlangFrame_t *f) {
     kvlangKvGetOne(f->kv, key, &v);
     int rc = write_result(f, &v); kvlangXvalueFree(&v);
     free(key); free_inputs(in, n); return rc;
+}
+
+int kvlangBuiltinKvAt(kvlangFrame_t *f) {
+    kvlangXvalue_t in[2]; int n = read_inputs(f, in, 2);
+    char *key = f->inst->nr >= 2 ? member_path(f, in) : NULL;
+    if (!key) { free_inputs(in, n); return set_err(f, "TypeError: kv.at requires a path and a key"); }
+    kvlangXvalue_t v; kvlangXvalueZero(&v);
+    kvlangKvGetOne(f->kv, key, &v);
+    if (kvlangXvalueNone(&v)) {
+        int rc = set_err(f, "KeyError: kv.at: key not found");
+        kvlangXvalueFree(&v); free(key); free_inputs(in, n);
+        return rc;
+    }
+    int rc = write_result(f, &v);
+    kvlangXvalueFree(&v); free(key); free_inputs(in, n);
+    return rc;
 }
 
 int kvlangBuiltinKvSet(kvlangFrame_t *f) {

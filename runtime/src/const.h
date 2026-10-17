@@ -29,7 +29,6 @@
 #define KVSPACE_KIND_DEF_RWIR   "defrwir"
 #define KVSPACE_KIND_DEF_RWFUNC "defrwfunc"
 #define KVSPACE_KIND_RWIR_OR_RWFUNC "rwir|rwfunc"
-#define KVSPACE_KIND_SCOPE      "scope"
 #define KVSPACE_KIND_TIME       "time"
 #define KVSPACE_KIND_DURATION   "duration"
 

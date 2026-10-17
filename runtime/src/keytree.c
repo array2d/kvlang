@@ -20,13 +20,67 @@ char *kvlangKeytreeStack(const char *root) {
     return r;
 }
 
+static void keytree_abort(const char *what, const char *s) {
+    fprintf(stderr, "keytree: %s: %s\n", what, s ? s : "(null)");
+    abort();
+}
+
+static const char *parse_vthread_frame(const char *s, kvlangStrbuf_t *vtid, int *d) {
+    const char *pfx = VTHREAD_ROOT PATH_SEP;
+    size_t pl = strlen(pfx);
+    if (!s || strncmp(s, pfx, pl) != 0) keytree_abort("not /vthread/", s);
+    const char *rest = s + pl;
+    const char *slash = strchr(rest, '/');
+    if (!slash || slash == rest) keytree_abort("missing vtid", s);
+    if (vtid) {
+        kvlangStrbufClear(vtid);
+        kvlangStrbufPutn(vtid, rest, (size_t)(slash - rest));
+    }
+    if (slash[1] != '[') keytree_abort("frame coord not [d]", s);
+    char *end = NULL;
+    long depth = strtol(slash + 2, &end, 10);
+    if (end == slash + 2 || *end != ']') keytree_abort("frame coord not [d]", s);
+    if (depth < 1 || depth > MAX_STACK_DEPTH) keytree_abort("frame depth out of range", s);
+    if (d) *d = (int)depth;
+    return end + 1;
+}
+
+void kvlangKeytreeParsePc(const char *pc, kvlangStrbuf_t *vtid, int *d, int *irseq, int *params) {
+    const char *rest = parse_vthread_frame(pc, vtid, d);
+    if (*rest != '/') keytree_abort("PC missing /[irseq,params]", pc);
+    if (rest[1] != '[') keytree_abort("instruction coord not 2-D", pc);
+    char *end = NULL;
+    long i = strtol(rest + 2, &end, 10);
+    if (end == rest + 2 || *end != ',') keytree_abort("instruction coord not 2-D", pc);
+    long j = strtol(end + 1, &end, 10);
+    if (*end != ']' || end[1] != 0) keytree_abort("instruction coord trailing junk", pc);
+    if (i < 1) keytree_abort("irseq < 1", pc);
+    if (irseq) *irseq = (int)i;
+    if (params) *params = (int)j;
+}
+
+int kvlangKeytreeFrameDepth(const char *frame_or_pc) {
+    int d = 0;
+    const char *rest = parse_vthread_frame(frame_or_pc, NULL, &d);
+    if (*rest == 0) return d;
+    kvlangKeytreeParsePc(frame_or_pc, NULL, &d, NULL, NULL);
+    return d;
+}
+
+char *kvlangKeytreeFrameAt(const char *vtid, int d) {
+    if (!vtid || !vtid[0] || d < 1 || d > MAX_STACK_DEPTH) keytree_abort("FrameAt range", vtid);
+    kvlangStrbuf_t b; kvlangStrbufInit(&b);
+    kvlangStrbufPrintf(&b, "%s/%s/[%d]", VTHREAD_ROOT, vtid, d);
+    return kvlangStrbufDetach(&b);
+}
+
 char *kvlangKeytreeFrameRoot(const char *pc) {
-    const char *last = NULL;
-    for (const char *p = pc; (p = strstr(p, "/[")) != NULL; p += 2) last = p;
-    if (!last) return NULL;
+    kvlangKeytreeParsePc(pc, NULL, NULL, NULL, NULL);
+    const char *last = strrchr(pc, '/');
     size_t n = (size_t)(last - pc);
     char *r = malloc(n + 1);
-    memcpy(r, pc, n); r[n] = 0;
+    memcpy(r, pc, n);
+    r[n] = 0;
     return r;
 }
 
@@ -40,20 +94,6 @@ static char *trim_right_join(const char *root, const char *suffix) {
 }
 
 char *kvlangKeytreeEntryPc(const char *root) { return trim_right_join(root, "/[1,0]"); }
-char *kvlangKeytreeScopeEntryPc(const char *root) { return trim_right_join(root, "/[0,0]"); }
-
-char *kvlangKeytreeParentFrame(const char *root) {
-    size_t n = strlen(root);
-    while (n > 0 && root[n - 1] == '/') n--;
-    if (n == 0) return strdup("");
-    size_t last = (size_t)-1;
-    for (size_t i = 0; i < n; i++) if (root[i] == '/') last = i;
-    if (last == (size_t)-1) return strdup("");
-    size_t cut = last + 1;
-    char *r = malloc(cut + 1);
-    memcpy(r, root, cut); r[cut] = 0;
-    return r;
-}
 
 char *kvlangKeytreeMember(const char *base, const char *name) {
     size_t bl = strlen(base), nl = strlen(name);
@@ -81,14 +121,6 @@ void kvlangKeytreeVthread(const char *vtid, kvlangStrbuf_t *out) {
     kvlangStrbufClear(out);
     kvlangStrbufPuts(out, VTHREAD_ROOT PATH_SEP);
     kvlangStrbufPuts(out, vtid);
-}
-
-void kvlangKeytreeVthreadSlot(const char *vtid, const char *frame, int i, int j, kvlangStrbuf_t *out) {
-    kvlangStrbufClear(out);
-    kvlangStrbufPuts(out, VTHREAD_ROOT PATH_SEP);
-    kvlangStrbufPuts(out, vtid);
-    if (frame && frame[0]) { kvlangStrbufPutc(out, '/'); kvlangStrbufPuts(out, frame); }
-    kvlangStrbufPrintf(out, "/[%d,%d]", i, j);
 }
 
 static void kvlangVthreadMember(const char *vtid, const char *seg, kvlangStrbuf_t *out) {
@@ -123,10 +155,6 @@ void kvlangKeytreeFrameCallpc(const char *root, kvlangStrbuf_t *out) { frame_mem
 void kvlangKeytreeFrameReturnpc(const char *root, kvlangStrbuf_t *out) { frame_member(root, SEG_RETURNPC, out); }
 void kvlangKeytreeFrameRo(const char *root, kvlangStrbuf_t *out) { frame_member(root, SEG_RO, out); }
 
-bool kvlangKeytreeIsEntryPc(const char *pc) {
-    const char *slash = strrchr(pc, '/');
-    return slash && strcmp(slash, "/[1,0]") == 0;
-}
 char *kvlangKeytreeCanonOp(const char *opcode) {
     const char *p = opcode ? opcode : "";
     if (strncmp(p, LIB_ROOT PATH_SEP, 5) == 0) p += 5;
@@ -261,7 +289,7 @@ char *kvlangKeytreeCheckWriteKey(const char *vtid, const char *key) {
         if (strcmp(key, own.p) == 0) {
             kvlangStrbufFree(&own);
             char *e = malloc(200);
-            snprintf(e, 200, "IsADirectoryError: write slot targets this vthread's frame root: \"%s\"; help: a frame root is a directory and writing it as a leaf destroys the call frame", key);
+            snprintf(e, 200, "IsADirectoryError: write slot targets this vthread root: \"%s\"; help: the vthread root is a directory, not a leaf", key);
             return e;
         }
         size_t ol = strlen(own.p);
@@ -270,6 +298,19 @@ char *kvlangKeytreeCheckWriteKey(const char *vtid, const char *key) {
             snprintf(e, 240, "PermissionError: write slot is outside this vthread's subtree (vtid=%s): \"%s\"; help: the whole /vthread domain belongs to the engine, a program may only write keys under %s/", vtid, key, own.p);
             kvlangStrbufFree(&own);
             return e;
+        }
+        const char *rest = key + ol + 1;
+        if (rest[0] == '[') {
+            const char *q = rest + 1;
+            if (*q >= '0' && *q <= '9') {
+                while (*q >= '0' && *q <= '9') q++;
+                if (*q == ']' && (q[1] == 0 || (q[1] == '/' && q[2] == 0))) {
+                    kvlangStrbufFree(&own);
+                    char *e = malloc(220);
+                    snprintf(e, 220, "IsADirectoryError: write slot targets a frame directory: \"%s\"; help: a frame is a directory and writing it as a leaf destroys the call frame", key);
+                    return e;
+                }
+            }
         }
         kvlangStrbufFree(&own);
     }
