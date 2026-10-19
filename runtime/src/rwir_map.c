@@ -121,10 +121,6 @@ int kvlangBuiltinMap(kvlangFrame_t *f) {
         free(dir);
         kvlangKvDel(f->kv, ok, err, sizeof err);
 
-        char **names = malloc(sizeof(char *) * (size_t)(n > 0 ? n : 1));
-        for (int i = 0; i < n; i++) {
-            names[i] = kvlangAstr("[%d]", i);
-        }
         /* 容器值 p：langtype=声明的 map langtype，body 空，dims=[n] 落 head。 */
         char *wty = declared_map_langtype(f, w);
         kvlangXvalue_t mark;
@@ -139,9 +135,7 @@ int kvlangBuiltinMap(kvlangFrame_t *f) {
             kvlangKvPair_t p = {k, in[i]};
             kvlangKvSet(f->kv, &p, 1, err, sizeof err);
             free(k);
-            free(names[i]);
         }
-        free(names);
         free(ok);
     }
     free(fr);

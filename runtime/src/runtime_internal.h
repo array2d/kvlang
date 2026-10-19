@@ -213,7 +213,7 @@ void kvlangXvalueSetBytes(kvlangXvalue_t *v, uint8_t *data,
 void kvlangXvalueMaterialize(
     kvlangXvalue_t *v); /* 借用值落地为自持（存入跨指令结构前必调） */
 int kvlangXvalueHead(const kvlangXvalue_t *v,
-                     kvspaceHead_t *h);                /* decode head */
+                     kvspaceHead_t *h); /* 完整 head；测试/外部用 */
 const char *kvlangXvalueKind(const kvlangXvalue_t *v); /* 返回 kind，None="" */
 bool kvlangXvalueKindIs(const kvlangXvalue_t *v, const char *kind);
 int kvlangXvalueLangtype(const kvlangXvalue_t *v, char *buf,
@@ -589,8 +589,6 @@ int kvlangBuiltinCheckMemhead(kvlangKv_t *kv, const char *frame_root,
                               const char *base);
 char *kvlangBuiltinResolveReadKey(kvlangKv_t *kv, const char *frame_root,
                                   const char *name, const kvlangXvalue_t *val);
-bool kvlangBuiltinTryParseNumber(const char *s,
-                                 kvlangXvalue_t *out); /* 成功 out 接管 */
 void kvlangDisplay(const kvlangXvalue_t *v,
                    char **out); /* malloc，对齐 Go Display */
 

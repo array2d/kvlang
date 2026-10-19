@@ -101,34 +101,7 @@ char *kvlangBuiltinResolveWriteSlot(kvlangKv_t *kv, const char *frame_root, cons
     return r;
 }
 
-/* ── coerce / kvlangDisplay ─────────────────────────────────────────────── */
-
-static bool try_parse_int(const char *s, int64_t *out) {
-    if (!s || !s[0]) return false;
-    char *end; long long v = strtoll(s, &end, 10);
-    if (end == s || *end != 0) return false;
-    *out = v; return true;
-}
-
-bool kvlangBuiltinTryParseNumber(const char *s, kvlangXvalue_t *out) {
-    kvlangXvalueZero(out);
-    if (!s || !s[0]) return false;
-    char c0 = s[0];
-    bool num = (c0 >= '0' && c0 <= '9') || (c0 == '-' && s[1] >= '0' && s[1] <= '9');
-    if (!num) return false;
-    int64_t iv;
-    if (try_parse_int(s, &iv)) { kvlangXvalueNewInt64(out, iv); return true; }
-    if (c0 != '-' && !strpbrk(s, ".eE")) {
-        char *end; unsigned long long uv = strtoull(s, &end, 10);
-        if (end != s && *end == 0) {
-            uint8_t r[8]; memcpy(r, &uv, 8);
-            kvlangXvalueNewTlv(out, KVSPACE_KIND_UINT64, r, 8, 1); return true;
-        }
-    }
-    char *end; double f = strtod(s, &end);
-    if (end != s && *end == 0) { kvlangXvalueNewFloat64(out, f); return true; }
-    return false;
-}
+/* ── kvlangDisplay ──────────────────────────────────────────────────────── */
 
 void kvlangBuiltinXvalueAt(const kvlangXvalue_t *v, int i, kvlangXvalue_t *out) {
     kvlangXvalueZero(out);
