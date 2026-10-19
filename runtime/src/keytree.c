@@ -204,3 +204,166 @@ bool kvlangKeytreeIsEntryPc(const char *pc) {
     const char *slash = strrchr(pc, '/');
     return slash && strcmp(slash, "/[1,0]") == 0;
 }
+
+const char *kvlangKeytreeCanonOp(const char *opcode) {
+    const char *p = opcode ? opcode : "";
+    size_t pl = strlen(LIB_ROOT PATH_SEP);
+    return strncmp(p, LIB_ROOT PATH_SEP, pl) == 0 ? p + pl : p;
+}
+
+bool kvlangKeytreeValidSegment(const char *s) {
+    if (!s || !s[0])
+        return false;
+    if (strcmp(s, ".") == 0 || strcmp(s, "..") == 0)
+        return false;
+    if (strcmp(s, MEMBER_SEP) == 0)
+        return false;
+    return strchr(s, '/') == NULL;
+}
+
+static char *join3(const char *a, const char *b, const char *c) {
+    kvlangStrbuf_t s;
+    kvlangStrbufInit(&s);
+    kvlangStrbufPuts(&s, a);
+    if (b && b[0]) {
+        kvlangStrbufPutc(&s, '/');
+        kvlangStrbufPuts(&s, b);
+    }
+    if (c && c[0]) {
+        kvlangStrbufPutc(&s, '/');
+        kvlangStrbufPuts(&s, c);
+    }
+    return kvlangStrbufDetach(&s);
+}
+
+char *kvlangKeytreeSysRwirBackendRoot(void) {
+    return strdup(SYS_ROOT PATH_SEP SEG_RWIR_BACKEND);
+}
+
+char *kvlangKeytreeSysRwirBackend(const char *name) {
+    return join3(SYS_ROOT PATH_SEP SEG_RWIR_BACKEND, name, NULL);
+}
+
+char *kvlangKeytreeSysRwirBackendOp(const char *name, const char *opcode) {
+    kvlangStrbuf_t s;
+    kvlangStrbufInit(&s);
+    kvlangStrbufPuts(&s, SYS_ROOT PATH_SEP SEG_RWIR_BACKEND "/");
+    kvlangStrbufPuts(&s, name);
+    kvlangStrbufPuts(&s, "/" SEG_OP "/");
+    kvlangStrbufPuts(&s, opcode);
+    return kvlangStrbufDetach(&s);
+}
+
+char *kvlangKeytreeSysRwirBackendCmd(const char *name) {
+    return join3(SYS_ROOT PATH_SEP SEG_RWIR_BACKEND, name, SEG_CMD);
+}
+
+char *kvlangKeytreeSysRwirBackendStatus(const char *name) {
+    return join3(SYS_ROOT PATH_SEP SEG_RWIR_BACKEND, name, SEG_STATUS);
+}
+
+char *kvlangKeytreeSysRwirBackendLoad(const char *name) {
+    return join3(SYS_ROOT PATH_SEP SEG_RWIR_BACKEND, name, SEG_LOAD);
+}
+
+char *kvlangKeytreeSysRwirBackendHeartbeat(const char *name) {
+    return join3(SYS_ROOT PATH_SEP SEG_RWIR_BACKEND, name, SEG_LAST_HEARTBEAT);
+}
+
+char *kvlangKeytreeSysRwirBackendCategoryRoot(const char *name) {
+    return join3(SYS_ROOT PATH_SEP SEG_RWIR_BACKEND, name, SEG_CATEGORY);
+}
+
+char *kvlangKeytreeSysTask(const char *task_id, const char *field) {
+    kvlangStrbuf_t s;
+    kvlangStrbufInit(&s);
+    kvlangStrbufPuts(&s, SYS_ROOT PATH_SEP SEG_TASK "/");
+    kvlangStrbufPuts(&s, task_id);
+    kvlangStrbufPutc(&s, '/');
+    kvlangStrbufPuts(&s, RUNTIME_MEMBER_SEP);
+    kvlangStrbufPuts(&s, field);
+    return kvlangStrbufDetach(&s);
+}
+
+char *kvlangKeytreeDoneRwir(const char *task_id) {
+    return join3(DONE_ROOT PATH_SEP SEG_RWIR, task_id, NULL);
+}
+
+char *kvlangKeytreeLibSig(const char *opcode) {
+    kvlangStrbuf_t s;
+    kvlangStrbufInit(&s);
+    kvlangStrbufPuts(&s, LIB_ROOT PATH_SEP);
+    kvlangStrbufPuts(&s, opcode);
+    kvlangStrbufPuts(&s, "/[0,0]");
+    return kvlangStrbufDetach(&s);
+}
+
+static char *write_err(size_t n, const char *fmt, ...) {
+    char *e = malloc(n);
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(e, n, fmt, ap);
+    va_end(ap);
+    return e;
+}
+
+char *kvlangKeytreeCheckWriteKey(const char *vtid, const char *key) {
+    if (!key || key[0] != '/')
+        return write_err(160,
+                         "ValueError: write slot is not an absolute path: \"%s\"; help: a write slot must resolve to a canonical path starting with /",
+                         key ? key : "");
+    const char *p = key + 1;
+    while (*p) {
+        const char *slash = strchr(p, '/');
+        size_t n = slash ? (size_t)(slash - p) : strlen(p);
+        if (n == 0 || (n == 1 && p[0] == '.') ||
+            (n == 2 && p[0] == '.' && p[1] == '.'))
+            return write_err(160,
+                             "ValueError: write slot is not a canonical path: \"%s\"; help: a path may not contain an empty segment, . or ..",
+                             key);
+        if (n >= 3 && (unsigned char)p[0] == 0xE2 && (unsigned char)p[1] == 0x80 &&
+            (unsigned char)p[2] == 0xA5)
+            return write_err(192,
+                             "PermissionError: write slot targets an engine-reserved key: \"%s\"; help: keys starting with %s belong to the VM and programs cannot write them",
+                             key, RUNTIME_MEMBER_SEP);
+        p = slash ? slash + 1 : p + n;
+    }
+    static const char *roots[] = {LIB_ROOT, SYS_ROOT, DEV_ROOT, DONE_ROOT, VTHREAD_ROOT, NULL};
+    for (int i = 0; roots[i]; i++) {
+        if (strcmp(key, roots[i]) == 0)
+            return write_err(192,
+                             "PermissionError: write slot targets domain root %s: \"%s\"; help: the domain belongs to the VM, and a root is a directory besides",
+                             roots[i], key);
+    }
+    static const char *prot[] = {LIB_ROOT, SYS_ROOT, DEV_ROOT, DONE_ROOT, NULL};
+    for (int i = 0; prot[i]; i++) {
+        size_t pl = strlen(prot[i]);
+        if (strncmp(key, prot[i], pl) == 0 && key[pl] == '/')
+            return write_err(220,
+                             "PermissionError: write slot targets protected domain %s: \"%s\"; help: %s belongs to the VM; write a slot in your own vthread or a user global key",
+                             prot[i], key, prot[i]);
+    }
+    size_t vr = strlen(VTHREAD_ROOT) + 1;
+    if (strncmp(key, VTHREAD_ROOT "/", vr) == 0) {
+        kvlangStrbuf_t own;
+        kvlangStrbufInit(&own);
+        kvlangKeytreeVthread(vtid, &own);
+        if (strcmp(key, own.p) == 0) {
+            char *e = write_err(200,
+                                "IsADirectoryError: write slot targets this vthread's frame root: \"%s\"; help: a frame root is a directory and writing it as a leaf destroys the call frame",
+                                key);
+            kvlangStrbufFree(&own);
+            return e;
+        }
+        size_t ol = strlen(own.p);
+        if (!(strncmp(key, own.p, ol) == 0 && key[ol] == '/')) {
+            char *e = write_err(240,
+                                "PermissionError: write slot is outside this vthread's subtree (vtid=%s): \"%s\"; help: the whole /vthread domain belongs to the engine, a program may only write keys under %s/",
+                                vtid, key, own.p);
+            kvlangStrbufFree(&own);
+            return e;
+        }
+        kvlangStrbufFree(&own);
+    }
+    return NULL;
+}

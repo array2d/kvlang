@@ -1332,6 +1332,12 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode,
                 kvlangStrbufFree(&vtid_b);
                 return 1;
             }
+        } else if (kvlangDispatchIsDelegatedOp(kv, inst->opcode)) {
+            exec_err = kvlangDispatchDelegate(kv, vtid, cur, inst);
+            if (exec_err == KVLANG_DELEGATE_LOCAL) {
+                exec_err = 0;
+                goto user_call;
+            }
         } else if (notinmyrwircaps(kv, inst->opcode)) {
             int def_nr = 0, def_dyn = 0;
             char *rk = kvlangKeytreeRwir(inst->opcode);
@@ -1359,6 +1365,7 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode,
             if (exec_err == 0)
                 exec_err = handoff_external_rwir(kv, vtid, cur, inst);
         } else {
+        user_call:
             /* 用户函数 → call */
             kvlangRwirInst_t ci;
             ci.opcode = strdup(OP_CALL);
