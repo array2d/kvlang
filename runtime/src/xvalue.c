@@ -124,8 +124,9 @@ static uint8_t *kvlangXvalueEncodeTlv(const char *kind, const uint8_t *raw,
     return kvlangXvalueOwn(tmp, tl, out_len);
 }
 
-/* head 视图：原位取偏移与 langtype（不建 328B head、不校验）。
- * 仅供按 head 取值的使用方（测试/外部）；热路径直接走 xh_* 访问器。 */
+/* head 视图：把 wire 原位解进调用方给的 kvspaceHead_t（不校验）。
+ * 这是**测试/外部**用的完整 head 入口（runtime/tests/ 两处调用，Linux CI 编译）；
+ * 热路径走 xh_* 访问器，不建 328B head。 */
 static void xh_fill_head(const uint8_t *d, kvspaceHead_t *h) {
     memset(h, 0, sizeof(*h));
     uint32_t headlen = xh_headlen(d);

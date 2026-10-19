@@ -373,7 +373,7 @@ int kvlangBuiltinAppend(kvlangFrame_t *f) {
     }
     int64_t c[1] = {separated_next(f->kv, base)};
     char *k = kvlangBuiltinScatterKey(base, c, 1);
-    kvlangKvPair_t p = {k, n >= 2 ? in[1] : in[0]};
+    kvlangKvPair_t p = {k, in[1]}; /* nr >= 2 已由上面拦下，ReadInputs(cap=2) 必返 2 */
     char err[256];
     rc = kvlangKvSet(f->kv, &p, 1, err, sizeof err);
     free(k);
