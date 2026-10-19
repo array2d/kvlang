@@ -12,7 +12,9 @@
  * PC 不可换「函数模板」键：操作数目标依赖「哪条调用路径到达本帧」——同为 [6]/[4,0]，
  * 经 fib(a) 与 fib(b) 到达时目标分别是 [5]/a 与 [5]/b——故跨调用路径复用会误用。
  * 帧深变化即作废正是为此。opcode/nr/nw 一类与实参无关的骨架数据另可按 (模板, addr0)
- * 缓存，但实测收益甚微（瓶颈在操作数物化，不在骨架），故未采用。 */
+ * 缓存，但实测收益甚微（瓶颈在操作数物化，不在骨架），故未采用。
+ * 路由判定 is_def_rwir 与 def rwir 读/写签名同样在 decode 期固化，执行循环不再每步查
+ * /lib 或拼签名串；委托判定保持动态（backend 上下线）。 */
 
 typedef struct {
     char *pc;              /* NULL = 空槽 */
@@ -278,7 +280,6 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode,
         char err[256];
         rwir_cache_entry_t *hit = rwir_cache_get(&cache, cur);
         bool from_cache = hit != NULL;
-        rwir_cache_entry_t *ce = hit;
         if (from_cache) {
             tmp = hit->inst; /* 浅拷骨架；val 恒空，本步现读 */
         } else {
@@ -290,7 +291,7 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode,
                 rc = exec_error(kv, vtid, cur, "decode: %.247s", err);
                 break;
             }
-            ce = rwir_cache_put(kv, &cache, cur, depth, &tmp);
+            hit = rwir_cache_put(kv, &cache, cur, depth, &tmp);
         }
         kvlangRwirInst_t *inst = &tmp;
 
@@ -307,8 +308,10 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode,
             break;
         }
 
-        if (from_cache && ce &&
-            rwir_cache_load_vals(kv, inst, ce->load_write_value, err,
+        if (!hit)
+            kvlangDie("rwir cache entry missing for %s", cur);
+        if (from_cache &&
+            rwir_cache_load_vals(kv, inst, hit->load_write_value, err,
                                  sizeof err) != 0) {
             rc = exec_error(kv, vtid, cur, "%s", err);
             rwir_inst_release(&tmp, true);
@@ -336,14 +339,15 @@ int kvlangKvcpuExecuteMode(kvlangKv_t *kv, const char *pc, kvmode_t mode,
                 exec_err = 0;
                 goto user_call;
             }
-        } else if (ce->is_def_rwir) {
-            if (ce->def_sig)
+        } else if (hit->is_def_rwir) {
+            if (hit->def_sig)
                 exec_err = check_read_types(kv, vtid, cur, inst->opcode,
-                                            ce->def_sig, ce->def_nr, ce->def_dyn,
-                                            inst->reads, inst->nr);
-            if (exec_err == 0 && ce->def_wsig)
+                                            hit->def_sig, hit->def_nr,
+                                            hit->def_dyn, inst->reads,
+                                            inst->nr);
+            if (exec_err == 0 && hit->def_wsig)
                 exec_err = check_write_types(kv, vtid, cur, inst->opcode,
-                                             ce->def_wsig, ce->def_nw);
+                                             hit->def_wsig, hit->def_nw);
             if (exec_err == 0 && mode == KVMODE_RETURN)
                 return exec_yield(&tmp, from_cache, &cache, out_pc,
                                   out_pc ? strdup(cur) : NULL);
