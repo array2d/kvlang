@@ -1,4 +1,4 @@
-#include "runtime_internal.h"
+#include "kvcpu_internal.h"
 
 /* 找末个成员分隔符（·，多字节），对齐 strrchr('.') 的单字节旧语义。 */
 static const char *rfind_sep(const char *s) {
@@ -499,22 +499,24 @@ int kvlangCtlBr(kvlangFrame_t *f) {
     return jump_to(f, &inst->reads[taken ? 1 : 2], OP_BR);
 }
 
-/* 动态调用：以运行时得到的 funckey 在当前 vthread 造一次 OP_CALL（不新开 vid），
- * pc 落在被调入口，帧结束回到本指令 NextPc。供 native vthread·call 用。 */
-int kvlangKvcpuDynCall(kvlangKv_t *kv, const char *vtid, const char *pc,
-                       const char *funckey) {
+/* 以伪 OP_CALL 进入被调函数：reads[0] 是目标函数，其后为实参。 */
+int kvlangKvcpuCallOpcode(kvlangKv_t *kv, const char *vtid, const char *pc,
+                          const char *status_known, const char *opcode,
+                          kvlangParam_t *reads, int nr,
+                          kvlangParam_t *writes, int nw) {
     kvlangRwirInst_t ci;
     ci.opcode = strdup(OP_CALL);
     ci.op_id = 0;
-    ci.reads = malloc(sizeof(kvlangParam_t));
-    ci.reads[0].name = strdup(funckey);
-    ci.reads[0].type = NULL;
-    ci.reads[0].address = 0;
-    kvlangXvalueZero(&ci.reads[0].val);
-    ci.nr = 1;
-    ci.writes = NULL;
-    ci.nw = 0;
+    ci.nr = nr + 1;
+    ci.nw = nw;
+    ci.reads = malloc(sizeof(kvlangParam_t) * (size_t)ci.nr);
+    ci.reads[0] = (kvlangParam_t){0};
+    ci.reads[0].name = strdup(opcode);
+    for (int i = 0; i < nr; i++)
+        ci.reads[i + 1] = reads[i];
+    ci.writes = writes;
     kvlangFrame_t f = {kv, vtid, pc, &ci, NULL};
+    f.status_known = status_known;
     int rc = kvlangCtlCall(&f);
     if (f.persist_failed)
         rc = -1;
@@ -522,6 +524,13 @@ int kvlangKvcpuDynCall(kvlangKv_t *kv, const char *vtid, const char *pc,
     free(ci.reads[0].name);
     free(ci.reads);
     return rc;
+}
+
+/* 动态调用：以运行时得到的 funckey 在当前 vthread 造一次 OP_CALL（不新开 vid），
+ * pc 落在被调入口，帧结束回到本指令 NextPc。供 native vthread·call 用。 */
+int kvlangKvcpuDynCall(kvlangKv_t *kv, const char *vtid, const char *pc,
+                       const char *funckey) {
+    return kvlangKvcpuCallOpcode(kv, vtid, pc, NULL, funckey, NULL, 0, NULL, 0);
 }
 
 

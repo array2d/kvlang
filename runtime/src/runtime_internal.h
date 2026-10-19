@@ -488,6 +488,8 @@ enum {
 };
 
 int kvlangBuiltinCapIndex(const char *opcode);
+/* 该算子是否需读回写参旧值（obj/map）；op_id<0 恒 false。 */
+bool kvlangBuiltinLoadWriteValue(int op_id);
 
 /* decode 期分类：control/copy 与 native 同在 myrwircaps 一张表，全走 CapIndex；
  * miss 落 OPID_notinmyrwircaps（执行期再查 /lib）。 */
