@@ -241,8 +241,7 @@ int kvlangRwirDecode(kvlangKv_t *kv, const char *link_base, const char *pc,
         }
         out->nr++;
     }
-    bool load_write_value = out->opcode &&
-        (strcmp(out->opcode, "obj") == 0 || strcmp(out->opcode, "map") == 0);
+    bool load_write_value = kvlangBuiltinLoadWriteValue(out->op_id);
     for (int i = 1; i <= nw; i++) {
         snprintf(slot, sizeof slot, "[%d,%d]", addr0, i);
         int rc = decode_operand(kv, link_base, frame_root, slot,
