@@ -24,26 +24,22 @@ static int register_vids(kvlangKv_t *k, const char *opcode) {
             return rc;
     }
     char *base = kvlangKeytreeRwir(opcode);
-    kvlangStrbuf_t tk;
-    kvlangStrbufInit(&tk);
-    kvlangStrbufPuts(&tk, base);
-    kvlangStrbufPuts(&tk, "/vids");
+    char tk[KV_KEY_MAX];
+    kvlangKeyFmt(tk, sizeof tk, "%s/vids", base);
     kvlangXvalue_t cur;
     kvlangXvalueZero(&cur);
-    bool exists =
-        (kvlangKvGetOne(k, tk.p, &cur) == 0 && !kvlangXvalueNone(&cur));
+    bool exists = (kvlangKvGetOne(k, tk, &cur) == 0 && !kvlangXvalueNone(&cur));
     kvlangXvalueFree(&cur);
     int rc = 0;
     if (!exists) {
         kvlangXvalue_t v;
         kvlangXvalueZero(&v);
         kvlangXvalueNewPtr(&v, queue_type, queue);
-        kvlangKvPair_t p = {tk.p, v};
+        kvlangKvPair_t p = {tk, v};
         char err[256];
         rc = kvlangKvSet(k, &p, 1, err, sizeof err);
         kvlangXvalueFree(&v);
     }
-    kvlangStrbufFree(&tk);
     free(base);
     return rc;
 }
@@ -51,18 +47,16 @@ static int register_vids(kvlangKv_t *k, const char *opcode) {
 /* 写 [0,x] 签名行槽 = def langtype（body 为该参数 langtype 串）。 */
 static void write_sig_slot(kvlangKv_t *k, const char *base, int x,
                            const char *lt, size_t lt_len) {
-    kvlangStrbuf_t sk;
-    kvlangStrbufInit(&sk);
-    kvlangStrbufPrintf(&sk, "%s/[0,%d]", base, x);
+    char sk[KV_KEY_MAX];
+    kvlangKeyFmt(sk, sizeof sk, "%s/[0,%d]", base, x);
     char *clean = strndup(lt, lt_len);
     kvlangXvalue_t sv;
     kvlangXvalueNewDefLangtype(&sv, clean);
     free(clean);
-    kvlangKvPair_t sp = {sk.p, sv};
+    kvlangKvPair_t sp = {sk, sv};
     char err[256];
     kvlangKvSet(k, &sp, 1, err, sizeof err);
     kvlangXvalueFree(&sv);
-    kvlangStrbufFree(&sk);
 }
 
 /* 注册一条 rwir：/lib/<op> 路由头（仅计数头）+ 各参数落 [0,x] 签名行槽（def langtype）。

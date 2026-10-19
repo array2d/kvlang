@@ -60,12 +60,9 @@ static char *get_char(kvlangKv_t *kv, const char *key) {
 }
 
 static char *error_msg(kvlangKv_t *kv, const char *vtid) {
-    kvlangStrbuf_t k;
-    kvlangStrbufInit(&k);
-    kvlangKeytreeVthreadStatusMsg(vtid, "error", &k);
-    char *s = get_char(kv, k.p);
-    kvlangStrbufFree(&k);
-    return s;
+    char k[KV_KEY_MAX];
+    kvlangKeytreeVthreadStatusMsg(vtid, "error", k, sizeof k);
+    return get_char(kv, k);
 }
 
 static char *take_cmd(kvlangKv_t *kv, const char *cmd_dir, uint64_t ns) {

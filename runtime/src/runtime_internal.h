@@ -119,29 +119,18 @@ typedef struct {
     void *h;
 } kvlangKv_t;
 
-/* growable string buffer */
-typedef struct {
-    char *p;
-    size_t len, cap;
-} kvlangStrbuf_t;
+/* ── 字符串工具 ──────────────────────────────────────────────────────
+ * 只有一次性操作：有界栈格式化 / 堆分配拷贝。没有可增长缓冲、没有复用语义。 */
 
-static inline void kvlangStrbufInit(kvlangStrbuf_t *b) {
-    b->p = NULL;
-    b->len = 0;
-    b->cap = 0;
-}
-void kvlangStrbufPutc(kvlangStrbuf_t *b, char c);
-void kvlangStrbufPutn(kvlangStrbuf_t *b, const char *s, size_t n);
-static inline void kvlangStrbufPuts(kvlangStrbuf_t *b, const char *s) {
-    kvlangStrbufPutn(b, s, strlen(s));
-}
-void kvlangStrbufPrintf(kvlangStrbuf_t *b, const char *fmt, ...);
-char *kvlangStrbufDetach(kvlangStrbuf_t *b); /* malloc，调用方 free */
-static inline void kvlangStrbufFree(kvlangStrbuf_t *b) {
-    free(b->p);
-    b->p = NULL;
-    b->len = b->cap = 0;
-}
+#define KV_KEY_MAX 1024 /* kvspace 写键上限：key_len < 1024 */
+
+void kvlangDie(const char *fmt, ...) __attribute__((noreturn, format(printf, 1, 2)));
+/* 有界写入调用方缓冲；超长或格式化错误直接 abort，绝不截断。 */
+size_t kvlangKeyFmt(char *buf, size_t cap, const char *fmt, ...)
+    __attribute__((format(printf, 3, 4)));
+/* 一次性堆字符串（调用方 free）；OOM abort。 */
+char *kvlangAstr(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+char *kvlangAstrN(const char *s, size_t n);
 
 /* ── xvalue head 零解码访问 ──────────────────────────────────────────
  * wire: [pow:u8][flags:u8][a:u64le][b:u64le][langtype][padding][body]
@@ -442,14 +431,8 @@ int kvlangKvWatch(kvlangKv_t *k, const char *key, const kvlangXvalue_t *target,
 #define LIB_ROOT "/lib"
 #define VTHREAD_ROOT "/vthread"
 
-static inline void kvlangStrbufClear(kvlangStrbuf_t *b) {
-    b->len = 0;
-    if (b->p)
-        b->p[0] = 0;
-}
-
-const char *kvlangKeytreeVtidFromPc(const char *pc,
-                                    kvlangStrbuf_t *out); /* "" 无效 */
+const char *kvlangKeytreeVtidFromPc(const char *pc, char *out,
+                                    size_t cap);          /* "" 无效 */
 char *kvlangKeytreeStack(const char *root);               /* malloc */
 size_t kvlangKeytreeStackBuf(const char *root, char *buf, size_t cap); /* 栈缓冲，返长度 */
 char *kvlangKeytreeFrameRoot(const char *pc); /* malloc，无效 NULL */
@@ -475,17 +458,17 @@ char *kvlangKeytreeSysRwirBackendCategoryRoot(const char *name);
 char *kvlangKeytreeSysTask(const char *task_id, const char *field);
 char *kvlangKeytreeDoneRwir(const char *task_id);
 char *kvlangKeytreeLibSig(const char *opcode);
-void kvlangKeytreeVthread(const char *vtid, kvlangStrbuf_t *out);
+void kvlangKeytreeVthread(const char *vtid, char *out, size_t cap);
 void kvlangKeytreeVthreadSlot(const char *vtid, const char *frame, int i, int j,
-                              kvlangStrbuf_t *out);
-void kvlangKeytreeVthreadPc(const char *vtid, kvlangStrbuf_t *out);
-void kvlangKeytreeVthreadStatus(const char *vtid, kvlangStrbuf_t *out);
+                              char *out, size_t cap);
+void kvlangKeytreeVthreadPc(const char *vtid, char *out, size_t cap);
+void kvlangKeytreeVthreadStatus(const char *vtid, char *out, size_t cap);
 void kvlangKeytreeVthreadStatusMsg(const char *vtid, const char *status,
-                                   kvlangStrbuf_t *out);
-void kvlangKeytreeVthreadDebugger(const char *vtid, kvlangStrbuf_t *out);
-void kvlangKeytreeFrameCallpc(const char *root, kvlangStrbuf_t *out);
-void kvlangKeytreeFrameReturnpc(const char *root, kvlangStrbuf_t *out);
-void kvlangKeytreeFrameRo(const char *root, kvlangStrbuf_t *out);
+                                   char *out, size_t cap);
+void kvlangKeytreeVthreadDebugger(const char *vtid, char *out, size_t cap);
+void kvlangKeytreeFrameCallpc(const char *root, char *out, size_t cap);
+void kvlangKeytreeFrameReturnpc(const char *root, char *out, size_t cap);
+void kvlangKeytreeFrameRo(const char *root, char *out, size_t cap);
 bool kvlangKeytreeIsEntryPc(const char *pc);
 
 /* ── rwir ──────────────────────────────────────────────────────────── */
@@ -529,7 +512,6 @@ typedef struct {
     int nw;
 } kvlangRwirInst_t;
 
-int kvlangRwirNextPc(const char *pc, kvlangStrbuf_t *out);
 size_t kvlangRwirNextPcBuf(const char *pc, char *buf, size_t cap); /* 栈缓冲，返长度 */
 int kvlangRwirExtractAddr0(const char *coord);
 int kvlangRwirDecode(kvlangKv_t *kv, const char *link_base, const char *pc,
@@ -549,9 +531,9 @@ void kvlangVthreadGet(kvlangKv_t *kv, const char *vtid, char **pc,
                       char **status);
 void kvlangVthreadPcGet(kvlangKv_t *kv, const char *vtid, char **pc);
 void kvlangVthreadStatusGet(kvlangKv_t *kv, const char *vtid, char **status);
-/* 复用调用方 strbuf 读成员值；false = 键缺失 / None。 */
-bool kvlangVthreadMemberGetBuf(kvlangKv_t *kv, const char *key,
-                               kvlangStrbuf_t *out);
+/* 读成员值到调用方缓冲；false = 键缺失 / None，超长直接 abort。 */
+bool kvlangVthreadMemberGetBuf(kvlangKv_t *kv, const char *key, char *out,
+                               size_t cap);
 int kvlangVthreadSet(kvlangKv_t *kv, const char *vtid, const char *pc,
                      const char *status);
 int kvlangVthreadSetDone(kvlangKv_t *kv, const char *vtid, const char *ret);

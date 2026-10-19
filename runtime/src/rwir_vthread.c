@@ -89,10 +89,10 @@ int kvlangBuiltinVthreadSleep(kvlangFrame_t *f) {
 /* 设状态并把 PC 前进到下一指令。execute 循环只在 init/running/wait 下继续，
  * 其余状态（paused/done/error…）即停。恢复：外部把 /vthread/{vid}/·status 改回 running。 */
 static int set_status(kvlangFrame_t *f, const char *status) {
-    kvlangStrbuf_t npc; kvlangStrbufInit(&npc);
-    kvlangRwirNextPc(f->pc, &npc);
-    kvlangVthreadAdvance(f, npc.p, status);
-    kvlangStrbufFree(&npc);
+    char npc[KV_KEY_MAX];
+    if (kvlangRwirNextPcBuf(f->pc, npc, sizeof npc) == 0)
+        kvlangDie("next pc exceeds %zu bytes", sizeof npc);
+    kvlangVthreadAdvance(f, npc, status);
     return 0;
 }
 

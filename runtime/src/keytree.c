@@ -1,15 +1,20 @@
 #include "runtime_internal.h"
 
-const char *kvlangKeytreeVtidFromPc(const char *pc, kvlangStrbuf_t *out) {
-    kvlangStrbufClear(out);
+const char *kvlangKeytreeVtidFromPc(const char *pc, char *out, size_t cap) {
     const char *pfx = VTHREAD_ROOT PATH_SEP;
     size_t pl = strlen(pfx);
-    if (strncmp(pc, pfx, pl) != 0) return "";
+    if (strncmp(pc, pfx, pl) != 0) {
+        if (cap) out[0] = 0;
+        return "";
+    }
     const char *rest = pc + pl;
     const char *slash = strchr(rest, '/');
-    if (slash) kvlangStrbufPutn(out, rest, (size_t)(slash - rest));
-    else kvlangStrbufPuts(out, rest);
-    return out->p;
+    size_t n = slash ? (size_t)(slash - rest) : strlen(rest);
+    if (n + 1 > cap)
+        kvlangDie("vtid exceeds %zu bytes", cap);
+    memcpy(out, rest, n);
+    out[n] = 0;
+    return out;
 }
 
 char *kvlangKeytreeStack(const char *root) {
@@ -66,67 +71,53 @@ static char *trim_right_join(const char *root, const char *suffix) {
 
 char *kvlangKeytreeEntryPc(const char *root) { return trim_right_join(root, "/[1,0]"); }
 
-static void keytree_die(const char *fmt, ...) {
-    fputs("panic: ", stderr);
-    va_list ap; va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
-    va_end(ap);
-    fputc('\n', stderr);
-    abort();
-}
-
 char *kvlangKeytreeFrameAt(const char *vtid, int depth) {
-    if (!vtid || !vtid[0]) keytree_die("FrameAt: empty vtid");
-    if (depth < 1) keytree_die("FrameAt: depth %d < 1", depth);
-    kvlangStrbuf_t b; kvlangStrbufInit(&b);
-    kvlangStrbufPrintf(&b, "%s/%s/[%d]", VTHREAD_ROOT, vtid, depth);
-    return kvlangStrbufDetach(&b);
+    if (!vtid || !vtid[0]) kvlangDie("FrameAt: empty vtid");
+    if (depth < 1) kvlangDie("FrameAt: depth %d < 1", depth);
+    return kvlangAstr("%s/%s/[%d]", VTHREAD_ROOT, vtid, depth);
 }
 
 int kvlangKeytreeFrameNum(const char *path) {
     /* 免分配：/vthread/<vtid>/[d][/...] —— 直接定位 vtid 后的帧坐标，不构造前缀串。 */
     const size_t rl = sizeof(VTHREAD_ROOT) - 1;
     if (strncmp(path, VTHREAD_ROOT PATH_SEP, rl + 1) != 0)
-        keytree_die("FrameNum: not a vthread path: %s", path);
+        kvlangDie("FrameNum: not a vthread path: %s", path);
     const char *vtid = path + rl + 1;
     const char *slash = strchr(vtid, '/');
     if (!slash || slash == vtid)
-        keytree_die("FrameNum: not a vthread path: %s", path);
+        kvlangDie("FrameNum: not a vthread path: %s", path);
     const char *rest = slash + 1;
-    if (rest[0] != '[') keytree_die("FrameNum: no frame coord in %s", path);
+    if (rest[0] != '[') kvlangDie("FrameNum: no frame coord in %s", path);
     const char *end = strchr(rest, ']');
-    if (!end) keytree_die("FrameNum: unterminated frame coord in %s", path);
+    if (!end) kvlangDie("FrameNum: unterminated frame coord in %s", path);
     size_t clen = (size_t)(end - (rest + 1));
     if (clen == 0 || memchr(rest + 1, ',', clen)) {
-        keytree_die("FrameNum: expected [d] frame coord in %s", path);
+        kvlangDie("FrameNum: expected [d] frame coord in %s", path);
     }
     char buf[32];
-    if (clen >= sizeof buf) keytree_die("FrameNum: frame coord too long in %s", path);
+    if (clen >= sizeof buf) kvlangDie("FrameNum: frame coord too long in %s", path);
     memcpy(buf, rest + 1, clen); buf[clen] = 0;
     char *ep = NULL;
     long n = strtol(buf, &ep, 10);
-    if (ep == buf || *ep != 0 || n < 1) keytree_die("FrameNum: invalid frame number %s in %s", buf, path);
+    if (ep == buf || *ep != 0 || n < 1) kvlangDie("FrameNum: invalid frame number %s in %s", buf, path);
     const char *after = end + 1;
     if (after[0] == 0 || (after[0] == '/' && after[1] == 0)) {
         /* frame root */
     } else if (after[0] == '/' && after[1] == '[') {
         const char *tail = after + 1;
-        if (strchr(tail, '/')) keytree_die("FrameNum: nested path after [d]: %s", path);
-        if (!strchr(tail, ',')) keytree_die("FrameNum: expected [irseq,j] after [d] in %s", path);
+        if (strchr(tail, '/')) kvlangDie("FrameNum: nested path after [d]: %s", path);
+        if (!strchr(tail, ',')) kvlangDie("FrameNum: expected [irseq,j] after [d] in %s", path);
     } else {
-        keytree_die("FrameNum: expected /[irseq,j] after [d] in %s", path);
+        kvlangDie("FrameNum: expected /[irseq,j] after [d]: %s", path);
     }
     return (int)n;
 }
 
 char *kvlangKeytreeIrseqPc(const char *frame_root, int irseq) {
-    if (irseq < 0) keytree_die("IrseqPC: irseq %d < 0", irseq);
-    kvlangStrbuf_t b; kvlangStrbufInit(&b);
+    if (irseq < 0) kvlangDie("IrseqPC: irseq %d < 0", irseq);
     size_t n = strlen(frame_root);
     while (n > 0 && frame_root[n - 1] == '/') n--;
-    kvlangStrbufPutn(&b, frame_root, n);
-    kvlangStrbufPrintf(&b, "/[%d,0]", irseq);
-    return kvlangStrbufDetach(&b);
+    return kvlangAstr("%.*s/[%d,0]", (int)n, frame_root, irseq);
 }
 
 char *kvlangKeytreeMember(const char *base, const char *name) {
@@ -140,65 +131,66 @@ char *kvlangKeytreeMember(const char *base, const char *name) {
 }
 
 char *kvlangKeytreeLibFunc(const char *pkg, const char *name) {
-    kvlangStrbuf_t b; kvlangStrbufInit(&b);
-    kvlangStrbufPuts(&b, LIB_ROOT PATH_SEP);
-    if (pkg && pkg[0]) { kvlangStrbufPuts(&b, pkg); kvlangStrbufPuts(&b, MEMBER_SEP); }
-    kvlangStrbufPuts(&b, name);
-    return kvlangStrbufDetach(&b);
+    if (pkg && pkg[0])
+        return kvlangAstr("%s%s%s%s", LIB_ROOT PATH_SEP, pkg, MEMBER_SEP, name);
+    return kvlangAstr("%s%s", LIB_ROOT PATH_SEP, name);
 }
 
 char *kvlangKeytreeRwir(const char *opcode) {
-    kvlangStrbuf_t b; kvlangStrbufInit(&b);
-    kvlangStrbufPuts(&b, LIB_ROOT PATH_SEP);
-    kvlangStrbufPuts(&b, opcode);
-    return kvlangStrbufDetach(&b);
+    return kvlangAstr("%s%s", LIB_ROOT PATH_SEP, opcode);
 }
 
-void kvlangKeytreeVthread(const char *vtid, kvlangStrbuf_t *out) {
-    kvlangStrbufClear(out);
-    kvlangStrbufPuts(out, VTHREAD_ROOT PATH_SEP);
-    kvlangStrbufPuts(out, vtid);
+void kvlangKeytreeVthread(const char *vtid, char *out, size_t cap) {
+    kvlangKeyFmt(out, cap, "%s%s", VTHREAD_ROOT PATH_SEP, vtid);
 }
 
-void kvlangKeytreeVthreadSlot(const char *vtid, const char *frame, int i, int j, kvlangStrbuf_t *out) {
-    kvlangStrbufClear(out);
-    kvlangStrbufPuts(out, VTHREAD_ROOT PATH_SEP);
-    kvlangStrbufPuts(out, vtid);
-    if (frame && frame[0]) { kvlangStrbufPutc(out, '/'); kvlangStrbufPuts(out, frame); }
-    kvlangStrbufPrintf(out, "/[%d,%d]", i, j);
+void kvlangKeytreeVthreadSlot(const char *vtid, const char *frame, int i, int j,
+                              char *out, size_t cap) {
+    if (frame && frame[0])
+        kvlangKeyFmt(out, cap, "%s%s/%s/[%d,%d]", VTHREAD_ROOT PATH_SEP, vtid,
+                     frame, i, j);
+    else
+        kvlangKeyFmt(out, cap, "%s%s/[%d,%d]", VTHREAD_ROOT PATH_SEP, vtid, i, j);
 }
 
-static void kvlangVthreadMember(const char *vtid, const char *seg, kvlangStrbuf_t *out) {
-    kvlangStrbufClear(out);
-    kvlangStrbufPuts(out, VTHREAD_ROOT PATH_SEP);
-    kvlangStrbufPuts(out, vtid);
-    kvlangStrbufPutc(out, '/');
-    kvlangStrbufPuts(out, RUNTIME_MEMBER_SEP);
-    kvlangStrbufPuts(out, seg);
+static void kvlangVthreadMember(const char *vtid, const char *seg, char *out,
+                                size_t cap) {
+    kvlangKeyFmt(out, cap, "%s%s%s%s%s", VTHREAD_ROOT PATH_SEP, vtid, "/",
+                 RUNTIME_MEMBER_SEP, seg);
 }
 
-void kvlangKeytreeVthreadPc(const char *vtid, kvlangStrbuf_t *out) { kvlangVthreadMember(vtid, SEG_PC, out); }
-void kvlangKeytreeVthreadStatus(const char *vtid, kvlangStrbuf_t *out) { kvlangVthreadMember(vtid, SEG_STATUS, out); }
-void kvlangKeytreeVthreadDebugger(const char *vtid, kvlangStrbuf_t *out) { kvlangVthreadMember(vtid, "debugger", out); }
-
-void kvlangKeytreeVthreadStatusMsg(const char *vtid, const char *status, kvlangStrbuf_t *out) {
-    kvlangVthreadMember(vtid, status, out);
-    kvlangStrbufPutc(out, '/');
-    kvlangStrbufPuts(out, SEG_MSG);
+void kvlangKeytreeVthreadPc(const char *vtid, char *out, size_t cap) {
+    kvlangVthreadMember(vtid, SEG_PC, out, cap);
+}
+void kvlangKeytreeVthreadStatus(const char *vtid, char *out, size_t cap) {
+    kvlangVthreadMember(vtid, SEG_STATUS, out, cap);
+}
+void kvlangKeytreeVthreadDebugger(const char *vtid, char *out, size_t cap) {
+    kvlangVthreadMember(vtid, "debugger", out, cap);
 }
 
-static void frame_member(const char *root, const char *seg, kvlangStrbuf_t *out) {
-    kvlangStrbufClear(out);
-    char *s = kvlangKeytreeStack(root);
-    kvlangStrbufPuts(out, s);
-    free(s);
-    kvlangStrbufPuts(out, RUNTIME_MEMBER_SEP);
-    kvlangStrbufPuts(out, seg);
+void kvlangKeytreeVthreadStatusMsg(const char *vtid, const char *status,
+                                   char *out, size_t cap) {
+    kvlangKeyFmt(out, cap, "%s%s%s%s%s%s%s", VTHREAD_ROOT PATH_SEP, vtid, "/",
+                 RUNTIME_MEMBER_SEP, status, "/", SEG_MSG);
 }
 
-void kvlangKeytreeFrameCallpc(const char *root, kvlangStrbuf_t *out) { frame_member(root, SEG_CALLPC, out); }
-void kvlangKeytreeFrameReturnpc(const char *root, kvlangStrbuf_t *out) { frame_member(root, SEG_RETURNPC, out); }
-void kvlangKeytreeFrameRo(const char *root, kvlangStrbuf_t *out) { frame_member(root, SEG_RO, out); }
+static void frame_member(const char *root, const char *seg, char *out,
+                         size_t cap) {
+    size_t n = strlen(root);
+    while (n > 0 && root[n - 1] == '/') n--;
+    kvlangKeyFmt(out, cap, "%.*s%s%s", (int)n, root, RUNTIME_MEMBER_SEP, seg);
+}
+
+void kvlangKeytreeFrameCallpc(const char *root, char *out, size_t cap) {
+    frame_member(root, SEG_CALLPC, out, cap);
+}
+void kvlangKeytreeFrameReturnpc(const char *root, char *out, size_t cap) {
+    frame_member(root, SEG_RETURNPC, out, cap);
+}
+void kvlangKeytreeFrameRo(const char *root, char *out, size_t cap) {
+    frame_member(root, SEG_RO, out, cap);
+}
 
 bool kvlangKeytreeIsEntryPc(const char *pc) {
     const char *slash = strrchr(pc, '/');
@@ -222,18 +214,13 @@ bool kvlangKeytreeValidSegment(const char *s) {
 }
 
 static char *join3(const char *a, const char *b, const char *c) {
-    kvlangStrbuf_t s;
-    kvlangStrbufInit(&s);
-    kvlangStrbufPuts(&s, a);
-    if (b && b[0]) {
-        kvlangStrbufPutc(&s, '/');
-        kvlangStrbufPuts(&s, b);
-    }
-    if (c && c[0]) {
-        kvlangStrbufPutc(&s, '/');
-        kvlangStrbufPuts(&s, c);
-    }
-    return kvlangStrbufDetach(&s);
+    if (b && b[0] && c && c[0])
+        return kvlangAstr("%s/%s/%s", a, b, c);
+    if (b && b[0])
+        return kvlangAstr("%s/%s", a, b);
+    if (c && c[0])
+        return kvlangAstr("%s/%s", a, c);
+    return strdup(a);
 }
 
 char *kvlangKeytreeSysRwirBackendRoot(void) {
@@ -245,13 +232,8 @@ char *kvlangKeytreeSysRwirBackend(const char *name) {
 }
 
 char *kvlangKeytreeSysRwirBackendOp(const char *name, const char *opcode) {
-    kvlangStrbuf_t s;
-    kvlangStrbufInit(&s);
-    kvlangStrbufPuts(&s, SYS_ROOT PATH_SEP SEG_RWIR_BACKEND "/");
-    kvlangStrbufPuts(&s, name);
-    kvlangStrbufPuts(&s, "/" SEG_OP "/");
-    kvlangStrbufPuts(&s, opcode);
-    return kvlangStrbufDetach(&s);
+    return kvlangAstr("%s/%s/%s/%s", SYS_ROOT PATH_SEP SEG_RWIR_BACKEND, name,
+                      SEG_OP, opcode);
 }
 
 char *kvlangKeytreeSysRwirBackendCmd(const char *name) {
@@ -275,14 +257,8 @@ char *kvlangKeytreeSysRwirBackendCategoryRoot(const char *name) {
 }
 
 char *kvlangKeytreeSysTask(const char *task_id, const char *field) {
-    kvlangStrbuf_t s;
-    kvlangStrbufInit(&s);
-    kvlangStrbufPuts(&s, SYS_ROOT PATH_SEP SEG_TASK "/");
-    kvlangStrbufPuts(&s, task_id);
-    kvlangStrbufPutc(&s, '/');
-    kvlangStrbufPuts(&s, RUNTIME_MEMBER_SEP);
-    kvlangStrbufPuts(&s, field);
-    return kvlangStrbufDetach(&s);
+    return kvlangAstr("%s/%s/%s%s", SYS_ROOT PATH_SEP SEG_TASK, task_id,
+                      RUNTIME_MEMBER_SEP, field);
 }
 
 char *kvlangKeytreeDoneRwir(const char *task_id) {
@@ -290,12 +266,7 @@ char *kvlangKeytreeDoneRwir(const char *task_id) {
 }
 
 char *kvlangKeytreeLibSig(const char *opcode) {
-    kvlangStrbuf_t s;
-    kvlangStrbufInit(&s);
-    kvlangStrbufPuts(&s, LIB_ROOT PATH_SEP);
-    kvlangStrbufPuts(&s, opcode);
-    kvlangStrbufPuts(&s, "/[0,0]");
-    return kvlangStrbufDetach(&s);
+    return kvlangAstr("%s%s/[0,0]", LIB_ROOT PATH_SEP, opcode);
 }
 
 static char *write_err(size_t n, const char *fmt, ...) {
@@ -345,25 +316,19 @@ char *kvlangKeytreeCheckWriteKey(const char *vtid, const char *key) {
     }
     size_t vr = strlen(VTHREAD_ROOT) + 1;
     if (strncmp(key, VTHREAD_ROOT "/", vr) == 0) {
-        kvlangStrbuf_t own;
-        kvlangStrbufInit(&own);
-        kvlangKeytreeVthread(vtid, &own);
-        if (strcmp(key, own.p) == 0) {
-            char *e = write_err(200,
-                                "IsADirectoryError: write slot targets this vthread's frame root: \"%s\"; help: a frame root is a directory and writing it as a leaf destroys the call frame",
-                                key);
-            kvlangStrbufFree(&own);
-            return e;
+        char own[KV_KEY_MAX];
+        kvlangKeytreeVthread(vtid, own, sizeof own);
+        if (strcmp(key, own) == 0) {
+            return write_err(200,
+                             "IsADirectoryError: write slot targets this vthread's frame root: \"%s\"; help: a frame root is a directory and writing it as a leaf destroys the call frame",
+                             key);
         }
-        size_t ol = strlen(own.p);
-        if (!(strncmp(key, own.p, ol) == 0 && key[ol] == '/')) {
-            char *e = write_err(240,
-                                "PermissionError: write slot is outside this vthread's subtree (vtid=%s): \"%s\"; help: the whole /vthread domain belongs to the engine, a program may only write keys under %s/",
-                                vtid, key, own.p);
-            kvlangStrbufFree(&own);
-            return e;
+        size_t ol = strlen(own);
+        if (!(strncmp(key, own, ol) == 0 && key[ol] == '/')) {
+            return write_err(240,
+                             "PermissionError: write slot is outside this vthread's subtree (vtid=%s): \"%s\"; help: the whole /vthread domain belongs to the engine, a program may only write keys under %s/",
+                             vtid, key, own);
         }
-        kvlangStrbufFree(&own);
     }
     return NULL;
 }

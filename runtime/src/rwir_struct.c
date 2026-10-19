@@ -2,13 +2,11 @@
 
 static char *struct_field_type(kvlangKv_t *kv, const char *base,
                                const char *fname) {
-    kvlangStrbuf_t key;
-    kvlangStrbufInit(&key);
-    kvlangStrbufPrintf(&key, "%s/%s", base, fname);
+    char key[KV_KEY_MAX];
+    kvlangKeyFmt(key, sizeof key, "%s/%s", base, fname);
     kvlangXvalue_t value;
     kvlangXvalueZero(&value);
-    kvlangKvGetOne(kv, key.p, &value);
-    kvlangStrbufFree(&key);
+    kvlangKvGetOne(kv, key, &value);
     if (kvlangXvalueNone(&value) ||
         strcmp(kvlangXvalueKind(&value), KVSPACE_KIND_DEF_LANGTYPE) != 0) {
         kvlangXvalueFree(&value);

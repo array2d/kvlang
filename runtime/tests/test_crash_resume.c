@@ -17,11 +17,9 @@ int main(void) {
         kvlangKv_t *kv = kvlangKvConnect(dsn);
         if (!kv)
             _exit(2);
-        kvlangStrbuf_t key;
-        kvlangStrbufInit(&key);
-        kvlangKeytreeVthreadPc("vt0", &key);
-        int rc = kvlangKvSetChar(kv, key.p, "/lib/f/[2,0]");
-        kvlangStrbufFree(&key);
+        char key[KV_KEY_MAX];
+        kvlangKeytreeVthreadPc("vt0", key, sizeof key);
+        int rc = kvlangKvSetChar(kv, key, "/lib/f/[2,0]");
         kvlangXvalue_t value;
         kvlangXvalueNewInt64(&value, 73);
         kvlangKvPair_t pair = {"/value", value};

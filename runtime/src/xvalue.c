@@ -384,22 +384,27 @@ uint32_t kvlangXvalueChar32At(const kvlangXvalue_t *v, int32_t idx) {
 
 /* ── UTF-8 ↔ UTF-32 ────────────────────────────────────────────────── */
 
-static void utf8_putc(kvlangStrbuf_t *b, uint32_t cp) {
-    if (cp < 0x80)
-        kvlangStrbufPutc(b, (char)cp);
-    else if (cp < 0x800) {
-        kvlangStrbufPutc(b, (char)(0xC0 | (cp >> 6)));
-        kvlangStrbufPutc(b, (char)(0x80 | (cp & 0x3F)));
-    } else if (cp < 0x10000) {
-        kvlangStrbufPutc(b, (char)(0xE0 | (cp >> 12)));
-        kvlangStrbufPutc(b, (char)(0x80 | ((cp >> 6) & 0x3F)));
-        kvlangStrbufPutc(b, (char)(0x80 | (cp & 0x3F)));
-    } else {
-        kvlangStrbufPutc(b, (char)(0xF0 | (cp >> 18)));
-        kvlangStrbufPutc(b, (char)(0x80 | ((cp >> 12) & 0x3F)));
-        kvlangStrbufPutc(b, (char)(0x80 | ((cp >> 6) & 0x3F)));
-        kvlangStrbufPutc(b, (char)(0x80 | (cp & 0x3F)));
+static size_t utf8_putc(char *out, uint32_t cp) {
+    if (cp < 0x80) {
+        out[0] = (char)cp;
+        return 1;
     }
+    if (cp < 0x800) {
+        out[0] = (char)(0xC0 | (cp >> 6));
+        out[1] = (char)(0x80 | (cp & 0x3F));
+        return 2;
+    }
+    if (cp < 0x10000) {
+        out[0] = (char)(0xE0 | (cp >> 12));
+        out[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        out[2] = (char)(0x80 | (cp & 0x3F));
+        return 3;
+    }
+    out[0] = (char)(0xF0 | (cp >> 18));
+    out[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
+    out[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
+    out[3] = (char)(0x80 | (cp & 0x3F));
+    return 4;
 }
 
 static uint32_t utf8_next(const char *s, size_t *i, size_t len) {
@@ -430,11 +435,15 @@ static uint32_t utf8_next(const char *s, size_t *i, size_t len) {
 }
 
 static char *utf32_to_utf8(const uint8_t *body, int32_t blen) {
-    kvlangStrbuf_t b;
-    kvlangStrbufInit(&b);
+    size_t n = (size_t)(blen / 4);
+    char *s = malloc(n * 4 + 1);
+    if (!s)
+        kvlangDie("out of memory formatting char/utf32");
+    size_t off = 0;
     for (int32_t i = 0; i + 4 <= blen; i += 4)
-        utf8_putc(&b, rd32(body + i));
-    return kvlangStrbufDetach(&b);
+        off += utf8_putc(s + off, rd32(body + i));
+    s[off] = 0;
+    return s;
 }
 
 static char *strndup2(const uint8_t *p, int32_t n) {
@@ -454,13 +463,6 @@ char *kvlangXvaluePtrTarget(const kvlangXvalue_t *v) {
 
 /* ── value_string（对齐 Go ValueString）────────────────────────────── */
 
-static void append_num_int(kvlangStrbuf_t *b, int64_t n) {
-    kvlangStrbufPrintf(b, "%lld", (long long)n);
-}
-static void append_num_uint(kvlangStrbuf_t *b, uint64_t n) {
-    kvlangStrbufPrintf(b, "%llu", (unsigned long long)n);
-}
-
 char *kvlangXvalueValueString(const kvlangXvalue_t *v) {
     if (kvlangXvalueNone(v))
         return strdup(KVSPACE_KIND_NONE);
@@ -469,62 +471,33 @@ char *kvlangXvalueValueString(const kvlangXvalue_t *v) {
     const char *k = kvlangXvalueKind(v);
 
     if (xh_is_ptr(v->data)) {
-        kvlangStrbuf_t b;
-        kvlangStrbufInit(&b);
-        kvlangStrbufPutn(&b, "\xE2\x86\x92", 3);
-        kvlangStrbufPutn(&b, (const char *)body, (size_t)blen);
-        return kvlangStrbufDetach(&b);
+        char *s = malloc((size_t)blen + 4);
+        if (!s)
+            kvlangDie("out of memory formatting pointer");
+        memcpy(s, "\xE2\x86\x92", 3);
+        if (blen)
+            memcpy(s + 3, body, (size_t)blen);
+        s[blen + 3] = 0;
+        return s;
     }
     if (strcmp(k, KVSPACE_KIND_BOOL) == 0)
         return strdup(body[0] ? "true" : "false");
-    if (strcmp(k, KVSPACE_KIND_INT8) == 0) {
-        kvlangStrbuf_t b;
-        kvlangStrbufInit(&b);
-        append_num_int(&b, (int8_t)body[0]);
-        return kvlangStrbufDetach(&b);
-    }
-    if (strcmp(k, KVSPACE_KIND_INT16) == 0) {
-        kvlangStrbuf_t b;
-        kvlangStrbufInit(&b);
-        append_num_int(&b, (int16_t)rd16(body));
-        return kvlangStrbufDetach(&b);
-    }
-    if (strcmp(k, KVSPACE_KIND_INT32) == 0) {
-        kvlangStrbuf_t b;
-        kvlangStrbufInit(&b);
-        append_num_int(&b, (int32_t)rd32(body));
-        return kvlangStrbufDetach(&b);
-    }
-    if (strcmp(k, KVSPACE_KIND_INT64) == 0) {
-        kvlangStrbuf_t b;
-        kvlangStrbufInit(&b);
-        append_num_int(&b, (int64_t)rd64(body));
-        return kvlangStrbufDetach(&b);
-    }
-    if (strcmp(k, KVSPACE_KIND_UINT8) == 0) {
-        kvlangStrbuf_t b;
-        kvlangStrbufInit(&b);
-        append_num_uint(&b, body[0]);
-        return kvlangStrbufDetach(&b);
-    }
-    if (strcmp(k, KVSPACE_KIND_UINT16) == 0) {
-        kvlangStrbuf_t b;
-        kvlangStrbufInit(&b);
-        append_num_uint(&b, rd16(body));
-        return kvlangStrbufDetach(&b);
-    }
-    if (strcmp(k, KVSPACE_KIND_UINT32) == 0) {
-        kvlangStrbuf_t b;
-        kvlangStrbufInit(&b);
-        append_num_uint(&b, rd32(body));
-        return kvlangStrbufDetach(&b);
-    }
-    if (strcmp(k, KVSPACE_KIND_UINT64) == 0) {
-        kvlangStrbuf_t b;
-        kvlangStrbufInit(&b);
-        append_num_uint(&b, rd64(body));
-        return kvlangStrbufDetach(&b);
-    }
+    if (strcmp(k, KVSPACE_KIND_INT8) == 0)
+        return kvlangAstr("%d", (int)(int8_t)body[0]);
+    if (strcmp(k, KVSPACE_KIND_INT16) == 0)
+        return kvlangAstr("%d", (int)(int16_t)rd16(body));
+    if (strcmp(k, KVSPACE_KIND_INT32) == 0)
+        return kvlangAstr("%d", (int32_t)rd32(body));
+    if (strcmp(k, KVSPACE_KIND_INT64) == 0)
+        return kvlangAstr("%lld", (long long)(int64_t)rd64(body));
+    if (strcmp(k, KVSPACE_KIND_UINT8) == 0)
+        return kvlangAstr("%u", (unsigned)body[0]);
+    if (strcmp(k, KVSPACE_KIND_UINT16) == 0)
+        return kvlangAstr("%u", (unsigned)rd16(body));
+    if (strcmp(k, KVSPACE_KIND_UINT32) == 0)
+        return kvlangAstr("%u", rd32(body));
+    if (strcmp(k, KVSPACE_KIND_UINT64) == 0)
+        return kvlangAstr("%llu", (unsigned long long)rd64(body));
     if (strcmp(k, KVSPACE_KIND_FLOAT32) == 0 ||
         strcmp(k, KVSPACE_KIND_FLOAT64) == 0) {
         char tmp[64];
@@ -542,11 +515,8 @@ char *kvlangXvalueValueString(const kvlangXvalue_t *v) {
     if (strcmp(k, KVSPACE_KIND_RWFUNC) == 0) {
         if (blen > 5)
             return strndup2(body + 5, blen - 5);
-        kvlangStrbuf_t b;
-        kvlangStrbufInit(&b);
-        kvlangStrbufPrintf(&b, "r%d/w%d", (blen >= 2 ? rd16(body) : 0),
-                           (blen >= 4 ? rd16(body + 2) : 0));
-        return kvlangStrbufDetach(&b);
+        return kvlangAstr("r%d/w%d", (blen >= 2 ? rd16(body) : 0),
+                          (blen >= 4 ? rd16(body + 2) : 0));
     }
     if (kvlangKindIsMap(k))
         return strdup("map");
@@ -618,18 +588,20 @@ void kvlangXvalueNewCharKind(kvlangXvalue_t *v, const char *kind,
 }
 void kvlangXvalueNewCharUtf32(kvlangXvalue_t *v, const char *s) {
     size_t len = strlen(s);
-    kvlangStrbuf_t raw;
-    kvlangStrbufInit(&raw);
-    size_t i = 0;
+    uint8_t *raw = malloc((len ? len : 1) * 4);
+    if (!raw)
+        kvlangDie("out of memory encoding char/utf32");
+    size_t i = 0, off = 0;
     while (i < len) {
         uint32_t cp = utf8_next(s, &i, len);
-        uint8_t le[4] = {cp & 0xFF, (cp >> 8) & 0xFF, (cp >> 16) & 0xFF,
-                         (cp >> 24) & 0xFF};
-        kvlangStrbufPutn(&raw, (const char *)le, 4);
+        raw[off++] = (uint8_t)(cp & 0xFF);
+        raw[off++] = (uint8_t)((cp >> 8) & 0xFF);
+        raw[off++] = (uint8_t)((cp >> 16) & 0xFF);
+        raw[off++] = (uint8_t)((cp >> 24) & 0xFF);
     }
-    kvlangXvalueNewTlv(v, KVSPACE_KIND_CHAR, (const uint8_t *)raw.p,
-                       (uint32_t)raw.len, (int32_t)(raw.len / 4));
-    kvlangStrbufFree(&raw);
+    kvlangXvalueNewTlv(v, KVSPACE_KIND_CHAR, raw, (uint32_t)off,
+                       (int32_t)(off / 4));
+    free(raw);
 }
 /* 指针：head langtype = "*" + target_langtype（目标完整 langtype），body = 目标 key。 */
 void kvlangXvalueNewPtr(kvlangXvalue_t *v, const char *target_langtype,
