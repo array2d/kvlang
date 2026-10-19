@@ -22,26 +22,23 @@ static char *original_absolute_arg(kvlangFrame_t *f, int idx) {
     char *fr = kvlangKeytreeFrameRoot(f->pc);
     if (!fr)
         return NULL;
-    kvlangStrbuf_t key;
-    kvlangStrbufInit(&key);
-    kvlangStrbufPrintf(&key, "%s/%slib", fr, RUNTIME_MEMBER_SEP);
+    char key[KV_KEY_MAX];
+    kvlangKeyFmt(key, sizeof key, "%s/%slib", fr, RUNTIME_MEMBER_SEP);
     kvlangXvalue_t lib;
     kvlangXvalueZero(&lib);
-    kvlangKvGetOne(f->kv, key.p, &lib);
+    kvlangKvGetOne(f->kv, key, &lib);
     char *root = kvlangXvalueNone(&lib) ? NULL : kvlangXvalueValueString(&lib);
     kvlangXvalueFree(&lib);
     if (!root || root[0] != '/') {
         free(root);
         free(fr);
-        kvlangStrbufFree(&key);
         return NULL;
     }
     int row = kvlangRwirExtractAddr0(strrchr(f->pc, '/') + 1);
-    kvlangStrbufClear(&key);
-    kvlangStrbufPrintf(&key, "%s/[%d,-%d]", root, row, idx + 1);
+    kvlangKeyFmt(key, sizeof key, "%s/[%d,-%d]", root, row, idx + 1);
     kvlangXvalue_t source;
     kvlangXvalueZero(&source);
-    kvlangKvGetOne(f->kv, key.p, &source);
+    kvlangKvGetOne(f->kv, key, &source);
     char *name = kvlangXvalueKindIs(&source, KVSPACE_KIND_RWIR) ?
                  kvlangXvalueSlotName(&source) : NULL;
     if (name && name[0] != '/') {
@@ -49,7 +46,6 @@ static char *original_absolute_arg(kvlangFrame_t *f, int idx) {
         name = NULL;
     }
     kvlangXvalueFree(&source);
-    kvlangStrbufFree(&key);
     free(root);
     free(fr);
     return name;

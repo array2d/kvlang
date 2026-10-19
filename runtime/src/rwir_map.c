@@ -123,10 +123,7 @@ int kvlangBuiltinMap(kvlangFrame_t *f) {
 
         char **names = malloc(sizeof(char *) * (size_t)(n > 0 ? n : 1));
         for (int i = 0; i < n; i++) {
-            kvlangStrbuf_t s;
-            kvlangStrbufInit(&s);
-            kvlangStrbufPrintf(&s, "[%d]", i);
-            names[i] = kvlangStrbufDetach(&s);
+            names[i] = kvlangAstr("[%d]", i);
         }
         /* 容器值 p：langtype=声明的 map langtype，body 空，dims=[n] 落 head。 */
         char *wty = declared_map_langtype(f, w);

@@ -222,6 +222,90 @@ bool kvlangDispatchIsDelegatedOp(kvlangKv_t *kv, const char *opcode) {
     return ok;
 }
 
+typedef struct {
+    char **v;
+    size_t n, cap, len;
+} parts_t;
+
+static void parts_push(parts_t *p, char *s) {
+    if (p->n == p->cap) {
+        p->cap = p->cap ? p->cap * 2 : 8;
+        p->v = realloc(p->v, sizeof(char *) * p->cap);
+        if (!p->v)
+            kvlangDie("out of memory building string parts");
+    }
+    p->v[p->n++] = s;
+    p->len += strlen(s);
+}
+
+/* 拼接后释放所有片段；sep 仅用于分隔。 */
+static char *parts_join(parts_t *p, const char *sep) {
+    size_t sl = strlen(sep);
+    size_t total = p->len + (p->n > 1 ? (p->n - 1) * sl : 0);
+    char *out = malloc(total + 1);
+    if (!out)
+        kvlangDie("out of memory joining string parts");
+    size_t off = 0;
+    for (size_t i = 0; i < p->n; i++) {
+        if (i && sl) {
+            memcpy(out + off, sep, sl);
+            off += sl;
+        }
+        size_t n = strlen(p->v[i]);
+        memcpy(out + off, p->v[i], n);
+        off += n;
+        free(p->v[i]);
+    }
+    out[off] = 0;
+    free(p->v);
+    *p = (parts_t){0};
+    return out;
+}
+
+static char *json_esc_dup(const char *s) {
+    size_t n = 2; /* quotes */
+    for (const char *p = s ? s : ""; *p; p++) {
+        unsigned char c = (unsigned char)*p;
+        n += (c == '"' || c == '\\' || c == '\n' || c == '\r' || c == '\t')
+                 ? 2
+                 : c < 0x20 ? 6 : 1;
+    }
+    char *o = malloc(n + 1);
+    if (!o)
+        kvlangDie("out of memory escaping json");
+    static const char hex[] = "0123456789abcdef";
+    size_t off = 0;
+    o[off++] = '"';
+    for (const char *p = s ? s : ""; *p; p++) {
+        unsigned char c = (unsigned char)*p;
+        if (c == '"' || c == '\\') {
+            o[off++] = '\\';
+            o[off++] = (char)c;
+        } else if (c == '\n') {
+            o[off++] = '\\';
+            o[off++] = 'n';
+        } else if (c == '\r') {
+            o[off++] = '\\';
+            o[off++] = 'r';
+        } else if (c == '\t') {
+            o[off++] = '\\';
+            o[off++] = 't';
+        } else if (c < 0x20) {
+            o[off++] = '\\';
+            o[off++] = 'u';
+            o[off++] = '0';
+            o[off++] = '0';
+            o[off++] = hex[(c >> 4) & 0xF];
+            o[off++] = hex[c & 0xF];
+        } else {
+            o[off++] = (char)c;
+        }
+    }
+    o[off++] = '"';
+    o[off] = 0;
+    return o;
+}
+
 static int select_backend(kvlangKv_t *kv, const char *op, char **out, char *err, size_t err_cap) {
     *out = NULL;
     strlist_t reg = {0}, duty = {0};
@@ -233,23 +317,19 @@ static int select_backend(kvlangKv_t *kv, const char *op, char **out, char *err,
         return -1;
     }
     if (duty.n == 0) {
-        kvlangStrbuf_t got;
-        kvlangStrbufInit(&got);
+        parts_t got = {0};
         for (int i = 0; i < reg.n; i++) {
-            if (i)
-                kvlangStrbufPuts(&got, ", ");
             char *sk = kvlangKeytreeSysRwirBackendStatus(reg.v[i]);
             char *st = get_char(kv, sk);
             free(sk);
-            kvlangStrbufPuts(&got, reg.v[i]);
-            kvlangStrbufPuts(&got, "=");
-            kvlangStrbufPuts(&got, st ? st : "");
+            parts_push(&got, kvlangAstr("%s=%s", reg.v[i], st ? st : ""));
             free(st);
         }
+        char *got_line = parts_join(&got, ", ");
         snprintf(err, err_cap,
                  "no on-duty backend for opcode=%s; backend status must be ready|busy, got %s",
-                 op, got.p ? got.p : "");
-        kvlangStrbufFree(&got);
+                 op, got_line);
+        free(got_line);
         sl_free(&reg);
         sl_free(&duty);
         return -1;
@@ -300,26 +380,6 @@ static int set_char(kvlangKv_t *kv, const char *key, const char *s, char *err, u
     return rc;
 }
 
-static void json_esc(kvlangStrbuf_t *b, const char *s) {
-    kvlangStrbufPutc(b, '"');
-    for (; s && *s; s++) {
-        unsigned char c = (unsigned char)*s;
-        if (c == '"' || c == '\\') {
-            kvlangStrbufPutc(b, '\\');
-            kvlangStrbufPutc(b, (char)c);
-        } else if (c == '\n')
-            kvlangStrbufPuts(b, "\\n");
-        else if (c == '\r')
-            kvlangStrbufPuts(b, "\\r");
-        else if (c == '\t')
-            kvlangStrbufPuts(b, "\\t");
-        else if (c < 0x20)
-            kvlangStrbufPrintf(b, "\\u%04x", (unsigned)c);
-        else
-            kvlangStrbufPutc(b, (char)c);
-    }
-    kvlangStrbufPutc(b, '"');
-}
 
 static bool is_var_slot(const kvlangParam_t *p) {
     if (!p->name || !p->name[0] || strstr(p->name, "/" RUNTIME_MEMBER_SEP "operand["))
@@ -397,18 +457,15 @@ int kvlangDispatchDelegate(kvlangKv_t *kv, const char *vtid, const char *pc, kvl
             kvlangXvalueFree(&sig);
             return KVLANG_DELEGATE_LOCAL;
         }
-        kvlangStrbuf_t names;
-        kvlangStrbufInit(&names);
-        for (int i = 0; i < duty.n; i++) {
-            if (i)
-                kvlangStrbufPuts(&names, ",");
-            kvlangStrbufPuts(&names, duty.v[i]);
-        }
+        parts_t names = {0};
+        for (int i = 0; i < duty.n; i++)
+            parts_push(&names, strdup(duty.v[i]));
         sl_free(&duty);
+        char *name_list = parts_join(&names, ",");
         int rc = fail_msg(kv, vtid, pc,
                           "%s: on-duty backend %s and local rwfunc both define it; one opcode, one definition",
-                          op, names.p ? names.p : "");
-        kvlangStrbufFree(&names);
+                          op, name_list);
+        free(name_list);
         kvlangXvalueFree(&sig);
         return rc;
     }
@@ -476,54 +533,55 @@ int kvlangDispatchDelegate(kvlangKv_t *kv, const char *vtid, const char *pc, kvl
         out_keys[i] = key;
     }
 
-    kvlangStrbuf_t json;
-    kvlangStrbufInit(&json);
-    kvlangStrbufPuts(&json, "{\"request_id\":");
-    json_esc(&json, task_id);
-    kvlangStrbufPuts(&json, ",\"vtid\":");
-    json_esc(&json, vtid);
-    kvlangStrbufPuts(&json, ",\"pc\":");
-    json_esc(&json, pc);
-    kvlangStrbufPuts(&json, ",\"opcode\":");
-    json_esc(&json, op);
-    kvlangStrbufPuts(&json, ",\"inputs\":[");
+    char *json = NULL;
+    parts_t j = {0};
+    parts_push(&j, strdup("{\"request_id\":"));
+    parts_push(&j, json_esc_dup(task_id));
+    parts_push(&j, strdup(",\"vtid\":"));
+    parts_push(&j, json_esc_dup(vtid));
+    parts_push(&j, strdup(",\"pc\":"));
+    parts_push(&j, json_esc_dup(pc));
+    parts_push(&j, strdup(",\"opcode\":"));
+    parts_push(&j, json_esc_dup(op));
+    parts_push(&j, strdup(",\"inputs\":["));
     for (int i = 0; i < inst->nr; i++) {
         if (i)
-            kvlangStrbufPutc(&json, ',');
-        kvlangStrbufPutc(&json, '{');
+            parts_push(&j, strdup(","));
+        parts_push(&j, strdup("{"));
         char *rk = is_var_slot(&inst->reads[i])
                        ? kvlangBuiltinResolveWriteSlot(kv, fr, inst->reads[i].name)
                        : NULL;
         if (rk && !keyset_has(out_keys, inst->nw, rk)) {
-            kvlangStrbufPuts(&json, "\"key\":");
-            json_esc(&json, rk);
+            parts_push(&j, strdup("\"key\":"));
+            parts_push(&j, json_esc_dup(rk));
         } else {
             kvlangXvalue_t val;
             kvlangXvalueZero(&val);
             kvlangBuiltinResolveReadValue(kv, fr, inst->reads[i].name, &inst->reads[i].val, &val);
             char *disp = NULL;
             kvlangDisplay(&val, &disp);
-            kvlangStrbufPuts(&json, "\"value\":");
-            json_esc(&json, disp ? disp : "");
+            parts_push(&j, strdup("\"value\":"));
+            parts_push(&j, json_esc_dup(disp ? disp : ""));
             free(disp);
             kvlangXvalueFree(&val);
         }
         free(rk);
-        kvlangStrbufPutc(&json, '}');
+        parts_push(&j, strdup("}"));
     }
-    kvlangStrbufPuts(&json, "],\"outputs\":[");
+    parts_push(&j, strdup("],\"outputs\":["));
     for (int i = 0; i < inst->nw; i++) {
         if (i)
-            kvlangStrbufPutc(&json, ',');
-        kvlangStrbufPuts(&json, "{\"key\":");
-        json_esc(&json, out_keys[i]);
-        kvlangStrbufPutc(&json, '}');
+            parts_push(&j, strdup(","));
+        parts_push(&j, strdup("{\"key\":"));
+        parts_push(&j, json_esc_dup(out_keys[i]));
+        parts_push(&j, strdup("}"));
     }
     char *done_key = kvlangKeytreeDoneRwir(task_id);
-    kvlangStrbufPuts(&json, "],\"done_key\":");
-    json_esc(&json, done_key);
+    parts_push(&j, strdup("],\"done_key\":"));
+    parts_push(&j, json_esc_dup(done_key));
     free(done_key);
-    kvlangStrbufPutc(&json, '}');
+    parts_push(&j, strdup("}"));
+    json = parts_join(&j, "");
 
     char *status_key = kvlangKeytreeSysTask(task_id, SEG_STATUS);
     kvlangXvalue_t existing;
@@ -548,18 +606,13 @@ int kvlangDispatchDelegate(kvlangKv_t *kv, const char *vtid, const char *pc, kvl
     }
 
     char *cmd = kvlangKeytreeSysRwirBackendCmd(backend);
-    kvlangStrbuf_t cmdk;
-    kvlangStrbufInit(&cmdk);
-    kvlangStrbufPuts(&cmdk, cmd);
-    kvlangStrbufPutc(&cmdk, '/');
-    kvlangStrbufPuts(&cmdk, task_id);
+    char cmdk[KV_KEY_MAX];
+    kvlangKeyFmt(cmdk, sizeof cmdk, "%s/%s", cmd, task_id);
     free(cmd);
-    if (set_char(kv, cmdk.p, json.p, err, sizeof err) != 0) {
+    if (set_char(kv, cmdk, json, err, sizeof err) != 0) {
         rc = fail_msg(kv, vtid, pc, "push task: %s", err);
-        kvlangStrbufFree(&cmdk);
         goto enqueue_done;
     }
-    kvlangStrbufFree(&cmdk);
 
     kvlangVthreadSet(kv, vtid, pc, "wait");
     kvlangLogDebug("[%s] DELEGATE %s task=%s", vtid, inst->opcode, task_id);
@@ -595,16 +648,15 @@ int kvlangDispatchDelegate(kvlangKv_t *kv, const char *vtid, const char *pc, kvl
         }
     }
 
-    kvlangStrbuf_t npc;
-    kvlangStrbufInit(&npc);
-    kvlangRwirNextPc(pc, &npc);
-    kvlangVthreadSet(kv, vtid, npc.p, "running");
-    kvlangStrbufFree(&npc);
+    char npc[KV_KEY_MAX];
+    if (kvlangRwirNextPcBuf(pc, npc, sizeof npc) == 0)
+        kvlangDie("next pc exceeds %zu bytes", sizeof npc);
+    kvlangVthreadSet(kv, vtid, npc, "running");
     kvlangLogDebug("[%s] DONE %s task=%s", vtid, inst->opcode, task_id);
 
 enqueue_done:
     free(status_key);
-    kvlangStrbufFree(&json);
+    free(json);
 done:
     if (out_keys) {
         for (int i = 0; i < inst->nw; i++)

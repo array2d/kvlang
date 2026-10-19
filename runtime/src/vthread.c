@@ -3,24 +3,22 @@
 #define VT_MEMBER_GET(fn, want_status)                                        \
     void fn(kvlangKv_t *kv, const char *vtid, char **out) {                   \
         *out = NULL;                                                          \
-        kvlangStrbuf_t k; kvlangStrbufInit(&k);                               \
-        if (want_status) kvlangKeytreeVthreadStatus(vtid, &k);                \
-        else kvlangKeytreeVthreadPc(vtid, &k);                                \
+        char k[KV_KEY_MAX];                                                   \
+        if (want_status) kvlangKeytreeVthreadStatus(vtid, k, sizeof k);       \
+        else kvlangKeytreeVthreadPc(vtid, k, sizeof k);                       \
         kvlangXvalue_t v; kvlangXvalueZero(&v);                               \
-        kvlangKvGetOne(kv, k.p, &v);                                          \
+        kvlangKvGetOne(kv, k, &v);                                            \
         if (!kvlangXvalueNone(&v)) *out = kvlangXvalueValueString(&v);        \
         kvlangXvalueFree(&v);                                                 \
-        kvlangStrbufFree(&k);                                                 \
     }
 
 /* Read PC and status separately from KVSpace. */
 VT_MEMBER_GET(kvlangVthreadPcGet, false)
 VT_MEMBER_GET(kvlangVthreadStatusGet, true)
 
-/* 复用缓冲版：把 key 的成员值读进调用方 strbuf（容量跨步保留），免每步 strdup + free。
- * 返回 false = 键缺失或 None（out 清空）。供执行循环每步读 pc / status。 */
-bool kvlangVthreadMemberGetBuf(kvlangKv_t *kv, const char *key, kvlangStrbuf_t *out) {
-    kvlangStrbufClear(out);
+/* 读成员值到调用方缓冲；false = 键缺失或 None。 */
+bool kvlangVthreadMemberGetBuf(kvlangKv_t *kv, const char *key, char *out,
+                               size_t cap) {
     kvlangXvalue_t v;
     kvlangXvalueZero(&v);
     if (kvlangKvGetOne(kv, key, &v) != 0)
@@ -29,14 +27,22 @@ bool kvlangVthreadMemberGetBuf(kvlangKv_t *kv, const char *key, kvlangStrbuf_t *
         kvlangXvalueFree(&v);
         return false;
     }
+    char *tmp = NULL;
+    const char *src;
+    size_t n;
     if (kvlangXvalueKindIs(&v, KVSPACE_KIND_CHAR_UTF8)) {
-        kvlangStrbufPutn(out, (const char *)xh_body(v.data),
-                         (size_t)xh_content_len(v.data));
+        src = (const char *)xh_body(v.data);
+        n = (size_t)xh_content_len(v.data);
     } else {
-        char *s = kvlangXvalueValueString(&v);
-        kvlangStrbufPuts(out, s);
-        free(s);
+        tmp = kvlangXvalueValueString(&v);
+        src = tmp;
+        n = strlen(tmp);
     }
+    if (n + 1 > cap)
+        kvlangDie("member value exceeds %zu bytes", cap);
+    memcpy(out, src, n);
+    out[n] = 0;
+    free(tmp);
     kvlangXvalueFree(&v);
     return true;
 }
@@ -47,72 +53,70 @@ void kvlangVthreadGet(kvlangKv_t *kv, const char *vtid, char **pc, char **status
 }
 
 int kvlangVthreadSet(kvlangKv_t *kv, const char *vtid, const char *pc, const char *status) {
-    kvlangStrbuf_t k1, k2;
-    kvlangStrbufInit(&k1); kvlangStrbufInit(&k2);
-    kvlangKeytreeVthreadPc(vtid, &k1);
-    kvlangKeytreeVthreadStatus(vtid, &k2);
+    char k1[KV_KEY_MAX], k2[KV_KEY_MAX];
+    kvlangKeytreeVthreadPc(vtid, k1, sizeof k1);
+    kvlangKeytreeVthreadStatus(vtid, k2, sizeof k2);
     kvlangXvalue_t v1, v2; kvlangXvalueZero(&v1); kvlangXvalueZero(&v2);
     kvlangXvalueNewCharUtf8(&v1, pc);
     kvlangXvalueNewCharUtf8(&v2, status);
-    kvlangKvPair_t pairs[2] = { { k1.p, v1 }, { k2.p, v2 } };
+    kvlangKvPair_t pairs[2] = { { k1, v1 }, { k2, v2 } };
     char err[256];
     int rc = kvlangKvSet(kv, pairs, 2, err, sizeof err);
     kvlangXvalueFree(&v1); kvlangXvalueFree(&v2);
-    kvlangStrbufFree(&k1); kvlangStrbufFree(&k2);
     return rc;
 }
 
 /* Persist PC and changed status after each instruction. */
 void kvlangVthreadAdvance(kvlangFrame_t *f, const char *pc, const char *status) {
-    kvlangStrbuf_t k1, k2;
-    kvlangStrbufInit(&k1); kvlangStrbufInit(&k2);
-    kvlangKeytreeVthreadPc(f->vtid, &k1);
-    kvlangKeytreeVthreadStatus(f->vtid, &k2);
-    if (kvlangKvSetChar(f->kv, k1.p, pc) != 0)
+    char k1[KV_KEY_MAX], k2[KV_KEY_MAX];
+    kvlangKeytreeVthreadPc(f->vtid, k1, sizeof k1);
+    kvlangKeytreeVthreadStatus(f->vtid, k2, sizeof k2);
+    if (kvlangKvSetChar(f->kv, k1, pc) != 0)
         f->persist_failed = true;
     if (!f->persist_failed &&
         (!f->status_known || strcmp(f->status_known, status) != 0) &&
-        kvlangKvSetChar(f->kv, k2.p, status) != 0)
+        kvlangKvSetChar(f->kv, k2, status) != 0)
         f->persist_failed = true;
-    kvlangStrbufFree(&k1); kvlangStrbufFree(&k2);
 }
 
 int kvlangVthreadSetDone(kvlangKv_t *kv, const char *vtid, const char *ret) {
     if (ret == NULL || ret[0] == 0) ret = "ok";
-    kvlangStrbuf_t k; kvlangStrbufInit(&k);
-    kvlangKeytreeVthreadStatus(vtid, &k);
+    char k[KV_KEY_MAX];
+    kvlangKeytreeVthreadStatus(vtid, k, sizeof k);
     kvlangXvalue_t v; kvlangXvalueZero(&v);
     kvlangXvalueNewCharUtf8(&v, ret);
-    kvlangKvPair_t pair = { k.p, v };
+    kvlangKvPair_t pair = { k, v };
     char err[256];
     int rc = kvlangKvSet(kv, &pair, 1, err, sizeof err);
-    kvlangXvalueFree(&v); kvlangStrbufFree(&k);
+    kvlangXvalueFree(&v);
     return rc;
 }
 
 void kvlangVthreadSetError(kvlangKv_t *kv, const char *vtid, const char *pc, const char *msg) {
-    kvlangStrbuf_t msg_path, pc_key, st_key; kvlangStrbufInit(&msg_path); kvlangStrbufInit(&pc_key); kvlangStrbufInit(&st_key);
-    kvlangKeytreeVthreadStatusMsg(vtid, "error", &msg_path);
-    kvlangKeytreeVthreadPc(vtid, &pc_key);
-    kvlangKeytreeVthreadStatus(vtid, &st_key);
+    char msg_path[KV_KEY_MAX], pc_key[KV_KEY_MAX], st_key[KV_KEY_MAX];
+    kvlangKeytreeVthreadStatusMsg(vtid, "error", msg_path, sizeof msg_path);
+    kvlangKeytreeVthreadPc(vtid, pc_key, sizeof pc_key);
+    kvlangKeytreeVthreadStatus(vtid, st_key, sizeof st_key);
 
     /* 确保 .error/ 父目录存在 */
-    char *sep = strrchr(msg_path.p, '/');
+    char *sep = strrchr(msg_path, '/');
     if (sep) {
-        kvlangStrbuf_t dir; kvlangStrbufInit(&dir);
-        kvlangStrbufPutn(&dir, msg_path.p, (size_t)(sep - msg_path.p) + 1);
+        size_t dl = (size_t)(sep - msg_path) + 1;
+        char dir[KV_KEY_MAX];
+        if (dl >= sizeof dir)
+            kvlangDie("error dir exceeds %zu bytes", sizeof dir);
+        memcpy(dir, msg_path, dl);
+        dir[dl] = 0;
         char err[256];
-        kvlangKvMkindex(kv, dir.p, 0, err, sizeof err);
-        kvlangStrbufFree(&dir);
+        kvlangKvMkindex(kv, dir, 0, err, sizeof err);
     }
 
     kvlangXvalue_t vpc, vmsg, vst; kvlangXvalueZero(&vpc); kvlangXvalueZero(&vmsg); kvlangXvalueZero(&vst);
     kvlangXvalueNewCharUtf8(&vpc, pc);
     kvlangXvalueNewCharUtf8(&vmsg, msg);
     kvlangXvalueNewCharUtf8(&vst, "error");
-    kvlangKvPair_t pairs[3] = { { pc_key.p, vpc }, { msg_path.p, vmsg }, { st_key.p, vst } };
+    kvlangKvPair_t pairs[3] = { { pc_key, vpc }, { msg_path, vmsg }, { st_key, vst } };
     char err[256];
     kvlangKvSet(kv, pairs, 3, err, sizeof err);
     kvlangXvalueFree(&vpc); kvlangXvalueFree(&vmsg); kvlangXvalueFree(&vst);
-    kvlangStrbufFree(&msg_path); kvlangStrbufFree(&pc_key); kvlangStrbufFree(&st_key);
 }

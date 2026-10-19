@@ -9,18 +9,8 @@ int kvlangRwirExtractAddr0(const char *coord) {
     return end == p ? 0 : (int)n;
 }
 
-int kvlangRwirNextPc(const char *pc, kvlangStrbuf_t *out) {
-    kvlangStrbufClear(out);
-    const char *slash = strrchr(pc, '/');
-    size_t plen = slash ? (size_t)(slash - pc) + 1 : 0;
-    int num = kvlangRwirExtractAddr0(slash ? slash + 1 : pc);
-    kvlangStrbufPutn(out, pc, plen);
-    kvlangStrbufPrintf(out, "[%d,0]", num + 1);
-    return 0;
-}
-
-/* 免分配版：把 pc 末段 [n,0] 换成 [n+1,0] 写入 buf，返回长度；cap 不足返回 0。
- * 供每指令的 PC 推进热路径复用调用方缓冲，免 strbuf 的 realloc + Printf。 */
+/* 把 pc 末段 [n,0] 换成 [n+1,0] 写入 buf，返回长度；cap 不足返回 0。
+ * 供每指令的 PC 推进热路径复用调用方缓冲。 */
 size_t kvlangRwirNextPcBuf(const char *pc, char *buf, size_t cap) {
     const char *slash = strrchr(pc, '/');
     size_t plen = slash ? (size_t)(slash - pc) + 1 : 0;
@@ -106,11 +96,8 @@ static int materialize_operand(kvlangKv_t *kv, const char *link_base,
             }
         }
     } else {
-        kvlangStrbuf_t literal;
-        kvlangStrbufInit(&literal);
-        kvlangStrbufPrintf(&literal, "%s%soperand%s", link_base,
-                           RUNTIME_MEMBER_SEP, slot);
-        target = kvlangStrbufDetach(&literal);
+        target = kvlangAstr("%s%soperand%s", link_base, RUNTIME_MEMBER_SEP,
+                            slot);
         kvlangKvPair_t pair = {target, *v};
         if (kvlangKvSet(kv, &pair, 1, err, err_cap) != 0) {
             free(target);

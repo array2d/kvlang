@@ -21,18 +21,14 @@ static void pack_typed_array(const char *kind, const kvlangXvalue_t *elems,
 }
 
 static int separated_len(kvlangKv_t *kv, const char *base) {
+    char key[KV_KEY_MAX];
     for (int i = 0;; i++) {
-        kvlangStrbuf_t k;
-        kvlangStrbufInit(&k);
-        kvlangStrbufPuts(&k, base);
-        kvlangStrbufPuts(&k, MEMBER_SEP);
-        kvlangStrbufPrintf(&k, "[%d]", i);
+        kvlangKeyFmt(key, sizeof key, "%s%s[%d]", base, MEMBER_SEP, i);
         kvlangXvalue_t v;
         kvlangXvalueZero(&v);
-        kvlangKvGetOne(kv, k.p, &v);
+        kvlangKvGetOne(kv, key, &v);
         bool none = kvlangXvalueNone(&v);
         kvlangXvalueFree(&v);
-        kvlangStrbufFree(&k);
         if (none)
             return i;
     }
@@ -72,13 +68,10 @@ static int clear_members(kvlangFrame_t *f, const char *base) {
     int rc = 0;
     for (int i = 0; i < count; i++) {
         if (rc == 0) {
-            kvlangStrbuf_t key;
-            kvlangStrbufInit(&key);
-            kvlangStrbufPuts(&key, prefix);
-            kvlangStrbufPuts(&key, names[i]);
-            if (kvlangKvDelTree(f->kv, key.p, err, sizeof err) != 0)
+            char key[KV_KEY_MAX];
+            kvlangKeyFmt(key, sizeof key, "%s%s", prefix, names[i]);
+            if (kvlangKvDelTree(f->kv, key, err, sizeof err) != 0)
                 rc = kvlangBuiltinSetErr(f, "%s", err);
-            kvlangStrbufFree(&key);
         }
         free(names[i]);
     }
@@ -90,18 +83,24 @@ static int clear_members(kvlangFrame_t *f, const char *base) {
 /* 坐标段 key：base·[s0,s1,...]。1 维即 base·[s0]。 */
 char *kvlangBuiltinScatterKey(const char *base, const int64_t *coords,
                               int ncoord) {
-    kvlangStrbuf_t b;
-    kvlangStrbufInit(&b);
-    kvlangStrbufPuts(&b, base);
-    kvlangStrbufPuts(&b, MEMBER_SEP);
-    kvlangStrbufPutc(&b, '[');
+    char buf[KV_KEY_MAX];
+    size_t cap = sizeof buf;
+    int n = snprintf(buf, cap, "%s%s[", base, MEMBER_SEP);
+    if (n < 0 || (size_t)n >= cap)
+        kvlangDie("scatter key exceeds %zu bytes", cap);
+    size_t off = (size_t)n;
     for (int i = 0; i < ncoord; i++) {
-        if (i)
-            kvlangStrbufPutc(&b, ',');
-        kvlangStrbufPrintf(&b, "%lld", (long long)coords[i]);
+        n = snprintf(buf + off, cap - off, "%s%lld", i ? "," : "",
+                     (long long)coords[i]);
+        if (n < 0 || (size_t)n >= cap - off)
+            kvlangDie("scatter key exceeds %zu bytes", cap);
+        off += (size_t)n;
     }
-    kvlangStrbufPutc(&b, ']');
-    return kvlangStrbufDetach(&b);
+    if (off + 2 > cap)
+        kvlangDie("scatter key exceeds %zu bytes", cap);
+    buf[off++] = ']';
+    buf[off] = 0;
+    return kvlangAstrN(buf, off);
 }
 
 static int ensure_scattered(kvlangFrame_t *f, const char *base, const char *fallback_kind) {

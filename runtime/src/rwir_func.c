@@ -88,20 +88,14 @@ char *kvlangBuiltinResolveWriteSlot(kvlangKv_t *kv, const char *frame_root, cons
             free(stk);
         return target;
     }
-    /* 存 stk+name 到栈缓冲后 strdup（返回值须自持）；过长才回落 strbuf。 */
+    /* stk+name 精确分配（返回值须自持）。 */
     size_t sl = strlen(stk), nl = strlen(name);
-    char outbuf[640];
-    char *r;
-    if (sl + nl + 1 <= sizeof outbuf) {
-        memcpy(outbuf, stk, sl);
-        memcpy(outbuf + sl, name, nl);
-        outbuf[sl + nl] = 0;
-        r = strdup(outbuf);
-    } else {
-        kvlangStrbuf_t o; kvlangStrbufInit(&o);
-        kvlangStrbufPuts(&o, stk); kvlangStrbufPuts(&o, name);
-        r = kvlangStrbufDetach(&o);
-    }
+    char *r = malloc(sl + nl + 1);
+    if (!r)
+        kvlangDie("out of memory building slot key");
+    memcpy(r, stk, sl);
+    memcpy(r + sl, name, nl);
+    r[sl + nl] = 0;
     if (stk != stkbuf)
         free(stk);
     return r;
@@ -151,16 +145,35 @@ void kvlangDisplay(const kvlangXvalue_t *v, char **out);
 
 static void format_array(const kvlangXvalue_t *v, char **out) {
     int n = kvlangXvalueArrayLen(v);
-    kvlangStrbuf_t b; kvlangStrbufInit(&b);
-    kvlangStrbufPutc(&b, '[');
+    char **parts = malloc(sizeof(char *) * (size_t)(n > 0 ? n : 1));
+    if (!parts)
+        kvlangDie("out of memory formatting array");
+    size_t total = 2; /* "[" + "]" */
     for (int i = 0; i < n; i++) {
-        if (i) kvlangStrbufPuts(&b, ", ");
         kvlangXvalue_t e; kvlangBuiltinXvalueAt(v, i, &e);
-        char *s; kvlangDisplay(&e, &s);
-        kvlangStrbufPuts(&b, s); free(s); kvlangXvalueFree(&e);
+        kvlangDisplay(&e, &parts[i]);
+        kvlangXvalueFree(&e);
+        total += strlen(parts[i]) + (i ? 2 : 0);
     }
-    kvlangStrbufPutc(&b, ']');
-    *out = kvlangStrbufDetach(&b);
+    char *s = malloc(total + 1);
+    if (!s)
+        kvlangDie("out of memory formatting array");
+    size_t off = 0;
+    s[off++] = '[';
+    for (int i = 0; i < n; i++) {
+        if (i) {
+            s[off++] = ',';
+            s[off++] = ' ';
+        }
+        size_t sl = strlen(parts[i]);
+        memcpy(s + off, parts[i], sl);
+        off += sl;
+        free(parts[i]);
+    }
+    s[off++] = ']';
+    s[off] = 0;
+    free(parts);
+    *out = s;
 }
 
 void kvlangDisplay(const kvlangXvalue_t *v, char **out) {
@@ -188,15 +201,10 @@ int kvlangBuiltinReadInputs(kvlangFrame_t *f, kvlangXvalue_t *out, int cap) {
 void kvlangBuiltinFreeInputs(kvlangXvalue_t *in, int n) { for (int i = 0; i < n; i++) kvlangXvalueFree(&in[i]); }
 
 void kvlangBuiltinNextPc(kvlangFrame_t *f) {
-    char buf[512];
-    if (kvlangRwirNextPcBuf(f->pc, buf, sizeof buf)) {
-        kvlangVthreadAdvance(f, buf, "running");
-        return;
-    }
-    kvlangStrbuf_t npc; kvlangStrbufInit(&npc);
-    kvlangRwirNextPc(f->pc, &npc);
-    kvlangVthreadAdvance(f, npc.p, "running");
-    kvlangStrbufFree(&npc);
+    char buf[KV_KEY_MAX];
+    if (kvlangRwirNextPcBuf(f->pc, buf, sizeof buf) == 0)
+        kvlangDie("next pc exceeds %zu bytes", sizeof buf);
+    kvlangVthreadAdvance(f, buf, "running");
 }
 
 int kvlangBuiltinWriteResult(kvlangFrame_t *f, const kvlangXvalue_t *result) {

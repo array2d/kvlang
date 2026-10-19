@@ -35,15 +35,13 @@ int kvlangRuntimeExecutePc(kvlangRuntime_t *rt, const char *pc) {
 void *kvlangRuntimeKvspaceHandle(kvlangRuntime_t *rt) { return rt->kv->h; }
 
 static char *read_vthread_pc(kvlangKv_t *kv, const char *vid) {
-  kvlangStrbuf_t key;
-  kvlangStrbufInit(&key);
-  kvlangKeytreeVthreadPc(vid, &key);
+  char key[KV_KEY_MAX];
+  kvlangKeytreeVthreadPc(vid, key, sizeof key);
   kvlangXvalue_t v;
   kvlangXvalueZero(&v);
-  kvlangKvGetOne(kv, key.p, &v);
+  kvlangKvGetOne(kv, key, &v);
   char *pc = kvlangXvalueNone(&v) ? strdup("") : kvlangXvalueValueString(&v);
   kvlangXvalueFree(&v);
-  kvlangStrbufFree(&key);
   return pc;
 }
 
@@ -56,12 +54,10 @@ int kvlangRuntimeExecuteVthread(kvlangRuntime_t *rt, const char *vid,
 }
 
 static char *alloc_vtid(kvlangKv_t *kv) {
-  kvlangStrbuf_t seq;
-  kvlangStrbufInit(&seq);
-  kvlangStrbufPuts(&seq, VTHREAD_ROOT "/" RUNTIME_MEMBER_SEP "seq");
+  static const char seq[] = VTHREAD_ROOT "/" RUNTIME_MEMBER_SEP "seq";
   kvlangXvalue_t v;
   kvlangXvalueZero(&v);
-  kvlangKvGetOne(kv, seq.p, &v);
+  kvlangKvGetOne(kv, seq, &v);
   char *s = kvlangXvalueNone(&v) ? strdup("") : kvlangXvalueValueString(&v);
   kvlangXvalueFree(&v);
   int64_t n = atoll(s) + 1;
@@ -70,12 +66,11 @@ static char *alloc_vtid(kvlangKv_t *kv) {
   snprintf(buf, sizeof buf, "%lld", (long long)n);
   kvlangXvalue_t nv;
   kvlangXvalueNewCharUtf8(&nv, buf);
-  kvlangKvPair_t p = {seq.p, nv};
+  kvlangKvPair_t p = {seq, nv};
   char err[256];
   int rc = kvlangXvalueNone(&nv) ? -1 :
            kvlangKvSet(kv, &p, 1, err, sizeof err);
   kvlangXvalueFree(&nv);
-  kvlangStrbufFree(&seq);
   return rc == 0 ? strdup(buf) : NULL;
 }
 
@@ -87,28 +82,24 @@ char *kvlangVthreadSpawn(kvlangKv_t *kv, const char *funcname,
   char *vtid = alloc_vtid(kv);
   if (!vtid)
     return NULL;
-  kvlangStrbuf_t vtroot;
-  kvlangStrbufInit(&vtroot);
-  kvlangKeytreeVthread(vtid, &vtroot);
-  char *stack_vt = kvlangKeytreeStack(vtroot.p);
+  char vtroot[KV_KEY_MAX];
+  kvlangKeytreeVthread(vtid, vtroot, sizeof vtroot);
+  char *stack_vt = kvlangKeytreeStack(vtroot);
   char e[256];
   if (kvlangKvMkindex(kv, stack_vt, 0, e, sizeof e) != 0) {
     free(stack_vt);
     free(vtid);
-    kvlangStrbufFree(&vtroot);
     return NULL;
   }
   char *first_pc = kvlangKvcpuBootstrap(kv, vtid, funcname, args, nargs);
   if (!first_pc) {
     free(stack_vt);
     free(vtid);
-    kvlangStrbufFree(&vtroot);
     return NULL;
   }
   int persisted = kvlangVthreadSet(kv, vtid, first_pc, "init");
   free(first_pc);
   free(stack_vt);
-  kvlangStrbufFree(&vtroot);
   if (persisted != 0) {
     free(vtid);
     return NULL;
@@ -136,29 +127,25 @@ int kvlangRuntimeRunVid(kvlangKv_t *kv, const char *vid, char **ret, char *err,
   free(pc);
 
   /* 读终态 */
-  kvlangStrbuf_t st;
-  kvlangStrbufInit(&st);
-  kvlangKeytreeVthreadStatus(vid, &st);
+  char st[KV_KEY_MAX];
+  kvlangKeytreeVthreadStatus(vid, st, sizeof st);
   kvlangXvalue_t sv;
   kvlangXvalueZero(&sv);
-  kvlangKvGetOne(kv, st.p, &sv);
+  kvlangKvGetOne(kv, st, &sv);
   char *status =
       kvlangXvalueNone(&sv) ? strdup("") : kvlangXvalueValueString(&sv);
   kvlangXvalueFree(&sv);
-  kvlangStrbufFree(&st);
 
   if (ret) {
     if (strcmp(status, "error") == 0) {
-      kvlangStrbuf_t mk;
-      kvlangStrbufInit(&mk);
-      kvlangKeytreeVthreadStatusMsg(vid, "error", &mk);
+      char mk[KV_KEY_MAX];
+      kvlangKeytreeVthreadStatusMsg(vid, "error", mk, sizeof mk);
       kvlangXvalue_t mv;
       kvlangXvalueZero(&mv);
-      kvlangKvGetOne(kv, mk.p, &mv);
+      kvlangKvGetOne(kv, mk, &mv);
       char *msg = kvlangXvalueNone(&mv) ? strdup("error")
                                         : kvlangXvalueValueString(&mv);
       kvlangXvalueFree(&mv);
-      kvlangStrbufFree(&mk);
       if (err && err_cap)
         snprintf(err, err_cap, "%s", msg);
       *ret = strdup("error");

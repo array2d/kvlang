@@ -48,14 +48,18 @@ static void new_char32_cp(kvlangXvalue_t *out, uint32_t cp) {
 static int write_char32(kvlangFrame_t *f, const uint32_t *r, int n) {
     kvlangXvalue_t e;
     if (n > 0) {
-        kvlangStrbuf_t raw; kvlangStrbufInit(&raw);
+        uint8_t *raw = malloc((size_t)n * 4);
+        if (!raw)
+            kvlangDie("out of memory writing char/utf32");
         for (int i = 0; i < n; i++) {
-            uint8_t le[4] = { r[i] & 0xFF, (r[i] >> 8) & 0xFF, (r[i] >> 16) & 0xFF, (r[i] >> 24) & 0xFF };
-            kvlangStrbufPutn(&raw, (const char *)le, 4);
+            raw[i * 4 + 0] = (uint8_t)(r[i] & 0xFF);
+            raw[i * 4 + 1] = (uint8_t)((r[i] >> 8) & 0xFF);
+            raw[i * 4 + 2] = (uint8_t)((r[i] >> 16) & 0xFF);
+            raw[i * 4 + 3] = (uint8_t)((r[i] >> 24) & 0xFF);
         }
         uint8_t *out; uint32_t len; int32_t d = n;
-        kvspaceTlvEncode(KVSPACE_KIND_CHAR, (const uint8_t *)raw.p, (uint32_t)raw.len, &d, 1, &out, &len);
-        kvlangStrbufFree(&raw);
+        kvspaceTlvEncode(KVSPACE_KIND_CHAR, raw, (uint32_t)n * 4, &d, 1, &out, &len);
+        free(raw);
         e.data = out; e.len = len;
     } else {
         uint8_t *out; uint32_t len; int32_t d = 0;

@@ -2,10 +2,11 @@
 #include "runtime_internal.h"
 
 char *kvlangRwirextNextPc(const char *pc) {
-    kvlangStrbuf_t b;
-    kvlangStrbufInit(&b);
-    kvlangRwirNextPc(pc, &b);
-    return kvlangStrbufDetach(&b);
+    char buf[KV_KEY_MAX];
+    size_t n = kvlangRwirNextPcBuf(pc, buf, sizeof buf);
+    if (n == 0)
+        kvlangDie("next pc exceeds %zu bytes", sizeof buf);
+    return kvlangAstrN(buf, n);
 }
 
 char *kvlangRwirextParams(void *kvspace, const char *pc) {
@@ -22,20 +23,35 @@ char *kvlangRwirextParams(void *kvspace, const char *pc) {
         return strdup("");
     }
     free(lb);
-    kvlangStrbuf_t b;
-    kvlangStrbufInit(&b);
-    kvlangStrbufPuts(&b, inst.opcode ? inst.opcode : "");
+    const char *op = inst.opcode ? inst.opcode : "";
+    size_t total = strlen(op) + 1;
+    for (int i = 0; i < inst.nr; i++)
+        total += 1 + strlen(inst.reads[i].name ? inst.reads[i].name : "");
+    for (int i = 0; i < inst.nw; i++)
+        total += 1 + strlen(inst.writes[i].name ? inst.writes[i].name : "");
+    char *out = malloc(total);
+    if (!out)
+        kvlangDie("out of memory formatting params");
+    size_t off = strlen(op);
+    memcpy(out, op, off);
     for (int i = 0; i < inst.nr; i++) {
-        kvlangStrbufPutc(&b, '\n');
-        kvlangStrbufPuts(&b, inst.reads[i].name ? inst.reads[i].name : "");
+        const char *s = inst.reads[i].name ? inst.reads[i].name : "";
+        size_t n = strlen(s);
+        out[off++] = '\n';
+        memcpy(out + off, s, n);
+        off += n;
     }
     for (int i = 0; i < inst.nw; i++) {
-        kvlangStrbufPutc(&b, '\n');
-        kvlangStrbufPuts(&b, inst.writes[i].name ? inst.writes[i].name : "");
+        const char *s = inst.writes[i].name ? inst.writes[i].name : "";
+        size_t n = strlen(s);
+        out[off++] = '\n';
+        memcpy(out + off, s, n);
+        off += n;
     }
+    out[off] = 0;
     free(fr);
     kvlangRwirInstFree(&inst);
-    return kvlangStrbufDetach(&b);
+    return out;
 }
 
 /* stringkeymap 容器值：遍历 p· 成员 → "[e0, e1, ...]"（成员为 map 时递归）。 */
@@ -48,30 +64,45 @@ static char *display_map(kvlangKv_t *k, const char *path) {
         free(names);
         return strdup("[]");
     }
-    kvlangStrbuf_t b;
-    kvlangStrbufInit(&b);
-    kvlangStrbufPutc(&b, '[');
+    char **ms = malloc(sizeof(char *) * (size_t)cnt);
+    if (!ms)
+        kvlangDie("out of memory formatting map");
+    size_t total = 2; /* "[" + "]" */
     for (int i = 0; i < cnt; i++) {
-        if (i)
-            kvlangStrbufPuts(&b, ", ");
         char *mk = kvlangKeytreeMember(path, names[i]);
         kvlangXvalue_t mv;
         kvlangXvalueZero(&mv);
         kvlangKvGetOne(k, mk, &mv);
-        char *ms = kvlangXvalueNone(&mv) ? strdup("")
-                   : kvlangKindIsMap(kvlangXvalueKind(&mv))
-                       ? display_map(k, mk)
-                       : kvlangXvalueValueString(&mv);
-        kvlangStrbufPuts(&b, ms);
-        free(ms);
+        ms[i] = kvlangXvalueNone(&mv) ? strdup("")
+                : kvlangKindIsMap(kvlangXvalueKind(&mv))
+                    ? display_map(k, mk)
+                    : kvlangXvalueValueString(&mv);
         kvlangXvalueFree(&mv);
         free(mk);
         free(names[i]);
+        total += strlen(ms[i]) + (i ? 2 : 0);
     }
-    kvlangStrbufPutc(&b, ']');
     free(names);
     free(dir);
-    return kvlangStrbufDetach(&b);
+    char *out = malloc(total + 1);
+    if (!out)
+        kvlangDie("out of memory formatting map");
+    size_t off = 0;
+    out[off++] = '[';
+    for (int i = 0; i < cnt; i++) {
+        if (i) {
+            out[off++] = ',';
+            out[off++] = ' ';
+        }
+        size_t n = strlen(ms[i]);
+        memcpy(out + off, ms[i], n);
+        off += n;
+        free(ms[i]);
+    }
+    out[off++] = ']';
+    out[off] = 0;
+    free(ms);
+    return out;
 }
 
 /* 解析读参 idx 为字符串（变量 → 帧槽值；路径 → 该路径下的值）。 */
