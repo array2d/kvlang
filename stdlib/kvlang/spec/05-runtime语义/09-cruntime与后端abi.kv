@@ -53,9 +53,10 @@ livebyte）。两组对外 C ABI：
 
 内部模块：`xvalue.c`（XValue 编解码薄封装）、`langtype.c` + `langtypetable.c`（langtype 校验/匹配与我
 表格）、`kvspace.c`（kvspace ABI 封装）、`keytree.c`（路径构造）、`rwir_decode.c`（PC 解析 + Decode）、
-`vthread.c`、`rwir*.c`（native 算子 + 静态注册表）、`kvcpu.c`（Execute 循环）、`runtime.c`（ABI
-层）、`rwirext.c`（扩展宿主 ABI，含 `notinmyrwircaps`）、`logx.c`、`strutil.c`（一次性字符串
-工具）、`const.h`。
+`vthread.c`、`rwir*.c`（native 算子 + 静态注册表）、`kvcpu*.c`（kvcpu.c=Execute 循环 +
+指令缓存；kvcpu_call.c=调用帧/绑定/控制流；kvcpu_sig.c=签名加载与类型校验；
+kvcpu_route.c=外部路由与 handoff）、`runtime.c`（ABI 层）、`rwirext.c`（扩展宿主 ABI，含
+`notinmyrwircaps`）、`logx.c`、`strutil.c`（一次性字符串工具）、`const.h`。
 myrwircaps 为**静态数组 + 线性查找**。
 
 ## 统一 `kvspace*` C ABI（去特化）
