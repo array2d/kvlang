@@ -539,6 +539,16 @@ int kvlangRwirExtractAddress(const char *coord);
 int kvlangRwirDecode(kvspace_t *kv, const char *link_base, const char *pc,
                      kvlangRwirInst_t *out, char *err, uint32_t err_cap);
 void kvlangRwirInstructionFree(kvlangRwirInst_t *inst);
+/* 操作数槽解析：1=有；0=None；-1=错误。literal -> out_literal；
+ * Ptr -> descriptor=目标 key 且 is_absolute_key=true；rwir/rwfunc -> descriptor=槽名。 */
+int kvlangRwirOperandParse(kvspace_t *kv, const char *link_base,
+                           const char *slot, char **out_descriptor,
+                           bool *out_is_literal, bool *out_is_absolute_key,
+                           kvlangXvalue_t *out_literal, char **out_type,
+                           char *err, uint32_t err_cap);
+/* 描述符 -> 当前帧绝对 key；类型非 "any" 时用实际槽 head 细化。 */
+char *kvlangRwirOperandTarget(kvspace_t *kv, const char *frame_root,
+                              const char *descriptor, char **type_io);
 /* 外部扩展 handoff：写共享队列 /lib/<opcode>/vids/<vid>=pc，阻塞 watch 该 key 直至变 None
  * （外部执行器认领、驱动、置 nextpc 后删除该条目 → 本端解除阻塞）。 */
 int kvlangHandoffExternalRwir(kvspace_t *kv, const char *vtid, const char *pc,
@@ -593,6 +603,8 @@ typedef struct {
     const char *
         status_known; /* 本步开始前从 kvspace 读到的 ‥status（借用）；NULL = 未知 */
     bool persist_failed;
+    /* 删除/委托/外部 handoff 时自增；帧层 keyoff 据此全部失效重绑。 */
+    uint32_t *addr_epoch;
 } kvlangFrame_t;
 
 /* Write PC to kvspace; write status when it changes. */
