@@ -2,10 +2,11 @@
 #include "runtime_internal.h"
 
 /* 函数级二维指令表（s0 = irseq，s1 = 参数轴），按需加载，执行循环内复用。
- * 设计见 workspace/coding2-funccode-2d-design.md。
  *
+ * key 与 value 的唯一事实源仍在 kvspace；这里只缓存「key -> 64 位地址」这一派生量。
  * 函数层只存与帧无关的部分：opcode/arity/描述符/字面量/类型。
- * 帧相对操作数的绝对 key 与 64 位地址属于帧，由 kvlangFrameRow 在本帧首次执行该行时绑定。 */
+ * 帧相对操作数的绝对 key 与 64 位地址属于帧，由 kvlangFrameRow 在本帧首次执行该行时绑定；
+ * 删除/委托/handoff 使地址世代前进后，帧内地址全部失效并按 key 重绑。 */
 
 typedef struct {
     char *
