@@ -39,7 +39,7 @@ static int jump_to(kvlangFrame_t *f, const kvlangParam_t *target, const char *op
     if (!fr) { owned = kvlangKeytreeFrameRoot(f->pc); fr = owned; }
     char *np = kvlangKeytreeIrseqPc(fr, irseq);
     free(owned);
-    kvlangVthreadAdvance(f, np, "running");
+    kvlangVthreadNextPc(f, np, "running");
     kvlangLogDebug("[%s] %s → %s", f->vthread_id, op, np);
     free(np);
     return 0;
@@ -424,7 +424,7 @@ int kvlangControlCall(kvlangFrame_t *f) {
     char *sub = handle_call(f->kvspace, f->pc, f->instruction);
     if (!sub)
         return -1;
-    kvlangVthreadAdvance(f, sub, "running");
+    kvlangVthreadNextPc(f, sub, "running");
     free(sub);
     return 0;
 }
@@ -436,7 +436,7 @@ int kvlangControlReturn(kvlangFrame_t *f) {
     if (!parent) {
         f->persist_failed = kvlangVthreadSetDone(f->kvspace, f->vthread_id, "ok") != 0;
     } else {
-        kvlangVthreadAdvance(f, parent, "running");
+        kvlangVthreadNextPc(f, parent, "running");
     }
     free(parent);
     if (f->persist_failed)
@@ -503,7 +503,8 @@ int kvlangControlBr(kvlangFrame_t *f) {
 int kvlangKvcpuCallOpcode(kvspace_t *kv, const char *vtid, const char *pc,
                           const char *status_known, const char *opcode,
                           kvlangParam_t *reads, int nr,
-                          kvlangParam_t *writes, int nw) {
+                          kvlangParam_t *writes, int nw, char *pc_out,
+                          size_t pc_out_cap, bool *pc_feedback) {
     kvlangRwirInst_t ci;
     ci.opcode = strdup(OP_CALL);
     ci.opcode_id = 0;
@@ -518,9 +519,12 @@ int kvlangKvcpuCallOpcode(kvspace_t *kv, const char *vtid, const char *pc,
     ci.write_offs = NULL;
     kvlangFrame_t f = {kv, vtid, pc, &ci, NULL};
     f.status_known = status_known;
+    f.pc_out = pc_out;
+    f.pc_out_cap = pc_out_cap;
     int rc = kvlangControlCall(&f);
     if (f.persist_failed)
         rc = -1;
+    *pc_feedback = f.pc_feedback;
     free(ci.opcode);
     free(ci.reads[0].name);
     free(ci.reads);
@@ -529,9 +533,10 @@ int kvlangKvcpuCallOpcode(kvspace_t *kv, const char *vtid, const char *pc,
 
 /* 动态调用：以运行时得到的 funckey 在当前 vthread 造一次 OP_CALL（不新开 vid），
  * pc 落在被调入口，帧结束回到本指令 NextPc。供 native vthread·call 用。 */
-int kvlangKvcpuDynamicCall(kvspace_t *kv, const char *vtid, const char *pc,
-                       const char *funckey) {
-    return kvlangKvcpuCallOpcode(kv, vtid, pc, NULL, funckey, NULL, 0, NULL, 0);
+int kvlangKvcpuDynamicCall(kvlangFrame_t *f, const char *funckey) {
+    return kvlangKvcpuCallOpcode(f->kvspace, f->vthread_id, f->pc, NULL, funckey,
+                                 NULL, 0, NULL, 0, f->pc_out, f->pc_out_cap,
+                                 &f->pc_feedback);
 }
 
 

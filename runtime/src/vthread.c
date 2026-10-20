@@ -113,7 +113,7 @@ int kvlangVthreadSet(kvspace_t *kv, const char *vtid, const char *pc,
 }
 
 /* Persist PC and changed status after each instruction. */
-void kvlangVthreadAdvance(kvlangFrame_t *f, const char *pc,
+void kvlangVthreadNextPc(kvlangFrame_t *f, const char *pc,
                           const char *status) {
     char k1[KV_KEY_MAX], k2[KV_KEY_MAX];
     kvlangKeytreeVthreadPc(f->vthread_id, k1, sizeof k1);
@@ -124,6 +124,14 @@ void kvlangVthreadAdvance(kvlangFrame_t *f, const char *pc,
         (!f->status_known || strcmp(f->status_known, status) != 0) &&
         kvlangKvspaceSetChar(f->kvspace, k2, status) != 0)
         f->persist_failed = true;
+    /* 回传：值就是刚写进 kvspace 的那条 PC，不引入第二份事实源。 */
+    if (!f->persist_failed && f->pc_out) {
+        size_t n = strlen(pc);
+        if (n + 1 > f->pc_out_cap)
+            kvlangDie("feedback pc exceeds %zu bytes", f->pc_out_cap);
+        memcpy(f->pc_out, pc, n + 1);
+        f->pc_feedback = true;
+    }
 }
 
 int kvlangVthreadSetDone(kvspace_t *kv, const char *vtid, const char *ret) {
