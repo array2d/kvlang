@@ -1,5 +1,5 @@
+#include "func_code.h"
 #include "kvcpu_internal.h"
-#include "rwir_cache.h"
 
 /* 统一错误出口：置 vthread error 并返回 -1。 */
 static int execute_error(kvspace_t *kv, const char *vtid, const char *pc,
@@ -13,16 +13,58 @@ static int execute_error(kvspace_t *kv, const char *vtid, const char *pc,
     return -1;
 }
 
-/* KVMODE_RETURN 收尾：把下一个 PC 的所有权交给调用方（或释放），清缓存。 */
-static int execute_yield(kvlangRwirInst_t *inst, bool from_cache,
-                         rwir_cache_t *cache, char **out_pc, char *next_pc) {
+/* KVMODE_RETURN 收尾：把下一个 PC 的所有权交给调用方（或释放）。 */
+static int execute_yield(char **out_pc, char *next_pc) {
     if (out_pc)
         *out_pc = next_pc;
     else
         free(next_pc);
-    rwir_instruction_release(inst, from_cache);
-    kvlangRwirCacheFree(cache);
     return 1;
+}
+
+/* 读一个操作数目标值；None 合法。地址未解析时按 key 读并补一次绑定。 */
+static int operand_load(kvspace_t *kv, kvlangBoundCell_t *cell,
+                        kvlangXvalue_t *out) {
+    kvlangXvalueZero(out);
+    kvspaceKeyOff *ko = &cell->off;
+    if (ko->resolved) {
+        uint8_t *d = NULL;
+        uint32_t len = 0;
+        if (kvspaceGetByRef(kv->handle, &ko->off, cell->key, &d, &len) != 0)
+            return -1;
+        if (d && len > 0) {
+            out->bytes = d;
+            out->length = len;
+            out->is_borrowed = 1;
+        }
+    } else {
+        if (kvlangKvspaceGetOne(kv, cell->key, out) != 0)
+            return -1;
+        /* 变量可能在加载后才创建：补一次绑定，成功即切 ByRef。 */
+        if (kvspaceResolveRef(kv->handle, cell->key, &ko->off) == 0)
+            ko->resolved = true;
+    }
+    kvlangXvalueMaterialize(out);
+    return 0;
+}
+
+static void operands_free(kvlangParam_t *p, int n) {
+    for (int i = 0; i < n; i++)
+        kvlangXvalueFree(&p[i].value);
+}
+
+/* 帧的 ‥lib：函数目录路径（owned）。 */
+static char *frame_func_dir(kvspace_t *kv, const char *frame_root) {
+    char *stack = kvlangKeytreeStack(frame_root);
+    char key[KV_KEY_MAX];
+    kvlangKeyFormat(key, sizeof key, "%s%s", stack, SEG_LIB);
+    free(stack);
+    kvlangXvalue_t v;
+    kvlangXvalueZero(&v);
+    kvlangKvspaceGetOne(kv, key, &v);
+    char *dir = kvlangXvalueNone(&v) ? NULL : kvlangXvalueValueString(&v);
+    kvlangXvalueFree(&v);
+    return dir;
 }
 
 int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
@@ -35,7 +77,7 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
         return -1;
     }
 
-    /* 每步复用的缓冲：pc/status 键与值、帧根、link base 全部跨步保留，免每步 malloc/free。
+    /* 每步复用的缓冲：pc/status 键与值、帧根全部跨步保留，免每步 malloc/free。
      * pc/status 值缓冲按页对齐：shm 常驻映射是页对齐的，未对齐时实测 k_nucleotide 有约
      * 12% 的栈布局敏感退化（换 64/128B 对齐都复现，只有 4K 对齐消失）。 */
     char pc_key[KV_KEY_MAX], st_key[KV_KEY_MAX];
@@ -48,9 +90,18 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
     kvspaceKeyOffBind(&pc_off, kv, pc_key);
     kvspaceKeyOffBind(&status_off, kv, st_key);
     char fr_stk[KV_KEY_MAX];
-    char lb_stk[KV_KEY_MAX];
     const char *cur_frame = NULL;
-    rwir_cache_t cache = {0};
+    /* 参数数组放堆上：ExecuteMode 只分配一次，避免每步栈帧过大加剧布局敏感。 */
+    kvlangParam_t *reads = malloc(sizeof *reads * MAX_PARAMS);
+    kvlangParam_t *writes = malloc(sizeof *writes * MAX_PARAMS);
+    if (!reads || !writes)
+        kvlangDie("out of memory allocating operand views");
+
+    /* /lib 函数二维缓存（ExecuteMode 级）+ 每个活跃帧的绑定上下文。 */
+    kvlangFuncCache_t fcache;
+    kvlangFuncCacheInit(&fcache);
+    kvlangFrameCtx_t *fctx[MAX_STACK_DEPTH + 1] = {0};
+    uint32_t addr_epoch = 0; /* 删除/委托/handoff 后自增，使帧层 keyoff 失效 */
     int last_depth = 0; /* 0 = 尚未进入任何帧 */
 
     int rc = 0;
@@ -72,72 +123,118 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
         }
 
         int depth = kvlangKeytreeFrameNum(cur);
-        if (depth != last_depth) {
-            /* 帧深变化 = 帧被建（call）或删（return）：帧根重算、派生数据作废。 */
-            if (!kvlangKeytreeFrameRootBuffer(cur, fr_stk, sizeof fr_stk)) {
-                rc = execute_error(kv, vtid, cur,
-                                   "RuntimeError: invalid pc: %s", cur);
-                break;
-            }
-            cur_frame = fr_stk;
-            if (last_depth != 0)
-                kvlangRwirCacheDrop(&cache, depth, depth > last_depth);
-            last_depth = depth;
-        }
         if (depth > MAX_STACK_DEPTH) {
             rc = execute_error(kv, vtid, cur,
                                "RecursionError: stack overflow: depth=%d pc=%s",
                                depth, cur);
             break;
         }
-
-        kvlangRwirInst_t tmp;
-        char err[256];
-        rwir_cache_entry_t *hit = kvlangRwirCacheGet(&cache, cur);
-        bool from_cache = hit != NULL;
-        if (from_cache) {
-            tmp = hit->instruction; /* 浅拷骨架；val 恒空，本步现读 */
-        } else {
-            if (kvlangKeytreeStackBuffer(cur_frame, lb_stk, sizeof lb_stk) == 0)
-                kvlangDie("link base exceeds %zu bytes", sizeof lb_stk);
-            int drc = kvlangRwirDecode(kv, lb_stk, cur, &tmp, err, sizeof err);
-            if (drc != 0) {
-                rc = execute_error(kv, vtid, cur, "decode: %.247s", err);
+        if (depth != last_depth) {
+            /* 帧变：变深=call（新帧）；变浅=return（更深的帧已删，本帧可复用）。 */
+            if (!kvlangKeytreeFrameRootBuffer(cur, fr_stk, sizeof fr_stk)) {
+                rc = execute_error(kv, vtid, cur,
+                                   "RuntimeError: invalid pc: %s", cur);
                 break;
             }
-            hit = kvlangRwirCachePut(kv, &cache, cur, depth, &tmp);
+            cur_frame = fr_stk;
+            for (int d = depth + 1; d <= last_depth && d <= MAX_STACK_DEPTH;
+                 d++) {
+                kvlangFrameCtxFree(fctx[d]);
+                fctx[d] = NULL;
+            }
+            if (fctx[depth] &&
+                strcmp(fctx[depth]->frame_root, cur_frame) != 0) {
+                kvlangFrameCtxFree(fctx[depth]);
+                fctx[depth] = NULL;
+            }
+            if (!fctx[depth]) {
+                char *func_dir = frame_func_dir(kv, cur_frame);
+                if (!func_dir) {
+                    rc = execute_error(kv, vtid, cur,
+                                       "RuntimeError: frame has no ‥lib: %s",
+                                       cur_frame);
+                    break;
+                }
+                fctx[depth] = kvlangFrameCtxNew(&fcache, func_dir, cur_frame);
+                free(func_dir);
+            }
+            last_depth = depth;
         }
-        kvlangRwirInst_t *inst = &tmp;
+        kvlangFrameCtxSync(fctx[depth], addr_epoch);
 
-        kvlangLogDebug("[%s] PC=%s OP=%s R=%d W=%d", vtid, cur,
-                       inst->opcode ? inst->opcode : "(empty)",
-                       inst->read_count, inst->write_count);
-
-        if (!inst->opcode || !inst->opcode[0]) {
-            /* layout 对每条路径都补了 return（lower::terminate），走到空槽只能是 /lib 损坏
-             * 或 goto/br 越界；报 RuntimeError 让该 vthread 停下，不拖垮整个进程。 */
-            rc = execute_error(kv, vtid, cur,
-                               "RuntimeError: no instruction at %s", cur);
-            rwir_instruction_release(&tmp, from_cache);
-            break;
-        }
-
-        if (!hit)
-            kvlangDie("rwir cache entry missing for %s", cur);
-        if (from_cache &&
-            kvlangRwirCacheLoadValues(kv, inst, hit->load_write_value, err,
-                                      sizeof err) != 0) {
-            rc = execute_error(kv, vtid, cur, "%s", err);
-            rwir_instruction_release(&tmp, true);
+        /* 函数二维表：PC 末坐标即 irseq，直接索引；行/绑定按需加载。 */
+        const char *lastc = NULL;
+        for (const char *p = cur; (p = strstr(p, "/[")) != NULL; p += 2)
+            lastc = p;
+        int irseq = lastc ? kvlangRwirExtractAddress(lastc + 1) : 0;
+        char err[256];
+        kvlangCodeRow_t *row = NULL;
+        kvlangRowBind_t *bind =
+            kvlangFrameRow(kv, fctx[depth], irseq, &row, err, sizeof err);
+        if (!bind || !row->opcode || !row->opcode[0]) {
+            /* layout 对每条路径都补了 return；走到空槽只能是 /lib 损坏或 goto/br 越界。 */
+            if (err[0])
+                rc = execute_error(kv, vtid, cur, "decode: %.247s", err);
+            else
+                rc = execute_error(kv, vtid, cur,
+                                   "RuntimeError: no instruction at %s", cur);
             break;
         }
 
         int exec_err = 0;
+        for (int i = 0; i < row->nr; i++)
+            reads[i] = (kvlangParam_t){0};
+        for (int j = 0; j < row->nw; j++)
+            writes[j] = (kvlangParam_t){0};
+        for (int i = 0; i < row->nr; i++) {
+            reads[i].name = bind->cell[i].key;
+            reads[i].type = bind->cell[i].type;
+            reads[i].is_address = true;
+            if (bind->cell[i].literal) {
+                /* 字面量：值已在行内（帧绑定时已落回 operand 槽，路径语义不变），
+                 * 直接借用，省掉每步一次 Get。 */
+                reads[i].value = *bind->cell[i].literal;
+                reads[i].value.is_borrowed = 1;
+                continue;
+            }
+            if (operand_load(kv, &bind->cell[i], &reads[i].value) != 0) {
+                exec_err = execute_error(
+                    kv, vtid, cur, "RuntimeError: cannot read operand %d", i);
+                break;
+            }
+        }
+        for (int j = 0; exec_err == 0 && j < row->nw; j++) {
+            writes[j].name = bind->cell[row->nr + j].key;
+            writes[j].type = bind->cell[row->nr + j].type;
+            writes[j].is_address = true;
+            if (row->load_write_value &&
+                operand_load(kv, &bind->cell[row->nr + j], &writes[j].value) !=
+                    0) {
+                exec_err =
+                    execute_error(kv, vtid, cur,
+                                  "RuntimeError: cannot read write slot %d", j);
+                break;
+            }
+        }
+        if (exec_err != 0) {
+            operands_free(reads, row->nr);
+            operands_free(writes, row->nw);
+            rc = -1;
+            break;
+        }
+
+        kvlangRwirInst_t inst = {row->opcode, row->opcode_id, reads,
+                                 row->nr,     writes,         row->nw};
+        kvlangLogDebug("[%s] PC=%s OP=%s R=%d W=%d", vtid, cur,
+                       inst.opcode ? inst.opcode : "(empty)", inst.read_count,
+                       inst.write_count);
+
         char *yield = NULL;
-        if (inst->opcode_id >= 0) {
+        if (inst.opcode_id >= 0) {
             /* 单表派发：native 算子与 control/copy 同居 myrwircaps，opcode_id 直查一跳到底。 */
-            kvlangFrame_t f = {kv, vtid, cur, inst, &yield};
+            kvlangFrame_t f = {kv, vtid, cur, &inst, &yield};
             f.frame_root = cur_frame;
+            f.addr_epoch = &addr_epoch;
             f.status_known =
                 status; /* 本步开始前读到的 ‥status（源值，借用） */
             exec_err = kvlangBuiltinNative(&f);
@@ -146,46 +243,65 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
             if (exec_err == 0 && yield) {
                 /* native（vthread·run return 模式）冒泡一个子 vthread 的 rwir pc 给上层驱动。
                  * 本 vthread（主）pc 未推进，驱动派发子 rwir 并推进子 pc 后重入即续跑。 */
-                return execute_yield(&tmp, from_cache, &cache, out_pc, yield);
+                operands_free(reads, row->nr);
+                operands_free(writes, row->nw);
+                free(reads);
+                free(writes);
+                for (int d = 0; d <= MAX_STACK_DEPTH; d++)
+                    kvlangFrameCtxFree(fctx[d]);
+                kvlangFuncCacheFree(&fcache);
+                return execute_yield(out_pc, yield);
             }
-        } else if (kvlangDispatchIsDelegatedOp(kv, inst->opcode)) {
-            exec_err = kvlangDispatchDelegate(kv, vtid, cur, inst);
+        } else if (kvlangDispatchIsDelegatedOp(kv, inst.opcode)) {
+            exec_err = kvlangDispatchDelegate(kv, vtid, cur, &inst);
             if (exec_err == KVLANG_DELEGATE_LOCAL) {
                 exec_err = 0;
                 goto user_call;
             }
-        } else if (hit->is_def_rwir) {
-            if (hit->def_read_sig)
+            addr_epoch++; /* 委托会删除输出槽 */
+        } else if (row->is_def_rwir) {
+            if (row->def_read_sig)
                 exec_err = check_read_types(
-                    kv, vtid, cur, inst->opcode, hit->def_read_sig,
-                    hit->def_read_count, hit->def_dynamic, inst->reads,
-                    inst->read_count);
-            if (exec_err == 0 && hit->def_write_sig)
+                    kv, vtid, cur, inst.opcode, row->def_read_sig,
+                    row->def_read_count, row->def_dynamic, inst.reads,
+                    inst.read_count);
+            if (exec_err == 0 && row->def_write_sig)
                 exec_err =
-                    check_write_types(kv, vtid, cur, inst->opcode,
-                                      hit->def_write_sig, hit->def_write_count);
-            if (exec_err == 0 && mode == KVMODE_RETURN)
-                return execute_yield(&tmp, from_cache, &cache, out_pc,
-                                     out_pc ? strdup(cur) : NULL);
+                    check_write_types(kv, vtid, cur, inst.opcode,
+                                      row->def_write_sig, row->def_write_count);
+            if (exec_err == 0 && mode == KVMODE_RETURN) {
+                operands_free(reads, row->nr);
+                operands_free(writes, row->nw);
+                free(reads);
+                free(writes);
+                for (int d = 0; d <= MAX_STACK_DEPTH; d++)
+                    kvlangFrameCtxFree(fctx[d]);
+                kvlangFuncCacheFree(&fcache);
+                return execute_yield(out_pc, out_pc ? strdup(cur) : NULL);
+            }
             if (exec_err == 0)
-                exec_err = kvlangHandoffExternalRwir(kv, vtid, cur, inst);
+                exec_err = kvlangHandoffExternalRwir(kv, vtid, cur, &inst);
+            addr_epoch++; /* 外部执行器可能删除/重建 key */
         } else {
         user_call:
-            exec_err = kvlangKvcpuCallOpcode(
-                kv, vtid, cur, status, inst->opcode, inst->reads,
-                inst->read_count, inst->writes, inst->write_count);
+            exec_err = kvlangKvcpuCallOpcode(kv, vtid, cur, status, inst.opcode,
+                                             inst.reads, inst.read_count,
+                                             inst.writes, inst.write_count);
         }
 
+        operands_free(reads, row->nr);
+        operands_free(writes, row->nw);
         if (exec_err != 0) {
-            rwir_instruction_release(&tmp, from_cache);
             rc = -1;
             break;
         }
-
-        rwir_instruction_release(&tmp, from_cache);
     }
 
-    kvlangRwirCacheFree(&cache);
+    for (int d = 0; d <= MAX_STACK_DEPTH; d++)
+        kvlangFrameCtxFree(fctx[d]);
+    kvlangFuncCacheFree(&fcache);
+    free(reads);
+    free(writes);
     return rc;
 }
 
