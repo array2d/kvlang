@@ -9,12 +9,12 @@ int kvlangBuiltinVthreadCreate(kvlangFrame_t *f) {
     kvlangXvalue_t in[1]; int n = kvlangBuiltinReadInputs(f, in, 1);
     if (n < 1 || !kvlangXvalueIsCharKind(kvlangXvalueKind(&in[0]))) {
         kvlangBuiltinFreeInputs(in, n);
-        return kvlangBuiltinSetErr(f, "TypeError: vthread.create requires 1 string arg");
+        return kvlangBuiltinSetError(f, "TypeError: vthread.create requires 1 string arg");
     }
     char *fn = kvlangXvalueValueString(&in[0]);
-    char *vid = kvlangVthreadSpawn(f->kv, fn, NULL, 0);
+    char *vid = kvlangVthreadSpawn(f->kvspace, fn, NULL, 0);
     free(fn); kvlangBuiltinFreeInputs(in, n);
-    if (!vid) return kvlangBuiltinSetErr(f, "RuntimeError: vthread.create failed");
+    if (!vid) return kvlangBuiltinSetError(f, "RuntimeError: vthread.create failed");
     kvlangXvalue_t r; kvlangXvalueNewCharUtf8(&r, vid);
     free(vid);
     int rc = kvlangBuiltinWriteResult(f, &r);
@@ -28,28 +28,28 @@ int kvlangBuiltinVthreadRun(kvlangFrame_t *f) {
     kvlangXvalue_t in[1]; int n = kvlangBuiltinReadInputs(f, in, 1);
     if (n < 1 || !kvlangXvalueIsCharKind(kvlangXvalueKind(&in[0]))) {
         kvlangBuiltinFreeInputs(in, n);
-        return kvlangBuiltinSetErr(f, "TypeError: vthread.run requires 1 string (vid) arg");
+        return kvlangBuiltinSetError(f, "TypeError: vthread.run requires 1 string (vid) arg");
     }
     char *vid = kvlangXvalueValueString(&in[0]);
     kvlangBuiltinFreeInputs(in, n);
     char *subpc = NULL, *status = NULL;
-    kvlangVthreadGet(f->kv, vid, &subpc, &status);
+    kvlangVthreadGet(f->kvspace, vid, &subpc, &status);
     free(status);
     if (!subpc || !subpc[0]) { free(subpc); kvlangBuiltinNextPc(f); return 0; }
     char *subout = NULL;
-    int rc = kvlangKvcpuExecuteMode(f->kv, subpc, KVMODE_RETURN, &subout);
+    int rc = kvlangKvcpuExecuteMode(f->kvspace, subpc, KVMODE_RETURN, &subout);
     free(subpc);
     if (rc < 0) {
         /* 子 vthread 自己失败（status=error）是**子**的终态：监督者要能活着检视
          * /vthread/<vid>/‥status 与 ‥error/msg（一个子任务失败不该杀掉整条会话）。
          * 只有驱动本身失败才冒泡给父。 */
         char *sp = NULL, *st = NULL;
-        kvlangVthreadGet(f->kv, vid, &sp, &st);
+        kvlangVthreadGet(f->kvspace, vid, &sp, &st);
         free(sp);
         int child_failed = st && strcmp(st, "error") == 0;
         free(st); free(vid); free(subout);
         if (child_failed) { kvlangBuiltinNextPc(f); return 0; }
-        return kvlangBuiltinSetErr(f, "RuntimeError: vthread.run failed");
+        return kvlangBuiltinSetError(f, "RuntimeError: vthread.run failed");
     }
     free(vid);
     if (rc == 1) { *f->yield_pc = subout; return 0; }
@@ -64,10 +64,10 @@ int kvlangBuiltinVthreadCall(kvlangFrame_t *f) {
     kvlangXvalue_t in[1]; int n = kvlangBuiltinReadInputs(f, in, 1);
     if (n < 1 || !kvlangXvalueIsCharKind(kvlangXvalueKind(&in[0]))) {
         kvlangBuiltinFreeInputs(in, n);
-        return kvlangBuiltinSetErr(f, "TypeError: vthread.call requires 1 string arg");
+        return kvlangBuiltinSetError(f, "TypeError: vthread.call requires 1 string arg");
     }
     char *fn = kvlangXvalueValueString(&in[0]);
-    int rc = kvlangKvcpuDynCall(f->kv, f->vtid, f->pc, fn);
+    int rc = kvlangKvcpuDynamicCall(f->kvspace, f->vthread_id, f->pc, fn);
     free(fn); kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
@@ -76,7 +76,7 @@ int kvlangBuiltinVthreadCall(kvlangFrame_t *f) {
  * 单进程模型下即 nanosleep 阻塞驱动线程。 */
 int kvlangBuiltinVthreadSleep(kvlangFrame_t *f) {
     kvlangXvalue_t in[1]; int n = kvlangBuiltinReadInputs(f, in, 1);
-    if (n < 1) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetErr(f, "TypeError: vthread.sleep requires 1 duration arg"); }
+    if (n < 1) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetError(f, "TypeError: vthread.sleep requires 1 duration arg"); }
     int64_t ns = kvlangScalarI64(kvlangXvalueScalar(&in[0]));
     kvlangBuiltinFreeInputs(in, n);
     if (ns > 0) {
@@ -90,17 +90,17 @@ int kvlangBuiltinVthreadSleep(kvlangFrame_t *f) {
  * 其余状态（paused/done/error…）即停。恢复：外部把 /vthread/{vid}/·status 改回 running。 */
 static int set_status(kvlangFrame_t *f, const char *status) {
     char npc[KV_KEY_MAX];
-    if (kvlangRwirNextPcBuf(f->pc, npc, sizeof npc) == 0)
+    if (kvlangRwirNextPcBuffer(f->pc, npc, sizeof npc) == 0)
         kvlangDie("next pc exceeds %zu bytes", sizeof npc);
     kvlangVthreadAdvance(f, npc, status);
     return 0;
 }
 
-int kvlangBuiltinVthreadSetstatus(kvlangFrame_t *f) {
+int kvlangBuiltinVthreadSetStatus(kvlangFrame_t *f) {
     kvlangXvalue_t in[1]; int n = kvlangBuiltinReadInputs(f, in, 1);
     if (n < 1 || !kvlangXvalueIsCharKind(kvlangXvalueKind(&in[0]))) {
         kvlangBuiltinFreeInputs(in, n);
-        return kvlangBuiltinSetErr(f, "TypeError: vthread.setstatus requires 1 string arg");
+        return kvlangBuiltinSetError(f, "TypeError: vthread.setstatus requires 1 string arg");
     }
     char *status = kvlangXvalueValueString(&in[0]);
     int rc = set_status(f, status);

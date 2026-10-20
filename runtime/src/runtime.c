@@ -2,44 +2,44 @@
 #include "runtime_internal.h"
 
 struct kvlangRuntime_t {
-  kvlangKv_t *kv;
+  kvspace_t *kvspace;
 };
 
 kvlangRuntime_t *kvlangRuntimeConnect(const char *dsn) {
-  kvlangKv_t *kv = kvlangKvConnect(dsn);
+  kvspace_t *kv = kvlangKvspaceConnect(dsn);
   if (!kv)
     return NULL;
   kvlangRuntime_t *rt = malloc(sizeof(*rt));
   if (!rt) {
-    kvlangKvDisconnect(kv);
+    kvlangKvspaceDisconnect(kv);
     return NULL;
   }
-  rt->kv = kv;
+  rt->kvspace = kv;
   return rt;
 }
 
 void kvlangRuntimeDisconnect(kvlangRuntime_t *rt) {
   if (!rt)
     return;
-  kvlangKvDisconnect(rt->kv);
+  kvlangKvspaceDisconnect(rt->kvspace);
   free(rt);
 }
 
 int kvlangRuntimeExecutePc(kvlangRuntime_t *rt, const char *pc) {
-  return kvlangKvcpuExecute(rt->kv, pc);
+  return kvlangKvcpuExecute(rt->kvspace, pc);
 }
 
 /* runtime 与 runtime-rs 必须共用同一 kvspace 句柄——durable 惰性 flush
  * 仅在同句柄内相干， 跨句柄写不可见（shm 共享 mmap
  * 掩盖了此点）。暴露内部句柄，禁止调用方另开连接。 */
-void *kvlangRuntimeKvspaceHandle(kvlangRuntime_t *rt) { return rt->kv->h; }
+void *kvlangRuntimeKvspaceHandle(kvlangRuntime_t *rt) { return rt->kvspace->handle; }
 
-static char *read_vthread_pc(kvlangKv_t *kv, const char *vid) {
+static char *read_vthread_pc(kvspace_t *kv, const char *vid) {
   char key[KV_KEY_MAX];
   kvlangKeytreeVthreadPc(vid, key, sizeof key);
   kvlangXvalue_t v;
   kvlangXvalueZero(&v);
-  kvlangKvGetOne(kv, key, &v);
+  kvlangKvspaceGetOne(kv, key, &v);
   char *pc = kvlangXvalueNone(&v) ? strdup("") : kvlangXvalueValueString(&v);
   kvlangXvalueFree(&v);
   return pc;
@@ -47,17 +47,17 @@ static char *read_vthread_pc(kvlangKv_t *kv, const char *vid) {
 
 int kvlangRuntimeExecuteVthread(kvlangRuntime_t *rt, const char *vid,
                                 char **out_pc) {
-  char *pc = read_vthread_pc(rt->kv, vid);
-  int rc = kvlangKvcpuExecuteMode(rt->kv, pc, KVMODE_RETURN, out_pc);
+  char *pc = read_vthread_pc(rt->kvspace, vid);
+  int rc = kvlangKvcpuExecuteMode(rt->kvspace, pc, KVMODE_RETURN, out_pc);
   free(pc);
   return rc;
 }
 
-static char *alloc_vtid(kvlangKv_t *kv) {
+static char *alloc_vthread_id(kvspace_t *kv) {
   static const char seq[] = VTHREAD_ROOT "/" RUNTIME_MEMBER_SEP "seq";
   kvlangXvalue_t v;
   kvlangXvalueZero(&v);
-  kvlangKvGetOne(kv, seq, &v);
+  kvlangKvspaceGetOne(kv, seq, &v);
   char *s = kvlangXvalueNone(&v) ? strdup("") : kvlangXvalueValueString(&v);
   kvlangXvalueFree(&v);
   int64_t n = atoll(s) + 1;
@@ -69,24 +69,24 @@ static char *alloc_vtid(kvlangKv_t *kv) {
   kvlangKvPair_t p = {seq, nv};
   char err[256];
   int rc = kvlangXvalueNone(&nv) ? -1 :
-           kvlangKvSet(kv, &p, 1, err, sizeof err);
+           kvlangKvspaceSet(kv, &p, 1, err, sizeof err);
   kvlangXvalueFree(&nv);
   return rc == 0 ? strdup(buf) : NULL;
 }
 
 /* 创建一个 vthread（分配 vid + 建栈索引 + bootstrap 首指令 + 置 init），返回
- * vid（调用方 free）。 只创建不运行——运行由 kvlangRuntimeRunVid 按 vid
+ * vid（调用方 free）。 只创建不运行——运行由 kvlangRuntimeRunVthreadId 按 vid
  * 承接。RuntimeBootstrap/ExecuteKv/vthread·create 共用。 */
-char *kvlangVthreadSpawn(kvlangKv_t *kv, const char *funcname,
+char *kvlangVthreadSpawn(kvspace_t *kv, const char *funcname,
                          const char *const *args, int nargs) {
-  char *vtid = alloc_vtid(kv);
+  char *vtid = alloc_vthread_id(kv);
   if (!vtid)
     return NULL;
   char vtroot[KV_KEY_MAX];
   kvlangKeytreeVthread(vtid, vtroot, sizeof vtroot);
   char *stack_vt = kvlangKeytreeStack(vtroot);
   char e[256];
-  if (kvlangKvMkindex(kv, stack_vt, 0, e, sizeof e) != 0) {
+  if (kvlangKvspaceMakeIndex(kv, stack_vt, 0, e, sizeof e) != 0) {
     free(stack_vt);
     free(vtid);
     return NULL;
@@ -109,12 +109,12 @@ char *kvlangVthreadSpawn(kvlangKv_t *kv, const char *funcname,
 
 char *kvlangRuntimeBootstrap(kvlangRuntime_t *rt, const char *funcname,
                              const char *const *args, int nargs) {
-  return kvlangVthreadSpawn(rt->kv, funcname, args, nargs);
+  return kvlangVthreadSpawn(rt->kvspace, funcname, args, nargs);
 }
 
 /* 按 vid 从其持久化 pc 跑到结束（WATCH 模式，阻塞）。读终态：error 时把消息写
  * err、*ret="error"。 */
-int kvlangRuntimeRunVid(kvlangKv_t *kv, const char *vid, char **ret, char *err,
+int kvlangRuntimeRunVthreadId(kvspace_t *kv, const char *vid, char **ret, char *err,
                         uint32_t err_cap) {
   char *pc = read_vthread_pc(kv, vid);
   if (!pc || !pc[0]) {
@@ -131,7 +131,7 @@ int kvlangRuntimeRunVid(kvlangKv_t *kv, const char *vid, char **ret, char *err,
   kvlangKeytreeVthreadStatus(vid, st, sizeof st);
   kvlangXvalue_t sv;
   kvlangXvalueZero(&sv);
-  kvlangKvGetOne(kv, st, &sv);
+  kvlangKvspaceGetOne(kv, st, &sv);
   char *status =
       kvlangXvalueNone(&sv) ? strdup("") : kvlangXvalueValueString(&sv);
   kvlangXvalueFree(&sv);
@@ -139,10 +139,10 @@ int kvlangRuntimeRunVid(kvlangKv_t *kv, const char *vid, char **ret, char *err,
   if (ret) {
     if (strcmp(status, "error") == 0) {
       char mk[KV_KEY_MAX];
-      kvlangKeytreeVthreadStatusMsg(vid, "error", mk, sizeof mk);
+      kvlangKeytreeVthreadStatusMessage(vid, "error", mk, sizeof mk);
       kvlangXvalue_t mv;
       kvlangXvalueZero(&mv);
-      kvlangKvGetOne(kv, mk, &mv);
+      kvlangKvspaceGetOne(kv, mk, &mv);
       char *msg = kvlangXvalueNone(&mv) ? strdup("error")
                                         : kvlangXvalueValueString(&mv);
       kvlangXvalueFree(&mv);
@@ -160,7 +160,7 @@ int kvlangRuntimeRunVid(kvlangKv_t *kv, const char *vid, char **ret, char *err,
   return rc;
 }
 
-int kvlangRuntimeExecuteKv(kvlangKv_t *kv, const char *funcname,
+int kvlangRuntimeExecuteKvspace(kvspace_t *kv, const char *funcname,
                            const char *const *args, int nargs, char **ret,
                            char *err, uint32_t err_cap) {
   char *vtid = kvlangVthreadSpawn(kv, funcname, args, nargs);
@@ -169,7 +169,7 @@ int kvlangRuntimeExecuteKv(kvlangKv_t *kv, const char *funcname,
       snprintf(err, err_cap, "Bootstrap %s failed", funcname);
     return -1;
   }
-  int rc = kvlangRuntimeRunVid(kv, vtid, ret, err, err_cap);
+  int rc = kvlangRuntimeRunVthreadId(kv, vtid, ret, err, err_cap);
   free(vtid);
   return rc;
 }
@@ -177,6 +177,6 @@ int kvlangRuntimeExecuteKv(kvlangKv_t *kv, const char *funcname,
 int kvlangRuntimeExecute(kvlangRuntime_t *rt, const char *funcname,
                          const char *const *args, int nargs, char **ret,
                          char *err, uint32_t err_cap) {
-  return kvlangRuntimeExecuteKv(rt->kv, funcname, args, nargs, ret, err,
+  return kvlangRuntimeExecuteKvspace(rt->kvspace, funcname, args, nargs, ret, err,
                                 err_cap);
 }

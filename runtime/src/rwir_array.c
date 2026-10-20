@@ -20,13 +20,13 @@ static void pack_typed_array(const char *kind, const kvlangXvalue_t *elems,
     free(raw);
 }
 
-static int separated_len(kvlangKv_t *kv, const char *base) {
+static int separated_len(kvspace_t *kv, const char *base) {
     char key[KV_KEY_MAX];
     for (int i = 0;; i++) {
-        kvlangKeyFmt(key, sizeof key, "%s%s[%d]", base, MEMBER_SEP, i);
+        kvlangKeyFormat(key, sizeof key, "%s%s[%d]", base, MEMBER_SEP, i);
         kvlangXvalue_t v;
         kvlangXvalueZero(&v);
-        kvlangKvGetOne(kv, key, &v);
+        kvlangKvspaceGetOne(kv, key, &v);
         bool none = kvlangXvalueNone(&v);
         kvlangXvalueFree(&v);
         if (none)
@@ -34,12 +34,12 @@ static int separated_len(kvlangKv_t *kv, const char *base) {
     }
 }
 
-static int64_t separated_next(kvlangKv_t *kv, const char *base) {
+static int64_t separated_next(kvspace_t *kv, const char *base) {
     char *dir = kvlangKeytreeMember(base, "");
     char **names = NULL;
     int count = 0;
     int64_t next = 0;
-    if (kvlangKvList(kv, dir, false, false, &names, &count) == 0) {
+    if (kvlangKvspaceList(kv, dir, false, false, &names, &count) == 0) {
         for (int i = 0; i < count; i++) {
             char *end = NULL;
             if (names[i][0] == '[') {
@@ -60,18 +60,18 @@ static int clear_members(kvlangFrame_t *f, const char *base) {
     char *prefix = kvlangKeytreeMember(base, "");
     char **names = NULL;
     int count = 0;
-    if (kvlangKvList(f->kv, prefix, false, false, &names, &count) != 0) {
+    if (kvlangKvspaceList(f->kvspace, prefix, false, false, &names, &count) != 0) {
         free(prefix);
-        return kvlangBuiltinSetErr(f, "array.scatter: cannot list members");
+        return kvlangBuiltinSetError(f, "array.scatter: cannot list members");
     }
     char err[256];
     int rc = 0;
     for (int i = 0; i < count; i++) {
         if (rc == 0) {
             char key[KV_KEY_MAX];
-            kvlangKeyFmt(key, sizeof key, "%s%s", prefix, names[i]);
-            if (kvlangKvDelTree(f->kv, key, err, sizeof err) != 0)
-                rc = kvlangBuiltinSetErr(f, "%s", err);
+            kvlangKeyFormat(key, sizeof key, "%s%s", prefix, names[i]);
+            if (kvlangKvspaceDeleteTree(f->kvspace, key, err, sizeof err) != 0)
+                rc = kvlangBuiltinSetError(f, "%s", err);
         }
         free(names[i]);
     }
@@ -100,19 +100,19 @@ char *kvlangBuiltinScatterKey(const char *base, const int64_t *coords,
         kvlangDie("scatter key exceeds %zu bytes", cap);
     buf[off++] = ']';
     buf[off] = 0;
-    return kvlangAstrN(buf, off);
+    return kvlangStringCopyN(buf, off);
 }
 
 static int ensure_scattered(kvlangFrame_t *f, const char *base, const char *fallback_kind) {
     kvlangXvalue_t arr;
     kvlangXvalueZero(&arr);
-    kvlangKvGetOne(f->kv, base, &arr);
+    kvlangKvspaceGetOne(f->kvspace, base, &arr);
     kvlangXvalueMaterialize(&arr);
     bool missing = kvlangXvalueNone(&arr);
     const char *kind = missing ? fallback_kind : kvlangXvalueKind(&arr);
     if (!kind || kvlangXvalueElemSize(kind) <= 0) {
         kvlangXvalueFree(&arr);
-        return missing ? kvlangBuiltinSetErr(f, "array: missing element type") : 0;
+        return missing ? kvlangBuiltinSetError(f, "array: missing element type") : 0;
     }
     char ty[256];
     snprintf(ty, sizeof ty, "[int64]%s%s", MEMBER_SEP, kind);
@@ -120,11 +120,11 @@ static int ensure_scattered(kvlangFrame_t *f, const char *base, const char *fall
     kvlangBuiltinMapMarker(&mark, ty);
     kvlangKvPair_t head = {(char *)base, mark};
     char err[256];
-    int rc = kvlangKvSet(f->kv, &head, 1, err, sizeof err);
+    int rc = kvlangKvspaceSet(f->kvspace, &head, 1, err, sizeof err);
     kvlangXvalueFree(&mark);
     if (rc != 0) {
         kvlangXvalueFree(&arr);
-        return kvlangBuiltinSetErr(f, "%s", err);
+        return kvlangBuiltinSetError(f, "%s", err);
     }
     if (missing) {
         kvlangXvalueFree(&arr);
@@ -135,14 +135,14 @@ static int ensure_scattered(kvlangFrame_t *f, const char *base, const char *fall
         int64_t c[1] = {i};
         char *k = kvlangBuiltinScatterKey(base, c, 1);
         kvlangXvalue_t e;
-        kvlangBuiltinXvalueAt(&arr, i, &e);
+        kvlangXvalueElementAt(&arr, i, &e);
         kvlangKvPair_t p = {k, e};
-        rc = kvlangKvSet(f->kv, &p, 1, err, sizeof err);
+        rc = kvlangKvspaceSet(f->kvspace, &p, 1, err, sizeof err);
         kvlangXvalueFree(&e);
         free(k);
         if (rc != 0) {
             kvlangXvalueFree(&arr);
-            return kvlangBuiltinSetErr(f, "%s", err);
+            return kvlangBuiltinSetError(f, "%s", err);
         }
     }
     kvlangXvalueFree(&arr);
@@ -152,7 +152,7 @@ static int ensure_scattered(kvlangFrame_t *f, const char *base, const char *fall
 int kvlangBuiltinArray(kvlangFrame_t *f) {
     kvlangXvalue_t in[64];
     int n = kvlangBuiltinReadInputs(f, in, 64);
-    if (f->inst->nw == 0 || n == 0) {
+    if (f->instruction->write_count == 0 || n == 0) {
         kvlangBuiltinNextPc(f);
         kvlangBuiltinFreeInputs(in, n);
         return 0;
@@ -160,24 +160,24 @@ int kvlangBuiltinArray(kvlangFrame_t *f) {
     const char *kind = kvlangXvalueKind(&in[0]);
     if (kvlangXvalueElemSize(kind) <= 0) {
         kvlangBuiltinFreeInputs(in, n);
-        return kvlangBuiltinSetErr(f, "array: unsupported element kind %s",
+        return kvlangBuiltinSetError(f, "array: unsupported element kind %s",
                                    kind);
     }
     for (int i = 1; i < n; i++)
         if (strcmp(kvlangXvalueKind(&in[i]), kind) != 0) {
             kvlangBuiltinFreeInputs(in, n);
-            return kvlangBuiltinSetErr(f, "array: mixed kinds %s and %s", kind,
+            return kvlangBuiltinSetError(f, "array: mixed kinds %s and %s", kind,
                                        kvlangXvalueKind(&in[i]));
         }
     kvlangXvalue_t arr;
     pack_typed_array(kind, in, n, &arr);
     char *fr = kvlangKeytreeFrameRoot(f->pc);
     char *key =
-        kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->writes[0].name);
+        kvlangBuiltinResolveWriteSlot(f->kvspace, fr, f->instruction->writes[0].name);
     free(fr);
     kvlangKvPair_t p = {key, arr};
     char err[256];
-    kvlangKvSet(f->kv, &p, 1, err, sizeof err);
+    kvlangKvspaceSet(f->kvspace, &p, 1, err, sizeof err);
     free(key);
     kvlangXvalueFree(&arr);
     kvlangBuiltinNextPc(f);
@@ -188,14 +188,14 @@ int kvlangBuiltinArray(kvlangFrame_t *f) {
 /* array·fill(langtype[, value]) -> a：按 langtype 的定长维度一次成型 compact 数组，
  * 每元素填 value（缺省全零）。用于大数组初始化，无需逐元素赋值。 */
 int kvlangBuiltinArrayFill(kvlangFrame_t *f) {
-    if (f->inst->nw == 0)
-        return kvlangBuiltinSetErr(
+    if (f->instruction->write_count == 0)
+        return kvlangBuiltinSetError(
             f, "TypeError: array.fill requires a write param (-> a)");
     kvlangXvalue_t in[2];
     int n = kvlangBuiltinReadInputs(f, in, 2);
     if (n < 1) {
         kvlangBuiltinFreeInputs(in, n);
-        return kvlangBuiltinSetErr(f,
+        return kvlangBuiltinSetError(f,
                                    "TypeError: array.fill requires a langtype");
     }
     char *ke = kvlangXvalueValueString(&in[0]);
@@ -203,7 +203,7 @@ int kvlangBuiltinArrayFill(kvlangFrame_t *f) {
     kvlangLangtypeParse((const uint8_t *)ke, (int32_t)strlen(ke), &kx);
     int sz = kvlangXvalueElemSize(kx.kind);
     if (sz <= 0 || sz > 8 || kx.ndim < 1 || kx.array_len < 0) {
-        int rc = kvlangBuiltinSetErr(
+        int rc = kvlangBuiltinSetError(
             f, "TypeError: array.fill: not a fixed-length array type %s", ke);
         free(ke);
         kvlangBuiltinFreeInputs(in, n);
@@ -212,7 +212,7 @@ int kvlangBuiltinArrayFill(kvlangFrame_t *f) {
     uint8_t elem[8] = {0};
     if (n >= 2 && !kvlangXvalueNone(&in[1])) {
         kvlangScalar_t s = kvlangXvalueScalar(&in[1]);
-        int tid = kvlangLangTypeId(kx.kind, kx.kind_len);
+        int tid = kvlangLangtypeId(kx.kind, kx.kind_len);
         if (tid == KVLANG_LT_FLOAT32) {
             float v = (float)kvlangScalarF64(s);
             memcpy(elem, &v, 4);
@@ -242,8 +242,8 @@ int kvlangBuiltinArrayFill(kvlangFrame_t *f) {
 /* ── array· 系列 ────────────────────────────────────────────────── */
 
 int kvlangBuiltinScatter(kvlangFrame_t *f) {
-    if (f->inst->nw == 0)
-        return kvlangBuiltinSetErr(
+    if (f->instruction->write_count == 0)
+        return kvlangBuiltinSetError(
             f, "TypeError: array.scatter requires a write param");
     kvlangXvalue_t in[2];
     int n = kvlangBuiltinReadInputs(f, in, 2);
@@ -254,14 +254,14 @@ int kvlangBuiltinScatter(kvlangFrame_t *f) {
     }
     if (kvlangXvalueElemSize(kvlangXvalueKind(&in[0])) <= 0) {
         kvlangBuiltinFreeInputs(in, n);
-        return kvlangBuiltinSetErr(
+        return kvlangBuiltinSetError(
             f,
             "TypeError: array.scatter requires a compact array ([]T), got %s",
             kvlangXvalueKind(&in[0]));
     }
     char *fr = kvlangKeytreeFrameRoot(f->pc);
     char *dst =
-        kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->writes[0].name);
+        kvlangBuiltinResolveWriteSlot(f->kvspace, fr, f->instruction->writes[0].name);
     int rc = clear_members(f, dst);
     if (rc != 0) {
         free(dst);
@@ -277,28 +277,28 @@ int kvlangBuiltinScatter(kvlangFrame_t *f) {
     kvlangXvalue_t mark;
     kvlangBuiltinMapMarker(&mark, ty);
     kvlangKvPair_t p0 = {dst, mark};
-    rc = kvlangKvSet(f->kv, &p0, 1, err, sizeof err);
+    rc = kvlangKvspaceSet(f->kvspace, &p0, 1, err, sizeof err);
     kvlangXvalueFree(&mark);
     if (rc != 0) {
         free(dst);
         free(fr);
         kvlangBuiltinFreeInputs(in, n);
-        return kvlangBuiltinSetErr(f, "%s", err);
+        return kvlangBuiltinSetError(f, "%s", err);
     }
     for (int i = 0; i < al; i++) {
         int64_t c[1] = {i};
         char *k = kvlangBuiltinScatterKey(dst, c, 1);
         kvlangXvalue_t e;
-        kvlangBuiltinXvalueAt(&in[0], i, &e);
+        kvlangXvalueElementAt(&in[0], i, &e);
         kvlangKvPair_t p = {k, e};
-        rc = kvlangKvSet(f->kv, &p, 1, err, sizeof err);
+        rc = kvlangKvspaceSet(f->kvspace, &p, 1, err, sizeof err);
         kvlangXvalueFree(&e);
         free(k);
         if (rc != 0) {
             free(dst);
             free(fr);
             kvlangBuiltinFreeInputs(in, n);
-            return kvlangBuiltinSetErr(f, "%s", err);
+            return kvlangBuiltinSetError(f, "%s", err);
         }
     }
     free(dst);
@@ -309,12 +309,12 @@ int kvlangBuiltinScatter(kvlangFrame_t *f) {
 }
 
 int kvlangBuiltinCompact(kvlangFrame_t *f) {
-    if (f->inst->nr == 0 || f->inst->nw == 0)
-        return kvlangBuiltinSetErr(
+    if (f->instruction->read_count == 0 || f->instruction->write_count == 0)
+        return kvlangBuiltinSetError(
             f, "TypeError: array.compact requires read and write params");
     char *fr = kvlangKeytreeFrameRoot(f->pc);
     char *src =
-        kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->reads[0].name);
+        kvlangBuiltinResolveWriteSlot(f->kvspace, fr, f->instruction->reads[0].name);
     kvlangXvalue_t elems[1024];
     int n = 0;
     for (int i = 0;; i++) {
@@ -322,7 +322,7 @@ int kvlangBuiltinCompact(kvlangFrame_t *f) {
         char *k = kvlangBuiltinScatterKey(src, c, 1);
         kvlangXvalue_t v;
         kvlangXvalueZero(&v);
-        kvlangKvGetOne(f->kv, k, &v);
+        kvlangKvspaceGetOne(f->kvspace, k, &v);
         bool none = kvlangXvalueNone(&v);
         free(k);
         if (none)
@@ -338,10 +338,10 @@ int kvlangBuiltinCompact(kvlangFrame_t *f) {
     kvlangXvalue_t arr;
     pack_typed_array(kvlangXvalueKind(&elems[0]), elems, n, &arr);
     char *dst =
-        kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->writes[0].name);
+        kvlangBuiltinResolveWriteSlot(f->kvspace, fr, f->instruction->writes[0].name);
     kvlangKvPair_t p = {dst, arr};
     char err[256];
-    kvlangKvSet(f->kv, &p, 1, err, sizeof err);
+    kvlangKvspaceSet(f->kvspace, &p, 1, err, sizeof err);
     for (int i = 0; i < n; i++)
         kvlangXvalueFree(&elems[i]);
     kvlangXvalueFree(&arr);
@@ -353,17 +353,17 @@ int kvlangBuiltinCompact(kvlangFrame_t *f) {
 }
 
 int kvlangBuiltinAppend(kvlangFrame_t *f) {
-    if (f->inst->nr < 2)
-        return kvlangBuiltinSetErr(
+    if (f->instruction->read_count < 2)
+        return kvlangBuiltinSetError(
             f, "TypeError: array.append requires array and element");
-    if (f->inst->nw == 0)
-        return kvlangBuiltinSetErr(
+    if (f->instruction->write_count == 0)
+        return kvlangBuiltinSetError(
             f, "TypeError: array.append requires a write param (-> arr)");
     kvlangXvalue_t in[2];
     int n = kvlangBuiltinReadInputs(f, in, 2);
     char *fr = kvlangKeytreeFrameRoot(f->pc);
     char *base =
-        kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->writes[0].name);
+        kvlangBuiltinResolveWriteSlot(f->kvspace, fr, f->instruction->writes[0].name);
     int rc = ensure_scattered(f, base, n >= 2 ? kvlangXvalueKind(&in[1]) : NULL);
     if (rc != 0) {
         free(base);
@@ -371,32 +371,32 @@ int kvlangBuiltinAppend(kvlangFrame_t *f) {
         kvlangBuiltinFreeInputs(in, n);
         return rc;
     }
-    int64_t c[1] = {separated_next(f->kv, base)};
+    int64_t c[1] = {separated_next(f->kvspace, base)};
     char *k = kvlangBuiltinScatterKey(base, c, 1);
     kvlangKvPair_t p = {k, in[1]}; /* nr >= 2 已由上面拦下，ReadInputs(cap=2) 必返 2 */
     char err[256];
-    rc = kvlangKvSet(f->kv, &p, 1, err, sizeof err);
+    rc = kvlangKvspaceSet(f->kvspace, &p, 1, err, sizeof err);
     free(k);
     free(base);
     free(fr);
     if (rc == 0)
         kvlangBuiltinNextPc(f);
     kvlangBuiltinFreeInputs(in, n);
-    return rc == 0 ? 0 : kvlangBuiltinSetErr(f, "%s", err);
+    return rc == 0 ? 0 : kvlangBuiltinSetError(f, "%s", err);
 }
 
 int kvlangBuiltinSlice(kvlangFrame_t *f) {
-    if (f->inst->nr < 3)
-        return kvlangBuiltinSetErr(
+    if (f->instruction->read_count < 3)
+        return kvlangBuiltinSetError(
             f, "TypeError: array.slice requires array, start, end");
-    if (f->inst->nw == 0)
-        return kvlangBuiltinSetErr(
+    if (f->instruction->write_count == 0)
+        return kvlangBuiltinSetError(
             f, "TypeError: array.slice requires a write param (-> arr)");
     kvlangXvalue_t in[3];
     int n = kvlangBuiltinReadInputs(f, in, 3);
     char *fr = kvlangKeytreeFrameRoot(f->pc);
     char *base =
-        kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->writes[0].name);
+        kvlangBuiltinResolveWriteSlot(f->kvspace, fr, f->instruction->writes[0].name);
     int rc = ensure_scattered(f, base, NULL);
     if (rc != 0) {
         free(base);
@@ -404,14 +404,14 @@ int kvlangBuiltinSlice(kvlangFrame_t *f) {
         kvlangBuiltinFreeInputs(in, n);
         return rc;
     }
-    int al = separated_len(f->kv, base);
+    int al = separated_len(f->kvspace, base);
     int lo = (int)kvlangScalarI64(kvlangXvalueScalar(&in[1])),
         hi = (int)kvlangScalarI64(kvlangXvalueScalar(&in[2]));
     if (lo < 0 || hi < lo || hi > al) {
         free(base);
         free(fr);
         kvlangBuiltinFreeInputs(in, n);
-        return kvlangBuiltinSetErr(
+        return kvlangBuiltinSetError(
             f, "IndexError: array.slice: bounds [%d:%d] out of range (len=%d)",
             lo, hi, al);
     }
@@ -420,11 +420,11 @@ int kvlangBuiltinSlice(kvlangFrame_t *f) {
         char *sk = kvlangBuiltinScatterKey(base, sc, 1);
         kvlangXvalue_t v;
         kvlangXvalueZero(&v);
-        kvlangKvGetOne(f->kv, sk, &v);
+        kvlangKvspaceGetOne(f->kvspace, sk, &v);
         char *dk = kvlangBuiltinScatterKey(base, dc, 1);
         kvlangKvPair_t p = {dk, v};
         char err[256];
-        kvlangKvSet(f->kv, &p, 1, err, sizeof err);
+        kvlangKvspaceSet(f->kvspace, &p, 1, err, sizeof err);
         kvlangXvalueFree(&v);
         free(sk);
         free(dk);
@@ -433,7 +433,7 @@ int kvlangBuiltinSlice(kvlangFrame_t *f) {
         int64_t dc[1] = {i};
         char *dk = kvlangBuiltinScatterKey(base, dc, 1);
         char err[256];
-        kvlangKvDel(f->kv, dk, err, sizeof err);
+        kvlangKvspaceDelete(f->kvspace, dk, err, sizeof err);
         free(dk);
     }
     free(base);

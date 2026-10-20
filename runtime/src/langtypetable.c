@@ -5,9 +5,9 @@
  * id，此后热路径纯整数比较。 */
 
 typedef struct {
-    const char *s;
-    size_t len;
-    int id;
+    const char *text;
+    size_t length;
+    int kind_id;
 } lt_ent_t;
 
 #define LT(k, i) { k, sizeof(k) - 1, i }
@@ -37,27 +37,27 @@ static const lt_ent_t LANGTYPETABLE[] = {
 };
 #undef LT
 
-int kvlangLangTypeId(const char *s, size_t len) {
+int kvlangLangtypeId(const char *s, size_t len) {
     if (!s)
         return KVLANG_LT_UNKNOWN;
     for (size_t i = 0; i < sizeof(LANGTYPETABLE) / sizeof(LANGTYPETABLE[0]); i++)
-        if (LANGTYPETABLE[i].len == len && memcmp(LANGTYPETABLE[i].s, s, len) == 0)
-            return LANGTYPETABLE[i].id;
+        if (LANGTYPETABLE[i].length == len && memcmp(LANGTYPETABLE[i].text, s, len) == 0)
+            return LANGTYPETABLE[i].kind_id;
     return KVLANG_LT_UNKNOWN;
 }
 
-const char *kvlangLangTypeKind(int id) {
+const char *kvlangLangtypeKind(int id) {
     for (size_t i = 0; i < sizeof(LANGTYPETABLE) / sizeof(LANGTYPETABLE[0]); i++)
-        if (LANGTYPETABLE[i].id == id)
-            return LANGTYPETABLE[i].s;
+        if (LANGTYPETABLE[i].kind_id == id)
+            return LANGTYPETABLE[i].text;
     return "";
 }
 
-int kvlangXvalueLangTypeId(const kvlangXvalue_t *v) {
+int kvlangXvalueLangtypeId(const kvlangXvalue_t *v) {
     if (kvlangXvalueNone(v))
         return KVLANG_LT_NONE;
     kvlangLangtype kx;
-    kvlangLangtypeParse(xh_langtype(v->data),
-                        (int32_t)xh_langtype_len(v->data), &kx);
-    return kvlangLangTypeId(kx.kind, (size_t)kx.kind_len);
+    kvlangLangtypeParse(xh_langtype(v->bytes),
+                        (int32_t)xh_langtype_len(v->bytes), &kx);
+    return kvlangLangtypeId(kx.kind, (size_t)kx.kind_len);
 }

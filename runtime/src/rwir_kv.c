@@ -6,7 +6,7 @@ static bool is_int_kind(const char *k) {
     return kvlangXvalueIsIntKind(k) || kvlangXvalueIsUintKind(k);
 }
 
-static char *kvlangKvKey(const kvlangXvalue_t *v) {
+static char *kvlangKvspaceKey(const kvlangXvalue_t *v) {
     if (kvlangXvalueIsCharKind(kvlangXvalueKind(v)))
         return kvlangXvalueValueString(v);
     if (is_int_kind(kvlangXvalueKind(v))) {
@@ -23,10 +23,10 @@ static char *original_absolute_arg(kvlangFrame_t *f, int idx) {
     if (!fr)
         return NULL;
     char key[KV_KEY_MAX];
-    kvlangKeyFmt(key, sizeof key, "%s/%slib", fr, RUNTIME_MEMBER_SEP);
+    kvlangKeyFormat(key, sizeof key, "%s/%slib", fr, RUNTIME_MEMBER_SEP);
     kvlangXvalue_t lib;
     kvlangXvalueZero(&lib);
-    kvlangKvGetOne(f->kv, key, &lib);
+    kvlangKvspaceGetOne(f->kvspace, key, &lib);
     char *root = kvlangXvalueNone(&lib) ? NULL : kvlangXvalueValueString(&lib);
     kvlangXvalueFree(&lib);
     if (!root || root[0] != '/') {
@@ -34,11 +34,11 @@ static char *original_absolute_arg(kvlangFrame_t *f, int idx) {
         free(fr);
         return NULL;
     }
-    int row = kvlangRwirExtractAddr0(strrchr(f->pc, '/') + 1);
-    kvlangKeyFmt(key, sizeof key, "%s/[%d,-%d]", root, row, idx + 1);
+    int row = kvlangRwirExtractAddress(strrchr(f->pc, '/') + 1);
+    kvlangKeyFormat(key, sizeof key, "%s/[%d,-%d]", root, row, idx + 1);
     kvlangXvalue_t source;
     kvlangXvalueZero(&source);
-    kvlangKvGetOne(f->kv, key, &source);
+    kvlangKvspaceGetOne(f->kvspace, key, &source);
     char *name = kvlangXvalueKindIs(&source, KVSPACE_KIND_RWIR) ?
                  kvlangXvalueSlotName(&source) : NULL;
     if (name && name[0] != '/') {
@@ -52,7 +52,7 @@ static char *original_absolute_arg(kvlangFrame_t *f, int idx) {
 }
 
 static char *path_arg(kvlangFrame_t *f, int idx, const kvlangXvalue_t *in) {
-    const char *name = f->inst->reads[idx].name;
+    const char *name = f->instruction->reads[idx].name;
     if (name[0] == '/') {
         if (strncmp(name, "/vthread/", 9) != 0)
             return strdup(name);
@@ -105,7 +105,7 @@ static char *member_path(kvlangFrame_t *f, const kvlangXvalue_t *in, int n,
         bp = kvlangXvaluePtrTarget(base);
     } else if (base_is_container(base)) {
         char *fr = kvlangKeytreeFrameRoot(f->pc);
-        bp = kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->reads[0].name);
+        bp = kvlangBuiltinResolveWriteSlot(f->kvspace, fr, f->instruction->reads[0].name);
         free(fr);
     } else if (kvlangXvalueIsCharKind(kvlangXvalueKind(base))) {
         bp = kvlangXvalueValueString(base);
@@ -114,7 +114,7 @@ static char *member_path(kvlangFrame_t *f, const kvlangXvalue_t *in, int n,
     }
     /* 成员链：base 之后逐段拼 key（变参），每段可为静态字面量或动态键（运行时值）。 */
     for (int i = 1; i < n; i++) {
-        char *kk = kvlangKvKey(&in[i]);
+        char *kk = kvlangKvspaceKey(&in[i]);
         char *next = kvlangKeytreeMember(bp, kk);
         free(kk);
         free(bp);
@@ -123,20 +123,20 @@ static char *member_path(kvlangFrame_t *f, const kvlangXvalue_t *in, int n,
     return bp;
 }
 
-int kvlangCGet(kvlangFrame_t *f) {
+int kvlangBuiltinKvspaceGet(kvlangFrame_t *f) {
     kvlangXvalue_t in[MAX_PARAMS];
     int n = kvlangBuiltinReadInputs(f, in, MAX_PARAMS);
     char merr[512];
-    char *key = f->inst->nr >= 2 ? member_path(f, in, n, merr, sizeof merr)
+    char *key = f->instruction->read_count >= 2 ? member_path(f, in, n, merr, sizeof merr)
                                  : (n >= 1 ? path_arg(f, 0, in) : NULL);
     if (!key) {
         kvlangBuiltinFreeInputs(in, n);
-        return kvlangBuiltinSetErr(f, "TypeError: kvspace·get: %s",
+        return kvlangBuiltinSetError(f, "TypeError: kvspace·get: %s",
                                    merr[0] ? merr : "requires a path");
     }
     kvlangXvalue_t v;
     kvlangXvalueZero(&v);
-    kvlangKvGetOne(f->kv, key, &v);
+    kvlangKvspaceGetOne(f->kvspace, key, &v);
     int rc = kvlangBuiltinWriteResult(f, &v);
     kvlangXvalueFree(&v);
     free(key);
@@ -149,34 +149,34 @@ int kvlangCGet(kvlangFrame_t *f) {
  * 错误，与「禁止写入未声明的 key」一致（对齐 strict 语义，见 [[容器]]）。
  * `/lib` 下跳过：那是 layout/runtime 的结构域，`·` 是包·函数命名分隔符而非成员写。
  * 返回 0 通过；-1 拒绝（调用方置 TypeError）。 */
-int kvlangBuiltinCheckMemhead(kvlangKv_t *kv, const char *frame_root,
+int kvlangBuiltinCheckMemoryHead(kvspace_t *kv, const char *frame_root,
                               const char *base) {
     if (!base || !base[0] || strncmp(base, "/lib", 4) == 0)
         return 0;
     char *path = kvlangBuiltinResolveWriteSlot(kv, frame_root, base);
     kvlangXvalue_t cur;
     kvlangXvalueZero(&cur);
-    kvlangKvGetOne(kv, path, &cur);
+    kvlangKvspaceGetOne(kv, path, &cur);
     int ok = !kvlangXvalueNone(&cur);
     kvlangXvalueFree(&cur);
     free(path);
     return ok ? 0 : -1;
 }
 
-int kvlangCSet(kvlangFrame_t *f) {
+int kvlangBuiltinKvspaceSet(kvlangFrame_t *f) {
     kvlangXvalue_t in[MAX_PARAMS];
     int n = kvlangBuiltinReadInputs(f, in, MAX_PARAMS);
     char *key;
     kvlangXvalue_t *val;
     char merr[512];
-    if (f->inst->nr >= 3) {
-        const char *base = f->inst->reads[0].name;
+    if (f->instruction->read_count >= 3) {
+        const char *base = f->instruction->reads[0].name;
         char *fr = kvlangKeytreeFrameRoot(f->pc);
-        int ok = kvlangBuiltinCheckMemhead(f->kv, fr, base);
+        int ok = kvlangBuiltinCheckMemoryHead(f->kvspace, fr, base);
         free(fr);
         if (ok != 0) {
             kvlangBuiltinFreeInputs(in, n);
-            return kvlangBuiltinSetErr(
+            return kvlangBuiltinSetError(
                 f,
                 "TypeError: memhead %s does not exist — declare the container "
                 "first (e.g. `%s:T = {}`)",
@@ -189,50 +189,50 @@ int kvlangCSet(kvlangFrame_t *f) {
         merr[0] = 0;
         val = &in[1];
     }
-    if (!key || (f->inst->nr < 3 && n < 2)) {
+    if (!key || (f->instruction->read_count < 3 && n < 2)) {
         free(key);
         kvlangBuiltinFreeInputs(in, n);
-        return kvlangBuiltinSetErr(f, "TypeError: kvspace·set: %s",
+        return kvlangBuiltinSetError(f, "TypeError: kvspace·set: %s",
                                    merr[0] ? merr : "requires path and value");
     }
     kvlangKvPair_t p = {key, *val};
     char err[256];
-    int rc = kvlangKvSet(f->kv, &p, 1, err, sizeof err);
+    int rc = kvlangKvspaceSet(f->kvspace, &p, 1, err, sizeof err);
     free(key);
     kvlangBuiltinFreeInputs(in, n);
     if (rc != 0)
-        return kvlangBuiltinSetErr(f, "%s", err);
+        return kvlangBuiltinSetError(f, "%s", err);
     kvlangBuiltinNextPc(f);
     return 0;
 }
 
-static int kv_path_void(kvlangFrame_t *f, const char *name,
-                        int (*op)(kvlangKv_t *, const char *, char *,
+static int run_path_op(kvlangFrame_t *f, const char *name,
+                        int (*op)(kvspace_t *, const char *, char *,
                                   uint32_t)) {
     kvlangXvalue_t in[1];
     int n = kvlangBuiltinReadInputs(f, in, 1);
     char *key = n >= 1 ? path_arg(f, 0, in) : NULL;
     if (!key) {
         kvlangBuiltinFreeInputs(in, n);
-        return kvlangBuiltinSetErr(f, "TypeError: %s requires 1 path arg",
+        return kvlangBuiltinSetError(f, "TypeError: %s requires 1 path arg",
                                    name);
     }
     char err[256];
-    int rc = op(f->kv, key, err, sizeof err);
+    int rc = op(f->kvspace, key, err, sizeof err);
     free(key);
     kvlangBuiltinFreeInputs(in, n);
     if (rc != 0)
-        return kvlangBuiltinSetErr(f, "%s", err);
+        return kvlangBuiltinSetError(f, "%s", err);
     kvlangBuiltinNextPc(f);
     return 0;
 }
 
-int kvlangCDel(kvlangFrame_t *f) {
-    return kv_path_void(f, "kvspace·del", kvlangKvDel);
+int kvlangBuiltinKvspaceDelete(kvlangFrame_t *f) {
+    return run_path_op(f, "kvspace·del", kvlangKvspaceDelete);
 }
 
-int kvlangCDelTree(kvlangFrame_t *f) {
-    return kv_path_void(f, "kvspace·deltree", kvlangKvDelTree);
+int kvlangBuiltinKvspaceDeleteTree(kvlangFrame_t *f) {
+    return run_path_op(f, "kvspace·deltree", kvlangKvspaceDeleteTree);
 }
 
 /* 绝对路径 / 路径字符串直取，否则裸标识符解析为本帧槽位 key（对齐 kvspace·list 的裸变量处理）。 */
@@ -243,13 +243,13 @@ static char *resolve_path_arg(kvlangFrame_t *f, int idx,
         return p;
     char *fr = kvlangKeytreeFrameRoot(f->pc);
     char *base =
-        kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->reads[idx].name);
+        kvlangBuiltinResolveWriteSlot(f->kvspace, fr, f->instruction->reads[idx].name);
     free(fr);
     return base;
 }
 
-static int kv_two_path_void(kvlangFrame_t *f, const char *name,
-                            int (*op)(kvlangKv_t *, const char *, const char *,
+static int run_two_path_op(kvlangFrame_t *f, const char *name,
+                            int (*op)(kvspace_t *, const char *, const char *,
                                       char *, uint32_t)) {
     kvlangXvalue_t in[2];
     int n = kvlangBuiltinReadInputs(f, in, 2);
@@ -259,33 +259,33 @@ static int kv_two_path_void(kvlangFrame_t *f, const char *name,
         free(src);
         free(dst);
         kvlangBuiltinFreeInputs(in, n);
-        return kvlangBuiltinSetErr(
+        return kvlangBuiltinSetError(
             f, "TypeError: %s requires src,dst path args", name);
     }
     char err[256];
-    int rc = op(f->kv, src, dst, err, sizeof err);
+    int rc = op(f->kvspace, src, dst, err, sizeof err);
     free(src);
     free(dst);
     kvlangBuiltinFreeInputs(in, n);
     if (rc != 0)
-        return kvlangBuiltinSetErr(f, "%s", err);
+        return kvlangBuiltinSetError(f, "%s", err);
     kvlangBuiltinNextPc(f);
     return 0;
 }
 
-int kvlangCCp(kvlangFrame_t *f) {
-    return kv_two_path_void(f, "kvspace·cp", kvlangKvCp);
+int kvlangBuiltinKvspaceCopy(kvlangFrame_t *f) {
+    return run_two_path_op(f, "kvspace·cp", kvlangKvspaceCopy);
 }
 
-int kvlangCCpTree(kvlangFrame_t *f) {
-    return kv_two_path_void(f, "kvspace·cpdir", kvlangKvCpTree);
+int kvlangBuiltinKvspaceCopyTree(kvlangFrame_t *f) {
+    return run_two_path_op(f, "kvspace·cpdir", kvlangKvspaceCopyTree);
 }
 
-int kvlangCCpList(kvlangFrame_t *f) {
-    return kv_two_path_void(f, "kvspace·cplist", kvlangKvCpList);
+int kvlangBuiltinKvspaceCopyList(kvlangFrame_t *f) {
+    return run_two_path_op(f, "kvspace·cplist", kvlangKvspaceCopyList);
 }
 
-int kvlangCAbs(kvlangFrame_t *f) {
+int kvlangBuiltinKvlangAbs(kvlangFrame_t *f) {
     kvlangXvalue_t in[MAX_PARAMS];
     int n = kvlangBuiltinReadInputs(f, in, MAX_PARAMS);
     char *p = NULL;
@@ -296,14 +296,14 @@ int kvlangCAbs(kvlangFrame_t *f) {
         p = resolve_path_arg(f, 0, in);
     if (!p) {
         kvlangBuiltinFreeInputs(in, n);
-        return kvlangBuiltinSetErr(f, "TypeError: kvlang·abs: %s",
+        return kvlangBuiltinSetError(f, "TypeError: kvlang·abs: %s",
                                    n >= 2 && merr[0] ? merr : "requires a key");
     }
     /* 产出 Ptr（ref=1）：langtype = 目标 kindexpr、body = 目标绝对路径。
      * &x ≡ kvlang·abs(x)：取址返回指向 x 所在节点的软链接（单跳同型），不再产 char 路径串。 */
     kvlangXvalue_t tg;
     kvlangXvalueZero(&tg);
-    kvlangKvGetOne(f->kv, p, &tg);
+    kvlangKvspaceGetOne(f->kvspace, p, &tg);
     char lt[256] = {0};
     if (!kvlangXvalueNone(&tg))
         xh_langtype_copy_of(&tg, lt, sizeof lt);
@@ -317,39 +317,39 @@ int kvlangCAbs(kvlangFrame_t *f) {
     return rc;
 }
 
-int kvlangCList(kvlangFrame_t *f) {
-    if (f->inst->nw == 0)
-        return kvlangBuiltinSetErr(
+int kvlangBuiltinKvspaceList(kvlangFrame_t *f) {
+    if (f->instruction->write_count == 0)
+        return kvlangBuiltinSetError(
             f, "TypeError: kvspace·list requires a write param");
     kvlangXvalue_t in[1];
     int n = kvlangBuiltinReadInputs(f, in, 1);
     char *key = n >= 1 ? path_arg(f, 0, in) : NULL;
-    if (!key && f->inst->nr >= 1) {
-        const char *name = f->inst->reads[0].name;
+    if (!key && f->instruction->read_count >= 1) {
+        const char *name = f->instruction->reads[0].name;
         char *fr = kvlangKeytreeFrameRoot(f->pc);
-        char *base = kvlangBuiltinResolveWriteSlot(f->kv, fr, name);
+        char *base = kvlangBuiltinResolveWriteSlot(f->kvspace, fr, name);
         free(fr);
         key = kvlangKeytreeMember(base, "");
         free(base);
     }
     if (!key) {
         kvlangBuiltinFreeInputs(in, n);
-        return kvlangBuiltinSetErr(
+        return kvlangBuiltinSetError(
             f, "TypeError: kvspace·list requires 1 path arg");
     }
     char **names = NULL;
     int count = 0;
-    kvlangKvList(f->kv, key, false, false, &names, &count);
+    kvlangKvspaceList(f->kvspace, key, false, false, &names, &count);
     char *fr = kvlangKeytreeFrameRoot(f->pc);
     char *dst =
-        kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->writes[0].name);
+        kvlangBuiltinResolveWriteSlot(f->kvspace, fr, f->instruction->writes[0].name);
     free(fr);
     /* Members are physical keys under dst·. */
     char err[256];
     kvlangXvalue_t mark;
     kvlangBuiltinMapMarker(&mark, "[int64]" MEMBER_SEP "[]char/utf8");
     kvlangKvPair_t p0 = {dst, mark};
-    kvlangKvSet(f->kv, &p0, 1, err, sizeof err);
+    kvlangKvspaceSet(f->kvspace, &p0, 1, err, sizeof err);
     kvlangXvalueFree(&mark);
     for (int i = 0; i < count; i++) {
         int64_t c[1] = {i};
@@ -357,7 +357,7 @@ int kvlangCList(kvlangFrame_t *f) {
         kvlangXvalue_t e;
         kvlangXvalueNewCharUtf8(&e, names[i]);
         kvlangKvPair_t p = {k, e};
-        kvlangKvSet(f->kv, &p, 1, err, sizeof err);
+        kvlangKvspaceSet(f->kvspace, &p, 1, err, sizeof err);
         kvlangXvalueFree(&e);
         free(k);
         free(names[i]);
@@ -367,14 +367,14 @@ int kvlangCList(kvlangFrame_t *f) {
         char *k = kvlangBuiltinScatterKey(dst, c, 1);
         kvlangXvalue_t v;
         kvlangXvalueZero(&v);
-        kvlangKvGetOne(f->kv, k, &v);
+        kvlangKvspaceGetOne(f->kvspace, k, &v);
         bool none = kvlangXvalueNone(&v);
         kvlangXvalueFree(&v);
         if (none) {
             free(k);
             break;
         }
-        kvlangKvDel(f->kv, k, err, sizeof err);
+        kvlangKvspaceDelete(f->kvspace, k, err, sizeof err);
         free(k);
     }
     free(names);
@@ -386,12 +386,12 @@ int kvlangCList(kvlangFrame_t *f) {
 }
 
 /* 解析 obj/map 成员目录 key（<frame>/<name>.），供 kvspace·list/listlen/listn 共用。 */
-static char *kv_list_dir(kvlangFrame_t *f, kvlangXvalue_t *in, int n) {
+static char *list_dir_key(kvlangFrame_t *f, kvlangXvalue_t *in, int n) {
     char *key = n >= 1 ? path_arg(f, 0, in) : NULL;
-    if (!key && f->inst->nr >= 1) {
-        const char *name = f->inst->reads[0].name;
+    if (!key && f->instruction->read_count >= 1) {
+        const char *name = f->instruction->reads[0].name;
         char *fr = kvlangKeytreeFrameRoot(f->pc);
-        char *base = kvlangBuiltinResolveWriteSlot(f->kv, fr, name);
+        char *base = kvlangBuiltinResolveWriteSlot(f->kvspace, fr, name);
         free(fr);
         key = kvlangKeytreeMember(base, "");
         free(base);
@@ -399,15 +399,15 @@ static char *kv_list_dir(kvlangFrame_t *f, kvlangXvalue_t *in, int n) {
     return key;
 }
 
-int kvlangCListLen(kvlangFrame_t *f) {
+int kvlangBuiltinKvspaceListLength(kvlangFrame_t *f) {
     kvlangXvalue_t in[1];
     int n = kvlangBuiltinReadInputs(f, in, 1);
-    char *key = kv_list_dir(f, in, n);
+    char *key = list_dir_key(f, in, n);
     int64_t count = 0;
     if (key) {
         char **names = NULL;
         int cnt = 0;
-        kvlangKvList(f->kv, key, false, false, &names, &cnt);
+        kvlangKvspaceList(f->kvspace, key, false, false, &names, &cnt);
         for (int i = 0; i < cnt; i++)
             free(names[i]);
         free(names);
@@ -422,17 +422,17 @@ int kvlangCListLen(kvlangFrame_t *f) {
     return rc;
 }
 
-int kvlangCListN(kvlangFrame_t *f) {
+int kvlangBuiltinKvspaceListNth(kvlangFrame_t *f) {
     kvlangXvalue_t in[2];
     int n = kvlangBuiltinReadInputs(f, in, 2);
-    char *key = kv_list_dir(f, in, n);
+    char *key = list_dir_key(f, in, n);
     int idx = n >= 2 ? (int)kvlangScalarI64(kvlangXvalueScalar(&in[1])) : -1;
     kvlangXvalue_t r;
     kvlangXvalueZero(&r);
     if (key && idx >= 0) {
         char **names = NULL;
         int cnt = 0;
-        kvlangKvList(f->kv, key, false, false, &names, &cnt);
+        kvlangKvspaceList(f->kvspace, key, false, false, &names, &cnt);
         if (idx < cnt) {
             kvlangXvalueNewCharUtf8(&r, names[idx]);
         }
@@ -447,28 +447,28 @@ int kvlangCListN(kvlangFrame_t *f) {
     return rc;
 }
 
-int kvlangCMkindex(kvlangFrame_t *f) {
+int kvlangBuiltinKvspaceMakeIndex(kvlangFrame_t *f) {
     kvlangXvalue_t in[2];
     int n = kvlangBuiltinReadInputs(f, in, 2);
     char *key = n >= 1 ? path_arg(f, 0, in) : NULL;
     if (!key) {
         kvlangBuiltinFreeInputs(in, n);
-        return kvlangBuiltinSetErr(
+        return kvlangBuiltinSetError(
             f, "TypeError: kvspace·mkindex requires a path");
     }
     uint32_t capacity =
         n >= 2 ? (uint32_t)kvlangScalarI64(kvlangXvalueScalar(&in[1])) : 0;
     char err[256];
-    int rc = kvlangKvMkindex(f->kv, key, capacity, err, sizeof err);
+    int rc = kvlangKvspaceMakeIndex(f->kvspace, key, capacity, err, sizeof err);
     free(key);
     kvlangBuiltinFreeInputs(in, n);
     if (rc != 0)
-        return kvlangBuiltinSetErr(f, "%s", err);
+        return kvlangBuiltinSetError(f, "%s", err);
     kvlangBuiltinNextPc(f);
     return 0;
 }
 
-int kvlangCExtIndex(kvlangFrame_t *f) {
+int kvlangBuiltinKvspaceExtensionIndex(kvlangFrame_t *f) {
     kvlangXvalue_t in[2];
     int n = kvlangBuiltinReadInputs(f, in, 2);
     char *key = n >= 1 ? path_arg(f, 0, in) : NULL;
@@ -477,37 +477,37 @@ int kvlangCExtIndex(kvlangFrame_t *f) {
         free(key);
         free(ext);
         kvlangBuiltinFreeInputs(in, n);
-        return kvlangBuiltinSetErr(
+        return kvlangBuiltinSetError(
             f, "TypeError: kvspace·extindex requires path and ext path");
     }
     char err[256];
-    int rc = kvlangKvExtIndex(f->kv, key, ext, err, sizeof err);
+    int rc = kvlangKvspaceExtensionIndex(f->kvspace, key, ext, err, sizeof err);
     free(key);
     free(ext);
     kvlangBuiltinFreeInputs(in, n);
     if (rc != 0)
-        return kvlangBuiltinSetErr(f, "%s", err);
+        return kvlangBuiltinSetError(f, "%s", err);
     kvlangBuiltinNextPc(f);
     return 0;
 }
 
-int kvlangCRmIndexExt(kvlangFrame_t *f) {
-    return kv_path_void(f, "kvspace·rmindexext", kvlangKvDelExtIndex);
+int kvlangBuiltinKvspaceRemoveIndexExtension(kvlangFrame_t *f) {
+    return run_path_op(f, "kvspace·rmindexext", kvlangKvspaceDeleteExtensionIndex);
 }
 
-int kvlangCWatch(kvlangFrame_t *f) {
+int kvlangBuiltinKvspaceWatch(kvlangFrame_t *f) {
     kvlangXvalue_t in[2];
     int n = kvlangBuiltinReadInputs(f, in, 2);
     char *key = n >= 1 ? path_arg(f, 0, in) : NULL;
     if (!key || n < 2) {
         free(key);
         kvlangBuiltinFreeInputs(in, n);
-        return kvlangBuiltinSetErr(
+        return kvlangBuiltinSetError(
             f, "TypeError: kvspace·watch requires key and target");
     }
     kvlangXvalue_t v;
     kvlangXvalueZero(&v);
-    kvlangKvWatch(f->kv, key, &in[1], 1000000, &v);
+    kvlangKvspaceWatch(f->kvspace, key, &in[1], 1000000, &v);
     int rc = kvlangBuiltinWriteResult(f, &v);
     kvlangXvalueFree(&v);
     free(key);

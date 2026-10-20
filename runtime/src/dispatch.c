@@ -13,18 +13,18 @@
 
 static int64_t default_timeout_ns = 30LL * 1000000000LL;
 
-void kvlangDispatchSetDefaultTimeoutNs(int64_t ns) { default_timeout_ns = ns; }
+void kvlangDispatchSetDefaultTimeoutNanoseconds(int64_t ns) { default_timeout_ns = ns; }
 
-static int64_t now_ns(void) {
+static int64_t now_nanoseconds(void) {
     struct timespec t;
     clock_gettime(CLOCK_REALTIME, &t);
     return (int64_t)t.tv_sec * 1000000000LL + t.tv_nsec;
 }
 
-static char *get_char(kvlangKv_t *kv, const char *key) {
+static char *get_char(kvspace_t *kv, const char *key) {
     kvlangXvalue_t v;
     kvlangXvalueZero(&v);
-    kvlangKvGetOne(kv, key, &v);
+    kvlangKvspaceGetOne(kv, key, &v);
     char *s = kvlangXvalueNone(&v) ? NULL : kvlangXvalueValueString(&v);
     kvlangXvalueFree(&v);
     return s;
@@ -44,7 +44,7 @@ static void trim_inplace(char *s) {
         memmove(s, p, strlen(p) + 1);
 }
 
-static bool heartbeat_fresh(kvlangKv_t *kv, const char *backend) {
+static bool heartbeat_fresh(kvspace_t *kv, const char *backend) {
     char *k = kvlangKeytreeSysRwirBackendHeartbeat(backend);
     char *s = get_char(kv, k);
     free(k);
@@ -63,7 +63,7 @@ static bool heartbeat_fresh(kvlangKv_t *kv, const char *backend) {
     return d <= HEARTBEAT_STALE_S;
 }
 
-static bool is_on_duty(kvlangKv_t *kv, const char *backend) {
+static bool is_on_duty(kvspace_t *kv, const char *backend) {
     char *k = kvlangKeytreeSysRwirBackendStatus(backend);
     char *s = get_char(kv, k);
     free(k);
@@ -76,7 +76,7 @@ static bool is_on_duty(kvlangKv_t *kv, const char *backend) {
     return ok;
 }
 
-static double parse_load(kvlangKv_t *kv, const char *backend) {
+static double parse_load(kvspace_t *kv, const char *backend) {
     char *k = kvlangKeytreeSysRwirBackendLoad(backend);
     char *s = get_char(kv, k);
     free(k);
@@ -95,53 +95,53 @@ static double parse_load(kvlangKv_t *kv, const char *backend) {
 }
 
 typedef struct {
-    char **v;
-    int n, cap;
+    char **items;
+    int count, capacity;
 } strlist_t;
 
-static void sl_push(strlist_t *l, char *s) {
-    if (l->n == l->cap) {
-        l->cap = l->cap ? l->cap * 2 : 8;
-        l->v = realloc(l->v, sizeof(char *) * (size_t)l->cap);
+static void strlist_push(strlist_t *l, char *s) {
+    if (l->count == l->capacity) {
+        l->capacity = l->capacity ? l->capacity * 2 : 8;
+        l->items = realloc(l->items, sizeof(char *) * (size_t)l->capacity);
     }
-    l->v[l->n++] = s;
+    l->items[l->count++] = s;
 }
 
-static void sl_free(strlist_t *l) {
-    for (int i = 0; i < l->n; i++)
-        free(l->v[i]);
-    free(l->v);
-    l->v = NULL;
-    l->n = l->cap = 0;
+static void strlist_free(strlist_t *l) {
+    for (int i = 0; i < l->count; i++)
+        free(l->items[i]);
+    free(l->items);
+    l->items = NULL;
+    l->count = l->capacity = 0;
 }
 
-static void list_children(kvlangKv_t *kv, const char *dir, strlist_t *out) {
+static void list_children(kvspace_t *kv, const char *dir, strlist_t *out) {
     char *pref = kvlangKeytreeStack(dir);
     char **names = NULL;
     int n = 0;
-    kvlangKvList(kv, pref, false, false, &names, &n);
+    kvlangKvspaceList(kv, pref, false, false, &names, &n);
     free(pref);
     for (int i = 0; i < n; i++) {
         size_t ln = strlen(names[i]);
         if (ln > 0 && names[i][ln - 1] == '/')
             names[i][ln - 1] = 0;
-        sl_push(out, names[i]);
+        strlist_push(out, names[i]);
     }
     free(names);
 }
 
-static void backends_for(kvlangKv_t *kv, const char *op, strlist_t *reg, strlist_t *duty) {
+static void backends_for(kvspace_t *kv, const char *op, strlist_t *reg, strlist_t *duty) {
     if (!kvlangKeytreeValidSegment(op))
         return;
     char *root = kvlangKeytreeSysRwirBackendRoot();
     strlist_t names = {0};
     list_children(kv, root, &names);
     free(root);
-    for (int i = 0; i < names.n; i++) {
-        char *opk = kvlangKeytreeSysRwirBackendOp(names.v[i], op);
+    for (int i = 0; i < names.count; i++) {
+        char *opk = kvlangKeytreeSysRwirBackendOp(names.items[i], op);
         kvlangXvalue_t v;
         kvlangXvalueZero(&v);
-        kvlangKvGetOne(kv, opk, &v);
+        kvlangKvspaceGetOne(kv, opk, &v);
         free(opk);
         if (kvlangXvalueNone(&v)) {
             kvlangXvalueFree(&v);
@@ -149,18 +149,18 @@ static void backends_for(kvlangKv_t *kv, const char *op, strlist_t *reg, strlist
         }
         kvlangXvalueFree(&v);
         if (reg)
-            sl_push(reg, strdup(names.v[i]));
-        if (is_on_duty(kv, names.v[i]))
-            sl_push(duty, strdup(names.v[i]));
+            strlist_push(reg, strdup(names.items[i]));
+        if (is_on_duty(kv, names.items[i]))
+            strlist_push(duty, strdup(names.items[i]));
     }
-    sl_free(&names);
+    strlist_free(&names);
 }
 
 typedef struct {
-    kvlangKv_t *kv;
-    char op[NEG_OP_CAP];
-    int64_t exp;
-    int used;
+    kvspace_t *kvspace;
+    char opcode[NEG_OP_CAP];
+    int64_t expires_at_ns;
+    int in_use;
 } negent_t;
 
 static struct {
@@ -168,17 +168,17 @@ static struct {
     negent_t e[NEG_CACHE_CAP];
 } neg = {.mu = PTHREAD_MUTEX_INITIALIZER};
 
-static bool neg_hit(kvlangKv_t *kv, const char *op) {
-    int64_t t = now_ns();
+static bool negative_cache_hit(kvspace_t *kv, const char *op) {
+    int64_t t = now_nanoseconds();
     pthread_mutex_lock(&neg.mu);
     bool hit = false;
     for (int i = 0; i < NEG_CACHE_CAP; i++) {
-        if (!neg.e[i].used)
+        if (!neg.e[i].in_use)
             continue;
-        if (neg.e[i].kv != kv || strcmp(neg.e[i].op, op) != 0)
+        if (neg.e[i].kvspace != kv || strcmp(neg.e[i].opcode, op) != 0)
             continue;
-        if (t >= neg.e[i].exp) {
-            neg.e[i].used = 0;
+        if (t >= neg.e[i].expires_at_ns) {
+            neg.e[i].in_use = 0;
             break;
         }
         hit = true;
@@ -188,81 +188,81 @@ static bool neg_hit(kvlangKv_t *kv, const char *op) {
     return hit;
 }
 
-static void neg_put(kvlangKv_t *kv, const char *op) {
+static void negative_cache_put(kvspace_t *kv, const char *op) {
     if (strlen(op) >= NEG_OP_CAP) {
         fprintf(stderr, "panic: opcode exceeds delegation cache key\n");
         abort();
     }
-    int64_t exp = now_ns() + NEG_CACHE_TTL_NS;
+    int64_t exp = now_nanoseconds() + NEG_CACHE_TTL_NS;
     pthread_mutex_lock(&neg.mu);
     int slot = 0;
     for (int i = 0; i < NEG_CACHE_CAP; i++) {
-        if (!neg.e[i].used || (neg.e[i].kv == kv && strcmp(neg.e[i].op, op) == 0)) {
+        if (!neg.e[i].in_use || (neg.e[i].kvspace == kv && strcmp(neg.e[i].opcode, op) == 0)) {
             slot = i;
             break;
         }
     }
-    neg.e[slot].kv = kv;
-    snprintf(neg.e[slot].op, sizeof neg.e[slot].op, "%s", op);
-    neg.e[slot].exp = exp;
-    neg.e[slot].used = 1;
+    neg.e[slot].kvspace = kv;
+    snprintf(neg.e[slot].opcode, sizeof neg.e[slot].opcode, "%s", op);
+    neg.e[slot].expires_at_ns = exp;
+    neg.e[slot].in_use = 1;
     pthread_mutex_unlock(&neg.mu);
 }
 
-bool kvlangDispatchIsDelegatedOp(kvlangKv_t *kv, const char *opcode) {
-    const char *op = kvlangKeytreeCanonOp(opcode);
-    if (neg_hit(kv, op))
+bool kvlangDispatchIsDelegatedOp(kvspace_t *kv, const char *opcode) {
+    const char *op = kvlangKeytreeCanonicalOp(opcode);
+    if (negative_cache_hit(kv, op))
         return false;
     strlist_t duty = {0};
     backends_for(kv, op, NULL, &duty);
-    bool ok = duty.n > 0;
+    bool ok = duty.count > 0;
     if (!ok)
-        neg_put(kv, op);
-    sl_free(&duty);
+        negative_cache_put(kv, op);
+    strlist_free(&duty);
     return ok;
 }
 
 typedef struct {
-    char **v;
-    size_t n, cap, len;
+    char **items;
+    size_t count, capacity, length;
 } parts_t;
 
 static void parts_push(parts_t *p, char *s) {
-    if (p->n == p->cap) {
-        p->cap = p->cap ? p->cap * 2 : 8;
-        p->v = realloc(p->v, sizeof(char *) * p->cap);
-        if (!p->v)
+    if (p->count == p->capacity) {
+        p->capacity = p->capacity ? p->capacity * 2 : 8;
+        p->items = realloc(p->items, sizeof(char *) * p->capacity);
+        if (!p->items)
             kvlangDie("out of memory building string parts");
     }
-    p->v[p->n++] = s;
-    p->len += strlen(s);
+    p->items[p->count++] = s;
+    p->length += strlen(s);
 }
 
 /* 拼接后释放所有片段；sep 仅用于分隔。 */
 static char *parts_join(parts_t *p, const char *sep) {
     size_t sl = strlen(sep);
-    size_t total = p->len + (p->n > 1 ? (p->n - 1) * sl : 0);
+    size_t total = p->length + (p->count > 1 ? (p->count - 1) * sl : 0);
     char *out = malloc(total + 1);
     if (!out)
         kvlangDie("out of memory joining string parts");
     size_t off = 0;
-    for (size_t i = 0; i < p->n; i++) {
+    for (size_t i = 0; i < p->count; i++) {
         if (i && sl) {
             memcpy(out + off, sep, sl);
             off += sl;
         }
-        size_t n = strlen(p->v[i]);
-        memcpy(out + off, p->v[i], n);
+        size_t n = strlen(p->items[i]);
+        memcpy(out + off, p->items[i], n);
         off += n;
-        free(p->v[i]);
+        free(p->items[i]);
     }
     out[off] = 0;
-    free(p->v);
+    free(p->items);
     *p = (parts_t){0};
     return out;
 }
 
-static char *json_esc_dup(const char *s) {
+static char *json_escape_dup(const char *s) {
     size_t n = 2; /* quotes */
     for (const char *p = s ? s : ""; *p; p++) {
         unsigned char c = (unsigned char)*p;
@@ -306,23 +306,23 @@ static char *json_esc_dup(const char *s) {
     return o;
 }
 
-static int select_backend(kvlangKv_t *kv, const char *op, char **out, char *err, size_t err_cap) {
+static int select_backend(kvspace_t *kv, const char *op, char **out, char *err, size_t err_cap) {
     *out = NULL;
     strlist_t reg = {0}, duty = {0};
     backends_for(kv, op, &reg, &duty);
-    if (reg.n == 0) {
+    if (reg.count == 0) {
         snprintf(err, err_cap, "no backend supports opcode=%s", op);
-        sl_free(&reg);
-        sl_free(&duty);
+        strlist_free(&reg);
+        strlist_free(&duty);
         return -1;
     }
-    if (duty.n == 0) {
+    if (duty.count == 0) {
         parts_t got = {0};
-        for (int i = 0; i < reg.n; i++) {
-            char *sk = kvlangKeytreeSysRwirBackendStatus(reg.v[i]);
+        for (int i = 0; i < reg.count; i++) {
+            char *sk = kvlangKeytreeSysRwirBackendStatus(reg.items[i]);
             char *st = get_char(kv, sk);
             free(sk);
-            parts_push(&got, kvlangAstr("%s=%s", reg.v[i], st ? st : ""));
+            parts_push(&got, kvlangStringFormat("%s=%s", reg.items[i], st ? st : ""));
             free(st);
         }
         char *got_line = parts_join(&got, ", ");
@@ -330,52 +330,52 @@ static int select_backend(kvlangKv_t *kv, const char *op, char **out, char *err,
                  "no on-duty backend for opcode=%s; backend status must be ready|busy, got %s",
                  op, got_line);
         free(got_line);
-        sl_free(&reg);
-        sl_free(&duty);
+        strlist_free(&reg);
+        strlist_free(&duty);
         return -1;
     }
-    char *best = duty.v[0];
+    char *best = duty.items[0];
     double best_load = parse_load(kv, best);
-    for (int i = 1; i < duty.n; i++) {
-        double ld = parse_load(kv, duty.v[i]);
+    for (int i = 1; i < duty.count; i++) {
+        double ld = parse_load(kv, duty.items[i]);
         if (ld < best_load) {
             best_load = ld;
-            best = duty.v[i];
+            best = duty.items[i];
         }
     }
     *out = strdup(best);
-    sl_free(&reg);
-    sl_free(&duty);
+    strlist_free(&reg);
+    strlist_free(&duty);
     return 0;
 }
 
-static int64_t timeout_for(kvlangKv_t *kv, const char *backend) {
+static int64_t timeout_for(kvspace_t *kv, const char *backend) {
     int64_t d = default_timeout_ns;
     char *root = kvlangKeytreeSysRwirBackendCategoryRoot(backend);
     strlist_t cats = {0};
     list_children(kv, root, &cats);
     free(root);
-    for (int i = 0; i < cats.n; i++) {
+    for (int i = 0; i < cats.count; i++) {
         int64_t t = 0;
-        if (strcmp(cats.v[i], "compute") == 0)
+        if (strcmp(cats.items[i], "compute") == 0)
             t = 30LL * 1000000000LL;
-        else if (strcmp(cats.v[i], "api") == 0)
+        else if (strcmp(cats.items[i], "api") == 0)
             t = 120LL * 1000000000LL;
-        else if (strcmp(cats.v[i], "agent") == 0)
+        else if (strcmp(cats.items[i], "agent") == 0)
             t = 300LL * 1000000000LL;
         if (t > d)
             d = t;
     }
-    sl_free(&cats);
+    strlist_free(&cats);
     return d;
 }
 
-static int set_char(kvlangKv_t *kv, const char *key, const char *s, char *err, uint32_t err_cap) {
+static int set_char(kvspace_t *kv, const char *key, const char *s, char *err, uint32_t err_cap) {
     kvlangXvalue_t v;
     kvlangXvalueZero(&v);
     kvlangXvalueNewCharUtf8(&v, s);
     kvlangKvPair_t p = {(char *)key, v};
-    int rc = kvlangKvSet(kv, &p, 1, err, err_cap);
+    int rc = kvlangKvspaceSet(kv, &p, 1, err, err_cap);
     kvlangXvalueFree(&v);
     return rc;
 }
@@ -384,8 +384,8 @@ static int set_char(kvlangKv_t *kv, const char *key, const char *s, char *err, u
 static bool is_var_slot(const kvlangParam_t *p) {
     if (!p->name || !p->name[0] || strstr(p->name, "/" RUNTIME_MEMBER_SEP "operand["))
         return false;
-    return p->name[0] == '/' || kvlangXvalueKindIs(&p->val, KVSPACE_KIND_RWIR) ||
-           kvlangXvalueNone(&p->val);
+    return p->name[0] == '/' || kvlangXvalueKindIs(&p->value, KVSPACE_KIND_RWIR) ||
+           kvlangXvalueNone(&p->value);
 }
 
 static bool keyset_has(char **keys, int n, const char *k) {
@@ -395,7 +395,7 @@ static bool keyset_has(char **keys, int n, const char *k) {
     return false;
 }
 
-static int fail_msg(kvlangKv_t *kv, const char *vtid, const char *pc, const char *fmt, ...) {
+static int fail_message(kvspace_t *kv, const char *vtid, const char *pc, const char *fmt, ...) {
     char body[384];
     va_list ap;
     va_start(ap, fmt);
@@ -441,28 +441,28 @@ static void make_task_id(char *out, size_t cap, const char *backend, const char 
     }
 }
 
-int kvlangDispatchDelegate(kvlangKv_t *kv, const char *vtid, const char *pc, kvlangRwirInst_t *inst) {
-    const char *op = kvlangKeytreeCanonOp(inst->opcode);
+int kvlangDispatchDelegate(kvspace_t *kv, const char *vtid, const char *pc, kvlangRwirInst_t *inst) {
+    const char *op = kvlangKeytreeCanonicalOp(inst->opcode);
 
-    char *sigk = kvlangKeytreeLibSig(op);
+    char *sigk = kvlangKeytreeLibSignature(op);
     kvlangXvalue_t sig;
     kvlangXvalueZero(&sig);
-    kvlangKvGetOne(kv, sigk, &sig);
+    kvlangKvspaceGetOne(kv, sigk, &sig);
     free(sigk);
     if (!kvlangXvalueNone(&sig) && kvlangXvalueKindIs(&sig, KVSPACE_KIND_RWFUNC)) {
         strlist_t duty = {0};
         backends_for(kv, op, NULL, &duty);
-        if (duty.n == 0) {
-            sl_free(&duty);
+        if (duty.count == 0) {
+            strlist_free(&duty);
             kvlangXvalueFree(&sig);
             return KVLANG_DELEGATE_LOCAL;
         }
         parts_t names = {0};
-        for (int i = 0; i < duty.n; i++)
-            parts_push(&names, strdup(duty.v[i]));
-        sl_free(&duty);
+        for (int i = 0; i < duty.count; i++)
+            parts_push(&names, strdup(duty.items[i]));
+        strlist_free(&duty);
         char *name_list = parts_join(&names, ",");
-        int rc = fail_msg(kv, vtid, pc,
+        int rc = fail_message(kv, vtid, pc,
                           "%s: on-duty backend %s and local rwfunc both define it; one opcode, one definition",
                           op, name_list);
         free(name_list);
@@ -474,30 +474,30 @@ int kvlangDispatchDelegate(kvlangKv_t *kv, const char *vtid, const char *pc, kvl
     char *declk = kvlangKeytreeRwir(op);
     kvlangXvalue_t decl;
     kvlangXvalueZero(&decl);
-    kvlangKvGetOne(kv, declk, &decl);
+    kvlangKvspaceGetOne(kv, declk, &decl);
     free(declk);
     if (!kvlangXvalueNone(&decl) && kvlangXvalueKindIs(&decl, KVSPACE_KIND_DEF_RWIR)) {
         int dnr = 0, dnw = 0, dynamic = 0;
         if (lib_arity(&decl, &dnr, &dnw, &dynamic) != 0) {
             kvlangXvalueFree(&decl);
-            return fail_msg(kv, vtid, pc, "%s: def rwir body is not a signature", op);
+            return fail_message(kv, vtid, pc, "%s: def rwir body is not a signature", op);
         }
         int min_r = dynamic && dnr > 0 ? dnr - 1 : dnr;
-        if (inst->nr < min_r || (!dynamic && inst->nr != dnr)) {
+        if (inst->read_count < min_r || (!dynamic && inst->read_count != dnr)) {
             kvlangXvalueFree(&decl);
-            return fail_msg(kv, vtid, pc,
+            return fail_message(kv, vtid, pc,
                             "%s: read arity mismatch: call site has %d, declaration has %d", op,
-                            inst->nr, dnr);
+                            inst->read_count, dnr);
         }
-        if (inst->nw != dnw) {
+        if (inst->write_count != dnw) {
             kvlangXvalueFree(&decl);
-            return fail_msg(kv, vtid, pc,
+            return fail_message(kv, vtid, pc,
                             "%s: write arity mismatch: call site has %d, declaration has %d", op,
-                            inst->nw, dnw);
+                            inst->write_count, dnw);
         }
     } else if (!kvlangXvalueNone(&decl)) {
         const char *k = kvlangXvalueKind(&decl);
-        int rc = fail_msg(kv, vtid, pc, "%s: /lib entry holds kind %s, which is not callable", op,
+        int rc = fail_message(kv, vtid, pc, "%s: /lib entry holds kind %s, which is not callable", op,
                           k[0] ? k : "?");
         kvlangXvalueFree(&decl);
         return rc;
@@ -507,7 +507,7 @@ int kvlangDispatchDelegate(kvlangKv_t *kv, const char *vtid, const char *pc, kvl
     char selerr[256];
     char *backend = NULL;
     if (select_backend(kv, op, &backend, selerr, sizeof selerr) != 0)
-        return fail_msg(kv, vtid, pc, "%s", selerr);
+        return fail_message(kv, vtid, pc, "%s", selerr);
 
     char task_id[256];
     make_task_id(task_id, sizeof task_id, backend, vtid);
@@ -515,12 +515,12 @@ int kvlangDispatchDelegate(kvlangKv_t *kv, const char *vtid, const char *pc, kvl
     char *fr = kvlangKeytreeFrameRoot(pc);
     if (!fr) {
         free(backend);
-        return fail_msg(kv, vtid, pc, "%s: pc has no frame: %s", op, pc);
+        return fail_message(kv, vtid, pc, "%s: pc has no frame: %s", op, pc);
     }
 
-    char **out_keys = inst->nw > 0 ? calloc((size_t)inst->nw, sizeof(char *)) : NULL;
+    char **out_keys = inst->write_count > 0 ? calloc((size_t)inst->write_count, sizeof(char *)) : NULL;
     int rc = KVLANG_DELEGATE_OK;
-    for (int i = 0; i < inst->nw; i++) {
+    for (int i = 0; i < inst->write_count; i++) {
         char *key = kvlangBuiltinResolveWriteSlot(kv, fr, inst->writes[i].name);
         char *werr = kvlangKeytreeCheckWriteKey(vtid, key);
         if (werr) {
@@ -536,32 +536,32 @@ int kvlangDispatchDelegate(kvlangKv_t *kv, const char *vtid, const char *pc, kvl
     char *json = NULL;
     parts_t j = {0};
     parts_push(&j, strdup("{\"request_id\":"));
-    parts_push(&j, json_esc_dup(task_id));
+    parts_push(&j, json_escape_dup(task_id));
     parts_push(&j, strdup(",\"vtid\":"));
-    parts_push(&j, json_esc_dup(vtid));
+    parts_push(&j, json_escape_dup(vtid));
     parts_push(&j, strdup(",\"pc\":"));
-    parts_push(&j, json_esc_dup(pc));
+    parts_push(&j, json_escape_dup(pc));
     parts_push(&j, strdup(",\"opcode\":"));
-    parts_push(&j, json_esc_dup(op));
+    parts_push(&j, json_escape_dup(op));
     parts_push(&j, strdup(",\"inputs\":["));
-    for (int i = 0; i < inst->nr; i++) {
+    for (int i = 0; i < inst->read_count; i++) {
         if (i)
             parts_push(&j, strdup(","));
         parts_push(&j, strdup("{"));
         char *rk = is_var_slot(&inst->reads[i])
                        ? kvlangBuiltinResolveWriteSlot(kv, fr, inst->reads[i].name)
                        : NULL;
-        if (rk && !keyset_has(out_keys, inst->nw, rk)) {
+        if (rk && !keyset_has(out_keys, inst->write_count, rk)) {
             parts_push(&j, strdup("\"key\":"));
-            parts_push(&j, json_esc_dup(rk));
+            parts_push(&j, json_escape_dup(rk));
         } else {
             kvlangXvalue_t val;
             kvlangXvalueZero(&val);
-            kvlangBuiltinResolveReadValue(kv, fr, inst->reads[i].name, &inst->reads[i].val, &val);
+            kvlangBuiltinResolveReadValue(kv, fr, inst->reads[i].name, &inst->reads[i].value, &val);
             char *disp = NULL;
             kvlangDisplay(&val, &disp);
             parts_push(&j, strdup("\"value\":"));
-            parts_push(&j, json_esc_dup(disp ? disp : ""));
+            parts_push(&j, json_escape_dup(disp ? disp : ""));
             free(disp);
             kvlangXvalueFree(&val);
         }
@@ -569,16 +569,16 @@ int kvlangDispatchDelegate(kvlangKv_t *kv, const char *vtid, const char *pc, kvl
         parts_push(&j, strdup("}"));
     }
     parts_push(&j, strdup("],\"outputs\":["));
-    for (int i = 0; i < inst->nw; i++) {
+    for (int i = 0; i < inst->write_count; i++) {
         if (i)
             parts_push(&j, strdup(","));
         parts_push(&j, strdup("{\"key\":"));
-        parts_push(&j, json_esc_dup(out_keys[i]));
+        parts_push(&j, json_escape_dup(out_keys[i]));
         parts_push(&j, strdup("}"));
     }
     char *done_key = kvlangKeytreeDoneRwir(task_id);
     parts_push(&j, strdup("],\"done_key\":"));
-    parts_push(&j, json_esc_dup(done_key));
+    parts_push(&j, json_escape_dup(done_key));
     free(done_key);
     parts_push(&j, strdup("}"));
     json = parts_join(&j, "");
@@ -586,7 +586,7 @@ int kvlangDispatchDelegate(kvlangKv_t *kv, const char *vtid, const char *pc, kvl
     char *status_key = kvlangKeytreeSysTask(task_id, SEG_STATUS);
     kvlangXvalue_t existing;
     kvlangXvalueZero(&existing);
-    kvlangKvGetOne(kv, status_key, &existing);
+    kvlangKvspaceGetOne(kv, status_key, &existing);
     if (!kvlangXvalueNone(&existing)) {
         fprintf(stderr, "panic: task id already exists: %s\n", status_key);
         abort();
@@ -595,22 +595,22 @@ int kvlangDispatchDelegate(kvlangKv_t *kv, const char *vtid, const char *pc, kvl
 
     char err[256];
     if (set_char(kv, status_key, "pending", err, sizeof err) != 0) {
-        rc = fail_msg(kv, vtid, pc, "%s: init task status: %s", op, err);
+        rc = fail_message(kv, vtid, pc, "%s: init task status: %s", op, err);
         goto enqueue_done;
     }
-    for (int i = 0; i < inst->nw; i++) {
-        if (kvlangKvDel(kv, out_keys[i], err, sizeof err) != 0) {
-            rc = fail_msg(kv, vtid, pc, "%s: clear output slot %s: %s", op, out_keys[i], err);
+    for (int i = 0; i < inst->write_count; i++) {
+        if (kvlangKvspaceDelete(kv, out_keys[i], err, sizeof err) != 0) {
+            rc = fail_message(kv, vtid, pc, "%s: clear output slot %s: %s", op, out_keys[i], err);
             goto enqueue_done;
         }
     }
 
-    char *cmd = kvlangKeytreeSysRwirBackendCmd(backend);
+    char *cmd = kvlangKeytreeSysRwirBackendCommand(backend);
     char cmdk[KV_KEY_MAX];
-    kvlangKeyFmt(cmdk, sizeof cmdk, "%s/%s", cmd, task_id);
+    kvlangKeyFormat(cmdk, sizeof cmdk, "%s/%s", cmd, task_id);
     free(cmd);
     if (set_char(kv, cmdk, json, err, sizeof err) != 0) {
-        rc = fail_msg(kv, vtid, pc, "push task: %s", err);
+        rc = fail_message(kv, vtid, pc, "push task: %s", err);
         goto enqueue_done;
     }
 
@@ -622,26 +622,26 @@ int kvlangDispatchDelegate(kvlangKv_t *kv, const char *vtid, const char *pc, kvl
     kvlangXvalueNewCharUtf8(&want, "done");
     kvlangXvalue_t got;
     kvlangXvalueZero(&got);
-    kvlangKvWatch(kv, status_key, &want, (uint64_t)timeout_for(kv, backend), &got);
+    kvlangKvspaceWatch(kv, status_key, &want, (uint64_t)timeout_for(kv, backend), &got);
     kvlangXvalueFree(&want);
     kvlangXvalueFree(&got);
 
     char *st = get_char(kv, status_key);
     if (!st || strcmp(st, "done") != 0) {
-        rc = fail_msg(kv, vtid, pc, "%s: timeout or failed (status=%s)", op, st ? st : "");
+        rc = fail_message(kv, vtid, pc, "%s: timeout or failed (status=%s)", op, st ? st : "");
         free(st);
         goto enqueue_done;
     }
     free(st);
 
-    for (int i = 0; i < inst->nw; i++) {
+    for (int i = 0; i < inst->write_count; i++) {
         kvlangXvalue_t ov;
         kvlangXvalueZero(&ov);
-        kvlangKvGetOne(kv, out_keys[i], &ov);
+        kvlangKvspaceGetOne(kv, out_keys[i], &ov);
         bool empty = kvlangXvalueNone(&ov);
         kvlangXvalueFree(&ov);
         if (empty) {
-            rc = fail_msg(kv, vtid, pc,
+            rc = fail_message(kv, vtid, pc,
                           "%s: executor reported done but left output slot %s unwritten", op,
                           out_keys[i]);
             goto enqueue_done;
@@ -649,7 +649,7 @@ int kvlangDispatchDelegate(kvlangKv_t *kv, const char *vtid, const char *pc, kvl
     }
 
     char npc[KV_KEY_MAX];
-    if (kvlangRwirNextPcBuf(pc, npc, sizeof npc) == 0)
+    if (kvlangRwirNextPcBuffer(pc, npc, sizeof npc) == 0)
         kvlangDie("next pc exceeds %zu bytes", sizeof npc);
     kvlangVthreadSet(kv, vtid, npc, "running");
     kvlangLogDebug("[%s] DONE %s task=%s", vtid, inst->opcode, task_id);
@@ -659,7 +659,7 @@ enqueue_done:
     free(json);
 done:
     if (out_keys) {
-        for (int i = 0; i < inst->nw; i++)
+        for (int i = 0; i < inst->write_count; i++)
             free(out_keys[i]);
         free(out_keys);
     }

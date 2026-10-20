@@ -2,7 +2,7 @@
 
 /* xvalue 初始化类 rwir：以真实值给一个 xvalue 初值（构造/设值），参数豁免 `*T` 约定——
  * 它们依赖真实值本身，见 #329 评论「关于五.7 指针」。其余 rwir 参数一律须 `*T`（一层指针）。 */
-static bool rwir_init_byval(const char *opcode) {
+static bool rwir_init_by_value(const char *opcode) {
     return strcmp(opcode, "input") == 0 || strcmp(opcode, "json·from") == 0;
 }
 
@@ -10,7 +10,7 @@ static bool rwir_init_byval(const char *opcode) {
  * （拒 T / **T / ***T），剥 `*` 后写入 out（供校验/比对）；exempt=1 时参数即真实值 T，
  * 原样写入 out（xvalue 初始化类 rwir 的读参）。违反约定 → 置 TypeError 并返回 -1。
  * where 是「读参」/「写参」，slot 从 1 起。 */
-static int rwir_norm_param(kvlangKv_t *kv, const char *vtid, const char *pc,
+static int rwir_normalize_param(kvspace_t *kv, const char *vtid, const char *pc,
                            const char *opcode, const char *where, int slot,
                            bool exempt, const char *exp, char *out, size_t cap) {
     if (exempt) {
@@ -47,7 +47,7 @@ static int rwir_norm_param(kvlangKv_t *kv, const char *vtid, const char *pc,
  * def_nr 为定义读参数，dynamic=1 表末读参变参吸收其后全部实参。空 kindexp / any 跳过。
  * XValue 头只携带 array_len 不含多维 shape，故仅校验 kind 层。
  * 不匹配 → 置 TypeError，返回 -1；通过返回 0。 */
-int check_read_types(kvlangKv_t *kv, const char *vtid, const char *pc,
+int check_read_types(kvspace_t *kv, const char *vtid, const char *pc,
                             const char *opcode, const char *def_sig, int def_nr,
                             int dynamic, kvlangParam_t *args, int nargs) {
     if (def_nr <= 0 || !def_sig || !*def_sig)
@@ -88,8 +88,8 @@ int check_read_types(kvlangKv_t *kv, const char *vtid, const char *pc,
             continue; /* 空 kindexp 跳过 */
         /* rwir 参数默认 *T（见 #329 评论「关于五.7 指针」）；剥 * 后按底层类型比对。 */
         char norm[256];
-        if (rwir_norm_param(kv, vtid, pc, opcode, "读参", i + 1,
-                            rwir_init_byval(opcode), exp, norm,
+        if (rwir_normalize_param(kv, vtid, pc, opcode, "读参", i + 1,
+                            rwir_init_by_value(opcode), exp, norm,
                             sizeof norm) != 0) {
             rc = -1;
             break;
@@ -98,7 +98,7 @@ int check_read_types(kvlangKv_t *kv, const char *vtid, const char *pc,
             continue; /* 动态/非法 kindexp 跳过 */
         kvlangXvalue_t v;
         kvlangXvalueZero(&v);
-        kvlangBuiltinResolveReadValue(kv, fr, args[i].name, &args[i].val, &v);
+        kvlangBuiltinResolveReadValue(kv, fr, args[i].name, &args[i].value, &v);
         const char *k = kvlangXvalueKind(&v);
         kvlangLangtype kx;
         kvlangLangtypeParse(xh_langtype_of(&v), (int32_t)xh_langtype_len_of(&v), &kx);
@@ -125,7 +125,7 @@ int check_read_types(kvlangKv_t *kv, const char *vtid, const char *pc,
  * 且写参初值恒为 None（读参只读、写参可写可读、初值 None），值匹配无意义——只校验
  * 「参数默认 *T」这一声明纪律（逐 branch 恰一层指针，见 #329 评论「关于五.7 指针」）。
  * def_sig 为 \n 分隔的写参 kindexp-list。违反 → 置 TypeError，返回 -1。 */
-int check_write_types(kvlangKv_t *kv, const char *vtid, const char *pc,
+int check_write_types(kvspace_t *kv, const char *vtid, const char *pc,
                              const char *opcode, const char *def_sig, int def_nw) {
     if (def_nw <= 0 || !def_sig || !*def_sig)
         return 0;
@@ -145,7 +145,7 @@ int check_write_types(kvlangKv_t *kv, const char *vtid, const char *pc,
         if (!slots[i][0])
             continue;
         char norm[256];
-        if (rwir_norm_param(kv, vtid, pc, opcode, "写参", i + 1, false,
+        if (rwir_normalize_param(kv, vtid, pc, opcode, "写参", i + 1, false,
                             slots[i], norm, sizeof norm) != 0)
             rc = -1;
     }
@@ -155,12 +155,12 @@ int check_write_types(kvlangKv_t *kv, const char *vtid, const char *pc,
 
 /* 读签名行 [0,x] 槽（def langtype）的 body 为 langtype 串（malloc；无槽返 NULL）。
  * dir 带尾 /；x<0 读参、x>0 写参。 */
-static char *read_sig_slot(kvlangKv_t *kv, const char *dir, int x) {
+static char *read_signature_slot(kvspace_t *kv, const char *dir, int x) {
     char sk[KV_KEY_MAX];
-    kvlangKeyFmt(sk, sizeof sk, "%s[0,%d]", dir, x);
+    kvlangKeyFormat(sk, sizeof sk, "%s[0,%d]", dir, x);
     kvlangXvalue_t v;
     kvlangXvalueZero(&v);
-    kvlangKvGetOne(kv, sk, &v);
+    kvlangKvspaceGetOne(kv, sk, &v);
     char *s = NULL;
     if (!kvlangXvalueNone(&v)) {
         const uint8_t *b = xh_body_of(&v);
@@ -174,7 +174,7 @@ static char *read_sig_slot(kvlangKv_t *kv, const char *dir, int x) {
 }
 
 /* \n 连接 [0,±1..±n] 各 def langtype 槽。dir 带尾 /。malloc 返回。 */
-static char *join_sig(kvlangKv_t *kv, const char *dir, int n, bool neg) {
+static char *join_signature(kvspace_t *kv, const char *dir, int n, bool neg) {
     if (n <= 0)
         return strdup("");
     char **parts = malloc(sizeof(char *) * (size_t)n);
@@ -182,7 +182,7 @@ static char *join_sig(kvlangKv_t *kv, const char *dir, int n, bool neg) {
         kvlangDie("out of memory joining signature");
     size_t total = 1;
     for (int i = 1; i <= n; i++) {
-        parts[i - 1] = read_sig_slot(kv, dir, neg ? -i : i);
+        parts[i - 1] = read_signature_slot(kv, dir, neg ? -i : i);
         total += strlen(parts[i - 1] ? parts[i - 1] : "") + (i > 1 ? 1 : 0);
     }
     char *out = malloc(total);
@@ -203,23 +203,23 @@ static char *join_sig(kvlangKv_t *kv, const char *dir, int n, bool neg) {
     return out;
 }
 
-static char *join_read_sig(kvlangKv_t *kv, const char *dir, int nr) {
-    return join_sig(kv, dir, nr, true);
+static char *join_read_signature(kvspace_t *kv, const char *dir, int nr) {
+    return join_signature(kv, dir, nr, true);
 }
 
-static char *join_write_sig(kvlangKv_t *kv, const char *dir, int nw) {
-    return join_sig(kv, dir, nw, false);
+static char *join_write_signature(kvspace_t *kv, const char *dir, int nw) {
+    return join_signature(kv, dir, nw, false);
 }
 
 /* 主槽计数头 [nr:u16 LE][nw:u16 LE][dynamic:u8] → nr/nw/dynamic。无定义返回 -1。 */
-static int load_def_counts(kvlangKv_t *kv, const char *key, int *out_nr,
+static int load_def_counts(kvspace_t *kv, const char *key, int *out_nr,
                            int *out_nw, int *out_dyn) {
     *out_nr = 0;
     *out_nw = 0;
     *out_dyn = 0;
     kvlangXvalue_t v;
     kvlangXvalueZero(&v);
-    kvlangKvGetOne(kv, key, &v);
+    kvlangKvspaceGetOne(kv, key, &v);
     if (kvlangXvalueNone(&v)) {
         kvlangXvalueFree(&v);
         return -1;
@@ -239,23 +239,23 @@ static int load_def_counts(kvlangKv_t *kv, const char *key, int *out_nr,
 
 /* 读取 rwir/rwfunc 定义的读参签名：读参 langtype 逐条落在签名行 [0,-i] 槽（def langtype）。
  * 返回 \n 连接的 kindexp-list（调用方 free）并置 *out_nr；无定义返回 NULL。 */
-char *load_def_reads(kvlangKv_t *kv, const char *key, int *out_nr,
+char *load_def_reads(kvspace_t *kv, const char *key, int *out_nr,
                             int *out_dyn) {
     int nw;
     if (load_def_counts(kv, key, out_nr, &nw, out_dyn) != 0)
         return NULL;
     char dir[KV_KEY_MAX];
-    kvlangKeyFmt(dir, sizeof dir, "%s/", key);
-    return join_read_sig(kv, dir, *out_nr);
+    kvlangKeyFormat(dir, sizeof dir, "%s/", key);
+    return join_read_signature(kv, dir, *out_nr);
 }
 
 /* 读取 rwir 定义的写参签名：写参 langtype 逐条落在签名行 [0,i] 槽（def langtype）。
  * 返回 \n 连接的 kindexp-list（调用方 free）并置 *out_nw；无定义返回 NULL。 */
-char *load_def_writes(kvlangKv_t *kv, const char *key, int *out_nw) {
+char *load_def_writes(kvspace_t *kv, const char *key, int *out_nw) {
     int nr, dyn;
     if (load_def_counts(kv, key, &nr, out_nw, &dyn) != 0)
         return NULL;
     char dir[KV_KEY_MAX];
-    kvlangKeyFmt(dir, sizeof dir, "%s/", key);
-    return join_write_sig(kv, dir, *out_nw);
+    kvlangKeyFormat(dir, sizeof dir, "%s/", key);
+    return join_write_signature(kv, dir, *out_nw);
 }

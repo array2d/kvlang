@@ -44,8 +44,8 @@ int kvlangBuiltinReadInputs(kvlangFrame_t *f, kvlangXvalue_t *out, int cap);
 void kvlangBuiltinFreeInputs(kvlangXvalue_t *in, int n);
 void kvlangBuiltinNextPc(kvlangFrame_t *f);
 int kvlangBuiltinWriteResult(kvlangFrame_t *f, const kvlangXvalue_t *result);
-int kvlangBuiltinSetErr(kvlangFrame_t *f, const char *fmt, ...);
-void kvlangBuiltinXvalueAt(const kvlangXvalue_t *v, int i, kvlangXvalue_t *out);
+int kvlangBuiltinSetError(kvlangFrame_t *f, const char *fmt, ...);
+void kvlangXvalueElementAt(const kvlangXvalue_t *v, int i, kvlangXvalue_t *out);
 char *kvlangBuiltinScatterKey(const char *base, const int64_t *coords,
                               int ncoord);
 void kvlangBuiltinMapMarker(kvlangXvalue_t *out, const char *langtype);
@@ -57,7 +57,7 @@ bool kvlangBuiltinCharConcat(const kvlangXvalue_t *a, const kvlangXvalue_t *b,
 /* 单读参 head（定义在 rwir_xvalue.c，rwir_ndarray.c 复用） */
 int xv_head1(kvlangFrame_t *f, xv_head_t *h);
 /* 算术 / 位 / cast（rwir_int.c） */
-int cmp_int(kvlangScalar_t a, kvlangScalar_t b);
+int compare_int(kvlangScalar_t a, kvlangScalar_t b);
 int kvlangBuiltinAdd(kvlangFrame_t *f), kvlangBuiltinSub(kvlangFrame_t *f),
     kvlangBuiltinMul(kvlangFrame_t *f), kvlangBuiltinDiv(kvlangFrame_t *f),
     kvlangBuiltinMod(kvlangFrame_t *f), kvlangBuiltinBitand(kvlangFrame_t *f),
@@ -72,9 +72,9 @@ int kvlangBuiltinAdd(kvlangFrame_t *f), kvlangBuiltinSub(kvlangFrame_t *f),
     kvlangBuiltinCastInt16(kvlangFrame_t *f), kvlangBuiltinCastInt32(kvlangFrame_t *f),
     kvlangBuiltinCastInt64(kvlangFrame_t *f), kvlangBuiltinCastUint8(kvlangFrame_t *f),
     kvlangBuiltinCastUint16(kvlangFrame_t *f), kvlangBuiltinCastUint32(kvlangFrame_t *f),
-    kvlangBuiltinCastUint64(kvlangFrame_t *f), kvlangBuiltinCastF32(kvlangFrame_t *f),
-    kvlangBuiltinCastF64(kvlangFrame_t *f), kvlangBuiltinCastChar32(kvlangFrame_t *f),
-    kvlangBuiltinCastChar8(kvlangFrame_t *f), kvlangBuiltinCastCharAscii(kvlangFrame_t *f);
+    kvlangBuiltinCastUint64(kvlangFrame_t *f), kvlangBuiltinCastFloat32(kvlangFrame_t *f),
+    kvlangBuiltinCastFloat64(kvlangFrame_t *f), kvlangBuiltinCastCharUtf32(kvlangFrame_t *f),
+    kvlangBuiltinCastCharUtf8(kvlangFrame_t *f), kvlangBuiltinCastCharAscii(kvlangFrame_t *f);
 /* 比较 / 逻辑（rwir_bool.c） */
 int kvlangBuiltinEq(kvlangFrame_t *f), kvlangBuiltinNeq(kvlangFrame_t *f),
     kvlangBuiltinLt(kvlangFrame_t *f), kvlangBuiltinGt(kvlangFrame_t *f),
@@ -90,8 +90,8 @@ int kvlangBuiltinArray(kvlangFrame_t *f),
     kvlangBuiltinXvReshape(kvlangFrame_t *f),
     kvlangBuiltinXvReinterpret(kvlangFrame_t *f),
     kvlangBuiltinXvLangtype(kvlangFrame_t *f),
-    kvlangBuiltinXvBodylen(kvlangFrame_t *f),
-    kvlangBuiltinXvParselangtype(kvlangFrame_t *f),
+    kvlangBuiltinXvBodyLen(kvlangFrame_t *f),
+    kvlangBuiltinXvParseLangtype(kvlangFrame_t *f),
     kvlangBuiltinScatter(kvlangFrame_t *f),
     kvlangBuiltinCompact(kvlangFrame_t *f),
     kvlangBuiltinAppend(kvlangFrame_t *f), kvlangBuiltinSlice(kvlangFrame_t *f),
@@ -113,31 +113,31 @@ int kvlangBuiltinArray(kvlangFrame_t *f),
     kvlangBuiltinTimeNow(kvlangFrame_t *f),
     kvlangBuiltinTimeSub(kvlangFrame_t *f),
     kvlangBuiltinTimeAdd(kvlangFrame_t *f),
-    kvlangBuiltinDurFrom(kvlangFrame_t *f),
-    kvlangBuiltinDurTo(kvlangFrame_t *f),
-    kvlangBuiltinDurArith(kvlangFrame_t *f),
-    kvlangBuiltinDurCmp(kvlangFrame_t *f),
-    kvlangBuiltinTimeCmp(kvlangFrame_t *f),
+    kvlangBuiltinDurationFrom(kvlangFrame_t *f),
+    kvlangBuiltinDurationTo(kvlangFrame_t *f),
+    kvlangBuiltinDurationArith(kvlangFrame_t *f),
+    kvlangBuiltinDurCompare(kvlangFrame_t *f),
+    kvlangBuiltinTimeCompare(kvlangFrame_t *f),
     kvlangBuiltinRandUint64(kvlangFrame_t *f),
     kvlangBuiltinRandInt63(kvlangFrame_t *f),
     kvlangBuiltinRandIntn(kvlangFrame_t *f),
-    kvlangCGet(kvlangFrame_t *f), kvlangCSet(kvlangFrame_t *f),
-    kvlangCDel(kvlangFrame_t *f),
-    kvlangCDelTree(kvlangFrame_t *f),
-    kvlangCCp(kvlangFrame_t *f),
-    kvlangCCpTree(kvlangFrame_t *f),
-    kvlangCCpList(kvlangFrame_t *f),
-    kvlangCList(kvlangFrame_t *f),
-    kvlangCListLen(kvlangFrame_t *f),
-    kvlangCListN(kvlangFrame_t *f),
-    kvlangCMkindex(kvlangFrame_t *f),
-    kvlangCExtIndex(kvlangFrame_t *f),
-    kvlangCRmIndexExt(kvlangFrame_t *f),
-    kvlangCWatch(kvlangFrame_t *f),
-    kvlangCAbs(kvlangFrame_t *f),
+    kvlangBuiltinKvspaceGet(kvlangFrame_t *f), kvlangBuiltinKvspaceSet(kvlangFrame_t *f),
+    kvlangBuiltinKvspaceDelete(kvlangFrame_t *f),
+    kvlangBuiltinKvspaceDeleteTree(kvlangFrame_t *f),
+    kvlangBuiltinKvspaceCopy(kvlangFrame_t *f),
+    kvlangBuiltinKvspaceCopyTree(kvlangFrame_t *f),
+    kvlangBuiltinKvspaceCopyList(kvlangFrame_t *f),
+    kvlangBuiltinKvspaceList(kvlangFrame_t *f),
+    kvlangBuiltinKvspaceListLength(kvlangFrame_t *f),
+    kvlangBuiltinKvspaceListNth(kvlangFrame_t *f),
+    kvlangBuiltinKvspaceMakeIndex(kvlangFrame_t *f),
+    kvlangBuiltinKvspaceExtensionIndex(kvlangFrame_t *f),
+    kvlangBuiltinKvspaceRemoveIndexExtension(kvlangFrame_t *f),
+    kvlangBuiltinKvspaceWatch(kvlangFrame_t *f),
+    kvlangBuiltinKvlangAbs(kvlangFrame_t *f),
     kvlangBuiltinDebugger(kvlangFrame_t *f),
     kvlangBuiltinVthreadCreate(kvlangFrame_t *f),
     kvlangBuiltinVthreadRun(kvlangFrame_t *f),
     kvlangBuiltinVthreadCall(kvlangFrame_t *f),
     kvlangBuiltinVthreadSleep(kvlangFrame_t *f),
-    kvlangBuiltinVthreadSetstatus(kvlangFrame_t *f);
+    kvlangBuiltinVthreadSetStatus(kvlangFrame_t *f);
