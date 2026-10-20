@@ -67,7 +67,7 @@ int kvlangBuiltinVthreadCall(kvlangFrame_t *f) {
         return kvlangBuiltinSetError(f, "TypeError: vthread.call requires 1 string arg");
     }
     char *fn = kvlangXvalueValueString(&in[0]);
-    int rc = kvlangKvcpuDynamicCall(f->kvspace, f->vthread_id, f->pc, fn);
+    int rc = kvlangKvcpuDynamicCall(f, fn);
     free(fn); kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
@@ -92,7 +92,7 @@ static int set_status(kvlangFrame_t *f, const char *status) {
     char npc[KV_KEY_MAX];
     if (kvlangRwirNextPcBuffer(f->pc, npc, sizeof npc) == 0)
         kvlangDie("next pc exceeds %zu bytes", sizeof npc);
-    kvlangVthreadAdvance(f, npc, status);
+    kvlangVthreadNextPc(f, npc, status);
     return 0;
 }
 

@@ -177,7 +177,7 @@ void kvlangBuiltinNextPc(kvlangFrame_t *f) {
     char buf[KV_KEY_MAX];
     if (kvlangRwirNextPcBuffer(f->pc, buf, sizeof buf) == 0)
         kvlangDie("next pc exceeds %zu bytes", sizeof buf);
-    kvlangVthreadAdvance(f, buf, "running");
+    kvlangVthreadNextPc(f, buf, "running");
 }
 
 int kvlangBuiltinWriteResult(kvlangFrame_t *f, const kvlangXvalue_t *result) {

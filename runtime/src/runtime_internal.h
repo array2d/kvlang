@@ -617,10 +617,14 @@ typedef struct {
     bool persist_failed;
     /* 删除/委托/外部 handoff 时自增；帧层 keyoff 据此全部失效重绑。 */
     uint32_t *addr_epoch;
+    /* PC 值回传：NextPc 持久化成功后把新 PC 拷进主循环的零分配缓冲。 */
+    char *pc_out;
+    size_t pc_out_cap;
+    bool pc_feedback;
 } kvlangFrame_t;
 
 /* Write PC to kvspace; write status when it changes. */
-void kvlangVthreadAdvance(kvlangFrame_t *f, const char *pc, const char *status);
+void kvlangVthreadNextPc(kvlangFrame_t *f, const char *pc, const char *status);
 
 /* kvlangNotInMyCaps：查 myrwircaps table，opcode 不在本 runtime 能力表内 → true。 */
 bool kvlangNotInMyCaps(const char *opcode);
@@ -661,8 +665,7 @@ int kvlangKvcpuExecute(kvspace_t *kv,
 char *kvlangKvcpuBootstrap(kvspace_t *kv, const char *vtid,
                            const char *funcname, const char *const *args,
                            int nargs);
-int kvlangKvcpuDynamicCall(kvspace_t *kv, const char *vtid, const char *pc,
-                           const char *funckey);
+int kvlangKvcpuDynamicCall(kvlangFrame_t *f, const char *funckey);
 /* 创建 vthread（不运行），返回 vid（free）。运行由 RunVid 承接。vthread·create 用。 */
 char *kvlangVthreadSpawn(kvspace_t *kv, const char *funcname,
                          const char *const *args, int nargs);

@@ -16,4 +16,5 @@ int check_write_types(kvspace_t *kv, const char *vtid, const char *pc,
 int kvlangKvcpuCallOpcode(kvspace_t *kv, const char *vtid, const char *pc,
                           const char *status_known, const char *opcode,
                           kvlangParam_t *reads, int nr,
-                          kvlangParam_t *writes, int nw);
+                          kvlangParam_t *writes, int nw, char *pc_out,
+                          size_t pc_out_cap, bool *pc_feedback);

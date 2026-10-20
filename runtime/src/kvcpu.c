@@ -83,6 +83,11 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
     char pc_key[KV_KEY_MAX], st_key[KV_KEY_MAX];
     char cur_b[KV_KEY_MAX] __attribute__((aligned(4096)));
     char status_b[KV_KEY_MAX] __attribute__((aligned(4096)));
+    /* PC 回传双缓冲：NextPc 写另一块，绝不覆盖本步 f->pc 指向的串
+     * （ControlReturn 在 NextPc 之后还要用 f->pc 清理返回帧）。 */
+    char fb_b[2][KV_KEY_MAX] __attribute__((aligned(4096)));
+    int fb_i = 0;
+    bool have_fb = false;
     kvlangKeytreeVthreadPc(vtid, pc_key, sizeof pc_key);
     kvlangKeytreeVthreadStatus(vtid, st_key, sizeof st_key);
     /* 执行期这两个 key 位置固定：keyoff 算一次，每步只读值（#329）。 */
@@ -109,11 +114,13 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
     for (;;) {
         /* Release borrowed values from the previous instruction. */
         kvlangKvspaceReadReset(kv);
-        if (!kvspaceKeyOffRead(&pc_off, cur_b, sizeof cur_b) || !cur_b[0]) {
+        if (!have_fb &&
+            (!kvspaceKeyOffRead(&pc_off, cur_b, sizeof cur_b) || !cur_b[0])) {
             rc = -1;
             break;
         }
-        const char *cur = cur_b;
+        const char *cur = have_fb ? fb_b[fb_i] : cur_b;
+        have_fb = false;
         /* Observe external status changes on every step. */
         if (!kvspaceKeyOffRead(&status_off, status_b, sizeof status_b))
             break;
@@ -234,16 +241,20 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
                        inst.write_count);
 
         char *yield = NULL;
+        bool pc_fb = false;
         if (inst.opcode_id >= 0) {
             /* 单表派发：native 算子与 control/copy 同居 myrwircaps，opcode_id 直查一跳到底。 */
             kvlangFrame_t f = {kv, vtid, cur, &inst, &yield};
             f.frame_root = cur_frame;
             f.addr_epoch = &addr_epoch;
+            f.pc_out = fb_b[fb_i ^ 1];
+            f.pc_out_cap = sizeof fb_b[0];
             f.status_known =
                 status; /* 本步开始前读到的 ‥status（源值，借用） */
             exec_err = kvlangBuiltinNative(&f);
             if (f.persist_failed)
                 exec_err = -1;
+            pc_fb = f.pc_feedback;
             if (exec_err == 0 && yield) {
                 /* native（vthread·run return 模式）冒泡一个子 vthread 的 rwir pc 给上层驱动。
                  * 本 vthread（主）pc 未推进，驱动派发子 rwir 并推进子 pc 后重入即续跑。 */
@@ -288,11 +299,16 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
             addr_epoch++; /* 外部执行器可能删除/重建 key */
         } else {
         user_call:
-            exec_err = kvlangKvcpuCallOpcode(kv, vtid, cur, status, inst.opcode,
-                                             inst.reads, inst.read_count,
-                                             inst.writes, inst.write_count);
+            exec_err = kvlangKvcpuCallOpcode(
+                kv, vtid, cur, status, inst.opcode, inst.reads,
+                inst.read_count, inst.writes, inst.write_count, fb_b[fb_i ^ 1],
+                sizeof fb_b[0], &pc_fb);
         }
 
+        if (pc_fb) {
+            fb_i ^= 1;
+            have_fb = true;
+        }
         operands_free(reads, row->nr);
         operands_free(writes, row->nw);
         if (exec_err != 0) {
