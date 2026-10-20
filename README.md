@@ -252,7 +252,7 @@ break / continue
 return                      // no return value
 ```
 
-Map traversal uses `while` + `kvspace·listlen` + `kvspace·listn` (`for`-`in` is not reliable on maps) — note the directory path needs a trailing `/`. Control flow is source syntax only; layout flattens it into a linear irseq and lowers it to `goto` / `br`.
+Map traversal uses `while` + `kvspace·listlen` + `kvspace·listat` (`for`-`in` is not reliable on maps) — note the directory path needs a trailing `/`. Control flow is source syntax only; layout flattens it into a linear irseq and lowers it to `goto` / `br`.
 
 ### Operators
 

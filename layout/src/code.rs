@@ -1146,7 +1146,7 @@ pub fn printstack(kv: &mut Kv, vid: &str) -> String {
             }
         }
         // 帧成员 = 实参槽 `[0,±j]` + **命名局部**（变量名即成员名，如 text/total/sz）
-        // + `‥*`。命名局部要用 expand_ext 才列得出来（kvspace·list 默认不展开）。
+        // + `‥*`。命名局部要用 expand_ext 才列得出来（kvspace list 默认不展开）。
         let mut names: Vec<String> = kv
             .list(&format!("{f}/"), true, true)
             .into_iter()

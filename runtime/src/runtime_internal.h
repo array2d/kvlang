@@ -435,6 +435,11 @@ int kvlangKvspaceExtensionIndex(kvspace_t *k, const char *path, const char *ext,
                                 char *err, uint32_t err_cap);
 int kvlangKvspaceDeleteExtensionIndex(kvspace_t *k, const char *path, char *err,
                                       uint32_t err_cap);
+/* 只取数量 / 只取第 idx 项：单次后端调用，不枚举、不分配名字数组。 */
+int kvlangKvspaceListLen(kvspace_t *k, const char *prefix, bool expand_ext,
+                         bool resolve, int *out_count);
+int kvlangKvspaceListAt(kvspace_t *k, const char *prefix, bool expand_ext,
+                        bool resolve, int idx, char **out_name);
 int kvlangKvspaceList(kvspace_t *k, const char *prefix, bool expand_ext,
                       bool resolve, char ***out_names,
                       int *out_count); /* split \n */

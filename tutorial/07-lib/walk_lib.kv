@@ -6,7 +6,7 @@
 // 成员经 `kvspace·members` 取：值与同名目录共存时后端会同时给出裸名与目录名（两个实体，
 // 后端不去重），members 折成一条，遍历侧不必各自去重（见 lib kvspace 注释）。
 // 目录判定不看 list 的尾斜杠（三后端不统一）：<名>/ 是结构目录，<名>· 是成员前缀目录。
-// 两种拼写都试，先 / 后 ·。kvspace·listn 返回 utf8，须显式转 char/utf32 才能索引（utf32）。
+// 两种拼写都试，先 / 后 ·。kvspace·listat 返回 utf8，须显式转 char/utf32 才能索引（utf32）。
 // 期望输出:
 //   /lib/string·
 //   upper
@@ -22,7 +22,7 @@ rwfunc walk(path:[]char/utf32, indent:[]char/utf32, down:int64) -> () {
 	kvspace·members(path) -> (ms, n)
 	0 -> i
 	while (i < n) {
-		kvspace·listn(ms, i) -> mk
+		kvspace·listat(ms, i) -> mk
 		kvspace·get(ms, mk) -> nm8
 		char/utf32(nm8) -> nm
 		path + nm -> full

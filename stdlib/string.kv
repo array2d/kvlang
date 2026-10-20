@@ -287,7 +287,7 @@ lib string {
 			if (i > 0) {
 				string·concat(r, sep) -> r
 			}
-			kvspace·listn(parts, i) -> key
+			kvspace·listat(parts, i) -> key
 			kvspace·get(parts, key) -> v
 			string·concat(r, v) -> r
 			i = i + 1

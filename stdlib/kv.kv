@@ -37,7 +37,7 @@ lib kvspace {
 		n = 0
 		i = 0
 		while (i < total) {
-			kvspace·listn(path, i) -> m8
+			kvspace·listat(path, i) -> m8
 			char/utf32(m8) -> m
 			skip = false
 			string·len(m) -> ml
@@ -49,7 +49,7 @@ lib kvspace {
 					// 所以要向后扫完**同前缀**的条目，不能只看下一条。
 					j = i + 1
 					while (j < total) {
-						kvspace·listn(path, j) -> n8
+						kvspace·listat(path, j) -> n8
 						char/utf32(n8) -> nx
 						string·len(nx) -> xl
 						if (xl < ml) {

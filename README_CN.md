@@ -252,7 +252,7 @@ break / continue
 return                      // 无返回值
 ```
 
-map 遍历用 `while` + `kvspace·listlen` + `kvspace·listn`（`for`-`in` 对 map 不可靠）——注意目录路径要带尾 `/`。控制流只是源码语法；layout 把它展平成线性 irseq，再 lower 成 `goto` / `br`。
+map 遍历用 `while` + `kvspace·listlen` + `kvspace·listat`（`for`-`in` 对 map 不可靠）——注意目录路径要带尾 `/`。控制流只是源码语法；layout 把它展平成线性 irseq，再 lower 成 `goto` / `br`。
 
 ### 操作符
 
