@@ -97,17 +97,14 @@ static int32_t array_len_to_dims(const char *kind, int32_t array_len, int32_t *d
     return 0;
 }
 
-/* Copy codec-owned bytes into runtime-owned storage. */
+/* 接管 codec 返回的堆缓冲：同进程同一 libc，free 兼容；省一次 malloc+memcpy。 */
 static uint8_t *kvlangXvalueOwn(uint8_t *tmp, uint32_t tl, uint32_t *out_len) {
     if (!tmp) {
         *out_len = 0;
         return NULL;
     }
-    uint8_t *buf = malloc(tl);
-    memcpy(buf, tmp, tl);
-    free(tmp);
     *out_len = tl;
-    return buf;
+    return tmp;
 }
 
 static uint8_t *kvlangXvalueEncodeTlv(const char *kind, const uint8_t *raw,
@@ -545,10 +542,7 @@ void kvlangXvalueNewTlvDims(kvlangXvalue_t *v, const char *kind,
         kvlangXvalueZero(v);
         return;
     }
-    uint8_t *buf = malloc(tl);
-    memcpy(buf, tmp, tl);
-    free(tmp);
-    v->bytes = buf;
+    v->bytes = tmp;
     v->length = tl;
     v->is_borrowed = 0;
 }
