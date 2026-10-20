@@ -23,7 +23,7 @@ lib kvlang/reflect {
 		kvspace·members(mdir) -> (ms, n)
 		i = 0
 		while (i < n) {
-			kvspace·listn(ms, i) -> mk
+			kvspace·listat(ms, i) -> mk
 			kvspace·get(ms, mk) -> k8
 			char/utf32(k8) -> key
 			string·concat(mdir, key) -> kp

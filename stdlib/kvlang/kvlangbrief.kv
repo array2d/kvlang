@@ -161,7 +161,7 @@ break / continue
 return                     // 无返回值
 ```
 
-map 遍历用 `while + kvspace·listlen + kvspace·listn`（for-in 对 map 不可靠）。
+map 遍历用 `while + kvspace·listlen + kvspace·listat`（for-in 对 map 不可靠）。
 
 ## 8. 函数（lib 内定义；跨库调用走全路径）
 
@@ -214,7 +214,7 @@ networld/fs·write("/tmp/x.txt", xv·reinterpret("hi", "[]uint8")) -> n
 
 ### KV 树（kvspace·*）
 - `kvspace·get(path)`、`kvspace·set(path,val)`、`kvspace·del(path)`、`kvspace·deltree(path)`。
-- `kvspace·list("/dir/")`、`kvspace·listlen("/dir/")`、`kvspace·listn("/dir/",i)`（列目录 path 要带尾 `/`）。
+- `kvspace·listlen("/dir/")`、`kvspace·listat("/dir/",i)`（列目录 path 要带尾 `/`）。
 - `kvlang·abs(x)`（= `&x`，取址）、`kvspace·cp(src,dst)`、`kvspace·cpdir(src,dst)`、`kvspace·cplist(src,dst)`、`kvspace·has(path)`。
 
 ### 字符串（string·*）

@@ -3,8 +3,7 @@
 
 // 列出 prefix 下的子键并计数
 rwfunc count_children(prefix:[]char/utf32) -> (n:int64) {
-	kvspace·list(prefix) -> names
-	kvspace·listlen(names) -> n
+	kvspace·listlen(prefix) -> n
 }
 
 rwfunc test() -> () {

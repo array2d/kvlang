@@ -39,7 +39,7 @@ lib networld/edit {
 				if (lines > 0 && lo + lines - 1 < total) { hi = lo + lines - 1 }
 				i = lo
 				while (i <= hi) {
-					kvspace·listn(parts, i - 1) -> kk
+					kvspace·listat(parts, i - 1) -> kk
 					kvspace·get(parts, kk) -> ln
 					string·formatint(i, 10) -> no
 					string·concat(view, no) -> view
@@ -135,8 +135,8 @@ lib networld/edit {
 				code = 0
 				i = 0
 				while (i < cnt) {
-					kvspace·listn(olds, i) -> ko
-					kvspace·listn(news, i) -> kn
+					kvspace·listat(olds, i) -> ko
+					kvspace·listat(news, i) -> kn
 					kvspace·get(olds, ko) -> o
 					kvspace·get(news, kn) -> w
 					string·count(t, o) -> c

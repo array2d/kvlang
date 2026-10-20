@@ -168,7 +168,7 @@ static const struct {
     {"time·before", kvlangBuiltinTimeCompare, false}, {"time·after", kvlangBuiltinTimeCompare, false},
     {"random·uint64", kvlangBuiltinRandUint64, false}, {"random·int63", kvlangBuiltinRandInt63, false}, {"random·intn", kvlangBuiltinRandIntn, false},
     {"kvspace·get", kvlangBuiltinKvspaceGet, false}, {"kvspace·set", kvlangBuiltinKvspaceSet, false}, {"kvspace·del", kvlangBuiltinKvspaceDelete, false},
-    {"kvspace·deltree", kvlangBuiltinKvspaceDeleteTree, false}, {"kvspace·cp", kvlangBuiltinKvspaceCopy, false}, {"kvspace·cpdir", kvlangBuiltinKvspaceCopyTree, false}, {"kvspace·cplist", kvlangBuiltinKvspaceCopyList, false}, {"kvspace·list", kvlangBuiltinKvspaceList, false}, {"kvspace·listlen", kvlangBuiltinKvspaceListLength, false}, {"kvspace·listn", kvlangBuiltinKvspaceListNth, false}, {"kvspace·mkindex", kvlangBuiltinKvspaceMakeIndex, false},
+    {"kvspace·deltree", kvlangBuiltinKvspaceDeleteTree, false}, {"kvspace·cp", kvlangBuiltinKvspaceCopy, false}, {"kvspace·cpdir", kvlangBuiltinKvspaceCopyTree, false}, {"kvspace·cplist", kvlangBuiltinKvspaceCopyList, false}, {"kvspace·listlen", kvlangBuiltinKvspaceListLength, false}, {"kvspace·listat", kvlangBuiltinKvspaceListAt, false}, {"kvspace·mkindex", kvlangBuiltinKvspaceMakeIndex, false},
     {"kvspace·extindex", kvlangBuiltinKvspaceExtensionIndex, false}, {"kvspace·rmindexext", kvlangBuiltinKvspaceRemoveIndexExtension, false}, {"kvspace·watch", kvlangBuiltinKvspaceWatch, false}, {"kvlang·abs", kvlangBuiltinKvlangAbs, false},
     {"vthread·create", kvlangBuiltinVthreadCreate, false},
     {"vthread·run", kvlangBuiltinVthreadRun, false},

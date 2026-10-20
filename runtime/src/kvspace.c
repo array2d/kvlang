@@ -145,27 +145,46 @@ int kvlangKvspaceDeleteExtensionIndex(kvspace_t *k, const char *path, char *err,
     return kvspaceRmindexExt(k->handle, path, err, err_cap);
 }
 
-int kvlangKvspaceList(kvspace_t *k, const char *prefix, bool expand_ext, bool resolve,
-                 char ***out_names, int *out_count) {
+int kvlangKvspaceListLen(kvspace_t *k, const char *prefix, bool expand_ext,
+                         bool resolve, int *out_count) {
+    int32_t count = 0;
+    if (kvspaceListLen(k->handle, prefix, expand_ext ? 1 : 0,
+                       resolve ? 1 : 0, &count) != 0)
+        return -1;
+    *out_count = (int)count;
+    return 0;
+}
+
+int kvlangKvspaceListAt(kvspace_t *k, const char *prefix, bool expand_ext,
+                        bool resolve, int idx, char **out_name) {
+    *out_name = NULL;
+    if (idx < 0)
+        return -1;
+    uint8_t buf[1024];
+    uint32_t len = 0;
+    if (kvspaceListAt(k->handle, prefix, expand_ext ? 1 : 0,
+                      resolve ? 1 : 0, idx, buf, sizeof buf, &len) != 0)
+        return -1;
+    *out_name = strndup((const char *)buf, len);
+    return 0;
+}
+
+int kvlangKvspaceList(kvspace_t *k, const char *prefix, bool expand_ext,
+                      bool resolve, char ***out_names, int *out_count) {
     *out_names = NULL;
     *out_count = 0;
-    int ex = expand_ext ? 1 : 0, rs = resolve ? 1 : 0;
-    int32_t count = 0;
-    if (kvspaceListLen(k->handle, prefix, ex, rs, &count) != 0)
+    int count = 0;
+    if (kvlangKvspaceListLen(k, prefix, expand_ext, resolve, &count) != 0)
         return -1;
     if (count <= 0)
         return 0;
     char **names = malloc(sizeof(char *) * (size_t)count);
-    for (int32_t i = 0; i < count; i++) {
-        uint8_t buf[1024];
-        uint32_t len = 0;
-        if (kvspaceListAt(k->handle, prefix, ex, rs, i, buf, sizeof buf, &len) == 0)
-            names[i] = strndup((const char *)buf, len);
-        else
+    for (int i = 0; i < count; i++) {
+        if (kvlangKvspaceListAt(k, prefix, expand_ext, resolve, i, &names[i]) != 0)
             names[i] = strdup("");
     }
     *out_names = names;
-    *out_count = (int)count;
+    *out_count = count;
     return 0;
 }
 

@@ -92,7 +92,7 @@ lib networld/fs {
 		kvspace·listlen(ns) -> nc
 		i = 0
 		while (i < nc) {
-			kvspace·listn(ns, i) -> k
+			kvspace·listat(ns, i) -> k
 			kvspace·get(ns, k) -> nm
 			networld/fs·match(nm, np) -> ok
 			if (ok) {
@@ -151,7 +151,7 @@ lib networld/fs {
 			gl = string·len(glob)
 			i = 0
 			while (i < nc) {
-				kvspace·listn(ns, i) -> k
+				kvspace·listat(ns, i) -> k
 				kvspace·get(ns, k) -> nm
 				networld/fs·match(nm, glob) -> ok
 				if (gl == 0 || ok) {

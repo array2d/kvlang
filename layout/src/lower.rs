@@ -587,7 +587,7 @@ fn lower_for_with_cont(
     let cond_slot = lg.tmp();
     let len_slot = lg.tmp();
     let key_slot = lg.tmp();
-    // 容器源（stringkeymap/struct）用 kvspace·listlen/kvspace·listn/kvspace·get 遍历，compact 数组源用
+    // 容器源（stringkeymap/struct）用 kvspace·listlen/kvspace·listat/kvspace·get 遍历，compact 数组源用
     // ndarray·numel/xv·at（见 spec 控制流脱糖）。判据看**声明的类型**：map 的 kindexpr 恒含
     // `key·value` 的那个 `·`（`[int64]·int64`、`[]char/utf8·int64`），compact 数组不含。
     let is_obj = s.iter.op == "obj"
@@ -670,7 +670,7 @@ fn lower_for_with_cont(
         body_insts.push(Stmt::Instruction(Instruction {
             comments: Vec::new(),
             expr: Some(ast::call(
-                "kvspace·listn",
+                "kvspace·listat",
                 vec![ast::leaf(&iter_slot), ast::leaf(&idx_slot)],
             )),
             writes: vec![key_slot.clone()],
@@ -1090,7 +1090,6 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
         }
         "xv·langtype" => return "[]char/utf8".to_string(),
         "ndarray·shape" => return "[]int64".to_string(),
-        "kvspace·list" => return "[]char/utf8".to_string(),
         "string·char" | "string·set" | "string·slice" | "string·concat" | "string·formatint"
         | "string·formatuint" => return "char/utf32".to_string(),
         "random.int63" => return "int64".to_string(),
