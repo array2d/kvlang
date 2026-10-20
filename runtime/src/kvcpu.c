@@ -3,7 +3,7 @@
 
 /* 统一错误出口：置 vthread error 并返回 -1。 */
 static int execute_error(kvspace_t *kv, const char *vtid, const char *pc,
-                      const char *fmt, ...) {
+                         const char *fmt, ...) {
     char msg[512];
     va_list ap;
     va_start(ap, fmt);
@@ -15,7 +15,7 @@ static int execute_error(kvspace_t *kv, const char *vtid, const char *pc,
 
 /* KVMODE_RETURN 收尾：把下一个 PC 的所有权交给调用方（或释放），清缓存。 */
 static int execute_yield(kvlangRwirInst_t *inst, bool from_cache,
-                      rwir_cache_t *cache, char **out_pc, char *next_pc) {
+                         rwir_cache_t *cache, char **out_pc, char *next_pc) {
     if (out_pc)
         *out_pc = next_pc;
     else
@@ -35,11 +35,18 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
         return -1;
     }
 
-    /* 每步复用的缓冲：pc/status 键与值、帧根、link base 全部跨步保留，免每步 malloc/free。 */
+    /* 每步复用的缓冲：pc/status 键与值、帧根、link base 全部跨步保留，免每步 malloc/free。
+     * pc/status 值缓冲按页对齐：shm 常驻映射是页对齐的，未对齐时实测 k_nucleotide 有约
+     * 12% 的栈布局敏感退化（换 64/128B 对齐都复现，只有 4K 对齐消失）。 */
     char pc_key[KV_KEY_MAX], st_key[KV_KEY_MAX];
-    char cur_b[KV_KEY_MAX], status_b[KV_KEY_MAX];
+    char cur_b[KV_KEY_MAX] __attribute__((aligned(4096)));
+    char status_b[KV_KEY_MAX] __attribute__((aligned(4096)));
     kvlangKeytreeVthreadPc(vtid, pc_key, sizeof pc_key);
     kvlangKeytreeVthreadStatus(vtid, st_key, sizeof st_key);
+    /* 执行期这两个 key 位置固定：keyoff 算一次，每步只读值（#329）。 */
+    kvspaceKeyOff pc_off, status_off;
+    kvspaceKeyOffBind(&pc_off, kv, pc_key);
+    kvspaceKeyOffBind(&status_off, kv, st_key);
     char fr_stk[KV_KEY_MAX];
     char lb_stk[KV_KEY_MAX];
     const char *cur_frame = NULL;
@@ -50,14 +57,13 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
     for (;;) {
         /* Release borrowed values from the previous instruction. */
         kvlangKvspaceReadReset(kv);
-        if (!kvlangVthreadMemberGetBuffer(kv, pc_key, cur_b, sizeof cur_b) ||
-            !cur_b[0]) {
+        if (!kvspaceKeyOffRead(&pc_off, cur_b, sizeof cur_b) || !cur_b[0]) {
             rc = -1;
             break;
         }
         const char *cur = cur_b;
         /* Observe external status changes on every step. */
-        if (!kvlangVthreadMemberGetBuffer(kv, st_key, status_b, sizeof status_b))
+        if (!kvspaceKeyOffRead(&status_off, status_b, sizeof status_b))
             break;
         const char *status = status_b;
         if (strcmp(status, "init") != 0 && strcmp(status, "running") != 0 &&
@@ -70,7 +76,7 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
             /* 帧深变化 = 帧被建（call）或删（return）：帧根重算、派生数据作废。 */
             if (!kvlangKeytreeFrameRootBuffer(cur, fr_stk, sizeof fr_stk)) {
                 rc = execute_error(kv, vtid, cur,
-                                "RuntimeError: invalid pc: %s", cur);
+                                   "RuntimeError: invalid pc: %s", cur);
                 break;
             }
             cur_frame = fr_stk;
@@ -80,8 +86,8 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
         }
         if (depth > MAX_STACK_DEPTH) {
             rc = execute_error(kv, vtid, cur,
-                            "RecursionError: stack overflow: depth=%d pc=%s",
-                            depth, cur);
+                               "RecursionError: stack overflow: depth=%d pc=%s",
+                               depth, cur);
             break;
         }
 
@@ -94,8 +100,7 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
         } else {
             if (kvlangKeytreeStackBuffer(cur_frame, lb_stk, sizeof lb_stk) == 0)
                 kvlangDie("link base exceeds %zu bytes", sizeof lb_stk);
-            int drc = kvlangRwirDecode(kv, lb_stk, cur, &tmp, err,
-                                       sizeof err);
+            int drc = kvlangRwirDecode(kv, lb_stk, cur, &tmp, err, sizeof err);
             if (drc != 0) {
                 rc = execute_error(kv, vtid, cur, "decode: %.247s", err);
                 break;
@@ -105,14 +110,14 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
         kvlangRwirInst_t *inst = &tmp;
 
         kvlangLogDebug("[%s] PC=%s OP=%s R=%d W=%d", vtid, cur,
-                       inst->opcode ? inst->opcode : "(empty)", inst->read_count,
-                       inst->write_count);
+                       inst->opcode ? inst->opcode : "(empty)",
+                       inst->read_count, inst->write_count);
 
         if (!inst->opcode || !inst->opcode[0]) {
             /* layout 对每条路径都补了 return（lower::terminate），走到空槽只能是 /lib 损坏
              * 或 goto/br 越界；报 RuntimeError 让该 vthread 停下，不拖垮整个进程。 */
             rc = execute_error(kv, vtid, cur,
-                            "RuntimeError: no instruction at %s", cur);
+                               "RuntimeError: no instruction at %s", cur);
             rwir_instruction_release(&tmp, from_cache);
             break;
         }
@@ -121,7 +126,7 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
             kvlangDie("rwir cache entry missing for %s", cur);
         if (from_cache &&
             kvlangRwirCacheLoadValues(kv, inst, hit->load_write_value, err,
-                                 sizeof err) != 0) {
+                                      sizeof err) != 0) {
             rc = execute_error(kv, vtid, cur, "%s", err);
             rwir_instruction_release(&tmp, true);
             break;
@@ -133,7 +138,8 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
             /* 单表派发：native 算子与 control/copy 同居 myrwircaps，opcode_id 直查一跳到底。 */
             kvlangFrame_t f = {kv, vtid, cur, inst, &yield};
             f.frame_root = cur_frame;
-            f.status_known = status;   /* 本步开始前读到的 ‥status（源值，借用） */
+            f.status_known =
+                status; /* 本步开始前读到的 ‥status（源值，借用） */
             exec_err = kvlangBuiltinNative(&f);
             if (f.persist_failed)
                 exec_err = -1;
@@ -150,24 +156,24 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
             }
         } else if (hit->is_def_rwir) {
             if (hit->def_read_sig)
-                exec_err = check_read_types(kv, vtid, cur, inst->opcode,
-                                            hit->def_read_sig, hit->def_read_count,
-                                            hit->def_dynamic, inst->reads,
-                                            inst->read_count);
+                exec_err = check_read_types(
+                    kv, vtid, cur, inst->opcode, hit->def_read_sig,
+                    hit->def_read_count, hit->def_dynamic, inst->reads,
+                    inst->read_count);
             if (exec_err == 0 && hit->def_write_sig)
-                exec_err = check_write_types(kv, vtid, cur, inst->opcode,
-                                             hit->def_write_sig, hit->def_write_count);
+                exec_err =
+                    check_write_types(kv, vtid, cur, inst->opcode,
+                                      hit->def_write_sig, hit->def_write_count);
             if (exec_err == 0 && mode == KVMODE_RETURN)
                 return execute_yield(&tmp, from_cache, &cache, out_pc,
-                                  out_pc ? strdup(cur) : NULL);
+                                     out_pc ? strdup(cur) : NULL);
             if (exec_err == 0)
                 exec_err = kvlangHandoffExternalRwir(kv, vtid, cur, inst);
         } else {
         user_call:
-            exec_err = kvlangKvcpuCallOpcode(kv, vtid, cur, status,
-                                             inst->opcode, inst->reads,
-                                             inst->read_count, inst->writes,
-                                             inst->write_count);
+            exec_err = kvlangKvcpuCallOpcode(
+                kv, vtid, cur, status, inst->opcode, inst->reads,
+                inst->read_count, inst->writes, inst->write_count);
         }
 
         if (exec_err != 0) {

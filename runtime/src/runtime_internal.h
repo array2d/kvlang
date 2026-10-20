@@ -37,6 +37,18 @@ extern int kvspaceSetValue(void *h, const char *key, const uint8_t *value,
                            uint32_t value_len, uint8_t ro, uint32_t vid,
                            char *err, uint32_t err_cap);
 
+/* key 的 64 位寻址结果（派生量，非真相）。见 kvspace.h 契约：
+ * block_id=叶子、gen=0；GetByRef 遇到 ART 节点搬移会沿 MOVED 链更新 ref。 */
+typedef struct {
+    uint32_t block_id;
+    uint32_t gen;
+    uint32_t parent_id;
+    uint32_t depth;
+} kvspaceRef_t;
+extern int kvspaceResolveRef(void *h, const char *key, kvspaceRef_t *ref);
+extern int kvspaceGetByRef(void *h, kvspaceRef_t *ref, const char *key_fallback,
+                           uint8_t **out, uint32_t *out_len);
+
 /* 指令边界回收读借用池；定位读/写（分片）；只读 head 前缀。见 kvspace.h 契约。 */
 extern void kvspaceReadReset(void *h);
 extern int kvspaceGetPart(void *h, const char *key, uint32_t offset,
@@ -124,12 +136,14 @@ typedef struct {
 
 #define KV_KEY_MAX 1024 /* kvspace 写键上限：key_len < 1024 */
 
-void kvlangDie(const char *fmt, ...) __attribute__((noreturn, format(printf, 1, 2)));
+void kvlangDie(const char *fmt, ...)
+    __attribute__((noreturn, format(printf, 1, 2)));
 /* 有界写入调用方缓冲；超长或格式化错误直接 abort，绝不截断。 */
 size_t kvlangKeyFormat(char *buf, size_t cap, const char *fmt, ...)
     __attribute__((format(printf, 3, 4)));
 /* 一次性堆字符串（调用方 free）；OOM abort。 */
-char *kvlangStringFormat(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+char *kvlangStringFormat(const char *fmt, ...)
+    __attribute__((format(printf, 1, 2)));
 char *kvlangStringCopyN(const char *s, size_t n);
 
 /* ── xvalue head 零解码访问 ──────────────────────────────────────────
@@ -384,40 +398,43 @@ void kvlangFormatFloat(char *out, size_t cap, double v);
 kvspace_t *kvlangKvspaceConnect(const char *dsn);
 void kvlangKvspaceDisconnect(kvspace_t *k);
 int kvlangKvspaceGetOne(kvspace_t *k, const char *key,
-                   kvlangXvalue_t *out); /* None → out len=0 */
+                        kvlangXvalue_t *out); /* None → out len=0 */
 int kvlangKvspaceGetMember(kvspace_t *k, const char *dir, const char *name,
-                      kvlangXvalue_t *out);
+                           kvlangXvalue_t *out);
 void kvlangKvspaceReadReset(kvspace_t *k); /* 指令边界回收读借用池 */
-int kvlangKvspaceGetPart(kvspace_t *k, const char *key, uint32_t off, uint32_t len,
-                    kvlangXvalue_t *out); /* 借用读分片 body 字节 */
+int kvlangKvspaceGetPart(kvspace_t *k, const char *key, uint32_t off,
+                         uint32_t len,
+                         kvlangXvalue_t *out); /* 借用读分片 body 字节 */
 int kvlangKvspaceSetPart(kvspace_t *k, const char *key, uint32_t off,
-                    const uint8_t *buf, uint32_t buf_len, char *err,
-                    uint32_t err_cap); /* 就地写分片 */
+                         const uint8_t *buf, uint32_t buf_len, char *err,
+                         uint32_t err_cap); /* 就地写分片 */
 int kvlangKvspaceGetHead(kvspace_t *k, const char *key,
-                    kvspaceHead_t *out); /* 只读 head，不取 body */
-int kvlangKvspaceSet(kvspace_t *k, const kvlangKvPair_t *pairs, int n, char *err,
-                uint32_t err_cap);
-int kvlangKvspaceSetChar(kvspace_t *k, const char *key, const char *s);
-int kvlangKvspaceDelete(kvspace_t *k, const char *key, char *err, uint32_t err_cap);
-int kvlangKvspaceDeleteTree(kvspace_t *k, const char *prefix, char *err,
-                    uint32_t err_cap);
-int kvlangKvspaceCopy(kvspace_t *k, const char *src, const char *dst, char *err,
-               uint32_t err_cap);
-int kvlangKvspaceCopyTree(kvspace_t *k, const char *src, const char *dst, char *err,
-                   uint32_t err_cap);
-int kvlangKvspaceCopyList(kvspace_t *k, const char *src, const char *dst, char *err,
-                   uint32_t err_cap);
-int kvlangKvspaceMakeIndex(kvspace_t *k, const char *path, uint32_t capacity,
-                    char *err, uint32_t err_cap);
-int kvlangKvspaceExtensionIndex(kvspace_t *k, const char *path, const char *ext,
+                         kvspaceHead_t *out); /* 只读 head，不取 body */
+int kvlangKvspaceSet(kvspace_t *k, const kvlangKvPair_t *pairs, int n,
                      char *err, uint32_t err_cap);
-int kvlangKvspaceDeleteExtensionIndex(kvspace_t *k, const char *path, char *err,
+int kvlangKvspaceSetChar(kvspace_t *k, const char *key, const char *s);
+int kvlangKvspaceDelete(kvspace_t *k, const char *key, char *err,
                         uint32_t err_cap);
+int kvlangKvspaceDeleteTree(kvspace_t *k, const char *prefix, char *err,
+                            uint32_t err_cap);
+int kvlangKvspaceCopy(kvspace_t *k, const char *src, const char *dst, char *err,
+                      uint32_t err_cap);
+int kvlangKvspaceCopyTree(kvspace_t *k, const char *src, const char *dst,
+                          char *err, uint32_t err_cap);
+int kvlangKvspaceCopyList(kvspace_t *k, const char *src, const char *dst,
+                          char *err, uint32_t err_cap);
+int kvlangKvspaceMakeIndex(kvspace_t *k, const char *path, uint32_t capacity,
+                           char *err, uint32_t err_cap);
+int kvlangKvspaceExtensionIndex(kvspace_t *k, const char *path, const char *ext,
+                                char *err, uint32_t err_cap);
+int kvlangKvspaceDeleteExtensionIndex(kvspace_t *k, const char *path, char *err,
+                                      uint32_t err_cap);
 int kvlangKvspaceList(kvspace_t *k, const char *prefix, bool expand_ext,
-                 bool resolve, char ***out_names,
-                 int *out_count); /* split \n */
-int kvlangKvspaceWatch(kvspace_t *k, const char *key, const kvlangXvalue_t *target,
-                  uint64_t tick_ns, kvlangXvalue_t *out);
+                      bool resolve, char ***out_names,
+                      int *out_count); /* split \n */
+int kvlangKvspaceWatch(kvspace_t *k, const char *key,
+                       const kvlangXvalue_t *target, uint64_t tick_ns,
+                       kvlangXvalue_t *out);
 
 /* ── keytree ───────────────────────────────────────────────────────── */
 
@@ -432,12 +449,14 @@ int kvlangKvspaceWatch(kvspace_t *k, const char *key, const kvlangXvalue_t *targ
 #define VTHREAD_ROOT "/vthread"
 
 const char *kvlangKeytreeVthreadIdFromPc(const char *pc, char *out,
-                                    size_t cap);          /* "" 无效 */
-char *kvlangKeytreeStack(const char *root);               /* malloc */
-size_t kvlangKeytreeStackBuffer(const char *root, char *buf, size_t cap); /* 栈缓冲，返长度 */
+                                         size_t cap); /* "" 无效 */
+char *kvlangKeytreeStack(const char *root);           /* malloc */
+size_t kvlangKeytreeStackBuffer(const char *root, char *buf,
+                                size_t cap);  /* 栈缓冲，返长度 */
 char *kvlangKeytreeFrameRoot(const char *pc); /* malloc，无效 NULL */
-size_t kvlangKeytreeFrameRootBuffer(const char *pc, char *buf, size_t cap); /* 栈缓冲，返长度 */
-char *kvlangKeytreeEntryPc(const char *root); /* malloc */
+size_t kvlangKeytreeFrameRootBuffer(const char *pc, char *buf,
+                                    size_t cap); /* 栈缓冲，返长度 */
+char *kvlangKeytreeEntryPc(const char *root);    /* malloc */
 char *kvlangKeytreeFrameAt(const char *vtid, int depth); /* malloc */
 int kvlangKeytreeFrameNum(const char *path); /* [d]; panics if invalid */
 char *kvlangKeytreeIrseqPc(const char *frame_root, int irseq); /* malloc */
@@ -464,7 +483,7 @@ void kvlangKeytreeVthreadSlot(const char *vtid, const char *frame, int i, int j,
 void kvlangKeytreeVthreadPc(const char *vtid, char *out, size_t cap);
 void kvlangKeytreeVthreadStatus(const char *vtid, char *out, size_t cap);
 void kvlangKeytreeVthreadStatusMessage(const char *vtid, const char *status,
-                                   char *out, size_t cap);
+                                       char *out, size_t cap);
 void kvlangKeytreeVthreadDebugger(const char *vtid, char *out, size_t cap);
 void kvlangKeytreeFrameCallPc(const char *root, char *out, size_t cap);
 void kvlangKeytreeFrameReturnPc(const char *root, char *out, size_t cap);
@@ -514,7 +533,8 @@ typedef struct {
     int write_count;
 } kvlangRwirInst_t;
 
-size_t kvlangRwirNextPcBuffer(const char *pc, char *buf, size_t cap); /* 栈缓冲，返长度 */
+size_t kvlangRwirNextPcBuffer(const char *pc, char *buf,
+                              size_t cap); /* 栈缓冲，返长度 */
 int kvlangRwirExtractAddress(const char *coord);
 int kvlangRwirDecode(kvspace_t *kv, const char *link_base, const char *pc,
                      kvlangRwirInst_t *out, char *err, uint32_t err_cap);
@@ -522,7 +542,7 @@ void kvlangRwirInstructionFree(kvlangRwirInst_t *inst);
 /* 外部扩展 handoff：写共享队列 /lib/<opcode>/vids/<vid>=pc，阻塞 watch 该 key 直至变 None
  * （外部执行器认领、驱动、置 nextpc 后删除该条目 → 本端解除阻塞）。 */
 int kvlangHandoffExternalRwir(kvspace_t *kv, const char *vtid, const char *pc,
-                          kvlangRwirInst_t *inst);
+                              kvlangRwirInst_t *inst);
 /* kvlangNotInMyRwirCaps：opcode 是不在本 runtime myrwircaps 内、须经 def rwir 路由给能兑现它的
  * 其它 runtime 的 rwir。判据=读 kvspace /lib/<opcode> 存在 def rwir 路由头（能力唯一事实源）。 */
 bool kvlangNotInMyRwirCaps(kvspace_t *kv, const char *opcode);
@@ -533,9 +553,18 @@ void kvlangVthreadGet(kvspace_t *kv, const char *vtid, char **pc,
                       char **status);
 void kvlangVthreadPcGet(kvspace_t *kv, const char *vtid, char **pc);
 void kvlangVthreadStatusGet(kvspace_t *kv, const char *vtid, char **status);
-/* 读成员值到调用方缓冲；false = 键缺失 / None，超长直接 abort。 */
-bool kvlangVthreadMemberGetBuffer(kvspace_t *kv, const char *key, char *out,
-                               size_t cap);
+/* key 的 64 位地址（偏移量）。key 由调用方持有；off 是 key→地址的派生缓存。
+ * value 仍每步从 kvspace 读；缓存的只是寻址结果，丢了可按 key 重算。 */
+typedef struct {
+    kvspace_t *kvspace;
+    const char *key;
+    kvspaceRef_t off;
+    bool resolved;
+} kvspaceKeyOff;
+
+void kvspaceKeyOffBind(kvspaceKeyOff *ko, kvspace_t *kvspace, const char *key);
+/* 读值到调用方缓冲；false = 键缺失 / None，超长直接 abort。 */
+bool kvspaceKeyOffRead(kvspaceKeyOff *ko, char *out, size_t cap);
 int kvlangVthreadSet(kvspace_t *kv, const char *vtid, const char *pc,
                      const char *status);
 int kvlangVthreadSetDone(kvspace_t *kv, const char *vtid, const char *ret);
@@ -560,8 +589,9 @@ typedef struct {
     const char *pc;
     kvlangRwirInst_t *instruction;
     char **yield_pc;
-    const char *frame_root;   /* Borrowed for this instruction. */
-    const char *status_known; /* 本步开始前从 kvspace 读到的 ‥status（借用）；NULL = 未知 */
+    const char *frame_root; /* Borrowed for this instruction. */
+    const char *
+        status_known; /* 本步开始前从 kvspace 读到的 ‥status（借用）；NULL = 未知 */
     bool persist_failed;
 } kvlangFrame_t;
 
@@ -586,7 +616,7 @@ char *kvlangBuiltinResolveWriteSlot(kvspace_t *kv, const char *frame_root,
 /* 成员写的 base 尚无值 → 落空 stringkeymap 值（`/lib` 下跳过，见 rwir_kv.c）。 */
 /* 成员写（memitem）前置条件：memhead（base 容器值）必须已存在；缺则返回 -1 拒绝写入。 */
 int kvlangBuiltinCheckMemoryHead(kvspace_t *kv, const char *frame_root,
-                              const char *base);
+                                 const char *base);
 char *kvlangBuiltinResolveReadKey(kvspace_t *kv, const char *frame_root,
                                   const char *name, const kvlangXvalue_t *val);
 void kvlangDisplay(const kvlangXvalue_t *v,
@@ -608,17 +638,17 @@ char *kvlangKvcpuBootstrap(kvspace_t *kv, const char *vtid,
                            const char *funcname, const char *const *args,
                            int nargs);
 int kvlangKvcpuDynamicCall(kvspace_t *kv, const char *vtid, const char *pc,
-                       const char *funckey);
+                           const char *funckey);
 /* 创建 vthread（不运行），返回 vid（free）。运行由 RunVid 承接。vthread·create 用。 */
 char *kvlangVthreadSpawn(kvspace_t *kv, const char *funcname,
                          const char *const *args, int nargs);
 /* 按 vid 从持久化 pc 跑到结束（KVMODE_WATCH），返回终态/错误。vthread·run 用。 */
-int kvlangRuntimeRunVthreadId(kvspace_t *kv, const char *vid, char **ret, char *err,
-                        uint32_t err_cap);
+int kvlangRuntimeRunVthreadId(kvspace_t *kv, const char *vid, char **ret,
+                              char *err, uint32_t err_cap);
 /* run funcname 到结束（Spawn + RunVid），返回终态/错误。 */
 int kvlangRuntimeExecuteKvspace(kvspace_t *kv, const char *funcname,
-                           const char *const *args, int nargs, char **ret,
-                           char *err, uint32_t err_cap);
+                                const char *const *args, int nargs, char **ret,
+                                char *err, uint32_t err_cap);
 
 /* ── logx ──────────────────────────────────────────────────────────── */
 
