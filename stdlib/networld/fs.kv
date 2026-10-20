@@ -1,11 +1,13 @@
 // 欢迎加入kvspace世界
 // lib networld/fs —— 宿主文件系统的文本级工具（rwfunc，kv 源码）。
 // native rwir（字节级，runtime-rs）：size / read(p,start,off) / write(p,bytes)
-//   / append / list / del / mkdir / exists。本库在其上补文本级组合：
-//   readtext / writetext  文件 ↔ []char/utf32 文本（UTF-8 解码 / 编码往返）
-//   match                名字段 shell 通配（* 任意串、? 单字符）
-//   glob                 按通配展开路径
-//   grep                 逐行查找（文件或目录下匹配 glob 的成员）
+//   / append / rename / list / del / mkdir / exists / isutf8。本库在其上补文本级与路径级组合：
+//   readtext / writetext / appendtext  文件 ↔ []char/utf32 文本（UTF-8 解码 / 编码往返与追加）
+//   copyfile                          字节级整文件拷贝
+//   basename / dirname / ext / joinpath  路径分段与拼接
+//   match                             名字段 shell 通配（* 任意串、? 单字符）
+//   glob                              按通配展开路径
+//   scan / grep                       逐行查找（文件或目录下匹配 glob 的成员）
 // 文本约定：文件按 UTF-8 解码为 []char/utf32 后操作（只有定宽的 char/utf32 可
 // 索引 / 切片）；落盘再编码回 UTF-8。字节级 I/O 仍走 native rwir。
 
@@ -28,6 +30,103 @@ lib networld/fs {
 		char/utf8(t) -> u8
 		xv·reinterpret(u8, "[]uint8") -> bytes
 		networld/fs·write(p, bytes) -> n
+	}
+	// appendtext(p, t) -> n：文本按 UTF-8 追加到文件末尾，返回追加字节数（失败 -1）
+	rwfunc appendtext(p:[]char/utf32, t:[]char/utf32) -> (n:int64) {
+		char/utf8(t) -> u8
+		xv·reinterpret(u8, "[]uint8") -> bytes
+		networld/fs·append(p, bytes) -> n
+	}
+	// copyfile(src, dst) -> n：字节级整文件拷贝，返回写入字节数（源不存在/失败 -1）
+	rwfunc copyfile(src:[]char/utf32, dst:[]char/utf32) -> (n:int64) {
+		networld/fs·size(src) -> sz
+		if (sz < 0) {
+			-1 -> n
+		} else {
+			networld/fs·read(src, 0, sz) -> raw
+			networld/fs·write(dst, raw) -> n
+		}
+	}
+	// basename(p) -> name：路径末段（剥除末尾连续 '/'；无 '/' 原样；全 '/' 返 "/"）
+	rwfunc basename(p:[]char/utf32) -> (name:[]char/utf32) {
+		hi = string·len(p)
+		if (hi == 0) {
+			"" -> name
+		} else {
+			while (hi > 1) {
+				string·char(p, hi - 1) -> c
+				if (string·cmp(c, "/") != 0) {
+					break
+				}
+				hi = hi - 1
+			}
+			string·slice(p, 0, hi) -> trimmed
+			string·rfind(trimmed, "/") -> idx
+			if (idx < 0) {
+				trimmed -> name
+			} else {
+				if (idx == 0 && hi == 1) {
+					"/" -> name
+				} else {
+					string·slice(trimmed, idx + 1, hi) -> name
+				}
+			}
+		}
+	}
+	// dirname(p) -> dir：路径父目录（剥除末尾连续 '/' 后取最后一个 '/' 之前；无 '/' 返 "."；根返 "/"）
+	rwfunc dirname(p:[]char/utf32) -> (dir:[]char/utf32) {
+		hi = string·len(p)
+		if (hi == 0) {
+			"." -> dir
+		} else {
+			while (hi > 1) {
+				string·char(p, hi - 1) -> c
+				if (string·cmp(c, "/") != 0) {
+					break
+				}
+				hi = hi - 1
+			}
+			string·slice(p, 0, hi) -> trimmed
+			string·rfind(trimmed, "/") -> idx
+			if (idx < 0) {
+				"." -> dir
+			} else {
+				if (idx == 0) {
+					"/" -> dir
+				} else {
+					string·slice(trimmed, 0, idx) -> dir
+				}
+			}
+		}
+	}
+	// ext(p) -> e：文件扩展名（含前导 '.'，如 ".kv"；无 '.' 或末段以单 '.' 开头无后续 '.' 返 ""）
+	rwfunc ext(p:[]char/utf32) -> (e:[]char/utf32) {
+		networld/fs·basename(p) -> base
+		bl = string·len(base)
+		string·rfind(base, ".") -> idx
+		if (idx <= 0) {
+			"" -> e
+		} else {
+			string·slice(base, idx, bl) -> e
+		}
+	}
+	// joinpath(a, b) -> p：拼接两段路径（自动处理连接处单 '/'；一方为空则返另一方）
+	rwfunc joinpath(a:[]char/utf32, b:[]char/utf32) -> (p:[]char/utf32) {
+		if (string·empty(a)) {
+			b -> p
+		} else {
+			if (string·empty(b)) {
+				a -> p
+			} else {
+				string·trimsuffix(a, "/") -> a2
+				string·trimprefix(b, "/") -> b2
+				if (string·empty(a2)) {
+					"/" + b2 -> p
+				} else {
+					a2 + "/" + b2 -> p
+				}
+			}
+		}
 	}
 	// match(name, pat) -> b：名字段通配匹配（* 任意串、? 单字符，其余按字面）
 	rwfunc match(name:[]char/utf32, pat:[]char/utf32) -> (b:bool) {
@@ -163,8 +262,8 @@ lib networld/fs {
 						string·concat(hits, h) -> hits
 					}
 				}
-					i = i + 1
-				}
+				i = i + 1
 			}
 		}
+	}
 }

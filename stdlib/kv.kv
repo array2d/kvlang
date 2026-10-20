@@ -1,6 +1,6 @@
 // 欢迎加入kvspace世界
-// lib kvspace —— KV 空间便利库。native rwir：kvspace·get/set/del/deltree/list/listlen；
-// rwfunc 补充：has（存在检测）、get_or（缺省回退）、set_default（幂等写）。
+// lib kvspace —— KV 空间便利库。native rwir：kvspace·get/set/del/deltree/cp/cpdir/cplist/listlen/listat；
+// rwfunc 补充：has（存在检测）、get_or（缺省回退）、set_default（幂等写）、members（折叠孪生目录条目）、count（折叠后成员数）。
 // /___kv_stdlib_null___ 为内部 sentinel 路径，用户不得写入。
 
 lib kvspace {
@@ -79,5 +79,10 @@ lib kvspace {
 			}
 			i = i + 1
 		}
+	}
+	// count(path) -> n：统计目录 path 下折叠同名孪生条目后的直接成员个数。
+	rwfunc count(path:[]char/utf32) -> (n:int64) {
+		ms:[int64]·[]char/utf32 = {}
+		kvspace·members(path) -> (ms, n)
 	}
 }
