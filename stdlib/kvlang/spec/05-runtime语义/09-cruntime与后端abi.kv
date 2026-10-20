@@ -95,8 +95,8 @@ kvspaceNewPtr / NewChar / NewBool / NewInt64 / NewFloat64
 
 符号清单的权威来源是**构建产物**——`nm -D --defined-only runtime/build/libkvlang_runtime.so | grep
 '^kvlang'`。本文只约定各模块的语义与 ABI 分组，不抄清单（抄清单必漂移）：`kvlangRuntime*` 执行入口、
-`kvlangKvcpu*` 取指-解码-执行循环、`kvlangCtl*` 控制流原语、`kvlangBuiltin*` native 算子（myrwircaps）、
-`kvlangKv*` kvspace ABI 封装、`kvlangRwirext*`/`kvlangDefRwir` 扩展宿主 ABI、`kvlangXvalue*`/
+`kvlangKvcpu*` 取指-解码-执行循环、`kvlangControl*` 控制流原语、`kvlangBuiltin*` native 算子（myrwircaps）、
+`kvlangKvspace*` kvspace ABI 封装、`kvlangRwirext*`/`kvlangDefRwir` 扩展宿主 ABI、`kvlangXvalue*`/
 `kvlangLangtype*` 值语义，以及 **def langtype（匹配）与 langtype（真实类型）**两组能力。
 	"#### -> /lib/kvlang/spec/runtime语义/cruntime与后端abi
 }

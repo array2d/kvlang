@@ -9,7 +9,7 @@ static int ndarray_shape_guard(kvlangFrame_t *f, const char *op,
     if (kx.ndim > 0)
         return 0;
     if (kvlangKindIsMap(kx.kind))
-        return kvlangBuiltinSetErr(f,
+        return kvlangBuiltinSetError(f,
                                    "TypeError: %s: container %s has no shape; "
                                    "use kvspace·listlen for member count",
                                    op, kx.kind);
@@ -24,12 +24,12 @@ int kvlangBuiltinNdarrayNumel(kvlangFrame_t *f) {
         kvlangLangtypeParse(h.langtype, h.langtype_len, &kx);
         if (kvlangKindIsMap(kx.kind)) {
             char *fr = kvlangKeytreeFrameRoot(f->pc);
-            char *base = kvlangBuiltinResolveWriteSlot(f->kv, fr,
-                                                        f->inst->reads[0].name);
+            char *base = kvlangBuiltinResolveWriteSlot(f->kvspace, fr,
+                                                        f->instruction->reads[0].name);
             char *dir = kvlangKeytreeMember(base, "");
             char **names = NULL;
             int count = 0;
-            kvlangKvList(f->kv, dir, false, false, &names, &count);
+            kvlangKvspaceList(f->kvspace, dir, false, false, &names, &count);
             for (int i = 0; i < count; i++)
                 free(names[i]);
             free(names);

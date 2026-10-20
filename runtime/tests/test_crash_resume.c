@@ -14,25 +14,25 @@ int main(void) {
     if (pid < 0)
         return 1;
     if (pid == 0) {
-        kvlangKv_t *kv = kvlangKvConnect(dsn);
+        kvspace_t *kv = kvlangKvspaceConnect(dsn);
         if (!kv)
             _exit(2);
         char key[KV_KEY_MAX];
         kvlangKeytreeVthreadPc("vt0", key, sizeof key);
-        int rc = kvlangKvSetChar(kv, key, "/lib/f/[2,0]");
+        int rc = kvlangKvspaceSetChar(kv, key, "/lib/f/[2,0]");
         kvlangXvalue_t value;
         kvlangXvalueNewInt64(&value, 73);
         kvlangKvPair_t pair = {"/value", value};
         char err[128];
         if (rc == 0)
-            rc = kvlangKvSet(kv, &pair, 1, err, sizeof err);
+            rc = kvlangKvspaceSet(kv, &pair, 1, err, sizeof err);
         kvlangXvalueFree(&value);
         _exit(rc == 0 ? 0 : 3);
     }
     int status = 0;
     if (waitpid(pid, &status, 0) != pid || !WIFEXITED(status) || WEXITSTATUS(status))
         return 1;
-    kvlangKv_t *kv = kvlangKvConnect(dsn);
+    kvspace_t *kv = kvlangKvspaceConnect(dsn);
     if (!kv)
         return 1;
     char *pc = NULL;
@@ -42,16 +42,16 @@ int main(void) {
     kvlangXvalue_t value;
     kvlangXvalueZero(&value);
     kvspaceHead_t head;
-    if (kvlangKvGetOne(kv, "/value", &value) != 0 ||
+    if (kvlangKvspaceGetOne(kv, "/value", &value) != 0 ||
         kvlangXvalueHead(&value, &head) != 0 || head.body_len != 8)
         ok = 0;
     else {
-        const uint8_t *body = value.data + head.body_offset;
+        const uint8_t *body = value.bytes + head.body_offset;
         ok = ok && body[0] == 73;
         for (int i = 1; i < 8; i++)
             ok = ok && body[i] == 0;
     }
     kvlangXvalueFree(&value);
-    kvlangKvDisconnect(kv);
+    kvlangKvspaceDisconnect(kv);
     return ok ? 0 : 1;
 }

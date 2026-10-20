@@ -17,28 +17,28 @@
  * 多态靠显式 "|" 枚举（如 int8|int16|int32|int64）。
  */
 
-static bool kind_eq(const char *s, size_t len, const char *k) {
+static bool kind_equal(const char *s, size_t len, const char *k) {
     size_t kl = strlen(k);
     return len == kl && memcmp(s, k, len) == 0;
 }
 
 /* 精确 kind 集合（对齐 runtime kind 常量，不含 None）。 */
 static bool known_kind(const char *s, size_t len) {
-    return kind_eq(s, len, KVSPACE_KIND_BOOL) ||
-           kind_eq(s, len, KVSPACE_KIND_INT8) || kind_eq(s, len, KVSPACE_KIND_INT16) ||
-           kind_eq(s, len, KVSPACE_KIND_INT32) || kind_eq(s, len, KVSPACE_KIND_INT64) ||
-           kind_eq(s, len, KVSPACE_KIND_UINT8) || kind_eq(s, len, KVSPACE_KIND_UINT16) ||
-           kind_eq(s, len, KVSPACE_KIND_UINT32) || kind_eq(s, len, KVSPACE_KIND_UINT64) ||
-           kind_eq(s, len, KVSPACE_KIND_FLOAT32) || kind_eq(s, len, KVSPACE_KIND_FLOAT64) ||
-           kind_eq(s, len, KVSPACE_KIND_FLOAT16) || kind_eq(s, len, KVSPACE_KIND_BFLOAT16) ||
-           kind_eq(s, len, KVSPACE_KIND_FLOAT8_E4M3) || kind_eq(s, len, KVSPACE_KIND_FLOAT8_E5M2) ||
-           kind_eq(s, len, KVSPACE_KIND_CHAR) || kind_eq(s, len, KVSPACE_KIND_CHAR_UTF8) ||
-           kind_eq(s, len, KVSPACE_KIND_CHAR_ASCII) ||
-           kind_eq(s, len, KVSPACE_KIND_MAP) ||
-           kind_eq(s, len, KVSPACE_KIND_RWIR) || kind_eq(s, len, KVSPACE_KIND_RWFUNC) ||
-           kind_eq(s, len, KVSPACE_KIND_SCOPE) || kind_eq(s, len, KVSPACE_KIND_DEF_STRUCT) ||
-           kind_eq(s, len, KVSPACE_KIND_TIME) ||
-           kind_eq(s, len, KVSPACE_KIND_DURATION);
+    return kind_equal(s, len, KVSPACE_KIND_BOOL) ||
+           kind_equal(s, len, KVSPACE_KIND_INT8) || kind_equal(s, len, KVSPACE_KIND_INT16) ||
+           kind_equal(s, len, KVSPACE_KIND_INT32) || kind_equal(s, len, KVSPACE_KIND_INT64) ||
+           kind_equal(s, len, KVSPACE_KIND_UINT8) || kind_equal(s, len, KVSPACE_KIND_UINT16) ||
+           kind_equal(s, len, KVSPACE_KIND_UINT32) || kind_equal(s, len, KVSPACE_KIND_UINT64) ||
+           kind_equal(s, len, KVSPACE_KIND_FLOAT32) || kind_equal(s, len, KVSPACE_KIND_FLOAT64) ||
+           kind_equal(s, len, KVSPACE_KIND_FLOAT16) || kind_equal(s, len, KVSPACE_KIND_BFLOAT16) ||
+           kind_equal(s, len, KVSPACE_KIND_FLOAT8_E4M3) || kind_equal(s, len, KVSPACE_KIND_FLOAT8_E5M2) ||
+           kind_equal(s, len, KVSPACE_KIND_CHAR) || kind_equal(s, len, KVSPACE_KIND_CHAR_UTF8) ||
+           kind_equal(s, len, KVSPACE_KIND_CHAR_ASCII) ||
+           kind_equal(s, len, KVSPACE_KIND_MAP) ||
+           kind_equal(s, len, KVSPACE_KIND_RWIR) || kind_equal(s, len, KVSPACE_KIND_RWFUNC) ||
+           kind_equal(s, len, KVSPACE_KIND_SCOPE) || kind_equal(s, len, KVSPACE_KIND_DEF_STRUCT) ||
+           kind_equal(s, len, KVSPACE_KIND_TIME) ||
+           kind_equal(s, len, KVSPACE_KIND_DURATION);
 }
 
 /* structref = "/" path：指向 /lib 下 struct 定义节点的完整路径（实例 kind / 字段类型）。
@@ -130,7 +130,7 @@ bool kvlangLangtypeValid(const char *expr) {
 /* any/kind 判定（kind 为运行时实际落盘 kind 串）。 */
 static bool base_match(const char *s, size_t len, const char *kind) {
     if (len == 3 && strncmp(s, "any", 3) == 0) return true;
-    return kind_eq(s, len, kind);
+    return kind_equal(s, len, kind);
 }
 
 /* 定长元（整数或 "."）匹配单轴：. 任意长，整数须精确相等。 */

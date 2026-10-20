@@ -1,12 +1,12 @@
 #include "rwir_internal.h"
 
-static char *struct_field_type(kvlangKv_t *kv, const char *base,
+static char *struct_field_type(kvspace_t *kv, const char *base,
                                const char *fname) {
     char key[KV_KEY_MAX];
-    kvlangKeyFmt(key, sizeof key, "%s/%s", base, fname);
+    kvlangKeyFormat(key, sizeof key, "%s/%s", base, fname);
     kvlangXvalue_t value;
     kvlangXvalueZero(&value);
-    kvlangKvGetOne(kv, key, &value);
+    kvlangKvspaceGetOne(kv, key, &value);
     if (kvlangXvalueNone(&value) ||
         strcmp(kvlangXvalueKind(&value), KVSPACE_KIND_DEF_LANGTYPE) != 0) {
         kvlangXvalueFree(&value);
@@ -26,16 +26,16 @@ int kvlangBuiltinStructNew(kvlangFrame_t *f) {
     int n = kvlangBuiltinReadInputs(f, in, 64);
     if (n < 1) {
         kvlangBuiltinFreeInputs(in, n);
-        return kvlangBuiltinSetErr(f, "TypeError: struct.new requires a type");
+        return kvlangBuiltinSetError(f, "TypeError: struct.new requires a type");
     }
     char *ref = kvlangXvalueValueString(&in[0]);
     kvlangXvalue_t proto;
     kvlangXvalueZero(&proto);
-    kvlangKvGetOne(f->kv, ref, &proto);
+    kvlangKvspaceGetOne(f->kvspace, ref, &proto);
     if (kvlangXvalueNone(&proto) ||
         strcmp(kvlangXvalueKind(&proto), KVSPACE_KIND_DEF_STRUCT) != 0) {
         int e =
-            kvlangBuiltinSetErr(f, "TypeError: %s is not a struct type", ref);
+            kvlangBuiltinSetError(f, "TypeError: %s is not a struct type", ref);
         kvlangXvalueFree(&proto);
         free(ref);
         kvlangBuiltinFreeInputs(in, n);
@@ -46,25 +46,25 @@ int kvlangBuiltinStructNew(kvlangFrame_t *f) {
     char err[256];
     int rc = 0;
     char *fr = kvlangKeytreeFrameRoot(f->pc);
-    for (int w = 0; w < f->inst->nw && rc == 0; w++) {
+    for (int w = 0; w < f->instruction->write_count && rc == 0; w++) {
         char *ok =
-            kvlangBuiltinResolveWriteSlot(f->kv, fr, f->inst->writes[w].name);
-        if (kvlangKvCpList(f->kv, ref, ok, err, sizeof err) != 0) {
-            rc = kvlangBuiltinSetErr(f, "%s", err);
+            kvlangBuiltinResolveWriteSlot(f->kvspace, fr, f->instruction->writes[w].name);
+        if (kvlangKvspaceCopyList(f->kvspace, ref, ok, err, sizeof err) != 0) {
+            rc = kvlangBuiltinSetError(f, "%s", err);
             free(ok);
             break;
         }
         kvlangXvalue_t mark;
         kvlangXvalueNewTlv(&mark, ref, (const uint8_t *)"", 0, 1);
         kvlangKvPair_t p0 = {ok, mark};
-        if (kvlangKvSet(f->kv, &p0, 1, err, sizeof err) != 0)
-            rc = kvlangBuiltinSetErr(f, "%s", err);
+        if (kvlangKvspaceSet(f->kvspace, &p0, 1, err, sizeof err) != 0)
+            rc = kvlangBuiltinSetError(f, "%s", err);
         kvlangXvalueFree(&mark);
         for (int i = 1; i + 1 < n && rc == 0; i += 2) {
             char *fname = kvlangXvalueValueString(&in[i]);
-            char *ftype = struct_field_type(f->kv, ref, fname);
+            char *ftype = struct_field_type(f->kvspace, ref, fname);
             if (!ftype) {
-                rc = kvlangBuiltinSetErr(
+                rc = kvlangBuiltinSetError(
                     f, "TypeError: struct %s has no field %s", ref, fname);
                 free(fname);
                 break;
@@ -80,10 +80,10 @@ int kvlangBuiltinStructNew(kvlangFrame_t *f) {
                                ? kvlangLangtypeMatch(fx, vk, vkx.ndim, vkx.dims)
                                : true;
             if (ftype[0] == '*' && !kvlangXvalueNone(&in[i + 1]) &&
-                !xh_is_ptr(in[i + 1].data))
+                !xh_is_ptr(in[i + 1].bytes))
                 type_ok = false;
             if (ftype[0] && !type_ok) {
-                rc = kvlangBuiltinSetErr(
+                rc = kvlangBuiltinSetError(
                     f, "TypeError: field %s: expected %s, got %s", fname, ftype,
                     vk[0] ? vk : "None");
                 free(ftype);
@@ -92,8 +92,8 @@ int kvlangBuiltinStructNew(kvlangFrame_t *f) {
             }
             char *mk = kvlangKeytreeMember(ok, fname);
             kvlangKvPair_t p = {mk, in[i + 1]};
-            if (kvlangKvSet(f->kv, &p, 1, err, sizeof err) != 0)
-                rc = kvlangBuiltinSetErr(f, "%s", err);
+            if (kvlangKvspaceSet(f->kvspace, &p, 1, err, sizeof err) != 0)
+                rc = kvlangBuiltinSetError(f, "%s", err);
             free(mk);
             free(ftype);
             free(fname);

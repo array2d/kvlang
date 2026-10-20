@@ -1,7 +1,7 @@
 #include "kvcpu_internal.h"
 
 /* 找末个成员分隔符（·，多字节），对齐 strrchr('.') 的单字节旧语义。 */
-static const char *rfind_sep(const char *s) {
+static const char *rfind_separator(const char *s) {
     const char *found = NULL, *p = s;
     while ((p = strstr(p, MEMBER_SEP)) != NULL) {
         found = p;
@@ -12,10 +12,10 @@ static const char *rfind_sep(const char *s) {
 
 /* goto/br 目标：layout 已把 label 解析为 int64 irseq（≥1）。非 int64 / 越界返回 -1。 */
 static int irseq_of(const kvlangParam_t *p) {
-    if (kvlangXvalueNone(&p->val) ||
-        !kvlangXvalueKindIs(&p->val, KVSPACE_KIND_INT64))
+    if (kvlangXvalueNone(&p->value) ||
+        !kvlangXvalueKindIs(&p->value, KVSPACE_KIND_INT64))
         return -1;
-    int64_t n = kvlangScalarI64(kvlangXvalueScalar(&p->val));
+    int64_t n = kvlangScalarI64(kvlangXvalueScalar(&p->value));
     if (n < 1 || n > 0x7fffffff)
         return -1;
     return (int)n;
@@ -29,8 +29,8 @@ static int jump_to(kvlangFrame_t *f, const kvlangParam_t *target, const char *op
         snprintf(msg, sizeof msg,
                  "RuntimeError: %s target is not an int64 irseq: %s (kind=%s)",
                  op, target->name ? target->name : "",
-                 kvlangXvalueKind(&target->val));
-        kvlangVthreadSetError(f->kv, f->vtid, f->pc, msg);
+                 kvlangXvalueKind(&target->value));
+        kvlangVthreadSetError(f->kvspace, f->vthread_id, f->pc, msg);
         return -1;
     }
     /* Reuse this instruction's frame root. */
@@ -40,7 +40,7 @@ static int jump_to(kvlangFrame_t *f, const kvlangParam_t *target, const char *op
     char *np = kvlangKeytreeIrseqPc(fr, irseq);
     free(owned);
     kvlangVthreadAdvance(f, np, "running");
-    kvlangLogDebug("[%s] %s → %s", f->vtid, op, np);
+    kvlangLogDebug("[%s] %s → %s", f->vthread_id, op, np);
     free(np);
     return 0;
 }
@@ -63,13 +63,13 @@ static char *frame_slot_key(const char *frame_root, const char *slot) {
     if (strncmp(slot, MEMBER_SEP, MEMBER_SEP_LEN) == 0)
         return NULL;
     char *stk = kvlangKeytreeStack(frame_root);
-    char *r = kvlangAstr("%s%s", stk, slot);
+    char *r = kvlangStringFormat("%s%s", stk, slot);
     free(stk);
     return r;
 }
 
 /* Resolve a caller operand to its KVSpace key. */
-static char *resolve_read_path(kvlangKv_t *kv, const char *frame_root,
+static char *resolve_read_path(kvspace_t *kv, const char *frame_root,
                                const char *name) {
     if (is_literal(name))
         return NULL;
@@ -78,7 +78,7 @@ static char *resolve_read_path(kvlangKv_t *kv, const char *frame_root,
     return frame_slot_key(frame_root, name);
 }
 
-static int handle_return(kvlangKv_t *kv, const char *vtid, const char *pc,
+static int handle_return(kvspace_t *kv, const char *vtid, const char *pc,
                          char **out_next) {
     *out_next = NULL;
     char *fr = kvlangKeytreeFrameRoot(pc);
@@ -86,10 +86,10 @@ static int handle_return(kvlangKv_t *kv, const char *vtid, const char *pc,
     char *next = NULL;
     if (d > 1) {
         char rk[KV_KEY_MAX];
-        kvlangKeytreeFrameReturnpc(fr, rk, sizeof rk);
+        kvlangKeytreeFrameReturnPc(fr, rk, sizeof rk);
         kvlangXvalue_t v;
         kvlangXvalueZero(&v);
-        kvlangKvGetOne(kv, rk, &v);
+        kvlangKvspaceGetOne(kv, rk, &v);
         if (!kvlangXvalueNone(&v))
             next = kvlangXvalueValueString(&v);
         kvlangXvalueFree(&v);
@@ -110,7 +110,7 @@ static int handle_return(kvlangKv_t *kv, const char *vtid, const char *pc,
     return 0;
 }
 
-static void param_decl_type(kvlangKv_t *kv, const char *func_key, int x,
+static void param_decl_type(kvspace_t *kv, const char *func_key, int x,
                             char *lt, size_t cap);
 
 #define MAX_BIND_PAIRS (MAX_PARAMS * 5)
@@ -124,9 +124,9 @@ static int add_param_binding(kvlangKvPair_t *pairs, int *np,
         type++;
     if (!type[0])
         return -1;
-    char *arg_key = kvlangAstr("%s/%sarg[0,%d]", frame_root,
+    char *arg_key = kvlangStringFormat("%s/%sarg[0,%d]", frame_root,
                                RUNTIME_MEMBER_SEP, x);
-    char *slot_key = kvlangAstr("%s/[0,%d]", frame_root, x);
+    char *slot_key = kvlangStringFormat("%s/[0,%d]", frame_root, x);
     kvlangXvalue_t arg_ptr, frame_ptr;
     kvlangXvalueNewPtr(&arg_ptr, type, value_key);
     kvlangXvalueNewPtr(&frame_ptr, type, arg_key);
@@ -143,17 +143,17 @@ static int add_param_binding(kvlangKvPair_t *pairs, int *np,
 }
 
 /* Create the callee frame and return its entry PC. */
-static char *handle_call(kvlangKv_t *kv, const char *pc,
+static char *handle_call(kvspace_t *kv, const char *pc,
                          kvlangRwirInst_t *inst) {
     char vtid_b[KV_KEY_MAX];
-    const char *vtid = kvlangKeytreeVtidFromPc(pc, vtid_b, sizeof vtid_b);
+    const char *vtid = kvlangKeytreeVthreadIdFromPc(pc, vtid_b, sizeof vtid_b);
     const char *fn = inst->reads[0].name;
     char *pkg = strdup("");
     char *name = strdup(fn);
     const char *lp = "/lib/";
     if (strncmp(fn, lp, 5) == 0) {
         const char *rest = fn + 5;
-        const char *dot = rfind_sep(rest);
+        const char *dot = rfind_separator(rest);
         if (dot) {
             free(pkg);
             pkg = strndup(rest, (size_t)(dot - rest));
@@ -164,7 +164,7 @@ static char *handle_call(kvlangKv_t *kv, const char *pc,
             name = strdup(rest);
         }
     } else {
-        const char *dot = rfind_sep(fn);
+        const char *dot = rfind_separator(fn);
         if (dot) {
             free(pkg);
             pkg = strndup(fn, (size_t)(dot - fn));
@@ -178,11 +178,11 @@ static char *handle_call(kvlangKv_t *kv, const char *pc,
                 /* 函数目录在帧的 ‥lib 槽（/lib/aaa/bbb/math·double/）：由此取调用者 pkg。 */
                 char *stk = kvlangKeytreeStack(ff);
                 char lk[KV_KEY_MAX];
-                kvlangKeyFmt(lk, sizeof lk, "%s%s", stk, SEG_LIB);
+                kvlangKeyFormat(lk, sizeof lk, "%s%s", stk, SEG_LIB);
                 free(stk);
                 kvlangXvalue_t lv;
                 kvlangXvalueZero(&lv);
-                kvlangKvGetOne(kv, lk, &lv);
+                kvlangKvspaceGetOne(kv, lk, &lv);
                 char *funcdir =
                     kvlangXvalueNone(&lv) ? NULL : kvlangXvalueValueString(&lv);
                 kvlangXvalueFree(&lv);
@@ -191,15 +191,15 @@ static char *handle_call(kvlangKv_t *kv, const char *pc,
                     size_t rl = strlen(rel);
                     if (rl > 0 && rel[rl - 1] == '/')
                         rel[rl - 1] = '\0'; // 剥尾 /
-                    const char *sep = rfind_sep(rel);
+                    const char *sep = rfind_separator(rel);
                     if (sep) {
                         char *cand_pkg = strndup(rel, (size_t)(sep - rel));
                         char *cand = kvlangKeytreeLibFunc(cand_pkg, fn);
                         char sk[KV_KEY_MAX];
-                        kvlangKeyFmt(sk, sizeof sk, "%s/[0,0]", cand);
+                        kvlangKeyFormat(sk, sizeof sk, "%s/[0,0]", cand);
                         kvlangXvalue_t sv;
                         kvlangXvalueZero(&sv);
-                        kvlangKvGetOne(kv, sk, &sv);
+                        kvlangKvspaceGetOne(kv, sk, &sv);
                         bool ok = !kvlangXvalueNone(&sv) &&
                                   kvlangXvalueKindIs(&sv, KVSPACE_KIND_RWFUNC);
                         kvlangXvalueFree(&sv);
@@ -218,21 +218,21 @@ static char *handle_call(kvlangKv_t *kv, const char *pc,
     }
     char *func_key = kvlangKeytreeLibFunc(pkg, name);
     char func_dir[KV_KEY_MAX];
-    kvlangKeyFmt(func_dir, sizeof func_dir, "%s/", func_key);
+    kvlangKeyFormat(func_dir, sizeof func_dir, "%s/", func_key);
 
     char sig_key[KV_KEY_MAX];
-    kvlangKeyFmt(sig_key, sizeof sig_key, "%s[0,0]", func_dir);
+    kvlangKeyFormat(sig_key, sizeof sig_key, "%s[0,0]", func_dir);
     kvlangXvalue_t sig;
     kvlangXvalueZero(&sig);
-    kvlangKvGetOne(kv, sig_key, &sig);
+    kvlangKvspaceGetOne(kv, sig_key, &sig);
     if (kvlangXvalueNone(&sig) ||
         !kvlangXvalueKindIs(&sig, KVSPACE_KIND_RWFUNC)) {
         /* 按 xvalue 的 kind 精确区分缺 rwir 还是缺 rwfunc：
-         * 到这里说明 opcode 已被 notinmyrwircaps 判否（/lib/<op> 非 def rwir 路由头）。 */
+         * 到这里说明 opcode 已被 kvlangNotInMyRwirCaps 判否（/lib/<op> 非 def rwir 路由头）。 */
         char *rk = kvlangKeytreeRwir(fn);
         kvlangXvalue_t rv;
         kvlangXvalueZero(&rv);
-        kvlangKvGetOne(kv, rk, &rv);
+        kvlangKvspaceGetOne(kv, rk, &rv);
         char msg[256];
         if (!kvlangXvalueNone(&rv) &&
             kvlangXvalueKindIs(&rv, KVSPACE_KIND_DEF_RWIR))
@@ -248,7 +248,7 @@ static char *handle_call(kvlangKv_t *kv, const char *pc,
         kvlangVthreadSetError(kv, vtid, pc, msg);
         goto fail;
     }
-    const uint8_t *sbody = xh_body(sig.data);
+    const uint8_t *sbody = xh_body(sig.bytes);
     int nr = sbody[0] | (sbody[1] << 8);
     int nw = sbody[2] | (sbody[3] << 8);
     if (nr > MAX_PARAMS || nw > MAX_PARAMS) {
@@ -258,17 +258,17 @@ static char *handle_call(kvlangKv_t *kv, const char *pc,
 
     /* rwfunc 不做派发期位置化读参校验：类型随命名参数键 funcDir/<name>（Ptr 的
      * target_langtype）承载，函数体在帧内按名解析、各 native 算子在使用点自校验操作数
-     * kind。位置化的有序签名校验（join_read_sig+check_read_types）是 rwir 的需求——
-     * 跨 runtime 队列按位置收参，故仅 def rwir 路由路径保留（见本文件 m->def_sig）。 */
+     * kind。位置化的有序签名校验（join_read_signature+check_read_types）是 rwir 的需求——
+     * 跨 runtime 队列按位置收参，故仅 def rwir 路由路径保留（见本文件 m->def_read_sig）。 */
 
     char *caller_fr = kvlangKeytreeFrameRoot(pc);
     int d = kvlangKeytreeFrameNum(pc);
     char *frame_root = kvlangKeytreeFrameAt(vtid, d + 1);
     char err[256];
-    kvlangKvDelTree(kv, frame_root, err, sizeof err);
+    kvlangKvspaceDeleteTree(kv, frame_root, err, sizeof err);
     char *stack_fr = kvlangKeytreeStack(frame_root);
-    if (kvlangKvMkindex(kv, stack_fr, 0, err, sizeof err) != 0 ||
-        kvlangKvExtIndex(kv, stack_fr, func_dir, err, sizeof err) != 0) {
+    if (kvlangKvspaceMakeIndex(kv, stack_fr, 0, err, sizeof err) != 0 ||
+        kvlangKvspaceExtensionIndex(kv, stack_fr, func_dir, err, sizeof err) != 0) {
         kvlangVthreadSetError(kv, vtid, pc, err);
         free(caller_fr);
         free(stack_fr);
@@ -278,13 +278,13 @@ static char *handle_call(kvlangKv_t *kv, const char *pc,
 
     /* 系统变量 */
     char npc[KV_KEY_MAX], retpc[KV_KEY_MAX], callpc[KV_KEY_MAX];
-    if (kvlangRwirNextPcBuf(pc, npc, sizeof npc) == 0)
+    if (kvlangRwirNextPcBuffer(pc, npc, sizeof npc) == 0)
         kvlangDie("next pc exceeds %zu bytes", sizeof npc);
-    kvlangKeytreeFrameReturnpc(frame_root, retpc, sizeof retpc);
-    kvlangKeytreeFrameCallpc(frame_root, callpc, sizeof callpc);
+    kvlangKeytreeFrameReturnPc(frame_root, retpc, sizeof retpc);
+    kvlangKeytreeFrameCallPc(frame_root, callpc, sizeof callpc);
     char *ep = kvlangKeytreeEntryPc(frame_root);
     char seglib[KV_KEY_MAX];
-    kvlangKeyFmt(seglib, sizeof seglib, "%s%s", stack_fr, SEG_LIB);
+    kvlangKeyFormat(seglib, sizeof seglib, "%s%s", stack_fr, SEG_LIB);
     kvlangXvalue_t v_npc, v_ep, v_fn;
     kvlangXvalueZero(&v_npc);
     kvlangXvalueZero(&v_ep);
@@ -296,7 +296,7 @@ static char *handle_call(kvlangKv_t *kv, const char *pc,
         {retpc, v_npc}, {callpc, v_ep}, {seglib, v_fn}};
     int sys_rc = kvlangXvalueNone(&v_npc) || kvlangXvalueNone(&v_ep) ||
                  kvlangXvalueNone(&v_fn) ? -1 :
-                 kvlangKvSet(kv, sys, 3, err, sizeof err);
+                 kvlangKvspaceSet(kv, sys, 3, err, sizeof err);
     kvlangXvalueFree(&v_npc);
     kvlangXvalueFree(&v_ep);
     kvlangXvalueFree(&v_fn);
@@ -309,7 +309,7 @@ static char *handle_call(kvlangKv_t *kv, const char *pc,
     int np = 0;
     int bind_error = 0;
     for (int i = 0; i < nr && !bind_error; i++) {
-        if (i + 1 >= inst->nr) {
+        if (i + 1 >= inst->read_count) {
             snprintf(err, sizeof err, "TypeError: missing read argument %d", i + 1);
             bind_error = 1;
             break;
@@ -317,13 +317,13 @@ static char *handle_call(kvlangKv_t *kv, const char *pc,
         kvlangParam_t *arg = &inst->reads[i + 1];
         char lt[256] = {0};
         param_decl_type(kv, func_key, -(i + 1), lt, sizeof lt);
-        bool concrete = !arg->address && !kvlangXvalueNone(&arg->val) &&
-                        !kvlangXvalueKindIs(&arg->val, KVSPACE_KIND_RWIR) &&
-                        !kvlangXvalueKindIs(&arg->val, KVSPACE_KIND_RWFUNC);
+        bool concrete = !arg->is_address && !kvlangXvalueNone(&arg->value) &&
+                        !kvlangXvalueKindIs(&arg->value, KVSPACE_KIND_RWIR) &&
+                        !kvlangXvalueKindIs(&arg->value, KVSPACE_KIND_RWFUNC);
         bool literal = concrete || is_literal(arg->name);
         char *rk = literal ? NULL : resolve_read_path(kv, caller_fr, arg->name);
         if (literal) {
-            rk = kvlangAstr("%s/._lit%d", frame_root, i);
+            rk = kvlangStringFormat("%s/._lit%d", frame_root, i);
             if (concrete) {
                 if (np >= MAX_BIND_PAIRS) {
                     free(rk);
@@ -333,15 +333,15 @@ static char *handle_call(kvlangKv_t *kv, const char *pc,
                 }
                 kvlangXvalue_t copy;
                 kvlangXvalueZero(&copy);
-                copy.data = malloc(arg->val.len);
-                if (!copy.data) {
+                copy.bytes = malloc(arg->value.length);
+                if (!copy.bytes) {
                     free(rk);
                     snprintf(err, sizeof err, "OutOfMemory: argument %d", i + 1);
                     bind_error = 1;
                     break;
                 }
-                memcpy(copy.data, arg->val.data, arg->val.len);
-                copy.len = arg->val.len;
+                memcpy(copy.bytes, arg->value.bytes, arg->value.length);
+                copy.length = arg->value.length;
                 pairs[np++] = (kvlangKvPair_t){strdup(rk), copy};
             }
         }
@@ -354,7 +354,7 @@ static char *handle_call(kvlangKv_t *kv, const char *pc,
     for (int i = 0; i < nw && !bind_error; i++) {
         char lt[256] = {0};
         param_decl_type(kv, func_key, i + 1, lt, sizeof lt);
-        char *wk = i < inst->nw ?
+        char *wk = i < inst->write_count ?
             resolve_read_path(kv, caller_fr, inst->writes[i].name) : NULL;
         if (add_param_binding(pairs, &np, frame_root, i + 1, lt, wk) != 0) {
             snprintf(err, sizeof err, "TypeError: cannot bind write argument %d", i + 1);
@@ -362,10 +362,10 @@ static char *handle_call(kvlangKv_t *kv, const char *pc,
         }
         free(wk);
     }
-    int wrc = bind_error ? -1 : np > 0 ? kvlangKvSet(kv, pairs, np, err, sizeof err) : 0;
+    int wrc = bind_error ? -1 : np > 0 ? kvlangKvspaceSet(kv, pairs, np, err, sizeof err) : 0;
     for (int i = 0; i < np; i++) {
         free(pairs[i].key);
-        kvlangXvalueFree(&pairs[i].val);
+        kvlangXvalueFree(&pairs[i].value);
     }
     if (wrc != 0) {
         kvlangVthreadSetError(kv, vtid, pc, err);
@@ -382,7 +382,7 @@ static char *handle_call(kvlangKv_t *kv, const char *pc,
     return ep;
 
 fail_frame:
-    kvlangKvDelTree(kv, frame_root, err, sizeof err);
+    kvlangKvspaceDeleteTree(kv, frame_root, err, sizeof err);
     free(caller_fr);
     free(stack_fr);
     free(ep);
@@ -396,13 +396,13 @@ fail:
 }
 
 /* Read the declared target type; the argument value may be None. */
-static void param_decl_type(kvlangKv_t *kv, const char *func_key, int x,
+static void param_decl_type(kvspace_t *kv, const char *func_key, int x,
                             char *lt, size_t cap) {
     char pk[KV_KEY_MAX];
-    kvlangKeyFmt(pk, sizeof pk, "%s.[0,%d]", func_key, x);
+    kvlangKeyFormat(pk, sizeof pk, "%s.[0,%d]", func_key, x);
     kvlangXvalue_t dv;
     kvlangXvalueZero(&dv);
-    kvlangKvGetOne(kv, pk, &dv);
+    kvlangKvspaceGetOne(kv, pk, &dv);
     if (!kvlangXvalueNone(&dv)) {
         const uint8_t *ab = xh_body_of(&dv);
         int32_t al = xh_content_len_of(&dv);
@@ -420,8 +420,8 @@ static void param_decl_type(kvlangKv_t *kv, const char *func_key, int x,
     kvlangXvalueFree(&dv);
 }
 
-int kvlangCtlCall(kvlangFrame_t *f) {
-    char *sub = handle_call(f->kv, f->pc, f->inst);
+int kvlangControlCall(kvlangFrame_t *f) {
+    char *sub = handle_call(f->kvspace, f->pc, f->instruction);
     if (!sub)
         return -1;
     kvlangVthreadAdvance(f, sub, "running");
@@ -429,12 +429,12 @@ int kvlangCtlCall(kvlangFrame_t *f) {
     return 0;
 }
 
-int kvlangCtlReturn(kvlangFrame_t *f) {
+int kvlangControlReturn(kvlangFrame_t *f) {
     char *parent = NULL;
-    if (handle_return(f->kv, f->vtid, f->pc, &parent) != 0)
+    if (handle_return(f->kvspace, f->vthread_id, f->pc, &parent) != 0)
         return -1;
     if (!parent) {
-        f->persist_failed = kvlangVthreadSetDone(f->kv, f->vtid, "ok") != 0;
+        f->persist_failed = kvlangVthreadSetDone(f->kvspace, f->vthread_id, "ok") != 0;
     } else {
         kvlangVthreadAdvance(f, parent, "running");
     }
@@ -444,43 +444,43 @@ int kvlangCtlReturn(kvlangFrame_t *f) {
     char *fr = kvlangKeytreeFrameRoot(f->pc);
     char *stk = kvlangKeytreeStack(fr);
     char err[256];
-    kvlangKvDelExtIndex(f->kv, stk, err, sizeof err);
-    kvlangKvDelTree(f->kv, fr, err, sizeof err);
+    kvlangKvspaceDeleteExtensionIndex(f->kvspace, stk, err, sizeof err);
+    kvlangKvspaceDeleteTree(f->kvspace, fr, err, sizeof err);
     free(stk);
     free(fr);
     return 0;
 }
 
-int kvlangCtlGoto(kvlangFrame_t *f) {
-    kvlangRwirInst_t *inst = f->inst;
-    if (inst->nr != 1) {
+int kvlangControlGoto(kvlangFrame_t *f) {
+    kvlangRwirInst_t *inst = f->instruction;
+    if (inst->read_count != 1) {
         char msg[128];
         snprintf(msg, sizeof msg, "RuntimeError: goto expects 1 irseq, got %d",
-                 inst->nr);
-        kvlangVthreadSetError(f->kv, f->vtid, f->pc, msg);
+                 inst->read_count);
+        kvlangVthreadSetError(f->kvspace, f->vthread_id, f->pc, msg);
         return -1;
     }
     return jump_to(f, &inst->reads[0], OP_GOTO);
 }
 
-int kvlangCtlBr(kvlangFrame_t *f) {
-    kvlangRwirInst_t *inst = f->inst;
-    if (inst->nr != 3) {
+int kvlangControlBr(kvlangFrame_t *f) {
+    kvlangRwirInst_t *inst = f->instruction;
+    if (inst->read_count != 3) {
         char msg[128];
         snprintf(msg, sizeof msg,
                  "RuntimeError: br expects cond trueIrseq falseIrseq, got %d",
-                 inst->nr);
-        kvlangVthreadSetError(f->kv, f->vtid, f->pc, msg);
+                 inst->read_count);
+        kvlangVthreadSetError(f->kvspace, f->vthread_id, f->pc, msg);
         return -1;
     }
     char *fr = kvlangKeytreeFrameRoot(f->pc);
     kvlangXvalue_t cond;
     kvlangXvalueZero(&cond);
-    kvlangBuiltinResolveReadValue(f->kv, fr, inst->reads[0].name,
-                                  &inst->reads[0].val, &cond);
+    kvlangBuiltinResolveReadValue(f->kvspace, fr, inst->reads[0].name,
+                                  &inst->reads[0].value, &cond);
     free(fr);
     if (kvlangXvalueNone(&cond)) {
-        kvlangVthreadSetError(f->kv, f->vtid, f->pc,
+        kvlangVthreadSetError(f->kvspace, f->vthread_id, f->pc,
                               "TypeError: None in branch condition");
         kvlangXvalueFree(&cond);
         return -1;
@@ -490,7 +490,7 @@ int kvlangCtlBr(kvlangFrame_t *f) {
         snprintf(msg, sizeof msg,
                  "TypeError: branch condition must be bool, got %s",
                  kvlangXvalueKind(&cond));
-        kvlangVthreadSetError(f->kv, f->vtid, f->pc, msg);
+        kvlangVthreadSetError(f->kvspace, f->vthread_id, f->pc, msg);
         kvlangXvalueFree(&cond);
         return -1;
     }
@@ -500,16 +500,16 @@ int kvlangCtlBr(kvlangFrame_t *f) {
 }
 
 /* 以伪 OP_CALL 进入被调函数：reads[0] 是目标函数，其后为实参。 */
-int kvlangKvcpuCallOpcode(kvlangKv_t *kv, const char *vtid, const char *pc,
+int kvlangKvcpuCallOpcode(kvspace_t *kv, const char *vtid, const char *pc,
                           const char *status_known, const char *opcode,
                           kvlangParam_t *reads, int nr,
                           kvlangParam_t *writes, int nw) {
     kvlangRwirInst_t ci;
     ci.opcode = strdup(OP_CALL);
-    ci.op_id = 0;
-    ci.nr = nr + 1;
-    ci.nw = nw;
-    ci.reads = malloc(sizeof(kvlangParam_t) * (size_t)ci.nr);
+    ci.opcode_id = 0;
+    ci.read_count = nr + 1;
+    ci.write_count = nw;
+    ci.reads = malloc(sizeof(kvlangParam_t) * (size_t)ci.read_count);
     ci.reads[0] = (kvlangParam_t){0};
     ci.reads[0].name = strdup(opcode);
     for (int i = 0; i < nr; i++)
@@ -517,7 +517,7 @@ int kvlangKvcpuCallOpcode(kvlangKv_t *kv, const char *vtid, const char *pc,
     ci.writes = writes;
     kvlangFrame_t f = {kv, vtid, pc, &ci, NULL};
     f.status_known = status_known;
-    int rc = kvlangCtlCall(&f);
+    int rc = kvlangControlCall(&f);
     if (f.persist_failed)
         rc = -1;
     free(ci.opcode);
@@ -528,18 +528,18 @@ int kvlangKvcpuCallOpcode(kvlangKv_t *kv, const char *vtid, const char *pc,
 
 /* 动态调用：以运行时得到的 funckey 在当前 vthread 造一次 OP_CALL（不新开 vid），
  * pc 落在被调入口，帧结束回到本指令 NextPc。供 native vthread·call 用。 */
-int kvlangKvcpuDynCall(kvlangKv_t *kv, const char *vtid, const char *pc,
+int kvlangKvcpuDynamicCall(kvspace_t *kv, const char *vtid, const char *pc,
                        const char *funckey) {
     return kvlangKvcpuCallOpcode(kv, vtid, pc, NULL, funckey, NULL, 0, NULL, 0);
 }
 
 
-char *kvlangKvcpuBootstrap(kvlangKv_t *kv, const char *vtid,
+char *kvlangKvcpuBootstrap(kvspace_t *kv, const char *vtid,
                            const char *funcname, const char *const *args,
                            int nargs) {
     char *pkg = strdup("");
     char *name = strdup(funcname);
-    const char *dot = rfind_sep(funcname);
+    const char *dot = rfind_separator(funcname);
     if (dot) {
         free(pkg);
         pkg = strndup(funcname, (size_t)(dot - funcname));
@@ -548,13 +548,13 @@ char *kvlangKvcpuBootstrap(kvlangKv_t *kv, const char *vtid,
     }
     char *func_key = kvlangKeytreeLibFunc(pkg, name);
     char func_dir[KV_KEY_MAX];
-    kvlangKeyFmt(func_dir, sizeof func_dir, "%s/", func_key);
+    kvlangKeyFormat(func_dir, sizeof func_dir, "%s/", func_key);
 
     char sig_key[KV_KEY_MAX];
-    kvlangKeyFmt(sig_key, sizeof sig_key, "%s[0,0]", func_dir);
+    kvlangKeyFormat(sig_key, sizeof sig_key, "%s[0,0]", func_dir);
     kvlangXvalue_t sig;
     kvlangXvalueZero(&sig);
-    kvlangKvGetOne(kv, sig_key, &sig);
+    kvlangKvspaceGetOne(kv, sig_key, &sig);
     if (kvlangXvalueNone(&sig) ||
         !kvlangXvalueKindIs(&sig, KVSPACE_KIND_RWFUNC)) {
         char msg[256];
@@ -567,14 +567,14 @@ char *kvlangKvcpuBootstrap(kvlangKv_t *kv, const char *vtid,
         free(name);
         return NULL;
     }
-    const uint8_t *sbody = xh_body(sig.data);
+    const uint8_t *sbody = xh_body(sig.bytes);
     int nr = sbody[0] | (sbody[1] << 8);
 
     char *frame_root = kvlangKeytreeFrameAt(vtid, 1);
     char *stack_fr = kvlangKeytreeStack(frame_root);
     char err[256];
-    if (kvlangKvMkindex(kv, stack_fr, 0, err, sizeof err) != 0 ||
-        kvlangKvExtIndex(kv, stack_fr, func_dir, err, sizeof err) != 0) {
+    if (kvlangKvspaceMakeIndex(kv, stack_fr, 0, err, sizeof err) != 0 ||
+        kvlangKvspaceExtensionIndex(kv, stack_fr, func_dir, err, sizeof err) != 0) {
         kvlangVthreadSetError(kv, vtid, "", err);
         kvlangXvalueFree(&sig);
         free(stack_fr);
@@ -587,8 +587,8 @@ char *kvlangKvcpuBootstrap(kvlangKv_t *kv, const char *vtid,
 
     char *ep = kvlangKeytreeEntryPc(frame_root);
     char callpc[KV_KEY_MAX], seglib[KV_KEY_MAX];
-    kvlangKeytreeFrameCallpc(frame_root, callpc, sizeof callpc);
-    kvlangKeyFmt(seglib, sizeof seglib, "%s%s", stack_fr, SEG_LIB);
+    kvlangKeytreeFrameCallPc(frame_root, callpc, sizeof callpc);
+    kvlangKeyFormat(seglib, sizeof seglib, "%s%s", stack_fr, SEG_LIB);
     kvlangXvalue_t v_ep, v_fn;
     kvlangXvalueZero(&v_ep);
     kvlangXvalueZero(&v_fn);
@@ -596,7 +596,7 @@ char *kvlangKvcpuBootstrap(kvlangKv_t *kv, const char *vtid,
     kvlangXvalueNewCharUtf8(&v_fn, func_key);
     kvlangKvPair_t sys[2] = {{callpc, v_ep}, {seglib, v_fn}};
     int sys_rc = kvlangXvalueNone(&v_ep) || kvlangXvalueNone(&v_fn) ? -1 :
-                 kvlangKvSet(kv, sys, 2, err, sizeof err);
+                 kvlangKvspaceSet(kv, sys, 2, err, sizeof err);
     if (sys_rc != 0)
         snprintf(err, sizeof err, "RuntimeError: cannot persist entry frame");
     kvlangXvalueFree(&v_ep);
@@ -611,7 +611,7 @@ char *kvlangKvcpuBootstrap(kvlangKv_t *kv, const char *vtid,
         kvlangKvPair_t pairs[MAX_BIND_PAIRS];
         int np = 0;
         for (int i = 0; i < nr && i < nargs; i++) {
-            char *value_key = kvlangAstr("%s/._arglit%d", frame_root, i);
+            char *value_key = kvlangStringFormat("%s/._arglit%d", frame_root, i);
             kvlangXvalue_t av;
             kvlangXvalueZero(&av);
             kvlangBuiltinResolveReadValue(kv, "", args[i], NULL, &av);
@@ -629,16 +629,16 @@ char *kvlangKvcpuBootstrap(kvlangKv_t *kv, const char *vtid,
             }
             free(value_key);
         }
-        if (!bind_error && np > 0 && kvlangKvSet(kv, pairs, np, err, sizeof err) != 0)
+        if (!bind_error && np > 0 && kvlangKvspaceSet(kv, pairs, np, err, sizeof err) != 0)
             bind_error = 1;
         for (int i = 0; i < np; i++) {
             free(pairs[i].key);
-            kvlangXvalueFree(&pairs[i].val);
+            kvlangXvalueFree(&pairs[i].value);
         }
     }
     if (bind_error) {
         kvlangVthreadSetError(kv, vtid, "", err);
-        kvlangKvDelTree(kv, frame_root, err, sizeof err);
+        kvlangKvspaceDeleteTree(kv, frame_root, err, sizeof err);
         free(ep);
         ep = NULL;
     }

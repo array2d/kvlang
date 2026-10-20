@@ -13,7 +13,7 @@ int main(void) {
     if (!mkdtemp(dir))
         return 1;
     snprintf(dsn, sizeof dsn, "%s://%s/s", scheme ? scheme : "shm", dir);
-    kvlangKv_t *kv = kvlangKvConnect(dsn);
+    kvspace_t *kv = kvlangKvspaceConnect(dsn);
     if (!kv)
         return 1;
 
@@ -30,6 +30,6 @@ int main(void) {
     if (!ok)
         fprintf(stderr, "PC did not follow kvspace state\n");
     free(pc);
-    kvlangKvDisconnect(kv);
+    kvlangKvspaceDisconnect(kv);
     return ok ? 0 : 1;
 }

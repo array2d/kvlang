@@ -1,6 +1,6 @@
 #include "runtime_internal.h"
 
-const char *kvlangKeytreeVtidFromPc(const char *pc, char *out, size_t cap) {
+const char *kvlangKeytreeVthreadIdFromPc(const char *pc, char *out, size_t cap) {
     const char *pfx = VTHREAD_ROOT PATH_SEP;
     size_t pl = strlen(pfx);
     if (strncmp(pc, pfx, pl) != 0) {
@@ -27,7 +27,7 @@ char *kvlangKeytreeStack(const char *root) {
 
 /* 栈缓冲版：把 root（去尾 /）拷进 buf 并补 '/'，返回写入长度（含尾 /）；cap 不足返回 0。
  * 读参热路径复用调用方缓冲，免每操作一次 malloc。 */
-size_t kvlangKeytreeStackBuf(const char *root, char *buf, size_t cap) {
+size_t kvlangKeytreeStackBuffer(const char *root, char *buf, size_t cap) {
     size_t n = strlen(root);
     while (n > 0 && root[n - 1] == '/') n--;
     if (n + 2 > cap) return 0;
@@ -49,7 +49,7 @@ char *kvlangKeytreeFrameRoot(const char *pc) {
 
 /* 栈缓冲版：帧根（末个 "/[" 之前）拷进 buf 并 NUL 终止，返回长度（不含 NUL）。
  * 无 "/[" 或 cap 不足返回 0（buf 内容不可用），调用方回退 kvlangKeytreeFrameRoot。 */
-size_t kvlangKeytreeFrameRootBuf(const char *pc, char *buf, size_t cap) {
+size_t kvlangKeytreeFrameRootBuffer(const char *pc, char *buf, size_t cap) {
     const char *last = NULL;
     for (const char *p = pc; (p = strstr(p, "/[")) != NULL; p += 2) last = p;
     if (!last) return 0;
@@ -74,7 +74,7 @@ char *kvlangKeytreeEntryPc(const char *root) { return trim_right_join(root, "/[1
 char *kvlangKeytreeFrameAt(const char *vtid, int depth) {
     if (!vtid || !vtid[0]) kvlangDie("FrameAt: empty vtid");
     if (depth < 1) kvlangDie("FrameAt: depth %d < 1", depth);
-    return kvlangAstr("%s/%s/[%d]", VTHREAD_ROOT, vtid, depth);
+    return kvlangStringFormat("%s/%s/[%d]", VTHREAD_ROOT, vtid, depth);
 }
 
 int kvlangKeytreeFrameNum(const char *path) {
@@ -117,7 +117,7 @@ char *kvlangKeytreeIrseqPc(const char *frame_root, int irseq) {
     if (irseq < 0) kvlangDie("IrseqPC: irseq %d < 0", irseq);
     size_t n = strlen(frame_root);
     while (n > 0 && frame_root[n - 1] == '/') n--;
-    return kvlangAstr("%.*s/[%d,0]", (int)n, frame_root, irseq);
+    return kvlangStringFormat("%.*s/[%d,0]", (int)n, frame_root, irseq);
 }
 
 char *kvlangKeytreeMember(const char *base, const char *name) {
@@ -132,30 +132,30 @@ char *kvlangKeytreeMember(const char *base, const char *name) {
 
 char *kvlangKeytreeLibFunc(const char *pkg, const char *name) {
     if (pkg && pkg[0])
-        return kvlangAstr("%s%s%s%s", LIB_ROOT PATH_SEP, pkg, MEMBER_SEP, name);
-    return kvlangAstr("%s%s", LIB_ROOT PATH_SEP, name);
+        return kvlangStringFormat("%s%s%s%s", LIB_ROOT PATH_SEP, pkg, MEMBER_SEP, name);
+    return kvlangStringFormat("%s%s", LIB_ROOT PATH_SEP, name);
 }
 
 char *kvlangKeytreeRwir(const char *opcode) {
-    return kvlangAstr("%s%s", LIB_ROOT PATH_SEP, opcode);
+    return kvlangStringFormat("%s%s", LIB_ROOT PATH_SEP, opcode);
 }
 
 void kvlangKeytreeVthread(const char *vtid, char *out, size_t cap) {
-    kvlangKeyFmt(out, cap, "%s%s", VTHREAD_ROOT PATH_SEP, vtid);
+    kvlangKeyFormat(out, cap, "%s%s", VTHREAD_ROOT PATH_SEP, vtid);
 }
 
 void kvlangKeytreeVthreadSlot(const char *vtid, const char *frame, int i, int j,
                               char *out, size_t cap) {
     if (frame && frame[0])
-        kvlangKeyFmt(out, cap, "%s%s/%s/[%d,%d]", VTHREAD_ROOT PATH_SEP, vtid,
+        kvlangKeyFormat(out, cap, "%s%s/%s/[%d,%d]", VTHREAD_ROOT PATH_SEP, vtid,
                      frame, i, j);
     else
-        kvlangKeyFmt(out, cap, "%s%s/[%d,%d]", VTHREAD_ROOT PATH_SEP, vtid, i, j);
+        kvlangKeyFormat(out, cap, "%s%s/[%d,%d]", VTHREAD_ROOT PATH_SEP, vtid, i, j);
 }
 
 static void kvlangVthreadMember(const char *vtid, const char *seg, char *out,
                                 size_t cap) {
-    kvlangKeyFmt(out, cap, "%s%s%s%s%s", VTHREAD_ROOT PATH_SEP, vtid, "/",
+    kvlangKeyFormat(out, cap, "%s%s%s%s%s", VTHREAD_ROOT PATH_SEP, vtid, "/",
                  RUNTIME_MEMBER_SEP, seg);
 }
 
@@ -169,9 +169,9 @@ void kvlangKeytreeVthreadDebugger(const char *vtid, char *out, size_t cap) {
     kvlangVthreadMember(vtid, "debugger", out, cap);
 }
 
-void kvlangKeytreeVthreadStatusMsg(const char *vtid, const char *status,
+void kvlangKeytreeVthreadStatusMessage(const char *vtid, const char *status,
                                    char *out, size_t cap) {
-    kvlangKeyFmt(out, cap, "%s%s%s%s%s%s%s", VTHREAD_ROOT PATH_SEP, vtid, "/",
+    kvlangKeyFormat(out, cap, "%s%s%s%s%s%s%s", VTHREAD_ROOT PATH_SEP, vtid, "/",
                  RUNTIME_MEMBER_SEP, status, "/", SEG_MSG);
 }
 
@@ -179,16 +179,16 @@ static void frame_member(const char *root, const char *seg, char *out,
                          size_t cap) {
     size_t n = strlen(root);
     while (n > 0 && root[n - 1] == '/') n--;
-    kvlangKeyFmt(out, cap, "%.*s%s%s", (int)n, root, RUNTIME_MEMBER_SEP, seg);
+    kvlangKeyFormat(out, cap, "%.*s%s%s", (int)n, root, RUNTIME_MEMBER_SEP, seg);
 }
 
-void kvlangKeytreeFrameCallpc(const char *root, char *out, size_t cap) {
+void kvlangKeytreeFrameCallPc(const char *root, char *out, size_t cap) {
     frame_member(root, SEG_CALLPC, out, cap);
 }
-void kvlangKeytreeFrameReturnpc(const char *root, char *out, size_t cap) {
+void kvlangKeytreeFrameReturnPc(const char *root, char *out, size_t cap) {
     frame_member(root, SEG_RETURNPC, out, cap);
 }
-void kvlangKeytreeFrameRo(const char *root, char *out, size_t cap) {
+void kvlangKeytreeFrameReadOnly(const char *root, char *out, size_t cap) {
     frame_member(root, SEG_RO, out, cap);
 }
 
@@ -197,7 +197,7 @@ bool kvlangKeytreeIsEntryPc(const char *pc) {
     return slash && strcmp(slash, "/[1,0]") == 0;
 }
 
-const char *kvlangKeytreeCanonOp(const char *opcode) {
+const char *kvlangKeytreeCanonicalOp(const char *opcode) {
     const char *p = opcode ? opcode : "";
     size_t pl = strlen(LIB_ROOT PATH_SEP);
     return strncmp(p, LIB_ROOT PATH_SEP, pl) == 0 ? p + pl : p;
@@ -213,13 +213,13 @@ bool kvlangKeytreeValidSegment(const char *s) {
     return strchr(s, '/') == NULL;
 }
 
-static char *join3(const char *a, const char *b, const char *c) {
+static char *join_three_parts(const char *a, const char *b, const char *c) {
     if (b && b[0] && c && c[0])
-        return kvlangAstr("%s/%s/%s", a, b, c);
+        return kvlangStringFormat("%s/%s/%s", a, b, c);
     if (b && b[0])
-        return kvlangAstr("%s/%s", a, b);
+        return kvlangStringFormat("%s/%s", a, b);
     if (c && c[0])
-        return kvlangAstr("%s/%s", a, c);
+        return kvlangStringFormat("%s/%s", a, c);
     return strdup(a);
 }
 
@@ -228,48 +228,48 @@ char *kvlangKeytreeSysRwirBackendRoot(void) {
 }
 
 char *kvlangKeytreeSysRwirBackend(const char *name) {
-    return join3(SYS_ROOT PATH_SEP SEG_RWIR_BACKEND, name, NULL);
+    return join_three_parts(SYS_ROOT PATH_SEP SEG_RWIR_BACKEND, name, NULL);
 }
 
 char *kvlangKeytreeSysRwirBackendOp(const char *name, const char *opcode) {
-    return kvlangAstr("%s/%s/%s/%s", SYS_ROOT PATH_SEP SEG_RWIR_BACKEND, name,
+    return kvlangStringFormat("%s/%s/%s/%s", SYS_ROOT PATH_SEP SEG_RWIR_BACKEND, name,
                       SEG_OP, opcode);
 }
 
-char *kvlangKeytreeSysRwirBackendCmd(const char *name) {
-    return join3(SYS_ROOT PATH_SEP SEG_RWIR_BACKEND, name, SEG_CMD);
+char *kvlangKeytreeSysRwirBackendCommand(const char *name) {
+    return join_three_parts(SYS_ROOT PATH_SEP SEG_RWIR_BACKEND, name, SEG_CMD);
 }
 
 char *kvlangKeytreeSysRwirBackendStatus(const char *name) {
-    return join3(SYS_ROOT PATH_SEP SEG_RWIR_BACKEND, name, SEG_STATUS);
+    return join_three_parts(SYS_ROOT PATH_SEP SEG_RWIR_BACKEND, name, SEG_STATUS);
 }
 
 char *kvlangKeytreeSysRwirBackendLoad(const char *name) {
-    return join3(SYS_ROOT PATH_SEP SEG_RWIR_BACKEND, name, SEG_LOAD);
+    return join_three_parts(SYS_ROOT PATH_SEP SEG_RWIR_BACKEND, name, SEG_LOAD);
 }
 
 char *kvlangKeytreeSysRwirBackendHeartbeat(const char *name) {
-    return join3(SYS_ROOT PATH_SEP SEG_RWIR_BACKEND, name, SEG_LAST_HEARTBEAT);
+    return join_three_parts(SYS_ROOT PATH_SEP SEG_RWIR_BACKEND, name, SEG_LAST_HEARTBEAT);
 }
 
 char *kvlangKeytreeSysRwirBackendCategoryRoot(const char *name) {
-    return join3(SYS_ROOT PATH_SEP SEG_RWIR_BACKEND, name, SEG_CATEGORY);
+    return join_three_parts(SYS_ROOT PATH_SEP SEG_RWIR_BACKEND, name, SEG_CATEGORY);
 }
 
 char *kvlangKeytreeSysTask(const char *task_id, const char *field) {
-    return kvlangAstr("%s/%s/%s%s", SYS_ROOT PATH_SEP SEG_TASK, task_id,
+    return kvlangStringFormat("%s/%s/%s%s", SYS_ROOT PATH_SEP SEG_TASK, task_id,
                       RUNTIME_MEMBER_SEP, field);
 }
 
 char *kvlangKeytreeDoneRwir(const char *task_id) {
-    return join3(DONE_ROOT PATH_SEP SEG_RWIR, task_id, NULL);
+    return join_three_parts(DONE_ROOT PATH_SEP SEG_RWIR, task_id, NULL);
 }
 
-char *kvlangKeytreeLibSig(const char *opcode) {
-    return kvlangAstr("%s%s/[0,0]", LIB_ROOT PATH_SEP, opcode);
+char *kvlangKeytreeLibSignature(const char *opcode) {
+    return kvlangStringFormat("%s%s/[0,0]", LIB_ROOT PATH_SEP, opcode);
 }
 
-static char *write_err(size_t n, const char *fmt, ...) {
+static char *make_error_message(size_t n, const char *fmt, ...) {
     char *e = malloc(n);
     va_list ap;
     va_start(ap, fmt);
@@ -280,7 +280,7 @@ static char *write_err(size_t n, const char *fmt, ...) {
 
 char *kvlangKeytreeCheckWriteKey(const char *vtid, const char *key) {
     if (!key || key[0] != '/')
-        return write_err(160,
+        return make_error_message(160,
                          "ValueError: write slot is not an absolute path: \"%s\"; help: a write slot must resolve to a canonical path starting with /",
                          key ? key : "");
     const char *p = key + 1;
@@ -289,12 +289,12 @@ char *kvlangKeytreeCheckWriteKey(const char *vtid, const char *key) {
         size_t n = slash ? (size_t)(slash - p) : strlen(p);
         if (n == 0 || (n == 1 && p[0] == '.') ||
             (n == 2 && p[0] == '.' && p[1] == '.'))
-            return write_err(160,
+            return make_error_message(160,
                              "ValueError: write slot is not a canonical path: \"%s\"; help: a path may not contain an empty segment, . or ..",
                              key);
         if (n >= 3 && (unsigned char)p[0] == 0xE2 && (unsigned char)p[1] == 0x80 &&
             (unsigned char)p[2] == 0xA5)
-            return write_err(192,
+            return make_error_message(192,
                              "PermissionError: write slot targets an engine-reserved key: \"%s\"; help: keys starting with %s belong to the VM and programs cannot write them",
                              key, RUNTIME_MEMBER_SEP);
         p = slash ? slash + 1 : p + n;
@@ -302,7 +302,7 @@ char *kvlangKeytreeCheckWriteKey(const char *vtid, const char *key) {
     static const char *roots[] = {LIB_ROOT, SYS_ROOT, DEV_ROOT, DONE_ROOT, VTHREAD_ROOT, NULL};
     for (int i = 0; roots[i]; i++) {
         if (strcmp(key, roots[i]) == 0)
-            return write_err(192,
+            return make_error_message(192,
                              "PermissionError: write slot targets domain root %s: \"%s\"; help: the domain belongs to the VM, and a root is a directory besides",
                              roots[i], key);
     }
@@ -310,7 +310,7 @@ char *kvlangKeytreeCheckWriteKey(const char *vtid, const char *key) {
     for (int i = 0; prot[i]; i++) {
         size_t pl = strlen(prot[i]);
         if (strncmp(key, prot[i], pl) == 0 && key[pl] == '/')
-            return write_err(220,
+            return make_error_message(220,
                              "PermissionError: write slot targets protected domain %s: \"%s\"; help: %s belongs to the VM; write a slot in your own vthread or a user global key",
                              prot[i], key, prot[i]);
     }
@@ -319,13 +319,13 @@ char *kvlangKeytreeCheckWriteKey(const char *vtid, const char *key) {
         char own[KV_KEY_MAX];
         kvlangKeytreeVthread(vtid, own, sizeof own);
         if (strcmp(key, own) == 0) {
-            return write_err(200,
+            return make_error_message(200,
                              "IsADirectoryError: write slot targets this vthread's frame root: \"%s\"; help: a frame root is a directory and writing it as a leaf destroys the call frame",
                              key);
         }
         size_t ol = strlen(own);
         if (!(strncmp(key, own, ol) == 0 && key[ol] == '/')) {
-            return write_err(240,
+            return make_error_message(240,
                              "PermissionError: write slot is outside this vthread's subtree (vtid=%s): \"%s\"; help: the whole /vthread domain belongs to the engine, a program may only write keys under %s/",
                              vtid, key, own);
         }

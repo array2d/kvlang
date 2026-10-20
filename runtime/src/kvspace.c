@@ -1,41 +1,41 @@
 #include "runtime_internal.h"
 
-kvlangKv_t *kvlangKvConnect(const char *dsn) {
-    kvlangKv_t *k = calloc(1, sizeof(*k));
+kvspace_t *kvlangKvspaceConnect(const char *dsn) {
+    kvspace_t *k = calloc(1, sizeof(*k));
     if (!k)
         return NULL;
-    k->h = kvspaceConnect(dsn);
-    if (!k->h) {
+    k->handle = kvspaceConnect(dsn);
+    if (!k->handle) {
         free(k);
         return NULL;
     }
     return k;
 }
 
-void kvlangKvDisconnect(kvlangKv_t *k) {
+void kvlangKvspaceDisconnect(kvspace_t *k) {
     if (!k)
         return;
-    if (k->h)
-        kvspaceClose(k->h);
+    if (k->handle)
+        kvspaceClose(k->handle);
     free(k);
 }
 
 /* Borrowed read (resolve=0). Empty -> out len=0. */
-int kvlangKvGetOne(kvlangKv_t *k, const char *key, kvlangXvalue_t *out) {
+int kvlangKvspaceGetOne(kvspace_t *k, const char *key, kvlangXvalue_t *out) {
     kvlangXvalueZero(out);
     uint8_t *d = NULL;
     uint32_t len = 0;
-    if (kvspaceGet(k->h, key, 0, &d, &len) != 0)
+    if (kvspaceGet(k->handle, key, 0, &d, &len) != 0)
         return -1;
     if (d && len > 0) {
-        out->data = d;
-        out->len = len;
-        out->borrowed = 1;
+        out->bytes = d;
+        out->length = len;
+        out->is_borrowed = 1;
     }
     return 0;
 }
 
-int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name,
+int kvlangKvspaceGetMember(kvspace_t *k, const char *dir, const char *name,
                       kvlangXvalue_t *out) {
     kvlangXvalueZero(out);
     if (!dir || !name || !name[0])
@@ -49,109 +49,109 @@ int kvlangKvGetMember(kvlangKv_t *k, const char *dir, const char *name,
         return -1;
     memcpy(key, dir, dl);
     memcpy(key + dl, name, nl + 1);
-    int rc = kvlangKvGetOne(k, key, out);
+    int rc = kvlangKvspaceGetOne(k, key, out);
     if (key != stackbuf)
         free(key);
     return rc;
 }
 
 /* Recycle the read-borrow pool at instruction boundaries. */
-void kvlangKvReadReset(kvlangKv_t *k) { kvspaceReadReset(k->h); }
+void kvlangKvspaceReadReset(kvspace_t *k) { kvspaceReadReset(k->handle); }
 
 /* Borrowed slice of the value body. Empty/OOB -> out len=0. */
-int kvlangKvGetPart(kvlangKv_t *k, const char *key, uint32_t off, uint32_t len, kvlangXvalue_t *out) {
+int kvlangKvspaceGetPart(kvspace_t *k, const char *key, uint32_t off, uint32_t len, kvlangXvalue_t *out) {
     kvlangXvalueZero(out);
     uint8_t *d;
     uint32_t got;
-    if (kvspaceGetPart(k->h, key, off, len, &d, &got) != 0)
+    if (kvspaceGetPart(k->handle, key, off, len, &d, &got) != 0)
         return -1;
     if (d && got > 0) {
-        out->data = d;
-        out->len = got;
-        out->borrowed = 1;
+        out->bytes = d;
+        out->length = got;
+        out->is_borrowed = 1;
     }
     return 0;
 }
 
 /* In-place write into an existing value. Key must already exist. */
-int kvlangKvSetPart(kvlangKv_t *k, const char *key, uint32_t off, const uint8_t *buf, uint32_t buf_len,
+int kvlangKvspaceSetPart(kvspace_t *k, const char *key, uint32_t off, const uint8_t *buf, uint32_t buf_len,
                      char *err, uint32_t err_cap) {
-    return kvspaceSetPart(k->h, key, off, buf, buf_len, err, err_cap);
+    return kvspaceSetPart(k->handle, key, off, buf, buf_len, err, err_cap);
 }
 
 /* Read head only (no body). Missing/empty -> non-zero. */
-int kvlangKvGetHead(kvlangKv_t *k, const char *key, kvspaceHead_t *out) {
-    return kvspaceGetHead(k->h, key, out);
+int kvlangKvspaceGetHead(kvspace_t *k, const char *key, kvspaceHead_t *out) {
+    return kvspaceGetHead(k->handle, key, out);
 }
 
-int kvlangKvSet(kvlangKv_t *k, const kvlangKvPair_t *pairs, int n, char *err, uint32_t err_cap) {
+int kvlangKvspaceSet(kvspace_t *k, const kvlangKvPair_t *pairs, int n, char *err, uint32_t err_cap) {
     for (int i = 0; i < n; i++) {
-        const kvlangXvalue_t *v = &pairs[i].val;
+        const kvlangXvalue_t *v = &pairs[i].value;
         if (kvlangXvalueNone(v)) {
             const char *dk[1] = {pairs[i].key};
-            if (kvspaceDel(k->h, dk, 1, err, err_cap) != 0)
+            if (kvspaceDel(k->handle, dk, 1, err, err_cap) != 0)
                 return -1;
             continue;
         }
-        if (kvspaceSetValue(k->h, pairs[i].key, v->data, v->len, 0, 0,
+        if (kvspaceSetValue(k->handle, pairs[i].key, v->bytes, v->length, 0, 0,
                             err, err_cap) != 0)
             return -1;
     }
     return 0;
 }
 
-int kvlangKvSetChar(kvlangKv_t *k, const char *key, const char *s) {
+int kvlangKvspaceSetChar(kvspace_t *k, const char *key, const char *s) {
     kvlangXvalue_t value;
     kvlangXvalueNewCharUtf8(&value, s);
-    if (!value.data || value.len == 0)
+    if (!value.bytes || value.length == 0)
         return -1;
     kvlangKvPair_t pair = {(char *)key, value};
     char err[256];
-    int rc = kvlangKvSet(k, &pair, 1, err, sizeof err);
+    int rc = kvlangKvspaceSet(k, &pair, 1, err, sizeof err);
     kvlangXvalueFree(&value);
     return rc;
 }
 
-int kvlangKvDel(kvlangKv_t *k, const char *key, char *err, uint32_t err_cap) {
+int kvlangKvspaceDelete(kvspace_t *k, const char *key, char *err, uint32_t err_cap) {
     const char *keys[1] = {key};
-    return kvspaceDel(k->h, keys, 1, err, err_cap);
+    return kvspaceDel(k->handle, keys, 1, err, err_cap);
 }
 
-int kvlangKvDelTree(kvlangKv_t *k, const char *prefix, char *err, uint32_t err_cap) {
-    return kvspaceDelTree(k->h, prefix, err, err_cap);
+int kvlangKvspaceDeleteTree(kvspace_t *k, const char *prefix, char *err, uint32_t err_cap) {
+    return kvspaceDelTree(k->handle, prefix, err, err_cap);
 }
 
-int kvlangKvCp(kvlangKv_t *k, const char *src, const char *dst, char *err, uint32_t err_cap) {
-    return kvspaceCp(k->h, src, dst, err, err_cap);
+int kvlangKvspaceCopy(kvspace_t *k, const char *src, const char *dst, char *err, uint32_t err_cap) {
+    return kvspaceCp(k->handle, src, dst, err, err_cap);
 }
 
-int kvlangKvCpTree(kvlangKv_t *k, const char *src, const char *dst, char *err, uint32_t err_cap) {
-    return kvspaceCpTree(k->h, src, dst, err, err_cap);
+int kvlangKvspaceCopyTree(kvspace_t *k, const char *src, const char *dst, char *err, uint32_t err_cap) {
+    return kvspaceCpTree(k->handle, src, dst, err, err_cap);
 }
 
-int kvlangKvCpList(kvlangKv_t *k, const char *src, const char *dst, char *err, uint32_t err_cap) {
-    return kvspaceCpList(k->h, src, dst, err, err_cap);
+int kvlangKvspaceCopyList(kvspace_t *k, const char *src, const char *dst, char *err, uint32_t err_cap) {
+    return kvspaceCpList(k->handle, src, dst, err, err_cap);
 }
 
-int kvlangKvMkindex(kvlangKv_t *k, const char *path, uint32_t capacity, char *err, uint32_t err_cap) {
-    return kvspaceMkindex(k->h, path, capacity, err, err_cap);
+int kvlangKvspaceMakeIndex(kvspace_t *k, const char *path, uint32_t capacity, char *err, uint32_t err_cap) {
+    return kvspaceMkindex(k->handle, path, capacity, err, err_cap);
 }
 
-int kvlangKvExtIndex(kvlangKv_t *k, const char *path, const char *ext, char *err, uint32_t err_cap) {
-    return kvspaceMkindexExt(k->h, path, ext, err, err_cap);
+int kvlangKvspaceExtensionIndex(kvspace_t *k, const char *path, const char *ext, char *err, uint32_t err_cap) {
+    return kvspaceMkindexExt(k->handle, path, ext, err, err_cap);
 }
 
-int kvlangKvDelExtIndex(kvlangKv_t *k, const char *path, char *err, uint32_t err_cap) {
-    return kvspaceRmindexExt(k->h, path, err, err_cap);
+int kvlangKvspaceDeleteExtensionIndex(kvspace_t *k, const char *path, char *err, uint32_t err_cap) {
+    return kvspaceRmindexExt(k->handle, path, err, err_cap);
 }
 
-int kvlangKvList(kvlangKv_t *k, const char *prefix, bool expand_ext, bool resolve,
+int kvlangKvspaceList(kvspace_t *k, const char *prefix, bool expand_ext, bool resolve,
                  char ***out_names, int *out_count) {
     *out_names = NULL;
     *out_count = 0;
     int ex = expand_ext ? 1 : 0, rs = resolve ? 1 : 0;
     int32_t count = 0;
-    if (kvspaceListLen(k->h, prefix, ex, rs, &count) != 0)
+    if (kvspaceListLen(k->handle, prefix, ex, rs, &count) != 0)
         return -1;
     if (count <= 0)
         return 0;
@@ -159,7 +159,7 @@ int kvlangKvList(kvlangKv_t *k, const char *prefix, bool expand_ext, bool resolv
     for (int32_t i = 0; i < count; i++) {
         uint8_t buf[1024];
         uint32_t len = 0;
-        if (kvspaceListAt(k->h, prefix, ex, rs, i, buf, sizeof buf, &len) == 0)
+        if (kvspaceListAt(k->handle, prefix, ex, rs, i, buf, sizeof buf, &len) == 0)
             names[i] = strndup((const char *)buf, len);
         else
             names[i] = strdup("");
@@ -169,18 +169,18 @@ int kvlangKvList(kvlangKv_t *k, const char *prefix, bool expand_ext, bool resolv
     return 0;
 }
 
-int kvlangKvWatch(kvlangKv_t *k, const char *key, const kvlangXvalue_t *target, uint64_t tick_ns, kvlangXvalue_t *out) {
+int kvlangKvspaceWatch(kvspace_t *k, const char *key, const kvlangXvalue_t *target, uint64_t tick_ns, kvlangXvalue_t *out) {
     kvlangXvalueZero(out);
-    const uint8_t *t = target->data ? target->data : (const uint8_t *)"";
-    uint32_t tl = target->len;
+    const uint8_t *t = target->bytes ? target->bytes : (const uint8_t *)"";
+    uint32_t tl = target->length;
     uint8_t *d;
     uint32_t len;
-    if (kvspaceWatch(k->h, key, t, tl, tick_ns, &d, &len) != 0)
+    if (kvspaceWatch(k->handle, key, t, tl, tick_ns, &d, &len) != 0)
         return -1;
     if (d && len) {
-        out->data = d;
-        out->len = len;
-        out->borrowed = 1;
+        out->bytes = d;
+        out->length = len;
+        out->is_borrowed = 1;
         kvlangXvalueMaterialize(out);
     }
     return 0;
