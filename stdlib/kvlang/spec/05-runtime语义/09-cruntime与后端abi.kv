@@ -73,6 +73,8 @@ kvspaceListLen / ListAt / Del / DelTree / Cp / CpTree
 kvspaceMkindex / MkindexExt / RmindexExt / Watch
 kvspaceTlvEncode / TlvEncodeMode / DecodeHead
 kvspaceNewPtr / NewChar / NewBool / NewInt64 / NewFloat64
+kvspaceResolveRef / GetByRef / SetPartByRef / SetValueByRef
+                                 // 地址寻址：key→64 位地址是派生量，后端可不实现（前端退回按 key）
 ```
 
 **读写模型**：

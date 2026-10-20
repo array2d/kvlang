@@ -94,6 +94,7 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
     /* 参数数组放堆上：ExecuteMode 只分配一次，避免每步栈帧过大加剧布局敏感。 */
     kvlangParam_t *reads = malloc(sizeof *reads * MAX_PARAMS);
     kvlangParam_t *writes = malloc(sizeof *writes * MAX_PARAMS);
+    kvspaceKeyOff *write_offs[MAX_PARAMS];
     if (!reads || !writes)
         kvlangDie("out of memory allocating operand views");
 
@@ -223,8 +224,11 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
             break;
         }
 
+        for (int j = 0; j < row->nw; j++)
+            write_offs[j] = &bind->cell[row->nr + j].off;
         kvlangRwirInst_t inst = {row->opcode, row->opcode_id, reads,
-                                 row->nr,     writes,         row->nw};
+                                 row->nr,     writes,         row->nw,
+                                 row->nw ? write_offs : NULL};
         kvlangLogDebug("[%s] PC=%s OP=%s R=%d W=%d", vtid, cur,
                        inst.opcode ? inst.opcode : "(empty)", inst.read_count,
                        inst.write_count);

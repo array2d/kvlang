@@ -73,6 +73,21 @@ bool kvspaceKeyOffRead(kvspaceKeyOff *ko, char *out, size_t cap) {
     return value_to_buffer(&v, out, cap);
 }
 
+/* 整值写：已解析走 SetValueByRef；未解析/失败退回按 key 写并补一次绑定。 */
+int kvspaceKeyOffSet(kvspaceKeyOff *ko, const uint8_t *val, uint32_t len,
+                     char *err, uint32_t err_cap) {
+    if (ko->resolved &&
+        kvspaceSetValueByRef(ko->kvspace->handle, &ko->off, ko->key, val, len,
+                             0, 0, err, err_cap) == 0)
+        return 0;
+    if (kvspaceSetValue(ko->kvspace->handle, ko->key, val, len, 0, 0, err,
+                        err_cap) != 0)
+        return -1;
+    if (kvspaceResolveRef(ko->kvspace->handle, ko->key, &ko->off) == 0)
+        ko->resolved = true;
+    return 0;
+}
+
 void kvlangVthreadGet(kvspace_t *kv, const char *vtid, char **pc,
                       char **status) {
     kvlangVthreadPcGet(kv, vtid, pc);

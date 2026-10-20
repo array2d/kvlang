@@ -182,6 +182,14 @@ void kvlangBuiltinNextPc(kvlangFrame_t *f) {
 
 int kvlangBuiltinWriteResult(kvlangFrame_t *f, const kvlangXvalue_t *result) {
     if (f->instruction->write_count > 0) {
+        kvspaceKeyOff *wo = f->instruction->write_offs
+                                ? f->instruction->write_offs[0]
+                                : NULL;
+        if (wo && result->bytes && result->length > 0 &&
+            kvspaceKeyOffSet(wo, result->bytes, result->length, NULL, 0) == 0) {
+            kvlangBuiltinNextPc(f);
+            return 0;
+        }
         char *owned = NULL;
         const char *fr = f->frame_root;
         if (!fr) { owned = kvlangKeytreeFrameRoot(f->pc); fr = owned; }
@@ -231,6 +239,11 @@ int kvlangBuiltinExecuteCopy(kvlangFrame_t *f) {
                 return -1;
             }
         }
+        kvspaceKeyOff *wo =
+            inst->write_offs ? inst->write_offs[i] : NULL;
+        if (wo && v.bytes && v.length > 0 &&
+            kvspaceKeyOffSet(wo, v.bytes, v.length, NULL, 0) == 0)
+            continue;
         char *key = kvlangBuiltinResolveWriteSlot(kv, fr, slot);
         kvlangKvPair_t pair = { key, v };
         char err[256];
