@@ -515,6 +515,7 @@ int kvlangKvcpuCallOpcode(kvspace_t *kv, const char *vtid, const char *pc,
     for (int i = 0; i < nr; i++)
         ci.reads[i + 1] = reads[i];
     ci.writes = writes;
+    ci.write_offs = NULL;
     kvlangFrame_t f = {kv, vtid, pc, &ci, NULL};
     f.status_known = status_known;
     int rc = kvlangControlCall(&f);

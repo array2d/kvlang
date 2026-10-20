@@ -48,6 +48,12 @@ typedef struct {
 extern int kvspaceResolveRef(void *h, const char *key, kvspaceRef_t *ref);
 extern int kvspaceGetByRef(void *h, kvspaceRef_t *ref, const char *key_fallback,
                            uint8_t **out, uint32_t *out_len);
+/* 整值写 by cached ref；ref 失效时后端内部回退并重解析。 */
+extern int kvspaceSetValueByRef(void *h, kvspaceRef_t *ref,
+                                const char *key_fallback,
+                                const uint8_t *value, uint32_t value_len,
+                                uint8_t ro, uint32_t vid, char *err,
+                                uint32_t err_cap);
 
 /* 指令边界回收读借用池；定位读/写（分片）；只读 head 前缀。见 kvspace.h 契约。 */
 extern void kvspaceReadReset(void *h);
@@ -517,6 +523,8 @@ static inline int kvlangOpClassify(const char *op) {
     return n >= 0 ? n : OPID_notinmyrwircaps;
 }
 
+typedef struct kvspaceKeyOff kvspaceKeyOff;
+
 typedef struct {
     char *name;
     char *type;
@@ -531,6 +539,7 @@ typedef struct {
     int read_count;
     kvlangParam_t *writes;
     int write_count;
+    kvspaceKeyOff **write_offs; /* 本步写槽的帧层地址；NULL = 按 key 写 */
 } kvlangRwirInst_t;
 
 size_t kvlangRwirNextPcBuffer(const char *pc, char *buf,
@@ -565,16 +574,19 @@ void kvlangVthreadPcGet(kvspace_t *kv, const char *vtid, char **pc);
 void kvlangVthreadStatusGet(kvspace_t *kv, const char *vtid, char **status);
 /* key 的 64 位地址（偏移量）。key 由调用方持有；off 是 key→地址的派生缓存。
  * value 仍每步从 kvspace 读；缓存的只是寻址结果，丢了可按 key 重算。 */
-typedef struct {
+struct kvspaceKeyOff {
     kvspace_t *kvspace;
     const char *key;
     kvspaceRef_t off;
     bool resolved;
-} kvspaceKeyOff;
+};
 
 void kvspaceKeyOffBind(kvspaceKeyOff *ko, kvspace_t *kvspace, const char *key);
 /* 读值到调用方缓冲；false = 键缺失 / None，超长直接 abort。 */
 bool kvspaceKeyOffRead(kvspaceKeyOff *ko, char *out, size_t cap);
+/* 整值写：已解析走 SetValueByRef，未解析/失败退回按 key 写。0 = 成功。 */
+int kvspaceKeyOffSet(kvspaceKeyOff *ko, const uint8_t *val, uint32_t len,
+                     char *err, uint32_t err_cap);
 int kvlangVthreadSet(kvspace_t *kv, const char *vtid, const char *pc,
                      const char *status);
 int kvlangVthreadSetDone(kvspace_t *kv, const char *vtid, const char *ret);
