@@ -33,7 +33,7 @@ layout 能力经 cdylib 导出，第三方无需 fork 子进程即可布局（�
 
 ## 导出符号
 
-layout 导出五个 `kvlangLayout*` 入口（file / code / vet / format / dump）与 `kvlangKindexprParse`。**符号
+layout 导出六个 `kvlangLayout*` 入口（file / code / vet / format / printlib / printstack）与 `kvlangKindexprParse`。**符号
 清单的权威来源是构建产物**——`nm -D --defined-only layout/target/release/libkvlanglayout.so | grep
 '^kvlang'`；本文只约定语义，不抄清单（抄清单必漂移）。
 	"#### -> /lib/kvlang/spec/layout语义/layout流水线接口

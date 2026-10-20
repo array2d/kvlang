@@ -32,7 +32,7 @@ pub fn vet(_eng: &Engine, src: &str) -> String {
 }
 
 pub fn format(_eng: &Engine, src: &str) -> String {
-    let mut out = vec![0u8; 65536];
+    let mut out = vec![0u8; src.len() * 4 + 65536];
     let mut err = buf();
     let rc = unsafe {
         kvlangLayoutFormat(
@@ -70,7 +70,7 @@ pub fn layout(eng: &Engine, code: &str) -> String {
 }
 
 pub fn printlib(eng: &Engine, lib: &str) -> String {
-    let mut out = vec![0u8; 65536];
+    let mut out = vec![0u8; 524288];
     let mut err = buf();
     let rc = unsafe {
         kvlangLayoutPrintlib(
@@ -100,7 +100,7 @@ pub fn printstack(eng: &Engine, pc: &str, vid: &str) -> String {
     if vid.is_empty() {
         return "error: printstack 无法确定 vthread（传 vid 或从 vthread 内调用）".to_string();
     }
-    let mut out = vec![0u8; 65536];
+    let mut out = vec![0u8; 262144];
     let mut err = buf();
     let rc = unsafe {
         kvlangLayoutPrintstack(

@@ -1,0 +1,18 @@
+// kvspace·members / kvspace·count：列目录成员并折叠同名孪生条目，以及统计成员个数
+//   值与同名目录共存时（如 /mtest/b 与 /mtest/b/sub），后端可能同时返回裸名与目录名两条，
+//   members 将其折叠为 1 条，count 对应该折叠后的成员数。
+// 期望输出:
+//   count: 3
+//   members: 3
+rwfunc test() -> () {
+	kvspace·deltree("/mtest")
+	kvspace·set("/mtest/a", 1)
+	kvspace·set("/mtest/b", 2)
+	kvspace·set("/mtest/b/sub", 3)
+	kvspace·set("/mtest/c", 4)
+	n = kvspace·count("/mtest/")
+	println("count:", n)
+	ms:[int64]·[]char/utf32 = {}
+	kvspace·members("/mtest/") -> (ms, cnt)
+	println("members:", cnt)
+}

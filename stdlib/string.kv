@@ -124,6 +124,28 @@ lib string {
 		}
 		string·slice(s, lo, hi) -> r
 	}
+	// trimprefix(s, pre) -> r：若以 pre 开头则剥除该前缀，否则原样返回（Go TrimPrefix / Python removeprefix / Rust strip_prefix）
+	rwfunc trimprefix(s:[]char/utf32, pre:[]char/utf32) -> (r:[]char/utf32) {
+		string·startswith(s, pre) -> ok
+		if (ok) {
+			pl = string·len(pre)
+			sl = string·len(s)
+			string·slice(s, pl, sl) -> r
+		} else {
+			s -> r
+		}
+	}
+	// trimsuffix(s, suf) -> r：若以 suf 结尾则剥除该后缀，否则原样返回（Go TrimSuffix / Python removesuffix / Rust strip_suffix）
+	rwfunc trimsuffix(s:[]char/utf32, suf:[]char/utf32) -> (r:[]char/utf32) {
+		string·endswith(s, suf) -> ok
+		if (ok) {
+			fl = string·len(suf)
+			sl = string·len(s)
+			string·slice(s, 0, sl - fl) -> r
+		} else {
+			s -> r
+		}
+	}
 	// padstart(s, n, pad) -> r：左侧补到长度 n（TS padStart / Python rjust），
 	// pad 超长取前段
 	rwfunc padstart(s:[]char/utf32, n:int64,
