@@ -413,6 +413,17 @@ int kvlangBuiltinAppend(kvlangFrame_t *f) {
     return rc == 0 ? 0 : kvlangBuiltinSetError(f, "%s", err);
 }
 
+/* 一维坐标段 "[i]" 解析；非该形式（多维/非坐标）返回 -1。 */
+static int64_t coord_of_name(const char *name) {
+    if (!name || name[0] != '[')
+        return -1;
+    char *end = NULL;
+    long long idx = strtoll(name + 1, &end, 10);
+    if (!end || *end != ']' || end[1] != 0 || idx < 0)
+        return -1;
+    return (int64_t)idx;
+}
+
 int kvlangBuiltinSlice(kvlangFrame_t *f) {
     if (f->instruction->read_count < 3)
         return kvlangBuiltinSetError(
@@ -432,50 +443,116 @@ int kvlangBuiltinSlice(kvlangFrame_t *f) {
         kvlangBuiltinFreeInputs(in, n);
         return rc;
     }
-    /* 原地语义（读槽即写槽）且源仍是 compact（pin 副本）时，长度直接取 ArrayLen，
-     * 免逐 key 探测；其它情况保持探测。 */
-    const char *rkey = f->instruction->reads[0].name;
-    int al = (rkey && strcmp(rkey, base) == 0 &&
-              kvlangXvalueElemSize(kvlangXvalueKind(&in[0])) > 0)
-                 ? kvlangXvalueArrayLen(&in[0])
-                 : separated_len(f->kvspace, base);
     int lo = (int)kvlangScalarI64(kvlangXvalueScalar(&in[1])),
         hi = (int)kvlangScalarI64(kvlangXvalueScalar(&in[2]));
+    const char *rkey = f->instruction->reads[0].name;
+    bool compact_src = rkey && strcmp(rkey, base) == 0 &&
+                       kvlangXvalueElemSize(kvlangXvalueKind(&in[0])) > 0;
+    char *dir = NULL, **names = NULL;
+    int al = 0;
+    bool rank_path = false;
+    if (compact_src) {
+        al = kvlangXvalueArrayLen(&in[0]);
+    } else {
+        dir = kvlangKeytreeMember(base, "");
+        if (kvlangKvspaceListLen(f->kvspace, dir, false, false, &al) != 0)
+            al = 0;
+        if (al > 0) {
+            /* 末元素坐标 == al-1 ⇒ dense（坐标连续），可按坐标切片；
+             * 否则带洞，需枚举名字走元素序列路径。 */
+            char *last = NULL;
+            if (kvlangKvspaceListAt(f->kvspace, dir, false, false, al - 1,
+                                    &last) == 0 &&
+                last) {
+                rank_path = coord_of_name(last) != (int64_t)al - 1;
+                free(last);
+            } else {
+                rank_path = true;
+            }
+        }
+        if (rank_path &&
+            kvlangKvspaceList(f->kvspace, dir, false, false, &names, &al) != 0)
+            al = 0;
+    }
     if (lo < 0 || hi < lo || hi > al) {
+        int e = kvlangBuiltinSetError(
+            f, "IndexError: array.slice: bounds [%d:%d] out of range (len=%d)",
+            lo, hi, al);
+        for (int i = 0; i < al; i++)
+            free(names ? names[i] : NULL);
+        free(names);
+        free(dir);
         free(base);
         free(fr);
         kvlangBuiltinFreeInputs(in, n);
-        return kvlangBuiltinSetError(
-            f, "IndexError: array.slice: bounds [%d:%d] out of range (len=%d)",
-            lo, hi, al);
+        return e;
     }
-    for (int i = lo; i < hi; i++) {
-        int64_t sc[1] = {i}, dc[1] = {i - lo};
-        char *sk = kvlangBuiltinScatterKey(base, sc, 1);
-        kvlangXvalue_t v;
-        kvlangXvalueZero(&v);
-        kvlangKvspaceGetOne(f->kvspace, sk, &v);
-        char *dk = kvlangBuiltinScatterKey(base, dc, 1);
-        kvlangKvPair_t p = {dk, v};
-        char err[256];
-        kvlangKvspaceSet(f->kvspace, &p, 1, err, sizeof err);
-        free(sk);
-        free(dk);
-    }
-    int tail = al - (hi - lo);
-    if (tail > 0) {
-        char **dk = malloc(sizeof *dk * (size_t)tail);
-        for (int i = 0; i < tail; i++) {
-            int64_t dc[1] = {hi - lo + i};
-            dk[i] = kvlangBuiltinScatterKey(base, dc, 1);
+    char err[256];
+    if (rank_path) {
+        /* 带洞数组：洞不是元素。按 memindex 排序后的元素序列取 [lo,hi)，
+         * 写连续坐标 [0,hi-lo)；源中坐标 >= hi-lo 的旧元素删除。 */
+        int cut = al;
+        for (int r = 0; r < al; r++) {
+            int64_t c = coord_of_name(names[r]);
+            if (c < 0 || c >= (int64_t)(hi - lo)) {
+                cut = r;
+                break;
+            }
         }
-        char err[256];
-        kvspaceDel(f->kvspace->handle, (const char *const *)dk, (uint32_t)tail,
-                       err, sizeof err);
-        for (int i = 0; i < tail; i++)
-            free(dk[i]);
-        free(dk);
+        for (int r = lo; r < hi; r++) {
+            char *sk = kvlangStringFormat("%s%s", dir, names[r]);
+            kvlangXvalue_t v;
+            kvlangXvalueZero(&v);
+            kvlangKvspaceGetOne(f->kvspace, sk, &v);
+            int64_t dc[1] = {r - lo};
+            char *dk = kvlangBuiltinScatterKey(base, dc, 1);
+            kvlangKvPair_t p = {dk, v};
+            kvlangKvspaceSet(f->kvspace, &p, 1, err, sizeof err);
+            free(sk);
+            free(dk);
+        }
+        if (cut < al) {
+            int tn = al - cut;
+            char **tk = malloc(sizeof *tk * (size_t)tn);
+            for (int i = 0; i < tn; i++)
+                tk[i] = kvlangStringFormat("%s%s", dir, names[cut + i]);
+            kvspaceDel(f->kvspace->handle, (const char *const *)tk,
+                       (uint32_t)tn, err, sizeof err);
+            for (int i = 0; i < tn; i++)
+                free(tk[i]);
+            free(tk);
+        }
+    } else {
+        for (int i = lo; i < hi; i++) {
+            int64_t sc[1] = {i}, dc[1] = {i - lo};
+            char *sk = kvlangBuiltinScatterKey(base, sc, 1);
+            kvlangXvalue_t v;
+            kvlangXvalueZero(&v);
+            kvlangKvspaceGetOne(f->kvspace, sk, &v);
+            char *dk = kvlangBuiltinScatterKey(base, dc, 1);
+            kvlangKvPair_t p = {dk, v};
+            kvlangKvspaceSet(f->kvspace, &p, 1, err, sizeof err);
+            free(sk);
+            free(dk);
+        }
+        int tail = al - (hi - lo);
+        if (tail > 0) {
+            char **dk = malloc(sizeof *dk * (size_t)tail);
+            for (int i = 0; i < tail; i++) {
+                int64_t dc[1] = {hi - lo + i};
+                dk[i] = kvlangBuiltinScatterKey(base, dc, 1);
+            }
+            kvspaceDel(f->kvspace->handle, (const char *const *)dk,
+                       (uint32_t)tail, err, sizeof err);
+            for (int i = 0; i < tail; i++)
+                free(dk[i]);
+            free(dk);
+        }
     }
+    for (int i = 0; i < al; i++)
+        free(names ? names[i] : NULL);
+    free(names);
+    free(dir);
     free(base);
     free(fr);
     kvlangBuiltinNextPc(f);
