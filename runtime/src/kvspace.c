@@ -9,6 +9,7 @@ kvspace_t *kvlangKvspaceConnect(const char *dsn) {
         free(k);
         return NULL;
     }
+    k->shm = strncmp(dsn, "shm://", 6) == 0;
     return k;
 }
 
@@ -82,6 +83,7 @@ int kvlangKvspaceGetHead(kvspace_t *k, const char *key, kvspaceHead_t *out) {
 int kvlangKvspaceSet(kvspace_t *k, const kvlangKvPair_t *pairs, int n, char *err, uint32_t err_cap) {
     for (int i = 0; i < n; i++) {
         const kvlangXvalue_t *v = &pairs[i].value;
+        kvlangBodyInvalidate(pairs[i].key);
         if (kvlangXvalueNone(v)) {
             const char *dk[1] = {pairs[i].key};
             if (kvspaceDel(k->handle, dk, 1, err, err_cap) != 0)
@@ -108,23 +110,28 @@ int kvlangKvspaceSetChar(kvspace_t *k, const char *key, const char *s) {
 }
 
 int kvlangKvspaceDelete(kvspace_t *k, const char *key, char *err, uint32_t err_cap) {
+    kvlangBodyInvalidate(key);
     const char *keys[1] = {key};
     return kvspaceDel(k->handle, keys, 1, err, err_cap);
 }
 
 int kvlangKvspaceDeleteTree(kvspace_t *k, const char *prefix, char *err, uint32_t err_cap) {
+    kvlangBodyInvalidateTree(prefix);
     return kvspaceDelTree(k->handle, prefix, err, err_cap);
 }
 
 int kvlangKvspaceCopy(kvspace_t *k, const char *src, const char *dst, char *err, uint32_t err_cap) {
+    kvlangBodyInvalidateTree(dst);
     return kvspaceCp(k->handle, src, dst, err, err_cap);
 }
 
 int kvlangKvspaceCopyTree(kvspace_t *k, const char *src, const char *dst, char *err, uint32_t err_cap) {
+    kvlangBodyInvalidateTree(dst);
     return kvspaceCpTree(k->handle, src, dst, err, err_cap);
 }
 
 int kvlangKvspaceCopyList(kvspace_t *k, const char *src, const char *dst, char *err, uint32_t err_cap) {
+    kvlangBodyInvalidateTree(dst);
     return kvspaceCpList(k->handle, src, dst, err, err_cap);
 }
 

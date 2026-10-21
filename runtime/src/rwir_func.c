@@ -1,5 +1,10 @@
 #include "runtime_internal.h"
 #include "rwir_internal.h"
+#include "func_code.h"
+
+#ifdef KV_COUNT
+unsigned long kvCBodyFast, kvCBodyFallback;
+#endif
 
 /* ── resolve ───────────────────────────────────────────────────────── */
 /* #116 后 if/while 不再建 scope 帧，当前帧 [d] 即 rwfunc 帧，frame_root 直接可用。 */
@@ -180,10 +185,16 @@ void kvlangBuiltinNextPc(kvlangFrame_t *f) {
 }
 
 int kvlangBuiltinWriteResult(kvlangFrame_t *f, const kvlangXvalue_t *result) {
+#ifdef KV_COUNT
+    if (f->instruction->write_count > 0)
+        kvCBodyFallback++; /* 真正落槽但未走 body 快路径的写 */
+#endif
     if (f->instruction->write_count > 0) {
         kvspaceKeyOff *wo = f->instruction->write_offs
                                 ? f->instruction->write_offs[0]
                                 : NULL;
+        if (wo)
+            kvlangBodyInvalidate(wo->key);
         if (wo && result->bytes && result->length > 0 &&
             kvspaceKeyOffSet(wo, result->bytes, result->length, NULL, 0) == 0) {
             kvlangBuiltinNextPc(f);
@@ -194,6 +205,7 @@ int kvlangBuiltinWriteResult(kvlangFrame_t *f, const kvlangXvalue_t *result) {
         if (!fr) { owned = kvlangKeytreeFrameRoot(f->pc); fr = owned; }
         char *key = kvlangBuiltinResolveWriteSlot(f->kvspace, fr, f->instruction->writes[0].name);
         free(owned);
+        kvlangBodyInvalidate(key);
         kvlangKvPair_t pair = { key, *result };
         char err[256];
         kvlangKvspaceSet(f->kvspace, &pair, 1, err, sizeof err);
@@ -211,6 +223,22 @@ int kvlangBuiltinEmitResult(kvlangFrame_t *f, kvlangXvalue_t *v) {
 
 static int emit_inline_scalar(kvlangFrame_t *f, const char *kind,
                               const uint8_t *raw, uint32_t len) {
+    /* 快路径：写槽 body 已绑定且宽度一致，只原地写 body，不编码 head、不 Set。
+     * 失效后在此惰性重捕一次（槽未解析时不动，等它被写后再来）。 */
+    kvspaceKeyOff *wo = f->instruction->write_offs
+                            ? f->instruction->write_offs[0]
+                            : NULL;
+    kvlangBodySlot *slot = wo ? wo->fast : NULL;
+    if (slot && !slot->ok && !slot->dead && slot->off->resolved)
+        kvlangBodyCapture(f->kvspace, slot, f->frame_root);
+    if (slot && slot->ok && slot->len == len) {
+#ifdef KV_COUNT
+        kvCBodyFast++;
+#endif
+        memcpy(slot->body, raw, len);
+        kvlangBuiltinNextPc(f);
+        return 0;
+    }
     uint8_t buf[64];
     uint32_t n = kvlangScalarEncode(kind, raw, len, buf, sizeof buf);
     kvlangXvalue_t v = {buf, n};

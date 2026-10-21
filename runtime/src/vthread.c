@@ -47,6 +47,7 @@ static bool value_to_buffer(kvlangXvalue_t *v, char *out, size_t cap) {
 void kvspaceKeyOffBind(kvspaceKeyOff *ko, kvspace_t *kvspace, const char *key) {
     ko->kvspace = kvspace;
     ko->key = key;
+    ko->fast = NULL;
     ko->resolved = kvspaceResolveRef(kvspace->handle, key, &ko->off) == 0;
 }
 

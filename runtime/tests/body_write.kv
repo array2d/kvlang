@@ -1,0 +1,53 @@
+// body-only 写路径回归：重复标量写、首次赋值、类型变化、同 key 多指令写、
+// 递归帧（每帧首次绑定）与 fast→fallback→fast 混合序列。期望输出见 body_write.sh。
+rwfunc fib(n:int64) -> (r:int64) {
+	if (n <= 1) {
+		n -> r
+	} else {
+		a = n - 1
+		b = n - 2
+		fib(a) -> x
+		fib(b) -> y
+		r = x + y
+	}
+}
+
+rwfunc test() -> () {
+	x:int64 = 0
+	i:int64 = 0
+	while (i < 200) {
+		x = x + 1
+		x = x + 2
+		i = i + 1
+	}
+	println("a", x)
+	x = "hello"
+	println("b", x)
+	x = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+	x = 5
+	x = x + 1
+	println("c", x)
+	y:int64 = 0
+	j:int64 = 0
+	while (j < 50) {
+		y = y + 1
+		y = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+		y = 5
+		j = j + 1
+	}
+	println("d", y)
+	f:float64 = 0.0
+	k:int64 = 0
+	while (k < 100) {
+		f = f + 0.5
+		k = k + 1
+	}
+	println("e", f)
+	z:int64 = 0
+	z = z + 1
+	z = 7
+	z = z + 2
+	println("g", z)
+	fib(10) -> ans
+	println("h", ans)
+}

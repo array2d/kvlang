@@ -190,6 +190,12 @@ static kvlangCodeRow_t *row_load(kvspace_t *kv, kvlangFuncCode_t *code, int s0,
     }
     row->handler_id =
         row->opcode_id >= 0 ? row->opcode_id : kvlangRwirRouteId();
+    /* 结果类型只取自同一张能力表；nw>1 不进快路径。 */
+    if (row->opcode_id >= 0 && row->nw == 1) {
+        const kvlangRwirCap *cap = &kvlangRwirCaps()[row->opcode_id];
+        row->result_kind = cap->result_kind;
+        row->result_width = cap->result_width;
+    }
     return row;
 
 fail:
@@ -218,7 +224,166 @@ static kvlangCodeRow_t *row_ensure(kvspace_t *kv, kvlangFrameCtx_t *ctx, int s0,
     return row;
 }
 
+/* ── 定长标量写：body 指针的捕获、失效与全局登记 ────────────────────
+ * 只有本 vthread 子树（/vthread/<vid>/）内的 shm 槽可捕获；任何整值写/删除
+ * 命中该 key 时精确清掉对应槽的指针（不清别的 key、不动 keyoff 世代）。
+ * 状态放在每候选行一个 kvlangBodySlot，不放大每个操作数 cell。 */
+#define BODY_BUCKETS 256
+static kvlangBodySlot *body_buckets[BODY_BUCKETS];
+#ifdef KV_COUNT
+unsigned long kvCBodyCells, kvCBodyCellsMax;
+unsigned long kvCBodyCapAttempt, kvCBodyCapOk;
+#endif
+
+static uint32_t key_hash(const char *k) {
+    uint32_t h = 2166136261u;
+    while (*k) {
+        h ^= (uint8_t)*k++;
+        h *= 16777619u;
+    }
+    return h;
+}
+
+static void body_unlink(kvlangBodySlot *slot) {
+    if (!slot->reg)
+        return;
+    kvlangBodySlot **pp = &body_buckets[slot->bucket];
+    while (*pp && *pp != slot)
+        pp = &(*pp)->next;
+    if (*pp)
+        *pp = slot->next;
+    slot->reg = false;
+    slot->next = NULL;
+#ifdef KV_COUNT
+    kvCBodyCells--;
+#endif
+}
+
+void kvlangBodyInvalidate(const char *key) {
+    if (!key)
+        return;
+    for (kvlangBodySlot *c = body_buckets[key_hash(key) % BODY_BUCKETS]; c;
+         c = c->next)
+        if (strcmp(c->key, key) == 0) {
+            c->ok = false;
+            c->body = NULL;
+            c->dead = false;
+        }
+}
+
+void kvlangBodyInvalidateTree(const char *prefix) {
+    if (!prefix)
+        return;
+    size_t n = strlen(prefix);
+    for (int b = 0; b < BODY_BUCKETS; b++)
+        for (kvlangBodySlot *c = body_buckets[b]; c; c = c->next)
+            if (strncmp(c->key, prefix, n) == 0 &&
+                (c->key[n] == 0 || c->key[n] == '/' ||
+                 strncmp(c->key + n, RUNTIME_MEMBER_SEP,
+                         sizeof RUNTIME_MEMBER_SEP - 1) == 0)) {
+                c->ok = false;
+                c->body = NULL;
+                c->dead = false;
+            }
+}
+
+/* frame_root 的 /vthread/<vid> 前缀（不含尾部 /）。 */
+static bool vthread_root(const char *frame_root, char *out, size_t cap) {
+    static const char pfx[] = "/vthread/";
+    if (!frame_root || strncmp(frame_root, pfx, sizeof pfx - 1) != 0)
+        return false;
+    const char *p = frame_root + sizeof pfx - 1;
+    const char *q = strchr(p, '/');
+    size_t n = q ? (size_t)(q - p) : strlen(p);
+    if (n == 0 || sizeof pfx - 1 + n >= cap)
+        return false;
+    memcpy(out, pfx, sizeof pfx - 1);
+    memcpy(out + sizeof pfx - 1, p, n);
+    out[sizeof pfx - 1 + n] = 0;
+    return true;
+}
+
+bool kvlangBodyCapture(kvspace_t *kv, kvlangBodySlot *slot,
+                       const char *frame_root) {
+    slot->ok = false;
+    slot->body = NULL;
+    /* 永久不资格（非 shm / 不在本 vthread 子树）：不再重试。 */
+    if (!kv || !kv->shm) {
+        slot->dead = true;
+        return false;
+    }
+    /* 槽还不存在：不算失败，等写使其 resolved 后再来。 */
+    if (!slot->off->resolved)
+        return false;
+    char root[KV_KEY_MAX];
+    bool in_tree = false;
+    if (vthread_root(frame_root, root, sizeof root)) {
+        size_t rl = strlen(root);
+        in_tree = strncmp(slot->key, root, rl) == 0 && slot->key[rl] == '/';
+    }
+    if (!in_tree) {
+        slot->dead = true;
+        return false;
+    }
+    /* 真正的候选槽：失败才算 dead，并登记以便该 key 被写后唤醒重试。 */
+    slot->dead = true;
+#ifdef KV_COUNT
+    kvCBodyCapAttempt++;
+#endif
+    if (!slot->reg) {
+        slot->bucket = key_hash(slot->key) % BODY_BUCKETS;
+        slot->next = body_buckets[slot->bucket];
+        body_buckets[slot->bucket] = slot;
+        slot->reg = true;
+#ifdef KV_COUNT
+        if (++kvCBodyCells > kvCBodyCellsMax)
+            kvCBodyCellsMax = kvCBodyCells;
+#endif
+    }
+    uint8_t *val = NULL;
+    uint32_t len = 0;
+    if (kvspaceGetByRef(kv->handle, &slot->off->off, slot->key, &val, &len) !=
+            0 ||
+        !val || len < XH_PREFIX)
+        return false;
+    /* 直接解 wire head：所有权守卫已限定本 vthread 自有的 frame-local 槽，
+     * ro/vid 恒为 0，无需再去后端取 sidecar。 */
+    if (val[0] < 5 || val[0] > 31)
+        return false;
+    uint32_t headlen = 1u << val[0];
+    if ((val[1] & 7u) != 0) /* 必须是 FIXED_SMALL 且非 ptr/ext */
+        return false;
+    if (headlen < XH_PREFIX || headlen > len)
+        return false;
+    uint32_t ltlen = 0;
+    while (XH_PREFIX + ltlen < headlen && val[XH_PREFIX + ltlen])
+        ltlen++;
+    if (XH_PREFIX + ltlen >= headlen) /* langtype 必须 NUL 终止 */
+        return false;
+    size_t kl = strlen(slot->kind);
+    if (ltlen != kl || memcmp(val + XH_PREFIX, slot->kind, kl) != 0)
+        return false;
+    /* FIXED_SMALL：a/b 必须为 0，宽度由 langtype 决定。 */
+    if (xh_rd64(val + 2) != 0 || xh_rd64(val + 10) != 0)
+        return false;
+    if (len != headlen + slot->width)
+        return false;
+    slot->body = val + headlen;
+    slot->len = slot->width;
+    slot->ok = true;
+    slot->dead = false;
+#ifdef KV_COUNT
+    kvCBodyCapOk++;
+#endif
+    return true;
+}
+
 static void bind_free(kvlangRowBind_t *b) {
+    if (b->body) {
+        if (b->body->reg)
+            body_unlink(b->body);
+        free(b->body);
+    }
     for (int i = 0; i < b->n; i++) {
         free(b->cell[i].key);
         free(b->cell[i].type);
@@ -275,6 +440,21 @@ static int bind_row(kvspace_t *kv, kvlangFrameCtx_t *ctx, int s0,
         /* 变量可能尚未创建：失败留待执行时重试，不阻断加载。 */
         kvspaceKeyOffBind(&cell->off, kv, cell->key);
     }
+    /* 候选行：挂一个 body 绑定槽（只此一处分配，不放大每个 cell）。 */
+    if (row->result_kind) {
+        kvlangBodySlot *slot = calloc(1, sizeof *slot);
+        if (!slot) {
+            snprintf(err, err_cap, "Runtime: out of memory binding body slot");
+            goto fail;
+        }
+        kvlangBoundCell_t *wc = &b->cell[row->nr];
+        slot->key = wc->key;
+        slot->kind = row->result_kind;
+        slot->width = row->result_width;
+        slot->off = &wc->off;
+        wc->off.fast = slot;
+        b->body = slot;
+    }
     /* 写槽会原地改写 key：同 key 或其后代的读视图须在执行前固化。
      * 绑定期判定一次，热路径只多一个 flag 判断。 */
     for (int i = 0; i < row->nr; i++)
@@ -310,6 +490,12 @@ void kvlangFrameCtxSync(kvlangFrameCtx_t *ctx, uint32_t epoch) {
             continue;
         for (int j = 0; j < ctx->binds[i].n; j++)
             ctx->binds[i].cell[j].off.resolved = false;
+        /* 地址世代前进后槽可能已被删/重建，body 指针同样作废。 */
+        if (ctx->binds[i].body) {
+            ctx->binds[i].body->ok = false;
+            ctx->binds[i].body->body = NULL;
+            ctx->binds[i].body->dead = false;
+        }
     }
     ctx->epoch = epoch;
 }
