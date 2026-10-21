@@ -8,7 +8,17 @@ camelCase）——kvspace 层前缀 `kvspace`（`kvspaceGet` / `kvspaceWriteInPl
 `kvlang_runtime_connect`），头文件名可用下划线（`kvlang_runtime.h`），导出符号一律无下划线。
 
 访问 kvspace 的唯一 C ABI 由前端 dispatch 静态导出（`kvspace/include/kvspace/kvspace.h`）。读写采用
-**借用指针模型**：读返回指向后端常驻空间的指针，调用方不得释放；写返回 body 偏移指针供调用方直接填。
+**借用指针模型**：读返回指向后端常驻空间的指针，调用方不得释放；寿命到该 key 被写/删或 handle
+close（没有指令边界回收调用）。写返回 body 偏移指针供调用方直接填。
+
+**durable 读是 handle 内 per-key 常驻快照（normative）**：同一 key 首次读后直接返回同一缓冲，
+直到**本 handle** 写/删该 key 才失效；其它 handle/进程对该 key 的写不被观测。跨进程等待必须用
+`kvspaceWatch`，不得用 `kvspaceGet` 轮询。
+
+**volatile keys（normative）**：控制键 `/vthread/*/‥status` 不走快照——每次
+`kvspaceGet`/`kvspaceGetPart` 都重读后端；实现用双缓冲，上一视图保活到该 key 下一次读。
+因此外部暂停/恢复/终止（改该键）对运行中的 kvcpu 立即可见。除此之外的 key 都是 snapshot；
+新增外部可改写键必须在此登记为 volatile。
 核心符号：
 
 | 符号 | 语义 |
@@ -76,7 +86,6 @@ dispatch 静态导出；后端 `kvspace-c` / `kvspace-durable` 各导出同一�
     kvspaceNewFloat64
     kvspaceNewInt64
     kvspaceNewPtr
-    kvspaceReadReset
     kvspaceRmindexExt
     kvspaceSetPart
     kvspaceTlvEncode

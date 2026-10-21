@@ -33,7 +33,7 @@
 kvlang 侧调用面 **35 处**：`runtime/src/` 30、`layout/src/ffi.rs` 3、`runtime-rs/src/` 5。
 
 已经存在的 0-copy 地基：`kvlangXvalue_t.borrowed` 借用标志、`kvspaceGet` 的借用读约定
-（「*out 指向后端常驻/回收空间，调用方不得 free」）、`kvspaceReadReset` 的指令边界回收池。
+（「*out 指向后端常驻空间，调用方不得 free」）；阶段 B 已删除 `kvspaceReadReset`，durable 读指针寿命改为到该 key 被写/删或 handle close。
 
 **现成反例**：`runtime_internal.h:147` 的 `kvlangXvalueNone` 已经裸偏移快判
 （`len==32 && data[0]==5 && data[1]==0 && data[18]==0`），却在末尾又调一次

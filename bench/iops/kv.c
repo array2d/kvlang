@@ -34,7 +34,8 @@ static int set_tlv(void *h, const char *key, uint8_t *tlv, uint32_t tlen,
     body_len = hd.body_len < 0 ? 0 : (uint32_t)hd.body_len;
     if (kvspaceWriteInPlace(h, key, 0, body_len, &dst, err, err_cap) != 0) {
         if (kvspaceWriteNewPlace(h, key, hd.ref, hd.storetype, hd.ro, hd.vid,
-                                 hd.langtype, body_len, &dst, err, err_cap) != 0)
+                                 hd.langtype, body_len, (uint64_t)body_len, &dst,
+                                 err, err_cap) != 0)
             return 1;
     }
     if (body_len && dst)
@@ -85,11 +86,9 @@ int main(void) {
         if (kvspaceDecodeHead(d, len, &hd) != 0 || hd.body_len < 8 ||
             hd.body_offset + 8 > (int32_t)len) {
             fprintf(stderr, "decode failed len=%u\n", len);
-            kvspaceReadReset(h);
             return 1;
         }
         a = rd64(d + hd.body_offset);
-        kvspaceReadReset(h);
         if (a >= n)
             break;
         a += 1;

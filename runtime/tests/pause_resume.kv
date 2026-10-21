@@ -1,0 +1,8 @@
+// 仅供 tests/pause_resume.sh：无限进度循环，便于外部 handle 改 ‥status 观察暂停/恢复。
+rwfunc worker() -> () {
+	i = 0
+	while (i < 100000000) {
+		i = i + 1
+		kvspace·set("/pausetest/i", i)
+	}
+}
