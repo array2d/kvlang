@@ -172,6 +172,23 @@ static const kvlangRwirCap myrwircaps[] = {
     KVLANG_INT_BASE_KINDS(CAP_INT_BASE)
     KVLANG_INT_SIGNED_KINDS(CAP_INT_SIGNED)
     KVLANG_INT_U64_KINDS(CAP_INT_U64)
+    /* Phase 2 浮点：float32（float64 族见上）。 */
+#define CAP_F32(ktok, kstr, w)                                                 \
+    {kstr MEMBER_SEP "add", kvlangBuiltin##ktok##Add, false, kstr, w},         \
+    {kstr MEMBER_SEP "sub", kvlangBuiltin##ktok##Sub, false, kstr, w},         \
+    {kstr MEMBER_SEP "mul", kvlangBuiltin##ktok##Mul, false, kstr, w},         \
+    {kstr MEMBER_SEP "div", kvlangBuiltin##ktok##Div, false, kstr, w},         \
+    {kstr MEMBER_SEP "max", kvlangBuiltin##ktok##Max, false, kstr, w},         \
+    {kstr MEMBER_SEP "min", kvlangBuiltin##ktok##Min, false, kstr, w},         \
+    {kstr MEMBER_SEP "neg", kvlangBuiltin##ktok##Neg, false, kstr, w},         \
+    {kstr MEMBER_SEP "abs", kvlangBuiltin##ktok##Abs, false, kstr, w},         \
+    {kstr MEMBER_SEP "eq", kvlangBuiltin##ktok##Eq, false, KVSPACE_KIND_BOOL, 1},\
+    {kstr MEMBER_SEP "neq", kvlangBuiltin##ktok##Neq, false, KVSPACE_KIND_BOOL, 1},\
+    {kstr MEMBER_SEP "lt", kvlangBuiltin##ktok##Lt, false, KVSPACE_KIND_BOOL, 1},\
+    {kstr MEMBER_SEP "le", kvlangBuiltin##ktok##Le, false, KVSPACE_KIND_BOOL, 1},\
+    {kstr MEMBER_SEP "gt", kvlangBuiltin##ktok##Gt, false, KVSPACE_KIND_BOOL, 1},\
+    {kstr MEMBER_SEP "ge", kvlangBuiltin##ktok##Ge, false, KVSPACE_KIND_BOOL, 1},
+    KVLANG_FLOAT32_KINDS(CAP_F32)
     {"sub", kvlangBuiltinSub, false}, {"-", kvlangBuiltinSub, false},
     {"mul", kvlangBuiltinMul, false}, {"×", kvlangBuiltinMul, false},
     {"div", kvlangBuiltinDiv, false}, {"÷", kvlangBuiltinDiv, false},

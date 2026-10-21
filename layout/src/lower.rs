@@ -1342,8 +1342,8 @@ fn specialize_inst(
         return;
     }
     let k = &kinds[0];
-    if !(builtin::is_int_kind(k) || k == "float64") {
-        return; /* float32 留到浮点阶段 */
+    if !(builtin::is_int_kind(k) || k == "float64" || k == "float32") {
+        return;
     }
     if kinds.iter().any(|t| t != k) {
         return;
@@ -1359,6 +1359,11 @@ fn specialize_inst(
     }
     if word == "sign" {
         if k != "int64" {
+            return;
+        }
+    } else if matches!(word.as_str(), "sqrt" | "exp" | "log" | "pow") {
+        /* 通用实现对这些恒给 float64；float32 不特化。 */
+        if k != "float64" {
             return;
         }
     } else if matches!(word.as_str(), "bitand" | "bitor" | "bitxor" | "shl" | "shr") {
