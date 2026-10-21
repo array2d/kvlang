@@ -14,7 +14,7 @@ static int kvlangBuiltinCompare(kvlangFrame_t *f, cmp_op op) {
         bool eq = kvlangXvalueNone(&in[0]) == kvlangXvalueNone(&in[1]);
         bool r = (op == CMP_EQ) ? eq : (op == CMP_NEQ) ? !eq : false;
         kvlangXvalue_t rv; kvlangXvalueNewBool(&rv, r);
-        int rc = kvlangBuiltinWriteResult(f, &rv); kvlangXvalueFree(&rv); kvlangBuiltinFreeInputs(in, n); return rc;
+        int rc = kvlangBuiltinWriteResult(f, &rv);kvlangBuiltinFreeInputs(in, n); return rc;
     }
     bool r;
     kvlangScalar_t a = kvlangXvalueScalar(&in[0]), b = kvlangXvalueScalar(&in[1]);
@@ -52,7 +52,7 @@ static int kvlangBuiltinCompare(kvlangFrame_t *f, cmp_op op) {
         kvlangBuiltinSetError(f, "TypeError: cannot compare %s with %s", kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1])); kvlangBuiltinFreeInputs(in, n); return -1;
     }
     kvlangXvalue_t rv; kvlangXvalueNewBool(&rv, r);
-    int rc = kvlangBuiltinWriteResult(f, &rv); kvlangXvalueFree(&rv); kvlangBuiltinFreeInputs(in, n);
+    int rc = kvlangBuiltinWriteResult(f, &rv);kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
 
@@ -77,20 +77,20 @@ int kvlangBuiltinAnd(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     if (!require_bool(f, "&&", in, n, 2)) { kvlangBuiltinFreeInputs(in, n); return -1; }
     kvlangXvalue_t r; kvlangXvalueNewBool(&r, kvlangScalarI64(kvlangXvalueScalar(&in[0])) != 0 && kvlangScalarI64(kvlangXvalueScalar(&in[1])) != 0);
-    int rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r); kvlangBuiltinFreeInputs(in, n);
+    int rc = kvlangBuiltinWriteResult(f, &r);kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
 int kvlangBuiltinOr(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     if (!require_bool(f, "||", in, n, 2)) { kvlangBuiltinFreeInputs(in, n); return -1; }
     kvlangXvalue_t r; kvlangXvalueNewBool(&r, kvlangScalarI64(kvlangXvalueScalar(&in[0])) != 0 || kvlangScalarI64(kvlangXvalueScalar(&in[1])) != 0);
-    int rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r); kvlangBuiltinFreeInputs(in, n);
+    int rc = kvlangBuiltinWriteResult(f, &r);kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
 int kvlangBuiltinNot(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     if (!require_bool(f, "!", in, n, 1)) { kvlangBuiltinFreeInputs(in, n); return -1; }
     kvlangXvalue_t r; kvlangXvalueNewBool(&r, kvlangScalarI64(kvlangXvalueScalar(&in[0])) == 0);
-    int rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r); kvlangBuiltinFreeInputs(in, n);
+    int rc = kvlangBuiltinWriteResult(f, &r);kvlangBuiltinFreeInputs(in, n);
     return rc;
 }

@@ -26,7 +26,6 @@ int main(void) {
         char err[128];
         if (rc == 0)
             rc = kvlangKvspaceSet(kv, &pair, 1, err, sizeof err);
-        kvlangXvalueFree(&value);
         _exit(rc == 0 ? 0 : 3);
     }
     int status = 0;
@@ -51,7 +50,6 @@ int main(void) {
         for (int i = 1; i < 8; i++)
             ok = ok && body[i] == 0;
     }
-    kvlangXvalueFree(&value);
     kvlangKvspaceDisconnect(kv);
     return ok ? 0 : 1;
 }

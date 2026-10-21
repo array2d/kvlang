@@ -28,7 +28,6 @@ static char *original_absolute_arg(kvlangFrame_t *f, int idx) {
     kvlangXvalueZero(&lib);
     kvlangKvspaceGetOne(f->kvspace, key, &lib);
     char *root = kvlangXvalueNone(&lib) ? NULL : kvlangXvalueValueString(&lib);
-    kvlangXvalueFree(&lib);
     if (!root || root[0] != '/') {
         free(root);
         free(fr);
@@ -46,7 +45,6 @@ static char *original_absolute_arg(kvlangFrame_t *f, int idx) {
         free(name);
         name = NULL;
     }
-    kvlangXvalueFree(&source);
     free(root);
     free(fr);
     return name;
@@ -141,7 +139,6 @@ int kvlangBuiltinKvspaceGet(kvlangFrame_t *f) {
     kvlangXvalueZero(&v);
     kvlangKvspaceGetOne(f->kvspace, key, &v);
     int rc = kvlangBuiltinWriteResult(f, &v);
-    kvlangXvalueFree(&v);
     free(key);
     kvlangBuiltinFreeInputs(in, n);
     return rc;
@@ -161,7 +158,6 @@ int kvlangBuiltinCheckMemoryHead(kvspace_t *kv, const char *frame_root,
     kvlangXvalueZero(&cur);
     kvlangKvspaceGetOne(kv, path, &cur);
     int ok = !kvlangXvalueNone(&cur);
-    kvlangXvalueFree(&cur);
     free(path);
     return ok ? 0 : -1;
 }
@@ -320,8 +316,6 @@ int kvlangBuiltinKvlangAbs(kvlangFrame_t *f) {
     kvlangXvalue_t r;
     kvlangXvalueNewPtr(&r, lt, p);
     int rc = kvlangBuiltinWriteResult(f, &r);
-    kvlangXvalueFree(&r);
-    kvlangXvalueFree(&tg);
     free(p);
     kvlangBuiltinFreeInputs(in, n);
     return rc;
@@ -355,7 +349,6 @@ int kvlangBuiltinKvspaceListLength(kvlangFrame_t *f) {
     kvlangXvalue_t r;
     kvlangXvalueNewInt64(&r, count);
     int rc = kvlangBuiltinWriteResult(f, &r);
-    kvlangXvalueFree(&r);
     kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
@@ -376,7 +369,6 @@ int kvlangBuiltinKvspaceListAt(kvlangFrame_t *f) {
         free(key);
     }
     int rc = kvlangBuiltinWriteResult(f, &r);
-    kvlangXvalueFree(&r);
     kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
@@ -444,7 +436,6 @@ int kvlangBuiltinKvspaceWatch(kvlangFrame_t *f) {
     kvlangXvalueZero(&v);
     kvlangKvspaceWatch(f->kvspace, key, &in[1], 1000000, &v);
     int rc = kvlangBuiltinWriteResult(f, &v);
-    kvlangXvalueFree(&v);
     free(key);
     kvlangBuiltinFreeInputs(in, n);
     return rc;

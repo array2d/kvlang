@@ -13,28 +13,18 @@ static uint64_t read_u64(const uint8_t *p) {
     return (uint64_t)read_u32(p) | ((uint64_t)read_u32(p + 4) << 32);
 }
 
-void kvlangXvalueFree(kvlangXvalue_t *v) {
-    if (!v->is_borrowed)
+/* 构造时无当前 arena ⇒ buffer 是 malloc 的，由调用方在此显式释放；
+ * 有 arena 时归 arena，整体回收。仅用于一次性系统调用（spawn/set/register 等）。 */
+void kvlangXvalueRelease(kvlangXvalue_t *v) {
+    if (!kvlangCurrentArena && v->bytes)
         free(v->bytes);
     v->bytes = NULL;
     v->length = 0;
-    v->is_borrowed = 0;
 }
 
 void kvlangXvalueSetBytes(kvlangXvalue_t *v, uint8_t *data, uint32_t len) {
     v->bytes = data;
     v->length = len;
-    v->is_borrowed = 0;
-}
-
-/* Own borrowed values across reads within an instruction. */
-void kvlangXvalueMaterialize(kvlangXvalue_t *v) {
-    if (v->is_borrowed && v->bytes && v->length > 0) {
-        uint8_t *o = malloc(v->length);
-        memcpy(o, v->bytes, v->length);
-        v->bytes = o;
-    }
-    v->is_borrowed = 0;
 }
 
 /* 有界查找 MEMBER_SEP（多字节）；无则 -1。 */
@@ -526,9 +516,9 @@ char *kvlangXvalueValueString(const kvlangXvalue_t *v) {
 void kvlangXvalueNewTlv(kvlangXvalue_t *v, const char *kind, const uint8_t *raw,
                         uint32_t raw_len, int32_t al) {
     uint32_t len;
-    v->bytes = kvlangXvalueEncodeTlv(kind, raw, raw_len, al, &len);
+    v->bytes = kvlangArenaOwn(
+        kvlangCurrentArena, kvlangXvalueEncodeTlv(kind, raw, raw_len, al, &len));
     v->length = len;
-    v->is_borrowed = 0;
 }
 
 /* 显式 ndim/dims 构造（保留多维 shape，供 xv.shape/xv.set 用）。 */
@@ -542,9 +532,8 @@ void kvlangXvalueNewTlvDims(kvlangXvalue_t *v, const char *kind,
         kvlangXvalueZero(v);
         return;
     }
-    v->bytes = tmp;
+    v->bytes = kvlangArenaOwn(kvlangCurrentArena, tmp);
     v->length = tl;
-    v->is_borrowed = 0;
 }
 
 void kvlangXvalueNewInt64(kvlangXvalue_t *v, int64_t n) {
@@ -607,9 +596,9 @@ void kvlangXvalueNewPtr(kvlangXvalue_t *v, const char *target_langtype,
         kvlangXvalueZero(v);
         return;
     }
-    v->bytes = kvlangXvalueOwn(tmp, tl, &len);
+    v->bytes = kvlangArenaOwn(kvlangCurrentArena,
+                              kvlangXvalueOwn(tmp, tl, &len));
     v->length = len;
-    v->is_borrowed = 0;
 }
 /* def rwir 路由头：body 仅计数头 [nr:u16 LE][nw:u16 LE][dynamic:u8]，无参数载荷。
  * 各参数类型由 kvlangDefRwir 落 /lib/<op>/[0,x] 签名行槽（def langtype）。 */

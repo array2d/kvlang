@@ -12,7 +12,6 @@ void kvlangBuiltinResolveReadValue(kvspace_t *kv, const char *frame_root, const 
     if (val && !kvlangXvalueNone(val) && !kvlangXvalueKindIs(val, KVSPACE_KIND_RWIR) && !kvlangXvalueKindIs(val, KVSPACE_KIND_RWFUNC)) {
         out->bytes = val->bytes; /* Borrowed for this instruction. */
         out->length = val->length;
-        out->is_borrowed = 1;
         return;
     }
     if (name && name[0] == '/') {
@@ -38,7 +37,6 @@ void kvlangBuiltinResolveReadValue(kvspace_t *kv, const char *frame_root, const 
     } else if (!kvlangXvalueNone(&pv)) {
         *out = pv; pv.bytes = NULL; pv.length = 0;
     }
-    kvlangXvalueFree(&pv);
     if (stk != stkbuf)
         free(stk);
 }
@@ -70,7 +68,6 @@ char *kvlangBuiltinResolveWriteSlot(kvspace_t *kv, const char *frame_root, const
             abort();
         }
         char *target = kvlangXvaluePtrTarget(&pv);
-        kvlangXvalueFree(&pv);
         if (strncmp(name + 1, "[0,", 3) == 0) {
             kvlangXvalue_t arg;
             kvlangXvalueZero(&arg);
@@ -80,7 +77,6 @@ char *kvlangBuiltinResolveWriteSlot(kvspace_t *kv, const char *frame_root, const
                 abort();
             }
             char *value_key = kvlangXvaluePtrTarget(&arg);
-            kvlangXvalueFree(&arg);
             free(target);
             target = value_key;
         }
@@ -125,7 +121,6 @@ static void format_array(const kvlangXvalue_t *v, char **out) {
     for (int i = 0; i < n; i++) {
         kvlangXvalue_t e; kvlangXvalueElementAt(v, i, &e);
         kvlangDisplay(&e, &parts[i]);
-        kvlangXvalueFree(&e);
         total += strlen(parts[i]) + (i ? 2 : 0);
     }
     char *s = malloc(total + 1);
@@ -171,7 +166,10 @@ int kvlangBuiltinReadInputs(kvlangFrame_t *f, kvlangXvalue_t *out, int cap) {
     return n;
 }
 
-void kvlangBuiltinFreeInputs(kvlangXvalue_t *in, int n) { for (int i = 0; i < n; i++) kvlangXvalueFree(&in[i]); }
+void kvlangBuiltinFreeInputs(kvlangXvalue_t *in, int n) {
+    (void)in;
+    (void)n;
+}
 
 void kvlangBuiltinNextPc(kvlangFrame_t *f) {
     char buf[KV_KEY_MAX];
@@ -234,7 +232,7 @@ int kvlangBuiltinExecuteCopy(kvlangFrame_t *f) {
                 snprintf(msg, sizeof msg, "TypeError: memhead %s does not exist — declare the container first (e.g. `%s:T = {}`)", b, b);
             free(b);
             if (ok != 0) {
-                kvlangXvalueFree(&v); free(owned);
+                free(owned);
                 kvlangVthreadSetError(kv, f->vthread_id, f->pc, msg);
                 return -1;
             }
@@ -250,7 +248,6 @@ int kvlangBuiltinExecuteCopy(kvlangFrame_t *f) {
         kvlangKvspaceSet(kv, &pair, 1, err, sizeof err);
         free(key);
     }
-    kvlangXvalueFree(&v);
     free(owned);
     kvlangBuiltinNextPc(f);
     return 0;

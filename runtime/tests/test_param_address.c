@@ -12,7 +12,6 @@ static int set_i64(kvspace_t *kv, const char *key, int64_t value) {
     kvlangXvalue_t xv;
     kvlangXvalueNewInt64(&xv, value);
     int rc = set_value(kv, key, &xv);
-    kvlangXvalueFree(&xv);
     return rc;
 }
 
@@ -21,7 +20,6 @@ static int64_t get_i64(kvspace_t *kv, const char *key) {
     kvlangXvalueZero(&xv);
     kvlangKvspaceGetOne(kv, key, &xv);
     int64_t value = kvlangScalarI64(kvlangXvalueScalar(&xv));
-    kvlangXvalueFree(&xv);
     return value;
 }
 
@@ -62,12 +60,6 @@ int main(void) {
              set_value(kv, "/lib/f/[1,1]", &write_slot) == 0 &&
              set_i64(kv, "/vthread/vt0/[1]/x", 5) == 0 &&
              set_i64(kv, "/vthread/vt0/[1]/y", 3) == 0;
-    kvlangXvalueFree(&anchor);
-    kvlangXvalueFree(&read_type);
-    kvlangXvalueFree(&write_type);
-    kvlangXvalueFree(&opcode);
-    kvlangXvalueFree(&read_operand);
-    kvlangXvalueFree(&write_slot);
     if (!ok)
         return 1;
 
@@ -97,11 +89,9 @@ int main(void) {
     ok = ok && kvlangXvalueIsPtr(&physical) && physical_target &&
          strcmp(physical_target, "/vthread/vt0/[1]/x") == 0;
     free(physical_target);
-    kvlangXvalueFree(&physical);
     kvlangXvalue_t extra;
     kvlangXvalueNewInt64(&extra, 99);
     ok = ok && set_value(kv, "/lib/f/[1,-2]", &extra) == 0;
-    kvlangXvalueFree(&extra);
     if (!ok || kvlangRwirDecode(kv, base, pc, &decoded, err, sizeof err) != 0)
         return 1;
     ok = ok && decoded.read_count == 1;
@@ -122,10 +112,6 @@ int main(void) {
          set_value(kv, "/lib/f/[2,-1]", &path_slot) == 0 &&
          set_value(kv, "/lib/f/[2,1]", &result_slot) == 0 &&
          set_value(kv, absolute, &path_value) == 0;
-    kvlangXvalueFree(&path_slot);
-    kvlangXvalueFree(&result_slot);
-    kvlangXvalueFree(&opcode);
-    kvlangXvalueFree(&path_value);
     const char *path_pc = "/vthread/vt0/[2]/[2,0]";
     if (!ok || kvlangRwirDecode(kv, base, path_pc, &decoded, err, sizeof err) != 0)
         return 1;
@@ -139,7 +125,6 @@ int main(void) {
     char *result_text = kvlangXvalueValueString(&result);
     ok = ok && strcmp(result_text, "/wrong") == 0;
     free(result_text);
-    kvlangXvalueFree(&result);
 
     const uint8_t any_operand[] = {0, 0, 0, 0, 0, 's', 'o', 'u', 'r', 'c', 'e',
                                    0, 'a', 'n', 'y'};
@@ -151,8 +136,6 @@ int main(void) {
                        sizeof one_read_op, 1);
     ok = ok && set_value(kv, "/lib/f/[3,0]", &one_read_opcode) == 0 &&
          set_value(kv, "/lib/f/[3,-1]", &any_slot) == 0;
-    kvlangXvalueFree(&one_read_opcode);
-    kvlangXvalueFree(&any_slot);
     const char *any_pc = "/vthread/vt0/[2]/[3,0]";
     if (!ok || kvlangRwirDecode(kv, base, any_pc, &decoded, err, sizeof err) != 0)
         return 1;
@@ -172,12 +155,10 @@ int main(void) {
     if (!kvlangXvalueIsPtr(&outer))
         return 1;
     char *middle = kvlangXvaluePtrTarget(&outer);
-    kvlangXvalueFree(&outer);
     kvlangKvspaceGetOne(kv, middle, &inner);
     if (!kvlangXvalueIsPtr(&inner))
         return 1;
     char *source = kvlangXvaluePtrTarget(&inner);
-    kvlangXvalueFree(&inner);
     ok = ok && strcmp(source, "/vthread/vt0/[1]/x") == 0;
     free(middle);
     free(source);
@@ -185,7 +166,6 @@ int main(void) {
     kvlangXvalue_t got;
     kvlangBuiltinResolveReadValue(kv, "/vthread/vt0/[2]", "*[0,-1]", NULL, &got);
     ok = ok && kvlangScalarI64(kvlangXvalueScalar(&got)) == 5;
-    kvlangXvalueFree(&got);
     ok = ok && set_i64(kv, "/vthread/vt0/[1]/x", 9) == 0;
     kvlangKvspaceDisconnect(kv);
     kv = kvlangKvspaceConnect(dsn);
@@ -199,7 +179,6 @@ int main(void) {
     kvlangRwirInstructionFree(&decoded);
     kvlangBuiltinResolveReadValue(kv, "/vthread/vt0/[2]", "*[0,-1]", NULL, &got);
     ok = ok && kvlangScalarI64(kvlangXvalueScalar(&got)) == 9;
-    kvlangXvalueFree(&got);
 
     char *dest = kvlangBuiltinResolveWriteSlot(kv, "/vthread/vt0/[2]", "*[0,1]");
     ok = ok && strcmp(dest, "/vthread/vt0/[1]/y") == 0;
@@ -212,7 +191,6 @@ int main(void) {
         return 1;
     kvlangBuiltinResolveReadValue(kv, "/vthread/vt0/[2]", "*[0,-1]", NULL, &got);
     ok = ok && kvlangXvalueNone(&got);
-    kvlangXvalueFree(&got);
 
     kvlangFrame_t child = {.kvspace = kv, .vthread_id = "vt0",
                             .pc = "/vthread/vt0/[2]/[1,0]"};
@@ -221,10 +199,8 @@ int main(void) {
     char *resumed = kvlangXvalueValueString(&got);
     ok = ok && strcmp(resumed, "/vthread/vt0/[1]/[2,0]") == 0;
     free(resumed);
-    kvlangXvalueFree(&got);
     kvlangKvspaceGetOne(kv, "/vthread/vt0/[2]/[0,-1]", &got);
     ok = ok && kvlangXvalueNone(&got);
-    kvlangXvalueFree(&got);
     kvlangKvspaceDisconnect(kv);
     return ok ? 0 : 1;
 }

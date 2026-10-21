@@ -105,7 +105,6 @@ int check_read_types(kvspace_t *kv, const char *vtid, const char *pc,
         bool ok = kvlangLangtypeMatch(norm, k, kx.ndim, kx.dims);
         char kbuf[40];
         snprintf(kbuf, sizeof kbuf, "%s", k[0] ? k : "None");
-        kvlangXvalueFree(&v);
         if (!ok) {
             char msg[256];
             snprintf(msg, sizeof msg,
@@ -169,7 +168,6 @@ static char *read_signature_slot(kvspace_t *kv, const char *dir, int x) {
         memcpy(s, b, (size_t)bl);
         s[bl] = 0;
     }
-    kvlangXvalueFree(&v);
     return s;
 }
 
@@ -221,19 +219,16 @@ static int load_def_counts(kvspace_t *kv, const char *key, int *out_nr,
     kvlangXvalueZero(&v);
     kvlangKvspaceGetOne(kv, key, &v);
     if (kvlangXvalueNone(&v)) {
-        kvlangXvalueFree(&v);
         return -1;
     }
     const uint8_t *b = xh_body_of(&v);
     int32_t bl = xh_content_len_of(&v);
     if (bl < 5) {
-        kvlangXvalueFree(&v);
         return -1;
     }
     *out_nr = b[0] | (b[1] << 8);
     *out_nw = b[2] | (b[3] << 8);
     *out_dyn = b[4];
-    kvlangXvalueFree(&v);
     return 0;
 }
 

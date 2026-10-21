@@ -44,7 +44,6 @@ int kvlangBuiltinNdarrayNumel(kvlangFrame_t *f) {
     kvlangXvalue_t r;
     kvlangXvalueNewInt64(&r, n_el);
     int rc = kvlangBuiltinWriteResult(f, &r);
-    kvlangXvalueFree(&r);
     return rc;
 }
 
@@ -62,7 +61,6 @@ int kvlangBuiltinNdarrayDim(kvlangFrame_t *f) {
     kvlangXvalue_t r;
     kvlangXvalueNewInt64(&r, ndim);
     int rc = kvlangBuiltinWriteResult(f, &r);
-    kvlangXvalueFree(&r);
     return rc;
 }
 
@@ -92,6 +90,5 @@ int kvlangBuiltinNdarrayShape(kvlangFrame_t *f) {
     kvlangXvalue_t r;
     kvlangXvalueNewTlvDims(&r, KVSPACE_KIND_INT64, raw, raw_len, sd, 1);
     int rc = kvlangBuiltinWriteResult(f, &r);
-    kvlangXvalueFree(&r);
     return rc;
 }

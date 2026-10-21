@@ -1,0 +1,21 @@
+// vthread·run 嵌套：父 vthread 循环创建子 vthread 并阻塞运行到结束；
+// 每次子返回后父继续构造/写值（验证嵌套 ExecuteMode 的 arena 归还）
+// 期望输出:
+//   child
+//   child
+//   child
+//   sum = 6
+rwfunc child() -> () {
+	println("child")
+}
+
+rwfunc test() -> () {
+	sum = 0
+	xs:[]int64 = [0, 1, 2]
+	for (i in xs) {
+		vthread·create("child") -> vid
+		vthread·run(vid)
+		sum = sum + i + 1
+	}
+	println("sum =", sum)
+}

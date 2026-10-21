@@ -77,7 +77,6 @@ static char *display_map(kvspace_t *k, const char *path) {
                 : kvlangKindIsMap(kvlangXvalueKind(&mv))
                     ? display_map(k, mk)
                     : kvlangXvalueValueString(&mv);
-        kvlangXvalueFree(&mv);
         free(mk);
         free(names[i]);
         total += strlen(ms[i]) + (i ? 2 : 0);
@@ -136,7 +135,6 @@ char *kvlangRwirextResolveRead(void *kvspace, const char *pc, int idx) {
     } else {
         s = kvlangXvalueValueString(&v);
     }
-    kvlangXvalueFree(&v);
     free(fr);
     kvlangRwirInstructionFree(&inst);
     return s;

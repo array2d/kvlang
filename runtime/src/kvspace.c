@@ -30,7 +30,6 @@ int kvlangKvspaceGetOne(kvspace_t *k, const char *key, kvlangXvalue_t *out) {
     if (d && len > 0) {
         out->bytes = d;
         out->length = len;
-        out->is_borrowed = 1;
     }
     return 0;
 }
@@ -68,7 +67,6 @@ int kvlangKvspaceGetPart(kvspace_t *k, const char *key, uint32_t off, uint32_t l
     if (d && got > 0) {
         out->bytes = d;
         out->length = got;
-        out->is_borrowed = 1;
     }
     return 0;
 }
@@ -108,7 +106,6 @@ int kvlangKvspaceSetChar(kvspace_t *k, const char *key, const char *s) {
     kvlangKvPair_t pair = {(char *)key, value};
     char err[256];
     int rc = kvlangKvspaceSet(k, &pair, 1, err, sizeof err);
-    kvlangXvalueFree(&value);
     return rc;
 }
 
@@ -199,8 +196,7 @@ int kvlangKvspaceWatch(kvspace_t *k, const char *key, const kvlangXvalue_t *targ
     if (d && len) {
         out->bytes = d;
         out->length = len;
-        out->is_borrowed = 1;
-        kvlangXvalueMaterialize(out);
+        kvlangXvalueCopyToArena(out); /* Watch 结果跨后端借用池存活 */
     }
     return 0;
 }

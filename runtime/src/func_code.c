@@ -52,12 +52,7 @@ static void row_free(kvlangCodeRow_t *row) {
     free(row->opcode);
     free(row->def_read_sig);
     free(row->def_write_sig);
-    for (int i = 0; i < row->nr + row->nw; i++) {
-        kvlangOperand_t *c = &row->cell[i];
-        free(c->descriptor);
-        kvlangXvalueFree(&c->literal);
-        free(c->type);
-    }
+    /* descriptor / type / literal 归函数 arena，随 code_free 的 arena 销毁整体释放。 */
     free(row->cell);
     free(row);
 }
@@ -68,6 +63,7 @@ static void code_free(kvlangFuncCode_t *code) {
     for (size_t i = 0; i < code->rows_cap; i++)
         row_free(code->rows[i]);
     free(code->rows);
+    kvlangArenaDestroy(&code->arena);
     free(code->func_dir);
     free(code);
 }
@@ -99,6 +95,7 @@ static kvlangFuncCode_t *func_code_get(kvlangFuncCache_t *c,
     }
     kvlangFuncCode_t *code = calloc(1, sizeof *code);
     code->func_dir = canon;
+    kvlangArenaInit(&code->arena);
     c->keys[slot - c->vals] = strdup(canon);
     *slot = code;
     c->count++;
@@ -118,19 +115,23 @@ static int parse_cell(kvspace_t *kv, const char *func_dir, int s0, int s1,
         kvlangRwirOperandParse(kv, func_dir, slot, &descriptor, &is_literal,
                                &is_absolute_key, &literal, &type, err, err_cap);
     if (rc < 0) {
-        kvlangXvalueFree(&literal);
         return -1;
     }
     if (rc == 0) {
         snprintf(err, err_cap, "Decode: missing operand %s", slot);
         return -1;
     }
-    cell->type = type;
+    cell->type = type ? kvlangArenaStrdup(kvlangCurrentArena, type) : NULL;
+    free(type);
     if (is_literal) {
         cell->is_literal = true;
+        kvlangXvalueCopyToArena(&literal);
         cell->literal = literal;
     } else {
-        cell->descriptor = descriptor;
+        cell->descriptor = descriptor
+                               ? kvlangArenaStrdup(kvlangCurrentArena, descriptor)
+                               : NULL;
+        free(descriptor);
         cell->key_absolute = is_absolute_key;
     }
     return 0;
@@ -147,26 +148,22 @@ static kvlangCodeRow_t *row_load(kvspace_t *kv, kvlangFuncCode_t *code, int s0,
         return NULL;
     }
     if (kvlangXvalueNone(&v)) {
-        kvlangXvalueFree(&v);
         return NULL; /* 无此指令：err 留空 */
     }
     const uint8_t *body = xh_body(v.bytes);
     int32_t len = xh_content_len(v.bytes);
     if (!body || len < 5) {
         snprintf(err, err_cap, "Decode: invalid opcode at [%d,0]", s0);
-        kvlangXvalueFree(&v);
         return NULL;
     }
     int nr = (int)body[0] | ((int)body[1] << 8);
     int nw = (int)body[2] | ((int)body[3] << 8);
     if (nr > MAX_PARAMS || nw > MAX_PARAMS) {
         snprintf(err, err_cap, "Decode: too many operands at [%d,0]", s0);
-        kvlangXvalueFree(&v);
         return NULL;
     }
     kvlangCodeRow_t *row = calloc(1, sizeof *row);
     row->opcode = kvlangXvalueValueString(&v);
-    kvlangXvalueFree(&v);
     row->opcode_id =
         row->opcode ? kvlangOpClassify(row->opcode) : OPID_notinmyrwircaps;
     row->nr = nr;
@@ -229,6 +226,17 @@ static void bind_free(kvlangRowBind_t *b) {
     memset(b, 0, sizeof *b);
 }
 
+/* key 是否位于 base 之下（含相等）：写槽会改写 base，其子树的读视图一并失效。 */
+static bool key_under(const char *key, const char *base) {
+    size_t n = strlen(base);
+    if (strncmp(key, base, n) != 0)
+        return false;
+    if (key[n] == '\0' || key[n] == '/')
+        return true;
+    return strncmp(key + n, RUNTIME_MEMBER_SEP, sizeof RUNTIME_MEMBER_SEP - 1) ==
+           0;
+}
+
 /* 帧层绑定：字面量落回帧内 operand 槽；描述符按本帧根解析成绝对 key。 */
 static int bind_row(kvspace_t *kv, kvlangFrameCtx_t *ctx, int s0,
                     kvlangCodeRow_t *row, kvlangRowBind_t *b, char *err,
@@ -266,6 +274,14 @@ static int bind_row(kvspace_t *kv, kvlangFrameCtx_t *ctx, int s0,
         /* 变量可能尚未创建：失败留待执行时重试，不阻断加载。 */
         kvspaceKeyOffBind(&cell->off, kv, cell->key);
     }
+    /* 写槽会原地改写 key：同 key 或其后代的读视图须在执行前固化。
+     * 绑定期判定一次，热路径只多一个 flag 判断。 */
+    for (int i = 0; i < row->nr; i++)
+        for (int j = 0; j < row->nw; j++)
+            if (key_under(b->cell[i].key, b->cell[row->nr + j].key)) {
+                b->cell[i].pin = true;
+                break;
+            }
     free(stack);
     b->bound = true;
     return 0;
