@@ -25,6 +25,7 @@ typedef struct {
     kvlangOperand_t *cell; /* nr+nw：读参在前，写参在后 */
     bool load_write_value;
     bool is_def_rwir;
+    int handler_id; /* myrwircaps 下标；非 native = kvlangRwirRouteId() */
     char *def_read_sig, *def_write_sig;
     int def_read_count, def_write_count, def_dynamic;
 } kvlangCodeRow_t;

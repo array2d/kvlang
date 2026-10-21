@@ -1,0 +1,47 @@
+// 欢迎加入kvspace世界
+lib kvlang/spec/runtime语义/指令派发与特化 {
+	r####"# 指令派发与数值特化
+
+本章定义 runtime 执行一条指令时的派发模型（runtime 内部，不改变 KV 布局），以及
+opcode 的特化命名与数值 promotion 规则（语言可见）。
+
+## 派发模型（normative）
+
+- 每条指令的 handler 在 **row 加载期**确定一次，存为 row 的 `handler_id`：
+  - opcode 属本 runtime 的 myrwircaps（native）→ 该表中该项的下标；
+  - 其余（delegated、def rwir、用户 rwfunc 调用）→ 表尾统一的 `route` 项。
+- 执行期只做一次表调用 `optable[row->handler_id](&f)`；**禁止**每步按 opcode 字符串查找或
+  在热路径展开 native / delegated / def rwir / user call 的分支树。
+- `route` handler 内部按序处理：delegated 派发（本地则落用户调用）→ def rwir 签名校验与
+  外部 handoff → 用户 rwfunc 调用；`KVMODE_RETURN` 的 yield 由 route 设置
+  `yield_pc` 冒泡，主循环的 yield/pc 回传逻辑不变。
+- native handler 不感知委托、def rwir、调用与 yield。
+
+## opcode 特化命名
+
+- 同型：`<kind>·<op>`（如 `int64·add`、`float64·lt`）。仅当**全部操作数静态类型严格一致**
+  且就是该 kind 时由 layout 发出；`char`/字符串、动态 `any`、混合宽度、int 与 float 混合
+  一律保留通用 opcode（如 `+`、`add`），由通用实现按值判别。
+- 混合（后续）：候选复合键 `<k1>·<k2>·<op>`（输入 kind 在前、结果 kind 由 promotion 表
+  决定）；在 wire 里直接写数值 handler id 作为备选方案记录，暂不采用。
+
+## 数值 promotion（normative，与 runtime 现有实现逐条一致）
+
+记 `w(k)` 为整数宽度（8/16/32/64），`s(k)` 为有符号性。
+
+- **int × int**
+  - `s(a) == s(b)`：取宽度较大者的有符号/无符号种类；同宽取任一（两侧同型）。
+  - `s(a) != s(b)`：结果为**有符号**，宽度为 `max(w(a), w(b))` 升一档：
+    `≤8 → int16`、`16 → int32`、`32 或 64 → int64`。
+- **float × float**：任一方为 `float64` → `float64`；否则任一方为 `float32` → `float32`；
+  其余按 `float64`。
+- **int × float**：按 float 规则（任一方 `float64` → `float64`，否则 `float32`）。
+- **char/字符串不参与数值 promotion**：`add` 的字符串拼接与字符串比较走通用实现，
+  不产生任何数值特化 opcode。
+
+## 值相关检查（保留）
+
+除零/模零、None 比较、越界与动态 `any` 的运行时判别不受本章影响；特化 handler 只在
+静态类型完全匹配时接管，其余回退通用实现，语义必须逐字节一致。
+	"#### -> /lib/kvlang/spec/runtime语义/指令派发与特化
+}

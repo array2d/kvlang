@@ -2,8 +2,6 @@
 #include "rwir_internal.h"
 #include "kvlang_runtime.h"
 
-typedef int (*kvlangBuiltinFn)(kvlangFrame_t *f);
-
 /* Keep the shared queue in KVSpace. */
 static int register_vids(kvspace_t *k, const char *opcode) {
     char queue[] = "/vthread/‥vids";
@@ -97,11 +95,7 @@ int kvlangDefRwir(void *kvspace, const char *opcode, const char *const *rp,
  * 未命中且前缀是 C native 数字 kind 时才剥前缀归到裸 op（如 add），kvlangBuiltin* 按操作数 kind 归约。 */
 static int kvlangControlCopy(kvlangFrame_t *f) { return kvlangBuiltinExecuteCopy(f); }
 
-static const struct {
-    const char *opcode;
-    kvlangBuiltinFn fn;
-    bool load_write_value;
-} myrwircaps[] = {
+static const kvlangRwirCap myrwircaps[] = {
     /* control / copy：与 native 算子同表，opcode_id 单跳派发 */
     {OP_CALL, kvlangControlCall, false}, {OP_RETURN, kvlangControlReturn, false}, {OP_GOTO, kvlangControlGoto, false},
     {OP_BR, kvlangControlBr, false}, {OP_COPY, kvlangControlCopy, false},
@@ -215,9 +209,18 @@ static const struct {
     {"vthread·sleep", kvlangBuiltinVthreadSleep, false},
     {"vthread·setstatus", kvlangBuiltinVthreadSetStatus, false},
     {"debugger", kvlangBuiltinDebugger, false},
+    /* 表尾：非 native（delegated / def rwir / user call）统一路由。 */
+    {NULL, kvlangKvcpuRoute, false},
 };
 
 static const size_t myrwircaps_n = sizeof(myrwircaps) / sizeof(myrwircaps[0]);
+
+__attribute__((visibility("hidden"))) const kvlangRwirCap *kvlangRwirCaps(void) {
+    return myrwircaps;
+}
+__attribute__((visibility("hidden"))) int kvlangRwirRouteId(void) {
+    return (int)myrwircaps_n - 1;
+}
 
 /* C 原生数值 langtype 集：仅这些精度的算术走 kvlangBuiltinAdd 等通用实现。
  * int4/fp8/bf16 等 C 表达不了的量化精度不在此列，其 <langtype>·op 走专精 fn 或 handoff。 */
@@ -229,21 +232,19 @@ static bool is_num_kind_prefix(const char *op, size_t n) {
     return false;
 }
 
-#ifdef KV_COUNT
-unsigned long kvCSpec, kvCGen;
-#endif
-
 /* rwirtable 两级查找：先查完整 opcode（命中=专精实现，如 fp8·add，或 time·add 等成员算子），
  * 未命中且末段前缀是 C 原生数值 langtype 才拆前缀查裸算子（int64·add → add，通用实现）。
  * 非数值前缀（time/duration·max 等用户 rwfunc）不剥离，两级皆 miss → 非本 runtime native。 */
 int kvlangBuiltinCapabilityIndex(const char *opcode) {
     for (size_t i = 0; i < myrwircaps_n; i++)
-        if (strcmp(myrwircaps[i].opcode, opcode) == 0) return (int)i;
+        if (myrwircaps[i].opcode && strcmp(myrwircaps[i].opcode, opcode) == 0)
+            return (int)i;
     const char *dot = strstr(opcode, MEMBER_SEP);
     if (dot && is_num_kind_prefix(opcode, (size_t)(dot - opcode))) {
         const char *bare = dot + MEMBER_SEP_LEN;
         for (size_t i = 0; i < myrwircaps_n; i++)
-            if (strcmp(myrwircaps[i].opcode, bare) == 0) return (int)i;
+            if (myrwircaps[i].opcode && strcmp(myrwircaps[i].opcode, bare) == 0)
+                return (int)i;
     }
     return -1;
 }
@@ -273,19 +274,4 @@ bool kvlangBuiltinNumericOp(const char *opcode) {
     case 's': return strcmp(opcode, "sub") == 0 || strcmp(opcode, "sqrt") == 0 || strcmp(opcode, "shl") == 0 || strcmp(opcode, "shr") == 0 || strcmp(opcode, "sign") == 0;
     }
     return false;
-}
-
-int kvlangBuiltinNative(kvlangFrame_t *f) {
-    int i = f->instruction->opcode_id >= 0 ? f->instruction->opcode_id : kvlangBuiltinCapabilityIndex(f->instruction->opcode);
-#ifdef KV_COUNT
-    if (i >= 0 && f->instruction->opcode) {
-        if (strncmp(f->instruction->opcode, "int64" MEMBER_SEP, 7) == 0 ||
-            strncmp(f->instruction->opcode, "float64" MEMBER_SEP, 9) == 0)
-            kvCSpec++;
-        else
-            kvCGen++;
-    }
-#endif
-    if (i >= 0) return myrwircaps[i].fn(f);
-    return kvlangBuiltinSetError(f, "unknown builtin op: %s", f->instruction->opcode);
 }
