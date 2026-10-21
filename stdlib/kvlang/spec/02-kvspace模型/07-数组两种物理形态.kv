@@ -47,6 +47,17 @@ stringkeymap 元素的成员名是坐标段，物理 key 形如 `m·[i]`（一�
 | `array·compact(arr) -> dst` | stringkeymap → compact | 读散 key 打包成连续数组 |
 | `array·append` / `array·slice` | 变长 | 作用于 compact 时先自动 scatter |
 
+## slice 与带洞数组
+
+- 散列数组的**长度 = 元素个数**（memindex 权威，`kvspace·listlen`）。
+- `array·slice(arr, lo, hi) -> arr` 原地语义：
+  - 源为 compact：先自动 scatter，结果为 dense，按坐标 `[lo,hi)` 切片；
+  - 源为 stringkeymap 且坐标连续（dense）：同上按坐标切片；
+  - 源为 stringkeymap **带洞**（坐标不连续）：洞不是元素。按 memindex 排序后的元素序列取
+    秩 `[lo,hi)`，结果写连续坐标 `[0,hi-lo)`；源中坐标 `>= hi-lo` 的旧元素全部删除。
+    因此不存在「读到 None 再写成删除」的路径。
+- 尾部删除：dense 按下标 `[hi-lo, len)` 删除；带洞按上述元素序列规则删除。
+
 ## ref（存储位置维）与扩展句柄
 
 | head 形态 | 语义 | body |
