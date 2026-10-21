@@ -80,7 +80,6 @@ int main(void) {
         got = xv_i64(&out);
         CHECK(got == want[i]);
         CHECK(got != want[(i + 1) % n]);
-        kvlangKvspaceReadReset(k);
     }
 
     printf("GetMember siblings after reconnect: %d keys, distinct values\n", n);
@@ -95,10 +94,8 @@ int main(void) {
             return 1;
         CHECK(kvlangKvspaceGetMember(k, frm, "lo", &out) == 0);
         CHECK(xv_i64(&out) == 88);
-        kvlangKvspaceReadReset(k);
         CHECK(kvlangKvspaceGetMember(k, frm, "hi", &out) == 0);
         CHECK(xv_i64(&out) == 77);
-        kvlangKvspaceReadReset(k);
         printf("Set sibling after reconnect: lo=88 hi=77\n");
     }
 

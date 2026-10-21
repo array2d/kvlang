@@ -113,8 +113,6 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
 
     int rc = 0;
     for (;;) {
-        /* Release borrowed values from the previous instruction. */
-        kvlangKvspaceReadReset(kv);
         if (!have_fb &&
             (!kvspaceKeyOffRead(&pc_off, cur_b, sizeof cur_b) || !cur_b[0])) {
             rc = -1;

@@ -40,7 +40,6 @@ int main(void) {
         return 1;
     }
     memcpy(before, got.bytes, before_len);
-    kvlangKvspaceReadReset(kv);
 
     uint8_t incompatible[128] = {6, 1};
     pair.value = (kvlangXvalue_t){.bytes = incompatible, .length = before_len};
@@ -50,7 +49,6 @@ int main(void) {
     CHECK(kvlangKvspaceGetOne(kv, pair.key, &got) == 0);
     CHECK(got.bytes && got.length == before_len &&
           memcmp(got.bytes, before, before_len) == 0);
-    kvlangKvspaceReadReset(kv);
 
     pair.value = (kvlangXvalue_t){.bytes = before, .length = before_len - 1};
     err[0] = 0;
@@ -59,7 +57,6 @@ int main(void) {
     CHECK(kvlangKvspaceGetOne(kv, pair.key, &got) == 0);
     CHECK(got.bytes && got.length == before_len &&
           memcmp(got.bytes, before, before_len) == 0);
-    kvlangKvspaceReadReset(kv);
 
     pair.key = "/missing";
     pair.value = (kvlangXvalue_t){.bytes = incompatible, .length = before_len};
@@ -67,7 +64,6 @@ int main(void) {
     CHECK(kvlangKvspaceSet(kv, &pair, 1, err, sizeof err) != 0);
     CHECK(strstr(err, "invalid XValue") != NULL);
     CHECK(kvlangKvspaceGetOne(kv, pair.key, &got) == 0 && got.length == 0);
-    kvlangKvspaceReadReset(kv);
 
     kvlangXvalue_t changed;
     kvlangXvalueNewFloat64(&changed, 3.5);
@@ -76,11 +72,9 @@ int main(void) {
     CHECK(kvlangKvspaceSet(kv, &pair, 1, err, sizeof err) == 0);
     CHECK(kvlangKvspaceGetOne(kv, pair.key, &got) == 0);
     CHECK(kvlangXvalueKindIs(&got, KVSPACE_KIND_FLOAT64));
-    kvlangKvspaceReadReset(kv);
     CHECK(kvlangKvspaceSetChar(kv, pair.key, "12345678") == 0);
     CHECK(kvlangKvspaceGetOne(kv, pair.key, &got) == 0);
     CHECK(kvlangXvalueKindIs(&got, KVSPACE_KIND_CHAR_UTF8));
-    kvlangKvspaceReadReset(kv);
 
     kvlangKvspaceDisconnect(kv);
     return failures ? 1 : 0;

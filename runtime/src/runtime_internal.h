@@ -55,8 +55,7 @@ extern int kvspaceSetValueByRef(void *h, kvspaceRef_t *ref,
                                 uint8_t ro, uint32_t vid, char *err,
                                 uint32_t err_cap);
 
-/* 指令边界回收读借用池；定位读/写（分片）；只读 head 前缀。见 kvspace.h 契约。 */
-extern void kvspaceReadReset(void *h);
+/* 定位读/写（分片）；只读 head 前缀。见 kvspace.h 契约。 */
 extern int kvspaceGetPart(void *h, const char *key, uint32_t offset,
                           uint32_t len, uint8_t **out, uint32_t *out_len);
 extern int kvspaceSetPart(void *h, const char *key, uint32_t offset,
@@ -123,7 +122,7 @@ void kvlangLangtypeParse(const uint8_t *langtype, int32_t langtype_len,
 /* ── 基础类型 ──────────────────────────────────────────────────────── */
 
 typedef struct {
-    uint8_t *bytes; /* 视图：mmap / 借用池 / 行内字面量 / 显式 copy */
+    uint8_t *bytes; /* 视图：mmap / durable 常驻快照 / 行内字面量 / 显式 copy */
     uint32_t length;
 } kvlangXvalue_t;
 
@@ -407,7 +406,6 @@ int kvlangKvspaceGetOne(kvspace_t *k, const char *key,
                         kvlangXvalue_t *out); /* None → out len=0 */
 int kvlangKvspaceGetMember(kvspace_t *k, const char *dir, const char *name,
                            kvlangXvalue_t *out);
-void kvlangKvspaceReadReset(kvspace_t *k); /* 指令边界回收读借用池 */
 int kvlangKvspaceGetPart(kvspace_t *k, const char *key, uint32_t off,
                          uint32_t len,
                          kvlangXvalue_t *out); /* 借用读分片 body 字节 */

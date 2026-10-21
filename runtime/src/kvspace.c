@@ -54,9 +54,6 @@ int kvlangKvspaceGetMember(kvspace_t *k, const char *dir, const char *name,
     return rc;
 }
 
-/* Recycle the read-borrow pool at instruction boundaries. */
-void kvlangKvspaceReadReset(kvspace_t *k) { kvspaceReadReset(k->handle); }
-
 /* Borrowed slice of the value body. Empty/OOB -> out len=0. */
 int kvlangKvspaceGetPart(kvspace_t *k, const char *key, uint32_t off, uint32_t len, kvlangXvalue_t *out) {
     kvlangXvalueZero(out);
