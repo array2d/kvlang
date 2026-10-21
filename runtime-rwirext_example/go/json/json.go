@@ -838,8 +838,7 @@ func doTo(c unsafe.Pointer, pc string, readNames []string) {
 }
 
 func fail(c unsafe.Pointer, vid string, msg string) {
-	setNone(c, "/vthread/"+vid+"/"+runtimeSep+"error")
-	setTLV(c, "/vthread/"+vid+"/"+runtimeSep+"error/msg", constructChar([]byte(msg)))
+	setTLV(c, "/vthread/"+vid+"/"+runtimeSep+"msg", constructChar([]byte(msg)))
 	setTLV(c, "/vthread/"+vid+"/"+runtimeSep+"status", constructChar([]byte("error")))
 }
 

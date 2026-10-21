@@ -299,7 +299,7 @@ fn drive_vid(eng: &Engine, vid: &str) {
         }
         if rc != 1 {
             let st = eng.get_kv(&format!("/vthread/{vid}/\u{2025}status"));
-            let msg = eng.get_kv(&format!("/vthread/{vid}/\u{2025}error/msg"));
+            let msg = eng.get_kv(&format!("/vthread/{vid}/\u{2025}msg"));
             let st = if st.is_empty() { "error".into() } else { st };
             kvlang_rs::elog!("vthread {vid} {st}: {msg}");
             std::process::exit(1);

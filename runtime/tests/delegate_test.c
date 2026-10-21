@@ -61,7 +61,7 @@ static char *get_char(kvspace_t *kv, const char *key) {
 
 static char *error_msg(kvspace_t *kv, const char *vtid) {
     char k[KV_KEY_MAX];
-    kvlangKeytreeVthreadStatusMessage(vtid, "error", k, sizeof k);
+    kvlangKeytreeVthreadMessage(vtid, k, sizeof k);
     return get_char(kv, k);
 }
 

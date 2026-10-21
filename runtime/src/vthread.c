@@ -151,23 +151,10 @@ int kvlangVthreadSetDone(kvspace_t *kv, const char *vtid, const char *ret) {
 
 void kvlangVthreadSetError(kvspace_t *kv, const char *vtid, const char *pc,
                            const char *msg) {
-    char msg_path[KV_KEY_MAX], pc_key[KV_KEY_MAX], st_key[KV_KEY_MAX];
-    kvlangKeytreeVthreadStatusMessage(vtid, "error", msg_path, sizeof msg_path);
+    char msg_key[KV_KEY_MAX], pc_key[KV_KEY_MAX], st_key[KV_KEY_MAX];
+    kvlangKeytreeVthreadMessage(vtid, msg_key, sizeof msg_key);
     kvlangKeytreeVthreadPc(vtid, pc_key, sizeof pc_key);
     kvlangKeytreeVthreadStatus(vtid, st_key, sizeof st_key);
-
-    /* 确保 .error/ 父目录存在 */
-    char *sep = strrchr(msg_path, '/');
-    if (sep) {
-        size_t dl = (size_t)(sep - msg_path) + 1;
-        char dir[KV_KEY_MAX];
-        if (dl >= sizeof dir)
-            kvlangDie("error dir exceeds %zu bytes", sizeof dir);
-        memcpy(dir, msg_path, dl);
-        dir[dl] = 0;
-        char err[256];
-        kvlangKvspaceMakeIndex(kv, dir, 0, err, sizeof err);
-    }
 
     kvlangXvalue_t vpc, vmsg, vst;
     kvlangXvalueZero(&vpc);
@@ -176,7 +163,7 @@ void kvlangVthreadSetError(kvspace_t *kv, const char *vtid, const char *pc,
     kvlangXvalueNewCharUtf8(&vpc, pc);
     kvlangXvalueNewCharUtf8(&vmsg, msg);
     kvlangXvalueNewCharUtf8(&vst, "error");
-    kvlangKvPair_t pairs[3] = {{pc_key, vpc}, {msg_path, vmsg}, {st_key, vst}};
+    kvlangKvPair_t pairs[3] = {{pc_key, vpc}, {msg_key, vmsg}, {st_key, vst}};
     char err[256];
     kvlangKvspaceSet(kv, pairs, 3, err, sizeof err);
     kvlangXvalueFree(&vpc);

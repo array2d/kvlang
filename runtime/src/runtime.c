@@ -139,7 +139,7 @@ int kvlangRuntimeRunVthreadId(kvspace_t *kv, const char *vid, char **ret, char *
   if (ret) {
     if (strcmp(status, "error") == 0) {
       char mk[KV_KEY_MAX];
-      kvlangKeytreeVthreadStatusMessage(vid, "error", mk, sizeof mk);
+      kvlangKeytreeVthreadMessage(vid, mk, sizeof mk);
       kvlangXvalue_t mv;
       kvlangXvalueZero(&mv);
       kvlangKvspaceGetOne(kv, mk, &mv);
