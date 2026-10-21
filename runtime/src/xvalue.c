@@ -46,6 +46,50 @@ uint32_t kvlangScalarEncode(const char *kind, const uint8_t *raw, uint32_t len,
     return headlen + len;
 }
 
+/* UTF-8 码点计数：规则与正典 slack codec 逐字一致（非法序列直接 panic）。 */
+static uint32_t utf8_count(const uint8_t *p, uint32_t len) {
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < len; count++) {
+        uint8_t c = p[i++];
+        if (c < 0x80)
+            continue;
+        uint32_t tail = c < 0xe0 ? 1 : c < 0xf0 ? 2 : 3;
+        if (c < 0xc2 || c > 0xf4 || len - i < tail)
+            kvlangDie("slack encode: invalid utf8");
+        uint8_t next = p[i];
+        if ((c == 0xe0 && next < 0xa0) || (c == 0xed && next > 0x9f) ||
+            (c == 0xf0 && next < 0x90) || (c == 0xf4 && next > 0x8f))
+            kvlangDie("slack encode: invalid utf8");
+        for (uint32_t j = 0; j < tail; j++)
+            if ((p[i++] & 0xc0) != 0x80)
+                kvlangDie("slack encode: invalid utf8");
+    }
+    return count;
+}
+
+/* 变长 char/utf8 的 SLACK 编码：容量固定，每步写出同尺寸值，后端可原地覆写。
+ * 与正典 codec 的逐字节一致性由 tests/test_scalar_encode.c 守护。 */
+__attribute__((visibility("hidden"))) uint32_t
+kvlangSlackEncodeChar(const uint8_t *raw, uint32_t len, uint32_t cap,
+                      uint8_t *buf, uint32_t bufsize) {
+    enum { HEADLEN = 1u << 6 };
+    char kind[48];
+    int kn = snprintf(kind, sizeof kind, "[%u]char/utf8", utf8_count(raw, len));
+    if (len > cap || HEADLEN + cap > bufsize || kn < 0 ||
+        (uint32_t)kn + XH_PREFIX > HEADLEN)
+        kvlangDie("slack encode overflow: len=%u cap=%u", len, cap);
+    memset(buf, 0, HEADLEN + cap);
+    buf[0] = 6; /* pow: headlen = 64 */
+    buf[1] = 1; /* flags: slack class */
+    for (uint32_t i = 0; i < 4; i++) {
+        buf[2 + i] = (uint8_t)(len >> (8 * i));  /* a = 当前长度 */
+        buf[10 + i] = (uint8_t)(cap >> (8 * i)); /* b = 槽容量 */
+    }
+    memcpy(buf + XH_PREFIX, kind, (size_t)kn);
+    memcpy(buf + HEADLEN, raw, len);
+    return HEADLEN + cap;
+}
+
 void kvlangXvalueSetBytes(kvlangXvalue_t *v, uint8_t *data, uint32_t len) {
     v->bytes = data;
     v->length = len;

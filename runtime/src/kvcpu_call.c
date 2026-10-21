@@ -490,7 +490,9 @@ int kvlangKvcpuCallOpcode(kvspace_t *kv, const char *vtid, const char *pc,
                           const char *status_known, const char *opcode,
                           kvlangParam_t *reads, int nr,
                           kvlangParam_t *writes, int nw, char *pc_out,
-                          size_t pc_out_cap, bool *pc_feedback) {
+                          size_t pc_out_cap, bool *pc_feedback,
+                          struct kvspaceKeyOff *pc_off,
+                          struct kvspaceKeyOff *status_off) {
     kvlangRwirInst_t ci;
     ci.opcode = strdup(OP_CALL);
     ci.opcode_id = 0;
@@ -507,6 +509,8 @@ int kvlangKvcpuCallOpcode(kvspace_t *kv, const char *vtid, const char *pc,
     f.status_known = status_known;
     f.pc_out = pc_out;
     f.pc_out_cap = pc_out_cap;
+    f.pc_off = pc_off;
+    f.status_off = status_off;
     int rc = kvlangControlCall(&f);
     if (f.persist_failed)
         rc = -1;
@@ -522,7 +526,7 @@ int kvlangKvcpuCallOpcode(kvspace_t *kv, const char *vtid, const char *pc,
 int kvlangKvcpuDynamicCall(kvlangFrame_t *f, const char *funckey) {
     return kvlangKvcpuCallOpcode(f->kvspace, f->vthread_id, f->pc, NULL, funckey,
                                  NULL, 0, NULL, 0, f->pc_out, f->pc_out_cap,
-                                 &f->pc_feedback);
+                                 &f->pc_feedback, f->pc_off, f->status_off);
 }
 
 
