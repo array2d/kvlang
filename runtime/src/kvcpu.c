@@ -59,7 +59,11 @@ static void pinned_free(kvlangRowBind_t *bind, int nr, kvlangParam_t *reads) {
 static void count_report(void) {
     if (!getenv("KV_COUNT"))
         return;
-    fprintf(stderr, "COUNT narrow=%lu cmp=%lu\n", kvCNarrow, kvCCompare);
+    fprintf(stderr,
+            "COUNT narrow=%lu cmp=%lu body_fast=%lu body_fallback=%lu "
+            "body_cells_max=%lu cap_try=%lu cap_ok=%lu\n",
+            kvCNarrow, kvCCompare, kvCBodyFast, kvCBodyFallback,
+            kvCBodyCellsMax, kvCBodyCapAttempt, kvCBodyCapOk);
 }
 #define COUNT_REPORT() count_report()
 #else

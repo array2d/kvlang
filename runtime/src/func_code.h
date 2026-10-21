@@ -26,6 +26,9 @@ typedef struct {
     bool load_write_value;
     bool is_def_rwir;
     int handler_id; /* myrwircaps 下标；非 native = kvlangRwirRouteId() */
+    /* 定长标量写快路径：结果 type/宽度（来自同一张能力表）；NULL = 不快。 */
+    const char *result_kind;
+    uint32_t result_width;
     char *def_read_sig, *def_write_sig;
     int def_read_count, def_write_count, def_dynamic;
 } kvlangCodeRow_t;
@@ -37,7 +40,7 @@ typedef struct {
 } kvlangFuncCode_t;
 
 /* 帧层：一个操作数的绑定结果 */
-typedef struct {
+typedef struct kvlangBoundCell {
     char *key;  /* owned */
     char *type; /* owned（细化后） */
     kvspaceKeyOff off;
@@ -45,11 +48,27 @@ typedef struct {
     bool pin; /* 本行写槽覆盖此 key：读视图须在写前固化 */
 } kvlangBoundCell_t;
 
+/* 定长标量写的绑定状态：只给候选行分配一个，不放大每个操作数 cell。 */
+typedef struct kvlangBodySlot {
+    const char *key;        /* borrowed：写 cell 的 key */
+    const char *kind;       /* 静态结果类型 */
+    uint32_t width;
+    uint8_t *body;
+    uint32_t len;
+    kvspaceKeyOff *off;     /* borrowed：写 cell 的 keyoff */
+    bool ok;                /* body 指针有效 */
+    bool dead;              /* 上次捕获失败；等该 key 被写后重试 */
+    bool reg;               /* 已挂进全局失效表 */
+    uint32_t bucket;
+    struct kvlangBodySlot *next;
+} kvlangBodySlot;
+
 typedef struct {
     kvlangBoundCell_t *cell; /* [n] */
     int n;
     bool bound;
-    bool has_pin; /* 本行有读 cell 落在写槽之下：执行后需释放 pin 副本 */
+    bool has_pin;          /* 本行有读 cell 落在写槽之下：执行后需释放 pin 副本 */
+    kvlangBodySlot *body; /* 定长标量写槽（候选行才有，owned） */
 } kvlangRowBind_t;
 
 typedef struct {
@@ -76,6 +95,11 @@ void kvlangFrameCtxFree(kvlangFrameCtx_t *ctx);
 /* 地址世代变化（删除/委托/handoff）后，帧内所有 keyoff 失效，执行时按 key 重绑。 */
 void kvlangFrameCtxSync(kvlangFrameCtx_t *ctx, uint32_t epoch);
 
+/* 定长标量写槽捕获：head 完全匹配才成功；失败置 dead（等该 key 被写后重试）。
+ * vthread_root 形如 /vthread/<vid>，写 key 必须在其子树内。 */
+__attribute__((visibility("hidden"))) bool
+kvlangBodyCapture(kvspace_t *kv, kvlangBodySlot *slot,
+                  const char *vthread_root);
 /* 取本帧 s0 行的绑定。行不存在返回 NULL 且 err[0]=0；出错返回 NULL 且 err 有消息。 */
 kvlangRowBind_t *kvlangFrameRow(kvspace_t *kv, kvlangFrameCtx_t *ctx, int s0,
                                 kvlangCodeRow_t **row_out, char *err,

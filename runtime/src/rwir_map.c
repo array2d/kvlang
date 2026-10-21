@@ -51,6 +51,8 @@ static void clear_old(kvspace_t *kv, const char *ok, char **old, int oc,
         keys[i] = kvlangKeytreeMember(ok, old[i]);
     if (drop_container)
         keys[oc] = kvlangStringFormat("%s", ok);
+    for (int i = 0; i < n; i++)
+        kvlangBodyInvalidate(keys[i]);
     kvspaceDel(kv->handle, (const char *const *)keys, (uint32_t)n, err, cap);
     for (int i = 0; i < n; i++)
         free(keys[i]);

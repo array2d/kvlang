@@ -86,8 +86,10 @@ static int clear_members(kvlangFrame_t *f, const char *base) {
     if (count > 0) {
         /* 一次多键 Del 取代 N 次逐键删除（成员均为标量，无子树）。 */
         char **keys = malloc(sizeof *keys * (size_t)count);
-        for (int i = 0; i < count; i++)
+        for (int i = 0; i < count; i++) {
             keys[i] = kvlangStringFormat("%s%s", prefix, names[i]);
+            kvlangBodyInvalidate(keys[i]);
+        }
         if (kvspaceDel(f->kvspace->handle, (const char *const *)keys, (uint32_t)count,
                        err, sizeof err) != 0)
             rc = kvlangBuiltinSetError(f, "%s", err);
@@ -514,8 +516,10 @@ int kvlangBuiltinSlice(kvlangFrame_t *f) {
         if (cut < al) {
             int tn = al - cut;
             char **tk = malloc(sizeof *tk * (size_t)tn);
-            for (int i = 0; i < tn; i++)
+            for (int i = 0; i < tn; i++) {
                 tk[i] = kvlangStringFormat("%s%s", dir, names[cut + i]);
+                kvlangBodyInvalidate(tk[i]);
+            }
             kvspaceDel(f->kvspace->handle, (const char *const *)tk,
                        (uint32_t)tn, err, sizeof err);
             for (int i = 0; i < tn; i++)
@@ -541,6 +545,7 @@ int kvlangBuiltinSlice(kvlangFrame_t *f) {
             for (int i = 0; i < tail; i++) {
                 int64_t dc[1] = {hi - lo + i};
                 dk[i] = kvlangBuiltinScatterKey(base, dc, 1);
+                kvlangBodyInvalidate(dk[i]);
             }
             kvspaceDel(f->kvspace->handle, (const char *const *)dk,
                        (uint32_t)tail, err, sizeof err);

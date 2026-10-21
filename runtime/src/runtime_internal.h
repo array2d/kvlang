@@ -27,6 +27,7 @@ typedef struct {
 #define KVSPACE_REF_INLINE 0
 #define KVSPACE_REF_PTR 1
 #define KVSPACE_REF_EXT 2
+#define KVSPACE_STORETYPE_FIXED_SMALL 0
 
 extern void *kvspaceConnect(const char *dsn);
 extern void kvspaceClose(void *h);
@@ -136,6 +137,7 @@ typedef struct {
 
 typedef struct {
     void *handle; /* opaque KVSpace connection */
+    bool shm;     /* DSN scheme == shm：允许 body 就地写快路径 */
 } kvspace_t;
 
 /* ── 字符串工具 ──────────────────────────────────────────────────────
@@ -577,6 +579,11 @@ int kvlangHandoffExternalRwir(kvspace_t *kv, const char *vtid, const char *pc,
  * 其它 runtime 的 rwir。判据=读 kvspace /lib/<opcode> 存在 def rwir 路由头（能力唯一事实源）。 */
 #ifdef KV_COUNT
 extern unsigned long kvCNarrow, kvCCompare;
+#ifdef KV_COUNT
+extern unsigned long kvCBodyFast, kvCBodyFallback;
+extern unsigned long kvCBodyCells, kvCBodyCellsMax;
+extern unsigned long kvCBodyCapAttempt, kvCBodyCapOk;
+#endif
 #endif
 bool kvlangNotInMyRwirCaps(kvspace_t *kv, const char *opcode);
 
@@ -593,6 +600,8 @@ struct kvspaceKeyOff {
     const char *key;
     kvspaceRef_t off;
     bool resolved;
+    /* 定长标量写槽（只写参、只候选行设置）：emit 快路径由此取绑定。 */
+    void *fast;
 };
 
 void kvspaceKeyOffBind(kvspaceKeyOff *ko, kvspace_t *kvspace, const char *key);
@@ -651,12 +660,20 @@ void kvlangVthreadNextPc(kvlangFrame_t *f, const char *pc, const char *status);
 /* kvlangNotInMyCaps：查 myrwircaps table，opcode 不在本 runtime 能力表内 → true。 */
 bool kvlangNotInMyCaps(const char *opcode);
 bool kvlangBuiltinNumericOp(const char *opcode);
+/* 该 key 被整值写/删除：清掉所有命中 cell 的 body 指针，允许重试。 */
+__attribute__((visibility("hidden"))) void kvlangBodyInvalidate(const char *key);
+__attribute__((visibility("hidden"))) void
+kvlangBodyInvalidateTree(const char *prefix);
+
 /* 指令派发表：native 项 + 表尾 route。row 加载期定型 handler_id，执行期一次间接调用。 */
 typedef int (*kvlangBuiltinFn)(kvlangFrame_t *f);
 typedef struct {
     const char *opcode;
     kvlangBuiltinFn fn;
     bool load_write_value;
+    /* 定长结果类型（仅 A1 特化项）；result_kind=NULL 表示结果类型不静态固定。 */
+    const char *result_kind;
+    uint32_t result_width;
 } kvlangRwirCap;
 __attribute__((visibility("hidden"))) const kvlangRwirCap *kvlangRwirCaps(void);
 __attribute__((visibility("hidden"))) int kvlangRwirRouteId(void);
