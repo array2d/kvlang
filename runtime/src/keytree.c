@@ -169,10 +169,8 @@ void kvlangKeytreeVthreadDebugger(const char *vtid, char *out, size_t cap) {
     kvlangVthreadMember(vtid, "debugger", out, cap);
 }
 
-void kvlangKeytreeVthreadStatusMessage(const char *vtid, const char *status,
-                                   char *out, size_t cap) {
-    kvlangKeyFormat(out, cap, "%s%s%s%s%s%s%s", VTHREAD_ROOT PATH_SEP, vtid, "/",
-                 RUNTIME_MEMBER_SEP, status, "/", SEG_MSG);
+void kvlangKeytreeVthreadMessage(const char *vtid, char *out, size_t cap) {
+    kvlangVthreadMember(vtid, SEG_MSG, out, cap);
 }
 
 static void frame_member(const char *root, const char *seg, char *out,

@@ -1049,7 +1049,7 @@ fn is_literal(s: &str) -> bool {
 // ── printstack：/vthread 活动栈渲染（帧链 + 每帧实参 + 顶帧当前指令）──────────
 //
 // 实测帧布局（2026-09）：
-//   /vthread/<vid>/‥pc / ‥status / ‥error/msg        vthread 头（仅根）
+//   /vthread/<vid>/‥pc / ‥status / ‥msg             vthread 头（仅根）
 //   /vthread/<vid>/[k]/‥lib / ‥callpc / ‥returnpc    第 k 帧（帧目录，k 为帧号）
 //   /vthread/<vid>/[k]/[0,±j]                        该帧绑定的实参 / 写参
 //   /vthread/<vid>/[k]/[s0,s1]                       帧内指令槽；PC 指向当前那一条
@@ -1115,7 +1115,7 @@ pub fn printstack(kv: &mut Kv, vid: &str) -> String {
     // 头部字段都是字符串值：给纯值（不带 kind 前缀）；槽位值才用 kind:value（类型有意义）。
     let status = plain_of(kv, &format!("{root}/‥status"));
     let pc = plain_of(kv, &format!("{root}/‥pc"));
-    let emsg = plain_of(kv, &format!("{root}/‥error/msg"));
+    let emsg = plain_of(kv, &format!("{root}/‥msg"));
     let frames = frame_dirs(kv, &root);
     let mut out = String::new();
     out.push_str(&format!(

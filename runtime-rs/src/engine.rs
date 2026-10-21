@@ -335,7 +335,7 @@ impl Engine {
             }
             if rc != 1 {
                 let st = self.get_kv(&format!("/vthread/{vid}/\u{2025}status"));
-                let msg = self.get_kv(&format!("/vthread/{vid}/\u{2025}error/msg"));
+                let msg = self.get_kv(&format!("/vthread/{vid}/\u{2025}msg"));
                 crate::elog!("vthread {vid} 错误 rc={rc} {st}: {msg}");
                 break;
             }

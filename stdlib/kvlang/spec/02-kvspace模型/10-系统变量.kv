@@ -17,7 +17,7 @@ lib kvlang/spec/kvspace模型/系统变量 {
 |----|------|
 | `‥pc` | 当前执行 PC（绝对路径字符串） |
 | `‥status` | 运行状态：`init` / `running` / `wait` / `paused` / `error`；**终态写入的是返回值串**（默认 `"ok"`）并 Notify |
-| `‥status/msg` | 状态附带消息；错误时形如 `‥error/msg` 承载错误文本 |
+| `‥msg` | 错误文本（`‥status=error` 时由 runtime 写入；正常运行不存在） |
 | `‥ctime` | 创建时刻 |
 
 ## 帧系统变量

@@ -493,7 +493,7 @@ void kvlangKeytreeVthreadSlot(const char *vtid, const char *frame, int i, int j,
                               char *out, size_t cap);
 void kvlangKeytreeVthreadPc(const char *vtid, char *out, size_t cap);
 void kvlangKeytreeVthreadStatus(const char *vtid, char *out, size_t cap);
-void kvlangKeytreeVthreadStatusMessage(const char *vtid, const char *status,
+void kvlangKeytreeVthreadMessage(const char *vtid,
                                        char *out, size_t cap);
 void kvlangKeytreeVthreadDebugger(const char *vtid, char *out, size_t cap);
 void kvlangKeytreeFrameCallPc(const char *root, char *out, size_t cap);

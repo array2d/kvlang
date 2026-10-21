@@ -41,7 +41,7 @@ int kvlangBuiltinVthreadRun(kvlangFrame_t *f) {
     free(subpc);
     if (rc < 0) {
         /* 子 vthread 自己失败（status=error）是**子**的终态：监督者要能活着检视
-         * /vthread/<vid>/‥status 与 ‥error/msg（一个子任务失败不该杀掉整条会话）。
+         * /vthread/<vid>/‥status 与 ‥msg（一个子任务失败不该杀掉整条会话）。
          * 只有驱动本身失败才冒泡给父。 */
         char *sp = NULL, *st = NULL;
         kvlangVthreadGet(f->kvspace, vid, &sp, &st);
