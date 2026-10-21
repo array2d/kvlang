@@ -39,6 +39,24 @@ static char *declared_map_langtype(kvlangFrame_t *f, int w) {
 
 /* ── obj / map ─────────────────────────────────────────────────── */
 
+/* 清旧成员（map 连同旧容器值）：一次多键 Del 取代逐键往返。成员无子树
+ * （DeleteTree 对 `‥` 成员命名空间也只删该键本身）。 */
+static void clear_old(kvspace_t *kv, const char *ok, char **old, int oc,
+                      bool drop_container, char *err, uint32_t cap) {
+    int n = oc + (drop_container ? 1 : 0);
+    if (n <= 0)
+        return;
+    char **keys = malloc(sizeof *keys * (size_t)n);
+    for (int i = 0; i < oc; i++)
+        keys[i] = kvlangKeytreeMember(ok, old[i]);
+    if (drop_container)
+        keys[oc] = kvlangStringFormat("%s", ok);
+    kvspaceDel(kv->handle, (const char *const *)keys, (uint32_t)n, err, cap);
+    for (int i = 0; i < n; i++)
+        free(keys[i]);
+    free(keys);
+}
+
 int kvlangBuiltinObj(kvlangFrame_t *f) {
     kvlangXvalue_t in[64];
     int n = kvlangBuiltinReadInputs(f, in, 64);
@@ -52,12 +70,9 @@ int kvlangBuiltinObj(kvlangFrame_t *f) {
         char **old = NULL;
         int oc = 0;
         kvlangKvspaceList(f->kvspace, dir, false, false, &old, &oc);
-        for (int i = 0; i < oc; i++) {
-            char *mk = kvlangKeytreeMember(ok, old[i]);
-            kvlangKvspaceDelete(f->kvspace, mk, err, sizeof err);
-            free(mk);
+        clear_old(f->kvspace, ok, old, oc, false, err, sizeof err);
+        for (int i = 0; i < oc; i++)
             free(old[i]);
-        }
         free(old);
         free(dir);
         /* 收集成员名（跳过 None）。 */
@@ -111,15 +126,11 @@ int kvlangBuiltinMap(kvlangFrame_t *f) {
         char **old = NULL;
         int oc = 0;
         kvlangKvspaceList(f->kvspace, dir, false, false, &old, &oc);
-        for (int i = 0; i < oc; i++) {
-            char *mk = kvlangKeytreeMember(ok, old[i]);
-            kvlangKvspaceDelete(f->kvspace, mk, err, sizeof err);
-            free(mk);
+        clear_old(f->kvspace, ok, old, oc, true, err, sizeof err);
+        for (int i = 0; i < oc; i++)
             free(old[i]);
-        }
         free(old);
         free(dir);
-        kvlangKvspaceDelete(f->kvspace, ok, err, sizeof err);
 
         /* 容器值 p：langtype=声明的 map langtype，body 空，dims=[n] 落 head。 */
         char *wty = declared_map_langtype(f, w);

@@ -65,15 +65,20 @@ static int clear_members(kvlangFrame_t *f, const char *base) {
     }
     char err[256];
     int rc = 0;
-    for (int i = 0; i < count; i++) {
-        if (rc == 0) {
-            char key[KV_KEY_MAX];
-            kvlangKeyFormat(key, sizeof key, "%s%s", prefix, names[i]);
-            if (kvlangKvspaceDeleteTree(f->kvspace, key, err, sizeof err) != 0)
-                rc = kvlangBuiltinSetError(f, "%s", err);
-        }
-        free(names[i]);
+    if (count > 0) {
+        /* 一次多键 Del 取代 N 次逐键删除（成员均为标量，无子树）。 */
+        char **keys = malloc(sizeof *keys * (size_t)count);
+        for (int i = 0; i < count; i++)
+            keys[i] = kvlangStringFormat("%s%s", prefix, names[i]);
+        if (kvspaceDel(f->kvspace->handle, (const char *const *)keys, (uint32_t)count,
+                       err, sizeof err) != 0)
+            rc = kvlangBuiltinSetError(f, "%s", err);
+        for (int i = 0; i < count; i++)
+            free(keys[i]);
+        free(keys);
     }
+    for (int i = 0; i < count; i++)
+        free(names[i]);
     free(names);
     free(prefix);
     return rc;
@@ -404,7 +409,13 @@ int kvlangBuiltinSlice(kvlangFrame_t *f) {
         kvlangBuiltinFreeInputs(in, n);
         return rc;
     }
-    int al = separated_len(f->kvspace, base);
+    /* 原地语义（读槽即写槽）且源仍是 compact（pin 副本）时，长度直接取 ArrayLen，
+     * 免逐 key 探测；其它情况保持探测。 */
+    const char *rkey = f->instruction->reads[0].name;
+    int al = (rkey && strcmp(rkey, base) == 0 &&
+              kvlangXvalueElemSize(kvlangXvalueKind(&in[0])) > 0)
+                 ? kvlangXvalueArrayLen(&in[0])
+                 : separated_len(f->kvspace, base);
     int lo = (int)kvlangScalarI64(kvlangXvalueScalar(&in[1])),
         hi = (int)kvlangScalarI64(kvlangXvalueScalar(&in[2]));
     if (lo < 0 || hi < lo || hi > al) {
@@ -428,11 +439,18 @@ int kvlangBuiltinSlice(kvlangFrame_t *f) {
         free(sk);
         free(dk);
     }
-    for (int i = hi - lo; i < al; i++) {
-        int64_t dc[1] = {i};
-        char *dk = kvlangBuiltinScatterKey(base, dc, 1);
+    int tail = al - (hi - lo);
+    if (tail > 0) {
+        char **dk = malloc(sizeof *dk * (size_t)tail);
+        for (int i = 0; i < tail; i++) {
+            int64_t dc[1] = {hi - lo + i};
+            dk[i] = kvlangBuiltinScatterKey(base, dc, 1);
+        }
         char err[256];
-        kvlangKvspaceDelete(f->kvspace, dk, err, sizeof err);
+        kvspaceDel(f->kvspace->handle, (const char *const *)dk, (uint32_t)tail,
+                       err, sizeof err);
+        for (int i = 0; i < tail; i++)
+            free(dk[i]);
         free(dk);
     }
     free(base);
