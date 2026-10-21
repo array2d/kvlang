@@ -15,7 +15,7 @@ int kvlangHandoffExternalRwir(kvspace_t *kv, const char *vtid, const char *pc,
     kvlangKvPair_t p = {vids, pv};
     char err[256];
     int set_rc = kvlangKvspaceSet(kv, &p, 1, err, sizeof err);
-    kvlangXvalueRelease(&pv);
+    kvlangXvalueFree(&pv);
     if (set_rc != 0) {
         free(base);
         return -1;

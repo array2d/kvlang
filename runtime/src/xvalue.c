@@ -13,13 +13,37 @@ static uint64_t read_u64(const uint8_t *p) {
     return (uint64_t)read_u32(p) | ((uint64_t)read_u32(p + 4) << 32);
 }
 
-/* 构造时无当前 arena ⇒ buffer 是 malloc 的，由调用方在此显式释放；
- * 有 arena 时归 arena，整体回收。仅用于一次性系统调用（spawn/set/register 等）。 */
-void kvlangXvalueRelease(kvlangXvalue_t *v) {
-    if (!kvlangCurrentArena && v->bytes)
-        free(v->bytes);
+/* 释放构造出来的值（kvlangXvalueNew* / Copy 的产物）。从 kvspace 读到的视图不得调用。 */
+void kvlangXvalueFree(kvlangXvalue_t *v) {
+    free(v->bytes);
     v->bytes = NULL;
     v->length = 0;
+}
+
+/* 显式复制：把后端借用的视图拷成独立堆副本，调用方负责 kvlangXvalueFree。 */
+void kvlangXvalueCopy(kvlangXvalue_t *v) {
+    if (!v->bytes || !v->length)
+        return;
+    uint8_t *p = malloc(v->length);
+    if (!p)
+        kvlangDie("out of memory copying xvalue");
+    memcpy(p, v->bytes, v->length);
+    v->bytes = p;
+}
+
+/* 标量 inline 编码：为省掉「每个标量结果一次 malloc」而写的第二份 head 写入。
+ * 与正典 codec 的逐 kind 字节一致性由 tests/test_scalar_encode.c 守护；
+ * 要彻底消除这份重复，需要 codec 提供 encode-into(调用方缓冲) ABI。 */
+uint32_t kvlangScalarEncode(const char *kind, const uint8_t *raw, uint32_t len,
+                            uint8_t *buf, uint32_t cap) {
+    uint32_t headlen = 32, lt = (uint32_t)strlen(kind);
+    if (lt > headlen - XH_PREFIX || headlen + len > cap)
+        kvlangDie("scalar encode overflow: kind=%s len=%u", kind, len);
+    memset(buf, 0, headlen);
+    buf[0] = 5; /* headlen = 1 << 5 */
+    memcpy(buf + XH_PREFIX, kind, lt);
+    memcpy(buf + headlen, raw, len);
+    return headlen + len;
 }
 
 void kvlangXvalueSetBytes(kvlangXvalue_t *v, uint8_t *data, uint32_t len) {
@@ -516,8 +540,7 @@ char *kvlangXvalueValueString(const kvlangXvalue_t *v) {
 void kvlangXvalueNewTlv(kvlangXvalue_t *v, const char *kind, const uint8_t *raw,
                         uint32_t raw_len, int32_t al) {
     uint32_t len;
-    v->bytes = kvlangArenaOwn(
-        kvlangCurrentArena, kvlangXvalueEncodeTlv(kind, raw, raw_len, al, &len));
+    v->bytes = kvlangXvalueEncodeTlv(kind, raw, raw_len, al, &len);
     v->length = len;
 }
 
@@ -532,7 +555,7 @@ void kvlangXvalueNewTlvDims(kvlangXvalue_t *v, const char *kind,
         kvlangXvalueZero(v);
         return;
     }
-    v->bytes = kvlangArenaOwn(kvlangCurrentArena, tmp);
+    v->bytes = tmp;
     v->length = tl;
 }
 
@@ -596,8 +619,7 @@ void kvlangXvalueNewPtr(kvlangXvalue_t *v, const char *target_langtype,
         kvlangXvalueZero(v);
         return;
     }
-    v->bytes = kvlangArenaOwn(kvlangCurrentArena,
-                              kvlangXvalueOwn(tmp, tl, &len));
+    v->bytes = kvlangXvalueOwn(tmp, tl, &len);
     v->length = len;
 }
 /* def rwir 路由头：body 仅计数头 [nr:u16 LE][nw:u16 LE][dynamic:u8]，无参数载荷。

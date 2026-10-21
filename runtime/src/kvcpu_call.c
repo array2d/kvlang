@@ -114,7 +114,7 @@ static void param_decl_type(kvspace_t *kv, const char *func_key, int x,
 
 #define MAX_BIND_PAIRS (MAX_PARAMS * 5)
 
-static int add_param_binding(kvlangKvPair_t *pairs, int *np,
+static int add_param_binding(kvlangKvPair_t *pairs, bool *owned, int *np,
                              const char *frame_root, int x, const char *type,
                              const char *value_key) {
     if (!type[0] || !value_key || *np > MAX_BIND_PAIRS - 2)
@@ -130,14 +130,16 @@ static int add_param_binding(kvlangKvPair_t *pairs, int *np,
     kvlangXvalueNewPtr(&arg_ptr, type, value_key);
     kvlangXvalueNewPtr(&frame_ptr, type, arg_key);
     if (kvlangXvalueNone(&arg_ptr) || kvlangXvalueNone(&frame_ptr)) {
-        kvlangXvalueRelease(&arg_ptr);
-        kvlangXvalueRelease(&frame_ptr);
+        kvlangXvalueFree(&arg_ptr);
+        kvlangXvalueFree(&frame_ptr);
         free(arg_key);
         free(slot_key);
         return -1;
     }
-    pairs[(*np)++] = (kvlangKvPair_t){arg_key, arg_ptr};
-    pairs[(*np)++] = (kvlangKvPair_t){slot_key, frame_ptr};
+    pairs[*np] = (kvlangKvPair_t){arg_key, arg_ptr};
+    owned[(*np)++] = true;
+    pairs[*np] = (kvlangKvPair_t){slot_key, frame_ptr};
+    owned[(*np)++] = true;
     return 0;
 }
 
@@ -293,19 +295,16 @@ static char *handle_call(kvspace_t *kv, const char *pc,
     int sys_rc = kvlangXvalueNone(&v_npc) || kvlangXvalueNone(&v_ep) ||
                  kvlangXvalueNone(&v_fn) ? -1 :
                  kvlangKvspaceSet(kv, sys, 3, err, sizeof err);
-    kvlangXvalueRelease(&v_npc);
-    kvlangXvalueRelease(&v_ep);
-    kvlangXvalueRelease(&v_fn);
+    kvlangXvalueFree(&v_npc);
+    kvlangXvalueFree(&v_ep);
+    kvlangXvalueFree(&v_fn);
     if (sys_rc != 0) {
         kvlangVthreadSetError(kv, vtid, pc, "RuntimeError: cannot persist call frame");
         goto fail_frame;
     }
 
-    kvlangArenaScope bind_scope;
-    bool bind_scoped = !kvlangCurrentArena;
-    if (bind_scoped)
-        kvlangArenaScopeEnter(&bind_scope);
     kvlangKvPair_t pairs[MAX_BIND_PAIRS];
+    bool owned[MAX_BIND_PAIRS] = {0};
     int np = 0;
     int bind_error = 0;
     for (int i = 0; i < nr && !bind_error; i++) {
@@ -331,22 +330,13 @@ static char *handle_call(kvspace_t *kv, const char *pc,
                     bind_error = 1;
                     break;
                 }
-                kvlangXvalue_t copy;
-                kvlangXvalueZero(&copy);
-                copy.bytes = kvlangArenaAlloc(kvlangCurrentArena,
-                                              arg->value.length);
-                if (!copy.bytes) {
-                    free(rk);
-                    snprintf(err, sizeof err, "OutOfMemory: argument %d", i + 1);
-                    bind_error = 1;
-                    break;
-                }
-                memcpy(copy.bytes, arg->value.bytes, arg->value.length);
-                copy.length = arg->value.length;
-                pairs[np++] = (kvlangKvPair_t){strdup(rk), copy};
+                kvlangXvalue_t copy = arg->value;
+                kvlangXvalueCopy(&copy);
+                pairs[np] = (kvlangKvPair_t){strdup(rk), copy};
+                owned[np++] = true;
             }
         }
-        if (add_param_binding(pairs, &np, frame_root, -(i + 1), lt, rk) != 0) {
+        if (add_param_binding(pairs, owned, &np, frame_root, -(i + 1), lt, rk) != 0) {
             snprintf(err, sizeof err, "TypeError: cannot bind read argument %d", i + 1);
             bind_error = 1;
         }
@@ -357,17 +347,18 @@ static char *handle_call(kvspace_t *kv, const char *pc,
         param_decl_type(kv, func_key, i + 1, lt, sizeof lt);
         char *wk = i < inst->write_count ?
             resolve_read_path(kv, caller_fr, inst->writes[i].name) : NULL;
-        if (add_param_binding(pairs, &np, frame_root, i + 1, lt, wk) != 0) {
+        if (add_param_binding(pairs, owned, &np, frame_root, i + 1, lt, wk) != 0) {
             snprintf(err, sizeof err, "TypeError: cannot bind write argument %d", i + 1);
             bind_error = 1;
         }
         free(wk);
     }
     int wrc = bind_error ? -1 : np > 0 ? kvlangKvspaceSet(kv, pairs, np, err, sizeof err) : 0;
-    for (int i = 0; i < np; i++)
+    for (int i = 0; i < np; i++) {
         free(pairs[i].key);
-    if (bind_scoped)
-        kvlangArenaScopeLeave(&bind_scope);
+        if (owned[i])
+            kvlangXvalueFree(&pairs[i].value);
+    }
     if (wrc != 0) {
         kvlangVthreadSetError(kv, vtid, pc, err);
         goto fail_frame;
@@ -596,8 +587,8 @@ char *kvlangKvcpuBootstrap(kvspace_t *kv, const char *vtid,
     kvlangKvPair_t sys[2] = {{callpc, v_ep}, {seglib, v_fn}};
     int sys_rc = kvlangXvalueNone(&v_ep) || kvlangXvalueNone(&v_fn) ? -1 :
                  kvlangKvspaceSet(kv, sys, 2, err, sizeof err);
-    kvlangXvalueRelease(&v_ep);
-    kvlangXvalueRelease(&v_fn);
+    kvlangXvalueFree(&v_ep);
+    kvlangXvalueFree(&v_fn);
     if (sys_rc != 0)
         snprintf(err, sizeof err, "RuntimeError: cannot persist entry frame");
 
@@ -607,11 +598,8 @@ char *kvlangKvcpuBootstrap(kvspace_t *kv, const char *vtid,
         bind_error = 1;
     }
     if (nargs > 0 && !bind_error) {
-        kvlangArenaScope bind_scope;
-        bool bind_scoped = !kvlangCurrentArena;
-        if (bind_scoped)
-            kvlangArenaScopeEnter(&bind_scope);
         kvlangKvPair_t pairs[MAX_BIND_PAIRS];
+        bool owned[MAX_BIND_PAIRS] = {0};
         int np = 0;
         for (int i = 0; i < nr && i < nargs; i++) {
             char *value_key = kvlangStringFormat("%s/._arglit%d", frame_root, i);
@@ -622,7 +610,7 @@ char *kvlangKvcpuBootstrap(kvspace_t *kv, const char *vtid,
                 pairs[np++] = (kvlangKvPair_t){strdup(value_key), av};
             char lt[256] = {0};
             param_decl_type(kv, func_key, -(i + 1), lt, sizeof lt);
-            if (add_param_binding(pairs, &np, frame_root, -(i + 1), lt, value_key) != 0) {
+            if (add_param_binding(pairs, owned, &np, frame_root, -(i + 1), lt, value_key) != 0) {
                 snprintf(err, sizeof err, "TypeError: cannot bind entry argument %d", i + 1);
                 bind_error = 1;
                 free(value_key);
@@ -632,10 +620,11 @@ char *kvlangKvcpuBootstrap(kvspace_t *kv, const char *vtid,
         }
         if (!bind_error && np > 0 && kvlangKvspaceSet(kv, pairs, np, err, sizeof err) != 0)
             bind_error = 1;
-        for (int i = 0; i < np; i++)
+        for (int i = 0; i < np; i++) {
             free(pairs[i].key);
-        if (bind_scoped)
-            kvlangArenaScopeLeave(&bind_scope);
+            if (owned[i])
+                kvlangXvalueFree(&pairs[i].value);
+        }
     }
     if (bind_error) {
         kvlangVthreadSetError(kv, vtid, "", err);

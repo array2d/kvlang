@@ -373,7 +373,7 @@ static int set_char(kvspace_t *kv, const char *key, const char *s, char *err, ui
     kvlangXvalueNewCharUtf8(&v, s);
     kvlangKvPair_t p = {(char *)key, v};
     int rc = kvlangKvspaceSet(kv, &p, 1, err, err_cap);
-    kvlangXvalueRelease(&v);
+    kvlangXvalueFree(&v);
     return rc;
 }
 
@@ -610,8 +610,8 @@ int kvlangDispatchDelegate(kvspace_t *kv, const char *vtid, const char *pc, kvla
     kvlangXvalue_t got;
     kvlangXvalueZero(&got);
     kvlangKvspaceWatch(kv, status_key, &want, (uint64_t)timeout_for(kv, backend), &got);
-    kvlangXvalueRelease(&want);
-    kvlangXvalueRelease(&got);
+    kvlangXvalueFree(&want);
+    /* got 是后端借用视图，不 free。 */
 
     char *st = get_char(kv, status_key);
     if (!st || strcmp(st, "done") != 0) {

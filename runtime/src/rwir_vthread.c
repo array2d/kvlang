@@ -17,7 +17,7 @@ int kvlangBuiltinVthreadCreate(kvlangFrame_t *f) {
     if (!vid) return kvlangBuiltinSetError(f, "RuntimeError: vthread.create failed");
     kvlangXvalue_t r; kvlangXvalueNewCharUtf8(&r, vid);
     free(vid);
-    int rc = kvlangBuiltinWriteResult(f, &r);
+    int rc = kvlangBuiltinEmitResult(f, &r);
     return rc;
 }
 

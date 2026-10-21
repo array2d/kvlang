@@ -315,7 +315,7 @@ int kvlangBuiltinKvlangAbs(kvlangFrame_t *f) {
         xh_langtype_copy_of(&tg, lt, sizeof lt);
     kvlangXvalue_t r;
     kvlangXvalueNewPtr(&r, lt, p);
-    int rc = kvlangBuiltinWriteResult(f, &r);
+    int rc = kvlangBuiltinEmitResult(f, &r);
     free(p);
     kvlangBuiltinFreeInputs(in, n);
     return rc;
@@ -346,9 +346,7 @@ int kvlangBuiltinKvspaceListLength(kvlangFrame_t *f) {
             count = cnt;
         free(key);
     }
-    kvlangXvalue_t r;
-    kvlangXvalueNewInt64(&r, count);
-    int rc = kvlangBuiltinWriteResult(f, &r);
+    int rc = kvlangBuiltinEmitInt64(f, count);
     kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
@@ -368,7 +366,7 @@ int kvlangBuiltinKvspaceListAt(kvlangFrame_t *f) {
         }
         free(key);
     }
-    int rc = kvlangBuiltinWriteResult(f, &r);
+    int rc = kvlangBuiltinEmitResult(f, &r);
     kvlangBuiltinFreeInputs(in, n);
     return rc;
 }

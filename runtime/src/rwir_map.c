@@ -78,6 +78,7 @@ int kvlangBuiltinObj(kvlangFrame_t *f) {
         free(wty);
         kvlangKvPair_t p0 = {ok, mark};
         kvlangKvspaceSet(f->kvspace, &p0, 1, err, sizeof err);
+        kvlangXvalueFree(&mark);
         for (int i = 0, j = 0; i + 1 < n; i += 2) {
             if (kvlangXvalueNone(&in[i + 1]))
                 continue;
@@ -127,6 +128,7 @@ int kvlangBuiltinMap(kvlangFrame_t *f) {
         free(wty);
         kvlangKvPair_t p0 = {ok, mark};
         kvlangKvspaceSet(f->kvspace, &p0, 1, err, sizeof err);
+        kvlangXvalueFree(&mark);
         for (int i = 0; i < n; i++) {
             int64_t c[1] = {i};
             char *k = kvlangBuiltinScatterKey(ok, c, 1);

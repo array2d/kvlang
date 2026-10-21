@@ -68,7 +68,7 @@ static char *alloc_vthread_id(kvspace_t *kv) {
   char err[256];
   int rc = kvlangXvalueNone(&nv) ? -1 :
            kvlangKvspaceSet(kv, &p, 1, err, sizeof err);
-  kvlangXvalueRelease(&nv);
+  kvlangXvalueFree(&nv);
   return rc == 0 ? strdup(buf) : NULL;
 }
 

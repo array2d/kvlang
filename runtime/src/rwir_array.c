@@ -106,12 +106,15 @@ static int ensure_scattered(kvlangFrame_t *f, const char *base, const char *fall
     kvlangXvalue_t arr;
     kvlangXvalueZero(&arr);
     kvlangKvspaceGetOne(f->kvspace, base, &arr);
-    /* base 即将被 marker 覆盖；shm 的读是 mmap 视图，写会使其失效，先固化。 */
-    kvlangXvalueCopyToArena(&arr);
+    /* base 即将被 marker 覆盖；shm 的读是 mmap 视图，写会使其失效，先显式 copy。 */
+    kvlangXvalueCopy(&arr);
     bool missing = kvlangXvalueNone(&arr);
     const char *kind = missing ? fallback_kind : kvlangXvalueKind(&arr);
     if (!kind || kvlangXvalueElemSize(kind) <= 0) {
-        return missing ? kvlangBuiltinSetError(f, "array: missing element type") : 0;
+        int rc = missing ? kvlangBuiltinSetError(f, "array: missing element type")
+                         : 0;
+        kvlangXvalueFree(&arr);
+        return rc;
     }
     char ty[256];
     snprintf(ty, sizeof ty, "[int64]%s%s", MEMBER_SEP, kind);
@@ -120,10 +123,14 @@ static int ensure_scattered(kvlangFrame_t *f, const char *base, const char *fall
     kvlangKvPair_t head = {(char *)base, mark};
     char err[256];
     int rc = kvlangKvspaceSet(f->kvspace, &head, 1, err, sizeof err);
+    kvlangXvalueFree(&mark);
     if (rc != 0) {
-        return kvlangBuiltinSetError(f, "%s", err);
+        int e = kvlangBuiltinSetError(f, "%s", err);
+        kvlangXvalueFree(&arr);
+        return e;
     }
     if (missing) {
+        kvlangXvalueFree(&arr);
         return 0;
     }
     int n = kvlangXvalueArrayLen(&arr);
@@ -134,11 +141,15 @@ static int ensure_scattered(kvlangFrame_t *f, const char *base, const char *fall
         kvlangXvalueElementAt(&arr, i, &e);
         kvlangKvPair_t p = {k, e};
         rc = kvlangKvspaceSet(f->kvspace, &p, 1, err, sizeof err);
+        kvlangXvalueFree(&e);
         free(k);
         if (rc != 0) {
-            return kvlangBuiltinSetError(f, "%s", err);
+            int err_rc = kvlangBuiltinSetError(f, "%s", err);
+            kvlangXvalueFree(&arr);
+            return err_rc;
         }
     }
+    kvlangXvalueFree(&arr);
     return 0;
 }
 
@@ -171,6 +182,7 @@ int kvlangBuiltinArray(kvlangFrame_t *f) {
     kvlangKvPair_t p = {key, arr};
     char err[256];
     kvlangKvspaceSet(f->kvspace, &p, 1, err, sizeof err);
+    kvlangXvalueFree(&arr);
     free(key);
     kvlangBuiltinNextPc(f);
     kvlangBuiltinFreeInputs(in, n);
@@ -224,7 +236,7 @@ int kvlangBuiltinArrayFill(kvlangFrame_t *f) {
     kvlangXvalueNewTlvDims(&arr, kx.kind, raw, (uint32_t)total, kx.dims,
                            kx.ndim);
     free(raw);
-    int rc = kvlangBuiltinWriteResult(f, &arr);
+    int rc = kvlangBuiltinEmitResult(f, &arr);
     free(ke);
     kvlangBuiltinFreeInputs(in, n);
     return rc;
@@ -269,6 +281,7 @@ int kvlangBuiltinScatter(kvlangFrame_t *f) {
     kvlangBuiltinMapMarker(&mark, ty);
     kvlangKvPair_t p0 = {dst, mark};
     rc = kvlangKvspaceSet(f->kvspace, &p0, 1, err, sizeof err);
+    kvlangXvalueFree(&mark);
     if (rc != 0) {
         free(dst);
         free(fr);
@@ -282,6 +295,7 @@ int kvlangBuiltinScatter(kvlangFrame_t *f) {
         kvlangXvalueElementAt(&in[0], i, &e);
         kvlangKvPair_t p = {k, e};
         rc = kvlangKvspaceSet(f->kvspace, &p, 1, err, sizeof err);
+        kvlangXvalueFree(&e);
         free(k);
         if (rc != 0) {
             free(dst);

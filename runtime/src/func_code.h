@@ -11,7 +11,7 @@
 typedef struct {
     char *
         descriptor; /* 描述符（变量名 / *[0,±k] / 绝对路径）；literal 时 NULL */
-    kvlangXvalue_t literal; /* 字面量值（owned）；descriptor 时 None */
+    kvlangXvalue_t literal; /* 字面量副本（owned，code_free 释放）；descriptor 时 None */
     char *type;             /* 声明类型（owned） */
     int s1;                 /* 参数轴：-nr..-1 读参，+1..+nw 写参 */
     bool is_literal;
@@ -31,7 +31,6 @@ typedef struct {
 
 typedef struct {
     char *func_dir;
-    kvlangArena_t arena;    /* 函数级长期值：literal / 描述符 / 类型串 */
     kvlangCodeRow_t **rows; /* rows[s0]，按需增长 */
     size_t rows_cap;
 } kvlangFuncCode_t;
@@ -49,6 +48,7 @@ typedef struct {
     kvlangBoundCell_t *cell; /* [n] */
     int n;
     bool bound;
+    bool has_pin; /* 本行有读 cell 落在写槽之下：执行后需释放 pin 副本 */
 } kvlangRowBind_t;
 
 typedef struct {

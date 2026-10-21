@@ -55,6 +55,7 @@ int kvlangBuiltinStructNew(kvlangFrame_t *f) {
         kvlangKvPair_t p0 = {ok, mark};
         if (kvlangKvspaceSet(f->kvspace, &p0, 1, err, sizeof err) != 0)
             rc = kvlangBuiltinSetError(f, "%s", err);
+        kvlangXvalueFree(&mark);
         for (int i = 1; i + 1 < n && rc == 0; i += 2) {
             char *fname = kvlangXvalueValueString(&in[i]);
             char *ftype = struct_field_type(f->kvspace, ref, fname);

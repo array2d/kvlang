@@ -34,7 +34,7 @@ endif()
 
 if(NOT APPLE)
     enable_testing()
-    foreach(test_name test_getmember_siblings test_kvset_invalid_head test_pc_kvspace_source test_crash_resume test_param_address delegate_test)
+    foreach(test_name test_getmember_siblings test_kvset_invalid_head test_pc_kvspace_source test_crash_resume test_param_address delegate_test test_scalar_encode)
         add_custom_command(
             OUTPUT "${BIN_DIR}/${test_name}"
             COMMAND ${CMAKE_C_COMPILER} -O2 -D_GNU_SOURCE
@@ -59,6 +59,7 @@ if(NOT APPLE)
     add_test(NAME param_address_shm COMMAND "${BIN_DIR}/test_param_address")
     add_test(NAME param_address_fs COMMAND "${BIN_DIR}/test_param_address")
     add_test(NAME delegate_shm COMMAND "${BIN_DIR}/delegate_test")
+    add_test(NAME scalar_encode COMMAND "${BIN_DIR}/test_scalar_encode")
     set_tests_properties(getmember_siblings kvset_invalid_head_shm pc_kvspace_source_shm crash_resume_shm param_address_shm delegate_shm
         PROPERTIES ENVIRONMENT "KVSPACE_BACKEND_PATH=${KVSPACE_LIB_DIR};KVLANG_TEST_SCHEME=shm")
     set_tests_properties(kvset_invalid_head_fs pc_kvspace_source_fs crash_resume_fs param_address_fs

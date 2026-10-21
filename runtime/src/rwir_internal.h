@@ -44,6 +44,12 @@ int kvlangBuiltinReadInputs(kvlangFrame_t *f, kvlangXvalue_t *out, int cap);
 void kvlangBuiltinFreeInputs(kvlangXvalue_t *in, int n);
 void kvlangBuiltinNextPc(kvlangFrame_t *f);
 int kvlangBuiltinWriteResult(kvlangFrame_t *f, const kvlangXvalue_t *result);
+/* 写结果槽并释放构造值（encode→write→free 的唯一入口）。 */
+int kvlangBuiltinEmitResult(kvlangFrame_t *f, kvlangXvalue_t *v);
+/* 标量结果：栈上编码 + 直接写，不经过堆。 */
+int kvlangBuiltinEmitInt64(kvlangFrame_t *f, int64_t n);
+int kvlangBuiltinEmitFloat64(kvlangFrame_t *f, double d);
+int kvlangBuiltinEmitBool(kvlangFrame_t *f, bool b);
 int kvlangBuiltinSetError(kvlangFrame_t *f, const char *fmt, ...);
 void kvlangXvalueElementAt(const kvlangXvalue_t *v, int i, kvlangXvalue_t *out);
 char *kvlangBuiltinScatterKey(const char *base, const int64_t *coords,
