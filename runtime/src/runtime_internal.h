@@ -567,6 +567,9 @@ int kvlangHandoffExternalRwir(kvspace_t *kv, const char *vtid, const char *pc,
                               kvlangRwirInst_t *inst);
 /* kvlangNotInMyRwirCaps：opcode 是不在本 runtime myrwircaps 内、须经 def rwir 路由给能兑现它的
  * 其它 runtime 的 rwir。判据=读 kvspace /lib/<opcode> 存在 def rwir 路由头（能力唯一事实源）。 */
+#ifdef KV_COUNT
+extern unsigned long kvCSpec, kvCGen, kvCNarrow, kvCCompare;
+#endif
 bool kvlangNotInMyRwirCaps(kvspace_t *kv, const char *opcode);
 
 /* ── vthread ───────────────────────────────────────────────────────── */

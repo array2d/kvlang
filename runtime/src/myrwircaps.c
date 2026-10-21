@@ -106,6 +106,47 @@ static const struct {
     {OP_CALL, kvlangControlCall, false}, {OP_RETURN, kvlangControlReturn, false}, {OP_GOTO, kvlangControlGoto, false},
     {OP_BR, kvlangControlBr, false}, {OP_COPY, kvlangControlCopy, false},
     {"add", kvlangBuiltinAdd, false}, {"+", kvlangBuiltinAdd, false},
+    /* layout 特化 opcode：<kind>·<op> 直达对应族的实现（A1 原型）。 */
+    {"int64" MEMBER_SEP "add", kvlangBuiltinI64Add, false},
+    {"int64" MEMBER_SEP "sub", kvlangBuiltinI64Sub, false},
+    {"int64" MEMBER_SEP "mul", kvlangBuiltinI64Mul, false},
+    {"int64" MEMBER_SEP "div", kvlangBuiltinI64Div, false},
+    {"int64" MEMBER_SEP "mod", kvlangBuiltinI64Mod, false},
+    {"int64" MEMBER_SEP "bitand", kvlangBuiltinI64Bitand, false},
+    {"int64" MEMBER_SEP "bitor", kvlangBuiltinI64Bitor, false},
+    {"int64" MEMBER_SEP "bitxor", kvlangBuiltinI64Bitxor, false},
+    {"int64" MEMBER_SEP "shl", kvlangBuiltinI64Shl, false},
+    {"int64" MEMBER_SEP "shr", kvlangBuiltinI64Shr, false},
+    {"int64" MEMBER_SEP "max", kvlangBuiltinI64Max, false},
+    {"int64" MEMBER_SEP "min", kvlangBuiltinI64Min, false},
+    {"int64" MEMBER_SEP "neg", kvlangBuiltinI64Neg, false},
+    {"int64" MEMBER_SEP "abs", kvlangBuiltinI64Abs, false},
+    {"int64" MEMBER_SEP "sign", kvlangBuiltinI64Sign, false},
+    {"int64" MEMBER_SEP "eq", kvlangBuiltinI64Eq, false},
+    {"int64" MEMBER_SEP "neq", kvlangBuiltinI64Neq, false},
+    {"int64" MEMBER_SEP "lt", kvlangBuiltinI64Lt, false},
+    {"int64" MEMBER_SEP "le", kvlangBuiltinI64Le, false},
+    {"int64" MEMBER_SEP "gt", kvlangBuiltinI64Gt, false},
+    {"int64" MEMBER_SEP "ge", kvlangBuiltinI64Ge, false},
+    {"float64" MEMBER_SEP "add", kvlangBuiltinF64Add, false},
+    {"float64" MEMBER_SEP "sub", kvlangBuiltinF64Sub, false},
+    {"float64" MEMBER_SEP "mul", kvlangBuiltinF64Mul, false},
+    {"float64" MEMBER_SEP "div", kvlangBuiltinF64Div, false},
+    {"float64" MEMBER_SEP "max", kvlangBuiltinF64Max, false},
+    {"float64" MEMBER_SEP "min", kvlangBuiltinF64Min, false},
+    {"float64" MEMBER_SEP "neg", kvlangBuiltinF64Neg, false},
+    {"float64" MEMBER_SEP "abs", kvlangBuiltinF64Abs, false},
+    {"float64" MEMBER_SEP "sign", kvlangBuiltinF64Sign, false},
+    {"float64" MEMBER_SEP "sqrt", kvlangBuiltinF64Sqrt, false},
+    {"float64" MEMBER_SEP "exp", kvlangBuiltinF64Exp, false},
+    {"float64" MEMBER_SEP "log", kvlangBuiltinF64Log, false},
+    {"float64" MEMBER_SEP "pow", kvlangBuiltinF64Pow, false},
+    {"float64" MEMBER_SEP "eq", kvlangBuiltinF64Eq, false},
+    {"float64" MEMBER_SEP "neq", kvlangBuiltinF64Neq, false},
+    {"float64" MEMBER_SEP "lt", kvlangBuiltinF64Lt, false},
+    {"float64" MEMBER_SEP "le", kvlangBuiltinF64Le, false},
+    {"float64" MEMBER_SEP "gt", kvlangBuiltinF64Gt, false},
+    {"float64" MEMBER_SEP "ge", kvlangBuiltinF64Ge, false},
     {"sub", kvlangBuiltinSub, false}, {"-", kvlangBuiltinSub, false},
     {"mul", kvlangBuiltinMul, false}, {"×", kvlangBuiltinMul, false},
     {"div", kvlangBuiltinDiv, false}, {"÷", kvlangBuiltinDiv, false},
@@ -188,6 +229,10 @@ static bool is_num_kind_prefix(const char *op, size_t n) {
     return false;
 }
 
+#ifdef KV_COUNT
+unsigned long kvCSpec, kvCGen;
+#endif
+
 /* rwirtable 两级查找：先查完整 opcode（命中=专精实现，如 fp8·add，或 time·add 等成员算子），
  * 未命中且末段前缀是 C 原生数值 langtype 才拆前缀查裸算子（int64·add → add，通用实现）。
  * 非数值前缀（time/duration·max 等用户 rwfunc）不剥离，两级皆 miss → 非本 runtime native。 */
@@ -232,6 +277,15 @@ bool kvlangBuiltinNumericOp(const char *opcode) {
 
 int kvlangBuiltinNative(kvlangFrame_t *f) {
     int i = f->instruction->opcode_id >= 0 ? f->instruction->opcode_id : kvlangBuiltinCapabilityIndex(f->instruction->opcode);
+#ifdef KV_COUNT
+    if (i >= 0 && f->instruction->opcode) {
+        if (strncmp(f->instruction->opcode, "int64" MEMBER_SEP, 7) == 0 ||
+            strncmp(f->instruction->opcode, "float64" MEMBER_SEP, 9) == 0)
+            kvCSpec++;
+        else
+            kvCGen++;
+    }
+#endif
     if (i >= 0) return myrwircaps[i].fn(f);
     return kvlangBuiltinSetError(f, "unknown builtin op: %s", f->instruction->opcode);
 }

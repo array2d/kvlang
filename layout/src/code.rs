@@ -642,7 +642,13 @@ pub fn write_func(
     local_funcs: &HashSet<String>,
 ) -> Result<(), String> {
     let type_map = lower::infer_types(fn_);
-    lower::specialize(fn_, &type_map);
+    let diags = lower::specialize(fn_, &type_map);
+    for d in &diags {
+        eprintln!("{}", d.string());
+    }
+    if parser::has_errors(&diags) {
+        return Err("type: error-level diagnostics — refusing to load".to_string());
+    }
     let func_dir = keytree::lib_func(pkg, &fn_.sig.name);
     let opcode = if pkg.is_empty() {
         fn_.sig.name.clone()

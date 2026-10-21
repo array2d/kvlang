@@ -2,6 +2,15 @@
 #include "rwir_internal.h"
 #include <math.h>
 
+#ifdef KV_COUNT
+unsigned long kvCNarrow, kvCCompare;
+#define CNT_NARROW() kvCNarrow++
+#define CNT_CMP() kvCCompare++
+#else
+#define CNT_NARROW() do {} while (0)
+#define CNT_CMP() do {} while (0)
+#endif
+
 /* ── 类型 helper ─────────────────────────────────────────────── */
 
 /* ── 类型 helper：全经 langtype id + 标量 0copy 视图，热路径零 strcmp、每值只 decode 一次 ── */
@@ -29,6 +38,7 @@ static int wider_float_id(int a, int b) {
 
 static void narrow_int(int a, int b, int64_t v, uint8_t *buf, size_t cap,
                        kvlangXvalue_t *out) {
+    CNT_NARROW();
     int k = wider_int_id(a, b);
     uint8_t raw[8];
     uint32_t len;
@@ -48,6 +58,7 @@ static void narrow_int(int a, int b, int64_t v, uint8_t *buf, size_t cap,
 
 static void narrow_float(int a, int b, double v, uint8_t *buf, size_t cap,
                          kvlangXvalue_t *out) {
+    CNT_NARROW();
     uint8_t raw[8];
     uint32_t len;
     const char *kind;
@@ -66,6 +77,7 @@ static void narrow_float(int a, int b, double v, uint8_t *buf, size_t cap,
 }
 
 int compare_int(kvlangScalar_t a, kvlangScalar_t b) {
+    CNT_CMP();
     bool au = kvlangLangtypeIsUint(a.kind_id), bu = kvlangLangtypeIsUint(b.kind_id);
     if (!au && !bu) { int64_t ai = kvlangScalarI64(a), bi = kvlangScalarI64(b); return ai < bi ? -1 : ai > bi ? 1 : 0; }
     if (au && bu) { uint64_t x = kvlangScalarU64(a), y = kvlangScalarU64(b); return x < y ? -1 : x > y ? 1 : 0; }

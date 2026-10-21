@@ -8,6 +8,11 @@ use super::{builtin, keytree, symbol};
 
 /// 容器类型（stringkeymap / mapexpr）不可用 `[]` 下标访问成员——
 /// `[]` 仅限 compact array（shaped langtype，含字符串 `[]char/*`）。
+/// 字符串/字符族（含 `[]char/utf32`、`[N]char`）：参与 add 拼接与比较，不做数值特化。
+fn is_string_kind(t: &str) -> bool {
+    t.contains("char")
+}
+
 fn is_container_type(t: &str) -> bool {
     t == "stringkeymap" || t.contains(keytree::MEMBER_SEP)
 }
@@ -1053,6 +1058,13 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
         };
     }
     if symbol::lookup(opcode).arith {
+        // 字符串拼接走 add：任一读参是 char 族，结果仍是该字符串类型（不是 int64）。
+        for r in reads {
+            let t = slot_type(r, tm);
+            if is_string_kind(&t) {
+                return t;
+            }
+        }
         for r in reads {
             if slot_type(r, tm) == "float64" {
                 return "float64".to_string();
@@ -1142,6 +1154,20 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
     String::new()
 }
 
+/// 表达式操作数的静态类型：字符串字面量按 quote/lit 判定（val 本身不含引号，
+/// 不能当变量名查 tm，否则 `"a" + "bc"` 会被同名变量 `a` 带偏）。
+fn arg_type(e: &Expr, tm: &HashMap<String, String>) -> String {
+    if e.quote != 0 || matches!(e.lit, LitKind::LitString | LitKind::LitRawString) {
+        return "char/utf32".to_string();
+    }
+    match e.lit {
+        LitKind::LitInt => "int64".to_string(),
+        LitKind::LitFloat => "float64".to_string(),
+        LitKind::LitBool => "bool".to_string(),
+        _ => slot_type(&e.val, tm),
+    }
+}
+
 fn slot_type(name: &str, tm: &HashMap<String, String>) -> String {
     if name.is_empty() {
         return String::new();
@@ -1177,37 +1203,115 @@ fn lit_to_type(lit: LitKind) -> &'static str {
     }
 }
 
-// ── 特化（对齐 lower/specialize.go） ────────────────────────────────
-
-pub fn specialize(fn_: &mut Func, tm: &HashMap<String, String>) {
-    specialize_body(&mut fn_.body, tm);
+/// 数值算子族的 layout 阶段类型/arity 校验（A1）：已知类型不符即报错，
+/// 未知类型（动态 any）保留给运行时。字符串只允许出现在 add（拼接）与比较中。
+fn validate_num_op(
+    word: &str,
+    args: &[Expr],
+    tm: &HashMap<String, String>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let is_cmp = matches!(word, "eq" | "neq" | "lt" | "le" | "gt" | "ge");
+    let unary = matches!(word, "neg" | "abs" | "sign" | "sqrt" | "exp" | "log");
+    if unary && args.len() != 1 {
+        push_num_diag(
+            diags,
+            format!("TypeError: {word} expects 1 operand, got {}", args.len()),
+        );
+        return;
+    }
+    if !unary && word == "sub" && !(args.len() == 1 || args.len() == 2) {
+        push_num_diag(
+            diags,
+            format!("TypeError: sub expects 1 or 2 operands, got {}", args.len()),
+        );
+        return;
+    }
+    if !unary && !matches!(word, "add" | "mul" | "sub") && args.len() != 2 {
+        push_num_diag(
+            diags,
+            format!("TypeError: {word} expects 2 operands, got {}", args.len()),
+        );
+        return;
+    }
+    let mut saw_char = false;
+    let mut saw_num = false;
+    for a in args {
+        let t = arg_type(a, tm);
+        if t.is_empty() || t == "any" {
+            continue;
+        }
+        if is_string_kind(&t) {
+            saw_char = true;
+        } else if builtin::is_num_kind(&t) {
+            saw_num = true;
+        } else if (t == "bool" || t.starts_with('*')) && is_cmp {
+            // bool / Ptr 比较合法（Ptr 对 None 的判空在运行时做值检查）
+        } else {
+            push_num_diag(
+                diags,
+                format!("TypeError: {word} expects numeric operand, got {t:?}"),
+            );
+            return;
+        }
+    }
+    if saw_char && saw_num {
+        push_num_diag(
+            diags,
+            format!("TypeError: {word} cannot mix string and numeric operands"),
+        );
+    }
 }
 
-fn specialize_body(body: &mut [Stmt], tm: &HashMap<String, String>) {
+fn push_num_diag(diags: &mut Vec<Diagnostic>, message: String) {
+    diags.push(Diagnostic {
+        pos: Pos { line: 0, col: 0 },
+        warn: false,
+        info: false,
+        message,
+        source: String::new(),
+        src_file: String::new(),
+        src_name: String::new(),
+    });
+}
+
+// ── 特化（对齐 lower/specialize.go） ────────────────────────────────
+
+pub fn specialize(fn_: &mut Func, tm: &HashMap<String, String>) -> Vec<Diagnostic> {
+    let mut diags = Vec::new();
+    specialize_body(&mut fn_.body, tm, &mut diags);
+    diags
+}
+
+fn specialize_body(body: &mut [Stmt], tm: &HashMap<String, String>, diags: &mut Vec<Diagnostic>) {
     for st in body {
         match st {
-            Stmt::Instruction(s) => specialize_inst(s, tm),
-            Stmt::Scope(s) => specialize_body(&mut s.body, tm),
+            Stmt::Instruction(s) => specialize_inst(s, tm, diags),
+            Stmt::Scope(s) => specialize_body(&mut s.body, tm, diags),
             Stmt::If(s) => {
                 if let Some(c) = &mut s.cond {
-                    specialize_inst(c, tm);
+                    specialize_inst(c, tm, diags);
                 }
-                specialize_body(&mut s.then_, tm);
-                specialize_body(&mut s.else_, tm);
+                specialize_body(&mut s.then_, tm, diags);
+                specialize_body(&mut s.else_, tm, diags);
             }
             Stmt::While(s) => {
                 if let Some(c) = &mut s.cond {
-                    specialize_inst(c, tm);
+                    specialize_inst(c, tm, diags);
                 }
-                specialize_body(&mut s.body, tm);
+                specialize_body(&mut s.body, tm, diags);
             }
-            Stmt::For(s) => specialize_body(&mut s.body, tm),
+            Stmt::For(s) => specialize_body(&mut s.body, tm, diags),
             _ => {}
         }
     }
 }
 
-fn specialize_inst(inst: &mut Instruction, tm: &HashMap<String, String>) {
+fn specialize_inst(
+    inst: &mut Instruction,
+    tm: &HashMap<String, String>,
+    diags: &mut Vec<Diagnostic>,
+) {
     let e = match &mut inst.expr {
         Some(e) => e,
         None => return,
@@ -1223,23 +1327,29 @@ fn specialize_inst(inst: &mut Instruction, tm: &HashMap<String, String>) {
     if !builtin::num_op(&word) {
         return;
     }
-    let mut kind = String::new();
+    validate_num_op(&word, &e.args, tm, diags);
+    /* 只在「全部操作数静态类型完全一致且为 int64/float64」时特化；
+     * 混合宽度/混合 int+float/动态 any/字符串/bool 一律保留通用 opcode。 */
+    let mut kinds: Vec<String> = Vec::new();
     for arg in &e.args {
-        let t = slot_type(&arg.val, tm);
-        if !builtin::is_num_kind(&t) {
-            continue;
+        let t = arg_type(arg, tm);
+        if t.is_empty() || t == "any" || is_string_kind(&t) || !builtin::is_num_kind(&t) {
+            return;
         }
-        if kind.is_empty() {
-            kind = t;
-        } else {
-            kind = builtin::wider_num_kind(&kind, &t);
-        }
+        kinds.push(t);
     }
-    if kind.is_empty() {
+    if kinds.is_empty() {
         return;
     }
-    let k = builtin::op_kind(&word, &kind);
-    if k.is_empty() {
+    let k = &kinds[0];
+    if k != "int64" && k != "float64" {
+        return;
+    }
+    if kinds.iter().any(|t| t != k) {
+        return;
+    }
+    let is_cmp = matches!(word.as_str(), "eq" | "neq" | "lt" | "le" | "gt" | "ge");
+    if !is_cmp && builtin::op_kind(&word, k) != *k {
         return;
     }
     e.op = format!("{k}{}{word}", keytree::MEMBER_SEP);
