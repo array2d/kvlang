@@ -271,6 +271,22 @@ void kvlangBodyInvalidate(const char *key) {
         }
 }
 
+void kvlangBodyInvalidateKind(const char *key, const uint8_t *langtype,
+                              uint32_t langtype_len) {
+    if (!key)
+        return;
+    for (kvlangBodySlot *c = body_buckets[key_hash(key) % BODY_BUCKETS]; c;
+         c = c->next)
+        if (strcmp(c->key, key) == 0) {
+            c->ok = false;
+            c->body = NULL;
+            /* 写入仍是别的 kind：别急着重试，等匹配的写再来。 */
+            size_t kl = strlen(c->kind);
+            c->dead = !(langtype && kl == langtype_len &&
+                        memcmp(c->kind, langtype, kl) == 0);
+        }
+}
+
 void kvlangBodyInvalidateTree(const char *prefix) {
     if (!prefix)
         return;

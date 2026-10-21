@@ -83,7 +83,11 @@ int kvlangKvspaceGetHead(kvspace_t *k, const char *key, kvspaceHead_t *out) {
 int kvlangKvspaceSet(kvspace_t *k, const kvlangKvPair_t *pairs, int n, char *err, uint32_t err_cap) {
     for (int i = 0; i < n; i++) {
         const kvlangXvalue_t *v = &pairs[i].value;
-        kvlangBodyInvalidate(pairs[i].key);
+        if (v->bytes && v->length >= XH_PREFIX)
+            kvlangBodyInvalidateKind(pairs[i].key, xh_langtype(v->bytes),
+                                     xh_langtype_len(v->bytes));
+        else
+            kvlangBodyInvalidate(pairs[i].key);
         if (kvlangXvalueNone(v)) {
             const char *dk[1] = {pairs[i].key};
             if (kvspaceDel(k->handle, dk, 1, err, err_cap) != 0)

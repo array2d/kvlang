@@ -95,6 +95,10 @@ int kvlangDefRwir(void *kvspace, const char *opcode, const char *const *rp,
  * 未命中且前缀是 C native 数字 kind 时才剥前缀归到裸 op（如 add），kvlangBuiltin* 按操作数 kind 归约。 */
 static int kvlangControlCopy(kvlangFrame_t *f) { return kvlangBuiltinExecuteCopy(f); }
 
+#ifdef KV_COUNT
+unsigned long kvCSpec, kvCGen;
+#endif
+
 static const kvlangRwirCap myrwircaps[] = {
     /* control / copy：与 native 算子同表，opcode_id 单跳派发 */
     {OP_CALL, kvlangControlCall, false}, {OP_RETURN, kvlangControlReturn, false}, {OP_GOTO, kvlangControlGoto, false},
@@ -141,6 +145,33 @@ static const kvlangRwirCap myrwircaps[] = {
     {"float64" MEMBER_SEP "le", kvlangBuiltinF64Le, false, KVSPACE_KIND_BOOL, 1},
     {"float64" MEMBER_SEP "gt", kvlangBuiltinF64Gt, false, KVSPACE_KIND_BOOL, 1},
     {"float64" MEMBER_SEP "ge", kvlangBuiltinF64Ge, false, KVSPACE_KIND_BOOL, 1},
+    /* Phase 2 整数族（int64 族见上；结果类型与此表同源）。 */
+#define CAP_INT_BASE(ktok, kstr, w, U, kid)                                         \
+    {kstr MEMBER_SEP "add", kvlangBuiltin##ktok##Add, false, kstr, w},         \
+    {kstr MEMBER_SEP "sub", kvlangBuiltin##ktok##Sub, false, kstr, w},         \
+    {kstr MEMBER_SEP "mul", kvlangBuiltin##ktok##Mul, false, kstr, w},         \
+    {kstr MEMBER_SEP "div", kvlangBuiltin##ktok##Div, false, kstr, w},         \
+    {kstr MEMBER_SEP "mod", kvlangBuiltin##ktok##Mod, false, kstr, w},         \
+    {kstr MEMBER_SEP "max", kvlangBuiltin##ktok##Max, false, kstr, w},         \
+    {kstr MEMBER_SEP "min", kvlangBuiltin##ktok##Min, false, kstr, w},         \
+    {kstr MEMBER_SEP "eq", kvlangBuiltin##ktok##Eq, false, KVSPACE_KIND_BOOL, 1},\
+    {kstr MEMBER_SEP "neq", kvlangBuiltin##ktok##Neq, false, KVSPACE_KIND_BOOL, 1},\
+    {kstr MEMBER_SEP "lt", kvlangBuiltin##ktok##Lt, false, KVSPACE_KIND_BOOL, 1},\
+    {kstr MEMBER_SEP "le", kvlangBuiltin##ktok##Le, false, KVSPACE_KIND_BOOL, 1},\
+    {kstr MEMBER_SEP "gt", kvlangBuiltin##ktok##Gt, false, KVSPACE_KIND_BOOL, 1},\
+    {kstr MEMBER_SEP "ge", kvlangBuiltin##ktok##Ge, false, KVSPACE_KIND_BOOL, 1},
+#define CAP_INT_SIGNED(ktok, kstr, w, U, kid)                                       \
+    {kstr MEMBER_SEP "neg", kvlangBuiltin##ktok##Neg, false, kstr, w},         \
+    {kstr MEMBER_SEP "abs", kvlangBuiltin##ktok##Abs, false, kstr, w},
+#define CAP_INT_U64(ktok, kstr, w, U, kid)                                          \
+    {kstr MEMBER_SEP "bitand", kvlangBuiltin##ktok##Bitand, false, kstr, w},   \
+    {kstr MEMBER_SEP "bitor", kvlangBuiltin##ktok##Bitor, false, kstr, w},     \
+    {kstr MEMBER_SEP "bitxor", kvlangBuiltin##ktok##Bitxor, false, kstr, w},   \
+    {kstr MEMBER_SEP "shl", kvlangBuiltin##ktok##Shl, false, kstr, w},         \
+    {kstr MEMBER_SEP "shr", kvlangBuiltin##ktok##Shr, false, kstr, w},
+    KVLANG_INT_BASE_KINDS(CAP_INT_BASE)
+    KVLANG_INT_SIGNED_KINDS(CAP_INT_SIGNED)
+    KVLANG_INT_U64_KINDS(CAP_INT_U64)
     {"sub", kvlangBuiltinSub, false}, {"-", kvlangBuiltinSub, false},
     {"mul", kvlangBuiltinMul, false}, {"×", kvlangBuiltinMul, false},
     {"div", kvlangBuiltinDiv, false}, {"÷", kvlangBuiltinDiv, false},

@@ -580,6 +580,7 @@ int kvlangHandoffExternalRwir(kvspace_t *kv, const char *vtid, const char *pc,
 #ifdef KV_COUNT
 extern unsigned long kvCNarrow, kvCCompare;
 #ifdef KV_COUNT
+extern unsigned long kvCSpec, kvCGen;
 extern unsigned long kvCBodyFast, kvCBodyFallback;
 extern unsigned long kvCBodyCells, kvCBodyCellsMax;
 extern unsigned long kvCBodyCapAttempt, kvCBodyCapOk;
@@ -654,6 +655,12 @@ typedef struct {
     char **out_pc;   /* ExecuteMode 的 out 参数（仅判空） */
 } kvlangFrame_t;
 
+/* 定长标量写：命中 body 快路径则原地写并 NextPc，返回 1；未命中返回 0。
+ * 供 emit_inline_scalar 与各特化 handler 共用。 */
+__attribute__((visibility("hidden"))) int
+kvlangBuiltinWriteBody(kvlangFrame_t *f, const char *kind, const uint8_t *raw,
+                       uint32_t len);
+
 /* Write PC to kvspace; write status when it changes. */
 void kvlangVthreadNextPc(kvlangFrame_t *f, const char *pc, const char *status);
 
@@ -662,6 +669,10 @@ bool kvlangNotInMyCaps(const char *opcode);
 bool kvlangBuiltinNumericOp(const char *opcode);
 /* 该 key 被整值写/删除：清掉所有命中 cell 的 body 指针，允许重试。 */
 __attribute__((visibility("hidden"))) void kvlangBodyInvalidate(const char *key);
+/* 整值写命中：只有写入 kind 与该槽静态结果类型一致时才允许重试捕获。 */
+__attribute__((visibility("hidden"))) void
+kvlangBodyInvalidateKind(const char *key, const uint8_t *langtype,
+                         uint32_t langtype_len);
 __attribute__((visibility("hidden"))) void
 kvlangBodyInvalidateTree(const char *prefix);
 
