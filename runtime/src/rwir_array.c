@@ -21,22 +21,40 @@ static void pack_typed_array(const char *kind, const kvlangXvalue_t *elems,
 }
 
 static int separated_len(kvspace_t *kv, const char *base) {
-    char key[KV_KEY_MAX];
-    for (int i = 0;; i++) {
-        kvlangKeyFormat(key, sizeof key, "%s%s[%d]", base, MEMBER_SEP, i);
-        kvlangXvalue_t v;
-        kvlangXvalueZero(&v);
-        kvlangKvspaceGetOne(kv, key, &v);
-        bool none = kvlangXvalueNone(&v);
-        if (none)
-            return i;
-    }
+    /* 一次 ListLen 取代逐 key GetOne 探测（数组元素为 base·[i]）。 */
+    char *dir = kvlangKeytreeMember(base, "");
+    int count = 0;
+    if (kvlangKvspaceListLen(kv, dir, false, false, &count) != 0)
+        count = 0;
+    free(dir);
+    return count;
 }
 
 static int64_t separated_next(kvspace_t *kv, const char *base) {
     char *dir = kvlangKeytreeMember(base, "");
-    char **names = NULL;
     int count = 0;
+    /* memindex 的坐标段按 cmp_coord 升序（spec 07），故末元素即最大坐标：
+     * next = max_index + 1。两次后端调用，且天然覆盖用户直写 [100] 造成的洞。 */
+    if (kvlangKvspaceListLen(kv, dir, false, false, &count) == 0 && count > 0) {
+        char *last = NULL;
+        if (kvlangKvspaceListAt(kv, dir, false, false, count - 1, &last) == 0 &&
+            last) {
+            int64_t next = -1;
+            if (last[0] == '[') {
+                char *end = NULL;
+                long long idx = strtoll(last + 1, &end, 10);
+                if (end && *end == ']' && end[1] == 0 && idx >= 0 &&
+                    idx < INT64_MAX)
+                    next = (int64_t)idx + 1;
+            }
+            free(last);
+            if (next >= 0) {
+                free(dir);
+                return next;
+            }
+        }
+    }
+    char **names = NULL;
     int64_t next = 0;
     if (kvlangKvspaceList(kv, dir, false, false, &names, &count) == 0) {
         for (int i = 0; i < count; i++) {
@@ -323,9 +341,14 @@ int kvlangBuiltinCompact(kvlangFrame_t *f) {
     char *fr = kvlangKeytreeFrameRoot(f->pc);
     char *src =
         kvlangBuiltinResolveWriteSlot(f->kvspace, fr, f->instruction->reads[0].name);
+    /* ListLen 给出元素数，逐元素读；省掉结尾那一次“再探一个空槽”的后端调用。 */
+    char *cdir = kvlangKeytreeMember(src, "");
+    int ccnt = 0;
+    kvlangKvspaceListLen(f->kvspace, cdir, false, false, &ccnt);
+    free(cdir);
     kvlangXvalue_t elems[1024];
     int n = 0;
-    for (int i = 0;; i++) {
+    for (int i = 0; i < ccnt && n < 1024; i++) {
         int64_t c[1] = {i};
         char *k = kvlangBuiltinScatterKey(src, c, 1);
         kvlangXvalue_t v;
