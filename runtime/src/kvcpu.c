@@ -261,6 +261,8 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
             f.pc_out_cap = sizeof fb_b[0];
             f.status_known =
                 status; /* 本步开始前读到的 ‥status（源值，借用） */
+            f.pc_off = &pc_off;
+            f.status_off = &status_off;
             exec_err = kvlangBuiltinNative(&f);
             if (f.persist_failed)
                 exec_err = -1;
@@ -312,7 +314,7 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
             exec_err = kvlangKvcpuCallOpcode(
                 kv, vtid, cur, status, inst.opcode, inst.reads,
                 inst.read_count, inst.writes, inst.write_count, fb_b[fb_i ^ 1],
-                sizeof fb_b[0], &pc_fb);
+                sizeof fb_b[0], &pc_fb, &pc_off, &status_off);
         }
 
         if (pc_fb) {

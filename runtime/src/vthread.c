@@ -108,18 +108,42 @@ int kvlangVthreadSet(kvspace_t *kv, const char *vtid, const char *pc,
     return rc;
 }
 
+/* 槽容量：pc 常态长度一档、status 更短一档；超长值退回全尺寸，仍不截断。 */
+#define VT_PC_SLACK_CAP 256
+#define VT_STATUS_SLACK_CAP 32
+#define VT_SLACK_MAX_CAP KV_KEY_MAX
+
+/* 整值写：已绑定的 keyoff 直接写；独立帧没有绑定，按 key 冷写。 */
+static void member_write(kvlangFrame_t *f, struct kvspaceKeyOff *ko,
+                         bool is_status, const char *s) {
+    uint32_t len = (uint32_t)strlen(s);
+    uint32_t cap = is_status ? VT_STATUS_SLACK_CAP : VT_PC_SLACK_CAP;
+    if (len > cap)
+        cap = VT_SLACK_MAX_CAP;
+    uint8_t val[64 + VT_SLACK_MAX_CAP];
+    uint32_t n = kvlangSlackEncodeChar((const uint8_t *)s, len, cap, val,
+                                       sizeof val);
+    if (ko) {
+        if (kvspaceKeyOffSet(ko, val, n, NULL, 0) != 0)
+            f->persist_failed = true;
+        return;
+    }
+    char k[KV_KEY_MAX];
+    if (is_status)
+        kvlangKeytreeVthreadStatus(f->vthread_id, k, sizeof k);
+    else
+        kvlangKeytreeVthreadPc(f->vthread_id, k, sizeof k);
+    if (kvspaceSetValue(f->kvspace->handle, k, val, n, 0, 0, NULL, 0) != 0)
+        f->persist_failed = true;
+}
+
 /* Persist PC and changed status after each instruction. */
 void kvlangVthreadNextPc(kvlangFrame_t *f, const char *pc,
                           const char *status) {
-    char k1[KV_KEY_MAX], k2[KV_KEY_MAX];
-    kvlangKeytreeVthreadPc(f->vthread_id, k1, sizeof k1);
-    kvlangKeytreeVthreadStatus(f->vthread_id, k2, sizeof k2);
-    if (kvlangKvspaceSetChar(f->kvspace, k1, pc) != 0)
-        f->persist_failed = true;
+    member_write(f, f->pc_off, false, pc);
     if (!f->persist_failed &&
-        (!f->status_known || strcmp(f->status_known, status) != 0) &&
-        kvlangKvspaceSetChar(f->kvspace, k2, status) != 0)
-        f->persist_failed = true;
+        (!f->status_known || strcmp(f->status_known, status) != 0))
+        member_write(f, f->status_off, true, status);
     /* 回传：值就是刚写进 kvspace 的那条 PC，不引入第二份事实源。 */
     if (!f->persist_failed && f->pc_out) {
         size_t n = strlen(pc);

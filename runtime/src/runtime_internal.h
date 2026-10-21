@@ -96,6 +96,9 @@ extern int kvspaceNewPtr(const char *target_langtype, const char *target,
                          uint8_t **out, uint32_t *out_len);
 extern int kvspaceNewChar(const uint8_t *bytes, uint32_t len, uint8_t **out,
                           uint32_t *out_len);
+/* 正典 slack 编码（elem 1 = UTF-8），tests/test_scalar_encode.c 作对照。 */
+extern int kvspaceXhNewSlack(int elem, const uint8_t *data, uint64_t data_len,
+                             uint64_t cap, uint8_t **out, uint64_t *out_len);
 extern int kvspaceNewBool(uint8_t v, uint8_t **out, uint32_t *out_len);
 extern int kvspaceNewInt64(int64_t v, uint8_t **out, uint32_t *out_len);
 extern int kvspaceNewFloat64(double v, uint8_t **out, uint32_t *out_len);
@@ -227,6 +230,11 @@ void kvlangXvalueFree(kvlangXvalue_t *v);
 void kvlangXvalueCopy(kvlangXvalue_t *v);
 /* 标量 inline 编码到调用方缓冲：pow=5(headlen 32)、flags=0、a=b=0、
  * langtype@18、body@32。与正典 codec 的字节一致性由 ctest scalar_encode 守护。 */
+/* 变长 char/utf8 的 SLACK 编码（pow=6、flags=1、a=len、b=cap、body@64）。
+ * 固定 cap 让每步写同尺寸值，后端得以原地覆写；返回值 = 编码总长。 */
+__attribute__((visibility("hidden"))) uint32_t
+kvlangSlackEncodeChar(const uint8_t *raw, uint32_t len, uint32_t cap,
+                      uint8_t *buf, uint32_t bufsize);
 uint32_t kvlangScalarEncode(const char *kind, const uint8_t *raw, uint32_t len,
                             uint8_t *buf, uint32_t cap);
 void kvlangXvalueSetBytes(kvlangXvalue_t *v, uint8_t *data,
@@ -627,6 +635,10 @@ typedef struct {
     char *pc_out;
     size_t pc_out_cap;
     bool pc_feedback;
+    /* PC/status 槽的 keyoff：ExecuteMode 入口绑定一次，NextPc 只做整值写。
+     * NULL = 调用方未绑定（独立帧），NextPc 按 key 冷写。 */
+    struct kvspaceKeyOff *pc_off;
+    struct kvspaceKeyOff *status_off;
 } kvlangFrame_t;
 
 /* Write PC to kvspace; write status when it changes. */

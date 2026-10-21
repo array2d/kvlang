@@ -4,7 +4,9 @@
 
 #include "runtime_internal.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static int failures;
 
@@ -28,6 +30,47 @@ static void check_kind(const char *kind, uint32_t len) {
     CHECK(bl == rl);
     CHECK(bl > 0 && memcmp(buf, ref, bl) == 0);
     free(ref);
+}
+
+/* NextPc 写出的槽：解出的 b 即槽容量，再按该容量与正典 slack codec 逐字节比对。
+ * 不写死实现档位——容量是实现自选的，布局与内容才是契约。 */
+static void check_member(kvspace_t *kv, bool is_status, const char *s) {
+    char key[KV_KEY_MAX];
+    if (is_status)
+        kvlangKeytreeVthreadStatus("slk", key, sizeof key);
+    else
+        kvlangKeytreeVthreadPc("slk", key, sizeof key);
+    kvspaceKeyOff ko;
+    kvspaceKeyOffBind(&ko, kv, key);
+    kvlangFrame_t f = {.kvspace = kv, .vthread_id = "slk"};
+    if (is_status) {
+        f.status_off = &ko;
+        f.status_known = NULL;
+        kvlangVthreadNextPc(&f, "/vthread/slk/‥pc", s);
+    } else {
+        f.pc_off = &ko;
+        kvlangVthreadNextPc(&f, s, "running");
+    }
+    CHECK(!f.persist_failed);
+    kvlangXvalue_t v;
+    kvlangXvalueZero(&v);
+    CHECK(kvlangKvspaceGetOne(kv, key, &v) == 0);
+    kvspaceHead_t h;
+    CHECK(kvspaceDecodeHead(v.bytes, v.length, &h) == 0);
+    CHECK(h.storetype == 1 /* slack */);
+    CHECK(h.body_len == (int32_t)strlen(s));
+    CHECK(h.body_cap >= (uint64_t)strlen(s));
+    uint8_t *ref = NULL;
+    uint64_t rl = 0;
+    CHECK(kvspaceXhNewSlack(1 /* UTF-8 */, (const uint8_t *)s, strlen(s),
+                            h.body_cap, &ref, &rl) == 0);
+    CHECK(v.length == (uint32_t)rl);
+    CHECK(v.length > 0 && memcmp(v.bytes, ref, v.length) == 0);
+    free(ref);
+}
+
+static void check_slack(kvspace_t *kv, const char *s) {
+    check_member(kv, false, s);
 }
 
 int main(void) {
@@ -81,6 +124,36 @@ int main(void) {
         CHECK(bl == rl && bl > 0 && memcmp(buf, ref, bl) == 0);
         free(ref);
     }
+    /* pc/status 的变长 char：固定 cap（含多字节 UTF-8）逐字节对齐正典。 */
+    char dir[] = "/tmp/kvlang-slack-XXXXXX";
+    if (!mkdtemp(dir)) {
+        fprintf(stderr, "mkdtemp failed\n");
+        return 1;
+    }
+    const char *scheme = getenv("KVLANG_TEST_SCHEME");
+    char dsn[256];
+    snprintf(dsn, sizeof dsn, "%s://%s/s", scheme ? scheme : "shm", dir);
+    kvspace_t *kv = kvlangKvspaceConnect(dsn);
+    CHECK(kv != NULL);
+    const char *texts[] = {"", "init", "/vthread/v1/lib/main/[3,0]",
+                           "/lib/名字/[7,1]", "running"};
+    for (size_t i = 0; i < sizeof texts / sizeof texts[0]; i++)
+        check_slack(kv, texts[i]);
+    /* 超过 pc 常态档 → 全尺寸槽（不截断）；status 单独一档。 */
+    char long_pc[301], long_status[41], max_pc[KV_KEY_MAX];
+    memset(long_pc, 'a', 300);
+    long_pc[300] = 0;
+    memset(long_status, 'b', 40);
+    long_status[40] = 0;
+    memset(max_pc, 'c', KV_KEY_MAX - 1);
+    max_pc[KV_KEY_MAX - 1] = 0;
+    check_slack(kv, long_pc);
+    check_slack(kv, max_pc);
+    check_member(kv, true, "running");
+    check_member(kv, true, "done");
+    check_member(kv, true, long_status);
+    if (kv)
+        kvlangKvspaceDisconnect(kv);
     if (failures) {
         fprintf(stderr, "%d failures\n", failures);
         return 1;
