@@ -59,7 +59,7 @@ static void pinned_free(kvlangRowBind_t *bind, int nr, kvlangParam_t *reads) {
 static void count_report(void) {
     if (!getenv("KV_COUNT"))
         return;
-    fprintf(stderr, "COUNT spec=%lu gen=%lu narrow=%lu cmp=%lu\n", kvCSpec, kvCGen, kvCNarrow, kvCCompare);
+    fprintf(stderr, "COUNT narrow=%lu cmp=%lu\n", kvCNarrow, kvCCompare);
 }
 #define COUNT_REPORT() count_report()
 #else
@@ -122,6 +122,7 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
     uint32_t addr_epoch = 0; /* 删除/委托/handoff 后自增，使帧层 keyoff 失效 */
     int last_depth = 0; /* 0 = 尚未进入任何帧 */
 
+    const kvlangRwirCap *caps = kvlangRwirCaps();
     int rc = 0;
     for (;;) {
         if (!have_fb &&
@@ -251,70 +252,33 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
                        inst.write_count);
 
         char *yield = NULL;
-        bool pc_fb = false;
-        if (inst.opcode_id >= 0) {
-            /* 单表派发：native 算子与 control/copy 同居 myrwircaps，opcode_id 直查一跳到底。 */
-            kvlangFrame_t f = {kv, vtid, cur, &inst, &yield};
-            f.frame_root = cur_frame;
-            f.addr_epoch = &addr_epoch;
-            f.pc_out = fb_b[fb_i ^ 1];
-            f.pc_out_cap = sizeof fb_b[0];
-            f.status_known =
-                status; /* 本步开始前读到的 ‥status（源值，借用） */
-            f.pc_off = &pc_off;
-            f.status_off = &status_off;
-            exec_err = kvlangBuiltinNative(&f);
-            if (f.persist_failed)
-                exec_err = -1;
-            pc_fb = f.pc_feedback;
-            if (exec_err == 0 && yield) {
-                /* native（vthread·run return 模式）冒泡一个子 vthread 的 rwir pc 给上层驱动。
-                 * 本 vthread（主）pc 未推进，驱动派发子 rwir 并推进子 pc 后重入即续跑。 */
-                pinned_free(bind, row->nr, reads);
-                free(reads);
-                free(writes);
-                for (int d = 0; d <= MAX_STACK_DEPTH; d++)
-                    kvlangFrameCtxFree(fctx[d]);
-                kvlangFuncCacheFree(&fcache);
-                COUNT_REPORT();
-                return execute_yield(out_pc, yield);
-            }
-        } else if (kvlangDispatchIsDelegatedOp(kv, inst.opcode)) {
-            exec_err = kvlangDispatchDelegate(kv, vtid, cur, &inst);
-            if (exec_err == KVLANG_DELEGATE_LOCAL) {
-                exec_err = 0;
-                goto user_call;
-            }
-            addr_epoch++; /* 委托会删除输出槽 */
-        } else if (row->is_def_rwir) {
-            if (row->def_read_sig)
-                exec_err = check_read_types(
-                    kv, vtid, cur, inst.opcode, row->def_read_sig,
-                    row->def_read_count, row->def_dynamic, inst.reads,
-                    inst.read_count);
-            if (exec_err == 0 && row->def_write_sig)
-                exec_err =
-                    check_write_types(kv, vtid, cur, inst.opcode,
-                                      row->def_write_sig, row->def_write_count);
-            if (exec_err == 0 && mode == KVMODE_RETURN) {
-                pinned_free(bind, row->nr, reads);
-                free(reads);
-                free(writes);
-                for (int d = 0; d <= MAX_STACK_DEPTH; d++)
-                    kvlangFrameCtxFree(fctx[d]);
-                kvlangFuncCacheFree(&fcache);
-                COUNT_REPORT();
-                return execute_yield(out_pc, out_pc ? strdup(cur) : NULL);
-            }
-            if (exec_err == 0)
-                exec_err = kvlangHandoffExternalRwir(kv, vtid, cur, &inst);
-            addr_epoch++; /* 外部执行器可能删除/重建 key */
-        } else {
-        user_call:
-            exec_err = kvlangKvcpuCallOpcode(
-                kv, vtid, cur, status, inst.opcode, inst.reads,
-                inst.read_count, inst.writes, inst.write_count, fb_b[fb_i ^ 1],
-                sizeof fb_b[0], &pc_fb, &pc_off, &status_off);
+        kvlangFrame_t f = {kv, vtid, cur, &inst, &yield};
+        f.frame_root = cur_frame;
+        f.addr_epoch = &addr_epoch;
+        f.pc_out = fb_b[fb_i ^ 1];
+        f.pc_out_cap = sizeof fb_b[0];
+        f.status_known = status; /* 本步开始前读到的 ‥status（源值，借用） */
+        f.pc_off = &pc_off;
+        f.status_off = &status_off;
+        f.row = row;
+        f.mode = (int)mode;
+        f.out_pc = out_pc;
+        /* 一次表调用：native 与 route（委托/def rwir/user call）共用同一出口。 */
+        exec_err = caps[row->handler_id].fn(&f);
+        if (f.persist_failed)
+            exec_err = -1;
+        bool pc_fb = f.pc_feedback;
+        if (exec_err == 0 && yield) {
+            /* vthread·run return 模式 / def rwir RETURN：冒泡子 rwir pc 给上层驱动。
+             * 本 vthread（主）pc 未推进，驱动派发子 rwir 并推进子 pc 后重入即续跑。 */
+            pinned_free(bind, row->nr, reads);
+            free(reads);
+            free(writes);
+            for (int d = 0; d <= MAX_STACK_DEPTH; d++)
+                kvlangFrameCtxFree(fctx[d]);
+            kvlangFuncCacheFree(&fcache);
+            COUNT_REPORT();
+            return execute_yield(out_pc, yield);
         }
 
         if (pc_fb) {

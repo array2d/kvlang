@@ -188,6 +188,8 @@ static kvlangCodeRow_t *row_load(kvspace_t *kv, kvlangFuncCode_t *code, int s0,
         row->def_write_sig = load_def_writes(kv, rk, &row->def_write_count);
         free(rk);
     }
+    row->handler_id =
+        row->opcode_id >= 0 ? row->opcode_id : kvlangRwirRouteId();
     return row;
 
 fail:

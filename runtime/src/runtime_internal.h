@@ -576,7 +576,7 @@ int kvlangHandoffExternalRwir(kvspace_t *kv, const char *vtid, const char *pc,
 /* kvlangNotInMyRwirCaps：opcode 是不在本 runtime myrwircaps 内、须经 def rwir 路由给能兑现它的
  * 其它 runtime 的 rwir。判据=读 kvspace /lib/<opcode> 存在 def rwir 路由头（能力唯一事实源）。 */
 #ifdef KV_COUNT
-extern unsigned long kvCSpec, kvCGen, kvCNarrow, kvCCompare;
+extern unsigned long kvCNarrow, kvCCompare;
 #endif
 bool kvlangNotInMyRwirCaps(kvspace_t *kv, const char *opcode);
 
@@ -639,6 +639,10 @@ typedef struct {
      * NULL = 调用方未绑定（独立帧），NextPc 按 key 冷写。 */
     struct kvspaceKeyOff *pc_off;
     struct kvspaceKeyOff *status_off;
+    /* Phase 1 派发：route 需要的只读上下文。 */
+    const void *row; /* const kvlangCodeRow_t * */
+    int mode;        /* kvmode_t */
+    char **out_pc;   /* ExecuteMode 的 out 参数（仅判空） */
 } kvlangFrame_t;
 
 /* Write PC to kvspace; write status when it changes. */
@@ -647,7 +651,16 @@ void kvlangVthreadNextPc(kvlangFrame_t *f, const char *pc, const char *status);
 /* kvlangNotInMyCaps：查 myrwircaps table，opcode 不在本 runtime 能力表内 → true。 */
 bool kvlangNotInMyCaps(const char *opcode);
 bool kvlangBuiltinNumericOp(const char *opcode);
-int kvlangBuiltinNative(kvlangFrame_t *f); /* dispatch + call，0 成功 */
+/* 指令派发表：native 项 + 表尾 route。row 加载期定型 handler_id，执行期一次间接调用。 */
+typedef int (*kvlangBuiltinFn)(kvlangFrame_t *f);
+typedef struct {
+    const char *opcode;
+    kvlangBuiltinFn fn;
+    bool load_write_value;
+} kvlangRwirCap;
+__attribute__((visibility("hidden"))) const kvlangRwirCap *kvlangRwirCaps(void);
+__attribute__((visibility("hidden"))) int kvlangRwirRouteId(void);
+__attribute__((visibility("hidden"))) int kvlangKvcpuRoute(kvlangFrame_t *f);
 int kvlangBuiltinExecuteCopy(kvlangFrame_t *f);
 /* control 算子：与 native 同居 myrwircaps 一张表，frame 签名统一派发（call/return/goto/br）。 */
 int kvlangControlCall(kvlangFrame_t *f);
