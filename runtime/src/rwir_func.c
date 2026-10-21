@@ -193,7 +193,10 @@ int kvlangBuiltinWriteResult(kvlangFrame_t *f, const kvlangXvalue_t *result) {
         kvspaceKeyOff *wo = f->instruction->write_offs
                                 ? f->instruction->write_offs[0]
                                 : NULL;
-        if (wo)
+        if (wo && result->bytes && result->length >= XH_PREFIX)
+            kvlangBodyInvalidateKind(wo->key, xh_langtype(result->bytes),
+                                     xh_langtype_len(result->bytes));
+        else if (wo)
             kvlangBodyInvalidate(wo->key);
         if (wo && result->bytes && result->length > 0 &&
             kvspaceKeyOffSet(wo, result->bytes, result->length, NULL, 0) == 0) {
@@ -205,7 +208,11 @@ int kvlangBuiltinWriteResult(kvlangFrame_t *f, const kvlangXvalue_t *result) {
         if (!fr) { owned = kvlangKeytreeFrameRoot(f->pc); fr = owned; }
         char *key = kvlangBuiltinResolveWriteSlot(f->kvspace, fr, f->instruction->writes[0].name);
         free(owned);
-        kvlangBodyInvalidate(key);
+        if (result->bytes && result->length >= XH_PREFIX)
+            kvlangBodyInvalidateKind(key, xh_langtype(result->bytes),
+                                     xh_langtype_len(result->bytes));
+        else
+            kvlangBodyInvalidate(key);
         kvlangKvPair_t pair = { key, *result };
         char err[256];
         kvlangKvspaceSet(f->kvspace, &pair, 1, err, sizeof err);
@@ -221,9 +228,10 @@ int kvlangBuiltinEmitResult(kvlangFrame_t *f, kvlangXvalue_t *v) {
     return rc;
 }
 
-static int emit_inline_scalar(kvlangFrame_t *f, const char *kind,
-                              const uint8_t *raw, uint32_t len) {
-    /* 快路径：写槽 body 已绑定且宽度一致，只原地写 body，不编码 head、不 Set。
+__attribute__((visibility("hidden"))) int
+kvlangBuiltinWriteBody(kvlangFrame_t *f, const char *kind, const uint8_t *raw,
+                       uint32_t len) {
+    /* 快路径：写槽 body 已绑定且 kind/宽度一致，只原地写 body，不编码 head、不 Set。
      * 失效后在此惰性重捕一次（槽未解析时不动，等它被写后再来）。 */
     kvspaceKeyOff *wo = f->instruction->write_offs
                             ? f->instruction->write_offs[0]
@@ -231,14 +239,22 @@ static int emit_inline_scalar(kvlangFrame_t *f, const char *kind,
     kvlangBodySlot *slot = wo ? wo->fast : NULL;
     if (slot && !slot->ok && !slot->dead && slot->off->resolved)
         kvlangBodyCapture(f->kvspace, slot, f->frame_root);
-    if (slot && slot->ok && slot->len == len) {
+    if (slot && slot->ok && slot->len == len &&
+        strcmp(slot->kind, kind) == 0) {
 #ifdef KV_COUNT
         kvCBodyFast++;
 #endif
         memcpy(slot->body, raw, len);
         kvlangBuiltinNextPc(f);
-        return 0;
+        return 1;
     }
+    return 0;
+}
+
+static int emit_inline_scalar(kvlangFrame_t *f, const char *kind,
+                              const uint8_t *raw, uint32_t len) {
+    if (kvlangBuiltinWriteBody(f, kind, raw, len))
+        return 0;
     uint8_t buf[64];
     uint32_t n = kvlangScalarEncode(kind, raw, len, buf, sizeof buf);
     kvlangXvalue_t v = {buf, n};

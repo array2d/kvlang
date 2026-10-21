@@ -1,0 +1,88 @@
+rwfunc test() -> () {
+	a8:int8 = int8(127)
+	o8:int8 = int8(1)
+	a8 + o8 -> r
+	println("i8wrapl", r)
+	m8:int8 = int8(-128)
+	n8:int8 = int8(-1)
+	m8 ÷ n8 -> q
+	println("i8div", q)
+	m8 % n8 -> md
+	println("i8mod", md)
+	neg(m8) -> neg8
+	println("i8neg", neg8)
+	abs(m8) -> ab
+	println("i8abs", ab)
+	p8:int8 = int8(100)
+	s8:int8 = int8(-100)
+	p8 - s8 -> d
+	println("i8sub", d)
+	p8 × s8 -> mu
+	println("i8mul", mu)
+	p8 > s8 -> c
+	println("i8gt", c)
+	p8 == s8 -> ce
+	println("i8eq", ce)
+	big16:int16 = int16(32767)
+	one16:int16 = int16(1)
+	big16 + one16 -> r16
+	println("i16wrap", r16)
+	m16:int16 = int16(-32768)
+	n16:int16 = int16(-1)
+	m16 ÷ n16 -> q16
+	println("i16div", q16)
+	big32:int32 = int32(2147483647)
+	one32:int32 = int32(1)
+	big32 + one32 -> r32
+	println("i32wrap", r32)
+	m32:int32 = int32(-2147483648)
+	n32:int32 = int32(-1)
+	m32 ÷ n32 -> q32
+	println("i32div", q32)
+	u8:uint8 = uint8(255)
+	oneu8:uint8 = uint8(1)
+	u8 + oneu8 -> w8
+	println("u8wrap", w8)
+	z8:uint8 = uint8(0)
+	z8 - oneu8 -> n8v
+	println("u8sub", n8v)
+	t8:uint8 = uint8(3)
+	v8:uint8 = uint8(200)
+	v8 ÷ t8 -> d8
+	println("u8div", d8)
+	v8 % t8 -> m8v
+	println("u8mod", m8v)
+	v8 > t8 -> g8
+	println("u8gt", g8)
+	u16:uint16 = uint16(65535)
+	oneu16:uint16 = uint16(1)
+	u16 + oneu16 -> w16
+	println("u16wrap", w16)
+	u32:uint32 = uint32(4294967295)
+	oneu32:uint32 = uint32(1)
+	u32 + oneu32 -> w32
+	println("u32wrap", w32)
+	z64:uint64 = uint64(0)
+	one64:uint64 = uint64(1)
+	mx:uint64 = z64 - one64
+	println("u64max", mx)
+	two64:uint64 = uint64(2)
+	mx ÷ two64 -> q64
+	println("u64div", q64)
+	mx % two64 -> md64
+	println("u64mod", md64)
+	mx > one64 -> g64
+	println("u64gt", g64)
+	mx >> one64 -> sh64
+	println("u64shr", sh64)
+	mx & one64 -> and64
+	println("u64and", and64)
+	mx ^ one64 -> xor64
+	println("u64xor", xor64)
+	mx + one64 -> wr64
+	println("u64wrap", wr64)
+	mix:int8 = int8(10)
+	lit:int64 = 300
+	mix + lit -> mixr
+	println("mixed", mixr)
+}

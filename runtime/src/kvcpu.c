@@ -60,10 +60,11 @@ static void count_report(void) {
     if (!getenv("KV_COUNT"))
         return;
     fprintf(stderr,
-            "COUNT narrow=%lu cmp=%lu body_fast=%lu body_fallback=%lu "
-            "body_cells_max=%lu cap_try=%lu cap_ok=%lu\n",
-            kvCNarrow, kvCCompare, kvCBodyFast, kvCBodyFallback,
-            kvCBodyCellsMax, kvCBodyCapAttempt, kvCBodyCapOk);
+            "COUNT spec=%lu gen=%lu narrow=%lu cmp=%lu body_fast=%lu "
+            "body_fallback=%lu body_cells_max=%lu cap_try=%lu cap_ok=%lu\n",
+            kvCSpec, kvCGen, kvCNarrow, kvCCompare, kvCBodyFast,
+            kvCBodyFallback, kvCBodyCellsMax, kvCBodyCapAttempt,
+            kvCBodyCapOk);
 }
 #define COUNT_REPORT() count_report()
 #else
@@ -204,6 +205,12 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
             break;
         }
 
+#ifdef KV_COUNT
+        if (row->result_kind)
+            kvCSpec++;
+        else if (row->opcode_id >= 0)
+            kvCGen++;
+#endif
         int exec_err = 0;
         for (int i = 0; i < row->nr; i++)
             reads[i] = (kvlangParam_t){0};

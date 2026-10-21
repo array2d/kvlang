@@ -253,3 +253,246 @@ DEF_CMP_BODY(F64, Gt, a > b,
 DEF_CMP_BODY(F64, Ge, a >= b,
              kvlangBuiltinFreeInputs(in, n);
              return kvlangBuiltinSetError(f, "TypeError: None in comparison"))
+
+/* ── Phase 2：整数族同型特化（其余 7 种 kind）────────────────────────
+ * 语义逐字节复刻通用实现：一律在 int64 位型上算，再按结果 kind 截断。
+ * 静态声明与实际存储 kind 可能不一致（如 int8 变量存着 int64 字面量）：
+ * 两操作数实际 kind 相同时按该 kind 编码（等价于通用 narrow），
+ * 混合 kind / 非整数时才回退通用实现。 */
+
+static int emit_int_kind(kvlangFrame_t *f, const char *kind, uint32_t width,
+                         int64_t v) {
+    uint8_t raw[8];
+    switch (width) {
+    case 1:
+        raw[0] = (uint8_t)v;
+        break;
+    case 2: {
+        uint16_t x = (uint16_t)v;
+        memcpy(raw, &x, 2);
+        break;
+    }
+    case 4: {
+        uint32_t x = (uint32_t)v;
+        memcpy(raw, &x, 4);
+        break;
+    }
+    default: {
+        uint64_t x = (uint64_t)v;
+        memcpy(raw, &x, 8);
+        break;
+    }
+    }
+    if (kvlangBuiltinWriteBody(f, kind, raw, width))
+        return 0;
+    uint8_t buf[64];
+    kvlangXvalue_t r = {buf, kvlangScalarEncode(kind, raw, width, buf,
+                                                sizeof buf)};
+    return kvlangBuiltinWriteResult(f, &r);
+}
+
+/* 两操作数实际 kind 相同且为整数：给出该 kind 的编码参数。 */
+static bool int_pair_kind(kvlangScalar_t a, kvlangScalar_t b,
+                          const char **kind, uint32_t *width) {
+    if (a.kind_id != b.kind_id || !kvlangLangtypeIsInt(a.kind_id))
+        return false;
+    *kind = kvlangLangtypeKind(a.kind_id);
+    *width = (uint32_t)(kvlangLangtypeIntWidth(a.kind_id) / 8);
+    return true;
+}
+
+#define INT_READ2(f, in, n)                                                    \
+    kvlangXvalue_t in[2];                                                      \
+    int n = kvlangBuiltinReadInputs(f, in, 2);                                 \
+    if (n < 2) {                                                               \
+        kvlangBuiltinFreeInputs(in, n);                                        \
+        return kvlangBuiltinSetError(f, "TypeError: binary op requires 2");    \
+    }
+
+#define DEF_INT_BIN(ktok, kstr, w, kid, name, gfn, expr)                       \
+    HIDDEN int kvlangBuiltin##ktok##name(kvlangFrame_t *f) {                   \
+        INT_READ2(f, in, n)                                                    \
+        kvlangScalar_t sa = kvlangXvalueScalar(&in[0]);                        \
+        kvlangScalar_t sb = kvlangXvalueScalar(&in[1]);                        \
+        const char *ek = kstr;                                                 \
+        uint32_t ew = w;                                                       \
+        if (sa.kind_id != kid || sb.kind_id != kid) {                          \
+            if (!int_pair_kind(sa, sb, &ek, &ew)) {                            \
+                kvlangBuiltinFreeInputs(in, n);                                \
+                return gfn(f);                                                 \
+            }                                                                  \
+        }                                                                      \
+        int64_t a = kvlangScalarI64(sa), b = kvlangScalarI64(sb);              \
+        int rc = emit_int_kind(f, ek, ew, (expr));                             \
+        kvlangBuiltinFreeInputs(in, n);                                        \
+        return rc;                                                             \
+    }
+
+#define DEF_INT_DIVMOD(ktok, kstr, w, kid, name, gfn, op, msg)                 \
+    HIDDEN int kvlangBuiltin##ktok##name(kvlangFrame_t *f) {                   \
+        INT_READ2(f, in, n)                                                    \
+        kvlangScalar_t sa = kvlangXvalueScalar(&in[0]);                        \
+        kvlangScalar_t sb = kvlangXvalueScalar(&in[1]);                        \
+        const char *ek = kstr;                                                 \
+        uint32_t ew = w;                                                       \
+        if (sa.kind_id != kid || sb.kind_id != kid) {                          \
+            if (!int_pair_kind(sa, sb, &ek, &ew)) {                            \
+                kvlangBuiltinFreeInputs(in, n);                                \
+                return gfn(f);                                                 \
+            }                                                                  \
+        }                                                                      \
+        int64_t a = kvlangScalarI64(sa), b = kvlangScalarI64(sb);              \
+        int rc;                                                                \
+        if (b == 0)                                                            \
+            rc = kvlangBuiltinSetError(f, "ZeroDivisionError: " msg);          \
+        else                                                                   \
+            rc = emit_int_kind(f, ek, ew, a op b);                             \
+        kvlangBuiltinFreeInputs(in, n);                                        \
+        return rc;                                                             \
+    }
+
+#define DEF_INT_MAXMIN(ktok, kstr, w, kid, name, gfn, U, op)                   \
+    HIDDEN int kvlangBuiltin##ktok##name(kvlangFrame_t *f) {                   \
+        INT_READ2(f, in, n)                                                    \
+        kvlangScalar_t sa = kvlangXvalueScalar(&in[0]);                        \
+        kvlangScalar_t sb = kvlangXvalueScalar(&in[1]);                        \
+        const char *ek = kstr;                                                 \
+        uint32_t ew = w;                                                       \
+        bool u = U;                                                            \
+        if (sa.kind_id != kid || sb.kind_id != kid) {                          \
+            if (!int_pair_kind(sa, sb, &ek, &ew)) {                            \
+                kvlangBuiltinFreeInputs(in, n);                                \
+                return gfn(f);                                                 \
+            }                                                                  \
+            u = kvlangLangtypeIsUint(sa.kind_id);                              \
+        }                                                                      \
+        int64_t a = kvlangScalarI64(sa), b = kvlangScalarI64(sb);              \
+        bool take = u ? ((uint64_t)a op(uint64_t)b) : (a op b);                \
+        int rc = emit_int_kind(f, ek, ew, take ? a : b);                       \
+        kvlangBuiltinFreeInputs(in, n);                                        \
+        return rc;                                                             \
+    }
+
+#define DEF_INT_EQ(ktok, kstr, w, kid, name, gfn, want)                        \
+    HIDDEN int kvlangBuiltin##ktok##name(kvlangFrame_t *f) {                   \
+        INT_READ2(f, in, n)                                                    \
+        kvlangScalar_t sa = kvlangXvalueScalar(&in[0]);                        \
+        kvlangScalar_t sb = kvlangXvalueScalar(&in[1]);                        \
+        if (sa.kind_id != kid || sb.kind_id != kid) {                          \
+            const char *ek;                                                    \
+            uint32_t ew;                                                       \
+            if (!int_pair_kind(sa, sb, &ek, &ew)) {                            \
+                kvlangBuiltinFreeInputs(in, n);                                \
+                return gfn(f);                                                 \
+            }                                                                  \
+        }                                                                      \
+        bool eq = kvlangScalarI64(sa) == kvlangScalarI64(sb);                  \
+        int rc = kvlangBuiltinEmitBool(f, want ? eq : !eq);                    \
+        kvlangBuiltinFreeInputs(in, n);                                        \
+        return rc;                                                             \
+    }
+
+#define DEF_INT_ORD(ktok, kstr, w, kid, name, gfn, U, op)                      \
+    HIDDEN int kvlangBuiltin##ktok##name(kvlangFrame_t *f) {                   \
+        INT_READ2(f, in, n)                                                    \
+        kvlangScalar_t sa = kvlangXvalueScalar(&in[0]);                        \
+        kvlangScalar_t sb = kvlangXvalueScalar(&in[1]);                        \
+        bool u = U;                                                            \
+        if (sa.kind_id != kid || sb.kind_id != kid) {                          \
+            const char *ek;                                                    \
+            uint32_t ew;                                                       \
+            if (!int_pair_kind(sa, sb, &ek, &ew)) {                            \
+                kvlangBuiltinFreeInputs(in, n);                                \
+                return gfn(f);                                                 \
+            }                                                                  \
+            u = kvlangLangtypeIsUint(sa.kind_id);                              \
+        }                                                                      \
+        int64_t a = kvlangScalarI64(sa), b = kvlangScalarI64(sb);              \
+        bool r = u ? ((uint64_t)a op(uint64_t)b) : (a op b);                   \
+        int rc = kvlangBuiltinEmitBool(f, r);                                  \
+        kvlangBuiltinFreeInputs(in, n);                                        \
+        return rc;                                                             \
+    }
+
+#define DEF_INT_NEG(ktok, kstr, w, kid)                                        \
+    HIDDEN int kvlangBuiltin##ktok##Neg(kvlangFrame_t *f) {                    \
+        kvlangXvalue_t in[2];                                                  \
+        int n = kvlangBuiltinReadInputs(f, in, 1);                             \
+        if (n < 1) {                                                           \
+            kvlangBuiltinFreeInputs(in, n);                                    \
+            return kvlangBuiltinSetError(f, "TypeError: unary op requires 1"); \
+        }                                                                      \
+        kvlangScalar_t sa = kvlangXvalueScalar(&in[0]);                        \
+        const char *ek = kstr;                                                 \
+        uint32_t ew = w;                                                       \
+        if (sa.kind_id != kid) {                                               \
+            if (!kvlangLangtypeIsInt(sa.kind_id)) {                            \
+                kvlangBuiltinFreeInputs(in, n);                                \
+                return kvlangBuiltinNeg(f);                                    \
+            }                                                                  \
+            ek = kvlangLangtypeKind(sa.kind_id);                               \
+            ew = (uint32_t)(kvlangLangtypeIntWidth(sa.kind_id) / 8);            \
+        }                                                                      \
+        int rc = emit_int_kind(f, ek, ew, -kvlangScalarI64(sa));               \
+        kvlangBuiltinFreeInputs(in, n);                                        \
+        return rc;                                                             \
+    }
+
+#define DEF_INT_ABS(ktok, kstr, w, kid)                                        \
+    HIDDEN int kvlangBuiltin##ktok##Abs(kvlangFrame_t *f) {                    \
+        kvlangXvalue_t in[2];                                                  \
+        int n = kvlangBuiltinReadInputs(f, in, 1);                             \
+        if (n < 1) {                                                           \
+            kvlangBuiltinFreeInputs(in, n);                                    \
+            return kvlangBuiltinSetError(f, "TypeError: unary op requires 1"); \
+        }                                                                      \
+        kvlangScalar_t sa = kvlangXvalueScalar(&in[0]);                        \
+        const char *ek = kstr;                                                 \
+        uint32_t ew = w;                                                       \
+        if (sa.kind_id != kid) {                                               \
+            if (!kvlangLangtypeIsInt(sa.kind_id)) {                            \
+                kvlangBuiltinFreeInputs(in, n);                                \
+                return kvlangBuiltinAbs(f);                                    \
+            }                                                                  \
+            ek = kvlangLangtypeKind(sa.kind_id);                               \
+            ew = (uint32_t)(kvlangLangtypeIntWidth(sa.kind_id) / 8);            \
+        }                                                                      \
+        int64_t a = kvlangScalarI64(sa);                                       \
+        int rc = emit_int_kind(f, ek, ew, a < 0 ? -a : a);                     \
+        kvlangBuiltinFreeInputs(in, n);                                        \
+        return rc;                                                             \
+    }
+
+#define DEF_INT_BASE_FUNCS(ktok, kstr, w, U, kid)                              \
+    DEF_INT_BIN(ktok, kstr, w, kid, Add, kvlangBuiltinAdd, a + b)              \
+    DEF_INT_BIN(ktok, kstr, w, kid, Sub, kvlangBuiltinSub, a - b)              \
+    DEF_INT_BIN(ktok, kstr, w, kid, Mul, kvlangBuiltinMul, a * b)              \
+    DEF_INT_DIVMOD(ktok, kstr, w, kid, Div, kvlangBuiltinDiv, /,              \
+                   "division by zero")                                         \
+    DEF_INT_DIVMOD(ktok, kstr, w, kid, Mod, kvlangBuiltinMod, %,              \
+                   "modulo by zero")                                           \
+    DEF_INT_MAXMIN(ktok, kstr, w, kid, Max, kvlangBuiltinMax, U, >=)           \
+    DEF_INT_MAXMIN(ktok, kstr, w, kid, Min, kvlangBuiltinMin, U, <=)           \
+    DEF_INT_EQ(ktok, kstr, w, kid, Eq, kvlangBuiltinEq, 1)                     \
+    DEF_INT_EQ(ktok, kstr, w, kid, Neq, kvlangBuiltinNeq, 0)                   \
+    DEF_INT_ORD(ktok, kstr, w, kid, Lt, kvlangBuiltinLt, U, <)                 \
+    DEF_INT_ORD(ktok, kstr, w, kid, Le, kvlangBuiltinLe, U, <=)                \
+    DEF_INT_ORD(ktok, kstr, w, kid, Gt, kvlangBuiltinGt, U, >)                 \
+    DEF_INT_ORD(ktok, kstr, w, kid, Ge, kvlangBuiltinGe, U, >=)
+
+#define DEF_INT_SIGNED_FUNCS(ktok, kstr, w, U, kid)                            \
+    DEF_INT_NEG(ktok, kstr, w, kid)                                            \
+    DEF_INT_ABS(ktok, kstr, w, kid)
+
+#define DEF_INT_U64_FUNCS(ktok, kstr, w, U, kid)                               \
+    DEF_INT_BIN(ktok, kstr, w, kid, Bitand, kvlangBuiltinBitand, a & b)        \
+    DEF_INT_BIN(ktok, kstr, w, kid, Bitor, kvlangBuiltinBitor, a | b)          \
+    DEF_INT_BIN(ktok, kstr, w, kid, Bitxor, kvlangBuiltinBitxor, a ^ b)        \
+    DEF_INT_BIN(ktok, kstr, w, kid, Shl, kvlangBuiltinShl,                     \
+                a << (uint64_t)b)                                              \
+    DEF_INT_BIN(ktok, kstr, w, kid, Shr, kvlangBuiltinShr,                     \
+                a >> (uint64_t)b)
+
+KVLANG_INT_BASE_KINDS(DEF_INT_BASE_FUNCS)
+KVLANG_INT_SIGNED_KINDS(DEF_INT_SIGNED_FUNCS)
+KVLANG_INT_U64_KINDS(DEF_INT_U64_FUNCS)

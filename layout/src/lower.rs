@@ -1342,14 +1342,35 @@ fn specialize_inst(
         return;
     }
     let k = &kinds[0];
-    if k != "int64" && k != "float64" {
-        return;
+    if !(builtin::is_int_kind(k) || k == "float64") {
+        return; /* float32 留到浮点阶段 */
     }
     if kinds.iter().any(|t| t != k) {
         return;
     }
+    /* handler 的实参个数必须与之一致（通用 sub 允许 1 参，特化版只收 2 参）。 */
     let is_cmp = matches!(word.as_str(), "eq" | "neq" | "lt" | "le" | "gt" | "ge");
-    if !is_cmp && builtin::op_kind(&word, k) != *k {
+    let unary = matches!(
+        word.as_str(),
+        "neg" | "abs" | "sign" | "sqrt" | "exp" | "log"
+    );
+    if e.args.len() != if unary { 1 } else { 2 } {
+        return;
+    }
+    if word == "sign" {
+        if k != "int64" {
+            return;
+        }
+    } else if matches!(word.as_str(), "bitand" | "bitor" | "bitxor" | "shl" | "shr") {
+        /* layout 把 bit/shift 的静态结果定义为 64 位；小宽度留待专门修正。 */
+        if k != "int64" && k != "uint64" {
+            return;
+        }
+    } else if matches!(word.as_str(), "neg" | "abs") {
+        if builtin::is_unsigned_kind(k) {
+            return;
+        }
+    } else if !is_cmp && builtin::op_kind(&word, k) != *k {
         return;
     }
     e.op = format!("{k}{}{word}", keytree::MEMBER_SEP);

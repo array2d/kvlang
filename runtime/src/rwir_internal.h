@@ -188,3 +188,51 @@ int kvlangBuiltinArray(kvlangFrame_t *f),
     kvlangBuiltinVthreadCall(kvlangFrame_t *f),
     kvlangBuiltinVthreadSleep(kvlangFrame_t *f),
     kvlangBuiltinVthreadSetStatus(kvlangFrame_t *f);
+
+/* Phase 2：整数族同型特化的 kind 列表（X-macro，handler 与能力表同源）。
+ * 参数：函数名 token、langtype 字面量、宽度、是否无符号。 */
+#define KVLANG_INT_BASE_KINDS(X)                                               \
+    X(Int8, "int8", 1, 0, KVLANG_LT_INT8)                                                      \
+    X(Int16, "int16", 2, 0, KVLANG_LT_INT16)                                                    \
+    X(Int32, "int32", 4, 0, KVLANG_LT_INT32)                                                    \
+    X(Uint8, "uint8", 1, 1, KVLANG_LT_UINT8)                                                    \
+    X(Uint16, "uint16", 2, 1, KVLANG_LT_UINT16)                                                  \
+    X(Uint32, "uint32", 4, 1, KVLANG_LT_UINT32)                                                  \
+    X(Uint64, "uint64", 8, 1, KVLANG_LT_UINT64)
+
+#define KVLANG_INT_SIGNED_KINDS(X)                                             \
+    X(Int8, "int8", 1, 0, KVLANG_LT_INT8)                                                      \
+    X(Int16, "int16", 2, 0, KVLANG_LT_INT16)                                                    \
+    X(Int32, "int32", 4, 0, KVLANG_LT_INT32)
+
+#define KVLANG_INT_U64_KINDS(X) X(Uint64, "uint64", 8, 1, KVLANG_LT_UINT64)
+
+#define DECL_INT_BASE(ktok, kstr, w, U, kid)                                        \
+    int kvlangBuiltin##ktok##Add(kvlangFrame_t *f);                            \
+    int kvlangBuiltin##ktok##Sub(kvlangFrame_t *f);                            \
+    int kvlangBuiltin##ktok##Mul(kvlangFrame_t *f);                            \
+    int kvlangBuiltin##ktok##Div(kvlangFrame_t *f);                            \
+    int kvlangBuiltin##ktok##Mod(kvlangFrame_t *f);                            \
+    int kvlangBuiltin##ktok##Max(kvlangFrame_t *f);                            \
+    int kvlangBuiltin##ktok##Min(kvlangFrame_t *f);                            \
+    int kvlangBuiltin##ktok##Eq(kvlangFrame_t *f);                             \
+    int kvlangBuiltin##ktok##Neq(kvlangFrame_t *f);                            \
+    int kvlangBuiltin##ktok##Lt(kvlangFrame_t *f);                             \
+    int kvlangBuiltin##ktok##Le(kvlangFrame_t *f);                             \
+    int kvlangBuiltin##ktok##Gt(kvlangFrame_t *f);                             \
+    int kvlangBuiltin##ktok##Ge(kvlangFrame_t *f);
+
+#define DECL_INT_SIGNED(ktok, kstr, w, U, kid)                                      \
+    int kvlangBuiltin##ktok##Neg(kvlangFrame_t *f);                            \
+    int kvlangBuiltin##ktok##Abs(kvlangFrame_t *f);
+
+#define DECL_INT_U64(ktok, kstr, w, U, kid)                                         \
+    int kvlangBuiltin##ktok##Bitand(kvlangFrame_t *f);                         \
+    int kvlangBuiltin##ktok##Bitor(kvlangFrame_t *f);                          \
+    int kvlangBuiltin##ktok##Bitxor(kvlangFrame_t *f);                         \
+    int kvlangBuiltin##ktok##Shl(kvlangFrame_t *f);                            \
+    int kvlangBuiltin##ktok##Shr(kvlangFrame_t *f);
+
+KVLANG_INT_BASE_KINDS(DECL_INT_BASE)
+KVLANG_INT_SIGNED_KINDS(DECL_INT_SIGNED)
+KVLANG_INT_U64_KINDS(DECL_INT_U64)
