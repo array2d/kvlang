@@ -55,6 +55,17 @@ static void pinned_free(kvlangRowBind_t *bind, int nr, kvlangParam_t *reads) {
             kvlangXvalueFree(&reads[i].value);
 }
 
+#ifdef KV_COUNT
+static void count_report(void) {
+    if (!getenv("KV_COUNT"))
+        return;
+    fprintf(stderr, "COUNT spec=%lu gen=%lu narrow=%lu cmp=%lu\n", kvCSpec, kvCGen, kvCNarrow, kvCCompare);
+}
+#define COUNT_REPORT() count_report()
+#else
+#define COUNT_REPORT() do {} while (0)
+#endif
+
 /* 帧的 ‥lib：函数目录路径（owned）。 */
 static char *frame_func_dir(kvspace_t *kv, const char *frame_root) {
     char *stack = kvlangKeytreeStack(frame_root);
@@ -263,6 +274,7 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
                 for (int d = 0; d <= MAX_STACK_DEPTH; d++)
                     kvlangFrameCtxFree(fctx[d]);
                 kvlangFuncCacheFree(&fcache);
+                COUNT_REPORT();
                 return execute_yield(out_pc, yield);
             }
         } else if (kvlangDispatchIsDelegatedOp(kv, inst.opcode)) {
@@ -289,6 +301,7 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
                 for (int d = 0; d <= MAX_STACK_DEPTH; d++)
                     kvlangFrameCtxFree(fctx[d]);
                 kvlangFuncCacheFree(&fcache);
+                COUNT_REPORT();
                 return execute_yield(out_pc, out_pc ? strdup(cur) : NULL);
             }
             if (exec_err == 0)
@@ -316,6 +329,7 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
     for (int d = 0; d <= MAX_STACK_DEPTH; d++)
         kvlangFrameCtxFree(fctx[d]);
     kvlangFuncCacheFree(&fcache);
+    COUNT_REPORT();
     free(reads);
     free(writes);
     return rc;

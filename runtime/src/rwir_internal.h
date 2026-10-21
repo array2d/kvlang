@@ -44,6 +44,48 @@ int kvlangBuiltinReadInputs(kvlangFrame_t *f, kvlangXvalue_t *out, int cap);
 void kvlangBuiltinFreeInputs(kvlangXvalue_t *in, int n);
 void kvlangBuiltinNextPc(kvlangFrame_t *f);
 int kvlangBuiltinWriteResult(kvlangFrame_t *f, const kvlangXvalue_t *result);
+/* A1 原型：layout 特化 opcode 的 int64/float64 族 handler。 */
+int kvlangBuiltinI64Add(kvlangFrame_t *f);
+int kvlangBuiltinI64Sub(kvlangFrame_t *f);
+int kvlangBuiltinI64Mul(kvlangFrame_t *f);
+int kvlangBuiltinI64Div(kvlangFrame_t *f);
+int kvlangBuiltinI64Mod(kvlangFrame_t *f);
+int kvlangBuiltinI64Bitand(kvlangFrame_t *f);
+int kvlangBuiltinI64Bitor(kvlangFrame_t *f);
+int kvlangBuiltinI64Bitxor(kvlangFrame_t *f);
+int kvlangBuiltinI64Shl(kvlangFrame_t *f);
+int kvlangBuiltinI64Shr(kvlangFrame_t *f);
+int kvlangBuiltinI64Max(kvlangFrame_t *f);
+int kvlangBuiltinI64Min(kvlangFrame_t *f);
+int kvlangBuiltinI64Neg(kvlangFrame_t *f);
+int kvlangBuiltinI64Abs(kvlangFrame_t *f);
+int kvlangBuiltinI64Sign(kvlangFrame_t *f);
+int kvlangBuiltinI64Eq(kvlangFrame_t *f);
+int kvlangBuiltinI64Neq(kvlangFrame_t *f);
+int kvlangBuiltinI64Lt(kvlangFrame_t *f);
+int kvlangBuiltinI64Le(kvlangFrame_t *f);
+int kvlangBuiltinI64Gt(kvlangFrame_t *f);
+int kvlangBuiltinI64Ge(kvlangFrame_t *f);
+int kvlangBuiltinF64Add(kvlangFrame_t *f);
+int kvlangBuiltinF64Sub(kvlangFrame_t *f);
+int kvlangBuiltinF64Mul(kvlangFrame_t *f);
+int kvlangBuiltinF64Div(kvlangFrame_t *f);
+int kvlangBuiltinF64Max(kvlangFrame_t *f);
+int kvlangBuiltinF64Min(kvlangFrame_t *f);
+int kvlangBuiltinF64Neg(kvlangFrame_t *f);
+int kvlangBuiltinF64Abs(kvlangFrame_t *f);
+int kvlangBuiltinF64Sign(kvlangFrame_t *f);
+int kvlangBuiltinF64Sqrt(kvlangFrame_t *f);
+int kvlangBuiltinF64Exp(kvlangFrame_t *f);
+int kvlangBuiltinF64Log(kvlangFrame_t *f);
+int kvlangBuiltinF64Pow(kvlangFrame_t *f);
+int kvlangBuiltinF64Eq(kvlangFrame_t *f);
+int kvlangBuiltinF64Neq(kvlangFrame_t *f);
+int kvlangBuiltinF64Lt(kvlangFrame_t *f);
+int kvlangBuiltinF64Le(kvlangFrame_t *f);
+int kvlangBuiltinF64Gt(kvlangFrame_t *f);
+int kvlangBuiltinF64Ge(kvlangFrame_t *f);
+
 /* 写结果槽并释放构造值（encode→write→free 的唯一入口）。 */
 int kvlangBuiltinEmitResult(kvlangFrame_t *f, kvlangXvalue_t *v);
 /* 标量结果：栈上编码 + 直接写，不经过堆。 */
