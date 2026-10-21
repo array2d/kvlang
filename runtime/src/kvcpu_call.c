@@ -330,10 +330,8 @@ static char *handle_call(kvspace_t *kv, const char *pc,
                     bind_error = 1;
                     break;
                 }
-                kvlangXvalue_t copy;
-                kvlangXvalueZero(&copy);
-                kvlangXvalueCopy(&arg->value);
-                copy = arg->value;
+                kvlangXvalue_t copy = arg->value;
+                kvlangXvalueCopy(&copy);
                 pairs[np] = (kvlangKvPair_t){strdup(rk), copy};
                 owned[np++] = true;
             }

@@ -227,6 +227,7 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
             }
         }
         if (exec_err != 0) {
+            pinned_free(bind, row->nr, reads);
             rc = -1;
             break;
         }
