@@ -1,0 +1,60 @@
+rwfunc test() -> () {
+	a:float32 = float32(1.5)
+	b:float32 = float32(2.5)
+	a + b -> s
+	println("f32add", s)
+	a - b -> d
+	println("f32sub", d)
+	a × b -> m
+	println("f32mul", m)
+	b ÷ a -> q
+	println("f32div", q)
+	max(a, b) -> mx
+	println("f32max", mx)
+	min(a, b) -> mn
+	println("f32min", mn)
+	neg(a) -> ng
+	println("f32neg", ng)
+	abs(ng) -> ab
+	println("f32abs", ab)
+	a < b -> c1
+	println("f32lt", c1)
+	a == b -> c2
+	println("f32eq", c2)
+	small:float32 = float32(0.1)
+	small2:float32 = float32(0.2)
+	small + small2 -> sm
+	println("f32round", sm)
+	big:float32 = float32(16777216.0)
+	big + float32(1.0) -> bsum
+	println("f32prec", bsum)
+	u:float32 = 1.5
+	v:float32 = 2.5
+	u + v -> ur
+	println("f32uncast", ur)
+	mix64:float64 = 1.5
+	mix32:float32 = float32(0.25)
+	mix64 + mix32 -> mixr
+	println("mixed", mixr)
+	sqrt(mix64) -> sq
+	println("sqrt64", sq)
+	sqrt(a) -> sq32
+	println("sqrt32", sq32)
+	nan:float64 = sqrt(-1.0)
+	nan == nan -> neq1
+	println("nan_eq", neq1)
+	nan != nan -> neq2
+	println("nan_neq", neq2)
+	nan < 1.0 -> nlt
+	println("nan_lt", nlt)
+	max(nan, 1.0) -> nmx
+	println("nan_max", nmx)
+	nan32:float32 = float32(nan)
+	nan32 == nan32 -> ne32
+	println("nan32_eq", ne32)
+	mz:float32 = float32(0.0)
+	neg(mz) -> nz
+	println("neg_zero", nz)
+	abs(nz) -> az
+	println("abs_zero", az)
+}

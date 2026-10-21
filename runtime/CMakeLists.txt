@@ -11,6 +11,10 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${BIN_DIR}")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${BIN_DIR}")
 
 file(GLOB KVLANG_RUNTIME_SRC CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/*.c")
+# 生成族放最后一个 TU：改动热 TU 的 .text 布局会造成约 1.5% 的实测回退。
+set(KVLANG_GEN_SRC "${CMAKE_SOURCE_DIR}/src/rwir_special_gen.c")
+list(REMOVE_ITEM KVLANG_RUNTIME_SRC "${KVLANG_GEN_SRC}")
+list(APPEND KVLANG_RUNTIME_SRC "${KVLANG_GEN_SRC}")
 add_library(kvlang_runtime SHARED ${KVLANG_RUNTIME_SRC})
 target_include_directories(kvlang_runtime PUBLIC include src)
 target_compile_definitions(kvlang_runtime PRIVATE _GNU_SOURCE)
@@ -62,6 +66,7 @@ if(NOT APPLE)
     add_test(NAME scalar_encode COMMAND "${BIN_DIR}/test_scalar_encode")
     add_test(NAME body_write COMMAND bash "${CMAKE_SOURCE_DIR}/tests/body_write.sh")
     add_test(NAME int_specialize COMMAND bash "${CMAKE_SOURCE_DIR}/tests/int_specialize.sh")
+    add_test(NAME float_specialize COMMAND bash "${CMAKE_SOURCE_DIR}/tests/float_specialize.sh")
     add_test(NAME pause_resume COMMAND bash "${CMAKE_SOURCE_DIR}/tests/pause_resume.sh")
     add_test(NAME layout_reject COMMAND bash "${CMAKE_SOURCE_DIR}/tests/layout_reject.sh")
     set_tests_properties(getmember_siblings kvset_invalid_head_shm pc_kvspace_source_shm crash_resume_shm param_address_shm delegate_shm scalar_encode
@@ -71,6 +76,8 @@ if(NOT APPLE)
     set_tests_properties(body_write
         PROPERTIES ENVIRONMENT "KVSPACE_BACKEND_PATH=${KVSPACE_LIB_DIR};KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/kvlang")
     set_tests_properties(int_specialize
+        PROPERTIES ENVIRONMENT "KVSPACE_BACKEND_PATH=${KVSPACE_LIB_DIR};KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/kvlang")
+    set_tests_properties(float_specialize
         PROPERTIES ENVIRONMENT "KVSPACE_BACKEND_PATH=${KVSPACE_LIB_DIR};KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/kvlang")
     set_tests_properties(pause_resume
         PROPERTIES ENVIRONMENT "KVSPACE_BACKEND_PATH=${KVSPACE_LIB_DIR};KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/kvlang")

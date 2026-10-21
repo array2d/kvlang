@@ -236,3 +236,24 @@ int kvlangBuiltinArray(kvlangFrame_t *f),
 KVLANG_INT_BASE_KINDS(DECL_INT_BASE)
 KVLANG_INT_SIGNED_KINDS(DECL_INT_SIGNED)
 KVLANG_INT_U64_KINDS(DECL_INT_U64)
+
+/* Phase 2 浮点：float32 同型特化（float64 族沿用 A1）。 */
+#define KVLANG_FLOAT32_KINDS(X) X(Float32, "float32", 4)
+
+#define DECL_F32_BASE(ktok, kstr, w)                                           \
+    int kvlangBuiltin##ktok##Add(kvlangFrame_t *f);                            \
+    int kvlangBuiltin##ktok##Sub(kvlangFrame_t *f);                            \
+    int kvlangBuiltin##ktok##Mul(kvlangFrame_t *f);                            \
+    int kvlangBuiltin##ktok##Div(kvlangFrame_t *f);                            \
+    int kvlangBuiltin##ktok##Max(kvlangFrame_t *f);                            \
+    int kvlangBuiltin##ktok##Min(kvlangFrame_t *f);                            \
+    int kvlangBuiltin##ktok##Neg(kvlangFrame_t *f);                            \
+    int kvlangBuiltin##ktok##Abs(kvlangFrame_t *f);                            \
+    int kvlangBuiltin##ktok##Eq(kvlangFrame_t *f);                             \
+    int kvlangBuiltin##ktok##Neq(kvlangFrame_t *f);                            \
+    int kvlangBuiltin##ktok##Lt(kvlangFrame_t *f);                             \
+    int kvlangBuiltin##ktok##Le(kvlangFrame_t *f);                             \
+    int kvlangBuiltin##ktok##Gt(kvlangFrame_t *f);                             \
+    int kvlangBuiltin##ktok##Ge(kvlangFrame_t *f);
+
+KVLANG_FLOAT32_KINDS(DECL_F32_BASE)
