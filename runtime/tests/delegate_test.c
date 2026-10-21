@@ -36,7 +36,6 @@ static void set_tlv(kvspace_t *kv, const char *key, const char *kind, const uint
     char err[256];
     if (kvlangKvspaceSet(kv, &p, 1, err, sizeof err) != 0)
         fail(err[0] ? err : "set");
-    kvlangXvalueFree(&v);
 }
 
 static void set_char(kvspace_t *kv, const char *key, const char *s) {
@@ -47,7 +46,6 @@ static void set_char(kvspace_t *kv, const char *key, const char *s) {
     char err[256];
     if (kvlangKvspaceSet(kv, &p, 1, err, sizeof err) != 0)
         fail(err[0] ? err : "set");
-    kvlangXvalueFree(&v);
 }
 
 static char *get_char(kvspace_t *kv, const char *key) {
@@ -55,7 +53,6 @@ static char *get_char(kvspace_t *kv, const char *key) {
     kvlangXvalueZero(&v);
     kvlangKvspaceGetOne(kv, key, &v);
     char *s = kvlangXvalueNone(&v) ? NULL : kvlangXvalueValueString(&v);
-    kvlangXvalueFree(&v);
     return s;
 }
 

@@ -9,13 +9,11 @@ static char *struct_field_type(kvspace_t *kv, const char *base,
     kvlangKvspaceGetOne(kv, key, &value);
     if (kvlangXvalueNone(&value) ||
         strcmp(kvlangXvalueKind(&value), KVSPACE_KIND_DEF_LANGTYPE) != 0) {
-        kvlangXvalueFree(&value);
         return NULL;
     }
     const uint8_t *body = xh_body_of(&value);
     int32_t len = xh_content_len_of(&value);
     char *type = strndup((const char *)body, (size_t)len);
-    kvlangXvalueFree(&value);
     return type;
 }
 
@@ -36,12 +34,10 @@ int kvlangBuiltinStructNew(kvlangFrame_t *f) {
         strcmp(kvlangXvalueKind(&proto), KVSPACE_KIND_DEF_STRUCT) != 0) {
         int e =
             kvlangBuiltinSetError(f, "TypeError: %s is not a struct type", ref);
-        kvlangXvalueFree(&proto);
         free(ref);
         kvlangBuiltinFreeInputs(in, n);
         return e;
     }
-    kvlangXvalueFree(&proto);
 
     char err[256];
     int rc = 0;
@@ -59,7 +55,6 @@ int kvlangBuiltinStructNew(kvlangFrame_t *f) {
         kvlangKvPair_t p0 = {ok, mark};
         if (kvlangKvspaceSet(f->kvspace, &p0, 1, err, sizeof err) != 0)
             rc = kvlangBuiltinSetError(f, "%s", err);
-        kvlangXvalueFree(&mark);
         for (int i = 1; i + 1 < n && rc == 0; i += 2) {
             char *fname = kvlangXvalueValueString(&in[i]);
             char *ftype = struct_field_type(f->kvspace, ref, fname);

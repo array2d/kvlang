@@ -29,12 +29,10 @@ void kvlangRwirInstructionFree(kvlangRwirInst_t *inst) {
     for (int i = 0; i < inst->read_count; i++) {
         free(inst->reads[i].name);
         free(inst->reads[i].type);
-        kvlangXvalueFree(&inst->reads[i].value);
     }
     for (int i = 0; i < inst->write_count; i++) {
         free(inst->writes[i].name);
         free(inst->writes[i].type);
-        kvlangXvalueFree(&inst->writes[i].value);
     }
     free(inst->reads);
     free(inst->writes);
@@ -81,10 +79,8 @@ int kvlangRwirOperandParse(kvspace_t *kv, const char *link_base,
         return -1;
     }
     if (kvlangXvalueNone(&v)) {
-        kvlangXvalueFree(&v);
         return 0;
     }
-    kvlangXvalueMaterialize(&v);
     *out_type = operand_type(&v);
     if (kvlangXvalueIsPtr(&v)) {
         *out_descriptor = kvlangXvaluePtrTarget(&v);
@@ -97,7 +93,6 @@ int kvlangRwirOperandParse(kvspace_t *kv, const char *link_base,
         *out_literal = v;
         kvlangXvalueZero(&v);
     }
-    kvlangXvalueFree(&v);
     if (!*out_is_literal && (!*out_descriptor || !(*out_descriptor)[0])) {
         snprintf(err, err_cap, "Decode: empty operand %s", slot);
         free(*out_descriptor);
@@ -151,7 +146,6 @@ static int decode_operand(kvspace_t *kv, const char *link_base,
         if (kvlangKvspaceSet(kv, &pair, 1, err, err_cap) != 0) {
             free(target);
             free(type);
-            kvlangXvalueFree(&literal);
             return -1;
         }
     } else if (is_absolute_key) {
@@ -160,7 +154,6 @@ static int decode_operand(kvspace_t *kv, const char *link_base,
         target = kvlangRwirOperandTarget(kv, frame_root, descriptor, &type);
         free(descriptor);
     }
-    kvlangXvalueFree(&literal);
     if (!target || !target[0]) {
         snprintf(err, err_cap, "Decode: invalid operand %s", slot);
         free(target);
@@ -175,11 +168,8 @@ static int decode_operand(kvspace_t *kv, const char *link_base,
         free(out->name);
         free(out->type);
         out->name = out->type = NULL;
-        kvlangXvalueFree(&out->value);
         return -1;
     }
-    if (read_target)
-        kvlangXvalueMaterialize(&out->value);
     return 1;
 }
 
@@ -212,19 +202,16 @@ int kvlangRwirDecode(kvspace_t *kv, const char *link_base, const char *pc,
         int32_t len = xh_content_len(v.bytes);
         if (!body || len < 5) {
             snprintf(err, err_cap, "Decode: invalid opcode at %s", pc);
-            kvlangXvalueFree(&v);
             goto fail;
         }
         nr = (int)body[0] | ((int)body[1] << 8);
         nw = (int)body[2] | ((int)body[3] << 8);
         if (nr > MAX_PARAMS || nw > MAX_PARAMS) {
             snprintf(err, err_cap, "Decode: too many operands at %s", pc);
-            kvlangXvalueFree(&v);
             goto fail;
         }
         out->opcode = kvlangXvalueValueString(&v);
     }
-    kvlangXvalueFree(&v);
     out->opcode_id =
         out->opcode ? kvlangOpClassify(out->opcode) : OPID_notinmyrwircaps;
     out->reads = malloc(sizeof(*out->reads) * (size_t)(nr ? nr : 1));

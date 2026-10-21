@@ -35,7 +35,6 @@ static int operand_load(kvspace_t *kv, kvlangBoundCell_t *cell,
         if (d && len > 0) {
             out->bytes = d;
             out->length = len;
-            out->is_borrowed = 1;
         }
     } else {
         if (kvlangKvspaceGetOne(kv, cell->key, out) != 0)
@@ -44,13 +43,7 @@ static int operand_load(kvspace_t *kv, kvlangBoundCell_t *cell,
         if (kvspaceResolveRef(kv->handle, cell->key, &ko->off) == 0)
             ko->resolved = true;
     }
-    kvlangXvalueMaterialize(out);
     return 0;
-}
-
-static void operands_free(kvlangParam_t *p, int n) {
-    for (int i = 0; i < n; i++)
-        kvlangXvalueFree(&p[i].value);
 }
 
 /* 帧的 ‥lib：函数目录路径（owned）。 */
@@ -63,7 +56,6 @@ static char *frame_func_dir(kvspace_t *kv, const char *frame_root) {
     kvlangXvalueZero(&v);
     kvlangKvspaceGetOne(kv, key, &v);
     char *dir = kvlangXvalueNone(&v) ? NULL : kvlangXvalueValueString(&v);
-    kvlangXvalueFree(&v);
     return dir;
 }
 
@@ -106,6 +98,9 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
     /* /lib 函数二维缓存（ExecuteMode 级）+ 每个活跃帧的绑定上下文。 */
     kvlangFuncCache_t fcache;
     kvlangFuncCacheInit(&fcache);
+    kvlangArena_t temp_arena;
+    kvlangArena_t *saved_arena = kvlangCurrentArena; /* 嵌套 ExecuteMode 的父 arena */
+    kvlangArenaInit(&temp_arena);
     kvlangFrameCtx_t *fctx[MAX_STACK_DEPTH + 1] = {0};
     uint32_t addr_epoch = 0; /* 删除/委托/handoff 后自增，使帧层 keyoff 失效 */
     int last_depth = 0; /* 0 = 尚未进入任何帧 */
@@ -114,6 +109,8 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
     for (;;) {
         /* Release borrowed values from the previous instruction. */
         kvlangKvspaceReadReset(kv);
+        kvlangArenaReset(&temp_arena); /* 本指令的临时值整体回收 */
+        kvlangCurrentArena = &temp_arena;
         if (!have_fb &&
             (!kvspaceKeyOffRead(&pc_off, cur_b, sizeof cur_b) || !cur_b[0])) {
             rc = -1;
@@ -177,8 +174,11 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
         int irseq = lastc ? kvlangRwirExtractAddress(lastc + 1) : 0;
         char err[256];
         kvlangCodeRow_t *row = NULL;
+        kvlangArena_t *row_arena_saved = kvlangCurrentArena;
+        kvlangCurrentArena = &fctx[depth]->code->arena; /* 行级长期值 */
         kvlangRowBind_t *bind =
             kvlangFrameRow(kv, fctx[depth], irseq, &row, err, sizeof err);
+        kvlangCurrentArena = row_arena_saved;
         if (!bind || !row->opcode || !row->opcode[0]) {
             /* layout 对每条路径都补了 return；走到空槽只能是 /lib 损坏或 goto/br 越界。 */
             if (err[0])
@@ -202,7 +202,6 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
                 /* 字面量：值已在行内（帧绑定时已落回 operand 槽，路径语义不变），
                  * 直接借用，省掉每步一次 Get。 */
                 reads[i].value = *bind->cell[i].literal;
-                reads[i].value.is_borrowed = 1;
                 continue;
             }
             if (operand_load(kv, &bind->cell[i], &reads[i].value) != 0) {
@@ -210,6 +209,8 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
                     kv, vtid, cur, "RuntimeError: cannot read operand %d", i);
                 break;
             }
+            if (bind->cell[i].pin) /* 写槽会覆盖此 key：先固化读视图 */
+                kvlangXvalueCopyToArena(&reads[i].value);
         }
         for (int j = 0; exec_err == 0 && j < row->nw; j++) {
             writes[j].name = bind->cell[row->nr + j].key;
@@ -225,8 +226,6 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
             }
         }
         if (exec_err != 0) {
-            operands_free(reads, row->nr);
-            operands_free(writes, row->nw);
             rc = -1;
             break;
         }
@@ -258,13 +257,13 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
             if (exec_err == 0 && yield) {
                 /* native（vthread·run return 模式）冒泡一个子 vthread 的 rwir pc 给上层驱动。
                  * 本 vthread（主）pc 未推进，驱动派发子 rwir 并推进子 pc 后重入即续跑。 */
-                operands_free(reads, row->nr);
-                operands_free(writes, row->nw);
                 free(reads);
                 free(writes);
                 for (int d = 0; d <= MAX_STACK_DEPTH; d++)
                     kvlangFrameCtxFree(fctx[d]);
                 kvlangFuncCacheFree(&fcache);
+                kvlangArenaDestroy(&temp_arena);
+                kvlangCurrentArena = saved_arena;
                 return execute_yield(out_pc, yield);
             }
         } else if (kvlangDispatchIsDelegatedOp(kv, inst.opcode)) {
@@ -285,13 +284,13 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
                     check_write_types(kv, vtid, cur, inst.opcode,
                                       row->def_write_sig, row->def_write_count);
             if (exec_err == 0 && mode == KVMODE_RETURN) {
-                operands_free(reads, row->nr);
-                operands_free(writes, row->nw);
                 free(reads);
                 free(writes);
                 for (int d = 0; d <= MAX_STACK_DEPTH; d++)
                     kvlangFrameCtxFree(fctx[d]);
                 kvlangFuncCacheFree(&fcache);
+                kvlangArenaDestroy(&temp_arena);
+                kvlangCurrentArena = saved_arena;
                 return execute_yield(out_pc, out_pc ? strdup(cur) : NULL);
             }
             if (exec_err == 0)
@@ -309,8 +308,6 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
             fb_i ^= 1;
             have_fb = true;
         }
-        operands_free(reads, row->nr);
-        operands_free(writes, row->nw);
         if (exec_err != 0) {
             rc = -1;
             break;
@@ -320,6 +317,8 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
     for (int d = 0; d <= MAX_STACK_DEPTH; d++)
         kvlangFrameCtxFree(fctx[d]);
     kvlangFuncCacheFree(&fcache);
+    kvlangArenaDestroy(&temp_arena);
+    kvlangCurrentArena = saved_arena;
     free(reads);
     free(writes);
     return rc;

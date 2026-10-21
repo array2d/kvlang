@@ -60,7 +60,6 @@ static int write_char32(kvlangFrame_t *f, const uint32_t *r, int n) {
         e.bytes = out; e.length = len;
     }
     int rc = kvlangBuiltinWriteResult(f, &e);
-    kvlangXvalueFree(&e);
     return rc;
 }
 
@@ -79,7 +78,7 @@ int kvlangBuiltinStringSet(kvlangFrame_t *f) {
         kvlangXvalue_t v; kvlangXvalueNewCharUtf32(&v, s);
         kvlangKvPair_t p = { key, v };
         char err[256]; kvlangKvspaceSet(f->kvspace, &p, 1, err, sizeof err);
-        kvlangXvalueFree(&v); free(key); free(fr);
+        free(key); free(fr);
     }
     free(s);
     kvlangBuiltinNextPc(f); kvlangBuiltinFreeInputs(in, n); return 0;
@@ -104,7 +103,7 @@ int kvlangBuiltinStringOrd(kvlangFrame_t *f) {
     { const char *cerr = variable_length_char_error(kvlangXvalueKind(&in[0])); if (cerr) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetError(f, "%s", cerr); } }
     int rn; uint32_t *r = string_runes(&in[0], &rn);
     kvlangXvalue_t e; kvlangXvalueNewInt64(&e, rn == 0 ? -1 : (int64_t)r[0]);
-    int rc = kvlangBuiltinWriteResult(f, &e); kvlangXvalueFree(&e); free(r); kvlangBuiltinFreeInputs(in, n);
+    int rc = kvlangBuiltinWriteResult(f, &e);free(r); kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
 
@@ -114,7 +113,7 @@ int kvlangBuiltinStringCmp(kvlangFrame_t *f) {
     char *a = kvlangXvalueValueString(&in[0]), *b = kvlangXvalueValueString(&in[1]);
     int64_t r = strcmp(a, b) < 0 ? -1 : strcmp(a, b) > 0 ? 1 : 0;
     kvlangXvalue_t e; kvlangXvalueNewInt64(&e, r);
-    int rc = kvlangBuiltinWriteResult(f, &e); kvlangXvalueFree(&e); free(a); free(b); kvlangBuiltinFreeInputs(in, n);
+    int rc = kvlangBuiltinWriteResult(f, &e);free(a); free(b); kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
 
@@ -128,7 +127,7 @@ int kvlangBuiltinStringFind(kvlangFrame_t *f) {
     if (nn == 0) r = 0;
     else for (int i = 0; i + nn <= hn; i++) { bool m = true; for (int j = 0; j < nn; j++) if (hay[i + j] != needle[j]) { m = false; break; } if (m) { r = i; break; } }
     kvlangXvalue_t e; kvlangXvalueNewInt64(&e, r);
-    int rc = kvlangBuiltinWriteResult(f, &e); kvlangXvalueFree(&e); free(hay); free(needle); kvlangBuiltinFreeInputs(in, n);
+    int rc = kvlangBuiltinWriteResult(f, &e);free(hay); free(needle); kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
 
@@ -141,7 +140,7 @@ int kvlangBuiltinStringLen(kvlangFrame_t *f) {
         else { uint32_t *r = string_runes(&in[0], &len); free(r); }
     }
     kvlangXvalue_t e; kvlangXvalueNewInt64(&e, len);
-    int rc = kvlangBuiltinWriteResult(f, &e); kvlangXvalueFree(&e); kvlangBuiltinFreeInputs(in, n);
+    int rc = kvlangBuiltinWriteResult(f, &e);kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
 
@@ -177,7 +176,7 @@ bool kvlangBuiltinCharConcat(const kvlangXvalue_t *a, const kvlangXvalue_t *b, k
 int kvlangBuiltinStringConcat(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     if (n < 2) {
-        kvlangXvalue_t e; kvlangXvalueNewCharUtf32(&e, ""); kvlangBuiltinWriteResult(f, &e); kvlangXvalueFree(&e);
+        kvlangXvalue_t e; kvlangXvalueNewCharUtf32(&e, ""); kvlangBuiltinWriteResult(f, &e);
         kvlangBuiltinFreeInputs(in, n); return 0;
     }
     const char *k0 = kvlangXvalueKind(&in[0]), *k1 = kvlangXvalueKind(&in[1]);
@@ -191,7 +190,7 @@ int kvlangBuiltinStringConcat(kvlangFrame_t *f) {
         kvlangBuiltinFreeInputs(in, n); return -1;
     }
     int rc = kvlangBuiltinWriteResult(f, &r);
-    kvlangXvalueFree(&r); kvlangBuiltinFreeInputs(in, n);
+    kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
 
@@ -240,7 +239,7 @@ int kvlangBuiltinStringParseInt(kvlangFrame_t *f) {
     free(s);
     if (bad) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetError(f, "ValueError: string.parseint: invalid syntax"); }
     kvlangXvalue_t e; kvlangXvalueNewInt64(&e, (int64_t)v);
-    int rc = kvlangBuiltinWriteResult(f, &e); kvlangXvalueFree(&e); kvlangBuiltinFreeInputs(in, n);
+    int rc = kvlangBuiltinWriteResult(f, &e);kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
 
@@ -254,7 +253,7 @@ int kvlangBuiltinStringParseUint(kvlangFrame_t *f) {
     if (bad) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetError(f, "ValueError: string.parseuint: invalid syntax"); }
     uint64_t u = (uint64_t)v; uint8_t r[8]; memcpy(r, &u, 8);
     kvlangXvalue_t e; kvlangXvalueNewTlv(&e, KVSPACE_KIND_UINT64, r, 8, 1);
-    int rc = kvlangBuiltinWriteResult(f, &e); kvlangXvalueFree(&e); kvlangBuiltinFreeInputs(in, n);
+    int rc = kvlangBuiltinWriteResult(f, &e);kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
 
@@ -270,6 +269,6 @@ int kvlangBuiltinStringParseFloat(kvlangFrame_t *f) {
     if (bad) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetError(f, "ValueError: string.parsefloat: invalid syntax"); }
     uint8_t r[8]; memcpy(r, &v, 8);
     kvlangXvalue_t e; kvlangXvalueNewTlv(&e, KVSPACE_KIND_FLOAT64, r, 8, 1);
-    int rc = kvlangBuiltinWriteResult(f, &e); kvlangXvalueFree(&e); kvlangBuiltinFreeInputs(in, n);
+    int rc = kvlangBuiltinWriteResult(f, &e);kvlangBuiltinFreeInputs(in, n);
     return rc;
 }

@@ -21,7 +21,7 @@ static void new_duration(kvlangXvalue_t *v, int64_t ns) {
 
 int kvlangBuiltinTimeNow(kvlangFrame_t *f) {
     kvlangXvalue_t e; new_time(&e, now_nanoseconds());
-    int rc = kvlangBuiltinWriteResult(f, &e); kvlangXvalueFree(&e);
+    int rc = kvlangBuiltinWriteResult(f, &e);
     return rc;
 }
 
@@ -29,7 +29,7 @@ int kvlangBuiltinTimeSub(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     if (n < 2) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetError(f, "TypeError: time.sub requires 2 time args"); }
     kvlangXvalue_t e; new_duration(&e, kvlangScalarI64(kvlangXvalueScalar(&in[0])) - kvlangScalarI64(kvlangXvalueScalar(&in[1])));
-    int rc = kvlangBuiltinWriteResult(f, &e); kvlangXvalueFree(&e); kvlangBuiltinFreeInputs(in, n);
+    int rc = kvlangBuiltinWriteResult(f, &e);kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
 
@@ -37,7 +37,7 @@ int kvlangBuiltinTimeAdd(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     if (n < 2) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetError(f, "TypeError: time.add requires time and duration"); }
     kvlangXvalue_t e; new_time(&e, kvlangScalarI64(kvlangXvalueScalar(&in[0])) + kvlangScalarI64(kvlangXvalueScalar(&in[1])));
-    int rc = kvlangBuiltinWriteResult(f, &e); kvlangXvalueFree(&e); kvlangBuiltinFreeInputs(in, n);
+    int rc = kvlangBuiltinWriteResult(f, &e);kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
 
@@ -54,7 +54,7 @@ int kvlangBuiltinDurationFrom(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     if (n < 1) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetError(f, "TypeError: time/duration.from requires 1 int64 arg"); }
     kvlangXvalue_t e; new_duration(&e, kvlangScalarI64(kvlangXvalueScalar(&in[0])) * duration_scale(f->instruction->opcode));
-    int rc = kvlangBuiltinWriteResult(f, &e); kvlangXvalueFree(&e); kvlangBuiltinFreeInputs(in, n);
+    int rc = kvlangBuiltinWriteResult(f, &e);kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
 
@@ -62,7 +62,7 @@ int kvlangBuiltinDurationTo(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     if (n < 1) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetError(f, "TypeError: time/duration.as requires 1 duration arg"); }
     kvlangXvalue_t e; kvlangXvalueNewInt64(&e, kvlangScalarI64(kvlangXvalueScalar(&in[0])) / duration_scale(f->instruction->opcode));
-    int rc = kvlangBuiltinWriteResult(f, &e); kvlangXvalueFree(&e); kvlangBuiltinFreeInputs(in, n);
+    int rc = kvlangBuiltinWriteResult(f, &e);kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
 
@@ -72,7 +72,7 @@ int kvlangBuiltinDurationArith(kvlangFrame_t *f) {
     int64_t a = kvlangScalarI64(kvlangXvalueScalar(&in[0])), b = kvlangScalarI64(kvlangXvalueScalar(&in[1]));
     bool sub = strstr(f->instruction->opcode, MEMBER_SEP "sub") != NULL;
     kvlangXvalue_t e; new_duration(&e, sub ? a - b : a + b);
-    int rc = kvlangBuiltinWriteResult(f, &e); kvlangXvalueFree(&e); kvlangBuiltinFreeInputs(in, n);
+    int rc = kvlangBuiltinWriteResult(f, &e);kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
 
@@ -82,7 +82,7 @@ int kvlangBuiltinDurCompare(kvlangFrame_t *f) {
     bool before = strstr(f->instruction->opcode, "before") != NULL;
     int64_t a = kvlangScalarI64(kvlangXvalueScalar(&in[0])), b = kvlangScalarI64(kvlangXvalueScalar(&in[1]));
     kvlangXvalue_t e; kvlangXvalueNewBool(&e, before ? a < b : a > b);
-    int rc = kvlangBuiltinWriteResult(f, &e); kvlangXvalueFree(&e); kvlangBuiltinFreeInputs(in, n);
+    int rc = kvlangBuiltinWriteResult(f, &e);kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
 
@@ -92,6 +92,6 @@ int kvlangBuiltinTimeCompare(kvlangFrame_t *f) {
     bool before = strstr(f->instruction->opcode, "before") != NULL;
     int64_t a = kvlangScalarI64(kvlangXvalueScalar(&in[0])), b = kvlangScalarI64(kvlangXvalueScalar(&in[1]));
     kvlangXvalue_t e; kvlangXvalueNewBool(&e, before ? a < b : a > b);
-    int rc = kvlangBuiltinWriteResult(f, &e); kvlangXvalueFree(&e); kvlangBuiltinFreeInputs(in, n);
+    int rc = kvlangBuiltinWriteResult(f, &e);kvlangBuiltinFreeInputs(in, n);
     return rc;
 }

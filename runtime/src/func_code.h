@@ -31,6 +31,7 @@ typedef struct {
 
 typedef struct {
     char *func_dir;
+    kvlangArena_t arena;    /* 函数级长期值：literal / 描述符 / 类型串 */
     kvlangCodeRow_t **rows; /* rows[s0]，按需增长 */
     size_t rows_cap;
 } kvlangFuncCode_t;
@@ -41,6 +42,7 @@ typedef struct {
     char *type; /* owned（细化后） */
     kvspaceKeyOff off;
     kvlangXvalue_t *literal; /* 指向行内字面量（借用）；非字面量 NULL */
+    bool pin; /* 本行写槽覆盖此 key：读视图须在写前固化 */
 } kvlangBoundCell_t;
 
 typedef struct {

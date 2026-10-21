@@ -18,7 +18,6 @@ int kvlangBuiltinVthreadCreate(kvlangFrame_t *f) {
     kvlangXvalue_t r; kvlangXvalueNewCharUtf8(&r, vid);
     free(vid);
     int rc = kvlangBuiltinWriteResult(f, &r);
-    kvlangXvalueFree(&r);
     return rc;
 }
 

@@ -41,7 +41,6 @@ static char *read_vthread_pc(kvspace_t *kv, const char *vid) {
   kvlangXvalueZero(&v);
   kvlangKvspaceGetOne(kv, key, &v);
   char *pc = kvlangXvalueNone(&v) ? strdup("") : kvlangXvalueValueString(&v);
-  kvlangXvalueFree(&v);
   return pc;
 }
 
@@ -59,7 +58,6 @@ static char *alloc_vthread_id(kvspace_t *kv) {
   kvlangXvalueZero(&v);
   kvlangKvspaceGetOne(kv, seq, &v);
   char *s = kvlangXvalueNone(&v) ? strdup("") : kvlangXvalueValueString(&v);
-  kvlangXvalueFree(&v);
   int64_t n = atoll(s) + 1;
   free(s);
   char buf[32];
@@ -70,7 +68,7 @@ static char *alloc_vthread_id(kvspace_t *kv) {
   char err[256];
   int rc = kvlangXvalueNone(&nv) ? -1 :
            kvlangKvspaceSet(kv, &p, 1, err, sizeof err);
-  kvlangXvalueFree(&nv);
+  kvlangXvalueRelease(&nv);
   return rc == 0 ? strdup(buf) : NULL;
 }
 
@@ -134,7 +132,6 @@ int kvlangRuntimeRunVthreadId(kvspace_t *kv, const char *vid, char **ret, char *
   kvlangKvspaceGetOne(kv, st, &sv);
   char *status =
       kvlangXvalueNone(&sv) ? strdup("") : kvlangXvalueValueString(&sv);
-  kvlangXvalueFree(&sv);
 
   if (ret) {
     if (strcmp(status, "error") == 0) {
@@ -145,7 +142,6 @@ int kvlangRuntimeRunVthreadId(kvspace_t *kv, const char *vid, char **ret, char *
       kvlangKvspaceGetOne(kv, mk, &mv);
       char *msg = kvlangXvalueNone(&mv) ? strdup("error")
                                         : kvlangXvalueValueString(&mv);
-      kvlangXvalueFree(&mv);
       if (err && err_cap)
         snprintf(err, err_cap, "%s", msg);
       *ret = strdup("error");

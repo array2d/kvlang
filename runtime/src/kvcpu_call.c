@@ -92,7 +92,6 @@ static int handle_return(kvspace_t *kv, const char *vtid, const char *pc,
         kvlangKvspaceGetOne(kv, rk, &v);
         if (!kvlangXvalueNone(&v))
             next = kvlangXvalueValueString(&v);
-        kvlangXvalueFree(&v);
         if (!next || !next[0]) {
             char msg[512];
             snprintf(msg, sizeof msg,
@@ -131,8 +130,8 @@ static int add_param_binding(kvlangKvPair_t *pairs, int *np,
     kvlangXvalueNewPtr(&arg_ptr, type, value_key);
     kvlangXvalueNewPtr(&frame_ptr, type, arg_key);
     if (kvlangXvalueNone(&arg_ptr) || kvlangXvalueNone(&frame_ptr)) {
-        kvlangXvalueFree(&arg_ptr);
-        kvlangXvalueFree(&frame_ptr);
+        kvlangXvalueRelease(&arg_ptr);
+        kvlangXvalueRelease(&frame_ptr);
         free(arg_key);
         free(slot_key);
         return -1;
@@ -185,7 +184,6 @@ static char *handle_call(kvspace_t *kv, const char *pc,
                 kvlangKvspaceGetOne(kv, lk, &lv);
                 char *funcdir =
                     kvlangXvalueNone(&lv) ? NULL : kvlangXvalueValueString(&lv);
-                kvlangXvalueFree(&lv);
                 if (funcdir) {
                     char *rel = funcdir + 5; // 剥 /lib/
                     size_t rl = strlen(rel);
@@ -202,7 +200,6 @@ static char *handle_call(kvspace_t *kv, const char *pc,
                         kvlangKvspaceGetOne(kv, sk, &sv);
                         bool ok = !kvlangXvalueNone(&sv) &&
                                   kvlangXvalueKindIs(&sv, KVSPACE_KIND_RWFUNC);
-                        kvlangXvalueFree(&sv);
                         if (ok) {
                             free(pkg);
                             pkg = cand_pkg;
@@ -243,7 +240,6 @@ static char *handle_call(kvspace_t *kv, const char *pc,
                      kvlangXvalueKind(&sig));
         else
             snprintf(msg, sizeof msg, "NameError: rwfunc not found: %s", fn);
-        kvlangXvalueFree(&rv);
         free(rk);
         kvlangVthreadSetError(kv, vtid, pc, msg);
         goto fail;
@@ -297,14 +293,18 @@ static char *handle_call(kvspace_t *kv, const char *pc,
     int sys_rc = kvlangXvalueNone(&v_npc) || kvlangXvalueNone(&v_ep) ||
                  kvlangXvalueNone(&v_fn) ? -1 :
                  kvlangKvspaceSet(kv, sys, 3, err, sizeof err);
-    kvlangXvalueFree(&v_npc);
-    kvlangXvalueFree(&v_ep);
-    kvlangXvalueFree(&v_fn);
+    kvlangXvalueRelease(&v_npc);
+    kvlangXvalueRelease(&v_ep);
+    kvlangXvalueRelease(&v_fn);
     if (sys_rc != 0) {
         kvlangVthreadSetError(kv, vtid, pc, "RuntimeError: cannot persist call frame");
         goto fail_frame;
     }
 
+    kvlangArenaScope bind_scope;
+    bool bind_scoped = !kvlangCurrentArena;
+    if (bind_scoped)
+        kvlangArenaScopeEnter(&bind_scope);
     kvlangKvPair_t pairs[MAX_BIND_PAIRS];
     int np = 0;
     int bind_error = 0;
@@ -333,7 +333,8 @@ static char *handle_call(kvspace_t *kv, const char *pc,
                 }
                 kvlangXvalue_t copy;
                 kvlangXvalueZero(&copy);
-                copy.bytes = malloc(arg->value.length);
+                copy.bytes = kvlangArenaAlloc(kvlangCurrentArena,
+                                              arg->value.length);
                 if (!copy.bytes) {
                     free(rk);
                     snprintf(err, sizeof err, "OutOfMemory: argument %d", i + 1);
@@ -363,10 +364,10 @@ static char *handle_call(kvspace_t *kv, const char *pc,
         free(wk);
     }
     int wrc = bind_error ? -1 : np > 0 ? kvlangKvspaceSet(kv, pairs, np, err, sizeof err) : 0;
-    for (int i = 0; i < np; i++) {
+    for (int i = 0; i < np; i++)
         free(pairs[i].key);
-        kvlangXvalueFree(&pairs[i].value);
-    }
+    if (bind_scoped)
+        kvlangArenaScopeLeave(&bind_scope);
     if (wrc != 0) {
         kvlangVthreadSetError(kv, vtid, pc, err);
         goto fail_frame;
@@ -374,7 +375,6 @@ static char *handle_call(kvspace_t *kv, const char *pc,
 
     free(caller_fr);
     free(stack_fr);
-    kvlangXvalueFree(&sig);
     free(func_key);
     free(pkg);
     free(name);
@@ -388,7 +388,6 @@ fail_frame:
     free(ep);
     free(frame_root);
 fail:
-    kvlangXvalueFree(&sig);
     free(func_key);
     free(pkg);
     free(name);
@@ -417,7 +416,6 @@ static void param_decl_type(kvspace_t *kv, const char *func_key, int x,
             break;
         }
     }
-    kvlangXvalueFree(&dv);
 }
 
 int kvlangControlCall(kvlangFrame_t *f) {
@@ -482,7 +480,6 @@ int kvlangControlBr(kvlangFrame_t *f) {
     if (kvlangXvalueNone(&cond)) {
         kvlangVthreadSetError(f->kvspace, f->vthread_id, f->pc,
                               "TypeError: None in branch condition");
-        kvlangXvalueFree(&cond);
         return -1;
     }
     if (!kvlangXvalueKindIs(&cond, KVSPACE_KIND_BOOL)) {
@@ -491,11 +488,9 @@ int kvlangControlBr(kvlangFrame_t *f) {
                  "TypeError: branch condition must be bool, got %s",
                  kvlangXvalueKind(&cond));
         kvlangVthreadSetError(f->kvspace, f->vthread_id, f->pc, msg);
-        kvlangXvalueFree(&cond);
         return -1;
     }
     bool taken = kvlangScalarI64(kvlangXvalueScalar(&cond)) != 0;
-    kvlangXvalueFree(&cond);
     return jump_to(f, &inst->reads[taken ? 1 : 2], OP_BR);
 }
 
@@ -567,7 +562,6 @@ char *kvlangKvcpuBootstrap(kvspace_t *kv, const char *vtid,
         snprintf(msg, sizeof msg, "Bootstrap: rwir/rwfunc not found: %s",
                  funcname);
         kvlangVthreadSetError(kv, vtid, "", msg);
-        kvlangXvalueFree(&sig);
         free(func_key);
         free(pkg);
         free(name);
@@ -582,7 +576,6 @@ char *kvlangKvcpuBootstrap(kvspace_t *kv, const char *vtid,
     if (kvlangKvspaceMakeIndex(kv, stack_fr, 0, err, sizeof err) != 0 ||
         kvlangKvspaceExtensionIndex(kv, stack_fr, func_dir, err, sizeof err) != 0) {
         kvlangVthreadSetError(kv, vtid, "", err);
-        kvlangXvalueFree(&sig);
         free(stack_fr);
         free(frame_root);
         free(func_key);
@@ -603,10 +596,10 @@ char *kvlangKvcpuBootstrap(kvspace_t *kv, const char *vtid,
     kvlangKvPair_t sys[2] = {{callpc, v_ep}, {seglib, v_fn}};
     int sys_rc = kvlangXvalueNone(&v_ep) || kvlangXvalueNone(&v_fn) ? -1 :
                  kvlangKvspaceSet(kv, sys, 2, err, sizeof err);
+    kvlangXvalueRelease(&v_ep);
+    kvlangXvalueRelease(&v_fn);
     if (sys_rc != 0)
         snprintf(err, sizeof err, "RuntimeError: cannot persist entry frame");
-    kvlangXvalueFree(&v_ep);
-    kvlangXvalueFree(&v_fn);
 
     int bind_error = sys_rc != 0;
     if (!bind_error && (nargs < 0 || nargs > MAX_PARAMS || nr > MAX_PARAMS)) {
@@ -614,6 +607,10 @@ char *kvlangKvcpuBootstrap(kvspace_t *kv, const char *vtid,
         bind_error = 1;
     }
     if (nargs > 0 && !bind_error) {
+        kvlangArenaScope bind_scope;
+        bool bind_scoped = !kvlangCurrentArena;
+        if (bind_scoped)
+            kvlangArenaScopeEnter(&bind_scope);
         kvlangKvPair_t pairs[MAX_BIND_PAIRS];
         int np = 0;
         for (int i = 0; i < nr && i < nargs; i++) {
@@ -623,8 +620,6 @@ char *kvlangKvcpuBootstrap(kvspace_t *kv, const char *vtid,
             kvlangBuiltinResolveReadValue(kv, "", args[i], NULL, &av);
             if (!kvlangXvalueNone(&av))
                 pairs[np++] = (kvlangKvPair_t){strdup(value_key), av};
-            else
-                kvlangXvalueFree(&av);
             char lt[256] = {0};
             param_decl_type(kv, func_key, -(i + 1), lt, sizeof lt);
             if (add_param_binding(pairs, &np, frame_root, -(i + 1), lt, value_key) != 0) {
@@ -637,10 +632,10 @@ char *kvlangKvcpuBootstrap(kvspace_t *kv, const char *vtid,
         }
         if (!bind_error && np > 0 && kvlangKvspaceSet(kv, pairs, np, err, sizeof err) != 0)
             bind_error = 1;
-        for (int i = 0; i < np; i++) {
+        for (int i = 0; i < np; i++)
             free(pairs[i].key);
-            kvlangXvalueFree(&pairs[i].value);
-        }
+        if (bind_scoped)
+            kvlangArenaScopeLeave(&bind_scope);
     }
     if (bind_error) {
         kvlangVthreadSetError(kv, vtid, "", err);
@@ -649,7 +644,6 @@ char *kvlangKvcpuBootstrap(kvspace_t *kv, const char *vtid,
         ep = NULL;
     }
 
-    kvlangXvalueFree(&sig);
     free(stack_fr);
     free(frame_root);
     free(func_key);

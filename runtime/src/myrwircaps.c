@@ -11,7 +11,6 @@ static int register_vids(kvspace_t *k, const char *opcode) {
     kvlangXvalue_t root;
     kvlangXvalueZero(&root);
     bool root_exists = kvlangKvspaceGetOne(k, queue, &root) == 0 && !kvlangXvalueNone(&root);
-    kvlangXvalueFree(&root);
     if (!root_exists) {
         kvlangXvalue_t value;
         kvlangXvalueZero(&value);
@@ -19,7 +18,7 @@ static int register_vids(kvspace_t *k, const char *opcode) {
         kvlangKvPair_t pair = {queue, value};
         char err[256];
         int rc = kvlangKvspaceSet(k, &pair, 1, err, sizeof err);
-        kvlangXvalueFree(&value);
+        kvlangXvalueRelease(&value);
         if (rc != 0)
             return rc;
     }
@@ -29,7 +28,6 @@ static int register_vids(kvspace_t *k, const char *opcode) {
     kvlangXvalue_t cur;
     kvlangXvalueZero(&cur);
     bool exists = (kvlangKvspaceGetOne(k, tk, &cur) == 0 && !kvlangXvalueNone(&cur));
-    kvlangXvalueFree(&cur);
     int rc = 0;
     if (!exists) {
         kvlangXvalue_t v;
@@ -38,7 +36,7 @@ static int register_vids(kvspace_t *k, const char *opcode) {
         kvlangKvPair_t p = {tk, v};
         char err[256];
         rc = kvlangKvspaceSet(k, &p, 1, err, sizeof err);
-        kvlangXvalueFree(&v);
+        kvlangXvalueRelease(&v);
     }
     free(base);
     return rc;
@@ -56,7 +54,7 @@ static void write_signature_slot(kvspace_t *k, const char *base, int x,
     kvlangKvPair_t sp = {sk, sv};
     char err[256];
     kvlangKvspaceSet(k, &sp, 1, err, sizeof err);
-    kvlangXvalueFree(&sv);
+    kvlangXvalueRelease(&sv);
 }
 
 /* 注册一条 rwir：/lib/<op> 路由头（仅计数头）+ 各参数落 [0,x] 签名行槽（def langtype）。
@@ -80,7 +78,7 @@ int kvlangDefRwir(void *kvspace, const char *opcode, const char *const *rp,
     kvlangXvalueNewDefRwir(&hv, nr, nw, dynamic);
     kvlangKvPair_t hp = {base, hv};
     int rc = kvlangKvspaceSet(&k, &hp, 1, err, sizeof err);
-    kvlangXvalueFree(&hv);
+    kvlangXvalueRelease(&hv);
 
     for (int32_t i = 0; i < nr; i++)
         write_signature_slot(&k, base, -(i + 1), rp[i],

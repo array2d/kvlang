@@ -38,10 +38,8 @@ static int set_i64(kvspace_t *k, const char *key, int64_t n) {
     p.value = v;
     err[0] = 0;
     if (kvlangKvspaceSet(k, &p, 1, err, sizeof err) != 0) {
-        kvlangXvalueFree(&v);
         return -1;
     }
-    kvlangXvalueFree(&v);
     return 0;
 }
 

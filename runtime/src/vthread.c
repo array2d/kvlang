@@ -13,7 +13,6 @@
         kvlangKvspaceGetOne(kv, k, &v);                                        \
         if (!kvlangXvalueNone(&v))                                             \
             *out = kvlangXvalueValueString(&v);                                \
-        kvlangXvalueFree(&v);                                                  \
     }
 
 /* Read PC and status separately from KVSpace. */
@@ -23,7 +22,6 @@ VT_MEMBER_GET(kvlangVthreadStatusGet, true)
 /* 系统变量值 → 调用方缓冲；false = 键缺失或 None，超长直接 abort。 */
 static bool value_to_buffer(kvlangXvalue_t *v, char *out, size_t cap) {
     if (kvlangXvalueNone(v)) {
-        kvlangXvalueFree(v);
         return false;
     }
     char *tmp = NULL;
@@ -42,7 +40,6 @@ static bool value_to_buffer(kvlangXvalue_t *v, char *out, size_t cap) {
     memcpy(out, src, n);
     out[n] = 0;
     free(tmp);
-    kvlangXvalueFree(v);
     return true;
 }
 
@@ -65,7 +62,6 @@ bool kvspaceKeyOffRead(kvspaceKeyOff *ko, char *out, size_t cap) {
         if (d && len > 0) {
             v.bytes = d;
             v.length = len;
-            v.is_borrowed = 1;
         }
     } else if (kvlangKvspaceGetOne(ko->kvspace, ko->key, &v) != 0) {
         return false;
@@ -107,8 +103,8 @@ int kvlangVthreadSet(kvspace_t *kv, const char *vtid, const char *pc,
     kvlangKvPair_t pairs[2] = {{k1, v1}, {k2, v2}};
     char err[256];
     int rc = kvlangKvspaceSet(kv, pairs, 2, err, sizeof err);
-    kvlangXvalueFree(&v1);
-    kvlangXvalueFree(&v2);
+    kvlangXvalueRelease(&v1);
+    kvlangXvalueRelease(&v2);
     return rc;
 }
 
@@ -145,7 +141,7 @@ int kvlangVthreadSetDone(kvspace_t *kv, const char *vtid, const char *ret) {
     kvlangKvPair_t pair = {k, v};
     char err[256];
     int rc = kvlangKvspaceSet(kv, &pair, 1, err, sizeof err);
-    kvlangXvalueFree(&v);
+    kvlangXvalueRelease(&v);
     return rc;
 }
 
@@ -166,7 +162,7 @@ void kvlangVthreadSetError(kvspace_t *kv, const char *vtid, const char *pc,
     kvlangKvPair_t pairs[3] = {{pc_key, vpc}, {msg_key, vmsg}, {st_key, vst}};
     char err[256];
     kvlangKvspaceSet(kv, pairs, 3, err, sizeof err);
-    kvlangXvalueFree(&vpc);
-    kvlangXvalueFree(&vmsg);
-    kvlangXvalueFree(&vst);
+    kvlangXvalueRelease(&vpc);
+    kvlangXvalueRelease(&vmsg);
+    kvlangXvalueRelease(&vst);
 }

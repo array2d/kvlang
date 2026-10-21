@@ -15,7 +15,7 @@ int kvlangHandoffExternalRwir(kvspace_t *kv, const char *vtid, const char *pc,
     kvlangKvPair_t p = {vids, pv};
     char err[256];
     int set_rc = kvlangKvspaceSet(kv, &p, 1, err, sizeof err);
-    kvlangXvalueFree(&pv);
+    kvlangXvalueRelease(&pv);
     if (set_rc != 0) {
         free(base);
         return -1;
@@ -26,7 +26,6 @@ int kvlangHandoffExternalRwir(kvspace_t *kv, const char *vtid, const char *pc,
     kvlangXvalue_t got;
     kvlangXvalueZero(&got);
     int rc = kvlangKvspaceWatch(kv, vids, &none, 30000000000ULL, &got);
-    kvlangXvalueFree(&got);
     free(base);
     if (rc != 0) {
         char msg[256];
@@ -52,7 +51,6 @@ bool kvlangNotInMyRwirCaps(kvspace_t *k, const char *opcode) {
     kvlangKvspaceGetOne(k, key, &v);
     bool yes =
         !kvlangXvalueNone(&v) && kvlangXvalueKindIs(&v, KVSPACE_KIND_DEF_RWIR);
-    kvlangXvalueFree(&v);
     free(key);
     return yes;
 }

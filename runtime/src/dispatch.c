@@ -26,7 +26,6 @@ static char *get_char(kvspace_t *kv, const char *key) {
     kvlangXvalueZero(&v);
     kvlangKvspaceGetOne(kv, key, &v);
     char *s = kvlangXvalueNone(&v) ? NULL : kvlangXvalueValueString(&v);
-    kvlangXvalueFree(&v);
     return s;
 }
 
@@ -144,10 +143,8 @@ static void backends_for(kvspace_t *kv, const char *op, strlist_t *reg, strlist_
         kvlangKvspaceGetOne(kv, opk, &v);
         free(opk);
         if (kvlangXvalueNone(&v)) {
-            kvlangXvalueFree(&v);
             continue;
         }
-        kvlangXvalueFree(&v);
         if (reg)
             strlist_push(reg, strdup(names.items[i]));
         if (is_on_duty(kv, names.items[i]))
@@ -376,7 +373,7 @@ static int set_char(kvspace_t *kv, const char *key, const char *s, char *err, ui
     kvlangXvalueNewCharUtf8(&v, s);
     kvlangKvPair_t p = {(char *)key, v};
     int rc = kvlangKvspaceSet(kv, &p, 1, err, err_cap);
-    kvlangXvalueFree(&v);
+    kvlangXvalueRelease(&v);
     return rc;
 }
 
@@ -454,7 +451,6 @@ int kvlangDispatchDelegate(kvspace_t *kv, const char *vtid, const char *pc, kvla
         backends_for(kv, op, NULL, &duty);
         if (duty.count == 0) {
             strlist_free(&duty);
-            kvlangXvalueFree(&sig);
             return KVLANG_DELEGATE_LOCAL;
         }
         parts_t names = {0};
@@ -466,10 +462,8 @@ int kvlangDispatchDelegate(kvspace_t *kv, const char *vtid, const char *pc, kvla
                           "%s: on-duty backend %s and local rwfunc both define it; one opcode, one definition",
                           op, name_list);
         free(name_list);
-        kvlangXvalueFree(&sig);
         return rc;
     }
-    kvlangXvalueFree(&sig);
 
     char *declk = kvlangKeytreeRwir(op);
     kvlangXvalue_t decl;
@@ -479,18 +473,15 @@ int kvlangDispatchDelegate(kvspace_t *kv, const char *vtid, const char *pc, kvla
     if (!kvlangXvalueNone(&decl) && kvlangXvalueKindIs(&decl, KVSPACE_KIND_DEF_RWIR)) {
         int dnr = 0, dnw = 0, dynamic = 0;
         if (lib_arity(&decl, &dnr, &dnw, &dynamic) != 0) {
-            kvlangXvalueFree(&decl);
             return fail_message(kv, vtid, pc, "%s: def rwir body is not a signature", op);
         }
         int min_r = dynamic && dnr > 0 ? dnr - 1 : dnr;
         if (inst->read_count < min_r || (!dynamic && inst->read_count != dnr)) {
-            kvlangXvalueFree(&decl);
             return fail_message(kv, vtid, pc,
                             "%s: read arity mismatch: call site has %d, declaration has %d", op,
                             inst->read_count, dnr);
         }
         if (inst->write_count != dnw) {
-            kvlangXvalueFree(&decl);
             return fail_message(kv, vtid, pc,
                             "%s: write arity mismatch: call site has %d, declaration has %d", op,
                             inst->write_count, dnw);
@@ -499,10 +490,8 @@ int kvlangDispatchDelegate(kvspace_t *kv, const char *vtid, const char *pc, kvla
         const char *k = kvlangXvalueKind(&decl);
         int rc = fail_message(kv, vtid, pc, "%s: /lib entry holds kind %s, which is not callable", op,
                           k[0] ? k : "?");
-        kvlangXvalueFree(&decl);
         return rc;
     }
-    kvlangXvalueFree(&decl);
 
     char selerr[256];
     char *backend = NULL;
@@ -563,7 +552,6 @@ int kvlangDispatchDelegate(kvspace_t *kv, const char *vtid, const char *pc, kvla
             parts_push(&j, strdup("\"value\":"));
             parts_push(&j, json_escape_dup(disp ? disp : ""));
             free(disp);
-            kvlangXvalueFree(&val);
         }
         free(rk);
         parts_push(&j, strdup("}"));
@@ -591,7 +579,6 @@ int kvlangDispatchDelegate(kvspace_t *kv, const char *vtid, const char *pc, kvla
         fprintf(stderr, "panic: task id already exists: %s\n", status_key);
         abort();
     }
-    kvlangXvalueFree(&existing);
 
     char err[256];
     if (set_char(kv, status_key, "pending", err, sizeof err) != 0) {
@@ -623,8 +610,8 @@ int kvlangDispatchDelegate(kvspace_t *kv, const char *vtid, const char *pc, kvla
     kvlangXvalue_t got;
     kvlangXvalueZero(&got);
     kvlangKvspaceWatch(kv, status_key, &want, (uint64_t)timeout_for(kv, backend), &got);
-    kvlangXvalueFree(&want);
-    kvlangXvalueFree(&got);
+    kvlangXvalueRelease(&want);
+    kvlangXvalueRelease(&got);
 
     char *st = get_char(kv, status_key);
     if (!st || strcmp(st, "done") != 0) {
@@ -639,7 +626,6 @@ int kvlangDispatchDelegate(kvspace_t *kv, const char *vtid, const char *pc, kvla
         kvlangXvalueZero(&ov);
         kvlangKvspaceGetOne(kv, out_keys[i], &ov);
         bool empty = kvlangXvalueNone(&ov);
-        kvlangXvalueFree(&ov);
         if (empty) {
             rc = fail_message(kv, vtid, pc,
                           "%s: executor reported done but left output slot %s unwritten", op,

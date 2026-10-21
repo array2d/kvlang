@@ -30,7 +30,6 @@ int main(void) {
     kvlangKvPair_t pair = {.key = "/value", .value = good};
     char err[128] = {0};
     CHECK(kvlangKvspaceSet(kv, &pair, 1, err, sizeof err) == 0);
-    kvlangXvalueFree(&good);
 
     kvlangXvalue_t got;
     CHECK(kvlangKvspaceGetOne(kv, pair.key, &got) == 0);
@@ -75,7 +74,6 @@ int main(void) {
     pair.key = "/value";
     pair.value = changed;
     CHECK(kvlangKvspaceSet(kv, &pair, 1, err, sizeof err) == 0);
-    kvlangXvalueFree(&changed);
     CHECK(kvlangKvspaceGetOne(kv, pair.key, &got) == 0);
     CHECK(kvlangXvalueKindIs(&got, KVSPACE_KIND_FLOAT64));
     kvlangKvspaceReadReset(kv);

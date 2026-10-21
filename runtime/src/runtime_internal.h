@@ -123,10 +123,42 @@ void kvlangLangtypeParse(const uint8_t *langtype, int32_t langtype_len,
 /* ── 基础类型 ──────────────────────────────────────────────────────── */
 
 typedef struct {
-    uint8_t *bytes;
+    uint8_t *bytes; /* 视图：mmap 常驻 / arena / 显式 copy */
     uint32_t length;
-    uint8_t is_borrowed;
 } kvlangXvalue_t;
+
+/* 指令级 bump arena：临时值在指令边界整体重置；函数级 arena 随函数表释放。
+ * 构造 XValue 时由当前 arena 接管 codec 返回的堆缓冲（不逐值 free）。 */
+typedef struct kvlangArenaBlock kvlangArenaBlock;
+typedef struct {
+    kvlangArenaBlock *head;
+    void **owned; /* 由 arena 接管的 codec 缓冲 */
+    size_t nowned, capowned;
+} kvlangArena_t;
+
+extern kvlangArena_t *kvlangCurrentArena;
+void kvlangArenaInit(kvlangArena_t *a);
+void kvlangArenaReset(kvlangArena_t *a);
+void kvlangArenaDestroy(kvlangArena_t *a);
+void *kvlangArenaAlloc(kvlangArena_t *a, size_t n);
+char *kvlangArenaStrdup(kvlangArena_t *a, const char *s);
+void *kvlangArenaOwn(kvlangArena_t *a, void *p);
+/* 把视图拷进当前 arena（跨指令/跨后端池存活时用）。 */
+void kvlangXvalueCopyToArena(kvlangXvalue_t *v);
+/* 临时接管当前 arena（如函数绑定期的一次性值），离开时整体释放。 */
+typedef struct {
+    kvlangArena_t *saved;
+    kvlangArena_t arena;
+} kvlangArenaScope;
+static inline void kvlangArenaScopeEnter(kvlangArenaScope *s) {
+    s->saved = kvlangCurrentArena;
+    kvlangArenaInit(&s->arena);
+    kvlangCurrentArena = &s->arena;
+}
+static inline void kvlangArenaScopeLeave(kvlangArenaScope *s) {
+    kvlangArenaDestroy(&s->arena);
+    kvlangCurrentArena = s->saved;
+}
 
 typedef struct {
     char *key;
@@ -202,7 +234,6 @@ static inline bool kvlangXvalueNone(const kvlangXvalue_t *v) {
 static inline void kvlangXvalueZero(kvlangXvalue_t *v) {
     v->bytes = NULL;
     v->length = 0;
-    v->is_borrowed = 0;
 }
 
 /* langtype 原位指针 + 字节数；None → 空串 / 0。指针无 NUL 保证，勿当 C 串用。 */
@@ -226,12 +257,9 @@ static inline uint32_t xh_langtype_copy_of(const kvlangXvalue_t *v, char *buf,
 }
 /* 有界拷出完整 langtype（malloc，调用方 free）。None → ""。 */
 char *kvlangXvalueLangtypeDup(const kvlangXvalue_t *v);
-void kvlangXvalueFree(
-    kvlangXvalue_t *v); /* free 自持 data（借用读已拷贝为自持） */
+void kvlangXvalueRelease(kvlangXvalue_t *v);
 void kvlangXvalueSetBytes(kvlangXvalue_t *v, uint8_t *data,
-                          uint32_t len); /* 接管内存 */
-void kvlangXvalueMaterialize(
-    kvlangXvalue_t *v); /* 借用值落地为自持（存入跨指令结构前必调） */
+                          uint32_t len); /* 视图赋值 */
 int kvlangXvalueHead(const kvlangXvalue_t *v,
                      kvspaceHead_t *h); /* 完整 head；测试/外部用 */
 const char *kvlangXvalueKind(const kvlangXvalue_t *v); /* 返回 kind，None="" */

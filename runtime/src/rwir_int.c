@@ -69,13 +69,13 @@ int kvlangBuiltinAdd(kvlangFrame_t *f) {
     if (n == 2 && kvlangLangtypeIsChar(a.kind_id) && kvlangLangtypeIsChar(b.kind_id)) {
         kvlangXvalue_t r;
         if (kvlangBuiltinCharConcat(&in[0], &in[1], &r)) {
-            rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r);
+            rc = kvlangBuiltinWriteResult(f, &r);
         } else rc = kvlangBuiltinSetError(f, "TypeError: cannot concat %s with %s; convert encoding explicitly (char/utf8|char/utf32|char/ascii)", kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1]));
     } else if (n >= 2 && kvlangLangtypeIsNum(a.kind_id) && kvlangLangtypeIsNum(b.kind_id)) {
         kvlangXvalue_t r;
         if (kvlangLangtypeIsInt(a.kind_id) && kvlangLangtypeIsInt(b.kind_id)) narrow_int(a.kind_id, b.kind_id, kvlangScalarI64(a) + kvlangScalarI64(b), &r);
         else narrow_float(a.kind_id, b.kind_id, kvlangScalarF64(a) + kvlangScalarF64(b), &r);
-        rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r);
+        rc = kvlangBuiltinWriteResult(f, &r);
     } else rc = kvlangBuiltinSetError(f, "TypeError: expected numeric, got %s", n ? kvlangXvalueKind(&in[0]) : "none");
     kvlangBuiltinFreeInputs(in, n);
     return rc;
@@ -87,13 +87,13 @@ int kvlangBuiltinSub(kvlangFrame_t *f) {
     int rc;
     if (n == 1) {
         kvlangXvalue_t r; kvlangXvalueNewInt64(&r, -kvlangScalarI64(a));
-        rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r);
+        rc = kvlangBuiltinWriteResult(f, &r);
     } else if (n >= 2 && kvlangLangtypeIsInt(a.kind_id) && kvlangLangtypeIsInt(b.kind_id)) {
         kvlangXvalue_t r; narrow_int(a.kind_id, b.kind_id, kvlangScalarI64(a) - kvlangScalarI64(b), &r);
-        rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r);
+        rc = kvlangBuiltinWriteResult(f, &r);
     } else if (n >= 2 && kvlangLangtypeIsNum(a.kind_id) && kvlangLangtypeIsNum(b.kind_id)) {
         kvlangXvalue_t r; narrow_float(a.kind_id, b.kind_id, kvlangScalarF64(a) - kvlangScalarF64(b), &r);
-        rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r);
+        rc = kvlangBuiltinWriteResult(f, &r);
     } else rc = kvlangBuiltinSetError(f, "TypeError: expected numeric, got %s", n ? kvlangXvalueKind(&in[0]) : "none");
     kvlangBuiltinFreeInputs(in, n);
     return rc;
@@ -105,10 +105,10 @@ int kvlangBuiltinMul(kvlangFrame_t *f) {
     int rc;
     if (n >= 2 && kvlangLangtypeIsInt(a.kind_id) && kvlangLangtypeIsInt(b.kind_id)) {
         kvlangXvalue_t r; narrow_int(a.kind_id, b.kind_id, kvlangScalarI64(a) * kvlangScalarI64(b), &r);
-        rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r);
+        rc = kvlangBuiltinWriteResult(f, &r);
     } else if (n >= 2 && kvlangLangtypeIsNum(a.kind_id) && kvlangLangtypeIsNum(b.kind_id)) {
         kvlangXvalue_t r; narrow_float(a.kind_id, b.kind_id, kvlangScalarF64(a) * kvlangScalarF64(b), &r);
-        rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r);
+        rc = kvlangBuiltinWriteResult(f, &r);
     } else rc = kvlangBuiltinSetError(f, "TypeError: expected numeric, got %s", n ? kvlangXvalueKind(&in[0]) : "none");
     kvlangBuiltinFreeInputs(in, n);
     return rc;
@@ -122,10 +122,10 @@ int kvlangBuiltinDiv(kvlangFrame_t *f) {
     if (kvlangScalarF64(b) == 0) { rc = kvlangBuiltinSetError(f, "ZeroDivisionError: division by zero"); kvlangBuiltinFreeInputs(in, n); return rc; }
     if (kvlangLangtypeIsInt(a.kind_id) && kvlangLangtypeIsInt(b.kind_id)) {
         kvlangXvalue_t r; narrow_int(a.kind_id, b.kind_id, kvlangScalarI64(a) / kvlangScalarI64(b), &r);
-        rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r);
+        rc = kvlangBuiltinWriteResult(f, &r);
     } else {
         kvlangXvalue_t r; narrow_float(a.kind_id, b.kind_id, kvlangScalarF64(a) / kvlangScalarF64(b), &r);
-        rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r);
+        rc = kvlangBuiltinWriteResult(f, &r);
     }
     kvlangBuiltinFreeInputs(in, n);
     return rc;
@@ -142,7 +142,7 @@ int kvlangBuiltinMod(kvlangFrame_t *f) {
     int64_t bv = kvlangScalarI64(b);
     if (bv == 0) { rc = kvlangBuiltinSetError(f, "ZeroDivisionError: modulo by zero"); kvlangBuiltinFreeInputs(in, n); return rc; }
     kvlangXvalue_t r; narrow_int(a.kind_id, b.kind_id, kvlangScalarI64(a) % bv, &r);
-    rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r);
+    rc = kvlangBuiltinWriteResult(f, &r);
     kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
@@ -159,7 +159,7 @@ static int kvlangBuiltinBit(kvlangFrame_t *f, int op) {
     int64_t a = kvlangScalarI64(sa), b = kvlangScalarI64(sb);
     int64_t v = op == 0 ? a & b : op == 1 ? a | b : op == 2 ? a ^ b : op == 3 ? (a << (uint64_t)b) : (a >> (uint64_t)b);
     kvlangXvalue_t r; narrow_int(sa.kind_id, sb.kind_id, v, &r);
-    int rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r); kvlangBuiltinFreeInputs(in, n);
+    int rc = kvlangBuiltinWriteResult(f, &r);kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
 int kvlangBuiltinBitand(kvlangFrame_t *f) { return kvlangBuiltinBit(f, 0); }
@@ -183,7 +183,7 @@ static int kvlangBuiltinMathUnary(kvlangFrame_t *f, int op) {
     case 4: /* abs */ if (kvlangLangtypeIsFloat(sa.kind_id)) { narrow_float(sa.kind_id, sa.kind_id, fabs(x), &r); } else { int64_t iv = kvlangScalarI64(sa); narrow_int(sa.kind_id, sa.kind_id, iv < 0 ? -iv : iv, &r); } break;
     case 5: kvlangXvalueNewInt64(&r, x < 0 ? -1 : x > 0 ? 1 : 0); break;
     }
-    int rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r); kvlangBuiltinFreeInputs(in, n);
+    int rc = kvlangBuiltinWriteResult(f, &r);kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
 int kvlangBuiltinSqrt(kvlangFrame_t *f) { return kvlangBuiltinMathUnary(f, 0); }
@@ -198,7 +198,7 @@ int kvlangBuiltinPow(kvlangFrame_t *f) {
     kvlangScalar_t sa = kvlangXvalueScalar(&in[0]), sb = n >= 2 ? kvlangXvalueScalar(&in[1]) : SCALAR_NONE;
     if (n < 2 || !kvlangLangtypeIsNum(sa.kind_id) || !kvlangLangtypeIsNum(sb.kind_id)) { kvlangBuiltinSetError(f, "TypeError: expected numeric"); kvlangBuiltinFreeInputs(in, n); return -1; }
     kvlangXvalue_t r; kvlangXvalueNewFloat64(&r, pow(kvlangScalarF64(sa), kvlangScalarF64(sb)));
-    int rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r); kvlangBuiltinFreeInputs(in, n);
+    int rc = kvlangBuiltinWriteResult(f, &r);kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
 
@@ -216,7 +216,7 @@ static int kvlangBuiltinMaxMin(kvlangFrame_t *f, bool is_max) {
         bool take_a = (is_max && a >= b) || (!is_max && a <= b);
         narrow_float(sa.kind_id, sb.kind_id, take_a ? a : b, &r);
     } else { kvlangBuiltinSetError(f, "TypeError: max/min requires numeric, got %s and %s", kvlangXvalueKind(&in[0]), kvlangXvalueKind(&in[1])); kvlangBuiltinFreeInputs(in, n); return -1; }
-    int rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r); kvlangBuiltinFreeInputs(in, n);
+    int rc = kvlangBuiltinWriteResult(f, &r);kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
 int kvlangBuiltinMax(kvlangFrame_t *f) { return kvlangBuiltinMaxMin(f, true); }
@@ -239,7 +239,7 @@ static int kvlangBuiltinCastNum(kvlangFrame_t *f, const char *kind) {
     else if (tid == KVLANG_LT_FLOAT32) { float fv = (float)kvlangScalarF64(sa); uint8_t b[4]; memcpy(b, &fv, 4); kvlangXvalueNewTlv(&r, KVSPACE_KIND_FLOAT32, b, 4, 1); }
     else if (tid == KVLANG_LT_FLOAT64) kvlangXvalueNewFloat64(&r, kvlangScalarF64(sa));
     else { int64_t v = kvlangScalarI64(sa); narrow_int(tid, tid, v, &r); }
-    int rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r); kvlangBuiltinFreeInputs(in, n);
+    int rc = kvlangBuiltinWriteResult(f, &r);kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
 int kvlangBuiltinCastBool(kvlangFrame_t *f) { return kvlangBuiltinCastNum(f, KVSPACE_KIND_BOOL); }
@@ -261,7 +261,7 @@ static int kvlangBuiltinCastChar(kvlangFrame_t *f, const char *kind) {
     kvlangXvalue_t r;
     if (strcmp(kind, KVSPACE_KIND_CHAR) == 0) kvlangXvalueNewCharUtf32(&r, s);
     else kvlangXvalueNewCharKind(&r, kind, s);
-    int rc = kvlangBuiltinWriteResult(f, &r); kvlangXvalueFree(&r); free(s); kvlangBuiltinFreeInputs(in, n);
+    int rc = kvlangBuiltinWriteResult(f, &r);free(s); kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
 int kvlangBuiltinCastCharUtf32(kvlangFrame_t *f) { return kvlangBuiltinCastChar(f, KVSPACE_KIND_CHAR); }
