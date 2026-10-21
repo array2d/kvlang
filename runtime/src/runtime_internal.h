@@ -123,42 +123,9 @@ void kvlangLangtypeParse(const uint8_t *langtype, int32_t langtype_len,
 /* ── 基础类型 ──────────────────────────────────────────────────────── */
 
 typedef struct {
-    uint8_t *bytes; /* 视图：mmap 常驻 / arena / 显式 copy */
+    uint8_t *bytes; /* 视图：mmap / 借用池 / 行内字面量 / 显式 copy */
     uint32_t length;
 } kvlangXvalue_t;
-
-/* 指令级 bump arena：临时值在指令边界整体重置；函数级 arena 随函数表释放。
- * 构造 XValue 时由当前 arena 接管 codec 返回的堆缓冲（不逐值 free）。 */
-typedef struct kvlangArenaBlock kvlangArenaBlock;
-typedef struct {
-    kvlangArenaBlock *head;
-    void **owned; /* 由 arena 接管的 codec 缓冲 */
-    size_t nowned, capowned;
-} kvlangArena_t;
-
-extern kvlangArena_t *kvlangCurrentArena;
-void kvlangArenaInit(kvlangArena_t *a);
-void kvlangArenaReset(kvlangArena_t *a);
-void kvlangArenaDestroy(kvlangArena_t *a);
-void *kvlangArenaAlloc(kvlangArena_t *a, size_t n);
-char *kvlangArenaStrdup(kvlangArena_t *a, const char *s);
-void *kvlangArenaOwn(kvlangArena_t *a, void *p);
-/* 把视图拷进当前 arena（跨指令/跨后端池存活时用）。 */
-void kvlangXvalueCopyToArena(kvlangXvalue_t *v);
-/* 临时接管当前 arena（如函数绑定期的一次性值），离开时整体释放。 */
-typedef struct {
-    kvlangArena_t *saved;
-    kvlangArena_t arena;
-} kvlangArenaScope;
-static inline void kvlangArenaScopeEnter(kvlangArenaScope *s) {
-    s->saved = kvlangCurrentArena;
-    kvlangArenaInit(&s->arena);
-    kvlangCurrentArena = &s->arena;
-}
-static inline void kvlangArenaScopeLeave(kvlangArenaScope *s) {
-    kvlangArenaDestroy(&s->arena);
-    kvlangCurrentArena = s->saved;
-}
 
 typedef struct {
     char *key;
@@ -257,7 +224,12 @@ static inline uint32_t xh_langtype_copy_of(const kvlangXvalue_t *v, char *buf,
 }
 /* 有界拷出完整 langtype（malloc，调用方 free）。None → ""。 */
 char *kvlangXvalueLangtypeDup(const kvlangXvalue_t *v);
-void kvlangXvalueRelease(kvlangXvalue_t *v);
+void kvlangXvalueFree(kvlangXvalue_t *v);
+void kvlangXvalueCopy(kvlangXvalue_t *v);
+/* 标量 inline 编码到调用方缓冲：pow=5(headlen 32)、flags=0、a=b=0、
+ * langtype@18、body@32。与正典 codec 的字节一致性由 ctest scalar_encode 守护。 */
+uint32_t kvlangScalarEncode(const char *kind, const uint8_t *raw, uint32_t len,
+                            uint8_t *buf, uint32_t cap);
 void kvlangXvalueSetBytes(kvlangXvalue_t *v, uint8_t *data,
                           uint32_t len); /* 视图赋值 */
 int kvlangXvalueHead(const kvlangXvalue_t *v,

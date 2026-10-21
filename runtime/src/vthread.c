@@ -103,8 +103,8 @@ int kvlangVthreadSet(kvspace_t *kv, const char *vtid, const char *pc,
     kvlangKvPair_t pairs[2] = {{k1, v1}, {k2, v2}};
     char err[256];
     int rc = kvlangKvspaceSet(kv, pairs, 2, err, sizeof err);
-    kvlangXvalueRelease(&v1);
-    kvlangXvalueRelease(&v2);
+    kvlangXvalueFree(&v1);
+    kvlangXvalueFree(&v2);
     return rc;
 }
 
@@ -141,7 +141,7 @@ int kvlangVthreadSetDone(kvspace_t *kv, const char *vtid, const char *ret) {
     kvlangKvPair_t pair = {k, v};
     char err[256];
     int rc = kvlangKvspaceSet(kv, &pair, 1, err, sizeof err);
-    kvlangXvalueRelease(&v);
+    kvlangXvalueFree(&v);
     return rc;
 }
 
@@ -162,7 +162,7 @@ void kvlangVthreadSetError(kvspace_t *kv, const char *vtid, const char *pc,
     kvlangKvPair_t pairs[3] = {{pc_key, vpc}, {msg_key, vmsg}, {st_key, vst}};
     char err[256];
     kvlangKvspaceSet(kv, pairs, 3, err, sizeof err);
-    kvlangXvalueRelease(&vpc);
-    kvlangXvalueRelease(&vmsg);
-    kvlangXvalueRelease(&vst);
+    kvlangXvalueFree(&vpc);
+    kvlangXvalueFree(&vmsg);
+    kvlangXvalueFree(&vst);
 }

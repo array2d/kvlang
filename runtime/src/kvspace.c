@@ -106,6 +106,7 @@ int kvlangKvspaceSetChar(kvspace_t *k, const char *key, const char *s) {
     kvlangKvPair_t pair = {(char *)key, value};
     char err[256];
     int rc = kvlangKvspaceSet(k, &pair, 1, err, sizeof err);
+    kvlangXvalueFree(&value);
     return rc;
 }
 
@@ -194,9 +195,8 @@ int kvlangKvspaceWatch(kvspace_t *k, const char *key, const kvlangXvalue_t *targ
     if (kvspaceWatch(k->handle, key, t, tl, tick_ns, &d, &len) != 0)
         return -1;
     if (d && len) {
-        out->bytes = d;
+        out->bytes = d; /* 借用视图；调用方在同一指令内使用，不 free */
         out->length = len;
-        kvlangXvalueCopyToArena(out); /* Watch 结果跨后端借用池存活 */
     }
     return 0;
 }

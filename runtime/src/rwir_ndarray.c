@@ -41,9 +41,7 @@ int kvlangBuiltinNdarrayNumel(kvlangFrame_t *f) {
             n_el = kx.array_len;
         }
     }
-    kvlangXvalue_t r;
-    kvlangXvalueNewInt64(&r, n_el);
-    int rc = kvlangBuiltinWriteResult(f, &r);
+    int rc = kvlangBuiltinEmitInt64(f, n_el);
     return rc;
 }
 
@@ -58,9 +56,7 @@ int kvlangBuiltinNdarrayDim(kvlangFrame_t *f) {
         kvlangLangtypeParse(h.langtype, h.langtype_len, &kx);
         ndim = kx.ndim;
     }
-    kvlangXvalue_t r;
-    kvlangXvalueNewInt64(&r, ndim);
-    int rc = kvlangBuiltinWriteResult(f, &r);
+    int rc = kvlangBuiltinEmitInt64(f, ndim);
     return rc;
 }
 
@@ -89,6 +85,6 @@ int kvlangBuiltinNdarrayShape(kvlangFrame_t *f) {
     int32_t sd[1] = {ndim};
     kvlangXvalue_t r;
     kvlangXvalueNewTlvDims(&r, KVSPACE_KIND_INT64, raw, raw_len, sd, 1);
-    int rc = kvlangBuiltinWriteResult(f, &r);
+    int rc = kvlangBuiltinEmitResult(f, &r);
     return rc;
 }

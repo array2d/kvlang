@@ -121,6 +121,7 @@ static void format_array(const kvlangXvalue_t *v, char **out) {
     for (int i = 0; i < n; i++) {
         kvlangXvalue_t e; kvlangXvalueElementAt(v, i, &e);
         kvlangDisplay(&e, &parts[i]);
+        kvlangXvalueFree(&e);
         total += strlen(parts[i]) + (i ? 2 : 0);
     }
     char *s = malloc(total + 1);
@@ -200,6 +201,41 @@ int kvlangBuiltinWriteResult(kvlangFrame_t *f, const kvlangXvalue_t *result) {
     }
     kvlangBuiltinNextPc(f);
     return 0;
+}
+
+int kvlangBuiltinEmitResult(kvlangFrame_t *f, kvlangXvalue_t *v) {
+    int rc = kvlangBuiltinWriteResult(f, v);
+    kvlangXvalueFree(v);
+    return rc;
+}
+
+static int emit_inline_scalar(kvlangFrame_t *f, const char *kind,
+                              const uint8_t *raw, uint32_t len) {
+    uint8_t buf[64];
+    uint32_t n = kvlangScalarEncode(kind, raw, len, buf, sizeof buf);
+    kvlangXvalue_t v = {buf, n};
+    return kvlangBuiltinWriteResult(f, &v); /* 栈缓冲，不 free */
+}
+
+int kvlangBuiltinEmitInt64(kvlangFrame_t *f, int64_t n) {
+    uint8_t r[8];
+    for (int i = 0; i < 8; i++)
+        r[i] = (uint8_t)((uint64_t)n >> (i * 8));
+    return emit_inline_scalar(f, KVSPACE_KIND_INT64, r, 8);
+}
+
+int kvlangBuiltinEmitFloat64(kvlangFrame_t *f, double d) {
+    uint64_t u;
+    memcpy(&u, &d, 8);
+    uint8_t r[8];
+    for (int i = 0; i < 8; i++)
+        r[i] = (uint8_t)(u >> (i * 8));
+    return emit_inline_scalar(f, KVSPACE_KIND_FLOAT64, r, 8);
+}
+
+int kvlangBuiltinEmitBool(kvlangFrame_t *f, bool b) {
+    uint8_t r = b ? 1 : 0;
+    return emit_inline_scalar(f, KVSPACE_KIND_BOOL, &r, 1);
 }
 
 int kvlangBuiltinSetError(kvlangFrame_t *f, const char *fmt, ...) {

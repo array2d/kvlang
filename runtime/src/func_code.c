@@ -52,7 +52,11 @@ static void row_free(kvlangCodeRow_t *row) {
     free(row->opcode);
     free(row->def_read_sig);
     free(row->def_write_sig);
-    /* descriptor / type / literal 归函数 arena，随 code_free 的 arena 销毁整体释放。 */
+    for (int i = 0; i < row->nr + row->nw; i++) {
+        free(row->cell[i].descriptor);
+        free(row->cell[i].type);
+        kvlangXvalueFree(&row->cell[i].literal);
+    }
     free(row->cell);
     free(row);
 }
@@ -63,7 +67,6 @@ static void code_free(kvlangFuncCode_t *code) {
     for (size_t i = 0; i < code->rows_cap; i++)
         row_free(code->rows[i]);
     free(code->rows);
-    kvlangArenaDestroy(&code->arena);
     free(code->func_dir);
     free(code);
 }
@@ -95,7 +98,6 @@ static kvlangFuncCode_t *func_code_get(kvlangFuncCache_t *c,
     }
     kvlangFuncCode_t *code = calloc(1, sizeof *code);
     code->func_dir = canon;
-    kvlangArenaInit(&code->arena);
     c->keys[slot - c->vals] = strdup(canon);
     *slot = code;
     c->count++;
@@ -121,17 +123,14 @@ static int parse_cell(kvspace_t *kv, const char *func_dir, int s0, int s1,
         snprintf(err, err_cap, "Decode: missing operand %s", slot);
         return -1;
     }
-    cell->type = type ? kvlangArenaStrdup(kvlangCurrentArena, type) : NULL;
-    free(type);
+    /* 行加载期一次性分配，code_free 统一释放。 */
+    cell->type = type;
     if (is_literal) {
         cell->is_literal = true;
-        kvlangXvalueCopyToArena(&literal);
+        kvlangXvalueCopy(&literal); /* 字面量是 GetMember 的借用视图，拷成行内副本 */
         cell->literal = literal;
     } else {
-        cell->descriptor = descriptor
-                               ? kvlangArenaStrdup(kvlangCurrentArena, descriptor)
-                               : NULL;
-        free(descriptor);
+        cell->descriptor = descriptor;
         cell->key_absolute = is_absolute_key;
     }
     return 0;
@@ -280,6 +279,7 @@ static int bind_row(kvspace_t *kv, kvlangFrameCtx_t *ctx, int s0,
         for (int j = 0; j < row->nw; j++)
             if (key_under(b->cell[i].key, b->cell[row->nr + j].key)) {
                 b->cell[i].pin = true;
+                b->has_pin = true;
                 break;
             }
     free(stack);

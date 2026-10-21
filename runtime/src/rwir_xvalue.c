@@ -138,7 +138,7 @@ int kvlangBuiltinXvAt(kvlangFrame_t *f) {
         const uint8_t *body = arr.bytes + h.body_offset;
         kvlangXvalueNewTlv(&e, kb, body + flat * sz, (uint32_t)sz, 1);
     }
-    int rc = kvlangBuiltinWriteResult(f, &e);
+    int rc = kvlangBuiltinEmitResult(f, &e);
     return rc;
 }
 
@@ -229,7 +229,7 @@ int kvlangBuiltinXvSet(kvlangFrame_t *f) {
     memcpy(nb + flat * sz, vb, (size_t)c);
     kvlangXvalue_t nv;
     kvlangXvalueNewTlvDims(&nv, k, nb, (uint32_t)ablen, kx.dims, kx.ndim);
-    int rc = kvlangBuiltinWriteResult(f, &nv);
+    int rc = kvlangBuiltinEmitResult(f, &nv);
     free(nb);
     return rc;
 }
@@ -285,7 +285,7 @@ int kvlangBuiltinXvReshape(kvlangFrame_t *f) {
     kvlangXvalue_t nv;
     kvlangXvalueNewTlvDims(&nv, k, body, (uint32_t)xh_content_len_of(&in[0]), dims,
                            ndims);
-    int rc = kvlangBuiltinWriteResult(f, &nv);
+    int rc = kvlangBuiltinEmitResult(f, &nv);
     kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
@@ -314,7 +314,7 @@ int kvlangBuiltinXvReinterpret(kvlangFrame_t *f) {
     }
     kvlangXvalue_t nv;
     kvlangXvalueNewTlvDims(&nv, nkx.kind, body, (uint32_t)blen, nkx.dims, ndim);
-    int rc = kvlangBuiltinWriteResult(f, &nv);
+    int rc = kvlangBuiltinEmitResult(f, &nv);
     free(ke);
     kvlangBuiltinFreeInputs(in, n);
     return rc;
@@ -331,7 +331,7 @@ int kvlangBuiltinXvLangtype(kvlangFrame_t *f) {
         xv_head_langtype_str(&h, ke, sizeof ke);
     kvlangXvalue_t r;
     kvlangXvalueNewCharUtf8(&r, ke);
-    int rc = kvlangBuiltinWriteResult(f, &r);
+    int rc = kvlangBuiltinEmitResult(f, &r);
     return rc;
 }
 
@@ -344,14 +344,12 @@ int kvlangBuiltinXvBodyLen(kvlangFrame_t *f) {
     int64_t bl = 0;
     if (xv_head1(f, &h) == 0)
         bl = h.body_len;
-    kvlangXvalue_t r;
-    kvlangXvalueNewInt64(&r, bl);
-    int rc = kvlangBuiltinWriteResult(f, &r);
+    int rc = kvlangBuiltinEmitInt64(f, bl);
     return rc;
 }
 
-/* 写第 i 个写参槽（多输出用；kvlangBuiltinWriteResult 只写 writes[0]）。 */
-static void xv_write_slot(kvlangFrame_t *f, int i, const kvlangXvalue_t *v) {
+/* 写第 i 个写参槽并释放构造值（多输出用；不接受借用视图）。 */
+static void xv_write_slot(kvlangFrame_t *f, int i, kvlangXvalue_t *v) {
     char *owned = NULL;
     const char *fr = f->frame_root;
     if (!fr) {
@@ -362,6 +360,7 @@ static void xv_write_slot(kvlangFrame_t *f, int i, const kvlangXvalue_t *v) {
     kvlangKvPair_t pair = {key, *v};
     char err[256];
     kvlangKvspaceSet(f->kvspace, &pair, 1, err, sizeof err);
+    kvlangXvalueFree(v);
     free(key);
     free(owned);
 }
