@@ -52,7 +52,8 @@ static char *original_absolute_arg(kvlangFrame_t *f, int idx) {
 
 static char *path_arg(kvlangFrame_t *f, int idx, const kvlangXvalue_t *in) {
     const char *name = f->instruction->reads[idx].name;
-    if (name[0] == '/') {
+    /* 字面量无槽（name=NULL）：只有绝对路径描述符才可能是槽路径。 */
+    if (name && name[0] == '/') {
         if (strncmp(name, "/vthread/", 9) != 0)
             return strdup(name);
         char *source = original_absolute_arg(f, idx);
@@ -103,6 +104,8 @@ static char *member_path(kvlangFrame_t *f, const kvlangXvalue_t *in, int n,
             return member_not_container(base, err, errsz);
         bp = kvlangXvaluePtrTarget(base);
     } else if (base_is_container(base)) {
+        /* 容器字面量（{...}）layout 只允许作赋值右值，不会出现在读参里，
+         * 故容器 base 必有槽名。 */
         char *fr = kvlangKeytreeFrameRoot(f->pc);
         bp = kvlangBuiltinResolveWriteSlot(f->kvspace, fr,
                                            f->instruction->reads[0].name);
@@ -126,7 +129,7 @@ static char *member_path(kvlangFrame_t *f, const kvlangXvalue_t *in, int n,
 int kvlangBuiltinKvspaceGet(kvlangFrame_t *f) {
     kvlangXvalue_t in[MAX_PARAMS];
     int n = kvlangBuiltinReadInputs(f, in, MAX_PARAMS);
-    char merr[512];
+    char merr[512] = {0}; /* 单读参走 path_arg，不填 merr */
     char *key = f->instruction->read_count >= 2
                     ? member_path(f, in, n, merr, sizeof merr)
                     : (n >= 1 ? path_arg(f, 0, in) : NULL);
@@ -169,6 +172,8 @@ int kvlangBuiltinKvspaceSet(kvlangFrame_t *f) {
     kvlangXvalue_t *val;
     char merr[512];
     if (f->instruction->read_count >= 3) {
+        /* 字面量 base（只有字符串可达）无槽可查：memhead 检查跳过，
+         * 成员键由 member_path 从值解析。 */
         const char *base = f->instruction->reads[0].name;
         char *fr = kvlangKeytreeFrameRoot(f->pc);
         int ok = kvlangBuiltinCheckMemoryHead(f->kvspace, fr, base);
@@ -246,6 +251,8 @@ static char *resolve_path_arg(kvlangFrame_t *f, int idx,
     char *p = path_arg(f, idx, in);
     if (p)
         return p;
+    if (!f->instruction->reads[idx].name)
+        return NULL; /* 字面量且不是绝对路径：没有槽路径，调用方报 TypeError */
     char *fr = kvlangKeytreeFrameRoot(f->pc);
     char *base = kvlangBuiltinResolveWriteSlot(f->kvspace, fr,
                                                f->instruction->reads[idx].name);
@@ -324,7 +331,9 @@ int kvlangBuiltinKvlangAbs(kvlangFrame_t *f) {
 /* 解析 obj/map 成员目录 key（<frame>/<name>.），供 kvspace·list/listlen/listn 共用。 */
 static char *list_dir_key(kvlangFrame_t *f, kvlangXvalue_t *in, int n) {
     char *key = n >= 1 ? path_arg(f, 0, in) : NULL;
-    if (!key && f->instruction->read_count >= 1) {
+    if (!key && f->instruction->read_count >= 1 &&
+        f->instruction->reads[0].name) {
+        /* 字面量无槽：list 长度为 0 / listat 为 None（调用方按 NULL key 处理）。 */
         const char *name = f->instruction->reads[0].name;
         char *fr = kvlangKeytreeFrameRoot(f->pc);
         char *base = kvlangBuiltinResolveWriteSlot(f->kvspace, fr, name);

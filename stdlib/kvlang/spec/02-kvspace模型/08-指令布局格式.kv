@@ -58,9 +58,9 @@ langtype 串），无 `{param}` 命名键、无实现指令行——跨 runtime 
 opcode 槽由 layout 按目标写 `rwir` 或 `rwfunc`；两者的 body 均为 5 字节 counts 加目标名。
 
 `/lib` 中的读写槽是共享的布局模板。runtime 首次解码执行帧的 `[s0,±j]` 时，在同坐标写入物理
-`*T` XValue，body 为目标 KV key；此后从执行帧读取该指针并回读目标值。内联字面量先落在该帧的
-`‥operand[s0,±j]` KV key，再由物理槽指向它。帧内槽覆盖 extindex 的读取结果，不修改共享模板；
-opcode `[s0,0]` 仍从 `/lib` 读取。
+`*T` XValue，body 为目标 KV key；此后从执行帧读取该指针并回读目标值。**内联字面量不落执行
+帧**：它没有槽也没有指针，runtime 直接取模板该槽的值作为读参。帧内槽覆盖 extindex 的读取
+结果，不修改共享模板；opcode `[s0,0]` 仍从 `/lib` 读取。
 
 **`rwir` 值的 body 格式（唯一）**：`counts` = `[nr:u16 LE][nw:u16 LE][dynamic:u8]`（5 字节，指令槽恒
 `0,0,0`）+ 槽文本；文本是 opcode 名，或变量引用（相对指针 `*[0,±k]`）。已知目标类型的读写槽

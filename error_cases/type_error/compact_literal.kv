@@ -1,0 +1,8 @@
+// expected
+//   TypeError: array.compact requires a scattered array, got [2]int64
+// 源已是 compact 值（数组字面量经 layout 物化为临时槽），没有散 key 目录可打包；
+// 旧行为静默空转（dst 不写），现显式报错（p1：不容许奇怪的成功）。
+rwfunc test() -> () {
+	array·compact([1, 2]) -> c
+	println(c)
+}

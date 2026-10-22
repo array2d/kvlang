@@ -44,7 +44,7 @@ stringkeymap 元素的成员名是坐标段，物理 key 形如 `m·[i]`（一�
 | rwir | 方向 | 语义 |
 |------|------|------|
 | `array·scatter(arr) -> dst` | compact → stringkeymap | 连续数组拆成 `dst·[0]…dst·[N-1]` 独立 key |
-| `array·compact(arr) -> dst` | stringkeymap → compact | 读散 key 打包成连续数组 |
+| `array·compact(arr) -> dst` | stringkeymap → compact | 读散 key 打包成连续数组；源须是散 key 形态（map 标记），已是 compact 值（数组/字符串）报 TypeError |
 | `array·append` / `array·slice` | 变长 | 作用于 compact 时先自动 scatter |
 
 ## slice 与带洞数组

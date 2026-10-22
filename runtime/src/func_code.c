@@ -420,7 +420,8 @@ static bool key_under(const char *key, const char *base) {
            0;
 }
 
-/* 帧层绑定：字面量落回帧内 operand 槽；描述符按本帧根解析成绝对 key。 */
+/* 帧层绑定：字面量只留行内值（不落 operand 槽、无 key/off）；
+ * 描述符按本帧根解析成绝对 key。 */
 static int bind_row(kvspace_t *kv, kvlangFrameCtx_t *ctx, int s0,
                     kvlangCodeRow_t *row, kvlangRowBind_t *b, char *err,
                     uint32_t err_cap) {
@@ -431,31 +432,23 @@ static int bind_row(kvspace_t *kv, kvlangFrameCtx_t *ctx, int s0,
     for (int i = 0; i < n; i++) {
         kvlangOperand_t *src = &row->cell[i];
         kvlangBoundCell_t *cell = &b->cell[i];
+        cell->type = src->type ? strdup(src->type) : NULL;
         if (src->is_literal) {
             cell->literal = &src->literal;
-            char slot[48];
-            snprintf(slot, sizeof slot, "[%d,%d]", s0, src->s1);
-            cell->key = kvlangStringFormat("%s%soperand%s", stack,
-                                           RUNTIME_MEMBER_SEP, slot);
-            kvlangKvPair_t pair = {cell->key, src->literal};
-            if (kvlangKvspaceSet(kv, &pair, 1, err, err_cap) != 0)
-                goto fail;
-            cell->type = src->type ? strdup(src->type) : NULL;
-        } else {
-            cell->type = src->type ? strdup(src->type) : NULL;
-            if (src->key_absolute)
-                cell->key = strdup(src->descriptor);
-            else
-                cell->key = kvlangRwirOperandTarget(kv, ctx->frame_root,
-                                                    src->descriptor);
+            continue;
         }
+        if (src->key_absolute)
+            cell->key = strdup(src->descriptor);
+        else
+            cell->key = kvlangRwirOperandTarget(kv, ctx->frame_root,
+                                                src->descriptor);
         if (!cell->key) {
             snprintf(err, err_cap,
                      "Runtime: cannot resolve operand %d at [%d,0]", i, s0);
             goto fail;
         }
         /* typed 读视图的 kind id 在绑定期解析一次，热路径不再扫 langtype 表。 */
-        if (!cell->literal && cell->type && cell->type[0]) {
+        if (cell->type && cell->type[0]) {
             int tid = kvlangLangtypeId(cell->type, strlen(cell->type));
             if (kvlangLangtypeIsNum(tid) || tid == KVLANG_LT_BOOL) {
                 cell->coerce_tid = tid;
@@ -481,14 +474,17 @@ static int bind_row(kvspace_t *kv, kvlangFrameCtx_t *ctx, int s0,
         b->body = slot;
     }
     /* 写槽会原地改写 key：同 key 或其后代的读视图须在执行前固化。
-     * 绑定期判定一次，热路径只多一个 flag 判断。 */
-    for (int i = 0; i < row->nr; i++)
+     * 绑定期判定一次，热路径只多一个 flag 判断。字面量无槽，不可能被覆盖。 */
+    for (int i = 0; i < row->nr; i++) {
+        if (b->cell[i].literal)
+            continue;
         for (int j = 0; j < row->nw; j++)
             if (key_under(b->cell[i].key, b->cell[row->nr + j].key)) {
                 b->cell[i].pin = true;
                 b->has_pin = true;
                 break;
             }
+    }
     free(stack);
     b->bound = true;
     return 0;

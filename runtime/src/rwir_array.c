@@ -356,9 +356,24 @@ int kvlangBuiltinCompact(kvlangFrame_t *f) {
     if (f->instruction->read_count == 0 || f->instruction->write_count == 0)
         return kvlangBuiltinSetError(
             f, "TypeError: array.compact requires read and write params");
+    /* 源必须是散 key 形态（map 标记）。已经是 compact 值（数组/字符串）就没有目录
+     * 可打包：显式拒绝，不静默空转。 */
+    kvlangXvalue_t sin[1];
+    int sn = kvlangBuiltinReadInputs(f, sin, 1);
+    if (sn >= 1 && !kvlangXvalueNone(&sin[0]) &&
+        !kvlangKindIsMap(kvlangXvalueKind(&sin[0]))) {
+        char lt[256];
+        xh_langtype_copy_of(&sin[0], lt, sizeof lt);
+        return kvlangBuiltinSetError(
+            f, "TypeError: array.compact requires a scattered array, got %s",
+            lt);
+    }
+    const char *src_name = f->instruction->reads[0].name;
+    if (!src_name)
+        return kvlangBuiltinSetError(
+            f, "TypeError: array.compact requires a scattered array variable");
     char *fr = kvlangKeytreeFrameRoot(f->pc);
-    char *src =
-        kvlangBuiltinResolveWriteSlot(f->kvspace, fr, f->instruction->reads[0].name);
+    char *src = kvlangBuiltinResolveWriteSlot(f->kvspace, fr, src_name);
     /* ListLen 给出元素数，逐元素读；省掉结尾那一次“再探一个空槽”的后端调用。 */
     char *cdir = kvlangKeytreeMember(src, "");
     int ccnt = 0;

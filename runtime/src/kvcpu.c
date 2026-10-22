@@ -64,7 +64,7 @@ static void pinned_free(kvlangRowBind_t *bind, int nr, kvlangParam_t *reads) {
     if (!bind->has_pin)
         return;
     for (int i = 0; i < nr; i++)
-        if (bind->cell[i].pin && !bind->cell[i].literal)
+        if (bind->cell[i].pin) /* 字面量不可能 pin（无槽可覆盖） */
             kvlangXvalueFree(&reads[i].value);
 }
 
@@ -243,13 +243,13 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
         for (int i = 0; i < row->nr; i++) {
             reads[i].name = bind->cell[i].key;
             reads[i].type = bind->cell[i].type;
-            reads[i].is_address = true;
             if (bind->cell[i].literal) {
-                /* 字面量：值已在行内（帧绑定时已落回 operand 槽，路径语义不变），
-                 * 直接借用，省掉每步一次 Get。 */
+                /* 字面量：值只在行内，无槽、无地址——name 为 NULL、
+                 * is_address 保持 false，handler 按值参数处理。 */
                 reads[i].value = *bind->cell[i].literal;
                 continue;
             }
+            reads[i].is_address = true;
             int lr = operand_load(kv, &bind->cell[i], &reads[i].value);
             if (lr != 0) {
                 exec_err =
