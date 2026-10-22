@@ -76,6 +76,8 @@ if(NOT APPLE)
     add_test(NAME pause_resume COMMAND bash "${CMAKE_SOURCE_DIR}/tests/pause_resume.sh")
     add_test(NAME layout_reject COMMAND bash "${CMAKE_SOURCE_DIR}/tests/layout_reject.sh")
     add_test(NAME coercion COMMAND bash "${CMAKE_SOURCE_DIR}/tests/coercion.sh")
+    add_test(NAME dyn_specialize COMMAND bash "${CMAKE_SOURCE_DIR}/tests/dyn_specialize.sh")
+    add_test(NAME specialize_gate COMMAND bash "${CMAKE_SOURCE_DIR}/tests/specialize_gate.sh")
     set_tests_properties(getmember_siblings kvset_invalid_head_shm pc_kvspace_source_shm crash_resume_shm param_address_shm delegate_shm scalar_encode
         PROPERTIES ENVIRONMENT "KVSPACE_BACKEND_PATH=${KVSPACE_LIB_DIR};KVLANG_TEST_SCHEME=shm")
     set_tests_properties(kvset_invalid_head_fs pc_kvspace_source_fs crash_resume_fs param_address_fs
@@ -92,4 +94,8 @@ if(NOT APPLE)
         PROPERTIES ENVIRONMENT "KVSPACE_BACKEND_PATH=${KVSPACE_LIB_DIR};KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout")
     set_tests_properties(coercion
         PROPERTIES ENVIRONMENT "KVSPACE_BACKEND_PATH=${KVSPACE_LIB_DIR};KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/kvlang")
+    set_tests_properties(dyn_specialize
+        PROPERTIES ENVIRONMENT "KVSPACE_BACKEND_PATH=${KVSPACE_LIB_DIR};KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/kvlang")
+    set_tests_properties(specialize_gate
+        PROPERTIES ENVIRONMENT "KVSPACE_BACKEND_PATH=${KVSPACE_LIB_DIR};KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout")
 endif()

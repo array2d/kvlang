@@ -1,0 +1,7 @@
+// 动态操作数走通用实现：非数值（bool）参与算术 → TypeError。
+rwfunc test() -> () {
+	a = 0
+	a = true
+	b = a + 1
+	println("b", b)
+}

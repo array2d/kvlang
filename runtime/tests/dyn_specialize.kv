@@ -1,0 +1,32 @@
+// 特化 opcode + 动态操作数：实际 kind 决定运算，通用实现兜底（[[赋值转换]]）。
+// 期望输出见 dyn_specialize.sh。
+rwfunc test() -> () {
+	a = 0
+	b = 0
+	a = float64(1.5)
+	b = float64(2.5)
+	c = a + b
+	println("f64add", c, xv·langtype(c))
+	a = int8(5)
+	b = int8(6)
+	d = a + b
+	println("i8add", d, xv·langtype(d))
+	x:int64 = 2
+	y:int64 = 3
+	e = x + y
+	println("typed", e, xv·langtype(e))
+	p = 1.5
+	q = 1.5
+	p = int64(2)
+	q = int64(3)
+	r = p + q
+	println("intviaf64", r, xv·langtype(r))
+	s = 0
+	t = 0
+	s = float64(5.0)
+	t = float64(2.0)
+	u = s - t
+	v = s ÷ t
+	w = s < t
+	println("sub", u, "div", v, "lt", w)
+}
