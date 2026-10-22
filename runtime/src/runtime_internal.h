@@ -49,11 +49,12 @@ typedef struct {
 extern int kvspaceResolveRef(void *h, const char *key, kvspaceRef_t *ref);
 extern int kvspaceGetByRef(void *h, kvspaceRef_t *ref, const char *key_fallback,
                            uint8_t **out, uint32_t *out_len);
-/* 整值写 by cached ref；ref 失效时后端内部回退并重解析。 */
+/* 局部写 by cached ref（只写 [offset, offset+len)）；失败时调用方回退整值写。 */
 extern int kvspaceSetPartByRef(void *h, kvspaceRef_t *ref,
                                const char *key_fallback, uint32_t offset,
                                const uint8_t *buf, uint32_t buf_len, char *err,
                                uint32_t err_cap);
+/* 整值写 by cached ref；ref 失效时后端内部回退并重解析。 */
 extern int kvspaceSetValueByRef(void *h, kvspaceRef_t *ref,
                                 const char *key_fallback,
                                 const uint8_t *value, uint32_t value_len,
@@ -802,5 +803,12 @@ int kvlangRuntimeExecuteKvspace(kvspace_t *kv, const char *funcname,
 /* ── logx ──────────────────────────────────────────────────────────── */
 
 void kvlangLogDebug(const char *fmt, ...);
+/* 热路径日志：内联 level 判断挡住可变参数准备（默认 warn 下零调用）。 */
+extern __attribute__((visibility("hidden"))) int kvlangLogDebugOn;
+#define KV_LOG_DEBUG(...)                                                      \
+    do {                                                                       \
+        if (kvlangLogDebugOn)                                                  \
+            kvlangLogDebug(__VA_ARGS__);                                       \
+    } while (0)
 void kvlangLogInfo(const char *fmt, ...);
 void kvlangLogError(const char *fmt, ...);

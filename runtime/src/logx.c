@@ -26,6 +26,12 @@ static int kvlangLogLevel(void) {
     return cached;
 }
 
+__attribute__((visibility("hidden"))) int kvlangLogDebugOn;
+
+__attribute__((constructor)) static void kvlang_log_init(void) {
+    kvlangLogDebugOn = kvlangLogLevel() <= 0;
+}
+
 void kvlangLogDebug(const char *fmt, ...) {
     if (kvlangLogLevel() > 0) return;
     fprintf(stderr, "%s: ", executable_name());

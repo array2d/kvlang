@@ -97,7 +97,7 @@ static char *frame_func_dir(kvspace_t *kv, const char *frame_root) {
     return dir;
 }
 
-int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
+__attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
                            char **out_pc) {
     if (out_pc)
         *out_pc = NULL;
@@ -287,7 +287,7 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
         kvlangRwirInst_t inst = {row->opcode, row->opcode_id, reads,
                                  row->nr,     writes,         row->nw,
                                  row->nw ? write_offs : NULL};
-        kvlangLogDebug("[%s] PC=%s OP=%s R=%d W=%d", vtid, cur,
+        KV_LOG_DEBUG("[%s] PC=%s OP=%s R=%d W=%d", vtid, cur,
                        inst.opcode ? inst.opcode : "(empty)", inst.read_count,
                        inst.write_count);
 
