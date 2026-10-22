@@ -671,6 +671,7 @@ pub fn write_func(
     sigs: &lower::SigTable,
 ) -> Result<(), String> {
     let type_map = lower::infer_types(fn_);
+    let declared = lower::declared_types(fn_);
     let mut diags = lower::validate_writes(fn_, pkg, &type_map, structs, sigs);
     diags.extend(lower::specialize(fn_, &type_map));
     for d in &diags {
@@ -755,7 +756,8 @@ pub fn write_func(
             (i as i32) + 1,
             inst,
             &labels,
-            &type_map,
+            &declared,
+            structs,
             &param_coord,
             &param_langtype,
             pkg,
@@ -907,7 +909,8 @@ fn write_linear_inst(
     n: i32,
     s: &Instruction,
     labels: &HashMap<String, i32>,
-    type_map: &HashMap<String, String>,
+    declared: &HashMap<String, String>,
+    structs: &lower::StructTable,
     params: &HashMap<String, String>,
     param_langtype: &HashMap<String, String>,
     pkg: &str,
@@ -960,7 +963,7 @@ fn write_linear_inst(
             .unwrap_or(r.as_str());
         let ty = param_langtype
             .get(r)
-            .or_else(|| type_map.get(r))
+            .or_else(|| declared.get(r))
             .map(String::as_str)
             .unwrap_or("");
         pairs.push((
@@ -971,13 +974,14 @@ fn write_linear_inst(
     for (j, w) in s.writes.iter().enumerate() {
         let orig = w.as_str();
         let wv = params.get(orig).map(String::as_str).unwrap_or(orig);
+        let resolved = lower::resolve_slot_type(orig, declared, structs, declared);
         let ty = s
             .write_types
             .get(j)
             .map(String::as_str)
             .filter(|t| !t.is_empty())
             .or_else(|| param_langtype.get(orig).map(String::as_str))
-            .or_else(|| type_map.get(orig).map(String::as_str))
+            .or_else(|| resolved.as_deref())
             .unwrap_or("");
         pairs.push((
             format!("{prefix}/[{n},{}]", j + 1),

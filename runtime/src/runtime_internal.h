@@ -102,6 +102,7 @@ extern int kvspaceXhNewSlack(int elem, const uint8_t *data, uint64_t data_len,
                              uint64_t cap, uint8_t **out, uint64_t *out_len);
 extern int kvspaceNewBool(uint8_t v, uint8_t **out, uint32_t *out_len);
 extern int kvspaceNewInt64(int64_t v, uint8_t **out, uint32_t *out_len);
+
 extern int kvspaceNewFloat64(double v, uint8_t **out, uint32_t *out_len);
 
 /* ── 数值上限 ──────────────────────────────────────────────────────── */
@@ -237,6 +238,7 @@ void kvlangXvalueCopy(kvlangXvalue_t *v);
 __attribute__((visibility("hidden"))) uint32_t
 kvlangSlackEncodeChar(const uint8_t *raw, uint32_t len, uint32_t cap,
                       uint8_t *buf, uint32_t bufsize);
+
 uint32_t kvlangScalarEncode(const char *kind, const uint8_t *raw, uint32_t len,
                             uint8_t *buf, uint32_t cap);
 void kvlangXvalueSetBytes(kvlangXvalue_t *v, uint8_t *data,
@@ -349,6 +351,37 @@ typedef struct {
     int32_t length;
 } kvlangScalar_t;
 kvlangScalar_t kvlangXvalueScalar(const kvlangXvalue_t *v);
+/* 标量转换（唯一转换路径，[[赋值转换]]）：target 为数值 kind id。
+ * 成功返回 0，out 指向 buf 上的标量编码；失败 -1（None/非数值）。 */
+__attribute__((visibility("hidden"))) int
+kvlangScalarCast(int target_id, kvlangScalar_t s, uint8_t *buf, size_t cap,
+                 kvlangXvalue_t *out);
+
+/* 按声明类型 type 转换 v（仅数值/布尔/字符等标量目标）；成功 out 是 v 或 buf 视图。 */
+__attribute__((visibility("hidden"))) int
+kvlangXvalueCoerce(const char *type, const kvlangXvalue_t *v, uint8_t *buf,
+                   size_t cap, kvlangXvalue_t *out);
+
+/* 声明类型 ty 的元素/成员值 kind（`[]T`/`[N]T` → T，map `k·v` → v）；非容器 NULL。 */
+static inline const char *kvlangDeclElemKind(const char *ty, char *buf,
+                                             size_t cap) {
+    if (!ty || !ty[0] || !strchr(ty, '['))
+        return NULL;
+    const char *p = strstr(ty, MEMBER_SEP);
+    if (p)
+        p += MEMBER_SEP_LEN;
+    else {
+        p = strchr(ty, ']');
+        if (!p)
+            return NULL;
+        p++;
+    }
+    /* 嵌套数组元素（[][]T 的 []T）不在此转换，交给各自 builtin。 */
+    if (!p[0] || p[0] == '[' || strchr(p, '[') || strlen(p) >= cap)
+        return NULL;
+    snprintf(buf, cap, "%s", p);
+    return buf;
+}
 int64_t kvlangScalarReadInt64(int id, const uint8_t *body);
 double kvlangScalarReadFloat64(int id, const uint8_t *body);
 uint64_t kvlangScalarReadUint64(int id, const uint8_t *body);
@@ -655,6 +688,13 @@ typedef struct {
     char **out_pc;   /* ExecuteMode 的 out 参数（仅判空） */
 } kvlangFrame_t;
 
+/* 写侧转换出口：失败即置 TypeError；CoerceAll 供数组字面量逐元素转换。 */
+__attribute__((visibility("hidden"))) int
+kvlangCoerceAssign(kvlangFrame_t *f, const char *type, const kvlangXvalue_t *v,
+                   uint8_t *buf, size_t cap, kvlangXvalue_t *out);
+__attribute__((visibility("hidden"))) int
+kvlangCoerceAll(kvlangFrame_t *f, const char *type, const kvlangXvalue_t *in,
+                int n, uint8_t (*bufs)[64], kvlangXvalue_t *out);
 /* 定长标量写：命中 body 快路径则原地写并 NextPc，返回 1；未命中返回 0。
  * 供 emit_inline_scalar 与各特化 handler 共用。 */
 __attribute__((visibility("hidden"))) int

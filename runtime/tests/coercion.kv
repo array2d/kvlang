@@ -1,0 +1,35 @@
+// typed 槽写侧转换（[[赋值转换]]）：声明类型决定写入 kind。
+// 动态 kvspace·set 无静态目标类型，按原 kind 写入。
+struct S { v:int8 = 0 }
+rwfunc test() -> () {
+	v:any = 200
+	x:int8 = v
+	println("i8", x)
+	y:uint8 = v
+	println("u8", y)
+	f:float32 = 0.1
+	println("f32", f)
+	g:float64 = 0.1
+	println("f64", g)
+	a:[]int8 = [v, 2]
+	println("arr", a[0], a[1])
+	a[0] = v
+	println("set", a[0])
+	a = array·append(a, v)
+	cout = array·compact(a)
+	println("append", cout[2])
+	m:[]char/utf8·int8 = {x=v}
+	println("map", m·x)
+	s:S = S{v=v}
+	println("field", s·v)
+	p:*int8 = &x
+	*p = v
+	println("ptr", x)
+	k:[]char/utf8·int8 = {y=v}
+	w:any = 300
+	k·y = w
+	println("dynmap", k·y)
+	kvspace·set("/tmp/coerce/k", w)
+	z = kvspace·get("/tmp/coerce/k")
+	println("dynkv", z)
+}

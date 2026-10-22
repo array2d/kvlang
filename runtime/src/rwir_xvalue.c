@@ -187,11 +187,22 @@ int kvlangBuiltinXvSet(kvlangFrame_t *f) {
         if (emsg)
             rc = kvlangBuiltinSetError(f, "%s", emsg);
         else {
-            int c = vblen < sz ? vblen : sz;
-            char err[256];
-            kvlangKvspaceSetPart(f->kvspace, wk, (uint32_t)(h.body_offset + flat * sz),
-                            vb, (uint32_t)c, err, sizeof err);
-            kvlangBuiltinNextPc(f);
+            char ek[65];
+            snprintf(ek, sizeof ek, "%.*s", kx.kind_len, kx.kind);
+            uint8_t cbuf[64];
+            kvlangXvalue_t cv;
+            if (kvlangCoerceAssign(f, ek, &vv, cbuf, sizeof cbuf, &cv) != 0)
+                rc = -1;
+            else {
+                const uint8_t *cvb = xh_body_of(&cv);
+                int32_t cvblen = xh_content_len_of(&cv);
+                int c = cvblen < sz ? cvblen : sz;
+                char err[256];
+                kvlangKvspaceSetPart(f->kvspace, wk,
+                                     (uint32_t)(h.body_offset + flat * sz), cvb,
+                                     (uint32_t)c, err, sizeof err);
+                kvlangBuiltinNextPc(f);
+            }
         }
         free(rk);
         free(wk);
@@ -222,11 +233,16 @@ int kvlangBuiltinXvSet(kvlangFrame_t *f) {
     if (emsg) {
         return kvlangBuiltinSetError(f, "%s", emsg);
     }
+    uint8_t cbuf[64];
+    kvlangXvalue_t cv;
+    if (kvlangCoerceAssign(f, k, &vv, cbuf, sizeof cbuf, &cv) != 0)
+        return -1;
     int32_t ablen = xh_content_len_of(&arr);
     uint8_t *nb = malloc((size_t)ablen);
     memcpy(nb, xh_body_of(&arr), (size_t)ablen);
-    int c = vblen < sz ? vblen : sz;
-    memcpy(nb + flat * sz, vb, (size_t)c);
+    int32_t cvblen = xh_content_len_of(&cv);
+    int c = cvblen < sz ? cvblen : sz;
+    memcpy(nb + flat * sz, xh_body_of(&cv), (size_t)c);
     kvlangXvalue_t nv;
     kvlangXvalueNewTlvDims(&nv, k, nb, (uint32_t)ablen, kx.dims, kx.ndim);
     int rc = kvlangBuiltinEmitResult(f, &nv);

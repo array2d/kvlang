@@ -948,6 +948,19 @@ fn is_cond_simple_slot(inst: &Instruction) -> bool {
 
 // ── 类型推断（对齐 lower/infer.go） ──────────────────────────────────
 
+/// 声明类型表：仅签名与源码写槽注解。推断类型不是声明（[[赋值转换]]），
+/// 故不得进入指令槽的 langtype——否则动态变量会被推断出的静态类型锁死。
+pub fn declared_types(fn_: &Func) -> HashMap<String, String> {
+    let mut d = HashMap::new();
+    for p in fn_.sig.params.iter().chain(fn_.sig.returns.iter()) {
+        if !p.ty.is_empty() {
+            d.insert(p.name.clone(), p.ty.clone());
+        }
+    }
+    collect_declared(&fn_.body, &mut d);
+    d
+}
+
 pub fn infer_types(fn_: &Func) -> HashMap<String, String> {
     let mut tm = HashMap::new();
     for p in &fn_.sig.params {
@@ -1065,12 +1078,30 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
                 return t;
             }
         }
-        for r in reads {
-            if slot_type(r, tm) == "float64" {
-                return "float64".to_string();
-            }
+        let word = symbol::lookup(opcode).word.to_string();
+        // 单目 sub（一元负号）恒产 int64（runtime EmitInt64）。
+        if word == "sub" && reads.len() == 1 {
+            return "int64".to_string();
         }
-        return "int64".to_string();
+        // 结果 kind 必须与 runtime 一致：同族按更宽者合流（narrow_int/narrow_float）；
+        // 任一操作数类型未知（动态 any/空）→ 不声明，runtime 按实际 kind 产出。
+        let mut kind = String::new();
+        for r in reads {
+            let t = slot_type(r, tm);
+            if t.is_empty() || t == "any" || !builtin::is_num_kind(&t) {
+                return String::new();
+            }
+            kind = if kind.is_empty() {
+                t
+            } else {
+                builtin::wider_num_kind(&kind, &t)
+            };
+        }
+        if kind.is_empty() {
+            return String::new();
+        }
+        let rk = builtin::op_kind(&word, &kind);
+        return if rk.is_empty() { kind } else { rk };
     }
     if symbol::lookup(opcode).cmp {
         return "bool".to_string();
@@ -1108,12 +1139,28 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
         "random·intn" | "random.uint64" | "string·parseuint" => return "uint64".to_string(),
         "pow" | "sqrt" | "exp" | "log" | "string·parsefloat" => return "float64".to_string(),
         "sign" => return "int64".to_string(),
-        "abs" | "neg" | "max" | "min" => {
+        "abs" | "neg" => {
             return if !reads.is_empty() {
                 slot_type(&reads[0], tm)
             } else {
                 String::new()
             };
+        }
+        "max" | "min" => {
+            // runtime 取两操作数的更宽数值 kind（narrow_int/narrow_float）。
+            let mut kind = String::new();
+            for r in reads {
+                let t = slot_type(r, tm);
+                if t.is_empty() || t == "any" || !builtin::is_num_kind(&t) {
+                    return String::new();
+                }
+                kind = if kind.is_empty() {
+                    t
+                } else {
+                    builtin::wider_num_kind(&kind, &t)
+                };
+            }
+            return kind;
         }
         "xv·at" => {
             if !reads.is_empty() {
@@ -1428,7 +1475,7 @@ fn container_value(ty: &str) -> Option<String> {
 }
 
 /// 写槽能解析出的声明类型；None = 非 typed 或不可解析。
-fn resolve_slot_type(
+pub fn resolve_slot_type(
     w: &str,
     tm: &HashMap<String, String>,
     structs: &StructTable,

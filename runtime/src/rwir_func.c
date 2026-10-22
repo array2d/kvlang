@@ -190,16 +190,32 @@ int kvlangBuiltinWriteResult(kvlangFrame_t *f, const kvlangXvalue_t *result) {
         kvCBodyFallback++; /* 真正落槽但未走 body 快路径的写 */
 #endif
     if (f->instruction->write_count > 0) {
+        const char *target = f->instruction->writes[0].type;
+        uint8_t cbuf[64];
+        kvlangXvalue_t cv;
+        if (kvlangCoerceAssign(f, target, result, cbuf, sizeof cbuf, &cv) != 0)
+            return -1;
+        /* coercion 后若声明类型是数值标量，重新尝试 body 快路径。 */
+        if (target && target[0]) {
+            int tid = kvlangLangtypeId(target, strlen(target));
+            if (kvlangLangtypeIsNum(tid) && cv.bytes &&
+                cv.length >= XH_PREFIX) {
+                const uint8_t *body = cv.bytes + (1u << cv.bytes[0]);
+                uint32_t blen = (uint32_t)xh_content_len(cv.bytes);
+                if (kvlangBuiltinWriteBody(f, target, body, blen))
+                    return 0;
+            }
+        }
         kvspaceKeyOff *wo = f->instruction->write_offs
                                 ? f->instruction->write_offs[0]
                                 : NULL;
-        if (wo && result->bytes && result->length >= XH_PREFIX)
-            kvlangBodyInvalidateKind(wo->key, xh_langtype(result->bytes),
-                                     xh_langtype_len(result->bytes));
+        if (wo && cv.bytes && cv.length >= XH_PREFIX)
+            kvlangBodyInvalidateKind(wo->key, xh_langtype(cv.bytes),
+                                     xh_langtype_len(cv.bytes));
         else if (wo)
             kvlangBodyInvalidate(wo->key);
-        if (wo && result->bytes && result->length > 0 &&
-            kvspaceKeyOffSet(wo, result->bytes, result->length, NULL, 0) == 0) {
+        if (wo && cv.bytes && cv.length > 0 &&
+            kvspaceKeyOffSet(wo, cv.bytes, cv.length, NULL, 0) == 0) {
             kvlangBuiltinNextPc(f);
             return 0;
         }
@@ -208,12 +224,12 @@ int kvlangBuiltinWriteResult(kvlangFrame_t *f, const kvlangXvalue_t *result) {
         if (!fr) { owned = kvlangKeytreeFrameRoot(f->pc); fr = owned; }
         char *key = kvlangBuiltinResolveWriteSlot(f->kvspace, fr, f->instruction->writes[0].name);
         free(owned);
-        if (result->bytes && result->length >= XH_PREFIX)
-            kvlangBodyInvalidateKind(key, xh_langtype(result->bytes),
-                                     xh_langtype_len(result->bytes));
+        if (cv.bytes && cv.length >= XH_PREFIX)
+            kvlangBodyInvalidateKind(key, xh_langtype(cv.bytes),
+                                     xh_langtype_len(cv.bytes));
         else
             kvlangBodyInvalidate(key);
-        kvlangKvPair_t pair = { key, *result };
+        kvlangKvPair_t pair = { key, cv };
         char err[256];
         kvlangKvspaceSet(f->kvspace, &pair, 1, err, sizeof err);
         free(key);
@@ -317,13 +333,20 @@ int kvlangBuiltinExecuteCopy(kvlangFrame_t *f) {
                 return -1;
             }
         }
+        uint8_t cbuf[64];
+        kvlangXvalue_t cv;
+        if (kvlangCoerceAssign(f, inst->writes[i].type, &v, cbuf, sizeof cbuf,
+                               &cv) != 0) {
+            free(owned);
+            return -1;
+        }
         kvspaceKeyOff *wo =
             inst->write_offs ? inst->write_offs[i] : NULL;
-        if (wo && v.bytes && v.length > 0 &&
-            kvspaceKeyOffSet(wo, v.bytes, v.length, NULL, 0) == 0)
+        if (wo && cv.bytes && cv.length > 0 &&
+            kvspaceKeyOffSet(wo, cv.bytes, cv.length, NULL, 0) == 0)
             continue;
         char *key = kvlangBuiltinResolveWriteSlot(kv, fr, slot);
-        kvlangKvPair_t pair = { key, v };
+        kvlangKvPair_t pair = { key, cv };
         char err[256];
         kvlangKvspaceSet(kv, &pair, 1, err, sizeof err);
         free(key);

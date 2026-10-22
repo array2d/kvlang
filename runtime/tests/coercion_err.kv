@@ -1,0 +1,5 @@
+// 动态值写入 typed 标量槽：不可转换必须运行时 TypeError（[[赋值转换]]）。
+rwfunc test() -> () {
+	v:any = "abc"
+	x:int8 = v
+}

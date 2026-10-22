@@ -46,6 +46,9 @@ typedef struct kvlangBoundCell {
     kvspaceKeyOff off;
     kvlangXvalue_t *literal; /* 指向行内字面量（借用）；非字面量 NULL */
     bool pin; /* 本行写槽覆盖此 key：读视图须在写前固化 */
+    int coerce_tid; /* 绑定期解析的声明 kind id（0=非 typed 标量） */
+    uint16_t coerce_len; /* 声明 kind 文本长度：热路径按字节比对，免查 langtype 表 */
+    uint8_t *coerce_buf; /* typed 读转换的 64B 临时视图（惰性分配，帧内复用） */
 } kvlangBoundCell_t;
 
 /* 定长标量写的绑定状态：只给候选行分配一个，不放大每个操作数 cell。 */
