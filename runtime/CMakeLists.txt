@@ -11,12 +11,16 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${BIN_DIR}")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${BIN_DIR}")
 
 file(GLOB KVLANG_RUNTIME_SRC CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/*.c")
-# 生成族与赋值转换放最后两个 TU：改动热 TU 的 .text 布局会造成明显实测回退
-# （生成族约 1.5%，转换代码曾致 k_nucleotide 约 8%）。顺序：gen 在 coerce 之前。
+# 生成族、decode 与赋值转换固定在热 TU 之后链接：改动热 TU 的 .text 布局会造成
+# 明显实测回退（生成族约 1.5%、转换代码约 8%、decode 收缩曾致 k_nucleotide +8%）。
+# decode 只在行加载期执行（每帧每行一次），排在 handler 之后不伤热路径。
 set(KVLANG_GEN_SRC "${CMAKE_SOURCE_DIR}/src/rwir_special_gen.c")
 set(KVLANG_COERCE_SRC "${CMAKE_SOURCE_DIR}/src/rwir_coerce.c")
-list(REMOVE_ITEM KVLANG_RUNTIME_SRC "${KVLANG_GEN_SRC}" "${KVLANG_COERCE_SRC}")
-list(APPEND KVLANG_RUNTIME_SRC "${KVLANG_GEN_SRC}" "${KVLANG_COERCE_SRC}")
+set(KVLANG_DECODE_SRC "${CMAKE_SOURCE_DIR}/src/rwir_decode.c")
+list(REMOVE_ITEM KVLANG_RUNTIME_SRC "${KVLANG_GEN_SRC}" "${KVLANG_COERCE_SRC}"
+    "${KVLANG_DECODE_SRC}")
+list(APPEND KVLANG_RUNTIME_SRC "${KVLANG_DECODE_SRC}" "${KVLANG_GEN_SRC}"
+    "${KVLANG_COERCE_SRC}")
 add_library(kvlang_runtime SHARED ${KVLANG_RUNTIME_SRC})
 target_include_directories(kvlang_runtime PUBLIC include src)
 target_compile_definitions(kvlang_runtime PRIVATE _GNU_SOURCE)
