@@ -114,26 +114,92 @@ int kvlangVthreadSet(kvspace_t *kv, const char *vtid, const char *pc,
 #define VT_STATUS_SLACK_CAP 32
 #define VT_SLACK_MAX_CAP KV_KEY_MAX
 
-/* 整值写：已绑定的 keyoff 直接写；独立帧没有绑定，按 key 冷写。 */
+/* PC 槽缓存：shm 下每步只 part-write `[2, 64+len)`（等价值写），不重编码、
+ * 不 memset 320B；fs/redis 保持整值写。见 spec [[执行模型-续]]。 */
+typedef struct {
+    char key[KV_KEY_MAX]; /* 缓存所属槽的 key 副本：跨 vthread 时栈/堆地址可能复用 */
+    uint8_t buf[64 + VT_SLACK_MAX_CAP];
+    uint32_t cap; /* 槽实际容量档（b 字段） */
+    bool ready;
+} pc_slot_cache_t;
+static __thread pc_slot_cache_t pc_cache;
+
+static uint32_t utf8_cp_count(const char *s, uint32_t len) {
+    uint32_t n = 0;
+    for (uint32_t i = 0; i < len; i++)
+        if (((uint8_t)s[i] & 0xC0) != 0x80)
+            n++;
+    return n;
+}
+
+/* 整值写（首次/超长/非 shm/part 失败回退）：编码进 pc 缓存并写整值。 */
+static int pc_write_whole(kvlangFrame_t *f, struct kvspaceKeyOff *ko,
+                          const char *s, uint32_t len) {
+    uint32_t cap = len > VT_PC_SLACK_CAP ? VT_SLACK_MAX_CAP : VT_PC_SLACK_CAP;
+    uint32_t n = kvlangSlackEncodeChar((const uint8_t *)s, len, cap,
+                                       pc_cache.buf, sizeof pc_cache.buf);
+    pc_cache.cap = cap;
+    pc_cache.ready = true;
+    snprintf(pc_cache.key, sizeof pc_cache.key, "%s", ko->key);
+    return kvspaceKeyOffSet(ko, pc_cache.buf, n, NULL, 0);
+}
+
+/* 等价值写：只更新 head 的 a/langtype 与 body 前缀，写 `[2, 64+len)`。 */
+static int pc_write_part(kvlangFrame_t *f, struct kvspaceKeyOff *ko,
+                         const char *s, uint32_t len) {
+    uint8_t *b = pc_cache.buf;
+    for (int i = 0; i < 4; i++)
+        b[2 + i] = (uint8_t)(len >> (8 * i)); /* a */
+    int kn = snprintf((char *)b + XH_PREFIX, 64 - XH_PREFIX, "[%u]char/utf8",
+                      utf8_cp_count(s, len));
+    if (kn < 0 || (uint32_t)kn >= 64 - XH_PREFIX)
+        return -1;
+    b[XH_PREFIX + (uint32_t)kn] = 0;
+    memcpy(b + 64, s, len);
+    uint32_t part = 64 + len - 2;
+    return kvspaceSetPartByRef(f->kvspace->handle, &ko->off, ko->key, 2, b + 2,
+                               part, NULL, 0);
+}
+
+/* 写 pc/status 槽：已绑定的 keyoff 直接写；独立帧没有绑定，按 key 冷写。 */
 static void member_write(kvlangFrame_t *f, struct kvspaceKeyOff *ko,
                          bool is_status, const char *s) {
     uint32_t len = (uint32_t)strlen(s);
-    uint32_t cap = is_status ? VT_STATUS_SLACK_CAP : VT_PC_SLACK_CAP;
-    if (len > cap)
-        cap = VT_SLACK_MAX_CAP;
-    uint8_t val[64 + VT_SLACK_MAX_CAP];
-    uint32_t n = kvlangSlackEncodeChar((const uint8_t *)s, len, cap, val,
-                                       sizeof val);
-    if (ko) {
-        if (kvspaceKeyOffSet(ko, val, n, NULL, 0) != 0)
+    if (is_status) { /* status 只在变化时写，保持整值写 */
+        uint32_t cap = len > VT_STATUS_SLACK_CAP ? VT_SLACK_MAX_CAP
+                                                 : VT_STATUS_SLACK_CAP;
+        uint8_t val[64 + VT_SLACK_MAX_CAP];
+        uint32_t n = kvlangSlackEncodeChar((const uint8_t *)s, len, cap, val,
+                                           sizeof val);
+        if (ko) {
+            if (kvspaceKeyOffSet(ko, val, n, NULL, 0) != 0)
+                f->persist_failed = true;
+            return;
+        }
+        char k[KV_KEY_MAX];
+        kvlangKeytreeVthreadStatus(f->vthread_id, k, sizeof k);
+        if (kvspaceSetValue(f->kvspace->handle, k, val, n, 0, 0, NULL, 0) != 0)
             f->persist_failed = true;
         return;
     }
+    if (ko && f->kvspace->shm && pc_cache.ready &&
+        strcmp(pc_cache.key, ko->key) == 0 && len <= pc_cache.cap) {
+        if (pc_write_part(f, ko, s, len) == 0)
+            return;
+        /* part 失败：回退整值写（会重建缓存）。 */
+    }
+    if (ko) {
+        if (pc_write_whole(f, ko, s, len) != 0)
+            f->persist_failed = true;
+        return;
+    }
+    pc_cache.ready = false;
     char k[KV_KEY_MAX];
-    if (is_status)
-        kvlangKeytreeVthreadStatus(f->vthread_id, k, sizeof k);
-    else
-        kvlangKeytreeVthreadPc(f->vthread_id, k, sizeof k);
+    kvlangKeytreeVthreadPc(f->vthread_id, k, sizeof k);
+    uint8_t val[64 + VT_SLACK_MAX_CAP];
+    uint32_t cap = len > VT_PC_SLACK_CAP ? VT_SLACK_MAX_CAP : VT_PC_SLACK_CAP;
+    uint32_t n = kvlangSlackEncodeChar((const uint8_t *)s, len, cap, val,
+                                       sizeof val);
     if (kvspaceSetValue(f->kvspace->handle, k, val, n, 0, 0, NULL, 0) != 0)
         f->persist_failed = true;
 }

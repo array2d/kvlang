@@ -65,7 +65,11 @@ static void check_member(kvspace_t *kv, bool is_status, const char *s) {
     CHECK(kvspaceXhNewSlack(1 /* UTF-8 */, (const uint8_t *)s, strlen(s),
                             h.body_cap, &ref, &rl) == 0);
     CHECK(v.length == (uint32_t)rl);
-    CHECK(v.length > 0 && memcmp(v.bytes, ref, v.length) == 0);
+    /* 等价值写（part-write）只保证 [0, 64+a) 是对的；b-a 的旧字节不属于值
+     * （spec 05/02：值语义只取前 a 字节）。整值写时两者自然相同。 */
+    size_t prefix = 64 + (size_t)h.body_len;
+    CHECK(prefix <= (size_t)rl && prefix <= (size_t)v.length);
+    CHECK(prefix > 0 && memcmp(v.bytes, ref, prefix) == 0);
     free(ref);
 }
 

@@ -50,6 +50,10 @@ extern int kvspaceResolveRef(void *h, const char *key, kvspaceRef_t *ref);
 extern int kvspaceGetByRef(void *h, kvspaceRef_t *ref, const char *key_fallback,
                            uint8_t **out, uint32_t *out_len);
 /* 整值写 by cached ref；ref 失效时后端内部回退并重解析。 */
+extern int kvspaceSetPartByRef(void *h, kvspaceRef_t *ref,
+                               const char *key_fallback, uint32_t offset,
+                               const uint8_t *buf, uint32_t buf_len, char *err,
+                               uint32_t err_cap);
 extern int kvspaceSetValueByRef(void *h, kvspaceRef_t *ref,
                                 const char *key_fallback,
                                 const uint8_t *value, uint32_t value_len,
