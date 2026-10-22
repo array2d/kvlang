@@ -1380,3 +1380,656 @@ fn specialize_inst(
     }
     e.op = format!("{k}{}{word}", keytree::MEMBER_SEP);
 }
+
+// ── typed 写槽校验（见 spec [[赋值转换]]）───────────────────────────
+
+/// 结构体表：简单名与 `pkg·名` 都可查。
+pub type StructTable = HashMap<String, ast::StructDecl>;
+
+fn struct_lookup<'a>(ty: &str, structs: &'a StructTable) -> Option<&'a ast::StructDecl> {
+    let n = ty.strip_prefix("/lib/").unwrap_or(ty);
+    structs.get(n)
+}
+
+fn slot_is_plain_name(w: &str) -> bool {
+    !w.is_empty()
+        && !w.starts_with('/')
+        && !w.starts_with('*')
+        && !w.contains(keytree::MEMBER_SEP)
+        && !w.contains('[')
+        && !w.contains(']')
+}
+
+/// None 字面量：Ident 叶、值为 `None`（普通变量叶的 lit 也是 LitNone，不能按 lit 判）。
+fn is_none_lit(e: &Expr) -> bool {
+    e.is_leaf() && e.val == "None"
+}
+
+/// compact 数组元素 kind：`[dims]K` / `[]K`（含 `[2][3]K`）。
+fn container_elem(ty: &str) -> Option<String> {
+    let t = ty.trim_start_matches('*');
+    if !t.starts_with('[') {
+        return None;
+    }
+    let last = t.rfind(']')?;
+    let e = t[last + 1..].trim();
+    if e.is_empty() {
+        None
+    } else {
+        Some(e.to_string())
+    }
+}
+
+/// map value kind：第一个 `·` 之后。
+fn container_value(ty: &str) -> Option<String> {
+    let t = ty.trim_start_matches('*');
+    let i = t.find(keytree::MEMBER_SEP)?;
+    Some(t[i + keytree::MEMBER_SEP.len()..].to_string())
+}
+
+/// 写槽能解析出的声明类型；None = 非 typed 或不可解析。
+fn resolve_slot_type(
+    w: &str,
+    tm: &HashMap<String, String>,
+    structs: &StructTable,
+    declared: &HashMap<String, String>,
+) -> Option<String> {
+    if slot_is_plain_name(w) {
+        return declared.get(w).cloned();
+    }
+    if let Some(rest) = w.strip_prefix('*') {
+        let t = declared.get(rest)?;
+        return Some(t.strip_prefix('*').unwrap_or(t).to_string());
+    }
+    if let Some(open) = w.find('[') {
+        let base = &w[..open];
+        let t = declared.get(base)?;
+        return container_elem(t);
+    }
+    let mut it = w.split(keytree::MEMBER_SEP);
+    let base = it.next()?;
+    let mut ty = declared.get(base)?.clone();
+    for part in it {
+        if let Some(v) = container_value(&ty) {
+            ty = v;
+        } else if ty.starts_with('[') {
+            ty = container_elem(&ty)?;
+        } else if let Some(d) = struct_lookup(&ty, structs) {
+            ty = d
+                .fields
+                .iter()
+                .find(|f| f.name == part)
+                .map(|f| f.ty.clone())?;
+        } else {
+            return None;
+        }
+    }
+    Some(ty)
+}
+
+fn push_write_diag(diags: &mut Vec<Diagnostic>, message: String) {
+    diags.push(Diagnostic {
+        pos: Pos { line: 0, col: 0 },
+        warn: false,
+        info: false,
+        message,
+        source: String::new(),
+        src_file: String::new(),
+        src_name: String::new(),
+    });
+}
+
+fn int_bounds(kind: &str) -> Option<(i128, i128)> {
+    Some(match kind {
+        "int8" => (-128, 127),
+        "int16" => (-32768, 32767),
+        "int32" => (i32::MIN as i128, i32::MAX as i128),
+        "int64" => (i64::MIN as i128, i64::MAX as i128),
+        "uint8" => (0, 255),
+        "uint16" => (0, 65535),
+        "uint32" => (0, u32::MAX as i128),
+        "uint64" => (0, u64::MAX as i128),
+        _ => return None,
+    })
+}
+
+/// 字面量对目标标量 kind 的可表示性检查。返回 false = 非数字字面量。
+fn check_literal(target: &str, e: &Expr, diags: &mut Vec<Diagnostic>) -> bool {
+    let is_int = builtin::is_int_kind(target);
+    let is_float = builtin::is_float_kind(target);
+    if !is_int && !is_float {
+        return false;
+    }
+    match e.lit {
+        LitKind::LitInt => {
+            let Ok(v) = e.val.trim().parse::<i128>() else {
+                return true;
+            };
+            if is_int {
+                if let Some((lo, hi)) = int_bounds(target) {
+                    if v < lo || v > hi {
+                        push_write_diag(
+                            diags,
+                            format!(
+                                "TypeError: literal {} is not representable as {target} \
+                                 (range {lo}..={hi})",
+                                e.val
+                            ),
+                        );
+                    }
+                }
+            }
+            true
+        }
+        LitKind::LitFloat => {
+            let Ok(v) = e.val.trim().parse::<f64>() else {
+                return true;
+            };
+            if is_int {
+                if !v.is_finite() || v.fract() != 0.0 {
+                    push_write_diag(
+                        diags,
+                        format!(
+                            "TypeError: literal {} is not an integer; cannot assign to {target}",
+                            e.val
+                        ),
+                    );
+                    return true;
+                }
+                if let Some((lo, hi)) = int_bounds(target) {
+                    if v < lo as f64 || v > hi as f64 {
+                        push_write_diag(
+                            diags,
+                            format!("TypeError: literal {} is out of range for {target}", e.val),
+                        );
+                    }
+                }
+            } else if target == "float32" {
+                if !v.is_finite() || v.abs() > f32::MAX as f64 {
+                    push_write_diag(
+                        diags,
+                        format!("TypeError: literal {} is out of float32 range", e.val),
+                    );
+                }
+            } else if !v.is_finite() {
+                push_write_diag(diags, format!("TypeError: literal {} is not finite", e.val));
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
+fn check_element(kind: &str, e: &Expr, diags: &mut Vec<Diagnostic>) {
+    if !e.is_leaf() {
+        return;
+    }
+    if check_literal(kind, e, diags) {
+        return;
+    }
+    match e.lit {
+        LitKind::LitBool => {
+            push_write_diag(diags, format!("TypeError: cannot assign bool to {kind}"))
+        }
+        LitKind::LitString | LitKind::LitRawString => {
+            if !is_string_kind(kind) {
+                push_write_diag(diags, format!("TypeError: cannot assign string to {kind}"));
+            }
+        }
+        _ => {
+            if is_none_lit(e) && !kind.starts_with('*') && kind != "any" {
+                push_write_diag(
+                    diags,
+                    format!("TypeError: None cannot be assigned to {kind}"),
+                );
+            }
+        }
+    }
+}
+
+fn check_assignable(target: &str, rhs: &str, diags: &mut Vec<Diagnostic>) {
+    if rhs.is_empty() || rhs == "any" {
+        return;
+    }
+    if builtin::is_num_kind(target) {
+        if !builtin::is_num_kind(rhs) {
+            push_write_diag(diags, format!("TypeError: cannot assign {rhs} to {target}"));
+        }
+        return;
+    }
+    if is_string_kind(target) {
+        if !is_string_kind(rhs) {
+            push_write_diag(diags, format!("TypeError: cannot assign {rhs} to {target}"));
+        }
+        return;
+    }
+    if target == "bool" {
+        if rhs != "bool" {
+            push_write_diag(diags, format!("TypeError: cannot assign {rhs} to bool"));
+        }
+        return;
+    }
+    if target.starts_with('*') {
+        if !rhs.starts_with('*') && rhs != "nil" {
+            push_write_diag(
+                diags,
+                format!("TypeError: cannot assign {rhs} to pointer {target}"),
+            );
+        }
+        return;
+    }
+    if target.starts_with('[') || target.contains(keytree::MEMBER_SEP) || target.starts_with('/') {
+        if rhs != target {
+            push_write_diag(diags, format!("TypeError: cannot assign {rhs} to {target}"));
+        }
+    }
+}
+
+/// 单个值对声明类型的检查：字面量范围优先，其余按静态类型可赋性。
+fn check_value(target: &str, e: &Expr, tm: &HashMap<String, String>, diags: &mut Vec<Diagnostic>) {
+    if e.is_leaf() {
+        if check_literal(target, e, diags) {
+            return;
+        }
+        match e.lit {
+            LitKind::LitBool => {
+                if target != "bool" {
+                    push_write_diag(diags, format!("TypeError: cannot assign bool to {target}"));
+                }
+                return;
+            }
+            LitKind::LitString | LitKind::LitRawString => {
+                if !is_string_kind(target) {
+                    push_write_diag(
+                        diags,
+                        format!("TypeError: cannot assign string to {target}"),
+                    );
+                }
+                return;
+            }
+            _ => {
+                if is_none_lit(e) {
+                    if !target.starts_with('*') && target != "any" {
+                        push_write_diag(
+                            diags,
+                            format!("TypeError: None cannot be assigned to {target}"),
+                        );
+                    }
+                    return;
+                }
+            }
+        }
+    }
+    check_assignable(target, &expr_result_type(e, tm), diags);
+}
+
+fn check_rhs(target: &str, e: &Expr, rhs: &str, diags: &mut Vec<Diagnostic>) {
+    if e.is_leaf() {
+        if check_literal(target, e, diags) {
+            return;
+        }
+        match e.lit {
+            LitKind::LitBool => {
+                if target != "bool" {
+                    push_write_diag(diags, format!("TypeError: cannot assign bool to {target}"));
+                }
+                return;
+            }
+            LitKind::LitString | LitKind::LitRawString => {
+                if !is_string_kind(target) {
+                    push_write_diag(
+                        diags,
+                        format!("TypeError: cannot assign string to {target}"),
+                    );
+                }
+                return;
+            }
+            _ => {
+                if is_none_lit(e) {
+                    if !target.starts_with('*') && target != "any" {
+                        push_write_diag(
+                            diags,
+                            format!("TypeError: None cannot be assigned to {target}"),
+                        );
+                    }
+                    return;
+                }
+            }
+        }
+    }
+    check_assignable(target, rhs, diags);
+}
+
+fn check_container_literal(
+    target: &str,
+    e: &Expr,
+    structs: &StructTable,
+    diags: &mut Vec<Diagnostic>,
+) {
+    match e.op.as_str() {
+        "array" => {
+            if let Some(elem) = container_elem(target) {
+                if builtin::is_num_kind(&elem) {
+                    for a in &e.args {
+                        check_element(&elem, a, diags);
+                    }
+                }
+            }
+        }
+        // 位置型 `{v0,v1,…}`：键为隐式整数坐标，只查值。
+        "map" => {
+            if let Some(v) = container_value(target) {
+                if builtin::is_num_kind(&v) {
+                    for a in &e.args {
+                        check_element(&v, a, diags);
+                    }
+                }
+            }
+        }
+        // 命名型 `{k=v}`：键为字符串字面量，值为 map value 或 struct 字段类型。
+        "obj" => {
+            let mut i = 0;
+            while i + 1 < e.args.len() {
+                let key = e.args[i].val.trim_matches('"');
+                let val = &e.args[i + 1];
+                let vt = container_value(target).or_else(|| {
+                    struct_lookup(target, structs).and_then(|d| {
+                        d.fields
+                            .iter()
+                            .find(|f| f.name == key)
+                            .map(|f| f.ty.clone())
+                    })
+                });
+                if let Some(vt) = vt {
+                    if builtin::is_num_kind(&vt) {
+                        check_element(&vt, val, diags);
+                    }
+                }
+                i += 2;
+            }
+        }
+        _ => {}
+    }
+}
+
+fn expr_result_type(e: &Expr, tm: &HashMap<String, String>) -> String {
+    if e.is_leaf() {
+        return arg_type(e, tm);
+    }
+    if matches!(e.op.as_str(), "array" | "map" | "obj") {
+        return String::new();
+    }
+    let sym = symbol::lookup(&e.op);
+    if sym.arith {
+        for a in &e.args {
+            let t = arg_type(a, tm);
+            if is_string_kind(&t) {
+                return t;
+            }
+        }
+        for a in &e.args {
+            if arg_type(a, tm) == "float64" {
+                return "float64".to_string();
+            }
+        }
+        return "int64".to_string();
+    }
+    if sym.cmp {
+        return "bool".to_string();
+    }
+    if e.op == "kvlang·abs" {
+        let t = e.args.first().map(|a| arg_type(a, tm)).unwrap_or_default();
+        return format!("*{t}");
+    }
+    if is_cast_op(&e.op) {
+        return e.op.clone();
+    }
+    if e.op == "obj" {
+        return "stringkeymap".to_string();
+    }
+    if e.op == "map" {
+        return "[]stringkeymap".to_string();
+    }
+    let mut tm2 = tm.clone();
+    let reads: Vec<String> = e.args.iter().map(|a| a.val.clone()).collect();
+    infer_op_type(&e.op, &reads, &mut tm2)
+}
+
+fn collect_declared(body: &[Stmt], declared: &mut HashMap<String, String>) {
+    for st in body {
+        match st {
+            Stmt::Instruction(s) => {
+                for (j, w) in s.writes.iter().enumerate() {
+                    if j < s.write_types.len()
+                        && !s.write_types[j].is_empty()
+                        && slot_is_plain_name(w)
+                    {
+                        declared
+                            .entry(w.clone())
+                            .or_insert_with(|| s.write_types[j].clone());
+                    }
+                }
+            }
+            Stmt::Scope(s) => collect_declared(&s.body, declared),
+            Stmt::If(s) => {
+                collect_declared(&s.then_, declared);
+                collect_declared(&s.else_, declared);
+            }
+            Stmt::While(s) => collect_declared(&s.body, declared),
+            Stmt::For(s) => collect_declared(&s.body, declared),
+            _ => {}
+        }
+    }
+}
+
+fn walk_writes(
+    body: &[Stmt],
+    pkg: &str,
+    sigs: &SigTable,
+    tm: &HashMap<String, String>,
+    structs: &StructTable,
+    declared: &HashMap<String, String>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    for st in body {
+        match st {
+            Stmt::Instruction(s) => walk_inst(s, pkg, sigs, tm, structs, declared, diags),
+            Stmt::Scope(s) => walk_writes(&s.body, pkg, sigs, tm, structs, declared, diags),
+            Stmt::If(s) => {
+                if let Some(c) = &s.cond {
+                    walk_inst(c, pkg, sigs, tm, structs, declared, diags);
+                }
+                walk_writes(&s.then_, pkg, sigs, tm, structs, declared, diags);
+                walk_writes(&s.else_, pkg, sigs, tm, structs, declared, diags);
+            }
+            Stmt::While(s) => {
+                if let Some(c) = &s.cond {
+                    walk_inst(c, pkg, sigs, tm, structs, declared, diags);
+                }
+                walk_writes(&s.body, pkg, sigs, tm, structs, declared, diags);
+            }
+            Stmt::For(s) => walk_writes(&s.body, pkg, sigs, tm, structs, declared, diags),
+            _ => {}
+        }
+    }
+}
+
+pub type SigTable = HashMap<String, ast::FuncSig>;
+
+/// struct 字面量 `struct·new(path, field, value, …)`：标量字段的字面量做可表示性检查。
+fn check_struct_literal(e: &Expr, structs: &StructTable, diags: &mut Vec<Diagnostic>) {
+    let Some(ty_arg) = e.args.first() else { return };
+    let ty = ty_arg.val.trim().trim_matches('"');
+    let Some(d) = struct_lookup(ty, structs) else {
+        return;
+    };
+    let mut i = 1;
+    while i + 1 < e.args.len() {
+        let fname = e.args[i].val.trim().trim_matches('"');
+        let val = &e.args[i + 1];
+        if let Some(f) = d.fields.iter().find(|f| f.name == fname) {
+            let ft = f.ty.trim_end_matches("...").trim();
+            if builtin::is_num_kind(ft) {
+                check_element(ft, val, diags);
+            }
+        }
+        i += 2;
+    }
+}
+
+/// 调用实参对形参声明类型的检查（typed 参数即 typed 槽，见 [[赋值转换]]）。
+fn check_call_args(
+    e: &Expr,
+    pkg: &str,
+    sigs: &SigTable,
+    tm: &HashMap<String, String>,
+    declared: &HashMap<String, String>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let sym = symbol::lookup(&e.op);
+    if sym.arith || sym.cmp || is_cast_op(&e.op) || matches!(e.op.as_str(), "array" | "map" | "obj")
+    {
+        return;
+    }
+    let qual = if pkg.is_empty() {
+        e.op.clone()
+    } else {
+        format!("{pkg}{}{}", keytree::MEMBER_SEP, e.op)
+    };
+    let Some(sig) = sigs.get(&e.op).or_else(|| sigs.get(&qual)) else {
+        return;
+    };
+    let np = sig.params.len();
+    for (i, arg) in e.args.iter().enumerate() {
+        let param = if i < np {
+            &sig.params[i]
+        } else if np > 0 && sig.params[np - 1].ty.ends_with("...") {
+            &sig.params[np - 1]
+        } else {
+            break;
+        };
+        let raw = param.ty.trim_end_matches("...").trim().to_string();
+        if raw.is_empty() || raw == "any" || raw.contains('|') || raw.starts_with('@') {
+            continue;
+        }
+        // 只对可静态信任的实参做检查：字面量，或已声明类型的变量。
+        // 推断类型可能不准（如 &t·1 的成员取址），不能作为拒绝依据。
+        if !arg.is_leaf() {
+            continue;
+        }
+        let is_ptr = raw.starts_with('*');
+        let vt = raw.strip_prefix('*').unwrap_or(&raw).to_string();
+        if is_none_lit(arg) {
+            continue;
+        }
+        if check_literal(&vt, arg, diags) {
+            continue;
+        }
+        match arg.lit {
+            LitKind::LitBool => {
+                if vt != "bool" {
+                    push_write_diag(diags, format!("TypeError: cannot pass bool to {}", raw));
+                }
+                continue;
+            }
+            LitKind::LitString | LitKind::LitRawString => {
+                if !is_string_kind(&vt) {
+                    push_write_diag(diags, format!("TypeError: cannot pass string to {}", raw));
+                }
+                continue;
+            }
+            _ => {}
+        }
+        if let Some(at) = declared.get(&arg.val) {
+            if is_ptr && (at == &raw || at == &format!("*{vt}")) {
+                continue;
+            }
+            check_assignable(&vt, at, diags);
+        }
+    }
+}
+
+fn walk_inst(
+    s: &Instruction,
+    pkg: &str,
+    sigs: &SigTable,
+    tm: &HashMap<String, String>,
+    structs: &StructTable,
+    declared: &HashMap<String, String>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let Some(e) = &s.expr else { return };
+    check_call_args(e, pkg, sigs, tm, declared, diags);
+    if e.op == format!("struct{}new", keytree::MEMBER_SEP) {
+        check_struct_literal(e, structs, diags);
+    }
+    // 容器元素写：xv·set(container, index, value) / kvspace·set(container, key, value)。
+    if (e.op == "xv·set" || e.op == "kvspace·set") && e.args.len() >= 3 {
+        if e.args[0].is_leaf() {
+            if let Some(cty) = declared.get(&e.args[0].val) {
+                let elem = if e.op == "xv·set" {
+                    container_elem(cty)
+                } else {
+                    container_value(cty)
+                };
+                if let Some(kind) = elem {
+                    if builtin::is_num_kind(&kind) {
+                        if let Some(v) = e.args.last() {
+                            check_element(&kind, v, diags);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if s.writes.is_empty() {
+        return;
+    }
+
+    let rhs = expr_result_type(e, tm);
+    for (j, w) in s.writes.iter().enumerate() {
+        if w.is_empty() {
+            return;
+        }
+        let ann = s.write_types.get(j).map(String::as_str).unwrap_or("");
+        let ty = if !ann.is_empty() {
+            ann.to_string()
+        } else {
+            match resolve_slot_type(w, tm, structs, declared) {
+                Some(t) => t,
+                None => continue,
+            }
+        };
+        let ty = ty.trim().to_string();
+        if ty.is_empty() || ty == "any" || ty.contains('|') || ty.starts_with('@') {
+            return;
+        }
+        if matches!(e.op.as_str(), "array" | "map" | "obj")
+            && (ty.starts_with('[') || ty.contains(keytree::MEMBER_SEP) || ty.starts_with('/'))
+        {
+            check_container_literal(&ty, e, structs, diags);
+        } else {
+            check_rhs(&ty, e, &rhs, diags);
+        }
+    }
+}
+
+/// typed 写槽校验（[[赋值转换]]）：可赋性 + 字面量可表示性 + 容器字面量元素。
+pub fn validate_writes(
+    fn_: &Func,
+    pkg: &str,
+    tm: &HashMap<String, String>,
+    structs: &StructTable,
+    sigs: &SigTable,
+) -> Vec<Diagnostic> {
+    let mut diags = Vec::new();
+    let mut declared: HashMap<String, String> = HashMap::new();
+    for p in fn_.sig.params.iter().chain(fn_.sig.returns.iter()) {
+        if !p.ty.is_empty() {
+            declared.insert(p.name.clone(), p.ty.clone());
+        }
+    }
+    collect_declared(&fn_.body, &mut declared);
+    walk_writes(&fn_.body, pkg, sigs, tm, structs, &declared, &mut diags);
+    diags
+}
