@@ -23,5 +23,7 @@ u = char/ascii(t)      // 非 ASCII 码点 → TypeError
 
 构造器接受字面量与变量表达式（`42.9 -> x; int8(x)`）。种类构造的结果 XValue 以该种类名为 langtype 落
 入 kvspace，精度信息随值保留。
+
+typed 槽的赋值/写入复用本章同一张转换表（见 [[赋值转换]]），不另设转换规则。
 "#### -> /lib/kvlang/spec/类型系统/构造器
 }
