@@ -602,7 +602,7 @@ int kvlangDispatchDelegate(kvspace_t *kv, const char *vtid, const char *pc, kvla
     }
 
     kvlangVthreadSet(kv, vtid, pc, "wait");
-    kvlangLogDebug("[%s] DELEGATE %s task=%s", vtid, inst->opcode, task_id);
+    KV_LOG_DEBUG("[%s] DELEGATE %s task=%s", vtid, inst->opcode, task_id);
 
     kvlangXvalue_t want;
     kvlangXvalueZero(&want);
@@ -638,7 +638,7 @@ int kvlangDispatchDelegate(kvspace_t *kv, const char *vtid, const char *pc, kvla
     if (kvlangRwirNextPcBuffer(pc, npc, sizeof npc) == 0)
         kvlangDie("next pc exceeds %zu bytes", sizeof npc);
     kvlangVthreadSet(kv, vtid, npc, "running");
-    kvlangLogDebug("[%s] DONE %s task=%s", vtid, inst->opcode, task_id);
+    KV_LOG_DEBUG("[%s] DONE %s task=%s", vtid, inst->opcode, task_id);
 
 enqueue_done:
     free(status_key);

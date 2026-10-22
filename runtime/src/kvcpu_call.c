@@ -40,7 +40,7 @@ static int jump_to(kvlangFrame_t *f, const kvlangParam_t *target, const char *op
     char *np = kvlangKeytreeIrseqPc(fr, irseq);
     free(owned);
     kvlangVthreadNextPc(f, np, "running");
-    kvlangLogDebug("[%s] %s → %s", f->vthread_id, op, np);
+    KV_LOG_DEBUG("[%s] %s → %s", f->vthread_id, op, np);
     free(np);
     return 0;
 }
