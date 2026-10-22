@@ -104,11 +104,12 @@ int kvlangRwirOperandParse(kvspace_t *kv, const char *link_base,
     return 1;
 }
 
-/* 描述符 -> 当前帧的绝对 key；顺带用实际槽 head 细化类型。 */
+/* 描述符 -> 当前帧的绝对 key；读槽无声明类型时用实际槽 head 补类型。 */
 char *kvlangRwirOperandTarget(kvspace_t *kv, const char *frame_root,
                               const char *descriptor, char **type_io) {
     char *target = kvlangBuiltinResolveWriteSlot(kv, frame_root, descriptor);
-    if (target && type_io && (!*type_io || strcmp(*type_io, "any") != 0)) {
+    /* 声明类型是权威：只有缺类型时才用实际 head 补（写槽不补，[[赋值转换]]）。 */
+    if (target && type_io && (!*type_io || !(*type_io)[0])) {
         kvspaceHead_t actual;
         if (kvlangKvspaceGetHead(kv, target, &actual) == 0 &&
             actual.langtype_len > 0 &&
@@ -126,8 +127,8 @@ char *kvlangRwirOperandTarget(kvspace_t *kv, const char *frame_root,
 
 static int decode_operand(kvspace_t *kv, const char *link_base,
                           const char *frame_root, const char *slot,
-                          kvlangParam_t *out, bool read_target, char *err,
-                          uint32_t err_cap) {
+                          kvlangParam_t *out, bool read_target, bool is_write,
+                          char *err, uint32_t err_cap) {
     memset(out, 0, sizeof *out);
     char *descriptor = NULL, *type = NULL;
     bool is_literal = false, is_absolute_key = false;
@@ -151,7 +152,8 @@ static int decode_operand(kvspace_t *kv, const char *link_base,
     } else if (is_absolute_key) {
         target = descriptor;
     } else {
-        target = kvlangRwirOperandTarget(kv, frame_root, descriptor, &type);
+        target = kvlangRwirOperandTarget(kv, frame_root, descriptor,
+                                         is_write ? NULL : &type);
         free(descriptor);
     }
     if (!target || !target[0]) {
@@ -225,7 +227,8 @@ int kvlangRwirDecode(kvspace_t *kv, const char *link_base, const char *pc,
         snprintf(slot, sizeof slot, "[%d,-%d]", addr0, i);
         int rc =
             decode_operand(kv, link_base, frame_root, slot,
-                           &out->reads[out->read_count], true, err, err_cap);
+                           &out->reads[out->read_count], true, false, err,
+                           err_cap);
         if (rc < 0)
             goto fail;
         if (rc == 0) {
@@ -239,7 +242,7 @@ int kvlangRwirDecode(kvspace_t *kv, const char *link_base, const char *pc,
         snprintf(slot, sizeof slot, "[%d,%d]", addr0, i);
         int rc = decode_operand(kv, link_base, frame_root, slot,
                                 &out->writes[out->write_count],
-                                load_write_value, err, err_cap);
+                                load_write_value, true, err, err_cap);
         if (rc < 0)
             goto fail;
         if (rc == 0) {

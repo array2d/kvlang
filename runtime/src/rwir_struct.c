@@ -65,18 +65,24 @@ int kvlangBuiltinStructNew(kvlangFrame_t *f) {
                 free(fname);
                 break;
             }
-            const char *vk = kvlangXvalueKind(&in[i + 1]);
+            uint8_t cbuf[64];
+            kvlangXvalue_t cv = in[i + 1];
+            bool coerced =
+                !ftype[0] ||
+                kvlangXvalueCoerce(ftype, &in[i + 1], cbuf, sizeof cbuf, &cv) ==
+                    0;
+            const char *vk = kvlangXvalueKind(&cv);
             kvlangLangtype vkx;
-            kvlangLangtypeParse(xh_langtype_of(&in[i + 1]),
-                                (int32_t)xh_langtype_len_of(&in[i + 1]), &vkx);
+            kvlangLangtypeParse(xh_langtype_of(&cv),
+                                (int32_t)xh_langtype_len_of(&cv), &vkx);
             // *T 指针字段：字段类型剥离前导 * 后与值的 langtype 比对，并校验值 ref=1；
             // None 是合法空指针（见 [[ptr]]），不算类型不符。
             const char *fx = (ftype[0] == '*') ? ftype + 1 : ftype;
-            bool type_ok = ftype[0]
-                               ? kvlangLangtypeMatch(fx, vk, vkx.ndim, vkx.dims)
-                               : true;
-            if (ftype[0] == '*' && !kvlangXvalueNone(&in[i + 1]) &&
-                !xh_is_ptr(in[i + 1].bytes))
+            bool type_ok =
+                coerced && (ftype[0]
+                                ? kvlangLangtypeMatch(fx, vk, vkx.ndim, vkx.dims)
+                                : true);
+            if (ftype[0] == '*' && !kvlangXvalueNone(&cv) && !xh_is_ptr(cv.bytes))
                 type_ok = false;
             if (ftype[0] && !type_ok) {
                 rc = kvlangBuiltinSetError(
@@ -87,7 +93,7 @@ int kvlangBuiltinStructNew(kvlangFrame_t *f) {
                 break;
             }
             char *mk = kvlangKeytreeMember(ok, fname);
-            kvlangKvPair_t p = {mk, in[i + 1]};
+            kvlangKvPair_t p = {mk, cv};
             if (kvlangKvspaceSet(f->kvspace, &p, 1, err, sizeof err) != 0)
                 rc = kvlangBuiltinSetError(f, "%s", err);
             free(mk);

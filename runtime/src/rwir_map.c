@@ -92,22 +92,37 @@ int kvlangBuiltinObj(kvlangFrame_t *f) {
         char *wty = declared_map_langtype(f, w);
         kvlangXvalue_t mark;
         kvlangBuiltinMapMarker(&mark, wty);
-        free(wty);
+        char vbuf[64];
+        const char *vk = kvlangDeclElemKind(wty, vbuf, sizeof vbuf);
         kvlangKvPair_t p0 = {ok, mark};
         kvlangKvspaceSet(f->kvspace, &p0, 1, err, sizeof err);
         kvlangXvalueFree(&mark);
-        for (int i = 0, j = 0; i + 1 < n; i += 2) {
+        int rc = 0;
+        for (int i = 0, j = 0; i + 1 < n && rc == 0; i += 2) {
             if (kvlangXvalueNone(&in[i + 1]))
                 continue;
-            char *mk = kvlangKeytreeMember(ok, names[j]);
-            kvlangKvPair_t p = {mk, in[i + 1]};
-            kvlangKvspaceSet(f->kvspace, &p, 1, err, sizeof err);
-            free(mk);
+            uint8_t cbuf[64];
+            kvlangXvalue_t cv = in[i + 1];
+            if (vk && kvlangCoerceAssign(f, vk, &in[i + 1], cbuf,
+                                         sizeof cbuf, &cv) != 0)
+                rc = -1;
+            else {
+                char *mk = kvlangKeytreeMember(ok, names[j]);
+                kvlangKvPair_t p = {mk, cv};
+                kvlangKvspaceSet(f->kvspace, &p, 1, err, sizeof err);
+                free(mk);
+            }
             free(names[j]);
             j++;
         }
         free(names);
+        free(wty);
         free(ok);
+        if (rc != 0) {
+            free(fr);
+            kvlangBuiltinFreeInputs(in, n);
+            return rc;
+        }
     }
     free(fr);
     kvlangBuiltinNextPc(f);
@@ -138,18 +153,33 @@ int kvlangBuiltinMap(kvlangFrame_t *f) {
         char *wty = declared_map_langtype(f, w);
         kvlangXvalue_t mark;
         kvlangBuiltinMapMarker(&mark, wty);
-        free(wty);
+        char vbuf[64];
+        const char *vk = kvlangDeclElemKind(wty, vbuf, sizeof vbuf);
         kvlangKvPair_t p0 = {ok, mark};
         kvlangKvspaceSet(f->kvspace, &p0, 1, err, sizeof err);
         kvlangXvalueFree(&mark);
-        for (int i = 0; i < n; i++) {
-            int64_t c[1] = {i};
-            char *k = kvlangBuiltinScatterKey(ok, c, 1);
-            kvlangKvPair_t p = {k, in[i]};
-            kvlangKvspaceSet(f->kvspace, &p, 1, err, sizeof err);
-            free(k);
+        int rc = 0;
+        for (int i = 0; i < n && rc == 0; i++) {
+            uint8_t cbuf[64];
+            kvlangXvalue_t cv = in[i];
+            if (vk && kvlangCoerceAssign(f, vk, &in[i], cbuf, sizeof cbuf,
+                                         &cv) != 0)
+                rc = -1;
+            else {
+                int64_t c[1] = {i};
+                char *k = kvlangBuiltinScatterKey(ok, c, 1);
+                kvlangKvPair_t p = {k, cv};
+                kvlangKvspaceSet(f->kvspace, &p, 1, err, sizeof err);
+                free(k);
+            }
         }
+        free(wty);
         free(ok);
+        if (rc != 0) {
+            free(fr);
+            kvlangBuiltinFreeInputs(in, n);
+            return rc;
+        }
     }
     free(fr);
     kvlangBuiltinNextPc(f);

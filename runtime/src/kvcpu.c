@@ -43,6 +43,19 @@ static int operand_load(kvspace_t *kv, kvlangBoundCell_t *cell,
         if (kvspaceResolveRef(kv->handle, cell->key, &ko->off) == 0)
             ko->resolved = true;
     }
+    /* typed 读视图：声明 kind 与实际不同 → 转到 cell 复用缓冲（绑定期已备好文本）。 */
+    if (cell->coerce_tid && out->bytes && out->length &&
+        (xh_langtype_len_of(out) != cell->coerce_len ||
+         memcmp(xh_langtype_of(out), cell->type, cell->coerce_len) != 0)) {
+        if (!cell->coerce_buf)
+            cell->coerce_buf = malloc(64);
+        if (!cell->coerce_buf)
+            kvlangDie("out of memory coercing typed operand");
+        kvlangXvalue_t cv;
+        if (kvlangXvalueCoerce(cell->type, out, cell->coerce_buf, 64, &cv) != 0)
+            return -2; /* 不可转换：值保持原样，由调用方报 TypeError */
+        *out = cv;
+    }
     return 0;
 }
 
@@ -226,9 +239,16 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
                 reads[i].value = *bind->cell[i].literal;
                 continue;
             }
-            if (operand_load(kv, &bind->cell[i], &reads[i].value) != 0) {
-                exec_err = execute_error(
-                    kv, vtid, cur, "RuntimeError: cannot read operand %d", i);
+            int lr = operand_load(kv, &bind->cell[i], &reads[i].value);
+            if (lr != 0) {
+                exec_err =
+                    lr == -2
+                        ? execute_error(kv, vtid, cur,
+                                        "TypeError: cannot read %s as %s",
+                                        kvlangXvalueKind(&reads[i].value),
+                                        bind->cell[i].type)
+                        : execute_error(kv, vtid, cur,
+                                        "RuntimeError: cannot read operand %d", i);
                 break;
             }
             if (bind->cell[i].pin) /* 写槽会覆盖此 key：显式 copy 读视图 */
@@ -238,13 +258,22 @@ int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
             writes[j].name = bind->cell[row->nr + j].key;
             writes[j].type = bind->cell[row->nr + j].type;
             writes[j].is_address = true;
-            if (row->load_write_value &&
-                operand_load(kv, &bind->cell[row->nr + j], &writes[j].value) !=
-                    0) {
-                exec_err =
-                    execute_error(kv, vtid, cur,
+            if (row->load_write_value) {
+                int lr = operand_load(kv, &bind->cell[row->nr + j],
+                                      &writes[j].value);
+                if (lr != 0) {
+                    exec_err =
+                        lr == -2
+                            ? execute_error(
+                                  kv, vtid, cur,
+                                  "TypeError: cannot read %s as %s",
+                                  kvlangXvalueKind(&writes[j].value),
+                                  bind->cell[row->nr + j].type)
+                            : execute_error(
+                                  kv, vtid, cur,
                                   "RuntimeError: cannot read write slot %d", j);
-                break;
+                    break;
+                }
             }
         }
         if (exec_err != 0) {

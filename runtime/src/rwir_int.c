@@ -276,6 +276,22 @@ int kvlangBuiltinMin(kvlangFrame_t *f) { return kvlangBuiltinMaxMin(f, false); }
 /* ── cast ─────────────────────────────────────────────────── */
 
 /* cast */
+__attribute__((visibility("hidden"))) int
+kvlangScalarCast(int target_id, kvlangScalar_t s, uint8_t *buf, size_t cap,
+                 kvlangXvalue_t *out) {
+    if (!kvlangLangtypeIsNum(s.kind_id))
+        return -1;
+    if (kvlangLangtypeIsInt(target_id)) {
+        narrow_int(target_id, target_id, kvlangScalarI64(s), buf, cap, out);
+        return 0;
+    }
+    if (kvlangLangtypeIsFloat(target_id)) {
+        narrow_float(target_id, target_id, kvlangScalarF64(s), buf, cap, out);
+        return 0;
+    }
+    return -1;
+}
+
 static int kvlangBuiltinCastNum(kvlangFrame_t *f, const char *kind) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     if (n < 1 || kvlangXvalueNone(&in[0])) { kvlangBuiltinSetError(f, "TypeError: cannot cast None"); kvlangBuiltinFreeInputs(in, n); return -1; }
@@ -286,18 +302,14 @@ static int kvlangBuiltinCastNum(kvlangFrame_t *f, const char *kind) {
     if (tid == KVLANG_LT_BOOL) {
         if (!kvlangXvalueKindIs(&in[0], KVSPACE_KIND_BOOL)) { kvlangBuiltinSetError(f, "TypeError: cannot cast %s to bool — use != 0", kvlangXvalueKind(&in[0])); kvlangBuiltinFreeInputs(in, n); return -1; }
         rc = kvlangBuiltinEmitBool(f, kvlangScalarI64(sa) != 0);
-    } else if (tid == KVLANG_LT_FLOAT32) {
-        float fv = (float)kvlangScalarF64(sa);
-        uint8_t raw[4];
-        memcpy(raw, &fv, 4);
-        kvlangXvalue_t r = {sbuf,
-            kvlangScalarEncode(KVSPACE_KIND_FLOAT32, raw, 4, sbuf, sizeof sbuf)};
-        rc = kvlangBuiltinWriteResult(f, &r);
-    } else if (tid == KVLANG_LT_FLOAT64) {
-        rc = kvlangBuiltinEmitFloat64(f, kvlangScalarF64(sa));
     } else {
         kvlangXvalue_t r;
-        narrow_int(tid, tid, kvlangScalarI64(sa), sbuf, sizeof sbuf, &r);
+        if (kvlangScalarCast(tid, sa, sbuf, sizeof sbuf, &r) != 0) {
+            kvlangBuiltinSetError(f, "TypeError: cannot cast %s to %s",
+                                  kvlangXvalueKind(&in[0]), kind);
+            kvlangBuiltinFreeInputs(in, n);
+            return -1;
+        }
         rc = kvlangBuiltinWriteResult(f, &r);
     }
     kvlangBuiltinFreeInputs(in, n);

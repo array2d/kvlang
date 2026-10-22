@@ -186,20 +186,27 @@ int kvlangBuiltinArray(kvlangFrame_t *f) {
         kvlangBuiltinFreeInputs(in, n);
         return 0;
     }
-    const char *kind = kvlangXvalueKind(&in[0]);
+    char dbuf[64];
+    char kbuf[64];
+    const char *kind =
+        kvlangDeclElemKind(f->instruction->writes[0].type, dbuf, sizeof dbuf);
+    if (!kind) {
+        snprintf(kbuf, sizeof kbuf, "%s", kvlangXvalueKind(&in[0]));
+        kind = kbuf;
+    }
     if (kvlangXvalueElemSize(kind) <= 0) {
         kvlangBuiltinFreeInputs(in, n);
         return kvlangBuiltinSetError(f, "array: unsupported element kind %s",
                                    kind);
     }
-    for (int i = 1; i < n; i++)
-        if (strcmp(kvlangXvalueKind(&in[i]), kind) != 0) {
-            kvlangBuiltinFreeInputs(in, n);
-            return kvlangBuiltinSetError(f, "array: mixed kinds %s and %s", kind,
-                                       kvlangXvalueKind(&in[i]));
-        }
+    uint8_t cbuf[64][64];
+    kvlangXvalue_t cv[64];
+    if (kvlangCoerceAll(f, kind, in, n, cbuf, cv) != 0) {
+        kvlangBuiltinFreeInputs(in, n);
+        return -1;
+    }
     kvlangXvalue_t arr;
-    pack_typed_array(kind, in, n, &arr);
+    pack_typed_array(kind, cv, n, &arr);
     char *fr = kvlangKeytreeFrameRoot(f->pc);
     char *key =
         kvlangBuiltinResolveWriteSlot(f->kvspace, fr, f->instruction->writes[0].name);
@@ -240,7 +247,16 @@ int kvlangBuiltinArrayFill(kvlangFrame_t *f) {
     }
     uint8_t elem[8] = {0};
     if (n >= 2 && !kvlangXvalueNone(&in[1])) {
-        kvlangScalar_t s = kvlangXvalueScalar(&in[1]);
+        char ek[65];
+        snprintf(ek, sizeof ek, "%.*s", kx.kind_len, kx.kind);
+        uint8_t cbuf[64];
+        kvlangXvalue_t cv;
+        if (kvlangCoerceAssign(f, ek, &in[1], cbuf, sizeof cbuf, &cv) != 0) {
+            free(ke);
+            kvlangBuiltinFreeInputs(in, n);
+            return -1;
+        }
+        kvlangScalar_t s = kvlangXvalueScalar(&cv);
         int tid = kvlangLangtypeId(kx.kind, kx.kind_len);
         if (tid == KVLANG_LT_FLOAT32) {
             float v = (float)kvlangScalarF64(s);
@@ -394,16 +410,29 @@ int kvlangBuiltinAppend(kvlangFrame_t *f) {
     char *fr = kvlangKeytreeFrameRoot(f->pc);
     char *base =
         kvlangBuiltinResolveWriteSlot(f->kvspace, fr, f->instruction->writes[0].name);
-    int rc = ensure_scattered(f, base, n >= 2 ? kvlangXvalueKind(&in[1]) : NULL);
+    char dbuf[64];
+    const char *kind =
+        kvlangDeclElemKind(f->instruction->writes[0].type, dbuf, sizeof dbuf);
+    int rc = ensure_scattered(
+        f, base, kind ? kind : (n >= 2 ? kvlangXvalueKind(&in[1]) : NULL));
     if (rc != 0) {
         free(base);
         free(fr);
         kvlangBuiltinFreeInputs(in, n);
         return rc;
     }
+    uint8_t cbuf[64];
+    kvlangXvalue_t ev = in[1];
+    if (kind && kvlangCoerceAssign(f, kind, &in[1], cbuf, sizeof cbuf, &ev) !=
+                    0) {
+        free(base);
+        free(fr);
+        kvlangBuiltinFreeInputs(in, n);
+        return -1;
+    }
     int64_t c[1] = {separated_next(f->kvspace, base)};
     char *k = kvlangBuiltinScatterKey(base, c, 1);
-    kvlangKvPair_t p = {k, in[1]}; /* nr >= 2 已由上面拦下，ReadInputs(cap=2) 必返 2 */
+    kvlangKvPair_t p = {k, ev}; /* nr >= 2 已由上面拦下，ReadInputs(cap=2) 必返 2 */
     char err[256];
     rc = kvlangKvspaceSet(f->kvspace, &p, 1, err, sizeof err);
     free(k);

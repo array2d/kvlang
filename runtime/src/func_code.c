@@ -403,6 +403,7 @@ static void bind_free(kvlangRowBind_t *b) {
     for (int i = 0; i < b->n; i++) {
         free(b->cell[i].key);
         free(b->cell[i].type);
+        free(b->cell[i].coerce_buf);
     }
     free(b->cell);
     memset(b, 0, sizeof *b);
@@ -442,16 +443,26 @@ static int bind_row(kvspace_t *kv, kvlangFrameCtx_t *ctx, int s0,
             cell->type = src->type ? strdup(src->type) : NULL;
         } else {
             cell->type = src->type ? strdup(src->type) : NULL;
+            /* 写槽类型只取声明；实际槽 head 不得回填成声明（见 [[赋值转换]]）。 */
+            char **refine = i < row->nr ? &cell->type : NULL;
             if (src->key_absolute)
                 cell->key = strdup(src->descriptor);
             else
-                cell->key = kvlangRwirOperandTarget(
-                    kv, ctx->frame_root, src->descriptor, &cell->type);
+                cell->key = kvlangRwirOperandTarget(kv, ctx->frame_root,
+                                                    src->descriptor, refine);
         }
         if (!cell->key) {
             snprintf(err, err_cap,
                      "Runtime: cannot resolve operand %d at [%d,0]", i, s0);
             goto fail;
+        }
+        /* typed 读视图的 kind id 在绑定期解析一次，热路径不再扫 langtype 表。 */
+        if (!cell->literal && cell->type && cell->type[0]) {
+            int tid = kvlangLangtypeId(cell->type, strlen(cell->type));
+            if (kvlangLangtypeIsNum(tid) || tid == KVLANG_LT_BOOL) {
+                cell->coerce_tid = tid;
+                cell->coerce_len = (uint16_t)strlen(cell->type);
+            }
         }
         /* 变量可能尚未创建：失败留待执行时重试，不阻断加载。 */
         kvspaceKeyOffBind(&cell->off, kv, cell->key);
