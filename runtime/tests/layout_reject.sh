@@ -38,4 +38,27 @@ accept dyn_any 'rwfunc f(x:any) -> () { y = x + 1 }'
 accept char_concat 'rwfunc f() -> () { y = "a" + "b" }'
 accept mixed_width 'rwfunc f() -> () { a:int32 = 1 b:int64 = 2 c = a + b }'
 
-echo "PASS: layout 拒绝类型/arity 错误；动态 any/混合宽度/字符串拼接放行"
+# typed 槽赋值转换（[[赋值转换]]）
+check int8_lit_overflow 'rwfunc f() -> () { x:int8 = 200 }' 'not representable as int8'
+check uint8_negative 'rwfunc f() -> () { x:uint8 = -1 }' 'not representable as uint8'
+check int64_fraction 'rwfunc f() -> () { x:int64 = 1.5 }' 'is not an integer'
+check float32_overflow 'rwfunc f() -> () { x:float32 = 1e40 }' 'out of float32 range'
+check string_to_int 'rwfunc f() -> () { x:int64 = "abc" }' 'cannot assign string to int64'
+check none_to_int 'rwfunc f() -> () { x:int64 = None }' 'None cannot be assigned'
+check array_elem_overflow 'rwfunc f() -> () { a:[]int8 = [200, 2] }' 'not representable as int8'
+check call_lit_overflow 'rwfunc g(n:int8) -> () { } rwfunc f() -> () { g(200) }' 'not representable as int8'
+check struct_field_overflow 'struct S { v:int8=0 }
+rwfunc f() -> () { s:S = {v=200} }' 'not representable as int8'
+check element_write_overflow 'rwfunc f() -> () { a:[]int8 = [1, 2]
+a[0] = 200 }' 'not representable as int8'
+check container_mismatch 'rwfunc f() -> () { b:[]int64 = [1, 2]
+a:[]int8 = b }' 'cannot assign []int64 to []int8'
+
+accept int8_lit_ok 'rwfunc f() -> () { x:int8 = 100 }'
+accept float32_narrow 'rwfunc f() -> () { x:float32 = 0.1 }'
+accept explicit_cast_wrap 'rwfunc f() -> () { x:int8 = int8(300) }'
+accept dyn_value 'rwfunc f(v:any) -> () { x:int8 = v }'
+accept call_dyn_value 'rwfunc g(n:int8) -> () { } rwfunc f(v:any) -> () { g(v) }'
+accept array_int8_ok 'rwfunc f() -> () { a:[]int8 = [100, 2] }'
+
+echo "PASS: layout 拒绝类型/arity/赋值转换错误；动态 any/混合宽度/字符串拼接放行"

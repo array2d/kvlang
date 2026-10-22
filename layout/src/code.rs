@@ -61,8 +61,35 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
             }
         })
         .collect();
+    let mut sigs: lower::SigTable = HashMap::new();
+    for f in &file.funcs {
+        let qual = if f.pkg.is_empty() {
+            f.sig.name.clone()
+        } else {
+            format!("{}{}{}", f.pkg, keytree::MEMBER_SEP, f.sig.name)
+        };
+        sigs.entry(qual).or_insert_with(|| f.sig.clone());
+    }
+    for d in &file.rwir_decls {
+        let qual = if d.pkg.is_empty() {
+            d.sig.name.clone()
+        } else {
+            format!("{}{}{}", d.pkg, keytree::MEMBER_SEP, d.sig.name)
+        };
+        sigs.entry(qual).or_insert_with(|| d.sig.clone());
+    }
+    let mut structs: lower::StructTable = HashMap::new();
     for decl in &file.structs {
         write_struct_decl(kv, decl);
+        let qual = if decl.pkg.is_empty() {
+            decl.name.clone()
+        } else {
+            format!("{}{}{}", decl.pkg, keytree::MEMBER_SEP, decl.name)
+        };
+        structs.entry(qual).or_insert_with(|| decl.clone());
+        structs
+            .entry(decl.name.clone())
+            .or_insert_with(|| decl.clone());
         any_code = true;
     }
     for func in &file.funcs {
@@ -72,7 +99,7 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
             func.pkg.clone()
         };
         let mut lowered = lower::lower_func(func);
-        write_func(kv, &pkg, &mut lowered, &local_funcs)?;
+        write_func(kv, &pkg, &mut lowered, &local_funcs, &structs, &sigs)?;
         any_code = true;
         if func.sig.name == "init" {
             inits.push(init_fn_name(&pkg));
@@ -99,7 +126,7 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
             pkg: String::new(),
         };
         let mut lowered = lower::lower_func(&init_fn);
-        write_func(kv, "", &mut lowered, &local_funcs)?;
+        write_func(kv, "", &mut lowered, &local_funcs, &structs, &sigs)?;
         any_code = true;
         inits.push(init_fn_name(""));
     }
@@ -640,9 +667,12 @@ pub fn write_func(
     pkg: &str,
     fn_: &mut Func,
     local_funcs: &HashSet<String>,
+    structs: &lower::StructTable,
+    sigs: &lower::SigTable,
 ) -> Result<(), String> {
     let type_map = lower::infer_types(fn_);
-    let diags = lower::specialize(fn_, &type_map);
+    let mut diags = lower::validate_writes(fn_, pkg, &type_map, structs, sigs);
+    diags.extend(lower::specialize(fn_, &type_map));
     for d in &diags {
         eprintln!("{}", d.string());
     }

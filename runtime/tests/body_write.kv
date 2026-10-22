@@ -21,21 +21,23 @@ rwfunc test() -> () {
 		i = i + 1
 	}
 	println("a", x)
-	x = "hello"
-	println("b", x)
-	x = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-	x = 5
-	x = x + 1
-	println("c", x)
-	y:int64 = 0
+	// 类型变化只允许发生在无注解（动态）变量上：typed 槽恒为声明类型。
+	u = 0
+	u = "hello"
+	println("b", u)
+	u = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+	u = 5
+	u = u + 1
+	println("c", u)
+	v = 0
 	j:int64 = 0
 	while (j < 50) {
-		y = y + 1
-		y = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-		y = 5
+		v = v + 1
+		v = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+		v = 5
 		j = j + 1
 	}
-	println("d", y)
+	println("d", v)
 	f:float64 = 0.0
 	k:int64 = 0
 	while (k < 100) {
