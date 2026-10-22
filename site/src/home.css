@@ -157,6 +157,50 @@ section .section-lead {
   margin: 0 0 24px;
 }
 
+/* ── Runtime 扩展表 ── */
+.runtimes {
+  padding: 32px 0 56px;
+}
+.table-wrap {
+  overflow-x: auto;
+}
+.runtime-table {
+  width: 100%;
+  min-width: 560px;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.runtime-table th,
+.runtime-table td {
+  text-align: left;
+  vertical-align: top;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.runtime-table th {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-dim);
+  font-weight: 600;
+}
+.runtime-table a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.runtime-table a:hover {
+  text-decoration: underline;
+}
+.runtime-table .muted {
+  color: var(--fg-dim);
+}
+.runtime-footnote {
+  margin: 16px 0 0;
+  color: var(--fg-dim);
+  font-size: 14px;
+  max-width: 80ch;
+}
+
 /* ── 特性 ── */
 .feature {
   display: grid;
