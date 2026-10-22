@@ -667,6 +667,13 @@ void kvlangDispatchSetDefaultTimeoutNanoseconds(int64_t ns);
 /* ── builtin ───────────────────────────────────────────────────────── */
 
 /* yield_pc returns a child PC to the external runtime. */
+/* 执行游标（C-iii）：帧深/irseq 的派生缓存；值仍以 kvspace 的 ‥pc 为准。
+ * dirty 由每次 dispatch 置位，只有 kvlangBuiltinNextPc（顺序推进）清位。 */
+typedef struct {
+    int irseq;
+    bool dirty;
+} kvlangExecCursor;
+
 typedef struct {
     kvspace_t *kvspace;
     const char *vthread_id;
@@ -691,6 +698,7 @@ typedef struct {
     const void *row; /* const kvlangCodeRow_t * */
     int mode;        /* kvmode_t */
     char **out_pc;   /* ExecuteMode 的 out 参数（仅判空） */
+    kvlangExecCursor *cursor; /* 执行游标（C-iii），可为 NULL */
 } kvlangFrame_t;
 
 /* 特化 handler 不变量（仅 debug 生效）：声明为 kid 的操作数经读侧 coercion 必为 kid；
