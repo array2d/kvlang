@@ -17,7 +17,7 @@ lib kvlang/spec/类型系统/赋值转换 {
 - struct 的标量字段；
 - 能解析出声明类型的全局变量。
 
-**非 typed 槽**保持 any/动态语义，**不**适用本章：无注解的推断变量、显式 `any`、
+**非 typed 槽**保持无约束/动态语义，**不**适用本章：无注解的推断变量、空 kindexp（`name:`）、
 union/def langtype、`kvspace·set`/`kv·set` 的动态 key、容器赋值的目标本身
 （其元素仍按元素 kind 规则处理）。
 
@@ -32,7 +32,7 @@ union/def langtype、`kvspace·set`/`kv·set` 的动态 key、容器赋值的目
 
 写入/读取所需的种类转换**必须**使用 [[构造器]] 定义的转换表：float→int 向零截断、
 整数窄化补码回绕（`int8(300)`=44、`uint8(-1)`=255）、float32 收窄；None 只能写入
-Ptr/any 槽，写入其它 typed 槽才 TypeError。**不得**引入第二套转换规则或兼容别名。
+Ptr/空 kindexp 槽，写入其它 typed 槽才 TypeError。**不得**引入第二套转换规则或兼容别名。
 
 显式与隐式的门槛不同，两者**不是**矛盾：
 
@@ -60,8 +60,8 @@ Ptr/any 槽，写入其它 typed 槽才 TypeError。**不得**引入第二套转
 只有**字面量 token** 参与该检查；非字面量常量表达式按动态值处理（常量折叠是后续
 独立扩展，不改变本规则）。
 
-动态值（`any`、调用实参、容器/指针读、外部写入）按转换表的 cast 语义转换；
-不可转换（非数值、None 写入非 Ptr/any 槽）→ 运行时 `TypeError`。
+动态值（空 kindexp 槽、调用实参、容器/指针读、外部写入）按转换表的 cast 语义转换；
+不可转换（非数值、None 写入非 Ptr/空 kindexp 槽）→ 运行时 `TypeError`。
 
 容器元素与 struct 字段写：按元素/字段声明 kind 转换后再编码容器。
 整个容器赋值要求两边 langtype 完全一致；整值替换**不做**逐元素转换。
@@ -77,7 +77,7 @@ layout 按静态类型把算术/比较改写为 `<kind>·<op>` 特化 opcode（�
 由字面量本身固定）：
 
 - 全部操作数的类型都是**声明/字面量**且等于该 kind → 发特化 opcode；
-- 任一操作数只是推断类型或无声明（`any`、动态变量）→ **不发特化**，发通用 opcode，
+- 任一操作数只是推断类型或无声明（空 kindexp、动态变量）→ **不发特化**，发通用 opcode，
   运行时按实际 kind 计算。动态/无声明值**永不进入**特化 handler；
 - typed 操作数经「读侧 typed 视图」后实际 kind = 声明 kind，特化实现直接计算，
   无需每步判别；

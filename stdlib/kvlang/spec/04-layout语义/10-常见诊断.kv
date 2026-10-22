@@ -11,7 +11,7 @@ lib kvlang/spec/layout语义/常见诊断 {
   `param "A" appears in both read-params and write-params`；列表内 `duplicate param "a" in read-params`
   / `in write-params`。**调用**时不受限：`inc(x) -> x` 合法。
 - 标注不是种类名——`write "x": unknown type "int"` / `struct field "f": unknown type "intg64"`：
-  标量字面量右值处标注须是已知种类名或 `any`，数组字面量右值处须是合法 langtype；**大括号右值
+  标量字面量右值处标注须是已知种类名，数组字面量右值处须是合法 langtype；**大括号右值
   除外**——那里裸名是 struct 名，存在性归 runtime（见 [[文法与合法性]]）。
 - 变参位置非法——`variadic param "x" must be the last read-param` /
   `write-param "r" cannot be variadic`。

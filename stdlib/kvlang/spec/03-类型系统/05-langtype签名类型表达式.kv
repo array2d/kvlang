@@ -14,11 +14,12 @@ lib kvlang/spec/类型系统/langtype签名类型表达式 {
 | | 出现位置 | 角色 | 表达力 |
 |----|---------|------|--------|
 | **langtype** | 一个具体 XValue 的 head langtype（见 [[langtype语义类型]]） | 值**是什么**：一个具体实例的类型 | 具体固定——单一种类 + 确定 `[dims]`（每维具体整数），**不含**并集与任何轴量词 |
-| **def langtype** | 函数定义处——`def rwir` 的签名行 `[0,x]` 槽、`rwfunc` 的参数定义键 `.[0,±j]`（承载节点的 head langtype 都是 `def langtype`，见 [[storetype_def族与签名行]]） | 参数**可接受的一类值**：**匹配类型** | 完整——并集 `A\|B`、轴量词 `.`/`?`/`*`/`+`、`any`、mapexpr（见 [[匹配语义与变参]]） |
+| **def langtype** | 函数定义处——`def rwir` 的签名行 `[0,x]` 槽、`rwfunc` 的参数定义键 `.[0,±j]`（承载节点的 head langtype 都是 `def langtype`，见 [[storetype_def族与签名行]]） | 参数**可接受的一类值**：**匹配类型** | 完整——并集 `A\|B`、轴量词 `.`/`?`/`*`/`+`、mapexpr、**空 kindexp**（`name:`，不约束；见 [[文法与合法性]]） |
 
 **一个 def langtype 可匹配多种 langtype**——这正是参数多态的来源：`x:int8|int16|int32|int64` 接受四种整数，
-`a:[.,*]float32` 接受首维任意、秩 ≥1 的 float32 数组，`v:any` 接受一切。装载与调用时，把**实参值的
-langtype** 对参数定义的 **def langtype** 逐值判定：命中即通过，失配报 TypeError（见 [[匹配语义与变参]]）。
+`a:[.,*]float32` 接受首维任意、秩 ≥1 的 float32 数组，`v:`（空 kindexp）接受一切。装载与调用时，把
+**实参值的 langtype** 对参数定义的 **def langtype** 逐值判定：命中即通过，失配报 TypeError（见
+[[匹配语义与变参]]）。`any` **不是**类型名，写 `:any` 报 unknown type。
 参数变参 `...` 是签名层 arity 构造，**不在** def langtype 串内（见 [[函数]]）。
 
 opcode 槽 `[s0,0]` 使用实际的 `rwir` 或 `rwfunc` langtype；layout 在生成时区分已知调用目标，

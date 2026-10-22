@@ -61,7 +61,7 @@ rwfunc main() -> () {
 ## 2. 类型与构造器
 
 数值定宽：`int8 int16 int32 int64 uint8 uint16 uint32 uint64 float32 float64`。
-其它：`bool`、`char/utf8` `char/utf32` `char/ascii`、`stringkeymap`、`index`、`struct`、`time`、`duration`、`any`。
+其它：`bool`、`char/utf8` `char/utf32` `char/ascii`、`stringkeymap`、`index`、`struct`、`time`、`duration`；不约束用空 kindexp（`name:`）。
 
 ```kv
 float64(3) -> f          // 3.0

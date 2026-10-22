@@ -25,7 +25,7 @@ kvlang 只有 **7 个词法关键字**，它们在词法阶段即被识别，不
 return  if  else  for  while  break  continue
 ```
 
-其余在语言中具有特殊含义的词（`lib`、`rwir`、`rwfunc`、`in`、`any`、`None`、`true`、`false`、种类名
+其余在语言中具有特殊含义的词（`lib`、`rwir`、`rwfunc`、`in`、`None`、`true`、`false`、种类名
 如 `int64`/`float32`/`struct` 等）**不是**词法关键字：它们一律词法化为 `Ident`，其含义由 layout 阶段
 依上下文赋予。这类词称为**上下文词**。
 
