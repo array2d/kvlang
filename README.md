@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/array2d/kvlang/actions/workflows/ci.yml/badge.svg)](https://github.com/array2d/kvlang/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Tutorial Examples](https://img.shields.io/badge/tutorials-210%20examples-4c1)](tutorial/)
+[![Tutorial Examples](https://img.shields.io/badge/tutorials-235%20examples-4c1)](tutorial/)
 [![Spec](https://img.shields.io/badge/spec-84%20chapters-blueviolet)](stdlib/kvlang/spec/)
 
 **A plaintext, interpreted language whose addressing space and memory space are both kvspace — a small core with extensions on top (the front-end language of deepx, formerly dxlang).** Code and data live in one KV tree; the PC is a KV path (crash-resumable), the source is the IR, and every KV value is plaintext. The core runtime does only the execute loop and control flow; every other capability is supplied by other runtimes and registered at `/lib/<opcode>`.
@@ -322,7 +322,7 @@ For an LLM-oriented one-page summary of the language, see [`stdlib/kvlang/kvlang
 
 ## Tutorial
 
-210 self-contained examples (`// 期望输出` headers give expected output for 202 of them), organized by topic:
+235 self-contained examples (`// 期望输出` headers give expected output for 227 of them), organized by topic:
 
 ```
 01-basics/      hello, arith, precision, numtypes, strings, …     (18)
@@ -385,7 +385,7 @@ The normative language definition lives in [`stdlib/kvlang/spec/`](stdlib/kvlang
 | [附录](stdlib/kvlang/spec/附录/) | The authoritative grammar: program structure, type expressions, instructions, expressions, control flow, builtins |
 | [设计理由](stdlib/kvlang/spec/设计理由/) | Non-normative rationale: storage/compute separation, everything is plaintext, program as data, code hierarchy, how to design a language |
 
-A rendered view of the stdlib and spec is published at [array2d.github.io/kvlang](https://array2d.github.io/kvlang/).
+A rendered view of the stdlib and spec is published at [kvlang.com/stdlib](https://kvlang.com/stdlib/).
 
 ---
 
