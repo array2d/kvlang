@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="512"
+     height="512"
+     viewBox="0 0 512 512"
+     role="img"
+     aria-labelledby="title desc">
+  <title id="title">kvlang k-v mark</title>
+  <desc id="desc">A parametric six-point, five-line k-v mark.</desc>
+  <rect width="512" height="512" fill="#D07E64"
+        data-base-color="#C86749"
+        data-transparency="0.15"/>
+  <path d="M48.273 30.6074 L122.223 30.6074 L122.223 283.3203 L48.273 283.3203 Z M396.302 30.6074 L457.202 30.6074 L122.223 156.9638 L48.273 156.9638 Z M48.273 156.9638 L122.223 156.9638 L457.202 283.3203 L396.302 283.3203 Z"
+        fill="#1D1A18"
+        fill-rule="nonzero"
+        shape-rendering="geometricPrecision"/>
+  <path d="M48.273 283.3203 L122.223 283.3203 L292.975 481.3926 L219.025 481.3926 Z M396.302 283.3203 L457.202 283.3203 L292.975 481.3926 L219.025 481.3926 Z"
+        fill="#E4B3A4"
+        data-base-color="#C86749"
+        data-transparency="0.5"
+        fill-rule="nonzero"
+        shape-rendering="geometricPrecision"/>
+</svg>

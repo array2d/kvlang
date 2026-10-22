@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/kvlang-mark.svg" width="96" alt="kvlang"></p>
+
 # kvlang
 
 [![CI](https://github.com/array2d/kvlang/actions/workflows/ci.yml/badge.svg)](https://github.com/array2d/kvlang/actions/workflows/ci.yml)
