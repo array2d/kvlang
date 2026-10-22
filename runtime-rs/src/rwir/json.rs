@@ -7,8 +7,8 @@ use crate::ffi::*;
 
 const SEP: &str = "·";
 const DIR_SUF: &str = "/";
-const OBJECT_TYPE: &str = "[]char/utf32·any";
-const ARRAY_TYPE: &str = "[int64]·any";
+const OBJECT_TYPE: &str = "[]char/utf32·";
+const ARRAY_TYPE: &str = "[int64]·";
 
 pub fn to(eng: &Engine, pc: &str) {
     let names = params(eng, pc);

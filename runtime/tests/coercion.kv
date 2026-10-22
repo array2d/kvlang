@@ -2,7 +2,7 @@
 // 动态 kvspace·set 无静态目标类型，按原 kind 写入。
 struct S { v:int8 = 0 }
 rwfunc test() -> () {
-	v:any = 200
+	v = 200
 	x:int8 = v
 	println("i8", x)
 	y:uint8 = v
@@ -26,7 +26,7 @@ rwfunc test() -> () {
 	*p = v
 	println("ptr", x)
 	k:[]char/utf8·int8 = {y=v}
-	w:any = 300
+	w = 300
 	k·y = w
 	println("dynmap", k·y)
 	kvspace·set("/tmp/coerce/k", w)

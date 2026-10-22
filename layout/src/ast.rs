@@ -63,7 +63,8 @@ pub fn stmt_comments(st: &Stmt) -> &[String] {
 #[derive(Clone)]
 pub struct Param {
     pub name: String,
-    pub ty: String, // "" = 动态类型
+    pub ty: String,   // "" = 空 kindexp（不约束，仅签名槽 `name:` 合法）
+    pub has_ty: bool, // 源码是否写了冒号（区分「空 kindexp」与「缺注解」）
 }
 
 #[derive(Clone)]

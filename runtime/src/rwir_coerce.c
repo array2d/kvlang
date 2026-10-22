@@ -8,7 +8,7 @@ __attribute__((visibility("hidden"))) int
 kvlangXvalueCoerce(const char *type, const kvlangXvalue_t *v, uint8_t *buf,
                    size_t cap, kvlangXvalue_t *out) {
     *out = *v;
-    if (!type || !type[0] || strcmp(type, "any") == 0 || strchr(type, '|'))
+    if (!type || !type[0] || strchr(type, '|'))
         return 0;
     int tid = kvlangLangtypeId(type, strlen(type));
     kvlangLangtype vkx;

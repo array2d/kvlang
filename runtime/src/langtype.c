@@ -2,10 +2,9 @@
 
 /* ── 签名 langtype（runtime篇-07，修订：无家族简写）──────────────────
  * type   = atom ("|" atom)*
- * atom   = [dims] ( any | kind )
+ * atom   = [dims] kind（空 type_expr = 空 kindexp「不约束」）
  * dims   = "[]" | "[" elem ("," elem)* "]"   # 至多一个变元量词 ? 星 加
  * elem   = integer | "." | "?" | 星 | 加     # 轴量词（借鉴正则的 . 及量词）
- * any    = "any"           # 通配，匹配任意 kind
  * kind   = 精确 kind 串    # 见 known_kind
  *
  * 变参 "..." 是签名层 arity（吸收 0..N 个实参），不是 langtype 的一部分——
@@ -61,10 +60,9 @@ static bool valid_structref(const char *s, size_t len) {
     return seg > 0;
 }
 
-/* base = any | kind（kind 为精确合法 kind 串） */
+/* base = kind（精确合法 kind 串；空 kindexp 在 expr 层处理） */
 static bool valid_base(const char *s, size_t len) {
     if (len == 0) return false;
-    if (len == 3 && strncmp(s, "any", 3) == 0) return true;
     return known_kind(s, len);
 }
 
@@ -113,7 +111,8 @@ static bool valid_atom(const char *s, size_t len) {
 
 /* 类型表达式语法校验（装载期）。变参 "..." 是签名层 arity、不入 langtype 串，此处永不见。 */
 bool kvlangLangtypeValid(const char *expr) {
-    if (!expr || !*expr) return false;
+    if (!expr) return false;
+    if (!*expr) return true; /* 空 kindexp：不约束 */
     const char *p = expr;
     const char *end = expr + strlen(expr);
     for (;;) {
@@ -127,9 +126,8 @@ bool kvlangLangtypeValid(const char *expr) {
     return true;
 }
 
-/* any/kind 判定（kind 为运行时实际落盘 kind 串）。 */
+/* kind 判定（kind 为运行时实际落盘 kind 串）。 */
 static bool base_match(const char *s, size_t len, const char *kind) {
-    if (len == 3 && strncmp(s, "any", 3) == 0) return true;
     return kind_equal(s, len, kind);
 }
 
@@ -181,7 +179,6 @@ static bool match_shape(const char *s, size_t len, int32_t ndim, const int32_t *
 /* match_atom：裸 kind 表单值（shape=[1]，即 ndim==0）；[dims] 前缀强制 shape。
  * 数组/字符串须显式 []kind（[]⟺[?] 一维）或 [n]kind。 */
 static bool match_atom(const char *s, size_t len, const char *kind, int32_t ndim, const int32_t *dims) {
-    if (len == 3 && strncmp(s, "any", 3) == 0) return true;   /* any：顶类型，任意 kind + 任意 shape */
     if (s[0] == '[') {
         const char *end = memchr(s, ']', len);
         if (!end) return false;
@@ -195,6 +192,7 @@ static bool match_atom(const char *s, size_t len, const char *kind, int32_t ndim
  * 变参 arity 不在此判（靠主槽 dynamic 字节 + 派发循环）。 */
 bool kvlangLangtypeMatch(const char *expr, const char *kind, int32_t ndim, const int32_t *dims) {
     if (!expr || !kind) return false;
+    if (!*expr) return true; /* 空 kindexp：不约束，命中任意值（含 None） */
     const char *end = expr + strlen(expr);
     const char *p = expr;
     while (p < end) {

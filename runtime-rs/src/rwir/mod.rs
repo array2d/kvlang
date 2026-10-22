@@ -37,43 +37,43 @@ pub const MYRWIRCAPS: &[(&str, Rwir)] = &[
     (
         "input",
         Rwir {
-            rp: &["any"],
-            wp: &["*any"],
+            rp: &[""],
+            wp: &["*"],
         },
     ),
     (
         "print",
         Rwir {
-            rp: &["*any..."],
+            rp: &["*..."],
             wp: &[],
         },
     ),
     (
         "println",
         Rwir {
-            rp: &["*any..."],
+            rp: &["*..."],
             wp: &[],
         },
     ),
     (
         "cerr",
         Rwir {
-            rp: &["*any..."],
+            rp: &["*..."],
             wp: &[],
         },
     ),
     (
         "printf",
         Rwir {
-            rp: &["*[]char/utf8|*[]char/utf32", "*any..."],
+            rp: &["*[]char/utf8|*[]char/utf32", "*..."],
             wp: &[],
         },
     ),
     (
         "json·to",
         Rwir {
-            rp: &["*any"],
-            wp: &["*any"],
+            rp: &["*"],
+            wp: &["*"],
         },
     ),
     // json·from：xvalue 初始化类（以源 JSON 文本为初值构造 xvalue 树）。读参豁免 *T →
@@ -81,8 +81,8 @@ pub const MYRWIRCAPS: &[(&str, Rwir)] = &[
     (
         "json·from",
         Rwir {
-            rp: &["any"],
-            wp: &["*any"],
+            rp: &[""],
+            wp: &["*"],
         },
     ),
     (

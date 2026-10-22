@@ -7,9 +7,9 @@
 //   out= hi
 //   err= oops
 // run_capture 把 code/out/err 三个结果一并带回调用方；
-// 捕获句柄无 kindexpr 类型，写参声明为 any
+// 捕获句柄无 kindexpr 类型，写参声明为空 kindexp（`out:`/`err:`，不约束）
 rwfunc run_capture(args:*[int64]·[]char/utf32,
-		envs:*[int64]·[]char/utf32) -> (code:uint8, out:any, err:any) {
+		envs:*[int64]·[]char/utf32) -> (code:uint8, out:, err:) {
 	networld/proc·exec(args, envs) -> code, out, err
 }
 

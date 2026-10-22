@@ -428,6 +428,19 @@ impl Parser {
             if self.peek().kind == Kind::Colon {
                 self.advance();
                 ty = self.parse_type();
+                if ty.is_empty() {
+                    self.errors.push(Diagnostic {
+                        pos: Pos { line: 0, col: 0 },
+                        message: format!(
+                            "struct field {fname:?}: empty kindexp is only allowed in                              signature slots (`name:`)"
+                        ),
+                        warn: false,
+                        info: false,
+                        source: String::new(),
+                        src_file: String::new(),
+                        src_name: String::new(),
+                    });
+                }
             }
             let mut default = None;
             if self.peek().kind == Kind::Arrow && self.peek().value == "=" {
@@ -487,6 +500,19 @@ impl Parser {
 
     fn parse_type(&mut self) -> String {
         let raw = self.parse_type_raw();
+        if type_has_any(&raw) {
+            self.errors.push(Diagnostic {
+                pos: Pos { line: 0, col: 0 },
+                message: "unknown type \"any\" — `any` 不再是类型名；不约束请写空 kindexp：                          签名槽 `name:`、Ptr 目标 `*`、mapexpr value `[k]·`"
+                    .to_string(),
+                warn: false,
+                info: false,
+                source: String::new(),
+                src_file: String::new(),
+                src_name: String::new(),
+            });
+            return String::new();
+        }
         super::langtype::expand_struct_refs(&raw)
     }
 
@@ -556,9 +582,11 @@ impl Parser {
             let mut param = Param {
                 name: self.advance().value,
                 ty: String::new(),
+                has_ty: false,
             };
             if self.peek().kind == Kind::Colon {
                 self.advance();
+                param.has_ty = true;
                 param.ty = self.parse_type();
             }
             params.push(param);
@@ -648,10 +676,10 @@ impl Parser {
             }
         }
         for param in &sig.params {
-            if param.ty.is_empty() {
+            if !param.has_ty {
                 self.errors.push(Diagnostic {
                     pos: Pos { line: 0, col: 0 },
-                    message: format!("func {}: param {:?} has no type annotation — every parameter must declare its type, e.g. {}:int64", sig.name, param.name, param.name),
+                    message: format!("func {}: param {:?} has no type annotation — every parameter must declare its type (e.g. {}:int64) or explicitly write {}: for unconstrained (empty kindexp)", sig.name, param.name, param.name, param.name),
                     warn: false,
                     info: false,
                     source: String::new(),
@@ -661,10 +689,10 @@ impl Parser {
             }
         }
         for ret in &sig.returns {
-            if ret.ty.is_empty() {
+            if !ret.has_ty {
                 self.errors.push(Diagnostic {
                     pos: Pos { line: 0, col: 0 },
-                    message: format!("func {}: return value {:?} has no type annotation — every return value must declare its type, e.g. {}:int64", sig.name, ret.name, ret.name),
+                    message: format!("func {}: return value {:?} has no type annotation — every return value must declare its type (e.g. {}:int64) or explicitly write {}: for unconstrained (empty kindexp)", sig.name, ret.name, ret.name, ret.name),
                     warn: false,
                     info: false,
                     source: String::new(),
@@ -895,6 +923,24 @@ impl Parser {
             && t2.kind != Kind::LBrack
             && !t2_structref
         {
+            // `x: = …` 是空 kindexp 标注（不是标签）：只允许出现在签名槽。
+            if t2.kind == Kind::Arrow && t2.value == "=" {
+                self.errors.push(Diagnostic {
+                    pos: self.peek().pos,
+                    message: "empty kindexp is only allowed in signature slots (`name:`); \
+                              变量标注必须写具体类型"
+                        .to_string(),
+                    warn: false,
+                    info: false,
+                    source: String::new(),
+                    src_file: String::new(),
+                    src_name: String::new(),
+                });
+                while self.peek().kind != Kind::Newline && self.peek().kind != Kind::EOF {
+                    self.advance();
+                }
+                return Vec::new();
+            }
             return vec![self.parse_block_label()];
         }
         match self.peek().kind {
@@ -2010,6 +2056,18 @@ impl Parser {
         if self.peek().kind == Kind::Colon {
             self.advance();
             typ = self.parse_type();
+            if typ.is_empty() {
+                self.errors.push(Diagnostic {
+                    pos: self.peek().pos,
+                    message: "empty kindexp is only allowed in signature slots (`name:`);                               变量/字面量标注必须写具体类型"
+                        .to_string(),
+                    warn: false,
+                    info: false,
+                    source: String::new(),
+                    src_file: String::new(),
+                    src_name: String::new(),
+                });
+            }
             if typ == "int" || typ == "float" {
                 let pos = self.peek().pos;
                 self.errors.push(Diagnostic {
@@ -2080,6 +2138,18 @@ impl Parser {
                 if self.peek().kind == Kind::Colon {
                     self.advance();
                     ty = self.parse_type();
+                    if ty.is_empty() {
+                        self.errors.push(Diagnostic {
+                            pos: Pos { line: 0, col: 0 },
+                            message: "empty kindexp is only allowed in signature slots                                       (`name:`); 成员写槽标注必须写具体类型"
+                                .to_string(),
+                            warn: false,
+                            info: false,
+                            source: String::new(),
+                            src_file: String::new(),
+                            src_name: String::new(),
+                        });
+                    }
                 }
                 writes.push(w);
                 wtypes.push(ty);
@@ -2499,4 +2569,21 @@ fn walk_read_only(
             _ => {}
         }
     }
+}
+
+/// 类型表达式里是否出现 `any`（含 `*any`、`any...`、shape/mapexpr 的基）。`any` 已删除，
+/// 必须显式报 unknown type，不得被隐式展开成 structref `/lib/any`。
+fn type_has_any(raw: &str) -> bool {
+    raw.split('|').any(|a| {
+        let a = a.trim_start_matches(['*', '@']).trim_end_matches("...");
+        let base = match a.rfind(']') {
+            Some(i) => &a[i + 1..],
+            None => a,
+        };
+        let base = match base.rfind('·') {
+            Some(i) => &base[i + '·'.len_utf8()..],
+            None => base,
+        };
+        base == "any"
+    })
 }

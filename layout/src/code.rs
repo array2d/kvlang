@@ -443,6 +443,7 @@ fn reconstruct_sig(kv: &mut Kv, dir: &str, name: &str, nr: i32, nw: i32, dynamic
     let blank = || Param {
         name: String::new(),
         ty: String::new(),
+        has_ty: false,
     };
     let mut params: Vec<Param> = (0..nr).map(|_| blank()).collect();
     let mut returns: Vec<Param> = (0..nw).map(|_| blank()).collect();
@@ -454,6 +455,7 @@ fn reconstruct_sig(kv: &mut Kv, dir: &str, name: &str, nr: i32, nw: i32, dynamic
             params[(k - 1) as usize] = Param {
                 name: pname,
                 ty: pty,
+                has_ty: true,
             };
         }
     }
@@ -463,6 +465,7 @@ fn reconstruct_sig(kv: &mut Kv, dir: &str, name: &str, nr: i32, nw: i32, dynamic
             returns[(k - 1) as usize] = Param {
                 name: rname,
                 ty: rty,
+                has_ty: true,
             };
         }
     }
