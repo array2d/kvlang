@@ -1324,31 +1324,271 @@ fn push_num_diag(diags: &mut Vec<Diagnostic>, message: String) {
 
 // ── 特化（对齐 lower/specialize.go） ────────────────────────────────
 
-pub fn specialize(fn_: &mut Func, tm: &HashMap<String, String>) -> Vec<Diagnostic> {
+/// 表达式在「声明 + kind 稳定」视角下的精确 kind；None = 非精确（动态/容器/指针）。
+fn exact_kind(
+    e: &Expr,
+    declared: &HashMap<String, String>,
+    stable: &HashMap<String, String>,
+) -> Option<String> {
+    if e.is_leaf() {
+        if e.quote != 0 || matches!(e.lit, LitKind::LitString | LitKind::LitRawString) {
+            return Some("char/utf32".to_string());
+        }
+        return match e.lit {
+            LitKind::LitInt => Some("int64".to_string()),
+            LitKind::LitFloat => Some("float64".to_string()),
+            LitKind::LitBool => Some("bool".to_string()),
+            LitKind::LitNone if e.val == "None" => None,
+            _ => {
+                // 变量叶的 lit 也是 LitNone，按名字查声明/稳定表。
+                let name = &e.val;
+                if name.is_empty() {
+                    None
+                } else {
+                    declared
+                        .get(name)
+                        .or_else(|| stable.get(name))
+                        .filter(|t| !t.is_empty() && t.as_str() != "any" && !t.contains('|'))
+                        .cloned()
+                }
+            }
+        };
+    }
+    let op = e.op.as_str();
+    if is_cast_op(op) {
+        return Some(op.to_string());
+    }
+    if op == "bool" {
+        return Some("bool".to_string());
+    }
+    if op == ast::DEREF_OP || op == "kvlang·abs" {
+        return None;
+    }
+    let mut word = symbol::lookup(op).word.to_string();
+    if word.is_empty() {
+        word = op.to_string();
+    }
+    if symbol::lookup(op).cmp {
+        return Some("bool".to_string());
+    }
+    match word.as_str() {
+        // 容器读：基座类型声明/稳定且元素 kind 具体 → 结果 kind 精确。
+        "xv·at" | "array·compact" | "xv·reshape" => {
+            let base = e.args.first()?;
+            let t = exact_kind(base, declared, stable)?;
+            return container_elem(&t);
+        }
+        "kvspace·get" => {
+            let base = e.args.first()?;
+            let t = exact_kind(base, declared, stable)?;
+            return container_value(&t);
+        }
+        "sqrt" | "exp" | "log" | "pow" => return Some("float64".to_string()),
+        "sign" => return Some("int64".to_string()),
+        "kvlen" | "ndarray·numel" | "ndarray·dim" | "kvspace·listlen" | "string·len"
+        | "string·ord" | "string·cmp" | "string·find" | "string·parseint" | "xv·bodylen"
+        | "random.int63" => return Some("int64".to_string()),
+        "random·intn" | "random.uint64" | "string·parseuint" => {
+            return Some("uint64".to_string())
+        }
+        "string·parsefloat" => return Some("float64".to_string()),
+        _ => {}
+    }
+    let arith = symbol::lookup(op).arith;
+    let maxmin = matches!(word.as_str(), "max" | "min");
+    if !arith && !maxmin {
+        return None;
+    }
+    if word == "sub" && e.args.len() == 1 {
+        // 一元负号恒产 int64（runtime EmitInt64）；操作数 kind 不影响结果 kind。
+        return Some("int64".to_string());
+    }
+    let mut kind = String::new();
+    for a in &e.args {
+        let t = exact_kind(a, declared, stable)?;
+        if !builtin::is_num_kind(&t) {
+            return None;
+        }
+        kind = if kind.is_empty() {
+            t
+        } else {
+            builtin::wider_num_kind(&kind, &t)
+        };
+    }
+    if kind.is_empty() {
+        return None;
+    }
+    let rk = builtin::op_kind(&word, &kind);
+    Some(if rk.is_empty() { kind } else { rk })
+}
+
+/// kind 稳定推断：只用于**派发资格**（是否发特化 opcode），不是声明类型、不做 coercion。
+/// 候选来自推断类型；验证要求该槽的**所有赋值来源**都是同一具体标量 kind：
+/// 字面量/显式 cast/声明类型/已稳定变量/结果 kind 精确的内建与算术。
+/// `&x`、容器/字段/指针读、调用写参、None、any/union 一律视为不稳定。
+fn stable_kinds(
+    fn_: &Func,
+    tm: &HashMap<String, String>,
+    declared: &HashMap<String, String>,
+) -> HashMap<String, String> {
+    let mut sources: HashMap<String, Vec<Expr>> = HashMap::new();
+    let mut disq: HashSet<String> = HashSet::new();
+    collect_stability(&fn_.body, &mut sources, &mut disq);
+    let mut cands: HashMap<String, String> = HashMap::new();
+    for (v, es) in &sources {
+        if disq.contains(v) || es.is_empty() {
+            continue;
+        }
+        if let Some(t) = tm.get(v) {
+            if !t.is_empty() && t != "any" && !t.contains('|') && builtin::is_num_kind(t) {
+                cands.insert(v.clone(), t.clone());
+            }
+        }
+    }
+    let mut stable: HashMap<String, String> = HashMap::new();
+    let mut dead: HashSet<String> = HashSet::new();
+    loop {
+        let mut changed = false;
+        for (v, k) in &cands {
+            if stable.contains_key(v) || dead.contains(v) {
+                continue;
+            }
+            let boot = sources
+                .get(v)
+                .map(|es| {
+                    es.iter()
+                        .any(|e| exact_kind(e, declared, &stable).as_deref() == Some(k.as_str()))
+                })
+                .unwrap_or(false);
+            if boot {
+                stable.insert(v.clone(), k.clone());
+                changed = true;
+            }
+        }
+        let bad: Vec<String> = stable
+            .iter()
+            .filter(|(v, k)| {
+                !sources
+                    .get(*v)
+                    .map(|es| {
+                        es.iter().all(|e| {
+                            exact_kind(e, declared, &stable).as_deref() == Some(k.as_str())
+                        })
+                    })
+                    .unwrap_or(false)
+            })
+            .map(|(v, _)| v.clone())
+            .collect();
+        for v in bad {
+            stable.remove(&v);
+            dead.insert(v);
+            changed = true;
+        }
+        if !changed {
+            break;
+        }
+    }
+    stable
+}
+
+fn collect_inst_stability(
+    s: &Instruction,
+    sources: &mut HashMap<String, Vec<Expr>>,
+    disq: &mut HashSet<String>,
+) {
+    let e = match &s.expr {
+        Some(e) => e,
+        None => return,
+    };
+    for w in &s.writes {
+        if slot_is_plain_name(w) {
+            sources.entry(w.clone()).or_default().push(e.clone());
+        }
+    }
+    if e.op == "kvlang·abs" {
+        if let Some(a) = e.args.first() {
+            if a.is_leaf() {
+                disq.insert(a.val.clone());
+            }
+        }
+    }
+}
+
+fn collect_stability(
+    body: &[Stmt],
+    sources: &mut HashMap<String, Vec<Expr>>,
+    disq: &mut HashSet<String>,
+) {
+    for st in body {
+        match st {
+            Stmt::Instruction(s) => collect_inst_stability(s, sources, disq),
+            Stmt::Scope(s) => collect_stability(&s.body, sources, disq),
+            Stmt::If(s) => {
+                if let Some(c) = &s.cond {
+                    collect_inst_stability(c, sources, disq);
+                }
+                collect_stability(&s.then_, sources, disq);
+                collect_stability(&s.else_, sources, disq);
+            }
+            Stmt::While(s) => {
+                if let Some(c) = &s.cond {
+                    collect_inst_stability(c, sources, disq);
+                }
+                collect_stability(&s.body, sources, disq);
+            }
+            Stmt::For(s) => collect_stability(&s.body, sources, disq),
+            _ => {}
+        }
+    }
+}
+
+/// 操作数的派发资格 kind：字面量按自身 kind，变量取声明或稳定推断，其余不算精确。
+fn exact_operand_kind(
+    e: &Expr,
+    declared: &HashMap<String, String>,
+    stable: &HashMap<String, String>,
+) -> Option<String> {
+    exact_kind(e, declared, stable)
+}
+
+/// 特化决策只认**声明类型**或 **kind 稳定**的操作数：其余（推断不稳/无声明/any/union）
+/// 在运行时可能是任意 kind，不能进入 `<kind>·<op>`；字面量的 kind 由字面量本身固定。
+pub fn specialize(
+    fn_: &mut Func,
+    tm: &HashMap<String, String>,
+    declared: &HashMap<String, String>,
+) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
-    specialize_body(&mut fn_.body, tm, &mut diags);
+    let stable = stable_kinds(fn_, tm, declared);
+    specialize_body(&mut fn_.body, tm, declared, &stable, &mut diags);
     diags
 }
 
-fn specialize_body(body: &mut [Stmt], tm: &HashMap<String, String>, diags: &mut Vec<Diagnostic>) {
+fn specialize_body(
+    body: &mut [Stmt],
+    tm: &HashMap<String, String>,
+    declared: &HashMap<String, String>,
+    stable: &HashMap<String, String>,
+    diags: &mut Vec<Diagnostic>,
+) {
     for st in body {
         match st {
-            Stmt::Instruction(s) => specialize_inst(s, tm, diags),
-            Stmt::Scope(s) => specialize_body(&mut s.body, tm, diags),
+            Stmt::Instruction(s) => specialize_inst(s, tm, declared, stable, diags),
+            Stmt::Scope(s) => specialize_body(&mut s.body, tm, declared, stable, diags),
             Stmt::If(s) => {
                 if let Some(c) = &mut s.cond {
-                    specialize_inst(c, tm, diags);
+                    specialize_inst(c, tm, declared, stable, diags);
                 }
-                specialize_body(&mut s.then_, tm, diags);
-                specialize_body(&mut s.else_, tm, diags);
+                specialize_body(&mut s.then_, tm, declared, stable, diags);
+                specialize_body(&mut s.else_, tm, declared, stable, diags);
             }
             Stmt::While(s) => {
                 if let Some(c) = &mut s.cond {
-                    specialize_inst(c, tm, diags);
+                    specialize_inst(c, tm, declared, stable, diags);
                 }
-                specialize_body(&mut s.body, tm, diags);
+                specialize_body(&mut s.body, tm, declared, stable, diags);
             }
-            Stmt::For(s) => specialize_body(&mut s.body, tm, diags),
+            Stmt::For(s) => specialize_body(&mut s.body, tm, declared, stable, diags),
             _ => {}
         }
     }
@@ -1357,6 +1597,8 @@ fn specialize_body(body: &mut [Stmt], tm: &HashMap<String, String>, diags: &mut 
 fn specialize_inst(
     inst: &mut Instruction,
     tm: &HashMap<String, String>,
+    declared: &HashMap<String, String>,
+    stable: &HashMap<String, String>,
     diags: &mut Vec<Diagnostic>,
 ) {
     let e = match &mut inst.expr {
@@ -1375,12 +1617,16 @@ fn specialize_inst(
         return;
     }
     validate_num_op(&word, &e.args, tm, diags);
+    /* 特化决策用 declared（见上）；诊断仍用推断表以保持现有报错面。 */
     /* 只在「全部操作数静态类型完全一致且为 int64/float64」时特化；
      * 混合宽度/混合 int+float/动态 any/字符串/bool 一律保留通用 opcode。 */
     let mut kinds: Vec<String> = Vec::new();
     for arg in &e.args {
-        let t = arg_type(arg, tm);
-        if t.is_empty() || t == "any" || is_string_kind(&t) || !builtin::is_num_kind(&t) {
+        let t = match exact_operand_kind(arg, declared, stable) {
+            Some(t) => t,
+            None => return,
+        };
+        if is_string_kind(&t) || !builtin::is_num_kind(&t) {
             return;
         }
         kinds.push(t);

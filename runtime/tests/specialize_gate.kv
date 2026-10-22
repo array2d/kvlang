@@ -1,0 +1,28 @@
+// 特化派发资格（kind 稳定推断）：只有所有赋值来源都精确为同一标量 kind 才发特化。
+// 期望 opcode 见 specialize_gate.sh。
+rwfunc decl(n:int64) -> () {
+	a = n + 1
+	println("decl", a)
+}
+rwfunc test() -> () {
+	stable = 0
+	while (stable < 3) {
+		stable = stable + 1
+	}
+	println("stable", stable)
+	unstable = 0
+	unstable = 1.5
+	other = 0
+	other = 2.5
+	both = unstable + other
+	println("unstable", both)
+	addr = 0
+	p = &addr
+	viap = addr + 1
+	println("viap", viap)
+	arr:[2]int64 = [1, 2]
+	elem = arr[0]
+	viaelem = elem + 1
+	println("viaelem", viaelem)
+	decl(1)
+}
