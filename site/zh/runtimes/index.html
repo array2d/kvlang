@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>运行时扩展 — kvlang</title>
+    <meta
+      name="description"
+      content="kvlang 是以扩展为主的编程语言：核心保持最小，能力由 runtime 扩展与 lib 提供，多个扩展运行在同一个 kvspace。"
+    />
+    <link rel="icon" type="image/svg+xml" href="/img/kvlang-mark.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/img/apple-touch-icon-180.png" />
+    <meta name="theme-color" content="#D07E64" />
+    <link rel="canonical" href="https://kvlang.com/zh/runtimes/" />
+    <link rel="alternate" hreflang="en" href="https://kvlang.com/runtimes/" />
+    <link rel="alternate" hreflang="zh-CN" href="https://kvlang.com/zh/runtimes/" />
+    <link rel="alternate" hreflang="x-default" href="https://kvlang.com/runtimes/" />
+    <script type="module" src="/src/home.ts"></script>
+  </head>
+  <body class="home-body">
+    <header class="site-nav">
+      <div class="wrap">
+        <a class="wordmark" href="/zh/"><img src="/img/kvlang-mark.svg" alt="" width="26" height="26" />kvlang</a>
+        <a href="https://github.com/array2d/kvlang/releases">下载</a>
+        <a href="/zh/#start">学习</a>
+        <a href="/stdlib/">文档</a>
+        <a href="/zh/runtimes/">运行时</a>
+        <a href="https://github.com/array2d/kvlang/tree/master/stdlib/kvlang/spec">规范</a>
+        <a href="/zh/#ecosystem">生态</a>
+        <a href="https://github.com/array2d/kvlang">GitHub</a>
+        <a href="/runtimes/" hreflang="en" lang="en">English</a>
+        <button
+          id="theme"
+          class="theme"
+          type="button"
+          title="切换主题"
+          aria-label="切换深色模式"
+          aria-pressed="false"
+        >
+          ◐
+        </button>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="wrap">
+          <h1>运行时扩展</h1>
+          <p class="lead">
+            kvlang 是以扩展为主的编程语言。核心刻意保持最小，能力由 runtime 扩展与 lib 提供。多个
+            runtime 扩展运行在同一个 kvspace 中——同一棵树里的代码、帧与值，对所有参与者可见。
+          </p>
+          <p class="lead">
+            runtime 把 opcode 注册到 <code class="inline">/lib/&lt;opcode&gt;</code>；lib 是一组
+            rwir/rwfunc 定义，layout 进同一棵树。
+          </p>
+        </div>
+      </section>
+
+      <section class="runtimes">
+        <div class="wrap">
+          <div class="table-wrap">
+            <table class="runtime-table">
+              <thead>
+                <tr>
+                  <th scope="col">Runtime</th>
+                  <th scope="col">Lib（依赖本行 runtime）</th>
+                  <th scope="col">介绍 / 备注</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><a href="https://github.com/array2d/kvlang/tree/master/runtime">runtime-c</a></td>
+                  <td class="muted">—</td>
+                  <td>
+                    最小核心：取指、解码、执行、控制流与 native 派发。扩展 runtime 嵌入这个核心，而不是另起一套。
+                  </td>
+                </tr>
+                <tr>
+                  <td><a href="https://github.com/array2d/kvlang/tree/master/runtime-rs">runtime-rs</a></td>
+                  <td><a href="/stdlib/">stdlib</a></td>
+                  <td>
+                    第一个 runtime 扩展，也是它对应的第一个 lib。嵌入 C 核心，提供 kv、xv、time、duration、string
+                    等标准库 opcode；二进制名仍是 <code class="inline">kvlang</code>。
+                  </td>
+                </tr>
+                <tr>
+                  <td><a href="https://github.com/array2d/kvlang/tree/master/runtime-rs">runtime-rs</a></td>
+                  <td><a href="https://github.com/array2d/byteseek">byteseek</a></td>
+                  <td>
+                    第二个 lib。用 kvlang 编写的 Agent Harness，运行在 runtime-rs 上，共享同一个 kvspace。
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="runtime-footnote">
+            扩展通过注册生长，而不是改核心：新能力落在 <code class="inline">/lib</code>，任何 runtime
+            都可以提供。每个 lib 依赖同一行的 runtime 才能运行；lib 的 opcode 注册在该 runtime 的
+            <code class="inline">/lib/&lt;opcode&gt;</code> 下。
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap">
+        <nav>
+          <a href="https://github.com/array2d/kvlang/blob/master/LICENSE">MIT 许可证</a>
+          <a href="https://github.com/array2d/kvlang">GitHub</a>
+          <a href="https://github.com/array2d/kvlang/blob/master/CONTRIBUTING.md">贡献指南</a>
+          <a href="https://github.com/array2d/kvspace">kvspace</a>
+          <a href="https://github.com/array2d/kvspace-c">kvspace-c</a>
+          <a href="https://github.com/array2d/kvspace-durable">kvspace-durable</a>
+          <a href="https://github.com/array2d/slotsboxmalloc">slotsboxmalloc</a>
+          <a href="/llms.txt">llms.txt</a>
+        </nav>
+        <p>
+          本页每个事实都可追溯到规范或教程。机器可读的源清单：<a href="/llms.txt">/llms.txt</a>。
+        </p>
+      </div>
+    </footer>
+  </body>
+</html>
