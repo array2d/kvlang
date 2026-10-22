@@ -25,10 +25,19 @@ body {
   background: var(--bg-alt);
 }
 #brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-weight: 700;
   font-size: 17px;
   text-decoration: none;
   color: var(--fg);
+}
+#brand img {
+  display: block;
+  width: 22px;
+  height: 22px;
+  flex: none;
 }
 #brand span {
   color: var(--fg-dim);

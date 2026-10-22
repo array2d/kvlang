@@ -38,12 +38,21 @@ pre {
   flex-wrap: wrap;
 }
 .wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-weight: 700;
   font-size: 17px;
   letter-spacing: -0.01em;
   color: var(--fg);
   text-decoration: none;
   margin-right: auto;
+}
+.wordmark img {
+  display: block;
+  width: 26px;
+  height: 26px;
+  flex: none;
 }
 .site-nav a:not(.wordmark) {
   color: var(--fg-dim);
