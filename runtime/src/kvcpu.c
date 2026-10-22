@@ -139,6 +139,10 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
     kvlangFrameCtx_t *fctx[MAX_STACK_DEPTH + 1] = {0};
     uint32_t addr_epoch = 0; /* 删除/委托/handoff 后自增，使帧层 keyoff 失效 */
     int last_depth = 0; /* 0 = 尚未进入任何帧 */
+    /* C-iii 游标：帧深/帧根/irseq 的派生缓存，仅在 PC 结构变化时重解析。 */
+    int cursor_depth = 0;
+    bool cursor_ok = false;
+    kvlangExecCursor cursor = {0, true};
 
     const kvlangRwirCap *caps = kvlangRwirCaps();
     int rc = 0;
@@ -159,51 +163,58 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
             break;
         }
 
-        int depth = kvlangKeytreeFrameNum(cur);
-        if (depth > MAX_STACK_DEPTH) {
-            rc = execute_error(kv, vtid, cur,
-                               "RecursionError: stack overflow: depth=%d pc=%s",
-                               depth, cur);
-            break;
-        }
-        if (depth != last_depth) {
-            /* 帧变：变深=call（新帧）；变浅=return（更深的帧已删，本帧可复用）。 */
-            if (!kvlangKeytreeFrameRootBuffer(cur, fr_stk, sizeof fr_stk)) {
+        int depth;
+        int irseq;
+        if (!cursor_ok) {
+            depth = kvlangKeytreeFrameNum(cur);
+            if (depth > MAX_STACK_DEPTH) {
                 rc = execute_error(kv, vtid, cur,
-                                   "RuntimeError: invalid pc: %s", cur);
+                                   "RecursionError: stack overflow: depth=%d pc=%s",
+                                   depth, cur);
                 break;
             }
-            cur_frame = fr_stk;
-            for (int d = depth + 1; d <= last_depth && d <= MAX_STACK_DEPTH;
-                 d++) {
-                kvlangFrameCtxFree(fctx[d]);
-                fctx[d] = NULL;
-            }
-            if (fctx[depth] &&
-                strcmp(fctx[depth]->frame_root, cur_frame) != 0) {
-                kvlangFrameCtxFree(fctx[depth]);
-                fctx[depth] = NULL;
-            }
-            if (!fctx[depth]) {
-                char *func_dir = frame_func_dir(kv, cur_frame);
-                if (!func_dir) {
+            if (depth != last_depth) {
+                /* 帧变：变深=call（新帧）；变浅=return（更深的帧已删，本帧可复用）。 */
+                if (!kvlangKeytreeFrameRootBuffer(cur, fr_stk, sizeof fr_stk)) {
                     rc = execute_error(kv, vtid, cur,
-                                       "RuntimeError: frame has no ‥lib: %s",
-                                       cur_frame);
+                                       "RuntimeError: invalid pc: %s", cur);
                     break;
                 }
-                fctx[depth] = kvlangFrameCtxNew(&fcache, func_dir, cur_frame);
-                free(func_dir);
+                cur_frame = fr_stk;
+                for (int d = depth + 1; d <= last_depth && d <= MAX_STACK_DEPTH;
+                     d++) {
+                    kvlangFrameCtxFree(fctx[d]);
+                    fctx[d] = NULL;
+                }
+                if (fctx[depth] &&
+                    strcmp(fctx[depth]->frame_root, cur_frame) != 0) {
+                    kvlangFrameCtxFree(fctx[depth]);
+                    fctx[depth] = NULL;
+                }
+                if (!fctx[depth]) {
+                    char *func_dir = frame_func_dir(kv, cur_frame);
+                    if (!func_dir) {
+                        rc = execute_error(kv, vtid, cur,
+                                           "RuntimeError: frame has no ‥lib: %s",
+                                           cur_frame);
+                        break;
+                    }
+                    fctx[depth] = kvlangFrameCtxNew(&fcache, func_dir, cur_frame);
+                    free(func_dir);
+                }
+                last_depth = depth;
             }
-            last_depth = depth;
+            cursor_depth = depth;
+            const char *lastc = NULL;
+            for (const char *p = cur; (p = strstr(p, "/[")) != NULL; p += 2)
+                lastc = p;
+            cursor.irseq = lastc ? kvlangRwirExtractAddress(lastc + 1) : 0;
+            cursor_ok = true;
         }
+        depth = cursor_depth;
+        irseq = cursor.irseq;
         kvlangFrameCtxSync(fctx[depth], addr_epoch);
 
-        /* 函数二维表：PC 末坐标即 irseq，直接索引；行/绑定按需加载。 */
-        const char *lastc = NULL;
-        for (const char *p = cur; (p = strstr(p, "/[")) != NULL; p += 2)
-            lastc = p;
-        int irseq = lastc ? kvlangRwirExtractAddress(lastc + 1) : 0;
         char err[256];
         kvlangCodeRow_t *row = NULL;
         kvlangRowBind_t *bind =
@@ -303,10 +314,17 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
         f.row = row;
         f.mode = (int)mode;
         f.out_pc = out_pc;
+        f.cursor = &cursor;
+        /* 默认 dirty；只有 kvlangBuiltinNextPc 的顺序推进清位。 */
+        cursor.dirty = true;
         /* 一次表调用：native 与 route（委托/def rwir/user call）共用同一出口。 */
         exec_err = caps[row->handler_id].fn(&f);
         if (f.persist_failed)
             exec_err = -1;
+        if (cursor.dirty)
+            cursor_ok = false; /* 帧/irseq 结构可能变化：下步重新解析 */
+        else
+            cursor.irseq++; /* 顺序推进：只允许 BuiltinNextPc 走到这里 */
         bool pc_fb = f.pc_feedback;
         if (exec_err == 0 && yield) {
             /* vthread·run return 模式 / def rwir RETURN：冒泡子 rwir pc 给上层驱动。

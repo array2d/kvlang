@@ -182,6 +182,9 @@ void kvlangBuiltinNextPc(kvlangFrame_t *f) {
     if (kvlangRwirNextPcBuffer(f->pc, buf, sizeof buf) == 0)
         kvlangDie("next pc exceeds %zu bytes", sizeof buf);
     kvlangVthreadNextPc(f, buf, "running");
+    /* 顺序推进（同一帧、irseq+1）：游标只需 +1，不必重解析 PC。 */
+    if (f->cursor)
+        f->cursor->dirty = false;
 }
 
 int kvlangBuiltinWriteResult(kvlangFrame_t *f, const kvlangXvalue_t *result) {
