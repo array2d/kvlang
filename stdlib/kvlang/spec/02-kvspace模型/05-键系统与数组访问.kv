@@ -30,7 +30,7 @@ kind 常量集中定义于 `kvspace/include/kvspace/const.h`（C）与 `kvspace-
 ### langtype 文法
 
 langtype 串**全前缀**书写，最左符号为最外层构造器，无优先级歧义（对齐 Go/Rust 的 `[]int`）。完整文法
-（shape 与轴量词 `.`/`?`/`*`/`+`、并集 `A|B`、通配 `any`、mapexpr `key·value`、structref）**只在附录
+（shape 与轴量词 `.`/`?`/`*`/`+`、并集 `A|B`、空 kindexp、mapexpr `key·value`、structref）**只在附录
 [[文法]] 一处定义**，本章与其它卷只引用、不另立。
 **`langtype` 与 `def langtype` 是两回事**：值处写的是 `langtype`（值的**真实类型**），定义处（函数参数/返回
 值）写的是 `def langtype`（**匹配类型**）——后者是模式，**一个参数定义可匹配多种实际 `langtype`**（见

@@ -3,16 +3,18 @@ lib kvlang/spec/附录/类型表达式文法 {
 	r##"# 类型表达式（签名参数/返回值类型，多态 + 高维数组）
 
 > 完整语义见 [[langtype签名类型表达式]]（类型系统卷）。**签名位（参数/返回值）写的是 `def langtype`（定义处
-  的匹配类型）**，它可含并集/轴量词/`any`，因而能匹配多种调用时的 `langtype`（值的真实类型）；两者区别
+  的匹配类型）**，它可含并集/轴量词/空 kindexp，因而能匹配多种调用时的 `langtype`（值的真实类型）；两者区别
   见该章。铁律：无家族简写（`int`/`uint`/`float`/`num`/`char`）——位宽是开放集合，编码须写明确；多态靠
   显式 `|` 枚举。
 
 ```
-type_expr   = [ ref_prefix ] atom { "|" atom }   (* 前缀描述目标位置；调用一律传地址 *)
+type_expr   = [ ref_prefix ] [ atom { "|" atom } ] (* 整体为空 = 空 kindexp（不约束） *)
+            (* 空 kindexp 只允许出现在签名槽（`name:`）、Ptr 目标（`*`）与 mapexpr value（`[k]·`）；
+               裸 `name`（缺冒号）仍是错误。 *)
 ref_prefix  = "*" | "@"                          (* * 使用 storetype bit2；@ 使用 storage class 3，见 [[XValueHead线格式]] *)
 atom        = shape | mapexpr | structref
-shape       = [ dims ] ( any | kind )
-mapexpr     = memitemkey "·" memitemvalue        (* stringkeymap；`·` 左=item 键侧的**格式器**（memitemkey_langtype_formatter）、右=item 值类型。声明形如 memheadname:memitemkey_langtype_formatter·memitemvalue_langtype={}，见 [[map容器]] *)
+shape       = [ dims ] kind
+mapexpr     = memitemkey "·" [ memitemvalue ] (* stringkeymap；`·` 左=item 键侧的**格式器**（memitemkey_langtype_formatter）、右=item 值类型；右侧为空 = value 不约束。声明形如 memheadname:memitemkey_langtype_formatter·memitemvalue_langtype={}，见 [[map容器]] *)
 memitemvalue = type_expr                         (* item 值/body 类型，递归为完整 type_expr，故 map 可无限嵌套 *)
 memitemkey  = scalar                             (* 裸标量键：键只在路径系统、无 body，故这是"格式器"——输出该标量字面量本身，如 b·200；禁止包成 [200]（见 [[文法与合法性]]） *)
             | "[]" char_enc                      (* 字符串键（格式器输出裸名字符串），等价 Go map[string]V *)
@@ -31,7 +33,6 @@ elem        = integer                            (* 恰 1 轴、长度=integer *
             | "*"                                (* 0+ 轴（≈正则 .* ） *)
             | "+"                                (* 1+ 轴（≈正则 .+ ） *)
               (* 参数变参 "..." 不在类型表达式内——它是签名层 arity 构造，见 [[函数]] / [[程序结构]] *)
-any         = "any"                              (* 通配，匹配任意 kind *)
 kind        = "bool"
             | "int8" | "int16" | "int32" | "int64"
             | "uint8" | "uint16" | "uint32" | "uint64"

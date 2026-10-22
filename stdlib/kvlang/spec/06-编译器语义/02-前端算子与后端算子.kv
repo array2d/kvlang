@@ -14,7 +14,7 @@ lib kvlang/spec/编译器语义/前端算子与后端算子 {
 
 - 前端算子是前端代码面向的**稳定算子面**：厂商无关、无 author，只承诺语义与签名。
 - 后端算子由计算 runtime（deepx-cpu-compute 等）注册；同一 `<op>` 可有多个 author 各自实现，签名的
-  dtype 约束可不同（如 `deepx/cblas·matmul` 仅 float32/float64，`deepx/miaobyte·matmul` 覆盖 any）。
+  dtype 约束可不同（如 `deepx/cblas·matmul` 仅 float32/float64，`deepx/miaobyte·matmul` 覆盖全部 dtype）。
 - 非规范对照：前端算子 ≈ PyTorch `TORCH_LIBRARY m.def("argmax(...)")`（schema）；后端算子 ≈
   `TORCH_LIBRARY_IMPL(deepx, <author>, m).impl("argmax", ...)`（按后端注册 kernel）。author 之于
   kvlang 路径 ≈ DispatchKey 之于 Dispatcher。

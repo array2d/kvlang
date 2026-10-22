@@ -36,7 +36,7 @@ comment = "//" { char } newline           (* 行注释；不消费尾随换行 *
 ```
 
 词法关键字仅 7 个：`return` `if` `else` `for` `while` `break` `continue`。
-`lib` `rwir` `rwfunc` `in` `any` `None` `true` `false` 为**上下文词（软关键字）**——由 parser 按位置
+`lib` `rwir` `rwfunc` `in` `None` `true` `false` 为**上下文词（软关键字）**——由 parser 按位置
 识别，非词法保留字。
 "## -> /lib/kvlang/spec/附录/文法
 }

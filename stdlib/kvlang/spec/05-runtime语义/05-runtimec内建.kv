@@ -46,7 +46,7 @@ runtime-c 的 myrwircaps**（见 [[runtime开发规范]]）——核心能就地
 - 原生算术/比较的 **layout 特化**（normative）：layout 按操作数静态 kind 把指令改写成
   `<kind>·<op>`（如 `int64·add`、`float64·lt`），并校验操作数类型与 arity——字符串与数值
   混用、非数值操作数、一元/二元 arity 不符均在 layout 阶段报错。runtime 对已注册的
-  `int64`/`float64` 特化 handler 直接执行，不再复判 kind/arity；其它宽度、动态 `any`、
+  `int64`/`float64` 特化 handler 直接执行，不再复判 kind/arity；其它宽度、动态槽（空 kindexp）、
   def rwir 与用户扩展仍走通用实现并保留动态校验。值相关检查（除零、None 比较、越界）
   语义不变；未注册特化时回退通用实现，不得静默改变语义。
 
