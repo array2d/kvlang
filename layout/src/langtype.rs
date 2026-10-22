@@ -2,13 +2,13 @@
 //!
 //! type   = atom ("|" atom)*
 //! atom   = shape | mapexpr
-//! shape  = [dims] ( any | kind )
+//! shape  = [dims] kind
 //! mapexpr= key "·" type      # stringkeymap；value 递归 → 嵌套 map[string]map[…]
 //! key    = "[]" char-enc     # 字符串键（= Go map[string]V）
 //!        | "[" scalar ("," scalar)* "]"   # 标量元组键（物理以字符串格式落 key）
 //! dims   = "[]" | "[" elem ("," elem)* "]"   # 至多一个变元量词 ?/*/+
 //! elem   = integer | "." | "?" | "*" | "+"   # 轴量词（借鉴正则：. .? .* .+）
-//! any    = "any"           # 通配，匹配任意 kind
+//! （空 type_expr = 空 kindexp「不约束」；`any` 不是类型名，见 [[文法与合法性]]）
 //! kind   = 精确 kind 串    # 见 [`known_kind`]
 //!
 //! 铁律：不提供 int/uint/float/num 数值家族简写（位宽开放，纳入须逐个显式命名，
@@ -70,7 +70,7 @@ fn valid_base(s: &str) -> bool {
     if s.is_empty() {
         return false;
     }
-    s == "any" || known_kind(s)
+    known_kind(s)
 }
 
 fn elem_is_variable(s: &str) -> bool {
@@ -172,7 +172,8 @@ fn valid_atom(s: &str) -> bool {
     // `*`=ref ptr、`@`=ref @ext（见 [[ref存储位置]]）：两者都只是**源码**前缀，
     // layout 解析时剥离并落成 head.ref 字节，wire langtype 不含前缀。
     if let Some(rest) = s.strip_prefix('*').or_else(|| s.strip_prefix('@')) {
-        return !rest.is_empty() && valid_atom(rest);
+        // `*`/`@` 后可为空：Ptr 目标空 kindexp = 不约束（见 [[文法与合法性]]）。
+        return rest.is_empty() || valid_atom(rest);
     }
     if s.starts_with('/') {
         return valid_structref(s);
@@ -183,12 +184,13 @@ fn valid_atom(s: &str) -> bool {
     valid_shape(s)
 }
 
-/// 类型表达式语法校验（装载期）。变参 `...` 是签名层 arity、不入 langtype 串，此处永不见。
+/// 类型表达式语法校验（装载期）。空串 = 空 kindexp（不约束，合法）；变参 `...` 是签名层
+/// arity、不入 langtype 串，此处永不见。`any` 不是类型名。
 pub fn valid_langtype(expr: &str) -> bool {
-    !expr.is_empty() && expr.split('|').all(valid_atom)
+    expr.is_empty() || expr.split('|').all(valid_atom)
 }
 
-/// 是否只由**已知种类名**（或 `any`）构成——即「标量字面量可写入的类型」。
+/// 是否只由**已知种类名**构成——即「标量字面量可写入的类型」。
 /// `*`/`@` 前缀先剥（源码传递方式，不是类型本体）；structref（`/lib/…`）与形状、mapexpr 皆否。
 /// 用途见 `parser`（局部声明的写目标、struct 字段默认值）：裸名 `int`/`intg64` 经
 /// [`expand_struct_refs`] 变成 `/lib/int` 后，正是靠这条落网——它**不是**种类名，标量写不进去
@@ -197,11 +199,11 @@ pub fn is_plain_kind(ty: &str) -> bool {
     !ty.is_empty()
         && ty.split('|').all(|a| {
             let a = a.trim_start_matches(['*', '@']);
-            a == "any" || known_kind(a)
+            known_kind(a)
         })
 }
 
-/// 隐式 struct 名解析：把 langtype 中裸 struct 名（非 known kind / any 的标识符）展开为
+/// 隐式 struct 名解析：把 langtype 中裸 struct 名（非 known kind 的标识符）展开为
 /// `/lib/<name>`，使 kv 源可写 `x:Node` / `[int64]·Node`，runtime 恒收到完整 `/lib/…` 路径。
 /// 已 `/` 开头或 known kind 原样返回。mapexpr 只对 value 递归展开（key 恒 `[…]` 非 struct）。
 pub fn expand_struct_refs(s: &str) -> String {
@@ -229,17 +231,14 @@ fn expand_atom(s: &str) -> String {
     if s.starts_with('[') {
         return s.to_string();
     }
-    if s.is_empty() || known_kind(s) || s == "any" {
+    if s.is_empty() || known_kind(s) {
         return s.to_string();
     }
     format!("/lib/{s}")
 }
 
 fn base_match(s: &str, kind: &str) -> bool {
-    match s {
-        "any" => true,
-        _ => s == kind,
-    }
+    s == kind
 }
 
 /// 定长元（整数或 `.`）匹配单轴：`.` 任意长，整数须精确相等。
@@ -319,8 +318,9 @@ fn match_atom(s: &str, kind: &str, ndim: i32, dims: &[i32]) -> bool {
 /// 单值（kind/ndim/dims）是否匹配类型表达式：任一 atom 命中即 true。
 /// 变参 arity 不在此判（靠主槽 dynamic 字节 + 派发循环）。
 pub fn match_langtype(expr: &str, kind: &str, ndim: i32, dims: &[i32]) -> bool {
-    !expr.is_empty()
-        && expr
+    // 空 kindexp = 不约束：命中任意值（含 None）。
+    expr.is_empty()
+        || expr
             .split('|')
             .any(|atom| match_atom(atom, kind, ndim, dims))
 }
@@ -336,7 +336,6 @@ mod tests {
             "uint8",
             "float32",
             "bool",
-            "any",
             "char/utf8",
             "char/utf32",
             "char/ascii",
@@ -374,12 +373,14 @@ mod tests {
             "@int64",
             "@[256,256]uint8",
             "*[int32,int32]·[]char/utf8",
+            "",             // 空 kindexp（不约束）
+            "[]char/utf8·", // mapexpr value 空 = 不约束
+            "*",            // Ptr 目标空
         ] {
             assert!(valid_langtype(e), "{e} should be valid");
         }
         for e in [
             "·int64",
-            "[]char/utf8·",
             "char/utf8·int64",
             "int·int64",
             "[]char/utf8·nope",
@@ -429,7 +430,6 @@ mod tests {
     #[test]
     fn invalid() {
         for e in [
-            "",
             "int|",
             "|int",
             "int||float64",
@@ -456,6 +456,10 @@ mod tests {
             "fp16",
             "string",
             "charbyte",
+            "any",
+            "int64|any",
+            "[]any",
+            "*any",
         ] {
             assert!(!valid_langtype(e), "{e} should be invalid");
         }
@@ -466,8 +470,9 @@ mod tests {
         let cases = [
             ("int64", "int64", 0, &[][..], true),
             ("int64", "float64", 0, &[], false),
-            ("any", "stringkeymap", 0, &[], true),
-            ("any", "int4", 0, &[], true),
+            ("", "stringkeymap", 0, &[], true),
+            ("", "int4", 0, &[], true),
+            ("", "int64", 0, &[], true),
             ("char/utf8", "char/utf8", 0, &[], true),
             ("char/utf8", "char/utf32", 0, &[], false),
             ("int64|float64", "float64", 0, &[], true),

@@ -117,12 +117,11 @@ static void param_decl_type(kvspace_t *kv, const char *func_key, int x,
 static int add_param_binding(kvlangKvPair_t *pairs, bool *owned, int *np,
                              const char *frame_root, int x, const char *type,
                              const char *value_key) {
-    if (!type[0] || !value_key || *np > MAX_BIND_PAIRS - 2)
+    if (!value_key || *np > MAX_BIND_PAIRS - 2)
         return -1;
     while (*type == '*' || *type == '@')
         type++;
-    if (!type[0])
-        return -1;
+    /* 空 kindexp（`name:` / `*`）：Ptr 目标不约束，照常绑定（[[文法与合法性]]）。 */
     char *arg_key = kvlangStringFormat("%s/%sarg[0,%d]", frame_root,
                                RUNTIME_MEMBER_SEP, x);
     char *slot_key = kvlangStringFormat("%s/[0,%d]", frame_root, x);
@@ -388,6 +387,8 @@ fail:
 /* Read the declared target type; the argument value may be None. */
 static void param_decl_type(kvspace_t *kv, const char *func_key, int x,
                             char *lt, size_t cap) {
+    if (cap)
+        lt[0] = 0; /* 空 kindexp：body 只含 name+NUL，类型为空（不得沿用上一个参数） */
     char pk[KV_KEY_MAX];
     kvlangKeyFormat(pk, sizeof pk, "%s.[0,%d]", func_key, x);
     kvlangXvalue_t dv;

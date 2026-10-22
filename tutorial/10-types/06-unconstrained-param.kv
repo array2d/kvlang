@@ -1,0 +1,16 @@
+// 空 kindexp 读参：`a:` 表示不约束，接受任意类型实参（Ptr 目标为空、跳过 kind 校验）。
+// 期望输出:
+//   3
+//   42
+rwfunc size_of(a:) -> (n:int64) {
+	kvspace·listlen(a) -> n
+}
+rwfunc print_any(a:) -> () {
+	println(a)
+}
+rwfunc test() -> () {
+	m:[int64]·[]char/utf32 = {"a", "b", "c"}
+	size_of(m) -> n
+	println(n)
+	print_any(42)
+}

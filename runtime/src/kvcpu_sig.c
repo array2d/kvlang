@@ -44,7 +44,7 @@ static int rwir_normalize_param(kvspace_t *kv, const char *vtid, const char *pc,
 
 /* 派发期读参类型校验（runtime篇-07 第八节）：把每个实参的 kind 逐一匹配
  * rwir/rwfunc 定义的读参 kindexp。def_sig 为读参 kindexp 在前的 \n 分隔列表，
- * def_nr 为定义读参数，dynamic=1 表末读参变参吸收其后全部实参。空 kindexp / any 跳过。
+ * def_nr 为定义读参数，dynamic=1 表末读参变参吸收其后全部实参。空 kindexp（不约束）跳过。
  * XValue 头只携带 array_len 不含多维 shape，故仅校验 kind 层。
  * 不匹配 → 置 TypeError，返回 -1；通过返回 0。 */
 int check_read_types(kvspace_t *kv, const char *vtid, const char *pc,

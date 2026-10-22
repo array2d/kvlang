@@ -25,7 +25,7 @@ check mix_type 'rwfunc test() -> () { x = "abc" - 1 }' 'cannot mix string and nu
 check non_numeric 'rwfunc test() -> () { x = true + 1 }' 'expects numeric operand'
 check arity 'rwfunc test() -> () { x = sqrt(4, 2) }' 'sqrt expects 1 operand'
 
-accept() { # name, source：动态 any / 混合宽度 / 字符串拼接必须放行（走通用实现）
+accept() { # name, source：空 kindexp / 混合宽度 / 字符串拼接必须放行（走通用实现）
 	local name=$1 src=$2
 	printf '%s\n' "$src" > "$tmp/$name.kv"
 	if ! "$LAYOUT" "$tmp/$name.kv" "$DSN" >/dev/null 2>&1; then
@@ -34,7 +34,7 @@ accept() { # name, source：动态 any / 混合宽度 / 字符串拼接必须放
 	fi
 }
 
-accept dyn_any 'rwfunc f(x:any) -> () { y = x + 1 }'
+accept dyn_empty 'rwfunc f(x:) -> () { y = x + 1 }'
 accept char_concat 'rwfunc f() -> () { y = "a" + "b" }'
 accept mixed_width 'rwfunc f() -> () { a:int32 = 1 b:int64 = 2 c = a + b }'
 
@@ -57,8 +57,20 @@ a:[]int8 = b }' 'cannot assign []int64 to []int8'
 accept int8_lit_ok 'rwfunc f() -> () { x:int8 = 100 }'
 accept float32_narrow 'rwfunc f() -> () { x:float32 = 0.1 }'
 accept explicit_cast_wrap 'rwfunc f() -> () { x:int8 = int8(300) }'
-accept dyn_value 'rwfunc f(v:any) -> () { x:int8 = v }'
-accept call_dyn_value 'rwfunc g(n:int8) -> () { } rwfunc f(v:any) -> () { g(v) }'
+accept dyn_value 'rwfunc f(v:) -> () { x:int8 = v }'
+accept call_dyn_value 'rwfunc g(n:int8) -> () { } rwfunc f(v:) -> () { g(v) }'
 accept array_int8_ok 'rwfunc f() -> () { a:[]int8 = [100, 2] }'
 
-echo "PASS: layout 拒绝类型/arity/赋值转换错误；动态 any/混合宽度/字符串拼接放行"
+# 移除 any：any 报 unknown；空 kindexp 只允许签名槽 / Ptr 目标 / mapexpr value
+check any_type 'rwfunc f(x:any) -> () { }' 'unknown type "any"'
+check any_union 'rwfunc f(x:int64|any) -> () { }' 'unknown type "any"'
+check var_empty 'rwfunc f() -> () { x: = 1 }' 'empty kindexp is only allowed'
+check field_empty 'struct S { v: = 0 }
+rwfunc f() -> () { }' 'empty kindexp is only allowed'
+check union_empty 'rwfunc f(x:int64|) -> () { }' 'unknown type'
+check shape_empty 'rwfunc f(x:[]) -> () { }' 'unknown type'
+accept sig_empty 'rwfunc f(a:) -> (r:) { a -> r }'
+accept ptr_empty 'rwfunc f(p:*) -> () { }'
+accept map_empty_value 'rwfunc f() -> () { m:[int64]· = {} }'
+
+echo "PASS: layout 拒绝类型/arity/赋值转换错误；空 kindexp/混合宽度/字符串拼接放行"

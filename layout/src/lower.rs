@@ -1088,7 +1088,7 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
         let mut kind = String::new();
         for r in reads {
             let t = slot_type(r, tm);
-            if t.is_empty() || t == "any" || !builtin::is_num_kind(&t) {
+            if t.is_empty() || !builtin::is_num_kind(&t) {
                 return String::new();
             }
             kind = if kind.is_empty() {
@@ -1151,7 +1151,7 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
             let mut kind = String::new();
             for r in reads {
                 let t = slot_type(r, tm);
-                if t.is_empty() || t == "any" || !builtin::is_num_kind(&t) {
+                if t.is_empty() || !builtin::is_num_kind(&t) {
                     return String::new();
                 }
                 kind = if kind.is_empty() {
@@ -1285,7 +1285,7 @@ fn validate_num_op(
     let mut saw_num = false;
     for a in args {
         let t = arg_type(a, tm);
-        if t.is_empty() || t == "any" {
+        if t.is_empty() {
             continue;
         }
         if is_string_kind(&t) {
@@ -1348,7 +1348,7 @@ fn exact_kind(
                     declared
                         .get(name)
                         .or_else(|| stable.get(name))
-                        .filter(|t| !t.is_empty() && t.as_str() != "any" && !t.contains('|'))
+                        .filter(|t| !t.is_empty() && !t.contains('|'))
                         .cloned()
                 }
             }
@@ -1440,7 +1440,7 @@ fn stable_kinds(
             continue;
         }
         if let Some(t) = tm.get(v) {
-            if !t.is_empty() && t != "any" && !t.contains('|') && builtin::is_num_kind(t) {
+            if !t.is_empty() && !t.contains('|') && builtin::is_num_kind(t) {
                 cands.insert(v.clone(), t.clone());
             }
         }
@@ -1870,7 +1870,7 @@ fn check_element(kind: &str, e: &Expr, diags: &mut Vec<Diagnostic>) {
             }
         }
         _ => {
-            if is_none_lit(e) && !kind.starts_with('*') && kind != "any" {
+            if is_none_lit(e) && !kind.starts_with('*') && !kind.is_empty() {
                 push_write_diag(
                     diags,
                     format!("TypeError: None cannot be assigned to {kind}"),
@@ -1881,7 +1881,7 @@ fn check_element(kind: &str, e: &Expr, diags: &mut Vec<Diagnostic>) {
 }
 
 fn check_assignable(target: &str, rhs: &str, diags: &mut Vec<Diagnostic>) {
-    if rhs.is_empty() || rhs == "any" {
+    if rhs.is_empty() {
         return;
     }
     if builtin::is_num_kind(target) {
@@ -1942,7 +1942,7 @@ fn check_value(target: &str, e: &Expr, tm: &HashMap<String, String>, diags: &mut
             }
             _ => {
                 if is_none_lit(e) {
-                    if !target.starts_with('*') && target != "any" {
+                    if !target.starts_with('*') && !target.is_empty() {
                         push_write_diag(
                             diags,
                             format!("TypeError: None cannot be assigned to {target}"),
@@ -1979,7 +1979,7 @@ fn check_rhs(target: &str, e: &Expr, rhs: &str, diags: &mut Vec<Diagnostic>) {
             }
             _ => {
                 if is_none_lit(e) {
-                    if !target.starts_with('*') && target != "any" {
+                    if !target.starts_with('*') && !target.is_empty() {
                         push_write_diag(
                             diags,
                             format!("TypeError: None cannot be assigned to {target}"),
@@ -2202,7 +2202,7 @@ fn check_call_args(
             break;
         };
         let raw = param.ty.trim_end_matches("...").trim().to_string();
-        if raw.is_empty() || raw == "any" || raw.contains('|') || raw.starts_with('@') {
+        if raw.is_empty() || raw.contains('|') || raw.starts_with('@') {
             continue;
         }
         // 只对可静态信任的实参做检查：字面量，或已声明类型的变量。
@@ -2294,7 +2294,7 @@ fn walk_inst(
             }
         };
         let ty = ty.trim().to_string();
-        if ty.is_empty() || ty == "any" || ty.contains('|') || ty.starts_with('@') {
+        if ty.is_empty() || ty.contains('|') || ty.starts_with('@') {
             return;
         }
         if matches!(e.op.as_str(), "array" | "map" | "obj")
