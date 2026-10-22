@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/array2d/kvlang/actions/workflows/ci.yml/badge.svg)](https://github.com/array2d/kvlang/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Tutorial Examples](https://img.shields.io/badge/tutorials-210%20examples-4c1)](tutorial/)
+[![Tutorial Examples](https://img.shields.io/badge/tutorials-235%20examples-4c1)](tutorial/)
 [![Spec](https://img.shields.io/badge/spec-84%20chapters-blueviolet)](stdlib/kvlang/spec/)
 
 **以 kvspace 为寻址空间和内存空间、小核心、扩展主导的明文解释执行语言（原训推框架 deepx 的前端语言，前身 dxlang）。** 代码与数据统一在一棵 KV 树；PC 即 KV 路径、可崩溃恢复，源码即 IR、KV 皆明文。核心 runtime 只做执行循环与控制流，其余能力由其它 runtime 提供、注册在 `/lib/<opcode>`。
@@ -322,7 +322,7 @@ rwfunc test() -> () {
 
 ## Tutorial
 
-210 个自包含示例（其中 202 个用 `// 期望输出` 头给出期望输出），按主题组织：
+235 个自包含示例（其中 227 个用 `// 期望输出` 头给出期望输出），按主题组织：
 
 ```
 01-basics/      hello, arith, precision, numtypes, strings, …     (18)
@@ -388,7 +388,7 @@ case、计时约定、CSV 字段见 [benchmark/README.md](benchmark/README.md)�
 | [附录](stdlib/kvlang/spec/附录/) | 唯一权威文法：程序结构、类型表达式、指令、表达式、控制流、内建函数 |
 | [设计理由](stdlib/kvlang/spec/设计理由/) | 非规范动机说明：存算分离、一切皆明文、程序即数据结构、代码层级、如何设计一门语言 |
 
-stdlib 与 spec 的渲染视图发布在 [array2d.github.io/kvlang](https://array2d.github.io/kvlang/)。
+stdlib 与 spec 的渲染视图发布在 [kvlang.com/stdlib](https://kvlang.com/stdlib/)。
 
 ---
 

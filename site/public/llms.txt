@@ -1,0 +1,20 @@
+# kvlang
+
+> A plaintext, interpreted language where code and data live in one KV tree.
+> The program counter is a path, the source is the IR, every value is plaintext.
+
+## Canonical sources
+
+- [README (English)](https://raw.githubusercontent.com/array2d/kvlang/master/README.md)
+- [README (Chinese)](https://raw.githubusercontent.com/array2d/kvlang/master/README_CN.md)
+- [Specification](https://github.com/array2d/kvlang/tree/master/stdlib/kvlang/spec)
+- [Tutorials](https://github.com/array2d/kvlang/tree/master/tutorial)
+- [Standard library documents](https://kvlang.com/stdlib/)
+- [Install script](https://raw.githubusercontent.com/array2d/kvlang/master/install.sh)
+- [Source repository](https://github.com/array2d/kvlang)
+
+## Notes
+
+- This homepage is static HTML; all facts are traceable to the spec or the tutorial.
+- The stdlib page is client-rendered. Crawlers that do not execute JS should use the
+  raw sources above (the GitHub trees API or raw.githubusercontent.com).

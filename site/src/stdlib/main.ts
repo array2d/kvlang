@@ -1,6 +1,7 @@
 // 入口：编排目录列表 → 侧边栏 → 选中渲染，hash 路由支持深链。
 
-import "./styles.css";
+import "../tokens.css";
+import "../styles.css";
 import {
   listStdlib,
   fetchRaw,

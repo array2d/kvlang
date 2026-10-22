@@ -3,6 +3,7 @@ name: pages
 on:
   push:
     branches: [master]
+    tags: ["v*"]
     paths:
       - "site/**"
       - "stdlib/**"
@@ -23,13 +24,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 版本号与日期从 tag 推导
       - uses: actions/setup-node@v4
         with:
           node-version: 20
       - name: 构建站点
         working-directory: site
         run: |
-          npm install
+          npm ci
           npm run build
       - uses: actions/upload-pages-artifact@v3
         with:
