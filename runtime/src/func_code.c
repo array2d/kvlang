@@ -443,13 +443,11 @@ static int bind_row(kvspace_t *kv, kvlangFrameCtx_t *ctx, int s0,
             cell->type = src->type ? strdup(src->type) : NULL;
         } else {
             cell->type = src->type ? strdup(src->type) : NULL;
-            /* 写槽类型只取声明；实际槽 head 不得回填成声明（见 [[赋值转换]]）。 */
-            char **refine = i < row->nr ? &cell->type : NULL;
             if (src->key_absolute)
                 cell->key = strdup(src->descriptor);
             else
                 cell->key = kvlangRwirOperandTarget(kv, ctx->frame_root,
-                                                    src->descriptor, refine);
+                                                    src->descriptor);
         }
         if (!cell->key) {
             snprintf(err, err_cap,

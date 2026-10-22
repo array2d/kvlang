@@ -603,7 +603,7 @@ int kvlangRwirOperandParse(kvspace_t *kv, const char *link_base,
                            char *err, uint32_t err_cap);
 /* 描述符 -> 当前帧绝对 key；类型非 "any" 时用实际槽 head 细化。 */
 char *kvlangRwirOperandTarget(kvspace_t *kv, const char *frame_root,
-                              const char *descriptor, char **type_io);
+                              const char *descriptor);
 /* 外部扩展 handoff：写共享队列 /lib/<opcode>/vids/<vid>=pc，阻塞 watch 该 key 直至变 None
  * （外部执行器认领、驱动、置 nextpc 后删除该条目 → 本端解除阻塞）。 */
 int kvlangHandoffExternalRwir(kvspace_t *kv, const char *vtid, const char *pc,
@@ -687,6 +687,25 @@ typedef struct {
     int mode;        /* kvmode_t */
     char **out_pc;   /* ExecuteMode 的 out 参数（仅判空） */
 } kvlangFrame_t;
+
+/* 特化 handler 不变量（仅 debug 生效）：声明为 kid 的操作数经读侧 coercion 必为 kid；
+ * 实际 kind 不符 = 不变量被破坏，直接 die。动态/无声明操作数（type 为空/any/union）
+ * 合法地可能任意 kind，不检查——它们由 handler 的通用回退处理。 */
+#ifndef NDEBUG
+static inline void kvlangSpecCheckDeclared(const kvlangFrame_t *f, int i,
+                                           int actual_kind, int kid) {
+    if (!f->instruction || i >= f->instruction->read_count)
+        return;
+    const char *t = f->instruction->reads[i].type;
+    if (!t || !t[0] || strcmp(t, "any") == 0 || strchr(t, '|'))
+        return;
+    if (kvlangLangtypeId(t, strlen(t)) == kid && actual_kind != kid)
+        kvlangDie("specialized %s: operand %d kind %d != declared %s",
+                  f->instruction->opcode, i, actual_kind, t);
+}
+#else
+#define kvlangSpecCheckDeclared(f, i, actual_kind, kid) ((void)0)
+#endif
 
 /* 写侧转换出口：失败即置 TypeError；CoerceAll 供数组字面量逐元素转换。 */
 __attribute__((visibility("hidden"))) int
