@@ -2,8 +2,8 @@ name: pages
 
 on:
   push:
+    # 只在 master 发布；tag 不需要部署 Pages（tag 上 deploy job 会失败）。
     branches: [master]
-    tags: ["v*"]
     paths:
       - "site/**"
       - "stdlib/**"
