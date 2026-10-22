@@ -1,4 +1,5 @@
 #include "kvcpu_internal.h"
+#include <assert.h>
 
 /* 找末个成员分隔符（·，多字节），对齐 strrchr('.') 的单字节旧语义。 */
 static const char *rfind_separator(const char *s) {
@@ -147,7 +148,10 @@ static char *handle_call(kvspace_t *kv, const char *pc,
                          kvlangRwirInst_t *inst) {
     char vtid_b[KV_KEY_MAX];
     const char *vtid = kvlangKeytreeVthreadIdFromPc(pc, vtid_b, sizeof vtid_b);
+    /* 目标名由 kvlangKvcpuCallOpcode 用 strdup(opcode) 造出（静态调用取 opcode、
+     * vthread·call 取运行时 funckey），不是行内操作数，故不会 NULL/字面量。 */
     const char *fn = inst->reads[0].name;
+    assert(fn);
     char *pkg = strdup("");
     char *name = strdup(fn);
     const char *lp = "/lib/";

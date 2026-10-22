@@ -1,6 +1,7 @@
 #include "runtime_internal.h"
 #include "rwir_internal.h"
 #include "func_code.h"
+#include <assert.h>
 
 #ifdef KV_COUNT
 unsigned long kvCBodyFast, kvCBodyFallback;
@@ -60,6 +61,8 @@ char *kvlangBuiltinResolveReadKey(kvspace_t *kv, const char *frame_root, const c
 }
 
 char *kvlangBuiltinResolveWriteSlot(kvspace_t *kv, const char *frame_root, const char *name) {
+    /* 写槽/槽键解析必须有名字：字面量读参 name=NULL，调用方须先按值分流。 */
+    assert(name);
     if (name[0] == '/') return strdup(name);
     char stkbuf[512];
     char *stk = kvlangKeytreeStackBuffer(frame_root, stkbuf, sizeof stkbuf)
