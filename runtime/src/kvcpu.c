@@ -265,6 +265,15 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
             for (const char *p = cur; (p = strstr(p, "/[")) != NULL; p += 2)
                 lastc = p;
             cursor.irseq = lastc ? kvlangRwirExtractAddress(lastc + 1) : 0;
+            /* 前缀（到末个 '/'，含）随游标缓存：顺序推进只重写数字尾。 */
+            size_t plen = lastc ? (size_t)(lastc - cur) + 1 : 0;
+            if (plen < sizeof cursor.prefix) {
+                memcpy(cursor.prefix, cur, plen);
+                cursor.prefix_len = (int)plen;
+                cursor.prefix_ok = true;
+            } else {
+                cursor.prefix_ok = false;
+            }
             cursor_ok = true;
         }
         depth = cursor_depth;

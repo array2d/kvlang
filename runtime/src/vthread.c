@@ -132,6 +132,14 @@ static uint32_t utf8_cp_count(const char *s, uint32_t len) {
     return n;
 }
 
+/* PC 路径绝大多数是纯 ASCII：此时码点数 == 字节数，免一次全串扫描。 */
+static uint32_t cp_count(const char *s, uint32_t len) {
+    uint8_t acc = 0;
+    for (uint32_t i = 0; i < len; i++)
+        acc |= (uint8_t)s[i];
+    return (acc & 0x80) ? utf8_cp_count(s, len) : len;
+}
+
 /* 整值写（首次/超长/非 shm/part 失败回退）：编码进 pc 缓存并写整值。 */
 static int pc_write_whole(kvlangFrame_t *f, struct kvspaceKeyOff *ko,
                           const char *s, uint32_t len) {
@@ -144,17 +152,34 @@ static int pc_write_whole(kvlangFrame_t *f, struct kvspaceKeyOff *ko,
     return kvspaceKeyOffSet(ko, pc_cache.buf, n, NULL, 0);
 }
 
+/* langtype = "[N]char/utf8"（冷 helper）：码点数统计 + 无 snprintf 整数格式化。 */
+__attribute__((noinline)) static int fmt_char_langtype(uint8_t *lt, const char *s,
+                                                       uint32_t len) {
+    uint32_t v = cp_count(s, len);
+    char digits[12];
+    int d = 0;
+    do {
+        digits[d++] = (char)('0' + (int)(v % 10));
+        v /= 10;
+    } while (v);
+    uint32_t p = 0;
+    if ((uint32_t)d + 13 > 64 - XH_PREFIX)
+        return -1;
+    lt[p++] = '[';
+    while (d)
+        lt[p++] = (uint8_t)digits[--d];
+    memcpy(lt + p, "]char/utf8", 11); /* 含结尾 NUL */
+    return 0;
+}
+
 /* 等价值写：只更新 head 的 a/langtype 与 body 前缀，写 `[2, 64+len)`。 */
 static int pc_write_part(kvlangFrame_t *f, struct kvspaceKeyOff *ko,
                          const char *s, uint32_t len) {
     uint8_t *b = pc_cache.buf;
     for (int i = 0; i < 4; i++)
         b[2 + i] = (uint8_t)(len >> (8 * i)); /* a */
-    int kn = snprintf((char *)b + XH_PREFIX, 64 - XH_PREFIX, "[%u]char/utf8",
-                      utf8_cp_count(s, len));
-    if (kn < 0 || (uint32_t)kn >= 64 - XH_PREFIX)
+    if (fmt_char_langtype(b + XH_PREFIX, s, len) != 0)
         return -1;
-    b[XH_PREFIX + (uint32_t)kn] = 0;
     memcpy(b + 64, s, len);
     uint32_t part = 64 + len - 2;
     return kvspaceSetPartByRef(f->kvspace->handle, &ko->off, ko->key, 2, b + 2,
@@ -211,12 +236,15 @@ void kvlangVthreadNextPc(kvlangFrame_t *f, const char *pc,
     if (!f->persist_failed &&
         (!f->status_known || strcmp(f->status_known, status) != 0))
         member_write(f, f->status_off, true, status);
-    /* 回传：值就是刚写进 kvspace 的那条 PC，不引入第二份事实源。 */
+    /* 回传：值就是刚写进 kvspace 的那条 PC，不引入第二份事实源。
+     * 热路径已直接格式化进 pc_out 时省掉这次 memcpy。 */
     if (!f->persist_failed && f->pc_out) {
-        size_t n = strlen(pc);
-        if (n + 1 > f->pc_out_cap)
-            kvlangDie("feedback pc exceeds %zu bytes", f->pc_out_cap);
-        memcpy(f->pc_out, pc, n + 1);
+        if (pc != f->pc_out) {
+            size_t n = strlen(pc);
+            if (n + 1 > f->pc_out_cap)
+                kvlangDie("feedback pc exceeds %zu bytes", f->pc_out_cap);
+            memcpy(f->pc_out, pc, n + 1);
+        }
         f->pc_feedback = true;
     }
 }

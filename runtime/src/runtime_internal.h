@@ -593,6 +593,9 @@ typedef struct {
     kvspaceKeyOff **write_offs; /* 本步写槽的帧层地址；NULL = 按 key 写 */
 } kvlangRwirInst_t;
 
+__attribute__((visibility("hidden"))) size_t
+kvlangRwirNextPcFromPrefix(const char *prefix, size_t plen, int irseq, char *buf,
+                           size_t cap);
 size_t kvlangRwirNextPcBuffer(const char *pc, char *buf,
                               size_t cap); /* 栈缓冲，返长度 */
 int kvlangRwirExtractAddress(const char *coord);
@@ -672,6 +675,10 @@ void kvlangDispatchSetDefaultTimeoutNanoseconds(int64_t ns);
 typedef struct {
     int irseq;
     bool dirty;
+    /* PC 前缀（到末个 '/'，含）缓存：顺序推进只需重写数字尾，免 strrchr/strtol。 */
+    char prefix[KV_KEY_MAX];
+    int prefix_len;
+    bool prefix_ok;
 } kvlangExecCursor;
 
 typedef struct {
