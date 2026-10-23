@@ -11,12 +11,12 @@ static int64_t now_nanoseconds(void) {
 
 static void new_time(kvlangXvalue_t *v, int64_t ns) {
     uint8_t r[8]; memcpy(r, &ns, 8);
-    kvlangXvalueNewTlv(v, KVSPACE_KIND_TIME, r, 8, 1);
+    kvlangXvalueNew(v, KVSPACE_KIND_TIME, r, 8, 1);
 }
 
 static void new_duration(kvlangXvalue_t *v, int64_t ns) {
     uint8_t r[8]; memcpy(r, &ns, 8);
-    kvlangXvalueNewTlv(v, KVSPACE_KIND_DURATION, r, 8, 1);
+    kvlangXvalueNew(v, KVSPACE_KIND_DURATION, r, 8, 1);
 }
 
 int kvlangBuiltinTimeNow(kvlangFrame_t *f) {

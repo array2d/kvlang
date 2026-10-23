@@ -13,11 +13,11 @@ func TestNativeDataTo(t *testing.T) {
 	delTree(c, "/d")
 	delTree(c, "/b")
 	mkindex(c, "/d/")
-	setTLV(c, "/d/p", constructTLV("int64", u64(1), 1))
-	setTLV(c, "/d/q", constructTLV("int64", u64(2), 1))
+	setXValue(c, "/d/p", constructXValue("int64", u64(1), 1))
+	setXValue(c, "/d/q", constructXValue("int64", u64(2), 1))
 
 	raw := append(append(append([]byte{}, u64(1)...), u64(2)...), u64(3)...)
-	setTLV(c, "/b", constructTLV("int64", raw, 3))
+	setXValue(c, "/b", constructXValue("int64", raw, 3))
 
 	if got, _ := json.Marshal(build(c, "/d")); string(got) != `{"p":1,"q":2}` {
 		t.Errorf("dir got %s", got)

@@ -67,7 +67,7 @@ extern "C" {
         err: *mut c_char,
         err_cap: u32,
     ) -> c_int;
-    fn kvspaceTlvEncode(
+    fn kvspaceXvalueEncode(
         kind: *const c_char,
         raw: *const u8,
         raw_len: u32,
@@ -239,10 +239,10 @@ impl Kv {
     }
 
     pub fn set(&mut self, pairs: &[(String, Vec<u8>)]) -> Result<(), String> {
-        for (key, tlv) in pairs {
+        for (key, xvalue) in pairs {
             let ck = CString::new(key.as_str()).expect("no NUL in key");
             let mut err: [c_char; 256] = [0; 256];
-            let is_none = tlv.is_empty() || xh_is_none(tlv);
+            let is_none = xvalue.is_empty() || xh_is_none(xvalue);
             let ret = if is_none {
                 let key_ptr = ck.as_ptr();
                 unsafe { kvspaceDel(self.h, &key_ptr, 1, err.as_mut_ptr(), err.len() as u32) }
@@ -251,8 +251,8 @@ impl Kv {
                     kvspaceSetValue(
                         self.h,
                         ck.as_ptr(),
-                        tlv.as_ptr(),
-                        tlv.len() as u32,
+                        xvalue.as_ptr(),
+                        xvalue.len() as u32,
                         0,
                         0,
                         err.as_mut_ptr(),
@@ -346,11 +346,11 @@ fn al_to_dims(kind: &str, array_len: i32) -> Vec<i32> {
 }
 
 /// Encode an inline XValue.
-pub fn tlv_encode(kind: &str, raw: &[u8], array_len: i32) -> Vec<u8> {
+pub fn xvalue_encode(kind: &str, raw: &[u8], array_len: i32) -> Vec<u8> {
     let ck = CString::new(kind).expect("no NUL in kind");
     let dims = al_to_dims(kind, array_len);
     call_codec(|out, out_len| unsafe {
-        kvspaceTlvEncode(
+        kvspaceXvalueEncode(
             ck.as_ptr(),
             raw.as_ptr(),
             raw.len() as u32,
@@ -419,7 +419,7 @@ pub fn new_char(kind: &str, s: &str) -> Vec<u8> {
     let ck = CString::new(kind).expect("no NUL");
     let dims = [n];
     call_codec(|out, out_len| unsafe {
-        kvspaceTlvEncode(
+        kvspaceXvalueEncode(
             ck.as_ptr(),
             raw.as_ptr(),
             raw.len() as u32,

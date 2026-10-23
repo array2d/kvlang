@@ -26,7 +26,7 @@ extern int   kvspaceListAt(void *h, const char *prefix, int expand_ext, int reso
 extern int   kvspaceDel(void *h, const char *const *keys, uint32_t nkeys, char *err, uint32_t err_cap);
 extern int   kvspaceDelTree(void *h, const char *prefix, char *err, uint32_t err_cap);
 extern int   kvspaceMkindex(void *h, const char *path, uint32_t capacity, char *err, uint32_t err_cap);
-extern int   kvspaceTlvEncode(const char *kind, const uint8_t *raw, uint32_t raw_len,
+extern int   kvspaceXvalueEncode(const char *kind, const uint8_t *raw, uint32_t raw_len,
                               const int32_t *dims, int32_t ndim, uint8_t **out, uint32_t *out_len);
 extern int   kvspaceNewChar(const uint8_t *bytes, uint32_t len, uint8_t **out, uint32_t *out_len);
 extern const char *kvspaceConst(const char *name);
@@ -115,9 +115,9 @@ func isMapLangtype(lt string) bool {
 	return k == kindMap || strings.Contains(k, sep)
 }
 
-// getTLV：借用读。resolve=1 穿透 link（handoff 队列经 Ptr 统一到首个 op，须穿透）。
+// getXValue：借用读。resolve=1 穿透 link（handoff 队列经 Ptr 统一到首个 op，须穿透）。
 // 返回拷贝，调用方持有；借用指针不得 free。
-func getTLV(c unsafe.Pointer, key string, resolve int) []byte {
+func getXValue(c unsafe.Pointer, key string, resolve int) []byte {
 	ck := cstr(key)
 	defer C.free(unsafe.Pointer(ck))
 	var out *C.uint8_t
@@ -129,12 +129,12 @@ func getTLV(c unsafe.Pointer, key string, resolve int) []byte {
 }
 
 func headAt(c unsafe.Pointer, key string) (C.kvspaceHead_t, bool) {
-	return headOf(getTLV(c, key, 0))
+	return headOf(getXValue(c, key, 0))
 }
 
 // get：key 的 body 字节（借用读 → 拷贝）。
 func get(c unsafe.Pointer, key string, resolve int) string {
-	data := getTLV(c, key, resolve)
+	data := getXValue(c, key, resolve)
 	h, ok := headOf(data)
 	if !ok {
 		return ""
@@ -174,16 +174,16 @@ func writeBody(c unsafe.Pointer, key string, ref, storetype, ro C.uint8_t, vid C
 	}
 }
 
-// setTLV：解 head 取三轴 + body，走写即构造。
-func setTLV(c unsafe.Pointer, key string, tlv []byte) {
-	h, ok := headOf(tlv)
+// setXValue：解 head 取三轴 + body，走写即构造。
+func setXValue(c unsafe.Pointer, key string, xvalue []byte) {
+	h, ok := headOf(xvalue)
 	if !ok {
 		return
 	}
 	bo, bl := int(h.body_offset), int(h.body_len)
 	var body []byte
-	if bo >= 0 && bl >= 0 && bo+bl <= len(tlv) {
-		body = tlv[bo : bo+bl]
+	if bo >= 0 && bl >= 0 && bo+bl <= len(xvalue) {
+		body = xvalue[bo : bo+bl]
 	}
 	writeBody(c, key, h.ref, h.storetype, h.ro, h.vid, langtypeOf(&h), body)
 }
@@ -273,10 +273,10 @@ func params(c unsafe.Pointer, pc string) []string {
 	return strings.Split(gostr(C.kvlangRwirextParams(c, cp)), "\n")
 }
 
-// ── XValue 编解码（走权威 codec：DecodeHead 读头 + TlvEncode/NewChar 编码）──
+// ── XValue 编解码（走权威 codec：DecodeHead 读头 + XvalueEncode/NewChar 编码）──
 
-// parseTLV：解 head 得 kind/body/arrLen。arrLen = ∏物理 dims（标量为 1；容器值 body 空）。
-func parseTLV(data []byte) (kind string, raw []byte, arrLen int) {
+// parseXValue：解 head 得 kind/body/arrLen。arrLen = ∏物理 dims（标量为 1；容器值 body 空）。
+func parseXValue(data []byte) (kind string, raw []byte, arrLen int) {
 	h, ok := headOf(data)
 	if !ok {
 		return "", nil, 0
@@ -297,8 +297,8 @@ func parseTLV(data []byte) (kind string, raw []byte, arrLen int) {
 	return kind, raw, arrLen
 }
 
-// encodeTLV：类型化编码（唯一编码入口，委托 kvspace 正典 codec，不手拼 head）。
-func encodeTLV(kind string, raw []byte, dims []int32) []byte {
+// encodeXValue：类型化编码（唯一编码入口，委托 kvspace 正典 codec，不手拼 head）。
+func encodeXValue(kind string, raw []byte, dims []int32) []byte {
 	ck := cstr(kind)
 	defer C.free(unsafe.Pointer(ck))
 	var buf unsafe.Pointer
@@ -316,19 +316,19 @@ func encodeTLV(kind string, raw []byte, dims []int32) []byte {
 	}
 	var out *C.uint8_t
 	var ol C.uint32_t
-	if C.kvspaceTlvEncode(ck, (*C.uint8_t)(buf), C.uint32_t(len(raw)), dp, C.int32_t(len(dims)), &out, &ol) != 0 || out == nil {
+	if C.kvspaceXvalueEncode(ck, (*C.uint8_t)(buf), C.uint32_t(len(raw)), dp, C.int32_t(len(dims)), &out, &ol) != 0 || out == nil {
 		return nil
 	}
 	defer C.free(unsafe.Pointer(out)) // codec 产出为前端 malloc
 	return C.GoBytes(unsafe.Pointer(out), C.int(ol))
 }
 
-// constructTLV：标量（arrLen==1）或一维数组（arrLen>1 → dims=[arrLen]）。
-func constructTLV(kind string, raw []byte, arrLen int) []byte {
+// constructXValue：标量（arrLen==1）或一维数组（arrLen>1 → dims=[arrLen]）。
+func constructXValue(kind string, raw []byte, arrLen int) []byte {
 	if arrLen > 1 {
-		return encodeTLV(kind, raw, []int32{int32(arrLen)})
+		return encodeXValue(kind, raw, []int32{int32(arrLen)})
 	}
-	return encodeTLV(kind, raw, nil)
+	return encodeXValue(kind, raw, nil)
 }
 
 // constructChar：字符串走 codec 的 NewChar（显式长度，NUL 安全）。空串亦须给非空指针。
@@ -351,7 +351,7 @@ func constructChar(raw []byte) []byte {
 	return C.GoBytes(unsafe.Pointer(out), C.int(ol))
 }
 
-// ── JSON 值 ↔ TLV ───────────────────────────────────────────────────
+// ── JSON 值 ↔ XValue ───────────────────────────────────────────────────
 
 func readInt(raw []byte) int64 {
 	var v int64
@@ -390,7 +390,7 @@ func utf32ToString(raw []byte) string {
 	return b.String()
 }
 
-func tlvToJSONValue(kind string, raw []byte, arrLen int) interface{} {
+func xvalueToJSONValue(kind string, raw []byte, arrLen int) interface{} {
 	es := elemSize(kind)
 	switch kind {
 	case "bool":
@@ -464,25 +464,25 @@ func floatJSON(f float64) json.Number {
 	return json.Number(s)
 }
 
-func jsonValueToTLV(v interface{}) ([]byte, error) {
+func jsonToXValue(v interface{}) ([]byte, error) {
 	switch t := v.(type) {
 	case json.Number:
 		s := t.String()
 		if i, err := t.Int64(); err == nil {
-			return constructTLV(kindInt64, u64(uint64(i)), 1), nil
+			return constructXValue(kindInt64, u64(uint64(i)), 1), nil
 		}
 		// 纯整数文本（无 . e E）但 Int64 失败 → 超 int64，显式拒绝，不静默降 float64。
 		if !strings.ContainsAny(s, ".eE") {
 			return nil, fmt.Errorf("json: integer %s overflows int64", s)
 		}
 		f, _ := t.Float64()
-		return constructTLV(kindFloat64, u64bits(f), 1), nil
+		return constructXValue(kindFloat64, u64bits(f), 1), nil
 	case bool:
 		b := byte(0)
 		if t {
 			b = 1
 		}
-		return constructTLV(kindBool, []byte{b}, 1), nil
+		return constructXValue(kindBool, []byte{b}, 1), nil
 	case string:
 		return constructChar([]byte(t)), nil
 	default:
@@ -581,11 +581,11 @@ func writeValue(c unsafe.Pointer, path string, v interface{}) error {
 	case []interface{}:
 		return writeArr(c, path, t)
 	default:
-		tlv, err := jsonValueToTLV(v)
+		xvalue, err := jsonToXValue(v)
 		if err != nil {
 			return err
 		}
-		setTLV(c, path, tlv)
+		setXValue(c, path, xvalue)
 	}
 	return nil
 }
@@ -593,8 +593,8 @@ func writeValue(c unsafe.Pointer, path string, v interface{}) error {
 // writeContainer：容器值落裸 base（body 空）。dims 空 = 命名字典（对象）；dims=[n] = 坐标数组。
 // storetype 恒 index（spec map容器）；langtype 由 codec 产出（裸 stringkeymap）。
 func writeContainer(c unsafe.Pointer, path string, dims []int32) {
-	tlv := encodeTLV(kindMap, nil, dims)
-	h, ok := headOf(tlv)
+	xvalue := encodeXValue(kindMap, nil, dims)
+	h, ok := headOf(xvalue)
 	if !ok {
 		return
 	}
@@ -653,11 +653,11 @@ func readValue(c unsafe.Pointer, path string) interface{} {
 	if isDir(c, path) {
 		return readDir(c, path)
 	}
-	kind, raw, arrLen := parseTLV(getTLV(c, path, 0))
+	kind, raw, arrLen := parseXValue(getXValue(c, path, 0))
 	if kind == "" {
 		return nil // None → JSON null
 	}
-	return tlvToJSONValue(kind, raw, arrLen)
+	return xvalueToJSONValue(kind, raw, arrLen)
 }
 
 // readDir：/ 目录树 → JSON object；子名带尾 /（子目录）或 ·（成员目录）先 strip。
@@ -747,7 +747,7 @@ func childPath(path, name string) string {
 
 // ptrTarget：路径上是 Ptr（ref=1）时取其 body（目标 key），否则原样返回。
 func ptrTarget(c unsafe.Pointer, path string) string {
-	data := getTLV(c, path, 0)
+	data := getXValue(c, path, 0)
 	h, ok := headOf(data)
 	if !ok || h.ref != refPtr {
 		return path
@@ -834,12 +834,12 @@ func doTo(c unsafe.Pointer, pc string, readNames []string) {
 		return
 	}
 	data, _ := json.Marshal(build(c, root))
-	setTLV(c, resolveWrite(c, pc, 0), constructChar(data))
+	setXValue(c, resolveWrite(c, pc, 0), constructChar(data))
 }
 
 func fail(c unsafe.Pointer, vid string, msg string) {
-	setTLV(c, "/vthread/"+vid+"/"+runtimeSep+"msg", constructChar([]byte(msg)))
-	setTLV(c, "/vthread/"+vid+"/"+runtimeSep+"status", constructChar([]byte("error")))
+	setXValue(c, "/vthread/"+vid+"/"+runtimeSep+"msg", constructChar([]byte(msg)))
+	setXValue(c, "/vthread/"+vid+"/"+runtimeSep+"status", constructChar([]byte("error")))
 }
 
 func doFrom(c unsafe.Pointer, pc string, writeNames []string, vid string) {
@@ -894,7 +894,7 @@ func serveOp(c unsafe.Pointer) {
 			} else {
 				doFrom(c, pc, ps[1+spec.nr:1+spec.nr+spec.nw], vid)
 			}
-			setTLV(c, "/vthread/"+vid+"/"+runtimeSep+"pc", constructChar([]byte(nextPC(pc))))
+			setXValue(c, "/vthread/"+vid+"/"+runtimeSep+"pc", constructChar([]byte(nextPC(pc))))
 			del(c, key)
 		}
 	}

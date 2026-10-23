@@ -46,12 +46,12 @@ int main(void) {
                                      'i', 'n', 't', '6', '4'};
     kvlangXvalue_t anchor, read_type, write_type, opcode, read_operand,
                     write_slot;
-    kvlangXvalueNewTlv(&anchor, "rwfunc", counts, sizeof counts, 1);
-    kvlangXvalueNewTlv(&read_type, "def langtype", read_def, sizeof read_def, 1);
-    kvlangXvalueNewTlv(&write_type, "def langtype", write_def, sizeof write_def, 1);
-    kvlangXvalueNewTlv(&opcode, "rwir", op, sizeof op, 1);
-    kvlangXvalueNewTlv(&read_operand, "rwir", operand, sizeof operand, 1);
-    kvlangXvalueNewTlv(&write_slot, "rwir", write_operand, sizeof write_operand, 1);
+    kvlangXvalueNew(&anchor, "rwfunc", counts, sizeof counts, 1);
+    kvlangXvalueNew(&read_type, "def langtype", read_def, sizeof read_def, 1);
+    kvlangXvalueNew(&write_type, "def langtype", write_def, sizeof write_def, 1);
+    kvlangXvalueNew(&opcode, "rwir", op, sizeof op, 1);
+    kvlangXvalueNew(&read_operand, "rwir", operand, sizeof operand, 1);
+    kvlangXvalueNew(&write_slot, "rwir", write_operand, sizeof write_operand, 1);
     int ok = set_value(kv, "/lib/f/[0,0]", &anchor) == 0 &&
              set_value(kv, "/lib/f.[0,-1]", &read_type) == 0 &&
              set_value(kv, "/lib/f.[0,1]", &write_type) == 0 &&
@@ -102,11 +102,11 @@ int main(void) {
     memcpy(absolute_operand + 5, absolute, strlen(absolute));
     const uint8_t result_operand[] = {0, 0, 0, 0, 0, 'r', 'e', 's', 'u', 'l', 't'};
     kvlangXvalue_t path_slot, result_slot, path_value;
-    kvlangXvalueNewTlv(&path_slot, "rwir", absolute_operand,
+    kvlangXvalueNew(&path_slot, "rwir", absolute_operand,
                        (uint32_t)(5 + strlen(absolute)), 1);
-    kvlangXvalueNewTlv(&result_slot, "rwir", result_operand,
+    kvlangXvalueNew(&result_slot, "rwir", result_operand,
                        sizeof result_operand, 1);
-    kvlangXvalueNewTlv(&opcode, "rwir", op, sizeof op, 1);
+    kvlangXvalueNew(&opcode, "rwir", op, sizeof op, 1);
     kvlangXvalueNewCharUtf8(&path_value, "/wrong");
     ok = ok && set_value(kv, "/lib/f/[2,0]", &opcode) == 0 &&
          set_value(kv, "/lib/f/[2,-1]", &path_slot) == 0 &&
@@ -129,10 +129,10 @@ int main(void) {
     const uint8_t any_operand[] = {0, 0, 0, 0, 0, 's', 'o', 'u', 'r', 'c', 'e',
                                    0, 'a', 'n', 'y'};
     kvlangXvalue_t any_slot;
-    kvlangXvalueNewTlv(&any_slot, "rwir", any_operand, sizeof any_operand, 1);
+    kvlangXvalueNew(&any_slot, "rwir", any_operand, sizeof any_operand, 1);
     const uint8_t one_read_op[] = {1, 0, 0, 0, 0, 'n', 'o', 'o', 'p'};
     kvlangXvalue_t one_read_opcode;
-    kvlangXvalueNewTlv(&one_read_opcode, "rwir", one_read_op,
+    kvlangXvalueNew(&one_read_opcode, "rwir", one_read_op,
                        sizeof one_read_op, 1);
     ok = ok && set_value(kv, "/lib/f/[3,0]", &one_read_opcode) == 0 &&
          set_value(kv, "/lib/f/[3,-1]", &any_slot) == 0;

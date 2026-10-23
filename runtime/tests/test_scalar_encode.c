@@ -18,7 +18,7 @@ static int failures;
         }                                                                      \
     } while (0)
 
-/* raw 低位字节为 0x2a，其余 0；与 kvspaceTlvEncode(ndim=0) 逐字节比对。 */
+/* raw 低位字节为 0x2a，其余 0；与 kvspaceXvalueEncode(ndim=0) 逐字节比对。 */
 static void check_kind(const char *kind, uint32_t len) {
     uint8_t raw[8] = {0x2a, 0, 0, 0, 0, 0, 0, 0};
     uint8_t buf[64];
@@ -26,7 +26,7 @@ static void check_kind(const char *kind, uint32_t len) {
     uint8_t *ref = NULL;
     uint32_t rl = 0;
     int32_t dims[1] = {0};
-    CHECK(kvspaceTlvEncode(kind, raw, len, dims, 0, &ref, &rl) == 0);
+    CHECK(kvspaceXvalueEncode(kind, raw, len, dims, 0, &ref, &rl) == 0);
     CHECK(bl == rl);
     CHECK(bl > 0 && memcmp(buf, ref, bl) == 0);
     free(ref);

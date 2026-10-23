@@ -5,7 +5,7 @@
 /* map 容器值（p）：body 空、storetype=index，langtype 为 map langtype（见 [[map容器]]）。
  * langtype 恒非空——layout 强制容器字面量写目标带 map langtype（缺则 layout 报错）。 */
 void kvlangBuiltinMapMarker(kvlangXvalue_t *out, const char *langtype) {
-    kvlangXvalueNewTlv(out, langtype, (const uint8_t *)"", 0, 1);
+    kvlangXvalueNew(out, langtype, (const uint8_t *)"", 0, 1);
 }
 
 /* 写槽 `w` 的声明容器类型：layout 的 write_slot_value 把 map langtype 落进写槽的 langtype

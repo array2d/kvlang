@@ -23,13 +23,13 @@ static uint64_t now_ns(void) {
     return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }
 
-/* NewInt64 产出的完整 TLV → 后端。codec 缓冲由调用方 free。 */
-static int set_tlv(void *h, const char *key, uint8_t *tlv, uint32_t tlen,
+/* NewInt64 产出的完整 XValue → 后端。codec 缓冲由调用方 free。 */
+static int set_xvalue(void *h, const char *key, uint8_t *xvalue, uint32_t tlen,
                    char *err, uint32_t err_cap) {
     kvspaceHead_t hd;
     uint8_t *dst = NULL;
     uint32_t body_len;
-    if (kvspaceDecodeHead(tlv, tlen, &hd) != 0)
+    if (kvspaceDecodeHead(xvalue, tlen, &hd) != 0)
         return 1;
     body_len = hd.body_len < 0 ? 0 : (uint32_t)hd.body_len;
     if (kvspaceWriteInPlace(h, key, 0, body_len, &dst, err, err_cap) != 0) {
@@ -39,7 +39,7 @@ static int set_tlv(void *h, const char *key, uint8_t *tlv, uint32_t tlen,
             return 1;
     }
     if (body_len && dst)
-        memcpy(dst, tlv + hd.body_offset, body_len);
+        memcpy(dst, xvalue + hd.body_offset, body_len);
     return 0;
 }
 
@@ -58,19 +58,19 @@ int main(void) {
         return 1;
     }
 
-    uint8_t *tlv = NULL;
+    uint8_t *xvalue = NULL;
     uint32_t tlen = 0;
-    if (kvspaceNewInt64(0, &tlv, &tlen) != 0 || !tlv) {
+    if (kvspaceNewInt64(0, &xvalue, &tlen) != 0 || !xvalue) {
         fprintf(stderr, "NewInt64 0 failed\n");
         return 1;
     }
     const char *key = "/a";
     char err[128] = {0};
-    if (set_tlv(h, key, tlv, tlen, err, sizeof err) != 0) {
+    if (set_xvalue(h, key, xvalue, tlen, err, sizeof err) != 0) {
         fprintf(stderr, "seed set: %s\n", err);
         return 1;
     }
-    free(tlv);
+    free(xvalue);
 
     uint64_t t0 = now_ns();
     int64_t a = 0;
@@ -92,18 +92,18 @@ int main(void) {
         if (a >= n)
             break;
         a += 1;
-        tlv = NULL;
+        xvalue = NULL;
         tlen = 0;
-        if (kvspaceNewInt64(a, &tlv, &tlen) != 0) {
+        if (kvspaceNewInt64(a, &xvalue, &tlen) != 0) {
             fprintf(stderr, "NewInt64 failed\n");
             return 1;
         }
-        if (set_tlv(h, key, tlv, tlen, err, sizeof err) != 0) {
+        if (set_xvalue(h, key, xvalue, tlen, err, sizeof err) != 0) {
             fprintf(stderr, "set: %s\n", err);
-            free(tlv);
+            free(xvalue);
             return 1;
         }
-        free(tlv);
+        free(xvalue);
     }
     uint64_t elapsed = now_ns() - t0;
     kvspaceClose(h);

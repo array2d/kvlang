@@ -41,7 +41,7 @@ fn params(eng: &Engine, pc: &str) -> Vec<String> {
 }
 
 fn read_value(eng: &Engine, path: &str) -> Value {
-    let (kind, raw, arr_len) = parse_tlv(&eng.get_tlv(path));
+    let (kind, raw, arr_len) = parse_xvalue(&eng.get_xvalue(path));
     if kind.contains(SEP) {
         return read_container(eng, path, &kind);
     }
@@ -51,7 +51,7 @@ fn read_value(eng: &Engine, path: &str) -> Value {
     if kind.is_empty() {
         return Value::Null; // None → JSON null
     }
-    tlv_to_json(&kind, &raw, arr_len)
+    xvalue_to_json(&kind, &raw, arr_len)
 }
 
 fn read_dir(eng: &Engine, path: &str) -> Value {
@@ -105,7 +105,7 @@ fn read_arr(eng: &Engine, path: &str) -> Value {
     )
 }
 
-fn parse_tlv(data: &[u8]) -> (String, Vec<u8>, usize) {
+fn parse_xvalue(data: &[u8]) -> (String, Vec<u8>, usize) {
     if data.is_empty() {
         return (String::new(), Vec::new(), 1);
     }
@@ -119,7 +119,7 @@ fn parse_tlv(data: &[u8]) -> (String, Vec<u8>, usize) {
     (kind, raw, arr_len)
 }
 
-fn tlv_to_json(kind: &str, raw: &[u8], arr_len: usize) -> Value {
+fn xvalue_to_json(kind: &str, raw: &[u8], arr_len: usize) -> Value {
     let es = elem_size(kind);
     match kind {
         "bool" => {
@@ -195,46 +195,46 @@ fn write_value(eng: &Engine, path: &str, v: &Value) {
     match v {
         Value::Object(m) => write_obj(eng, path, m),
         Value::Array(arr) => write_arr(eng, path, arr),
-        Value::Null => eng.set_tlv(path, &tlv_encode("None", &[], &[])),
-        _ => eng.set_tlv(path, &value_to_tlv(v)),
+        Value::Null => eng.set_xvalue(path, &xvalue_encode("None", &[], &[])),
+        _ => eng.set_xvalue(path, &value_to_xvalue(v)),
     }
 }
 
 fn write_obj(eng: &Engine, path: &str, m: &Map<String, Value>) {
-    eng.set_tlv(path, &mk_obj_value());
+    eng.set_xvalue(path, &mk_obj_value());
     for k in m.keys() {
         write_value(eng, &format!("{path}{SEP}{k}"), &m[k]);
     }
 }
 
 fn write_arr(eng: &Engine, path: &str, arr: &[Value]) {
-    eng.set_tlv(path, &mk_map_value());
+    eng.set_xvalue(path, &mk_map_value());
     for (i, v) in arr.iter().enumerate() {
         write_value(eng, &format!("{path}{SEP}[{i}]"), v);
     }
 }
 
-fn value_to_tlv(v: &Value) -> Vec<u8> {
+fn value_to_xvalue(v: &Value) -> Vec<u8> {
     match v {
         Value::Number(n) => {
             if let Some(i) = n.as_i64() {
-                tlv_encode("int64", &i.to_le_bytes(), &[])
+                xvalue_encode("int64", &i.to_le_bytes(), &[])
             } else {
-                tlv_encode("float64", &n.as_f64().unwrap_or(0.0).to_le_bytes(), &[])
+                xvalue_encode("float64", &n.as_f64().unwrap_or(0.0).to_le_bytes(), &[])
             }
         }
-        Value::Bool(b) => tlv_encode("bool", &[*b as u8], &[]),
+        Value::Bool(b) => xvalue_encode("bool", &[*b as u8], &[]),
         Value::String(s) => new_char_byte(s.as_bytes()),
         _ => Vec::new(),
     }
 }
 
 fn mk_obj_value() -> Vec<u8> {
-    tlv_encode(OBJECT_TYPE, &[], &[])
+    xvalue_encode(OBJECT_TYPE, &[], &[])
 }
 
 fn mk_map_value() -> Vec<u8> {
-    tlv_encode(ARRAY_TYPE, &[], &[])
+    xvalue_encode(ARRAY_TYPE, &[], &[])
 }
 
 fn parse_langtype(kx: &str) -> (Vec<i32>, String) {
@@ -264,7 +264,7 @@ fn new_char_byte(bytes: &[u8]) -> Vec<u8> {
         .map(|c| c as u32)
         .collect();
     let raw: Vec<u8> = utf32.iter().flat_map(|v| v.to_le_bytes()).collect();
-    tlv_encode("char/utf32", &raw, &[utf32.len() as i32])
+    xvalue_encode("char/utf32", &raw, &[utf32.len() as i32])
 }
 
 #[cfg(test)]
@@ -272,14 +272,14 @@ mod tests {
     use super::*;
     use std::ffi::c_char;
 
-    fn i64_tlv(vals: &[i64]) -> Vec<u8> {
+    fn i64_xvalue(vals: &[i64]) -> Vec<u8> {
         let mut raw = Vec::with_capacity(vals.len() * 8);
         for v in vals {
             raw.extend_from_slice(&v.to_le_bytes());
         }
         let d = [vals.len() as i32];
         let ds: &[i32] = if vals.len() > 1 { &d } else { &[] };
-        tlv_encode("int64", &raw, ds)
+        xvalue_encode("int64", &raw, ds)
     }
 
     fn test_engine() -> Engine {
@@ -319,13 +319,13 @@ mod tests {
     #[test]
     fn native_data_to() {
         let eng = test_engine();
-        eng.set_tlv("/data", &mk_obj_value());
-        eng.set_tlv("/data·age", &i64_tlv(&[42]));
-        eng.set_tlv("/data·name", &new_char_byte(b"alice"));
-        eng.set_tlv("/data·scat", &mk_map_value());
-        eng.set_tlv("/data·scat·[0]", &i64_tlv(&[10]));
-        eng.set_tlv("/data·scat·[1]", &i64_tlv(&[20]));
-        eng.set_tlv("/data·scat·[2]", &i64_tlv(&[30]));
+        eng.set_xvalue("/data", &mk_obj_value());
+        eng.set_xvalue("/data·age", &i64_xvalue(&[42]));
+        eng.set_xvalue("/data·name", &new_char_byte(b"alice"));
+        eng.set_xvalue("/data·scat", &mk_map_value());
+        eng.set_xvalue("/data·scat·[0]", &i64_xvalue(&[10]));
+        eng.set_xvalue("/data·scat·[1]", &i64_xvalue(&[20]));
+        eng.set_xvalue("/data·scat·[2]", &i64_xvalue(&[30]));
 
         let j = read_value(&eng, "/data").to_string();
         assert_eq!(j, r#"{"age":42,"name":"alice","scat":[10,20,30]}"#);

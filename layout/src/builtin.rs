@@ -168,7 +168,7 @@ pub fn try_parse_number(s: &str) -> Option<Vec<u8>> {
     }
     if c0 != b'-' && !s.contains('.') && !s.contains('e') && !s.contains('E') {
         if let Ok(u) = s.parse::<u64>() {
-            return Some(ffi::tlv_encode("uint64", &u.to_le_bytes(), 1));
+            return Some(ffi::xvalue_encode("uint64", &u.to_le_bytes(), 1));
         }
     }
     if let Ok(f) = s.parse::<f64>() {

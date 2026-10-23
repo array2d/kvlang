@@ -120,9 +120,9 @@ pub fn xh_body_slice(data: &[u8]) -> &[u8] {
 }
 
 /// Encode through the kvspace codec.
-pub fn tlv_encode(kind: &str, raw: &[u8], dims: &[i32]) -> Vec<u8> {    unsafe {
+pub fn xvalue_encode(kind: &str, raw: &[u8], dims: &[i32]) -> Vec<u8> {    unsafe {
         let (mut out, mut olen) = (std::ptr::null_mut(), 0u32);
-        kvspaceTlvEncode(
+        kvspaceXvalueEncode(
             cs(kind).as_ptr(),
             raw.as_ptr(),
             raw.len() as u32,
@@ -198,7 +198,7 @@ unsafe extern "C" {
         buf_cap: u32,
         out_len: *mut u32,
     ) -> c_int;
-    pub fn kvspaceTlvEncode(
+    pub fn kvspaceXvalueEncode(
         kind: *const c_char,
         raw: *const u8,
         raw_len: u32,
@@ -207,7 +207,7 @@ unsafe extern "C" {
         out: *mut *mut u8,
         out_len: *mut u32,
     ) -> c_int;
-    pub fn kvspaceTlvEncodeMode(
+    pub fn kvspaceXvalueEncodeMode(
         kind: *const c_char,
         raw: *const u8,
         raw_len: u32,

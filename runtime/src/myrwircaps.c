@@ -12,7 +12,7 @@ static int register_vids(kvspace_t *k, const char *opcode) {
     if (!root_exists) {
         kvlangXvalue_t value;
         kvlangXvalueZero(&value);
-        kvlangXvalueNewTlv(&value, queue_type, NULL, 0, 1);
+        kvlangXvalueNew(&value, queue_type, NULL, 0, 1);
         kvlangKvPair_t pair = {queue, value};
         char err[256];
         int rc = kvlangKvspaceSet(k, &pair, 1, err, sizeof err);

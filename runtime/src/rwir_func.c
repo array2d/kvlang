@@ -115,7 +115,7 @@ void kvlangXvalueElementAt(const kvlangXvalue_t *v, int i, kvlangXvalue_t *out) 
     int sz = kvlangXvalueElemSize(k);
     if (sz <= 0) return;
     const uint8_t *body = xh_body_of(v);
-    kvlangXvalueNewTlv(out, k, body + i * sz, (uint32_t)sz, 1);
+    kvlangXvalueNew(out, k, body + i * sz, (uint32_t)sz, 1);
 }
 
 void kvlangDisplay(const kvlangXvalue_t *v, char **out);

@@ -132,11 +132,11 @@ int kvlangBuiltinXvAt(kvlangFrame_t *f) {
         kvlangXvalue_t part;
         kvlangKvspaceGetPart(f->kvspace, key, (uint32_t)(h.body_offset + flat * sz),
                         (uint32_t)sz, &part);
-        kvlangXvalueNewTlv(&e, kb, part.bytes, part.length, 1);
+        kvlangXvalueNew(&e, kb, part.bytes, part.length, 1);
         free(key);
     } else {
         const uint8_t *body = arr.bytes + h.body_offset;
-        kvlangXvalueNewTlv(&e, kb, body + flat * sz, (uint32_t)sz, 1);
+        kvlangXvalueNew(&e, kb, body + flat * sz, (uint32_t)sz, 1);
     }
     int rc = kvlangBuiltinEmitResult(f, &e);
     return rc;
@@ -244,7 +244,7 @@ int kvlangBuiltinXvSet(kvlangFrame_t *f) {
     int c = cvblen < sz ? cvblen : sz;
     memcpy(nb + flat * sz, xh_body_of(&cv), (size_t)c);
     kvlangXvalue_t nv;
-    kvlangXvalueNewTlvDims(&nv, k, nb, (uint32_t)ablen, kx.dims, kx.ndim);
+    kvlangXvalueNewDims(&nv, k, nb, (uint32_t)ablen, kx.dims, kx.ndim);
     int rc = kvlangBuiltinEmitResult(f, &nv);
     free(nb);
     return rc;
@@ -299,7 +299,7 @@ int kvlangBuiltinXvReshape(kvlangFrame_t *f) {
     }
     const uint8_t *body = xh_body_of(&in[0]);
     kvlangXvalue_t nv;
-    kvlangXvalueNewTlvDims(&nv, k, body, (uint32_t)xh_content_len_of(&in[0]), dims,
+    kvlangXvalueNewDims(&nv, k, body, (uint32_t)xh_content_len_of(&in[0]), dims,
                            ndims);
     int rc = kvlangBuiltinEmitResult(f, &nv);
     kvlangBuiltinFreeInputs(in, n);
@@ -329,7 +329,7 @@ int kvlangBuiltinXvReinterpret(kvlangFrame_t *f) {
         ndim = 1;
     }
     kvlangXvalue_t nv;
-    kvlangXvalueNewTlvDims(&nv, nkx.kind, body, (uint32_t)blen, nkx.dims, ndim);
+    kvlangXvalueNewDims(&nv, nkx.kind, body, (uint32_t)blen, nkx.dims, ndim);
     int rc = kvlangBuiltinEmitResult(f, &nv);
     free(ke);
     kvlangBuiltinFreeInputs(in, n);

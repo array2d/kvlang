@@ -20,7 +20,7 @@ pub fn size(eng: &Engine, pc: &str) {
     let n = std::fs::metadata(&path)
         .map(|m| m.len() as i64)
         .unwrap_or(-1);
-    eng.set_tlv_encoded(&eng.write0(pc), "int64", &n.to_le_bytes(), &[]);
+    eng.set_xvalue_encoded(&eng.write0(pc), "int64", &n.to_le_bytes(), &[]);
 }
 
 /// networld/fs·read(p, start, offset) -> raw：从 start 起读 offset 字节（[]uint8）。
@@ -29,7 +29,7 @@ pub fn read(eng: &Engine, pc: &str) {
     let start = eng.read_i64(pc, 1);
     let len = eng.read_i64(pc, 2);
     let bytes = read_slice(&path, start, len);
-    eng.set_tlv_encoded(&eng.write0(pc), "uint8", &bytes, &[bytes.len() as i32]);
+    eng.set_xvalue_encoded(&eng.write0(pc), "uint8", &bytes, &[bytes.len() as i32]);
 }
 
 /// networld/fs·write(p, data) -> n：把 data 覆盖写入 p（创建/截断），返回写入字节数（失败 -1）。
@@ -39,7 +39,7 @@ pub fn write(eng: &Engine, pc: &str) {
     let n = std::fs::write(&path, &data)
         .map(|_| data.len() as i64)
         .unwrap_or(-1);
-    eng.set_tlv_encoded(&eng.write0(pc), "int64", &n.to_le_bytes(), &[]);
+    eng.set_xvalue_encoded(&eng.write0(pc), "int64", &n.to_le_bytes(), &[]);
 }
 
 /// networld/fs·append(p, data) -> n：把 data 追加到 p 末尾，返回写入字节数（失败 -1）。
@@ -49,7 +49,7 @@ pub fn append(eng: &Engine, pc: &str) {
     let n = append_bytes(&path, &data)
         .map(|_| data.len() as i64)
         .unwrap_or(-1);
-    eng.set_tlv_encoded(&eng.write0(pc), "int64", &n.to_le_bytes(), &[]);
+    eng.set_xvalue_encoded(&eng.write0(pc), "int64", &n.to_le_bytes(), &[]);
 }
 
 /// networld/fs·rename(src, dst) -> code：改名/移动（POSIX rename 语义，同文件系统内原子）；
@@ -58,7 +58,7 @@ pub fn rename(eng: &Engine, pc: &str) {
     let src = eng.read0(pc);
     let dst = eng.read_at(pc, 1);
     let code = std::fs::rename(&src, &dst).map(|_| 0i64).unwrap_or(-1);
-    eng.set_tlv_encoded(&eng.write0(pc), "int64", &code.to_le_bytes(), &[]);
+    eng.set_xvalue_encoded(&eng.write0(pc), "int64", &code.to_le_bytes(), &[]);
 }
 
 /// networld/fs·list(p) -> names：列目录 p 的成员名（名字序）。p 必须是目录，否则空列表。
@@ -84,7 +84,7 @@ pub fn del(eng: &Engine, pc: &str) {
         Err(e) => Err(e),
     };
     let code: i64 = if r.is_ok() { 0 } else { -1 };
-    eng.set_tlv_encoded(&eng.write0(pc), "int64", &code.to_le_bytes(), &[]);
+    eng.set_xvalue_encoded(&eng.write0(pc), "int64", &code.to_le_bytes(), &[]);
 }
 
 /// networld/fs·mkdir(p) -> code：创建目录 p（含缺失父级，幂等），0 成功/-1 失败。
@@ -95,14 +95,14 @@ pub fn mkdir(eng: &Engine, pc: &str) {
     } else {
         -1
     };
-    eng.set_tlv_encoded(&eng.write0(pc), "int64", &code.to_le_bytes(), &[]);
+    eng.set_xvalue_encoded(&eng.write0(pc), "int64", &code.to_le_bytes(), &[]);
 }
 
 /// networld/fs·exists(p) -> b：p 是否存在。
 pub fn exists(eng: &Engine, pc: &str) {
     let path = eng.read0(pc);
     let b = std::path::Path::new(&path).exists();
-    eng.set_tlv_encoded(&eng.write0(pc), "bool", &[b as u8], &[]);
+    eng.set_xvalue_encoded(&eng.write0(pc), "bool", &[b as u8], &[]);
 }
 
 /// networld/fs·isutf8(p) -> b：p 的内容是否是合法 UTF-8（缺失/不可读 = false）。
@@ -113,7 +113,7 @@ pub fn isutf8(eng: &Engine, pc: &str) {
     let b = std::fs::read(&path)
         .map(|bytes| std::str::from_utf8(&bytes).is_ok())
         .unwrap_or(false);
-    eng.set_tlv_encoded(&eng.write0(pc), "bool", &[b as u8], &[]);
+    eng.set_xvalue_encoded(&eng.write0(pc), "bool", &[b as u8], &[]);
 }
 
 fn read_slice(path: &str, start: i64, len: i64) -> Vec<u8> {

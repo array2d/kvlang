@@ -18,15 +18,15 @@ impl Engine {
     // ── kvspace 读写（绝对路径，char/utf8 与 char/utf32 编解码）─────────
     /// 通用类型化写入：任意 kind + body 字节 + dims（空=标量 ndim0）。
     /// set_kv 与各 rwir 的类型化输出共用，避免每种 kind 一个专用写函数。
-    pub fn set_tlv_encoded(&self, key: &str, kind: &str, raw: &[u8], dims: &[i32]) {
-        let value = tlv_encode(kind, raw, dims);
+    pub fn set_xvalue_encoded(&self, key: &str, kind: &str, raw: &[u8], dims: &[i32]) {
+        let value = xvalue_encode(kind, raw, dims);
         assert!(!value.is_empty(), "invalid XValue for {key}");
-        self.set_tlv(key, &value);
+        self.set_xvalue(key, &value);
     }
     pub fn set_kv(&self, key: &str, val: &str) {
         let utf32: Vec<u32> = val.chars().map(|c| c as u32).collect();
         let raw: Vec<u8> = utf32.iter().flat_map(|v| v.to_le_bytes()).collect();
-        self.set_tlv_encoded(key, "char/utf32", &raw, &[utf32.len() as i32]);
+        self.set_xvalue_encoded(key, "char/utf32", &raw, &[utf32.len() as i32]);
     }
     pub fn get_kv(&self, key: &str) -> String {
         unsafe {
@@ -55,7 +55,7 @@ impl Engine {
         unsafe {
             let mut out = null_mut();
             let mut len = 0u32;
-            let rc = kvspaceTlvEncodeMode(
+            let rc = kvspaceXvalueEncodeMode(
                 cs(target_langtype).as_ptr(),
                 locator.as_ptr(),
                 locator.len() as u32,
@@ -70,19 +70,19 @@ impl Engine {
             assert_eq!(rc, 0, "invalid ext locator for {key}");
             let value = std::slice::from_raw_parts(out, len as usize).to_vec();
             libc::free(out as *mut c_void);
-            self.set_tlv(key, &value);
+            self.set_xvalue(key, &value);
         }
     }
 
     /// 读 key 的 head，返回 (ref, body 串)。仅 ref==2 时 body 有意义（扩展句柄定位串）。
     fn head_ref_body(&self, key: &str) -> (i32, String) {
-        let tlv = self.get_tlv(key);
-        if tlv.is_empty() {
+        let xvalue = self.get_xvalue(key);
+        if xvalue.is_empty() {
             return (0, String::new());
         }
-        let r = if xh_is_ptr(&tlv) {
+        let r = if xh_is_ptr(&xvalue) {
             1
-        } else if xh_class(&tlv) == 3 {
+        } else if xh_class(&xvalue) == 3 {
             2
         } else {
             0
@@ -90,7 +90,7 @@ impl Engine {
         if r != 2 {
             return (r, String::new());
         }
-        let body = String::from_utf8_lossy(xh_body_slice(&tlv)).into_owned();
+        let body = String::from_utf8_lossy(xh_body_slice(&xvalue)).into_owned();
         (r, body)
     }
 
@@ -138,18 +138,18 @@ impl Engine {
         if p.is_empty() {
             return self.read_at(pc, idx).into_bytes();
         }
-        let tlv = self.get_tlv(&p);
-        if tlv.is_empty() {
+        let xvalue = self.get_xvalue(&p);
+        if xvalue.is_empty() {
             return Vec::new();
         }
-        let r = if xh_is_ptr(&tlv) {
+        let r = if xh_is_ptr(&xvalue) {
             1
-        } else if xh_class(&tlv) == 3 {
+        } else if xh_class(&xvalue) == 3 {
             2
         } else {
             0
         };
-        let body = xh_body_slice(&tlv);
+        let body = xh_body_slice(&xvalue);
         if r == 2 {
             return self.resolve_ext_bytes(&String::from_utf8_lossy(body));
         }
@@ -157,7 +157,7 @@ impl Engine {
     }
 
     pub fn set_str_list(&self, dst: &str, items: &[String]) {
-        self.set_tlv_encoded(dst, "[int64]·[]char/utf32", &[], &[]);
+        self.set_xvalue_encoded(dst, "[int64]·[]char/utf32", &[], &[]);
         for (i, it) in items.iter().enumerate() {
             self.set_kv(&format!("{dst}\u{b7}[{i}]"), it);
         }
@@ -221,7 +221,7 @@ impl Engine {
             );
         }
     }
-    pub fn get_tlv(&self, key: &str) -> Vec<u8> {
+    pub fn get_xvalue(&self, key: &str) -> Vec<u8> {
         unsafe {
             let (mut out, mut olen) = (null_mut(), 0u32);
             kvspaceGet(self.kv, cs(key).as_ptr(), 0, &mut out, &mut olen);
@@ -231,8 +231,8 @@ impl Engine {
             std::slice::from_raw_parts(out, olen as usize).to_vec()
         }
     }
-    pub fn set_tlv(&self, key: &str, tlv: &[u8]) {
-        if tlv.is_empty() {
+    pub fn set_xvalue(&self, key: &str, xvalue: &[u8]) {
+        if xvalue.is_empty() {
             self.del(key);
             return;
         }
@@ -241,8 +241,8 @@ impl Engine {
             let rc = kvspaceSetValue(
                 self.kv,
                 cs(key).as_ptr(),
-                tlv.as_ptr(),
-                tlv.len() as u32,
+                xvalue.as_ptr(),
+                xvalue.len() as u32,
                 0,
                 0,
                 err.as_mut_ptr() as *mut c_char,

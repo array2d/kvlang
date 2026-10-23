@@ -165,14 +165,14 @@ static uint8_t *kvlangXvalueOwn(uint8_t *tmp, uint32_t tl, uint32_t *out_len) {
     return tmp;
 }
 
-static uint8_t *kvlangXvalueEncodeTlv(const char *kind, const uint8_t *raw,
+static uint8_t *kvlangXvalueEncode(const char *kind, const uint8_t *raw,
                                       uint32_t raw_len, int32_t array_len,
                                       uint32_t *out_len) {
     int32_t dims[1];
     int32_t ndim = array_len_to_dims(kind, array_len, dims);
     uint8_t *tmp = NULL;
     uint32_t tl = 0;
-    if (kvspaceTlvEncode(kind, raw, raw_len, dims, ndim, &tmp, &tl) != 0) {
+    if (kvspaceXvalueEncode(kind, raw, raw_len, dims, ndim, &tmp, &tl) != 0) {
         *out_len = 0;
         return NULL;
     }
@@ -581,20 +581,20 @@ char *kvlangXvalueValueString(const kvlangXvalue_t *v) {
 
 /* ── 构造 ──────────────────────────────────────────────────────────── */
 
-void kvlangXvalueNewTlv(kvlangXvalue_t *v, const char *kind, const uint8_t *raw,
+void kvlangXvalueNew(kvlangXvalue_t *v, const char *kind, const uint8_t *raw,
                         uint32_t raw_len, int32_t al) {
     uint32_t len;
-    v->bytes = kvlangXvalueEncodeTlv(kind, raw, raw_len, al, &len);
+    v->bytes = kvlangXvalueEncode(kind, raw, raw_len, al, &len);
     v->length = len;
 }
 
 /* 显式 ndim/dims 构造（保留多维 shape，供 xv.shape/xv.set 用）。 */
-void kvlangXvalueNewTlvDims(kvlangXvalue_t *v, const char *kind,
+void kvlangXvalueNewDims(kvlangXvalue_t *v, const char *kind,
                             const uint8_t *raw, uint32_t raw_len,
                             const int32_t *dims, int32_t ndim) {
     uint8_t *tmp = NULL;
     uint32_t tl = 0;
-    if (kvspaceTlvEncode(kind, raw, raw_len, dims, ndim, &tmp, &tl) != 0 ||
+    if (kvspaceXvalueEncode(kind, raw, raw_len, dims, ndim, &tmp, &tl) != 0 ||
         !tmp) {
         kvlangXvalueZero(v);
         return;
@@ -613,7 +613,7 @@ void kvlangXvalueNewInt64(kvlangXvalue_t *v, int64_t n) {
     r[5] = (n >> 40) & 0xFF;
     r[6] = (n >> 48) & 0xFF;
     r[7] = (n >> 56) & 0xFF;
-    kvlangXvalueNewTlv(v, KVSPACE_KIND_INT64, r, 8, 1);
+    kvlangXvalueNew(v, KVSPACE_KIND_INT64, r, 8, 1);
 }
 void kvlangXvalueNewFloat64(kvlangXvalue_t *v, double f) {
     uint64_t u;
@@ -621,21 +621,21 @@ void kvlangXvalueNewFloat64(kvlangXvalue_t *v, double f) {
     uint8_t r[8];
     for (int i = 0; i < 8; i++)
         r[i] = (u >> (i * 8)) & 0xFF;
-    kvlangXvalueNewTlv(v, KVSPACE_KIND_FLOAT64, r, 8, 1);
+    kvlangXvalueNew(v, KVSPACE_KIND_FLOAT64, r, 8, 1);
 }
 void kvlangXvalueNewBool(kvlangXvalue_t *v, bool b) {
     uint8_t r = b ? 1 : 0;
-    kvlangXvalueNewTlv(v, KVSPACE_KIND_BOOL, &r, 1, 1);
+    kvlangXvalueNew(v, KVSPACE_KIND_BOOL, &r, 1, 1);
 }
 void kvlangXvalueNewCharUtf8(kvlangXvalue_t *v, const char *s) {
     uint32_t sl = (uint32_t)strlen(s);
-    kvlangXvalueNewTlv(v, KVSPACE_KIND_CHAR_UTF8, (const uint8_t *)s, sl,
+    kvlangXvalueNew(v, KVSPACE_KIND_CHAR_UTF8, (const uint8_t *)s, sl,
                        (int32_t)sl);
 }
 void kvlangXvalueNewCharKind(kvlangXvalue_t *v, const char *kind,
                              const char *s) {
     uint32_t sl = (uint32_t)strlen(s);
-    kvlangXvalueNewTlv(v, kind, (const uint8_t *)s, sl, (int32_t)sl);
+    kvlangXvalueNew(v, kind, (const uint8_t *)s, sl, (int32_t)sl);
 }
 void kvlangXvalueNewCharUtf32(kvlangXvalue_t *v, const char *s) {
     size_t len = strlen(s);
@@ -650,7 +650,7 @@ void kvlangXvalueNewCharUtf32(kvlangXvalue_t *v, const char *s) {
         raw[off++] = (uint8_t)((cp >> 16) & 0xFF);
         raw[off++] = (uint8_t)((cp >> 24) & 0xFF);
     }
-    kvlangXvalueNewTlv(v, KVSPACE_KIND_CHAR, raw, (uint32_t)off,
+    kvlangXvalueNew(v, KVSPACE_KIND_CHAR, raw, (uint32_t)off,
                        (int32_t)(off / 4));
     free(raw);
 }
@@ -672,12 +672,12 @@ void kvlangXvalueNewDefRwir(kvlangXvalue_t *v, int32_t nr, int32_t nw,
                             int dynamic) {
     uint8_t raw[5] = {nr & 0xFF, (nr >> 8) & 0xFF, nw & 0xFF, (nw >> 8) & 0xFF,
                       dynamic ? 1 : 0};
-    kvlangXvalueNewTlv(v, KVSPACE_KIND_DEF_RWIR, raw, 5, 1);
+    kvlangXvalueNew(v, KVSPACE_KIND_DEF_RWIR, raw, 5, 1);
 }
 
 /* 签名行 [0,x] 槽：一个参数的类型定义，body=该参数完整 langtype 串。 */
 void kvlangXvalueNewDefLangtype(kvlangXvalue_t *v, const char *langtype) {
-    kvlangXvalueNewTlv(v, KVSPACE_KIND_DEF_LANGTYPE, (const uint8_t *)langtype,
+    kvlangXvalueNew(v, KVSPACE_KIND_DEF_LANGTYPE, (const uint8_t *)langtype,
                        (uint32_t)strlen(langtype), 1);
 }
 
