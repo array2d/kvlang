@@ -3,12 +3,15 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 LAYOUT="${KVLANG_LAYOUT_BIN:-$ROOT/bin/kvlanglayout}"
+KVLANG="${KVLANG_TERM_BIN:-$ROOT/bin/kvlang}"
+boot() { KVSPACE="$1" "$KVLANG" -c 'print("boot")' >/dev/null 2>&1; }
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 DSN="fs://$tmp/db"; mkdir -p "$tmp/db"
 
 check() { # name, source, expected-substring
 	local name=$1 src=$2 want=$3
 	printf '%s\n' "$src" > "$tmp/$name.kv"
+	boot "$DSN"
 	out=$("$LAYOUT" "$tmp/$name.kv" "$DSN" 2>&1)
 	rc=$?
 	if [ "$rc" = 0 ]; then

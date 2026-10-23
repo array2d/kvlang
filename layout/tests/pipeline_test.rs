@@ -14,6 +14,7 @@ fn fresh_kv() -> Kv {
     let dsn = format!("fs:///tmp/kvlanglayout_test_{}", std::process::id());
     let mut kv = Kv::conn(&dsn);
     init_dirs(&mut kv).unwrap();
+    kvlanglayout::isa::ensure_test_isa(&mut kv);
     kv
 }
 

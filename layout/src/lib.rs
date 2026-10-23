@@ -7,6 +7,7 @@ pub mod ast;
 pub mod builtin;
 pub mod capi;
 pub mod code;
+pub mod isa;
 pub mod ffi;
 pub mod keytree;
 pub mod kvkind;

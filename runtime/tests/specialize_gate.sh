@@ -3,8 +3,11 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 LAYOUT="${KVLANG_LAYOUT_BIN:-$ROOT/bin/kvlanglayout}"
+KVLANG="${KVLANG_TERM_BIN:-$ROOT/bin/kvlang}"
+boot() { KVSPACE="$1" "$KVLANG" -c 'print("boot")' >/dev/null 2>&1; }
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
+boot "fs://$tmp/db"
 out=$("$LAYOUT" printlib "$ROOT/runtime/tests/specialize_gate.kv" /lib "fs://$tmp/db" 2>/dev/null | tr -d '\0')
 
 want_stable() {

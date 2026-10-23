@@ -4,6 +4,8 @@
 //! 导致同一语料多次 layout 的特化集合不同（特化数在 881/882/907 间波动）。
 //! 单进程内 HashMap 顺序稳定，故必须用子进程复现。
 
+use kvlanglayout::ffi::Kv;
+use kvlanglayout::isa;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -41,6 +43,10 @@ fn layout_is_deterministic_across_processes() {
     for run in 0..16 {
         let db = PathBuf::from(format!("/tmp/kvlanglayout_det_{pid}_{run}"));
         let _ = std::fs::remove_dir_all(&db);
+        {
+            let mut kv = Kv::conn(&format!("fs://{}", db.display()));
+            isa::ensure_test_isa(&mut kv);
+        }
         let out = Command::new(bin)
             .arg(&src)
             .arg(format!("fs://{}", db.display()))

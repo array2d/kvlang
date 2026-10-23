@@ -43,6 +43,8 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
         return Err("parse: error-level diagnostics — refusing to load".to_string());
     }
 
+    /* P1a：读目标 kvspace 的 ISA registry；缺失/不一致硬失败。 */
+    let isa = crate::isa::Isa::load(kv)?;
     let mut any_code = false;
     let mut inits: Vec<String> = Vec::new();
     let local_funcs: HashSet<String> = file
@@ -99,7 +101,7 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
             func.pkg.clone()
         };
         let mut lowered = lower::lower_func(func);
-        write_func(kv, &pkg, &mut lowered, &local_funcs, &structs, &sigs)?;
+        write_func(kv, &pkg, &mut lowered, &local_funcs, &structs, &sigs, &isa)?;
         any_code = true;
         if func.sig.name == "init" {
             inits.push(init_fn_name(&pkg));
@@ -126,7 +128,7 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
             pkg: String::new(),
         };
         let mut lowered = lower::lower_func(&init_fn);
-        write_func(kv, "", &mut lowered, &local_funcs, &structs, &sigs)?;
+        write_func(kv, "", &mut lowered, &local_funcs, &structs, &sigs, &isa)?;
         any_code = true;
         inits.push(init_fn_name(""));
     }
@@ -672,6 +674,7 @@ pub fn write_func(
     local_funcs: &HashSet<String>,
     structs: &lower::StructTable,
     sigs: &lower::SigTable,
+    isa: &crate::isa::Isa,
 ) -> Result<(), String> {
     let type_map = lower::infer_types(fn_);
     let declared = lower::declared_types(fn_);
@@ -752,6 +755,16 @@ pub fn write_func(
     }
     let _ = kv.set(&pairs);
 
+    let mut emitted: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for inst in &seq {
+        if let Some(e) = &inst.expr {
+            if !e.op.is_empty() {
+                emitted.insert(e.op.clone());
+            }
+        }
+    }
+    let ext_bridge = isa.ext_bridge(kv, &emitted);
+
     for (i, inst) in seq.iter().enumerate() {
         write_linear_inst(
             kv,
@@ -780,6 +793,7 @@ pub fn write_func(
             .collect();
         let _ = kv.set(&lpairs);
     }
+    isa.write_ref(kv, &func_dir, &ext_bridge)?;
     Ok(())
 }
 
@@ -1267,6 +1281,7 @@ mod tests {
             std::process::id()
         ));
         init_dirs(&mut kv).unwrap();
+        crate::isa::ensure_test_isa(&mut kv);
 
         compile(
             &mut kv,
@@ -1300,6 +1315,7 @@ mod tests {
             std::process::id()
         ));
         init_dirs(&mut kv).unwrap();
+        crate::isa::ensure_test_isa(&mut kv);
         compile(&mut kv, "rwfunc caller() -> () {\ncallee(1) -> y\nprintln(y)\n}\nrwfunc callee(x:int64) -> (r:int64) {\nx -> r\n}\n").unwrap();
         assert_eq!(kvkind::kind(&kv.get_one("/lib/caller/[1,0]")), "rwfunc");
         assert_eq!(
@@ -1334,6 +1350,7 @@ mod tests {
             std::process::id()
         ));
         init_dirs(&mut kv).unwrap();
+        crate::isa::ensure_test_isa(&mut kv);
         compile(
             &mut kv,
             "struct Point {\n\tx:int64=3\n\tnext:*Point=None\n}\n",
@@ -1361,6 +1378,7 @@ mod tests {
             std::process::id()
         ));
         init_dirs(&mut kv).unwrap();
+        crate::isa::ensure_test_isa(&mut kv);
         compile(
             &mut kv,
             "lib t {\nrwfunc main() -> () {\nfoo.bar(\"x\") -> y\nbaz(\"z\") -> w\n}\n}\n",
