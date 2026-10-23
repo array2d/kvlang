@@ -118,6 +118,25 @@ fn main() {
             drive(&eng, "test");
         }
 
+        // ── isa publish：发布 core manifest（connect）并注册 runtime-rs 的 def rwir，
+        //    使 layout CLI 无需完整 boot 即可独立工作。──
+        [cmd, act] if cmd == "isa" && act == "publish" => {
+            let rt = unsafe { kvlangRuntimeConnect(cs(&dsn).as_ptr()) };
+            if rt.is_null() {
+                kvlang_rs::elog!("kvlangRuntimeConnect 失败: {dsn}");
+                std::process::exit(1);
+            }
+            let kv = unsafe { kvlangRuntimeKvspaceHandle(rt) };
+            let eng = Engine {
+                rt,
+                kv,
+                dsn: dsn.clone(),
+                ext: None,
+            };
+            eng.register();
+            unsafe { kvlangRuntimeDisconnect(rt) };
+        }
+
         // ── vthread 两步分离：create 只创建（bootstrap）并把 vid 打到 stdout，不运行 ──
         [cmd, funcname] if cmd == "create" => {
             let eng = boot(&dsn);

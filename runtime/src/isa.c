@@ -211,6 +211,7 @@ static char *isa_build_core(uint32_t *count_out) {
         }
         int nr = g->nr, nw = g->nw;
         char fam[32];
+        char str_kind[32];
         const char *rp[8] = {0}, *wp[4] = {0};
         int st = -1, hl = -1, w = -1;
         switch (g->sig) {
@@ -252,6 +253,9 @@ static char *isa_build_core(uint32_t *count_out) {
             rp[0] = ISA_ANY;
             wp[0] = op;
             if (strncmp(op, "char/", 5) == 0) {
+                /* 字符串槽 kindexpr 恒为 []char（见 kindexpr 规范）。 */
+                snprintf(str_kind, sizeof str_kind, "[]%s", op);
+                wp[0] = str_kind;
                 st = 1;
                 hl = 64;
             } else {

@@ -1,0 +1,303 @@
+ver	1
+count	300
+hash	16bedee2a5f7b947ff326855c4f9682c
+!	1	1	0	any	any	-1	-1	-1	pure	-1	core	runtime-c
+!=	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+%	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+&	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+&&	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
++	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+-	1	1	1	any...	any	-1	-1	-1	pure	-1	core	runtime-c
+<	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+<<	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+<=	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+=	1	1	0	any	any	-1	-1	-1	pure	-1	core	runtime-c
+==	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+>	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+>=	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+>>	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+^	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+abs	1	1	0	any	any	-1	-1	-1	pure	-1	core	runtime-c
+add	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+and	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+array	1	1	1	any...	any	-1	-1	-1	pure	-1	ext	runtime-c
+array·append	2	1	0	any	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+array·compact	1	1	0	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+array·fill	2	1	0	any	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+array·scatter	1	1	0	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+array·slice	3	1	0	any	any	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+bitand	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+bitor	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+bitxor	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+bool	1	1	0	any	bool	0	32	1	pure	-1	core	runtime-c
+br	3	0	0	any	any	any	-1	-1	-1	control	-1	core	runtime-c
+call	1	0	0	any	-1	-1	-1	control	-1	core	runtime-c
+char/ascii	1	1	0	any	[]char/ascii	1	64	-1	pure	-1	core	runtime-c
+char/utf32	1	1	0	any	[]char/utf32	1	64	-1	pure	-1	core	runtime-c
+char/utf8	1	1	0	any	[]char/utf8	1	64	-1	pure	-1	core	runtime-c
+debugger	0	0	0	-1	-1	-1	debug	-1	core	runtime-c
+div	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+eq	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+exp	1	1	0	any	any	-1	-1	-1	pure	-1	core	runtime-c
+float32	1	1	0	any	float32	0	32	4	pure	-1	core	runtime-c
+float32·abs	1	1	0	float32	float32	0	32	4	pure	-1	core	runtime-c
+float32·add	2	1	0	float32	float32	float32	0	32	4	pure	-1	core	runtime-c
+float32·div	2	1	0	float32	float32	float32	0	32	4	pure	-1	core	runtime-c
+float32·eq	2	1	0	float32	float32	bool	0	32	1	pure	-1	core	runtime-c
+float32·ge	2	1	0	float32	float32	bool	0	32	1	pure	-1	core	runtime-c
+float32·gt	2	1	0	float32	float32	bool	0	32	1	pure	-1	core	runtime-c
+float32·le	2	1	0	float32	float32	bool	0	32	1	pure	-1	core	runtime-c
+float32·lt	2	1	0	float32	float32	bool	0	32	1	pure	-1	core	runtime-c
+float32·max	2	1	0	float32	float32	float32	0	32	4	pure	-1	core	runtime-c
+float32·min	2	1	0	float32	float32	float32	0	32	4	pure	-1	core	runtime-c
+float32·mul	2	1	0	float32	float32	float32	0	32	4	pure	-1	core	runtime-c
+float32·neg	1	1	0	float32	float32	0	32	4	pure	-1	core	runtime-c
+float32·neq	2	1	0	float32	float32	bool	0	32	1	pure	-1	core	runtime-c
+float32·sub	2	1	0	float32	float32	float32	0	32	4	pure	-1	core	runtime-c
+float64	1	1	0	any	float64	0	32	8	pure	-1	core	runtime-c
+float64·abs	1	1	0	float64	float64	0	32	8	pure	-1	core	runtime-c
+float64·add	2	1	0	float64	float64	float64	0	32	8	pure	-1	core	runtime-c
+float64·div	2	1	0	float64	float64	float64	0	32	8	pure	-1	core	runtime-c
+float64·eq	2	1	0	float64	float64	bool	0	32	1	pure	-1	core	runtime-c
+float64·exp	1	1	0	float64	float64	0	32	8	pure	-1	core	runtime-c
+float64·ge	2	1	0	float64	float64	bool	0	32	1	pure	-1	core	runtime-c
+float64·gt	2	1	0	float64	float64	bool	0	32	1	pure	-1	core	runtime-c
+float64·le	2	1	0	float64	float64	bool	0	32	1	pure	-1	core	runtime-c
+float64·log	1	1	0	float64	float64	0	32	8	pure	-1	core	runtime-c
+float64·lt	2	1	0	float64	float64	bool	0	32	1	pure	-1	core	runtime-c
+float64·max	2	1	0	float64	float64	float64	0	32	8	pure	-1	core	runtime-c
+float64·min	2	1	0	float64	float64	float64	0	32	8	pure	-1	core	runtime-c
+float64·mul	2	1	0	float64	float64	float64	0	32	8	pure	-1	core	runtime-c
+float64·neg	1	1	0	float64	float64	0	32	8	pure	-1	core	runtime-c
+float64·neq	2	1	0	float64	float64	bool	0	32	1	pure	-1	core	runtime-c
+float64·pow	2	1	0	float64	float64	float64	0	32	8	pure	-1	core	runtime-c
+float64·sign	1	1	0	float64	float64	0	32	8	pure	-1	core	runtime-c
+float64·sqrt	1	1	0	float64	float64	0	32	8	pure	-1	core	runtime-c
+float64·sub	2	1	0	float64	float64	float64	0	32	8	pure	-1	core	runtime-c
+ge	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+goto	1	0	0	any	-1	-1	-1	control	-1	core	runtime-c
+gt	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+int16	1	1	0	any	int16	0	32	2	pure	-1	core	runtime-c
+int16·abs	1	1	0	int16	int16	0	32	2	pure	-1	core	runtime-c
+int16·add	2	1	0	int16	int16	int16	0	32	2	pure	-1	core	runtime-c
+int16·div	2	1	0	int16	int16	int16	0	32	2	pure	-1	core	runtime-c
+int16·eq	2	1	0	int16	int16	bool	0	32	1	pure	-1	core	runtime-c
+int16·ge	2	1	0	int16	int16	bool	0	32	1	pure	-1	core	runtime-c
+int16·gt	2	1	0	int16	int16	bool	0	32	1	pure	-1	core	runtime-c
+int16·le	2	1	0	int16	int16	bool	0	32	1	pure	-1	core	runtime-c
+int16·lt	2	1	0	int16	int16	bool	0	32	1	pure	-1	core	runtime-c
+int16·max	2	1	0	int16	int16	int16	0	32	2	pure	-1	core	runtime-c
+int16·min	2	1	0	int16	int16	int16	0	32	2	pure	-1	core	runtime-c
+int16·mod	2	1	0	int16	int16	int16	0	32	2	pure	-1	core	runtime-c
+int16·mul	2	1	0	int16	int16	int16	0	32	2	pure	-1	core	runtime-c
+int16·neg	1	1	0	int16	int16	0	32	2	pure	-1	core	runtime-c
+int16·neq	2	1	0	int16	int16	bool	0	32	1	pure	-1	core	runtime-c
+int16·sub	2	1	0	int16	int16	int16	0	32	2	pure	-1	core	runtime-c
+int32	1	1	0	any	int32	0	32	4	pure	-1	core	runtime-c
+int32·abs	1	1	0	int32	int32	0	32	4	pure	-1	core	runtime-c
+int32·add	2	1	0	int32	int32	int32	0	32	4	pure	-1	core	runtime-c
+int32·div	2	1	0	int32	int32	int32	0	32	4	pure	-1	core	runtime-c
+int32·eq	2	1	0	int32	int32	bool	0	32	1	pure	-1	core	runtime-c
+int32·ge	2	1	0	int32	int32	bool	0	32	1	pure	-1	core	runtime-c
+int32·gt	2	1	0	int32	int32	bool	0	32	1	pure	-1	core	runtime-c
+int32·le	2	1	0	int32	int32	bool	0	32	1	pure	-1	core	runtime-c
+int32·lt	2	1	0	int32	int32	bool	0	32	1	pure	-1	core	runtime-c
+int32·max	2	1	0	int32	int32	int32	0	32	4	pure	-1	core	runtime-c
+int32·min	2	1	0	int32	int32	int32	0	32	4	pure	-1	core	runtime-c
+int32·mod	2	1	0	int32	int32	int32	0	32	4	pure	-1	core	runtime-c
+int32·mul	2	1	0	int32	int32	int32	0	32	4	pure	-1	core	runtime-c
+int32·neg	1	1	0	int32	int32	0	32	4	pure	-1	core	runtime-c
+int32·neq	2	1	0	int32	int32	bool	0	32	1	pure	-1	core	runtime-c
+int32·sub	2	1	0	int32	int32	int32	0	32	4	pure	-1	core	runtime-c
+int64	1	1	0	any	int64	0	32	8	pure	-1	core	runtime-c
+int64·abs	1	1	0	int64	int64	0	32	8	pure	-1	core	runtime-c
+int64·add	2	1	0	int64	int64	int64	0	32	8	pure	-1	core	runtime-c
+int64·bitand	2	1	0	int64	int64	int64	0	32	8	pure	-1	core	runtime-c
+int64·bitor	2	1	0	int64	int64	int64	0	32	8	pure	-1	core	runtime-c
+int64·bitxor	2	1	0	int64	int64	int64	0	32	8	pure	-1	core	runtime-c
+int64·div	2	1	0	int64	int64	int64	0	32	8	pure	-1	core	runtime-c
+int64·eq	2	1	0	int64	int64	bool	0	32	1	pure	-1	core	runtime-c
+int64·ge	2	1	0	int64	int64	bool	0	32	1	pure	-1	core	runtime-c
+int64·gt	2	1	0	int64	int64	bool	0	32	1	pure	-1	core	runtime-c
+int64·le	2	1	0	int64	int64	bool	0	32	1	pure	-1	core	runtime-c
+int64·lt	2	1	0	int64	int64	bool	0	32	1	pure	-1	core	runtime-c
+int64·max	2	1	0	int64	int64	int64	0	32	8	pure	-1	core	runtime-c
+int64·min	2	1	0	int64	int64	int64	0	32	8	pure	-1	core	runtime-c
+int64·mod	2	1	0	int64	int64	int64	0	32	8	pure	-1	core	runtime-c
+int64·mul	2	1	0	int64	int64	int64	0	32	8	pure	-1	core	runtime-c
+int64·neg	1	1	0	int64	int64	0	32	8	pure	-1	core	runtime-c
+int64·neq	2	1	0	int64	int64	bool	0	32	1	pure	-1	core	runtime-c
+int64·shl	2	1	0	int64	int64	int64	0	32	8	pure	-1	core	runtime-c
+int64·shr	2	1	0	int64	int64	int64	0	32	8	pure	-1	core	runtime-c
+int64·sign	1	1	0	int64	int64	0	32	8	pure	-1	core	runtime-c
+int64·sub	2	1	0	int64	int64	int64	0	32	8	pure	-1	core	runtime-c
+int8	1	1	0	any	int8	0	32	1	pure	-1	core	runtime-c
+int8·abs	1	1	0	int8	int8	0	32	1	pure	-1	core	runtime-c
+int8·add	2	1	0	int8	int8	int8	0	32	1	pure	-1	core	runtime-c
+int8·div	2	1	0	int8	int8	int8	0	32	1	pure	-1	core	runtime-c
+int8·eq	2	1	0	int8	int8	bool	0	32	1	pure	-1	core	runtime-c
+int8·ge	2	1	0	int8	int8	bool	0	32	1	pure	-1	core	runtime-c
+int8·gt	2	1	0	int8	int8	bool	0	32	1	pure	-1	core	runtime-c
+int8·le	2	1	0	int8	int8	bool	0	32	1	pure	-1	core	runtime-c
+int8·lt	2	1	0	int8	int8	bool	0	32	1	pure	-1	core	runtime-c
+int8·max	2	1	0	int8	int8	int8	0	32	1	pure	-1	core	runtime-c
+int8·min	2	1	0	int8	int8	int8	0	32	1	pure	-1	core	runtime-c
+int8·mod	2	1	0	int8	int8	int8	0	32	1	pure	-1	core	runtime-c
+int8·mul	2	1	0	int8	int8	int8	0	32	1	pure	-1	core	runtime-c
+int8·neg	1	1	0	int8	int8	0	32	1	pure	-1	core	runtime-c
+int8·neq	2	1	0	int8	int8	bool	0	32	1	pure	-1	core	runtime-c
+int8·sub	2	1	0	int8	int8	int8	0	32	1	pure	-1	core	runtime-c
+kvlang·abs	1	1	0	any	any	1	64	-1	pure	-1	core	runtime-c
+kvspace·cp	2	0	0	any	any	-1	-1	-1	write	-1	ext	runtime-c
+kvspace·cpdir	2	0	0	any	any	-1	-1	-1	write	-1	ext	runtime-c
+kvspace·cplist	2	0	0	any	any	-1	-1	-1	write	-1	ext	runtime-c
+kvspace·del	1	1	0	any	any	-1	-1	-1	write	-1	ext	runtime-c
+kvspace·deltree	1	1	0	any	any	-1	-1	-1	write	-1	ext	runtime-c
+kvspace·extindex	2	0	0	any	any	-1	-1	-1	write	-1	ext	runtime-c
+kvspace·get	2	1	0	any	any	any	-1	-1	-1	read	-1	core	runtime-c
+kvspace·listat	2	1	0	any	any	any	-1	-1	-1	read	-1	core	runtime-c
+kvspace·listlen	1	1	0	any	any	-1	-1	-1	read	-1	core	runtime-c
+kvspace·mkindex	2	0	0	any	any	-1	-1	-1	write	-1	ext	runtime-c
+kvspace·rmindexext	1	0	0	any	-1	-1	-1	write	-1	ext	runtime-c
+kvspace·set	3	1	0	any	any	any	any	-1	-1	-1	write	-1	core	runtime-c
+kvspace·watch	2	1	0	any	any	any	-1	-1	-1	read,write	-1	ext	runtime-c
+le	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+log	1	1	0	any	any	-1	-1	-1	pure	-1	core	runtime-c
+lt	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+map	1	1	1	any...	any	-1	-1	-1	pure	-1	ext	runtime-c
+max	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+min	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+mod	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+mul	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+ndarray·dim	1	1	0	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+ndarray·numel	1	1	0	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+ndarray·shape	1	1	0	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+neg	1	1	0	any	any	-1	-1	-1	pure	-1	core	runtime-c
+neq	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+not	1	1	0	any	any	-1	-1	-1	pure	-1	core	runtime-c
+obj	1	1	1	any...	any	-1	-1	-1	pure	-1	ext	runtime-c
+or	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+pow	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+random·int63	0	1	0	any	-1	-1	-1	read	-1	ext	runtime-c
+random·intn	1	1	0	any	any	-1	-1	-1	read	-1	ext	runtime-c
+random·uint64	0	1	0	any	-1	-1	-1	read	-1	ext	runtime-c
+return	1	0	0	any	-1	-1	-1	control	-1	core	runtime-c
+shl	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+shr	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+sign	1	1	0	any	any	-1	-1	-1	pure	-1	core	runtime-c
+sqrt	1	1	0	any	any	-1	-1	-1	pure	-1	core	runtime-c
+string·char	2	1	0	any	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+string·cmp	2	1	0	any	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+string·concat	2	1	0	any	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+string·find	2	1	0	any	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+string·formatint	2	1	0	any	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+string·formatuint	2	1	0	any	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+string·len	1	1	0	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+string·ord	1	1	0	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+string·parsefloat	1	1	0	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+string·parseint	2	1	0	any	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+string·parseuint	2	1	0	any	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+string·set	3	1	0	any	any	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+string·slice	3	1	0	any	any	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+struct·new	1	1	1	any...	any	-1	-1	-1	pure	-1	ext	runtime-c
+sub	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+time/duration·add	2	1	0	any	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+time/duration·after	2	1	0	any	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+time/duration·as_hours	1	1	0	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+time/duration·as_millis	1	1	0	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+time/duration·as_minutes	1	1	0	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+time/duration·as_nanos	1	1	0	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+time/duration·as_seconds	1	1	0	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+time/duration·before	2	1	0	any	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+time/duration·hours	1	1	0	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+time/duration·millis	1	1	0	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+time/duration·minutes	1	1	0	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+time/duration·nanos	1	1	0	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+time/duration·seconds	1	1	0	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+time/duration·sub	2	1	0	any	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+time·add	2	1	0	any	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+time·after	2	1	0	any	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+time·before	2	1	0	any	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+time·now	0	1	0	any	-1	-1	-1	read	-1	ext	runtime-c
+time·sub	2	1	0	any	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+uint16	1	1	0	any	uint16	0	32	2	pure	-1	core	runtime-c
+uint16·add	2	1	0	uint16	uint16	uint16	0	32	2	pure	-1	core	runtime-c
+uint16·div	2	1	0	uint16	uint16	uint16	0	32	2	pure	-1	core	runtime-c
+uint16·eq	2	1	0	uint16	uint16	bool	0	32	1	pure	-1	core	runtime-c
+uint16·ge	2	1	0	uint16	uint16	bool	0	32	1	pure	-1	core	runtime-c
+uint16·gt	2	1	0	uint16	uint16	bool	0	32	1	pure	-1	core	runtime-c
+uint16·le	2	1	0	uint16	uint16	bool	0	32	1	pure	-1	core	runtime-c
+uint16·lt	2	1	0	uint16	uint16	bool	0	32	1	pure	-1	core	runtime-c
+uint16·max	2	1	0	uint16	uint16	uint16	0	32	2	pure	-1	core	runtime-c
+uint16·min	2	1	0	uint16	uint16	uint16	0	32	2	pure	-1	core	runtime-c
+uint16·mod	2	1	0	uint16	uint16	uint16	0	32	2	pure	-1	core	runtime-c
+uint16·mul	2	1	0	uint16	uint16	uint16	0	32	2	pure	-1	core	runtime-c
+uint16·neq	2	1	0	uint16	uint16	bool	0	32	1	pure	-1	core	runtime-c
+uint16·sub	2	1	0	uint16	uint16	uint16	0	32	2	pure	-1	core	runtime-c
+uint32	1	1	0	any	uint32	0	32	4	pure	-1	core	runtime-c
+uint32·add	2	1	0	uint32	uint32	uint32	0	32	4	pure	-1	core	runtime-c
+uint32·div	2	1	0	uint32	uint32	uint32	0	32	4	pure	-1	core	runtime-c
+uint32·eq	2	1	0	uint32	uint32	bool	0	32	1	pure	-1	core	runtime-c
+uint32·ge	2	1	0	uint32	uint32	bool	0	32	1	pure	-1	core	runtime-c
+uint32·gt	2	1	0	uint32	uint32	bool	0	32	1	pure	-1	core	runtime-c
+uint32·le	2	1	0	uint32	uint32	bool	0	32	1	pure	-1	core	runtime-c
+uint32·lt	2	1	0	uint32	uint32	bool	0	32	1	pure	-1	core	runtime-c
+uint32·max	2	1	0	uint32	uint32	uint32	0	32	4	pure	-1	core	runtime-c
+uint32·min	2	1	0	uint32	uint32	uint32	0	32	4	pure	-1	core	runtime-c
+uint32·mod	2	1	0	uint32	uint32	uint32	0	32	4	pure	-1	core	runtime-c
+uint32·mul	2	1	0	uint32	uint32	uint32	0	32	4	pure	-1	core	runtime-c
+uint32·neq	2	1	0	uint32	uint32	bool	0	32	1	pure	-1	core	runtime-c
+uint32·sub	2	1	0	uint32	uint32	uint32	0	32	4	pure	-1	core	runtime-c
+uint64	1	1	0	any	uint64	0	32	8	pure	-1	core	runtime-c
+uint64·add	2	1	0	uint64	uint64	uint64	0	32	8	pure	-1	core	runtime-c
+uint64·bitand	2	1	0	uint64	uint64	uint64	0	32	8	pure	-1	core	runtime-c
+uint64·bitor	2	1	0	uint64	uint64	uint64	0	32	8	pure	-1	core	runtime-c
+uint64·bitxor	2	1	0	uint64	uint64	uint64	0	32	8	pure	-1	core	runtime-c
+uint64·div	2	1	0	uint64	uint64	uint64	0	32	8	pure	-1	core	runtime-c
+uint64·eq	2	1	0	uint64	uint64	bool	0	32	1	pure	-1	core	runtime-c
+uint64·ge	2	1	0	uint64	uint64	bool	0	32	1	pure	-1	core	runtime-c
+uint64·gt	2	1	0	uint64	uint64	bool	0	32	1	pure	-1	core	runtime-c
+uint64·le	2	1	0	uint64	uint64	bool	0	32	1	pure	-1	core	runtime-c
+uint64·lt	2	1	0	uint64	uint64	bool	0	32	1	pure	-1	core	runtime-c
+uint64·max	2	1	0	uint64	uint64	uint64	0	32	8	pure	-1	core	runtime-c
+uint64·min	2	1	0	uint64	uint64	uint64	0	32	8	pure	-1	core	runtime-c
+uint64·mod	2	1	0	uint64	uint64	uint64	0	32	8	pure	-1	core	runtime-c
+uint64·mul	2	1	0	uint64	uint64	uint64	0	32	8	pure	-1	core	runtime-c
+uint64·neq	2	1	0	uint64	uint64	bool	0	32	1	pure	-1	core	runtime-c
+uint64·shl	2	1	0	uint64	uint64	uint64	0	32	8	pure	-1	core	runtime-c
+uint64·shr	2	1	0	uint64	uint64	uint64	0	32	8	pure	-1	core	runtime-c
+uint64·sub	2	1	0	uint64	uint64	uint64	0	32	8	pure	-1	core	runtime-c
+uint8	1	1	0	any	uint8	0	32	1	pure	-1	core	runtime-c
+uint8·add	2	1	0	uint8	uint8	uint8	0	32	1	pure	-1	core	runtime-c
+uint8·div	2	1	0	uint8	uint8	uint8	0	32	1	pure	-1	core	runtime-c
+uint8·eq	2	1	0	uint8	uint8	bool	0	32	1	pure	-1	core	runtime-c
+uint8·ge	2	1	0	uint8	uint8	bool	0	32	1	pure	-1	core	runtime-c
+uint8·gt	2	1	0	uint8	uint8	bool	0	32	1	pure	-1	core	runtime-c
+uint8·le	2	1	0	uint8	uint8	bool	0	32	1	pure	-1	core	runtime-c
+uint8·lt	2	1	0	uint8	uint8	bool	0	32	1	pure	-1	core	runtime-c
+uint8·max	2	1	0	uint8	uint8	uint8	0	32	1	pure	-1	core	runtime-c
+uint8·min	2	1	0	uint8	uint8	uint8	0	32	1	pure	-1	core	runtime-c
+uint8·mod	2	1	0	uint8	uint8	uint8	0	32	1	pure	-1	core	runtime-c
+uint8·mul	2	1	0	uint8	uint8	uint8	0	32	1	pure	-1	core	runtime-c
+uint8·neq	2	1	0	uint8	uint8	bool	0	32	1	pure	-1	core	runtime-c
+uint8·sub	2	1	0	uint8	uint8	uint8	0	32	1	pure	-1	core	runtime-c
+vthread·call	1	0	0	any	-1	-1	-1	control,write	-1	core	runtime-c
+vthread·create	1	1	0	any	any	-1	-1	-1	control,write	-1	core	runtime-c
+vthread·run	1	0	0	any	-1	-1	-1	control,write	-1	core	runtime-c
+vthread·setstatus	1	0	0	any	-1	-1	-1	control,write	-1	core	runtime-c
+vthread·sleep	1	0	0	any	-1	-1	-1	control,write	-1	core	runtime-c
+xv·at	2	1	0	any	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+xv·bodylen	1	1	0	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+xv·langtype	1	1	0	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+xv·parselangtype	1	1	0	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+xv·reinterpret	2	1	0	any	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+xv·reshape	3	1	0	any	any	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+xv·set	3	1	0	any	any	any	any	-1	-1	-1	pure	-1	ext	runtime-c
+|	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+||	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+×	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+÷	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+√	1	1	0	any	any	-1	-1	-1	pure	-1	core	runtime-c
+≠	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+≤	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
+≥	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
