@@ -767,6 +767,34 @@ typedef struct {
     const char *result_kind;
     uint32_t result_width;
 } kvlangRwirCap;
+
+/* P1b1 ISA 签名列：与 myrwircaps 同序、逐项一行（see workspace P1 spec §1.3/§2.1）。
+ * rp/wp 类型由 sig 规则 + opcode 生成，不在发布器里另列 opcode 清单。 */
+enum { KV_ISA_CORE = 0, KV_ISA_EXT = 1 };
+enum {
+    KV_ISA_ANY = 0, /* 槽类型全 any（arity 显式；dynamic 时末读参 any...） */
+    KV_ISA_BIN,     /* <kind>·op：rp=kind×2，wp=kind */
+    KV_ISA_CMP,     /* <kind>·op：rp=kind×2，wp=bool */
+    KV_ISA_UN,      /* <kind>·op：rp=kind，wp=kind */
+    KV_ISA_CAST,    /* rp=any，wp=opcode kind */
+};
+enum {
+    KV_EFF_PURE = 1,
+    KV_EFF_READ = 2,
+    KV_EFF_WRITE = 4,
+    KV_EFF_CONTROL = 8,
+    KV_EFF_IO = 16,
+    KV_EFF_DEBUG = 32,
+};
+typedef struct {
+    uint8_t cls;
+    uint8_t sig;
+    uint8_t nr;
+    uint8_t nw;
+    uint8_t dynamic;
+    uint8_t effects;
+} kvlangIsaSig;
+__attribute__((visibility("hidden"))) const kvlangIsaSig *kvlangIsaSigs(uint32_t *n_out);
 /* ISA registry（P1a）：core manifest 发布与 per-function hash 闸门。 */
 __attribute__((visibility("hidden"))) int kvlangIsaPublishCore(kvspace_t *kv);
 __attribute__((visibility("hidden"))) bool kvlangIsaCtlDsn(const char *dsn, char *out,

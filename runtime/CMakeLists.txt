@@ -18,10 +18,11 @@ set(KVLANG_GEN_SRC "${CMAKE_SOURCE_DIR}/src/rwir_special_gen.c")
 set(KVLANG_COERCE_SRC "${CMAKE_SOURCE_DIR}/src/rwir_coerce.c")
 set(KVLANG_DECODE_SRC "${CMAKE_SOURCE_DIR}/src/rwir_decode.c")
 set(KVLANG_ISA_SRC "${CMAKE_SOURCE_DIR}/src/isa.c")
+set(KVLANG_ISA_SIG_SRC "${CMAKE_SOURCE_DIR}/src/isa_sig.c")
 list(REMOVE_ITEM KVLANG_RUNTIME_SRC "${KVLANG_GEN_SRC}" "${KVLANG_COERCE_SRC}"
-    "${KVLANG_DECODE_SRC}" "${KVLANG_ISA_SRC}")
+    "${KVLANG_DECODE_SRC}" "${KVLANG_ISA_SRC}" "${KVLANG_ISA_SIG_SRC}")
 list(APPEND KVLANG_RUNTIME_SRC "${KVLANG_DECODE_SRC}" "${KVLANG_GEN_SRC}"
-    "${KVLANG_COERCE_SRC}" "${KVLANG_ISA_SRC}")
+    "${KVLANG_COERCE_SRC}" "${KVLANG_ISA_SRC}" "${KVLANG_ISA_SIG_SRC}")
 add_library(kvlang_runtime SHARED ${KVLANG_RUNTIME_SRC})
 target_include_directories(kvlang_runtime PUBLIC include src)
 target_compile_definitions(kvlang_runtime PRIVATE _GNU_SOURCE)

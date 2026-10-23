@@ -1,0 +1,325 @@
+/* P1b1 ISA 签名列：与 myrwircaps 同序、逐项一行（P1 spec 1.3/2.1）。
+ * 独立 TU 且最后链接：不移动热 TU/热表的地址布局（见 CMake 注释）。 */
+
+#include "runtime_internal.h"
+
+/* P1b1 ISA 签名表：与 myrwircaps 同序、逐项一行；发布期做形状校验。
+ * sig: ANY=全 any 槽（arity 显式）; BIN/CMP/UN=<kind>·op 特化; CAST=rp any / wp=kind。
+ * 变参 entry dynamic=1，末读参类型发布时补 "..."。 */
+/* P1b1 ISA 签名表：与 myrwircaps 同序、逐项一行；发布期做形状校验。
+ * sig: ANY=全 any 槽（arity 显式）; BIN/CMP/UN=<kind>·op 特化; CAST=rp any / wp=kind。
+ * 变参 entry dynamic=1，末读参类型发布时补 "..."。 */
+static const kvlangIsaSig isa_sig[] = {
+    {KV_ISA_CORE, KV_ISA_ANY, 1, 0, 0, KV_EFF_CONTROL}, /* call */
+    {KV_ISA_CORE, KV_ISA_ANY, 1, 0, 0, KV_EFF_CONTROL}, /* return */
+    {KV_ISA_CORE, KV_ISA_ANY, 1, 0, 0, KV_EFF_CONTROL}, /* goto */
+    {KV_ISA_CORE, KV_ISA_ANY, 3, 0, 0, KV_EFF_CONTROL}, /* br */
+    {KV_ISA_CORE, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* = */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* add */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* + */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* int64·add */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* int64·sub */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* int64·mul */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* int64·div */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* int64·mod */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* int64·bitand */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* int64·bitor */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* int64·bitxor */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* int64·shl */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* int64·shr */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* int64·max */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* int64·min */
+    {KV_ISA_CORE, KV_ISA_UN, 1, 1, 0, KV_EFF_PURE}, /* int64·neg */
+    {KV_ISA_CORE, KV_ISA_UN, 1, 1, 0, KV_EFF_PURE}, /* int64·abs */
+    {KV_ISA_CORE, KV_ISA_UN, 1, 1, 0, KV_EFF_PURE}, /* int64·sign */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* int64·eq */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* int64·neq */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* int64·lt */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* int64·le */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* int64·gt */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* int64·ge */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* float64·add */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* float64·sub */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* float64·mul */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* float64·div */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* float64·max */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* float64·min */
+    {KV_ISA_CORE, KV_ISA_UN, 1, 1, 0, KV_EFF_PURE}, /* float64·neg */
+    {KV_ISA_CORE, KV_ISA_UN, 1, 1, 0, KV_EFF_PURE}, /* float64·abs */
+    {KV_ISA_CORE, KV_ISA_UN, 1, 1, 0, KV_EFF_PURE}, /* float64·sign */
+    {KV_ISA_CORE, KV_ISA_UN, 1, 1, 0, KV_EFF_PURE}, /* float64·sqrt */
+    {KV_ISA_CORE, KV_ISA_UN, 1, 1, 0, KV_EFF_PURE}, /* float64·exp */
+    {KV_ISA_CORE, KV_ISA_UN, 1, 1, 0, KV_EFF_PURE}, /* float64·log */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* float64·pow */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* float64·eq */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* float64·neq */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* float64·lt */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* float64·le */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* float64·gt */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* float64·ge */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* int8·add */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* int8·sub */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* int8·mul */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* int8·div */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* int8·mod */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* int8·max */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* int8·min */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* int8·eq */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* int8·neq */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* int8·lt */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* int8·le */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* int8·gt */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* int8·ge */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* int16·add */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* int16·sub */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* int16·mul */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* int16·div */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* int16·mod */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* int16·max */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* int16·min */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* int16·eq */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* int16·neq */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* int16·lt */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* int16·le */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* int16·gt */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* int16·ge */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* int32·add */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* int32·sub */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* int32·mul */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* int32·div */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* int32·mod */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* int32·max */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* int32·min */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* int32·eq */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* int32·neq */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* int32·lt */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* int32·le */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* int32·gt */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* int32·ge */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* uint8·add */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* uint8·sub */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* uint8·mul */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* uint8·div */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* uint8·mod */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* uint8·max */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* uint8·min */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* uint8·eq */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* uint8·neq */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* uint8·lt */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* uint8·le */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* uint8·gt */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* uint8·ge */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* uint16·add */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* uint16·sub */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* uint16·mul */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* uint16·div */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* uint16·mod */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* uint16·max */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* uint16·min */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* uint16·eq */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* uint16·neq */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* uint16·lt */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* uint16·le */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* uint16·gt */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* uint16·ge */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* uint32·add */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* uint32·sub */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* uint32·mul */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* uint32·div */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* uint32·mod */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* uint32·max */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* uint32·min */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* uint32·eq */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* uint32·neq */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* uint32·lt */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* uint32·le */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* uint32·gt */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* uint32·ge */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* uint64·add */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* uint64·sub */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* uint64·mul */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* uint64·div */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* uint64·mod */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* uint64·max */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* uint64·min */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* uint64·eq */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* uint64·neq */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* uint64·lt */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* uint64·le */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* uint64·gt */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* uint64·ge */
+    {KV_ISA_CORE, KV_ISA_UN, 1, 1, 0, KV_EFF_PURE}, /* int8·neg */
+    {KV_ISA_CORE, KV_ISA_UN, 1, 1, 0, KV_EFF_PURE}, /* int8·abs */
+    {KV_ISA_CORE, KV_ISA_UN, 1, 1, 0, KV_EFF_PURE}, /* int16·neg */
+    {KV_ISA_CORE, KV_ISA_UN, 1, 1, 0, KV_EFF_PURE}, /* int16·abs */
+    {KV_ISA_CORE, KV_ISA_UN, 1, 1, 0, KV_EFF_PURE}, /* int32·neg */
+    {KV_ISA_CORE, KV_ISA_UN, 1, 1, 0, KV_EFF_PURE}, /* int32·abs */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* uint64·bitand */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* uint64·bitor */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* uint64·bitxor */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* uint64·shl */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* uint64·shr */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* float32·add */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* float32·sub */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* float32·mul */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* float32·div */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* float32·max */
+    {KV_ISA_CORE, KV_ISA_BIN, 2, 1, 0, KV_EFF_PURE}, /* float32·min */
+    {KV_ISA_CORE, KV_ISA_UN, 1, 1, 0, KV_EFF_PURE}, /* float32·neg */
+    {KV_ISA_CORE, KV_ISA_UN, 1, 1, 0, KV_EFF_PURE}, /* float32·abs */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* float32·eq */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* float32·neq */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* float32·lt */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* float32·le */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* float32·gt */
+    {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* float32·ge */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* sub */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* - */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* mul */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* × */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* div */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* ÷ */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* mod */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* % */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* eq */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* == */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* neq */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* != */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* ≠ */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* lt */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* < */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* gt */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* > */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* le */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* <= */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* ≤ */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* ge */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* >= */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* ≥ */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* and */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* && */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* or */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* || */
+    {KV_ISA_CORE, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* not */
+    {KV_ISA_CORE, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* ! */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* bitand */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* & */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* bitor */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* | */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* bitxor */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* ^ */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* shl */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* << */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* shr */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* >> */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* pow */
+    {KV_ISA_CORE, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* sqrt */
+    {KV_ISA_CORE, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* √ */
+    {KV_ISA_CORE, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* exp */
+    {KV_ISA_CORE, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* log */
+    {KV_ISA_CORE, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* neg */
+    {KV_ISA_CORE, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* abs */
+    {KV_ISA_CORE, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* sign */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* max */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* min */
+    {KV_ISA_CORE, KV_ISA_CAST, 1, 1, 0, KV_EFF_PURE}, /* bool */
+    {KV_ISA_CORE, KV_ISA_CAST, 1, 1, 0, KV_EFF_PURE}, /* int8 */
+    {KV_ISA_CORE, KV_ISA_CAST, 1, 1, 0, KV_EFF_PURE}, /* int16 */
+    {KV_ISA_CORE, KV_ISA_CAST, 1, 1, 0, KV_EFF_PURE}, /* int32 */
+    {KV_ISA_CORE, KV_ISA_CAST, 1, 1, 0, KV_EFF_PURE}, /* int64 */
+    {KV_ISA_CORE, KV_ISA_CAST, 1, 1, 0, KV_EFF_PURE}, /* uint8 */
+    {KV_ISA_CORE, KV_ISA_CAST, 1, 1, 0, KV_EFF_PURE}, /* uint16 */
+    {KV_ISA_CORE, KV_ISA_CAST, 1, 1, 0, KV_EFF_PURE}, /* uint32 */
+    {KV_ISA_CORE, KV_ISA_CAST, 1, 1, 0, KV_EFF_PURE}, /* uint64 */
+    {KV_ISA_CORE, KV_ISA_CAST, 1, 1, 0, KV_EFF_PURE}, /* float32 */
+    {KV_ISA_CORE, KV_ISA_CAST, 1, 1, 0, KV_EFF_PURE}, /* float64 */
+    {KV_ISA_CORE, KV_ISA_CAST, 1, 1, 0, KV_EFF_PURE}, /* char/utf32 */
+    {KV_ISA_CORE, KV_ISA_CAST, 1, 1, 0, KV_EFF_PURE}, /* char/utf8 */
+    {KV_ISA_CORE, KV_ISA_CAST, 1, 1, 0, KV_EFF_PURE}, /* char/ascii */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 1, KV_EFF_PURE}, /* array */
+    {KV_ISA_EXT, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* array·fill */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* array·scatter */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* array·compact */
+    {KV_ISA_EXT, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* array·append */
+    {KV_ISA_EXT, KV_ISA_ANY, 3, 1, 0, KV_EFF_PURE}, /* array·slice */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 1, KV_EFF_PURE}, /* obj */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 1, KV_EFF_PURE}, /* map */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 1, KV_EFF_PURE}, /* struct·new */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* ndarray·numel */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* ndarray·dim */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* ndarray·shape */
+    {KV_ISA_EXT, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* xv·at */
+    {KV_ISA_EXT, KV_ISA_ANY, 3, 1, 0, KV_EFF_PURE}, /* xv·set */
+    {KV_ISA_EXT, KV_ISA_ANY, 3, 1, 0, KV_EFF_PURE}, /* xv·reshape */
+    {KV_ISA_EXT, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* xv·reinterpret */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* xv·langtype */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* xv·bodylen */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* xv·parselangtype */
+    {KV_ISA_EXT, KV_ISA_ANY, 3, 1, 0, KV_EFF_PURE}, /* string·set */
+    {KV_ISA_EXT, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* string·char */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* string·ord */
+    {KV_ISA_EXT, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* string·cmp */
+    {KV_ISA_EXT, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* string·find */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* string·len */
+    {KV_ISA_EXT, KV_ISA_ANY, 3, 1, 0, KV_EFF_PURE}, /* string·slice */
+    {KV_ISA_EXT, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* string·concat */
+    {KV_ISA_EXT, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* string·formatint */
+    {KV_ISA_EXT, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* string·formatuint */
+    {KV_ISA_EXT, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* string·parseint */
+    {KV_ISA_EXT, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* string·parseuint */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* string·parsefloat */
+    {KV_ISA_EXT, KV_ISA_ANY, 0, 1, 0, KV_EFF_READ}, /* time·now */
+    {KV_ISA_EXT, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* time·sub */
+    {KV_ISA_EXT, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* time·add */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* time/duration·nanos */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* time/duration·millis */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* time/duration·seconds */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* time/duration·minutes */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* time/duration·hours */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* time/duration·as_nanos */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* time/duration·as_millis */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* time/duration·as_seconds */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* time/duration·as_minutes */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* time/duration·as_hours */
+    {KV_ISA_EXT, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* time/duration·add */
+    {KV_ISA_EXT, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* time/duration·sub */
+    {KV_ISA_EXT, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* time/duration·before */
+    {KV_ISA_EXT, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* time/duration·after */
+    {KV_ISA_EXT, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* time·before */
+    {KV_ISA_EXT, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* time·after */
+    {KV_ISA_EXT, KV_ISA_ANY, 0, 1, 0, KV_EFF_READ}, /* random·uint64 */
+    {KV_ISA_EXT, KV_ISA_ANY, 0, 1, 0, KV_EFF_READ}, /* random·int63 */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_READ}, /* random·intn */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_READ}, /* kvspace·get */
+    {KV_ISA_CORE, KV_ISA_ANY, 3, 1, 0, KV_EFF_WRITE}, /* kvspace·set */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_WRITE}, /* kvspace·del */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_WRITE}, /* kvspace·deltree */
+    {KV_ISA_EXT, KV_ISA_ANY, 2, 0, 0, KV_EFF_WRITE}, /* kvspace·cp */
+    {KV_ISA_EXT, KV_ISA_ANY, 2, 0, 0, KV_EFF_WRITE}, /* kvspace·cpdir */
+    {KV_ISA_EXT, KV_ISA_ANY, 2, 0, 0, KV_EFF_WRITE}, /* kvspace·cplist */
+    {KV_ISA_CORE, KV_ISA_ANY, 1, 1, 0, KV_EFF_READ}, /* kvspace·listlen */
+    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_READ}, /* kvspace·listat */
+    {KV_ISA_EXT, KV_ISA_ANY, 2, 0, 0, KV_EFF_WRITE}, /* kvspace·mkindex */
+    {KV_ISA_EXT, KV_ISA_ANY, 2, 0, 0, KV_EFF_WRITE}, /* kvspace·extindex */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 0, 0, KV_EFF_WRITE}, /* kvspace·rmindexext */
+    {KV_ISA_EXT, KV_ISA_ANY, 2, 1, 0, KV_EFF_READ | KV_EFF_WRITE}, /* kvspace·watch */
+    {KV_ISA_CORE, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* kvlang·abs */
+    {KV_ISA_CORE, KV_ISA_ANY, 1, 1, 0, KV_EFF_CONTROL | KV_EFF_WRITE}, /* vthread·create */
+    {KV_ISA_CORE, KV_ISA_ANY, 1, 0, 0, KV_EFF_CONTROL | KV_EFF_WRITE}, /* vthread·run */
+    {KV_ISA_CORE, KV_ISA_ANY, 1, 0, 0, KV_EFF_CONTROL | KV_EFF_WRITE}, /* vthread·call */
+    {KV_ISA_CORE, KV_ISA_ANY, 1, 0, 0, KV_EFF_CONTROL | KV_EFF_WRITE}, /* vthread·sleep */
+    {KV_ISA_CORE, KV_ISA_ANY, 1, 0, 0, KV_EFF_CONTROL | KV_EFF_WRITE}, /* vthread·setstatus */
+    {KV_ISA_CORE, KV_ISA_ANY, 0, 0, 0, KV_EFF_DEBUG}, /* debugger */
+};
+
+
+_Static_assert(sizeof(isa_sig) / sizeof(isa_sig[0]) == 300,
+               "P1b1: isa_sig must have 300 rows (core 237 + ext 63)");
+/* 与 myrwircaps 的对齐由 kvlangIsaPublishCore 的运行期 route==nsig 校验兜底。 */
+
+__attribute__((visibility("hidden"))) const kvlangIsaSig *
+kvlangIsaSigs(uint32_t *n_out) {
+    if (n_out)
+        *n_out = (uint32_t)(sizeof(isa_sig) / sizeof(isa_sig[0]));
+    return isa_sig;
+}
