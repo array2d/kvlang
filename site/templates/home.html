@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="{{ meta.lang }}">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ meta.title }}</title>
+    <meta name="description" content="{{ meta.description }}" />
+    <link rel="icon" type="image/svg+xml" href="/img/kvlang-mark.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/img/apple-touch-icon-180.png" />
+    <meta name="theme-color" content="#D07E64" />
+    <link rel="canonical" href="{{ meta.canonical }}" />
+    <link rel="alternate" hreflang="en" href="{{ meta.hreflangEn }}" />
+    <link rel="alternate" hreflang="zh-CN" href="{{ meta.hreflangZh }}" />
+    <link rel="alternate" hreflang="x-default" href="{{ meta.hreflangDefault }}" />
+    <link
+      rel="alternate"
+      type="text/plain"
+      title="{{ meta.alternateTitle }}"
+      href="{{ meta.alternateHref }}"
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="{{ meta.ogTitle }}" />
+    <meta property="og:description" content="{{ meta.ogDescription }}" />
+    <meta property="og:url" content="{{ meta.ogUrl }}" />
+    <meta property="og:image" content="{{ meta.ogImage }}" />
+    <meta property="og:image:width" content="{{ meta.ogImageWidth }}" />
+    <meta property="og:image:height" content="{{ meta.ogImageHeight }}" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="{{ meta.twitterTitle }}" />
+    <meta name="twitter:description" content="{{ meta.twitterDescription }}" />
+    <meta name="twitter:image" content="{{ meta.twitterImage }}" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareSourceCode",
+        "name": "kvlang",
+        "description": "{{ meta.jsonLdDescription }}",
+        "codeRepository": "https://github.com/array2d/kvlang",
+        "license": "https://github.com/array2d/kvlang/blob/master/LICENSE",
+        "programmingLanguage": "kvlang",
+        "version": "{{VERSION}}"
+      }
+    </script>
+    <script>
+      // 旧站深链：array2d.github.io/kvlang/#/stdlib/... → kvlang.com/stdlib/#/...
+      if (location.hash.indexOf("#/") === 0) {
+        location.replace("/stdlib/" + location.hash);
+      }
+    </script>
+    <script type="module" src="/src/home.ts"></script>
+  </head>
+  <body class="home-body">
+    <header class="site-nav">
+      <div class="wrap">
+        <a class="wordmark" href="{{ nav.home }}"
+          ><img src="/img/kvlang-mark.svg" alt="" width="26" height="26" />kvlang</a
+        >
+        {{#each nav.items}}<a href="{{ href }}">{{ label }}</a>
+        {{/each}}<a
+          href="{{ nav.switch.href }}"
+          hreflang="{{ nav.switch.hreflang }}"
+          lang="{{ nav.switch.lang }}"
+          >{{ nav.switch.label }}</a
+        >
+        <button
+          id="theme"
+          class="theme"
+          type="button"
+          title="{{ nav.themeTitle }}"
+          aria-label="{{ nav.themeLabel }}"
+          aria-pressed="false"
+        >
+          ◐
+        </button>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="wrap">
+          <h1>{{ home.hero.title }}</h1>
+          <p class="lead">
+            {{ home.hero.lead }}
+          </p>
+          <div class="actions">
+            <a class="btn primary" href="{{ home.hero.downloadHref }}">{{ home.hero.download }}</a>
+            <a class="btn" href="{{ home.hero.quickStartHref }}">{{ home.hero.quickStart }}</a>
+            <span class="version">{{ home.hero.released }}</span>
+          </div>
+          <div class="install">
+            <code id="install-cmd">{{ home.hero.install }}</code
+            ><button type="button" data-copy="#install-cmd">{{ home.hero.copy }}</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="features">
+        <div class="wrap">
+          <h2>{{ home.featuresTitle }}</h2>
+          <p class="section-lead">{{ home.featuresLead }}</p>
+
+          {{#each home.features}}
+          <div class="{{ featureClass }}">
+            <div>
+              <h3>{{ title }}</h3>
+              <p>
+                {{{ body }}}
+              </p>
+            </div>
+            {{{ codeHtml }}}
+          </div>
+          {{/each}}
+        </div>
+      </section>
+
+      <section id="ecosystem">
+        <div class="wrap">
+          <h2>{{ home.ecosystem.title }}</h2>
+          <p class="section-lead">
+            {{ home.ecosystem.lead }}
+          </p>
+          <figure class="eco-figure">
+            <img
+              src="{{ home.ecosystem.image }}"
+              alt="{{ home.ecosystem.alt }}"
+              loading="lazy"
+              width="1201"
+              height="1091"
+            />
+          </figure>
+          <div class="eco-text">
+            {{#each home.ecosystem.layers}}
+            <div>
+              <h3>{{ title }}</h3>
+              <p>{{{ body }}}</p>
+            </div>
+            {{/each}}
+          </div>
+        </div>
+      </section>
+
+      <section id="start">
+        <div class="wrap">
+          <h2>{{ home.start.title }}</h2>
+          <p class="section-lead">{{ home.start.lead }}</p>
+          <div class="steps">
+            {{#each home.start.steps}}
+            <div class="step">
+              <h3>{{ title }}</h3>
+              {{{ codeHtml }}}{{{ bodyHtml }}}
+            </div>
+            {{/each}}
+          </div>
+          <details class="source-build">
+            <summary>{{ home.start.sourceBuild.summary }}</summary>
+            {{{ home.start.sourceBuild.codeHtml }}}{{{ home.start.sourceBuild.bodyHtml }}}
+          </details>
+        </div>
+      </section>
+
+      <section id="learn">
+        <div class="wrap">
+          <h2>{{ home.learn.title }}</h2>
+          <p class="section-lead">{{ home.learn.lead }}</p>
+          <div class="cards">
+            {{#each home.learn.cards}}
+            <div class="card">
+              <h3>{{ title }}</h3>
+              <p>{{{ body }}}</p>
+              <a href="{{ href }}">{{ label }}</a>
+            </div>
+            {{/each}}
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap">
+        <nav>
+          {{#each footer.links}}<a href="{{ href }}">{{ label }}</a>
+          {{/each}}
+        </nav>
+        <p>
+          {{{ footer.note }}}
+        </p>
+      </div>
+    </footer>
+  </body>
+</html>

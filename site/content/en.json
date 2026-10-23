@@ -1,0 +1,393 @@
+{
+  "locale": "en",
+  "meta": {
+    "lang": "en",
+    "title": "kvlang — a plaintext, interpreted language",
+    "description": "kvlang is a plaintext, interpreted language where code and data live in one KV tree. The program counter is a path, the source is the IR, and every value is plaintext.",
+    "canonical": "https://kvlang.com/",
+    "hreflangEn": "https://kvlang.com/",
+    "hreflangZh": "https://kvlang.com/zh/",
+    "hreflangDefault": "https://kvlang.com/",
+    "alternateTitle": "README",
+    "alternateHref": "https://raw.githubusercontent.com/array2d/kvlang/master/README.md",
+    "ogTitle": "kvlang — a plaintext, interpreted language",
+    "ogDescription": "Code and data live in one KV tree. The PC is a path, the source is the IR, every value is plaintext.",
+    "ogUrl": "https://kvlang.com/",
+    "ogImage": "https://kvlang.com/img/ecosystem.png",
+    "ogImageWidth": "1201",
+    "ogImageHeight": "1091",
+    "twitterTitle": "kvlang — a plaintext, interpreted language",
+    "twitterDescription": "Code and data live in one KV tree. The PC is a path, the source is the IR, every value is plaintext.",
+    "twitterImage": "https://kvlang.com/img/ecosystem.png",
+    "jsonLdDescription": "A plaintext, interpreted language where code and data live in one KV tree."
+  },
+  "nav": {
+    "home": "/",
+    "items": [
+      {
+        "label": "Download",
+        "href": "https://github.com/array2d/kvlang/releases"
+      },
+      {
+        "label": "Learn",
+        "href": "#start"
+      },
+      {
+        "label": "Docs",
+        "href": "/stdlib/"
+      },
+      {
+        "label": "Runtimes",
+        "href": "/runtimes/"
+      },
+      {
+        "label": "Ecosystem",
+        "href": "#ecosystem"
+      },
+      {
+        "label": "GitHub",
+        "href": "https://github.com/array2d/kvlang"
+      }
+    ],
+    "switch": {
+      "label": "中文",
+      "href": "/zh/",
+      "hreflang": "zh-CN",
+      "lang": "zh-CN"
+    },
+    "themeTitle": "Toggle theme",
+    "themeLabel": "Toggle dark mode"
+  },
+  "home": {
+    "hero": {
+      "title": "A plaintext, interpreted language where code and data live in one KV tree.",
+      "lead": "The program counter is a path. The source is the IR. Every value is plaintext — inspectable with any KV client, resumable after a crash.",
+      "download": "Download {{VERSION}}",
+      "downloadHref": "https://github.com/array2d/kvlang/releases",
+      "quickStart": "Quick start",
+      "quickStartHref": "#start",
+      "released": "released {{DATE}}",
+      "install": "curl -fsSL https://raw.githubusercontent.com/array2d/kvlang/master/install.sh | sh",
+      "copy": "Copy"
+    },
+    "features": [
+      {
+        "featureClass": "feature",
+        "title": "Code is data",
+        "body": "A function is a subtree. Its parameters are reads on the negative axis and writes on the positive one — the same shape as every value in kvspace.",
+        "code": "    rwfunc add(a:int64, b:int64) -> (c:int64) { a + b -> c }",
+        "source": "README.md",
+        "codeHtml": "<pre class=\"code\"><code><!-- source: README.md -->\n    rwfunc add(a:int64, b:int64) -> (c:int64) { a + b -> c }</code></pre>"
+      },
+      {
+        "featureClass": "feature",
+        "title": "The PC is a path — crash-resumable",
+        "body": "There is no separate call stack. Frame depth is written into the program counter itself, so a restarted process can continue from the same instruction.",
+        "code": "PC    = \"/vthread/&lt;vid&gt;/[1]/[3,0]\"            vthread vid, frame 1, instruction 3",
+        "source": "README.md",
+        "codeHtml": "<pre class=\"code\"><code><!-- source: README.md -->\nPC    = \"/vthread/&lt;vid&gt;/[1]/[3,0]\"            vthread vid, frame 1, instruction 3</code></pre>"
+      },
+      {
+        "featureClass": "feature",
+        "title": "Small core, extensions on top",
+        "body": "The core runtime only executes and branches. Every other opcode is registered at <code class=\"inline\">/lib/&lt;opcode&gt;</code> and handed to a runtime that declares it.",
+        "code": "/lib/&lt;opcode&gt;/vids/&lt;vtid&gt; = pc",
+        "source": "README.md",
+        "codeHtml": "<pre class=\"code\"><code><!-- source: README.md -->\n/lib/&lt;opcode&gt;/vids/&lt;vtid&gt; = pc</code></pre>"
+      },
+      {
+        "featureClass": "feature single",
+        "title": "The spec is the source of truth",
+        "body": "Language facts live in the spec, not in this page. {{SPEC_COUNT}} spec chapters define the language; {{TUTORIAL_COUNT}} anchored tutorial cases demonstrate it. <a class=\"fact\" href=\"https://github.com/array2d/kvlang/tree/master/stdlib/kvlang/spec\">Read the specification →</a>",
+        "code": "",
+        "source": "",
+        "codeHtml": ""
+      },
+      {
+        "featureClass": "feature",
+        "title": "Byte-identical backends",
+        "body": "One PascalCase C ABI, two implementations chosen by DSN. The same program runs against shared memory, files, or Redis with identical bytes.",
+        "code": "KVSPACE=shm:///tmp/kvlang.shm ./bin/kvlang tutorial/01-basics/hello.kv   # kvspace-c\nKVSPACE=fs:///tmp/kvlang-fs   ./bin/kvlang tutorial/01-basics/hello.kv   # kvspace-durable",
+        "source": "README.md",
+        "codeHtml": "<pre class=\"code\"><code><!-- source: README.md -->\nKVSPACE=shm:///tmp/kvlang.shm ./bin/kvlang tutorial/01-basics/hello.kv   # kvspace-c\nKVSPACE=fs:///tmp/kvlang-fs   ./bin/kvlang tutorial/01-basics/hello.kv   # kvspace-durable</code></pre>"
+      },
+      {
+        "featureClass": "feature single",
+        "title": "Built for agents",
+        "body": "Source, values, and compiled forms are all plaintext in the same tree. deepx uses kvlang as its front-end language; byteseek reads and rewrites its own code and state through the same KV reads and writes. <a class=\"fact\" href=\"https://github.com/array2d/kvlang#use-cases\">Read the use cases →</a>",
+        "code": "",
+        "source": "",
+        "codeHtml": ""
+      }
+    ],
+    "ecosystem": {
+      "title": "Ecosystem",
+      "lead": "Three layers, one tree. Each layer is independently replaceable.",
+      "image": "/img/ecosystem.png",
+      "alt": "kvspace at the bottom, layout in the middle, runtime on top",
+      "layers": [
+        {
+          "title": "kvspace",
+          "body": "Addressing and memory. One C ABI; shm and durable backends must match byte for byte."
+        },
+        {
+          "title": "layout",
+          "body": "The o0 compiler. Parses source and writes the KV tree — no optimization, no IR."
+        },
+        {
+          "title": "runtime",
+          "body": "Pure interpretation: fetch, decode, execute, route. Extensions live at /lib/&lt;opcode&gt;."
+        }
+      ]
+    },
+    "start": {
+      "title": "Get started",
+      "lead": "Three steps to a running program.",
+      "steps": [
+        {
+          "title": "1 · Install",
+          "code": "curl -fsSL https://raw.githubusercontent.com/array2d/kvlang/master/install.sh | sh",
+          "source": "README.md",
+          "codeHtml": "<pre class=\"code\"><code><!-- source: README.md -->\ncurl -fsSL https://raw.githubusercontent.com/array2d/kvlang/master/install.sh | sh</code></pre>",
+          "bodyHtml": ""
+        },
+        {
+          "title": "2 · Run",
+          "code": "./bin/kvlang -c 'println(\"hello, world\")'    # inline mode (entry init)",
+          "source": "README.md",
+          "codeHtml": "<pre class=\"code\"><code><!-- source: README.md -->\n./bin/kvlang -c 'println(\"hello, world\")'    # inline mode (entry init)</code></pre>",
+          "bodyHtml": ""
+        },
+        {
+          "title": "3 · Read the tutorial",
+          "code": "",
+          "source": "",
+          "codeHtml": "",
+          "bodyHtml": "<p><a href=\"https://github.com/array2d/kvlang/blob/master/tutorial/01-basics/hello.kv\">tutorial/01-basics/hello.kv</a> — the first of {{TUTORIAL_COUNT}} anchored cases.</p>"
+        }
+      ],
+      "sourceBuild": {
+        "summary": "Build from source",
+        "code": "make all                                     # runtime(C) + layout(Rust) + runtime-rs(Rust) + json(Go)",
+        "source": "README.md",
+        "codeHtml": "<pre class=\"code\"><code><!-- source: README.md -->\nmake all                                     # runtime(C) + layout(Rust) + runtime-rs(Rust) + json(Go)</code></pre>",
+        "bodyHtml": "<p>Requirements: a C toolchain + cmake, Rust (cargo), and the kvspace ABI libraries. See the <a href=\"https://github.com/array2d/kvlang#quick-start-from-source\">README</a>.</p>"
+      }
+    },
+    "learn": {
+      "title": "Learn",
+      "lead": "Run the tutorials and browse the standard library — the spec is in there too.",
+      "cards": [
+        {
+          "title": "Tutorials",
+          "body": "{{TUTORIAL_COUNT}} runnable cases across 15 chapters.",
+          "href": "https://github.com/array2d/kvlang/tree/master/tutorial",
+          "label": "tutorial/ →"
+        },
+        {
+          "title": "Standard library",
+          "body": "Browse every .kv document with source and structure.",
+          "href": "/stdlib/",
+          "label": "stdlib docs →"
+        }
+      ]
+    },
+    "featuresTitle": "Why kvlang",
+    "featuresLead": "A small core with everything else registered at a path."
+  },
+  "runtimes": {
+    "heroTitle": "Runtime extensions",
+    "heroLeads": [
+      "kvlang is an extension-first language. The core stays small; capabilities arrive as runtime extensions and libs. Multiple runtime extensions execute in the same kvspace — one tree of code, frames, and values, visible to every participant.",
+      "A runtime registers its opcodes at <code class=\"inline\">/lib/&lt;opcode&gt;</code>; a lib is a set of rwir/rwfunc definitions laid out into the same tree.",
+      "The <a href=\"https://github.com/array2d/deepx\">deepx</a> repository holds model definitions rather than a runtime extension, and <a href=\"https://github.com/array2d/deepx-design\">deepx-design</a> is documentation; neither is listed as a runtime below.",
+      "<strong>Registration styles differ.</strong> runtime-c is the C core; runtime-rs and deepx-cpu-compute embed it and declare a capability set. deepx-cpu-compute additionally writes its signatures to <code class=\"inline\">/lib/&lt;opcode&gt;</code> for distributed scheduling. deepx-compute-cuda registers tensor functions through its own <code class=\"inline\">TfFactory</code>. The Metal compute/heap/io planes and heap-cuda exchange bare opcodes (<code class=\"inline\">add</code>, <code class=\"inline\">load</code>, <code class=\"inline\">print</code>, <code class=\"inline\">save</code>) over a Redis task queue rather than through <code class=\"inline\">/lib</code> routing.",
+      "All deepx extensions are being migrated to embed the runtime-c core and register through the capability/route contract; until that migration completes, the table records their current mechanisms."
+    ],
+    "tableHeaders": [
+      "Runtime",
+      "Arch/OS",
+      "Lib (requires this runtime)",
+      "Notes"
+    ],
+    "rows": [
+      {
+        "name": "runtime-c",
+        "href": "https://github.com/array2d/kvlang/tree/master/runtime",
+        "arch": [
+          "linux-x86_64",
+          "darwin-arm64"
+        ],
+        "notes": "The minimal core: fetch, decode, execute, control flow, native dispatch. Runtime extensions embed this core rather than fork it.",
+        "libHtml": "<span class=\"muted\">—</span>",
+        "archHtml": "<code class=\"inline\">linux-x86_64</code>, <code class=\"inline\">darwin-arm64</code>",
+        "archNote": ""
+      },
+      {
+        "name": "runtime-rs",
+        "href": "https://github.com/array2d/kvlang/tree/master/runtime-rs",
+        "arch": [
+          "linux-x86_64",
+          "darwin-arm64"
+        ],
+        "notes": "The first runtime extension and its first lib. Embeds the C core and adds the stdlib opcodes (kv, xv, time, duration, string); the binary is still named <code class=\"inline\">kvlang</code>.",
+        "libHtml": "<a href=\"/stdlib/\">stdlib</a>",
+        "archHtml": "<code class=\"inline\">linux-x86_64</code>, <code class=\"inline\">darwin-arm64</code>",
+        "archNote": ""
+      },
+      {
+        "name": "runtime-rs",
+        "href": "https://github.com/array2d/kvlang/tree/master/runtime-rs",
+        "arch": [
+          "linux-x86_64",
+          "darwin-arm64"
+        ],
+        "notes": "The second lib. An agent harness written in kvlang, running on runtime-rs against the same kvspace.",
+        "libHtml": "<a href=\"https://github.com/array2d/byteseek\">byteseek</a>",
+        "archHtml": "<code class=\"inline\">linux-x86_64</code>, <code class=\"inline\">darwin-arm64</code>",
+        "archNote": ""
+      },
+      {
+        "name": "deepx-cpu-compute",
+        "href": "https://github.com/array2d/deepx-cpu-compute",
+        "arch": [
+          "linux-x86_64",
+          "linux-arm64",
+          "darwin-x86_64",
+          "darwin-arm64"
+        ],
+        "notes": "The CPU <strong>op-plat</strong>: tensor kernels over OpenBLAS/Highway/OpenMP. Declares <code class=\"inline\">myrwircaps = deepx/miaobyte·*</code> (<code class=\"inline\">add</code>, <code class=\"inline\">sub</code>, <code class=\"inline\">mul</code>, <code class=\"inline\">div</code>, …), embeds the C core, and writes signatures to <code class=\"inline\">/lib</code> for distributed scheduling.",
+        "libHtml": "<span class=\"muted\">—</span>",
+        "archHtml": "<code class=\"inline\">linux-x86_64</code>, <code class=\"inline\">linux-arm64</code>, <code class=\"inline\">darwin-x86_64</code>, <code class=\"inline\">darwin-arm64</code>",
+        "archNote": ""
+      },
+      {
+        "name": "deepx-compute-metal",
+        "href": "https://github.com/array2d/deepx-compute-metal",
+        "arch": [
+          "darwin-arm64"
+        ],
+        "notes": "The Metal <strong>op-plat</strong>. Runs elementwise/reduce/changeshape kernels on the GPU; bare task opcodes arrive over Redis, not through <code class=\"inline\">/lib</code>. Requires Metal (no CUDA).",
+        "libHtml": "<span class=\"muted\">—</span>",
+        "archHtml": "<code class=\"inline\">darwin-arm64</code>",
+        "archNote": ""
+      },
+      {
+        "name": "deepx-common-metal",
+        "href": "https://github.com/array2d/deepx-common-metal",
+        "arch": [
+          "darwin-arm64"
+        ],
+        "notes": "The Metal <strong>HAL</strong>: device detection and shared Metal context used by the other Metal rows.",
+        "libHtml": "<span class=\"muted\">—</span>",
+        "archHtml": "<code class=\"inline\">darwin-arm64</code>",
+        "archNote": ""
+      },
+      {
+        "name": "deepx-heap-metal",
+        "href": "https://github.com/array2d/deepx-heap-metal",
+        "arch": [
+          "darwin-arm64"
+        ],
+        "notes": "The Metal <strong>heap-plat</strong>: tensor lifetime and shared-memory bookkeeping alongside the Metal compute plane. A Redis-driven service, not a kvlang capability set.",
+        "libHtml": "<span class=\"muted\">—</span>",
+        "archHtml": "<code class=\"inline\">darwin-arm64</code>",
+        "archNote": ""
+      },
+      {
+        "name": "deepx-io-metal",
+        "href": "https://github.com/array2d/deepx-io-metal",
+        "arch": [
+          "darwin-arm64"
+        ],
+        "notes": "The Metal <strong>io-plat</strong>: <code class=\"inline\">load</code> / <code class=\"inline\">print</code> / <code class=\"inline\">save</code> tasks driven over the Redis queue.",
+        "libHtml": "<span class=\"muted\">—</span>",
+        "archHtml": "<code class=\"inline\">darwin-arm64</code>",
+        "archNote": ""
+      },
+      {
+        "name": "deepx-compute-cuda",
+        "href": "https://github.com/array2d/deepx-compute-cuda",
+        "arch": [
+          "linux-x86_64"
+        ],
+        "notes": "The CUDA <strong>op-plat</strong>. Registers <code class=\"inline\">deepx/miaobyte·*</code> tensor functions through its own <code class=\"inline\">TfFactory</code>; built in a CUDA 12.8 container, CMake targets <code class=\"inline\">sm_75</code>.",
+        "libHtml": "<span class=\"muted\">—</span>",
+        "archHtml": "<code class=\"inline\">linux-x86_64</code>",
+        "archNote": " + CUDA"
+      },
+      {
+        "name": "deepx-heap-cuda",
+        "href": "https://github.com/array2d/deepx-heap-cuda",
+        "arch": [],
+        "notes": "The CUDA <strong>heap-plat</strong>: device/host memory lifecycle and synchronisation. A Redis-driven service, not a kvlang capability set.",
+        "libHtml": "<span class=\"muted\">—</span>",
+        "archHtml": "",
+        "archNote": "CUDA (OS not pinned in repo)"
+      },
+      {
+        "name": "deepx-cuda-kernelcompiler",
+        "href": "https://github.com/array2d/deepx-cuda-kernelcompiler",
+        "arch": [
+          "linux-x86_64"
+        ],
+        "notes": "The GPU <strong>kernel compiler</strong>: lowers kvlang tensor ops to TileLang kernels (AOT <code class=\"inline\">.so</code>); no opcode registration.",
+        "libHtml": "<span class=\"muted\">—</span>",
+        "archHtml": "<code class=\"inline\">linux-x86_64</code>",
+        "archNote": " + CUDA"
+      }
+    ],
+    "footnote": "Extensions grow by registration, not by changing the core: new capabilities land under <code class=\"inline\">/lib</code>, and any runtime can provide them. Each lib requires the runtime in the same row to run; a lib's opcodes are registered under that runtime's <code class=\"inline\">/lib/&lt;opcode&gt;</code>.",
+    "meta": {
+      "title": "Runtime extensions — kvlang",
+      "description": "kvlang is an extension-first language: the core stays small, capabilities arrive as runtime extensions and libs, and multiple runtimes share one kvspace.",
+      "canonical": "https://kvlang.com/runtimes/",
+      "ogUrl": "https://kvlang.com/runtimes/",
+      "alternateTitle": "README",
+      "alternateHref": "https://raw.githubusercontent.com/array2d/kvlang/master/README.md",
+      "hreflangEn": "https://kvlang.com/runtimes/",
+      "hreflangZh": "https://kvlang.com/zh/runtimes/",
+      "hreflangDefault": "https://kvlang.com/runtimes/",
+      "ogImage": "https://kvlang.com/img/ecosystem.png",
+      "ogImageWidth": "1201",
+      "ogImageHeight": "1091"
+    }
+  },
+  "footer": {
+    "links": [
+      {
+        "label": "MIT license",
+        "href": "https://github.com/array2d/kvlang/blob/master/LICENSE"
+      },
+      {
+        "label": "GitHub",
+        "href": "https://github.com/array2d/kvlang"
+      },
+      {
+        "label": "Contributing",
+        "href": "https://github.com/array2d/kvlang/blob/master/CONTRIBUTING.md"
+      },
+      {
+        "label": "kvspace",
+        "href": "https://github.com/array2d/kvspace"
+      },
+      {
+        "label": "kvspace-c",
+        "href": "https://github.com/array2d/kvspace-c"
+      },
+      {
+        "label": "kvspace-durable",
+        "href": "https://github.com/array2d/kvspace-durable"
+      },
+      {
+        "label": "slotsboxmalloc",
+        "href": "https://github.com/array2d/slotsboxmalloc"
+      },
+      {
+        "label": "llms.txt",
+        "href": "/llms.txt"
+      }
+    ],
+    "note": "Every fact on this page is traceable to the spec or the tutorial. Machine-readable source list: <a href=\"/llms.txt\">/llms.txt</a>."
+  }
+}
