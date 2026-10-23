@@ -1,5 +1,6 @@
 import "./tokens.css";
 import "./home.css";
+import { refreshBenchmarks } from "./benchmark/live";
 
 const root = document.documentElement;
 const themeBtn = document.getElementById("theme");
@@ -46,6 +47,8 @@ themeBtn?.addEventListener("click", () => {
 });
 
 // 复制安装命令。按钮用 data-copy 指向目标元素选择器。
+void refreshBenchmarks();
+
 const copiedLabel = isZh ? "已复制" : "Copied";
 document.querySelectorAll<HTMLButtonElement>("[data-copy]").forEach((btn) => {
   btn.addEventListener("click", async () => {

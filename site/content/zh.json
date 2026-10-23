@@ -41,10 +41,6 @@
         "href": "/zh/runtimes/"
       },
       {
-        "label": "生态",
-        "href": "#ecosystem"
-      },
-      {
         "label": "GitHub",
         "href": "https://github.com/array2d/kvlang"
       }
@@ -397,5 +393,36 @@
       }
     ],
     "note": "本页每个事实都可追溯到规范或教程。机器可读的源清单：<a href=\"/llms.txt\">/llms.txt</a>。"
+  },
+  "benchmarks": {
+    "title": "基准测试",
+    "lead": "每个 case 有四份逻辑等价的实现。kvlang <strong>目前仍比</strong> Python、Rust、C 慢；这些图表用于追踪它收敛的速度。",
+    "note": "ns/µs/ms 自动选择单位；缺值显示为 —。",
+    "versionLabel": "数据来自",
+    "fullResults": "完整结果（{n} 行）",
+    "series": [
+      "kvlang shm",
+      "kvlang fs",
+      "kvlang redis",
+      "Python",
+      "Rust",
+      "C"
+    ],
+    "tableHeaders": [
+      "Case",
+      "Input",
+      "shm",
+      "fs",
+      "redis",
+      "Python",
+      "Rust",
+      "C"
+    ],
+    "sourceLabel": "benchmark/README.md",
+    "sourceHref": "https://github.com/array2d/kvlang/blob/master/benchmark/README.md",
+    "dateLabel": "测量于",
+    "rawCsvLabel": "原始 CSV",
+    "axisTitle": "耗时（ns，对数刻度）",
+    "desc": "十个基准用例的纳秒级耗时（对数刻度），对比 kvlang（shm、fs、redis）与 Python、Rust、C。"
   }
 }
