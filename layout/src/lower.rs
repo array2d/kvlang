@@ -1447,25 +1447,30 @@ fn stable_kinds(
     }
     let mut stable: HashMap<String, String> = HashMap::new();
     let mut dead: HashSet<String> = HashSet::new();
+    /* 迭代顺序必须与进程哈希种子无关：fixpoint 里 boot/dead 的先后会改变最终稳定集合，
+     * 否则同一输入两次 layout 会产出不同的特化集合（881/882/907 波动）。 */
+    let mut order: Vec<&String> = cands.keys().collect();
+    order.sort_unstable();
     loop {
         let mut changed = false;
-        for (v, k) in &cands {
-            if stable.contains_key(v) || dead.contains(v) {
+        for v in &order {
+            let k = &cands[*v];
+            if stable.contains_key(*v) || dead.contains(*v) {
                 continue;
             }
             let boot = sources
-                .get(v)
+                .get(*v)
                 .map(|es| {
                     es.iter()
                         .any(|e| exact_kind(e, declared, &stable).as_deref() == Some(k.as_str()))
                 })
                 .unwrap_or(false);
             if boot {
-                stable.insert(v.clone(), k.clone());
+                stable.insert((*v).clone(), k.clone());
                 changed = true;
             }
         }
-        let bad: Vec<String> = stable
+        let mut bad: Vec<String> = stable
             .iter()
             .filter(|(v, k)| {
                 !sources
@@ -1479,6 +1484,7 @@ fn stable_kinds(
             })
             .map(|(v, _)| v.clone())
             .collect();
+        bad.sort_unstable();
         for v in bad {
             stable.remove(&v);
             dead.insert(v);
