@@ -13,6 +13,7 @@ fn redis_dsn() -> String {
 #[test]
 fn redis_roundtrip() {
     let mut kv = Kv::conn(&redis_dsn());
+    kvlanglayout::isa::ensure_test_isa(&mut kv);
     init_dirs(&mut kv).unwrap();
 
     // 写一个 rwir（Opaque kind）并读回（无 `.` 的 plain key，避免 dict 拆分）
@@ -33,6 +34,7 @@ fn redis_roundtrip() {
 #[test]
 fn redis_compile() {
     let mut kv = Kv::conn(&redis_dsn());
+    kvlanglayout::isa::ensure_test_isa(&mut kv);
     init_dirs(&mut kv).unwrap();
 
     let src = "rwfunc sum(A:int64, B:int64) -> (C:int64) {\n    A + B -> C\n}\n";

@@ -11,3 +11,4 @@ path = "src/lib.rs"
 crate-type = ["rlib", "cdylib"]
 
 [dependencies]
+sha2 = "0.11"

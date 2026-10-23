@@ -142,8 +142,10 @@ typedef struct {
 } kvlangKvPair_t;
 
 typedef struct {
-    void *handle; /* opaque KVSpace connection */
-    bool shm;     /* DSN scheme == shm：允许 body 就地写快路径 */
+    void *handle;    /* opaque KVSpace connection（数据 store） */
+    bool shm;        /* DSN scheme == shm：允许 body 就地写快路径 */
+    void *isa_handle; /* P1a 控制 store 句柄；NULL/同 handle 表示与数据 store 同库 */
+    bool isa_shared; /* isa_handle == handle（redis：控制键共用数据 store） */
 } kvspace_t;
 
 /* ── 字符串工具 ──────────────────────────────────────────────────────
@@ -765,6 +767,16 @@ typedef struct {
     const char *result_kind;
     uint32_t result_width;
 } kvlangRwirCap;
+/* ISA registry（P1a）：core manifest 发布与 per-function hash 闸门。 */
+__attribute__((visibility("hidden"))) int kvlangIsaPublishCore(kvspace_t *kv);
+__attribute__((visibility("hidden"))) bool kvlangIsaCtlDsn(const char *dsn, char *out,
+                                                          size_t cap);
+__attribute__((visibility("hidden"))) int kvlangIsaCheck(kvspace_t *kv,
+                                                         const char *func_dir,
+                                                         char *err,
+                                                         uint32_t err_cap);
+__attribute__((visibility("hidden"))) const char *kvlangIsaCoreHash(void);
+
 __attribute__((visibility("hidden"))) const kvlangRwirCap *kvlangRwirCaps(void);
 __attribute__((visibility("hidden"))) int kvlangRwirRouteId(void);
 __attribute__((visibility("hidden"))) int kvlangKvcpuRoute(kvlangFrame_t *f);

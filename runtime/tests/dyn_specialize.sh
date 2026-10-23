@@ -4,6 +4,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 LAYOUT="${KVLANG_LAYOUT_BIN:-$ROOT/bin/kvlanglayout}"
 KVLANG="${KVLANG_TERM_BIN:-$ROOT/bin/kvlang}"
+boot() { KVSPACE="$1" "$KVLANG" -c 'print("boot")' >/dev/null 2>&1; }
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
@@ -18,6 +19,7 @@ OUT
 
 for scheme in shm fs; do
 	dsn="$scheme://$tmp/$scheme"
+	boot "$dsn"
 	if ! "$LAYOUT" "$ROOT/runtime/tests/dyn_specialize.kv" "$dsn" >/dev/null 2>&1; then
 		echo "FAIL: layout $scheme"
 		exit 1
@@ -30,6 +32,7 @@ for scheme in shm fs; do
 	fi
 
 	dsn2="$scheme://$tmp/e-$scheme"
+	boot "$dsn2"
 	"$LAYOUT" "$ROOT/runtime/tests/dyn_specialize_err.kv" "$dsn2" >/dev/null 2>&1 || {
 		echo "FAIL: layout err $scheme"
 		exit 1

@@ -37,6 +37,7 @@ fn fresh_kv() -> Kv {
     );
     let mut kv = Kv::conn(&dsn);
     init_dirs(&mut kv).unwrap();
+    kvlanglayout::isa::ensure_test_isa(&mut kv);
     kv
 }
 

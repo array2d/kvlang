@@ -36,16 +36,20 @@ _LAST_BACKEND = None
 
 
 def _drop_backend(dsn: str) -> None:
-    """删掉某个后端 DSN 对应的私有文件（只用于本进程自己造的那些）。"""
+    """删掉某个后端 DSN 对应的私有文件（只用于本进程自己造的那些）。
+
+    P1a 控制面独立 store：shm/fs 的控制 store 是 `<dsn>.isa`，一并清理。"""
     path = dsn.split("://", 1)[1]
     if dsn.startswith("shm://"):
-        for suf in ("", ".sbo.data", ".sbo.head"):
-            try:
-                os.unlink(path + suf)
-            except OSError:
-                pass
+        for base in (path, path + ".isa"):
+            for suf in ("", ".sbo.data", ".sbo.head"):
+                try:
+                    os.unlink(base + suf)
+                except OSError:
+                    pass
     else:
         shutil.rmtree(path, ignore_errors=True)
+        shutil.rmtree(path + ".isa", ignore_errors=True)
 
 
 def _case_dsn() -> str:
@@ -241,6 +245,12 @@ def _run_test_file(f: Path, expects: list[str], env: dict) -> tuple[bool, str]:
     dsn = _case_dsn()
     if dsn == _C_DSN:
         _flush_backend()  # 只有共享后端（redis 等）才需要显式清空
+    # P1a：layout 前必须由 runtime-c 发布控制 store 的 /‥isa（全 live registry）。
+    boot = subprocess.run([TERM_BIN, "-c", 'print("boot")'], capture_output=True,
+                          text=True, timeout=60, cwd=str(ROOT),
+                          env={**env, "KVSPACE": dsn})
+    if boot.returncode != 0:
+        return False, f"isa boot failed: {boot.stderr.strip()[:100]}"
     layout = subprocess.run([LAYOUT_BIN, rel, dsn], capture_output=True, text=True,
                             timeout=60, cwd=str(ROOT), env=env)
     if layout.returncode != 0:

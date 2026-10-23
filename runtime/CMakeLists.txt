@@ -17,10 +17,11 @@ file(GLOB KVLANG_RUNTIME_SRC CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/*.c")
 set(KVLANG_GEN_SRC "${CMAKE_SOURCE_DIR}/src/rwir_special_gen.c")
 set(KVLANG_COERCE_SRC "${CMAKE_SOURCE_DIR}/src/rwir_coerce.c")
 set(KVLANG_DECODE_SRC "${CMAKE_SOURCE_DIR}/src/rwir_decode.c")
+set(KVLANG_ISA_SRC "${CMAKE_SOURCE_DIR}/src/isa.c")
 list(REMOVE_ITEM KVLANG_RUNTIME_SRC "${KVLANG_GEN_SRC}" "${KVLANG_COERCE_SRC}"
-    "${KVLANG_DECODE_SRC}")
+    "${KVLANG_DECODE_SRC}" "${KVLANG_ISA_SRC}")
 list(APPEND KVLANG_RUNTIME_SRC "${KVLANG_DECODE_SRC}" "${KVLANG_GEN_SRC}"
-    "${KVLANG_COERCE_SRC}")
+    "${KVLANG_COERCE_SRC}" "${KVLANG_ISA_SRC}")
 add_library(kvlang_runtime SHARED ${KVLANG_RUNTIME_SRC})
 target_include_directories(kvlang_runtime PUBLIC include src)
 target_compile_definitions(kvlang_runtime PRIVATE _GNU_SOURCE)
@@ -44,7 +45,7 @@ endif()
 
 if(NOT APPLE)
     enable_testing()
-    foreach(test_name test_getmember_siblings test_kvset_invalid_head test_pc_kvspace_source test_crash_resume test_param_address delegate_test test_scalar_encode test_pc_part_write)
+    foreach(test_name test_getmember_siblings test_kvset_invalid_head test_pc_kvspace_source test_crash_resume test_param_address delegate_test test_scalar_encode test_pc_part_write test_ro_rewrite)
         add_custom_command(
             OUTPUT "${BIN_DIR}/${test_name}"
             COMMAND ${CMAKE_C_COMPILER} -O2 -D_GNU_SOURCE
@@ -72,6 +73,8 @@ if(NOT APPLE)
     add_test(NAME scalar_encode COMMAND "${BIN_DIR}/test_scalar_encode")
     add_test(NAME pc_part_write_shm COMMAND "${BIN_DIR}/test_pc_part_write")
     add_test(NAME pc_part_write_fs COMMAND "${BIN_DIR}/test_pc_part_write")
+    add_test(NAME ro_rewrite_shm COMMAND "${BIN_DIR}/test_ro_rewrite")
+    add_test(NAME ro_rewrite_fs COMMAND "${BIN_DIR}/test_ro_rewrite")
     add_test(NAME body_write COMMAND bash "${CMAKE_SOURCE_DIR}/tests/body_write.sh")
     add_test(NAME int_specialize COMMAND bash "${CMAKE_SOURCE_DIR}/tests/int_specialize.sh")
     add_test(NAME float_specialize COMMAND bash "${CMAKE_SOURCE_DIR}/tests/float_specialize.sh")
@@ -79,10 +82,11 @@ if(NOT APPLE)
     add_test(NAME layout_reject COMMAND bash "${CMAKE_SOURCE_DIR}/tests/layout_reject.sh")
     add_test(NAME coercion COMMAND bash "${CMAKE_SOURCE_DIR}/tests/coercion.sh")
     add_test(NAME dyn_specialize COMMAND bash "${CMAKE_SOURCE_DIR}/tests/dyn_specialize.sh")
+    add_test(NAME isa_gate COMMAND bash "${CMAKE_SOURCE_DIR}/tests/isa_gate.sh")
     add_test(NAME specialize_gate COMMAND bash "${CMAKE_SOURCE_DIR}/tests/specialize_gate.sh")
-    set_tests_properties(getmember_siblings kvset_invalid_head_shm pc_kvspace_source_shm crash_resume_shm param_address_shm delegate_shm scalar_encode pc_part_write_shm
+    set_tests_properties(getmember_siblings kvset_invalid_head_shm pc_kvspace_source_shm crash_resume_shm param_address_shm delegate_shm scalar_encode pc_part_write_shm ro_rewrite_shm
         PROPERTIES ENVIRONMENT "KVSPACE_BACKEND_PATH=${KVSPACE_LIB_DIR};KVLANG_TEST_SCHEME=shm")
-    set_tests_properties(kvset_invalid_head_fs pc_kvspace_source_fs crash_resume_fs param_address_fs pc_part_write_fs
+    set_tests_properties(kvset_invalid_head_fs pc_kvspace_source_fs crash_resume_fs param_address_fs pc_part_write_fs ro_rewrite_fs
         PROPERTIES ENVIRONMENT "KVSPACE_BACKEND_PATH=${KVSPACE_LIB_DIR};KVLANG_TEST_SCHEME=fs")
     set_tests_properties(body_write
         PROPERTIES ENVIRONMENT "KVSPACE_BACKEND_PATH=${KVSPACE_LIB_DIR};KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/kvlang")
@@ -91,6 +95,8 @@ if(NOT APPLE)
     set_tests_properties(float_specialize
         PROPERTIES ENVIRONMENT "KVSPACE_BACKEND_PATH=${KVSPACE_LIB_DIR};KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/kvlang")
     set_tests_properties(pause_resume
+        PROPERTIES ENVIRONMENT "KVSPACE_BACKEND_PATH=${KVSPACE_LIB_DIR};KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/kvlang")
+    set_tests_properties(isa_gate
         PROPERTIES ENVIRONMENT "KVSPACE_BACKEND_PATH=${KVSPACE_LIB_DIR};KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/kvlang")
     set_tests_properties(layout_reject
         PROPERTIES ENVIRONMENT "KVSPACE_BACKEND_PATH=${KVSPACE_LIB_DIR};KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout")
