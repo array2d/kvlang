@@ -1,2 +1,8 @@
 node_modules/
 dist/
+
+# 生成页（模板与 content/ 是唯一源）
+/index.html
+/zh/index.html
+/runtimes/index.html
+/zh/runtimes/index.html

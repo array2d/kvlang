@@ -1,0 +1,393 @@
+{
+  "locale": "zh",
+  "meta": {
+    "lang": "zh-CN",
+    "title": "kvlang — 纯文本解释型语言",
+    "description": "kvlang 是一门纯文本解释型语言：代码与数据同处一棵 KV 树。程序计数器是一条路径，源码即 IR，每个值都是纯文本。",
+    "canonical": "https://kvlang.com/zh/",
+    "hreflangEn": "https://kvlang.com/",
+    "hreflangZh": "https://kvlang.com/zh/",
+    "hreflangDefault": "https://kvlang.com/",
+    "alternateTitle": "README_CN",
+    "alternateHref": "https://raw.githubusercontent.com/array2d/kvlang/master/README_CN.md",
+    "ogTitle": "kvlang — 纯文本解释型语言",
+    "ogDescription": "代码与数据同处一棵 KV 树。程序计数器是一条路径，源码即 IR，每个值都是纯文本。",
+    "ogUrl": "https://kvlang.com/zh/",
+    "ogImage": "https://kvlang.com/img/ecosystem.png",
+    "ogImageWidth": "1201",
+    "ogImageHeight": "1091",
+    "twitterTitle": "kvlang — 纯文本解释型语言",
+    "twitterDescription": "代码与数据同处一棵 KV 树。程序计数器是一条路径，源码即 IR，每个值都是纯文本。",
+    "twitterImage": "https://kvlang.com/img/ecosystem.png",
+    "jsonLdDescription": "一门纯文本解释型语言：代码与数据同处一棵 KV 树。"
+  },
+  "nav": {
+    "home": "/zh/",
+    "items": [
+      {
+        "label": "下载",
+        "href": "https://github.com/array2d/kvlang/releases"
+      },
+      {
+        "label": "学习",
+        "href": "#start"
+      },
+      {
+        "label": "文档",
+        "href": "/stdlib/"
+      },
+      {
+        "label": "运行时",
+        "href": "/zh/runtimes/"
+      },
+      {
+        "label": "生态",
+        "href": "#ecosystem"
+      },
+      {
+        "label": "GitHub",
+        "href": "https://github.com/array2d/kvlang"
+      }
+    ],
+    "switch": {
+      "label": "English",
+      "href": "/",
+      "hreflang": "en",
+      "lang": "en"
+    },
+    "themeTitle": "切换主题",
+    "themeLabel": "切换深色模式"
+  },
+  "home": {
+    "hero": {
+      "title": "一门纯文本解释型语言：代码与数据同处一棵 KV 树。",
+      "lead": "程序计数器是一条路径，源码即 IR，每个值都是纯文本——任何 KV 客户端都能查看，崩溃后可从原指令继续。",
+      "download": "下载 {{VERSION}}",
+      "downloadHref": "https://github.com/array2d/kvlang/releases",
+      "quickStart": "快速开始",
+      "quickStartHref": "#start",
+      "released": "发布于 {{DATE}}",
+      "install": "curl -fsSL https://raw.githubusercontent.com/array2d/kvlang/master/install.sh | sh",
+      "copy": "复制"
+    },
+    "features": [
+      {
+        "featureClass": "feature",
+        "title": "代码即数据",
+        "body": "一个函数就是一棵子树。参数在负轴是读参、正轴是写参——与 kvspace 里每个值的形状完全一致。",
+        "code": "    rwfunc add(a:int64, b:int64) -> (c:int64) { a + b -> c }",
+        "source": "README.md",
+        "codeHtml": "<pre class=\"code\"><code><!-- source: README.md -->\n    rwfunc add(a:int64, b:int64) -> (c:int64) { a + b -> c }</code></pre>"
+      },
+      {
+        "featureClass": "feature",
+        "title": "PC 是路径，崩溃可续",
+        "body": "没有独立的调用栈。帧深直接写在程序计数器里，重启后的进程可以从同一条指令继续执行。",
+        "code": "PC    = \"/vthread/&lt;vid&gt;/[1]/[3,0]\"            vthread vid, frame 1, instruction 3",
+        "source": "README.md",
+        "codeHtml": "<pre class=\"code\"><code><!-- source: README.md -->\nPC    = \"/vthread/&lt;vid&gt;/[1]/[3,0]\"            vthread vid, frame 1, instruction 3</code></pre>"
+      },
+      {
+        "featureClass": "feature",
+        "title": "小核心，扩展在上",
+        "body": "核心运行时只负责执行与跳转。其余每个 opcode 都注册在 <code class=\"inline\">/lib/&lt;opcode&gt;</code>，交给声明了它的运行时兑现。",
+        "code": "/lib/&lt;opcode&gt;/vids/&lt;vtid&gt; = pc",
+        "source": "README.md",
+        "codeHtml": "<pre class=\"code\"><code><!-- source: README.md -->\n/lib/&lt;opcode&gt;/vids/&lt;vtid&gt; = pc</code></pre>"
+      },
+      {
+        "featureClass": "feature single",
+        "title": "规范即事实",
+        "body": "语言事实在规范里，不在这张页面上。{{SPEC_COUNT}} 章规范定义语言，{{TUTORIAL_COUNT}} 个锚定教程用例演示它。 <a class=\"fact\" href=\"https://github.com/array2d/kvlang/tree/master/stdlib/kvlang/spec\">阅读规范 →</a>",
+        "code": "",
+        "source": "",
+        "codeHtml": ""
+      },
+      {
+        "featureClass": "feature",
+        "title": "字节一致的双后端",
+        "body": "一套 PascalCase C ABI，两个实现由 DSN 选择。同一份程序在共享内存、文件或 Redis 上运行，落盘字节完全一致。",
+        "code": "KVSPACE=shm:///tmp/kvlang.shm ./bin/kvlang tutorial/01-basics/hello.kv   # kvspace-c\nKVSPACE=fs:///tmp/kvlang-fs   ./bin/kvlang tutorial/01-basics/hello.kv   # kvspace-durable",
+        "source": "README.md",
+        "codeHtml": "<pre class=\"code\"><code><!-- source: README.md -->\nKVSPACE=shm:///tmp/kvlang.shm ./bin/kvlang tutorial/01-basics/hello.kv   # kvspace-c\nKVSPACE=fs:///tmp/kvlang-fs   ./bin/kvlang tutorial/01-basics/hello.kv   # kvspace-durable</code></pre>"
+      },
+      {
+        "featureClass": "feature single",
+        "title": "为 Agent 而生",
+        "body": "源码、值与编译产物都是同一棵树里的纯文本。deepx 以 kvlang 作为前端语言；byteseek 通过同样的 KV 读写，读取并改写自己的代码与状态。 <a class=\"fact\" href=\"https://github.com/array2d/kvlang#use-cases\">查看用例 →</a>",
+        "code": "",
+        "source": "",
+        "codeHtml": ""
+      }
+    ],
+    "ecosystem": {
+      "title": "生态",
+      "lead": "三层，一棵树。每一层都可以独立替换。",
+      "image": "/img/ecosystem.png",
+      "alt": "底层 kvspace、中层 layout、上层 runtime",
+      "layers": [
+        {
+          "title": "kvspace",
+          "body": "寻址与内存。一套 C ABI；shm 与 durable 后端必须逐字节一致。"
+        },
+        {
+          "title": "layout",
+          "body": "o0 编译器。解析源码并写入 KV 树——不做优化，没有 IR。"
+        },
+        {
+          "title": "runtime",
+          "body": "纯解释：取指、解码、执行、路由。扩展放在 /lib/&lt;opcode&gt;。"
+        }
+      ]
+    },
+    "start": {
+      "title": "开始使用",
+      "lead": "三步跑起来。",
+      "steps": [
+        {
+          "title": "1 · 安装",
+          "code": "curl -fsSL https://raw.githubusercontent.com/array2d/kvlang/master/install.sh | sh",
+          "source": "README.md",
+          "codeHtml": "<pre class=\"code\"><code><!-- source: README.md -->\ncurl -fsSL https://raw.githubusercontent.com/array2d/kvlang/master/install.sh | sh</code></pre>",
+          "bodyHtml": ""
+        },
+        {
+          "title": "2 · 运行",
+          "code": "./bin/kvlang -c 'println(\"hello, world\")'    # inline mode (entry init)",
+          "source": "README.md",
+          "codeHtml": "<pre class=\"code\"><code><!-- source: README.md -->\n./bin/kvlang -c 'println(\"hello, world\")'    # inline mode (entry init)</code></pre>",
+          "bodyHtml": ""
+        },
+        {
+          "title": "3 · 读教程",
+          "code": "",
+          "source": "",
+          "codeHtml": "",
+          "bodyHtml": "<p><a href=\"https://github.com/array2d/kvlang/blob/master/tutorial/01-basics/hello.kv\">tutorial/01-basics/hello.kv</a> — {{TUTORIAL_COUNT}} 个锚定用例中的第一个。</p>"
+        }
+      ],
+      "sourceBuild": {
+        "summary": "从源码构建",
+        "code": "make all                                     # runtime(C) + layout(Rust) + runtime-rs(Rust) + json(Go)",
+        "source": "README.md",
+        "codeHtml": "<pre class=\"code\"><code><!-- source: README.md -->\nmake all                                     # runtime(C) + layout(Rust) + runtime-rs(Rust) + json(Go)</code></pre>",
+        "bodyHtml": "<p>需要 C 工具链 + cmake、Rust（cargo）与 kvspace ABI 库。详见 <a href=\"https://github.com/array2d/kvlang/blob/master/README_CN.md#quick-start从源码\">README_CN</a>。</p>"
+      }
+    },
+    "learn": {
+      "title": "学习",
+      "lead": "跑教程、浏览标准库——规范也在里面。",
+      "cards": [
+        {
+          "title": "教程",
+          "body": "{{TUTORIAL_COUNT}} 个可运行用例，分布在 15 章。",
+          "href": "https://github.com/array2d/kvlang/tree/master/tutorial",
+          "label": "tutorial/ →"
+        },
+        {
+          "title": "标准库",
+          "body": "逐篇浏览 .kv 文档及其源码结构。",
+          "href": "/stdlib/",
+          "label": "stdlib 文档 →"
+        }
+      ]
+    },
+    "featuresTitle": "为什么是 kvlang",
+    "featuresLead": "小核心，其余能力全部注册在路径上。"
+  },
+  "runtimes": {
+    "heroTitle": "运行时扩展",
+    "heroLeads": [
+      "kvlang 是以扩展为主的编程语言。核心刻意保持最小，能力由 runtime 扩展与 lib 提供。多个 runtime 扩展运行在同一个 kvspace 中——同一棵树里的代码、帧与值，对所有参与者可见。",
+      "runtime 把 opcode 注册到 <code class=\"inline\">/lib/&lt;opcode&gt;</code>；lib 是一组 rwir/rwfunc 定义，layout 进同一棵树。",
+      "<a href=\"https://github.com/array2d/deepx\">deepx</a> 仓库是模型定义，不是 runtime 扩展；<a href=\"https://github.com/array2d/deepx-design\">deepx-design</a> 是文档。二者都不列入下表。",
+      "<strong>注册方式并不统一。</strong> runtime-c 就是 C 核心；runtime-rs 与 deepx-cpu-compute 嵌入它并声明能力集。deepx-cpu-compute 还会把签名写入 <code class=\"inline\">/lib/&lt;opcode&gt;</code> 供分布式调度。deepx-compute-cuda 通过自建的 <code class=\"inline\">TfFactory</code> 注册 tensor 函数。Metal 的 compute / heap / io 平面与 heap-cuda 则在 Redis 任务队列上交换裸 opcode（<code class=\"inline\">add</code>、<code class=\"inline\">load</code>、<code class=\"inline\">print</code>、<code class=\"inline\">save</code>），不走 <code class=\"inline\">/lib</code> 路由。",
+      "所有 deepx 扩展都将迁移为嵌入 runtime-c 核心并通过能力集/路由契约注册；迁移完成前，表中如实记录当前机制。"
+    ],
+    "tableHeaders": [
+      "运行时",
+      "架构 / 系统",
+      "Lib（依赖本行 runtime）",
+      "介绍 / 备注"
+    ],
+    "rows": [
+      {
+        "name": "runtime-c",
+        "href": "https://github.com/array2d/kvlang/tree/master/runtime",
+        "arch": [
+          "linux-x86_64",
+          "darwin-arm64"
+        ],
+        "notes": "最小核心：取指、解码、执行、控制流与 native 派发。扩展 runtime 嵌入这个核心，而不是另起一套。",
+        "libHtml": "<span class=\"muted\">—</span>",
+        "archHtml": "<code class=\"inline\">linux-x86_64</code>、<code class=\"inline\">darwin-arm64</code>",
+        "archNote": ""
+      },
+      {
+        "name": "runtime-rs",
+        "href": "https://github.com/array2d/kvlang/tree/master/runtime-rs",
+        "arch": [
+          "linux-x86_64",
+          "darwin-arm64"
+        ],
+        "notes": "第一个 runtime 扩展，也是它对应的第一个 lib。嵌入 C 核心，提供 kv、xv、time、duration、string 等标准库 opcode；二进制名仍是 <code class=\"inline\">kvlang</code>。",
+        "libHtml": "<a href=\"/stdlib/\">stdlib</a>",
+        "archHtml": "<code class=\"inline\">linux-x86_64</code>、<code class=\"inline\">darwin-arm64</code>",
+        "archNote": ""
+      },
+      {
+        "name": "runtime-rs",
+        "href": "https://github.com/array2d/kvlang/tree/master/runtime-rs",
+        "arch": [
+          "linux-x86_64",
+          "darwin-arm64"
+        ],
+        "notes": "第二个 lib。用 kvlang 编写的 Agent Harness，运行在 runtime-rs 上，共享同一个 kvspace。",
+        "libHtml": "<a href=\"https://github.com/array2d/byteseek\">byteseek</a>",
+        "archHtml": "<code class=\"inline\">linux-x86_64</code>、<code class=\"inline\">darwin-arm64</code>",
+        "archNote": ""
+      },
+      {
+        "name": "deepx-cpu-compute",
+        "href": "https://github.com/array2d/deepx-cpu-compute",
+        "arch": [
+          "linux-x86_64",
+          "linux-arm64",
+          "darwin-x86_64",
+          "darwin-arm64"
+        ],
+        "notes": "CPU <strong>op-plat</strong>：基于 OpenBLAS / Highway / OpenMP 的 tensor kernel。声明 <code class=\"inline\">myrwircaps = deepx/miaobyte·*</code>（<code class=\"inline\">add</code>、<code class=\"inline\">sub</code>、<code class=\"inline\">mul</code>、<code class=\"inline\">div</code> 等），嵌入 C 核心，并把签名写入 <code class=\"inline\">/lib</code> 供分布式调度。",
+        "libHtml": "<span class=\"muted\">—</span>",
+        "archHtml": "<code class=\"inline\">linux-x86_64</code>、<code class=\"inline\">linux-arm64</code>、<code class=\"inline\">darwin-x86_64</code>、<code class=\"inline\">darwin-arm64</code>",
+        "archNote": ""
+      },
+      {
+        "name": "deepx-compute-metal",
+        "href": "https://github.com/array2d/deepx-compute-metal",
+        "arch": [
+          "darwin-arm64"
+        ],
+        "notes": "Metal <strong>op-plat</strong>：在 GPU 上运行 elementwise / reduce / changeshape kernel；裸 task opcode 经 Redis 到达，不走 <code class=\"inline\">/lib</code>。依赖 Metal，不依赖 CUDA。",
+        "libHtml": "<span class=\"muted\">—</span>",
+        "archHtml": "<code class=\"inline\">darwin-arm64</code>",
+        "archNote": ""
+      },
+      {
+        "name": "deepx-common-metal",
+        "href": "https://github.com/array2d/deepx-common-metal",
+        "arch": [
+          "darwin-arm64"
+        ],
+        "notes": "Metal <strong>HAL</strong>：设备检测与共享 Metal context，供其余 Metal 行使用。",
+        "libHtml": "<span class=\"muted\">—</span>",
+        "archHtml": "<code class=\"inline\">darwin-arm64</code>",
+        "archNote": ""
+      },
+      {
+        "name": "deepx-heap-metal",
+        "href": "https://github.com/array2d/deepx-heap-metal",
+        "arch": [
+          "darwin-arm64"
+        ],
+        "notes": "Metal <strong>heap-plat</strong>：与 Metal 计算平面配套的 tensor 生命周期与共享内存簿记。Redis 驱动的服务，不是 kvlang 能力集。",
+        "libHtml": "<span class=\"muted\">—</span>",
+        "archHtml": "<code class=\"inline\">darwin-arm64</code>",
+        "archNote": ""
+      },
+      {
+        "name": "deepx-io-metal",
+        "href": "https://github.com/array2d/deepx-io-metal",
+        "arch": [
+          "darwin-arm64"
+        ],
+        "notes": "Metal <strong>io-plat</strong>：经 Redis 队列驱动的 <code class=\"inline\">load</code> / <code class=\"inline\">print</code> / <code class=\"inline\">save</code> 任务。",
+        "libHtml": "<span class=\"muted\">—</span>",
+        "archHtml": "<code class=\"inline\">darwin-arm64</code>",
+        "archNote": ""
+      },
+      {
+        "name": "deepx-compute-cuda",
+        "href": "https://github.com/array2d/deepx-compute-cuda",
+        "arch": [
+          "linux-x86_64"
+        ],
+        "notes": "CUDA <strong>op-plat</strong>：通过自建 <code class=\"inline\">TfFactory</code> 注册 <code class=\"inline\">deepx/miaobyte·*</code> tensor 函数；在 CUDA 12.8 容器中构建，CMake 目标为 <code class=\"inline\">sm_75</code>。",
+        "libHtml": "<span class=\"muted\">—</span>",
+        "archHtml": "<code class=\"inline\">linux-x86_64</code>",
+        "archNote": " + CUDA"
+      },
+      {
+        "name": "deepx-heap-cuda",
+        "href": "https://github.com/array2d/deepx-heap-cuda",
+        "arch": [],
+        "notes": "CUDA <strong>heap-plat</strong>：设备 / 主机内存生命周期与同步。Redis 驱动的服务，不是 kvlang 能力集。",
+        "libHtml": "<span class=\"muted\">—</span>",
+        "archHtml": "",
+        "archNote": "CUDA（仓库未固定 OS）"
+      },
+      {
+        "name": "deepx-cuda-kernelcompiler",
+        "href": "https://github.com/array2d/deepx-cuda-kernelcompiler",
+        "arch": [
+          "linux-x86_64"
+        ],
+        "notes": "GPU <strong>kernel compiler</strong>：把 kvlang tensor op 降为 TileLang kernel（AOT <code class=\"inline\">.so</code>）；不注册 opcode。",
+        "libHtml": "<span class=\"muted\">—</span>",
+        "archHtml": "<code class=\"inline\">linux-x86_64</code>",
+        "archNote": " + CUDA"
+      }
+    ],
+    "footnote": "扩展通过注册生长，而不是改核心：新能力落在 <code class=\"inline\">/lib</code>，任何 runtime 都可以提供。每个 lib 依赖同一行的 runtime 才能运行；lib 的 opcode 注册在该 runtime 的 <code class=\"inline\">/lib/&lt;opcode&gt;</code> 下。",
+    "meta": {
+      "title": "运行时扩展 — kvlang",
+      "description": "kvlang 是以扩展为主的编程语言：核心保持最小，能力由 runtime 扩展与 lib 提供，多个 runtime 共享同一个 kvspace。",
+      "canonical": "https://kvlang.com/zh/runtimes/",
+      "ogUrl": "https://kvlang.com/zh/runtimes/",
+      "alternateTitle": "README_CN",
+      "alternateHref": "https://raw.githubusercontent.com/array2d/kvlang/master/README_CN.md",
+      "hreflangEn": "https://kvlang.com/runtimes/",
+      "hreflangZh": "https://kvlang.com/zh/runtimes/",
+      "hreflangDefault": "https://kvlang.com/runtimes/",
+      "ogImage": "https://kvlang.com/img/ecosystem.png",
+      "ogImageWidth": "1201",
+      "ogImageHeight": "1091"
+    }
+  },
+  "footer": {
+    "links": [
+      {
+        "label": "MIT 许可证",
+        "href": "https://github.com/array2d/kvlang/blob/master/LICENSE"
+      },
+      {
+        "label": "GitHub",
+        "href": "https://github.com/array2d/kvlang"
+      },
+      {
+        "label": "贡献指南",
+        "href": "https://github.com/array2d/kvlang/blob/master/CONTRIBUTING.md"
+      },
+      {
+        "label": "kvspace",
+        "href": "https://github.com/array2d/kvspace"
+      },
+      {
+        "label": "kvspace-c",
+        "href": "https://github.com/array2d/kvspace-c"
+      },
+      {
+        "label": "kvspace-durable",
+        "href": "https://github.com/array2d/kvspace-durable"
+      },
+      {
+        "label": "slotsboxmalloc",
+        "href": "https://github.com/array2d/slotsboxmalloc"
+      },
+      {
+        "label": "llms.txt",
+        "href": "/llms.txt"
+      }
+    ],
+    "note": "本页每个事实都可追溯到规范或教程。机器可读的源清单：<a href=\"/llms.txt\">/llms.txt</a>。"
+  }
+}
