@@ -383,3 +383,95 @@ details.source-build pre.code {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+
+/* ── Benchmarks ── */
+.bench-chart {
+  display: block;
+  width: 100%;
+  max-width: 680px;
+  height: auto;
+  margin: 0 auto 8px;
+}
+.bench-line {
+  fill: none;
+  stroke-width: 1.6;
+}
+.bench-point {
+  stroke: none;
+}
+.bench-line.s1,
+.bench-point.s1 { stroke: var(--chart-1); fill: var(--chart-1); }
+.bench-line.s2,
+.bench-point.s2 { stroke: var(--chart-2); fill: var(--chart-2); }
+.bench-line.s3,
+.bench-point.s3 { stroke: var(--chart-3); fill: var(--chart-3); }
+.bench-line.s4,
+.bench-point.s4 { stroke: var(--chart-4); fill: var(--chart-4); }
+.bench-line.s5,
+.bench-point.s5 { stroke: var(--chart-5); fill: var(--chart-5); }
+.bench-line.s6,
+.bench-point.s6 { stroke: var(--chart-6); fill: var(--chart-6); }
+.bench-grid {
+  stroke: var(--border);
+  stroke-width: 0.8;
+}
+.bench-case {
+  font: 600 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  fill: var(--fg);
+}
+.bench-tick {
+  font: 9px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  fill: var(--fg-dim);
+}
+.bench-meta,
+.bench-note {
+  color: var(--fg-dim);
+  font-size: 13px;
+  margin: 0 0 12px;
+}
+.bench-note a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.bench-details {
+  margin-top: 16px;
+  border: 1px solid var(--border);
+  padding: 10px 14px;
+}
+.bench-details summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 14px;
+}
+.bench-table {
+  width: 100%;
+  min-width: 620px;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-top: 10px;
+}
+.bench-table th,
+.bench-table td {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.bench-table th {
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-dim);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .bench-table th { background: var(--bg); }
+}
+.bench-legend-label,
+.bench-y-tick,
+.bench-axis-title {
+  font: 9px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  fill: var(--fg-dim);
+}

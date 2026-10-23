@@ -14,6 +14,12 @@
   --tok-op: #cf222e;
   --tok-path: #953800;
   --tok-lit: #0550ae;
+  --chart-1: #0969da;
+  --chart-2: #bf3989;
+  --chart-3: #9a6700;
+  --chart-4: #1a7f37;
+  --chart-5: #8250df;
+  --chart-6: #cf222e;
 }
 /* 首访跟随系统：无 data-theme 时用暗色令牌；显式 light 覆盖之。 */
 @media (prefers-color-scheme: dark) {
@@ -33,6 +39,12 @@
     --tok-op: #ff7b72;
     --tok-path: #ffa657;
     --tok-lit: #79c0ff;
+    --chart-1: #58a6ff;
+    --chart-2: #f778ba;
+    --chart-3: #e3b341;
+    --chart-4: #3fb950;
+    --chart-5: #d2a8ff;
+    --chart-6: #ff7b72;
     color-scheme: dark;
   }
 }
@@ -52,5 +64,11 @@
   --tok-op: #ff7b72;
   --tok-path: #ffa657;
   --tok-lit: #79c0ff;
+  --chart-1: #58a6ff;
+  --chart-2: #f778ba;
+  --chart-3: #e3b341;
+  --chart-4: #3fb950;
+  --chart-5: #d2a8ff;
+  --chart-6: #ff7b72;
   color-scheme: dark;
 }

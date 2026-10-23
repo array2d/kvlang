@@ -41,10 +41,6 @@
         "href": "/runtimes/"
       },
       {
-        "label": "Ecosystem",
-        "href": "#ecosystem"
-      },
-      {
         "label": "GitHub",
         "href": "https://github.com/array2d/kvlang"
       }
@@ -397,5 +393,36 @@
       }
     ],
     "note": "Every fact on this page is traceable to the spec or the tutorial. Machine-readable source list: <a href=\"/llms.txt\">/llms.txt</a>."
+  },
+  "benchmarks": {
+    "title": "Benchmarks",
+    "lead": "Each case has four logically equivalent implementations. kvlang is <strong>currently slower</strong> than Python, Rust, and C; these charts track how fast it converges.",
+    "note": "ns/µs/ms are self-adaptive. Missing values are shown as —.",
+    "versionLabel": "Data from",
+    "fullResults": "Full results ({n} rows)",
+    "series": [
+      "kvlang shm",
+      "kvlang fs",
+      "kvlang redis",
+      "Python",
+      "Rust",
+      "C"
+    ],
+    "tableHeaders": [
+      "Case",
+      "Input",
+      "shm",
+      "fs",
+      "redis",
+      "Python",
+      "Rust",
+      "C"
+    ],
+    "sourceLabel": "benchmark/README.md",
+    "sourceHref": "https://github.com/array2d/kvlang/blob/master/benchmark/README.md",
+    "dateLabel": "measured",
+    "rawCsvLabel": "raw CSV",
+    "axisTitle": "time (ns, log scale)",
+    "desc": "Log-scale latency in nanoseconds for ten benchmark cases, comparing kvlang (shm, fs, redis) with Python, Rust, and C."
   }
 }
