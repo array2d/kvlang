@@ -351,6 +351,14 @@
       "ogImage": "https://kvlang.com/img/ecosystem.png",
       "ogImageWidth": "1201",
       "ogImageHeight": "1091"
+    },
+    "nav": {
+      "switch": {
+        "label": "English",
+        "href": "/runtimes/",
+        "hreflang": "en",
+        "lang": "en"
+      }
     }
   },
   "footer": {

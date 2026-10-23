@@ -18,7 +18,7 @@ const data = Object.fromEntries(
 
 const UNTRANSLATABLE = new Set(["href", "code", "source", "image", "arch", "name"]);
 /** 这些链接按语言不同：导航的 Runtimes 入口与语言切换。 */
-const LOCALE_AWARE = [/^nav\.items\[\d+\]\.href$/, /^nav\.switch\.href$/];
+const LOCALE_AWARE = [/^nav\.items\[\d+\]\.href$/, /^(?:.*\.)?nav\.switch\.href$/];
 const REQUIRED = new Set([
   "title", "label", "lead", "body", "notes", "description",
   "ogTitle", "ogDescription", "twitterTitle", "twitterDescription",
