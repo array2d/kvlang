@@ -6,9 +6,6 @@
 /* P1b1 ISA 签名表：与 myrwircaps 同序、逐项一行；发布期做形状校验。
  * sig: ANY=全 any 槽（arity 显式）; BIN/CMP/UN=<kind>·op 特化; CAST=rp any / wp=kind。
  * 变参 entry dynamic=1，末读参类型发布时补 "..."。 */
-/* P1b1 ISA 签名表：与 myrwircaps 同序、逐项一行；发布期做形状校验。
- * sig: ANY=全 any 槽（arity 显式）; BIN/CMP/UN=<kind>·op 特化; CAST=rp any / wp=kind。
- * 变参 entry dynamic=1，末读参类型发布时补 "..."。 */
 static const kvlangIsaSig isa_sig[] = {
     {KV_ISA_CORE, KV_ISA_ANY, 1, 0, 0, KV_EFF_CONTROL}, /* call */
     {KV_ISA_CORE, KV_ISA_ANY, 1, 0, 0, KV_EFF_CONTROL}, /* return */
@@ -174,7 +171,7 @@ static const kvlangIsaSig isa_sig[] = {
     {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* float32·gt */
     {KV_ISA_CORE, KV_ISA_CMP, 2, 1, 0, KV_EFF_PURE}, /* float32·ge */
     {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* sub */
-    {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* - */
+    {KV_ISA_CORE, KV_ISA_ANY, 1, 1, 1, KV_EFF_PURE}, /* - */
     {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* mul */
     {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* × */
     {KV_ISA_CORE, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* div */
@@ -311,7 +308,6 @@ static const kvlangIsaSig isa_sig[] = {
     {KV_ISA_CORE, KV_ISA_ANY, 1, 0, 0, KV_EFF_CONTROL | KV_EFF_WRITE}, /* vthread·setstatus */
     {KV_ISA_CORE, KV_ISA_ANY, 0, 0, 0, KV_EFF_DEBUG}, /* debugger */
 };
-
 
 _Static_assert(sizeof(isa_sig) / sizeof(isa_sig[0]) == 300,
                "P1b1: isa_sig must have 300 rows (core 237 + ext 63)");

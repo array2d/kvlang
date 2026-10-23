@@ -222,6 +222,7 @@ unsafe extern "C" {
 
     // ── kvlang runtime：模式2 执行（kvlang_vthread.h）───────────────
     pub fn kvlangRuntimeConnect(dsn: *const c_char) -> *mut c_void;
+    pub fn kvlangRuntimeDisconnect(rt: *mut c_void);
     /// runtime 内部 kvspace 句柄——复用它而非另开连接（durable 惰性 flush 仅同句柄内相干）。
     pub fn kvlangRuntimeKvspaceHandle(rt: *mut c_void) -> *mut c_void;
     pub fn kvlangRuntimeBootstrap(

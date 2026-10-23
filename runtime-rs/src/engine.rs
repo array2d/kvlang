@@ -259,6 +259,16 @@ impl Engine {
     /// 把单段内存源码 layout 进 kvspace，返回其写入的 init 函数名列表（entry_out，\n 分隔，
     /// pkg 严格取自源码 `lib` 声明）。失败打印错误并返回空。幂等、best-effort。
     pub fn layout_src(&self, name: &str, src: &str) -> Vec<String> {
+        match self.layout_src_try(name, src) {
+            Ok(v) => v,
+            Err(e) => {
+                crate::elog!("layout {name} 失败: {e}");
+                Vec::new()
+            }
+        }
+    }
+
+    fn layout_src_try(&self, name: &str, src: &str) -> Result<Vec<String>, String> {
         let mut entry = [0u8; 4096];
         let mut err = [0u8; 4096];
         let rc = unsafe {
@@ -272,21 +282,48 @@ impl Engine {
             )
         };
         if rc != 0 {
-            crate::elog!("layout {name} 失败: {}", cbuf(&err));
-            return Vec::new();
+            return Err(cbuf(&err));
         }
-        cbuf(&entry)
+        Ok(cbuf(&entry)
             .split('\n')
             .filter(|s| !s.is_empty())
             .map(str::to_string)
-            .collect()
+            .collect())
     }
 
     /// layout 一组 (名, 源码) 库进 kvspace（stdlib 与 KVLANG_LIB 共用），汇总各库的 init 函数名。
+    /// 多文件库允许前向引用：未解析的库在多轮中重试，直到无进展；仍失败才报错（硬失败）。
     pub fn layout_libs<S: AsRef<str>>(&self, libs: &[(S, S)]) -> Vec<String> {
         let mut inits = Vec::new();
-        for (name, src) in libs {
-            inits.extend(self.layout_src(name.as_ref(), src.as_ref()));
+        let mut pending: Vec<usize> = (0..libs.len()).collect();
+        // 前向引用重试：最多 libs.len() 轮；每轮至少一个库成功才继续，否则停。
+        let mut last_errs: Vec<(String, String)> = Vec::new();
+        for _round in 0..libs.len().max(1) {
+            if pending.is_empty() {
+                last_errs.clear();
+                break;
+            }
+            let mut next = Vec::new();
+            let mut errs: Vec<(String, String)> = Vec::new();
+            for &i in &pending {
+                let name = libs[i].0.as_ref();
+                match self.layout_src_try(name, libs[i].1.as_ref()) {
+                    Ok(v) => inits.extend(v),
+                    Err(e) => {
+                        next.push(i);
+                        errs.push((name.to_string(), e));
+                    }
+                }
+            }
+            let no_progress = next.len() == pending.len();
+            pending = next;
+            last_errs = errs;
+            if no_progress {
+                break;
+            }
+        }
+        for (name, e) in last_errs {
+            crate::elog!("layout {name} 失败: {e}");
         }
         inits
     }

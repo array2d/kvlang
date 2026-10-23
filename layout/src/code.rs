@@ -666,6 +666,74 @@ fn build_inst(inst: &RawInst, by_irseq: &HashMap<i32, String>) -> Instruction {
     }
 }
 
+/// P1b2：manifest 四路目标。
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum IsaTarget {
+    Core,
+    Ext,
+    Bridge,
+    User,
+}
+
+/// 按 manifest + `/lib/<op>` 判定 opcode 的发射归属；未知硬失败。
+pub fn isa_target(
+    kv: &mut Kv,
+    isa: &crate::isa::Isa,
+    op: &str,
+    pkg: &str,
+    local_funcs: &HashSet<String>,
+) -> Result<IsaTarget, String> {
+    if let Some(e) = isa.entries.get(op) {
+        return Ok(if e.class == "core" {
+            IsaTarget::Core
+        } else {
+            IsaTarget::Ext
+        });
+    }
+    if local_funcs.contains(op) {
+        return Ok(IsaTarget::User);
+    }
+    // 包内裸名先按 `<pkg>·<name>` 解析，再回退全局名；绝对路径本身就是 key。
+    let qual = if !op.starts_with('/') && !pkg.is_empty() {
+        Some(format!("{pkg}{}{op}", crate::keytree::MEMBER_SEP))
+    } else {
+        None
+    };
+    if let Some(q) = &qual {
+        if local_funcs.contains(q) {
+            return Ok(IsaTarget::User);
+        }
+    }
+    let mut bases: Vec<String> = Vec::new();
+    if op.starts_with('/') {
+        bases.push(op.to_string());
+    } else {
+        if let Some(q) = &qual {
+            bases.push(crate::keytree::rwir(q));
+        }
+        bases.push(crate::keytree::rwir(op));
+    }
+    for base in &bases {
+        if crate::kvkind::kind(&kv.get_one(base)) == crate::kvkind::KIND_DEF_RWIR {
+            return Ok(IsaTarget::Bridge);
+        }
+        if is_func_dir(kv, &format!("{base}/")) {
+            return Ok(IsaTarget::User);
+        }
+    }
+    Err(format!("ISA: unknown opcode {op}"))
+}
+
+/// 通用 `sub` 只能是 2r→1w；一元取负必须走 `neg/abs`（P1b2 契约）。
+pub fn check_sub_arity(op: &str, reads: usize, writes: usize) -> Result<(), String> {
+    if op == "sub" && (reads != 2 || writes != 1) {
+        return Err(format!(
+            "ISA: sub must emit 2 reads / 1 write (got {reads}/{writes})"
+        ));
+    }
+    Ok(())
+}
+
 /// 写函数到 /lib/：签名（rwfunc）、源码、参数 Ptr、指令体。
 pub fn write_func(
     kv: &mut Kv,
@@ -764,6 +832,70 @@ pub fn write_func(
         }
     }
     let ext_bridge = isa.ext_bridge(kv, &emitted);
+
+    // P1b2：四路归类 + 核心项 arity/类型一致性校验（hard fail）。
+    // 注意：P1b2 不把 manifest 类型写进槽（typed slot 写入属 P1b3，与 runtime
+    // 零检查一起落，避免先引入 layout-output 地址漂移）。
+    for inst in &seq {
+        let (op, reads) = inst.flat();
+        if !op.is_empty() {
+            let target = isa_target(kv, isa, &op, pkg, local_funcs)?;
+            check_sub_arity(&op, reads.len(), inst.writes.len())?;
+            if target == IsaTarget::Core {
+                let e = isa
+                    .entries
+                    .get(&op)
+                    .ok_or_else(|| format!("ISA: missing manifest entry {op}"))?;
+                let typed =
+                    e.rp.iter()
+                        .chain(e.wp.iter())
+                        .any(|t| t != "any" && !t.ends_with("..."));
+                if typed && (reads.len() != e.nr as usize || inst.writes.len() != e.nw as usize) {
+                    return Err(format!(
+                        "ISA: arity mismatch for {op}: manifest {}r/{}w, got {}r/{}w",
+                        e.nr,
+                        e.nw,
+                        reads.len(),
+                        inst.writes.len()
+                    ));
+                }
+                for (j, r) in reads.iter().enumerate() {
+                    if let Some(mt) = e.concrete(j, false) {
+                        let ty = param_langtype
+                            .get(r)
+                            .or_else(|| declared.get(r))
+                            .map(String::as_str)
+                            .unwrap_or("");
+                        if !ty.is_empty() && ty != mt {
+                            return Err(format!(
+                                "ISA: {op} read {} type {ty} != manifest {mt}",
+                                j + 1
+                            ));
+                        }
+                    }
+                }
+                for (j, w) in inst.writes.iter().enumerate() {
+                    if let Some(mt) = e.concrete(j, true) {
+                        let resolved = lower::resolve_slot_type(w, &declared, structs, &declared);
+                        let ty = inst
+                            .write_types
+                            .get(j)
+                            .map(String::as_str)
+                            .filter(|t| !t.is_empty())
+                            .or_else(|| param_langtype.get(w).map(String::as_str))
+                            .or(resolved.as_deref())
+                            .unwrap_or("");
+                        if !ty.is_empty() && ty != mt {
+                            return Err(format!(
+                                "ISA: {op} write {} type {ty} != manifest {mt}",
+                                j + 1
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     for (i, inst) in seq.iter().enumerate() {
         write_linear_inst(
@@ -1309,6 +1441,14 @@ mod tests {
     }
 
     #[test]
+    fn sub_arity_contract() {
+        assert!(check_sub_arity("sub", 2, 1).is_ok());
+        assert!(check_sub_arity("sub", 1, 1).is_err());
+        assert!(check_sub_arity("sub", 2, 0).is_err());
+        assert!(check_sub_arity("-", 1, 1).is_ok());
+    }
+
+    #[test]
     fn call_slots_use_target_type() {
         let mut kv = Kv::conn(&format!(
             "fs:///tmp/kvlanglayout_call_kind_{}",
@@ -1316,6 +1456,7 @@ mod tests {
         ));
         init_dirs(&mut kv).unwrap();
         crate::isa::ensure_test_isa(&mut kv);
+        crate::isa::ensure_test_bridge(&mut kv, "println", 1, 0);
         compile(&mut kv, "rwfunc caller() -> () {\ncallee(1) -> y\nprintln(y)\n}\nrwfunc callee(x:int64) -> (r:int64) {\nx -> r\n}\n").unwrap();
         assert_eq!(kvkind::kind(&kv.get_one("/lib/caller/[1,0]")), "rwfunc");
         assert_eq!(
@@ -1379,6 +1520,8 @@ mod tests {
         ));
         init_dirs(&mut kv).unwrap();
         crate::isa::ensure_test_isa(&mut kv);
+        crate::isa::ensure_test_bridge(&mut kv, "foo.bar", 1, 1);
+        crate::isa::ensure_test_bridge(&mut kv, "baz", 1, 1);
         compile(
             &mut kv,
             "lib t {\nrwfunc main() -> () {\nfoo.bar(\"x\") -> y\nbaz(\"z\") -> w\n}\n}\n",
