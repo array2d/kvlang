@@ -180,10 +180,32 @@ void kvlangBuiltinFreeInputs(kvlangXvalue_t *in, int n) {
     (void)n;
 }
 
+/* 下一 PC 的格式化（冷 helper）：热循环里只留一次调用，避免函数体膨胀挪动布局。 */
+__attribute__((noinline)) static size_t next_pc_format(kvlangFrame_t *f,
+                                                       char *buf, size_t cap) {
+    size_t n = 0;
+    if (f->cursor && f->cursor->prefix_ok)
+        n = kvlangRwirNextPcFromPrefix(f->cursor->prefix,
+                                       (size_t)f->cursor->prefix_len,
+                                       f->cursor->irseq, buf, cap);
+    if (n == 0)
+        n = kvlangRwirNextPcBuffer(f->pc, buf, cap);
+    if (n == 0)
+        kvlangDie("next pc exceeds %zu bytes", cap);
+    return n;
+}
+
 void kvlangBuiltinNextPc(kvlangFrame_t *f) {
-    char buf[KV_KEY_MAX];
-    if (kvlangRwirNextPcBuffer(f->pc, buf, sizeof buf) == 0)
-        kvlangDie("next pc exceeds %zu bytes", sizeof buf);
+    /* 顺序推进：优先用游标缓存的前缀 + irseq 直接拼下一 PC；能直接写进反馈缓冲
+     * 就省掉一次 memcpy。 */
+    char stackbuf[KV_KEY_MAX];
+    char *buf = stackbuf;
+    size_t cap = sizeof stackbuf;
+    if (f->pc_out && f->pc_out_cap >= 16) {
+        buf = f->pc_out;
+        cap = f->pc_out_cap;
+    }
+    (void)next_pc_format(f, buf, cap);
     kvlangVthreadNextPc(f, buf, "running");
     /* 顺序推进（同一帧、irseq+1）：游标只需 +1，不必重解析 PC。 */
     if (f->cursor)

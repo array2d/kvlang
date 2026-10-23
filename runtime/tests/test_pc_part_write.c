@@ -98,6 +98,17 @@ int main(void) {
         write_pc(kv, &ko, s);
         check_slot(kv, key, s, !shm);
     }
+    /* UTF-8 码点：langtype 记码点数、head 的 a 记字节数；与正典 codec 逐字节比对。 */
+    static const char *utf8_pcs[] = {
+        "/vthread/1/[1]/[2,0]·中文",
+        "/vthread/1/[1]/[2,0]·é€𝄞",
+        "/vthread/1/[1]/[2,0]·ascii与混合",
+    };
+    for (size_t i = 0; i < sizeof utf8_pcs / sizeof utf8_pcs[0]; i++) {
+        write_pc(kv, &ko, utf8_pcs[i]);
+        check_slot(kv, key, utf8_pcs[i], !shm);
+    }
+
     kvlangKvspaceDisconnect(kv);
     if (failures) {
         fprintf(stderr, "%d failures\n", failures);

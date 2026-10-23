@@ -9,19 +9,60 @@ int kvlangRwirExtractAddress(const char *coord) {
     return end == p ? 0 : (int)n;
 }
 
+/* [n,0] 的无格式化写出：返回尾长，不写 NUL。保留 int 负数语义（损坏 PC 时与
+ * snprintf("%d") 输出一致）。 */
+static size_t fmt_coord(char *out, long long n) {
+    char tmp[24];
+    int d = 0;
+    bool neg = n < 0;
+    unsigned long long v = neg ? (unsigned long long)(-(n + 1)) + 1u
+                               : (unsigned long long)n;
+    do {
+        tmp[d++] = (char)('0' + (int)(v % 10));
+        v /= 10;
+    } while (v);
+    size_t p = 0;
+    out[p++] = '[';
+    if (neg)
+        out[p++] = '-';
+    while (d)
+        out[p++] = tmp[--d];
+    out[p++] = ',';
+    out[p++] = '0';
+    out[p++] = ']';
+    return p;
+}
+
+/* 用已知前缀（到末个 '/'，含）+ irseq 直接拼下一 PC：顺序推进热路径。 */
+__attribute__((visibility("hidden"))) size_t
+kvlangRwirNextPcFromPrefix(const char *prefix, size_t plen, int irseq, char *buf,
+                           size_t cap) {
+    if (!prefix || !buf || irseq == 0x7fffffff)
+        return 0;
+    char tail[24];
+    size_t tl = fmt_coord(tail, (long long)irseq + 1);
+    if (plen + tl + 1 > cap)
+        return 0;
+    memcpy(buf, prefix, plen);
+    memcpy(buf + plen, tail, tl);
+    buf[plen + tl] = 0;
+    return plen + tl;
+}
+
 /* 把 pc 末段 [n,0] 换成 [n+1,0] 写入 buf，返回长度；cap 不足返回 0。
  * 供每指令的 PC 推进热路径复用调用方缓冲。 */
 size_t kvlangRwirNextPcBuffer(const char *pc, char *buf, size_t cap) {
     const char *slash = strrchr(pc, '/');
     size_t plen = slash ? (size_t)(slash - pc) + 1 : 0;
     int num = kvlangRwirExtractAddress(slash ? slash + 1 : pc);
-    char tail[32];
-    int tl = snprintf(tail, sizeof tail, "[%d,0]", num + 1);
-    if (plen + (size_t)tl + 1 > cap)
+    char tail[24];
+    size_t tl = fmt_coord(tail, (long long)num + 1);
+    if (plen + tl + 1 > cap)
         return 0;
     memcpy(buf, pc, plen);
-    memcpy(buf + plen, tail, (size_t)tl + 1);
-    return plen + (size_t)tl;
+    memcpy(buf + plen, tail, tl);
+    buf[plen + tl] = 0;
+    return plen + tl;
 }
 
 void kvlangRwirInstructionFree(kvlangRwirInst_t *inst) {
