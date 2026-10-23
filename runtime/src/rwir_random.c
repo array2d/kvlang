@@ -12,7 +12,7 @@ static uint64_t crypto_rand_u64(void) {
 int kvlangBuiltinRandUint64(kvlangFrame_t *f) {
     uint64_t v = crypto_rand_u64();
     uint8_t r[8]; memcpy(r, &v, 8);
-    kvlangXvalue_t e; kvlangXvalueNewTlv(&e, KVSPACE_KIND_UINT64, r, 8, 1);
+    kvlangXvalue_t e; kvlangXvalueNew(&e, KVSPACE_KIND_UINT64, r, 8, 1);
     int rc = kvlangBuiltinEmitResult(f, &e);
     return rc;
 }
@@ -29,7 +29,7 @@ int kvlangBuiltinRandIntn(kvlangFrame_t *f) {
     uint64_t m = (uint64_t)kvlangScalarI64(kvlangXvalueScalar(&in[0]));
     uint64_t v = m == 0 ? 0 : crypto_rand_u64() % m;
     uint8_t r[8]; memcpy(r, &v, 8);
-    kvlangXvalue_t e; kvlangXvalueNewTlv(&e, KVSPACE_KIND_UINT64, r, 8, 1);
+    kvlangXvalue_t e; kvlangXvalueNew(&e, KVSPACE_KIND_UINT64, r, 8, 1);
     int rc = kvlangBuiltinEmitResult(f, &e);kvlangBuiltinFreeInputs(in, n);
     return rc;
 }

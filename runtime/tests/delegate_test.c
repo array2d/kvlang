@@ -28,10 +28,10 @@ static kvspace_t *open_kv(void) {
     return kv;
 }
 
-static void set_tlv(kvspace_t *kv, const char *key, const char *kind, const uint8_t *raw, uint32_t len) {
+static void set_xvalue(kvspace_t *kv, const char *key, const char *kind, const uint8_t *raw, uint32_t len) {
     kvlangXvalue_t v;
     kvlangXvalueZero(&v);
-    kvlangXvalueNewTlv(&v, kind, raw, len, 1);
+    kvlangXvalueNew(&v, kind, raw, len, 1);
     kvlangKvPair_t p = {(char *)key, v};
     char err[256];
     if (kvlangKvspaceSet(kv, &p, 1, err, sizeof err) != 0)
@@ -304,7 +304,7 @@ static void test_one_definition(kvspace_t *kv) {
     register_backend(kv, "db", "dup.op", "ready");
     uint8_t raw[5] = {0, 0, 0, 0, 0};
     char *sk = kvlangKeytreeLibSignature("dup.op");
-    set_tlv(kv, sk, KVSPACE_KIND_RWFUNC, raw, sizeof raw);
+    set_xvalue(kv, sk, KVSPACE_KIND_RWFUNC, raw, sizeof raw);
     kvlangRwirInst_t inst = make_inst("dup.op", "/data/dup");
     kvlangVthreadSet(kv, "1", PC, "running");
     int rc = kvlangDispatchDelegate(kv, "1", PC, &inst);
@@ -358,11 +358,11 @@ static void test_decoded_inputs(kvspace_t *kv) {
     const uint8_t op_raw[] = {3, 0, 1, 0, 0, 'd', 'e', 'c', '.', 'o', 'p'};
     const uint8_t x_raw[] = {0, 0, 0, 0, 0, 'x', 0, 'c', 'h', 'a', 'r', '/', 'u', 't', 'f', '8'};
     const uint8_t y_raw[] = {0, 0, 0, 0, 0, 'y', 0, 'c', 'h', 'a', 'r', '/', 'u', 't', 'f', '8'};
-    set_tlv(kv, "/vthread/1/[1]/[1,0]", KVSPACE_KIND_RWIR, op_raw, sizeof op_raw);
+    set_xvalue(kv, "/vthread/1/[1]/[1,0]", KVSPACE_KIND_RWIR, op_raw, sizeof op_raw);
     set_char(kv, "/vthread/1/[1]/[1,-1]", "lit-val");
-    set_tlv(kv, "/vthread/1/[1]/[1,-2]", KVSPACE_KIND_RWIR, x_raw, sizeof x_raw);
-    set_tlv(kv, "/vthread/1/[1]/[1,-3]", KVSPACE_KIND_RWIR, y_raw, sizeof y_raw);
-    set_tlv(kv, "/vthread/1/[1]/[1,1]", KVSPACE_KIND_RWIR, y_raw, sizeof y_raw);
+    set_xvalue(kv, "/vthread/1/[1]/[1,-2]", KVSPACE_KIND_RWIR, x_raw, sizeof x_raw);
+    set_xvalue(kv, "/vthread/1/[1]/[1,-3]", KVSPACE_KIND_RWIR, y_raw, sizeof y_raw);
+    set_xvalue(kv, "/vthread/1/[1]/[1,1]", KVSPACE_KIND_RWIR, y_raw, sizeof y_raw);
     set_char(kv, "/vthread/1/[1]/x", "x-val");
     set_char(kv, "/vthread/1/[1]/y", "before");
 

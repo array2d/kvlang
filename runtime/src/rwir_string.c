@@ -51,12 +51,12 @@ static int write_char32(kvlangFrame_t *f, const uint32_t *r, int n) {
             raw[i * 4 + 3] = (uint8_t)((r[i] >> 24) & 0xFF);
         }
         uint8_t *out; uint32_t len; int32_t d = n;
-        kvspaceTlvEncode(KVSPACE_KIND_CHAR, raw, (uint32_t)n * 4, &d, 1, &out, &len);
+        kvspaceXvalueEncode(KVSPACE_KIND_CHAR, raw, (uint32_t)n * 4, &d, 1, &out, &len);
         free(raw);
         e.bytes = out; e.length = len;
     } else {
         uint8_t *out; uint32_t len; int32_t d = 0;
-        kvspaceTlvEncode(KVSPACE_KIND_CHAR, (const uint8_t *)"", 0, &d, 1, &out, &len);
+        kvspaceXvalueEncode(KVSPACE_KIND_CHAR, (const uint8_t *)"", 0, &d, 1, &out, &len);
         e.bytes = out; e.length = len;
     }
     int rc = kvlangBuiltinEmitResult(f, &e);
@@ -247,7 +247,7 @@ int kvlangBuiltinStringParseUint(kvlangFrame_t *f) {
     free(s);
     if (bad) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetError(f, "ValueError: string.parseuint: invalid syntax"); }
     uint64_t u = (uint64_t)v; uint8_t r[8]; memcpy(r, &u, 8);
-    kvlangXvalue_t e; kvlangXvalueNewTlv(&e, KVSPACE_KIND_UINT64, r, 8, 1);
+    kvlangXvalue_t e; kvlangXvalueNew(&e, KVSPACE_KIND_UINT64, r, 8, 1);
     int rc = kvlangBuiltinEmitResult(f, &e);kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
@@ -263,7 +263,7 @@ int kvlangBuiltinStringParseFloat(kvlangFrame_t *f) {
     free(s);
     if (bad) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetError(f, "ValueError: string.parsefloat: invalid syntax"); }
     uint8_t r[8]; memcpy(r, &v, 8);
-    kvlangXvalue_t e; kvlangXvalueNewTlv(&e, KVSPACE_KIND_FLOAT64, r, 8, 1);
+    kvlangXvalue_t e; kvlangXvalueNew(&e, KVSPACE_KIND_FLOAT64, r, 8, 1);
     int rc = kvlangBuiltinEmitResult(f, &e);kvlangBuiltinFreeInputs(in, n);
     return rc;
 }

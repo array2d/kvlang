@@ -84,7 +84,7 @@ int kvlangBuiltinNdarrayShape(kvlangFrame_t *f) {
     }
     int32_t sd[1] = {ndim};
     kvlangXvalue_t r;
-    kvlangXvalueNewTlvDims(&r, KVSPACE_KIND_INT64, raw, raw_len, sd, 1);
+    kvlangXvalueNewDims(&r, KVSPACE_KIND_INT64, raw, raw_len, sd, 1);
     int rc = kvlangBuiltinEmitResult(f, &r);
     return rc;
 }

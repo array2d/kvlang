@@ -15,7 +15,7 @@ durable 单句柄相干、后端装载。
 
 1. **执行核心**：取指-解码-执行大循环、call/return/br/goto、vthread 调度、native builtin 派发、`=`
    拷贝语义。
-2. **值语义与编解码**：headlenpow / langtype 的**唯一编解码器**在 kvspace 正典 codec（`kvspaceTlvEncode` /
+2. **值语义与编解码**：headlenpow / langtype 的**唯一编解码器**在 kvspace 正典 codec（`kvspaceXvalueEncode` /
    `kvspaceDecodeHead` / `kvspaceNewPtr`/`NewChar`/`NewBool`/`NewInt64`/`NewFloat64`）；runtime-c 的
    `xvalue.c` 只是其薄封装。langtype 串是类型的唯一真相，怎么拼、怎么解，只此一处。
 3. **指令解码与签名校验**：`rwir_decode.c:RwirDecode`（稠密探查、遇空即停）、`/lib/<op>` 签名的读写码规范、
@@ -42,7 +42,7 @@ livebyte）。两组对外 C ABI：
 - `kvlang_runtime.h`：扩展 runtime 语义，**只暴露 kvspace 不提供的部分**。现有 9 个符号：`kvlangDefRwir`、
   `kvlangRwirextHandoff`、`kvlangRwirextNextPc`、`kvlangRwirextParams`、`kvlangRwirextResolveRead`、
   `kvlangRwirextResolveReadPath`、`kvlangRwirextResolveWrite`、`kvlangLangtypeValid`、
-  `kvlangLangtypeMatch`。KV 存取（connect/get/write/del/list/tlv）**不在此**——扩展宿主自连 kvspace ABI，把
+  `kvlangLangtypeMatch`。KV 存取（connect/get/write/del/list/xvalue）**不在此**——扩展宿主自连 kvspace ABI，把
   句柄（`void *`）传进带句柄的 myrwir 函数。
 
 其中 `LangtypeValid`/`LangtypeMatch` 与正典 codec 的 head 解码，正是 **def langtype 与 langtype** 对外的
@@ -71,7 +71,7 @@ kvspaceSetValue                  // 验证并同步写入完整 XValue 与 ro/vi
 kvspaceGetHead                   // 读 head 与独立 KV key 上的 ro/vid
 kvspaceListLen / ListAt / Del / DelTree / Cp / CpTree
 kvspaceMkindex / MkindexExt / RmindexExt / Watch
-kvspaceTlvEncode / TlvEncodeMode / DecodeHead
+kvspaceXvalueEncode / XvalueEncodeMode / DecodeHead
 kvspaceNewPtr / NewChar / NewBool / NewInt64 / NewFloat64
 kvspaceResolveRef / GetByRef / SetPartByRef / SetValueByRef
                                  // 地址寻址：key→64 位地址是派生量，后端可不实现（前端退回按 key）

@@ -51,7 +51,7 @@ int kvlangBuiltinStructNew(kvlangFrame_t *f) {
             break;
         }
         kvlangXvalue_t mark;
-        kvlangXvalueNewTlv(&mark, ref, (const uint8_t *)"", 0, 1);
+        kvlangXvalueNew(&mark, ref, (const uint8_t *)"", 0, 1);
         kvlangKvPair_t p0 = {ok, mark};
         if (kvlangKvspaceSet(f->kvspace, &p0, 1, err, sizeof err) != 0)
             rc = kvlangBuiltinSetError(f, "%s", err);

@@ -229,13 +229,13 @@ fn counts_body(nr: i32, nw: i32, dynamic: bool) -> Vec<u8> {
 pub fn new_rwir(nr: i32, nw: i32, sig: &str) -> Vec<u8> {
     let mut raw = counts_body(nr, nw, false);
     raw.extend_from_slice(sig.as_bytes());
-    ffi::tlv_encode(KIND_RWIR, &raw, 1)
+    ffi::xvalue_encode(KIND_RWIR, &raw, 1)
 }
 
 pub fn new_rwfunc_call(nr: i32, nw: i32, sig: &str) -> Vec<u8> {
     let mut raw = counts_body(nr, nw, false);
     raw.extend_from_slice(sig.as_bytes());
-    ffi::tlv_encode(KIND_RWFUNC, &raw, 1)
+    ffi::xvalue_encode(KIND_RWFUNC, &raw, 1)
 }
 
 pub fn new_typed_rwir(name: &str, langtype: &str) -> Vec<u8> {
@@ -243,17 +243,17 @@ pub fn new_typed_rwir(name: &str, langtype: &str) -> Vec<u8> {
     raw.extend_from_slice(name.as_bytes());
     raw.push(0);
     raw.extend_from_slice(langtype.as_bytes());
-    ffi::tlv_encode(KIND_RWIR, &raw, 1)
+    ffi::xvalue_encode(KIND_RWIR, &raw, 1)
 }
 
 /// def rwir 路由头：仅计数头，无参数载荷。各参数落 [0,x] 签名行槽（def langtype）。
 pub fn new_defrwir(nr: i32, nw: i32, dynamic: bool) -> Vec<u8> {
-    ffi::tlv_encode(KIND_DEF_RWIR, &counts_body(nr, nw, dynamic), 1)
+    ffi::xvalue_encode(KIND_DEF_RWIR, &counts_body(nr, nw, dynamic), 1)
 }
 
 /// 签名行 [0,x] 槽：一个参数的类型定义，body=该参数完整 langtype 串。
 pub fn new_def_langtype(langtype: &str) -> Vec<u8> {
-    ffi::tlv_encode(KIND_DEF_LANGTYPE, langtype.as_bytes(), 1)
+    ffi::xvalue_encode(KIND_DEF_LANGTYPE, langtype.as_bytes(), 1)
 }
 
 /// rwfunc 参数定义键（点后缀 .[0,-k]）：body=名字\x00类型串，langtype=def langtype。
@@ -261,7 +261,7 @@ pub fn new_def_param(name: &str, langtype: &str) -> Vec<u8> {
     let mut body = name.as_bytes().to_vec();
     body.push(0);
     body.extend_from_slice(langtype.as_bytes());
-    ffi::tlv_encode(KIND_DEF_LANGTYPE, &body, 1)
+    ffi::xvalue_encode(KIND_DEF_LANGTYPE, &body, 1)
 }
 
 /// 解析参数定义键 body（名字\x00类型串）→ (名字, 类型)。
@@ -278,17 +278,17 @@ pub fn def_param_parts(data: &[u8]) -> Option<(String, String)> {
 }
 
 pub fn new_struct() -> Vec<u8> {
-    ffi::tlv_encode(KIND_DEF_STRUCT, &[], 1)
+    ffi::xvalue_encode(KIND_DEF_STRUCT, &[], 1)
 }
 
 // ── kvlang 自有 kind：rwfunc ────────────────────────────────────────
 //
 pub fn new_rwfunc_dir() -> Vec<u8> {
-    ffi::tlv_encode(KIND_RWFUNC, &[], 1)
+    ffi::xvalue_encode(KIND_RWFUNC, &[], 1)
 }
 
 pub fn new_rwfunc_anchor(nr: i32, nw: i32, dynamic: bool) -> Vec<u8> {
-    ffi::tlv_encode(KIND_RWFUNC, &counts_body(nr, nw, dynamic), 1)
+    ffi::xvalue_encode(KIND_RWFUNC, &counts_body(nr, nw, dynamic), 1)
 }
 
 /// rwfunc body 访问器（layout 读回签名时用）。

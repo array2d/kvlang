@@ -16,7 +16,7 @@ static void pack_typed_array(const char *kind, const kvlangXvalue_t *elems,
         for (int j = c; j < sz; j++)
             raw[i * sz + j] = 0;
     }
-    kvlangXvalueNewTlv(out, kind, raw, (uint32_t)(sz * n), n);
+    kvlangXvalueNew(out, kind, raw, (uint32_t)(sz * n), n);
     free(raw);
 }
 
@@ -274,7 +274,7 @@ int kvlangBuiltinArrayFill(kvlangFrame_t *f) {
     for (int i = 0; i < kx.array_len; i++)
         memcpy(raw + (size_t)i * sz, elem, (size_t)sz);
     kvlangXvalue_t arr;
-    kvlangXvalueNewTlvDims(&arr, kx.kind, raw, (uint32_t)total, kx.dims,
+    kvlangXvalueNewDims(&arr, kx.kind, raw, (uint32_t)total, kx.dims,
                            kx.ndim);
     free(raw);
     int rc = kvlangBuiltinEmitResult(f, &arr);

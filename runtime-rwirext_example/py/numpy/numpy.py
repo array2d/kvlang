@@ -12,7 +12,7 @@
   · ndarray 不是新类型，就是 [dims]dtype——一维字面量由 kvlang 产生，更高的秩由 numpy
     算子（reshape/matmul/…）产出并按 [dims]dtype 存回 kvspace。
   · tensor data 零拷贝：读走权威 kvspaceDecodeHead，在 kvspace-c SHM 地址上建 ndarray 视图；
-    写走权威 N 维 kvspaceTlvEncode，dims 直接落盘。
+    写走权威 N 维 kvspaceXvalueEncode，dims 直接落盘。
   · 遵照读写码：从 kvlangRwirextParams 取 opcode 与读/写操作数名；读参优先按路径零拷贝 view，
     否则回退 kvlangRwirextResolveRead；写参经 kvlangRwirextResolveWrite 解析为 KV 路径。
   · numpy.print 走本进程自身的 stdout（不经 kvlang println）。
@@ -71,10 +71,10 @@ def _bind():
     _ks.kvspaceShmSet.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.POINTER(ctypes.c_uint8), ctypes.c_int32]
     _ks.kvspaceDecodeHead.argtypes = [ctypes.POINTER(ctypes.c_uint8), ctypes.c_uint32, ctypes.POINTER(kvspace_head_t)]
     _ks.kvspaceDecodeHead.restype = ctypes.c_int
-    _ks.kvspaceTlvEncode.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_uint8), ctypes.c_uint32,
+    _ks.kvspaceXvalueEncode.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_uint8), ctypes.c_uint32,
                                       ctypes.POINTER(ctypes.c_int32), ctypes.c_int32,
                                       ctypes.POINTER(ctypes.POINTER(ctypes.c_uint8)), ctypes.POINTER(ctypes.c_uint32)]
-    _ks.kvspaceTlvEncode.restype = ctypes.c_int
+    _ks.kvspaceXvalueEncode.restype = ctypes.c_int
     # codec 产出为 frontend malloc 缓冲，拷出后以 libc free 释放（无 kvspaceBytesFree）。
     _ks.kvspaceListLen.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int, ctypes.c_int,
                                    ctypes.POINTER(ctypes.c_int32)]
@@ -272,10 +272,10 @@ class Engine:
         dims = (ctypes.c_int32 * ndim)(*shape) if ndim > 0 else None
         buf = (ctypes.c_uint8 * len(raw)).from_buffer_copy(raw) if raw else None
         out = ctypes.POINTER(ctypes.c_uint8)(); ol = ctypes.c_uint32()
-        if _ks.kvspaceTlvEncode(_kind_of(arr.dtype).encode(),
+        if _ks.kvspaceXvalueEncode(_kind_of(arr.dtype).encode(),
                                  ctypes.cast(buf, ctypes.POINTER(ctypes.c_uint8)), len(raw),
                                  dims, ndim, ctypes.byref(out), ctypes.byref(ol)) != 0:
-            raise RuntimeError(f"tlv_encode failed: {key}")
+            raise RuntimeError(f"xvalue_encode failed: {key}")
         _ks.kvspaceShmSet(self.kv, key.encode(), out, ol.value)
         _libc.free(ctypes.cast(out, ctypes.c_void_p))
 

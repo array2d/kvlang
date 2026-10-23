@@ -821,24 +821,24 @@ fn field_default(ty: &str, default: Option<&Expr>) -> Vec<u8> {
         return ffi::new_char(&base, &s);
     }
     if !dims.is_empty() {
-        return ffi::tlv_encode(&base, &[], dims.iter().product());
+        return ffi::xvalue_encode(&base, &[], dims.iter().product());
     }
     let i = || s.parse::<i64>().unwrap_or(0);
     let u = || s.parse::<u64>().unwrap_or(0);
     let f = || s.parse::<f64>().unwrap_or(0.0);
     match base.as_str() {
         "bool" => ffi::new_bool(s == "true"),
-        "int8" => ffi::tlv_encode("int8", &(i() as i8).to_le_bytes(), 1),
-        "int16" => ffi::tlv_encode("int16", &(i() as i16).to_le_bytes(), 1),
-        "int32" => ffi::tlv_encode("int32", &(i() as i32).to_le_bytes(), 1),
+        "int8" => ffi::xvalue_encode("int8", &(i() as i8).to_le_bytes(), 1),
+        "int16" => ffi::xvalue_encode("int16", &(i() as i16).to_le_bytes(), 1),
+        "int32" => ffi::xvalue_encode("int32", &(i() as i32).to_le_bytes(), 1),
         "int64" => ffi::new_int64(i()),
-        "uint8" => ffi::tlv_encode("uint8", &[u() as u8], 1),
-        "uint16" => ffi::tlv_encode("uint16", &(u() as u16).to_le_bytes(), 1),
-        "uint32" => ffi::tlv_encode("uint32", &(u() as u32).to_le_bytes(), 1),
-        "uint64" => ffi::tlv_encode("uint64", &u().to_le_bytes(), 1),
-        "float32" => ffi::tlv_encode("float32", &(f() as f32).to_le_bytes(), 1),
+        "uint8" => ffi::xvalue_encode("uint8", &[u() as u8], 1),
+        "uint16" => ffi::xvalue_encode("uint16", &(u() as u16).to_le_bytes(), 1),
+        "uint32" => ffi::xvalue_encode("uint32", &(u() as u32).to_le_bytes(), 1),
+        "uint64" => ffi::xvalue_encode("uint64", &u().to_le_bytes(), 1),
+        "float32" => ffi::xvalue_encode("float32", &(f() as f32).to_le_bytes(), 1),
         "float64" => ffi::new_float64(f()),
-        _ => ffi::tlv_encode(&base, &[], 1),
+        _ => ffi::xvalue_encode(&base, &[], 1),
     }
 }
 

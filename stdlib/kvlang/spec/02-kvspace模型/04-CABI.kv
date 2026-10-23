@@ -37,7 +37,7 @@ close（没有指令边界回收调用）。写返回 body 偏移指针供调用
 | `kvspaceClear` | 清空 |
 | `kvspaceWatch` | 一次性等待某 key 变为目标值 |
 
-无句柄的编解码符号（前端静态实现，byte-identical）：`kvspaceTlvEncode` / `kvspaceTlvEncodeMode` /
+无句柄的编解码符号（前端静态实现，byte-identical）：`kvspaceXvalueEncode` / `kvspaceXvalueEncodeMode` /
 `kvspaceDecodeHead`，以及构造器 `kvspaceNewPtr`（存目标完整 langtype + 目标 key）、`kvspaceNewChar`
 / `kvspaceNewBool` / `kvspaceNewInt64` / `kvspaceNewFloat64`。
 
@@ -88,8 +88,8 @@ dispatch 静态导出；后端 `kvspace-c` / `kvspace-durable` 各导出同一�
     kvspaceNewPtr
     kvspaceRmindexExt
     kvspaceSetPart
-    kvspaceTlvEncode
-    kvspaceTlvEncodeMode
+    kvspaceXvalueEncode
+    kvspaceXvalueEncodeMode
     kvspaceWatch
     kvspaceWriteInPlace
     kvspaceWriteNewPlace

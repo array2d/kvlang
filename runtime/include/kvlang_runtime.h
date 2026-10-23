@@ -5,7 +5,7 @@
 /* kvlang 扩展 runtime ABI：供第三方语言（Rust/Python/Go）通过 C ABI 嵌入 C
  * runtime， 实现自定义 rwirext（如 term 的 print）。
  *
- * KV 存取（connect/get/set/del/list/mkindex/tlv）不在此——扩展宿主自己连 kvspace
+ * KV 存取（connect/get/set/del/list/mkindex/xvalue）不在此——扩展宿主自己连 kvspace
  * ABI （kvspaceConnect/Get/Set/...），把拿到的 kvspace 句柄（void
  * *）传进下列带句柄的函数即可。 本 ABI 只暴露 kvspace 不提供的 runtime
  * 语义：rwir 解码 + resolve + display + PC 推进 + 类型判定。 */
