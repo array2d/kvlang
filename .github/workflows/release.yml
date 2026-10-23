@@ -2,12 +2,17 @@ name: release-abi
 on:
   push:
     tags: ['v*']
-  workflow_dispatch: # dry-run：构建 + 打包 + 自包含冒烟，不发布
+  workflow_dispatch: # dry-run：构建 + 打包 + 自包含冒烟；填 tag 才发布
+    inputs:
+      tag:
+        description: 发布目标 tag；留空则纯 dry-run（不发布任何资产）
+        required: false
+        default: ""
 permissions:
   contents: write
 env:
-  # workflow_dispatch 在分支上跑，GITHUB_REF_NAME 含 /，用固定名避免污染产物名
-  ABI_VERSION: ${{ github.event_name == 'push' && github.ref_name || 'dryrun' }}
+  # workflow_dispatch 在分支上跑，GITHUB_REF_NAME 含 /；用 tag 输入或固定名
+  ABI_VERSION: ${{ github.event_name == 'push' && github.ref_name || inputs.tag || 'dryrun' }}
 jobs:
   # Linux：deps.json 所列依赖有预编译 ABI tarball，直接下载安装后打包（自包含）。
   linux:
@@ -48,7 +53,7 @@ jobs:
           printf '{"abi":"%s"}\n' "$v" > "$d/abi-manifest.json"
           tar czf "$d.tar.gz" "$d"
           tar tzf "$d.tar.gz"
-          sha256sum "$d.tar.gz" > SHA256SUMS-linux
+          sha256sum "$d.tar.gz" | tee SHA256SUMS-linux
       - name: 自包含冒烟（空目录解包，隐藏系统安装）
         run: |
           set -euo pipefail
@@ -200,7 +205,15 @@ jobs:
           printf '{"abi":"%s"}\n' "$v" > "$d/abi-manifest.json"
           tar czf "$d.tar.gz" "$d"
           tar tzf "$d.tar.gz"
-          sha256sum "$d.tar.gz" > SHA256SUMS-macos
+          sha256sum "$d.tar.gz" | tee SHA256SUMS-macos
+      - name: 上传 dry-run 产物（供合并前核对/重传）
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: kvlang-abi-${{ env.ABI_VERSION }}-darwin-arm64
+          path: |
+            kvlang-abi-${{ env.ABI_VERSION }}-darwin-arm64.tar.gz
+            SHA256SUMS-macos
       - name: 自包含冒烟（空目录解包，隐藏系统安装）
         run: |
           set -euo pipefail
@@ -224,6 +237,12 @@ jobs:
           usage=$("$tmp/$d/bin/kvlanglayout" 2>&1 || true)
           echo "smoke layout: $usage"
           echo "$usage" | grep -q '^usage: kvlanglayout'
+      - name: dispatch 发布（tag 输入非空且冒烟通过）
+        if: github.event_name == 'workflow_dispatch' && inputs.tag != ''
+        run: |
+          gh release upload "${{ inputs.tag }}" \
+            "kvlang-abi-${{ inputs.tag }}-darwin-arm64.tar.gz" \
+            SHA256SUMS-macos --clobber
       - name: 上传到 release
         if: github.event_name == 'push'
         run: gh release upload "${GITHUB_REF_NAME}" kvlang-abi-*-darwin-*.tar.gz SHA256SUMS-macos --clobber
