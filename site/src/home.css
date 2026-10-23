@@ -166,7 +166,7 @@ section .section-lead {
 }
 .runtime-table {
   width: 100%;
-  min-width: 560px;
+  min-width: 760px; /* 4 列；窄屏由 .table-wrap 横向滚动 */
   border-collapse: collapse;
   font-size: 14px;
 }

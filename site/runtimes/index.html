@@ -26,7 +26,6 @@
         <a href="/#start">Learn</a>
         <a href="/stdlib/">Docs</a>
         <a href="/runtimes/">Runtimes</a>
-        <a href="https://github.com/array2d/kvlang/tree/master/stdlib/kvlang/spec">Spec</a>
         <a href="/#ecosystem">Ecosystem</a>
         <a href="https://github.com/array2d/kvlang">GitHub</a>
         <a href="/zh/runtimes/" hreflang="zh-CN" lang="zh-CN">中文</a>
@@ -56,6 +55,28 @@
             A runtime registers its opcodes at <code class="inline">/lib/&lt;opcode&gt;</code>; a
             lib is a set of rwir/rwfunc definitions laid out into the same tree.
           </p>
+          <p class="lead">
+            The <a href="https://github.com/array2d/deepx">deepx</a> repository holds model
+            definitions rather than a runtime extension, and
+            <a href="https://github.com/array2d/deepx-design">deepx-design</a> is documentation;
+            neither is listed as a runtime below.
+          </p>
+          <p class="lead">
+            <strong>Registration styles differ.</strong> runtime-c is the C core; runtime-rs and
+            deepx-cpu-compute embed it and declare a capability set. deepx-cpu-compute
+            additionally writes its signatures to <code class="inline">/lib/&lt;opcode&gt;</code>
+            for distributed scheduling. deepx-compute-cuda registers tensor functions through its
+            own <code class="inline">TfFactory</code>. The Metal compute/heap/io planes and
+            heap-cuda exchange bare opcodes (<code class="inline">add</code>,
+            <code class="inline">load</code>, <code class="inline">print</code>,
+            <code class="inline">save</code>) over a Redis task queue rather than through
+            <code class="inline">/lib</code> routing.
+          </p>
+          <p class="lead">
+            All deepx extensions are being migrated to embed the runtime-c core and register
+            through the capability/route contract; until that migration completes, the table
+            records their current mechanisms.
+          </p>
         </div>
       </section>
 
@@ -66,6 +87,7 @@
               <thead>
                 <tr>
                   <th scope="col">Runtime</th>
+                  <th scope="col">Arch/OS</th>
                   <th scope="col">Lib (requires this runtime)</th>
                   <th scope="col">Notes</th>
                 </tr>
@@ -73,6 +95,7 @@
               <tbody>
                 <tr>
                   <td><a href="https://github.com/array2d/kvlang/tree/master/runtime">runtime-c</a></td>
+                  <td><code class="inline">linux-x86_64</code>, <code class="inline">darwin-arm64</code></td>
                   <td class="muted">—</td>
                   <td>
                     The minimal core: fetch, decode, execute, control flow, native dispatch.
@@ -81,6 +104,7 @@
                 </tr>
                 <tr>
                   <td><a href="https://github.com/array2d/kvlang/tree/master/runtime-rs">runtime-rs</a></td>
+                  <td><code class="inline">linux-x86_64</code>, <code class="inline">darwin-arm64</code></td>
                   <td><a href="/stdlib/">stdlib</a></td>
                   <td>
                     The first runtime extension and its first lib. Embeds the C core and adds the
@@ -90,10 +114,95 @@
                 </tr>
                 <tr>
                   <td><a href="https://github.com/array2d/kvlang/tree/master/runtime-rs">runtime-rs</a></td>
+                  <td><code class="inline">linux-x86_64</code>, <code class="inline">darwin-arm64</code></td>
                   <td><a href="https://github.com/array2d/byteseek">byteseek</a></td>
                   <td>
                     The second lib. An agent harness written in kvlang, running on runtime-rs
                     against the same kvspace.
+                  </td>
+                </tr>
+                <tr>
+                  <td><a href="https://github.com/array2d/deepx-cpu-compute">deepx-cpu-compute</a></td>
+                  <td>
+                    <code class="inline">linux-x86_64</code>, <code class="inline">linux-arm64</code>,
+                    <code class="inline">darwin-x86_64</code>, <code class="inline">darwin-arm64</code>
+                  </td>
+                  <td class="muted">—</td>
+                  <td>
+                    The CPU <strong>op-plat</strong>: tensor kernels over OpenBLAS/Highway/OpenMP.
+                    Declares <code class="inline">myrwircaps = deepx/miaobyte·*</code>
+                    (<code class="inline">add</code>, <code class="inline">sub</code>,
+                    <code class="inline">mul</code>, <code class="inline">div</code>, …), embeds the
+                    C core, and writes signatures to <code class="inline">/lib</code> for
+                    distributed scheduling.
+                  </td>
+                </tr>
+                <tr>
+                  <td><a href="https://github.com/array2d/deepx-compute-metal">deepx-compute-metal</a></td>
+                  <td><code class="inline">darwin-arm64</code></td>
+                  <td class="muted">—</td>
+                  <td>
+                    The Metal <strong>op-plat</strong>. Runs elementwise/reduce/changeshape kernels
+                    on the GPU; bare task opcodes arrive over Redis, not through
+                    <code class="inline">/lib</code>. Requires Metal (no CUDA).
+                  </td>
+                </tr>
+                <tr>
+                  <td><a href="https://github.com/array2d/deepx-common-metal">deepx-common-metal</a></td>
+                  <td><code class="inline">darwin-arm64</code></td>
+                  <td class="muted">—</td>
+                  <td>
+                    The Metal <strong>HAL</strong>: device detection and shared Metal context used
+                    by the other Metal rows.
+                  </td>
+                </tr>
+                <tr>
+                  <td><a href="https://github.com/array2d/deepx-heap-metal">deepx-heap-metal</a></td>
+                  <td><code class="inline">darwin-arm64</code></td>
+                  <td class="muted">—</td>
+                  <td>
+                    The Metal <strong>heap-plat</strong>: tensor lifetime and shared-memory
+                    bookkeeping alongside the Metal compute plane. A Redis-driven service, not a
+                    kvlang capability set.
+                  </td>
+                </tr>
+                <tr>
+                  <td><a href="https://github.com/array2d/deepx-io-metal">deepx-io-metal</a></td>
+                  <td><code class="inline">darwin-arm64</code></td>
+                  <td class="muted">—</td>
+                  <td>
+                    The Metal <strong>io-plat</strong>: <code class="inline">load</code> /
+                    <code class="inline">print</code> / <code class="inline">save</code> tasks
+                    driven over the Redis queue.
+                  </td>
+                </tr>
+                <tr>
+                  <td><a href="https://github.com/array2d/deepx-compute-cuda">deepx-compute-cuda</a></td>
+                  <td><code class="inline">linux-x86_64</code> + CUDA</td>
+                  <td class="muted">—</td>
+                  <td>
+                    The CUDA <strong>op-plat</strong>. Registers
+                    <code class="inline">deepx/miaobyte·*</code> tensor functions through its own
+                    <code class="inline">TfFactory</code>; built in a CUDA 12.8 container, CMake
+                    targets <code class="inline">sm_75</code>.
+                  </td>
+                </tr>
+                <tr>
+                  <td><a href="https://github.com/array2d/deepx-heap-cuda">deepx-heap-cuda</a></td>
+                  <td>CUDA (OS not pinned in repo)</td>
+                  <td class="muted">—</td>
+                  <td>
+                    The CUDA <strong>heap-plat</strong>: device/host memory lifecycle and
+                    synchronisation. A Redis-driven service, not a kvlang capability set.
+                  </td>
+                </tr>
+                <tr>
+                  <td><a href="https://github.com/array2d/deepx-cuda-kernelcompiler">deepx-cuda-kernelcompiler</a></td>
+                  <td><code class="inline">linux-x86_64</code> + CUDA</td>
+                  <td class="muted">—</td>
+                  <td>
+                    The GPU <strong>kernel compiler</strong>: lowers kvlang tensor ops to TileLang
+                    kernels (AOT <code class="inline">.so</code>); no opcode registration.
                   </td>
                 </tr>
               </tbody>
