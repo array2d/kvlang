@@ -1,6 +1,35 @@
 #include "func_code.h"
 #include "kvcpu_internal.h"
 
+/* P0-2：换行时刷新 inst 与参数数组的静态字段（name/type/is_address/write_offs）。
+ * 冷路径：每帧每行一次；热循环里只判 bind/row 是否变化。 */
+__attribute__((noinline)) static void row_template(
+    kvlangRwirInst_t *inst, kvlangParam_t *reads, kvlangParam_t *writes,
+    kvspaceKeyOff **write_offs, kvlangCodeRow_t *row, kvlangRowBind_t *bind) {
+    for (int i = 0; i < row->nr; i++) {
+        kvlangParam_t *p = &reads[i];
+        kvlangBoundCell_t *c = &bind->cell[i];
+        p->name = c->key;
+        p->type = c->type;
+        p->is_address = !c->literal;
+        kvlangXvalueZero(&p->value);
+    }
+    for (int j = 0; j < row->nw; j++) {
+        kvlangParam_t *p = &writes[j];
+        kvlangBoundCell_t *c = &bind->cell[row->nr + j];
+        p->name = c->key;
+        p->type = c->type;
+        p->is_address = true;
+        kvlangXvalueZero(&p->value);
+        write_offs[j] = &c->off;
+    }
+    inst->opcode = row->opcode;
+    inst->opcode_id = row->opcode_id;
+    inst->read_count = row->nr;
+    inst->write_count = row->nw;
+    inst->write_offs = row->nw ? write_offs : NULL;
+}
+
 /* 统一错误出口：置 vthread error 并返回 -1。 */
 static int execute_error(kvspace_t *kv, const char *vtid, const char *pc,
                          const char *fmt, ...) {
@@ -144,6 +173,30 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
     bool cursor_ok = false;
     kvlangExecCursor cursor = {0, true};
 
+    /* P0-2：row/bind/inst/frame 模板跨步保留。参数数组只在本行首次（或换行）
+     * 填静态字段 name/type/is_address，每步只刷新 value。 */
+    kvlangCodeRow_t *row = NULL;
+    kvlangRowBind_t *bind = NULL;
+    kvlangCodeRow_t *tpl_row = NULL;
+    kvlangRowBind_t *tpl_bind = NULL;
+    kvlangRwirInst_t inst;
+    memset(&inst, 0, sizeof inst);
+    inst.reads = reads;
+    inst.writes = writes;
+    inst.write_offs = write_offs;
+    kvlangFrame_t f;
+    memset(&f, 0, sizeof f);
+    f.kvspace = kv;
+    f.vthread_id = vtid;
+    f.instruction = &inst;
+    f.addr_epoch = &addr_epoch;
+    f.pc_out_cap = sizeof fb_b[0];
+    f.pc_off = &pc_off;
+    f.status_off = &status_off;
+    f.mode = (int)mode;
+    f.out_pc = out_pc;
+    f.cursor = &cursor;
+
     const kvlangRwirCap *caps = kvlangRwirCaps();
     int rc = 0;
     for (;;) {
@@ -191,6 +244,9 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
                     kvlangFrameCtxFree(fctx[depth]);
                     fctx[depth] = NULL;
                 }
+                /* 模板里的 name/type/off 借用自 ctx 的 bind：ctx 释放即作废。 */
+                tpl_bind = NULL;
+                tpl_row = NULL;
                 if (!fctx[depth]) {
                     char *func_dir = frame_func_dir(kv, cur_frame);
                     if (!func_dir) {
@@ -213,12 +269,24 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
         }
         depth = cursor_depth;
         irseq = cursor.irseq;
-        kvlangFrameCtxSync(fctx[depth], addr_epoch);
+        kvlangFrameCtx_t *ctx = fctx[depth];
+        /* P0-2：epoch 比较内联，只有世代变化时才做整帧失效。 */
+        if (ctx->epoch != addr_epoch)
+            kvlangFrameCtxSync(ctx, addr_epoch);
 
         char err[256];
-        kvlangCodeRow_t *row = NULL;
-        kvlangRowBind_t *bind =
-            kvlangFrameRow(kv, fctx[depth], irseq, &row, err, sizeof err);
+        err[0] = 0;
+        /* P0-2：目标行已加载/已绑定 → 直接复用 row/bind，不再走
+         * kvlangFrameRow（省一次函数调用与双重边界检查）。 */
+        if ((size_t)irseq < ctx->code->rows_cap &&
+            (size_t)irseq < ctx->binds_cap &&
+            (row = ctx->code->rows[irseq]) != NULL &&
+            ctx->binds[irseq].bound) {
+            bind = &ctx->binds[irseq];
+        } else {
+            row = NULL;
+            bind = kvlangFrameRow(kv, ctx, irseq, &row, err, sizeof err);
+        }
         if (!bind || !row->opcode || !row->opcode[0]) {
             /* layout 对每条路径都补了 return；走到空槽只能是 /lib 损坏或 goto/br 越界。 */
             if (err[0])
@@ -236,39 +304,35 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
             kvCGen++;
 #endif
         int exec_err = 0;
-        for (int i = 0; i < row->nr; i++)
-            reads[i] = (kvlangParam_t){0};
-        for (int j = 0; j < row->nw; j++)
-            writes[j] = (kvlangParam_t){0};
+        if (bind != tpl_bind || row != tpl_row) {
+            row_template(&inst, reads, writes, write_offs, row, bind);
+            tpl_bind = bind;
+            tpl_row = row;
+        }
         for (int i = 0; i < row->nr; i++) {
-            reads[i].name = bind->cell[i].key;
-            reads[i].type = bind->cell[i].type;
-            if (bind->cell[i].literal) {
+            kvlangBoundCell_t *c = &bind->cell[i];
+            if (c->literal) {
                 /* 字面量：值只在行内，无槽、无地址——name 为 NULL、
                  * is_address 保持 false，handler 按值参数处理。 */
-                reads[i].value = *bind->cell[i].literal;
+                reads[i].value = *c->literal;
                 continue;
             }
-            reads[i].is_address = true;
-            int lr = operand_load(kv, &bind->cell[i], &reads[i].value);
+            int lr = operand_load(kv, c, &reads[i].value);
             if (lr != 0) {
                 exec_err =
                     lr == -2
                         ? execute_error(kv, vtid, cur,
                                         "TypeError: cannot read %s as %s",
                                         kvlangXvalueKind(&reads[i].value),
-                                        bind->cell[i].type)
+                                        c->type)
                         : execute_error(kv, vtid, cur,
                                         "RuntimeError: cannot read operand %d", i);
                 break;
             }
-            if (bind->cell[i].pin) /* 写槽会覆盖此 key：显式 copy 读视图 */
+            if (c->pin) /* 写槽会覆盖此 key：显式 copy 读视图 */
                 kvlangXvalueCopy(&reads[i].value);
         }
         for (int j = 0; exec_err == 0 && j < row->nw; j++) {
-            writes[j].name = bind->cell[row->nr + j].key;
-            writes[j].type = bind->cell[row->nr + j].type;
-            writes[j].is_address = true;
             if (row->load_write_value) {
                 int lr = operand_load(kv, &bind->cell[row->nr + j],
                                       &writes[j].value);
@@ -285,6 +349,8 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
                                   "RuntimeError: cannot read write slot %d", j);
                     break;
                 }
+            } else {
+                kvlangXvalueZero(&writes[j].value); /* 不继承上一行的残留值 */
             }
         }
         if (exec_err != 0) {
@@ -293,28 +359,19 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
             break;
         }
 
-        for (int j = 0; j < row->nw; j++)
-            write_offs[j] = &bind->cell[row->nr + j].off;
-        kvlangRwirInst_t inst = {row->opcode, row->opcode_id, reads,
-                                 row->nr,     writes,         row->nw,
-                                 row->nw ? write_offs : NULL};
         KV_LOG_DEBUG("[%s] PC=%s OP=%s R=%d W=%d", vtid, cur,
                        inst.opcode ? inst.opcode : "(empty)", inst.read_count,
                        inst.write_count);
 
         char *yield = NULL;
-        kvlangFrame_t f = {kv, vtid, cur, &inst, &yield};
+        f.pc = cur;
         f.frame_root = cur_frame;
-        f.addr_epoch = &addr_epoch;
         f.pc_out = fb_b[fb_i ^ 1];
-        f.pc_out_cap = sizeof fb_b[0];
         f.status_known = status; /* 本步开始前读到的 ‥status（源值，借用） */
-        f.pc_off = &pc_off;
-        f.status_off = &status_off;
         f.row = row;
-        f.mode = (int)mode;
-        f.out_pc = out_pc;
-        f.cursor = &cursor;
+        f.yield_pc = &yield;
+        f.persist_failed = false;
+        f.pc_feedback = false;
         /* 默认 dirty；只有 kvlangBuiltinNextPc 的顺序推进清位。 */
         cursor.dirty = true;
         /* 一次表调用：native 与 route（委托/def rwir/user call）共用同一出口。 */
