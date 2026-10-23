@@ -28,9 +28,25 @@ core=$(KVSPACE="$CTL" kvspace get '/‥isa/‥core' | tr -d '\0') \
 meta=$(KVSPACE="$CTL" kvspace get '/‥isa/‥meta' | tr -d '\0') || fail "no meta"
 hash=$(printf '%s' "$meta" | sed -n 's/.*hash\t\([0-9a-f]\{32\}\).*/\1/p')
 [ -n "$hash" ] || fail "meta hash"
-printf '%s' "$core" | grep -q "^count	26$" || fail "core count != 26"
+printf '%s' "$core" | grep -q "^count	300$" || fail "core count != 300"
 printf '%s' "$core" | grep -q "^int64·add	2	1	0	int64	int64	int64	0	32	8	pure	-1	core	runtime-c$" \
     || fail "int64·add manifest record"
+printf '%s' "$core" | grep -q "^int64·eq	2	1	0	int64	int64	bool	0	32	1	pure	-1	core	runtime-c$" \
+    || fail "int64·eq manifest record"
+printf '%s' "$core" | grep -q "^int64	1	1	0	any	int64	0	32	8	pure	-1	core	runtime-c$" \
+    || fail "cast int64 manifest record"
+printf '%s' "$core" | grep -q "^char/utf8	1	1	0	any	char/utf8	1	64	-1	pure	-1	core	runtime-c$" \
+    || fail "cast char/utf8 manifest record"
+printf '%s' "$core" | grep -qE "^array	1	1	1	any\.\.\.	any	-1	-1	-1	pure	-1	ext	runtime-c$" \
+    || fail "array manifest record (dynamic ext)"
+printf '%s' "$core" | grep -q "^string·len	1	1	0	any	any	-1	-1	-1	pure	-1	ext	runtime-c$" \
+    || fail "string·len manifest record (ext)"
+printf '%s' "$core" | grep -q "^kvspace·set	3	1	0	any	any	any	any	-1	-1	-1	write	-1	core	runtime-c$" \
+    || fail "kvspace·set manifest record"
+printf '%s' "$core" | grep -q "^vthread·run	1	0	0	any	-1	-1	-1	control,write	-1	core	runtime-c$" \
+    || fail "vthread·run manifest record"
+printf '%s' "$core" | grep -q "^debugger	0	0	0	-1	-1	-1	debug	-1	core	runtime-c$" \
+    || fail "debugger manifest record"
 
 # 2) 双 store 隔离：数据 store 不写任何 /lib/isa key
 [ "$(kvspace list /lib/ 2>/dev/null | grep -c '^isa')" = "0" ] \
@@ -72,7 +88,7 @@ vid=$("$TERM" create test 2>/dev/null | head -1)
 [ -n "$vid" ] || fail "create vid"
 KVSPACE="$DSN.2.isa" kvspace set '/‥isa/func/lib/test' "string:ver	1
 hash	ffffffffffffffffffffffffffffffff
-count	26
+count	300
 " >/dev/null || fail "tamper ref"
 runout=$("$TERM" run "$vid" 2>&1)
 runrc=$?

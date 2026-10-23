@@ -126,148 +126,214 @@ static void sha256_hex16(const char *data, size_t n, char out[33]) {
     out[32] = 0;
 }
 
-/* P1a 最小 core：控制/拷贝 + int64 特化族（共 26 条）。签名按 op 类别给出；
- * 发布迭代源是 myrwircaps（不另列 opcode 清单），此处只补签名。 */
-static bool isa_published(const char *op) {
-    if (!op || !op[0])
-        return false;
-    if (strcmp(op, OP_CALL) == 0 || strcmp(op, OP_RETURN) == 0 ||
-        strcmp(op, OP_GOTO) == 0 || strcmp(op, OP_BR) == 0 ||
-        strcmp(op, OP_COPY) == 0)
-        return true;
-    return strncmp(op, KVSPACE_KIND_INT64 MEMBER_SEP, 6) == 0;
-}
-
-/* 返回 rp/wp 类型串；nr/nw 由 op 类别决定。 */
-static bool isa_sig(const char *op, int *nr, int *nw, const char **rp,
-                    const char **wp) {
-    static const char *ANY = "any";
-    *nr = 2;
-    *nw = 1;
-    *rp = KVSPACE_KIND_INT64;
-    *wp = KVSPACE_KIND_INT64;
-    if (strcmp(op, OP_CALL) == 0) { /* 目标 + 变参；P1a 记为动态 */
-        *nr = 1;
-        *nw = 0;
-        *rp = ANY;
-        *wp = ANY;
-        return true;
-    }
-    if (strcmp(op, OP_RETURN) == 0 || strcmp(op, OP_GOTO) == 0) {
-        *nr = 1;
-        *nw = 0;
-        *rp = ANY;
-        *wp = ANY;
-        return true;
-    }
-    if (strcmp(op, OP_BR) == 0) {
-        *nr = 3;
-        *nw = 0;
-        *rp = ANY;
-        *wp = ANY;
-        return true;
-    }
-    if (strcmp(op, OP_COPY) == 0) {
-        *nr = 1;
-        *nw = 1;
-        *rp = ANY;
-        *wp = ANY;
-        return true;
-    }
-    const char *dot = strstr(op, MEMBER_SEP);
-    if (!dot)
-        return false;
-    dot += MEMBER_SEP_LEN;
-    if (strcmp(dot, "neg") == 0 || strcmp(dot, "abs") == 0 ||
-        strcmp(dot, "sign") == 0) {
-        *nr = 1;
-        *nw = 1;
-        return true;
-    }
-    if (strcmp(dot, "eq") == 0 || strcmp(dot, "neq") == 0 ||
-        strcmp(dot, "lt") == 0 || strcmp(dot, "le") == 0 ||
-        strcmp(dot, "gt") == 0 || strcmp(dot, "ge") == 0) {
-        *wp = KVSPACE_KIND_BOOL;
-        return true;
-    }
-    return true; /* add/sub/... 默认 2→1 */
-}
+/* P1b1：全量 manifest（core 237 + ext 63 = 300）。签名列 isa_sig 与 myrwircaps
+ * 同序，发布期做形状校验；不另列 opcode 清单。 */
 
 static char g_isa_hash[33];
-__attribute__((visibility("hidden"))) const char *kvlangIsaCoreHash(void) {
-    return g_isa_hash;
+
+static bool numeric_family(const char *s, size_t n) {
+    static const char *const kinds[] = {"int8", "int16", "int32", "int64",
+                                        "uint8", "uint16", "uint32", "uint64",
+                                        "float32", "float64"};
+    for (size_t i = 0; i < sizeof kinds / sizeof kinds[0]; i++)
+        if (strlen(kinds[i]) == n && strncmp(s, kinds[i], n) == 0)
+            return true;
+    return false;
 }
 
-/* 构造最小 core manifest body（返回 malloc 字符串）。 */
+static int kind_width(const char *k) {
+    if (strcmp(k, "bool") == 0 || strcmp(k, "int8") == 0 ||
+        strcmp(k, "uint8") == 0)
+        return 1;
+    if (strcmp(k, "int16") == 0 || strcmp(k, "uint16") == 0)
+        return 2;
+    if (strcmp(k, "int32") == 0 || strcmp(k, "uint32") == 0 ||
+        strcmp(k, "float32") == 0)
+        return 4;
+    if (strcmp(k, "int64") == 0 || strcmp(k, "uint64") == 0 ||
+        strcmp(k, "float64") == 0)
+        return 8;
+    return -1;
+}
+
+static bool cast_kind(const char *k) {
+    static const char *const kinds[] = {
+        "bool",  "int8",   "int16",  "int32", "int64",  "uint8",
+        "uint16", "uint32", "uint64", "float32", "float64",
+        "char/utf32", "char/utf8", "char/ascii"};
+    for (size_t i = 0; i < sizeof kinds / sizeof kinds[0]; i++)
+        if (strcmp(k, kinds[i]) == 0)
+            return true;
+    return false;
+}
+
+/* effects 串按字母序输出（spec 1.3）。 */
+static void effects_str(uint8_t mask, char *out, size_t cap) {
+    static const struct {
+        uint8_t bit;
+        const char *name;
+    } tab[] = {{KV_EFF_CONTROL, "control"}, {KV_EFF_DEBUG, "debug"},
+               {KV_EFF_IO, "io"},           {KV_EFF_PURE, "pure"},
+               {KV_EFF_READ, "read"},       {KV_EFF_WRITE, "write"}};
+    size_t p = 0;
+    out[0] = 0;
+    for (size_t i = 0; i < sizeof tab / sizeof tab[0]; i++) {
+        if (!(mask & tab[i].bit))
+            continue;
+        int k = snprintf(out + p, cap - p, "%s%s", p ? "," : "", tab[i].name);
+        if (k < 0 || (size_t)k >= cap - p)
+            return;
+        p += (size_t)k;
+    }
+}
+
+#define ISA_ANY "any"
+
+/* 构造全量 core manifest body（返回 malloc 字符串）。形状不符 -> NULL（p0）。 */
 static char *isa_build_core(uint32_t *count_out) {
     const kvlangRwirCap *caps = kvlangRwirCaps();
     int route = kvlangRwirRouteId();
-    char **rec = calloc((size_t)(route > 0 ? route : 1), sizeof *rec);
-    uint32_t n = 0;
+    uint32_t nsig = 0;
+    const kvlangIsaSig *sigs = kvlangIsaSigs(&nsig);
+    if (!caps || route <= 0 || (uint32_t)route != nsig)
+        return NULL;
+    char **rec = calloc((size_t)route, sizeof *rec);
     if (!rec)
         return NULL;
-    for (int i = 0; i < route; i++) {
+    uint32_t n = 0;
+    bool ok = true;
+    for (int i = 0; i < route && ok; i++) {
         const char *op = caps[i].opcode;
-        if (!isa_published(op))
-            continue;
-        int nr = 0, nw = 0;
-        const char *rp = NULL, *wp = NULL;
-        if (!isa_sig(op, &nr, &nw, &rp, &wp))
-            continue;
+        const kvlangIsaSig *g = &sigs[i];
+        if (!op || !op[0] || g->nr > MAX_PARAMS || g->nw > MAX_PARAMS) {
+            ok = false;
+            break;
+        }
+        int nr = g->nr, nw = g->nw;
+        char fam[32];
+        const char *rp[8] = {0}, *wp[4] = {0};
         int st = -1, hl = -1, w = -1;
-        if (caps[i].result_kind && caps[i].result_width > 0) {
+        switch (g->sig) {
+        case KV_ISA_BIN:
+        case KV_ISA_CMP:
+        case KV_ISA_UN: {
+            const char *dot = strstr(op, MEMBER_SEP);
+            if (!dot || (size_t)(dot - op) >= sizeof fam) {
+                ok = false;
+                break;
+            }
+            size_t flen = (size_t)(dot - op);
+            memcpy(fam, op, flen);
+            fam[flen] = 0;
+            const char *want = g->sig == KV_ISA_CMP ? KVSPACE_KIND_BOOL : fam;
+            if (!numeric_family(fam, flen) || !caps[i].result_kind ||
+                strcmp(caps[i].result_kind, want) != 0) {
+                ok = false;
+                break;
+            }
+            int arity = g->sig == KV_ISA_UN ? 1 : 2;
+            if (nr != arity || nw != 1) {
+                ok = false;
+                break;
+            }
+            for (int j = 0; j < nr; j++)
+                rp[j] = fam;
+            wp[0] = g->sig == KV_ISA_CMP ? KVSPACE_KIND_BOOL : fam;
             st = 0;
             hl = 32;
             w = (int)caps[i].result_width;
-        }
-        const char *eff = strcmp(op, OP_COPY) == 0 ? "pure" : "pure";
-        if (strcmp(op, OP_CALL) == 0 || strcmp(op, OP_RETURN) == 0 ||
-            strcmp(op, OP_GOTO) == 0 || strcmp(op, OP_BR) == 0)
-            eff = "control";
-        size_t cap = (size_t)(11 + nr + nw) * 32 + 128;
-        char *line = malloc(cap);
-        if (!line)
             break;
-        int p = snprintf(line, cap, "%s\t%d\t%d\t0", op, nr, nw);
+        }
+        case KV_ISA_CAST:
+            if (!cast_kind(op) || nr != 1 || nw != 1) {
+                ok = false;
+                break;
+            }
+            rp[0] = ISA_ANY;
+            wp[0] = op;
+            if (strncmp(op, "char/", 5) == 0) {
+                st = 1;
+                hl = 64;
+            } else {
+                st = 0;
+                hl = 32;
+                w = kind_width(op);
+            }
+            break;
+        case KV_ISA_ANY:
+            for (int j = 0; j < nr; j++)
+                rp[j] = ISA_ANY;
+            for (int j = 0; j < nw; j++)
+                wp[j] = ISA_ANY;
+            if (g->dynamic && nr > 0)
+                rp[nr - 1] = ISA_ANY "...";
+            if (strcmp(op, "kvlang" MEMBER_SEP "abs") == 0) {
+                st = 1;
+                hl = 64;
+            }
+            break;
+        default:
+            ok = false;
+            break;
+        }
+        if (!ok)
+            break;
+        char eff[32];
+        effects_str(g->effects, eff, sizeof eff);
+        size_t cap = (size_t)(11 + nr + nw) * 40 + strlen(op) + 160;
+        char *line = malloc(cap);
+        if (!line) {
+            ok = false;
+            break;
+        }
+        int p = snprintf(line, cap, "%s\t%d\t%d\t%d", op, nr, nw,
+                         g->dynamic ? 1 : 0);
         for (int j = 0; j < nr; j++)
-            p += snprintf(line + p, cap - (size_t)p, "\t%s", rp);
+            p += snprintf(line + p, cap - (size_t)p, "\t%s", rp[j]);
         for (int j = 0; j < nw; j++)
-            p += snprintf(line + p, cap - (size_t)p, "\t%s", wp);
-        snprintf(line + p, cap - (size_t)p, "\t%d\t%d\t%d\t%s\t-1\tcore\truntime-c",
-                 st, hl, w, eff);
+            p += snprintf(line + p, cap - (size_t)p, "\t%s", wp[j]);
+        snprintf(line + p, cap - (size_t)p,
+                 "\t%d\t%d\t%d\t%s\t-1\t%s\truntime-c", st, hl, w, eff,
+                 g->cls == KV_ISA_EXT ? "ext" : "core");
         rec[n++] = line;
+    }
+    if (!ok) {
+        for (uint32_t i = 0; i < n; i++)
+            free(rec[i]);
+        free(rec);
+        return NULL;
     }
     qsort(rec, n, sizeof *rec, (int (*)(const void *, const void *))strcmp_ptr);
     size_t total = 128;
     for (uint32_t i = 0; i < n; i++)
         total += strlen(rec[i]) + 1;
     char *body = malloc(total);
-    size_t p = 0;
     if (body) {
-        p += (size_t)snprintf(body + p, total - p, "ver\t1\ncount\t%u\nhash\t", n);
-        /* hash = SHA-256(记录区)[:16]；先拼记录区再回填 header。 */
+        size_t p = (size_t)snprintf(body, total, "ver\t1\ncount\t%u\nhash\t",
+                                    n);
         char *records = malloc(total);
-        size_t rp_len = 0;
-        if (records) {
-            for (uint32_t i = 0; i < n; i++)
-                rp_len += (size_t)snprintf(records + rp_len, total - rp_len, "%s\n",
-                                           rec[i]);
-            char h[33];
-            sha256_hex16(records, rp_len, h);
-            p += (size_t)snprintf(body + p, total - p, "%s\n", h);
-            if (p + rp_len < total)
-                memcpy(body + p, records, rp_len);
-            p += rp_len;
-            snprintf(g_isa_hash, sizeof g_isa_hash, "%s", h);
-            free(records);
-        } else {
+        if (!records) {
             free(body);
             body = NULL;
+        } else {
+            size_t rl = 0;
+            for (uint32_t i = 0; i < n; i++)
+                rl += (size_t)snprintf(records + rl, total - rl, "%s\n", rec[i]);
+            char h[33];
+            sha256_hex16(records, rl, h);
+            p += (size_t)snprintf(body + p, total - p, "%s\n", h);
+            if (p + rl < total)
+                memcpy(body + p, records, rl);
+            p += rl;
+            snprintf(g_isa_hash, sizeof g_isa_hash, "%s", h);
+            free(records);
         }
     }
     for (uint32_t i = 0; i < n; i++)
         free(rec[i]);
     free(rec);
+    if (!body)
+        return NULL;
     *count_out = n;
     return body;
 }
