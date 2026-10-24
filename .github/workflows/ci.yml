@@ -36,6 +36,7 @@ jobs:
         run: ./ci/deps.sh
       - name: 构建 layout + runtime-rs（提供 bin/kvlang、kvlanglayout）
         run: |
+          mkdir -p bin
           make layout
           make runtime-rs
       - name: 构建 KV_DEBUG_TYPES runtime
