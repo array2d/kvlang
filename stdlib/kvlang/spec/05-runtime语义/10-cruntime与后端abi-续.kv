@@ -45,5 +45,21 @@ durable 后端（fs/redis）采用**惰性 flush**，只在**同一 kvspace 句�
 取 XValue 指针 → `DecodeHead` 定位 body → 在该地址原位建 ndarray，读写 ndarray 即读写 kvspace，无拷贝；
 写走 `kvspaceXvalueEncode` + `WriteInPlace`/`WriteNewPlace`。锚例：`tutorial/14-numpy/`（shm 全流程）、
 `tutorial/14-networld/`（fs/proc）。
+## slot view 的使用（runtime-c, normative）
+
+- **绑定期取 view**：`kvspaceSlotView` 在绑定/首次使用槽时调用；`-2` 表示后端不支持，
+  每个句柄只判定一次并永久回退既有读写 API，热路径不得重复探测或重试。
+- **status 每步直读**：有 view 时每步比较 head 的内容长度与**全部 body 字节**，再进
+  `init/running/wait` 白名单判定；不得只比较首字节或按固定长度截断。fs/redis 走
+  fallback，全量 tutorial 必须与 master 行为一致。
+- **owned 仅 PC**：PC owned view 按 `view->body_cap` 编码整个 XValue，旧 head 的
+  storetype/headlen/langtype 原样拷贝、只更新内容长度；总长超过 `cap` 或后端拒绝即
+  永久回退 `SetPartByRef`。局部操作数不进入 owned（继续 `WriteBody`）。
+- **operand 只读 view**：仅用于 typed_core 行的**本 vthread 独占 frame 槽**；每次读
+  按静态 kind 校验。外部改变长度/kind 导致 box 移动**不可检测**（无世代号，读旧 head
+  即 UAF）；外部写必须同 key/同类型/同尺寸，否则属契约外（debug 构建断言）。runtime
+  只在本进程自身写该 key 后按 `kvlangBodyInvalidate*` 重取。
+- 每步不得为判定 typed/owned 而查 manifest 或 `strcmp`；定性全部在行装载/绑定期完成。
+
 	"#### -> /lib/kvlang/spec/runtime语义/cruntime与后端abi_续
 }

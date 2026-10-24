@@ -19,11 +19,54 @@ close（没有指令边界回收调用）。写返回 body 偏移指针供调用
 `kvspaceGet`/`kvspaceGetPart` 都重读后端；实现用双缓冲，上一视图保活到该 key 下一次读。
 因此外部暂停/恢复/终止（改该键）对运行中的 kvcpu 立即可见。除此之外的 key 都是 snapshot；
 新增外部可改写键必须在此登记为 volatile。
+
+**status 固定档（normative）**：`/vthread/*/‥status` 的**形状固定**——storetype 为
+SLACK、headlen 由规范编码器固定（`[<digits>]char/utf8`，当前为 64）、合法内容长度上限
+LV=16。shm 后端创建该键时按**物理容量下限 80 字节**分配（不是 64+16 的常量假设；实际
+`headlen`/`body_cap` 以 slot view 返回为准）。之后任何写入（runtime
+`setstatus`/`SetDone`/`SetError` 或外部 `kvspace set`）都必须原地完成；内容长度 > LV、
+storetype/langtype/headlen 与规范形状不符、现存槽 headlen 不同、或现存槽自身
+不满足规范形状（SLACK/64/`[n]char/utf8`/content ≤16），必须**硬错返回**，
+不得 realloc、不得截断、不得更换 box。**旧 store 中 headlen 不符或物理容量 <80 的
+status 槽不自动升级**：写入硬错，slot view 返回 `-1`，需重建/重置该 store。合规槽的
+view 指针在 handle 生命期内稳定；`kvspaceWatch` 仍按后端值轮询，status 变更仍可见。
+
+**slot view（shm-only, normative）**：`kvspaceSlotView(handle, ref, key_fallback, view)`
+把已绑定槽在映射内的地址一次性交给调用方，供每步直接读/写。非 shm 后端返回 `-2`
+（不支持），调用方必须回退既有读写 API，且**每个句柄只判定一次**，不得在热路径重试。
+
+```c
+typedef struct {
+    uint8_t *head;       /* XValue head 起点 */
+    uint32_t headlen;    /* head 字节数；body = head + headlen */
+    uint8_t *body;
+    uint64_t body_cap;   /* = cap - headlen */
+    uint64_t cap;        /* 整 box 物理容量（sbo_allocated_size），非常量假设 */
+} kvspaceSlotView_t;
+int kvspaceSlotView(void *h, const kvspaceRef_t *ref,
+                    const char *key_fallback, kvspaceSlotView_t *out);
+/* 0=成功；-1=不存在/ref 失效/不可视槽；-2=后端不支持。 */
+```
+
+**`key_fallback` 必填（normative）**：status 的识别与形状/容量校验依赖它；
+传 NULL 一律返回 `-1`，不得绕过 status 规则。`status` 形状不符、`content_len >16`、
+物理容量 `cap <80` 或旧 store 不合规时同样返回 `-1`（runtime 回退既有 API）。
+指针为借用：寿命到该 key 被写/删、view 失效或 handle close。两种使用模式：
+
+- **只读 view**：只读 head/body，不写；用于 status 与 operand 的每步读。
+- **owned view（P1 仅 PC）**：key 由本 vthread 独占写，storetype/headlen/langtype
+  固定。允许一次 memcpy 原地替换整个 XValue，但必须按 `view->body_cap` 编码（不得按
+  新值长度收紧）；storetype/headlen/langtype 必须**从旧 head 原样拷贝字节**，只更新
+  内容长度与 valuelen。总长超过 `cap` 或后端拒绝时回退 `SetPartByRef`（一次性）。
+  owned 键不提供 `kvspaceWatch` 通知保证；P1 的局部操作数不进入 owned，继续走
+  `WriteBody`（FIXED_SMALL body 直写）。
+
 核心符号：
 
 | 符号 | 语义 |
 |------|------|
 | `kvspaceGet` | 借用读：`*out` 指向后端常驻空间；`resolve=1` 穿透 link；不存在/空值 → `*out=NULL`、返回 0 |
+| `kvspaceSlotView` | shm-only slot view：返回映射内 `head/body/cap/body_cap`；只读或 owned 直写；不支持后端返回 `-2` |
 | `kvspaceWriteInPlace` | 就地写：key 已存在、kind 不变、body 长度不变；返回原 box body 偏移指针，违反前置条件即报错，绝不静默重分配 |
 | `kvspaceWriteNewPlace` | 新位置写：按 `(ref, storetype, langtype, body_len, body_cap)` 分配新 box、写好 head，返回 body 偏移指针；用于新建或 kind/尺寸变化。`body_cap` 是 v0.3.0 起的容量下界（预留冗余，减少后续扩容） |
 | `kvspaceSetValue` | 整值写：给定完整 xvalue 字节，由后端编码 head 并写入。runtime 侧的写出口走它，而非上面的偏移指针原语 |
@@ -88,6 +131,7 @@ dispatch 静态导出；后端 `kvspace-c` / `kvspace-durable` 各导出同一�
     kvspaceNewPtr
     kvspaceRmindexExt
     kvspaceSetPart
+    kvspaceSlotView
     kvspaceXvalueEncode
     kvspaceXvalueEncodeMode
     kvspaceWatch
