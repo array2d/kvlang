@@ -25,6 +25,7 @@ __attribute__((noinline)) static void row_template(
     }
     inst->opcode = row->opcode;
     inst->opcode_id = row->opcode_id;
+    inst->typed_core = row->typed_core;
     inst->read_count = row->nr;
     inst->write_count = row->nw;
     inst->write_offs = row->nw ? write_offs : NULL;

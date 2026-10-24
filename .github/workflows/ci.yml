@@ -25,3 +25,33 @@ jobs:
       - name: 测试 (${{ matrix.backend.name }})
         env: { KVSPACE: "${{ matrix.backend.dsn }}", KV_CASE_TIMEOUT: "600" }
         run: python3 tutorial/test.py
+
+  typed-debug:
+    runs-on: ubuntu-latest
+    name: typed-debug
+    steps:
+      - uses: actions/checkout@v4
+      - name: 下载 ABI 依赖
+        env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+        run: ./ci/deps.sh
+      - name: 构建 layout + runtime-rs（提供 bin/kvlang、kvlanglayout）
+        run: |
+          make layout
+          make runtime-rs
+      - name: 构建 KV_DEBUG_TYPES runtime
+        run: |
+          cmake -S runtime -B build/runtime-debug -DCMAKE_BUILD_TYPE=Release \
+            -DKVLANG_DEBUG_TYPES=ON
+          cmake --build build/runtime-debug --target kvlang_runtime -j
+      - name: typed violation（必须真跑，不能 SKIP）
+        run: |
+          test -f "$PWD/bin/libkvlang_runtime.so"
+          KVLANG_DEBUG_RUNTIME_LIB="$PWD/bin/libkvlang_runtime.so" \
+          KVLANG_LAYOUT_BIN="$PWD/bin/kvlanglayout" \
+          KVLANG_TERM_BIN="$PWD/bin/kvlang" \
+          bash runtime/tests/isa_typed_violation.sh
+      - name: 156 entry conformance
+        run: |
+          KVLANG_LAYOUT_BIN="$PWD/bin/kvlanglayout" \
+          KVLANG_TERM_BIN="$PWD/bin/kvlang" \
+          python3 runtime/tests/isa_conformance.py

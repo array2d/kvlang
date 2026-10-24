@@ -724,6 +724,39 @@ pub fn isa_target(
     Err(format!("ISA: unknown opcode {op}"))
 }
 
+/// 临时槽：lower 生成 `_N` / `_prefix_N`；未来 `‥tmp[n]`。
+fn is_temp_slot(n: &str) -> bool {
+    n.starts_with('_') || n.starts_with("‥tmp")
+}
+
+/// P1b3：typed 写不得复用临时槽。临时槽若被 >=2 条指令写，且其中任一写是
+/// core 具体 opcode（typed 写 = 本条 opcode 定义槽类型），必须已有 exact 声明；
+/// 否则混型风险。纯 generic/copy 多写（如 for 索引 init+increment）允许。
+pub fn check_temp_write_kinds(
+    writes: &[(String, bool)],
+    exact: impl Fn(&str) -> bool,
+) -> Result<(), String> {
+    let mut seen: HashMap<&str, (usize, usize)> = HashMap::new();
+    for (w, typed) in writes {
+        if !is_temp_slot(w) {
+            continue;
+        }
+        let e = seen.entry(w.as_str()).or_default();
+        e.0 += 1;
+        if *typed {
+            e.1 += 1;
+        }
+    }
+    for (n, (count, typed)) in seen {
+        if count >= 2 && typed > 0 && !exact(n) {
+            return Err(format!(
+                "ISA: temporary slot {n} is written by a typed opcode and reused; needs exact declaration"
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// 通用 `sub` 只能是 2r→1w；一元取负必须走 `neg/abs`（P1b2 契约）。
 pub fn check_sub_arity(op: &str, reads: usize, writes: usize) -> Result<(), String> {
     if op == "sub" && (reads != 2 || writes != 1) {
@@ -747,6 +780,8 @@ pub fn write_func(
     let type_map = lower::infer_types(fn_);
     let declared = lower::declared_types(fn_);
     let mut diags = lower::validate_writes(fn_, pkg, &type_map, structs, sigs);
+    // P1b3 证明闸门/临时槽检查：与 specialize 用同一份（特化前）declared+stable。
+    let stable = lower::stable_kinds(fn_, &type_map, &declared);
     diags.extend(lower::specialize(fn_, &type_map, &declared));
     for d in &diags {
         eprintln!("{}", d.string());
@@ -769,6 +804,29 @@ pub fn write_func(
     let mut seq: Vec<Instruction> = Vec::new();
     let mut labels: HashMap<String, i32> = HashMap::new();
     collect_insts(&fn_.body, &mut seq, &mut labels);
+    {
+        let mut writes: Vec<(String, bool)> = Vec::new();
+        for inst in &seq {
+            let (op, _) = inst.flat();
+            let typed = isa
+                .entries
+                .get(&op)
+                .map(|e| {
+                    (e.nr > 0 || e.nw > 0)
+                        && e.rp
+                            .iter()
+                            .chain(e.wp.iter())
+                            .all(|t| t != "any" && !t.ends_with("..."))
+                })
+                .unwrap_or(false);
+            for w in &inst.writes {
+                writes.push((w.clone(), typed));
+            }
+        }
+        check_temp_write_kinds(&writes, |n| {
+            lower::exact_name_kind(n, &declared, &stable).is_some()
+        })?;
+    }
 
     let mut param_coord: HashMap<String, String> = HashMap::new();
     for (i, p) in fn_.sig.params.iter().enumerate() {
@@ -833,65 +891,69 @@ pub fn write_func(
     }
     let ext_bridge = isa.ext_bridge(kv, &emitted);
 
-    // P1b2：四路归类 + 核心项 arity/类型一致性校验（hard fail）。
-    // 注意：P1b2 不把 manifest 类型写进槽（typed slot 写入属 P1b3，与 runtime
-    // 零检查一起落，避免先引入 layout-output 地址漂移）。
+    // P1b2/P1b3：四路归类 + typed core 的 exact-kind 证明闸门（hard fail）。
+    // typed core = manifest core 且 rp/wp 全具体、且有操作数（156 项）；
+    // 不把类型写进槽（typed 性是 row/opcode 属性），只用同一套 exact kind 证明。
     for inst in &seq {
         let (op, reads) = inst.flat();
-        if !op.is_empty() {
-            let target = isa_target(kv, isa, &op, pkg, local_funcs)?;
-            check_sub_arity(&op, reads.len(), inst.writes.len())?;
-            if target == IsaTarget::Core {
-                let e = isa
-                    .entries
-                    .get(&op)
-                    .ok_or_else(|| format!("ISA: missing manifest entry {op}"))?;
-                let typed =
-                    e.rp.iter()
-                        .chain(e.wp.iter())
-                        .any(|t| t != "any" && !t.ends_with("..."));
-                if typed && (reads.len() != e.nr as usize || inst.writes.len() != e.nw as usize) {
+        if op.is_empty() {
+            continue;
+        }
+        let target = isa_target(kv, isa, &op, pkg, local_funcs)?;
+        check_sub_arity(&op, reads.len(), inst.writes.len())?;
+        if target != IsaTarget::Core {
+            continue;
+        }
+        let e = isa
+            .entries
+            .get(&op)
+            .ok_or_else(|| format!("ISA: missing manifest entry {op}"))?;
+        let typed = (e.nr > 0 || e.nw > 0)
+            && e.rp
+                .iter()
+                .chain(e.wp.iter())
+                .all(|t| t != "any" && !t.ends_with("..."));
+        if !typed {
+            continue;
+        }
+        if reads.len() != e.nr as usize || inst.writes.len() != e.nw as usize {
+            return Err(format!(
+                "ISA: arity mismatch for {op}: manifest {}r/{}w, got {}r/{}w",
+                e.nr,
+                e.nw,
+                reads.len(),
+                inst.writes.len()
+            ));
+        }
+        let expr = inst
+            .expr
+            .as_ref()
+            .ok_or_else(|| format!("ISA: {op} without expression"))?;
+        for (j, arg) in expr.args.iter().enumerate() {
+            let mt = e
+                .concrete(j, false)
+                .ok_or_else(|| format!("ISA: {op} read {} not concrete", j + 1))?;
+            let proved = lower::exact_operand_kind(arg, &declared, &stable);
+            if proved.as_deref() != Some(mt) {
+                return Err(format!(
+                    "ISA: {op} read {}: cannot prove exact {mt} (got {}); use generic opcode or explicit cast",
+                    j + 1,
+                    proved.as_deref().unwrap_or("<unknown>")
+                ));
+            }
+        }
+        for (j, w) in inst.writes.iter().enumerate() {
+            let mt = e
+                .concrete(j, true)
+                .ok_or_else(|| format!("ISA: {op} write {} not concrete", j + 1))?;
+            // 写槽由本条 opcode 定 kind：目标无声明/不可静态证明（临时槽等）是合法的；
+            // 只有“已有 exact 声明且与 manifest 不符”才是硬错误。
+            if let Some(proved) = lower::exact_name_kind(w, &declared, &stable) {
+                if proved != mt {
                     return Err(format!(
-                        "ISA: arity mismatch for {op}: manifest {}r/{}w, got {}r/{}w",
-                        e.nr,
-                        e.nw,
-                        reads.len(),
-                        inst.writes.len()
+                        "ISA: {op} write {}: exact {proved} != manifest {mt}",
+                        j + 1
                     ));
-                }
-                for (j, r) in reads.iter().enumerate() {
-                    if let Some(mt) = e.concrete(j, false) {
-                        let ty = param_langtype
-                            .get(r)
-                            .or_else(|| declared.get(r))
-                            .map(String::as_str)
-                            .unwrap_or("");
-                        if !ty.is_empty() && ty != mt {
-                            return Err(format!(
-                                "ISA: {op} read {} type {ty} != manifest {mt}",
-                                j + 1
-                            ));
-                        }
-                    }
-                }
-                for (j, w) in inst.writes.iter().enumerate() {
-                    if let Some(mt) = e.concrete(j, true) {
-                        let resolved = lower::resolve_slot_type(w, &declared, structs, &declared);
-                        let ty = inst
-                            .write_types
-                            .get(j)
-                            .map(String::as_str)
-                            .filter(|t| !t.is_empty())
-                            .or_else(|| param_langtype.get(w).map(String::as_str))
-                            .or(resolved.as_deref())
-                            .unwrap_or("");
-                        if !ty.is_empty() && ty != mt {
-                            return Err(format!(
-                                "ISA: {op} write {} type {ty} != manifest {mt}",
-                                j + 1
-                            ));
-                        }
-                    }
                 }
             }
         }
@@ -1438,6 +1500,33 @@ mod tests {
             "b·f 应保留"
         );
         assert_eq!(kvkind::kind(&kv.get_one("/lib/a/c·g/[0,0]")), "rwfunc");
+    }
+
+    #[test]
+    fn temp_write_kind_contract() {
+        // 纯 generic/copy 多写（for 索引）允许。
+        assert!(check_temp_write_kinds(
+            &[("_1".into(), false), ("_1".into(), false)],
+            |_| false
+        )
+        .is_ok());
+        // typed 写 + 复用 → 必须 exact 声明。
+        assert!(check_temp_write_kinds(
+            &[("_1".into(), true), ("_1".into(), false)],
+            |_| false
+        )
+        .is_err());
+        assert!(check_temp_write_kinds(
+            &[("_1".into(), true), ("_1".into(), false)],
+            |n| n == "_1"
+        )
+        .is_ok());
+        assert!(check_temp_write_kinds(&[("_1".into(), true)], |_| false).is_ok());
+        assert!(check_temp_write_kinds(
+            &[("‥tmp1".into(), true), ("‥tmp1".into(), true)],
+            |_| false
+        )
+        .is_err());
     }
 
     #[test]

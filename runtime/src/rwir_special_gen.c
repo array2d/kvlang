@@ -7,6 +7,32 @@
 
 #define HIDDEN __attribute__((visibility("hidden")))
 
+/* P1b3：typed_core 行不保留“kind 不等 → 通用回退”分支（layout 已证明）；
+ * 仅 KV_DEBUG_TYPES 构建保留为断言 + 兜底。 */
+#ifdef KV_DEBUG_TYPES
+#define SPEC_FALLBACK2(f, in, n, ka, kb, kid, gfn)                             \
+    do {                                                                       \
+        if ((ka) != (kid) || (kb) != (kid)) {                                  \
+            kvlangSpecCheckTyped(f, 0, ka, kid);                               \
+            kvlangSpecCheckTyped(f, 1, kb, kid);                               \
+            kvlangBuiltinFreeInputs(in, n);                                    \
+            return gfn(f);                                                     \
+        }                                                                      \
+    } while (0)
+#define SPEC_FALLBACK1(f, in, n, ka, kid, gfn)                                 \
+    do {                                                                       \
+        if ((ka) != (kid)) {                                                   \
+            kvlangSpecCheckTyped(f, 0, ka, kid);                               \
+            kvlangBuiltinFreeInputs(in, n);                                    \
+            return gfn(f);                                                     \
+        }                                                                      \
+    } while (0)
+#else
+#define SPEC_FALLBACK2(f, in, n, ka, kb, kid, gfn) ((void)0)
+#define SPEC_FALLBACK1(f, in, n, ka, kid, gfn) ((void)0)
+#endif
+
+
 #define F32_READ2(f, in, n)                                                    \
     kvlangXvalue_t in[2];                                                      \
     int n = kvlangBuiltinReadInputs(f, in, 2);                                 \
@@ -34,6 +60,8 @@ static int emit_float_kind(kvlangFrame_t *f, const char *kind, uint32_t width,
     uint8_t buf[64];
     kvlangXvalue_t r = {buf,
                         kvlangScalarEncode(kind, raw, width, buf, sizeof buf)};
+    if (f->instruction && f->instruction->typed_core)
+        return kvlangBuiltinWriteResultTyped(f, &r, kind);
     return kvlangBuiltinWriteResult(f, &r);
 }
 
@@ -42,13 +70,7 @@ static int emit_float_kind(kvlangFrame_t *f, const char *kind, uint32_t width,
         F32_READ2(f, in, n)                                                    \
         kvlangScalar_t sa = kvlangXvalueScalar(&in[0]);                        \
         kvlangScalar_t sb = kvlangXvalueScalar(&in[1]);                        \
-        if (sa.kind_id != KVLANG_LT_FLOAT32 ||                                 \
-            sb.kind_id != KVLANG_LT_FLOAT32) {                                 \
-            kvlangSpecCheckDeclared(f, 0, sa.kind_id, KVLANG_LT_FLOAT32);      \
-            kvlangSpecCheckDeclared(f, 1, sb.kind_id, KVLANG_LT_FLOAT32);      \
-            kvlangBuiltinFreeInputs(in, n);                                    \
-            return gfn(f);                                                     \
-        }                                                                      \
+        SPEC_FALLBACK2(f, in, n, sa.kind_id, sb.kind_id, KVLANG_LT_FLOAT32, gfn); \
         double a = kvlangScalarF64(sa), b = kvlangScalarF64(sb);               \
         int rc = emit_float_kind(f, "float32", 4, (expr));                     \
         kvlangBuiltinFreeInputs(in, n);                                        \
@@ -60,13 +82,7 @@ static int emit_float_kind(kvlangFrame_t *f, const char *kind, uint32_t width,
         F32_READ2(f, in, n)                                                    \
         kvlangScalar_t sa = kvlangXvalueScalar(&in[0]);                        \
         kvlangScalar_t sb = kvlangXvalueScalar(&in[1]);                        \
-        if (sa.kind_id != KVLANG_LT_FLOAT32 ||                                 \
-            sb.kind_id != KVLANG_LT_FLOAT32) {                                 \
-            kvlangSpecCheckDeclared(f, 0, sa.kind_id, KVLANG_LT_FLOAT32);      \
-            kvlangSpecCheckDeclared(f, 1, sb.kind_id, KVLANG_LT_FLOAT32);      \
-            kvlangBuiltinFreeInputs(in, n);                                    \
-            return gfn(f);                                                     \
-        }                                                                      \
+        SPEC_FALLBACK2(f, in, n, sa.kind_id, sb.kind_id, KVLANG_LT_FLOAT32, gfn); \
         double a = kvlangScalarF64(sa), b = kvlangScalarF64(sb);               \
         int rc;                                                                \
         if (b == 0)                                                            \
@@ -83,13 +99,7 @@ static int emit_float_kind(kvlangFrame_t *f, const char *kind, uint32_t width,
         F32_READ2(f, in, n)                                                    \
         kvlangScalar_t sa = kvlangXvalueScalar(&in[0]);                        \
         kvlangScalar_t sb = kvlangXvalueScalar(&in[1]);                        \
-        if (sa.kind_id != KVLANG_LT_FLOAT32 ||                                 \
-            sb.kind_id != KVLANG_LT_FLOAT32) {                                 \
-            kvlangSpecCheckDeclared(f, 0, sa.kind_id, KVLANG_LT_FLOAT32);      \
-            kvlangSpecCheckDeclared(f, 1, sb.kind_id, KVLANG_LT_FLOAT32);      \
-            kvlangBuiltinFreeInputs(in, n);                                    \
-            return gfn(f);                                                     \
-        }                                                                      \
+        SPEC_FALLBACK2(f, in, n, sa.kind_id, sb.kind_id, KVLANG_LT_FLOAT32, gfn); \
         double a = kvlangScalarF64(sa), b = kvlangScalarF64(sb);               \
         bool take = (is_max && a >= b) || (!is_max && a <= b);                 \
         int rc = emit_float_kind(f, "float32", 4, take ? a : b);               \
@@ -106,11 +116,7 @@ static int emit_float_kind(kvlangFrame_t *f, const char *kind, uint32_t width,
             return kvlangBuiltinSetError(f, "TypeError: unary op requires 1"); \
         }                                                                      \
         kvlangScalar_t sa = kvlangXvalueScalar(&in[0]);                        \
-        if (sa.kind_id != KVLANG_LT_FLOAT32) {                                 \
-            kvlangSpecCheckDeclared(f, 0, sa.kind_id, KVLANG_LT_FLOAT32);      \
-            kvlangBuiltinFreeInputs(in, n);                                    \
-            return gfn(f);                                                     \
-        }                                                                      \
+        SPEC_FALLBACK1(f, in, n, sa.kind_id, KVLANG_LT_FLOAT32, gfn); \
         double a = kvlangScalarF64(sa);                                        \
         int rc = emit_float_kind(f, "float32", 4, (expr));                     \
         kvlangBuiltinFreeInputs(in, n);                                        \
@@ -122,13 +128,7 @@ static int emit_float_kind(kvlangFrame_t *f, const char *kind, uint32_t width,
         F32_READ2(f, in, n)                                                    \
         kvlangScalar_t sa = kvlangXvalueScalar(&in[0]);                        \
         kvlangScalar_t sb = kvlangXvalueScalar(&in[1]);                        \
-        if (sa.kind_id != KVLANG_LT_FLOAT32 ||                                 \
-            sb.kind_id != KVLANG_LT_FLOAT32) {                                 \
-            kvlangSpecCheckDeclared(f, 0, sa.kind_id, KVLANG_LT_FLOAT32);      \
-            kvlangSpecCheckDeclared(f, 1, sb.kind_id, KVLANG_LT_FLOAT32);      \
-            kvlangBuiltinFreeInputs(in, n);                                    \
-            return gfn(f);                                                     \
-        }                                                                      \
+        SPEC_FALLBACK2(f, in, n, sa.kind_id, sb.kind_id, KVLANG_LT_FLOAT32, gfn); \
         bool eq = kvlangScalarF64(sa) == kvlangScalarF64(sb);                  \
         int rc = kvlangBuiltinEmitBool(f, want ? eq : !eq);                    \
         kvlangBuiltinFreeInputs(in, n);                                        \
@@ -140,13 +140,7 @@ static int emit_float_kind(kvlangFrame_t *f, const char *kind, uint32_t width,
         F32_READ2(f, in, n)                                                    \
         kvlangScalar_t sa = kvlangXvalueScalar(&in[0]);                        \
         kvlangScalar_t sb = kvlangXvalueScalar(&in[1]);                        \
-        if (sa.kind_id != KVLANG_LT_FLOAT32 ||                                 \
-            sb.kind_id != KVLANG_LT_FLOAT32) {                                 \
-            kvlangSpecCheckDeclared(f, 0, sa.kind_id, KVLANG_LT_FLOAT32);      \
-            kvlangSpecCheckDeclared(f, 1, sb.kind_id, KVLANG_LT_FLOAT32);      \
-            kvlangBuiltinFreeInputs(in, n);                                    \
-            return gfn(f);                                                     \
-        }                                                                      \
+        SPEC_FALLBACK2(f, in, n, sa.kind_id, sb.kind_id, KVLANG_LT_FLOAT32, gfn); \
         bool r = kvlangScalarF64(sa) op kvlangScalarF64(sb);                   \
         int rc = kvlangBuiltinEmitBool(f, r);                                  \
         kvlangBuiltinFreeInputs(in, n);                                        \

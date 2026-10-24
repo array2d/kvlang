@@ -588,6 +588,7 @@ typedef struct {
 typedef struct {
     char *opcode;
     int opcode_id; /* 统一派发码，见上 enum；decode 期固化，永不随帧变化 */
+    bool typed_core; /* P1b3：mrwircaps sig ∈ BIN/CMP/UN 的行 */
     kvlangParam_t *reads;
     int read_count;
     kvlangParam_t *writes;
@@ -728,6 +729,24 @@ static inline void kvlangSpecCheckDeclared(const kvlangFrame_t *f, int i,
 #else
 #define kvlangSpecCheckDeclared(f, i, actual_kind, kid) ((void)0)
 #endif
+
+/* P1b3：typed_core 行的实际值 kind 断言（仅 KV_DEBUG_TYPES 构建）。
+ * 比较实际值 head kind 与 manifest 声明（kid），不依赖槽字符串。 */
+#ifdef KV_DEBUG_TYPES
+static inline void kvlangSpecCheckTyped(const kvlangFrame_t *f, int i,
+                                        int actual_kind, int kid) {
+    if (f->instruction && f->instruction->typed_core && actual_kind != kid)
+        kvlangDie("typed %s: operand %d kind %d != manifest %d",
+                  f->instruction->opcode, i, actual_kind, kid);
+}
+#else
+#define kvlangSpecCheckTyped(f, i, actual_kind, kid) ((void)0)
+#endif
+
+/* P1b3 typed 写原语：结果 kind 已定型，跳过 CoerceAssign/分派。 */
+__attribute__((visibility("hidden"))) int
+kvlangBuiltinWriteResultTyped(kvlangFrame_t *f, const kvlangXvalue_t *v,
+                              const char *kind);
 
 /* 写侧转换出口：失败即置 TypeError；CoerceAll 供数组字面量逐元素转换。 */
 __attribute__((visibility("hidden"))) int

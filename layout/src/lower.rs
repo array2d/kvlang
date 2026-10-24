@@ -1426,7 +1426,7 @@ fn exact_kind(
 /// 候选来自推断类型；验证要求该槽的**所有赋值来源**都是同一具体标量 kind：
 /// 字面量/显式 cast/声明类型/已稳定变量/结果 kind 精确的内建与算术。
 /// `&x`、容器/字段/指针读、调用写参、None、any/union 一律视为不稳定。
-fn stable_kinds(
+pub fn stable_kinds(
     fn_: &Func,
     tm: &HashMap<String, String>,
     declared: &HashMap<String, String>,
@@ -1549,12 +1549,34 @@ fn collect_stability(
 }
 
 /// 操作数的派发资格 kind：字面量按自身 kind，变量取声明或稳定推断，其余不算精确。
-fn exact_operand_kind(
+pub fn exact_operand_kind(
     e: &Expr,
     declared: &HashMap<String, String>,
     stable: &HashMap<String, String>,
 ) -> Option<String> {
     exact_kind(e, declared, stable)
+}
+
+/// 写槽名的 exact kind：只接受普通变量名（declared / stable）。
+/// 指针解引用、成员/下标、绝对路径等无法静态证明 → None。
+pub fn exact_name_kind(
+    name: &str,
+    declared: &HashMap<String, String>,
+    stable: &HashMap<String, String>,
+) -> Option<String> {
+    if name.is_empty()
+        || name.starts_with('*')
+        || name.starts_with('/')
+        || name.contains(keytree::MEMBER_SEP)
+        || name.contains('[')
+    {
+        return None;
+    }
+    declared
+        .get(name)
+        .or_else(|| stable.get(name))
+        .filter(|t| !t.is_empty() && !t.contains('|'))
+        .cloned()
 }
 
 /// 特化决策只认**声明类型**或 **kind 稳定**的操作数：其余（推断不稳/无声明/any/union）

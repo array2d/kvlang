@@ -24,6 +24,7 @@ typedef struct {
     int nr, nw;
     kvlangOperand_t *cell; /* nr+nw：读参在前，写参在后 */
     bool load_write_value;
+    bool typed_core; /* P1b3：sig ∈ BIN/CMP/UN，row 装载期一次；typed 零检查路径 */
     bool is_def_rwir;
     int handler_id; /* myrwircaps 下标；非 native = kvlangRwirRouteId() */
     /* 定长标量写快路径：结果 type/宽度（来自同一张能力表）；NULL = 不快。 */
