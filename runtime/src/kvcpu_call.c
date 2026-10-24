@@ -1,4 +1,5 @@
 #include "kvcpu_internal.h"
+#include "func_code.h"
 #include <assert.h>
 
 /* 找末个成员分隔符（·，多字节），对齐 strrchr('.') 的单字节旧语义。 */
@@ -22,10 +23,15 @@ static int irseq_of(const kvlangParam_t *p) {
     return (int)n;
 }
 
-/* 函数内跳转：只改 PC 的 [irseq]，帧不变。目标非法 → RuntimeError，返回 -1。 */
-static int jump_to(kvlangFrame_t *f, const kvlangParam_t *target, const char *op) {
-    int irseq = irseq_of(target);
-    if (irseq < 0) {
+/* 函数内跳转：只改 PC 的 [irseq]，帧不变。目标非法 → RuntimeError，返回 -1。
+ * 目标 irseq 已在行绑定期从 int64 字面量固化；PC 在栈缓冲里格式化，
+ * 不按帧/按步分配。异常形状回退动态路径。 */
+static int jump_to(kvlangFrame_t *f, int which, const kvlangParam_t *target,
+                   const char *op) {
+    const kvlangRowBind_t *b = f->bind;
+    int known = (b && which >= 0 && which < 2) ? b->jump_irseq[which] : 0;
+    int irseq = known > 0 ? known : irseq_of(target);
+    if (irseq < 1) {
         char msg[256];
         snprintf(msg, sizeof msg,
                  "RuntimeError: %s target is not an int64 irseq: %s (kind=%s)",
@@ -34,15 +40,41 @@ static int jump_to(kvlangFrame_t *f, const kvlangParam_t *target, const char *op
         kvlangVthreadSetError(f->kvspace, f->vthread_id, f->pc, msg);
         return -1;
     }
-    /* Reuse this instruction's frame root. */
     char *owned = NULL;
     const char *fr = f->frame_root;
     if (!fr) { owned = kvlangKeytreeFrameRoot(f->pc); fr = owned; }
-    char *np = kvlangKeytreeIrseqPc(fr, irseq);
-    free(owned);
-    kvlangVthreadNextPc(f, np, "running");
-    KV_LOG_DEBUG("[%s] %s → %s", f->vthread_id, op, np);
+    char pcbuf[KV_KEY_MAX];
+    char *np = NULL;
+    const char *next = NULL;
+    if (kvlangKeytreeIrseqPcBuffer(fr, irseq, pcbuf, sizeof pcbuf) > 0) {
+        next = pcbuf;
+    } else {
+        np = kvlangKeytreeIrseqPc(fr, irseq);
+        next = np;
+    }
+    kvlangVthreadNextPc(f, next, "running");
+    KV_LOG_DEBUG("[%s] %s → %s", f->vthread_id, op, next);
+    /* 跳转后游标直接指向目标：下一步不重新解析完整 PC。 */
+    if (f->cursor) {
+        kvlangExecCursor *c = f->cursor;
+        /* 与 kvlangKeytreeIrseqPcBuffer 相同的 stripped 帧根：去掉尾部 '/'。 */
+        size_t pl = strlen(fr);
+        while (pl > 0 && fr[pl - 1] == '/')
+            pl--;
+        if (pl + 1 < sizeof c->prefix) {
+            memcpy(c->prefix, fr, pl);
+            c->prefix[pl] = '/';
+            c->prefix[pl + 1] = 0;
+            c->prefix_len = (int)pl + 1;
+            c->prefix_ok = true;
+        } else {
+            c->prefix_ok = false;
+        }
+        c->irseq = irseq;
+        c->jump = true;
+    }
     free(np);
+    free(owned);
     return 0;
 }
 
@@ -454,7 +486,7 @@ int kvlangControlGoto(kvlangFrame_t *f) {
         kvlangVthreadSetError(f->kvspace, f->vthread_id, f->pc, msg);
         return -1;
     }
-    return jump_to(f, &inst->reads[0], OP_GOTO);
+    return jump_to(f, 0, &inst->reads[0], OP_GOTO);
 }
 
 int kvlangControlBr(kvlangFrame_t *f) {
@@ -467,12 +499,14 @@ int kvlangControlBr(kvlangFrame_t *f) {
         kvlangVthreadSetError(f->kvspace, f->vthread_id, f->pc, msg);
         return -1;
     }
-    char *fr = kvlangKeytreeFrameRoot(f->pc);
+    char *owned = NULL;
+    const char *fr = f->frame_root;
+    if (!fr) { owned = kvlangKeytreeFrameRoot(f->pc); fr = owned; }
     kvlangXvalue_t cond;
     kvlangXvalueZero(&cond);
     kvlangBuiltinResolveReadValue(f->kvspace, fr, inst->reads[0].name,
                                   &inst->reads[0].value, &cond);
-    free(fr);
+    free(owned);
     if (kvlangXvalueNone(&cond)) {
         kvlangVthreadSetError(f->kvspace, f->vthread_id, f->pc,
                               "TypeError: None in branch condition");
@@ -487,7 +521,7 @@ int kvlangControlBr(kvlangFrame_t *f) {
         return -1;
     }
     bool taken = kvlangScalarI64(kvlangXvalueScalar(&cond)) != 0;
-    return jump_to(f, &inst->reads[taken ? 1 : 2], OP_BR);
+    return jump_to(f, taken ? 1 : 0, &inst->reads[taken ? 1 : 2], OP_BR);
 }
 
 /* 以伪 OP_CALL 进入被调函数：reads[0] 是目标函数，其后为实参。 */

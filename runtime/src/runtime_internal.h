@@ -519,6 +519,37 @@ char *kvlangKeytreeEntryPc(const char *root);    /* malloc */
 char *kvlangKeytreeFrameAt(const char *vtid, int depth); /* malloc */
 int kvlangKeytreeFrameNum(const char *path); /* [d]; panics if invalid */
 char *kvlangKeytreeIrseqPc(const char *frame_root, int irseq); /* malloc */
+/* 同上，写入调用方缓冲（跳转热路径：无 malloc、无 snprintf）。
+ * frame_root 尾部连续 '/' 先剥掉；cap 不足/非法 irseq 返回 0。 */
+static inline size_t kvlangKeytreeIrseqPcBuffer(const char *frame_root,
+                                                int irseq, char *buf,
+                                                size_t cap) {
+    if (!frame_root || !buf || irseq < 0)
+        return 0;
+    size_t n = strlen(frame_root);
+    while (n > 0 && frame_root[n - 1] == '/')
+        n--;
+    char digits[12];
+    int d = 0;
+    unsigned v = (unsigned)irseq;
+    do {
+        digits[d++] = (char)('0' + (int)(v % 10));
+        v /= 10;
+    } while (v);
+    /* 尾部 "/[<digits>,0]" + NUL：n + 1 + 1 + d + 1 + 1 + 1 = n+d+6 */
+    if (n + (size_t)d + 6 > cap)
+        return 0;
+    memcpy(buf, frame_root, n);
+    buf[n++] = '/';
+    buf[n++] = '[';
+    while (d)
+        buf[n++] = digits[--d];
+    buf[n++] = ',';
+    buf[n++] = '0';
+    buf[n++] = ']';
+    buf[n] = 0;
+    return n;
+}
 char *kvlangKeytreeMember(const char *base, const char *name); /* malloc */
 char *kvlangKeytreeLibFunc(const char *pkg, const char *name); /* malloc */
 char *kvlangKeytreeRwir(const char *opcode);                   /* malloc */
@@ -678,6 +709,8 @@ void kvlangDispatchSetDefaultTimeoutNanoseconds(int64_t ns);
 typedef struct {
     int irseq;
     bool dirty;
+    /* goto/br 已把游标设为目标：本步结束时不要 +1、也不要判 dirty 重解析。 */
+    bool jump;
     /* PC 前缀（到末个 '/'，含）缓存：顺序推进只需重写数字尾，免 strrchr/strtol。 */
     char prefix[KV_KEY_MAX];
     int prefix_len;
@@ -705,7 +738,8 @@ typedef struct {
     struct kvspaceKeyOff *pc_off;
     struct kvspaceKeyOff *status_off;
     /* Phase 1 派发：route 需要的只读上下文。 */
-    const void *row; /* const kvlangCodeRow_t * */
+    const void *row;  /* const kvlangCodeRow_t * */
+    const void *bind; /* const kvlangRowBind_t *：goto/br 预格式化目标 */
     int mode;        /* kvmode_t */
     char **out_pc;   /* ExecuteMode 的 out 参数（仅判空） */
     kvlangExecCursor *cursor; /* 执行游标（C-iii），可为 NULL */
