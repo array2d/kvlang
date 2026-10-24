@@ -427,6 +427,20 @@ static inline int32_t xh_content_len_of(const kvlangXvalue_t *v) {
     return kvlangXvalueNone(v) ? 0 : xh_content_len(v->bytes);
 }
 
+/* P1b4-a4：typed_core 行的标量视图——kind 由行静态签名定型，跳过 langtype
+ * 解析。bytes 为空（None/空值）返回 false；调用方不得读成 0。 */
+static inline bool kvlangXvalueScalarTyped(const kvlangXvalue_t *v, int kid,
+                                           kvlangScalar_t *out) {
+    if (!v->bytes || v->length < XH_PREFIX)
+        return false;
+    out->kind_id = kid;
+    out->bytes = xh_body(v->bytes);
+    /* 宽度由静态 kind 决定，不经 xh_content_len（class0 会重解析 langtype）。 */
+    out->length = kvlangLangtypeElemSize(kid);
+    return true;
+}
+
+
 void kvlangXvalueNewInt64(kvlangXvalue_t *v, int64_t n);
 void kvlangXvalueNewFloat64(kvlangXvalue_t *v, double f);
 void kvlangXvalueNewBool(kvlangXvalue_t *v, bool b);
@@ -744,6 +758,27 @@ typedef struct {
     char **out_pc;   /* ExecuteMode 的 out 参数（仅判空） */
     kvlangExecCursor *cursor; /* 执行游标（C-iii），可为 NULL */
 } kvlangFrame_t;
+
+/* typed_core 行按静态 kind 取标量；None 属 layout 未定义，直接 die（不读成 0）。 */
+static inline kvlangScalar_t kvlangScalarOf(const kvlangFrame_t *f,
+                                                 const kvlangXvalue_t *v,
+                                                 int kid) {
+#ifdef KV_DEBUG_TYPES
+    /* debug 构建保留原解析，由 SPEC_FALLBACK/typed check 给出既有诊断。 */
+    (void)f;
+    (void)kid;
+    return kvlangXvalueScalar(v);
+#else
+    if (f->instruction && f->instruction->typed_core) {
+        kvlangScalar_t s;
+        if (!kvlangXvalueScalarTyped(v, kid, &s))
+            kvlangDie("typed %s: None operand",
+                      f->instruction->opcode ? f->instruction->opcode : "?");
+        return s;
+    }
+    return kvlangXvalueScalar(v);
+#endif
+}
 
 /* 特化 handler 不变量（仅 debug 生效）：声明为 kid 的操作数经读侧 coercion 必为 kid；
  * 实际 kind 不符 = 不变量被破坏，直接 die。动态/无声明操作数（type 为空/空 kindexp/

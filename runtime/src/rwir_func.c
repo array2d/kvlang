@@ -162,6 +162,10 @@ void kvlangDisplay(const kvlangXvalue_t *v, char **out) {
 /* ── frame helper ─────────────────────────────────────────────────── */
 
 int kvlangBuiltinReadInputs(kvlangFrame_t *f, kvlangXvalue_t *out, int cap) {
+    /* P1b4-a4：typed_core 行直接借用已加载值；实现放晚链接 TU，控制热 TU
+     * 布局（#476：同算法仅布局不同就有 ±5% 的 kn 漂移）。 */
+    if (f->instruction->typed_core)
+        return kvlangBuiltinReadInputsTyped(f, out, cap);
     /* Reuse this instruction's frame root. */
     char *owned = NULL;
     const char *fr = f->frame_root;
