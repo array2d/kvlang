@@ -1,4 +1,5 @@
 #include "runtime_internal.h"
+#include "slotview.h"
 
 #define VT_MEMBER_GET(fn, want_status)                                         \
     void fn(kvspace_t *kv, const char *vtid, char **out) {                     \
@@ -126,6 +127,11 @@ typedef struct {
 } pc_slot_cache_t;
 static __thread pc_slot_cache_t pc_cache;
 
+/* b1b：owned 接管/回退时作废 part-write 缓存，避免指向被 WriteNewPlace 移动的旧 box。 */
+__attribute__((visibility("hidden"))) void kvlangPcCacheInvalidate(void) {
+    pc_cache.ready = false;
+}
+
 static uint32_t utf8_cp_count(const char *s, uint32_t len) {
     uint32_t n = 0;
     for (uint32_t i = 0; i < len; i++)
@@ -155,8 +161,8 @@ static int pc_write_whole(kvlangFrame_t *f, struct kvspaceKeyOff *ko,
 }
 
 /* langtype = "[N]char/utf8"（冷 helper）：码点数统计 + 无 snprintf 整数格式化。 */
-__attribute__((noinline)) static int fmt_char_langtype(uint8_t *lt, const char *s,
-                                                       uint32_t len) {
+__attribute__((noinline, visibility("hidden"))) int
+kvlangCharLangtypeFmt(uint8_t *lt, const char *s, uint32_t len) {
     uint32_t v = cp_count(s, len);
     char digits[12];
     int d = 0;
@@ -180,7 +186,7 @@ static int pc_write_part(kvlangFrame_t *f, struct kvspaceKeyOff *ko,
     uint8_t *b = pc_cache.buf;
     for (int i = 0; i < 4; i++)
         b[2 + i] = (uint8_t)(len >> (8 * i)); /* a */
-    if (fmt_char_langtype(b + XH_PREFIX, s, len) != 0)
+    if (kvlangCharLangtypeFmt(b + XH_PREFIX, s, len) != 0)
         return -1;
     memcpy(b + 64, s, len);
     uint32_t part = 64 + len - 2;
@@ -209,6 +215,8 @@ static void member_write(kvlangFrame_t *f, struct kvspaceKeyOff *ko,
             f->persist_failed = true;
         return;
     }
+    if (ko && kvlangPcViewWrite(f, ko, s, len) == 1)
+        return;
     if (ko && f->kvspace->shm && pc_cache.ready &&
         strcmp(pc_cache.key, ko->key) == 0 && len <= pc_cache.cap) {
         if (pc_write_part(f, ko, s, len) == 0)

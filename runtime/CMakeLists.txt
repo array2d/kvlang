@@ -54,7 +54,7 @@ endif()
 
 if(NOT APPLE)
     enable_testing()
-    foreach(test_name test_getmember_siblings test_kvset_invalid_head test_pc_kvspace_source test_crash_resume test_param_address delegate_test test_scalar_encode test_pc_part_write test_ro_rewrite test_keytree_irseq_pc)
+    foreach(test_name test_getmember_siblings test_kvset_invalid_head test_pc_kvspace_source test_crash_resume test_param_address delegate_test test_scalar_encode test_pc_part_write test_ro_rewrite test_keytree_irseq_pc test_pc_view_probe)
         add_custom_command(
             OUTPUT "${BIN_DIR}/${test_name}"
             COMMAND ${CMAKE_C_COMPILER} -O2 -D_GNU_SOURCE
@@ -92,6 +92,9 @@ if(NOT APPLE)
     add_test(NAME status_view COMMAND bash "${CMAKE_SOURCE_DIR}/tests/status_view.sh")
     add_test(NAME status_rebind COMMAND bash "${CMAKE_SOURCE_DIR}/tests/status_rebind.sh")
     set_tests_properties(status_rebind PROPERTIES SKIP_RETURN_CODE 77)
+    add_test(NAME pc_owned_view COMMAND bash "${CMAKE_SOURCE_DIR}/tests/pc_owned_view.sh")
+    set_tests_properties(pc_owned_view PROPERTIES SKIP_RETURN_CODE 77
+        ENVIRONMENT "KVSPACE_BACKEND_PATH=${KVSPACE_LIB_DIR};KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/kvlang;KVLANG_PC_PROBE=${BIN_DIR}/test_pc_view_probe")
     add_test(NAME layout_reject COMMAND bash "${CMAKE_SOURCE_DIR}/tests/layout_reject.sh")
     add_test(NAME coercion COMMAND bash "${CMAKE_SOURCE_DIR}/tests/coercion.sh")
     add_test(NAME dyn_specialize COMMAND bash "${CMAKE_SOURCE_DIR}/tests/dyn_specialize.sh")

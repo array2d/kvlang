@@ -1,0 +1,14 @@
+// b1b：深递归让 PC 路径超过旧 256 档，用于 owned view 跨档验证。
+rwfunc deep(n:int64) -> (x:int64) {
+	x = 0
+	if (n > 0) {
+		deep(n - 1) -> x
+	}
+	if (n == 0) {
+		vthread·setstatus("paused")
+	}
+}
+
+rwfunc worker() -> () {
+	deep(100) -> t
+}
