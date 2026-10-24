@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/array2d/kvlang/actions/workflows/ci.yml/badge.svg)](https://github.com/array2d/kvlang/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Tutorial Examples](https://img.shields.io/badge/tutorials-235%20examples-4c1)](tutorial/)
+[![Tutorial Examples](https://img.shields.io/badge/tutorials-236%20examples-4c1)](tutorial/)
 [![Spec](https://img.shields.io/badge/spec-84%20chapters-blueviolet)](stdlib/kvlang/spec/)
 
 **以 kvspace 为寻址空间和内存空间、小核心、扩展主导的明文解释执行语言（原训推框架 deepx 的前端语言，前身 dxlang）。** 代码与数据统一在一棵 KV 树；PC 即 KV 路径、可崩溃恢复，源码即 IR、KV 皆明文。核心 runtime 只做执行循环与控制流，其余能力由其它 runtime 提供、注册在 `/lib/<opcode>`。
@@ -324,7 +324,7 @@ rwfunc test() -> () {
 
 ## Tutorial
 
-235 个自包含示例（其中 227 个用 `// 期望输出` 头给出期望输出），按主题组织：
+236 个自包含示例（其中 228 个用 `// 期望输出` 头给出期望输出），按主题组织：
 
 ```
 01-basics/      hello, arith, precision, numtypes, strings, …     (18)

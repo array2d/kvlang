@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/array2d/kvlang/actions/workflows/ci.yml/badge.svg)](https://github.com/array2d/kvlang/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Tutorial Examples](https://img.shields.io/badge/tutorials-235%20examples-4c1)](tutorial/)
+[![Tutorial Examples](https://img.shields.io/badge/tutorials-236%20examples-4c1)](tutorial/)
 [![Spec](https://img.shields.io/badge/spec-84%20chapters-blueviolet)](stdlib/kvlang/spec/)
 
 **A plaintext, interpreted language whose addressing space and memory space are both kvspace — a small core with extensions on top (the front-end language of deepx, formerly dxlang).** Code and data live in one KV tree; the PC is a KV path (crash-resumable), the source is the IR, and every KV value is plaintext. The core runtime does only the execute loop and control flow; every other capability is supplied by other runtimes and registered at `/lib/<opcode>`.
@@ -324,7 +324,7 @@ For an LLM-oriented one-page summary of the language, see [`stdlib/kvlang/kvlang
 
 ## Tutorial
 
-235 self-contained examples (`// 期望输出` headers give expected output for 227 of them), organized by topic:
+236 self-contained examples (`// 期望输出` headers give expected output for 228 of them), organized by topic:
 
 ```
 01-basics/      hello, arith, precision, numtypes, strings, …     (18)
