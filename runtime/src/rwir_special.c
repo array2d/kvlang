@@ -41,14 +41,14 @@ typedef double F64_t;
 
 
 static int64_t arg_I64(kvlangFrame_t *f, kvlangXvalue_t *in, int i) {
-    kvlangScalar_t s = kvlangXvalueScalar(&in[i]);
+    kvlangScalar_t s = kvlangScalarOf(f, &in[i], KVLANG_LT_INT64);
     kvlangSpecCheckDeclared(f, i, s.kind_id, KVLANG_LT_INT64);
     kvlangSpecCheckTyped(f, i, s.kind_id, KVLANG_LT_INT64);
     return kvlangScalarI64(s);
 }
 
 static double arg_F64(kvlangFrame_t *f, kvlangXvalue_t *in, int i) {
-    kvlangScalar_t s = kvlangXvalueScalar(&in[i]);
+    kvlangScalar_t s = kvlangScalarOf(f, &in[i], KVLANG_LT_FLOAT64);
     kvlangSpecCheckDeclared(f, i, s.kind_id, KVLANG_LT_FLOAT64);
     kvlangSpecCheckTyped(f, i, s.kind_id, KVLANG_LT_FLOAT64);
     return kvlangScalarF64(s);
@@ -335,9 +335,9 @@ static int emit_int_kind(kvlangFrame_t *f, const char *kind, uint32_t width,
 #define DEF_INT_BIN(ktok, kstr, w, kid, name, gfn, expr)                       \
     HIDDEN int kvlangBuiltin##ktok##name(kvlangFrame_t *f) {                   \
         INT_READ2(f, in, n)                                                    \
-        kvlangScalar_t sa = kvlangXvalueScalar(&in[0]);                        \
-        kvlangScalar_t sb = kvlangXvalueScalar(&in[1]);                        \
-        SPEC_FALLBACK2(f, in, n, sa.kind_id, sb.kind_id, kid, gfn); \
+        kvlangScalar_t sa = kvlangScalarOf(f, &in[0], kid);                    \
+        kvlangScalar_t sb = kvlangScalarOf(f, &in[1], kid);                    \
+        SPEC_FALLBACK2(f, in, n, sa.kind_id, sb.kind_id, kid, gfn);            \
         int64_t a = kvlangScalarI64(sa), b = kvlangScalarI64(sb);              \
         int rc = emit_int_kind(f, kstr, w, (expr));                            \
         kvlangBuiltinFreeInputs(in, n);                                        \
@@ -347,9 +347,9 @@ static int emit_int_kind(kvlangFrame_t *f, const char *kind, uint32_t width,
 #define DEF_INT_DIVMOD(ktok, kstr, w, kid, name, gfn, op, msg)                 \
     HIDDEN int kvlangBuiltin##ktok##name(kvlangFrame_t *f) {                   \
         INT_READ2(f, in, n)                                                    \
-        kvlangScalar_t sa = kvlangXvalueScalar(&in[0]);                        \
-        kvlangScalar_t sb = kvlangXvalueScalar(&in[1]);                        \
-        SPEC_FALLBACK2(f, in, n, sa.kind_id, sb.kind_id, kid, gfn); \
+        kvlangScalar_t sa = kvlangScalarOf(f, &in[0], kid);                    \
+        kvlangScalar_t sb = kvlangScalarOf(f, &in[1], kid);                    \
+        SPEC_FALLBACK2(f, in, n, sa.kind_id, sb.kind_id, kid, gfn);            \
         int64_t a = kvlangScalarI64(sa), b = kvlangScalarI64(sb);              \
         int rc;                                                                \
         if (b == 0)                                                            \
@@ -363,10 +363,10 @@ static int emit_int_kind(kvlangFrame_t *f, const char *kind, uint32_t width,
 #define DEF_INT_MAXMIN(ktok, kstr, w, kid, name, gfn, U, op)                   \
     HIDDEN int kvlangBuiltin##ktok##name(kvlangFrame_t *f) {                   \
         INT_READ2(f, in, n)                                                    \
-        kvlangScalar_t sa = kvlangXvalueScalar(&in[0]);                        \
-        kvlangScalar_t sb = kvlangXvalueScalar(&in[1]);                        \
+        kvlangScalar_t sa = kvlangScalarOf(f, &in[0], kid);                    \
+        kvlangScalar_t sb = kvlangScalarOf(f, &in[1], kid);                    \
         bool u = U;                                                            \
-        SPEC_FALLBACK2(f, in, n, sa.kind_id, sb.kind_id, kid, gfn); \
+        SPEC_FALLBACK2(f, in, n, sa.kind_id, sb.kind_id, kid, gfn);            \
         int64_t a = kvlangScalarI64(sa), b = kvlangScalarI64(sb);              \
         bool take = u ? ((uint64_t)a op(uint64_t)b) : (a op b);                \
         int rc = emit_int_kind(f, kstr, w, take ? a : b);                      \
@@ -377,9 +377,9 @@ static int emit_int_kind(kvlangFrame_t *f, const char *kind, uint32_t width,
 #define DEF_INT_EQ(ktok, kstr, w, kid, name, gfn, want)                        \
     HIDDEN int kvlangBuiltin##ktok##name(kvlangFrame_t *f) {                   \
         INT_READ2(f, in, n)                                                    \
-        kvlangScalar_t sa = kvlangXvalueScalar(&in[0]);                        \
-        kvlangScalar_t sb = kvlangXvalueScalar(&in[1]);                        \
-        SPEC_FALLBACK2(f, in, n, sa.kind_id, sb.kind_id, kid, gfn); \
+        kvlangScalar_t sa = kvlangScalarOf(f, &in[0], kid);                    \
+        kvlangScalar_t sb = kvlangScalarOf(f, &in[1], kid);                    \
+        SPEC_FALLBACK2(f, in, n, sa.kind_id, sb.kind_id, kid, gfn);            \
         bool eq = kvlangScalarI64(sa) == kvlangScalarI64(sb);                  \
         int rc = kvlangBuiltinEmitBool(f, want ? eq : !eq);                    \
         kvlangBuiltinFreeInputs(in, n);                                        \
@@ -389,10 +389,10 @@ static int emit_int_kind(kvlangFrame_t *f, const char *kind, uint32_t width,
 #define DEF_INT_ORD(ktok, kstr, w, kid, name, gfn, U, op)                      \
     HIDDEN int kvlangBuiltin##ktok##name(kvlangFrame_t *f) {                   \
         INT_READ2(f, in, n)                                                    \
-        kvlangScalar_t sa = kvlangXvalueScalar(&in[0]);                        \
-        kvlangScalar_t sb = kvlangXvalueScalar(&in[1]);                        \
+        kvlangScalar_t sa = kvlangScalarOf(f, &in[0], kid);                    \
+        kvlangScalar_t sb = kvlangScalarOf(f, &in[1], kid);                    \
         bool u = U;                                                            \
-        SPEC_FALLBACK2(f, in, n, sa.kind_id, sb.kind_id, kid, gfn); \
+        SPEC_FALLBACK2(f, in, n, sa.kind_id, sb.kind_id, kid, gfn);            \
         int64_t a = kvlangScalarI64(sa), b = kvlangScalarI64(sb);              \
         bool r = u ? ((uint64_t)a op(uint64_t)b) : (a op b);                   \
         int rc = kvlangBuiltinEmitBool(f, r);                                  \
@@ -408,8 +408,8 @@ static int emit_int_kind(kvlangFrame_t *f, const char *kind, uint32_t width,
             kvlangBuiltinFreeInputs(in, n);                                    \
             return kvlangBuiltinSetError(f, "TypeError: unary op requires 1"); \
         }                                                                      \
-        kvlangScalar_t sa = kvlangXvalueScalar(&in[0]);                        \
-        SPEC_FALLBACK1(f, in, n, sa.kind_id, kid, kvlangBuiltinNeg); \
+        kvlangScalar_t sa = kvlangScalarOf(f, &in[0], kid);                    \
+        SPEC_FALLBACK1(f, in, n, sa.kind_id, kid, kvlangBuiltinNeg);           \
         int rc = emit_int_kind(f, kstr, w, -kvlangScalarI64(sa));              \
         kvlangBuiltinFreeInputs(in, n);                                        \
         return rc;                                                             \
@@ -423,8 +423,8 @@ static int emit_int_kind(kvlangFrame_t *f, const char *kind, uint32_t width,
             kvlangBuiltinFreeInputs(in, n);                                    \
             return kvlangBuiltinSetError(f, "TypeError: unary op requires 1"); \
         }                                                                      \
-        kvlangScalar_t sa = kvlangXvalueScalar(&in[0]);                        \
-        SPEC_FALLBACK1(f, in, n, sa.kind_id, kid, kvlangBuiltinAbs); \
+        kvlangScalar_t sa = kvlangScalarOf(f, &in[0], kid);                    \
+        SPEC_FALLBACK1(f, in, n, sa.kind_id, kid, kvlangBuiltinAbs);           \
         int64_t a = kvlangScalarI64(sa);                                       \
         int rc = emit_int_kind(f, kstr, w, a < 0 ? -a : a);                    \
         kvlangBuiltinFreeInputs(in, n);                                        \

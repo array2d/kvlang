@@ -41,6 +41,8 @@ static inline void xv_head_from_data(xv_head_t *o, const uint8_t *d) {
 /* ── 跨模块共享 helper ─────────────────────────────────────────────
    frame I/O 与 xvalue_at 定义在 rwir_func.c；容器 key/index helper 定义在 rwir_array.c / rwir_map.c。*/
 int kvlangBuiltinReadInputs(kvlangFrame_t *f, kvlangXvalue_t *out, int cap);
+int kvlangBuiltinReadInputsTyped(kvlangFrame_t *f, kvlangXvalue_t *out,
+                                  int cap);
 void kvlangBuiltinFreeInputs(kvlangXvalue_t *in, int n);
 void kvlangBuiltinNextPc(kvlangFrame_t *f);
 int kvlangBuiltinWriteResult(kvlangFrame_t *f, const kvlangXvalue_t *result);
