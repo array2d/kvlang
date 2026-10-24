@@ -93,6 +93,9 @@ if(NOT APPLE)
     add_test(NAME status_rebind COMMAND bash "${CMAKE_SOURCE_DIR}/tests/status_rebind.sh")
     set_tests_properties(status_rebind PROPERTIES SKIP_RETURN_CODE 77)
     add_test(NAME pc_owned_view COMMAND bash "${CMAKE_SOURCE_DIR}/tests/pc_owned_view.sh")
+    add_test(NAME read_view_lazy COMMAND bash "${CMAKE_SOURCE_DIR}/tests/read_view_lazy.sh")
+    set_tests_properties(read_view_lazy PROPERTIES SKIP_RETURN_CODE 77
+        ENVIRONMENT "KVSPACE_BACKEND_PATH=${KVSPACE_LIB_DIR};KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/kvlang")
     set_tests_properties(pc_owned_view PROPERTIES SKIP_RETURN_CODE 77
         ENVIRONMENT "KVSPACE_BACKEND_PATH=${KVSPACE_LIB_DIR};KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/kvlang;KVLANG_PC_PROBE=${BIN_DIR}/test_pc_view_probe")
     add_test(NAME layout_reject COMMAND bash "${CMAKE_SOURCE_DIR}/tests/layout_reject.sh")

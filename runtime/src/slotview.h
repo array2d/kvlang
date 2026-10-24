@@ -12,6 +12,21 @@ int kvlangSlotViewBind(kvspace_t *kv, kvspaceKeyOff *ko,
 bool kvlangStatusViewRead(const kvspaceSlotView_t *view, char *out,
                           size_t cap);
 
+/* T-120 A：lazy operand 只读 view。同一 bind 内第 N 次读才分配+capture；
+ * 递归帧单帧命中 <N 时零分配。提升后每 RECHECK 次命中重验 head。 */
+#ifndef KV_READ_VIEW_N
+#define KV_READ_VIEW_N 8
+#endif
+#ifndef KV_READ_VIEW_RECHECK
+#define KV_READ_VIEW_RECHECK 512
+#endif
+
+/* 返回 1=命中（out 为借用视图），0=回退 GetByRef。pack=0 时调用方不应调用。 */
+struct kvlangBoundCell;
+__attribute__((visibility("hidden"))) int
+kvlangReadViewTry(kvspace_t *kv, struct kvlangBoundCell *cell, uint32_t pack,
+                  kvlangXvalue_t *out);
+
 /* b1b：PC owned view 状态（每 ExecuteMode 一份）。 */
 typedef struct {
     kvspaceSlotView_t view;

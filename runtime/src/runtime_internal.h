@@ -701,6 +701,7 @@ extern unsigned long kvCSpec, kvCGen;
 extern unsigned long kvCBodyFast, kvCBodyFallback;
 extern unsigned long kvCBodyCells, kvCBodyCellsMax;
 extern unsigned long kvCBodyCapAttempt, kvCBodyCapOk;
+extern unsigned long kvCReadViewProm, kvCReadViewDemote, kvCReadViewHit;
 #endif
 #endif
 bool kvlangNotInMyRwirCaps(kvspace_t *kv, const char *opcode);

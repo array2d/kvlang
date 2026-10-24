@@ -54,9 +54,12 @@ static int execute_yield(char **out_pc, char *next_pc) {
 }
 
 /* 读一个操作数目标值；None 合法。地址未解析时按 key 读并补一次绑定。 */
-static int operand_load(kvspace_t *kv, kvlangBoundCell_t *cell,
+static int operand_load(kvspace_t *kv, kvlangBoundCell_t *cell, uint32_t pack,
                         kvlangXvalue_t *out) {
     kvlangXvalueZero(out);
+    /* T-120 A：lazy operand view；pack=0（非 typed 行）直接跳过。 */
+    if (pack != 0 && kvlangReadViewTry(kv, cell, pack, out))
+        return 0;
     kvspaceKeyOff *ko = &cell->off;
     if (ko->resolved) {
         uint8_t *d = NULL;
@@ -74,10 +77,12 @@ static int operand_load(kvspace_t *kv, kvlangBoundCell_t *cell,
         if (kvspaceResolveRef(kv->handle, cell->key, &ko->off) == 0)
             ko->resolved = true;
     }
-    /* typed 读视图：声明 kind 与实际不同 → 转到 cell 复用缓冲（绑定期已备好文本）。 */
-    if (cell->coerce_tid && out->bytes && out->length &&
-        (xh_langtype_len_of(out) != cell->coerce_len ||
-         memcmp(xh_langtype_of(out), cell->type, cell->coerce_len) != 0)) {
+    /* typed 读视图：声明 kind 与实际不同 → 转到 cell 复用缓冲（绑定期已备好文本）。
+     * pack != 0 表示 typed 行：union 存的是 view 计数，不能当 coerce 读。 */
+    if (pack == 0 && cell->coerce.tid && cell->type && out->bytes &&
+        out->length &&
+        (xh_langtype_len_of(out) != cell->coerce.len ||
+         memcmp(xh_langtype_of(out), cell->type, cell->coerce.len) != 0)) {
         if (!cell->coerce_buf)
             cell->coerce_buf = malloc(64);
         if (!cell->coerce_buf)
@@ -105,10 +110,12 @@ static void count_report(void) {
         return;
     fprintf(stderr,
             "COUNT spec=%lu gen=%lu narrow=%lu cmp=%lu body_fast=%lu "
-            "body_fallback=%lu body_cells_max=%lu cap_try=%lu cap_ok=%lu\n",
+            "body_fallback=%lu body_cells_max=%lu cap_try=%lu cap_ok=%lu "
+            "rv_prom=%lu rv_demote=%lu rv_hit=%lu\n",
             kvCSpec, kvCGen, kvCNarrow, kvCCompare, kvCBodyFast,
             kvCBodyFallback, kvCBodyCellsMax, kvCBodyCapAttempt,
-            kvCBodyCapOk);
+            kvCBodyCapOk, kvCReadViewProm, kvCReadViewDemote,
+            kvCReadViewHit);
 }
 #define COUNT_REPORT() count_report()
 #else
@@ -394,7 +401,7 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
                 reads[i].value = *c->literal;
                 continue;
             }
-            int lr = operand_load(kv, c, &reads[i].value);
+            int lr = operand_load(kv, c, row->view_pack, &reads[i].value);
             if (lr != 0) {
                 exec_err =
                     lr == -2
@@ -411,7 +418,7 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
         }
         for (int j = 0; exec_err == 0 && j < row->nw; j++) {
             if (row->load_write_value) {
-                int lr = operand_load(kv, &bind->cell[row->nr + j],
+                int lr = operand_load(kv, &bind->cell[row->nr + j], 0,
                                       &writes[j].value);
                 if (lr != 0) {
                     exec_err =
