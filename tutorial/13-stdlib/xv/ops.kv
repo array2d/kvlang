@@ -1,0 +1,32 @@
+// xv 数组组合操作：last / reverse / find / contains / count / sum / min / max / flatten
+// 期望输出:
+//   last: 40
+//   rev: 40 30 20 10
+//   find 30: 2
+//   find 99: -1
+//   contains: true false
+//   count 20: 3
+//   sum: 100
+//   min: 10
+//   max: 40
+//   flat len: 4
+//   flat[3]: 4
+
+rwfunc test() -> () {
+	a:[]int64 = [10, 20, 30, 40]
+	println("last:", xv·last(a))
+	r = xv·reverse(a)
+	println("rev:", r[0], r[1], r[2], r[3])
+	println("find 30:", xv·find(a, 30))
+	println("find 99:", xv·find(a, 99))
+	println("contains:", xv·contains(a, 20), xv·contains(a, 99))
+	b:[]int64 = [10, 20, 20, 30, 20]
+	println("count 20:", xv·count(b, 20))
+	println("sum:", xv·sum(a))
+	println("min:", xv·min(a))
+	println("max:", xv·max(a))
+	m = xv·reshape([1, 2, 3, 4], 2, 2)
+	fl = xv·flatten(m)
+	println("flat len:", ndarray·numel(fl))
+	println("flat[3]:", fl[3])
+}

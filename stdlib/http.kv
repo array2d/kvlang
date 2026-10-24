@@ -1,6 +1,6 @@
 // 欢迎加入kvspace世界
 // lib http —— 网络抓取标准库。rwir 只有 http·call(method, header, url, body)；
-// get/post/put/del 都是 rwfunc 封装（kv 源码，可寻址/可自改）。
+// get/post/put/del/patch/head/post_json 都是 rwfunc 封装（kv 源码，可寻址/可自改）。
 // 字符串类型恒 []char/utf32（kvlang 字面量默认编码）。header 是 "K: V\nK2: V2" 原文块，
 // 空串 = 无 header；body 空串 = 无请求体。
 
@@ -16,5 +16,14 @@ lib http {
 	}
 	rwfunc del(url:[]char/utf32) -> (resp:[]char/utf32) {
 		http·call("DELETE", "", url, "") -> resp
+	}
+	rwfunc patch(url:[]char/utf32, body:[]char/utf32) -> (resp:[]char/utf32) {
+		http·call("PATCH", "", url, body) -> resp
+	}
+	rwfunc head(url:[]char/utf32) -> (resp:[]char/utf32) {
+		http·call("HEAD", "", url, "") -> resp
+	}
+	rwfunc post_json(url:[]char/utf32, body:[]char/utf32) -> (resp:[]char/utf32) {
+		http·call("POST", "Content-Type: application/json", url, body) -> resp
 	}
 }

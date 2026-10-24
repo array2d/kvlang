@@ -26,12 +26,12 @@ lib kvlang/spec/runtime语义/notinmyrwircaps {
 `rwir::dispatch`），无 handoff、无 watch。runtime-rs 的 myrwircaps（就地集合）当前登记：
 
 ```
-term      print / println / cerr / input
+term      print / println / cerr / printf / input
 json      json·to / json·from
 http      http·call
-kvlang    kvlang·vet / ·format / ·layout / ·dump
+kvlang    kvlang·vet / ·format / ·layout / ·printlib / ·printstack
 networld  networld/proc·exec
-          networld/fs·size / ·read / ·write / ·append / ·list / ·del / ·mkdir / ·exists
+          networld/fs·size / ·read / ·write / ·append / ·rename / ·list / ·del / ·mkdir / ·exists / ·isutf8
 ```
 
 就地与跨进程只是**执行位置**之别，职责线一致——两者都只经 `kvlangRwirext*` 解析参数、只经 `kvspace*`

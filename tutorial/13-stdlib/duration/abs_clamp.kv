@@ -1,0 +1,26 @@
+// time/duration·abs / is_neg / is_pos / clamp
+// 期望输出:
+//   is_neg: true false
+//   is_pos: true false
+//   abs: 5
+//   clamp lo: 2
+//   clamp mid: 4
+//   clamp hi: 6
+rwfunc test() -> () {
+	time/duration·hours(2) -> h2
+	time/duration·hours(7) -> h7
+	time/duration·sub(h2, h7) -> neg5
+	println("is_neg:", time/duration·is_neg(neg5), time/duration·is_neg(h2))
+	println("is_pos:", time/duration·is_pos(h2), time/duration·is_pos(neg5))
+	time/duration·abs(neg5) -> pos5
+	println("abs:", time/duration·as_hours(pos5))
+	time/duration·hours(1) -> h1
+	time/duration·hours(4) -> h4
+	time/duration·hours(6) -> h6
+	time/duration·clamp(h1, h2, h6) -> c1
+	time/duration·clamp(h4, h2, h6) -> c2
+	time/duration·clamp(h7, h2, h6) -> c3
+	println("clamp lo:", time/duration·as_hours(c1))
+	println("clamp mid:", time/duration·as_hours(c2))
+	println("clamp hi:", time/duration·as_hours(c3))
+}

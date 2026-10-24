@@ -1,10 +1,13 @@
-// networld/python·run(code) -> out：python3 -c 的 stdout 文本（stderr 不返回）
+// networld/python·run(code) -> out / exec(code) -> (ret, out, err)
 // 期望输出:
 //   out= 42
 //   str= abc
+//   exec= 5 pyout pyerr
 rwfunc test() -> () {
 	networld/python·run("print(6*7)") -> o
 	println("out=", o)
 	networld/python·run("print('a'+'bc')") -> s
 	println("str=", s)
+	networld/python·exec("import sys; sys.stdout.write('pyout'); sys.stderr.write('pyerr'); sys.exit(5)") -> (c, po, pe)
+	println("exec=", c, po, pe)
 }

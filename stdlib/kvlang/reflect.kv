@@ -13,7 +13,7 @@
 //   后端不去重），members 把它折成一条，这里就不必再猜「裸名是不是目录的孪生」。
 // 用途：把一棵 lib 子树的「有什么能力」压成一行文本，供 LLM 生成能力记忆 / 工具清单。
 // 命名沿用 Go/Rust 的 reflect（自省）；不占用 `lib kvlang`——那是 kvlangbrief 与
-// kvlang·vet/·layout/·format/·dump 四个 def rwir 路由头的命名空间。
+// kvlang·vet/·layout/·format/·printlib/·printstack 五个 def rwir 路由头的命名空间。
 
 lib kvlang/reflect {
 	rwfunc fnlist(name:[]char/utf32) -> (listing:[]char/utf32) {

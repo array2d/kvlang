@@ -1,0 +1,23 @@
+// time·until / max / min / elapsed_ms / elapsed_s
+// 期望输出:
+//   until > 0: true
+//   max=t1: true
+//   min=t0: true
+//   elapsed_ms >= 0: true
+//   elapsed_s >= 0: true
+rwfunc test() -> () {
+	time·now() -> t0
+	time/duration·hours(1) -> h1
+	time·add(t0, h1) -> t1
+	time·until(t1) -> rem
+	time/duration·as_seconds(rem) -> rs
+	println("until > 0:", rs > 0)
+	time·max(t0, t1) -> mx
+	time·min(t0, t1) -> mn
+	println("max=t1:", time·equal(mx, t1))
+	println("min=t0:", time·equal(mn, t0))
+	time·elapsed_ms(t0) -> ms
+	time·elapsed_s(t0) -> s
+	println("elapsed_ms >= 0:", ms >= 0)
+	println("elapsed_s >= 0:", s >= 0)
+}

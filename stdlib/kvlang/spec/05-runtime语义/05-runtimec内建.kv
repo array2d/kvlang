@@ -51,9 +51,9 @@ runtime-c 的 myrwircaps**（见 [[runtime开发规范]]）——核心能就地
   语义不变；未注册特化时回退通用实现，不得静默改变语义。
 
 - `ndarray·`：`numel`、`dim`、`shape`。
-- `xv·`：`at`、`set`、`reshape`、`reinterpret`、`langtype`、`bodylen`。
+- `xv·`：`at`、`set`、`reshape`、`reinterpret`、`langtype`、`bodylen`、`parselangtype`。
 - `string·`：`set`、`char`、`ord`、`cmp`、`find`、`len`、`slice`、`concat`、`formatint`、
-  `formatuint`、`parseint`、`parseuint`。
+  `formatuint`、`parseint`、`parseuint`、`parsefloat`。
 - `time·`：`now`、`sub`、`add`、`before`、`after`。
 - `time/duration·`：`nanos`、`millis`、`seconds`、`minutes`、`hours`、`as_nanos`、`as_millis`、
   `as_seconds`、`as_minutes`、`as_hours`、`add`、`sub`、`before`、`after`。
@@ -66,11 +66,11 @@ runtime-c 的 myrwircaps**（见 [[runtime开发规范]]）——核心能就地
 锚例：`tutorial/13-stdlib/`（`kv`、`string`、`xv`、`math`、`time`、`duration` 六族）、
 `tutorial/04-ndarray/`（`xv_meta.kv`、`xv_reinterpret.kv`、`xv_shape.kv`）。
 
-## `print` / `println` / `cerr` / `input` 不是 native
+## `print` / `println` / `cerr` / `printf` / `input` 不是 native
 
-**规范要点**：`print`、`println`、`cerr`、`input` **不在** myrwircaps——它们是 **term runtime 的 rwir
+**规范要点**：`print`、`println`、`cerr`、`printf`、`input` **不在** myrwircaps——它们是 **term runtime 的 rwir
 （经 def rwir 路由，`/lib/<opcode>` kind=`def rwir`）**，经派发链第 4 级 `notinmyrwircaps` 命中（见
 [[runtime开发规范]]）。term 扩展与中央 runtime 同进程，就地 `ResolveRead` + display 直写宿主
-stdout/stderr。实现**不得**把这四个 opcode 当 myrwircaps 内处理。
+stdout/stderr。实现**不得**把这五个 opcode 当 myrwircaps 内处理。
 	"#### -> /lib/kvlang/spec/runtime语义/runtimec内建
 }
