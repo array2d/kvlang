@@ -39,6 +39,26 @@ static uint32_t *string_runes(const kvlangXvalue_t *v, int *out_n) {
 }
 
 static int write_char32(kvlangFrame_t *f, const uint32_t *r, int n) {
+    if (n >= 0 && n <= 16) {
+        uint8_t sbuf[128];
+        uint32_t blen = (uint32_t)n * 4;
+        memset(sbuf, 0, 64);
+        sbuf[0] = 6;
+        sbuf[1] = 1;
+        for (int i = 0; i < 4; i++) {
+            sbuf[2 + i] = (uint8_t)(blen >> (8 * i));
+            sbuf[10 + i] = (uint8_t)(blen >> (8 * i));
+        }
+        snprintf((char *)sbuf + XH_PREFIX, 64 - XH_PREFIX, "[%d]char/utf32", n);
+        for (int i = 0; i < n; i++) {
+            sbuf[64 + i * 4 + 0] = (uint8_t)(r[i] & 0xFF);
+            sbuf[64 + i * 4 + 1] = (uint8_t)((r[i] >> 8) & 0xFF);
+            sbuf[64 + i * 4 + 2] = (uint8_t)((r[i] >> 16) & 0xFF);
+            sbuf[64 + i * 4 + 3] = (uint8_t)((r[i] >> 24) & 0xFF);
+        }
+        kvlangXvalue_t e = {sbuf, 64 + blen};
+        return kvlangBuiltinWriteResult(f, &e);
+    }
     kvlangXvalue_t e;
     if (n > 0) {
         uint8_t *raw = malloc((size_t)n * 4);
@@ -87,6 +107,18 @@ int kvlangBuiltinStringSet(kvlangFrame_t *f) {
 int kvlangBuiltinStringChar(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     if (n < 2) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetError(f, "TypeError: string.char requires string and index"); }
+    if (!kvlangXvalueNone(&in[0]) && kvlangXvalueKindIs(&in[0], KVSPACE_KIND_CHAR)) {
+        int idx = (int)kvlangScalarI64(kvlangXvalueScalar(&in[1]));
+        int rn = (int)(xh_content_len_of(&in[0]) >> 2);
+        if (idx < 0 || idx >= rn) {
+            kvlangBuiltinFreeInputs(in, n);
+            return kvlangBuiltinSetError(f, "IndexError: at: index %d out of bounds (char count=%d)", idx, rn);
+        }
+        uint32_t one = kvlangXvalueChar32At(&in[0], idx);
+        int rc = write_char32(f, &one, 1);
+        kvlangBuiltinFreeInputs(in, n);
+        return rc;
+    }
     { const char *cerr = variable_length_char_error(kvlangXvalueKind(&in[0])); if (cerr) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetError(f, "%s", cerr); } }
     int idx = (int)kvlangScalarI64(kvlangXvalueScalar(&in[1]));
     int rn; uint32_t *r = string_runes(&in[0], &rn);
@@ -100,6 +132,13 @@ int kvlangBuiltinStringChar(kvlangFrame_t *f) {
 int kvlangBuiltinStringOrd(kvlangFrame_t *f) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     if (n < 1) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetError(f, "TypeError: string.ord requires a string"); }
+    if (!kvlangXvalueNone(&in[0]) && kvlangXvalueKindIs(&in[0], KVSPACE_KIND_CHAR)) {
+        int rn = (int)(xh_content_len_of(&in[0]) >> 2);
+        int64_t cp = rn == 0 ? -1 : (int64_t)kvlangXvalueChar32At(&in[0], 0);
+        int rc = kvlangBuiltinEmitInt64(f, cp);
+        kvlangBuiltinFreeInputs(in, n);
+        return rc;
+    }
     { const char *cerr = variable_length_char_error(kvlangXvalueKind(&in[0])); if (cerr) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetError(f, "%s", cerr); } }
     int rn; uint32_t *r = string_runes(&in[0], &rn);
     int rc = kvlangBuiltinEmitInt64(f, rn == 0 ? -1 : (int64_t)r[0]);free(r); kvlangBuiltinFreeInputs(in, n);

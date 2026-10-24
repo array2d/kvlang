@@ -68,23 +68,22 @@ typedef struct kvlangBodySlot {
 } kvlangBodySlot;
 
 typedef struct {
-    kvlangBoundCell_t *cell; /* [n] */
+    kvlangBoundCell_t *cell;
     int n;
     bool bound;
-    bool has_pin;          /* 本行有读 cell 落在写槽之下：执行后需释放 pin 副本 */
-    kvlangBodySlot *body; /* 定长标量写槽（候选行才有，owned） */
-    /* goto/br 目标 irseq：绑定期从 int64 字面量固化（0 = 不可用，执行期回退）。
-     * goto 用 [0]；br 用 [false]=[0]、[true]=[1]。不分配字符串：目标 PC 在
-     * 跳转时用帧根 + irseq 格式化到栈缓冲，避免每次函数调用都 malloc。 */
+    bool has_pin;
+    uint32_t reenter_gen;
+    kvlangBodySlot *body;
     int jump_irseq[2];
 } kvlangRowBind_t;
 
 typedef struct {
     char *frame_root;
     kvlangFuncCode_t *code;
-    kvlangRowBind_t *binds; /* 与 code->rows 平行 */
+    kvlangRowBind_t *binds;
     size_t binds_cap;
-    uint32_t epoch; /* 已同步的地址世代 */
+    uint32_t epoch;
+    uint32_t reenter_gen;
 } kvlangFrameCtx_t;
 
 /* ExecuteMode 内的函数缓存：func_dir -> 二维表 */
@@ -100,7 +99,10 @@ void kvlangFuncCacheFree(kvlangFuncCache_t *c);
 kvlangFrameCtx_t *kvlangFrameCtxNew(kvlangFuncCache_t *c, const char *func_dir,
                                     const char *frame_root);
 void kvlangFrameCtxFree(kvlangFrameCtx_t *ctx);
-/* 地址世代变化（删除/委托/handoff）后，帧内所有 keyoff 失效，执行时按 key 重绑。 */
+int kvlangFrameCtxReenter(kvspace_t *kv, kvlangFrameCtx_t *ctx,
+                          uint32_t epoch);
+int kvlangRowBindReenter(kvspace_t *kv, kvlangFrameCtx_t *ctx,
+                         kvlangCodeRow_t *row, kvlangRowBind_t *b);
 void kvlangFrameCtxSync(kvlangFrameCtx_t *ctx, uint32_t epoch);
 
 /* 定长标量写槽捕获：head 完全匹配才成功；失败置 dead（等该 key 被写后重试）。

@@ -206,6 +206,50 @@ static kvlangCodeRow_t *row_load(kvspace_t *kv, kvlangFuncCode_t *code, int s0,
         const kvlangRwirCap *cap = &kvlangRwirCaps()[row->opcode_id];
         row->result_kind = cap->result_kind;
         row->result_width = cap->result_width;
+        if (!row->result_kind) {
+            const char *wty = row->cell[row->nr].type;
+            if (wty && wty[0] && !strchr(wty, '|') && !strchr(wty, '[')) {
+                int tid = kvlangLangtypeId(wty, strlen(wty));
+                if (kvlangLangtypeIsNum(tid) || tid == KVLANG_LT_BOOL) {
+                    row->result_kind = kvlangLangtypeKind(tid);
+                    row->result_width = (uint32_t)kvlangLangtypeElemSize(tid);
+                }
+            } else {
+                static const char *const bool_ops[] = {
+                    "==", "!=", "≠", "<",  ">",  "<=", "≤",
+                    ">=", "≥",  "eq", "neq", "lt", "gt", "le", "ge",
+                };
+                for (size_t k = 0; k < sizeof bool_ops / sizeof bool_ops[0]; k++)
+                    if (strcmp(row->opcode, bool_ops[k]) == 0) {
+                        row->result_kind = KVSPACE_KIND_BOOL;
+                        row->result_width = 1;
+                        break;
+                    }
+                if (!row->result_kind &&
+                    (strcmp(row->opcode, "string·ord") == 0 ||
+                     strcmp(row->opcode, "string·len") == 0)) {
+                    row->result_kind = KVSPACE_KIND_INT64;
+                    row->result_width = 8;
+                }
+                if (!row->result_kind && strcmp(row->opcode, OP_COPY) == 0 &&
+                    row->nr == 1) {
+                    const char *rty = row->cell[0].type;
+                    if (!rty || !rty[0])
+                        rty = row->cell[0].is_literal
+                                  ? kvlangXvalueKind(&row->cell[0].literal)
+                                  : NULL;
+                    if (rty && rty[0] && !strchr(rty, '|') &&
+                        !strchr(rty, '[')) {
+                        int tid = kvlangLangtypeId(rty, strlen(rty));
+                        if (kvlangLangtypeIsNum(tid) || tid == KVLANG_LT_BOOL) {
+                            row->result_kind = kvlangLangtypeKind(tid);
+                            row->result_width =
+                                (uint32_t)kvlangLangtypeElemSize(tid);
+                        }
+                    }
+                }
+            }
+        }
     }
     return row;
 
@@ -246,6 +290,8 @@ static kvlangCodeRow_t *row_ensure(kvspace_t *kv, kvlangFrameCtx_t *ctx, int s0,
  * 状态放在每候选行一个 kvlangBodySlot，不放大每个操作数 cell。 */
 #define BODY_BUCKETS 256
 static kvlangBodySlot *body_buckets[BODY_BUCKETS];
+static uint64_t body_nonempty[4];
+static uint32_t body_reg_count;
 #ifdef KV_COUNT
 unsigned long kvCBodyCells, kvCBodyCellsMax;
 unsigned long kvCBodyCapAttempt, kvCBodyCapOk;
@@ -263,23 +309,27 @@ static uint32_t key_hash(const char *k) {
 static void body_unlink(kvlangBodySlot *slot) {
     if (!slot->reg)
         return;
-    kvlangBodySlot **pp = &body_buckets[slot->bucket];
+    uint32_t b = slot->bucket;
+    kvlangBodySlot **pp = &body_buckets[b];
     while (*pp && *pp != slot)
         pp = &(*pp)->next;
     if (*pp)
         *pp = slot->next;
+    if (!body_buckets[b])
+        body_nonempty[b >> 6] &= ~(1ULL << (b & 63));
     slot->reg = false;
     slot->next = NULL;
+    body_reg_count--;
 #ifdef KV_COUNT
     kvCBodyCells--;
 #endif
 }
 
 void kvlangBodyInvalidate(const char *key) {
-    if (!key)
+    if (!key || body_reg_count == 0)
         return;
-    for (kvlangBodySlot *c = body_buckets[key_hash(key) % BODY_BUCKETS]; c;
-         c = c->next)
+    uint32_t b = key_hash(key) % BODY_BUCKETS;
+    for (kvlangBodySlot *c = body_buckets[b]; c; c = c->next)
         if (strcmp(c->key, key) == 0) {
             c->ok = false;
             c->body = NULL;
@@ -289,14 +339,13 @@ void kvlangBodyInvalidate(const char *key) {
 
 void kvlangBodyInvalidateKind(const char *key, const uint8_t *langtype,
                               uint32_t langtype_len) {
-    if (!key)
+    if (!key || body_reg_count == 0)
         return;
-    for (kvlangBodySlot *c = body_buckets[key_hash(key) % BODY_BUCKETS]; c;
-         c = c->next)
+    uint32_t b = key_hash(key) % BODY_BUCKETS;
+    for (kvlangBodySlot *c = body_buckets[b]; c; c = c->next)
         if (strcmp(c->key, key) == 0) {
             c->ok = false;
             c->body = NULL;
-            /* 写入仍是别的 kind：别急着重试，等匹配的写再来。 */
             size_t kl = strlen(c->kind);
             c->dead = !(langtype && kl == langtype_len &&
                         memcmp(c->kind, langtype, kl) == 0);
@@ -304,19 +353,26 @@ void kvlangBodyInvalidateKind(const char *key, const uint8_t *langtype,
 }
 
 void kvlangBodyInvalidateTree(const char *prefix) {
-    if (!prefix)
+    if (!prefix || body_reg_count == 0)
         return;
     size_t n = strlen(prefix);
-    for (int b = 0; b < BODY_BUCKETS; b++)
-        for (kvlangBodySlot *c = body_buckets[b]; c; c = c->next)
-            if (strncmp(c->key, prefix, n) == 0 &&
-                (c->key[n] == 0 || c->key[n] == '/' ||
-                 strncmp(c->key + n, RUNTIME_MEMBER_SEP,
-                         sizeof RUNTIME_MEMBER_SEP - 1) == 0)) {
-                c->ok = false;
-                c->body = NULL;
-                c->dead = false;
-            }
+    for (int w = 0; w < 4; w++) {
+        uint64_t mask = body_nonempty[w];
+        while (mask) {
+            int bit = __builtin_ctzll(mask);
+            mask &= mask - 1;
+            int b = (w << 6) + bit;
+            for (kvlangBodySlot *c = body_buckets[b]; c; c = c->next)
+                if (strncmp(c->key, prefix, n) == 0 &&
+                    (c->key[n] == 0 || c->key[n] == '/' ||
+                     strncmp(c->key + n, RUNTIME_MEMBER_SEP,
+                             sizeof RUNTIME_MEMBER_SEP - 1) == 0)) {
+                    c->ok = false;
+                    c->body = NULL;
+                    c->dead = false;
+                }
+        }
+    }
 }
 
 /* frame_root 的 /vthread/<vid> 前缀（不含尾部 /）。 */
@@ -363,10 +419,13 @@ bool kvlangBodyCapture(kvspace_t *kv, kvlangBodySlot *slot,
     kvCBodyCapAttempt++;
 #endif
     if (!slot->reg) {
-        slot->bucket = key_hash(slot->key) % BODY_BUCKETS;
-        slot->next = body_buckets[slot->bucket];
-        body_buckets[slot->bucket] = slot;
+        uint32_t b = key_hash(slot->key) % BODY_BUCKETS;
+        slot->bucket = b;
+        slot->next = body_buckets[b];
+        body_buckets[b] = slot;
+        body_nonempty[b >> 6] |= 1ULL << (b & 63);
         slot->reg = true;
+        body_reg_count++;
 #ifdef KV_COUNT
         if (++kvCBodyCells > kvCBodyCellsMax)
             kvCBodyCellsMax = kvCBodyCells;
@@ -466,13 +525,29 @@ static bool key_under(const char *key, const char *base) {
            0;
 }
 
+static void compute_row_pins(const kvlangCodeRow_t *row, kvlangRowBind_t *b) {
+    b->has_pin = false;
+    bool xv_set = row->opcode && strcmp(row->opcode, "xv·set") == 0 &&
+                  row->nw == 1;
+    for (int i = 0; i < row->nr; i++) {
+        b->cell[i].pin = false;
+        if (b->cell[i].literal || (xv_set && i == 0))
+            continue;
+        for (int j = 0; j < row->nw; j++)
+            if (key_under(b->cell[i].key, b->cell[row->nr + j].key)) {
+                b->cell[i].pin = true;
+                b->has_pin = true;
+                break;
+            }
+    }
+}
+
 /* 帧层绑定：字面量只留行内值（不落 operand 槽、无 key/off）；
  * 描述符按本帧根解析成绝对 key。 */
 static int bind_row(kvspace_t *kv, kvlangFrameCtx_t *ctx, int s0,
                     kvlangCodeRow_t *row, kvlangRowBind_t *b, char *err,
                     uint32_t err_cap) {
     int n = row->nr + row->nw;
-    char *stack = kvlangKeytreeStack(ctx->frame_root);
     b->n = n;
     b->cell = calloc((size_t)(n ? n : 1), sizeof *b->cell);
     for (int i = 0; i < n; i++) {
@@ -520,25 +595,13 @@ static int bind_row(kvspace_t *kv, kvlangFrameCtx_t *ctx, int s0,
         wc->off.fast = slot;
         b->body = slot;
     }
-    /* 写槽会原地改写 key：同 key 或其后代的读视图须在执行前固化。
-     * 绑定期判定一次，热路径只多一个 flag 判断。字面量无槽，不可能被覆盖。 */
-    for (int i = 0; i < row->nr; i++) {
-        if (b->cell[i].literal)
-            continue;
-        for (int j = 0; j < row->nw; j++)
-            if (key_under(b->cell[i].key, b->cell[row->nr + j].key)) {
-                b->cell[i].pin = true;
-                b->has_pin = true;
-                break;
-            }
-    }
+    compute_row_pins(row, b);
     bind_jump_targets(row, b);
-    free(stack);
+    b->reenter_gen = ctx->reenter_gen;
     b->bound = true;
     return 0;
 
 fail:
-    free(stack);
     bind_free(b);
     return -1;
 }
@@ -567,6 +630,55 @@ void kvlangFrameCtxSync(kvlangFrameCtx_t *ctx, uint32_t epoch) {
         }
     }
     ctx->epoch = epoch;
+}
+
+int kvlangFrameCtxReenter(kvspace_t *kv, kvlangFrameCtx_t *ctx, uint32_t epoch) {
+    (void)kv;
+    ctx->reenter_gen++;
+    ctx->epoch = epoch;
+    return 0;
+}
+
+__attribute__((noinline)) int
+kvlangRowBindReenter(kvspace_t *kv, kvlangFrameCtx_t *ctx,
+                     kvlangCodeRow_t *row, kvlangRowBind_t *b) {
+    bool has_star = false;
+    for (int j = 0; j < b->n; j++) {
+        kvlangOperand_t *src = &row->cell[j];
+        kvlangBoundCell_t *cell = &b->cell[j];
+        if (cell->literal)
+            continue;
+        if (!src->key_absolute && src->descriptor &&
+            src->descriptor[0] == '*') {
+            char *nk =
+                kvlangRwirOperandTarget(kv, ctx->frame_root, src->descriptor);
+            if (!nk)
+                return -1;
+            if (!cell->key || strcmp(cell->key, nk) != 0) {
+                if (b->body && b->body->key == cell->key && b->body->reg)
+                    body_unlink(b->body);
+                free(cell->key);
+                cell->key = nk;
+                cell->off.key = nk;
+                if (b->body && j == row->nr)
+                    b->body->key = nk;
+                has_star = true;
+            } else {
+                free(nk);
+            }
+        }
+        cell->off.resolved =
+            kvspaceResolveRef(kv->handle, cell->key, &cell->off.off) == 0;
+    }
+    if (b->body) {
+        b->body->ok = false;
+        b->body->body = NULL;
+        b->body->dead = false;
+    }
+    if (has_star)
+        compute_row_pins(row, b);
+    b->reenter_gen = ctx->reenter_gen;
+    return 0;
 }
 
 void kvlangFrameCtxFree(kvlangFrameCtx_t *ctx) {
@@ -602,8 +714,15 @@ kvlangRowBind_t *kvlangFrameRow(kvspace_t *kv, kvlangFrameCtx_t *ctx, int s0,
         ctx->binds_cap = nc;
     }
     kvlangRowBind_t *b = &ctx->binds[s0];
-    if (!b->bound && bind_row(kv, ctx, s0, row, b, err, err_cap) != 0)
-        return NULL;
+    if (!b->bound) {
+        if (bind_row(kv, ctx, s0, row, b, err, err_cap) != 0)
+            return NULL;
+    } else if (b->reenter_gen != ctx->reenter_gen) {
+        if (kvlangRowBindReenter(kv, ctx, row, b) != 0) {
+            snprintf(err, err_cap, "Runtime: cannot rebind row [%d,0]", s0);
+            return NULL;
+        }
+    }
     *row_out = row;
     return b;
 }

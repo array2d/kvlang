@@ -114,17 +114,63 @@ static void count_report(void) {
 #define COUNT_REPORT() do {} while (0)
 #endif
 
-/* 帧的 ‥lib：函数目录路径（owned）。 */
-static char *frame_func_dir(kvspace_t *kv, const char *frame_root) {
-    char *stack = kvlangKeytreeStack(frame_root);
-    char key[KV_KEY_MAX];
-    kvlangKeyFormat(key, sizeof key, "%s%s", stack, SEG_LIB);
-    free(stack);
+__attribute__((noinline)) static bool
+frame_func_dir_buf(kvspace_t *kv, const char *frame_root, char *out,
+                   size_t cap) {
+    char stk[KV_KEY_MAX], key[KV_KEY_MAX];
+    if (!kvlangKeytreeStackBuffer(frame_root, stk, sizeof stk))
+        return false;
+    kvlangKeyFormat(key, sizeof key, "%s%s", stk, SEG_LIB);
     kvlangXvalue_t v;
     kvlangXvalueZero(&v);
     kvlangKvspaceGetOne(kv, key, &v);
-    char *dir = kvlangXvalueNone(&v) ? NULL : kvlangXvalueValueString(&v);
-    return dir;
+    if (kvlangXvalueNone(&v) || !kvlangXvalueKindIs(&v, KVSPACE_KIND_CHAR_UTF8))
+        return false;
+    const char *src = (const char *)xh_body(v.bytes);
+    size_t n = (size_t)xh_content_len(v.bytes);
+    while (n > 0 && src[n - 1] == '/')
+        n--;
+    if (n == 0 || n + 2 > cap)
+        return false;
+    memcpy(out, src, n);
+    out[n] = '/';
+    out[n + 1] = 0;
+    return true;
+}
+
+__attribute__((noinline)) static int
+switch_frame_ctx(kvspace_t *kv, const char *vtid, const char *cur,
+                 const char *cur_frame, int depth, int last_depth,
+                 uint32_t addr_epoch, kvlangFuncCache_t *fcache,
+                 kvlangFrameCtx_t **fctx) {
+    if (depth > last_depth) {
+        char fdir[KV_KEY_MAX];
+        if (!frame_func_dir_buf(kv, cur_frame, fdir, sizeof fdir))
+            return execute_error(kv, vtid, cur,
+                                 "RuntimeError: frame has no ‥lib: %s",
+                                 cur_frame);
+        if (fctx[depth] &&
+            strcmp(fctx[depth]->frame_root, cur_frame) == 0 &&
+            strcmp(fctx[depth]->code->func_dir, fdir) == 0 &&
+            kvlangFrameCtxReenter(kv, fctx[depth], addr_epoch) == 0)
+            return 0;
+        kvlangFrameCtxFree(fctx[depth]);
+        fctx[depth] = kvlangFrameCtxNew(fcache, fdir, cur_frame);
+        return 0;
+    }
+    if (fctx[depth] && strcmp(fctx[depth]->frame_root, cur_frame) != 0) {
+        kvlangFrameCtxFree(fctx[depth]);
+        fctx[depth] = NULL;
+    }
+    if (!fctx[depth]) {
+        char fdir[KV_KEY_MAX];
+        if (!frame_func_dir_buf(kv, cur_frame, fdir, sizeof fdir))
+            return execute_error(kv, vtid, cur,
+                                 "RuntimeError: frame has no ‥lib: %s",
+                                 cur_frame);
+        fctx[depth] = kvlangFrameCtxNew(fcache, fdir, cur_frame);
+    }
+    return 0;
 }
 
 __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
@@ -208,11 +254,10 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
         }
         const char *cur = have_fb ? fb_b[fb_i] : cur_b;
         have_fb = false;
-        /* Observe external status changes on every step. */
         if (!kvspaceKeyOffRead(&status_off, status_b, sizeof status_b))
             break;
         const char *status = status_b;
-        if (strcmp(status, "init") != 0 && strcmp(status, "running") != 0 &&
+        if (strcmp(status, "running") != 0 && strcmp(status, "init") != 0 &&
             strcmp(status, "wait") != 0) {
             break;
         }
@@ -228,36 +273,19 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
                 break;
             }
             if (depth != last_depth) {
-                /* 帧变：变深=call（新帧）；变浅=return（更深的帧已删，本帧可复用）。 */
                 if (!kvlangKeytreeFrameRootBuffer(cur, fr_stk, sizeof fr_stk)) {
                     rc = execute_error(kv, vtid, cur,
                                        "RuntimeError: invalid pc: %s", cur);
                     break;
                 }
                 cur_frame = fr_stk;
-                for (int d = depth + 1; d <= last_depth && d <= MAX_STACK_DEPTH;
-                     d++) {
-                    kvlangFrameCtxFree(fctx[d]);
-                    fctx[d] = NULL;
-                }
-                if (fctx[depth] &&
-                    strcmp(fctx[depth]->frame_root, cur_frame) != 0) {
-                    kvlangFrameCtxFree(fctx[depth]);
-                    fctx[depth] = NULL;
-                }
-                /* 模板里的 name/type/off 借用自 ctx 的 bind：ctx 释放即作废。 */
                 tpl_bind = NULL;
                 tpl_row = NULL;
-                if (!fctx[depth]) {
-                    char *func_dir = frame_func_dir(kv, cur_frame);
-                    if (!func_dir) {
-                        rc = execute_error(kv, vtid, cur,
-                                           "RuntimeError: frame has no ‥lib: %s",
-                                           cur_frame);
-                        break;
-                    }
-                    fctx[depth] = kvlangFrameCtxNew(&fcache, func_dir, cur_frame);
-                    free(func_dir);
+                if (switch_frame_ctx(kv, vtid, cur, cur_frame, depth,
+                                     last_depth, addr_epoch, &fcache,
+                                     fctx) != 0) {
+                    rc = -1;
+                    break;
                 }
                 last_depth = depth;
             }
@@ -286,16 +314,16 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
 
         char err[256];
         err[0] = 0;
-        /* P0-2：目标行已加载/已绑定 → 直接复用 row/bind，不再走
-         * kvlangFrameRow（省一次函数调用与双重边界检查）。 */
         if ((size_t)irseq < ctx->code->rows_cap &&
             (size_t)irseq < ctx->binds_cap &&
             (row = ctx->code->rows[irseq]) != NULL &&
-            ctx->binds[irseq].bound) {
+            ctx->binds[irseq].bound &&
+            ctx->binds[irseq].reenter_gen == ctx->reenter_gen) {
             bind = &ctx->binds[irseq];
         } else {
             row = NULL;
             bind = kvlangFrameRow(kv, ctx, irseq, &row, err, sizeof err);
+            tpl_bind = NULL;
         }
         if (!bind || !row->opcode || !row->opcode[0]) {
             /* layout 对每条路径都补了 return；走到空槽只能是 /lib 损坏或 goto/br 越界。 */
