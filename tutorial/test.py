@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""kvlang tutorial test — 从 .kv 文件 # 期望输出 头注释自动生成测试。"""
+"""kvlang tutorial test — 从 .kv 文件 # 期望输出 头注释自动生成测试。
+
+运行依赖（macOS）：
+  - `kvspace` CLI 必须在 PATH：共享后端每用例前由它清空；
+  - DYLD_LIBRARY_PATH 需含 kvspace 前缀的 lib 与 lib/kvspace，以及本仓 bin/。
+缺任何一项都会以明确错误中止，而不是在未清理的后端上继续跑。
+"""
 
 from __future__ import annotations
 
@@ -81,19 +87,35 @@ def discover(root: Path) -> list[Path]:
 
 
 def parse_expects(f: Path) -> list[str]:
-    """从 .kv 文件头提取 // 期望输出 行，去掉注释前缀和尾部说明。"""
+    """从 .kv 文件头提取 // 期望输出，支持行内与块两种形态。
+
+    行内： // 期望输出: a, b
+    块：   // 期望输出:
+           //   a
+           //   b
+    行尾的「（说明）」只在其前面还有内容时才剥离，避免把 `(())` 这类输出本身删掉。
+    """
+    tail_note = re.compile(r"(?<=\S)\s+\([^()]*\)\s*$")
     pats = []
     in_block = False
     with open(f) as fh:
         for line in fh:
             line = line.rstrip("\n")
             if line.startswith("// 期望输出"):
+                inline = line[len("// 期望输出") :].lstrip()
+                if inline.startswith(":"):
+                    inline = inline[1:].strip()
+                if inline:
+                    for part in inline.split(","):
+                        p = tail_note.sub("", part.strip()).strip()
+                        if p:
+                            pats.append(p)
+                    continue
                 in_block = True
                 continue
             if in_block:
                 if line.startswith("//   ") or line.startswith("// \t"):
-                    p = line[3:].strip()
-                    p = re.sub(r"\s*\(.*\)\s*$", "", p)
+                    p = tail_note.sub("", line[3:].strip()).strip()
                     if p:
                         pats.append(p)
                 elif not line.startswith("//"):
@@ -113,14 +135,21 @@ def _needs_skip(f: Path) -> bool:
 
 
 def _flush_backend() -> None:
+    """清空共享后端。失败必须中止：未清理会让后续用例在脏状态上跑。"""
     try:
-        subprocess.run(
+        r = subprocess.run(
             ["kvspace", "clear"],
-            capture_output=True, timeout=10,
+            capture_output=True, text=True, timeout=60,
             env={**os.environ, "KVSPACE": _C_DSN},
         )
     except FileNotFoundError:
-        pass
+        raise SystemExit(
+            "kvspace CLI not found in PATH; set PATH to the kvspace prefix bin"
+        )
+    if r.returncode != 0:
+        raise SystemExit(
+            f"kvspace clear failed ({r.returncode}): {r.stderr.strip()[:200]}"
+        )
 
 
 def _extract_bench_us(stdout: str) -> tuple[str, float]:
