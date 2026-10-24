@@ -51,7 +51,7 @@ endif()
 
 if(NOT APPLE)
     enable_testing()
-    foreach(test_name test_getmember_siblings test_kvset_invalid_head test_pc_kvspace_source test_crash_resume test_param_address delegate_test test_scalar_encode test_pc_part_write test_ro_rewrite)
+    foreach(test_name test_getmember_siblings test_kvset_invalid_head test_pc_kvspace_source test_crash_resume test_param_address delegate_test test_scalar_encode test_pc_part_write test_ro_rewrite test_keytree_irseq_pc)
         add_custom_command(
             OUTPUT "${BIN_DIR}/${test_name}"
             COMMAND ${CMAKE_C_COMPILER} -O2 -D_GNU_SOURCE
@@ -77,6 +77,7 @@ if(NOT APPLE)
     add_test(NAME param_address_fs COMMAND "${BIN_DIR}/test_param_address")
     add_test(NAME delegate_shm COMMAND "${BIN_DIR}/delegate_test")
     add_test(NAME scalar_encode COMMAND "${BIN_DIR}/test_scalar_encode")
+    add_test(NAME keytree_irseq_pc COMMAND "${BIN_DIR}/test_keytree_irseq_pc")
     add_test(NAME pc_part_write_shm COMMAND "${BIN_DIR}/test_pc_part_write")
     add_test(NAME pc_part_write_fs COMMAND "${BIN_DIR}/test_pc_part_write")
     add_test(NAME ro_rewrite_shm COMMAND "${BIN_DIR}/test_ro_rewrite")

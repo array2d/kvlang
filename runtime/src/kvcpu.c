@@ -379,6 +379,7 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
         f.pc_out = fb_b[fb_i ^ 1];
         f.status_known = status; /* 本步开始前读到的 ‥status（源值，借用） */
         f.row = row;
+        f.bind = bind;
         f.yield_pc = &yield;
         f.persist_failed = false;
         f.pc_feedback = false;
@@ -388,7 +389,9 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
         exec_err = caps[row->handler_id].fn(&f);
         if (f.persist_failed)
             exec_err = -1;
-        if (cursor.dirty)
+        if (cursor.jump)
+            cursor.jump = false; /* goto/br 已把游标设为目标：不自增、不重解析 */
+        else if (cursor.dirty)
             cursor_ok = false; /* 帧/irseq 结构可能变化：下步重新解析 */
         else
             cursor.irseq++; /* 顺序推进：只允许 BuiltinNextPc 走到这里 */

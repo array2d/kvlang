@@ -73,6 +73,10 @@ typedef struct {
     bool bound;
     bool has_pin;          /* 本行有读 cell 落在写槽之下：执行后需释放 pin 副本 */
     kvlangBodySlot *body; /* 定长标量写槽（候选行才有，owned） */
+    /* goto/br 目标 irseq：绑定期从 int64 字面量固化（0 = 不可用，执行期回退）。
+     * goto 用 [0]；br 用 [false]=[0]、[true]=[1]。不分配字符串：目标 PC 在
+     * 跳转时用帧根 + irseq 格式化到栈缓冲，避免每次函数调用都 malloc。 */
+    int jump_irseq[2];
 } kvlangRowBind_t;
 
 typedef struct {

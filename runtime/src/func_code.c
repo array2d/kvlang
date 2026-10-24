@@ -410,6 +410,36 @@ bool kvlangBodyCapture(kvspace_t *kv, kvlangBodySlot *slot,
     return true;
 }
 
+/* goto/br：目标 irseq 是 layout 写死的 int64 字面量，本帧内恒定。
+ * 绑定期只固化 irseq（不分配字符串）；异常形状保持 0，执行期回退动态路径。 */
+static void bind_jump_targets(kvlangCodeRow_t *row, kvlangRowBind_t *b) {
+    if (!row->opcode || row->nw != 0)
+        return;
+    /* br 的读参顺序：cond, true, false；jump_pc[0]=false、[1]=true。 */
+    int which[2] = {0, 0};
+    int n = 0;
+    if (strcmp(row->opcode, OP_GOTO) == 0 && row->nr == 1) {
+        which[0] = 0;
+        n = 1;
+    } else if (strcmp(row->opcode, OP_BR) == 0 && row->nr == 3) {
+        which[0] = 2;
+        which[1] = 1;
+        n = 2;
+    } else {
+        return;
+    }
+    for (int k = 0; k < n; k++) {
+        kvlangOperand_t *src = &row->cell[which[k]];
+        if (!src->is_literal || kvlangXvalueNone(&src->literal) ||
+            !kvlangXvalueKindIs(&src->literal, KVSPACE_KIND_INT64))
+            continue;
+        int64_t ir = kvlangScalarI64(kvlangXvalueScalar(&src->literal));
+        if (ir < 1 || ir > 0x7fffffff)
+            continue;
+        b->jump_irseq[k] = (int)ir;
+    }
+}
+
 static void bind_free(kvlangRowBind_t *b) {
     if (b->body) {
         if (b->body->reg)
@@ -502,6 +532,7 @@ static int bind_row(kvspace_t *kv, kvlangFrameCtx_t *ctx, int s0,
                 break;
             }
     }
+    bind_jump_targets(row, b);
     free(stack);
     b->bound = true;
     return 0;
