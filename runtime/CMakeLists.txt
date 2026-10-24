@@ -27,6 +27,11 @@ add_library(kvlang_runtime SHARED ${KVLANG_RUNTIME_SRC})
 target_include_directories(kvlang_runtime PUBLIC include src)
 target_compile_definitions(kvlang_runtime PRIVATE _GNU_SOURCE)
 
+option(KVLANG_DEBUG_TYPES "P1b3: assert typed-core slot kinds (test build)" OFF)
+if(KVLANG_DEBUG_TYPES)
+    target_compile_definitions(kvlang_runtime PRIVATE KV_DEBUG_TYPES)
+endif()
+
 # 链接 kvspace dispatch 前端（与后端同装 <prefix>/lib/kvspace），运行期按 DSN 选后端，编译期不再选后端。
 # KVSPACE_LIB_DIR 可覆盖安装目录：macOS 的 /usr 受 SIP 保护，应指向 <prefix>/lib/kvspace。
 set(KVSPACE_LIB_DIR "/usr/lib/kvspace" CACHE PATH "kvspace dispatch 前端安装目录")
@@ -84,6 +89,17 @@ if(NOT APPLE)
     add_test(NAME coercion COMMAND bash "${CMAKE_SOURCE_DIR}/tests/coercion.sh")
     add_test(NAME dyn_specialize COMMAND bash "${CMAKE_SOURCE_DIR}/tests/dyn_specialize.sh")
     add_test(NAME isa_gate COMMAND bash "${CMAKE_SOURCE_DIR}/tests/isa_gate.sh")
+    add_test(NAME isa_typed_violation
+             COMMAND bash "${CMAKE_SOURCE_DIR}/tests/isa_typed_violation.sh")
+    set_tests_properties(isa_typed_violation PROPERTIES SKIP_RETURN_CODE 77
+        ENVIRONMENT "KVSPACE_BACKEND_PATH=${KVSPACE_LIB_DIR};KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/kvlang")
+    find_program(PYTHON3_EXE python3)
+    if(PYTHON3_EXE)
+        add_test(NAME isa_conformance
+                 COMMAND "${PYTHON3_EXE}" "${CMAKE_SOURCE_DIR}/tests/isa_conformance.py")
+        set_tests_properties(isa_conformance PROPERTIES
+            ENVIRONMENT "KVSPACE_BACKEND_PATH=${KVSPACE_LIB_DIR};KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/kvlang")
+    endif()
     add_test(NAME specialize_gate COMMAND bash "${CMAKE_SOURCE_DIR}/tests/specialize_gate.sh")
     set_tests_properties(getmember_siblings kvset_invalid_head_shm pc_kvspace_source_shm crash_resume_shm param_address_shm delegate_shm scalar_encode pc_part_write_shm ro_rewrite_shm
         PROPERTIES ENVIRONMENT "KVSPACE_BACKEND_PATH=${KVSPACE_LIB_DIR};KVLANG_TEST_SCHEME=shm")

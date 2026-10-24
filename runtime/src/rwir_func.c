@@ -212,6 +212,44 @@ void kvlangBuiltinNextPc(kvlangFrame_t *f) {
         f->cursor->dirty = false;
 }
 
+/* 写槽公共尾巴：失效 body 缓存 → ByRef 整值写 → 失败回退按 key 写 → NextPc。
+ * 调用方负责：coerce（WriteResult）或 kind 已定型（Typed）与 body 快路径。 */
+static inline __attribute__((always_inline)) void
+write_value_to_slot(kvlangFrame_t *f, const kvlangXvalue_t *v) {
+    kvspaceKeyOff *wo = f->instruction->write_offs
+                            ? f->instruction->write_offs[0]
+                            : NULL;
+    if (wo && v->bytes && v->length >= XH_PREFIX)
+        kvlangBodyInvalidateKind(wo->key, xh_langtype(v->bytes),
+                                 xh_langtype_len(v->bytes));
+    else if (wo)
+        kvlangBodyInvalidate(wo->key);
+    if (wo && v->bytes && v->length > 0 &&
+        kvspaceKeyOffSet(wo, v->bytes, v->length, NULL, 0) == 0) {
+        kvlangBuiltinNextPc(f);
+        return;
+    }
+    char *owned = NULL;
+    const char *fr = f->frame_root;
+    if (!fr) {
+        owned = kvlangKeytreeFrameRoot(f->pc);
+        fr = owned;
+    }
+    char *key = kvlangBuiltinResolveWriteSlot(f->kvspace, fr,
+                                              f->instruction->writes[0].name);
+    free(owned);
+    if (v->bytes && v->length >= XH_PREFIX)
+        kvlangBodyInvalidateKind(key, xh_langtype(v->bytes),
+                                 xh_langtype_len(v->bytes));
+    else
+        kvlangBodyInvalidate(key);
+    kvlangKvPair_t pair = {key, *v};
+    char err[256];
+    kvlangKvspaceSet(f->kvspace, &pair, 1, err, sizeof err);
+    free(key);
+    kvlangBuiltinNextPc(f);
+}
+
 int kvlangBuiltinWriteResult(kvlangFrame_t *f, const kvlangXvalue_t *result) {
 #ifdef KV_COUNT
     if (f->instruction->write_count > 0)
@@ -234,35 +272,46 @@ int kvlangBuiltinWriteResult(kvlangFrame_t *f, const kvlangXvalue_t *result) {
                     return 0;
             }
         }
-        kvspaceKeyOff *wo = f->instruction->write_offs
-                                ? f->instruction->write_offs[0]
-                                : NULL;
-        if (wo && cv.bytes && cv.length >= XH_PREFIX)
-            kvlangBodyInvalidateKind(wo->key, xh_langtype(cv.bytes),
-                                     xh_langtype_len(cv.bytes));
-        else if (wo)
-            kvlangBodyInvalidate(wo->key);
-        if (wo && cv.bytes && cv.length > 0 &&
-            kvspaceKeyOffSet(wo, cv.bytes, cv.length, NULL, 0) == 0) {
-            kvlangBuiltinNextPc(f);
-            return 0;
-        }
-        char *owned = NULL;
-        const char *fr = f->frame_root;
-        if (!fr) { owned = kvlangKeytreeFrameRoot(f->pc); fr = owned; }
-        char *key = kvlangBuiltinResolveWriteSlot(f->kvspace, fr, f->instruction->writes[0].name);
-        free(owned);
-        if (cv.bytes && cv.length >= XH_PREFIX)
-            kvlangBodyInvalidateKind(key, xh_langtype(cv.bytes),
-                                     xh_langtype_len(cv.bytes));
-        else
-            kvlangBodyInvalidate(key);
-        kvlangKvPair_t pair = { key, cv };
-        char err[256];
-        kvlangKvspaceSet(f->kvspace, &pair, 1, err, sizeof err);
-        free(key);
+        write_value_to_slot(f, &cv);
+        return 0;
     }
     kvlangBuiltinNextPc(f);
+    return 0;
+}
+
+/* P1b3：typed_core 写原语。结果 kind 已由 layout/manifest 定型，跳过
+ * CoerceAssign（不做转换/分派）；调用方已先试 WriteBody 快路径。 */
+__attribute__((visibility("hidden"))) int
+kvlangBuiltinWriteResultTyped(kvlangFrame_t *f, const kvlangXvalue_t *v,
+                              const char *kind) {
+#ifdef KV_DEBUG_TYPES
+    /* 写入侧断言：结果 head kind 必须等于 manifest kind；非空目标槽若已有
+     * 值，其 kind 也必须一致（typed 槽不混型）。 */
+    if (v->bytes && v->length >= XH_PREFIX &&
+        (xh_langtype_len(v->bytes) != strlen(kind) ||
+         memcmp(xh_langtype(v->bytes), kind, strlen(kind)) != 0))
+        kvlangDie("typed write %s: result kind %.*s != manifest %s",
+                  f->instruction->opcode, (int)xh_langtype_len(v->bytes),
+                  (const char *)xh_langtype(v->bytes), kind);
+    kvspaceKeyOff *wo = f->instruction->write_offs
+                            ? f->instruction->write_offs[0]
+                            : NULL;
+    if (wo && wo->resolved) {
+        uint8_t *cur = NULL;
+        uint32_t cur_len = 0;
+        if (kvspaceGetByRef(f->kvspace->handle, &wo->off, wo->key, &cur,
+                            &cur_len) == 0 &&
+            cur && cur_len >= XH_PREFIX) {
+            if (xh_langtype_len(cur) != strlen(kind) ||
+                memcmp(xh_langtype(cur), kind, strlen(kind)) != 0)
+                kvlangDie("typed write %s: slot has kind %.*s != manifest %s",
+                          f->instruction->opcode,
+                          (int)xh_langtype_len(cur),
+                          (const char *)xh_langtype(cur), kind);
+        }
+    }
+#endif
+    write_value_to_slot(f, v);
     return 0;
 }
 
@@ -302,6 +351,8 @@ static int emit_inline_scalar(kvlangFrame_t *f, const char *kind,
     uint8_t buf[64];
     uint32_t n = kvlangScalarEncode(kind, raw, len, buf, sizeof buf);
     kvlangXvalue_t v = {buf, n};
+    if (f->instruction && f->instruction->typed_core)
+        return kvlangBuiltinWriteResultTyped(f, &v, kind);
     return kvlangBuiltinWriteResult(f, &v); /* 栈缓冲，不 free */
 }
 

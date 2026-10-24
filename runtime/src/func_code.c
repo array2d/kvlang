@@ -190,6 +190,17 @@ static kvlangCodeRow_t *row_load(kvspace_t *kv, kvlangFuncCode_t *code, int s0,
     }
     row->handler_id =
         row->opcode_id >= 0 ? row->opcode_id : kvlangRwirRouteId();
+    /* P1b3 typed_core：manifest core 具体项 = 签名列 BIN/CMP/UN（156 项）。
+     * 装载期一次固化，执行期不查 manifest。 */
+    if (row->opcode_id >= 0) {
+        uint32_t nsig = 0;
+        const kvlangIsaSig *sg = kvlangIsaSigs(&nsig);
+        if ((uint32_t)row->opcode_id < nsig) {
+            uint8_t k = sg[row->opcode_id].sig;
+            row->typed_core =
+                k == KV_ISA_BIN || k == KV_ISA_CMP || k == KV_ISA_UN;
+        }
+    }
     /* 结果类型只取自同一张能力表；nw>1 不进快路径。 */
     if (row->opcode_id >= 0 && row->nw == 1) {
         const kvlangRwirCap *cap = &kvlangRwirCaps()[row->opcode_id];
@@ -452,8 +463,9 @@ static int bind_row(kvspace_t *kv, kvlangFrameCtx_t *ctx, int s0,
                      "Runtime: cannot resolve operand %d at [%d,0]", i, s0);
             goto fail;
         }
-        /* typed 读视图的 kind id 在绑定期解析一次，热路径不再扫 langtype 表。 */
-        if (cell->type && cell->type[0]) {
+        /* typed 读视图的 kind id 在绑定期解析一次，热路径不再扫 langtype 表。
+         * P1b3：typed_core row 的 kind 由 layout 保证，不建读侧转换视图。 */
+        if (!row->typed_core && cell->type && cell->type[0]) {
             int tid = kvlangLangtypeId(cell->type, strlen(cell->type));
             if (kvlangLangtypeIsNum(tid) || tid == KVLANG_LT_BOOL) {
                 cell->coerce_tid = tid;
