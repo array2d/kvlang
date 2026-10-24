@@ -46,6 +46,19 @@ typedef struct {
     uint32_t parent_id;
     uint32_t depth;
 } kvspaceRef_t;
+
+/* Match kvspaceSlotView_t in the KVSpace C ABI（shm-only）。 */
+typedef struct {
+    uint8_t *head;
+    uint32_t headlen;
+    uint8_t *body;
+    uint64_t body_cap;
+    uint64_t cap;
+} kvspaceSlotView_t;
+/* 0=成功；-1=不存在/不可视；-2=后端不支持。key_fallback 必填。 */
+extern int kvspaceSlotView(void *h, const kvspaceRef_t *ref,
+                           const char *key_fallback, kvspaceSlotView_t *out);
+
 extern int kvspaceResolveRef(void *h, const char *key, kvspaceRef_t *ref);
 extern int kvspaceGetByRef(void *h, kvspaceRef_t *ref, const char *key_fallback,
                            uint8_t **out, uint32_t *out_len);
@@ -146,6 +159,7 @@ typedef struct {
     bool shm;        /* DSN scheme == shm：允许 body 就地写快路径 */
     void *isa_handle; /* P1a 控制 store 句柄；NULL/同 handle 表示与数据 store 同库 */
     bool isa_shared; /* isa_handle == handle（redis：控制键共用数据 store） */
+    bool slotview_unsupported; /* slot view 返回 -2：本句柄永久回退 */
 } kvspace_t;
 
 /* ── 字符串工具 ──────────────────────────────────────────────────────

@@ -111,7 +111,9 @@ int kvlangVthreadSet(kvspace_t *kv, const char *vtid, const char *pc,
 
 /* 槽容量：pc 常态长度一档、status 更短一档；超长值退回全尺寸，仍不截断。 */
 #define VT_PC_SLACK_CAP 256
-#define VT_STATUS_SLACK_CAP 32
+/* status 固定档：b=16 使 wire 总长 64+16=80，与后端物理容量下限一致；
+ * 超过 16 的写入由后端硬错（persist_failed），不再用更大 cap 扩容。 */
+#define VT_STATUS_SLACK_CAP 16
 #define VT_SLACK_MAX_CAP KV_KEY_MAX
 
 /* PC 槽缓存：shm 下每步只 part-write `[2, 64+len)`（等价值写），不重编码、
