@@ -425,6 +425,12 @@ int kvlangBuiltinExecuteCopy(kvlangFrame_t *f) {
         }
         kvspaceKeyOff *wo =
             inst->write_offs ? inst->write_offs[i] : NULL;
+        /* 整值写可能移动 box：先按同一规则失效 body/operand view。 */
+        if (wo && cv.bytes && cv.length >= XH_PREFIX)
+            kvlangBodyInvalidateKind(wo->key, xh_langtype(cv.bytes),
+                                     xh_langtype_len(cv.bytes));
+        else if (wo)
+            kvlangBodyInvalidate(wo->key);
         if (wo && cv.bytes && cv.length > 0 &&
             kvspaceKeyOffSet(wo, cv.bytes, cv.length, NULL, 0) == 0)
             continue;

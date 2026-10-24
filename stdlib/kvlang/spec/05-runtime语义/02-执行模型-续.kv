@@ -31,6 +31,19 @@ runtime **不得**另存独立的调用栈结构：嵌套帧路径本身即调�
 字节不属于值）。后端不支持 part-write 或写失败时**必须**回退整值写，并成功后就地重绑定。外部
 `set`/`watch` 看到的值不变：仍是那条 UTF-8 串。
 
+## 操作数只读 view
+
+runtime **可以**为本 vthread 帧子树内、`FIXED_SMALL` 的 typed 行读槽缓存
+head/body 指针（仅 shm 后端）。缓存是纯观测量，任何路径读到的值必须与
+`GetByRef` 一致。
+
+- 外部对同一 key 的**同类型、同尺寸**写是原地覆写，view 必须读到新值。
+- runtime 自身写该 key：等长 body 快写不改变槽地址，view 继续有效；整值
+  写、删除、树操作必须使 view 失效并重新获取。
+- 外部删除或改变尺寸/类型导致槽移动属**契约外**，runtime 不承诺检测。
+- 非 shm 后端、非帧内槽、非 typed 行**不得**使用 view，必须走
+  `GetByRef`。
+
 ## vthread
 
 vthread 是 kvlang 的执行线程，句柄为整数 `vid`，根在 `/vthread/<vid>/`。进程与 vid 为 1:1（当前驱动

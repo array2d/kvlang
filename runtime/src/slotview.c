@@ -1,6 +1,7 @@
 /* P1b4-b1a：shm slot view 的 runtime 薄封装（晚链接 TU，控制热 TU 布局）。 */
 
 #include "slotview.h"
+#include "func_code.h"
 
 __attribute__((visibility("hidden"))) int
 kvlangSlotViewBind(kvspace_t *kv, kvspaceKeyOff *ko,
@@ -148,5 +149,118 @@ kvlangPcViewWrite(kvlangFrame_t *f, kvspaceKeyOff *ko, const char *pc,
         return pc_fallback(st);
     }
     memcpy(st->view.body, pc, len);
+    return 1;
+}
+
+/* ── T-120 A：lazy operand 只读 view ────────────────────────────────── */
+
+/* kind/width 由 row 装载期固化（见 kvlangCodeRow_t.view_pack）。
+ * pin cell 允许：pin 只在 handler 前把读值 copy 一份，view 在慢写后由既有
+ * Invalidate* 失效；iops 的 `a = a + 1` 读参正是 pin。 */
+
+/* 提升：一次 calloc + capture。失败解注册并释放，调用方清零计数重来。 */
+#ifdef KV_COUNT
+unsigned long kvCReadViewProm, kvCReadViewDemote, kvCReadViewHit;
+#endif
+
+static bool rv_promote(kvspace_t *kv, kvlangBoundCell_t *cell) {
+    kvlangBodySlot *slot = calloc(1, sizeof *slot);
+    if (!slot)
+        return false;
+    slot->key = cell->key;
+    slot->kind = kvlangLangtypeKind(cell->view.kind);
+    slot->width = cell->view.width;
+    slot->off = &cell->off;
+    /* 读 cell 的 key 是帧内绝对路径；显式取 /vthread/<vid> 前缀交给
+     * capture（global/绝对 key 取不到前缀 → 拒绝提升，不隐式借用 key）。 */
+    char root[KV_KEY_MAX];
+    if (!slot->kind || !slot->kind[0] || !slot->width ||
+        !kvlangVthreadRootOfKey(cell->key, root, sizeof root) ||
+        !kvlangBodyCapture(kv, slot, root)) {
+        kvlangBodySlotRelease(slot);
+        return false;
+    }
+    slot->ref = cell->off.off;
+    cell->off.fast = slot;
+#ifdef KV_COUNT
+    kvCReadViewProm++;
+#endif
+    cell->view.hits = KV_READ_VIEW_RECHECK;
+    cell->view_state = 2;
+    return true;
+}
+
+static void rv_demote(kvlangBoundCell_t *cell) {
+#ifdef KV_COUNT
+    kvCReadViewDemote++;
+#endif
+    kvlangBodySlotRelease((kvlangBodySlot *)cell->off.fast);
+    cell->off.fast = NULL;
+    cell->view.hits = 0;
+    cell->view_state = 1;
+}
+
+/* 每 RECHECK 次命中重验一次：只重解析 ref 并与提升时的 ref 比对（一次
+ * 后端调用）。ref 不变即同一槽 box；外部删除/改尺寸仍是契约外。 */
+static bool rv_recheck(kvspace_t *kv, kvlangBoundCell_t *cell) {
+    kvspaceRef_t nr;
+    if (kvspaceResolveRef(kv->handle, cell->key, &nr) != 0)
+        return false;
+    kvlangBodySlot *s = (kvlangBodySlot *)cell->off.fast;
+    if (memcmp(&nr, &s->ref, sizeof nr) != 0)
+        return false;
+    cell->off.off = nr;
+    cell->off.resolved = true;
+    return true;
+}
+
+__attribute__((visibility("hidden"))) int
+kvlangReadViewTry(kvspace_t *kv, struct kvlangBoundCell *cell, uint32_t pack,
+                  kvlangXvalue_t *out) {
+    if (!kv || !kv->shm)
+        return 0;
+    switch (cell->view_state) {
+    case 3:
+        return 0;
+    case 0:
+        cell->view.kind = (uint8_t)(pack & 0xffu);
+        cell->view.width = (uint16_t)(pack >> 8);
+        cell->view_state = 1;
+        cell->view.hits = 0;
+        /* fall through */
+    case 1:
+        if (++cell->view.hits < KV_READ_VIEW_N)
+            return 0;
+        if (!rv_promote(kv, cell)) {
+            cell->view.hits = 0;
+            return 0;
+        }
+        break;
+    case 2:
+        break;
+    default:
+        cell->view_state = 3;
+        return 0;
+    }
+    kvlangBodySlot *s = (kvlangBodySlot *)cell->off.fast;
+    if (!s || !s->ok || !s->head || !s->headlen) {
+        if (s)
+            rv_demote(cell);
+        else
+            cell->view_state = 1;
+        return 0;
+    }
+    if (--cell->view.hits == 0) {
+        cell->view.hits = KV_READ_VIEW_RECHECK;
+        if (!rv_recheck(kv, cell)) {
+            rv_demote(cell);
+            return 0;
+        }
+    }
+#ifdef KV_COUNT
+    kvCReadViewHit++;
+#endif
+    out->bytes = s->head;
+    out->length = s->headlen + s->width;
     return 1;
 }
