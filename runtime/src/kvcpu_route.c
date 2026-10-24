@@ -118,5 +118,6 @@ user_call:
     return kvlangKvcpuCallOpcode(kv, vtid, cur, f->status_known, inst->opcode,
                                  inst->reads, inst->read_count, inst->writes,
                                  inst->write_count, f->pc_out, f->pc_out_cap,
-                                 &f->pc_feedback, f->pc_off, f->status_off);
+                                 &f->pc_feedback, f->pc_off, f->status_off,
+                                 f->cursor);
 }

@@ -14,6 +14,7 @@ typedef struct {
     kvlangXvalue_t literal; /* 字面量副本（owned，code_free 释放）；descriptor 时 None */
     char *type;             /* 声明类型（owned） */
     int s1;                 /* 参数轴：-nr..-1 读参，+1..+nw 写参 */
+    int param_s1;           /* *[0,±k] 时为 ±k（非零）；否则 0 */
     bool is_literal;
     bool key_absolute; /* Ptr 操作数：descriptor 已是绝对 key，不再按帧解析 */
 } kvlangOperand_t;
@@ -72,10 +73,41 @@ typedef struct {
     int n;
     bool bound;
     bool has_pin;
+    bool has_star_op;
     uint32_t reenter_gen;
+    uint32_t star_rmask;
+    uint32_t star_wmask;
     kvlangBodySlot *body;
     int jump_irseq[2];
 } kvlangRowBind_t;
+
+#define KVLANG_PARK_MAX_PARAMS 16
+typedef struct kvlangParkedFrame {
+    void *handle;
+    char vtid[64];
+    int depth;
+    char frame_root[256];
+    char stack_fr[256];
+    char func_key[256];
+    char func_dir[256];
+    char entry_pc[256];
+    char retpc_key[256];
+    char retpc_val[256];
+    kvspaceKeyOff retpc_ko;
+    int nr, nw;
+    char r_arg_key[KVLANG_PARK_MAX_PARAMS][256];
+    char r_lit_key[KVLANG_PARK_MAX_PARAMS][256];
+    char r_target[KVLANG_PARK_MAX_PARAMS][256];
+    kvspaceKeyOff r_arg_ko[KVLANG_PARK_MAX_PARAMS];
+    kvspaceKeyOff r_lit_ko[KVLANG_PARK_MAX_PARAMS];
+    char w_arg_key[KVLANG_PARK_MAX_PARAMS][256];
+    char w_target[KVLANG_PARK_MAX_PARAMS][256];
+    kvspaceKeyOff w_arg_ko[KVLANG_PARK_MAX_PARAMS];
+    uint32_t r_changed_mask;
+    uint32_t w_changed_mask;
+    bool warm;
+    bool active;
+} kvlangParkedFrame_t;
 
 typedef struct {
     char *frame_root;
@@ -84,6 +116,7 @@ typedef struct {
     size_t binds_cap;
     uint32_t epoch;
     uint32_t reenter_gen;
+    kvlangParkedFrame_t *park;
 } kvlangFrameCtx_t;
 
 /* ExecuteMode 内的函数缓存：func_dir -> 二维表 */

@@ -138,14 +138,83 @@ static const char *resolve_read_path_buf(kvspace_t *kv, const char *frame_root,
     return out;
 }
 
+static __thread kvlangParkedFrame_t parked_frames[MAX_STACK_DEPTH + 1];
+static __thread int parked_max_depth = 0;
+
+struct kvlangParkedFrame *kvlangParkedFrameGet(kvspace_t *kv, const char *vtid,
+                                               int depth) {
+    if (!kv || !vtid || depth < 1 || depth > MAX_STACK_DEPTH)
+        return NULL;
+    kvlangParkedFrame_t *pf = &parked_frames[depth];
+    if (pf->warm && pf->handle == kv->handle && strcmp(pf->vtid, vtid) == 0)
+        return pf;
+    return NULL;
+}
+
+static void parked_frame_destroy(kvspace_t *kv, kvlangParkedFrame_t *pf) {
+    if (!pf->warm)
+        return;
+    if (kv && kv->handle == pf->handle && pf->frame_root[0] && pf->stack_fr[0]) {
+        char err[256];
+        kvlangKvspaceDeleteExtensionIndex(kv, pf->stack_fr, err, sizeof err);
+        kvlangKvspaceDeleteTree(kv, pf->frame_root, err, sizeof err);
+    }
+    pf->warm = false;
+    pf->active = false;
+    pf->func_key[0] = 0;
+    pf->retpc_val[0] = 0;
+}
+
+void kvlangParkedFramesCleanupAbove(kvspace_t *kv, const char *vtid,
+                                    int min_depth) {
+    if (min_depth < 1)
+        min_depth = 1;
+    for (int d = parked_max_depth; d > min_depth; d--) {
+        kvlangParkedFrame_t *pf = &parked_frames[d];
+        if (!pf->warm)
+            continue;
+        if (!vtid || !vtid[0] ||
+            (kv && pf->handle == kv->handle && strcmp(pf->vtid, vtid) == 0)) {
+            parked_frame_destroy(kv, pf);
+        }
+    }
+    while (parked_max_depth > 0 && !parked_frames[parked_max_depth].warm)
+        parked_max_depth--;
+}
+
+void kvlangParkedFramesInvalidateAll(void *handle) {
+    for (int d = 1; d <= parked_max_depth; d++) {
+        if (!handle || parked_frames[d].handle == handle) {
+            parked_frames[d].warm = false;
+            parked_frames[d].active = false;
+            parked_frames[d].func_key[0] = 0;
+            parked_frames[d].retpc_val[0] = 0;
+        }
+    }
+    while (parked_max_depth > 0 && !parked_frames[parked_max_depth].warm)
+        parked_max_depth--;
+}
+
 static int handle_return(kvspace_t *kv, const char *vtid, const char *pc,
-                         char *out_next, size_t next_cap) {
+                         char *out_next, size_t next_cap,
+                         const kvlangExecCursor *cursor) {
     out_next[0] = 0;
     char fr[KV_KEY_MAX];
     if (!kvlangKeytreeFrameRootBuffer(pc, fr, sizeof fr))
         return -1;
     int d = kvlangKeytreeFrameNum(fr);
     if (d > 1) {
+        if (cursor && d <= MAX_STACK_DEPTH) {
+            kvlangParkedFrame_t *pf = &parked_frames[d];
+            if (pf->warm && pf->handle == kv->handle &&
+                strcmp(pf->vtid, vtid) == 0 && pf->retpc_val[0]) {
+                size_t rl = strlen(pf->retpc_val);
+                if (rl + 1 <= next_cap) {
+                    memcpy(out_next, pf->retpc_val, rl + 1);
+                    return 0;
+                }
+            }
+        }
         char rk[KV_KEY_MAX];
         kvlangKeytreeFrameReturnPc(fr, rk, sizeof rk);
         kvlangXvalue_t v;
@@ -306,40 +375,57 @@ static int write_kv_raw(kvspace_t *kv, const char *key, const uint8_t *bytes,
     return kvspaceSetValue(kv->handle, key, bytes, len, 0, 0, err, err_cap);
 }
 
-static int bind_param_direct(kvspace_t *kv, const char *frame_root, int x,
-                             const char *type, const char *value_key, char *err,
-                             uint32_t err_cap) {
+static int write_kv_raw_ko(kvspace_t *kv, kvspaceKeyOff *ko, const char *key,
+                           const uint8_t *bytes, uint32_t len, char *err,
+                           uint32_t err_cap) {
+    if (!bytes || len < XH_PREFIX)
+        return -1;
+    kvlangBodyInvalidateKind(key, xh_langtype(bytes), xh_langtype_len(bytes));
+    if (ko)
+        return kvspaceKeyOffSet(ko, bytes, len, err, err_cap);
+    return kvspaceSetValue(kv->handle, key, bytes, len, 0, 0, err, err_cap);
+}
+
+static int write_arg_ptr_ko(kvspace_t *kv, kvspaceKeyOff *ko,
+                            const char *arg_key, const char *type,
+                            const char *value_key, char *err,
+                            uint32_t err_cap) {
     if (!value_key)
         return -1;
     while (*type == '*' || *type == '@')
         type++;
-    char arg_key[KV_KEY_MAX], slot_key[KV_KEY_MAX];
-    kvlangKeyFormat(arg_key, sizeof arg_key, "%s/%sarg[0,%d]", frame_root,
-                    RUNTIME_MEMBER_SEP, x);
-    kvlangKeyFormat(slot_key, sizeof slot_key, "%s/[0,%d]", frame_root, x);
-    uint8_t abuf[128 + KV_KEY_MAX], sbuf[128 + KV_KEY_MAX];
+    uint8_t abuf[128 + KV_KEY_MAX];
     uint32_t alen = encode_ptr_buf(type, value_key, abuf, sizeof abuf);
-    uint32_t slen = encode_ptr_buf(type, arg_key, sbuf, sizeof sbuf);
-    if (!alen || !slen) {
-        kvlangXvalue_t arg_ptr, frame_ptr;
+    if (!alen) {
+        kvlangXvalue_t arg_ptr;
         kvlangXvalueNewPtr(&arg_ptr, type, value_key);
-        kvlangXvalueNewPtr(&frame_ptr, type, arg_key);
-        int rc = (kvlangXvalueNone(&arg_ptr) || kvlangXvalueNone(&frame_ptr))
+        int rc = kvlangXvalueNone(&arg_ptr)
                      ? -1
-                 : (write_kv_raw(kv, arg_key, arg_ptr.bytes, arg_ptr.length,
-                                 err, err_cap) == 0 &&
-                    write_kv_raw(kv, slot_key, frame_ptr.bytes,
-                                 frame_ptr.length, err, err_cap) == 0)
-                     ? 0
-                     : -1;
+                     : write_kv_raw_ko(kv, ko, arg_key, arg_ptr.bytes,
+                                       arg_ptr.length, err, err_cap);
         kvlangXvalueFree(&arg_ptr);
+        return rc;
+    }
+    return write_kv_raw_ko(kv, ko, arg_key, abuf, alen, err, err_cap);
+}
+
+static int write_slot_ptr(kvspace_t *kv, const char *slot_key, const char *type,
+                          const char *arg_key, char *err, uint32_t err_cap) {
+    while (*type == '*' || *type == '@')
+        type++;
+    uint8_t sbuf[128 + KV_KEY_MAX];
+    uint32_t slen = encode_ptr_buf(type, arg_key, sbuf, sizeof sbuf);
+    if (!slen) {
+        kvlangXvalue_t frame_ptr;
+        kvlangXvalueNewPtr(&frame_ptr, type, arg_key);
+        int rc = kvlangXvalueNone(&frame_ptr)
+                     ? -1
+                     : write_kv_raw(kv, slot_key, frame_ptr.bytes,
+                                    frame_ptr.length, err, err_cap);
         kvlangXvalueFree(&frame_ptr);
         return rc;
     }
-    if (write_kv_raw(kv, arg_key, abuf, alen, err, err_cap) != 0 ||
-        write_kv_raw(kv, slot_key, sbuf, slen, err, err_cap) != 0)
-        return -1;
-    return 0;
+    return write_kv_raw(kv, slot_key, sbuf, slen, err, err_cap);
 }
 
 #define MAX_BIND_PAIRS (MAX_PARAMS * 5)
@@ -375,7 +461,7 @@ static int add_param_binding(kvlangKvPair_t *pairs, bool *owned, int *np,
 /* Create the callee frame and write its entry PC into ep_out. */
 static int handle_call_buf(kvspace_t *kv, const char *pc,
                            kvlangRwirInst_t *inst, char *ep_out,
-                           size_t ep_cap) {
+                           size_t ep_cap, kvlangExecCursor *cursor) {
     char vtid_b[KV_KEY_MAX];
     const char *vtid = kvlangKeytreeVthreadIdFromPc(pc, vtid_b, sizeof vtid_b);
     const char *fn = inst->reads[0].name;
@@ -506,48 +592,146 @@ static int handle_call_buf(kvspace_t *kv, const char *pc,
     if (!kvlangKeytreeFrameRootBuffer(pc, caller_fr, sizeof caller_fr))
         return -1;
     int d = kvlangKeytreeFrameNum(pc);
-    kvlangKeyFormat(frame_root, sizeof frame_root, "%s/%s/[%d]", VTHREAD_ROOT,
-                    vtid, d + 1);
-    kvlangKeyFormat(stack_fr, sizeof stack_fr, "%s/", frame_root);
+    int callee_d = d + 1;
     char err[256];
-    kvlangKvspaceDeleteTree(kv, frame_root, err, sizeof err);
-    if (kvlangKvspaceMakeIndex(kv, stack_fr, 0, err, sizeof err) != 0 ||
-        kvlangKvspaceExtensionIndex(kv, stack_fr, func_dir, err, sizeof err) !=
-            0) {
-        kvlangVthreadSetError(kv, vtid, pc, err);
-        return -1;
-    }
 
-    char npc[KV_KEY_MAX], retpc[KV_KEY_MAX], callpc[KV_KEY_MAX],
-        seglib[KV_KEY_MAX];
-    if (kvlangRwirNextPcBuffer(pc, npc, sizeof npc) == 0)
+    char npc[KV_KEY_MAX];
+    if (cursor && cursor->prefix_ok) {
+        if (kvlangRwirNextPcFromPrefix(cursor->prefix,
+                                       (size_t)cursor->prefix_len,
+                                       cursor->irseq, npc, sizeof npc) == 0)
+            kvlangDie("next pc exceeds %zu bytes", sizeof npc);
+    } else if (kvlangRwirNextPcBuffer(pc, npc, sizeof npc) == 0) {
         kvlangDie("next pc exceeds %zu bytes", sizeof npc);
-    kvlangKeytreeFrameReturnPc(frame_root, retpc, sizeof retpc);
-    kvlangKeytreeFrameCallPc(frame_root, callpc, sizeof callpc);
-    kvlangKeyFormat(ep_out, ep_cap, "%s/[1,0]", frame_root);
-    kvlangKeyFormat(seglib, sizeof seglib, "%s%s", stack_fr, SEG_LIB);
+    }
 
-    uint8_t sbuf[64 + KV_KEY_MAX];
-    uint32_t nl_npc = (uint32_t)strlen(npc);
-    uint32_t nl_ep = (uint32_t)strlen(ep_out);
-    uint32_t nl_fn = (uint32_t)strlen(func_key);
-    uint32_t wn_npc = kvlangSlackEncodeChar((const uint8_t *)npc, nl_npc,
-                                            nl_npc, sbuf, sizeof sbuf);
-    int sys_rc = write_kv_raw(kv, retpc, sbuf, wn_npc, err, sizeof err);
-    if (sys_rc == 0) {
-        uint32_t wn_ep = kvlangSlackEncodeChar((const uint8_t *)ep_out, nl_ep,
-                                               nl_ep, sbuf, sizeof sbuf);
-        sys_rc = write_kv_raw(kv, callpc, sbuf, wn_ep, err, sizeof err);
+    kvlangParkedFrame_t *pf = NULL;
+    bool can_park = cursor != NULL && callee_d > 1 &&
+                    callee_d <= MAX_STACK_DEPTH &&
+                    nr <= KVLANG_PARK_MAX_PARAMS &&
+                    nw <= KVLANG_PARK_MAX_PARAMS &&
+                    strlen(vtid) < sizeof pf->vtid &&
+                    strlen(func_key) < sizeof pf->func_key &&
+                    strlen(func_dir) < sizeof pf->func_dir;
+    bool warm_hit = false;
+    if (can_park) {
+        pf = &parked_frames[callee_d];
+        if (pf->warm && pf->handle == kv->handle &&
+            strcmp(pf->vtid, vtid) == 0 &&
+            strcmp(pf->func_key, func_key) == 0) {
+            warm_hit = true;
+            strcpy(frame_root, pf->frame_root);
+            strcpy(stack_fr, pf->stack_fr);
+        } else if (pf->warm) {
+            parked_frame_destroy(kv, pf);
+        }
     }
-    if (sys_rc == 0) {
-        uint32_t wn_fn = kvlangSlackEncodeChar((const uint8_t *)func_key, nl_fn,
-                                               nl_fn, sbuf, sizeof sbuf);
-        sys_rc = write_kv_raw(kv, seglib, sbuf, wn_fn, err, sizeof err);
-    }
-    if (sys_rc != 0) {
-        kvlangVthreadSetError(kv, vtid, pc,
-                              "RuntimeError: cannot persist call frame");
-        goto fail_frame;
+
+    if (!warm_hit) {
+        kvlangKeyFormat(frame_root, sizeof frame_root, "%s/%s/[%d]",
+                        VTHREAD_ROOT, vtid, callee_d);
+        kvlangKeyFormat(stack_fr, sizeof stack_fr, "%s/", frame_root);
+        kvlangKvspaceDeleteTree(kv, frame_root, err, sizeof err);
+        if (kvlangKvspaceMakeIndex(kv, stack_fr, 0, err, sizeof err) != 0 ||
+            kvlangKvspaceExtensionIndex(kv, stack_fr, func_dir, err,
+                                        sizeof err) != 0) {
+            kvlangVthreadSetError(kv, vtid, pc, err);
+            return -1;
+        }
+        char retpc[KV_KEY_MAX], callpc[KV_KEY_MAX], seglib[KV_KEY_MAX];
+        kvlangKeytreeFrameReturnPc(frame_root, retpc, sizeof retpc);
+        kvlangKeytreeFrameCallPc(frame_root, callpc, sizeof callpc);
+        kvlangKeyFormat(ep_out, ep_cap, "%s/[1,0]", frame_root);
+        kvlangKeyFormat(seglib, sizeof seglib, "%s%s", stack_fr, SEG_LIB);
+
+        uint8_t sbuf[64 + KV_KEY_MAX];
+        uint32_t nl_npc = (uint32_t)strlen(npc);
+        uint32_t nl_ep = (uint32_t)strlen(ep_out);
+        uint32_t nl_fn = (uint32_t)strlen(func_key);
+        uint32_t wn_npc = kvlangSlackEncodeChar((const uint8_t *)npc, nl_npc,
+                                                nl_npc, sbuf, sizeof sbuf);
+        int sys_rc = write_kv_raw(kv, retpc, sbuf, wn_npc, err, sizeof err);
+        if (sys_rc == 0) {
+            uint32_t wn_ep = kvlangSlackEncodeChar((const uint8_t *)ep_out,
+                                                   nl_ep, nl_ep, sbuf,
+                                                   sizeof sbuf);
+            sys_rc = write_kv_raw(kv, callpc, sbuf, wn_ep, err, sizeof err);
+        }
+        if (sys_rc == 0) {
+            uint32_t wn_fn = kvlangSlackEncodeChar((const uint8_t *)func_key,
+                                                   nl_fn, nl_fn, sbuf,
+                                                   sizeof sbuf);
+            sys_rc = write_kv_raw(kv, seglib, sbuf, wn_fn, err, sizeof err);
+        }
+        if (sys_rc != 0) {
+            kvlangVthreadSetError(kv, vtid, pc,
+                                  "RuntimeError: cannot persist call frame");
+            goto fail_frame;
+        }
+        if (pf && strlen(frame_root) < sizeof pf->frame_root &&
+            strlen(stack_fr) < sizeof pf->stack_fr &&
+            strlen(ep_out) < sizeof pf->entry_pc &&
+            strlen(retpc) < sizeof pf->retpc_key &&
+            strlen(npc) < sizeof pf->retpc_val) {
+            memset(pf, 0, sizeof *pf);
+            pf->handle = kv->handle;
+            strcpy(pf->vtid, vtid);
+            pf->depth = callee_d;
+            strcpy(pf->frame_root, frame_root);
+            strcpy(pf->stack_fr, stack_fr);
+            strcpy(pf->func_key, func_key);
+            strcpy(pf->func_dir, func_dir);
+            strcpy(pf->entry_pc, ep_out);
+            strcpy(pf->retpc_key, retpc);
+            strcpy(pf->retpc_val, npc);
+            kvspaceKeyOffBind(&pf->retpc_ko, kv, pf->retpc_key);
+            pf->nr = nr;
+            pf->nw = nw;
+            for (int i = 0; i < nr; i++) {
+                kvlangKeyFormat(pf->r_arg_key[i], sizeof pf->r_arg_key[i],
+                                "%s/%sarg[0,-%d]", frame_root,
+                                RUNTIME_MEMBER_SEP, i + 1);
+                kvlangKeyFormat(pf->r_lit_key[i], sizeof pf->r_lit_key[i],
+                                "%s/._lit%d", frame_root, i);
+                pf->r_arg_ko[i].kvspace = kv;
+                pf->r_arg_ko[i].key = pf->r_arg_key[i];
+                pf->r_lit_ko[i].kvspace = kv;
+                pf->r_lit_ko[i].key = pf->r_lit_key[i];
+            }
+            for (int i = 0; i < nw; i++) {
+                kvlangKeyFormat(pf->w_arg_key[i], sizeof pf->w_arg_key[i],
+                                "%s/%sarg[0,%d]", frame_root,
+                                RUNTIME_MEMBER_SEP, i + 1);
+                pf->w_arg_ko[i].kvspace = kv;
+                pf->w_arg_ko[i].key = pf->w_arg_key[i];
+            }
+        } else {
+            pf = NULL;
+        }
+    } else {
+        size_t epl = strlen(pf->entry_pc);
+        if (epl + 1 <= ep_cap)
+            memcpy(ep_out, pf->entry_pc, epl + 1);
+        else
+            kvlangKeyFormat(ep_out, ep_cap, "%s/[1,0]", frame_root);
+        pf->r_changed_mask = 0;
+        pf->w_changed_mask = 0;
+        if (strcmp(pf->retpc_val, npc) != 0) {
+            uint8_t sbuf[64 + KV_KEY_MAX];
+            uint32_t nl_npc = (uint32_t)strlen(npc);
+            uint32_t wn_npc = kvlangSlackEncodeChar(
+                (const uint8_t *)npc, nl_npc, nl_npc, sbuf, sizeof sbuf);
+            if (write_kv_raw_ko(kv, &pf->retpc_ko, pf->retpc_key, sbuf, wn_npc,
+                                err, sizeof err) != 0) {
+                kvlangVthreadSetError(
+                    kv, vtid, pc, "RuntimeError: cannot persist call frame");
+                goto fail_frame;
+            }
+            if (nl_npc < sizeof pf->retpc_val)
+                memcpy(pf->retpc_val, npc, nl_npc + 1);
+            else
+                pf->retpc_val[0] = 0;
+        }
     }
 
     for (int i = 0; i < nr; i++) {
@@ -569,26 +753,72 @@ static int handle_call_buf(kvspace_t *kv, const char *pc,
         char rk_buf[KV_KEY_MAX];
         const char *rk = NULL;
         if (literal) {
-            kvlangKeyFormat(rk_buf, sizeof rk_buf, "%s/._lit%d", frame_root, i);
-            rk = rk_buf;
+            if (pf) {
+                rk = pf->r_lit_key[i];
+            } else {
+                kvlangKeyFormat(rk_buf, sizeof rk_buf, "%s/._lit%d", frame_root,
+                                i);
+                rk = rk_buf;
+            }
             if (concrete) {
-                if (write_kv_raw(kv, rk, arg->value.bytes, arg->value.length,
-                                 err, sizeof err) != 0) {
+                if (write_kv_raw_ko(kv, pf ? &pf->r_lit_ko[i] : NULL, rk,
+                                    arg->value.bytes, arg->value.length, err,
+                                    sizeof err) != 0) {
                     kvlangVthreadSetError(kv, vtid, pc, err);
                     goto fail_frame;
                 }
+            } else if (warm_hit && pf) {
+                /* "null" literal on a warm frame must clear any previous ._lit value */
+                kvlangKvspaceDelete(kv, rk, err, sizeof err);
+                pf->r_lit_ko[i].resolved = false;
             }
         } else {
             rk = resolve_read_path_buf(kv, caller_fr, arg->name, rk_buf,
                                        sizeof rk_buf);
         }
-        if (bind_param_direct(kv, frame_root, -(i + 1), lt, rk, err,
-                              sizeof err) != 0) {
-            if (!err[0])
-                snprintf(err, sizeof err,
-                         "TypeError: cannot bind read argument %d", i + 1);
+        if (!rk) {
+            snprintf(err, sizeof err, "TypeError: cannot bind read argument %d",
+                     i + 1);
             kvlangVthreadSetError(kv, vtid, pc, err);
             goto fail_frame;
+        }
+        if (warm_hit && pf) {
+            if (strcmp(pf->r_target[i], rk) != 0) {
+                if (write_arg_ptr_ko(kv, &pf->r_arg_ko[i], pf->r_arg_key[i], lt,
+                                     rk, err, sizeof err) != 0) {
+                    if (!err[0])
+                        snprintf(err, sizeof err,
+                                 "TypeError: cannot bind read argument %d",
+                                 i + 1);
+                    kvlangVthreadSetError(kv, vtid, pc, err);
+                    goto fail_frame;
+                }
+                if (strlen(rk) < sizeof pf->r_target[i])
+                    strcpy(pf->r_target[i], rk);
+                else
+                    pf->r_target[i][0] = 0;
+                pf->r_changed_mask |= (1u << i);
+            }
+        } else {
+            char arg_key_b[KV_KEY_MAX], slot_key_b[KV_KEY_MAX];
+            const char *arg_key = pf ? pf->r_arg_key[i] : arg_key_b;
+            if (!pf)
+                kvlangKeyFormat(arg_key_b, sizeof arg_key_b, "%s/%sarg[0,-%d]",
+                                frame_root, RUNTIME_MEMBER_SEP, i + 1);
+            kvlangKeyFormat(slot_key_b, sizeof slot_key_b, "%s/[0,-%d]",
+                            frame_root, i + 1);
+            if (write_arg_ptr_ko(kv, pf ? &pf->r_arg_ko[i] : NULL, arg_key, lt,
+                                 rk, err, sizeof err) != 0 ||
+                write_slot_ptr(kv, slot_key_b, lt, arg_key, err, sizeof err) !=
+                    0) {
+                if (!err[0])
+                    snprintf(err, sizeof err,
+                             "TypeError: cannot bind read argument %d", i + 1);
+                kvlangVthreadSetError(kv, vtid, pc, err);
+                goto fail_frame;
+            }
+            if (pf && strlen(rk) < sizeof pf->r_target[i])
+                strcpy(pf->r_target[i], rk);
         }
     }
     for (int i = 0; i < nw; i++) {
@@ -602,18 +832,70 @@ static int handle_call_buf(kvspace_t *kv, const char *pc,
                 ? resolve_read_path_buf(kv, caller_fr, inst->writes[i].name,
                                         wk_buf, sizeof wk_buf)
                 : NULL;
-        if (bind_param_direct(kv, frame_root, i + 1, lt, wk, err, sizeof err) !=
-            0) {
-            if (!err[0])
-                snprintf(err, sizeof err,
-                         "TypeError: cannot bind write argument %d", i + 1);
+        if (!wk) {
+            snprintf(err, sizeof err,
+                     "TypeError: cannot bind write argument %d", i + 1);
             kvlangVthreadSetError(kv, vtid, pc, err);
             goto fail_frame;
         }
+        if (warm_hit && pf) {
+            if (strcmp(pf->w_target[i], wk) != 0) {
+                if (write_arg_ptr_ko(kv, &pf->w_arg_ko[i], pf->w_arg_key[i], lt,
+                                     wk, err, sizeof err) != 0) {
+                    if (!err[0])
+                        snprintf(err, sizeof err,
+                                 "TypeError: cannot bind write argument %d",
+                                 i + 1);
+                    kvlangVthreadSetError(kv, vtid, pc, err);
+                    goto fail_frame;
+                }
+                if (strlen(wk) < sizeof pf->w_target[i])
+                    strcpy(pf->w_target[i], wk);
+                else
+                    pf->w_target[i][0] = 0;
+                pf->w_changed_mask |= (1u << i);
+            }
+        } else {
+            char arg_key_b[KV_KEY_MAX], slot_key_b[KV_KEY_MAX];
+            const char *arg_key = pf ? pf->w_arg_key[i] : arg_key_b;
+            if (!pf)
+                kvlangKeyFormat(arg_key_b, sizeof arg_key_b, "%s/%sarg[0,%d]",
+                                frame_root, RUNTIME_MEMBER_SEP, i + 1);
+            kvlangKeyFormat(slot_key_b, sizeof slot_key_b, "%s/[0,%d]",
+                            frame_root, i + 1);
+            if (write_arg_ptr_ko(kv, pf ? &pf->w_arg_ko[i] : NULL, arg_key, lt,
+                                 wk, err, sizeof err) != 0 ||
+                write_slot_ptr(kv, slot_key_b, lt, arg_key, err, sizeof err) !=
+                    0) {
+                if (!err[0])
+                    snprintf(err, sizeof err,
+                             "TypeError: cannot bind write argument %d", i + 1);
+                kvlangVthreadSetError(kv, vtid, pc, err);
+                goto fail_frame;
+            }
+            if (pf && strlen(wk) < sizeof pf->w_target[i])
+                strcpy(pf->w_target[i], wk);
+        }
+    }
+    if (pf) {
+        if (!warm_hit) {
+            pf->r_changed_mask = (1u << nr) - 1u;
+            pf->w_changed_mask = (1u << nw) - 1u;
+        }
+        pf->warm = true;
+        pf->active = true;
+        if (callee_d > parked_max_depth)
+            parked_max_depth = callee_d;
     }
     return 0;
 
 fail_frame:
+    if (pf) {
+        pf->warm = false;
+        pf->active = false;
+        pf->func_key[0] = 0;
+    }
+    kvlangKvspaceDeleteExtensionIndex(kv, stack_fr, err, sizeof err);
     kvlangKvspaceDeleteTree(kv, frame_root, err, sizeof err);
     ep_out[0] = 0;
     return -1;
@@ -621,8 +903,8 @@ fail_frame:
 
 int kvlangControlCall(kvlangFrame_t *f) {
     char sub[KV_KEY_MAX];
-    if (handle_call_buf(f->kvspace, f->pc, f->instruction, sub, sizeof sub) !=
-            0 ||
+    if (handle_call_buf(f->kvspace, f->pc, f->instruction, sub, sizeof sub,
+                        f->cursor) != 0 ||
         !sub[0])
         return -1;
     kvlangVthreadNextPc(f, sub, "running");
@@ -631,8 +913,8 @@ int kvlangControlCall(kvlangFrame_t *f) {
 
 int kvlangControlReturn(kvlangFrame_t *f) {
     char parent[KV_KEY_MAX];
-    if (handle_return(f->kvspace, f->vthread_id, f->pc, parent,
-                      sizeof parent) != 0)
+    if (handle_return(f->kvspace, f->vthread_id, f->pc, parent, sizeof parent,
+                      f->cursor) != 0)
         return -1;
     if (!parent[0]) {
         f->persist_failed =
@@ -642,6 +924,19 @@ int kvlangControlReturn(kvlangFrame_t *f) {
     }
     if (f->persist_failed)
         return -1;
+    if (f->cursor && parent[0]) {
+        int d = kvlangKeytreeFrameNum(f->pc);
+        if (d > 1 && d <= MAX_STACK_DEPTH) {
+            kvlangParkedFrame_t *pf = &parked_frames[d];
+            if (pf->warm && pf->handle == f->kvspace->handle &&
+                strcmp(pf->vtid, f->vthread_id) == 0) {
+                pf->active = false;
+                return 0;
+            }
+        }
+    }
+    if (!parent[0])
+        kvlangParkedFramesCleanupAbove(f->kvspace, f->vthread_id, 1);
     char fr[KV_KEY_MAX], stk[KV_KEY_MAX], err[256];
     if (kvlangKeytreeFrameRootBuffer(f->pc, fr, sizeof fr) &&
         kvlangKeytreeStackBuffer(fr, stk, sizeof stk)) {
@@ -718,7 +1013,8 @@ int kvlangKvcpuCallOpcode(kvspace_t *kv, const char *vtid, const char *pc,
                           kvlangParam_t *writes, int nw, char *pc_out,
                           size_t pc_out_cap, bool *pc_feedback,
                           struct kvspaceKeyOff *pc_off,
-                          struct kvspaceKeyOff *status_off) {
+                          struct kvspaceKeyOff *status_off,
+                          kvlangExecCursor *cursor) {
     kvlangParam_t rbuf[MAX_PARAMS + 1];
     kvlangRwirInst_t ci;
     ci.opcode = (char *)OP_CALL;
@@ -740,6 +1036,7 @@ int kvlangKvcpuCallOpcode(kvspace_t *kv, const char *vtid, const char *pc,
     f.pc_out_cap = pc_out_cap;
     f.pc_off = pc_off;
     f.status_off = status_off;
+    f.cursor = cursor;
     int rc = kvlangControlCall(&f);
     if (f.persist_failed)
         rc = -1;
@@ -754,7 +1051,8 @@ int kvlangKvcpuCallOpcode(kvspace_t *kv, const char *vtid, const char *pc,
 int kvlangKvcpuDynamicCall(kvlangFrame_t *f, const char *funckey) {
     return kvlangKvcpuCallOpcode(f->kvspace, f->vthread_id, f->pc, NULL, funckey,
                                  NULL, 0, NULL, 0, f->pc_out, f->pc_out_cap,
-                                 &f->pc_feedback, f->pc_off, f->status_off);
+                                 &f->pc_feedback, f->pc_off, f->status_off,
+                                 f->cursor);
 }
 
 

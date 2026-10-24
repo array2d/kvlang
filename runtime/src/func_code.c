@@ -132,6 +132,16 @@ static int parse_cell(kvspace_t *kv, const char *func_dir, int s0, int s1,
     } else {
         cell->descriptor = descriptor;
         cell->key_absolute = is_absolute_key;
+        if (!is_absolute_key && descriptor &&
+            strncmp(descriptor, "*[0,", 4) == 0) {
+            char *endp = NULL;
+            long ps1 = strtol(descriptor + 4, &endp, 10);
+            if (endp && *endp == ']' && endp[1] == 0 && ps1 != 0 &&
+                ps1 >= -KVLANG_PARK_MAX_PARAMS &&
+                ps1 <= KVLANG_PARK_MAX_PARAMS) {
+                cell->param_s1 = (int)ps1;
+            }
+        }
     }
     return 0;
 }
@@ -558,11 +568,28 @@ static int bind_row(kvspace_t *kv, kvlangFrameCtx_t *ctx, int s0,
             cell->literal = &src->literal;
             continue;
         }
-        if (src->key_absolute)
+        if (src->key_absolute) {
             cell->key = strdup(src->descriptor);
-        else
-            cell->key = kvlangRwirOperandTarget(kv, ctx->frame_root,
-                                                src->descriptor);
+        } else {
+            if (src->descriptor && src->descriptor[0] == '*') {
+                b->has_star_op = true;
+                if (src->param_s1 < 0)
+                    b->star_rmask |= (1u << (-src->param_s1 - 1));
+                else if (src->param_s1 > 0)
+                    b->star_wmask |= (1u << (src->param_s1 - 1));
+            }
+            if (ctx->park && src->param_s1 != 0) {
+                const char *pt =
+                    src->param_s1 < 0
+                        ? ctx->park->r_target[-src->param_s1 - 1]
+                        : ctx->park->w_target[src->param_s1 - 1];
+                if (pt && pt[0])
+                    cell->key = strdup(pt);
+            }
+            if (!cell->key)
+                cell->key = kvlangRwirOperandTarget(kv, ctx->frame_root,
+                                                    src->descriptor);
+        }
         if (!cell->key) {
             snprintf(err, err_cap,
                      "Runtime: cannot resolve operand %d at [%d,0]", i, s0);
@@ -634,43 +661,99 @@ void kvlangFrameCtxSync(kvlangFrameCtx_t *ctx, uint32_t epoch) {
 
 int kvlangFrameCtxReenter(kvspace_t *kv, kvlangFrameCtx_t *ctx, uint32_t epoch) {
     (void)kv;
+    if (ctx->epoch != epoch) {
+        kvlangFrameCtxSync(ctx, epoch);
+        ctx->reenter_gen++;
+        return 0;
+    }
+    if (ctx->park && ctx->park->warm) {
+        if (ctx->park->r_changed_mask == 0 && ctx->park->w_changed_mask == 0)
+            return 0;
+    }
     ctx->reenter_gen++;
-    ctx->epoch = epoch;
     return 0;
 }
 
 __attribute__((noinline)) int
 kvlangRowBindReenter(kvspace_t *kv, kvlangFrameCtx_t *ctx,
                      kvlangCodeRow_t *row, kvlangRowBind_t *b) {
+    kvlangParkedFrame_t *pf = (ctx->park && ctx->park->warm) ? ctx->park : NULL;
+    if (pf && !b->has_star_op) {
+        b->reenter_gen = ctx->reenter_gen;
+        return 0;
+    }
     bool has_star = false;
+    bool write_changed = false;
     for (int j = 0; j < b->n; j++) {
         kvlangOperand_t *src = &row->cell[j];
         kvlangBoundCell_t *cell = &b->cell[j];
         if (cell->literal)
             continue;
-        if (!src->key_absolute && src->descriptor &&
-            src->descriptor[0] == '*') {
-            char *nk =
-                kvlangRwirOperandTarget(kv, ctx->frame_root, src->descriptor);
-            if (!nk)
-                return -1;
-            if (!cell->key || strcmp(cell->key, nk) != 0) {
-                if (b->body && b->body->key == cell->key && b->body->reg)
-                    body_unlink(b->body);
-                free(cell->key);
-                cell->key = nk;
-                cell->off.key = nk;
-                if (b->body && j == row->nr)
-                    b->body->key = nk;
-                has_star = true;
-            } else {
-                free(nk);
+        bool is_star = !src->key_absolute && src->descriptor &&
+                       src->descriptor[0] == '*';
+        if (is_star) {
+            const char *fast_nk = NULL;
+            if (pf && src->param_s1 != 0) {
+                fast_nk = src->param_s1 < 0
+                              ? pf->r_target[-src->param_s1 - 1]
+                              : pf->w_target[src->param_s1 - 1];
+                if (fast_nk && !fast_nk[0])
+                    fast_nk = NULL;
             }
+            if (fast_nk) {
+                if (!cell->key || strcmp(cell->key, fast_nk) != 0) {
+                    char *nk = strdup(fast_nk);
+                    if (!nk)
+                        return -1;
+                    if (b->body && b->body->key == cell->key && b->body->reg)
+                        body_unlink(b->body);
+                    free(cell->key);
+                    cell->key = nk;
+                    cell->off.key = nk;
+                    if (b->body && j == row->nr)
+                        b->body->key = nk;
+                    has_star = true;
+                    if (j >= row->nr)
+                        write_changed = true;
+                    cell->off.resolved =
+                        kvspaceResolveRef(kv->handle, cell->key,
+                                          &cell->off.off) == 0;
+                } else if (!cell->off.resolved) {
+                    cell->off.resolved =
+                        kvspaceResolveRef(kv->handle, cell->key,
+                                          &cell->off.off) == 0;
+                }
+            } else {
+                char *nk = kvlangRwirOperandTarget(kv, ctx->frame_root,
+                                                   src->descriptor);
+                if (!nk)
+                    return -1;
+                if (!cell->key || strcmp(cell->key, nk) != 0) {
+                    if (b->body && b->body->key == cell->key && b->body->reg)
+                        body_unlink(b->body);
+                    free(cell->key);
+                    cell->key = nk;
+                    cell->off.key = nk;
+                    if (b->body && j == row->nr)
+                        b->body->key = nk;
+                    has_star = true;
+                    if (j >= row->nr)
+                        write_changed = true;
+                } else {
+                    free(nk);
+                }
+                cell->off.resolved =
+                    kvspaceResolveRef(kv->handle, cell->key, &cell->off.off) ==
+                    0;
+            }
+        } else if (!pf) {
+            cell->off.resolved =
+                kvspaceResolveRef(kv->handle, cell->key, &cell->off.off) == 0;
+            if (j >= row->nr)
+                write_changed = true;
         }
-        cell->off.resolved =
-            kvspaceResolveRef(kv->handle, cell->key, &cell->off.off) == 0;
     }
-    if (b->body) {
+    if (b->body && (write_changed || !pf)) {
         b->body->ok = false;
         b->body->body = NULL;
         b->body->dead = false;

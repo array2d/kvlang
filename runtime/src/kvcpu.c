@@ -143,19 +143,29 @@ switch_frame_ctx(kvspace_t *kv, const char *vtid, const char *cur,
                  const char *cur_frame, int depth, int last_depth,
                  uint32_t addr_epoch, kvlangFuncCache_t *fcache,
                  kvlangFrameCtx_t **fctx) {
+    kvlangParkedFrame_t *pf = kvlangParkedFrameGet(kv, vtid, depth);
     if (depth > last_depth) {
         char fdir[KV_KEY_MAX];
-        if (!frame_func_dir_buf(kv, cur_frame, fdir, sizeof fdir))
-            return execute_error(kv, vtid, cur,
-                                 "RuntimeError: frame has no ‥lib: %s",
-                                 cur_frame);
-        if (fctx[depth] &&
-            strcmp(fctx[depth]->frame_root, cur_frame) == 0 &&
-            strcmp(fctx[depth]->code->func_dir, fdir) == 0 &&
-            kvlangFrameCtxReenter(kv, fctx[depth], addr_epoch) == 0)
-            return 0;
+        const char *fdir_p = NULL;
+        if (pf && pf->func_dir[0]) {
+            fdir_p = pf->func_dir;
+        } else {
+            if (!frame_func_dir_buf(kv, cur_frame, fdir, sizeof fdir))
+                return execute_error(kv, vtid, cur,
+                                     "RuntimeError: frame has no ‥lib: %s",
+                                     cur_frame);
+            fdir_p = fdir;
+        }
+        if (fctx[depth]) {
+            fctx[depth]->park = pf;
+            if (strcmp(fctx[depth]->frame_root, cur_frame) == 0 &&
+                strcmp(fctx[depth]->code->func_dir, fdir_p) == 0 &&
+                kvlangFrameCtxReenter(kv, fctx[depth], addr_epoch) == 0)
+                return 0;
+        }
         kvlangFrameCtxFree(fctx[depth]);
-        fctx[depth] = kvlangFrameCtxNew(fcache, fdir, cur_frame);
+        fctx[depth] = kvlangFrameCtxNew(fcache, fdir_p, cur_frame);
+        fctx[depth]->park = pf;
         return 0;
     }
     if (fctx[depth] && strcmp(fctx[depth]->frame_root, cur_frame) != 0) {
@@ -164,12 +174,19 @@ switch_frame_ctx(kvspace_t *kv, const char *vtid, const char *cur,
     }
     if (!fctx[depth]) {
         char fdir[KV_KEY_MAX];
-        if (!frame_func_dir_buf(kv, cur_frame, fdir, sizeof fdir))
-            return execute_error(kv, vtid, cur,
-                                 "RuntimeError: frame has no ‥lib: %s",
-                                 cur_frame);
-        fctx[depth] = kvlangFrameCtxNew(fcache, fdir, cur_frame);
+        const char *fdir_p = NULL;
+        if (pf && pf->func_dir[0]) {
+            fdir_p = pf->func_dir;
+        } else {
+            if (!frame_func_dir_buf(kv, cur_frame, fdir, sizeof fdir))
+                return execute_error(kv, vtid, cur,
+                                     "RuntimeError: frame has no ‥lib: %s",
+                                     cur_frame);
+            fdir_p = fdir;
+        }
+        fctx[depth] = kvlangFrameCtxNew(fcache, fdir_p, cur_frame);
     }
+    fctx[depth]->park = pf;
     return 0;
 }
 
@@ -427,6 +444,7 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
         if (exec_err == 0 && yield) {
             /* vthread·run return 模式 / def rwir RETURN：冒泡子 rwir pc 给上层驱动。
              * 本 vthread（主）pc 未推进，驱动派发子 rwir 并推进子 pc 后重入即续跑。 */
+            kvlangParkedFramesCleanupAbove(kv, vtid, depth);
             pinned_free(bind, row->nr, reads);
             free(reads);
             free(writes);
@@ -448,6 +466,7 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
         }
     }
 
+    kvlangParkedFramesCleanupAbove(kv, vtid, last_depth > 0 ? last_depth : 1);
     for (int d = 0; d <= MAX_STACK_DEPTH; d++)
         kvlangFrameCtxFree(fctx[d]);
     kvlangFuncCacheFree(&fcache);
