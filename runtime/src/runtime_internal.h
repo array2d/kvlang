@@ -60,6 +60,15 @@ extern int kvspaceSetValueByRef(void *h, kvspaceRef_t *ref,
                                 const uint8_t *value, uint32_t value_len,
                                 uint8_t ro, uint32_t vid, char *err,
                                 uint32_t err_cap);
+typedef struct {
+    uint8_t *head;
+    uint32_t headlen;
+    uint8_t *body;
+    uint64_t body_cap;
+    uint64_t cap;
+} kvspaceSlotView_t;
+extern int kvspaceSlotView(void *h, const kvspaceRef_t *ref,
+                           const char *key_fallback, kvspaceSlotView_t *out);
 
 /* 定位读/写（分片）；只读 head 前缀。见 kvspace.h 契约。 */
 extern int kvspaceGetPart(void *h, const char *key, uint32_t offset,
@@ -144,6 +153,7 @@ typedef struct {
 typedef struct {
     void *handle;    /* opaque KVSpace connection（数据 store） */
     bool shm;        /* DSN scheme == shm：允许 body 就地写快路径 */
+    int8_t slot_view_sup;
     void *isa_handle; /* P1a 控制 store 句柄；NULL/同 handle 表示与数据 store 同库 */
     bool isa_shared; /* isa_handle == handle（redis：控制键共用数据 store） */
 } kvspace_t;
@@ -690,6 +700,8 @@ struct kvspaceKeyOff {
     const char *key;
     kvspaceRef_t off;
     bool resolved;
+    kvspaceSlotView_t view;
+    bool view_ok;
     /* 定长标量写槽（只写参、只候选行设置）：emit 快路径由此取绑定。 */
     void *fast;
 };

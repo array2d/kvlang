@@ -257,7 +257,7 @@ write_value_to_slot(kvlangFrame_t *f, const kvlangXvalue_t *v) {
 int kvlangBuiltinWriteResult(kvlangFrame_t *f, const kvlangXvalue_t *result) {
 #ifdef KV_COUNT
     if (f->instruction->write_count > 0)
-        kvCBodyFallback++; /* 真正落槽但未走 body 快路径的写 */
+        kvCBodyFallback++;
 #endif
     if (f->instruction->write_count > 0) {
         const char *target = f->instruction->writes[0].type;
@@ -265,14 +265,16 @@ int kvlangBuiltinWriteResult(kvlangFrame_t *f, const kvlangXvalue_t *result) {
         kvlangXvalue_t cv;
         if (kvlangCoerceAssign(f, target, result, cbuf, sizeof cbuf, &cv) != 0)
             return -1;
-        /* coercion 后若声明类型是数值标量，重新尝试 body 快路径。 */
-        if (target && target[0]) {
-            int tid = kvlangLangtypeId(target, strlen(target));
-            if (kvlangLangtypeIsNum(tid) && cv.bytes &&
-                cv.length >= XH_PREFIX) {
-                const uint8_t *body = cv.bytes + (1u << cv.bytes[0]);
-                uint32_t blen = (uint32_t)xh_content_len(cv.bytes);
-                if (kvlangBuiltinWriteBody(f, target, body, blen))
+        if (cv.bytes && cv.length > 32 && cv.bytes[0] == 5 && cv.bytes[1] == 0) {
+            kvspaceKeyOff *wo = f->instruction->write_offs
+                                    ? f->instruction->write_offs[0]
+                                    : NULL;
+            kvlangBodySlot *slot = wo ? wo->fast : NULL;
+            if (slot &&
+                ((target && target[0]) ||
+                 memcmp(cv.bytes + XH_PREFIX, slot->kind, strlen(slot->kind) + 1) == 0)) {
+                if (kvlangBuiltinWriteBody(f, slot->kind, cv.bytes + 32,
+                                           cv.length - 32))
                     return 0;
             }
         }
@@ -399,6 +401,14 @@ int kvlangBuiltinExecuteCopy(kvlangFrame_t *f) {
     if (inst->read_count == 0) { free(owned); kvlangBuiltinNextPc(f); return 0; }
     kvlangXvalue_t v; kvlangXvalueZero(&v);
     kvlangBuiltinResolveReadValue(kv, fr, inst->reads[0].name, &inst->reads[0].value, &v);
+    if (inst->write_count == 1) {
+        const char *slot = inst->writes[0].name;
+        const char *dot = strstr(slot, MEMBER_SEP);
+        if (!dot || dot == slot) {
+            free(owned);
+            return kvlangBuiltinWriteResult(f, &v);
+        }
+    }
     for (int i = 0; i < inst->write_count; i++) {
         const char *slot = inst->writes[i].name;
         const char *dot = strstr(slot, MEMBER_SEP);
@@ -425,6 +435,11 @@ int kvlangBuiltinExecuteCopy(kvlangFrame_t *f) {
         }
         kvspaceKeyOff *wo =
             inst->write_offs ? inst->write_offs[i] : NULL;
+        if (wo && cv.bytes && cv.length >= XH_PREFIX)
+            kvlangBodyInvalidateKind(wo->key, xh_langtype(cv.bytes),
+                                     xh_langtype_len(cv.bytes));
+        else if (wo)
+            kvlangBodyInvalidate(wo->key);
         if (wo && cv.bytes && cv.length > 0 &&
             kvspaceKeyOffSet(wo, cv.bytes, cv.length, NULL, 0) == 0)
             continue;
