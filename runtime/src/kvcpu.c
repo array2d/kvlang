@@ -201,6 +201,8 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
     inst.reads = reads;
     inst.writes = writes;
     inst.write_offs = write_offs;
+    kvlangPcViewState pc_view;
+    kvlangPcViewInit(&pc_view);
     kvlangFrame_t f;
     memset(&f, 0, sizeof f);
     f.kvspace = kv;
@@ -213,6 +215,7 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
     f.mode = (int)mode;
     f.out_pc = out_pc;
     f.cursor = &cursor;
+    f.pc_view_state = &pc_view;
 
     const kvlangRwirCap *caps = kvlangRwirCaps();
     int rc = 0;

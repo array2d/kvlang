@@ -56,8 +56,9 @@ int kvspaceSlotView(void *h, const kvspaceRef_t *ref,
 - **只读 view**：只读 head/body，不写；用于 status 与 operand 的每步读。
 - **owned view（P1 仅 PC）**：key 由本 vthread 独占写，storetype/headlen/langtype
   固定。允许一次 memcpy 原地替换整个 XValue，但必须按 `view->body_cap` 编码（不得按
-  新值长度收紧）；storetype/headlen/langtype 必须**从旧 head 原样拷贝字节**，只更新
-  内容长度与 valuelen。总长超过 `cap` 或后端拒绝时回退 `SetPartByRef`（一次性）。
+  新值长度收紧）；storetype/headlen 与 langtype 的**基类型**必须不变；char 的
+  `[<n>]` 长度前缀是派生字段，必须用规范编码随内容更新并与 valuelen 一致
+  （不得整串照抄旧 n）。总长超过 `cap` 或后端拒绝时回退 `SetPartByRef`（一次性）。
   owned 键不提供 `kvspaceWatch` 通知保证；P1 的局部操作数不进入 owned，继续走
   `WriteBody`（FIXED_SMALL body 直写）。
 

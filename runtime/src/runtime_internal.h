@@ -28,6 +28,7 @@ typedef struct {
 #define KVSPACE_REF_PTR 1
 #define KVSPACE_REF_EXT 2
 #define KVSPACE_STORETYPE_FIXED_SMALL 0
+#define KVSPACE_STORETYPE_SLACK 1
 
 extern void *kvspaceConnect(const char *dsn);
 extern void kvspaceClose(void *h);
@@ -75,6 +76,14 @@ extern int kvspaceSetValueByRef(void *h, kvspaceRef_t *ref,
                                 uint32_t err_cap);
 
 /* 定位读/写（分片）；只读 head 前缀。见 kvspace.h 契约。 */
+/* 新位置写：按 (ref,storetype,langtype,body_len,body_cap) 分配并写 head，
+ * 返回 body 指针供调用方填（shm 写即落）。 */
+extern int kvspaceWriteNewPlace(void *h, const char *key, uint8_t ref,
+                                uint8_t storetype, uint8_t ro, uint32_t vid,
+                                const char *langtype, uint32_t body_len,
+                                uint64_t body_cap, uint8_t **body, char *err,
+                                uint32_t err_cap);
+
 extern int kvspaceGetPart(void *h, const char *key, uint32_t offset,
                           uint32_t len, uint8_t **out, uint32_t *out_len);
 extern int kvspaceSetPart(void *h, const char *key, uint32_t offset,
@@ -272,6 +281,11 @@ int kvlangXvalueLangtype(const kvlangXvalue_t *v, char *buf,
                          size_t cap); /* 完整 langtype → buf */
 bool kvlangKindIsMap(
     const char *kind); /* stringkeymap 或 map langtype（`…·…`） */
+/* "[<utf8码点>]char/utf8" 写入 lt（≥64B）；失败 -1。 */
+__attribute__((visibility("hidden"))) int
+kvlangCharLangtypeFmt(uint8_t *lt, const char *s, uint32_t len);
+/* 作废 PC part-write 缓存（owned 接管或回退时调用）。 */
+__attribute__((visibility("hidden"))) void kvlangPcCacheInvalidate(void);
 bool kvlangXvalueIsPtr(const kvlangXvalue_t *v);
 int32_t kvlangXvalueArrayLen(const kvlangXvalue_t *v);
 const uint8_t *kvlangXvalueBody(const kvlangXvalue_t *v, const kvspaceHead_t *h,
@@ -768,6 +782,7 @@ typedef struct {
     /* Phase 1 派发：route 需要的只读上下文。 */
     const void *row;  /* const kvlangCodeRow_t * */
     const void *bind; /* const kvlangRowBind_t *：goto/br 预格式化目标 */
+    void *pc_view_state; /* kvlangPcViewState *：PC owned view（b1b） */
     int mode;        /* kvmode_t */
     char **out_pc;   /* ExecuteMode 的 out 参数（仅判空） */
     kvlangExecCursor *cursor; /* 执行游标（C-iii），可为 NULL */
