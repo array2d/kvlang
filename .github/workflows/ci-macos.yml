@@ -3,8 +3,7 @@ on: [push, pull_request]
 jobs:
   build:
     runs-on: macos-latest
-    env:
-      # /usr 受 SIP 保护，kvspace 装到 /usr/local（本仓 runtime/layout/runtime-rs 均读该变量）
+    # /usr 受 SIP 保护，kvspace 装到 /usr/local（本仓 runtime/layout/runtime-rs 固定该目录）
     steps:
       - uses: actions/checkout@v4
       - name: 构建依赖 kvspace（macOS 无预编译 ABI，从源码装到 /usr/local）
