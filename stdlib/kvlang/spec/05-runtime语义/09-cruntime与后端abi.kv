@@ -59,10 +59,26 @@ kvcpu_route.c=外部路由与 handoff）、`runtime.c`（ABI 层）、`rwirext.c
 `notinmyrwircaps`）、`logx.c`、`strutil.c`（一次性字符串工具）、`const.h`。
 myrwircaps 为**静态数组 + 线性查找**。
 
+## ISA 控制 store DSN（normative）
+
+ISA 控制面使用独立 kvspace，数据 store 零 ISA key。控制 DSN：
+
+- 控制 DSN 只从 `KVSPACE` 派生：shm/fs → 数据 DSN 追加 `.isa` 后缀（path 末尾、
+  query 之前）；无 path 报错。
+- redis → 同一 DSN（独立连接句柄），控制键在 `/‥isa/**`。
+- 未知 scheme → 硬失败 `ISA control DSN unsupported: <scheme>`。
+- 不接受 `KVSPACE_ISA`/`KVSPACE_BACKEND_PATH` 等额外环境变量；运行时只有
+  `KVSPACE`。
+
+runtime 与 layout 必须用同一派生函数；控制句柄写后按现有 Close/后端语义 flush，
+不依赖跨句柄惰性 flush，不新增 `kvspaceFlush` 符号；`kv_reset`/CI 清双 store
+（数据 `/lib` + 控制 `/‥isa`）。
+
 ## 统一 `kvspace*` C ABI（去特化）
 
-layout 与 runtime **都不对 kvspace 做特化**：不 dlopen、不双后端分支、不解析 scheme。二者只走一套
-`kvspace*` 兼容 C ABI（无下划线 camelCase）：
+layout 与 runtime 对**数据 store**不做特化：不 dlopen、不双后端分支；唯一的
+scheme 解析点是 ISA 控制 DSN 派生（见上）。二者只走一套 `kvspace*` 兼容 C ABI
+（无下划线 camelCase）：
 
 ```
 kvspaceConnect / Close / Clear

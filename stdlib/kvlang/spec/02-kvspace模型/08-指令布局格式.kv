@@ -68,5 +68,26 @@ opcode 槽由 layout 按目标写 `rwir` 或 `rwfunc`；两者的 body 均为 5 
 面量自身的 kind 编码（如 `int64` 的 8 字节 raw），**无** `counts`。故读/写槽的值两类：`rwir`（counts +
 文本）或内联字面量（如 `int64raw`、`char/utf32` 串）。opcode 槽永不存变量引用，故值拷贝 `=` 与函数调用
 `call` 在 KV 层无歧义。
+
+### ISA 控制面（独立 store）
+
+ISA manifest/meta/per-func ref 不在 `/lib`，在控制 store：
+
+```
+/‥isa/‥core
+/‥isa/‥meta
+/‥isa/func<func-path>
+```
+
+`<func-path>`：数据函数目录 `/lib/<pkg>·<name>/` 去掉 `/lib`，`·` 折成 `/`；
+例 `/lib/a/b·f/` → `/‥isa/func/lib/a/b/f`。layout/runtime 用同一折叠函数；
+不同函数折叠后重名 → `ISA ref path conflict`。
+
+控制值传输 langtype 统一 `[n]char/utf8`（class=1 SLACK、headlen=64、body=UTF-8）；
+**kind 只是传输标签，权威由 key + body 决定**。
+
+`‥isa` body：`ver\t1`、`hash\t<32hex>`、`count\t<n>`、`ext_bridge\t<32hex|none>`。
+数据 store **零 ISA key**（不得写 `/lib/isa` 或 `/lib/.../‥isa`）。
+
 	"#### -> /lib/kvlang/spec/kvspace模型/指令布局格式
 }

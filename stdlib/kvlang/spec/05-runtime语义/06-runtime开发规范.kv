@@ -66,6 +66,10 @@ myrwircaps **只关乎执行位置**（哪张表登记了它、由谁就地跑�
   `opcode[0]=='/'` → false；否则读 `/lib/<opcode>` 的 kind，等于 `def rwir` 即不在本 runtime
   myrwircaps、须经 def rwir 路由。
 
+P1 不写 `‥ext` manifest：layout 把 `/lib/<opcode>` 的 def rwir 当作 **Bridge**
+静态签名来源；P2 引入 `/‥isa/‥ext/<owner>` 后再按 owner 具体化。控制 store
+DSN 与键布局见 [[cruntime与后端abi]]。
+
 ### 全局标记与幂等
 
 - 裸 opcode（如 `print`/`input`）须在**进程启动期**经 `kvlangDefRwir` 注册全局，使 layout 阶

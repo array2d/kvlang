@@ -20,6 +20,12 @@ kvspace 的路径中，只有以下前缀由语言核心赋予固定结构语义
 径 `/lib/{pkg}·{func}`。多文件经引导拼接后统一 layout 进 `/lib`，已加载条目去重。函数在 `/lib` 下只
 读，帧调用经 extindex 复用同一份指令树（见 [[指令布局格式]]）。
 
+### ISA 控制面
+
+ISA registry 不在数据 store 的 `/lib` 下，而在**独立控制 kvspace** 的 `/‥isa/**`；
+数据 store 零 ISA key。控制 store 的 DSN 派生见 [[cruntime与后端abi]]，控制键与
+per-func ref 见 [[指令布局格式]]。
+
 ### `/vthread`
 
 每个虚线程 `vid` 占一棵子树 `/vthread/{vid}/`，借用 Unix `/proc/<pid>/` 思想：栈帧为其下的 KV 子树，

@@ -17,6 +17,8 @@ lib kvlang/spec/layout语义/lib与rwir数据 {
 
 四类同存 `/lib`，无独立 `/rwir/` 命名空间。
 
+ISA 控制面不在 `/lib`，而在独立控制 store；见 [[结构域]] 与 [[cruntime与后端abi]]。
+
 ## pkg 与嵌套 lib
 
 pkg **严格取自 `lib` 声明**（非文件名）。嵌套 lib 的 pkg 以 `/` 累积，函数名以 `·` 附于末段：
