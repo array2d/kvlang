@@ -24,11 +24,11 @@ jobs:
       - name: 下载 ABI 依赖
         env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
         run: ./ci/deps.sh
-      - name: 构建 runtime + layout + runtime-rs（产 bin/ 下的 CLI）
+      - name: 构建 runtime + layout + byteseek（产 bin/ 下的 CLI）
         run: |
           make runtime
           make layout      # cargo build + cp kvlanglayout / libkvlanglayout.so → bin/
-          make runtime-rs  # → bin/kvlang
+          make byteseek    # → bin/byteseek
       - name: 打包 ABI 产物
         run: |
           set -euo pipefail
@@ -48,7 +48,7 @@ jobs:
           # blockmalloc / slotsboxmalloc 是 header-only（只发头、无 lib），故不收集它们的 .so
           find /usr/lib/kvspace -maxdepth 1 -name '*.so*' -exec cp -P {} "$d/lib/kvspace/" \;
           # 可执行：本仓 CLI + 依赖带来的 CLI
-          cp bin/kvlang bin/kvlanglayout "$d/bin/"
+          cp bin/byteseek bin/kvlanglayout "$d/bin/"
           cp /usr/bin/kvspace "$d/bin/"
           printf '{"abi":"%s"}\n' "$v" > "$d/abi-manifest.json"
           tar czf "$d.tar.gz" "$d"
@@ -76,13 +76,13 @@ jobs:
             done
           }
           trap restore EXIT
-          # 不设 LD_LIBRARY_PATH：必须靠 ELF RPATH（bin/kvlang 带 $ORIGIN/../lib）
+          # 不设 LD_LIBRARY_PATH：必须靠 ELF RPATH（bin/byteseek 带 $ORIGIN/../lib）
           # 解出前端；后端目录仍是构建期常量 /usr/lib/kvspace，故显式给
           # KVSPACE_BACKEND_PATH（frontend 支持的运行期覆盖）。
           out=$(env -i PATH=/usr/bin:/bin HOME="$tmp" \
             KVSPACE="shm://$tmp/shm" \
             KVSPACE_BACKEND_PATH="$tmp/$d/lib/kvspace" \
-            "$tmp/$d/bin/kvlang" -c 'print("ok")')
+            "$tmp/$d/bin/byteseek" -c 'print("ok")')
           echo "smoke: $out"
           [ "$out" = "ok" ]
           # kvlanglayout 同样必须靠相对 RPATH 从包内解析前端
@@ -118,19 +118,19 @@ jobs:
           # durable 为 Rust（无 install 规则），手动装入后端目录，供 frontend dlopen
           sudo mkdir -p "$PREFIX/lib/kvspace"
           sudo cp /tmp/kvspace-durable/target/release/libkvspace_durable.dylib "$PREFIX/lib/kvspace/"
-      - name: 构建 runtime + layout + runtime-rs + kvspace CLI
+      - name: 构建 runtime + layout + byteseek + kvspace CLI
         run: |
           cmake -S runtime -B build/runtime -DCMAKE_BUILD_TYPE=Release -DKVSPACE_LIB_DIR="$KVSPACE_LIB_DIR"
           cmake --build build/runtime --target kvlang_runtime -j
           cargo build --release --manifest-path layout/Cargo.toml
-          # runtime-rs 的 build.rs 在 ../bin 找 libkvlang_runtime/libkvlanglayout，必须先就位
+          # byteseek 的 build.rs 在 ../bin 找 libkvlang_runtime/libkvlanglayout，必须先就位
           mkdir -p bin
           cp layout/target/release/libkvlanglayout.dylib bin/
-          cargo build --release --manifest-path runtime-rs/Cargo.toml
+          cargo build --release --manifest-path byteseek/Cargo.toml
           # kvspace CLI 用 #[link(name = "kvspace")]，前端装在 /usr/local/lib/kvspace
           RUSTFLAGS="-L native=/usr/local/lib/kvspace" cargo build --release --manifest-path /tmp/kvspace/cli/Cargo.toml
           cp layout/target/release/kvlanglayout bin/
-          cp runtime-rs/target/release/kvlang bin/
+          cp byteseek/target/release/byteseek bin/
       - name: 后端装载冒烟（frontend 的 dlopen 真能加载后端）
         run: |
           cat > /tmp/conn.c <<'EOF'
@@ -166,7 +166,7 @@ jobs:
           find /usr/local/lib/kvspace -maxdepth 1 -name '*.dylib' -exec cp -P {} "$d/lib/kvspace/" \;
           cp /tmp/kvspace-durable/target/release/libkvspace_durable.dylib "$d/lib/kvspace/"
           # 可执行：本仓 CLI + 依赖带来的 CLI
-          cp bin/kvlang bin/kvlanglayout "$d/bin/"
+          cp bin/byteseek bin/kvlanglayout "$d/bin/"
           cp /tmp/kvspace/cli/target/release/kvspace "$d/bin/"
           # 抹掉构建机绝对路径：layout 的 ID 与 CLI 对它的依赖必须是 @rpath，
           # 且 bin/ 与 lib/ 都要能从 tarball 内的 lib/ 解析 @rpath
@@ -178,25 +178,25 @@ jobs:
           cur_id=$(otool -D "$d/lib/libkvlanglayout.dylib" | tail -n +2)
           [ "$cur_id" = "@rpath/libkvlanglayout.dylib" ] || \
             install_name_tool -id @rpath/libkvlanglayout.dylib "$d/lib/libkvlanglayout.dylib"
-          layout_dep=$(otool -L "$d/bin/kvlang" | awk '/libkvlanglayout\.dylib/ {print $1; exit}')
+          layout_dep=$(otool -L "$d/bin/byteseek" | awk '/libkvlanglayout\.dylib/ {print $1; exit}')
           test -n "$layout_dep"
           case "$layout_dep" in
             @rpath/*) ;;
-            *) install_name_tool -change "$layout_dep" @rpath/libkvlanglayout.dylib "$d/bin/kvlang" ;;
+            *) install_name_tool -change "$layout_dep" @rpath/libkvlanglayout.dylib "$d/bin/byteseek" ;;
           esac
           # 前端依赖必须是 @rpath，绝对路径加 rpath 也救不回来
-          front_dep=$(otool -L "$d/bin/kvlang" | awk '/libkvspace\.[0-9]+\.dylib/ {print $1; exit}')
+          front_dep=$(otool -L "$d/bin/byteseek" | awk '/libkvspace\.[0-9]+\.dylib/ {print $1; exit}')
           test -n "$front_dep"
           case "$front_dep" in
             @rpath/*) ;;
-            *) install_name_tool -change "$front_dep" @rpath/libkvspace.1.dylib "$d/bin/kvlang" ;;
+            *) install_name_tool -change "$front_dep" @rpath/libkvspace.1.dylib "$d/bin/byteseek" ;;
           esac
           for f in "$d"/bin/* "$d"/lib/*.dylib; do
             add_rpath "$f" @loader_path/../lib
           done
           # 打包前核验：CLI 的 layout/前端依赖确实解析到 @rpath，且 rpath 覆盖 lib/
-          otool -L "$d/bin/kvlang"
-          otool -l "$d/bin/kvlang" | awk '/cmd LC_RPATH/{f=1} f && /path /{print "rpath:", $2; f=0}'
+          otool -L "$d/bin/byteseek"
+          otool -l "$d/bin/byteseek" | awk '/cmd LC_RPATH/{f=1} f && /path /{print "rpath:", $2; f=0}'
           for f in "$d/bin/kvlanglayout" "$d/lib/libkvlang_runtime.dylib" \
                    "$d/lib/libkvlanglayout.dylib" "$d/lib/libkvspace.1.dylib"; do
             echo "=== otool -L $f"
@@ -230,7 +230,7 @@ jobs:
           out=$(env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$tmp" \
             KVSPACE="shm://$tmp/shm" \
             KVSPACE_BACKEND_PATH="$tmp/$d/lib/kvspace" \
-            "$tmp/$d/bin/kvlang" -c 'print("ok")')
+            "$tmp/$d/bin/byteseek" -c 'print("ok")')
           echo "smoke: $out"
           [ "$out" = "ok" ]
           # kvlanglayout 同样必须靠 @loader_path/../lib 从包内解析 @rpath

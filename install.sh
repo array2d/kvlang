@@ -88,7 +88,7 @@ if [ -d "$root/lib" ]; then
   fi
 fi
 
-# CLI：kvlang / kvlanglayout / kvspace
+# CLI：byteseek / kvlanglayout / kvspace
 if [ -d "$root/bin" ]; then
   for f in "$root/bin"/*; do
     [ -e "$f" ] && { $SUDO cp "$f" "$PREFIX/bin/"; $SUDO chmod 755 "$PREFIX/bin/$(basename "$f")"; }
@@ -104,12 +104,12 @@ fi
 
 echo
 echo "✅ kvlang $tag 已安装到 $PREFIX"
-echo "   CLI      : $PREFIX/bin/{kvlang,kvlanglayout,kvspace}"
+echo "   CLI      : $PREFIX/bin/{byteseek,kvlanglayout,kvspace}"
 echo "   库       : $PREFIX/lib/  +  $PREFIX/lib/$KVSPACE_BACKEND_DIR/"
 echo "   头       : $PREFIX/include/{kvlang,kvspace,...}"
 echo
 echo "试用（后端由 KVSPACE DSN 选择）："
-echo "  KVSPACE=shm:///tmp/kvlang.shm $PREFIX/bin/kvlang -c 'println(\"hello\")'"
+echo "  KVSPACE=shm:///tmp/kvlang.shm $PREFIX/bin/byteseek -c 'println(\"hello\")'"
 case "$plat" in
   darwin-*)
     echo

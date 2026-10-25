@@ -1,8 +1,3 @@
-// 欢迎加入kvspace世界
-// lib xv —— 数组操作便利库。native rwir：xv·at/set/reshape/reinterpret；
-// rwfunc 补充：swap（交换两下标元素，返回新数组）、first（取首元素）。
-// 当前仅支持 []int64；xv 无长度原语，通用遍历类组合受限。
-
 lib xv {
 	rwfunc swap(arr:[]int64, i:int64, j:int64) -> (result:[]int64) {
 		vi = xv·at(arr, i)
@@ -10,7 +5,208 @@ lib xv {
 		tmp = xv·set(arr, i, vj)
 		result = xv·set(tmp, j, vi)
 	}
+
 	rwfunc first(arr:[]int64) -> (result:int64) {
 		result = xv·at(arr, 0)
+	}
+
+	rwfunc last(arr:[]int64) -> (result:int64) {
+		result = xv·at(arr, ndarray·numel(arr) - 1)
+	}
+
+	rwfunc sum(arr:[]int64) -> (result:int64) {
+		n = ndarray·numel(arr)
+		result = 0
+		i = 0
+		while (i < n) {
+			result = result + xv·at(arr, i)
+			i = i + 1
+		}
+	}
+
+	rwfunc argmin(arr:[]int64) -> (idx:int64) {
+		n = ndarray·numel(arr)
+		if (n == 0) {
+			idx = -1
+		} else {
+			idx = 0
+			best = xv·at(arr, 0)
+			i = 1
+			while (i < n) {
+				v = xv·at(arr, i)
+				if (v < best) {
+					best = v
+					idx = i
+				}
+				i = i + 1
+			}
+		}
+	}
+
+	rwfunc argmax(arr:[]int64) -> (idx:int64) {
+		n = ndarray·numel(arr)
+		if (n == 0) {
+			idx = -1
+		} else {
+			idx = 0
+			best = xv·at(arr, 0)
+			i = 1
+			while (i < n) {
+				v = xv·at(arr, i)
+				if (v > best) {
+					best = v
+					idx = i
+				}
+				i = i + 1
+			}
+		}
+	}
+
+	rwfunc min(arr:[]int64) -> (result:int64) {
+		xv·argmin(arr) -> idx
+		if (idx == -1) {
+			result = 0
+		} else {
+			result = xv·at(arr, idx)
+		}
+	}
+
+	rwfunc max(arr:[]int64) -> (result:int64) {
+		xv·argmax(arr) -> idx
+		if (idx == -1) {
+			result = 0
+		} else {
+			result = xv·at(arr, idx)
+		}
+	}
+
+	rwfunc find(arr:[]int64, target:int64) -> (idx:int64) {
+		n = ndarray·numel(arr)
+		idx = -1
+		i = 0
+		while (i < n) {
+			if (xv·at(arr, i) == target) {
+				idx = i
+				break
+			}
+			i = i + 1
+		}
+	}
+
+	rwfunc rfind(arr:[]int64, target:int64) -> (idx:int64) {
+		idx = -1
+		i = ndarray·numel(arr) - 1
+		while (i >= 0) {
+			if (xv·at(arr, i) == target) {
+				idx = i
+				break
+			}
+			i = i - 1
+		}
+	}
+
+	rwfunc contains(arr:[]int64, target:int64) -> (r:bool) {
+		r = xv·find(arr, target) != -1
+	}
+
+	rwfunc count(arr:[]int64, target:int64) -> (c:int64) {
+		n = ndarray·numel(arr)
+		c = 0
+		i = 0
+		while (i < n) {
+			if (xv·at(arr, i) == target) {
+				c = c + 1
+			}
+			i = i + 1
+		}
+	}
+
+	rwfunc eq(a:[]int64, b:[]int64) -> (r:bool) {
+		na = ndarray·numel(a)
+		if (na != ndarray·numel(b)) {
+			r = false
+		} else {
+			r = true
+			i = 0
+			while (i < na) {
+				if (xv·at(a, i) != xv·at(b, i)) {
+					r = false
+					break
+				}
+				i = i + 1
+			}
+		}
+	}
+
+	rwfunc is_sorted(arr:[]int64) -> (r:bool) {
+		n = ndarray·numel(arr)
+		r = true
+		i = 1
+		while (i < n) {
+			if (xv·at(arr, i) < xv·at(arr, i - 1)) {
+				r = false
+				break
+			}
+			i = i + 1
+		}
+	}
+
+	rwfunc reverse(arr:[]int64) -> (result:[]int64) {
+		result = arr
+		lo = 0
+		hi = ndarray·numel(arr) - 1
+		while (lo < hi) {
+			xv·swap(result, lo, hi) -> result
+			lo = lo + 1
+			hi = hi - 1
+		}
+	}
+
+	rwfunc sort(arr:[]int64) -> (result:[]int64) {
+		result = arr
+		n = ndarray·numel(result)
+		i = 1
+		while (i < n) {
+			key = xv·at(result, i)
+			j = i - 1
+			while (j >= 0) {
+				vj = xv·at(result, j)
+				if (vj <= key) {
+					break
+				}
+				result = xv·set(result, j + 1, vj)
+				j = j - 1
+			}
+			result = xv·set(result, j + 1, key)
+			i = i + 1
+		}
+	}
+
+	rwfunc binary_search(arr:[]int64, target:int64) -> (idx:int64) {
+		lo = 0
+		hi = ndarray·numel(arr) - 1
+		idx = -1
+		while (lo <= hi) {
+			mid = lo + (hi - lo) ÷ 2
+			vm = xv·at(arr, mid)
+			if (vm == target) {
+				idx = mid
+				break
+			} else if (vm < target) {
+				lo = mid + 1
+			} else {
+				hi = mid - 1
+			}
+		}
+	}
+
+	rwfunc fill(arr:[]int64, val:int64) -> (result:[]int64) {
+		result = arr
+		n = ndarray·numel(result)
+		i = 0
+		while (i < n) {
+			result = xv·set(result, i, val)
+			i = i + 1
+		}
 	}
 }

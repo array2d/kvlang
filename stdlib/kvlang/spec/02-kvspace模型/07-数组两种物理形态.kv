@@ -68,7 +68,7 @@ stringkeymap 元素的成员名是坐标段，物理 key 形如 `m·[i]`（一�
 
 class 3 表示值本体在扩展世界（SHM/GPU/文件），head 中 langtype 记录形态（如 `[256,256]uint8`），body
 记位置描述符。@ext 只表**单个值**存于扩展世界（compact 形态），与目录成员枚举无关。读
-取时由支持 `@` 的 rwir（如 runtime-rs 的 fs/networld 一族）按定位串兑现（见 [[地址空间]] 扩展存储）。
+取时由支持 `@` 的 rwir（如 byteseek 的 fs/networld 一族）按定位串兑现（见 [[地址空间]] 扩展存储）。
 
 ## 成员枚举
 

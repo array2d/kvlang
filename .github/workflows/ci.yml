@@ -20,7 +20,7 @@ jobs:
           make runtime
           make layout
           sudo cp layout/target/release/libkvlanglayout.so /usr/lib/
-          make runtime-rs
+          make byteseek
           sudo make install
       - name: 测试 (${{ matrix.backend.name }})
         env: { KVSPACE: "${{ matrix.backend.dsn }}", KV_CASE_TIMEOUT: "600" }
@@ -34,12 +34,12 @@ jobs:
       - name: 下载 ABI 依赖
         env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
         run: ./ci/deps.sh
-      - name: 构建 layout + runtime-rs（提供 bin/kvlang、kvlanglayout）
+      - name: 构建 layout + byteseek（提供 bin/byteseek、kvlanglayout）
         run: |
           mkdir -p bin
           make runtime
           make layout
-          make runtime-rs
+          make byteseek
       - name: 构建 KV_DEBUG_TYPES runtime
         run: |
           cmake -S runtime -B build/runtime-debug -DCMAKE_BUILD_TYPE=Release \
@@ -50,10 +50,10 @@ jobs:
           test -f "$PWD/bin/libkvlang_runtime.so"
           KVLANG_DEBUG_RUNTIME_LIB="$PWD/bin/libkvlang_runtime.so" \
           KVLANG_LAYOUT_BIN="$PWD/bin/kvlanglayout" \
-          KVLANG_TERM_BIN="$PWD/bin/kvlang" \
+          KVLANG_TERM_BIN="$PWD/bin/byteseek" \
           bash runtime/tests/isa_typed_violation.sh
       - name: 156 entry conformance
         run: |
           KVLANG_LAYOUT_BIN="$PWD/bin/kvlanglayout" \
-          KVLANG_TERM_BIN="$PWD/bin/kvlang" \
+          KVLANG_TERM_BIN="$PWD/bin/byteseek" \
           python3 runtime/tests/isa_conformance.py

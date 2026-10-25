@@ -21,7 +21,7 @@ opcode**，映射 `opcode → 就地处理器`。它是 kvlang runtime 分层与
 - **每个 runtime 必须声明自己的 myrwircaps**。核心 runtime-c 的 myrwircaps 就是其 **native 静态注册
   表**（数组 + 线性查找，见 [[cruntime与后端abi]]），登记 native builtin（+ 控制流 `call`/`return`/
   `br`/`goto` + `=` 拷贝，见 [[runtimec内建]]）。
-- **每个扩展运行时各自定义一张 myrwircaps**，登记其自带的 rwir opcode。例：runtime-rs 为 `term`/
+- **每个扩展运行时各自定义一张 myrwircaps**，登记其自带的 rwir opcode。例：byteseek 为 `term`/
   `json`/`http`/`kvlang`/`networld` 等（见 [[notinmyrwircaps]] 就地集合）；未来
   deepx-gpu-compute 为 tensor 融合算子。
 - **派发判据**：`opcode ∈ 本 runtime.myrwircaps` → 查表取处理器**就地执行**；否则该 rwir 须经 def
@@ -76,7 +76,7 @@ myrwircaps **只关乎执行位置**（哪张表登记了它、由谁就地跑�
 ## 注册表：逐槽 langtype
 
 扩展的每个 opcode 携带读参表 `rp` 与写参表 `wp`，各槽一个 langtype（Rust
-`runtime-rs/src/rwir/mod.rs::Rwir{rp,wp}`）。注册时各参数类型分别写入 `/lib/<opcode>` 签名行 `[0,x]`
+`byteseek/src/rwir/mod.rs::Rwir{rp,wp}`）。注册时各参数类型分别写入 `/lib/<opcode>` 签名行 `[0,x]`
 的 `def langtype` 槽（`rp` 各参 `x<0` 递减、`wp` 各参 `x>0` 递增）；主槽 body 只记
 `[nr][nw][dynamic]`（见 [[总体方案]]）。读参**只读**、写参**可写可读**；扩展**必须**把输出显式写入其
 写槽（见 [[执行模型]] §五）。示例（networld）：

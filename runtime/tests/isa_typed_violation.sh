@@ -10,11 +10,11 @@ TERM=${KVLANG_TERM_BIN:?}
 BASE=/tmp/isa-typed-violation-$$
 rm -rf "$BASE" "$BASE.isa" "$BASE.bin"
 mkdir -p "$BASE" "$BASE.bin"
-cp "$TERM" "$BASE.bin/kvlang"
+cp "$TERM" "$BASE.bin/byteseek"
 cp "$LAYOUT" "$BASE.bin/kvlanglayout"
 cp "$(dirname "$LAYOUT")/libkvlanglayout.so" "$BASE.bin/" 2>/dev/null || true
 cp "$LIB" "$BASE.bin/libkvlang_runtime.so"
-TERM="$BASE.bin/kvlang"
+TERM="$BASE.bin/byteseek"
 
 PROG="$BASE/p.kv"
 cat > "$PROG" <<'EOF'

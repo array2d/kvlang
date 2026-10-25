@@ -1,12 +1,12 @@
 # kvlang 统一构建：产物全部输出到 bin/，各组件独立编译。
 #   make runtime    C runtime 库（libkvlang_runtime.so，经 CMake）
-#   make runtime-rs 功能完整 Rust runtime → 编译为 kvlang（term/json/http/kvlanglayout 就地 rwir）
+#   make byteseek   功能完整 Rust runtime → 编译为 byteseek（term/json/http/kvlanglayout/networld 就地 rwir）
 #   make layout     Rust layout（kvlanglayout）
 #   make json       Go json 扩展（json-rwirext 可执行文件）
 #   make oldhero    Go 旧 runtime（kvlang-go，兼容保留，即将归档）
 #   make test       全量 tutorial 回归
 #   make install    一次性安装产物到最终态目录（.so→/usr/lib，可执行→/usr/bin，头→/usr/include/kvlang/）
-#   make all        全部（runtime + runtime-rs + layout + json）
+#   make all        全部（runtime + byteseek + layout + json）
 #   make clean      清理 bin/ 与各构建目录
 #   make clear      install 的逆操作：删系统目录里 kvspace/kvlang 的 .so 与可执行
 #   make status     列出系统目录里已安装的库 / 可执行 / 头
@@ -14,10 +14,10 @@
 
 BIN         := bin
 
-.PHONY: all runtime runtime-rs layout json oldhero test install clean \
+.PHONY: all runtime byteseek layout json oldhero test install clean \
         status clear clear-headers clear-all
 
-all: runtime runtime-rs layout json
+all: runtime byteseek layout json
 
 test: all
 	python3 tutorial/test.py --no-build
@@ -26,9 +26,9 @@ runtime:
 	cmake -S runtime -B build/runtime -DCMAKE_BUILD_TYPE=Release
 	cmake --build build/runtime --target kvlang_runtime -j
 
-runtime-rs:
-	cargo build --release --manifest-path runtime-rs/Cargo.toml
-	cp runtime-rs/target/release/kvlang $(BIN)/kvlang
+byteseek:
+	cargo build --release --manifest-path byteseek/Cargo.toml
+	cp byteseek/target/release/byteseek $(BIN)/byteseek
 
 layout:
 	cargo build --release --manifest-path layout/Cargo.toml
@@ -39,7 +39,7 @@ install:
 	install -d /usr/lib /usr/bin /usr/include/kvlang
 	install -m 755 $(BIN)/libkvlang_runtime.so /usr/lib/
 	install -m 755 layout/target/release/libkvlanglayout.so /usr/lib/
-	install -m 755 $(BIN)/kvlang $(BIN)/kvlanglayout /usr/bin/
+	install -m 755 $(BIN)/byteseek $(BIN)/kvlanglayout /usr/bin/
 	install -m 644 runtime/include/kvlang_vthread.h runtime/include/kvlang_runtime.h /usr/include/kvlang/
 
 json:
@@ -51,7 +51,7 @@ oldhero:
 clean:
 	rm -rf $(BIN) build
 	cargo clean --manifest-path layout/Cargo.toml
-	cargo clean --manifest-path runtime-rs/Cargo.toml
+	cargo clean --manifest-path byteseek/Cargo.toml
 
 # ── 安装态清理（install 的逆操作，kvspace / kvlang 生态） ─────────────────
 #   make clear         删 .so（/usr/lib、/usr/lib/kvspace、/lib、/usr/local/lib …）+ 可执行
@@ -61,7 +61,7 @@ clean:
 SUDO    ?= sudo
 LIBDIRS := /usr/lib/kvspace /usr/lib/x86_64-linux-gnu /usr/lib /lib/x86_64-linux-gnu /lib /usr/local/lib
 BINDIRS := /usr/bin /bin /usr/local/bin
-BINS    := kvlang kvlanglayout kvspace
+BINS    := byteseek kvlang kvlanglayout kvspace
 HDRDIRS := /usr/include/kvspace /usr/include/kvlang /usr/local/include/kvspace /usr/local/include/kvlang
 PCDIRS  := /usr/lib/x86_64-linux-gnu/pkgconfig /usr/lib/pkgconfig /usr/local/lib/pkgconfig
 

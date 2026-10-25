@@ -1,0 +1,31 @@
+// 期望输出:
+//   isabs= true false
+//   join1= /usr/local/bin
+//   join2= /etc/hosts
+//   join3= a/b
+//   dir= /usr/local . /
+//   base= main.kv foo /
+//   ext= .kv  .gz
+//   stem= main .bashrc archive.tar
+//   split= /a/b | c.txt
+//   splitext= /a/b/c | .txt
+//   norm1= /a/c
+//   norm2= ../b
+//   norm3= .
+rwfunc test() -> () {
+	println("isabs=", path·isabs("/usr/bin"), path·isabs("src/main.kv"))
+	println("join1=", path·join("/usr/local", "bin"))
+	println("join2=", path·join("/usr/local", "/etc/hosts"))
+	println("join3=", path·join("a/", "b"))
+	println("dir=", path·dirname("/usr/local/bin/"), path·dirname("foo"), path·dirname("/etc"))
+	println("base=", path·basename("/src/main.kv"), path·basename("foo/"), path·basename("/"))
+	println("ext=", path·ext("/src/main.kv"), path·ext("/home/.bashrc"), path·ext("archive.tar.gz"))
+	println("stem=", path·stem("/src/main.kv"), path·stem("/home/.bashrc"), path·stem("archive.tar.gz"))
+	path·split("/a/b/c.txt") -> (d, b)
+	println("split=", d, "|", b)
+	path·splitext("/a/b/c.txt") -> (r, e)
+	println("splitext=", r, "|", e)
+	println("norm1=", path·normpath("/a/b/../c/./"))
+	println("norm2=", path·normpath("a/../../b"))
+	println("norm3=", path·normpath(""))
+}

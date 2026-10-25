@@ -24,6 +24,7 @@ fn main() {
     let bin = format!("{manifest}/../bin"); // kvlang/bin（新构建的 libkvlang_runtime.so）
 
     // KVSPACE_LIB_DIR 可覆盖安装目录：macOS 的 /usr 受 SIP 保护，应指向 <prefix>/lib/kvspace。
+    println!("cargo:rerun-if-env-changed=KVSPACE_LIB_DIR");
     let kvspace_dir =
         std::env::var("KVSPACE_LIB_DIR").unwrap_or_else(|_| "/usr/lib/kvspace".into());
 

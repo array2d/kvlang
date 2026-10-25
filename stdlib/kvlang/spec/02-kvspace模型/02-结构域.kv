@@ -31,7 +31,7 @@ kvspace 的路径中，只有以下前缀由语言核心赋予固定结构语义
 `/networld` 是本机在网络命名空间下的身份域，`host` 取裸 hostname。外部进程执行、宿主文件系统读写等**
 不**经设备文件，而是登记在 `/networld/{host}/…` 下并由 rwir（经 def rwir 路由）兑现：例如外部进程的
 stdout/stderr 捕获为扩展存储句柄，其逻辑定位符形如 `/networld/{host}/proc/{pid}/{stream}`
-（`runtime-rs/src/rwir/networld/`）。
+（`byteseek/src/rwir/networld/`）。
 
 ### 没有设备域
 

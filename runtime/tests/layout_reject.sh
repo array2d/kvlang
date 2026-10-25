@@ -3,7 +3,7 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 LAYOUT="${KVLANG_LAYOUT_BIN:-$ROOT/bin/kvlanglayout}"
-KVLANG="${KVLANG_TERM_BIN:-$ROOT/bin/kvlang}"
+KVLANG="${KVLANG_TERM_BIN:-$ROOT/bin/byteseek}"
 boot() { KVSPACE="$1" "$KVLANG" -c 'print("boot")' >/dev/null 2>&1; }
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 DSN="fs://$tmp/db"; mkdir -p "$tmp/db"

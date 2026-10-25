@@ -212,7 +212,7 @@ pub fn ensure_test_isa(kv: &mut Kv) {
             ffi::new_char_byte(meta.as_bytes()),
         ),
     ]);
-    // 模拟 runtime-rs 的 def rwir 注册（P1 静态桥），与 MYRWIRCAPS 同步的快照。
+    // 模拟 byteseek 的 def rwir 注册（P1 静态桥），与 MYRWIRCAPS 同步的快照。
     const BRIDGES: &str = include_str!("../tests/fixtures/def_rwir.txt");
     for line in BRIDGES.lines() {
         let c: Vec<&str> = line.split('\t').collect();
@@ -225,7 +225,7 @@ pub fn ensure_test_isa(kv: &mut Kv) {
     }
 }
 
-/// 测试专用：注册一个 def rwir 静态桥（模拟 runtime-rs register）。
+/// 测试专用：注册一个 def rwir 静态桥（模拟 byteseek register）。
 pub fn ensure_test_bridge(kv: &mut Kv, op: &str, nr: u32, nw: u32) {
     let base = crate::keytree::rwir(op);
     let mut pairs = vec![(

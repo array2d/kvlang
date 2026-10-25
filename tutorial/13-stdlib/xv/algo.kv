@@ -1,0 +1,38 @@
+// 期望输出:
+//   last= 20
+//   sum= 90
+//   min_max= 5 40
+//   argmin_max= 2 1
+//   find= 1 4 -1
+//   contains= true false
+//   count= 2 0
+//   eq= true false
+//   sorted_before= false
+//   sorted_after= true
+//   sorted_elems= 5 10 15 20 20 40
+//   bsearch= 3 -1
+//   rev_ends= 40 5
+//   filled= 7 7
+rwfunc test() -> () {
+	a:[]int64 = [10, 40, 5, 15, 20]
+	println("last=", xv·last(a))
+	println("sum=", xv·sum(a))
+	println("min_max=", xv·min(a), xv·max(a))
+	println("argmin_max=", xv·argmin(a), xv·argmax(a))
+	b:[]int64 = [10, 20, 5, 15, 20, 40]
+	println("find=", xv·find(b, 20), xv·rfind(b, 20), xv·find(b, 99))
+	println("contains=", xv·contains(b, 15), xv·contains(b, 99))
+	println("count=", xv·count(b, 20), xv·count(b, 99))
+	c:[]int64 = [10, 40, 5, 15, 20]
+	println("eq=", xv·eq(a, c), xv·eq(a, b))
+	println("sorted_before=", xv·is_sorted(b))
+	s = xv·sort(b)
+	println("sorted_after=", xv·is_sorted(s))
+	println("sorted_elems=", s[0], s[1], s[2], s[3], s[4], s[5])
+	u = xv·sort(a)
+	println("bsearch=", xv·binary_search(u, 20), xv·binary_search(u, 99))
+	rev = xv·reverse(u)
+	println("rev_ends=", xv·first(rev), xv·last(rev))
+	f = xv·fill(a, 7)
+	println("filled=", xv·first(f), xv·last(f))
+}

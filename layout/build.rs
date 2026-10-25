@@ -2,6 +2,7 @@
 // 运行期由前端按 DSN 选后端（shm://→kvspace-c，其余→kvspace-durable）。
 // KVSPACE_LIB_DIR 可覆盖安装目录：macOS 的 /usr 受 SIP 保护，应指向 <prefix>/lib/kvspace。
 fn main() {
+    println!("cargo:rerun-if-env-changed=KVSPACE_LIB_DIR");
     let dir = std::env::var("KVSPACE_LIB_DIR").unwrap_or_else(|_| "/usr/lib/kvspace".into());
     println!("cargo:rustc-link-search=native={dir}");
     println!("cargo:rustc-link-lib=dylib=kvspace");
