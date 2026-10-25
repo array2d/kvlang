@@ -62,6 +62,58 @@ int kvspaceSlotView(void *h, const kvspaceRef_t *ref,
   owned 键不提供 `kvspaceWatch` 通知保证；P1 的局部操作数不进入 owned，继续走
   `WriteBody`（FIXED_SMALL body 直写）。
 
+**view token（shm-only, normative）**：shm 后端额外提供版本化视图 token；
+durable 无映射内槽，全部返回 `-2`。
+
+```c
+typedef struct {
+    uint8_t *head;        /* XValue 起点（映射内，借用） */
+    uint8_t *body;        /* head + headlen */
+    uint32_t headlen;
+    uint32_t value_len;
+    uint64_t cap;         /* 整 box 物理容量 */
+    uint64_t body_cap;
+    uint32_t struct_gen;  /* 结构版本：子集变化/搬迁才变 */
+    uint32_t value_gen;   /* 值版本：写/删递增（seqlock） */
+    uint64_t store_id;    /* 句柄身份：close/重开后旧 token 失效 */
+    uint32_t node_id;
+    uint32_t _pad;
+} kvspaceViewToken_t;
+```
+
+符号：`kvspaceViewResolve` / `FromRef` / `ResolveFrom` /
+`ResolvePrefix` / `Check` / `Write` / `Del` / `Refresh` / `Sweep` /
+`Ack` / `Quiesce`。返回码：`0`=有效/成功，`1`=STALE（需 `Refresh`），
+`-1`=错误，`-2`=后端不支持（durable 全部 `-2`，调用方回退既有读写
+API，每个句柄只判定一次）。**没有 Release**：token 无 pin，`store_id`
+失配或版本不符即失效。
+
+**屏障契约（normative）**：
+
+- claim 后默认 `quiesced=1`；**使用 token/view 前必须
+  `kvspaceViewQuiesce(h, 0)`**。
+- 进入阻塞（`kvspaceWatch` / sleep / 长时间不让出）前必须
+  `Quiesce(1)` + `kvspaceViewAck`；返回后 `Quiesce(0)` 并作废本进程
+  全部派生 token。
+- 长计算每 64 个 op 检查一次（runtime 已内置）。不 ack 只会让屏障轮
+  阻塞、垃圾不回收——是背压，不是错误。
+- leader 只在“所有存活进程都已 ack 或 quiesced”后推进 epoch 并回收；
+  死进程按 `/proc/<pid>/stat` 判定。
+
+**单写者契约（normative）**：同一 store 同一时刻只允许**一个写者进程**；
+两个进程并发写（即使不同 key）为未定义行为，后端可硬错。多进程只读/
+等待不受限。
+
+**shm store 格式 4（normative）**：`format_version = 4`（ART val 原子字、
+垃圾环、单写者降级、ART 节点 8 字节对齐）。旧格式（2/3）在 open 时
+硬失败并提示重建；不迁移、不向后兼容。节点 8 字节对齐是正确性前提：
+非对齐 8 字节原子在 x86 上退化为 split lock，在 AArch64 上可能直接陷入。
+
+**删除是延迟回收（normative）**：`kvspaceDel` / `kvspaceViewDel` 只把
+box 退役进垃圾环；释放发生在屏障轮（`kvspaceViewSweep` 同步跑一轮，或
+维护线程在未回收字节达 64 MiB 时启动）。需要立即观察物理释放的调用方
+必须显式 `Sweep`。
+
 核心符号：
 
 | 符号 | 语义 |
@@ -135,6 +187,17 @@ dispatch 静态导出；后端 `kvspace-c` / `kvspace-durable` 各导出同一�
     kvspaceSlotView
     kvspaceXvalueEncode
     kvspaceXvalueEncodeMode
+    kvspaceViewAck
+    kvspaceViewCheck
+    kvspaceViewDel
+    kvspaceViewFromRef
+    kvspaceViewQuiesce
+    kvspaceViewRefresh
+    kvspaceViewResolve
+    kvspaceViewResolveFrom
+    kvspaceViewResolvePrefix
+    kvspaceViewSweep
+    kvspaceViewWrite
     kvspaceWatch
     kvspaceWriteInPlace
     kvspaceWriteNewPlace

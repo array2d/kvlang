@@ -30,6 +30,15 @@ add_library(kvlang_runtime SHARED ${KVLANG_RUNTIME_SRC})
 target_include_directories(kvlang_runtime PUBLIC include src)
 target_compile_definitions(kvlang_runtime PRIVATE _GNU_SOURCE)
 
+# 热 TU（kvcpu.c）对代码布局敏感：P2 静默点新增分支曾让 k_nucleotide 漂移 +15%，
+# 函数/循环按 64B 对齐后恢复（实测 11.761 → 10.237ms）。编译器不支持时跳过。
+include(CheckCCompilerFlag)
+check_c_compiler_flag("-falign-functions=64" KVLANG_HAVE_ALIGN)
+if(KVLANG_HAVE_ALIGN)
+    target_compile_options(kvlang_runtime PRIVATE
+        -falign-functions=64 -falign-loops=64)
+endif()
+
 option(KVLANG_DEBUG_TYPES "P1b3: assert typed-core slot kinds (test build)" OFF)
 if(KVLANG_DEBUG_TYPES)
     target_compile_definitions(kvlang_runtime PRIVATE KV_DEBUG_TYPES)

@@ -226,7 +226,11 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
 
     const kvlangRwirCap *caps = kvlangRwirCaps();
     int rc = 0;
+    uint32_t qops = 0;
     for (;;) {
+        /* 每 64 条指令一个静默点（handler 已返回，处于 op 边界）。 */
+        if (kv->shm && !(++qops & 63))
+            kvlangViewQuiesce(kv);
         if (!have_fb &&
             (!kvspaceKeyOffRead(&pc_off, cur_b, sizeof cur_b) || !cur_b[0])) {
             rc = -1;
