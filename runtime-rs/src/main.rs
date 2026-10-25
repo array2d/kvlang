@@ -40,6 +40,10 @@ fn read_file(path: &str) -> String {
 }
 
 fn main() {
+    // #493：先从内存加载嵌入的 .so 并绑定符号（必须在任何 connect 之前）。
+    #[cfg(feature = "embed")]
+    kvlang_rs::embed::init();
+
     let args: Vec<String> = std::env::args().skip(1).collect();
     let dsn = dsn();
 

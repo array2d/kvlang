@@ -88,6 +88,38 @@ PREFIX=/opt/kvlang VERSION=v0.2.18 sh install.sh   # 覆盖前缀 / 指定版本
 
 安装内容：`kvlang`（runtime CLI）、`kvlanglayout`（layout CLI）、`kvspace`（后端 CLI）→ `<prefix>/bin`；库 → `<prefix>/lib` + `<prefix>/lib/kvspace`；头 → `<prefix>/include/{kvlang,kvspace,…}`。
 
+## 单文件二进制（Linux）
+
+`make single` 产出 `bin/kvlang-single`：一个可执行文件，把项目自有的全部 `.so`
+以字节嵌入。启动时写入匿名 `memfd_create` 对象并 `dlopen("/proc/self/fd/N")`
+从内存加载——**不落盘**，运行期不需要 `LD_LIBRARY_PATH`、rpath，也不需要系统里
+安装 kvspace/kvlang 库（`ldd` 只剩 libc/libm/libgcc）。
+
+```bash
+./ci/deps.sh          # 或把 KVSPACE_DEPS_DIR 指向已有的依赖前缀
+make single           # → bin/kvlang-single
+ldd bin/kvlang-single # 只系统库
+KVSPACE=shm:///tmp/s.db bin/kvlang-single -c 'print("ok")'
+```
+
+`KVSPACE`（DSN）选择后端；**加载器本身不设置任何环境变量**。它把后端从内存映射进来，
+dispatch 前端再用 `dlopen(name, RTLD_NOW | RTLD_NOLOAD)` 按 SONAME 复用，不需要
+后端目录、rpath 或 `LD_LIBRARY_PATH`。payload 里的前端必须是**支持 NOLOAD 复用**的
+kvspace 构建（v0.3.18 发布版没有）：用当前 kvspace 源码构建并
+`FRONTEND_SO=<路径> make single`；缺能力标记时构建**直接失败**，不会静默回退。
+
+要用单文件跑 tutorial：layout 步骤改调它自己的 `layout` 子命令，并在 `PATH` 上放一个
+指向单文件的 `kvlang` 符号链接（networld 嵌套 exec 用例需要）：
+
+```bash
+printf '#!/bin/sh\nexec env KVSPACE="$2" "$PWD/bin/kvlang-single" layout "$1"\n' > /tmp/kl.sh
+chmod +x /tmp/kl.sh && ln -sf "$PWD/bin/kvlang-single" /tmp/kvlang
+PATH=/tmp:$PATH KVLANG_TERM_BIN="$PWD/bin/kvlang-single" KVLANG_LAYOUT_BIN=/tmp/kl.sh \
+  KVSPACE=shm:///tmp/tut python3 tutorial/test.py --no-build
+```
+
+自包含 tarball 仍是正式发布物；单文件是 Linux 的**新增**产物（macOS 为后续项）。
+
 ## Quick Start（从源码）
 
 依赖：C 工具链 + cmake、Rust（cargo），以及装到 `/usr/lib/kvspace` 的 kvspace ABI 库（由 [`ci/deps.sh`](ci/deps.sh) 按 [`deps.json`](deps.json) 里的 tag 拉取）。Go 仅 Go `json` 示例扩展需要。
