@@ -150,7 +150,7 @@ KVSPACE=shm:///tmp/kvlang.shm ./bin/kvlang tutorial/01-basics/hello.kv   # kvspa
 KVSPACE=fs:///tmp/kvlang-fs   ./bin/kvlang tutorial/01-basics/hello.kv   # kvspace-durable
 ```
 
-Two more modes: `kvlang create <func>` prints a vthread `vid`, and `kvlang run <vid>` resumes from the persisted PC (crash recovery). With no arguments and `KVLANG_LIB=p1:p2:…` set, kvlang lays out every `.kv` under those paths and runs each lib's `init`.
+Two more modes: `kvlang create <func>` prints a vthread `vid`, and `kvlang run <vid>` resumes from the persisted PC (crash recovery). With `--lib p1:p2:…` (instead of an entry), kvlang lays out every `.kv` under those paths and runs each lib's `init`; there is no environment variable for this.
 
 ---
 

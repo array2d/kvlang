@@ -25,11 +25,12 @@ layout 能力经 cdylib 导出，第三方无需 fork 子进程即可布局（�
 `vet` 走 parse + lower，但**不写 kvspace**。它是自造代码的装载前闸门：LLM 生成或外部注入的 `.kv` 先
 过 vet，失败不污染 `/lib`。
 
-## KVLANG_LIB 引导与 init 入口
+## `--lib` 引导与 init 入口
 
-`KVLANG_LIB` 引导 layout 与 run 各 lib 的 init。pkg **严格取自 `lib` 声明**（`lib X { … }` → `X`），
-不从文件名推导。layout 产出的 init 入口名列表即消费方驱动 init 的依据；tutorial 按约定跑 `test` 入
-口。
+`kvlang --lib p1:p2:…` 引导 layout 与 run 各 lib 的 init（路径以 `:` 分隔；目录递归、相对根、排序）。
+pkg **严格取自 `lib` 声明**（`lib X { … }` → `X`），不从文件名推导。不带 `--lib` 时不存在隐式库路径，
+也没有对应的环境变量。layout 产出的 init 入口名列表即消费方驱动 init 的依据；tutorial 按约定跑
+`test` 入口。
 
 ## 导出符号
 

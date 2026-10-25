@@ -8,7 +8,7 @@
 //!   kvlang vet <file>      仅校验（parse+lower），打印 ok 或错误
 //!   kvlang format <file>   格式化输出到 stdout
 //!   kvlang printlib <file> [prefix]  layout 该文件后，把 /lib（或 prefix）子树重建为可运行 kvlang + 槽位注释（不读 .src）
-//!   kvlang（无参，设 KVLANG_LIB=p1:p2:…）  layout 各路径下所有 .kv → run 各 lib 的 init（pkg 取自源码 `lib` 声明，同 stdlib）
+//!   kvlang --lib p1:p2:…   layout 各路径下所有 .kv → run 各 lib 的 init（pkg 取自源码 `lib` 声明，同 stdlib）
 //! 驱动循环：executeVthread 主导执行，遇 rwir 停下；就地 rwir（print/json/http/…）
 //! 连续批处理 + nextPc；外部 rwir（如 numpy）handoff 给扩展进程；native/控制帧写回 pc。
 #![allow(non_snake_case, non_camel_case_types)]
@@ -158,17 +158,21 @@ fn main() {
 
         // ── 运行已入库的显式入口（tutorial 测试主路径：pkg·func 或裸名，pkg 可空）──
         [x] => drive(&boot(&dsn), x),
-        // ── KVLANG_LIB=p1:p2:… → layout 各路径下所有 .kv（相对名=pkg），复用 stdlib 的 run init 引导──
-        [] => {
-            let lib = std::env::var("KVLANG_LIB").unwrap_or_default();
+        // ── --lib p1:p2:… → layout 各路径下所有 .kv（相对名=pkg），复用 stdlib 的 run init 引导──
+        [flag, lib] if flag == "--lib" => {
             if lib.is_empty() {
-                kvlang_rs::elog!("need entry");
+                kvlang_rs::elog!("--lib needs p1:p2:…");
                 std::process::exit(1);
             }
             let eng = boot(&dsn);
-            let libs = collect_libs(&lib);
+            let libs = collect_libs(lib);
             let inits = eng.layout_libs(&libs);
             eng.run_inits(&inits);
+        }
+        // 无参：直接报错（没有任何“隐式库路径”环境变量）
+        [] => {
+            kvlang_rs::elog!("need entry (or --lib p1:p2:…)");
+            std::process::exit(1);
         }
         _ => {
             kvlang_rs::elog!("参数不合法");
@@ -218,7 +222,7 @@ fn layout_code_or_die(src: &str, dsn: &str) {
     }
 }
 
-/// KVLANG_LIB（: 分隔路径）→ (名, 源码)：文件取 basename，目录递归、相对根、排序（确定性）。
+/// `--lib`（: 分隔路径）→ (名, 源码)：文件取 basename，目录递归、相对根、排序（确定性）。
 /// 名仅作错误显示；pkg 与 init 由 layout 按源码 `lib` 声明产出，不从此名/路径推导。
 fn collect_libs(spec: &str) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = Vec::new();

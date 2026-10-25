@@ -226,21 +226,16 @@ fn call_borrow(f: impl FnOnce(*mut *mut u8, *mut u32) -> c_int) -> Vec<u8> {
 
 // ── 安全句柄 ─────────────────────────────────────────────────────────
 
-/// 控制 store DSN：KVSPACE_ISA 优先；shm/fs 派生 `<dsn>.isa`；redis 同库；
-/// 其它 scheme 未显式设置 → 硬失败（不静默回落到数据 store）。
+/// 控制 store DSN：只由 KVSPACE 派生——shm/fs 为 `<dsn>.isa`，redis 与数据同库；
+/// 其它 scheme 硬失败（没有隐式回落，也没有额外环境变量）。
 pub fn ctl_dsn(dsn: &str) -> String {
-    if let Ok(v) = std::env::var("KVSPACE_ISA") {
-        if !v.is_empty() {
-            return v;
-        }
-    }
     if dsn.starts_with("shm://") || dsn.starts_with("fs://") {
         return format!("{}.isa", dsn.trim_end_matches('/'));
     }
     if dsn.starts_with("redis://") {
         return dsn.to_string();
     }
-    panic!("ISA control store DSN unsupported for {dsn}: set KVSPACE_ISA");
+    panic!("ISA control store DSN unsupported for {dsn}");
 }
 
 fn connect_or_panic(dsn: &str) -> Handle {
@@ -264,10 +259,18 @@ impl Kv {
         let h = connect_or_panic(dsn);
         let cdsn = ctl_dsn(dsn);
         if cdsn == dsn {
-            Kv { h, ctl: h, ctl_shared: true }
+            Kv {
+                h,
+                ctl: h,
+                ctl_shared: true,
+            }
         } else {
             let ctl = connect_or_panic(&cdsn);
-            Kv { h, ctl, ctl_shared: false }
+            Kv {
+                h,
+                ctl,
+                ctl_shared: false,
+            }
         }
     }
 
@@ -323,18 +326,15 @@ impl Kv {
     /// 控制 store 单点读。
     pub fn isa_get_one(&mut self, key: &str) -> Vec<u8> {
         let c = CString::new(key).expect("no NUL in key");
-        call_borrow(|out, out_len| unsafe {
-            kvspaceGet(self.ctl, c.as_ptr(), 0, out, out_len)
-        })
+        call_borrow(|out, out_len| unsafe { kvspaceGet(self.ctl, c.as_ptr(), 0, out, out_len) })
     }
 
     /// 控制 store mkindex。
     pub fn isa_mkindex(&mut self, path: &str) -> Result<(), String> {
         let c = CString::new(path).expect("no NUL");
         let mut err: [c_char; 256] = [0; 256];
-        let ret = unsafe {
-            kvspaceMkindex(self.ctl, c.as_ptr(), 0, err.as_mut_ptr(), err.len() as u32)
-        };
+        let ret =
+            unsafe { kvspaceMkindex(self.ctl, c.as_ptr(), 0, err.as_mut_ptr(), err.len() as u32) };
         err_ret(&mut err, ret)
     }
 

@@ -213,19 +213,18 @@ KVSPACE="fs://$BASE.pkg.isa" kvspace get '/‥isa/func/lib/a·b' 2>/dev/null | g
 pv=$("$TERM" test 2>/dev/null | head -1)
 [ "$pv" = "pkg ok" ] || fail "pkg conformance: '$pv'"
 
-# 9) KVSPACE_ISA 显式覆盖：数据 store 与派生 .isa 都不出现控制键
+# 9) 控制 store 由 KVSPACE 派生：fs → <dsn>.isa；数据 store 不含控制键
 export KVSPACE="fs://$BASE.4"
-KVSPACE_ISA="fs://$BASE.4ctl" "$TERM" -c 'print("boot")' >/dev/null 2>&1 \
-    || fail "boot with KVSPACE_ISA"
-KVSPACE="fs://$BASE.4ctl" kvspace get '/‥isa/‥core' 2>/dev/null | grep -q "count" \
-    || fail "explicit control store missing manifest"
+"$TERM" -c 'print("boot")' >/dev/null 2>&1 || fail "boot (derived isa)"
+[ -e "$BASE.4.isa" ] || fail "derived .isa not created"
+KVSPACE="fs://$BASE.4.isa" kvspace get '/‥isa/‥core' 2>/dev/null | grep -q "count" \
+    || fail "derived control store missing manifest"
 kvspace get '/‥isa/‥core' 2>/dev/null | grep -q "(nil)" \
-    || fail "data store must not hold manifest with explicit KVSPACE_ISA"
-[ ! -e "$BASE.4.isa" ] || fail "derived .isa must not be created with KVSPACE_ISA"
+    || fail "data store must not hold manifest"
 
-# 10) 未设 KVSPACE_ISA 且 scheme 未知：硬失败（不静默回落）
+# 10) scheme 未知：硬失败（没有环境变量兜底）
 if KVSPACE=bogus://x "$TERM" -c 'print("x")' >/dev/null 2>&1; then
-    fail "unknown scheme without KVSPACE_ISA must fail"
+    fail "unknown scheme must fail"
 fi
 
 # 11) kvlang isa publish：不跑完整 boot 也能让 layout CLI 独立工作

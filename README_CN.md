@@ -146,7 +146,7 @@ KVSPACE=shm:///tmp/kvlang.shm ./bin/kvlang tutorial/01-basics/hello.kv   # kvspa
 KVSPACE=fs:///tmp/kvlang-fs   ./bin/kvlang tutorial/01-basics/hello.kv   # kvspace-durable
 ```
 
-另有两种模式：`kvlang create <func>` 打印 vthread `vid`，`kvlang run <vid>` 从持久化的 PC 继续（崩溃恢复）。无参数且设了 `KVLANG_LIB=p1:p2:…` 时，kvlang 会 layout 这些路径下的所有 `.kv` 并运行各 lib 的 `init`。
+另有两种模式：`kvlang create <func>` 打印 vthread `vid`，`kvlang run <vid>` 从持久化的 PC 继续（崩溃恢复）。用 `--lib p1:p2:…`（代替入口名）时，kvlang 会 layout 这些路径下的所有 `.kv` 并运行各 lib 的 `init`；没有对应环境变量。
 
 ---
 
