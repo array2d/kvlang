@@ -122,7 +122,6 @@ jobs:
     runs-on: macos-latest
     env:
       GH_TOKEN: ${{ github.token }}
-      KVSPACE_LIB_DIR: /usr/local/lib/kvspace # /usr 受 SIP 保护
     steps:
       - uses: actions/checkout@v4
       - name: 构建依赖链（blockmalloc / slotsboxmalloc / kvspace / kvspace-c / kvspace-durable）
@@ -143,7 +142,7 @@ jobs:
           sudo cp /tmp/kvspace-durable/target/release/libkvspace_durable.dylib "$PREFIX/lib/kvspace/"
       - name: 构建 runtime + layout + runtime-rs + kvspace CLI
         run: |
-          cmake -S runtime -B build/runtime -DCMAKE_BUILD_TYPE=Release -DKVSPACE_LIB_DIR="$KVSPACE_LIB_DIR"
+          cmake -S runtime -B build/runtime -DCMAKE_BUILD_TYPE=Release
           cmake --build build/runtime --target kvlang_runtime -j
           cargo build --release --manifest-path layout/Cargo.toml
           # runtime-rs 的 build.rs 在 ../bin 找 libkvlang_runtime/libkvlanglayout，必须先就位

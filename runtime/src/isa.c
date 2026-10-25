@@ -357,14 +357,11 @@ static kvspace_t isa_view(kvspace_t *kv) {
     return v;
 }
 
-/* P1a：控制 store DSN。KVSPACE_ISA 优先；否则 shm/fs 派生 `<dsn>.isa`，
- * redis 与数据同库；其它 scheme 且未显式设置 → 硬失败。 */
+/* P1a：控制 store DSN 只由 KVSPACE 派生——shm/fs 为 `<dsn>.isa`，redis 与数据
+ * 同库；其它 scheme 硬失败（没有环境变量可覆盖）。 */
 __attribute__((visibility("hidden"))) bool kvlangIsaCtlDsn(const char *dsn,
                                                           char *out,
                                                           size_t cap) {
-    const char *env = getenv("KVSPACE_ISA");
-    if (env && *env)
-        return snprintf(out, cap, "%s", env) < (int)cap;
     if (!dsn)
         return false;
     if (strncmp(dsn, "shm://", 6) == 0 || strncmp(dsn, "fs://", 5) == 0) {

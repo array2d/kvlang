@@ -126,9 +126,13 @@ fn main() {
     let manifest = env!("CARGO_MANIFEST_DIR");
     let bin = format!("{manifest}/../bin"); // kvlang/bin（新构建的 libkvlang_runtime.so）
 
-    // KVSPACE_LIB_DIR 可覆盖安装目录：macOS 的 /usr 受 SIP 保护，应指向 <prefix>/lib/kvspace。
-    let kvspace_dir =
-        std::env::var("KVSPACE_LIB_DIR").unwrap_or_else(|_| "/usr/lib/kvspace".into());
+    // 安装目录固定（无构建期覆盖变量）：Linux /usr/lib + /usr/lib/kvspace；
+    // macOS /usr/local/lib + /usr/local/lib/kvspace（/usr 受 SIP 保护）。
+    let (kvspace_dir, kvspace_lib) = if cfg!(target_os = "macos") {
+        ("/usr/local/lib/kvspace", "/usr/local/lib")
+    } else {
+        ("/usr/lib/kvspace", "/usr/lib")
+    };
 
     if std::env::var("CARGO_FEATURE_EMBED").is_ok() {
         // #493：全部自有 .so 以字节嵌入，启动时 memfd + dlopen 从内存加载。
@@ -136,6 +140,7 @@ fn main() {
     } else {
         println!("cargo:rustc-link-search=native={bin}");
         println!("cargo:rustc-link-search=native={kvspace_dir}");
+        println!("cargo:rustc-link-search=native={kvspace_lib}");
         println!("cargo:rustc-link-lib=dylib=kvlang_runtime");
         println!("cargo:rustc-link-lib=dylib=kvspace");
         println!("cargo:rustc-link-lib=dylib=kvlanglayout");
