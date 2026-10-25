@@ -120,7 +120,8 @@ pub fn xh_body_slice(data: &[u8]) -> &[u8] {
 }
 
 /// Encode through the kvspace codec.
-pub fn xvalue_encode(kind: &str, raw: &[u8], dims: &[i32]) -> Vec<u8> {    unsafe {
+pub fn xvalue_encode(kind: &str, raw: &[u8], dims: &[i32]) -> Vec<u8> {
+    unsafe {
         let (mut out, mut olen) = (std::ptr::null_mut(), 0u32);
         kvspaceXvalueEncode(
             cs(kind).as_ptr(),
@@ -144,6 +145,7 @@ pub fn xvalue_encode(kind: &str, raw: &[u8], dims: &[i32]) -> Vec<u8> {    unsaf
     }
 }
 
+#[cfg(not(feature = "embed"))]
 unsafe extern "C" {
     // kvspace ABI.
     pub fn kvspaceConnect(dsn: *const c_char) -> *mut c_void;
@@ -314,6 +316,11 @@ unsafe extern "C" {
         err_cap: u32,
     ) -> c_int;
 }
+
+// #493 embed：符号在启动时 memfd+dlopen 后由 bind() 填指针；shim 与原声明同签名，
+// 调用点零改动。
+#[cfg(feature = "embed")]
+include!(concat!(env!("OUT_DIR"), "/embed_shim.rs"));
 
 pub fn cs(s: &str) -> CString {
     CString::new(s).unwrap_or_else(|_| CString::new("").unwrap())

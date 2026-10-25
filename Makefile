@@ -15,12 +15,21 @@
 BIN         := bin
 
 .PHONY: all runtime runtime-rs layout json oldhero test install clean \
-        status clear clear-headers clear-all
+        status clear clear-headers clear-all single
 
 all: runtime runtime-rs layout json
 
 test: all
 	python3 tutorial/test.py --no-build
+
+# 单一二进制（#493）：把 .so 作为字节嵌进 kvlang，启动时 memfd+dlopen，前端用
+# RTLD_NOLOAD 复用已加载的后端。payload 固定组装到 build/embed（不读构建 env）。
+# FRONTEND_SO 是构建期参数（不是运行时环境变量）：本分支构建的 libkvspace.so.1。
+FRONTEND_SO ?=
+single: runtime layout
+	./tools/stage_embed.sh $(FRONTEND_SO) build/embed
+	cargo build --release --manifest-path runtime-rs/Cargo.toml --features embed
+	cp runtime-rs/target/release/kvlang $(BIN)/kvlang-single
 
 runtime:
 	cmake -S runtime -B build/runtime -DCMAKE_BUILD_TYPE=Release

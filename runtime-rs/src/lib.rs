@@ -1,6 +1,8 @@
 //! kvlang runtime library.
 #![allow(non_snake_case, non_camel_case_types)]
 
+#[cfg(feature = "embed")]
+pub mod embed;
 pub mod engine;
 pub mod ffi;
 pub mod rwir;
