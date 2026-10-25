@@ -80,6 +80,12 @@ typedef struct kvlangBodySlot {
     struct kvlangBodySlot *next;
 } kvlangBodySlot;
 
+/* 读 view：body slot + 版本化 token（只在提升时分配，写候选行不背 token）。 */
+typedef struct {
+    kvlangBodySlot slot;            /* 首成员：cell->off.fast 指向它 */
+    kvspaceViewToken_t token;
+} kvlangReadViewSlot;
+
 typedef struct {
     kvlangBoundCell_t *cell; /* [n] */
     int n;
@@ -119,14 +125,22 @@ void kvlangFrameCtxSync(kvlangFrameCtx_t *ctx, uint32_t epoch);
 /* 定长标量写槽捕获：head 完全匹配才成功；失败置 dead（等该 key 被写后重试）。
  * vthread_root 形如 /vthread/<vid>，写 key 必须在其子树内。 */
 __attribute__((visibility("hidden"))) bool
-kvlangBodyCapture(kvspace_t *kv, kvlangBodySlot *slot,
-                  const char *vthread_root);
+kvlangBodyCapture(kvspace_t *kv, kvlangBodySlot *slot, const char *vthread_root,
+                  kvspaceViewToken_t *tok);   /* tok 非 NULL 时用版本化 view */
+/* 校验 wire 形状并填充 slot；tok 的 head/headlen/value_len 由调用方保证已就绪。 */
+__attribute__((visibility("hidden"))) bool
+kvlangBodyAdopt(kvlangBodySlot *slot, const uint8_t *val, uint32_t len);
+/* 全局失效所有 body slot（不 free；下次使用惰性重捕）。 */
+__attribute__((visibility("hidden"))) void kvlangBodyInvalidateAll(void);
 /* 由 key 显式取 /vthread/<vid> 前缀（key 必须在 vthread 子树内）。 */
 __attribute__((visibility("hidden"))) bool
 kvlangVthreadRootOfKey(const char *key, char *out, size_t cap);
-/* 解注册并释放一个 body slot（提升失败/降级用）。 */
+/* 只解注册，不释放内存（调用方决定是 free slot 还是整个容器）。 */
 __attribute__((visibility("hidden"))) void
 kvlangBodySlotRelease(kvlangBodySlot *slot);
+/* 释放读 view 容器（slot + token）。 */
+__attribute__((visibility("hidden"))) void
+kvlangReadViewSlotFree(kvlangReadViewSlot *rs);
 /* 取本帧 s0 行的绑定。行不存在返回 NULL 且 err[0]=0；出错返回 NULL 且 err 有消息。 */
 kvlangRowBind_t *kvlangFrameRow(kvspace_t *kv, kvlangFrameCtx_t *ctx, int s0,
                                 kvlangCodeRow_t **row_out, char *err,

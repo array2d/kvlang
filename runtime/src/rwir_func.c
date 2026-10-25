@@ -335,7 +335,7 @@ kvlangBuiltinWriteBody(kvlangFrame_t *f, const char *kind, const uint8_t *raw,
                             : NULL;
     kvlangBodySlot *slot = wo ? wo->fast : NULL;
     if (slot && !slot->ok && !slot->dead && slot->off->resolved)
-        kvlangBodyCapture(f->kvspace, slot, f->frame_root);
+        kvlangBodyCapture(f->kvspace, slot, f->frame_root, NULL);
     if (slot && slot->ok && slot->len == len &&
         strcmp(slot->kind, kind) == 0) {
 #ifdef KV_COUNT
