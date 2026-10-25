@@ -96,6 +96,10 @@ typedef struct {
     int32_t xv_ndim;
     int32_t xv_dims[X_MAX_NDIM];
     bool xv_is_ptr;
+    /* 快核（kvcpu_fast.c）：行形状的一次性分类。0=未分类，1=不可快，2=可快；
+     * fk_op 为快核内部操作码。只依赖 row 形状，reenter 不变。 */
+    uint8_t fk_state;
+    uint8_t fk_op;
 } kvlangRowBind_t;
 
 #define KVLANG_PARK_MAX_PARAMS 16
@@ -163,6 +167,13 @@ kvlangBodyCapture(kvspace_t *kv, kvlangBodySlot *slot,
 __attribute__((visibility("hidden"))) bool
 kvlangOperandViewPromote(kvspace_t *kv, kvlangBoundCell_t *cell,
                          const char *frame_root, uint8_t *d, uint32_t len);
+/* 快核：从 *irseq 起连续执行可快行（typed 标量算术/比较、copy、goto、br），
+ * 每步仍原地持久化值与 PC 并检查 ‥status。遇到不可快行/任一前提不满足即停，
+ * *irseq 为下一条待执行行；返回执行的步数。pc_out 收到最终 PC 串（步数>0 时）。 */
+__attribute__((visibility("hidden"))) int
+kvlangFastRun(kvlangFrameCtx_t *ctx, int *irseq, kvspaceKeyOff *pc_off,
+              kvspaceKeyOff *status_off, const char *prefix, int prefix_len,
+              char *pc_out, size_t pc_out_cap);
 /* 取本帧 s0 行的绑定。行不存在返回 NULL 且 err[0]=0；出错返回 NULL 且 err 有消息。 */
 kvlangRowBind_t *kvlangFrameRow(kvspace_t *kv, kvlangFrameCtx_t *ctx, int s0,
                                 kvlangCodeRow_t **row_out, char *err,

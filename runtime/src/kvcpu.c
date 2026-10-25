@@ -270,6 +270,10 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
     f.cursor = &cursor;
 
     const kvlangRwirCap *caps = kvlangRwirCaps();
+    /* 快核开关：debug 日志需要逐步 trace，KVLANG_NOFAST=1 供 A/B。 */
+    const char *nofast = getenv("KVLANG_NOFAST");
+    const bool fast_on =
+        kv->shm && !kvlangLogDebugOn && !(nofast && nofast[0] && nofast[0] != '0');
     int rc = 0;
     for (;;) {
         if (!have_fb &&
@@ -366,6 +370,20 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
         else if (row->opcode_id >= 0)
             kvCGen++;
 #endif
+        /* 快核：本行及其后的可快行连续原地执行（每步仍持久化值/PC、查 status）。
+         * 停在第一条不可快行；本步若一行都没执行则落回下方通用路径。 */
+        if (fast_on && bind->fk_state != 1 && cursor.prefix_ok) {
+            int fi = irseq;
+            int ns = kvlangFastRun(ctx, &fi, &pc_off, &status_off,
+                                   cursor.prefix, cursor.prefix_len,
+                                   fb_b[fb_i ^ 1], sizeof fb_b[0]);
+            if (ns > 0) {
+                cursor.irseq = fi;
+                fb_i ^= 1;
+                have_fb = true;
+                continue;
+            }
+        }
         int exec_err = 0;
         if (bind != tpl_bind || row != tpl_row) {
             row_template(&inst, reads, writes, write_offs, row, bind);
