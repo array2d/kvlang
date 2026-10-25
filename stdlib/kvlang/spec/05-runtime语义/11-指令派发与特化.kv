@@ -17,6 +17,10 @@ opcode 的特化命名与数值 promotion 规则（语言可见）。
   `yield_pc` 冒泡，主循环的 yield/pc 回传逻辑不变。
 - native handler 不感知委托、def rwir、调用与 yield。
 
+layout 的 target selection 在 layout 期完成；runtime 的 handler_id/派发模型
+不因 ISA manifest 改变。core 特化 opcode 仍由 layout 的 `specialize` 发出；
+P1b2 不把 manifest 类型写槽，P1b3 才做 typed row/零检查。
+
 ## opcode 特化命名
 
 - 同型：`<kind>·<op>`（如 `int64·add`、`float64·lt`）。仅当**全部操作数静态类型严格一致**

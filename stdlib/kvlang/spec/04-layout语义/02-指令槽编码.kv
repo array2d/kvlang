@@ -14,13 +14,28 @@ a -> b        [s0,0]="="   [s0,-1]="a"    [s0,1]="b"
 opcode 位恒为操作码，故拷贝（opcode=`=`）与零参函数调用（`greet() -> x`，opcode=`greet`）在 KV 层无
 歧义。
 
-## opcode 槽的 langtype
+## opcode 槽的判定与 langtype
 
-opcode 槽 `[s0,0]` 的 langtype 由 layout 按 opcode 类别决定：
+layout 必须先读控制 store 的 ISA manifest，按以下**四路**归类 opcode：
 
-- 控制流与拷贝原语（`return` / `goto` / `br` / `call` / `=`）——langtype `rwir`。
-- 运算符与 rwir 调用目标——langtype `rwir`；已知的用户函数调用目标——langtype `rwfunc`。
-  layout 根据本次源码的函数声明及 KVSpace 中已有的定义确定类型；runtime 仍按目标定义分派。
+1. manifest 命中：`class=core` → Core；`class=ext` → Ext；
+2. 当前编译单元本地函数（含 `<pkg>·<name>`、绝对 `/lib/...`）→ User；
+3. `/lib/<op>`（包内先查 `<pkg>·<op>`）kind=`def rwir` → Bridge；
+4. 否则 **layout 硬失败**：`ISA: unknown opcode <op>`。
+
+opcode 槽的 langtype：
+
+- 控制流与拷贝原语（`return`/`goto`/`br`/`call`/`=`）——`rwir`。
+- Core / Ext / Bridge——`rwir`；User——`rwfunc`。
+- Core 可发 `<kind>·<op>` 特化；Ext/Bridge 发普通 opcode。
+- **P1b2 不把 manifest 的 rp/wp/storetype/headlen/width 写进操作数槽**；
+  槽编码保持既有 layout 推断，manifest 只用于 target/arity 检查。
+- 通用 `sub` 只能 **2r→1w**；一元负由 layout lower 成 `sub 0,x`（2r1w），
+  保留 `sub` 单参数化；不新增 `neg`/`abs` 基础 ISA opcode。`abs` 属
+  builtin/extension（现有 core 表中的 `abs` 归属按后续清理处理）；`neg` 若以后
+  证明 1r1w 有显著收益，再作为 P1b3 单指令优化。
+- exact-kind 证明闸门属 P1b3，不是 P1b2 的 normative 要求；实现中已有该检查，
+  spec 标为 traceability/非 normative。
 
 ## 读写槽的槽值编码
 

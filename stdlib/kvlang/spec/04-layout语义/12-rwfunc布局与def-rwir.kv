@@ -29,9 +29,12 @@ rwfunc 无 `[0,x]` 槽、def rwir 无 `{name}` 键。
   `/lib/<opcode>`；注册前校验各参 langtype。主槽 body `[nr][nw][dynamic]`，各参数类型分别落入
   `[0,x]` 签名行槽（`def langtype` xvalue），无实现指令行。
 
-layout 在生成 opcode 槽时区分 `rwir` 与已知的 `rwfunc`；runtime 仍查 `/lib/<opcode>` 分派。def rwir
-路由头仅落于 `/lib/<opcode>`，无 native/扩展/user 的静态归类——每个 runtime 只声明自身 myrwircaps，不
-在 layout 层区分。
+layout 在生成 opcode 槽时按 ISA manifest + `/lib` 静态元数据做四路归类
+（Core/Ext/Bridge/User）；runtime 仍按原有派发链分派。def rwir 路由头仅落于
+`/lib/<opcode>`，P1b2 把它归为 Bridge；不把签名写进操作数槽。
+
+每函数 `‥isa` 记录本次用到的 Bridge 签名集合 hash（`ext_bridge`；无 Bridge 为
+`none`）。P1 runtime 不校验，仅作 traceability；后续 runtime 阶段再收紧。
 
 ## native rwir 不落入 kvspace
 
