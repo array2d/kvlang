@@ -237,7 +237,11 @@ static kvlangCodeRow_t *row_load(kvspace_t *kv, kvlangFuncCode_t *code, int s0,
                     }
                 if (!row->result_kind &&
                     (strcmp(row->opcode, "string·ord") == 0 ||
-                     strcmp(row->opcode, "string·len") == 0)) {
+                     strcmp(row->opcode, "string·len") == 0 ||
+                     strcmp(row->opcode, "string·cmp") == 0 ||
+                     strcmp(row->opcode, "string·find") == 0 ||
+                     strcmp(row->opcode, "string·parseint") == 0 ||
+                     strcmp(row->opcode, "kvspace·listlen") == 0)) {
                     row->result_kind = KVSPACE_KIND_INT64;
                     row->result_width = 8;
                 }
@@ -335,6 +339,13 @@ static void body_unlink(kvlangBodySlot *slot) {
 #endif
 }
 
+static void rcell_invalidate(kvlangBoundCell_t *rc) {
+    rc->rview_bytes = NULL;
+    rc->rview_len = 0;
+    rc->rview_hits = 0;
+    rc->rview_state = 0;
+}
+
 void kvlangBodyInvalidate(const char *key) {
     if (!key || body_reg_count == 0)
         return;
@@ -344,6 +355,8 @@ void kvlangBodyInvalidate(const char *key) {
             c->ok = false;
             c->body = NULL;
             c->dead = false;
+            if (c->rcell)
+                rcell_invalidate(c->rcell);
         }
 }
 
@@ -356,9 +369,13 @@ void kvlangBodyInvalidateKind(const char *key, const uint8_t *langtype,
         if (strcmp(c->key, key) == 0) {
             c->ok = false;
             c->body = NULL;
-            size_t kl = strlen(c->kind);
-            c->dead = !(langtype && kl == langtype_len &&
-                        memcmp(c->kind, langtype, kl) == 0);
+            if (c->rcell) {
+                rcell_invalidate(c->rcell);
+            } else {
+                size_t kl = c->kind_len;
+                c->dead = !(c->kind && langtype && kl == langtype_len &&
+                            memcmp(c->kind, langtype, kl) == 0);
+            }
         }
 }
 
@@ -380,6 +397,8 @@ void kvlangBodyInvalidateTree(const char *prefix) {
                     c->ok = false;
                     c->body = NULL;
                     c->dead = false;
+                    if (c->rcell)
+                        rcell_invalidate(c->rcell);
                 }
         }
     }
@@ -401,6 +420,30 @@ static bool vthread_root(const char *frame_root, char *out, size_t cap) {
     return true;
 }
 
+static bool key_in_vthread_tree(const char *frame_root, const char *key) {
+    char root[KV_KEY_MAX];
+    if (!vthread_root(frame_root, root, sizeof root))
+        return false;
+    size_t rl = strlen(root);
+    return strncmp(key, root, rl) == 0 && key[rl] == '/';
+}
+
+static void body_register(kvlangBodySlot *slot) {
+    if (slot->reg)
+        return;
+    uint32_t b = key_hash(slot->key) % BODY_BUCKETS;
+    slot->bucket = b;
+    slot->next = body_buckets[b];
+    body_buckets[b] = slot;
+    body_nonempty[b >> 6] |= 1ULL << (b & 63);
+    slot->reg = true;
+    body_reg_count++;
+#ifdef KV_COUNT
+    if (++kvCBodyCells > kvCBodyCellsMax)
+        kvCBodyCellsMax = kvCBodyCells;
+#endif
+}
+
 bool kvlangBodyCapture(kvspace_t *kv, kvlangBodySlot *slot,
                        const char *frame_root) {
     slot->ok = false;
@@ -413,13 +456,7 @@ bool kvlangBodyCapture(kvspace_t *kv, kvlangBodySlot *slot,
     /* 槽还不存在：不算失败，等写使其 resolved 后再来。 */
     if (!slot->off->resolved)
         return false;
-    char root[KV_KEY_MAX];
-    bool in_tree = false;
-    if (vthread_root(frame_root, root, sizeof root)) {
-        size_t rl = strlen(root);
-        in_tree = strncmp(slot->key, root, rl) == 0 && slot->key[rl] == '/';
-    }
-    if (!in_tree) {
+    if (!key_in_vthread_tree(frame_root, slot->key)) {
         slot->dead = true;
         return false;
     }
@@ -428,19 +465,7 @@ bool kvlangBodyCapture(kvspace_t *kv, kvlangBodySlot *slot,
 #ifdef KV_COUNT
     kvCBodyCapAttempt++;
 #endif
-    if (!slot->reg) {
-        uint32_t b = key_hash(slot->key) % BODY_BUCKETS;
-        slot->bucket = b;
-        slot->next = body_buckets[b];
-        body_buckets[b] = slot;
-        body_nonempty[b >> 6] |= 1ULL << (b & 63);
-        slot->reg = true;
-        body_reg_count++;
-#ifdef KV_COUNT
-        if (++kvCBodyCells > kvCBodyCellsMax)
-            kvCBodyCellsMax = kvCBodyCells;
-#endif
-    }
+    body_register(slot);
     uint8_t *val = NULL;
     uint32_t len = 0;
     if (kvspaceGetByRef(kv->handle, &slot->off->off, slot->key, &val, &len) !=
@@ -461,8 +486,8 @@ bool kvlangBodyCapture(kvspace_t *kv, kvlangBodySlot *slot,
         ltlen++;
     if (XH_PREFIX + ltlen >= headlen) /* langtype 必须 NUL 终止 */
         return false;
-    size_t kl = strlen(slot->kind);
-    if (ltlen != kl || memcmp(val + XH_PREFIX, slot->kind, kl) != 0)
+    size_t kl = slot->kind_len;
+    if (!slot->kind || ltlen != kl || memcmp(val + XH_PREFIX, slot->kind, kl) != 0)
         return false;
     /* FIXED_SMALL：a/b 必须为 0，宽度由 langtype 决定。 */
     if (xh_rd64(val + 2) != 0 || xh_rd64(val + 10) != 0)
@@ -476,6 +501,49 @@ bool kvlangBodyCapture(kvspace_t *kv, kvlangBodySlot *slot,
 #ifdef KV_COUNT
     kvCBodyCapOk++;
 #endif
+    return true;
+}
+
+__attribute__((noinline)) bool
+kvlangOperandViewPromote(kvspace_t *kv, kvlangBoundCell_t *cell,
+                         const char *frame_root, uint8_t *d, uint32_t len) {
+    cell->rview_state = 2;
+    if (!kv || !kv->shm || !cell->off.resolved || !d || len <= 32 ||
+        len > 40)
+        return false;
+    if (d[0] != 5 || (d[1] & 7u) != 0)
+        return false;
+    if (xh_rd64(d + 2) != 0 || xh_rd64(d + 10) != 0)
+        return false;
+    uint32_t ltlen = 0;
+    while (XH_PREFIX + ltlen < 32 && d[XH_PREFIX + ltlen])
+        ltlen++;
+    if (ltlen == 0 || XH_PREFIX + ltlen >= 32)
+        return false;
+    int tid = kvlangLangtypeId((const char *)(d + XH_PREFIX), ltlen);
+    if (!kvlangLangtypeIsNum(tid) && tid != KVLANG_LT_BOOL)
+        return false;
+    int w = kvlangLangtypeElemSize(tid);
+    if (w <= 0 || len != 32u + (uint32_t)w)
+        return false;
+    if (!key_in_vthread_tree(frame_root, cell->key))
+        return false;
+    kvlangBodySlot *slot = cell->off.fast;
+    if (!slot) {
+        slot = calloc(1, sizeof *slot);
+        if (!slot)
+            return false;
+        slot->key = cell->key;
+        slot->off = &cell->off;
+        slot->rcell = cell;
+        cell->off.fast = slot;
+    }
+    slot->key = cell->key;
+    body_register(slot);
+    cell->rview_bytes = d;
+    cell->rview_len = len;
+    cell->rview_hits = 1;
+    cell->rview_state = 1;
     return true;
 }
 
@@ -516,6 +584,12 @@ static void bind_free(kvlangRowBind_t *b) {
         free(b->body);
     }
     for (int i = 0; i < b->n; i++) {
+        kvlangBodySlot *rs = b->cell[i].off.fast;
+        if (rs && rs != b->body) {
+            if (rs->reg)
+                body_unlink(rs);
+            free(rs);
+        }
         free(b->cell[i].key);
         free(b->cell[i].type);
         free(b->cell[i].coerce_buf);
@@ -539,6 +613,10 @@ static void compute_row_pins(const kvlangCodeRow_t *row, kvlangRowBind_t *b) {
     b->has_pin = false;
     bool xv_set = row->opcode && strcmp(row->opcode, "xv·set") == 0 &&
                   row->nw == 1;
+    b->xv_same_slot = xv_set && row->nr >= 2 && b->cell[0].key &&
+                      b->cell[0].key[0] == '/' && b->cell[row->nr].key &&
+                      b->cell[row->nr].key[0] == '/' &&
+                      strcmp(b->cell[0].key, b->cell[row->nr].key) == 0;
     for (int i = 0; i < row->nr; i++) {
         b->cell[i].pin = false;
         if (b->cell[i].literal || (xv_set && i == 0))
@@ -608,7 +686,7 @@ static int bind_row(kvspace_t *kv, kvlangFrameCtx_t *ctx, int s0,
         kvspaceKeyOffBind(&cell->off, kv, cell->key);
     }
     /* 候选行：挂一个 body 绑定槽（只此一处分配，不放大每个 cell）。 */
-    if (row->result_kind) {
+    if (row->opcode_id >= 0 && row->nw == 1 && !row->load_write_value) {
         kvlangBodySlot *slot = calloc(1, sizeof *slot);
         if (!slot) {
             snprintf(err, err_cap, "Runtime: out of memory binding body slot");
@@ -618,9 +696,16 @@ static int bind_row(kvspace_t *kv, kvlangFrameCtx_t *ctx, int s0,
         slot->key = wc->key;
         slot->kind = row->result_kind;
         slot->width = row->result_width;
+        slot->kind_len =
+            row->result_kind ? (uint8_t)strlen(row->result_kind) : 0;
         slot->off = &wc->off;
         wc->off.fast = slot;
         b->body = slot;
+    }
+    if (row->opcode && strcmp(row->opcode, OP_COPY) == 0 && row->nr == 1 &&
+        row->nw == 1 && b->cell[1].key) {
+        const char *dot = strstr(b->cell[1].key, RUNTIME_MEMBER_SEP);
+        b->copy_plain = (!dot || dot == b->cell[1].key);
     }
     compute_row_pins(row, b);
     bind_jump_targets(row, b);
@@ -647,14 +732,18 @@ void kvlangFrameCtxSync(kvlangFrameCtx_t *ctx, uint32_t epoch) {
     for (size_t i = 0; i < ctx->binds_cap; i++) {
         if (!ctx->binds[i].bound)
             continue;
-        for (int j = 0; j < ctx->binds[i].n; j++)
+        for (int j = 0; j < ctx->binds[i].n; j++) {
             ctx->binds[i].cell[j].off.resolved = false;
+            rcell_invalidate(&ctx->binds[i].cell[j]);
+        }
         /* 地址世代前进后槽可能已被删/重建，body 指针同样作废。 */
         if (ctx->binds[i].body) {
             ctx->binds[i].body->ok = false;
             ctx->binds[i].body->body = NULL;
             ctx->binds[i].body->dead = false;
         }
+        ctx->binds[i].xv_bytes = NULL;
+        ctx->binds[i].xv_len = 0;
     }
     ctx->epoch = epoch;
 }
@@ -700,53 +789,48 @@ kvlangRowBindReenter(kvspace_t *kv, kvlangFrameCtx_t *ctx,
                 if (fast_nk && !fast_nk[0])
                     fast_nk = NULL;
             }
-            if (fast_nk) {
-                if (!cell->key || strcmp(cell->key, fast_nk) != 0) {
-                    char *nk = strdup(fast_nk);
-                    if (!nk)
-                        return -1;
-                    if (b->body && b->body->key == cell->key && b->body->reg)
-                        body_unlink(b->body);
-                    free(cell->key);
-                    cell->key = nk;
-                    cell->off.key = nk;
-                    if (b->body && j == row->nr)
-                        b->body->key = nk;
-                    has_star = true;
-                    if (j >= row->nr)
-                        write_changed = true;
-                    cell->off.resolved =
-                        kvspaceResolveRef(kv->handle, cell->key,
-                                          &cell->off.off) == 0;
-                } else if (!cell->off.resolved) {
-                    cell->off.resolved =
-                        kvspaceResolveRef(kv->handle, cell->key,
-                                          &cell->off.off) == 0;
-                }
-            } else {
-                char *nk = kvlangRwirOperandTarget(kv, ctx->frame_root,
+            char *owned_nk = NULL;
+            const char *target_k = fast_nk;
+            if (!target_k) {
+                rcell_invalidate(cell);
+                owned_nk = kvlangRwirOperandTarget(kv, ctx->frame_root,
                                                    src->descriptor);
+                if (!owned_nk)
+                    return -1;
+                target_k = owned_nk;
+            }
+            if (!cell->key || strcmp(cell->key, target_k) != 0) {
+                char *nk = owned_nk ? owned_nk : strdup(target_k);
                 if (!nk)
                     return -1;
-                if (!cell->key || strcmp(cell->key, nk) != 0) {
-                    if (b->body && b->body->key == cell->key && b->body->reg)
-                        body_unlink(b->body);
-                    free(cell->key);
-                    cell->key = nk;
-                    cell->off.key = nk;
-                    if (b->body && j == row->nr)
-                        b->body->key = nk;
-                    has_star = true;
-                    if (j >= row->nr)
-                        write_changed = true;
-                } else {
-                    free(nk);
-                }
+                rcell_invalidate(cell);
+                kvlangBodySlot *rs = cell->off.fast;
+                if (rs && rs != b->body && rs->reg)
+                    body_unlink(rs);
+                if (b->body && b->body->key == cell->key && b->body->reg)
+                    body_unlink(b->body);
+                free(cell->key);
+                cell->key = nk;
+                cell->off.key = nk;
+                if (rs && rs != b->body)
+                    rs->key = nk;
+                if (b->body && j == row->nr)
+                    b->body->key = nk;
+                has_star = true;
+                if (j >= row->nr)
+                    write_changed = true;
                 cell->off.resolved =
                     kvspaceResolveRef(kv->handle, cell->key, &cell->off.off) ==
                     0;
+            } else {
+                free(owned_nk);
+                if (!fast_nk || !cell->off.resolved)
+                    cell->off.resolved =
+                        kvspaceResolveRef(kv->handle, cell->key,
+                                          &cell->off.off) == 0;
             }
         } else if (!pf) {
+            rcell_invalidate(cell);
             cell->off.resolved =
                 kvspaceResolveRef(kv->handle, cell->key, &cell->off.off) == 0;
             if (j >= row->nr)
@@ -758,8 +842,18 @@ kvlangRowBindReenter(kvspace_t *kv, kvlangFrameCtx_t *ctx,
         b->body->body = NULL;
         b->body->dead = false;
     }
-    if (has_star)
+    if (has_star || !pf) {
+        b->xv_bytes = NULL;
+        b->xv_len = 0;
+    }
+    if (has_star) {
         compute_row_pins(row, b);
+        if (row->opcode && strcmp(row->opcode, OP_COPY) == 0 && row->nr == 1 &&
+            row->nw == 1 && b->cell[1].key) {
+            const char *dot = strstr(b->cell[1].key, RUNTIME_MEMBER_SEP);
+            b->copy_plain = (!dot || dot == b->cell[1].key);
+        }
+    }
     b->reenter_gen = ctx->reenter_gen;
     return 0;
 }

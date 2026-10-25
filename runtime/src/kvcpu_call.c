@@ -768,7 +768,6 @@ static int handle_call_buf(kvspace_t *kv, const char *pc,
                     goto fail_frame;
                 }
             } else if (warm_hit && pf) {
-                /* "null" literal on a warm frame must clear any previous ._lit value */
                 kvlangKvspaceDelete(kv, rk, err, sizeof err);
                 pf->r_lit_ko[i].resolved = false;
             }

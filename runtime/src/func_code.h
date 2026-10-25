@@ -14,7 +14,7 @@ typedef struct {
     kvlangXvalue_t literal; /* 字面量副本（owned，code_free 释放）；descriptor 时 None */
     char *type;             /* 声明类型（owned） */
     int s1;                 /* 参数轴：-nr..-1 读参，+1..+nw 写参 */
-    int param_s1;           /* *[0,±k] 时为 ±k（非零）；否则 0 */
+    int param_s1;
     bool is_literal;
     bool key_absolute; /* Ptr 操作数：descriptor 已是绝对 key，不再按帧解析 */
 } kvlangOperand_t;
@@ -51,13 +51,18 @@ typedef struct kvlangBoundCell {
     int coerce_tid; /* 绑定期解析的声明 kind id（0=非 typed 标量） */
     uint16_t coerce_len; /* 声明 kind 文本长度：热路径按字节比对，免查 langtype 表 */
     uint8_t *coerce_buf; /* typed 读转换的 64B 临时视图（惰性分配，帧内复用） */
+    uint8_t *rview_bytes;
+    uint32_t rview_len;
+    uint16_t rview_hits;
+    uint8_t rview_state;
 } kvlangBoundCell_t;
 
 /* 定长标量写的绑定状态：只给候选行分配一个，不放大每个操作数 cell。 */
 typedef struct kvlangBodySlot {
     const char *key;        /* borrowed：写 cell 的 key */
-    const char *kind;       /* 静态结果类型 */
+    const char *kind;
     uint32_t width;
+    uint8_t kind_len;
     uint8_t *body;
     uint32_t len;
     kvspaceKeyOff *off;     /* borrowed：写 cell 的 keyoff */
@@ -66,6 +71,7 @@ typedef struct kvlangBodySlot {
     bool reg;               /* 已挂进全局失效表 */
     uint32_t bucket;
     struct kvlangBodySlot *next;
+    kvlangBoundCell_t *rcell;
 } kvlangBodySlot;
 
 typedef struct {
@@ -73,12 +79,23 @@ typedef struct {
     int n;
     bool bound;
     bool has_pin;
+    bool copy_plain;
     bool has_star_op;
+    bool xv_same_slot;
     uint32_t reenter_gen;
     uint32_t star_rmask;
     uint32_t star_wmask;
     kvlangBodySlot *body;
     int jump_irseq[2];
+    const uint8_t *xv_bytes;
+    uint32_t xv_len;
+    const uint8_t *xv_body;
+    uint32_t xv_headlen;
+    int xv_tid;
+    int xv_elem_size;
+    int32_t xv_ndim;
+    int32_t xv_dims[X_MAX_NDIM];
+    bool xv_is_ptr;
 } kvlangRowBind_t;
 
 #define KVLANG_PARK_MAX_PARAMS 16
@@ -143,6 +160,9 @@ void kvlangFrameCtxSync(kvlangFrameCtx_t *ctx, uint32_t epoch);
 __attribute__((visibility("hidden"))) bool
 kvlangBodyCapture(kvspace_t *kv, kvlangBodySlot *slot,
                   const char *vthread_root);
+__attribute__((visibility("hidden"))) bool
+kvlangOperandViewPromote(kvspace_t *kv, kvlangBoundCell_t *cell,
+                         const char *frame_root, uint8_t *d, uint32_t len);
 /* 取本帧 s0 行的绑定。行不存在返回 NULL 且 err[0]=0；出错返回 NULL 且 err 有消息。 */
 kvlangRowBind_t *kvlangFrameRow(kvspace_t *kv, kvlangFrameCtx_t *ctx, int s0,
                                 kvlangCodeRow_t **row_out, char *err,

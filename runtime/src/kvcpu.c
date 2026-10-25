@@ -53,11 +53,36 @@ static int execute_yield(char **out_pc, char *next_pc) {
 }
 
 /* 读一个操作数目标值；None 合法。地址未解析时按 key 读并补一次绑定。 */
-static int operand_load(kvspace_t *kv, kvlangBoundCell_t *cell,
-                        kvlangXvalue_t *out) {
+static int operand_load(kvspace_t *kv, const char *frame_root,
+                        kvlangBoundCell_t *cell, kvlangXvalue_t *out) {
     kvlangXvalueZero(out);
     kvspaceKeyOff *ko = &cell->off;
-    if (ko->resolved) {
+    if (cell->rview_state == 1) {
+        if ((++cell->rview_hits & 127u) != 0 &&
+            cell->rview_bytes[0] == 5 && (cell->rview_bytes[1] & 7u) == 0) {
+            out->bytes = cell->rview_bytes;
+            out->length = cell->rview_len;
+        } else {
+            uint8_t *d = NULL;
+            uint32_t len = 0;
+            if (kvspaceGetByRef(kv->handle, &ko->off, cell->key, &d, &len) != 0)
+                return -1;
+            if (d == cell->rview_bytes && len == cell->rview_len &&
+                d[0] == 5 && (d[1] & 7u) == 0) {
+                out->bytes = d;
+                out->length = len;
+            } else {
+                cell->rview_bytes = NULL;
+                cell->rview_len = 0;
+                cell->rview_hits = 0;
+                cell->rview_state = 2;
+                if (d && len > 0) {
+                    out->bytes = d;
+                    out->length = len;
+                }
+            }
+        }
+    } else if (ko->resolved) {
         uint8_t *d = NULL;
         uint32_t len = 0;
         if (kvspaceGetByRef(kv->handle, &ko->off, cell->key, &d, &len) != 0)
@@ -65,6 +90,8 @@ static int operand_load(kvspace_t *kv, kvlangBoundCell_t *cell,
         if (d && len > 0) {
             out->bytes = d;
             out->length = len;
+            if (cell->rview_state == 0 && ++cell->rview_hits >= 8)
+                kvlangOperandViewPromote(kv, cell, frame_root, d, len);
         }
     } else {
         if (kvlangKvspaceGetOne(kv, cell->key, out) != 0)
@@ -144,48 +171,29 @@ switch_frame_ctx(kvspace_t *kv, const char *vtid, const char *cur,
                  uint32_t addr_epoch, kvlangFuncCache_t *fcache,
                  kvlangFrameCtx_t **fctx) {
     kvlangParkedFrame_t *pf = kvlangParkedFrameGet(kv, vtid, depth);
-    if (depth > last_depth) {
-        char fdir[KV_KEY_MAX];
-        const char *fdir_p = NULL;
-        if (pf && pf->func_dir[0]) {
-            fdir_p = pf->func_dir;
-        } else {
-            if (!frame_func_dir_buf(kv, cur_frame, fdir, sizeof fdir))
-                return execute_error(kv, vtid, cur,
-                                     "RuntimeError: frame has no ‥lib: %s",
-                                     cur_frame);
-            fdir_p = fdir;
-        }
-        if (fctx[depth]) {
-            fctx[depth]->park = pf;
-            if (strcmp(fctx[depth]->frame_root, cur_frame) == 0 &&
-                strcmp(fctx[depth]->code->func_dir, fdir_p) == 0 &&
-                kvlangFrameCtxReenter(kv, fctx[depth], addr_epoch) == 0)
-                return 0;
-        }
-        kvlangFrameCtxFree(fctx[depth]);
-        fctx[depth] = kvlangFrameCtxNew(fcache, fdir_p, cur_frame);
+    if (depth <= last_depth && fctx[depth] &&
+        strcmp(fctx[depth]->frame_root, cur_frame) == 0) {
         fctx[depth]->park = pf;
         return 0;
     }
-    if (fctx[depth] && strcmp(fctx[depth]->frame_root, cur_frame) != 0) {
-        kvlangFrameCtxFree(fctx[depth]);
-        fctx[depth] = NULL;
+    char fdir[KV_KEY_MAX];
+    const char *fdir_p = (pf && pf->func_dir[0]) ? pf->func_dir : NULL;
+    if (!fdir_p) {
+        if (!frame_func_dir_buf(kv, cur_frame, fdir, sizeof fdir))
+            return execute_error(kv, vtid, cur,
+                                 "RuntimeError: frame has no ‥lib: %s",
+                                 cur_frame);
+        fdir_p = fdir;
     }
-    if (!fctx[depth]) {
-        char fdir[KV_KEY_MAX];
-        const char *fdir_p = NULL;
-        if (pf && pf->func_dir[0]) {
-            fdir_p = pf->func_dir;
-        } else {
-            if (!frame_func_dir_buf(kv, cur_frame, fdir, sizeof fdir))
-                return execute_error(kv, vtid, cur,
-                                     "RuntimeError: frame has no ‥lib: %s",
-                                     cur_frame);
-            fdir_p = fdir;
-        }
-        fctx[depth] = kvlangFrameCtxNew(fcache, fdir_p, cur_frame);
+    if (depth > last_depth && fctx[depth]) {
+        fctx[depth]->park = pf;
+        if (strcmp(fctx[depth]->frame_root, cur_frame) == 0 &&
+            strcmp(fctx[depth]->code->func_dir, fdir_p) == 0 &&
+            kvlangFrameCtxReenter(kv, fctx[depth], addr_epoch) == 0)
+            return 0;
     }
+    kvlangFrameCtxFree(fctx[depth]);
+    fctx[depth] = kvlangFrameCtxNew(fcache, fdir_p, cur_frame);
     fctx[depth]->park = pf;
     return 0;
 }
@@ -372,7 +380,7 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
                 reads[i].value = *c->literal;
                 continue;
             }
-            int lr = operand_load(kv, c, &reads[i].value);
+            int lr = operand_load(kv, cur_frame, c, &reads[i].value);
             if (lr != 0) {
                 exec_err =
                     lr == -2
@@ -389,7 +397,7 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
         }
         for (int j = 0; exec_err == 0 && j < row->nw; j++) {
             if (row->load_write_value) {
-                int lr = operand_load(kv, &bind->cell[row->nr + j],
+                int lr = operand_load(kv, cur_frame, &bind->cell[row->nr + j],
                                       &writes[j].value);
                 if (lr != 0) {
                     exec_err =
