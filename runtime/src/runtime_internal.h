@@ -48,6 +48,26 @@ typedef struct {
     uint32_t depth;
 } kvspaceRef_t;
 
+/* P2 view token：与 kvspace/include/kvspace/kvspace.h 逐字段一致（无 pin）。 */
+typedef struct {
+    uint8_t *head; uint8_t *body; uint32_t headlen; uint32_t value_len;
+    uint64_t cap; uint64_t body_cap;
+    uint32_t struct_gen; uint32_t value_gen;
+    uint64_t store_id; uint32_t node_id; uint32_t _pad;
+} kvspaceViewToken_t;
+/* 0=成功；1=STALE；-1=不存在/非法；-2=后端不支持（回退字符串 ABI）。 */
+extern int kvspaceViewResolve(void *h, const char *key, kvspaceViewToken_t *tok);
+extern int kvspaceViewFromRef(void *h, const kvspaceRef_t *ref,
+                              const char *key_fallback, kvspaceViewToken_t *tok);
+extern int kvspaceViewResolveFrom(void *h, const kvspaceRef_t *parent,
+                                  const char *rel, kvspaceViewToken_t *tok);
+extern int kvspaceViewCheck(void *h, const kvspaceViewToken_t *tok);
+extern int kvspaceViewRefresh(void *h, kvspaceViewToken_t *tok, const char *key);
+/* Q1：op 边界 ack；0=已 ack，1=epoch 变了（先作废 token 再来），-2=不支持。 */
+extern int kvspaceViewAck(void *h, uint32_t *epoch);
+/* Q2：显式静默声明；on∈{0,1}；声明期间 View* 一律 -1。 */
+extern int kvspaceViewQuiesce(void *h, int on);
+
 /* Match kvspaceSlotView_t in the KVSpace C ABI（shm-only）。 */
 typedef struct {
     uint8_t *head;

@@ -21,6 +21,10 @@ bool kvlangStatusViewRead(const kvspaceSlotView_t *view, char *out,
 #define KV_READ_VIEW_RECHECK 512
 #endif
 
+/* Q1：op 边界静默点（epoch 变化时作废全部 body slot 并 ack）。 */
+__attribute__((visibility("hidden"))) void kvlangViewQuiesce(kvspace_t *kv);
+__attribute__((visibility("hidden"))) void kvlangViewAckNow(kvspace_t *kv);
+
 /* 返回 1=命中（out 为借用视图），0=回退 GetByRef。pack=0 时调用方不应调用。 */
 struct kvlangBoundCell;
 __attribute__((visibility("hidden"))) int

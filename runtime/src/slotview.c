@@ -164,9 +164,10 @@ unsigned long kvCReadViewProm, kvCReadViewDemote, kvCReadViewHit;
 #endif
 
 static bool rv_promote(kvspace_t *kv, kvlangBoundCell_t *cell) {
-    kvlangBodySlot *slot = calloc(1, sizeof *slot);
-    if (!slot)
+    kvlangReadViewSlot *rs = calloc(1, sizeof *rs);
+    if (!rs)
         return false;
+    kvlangBodySlot *slot = &rs->slot;
     slot->key = cell->key;
     slot->kind = kvlangLangtypeKind(cell->view.kind);
     slot->width = cell->view.width;
@@ -176,8 +177,8 @@ static bool rv_promote(kvspace_t *kv, kvlangBoundCell_t *cell) {
     char root[KV_KEY_MAX];
     if (!slot->kind || !slot->kind[0] || !slot->width ||
         !kvlangVthreadRootOfKey(cell->key, root, sizeof root) ||
-        !kvlangBodyCapture(kv, slot, root)) {
-        kvlangBodySlotRelease(slot);
+        !kvlangBodyCapture(kv, slot, root, &rs->token)) {
+        kvlangReadViewSlotFree(rs);
         return false;
     }
     slot->ref = cell->off.off;
@@ -194,24 +195,66 @@ static void rv_demote(kvlangBoundCell_t *cell) {
 #ifdef KV_COUNT
     kvCReadViewDemote++;
 #endif
-    kvlangBodySlotRelease((kvlangBodySlot *)cell->off.fast);
+    kvlangReadViewSlotFree((kvlangReadViewSlot *)cell->off.fast);
     cell->off.fast = NULL;
     cell->view.hits = 0;
     cell->view_state = 1;
 }
 
-/* 每 RECHECK 次命中重验一次：只重解析 ref 并与提升时的 ref 比对（一次
- * 后端调用）。ref 不变即同一槽 box；外部删除/改尺寸仍是契约外。 */
+/* 每 RECHECK 次命中重验一次：版本化 Check（gen/epoch/has_value/box）；
+ * STALE → Refresh 原地重解析并重新校验形状。 */
 static bool rv_recheck(kvspace_t *kv, kvlangBoundCell_t *cell) {
-    kvspaceRef_t nr;
-    if (kvspaceResolveRef(kv->handle, cell->key, &nr) != 0)
+    kvlangReadViewSlot *rs = (kvlangReadViewSlot *)cell->off.fast;
+    int rc = kvspaceViewCheck(kv->handle, &rs->token);
+    if (rc == 0)
+        return true;
+    if (rc != 1)
+        return false;                  /* -2/-1：回退 */
+    if (kvspaceViewRefresh(kv->handle, &rs->token, cell->key) != 0)
         return false;
-    kvlangBodySlot *s = (kvlangBodySlot *)cell->off.fast;
-    if (memcmp(&nr, &s->ref, sizeof nr) != 0)
+    if (!kvlangBodyAdopt(&rs->slot, rs->token.head,
+                         rs->token.headlen + rs->token.value_len))
         return false;
-    cell->off.off = nr;
-    cell->off.resolved = true;
     return true;
+}
+
+/* 立即 ack（bracket 退出时用：token 已在进入时作废，无需再失效）。 */
+__attribute__((visibility("hidden"))) void
+kvlangViewAckNow(kvspace_t *kv) {
+    static uint32_t ack_epoch;
+    if (!kv || !kv->shm || !kv->handle)
+        return;
+    for (;;) {
+        uint32_t ep = ack_epoch;
+        int rc = kvspaceViewAck(kv->handle, &ep);
+        if (rc == 0) {
+            ack_epoch = ep;
+            return;
+        }
+        if (rc != 1)
+            return;
+        ack_epoch = ep;
+    }
+}
+
+/* Q1：op 边界 ack。epoch 变了先作废全部 body slot，两步重试后再 ack。 */
+__attribute__((visibility("hidden"))) void
+kvlangViewQuiesce(kvspace_t *kv) {
+    static uint32_t view_epoch;
+    if (!kv || !kv->shm || !kv->handle)
+        return;
+    for (;;) {
+        uint32_t ep = view_epoch;
+        int rc = kvspaceViewAck(kv->handle, &ep);
+        if (rc == 0) {
+            view_epoch = ep;
+            return;
+        }
+        if (rc != 1)
+            return;                    /* -2：后端无 view，不 ack */
+        kvlangBodyInvalidateAll();
+        view_epoch = ep;
+    }
 }
 
 __attribute__((visibility("hidden"))) int

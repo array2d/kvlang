@@ -291,7 +291,6 @@ kvlangBodySlotRelease(kvlangBodySlot *slot) {
     if (!slot)
         return;
     body_unlink(slot);
-    free(slot);
 }
 
 void kvlangBodyInvalidate(const char *key) {
@@ -365,8 +364,43 @@ kvlangVthreadRootOfKey(const char *key, char *out, size_t cap) {
     return vthread_root(key, out, cap);
 }
 
+bool kvlangBodyAdopt(kvlangBodySlot *slot, const uint8_t *val, uint32_t len) {
+    slot->ok = false;
+    slot->head = NULL;
+    slot->headlen = 0;
+    slot->body = NULL;
+    if (!val || len < XH_PREFIX)
+        return false;
+    if (val[0] < 5 || val[0] > 31)
+        return false;
+    uint32_t headlen = 1u << val[0];
+    if ((val[1] & 7u) != 0) /* 必须是 FIXED_SMALL 且非 ptr/ext */
+        return false;
+    if (headlen < XH_PREFIX || headlen > len)
+        return false;
+    uint32_t ltlen = 0;
+    while (XH_PREFIX + ltlen < headlen && val[XH_PREFIX + ltlen])
+        ltlen++;
+    if (XH_PREFIX + ltlen >= headlen) /* langtype 必须 NUL 终止 */
+        return false;
+    size_t kl = strlen(slot->kind);
+    if (ltlen != kl || memcmp(val + XH_PREFIX, slot->kind, kl) != 0)
+        return false;
+    /* FIXED_SMALL：a/b 必须为 0，宽度由 langtype 决定。 */
+    if (xh_rd64(val + 2) != 0 || xh_rd64(val + 10) != 0)
+        return false;
+    if (len != headlen + slot->width)
+        return false;
+    slot->head = (uint8_t *)val;
+    slot->headlen = headlen;
+    slot->body = (uint8_t *)val + headlen;
+    slot->len = slot->width;
+    slot->ok = true;
+    return true;
+}
+
 bool kvlangBodyCapture(kvspace_t *kv, kvlangBodySlot *slot,
-                       const char *frame_root) {
+                       const char *frame_root, kvspaceViewToken_t *tok) {
     slot->ok = false;
     slot->head = NULL;
     slot->headlen = 0;
@@ -404,44 +438,43 @@ bool kvlangBodyCapture(kvspace_t *kv, kvlangBodySlot *slot,
             kvCBodyCellsMax = kvCBodyCells;
 #endif
     }
-    uint8_t *val = NULL;
-    uint32_t len = 0;
-    if (kvspaceGetByRef(kv->handle, &slot->off->off, slot->key, &val, &len) !=
-            0 ||
-        !val || len < XH_PREFIX)
-        return false;
-    /* 直接解 wire head：所有权守卫已限定本 vthread 自有的 frame-local 槽，
-     * ro/vid 恒为 0，无需再去后端取 sidecar。 */
-    if (val[0] < 5 || val[0] > 31)
-        return false;
-    uint32_t headlen = 1u << val[0];
-    if ((val[1] & 7u) != 0) /* 必须是 FIXED_SMALL 且非 ptr/ext */
-        return false;
-    if (headlen < XH_PREFIX || headlen > len)
-        return false;
-    uint32_t ltlen = 0;
-    while (XH_PREFIX + ltlen < headlen && val[XH_PREFIX + ltlen])
-        ltlen++;
-    if (XH_PREFIX + ltlen >= headlen) /* langtype 必须 NUL 终止 */
-        return false;
-    size_t kl = strlen(slot->kind);
-    if (ltlen != kl || memcmp(val + XH_PREFIX, slot->kind, kl) != 0)
-        return false;
-    /* FIXED_SMALL：a/b 必须为 0，宽度由 langtype 决定。 */
-    if (xh_rd64(val + 2) != 0 || xh_rd64(val + 10) != 0)
-        return false;
-    if (len != headlen + slot->width)
-        return false;
-    slot->head = val;
-    slot->headlen = headlen;
-    slot->body = val + headlen;
-    slot->len = slot->width;
-    slot->ok = true;
+    if (tok) {
+        /* 读 view：一次带版本的解析；-2/STALE 都当失败（dead 已置）。 */
+        if (kvspaceViewResolve(kv->handle, slot->key, tok) != 0)
+            return false;
+        if (!kvlangBodyAdopt(slot, tok->head, tok->headlen + tok->value_len))
+            return false;
+    } else {
+        uint8_t *val = NULL;
+        uint32_t len = 0;
+        if (kvspaceGetByRef(kv->handle, &slot->off->off, slot->key, &val, &len) !=
+                0 ||
+            !kvlangBodyAdopt(slot, val, len))
+            return false;
+    }
     slot->dead = false;
 #ifdef KV_COUNT
     kvCBodyCapOk++;
 #endif
     return true;
+}
+
+void kvlangBodyInvalidateAll(void) {
+    for (int b = 0; b < BODY_BUCKETS; b++)
+        for (kvlangBodySlot *c = body_buckets[b]; c; c = c->next) {
+            c->ok = false;
+            c->head = NULL;
+            c->headlen = 0;
+            c->body = NULL;
+            c->dead = false;
+        }
+}
+
+void kvlangReadViewSlotFree(kvlangReadViewSlot *rs) {
+    if (!rs)
+        return;
+    kvlangBodySlotRelease(&rs->slot);
+    free(rs);
 }
 
 /* goto/br：目标 irseq 是 layout 写死的 int64 字面量，本帧内恒定。
@@ -477,9 +510,10 @@ static void bind_jump_targets(kvlangCodeRow_t *row, kvlangRowBind_t *b) {
 static void bind_free(kvlangRowBind_t *b) {
     if (b->body)
         kvlangBodySlotRelease(b->body);
+        free(b->body);
     for (int i = 0; i < b->n; i++) {
         if (b->cell[i].view_state == 2)
-            kvlangBodySlotRelease((kvlangBodySlot *)b->cell[i].off.fast);
+            kvlangReadViewSlotFree((kvlangReadViewSlot *)b->cell[i].off.fast);
         free(b->cell[i].key);
         free(b->cell[i].type);
         free(b->cell[i].coerce_buf);
