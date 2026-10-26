@@ -138,6 +138,8 @@ typedef struct {
     uint32_t epoch;
     uint32_t reenter_gen;
     kvlangParkedFrame_t *park;
+    char *vkey; /* park target-set variant key (owned); NULL = singleton */
+    uint32_t lru;
 } kvlangFrameCtx_t;
 
 /* ExecuteMode 内的函数缓存：func_dir -> 二维表 */

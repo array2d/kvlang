@@ -165,11 +165,43 @@ frame_func_dir_buf(kvspace_t *kv, const char *frame_root, char *out,
     return true;
 }
 
+#define FCTX_VARIANTS 4 /* ctx variants per depth, by park target set */
+
+static void fctx_pool_free(kvlangFrameCtx_t **pool) {
+    for (size_t i = 0; i < (size_t)(MAX_STACK_DEPTH + 1) * FCTX_VARIANTS; i++)
+        kvlangFrameCtxFree(pool[i]);
+    free(pool);
+}
+
+static bool park_vkey(const kvlangParkedFrame_t *pf, const char *fdir,
+                      char *out, size_t cap) {
+    size_t n = 0;
+    const char *parts[1 + 2 * KVLANG_PARK_MAX_PARAMS];
+    int np = 0;
+    parts[np++] = fdir;
+    for (int i = 0; i < pf->nr && i < KVLANG_PARK_MAX_PARAMS; i++)
+        parts[np++] = pf->r_target[i];
+    for (int i = 0; i < pf->nw && i < KVLANG_PARK_MAX_PARAMS; i++)
+        parts[np++] = pf->w_target[i];
+    for (int k = 0; k < np; k++) {
+        size_t l = strlen(parts[k]);
+        if (n + l + 2 > cap)
+            return false;
+        memcpy(out + n, parts[k], l);
+        n += l;
+        out[n++] = '\x1f';
+    }
+    out[n] = 0;
+    return true;
+}
+
+/* fctx[d]: active ctx (borrowed); pool holds all variants per depth. */
 __attribute__((noinline)) static int
 switch_frame_ctx(kvspace_t *kv, const char *vtid, const char *cur,
                  const char *cur_frame, int depth, int last_depth,
                  uint32_t addr_epoch, kvlangFuncCache_t *fcache,
-                 kvlangFrameCtx_t **fctx) {
+                 kvlangFrameCtx_t **fctx, kvlangFrameCtx_t **pool) {
+    static __thread uint32_t lru_clock;
     kvlangParkedFrame_t *pf = kvlangParkedFrameGet(kv, vtid, depth);
     if (depth <= last_depth && fctx[depth] &&
         strcmp(fctx[depth]->frame_root, cur_frame) == 0) {
@@ -185,16 +217,38 @@ switch_frame_ctx(kvspace_t *kv, const char *vtid, const char *cur,
                                  cur_frame);
         fdir_p = fdir;
     }
-    if (depth > last_depth && fctx[depth]) {
-        fctx[depth]->park = pf;
-        if (strcmp(fctx[depth]->frame_root, cur_frame) == 0 &&
-            strcmp(fctx[depth]->code->func_dir, fdir_p) == 0 &&
-            kvlangFrameCtxReenter(kv, fctx[depth], addr_epoch) == 0)
-            return 0;
+    kvlangFrameCtx_t **slots = &pool[(size_t)depth * FCTX_VARIANTS];
+    char vk[2048];
+    const bool use_vk = pf && pf->warm && park_vkey(pf, fdir_p, vk, sizeof vk);
+    int victim = 0;
+    for (int i = 0; i < FCTX_VARIANTS; i++) {
+        kvlangFrameCtx_t *c = slots[i];
+        if (!c) {
+            if (slots[victim])
+                victim = i;
+            continue;
+        }
+        if (slots[victim] && c->lru < slots[victim]->lru)
+            victim = i;
+        if (strcmp(c->frame_root, cur_frame) != 0 ||
+            strcmp(c->code->func_dir, fdir_p) != 0)
+            continue;
+        if (use_vk ? (!c->vkey || strcmp(c->vkey, vk) != 0) : c->vkey != NULL)
+            continue;
+        c->park = pf;
+        if (depth > last_depth || fctx[depth] != c)
+            kvlangFrameCtxReenter(kv, c, addr_epoch);
+        c->lru = ++lru_clock;
+        fctx[depth] = c;
+        return 0;
     }
-    kvlangFrameCtxFree(fctx[depth]);
-    fctx[depth] = kvlangFrameCtxNew(fcache, fdir_p, cur_frame);
-    fctx[depth]->park = pf;
+    kvlangFrameCtxFree(slots[victim]);
+    kvlangFrameCtx_t *c = kvlangFrameCtxNew(fcache, fdir_p, cur_frame);
+    c->park = pf;
+    c->vkey = use_vk ? strdup(vk) : NULL;
+    c->lru = ++lru_clock;
+    slots[victim] = c;
+    fctx[depth] = c;
     return 0;
 }
 
@@ -238,6 +292,10 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
     kvlangFuncCache_t fcache;
     kvlangFuncCacheInit(&fcache);
     kvlangFrameCtx_t *fctx[MAX_STACK_DEPTH + 1] = {0};
+    kvlangFrameCtx_t **fpool =
+        calloc((size_t)(MAX_STACK_DEPTH + 1) * FCTX_VARIANTS, sizeof *fpool);
+    if (!fpool)
+        kvlangDie("out of memory allocating frame contexts");
     uint32_t addr_epoch = 0; /* 删除/委托/handoff 后自增，使帧层 keyoff 失效 */
     int last_depth = 0; /* 0 = 尚未进入任何帧 */
     /* C-iii 游标：帧深/帧根/irseq 的派生缓存，仅在 PC 结构变化时重解析。 */
@@ -312,7 +370,7 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
                 tpl_row = NULL;
                 if (switch_frame_ctx(kv, vtid, cur, cur_frame, depth,
                                      last_depth, addr_epoch, &fcache,
-                                     fctx) != 0) {
+                                     fctx, fpool) != 0) {
                     rc = -1;
                     break;
                 }
@@ -474,8 +532,7 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
             pinned_free(bind, row->nr, reads);
             free(reads);
             free(writes);
-            for (int d = 0; d <= MAX_STACK_DEPTH; d++)
-                kvlangFrameCtxFree(fctx[d]);
+            fctx_pool_free(fpool);
             kvlangFuncCacheFree(&fcache);
             COUNT_REPORT();
             return execute_yield(out_pc, yield);
@@ -493,8 +550,7 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
     }
 
     kvlangParkedFramesCleanupAbove(kv, vtid, last_depth > 0 ? last_depth : 1);
-    for (int d = 0; d <= MAX_STACK_DEPTH; d++)
-        kvlangFrameCtxFree(fctx[d]);
+    fctx_pool_free(fpool);
     kvlangFuncCacheFree(&fcache);
     COUNT_REPORT();
     free(reads);

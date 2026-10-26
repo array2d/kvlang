@@ -867,6 +867,7 @@ void kvlangFrameCtxFree(kvlangFrameCtx_t *ctx) {
     }
     free(ctx->binds);
     free(ctx->frame_root);
+    free(ctx->vkey);
     free(ctx);
 }
 
