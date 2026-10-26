@@ -31,6 +31,7 @@ struct CInsn {
     int s0 = 0;  // 明文指令坐标
     std::string name;    // opcode 原文（Native 分派用）
     std::string callee;  // call：被调函数名
+    std::uint16_t prof_id = 0;  // 进程级 opcode 名表下标（分段计时用）
     ops::Impl impl = ops::Impl::None;
 };
 
@@ -46,5 +47,9 @@ bool build_segment(void* h, const std::string& func_dir, Segment* out);
 // 进程级段缓存（按函数目录；失效用 ‥ctime，后续接）。
 const Segment* cached_segment(void* h, const std::string& func_dir);
 void clear_segment_cache();
+
+// 进程级 opcode 名表（prof_id → 名字），只增不减。
+const std::string& op_name(std::uint16_t id);
+std::size_t op_name_count();
 
 }  // namespace kv::rt

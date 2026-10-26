@@ -3,11 +3,25 @@
 #include <cstdio>
 #include <cstring>
 #include <unordered_map>
+#include <vector>
 
 #include "valueio.hpp"
 
 namespace kv::rt {
 namespace {
+
+std::vector<std::string> g_op_names;
+
+std::uint16_t intern_op(const std::string& name) {
+    static std::unordered_map<std::string, std::uint16_t> idx;
+    auto it = idx.find(name);
+    if (it != idx.end())
+        return it->second;
+    const auto id = static_cast<std::uint16_t>(g_op_names.size());
+    g_op_names.push_back(name);
+    idx[name] = id;
+    return id;
+}
 
 std::string slot_key(const std::string& func_dir, int s0, int s1) {
     std::string k = func_dir;
@@ -66,6 +80,7 @@ bool build(void* h, const std::string& func_dir, Segment* out) {
         ins.impl = ops::Impl::Handoff;
         ins.s0 = s0;
         ins.name = op;
+        ins.prof_id = intern_op(op);
         if (is_call) {
             ins.callee = callee;
             ins.op = ops::Op::Call;
@@ -118,6 +133,13 @@ std::unordered_map<std::string, Segment>& cache() {
 bool build_segment(void* h, const std::string& func_dir, Segment* out) {
     return build(h, func_dir, out);
 }
+
+const std::string& op_name(std::uint16_t id) {
+    static const std::string kEmpty;
+    return id < g_op_names.size() ? g_op_names[id] : kEmpty;
+}
+
+std::size_t op_name_count() { return g_op_names.size(); }
 
 const Segment* cached_segment(void* h, const std::string& func_dir) {
     auto& c = cache();

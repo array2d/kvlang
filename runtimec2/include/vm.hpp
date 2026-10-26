@@ -19,6 +19,8 @@ struct FReg {
     bool resolved = false;
     kvspaceSlotView_t view{};
     bool view_ok = false;
+    std::uint8_t* body = nullptr;  // view 的 body 指针（槽搬迁/写后失效）
+    std::uint64_t cap = 0;
     bool sc_ok = false;  // 标量 kind/width 已缓存（写后失效）
     Scalar::K sck = Scalar::K::None;
     std::uint8_t scw = 0;

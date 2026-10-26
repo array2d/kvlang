@@ -16,13 +16,29 @@
 namespace kv::rt {
 namespace {
 
+struct OpStat {
+    unsigned long long n = 0, handler = 0, loop = 0;
+};
+
 struct Prof {
     unsigned long long handler = 0, loop = 0, steps = 0;
     unsigned long long pre = 0, loads = 0, frames = 0, ctrl = 0, fb = 0;
     unsigned long long f_slot = 0, f_raw = 0, w_fast = 0, w_fb = 0;
+    unsigned long long rdtsc = 0;  // 单次 now() 的探针成本（校准值）
+    std::vector<OpStat> ops;
 };
+
 Prof g_prof;
 bool g_prof_on = false;
+
+void prof_tick(std::uint16_t id, std::uint64_t h, std::uint64_t l) {
+    if (g_prof.ops.size() < op_name_count())
+        g_prof.ops.resize(op_name_count());
+    OpStat& st = g_prof.ops[id];
+    st.n++;
+    st.handler += h;
+    st.loop += l;
+}
 bool g_trace_on = false;
 unsigned long long g_trace_n = 200;
 
@@ -43,6 +59,19 @@ void prof_report() {
                  (double)g_prof.ctrl / g_prof.steps, g_prof.fb, g_prof.f_slot,
                  g_prof.f_raw, g_prof.w_fast, g_prof.w_fb,
                  (double)(g_prof.handler + g_prof.loop) / g_prof.steps);
+    std::fprintf(stderr, "RC2PROF rdtsc_cost=%.1f cycles\n", (double)g_prof.rdtsc);
+    const double cal = (double)g_prof.rdtsc;
+    for (std::size_t i = 0; i < g_prof.ops.size(); i++) {
+        const OpStat& st = g_prof.ops[i];
+        if (st.n == 0)
+            continue;
+        std::fprintf(stderr,
+                     "RC2PROFOP %-24s n=%-7llu handler=%.1f loop=%.1f "
+                     "(扣探针 %.1f)\n",
+                     op_name(static_cast<std::uint16_t>(i)).c_str(), st.n,
+                     (double)st.handler / st.n, (double)st.loop / st.n,
+                     (double)(st.handler + st.loop) / st.n - cal);
+    }
 }
 
 void prof_init() {
@@ -56,8 +85,18 @@ void prof_init() {
         const char* e = std::getenv("RC2_TRACE_N");
         g_trace_n = e ? std::strtoull(e, nullptr, 10) : 200ULL;
     }
-    if (g_prof_on)
+    if (g_prof_on) {
+        // 探针校准：一次 now() 往返的真实成本（取 256 次最小值）。
+        unsigned long long best = ~0ULL;
+        for (int i = 0; i < 256; i++) {
+            const unsigned long long a = now();
+            const unsigned long long b = now();
+            if (b - a < best)
+                best = b - a;
+        }
+        g_prof.rdtsc = best;
         std::atexit(prof_report);
+    }
 }
 
 // 变量描述符 → 具体 key（帧入口一次；Ptr 链在此解析完）。
@@ -142,7 +181,27 @@ bool reg_slot(FrameCtx& f, std::uint8_t idx, kvspaceSlotView_t* out) {
     if (kvspaceSlotView(f.h, &r.ref, r.key.c_str(), &r.view) != 0)
         return false;
     r.view_ok = true;
+    r.body = r.view.body;
+    r.cap = r.view.body_cap;
     *out = r.view;
+    return true;
+}
+
+// 只取 body/cap（热路径不搬 40 字节 view 结构）。
+bool reg_body(FrameCtx& f, std::uint8_t idx, std::uint8_t** body,
+              std::uint64_t* cap) {
+    FReg& r = f.regs[idx];
+    if (!r.view_ok) {
+        if (!ensure_ref(f, &r))
+            return false;
+        if (kvspaceSlotView(f.h, &r.ref, r.key.c_str(), &r.view) != 0)
+            return false;
+        r.view_ok = true;
+        r.body = r.view.body;
+        r.cap = r.view.body_cap;
+    }
+    *body = r.body;
+    *cap = r.cap;
     return true;
 }
 
@@ -187,17 +246,18 @@ bool read_reg(FrameCtx& f, std::uint8_t idx, Wire* out) {
 // 读标量：slot view 直读；kind/width 每帧解析一次后缓存。
 bool read_scalar(FrameCtx& f, std::uint8_t idx, Scalar* out) {
     FReg& r = f.regs[idx];
-    kvspaceSlotView_t v{};
-    bool have_view = reg_slot(f, idx, &v);
+    std::uint8_t* body = nullptr;
+    std::uint64_t cap = 0;
+    const bool have_view = reg_body(f, idx, &body, &cap);
     if (g_prof_on && !have_view)
         g_prof.f_slot++;
     if (have_view) {
         if (r.sc_ok) {
-            if (v_scalar_raw(r.sck, r.scw, v.body, v.body_cap, out))
+            if (v_scalar_raw(r.sck, r.scw, body, cap, out))
                 return true;
             if (g_prof_on)
                 g_prof.f_raw++;
-        } else if (slot_read_scalar(v, out)) {
+        } else if (slot_read_scalar(r.view, out)) {
             r.sck = out->k;
             r.scw = out->width;
             r.sc_ok = true;
@@ -231,20 +291,45 @@ bool write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
     return true;
 }
 
+// 直取 int64 槽值（不经 Scalar 结构）。
+bool read_i64(FrameCtx& f, std::uint8_t idx, std::int64_t* out) {
+    FReg& r = f.regs[idx];
+    std::uint8_t* body = nullptr;
+    std::uint64_t cap = 0;
+    if (!reg_body(f, idx, &body, &cap) || !body)
+        return false;
+    if (r.sc_ok) {
+        if (r.sck != Scalar::K::Int || r.scw != 8 || cap < 8)
+            return false;
+        std::memcpy(out, body, 8);
+        return true;
+    }
+    Scalar sc{};
+    if (!read_scalar(f, idx, &sc) || sc.k != Scalar::K::Int)
+        return false;
+    *out = sc.i;
+    return true;
+}
+
 const char* kind_name(Scalar::K k, std::uint8_t width);
 
 bool slot_write_scalar(FrameCtx& f, std::uint8_t idx, const Scalar& s,
                        std::uint8_t width) {
-    kvspaceSlotView_t v{};
+    std::uint8_t* body = nullptr;
+    std::uint64_t body_cap = 0;
     const char* kn = kind_name(s.k, width);
     if (!kn)
         return false;
-    if (reg_slot(f, idx, &v) && v.head && v.headlen > 18 && v.body &&
-        v.body_cap >= width) {
-        const char* lt = reinterpret_cast<const char*>(v.head + 18);
-        const std::size_t cap = v.headlen - 18;
-        const std::size_t n = ::strnlen(lt, cap);
-        if (n == std::strlen(kn) && std::memcmp(lt, kn, n) == 0) {
+    FReg& fr = f.regs[idx];
+    bool match = fr.sc_ok && fr.sck == s.k && fr.scw == width;
+    if (reg_body(f, idx, &body, &body_cap) && body && body_cap >= width) {
+        if (!match && fr.view.head && fr.view.headlen > 18) {
+            const char* lt = reinterpret_cast<const char*>(fr.view.head + 18);
+            const std::size_t cap = fr.view.headlen - 18;
+            const std::size_t n = ::strnlen(lt, cap);
+            match = n == std::strlen(kn) && std::memcmp(lt, kn, n) == 0;
+        }
+        if (match) {
             std::uint64_t u = 0;
             switch (s.k) {
             case Scalar::K::Float:
@@ -264,7 +349,10 @@ bool slot_write_scalar(FrameCtx& f, std::uint8_t idx, const Scalar& s,
                 u = s.u;
                 break;
             }
-            std::memcpy(v.body, &u, width);
+            std::memcpy(body, &u, width);
+            fr.sck = s.k;
+            fr.scw = width;
+            fr.sc_ok = true;
             if (g_prof_on)
                 g_prof.w_fast++;
             return true;
@@ -523,8 +611,10 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
             }
             idx = dest - 2;
             if (g_prof_on) {
-                g_prof.ctrl += now() - t0;
+                const std::uint64_t d = now() - t0;
+                g_prof.ctrl += d;
                 g_prof.steps++;
+                prof_tick(ins.prof_id, 0, d);
             }
             continue;
         }
@@ -533,6 +623,8 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                 g_prof.loop += now() - t0;
                 g_prof.steps++;
             }
+            if (g_prof_on)
+                prof_tick(ins.prof_id, 0, 0);
             if (f.depth <= 1)
                 return RunResult::Ok;  // 入口帧（depth=1）return = vthread done
             std::string ret;
@@ -725,6 +817,12 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                                        : kvspaceCpList(f.h, k0.c_str(), k1.c_str(),
                                                        errbuf, sizeof errbuf);
                     ok = rc == 0;
+                } else if (fn == "kvspace/extindex") {
+                    ok = kvspaceMkindexExt(f.h, k0.c_str(), k1.c_str(), errbuf,
+                                           sizeof errbuf) == 0;
+                } else if (fn == "kvspace/rmindexext") {
+                    ok = kvspaceRmindexExt(f.h, k0.c_str(), errbuf,
+                                           sizeof errbuf) == 0;
                 } else {
                     ok = false;
                     *err = "native op not implemented: " + ins.name;
@@ -742,8 +840,10 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                 return RunResult::Error;
             }
             if (g_prof_on) {
-                g_prof.handler += now() - t0;
+                const std::uint64_t d = now() - t0;
+                g_prof.handler += d;
                 g_prof.steps++;
+                prof_tick(ins.prof_id, d, 0);
             }
             continue;
         }
@@ -845,6 +945,74 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                 g_prof.steps++;  // 嵌套帧自身已计时，勿重复累计
             continue;
         }
+        // 快路径：int64×int64（iops 热循环主力），不经 Scalar/通用 switch。
+        if (ins.kind == ops::Kind::Int && ins.width == 8 && ins.nrd == 2 &&
+            ins.op != ops::Op::Pow && ins.op != ops::Op::Sqrt &&
+            ins.op != ops::Op::Exp && ins.op != ops::Op::Log) {
+            std::int64_t a = 0, b = 0;
+            if (read_i64(f, ins.rd[0], &a) && read_i64(f, ins.rd[1], &b)) {
+                const unsigned long long thl = g_prof_on ? now() : 0;
+                std::int64_t rv = 0;
+                Scalar out{};
+                bool ok2 = true, is_bool = false;
+                out.k = Scalar::K::Int;
+                out.width = 8;
+                switch (ins.op) {
+                case ops::Op::Add: rv = a + b; break;
+                case ops::Op::Sub: rv = a - b; break;
+                case ops::Op::Mul: rv = a * b; break;
+                case ops::Op::Div:
+                case ops::Op::Mod:
+                    if (b == 0) {
+                        *err = "division by zero: " + ins.name;
+                        return RunResult::Error;
+                    }
+                    rv = ins.op == ops::Op::Div ? a / b : a % b;
+                    break;
+                case ops::Op::Max: rv = a > b ? a : b; break;
+                case ops::Op::Min: rv = a < b ? a : b; break;
+                case ops::Op::BitAnd: rv = a & b; break;
+                case ops::Op::BitOr: rv = a | b; break;
+                case ops::Op::BitXor: rv = a ^ b; break;
+                case ops::Op::Shl: rv = (std::int64_t)((std::uint64_t)a << (b & 63)); break;
+                case ops::Op::Shr: rv = a >> (b & 63); break;
+                case ops::Op::Eq: case ops::Op::Neq: case ops::Op::Lt:
+                case ops::Op::Le: case ops::Op::Gt: case ops::Op::Ge: {
+                    bool c = ins.op == ops::Op::Eq ? a == b
+                             : ins.op == ops::Op::Neq ? a != b
+                             : ins.op == ops::Op::Lt ? a < b
+                             : ins.op == ops::Op::Le ? a <= b
+                             : ins.op == ops::Op::Gt ? a > b
+                                                     : a >= b;
+                    out.k = Scalar::K::Bool;
+                    out.width = 1;
+                    out.u = c ? 1 : 0;
+                    is_bool = true;
+                    break;
+                }
+                default: ok2 = false; break;
+                }
+                if (ok2) {
+                    if (!is_bool) {
+                        out.i = rv;
+                        out.u = (std::uint64_t)rv;
+                    }
+                    ok2 = slot_write_scalar(f, ins.wr[0], out, out.width);
+                    if (g_prof_on) {
+                        const std::uint64_t dh = now() - thl;
+                        g_prof.handler += dh;
+                        g_prof.loop += (thl - t0);
+                        g_prof.steps++;
+                        prof_tick(ins.prof_id, dh, thl - t0);
+                    }
+                    if (!ok2) {
+                        *err = "value op failed: " + ins.name;
+                        return RunResult::Error;
+                    }
+                    continue;
+                }
+            }
+        }
         // 值算子
         Wire w[4]{};
         Scalar s[4]{};
@@ -887,8 +1055,10 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                  buf && write_reg(f, ins.wr[0], buf, len);
             std::free(buf);
             if (g_prof_on) {
-                g_prof.handler += now() - th;
+                const std::uint64_t dh = now() - th;
+                g_prof.handler += dh;
                 g_prof.steps++;
+                prof_tick(ins.prof_id, dh, th - t0);
             }
             if (!ok) {
                 *err = "value op failed: " + ins.name;
@@ -1022,9 +1192,11 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                                        out.width ? out.width : 8);
         }
         if (g_prof_on) {
-            g_prof.handler += now() - th;
+            const std::uint64_t dh = now() - th;
+            g_prof.handler += dh;
             g_prof.loop += (th - t0);
             g_prof.steps++;
+            prof_tick(ins.prof_id, dh, th - t0);
         }
         if (!ok) {
             *err = "value op failed: " + ins.name;
