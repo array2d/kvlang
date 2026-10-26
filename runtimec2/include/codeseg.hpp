@@ -10,7 +10,15 @@ namespace kv::rt {
 // 操作数：字面量（值在函数槽）或变量（帧栈成员 <frame>/<name>）。
 struct Operand {
     enum class Kind : std::uint8_t { None = 0, Literal, Var } kind = Kind::None;
-    std::string name;  // Var 时的变量名
+    std::string name;      // Var：变量名或 `*[s0,s1] T` 描述符
+    std::string slot_key;  // Literal：函数槽 key（值在其中）
+};
+
+// 寄存器描述：一个操作数在帧地址表里的条目（构建期去重，帧入口解析一次）。
+struct RegDesc {
+    Operand::Kind kind = Operand::Kind::None;
+    std::string name;     // Var 名/描述符
+    std::string slot_key; // Literal 的函数槽 key
 };
 
 struct CInsn {
@@ -18,18 +26,25 @@ struct CInsn {
     ops::Kind kind = ops::Kind::None;
     std::uint8_t width = 0;
     std::uint8_t nrd = 0, nwr = 0;
-    Operand rd[4];
-    Operand wr[2];
+    std::uint8_t rd[4] = {};  // 寄存器号（Segment::regs 下标）
+    std::uint8_t wr[2] = {};
     int s0 = 0;  // 明文指令坐标
+    std::string name;    // opcode 原文（Native 分派用）
+    std::string callee;  // call：被调函数名
+    ops::Impl impl = ops::Impl::None;
 };
 
 struct Segment {
     std::vector<CInsn> insns;
+    std::vector<RegDesc> regs;  // 帧地址表条目（进程级，帧无关）
 };
 
 // 从函数目录（/lib/<name>/）构建指令段；遇到非本 runtime 的 opcode 即停
 // （返回 false 且 insns 保留已建部分，调用方据此改写为 ext）。
-bool build_segment(void* h, const std::string& func_dir, Segment* out,
-                   std::string* stop_op);
+bool build_segment(void* h, const std::string& func_dir, Segment* out);
+
+// 进程级段缓存（按函数目录；失效用 ‥ctime，后续接）。
+const Segment* cached_segment(void* h, const std::string& func_dir);
+void clear_segment_cache();
 
 }  // namespace kv::rt

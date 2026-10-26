@@ -52,11 +52,29 @@ bool read_wire(void* h, std::string_view key, const std::uint8_t** data,
     return d != nullptr && n > 0;
 }
 
+bool read_wire_raw(void* h, std::string_view key, const std::uint8_t** data,
+                   std::uint32_t* len) noexcept {
+    *data = nullptr;
+    *len = 0;
+    auto k = keyz(key);
+    std::uint8_t* d = nullptr;
+    std::uint32_t n = 0;
+    if (kvspaceGet(h, k.c_str(), 0, &d, &n) != 0)
+        return false;
+    *data = d;
+    *len = n;
+    return d != nullptr && n > 0;
+}
+
 bool read_text(void* h, std::string_view key, std::string* out) noexcept {
     const std::uint8_t* d = nullptr;
     std::uint32_t n = 0;
     if (!read_wire(h, key, &d, &n))
         return false;
+    return wire_text(d, n, out);
+}
+
+bool wire_text(const std::uint8_t* d, std::uint32_t n, std::string* out) noexcept {
     kvspaceXh xh{};
     if (kvspaceXhDecode(d, n, &xh) != 0)
         return false;
@@ -104,8 +122,35 @@ bool read_rwir(void* h, std::string_view key, std::string* op, int* nr,
     const std::uint8_t* b = xh.body;
     *nr = static_cast<int>(b[0] | (b[1] << 8));
     *nw = static_cast<int>(b[2] | (b[3] << 8));
-    op->assign(reinterpret_cast<const char*>(b + 5),
-               static_cast<std::size_t>(xh.content_len - 5));
+    const char* opb = reinterpret_cast<const char*>(b + 5);
+    std::size_t opn = 0, cap = static_cast<std::size_t>(xh.content_len - 5);
+    while (opn < cap && opb[opn] != '\0')
+        opn++;
+    op->assign(opb, opn);
+    return true;
+}
+
+bool read_rwfunc(void* h, std::string_view key, std::string* name, int* nr,
+                 int* nw) noexcept {
+    const std::uint8_t* d = nullptr;
+    std::uint32_t n = 0;
+    if (!read_wire(h, key, &d, &n))
+        return false;
+    kvspaceXh xh{};
+    if (kvspaceXhDecode(d, n, &xh) != 0)
+        return false;
+    if (xh.langtype_len != 6 || std::memcmp(xh.langtype, "rwfunc", 6) != 0)
+        return false;
+    if (!xh.body || xh.content_len < 5)
+        return false;
+    const std::uint8_t* b = xh.body;
+    *nr = static_cast<int>(b[0] | (b[1] << 8));
+    *nw = static_cast<int>(b[2] | (b[3] << 8));
+    const char* nb = reinterpret_cast<const char*>(b + 5);
+    std::size_t cap = static_cast<std::size_t>(xh.content_len - 5), len = 0;
+    while (len < cap && nb[len] != '\0')
+        len++;
+    name->assign(nb, len);
     return true;
 }
 

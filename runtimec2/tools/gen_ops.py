@@ -32,6 +32,7 @@ SUF = {
     "neq": "Neq", "lt": "Lt", "le": "Le", "gt": "Gt", "ge": "Ge", "sqrt": "Sqrt",
     "exp": "Exp", "log": "Log", "pow": "Pow",
 }
+NATIVE_FAMILIES = {"time", "time/duration", "random", "kvspace", "vthread"}
 SPECIAL = {"=": "Copy", "bool": "Bool", "br": "Br", "call": "Call", "goto": "Goto",
            "debugger": "Debugger", "return": "Return"}
 GENERIC = {
@@ -55,7 +56,9 @@ def impl_of(name):
         fam = name.split("·", 1)[0]
         if fam in KIND or fam == "kvlang":
             return "Impl::Typed"
-        return "Impl::Handoff"
+        if fam in NATIVE_FAMILIES:
+            return "Impl::Native"  # 与 C runtime 同责（原生 syscall/ABI）
+        return "Impl::Handoff"     # 真正的扩展族
     if name in KIND:
         return "Impl::Typed"  # bare kind = cast
     if name in GENERIC or name.startswith("char/"):
@@ -67,8 +70,8 @@ def op_of(name):
     impl = impl_of(name)
     if impl == "Impl::Control":
         return f"Op::{SPECIAL[name]}"
-    if impl == "Impl::Handoff":
-        return "Op::None"
+    if impl in ("Impl::Handoff", "Impl::Native"):
+        return "Op::None"  # 按名字分派
     if name in GENERIC:
         return f"Op::{GENERIC[name]}"
     if "·" in name:
@@ -78,7 +81,7 @@ def op_of(name):
 
 def kind_of(name):
     impl = impl_of(name)
-    if impl in ("Impl::Control", "Impl::Handoff"):
+    if impl in ("Impl::Control", "Impl::Handoff", "Impl::Native"):
         return "Kind::None", 0
     if impl == "Impl::Dynamic":
         return "Kind::Any", 0
@@ -94,7 +97,9 @@ def kind_of(name):
 
 def policy_of(name):
     # no-malloc 口径：Typed/Control = base 174；Dynamic/Handoff = complex 126。
-    return "Class::Base" if impl_of(name) in ("Impl::Typed", "Impl::Control") else "Class::Complex"
+    return ("Class::Base"
+            if impl_of(name) in ("Impl::Typed", "Impl::Control")
+            else "Class::Complex")
 
 
 def classify(name):
@@ -123,7 +128,7 @@ def main():
     out = ["/* 生成：native 作者清单 → 算子表。源 layout/tests/fixtures/isa_native.txt。勿手改。 */",
            '#include "ops.hpp"', "", "namespace kv::ops {", "",
            "const Entry kBaseOps[] = {"]
-    counts = {"Typed": 0, "Control": 0, "Dynamic": 0, "Handoff": 0}
+    counts = {"Typed": 0, "Control": 0, "Dynamic": 0, "Native": 0, "Handoff": 0}
     for n in names:
         cls, op, kind, w, impl = classify(n)
         counts[impl.split("::", 1)[1]] += 1
@@ -131,7 +136,8 @@ def main():
     out += ["};", "", "const int kBaseOpsN = 300;", "", "}  // namespace kv::ops", ""]
     sys.stderr.write(
         f"impl counts: Typed={counts['Typed']} Control={counts['Control']} "
-        f"Dynamic={counts['Dynamic']} Handoff={counts['Handoff']}\n")
+        f"Dynamic={counts['Dynamic']} Native={counts['Native']} "
+        f"Handoff={counts['Handoff']}\n")
     sys.stdout.write("\n".join(out))
 
 

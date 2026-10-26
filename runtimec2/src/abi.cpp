@@ -7,6 +7,12 @@ extern "C" {
 #include "kvlang_vthread.h"
 }
 
+#include <cstring>
+#include <string>
+
+#include <kvspace/kvspace.h>
+#include <kvspace/xvalue_head.h>
+
 #include "model.hpp"
 #include "runtime.hpp"
 
@@ -79,16 +85,60 @@ KV2_EXPORT int kvlangRuntimeExecute(kvlangRuntime_t* rt, const char* funcname,
     return -1;
 }
 
+namespace {
+
+bool set_wire(void* h, const std::string& key, const char* kind,
+              const std::uint8_t* raw, std::uint32_t len) {
+    std::uint8_t* buf = nullptr;
+    std::uint32_t n = 0;
+    if (kvspaceXvalueEncode(kind, raw, len, nullptr, 0, &buf, &n) != 0 || !buf)
+        return false;
+    char err[192] = {};
+    int rc = kvspaceSetValue(h, key.c_str(), buf, n, 1, 0, err, sizeof err);
+    std::free(buf);
+    return rc == 0;
+}
+
+bool write_sig(void* h, const std::string& base, int x, const char* lt,
+               std::size_t len) {
+    const std::string key = base + "/[0," + std::to_string(x) + "]";
+    return set_wire(h, key, "def langtype",
+                    reinterpret_cast<const std::uint8_t*>(lt),
+                    static_cast<std::uint32_t>(len));
+}
+
+}  // namespace
+
 KV2_EXPORT int kvlangDefRwir(void* kvspace, const char* opcode,
                              const char* const* rp, int32_t nr,
                              const char* const* wp, int32_t nw) {
-    (void)kvspace;
-    (void)opcode;
-    (void)rp;
-    (void)nr;
-    (void)wp;
-    (void)nw;
-    return -1;  // M2：签名注册
+    if (!kvspace || !opcode || !*opcode)
+        return -1;
+    void* h = kvspace;
+    const std::string base = std::string("/lib/") + opcode;
+    int dynamic = 0;
+    std::size_t last_len = nr > 0 && rp[nr - 1] ? std::strlen(rp[nr - 1]) : 0;
+    if (nr > 0 && last_len >= 3 &&
+        std::memcmp(rp[nr - 1] + last_len - 3, "...", 3) == 0) {
+        dynamic = 1;
+        last_len -= 3;
+    }
+    const std::uint8_t body[5] = {
+        static_cast<std::uint8_t>(nr & 0xff),
+        static_cast<std::uint8_t>((nr >> 8) & 0xff),
+        static_cast<std::uint8_t>(nw & 0xff),
+        static_cast<std::uint8_t>((nw >> 8) & 0xff),
+        static_cast<std::uint8_t>(dynamic)};
+    if (!set_wire(h, base, "def rwir", body, sizeof body))
+        return -1;
+    for (int32_t i = 0; i < nr; i++)
+        if (!write_sig(h, base, -(i + 1), rp[i],
+                       (i == nr - 1) ? last_len : std::strlen(rp[i])))
+            return -1;
+    for (int32_t i = 0; i < nw; i++)
+        if (!write_sig(h, base, i + 1, wp[i], std::strlen(wp[i])))
+            return -1;
+    return 0;
 }
 
 KV2_EXPORT int kvlangRwirextHandoff(void* kvspace, const char* vtid,

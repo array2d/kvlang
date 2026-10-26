@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include "runtime.hpp"
 
 #include <cstdio>
@@ -7,6 +8,8 @@
 #include <kvspace/kvspace.h>
 
 #include "model.hpp"
+#include "ops.hpp"
+#include "vm.hpp"
 #include "status.hpp"
 #include "valueio.hpp"
 
@@ -65,8 +68,16 @@ bool read_opcode(void* h, const std::string& pc, std::string* op) {
     Pc p;
     if (!parse_pc(pc, &p))
         return false;
+    const std::string key = instr_func_key(h, p);
     int nr = 0, nw = 0;
-    return read_rwir(h, instr_func_key(h, p), op, &nr, &nw);
+    std::string name;
+    if (read_rwir(h, key, op, &nr, &nw))
+        return true;
+    if (read_rwfunc(h, key, &name, &nr, &nw)) {
+        *op = "call";
+        return true;
+    }
+    return false;
 }
 
 }  // namespace
@@ -115,16 +126,57 @@ int execute_vthread_impl(Runtime* r, const char* vid, char** out_pc) {
         std::string pc;
         if (!read_text(h, pc_key(vid), &pc) || pc.empty())
             return -1;
+        static const bool ev_trace = std::getenv("RC2_TRACE") != nullptr;
+        if (ev_trace)
+            std::fprintf(stderr, "[ev vid=%s key=%s pc=%s status=%s]\n", vid,
+                         pc_key(vid).c_str(), pc.c_str(), st.c_str());
         std::string op;
         if (!read_opcode(h, pc, &op))
             return -1;
-        if (op == "return") {
-            write_status(h, vid, "ok");
-            return 0;
-        }
         if (op.empty()) {
             write_status(h, vid, "error");
             return -1;
+        }
+        const ops::Entry* e = ops::find(op.data(), static_cast<std::uint32_t>(op.size()));
+        static const bool op_trace = std::getenv("RC2_TRACE") != nullptr;
+        if (op_trace)
+            std::fprintf(stderr, "[op=%s found=%d impl=%d]\n", op.c_str(), e != nullptr,
+                         e ? (int)e->impl : -1);
+        if (e && e->impl != ops::Impl::Handoff) {
+            Pc p;
+            if (!parse_pc(pc, &p))
+                return -1;
+            FrameCtx fctx;
+            fctx.h = h;
+            fctx.vid = vid;
+            fctx.depth = p.depth;
+            fctx.frame = frame_root(vid, p.depth);
+            if (!frame_func_dir(h, vid, p.depth, &fctx.func_dir))
+                return -1;
+            std::string err;
+            std::string stop_pc;
+            RunResult rr = run_frame(fctx, p.s0, &stop_pc, &err);
+            if (rr == RunResult::Error) {
+                write_status(h, vid, "error");
+                write_text(h, join(vthread_root(vid), join("/", join(kMemberSep, "msg"))),
+                           err.empty() ? "runtimec2: execution failed" : err);
+                return -1;
+            }
+            if (rr == RunResult::Ok) {
+                write_status(h, vid, "ok");
+                return 0;
+            }
+            if (ev_trace)
+                std::fprintf(stderr, "[rr=%d stop=%s]\n", (int)rr, stop_pc.c_str());
+            if (rr == RunResult::Returned) {
+                // 子帧返回 → 续跑调用方返回地址（帧已由 run_frame 删除）。
+                if (stop_pc.empty() || !write_text(h, pc_key(vid), stop_pc))
+                    return -1;
+                continue;
+            }
+            if (out_pc)
+                *out_pc = strdup(stop_pc.c_str());
+            return 1;
         }
         if (out_pc)
             *out_pc = strdup(pc.c_str());

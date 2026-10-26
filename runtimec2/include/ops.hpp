@@ -13,7 +13,7 @@ enum class Kind : std::uint8_t { None = 0, Int, Uint, Float, Any };
 enum class Class : std::uint8_t { Base = 0, Complex = 1 };
 // 执行方式（与 policy 正交）：Typed/Control/Dynamic 由本 runtime 执行，
 // Handoff 交扩展（M2 起逐步实现）。
-enum class Impl : std::uint8_t { None = 0, Typed, Control, Dynamic, Handoff };
+enum class Impl : std::uint8_t { None = 0, Typed, Control, Dynamic, Native, Handoff };
 
 struct Entry {
     const char* name;

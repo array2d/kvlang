@@ -6,10 +6,42 @@
 #include <kvspace/kvspace.h>
 
 #include "model.hpp"
+#include <cinttypes>
+
+#include "value.hpp"
 #include "valueio.hpp"
 
 namespace kv::rt {
 namespace {
+
+// 与 C runtime kvlangFormatFloat 逐字一致：%.16g → 不可回读则 %.17g，
+// 再补 ".0"、去尾零。
+void format_float(double v, char* out, std::size_t cap) {
+    char s[64];
+    std::snprintf(s, sizeof s, "%.16g", v);
+    if (std::strtod(s, nullptr) != v)
+        std::snprintf(s, sizeof s, "%.17g", v);
+    std::snprintf(out, cap, "%s", s);
+    if (std::strchr(out, 'e'))
+        return;
+    char* dot = std::strchr(out, '.');
+    if (!dot) {
+        std::size_t l = std::strlen(out);
+        if (l + 2 < cap) {
+            out[l] = '.';
+            out[l + 1] = '0';
+            out[l + 2] = 0;
+        }
+        return;
+    }
+    char* p = out + std::strlen(out) - 1;
+    while (p > dot && *p == '0')
+        *p-- = 0;
+    if (p == dot) {
+        p[1] = '0';
+        p[2] = 0;
+    }
+}
 
 char* dup(const std::string& s) {
     char* p = static_cast<char*>(std::malloc(s.size() + 1));
@@ -56,8 +88,72 @@ char* resolve_read_impl(void* h, const char* pc, int idx) {
     Pc p;
     if (!h || !pc || !parse_pc(pc, &p) || idx < 0)
         return dup("");
+    const std::string key = func_key(h, p, -(idx + 1));
+    std::string var;
+    int nr = 0, nw = 0;
+    if (read_rwir(h, key, &var, &nr, &nw)) {
+        // 变量操作数：按 * 描述符/裸名解析到帧栈成员，再取文本值。
+        std::string target;
+        const std::string frame = frame_root(p.vid, p.depth);
+        if (!var.empty() && var[0] == '*') {
+            const std::string mk = frame + "/" + var.substr(1);
+            const std::uint8_t* d = nullptr;
+            std::uint32_t n = 0;
+            if (!read_wire_raw(h, mk, &d, &n))  // Ptr 本体，禁穿透
+                return dup("");
+            Wire w{d, n};
+            std::string t;
+            if (!v_ptr_target(w, &t))
+                return dup("");
+            if (var.rfind("*[0,", 0) == 0) {
+                const std::uint8_t* d2 = nullptr;
+                std::uint32_t n2 = 0;
+                if (!read_wire_raw(h, t, &d2, &n2))
+                    return dup("");
+                Wire w2{d2, n2};
+                if (!v_ptr_target(w2, &target))
+                    return dup("");
+            } else {
+                target = t;
+            }
+        } else if (!var.empty() && var[0] == '/') {
+            target = var;
+        } else {
+            target = frame + "/" + var;
+        }
+        // 值可能是标量：按 C 的显示规则格式化为十进制。
+        const std::uint8_t* vd = nullptr;
+        std::uint32_t vn = 0;
+        std::string v;
+        if (read_wire(h, target, &vd, &vn)) {
+            Wire w{vd, vn};
+            Scalar sc{};
+            if (v_scalar(w, &sc)) {
+                char buf[64];
+                switch (sc.k) {
+                case Scalar::K::Int:
+                    std::snprintf(buf, sizeof buf, "%lld", (long long)sc.i);
+                    return dup(buf);
+                case Scalar::K::Bool:
+                    return dup(sc.u ? "true" : "false");
+                case Scalar::K::Uint:
+                    std::snprintf(buf, sizeof buf, "%llu", (unsigned long long)sc.u);
+                    return dup(buf);
+                case Scalar::K::Float: {
+                    format_float(sc.f, buf, sizeof buf);
+                    return dup(buf);
+                }
+                default:
+                    break;
+                }
+            }
+        }
+        if (!read_text(h, target, &v))
+            return dup("");
+        return dup(v);
+    }
     std::string v;
-    if (!read_text(h, func_key(h, p, -(idx + 1)), &v))
+    if (!read_text(h, key, &v))
         return dup("");
     return dup(v);
 }

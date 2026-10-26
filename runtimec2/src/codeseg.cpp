@@ -1,6 +1,8 @@
 #include "codeseg.hpp"
 
 #include <cstdio>
+#include <cstring>
+#include <unordered_map>
 
 #include "valueio.hpp"
 
@@ -19,12 +21,18 @@ std::string slot_key(const std::string& func_dir, int s0, int s1) {
     return k;
 }
 
-bool read_operand(void* h, const std::string& key, Operand* out) {
-    // 字面量：任意非 rwir 值；变量：rwir 值，opcode 即变量名。
-    const std::uint8_t* d = nullptr;
-    std::uint32_t n = 0;
-    if (!read_wire(h, key, &d, &n))
-        return false;
+int reg_of(Segment* seg, std::unordered_map<std::string, int>* dedup,
+           const std::string& tag, const RegDesc& d) {
+    auto it = dedup->find(tag);
+    if (it != dedup->end())
+        return it->second;
+    int idx = static_cast<int>(seg->regs.size());
+    seg->regs.push_back(d);
+    (*dedup)[tag] = idx;
+    return idx;
+}
+
+bool operand_desc(void* h, const std::string& key, RegDesc* out) {
     std::string op;
     int nr = 0, nw = 0;
     if (read_rwir(h, key, &op, &nr, &nw)) {
@@ -33,47 +41,96 @@ bool read_operand(void* h, const std::string& key, Operand* out) {
         return true;
     }
     out->kind = Operand::Kind::Literal;
+    out->slot_key = key;
     return true;
 }
 
-}  // namespace
-
-bool build_segment(void* h, const std::string& func_dir, Segment* out,
-                   std::string* stop_op) {
+bool build(void* h, const std::string& func_dir, Segment* out) {
     out->insns.clear();
-    if (stop_op)
-        stop_op->clear();
+    out->regs.clear();
+    std::unordered_map<std::string, int> dedup;
     for (int s0 = 1;; s0++) {
         const std::string op_key = slot_key(func_dir, s0, 0);
-        std::string op;
+        std::string op, callee;
         int nr = 0, nw = 0;
-        if (!read_rwir(h, op_key, &op, &nr, &nw))
-            break;  // 指令序列结束
-        const ops::Entry* e = ops::find(op.data(), static_cast<uint32_t>(op.size()));
-        if (!e || e->impl == ops::Impl::Handoff) {
-            // 非 base：本指令段到此为止（调用方转 handoff/扩展）。
-            if (stop_op)
-                *stop_op = op;
-            return false;
+        bool is_call = false;
+        if (!read_rwir(h, op_key, &op, &nr, &nw)) {
+            if (!read_rwfunc(h, op_key, &callee, &nr, &nw))
+                break;  // 函数末尾
+            is_call = true;
+            op = "call";
         }
-        if (nr > 4 || nw > 2)
-            return false;
+        const ops::Entry* e = ops::find(op.data(), static_cast<std::uint32_t>(op.size()));
         CInsn ins;
-        ins.op = e->op;
-        ins.kind = e->kind;
-        ins.width = e->width;
-        ins.nrd = static_cast<std::uint8_t>(nr);
-        ins.nwr = static_cast<std::uint8_t>(nw);
+        ins.op = ops::Op::None;
+        ins.impl = ops::Impl::Handoff;
         ins.s0 = s0;
-        for (int k = 1; k <= nr; k++)
-            if (!read_operand(h, slot_key(func_dir, s0, -k), &ins.rd[k - 1]))
+        ins.name = op;
+        if (is_call) {
+            ins.callee = callee;
+            ins.op = ops::Op::Call;
+            ins.impl = ops::Impl::Control;
+        } else if (e) {
+            ins.op = e->op;
+            ins.kind = e->kind;
+            ins.width = e->width;
+            ins.impl = e->impl;
+        }
+        if (ins.impl == ops::Impl::Handoff) {
+            out->insns.push_back(ins);
+            continue;
+        }
+        if (nr + (is_call ? 1 : 0) > 4 || nw > 2)
+            return false;
+        ins.nrd = static_cast<std::uint8_t>(nr + (is_call ? 1 : 0));
+        ins.nwr = static_cast<std::uint8_t>(nw);
+        int rbase = is_call ? 1 : 0;
+        for (int k = 1; k <= nr; k++) {
+            const std::string rk = slot_key(func_dir, s0, -k);
+            RegDesc d;
+            if (!operand_desc(h, rk, &d))
                 return false;
-        for (int k = 1; k <= nw; k++)
-            if (!read_operand(h, slot_key(func_dir, s0, k), &ins.wr[k - 1]))
+            const std::string tag = std::string(d.kind == Operand::Kind::Var ? "v:" : "l:") +
+                                    (d.kind == Operand::Kind::Var ? d.name : rk);
+            ins.rd[rbase + k - 1] = static_cast<std::uint8_t>(reg_of(out, &dedup, tag, d));
+        }
+        for (int k = 1; k <= nw; k++) {
+            const std::string wk = slot_key(func_dir, s0, k);
+            RegDesc d;
+            if (!operand_desc(h, wk, &d))
                 return false;
+            const std::string tag = std::string(d.kind == Operand::Kind::Var ? "v:" : "l:") +
+                                    (d.kind == Operand::Kind::Var ? d.name : wk);
+            ins.wr[k - 1] = static_cast<std::uint8_t>(reg_of(out, &dedup, tag, d));
+        }
         out->insns.push_back(ins);
     }
     return true;
 }
+
+std::unordered_map<std::string, Segment>& cache() {
+    static std::unordered_map<std::string, Segment> c;
+    return c;
+}
+
+}  // namespace
+
+bool build_segment(void* h, const std::string& func_dir, Segment* out) {
+    return build(h, func_dir, out);
+}
+
+const Segment* cached_segment(void* h, const std::string& func_dir) {
+    auto& c = cache();
+    auto it = c.find(func_dir);
+    if (it != c.end())
+        return &it->second;
+    Segment seg;
+    if (!build(h, func_dir, &seg))
+        return nullptr;
+    auto res = c.emplace(func_dir, std::move(seg));
+    return &res.first->second;
+}
+
+void clear_segment_cache() { cache().clear(); }
 
 }  // namespace kv::rt

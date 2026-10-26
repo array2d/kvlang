@@ -48,7 +48,18 @@ int main(int argc, char **argv) {
         if (rc == 0)
             break;
         if (rc != 1) {
-            fprintf(stderr, "execute failed rc=%d\n", rc);
+            char mk[256];
+            snprintf(mk, sizeof mk, "/vthread/%s/\xE2\x80\xA5msg", vid);
+            uint8_t *md = NULL;
+            uint32_t mn = 0;
+            kvspaceXh xh;
+            memset(&xh, 0, sizeof xh);
+            if (kvspaceGet(kv, mk, 1, &md, &mn) == 0 && md && mn &&
+                kvspaceXhDecode(md, mn, &xh) == 0 && xh.body)
+                fprintf(stderr, "execute failed rc=%d: %.*s\n", rc,
+                        (int)xh.content_len, (const char *)xh.body);
+            else
+                fprintf(stderr, "execute failed rc=%d\n", rc);
             return 1;
         }
         char *params = kvlangRwirextParams(kv, pc);
