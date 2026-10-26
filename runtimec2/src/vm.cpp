@@ -839,24 +839,31 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
         }
         unsigned long long t0 = g_prof_on ? now() : 0;
         if (ins.op == ops::Op::Goto || ins.op == ops::Op::Br) {
-            Scalar target{};
-            if (!read_scalar(f, ins.rd[ins.op == ops::Op::Br ? 1 : 0], &target)) {
+            std::int64_t target_v = 0;
+            FReg &tr = f.regs[ins.rd[ins.op == ops::Op::Br ? 1 : 0]];
+            if (!(tr.fast_i64 ? (target_v = tr.fv, true)
+                              : read_i64(f, ins.rd[ins.op == ops::Op::Br ? 1 : 0],
+                                         &target_v))) {
                 *err = "control: bad target";
                 return RunResult::Error;
             }
-            int dest = static_cast<int>(target.i);
+            int dest = static_cast<int>(target_v);
             if (ins.op == ops::Op::Br) {
-                Scalar cond{};
-                if (!read_scalar(f, ins.rd[0], &cond)) {
+                bool cond = false;
+                FReg &cr = f.regs[ins.rd[0]];
+                if (!(cr.fast_bool ? (cond = cr.fb, true)
+                                   : read_bool(f, ins.rd[0], &cond))) {
                     *err = "br: bad cond";
                     return RunResult::Error;
                 }
-                if (!truthy(cond)) {
-                    if (!read_scalar(f, ins.rd[2], &target)) {
+                if (!cond) {
+                    FReg &fr = f.regs[ins.rd[2]];
+                    if (!(fr.fast_i64 ? (target_v = fr.fv, true)
+                                      : read_i64(f, ins.rd[2], &target_v))) {
                         *err = "br: bad false target";
                         return RunResult::Error;
                     }
-                    dest = static_cast<int>(target.i);
+                    dest = static_cast<int>(target_v);
                 }
             }
             if (dest < 1 || dest > n + 1) {
@@ -1202,11 +1209,17 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
         // 快路径：int64×int64（iops 热循环主力），不经 Scalar/通用 switch。
         // fast_i64 由 build_segment 预标，每步只判一位。
         if (ins.fast_i64) {
+            // 直取两操作数：fast 缓存命中（热循环稳态）零判定；未命中回退 read_i64。
+            FReg &r0 = f.regs[ins.rd[0]], &r1 = f.regs[ins.rd[1]];
             std::int64_t a = 0, b = 0;
-            if (read_i64(f, ins.rd[0], &a) && read_i64(f, ins.rd[1], &b)) {
+            bool got =
+                (r0.fast_i64 ? (a = r0.fv, true)
+                             : read_i64(f, ins.rd[0], &a)) &&
+                (r1.fast_i64 ? (b = r1.fv, true)
+                             : read_i64(f, ins.rd[1], &b));
+            if (got) {
                 std::int64_t rv = 0;
                 bool ok2 = true;
-                // 直查表：算术（opfn 1..12）→ 除零哨兵特判；比较（13..18）→ bool 槽直写。
                 if (ins.opfn <= 12) {
                     if (ins.opfn == 4 || ins.opfn == 5) {
                         if (b == 0) {
@@ -1215,7 +1228,20 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                         }
                     }
                     rv = kFastI64Tbl[ins.opfn](a, b);
-                    ok2 = slot_write_i64(f, ins.wr[0], rv);
+                    FReg &w = f.regs[ins.wr[0]];
+                    if (w.fast_i64) {
+                        std::uint8_t *wb = nullptr;
+                        std::uint64_t wcap = 0;
+                        if (reg_body(f, ins.wr[0], &wb, &wcap) && wb && wcap >= 8) {
+                            std::memcpy(wb, &rv, 8);
+                            w.fv = rv;
+                        } else {
+                            w.fast_i64 = false;
+                            ok2 = slot_write_i64(f, ins.wr[0], rv);
+                        }
+                    } else {
+                        ok2 = slot_write_i64(f, ins.wr[0], rv);
+                    }
                 } else {
                     rv = kFastI64Tbl[ins.opfn](a, b);
                     ok2 = slot_write_bool(f, ins.wr[0], rv != 0);
