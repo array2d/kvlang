@@ -28,6 +28,14 @@ impl Engine {
         let raw: Vec<u8> = utf32.iter().flat_map(|v| v.to_le_bytes()).collect();
         self.set_xvalue_encoded(key, "char/utf32", &raw, &[utf32.len() as i32]);
     }
+    /// key 是否存在（不取值；容器类值也能判）。
+    pub fn kv_exists(&self, key: &str) -> bool {
+        unsafe {
+            let (mut out, mut olen) = (null_mut(), 0u32);
+            let rc = kvspaceGet(self.kv, cs(key).as_ptr(), 0, &mut out, &mut olen);
+            rc == 0 && !out.is_null()
+        }
+    }
     pub fn get_kv(&self, key: &str) -> String {
         unsafe {
             let (mut out, mut olen) = (null_mut(), 0u32);
