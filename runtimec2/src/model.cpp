@@ -84,6 +84,15 @@ std::string instr_key(const Pc& pc) {
     return param_key(frame_root(pc.vid, pc.depth), pc.s0, pc.s1);
 }
 
+std::string pc_key_for(const Pc& p) {
+    std::string s;
+    s.reserve(p.vid.size() + 14);
+    s += "/vthread/";
+    s += p.vid;
+    s += "/\xE2\x80\xA5" "pc";
+    return s;
+}
+
 std::string next_pc(const Pc& pc) {
     return param_key(frame_root(pc.vid, pc.depth), pc.s0 + 1, 0);
 }

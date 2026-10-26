@@ -406,100 +406,221 @@ const char* kind_name(Scalar::K k, std::uint8_t width) {
     }
 }
 
+// ── 模板化值计算：switch(Op) → template<Op> constexpr（编译期内联单指令）。
+// 返回 false = 该 op 不支持此操作数（Zero 检查失败等）。
+
+template <ops::Op O, bool SGN>
+constexpr bool arith_i(const Scalar& a, const Scalar& b, Scalar* r) {
+    if constexpr (O == ops::Op::Add) { r->i = a.i + b.i; return true; }
+    if constexpr (O == ops::Op::Sub) { r->i = a.i - b.i; return true; }
+    if constexpr (O == ops::Op::Mul) { r->i = a.i * b.i; return true; }
+    if constexpr (O == ops::Op::Div) {
+        if (SGN) { if (b.i == 0) return false; r->i = a.i / b.i; }
+        else     { if (b.u == 0) return false; r->u = a.u / b.u; }
+        return true;
+    }
+    if constexpr (O == ops::Op::Mod) {
+        if (SGN) { if (b.i == 0) return false; r->i = a.i % b.i; }
+        else     { if (b.u == 0) return false; r->u = a.u % b.u; }
+        return true;
+    }
+    if constexpr (O == ops::Op::Max) {
+        r->i = SGN ? (a.i > b.i ? a.i : b.i) : (std::int64_t)(a.u > b.u ? a.u : b.u);
+        return true;
+    }
+    if constexpr (O == ops::Op::Min) {
+        r->i = SGN ? (a.i < b.i ? a.i : b.i) : (std::int64_t)(a.u < b.u ? a.u : b.u);
+        return true;
+    }
+    if constexpr (O == ops::Op::Neg) { r->i = -a.i; return true; }
+    if constexpr (O == ops::Op::Abs) { r->i = a.i < 0 ? -a.i : a.i; return true; }
+    if constexpr (O == ops::Op::Sign) { r->i = a.i > 0 ? 1 : a.i < 0 ? -1 : 0; return true; }
+    if constexpr (O == ops::Op::BitAnd) { r->i = a.i & b.i; return true; }
+    if constexpr (O == ops::Op::BitOr)  { r->i = a.i | b.i; return true; }
+    if constexpr (O == ops::Op::BitXor) { r->i = a.i ^ b.i; return true; }
+    if constexpr (O == ops::Op::Shl) { r->i = (std::int64_t)(a.u << (b.u & 63)); return true; }
+    if constexpr (O == ops::Op::Shr) {
+        r->i = SGN ? (a.i >> (b.u & 63)) : (std::int64_t)(a.u >> (b.u & 63));
+        return true;
+    }
+    return false;
+}
+
+template <ops::Op O>
+constexpr bool arith_f(const Scalar& a, const Scalar& b, Scalar* r) {
+    if constexpr (O == ops::Op::Add) { r->f = a.f + b.f; return true; }
+    if constexpr (O == ops::Op::Sub) { r->f = a.f - b.f; return true; }
+    if constexpr (O == ops::Op::Mul) { r->f = a.f * b.f; return true; }
+    if constexpr (O == ops::Op::Div) { r->f = a.f / b.f; return true; }
+    if constexpr (O == ops::Op::Max) { r->f = a.f > b.f ? a.f : b.f; return true; }
+    if constexpr (O == ops::Op::Min) { r->f = a.f < b.f ? a.f : b.f; return true; }
+    if constexpr (O == ops::Op::Neg) { r->f = -a.f; return true; }
+    if constexpr (O == ops::Op::Abs) { r->f = a.f < 0 ? -a.f : a.f; return true; }
+    if constexpr (O == ops::Op::Sign) { r->f = a.f > 0 ? 1 : a.f < 0 ? -1 : 0; return true; }
+    if constexpr (O == ops::Op::Sqrt) { r->f = __builtin_sqrt(a.f); return true; }
+    if constexpr (O == ops::Op::Exp) { r->f = __builtin_exp(a.f); return true; }
+    if constexpr (O == ops::Op::Log) { r->f = __builtin_log(a.f); return true; }
+    if constexpr (O == ops::Op::Pow) { r->f = __builtin_pow(a.f, b.f); return true; }
+    return false;
+}
+
+template <ops::Op O>
+constexpr bool cmp_f(const Scalar& a, const Scalar& b) {
+    if constexpr (O == ops::Op::Eq)  return a.f == b.f;
+    if constexpr (O == ops::Op::Neq) return a.f != b.f;
+    if constexpr (O == ops::Op::Lt)  return a.f < b.f;
+    if constexpr (O == ops::Op::Le)  return a.f <= b.f;
+    if constexpr (O == ops::Op::Gt)  return a.f > b.f;
+    if constexpr (O == ops::Op::Ge)  return a.f >= b.f;
+    return false;
+}
+
+template <ops::Op O>
+constexpr bool cmp_sgn(const Scalar& a, const Scalar& b) {
+    if constexpr (O == ops::Op::Eq)  return a.i == b.i;
+    if constexpr (O == ops::Op::Neq) return a.i != b.i;
+    if constexpr (O == ops::Op::Lt)  return a.i < b.i;
+    if constexpr (O == ops::Op::Le)  return a.i <= b.i;
+    if constexpr (O == ops::Op::Gt)  return a.i > b.i;
+    if constexpr (O == ops::Op::Ge)  return a.i >= b.i;
+    return false;
+}
+
+template <ops::Op O>
+constexpr bool cmp_uns(const Scalar& a, const Scalar& b) {
+    if constexpr (O == ops::Op::Eq)  return a.u == b.u;
+    if constexpr (O == ops::Op::Neq) return a.u != b.u;
+    if constexpr (O == ops::Op::Lt)  return a.u < b.u;
+    if constexpr (O == ops::Op::Le)  return a.u <= b.u;
+    if constexpr (O == ops::Op::Gt)  return a.u > b.u;
+    if constexpr (O == ops::Op::Ge)  return a.u >= b.u;
+    return false;
+}
+
+// 分派表：Op → 三套模板实例化的函数指针（编译期查表，运行期直呼）。
+// 顺序与 ops.hpp 的 Op 枚举一致。
+typedef bool (*IntFn)(const Scalar&, const Scalar&, Scalar*);
+typedef bool (*FloatFn)(const Scalar&, const Scalar&, Scalar*);
+typedef bool (*CmpFn)(const Scalar&, const Scalar&);
+static constexpr IntFn kIntTbl[] = {
+    arith_i<ops::Op::None, false>, arith_i<ops::Op::Copy, false>, arith_i<ops::Op::Bool, false>,
+    arith_i<ops::Op::Br, false>, arith_i<ops::Op::Call, false>, arith_i<ops::Op::Goto, false>,
+    arith_i<ops::Op::Debugger, false>, arith_i<ops::Op::Return, false>, arith_i<ops::Op::Cast, false>,
+    arith_i<ops::Op::Abs, true>, arith_i<ops::Op::Add, true>, arith_i<ops::Op::Sub, true>,
+    arith_i<ops::Op::Mul, true>, arith_i<ops::Op::Div, true>, arith_i<ops::Op::Mod, true>,
+    arith_i<ops::Op::Max, true>, arith_i<ops::Op::Min, true>, arith_i<ops::Op::Neg, true>,
+    arith_i<ops::Op::Sign, true>, arith_i<ops::Op::BitAnd, true>, arith_i<ops::Op::BitOr, true>,
+    arith_i<ops::Op::BitXor, true>, arith_i<ops::Op::Shl, true>, arith_i<ops::Op::Shr, true>,
+    arith_i<ops::Op::Eq, true>, arith_i<ops::Op::Neq, true>, arith_i<ops::Op::Lt, true>,
+    arith_i<ops::Op::Le, true>, arith_i<ops::Op::Gt, true>, arith_i<ops::Op::Ge, true>,
+    arith_i<ops::Op::Sqrt, true>, arith_i<ops::Op::Exp, true>, arith_i<ops::Op::Log, true>,
+    arith_i<ops::Op::Pow, true>, arith_i<ops::Op::And, true>, arith_i<ops::Op::Or, true>,
+    arith_i<ops::Op::Not, true>,
+};
+static constexpr FloatFn kFloatTbl[] = {
+    arith_f<ops::Op::None>, arith_f<ops::Op::Copy>, arith_f<ops::Op::Bool>,
+    arith_f<ops::Op::Br>, arith_f<ops::Op::Call>, arith_f<ops::Op::Goto>,
+    arith_f<ops::Op::Debugger>, arith_f<ops::Op::Return>, arith_f<ops::Op::Cast>,
+    arith_f<ops::Op::Abs>, arith_f<ops::Op::Add>, arith_f<ops::Op::Sub>,
+    arith_f<ops::Op::Mul>, arith_f<ops::Op::Div>, arith_f<ops::Op::Mod>,
+    arith_f<ops::Op::Max>, arith_f<ops::Op::Min>, arith_f<ops::Op::Neg>,
+    arith_f<ops::Op::Sign>, arith_f<ops::Op::BitAnd>, arith_f<ops::Op::BitOr>,
+    arith_f<ops::Op::BitXor>, arith_f<ops::Op::Shl>, arith_f<ops::Op::Shr>,
+    arith_f<ops::Op::Eq>, arith_f<ops::Op::Neq>, arith_f<ops::Op::Lt>,
+    arith_f<ops::Op::Le>, arith_f<ops::Op::Gt>, arith_f<ops::Op::Ge>,
+    arith_f<ops::Op::Sqrt>, arith_f<ops::Op::Exp>, arith_f<ops::Op::Log>,
+    arith_f<ops::Op::Pow>, arith_f<ops::Op::And>, arith_f<ops::Op::Or>,
+    arith_f<ops::Op::Not>,
+};
+static constexpr CmpFn kCmpSgnTbl[] = {
+    cmp_sgn<ops::Op::None>, cmp_sgn<ops::Op::Copy>, cmp_sgn<ops::Op::Bool>,
+    cmp_sgn<ops::Op::Br>, cmp_sgn<ops::Op::Call>, cmp_sgn<ops::Op::Goto>,
+    cmp_sgn<ops::Op::Debugger>, cmp_sgn<ops::Op::Return>, cmp_sgn<ops::Op::Cast>,
+    cmp_sgn<ops::Op::Abs>, cmp_sgn<ops::Op::Add>, cmp_sgn<ops::Op::Sub>,
+    cmp_sgn<ops::Op::Mul>, cmp_sgn<ops::Op::Div>, cmp_sgn<ops::Op::Mod>,
+    cmp_sgn<ops::Op::Max>, cmp_sgn<ops::Op::Min>, cmp_sgn<ops::Op::Neg>,
+    cmp_sgn<ops::Op::Sign>, cmp_sgn<ops::Op::BitAnd>, cmp_sgn<ops::Op::BitOr>,
+    cmp_sgn<ops::Op::BitXor>, cmp_sgn<ops::Op::Shl>, cmp_sgn<ops::Op::Shr>,
+    cmp_sgn<ops::Op::Eq>, cmp_sgn<ops::Op::Neq>, cmp_sgn<ops::Op::Lt>,
+    cmp_sgn<ops::Op::Le>, cmp_sgn<ops::Op::Gt>, cmp_sgn<ops::Op::Ge>,
+    cmp_sgn<ops::Op::Sqrt>, cmp_sgn<ops::Op::Exp>, cmp_sgn<ops::Op::Log>,
+    cmp_sgn<ops::Op::Pow>, cmp_sgn<ops::Op::And>, cmp_sgn<ops::Op::Or>,
+    cmp_sgn<ops::Op::Not>,
+};
+static constexpr CmpFn kCmpUnsTbl[] = {
+    cmp_uns<ops::Op::None>, cmp_uns<ops::Op::Copy>, cmp_uns<ops::Op::Bool>,
+    cmp_uns<ops::Op::Br>, cmp_uns<ops::Op::Call>, cmp_uns<ops::Op::Goto>,
+    cmp_uns<ops::Op::Debugger>, cmp_uns<ops::Op::Return>, cmp_uns<ops::Op::Cast>,
+    cmp_uns<ops::Op::Abs>, cmp_uns<ops::Op::Add>, cmp_uns<ops::Op::Sub>,
+    cmp_uns<ops::Op::Mul>, cmp_uns<ops::Op::Div>, cmp_uns<ops::Op::Mod>,
+    cmp_uns<ops::Op::Max>, cmp_uns<ops::Op::Min>, cmp_uns<ops::Op::Neg>,
+    cmp_uns<ops::Op::Sign>, cmp_uns<ops::Op::BitAnd>, cmp_uns<ops::Op::BitOr>,
+    cmp_uns<ops::Op::BitXor>, cmp_uns<ops::Op::Shl>, cmp_uns<ops::Op::Shr>,
+    cmp_uns<ops::Op::Eq>, cmp_uns<ops::Op::Neq>, cmp_uns<ops::Op::Lt>,
+    cmp_uns<ops::Op::Le>, cmp_uns<ops::Op::Gt>, cmp_uns<ops::Op::Ge>,
+    cmp_uns<ops::Op::Sqrt>, cmp_uns<ops::Op::Exp>, cmp_uns<ops::Op::Log>,
+    cmp_uns<ops::Op::Pow>, cmp_uns<ops::Op::And>, cmp_uns<ops::Op::Or>,
+    cmp_uns<ops::Op::Not>,
+};
+static constexpr CmpFn kCmpFloatTbl[] = {
+    cmp_f<ops::Op::None>, cmp_f<ops::Op::Copy>, cmp_f<ops::Op::Bool>,
+    cmp_f<ops::Op::Br>, cmp_f<ops::Op::Call>, cmp_f<ops::Op::Goto>,
+    cmp_f<ops::Op::Debugger>, cmp_f<ops::Op::Return>, cmp_f<ops::Op::Cast>,
+    cmp_f<ops::Op::Abs>, cmp_f<ops::Op::Add>, cmp_f<ops::Op::Sub>,
+    cmp_f<ops::Op::Mul>, cmp_f<ops::Op::Div>, cmp_f<ops::Op::Mod>,
+    cmp_f<ops::Op::Max>, cmp_f<ops::Op::Min>, cmp_f<ops::Op::Neg>,
+    cmp_f<ops::Op::Sign>, cmp_f<ops::Op::BitAnd>, cmp_f<ops::Op::BitOr>,
+    cmp_f<ops::Op::BitXor>, cmp_f<ops::Op::Shl>, cmp_f<ops::Op::Shr>,
+    cmp_f<ops::Op::Eq>, cmp_f<ops::Op::Neq>, cmp_f<ops::Op::Lt>,
+    cmp_f<ops::Op::Le>, cmp_f<ops::Op::Gt>, cmp_f<ops::Op::Ge>,
+    cmp_f<ops::Op::Sqrt>, cmp_f<ops::Op::Exp>, cmp_f<ops::Op::Log>,
+    cmp_f<ops::Op::Pow>, cmp_f<ops::Op::And>, cmp_f<ops::Op::Or>,
+    cmp_f<ops::Op::Not>,
+};
+
+// 通用数值计算入口：查表直呼（不再 switch）。
 bool compute_int(ops::Op op, Scalar::K k, const Scalar& a, const Scalar& b, Scalar* r) {
-    const bool sgn = k == Scalar::K::Int;
-    const std::int64_t ai = a.i, bi = b.i;
-    const std::uint64_t au = a.u, bu = b.u;
-    std::int64_t ri = 0;
-    switch (op) {
-    case ops::Op::Add: ri = ai + bi; break;
-    case ops::Op::Sub: ri = ai - bi; break;
-    case ops::Op::Mul: ri = ai * bi; break;
-    case ops::Op::Div:
-        if ((sgn && bi == 0) || (!sgn && bu == 0)) return false;
-        ri = sgn ? ai / bi : (std::int64_t)(au / bu);
-        break;
-    case ops::Op::Mod:
-        if ((sgn && bi == 0) || (!sgn && bu == 0)) return false;
-        ri = sgn ? ai % bi : (std::int64_t)(au % bu);
-        break;
-    case ops::Op::Max: ri = sgn ? (ai > bi ? ai : bi) : (std::int64_t)(au > bu ? au : bu); break;
-    case ops::Op::Min: ri = sgn ? (ai < bi ? ai : bi) : (std::int64_t)(au < bu ? au : bu); break;
-    case ops::Op::Neg: ri = -ai; break;
-    case ops::Op::Abs: ri = ai < 0 ? -ai : ai; break;
-    case ops::Op::Sign: ri = ai > 0 ? 1 : ai < 0 ? -1 : 0; break;
-    case ops::Op::BitAnd: ri = ai & bi; break;
-    case ops::Op::BitOr: ri = ai | bi; break;
-    case ops::Op::BitXor: ri = ai ^ bi; break;
-    case ops::Op::Shl: ri = (std::int64_t)(au << (bu & 63)); break;
-    case ops::Op::Shr: ri = sgn ? (ai >> (bu & 63)) : (std::int64_t)(au >> (bu & 63)); break;
-    default: return false;
-    }
+    const auto o = static_cast<std::size_t>(op);
+    if (o >= sizeof kIntTbl / sizeof kIntTbl[0])
+        return false;
     *r = a;
-    if (sgn) {
-        r->i = ri;
-        r->u = (std::uint64_t)ri;
-    } else {
-        r->u = (std::uint64_t)ri;
-        r->i = (std::int64_t)r->u;
+    if (k == Scalar::K::Int) {
+        if (!kIntTbl[o](a, b, r))
+            return false;
+        r->u = (std::uint64_t)r->i;
+        return true;
     }
+    if (!kIntTbl[o](a, b, r))
+        return false;
+    r->u = (std::uint64_t)r->i;
+    r->i = (std::int64_t)r->u;
     return true;
 }
 
 bool compute_float(ops::Op op, double a, double b, double* r) {
-    switch (op) {
-    case ops::Op::Add: *r = a + b; return true;
-    case ops::Op::Sub: *r = a - b; return true;
-    case ops::Op::Mul: *r = a * b; return true;
-    case ops::Op::Div: *r = a / b; return true;
-    case ops::Op::Max: *r = a > b ? a : b; return true;
-    case ops::Op::Min: *r = a < b ? a : b; return true;
-    case ops::Op::Neg: *r = -a; return true;
-    case ops::Op::Abs: *r = a < 0 ? -a : a; return true;
-    case ops::Op::Sign: *r = a > 0 ? 1 : a < 0 ? -1 : 0; return true;
-    case ops::Op::Sqrt: *r = __builtin_sqrt(a); return true;
-    case ops::Op::Exp: *r = __builtin_exp(a); return true;
-    case ops::Op::Log: *r = __builtin_log(a); return true;
-    case ops::Op::Pow: *r = __builtin_pow(a, b); return true;
-    default: return false;
-    }
+    Scalar x, y;
+    x.f = a;
+    y.f = b;
+    Scalar out;
+    const auto o = static_cast<std::size_t>(op);
+    if (o >= sizeof kFloatTbl / sizeof kFloatTbl[0])
+        return false;
+    if (!kFloatTbl[o](x, y, &out))
+        return false;
+    *r = out.f;
+    return true;
 }
 
 bool compare(ops::Op op, Scalar::K k, const Scalar& a, const Scalar& b, bool* out) {
-    if (k == Scalar::K::Int) {
-        switch (op) {
-        case ops::Op::Eq: *out = a.i == b.i; return true;
-        case ops::Op::Neq: *out = a.i != b.i; return true;
-        case ops::Op::Lt: *out = a.i < b.i; return true;
-        case ops::Op::Le: *out = a.i <= b.i; return true;
-        case ops::Op::Gt: *out = a.i > b.i; return true;
-        case ops::Op::Ge: *out = a.i >= b.i; return true;
-        default: return false;
-        }
+    const auto o = static_cast<std::size_t>(op);
+    if (o >= sizeof kCmpSgnTbl / sizeof kCmpSgnTbl[0])
+        return false;
+    switch (k) {
+    case Scalar::K::Int:  *out = kCmpSgnTbl[o](a, b); return true;
+    case Scalar::K::Uint: case Scalar::K::Bool: *out = kCmpUnsTbl[o](a, b); return true;
+    case Scalar::K::Float: *out = kCmpFloatTbl[o](a, b); return true;
+    default: return false;
     }
-    if (k == Scalar::K::Uint || k == Scalar::K::Bool) {
-        switch (op) {
-        case ops::Op::Eq: *out = a.u == b.u; return true;
-        case ops::Op::Neq: *out = a.u != b.u; return true;
-        case ops::Op::Lt: *out = a.u < b.u; return true;
-        case ops::Op::Le: *out = a.u <= b.u; return true;
-        case ops::Op::Gt: *out = a.u > b.u; return true;
-        case ops::Op::Ge: *out = a.u >= b.u; return true;
-        default: return false;
-        }
-    }
-    if (k == Scalar::K::Float) {
-        switch (op) {
-        case ops::Op::Eq: *out = a.f == b.f; return true;
-        case ops::Op::Neq: *out = a.f != b.f; return true;
-        case ops::Op::Lt: *out = a.f < b.f; return true;
-        case ops::Op::Le: *out = a.f <= b.f; return true;
-        case ops::Op::Gt: *out = a.f > b.f; return true;
-        case ops::Op::Ge: *out = a.f >= b.f; return true;
-        default: return false;
-        }
-    }
-    return false;
 }
 
 bool is_cmp(ops::Op op) {

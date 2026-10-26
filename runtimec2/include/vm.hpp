@@ -31,7 +31,8 @@ struct FrameCtx {
     std::string vid;
     int depth = 0;
     std::string frame;    // /vthread/<vid>/[depth]
-    std::string func_dir; // /lib/<name>
+    std::string func_dir;    // /lib/<name>
+    std::string frame_dir_hint;  // 段缓存已持有的函数目录（复用，避免二次构造/查询）
     std::vector<FReg> regs;  // 帧地址表（帧入口一次解析）
 };
 

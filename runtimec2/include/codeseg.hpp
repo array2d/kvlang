@@ -52,4 +52,9 @@ void clear_segment_cache();
 const std::string& op_name(std::uint16_t id);
 std::size_t op_name_count();
 
+// 段缓存双键查询：函数目录 + 指令 s0。找不到/不可执行 → false。
+// 命中时若 *out 非空，写本函数目录段缓存句柄（省调用方第二次按键查）。
+bool cached_insn(const std::string& func_dir, int s0, const CInsn** out,
+                 const Segment** seg_out);
+
 }  // namespace kv::rt

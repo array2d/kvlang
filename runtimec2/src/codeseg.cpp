@@ -153,6 +153,23 @@ const Segment* cached_segment(void* h, const std::string& func_dir) {
     return &res.first->second;
 }
 
+bool cached_insn(const std::string& func_dir, int s0, const CInsn** out,
+                 const Segment** seg_out) {
+    auto& c = cache();
+    auto it = c.find(func_dir);
+    if (it == c.end())
+        return false;  // 未缓存：交给调用方走 cached_segment 补建
+    const Segment& seg = it->second;
+    const auto i = s0 - 1;
+    if (i < 0 || i >= static_cast<int>(seg.insns.size()))
+        return false;
+    if (out)
+        *out = &seg.insns[static_cast<std::size_t>(i)];
+    if (seg_out)
+        *seg_out = &seg;
+    return true;
+}
+
 void clear_segment_cache() { cache().clear(); }
 
 }  // namespace kv::rt
