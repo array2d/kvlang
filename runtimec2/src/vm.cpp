@@ -509,35 +509,29 @@ const char* kind_name(Scalar::K k, std::uint8_t width) {
     }
 }
 
-// ── int64 快路径算术表：opfn → (a,b)->i64。Div/Mod 的除零检查走 0 哨兵。
-static inline std::int64_t fast_add(std::int64_t a, std::int64_t b) { return a + b; }
-static inline std::int64_t fast_sub(std::int64_t a, std::int64_t b) { return a - b; }
-static inline std::int64_t fast_mul(std::int64_t a, std::int64_t b) { return a * b; }
-static inline std::int64_t fast_div(std::int64_t a, std::int64_t b) { return b ? a / b : 0; }
-static inline std::int64_t fast_mod(std::int64_t a, std::int64_t b) { return b ? a % b : 0; }
-static inline std::int64_t fast_max(std::int64_t a, std::int64_t b) { return a > b ? a : b; }
-static inline std::int64_t fast_min(std::int64_t a, std::int64_t b) { return a < b ? a : b; }
-static inline std::int64_t fast_and(std::int64_t a, std::int64_t b) { return a & b; }
-static inline std::int64_t fast_or(std::int64_t a, std::int64_t b) { return a | b; }
-static inline std::int64_t fast_xor(std::int64_t a, std::int64_t b) { return a ^ b; }
-static inline std::int64_t fast_shl(std::int64_t a, std::int64_t b) { return (std::int64_t)((std::uint64_t)a << (b & 63)); }
-static inline std::int64_t fast_shr(std::int64_t a, std::int64_t b) { return a >> (b & 63); }
-
-// 比较：返回 1/0（bool 结果，直写 bool 槽）。
-static inline std::int64_t fast_eq(std::int64_t a, std::int64_t b) { return a == b; }
-static inline std::int64_t fast_neq(std::int64_t a, std::int64_t b) { return a != b; }
-static inline std::int64_t fast_lt(std::int64_t a, std::int64_t b) { return a < b; }
-static inline std::int64_t fast_le(std::int64_t a, std::int64_t b) { return a <= b; }
-static inline std::int64_t fast_gt(std::int64_t a, std::int64_t b) { return a > b; }
-static inline std::int64_t fast_ge(std::int64_t a, std::int64_t b) { return a >= b; }
-
-using I64Fn = std::int64_t (*)(std::int64_t, std::int64_t);
-static constexpr I64Fn kFastI64Tbl[] = {
-    nullptr,
-    fast_add, fast_sub, fast_mul, fast_div, fast_mod, fast_max, fast_min,
-    fast_and, fast_or, fast_xor, fast_shl, fast_shr,
-    fast_eq, fast_neq, fast_lt, fast_le, fast_gt, fast_ge,
-};
+// ── int64 快路径：模板特化（编译期内联单指令，无函数指针间接跳）。
+template <std::uint8_t O>
+static inline std::int64_t fast_i64(std::int64_t a, std::int64_t b) {
+    if constexpr (O == 1)  return a + b;                        // Add
+    if constexpr (O == 2)  return a - b;                        // Sub
+    if constexpr (O == 3)  return a * b;                        // Mul
+    if constexpr (O == 4)  return b ? a / b : 0;                // Div（0 哨兵）
+    if constexpr (O == 5)  return b ? a % b : 0;                // Mod
+    if constexpr (O == 6)  return a > b ? a : b;                // Max
+    if constexpr (O == 7)  return a < b ? a : b;                // Min
+    if constexpr (O == 8)  return a & b;                        // BitAnd
+    if constexpr (O == 9)  return a | b;                        // BitOr
+    if constexpr (O == 10) return a ^ b;                        // BitXor
+    if constexpr (O == 11) return (std::int64_t)((std::uint64_t)a << (b & 63)); // Shl
+    if constexpr (O == 12) return a >> (b & 63);                // Shr
+    if constexpr (O == 13) return a == b ? 1 : 0;               // Eq
+    if constexpr (O == 14) return a != b ? 1 : 0;               // Neq
+    if constexpr (O == 15) return a < b ? 1 : 0;                // Lt
+    if constexpr (O == 16) return a <= b ? 1 : 0;               // Le
+    if constexpr (O == 17) return a > b ? 1 : 0;                // Gt
+    if constexpr (O == 18) return a >= b ? 1 : 0;               // Ge
+    return 0;
+}
 
 // ── 模板化值计算：switch(Op) → template<Op> constexpr（编译期内联单指令）。
 // 返回 false = 该 op 不支持此操作数（Zero 检查失败等）。
@@ -1220,6 +1214,15 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
             if (got) {
                 std::int64_t rv = 0;
                 bool ok2 = true;
+                // 模板分派：每个 case 内联成单指令（除 Div/Mod 的 0 哨兵）。
+                switch (ins.opfn) {
+#define C2_FAST_CASE(O) case O: rv = fast_i64<O>(a, b); break
+                C2_FAST_CASE(1);  C2_FAST_CASE(2);  C2_FAST_CASE(3);
+                C2_FAST_CASE(4);  C2_FAST_CASE(5);  C2_FAST_CASE(6);
+                C2_FAST_CASE(7);  C2_FAST_CASE(8);  C2_FAST_CASE(9);
+                C2_FAST_CASE(10); C2_FAST_CASE(11); C2_FAST_CASE(12);
+                default: break;
+                }
                 if (ins.opfn <= 12) {
                     if (ins.opfn == 4 || ins.opfn == 5) {
                         if (b == 0) {
@@ -1227,7 +1230,6 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                             return RunResult::Error;
                         }
                     }
-                    rv = kFastI64Tbl[ins.opfn](a, b);
                     FReg &w = f.regs[ins.wr[0]];
                     if (w.fast_i64) {
                         std::uint8_t *wb = nullptr;
@@ -1243,9 +1245,14 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                         ok2 = slot_write_i64(f, ins.wr[0], rv);
                     }
                 } else {
-                    rv = kFastI64Tbl[ins.opfn](a, b);
+                    switch (ins.opfn) {
+                    C2_FAST_CASE(13); C2_FAST_CASE(14); C2_FAST_CASE(15);
+                    C2_FAST_CASE(16); C2_FAST_CASE(17); C2_FAST_CASE(18);
+                    default: break;
+                    }
                     ok2 = slot_write_bool(f, ins.wr[0], rv != 0);
                 }
+#undef C2_FAST_CASE
                 if (g_prof_on) {
                     const std::uint64_t dh = now() - t0;
                     g_prof.handler += dh;
