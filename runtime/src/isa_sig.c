@@ -311,7 +311,7 @@ static const kvlangIsaSig isa_sig[] = {
 
 _Static_assert(sizeof(isa_sig) / sizeof(isa_sig[0]) == 300,
                "P1b1: isa_sig must have 300 rows (core 237 + ext 63)");
-/* 与 myrwircaps 的对齐由 kvlangIsaPublishCore 的运行期 route==nsig 校验兜底。 */
+/* 新架构：签名声明由 layout/扩展写 /‥isa/<folded-op>；本表只服务 runtime 自身的 typed_core 判定。 */
 
 __attribute__((visibility("hidden"))) const kvlangIsaSig *
 kvlangIsaSigs(uint32_t *n_out) {

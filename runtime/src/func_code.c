@@ -228,11 +228,6 @@ fail:
 static kvlangCodeRow_t *row_ensure(kvspace_t *kv, kvlangFrameCtx_t *ctx, int s0,
                                    char *err, uint32_t err_cap) {
     kvlangFuncCode_t *code = ctx->code;
-    /* P1a：函数首次加载行时校验 layout 记录的 ISA hash；rows_cap 非零后
-     * 不再重复（每函数一次）。失败经既有 decode 错误路径上报。 */
-    if (code->rows_cap == 0 &&
-        kvlangIsaCheck(kv, code->func_dir, err, err_cap) != 0)
-        return NULL;
     if ((size_t)s0 < code->rows_cap && code->rows[s0])
         return code->rows[s0];
     kvlangCodeRow_t *row = row_load(kv, code, s0, err, err_cap);
