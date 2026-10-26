@@ -90,6 +90,19 @@ bool build(void* h, const std::string& func_dir, Segment* out) {
             ins.kind = e->kind;
             ins.width = e->width;
             ins.impl = e->impl;
+            if (e->kind == ops::Kind::Int && e->width == 8) {
+                switch (e->op) {
+                case ops::Op::Add: case ops::Op::Sub: case ops::Op::Mul:
+                case ops::Op::Div: case ops::Op::Mod: case ops::Op::Max:
+                case ops::Op::Min: case ops::Op::BitAnd: case ops::Op::BitOr:
+                case ops::Op::BitXor: case ops::Op::Shl: case ops::Op::Shr:
+                case ops::Op::Eq: case ops::Op::Neq: case ops::Op::Lt:
+                case ops::Op::Le: case ops::Op::Gt: case ops::Op::Ge:
+                    ins.fast_i64 = true;
+                    break;
+                default: break;
+                }
+            }
         }
         if (ins.impl == ops::Impl::Handoff) {
             out->insns.push_back(ins);

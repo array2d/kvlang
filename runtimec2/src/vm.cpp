@@ -312,6 +312,47 @@ bool read_i64(FrameCtx& f, std::uint8_t idx, std::int64_t* out) {
 }
 
 const char* kind_name(Scalar::K k, std::uint8_t width);
+bool slot_write_scalar(FrameCtx& f, std::uint8_t idx, const Scalar& s,
+                       std::uint8_t width);
+
+// 专用直写 int64：缓存命中（Int/8）时免 Scalar 装箱、免 kind 判定，纯 8 字节 memcpy。
+bool slot_write_i64(FrameCtx& f, std::uint8_t idx, std::int64_t v) {
+    FReg& fr = f.regs[idx];
+    std::uint8_t* body = nullptr;
+    std::uint64_t cap = 0;
+    if (fr.sc_ok && fr.sck == Scalar::K::Int && fr.scw == 8 &&
+        reg_body(f, idx, &body, &cap) && body && cap >= 8) {
+        std::memcpy(body, &v, 8);
+        if (g_prof_on)
+            g_prof.w_fast++;
+        return true;
+    }
+    Scalar s{};
+    s.k = Scalar::K::Int;
+    s.width = 8;
+    s.i = v;
+    s.u = (std::uint64_t)v;
+    return slot_write_scalar(f, idx, s, 8);
+}
+
+// 专用直写 bool：同理，1 字节。
+bool slot_write_bool(FrameCtx& f, std::uint8_t idx, bool b) {
+    FReg& fr = f.regs[idx];
+    std::uint8_t* body = nullptr;
+    std::uint64_t cap = 0;
+    if (fr.sc_ok && fr.sck == Scalar::K::Bool && fr.scw == 1 &&
+        reg_body(f, idx, &body, &cap) && body && cap >= 1) {
+        *body = b ? 1 : 0;
+        if (g_prof_on)
+            g_prof.w_fast++;
+        return true;
+    }
+    Scalar s{};
+    s.k = Scalar::K::Bool;
+    s.width = 1;
+    s.u = b ? 1 : 0;
+    return slot_write_scalar(f, idx, s, 1);
+}
 
 bool slot_write_scalar(FrameCtx& f, std::uint8_t idx, const Scalar& s,
                        std::uint8_t width) {
@@ -1067,17 +1108,13 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
             continue;
         }
         // 快路径：int64×int64（iops 热循环主力），不经 Scalar/通用 switch。
-        if (ins.kind == ops::Kind::Int && ins.width == 8 && ins.nrd == 2 &&
-            ins.op != ops::Op::Pow && ins.op != ops::Op::Sqrt &&
-            ins.op != ops::Op::Exp && ins.op != ops::Op::Log) {
+        // fast_i64 由 build_segment 预标，每步只判一位。
+        if (ins.fast_i64) {
             std::int64_t a = 0, b = 0;
             if (read_i64(f, ins.rd[0], &a) && read_i64(f, ins.rd[1], &b)) {
                 const unsigned long long thl = g_prof_on ? now() : 0;
                 std::int64_t rv = 0;
-                Scalar out{};
                 bool ok2 = true, is_bool = false;
-                out.k = Scalar::K::Int;
-                out.width = 8;
                 switch (ins.op) {
                 case ops::Op::Add: rv = a + b; break;
                 case ops::Op::Sub: rv = a - b; break;
@@ -1105,20 +1142,15 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                              : ins.op == ops::Op::Le ? a <= b
                              : ins.op == ops::Op::Gt ? a > b
                                                      : a >= b;
-                    out.k = Scalar::K::Bool;
-                    out.width = 1;
-                    out.u = c ? 1 : 0;
                     is_bool = true;
+                    rv = c ? 1 : 0;
                     break;
                 }
                 default: ok2 = false; break;
                 }
                 if (ok2) {
-                    if (!is_bool) {
-                        out.i = rv;
-                        out.u = (std::uint64_t)rv;
-                    }
-                    ok2 = slot_write_scalar(f, ins.wr[0], out, out.width);
+                    ok2 = is_bool ? slot_write_bool(f, ins.wr[0], rv != 0)
+                                  : slot_write_i64(f, ins.wr[0], rv);
                     if (g_prof_on) {
                         const std::uint64_t dh = now() - thl;
                         g_prof.handler += dh;

@@ -32,6 +32,7 @@ struct CInsn {
     std::string name;    // opcode 原文（Native 分派用）
     std::string callee;  // call：被调函数名
     std::uint16_t prof_id = 0;  // 进程级 opcode 名表下标（分段计时用）
+    bool fast_i64 = false;      // 快路径候选：Typed int64 二目二元 op（iops 热循环）
     ops::Impl impl = ops::Impl::None;
 };
 
