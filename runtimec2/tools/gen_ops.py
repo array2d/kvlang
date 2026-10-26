@@ -8,9 +8,17 @@
 - policy：no-malloc 口径，base 174 / complex 126；
 - impl：执行方式，Typed 166 / Control 7 / Dynamic 52 / Handoff 75。
 """
+import os
 import sys
 
-FIXTURE_DEFAULT = "../layout/tests/fixtures/isa_native.txt"
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
+
+# 清单位置（#507 后迁到 stdlib）；两级都缺即失败，不静默跳过。
+FIXTURE_CANDIDATES = [
+    os.path.join(ROOT, "stdlib/kvlang/spec/isa/native.txt"),
+    os.path.join(ROOT, "layout/tests/fixtures/isa_native.txt"),
+]
 
 KIND = {
     "int8": ("Int", 1), "int16": ("Int", 2), "int32": ("Int", 4), "int64": ("Int", 8),
@@ -95,7 +103,12 @@ def classify(name):
 
 
 def main():
-    fixture = sys.argv[1] if len(sys.argv) > 1 else FIXTURE_DEFAULT
+    if len(sys.argv) > 1:
+        fixture = sys.argv[1]
+    else:
+        fixture = next((p for p in FIXTURE_CANDIDATES if os.path.isfile(p)), None)
+        if not fixture:
+            sys.exit("native list not found: " + ", ".join(FIXTURE_CANDIDATES))
     names = []
     with open(fixture, "r", encoding="utf-8") as f:
         for line in f:

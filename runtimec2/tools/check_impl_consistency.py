@@ -33,8 +33,8 @@ def main():
     bad = []
     for r in rows:
         name = r["name"]
-        cls, op, kind, w = gen.classify(name)
-        want = gen.impl_of(cls, op).split("::", 1)[1]
+        cls, op, kind, w, impl = gen.classify(name)
+        want = impl.split("::", 1)[1]
         got = (r.get("impl") or "").strip()
         if got and got != want:
             bad.append((name, got, want))
