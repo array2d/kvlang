@@ -1,0 +1,140 @@
+#include "valueio.hpp"
+
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <string_view>
+
+#include <kvspace/kvspace.h>
+#include <kvspace/xvalue_head.h>
+
+namespace kv::rt {
+namespace {
+
+std::string keyz(std::string_view k) { return std::string(k); }
+
+void put_utf8(std::string* out, std::uint32_t cp) {
+    if (cp < 0x80) {
+        out->push_back(static_cast<char>(cp));
+    } else if (cp < 0x800) {
+        out->push_back(static_cast<char>(0xC0 | (cp >> 6)));
+        out->push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+    } else if (cp < 0x10000) {
+        out->push_back(static_cast<char>(0xE0 | (cp >> 12)));
+        out->push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+        out->push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+    } else {
+        out->push_back(static_cast<char>(0xF0 | (cp >> 18)));
+        out->push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
+        out->push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+        out->push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+    }
+}
+
+bool langtype_has(const kvspaceXh& xh, std::string_view what) {
+    return std::string_view(reinterpret_cast<const char*>(xh.langtype), xh.langtype_len)
+               .find(what) != std::string_view::npos;
+}
+
+}  // namespace
+
+bool read_wire(void* h, std::string_view key, const std::uint8_t** data,
+               std::uint32_t* len) noexcept {
+    *data = nullptr;
+    *len = 0;
+    auto k = keyz(key);
+    std::uint8_t* d = nullptr;
+    std::uint32_t n = 0;
+    if (kvspaceGet(h, k.c_str(), 1, &d, &n) != 0)
+        return false;
+    *data = d;
+    *len = n;
+    return d != nullptr && n > 0;
+}
+
+bool read_text(void* h, std::string_view key, std::string* out) noexcept {
+    const std::uint8_t* d = nullptr;
+    std::uint32_t n = 0;
+    if (!read_wire(h, key, &d, &n))
+        return false;
+    kvspaceXh xh{};
+    if (kvspaceXhDecode(d, n, &xh) != 0)
+        return false;
+    out->clear();
+    if (langtype_has(xh, "char/utf32")) {
+        const auto* p = reinterpret_cast<const std::uint32_t*>(xh.body);
+        for (std::uint64_t i = 0; i < xh.content_len / 4; i++)
+            put_utf8(out, p[i]);
+        return true;
+    }
+    out->assign(reinterpret_cast<const char*>(xh.body), xh.content_len);
+    return true;
+}
+
+bool write_text(void* h, std::string_view key, std::string_view text) noexcept {
+    const std::int32_t dims[1] = {static_cast<std::int32_t>(text.size())};
+    std::uint8_t* buf = nullptr;
+    std::uint32_t len = 0;
+    if (kvspaceXvalueEncode("char/utf8",
+                            reinterpret_cast<const std::uint8_t*>(text.data()),
+                            static_cast<std::uint32_t>(text.size()), dims, 1, &buf,
+                            &len) != 0 ||
+        !buf)
+        return false;
+    auto k = keyz(key);
+    char err[192] = {};
+    int rc = kvspaceSetValue(h, k.c_str(), buf, len, 0, 0, err, sizeof err);
+    std::free(buf);
+    return rc == 0;
+}
+
+bool read_rwir(void* h, std::string_view key, std::string* op, int* nr,
+               int* nw) noexcept {
+    const std::uint8_t* d = nullptr;
+    std::uint32_t n = 0;
+    if (!read_wire(h, key, &d, &n))
+        return false;
+    kvspaceXh xh{};
+    if (kvspaceXhDecode(d, n, &xh) != 0)
+        return false;
+    if (xh.langtype_len != 4 || std::memcmp(xh.langtype, "rwir", 4) != 0)
+        return false;
+    if (!xh.body || xh.content_len < 5)
+        return false;
+    const std::uint8_t* b = xh.body;
+    *nr = static_cast<int>(b[0] | (b[1] << 8));
+    *nw = static_cast<int>(b[2] | (b[3] << 8));
+    op->assign(reinterpret_cast<const char*>(b + 5),
+               static_cast<std::size_t>(xh.content_len - 5));
+    return true;
+}
+
+bool frame_func_dir(void* h, std::string_view vid, int depth, std::string* out) noexcept {
+    std::string key = "/vthread/";
+    key.append(vid);
+    key += "/[";
+    key += std::to_string(depth);
+    key += "]/\xE2\x80\xA5lib";
+    out->clear();
+    return read_text(h, key, out) && !out->empty();
+}
+
+bool read_int(void* h, std::string_view key, std::int64_t* out) noexcept {
+    std::string s;
+    if (!read_text(h, key, &s) || s.empty())
+        return false;
+    char* end = nullptr;
+    long long v = std::strtoll(s.c_str(), &end, 10);
+    if (end == s.c_str())
+        return false;
+    *out = v;
+    return true;
+}
+
+bool write_int(void* h, std::string_view key, std::int64_t v) noexcept {
+    char buf[32];
+    std::snprintf(buf, sizeof buf, "%lld", static_cast<long long>(v));
+    return write_text(h, key, buf);
+}
+
+}  // namespace kv::rt
