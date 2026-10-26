@@ -317,6 +317,10 @@ fn drive(eng: &Engine, funcname: &str) {
 /// 从 kvspace 里 vid 的持久化 pc 续跑到结束（崩溃恢复入口，与 drive 共用循环，不 bootstrap）。
 fn drive_vid(eng: &Engine, vid: &str) {
     let (rt, kv) = (eng.rt, eng.kv);
+    let mut guard_pc: Option<String> = None;
+    let mut guard_st = String::new();
+    let mut guard_n = 0u32;
+    let mut guard_ran = false;
 
     loop {
         let mut pc: *mut c_char = null_mut();
@@ -332,8 +336,29 @@ fn drive_vid(eng: &Engine, vid: &str) {
             std::process::exit(1);
         }
 
+        let st_before = eng.get_kv(&format!("/vthread/{vid}/\u{2025}status"));
+        let c0 = take(pc);
+
+        // 无进展闸门：runtime 回到同一 pc、期间没派发任何就地 op、状态也没变 → 空转。
+        let same = guard_pc.as_deref() == Some(c0.as_str()) && !guard_ran
+                   && guard_st == st_before;
+        guard_n = if same { guard_n + 1 } else { 0 };
+        guard_pc = Some(c0.clone());
+        guard_st = st_before;
+        guard_ran = false;
+        if guard_n >= 3 {
+            let op_at = take(unsafe { kvlangRwirextParams(kv, cs(&c0).as_ptr()) });
+            let op_at = op_at.lines().next().unwrap_or("").to_string();
+            let msg = eng.get_kv(&format!("/vthread/{vid}/\u{2025}msg"));
+            kvlang_rs::elog!(
+                "op '{op_at}' not implemented by any runtime (Handoff): pc 连续 \
+                 3 次未推进 @ {c0} status={guard_st} {msg}"
+            );
+            std::process::exit(1);
+        }
+
         // 连续批处理就地 rwir（print/json/http/kvlayout/input），遇非就地指令停下。
-        let mut c = take(pc);
+        let mut c = c0.clone();
         let stop_op = loop {
             let params = take(unsafe { kvlangRwirextParams(kv, cs(&c).as_ptr()) });
             let op = params.split('\n').next().unwrap_or("").to_string();
@@ -341,13 +366,24 @@ fn drive_vid(eng: &Engine, vid: &str) {
                 break op;
             }
             rwir::dispatch(eng, &op, &c);
-            c = take(unsafe { kvlangRwirextNextPc(cs(&c).as_ptr()) });
+            guard_ran = true;
+            let nxt = take(unsafe { kvlangRwirextNextPc(cs(&c).as_ptr()) });
+            // 就地派发可能跳到子 vthread：接下来停在的 pc 属谁，就推进谁的‥pc。
+            let nsub = nxt.split('/').nth(2).unwrap_or(vid);
+            eng.set_kv(&format!("/vthread/{nsub}/\u{2025}pc"), &nxt);
+            c = nxt;
         };
 
         // pc 可能属子 vthread（native vthread·run 冒泡上来）：目标 vid 一律由 pc 导出，非固定主 vid。
         let sub = c.split('/').nth(2).unwrap_or(vid);
-        // 停在本 myrwircaps 内的 op：handoff；native/控制帧/帧结束：写回 pc 让 runtime 继续。
-        if !stop_op.is_empty() && rwir::in_myrwircaps(&stop_op) {
+
+        // 路由：本 myrwircaps 或已登记扩展（/lib/<op>/vids）→ handoff；
+        // 其余写回 pc 交给 runtime 自己执行（native/控制帧/帧结束都走这条）。
+        // 无人认领的 op 由上面的"无进展"闸门在 3 次空转内硬错，不无限空转。
+        let claimed = !stop_op.is_empty()
+            && (rwir::in_myrwircaps(&stop_op)
+                || eng.kv_exists(&format!("/lib/{stop_op}/vids")));
+        if claimed {
             if unsafe { kvlangRwirextHandoff(kv, cs(sub).as_ptr(), cs(&c).as_ptr()) } != 0 {
                 kvlang_rs::elog!("handoff {stop_op} 失败 @ {c}");
                 std::process::exit(1);

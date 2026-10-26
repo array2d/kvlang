@@ -279,6 +279,7 @@ pub fn in_myrwircaps(op: &str) -> bool {
 
 /// 主导驱动循环遇到就地 rwir 时分派。
 pub fn dispatch(eng: &Engine, op: &str, pc: &str) {
+    let _ = (eng, op, pc);  // 本帧中不再修改 guard_ran
     match op {
         "print" | "println" | "cerr" => term::print_line(eng, pc),
         "printf" => term::printf(eng, pc),
