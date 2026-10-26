@@ -20,8 +20,6 @@ kvspace_t *kvlangKvspaceConnect(const char *dsn) {
 void kvlangKvspaceDisconnect(kvspace_t *k) {
     if (!k)
         return;
-    if (k->isa_handle && !k->isa_shared)
-        kvspaceClose(k->isa_handle);
     if (k->handle)
         kvspaceClose(k->handle);
     free(k);

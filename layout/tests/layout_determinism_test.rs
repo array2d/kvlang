@@ -18,6 +18,9 @@ fn tree(dir: &Path) -> Vec<(String, Vec<u8>)> {
         ents.sort_by_key(|e| e.file_name());
         for e in ents {
             let p = e.path();
+            if p.file_name().is_some_and(|n| n == "‥ctime") {
+                continue;
+            }
             if p.is_dir() {
                 walk(base, &p, out);
             } else {
@@ -36,8 +39,8 @@ fn tree(dir: &Path) -> Vec<(String, Vec<u8>)> {
 #[test]
 fn layout_is_deterministic_across_processes() {
     let bin = env!("CARGO_BIN_EXE_kvlanglayout");
-    let src = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../benchmark/cases/nqueens/nqueens.kv");
+    let src =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../benchmark/cases/nqueens/nqueens.kv");
     let pid = std::process::id();
     let mut first: Option<Vec<(String, Vec<u8>)>> = None;
     for run in 0..16 {

@@ -42,7 +42,7 @@ kind        = "bool"
             | "struct"
             | "rwir" | "rwfunc" | "time" | "duration"
               (* 标注可用 kind 白名单（layout known_kind）。rwfunc 兼作用户函数签名槽 kind；
-                 def rwir 是 /lib/<op> 路由头（rwir 统一调度入口，仅存于 /lib/ 目录），不在标注白名单。
+                 def rwir 是 /‥isa/<folded-op> 路由头（rwir 统一调度入口），不在标注白名单。
                  无 def rwfunc：rwfunc 有 kvlang 实现体（一串 rwir 指令槽），可被 main-runtime 直接解释执行，无需路由头（见 [[总体方案]]）。
                  `object`/`scope` 彻底删除，无此种类名（见 [[总体方案]]）；异构命名容器一律 struct。
                  目录成员由物理 key 前缀枚举，`index`/`extindex` 不再是 XValue 类型；

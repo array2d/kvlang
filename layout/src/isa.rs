@@ -1,13 +1,10 @@
-//! ISA registry（P1a）：控制面独立 kvspace。读 runtime-c 发布的
-//! `/‥isa/‥core`/`‥meta`，校验 hash，并在 `/‥isa/func<func-path>` 写 isa-ref。
-//! 数据 store 不写任何 ISA key。
-//!
-//! 按裁决 C：manifest/meta/isa-ref 均以现有 `[n]char/utf8` SLACK 存储；
-//! 内容（多行文本）才是语义来源，langtype 只是传输标签。
+//! ISA declarations：native opcode 与扩展同形，统一落在
+//! `/lib/<op>` 的 `def rwir` 明文节点；layout 只写/读这份声明，
+//! 不再消费 runtime 的 `/‥isa/‥core` manifest。
 
 use crate::ffi::{self, Kv};
-use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use crate::{keytree, kvkind};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 #[derive(Clone, Debug)]
 pub struct Entry {
@@ -25,7 +22,6 @@ pub struct Entry {
 }
 
 impl Entry {
-    /// 具体槽类型（非 any、非变参尾）。
     pub fn concrete(&self, i: usize, write: bool) -> Option<&str> {
         let t = if write {
             self.wp.get(i)
@@ -41,178 +37,205 @@ impl Entry {
 }
 
 pub struct Isa {
-    pub ver: u32,
-    pub count: u32,
-    pub hash: String,
     pub entries: HashMap<String, Entry>,
+    pub folded: BTreeMap<String, String>,
 }
 
-fn text_of(kv: &mut Kv, key: &str) -> Option<String> {
-    let v = kv.isa_get_one(key);
-    if v.is_empty() || ffi::xh_is_none(&v) {
+/// native ISA 作者清单：只供 layout 生成 `/‥isa` 声明；runtime 不读。
+const NATIVE: &str = include_str!("../tests/fixtures/isa_native.txt");
+
+fn parse_native() -> Result<Vec<Entry>, String> {
+    let mut out = Vec::new();
+    for (n, line) in NATIVE.lines().enumerate() {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line.starts_with("ver\t") || line.starts_with("count\t") || line.starts_with("hash\t") {
+            continue;
+        }
+        let cols: Vec<&str> = line.split('\t').collect();
+        if cols.len() < 6 {
+            return Err(format!("native ISA record {} field count", n + 1));
+        }
+        let nr: u32 = cols[1].parse().map_err(|_| "native ISA nr".to_string())?;
+        let nw: u32 = cols[2].parse().map_err(|_| "native ISA nw".to_string())?;
+        let base = 4 + nr as usize + nw as usize;
+        if cols.len() < base {
+            return Err(format!("native ISA record {} arity", n + 1));
+        }
+        out.push(Entry {
+            opcode: cols[0].to_string(),
+            nr,
+            nw,
+            dynamic: cols[3] == "1",
+            rp: cols[4..4 + nr as usize]
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect(),
+            wp: cols[4 + nr as usize..base]
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect(),
+            storetype: cols.get(base).and_then(|s| s.parse().ok()).unwrap_or(-1),
+            headlen: cols
+                .get(base + 1)
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(-1),
+            width: cols
+                .get(base + 2)
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(-1),
+            class: "core".to_string(),
+            line: line.to_string(),
+        });
+    }
+    Ok(out)
+}
+
+fn wire_type(t: &str) -> &str {
+    if t == "any" || t.ends_with("...") {
+        "*"
+    } else {
+        t
+    }
+}
+
+fn read_def(kv: &mut Kv, op: &str, class: &str) -> Option<Entry> {
+    let d = kv.get_one(&keytree::isa_op(op));
+    if kvkind::kind(&d) != kvkind::KIND_DEF_RWIR {
         return None;
     }
-    Some(String::from_utf8_lossy(ffi::xh_body_slice(&v)).into_owned())
+    let b = ffi::xh_body_slice(&d);
+    if b.len() < 5 {
+        return None;
+    }
+    let nr = u16::from_le_bytes([b[0], b[1]]) as usize;
+    let nw = u16::from_le_bytes([b[2], b[3]]) as usize;
+    let mut rp = Vec::with_capacity(nr);
+    let mut wp = Vec::with_capacity(nw);
+    for j in 0..nr + nw {
+        let x = if j < nr {
+            -(j as i64 + 1)
+        } else {
+            (j - nr) as i64 + 1
+        };
+        let p = kv.get_one(&format!("{}/[0,{}]", keytree::isa_op(op), x));
+        let mut ty = String::from_utf8_lossy(ffi::xh_body_slice(&p)).into_owned();
+        if ty == "*" {
+            ty = "any".to_string();
+        }
+        if j < nr {
+            rp.push(ty);
+        } else {
+            wp.push(ty);
+        }
+    }
+    Some(Entry {
+        opcode: op.to_string(),
+        nr: nr as u32,
+        nw: nw as u32,
+        dynamic: b[4] != 0,
+        rp,
+        wp,
+        storetype: -1,
+        headlen: -1,
+        width: -1,
+        class: class.to_string(),
+        line: String::new(),
+    })
 }
 
-fn hex16(data: &[u8]) -> String {
-    let d = Sha256::digest(data);
-    d[..16].iter().map(|b| format!("{b:02x}")).collect()
+fn ensure_native(kv: &mut Kv, e: &Entry) -> Result<(), String> {
+    let key = keytree::isa_op(&e.opcode);
+    let cur = kv.get_one(&key);
+    let k = kvkind::kind(&cur);
+    if k == kvkind::KIND_DEF_RWIR {
+        return Ok(());
+    }
+    if !cur.is_empty() {
+        return Err(format!(
+            "ISA: native opcode {} is already defined as {k}",
+            e.opcode
+        ));
+    }
+    let mut pairs = vec![(
+        key.clone(),
+        kvkind::new_defrwir(e.nr as i32, e.nw as i32, e.dynamic),
+    )];
+    for (j, t) in e.rp.iter().enumerate() {
+        pairs.push((
+            format!("{key}/[0,-{}]", j + 1),
+            kvkind::new_def_langtype(wire_type(t)),
+        ));
+    }
+    for (j, t) in e.wp.iter().enumerate() {
+        pairs.push((
+            format!("{key}/[0,{}]", j + 1),
+            kvkind::new_def_langtype(wire_type(t)),
+        ));
+    }
+    kv.set(&pairs)
+        .map_err(|err| format!("ISA: write native {}: {err}", e.opcode))
 }
 
 impl Isa {
+    /// 写/读 native 声明；native 与扩展同形，均以 `/lib/<op>` 为唯一来源。
     pub fn load(kv: &mut Kv) -> Result<Isa, String> {
-        let meta = text_of(kv, "/‥isa/‥meta")
-            .ok_or_else(|| "ISA registry missing: no /‥isa/‥meta".to_string())?;
-        let core = text_of(kv, "/‥isa/‥core")
-            .ok_or_else(|| "ISA manifest missing: runtime-c".to_string())?;
-        let mut lines = core.lines();
-        let ver = parse_kv(lines.next(), "ver")?;
-        let count: u32 = parse_kv(lines.next(), "count")?;
-        let hash = parse_field(lines.next(), "hash")?;
-        let records: Vec<&str> = lines.collect();
-        if records.len() as u32 != count {
-            return Err(format!(
-                "ISA manifest count mismatch: header {count}, records {}",
-                records.len()
-            ));
+        let native = parse_native()?;
+        let mut folded = BTreeMap::new();
+        for e in &native {
+            let path = keytree::isa_op(&e.opcode);
+            if let Some(prev) = folded.insert(path.clone(), e.opcode.clone()) {
+                return Err(format!(
+                    "ISA op path conflict: {prev} and {} -> {path}",
+                    e.opcode
+                ));
+            }
         }
-        let mut region = String::new();
-        for r in &records {
-            region.push_str(r);
-            region.push('\n');
-        }
-        let got = hex16(region.as_bytes());
-        if got != hash {
-            return Err("ISA manifest hash mismatch".to_string());
-        }
-        let meta_hash = parse_field(meta.lines().find(|l| l.starts_with("hash\t")), "hash")?;
-        if meta_hash != hash {
-            return Err("ISA manifest hash mismatch".to_string());
+        let _ = kv.mkindex("/‥isa/");
+        for e in &native {
+            ensure_native(kv, e)?;
         }
         let mut entries = HashMap::new();
-        let mut prev: Option<&str> = None;
-        for r in &records {
-            let cols: Vec<&str> = r.split('\t').collect();
-            if cols.len() < 4 {
-                return Err("ISA manifest field count".to_string());
+        for e in native {
+            let got = read_def(kv, &e.opcode, "core").unwrap_or(e);
+            entries.insert(got.opcode.clone(), got);
+        }
+        Ok(Isa { entries, folded })
+    }
+
+    pub fn is_native(&self, op: &str) -> bool {
+        self.entries.get(op).is_some_and(|e| e.class == "core")
+    }
+
+    /// 把本次函数实际发射、尚未加载的 opcode 从 `/isa` 读入。
+    pub fn ensure_ops(&mut self, kv: &mut Kv, ops: &BTreeSet<String>) -> Result<(), String> {
+        for op in ops {
+            if self.entries.contains_key(op) {
+                continue;
             }
-            let nr: u32 = cols[1].parse().map_err(|_| "ISA manifest nr".to_string())?;
-            let nw: u32 = cols[2].parse().map_err(|_| "ISA manifest nw".to_string())?;
-            if cols.len() != 11 + nr as usize + nw as usize {
-                return Err("ISA manifest field count".to_string());
-            }
-            if let Some(p) = prev {
-                if p.as_bytes() >= cols[0].as_bytes() {
-                    return Err("ISA manifest not sorted/duplicate".to_string());
+            let path = keytree::isa_op(op);
+            if let Some(prev) = self.folded.insert(path.clone(), op.clone()) {
+                if prev != *op {
+                    return Err(format!("ISA op path conflict: {prev} and {op} -> {path}"));
                 }
             }
-            prev = Some(cols[0]);
-            let base = 4 + nr as usize + nw as usize;
-            entries.insert(
-                cols[0].to_string(),
-                Entry {
-                    opcode: cols[0].to_string(),
-                    nr,
-                    nw,
-                    dynamic: cols[3] == "1",
-                    rp: cols[4..4 + nr as usize]
-                        .iter()
-                        .map(|s| (*s).to_string())
-                        .collect(),
-                    wp: cols[4 + nr as usize..base]
-                        .iter()
-                        .map(|s| (*s).to_string())
-                        .collect(),
-                    storetype: cols[base].parse().unwrap_or(-1),
-                    headlen: cols[base + 1].parse().unwrap_or(-1),
-                    width: cols[base + 2].parse().unwrap_or(-1),
-                    class: cols[base + 5].to_string(),
-                    line: (*r).to_string(),
-                },
-            );
+            if let Some(e) = read_def(kv, op, "ext") {
+                self.entries.insert(op.clone(), e);
+            }
         }
-        Ok(Isa {
-            ver,
-            count,
-            hash,
-            entries,
-        })
-    }
-
-    /// 写 `/‥isa/func<func-path>`（isa-ref，控制 store）。内容：ver/hash/count。
-    pub fn write_ref(&self, kv: &mut Kv, func_dir: &str, ext_bridge: &str) -> Result<(), String> {
-        let body = format!(
-            "ver\t{}\nhash\t{}\ncount\t{}\next_bridge\t{}\n",
-            self.ver, self.hash, self.count, ext_bridge
-        );
-        kv.isa_set(&[(ref_key(func_dir), ffi::new_char_byte(body.as_bytes()))])
-            .map_err(|e| format!("ISA ref write {func_dir}: {e}"))
+        Ok(())
     }
 }
 
-fn parse_kv(line: Option<&str>, want: &str) -> Result<u32, String> {
-    let l = line.ok_or_else(|| format!("ISA manifest missing {want}"))?;
-    let mut it = l.split('\t');
-    if it.next() != Some(want) {
-        return Err(format!("ISA manifest missing {want}"));
-    }
-    it.next()
-        .and_then(|v| v.parse().ok())
-        .ok_or_else(|| format!("ISA manifest bad {want}"))
-}
-
-fn parse_field(line: Option<&str>, want: &str) -> Result<String, String> {
-    let l = line.ok_or_else(|| format!("ISA manifest missing {want}"))?;
-    let mut it = l.split('\t');
-    if it.next() != Some(want) {
-        return Err(format!("ISA manifest missing {want}"));
-    }
-    it.next()
-        .map(str::to_string)
-        .ok_or_else(|| format!("ISA manifest bad {want}"))
-}
-
-/// per-func isa-ref 的控制 store key：`/‥isa/func` + 规范化函数目录。
-/// 成员分隔符 `·`(U+00B7) 在 durable 里是 memitem 分隔符（需容器声明），
-/// 控制键里统一折成 `/`；runtime 侧用同一规则。
-pub fn ref_key(func_dir: &str) -> String {
-    let d = func_dir.trim_end_matches('/');
-    assert!(d.starts_with('/'), "func dir must be absolute: {func_dir}");
-    format!("/‥isa/func{}", d.replace('·', "/"))
-}
-
-/// 测试专用：把 runtime-c 发布的真实 300 条 manifest 快照写进控制 store。
-/// 快照文件 `tests/fixtures/isa_core.txt` 由 runtime 的 `/‥isa/‥core` body 原样导出；
-/// `isa_gate` 会比对运行时发布 hash 与快照 hash，防止两侧漂移。
+/// 测试专用：把 native 声明与静态桥写进目标 store。
 pub fn ensure_test_isa(kv: &mut Kv) {
-    const CORE: &str = include_str!("../tests/fixtures/isa_core.txt");
-    let mut it = CORE.lines();
-    let ver = it
-        .next()
-        .and_then(|l| l.strip_prefix("ver\t"))
-        .unwrap_or("1");
-    let count = it
-        .next()
-        .and_then(|l| l.strip_prefix("count\t"))
-        .unwrap_or("300");
-    let hash = it
-        .next()
-        .and_then(|l| l.strip_prefix("hash\t"))
-        .unwrap_or("");
-    let meta = format!("ver\t{ver}\ncount\t{count}\nhash\t{hash}\nowners\truntime-c\n");
-    let _ = kv.isa_mkindex("/‥isa/");
-    let _ = kv.isa_set(&[
-        (
-            "/‥isa/‥core".to_string(),
-            ffi::new_char_byte(CORE.as_bytes()),
-        ),
-        (
-            "/‥isa/‥meta".to_string(),
-            ffi::new_char_byte(meta.as_bytes()),
-        ),
-    ]);
-    // 模拟 runtime-rs 的 def rwir 注册（P1 静态桥），与 MYRWIRCAPS 同步的快照。
+    let _ = kv.mkindex("/‥isa/");
+    if let Ok(native) = parse_native() {
+        for e in &native {
+            let _ = ensure_native(kv, e);
+        }
+    }
     const BRIDGES: &str = include_str!("../tests/fixtures/def_rwir.txt");
     for line in BRIDGES.lines() {
         let c: Vec<&str> = line.split('\t').collect();
@@ -225,96 +248,23 @@ pub fn ensure_test_isa(kv: &mut Kv) {
     }
 }
 
-/// 测试专用：注册一个 def rwir 静态桥（模拟 runtime-rs register）。
 pub fn ensure_test_bridge(kv: &mut Kv, op: &str, nr: u32, nw: u32) {
-    let base = crate::keytree::rwir(op);
+    let base = keytree::isa_op(op);
     let mut pairs = vec![(
         base.clone(),
-        crate::kvkind::new_defrwir(nr as i32, nw as i32, false),
+        kvkind::new_defrwir(nr as i32, nw as i32, false),
     )];
     for j in 0..nr {
         pairs.push((
             format!("{base}/[0,-{}]", j + 1),
-            crate::kvkind::new_def_langtype("*"),
+            kvkind::new_def_langtype("*"),
         ));
     }
     for j in 0..nw {
         pairs.push((
             format!("{base}/[0,{}]", j + 1),
-            crate::kvkind::new_def_langtype("*"),
+            kvkind::new_def_langtype("*"),
         ));
     }
     let _ = kv.set(&pairs);
-}
-
-impl Isa {
-    /// P1 静态签名桥：本次发射、不在 core manifest、且 `/lib/<op>` 是 def rwir 的
-    /// opcode，按 op 排序拼接 `op\trp..\twp..\n` 取 SHA-256/128；无则 `none`。
-    pub fn ext_bridge(&self, kv: &mut Kv, ops: &std::collections::BTreeSet<String>) -> String {
-        let mut lines: Vec<String> = Vec::new();
-        for op in ops {
-            if self.entries.contains_key(op) {
-                continue;
-            }
-            let decl = kv.get_one(&crate::keytree::rwir(op));
-            if crate::kvkind::kind(&decl) != crate::kvkind::KIND_DEF_RWIR {
-                continue;
-            }
-            let b = ffi::xh_body_slice(&decl);
-            if b.len() < 4 {
-                continue;
-            }
-            let nr = u16::from_le_bytes([b[0], b[1]]) as usize;
-            let nw = u16::from_le_bytes([b[2], b[3]]) as usize;
-            let mut line = op.clone();
-            for j in 0..nr + nw {
-                let x = if j < nr {
-                    -(j as i64 + 1)
-                } else {
-                    (j - nr) as i64 + 1
-                };
-                let p = kv.get_one(&format!("{}/[0,{}]", crate::keytree::rwir(op), x));
-                let pb = ffi::xh_body_slice(&p);
-                let ty = String::from_utf8_lossy(pb).into_owned();
-                let ty = ty.strip_prefix('*').unwrap_or(&ty);
-                line.push('\t');
-                line.push_str(if ty.is_empty() { "any" } else { ty });
-            }
-            lines.push(line);
-        }
-        if lines.is_empty() {
-            return "none".to_string();
-        }
-        lines.sort();
-        let mut region = String::new();
-        for l in &lines {
-            region.push_str(l);
-            region.push('\n');
-        }
-        let d = Sha256::digest(region.as_bytes());
-        d[..16].iter().map(|b| format!("{b:02x}")).collect()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::ref_key;
-
-    #[test]
-    fn ref_key_folds_member_sep() {
-        assert_eq!(ref_key("/lib/pkg·f"), "/‥isa/func/lib/pkg/f");
-        assert_eq!(ref_key("/lib/pkg·f/"), "/‥isa/func/lib/pkg/f");
-        assert_eq!(ref_key("/lib/a/b·c"), "/‥isa/func/lib/a/b/c");
-    }
-
-    /// 合法 func_dir 恒为 `/lib/<pkg>·<name>`：pkg 可含 '/'（嵌套包），
-    /// name 是标识符（不含 '/' 与 '·'）。折叠 `·`→`/` 后由「最后一个 '·' 位置」
-    /// 可逆：最后的 pkg 段与 name 之间必有分隔，故不同函数不撞键。
-    #[test]
-    fn ref_key_is_injective_for_legal_func_dirs() {
-        assert_ne!(ref_key("/lib/a·b"), ref_key("/lib/a/b·c"));
-        assert_ne!(ref_key("/lib/a·b"), ref_key("/lib/ab"));
-        assert_ne!(ref_key("/lib/a·b"), ref_key("/lib/a·b·c"));
-        assert_ne!(ref_key("/lib/a/b·c"), ref_key("/lib/a/b/c·d"));
-    }
 }

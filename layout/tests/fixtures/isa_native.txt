@@ -1,3 +1,4 @@
+# native ISA author list: only layout uses it to write /‥isa declarations; runtime never reads this file.
 ver	1
 count	300
 hash	16bedee2a5f7b947ff326855c4f9682c

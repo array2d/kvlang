@@ -23,23 +23,23 @@ rwfunc 无 `[0,x]` 槽、def rwir 无 `{name}` 键。
 
 ## def rwir 路由头（rwir 统一调度入口）
 
-`/lib/<opcode>`（langtype `def rwir`）由 layout 的声明或 runtime 注册写入：
+`/‥isa/<folded-op>`（langtype `def rwir`）由 layout 写 native、
+runtime 写扩展：
 
-- **runtime 注册**——各 runtime 启动时经运行时注册接口把自身 myrwircaps 的每个 opcode 写入
-  `/lib/<opcode>`；注册前校验各参 langtype。主槽 body `[nr][nw][dynamic]`，各参数类型分别落入
-  `[0,x]` 签名行槽（`def langtype` xvalue），无实现指令行。
+- **native**：layout 按作者清单写 `/‥isa/<folded-op>`，主槽 body
+  `[nr][nw][dynamic]`，各参数类型落 `[0,x]` 签名行槽（`def langtype`）。
+- **扩展**：runtime 启动时经运行接口写同一 `/‥isa` 子树；注册前校验各参
+  langtype，折叠冲突硬错 `ISA op path conflict`。
 
-layout 在生成 opcode 槽时按 ISA manifest + `/lib` 静态元数据做四路归类
-（Core/Ext/Bridge/User）；runtime 仍按原有派发链分派。def rwir 路由头仅落于
-`/lib/<opcode>`，P1b2 把它归为 Bridge；不把签名写进操作数槽。
+layout 在生成 opcode 槽时按 `/‥isa` + `/lib` 静态元数据做三类归类
+（Rwir/User）；runtime 按 myrwircaps 名字表绑定 `/‥isa` 声明。
+def rwir 路由头落 `/‥isa/<folded-op>`，不把签名写进操作数槽。
 
-每函数 `‥isa` 记录本次用到的 Bridge 签名集合 hash（`ext_bridge`；无 Bridge 为
-`none`）。P1 runtime 不校验，仅作 traceability；后续 runtime 阶段再收紧。
+## native rwir 声明落入 `/‥isa`
 
-## native rwir 不落入 kvspace
-
-`+`、`==`、`array`、`sqrt`、`print` 等 native builtin 融合在 runtime 内建表，**不**写 kvspace、运行
-时也不回查 `/lib`。数值多类型算子在内建表中融合为单条（`add` 覆盖 int8…float64），派发前剥掉
+`+`、`==`、`array`、`sqrt`、`print` 等 native builtin 的签名写入
+`/‥isa/<folded-op>` 的 `def rwir`；runtime 的 handler 仍在 myrwircaps。
+数值多类型算子在内建表中融合为单条（`add` 覆盖 int8…float64），派发前剥掉
 `<numkind>·` 前缀，输出 kind 由实参决定。
 
 ## lib 数据（常量）

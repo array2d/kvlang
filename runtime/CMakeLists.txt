@@ -17,14 +17,13 @@ file(GLOB KVLANG_RUNTIME_SRC CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/*.c")
 set(KVLANG_GEN_SRC "${CMAKE_SOURCE_DIR}/src/rwir_special_gen.c")
 set(KVLANG_COERCE_SRC "${CMAKE_SOURCE_DIR}/src/rwir_coerce.c")
 set(KVLANG_DECODE_SRC "${CMAKE_SOURCE_DIR}/src/rwir_decode.c")
-set(KVLANG_ISA_SRC "${CMAKE_SOURCE_DIR}/src/isa.c")
 set(KVLANG_ISA_SIG_SRC "${CMAKE_SOURCE_DIR}/src/isa_sig.c")
 set(KVLANG_SLOTVIEW_SRC "${CMAKE_SOURCE_DIR}/src/slotview.c")
 list(REMOVE_ITEM KVLANG_RUNTIME_SRC "${KVLANG_GEN_SRC}" "${KVLANG_COERCE_SRC}"
-    "${KVLANG_DECODE_SRC}" "${KVLANG_ISA_SRC}" "${KVLANG_ISA_SIG_SRC}"
+    "${KVLANG_DECODE_SRC}" "${KVLANG_ISA_SIG_SRC}"
     "${KVLANG_SLOTVIEW_SRC}")
 list(APPEND KVLANG_RUNTIME_SRC "${KVLANG_DECODE_SRC}" "${KVLANG_GEN_SRC}"
-    "${KVLANG_COERCE_SRC}" "${KVLANG_ISA_SRC}" "${KVLANG_ISA_SIG_SRC}"
+    "${KVLANG_COERCE_SRC}" "${KVLANG_ISA_SIG_SRC}"
     "${KVLANG_SLOTVIEW_SRC}")
 add_library(kvlang_runtime SHARED ${KVLANG_RUNTIME_SRC})
 target_include_directories(kvlang_runtime PUBLIC include src)
@@ -115,7 +114,6 @@ if(NOT APPLE)
     add_test(NAME layout_reject COMMAND bash "${CMAKE_SOURCE_DIR}/tests/layout_reject.sh")
     add_test(NAME coercion COMMAND bash "${CMAKE_SOURCE_DIR}/tests/coercion.sh")
     add_test(NAME dyn_specialize COMMAND bash "${CMAKE_SOURCE_DIR}/tests/dyn_specialize.sh")
-    add_test(NAME isa_gate COMMAND bash "${CMAKE_SOURCE_DIR}/tests/isa_gate.sh")
     add_test(NAME isa_typed_violation
              COMMAND bash "${CMAKE_SOURCE_DIR}/tests/isa_typed_violation.sh")
     set_tests_properties(isa_typed_violation PROPERTIES SKIP_RETURN_CODE 77
@@ -141,8 +139,6 @@ if(NOT APPLE)
     set_tests_properties(pause_resume
         PROPERTIES ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/kvlang")
     set_tests_properties(status_view
-        PROPERTIES ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/kvlang")
-    set_tests_properties(isa_gate
         PROPERTIES ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/kvlang")
     set_tests_properties(layout_reject
         PROPERTIES ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout")

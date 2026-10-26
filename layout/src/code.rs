@@ -43,8 +43,8 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
         return Err("parse: error-level diagnostics — refusing to load".to_string());
     }
 
-    /* P1a：读目标 kvspace 的 ISA registry；缺失/不一致硬失败。 */
-    let isa = crate::isa::Isa::load(kv)?;
+    /* 写/读 `/‥isa/<folded-op>` 的 native 声明；冲突硬失败。 */
+    let mut isa = crate::isa::Isa::load(kv)?;
     let mut any_code = false;
     let mut inits: Vec<String> = Vec::new();
     let local_funcs: HashSet<String> = file
@@ -101,7 +101,15 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
             func.pkg.clone()
         };
         let mut lowered = lower::lower_func(func);
-        write_func(kv, &pkg, &mut lowered, &local_funcs, &structs, &sigs, &isa)?;
+        write_func(
+            kv,
+            &pkg,
+            &mut lowered,
+            &local_funcs,
+            &structs,
+            &sigs,
+            &mut isa,
+        )?;
         any_code = true;
         if func.sig.name == "init" {
             inits.push(init_fn_name(&pkg));
@@ -128,7 +136,15 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
             pkg: String::new(),
         };
         let mut lowered = lower::lower_func(&init_fn);
-        write_func(kv, "", &mut lowered, &local_funcs, &structs, &sigs, &isa)?;
+        write_func(
+            kv,
+            "",
+            &mut lowered,
+            &local_funcs,
+            &structs,
+            &sigs,
+            &mut isa,
+        )?;
         any_code = true;
         inits.push(init_fn_name(""));
     }
@@ -666,7 +682,7 @@ fn build_inst(inst: &RawInst, by_irseq: &HashMap<i32, String>) -> Instruction {
     }
 }
 
-/// P1b2：manifest 四路目标。
+/// 发射归属：Rwir（`/‥isa` 声明）或 User（`/lib` 函数）。
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum IsaTarget {
     Core,
@@ -675,7 +691,7 @@ pub enum IsaTarget {
     User,
 }
 
-/// 按 manifest + `/lib/<op>` 判定 opcode 的发射归属；未知硬失败。
+/// 按 `/‥isa` 声明 + `/lib` 函数判定 opcode 归属；未知硬失败。
 pub fn isa_target(
     kv: &mut Kv,
     isa: &crate::isa::Isa,
@@ -704,22 +720,17 @@ pub fn isa_target(
             return Ok(IsaTarget::User);
         }
     }
-    let mut bases: Vec<String> = Vec::new();
-    if op.starts_with('/') {
-        bases.push(op.to_string());
-    } else {
-        if let Some(q) = &qual {
-            bases.push(crate::keytree::rwir(q));
-        }
-        bases.push(crate::keytree::rwir(op));
+    let isa_path = crate::keytree::isa_op(op);
+    if crate::kvkind::kind(&kv.get_one(&isa_path)) == crate::kvkind::KIND_DEF_RWIR {
+        return Ok(IsaTarget::Bridge);
     }
-    for base in &bases {
-        if crate::kvkind::kind(&kv.get_one(base)) == crate::kvkind::KIND_DEF_RWIR {
-            return Ok(IsaTarget::Bridge);
-        }
-        if is_func_dir(kv, &format!("{base}/")) {
-            return Ok(IsaTarget::User);
-        }
+    let func_path = if op.starts_with('/') {
+        op.to_string()
+    } else {
+        crate::keytree::rwir(op)
+    };
+    if is_func_dir(kv, &format!("{func_path}/")) {
+        return Ok(IsaTarget::User);
     }
     Err(format!("ISA: unknown opcode {op}"))
 }
@@ -767,6 +778,26 @@ pub fn check_sub_arity(op: &str, reads: usize, writes: usize) -> Result<(), Stri
     Ok(())
 }
 
+fn read_ctime(kv: &mut Kv, key: &str) -> i64 {
+    let v = kv.get_one(key);
+    if v.is_empty() || ffi::xh_is_none(&v) {
+        return 0;
+    }
+    let b = ffi::xh_body_slice(&v);
+    if b.len() < 8 {
+        return 0;
+    }
+    i64::from_le_bytes(b[..8].try_into().unwrap())
+}
+
+fn next_ctime(old: i64) -> i64 {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as i64)
+        .unwrap_or(0);
+    old.saturating_add(1).max(now)
+}
+
 /// 写函数到 /lib/：签名（rwfunc）、源码、参数 Ptr、指令体。
 pub fn write_func(
     kv: &mut Kv,
@@ -775,7 +806,7 @@ pub fn write_func(
     local_funcs: &HashSet<String>,
     structs: &lower::StructTable,
     sigs: &lower::SigTable,
-    isa: &crate::isa::Isa,
+    isa: &mut crate::isa::Isa,
 ) -> Result<(), String> {
     let type_map = lower::infer_types(fn_);
     let declared = lower::declared_types(fn_);
@@ -795,7 +826,9 @@ pub fn write_func(
     } else {
         format!("{pkg}{}{}", keytree::MEMBER_SEP, fn_.sig.name)
     };
-    if kvkind::kind(&kv.get_one(&keytree::rwir(&opcode))) == kvkind::KIND_DEF_RWIR {
+    let lib_decl = kvkind::kind(&kv.get_one(&keytree::rwir(&opcode))) == kvkind::KIND_DEF_RWIR;
+    let isa_decl = kvkind::kind(&kv.get_one(&keytree::isa_op(&opcode))) == kvkind::KIND_DEF_RWIR;
+    if lib_decl || (isa_decl && !isa.is_native(&opcode)) {
         return Err(format!(
             "{opcode}: rwir declaration and rwfunc body both define it; one opcode, one definition"
         ));
@@ -836,6 +869,9 @@ pub fn write_func(
         param_coord.insert(r.name.clone(), format!("*[0,{}]", i + 1));
     }
 
+    let ctime_key = format!("{func_dir}/‥ctime");
+    let ctime = next_ctime(read_ctime(kv, &ctime_key));
+
     // 按函数覆盖（文件夹复制式合并）：只 del_tree 本函数子树，不动 /lib 下其它函数。
     // 禁止整库删除——layoutcode 必须可增量：多次 layout 各自覆盖其函数，不误删先前的函数。
     let _ = kv.del_tree(&func_dir);
@@ -856,6 +892,7 @@ pub fn write_func(
 
     let mut pairs: Vec<(String, Vec<u8>)> = Vec::new();
     pairs.push((format!("{func_dir}/"), kvkind::new_rwfunc_dir()));
+    pairs.push((ctime_key, ffi::new_int64(ctime)));
     pairs.push((
         format!("{func_dir}/[0,0]"),
         kvkind::new_rwfunc_anchor(nr, nw, fn_.sig.dynamic()),
@@ -889,17 +926,17 @@ pub fn write_func(
             }
         }
     }
-    let ext_bridge = isa.ext_bridge(kv, &emitted);
+    isa.ensure_ops(kv, &emitted)?;
 
     // P1b2/P1b3：四路归类 + typed core 的 exact-kind 证明闸门（hard fail）。
-    // typed core = manifest core 且 rp/wp 全具体、且有操作数（156 项）；
+    // concrete native = /‥isa 声明 rp/wp 全具体、且有操作数；
     // 不把类型写进槽（typed 性是 row/opcode 属性），只用同一套 exact kind 证明。
     for inst in &seq {
         let (op, reads) = inst.flat();
         if op.is_empty() {
             continue;
         }
-        let target = isa_target(kv, isa, &op, pkg, local_funcs)?;
+        let target = isa_target(kv, &*isa, &op, pkg, local_funcs)?;
         check_sub_arity(&op, reads.len(), inst.writes.len())?;
         if target != IsaTarget::Core {
             continue;
@@ -907,7 +944,7 @@ pub fn write_func(
         let e = isa
             .entries
             .get(&op)
-            .ok_or_else(|| format!("ISA: missing manifest entry {op}"))?;
+            .ok_or_else(|| format!("ISA: missing declaration {op}"))?;
         let typed = (e.nr > 0 || e.nw > 0)
             && e.rp
                 .iter()
@@ -918,7 +955,7 @@ pub fn write_func(
         }
         if reads.len() != e.nr as usize || inst.writes.len() != e.nw as usize {
             return Err(format!(
-                "ISA: arity mismatch for {op}: manifest {}r/{}w, got {}r/{}w",
+                "ISA: arity mismatch for {op}: decl {}r/{}w, got {}r/{}w",
                 e.nr,
                 e.nw,
                 reads.len(),
@@ -947,11 +984,11 @@ pub fn write_func(
                 .concrete(j, true)
                 .ok_or_else(|| format!("ISA: {op} write {} not concrete", j + 1))?;
             // 写槽由本条 opcode 定 kind：目标无声明/不可静态证明（临时槽等）是合法的；
-            // 只有“已有 exact 声明且与 manifest 不符”才是硬错误。
+            // 只有“已有 exact 声明且与 ISA 声明不符”才是硬错误。
             if let Some(proved) = lower::exact_name_kind(w, &declared, &stable) {
                 if proved != mt {
                     return Err(format!(
-                        "ISA: {op} write {}: exact {proved} != manifest {mt}",
+                        "ISA: {op} write {}: exact {proved} != decl {mt}",
                         j + 1
                     ));
                 }
@@ -987,7 +1024,6 @@ pub fn write_func(
             .collect();
         let _ = kv.set(&lpairs);
     }
-    isa.write_ref(kv, &func_dir, &ext_bridge)?;
     Ok(())
 }
 
@@ -1050,7 +1086,7 @@ fn field_default(ty: &str, default: Option<&Expr>) -> Vec<u8> {
     }
 }
 
-/// 写用户声明的 rwir（无体）到 /lib/<opcode>。
+/// 写用户声明的 rwir（无体）到 /‥isa/<folded-op>。
 pub fn write_rwir_decl(kv: &mut Kv, decl: &RwirDecl) -> Result<(), String> {
     let mut opcode = decl.sig.name.clone();
     if !decl.pkg.is_empty() {
@@ -1065,7 +1101,7 @@ pub fn write_rwir_decl(kv: &mut Kv, decl: &RwirDecl) -> Result<(), String> {
     let nr = decl.sig.num_reads();
     let nw = decl.sig.num_writes();
     let param_types = decl.sig.langtype_list();
-    let base = keytree::rwir(&opcode);
+    let base = keytree::isa_op(&opcode);
     // 路由头：仅计数头（无参数载荷）；各参数类型落 [0,x] 签名行槽（def langtype）。
     let mut pairs: Vec<(String, Vec<u8>)> = vec![(
         base.clone(),
@@ -1505,22 +1541,19 @@ mod tests {
     #[test]
     fn temp_write_kind_contract() {
         // 纯 generic/copy 多写（for 索引）允许。
-        assert!(check_temp_write_kinds(
-            &[("_1".into(), false), ("_1".into(), false)],
-            |_| false
-        )
-        .is_ok());
+        assert!(
+            check_temp_write_kinds(&[("_1".into(), false), ("_1".into(), false)], |_| false)
+                .is_ok()
+        );
         // typed 写 + 复用 → 必须 exact 声明。
-        assert!(check_temp_write_kinds(
-            &[("_1".into(), true), ("_1".into(), false)],
-            |_| false
-        )
-        .is_err());
-        assert!(check_temp_write_kinds(
-            &[("_1".into(), true), ("_1".into(), false)],
-            |n| n == "_1"
-        )
-        .is_ok());
+        assert!(
+            check_temp_write_kinds(&[("_1".into(), true), ("_1".into(), false)], |_| false)
+                .is_err()
+        );
+        assert!(
+            check_temp_write_kinds(&[("_1".into(), true), ("_1".into(), false)], |n| n == "_1")
+                .is_ok()
+        );
         assert!(check_temp_write_kinds(&[("_1".into(), true)], |_| false).is_ok());
         assert!(check_temp_write_kinds(
             &[("‥tmp1".into(), true), ("‥tmp1".into(), true)],

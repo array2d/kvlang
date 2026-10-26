@@ -20,14 +20,13 @@ layout 能力经 cdylib 导出，第三方无需 fork 子进程即可布局（�
 成功返回 0（`entry_out` 为 init 入口名列表，`\n` 分隔），失败返回 -1（`err_out` 为错误）。
 `kvlangLayoutFile` 是 `kvlangLayoutCode` 的薄封装。
 
-## ISA 控制面 bootstrap
+## ISA 签名 bootstrap
 
-layout 连 data + control 两个 kvspace 句柄；control DSN 规则唯一见
-[[cruntime与后端abi]]。`kvlangLayoutFile/Code` 要求 control store 已有
-`/‥isa/‥meta` 与 `/‥isa/‥core`，否则返回 `ISA registry missing`。
-
-`kvlang isa publish`：connect、发布 core、注册 runtime-rs 的 def rwir、
-disconnect；供 `kvlang layout` 在无完整 boot 时使用。`vet`/`format` 不读 ISA。
+layout 只连一个数据 store：编译前把 native 作者清单写成/刷新
+`/‥isa/<folded-op>` 的 `def rwir`（签名行 `[0,x]`），再从同一子树
+读回；只有一个数据 store。扩展 rwir 由对应 runtime 在同一 `/‥isa`
+子树注册；runtime 只按 `/‥isa/<folded-op>` 与 myrwircaps 对账。
+`vet`/`format` 不写/不读 ISA。
 
 ## vet 闸门
 

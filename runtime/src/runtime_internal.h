@@ -186,8 +186,6 @@ typedef struct {
 typedef struct {
     void *handle;    /* opaque KVSpace connection（数据 store） */
     bool shm;        /* DSN scheme == shm：允许 body 就地写快路径 */
-    void *isa_handle; /* P1a 控制 store 句柄；NULL/同 handle 表示与数据 store 同库 */
-    bool isa_shared; /* isa_handle == handle（redis：控制键共用数据 store） */
     bool slotview_unsupported; /* slot view 返回 -2：本句柄永久回退 */
 } kvspace_t;
 
@@ -933,15 +931,6 @@ typedef struct {
     uint8_t effects;
 } kvlangIsaSig;
 __attribute__((visibility("hidden"))) const kvlangIsaSig *kvlangIsaSigs(uint32_t *n_out);
-/* ISA registry（P1a）：core manifest 发布与 per-function hash 闸门。 */
-__attribute__((visibility("hidden"))) int kvlangIsaPublishCore(kvspace_t *kv);
-__attribute__((visibility("hidden"))) bool kvlangIsaCtlDsn(const char *dsn, char *out,
-                                                          size_t cap);
-__attribute__((visibility("hidden"))) int kvlangIsaCheck(kvspace_t *kv,
-                                                         const char *func_dir,
-                                                         char *err,
-                                                         uint32_t err_cap);
-__attribute__((visibility("hidden"))) const char *kvlangIsaCoreHash(void);
 
 __attribute__((visibility("hidden"))) const kvlangRwirCap *kvlangRwirCaps(void);
 __attribute__((visibility("hidden"))) int kvlangRwirRouteId(void);

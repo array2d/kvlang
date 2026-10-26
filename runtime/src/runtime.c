@@ -9,29 +9,8 @@ kvlangRuntime_t *kvlangRuntimeConnect(const char *dsn) {
   kvspace_t *kv = kvlangKvspaceConnect(dsn);
   if (!kv)
     return NULL;
-  /* P1a：控制面独立 store（redis 同库）。先连控制 store，再发布 core；
-   * 任一失败即连接失败，绝不静默回落到数据 store。 */
-  char ctl[KV_KEY_MAX];
-  if (!kvlangIsaCtlDsn(dsn, ctl, sizeof ctl)) {
-    kvlangKvspaceDisconnect(kv);
-    return NULL;
-  }
-  if (strcmp(ctl, dsn) == 0) {
-    kv->isa_handle = kv->handle;
-    kv->isa_shared = true;
-  } else {
-    kvspace_t *isa = kvlangKvspaceConnect(ctl);
-    if (!isa) {
-      kvlangKvspaceDisconnect(kv);
-      return NULL;
-    }
-    kv->isa_handle = isa->handle;
-    free(isa);
-  }
-  if (kvlangIsaPublishCore(kv) != 0) {
-    kvlangKvspaceDisconnect(kv);
-    return NULL;
-  }
+  /* 新架构：没有独立控制 store，runtime 不发布 ISA manifest；
+   * 签名声明由 layout/扩展写到同一 kvspace 的 /‥isa/<folded-op>。 */
   kvlangRuntime_t *rt = malloc(sizeof(*rt));
   if (!rt) {
     kvlangKvspaceDisconnect(kv);

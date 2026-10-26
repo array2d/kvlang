@@ -47,7 +47,7 @@ kvlang 的三阶段：**layout（o0）→ 编译器（优化）→ runtime（纯
 融合不是一步，分**两层**，职责必须切开：
 
 - **kvlang 编译器（编排器）**：读整棵 `/lib`，做后端绑定、复合算子分解、**识别可融合的相邻 rwir 组
-  **、编排、并把结果**回写**——把融合产物注册为 `/lib/<opcode>` def rwir + myrwircaps、改写调用点
+  **、编排、并把结果**回写**——把融合产物注册为 `/‥isa/<folded-op>` def rwir + myrwircaps、改写调用点
   opcode、登记版本。回写是编排器的职责。
 - **kernel 编译器（叶子 codegen）**：把「一组 rwir + shape + dtype」codegen 成**单个硬件 kernel**
   （如 op-gpu / TileLang，GPU 上多个 `deepx·{rwir/rwfunc}` 融成一次 kernel 调用 = 一条 rwir）。它是
