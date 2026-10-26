@@ -20,7 +20,7 @@ head。这条例外恰印证边界：**能调用 kvspace 的一律调用；kvspa
 
 | 目录 | 回答 | 内容 |
 |------|------|------|
-| `/lib/<opcode>` | 有什么 op（签名） | `def rwir` 路由头（主槽 body=[nr][nw][dynamic]，签名行 `[0,x]`） |
+| `/‥isa/<folded-op>` | 有什么 op（签名） | `def rwir` 路由头（主槽 body=[nr][nw][dynamic]，签名行 `[0,x]`） |
 | `/ext/` | 在哪、怎么执行（拓扑） | 存储 / 计算 / 通信引擎注册 |
 
 无状态扩展（term/json）只写 `/lib/`；有状态扩展引擎（op-gpu 等）写 `/lib/` + `/ext/`，handoff 协议一

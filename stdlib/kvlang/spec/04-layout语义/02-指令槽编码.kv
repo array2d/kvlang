@@ -16,18 +16,19 @@ opcode 位恒为操作码，故拷贝（opcode=`=`）与零参函数调用（`gr
 
 ## opcode 槽的判定与 langtype
 
-layout 必须先读控制 store 的 ISA manifest，按以下**四路**归类 opcode：
+layout 先在数据 store 写/读 `/‥isa/<folded-op>` 的 native 声明，
+再按以下四类归类 opcode：
 
-1. manifest 命中：`class=core` → Core；`class=ext` → Ext；
+1. `/‥isa/<folded-op>` 存在 kind=`def rwir` → Rwir（native/ext 不分）；
 2. 当前编译单元本地函数（含 `<pkg>·<name>`、绝对 `/lib/...`）→ User；
-3. `/lib/<op>`（包内先查 `<pkg>·<op>`）kind=`def rwir` → Bridge；
+3. 已布局的 `/lib/<pkg>·<name>/` 函数目录 → User；
 4. 否则 **layout 硬失败**：`ISA: unknown opcode <op>`。
 
 opcode 槽的 langtype：
 
 - 控制流与拷贝原语（`return`/`goto`/`br`/`call`/`=`）——`rwir`。
-- Core / Ext / Bridge——`rwir`；User——`rwfunc`。
-- Core 可发 `<kind>·<op>` 特化；Ext/Bridge 发普通 opcode。
+- Rwir——`rwir`；User——`rwfunc`。
+- 不做 `<kind>·<op>` 特化；opcode 保持源码/lower 产物。
 - **P1b2 不把 manifest 的 rp/wp/storetype/headlen/width 写进操作数槽**；
   槽编码保持既有 layout 推断，manifest 只用于 target/arity 检查。
 - 通用 `sub` 只能 **2r→1w**；一元负由 layout lower 成 `sub 0,x`（2r1w），

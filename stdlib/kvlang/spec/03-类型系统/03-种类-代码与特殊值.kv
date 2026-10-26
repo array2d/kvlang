@@ -4,7 +4,8 @@ lib kvlang/spec/类型系统/种类_代码与特殊值 {
 
 - `rwir`：无 kvlang 实现体，调用槽为 class 1，body 为 5 字节计数头加目标名，由 runtime 兑现。
 - `rwfunc`：有 kvlang 实现体。目录值为 class 0 空 body；`[0,0]` 签名锚点为 class 1、5 字节；调用槽为 class 1、计数头加函数名。
-- `def rwir`：仅位于 `/lib/<op>` 的 class 0 路由头，body 为 5 字节计数头。各 runtime 用 myrwircaps 声明可兑现能力。
+- `def rwir`：位于 `/‥isa/<folded-op>` 的路由头，body 为 5 字节计数头；layout 写 native、runtime
+写扩展，myrwircaps 按名绑定。
 - `None`：class 0、空 langtype、空 body。缺值运算报 TypeError。
 - ptr：class 1 加指针标志，langtype 为目标真实类型，body 为目标 KV 路径。空指针用 None。
 - `@ext`：class 3，langtype 为目标真实类型，body 为 UTF-8 定位串。

@@ -34,11 +34,19 @@ body = 参数名 + NUL + 该参数的 **def langtype**（匹配类型）串—�
 数顺序由键中的 `±j` 显式记录（命名键不保序），故 func 目录
 根**不**落 `/[0,x]` 子槽。
 
-`def rwir` 则相反：`/lib/<op>` 节点自身 langtype = `def rwir`（裸种类名）、body 同计数格式，各参数类型落**位置化**签
-名
-行 `[0,x]` 子槽（`x<0` 读参、`x>0` 写参，class=1、langtype=`def langtype`，body 为该参数
-langtype 串），无 `{param}` 命名键、无实现指令行——跨 runtime 队列按位置收参故须有序签名（见 [[总体方
-案]]）。
+`def rwir` 则相反：节点位于 `/‥isa/<folded-op>`，
+langtype = `def rwir`（裸种类名），body 同计数格式；
+各参数类型落**位置化**签名行 `[0,x]` 子槽
+（`x<0` 读参、`x>0` 写参，class=1、
+langtype=`def langtype`，body 为该参数 langtype 串），
+无 `{param}` 命名键、无实现指令行——跨 runtime 队列
+按位置收参故须有序签名（见 [[总体方案]]）。
+`folded-op` 把 opcode 的 `·` 与 `/` 都折成 `/`
+（与 [[调用extindex]] 的函数路径折叠同一规则）：
+`int64·add` → `int64/add`，
+`networld/fs·read` → `networld/fs/read`。
+折叠后重名 → `ISA op path conflict`，不允许静默覆盖；
+native 与扩展同形。
 
 ### 指令行
 
@@ -69,25 +77,24 @@ opcode 槽由 layout 按目标写 `rwir` 或 `rwfunc`；两者的 body 均为 5 
 文本）或内联字面量（如 `int64raw`、`char/utf32` 串）。opcode 槽永不存变量引用，故值拷贝 `=` 与函数调用
 `call` 在 KV 层无歧义。
 
-### ISA 控制面（独立 store）
+### ISA 签名（数据 store 内）
 
-ISA manifest/meta/per-func ref 不在 `/lib`，在控制 store：
+ISA 签名只有一个来源：`/‥isa/<folded-op>` 的
+`def rwir` 明文节点，native 与扩展统一。不设独立控制
+store，不写 `/‥isa/‥core`、`/‥isa/‥meta`、
+`/‥isa/func<func-path>` 或 `ext_bridge`；数据 store 内
+`/‥isa/` 只承载这些签名节点。
 
-```
-/‥isa/‥core
-/‥isa/‥meta
-/‥isa/func<func-path>
-```
-
-`<func-path>`：数据函数目录 `/lib/<pkg>·<name>/` 去掉 `/lib`，`·` 折成 `/`；
-例 `/lib/a/b·f/` → `/‥isa/func/lib/a/b/f`。layout/runtime 用同一折叠函数；
-不同函数折叠后重名 → `ISA ref path conflict`。
-
-控制值传输 langtype 统一 `[n]char/utf8`（class=1 SLACK、headlen=64、body=UTF-8）；
-**kind 只是传输标签，权威由 key + body 决定**。
-
-`‥isa` body：`ver\t1`、`hash\t<32hex>`、`count\t<n>`、`ext_bridge\t<32hex|none>`。
-数据 store **零 ISA key**（不得写 `/lib/isa` 或 `/lib/.../‥isa`）。
+- `folded-op`：opcode 中 `·` 与 `/` 都折成 `/`；例 `int64·add` →
+  `/‥isa/int64/add`，`networld/fs·read` → `/‥isa/networld/fs/read`。
+- 折叠后重名 → layout/runtime 硬错 `ISA op path conflict`。
+- layout 写/读该节点：counts 与签名行槽格式同 `def rwir`。
+- runtime bootstrap 遍历自己的 `myrwircaps` 名字表，
+  按同一 fold 读取节点；再枚举 `/‥isa/` 子树与名字表
+  比对，缺一/多一硬错。bootstrap 不从路径反推名字，
+  折叠有损无碍。
+- 签名行 `[0,x]`：`x<0` 读参、`x>0` 写参，class=1、
+  langtype=`def langtype`，body 为该参数 langtype 串。
 
 	"#### -> /lib/kvlang/spec/kvspace模型/指令布局格式
 }

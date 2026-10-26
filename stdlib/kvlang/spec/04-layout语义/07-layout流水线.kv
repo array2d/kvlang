@@ -31,19 +31,19 @@ kvspace 的 `/lib/` 子树，供 runtime 解释执行。layout 是 **o0 编译�
 `no executable code found`。compile 返回本次写入的 init 函数名列表（供消费方按 lib 声明驱动 init，非
 文件系统路径推导）。
 
-compile 前必须从控制 store load ISA manifest；缺失、count/hash 不符、未知
-opcode 均硬失败，不 layout、不 fallback。
+compile 前把 native 作者清单写成/刷新 `/‥isa/<folded-op>` 的
+`def rwir` 并读回；未知 opcode 硬失败，不 layout、不 fallback。
 
 ## write_func 步骤
 
-1. 推断类型并特化算子；对写槽做可赋性与字面量可表示性检查（见 [[赋值转换]]）。
+1. 推断类型做可赋性与字面量可表示性检查（见 [[赋值转换]]）；不做算子特化/下译。
 2. `del_tree` 本函数目录（增量覆盖，仅本函数子树）。
 3. 写 `[0,0]` 签名锚点、`.src` 源码副本、各**参数定义键** `funcDir.[0,±j]`。
-4. 四路 target 归类（Core/Ext/Bridge/User）；Core 具体项检查 arity；
-   `sub` 恒 2r→1w；未知 opcode 硬失败。P1b2 不把 manifest 类型写进槽。
+4. 三类 target 归类（Rwir/User）；Rwir 检查 arity；
+   `sub` 恒 2r→1w；未知 opcode 硬失败；不把类型写进槽。
 5. 从 `[1,0]` 起写线性指令；goto/br 标签解析为整数 irseq。
 6. 若有标签，写 `‥labels/<label>` → irseq。
-7. 写控制 store `/‥isa/func<func-path>`（core hash + `ext_bridge`）；
-   `write_ref` 失败必须上抛。
+7. 写/刷新每函数 `/lib/<func>/‥ctime`：`max(旧 ctime + 1, now_ns)`；
+   不写 per-func ISA ref/hash。
 	"#### -> /lib/kvlang/spec/layout语义/layout流水线
 }

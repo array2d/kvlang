@@ -54,10 +54,10 @@ fn compile_simple_func() {
         .collect();
     assert_eq!(types, vec!["int64", "int64", "int64"]);
 
-    // 指令（特化后 opcode = int64·add）
+    // 指令（新架构不做下译：opcode 保持泛型 +）
     let op = kv.get_one("/lib/sum/[1,0]");
     assert_eq!(kvkind::kind(&op), "rwir");
-    assert_eq!(sig(&op), "int64·add");
+    assert_eq!(sig(&op), "+");
     assert_eq!(sig(&kv.get_one("/lib/sum/[1,-1]")), "*[0,-1]\0int64");
     assert_eq!(sig(&kv.get_one("/lib/sum/[1,-2]")), "*[0,-2]\0int64");
     assert_eq!(sig(&kv.get_one("/lib/sum/[1,1]")), "*[0,1]\0int64");

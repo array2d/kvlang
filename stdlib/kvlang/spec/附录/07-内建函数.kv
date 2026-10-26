@@ -15,7 +15,8 @@ builtin_call = ( "abs" | "neg" | "sign" | "pow" | "sqrt" | "exp" | "log"
               | "debugger" ) "(" [ arg_list ] ")"
 ```
 
-`print` / `println` / `cerr` / `input` **不是 native**——它们由 term runtime 的 myrwircaps（rwir 能力
+`print` / `println` / `cerr` / `input` **不是 native**——它们由 term runtime 的
+myrwircaps（rwir 能力
 集）兑现（见 runtime 语义卷）。
 
 `·` 限定内建族（`base·method(...)`，非裸名终结符）：
