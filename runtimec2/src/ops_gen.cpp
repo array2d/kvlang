@@ -3,7 +3,7 @@
 
 namespace kv::ops {
 
-const Entry kBaseOps[] = {
+const Entry myrwircaps[] = {
     {"!", Op::Not, Kind::Any, 0, Class::Complex, Impl::Dynamic},
     {"!=", Op::Neq, Kind::Any, 0, Class::Complex, Impl::Dynamic},
     {"%", Op::Mod, Kind::Any, 0, Class::Complex, Impl::Dynamic},
@@ -306,6 +306,6 @@ const Entry kBaseOps[] = {
     {"≥", Op::Ge, Kind::Any, 0, Class::Complex, Impl::Dynamic},
 };
 
-const int kBaseOpsN = 300;
+const int kMyrwircapsN = 300;
 
 }  // namespace kv::ops

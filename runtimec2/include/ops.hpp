@@ -24,10 +24,11 @@ struct Entry {
     Impl impl;
 };
 
-extern const Entry kBaseOps[];
-extern const int kBaseOpsN;
+// = C runtime 的 myrwircaps（能力表，opcode→处理器）。
+extern const Entry myrwircaps[];
+extern const int kMyrwircapsN;
 
 // 名字 → 表项；未命中返回 nullptr（非本 runtime 的 rwir）。
-const Entry* find(const char* name, std::uint32_t len) noexcept;
+const Entry* find_myrwircap(const char* name, std::uint32_t len) noexcept;
 
 }  // namespace kv::ops

@@ -127,13 +127,13 @@ def main():
         sys.exit(f"fixture: expected 300 names, got {len(names)}")
     out = ["/* 生成：native 作者清单 → 算子表。源 layout/tests/fixtures/isa_native.txt。勿手改。 */",
            '#include "ops.hpp"', "", "namespace kv::ops {", "",
-           "const Entry kBaseOps[] = {"]
+           "const Entry myrwircaps[] = {"]
     counts = {"Typed": 0, "Control": 0, "Dynamic": 0, "Native": 0, "Handoff": 0}
     for n in names:
         cls, op, kind, w, impl = classify(n)
         counts[impl.split("::", 1)[1]] += 1
         out.append(f'    {{"{n}", {op}, {kind}, {w}, {cls}, {impl}}},')
-    out += ["};", "", "const int kBaseOpsN = 300;", "", "}  // namespace kv::ops", ""]
+    out += ["};", "", "const int kMyrwircapsN = 300;", "", "}  // namespace kv::ops", ""]
     sys.stderr.write(
         f"impl counts: Typed={counts['Typed']} Control={counts['Control']} "
         f"Dynamic={counts['Dynamic']} Native={counts['Native']} "

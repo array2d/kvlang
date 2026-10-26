@@ -148,7 +148,8 @@ int execute_vthread_impl(Runtime* r, const char* vid, char** out_pc) {
         std::string op;
         if (!read_opcode(h, pc, &op))
             return -1;
-        const ops::Entry* e = ops::find(op.data(), static_cast<std::uint32_t>(op.size()));
+        const ops::Entry* e = ops::find_myrwircap(op.data(),
+                                                   static_cast<std::uint32_t>(op.size()));
         static const bool op_trace = std::getenv("RC2_TRACE") != nullptr;
         if (op_trace)
             std::fprintf(stderr, "[op=%s found=%d impl=%d]\n", op.c_str(), e != nullptr,

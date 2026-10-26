@@ -74,7 +74,8 @@ bool build(void* h, const std::string& func_dir, Segment* out) {
             is_call = true;
             op = "call";
         }
-        const ops::Entry* e = ops::find(op.data(), static_cast<std::uint32_t>(op.size()));
+        const ops::Entry* e = ops::find_myrwircap(op.data(),
+                                                   static_cast<std::uint32_t>(op.size()));
         CInsn ins;
         ins.op = ops::Op::None;
         ins.impl = ops::Impl::Handoff;
