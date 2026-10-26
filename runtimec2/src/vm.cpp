@@ -29,15 +29,24 @@ struct Prof {
 };
 
 Prof g_prof;
-bool g_prof_on = false;
+// 探针以编译期宏摘除：非 RC2_PROF 构建中 g_prof_on 恒 false，热路径零开销。
+#ifdef RC2_PROF
+constexpr bool g_prof_on = true;
+#else
+constexpr bool g_prof_on = false;
+#endif
 
 void prof_tick(std::uint16_t id, std::uint64_t h, std::uint64_t l) {
+#ifdef RC2_PROF
     if (g_prof.ops.size() < op_name_count())
         g_prof.ops.resize(op_name_count());
     OpStat& st = g_prof.ops[id];
     st.n++;
     st.handler += h;
     st.loop += l;
+#else
+    (void)id; (void)h; (void)l;
+#endif
 }
 bool g_trace_on = false;
 unsigned long long g_trace_n = 200;
@@ -79,24 +88,29 @@ void prof_init() {
     if (inited)
         return;
     inited = true;
-    g_prof_on = std::getenv("RC2_PROF") != nullptr;
+#ifdef RC2_PROF
     g_trace_on = std::getenv("RC2_TRACE") != nullptr;
     {
         const char* e = std::getenv("RC2_TRACE_N");
         g_trace_n = e ? std::strtoull(e, nullptr, 10) : 200ULL;
     }
-    if (g_prof_on) {
-        // 探针校准：一次 now() 往返的真实成本（取 256 次最小值）。
-        unsigned long long best = ~0ULL;
-        for (int i = 0; i < 256; i++) {
-            const unsigned long long a = now();
-            const unsigned long long b = now();
-            if (b - a < best)
-                best = b - a;
-        }
-        g_prof.rdtsc = best;
-        std::atexit(prof_report);
+    // 探针校准：一次 now() 往返的真实成本（取 256 次最小值）。
+    unsigned long long best = ~0ULL;
+    for (int i = 0; i < 256; i++) {
+        const unsigned long long a = now();
+        const unsigned long long b = now();
+        if (b - a < best)
+            best = b - a;
     }
+    g_prof.rdtsc = best;
+    std::atexit(prof_report);
+#else
+    g_trace_on = std::getenv("RC2_TRACE") != nullptr;
+    {
+        const char* e = std::getenv("RC2_TRACE_N");
+        g_trace_n = e ? std::strtoull(e, nullptr, 10) : 200ULL;
+    }
+#endif
 }
 
 // 变量描述符 → 具体 key（帧入口一次；Ptr 链在此解析完）。
@@ -446,6 +460,36 @@ const char* kind_name(Scalar::K k, std::uint8_t width) {
         return nullptr;
     }
 }
+
+// ── int64 快路径算术表：opfn → (a,b)->i64。Div/Mod 的除零检查走 0 哨兵。
+static inline std::int64_t fast_add(std::int64_t a, std::int64_t b) { return a + b; }
+static inline std::int64_t fast_sub(std::int64_t a, std::int64_t b) { return a - b; }
+static inline std::int64_t fast_mul(std::int64_t a, std::int64_t b) { return a * b; }
+static inline std::int64_t fast_div(std::int64_t a, std::int64_t b) { return b ? a / b : 0; }
+static inline std::int64_t fast_mod(std::int64_t a, std::int64_t b) { return b ? a % b : 0; }
+static inline std::int64_t fast_max(std::int64_t a, std::int64_t b) { return a > b ? a : b; }
+static inline std::int64_t fast_min(std::int64_t a, std::int64_t b) { return a < b ? a : b; }
+static inline std::int64_t fast_and(std::int64_t a, std::int64_t b) { return a & b; }
+static inline std::int64_t fast_or(std::int64_t a, std::int64_t b) { return a | b; }
+static inline std::int64_t fast_xor(std::int64_t a, std::int64_t b) { return a ^ b; }
+static inline std::int64_t fast_shl(std::int64_t a, std::int64_t b) { return (std::int64_t)((std::uint64_t)a << (b & 63)); }
+static inline std::int64_t fast_shr(std::int64_t a, std::int64_t b) { return a >> (b & 63); }
+
+// 比较：返回 1/0（bool 结果，直写 bool 槽）。
+static inline std::int64_t fast_eq(std::int64_t a, std::int64_t b) { return a == b; }
+static inline std::int64_t fast_neq(std::int64_t a, std::int64_t b) { return a != b; }
+static inline std::int64_t fast_lt(std::int64_t a, std::int64_t b) { return a < b; }
+static inline std::int64_t fast_le(std::int64_t a, std::int64_t b) { return a <= b; }
+static inline std::int64_t fast_gt(std::int64_t a, std::int64_t b) { return a > b; }
+static inline std::int64_t fast_ge(std::int64_t a, std::int64_t b) { return a >= b; }
+
+using I64Fn = std::int64_t (*)(std::int64_t, std::int64_t);
+static constexpr I64Fn kFastI64Tbl[] = {
+    nullptr,
+    fast_add, fast_sub, fast_mul, fast_div, fast_mod, fast_max, fast_min,
+    fast_and, fast_or, fast_xor, fast_shl, fast_shr,
+    fast_eq, fast_neq, fast_lt, fast_le, fast_gt, fast_ge,
+};
 
 // ── 模板化值计算：switch(Op) → template<Op> constexpr（编译期内联单指令）。
 // 返回 false = 该 op 不支持此操作数（Zero 检查失败等）。
@@ -1112,58 +1156,34 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
         if (ins.fast_i64) {
             std::int64_t a = 0, b = 0;
             if (read_i64(f, ins.rd[0], &a) && read_i64(f, ins.rd[1], &b)) {
-                const unsigned long long thl = g_prof_on ? now() : 0;
                 std::int64_t rv = 0;
-                bool ok2 = true, is_bool = false;
-                switch (ins.op) {
-                case ops::Op::Add: rv = a + b; break;
-                case ops::Op::Sub: rv = a - b; break;
-                case ops::Op::Mul: rv = a * b; break;
-                case ops::Op::Div:
-                case ops::Op::Mod:
-                    if (b == 0) {
-                        *err = "division by zero: " + ins.name;
-                        return RunResult::Error;
+                bool ok2 = true;
+                // 直查表：算术（opfn 1..12）→ 除零哨兵特判；比较（13..18）→ bool 槽直写。
+                if (ins.opfn <= 12) {
+                    if (ins.opfn == 4 || ins.opfn == 5) {
+                        if (b == 0) {
+                            *err = "division by zero: " + ins.name;
+                            return RunResult::Error;
+                        }
                     }
-                    rv = ins.op == ops::Op::Div ? a / b : a % b;
-                    break;
-                case ops::Op::Max: rv = a > b ? a : b; break;
-                case ops::Op::Min: rv = a < b ? a : b; break;
-                case ops::Op::BitAnd: rv = a & b; break;
-                case ops::Op::BitOr: rv = a | b; break;
-                case ops::Op::BitXor: rv = a ^ b; break;
-                case ops::Op::Shl: rv = (std::int64_t)((std::uint64_t)a << (b & 63)); break;
-                case ops::Op::Shr: rv = a >> (b & 63); break;
-                case ops::Op::Eq: case ops::Op::Neq: case ops::Op::Lt:
-                case ops::Op::Le: case ops::Op::Gt: case ops::Op::Ge: {
-                    bool c = ins.op == ops::Op::Eq ? a == b
-                             : ins.op == ops::Op::Neq ? a != b
-                             : ins.op == ops::Op::Lt ? a < b
-                             : ins.op == ops::Op::Le ? a <= b
-                             : ins.op == ops::Op::Gt ? a > b
-                                                     : a >= b;
-                    is_bool = true;
-                    rv = c ? 1 : 0;
-                    break;
+                    rv = kFastI64Tbl[ins.opfn](a, b);
+                    ok2 = slot_write_i64(f, ins.wr[0], rv);
+                } else {
+                    rv = kFastI64Tbl[ins.opfn](a, b);
+                    ok2 = slot_write_bool(f, ins.wr[0], rv != 0);
                 }
-                default: ok2 = false; break;
+                if (g_prof_on) {
+                    const std::uint64_t dh = now() - t0;
+                    g_prof.handler += dh;
+                    g_prof.loop += (t0 - t_start);
+                    g_prof.steps++;
+                    prof_tick(ins.prof_id, dh, t0 - t_start);
                 }
-                if (ok2) {
-                    ok2 = is_bool ? slot_write_bool(f, ins.wr[0], rv != 0)
-                                  : slot_write_i64(f, ins.wr[0], rv);
-                    if (g_prof_on) {
-                        const std::uint64_t dh = now() - thl;
-                        g_prof.handler += dh;
-                        g_prof.loop += (thl - t0);
-                        g_prof.steps++;
-                        prof_tick(ins.prof_id, dh, thl - t0);
-                    }
-                    if (!ok2) {
-                        *err = "value op failed: " + ins.name;
-                        return RunResult::Error;
-                    }
-                    continue;
+                if (!ok2) {
+                    *err = "value op failed: " + ins.name;
+                    return RunResult::Error;
                 }
+                continue;
             }
         }
         // 值算子

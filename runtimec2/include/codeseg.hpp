@@ -33,6 +33,7 @@ struct CInsn {
     std::string callee;  // call：被调函数名
     std::uint16_t prof_id = 0;  // 进程级 opcode 名表下标（分段计时用）
     bool fast_i64 = false;      // 快路径候选：Typed int64 二目二元 op（iops 热循环）
+    std::uint8_t opfn = 0;      // 快路径算术函数表下标（Add=1..Ge=6，0=非快算术）
     ops::Impl impl = ops::Impl::None;
 };
 

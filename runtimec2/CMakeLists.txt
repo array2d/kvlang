@@ -5,6 +5,12 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# 性能探针开关：默认关（热路径零开销）；开时产 profiling 二进制（RC2_PROF 输出）。
+option(RC2_PROF "Build runtimec2 with per-op rdtsc profiling" OFF)
+if(RC2_PROF)
+    target_compile_definitions(kvlang_runtimec2 PRIVATE RC2_PROF)
+endif()
+
 # 不进入默认构建：显式 `cmake --build <dir> --target runtimec2`。
 add_library(kvlang_runtimec2 SHARED EXCLUDE_FROM_ALL
     src/abi.cpp

@@ -92,14 +92,24 @@ bool build(void* h, const std::string& func_dir, Segment* out) {
             ins.impl = e->impl;
             if (e->kind == ops::Kind::Int && e->width == 8) {
                 switch (e->op) {
-                case ops::Op::Add: case ops::Op::Sub: case ops::Op::Mul:
-                case ops::Op::Div: case ops::Op::Mod: case ops::Op::Max:
-                case ops::Op::Min: case ops::Op::BitAnd: case ops::Op::BitOr:
-                case ops::Op::BitXor: case ops::Op::Shl: case ops::Op::Shr:
-                case ops::Op::Eq: case ops::Op::Neq: case ops::Op::Lt:
-                case ops::Op::Le: case ops::Op::Gt: case ops::Op::Ge:
-                    ins.fast_i64 = true;
-                    break;
+                case ops::Op::Add: ins.fast_i64 = true; ins.opfn = 1; break;
+                case ops::Op::Sub: ins.fast_i64 = true; ins.opfn = 2; break;
+                case ops::Op::Mul: ins.fast_i64 = true; ins.opfn = 3; break;
+                case ops::Op::Div: ins.fast_i64 = true; ins.opfn = 4; break;
+                case ops::Op::Mod: ins.fast_i64 = true; ins.opfn = 5; break;
+                case ops::Op::Max: ins.fast_i64 = true; ins.opfn = 6; break;
+                case ops::Op::Min: ins.fast_i64 = true; ins.opfn = 7; break;
+                case ops::Op::BitAnd: ins.fast_i64 = true; ins.opfn = 8; break;
+                case ops::Op::BitOr: ins.fast_i64 = true; ins.opfn = 9; break;
+                case ops::Op::BitXor: ins.fast_i64 = true; ins.opfn = 10; break;
+                case ops::Op::Shl: ins.fast_i64 = true; ins.opfn = 11; break;
+                case ops::Op::Shr: ins.fast_i64 = true; ins.opfn = 12; break;
+                case ops::Op::Eq: ins.fast_i64 = true; ins.opfn = 13; break;
+                case ops::Op::Neq: ins.fast_i64 = true; ins.opfn = 14; break;
+                case ops::Op::Lt: ins.fast_i64 = true; ins.opfn = 15; break;
+                case ops::Op::Le: ins.fast_i64 = true; ins.opfn = 16; break;
+                case ops::Op::Gt: ins.fast_i64 = true; ins.opfn = 17; break;
+                case ops::Op::Ge: ins.fast_i64 = true; ins.opfn = 18; break;
                 default: break;
                 }
             }
