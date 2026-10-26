@@ -26,7 +26,7 @@ struct CInsn {
     ops::Kind kind = ops::Kind::None;
     std::uint8_t width = 0;
     std::uint8_t nrd = 0, nwr = 0;
-    std::uint8_t rd[4] = {};  // 寄存器号（Segment::regs 下标）
+    std::uint8_t rd[8] = {};  // 寄存器号（Segment::regs 下标）；call 时 rd[0]=callee，参数从 rd[1]
     std::uint8_t wr[2] = {};
     int s0 = 0;  // 明文指令坐标
     std::string name;    // opcode 原文（Native 分派用）

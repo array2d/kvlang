@@ -123,7 +123,9 @@ bool resolve_desc(FrameCtx& f, const std::string& name, std::string* key,
         return true;
     }
     if (name[0] != '*') {
-        *key = f.frame + "/" + name;
+        // 描述符可能带类型声明（`arr [int64]·int64`）：变量名取空格前段。
+        const auto sp = name.find(' ');
+        *key = f.frame + "/" + name.substr(0, sp);
         return true;
     }
     std::string member = name.substr(1);
@@ -235,8 +237,27 @@ bool slot_read_scalar(const kvspaceSlotView_t& v, Scalar* out) {
     return v_scalar_view(v.head + 18, v.headlen - 18, v.body, v.body_cap, out);
 }
 
+// 槽值缓存：None 值用显式 XValue 表示（kvspace-c 对 None 返回 NULL，C runtime 对齐语义）。
+thread_local std::uint8_t g_none_wire[32];
+thread_local std::uint8_t* g_none_ptr = nullptr;
+thread_local std::uint32_t g_none_len = 0;
+
+// 惰性解析：Ptr 描述符在首次读/写时经 resolve_desc 补 key（target 由运行时写，
+// 帧入口解析会过早失败）。读写共用同一入口。
+static inline bool ensure_reg_key(FrameCtx& f, FReg& r) {
+    if (r.key.empty() && !r.desc.empty()) {
+        std::string ek, ed;
+        if (!resolve_desc(f, r.desc, &ek, &ed))
+            return false;
+        r.key = std::move(ek);
+    }
+    return true;
+}
+
 bool read_reg(FrameCtx& f, std::uint8_t idx, Wire* out) {
     FReg& r = f.regs[idx];
+    if (!ensure_reg_key(f, r))
+        return false;
     if (ensure_ref(f, &r)) {
         std::uint8_t* d = nullptr;
         std::uint32_t n = 0;
@@ -245,11 +266,36 @@ bool read_reg(FrameCtx& f, std::uint8_t idx, Wire* out) {
             out->n = n;
             return true;
         }
+        // d=NULL（None 值）→ 返回显式 None XValue，不是失败。
+        if (!g_none_len) {
+            std::uint64_t nn = 0;
+            g_none_ptr = g_none_wire;
+            if (kvspaceXhNewNone(&g_none_ptr, &nn) == 0)
+                g_none_len = static_cast<std::uint32_t>(nn);
+        }
+        if (g_none_len) {
+            out->d = g_none_ptr;
+            out->n = g_none_len;
+            return true;
+        }
     }
     const std::uint8_t* d = nullptr;
     std::uint32_t n = 0;
-    if (!read_wire(f.h, r.key, &d, &n))
+    if (!read_wire(f.h, r.key, &d, &n)) {
+        // read_wire 也失败：同 None 语义（key 缺失/空值 → None）。
+        if (!g_none_len) {
+            std::uint64_t nn = 0;
+            g_none_ptr = g_none_wire;
+            if (kvspaceXhNewNone(&g_none_ptr, &nn) == 0)
+                g_none_len = static_cast<std::uint32_t>(nn);
+        }
+        if (g_none_len) {
+            out->d = g_none_ptr;
+            out->n = g_none_len;
+            return true;
+        }
         return false;
+    }
     out->d = d;
     out->n = n;
     return true;
@@ -285,6 +331,8 @@ bool read_scalar(FrameCtx& f, std::uint8_t idx, Scalar* out) {
 bool write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
                std::uint32_t len) {
     FReg& r = f.regs[idx];
+    if (!ensure_reg_key(f, r))
+        return false;
     r.view_ok = false;
     r.sc_ok = false;
     r.fast_i64 = false;
@@ -297,8 +345,12 @@ bool write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
         r.resolved = false;
     }
     char err[192] = {};
-    if (kvspaceSetValue(f.h, r.key.c_str(), data, len, 0, 0, err, sizeof err) != 0)
+    if (kvspaceSetValue(f.h, r.key.c_str(), data, len, 0, 0, err, sizeof err) != 0) {
+        if (std::getenv("RC2_TRACE"))
+            std::fprintf(stderr, "[setvalue fail key=%s err='%s' len=%u]\n",
+                         r.key.c_str(), err, len);
         return false;
+    }
     // 新键：补一次绑定，后续走 ByRef。
     if (kvspaceResolveRef(f.h, r.key.c_str(), &r.ref) == 0)
         r.resolved = true;
@@ -563,9 +615,14 @@ constexpr bool arith_i(const Scalar& a, const Scalar& b, Scalar* r) {
     if constexpr (O == ops::Op::BitAnd) { r->i = a.i & b.i; return true; }
     if constexpr (O == ops::Op::BitOr)  { r->i = a.i | b.i; return true; }
     if constexpr (O == ops::Op::BitXor) { r->i = a.i ^ b.i; return true; }
-    if constexpr (O == ops::Op::Shl) { r->i = (std::int64_t)(a.u << (b.u & 63)); return true; }
+    if constexpr (O == ops::Op::Shl) {
+        // SGN 时 i 有效（u 可能未同步）；无符号用 u。移位量取低 6 位。
+        r->i = (std::int64_t)((SGN ? (std::uint64_t)a.i : a.u)
+                              << (SGN ? (std::uint64_t)b.i & 63 : b.u & 63));
+        return true;
+    }
     if constexpr (O == ops::Op::Shr) {
-        r->i = SGN ? (a.i >> (b.u & 63)) : (std::int64_t)(a.u >> (b.u & 63));
+        r->i = SGN ? (a.i >> (b.i & 63)) : (std::int64_t)(a.u >> (b.u & 63));
         return true;
     }
     return false;
@@ -793,8 +850,19 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
             if (d.kind == Operand::Kind::Literal) {
                 f.regs[i].key = d.slot_key;
             } else if (d.kind == Operand::Kind::Var) {
-                if (!resolve_desc(f, d.name, &f.regs[i].key, err))
+                // Ptr 描述符（`*` 开头）惰性解析：target 由运行时写（如 &x 产 Ptr），
+                // 帧入口解析会过早失败。非 Ptr 的 Var/字面量帧入口一次建 key。
+                if (d.name[0] == '*' && d.name.rfind("*[0,", 0) == 0) {
+                    // 参数 Ptr（`*[0,±k]`）：call 时已绑定，帧入口解析。
+                    if (!resolve_desc(f, d.name, &f.regs[i].key, err))
+                        return RunResult::Error;
+                } else if (d.name[0] == '*') {
+                    // 普通 Ptr 描述符（`*p`）：target 由运行时写，惰性解析。
+                    f.regs[i].key.clear();
+                    f.regs[i].desc = d.name;
+                } else if (!resolve_desc(f, d.name, &f.regs[i].key, err)) {
                     return RunResult::Error;
+                }
             }
         }
     }
@@ -821,6 +889,18 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
             std::fprintf(stderr, "[%s d%d s0=%d op=%s impl=%d]\n",
                          f.func_dir.c_str(), f.depth, ins.s0, ins.name.c_str(),
                          (int)ins.impl);
+        // debugger = 调试断点：置 status=paused 后 Stop（外部恢复 status 才续跑）。
+        if (ins.op == ops::Op::Debugger) {
+            if (g_trace_on)
+                std::fprintf(stderr, "[debugger %s d%d s0=%d]\n",
+                             f.func_dir.c_str(), f.depth, ins.s0);
+            const std::string stk =
+                "/vthread/" + f.vid + "/\xE2\x80\xA5" "status";
+            write_text(f.h, stk, "paused");
+            if (stop_pc)
+                *stop_pc = param_key(f.frame, ins.s0, 0);
+            return RunResult::Stop;
+        }
         if (ins.impl == ops::Impl::Handoff || ins.impl == ops::Impl::None) {
             if (g_trace_on)
                 std::fprintf(stderr, "[stop %s d%d s0=%d %s]\n",
@@ -1008,8 +1088,420 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                     ok = write_named_i64(f.h, ins.wr[0], f, "uint64",
                                          (std::int64_t)r);
                 }
-            } else if (fn == "kvspace/set" || fn == "kvspace/get" ||
-                       fn == "kvspace/del" || fn == "kvspace/deltree" ||
+            } else if (fn == "array/fill") {
+                // array·fill(langtype[, value])：按定长数组类型一次成型 compact XValue。
+                // langtype 形如 `[4,4]float64`：解析 dims + 裸 elem kind，填 value（缺省 0）。
+                Wire lw{};
+                std::string lt;
+                if (ins.nrd < 1 || !read_reg(f, ins.rd[0], &lw) ||
+                    !wire_text(lw.d, lw.n, &lt)) {
+                    *err = "array·fill: bad langtype";
+                    return RunResult::Error;
+                }
+                // 解析 `[N,M]kind`。
+                std::int32_t dims[8];
+                std::uint32_t ndim = 0;
+                std::size_t pos = 0;
+                if (!lt.empty() && lt[0] == '[') {
+                    // `[N,M]kind`：括号内逗号分隔多个 dim。
+                    const std::size_t close = lt.find(']');
+                    if (close != std::string::npos) {
+                        const std::string seg = lt.substr(1, close - 1);
+                        std::size_t i = 0;
+                        while (i <= seg.size() && ndim < 8) {
+                            const std::size_t comma = seg.find(',', i);
+                            const std::string one =
+                                comma == std::string::npos
+                                    ? seg.substr(i)
+                                    : seg.substr(i, comma - i);
+                            char* end = nullptr;
+                            std::int64_t dv = std::strtoll(one.c_str(), &end, 10);
+                            dims[ndim++] = static_cast<std::int32_t>(dv);
+                            if (comma == std::string::npos)
+                                break;
+                            i = comma + 1;
+                        }
+                        lt = lt.substr(close + 1);  // 剩裸 kind（如 float64）
+                    }
+                }
+                // 每元素字节宽。
+                std::uint32_t esz = 0;
+                if (lt.rfind("float64", 0) == 0) esz = 8;
+                else if (lt.rfind("float32", 0) == 0) esz = 4;
+                else if (lt.rfind("int64", 0) == 0 || lt.rfind("uint64", 0) == 0) esz = 8;
+                else if (lt.rfind("int32", 0) == 0 || lt.rfind("uint32", 0) == 0) esz = 4;
+                else if (lt.rfind("int16", 0) == 0 || lt.rfind("uint16", 0) == 0) esz = 2;
+                else if (lt.rfind("int8", 0) == 0 || lt.rfind("uint8", 0) == 0 ||
+                         lt.rfind("bool", 0) == 0) esz = 1;
+                if (esz == 0 || ndim == 0) {
+                    *err = "array·fill: bad type " + lt;
+                    return RunResult::Error;
+                }
+                std::uint64_t total = 1;
+                for (std::uint32_t i = 0; i < ndim; i++)
+                    total *= static_cast<std::uint64_t>(dims[i]);
+                total *= esz;
+                std::vector<std::uint8_t> raw(total ? total : 1, 0);
+                // value 缺省 0；第二读参为填充值。
+                if (ins.nrd >= 2) {
+                    Wire vw{};
+                    Scalar vs{};
+                    if (read_reg(f, ins.rd[1], &vw) && v_scalar(vw, &vs)) {
+                        for (std::uint64_t i = 0; i < total / esz; i++) {
+                            const std::uint64_t off = i * esz;
+                            if (lt.rfind("float64", 0) == 0)
+                                std::memcpy(raw.data() + off, &vs.f, esz);
+                            else if (lt.rfind("float32", 0) == 0) {
+                                float f = (float)vs.f;
+                                std::memcpy(raw.data() + off, &f, esz);
+                            } else if (lt.rfind("int64", 0) == 0 ||
+                                       lt.rfind("uint64", 0) == 0) {
+                                std::uint64_t u = vs.k == Scalar::K::Int
+                                                      ? (std::uint64_t)vs.i
+                                                      : vs.u;
+                                std::memcpy(raw.data() + off, &u, esz);
+                            } else if (lt.rfind("int32", 0) == 0 ||
+                                       lt.rfind("uint32", 0) == 0) {
+                                std::uint32_t u32 = (std::uint32_t)(vs.k == Scalar::K::Int
+                                                            ? vs.i : (std::int64_t)vs.u);
+                                std::memcpy(raw.data() + off, &u32, esz);
+                            } else {
+                                std::uint8_t b = vs.k == Scalar::K::Int
+                                                    ? (std::uint8_t)vs.i : (std::uint8_t)vs.u;
+                                std::memset(raw.data() + off, b, esz);
+                            }
+                        }
+                    }
+                }
+                std::uint8_t* arr = nullptr;
+                std::uint32_t al = 0;
+                ok = kvspaceXvalueEncode(
+                         lt.c_str(), raw.data(), static_cast<std::uint32_t>(raw.size()),
+                         dims, ndim, &arr, &al) == 0 &&
+                     arr && write_reg(f, ins.wr[0], arr, al);
+                std::free(arr);
+            } else if (fn == "string/char") {
+                // string·char(s, idx)：取第 idx 个码点，返回 char/utf32 单字符。
+                Wire sw{};
+                std::int64_t idx = 0;
+                if (ins.nrd < 2 || !read_reg(f, ins.rd[0], &sw) ||
+                    !read_i64(f, ins.rd[1], &idx)) {
+                    *err = "string·char: bad input";
+                    return RunResult::Error;
+                }
+                kvspaceXh sh{};
+                std::uint32_t cp = 0;
+                if (kvspaceXhDecode(sw.d, sw.n, &sh) == 0 && sh.body) {
+                    std::string sl(reinterpret_cast<const char*>(sh.langtype),
+                                   sh.langtype_len);
+                    if (sl.find("utf32") != std::string::npos) {
+                        const std::uint32_t n =
+                            static_cast<std::uint32_t>(sh.content_len / 4);
+                        if (idx >= 0 && (std::uint64_t)idx < n)
+                            std::memcpy(&cp, sh.body + (std::uint64_t)idx * 4, 4);
+                        else {
+                            *err = "string·char: index out of bounds";
+                            return RunResult::Error;
+                        }
+                    } else {
+                        // utf8：逐码点数到 idx。
+                        const std::uint8_t* b = sh.body;
+                        std::int64_t rune_i = 0;
+                        for (std::uint64_t i = 0; i < sh.content_len && rune_i <= idx;) {
+                            const std::uint8_t c = b[i];
+                            std::uint32_t r = 0, take = 1;
+                            if (c < 0x80) { r = c; }
+                            else if ((c >> 5) == 0x6) { r = c & 0x1F; take = 2; }
+                            else if ((c >> 4) == 0xE) { r = c & 0x0F; take = 3; }
+                            else if ((c >> 3) == 0x1E) { r = c & 0x07; take = 4; }
+                            for (std::uint32_t k = 1; k < take && i + k < sh.content_len; k++)
+                                r = (r << 6) | (b[i + k] & 0x3F);
+                            if (rune_i == idx) { cp = r; break; }
+                            rune_i++;
+                            i += take;
+                        }
+                        if (rune_i < idx) {
+                            *err = "string·char: index out of bounds";
+                            return RunResult::Error;
+                        }
+                    }
+                }
+                const std::uint32_t u32 = cp;
+                std::uint8_t* cb = nullptr;
+                std::uint32_t cl = 0;
+                const std::int32_t cdims[1] = {1};  // 单码点 = [1]char/utf32
+                ok = kvspaceXvalueEncode(
+                         "char/utf32",
+                         reinterpret_cast<const std::uint8_t*>(&u32), 4,
+                         cdims, 1, &cb, &cl) == 0 &&
+                     cb && write_reg(f, ins.wr[0], cb, cl);
+                std::free(cb);
+            } else if (fn == "string/len") {
+                // string·len：读字符串，返回字符数（utf8 数 rune，utf32 数组长）。
+                Wire sw{};
+                if (ins.nrd < 1 || !read_reg(f, ins.rd[0], &sw)) {
+                    *err = "string·len: bad input";
+                    return RunResult::Error;
+                }
+                kvspaceXh sh{};
+                std::int64_t len = 0;
+                if (kvspaceXhDecode(sw.d, sw.n, &sh) == 0 && sh.body) {
+                    std::string sl(reinterpret_cast<const char*>(sh.langtype),
+                                   sh.langtype_len);
+                    if (sl.find("utf32") != std::string::npos) {
+                        len = static_cast<std::int64_t>(sh.content_len / 4);
+                    } else if (sl.find("ascii") != std::string::npos) {
+                        len = static_cast<std::int64_t>(sh.content_len);
+                    } else {
+                        // utf8：数码点（跳过续字节 10xxxxxx）。
+                        const std::uint8_t* b = sh.body;
+                        for (std::uint64_t i = 0; i < sh.content_len; i++)
+                            if ((b[i] & 0xC0) != 0x80)
+                                len++;
+                    }
+                }
+                Scalar outv{};
+                outv.k = Scalar::K::Int;
+                outv.width = 8;
+                outv.i = len;
+                ok = slot_write_i64(f, ins.wr[0], len);
+            } else if (fn == "string/ord") {
+                // string·ord：返回字符串首码点（空串 -1）。utf32 直取第 0 个，
+                // utf8/ascii 解码首 rune。对齐 C runtime。
+                Wire sw{};
+                if (ins.nrd < 1 || !read_reg(f, ins.rd[0], &sw)) {
+                    *err = "string·ord: bad input";
+                    return RunResult::Error;
+                }
+                kvspaceXh sh{};
+                std::int64_t cp = -1;
+                if (kvspaceXhDecode(sw.d, sw.n, &sh) == 0 && sh.body &&
+                    sh.content_len) {
+                    std::string sl(reinterpret_cast<const char*>(sh.langtype),
+                                   sh.langtype_len);
+                    const std::uint8_t* b = sh.body;
+                    if (sl.find("utf32") != std::string::npos) {
+                        std::uint32_t u = 0;
+                        std::memcpy(&u, b, 4);
+                        cp = u;
+                    } else {
+                        std::uint32_t r = 0, take = 1;
+                        const std::uint8_t c = b[0];
+                        if (c < 0x80) { r = c; }
+                        else if ((c >> 5) == 0x6) { r = c & 0x1F; take = 2; }
+                        else if ((c >> 4) == 0xE) { r = c & 0x0F; take = 3; }
+                        else if ((c >> 3) == 0x1E) { r = c & 0x07; take = 4; }
+                        for (std::uint32_t k = 1; k < take && k < sh.content_len; k++)
+                            r = (r << 6) | (b[k] & 0x3F);
+                        cp = r;
+                    }
+                }
+                ok = slot_write_i64(f, ins.wr[0], cp);
+            } else if (fn == "xv/at" || fn == "xv/set") {
+                // compact 数组元素读/写（[N,M]kind，body 连续打包）。
+                // 读参[0]=数组；下标读参[1..n-1]；xv·set 最后读参=值，写回数组槽。
+                const bool is_set = fn == "xv/set";
+                Wire aw{};
+                if (!read_reg(f, ins.rd[0], &aw)) {
+                    *err = "xv: bad array";
+                    return RunResult::Error;
+                }
+                kvspaceXh xh{};
+                if (kvspaceXhDecode(aw.d, aw.n, &xh) != 0 || !xh.body) {
+                    *err = "xv: not a compact array";
+                    return RunResult::Error;
+                }
+                std::string lt(reinterpret_cast<const char*>(xh.langtype),
+                               xh.langtype_len);
+                // 解析 [N,M]kind。
+                std::int32_t dims[8];
+                std::uint32_t ndim = 0;
+                if (!lt.empty() && lt[0] == '[') {
+                    const std::size_t close = lt.find(']');
+                    if (close != std::string::npos) {
+                        const std::string seg = lt.substr(1, close - 1);
+                        std::size_t i = 0;
+                        while (i <= seg.size() && ndim < 8) {
+                            const std::size_t comma = seg.find(',', i);
+                            const std::string one =
+                                comma == std::string::npos
+                                    ? seg.substr(i)
+                                    : seg.substr(i, comma - i);
+                            char* end = nullptr;
+                            std::int64_t dv = std::strtoll(one.c_str(), &end, 10);
+                            dims[ndim++] = static_cast<std::int32_t>(dv);
+                            if (comma == std::string::npos) break;
+                            i = comma + 1;
+                        }
+                        lt = lt.substr(close + 1);
+                    }
+                }
+                std::uint32_t esz = 0;
+                if (lt.rfind("float64", 0) == 0) esz = 8;
+                else if (lt.rfind("float32", 0) == 0) esz = 4;
+                else if (lt.rfind("int64", 0) == 0 || lt.rfind("uint64", 0) == 0) esz = 8;
+                else if (lt.rfind("int32", 0) == 0 || lt.rfind("uint32", 0) == 0) esz = 4;
+                else if (lt.rfind("int16", 0) == 0 || lt.rfind("uint16", 0) == 0) esz = 2;
+                else if (lt.rfind("int8", 0) == 0 || lt.rfind("uint8", 0) == 0 ||
+                         lt.rfind("bool", 0) == 0) esz = 1;
+                const int nidx = is_set ? ins.nrd - 2 : ins.nrd - 1;
+                if (esz == 0 || ndim == 0 || nidx != (int)ndim) {
+                    *err = "xv: bad type/dims";
+                    return RunResult::Error;
+                }
+                std::int64_t flat = 0;
+                for (int d = 0; d < nidx; d++) {
+                    std::int64_t idxv = 0;
+                    if (!read_i64(f, ins.rd[d + 1], &idxv)) {
+                        *err = "xv: bad index";
+                        return RunResult::Error;
+                    }
+                    flat = flat * dims[d] + idxv;
+                }
+                // xh.body 已指向 head 之后（kvspaceXhDecode: body = data + headlen），
+                // 元素偏移 = flat * esz，**不含** head 长度。
+                const std::uint64_t off = (std::uint64_t)flat * esz;
+                if ((std::uint64_t)flat * esz + esz > xh.content_len) {
+                    *err = "xv: index out of range";
+                    return RunResult::Error;
+                }
+                if (!is_set) {
+                    // 读元素：按 elem kind 编码。
+                    Scalar ev{};
+                    ev.k = lt.rfind("float", 0) == 0   ? Scalar::K::Float
+                           : lt.rfind("int", 0) == 0   ? Scalar::K::Int
+                           : lt.rfind("uint", 0) == 0  ? Scalar::K::Uint
+                                                        : Scalar::K::Bool;
+                    ev.width = static_cast<std::uint8_t>(esz);
+                    if (ev.k == Scalar::K::Float) {
+                        if (esz == 8) std::memcpy(&ev.f, xh.body + off, esz);
+                        else {
+                            float f;
+                            std::memcpy(&f, xh.body + off, esz);
+                            ev.f = f;
+                        }
+                    } else if (ev.k == Scalar::K::Int) {
+                        std::int64_t v = 0;
+                        std::memcpy(&v, xh.body + off, esz);
+                        ev.i = v;
+                        ev.u = (std::uint64_t)v;
+                    } else {
+                        std::uint64_t v = 0;
+                        std::memcpy(&v, xh.body + off, esz);
+                        ev.u = v;
+                        ev.i = (std::int64_t)v;
+                    }
+                    std::uint8_t* eb = nullptr;
+                    std::uint32_t el = 0;
+                    ok = v_encode(lt.c_str(), esz, ev, &eb, &el) && eb &&
+                         write_reg(f, ins.wr[0], eb, el);
+                    std::free(eb);
+                } else {
+                    // 写元素：值读参最后，body 直写（shm 槽 body 即 mmap，写即持久）。
+                    Wire vw{};
+                    if (!read_reg(f, ins.rd[ins.nrd - 1], &vw)) {
+                        *err = "xv: bad value";
+                        return RunResult::Error;
+                    }
+                    FReg& ar = f.regs[ins.rd[0]];
+                    std::uint8_t* ab = nullptr;
+                    std::uint64_t acap = 0;
+                    if (reg_body(f, ins.rd[0], &ab, &acap) && ab &&
+                        (std::uint64_t)flat * esz + esz <= acap) {
+                        ar.body = ab;
+                        ar.cap = acap;
+                        const std::uint64_t body_off = (std::uint64_t)flat * esz;
+                        // 值 XValue：取 body 前 esz 字节（标量 body 即数值）。
+                        std::uint8_t tmp[8] = {0};
+                        kvspaceXh vh{};
+                        if (kvspaceXhDecode(vw.d, vw.n, &vh) == 0 && vh.body) {
+                            const std::uint32_t take =
+                                vh.content_len < esz ? vh.content_len : esz;
+                            std::memcpy(tmp, vh.body, take);
+                        } else if (vw.n <= 8) {
+                            std::memcpy(tmp, vw.d, vw.n);
+                        }
+                        std::memcpy(ab + body_off, tmp, esz);
+                        ar.fast_i64 = false;
+                        ar.fast_bool = false;
+                        ok = true;
+                    } else {
+                        // 回退：SetPartByRef（view 不可用）。
+                        char e[192] = {};
+                        ok = kvspaceSetPartByRef(f.h, &ar.ref, ar.key.c_str(),
+                                                 static_cast<std::uint32_t>(off),
+                                                 vw.d, vw.n, e, sizeof e) == 0;
+                        ar.view_ok = false;
+                    }
+                }
+            } else if (fn == "obj") {
+                // 容器创建（map/obj）：写槽描述符 `arr <langtype>` 取容器类型，
+                // 写 marker XValue（body 空、dims=[1]）+ 建成员目录。
+                // 对齐 C kvlangBuiltinMap：容器值是索引型（成员=子键）。
+                std::string lt;
+                // 写槽描述符 body = `name\0<langtype>`（NUL 分隔两段）。
+                const std::string wkey =
+                    f.func_dir + "/[" + std::to_string(ins.s0) + ",1]";
+                const std::uint8_t* wd = nullptr;
+                std::uint32_t wn = 0;
+                if (read_wire_raw(f.h, wkey, &wd, &wn) && wd) {
+                    kvspaceXh xh{};
+                    if (kvspaceXhDecode(wd, wn, &xh) == 0 && xh.body) {
+                        // body 前 5 字节计数头 + 名字 + NUL + 类型。
+                        const std::uint8_t* b = xh.body;
+                        const std::size_t bl = xh.content_len;
+                        if (bl > 5) {
+                            const char* p = reinterpret_cast<const char*>(b + 5);
+                            const std::size_t cap = bl - 5;
+                            std::size_t i = 0;
+                            while (i < cap && p[i] != '\0') i++;
+                            if (i < cap)
+                                lt.assign(p + i + 1, cap - i - 1);
+                        }
+                    }
+                }
+                if (lt.empty())
+                    lt = "map";
+                // 容器 marker：langtype 含 `·`（map 类型），用 XhNewShort 直存。
+                std::uint8_t* mark = nullptr;
+                std::uint64_t ml = 0;
+                ok = kvspaceXhNewShort(lt.c_str(), nullptr, 0, &mark, &ml) == 0 &&
+                     mark &&
+                     write_reg(f, ins.wr[0], mark,
+                               static_cast<std::uint32_t>(ml));
+                std::free(mark);
+                if (ok) {
+                    // 建成员目录（容器子键空间）。
+                    char e[192] = {};
+                    const std::string dir = f.regs[ins.wr[0]].key + "/";
+                    ok = kvspaceMkindex(f.h, dir.c_str(), 0, e, sizeof e) == 0;
+                }
+            } else if (fn == "kvlang/abs") {
+                // &x ≡ kvlang·abs(x)：读参是变量名/字面量路径 → 产 Ptr（langtype=目标 kindexpr，body=绝对路径）。
+                std::string k0;
+                const RegDesc& ad = seg->regs[ins.rd[0]];
+                if (ad.kind == Operand::Kind::Literal) {
+                    ok = atext(0, &k0);
+                } else if (ad.name[0] == '/') {
+                    k0 = ad.name;
+                } else {
+                    k0 = f.regs[ins.rd[0]].key;  // 变量已解析的帧 key
+                }
+                if (!ok || k0.empty()) {
+                    *err = "native: bad path operand: " + ins.name;
+                    return RunResult::Error;
+                }
+                const std::uint8_t* td = nullptr;
+                std::uint32_t tn = 0;
+                std::string lt;
+                if (read_wire(f.h, k0, &td, &tn))
+                    (void)v_langtype(Wire{td, tn}, &lt);
+                std::uint8_t* ptr = nullptr;
+                std::uint32_t pl = 0;
+                ok = kvspaceNewPtr(lt.c_str(), k0.c_str(), &ptr, &pl) == 0 && ptr &&
+                     write_reg(f, ins.wr[0], ptr, pl);
+                std::free(ptr);
+            } else if (fn == "kvspace/del" || fn == "kvspace/deltree" ||
                        fn == "kvspace/mkindex" || fn == "kvspace/listlen" ||
                        fn == "kvspace/listat" || fn == "kvspace/cp" ||
                        fn == "kvspace/cpdir" || fn == "kvspace/cplist" ||
@@ -1020,15 +1512,10 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                     *err = "native: bad path operand: " + ins.name;
                     return RunResult::Error;
                 }
-                if (fn == "kvspace/set") {
-                    ok = ins.nrd == 2 &&
-                         kvspaceSetValue(f.h, k0.c_str(), in[1].d, in[1].n, 0, 0,
-                                         errbuf, sizeof errbuf) == 0;
-                } else if (fn == "kvspace/get") {
-                    const std::uint8_t* d = nullptr;
-                    std::uint32_t n = 0;
-                    ok = read_wire(f.h, k0, &d, &n) &&
-                         write_reg(f, ins.wr[0], d, n);
+                // kvspace·get/set 已死刑（清理方案）：成员读写走 `=`/`base·*key`，
+                // 单路径读写走 `=`。c2 不再实现 get/set。
+                if (false) {
+                    // 保留编译期可达性：永不命中（get/set 不在 ops 表）。
                 } else if (fn == "kvspace/del") {
                     const char* keys[1] = {k0.c_str()};
                     ok = kvspaceDel(f.h, keys, 1, errbuf, sizeof errbuf) == 0;
@@ -1105,7 +1592,45 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                 *err = "call: empty callee";
                 return RunResult::Error;
             }
-            const std::string callee = fn.rfind("/lib/", 0) == 0 ? fn : "/lib/" + fold_op(fn);
+            // callee 解析：绝对 /lib/ 直用；含 `·` 的 pkg·func 折叠成 /lib/<pkg>/<func>；
+            // 裸名（无 /lib/ 无 ·）同 pkg 优先（读当前帧 ‥lib 取 pkg），否则回退根 /lib/<fn>。
+            std::string callee;
+            if (fn.rfind("/lib/", 0) == 0) {
+                callee = fn;
+            } else if (fn.find("\xC2\xB7") != std::string::npos) {
+                // pkg·func：`·` 是布局的函数分隔符，保留；只补 /lib/ 前缀。
+                callee = "/lib/" + fn;
+            } else if (fn.find('/') != std::string::npos) {
+                // 含 / 的路径：逐段补 /lib/ 前缀（aaa/bbb/math·sum 形式里 · 已在上分支）。
+                callee = "/lib/" + fn;
+            } else {
+                // 裸名：尝试当前 pkg。
+                std::string libdir;
+                if (read_text(f.h, f.frame + "/\xE2\x80\xA5" "lib", &libdir) &&
+                    libdir.size() > 5 && libdir.back() == '/')
+                    libdir.pop_back();
+                if (libdir.size() > 5) {
+                    // pkg = 剥 /lib/ 后最后一个分隔符（· 或 /）之前的部分。
+                    const std::string rel = libdir.substr(5);
+                    const auto dot = rel.rfind("\xC2\xB7");
+                    const auto sl = rel.rfind('/');
+                    const std::size_t sep = dot != std::string::npos &&
+                                                   (sl == std::string::npos ||
+                                                    dot > sl)
+                                               ? dot
+                                               : sl;
+                    const std::string pkg =
+                        sep == std::string::npos ? rel : rel.substr(0, sep);
+                    const std::string cand = "/lib/" + pkg + "\xC2\xB7" + fn;
+                    std::uint8_t* cd = nullptr;
+                    std::uint32_t cn = 0;
+                    const std::string ck = cand + "/[0,0]";
+                    if (kvspaceGet(f.h, ck.c_str(), 1, &cd, &cn) == 0 && cd && cn)
+                        callee = cand;
+                }
+                if (callee.empty())
+                    callee = "/lib/" + fn;
+            }
             const std::string callee_dir = callee + "/";
             const std::string nf = frame_root(f.vid, f.depth + 1);
             const std::string nstack = nf + "/";
@@ -1272,6 +1797,7 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
         Wire w[4]{};
         Scalar s[4]{};
         bool non_scalar = false;
+        bool none0 = false, none1 = false;
         if (ins.op != ops::Op::Copy) {
             for (int i = 0; i < ins.nrd; i++) {
                 if (read_scalar(f, ins.rd[i], &s[i]))
@@ -1280,19 +1806,74 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                     *err = "operand " + std::to_string(i) + " is missing";
                     return RunResult::Error;
                 }
-                non_scalar = true;
+                if (v_is_none(w[i])) {
+                    if (i == 0) none0 = true;
+                    else if (i == 1) none1 = true;
+                } else
+                    non_scalar = true;
             }
         }
         bool ok = true;
-        if (non_scalar) {
-            // 动态算子按运行时类型分派：`+` 对 char 族即字符串拼接。
-            std::string a, b;
-            if (ins.op != ops::Op::Add || ins.nrd != 2 ||
-                !wire_text(w[0].d, w[0].n, &a) ||
-                !wire_text(w[1].d, w[1].n, &b)) {
-                *err = "non-scalar operand: " + ins.name;
+        // None 参与比较：对齐 C 语义（Eq：双 None=true；Neq：双 None=false；其余 → TypeError）。
+        if ((none0 || none1) && is_cmp(ins.op)) {
+            if (ins.op == ops::Op::Eq)
+                ok = slot_write_bool(f, ins.wr[0], none0 && none1);
+            else if (ins.op == ops::Op::Neq)
+                ok = slot_write_bool(f, ins.wr[0], !(none0 && none1));
+            else {
+                *err = "TypeError: None in comparison: " + ins.name;
                 return RunResult::Error;
             }
+            if (g_prof_on) {
+                const std::uint64_t dh = now() - t0;
+                g_prof.handler += dh;
+                g_prof.steps++;
+                prof_tick(ins.prof_id, dh, 0);
+            }
+            if (!ok) {
+                *err = "value op failed: " + ins.name;
+                return RunResult::Error;
+            }
+            continue;
+        }
+        if (non_scalar) {
+            // char 族转码（char/utf8|utf32|ascii 互转）优先于 `+` 拼接。
+            // 简化：统一按 utf8 文本读入，目标编码经 kvspaceNewChar 产 char XValue。
+            if (ins.op == ops::Op::Cast && ins.nrd == 1 &&
+                ins.name.rfind("char/", 0) == 0) {
+                std::string txt;
+                if (!wire_text(w[0].d, w[0].n, &txt)) {
+                    *err = "char cast: bad input";
+                    return RunResult::Error;
+                }
+                std::uint8_t* cb = nullptr;
+                std::uint32_t cl = 0;
+                const int ncr = kvspaceNewChar(
+                    reinterpret_cast<const std::uint8_t*>(txt.data()),
+                    static_cast<std::uint32_t>(txt.size()), &cb, &cl);
+                ok = ncr == 0 && cb &&
+                     write_reg(f, ins.wr[0], cb, cl);
+                std::free(cb);
+                if (g_prof_on) {
+                    const std::uint64_t dh = now() - t0;
+                    g_prof.handler += dh;
+                    g_prof.steps++;
+                    prof_tick(ins.prof_id, dh, 0);
+                }
+                if (!ok) {
+                    *err = "value op failed: " + ins.name;
+                    return RunResult::Error;
+                }
+                continue;
+            } else {
+                // 动态算子按运行时类型分派：`+` 对 char 族即字符串拼接。
+                std::string a, b;
+                if (ins.op != ops::Op::Add || ins.nrd != 2 ||
+                    !wire_text(w[0].d, w[0].n, &a) ||
+                    !wire_text(w[1].d, w[1].n, &b)) {
+                    *err = "non-scalar operand: " + ins.name;
+                    return RunResult::Error;
+                }
             const std::string out_s = a + b;
             const std::int32_t dims[1] = {static_cast<std::int32_t>(out_s.size())};
             std::uint8_t* buf = nullptr;
@@ -1315,18 +1896,117 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                 return RunResult::Error;
             }
             continue;
+            }
         }
+        // 动态键：int64/标量 → 十进制字符串；char 族 → 文本。
+        auto key_str = [&](const Wire& kw, std::string* out) {
+            Scalar sc{};
+            if (v_scalar(kw, &sc)) {
+                char b[64];
+                switch (sc.k) {
+                case Scalar::K::Int:
+                    std::snprintf(b, sizeof b, "%lld", (long long)sc.i);
+                    *out = b;
+                    return true;
+                case Scalar::K::Uint:
+                    std::snprintf(b, sizeof b, "%llu", (unsigned long long)sc.u);
+                    *out = b;
+                    return true;
+                default:
+                    break;
+                }
+            }
+            return wire_text(kw.d, kw.n, out);
+        };
         if (ins.op == ops::Op::Copy) {
-            Wire src{};
-            if (read_reg(f, ins.rd[0], &src)) {
-                ok = write_reg(f, ins.wr[0], src.d, src.n);
+            // 成员路径（layout MEMBER_READ_OP="="）：nrd=2 = 成员读（base+key），
+            // 写槽描述符含 `·*` = 成员写。目标 key = 容器槽 + "/" + 键值。
+            const RegDesc& wdesc = seg->regs[ins.wr[0]];
+            const bool member_write =
+                wdesc.name.find("\xC2\xB7*") != std::string::npos;
+            if (ins.nrd == 2 && !member_write) {
+                // 成员读：base（读参0 的值或 Ptr 目标 key）+ key（读参1 的值）。
+                Wire bw{};
+                std::string base_key;
+                if (read_reg(f, ins.rd[0], &bw)) {
+                    std::string bt;
+                    if (v_ptr_target(bw, &bt))
+                        base_key = bt;
+                    else if (f.regs[ins.rd[0]].key.size() > 5)
+                        base_key = f.regs[ins.rd[0]].key;
+                }
+                Wire kw{};
+                std::string kstr;
+                if (!base_key.empty() && read_reg(f, ins.rd[1], &kw) &&
+                    key_str(kw, &kstr) && !kstr.empty()) {
+                    const std::string mkey = base_key + "/" + kstr;
+                    const std::uint8_t* md = nullptr;
+                    std::uint32_t mn = 0;
+                    if (read_wire(f.h, mkey, &md, &mn) && md && mn) {
+                        ok = write_reg(f, ins.wr[0], md, mn);
+                    } else {
+                        // 缺失成员 → None（容器成员可能未建）。
+                        std::uint8_t* none = nullptr;
+                        std::uint64_t nn = 0;
+                        ok = kvspaceXhNewNone(&none, &nn) == 0 && none &&
+                             write_reg(f, ins.wr[0], none,
+                                       static_cast<std::uint32_t>(nn));
+                        std::free(none);
+                    }
+                } else {
+                    *err = "member read: bad base/key: " + ins.name;
+                    return RunResult::Error;
+                }
+            } else if (member_write) {
+                // 成员写 `v -> base·*key`：写槽 `base·*key`，键 = `*` 后变量的**值**，
+                // 值 = 读参（v）。布局把写槽名保成 `L·*k`，键变量 k 由运行时读帧成员取值。
+                const std::string& wname = wdesc.name;
+                const auto mid = wname.find("\xC2\xB7*");
+                const std::string base_part = wname.substr(0, mid);
+                // 键变量名 = `·*` 后到末尾（写槽名无类型后缀，见 read_rwir）。
+                const std::string keyvar = wname.substr(mid + 3);
+                Wire kw{};
+                std::string kstr;
+                const std::uint8_t* kd = nullptr;
+                std::uint32_t kn = 0;
+                if (keyvar.empty() || !read_wire(f.h, f.frame + "/" + keyvar,
+                                                 &kd, &kn)) {
+                    *err = "member write: bad key var: " + wname;
+                    return RunResult::Error;
+                }
+                Wire kvw{kd, kn};
+                if (!key_str(kvw, &kstr) || kstr.empty()) {
+                    *err = "member write: bad key: " + ins.name;
+                    return RunResult::Error;
+                }
+                // base 槽 key = 帧局部变量名（arr 是帧变量，key=frame/arr）。
+                const std::string base_key = f.frame + "/" + base_part;
+                if (base_key.empty()) {
+                    *err = "member write: no base: " + ins.name;
+                    return RunResult::Error;
+                }
+                // 值 = 读参（v 的值）。保留完整 XValue 类型。
+                const std::string mkey = base_key + "/" + kstr;
+                char e[192] = {};
+                if (!read_reg(f, ins.rd[0], &kw)) {
+                    *err = "member write: no value: " + ins.name;
+                    return RunResult::Error;
+                }
+                ok = kvspaceSetValue(f.h, mkey.c_str(), kw.d, kw.n, 0, 0, e,
+                                     sizeof e) == 0;
             } else {
-                // 未赋值变量读作 None：整体写 None XValue，不是错误。
-                std::uint8_t* none = nullptr;
-                std::uint64_t nn = 0;
-                ok = kvspaceXhNewNone(&none, &nn) == 0 && none &&
-                     write_reg(f, ins.wr[0], none, static_cast<std::uint32_t>(nn));
-                std::free(none);
+                Wire src{};
+                if (read_reg(f, ins.rd[0], &src)) {
+                    ok = write_reg(f, ins.wr[0], src.d, src.n);
+                } else {
+                    // 未赋值变量读作 None：整体写 None XValue，不是错误。
+                    std::uint8_t* none = nullptr;
+                    std::uint64_t nn = 0;
+                    ok = kvspaceXhNewNone(&none, &nn) == 0 && none &&
+                         write_reg(f, ins.wr[0], none,
+                                   static_cast<std::uint32_t>(nn));
+                    std::free(none);
+                }
             }
         } else if (ins.op == ops::Op::Bool) {
             Scalar r{};

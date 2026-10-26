@@ -119,7 +119,7 @@ bool build(void* h, const std::string& func_dir, Segment* out) {
             out->insns.push_back(ins);
             continue;
         }
-        if (nr + (is_call ? 1 : 0) > 4 || nw > 2)
+        if (nr + (is_call ? 1 : 0) > 8 || nw > 2)
             return false;
         ins.nrd = static_cast<std::uint8_t>(nr + (is_call ? 1 : 0));
         ins.nwr = static_cast<std::uint8_t>(nw);

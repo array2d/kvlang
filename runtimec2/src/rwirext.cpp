@@ -148,11 +148,57 @@ char* resolve_read_impl(void* h, const char* pc, int idx) {
                 }
             }
         }
+        if (read_wire(h, target, &vd, &vn)) {
+            Wire w{vd, vn};
+            Scalar sc{};
+            if (v_scalar(w, &sc)) {
+                char buf[64];
+                switch (sc.k) {
+                case Scalar::K::Int:
+                    std::snprintf(buf, sizeof buf, "%lld", (long long)sc.i);
+                    return dup(buf);
+                case Scalar::K::Bool:
+                    return dup(sc.u ? "true" : "false");
+                case Scalar::K::Uint:
+                    std::snprintf(buf, sizeof buf, "%llu", (unsigned long long)sc.u);
+                    return dup(buf);
+                case Scalar::K::Float:
+                    format_float(sc.f, buf, sizeof buf);
+                    return dup(buf);
+                default:
+                    break;
+                }
+            }
+        }
         if (!read_text(h, target, &v))
             return dup("");
         return dup(v);
     }
     std::string v;
+    const std::uint8_t* kd = nullptr;
+    std::uint32_t kn = 0;
+    if (read_wire(h, key, &kd, &kn)) {
+        Wire w{kd, kn};
+        Scalar sc{};
+        if (v_scalar(w, &sc)) {
+            char buf[64];
+            switch (sc.k) {
+            case Scalar::K::Int:
+                std::snprintf(buf, sizeof buf, "%lld", (long long)sc.i);
+                return dup(buf);
+            case Scalar::K::Bool:
+                return dup(sc.u ? "true" : "false");
+            case Scalar::K::Uint:
+                std::snprintf(buf, sizeof buf, "%llu", (unsigned long long)sc.u);
+                return dup(buf);
+            case Scalar::K::Float:
+                format_float(sc.f, buf, sizeof buf);
+                return dup(buf);
+            default:
+                break;
+            }
+        }
+    }
     if (!read_text(h, key, &v))
         return dup("");
     return dup(v);

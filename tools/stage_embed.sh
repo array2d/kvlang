@@ -4,7 +4,8 @@
 # 布局（build.rs 固定从 build/embed 查找，不读构建环境变量）：
 #   <out>/libkvspace.so.1              dispatch 前端（必须含 RTLD_NOLOAD 能力标记：
 #                                      用本分支/最新 kvspace 构建，不要用 v0.3.18 旧前端）
-#   <out>/libkvlang_runtime.so         本仓本次构建（bin/）
+#   <out>/libkvlang_runtimec2.so       本仓本次构建（bin/，默认 c2 runtime）
+#   <out>/libkvlang_runtime.so         （可选 A/B：存在则一并带，build.rs 优先取 c2）
 #   <out>/libkvlanglayout.so           本仓本次构建（bin/）
 #   <out>/kvspace/libkvspace-c.so.1    shm 后端（deps.json pin）
 #   <out>/kvspace/libkvspace_durable.so.1  durable 后端（deps.json pin）
@@ -24,7 +25,9 @@ fi
 
 rm -rf "$OUT"
 mkdir -p "$OUT/kvspace"
-cp "$ROOT/bin/libkvlang_runtime.so" "$ROOT/bin/libkvlanglayout.so" "$OUT/"
+cp "$ROOT/bin/libkvlang_runtimec2.so" "$ROOT/bin/libkvlanglayout.so" "$OUT/"
+# A/B 可选臂：C 版存在则一并带（embed 默认 c2，见 build.rs）。
+[ -f "$ROOT/bin/libkvlang_runtime.so" ] && cp "$ROOT/bin/libkvlang_runtime.so" "$OUT/" || true
 cp "$FRONTEND" "$OUT/libkvspace.so.1"
 cp -P "$DEPS"/kvspace/libkvspace-c.so* "$DEPS"/kvspace/libkvspace_durable.so* "$OUT/kvspace/"
 echo "embed payload: $OUT"

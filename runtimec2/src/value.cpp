@@ -9,7 +9,12 @@
 
 namespace kv::rt {
 
-bool v_is_none(Wire w) noexcept { return !w.d || w.n == 0; }
+bool v_is_none(Wire w) noexcept {
+    if (!w.d || w.n == 0)
+        return true;
+    // 对齐 C 的 xh_is_none：flags 无 class/ptr 位 且 langtype 首字节为 0。
+    return w.n >= 19 && w.d[1] == 0 && w.d[18] == 0;
+}
 
 bool v_ptr(Wire w) noexcept {
     kvspaceXh xh{};

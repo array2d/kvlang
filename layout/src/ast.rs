@@ -261,6 +261,11 @@ pub struct Expr {
 /// runtime 按该槽里的 Ptr 解引用到目标——与形参槽 `*[0,±k]` 同一约定（见 spec [[ptr]]）。
 pub const DEREF_OP: &str = "*";
 
+/// 成员读（`base·key`/`base·*key`）在 AST 里的算子名。layout 把成员链展开成
+/// `base·seg…` 读表达式（等价 `=` 拷贝读的成员路径），runtime 拼路径读值。
+/// 不再经 `kvspace·get`（清理方案：get 死刑）。
+pub const MEMBER_READ_OP: &str = "=";
+
 impl Expr {
     pub fn is_leaf(&self) -> bool {
         self.op.is_empty()

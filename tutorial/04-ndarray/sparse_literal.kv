@@ -15,7 +15,7 @@ rwfunc print_sum(nums:*[int64]·int64) -> (total:int64) {
 	0 -> i
 	while (i < n) {
 		kvspace·listat(nums, i) -> k
-		kvspace·get(nums, k) -> x
+		nums·*k -> x
 		println(x)
 		total = total + x
 		i = i + 1

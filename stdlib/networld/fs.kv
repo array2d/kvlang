@@ -192,7 +192,7 @@ lib networld/fs {
 		i = 0
 		while (i < nc) {
 			kvspace·listat(ns, i) -> k
-			kvspace·get(ns, k) -> nm
+			ns·*k -> nm
 			networld/fs·match(nm, np) -> ok
 			if (ok) {
 				string·concat(dir, "/") -> d
@@ -251,7 +251,7 @@ lib networld/fs {
 			i = 0
 			while (i < nc) {
 				kvspace·listat(ns, i) -> k
-				kvspace·get(ns, k) -> nm
+				ns·*k -> nm
 				networld/fs·match(nm, glob) -> ok
 				if (gl == 0 || ok) {
 					string·concat(path, "/") -> d

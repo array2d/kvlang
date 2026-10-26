@@ -17,9 +17,7 @@ jobs:
         run: |
           cargo build --release --manifest-path layout/Cargo.toml
           mkdir -p bin && cp layout/target/release/libkvlanglayout.dylib bin/
-      - name: 构建 runtime（C）
-        run: |
-          cmake -S runtime -B build/runtime -DCMAKE_BUILD_TYPE=Release
-          cmake --build build/runtime --target kvlang_runtime -j
+      - name: 构建 runtimec2（默认 runtime）
+        run: make runtimec2
       - name: 构建 runtime-rs（Rust）
         run: cargo build --release --manifest-path runtime-rs/Cargo.toml

@@ -12,7 +12,7 @@ rwfunc map_reduce(nums:*[int64]·int64) -> (count:int64, total:int64) {
 	0 -> i
 	while (i < n) {
 		kvspace·listat(nums, i) -> k
-		kvspace·get(nums, k) -> nv
+		nums·*k -> nv
 		rem = nv % 2
 		rem == 1 -> is_odd
 
