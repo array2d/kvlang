@@ -58,16 +58,14 @@ void prof_report() {
         return;
     std::fprintf(stderr,
                  "RC2PROF steps=%llu frames=%llu handler=%.1f loop=%.1f "
-                 "pre=%.1f loads=%.1f ctrl=%.1f fb=%llu fslot=%llu fraw=%llu "
-                 "wfast=%llu wfb=%llu total=%.1f\n",
+                 "ctrl=%.1f fb=%llu wfast=%llu wfb=%llu total=%.1f\n",
                  g_prof.steps, g_prof.frames,
                  (double)g_prof.handler / g_prof.steps,
                  (double)g_prof.loop / g_prof.steps,
-                 (double)g_prof.pre / g_prof.steps,
-                 (double)g_prof.loads / g_prof.steps,
-                 (double)g_prof.ctrl / g_prof.steps, g_prof.fb, g_prof.f_slot,
-                 g_prof.f_raw, g_prof.w_fast, g_prof.w_fb,
-                 (double)(g_prof.handler + g_prof.loop) / g_prof.steps);
+                 (double)g_prof.ctrl / g_prof.steps, g_prof.fb, g_prof.w_fast,
+                 g_prof.w_fb,
+                 (double)(g_prof.handler + g_prof.loop + g_prof.ctrl) /
+                     g_prof.steps);
     std::fprintf(stderr, "RC2PROF rdtsc_cost=%.1f cycles\n", (double)g_prof.rdtsc);
     const double cal = (double)g_prof.rdtsc;
     for (std::size_t i = 0; i < g_prof.ops.size(); i++) {
@@ -812,7 +810,7 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
     if (g_prof_on)
         g_prof.frames++;
     for (; idx < n; idx++) {
-        const unsigned long long t_start = g_prof_on ? now() : 0;
+        const unsigned long long t0 = g_prof_on ? now() : 0;
         const CInsn& ins = seg->insns[idx];
         if (++g_run_steps > 50000000ULL) {
             *err = "runaway loop: " + f.func_dir + " s0=" + std::to_string(ins.s0) +
@@ -831,7 +829,6 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                 *stop_pc = param_key(f.frame, ins.s0, 0);
             return RunResult::Stop;
         }
-        unsigned long long t0 = g_prof_on ? now() : 0;
         if (ins.op == ops::Op::Goto || ins.op == ops::Op::Br) {
             std::int64_t target_v = 0;
             FReg &tr = f.regs[ins.rd[ins.op == ops::Op::Br ? 1 : 0]];
@@ -1250,15 +1247,32 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                     C2_FAST_CASE(16); C2_FAST_CASE(17); C2_FAST_CASE(18);
                     default: break;
                     }
-                    ok2 = slot_write_bool(f, ins.wr[0], rv != 0);
+                    // 比较结果直写 bool 槽：fast_bool 命中时内联 memcpy（免函数调用）。
+                    const bool rb = rv != 0;
+                    FReg &wb = f.regs[ins.wr[0]];
+                    if (wb.fast_bool ||
+                        (wb.sc_ok && wb.sck == Scalar::K::Bool && wb.scw == 1)) {
+                        std::uint8_t *bb = nullptr;
+                        std::uint64_t bcap = 0;
+                        if (reg_body(f, ins.wr[0], &bb, &bcap) && bb && bcap >= 1) {
+                            *bb = rb ? 1 : 0;
+                            wb.fb = rb;
+                            wb.fast_bool = true;
+                            ok2 = true;
+                        } else {
+                            wb.fast_bool = false;
+                            ok2 = slot_write_bool(f, ins.wr[0], rb);
+                        }
+                    } else {
+                        ok2 = slot_write_bool(f, ins.wr[0], rb);
+                    }
                 }
 #undef C2_FAST_CASE
                 if (g_prof_on) {
                     const std::uint64_t dh = now() - t0;
                     g_prof.handler += dh;
-                    g_prof.loop += (t0 - t_start);
                     g_prof.steps++;
-                    prof_tick(ins.prof_id, dh, t0 - t_start);
+                    prof_tick(ins.prof_id, dh, 0);
                 }
                 if (!ok2) {
                     *err = "value op failed: " + ins.name;
@@ -1282,11 +1296,6 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                 non_scalar = true;
             }
         }
-        unsigned long long th = g_prof_on ? now() : 0;
-        if (g_prof_on) {
-            g_prof.pre += t0 - t_start;
-            g_prof.loads += th - t0;
-        }
         bool ok = true;
         if (non_scalar) {
             // 动态算子按运行时类型分派：`+` 对 char 族即字符串拼接。
@@ -1309,10 +1318,10 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                  buf && write_reg(f, ins.wr[0], buf, len);
             std::free(buf);
             if (g_prof_on) {
-                const std::uint64_t dh = now() - th;
+                const std::uint64_t dh = now() - t0;
                 g_prof.handler += dh;
                 g_prof.steps++;
-                prof_tick(ins.prof_id, dh, th - t0);
+                prof_tick(ins.prof_id, dh, 0);
             }
             if (!ok) {
                 *err = "value op failed: " + ins.name;
@@ -1456,11 +1465,10 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                 sync_fast_after_write(f, ins.wr[0], out);
         }
         if (g_prof_on) {
-            const std::uint64_t dh = now() - th;
+            const std::uint64_t dh = now() - t0;
             g_prof.handler += dh;
-            g_prof.loop += (th - t0);
             g_prof.steps++;
-            prof_tick(ins.prof_id, dh, th - t0);
+            prof_tick(ins.prof_id, dh, 0);
         }
         if (!ok) {
             *err = "value op failed: " + ins.name;

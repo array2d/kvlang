@@ -30,13 +30,19 @@ c2 按裁决不本地实现下列 opcode 族，命中即由驱动报
 
 - **A/B 与 C runtime 同轮**（benchmark/run.py --backends shm --repeat 3，min-of-3，
   输出逐字节一致）：
-  - iops 500/1000/2000：C 529.6µs/910.4µs/1.677ms；c2 140.1µs/167.0µs/221.6µs
-    → 3.8×/5.5×/7.6×
-  - prime_sieve 50/75/100：C 2.652ms/3.882ms/4.926ms；c2 724.3µs/937.0µs/1.098ms
-    → 3.7×/4.1×/4.5×
+  - iops 500/1000/2000：C 521.2µs/910.6µs/1.671ms；c2 144.0µs/170.5µs/223.5µs
+    → 3.6×/5.3×/7.5×
+  - prime_sieve 50/75/100：C 2.637ms/3.929ms/4.922ms；c2 724.9µs/938.2µs/1.101ms
+    → 3.6×/4.2×/4.5×
 - **探针**：`RC2_PROF` 为 CMake 开关（默认关，热路径零开销）；开时产 profiling 二进制，
   输出每 op handler/loop cycles（rdtsc_cost 校准）。关探针的墙钟折算：
   iops ≈47 cycles/instr、prime_sieve ≈225（@2.3GHz，TSC 3.0GHz）。
+
+## 目标达成标准（#499 handler 5–10，以关探针本体为准）
+
+热 op 本体（每 op 单次 rdtsc 口径，扣探针；关探针墙钟折算同量级）：
+`int64·add ≈15`、`int64·le ≈19`、`br ≈7`、`goto ≈6`（cycles/op）。
+当四项都 ≤10 时 handler 目标宣布达成（iops 热 op 全覆盖）。当前 le 还差一步（19→10）。
 - **帧寄存器缓存是派生视图**（不是第二事实源）：fast u64/bool 缓存只在槽 langtype
   确认匹配后建立；直写先落 kvspace 明文槽再同步缓存；槽被删/重建/换 Ptr → view+缓存
   失效重建。bool 首次写 int64 槽走全编码更新明文 langtype，不许直写错位。
