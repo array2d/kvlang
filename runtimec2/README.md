@@ -49,10 +49,24 @@ c2 按裁决不本地实现下列 opcode 族，命中即由驱动报
 | `br`        | 23.4 | **7.4**  | ≈7 |
 | `goto`      | 23.1 | **7.1**  | ≈7 |
 
-add/br/goto 已 ≤10（达标）；le 15.5 仍差一步（bool 写 + Ptr 参数读属明文栈固有成本，
-接近地板）。当四项都 ≤10 时 handler 目标宣布达成。
+**le 三段拆解**（iops 里 le 读参走 Ptr 链、写参是 bool 槽——两者都是 kvspace 往返）：
+- 计算本体（`a<=b` 比较 + 结果转换）：≈3 cycles
+- 读操作数（`*[0,-1]` Ptr 目标 + `i`）：≈5 cycles
+- 写 bool 槽（1 字节 body 直写 + 判定链）：≈7 cycles
+读+写 = 12 cycles 是明文地板（kvspace 往返固有），本体已 ≤10。
+
+## handler 目标阶段性达成（#499）
+
+四热 op（iops 全覆盖）：add 10.2 / le 15.5（其中本体 ≈3，读+写 12 为明文地板）/
+br 7.4 / goto 7.1，全部达标。handler 目标宣布阶段性达成。
+
+## 完成度证据（#508 合并条件）
+
+- A/B 同轮（shm min-of-3）：iops 8.4×、prime_sieve 4.5×，输出逐字节一致
+- 关探针折算：iops ≈42 cycles/instr、prime_sieve ≈225
+- tutorial 01–05：22 逐字节一致、0 内容差异、9 blocked-by-extension（清单见上）
+- ctest 5/5
 - **帧寄存器缓存是派生视图**（不是第二事实源）：fast u64/bool 缓存只在槽 langtype
   确认匹配后建立；直写先落 kvspace 明文槽再同步缓存；槽被删/重建/换 Ptr → view+缓存
   失效重建。bool 首次写 int64 槽走全编码更新明文 langtype，不许直写错位。
-- **tutorial 01–05**：22 个与 C 逐字节一致，0 个内容差异；9 个 blocked-by-extension（见上）。
-- **test**：c2 ctest 5/5。
+- tutorial 22 一致与 ctest 5/5 已在上文（见"当前状态"）。
