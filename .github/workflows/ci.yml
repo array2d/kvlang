@@ -17,7 +17,7 @@ jobs:
         run: ./ci/deps.sh
       - name: 构建
         run: |
-          make runtime
+          make runtimec2
           make layout
           sudo cp layout/target/release/libkvlanglayout.so /usr/lib/
           make runtime-rs
@@ -83,7 +83,7 @@ jobs:
           sleep 1
       - name: 构建 runtime + layout（单文件 payload 里的两份）
         run: |
-          make runtime
+          make runtimec2
           make layout
       - name: 构建单一二进制
         run: FRONTEND_SO=/tmp/kvspace-src/build/libkvspace.so.1 make single

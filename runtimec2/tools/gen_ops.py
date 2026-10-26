@@ -54,16 +54,19 @@ def impl_of(name):
         return "Impl::Control"
     if "·" in name:
         fam = name.split("·", 1)[0]
-        if fam in KIND or fam == "kvlang":
+        if fam in NATIVE_FAMILIES or fam == "kvlang":
+            # kvlang·abs = 取地址（&x），与 C runtime 同责 → Native。
+            return "Impl::Native"
+        if fam in KIND:
             return "Impl::Typed"
-        if fam in NATIVE_FAMILIES:
-            return "Impl::Native"  # 与 C runtime 同责（原生 syscall/ABI）
-        return "Impl::Handoff"     # 真正的扩展族
+        # 用户裁定：容器/string/ndarray 是 runtimec2 核心职责（Native），
+        # Handoff 只留 struct·new（待实现）。
+        return "Impl::Native" if name != "struct·new" else "Impl::Handoff"
     if name in KIND:
         return "Impl::Typed"  # bare kind = cast
     if name in GENERIC or name.startswith("char/"):
         return "Impl::Dynamic"  # 泛型数值/比较 + char cast：运行动态分派
-    return "Impl::Handoff"      # 容器（array/obj/map）等
+    return "Impl::Native" if name != "struct·new" else "Impl::Handoff"
 
 
 def op_of(name):

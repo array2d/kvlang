@@ -310,7 +310,7 @@ lib string {
 				string·concat(r, sep) -> r
 			}
 			kvspace·listat(parts, i) -> key
-			kvspace·get(parts, key) -> v
+			parts·*key -> v
 			string·concat(r, v) -> r
 			i = i + 1
 		}

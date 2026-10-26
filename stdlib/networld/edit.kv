@@ -40,7 +40,7 @@ lib networld/edit {
 				i = lo
 				while (i <= hi) {
 					kvspace·listat(parts, i - 1) -> kk
-					kvspace·get(parts, kk) -> ln
+					parts·*kk -> ln
 					string·formatint(i, 10) -> no
 					string·concat(view, no) -> view
 					string·concat(view, ": ") -> view
@@ -137,8 +137,8 @@ lib networld/edit {
 				while (i < cnt) {
 					kvspace·listat(olds, i) -> ko
 					kvspace·listat(news, i) -> kn
-					kvspace·get(olds, ko) -> o
-					kvspace·get(news, kn) -> w
+					olds·*ko -> o
+					news·*kn -> w
 					string·count(t, o) -> c
 					if (c == 0) {
 						bad = i

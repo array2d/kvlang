@@ -57,6 +57,10 @@ fn parse_native() -> Result<Vec<Entry>, String> {
         if cols.len() < 6 {
             return Err(format!("native ISA record {} field count", n + 1));
         }
+        // 死刑：kvspace·get/set 不再发射（成员读写走 =，创建走 {t}·new）。
+        if cols[0] == "kvspace·get" || cols[0] == "kvspace·set" {
+            continue;
+        }
         let nr: u32 = cols[1].parse().map_err(|_| "native ISA nr".to_string())?;
         let nw: u32 = cols[2].parse().map_err(|_| "native ISA nw".to_string())?;
         let base = 4 + nr as usize + nw as usize;

@@ -19,6 +19,7 @@ namespace kv::rt {
 //   槽被删/重建/换 Ptr → 缓存失效重建（frame-entry 解析 + view 失效）。
 struct FReg {
     std::string key;
+    std::string desc;  // Ptr 描述符原样（惰性解析用；非 Ptr 为空）
     kvspaceRef_t ref{};
     bool resolved = false;
     kvspaceSlotView_t view{};

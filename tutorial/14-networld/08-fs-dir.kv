@@ -16,7 +16,7 @@ rwfunc print_dir(d:[]char/utf32) -> () {
 	i = 0
 	while (i < nc) {
 		kvspace·listat(names, i) -> key
-		kvspace·get(names, key) -> nm
+		names·*key -> nm
 		println("name=", nm)
 		i = i + 1
 	}

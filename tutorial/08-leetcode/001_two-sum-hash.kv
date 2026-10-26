@@ -11,16 +11,16 @@ rwfunc two_sum(nums:[]int64, target:int64) -> () {
 	while (i < n) {
 		x = nums[i]
 		need = target - x
-		kvspace·get(h, need) != None -> exists
+		h·*need != None -> exists
 
 		if (exists) {
-			kvspace·get(h, need) -> j
+			h·*need -> j
 			k = j - 1
 			println("[", k, ",", i, "]")
 			n -> i
 		} else {
 			v = i + 1
-			_ = kvspace·set(h, x, v)
+			v -> h·*x
 			i + 1 -> i
 		}
 	}

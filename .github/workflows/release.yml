@@ -26,7 +26,7 @@ jobs:
         run: ./ci/deps.sh
       - name: 构建 runtime + layout + runtime-rs（产 bin/ 下的 CLI）
         run: |
-          make runtime
+          make runtimec2
           make layout      # cargo build + cp kvlanglayout / libkvlanglayout.so → bin/
           make runtime-rs  # → bin/kvlang
       - name: 打包 ABI 产物
@@ -142,10 +142,9 @@ jobs:
           sudo cp /tmp/kvspace-durable/target/release/libkvspace_durable.dylib "$PREFIX/lib/kvspace/"
       - name: 构建 runtime + layout + runtime-rs + kvspace CLI
         run: |
-          cmake -S runtime -B build/runtime -DCMAKE_BUILD_TYPE=Release
-          cmake --build build/runtime --target kvlang_runtime -j
+          make runtimec2
           cargo build --release --manifest-path layout/Cargo.toml
-          # runtime-rs 的 build.rs 在 ../bin 找 libkvlang_runtime/libkvlanglayout，必须先就位
+          # runtime-rs 的 build.rs 在 ../bin 找 libkvlang_runtimec2/libkvlanglayout，必须先就位
           mkdir -p bin
           cp layout/target/release/libkvlanglayout.dylib bin/
           cargo build --release --manifest-path runtime-rs/Cargo.toml
@@ -219,7 +218,7 @@ jobs:
           # 打包前核验：CLI 的 layout/前端依赖确实解析到 @rpath，且 rpath 覆盖 lib/
           otool -L "$d/bin/kvlang"
           otool -l "$d/bin/kvlang" | awk '/cmd LC_RPATH/{f=1} f && /path /{print "rpath:", $2; f=0}'
-          for f in "$d/bin/kvlanglayout" "$d/lib/libkvlang_runtime.dylib" \
+          for f in "$d/bin/kvlanglayout" "$d/lib/libkvlang_runtimec2.dylib" \
                    "$d/lib/libkvlanglayout.dylib" "$d/lib/libkvspace.1.dylib"; do
             echo "=== otool -L $f"
             otool -L "$f"

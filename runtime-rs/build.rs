@@ -26,7 +26,8 @@ fn emit_embed(manifest: &str) {
     let dir = format!("{manifest}/../build/embed");
     let names = [
         ("EMBED_KVSPACE", "libkvspace.so.1"),
-        ("EMBED_KVLANG_RUNTIME", "libkvlang_runtime.so"),
+        // 默认 c2 runtime；C 版（libkvlang_runtime.so）仅作 A/B fallback。
+        ("EMBED_KVLANG_RUNTIME", "libkvlang_runtimec2.so"),
         ("EMBED_KVLANGLAYOUT", "libkvlanglayout.so"),
         ("EMBED_KVSPACE_C", "libkvspace-c.so.1"),
         ("EMBED_KVSPACE_DURABLE", "libkvspace_durable.so.1"),
@@ -124,7 +125,7 @@ fn gen_shim(ffi_rs: &str) {
 
 fn main() {
     let manifest = env!("CARGO_MANIFEST_DIR");
-    let bin = format!("{manifest}/../bin"); // kvlang/bin（新构建的 libkvlang_runtime.so）
+    let bin = format!("{manifest}/../bin"); // kvlang/bin（新构建的 libkvlang_runtimec2.so，默认 c2）
 
     // 安装目录固定（无构建期覆盖变量）：Linux /usr/lib + /usr/lib/kvspace；
     // macOS /usr/local/lib + /usr/local/lib/kvspace（/usr 受 SIP 保护）。
@@ -141,7 +142,7 @@ fn main() {
         println!("cargo:rustc-link-search=native={bin}");
         println!("cargo:rustc-link-search=native={kvspace_dir}");
         println!("cargo:rustc-link-search=native={kvspace_lib}");
-        println!("cargo:rustc-link-lib=dylib=kvlang_runtime");
+        println!("cargo:rustc-link-lib=dylib=kvlang_runtimec2");
         println!("cargo:rustc-link-lib=dylib=kvspace");
         println!("cargo:rustc-link-lib=dylib=kvlanglayout");
 

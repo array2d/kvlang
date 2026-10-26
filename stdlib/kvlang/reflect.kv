@@ -24,10 +24,10 @@ lib kvlang/reflect {
 		i = 0
 		while (i < n) {
 			kvspace·listat(ms, i) -> mk
-			kvspace·get(ms, mk) -> k8
+			ms·*mk -> k8
 			char/utf32(k8) -> key
 			string·concat(mdir, key) -> kp
-			kvspace·get(kp) -> v
+			kp -> v
 			xv·parselangtype(v) -> k
 			if (k != "langtype") {
 				string·find(key, ".src") -> src

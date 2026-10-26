@@ -116,6 +116,23 @@ KV2_EXPORT int kvlangDefRwir(void* kvspace, const char* opcode,
         return -1;
     void* h = kvspace;
     const std::string base = std::string("/lib/") + opcode;
+    // 新架构：签名声明同时落 /‥isa/<folded-op>（layout 的 isa_op 路径），
+    // 供 layout 对扩展/term op（如 println）按 Bridge 放行。
+    const std::string isa_base = [&] {
+        std::string f;
+        for (const char* p = opcode; *p; p++) {
+            const unsigned char c = (unsigned char)*p;
+            if (c == 0xC2 && (unsigned char)p[1] == 0xB7) {
+                f += '/';
+                p++;
+            } else if (c == '/') {
+                f += '/';
+            } else {
+                f += c;
+            }
+        }
+        return "/â¥isa/" + f;
+    }();
     int dynamic = 0;
     std::size_t last_len = nr > 0 && rp[nr - 1] ? std::strlen(rp[nr - 1]) : 0;
     if (nr > 0 && last_len >= 3 &&
@@ -129,16 +146,21 @@ KV2_EXPORT int kvlangDefRwir(void* kvspace, const char* opcode,
         static_cast<std::uint8_t>(nw & 0xff),
         static_cast<std::uint8_t>((nw >> 8) & 0xff),
         static_cast<std::uint8_t>(dynamic)};
-    if (!set_wire(h, base, "def rwir", body, sizeof body))
+    // /lib/<op> 供调用路由；/‥isa/<op> 供 layout 签名查询（def rwir）。
+    if (!set_wire(h, base, "def rwir", body, sizeof body) ||
+        !set_wire(h, isa_base, "def rwir", body, sizeof body))
         return -1;
-    for (int32_t i = 0; i < nr; i++)
-        if (!write_sig(h, base, -(i + 1), rp[i],
-                       (i == nr - 1) ? last_len : std::strlen(rp[i])))
-            return -1;
-    for (int32_t i = 0; i < nw; i++)
-        if (!write_sig(h, base, i + 1, wp[i], std::strlen(wp[i])))
-            return -1;
-    return 0;
+    auto write_sigs = [&](const std::string& b) {
+        for (int32_t i = 0; i < nr; i++)
+            if (!write_sig(h, b, -(i + 1), rp[i],
+                           (i == nr - 1) ? last_len : std::strlen(rp[i])))
+                return false;
+        for (int32_t i = 0; i < nw; i++)
+            if (!write_sig(h, b, i + 1, wp[i], std::strlen(wp[i])))
+                return false;
+        return true;
+    };
+    return write_sigs(base) && write_sigs(isa_base) ? 0 : -1;
 }
 
 KV2_EXPORT int kvlangRwirextHandoff(void* kvspace, const char* vtid,

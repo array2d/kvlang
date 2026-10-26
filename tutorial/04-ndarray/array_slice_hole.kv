@@ -19,6 +19,6 @@ rwfunc test() -> () {
 	b·[1] -> y
 	println("x", x)
 	println("y", y)
-	kvspace·get(b, "[5]") == None -> gone
+	b·*"[5]" == None -> gone
 	println("gone5", gone)
 }

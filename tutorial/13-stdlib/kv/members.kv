@@ -6,10 +6,10 @@
 //   members: 3
 rwfunc test() -> () {
 	kvspace·deltree("/mtest")
-	kvspace·set("/mtest/a", 1)
-	kvspace·set("/mtest/b", 2)
-	kvspace·set("/mtest/b/sub", 3)
-	kvspace·set("/mtest/c", 4)
+	1 -> "/mtest/a"
+	2 -> "/mtest/b"
+	3 -> "/mtest/b/sub"
+	4 -> "/mtest/c"
 	n = kvspace·count("/mtest/")
 	println("count:", n)
 	ms:[int64]·[]char/utf32 = {}

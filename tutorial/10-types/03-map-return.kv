@@ -9,10 +9,10 @@ rwfunc build() -> (m:*[]char/utf8·int64) {
 }
 rwfunc test() -> () {
 	build() -> r
-	kvspace·get(r, "n") -> n
+	r·*"n" -> n
 	println("n =", n)
-	kvspace·get(r, "x") -> x
+	r·*"x" -> x
 	println("x =", x)
-	kvspace·get(r, "none") == None -> miss
+	r·*"none" == None -> miss
 	println("miss =", miss)
 }

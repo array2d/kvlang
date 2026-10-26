@@ -50,6 +50,10 @@ else()
         LINK_FLAGS "-Wl,--disable-new-dtags -Wl,-rpath,/usr/lib -Wl,-rpath,/usr/lib/kvspace")
 endif()
 
+# install：装到 /usr/lib/libkvlang_runtimec2.so（与 C 版同目录）。
+install(TARGETS kvlang_runtimec2
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+
 add_executable(m1_smoke tests/m1_smoke.c)
 target_include_directories(m1_smoke PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/include /usr/include)

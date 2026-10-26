@@ -20,8 +20,10 @@ def load_gen():
 
 
 def main():
-    csv_path = sys.argv[1] if len(sys.argv) > 1 else os.path.expanduser(
-        "~/kvlang-isa/opcodes-499.csv")
+    # 权威：仓库留档 DB（workspace/py-lua-bytecode-ref/opcodes-499.csv）。
+    # impl 列由 gen_ops.py 规则生成，DB 只作分析视图；缺列/文件不存在 → SKIP。
+    csv_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
+        HERE, "../../workspace/py-lua-bytecode-ref/opcodes-499.csv")
     if not os.path.isfile(csv_path):
         print("SKIP: no DB export")
         return 0

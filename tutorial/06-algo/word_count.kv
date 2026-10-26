@@ -11,7 +11,7 @@ rwfunc word_count(chars:*[int64]·[]char/utf32) -> (nw:int64) {
 	0 -> i
 	while (i < n) {
 		kvspace·listat(chars, i) -> k
-		kvspace·get(chars, k) -> c
+		chars·*k -> c
 		blank = c == " "
 
 		if (blank) {
