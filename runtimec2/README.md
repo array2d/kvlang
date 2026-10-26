@@ -30,12 +30,15 @@ c2 按裁决不本地实现下列 opcode 族，命中即由驱动报
 
 - **A/B 与 C runtime 同轮**（benchmark/run.py --backends shm --repeat 3，min-of-3，
   输出逐字节一致）：
-  - iops 500/1000/2000：C 523.5µs/902.6µs/1.671ms；c2 157.4µs/202.4µs/293.6µs
-    → 3.3×/4.5×/5.7×
-  - prime_sieve 50/75/100：C 2.629ms/3.916ms/4.948ms；c2 759.3µs/999.5µs/1.191ms
-    → 3.5×/3.9×/4.2×
+  - iops 500/1000/2000：C 522.0µs/913.2µs/1.670ms；c2 155.0µs/193.1µs/275.0µs
+    → 3.4×/4.7×/6.1×
+  - prime_sieve 50/75/100：C 2.669ms/3.978ms/4.918ms；c2 749.9µs/989.6µs/1.168ms
+    → 3.6×/4.0×/4.2×
 - **探针**：`RC2_PROF` 为 CMake 开关（默认关，热路径零开销）；开时产 profiling 二进制，
   输出每 op handler/loop cycles（rdtsc_cost 校准）。关探针的墙钟折算：
-  iops ≈62 cycles/instr、prime_sieve ≈245（@2.3GHz，TSC 3.0GHz）。
+  iops ≈58 cycles/instr、prime_sieve ≈240（@2.3GHz，TSC 3.0GHz）。
+- **帧寄存器缓存是派生视图**（不是第二事实源）：fast u64/bool 缓存只在槽 langtype
+  确认匹配后建立；直写先落 kvspace 明文槽再同步缓存；槽被删/重建/换 Ptr → view+缓存
+  失效重建。bool 首次写 int64 槽走全编码更新明文 langtype，不许直写错位。
 - **tutorial 01–05**：22 个与 C 逐字节一致，0 个内容差异；9 个 blocked-by-extension（见上）。
 - **test**：c2 ctest 5/5。

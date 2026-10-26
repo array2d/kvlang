@@ -289,6 +289,8 @@ bool write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
     FReg& r = f.regs[idx];
     r.view_ok = false;
     r.sc_ok = false;
+    r.fast_i64 = false;
+    r.fast_bool = false;
     if (ensure_ref(f, &r)) {
         char err[192] = {};
         if (kvspaceSetValueByRef(f.h, &r.ref, r.key.c_str(), data, len, 0, 0, err,
@@ -305,23 +307,41 @@ bool write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
     return true;
 }
 
-// 直取 int64 槽值（不经 Scalar 结构）。
+// 直取 int64 槽值（不经 Scalar 结构）。快缓存命中：零判定、零拷贝。
 bool read_i64(FrameCtx& f, std::uint8_t idx, std::int64_t* out) {
     FReg& r = f.regs[idx];
-    std::uint8_t* body = nullptr;
-    std::uint64_t cap = 0;
-    if (!reg_body(f, idx, &body, &cap) || !body)
-        return false;
-    if (r.sc_ok) {
-        if (r.sck != Scalar::K::Int || r.scw != 8 || cap < 8)
-            return false;
-        std::memcpy(out, body, 8);
+    if (r.fast_i64) {
+        *out = r.fv;
         return true;
     }
     Scalar sc{};
     if (!read_scalar(f, idx, &sc) || sc.k != Scalar::K::Int)
         return false;
     *out = sc.i;
+    if (sc.width == 8) {
+        r.fv = sc.i;
+        r.fast_i64 = true;
+    }
+    return true;
+}
+
+bool truthy(const Scalar& s);
+
+// 直取 bool 槽值（比较/br/条件）。
+bool read_bool(FrameCtx& f, std::uint8_t idx, bool* out) {
+    FReg& r = f.regs[idx];
+    if (r.fast_bool) {
+        *out = r.fb;
+        return true;
+    }
+    Scalar sc{};
+    if (!read_scalar(f, idx, &sc))
+        return false;
+    *out = truthy(sc);
+    if (sc.k == Scalar::K::Bool && sc.width == 1) {
+        r.fb = *out;
+        r.fast_bool = true;
+    }
     return true;
 }
 
@@ -334,9 +354,11 @@ bool slot_write_i64(FrameCtx& f, std::uint8_t idx, std::int64_t v) {
     FReg& fr = f.regs[idx];
     std::uint8_t* body = nullptr;
     std::uint64_t cap = 0;
-    if (fr.sc_ok && fr.sck == Scalar::K::Int && fr.scw == 8 &&
+    if ((fr.fast_i64 || (fr.sc_ok && fr.sck == Scalar::K::Int && fr.scw == 8)) &&
         reg_body(f, idx, &body, &cap) && body && cap >= 8) {
         std::memcpy(body, &v, 8);
+        fr.fv = v;
+        fr.fast_i64 = true;
         if (g_prof_on)
             g_prof.w_fast++;
         return true;
@@ -346,7 +368,12 @@ bool slot_write_i64(FrameCtx& f, std::uint8_t idx, std::int64_t v) {
     s.width = 8;
     s.i = v;
     s.u = (std::uint64_t)v;
-    return slot_write_scalar(f, idx, s, 8);
+    bool ok = slot_write_scalar(f, idx, s, 8);
+    if (ok) {
+        fr.fv = v;
+        fr.fast_i64 = true;
+    }
+    return ok;
 }
 
 // 专用直写 bool：同理，1 字节。
@@ -354,9 +381,11 @@ bool slot_write_bool(FrameCtx& f, std::uint8_t idx, bool b) {
     FReg& fr = f.regs[idx];
     std::uint8_t* body = nullptr;
     std::uint64_t cap = 0;
-    if (fr.sc_ok && fr.sck == Scalar::K::Bool && fr.scw == 1 &&
+    if ((fr.fast_bool || (fr.sc_ok && fr.sck == Scalar::K::Bool && fr.scw == 1)) &&
         reg_body(f, idx, &body, &cap) && body && cap >= 1) {
         *body = b ? 1 : 0;
+        fr.fb = b;
+        fr.fast_bool = true;
         if (g_prof_on)
             g_prof.w_fast++;
         return true;
@@ -365,7 +394,12 @@ bool slot_write_bool(FrameCtx& f, std::uint8_t idx, bool b) {
     s.k = Scalar::K::Bool;
     s.width = 1;
     s.u = b ? 1 : 0;
-    return slot_write_scalar(f, idx, s, 1);
+    bool ok = slot_write_scalar(f, idx, s, 1);
+    if (ok) {
+        fr.fb = b;
+        fr.fast_bool = true;
+    }
+    return ok;
 }
 
 bool slot_write_scalar(FrameCtx& f, std::uint8_t idx, const Scalar& s,
@@ -423,6 +457,20 @@ bool slot_write_scalar(FrameCtx& f, std::uint8_t idx, const Scalar& s,
     bool ok = write_reg(f, idx, buf, len);
     std::free(buf);
     return ok;
+}
+
+// 写后 fast 缓存同步（Int/8 → fv；Bool/1 → fb；其余失效）。
+void sync_fast_after_write(FrameCtx& f, std::uint8_t idx, const Scalar& s) {
+    FReg& r = f.regs[idx];
+    r.fast_i64 = false;
+    r.fast_bool = false;
+    if (s.k == Scalar::K::Int && s.width == 8) {
+        r.fv = s.i;
+        r.fast_i64 = true;
+    } else if (s.k == Scalar::K::Bool && s.width == 1) {
+        r.fb = s.u != 0;
+        r.fast_bool = true;
+    }
 }
 
 // ── 值计算（与之前相同）────────────────────────────────────────────
@@ -1257,6 +1305,8 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
             r.width = 1;
             r.u = truthy(s[0]) ? 1 : 0;
             ok = slot_write_scalar(f, ins.wr[0], r, 1);
+            if (ok)
+                sync_fast_after_write(f, ins.wr[0], r);
         } else if (ins.op == ops::Op::Cast) {
             Scalar r{};
             r.k = ins.kind == ops::Kind::Int     ? Scalar::K::Int
@@ -1281,6 +1331,8 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                 r.u = (std::uint64_t)r.i;
             }
             ok = slot_write_scalar(f, ins.wr[0], r, r.width);
+            if (ok)
+                sync_fast_after_write(f, ins.wr[0], r);
         } else if (ins.op == ops::Op::And || ins.op == ops::Op::Or ||
                    ins.op == ops::Op::Not) {
             bool a = truthy(s[0]);
@@ -1293,6 +1345,8 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
             out.width = 1;
             out.u = r ? 1 : 0;
             ok = slot_write_scalar(f, ins.wr[0], out, 1);
+            if (ok)
+                sync_fast_after_write(f, ins.wr[0], out);
         } else if (is_cmp(ins.op)) {
             bool r = false;
             Scalar a = s[0], b = s[1];
@@ -1326,6 +1380,8 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
             out.width = 1;
             out.u = r ? 1 : 0;
             ok = ok && slot_write_scalar(f, ins.wr[0], out, 1);
+            if (ok)
+                sync_fast_after_write(f, ins.wr[0], out);
         } else {
             // 一元 `-` 与二元 Sub 同 opcode：按读参数区分。
             const ops::Op op =
@@ -1363,6 +1419,8 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
             if (ok)
                 ok = slot_write_scalar(f, ins.wr[0], out,
                                        out.width ? out.width : 8);
+            if (ok)
+                sync_fast_after_write(f, ins.wr[0], out);
         }
         if (g_prof_on) {
             const std::uint64_t dh = now() - th;

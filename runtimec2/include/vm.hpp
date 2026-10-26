@@ -13,6 +13,10 @@
 namespace kv::rt {
 
 // 单帧执行上下文（中间变量段：帧栈成员；值仍在 kvspace）。
+// 帧寄存器 = kvspace 明文槽的**派生视图**（不是第二事实源）：
+// - body/cap 指向 shm 槽（借用），fast 缓存纯 u64/布尔值；
+// - 任何写（本 runtime 或外部）都先写回 kvspace 明文槽再更新 fast，
+//   槽被删/重建/换 Ptr → 缓存失效重建（frame-entry 解析 + view 失效）。
 struct FReg {
     std::string key;
     kvspaceRef_t ref{};
@@ -24,6 +28,11 @@ struct FReg {
     bool sc_ok = false;  // 标量 kind/width 已缓存（写后失效）
     Scalar::K sck = Scalar::K::None;
     std::uint8_t scw = 0;
+    // 热路径快缓存：已确认 Int/8 时直存 u64；已确认 Bool/1 时直存 b。
+    bool fast_i64 = false;
+    std::int64_t fv = 0;
+    bool fast_bool = false;
+    bool fb = false;
 };
 
 struct FrameCtx {
