@@ -24,8 +24,8 @@ layout 能力经 cdylib 导出，第三方无需 fork 子进程即可布局（�
 
 layout 只连一个数据 store：编译前把 native 作者清单写成/刷新
 `/‥isa/<folded-op>` 的 `def rwir`（签名行 `[0,x]`），再从同一子树
-读回；不设 control store，不发布 `‥core/‥meta`，不写 per-func ref。
-扩展 rwir 由对应 runtime 在同一 `/‥isa` 子树注册；折叠冲突硬错。
+读回；只有一个数据 store。扩展 rwir 由对应 runtime 在同一 `/‥isa`
+子树注册；runtime 只按 `/‥isa/<folded-op>` 与 myrwircaps 对账。
 `vet`/`format` 不写/不读 ISA。
 
 ## vet 闸门

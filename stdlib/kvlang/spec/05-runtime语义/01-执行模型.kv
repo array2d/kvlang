@@ -68,8 +68,7 @@ runtime 对一个 vthread 的执行是如下循环（C 实现 `runtime/src/kvcpu
 5. **否则视为用户 rwfunc 调用**——opcode 移入 `reads[0]`，改写为 `call` 指令。
 
 layout 的 target selection（Rwir/User）在 **layout 期**完成；runtime
-按 myrwircaps 名字表绑定 `/‥isa` 声明。不再有 per-func `‥isa` ref、
-core hash 或 `ext_bridge`。
+runtime 只按 `/‥isa/<folded-op>` 与 myrwircaps 名字表对账。
 
 `op_id` 每条指令重新计算，控制/拷贝/myrwircaps 成员全折入同一整数字段，热路径无 opcode 字符串匹
 配。myrwircaps 判定先于 `/lib` 函数查表；`/‥isa` 只提供签名，不改变派发。

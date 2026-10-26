@@ -60,7 +60,7 @@ durable 后端（fs/redis）采用**惰性 flush**，只在**同一 kvspace 句�
   按静态 kind 校验。外部改变长度/kind 导致 box 移动**不可检测**（无世代号，读旧 head
   即 UAF）；外部写必须同 key/同类型/同尺寸，否则属契约外（debug 构建断言）。runtime
   只在本进程自身写该 key 后按 `kvlangBodyInvalidate*` 重取。
-- 每步不得为判定 typed/owned 而查 manifest 或 `strcmp`；定性全部在行装载/绑定期完成。
+- 每步不得为判定 typed/owned 而查 `/‥isa` 声明或 `strcmp`；定性全部在行装载/绑定期完成。
 
 	"#### -> /lib/kvlang/spec/runtime语义/cruntime与后端abi_续
 }

@@ -17,9 +17,9 @@ lib kvlang/spec/runtime语义/runtimec内建 {
 runtime-c 的 myrwircaps**（见 [[runtime开发规范]]）——核心能就地跑的 opcode 全在这张表里；
 `notinmycaps(opcode)` 是其否定谓词。
 
-ISA 不再分 Core/Ext manifest：native 与扩展都以
+ISA 不再分 Core/Ext class：native 与扩展都以
 `/‥isa/<folded-op>` 的 `def rwir` 为签名来源；是否本 runtime 可执行
-由 myrwircaps 判定，不由 manifest class 决定。
+由 myrwircaps 判定，不由声明 class 决定。
 
 跨操作数的维相等 / 输出维推断**不在**类型层，归 op 的 shape function（见 [[匹配语义与变参]]）。
 

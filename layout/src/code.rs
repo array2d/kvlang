@@ -810,9 +810,10 @@ pub fn write_func(
 ) -> Result<(), String> {
     let type_map = lower::infer_types(fn_);
     let declared = lower::declared_types(fn_);
-    let diags = lower::validate_writes(fn_, pkg, &type_map, structs, sigs);
+    let mut diags = lower::validate_writes(fn_, pkg, &type_map, structs, sigs);
     // P1b3 证明闸门/临时槽检查：与 specialize 用同一份（特化前）declared+stable。
     let stable = lower::stable_kinds(fn_, &type_map, &declared);
+    diags.extend(lower::specialize(fn_, &type_map, &declared));
     for d in &diags {
         eprintln!("{}", d.string());
     }

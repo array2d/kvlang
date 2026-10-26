@@ -14,6 +14,7 @@ cp "$TERM" "$BASE.bin/kvlang"
 cp "$LAYOUT" "$BASE.bin/kvlanglayout"
 cp "$(dirname "$LAYOUT")/libkvlanglayout.so" "$BASE.bin/" 2>/dev/null || true
 cp "$LIB" "$BASE.bin/libkvlang_runtime.so"
+export LD_LIBRARY_PATH="$BASE.bin:${LD_LIBRARY_PATH:-}"
 TERM="$BASE.bin/kvlang"
 
 PROG="$BASE/p.kv"
@@ -26,9 +27,9 @@ rwfunc test() -> () {
 }
 EOF
 export KVSPACE="shm://$BASE/s"
-"$TERM" isa publish >/dev/null 2>&1 || {
+"$TERM" -c 'print("boot")' >/dev/null 2>&1 || {
     rm -rf "$BASE" "$BASE.isa" "$BASE.bin"
-    echo "FAIL: publish" >&2
+    echo "FAIL: boot" >&2
     exit 1
 }
 "$LAYOUT" "$PROG" "shm://$BASE/s" >/dev/null 2>&1 || {

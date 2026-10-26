@@ -33,8 +33,7 @@ runtime 写扩展：
 
 layout 在生成 opcode 槽时按 `/‥isa` + `/lib` 静态元数据做三类归类
 （Rwir/User）；runtime 按 myrwircaps 名字表绑定 `/‥isa` 声明。
-def rwir 路由头落 `/‥isa/<folded-op>`，不把签名写进操作数槽；
-不写 per-func `‥isa` ref、不写 `ext_bridge` hash。
+def rwir 路由头落 `/‥isa/<folded-op>`，不把签名写进操作数槽。
 
 ## native rwir 声明落入 `/‥isa`
 

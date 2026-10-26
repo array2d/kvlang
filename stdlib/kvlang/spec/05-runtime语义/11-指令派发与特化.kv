@@ -18,14 +18,16 @@ opcode 的特化命名与数值 promotion 规则（语言可见）。
 - native handler 不感知委托、def rwir、调用与 yield。
 
 layout 的 target selection 在 layout 期完成（Rwir/User）；runtime 的
-handler_id/派发模型不因 `/‥isa` 改变。layout 不做 opcode 特化/lower，
-opcode 保持源码/lower 产物。
+handler_id/派发模型不因 `/‥isa` 改变。typed Rwir opcode 仍由 layout 的
+`specialize` 按静态类型发出；不做 Code/字节码下译。
 
-## 不做 opcode 特化
+## opcode 特化命名
 
-layout 不改写 `<kind>·<op>`，也不发数值 handler id；运行期按
-myrwircaps 索引派发，通用 handler 按实际 kind 归约。`char`/字符串、
-动态槽、混合宽度、int/float 混合都由通用实现处理。
+- 同型：`<kind>·<op>`（如 `int64·add`、`float64·lt`）。仅当**全部操作数静态类型严格一致**
+  且就是该 kind 时由 layout 发出；`char`/字符串、动态槽（空 kindexp）、混合宽度、int 与 float 混合
+  一律保留通用 opcode（如 `+`、`add`），由通用实现按值判别。
+- 混合（后续）：候选复合键 `<k1>·<k2>·<op>`（输入 kind 在前、结果 kind 由 promotion 表
+  决定）；在 wire 里直接写数值 handler id 作为备选方案记录，暂不采用。
 
 ## 数值 promotion（normative，与 runtime 现有实现逐条一致）
 

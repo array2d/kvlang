@@ -81,9 +81,7 @@ opcode 槽由 layout 按目标写 `rwir` 或 `rwfunc`；两者的 body 均为 5 
 
 ISA 签名只有一个来源：`/‥isa/<folded-op>` 的
 `def rwir` 明文节点，native 与扩展统一。不设独立控制
-store，不写 `/‥isa/‥core`、`/‥isa/‥meta`、
-`/‥isa/func<func-path>` 或 `ext_bridge`；数据 store 内
-`/‥isa/` 只承载这些签名节点。
+store；数据 store 内 `/‥isa/` 只承载这些签名节点。
 
 - `folded-op`：opcode 中 `·` 与 `/` 都折成 `/`；例 `int64·add` →
   `/‥isa/int64/add`，`networld/fs·read` → `/‥isa/networld/fs/read`。
