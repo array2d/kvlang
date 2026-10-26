@@ -1228,16 +1228,9 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                         }
                     }
                     FReg &w = f.regs[ins.wr[0]];
-                    if (w.fast_i64) {
-                        std::uint8_t *wb = nullptr;
-                        std::uint64_t wcap = 0;
-                        if (reg_body(f, ins.wr[0], &wb, &wcap) && wb && wcap >= 8) {
-                            std::memcpy(wb, &rv, 8);
-                            w.fv = rv;
-                        } else {
-                            w.fast_i64 = false;
-                            ok2 = slot_write_i64(f, ins.wr[0], rv);
-                        }
+                    if (w.fast_i64 && w.view_ok && w.body) {
+                        std::memcpy(w.body, &rv, 8);
+                        w.fv = rv;
                     } else {
                         ok2 = slot_write_i64(f, ins.wr[0], rv);
                     }
@@ -1247,22 +1240,16 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                     C2_FAST_CASE(16); C2_FAST_CASE(17); C2_FAST_CASE(18);
                     default: break;
                     }
-                    // 比较结果直写 bool 槽：fast_bool 命中时内联 memcpy（免函数调用）。
+                    // 比较结果直写 bool 槽：fast_bool 命中时 wb.body 直写（零函数调用）。
                     const bool rb = rv != 0;
                     FReg &wb = f.regs[ins.wr[0]];
-                    if (wb.fast_bool ||
-                        (wb.sc_ok && wb.sck == Scalar::K::Bool && wb.scw == 1)) {
-                        std::uint8_t *bb = nullptr;
-                        std::uint64_t bcap = 0;
-                        if (reg_body(f, ins.wr[0], &bb, &bcap) && bb && bcap >= 1) {
-                            *bb = rb ? 1 : 0;
-                            wb.fb = rb;
-                            wb.fast_bool = true;
-                            ok2 = true;
-                        } else {
-                            wb.fast_bool = false;
-                            ok2 = slot_write_bool(f, ins.wr[0], rb);
-                        }
+                    if ((wb.fast_bool ||
+                         (wb.sc_ok && wb.sck == Scalar::K::Bool && wb.scw == 1)) &&
+                        wb.view_ok && wb.body) {
+                        *wb.body = rb ? 1 : 0;
+                        wb.fb = rb;
+                        wb.fast_bool = true;
+                        ok2 = true;
                     } else {
                         ok2 = slot_write_bool(f, ins.wr[0], rb);
                     }
