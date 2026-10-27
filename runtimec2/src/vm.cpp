@@ -19,13 +19,7 @@ namespace kv::rt {
 using bin::FReg;
 using bin::FrameCtx;
 using bin::RunResult;
-using bin::g_prof;
-using bin::g_prof_on;
-using bin::g_trace_on;
-using bin::g_trace_n;
-using bin::now;
-using bin::prof_init;
-using bin::prof_tick;
+using bin::g_vm_bin;
 using bin::fast_i64;
 namespace {
 
@@ -51,7 +45,7 @@ struct FregPoolGuard {
 
 RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                     std::string* err) {
-    prof_init();
+    g_vm_bin.prof_init();
     if (stop_pc)
         stop_pc->clear();
     const Segment* seg = cached_segment(f.h, f.func_dir);
@@ -186,15 +180,15 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
         *err = "start s0 out of segment";
         return RunResult::Error;
     }
-    if (g_prof_on)
-        g_prof.frames++;
+    if (g_vm_bin.prof_on)
+        g_vm_bin.prof.frames++;
     // 四基址常驻：指令段/FReg 表基址提局部，热路径免 vector 链访问。
     const CInsn* ci = seg->insns.data();
     FReg* regs = f.regs.data();
     // runaway 防护：局部计数，函数末尾合并进全局（热路径无全局 inc）。
     unsigned long long run_steps = 0;
     for (; idx < n; idx++) {
-        const unsigned long long t0 = g_prof_on ? now() : 0;
+        const unsigned long long t0 = g_vm_bin.prof_on ? g_vm_bin.now() : 0;
         const CInsn& ins = ci[idx];
         // runaway 防护：每 16M 步抽检一次（热路径无每步大数比较）。
         if ((++run_steps & 0xFFFFFFULL) == 0 && run_steps > 50000000ULL) {
@@ -202,7 +196,7 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                    " op=" + ins.name;
             return RunResult::Error;
         }
-        if (g_trace_on && run_steps < g_trace_n)
+        if (g_vm_bin.trace_on && run_steps < g_vm_bin.trace_n)
             std::fprintf(stderr, "[%s d%d s0=%d op=%s impl=%d idx=%d]\n",
                          f.func_dir.c_str(), f.depth, ins.s0, ins.name.c_str(),
                          (int)ins.impl, idx);
@@ -400,9 +394,9 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                 }
                 idx--;
             fk_exit:
-                if (g_prof_on) {
-                    g_prof.handler += now() - t0;
-                    g_prof.steps += fk_n;
+                if (g_vm_bin.prof_on) {
+                    g_vm_bin.prof.handler += g_vm_bin.now() - t0;
+                    g_vm_bin.prof.steps += fk_n;
                 }
                 continue;
             }
@@ -495,11 +489,11 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                         w.sc_ok = false;
                     }
                 }
-                if (g_prof_on) {
-                    const std::uint64_t dh = now() - t0;
-                    g_prof.handler += dh;
-                    g_prof.steps++;
-                    prof_tick(ins.prof_id, dh, 0);
+                if (g_vm_bin.prof_on) {
+                    const std::uint64_t dh = g_vm_bin.now() - t0;
+                    g_vm_bin.prof.handler += dh;
+                    g_vm_bin.prof.steps++;
+                    g_vm_bin.prof_tick(ins.prof_id, dh, 0);
                 }
                 continue;
             }
@@ -550,11 +544,11 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                     w.fast_i64 = false;
                     w.sc_ok = false;
                 }
-                if (g_prof_on) {
-                    const std::uint64_t dh = now() - t0;
-                    g_prof.handler += dh;
-                    g_prof.steps++;
-                    prof_tick(ins.prof_id, dh, 0);
+                if (g_vm_bin.prof_on) {
+                    const std::uint64_t dh = g_vm_bin.now() - t0;
+                    g_vm_bin.prof.handler += dh;
+                    g_vm_bin.prof.steps++;
+                    g_vm_bin.prof_tick(ins.prof_id, dh, 0);
                 }
                 continue;
             }
@@ -593,16 +587,16 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                 return RunResult::Error;
             }
             idx = dest - 2;
-            if (g_prof_on) {
-                const std::uint64_t d = now() - t0;
-                g_prof.ctrl += d;
-                g_prof.steps++;
-                prof_tick(ins.prof_id, 0, d);
+            if (g_vm_bin.prof_on) {
+                const std::uint64_t d = g_vm_bin.now() - t0;
+                g_vm_bin.prof.ctrl += d;
+                g_vm_bin.prof.steps++;
+                g_vm_bin.prof_tick(ins.prof_id, 0, d);
             }
             continue;
         }
         if (ins.impl == ops::Impl::Handoff || ins.impl == ops::Impl::None) {
-            if (g_trace_on)
+            if (g_vm_bin.trace_on)
                 std::fprintf(stderr, "[stop %s d%d s0=%d %s]\n",
                              f.func_dir.c_str(), f.depth, ins.s0, ins.name.c_str());
             // Stop 边界（handoff/外部引擎接管）：冲刷帧局部纯内存变量落明文，
@@ -613,12 +607,12 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
             return RunResult::Stop;
         }
         if (ins.op == ops::Op::Return) {
-            if (g_prof_on) {
-                g_prof.loop += now() - t0;
-                g_prof.steps++;
+            if (g_vm_bin.prof_on) {
+                g_vm_bin.prof.loop += g_vm_bin.now() - t0;
+                g_vm_bin.prof.steps++;
             }
-            if (g_prof_on)
-                prof_tick(ins.prof_id, 0, 0);
+            if (g_vm_bin.prof_on)
+                g_vm_bin.prof_tick(ins.prof_id, 0, 0);
             // return 边界：本段含 native/handoff 才冲刷（纯算术/递归帧免，
             // 保持零 kvspace）。入口帧 return 交给外层引擎收尾（同样冲刷）。
             if (seg->has_native)
@@ -961,7 +955,7 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                     hcap ? ::strnlen(reinterpret_cast<const char*>(hd + 18),
                                      hcap)
                          : 0;
-                const bin::LangType st = bin::langtype_of(
+                const bin::LangType st = bin::g_vm_bin.langtype_of(
                     reinterpret_cast<const char*>(hd + 18), hlen);
                 std::uint32_t cp = 0;
                 const bool utf32 =
@@ -1207,11 +1201,11 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                             ln -= koff;
                         }
                     }
-                    const bin::LangType bt = bin::langtype_of(lt, ln);
+                    const bin::LangType bt = bin::g_vm_bin.langtype_of(lt, ln);
                     is_char = bt == bin::LangType::CharUtf8 ||
                               bt == bin::LangType::CharUtf32 ||
                               bt == bin::LangType::CharAscii;
-                    esz = bin::elem_width_of(bt);
+                    esz = bin::g_vm_bin.elem_width_of(bt);
                     ekind = bt == bin::LangType::Float32 ||
                                     bt == bin::LangType::Float64
                                 ? Scalar::K::Float
@@ -1561,11 +1555,11 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                     *err = "native: write failed: " + ins.name;
                 return RunResult::Error;
             }
-            if (g_prof_on) {
-                const std::uint64_t d = now() - t0;
-                g_prof.handler += d;
-                g_prof.steps++;
-                prof_tick(ins.prof_id, d, 0);
+            if (g_vm_bin.prof_on) {
+                const std::uint64_t d = g_vm_bin.now() - t0;
+                g_vm_bin.prof.handler += d;
+                g_vm_bin.prof.steps++;
+                g_vm_bin.prof_tick(ins.prof_id, d, 0);
             }
             continue;
         }
@@ -1788,8 +1782,8 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
             RunResult rr = run_frame(nfc, 1, stop_pc, err);
             if (rr != RunResult::Ok && rr != RunResult::Returned)
                 return rr;
-            if (g_prof_on)
-                g_prof.steps++;  // 嵌套帧自身已计时，勿重复累计
+            if (g_vm_bin.prof_on)
+                g_vm_bin.prof.steps++;  // 嵌套帧自身已计时，勿重复累计
             continue;
         }
         // 值算子
@@ -1823,11 +1817,11 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                 *err = "TypeError: None in comparison: " + ins.name;
                 return RunResult::Error;
             }
-            if (g_prof_on) {
-                const std::uint64_t dh = now() - t0;
-                g_prof.handler += dh;
-                g_prof.steps++;
-                prof_tick(ins.prof_id, dh, 0);
+            if (g_vm_bin.prof_on) {
+                const std::uint64_t dh = g_vm_bin.now() - t0;
+                g_vm_bin.prof.handler += dh;
+                g_vm_bin.prof.steps++;
+                g_vm_bin.prof_tick(ins.prof_id, dh, 0);
             }
             if (!ok) {
                 *err = "value op failed: " + ins.name;
@@ -1853,11 +1847,11 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                 ok = ncr == 0 && cb &&
                      write_reg(f, ins.wr[0], cb, cl);
                 std::free(cb);
-                if (g_prof_on) {
-                    const std::uint64_t dh = now() - t0;
-                    g_prof.handler += dh;
-                    g_prof.steps++;
-                    prof_tick(ins.prof_id, dh, 0);
+                if (g_vm_bin.prof_on) {
+                    const std::uint64_t dh = g_vm_bin.now() - t0;
+                    g_vm_bin.prof.handler += dh;
+                    g_vm_bin.prof.steps++;
+                    g_vm_bin.prof_tick(ins.prof_id, dh, 0);
                 }
                 if (!ok) {
                     *err = "value op failed: " + ins.name;
@@ -1873,11 +1867,11 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                     wire_text(w[1].d, w[1].n, &b)) {
                     const bool eq = a == b;
                     ok = slot_write_bool(f, ins.wr[0], ins.op == ops::Op::Eq ? eq : !eq);
-                    if (g_prof_on) {
-                        const std::uint64_t dh = now() - t0;
-                        g_prof.handler += dh;
-                        g_prof.steps++;
-                        prof_tick(ins.prof_id, dh, 0);
+                    if (g_vm_bin.prof_on) {
+                        const std::uint64_t dh = g_vm_bin.now() - t0;
+                        g_vm_bin.prof.handler += dh;
+                        g_vm_bin.prof.steps++;
+                        g_vm_bin.prof_tick(ins.prof_id, dh, 0);
                     }
                     continue;
                 }
@@ -1898,11 +1892,11 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                      &len) == 0 &&
                  buf && write_reg(f, ins.wr[0], buf, len);
             std::free(buf);
-            if (g_prof_on) {
-                const std::uint64_t dh = now() - t0;
-                g_prof.handler += dh;
-                g_prof.steps++;
-                prof_tick(ins.prof_id, dh, 0);
+            if (g_vm_bin.prof_on) {
+                const std::uint64_t dh = g_vm_bin.now() - t0;
+                g_vm_bin.prof.handler += dh;
+                g_vm_bin.prof.steps++;
+                g_vm_bin.prof_tick(ins.prof_id, dh, 0);
             }
             if (!ok) {
                 *err = "value op failed: " + ins.name;
@@ -1977,11 +1971,11 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                                 wr.fast_bool = true;
                             }
                         }
-                        if (g_prof_on) {
-                            const std::uint64_t dh = now() - t0;
-                            g_prof.handler += dh;
-                            g_prof.steps++;
-                            prof_tick(ins.prof_id, dh, 0);
+                        if (g_vm_bin.prof_on) {
+                            const std::uint64_t dh = g_vm_bin.now() - t0;
+                            g_vm_bin.prof.handler += dh;
+                            g_vm_bin.prof.steps++;
+                            g_vm_bin.prof_tick(ins.prof_id, dh, 0);
                         }
                         // 非别名写参/绝对路径槽：fast 直写只进缓存，须补落明文
                         // （内存别名由边界冲刷兜底，见 flush_frame_locals）。
@@ -2240,11 +2234,11 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
             if (ok)
                 sync_fast_after_write(f, ins.wr[0], out);
         }
-        if (g_prof_on) {
-            const std::uint64_t dh = now() - t0;
-            g_prof.handler += dh;
-            g_prof.steps++;
-            prof_tick(ins.prof_id, dh, 0);
+        if (g_vm_bin.prof_on) {
+            const std::uint64_t dh = g_vm_bin.now() - t0;
+            g_vm_bin.prof.handler += dh;
+            g_vm_bin.prof.steps++;
+            g_vm_bin.prof_tick(ins.prof_id, dh, 0);
         }
         if (!ok) {
             *err = "value op failed: " + ins.name;

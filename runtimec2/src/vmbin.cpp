@@ -57,7 +57,7 @@ std::uint8_t elem_width(LangType t) {
 }  // namespace
 
 // kindexpr 串 → 枚举（剥 dims 前缀；命中映射表）。返回 None 表示未知/复合。
-LangType langtype_of(const char* kindexpr, std::size_t len) {
+LangType VmBin::langtype_of(const char* kindexpr, std::size_t len) {
     const char* p = kindexpr;
     std::size_t n = len;
     // 剥 `[N,M]` dims 前缀（容器/数组）。
@@ -84,9 +84,9 @@ LangType langtype_of(const char* kindexpr, std::size_t len) {
     return LangType::None;
 }
 
-std::uint8_t elem_width_of(LangType t) { return elem_width(t); }
+std::uint8_t VmBin::elem_width_of(LangType t) { return elem_width(t); }
 
-bool is_scalar(LangType t) {
+bool VmBin::is_scalar(LangType t) {
     return t != LangType::None && t != LangType::Array &&
            t != LangType::StringKeyMap && t != LangType::StructRef &&
            t != LangType::Ext;
@@ -94,31 +94,23 @@ bool is_scalar(LangType t) {
 
 // ── 性能统计（RC2_PROF 构建探针；热路径零开销）──────────────────────
 
-Prof g_prof;
-#ifdef RC2_PROF
-constexpr bool g_prof_on = true;
-#else
-constexpr bool g_prof_on = false;
-#endif
-
-bool g_trace_on = false;
-unsigned long long g_trace_n = 200;
+VmBin g_vm_bin;
 
 // 时间探针：x86 rdtsc；ARM64 用 mach_absolute_time（macOS 跨架构移植）。
 #if defined(__x86_64__)
-unsigned long long now() { return __builtin_ia32_rdtsc(); }
+unsigned long long VmBin::now() { return __builtin_ia32_rdtsc(); }
 #else
 #include <mach/mach_time.h>
-unsigned long long now() {
+unsigned long long VmBin::now() {
     return static_cast<unsigned long long>(mach_absolute_time());
 }
 #endif
 
-void prof_tick(std::uint16_t id, std::uint64_t h, std::uint64_t l) {
+void VmBin::prof_tick(std::uint16_t id, std::uint64_t h, std::uint64_t l) {
 #ifdef RC2_PROF
-    if (g_prof.ops.size() < op_name_count())
-        g_prof.ops.resize(op_name_count());
-    OpStat& st = g_prof.ops[id];
+    if (prof.ops.size() < op_name_count())
+        prof.ops.resize(op_name_count());
+    OpStat& st = prof.ops[id];
     st.n++;
     st.handler += h;
     st.loop += l;
@@ -129,23 +121,23 @@ void prof_tick(std::uint16_t id, std::uint64_t h, std::uint64_t l) {
 #endif
 }
 
-void prof_report() {
-    if (!g_prof_on || g_prof.steps == 0)
+void VmBin::prof_report() {
+    if (!prof_on || prof.steps == 0)
         return;
     std::fprintf(stderr,
                  "RC2PROF steps=%llu frames=%llu handler=%.1f loop=%.1f "
                  "ctrl=%.1f fb=%llu wfast=%llu wfb=%llu total=%.1f\n",
-                 g_prof.steps, g_prof.frames, (double)g_prof.handler / g_prof.steps,
-                 (double)g_prof.loop / g_prof.steps,
-                 (double)g_prof.ctrl / g_prof.steps, g_prof.fb, g_prof.w_fast,
-                 g_prof.w_fb,
-                 (double)(g_prof.handler + g_prof.loop + g_prof.ctrl) /
-                     g_prof.steps);
+                 prof.steps, prof.frames, (double)prof.handler / prof.steps,
+                 (double)prof.loop / prof.steps,
+                 (double)prof.ctrl / prof.steps, prof.fb, prof.w_fast,
+                 prof.w_fb,
+                 (double)(prof.handler + prof.loop + prof.ctrl) /
+                     prof.steps);
     std::fprintf(stderr, "RC2PROF rdtsc_cost=%.1f cycles\n",
-                 (double)g_prof.rdtsc);
-    const double cal = (double)g_prof.rdtsc;
-    for (std::size_t i = 0; i < g_prof.ops.size(); i++) {
-        const OpStat& st = g_prof.ops[i];
+                 (double)prof.rdtsc);
+    const double cal = (double)prof.rdtsc;
+    for (std::size_t i = 0; i < prof.ops.size(); i++) {
+        const OpStat& st = prof.ops[i];
         if (st.n == 0)
             continue;
         std::fprintf(stderr, "RC2PROFOP %-24s n=%-7llu handler=%.1f loop=%.1f "
@@ -156,14 +148,14 @@ void prof_report() {
     }
 }
 
-void prof_init() {
+void VmBin::prof_init() {
     static bool inited = false;
     if (inited)
         return;
     inited = true;
-    g_trace_on = std::getenv("RC2_TRACE") != nullptr;
+    trace_on = std::getenv("RC2_TRACE") != nullptr;
     const char* e = std::getenv("RC2_TRACE_N");
-    g_trace_n = e ? std::strtoull(e, nullptr, 10) : 200ULL;
+    trace_n = e ? std::strtoull(e, nullptr, 10) : 200ULL;
 #ifdef RC2_PROF
     unsigned long long best = ~0ULL;
     for (int i = 0; i < 256; i++) {
@@ -172,7 +164,7 @@ void prof_init() {
         if (b - a < best)
             best = b - a;
     }
-    g_prof.rdtsc = best;
+    prof.rdtsc = best;
     std::atexit(prof_report);
 #endif
 }
