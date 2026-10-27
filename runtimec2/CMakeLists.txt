@@ -36,7 +36,7 @@ target_compile_options(kvlang_runtimec2 PRIVATE
     -Wall -Wextra)
 
 if(APPLE)
-    link_directories(/usr/local/lib/kvspace)
+    target_link_directories(kvlang_runtimec2 PRIVATE /usr/local/lib/kvspace)
     target_link_libraries(kvlang_runtimec2 PRIVATE kvspace)
     set_target_properties(kvlang_runtimec2 PROPERTIES
         OUTPUT_NAME "kvlang_runtimec2"
@@ -57,6 +57,9 @@ install(TARGETS kvlang_runtimec2
 add_executable(m1_smoke tests/m1_smoke.c)
 target_include_directories(m1_smoke PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/include /usr/include)
+if(APPLE)
+    target_link_directories(m1_smoke PRIVATE /usr/local/lib/kvspace)
+endif()
 target_link_libraries(m1_smoke PRIVATE kvlang_runtimec2 kvspace)
 
 enable_testing()
