@@ -22,8 +22,6 @@ struct RegDesc {
     int param_k = 0;      // 参数 Ptr 槽号（`*[0,±k]` build 预解析；帧入口零 substr/atoi）
 };
 
-struct Segment;
-
 struct CInsn {
     ops::Op op = ops::Op::None;
     ops::Kind kind = ops::Kind::None;
@@ -39,7 +37,6 @@ struct CInsn {
     int s0 = 0;  // 明文指令坐标
     std::string name;    // opcode 原文（Native 分派用）
     std::string callee;  // call：被调函数名
-    const Segment* callee_seg = nullptr;  // callee 段缓存指针（build 期解析，call 分支零 hash）
 };
 
 // 字面量 int64 快值缓存（build 期读槽一次，帧入口零 kvspace 预读）。

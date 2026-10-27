@@ -2767,8 +2767,13 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
             // bind 已结束（fib mem 路径早 return，nf 未被非 mem 路径再用）：move 免拷贝
             nfc.frame = std::move(nf);
             nfc.func_dir = callee;
-            std::memcpy(nfc.arg_src, mem_src, sizeof mem_src);
-            std::memcpy(nfc.arg_dst, mem_dst, sizeof mem_dst);
+            // 按实参数拷贝（fib 3 指针 vs 全 16 指针，省 232B memcpy/call）。
+            if (mem_src_n)
+                std::memcpy(nfc.arg_src, mem_src,
+                            static_cast<std::size_t>(mem_src_n) * sizeof(FReg*));
+            if (mem_dst_n)
+                std::memcpy(nfc.arg_dst, mem_dst,
+                            static_cast<std::size_t>(mem_dst_n) * sizeof(FReg*));
             nfc.arg_src_n = mem_src_n;
             nfc.arg_dst_n = mem_dst_n;
             nfc.mem_frame = mem_frame;
