@@ -2,14 +2,14 @@
 
 #include "runtime_internal.h"
 
-/* 绑定期取 shm slot view（status 必须传完整 key_fallback）。
+/* 绑定期取 shm xvalue body view（status 必须传完整 key_fallback）。
  * 0=成功；-1=槽不存在/不可视；-2=后端不支持（调用方每句柄永久 fallback）。 */
-int kvlangSlotViewBind(kvspace_t *kv, kvspaceKeyOff *ko,
-                       kvspaceSlotView_t *view);
+int kvlangXvalueBodyViewBind(kvspace_t *kv, kvspaceKeyOff *ko,
+                       kvspaceXvalueBodyView_t *view);
 
 /* status 只读 view：完整取 head content_len 与全部 body 字节并 NUL 结尾。
  * 形状/长度/容量不自洽 → false（调用方丢弃 view 并回退）。 */
-bool kvlangStatusViewRead(const kvspaceSlotView_t *view, char *out,
+bool kvlangStatusXvalueBodyViewRead(const kvspaceXvalueBodyView_t *view, char *out,
                           size_t cap);
 
 /* T-120 A：lazy operand 只读 view。同一 bind 内第 N 次读才分配+capture；
@@ -33,7 +33,7 @@ kvlangReadViewTry(kvspace_t *kv, struct kvlangBoundCell *cell, uint32_t pack,
 
 /* b1b：PC owned view 状态（每 ExecuteMode 一份）。 */
 typedef struct {
-    kvspaceSlotView_t view;
+    kvspaceXvalueBodyView_t view;
     bool ready;     /* 固定档（body_cap>=1024）已就绪 */
     bool fallback;  /* 永久回退 SetPartByRef */
     unsigned recheck; /* 每 128 次写重验 keyoff/view 地址 */

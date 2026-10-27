@@ -1,19 +1,19 @@
-/* P1b4-b1a：shm slot view 的 runtime 薄封装（晚链接 TU，控制热 TU 布局）。 */
+/* P1b4-b1a：shm xvalue body view 的 runtime 薄封装（晚链接 TU，控制热 TU 布局）。 */
 
-#include "slotview.h"
+#include "xvaluebodyview.h"
 #include "func_code.h"
 
 __attribute__((visibility("hidden"))) int
-kvlangSlotViewBind(kvspace_t *kv, kvspaceKeyOff *ko,
-                       kvspaceSlotView_t *view) {
+kvlangXvalueBodyViewBind(kvspace_t *kv, kvspaceKeyOff *ko,
+                       kvspaceXvalueBodyView_t *view) {
     /* ref 未解析（槽未创建）时不取 view：后端零 ref 会落到错误叶子。 */
     if (!kv || !ko || !view || !ko->key || !ko->resolved)
         return -1;
-    return kvspaceSlotView(kv->handle, &ko->off, ko->key, view);
+    return kvspaceXvalueBodyView(kv->handle, &ko->off, ko->key, view);
 }
 
 __attribute__((visibility("hidden"))) bool
-kvlangStatusViewRead(const kvspaceSlotView_t *view, char *out,
+kvlangStatusXvalueBodyViewRead(const kvspaceXvalueBodyView_t *view, char *out,
                           size_t cap) {
     if (!view || !view->head || !out || cap == 0)
         return false;
@@ -59,8 +59,8 @@ static bool pc_langtype_ok(const uint8_t *head, uint32_t headlen) {
 /* 取 view 并校验固定档与规范形状；成功写入 st->view。 */
 static bool pc_view_adopt(kvlangPcViewState *st, kvspace_t *kv,
                           kvspaceKeyOff *ko) {
-    kvspaceSlotView_t nv;
-    if (kvspaceSlotView(kv->handle, &ko->off, ko->key, &nv) != 0)
+    kvspaceXvalueBodyView_t nv;
+    if (kvspaceXvalueBodyView(kv->handle, &ko->off, ko->key, &nv) != 0)
         return false;
     if (!nv.head || nv.headlen != (1u << 6) || nv.body_cap < PC_FIXED_CAP ||
         nv.head[0] != 6 || (nv.head[1] & 3u) != 1u ||

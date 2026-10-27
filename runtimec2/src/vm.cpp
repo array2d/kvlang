@@ -211,8 +211,8 @@ bool ensure_ref(FrameCtx& f, FReg* r) {
     return true;
 }
 
-// shm slot view：head/body 直接指针（帧内缓存，写后失效）。
-bool reg_slot(FrameCtx& f, std::uint8_t idx, kvspaceSlotView_t* out) {
+// shm xvaluebodyview：head/body 直接指针（帧内缓存，写后失效）。
+bool reg_slot(FrameCtx& f, std::uint8_t idx, kvspaceXvalueBodyView_t* out) {
     FReg& r = f.regs[idx];
     if (r.view_ok) {
         *out = r.view;
@@ -220,7 +220,7 @@ bool reg_slot(FrameCtx& f, std::uint8_t idx, kvspaceSlotView_t* out) {
     }
     if (!ensure_ref(f, &r))
         return false;
-    if (kvspaceSlotView(f.h, &r.ref, r.key.c_str(), &r.view) != 0)
+    if (kvspaceXvalueBodyView(f.h, &r.ref, r.key.c_str(), &r.view) != 0)
         return false;
     r.view_ok = true;
     r.body = r.view.body;
@@ -236,7 +236,7 @@ bool reg_body(FrameCtx& f, std::uint8_t idx, std::uint8_t** body,
     if (!r.view_ok) {
         if (!ensure_ref(f, &r))
             return false;
-        if (kvspaceSlotView(f.h, &r.ref, r.key.c_str(), &r.view) != 0)
+        if (kvspaceXvalueBodyView(f.h, &r.ref, r.key.c_str(), &r.view) != 0)
             return false;
         r.view_ok = true;
         r.body = r.view.body;
@@ -247,7 +247,7 @@ bool reg_body(FrameCtx& f, std::uint8_t idx, std::uint8_t** body,
     return true;
 }
 
-bool slot_langtype(const kvspaceSlotView_t& v, std::string* lt) {
+bool slot_langtype(const kvspaceXvalueBodyView_t& v, std::string* lt) {
     if (!v.head || v.headlen <= 18)
         return false;
     const char* p = reinterpret_cast<const char*>(v.head + 18);
@@ -259,7 +259,7 @@ bool slot_langtype(const kvspaceSlotView_t& v, std::string* lt) {
 }
 
 // 从 view 直读标量（不 decode head、不 ABI）。
-bool slot_read_scalar(const kvspaceSlotView_t& v, Scalar* out) {
+bool slot_read_scalar(const kvspaceXvalueBodyView_t& v, Scalar* out) {
     if (!v.head || v.headlen <= 18)
         return false;
     return v_scalar_view(v.head + 18, v.headlen - 18, v.body, v.body_cap, out);
@@ -375,7 +375,7 @@ bool read_reg(FrameCtx& f, std::uint8_t idx, Wire* out) {
     return true;
 }
 
-// 读标量：slot view 直读；kind/width 每帧解析一次后缓存。
+// 读标量：xvaluebodyview 直读；kind/width 每帧解析一次后缓存。
 // 帧局部/内存别名的 fast 缓存直取（纯内存变量无明文槽，view 恒无 →
 // 此前每步 fallback 到 kvspaceXvalueEncode，fib 的 `+` 3003 cycles/次 主源）。
 bool read_scalar(FrameCtx& f, std::uint8_t idx, Scalar* out) {
@@ -1086,7 +1086,7 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
         FReg& rr = f.regs[i];
         rr.ref = kvspaceRef_t{};
         rr.resolved = false;
-        rr.view = kvspaceSlotView_t{};
+        rr.view = kvspaceXvalueBodyView_t{};
         rr.view_ok = false;
         rr.body = nullptr;
         rr.cap = 0;

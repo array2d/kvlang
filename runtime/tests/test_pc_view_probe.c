@@ -1,4 +1,4 @@
-/* b1b：读取 /vthread/<vid>/‥pc 的 slot view 并打印字段，供 shell 断言。 */
+/* b1b：读取 /vthread/<vid>/‥pc 的 xvalue body view 并打印字段，供 shell 断言。 */
 #include <kvspace/kvspace.h>
 #include <stdio.h>
 #include <string.h>
@@ -63,8 +63,8 @@ int main(int argc, char **argv) {
     memset(&r, 0, sizeof r);
     if (kvspaceResolveRef(h, key, &r) != 0)
         return 1;
-    kvspaceSlotView_t v;
-    if (kvspaceSlotView(h, &r, key, &v) != 0)
+    kvspaceXvalueBodyView_t v;
+    if (kvspaceXvalueBodyView(h, &r, key, &v) != 0)
         return 1;
     uint64_t a = rd64(v.head + 2), b = rd64(v.head + 10);
     printf("pow=%u flags=%u a=%llu b=%llu headlen=%u body_cap=%llu lt=%s body=%.*s\n",

@@ -12,7 +12,7 @@
 #include "value.hpp"
 
 // 双栈映射：kvspace 明文栈（string key + head 携带的 xvalue）+ runtimec2 私有
-// 二进制栈（vmbin）。本层把 slotview 等优化技术统一组织：langtype 枚举化、
+// 二进制栈（vmbin）。本层把 xvaluebodyview 等优化技术统一组织：langtype 枚举化、
 // 寄存器（FReg）/帧（FrameCtx）、key/xvalue 偏移量、PC 双 int32。
 // kvspace 保持 string 形态（明文栈契约），vmbin 侧零 string 判断
 // （编译期/init 预编码 + 槽直寻址）。
@@ -80,7 +80,7 @@ struct FReg {
     const RegDesc* desc_ref = nullptr;  // 段级描述符指针（普通变量惰性 key 用，零 string 拷贝）
     kvspaceRef_t ref{};
     bool resolved = false;
-    kvspaceSlotView_t view{};
+    kvspaceXvalueBodyView_t view{};
     bool view_ok = false;
     std::uint8_t* body = nullptr;  // view 的 body 指针（槽搬迁/写后失效）
     std::uint64_t cap = 0;

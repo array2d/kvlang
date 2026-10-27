@@ -48,7 +48,7 @@ struct LitFast {
 struct Segment {
     std::vector<CInsn> insns;
     std::vector<RegDesc> regs;  // 帧地址表条目（进程级，帧无关）
-    std::vector<LitFast> lit;   // 下标 = reg 号；字面量 int64 快值（fib 递归每帧省 kvspaceSlotView）
+    std::vector<LitFast> lit;   // 下标 = reg 号；字面量 int64 快值（fib 递归每帧省 kvspaceXvalueBodyView）
     bool has_native = false;    // 含 native/handoff：return/Stop 前须冲刷纯内存帧局部变量
 };
 
