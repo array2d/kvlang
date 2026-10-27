@@ -406,7 +406,14 @@ void flush_frame_locals(FrameCtx& f) {
     std::uint8_t* buf = nullptr;
     std::uint32_t len = 0;
     for (FReg& r : f.regs) {
-        if (r.view_ok || r.key.empty() || r.src_ptr || r.dst_ptr)
+        if (r.view_ok || r.src_ptr || r.dst_ptr)
+            continue;
+        // 惰性 key：普通变量（desc 非空且非 Ptr/绝对路径）帧入口未解析 key，
+        // flush 边界须补解析（native/handoff 前落明文，println 读帧局部）。
+        if (r.key.empty() && !r.desc.empty() && r.desc[0] != '*' &&
+            r.desc[0] != '/')
+            ensure_reg_key(f, r);
+        if (r.key.empty())
             continue;
         if (r.fast_i64 && is_frame_local(f, r.key)) {
             if (kvspaceXvalueEncode("int64",
@@ -1074,15 +1081,9 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                     // 参数 Ptr（`*[0,±k]`）：call 时已绑定。内存别名子帧命中
                     // arg_src/arg_dst 表 → 挂跨帧指针（读参 src / 写参 dst），
                     // 零 kvspace；未命中（容器/扩展参数）回退 kvspace 原路径。
-                    if (std::getenv("RC2_REGS"))
-                        std::fprintf(stderr, "[reg i=%zu d=%s as=%d ad=%d]\n",
-                                     i, d.name.c_str(), f.arg_src_n,
-                                     f.arg_dst_n);
-                    const std::string ds = d.name.substr(4);  // "[0,-k]" 剥 `*[0,`
-                    const auto cb = ds.find(']');
-                    const std::string ns = cb == std::string::npos
-                        ? ds : ds.substr(0, cb);
-                    const int k = std::atoi(ns.c_str());
+                    // 槽号 build 已预解析（d.param_k），帧入口零 substr/atoi
+                    // （fib 递归每帧 12+ reg，字符串解析是 setup 大头）。
+                    const int k = d.param_k;
                     FReg* ap = nullptr;
                     if (k < 0 && static_cast<std::size_t>(-k) <=
                                      static_cast<std::size_t>(f.arg_src_n))
@@ -1118,8 +1119,11 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                     // 普通 Ptr 描述符（`*p`）：target 由运行时写，惰性解析。
                     f.regs[i].key.clear();
                     f.regs[i].desc = d.name;
-                } else if (!resolve_desc(f, d.name, &f.regs[i].key, err)) {
-                    return RunResult::Error;
+                } else {
+                    // 普通变量：key 惰性（fast 路径零 key 构造，fib 的 a/b/x/y 每帧
+                    // 省 resolve_desc 拼接；读明文 fallback 时 ensure_reg_key 才解析）。
+                    f.regs[i].key.clear();
+                    f.regs[i].desc = d.name;
                 }
             }
     }
@@ -2453,9 +2457,7 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                 *err = "call: empty callee";
                 return RunResult::Error;
             }
-            const std::string callee_dir = callee + "/";
             const std::string nf = frame_root(f.vid, f.depth + 1);
-            const std::string nstack = nf + "/";
             char e[192] = {};
             // 纯 runtime rwfunc 调用（callee 有代码段可解释）：帧局部 int64/bool
             // 参数走内存别名，免建 kvspace arg 槽/写参槽（fib 递归热点）。
@@ -2467,6 +2469,7 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
             const bool mem_frame = cseg && !cseg->has_native;
             // 非纯内存帧：清残留 + 建目录 + 系统变量落明文（明文栈唯一事实）。
             if (!mem_frame) {
+                const std::string nstack = nf + "/";
                 kvspaceDelTree(f.h, nf.c_str(), e, sizeof e);
                 // Mkindex 删除：shm ART SetValue 隐式建目录（实测无回归）。
                 // 显式 Mkindex 使 SetValue 便宜 ~2k，但省掉 Mkindex 本身净省 ~11k/帧。
@@ -2475,6 +2478,7 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                     return RunResult::Error;
                 }
                 // 帧目录的 callee ext 索引：仅供他人 runtime 从 pc 找函数（handoff 路由）。
+                const std::string callee_dir = callee + "/";
                 kvspaceMkindexExt(f.h, nstack.c_str(), callee_dir.c_str(), e,
                                   sizeof e);
                 const std::string retpc = param_key(f.frame, ins.s0 + 1, 0);
@@ -2504,9 +2508,6 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                                 const std::string& value_key,
                                 const std::string& typ,
                                 const Wire& src) -> bool {
-                const std::string xs = std::to_string(x);
-                const std::string arg_key = nf + "/\xE2\x80\xA5" "arg[0," + xs + "]";
-                const std::string slot = nf + "/[0," + xs + "]";
                 char be[192] = {};
                 // 容器参数（typ 含 `·`）必须 Ptr：成员在调用方容器下（传值只复制
                 // marker，callee 读不到成员）。
@@ -2531,18 +2532,21 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                         if (ix + 1 > static_cast<std::size_t>(mem_dst_n))
                             mem_dst_n = static_cast<int>(ix + 1);
                     }
-                    if (std::getenv("RC2_TRACE"))
-                        std::fprintf(stderr, "[bindmem x=%d typ=%s]\n", x,
-                                     typ.c_str());
                     return true;
                 }
+                // 非 mem 路径才需要 arg_key/slot 字符串（fib 纯标量走 mem 别名，
+                // 免每参数 3 次 string 构造/转换）。
+                const std::string xs = std::to_string(x);
+                const std::string arg_key = nf + "/\xE2\x80\xA5" "arg[0," + xs + "]";
+                const std::string slot = nf + "/[0," + xs + "]";
                 if (std::getenv("RC2_TRACE") && callee.find("bsearch") != std::string::npos)
                     std::fprintf(stderr, "[bindkv x=%d typ=%s memcall=%d scalar=%d]\n",
                                  x, typ.c_str(), (int)(cseg != nullptr),
                                  (int)scalar_arg);
                 // 首个需要 kvspace 槽的参数（非标量绑定路径）：补建帧目录。
                 if (!mk_done) {
-                    if (kvspaceMkindex(f.h, nstack.c_str(), 0, be, sizeof be) != 0) {
+                    const std::string ns = nf + "/";
+                    if (kvspaceMkindex(f.h, ns.c_str(), 0, be, sizeof be) != 0) {
                         *err = std::string("bind: frame dir failed: ") + be;
                         return false;
                     }
@@ -2642,7 +2646,8 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
             nfc.h = f.h;
             nfc.vid = f.vid;
             nfc.depth = f.depth + 1;
-            nfc.frame = nf;
+            // bind 已结束（fib mem 路径早 return，nf 未被非 mem 路径再用）：move 免拷贝
+            nfc.frame = std::move(nf);
             nfc.func_dir = callee;
             std::memcpy(nfc.arg_src, mem_src, sizeof mem_src);
             std::memcpy(nfc.arg_dst, mem_dst, sizeof mem_dst);
@@ -2929,7 +2934,9 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                             std::string("v:") + keyref;
                         std::uint8_t kridx = 255;
                         for (std::size_t kr = 0; kr < f.regs.size(); kr++) {
-                            if (f.regs[kr].key == f.frame + "/" + keyref) {
+                            // 惰性 key 普通变量 desc=name（帧局部），与 key 等价匹配。
+                            if (f.regs[kr].key == f.frame + "/" + keyref ||
+                                f.regs[kr].desc == keyref) {
                                 kridx = static_cast<std::uint8_t>(kr);
                                 break;
                             }

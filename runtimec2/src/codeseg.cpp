@@ -55,6 +55,14 @@ bool operand_desc(void* h, const std::string& key, RegDesc* out) {
     if (read_rwir(h, key, &op, &nr, &nw)) {
         out->kind = Operand::Kind::Var;
         out->name = op;
+        // 参数 Ptr 槽号预解析（`*[0,±k]`）：帧入口零 substr/atoi（fib 递归 setup 大头）。
+        if (op.size() > 4 && op[0] == '*' && op.compare(1, 3, "[0,") == 0) {
+            const char* p = op.c_str() + 4;
+            char* end = nullptr;
+            const long v = std::strtol(p, &end, 10);
+            if (end && *end == ']')
+                out->param_k = static_cast<int>(v);
+        }
         return true;
     }
     out->kind = Operand::Kind::Literal;
