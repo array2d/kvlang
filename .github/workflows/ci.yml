@@ -37,6 +37,7 @@ jobs:
       - name: 构建 layout + runtime-rs（提供 bin/kvlang、kvlanglayout）
         run: |
           mkdir -p bin
+          make runtimec2
           make runtime
           make layout
           make runtime-rs
