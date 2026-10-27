@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-#include "ops.hpp"
+#include "rwir.hpp"
 
 namespace kv::rt {
 

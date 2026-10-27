@@ -7,9 +7,8 @@
 
 #include <kvspace/kvspace.h>
 
-#include "model.hpp"
-#include "ops.hpp"
 #include "vmkv.hpp"
+#include "rwir.hpp"
 #include "status.hpp"
 #include "valueio.hpp"
 
@@ -31,11 +30,11 @@ std::string join(std::string_view a, std::string_view b) {
 }
 
 std::string status_key(std::string_view vid) {
-    return join(vthread_root(vid), join("/", join(kMemberSep, "status")));
+    return join(g_vmkv.vthread_root(vid), join("/", join(kMemberSep, "status")));
 }
 
 std::string pc_key(std::string_view vid) {
-    return join(vthread_root(vid), join("/", join(kMemberSep, "pc")));
+    return join(g_vmkv.vthread_root(vid), join("/", join(kMemberSep, "pc")));
 }
 
 std::string callpc_key(std::string_view frame) {
@@ -66,7 +65,7 @@ bool read_opcode(void* h, const std::string& pc, std::string* op) {
     Pc p;
     if (!parse_pc(pc, &p))
         return false;
-    const std::string frame = frame_root(p.vid, p.depth);
+    const std::string frame = g_vmkv.frame_root(p.vid, p.depth);
     std::string dir;
     if (!frame_func_dir(h, p.vid, p.depth, &dir))
         return false;
@@ -102,15 +101,15 @@ char* bootstrap_impl(Runtime* r, const char* funcname) {
     std::string vid = alloc_vid(h);
     if (vid.empty())
         return nullptr;
-    std::string func_key = "/lib/" + fold_op(funcname);
+    std::string func_key = "/lib/" + g_vmkv.fold_op(funcname);
     std::string func_dir = func_key + "/";
-    std::string frame = frame_root(vid, 1);
+    std::string frame = g_vmkv.frame_root(vid, 1);
     std::string stack = frame + "/";
     char err[192] = {};
     if (kvspaceMkindex(h, stack.c_str(), 0, err, sizeof err) != 0 ||
         kvspaceMkindexExt(h, stack.c_str(), func_dir.c_str(), err, sizeof err) != 0)
         return nullptr;
-    std::string entry = entry_pc(vid, 1);
+    std::string entry = g_vmkv.entry_pc(vid, 1);
     if (!write_text(h, callpc_key(frame), entry) ||
         !write_text(h, seglib_key(stack), func_key) ||
         !write_text(h, pc_key(vid), entry) || !write_status(h, vid, "init"))
@@ -127,8 +126,8 @@ int execute_vthread_impl(Runtime* r, const char* vid, char** out_pc) {
     // 帧级缓存：key/pc 只构造一次（P0：消灭每步字符串构造）。
     const std::string st_key = status_key(vid);
     const std::string pc_k = pc_key(vid);
-    const std::string msg_key = join(vthread_root(vid), join("/", join(kMemberSep, "msg")));
-    const std::string vid_root = vthread_root(vid);
+    const std::string msg_key = join(g_vmkv.vthread_root(vid), join("/", join(kMemberSep, "msg")));
+    const std::string vid_root = g_vmkv.vthread_root(vid);
     for (;;) {
         std::string st;
         if (!read_text(h, st_key, &st) || st.empty())
@@ -141,7 +140,7 @@ int execute_vthread_impl(Runtime* r, const char* vid, char** out_pc) {
         Pc p;
         if (!parse_pc(pc, &p))
             return -1;
-        const std::string frame = frame_root(p.vid, p.depth);
+        const std::string frame = g_vmkv.frame_root(p.vid, p.depth);
         static const bool ev_trace = std::getenv("RC2_TRACE") != nullptr;
         if (ev_trace)
             std::fprintf(stderr, "[ev vid=%s key=%s pc=%s status=%s]\n", vid,
@@ -169,7 +168,7 @@ int execute_vthread_impl(Runtime* r, const char* vid, char** out_pc) {
                 return -1;
             std::string err;
             std::string stop_pc;
-            RunResult rr = run_frame(fctx, p.s0, &stop_pc, &err);
+            RunResult rr = g_vmkv.run_frame(fctx, p.s0, &stop_pc, &err);
             if (rr == RunResult::Error) {
                 write_status(h, vid, "error");
                 write_text(h, msg_key,

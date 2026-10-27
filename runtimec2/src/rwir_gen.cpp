@@ -1,5 +1,5 @@
 /* 生成：native 作者清单 → 算子表。源 layout/tests/fixtures/isa_native.txt。勿手改。 */
-#include "ops.hpp"
+#include "rwir.hpp"
 
 namespace kv::ops {
 

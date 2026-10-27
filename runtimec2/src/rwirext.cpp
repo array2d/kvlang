@@ -5,7 +5,7 @@
 
 #include <kvspace/kvspace.h>
 
-#include "model.hpp"
+#include "vmkv.hpp"
 #include <cinttypes>
 
 #include "value.hpp"
@@ -53,8 +53,8 @@ char* dup(const std::string& s) {
 std::string func_key(void* h, const Pc& p, int s1) {
     std::string dir;
     if (frame_func_dir(h, p.vid, p.depth, &dir))
-        return param_key(dir, p.s0, s1);
-    return param_key(frame_root(p.vid, p.depth), p.s0, s1);
+        return g_vmkv.param_key(dir, p.s0, s1);
+    return g_vmkv.param_key(g_vmkv.frame_root(p.vid, p.depth), p.s0, s1);
 }
 
 bool param_exists(void* h, const Pc& p, int s1) {
@@ -76,7 +76,7 @@ char* params_impl(void* h, const char* pc) {
     }
     std::string op;
     int nr = 0, nw = 0;
-    if (!read_rwir(h, param_key(dir, p.s0, 0), &op, &nr, &nw))
+    if (!read_rwir(h, g_vmkv.param_key(dir, p.s0, 0), &op, &nr, &nw))
         return dup("");
     std::string out = op;
     for (int i = 0; i < nr; i++)
@@ -94,7 +94,7 @@ char* resolve_read_impl(void* h, const char* pc, int idx) {
     if (read_rwir(h, key, &var, &nr, &nw)) {
         // 变量操作数：按 * 描述符/裸名解析到帧栈成员，再取文本值。
         std::string target;
-        const std::string frame = frame_root(p.vid, p.depth);
+        const std::string frame = g_vmkv.frame_root(p.vid, p.depth);
         if (!var.empty() && var[0] == '*') {
             const std::string mk = frame + "/" + var.substr(1);
             const std::uint8_t* d = nullptr;
@@ -228,7 +228,7 @@ char* next_pc_impl(const char* pc) {
     Pc p;
     if (!pc || !parse_pc(pc, &p))
         return nullptr;
-    return dup(next_pc(p));
+    return dup(g_vmkv.next_pc(p));
 }
 
 }  // namespace kv::rt

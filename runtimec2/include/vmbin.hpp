@@ -102,9 +102,6 @@ struct VmBin {
     void prof_report();
 };
 
-// 进程级实例：vmkv 依赖的 bin 公开接口（经 vmkv.bin 访问）。
-extern VmBin g_vm_bin;
-
 // 帧寄存器：kvspace 明文槽的**派生视图**（不是第二事实源）。
 // - body/cap 指向 shm 槽（借用），fast 缓存纯 u64/布尔值；
 // - 任何写（本 runtime 或外部）都先写回 kvspace 明文槽再更新 fast，
