@@ -34,6 +34,10 @@ struct FReg {
     std::int64_t fv = 0;
     bool fast_bool = false;
     bool fb = false;
+    // 跨帧内存别名（纯 runtime rwfunc 递归调用的参数边界，免 kvspace arg 槽）：
+    // src_ptr：读参 → 调用方 reg（只读转发）；dst_ptr：写参 → 调用方 reg（写转发）。
+    FReg* src_ptr = nullptr;
+    FReg* dst_ptr = nullptr;
 };
 
 struct FrameCtx {
@@ -44,6 +48,16 @@ struct FrameCtx {
     std::string func_dir;    // /lib/<name>
     std::string frame_dir_hint;  // 段缓存已持有的函数目录（复用，避免二次构造/查询）
     std::vector<FReg> regs;  // 帧地址表（帧入口一次解析）
+    // 跨帧参数别名表（定长栈数组，段 nr/nw ≤ 16）：arg_src[-k-1]=读参 k 槽的调用方 reg，
+    // arg_dst[k-1]=写参 k 槽的调用方 reg。避免每次 call 的 vector 堆分配（fib 递归热点）。
+    FReg* arg_src[16] = {};
+    int arg_src_n = 0;
+    FReg* arg_dst[16] = {};
+    int arg_dst_n = 0;
+    // 纯内存递归帧：callee 段无 native/handoff → 无观察边界 → 帧系统变量
+    // （returnpc/lib）与帧生命周期（DelTree/Mkindex）全部省略。return 直接
+    // Returned（stop_pc 空，Call 分支捕获后 continue），pc 从不指向此帧。
+    bool mem_frame = false;
 };
 
 // 单帧执行结果：Ok=入口帧走到段尾/return（vthread done）；

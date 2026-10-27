@@ -5,6 +5,9 @@
 #include <unordered_map>
 #include <vector>
 
+#include <kvspace/kvspace.h>
+
+#include "value.hpp"
 #include "valueio.hpp"
 
 namespace kv::rt {
@@ -59,6 +62,39 @@ bool operand_desc(void* h, const std::string& key, RegDesc* out) {
     return true;
 }
 
+// callee 预解析（build 期一次，运行期 call 直用，免每帧 read_text(‥lib)+kvspaceGet 探测）。
+// func_dir = 调用方函数目录（= 帧 ‥lib，同一函数所有帧一致）。
+std::string resolve_callee(void* h, const std::string& func_dir,
+                           const std::string& fn) {
+    if (fn.rfind("/lib/", 0) == 0)
+        return fn;
+    if (fn.find("\xC2\xB7") != std::string::npos)
+        return "/lib/" + fn;
+    if (fn.find('/') != std::string::npos)
+        return "/lib/" + fn;
+    // 裸名：同 pkg 优先（读帧 ‥lib 取 pkg 等价于 func_dir 推导）。
+    std::string libdir = func_dir;
+    if (libdir.size() > 5 && libdir.back() == '/')
+        libdir.pop_back();
+    if (libdir.size() > 5) {
+        const std::string rel = libdir.substr(5);
+        const auto dot = rel.rfind("\xC2\xB7");
+        const auto sl = rel.rfind('/');
+        const std::size_t sep = dot != std::string::npos &&
+                                       (sl == std::string::npos || dot > sl)
+                                   ? dot
+                                   : sl;
+        const std::string pkg = sep == std::string::npos ? rel : rel.substr(0, sep);
+        const std::string cand = "/lib/" + pkg + "\xC2\xB7" + fn;
+        std::uint8_t* cd = nullptr;
+        std::uint32_t cn = 0;
+        const std::string ck = cand + "/[0,0]";
+        if (kvspaceGet(h, ck.c_str(), 1, &cd, &cn) == 0 && cd && cn)
+            return cand;
+    }
+    return "/lib/" + fn;
+}
+
 bool build(void* h, const std::string& func_dir, Segment* out) {
     out->insns.clear();
     out->regs.clear();
@@ -73,6 +109,7 @@ bool build(void* h, const std::string& func_dir, Segment* out) {
                 break;  // 函数末尾
             is_call = true;
             op = "call";
+            callee = resolve_callee(h, func_dir, callee);  // 预解析为最终 /lib/ 路径
         }
         const ops::Entry* e = ops::find_myrwircap(op.data(),
                                                    static_cast<std::uint32_t>(op.size()));
@@ -115,11 +152,14 @@ bool build(void* h, const std::string& func_dir, Segment* out) {
                 }
             }
         }
+        if (ins.impl == ops::Impl::Native)
+            out->has_native = true;
         if (ins.impl == ops::Impl::Handoff) {
+            out->has_native = true;
             out->insns.push_back(ins);
             continue;
         }
-        if (nr + (is_call ? 1 : 0) > 8 || nw > 2)
+        if (nr + (is_call ? 1 : 0) > 16 || nw > 4)
             return false;
         ins.nrd = static_cast<std::uint8_t>(nr + (is_call ? 1 : 0));
         ins.nwr = static_cast<std::uint8_t>(nw);
@@ -141,8 +181,32 @@ bool build(void* h, const std::string& func_dir, Segment* out) {
             const std::string tag = std::string(d.kind == Operand::Kind::Var ? "v:" : "l:") +
                                     (d.kind == Operand::Kind::Var ? d.name : wk);
             ins.wr[k - 1] = static_cast<std::uint8_t>(reg_of(out, &dedup, tag, d));
+            // 写槽帧局部预标记：普通变量（非 * 参数/非 / 绝对路径/非 · 成员写）
+            // → fast 写直走 fv。成员写（`base·member`）排除（fast kernel 单参 copy 误判）。
+            if (d.kind == Operand::Kind::Var && !d.name.empty() &&
+                d.name[0] != '*' && d.name[0] != '/' &&
+                d.name.find("\xC2\xB7") == std::string::npos)
+                ins.wr_local = true;
         }
         out->insns.push_back(ins);
+    }
+    // 字面量 int64 快值缓存：build 期读槽一次，运行期帧入口零 kvspace 预读
+    // （fib 递归每帧省 1 次 kvspaceSlotView 读字面量 `1`）。
+    out->lit.assign(out->regs.size(), LitFast{});
+    for (std::size_t i = 0; i < out->regs.size(); i++) {
+        const RegDesc& d = out->regs[i];
+        if (d.kind == Operand::Kind::Literal) {
+            const std::uint8_t* dd = nullptr;
+            std::uint32_t dn = 0;
+            if (read_wire(h, d.slot_key, &dd, &dn)) {
+                Scalar sc{};
+                if (v_scalar(Wire{dd, dn}, &sc) && sc.k == Scalar::K::Int &&
+                    sc.width == 8) {
+                    out->lit[i].is_i64 = true;
+                    out->lit[i].v = sc.i;
+                }
+            }
+        }
     }
     return true;
 }

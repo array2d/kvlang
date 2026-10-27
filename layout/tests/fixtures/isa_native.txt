@@ -1,6 +1,6 @@
 # native ISA author list: only layout uses it to write /‥isa declarations; runtime never reads this file.
 ver	1
-count	300
+count	299
 hash	16bedee2a5f7b947ff326855c4f9682c
 !	1	1	0	any	any	-1	-1	-1	pure	-1	core	runtime-c
 !=	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
@@ -36,7 +36,6 @@ call	1	0	0	any	-1	-1	-1	control	-1	core	runtime-c
 char/ascii	1	1	0	any	[]char/ascii	1	64	-1	pure	-1	core	runtime-c
 char/utf32	1	1	0	any	[]char/utf32	1	64	-1	pure	-1	core	runtime-c
 char/utf8	1	1	0	any	[]char/utf8	1	64	-1	pure	-1	core	runtime-c
-debugger	0	0	0	-1	-1	-1	debug	-1	core	runtime-c
 div	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
 eq	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
 exp	1	1	0	any	any	-1	-1	-1	pure	-1	core	runtime-c

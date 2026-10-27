@@ -1,4 +1,4 @@
-// 生成表自检：300 项；policy 173/127；Impl 四类互斥完备 166/7/54/72/1。
+// 生成表自检：299 项；policy 172/127；Impl 四类互斥完备 166/6/54/72/1。
 #include <cstdio>
 
 #include "ops.hpp"
@@ -30,8 +30,8 @@ int main() {
             missing++;
         }
     }
-    if (kv::ops::kMyrwircapsN != 300 || base != 173 || complex != 127 || missing != 0 ||
-        typed != 166 || control != 7 || dynamic != 54 || native != 72 ||
+    if (kv::ops::kMyrwircapsN != 299 || base != 172 || complex != 127 || missing != 0 ||
+        typed != 166 || control != 6 || dynamic != 54 || native != 72 ||
         handoff != 1) {
         std::fprintf(stderr,
                      "ops table: n=%d base=%d complex=%d missing=%d "
@@ -40,6 +40,6 @@ int main() {
                      dynamic, native, handoff);
         return 1;
     }
-    std::printf("OK ops table (300 = 173 base + 127 complex; impl 166/7/54/72/1)\n");
+    std::printf("OK ops table (299 = 172 base + 127 complex; impl 166/6/54/72/1)\n");
     return 0;
 }

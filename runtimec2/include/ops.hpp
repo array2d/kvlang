@@ -4,7 +4,7 @@
 namespace kv::ops {
 
 enum class Op : std::uint8_t {
-    None = 0, Copy, Bool, Br, Call, Goto, Debugger, Return, Cast, Abs, Add, Sub, Mul,
+    None = 0, Copy, Bool, Br, Call, Goto, Return, Cast, Abs, Add, Sub, Mul,
     Div, Mod, Max, Min, Neg, Sign, BitAnd, BitOr, BitXor, Shl, Shr, Eq, Neq, Lt, Le,
     Gt, Ge, Sqrt, Exp, Log, Pow, And, Or, Not
 };

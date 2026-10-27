@@ -111,8 +111,13 @@ char* resolve_read_impl(void* h, const char* pc, int idx) {
                 if (!read_wire_raw(h, t, &d2, &n2))
                     return dup("");
                 Wire w2{d2, n2};
-                if (!v_ptr_target(w2, &target))
-                    return dup("");
+                // 写参 Ptr 链：arg 槽 Ptr → 调用方槽（两跳）；读参传值：arg 槽即值槽
+                // （单跳，本帧 view 缓存）。对齐 resolve_desc 的 fallback 语义。
+                if (v_ptr_target(w2, &target)) {
+                    /* 两跳 */
+                } else {
+                    target = t;
+                }
             } else {
                 target = t;
             }

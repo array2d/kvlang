@@ -24,22 +24,31 @@ struct RegDesc {
 struct CInsn {
     ops::Op op = ops::Op::None;
     ops::Kind kind = ops::Kind::None;
+    ops::Impl impl = ops::Impl::None;
     std::uint8_t width = 0;
+    std::uint8_t opfn = 0;      // 快路径算术函数表下标（Add=1..Ge=6，0=非快算术）
+    bool fast_i64 = false;      // 快路径候选：Typed int64 二目二元 op（iops 热循环）
     std::uint8_t nrd = 0, nwr = 0;
-    std::uint8_t rd[8] = {};  // 寄存器号（Segment::regs 下标）；call 时 rd[0]=callee，参数从 rd[1]
-    std::uint8_t wr[2] = {};
+    std::uint8_t rd[16] = {};  // 寄存器号（Segment::regs 下标）；call 时 rd[0]=callee，参数从 rd[1]；数组字面量元素从 rd[0]
+    std::uint8_t wr[4] = {};
+    bool wr_local = false;  // 写槽是帧局部普通变量（build 预标记）：fast 写免 is_frame_local string 比较
+    std::uint16_t prof_id = 0;  // 进程级 opcode 名表下标（分段计时用）
     int s0 = 0;  // 明文指令坐标
     std::string name;    // opcode 原文（Native 分派用）
     std::string callee;  // call：被调函数名
-    std::uint16_t prof_id = 0;  // 进程级 opcode 名表下标（分段计时用）
-    bool fast_i64 = false;      // 快路径候选：Typed int64 二目二元 op（iops 热循环）
-    std::uint8_t opfn = 0;      // 快路径算术函数表下标（Add=1..Ge=6，0=非快算术）
-    ops::Impl impl = ops::Impl::None;
+};
+
+// 字面量 int64 快值缓存（build 期读槽一次，帧入口零 kvspace 预读）。
+struct LitFast {
+    bool is_i64 = false;
+    std::int64_t v = 0;
 };
 
 struct Segment {
     std::vector<CInsn> insns;
     std::vector<RegDesc> regs;  // 帧地址表条目（进程级，帧无关）
+    std::vector<LitFast> lit;   // 下标 = reg 号；字面量 int64 快值（fib 递归每帧省 kvspaceSlotView）
+    bool has_native = false;    // 含 native/handoff：return/Stop 前须冲刷纯内存帧局部变量
 };
 
 // 从函数目录（/lib/<name>/）构建指令段；遇到非本 runtime 的 opcode 即停
