@@ -56,7 +56,7 @@ layout:
 	cp layout/target/release/kvlanglayout $(BIN)/
 	cp layout/target/release/libkvlanglayout.so $(BIN)/
 
-install: all
+install:
 	install -d /usr/lib /usr/bin /usr/include/kvlang
 	install -m 755 $(BIN)/libkvlang_runtimec2.so /usr/lib/libkvlang_runtimec2.so
 	install -m 755 layout/target/release/libkvlanglayout.so /usr/lib/

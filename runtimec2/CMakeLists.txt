@@ -36,6 +36,7 @@ target_compile_options(kvlang_runtimec2 PRIVATE
     -Wall -Wextra)
 
 if(APPLE)
+    link_directories(/usr/local/lib/kvspace)
     target_link_libraries(kvlang_runtimec2 PRIVATE kvspace)
     set_target_properties(kvlang_runtimec2 PROPERTIES
         OUTPUT_NAME "kvlang_runtimec2"
