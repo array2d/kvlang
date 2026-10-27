@@ -9,15 +9,12 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_library(kvlang_runtimec2 SHARED EXCLUDE_FROM_ALL
     src/abi.cpp
     src/kvspace.cpp
-    src/vm.cpp
-    src/model.cpp
     src/valueio.cpp
     src/rwirext.cpp
-    src/ops_gen.cpp
-    src/ops_lookup.cpp
+    src/rwir_gen.cpp
+    src/rwir_lookup.cpp
     src/codeseg.cpp
     src/value.cpp
-    src/vm.cpp
     src/vmkv.cpp
     src/vmbin.cpp
     src/runtime.cpp)
@@ -62,14 +59,14 @@ target_include_directories(m1_smoke PRIVATE
 target_link_libraries(m1_smoke PRIVATE kvlang_runtimec2 kvspace)
 
 enable_testing()
-add_executable(ops_table tests/ops_table.cpp src/ops_gen.cpp)
-target_include_directories(ops_table PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+add_executable(rwir_table tests/rwir_table.cpp src/rwir_gen.cpp)
+target_include_directories(rwir_table PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-add_test(NAME c2_ops_table COMMAND $<TARGET_FILE:ops_table>)
+add_test(NAME c2_rwir_table COMMAND $<TARGET_FILE:rwir_table>)
 add_test(NAME c2_impl_db_check
          COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/impl_db_check.sh)
 add_test(NAME c2_ops_gen_check
-         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/ops_gen_check.sh)
+         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/rwir_gen_check.sh)
 add_test(NAME c2_m1_smoke
          COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/m1_smoke.sh
                  $<TARGET_FILE:m1_smoke>)

@@ -13,7 +13,7 @@ extern "C" {
 #include <kvspace/kvspace.h>
 #include <kvspace/xvalue_head.h>
 
-#include "model.hpp"
+#include "vmkv.hpp"
 #include "runtime.hpp"
 
 #define KV2_EXPORT extern "C" __attribute__((visibility("default")))

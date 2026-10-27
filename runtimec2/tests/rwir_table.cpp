@@ -1,7 +1,7 @@
 // 生成表自检：299 项；policy 172/127；Impl 四类互斥完备 166/6/54/72/1。
 #include <cstdio>
 
-#include "ops.hpp"
+#include "rwir.hpp"
 
 int main() {
     int base = 0, complex = 0, missing = 0;

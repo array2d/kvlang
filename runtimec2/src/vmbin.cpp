@@ -94,8 +94,6 @@ bool VmBin::is_scalar(LangType t) {
 
 // ── 性能统计（RC2_PROF 构建探针；热路径零开销）──────────────────────
 
-VmBin g_vm_bin;
-
 // 时间探针：x86 rdtsc；ARM64 用 mach_absolute_time（macOS 跨架构移植）。
 #if defined(__x86_64__)
 unsigned long long VmBin::now() { return __builtin_ia32_rdtsc(); }
