@@ -1073,9 +1073,34 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
         }
     }
     freg_guard.blk = &f.regs;
-    // 无条件重置（池借出的块可能 size 恰等 → 旧 fast/ref/view 残留会读错值）。
-    f.regs.assign(seg->regs.size(), FReg{});
+    // 逐 reg 热字段重置（不清 string capacity——池复用的 key/desc 保留缓冲，
+    // fib 每帧省 24 次 string 构造/析构；语义同 assign 全清零）。
+    f.regs.resize(seg->regs.size());
     for (size_t i = 0; i < seg->regs.size(); i++) {
+        FReg& rr = f.regs[i];
+        rr.ref = kvspaceRef_t{};
+        rr.resolved = false;
+        rr.view = kvspaceSlotView_t{};
+        rr.view_ok = false;
+        rr.body = nullptr;
+        rr.cap = 0;
+        rr.sc_ok = false;
+        rr.sck = Scalar::K::None;
+        rr.scw = 0;
+        rr.fast_i64 = false;
+        rr.fv = 0;
+        rr.fast_bool = false;
+        rr.fb = false;
+        rr.src_ptr = nullptr;
+        rr.dst_ptr = nullptr;
+        rr.arr_esz = 0;
+        rr.arr_dims[0] = rr.arr_dims[1] = rr.arr_dims[2] = rr.arr_dims[3] = 0;
+        rr.arr_dims[4] = rr.arr_dims[5] = rr.arr_dims[6] = rr.arr_dims[7] = 0;
+        rr.arr_ndim = 0;
+        rr.arr_kind = 0;
+        rr.key.clear();
+        rr.desc.clear();
+        rr.desc_ref = nullptr;
         const RegDesc& d = seg->regs[i];
             if (d.kind == Operand::Kind::Literal) {
                 f.regs[i].key = d.slot_key;
@@ -2700,7 +2725,13 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                 } else {
                     vk = f.regs[ins.rd[i]].key;
                 }
-                if (!v_langtype(vw, &typ) || typ.empty())
+                // typ 优先取描述符类型段（`arr [int64]·int64` 空格后），免每 call
+                // v_langtype wire 解析（fib 参数 int64 每 call 2 次 decode）；无则回退。
+                typ.clear();
+                const std::size_t tsp = rd.name.find(' ');
+                if (tsp != std::string::npos)
+                    typ = rd.name.substr(tsp + 1);
+                if (typ.empty() && (!v_langtype(vw, &typ) || typ.empty()))
                     typ = "int64";
                 if (!bind_arg(-i, &f.regs[ins.rd[i]], vk, typ, vw))
                     return RunResult::Error;
