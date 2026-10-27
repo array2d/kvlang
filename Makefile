@@ -16,6 +16,15 @@
 # 默认 runtime = c2（A/B 目标达成后主选）。C 版仍可 `make runtime` 单独构建。
 BIN         := bin
 
+# 产物后缀：Linux=.so macOS=.dylib（uname 判 Darwin，跨平台确定）。
+ifeq ($(shell uname -s),Darwin)
+C2_LIB     := libkvlang_runtimec2.dylib
+LAYOUT_LIB := libkvlanglayout.dylib
+else
+C2_LIB     := libkvlang_runtimec2.so
+LAYOUT_LIB := libkvlanglayout.so
+endif
+
 .PHONY: all runtime runtimec2 runtime-rs layout json oldhero test install clean \
         status clear clear-headers clear-all single
 
@@ -45,7 +54,7 @@ runtimec2:
 	cmake -S runtimec2 -B build/runtimec2 -DCMAKE_BUILD_TYPE=Release
 	cmake --build build/runtimec2 --target kvlang_runtimec2 -j
 	mkdir -p $(BIN)
-	cp build/runtimec2/bin/libkvlang_runtimec2.so $(BIN)/libkvlang_runtimec2.so
+	cp build/runtimec2/bin/$(C2_LIB) $(BIN)/$(C2_LIB)
 
 runtime-rs:
 	cargo build --release --manifest-path runtime-rs/Cargo.toml
@@ -54,12 +63,12 @@ runtime-rs:
 layout:
 	cargo build --release --manifest-path layout/Cargo.toml
 	cp layout/target/release/kvlanglayout $(BIN)/
-	cp layout/target/release/libkvlanglayout.so $(BIN)/
+	cp layout/target/release/$(LAYOUT_LIB) $(BIN)/
 
 install:
 	install -d /usr/lib /usr/bin /usr/include/kvlang
-	install -m 755 $(BIN)/libkvlang_runtimec2.so /usr/lib/libkvlang_runtimec2.so
-	install -m 755 layout/target/release/libkvlanglayout.so /usr/lib/
+	install -m 755 $(BIN)/$(C2_LIB) /usr/lib/$(C2_LIB)
+	install -m 755 layout/target/release/$(LAYOUT_LIB) /usr/lib/
 	install -m 755 $(BIN)/kvlang $(BIN)/kvlanglayout /usr/bin/
 	install -m 644 runtime/include/kvlang_vthread.h runtime/include/kvlang_runtime.h /usr/include/kvlang/
 

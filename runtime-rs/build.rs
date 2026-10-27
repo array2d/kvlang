@@ -19,18 +19,23 @@ fn collect_kv(dir: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
-/// #493 embed：把发布版 .so 的字节嵌进可执行文件（include_bytes!），不直接链接。
+/// #493 embed：把发布版 .so/.dylib 的字节嵌进可执行文件（include_bytes!），不直接链接。
 fn emit_embed(manifest: &str) {
     // payload 目录固定为 build/embed（由 tools/stage_embed.sh 组装）；
-    // 不读任何构建环境变量。
+    // 不读任何构建环境变量。产物后缀：Linux=.so(+版本号) macOS=.dylib。
     let dir = format!("{manifest}/../build/embed");
+    let (ks_ext, rt_ext) = if cfg!(target_os = "macos") {
+        (".dylib", ".dylib")
+    } else {
+        (".so.1", ".so")
+    };
     let names = [
-        ("EMBED_KVSPACE", "libkvspace.so.1"),
+        ("EMBED_KVSPACE", &format!("libkvspace{ks_ext}")),
         // 默认 c2 runtime；C 版（libkvlang_runtime.so）仅作 A/B fallback。
-        ("EMBED_KVLANG_RUNTIME", "libkvlang_runtimec2.so"),
-        ("EMBED_KVLANGLAYOUT", "libkvlanglayout.so"),
-        ("EMBED_KVSPACE_C", "libkvspace-c.so.1"),
-        ("EMBED_KVSPACE_DURABLE", "libkvspace_durable.so.1"),
+        ("EMBED_KVLANG_RUNTIME", &format!("libkvlang_runtimec2{rt_ext}")),
+        ("EMBED_KVLANGLAYOUT", &format!("libkvlanglayout{rt_ext}")),
+        ("EMBED_KVSPACE_C", &format!("libkvspace-c{ks_ext}")),
+        ("EMBED_KVSPACE_DURABLE", &format!("libkvspace_durable{ks_ext}")),
     ];
     for (var, file) in names {
         let mut found = None;
