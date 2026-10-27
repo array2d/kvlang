@@ -270,6 +270,11 @@ static inline bool ensure_reg_key(FrameCtx& f, FReg& r) {
     if (r.key.empty()) {
         // 普通变量（desc_ref）：key = frame + "/" + name（一次轻拼接，SSO）。
         if (r.desc_ref) {
+            // 绝对路径变量（`/lib/...` 顶层写槽）：直接作 key，不拼 f.frame。
+            if (!r.desc_ref->name.empty() && r.desc_ref->name[0] == '/') {
+                r.key = r.desc_ref->name;
+                return true;
+            }
             r.key.reserve(f.frame.size() + 1 + r.desc_ref->name.size());
             r.key = f.frame;
             r.key += "/";
