@@ -1,6 +1,7 @@
 #include "model.hpp"
 
 #include <charconv>
+#include <cstdio>
 
 namespace kv::rt {
 namespace {
@@ -57,27 +58,26 @@ std::string vthread_root(std::string_view vid) {
 }
 
 std::string frame_root(std::string_view vid, int depth) {
-    std::string s = vthread_root(vid);
-    s += "/[";
-    s += std::to_string(depth);
-    s += "]";
-    return s;
+    // 单次 snprintf（免多次 string 拼接的多次堆分配；等 coding3 key 零内存 demo
+    // 落地后改栈缓冲复用）。
+    char buf[64];
+    const int n = std::snprintf(buf, sizeof buf, "/vthread/%.*s/[%d]",
+                                (int)vid.size(), vid.data(), depth);
+    return std::string(buf, static_cast<std::size_t>(n));
 }
 
 std::string entry_pc(std::string_view vid, int depth) {
-    std::string s = frame_root(vid, depth);
-    s += "/[1,0]";
-    return s;
+    char buf[80];
+    const int n = std::snprintf(buf, sizeof buf, "/vthread/%.*s/[%d]/[1,0]",
+                                (int)vid.size(), vid.data(), depth);
+    return std::string(buf, static_cast<std::size_t>(n));
 }
 
 std::string param_key(std::string_view fr, int s0, int s1) {
-    std::string s(fr);
-    s += "/[";
-    s += std::to_string(s0);
-    s += ",";
-    s += std::to_string(s1);
-    s += "]";
-    return s;
+    char buf[96];
+    const int n = std::snprintf(buf, sizeof buf, "%.*s/[%d,%d]", (int)fr.size(),
+                                fr.data(), s0, s1);
+    return std::string(buf, static_cast<std::size_t>(n));
 }
 
 std::string instr_key(const Pc& pc) {

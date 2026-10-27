@@ -19,6 +19,7 @@ struct RegDesc {
     Operand::Kind kind = Operand::Kind::None;
     std::string name;     // Var 名/描述符
     std::string slot_key; // Literal 的函数槽 key
+    int param_k = 0;      // 参数 Ptr 槽号（`*[0,±k]` build 预解析；帧入口零 substr/atoi）
 };
 
 struct CInsn {
