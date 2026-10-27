@@ -481,8 +481,8 @@ impl fmt::Display for Instruction {
             }
             return write!(f, "{s}");
         }
-        // array(...) → [...]
-        if e.op == "array" {
+        // array·new(...) → [...]
+        if e.op == "array·new" {
             let args: Vec<String> = e.args.iter().map(|a| a.to_string()).collect();
             let s = format!("[{}]", args.join(", "));
             if !self.writes.is_empty() {

@@ -128,7 +128,7 @@ k = "a"
 d·*k -> v                     // 动态键读
 30 -> d·*"c"       // 动态键写
 
-m = map()                     // stringkeymap
+m = map·new()                 // stringkeymap
 m·k = 5
 
 m2:[int64]·int64 = {}         // 整型键 map（键落字符串）
@@ -208,7 +208,7 @@ rwfunc main() -> () {
 - 字符串↔字节：`xv·reinterpret("s","[]uint8")` 或 `xv·reinterpret(raw,"[]char/utf8")`。
 
 ```kv
-noenv = map()
+noenv = map·new()
 a = {"sh", "-c", "echo hi; echo oops 1>&2"}
 networld/proc·exec(a, noenv) -> code, out, err
 println(code, out, err)

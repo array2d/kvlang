@@ -21,7 +21,7 @@ hash	16bedee2a5f7b947ff326855c4f9682c
 abs	1	1	0	any	any	-1	-1	-1	pure	-1	core	runtime-c
 add	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
 and	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
-array	1	1	1	any...	any	-1	-1	-1	pure	-1	ext	runtime-c
+array·new	1	1	1	any...	any	-1	-1	-1	pure	-1	ext	runtime-c
 array·append	2	1	0	any	any	any	-1	-1	-1	pure	-1	ext	runtime-c
 array·compact	1	1	0	any	any	-1	-1	-1	pure	-1	ext	runtime-c
 array·fill	2	1	0	any	any	any	-1	-1	-1	pure	-1	ext	runtime-c
@@ -164,7 +164,7 @@ kvspace·watch	2	1	0	any	any	any	-1	-1	-1	read,write	-1	ext	runtime-c
 le	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
 log	1	1	0	any	any	-1	-1	-1	pure	-1	core	runtime-c
 lt	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
-map	1	1	1	any...	any	-1	-1	-1	pure	-1	ext	runtime-c
+map·new	1	1	1	any...	any	-1	-1	-1	pure	-1	ext	runtime-c
 max	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
 min	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c
 mod	2	1	0	any	any	any	-1	-1	-1	pure	-1	core	runtime-c

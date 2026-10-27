@@ -1108,7 +1108,7 @@ impl Parser {
     }
 
     fn check_sparse_usage(&mut self, e: &Expr, top_legal: bool) {
-        let top_is_sparse = e.op == "map";
+        let top_is_sparse = e.op == "map·new";
         let bad = if top_is_sparse && top_legal {
             e.args.iter().any(expr_contains_sparse)
         } else {
@@ -1210,7 +1210,7 @@ impl Parser {
                     let (name, typ) = self.parse_write_slot();
                     inst.writes = vec![name];
                     inst.write_types = vec![typ];
-                    inst.expr = Some(ast::call("array", Vec::new()));
+                    inst.expr = Some(ast::call("array·new", Vec::new()));
                 } else {
                     inst.expr = self.parse_pratt(0);
                 }
@@ -1538,7 +1538,7 @@ impl Parser {
                     src_name: String::new(),
                 });
             }
-            return Some(ast::call("array", elems));
+            return Some(ast::call("array·new", elems));
         }
 
         // struct 字面量 Name{...} 或 pkg.Name{...} → struct·new("/lib/…", "f", v, …)
@@ -1643,7 +1643,7 @@ impl Parser {
                     }
                 }
                 self.expect(Kind::RBrace);
-                return Some(ast::call("map", elems));
+                return Some(ast::call("map·new", elems));
             }
             self.advance(); // consume {
             let mut args = Vec::new();
@@ -2326,7 +2326,7 @@ impl Parser {
             let mut args = vec![ast::str_lit(&wt)];
             args.extend(e.args.iter().cloned());
             inst.expr = Some(ast::call("array·fill", args));
-        } else if e.op == "array" && e.args.is_empty() && fixed {
+        } else if e.op == "array·new" && e.args.is_empty() && fixed {
             inst.expr = Some(ast::call("array·fill", vec![ast::str_lit(&wt)]));
         }
     }
@@ -2336,7 +2336,7 @@ impl Parser {
             Some(e) => e,
             None => return,
         };
-        let expr_is_array = e.op == "array";
+        let expr_is_array = e.op == "array·new";
         let scalar_lit = expr_is_scalar_lit(e);
 
         for (j, wt) in inst.write_types.iter().enumerate() {
@@ -2414,9 +2414,9 @@ fn is_float_literal(v: &str) -> bool {
     v.contains('.') || v.contains('e') || v.contains('E')
 }
 
-/// 表达式树中任意节点是否为散 key 字面量 `{...}`（parser 产出的 "map"）。
+/// 表达式树中任意节点是否为散 key 字面量 `{...}`（parser 产出的 "map·new"）。
 fn expr_contains_sparse(e: &Expr) -> bool {
-    e.op == "map" || e.args.iter().any(expr_contains_sparse)
+    e.op == "map·new" || e.args.iter().any(expr_contains_sparse)
 }
 
 fn attach_comments(st: Stmt, comments: Vec<String>) -> Stmt {
