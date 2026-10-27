@@ -44,6 +44,7 @@ runtime:
 runtimec2:
 	cmake -S runtimec2 -B build/runtimec2 -DCMAKE_BUILD_TYPE=Release
 	cmake --build build/runtimec2 --target kvlang_runtimec2 -j
+	mkdir -p $(BIN)
 	cp build/runtimec2/bin/libkvlang_runtimec2.so $(BIN)/libkvlang_runtimec2.so
 
 runtime-rs:
