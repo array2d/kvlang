@@ -9,11 +9,13 @@
 
 #include "model.hpp"
 #include "ops.hpp"
-#include "vm.hpp"
+#include "vmkv.hpp"
 #include "status.hpp"
 #include "valueio.hpp"
 
 namespace kv::rt {
+using bin::FrameCtx;
+using bin::RunResult;
 namespace {
 
 constexpr std::string_view kMemberSep = "\xE2\x80\xA5";  // ‥
