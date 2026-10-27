@@ -1945,39 +1945,55 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                 std::free(arr);
             } else if (fn == "string/char") {
                 // string·char(s, idx)：取第 idx 个码点，返回 char/utf32 单字符。
-                Wire sw{};
+                // view 直读 body（零 kvspace 往返）+ langtype 枚举化（零 string find）。
                 std::int64_t idx = 0;
-                if (ins.nrd < 2 || !read_reg(f, ins.rd[0], &sw) ||
-                    !read_i64(f, ins.rd[1], &idx)) {
+                if (ins.nrd < 2 || !read_i64(f, ins.rd[1], &idx)) {
                     *err = "string·char: bad input";
                     return RunResult::Error;
                 }
-                kvspaceXh sh{};
+                std::uint8_t* sb = nullptr;
+                std::uint64_t sc = 0;
+                if (!reg_body(f, ins.rd[0], &sb, &sc) || !sb) {
+                    *err = "string·char: bad string";
+                    return RunResult::Error;
+                }
+                FReg& sr = f.regs[ins.rd[0]];
+                const std::uint8_t* hd = sr.view.head;
+                const std::size_t hcap =
+                    hd ? static_cast<std::size_t>(sr.view.headlen > 18
+                                                     ? sr.view.headlen - 18
+                                                     : 0)
+                       : 0;
+                const std::size_t hlen =
+                    hcap ? ::strnlen(reinterpret_cast<const char*>(hd + 18),
+                                     hcap)
+                         : 0;
+                const bin::LangType st = bin::langtype_of(
+                    reinterpret_cast<const char*>(hd + 18), hlen);
                 std::uint32_t cp = 0;
-                if (kvspaceXhDecode(sw.d, sw.n, &sh) == 0 && sh.body) {
-                    std::string sl(reinterpret_cast<const char*>(sh.langtype),
-                                   sh.langtype_len);
-                    if (sl.find("utf32") != std::string::npos) {
-                        const std::uint32_t n =
-                            static_cast<std::uint32_t>(sh.content_len / 4);
-                        if (idx >= 0 && (std::uint64_t)idx < n)
-                            std::memcpy(&cp, sh.body + (std::uint64_t)idx * 4, 4);
-                        else {
-                            *err = "string·char: index out of bounds";
-                            return RunResult::Error;
-                        }
-                    } else {
+                const bool utf32 =
+                    st == bin::LangType::CharUtf32;
+                const std::uint64_t blen = sc;
+                if (utf32) {
+                    const std::uint32_t n = static_cast<std::uint32_t>(blen / 4);
+                    if (idx >= 0 && (std::uint64_t)idx < n)
+                        std::memcpy(&cp, sb + (std::uint64_t)idx * 4, 4);
+                    else {
+                        *err = "string·char: index out of bounds";
+                        return RunResult::Error;
+                    }
+                } else {
                         // utf8：逐码点数到 idx。
-                        const std::uint8_t* b = sh.body;
+                        const std::uint8_t* b = sb;
                         std::int64_t rune_i = 0;
-                        for (std::uint64_t i = 0; i < sh.content_len && rune_i <= idx;) {
+                        for (std::uint64_t i = 0; i < blen && rune_i <= idx;) {
                             const std::uint8_t c = b[i];
                             std::uint32_t r = 0, take = 1;
                             if (c < 0x80) { r = c; }
                             else if ((c >> 5) == 0x6) { r = c & 0x1F; take = 2; }
                             else if ((c >> 4) == 0xE) { r = c & 0x0F; take = 3; }
                             else if ((c >> 3) == 0x1E) { r = c & 0x07; take = 4; }
-                            for (std::uint32_t k = 1; k < take && i + k < sh.content_len; k++)
+                            for (std::uint32_t k = 1; k < take && i + k < blen; k++)
                                 r = (r << 6) | (b[i + k] & 0x3F);
                             if (rune_i == idx) { cp = r; break; }
                             rune_i++;
@@ -1986,7 +2002,6 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
                         if (rune_i < idx) {
                             *err = "string·char: index out of bounds";
                             return RunResult::Error;
-                        }
                     }
                 }
                 const std::uint32_t u32 = cp;
