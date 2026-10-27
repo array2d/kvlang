@@ -34,7 +34,7 @@ SUF = {
 }
 NATIVE_FAMILIES = {"time", "time/duration", "random", "kvspace", "vthread"}
 SPECIAL = {"=": "Copy", "bool": "Bool", "br": "Br", "call": "Call", "goto": "Goto",
-           "debugger": "Debugger", "return": "Return"}
+           "return": "Return"}
 GENERIC = {
     "add": "Add", "+": "Add", "sub": "Sub", "-": "Sub", "mul": "Mul", "×": "Mul",
     "div": "Div", "÷": "Div", "mod": "Mod", "%": "Mod", "eq": "Eq", "==": "Eq",
@@ -118,16 +118,22 @@ def main():
         if not fixture:
             sys.exit("native list not found: " + ", ".join(FIXTURE_CANDIDATES))
     names = []
+    expect_n = None
     with open(fixture, "r", encoding="utf-8") as f:
         for line in f:
             if not line.strip() or line.startswith("#"):
                 continue
             first = line.split("\t", 1)[0].split(" ", 1)[0]
-            if first in ("ver", "count", "hash"):
+            if first == "count":
+                expect_n = int(line.split("\t", 1)[1].strip())
+                continue
+            if first in ("ver", "hash"):
                 continue
             names.append(first)
-    if len(names) != 300:
-        sys.exit(f"fixture: expected 300 names, got {len(names)}")
+    if expect_n is None:
+        sys.exit("fixture missing count header")
+    if len(names) != expect_n:
+        sys.exit(f"fixture: expected {expect_n} names, got {len(names)}")
     out = ["/* 生成：native 作者清单 → 算子表。源 layout/tests/fixtures/isa_native.txt。勿手改。 */",
            '#include "ops.hpp"', "", "namespace kv::ops {", "",
            "const Entry myrwircaps[] = {"]
@@ -136,7 +142,8 @@ def main():
         cls, op, kind, w, impl = classify(n)
         counts[impl.split("::", 1)[1]] += 1
         out.append(f'    {{"{n}", {op}, {kind}, {w}, {cls}, {impl}}},')
-    out += ["};", "", "const int kMyrwircapsN = 300;", "", "}  // namespace kv::ops", ""]
+    out += ["};", "", f"const int kMyrwircapsN = {expect_n};", "",
+            "}  // namespace kv::ops", ""]
     sys.stderr.write(
         f"impl counts: Typed={counts['Typed']} Control={counts['Control']} "
         f"Dynamic={counts['Dynamic']} Native={counts['Native']} "

@@ -38,7 +38,6 @@ const Entry myrwircaps[] = {
     {"char/ascii", Op::Cast, Kind::Any, 0, Class::Complex, Impl::Dynamic},
     {"char/utf32", Op::Cast, Kind::Any, 0, Class::Complex, Impl::Dynamic},
     {"char/utf8", Op::Cast, Kind::Any, 0, Class::Complex, Impl::Dynamic},
-    {"debugger", Op::Debugger, Kind::None, 0, Class::Base, Impl::Control},
     {"div", Op::Div, Kind::Any, 0, Class::Complex, Impl::Dynamic},
     {"eq", Op::Eq, Kind::Any, 0, Class::Complex, Impl::Dynamic},
     {"exp", Op::Exp, Kind::Any, 0, Class::Complex, Impl::Dynamic},
@@ -306,6 +305,6 @@ const Entry myrwircaps[] = {
     {"≥", Op::Ge, Kind::Any, 0, Class::Complex, Impl::Dynamic},
 };
 
-const int kMyrwircapsN = 300;
+const int kMyrwircapsN = 299;
 
 }  // namespace kv::ops
