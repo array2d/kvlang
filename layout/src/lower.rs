@@ -166,7 +166,8 @@ fn check_map_body(body: &[Stmt], defined: &HashSet<String>, diags: &mut Vec<Diag
 }
 
 fn check_map_base(base: &str, defined: &HashSet<String>, pos: Pos, diags: &mut Vec<Diagnostic>) {
-    if base.is_empty() || base.starts_with("/lib") || defined.contains(base) {
+    // 绝对路径容器（/tmp/... 等）全局可见，不需本函数声明；/lib 是结构域。
+    if base.is_empty() || base.starts_with('/') || defined.contains(base) {
         return;
     }
     diags.push(Diagnostic {

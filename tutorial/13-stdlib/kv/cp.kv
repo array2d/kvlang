@@ -7,11 +7,11 @@
 rwfunc test() -> () {
 	10 -> "/cp_src"
 	kvspace·cp("/cp_src", "/cp_dst")
-	d1 = "/cp_dst"
+	d1 = /cp_dst
 	println("dst:", d1)
 	20 -> "/cp_src"
-	s2 = "/cp_src"
-	d2 = "/cp_dst"
+	s2 = /cp_src
+	d2 = /cp_dst
 	println("src after:", s2)
 	println("dst after:", d2)
 }

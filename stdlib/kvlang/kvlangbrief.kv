@@ -53,7 +53,7 @@ rwfunc main() -> () {
     d:[]char/utf32·int64 = {}
     d·a = 10
     d·b = 20
-    kvspace·get(d, "a") -> x
+    d·*"a" -> x
     println(x)              // 10
 }
 ```
@@ -123,16 +123,16 @@ xv·bodylen(a) -> bl       // 32（body 字节数）
 d:[]char/utf32·int64 = {}    // 空 stringkeymap 必须标类型
 d·a = 10                      // 静态成员写
 d·b = 20
-kvspace·get(d, "a") -> x           // 读（缺失返回 None）
+d·*"a" -> x           // 读（缺失返回 None）
 k = "a"
 d·*k -> v                     // 动态键读
-kvspace·set(d, "c", 30) -> _       // 动态键写
+30 -> d·*"c"       // 动态键写
 
 m = map()                     // stringkeymap
 m·k = 5
 
 m2:[int64]·int64 = {}         // 整型键 map（键落字符串）
-kvspace·set(m2, 0, 7) -> _
+7 -> m2·*0
 
 r = {name="kv", ver=1}        // struct 字面量（异构记录；没有 object）
 r·name -> n
@@ -216,10 +216,10 @@ networld/fs·write("/tmp/x.txt", xv·reinterpret("hi", "[]uint8")) -> n
 ```
 
 ### KV 树（kvspace·*）
-- `kvspace·get(path)`、`kvspace·set(path,val)`、`kvspace·del(path)`、`kvspace·deltree(path)`。
+- 路径字符串读/写用 `=` / 成员读写 / `{t}·new`；`kvspace·del(path)`、`kvspace·deltree(path)`。
 - `kvspace·listlen("/dir/")`、`kvspace·listat("/dir/",i)`（列目录 path 要带尾 `/`）。
 - `kvlang·abs(x)`（= `&x`，取址）、`kvspace·cp(src,dst)`、`kvspace·cpdir(src,dst)`、`kvspace·cplist(src,dst)`。
-- rwfunc 便利：`kvspace·has(path)->b`、`kvspace·get_or(path,default)->v`、`kvspace·set_default(path,val)`、`kvspace·members(path)->(names,n)`（列目录并折叠同名孪生条目）、`kvspace·count(path)->n`。
+- rwfunc 便利：`kvspace·members(path)->(names,n)`、`kvspace·count(path)->n`。
 
 ### 字符串（string·*）
 - `len / char / ord / cmp / find / slice / concat / set / formatint / formatuint / parseint / parseuint / parsefloat`。
