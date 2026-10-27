@@ -71,7 +71,13 @@ void prof_tick(std::uint16_t id, std::uint64_t h, std::uint64_t l) {
 bool g_trace_on = false;
 unsigned long long g_trace_n = 200;
 
+// 时间探针：x86 rdtsc；ARM64 用 mach_absolute_time（macOS 跨架构移植）。
+#if defined(__x86_64__)
 unsigned long long now() { return __builtin_ia32_rdtsc(); }
+#else
+#include <mach/mach_time.h>
+unsigned long long now() { return static_cast<unsigned long long>(mach_absolute_time()); }
+#endif
 
 void prof_report() {
     if (!g_prof_on || g_prof.steps == 0)
@@ -1749,10 +1755,14 @@ RunResult run_frame(FrameCtx& f, int start_s0, std::string* stop_pc,
             } else if (fn == "random/int63" || fn == "random/uint64" ||
                        fn == "random/intn") {
                 std::uint64_t r = 0;
+#if defined(__APPLE__)
+                arc4random_buf(&r, sizeof r);
+#else
                 if (getrandom(&r, sizeof r, 0) != (ssize_t)sizeof r) {
                     *err = "native: getrandom failed";
                     return RunResult::Error;
                 }
+#endif
                 if (fn == "random/intn") {
                     ok = ai64(0, &v0);
                     const std::uint64_t m = (std::uint64_t)v0;
