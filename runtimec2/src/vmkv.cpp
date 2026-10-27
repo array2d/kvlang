@@ -11,8 +11,7 @@
 #include "valueio.hpp"
 
 namespace kv::rt {
-using bin::g_prof;
-using bin::g_prof_on;
+using bin::g_vm_bin;
 // 明文栈操作（装载/槽解析/回写）。FReg/FrameCtx 来自 vmbin（bin 命名空间）。
 using bin::FReg;
 using bin::FrameCtx;
@@ -277,14 +276,14 @@ bool read_scalar(FrameCtx& f, std::uint8_t idx, Scalar* out) {
     std::uint8_t* body = nullptr;
     std::uint64_t cap = 0;
     const bool have_view = reg_body(f, idx, &body, &cap);
-    if (g_prof_on && !have_view)
-        g_prof.f_slot++;
+    if (g_vm_bin.prof_on && !have_view)
+        g_vm_bin.prof.f_slot++;
     if (have_view) {
         if (r.sc_ok) {
             if (v_scalar_raw(r.sck, r.scw, body, cap, out))
                 return true;
-            if (g_prof_on)
-                g_prof.f_raw++;
+            if (g_vm_bin.prof_on)
+                g_vm_bin.prof.f_raw++;
         } else if (slot_read_scalar(r.view, out)) {
             r.sck = out->k;
             r.scw = out->width;
@@ -292,8 +291,8 @@ bool read_scalar(FrameCtx& f, std::uint8_t idx, Scalar* out) {
             return true;
         }
     }
-    if (g_prof_on)
-        g_prof.fb++;
+    if (g_vm_bin.prof_on)
+        g_vm_bin.prof.fb++;
     Wire w{};
     return read_reg(f, idx, &w) && v_scalar(w, out);
 }
@@ -492,8 +491,8 @@ bool slot_write_i64(FrameCtx& f, std::uint8_t idx, std::int64_t v) {
         fr.fast_i64 = true;
         if (fr.view_ok && fr.body)
             std::memcpy(fr.body, &v, 8);
-        if (g_prof_on)
-            g_prof.w_fast++;
+        if (g_vm_bin.prof_on)
+            g_vm_bin.prof.w_fast++;
         return true;
     }
     std::uint8_t* body = nullptr;
@@ -503,8 +502,8 @@ bool slot_write_i64(FrameCtx& f, std::uint8_t idx, std::int64_t v) {
         std::memcpy(body, &v, 8);
         fr.fv = v;
         fr.fast_i64 = true;
-        if (g_prof_on)
-            g_prof.w_fast++;
+        if (g_vm_bin.prof_on)
+            g_vm_bin.prof.w_fast++;
         return true;
     }
     Scalar s{};
@@ -528,8 +527,8 @@ bool slot_write_bool(FrameCtx& f, std::uint8_t idx, bool b) {
         fr.fb = b;
         if (fr.view_ok && fr.body)
             *fr.body = b ? 1 : 0;
-        if (g_prof_on)
-            g_prof.w_fast++;
+        if (g_vm_bin.prof_on)
+            g_vm_bin.prof.w_fast++;
         return true;
     }
     std::uint8_t* body = nullptr;
@@ -539,8 +538,8 @@ bool slot_write_bool(FrameCtx& f, std::uint8_t idx, bool b) {
         *body = b ? 1 : 0;
         fr.fb = b;
         fr.fast_bool = true;
-        if (g_prof_on)
-            g_prof.w_fast++;
+        if (g_vm_bin.prof_on)
+            g_vm_bin.prof.w_fast++;
         return true;
     }
     Scalar s{};
@@ -595,14 +594,14 @@ bool slot_write_scalar(FrameCtx& f, std::uint8_t idx, const Scalar& s,
             fr.sck = s.k;
             fr.scw = width;
             fr.sc_ok = true;
-            if (g_prof_on)
-                g_prof.w_fast++;
+            if (g_vm_bin.prof_on)
+                g_vm_bin.prof.w_fast++;
             return true;
         }
     }
     // 回退：编码 + ByRef（槽 langtype/容量不匹配时走这里）。
-    if (g_prof_on)
-        g_prof.w_fb++;
+    if (g_vm_bin.prof_on)
+        g_vm_bin.prof.w_fb++;
     std::uint8_t* buf = nullptr;
     std::uint32_t len = 0;
     if (!v_encode(kn, width, s, &buf, &len))

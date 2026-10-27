@@ -62,13 +62,48 @@ struct FrameKey {
 
 // kindexpr 串 → LangType 枚举（剥 dims 前缀；init/首次调用后热路径零 string）。
 // None = 未知/复合（StringKeyMap/Ext 单独识别）。
-LangType langtype_of(const char* kindexpr, std::size_t len);
 
-// 元素字节宽（int64=8, float64=8, bool=1, char/utf8=1...）。
-std::uint8_t elem_width_of(LangType t);
+// ── 二进制栈性能统计 ──
+struct OpStat {
+    unsigned long long n = 0, handler = 0, loop = 0;
+};
 
-// 是否定宽标量（非容器/扩展）——二进制栈直读 body 的前提。
-bool is_scalar(LangType t);
+struct Prof {
+    unsigned long long handler = 0, loop = 0, steps = 0;
+    unsigned long long pre = 0, loads = 0, frames = 0, ctrl = 0, fb = 0;
+    unsigned long long f_slot = 0, f_raw = 0, w_fast = 0, w_fb = 0;
+    unsigned long long rdtsc = 0;  // 单次 now() 的探针成本（校准值）
+    std::vector<OpStat> ops;
+};
+
+// 二进制栈（VmBin）：收拢纯 bin 态（prof 统计）+ 方法（langtype 映射/探针/纯运算）。
+// 明文逻辑（帧装载/回写）在 vmkv 方法，经 vmkv.bin.xxx() 调本层纯 bin 能力。
+struct VmBin {
+    // ── 数据（纯 bin 态）──
+    Prof prof;
+    bool trace_on = false;
+    unsigned long long trace_n = 200;
+    unsigned long long rdtsc_cost = 0;
+#ifdef RC2_PROF
+    static constexpr bool prof_on = true;
+#else
+    static constexpr bool prof_on = false;
+#endif
+
+    // ── 方法：langtype 映射 ──
+    LangType langtype_of(const char* kindexpr, std::size_t len);
+    std::uint8_t elem_width_of(LangType t);
+    bool is_scalar(LangType t);
+
+    // ── 方法：性能探针 ──
+    unsigned long long now();
+    void prof_tick(std::uint16_t id, std::uint64_t h, std::uint64_t l);
+    void prof_init();
+    void prof_report();
+};
+
+// 进程级实例：vmkv 依赖的 bin 公开接口（经 vmkv.bin 访问）。
+extern VmBin g_vm_bin;
 
 // 帧寄存器：kvspace 明文槽的**派生视图**（不是第二事实源）。
 // - body/cap 指向 shm 槽（借用），fast 缓存纯 u64/布尔值；
@@ -128,30 +163,6 @@ struct FrameCtx {
 // 单帧执行结果：Ok=入口帧走到段尾/return（vthread done）；
 // Returned=子帧 return 弹出（stop_pc 为调用方返回地址）；Stop=遇到他人 op。
 enum class RunResult : std::uint8_t { Ok = 0, Stop, Returned, Error };
-
-// ── 二进制栈性能统计（vmbin.cpp 实现；RC2_PROF 构建探针）────────────
-struct OpStat {
-    unsigned long long n = 0, handler = 0, loop = 0;
-};
-
-struct Prof {
-    unsigned long long handler = 0, loop = 0, steps = 0;
-    unsigned long long pre = 0, loads = 0, frames = 0, ctrl = 0, fb = 0;
-    unsigned long long f_slot = 0, f_raw = 0, w_fast = 0, w_fb = 0;
-    unsigned long long rdtsc = 0;  // 单次 now() 的探针成本（校准值）
-    std::vector<OpStat> ops;
-};
-
-extern Prof g_prof;
-// 探针编译期宏摘除：非 RC2_PROF 构建 g_prof_on 恒 false，热路径零开销。
-extern const bool g_prof_on;
-extern bool g_trace_on;
-extern unsigned long long g_trace_n;
-
-unsigned long long now();
-void prof_tick(std::uint16_t id, std::uint64_t h, std::uint64_t l);
-void prof_init();
-void prof_report();
 
 // ── int64 快路径：模板特化（编译期内联单指令，无函数指针间接跳）。
 template <std::uint8_t O>
