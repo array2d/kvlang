@@ -1649,7 +1649,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                     ok = write_named_i64(f.h, ins.wr[0], f, "uint64",
                                          (std::int64_t)r);
                 }
-            } else if (fn == "array") {
+            } else if (fn == "array/new") {
                 // 数组字面量 `[v...]`：读参[0..n-1]=元素，写槽描述符 `a <langtype>`
                 // 提供 elem kind（`[]int64`/`[N]T`），打包为 [n]elem compact XValue。
                 std::string lt;
@@ -2221,7 +2221,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                         ar.view_ok = false;
                     }
                 }
-            } else if (fn == "obj" || fn == "map") {
+            } else if (fn == "obj" || fn == "map/new") {
                 // 容器创建：obj=空 `{}`，map=带元素 `{v...}`。写槽描述符 `arr <langtype>`
                 // 取容器类型，写 marker XValue（body 空）+ 建成员目录；map 逐元素写 `base/i`。
                 // 对齐 C kvlangBuiltinMap：容器值是索引型（成员=子键）。
@@ -2267,10 +2267,10 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                 // map：逐元素写 `base/[i]`（散 key 数组，坐标键对齐 C kvlangBuiltinScatterKey
                 // 的 `base·[i]`；c2 用 `/` 作成员分隔）。`·*"[i]"` 动态键读同键匹配。
                 // obj：命名成员字面量 `{n=42; x=7}` 读参成对（键,值,键,值）。
-                if (ok && (fn == "map" || ins.nrd >= 2)) {
+                if (ok && (fn == "map/new" || ins.nrd >= 2)) {
                     const std::string base_key = f.regs[ins.wr[0]].key;
                     char e[192] = {};
-                    if (fn == "map") {
+                    if (fn == "map/new") {
                         for (int i = 0; i < ins.nrd; i++) {
                             Wire ew{};
                             if (!read_reg(f, ins.rd[i], &ew)) {

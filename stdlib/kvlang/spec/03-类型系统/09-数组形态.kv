@@ -25,9 +25,9 @@ kvlang 的数组有**两种物理形态**：**compact**（稠密：全量元素�
 | `[e0, e1, …]` | compact | 元素连续打包进单个 XValue，langtype 含形状与元素种类（如 `[4]int64`），storetype 为 class 2 | 定长、同种类；元素**不得**为变长（字符串字面量禁入） |
 | `{v0, v1, …}` | stringkeymap | 每元素落 `base·[i]` 坐标段独立子 key，容器值 langtype=map langtype（如 `[]char/utf8·int64`），class 0 容器头 body 空，成员按物理 key 前缀枚举 | 变长/可增长；字符串数组等变长集合用此形式 |
 
-- compact 字面量降级为 `array(…)` 构造。变长字符串元素进 compact `[…]` 在 layout 语法检查期报错
+- compact 字面量降级为 `array·new(…)` 构造。变长字符串元素进 compact `[…]` 在 layout 语法检查期报错
   （`compact array [...] cannot hold variable-length string element`）。
-- stringkeymap 字面量降级为 `map(…)` 构造，只作赋值右值或 `for-in` 源。
+- stringkeymap 字面量降级为 `map·new(…)` 构造，只作赋值右值或 `for-in` 源。
 
 ## 定长初始化（无需逐元素赋值）
 
@@ -44,5 +44,26 @@ kvlang 的数组有**两种物理形态**：**compact**（稠密：全量元素�
 - `[v...]` 只允许**单一**填充值，且写类型必须是定长数组（`[]T` 动态一维、`[.,N]T` 含任意长维均报
   错）。（此处 `[v...]` 是**值字面量**的填充展开，与类型表达式无关。）
 - 动态一维 `a:[]int32 = []` 仍是**空数组**（0 长度），不触发填充。
+
+## 初始化职责边界（`T·new` 与特殊初始化拆分）
+
+**创建**与**特殊初始化**是两层，命名风格统一为 `T·new` 与 `T·<init>`：
+
+- **`T·new`（创建）**：只创建类型骨架，不负责数据初值。`map·new`、`array·new`、
+  `struct·new`。所有 xvalue 类型的创建 rwir 一律 `T·new` 命名（`T` = 类型名）。
+- **`T·fill`（全量填充，核心 runtime 唯一初始化模式）**：`array·fill(langtype[, v])`——
+  按定长维度一次成型 + 统一填充值（缺省全零）。这是 **runtimec2/C runtime 就地支持**
+  的唯一初始化模式，`[]`/`[v...]` 字面量降级于此。
+- **其它特殊初始化（扩展 runtime 职责）**：带算法语义、需模式生成的初始化——如
+  `np·eye`（单位阵）、`np·zeros`、`np·ones`、`np·arange`、`np·rand`、`np·linspace` 等。
+  **runtimec2 不实现**，归扩展 runtime（`np·` 等前缀的扩展世界）。核心 runtime 遇到
+  `notinmycaps` 即 handoff 到扩展。
+- **tensor 权重初始化（扩展 runtime 职责）**：模型权重的算法初始化——Xavier/He/Glorot
+  均匀与正态、`randn`、`truncated_normal`、正交初始化等（`nn·`/`tensor·` 前缀的扩展世界）。
+  属训练/模型语义，**核心 runtime 一律不实现**，handoff 扩展。
+
+边界规则：核心 runtime 只认 `T·new`（创建）+ `T·fill`（全量填充）；任何超出"空创建/统一
+填充"的初始化语义（含 numpy 式模式生成、tensor 权重初始化）都属于扩展世界，不得在核心
+runtime 堆实现。
 "#### -> /lib/kvlang/spec/类型系统/数组形态
 }

@@ -61,7 +61,7 @@ fn check_container_body(body: &[Stmt], fn_: &Func, diags: &mut Vec<Diagnostic>) 
 
 fn check_container_inst(s: &Instruction, fn_: &Func, diags: &mut Vec<Diagnostic>) {
     let Some(e) = &s.expr else { return };
-    if e.op != "obj" && e.op != "map" {
+    if e.op != "obj" && e.op != "map·new" {
         return;
     }
     let Some(target) = s.writes.first() else {
@@ -407,7 +407,7 @@ fn lower_body(
                 // 散 key 数组字面量 `base = {v0, v1, ...}` → 逐元素散 key 写入。
                 if s.writes.len() == 1 {
                     if let Some(e) = &s.expr {
-                        if e.op == "map" {
+                        if e.op == "map·new" {
                             preamble.extend(expand_sparse(&s.writes[0], e, &s.write_types, lg));
                             continue;
                         }
@@ -591,7 +591,7 @@ fn lower_for_with_cont(
     // ndarray·numel/xv·at（见 spec 控制流脱糖）。判据看**声明的类型**：map 的 kindexpr 恒含
     // `key·value` 的那个 `·`（`[int64]·int64`、`[]char/utf8·int64`），compact 数组不含。
     let is_obj = s.iter.op == "obj"
-        || s.iter.op == "map"
+        || s.iter.op == "map·new"
         || (s.iter.is_leaf()
             && matches!(tm.get(&s.iter.val),
                 Some(t) if t == "stringkeymap" || t.contains(keytree::MEMBER_SEP)));
@@ -600,7 +600,7 @@ fn lower_for_with_cont(
     let mut init_body = Vec::new();
     let iter_slot = if s.iter.is_leaf() {
         s.iter.val.clone()
-    } else if s.iter.op == "map" {
+    } else if s.iter.op == "map·new" {
         let slot = lg.tmp();
         // for-in 源是裸字面量：无写目标可标注，就地推 map langtype（元素类型必须唯一且可推）。
         let wty = infer_sparse_type(&s.iter, tm);
@@ -801,7 +801,7 @@ fn goto_label(label: &str) -> Stmt {
 /// 位置型 `{v0,v1,…}` 键为 1 元坐标 `[int64]`，命名型 `{k=v}` 键为字符串 `[]char/utf8`；
 /// 值类型取首个元素的推断类型。推不出（元素类型未知）则空 → runtime 直接 fatal 暴露。
 fn infer_sparse_type(e: &Expr, tm: &HashMap<String, String>) -> Vec<String> {
-    let (keylt, val) = if e.op == "map" {
+    let (keylt, val) = if e.op == "map·new" {
         ("[int64]", e.args.first())
     } else {
         ("[]char/utf8", e.args.get(1))
@@ -818,12 +818,12 @@ fn infer_sparse_type(e: &Expr, tm: &HashMap<String, String>) -> Vec<String> {
     }
 }
 
-/// 散 key 数组字面量（parser 产出的 "map"）→ 单条 `map(v0, v1, ...) -> base`，
+/// 散 key 数组字面量（parser 产出的 "map·new"）→ 单条 `map·new(v0, v1, ...) -> base`，
 /// 运行时 map builtin 创建 map 根（kind=map）+ 子键 `base/[i]`（相对 key，方括号索引串）。
 fn expand_sparse(base: &str, e: &Expr, wtypes: &[String], _lg: &mut LabelGen) -> Vec<Stmt> {
     let inst = Instruction {
         comments: Vec::new(),
-        expr: Some(ast::call("map", e.args.clone())),
+        expr: Some(ast::call("map·new", e.args.clone())),
         writes: vec![base.to_string()],
         // 写类型**必须原样带过来**：容器字面量的 map langtype 就靠它落到写槽
         // （`nums:[int64]·int64 = {…}`；见 [[map容器]]）。曾在此清空，runtime 无从得知容器类型。
@@ -1127,7 +1127,7 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
     if opcode == "obj" {
         return "stringkeymap".to_string();
     }
-    if opcode == "map" {
+    if opcode == "map·new" {
         return "[]stringkeymap".to_string();
     }
     match opcode {
@@ -2050,7 +2050,7 @@ fn check_container_literal(
     diags: &mut Vec<Diagnostic>,
 ) {
     match e.op.as_str() {
-        "array" => {
+        "array·new" => {
             if let Some(elem) = container_elem(target) {
                 if builtin::is_num_kind(&elem) {
                     for a in &e.args {
@@ -2060,7 +2060,7 @@ fn check_container_literal(
             }
         }
         // 位置型 `{v0,v1,…}`：键为隐式整数坐标，只查值。
-        "map" => {
+        "map·new" => {
             if let Some(v) = container_value(target) {
                 if builtin::is_num_kind(&v) {
                     for a in &e.args {
@@ -2099,7 +2099,7 @@ fn expr_result_type(e: &Expr, tm: &HashMap<String, String>) -> String {
     if e.is_leaf() {
         return arg_type(e, tm);
     }
-    if matches!(e.op.as_str(), "array" | "map" | "obj") {
+    if matches!(e.op.as_str(), "array·new" | "map·new" | "obj") {
         return String::new();
     }
     let sym = symbol::lookup(&e.op);
@@ -2130,7 +2130,7 @@ fn expr_result_type(e: &Expr, tm: &HashMap<String, String>) -> String {
     if e.op == "obj" {
         return "stringkeymap".to_string();
     }
-    if e.op == "map" {
+    if e.op == "map·new" {
         return "[]stringkeymap".to_string();
     }
     let mut tm2 = tm.clone();
@@ -2230,7 +2230,8 @@ fn check_call_args(
     diags: &mut Vec<Diagnostic>,
 ) {
     let sym = symbol::lookup(&e.op);
-    if sym.arith || sym.cmp || is_cast_op(&e.op) || matches!(e.op.as_str(), "array" | "map" | "obj")
+    if sym.arith || sym.cmp || is_cast_op(&e.op)
+        || matches!(e.op.as_str(), "array·new" | "map·new" | "obj")
     {
         return;
     }
@@ -2343,7 +2344,7 @@ fn walk_inst(
         if ty.is_empty() || ty.contains('|') || ty.starts_with('@') {
             return;
         }
-        if matches!(e.op.as_str(), "array" | "map" | "obj")
+        if matches!(e.op.as_str(), "array·new" | "map·new" | "obj")
             && (ty.starts_with('[') || ty.contains(keytree::MEMBER_SEP) || ty.starts_with('/'))
         {
             check_container_literal(&ty, e, structs, diags);
