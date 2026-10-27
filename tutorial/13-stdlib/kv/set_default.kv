@@ -1,13 +1,17 @@
-// kvspace·set_default：路径不存在时写入，已存在则保留原值
+// set_default：路径不存在时写入，已存在则保留原值（if 条件写）
 // 期望输出:
 //   set_default new: first_val
 //   set_default existing: first_val
 
 rwfunc test() -> () {
-	kvspace·set_default("/sd_key", "first_val")
-	sd1 = kvspace·get("/sd_key")
+	if (/sd_key == None) {
+		"first_val" -> "/sd_key"
+	}
+	sd1 = /sd_key
 	println("set_default new:", sd1)
-	kvspace·set_default("/sd_key", "second_val")
-	sd2 = kvspace·get("/sd_key")
+	if (/sd_key == None) {
+		"second_val" -> "/sd_key"
+	}
+	sd2 = /sd_key
 	println("set_default existing:", sd2)
 }

@@ -6,9 +6,9 @@
 rwfunc test() -> () {
 	1 -> "/cptree/a"
 	kvspace·cpdir("/cptree", "/cptree2")
-	v = "/cptree2/a"
+	v = /cptree2/a
 	println("child:", v)
 	9 -> "/cptree/a"
-	v2 = "/cptree2/a"
+	v2 = /cptree2/a
 	println("after:", v2)
 }
