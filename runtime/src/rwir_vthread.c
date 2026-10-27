@@ -2,7 +2,7 @@
 
 #include "rwir_internal.h"
 #include "func_code.h"
-#include "slotview.h"
+#include "xvaluebodyview.h"
 #include <time.h>
 
 /* vthread·create(funckey) -> vid：分配 vid、建栈索引、bootstrap 首指令、置 init，返回 vid 句柄。

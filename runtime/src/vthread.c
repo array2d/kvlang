@@ -1,5 +1,5 @@
 #include "runtime_internal.h"
-#include "slotview.h"
+#include "xvaluebodyview.h"
 
 #define VT_MEMBER_GET(fn, want_status)                                         \
     void fn(kvspace_t *kv, const char *vtid, char **out) {                     \

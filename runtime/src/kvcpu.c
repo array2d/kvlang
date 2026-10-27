@@ -1,5 +1,5 @@
 #include "func_code.h"
-#include "slotview.h"
+#include "xvaluebodyview.h"
 #include "kvcpu_internal.h"
 
 /* P0-2：换行时刷新 inst 与参数数组的静态字段（name/type/is_address/write_offs）。
@@ -162,20 +162,20 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
     kvspaceKeyOff pc_off, status_off;
     kvspaceKeyOffBind(&pc_off, kv, pc_key);
     kvspaceKeyOffBind(&status_off, kv, st_key);
-    /* status 只读 slot view：绑定期取一次；-2 每句柄永久回退；-1 等首次读到
+    /* status 只读 xvalue body view：绑定期取一次；-2 每句柄永久回退；-1 等首次读到
      * 非 None status 后仅重试一次。 */
-    kvspaceSlotView_t status_view;
+    kvspaceXvalueBodyView_t status_view;
     bool status_view_ok = false;
     bool status_view_final = false;
     /* 每 128 步重新解析 keyoff 并比对 view 地址：识别 status 槽被删除/重建，
      * 同时把探测成本摊到 <2 cycles/step（不是每步重试）。 */
     unsigned status_recheck = 0;
-    if (!kv->slotview_unsupported) {
-        int svr = kvlangSlotViewBind(kv, &status_off, &status_view);
+    if (!kv->xvaluebodyview_unsupported) {
+        int svr = kvlangXvalueBodyViewBind(kv, &status_off, &status_view);
         if (svr == 0)
             status_view_ok = true;
         else if (svr == -2)
-            kv->slotview_unsupported = true;
+            kv->xvaluebodyview_unsupported = true;
     }
     char fr_stk[KV_KEY_MAX];
     const char *cur_frame = NULL;
@@ -243,19 +243,19 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
         if (status_view_ok && ((++status_recheck & 127u) == 0)) {
             /* 周期重验：删除 → 丢弃 view 并安全回退；重建 → 采用新地址。 */
             kvspaceKeyOffBind(&status_off, kv, status_off.key);
-            kvspaceSlotView_t nv;
-            int nr = kvlangSlotViewBind(kv, &status_off, &nv);
+            kvspaceXvalueBodyView_t nv;
+            int nr = kvlangXvalueBodyViewBind(kv, &status_off, &nv);
             if (nr == 0)
                 status_view = nv;
             else {
                 status_view_ok = false;
                 if (nr == -2)
-                    kv->slotview_unsupported = true;
+                    kv->xvaluebodyview_unsupported = true;
             }
         }
         if (status_view_ok) {
             have_status =
-                kvlangStatusViewRead(&status_view, status_b, sizeof status_b);
+                kvlangStatusXvalueBodyViewRead(&status_view, status_b, sizeof status_b);
             if (!have_status) {
                 /* view 失效（槽被删/重建或 head 不自洽）：丢弃并仅重绑一次。 */
                 status_view_ok = false;
@@ -263,13 +263,13 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
                     status_view_final = true;
                     /* 槽可能已删除/重建：先重解析 keyoff，再取新 view。 */
                     kvspaceKeyOffBind(&status_off, kv, status_off.key);
-                    int r = kvlangSlotViewBind(kv, &status_off, &status_view);
+                    int r = kvlangXvalueBodyViewBind(kv, &status_off, &status_view);
                     if (r == 0) {
                         status_view_ok = true;
-                        have_status = kvlangStatusViewRead(
+                        have_status = kvlangStatusXvalueBodyViewRead(
                             &status_view, status_b, sizeof status_b);
                     } else if (r == -2) {
-                        kv->slotview_unsupported = true;
+                        kv->xvaluebodyview_unsupported = true;
                     }
                 }
             }
@@ -278,15 +278,15 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
             if (!kvspaceKeyOffRead(&status_off, status_b, sizeof status_b))
                 break;
             /* 首次读到非 None status 后只重试一次绑定；成功/失败都定局。 */
-            if (!status_view_final && !kv->slotview_unsupported) {
+            if (!status_view_final && !kv->xvaluebodyview_unsupported) {
                 status_view_final = true;
                 /* 槽已存在：强制重解析 keyoff（可能刚被删除/重建），再取 view。 */
                 kvspaceKeyOffBind(&status_off, kv, status_off.key);
-                int r = kvlangSlotViewBind(kv, &status_off, &status_view);
+                int r = kvlangXvalueBodyViewBind(kv, &status_off, &status_view);
                 if (r == 0)
                     status_view_ok = true;
                 else if (r == -2)
-                    kv->slotview_unsupported = true;
+                    kv->xvaluebodyview_unsupported = true;
             }
         }
         const char *status = status_b;

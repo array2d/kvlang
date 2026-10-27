@@ -199,7 +199,7 @@ bool build(void* h, const std::string& func_dir, Segment* out) {
         out->insns.push_back(ins);
     }
     // 字面量 int64 快值缓存：build 期读槽一次，运行期帧入口零 kvspace 预读
-    // （fib 递归每帧省 1 次 kvspaceSlotView 读字面量 `1`）。
+    // （fib 递归每帧省 1 次 kvspaceXvalueBodyView 读字面量 `1`）。
     out->lit.assign(out->regs.size(), LitFast{});
     for (std::size_t i = 0; i < out->regs.size(); i++) {
         const RegDesc& d = out->regs[i];

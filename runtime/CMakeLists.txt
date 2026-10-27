@@ -18,7 +18,7 @@ set(KVLANG_GEN_SRC "${CMAKE_SOURCE_DIR}/src/rwir_special_gen.c")
 set(KVLANG_COERCE_SRC "${CMAKE_SOURCE_DIR}/src/rwir_coerce.c")
 set(KVLANG_DECODE_SRC "${CMAKE_SOURCE_DIR}/src/rwir_decode.c")
 set(KVLANG_ISA_SIG_SRC "${CMAKE_SOURCE_DIR}/src/isa_sig.c")
-set(KVLANG_SLOTVIEW_SRC "${CMAKE_SOURCE_DIR}/src/slotview.c")
+set(KVLANG_SLOTVIEW_SRC "${CMAKE_SOURCE_DIR}/src/xvaluebodyview.c")
 list(REMOVE_ITEM KVLANG_RUNTIME_SRC "${KVLANG_GEN_SRC}" "${KVLANG_COERCE_SRC}"
     "${KVLANG_DECODE_SRC}" "${KVLANG_ISA_SIG_SRC}"
     "${KVLANG_SLOTVIEW_SRC}")

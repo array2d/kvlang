@@ -1,6 +1,6 @@
 #include "runtime_internal.h"
 #include "func_code.h"
-#include "slotview.h"
+#include "xvaluebodyview.h"
 
 kvspace_t *kvlangKvspaceConnect(const char *dsn) {
     kvspace_t *k = calloc(1, sizeof(*k));
