@@ -129,4 +129,52 @@ struct FrameCtx {
 // Returned=子帧 return 弹出（stop_pc 为调用方返回地址）；Stop=遇到他人 op。
 enum class RunResult : std::uint8_t { Ok = 0, Stop, Returned, Error };
 
+// ── 二进制栈性能统计（vmbin.cpp 实现；RC2_PROF 构建探针）────────────
+struct OpStat {
+    unsigned long long n = 0, handler = 0, loop = 0;
+};
+
+struct Prof {
+    unsigned long long handler = 0, loop = 0, steps = 0;
+    unsigned long long pre = 0, loads = 0, frames = 0, ctrl = 0, fb = 0;
+    unsigned long long f_slot = 0, f_raw = 0, w_fast = 0, w_fb = 0;
+    unsigned long long rdtsc = 0;  // 单次 now() 的探针成本（校准值）
+    std::vector<OpStat> ops;
+};
+
+extern Prof g_prof;
+// 探针编译期宏摘除：非 RC2_PROF 构建 g_prof_on 恒 false，热路径零开销。
+extern const bool g_prof_on;
+extern bool g_trace_on;
+extern unsigned long long g_trace_n;
+
+unsigned long long now();
+void prof_tick(std::uint16_t id, std::uint64_t h, std::uint64_t l);
+void prof_init();
+void prof_report();
+
+// ── int64 快路径：模板特化（编译期内联单指令，无函数指针间接跳）。
+template <std::uint8_t O>
+inline std::int64_t fast_i64(std::int64_t a, std::int64_t b) {
+    if constexpr (O == 1)  return a + b;                        // Add
+    if constexpr (O == 2)  return a - b;                        // Sub
+    if constexpr (O == 3)  return a * b;                        // Mul
+    if constexpr (O == 4)  return b ? a / b : 0;                // Div（0 哨兵）
+    if constexpr (O == 5)  return b ? a % b : 0;                // Mod
+    if constexpr (O == 6)  return a > b ? a : b;                // Max
+    if constexpr (O == 7)  return a < b ? a : b;                // Min
+    if constexpr (O == 8)  return a & b;                        // BitAnd
+    if constexpr (O == 9)  return a | b;                        // BitOr
+    if constexpr (O == 10) return a ^ b;                        // BitXor
+    if constexpr (O == 11) return (std::int64_t)((std::uint64_t)a << (b & 63)); // Shl
+    if constexpr (O == 12) return a >> (b & 63);                // Shr
+    if constexpr (O == 13) return a == b ? 1 : 0;               // Eq
+    if constexpr (O == 14) return a != b ? 1 : 0;               // Neq
+    if constexpr (O == 15) return a < b ? 1 : 0;                // Lt
+    if constexpr (O == 16) return a <= b ? 1 : 0;               // Le
+    if constexpr (O == 17) return a > b ? 1 : 0;                // Gt
+    if constexpr (O == 18) return a >= b ? 1 : 0;               // Ge
+    return 0;
+}
+
 }  // namespace kv::rt::bin

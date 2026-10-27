@@ -18,6 +18,7 @@ add_library(kvlang_runtimec2 SHARED EXCLUDE_FROM_ALL
     src/codeseg.cpp
     src/value.cpp
     src/vm.cpp
+    src/vmkv.cpp
     src/vmbin.cpp
     src/runtime.cpp)
 add_custom_target(runtimec2 ALL DEPENDS kvlang_runtimec2)
