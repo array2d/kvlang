@@ -37,14 +37,19 @@ target_compile_options(kvlang_runtimec2 PRIVATE
     -O3 -fno-exceptions -fno-rtti -fvisibility=hidden -fno-threadsafe-statics
     -Wall -Wextra)
 
+# 链接 kvspace dispatch 前端（与后端同装 <prefix>/lib/kvspace），运行期按 DSN 选后端。
+# 安装目录固定（无构建期覆盖变量）：Linux 前端在 /usr/lib、后端 /usr/lib/kvspace；
+# macOS 前端在 /usr/local/lib、后端 /usr/local/lib/kvspace（/usr 受 SIP 保护）。
+# 对齐 runtime/CMakeLists.txt 的 KVLANG_LINK_DIRS。
 if(APPLE)
-    target_link_directories(kvlang_runtimec2 PRIVATE /usr/local/lib/kvspace)
+    target_link_directories(kvlang_runtimec2 PRIVATE /usr/local/lib /usr/local/lib/kvspace)
     target_link_libraries(kvlang_runtimec2 PRIVATE kvspace)
     set_target_properties(kvlang_runtimec2 PROPERTIES
         OUTPUT_NAME "kvlang_runtimec2"
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
         INSTALL_RPATH "/usr/local/lib;/usr/local/lib/kvspace")
 else()
+    target_link_directories(kvlang_runtimec2 PRIVATE /usr/lib /usr/lib/kvspace)
     target_link_libraries(kvlang_runtimec2 PRIVATE kvspace)
     set_target_properties(kvlang_runtimec2 PROPERTIES
         OUTPUT_NAME "kvlang_runtimec2"
@@ -60,7 +65,9 @@ add_executable(m1_smoke tests/m1_smoke.c)
 target_include_directories(m1_smoke PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/include /usr/include)
 if(APPLE)
-    target_link_directories(m1_smoke PRIVATE /usr/local/lib/kvspace)
+    target_link_directories(m1_smoke PRIVATE /usr/local/lib /usr/local/lib/kvspace)
+else()
+    target_link_directories(m1_smoke PRIVATE /usr/lib /usr/lib/kvspace)
 endif()
 target_link_libraries(m1_smoke PRIVATE kvlang_runtimec2 kvspace)
 
