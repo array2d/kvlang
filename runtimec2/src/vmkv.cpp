@@ -1920,6 +1920,24 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                 } else
                     non_scalar = true;
             }
+            // A char slot reads as a Scalar of its first char; `+`/`==`/`!=` on
+            // two char operands are text operations, so re-read them as wires.
+            const bool text_op = ins.nrd == 2 && (ins.op == ops::Op::Add ||
+                                                  ins.op == ops::Op::Eq ||
+                                                  ins.op == ops::Op::Neq);
+            auto charish = [&](int i) {
+                return w[i].d ? !v_is_none(w[i]) : s[i].k == Scalar::K::Char;
+            };
+            if (text_op && (s[0].k == Scalar::K::Char || s[1].k == Scalar::K::Char) &&
+                charish(0) && charish(1)) {
+                for (int i = 0; i < 2; i++) {
+                    if (!w[i].d && !read_reg(f, ins.rd[i], &w[i])) {
+                        *err = "operand " + std::to_string(i) + " is missing";
+                        return RunResult::Error;
+                    }
+                }
+                non_scalar = true;
+            }
         }
         bool ok = true;
         // None 参与比较：对齐 C 语义（Eq：双 None=true；Neq：双 None=false；其余 → TypeError）。
@@ -2027,6 +2045,8 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                         }
                         continue;
                     }
+                }
+                {
                     if (ins.op != ops::Op::Add || ins.nrd != 2 ||
                         !wire_text(w[0].d, w[0].n, &a) ||
                         !wire_text(w[1].d, w[1].n, &b)) {
@@ -2034,14 +2054,12 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                         return RunResult::Error;
                     }
                     const std::string out_s = a + b;
-                    const std::int32_t dims[1] = {static_cast<std::int32_t>(out_s.size())};
                     std::uint8_t* buf = nullptr;
                     std::uint32_t len = 0;
-                    ok = kvspaceXvalueEncode(
-                             "char/utf8",
+                    // kvspaceNewChar counts code points for the `[n]char/utf8` head.
+                    ok = kvspaceNewChar(
                              reinterpret_cast<const std::uint8_t*>(out_s.data()),
-                             static_cast<std::uint32_t>(out_s.size()), dims, 1,
-                             &buf, &len) == 0 &&
+                             static_cast<std::uint32_t>(out_s.size()), &buf, &len) == 0 &&
                          buf && write_reg(f, ins.wr[0], buf, len);
                     std::free(buf);
                     if (bin.prof_on) {
