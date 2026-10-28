@@ -4,25 +4,21 @@
 #   IOPS_N=100000000 ./bench/iops/run.sh        # issue-sized (slow)
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-if [[ -z "${DEPS:-}" ]]; then
-  if [[ -d "$ROOT/.prefix" ]]; then
-    DEPS="$ROOT/.prefix"
-  else
-    DEPS="$ROOT/.deps"
-  fi
-fi
+# 测试按 /usr 最终态安装：依赖（前端/后端）装在 /usr/lib 与 /usr/lib/kvspace。
+# 需要别的安装前缀时显式 DEPS=…（该前缀下必须有 lib/ 与 lib/kvspace/）。
+DEPS="${DEPS:-/usr}"
+[[ -e "$DEPS/lib/libkvspace.so" ]] || {
+  echo "bench/iops: $DEPS/lib/libkvspace.so not found (install ABI to /usr or set DEPS)" >&2
+  exit 1
+}
 HERE="$(cd "$(dirname "$0")" && pwd)"
 OUT="$HERE/.run"
 mkdir -p "$OUT"
 
 export IOPS_N="${IOPS_N:-1000000}"
-if [[ -z "${KVSPACE_BACKEND_PATH:-}" && -d "$DEPS/lib/kvspace" ]]; then
-  export KVSPACE_BACKEND_PATH="$DEPS/lib/kvspace"
-fi
-LIBS="$DEPS/lib"
-if [[ -n "${KVSPACE_BACKEND_PATH:-}" ]]; then
-  LIBS="$LIBS:$KVSPACE_BACKEND_PATH"
-fi
+# 后端目录固定（/usr/lib/kvspace 或 deps 前缀下的 lib/kvspace），无运行期 env；
+# LD_LIBRARY_PATH 只用于让循环程序找到 deps 前缀里的前端/后端。
+LIBS="$DEPS/lib:$DEPS/lib/kvspace"
 export LD_LIBRARY_PATH="$LIBS:$ROOT/bin${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 if [[ -z "${KVSPACE:-}" ]]; then
   export KVSPACE="shm://${OUT}/kv.shm"

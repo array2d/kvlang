@@ -54,7 +54,7 @@ fn compile_simple_func() {
         .collect();
     assert_eq!(types, vec!["int64", "int64", "int64"]);
 
-    // 指令（特化后 opcode = int64·add）
+    // 指令（layout 类型特化：opcode = int64·add）
     let op = kv.get_one("/lib/sum/[1,0]");
     assert_eq!(kvkind::kind(&op), "rwir");
     assert_eq!(sig(&op), "int64·add");

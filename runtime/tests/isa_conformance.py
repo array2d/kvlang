@@ -125,10 +125,10 @@ def main():
                 except OSError:
                     pass
             env = {**os.environ, "KVSPACE": dsn}
-            boot = subprocess.run([TERM, "isa", "publish"], env=env,
+            boot = subprocess.run([TERM, "-c", "print(\"boot\")"], env=env,
                                   capture_output=True, text=True)
             if boot.returncode != 0:
-                fails.append((kind, op, "publish", boot.stderr[:120]))
+                fails.append((kind, op, "boot", boot.stderr[:120]))
                 continue
             lay = subprocess.run([LAYOUT, prog, dsn], env=env,
                                  capture_output=True, text=True)

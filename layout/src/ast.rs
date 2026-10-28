@@ -261,6 +261,11 @@ pub struct Expr {
 /// runtime 按该槽里的 Ptr 解引用到目标——与形参槽 `*[0,±k]` 同一约定（见 spec [[ptr]]）。
 pub const DEREF_OP: &str = "*";
 
+/// 成员读（`base·key`/`base·*key`）在 AST 里的算子名。layout 把成员链展开成
+/// `base·seg…` 读表达式（等价 `=` 拷贝读的成员路径），runtime 拼路径读值。
+/// 不再经 `kvspace·get`（清理方案：get 死刑）。
+pub const MEMBER_READ_OP: &str = "=";
+
 impl Expr {
     pub fn is_leaf(&self) -> bool {
         self.op.is_empty()
@@ -463,7 +468,7 @@ impl fmt::Display for Instruction {
         };
         let writes = self.join_typed_writes();
         // array·fill(langtype[, v]) → [] / [v...]（首参 langtype 由写类型隐含，不回显）
-        if e.op == "array·fill" {
+        if e.op == "compactarray·fill" {
             let s = match e.args.get(1) {
                 Some(v) => format!("[{}...]", v),
                 None => "[]".to_string(),
@@ -476,8 +481,8 @@ impl fmt::Display for Instruction {
             }
             return write!(f, "{s}");
         }
-        // array(...) → [...]
-        if e.op == "array" {
+        // array·new(...) → [...]
+        if e.op == "compactarray·new" {
             let args: Vec<String> = e.args.iter().map(|a| a.to_string()).collect();
             let s = format!("[{}]", args.join(", "));
             if !self.writes.is_empty() {

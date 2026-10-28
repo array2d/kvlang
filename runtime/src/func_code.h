@@ -26,6 +26,9 @@ typedef struct {
     kvlangOperand_t *cell; /* nr+nw：读参在前，写参在后 */
     bool load_write_value;
     bool typed_core; /* P1b3：sig ∈ BIN/CMP/UN，row 装载期一次；typed 零检查路径 */
+    /* T-120 A：typed 行的操作数 langtype（装载期固化；0=不可用 view）。
+     * 低 8 位 kind、高 16 位元素宽度；放 row 而非 cell，递归重建 bind 不重算。 */
+    uint32_t view_pack;
     bool is_def_rwir;
     int handler_id; /* myrwircaps 下标；非 native = kvlangRwirRouteId() */
     /* 定长标量写快路径：结果 type/宽度（来自同一张能力表）；NULL = 不快。 */
@@ -45,12 +48,19 @@ typedef struct {
 typedef struct kvlangBoundCell {
     char *key;  /* owned */
     char *type; /* owned（细化后） */
+    /* 读 cell 的 off.fast 存放 lazy operand view（owned，T-120 A）；写 cell
+     * 的 off.fast 仍是 body slot —— bind_free 只对 view_state==2 的 cell 释放。 */
     kvspaceKeyOff off;
     kvlangXvalue_t *literal; /* 指向行内字面量（借用）；非字面量 NULL */
     bool pin; /* 本行写槽覆盖此 key：读视图须在写前固化 */
-    int coerce_tid; /* 绑定期解析的声明 kind id（0=非 typed 标量） */
-    uint16_t coerce_len; /* 声明 kind 文本长度：热路径按字节比对，免查 langtype 表 */
+    uint8_t view_state; /* 0 未判定 / 1 计数 / 2 已提升 / 3 禁用；仅 typed 读 cell */
+    union {
+        struct { int tid; uint16_t len; } coerce; /* 非 typed 行 */
+        struct { uint16_t hits; uint16_t width; uint8_t kind; } view; /* typed 行 */
+    };
     uint8_t *coerce_buf; /* typed 读转换的 64B 临时视图（惰性分配，帧内复用） */
+    int coerce_tid; /* #513 快核：声明 kind id（0=非 typed 标量） */
+    uint16_t coerce_len; /* #513 快核：声明 kind 文本长度 */
     uint8_t *rview_bytes;
     uint32_t rview_len;
     uint16_t rview_hits;
@@ -59,13 +69,16 @@ typedef struct kvlangBoundCell {
 
 /* 定长标量写的绑定状态：只给候选行分配一个，不放大每个操作数 cell。 */
 typedef struct kvlangBodySlot {
-    const char *key;        /* borrowed：写 cell 的 key */
-    const char *kind;
+    const char *key;        /* borrowed：cell 的 key */
+    const char *kind;       /* 静态结果类型 */
     uint32_t width;
-    uint8_t kind_len;
+    uint8_t kind_len;       /* 快核写槽匹配用（kvcpu_fast.c） */
+    uint8_t *head;          /* T-120 A：XValue wire head（借用后端常驻空间） */
+    uint32_t headlen;
     uint8_t *body;
     uint32_t len;
-    kvspaceKeyOff *off;     /* borrowed：写 cell 的 keyoff */
+    kvspaceKeyOff *off;     /* borrowed：cell 的 keyoff */
+    kvspaceRef_t ref;       /* 提升时的 ref：revalidate 只比对它 */
     bool ok;                /* body 指针有效 */
     bool dead;              /* 上次捕获失败；等该 key 被写后重试 */
     bool reg;               /* 已挂进全局失效表 */
@@ -73,6 +86,12 @@ typedef struct kvlangBodySlot {
     struct kvlangBodySlot *next;
     kvlangBoundCell_t *rcell;
 } kvlangBodySlot;
+
+/* 读 view：body slot + 版本化 token（只在提升时分配，写候选行不背 token）。 */
+typedef struct {
+    kvlangBodySlot slot;            /* 首成员：cell->off.fast 指向它 */
+    kvspaceViewToken_t token;
+} kvlangReadViewSlot;
 
 typedef struct {
     kvlangBoundCell_t *cell;
@@ -164,8 +183,8 @@ void kvlangFrameCtxSync(kvlangFrameCtx_t *ctx, uint32_t epoch);
 /* 定长标量写槽捕获：head 完全匹配才成功；失败置 dead（等该 key 被写后重试）。
  * vthread_root 形如 /vthread/<vid>，写 key 必须在其子树内。 */
 __attribute__((visibility("hidden"))) bool
-kvlangBodyCapture(kvspace_t *kv, kvlangBodySlot *slot,
-                  const char *vthread_root);
+kvlangBodyCapture(kvspace_t *kv, kvlangBodySlot *slot, const char *vthread_root,
+                  kvspaceViewToken_t *tok);   /* tok 非 NULL 时用版本化 view */
 __attribute__((visibility("hidden"))) bool
 kvlangOperandViewPromote(kvspace_t *kv, kvlangBoundCell_t *cell,
                          const char *frame_root, uint8_t *d, uint32_t len);
@@ -176,6 +195,20 @@ __attribute__((visibility("hidden"))) int
 kvlangFastRun(kvlangFrameCtx_t *ctx, int *irseq, kvspaceKeyOff *pc_off,
               kvspaceKeyOff *status_off, const char *prefix, int prefix_len,
               char *pc_out, size_t pc_out_cap);
+/* 校验 wire 形状并填充 slot；tok 的 head/headlen/value_len 由调用方保证已就绪。 */
+__attribute__((visibility("hidden"))) bool
+kvlangBodyAdopt(kvlangBodySlot *slot, const uint8_t *val, uint32_t len);
+/* 全局失效所有 body slot（不 free；下次使用惰性重捕）。 */
+__attribute__((visibility("hidden"))) void kvlangBodyInvalidateAll(void);
+/* 由 key 显式取 /vthread/<vid> 前缀（key 必须在 vthread 子树内）。 */
+__attribute__((visibility("hidden"))) bool
+kvlangVthreadRootOfKey(const char *key, char *out, size_t cap);
+/* 只解注册，不释放内存（调用方决定是 free slot 还是整个容器）。 */
+__attribute__((visibility("hidden"))) void
+kvlangBodySlotRelease(kvlangBodySlot *slot);
+/* 释放读 view 容器（slot + token）。 */
+__attribute__((visibility("hidden"))) void
+kvlangReadViewSlotFree(kvlangReadViewSlot *rs);
 /* 取本帧 s0 行的绑定。行不存在返回 NULL 且 err[0]=0；出错返回 NULL 且 err 有消息。 */
 kvlangRowBind_t *kvlangFrameRow(kvspace_t *kv, kvlangFrameCtx_t *ctx, int s0,
                                 kvlangCodeRow_t **row_out, char *err,

@@ -17,6 +17,10 @@ lib kvlang/spec/runtime语义/runtimec内建 {
 runtime-c 的 myrwircaps**（见 [[runtime开发规范]]）——核心能就地跑的 opcode 全在这张表里；
 `notinmycaps(opcode)` 是其否定谓词。
 
+ISA 不再分 Core/Ext class：native 与扩展都以
+`/‥isa/<folded-op>` 的 `def rwir` 为签名来源；是否本 runtime 可执行
+由 myrwircaps 判定，不由声明 class 决定。
+
 跨操作数的维相等 / 输出维推断**不在**类型层，归 op 的 shape function（见 [[匹配语义与变参]]）。
 
 ## native builtin 全集（权威）
@@ -33,8 +37,8 @@ runtime-c 的 myrwircaps**（见 [[runtime开发规范]]）——核心能就地
 **类型构造兼转换**（裸名）：`bool`、`int8`、`int16`、`int32`、`int64`、`uint8`、`uint16`、`uint32`、
 `uint64`、`float32`、`float64`、`char/utf32`、`char/utf8`、`char/ascii`。
 
-**容器构造**（裸名）：`map`（stringkeymap 构造）、`array`（数组构造）、`struct·new`（structref 实
-例）。
+**容器构造**（裸名）：`map·new`（stringkeymap 构造）、`compactarray·new`（compact 数组构造）、
+`scatterarray·new`（散列数组构造）、`struct·new`（structref 实例）。
 
 **调试**：`debugger`（等价 `vthread·setstatus("paused")`）。
 
@@ -42,7 +46,9 @@ runtime-c 的 myrwircaps**（见 [[runtime开发规范]]）——核心能就地
 
 带 `·` 的 native 内建按族注册；各族的完整方法集如下：
 
-- `array·`：`scatter`、`compact`、`append`、`slice`、`fill`。
+- `compactarray·`：`new`、`fill`、`copy`、`at`、`set`、`numel`、`dim`、`shape`、`slice`、
+  `reshape`、`reinterpret`、`langtype`、`bodylen`、`parselangtype`。
+- `scatterarray·`：`new`、`scatter`、`compact`、`len`、`at`、`set`、`append`、`slice`。
 - 原生算术/比较的 **layout 特化**（normative）：layout 按操作数静态 kind 把指令改写成
   `<kind>·<op>`（如 `int64·add`、`float64·lt`），并校验操作数类型与 arity——字符串与数值
   混用、非数值操作数、一元/二元 arity 不符均在 layout 阶段报错。runtime 对已注册的
@@ -50,10 +56,11 @@ runtime-c 的 myrwircaps**（见 [[runtime开发规范]]）——核心能就地
   def rwir 与用户扩展仍走通用实现并保留动态校验。值相关检查（除零、None 比较、越界）
   语义不变；未注册特化时回退通用实现，不得静默改变语义。
 
-- `ndarray·`：`numel`、`dim`、`shape`。
-- `xv·`：`at`、`set`、`reshape`、`reinterpret`、`langtype`、`bodylen`。
+**形态边界**：`compactarray·*` 只收 compact 数组（含字符串 char 序列），`scatterarray·*` 只收
+stringkeymap 散列容器；跨形态 TypeError。`compactarray·set` 仅同槽 patch；`scatterarray·append`
+对 compact 源 TypeError（须先显式 `scatterarray·newscatter`）。
 - `string·`：`set`、`char`、`ord`、`cmp`、`find`、`len`、`slice`、`concat`、`formatint`、
-  `formatuint`、`parseint`、`parseuint`。
+  `formatuint`、`parseint`、`parseuint`、`parsefloat`。
 - `time·`：`now`、`sub`、`add`、`before`、`after`。
 - `time/duration·`：`nanos`、`millis`、`seconds`、`minutes`、`hours`、`as_nanos`、`as_millis`、
   `as_seconds`、`as_minutes`、`as_hours`、`add`、`sub`、`before`、`after`。
@@ -66,11 +73,13 @@ runtime-c 的 myrwircaps**（见 [[runtime开发规范]]）——核心能就地
 锚例：`tutorial/13-stdlib/`（`kv`、`string`、`xv`、`math`、`time`、`duration` 六族）、
 `tutorial/04-ndarray/`（`xv_meta.kv`、`xv_reinterpret.kv`、`xv_shape.kv`）。
 
-## `print` / `println` / `cerr` / `input` 不是 native
+## `print` / `println` / `cerr` / `printf` / `input` 不是 native
 
-**规范要点**：`print`、`println`、`cerr`、`input` **不在** myrwircaps——它们是 **term runtime 的 rwir
-（经 def rwir 路由，`/lib/<opcode>` kind=`def rwir`）**，经派发链第 4 级 `notinmyrwircaps` 命中（见
+**规范要点**：`print`、`println`、`cerr`、`printf`、`input` **不在** myrwircaps——它们是 **term
+runtime 的 rwir
+（经 def rwir 路由，`/‥isa/<folded-op>` kind=`def rwir`）**，经派发链第 4 级 `notinmyrwircaps`
+命中（见
 [[runtime开发规范]]）。term 扩展与中央 runtime 同进程，就地 `ResolveRead` + display 直写宿主
-stdout/stderr。实现**不得**把这四个 opcode 当 myrwircaps 内处理。
+stdout/stderr。实现**不得**把这五个 opcode 当 myrwircaps 内处理。
 	"#### -> /lib/kvlang/spec/runtime语义/runtimec内建
 }

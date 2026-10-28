@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/array2d/kvlang/actions/workflows/ci.yml/badge.svg)](https://github.com/array2d/kvlang/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Tutorial Examples](https://img.shields.io/badge/tutorials-235%20examples-4c1)](tutorial/)
+[![Tutorial Examples](https://img.shields.io/badge/tutorials-236%20examples-4c1)](tutorial/)
 [![Spec](https://img.shields.io/badge/spec-84%20chapters-blueviolet)](stdlib/kvlang/spec/)
 
 **以 kvspace 为寻址空间和内存空间、小核心、扩展主导的明文解释执行语言（原训推框架 deepx 的前端语言，前身 dxlang）。** 代码与数据统一在一棵 KV 树；PC 即 KV 路径、可崩溃恢复，源码即 IR、KV 皆明文。核心 runtime 只做执行循环与控制流，其余能力由其它 runtime 提供、注册在 `/lib/<opcode>`。
@@ -88,6 +88,38 @@ PREFIX=/opt/kvlang VERSION=v0.2.18 sh install.sh   # 覆盖前缀 / 指定版本
 
 安装内容：`kvlang`（runtime CLI）、`kvlanglayout`（layout CLI）、`kvspace`（后端 CLI）→ `<prefix>/bin`；库 → `<prefix>/lib` + `<prefix>/lib/kvspace`；头 → `<prefix>/include/{kvlang,kvspace,…}`。
 
+## 单文件二进制（Linux）
+
+`make single` 产出 `bin/kvlang-single`：一个可执行文件，把项目自有的全部 `.so`
+以字节嵌入。启动时写入匿名 `memfd_create` 对象并 `dlopen("/proc/self/fd/N")`
+从内存加载——**不落盘**，运行期不需要 `LD_LIBRARY_PATH`、rpath，也不需要系统里
+安装 kvspace/kvlang 库（`ldd` 只剩 libc/libm/libgcc）。
+
+```bash
+./ci/deps.sh          # 或把 KVSPACE_DEPS_DIR 指向已有的依赖前缀
+make single           # → bin/kvlang-single
+ldd bin/kvlang-single # 只系统库
+KVSPACE=shm:///tmp/s.db bin/kvlang-single -c 'print("ok")'
+```
+
+`KVSPACE`（DSN）选择后端；**加载器本身不设置任何环境变量**。它把后端从内存映射进来，
+dispatch 前端再用 `dlopen(name, RTLD_NOW | RTLD_NOLOAD)` 按 SONAME 复用，不需要
+后端目录、rpath 或 `LD_LIBRARY_PATH`。payload 里的前端必须是**支持 NOLOAD 复用**的
+kvspace 构建（v0.3.18 发布版没有）：用当前 kvspace 源码构建并
+`FRONTEND_SO=<路径> make single`；缺能力标记时构建**直接失败**，不会静默回退。
+
+要用单文件跑 tutorial：layout 步骤改调它自己的 `layout` 子命令，并在 `PATH` 上放一个
+指向单文件的 `kvlang` 符号链接（networld 嵌套 exec 用例需要）：
+
+```bash
+printf '#!/bin/sh\nexec env KVSPACE="$2" "$PWD/bin/kvlang-single" layout "$1"\n' > /tmp/kl.sh
+chmod +x /tmp/kl.sh && ln -sf "$PWD/bin/kvlang-single" /tmp/kvlang
+PATH=/tmp:$PATH KVLANG_TERM_BIN="$PWD/bin/kvlang-single" KVLANG_LAYOUT_BIN=/tmp/kl.sh \
+  KVSPACE=shm:///tmp/tut python3 tutorial/test.py --no-build
+```
+
+自包含 tarball 仍是正式发布物；单文件是 Linux 的**新增**产物（macOS 为后续项）。
+
 ## Quick Start（从源码）
 
 依赖：C 工具链 + cmake、Rust（cargo），以及装到 `/usr/lib/kvspace` 的 kvspace ABI 库（由 [`ci/deps.sh`](ci/deps.sh) 按 [`deps.json`](deps.json) 里的 tag 拉取）。Go 仅 Go `json` 示例扩展需要。
@@ -114,7 +146,7 @@ KVSPACE=shm:///tmp/kvlang.shm ./bin/kvlang tutorial/01-basics/hello.kv   # kvspa
 KVSPACE=fs:///tmp/kvlang-fs   ./bin/kvlang tutorial/01-basics/hello.kv   # kvspace-durable
 ```
 
-另有两种模式：`kvlang create <func>` 打印 vthread `vid`，`kvlang run <vid>` 从持久化的 PC 继续（崩溃恢复）。无参数且设了 `KVLANG_LIB=p1:p2:…` 时，kvlang 会 layout 这些路径下的所有 `.kv` 并运行各 lib 的 `init`。
+另有两种模式：`kvlang create <func>` 打印 vthread `vid`，`kvlang run <vid>` 从持久化的 PC 继续（崩溃恢复）。用 `--lib p1:p2:…`（代替入口名）时，kvlang 会 layout 这些路径下的所有 `.kv` 并运行各 lib 的 `init`；没有对应环境变量。
 
 ---
 
@@ -324,7 +356,7 @@ rwfunc test() -> () {
 
 ## Tutorial
 
-235 个自包含示例（其中 227 个用 `// 期望输出` 头给出期望输出），按主题组织：
+236 个自包含示例（其中 228 个用 `// 期望输出` 头给出期望输出），按主题组织：
 
 ```
 01-basics/      hello, arith, precision, numtypes, strings, …     (18)

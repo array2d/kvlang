@@ -13,7 +13,8 @@ lib kvlang/spec/runtime语义/notinmyrwircaps {
 第一个 rwir 的 `vids` 是真实 strkeymap；后续同 opcode 的 `vids` 是 `Ptr` 指向第一个（共享同一队
 列）。时序：
 
-1. 中央 runtime `notinmyrwircaps` 命中 → `handoff_external_rwir`：`Set /lib/<op>/vids/<vtid>=pc`。
+1. 中央 runtime `notinmyrwircaps` 命中 → `handoff_external_rwir`：`Set
+/lib/<op>/vids/<vtid>=pc`。
 2. 扩展发现队列中的 vtid，`RunSeq(pc)`：从 PC 起逐条解码，只要 `opcode ∈ 本扩展.myrwircaps` 就执行，
    遇第一条不在 myrwircaps 内的指令即停（**顺序执行，非并行 batch**）；写回最终 PC，删 `vids` 项。
 3. 中央 runtime `Watch` 直到 vtid 从队列消失（30s 超时），继续。
@@ -26,12 +27,12 @@ lib kvlang/spec/runtime语义/notinmyrwircaps {
 `rwir::dispatch`），无 handoff、无 watch。runtime-rs 的 myrwircaps（就地集合）当前登记：
 
 ```
-term      print / println / cerr / input
+term      print / println / cerr / printf / input
 json      json·to / json·from
 http      http·call
-kvlang    kvlang·vet / ·format / ·layout / ·dump
+kvlang    kvlang·vet / ·format / ·layout / ·printlib / ·printstack
 networld  networld/proc·exec
-          networld/fs·size / ·read / ·write / ·append / ·list / ·del / ·mkdir / ·exists
+          networld/fs·size / ·read / ·write / ·append / ·rename / ·list / ·del / ·mkdir / ·exists / ·isutf8
 ```
 
 就地与跨进程只是**执行位置**之别，职责线一致——两者都只经 `kvlangRwirext*` 解析参数、只经 `kvspace*`

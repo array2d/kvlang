@@ -158,8 +158,7 @@ int kvlangBuiltinStringChar(kvlangFrame_t *f) {
             kvlangBuiltinFreeInputs(in, n);
             return kvlangBuiltinSetError(f, "IndexError: at: index %d out of bounds (char count=%d)", idx, rn);
         }
-        const uint8_t *p = xh_body(in[0].bytes) + (size_t)idx * 4;
-        uint32_t one = xh_rd32(p);
+        uint32_t one = kvlangXvalueChar32At(&in[0], idx);
         int rc = write_char32(f, &one, 1);
         kvlangBuiltinFreeInputs(in, n);
         return rc;
@@ -187,7 +186,7 @@ int kvlangBuiltinStringOrd(kvlangFrame_t *f) {
     if (n < 1) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetError(f, "TypeError: string.ord requires a string"); }
     if (!kvlangXvalueNone(&in[0]) && kvlangXvalueKindIs(&in[0], KVSPACE_KIND_CHAR)) {
         int rn = (int)(xh_content_len_of(&in[0]) >> 2);
-        int64_t cp = rn <= 0 ? -1 : (int64_t)xh_rd32(xh_body(in[0].bytes));
+        int64_t cp = rn == 0 ? -1 : (int64_t)kvlangXvalueChar32At(&in[0], 0);
         int rc = kvlangBuiltinEmitInt64(f, cp);
         kvlangBuiltinFreeInputs(in, n);
         return rc;

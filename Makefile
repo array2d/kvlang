@@ -1,30 +1,60 @@
 # kvlang 统一构建：产物全部输出到 bin/，各组件独立编译。
-#   make runtime    C runtime 库（libkvlang_runtime.so，经 CMake）
+#   make runtime    C runtime 库（libkvlang_runtime.so，经 CMake）——可选 A/B 臂
+#   make runtimec2  c2 runtime 库（libkvlang_runtimec2.so，经 CMake）——默认 runtime
 #   make runtime-rs 功能完整 Rust runtime → 编译为 kvlang（term/json/http/kvlanglayout 就地 rwir）
 #   make layout     Rust layout（kvlanglayout）
 #   make json       Go json 扩展（json-rwirext 可执行文件）
 #   make oldhero    Go 旧 runtime（kvlang-go，兼容保留，即将归档）
 #   make test       全量 tutorial 回归
 #   make install    一次性安装产物到最终态目录（.so→/usr/lib，可执行→/usr/bin，头→/usr/include/kvlang/）
-#   make all        全部（runtime + runtime-rs + layout + json）
+#   make all        全部（runtimec2 + runtime-rs + layout + json；C 版 runtime 不默认构建）
 #   make clean      清理 bin/ 与各构建目录
 #   make clear      install 的逆操作：删系统目录里 kvspace/kvlang 的 .so 与可执行
 #   make status     列出系统目录里已安装的库 / 可执行 / 头
 # kvspace 后端由 libkvspace dispatch 前端按 DSN 运行时选择，不再编译期切换。
 
+# 默认 runtime = c2（A/B 目标达成后主选）。C 版仍可 `make runtime` 单独构建。
 BIN         := bin
 
-.PHONY: all runtime runtime-rs layout json oldhero test install clean \
-        status clear clear-headers clear-all
+# 产物后缀：Linux=.so macOS=.dylib（uname 判 Darwin，跨平台确定）。
+ifeq ($(shell uname -s),Darwin)
+C2_LIB     := libkvlang_runtimec2.dylib
+LAYOUT_LIB := libkvlanglayout.dylib
+else
+C2_LIB     := libkvlang_runtimec2.so
+LAYOUT_LIB := libkvlanglayout.so
+endif
 
-all: runtime runtime-rs layout json
+.PHONY: all runtime runtimec2 runtime-rs layout json oldhero test install clean \
+        status clear clear-headers clear-all single
+
+all: runtimec2 runtime-rs layout json
 
 test: all
 	python3 tutorial/test.py --no-build
 
+# 单一二进制（#493）：把 .so 作为字节嵌进 kvlang，启动时 memfd+dlopen，前端用
+# RTLD_NOLOAD 复用已加载的后端。payload 固定组装到 build/embed（不读构建 env）。
+# FRONTEND_SO 是构建期参数（不是运行时环境变量）：本分支构建的 libkvspace.so.1。
+FRONTEND_SO ?=
+# 单一二进制（#493）：默认 embed c2 runtime。C 版 A/B 臂：`make runtime` 后
+# 手动替换 bin/libkvlang_runtime.so 再 stage_embed（tools/stage_embed.sh 已同时带 c2）。
+single: runtimec2 layout
+	./tools/stage_embed.sh $(FRONTEND_SO) build/embed
+	cargo build --release --manifest-path runtime-rs/Cargo.toml --features embed
+	cp runtime-rs/target/release/kvlang $(BIN)/kvlang-single
+
 runtime:
 	cmake -S runtime -B build/runtime -DCMAKE_BUILD_TYPE=Release
 	cmake --build build/runtime --target kvlang_runtime -j
+
+# c2 runtime（默认）：产物 bin/libkvlang_runtimec2.so（Makefile 层面不 install 到 /usr/lib，
+# install 目标负责装）。C 版 libkvlang_runtime.so 仍由 `make runtime` 单独产出。
+runtimec2:
+	cmake -S runtimec2 -B build/runtimec2 -DCMAKE_BUILD_TYPE=Release
+	cmake --build build/runtimec2 --target kvlang_runtimec2 -j
+	mkdir -p $(BIN)
+	cp build/runtimec2/bin/$(C2_LIB) $(BIN)/$(C2_LIB)
 
 runtime-rs:
 	cargo build --release --manifest-path runtime-rs/Cargo.toml
@@ -33,12 +63,12 @@ runtime-rs:
 layout:
 	cargo build --release --manifest-path layout/Cargo.toml
 	cp layout/target/release/kvlanglayout $(BIN)/
-	cp layout/target/release/libkvlanglayout.so $(BIN)/
+	cp layout/target/release/$(LAYOUT_LIB) $(BIN)/
 
 install:
 	install -d /usr/lib /usr/bin /usr/include/kvlang
-	install -m 755 $(BIN)/libkvlang_runtime.so /usr/lib/
-	install -m 755 layout/target/release/libkvlanglayout.so /usr/lib/
+	install -m 755 $(BIN)/$(C2_LIB) /usr/lib/$(C2_LIB)
+	install -m 755 layout/target/release/$(LAYOUT_LIB) /usr/lib/
 	install -m 755 $(BIN)/kvlang $(BIN)/kvlanglayout /usr/bin/
 	install -m 644 runtime/include/kvlang_vthread.h runtime/include/kvlang_runtime.h /usr/include/kvlang/
 

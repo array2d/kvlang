@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/array2d/kvlang/actions/workflows/ci.yml/badge.svg)](https://github.com/array2d/kvlang/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Tutorial Examples](https://img.shields.io/badge/tutorials-235%20examples-4c1)](tutorial/)
+[![Tutorial Examples](https://img.shields.io/badge/tutorials-236%20examples-4c1)](tutorial/)
 [![Spec](https://img.shields.io/badge/spec-84%20chapters-blueviolet)](stdlib/kvlang/spec/)
 
 **A plaintext, interpreted language whose addressing space and memory space are both kvspace — a small core with extensions on top (the front-end language of deepx, formerly dxlang).** Code and data live in one KV tree; the PC is a KV path (crash-resumable), the source is the IR, and every KV value is plaintext. The core runtime does only the execute loop and control flow; every other capability is supplied by other runtimes and registered at `/lib/<opcode>`.
@@ -88,6 +88,42 @@ PREFIX=/opt/kvlang VERSION=v0.2.18 sh install.sh   # override prefix / pin a ver
 
 It installs `kvlang` (runtime CLI), `kvlanglayout` (layout CLI) and `kvspace` (backend CLI) into `<prefix>/bin`, the libraries into `<prefix>/lib` + `<prefix>/lib/kvspace`, and the headers into `<prefix>/include/{kvlang,kvspace,…}`.
 
+## Single-file binary (Linux)
+
+`make single` builds `bin/kvlang-single`: one executable with every project-owned
+shared library embedded as bytes. At startup they are written to anonymous
+`memfd_create` objects and loaded with `dlopen("/proc/self/fd/N")` — nothing is
+extracted to disk, and the binary needs no `LD_LIBRARY_PATH`, rpath, or installed
+kvspace/kvlang libraries (`ldd` shows only libc/libm/libgcc).
+
+```bash
+./ci/deps.sh          # or point KVSPACE_DEPS_DIR at an existing deps prefix
+make single           # → bin/kvlang-single
+ldd bin/kvlang-single # only system libraries
+KVSPACE=shm:///tmp/s.db bin/kvlang-single -c 'print("ok")'
+```
+
+`KVSPACE` (the DSN) selects the backend, and the loader itself sets no environment
+variables. The loader maps the backends from memory; the dispatch front end reuses
+them by SONAME with
+`dlopen(name, RTLD_NOW | RTLD_NOLOAD)`, so no backend directory, rpath, or
+`LD_LIBRARY_PATH` is involved. The front end embedded in the payload must carry
+that NOLOAD support — build it from current kvspace sources and pass
+`FRONTEND_SO=<path> make single` (the build fails loudly otherwise). To run the
+tutorial suite against the single binary, point the layout step at its own
+`layout` subcommand and put a `kvlang` symlink on `PATH` for the nested-exec test
+case:
+
+```bash
+printf '#!/bin/sh\nexec env KVSPACE="$2" "$PWD/bin/kvlang-single" layout "$1"\n' > /tmp/kl.sh
+chmod +x /tmp/kl.sh && ln -sf "$PWD/bin/kvlang-single" /tmp/kvlang
+PATH=/tmp:$PATH KVLANG_TERM_BIN="$PWD/bin/kvlang-single" KVLANG_LAYOUT_BIN=/tmp/kl.sh \
+  KVSPACE=shm:///tmp/tut python3 tutorial/test.py --no-build
+```
+
+The self-contained tarball remains the supported/released artifact; the
+single-file binary is an additional Linux artifact (macOS is a follow-up).
+
 ## Quick Start (from source)
 
 Requirements: a C toolchain + cmake, Rust (cargo), and the kvspace ABI libraries installed to `/usr/lib/kvspace` (fetched by [`ci/deps.sh`](ci/deps.sh) from the tags in [`deps.json`](deps.json)). Go is needed only for the Go `json` example extension.
@@ -114,7 +150,7 @@ KVSPACE=shm:///tmp/kvlang.shm ./bin/kvlang tutorial/01-basics/hello.kv   # kvspa
 KVSPACE=fs:///tmp/kvlang-fs   ./bin/kvlang tutorial/01-basics/hello.kv   # kvspace-durable
 ```
 
-Two more modes: `kvlang create <func>` prints a vthread `vid`, and `kvlang run <vid>` resumes from the persisted PC (crash recovery). With no arguments and `KVLANG_LIB=p1:p2:…` set, kvlang lays out every `.kv` under those paths and runs each lib's `init`.
+Two more modes: `kvlang create <func>` prints a vthread `vid`, and `kvlang run <vid>` resumes from the persisted PC (crash recovery). With `--lib p1:p2:…` (instead of an entry), kvlang lays out every `.kv` under those paths and runs each lib's `init`; there is no environment variable for this.
 
 ---
 
@@ -324,7 +360,7 @@ For an LLM-oriented one-page summary of the language, see [`stdlib/kvlang/kvlang
 
 ## Tutorial
 
-235 self-contained examples (`// 期望输出` headers give expected output for 227 of them), organized by topic:
+236 self-contained examples (`// 期望输出` headers give expected output for 228 of them), organized by topic:
 
 ```
 01-basics/      hello, arith, precision, numtypes, strings, …     (18)

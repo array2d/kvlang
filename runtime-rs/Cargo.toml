@@ -12,6 +12,10 @@ path = "src/lib.rs"
 name = "kvlang"
 path = "src/main.rs"
 
+[features]
+# #493：全部自有 .so 以字节嵌入，启动 memfd+dlopen 从内存加载（不落盘、不 exec）。
+embed = []
+
 [dependencies]
 libc = "0.2"
 serde_json = "1"

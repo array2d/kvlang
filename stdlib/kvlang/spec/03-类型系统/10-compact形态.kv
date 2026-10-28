@@ -16,23 +16,31 @@ a:[]int64 = [10, 20, 30, 40]   // head langtype = [4]int64，body = 4×8 字节
 
 ### compact 元素访问
 
-下标 `a[i]` 是 compact 元素访问：读降级为 `xv·at`，写（`a[i]=v` 或 `v -> a[i]`）降级为 `xv·set`。
+下标 `a[i]` 是 compact 元素访问：读降级为 `compactarray·at`，写（`a[i]=v` 或 `v -> a[i]`）降级为
+`compactarray·set`。
 
 ```kv
-a[1] -> e          // 等价 xv·at(a, 1) -> e
-a[2] = 99          // 等价 xv·set(a, 2, 99) -> a
-99 -> a[0]         // 右箭头下标写，等价 xv·set(a, 0, 99) -> a
+a[1] -> e          // 等价 compactarray·at(a, 1) -> e
+a[2] = 99          // 等价 compactarray·set(a, 2, 99) -> a
+99 -> a[0]         // 右箭头下标写，等价 compactarray·set(a, 0, 99) -> a
 ```
 
-`xv·at` / `xv·set` **仅接受 compact 数组**（维数非 0）：对 stringkeymap 或标量报 TypeError。索引个数
-**必须**等于维数，按 row-major 折算扁平偏移；越界报 IndexError。写回保持 dims 不变。
+`compactarray·at` / `compactarray·set` **仅接受 compact 数组**（维数非 0）：对 stringkeymap 或标量报
+TypeError。索引个数**必须**等于维数，按 row-major 折算扁平偏移；越界报 IndexError。写回保持 dims
+不变。`compactarray·set` **只做同槽 patch**（写预创建槽 body）；`tmp = compactarray·set(a, i, v)` 这类
+异槽写法非法，必须先 `compactarray·copy` 再同槽 set：
+
+```kv
+tmp = compactarray·copy(a)      // 专职创建副本
+compactarray·set(tmp, i, v) -> tmp   // 同槽 patch
+```
 
 ### 多维 compact（tensor）
 
-多维 compact 由 `xv·reshape` 从一维铺开：
+多维 compact 由 `compactarray·newreshape` 从一维铺开：
 
 ```kv
-m = xv·reshape([1, 2, 3, 4], 2, 2)   // dims = [2,2]
+m = compactarray·newreshape([1, 2, 3, 4], 2, 2)   // dims = [2,2]
 7 -> m[1, 0]                          // 多维下标写
 m[0, 1] -> x                          // 多维下标读
 ```
@@ -43,8 +51,8 @@ m[0, 1] -> x                          // 多维下标读
 
 | 算子 | 语义 |
 |------|------|
-| `xv·langtype(a)` | 返回 head 的 langtype 串（如 `[4]int64`） |
-| `xv·bodylen(a)` | 返回 body 字节数 |
-| `xv·reinterpret(a, "[]uint8")` | 原样保留 body 字节，只替换 langtype（`[3]int64` 24 字节 → `[24]uint8`） |
+| `compactarray·langtype(a)` | 返回 head 的 langtype 串（如 `[4]int64`） |
+| `compactarray·bodylen(a)` | 返回 body 字节数 |
+| `compactarray·newreinterpret(a, "[]uint8")` | 原样保留 body 字节，只替换 langtype（`[3]int64` 24 字节 → `[24]uint8`） |
 "#### -> /lib/kvlang/spec/类型系统/compact形态
 }

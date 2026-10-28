@@ -14,7 +14,7 @@ rwfunc is_pal(head:*Node) -> () {
 	head -> p
 	while (p != None) {
 		p·val -> v
-		kvspace·set(arr, n, v) -> _
+		v -> arr·*n
 		n = n + 1
 		p·next -> p
 	}
@@ -22,8 +22,8 @@ rwfunc is_pal(head:*Node) -> () {
 	0 -> l
 	r = n - 1
 	while (l < r) {
-		kvspace·get(arr, l) -> x
-		kvspace·get(arr, r) -> y
+		arr·*l -> x
+		arr·*r -> y
 
 		if (x != y) {
 			false -> ok

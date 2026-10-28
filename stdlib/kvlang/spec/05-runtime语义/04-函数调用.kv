@@ -10,10 +10,11 @@ lib kvlang/spec/runtime语义/函数调用 {
 
 调用点把每个实参的实际 KV 路径写为 `*T` 参数指针；字面量先落临时 KV key。子帧 `[0,±k]` 存指向该参数指针的第二层指针 `**T`。被调函数体的形参引用是 `*[0,±k]`，runtime 先从帧槽读参数指针，再由普通 rwir 读取目标值。写参沿同一链直达调用方目标，返回时无需拷贝。读参只读，由 layout 验证。
 
-参数签名在函数旁的 `.[0,±k]` key，类型为 `def langtype`，body 为参数名、NUL、匹配类型串。它们不覆盖帧内 `/[0,±k]` 绑定键。`[0,0]` 锚点单独存 5 字节读参、写参和变参计数头。普通 rwir 的路由头在 `/lib/<opcode>`，签名在它的 `[0,x]` 子 key。
+参数签名在函数旁的 `.[0,±k]` key，类型为 `def langtype`，body 为参数名、NUL、匹配类型串。它们不覆盖帧内 `/[0,±k]` 绑定键。`[0,0]` 锚点单独存 5 字节读参、写参和变参计数头。普通 rwir 的路由头在 `/‥isa/<folded-op>`，签名在它的 `[0,x]` 子 key。
 
 ## 调度
 
-runtime 先按 myrwircaps 兑现本地 rwir；不在能力集内而有 `def rwir` 路由头的指令交给对应外部 runtime；其余已知函数按 rwfunc 调用。外部 rwir 也从 KVSpace 读写 PC 与参数，不依赖进程私有的执行状态。
+runtime 先按 myrwircaps 兑现本地 rwir；不在能力集内而有 `def rwir` 路由头的指令交给对应外部 runtime；其余已知函数按
+rwfunc 调用。外部 rwir 也从 KVSpace 读写 PC 与参数，不依赖进程私有的执行状态。
 "#### -> /lib/kvlang/spec/runtime语义/函数调用
 }

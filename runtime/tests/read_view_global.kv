@@ -1,0 +1,12 @@
+// 仅 tests/read_view_lazy.sh：typed 行只读 global/绝对 key 时不得建 view
+// （view 只允许 vthread 帧子树内的槽），值仍必须正确。
+rwfunc test() -> () {
+	kvspace·set("/viewtest/g", 7)
+	kvspace·set("/viewtest/i", 0)
+	y = 0
+	while (/viewtest/i < 100) {
+		y = /viewtest/g + 1
+		kvspace·set("/viewtest/i", /viewtest/i + 1)
+	}
+	print("read_view_global:", y)
+}

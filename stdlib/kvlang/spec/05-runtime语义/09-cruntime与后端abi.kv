@@ -18,7 +18,8 @@ durable 单句柄相干、后端装载。
 2. **值语义与编解码**：headlenpow / langtype 的**唯一编解码器**在 kvspace 正典 codec（`kvspaceXvalueEncode` /
    `kvspaceDecodeHead` / `kvspaceNewPtr`/`NewChar`/`NewBool`/`NewInt64`/`NewFloat64`）；runtime-c 的
    `xvalue.c` 只是其薄封装。langtype 串是类型的唯一真相，怎么拼、怎么解，只此一处。
-3. **指令解码与签名校验**：`rwir_decode.c:RwirDecode`（稠密探查、遇空即停）、`/lib/<op>` 签名的读写码规范、
+3. **指令解码与签名校验**：`rwir_decode.c:RwirDecode`（稠密探查、遇空即停）、`/‥isa/<folded-op>`
+签名的读写码规范、
    `LangtypeValid`/`LangtypeMatch` 类型判定。
 
 **扩展运行时套用核心，不复刻**：runtime-c 把上述三件能力经嵌入式 C ABI（下节 `kvlang_vthread.h` +
@@ -26,7 +27,8 @@ durable 单句柄相干、后端装载。
 **自行解释己方 opcode**——不得另起执行核心、不得另写编解码器、不得复刻 native 算子。据此：
 
 - **runtime-rs 是扩展运行时的参考实现**，不是第二套等价核心。它作为 myrwir 宿主，套用 runtime-c 核
-  心，在自己的 **myrwircaps**（见 [[runtime开发规范]]）里登记 print/fs/http/networld/vthread 等「OS
+  心，在自己的 **myrwircaps**（见 [[runtime开发规范]]）里登记 print/fs/http/networld/vthread
+  等「OS
   工具箱」rwir。其对 head/langtype 的读写**必须**走正典 codec，不得自持一份编解码。
 - **未来的 deepx-gpu-compute（GPU 算子融合计算引擎）同架构**：同样嵌入 runtime-c 核心，只在其
   **myrwircaps** 里登记 tensor 融合算子——算子融合发生在扩展侧（见 [[runtime开发规范]]），核心的解释
@@ -59,10 +61,17 @@ kvcpu_route.c=外部路由与 handoff）、`runtime.c`（ABI 层）、`rwirext.c
 `notinmyrwircaps`）、`logx.c`、`strutil.c`（一次性字符串工具）、`const.h`。
 myrwircaps 为**静态数组 + 线性查找**。
 
+## ISA 签名存储
+
+ISA 签名与程序同处一个数据 store，位置 `/‥isa/<folded-op>`；
+不再派生独立 control DSN、不使用第二个 kvspace 句柄，也不存在
+`KVSPACE_ISA` 等额外环境变量。runtime/layout 只按 `KVSPACE` 连接。
+
 ## 统一 `kvspace*` C ABI（去特化）
 
-layout 与 runtime **都不对 kvspace 做特化**：不 dlopen、不双后端分支、不解析 scheme。二者只走一套
-`kvspace*` 兼容 C ABI（无下划线 camelCase）：
+layout 与 runtime 对**数据 store**不做特化：不 dlopen、不双后端分支；
+也不存在 ISA 控制 DSN 派生。二者只走一套 `kvspace*` 兼容 C ABI
+（无下划线 camelCase）：
 
 ```
 kvspaceConnect / Close / Clear
@@ -97,7 +106,8 @@ kvspaceResolveRef / GetByRef / SetPartByRef / SetValueByRef
 
 符号清单的权威来源是**构建产物**——`nm -D --defined-only runtime/build/libkvlang_runtime.so | grep
 '^kvlang'`。本文只约定各模块的语义与 ABI 分组，不抄清单（抄清单必漂移）：`kvlangRuntime*` 执行入口、
-`kvlangKvcpu*` 取指-解码-执行循环、`kvlangControl*` 控制流原语、`kvlangBuiltin*` native 算子（myrwircaps）、
+`kvlangKvcpu*` 取指-解码-执行循环、`kvlangControl*` 控制流原语、`kvlangBuiltin*` native
+算子（myrwircaps）、
 `kvlangKvspace*` kvspace ABI 封装、`kvlangRwirext*`/`kvlangDefRwir` 扩展宿主 ABI、`kvlangXvalue*`/
 `kvlangLangtype*` 值语义，以及 **def langtype（匹配）与 langtype（真实类型）**两组能力。
 	"#### -> /lib/kvlang/spec/runtime语义/cruntime与后端abi

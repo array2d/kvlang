@@ -23,7 +23,8 @@ lib kvlang/spec/类型系统/langtype签名类型表达式 {
 参数变参 `...` 是签名层 arity 构造，**不在** def langtype 串内（见 [[函数]]）。
 
 opcode 槽 `[s0,0]` 使用实际的 `rwir` 或 `rwfunc` langtype；layout 在生成时区分已知调用目标，
-runtime 再查 `/lib/<opcode>` 分派（见 [[指令槽编码]]）。
+runtime 按 myrwircaps 派发；跨 runtime 路由再读
+`/‥isa/<folded-op>` 签名（见 [[指令槽编码]]）。
 
 ## kindexpr（简写）
 

@@ -8,9 +8,9 @@ rwfunc count_children(prefix:[]char/utf32) -> (n:int64) {
 
 rwfunc test() -> () {
 	kvspace·mkindex("/tmp/kvtc/", 8)
-	kvspace·set("/tmp/kvtc/a", 1)
-	kvspace·set("/tmp/kvtc/bb", 2)
-	kvspace·set("/tmp/kvtc/ccc", 3)
+	1 -> "/tmp/kvtc/a"
+	2 -> "/tmp/kvtc/bb"
+	3 -> "/tmp/kvtc/ccc"
 	count_children("/tmp/kvtc/") -> n
 	println("n=", n)
 }

@@ -26,7 +26,7 @@ jobs:
         run: ./ci/deps.sh
       - name: 构建 runtime + layout + runtime-rs（产 bin/ 下的 CLI）
         run: |
-          make runtime
+          make runtimec2
           make layout      # cargo build + cp kvlanglayout / libkvlanglayout.so → bin/
           make runtime-rs  # → bin/kvlang
       - name: 打包 ABI 产物
@@ -54,17 +54,42 @@ jobs:
           tar czf "$d.tar.gz" "$d"
           tar tzf "$d.tar.gz"
           sha256sum "$d.tar.gz" | tee SHA256SUMS-linux
-      - name: 自包含冒烟（空目录解包，隐藏系统安装）
+      - name: 自包含冒烟（安装到 /usr 后运行；后端目录固定，不再有运行期 env）
         run: |
           set -euo pipefail
           v="${ABI_VERSION}"
           d="kvlang-abi-$v-linux-x86_64"
-          # 前端与后端都必须随包走
-          test -e "$d/lib/libkvspace.so.1"
-          test -n "$(ls -A "$d/lib/kvspace")"
-          tmp=$(mktemp -d)
-          tar xzf "$d.tar.gz" -C "$tmp"
-          # 暂时移走系统安装，证明运行期只依赖 tarball 内容
+          # 后端目录固定 /usr/lib/kvspace、前端固定 /usr/lib：按 tarball 布局安装后运行。
+          sudo cp -P "$d"/lib/*.so* /usr/lib/
+          sudo cp -P "$d"/lib/kvspace/*.so* /usr/lib/kvspace/
+          sudo cp "$d"/bin/kvlang "$d"/bin/kvlanglayout /usr/bin/
+          out=$(env -i PATH=/usr/bin:/bin HOME=/tmp \
+            KVSPACE="shm:///tmp/rel-smoke.shm" /usr/bin/kvlang -c 'print("ok")')
+          echo "smoke: $out"
+          [ "$out" = "ok" ]
+          usage=$(/usr/bin/kvlanglayout 2>&1 || true)
+          echo "smoke layout: $usage"
+          echo "$usage" | grep -q '^usage: kvlanglayout'
+      - name: 构建单一二进制（#493：嵌入本 tag 构建的 runtime/layout + 依赖五件套）
+        run: |
+          set -euo pipefail
+          v="${ABI_VERSION}"
+          # 前端必须带 RTLD_NOLOAD 能力标记；deps.json 的 v0.3.18 发布版没有，
+          # 故从 kvspace 源码构建（下个协同 tag 起改为 deps.json pin 的版本）。
+          git clone --depth 1 https://github.com/array2d/kvspace /tmp/kvspace-src
+          cmake -S /tmp/kvspace-src -B /tmp/kvspace-src/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build /tmp/kvspace-src/build -j
+          grep -aq "kvspace:embed-noload" /tmp/kvspace-src/build/libkvspace.so.1
+          FRONTEND_SO=/tmp/kvspace-src/build/libkvspace.so.1 make single
+          # 记录嵌入的依赖版本（deps.json 即 tag 的 pin）与 sha256
+          python3 -c 'import json,hashlib,sys; v=sys.argv[1]; deps=json.load(open("deps.json")); b=open("bin/kvlang-single","rb").read(); json.dump({"single":v,"platform":"linux-x86_64","embedded":deps,"size":len(b),"sha256":hashlib.sha256(b).hexdigest()}, open("kvlang-single-%s-linux-x86_64.json"%v,"w"), indent=2)' "$v"
+          cp bin/kvlang-single "kvlang-single-$v-linux-x86_64"
+          sha256sum "kvlang-single-$v-linux-x86_64" | tee SHA256SUMS-single
+      - name: 单文件冒烟（无系统库、无 rpath）
+        run: |
+          set -euo pipefail
+          v="${ABI_VERSION}"
+          # 证明单文件不依赖系统安装：临时移走 kvspace 前端与后端目录
           sudo mv /usr/lib/kvspace /usr/lib/kvspace.hidden
           for f in /usr/lib/libkvspace.so*; do
             sudo mv "$f" "/tmp/$(basename "$f").hidden"
@@ -76,22 +101,20 @@ jobs:
             done
           }
           trap restore EXIT
-          # 不设 LD_LIBRARY_PATH：必须靠 ELF RPATH（bin/kvlang 带 $ORIGIN/../lib）
-          # 解出前端；后端目录仍是构建期常量 /usr/lib/kvspace，故显式给
-          # KVSPACE_BACKEND_PATH（frontend 支持的运行期覆盖）。
-          out=$(env -i PATH=/usr/bin:/bin HOME="$tmp" \
-            KVSPACE="shm://$tmp/shm" \
-            KVSPACE_BACKEND_PATH="$tmp/$d/lib/kvspace" \
-            "$tmp/$d/bin/kvlang" -c 'print("ok")')
-          echo "smoke: $out"
+          ldd "kvlang-single-$v-linux-x86_64" > /tmp/ldd-single.txt
+          ! grep -E 'kvspace|kvlang' /tmp/ldd-single.txt
+          ! readelf -d "kvlang-single-$v-linux-x86_64" | grep -E 'RPATH|RUNPATH'
+          out=$(env -i PATH=/usr/bin:/bin HOME=/tmp \
+            KVSPACE="shm:///tmp/single-rel.shm" \
+            "./kvlang-single-$v-linux-x86_64" -c 'print("ok")')
           [ "$out" = "ok" ]
-          # kvlanglayout 同样必须靠相对 RPATH 从包内解析前端
-          usage=$("$tmp/$d/bin/kvlanglayout" 2>&1 || true)
-          echo "smoke layout: $usage"
-          echo "$usage" | grep -q '^usage: kvlanglayout'
       - name: 发布 release
         if: github.event_name == 'push'
-        run: gh release create "${GITHUB_REF_NAME}" kvlang-abi-*-linux-*.tar.gz SHA256SUMS-linux --generate-notes
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            kvlang-abi-*-linux-*.tar.gz SHA256SUMS-linux \
+            kvlang-single-*-linux-x86_64 kvlang-single-*.json SHA256SUMS-single \
+            --generate-notes
 
   # macOS：各仓只有 linux ABI tarball，依赖全部源码构建（装 /usr/local）后打包（自包含）。
   macos:
@@ -99,7 +122,6 @@ jobs:
     runs-on: macos-latest
     env:
       GH_TOKEN: ${{ github.token }}
-      KVSPACE_LIB_DIR: /usr/local/lib/kvspace # /usr 受 SIP 保护
     steps:
       - uses: actions/checkout@v4
       - name: 构建依赖链（blockmalloc / slotsboxmalloc / kvspace / kvspace-c / kvspace-durable）
@@ -120,10 +142,9 @@ jobs:
           sudo cp /tmp/kvspace-durable/target/release/libkvspace_durable.dylib "$PREFIX/lib/kvspace/"
       - name: 构建 runtime + layout + runtime-rs + kvspace CLI
         run: |
-          cmake -S runtime -B build/runtime -DCMAKE_BUILD_TYPE=Release -DKVSPACE_LIB_DIR="$KVSPACE_LIB_DIR"
-          cmake --build build/runtime --target kvlang_runtime -j
+          make runtimec2
           cargo build --release --manifest-path layout/Cargo.toml
-          # runtime-rs 的 build.rs 在 ../bin 找 libkvlang_runtime/libkvlanglayout，必须先就位
+          # runtime-rs 的 build.rs 在 ../bin 找 libkvlang_runtimec2/libkvlanglayout，必须先就位
           mkdir -p bin
           cp layout/target/release/libkvlanglayout.dylib bin/
           cargo build --release --manifest-path runtime-rs/Cargo.toml
@@ -197,7 +218,7 @@ jobs:
           # 打包前核验：CLI 的 layout/前端依赖确实解析到 @rpath，且 rpath 覆盖 lib/
           otool -L "$d/bin/kvlang"
           otool -l "$d/bin/kvlang" | awk '/cmd LC_RPATH/{f=1} f && /path /{print "rpath:", $2; f=0}'
-          for f in "$d/bin/kvlanglayout" "$d/lib/libkvlang_runtime.dylib" \
+          for f in "$d/bin/kvlanglayout" "$d/lib/libkvlang_runtimec2.dylib" \
                    "$d/lib/libkvlanglayout.dylib" "$d/lib/libkvspace.1.dylib"; do
             echo "=== otool -L $f"
             otool -L "$f"
@@ -214,27 +235,21 @@ jobs:
           path: |
             kvlang-abi-${{ env.ABI_VERSION }}-darwin-arm64.tar.gz
             SHA256SUMS-macos
-      - name: 自包含冒烟（空目录解包，隐藏系统安装）
+      - name: 自包含冒烟（安装到 /usr/local 后运行；后端目录固定，不再有运行期 env）
         run: |
           set -euo pipefail
           v="${ABI_VERSION}"
           d="kvlang-abi-$v-darwin-arm64"
           test -e "$d/lib/libkvspace.1.dylib"
-          tmp=$(mktemp -d)
-          tar xzf "$d.tar.gz" -C "$tmp"
-          sudo mv /usr/local/lib/kvspace /usr/local/lib/kvspace.hidden
-          restore() { sudo mv /usr/local/lib/kvspace.hidden /usr/local/lib/kvspace; }
-          trap restore EXIT
-          # 不设 DYLD_LIBRARY_PATH：必须靠 LC_RPATH（@loader_path/../lib）解析 @rpath；
-          # 后端目录仍是构建期常量，故只显式给 KVSPACE_BACKEND_PATH。
-          out=$(env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$tmp" \
-            KVSPACE="shm://$tmp/shm" \
-            KVSPACE_BACKEND_PATH="$tmp/$d/lib/kvspace" \
-            "$tmp/$d/bin/kvlang" -c 'print("ok")')
+          # 后端目录固定 /usr/local/lib/kvspace、前端在 /usr/local/lib：按 tarball 布局安装后运行。
+          sudo cp -P "$d"/lib/*.dylib /usr/local/lib/
+          sudo cp -P "$d"/lib/kvspace/*.dylib /usr/local/lib/kvspace/
+          sudo cp "$d"/bin/kvlang "$d"/bin/kvlanglayout /usr/local/bin/
+          out=$(env -i PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin HOME=/tmp \
+            KVSPACE="shm:///tmp/rel-smoke.shm" /usr/local/bin/kvlang -c 'print("ok")')
           echo "smoke: $out"
           [ "$out" = "ok" ]
-          # kvlanglayout 同样必须靠 @loader_path/../lib 从包内解析 @rpath
-          usage=$("$tmp/$d/bin/kvlanglayout" 2>&1 || true)
+          usage=$(/usr/local/bin/kvlanglayout 2>&1 || true)
           echo "smoke layout: $usage"
           echo "$usage" | grep -q '^usage: kvlanglayout'
       - name: dispatch 发布（tag 输入非空且冒烟通过）

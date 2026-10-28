@@ -1,7 +1,7 @@
 // 欢迎加入kvspace世界
 // lib time/duration —— 时长标准库便利函数。native rwir: nanos/millis/seconds/minutes/hours/
 // as_nanos/as_millis/as_seconds/as_minutes/as_hours/add/sub/before/after；
-// days/as_days/is_zero/equal/max/min 是 rwfunc 封装（kv 源码，可寻址/可自改）。
+// days/as_days/is_zero/is_neg/is_pos/abs/equal/max/min/clamp 是 rwfunc 封装（kv 源码，可寻址/可自改）。
 
 lib time/duration {
 	rwfunc days(n:int64) -> (dur:duration) {
@@ -15,6 +15,23 @@ lib time/duration {
 	rwfunc is_zero(d:duration) -> (r:bool) {
 		time/duration·as_nanos(d) -> ns
 		ns == 0 -> r
+	}
+	rwfunc is_neg(d:duration) -> (r:bool) {
+		time/duration·as_nanos(d) -> ns
+		ns < 0 -> r
+	}
+	rwfunc is_pos(d:duration) -> (r:bool) {
+		time/duration·as_nanos(d) -> ns
+		ns > 0 -> r
+	}
+	rwfunc abs(d:duration) -> (r:duration) {
+		time/duration·as_nanos(d) -> ns
+		if (ns < 0) {
+			0 - ns -> pos
+			time/duration·nanos(pos) -> r
+		} else {
+			d -> r
+		}
 	}
 	rwfunc equal(d1:duration, d2:duration) -> (r:bool) {
 		time/duration·before(d1, d2) -> b
@@ -36,5 +53,9 @@ lib time/duration {
 		} else {
 			d2 -> r
 		}
+	}
+	rwfunc clamp(d:duration, lo:duration, hi:duration) -> (r:duration) {
+		time/duration·max(d, lo) -> t
+		time/duration·min(t, hi) -> r
 	}
 }

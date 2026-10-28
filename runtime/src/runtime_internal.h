@@ -28,6 +28,7 @@ typedef struct {
 #define KVSPACE_REF_PTR 1
 #define KVSPACE_REF_EXT 2
 #define KVSPACE_STORETYPE_FIXED_SMALL 0
+#define KVSPACE_STORETYPE_SLACK 1
 
 extern void *kvspaceConnect(const char *dsn);
 extern void kvspaceClose(void *h);
@@ -46,6 +47,39 @@ typedef struct {
     uint32_t parent_id;
     uint32_t depth;
 } kvspaceRef_t;
+
+/* P2 view token：与 kvspace/include/kvspace/kvspace.h 逐字段一致（无 pin）。 */
+typedef struct {
+    uint8_t *head; uint8_t *body; uint32_t headlen; uint32_t value_len;
+    uint64_t cap; uint64_t body_cap;
+    uint32_t struct_gen; uint32_t value_gen;
+    uint64_t store_id; uint32_t node_id; uint32_t _pad;
+} kvspaceViewToken_t;
+/* 0=成功；1=STALE；-1=不存在/非法；-2=后端不支持（回退字符串 ABI）。 */
+extern int kvspaceViewResolve(void *h, const char *key, kvspaceViewToken_t *tok);
+extern int kvspaceViewFromRef(void *h, const kvspaceRef_t *ref,
+                              const char *key_fallback, kvspaceViewToken_t *tok);
+extern int kvspaceViewResolveFrom(void *h, const kvspaceRef_t *parent,
+                                  const char *rel, kvspaceViewToken_t *tok);
+extern int kvspaceViewCheck(void *h, const kvspaceViewToken_t *tok);
+extern int kvspaceViewRefresh(void *h, kvspaceViewToken_t *tok, const char *key);
+/* Q1：op 边界 ack；0=已 ack，1=epoch 变了（先作废 token 再来），-2=不支持。 */
+extern int kvspaceViewAck(void *h, uint32_t *epoch);
+/* Q2：显式静默声明；on∈{0,1}；声明期间 View* 一律 -1。 */
+extern int kvspaceViewQuiesce(void *h, int on);
+
+/* Match kvspaceXvalueBodyView_t in the KVSpace C ABI（shm-only）。 */
+typedef struct {
+    uint8_t *head;
+    uint32_t headlen;
+    uint8_t *body;
+    uint64_t body_cap;
+    uint64_t cap;
+} kvspaceXvalueBodyView_t;
+/* 0=成功；-1=不存在/不可视；-2=后端不支持。key_fallback 必填。 */
+extern int kvspaceXvalueBodyView(void *h, const kvspaceRef_t *ref,
+                           const char *key_fallback, kvspaceXvalueBodyView_t *out);
+
 extern int kvspaceResolveRef(void *h, const char *key, kvspaceRef_t *ref);
 extern int kvspaceGetByRef(void *h, kvspaceRef_t *ref, const char *key_fallback,
                            uint8_t **out, uint32_t *out_len);
@@ -60,17 +94,16 @@ extern int kvspaceSetValueByRef(void *h, kvspaceRef_t *ref,
                                 const uint8_t *value, uint32_t value_len,
                                 uint8_t ro, uint32_t vid, char *err,
                                 uint32_t err_cap);
-typedef struct {
-    uint8_t *head;
-    uint32_t headlen;
-    uint8_t *body;
-    uint64_t body_cap;
-    uint64_t cap;
-} kvspaceSlotView_t;
-extern int kvspaceSlotView(void *h, const kvspaceRef_t *ref,
-                           const char *key_fallback, kvspaceSlotView_t *out);
 
 /* 定位读/写（分片）；只读 head 前缀。见 kvspace.h 契约。 */
+/* 新位置写：按 (ref,storetype,langtype,body_len,body_cap) 分配并写 head，
+ * 返回 body 指针供调用方填（shm 写即落）。 */
+extern int kvspaceWriteNewPlace(void *h, const char *key, uint8_t ref,
+                                uint8_t storetype, uint8_t ro, uint32_t vid,
+                                const char *langtype, uint32_t body_len,
+                                uint64_t body_cap, uint8_t **body, char *err,
+                                uint32_t err_cap);
+
 extern int kvspaceGetPart(void *h, const char *key, uint32_t offset,
                           uint32_t len, uint8_t **out, uint32_t *out_len);
 extern int kvspaceSetPart(void *h, const char *key, uint32_t offset,
@@ -153,9 +186,8 @@ typedef struct {
 typedef struct {
     void *handle;    /* opaque KVSpace connection（数据 store） */
     bool shm;        /* DSN scheme == shm：允许 body 就地写快路径 */
-    int8_t slot_view_sup;
-    void *isa_handle; /* P1a 控制 store 句柄；NULL/同 handle 表示与数据 store 同库 */
-    bool isa_shared; /* isa_handle == handle（redis：控制键共用数据 store） */
+    bool xvaluebodyview_unsupported; /* xvalue body view 返回 -2：本句柄永久回退 */
+    int8_t slot_view_sup; /* slot view 支持度（0=未知，1=支持，-1=不支持） */
 } kvspace_t;
 
 /* ── 字符串工具 ──────────────────────────────────────────────────────
@@ -268,6 +300,11 @@ int kvlangXvalueLangtype(const kvlangXvalue_t *v, char *buf,
                          size_t cap); /* 完整 langtype → buf */
 bool kvlangKindIsMap(
     const char *kind); /* stringkeymap 或 map langtype（`…·…`） */
+/* "[<utf8码点>]char/utf8" 写入 lt（≥64B）；失败 -1。 */
+__attribute__((visibility("hidden"))) int
+kvlangCharLangtypeFmt(uint8_t *lt, const char *s, uint32_t len);
+/* 作废 PC part-write 缓存（owned 接管或回退时调用）。 */
+__attribute__((visibility("hidden"))) void kvlangPcCacheInvalidate(void);
 bool kvlangXvalueIsPtr(const kvlangXvalue_t *v);
 int32_t kvlangXvalueArrayLen(const kvlangXvalue_t *v);
 const uint8_t *kvlangXvalueBody(const kvlangXvalue_t *v, const kvspaceHead_t *h,
@@ -683,6 +720,7 @@ extern unsigned long kvCSpec, kvCGen;
 extern unsigned long kvCBodyFast, kvCBodyFallback;
 extern unsigned long kvCBodyCells, kvCBodyCellsMax;
 extern unsigned long kvCBodyCapAttempt, kvCBodyCapOk;
+extern unsigned long kvCReadViewProm, kvCReadViewDemote, kvCReadViewHit;
 #endif
 #endif
 bool kvlangNotInMyRwirCaps(kvspace_t *kv, const char *opcode);
@@ -700,7 +738,7 @@ struct kvspaceKeyOff {
     const char *key;
     kvspaceRef_t off;
     bool resolved;
-    kvspaceSlotView_t view;
+    kvspaceXvalueBodyView_t view; /* #513 快核：读视图缓存 */
     bool view_ok;
     /* 定长标量写槽（只写参、只候选行设置）：emit 快路径由此取绑定。 */
     void *fast;
@@ -766,6 +804,7 @@ typedef struct {
     /* Phase 1 派发：route 需要的只读上下文。 */
     const void *row;  /* const kvlangCodeRow_t * */
     const void *bind; /* const kvlangRowBind_t *：goto/br 预格式化目标 */
+    void *pc_view_state; /* kvlangPcViewState *：PC owned view（b1b） */
     int mode;        /* kvmode_t */
     char **out_pc;   /* ExecuteMode 的 out 参数（仅判空） */
     kvlangExecCursor *cursor; /* 执行游标（C-iii），可为 NULL */
@@ -895,15 +934,6 @@ typedef struct {
     uint8_t effects;
 } kvlangIsaSig;
 __attribute__((visibility("hidden"))) const kvlangIsaSig *kvlangIsaSigs(uint32_t *n_out);
-/* ISA registry（P1a）：core manifest 发布与 per-function hash 闸门。 */
-__attribute__((visibility("hidden"))) int kvlangIsaPublishCore(kvspace_t *kv);
-__attribute__((visibility("hidden"))) bool kvlangIsaCtlDsn(const char *dsn, char *out,
-                                                          size_t cap);
-__attribute__((visibility("hidden"))) int kvlangIsaCheck(kvspace_t *kv,
-                                                         const char *func_dir,
-                                                         char *err,
-                                                         uint32_t err_cap);
-__attribute__((visibility("hidden"))) const char *kvlangIsaCoreHash(void);
 
 __attribute__((visibility("hidden"))) const kvlangRwirCap *kvlangRwirCaps(void);
 __attribute__((visibility("hidden"))) int kvlangRwirRouteId(void);

@@ -211,6 +211,17 @@ static kvlangCodeRow_t *row_load(kvspace_t *kv, kvlangFuncCode_t *code, int s0,
                 k == KV_ISA_BIN || k == KV_ISA_CMP || k == KV_ISA_UN;
         }
     }
+    /* T-120 A：typed 行操作数 langtype 由 opcode 前缀承载（`int64·add`），
+     * 装载期解析一次；cell->type 在 typed 行上通常为空。 */
+    row->view_pack = 0;
+    if (row->typed_core && row->opcode && row->opcode[0]) {
+        const char *sep = strstr(row->opcode, MEMBER_SEP);
+        size_t plen = sep ? (size_t)(sep - row->opcode) : strlen(row->opcode);
+        int tid = kvlangLangtypeId(row->opcode, plen);
+        int w = kvlangLangtypeIsNum(tid) ? kvlangLangtypeElemSize(tid) : 0;
+        if (w > 0 && w <= 0xffff && tid > 0 && tid <= 0xff)
+            row->view_pack = (uint32_t)tid | ((uint32_t)w << 8);
+    }
     /* 结果类型只取自同一张能力表；nw>1 不进快路径。 */
     if (row->opcode_id >= 0 && row->nw == 1) {
         const kvlangRwirCap *cap = &kvlangRwirCaps()[row->opcode_id];
@@ -275,11 +286,6 @@ fail:
 static kvlangCodeRow_t *row_ensure(kvspace_t *kv, kvlangFrameCtx_t *ctx, int s0,
                                    char *err, uint32_t err_cap) {
     kvlangFuncCode_t *code = ctx->code;
-    /* P1a：函数首次加载行时校验 layout 记录的 ISA hash；rows_cap 非零后
-     * 不再重复（每函数一次）。失败经既有 decode 错误路径上报。 */
-    if (code->rows_cap == 0 &&
-        kvlangIsaCheck(kv, code->func_dir, err, err_cap) != 0)
-        return NULL;
     if ((size_t)s0 < code->rows_cap && code->rows[s0])
         return code->rows[s0];
     kvlangCodeRow_t *row = row_load(kv, code, s0, err, err_cap);
@@ -346,6 +352,13 @@ static void rcell_invalidate(kvlangBoundCell_t *rc) {
     rc->rview_state = 0;
 }
 
+__attribute__((visibility("hidden"))) void
+kvlangBodySlotRelease(kvlangBodySlot *slot) {
+    if (!slot)
+        return;
+    body_unlink(slot);
+}
+
 void kvlangBodyInvalidate(const char *key) {
     if (!key || body_reg_count == 0)
         return;
@@ -353,6 +366,8 @@ void kvlangBodyInvalidate(const char *key) {
     for (kvlangBodySlot *c = body_buckets[b]; c; c = c->next)
         if (strcmp(c->key, key) == 0) {
             c->ok = false;
+            c->head = NULL;
+            c->headlen = 0;
             c->body = NULL;
             c->dead = false;
             if (c->rcell)
@@ -368,6 +383,8 @@ void kvlangBodyInvalidateKind(const char *key, const uint8_t *langtype,
     for (kvlangBodySlot *c = body_buckets[b]; c; c = c->next)
         if (strcmp(c->key, key) == 0) {
             c->ok = false;
+            c->head = NULL;
+            c->headlen = 0;
             c->body = NULL;
             if (c->rcell) {
                 rcell_invalidate(c->rcell);
@@ -383,25 +400,20 @@ void kvlangBodyInvalidateTree(const char *prefix) {
     if (!prefix || body_reg_count == 0)
         return;
     size_t n = strlen(prefix);
-    for (int w = 0; w < 4; w++) {
-        uint64_t mask = body_nonempty[w];
-        while (mask) {
-            int bit = __builtin_ctzll(mask);
-            mask &= mask - 1;
-            int b = (w << 6) + bit;
-            for (kvlangBodySlot *c = body_buckets[b]; c; c = c->next)
-                if (strncmp(c->key, prefix, n) == 0 &&
-                    (c->key[n] == 0 || c->key[n] == '/' ||
-                     strncmp(c->key + n, RUNTIME_MEMBER_SEP,
-                             sizeof RUNTIME_MEMBER_SEP - 1) == 0)) {
-                    c->ok = false;
-                    c->body = NULL;
-                    c->dead = false;
-                    if (c->rcell)
-                        rcell_invalidate(c->rcell);
-                }
-        }
-    }
+    for (int b = 0; b < BODY_BUCKETS; b++)
+        for (kvlangBodySlot *c = body_buckets[b]; c; c = c->next)
+            if (strncmp(c->key, prefix, n) == 0 &&
+                (c->key[n] == 0 || c->key[n] == '/' ||
+                 strncmp(c->key + n, RUNTIME_MEMBER_SEP,
+                         sizeof RUNTIME_MEMBER_SEP - 1) == 0)) {
+                c->ok = false;
+                c->head = NULL;
+                c->headlen = 0;
+                c->body = NULL;
+                c->dead = false;
+                if (c->rcell)
+                    rcell_invalidate(c->rcell);
+            }
 }
 
 /* frame_root 的 /vthread/<vid> 前缀（不含尾部 /）。 */
@@ -420,60 +432,18 @@ static bool vthread_root(const char *frame_root, char *out, size_t cap) {
     return true;
 }
 
-static bool key_in_vthread_tree(const char *frame_root, const char *key) {
-    char root[KV_KEY_MAX];
-    if (!vthread_root(frame_root, root, sizeof root))
-        return false;
-    size_t rl = strlen(root);
-    return strncmp(key, root, rl) == 0 && key[rl] == '/';
+__attribute__((visibility("hidden"))) bool
+kvlangVthreadRootOfKey(const char *key, char *out, size_t cap) {
+    return vthread_root(key, out, cap);
 }
 
-static void body_register(kvlangBodySlot *slot) {
-    if (slot->reg)
-        return;
-    uint32_t b = key_hash(slot->key) % BODY_BUCKETS;
-    slot->bucket = b;
-    slot->next = body_buckets[b];
-    body_buckets[b] = slot;
-    body_nonempty[b >> 6] |= 1ULL << (b & 63);
-    slot->reg = true;
-    body_reg_count++;
-#ifdef KV_COUNT
-    if (++kvCBodyCells > kvCBodyCellsMax)
-        kvCBodyCellsMax = kvCBodyCells;
-#endif
-}
-
-bool kvlangBodyCapture(kvspace_t *kv, kvlangBodySlot *slot,
-                       const char *frame_root) {
+bool kvlangBodyAdopt(kvlangBodySlot *slot, const uint8_t *val, uint32_t len) {
     slot->ok = false;
+    slot->head = NULL;
+    slot->headlen = 0;
     slot->body = NULL;
-    /* 永久不资格（非 shm / 不在本 vthread 子树）：不再重试。 */
-    if (!kv || !kv->shm) {
-        slot->dead = true;
+    if (!val || len < XH_PREFIX)
         return false;
-    }
-    /* 槽还不存在：不算失败，等写使其 resolved 后再来。 */
-    if (!slot->off->resolved)
-        return false;
-    if (!key_in_vthread_tree(frame_root, slot->key)) {
-        slot->dead = true;
-        return false;
-    }
-    /* 真正的候选槽：失败才算 dead，并登记以便该 key 被写后唤醒重试。 */
-    slot->dead = true;
-#ifdef KV_COUNT
-    kvCBodyCapAttempt++;
-#endif
-    body_register(slot);
-    uint8_t *val = NULL;
-    uint32_t len = 0;
-    if (kvspaceGetByRef(kv->handle, &slot->off->off, slot->key, &val, &len) !=
-            0 ||
-        !val || len < XH_PREFIX)
-        return false;
-    /* 直接解 wire head：所有权守卫已限定本 vthread 自有的 frame-local 槽，
-     * ro/vid 恒为 0，无需再去后端取 sidecar。 */
     if (val[0] < 5 || val[0] > 31)
         return false;
     uint32_t headlen = 1u << val[0];
@@ -486,17 +456,75 @@ bool kvlangBodyCapture(kvspace_t *kv, kvlangBodySlot *slot,
         ltlen++;
     if (XH_PREFIX + ltlen >= headlen) /* langtype 必须 NUL 终止 */
         return false;
-    size_t kl = slot->kind_len;
-    if (!slot->kind || ltlen != kl || memcmp(val + XH_PREFIX, slot->kind, kl) != 0)
+    size_t kl = strlen(slot->kind);
+    if (ltlen != kl || memcmp(val + XH_PREFIX, slot->kind, kl) != 0)
         return false;
     /* FIXED_SMALL：a/b 必须为 0，宽度由 langtype 决定。 */
     if (xh_rd64(val + 2) != 0 || xh_rd64(val + 10) != 0)
         return false;
     if (len != headlen + slot->width)
         return false;
-    slot->body = val + headlen;
+    slot->head = (uint8_t *)val;
+    slot->headlen = headlen;
+    slot->body = (uint8_t *)val + headlen;
     slot->len = slot->width;
     slot->ok = true;
+    return true;
+}
+
+bool kvlangBodyCapture(kvspace_t *kv, kvlangBodySlot *slot,
+                       const char *frame_root, kvspaceViewToken_t *tok) {
+    slot->ok = false;
+    slot->head = NULL;
+    slot->headlen = 0;
+    slot->body = NULL;
+    /* 永久不资格（非 shm / 不在本 vthread 子树）：不再重试。 */
+    if (!kv || !kv->shm) {
+        slot->dead = true;
+        return false;
+    }
+    /* 槽还不存在：不算失败，等写使其 resolved 后再来。 */
+    if (!slot->off->resolved)
+        return false;
+    char root[KV_KEY_MAX];
+    bool in_tree = false;
+    if (vthread_root(frame_root, root, sizeof root)) {
+        size_t rl = strlen(root);
+        in_tree = strncmp(slot->key, root, rl) == 0 && slot->key[rl] == '/';
+    }
+    if (!in_tree) {
+        slot->dead = true;
+        return false;
+    }
+    /* 真正的候选槽：失败才算 dead，并登记以便该 key 被写后唤醒重试。 */
+    slot->dead = true;
+#ifdef KV_COUNT
+    kvCBodyCapAttempt++;
+#endif
+    if (!slot->reg) {
+        slot->bucket = key_hash(slot->key) % BODY_BUCKETS;
+        slot->next = body_buckets[slot->bucket];
+        body_buckets[slot->bucket] = slot;
+        slot->reg = true;
+#ifdef KV_COUNT
+        if (++kvCBodyCells > kvCBodyCellsMax)
+            kvCBodyCellsMax = kvCBodyCells;
+#endif
+    }
+    if (tok) {
+        /* 读 view：一次带版本的解析；-2/STALE 都当失败（dead 已置）。 */
+        if (kvspaceViewResolve(kv->handle, slot->key, tok) != 0)
+            return false;
+        if (!kvlangBodyAdopt(slot, tok->head, tok->headlen + tok->value_len))
+            return false;
+    } else {
+        uint8_t *val = NULL;
+        uint32_t len = 0;
+        if (kvspaceGetByRef(kv->handle, &slot->off->off, slot->key, &val, &len) !=
+                0 ||
+            !kvlangBodyAdopt(slot, val, len))
+            return false;
+    }
     slot->dead = false;
 #ifdef KV_COUNT
     kvCBodyCapOk++;
@@ -526,7 +554,13 @@ kvlangOperandViewPromote(kvspace_t *kv, kvlangBoundCell_t *cell,
     int w = kvlangLangtypeElemSize(tid);
     if (w <= 0 || len != 32u + (uint32_t)w)
         return false;
-    if (!key_in_vthread_tree(frame_root, cell->key))
+    char root[KV_KEY_MAX];
+    bool in_tree = false;
+    if (vthread_root(frame_root, root, sizeof root)) {
+        size_t rl = strlen(root);
+        in_tree = strncmp(cell->key, root, rl) == 0 && cell->key[rl] == '/';
+    }
+    if (!in_tree)
         return false;
     kvlangBodySlot *slot = cell->off.fast;
     if (!slot) {
@@ -539,12 +573,35 @@ kvlangOperandViewPromote(kvspace_t *kv, kvlangBoundCell_t *cell,
         cell->off.fast = slot;
     }
     slot->key = cell->key;
-    body_register(slot);
+    if (!slot->reg) {
+        slot->bucket = key_hash(slot->key) % BODY_BUCKETS;
+        slot->next = body_buckets[slot->bucket];
+        body_buckets[slot->bucket] = slot;
+        slot->reg = true;
+    }
     cell->rview_bytes = d;
     cell->rview_len = len;
     cell->rview_hits = 1;
     cell->rview_state = 1;
     return true;
+}
+
+void kvlangBodyInvalidateAll(void) {
+    for (int b = 0; b < BODY_BUCKETS; b++)
+        for (kvlangBodySlot *c = body_buckets[b]; c; c = c->next) {
+            c->ok = false;
+            c->head = NULL;
+            c->headlen = 0;
+            c->body = NULL;
+            c->dead = false;
+        }
+}
+
+void kvlangReadViewSlotFree(kvlangReadViewSlot *rs) {
+    if (!rs)
+        return;
+    kvlangBodySlotRelease(&rs->slot);
+    free(rs);
 }
 
 /* goto/br：目标 irseq 是 layout 写死的 int64 字面量，本帧内恒定。
@@ -578,17 +635,19 @@ static void bind_jump_targets(kvlangCodeRow_t *row, kvlangRowBind_t *b) {
 }
 
 static void bind_free(kvlangRowBind_t *b) {
-    if (b->body) {
-        if (b->body->reg)
-            body_unlink(b->body);
+    if (b->body)
+        kvlangBodySlotRelease(b->body);
         free(b->body);
-    }
     for (int i = 0; i < b->n; i++) {
-        kvlangBodySlot *rs = b->cell[i].off.fast;
-        if (rs && rs != b->body) {
-            if (rs->reg)
-                body_unlink(rs);
-            free(rs);
+        if (b->cell[i].view_state == 2) {
+            kvlangReadViewSlotFree((kvlangReadViewSlot *)b->cell[i].off.fast);
+        } else {
+            kvlangBodySlot *rs = b->cell[i].off.fast;
+            if (rs && rs != b->body) {
+                if (rs->reg)
+                    body_unlink(rs);
+                free(rs);
+            }
         }
         free(b->cell[i].key);
         free(b->cell[i].type);
@@ -678,8 +737,8 @@ static int bind_row(kvspace_t *kv, kvlangFrameCtx_t *ctx, int s0,
         if (!row->typed_core && cell->type && cell->type[0]) {
             int tid = kvlangLangtypeId(cell->type, strlen(cell->type));
             if (kvlangLangtypeIsNum(tid) || tid == KVLANG_LT_BOOL) {
-                cell->coerce_tid = tid;
-                cell->coerce_len = (uint16_t)strlen(cell->type);
+                cell->coerce.tid = tid;
+                cell->coerce.len = (uint16_t)strlen(cell->type);
             }
         }
         /* 变量可能尚未创建：失败留待执行时重试，不阻断加载。 */
@@ -739,11 +798,23 @@ void kvlangFrameCtxSync(kvlangFrameCtx_t *ctx, uint32_t epoch) {
         /* 地址世代前进后槽可能已被删/重建，body 指针同样作废。 */
         if (ctx->binds[i].body) {
             ctx->binds[i].body->ok = false;
+            ctx->binds[i].body->head = NULL;
+            ctx->binds[i].body->headlen = 0;
             ctx->binds[i].body->body = NULL;
             ctx->binds[i].body->dead = false;
         }
-        ctx->binds[i].xv_bytes = NULL;
-        ctx->binds[i].xv_len = 0;
+        /* 地址世代变化后 operand 读 view 的 head/body 同样作废；不在此 free，
+         * 读路径看到 ok=false 后降级。 */
+        for (int j = 0; j < ctx->binds[i].n; j++) {
+            kvlangBoundCell_t *c = &ctx->binds[i].cell[j];
+            if (c->view_state == 2) {
+                kvlangBodySlot *s = (kvlangBodySlot *)c->off.fast;
+                s->ok = false;
+                s->head = NULL;
+                s->headlen = 0;
+                s->body = NULL;
+            }
+        }
     }
     ctx->epoch = epoch;
 }

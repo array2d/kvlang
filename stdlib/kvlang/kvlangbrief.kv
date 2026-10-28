@@ -42,8 +42,8 @@ rwfunc main() -> () {
     a:[]int64 = [1,2,3,4]
     0 -> acc
     0 -> i
-    while (i < ndarray·numel(a)) {
-        xv·at(a, i) -> e
+    while (i < compactarray·numel(a)) {
+        compactarray·at(a, i) -> e
         acc + e -> acc
         i + 1 -> i
     }
@@ -53,7 +53,7 @@ rwfunc main() -> () {
     d:[]char/utf32·int64 = {}
     d·a = 10
     d·b = 20
-    kvspace·get(d, "a") -> x
+    d·*"a" -> x
     println(x)              // 10
 }
 ```
@@ -103,19 +103,19 @@ s[1] = "X"                   // 替换单字符，s 变 "hXllo"
 
 ```kv
 a:[]int64 = [7,2,9,4]
-ndarray·numel(a) -> n     // 4（元素数）
-ndarray·dim(a) -> d       // 1（维数）
-ndarray·shape(a) -> sh    // 各轴长度
-xv·at(a, 2) -> e          // 9（越界报错）
-xv·set(a, 1, 99) -> b     // 改元素，返回新数组 [7,99,9,4]
+compactarray·numel(a) -> n     // 4（元素数）
+compactarray·dim(a) -> d       // 1（维数）
+compactarray·shape(a) -> sh    // 各轴长度
+compactarray·at(a, 2) -> e          // 9（越界报错）
+tmp = compactarray·copy(a); compactarray·set(tmp, 1, 99) -> tmp  // 值语义先 copy 再同槽 set
 a[0] -> head              // 7
-xv·langtype(a) -> lt      // "[4]int64"
-xv·bodylen(a) -> bl       // 32（body 字节数）
+compactarray·langtype(a) -> lt      // "[4]int64"
+compactarray·bodylen(a) -> bl       // 32（body 字节数）
 ```
 
-遍历用 `while + ndarray·numel + xv·at`。多维 `[2,3]int64` 也是 compact ndarray。
+遍历用 `while + compactarray·numel + compactarray·at`。多维 `[2,3]int64` 也是 compact ndarray。
 字符串数组 / 变长集合用 `{}` stringkeymap 形态（见下），不要用 `[]`。
-`array·append/slice/fill/scatter/compact` 当前行为未稳定，数组任务优先用 compact + 下标/`xv·*`。
+`scatterarray·append/slice/fill/scatter/compact` 当前行为未稳定，数组任务优先用 compact + 下标/`xv·*`。
 
 ## 6. 容器：stringkeymap / map / struct（成员一律用 `·`，绝不用 `[]`）
 
@@ -123,16 +123,16 @@ xv·bodylen(a) -> bl       // 32（body 字节数）
 d:[]char/utf32·int64 = {}    // 空 stringkeymap 必须标类型
 d·a = 10                      // 静态成员写
 d·b = 20
-kvspace·get(d, "a") -> x           // 读（缺失返回 None）
+d·*"a" -> x           // 读（缺失返回 None）
 k = "a"
 d·*k -> v                     // 动态键读
-kvspace·set(d, "c", 30) -> _       // 动态键写
+30 -> d·*"c"       // 动态键写
 
-m = map()                     // stringkeymap
+m = map·new()                 // stringkeymap
 m·k = 5
 
 m2:[int64]·int64 = {}         // 整型键 map（键落字符串）
-kvspace·set(m2, 0, 7) -> _
+7 -> m2·*0
 
 r = {name="kv", ver=1}        // struct 字面量（异构记录；没有 object）
 r·name -> n
@@ -189,50 +189,56 @@ rwfunc main() -> () {
 - `json·from(str) -> root`：JSON 文本解析写入 root 子树（覆盖语义）。
 
 ### 网络
-- `http·call(method, header, url, body) -> resp`；`http·get(url)`/`post(url,body)`/`put(url,body)`/`del(url)`。
+- `http·call(method, header, url, body) -> resp`；`http·get(url)`/`post(url,body)`/`put(url,body)`/`del(url)`/`patch(url,body)`/`head(url)`/`post_json(url,body)`。
 
-### 自举（kvlang·*）
+### 自举（kvlang·* / kvlang/reflect·*）
 - `kvlang·vet(src) -> "ok"/err`：只校验，不写库。
 - `kvlang·format(src) -> 规范化源码`。
 - `kvlang·layout(src) -> entry`：源码 layout 入库，返回入口。
 - `kvlang·printlib("/lib") -> 源码`：把 /lib 子树重建为可运行源码（**只看 layout 结果，不读 `.src`**）。
 - `kvlang·printstack(vid) -> 文本`：把 /vthread 活动栈渲染成文本（帧链 + 实参 + 当前指令；vid 空 = 当前 vthread）。
+- `kvlang/reflect·fnlist(name) -> listing`：自省 `/lib/<name>·` 下的能力名列表（逗号连接）。
 
 ### 外部进程/文件系统（networld）
 - `networld/proc·exec(args, envs) -> code[, out, err]`：args/envs 是 `{...}` 数组字面量，args 首元素=可执行文件；out/err 是 `@[]uint8` 捕获句柄（绑定即捕获）。
-- `networld/fs·size(p)->n`、`·read(p,start,len)->raw`、`·write(p,bytes)->n`、`·append(p,bytes)->n`、`·list(p)->names`、`·del(p)->code`、`·mkdir(p)->code`、`·exists(p)->b`。
-- 文本级（rwfunc）：`readtext(p)->(t,sz)`、`writetext(p,t)->n`（UTF-8 往返）、`match(name,pat)->b`（`*`/`?` 通配）、`glob(pat)->paths`、`grep(pat,path,glob)->hits`（`路径:行号:文本`）、`multi(path,olds,news)->(done,bad)`（逐条精确替换，全成才落盘）。
-- 字符串↔字节：`xv·reinterpret("s","[]uint8")` 或 `xv·reinterpret(raw,"[]char/utf8")`。
+- `networld/shell·run(cmd) -> out`、`networld/shell·exec(cmd) -> (code, out, err)`；`networld/python·run(code) -> out`、`networld/python·exec(code) -> (ret, out, err)`。
+- `networld/fs·size(p)->n`、`·read(p,start,len)->raw`、`·write(p,bytes)->n`、`·append(p,bytes)->n`、`·rename(src,dst)->code`、`·list(p)->names`、`·del(p)->code`、`·mkdir(p)->code`、`·exists(p)->b`、`·isutf8(p)->b`。
+- 文本与路径（`networld/fs` rwfunc）：`readtext(p)->(t,sz)`、`writetext(p,t)->n`、`appendtext(p,t)->n`（UTF-8 往返）、`copyfile(src,dst)->n`、`basename(p)->name`、`dirname(p)->dir`、`ext(p)->e`、`joinpath(a,b)->p`、`match(name,pat)->b`（`*`/`?` 通配）、`glob(pat)->paths`、`scan(text,path,pat)->hits`、`grep(pat,path,glob)->hits`（`路径:行号:文本`）。
+- 文件改写（`networld/edit` rwfunc）：`read(p,from,lines)->(view,total,sz)`、`write(p,t)->(n,code)`、`replace(p,old,new,dry)->(done,hit,code)`、`multi(p,olds,news,dry)->(done,bad,code)`、`commit(p,t)->code`。
+- 字符串↔字节：`compactarray·newreinterpret("s","[]uint8")` 或 `compactarray·newreinterpret(raw,"[]char/utf8")`。
 
 ```kv
-noenv = map()
+noenv = map·new()
 a = {"sh", "-c", "echo hi; echo oops 1>&2"}
 networld/proc·exec(a, noenv) -> code, out, err
 println(code, out, err)
-networld/fs·write("/tmp/x.txt", xv·reinterpret("hi", "[]uint8")) -> n
+networld/fs·write("/tmp/x.txt", compactarray·newreinterpret("hi", "[]uint8")) -> n
 ```
 
 ### KV 树（kvspace·*）
-- `kvspace·get(path)`、`kvspace·set(path,val)`、`kvspace·del(path)`、`kvspace·deltree(path)`。
+- 路径字符串读/写用 `=` / 成员读写 / `{t}·new`；`kvspace·del(path)`、`kvspace·deltree(path)`。
 - `kvspace·listlen("/dir/")`、`kvspace·listat("/dir/",i)`（列目录 path 要带尾 `/`）。
-- `kvlang·abs(x)`（= `&x`，取址）、`kvspace·cp(src,dst)`、`kvspace·cpdir(src,dst)`、`kvspace·cplist(src,dst)`、`kvspace·has(path)`。
+- `kvlang·abs(x)`（= `&x`，取址）、`kvspace·cp(src,dst)`、`kvspace·cpdir(src,dst)`、`kvspace·cplist(src,dst)`。
+- rwfunc 便利：`kvspace·members(path)->(names,n)`、`kvspace·count(path)->n`。
 
 ### 字符串（string·*）
 - `len / char / ord / cmp / find / slice / concat / set / formatint / formatuint / parseint / parseuint / parsefloat`。
 - rwfunc 判定/查找/替换：`eq / ne / empty / contains / startswith / endswith / eqfold`、`count / rfind`、`replace / replacen / cut`。
-- rwfunc 修剪/切分：`trim / trimstart / trimend / padstart / padend`、`split / splitn / lines / fields / join`。
-- rwfunc 变换/分类：`reverse / repeat / upper / lower / capitalize / title / swapcase`、`allinset / isalpha / isdigit / isalnum / isspace / isupper / islower / isxdigit / ispunct`（大小写与分类一律 ASCII）。
+- rwfunc 修剪/切分：`trim / trimstart / trimend / trimprefix / trimsuffix / padstart / padend`、`split / splitn / lines / fields / join`。
+- rwfunc 变换/分类：`reverse / repeat / upper / lower / capitalize / title / swapcase`、`allinset / isalpha / isdigit / isalnum / isspace / isupper / islower / isxdigit / ispunct / lang`（大小写与分类一律 ASCII；`lang` 按文字系统返 `zh/en/ja/ko/other`）。
 
 ### 数组（ndarray·* / xv·*）
-- `ndarray·numel / dim / shape`；`xv·at / set / reshape / reinterpret / langtype / bodylen`。
-- `xv·parselangtype(v) -> (kind[, ndim])`：解析 langtype 基名（剥 `[dims]` 与 `def ` 前缀），
+- `compactarray·numel / dim / shape`；`compactarray·at / set / reshape / reinterpret / langtype / bodylen`。
+- `compactarray·parselangtype(v) -> (kind[, ndim])`：解析 langtype 基名（剥 `[dims]` 与 `def ` 前缀），
   如 `def langtype`→`langtype`、`def rwir`→`rwir`、`[508]char/utf8`→`char/utf8`；用于按类型分类 KV 成员。
+- rwfunc（`[]int64`）：`xv·first / last / swap / reverse / find / contains / count / sum / min / max / flatten`。
 
 ### 数学
 - 运算符见上；`pow / sqrt / exp / log / abs / sign / neg / min / max`；常量 `/lib/math·Pi` `/lib/math·E` `/lib/math·Tau`。
 
 ### 时间/时长/随机
-- `time·now()`、`time·sub/add/before/after`；`time/duration·nanos/millis/seconds/minutes/hours(...)`、`time/duration·as_nanos/...`。
+- `time·now()`、`time·sub/add/before/after`；rwfunc：`time·since / until / equal / elapsed_ns / elapsed_ms / elapsed_s / max / min`。
+- `time/duration·nanos/millis/seconds/minutes/hours(...)`、`time/duration·as_nanos/as_millis/as_seconds/as_minutes/as_hours(...)`、`time/duration·add/sub/before/after`；rwfunc：`time/duration·days / as_days / is_zero / is_neg / is_pos / abs / equal / max / min / clamp`。
 - `random·intn(n)`、`random·uint64()`、`random·int63()`。
 
 ### 线程/调试

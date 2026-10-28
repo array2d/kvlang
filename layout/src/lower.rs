@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::ast::{self, Expr, Func, Instruction, LitKind, Stmt};
+use super::ast::{self, Expr, Func, Instruction, LitKind, MEMBER_READ_OP, Stmt};
 use super::scanner::{Diagnostic, Pos};
 use super::{builtin, keytree, symbol};
 
@@ -17,7 +17,7 @@ fn is_container_type(t: &str) -> bool {
     t == "stringkeymap" || t.contains(keytree::MEMBER_SEP)
 }
 
-/// `[]` 下标校验：xv·at/xv·set 基座若为容器类型 → 报错，逼用 kvspace·get/kvspace·set/`base·key`。
+/// `[]` 下标校验：xv·at/xv·set 基座若为容器类型 → 报错，逼用 `base·key` 成员读/写。
 fn is_container_ty(ty: &str) -> bool {
     // 剥掉间接性前缀 `*`/`@` 再判：签名里 `p:*Point`、`m:*[int64]·int64` 的 `*` 是传递方式，
     // 类型本体仍是值容器——不剥会把这类参数误判为"未定义容器"，成员写全部被拒。
@@ -61,7 +61,7 @@ fn check_container_body(body: &[Stmt], fn_: &Func, diags: &mut Vec<Diagnostic>) 
 
 fn check_container_inst(s: &Instruction, fn_: &Func, diags: &mut Vec<Diagnostic>) {
     let Some(e) = &s.expr else { return };
-    if e.op != "obj" && e.op != "map" {
+    if e.op != "obj" && e.op != "map·new" {
         return;
     }
     let Some(target) = s.writes.first() else {
@@ -166,7 +166,8 @@ fn check_map_body(body: &[Stmt], defined: &HashSet<String>, diags: &mut Vec<Diag
 }
 
 fn check_map_base(base: &str, defined: &HashSet<String>, pos: Pos, diags: &mut Vec<Diagnostic>) {
-    if base.is_empty() || base.starts_with("/lib") || defined.contains(base) {
+    // 绝对路径容器（/tmp/... 等）全局可见，不需本函数声明；/lib 是结构域。
+    if base.is_empty() || base.starts_with('/') || defined.contains(base) {
         return;
     }
     diags.push(Diagnostic {
@@ -188,12 +189,6 @@ fn check_map_inst(s: &Instruction, defined: &HashSet<String>, diags: &mut Vec<Di
             if i > 0 {
                 check_map_base(&w[..i], defined, Pos { line: 0, col: 0 }, diags);
             }
-        }
-    }
-    // kvspace·set(base, key, val) 成员形
-    if let Some(e) = &s.expr {
-        if e.op == "kvspace·set" && e.args.len() >= 3 && !e.args[0].val.contains('/') {
-            check_map_base(&e.args[0].val, defined, Pos { line: 0, col: 0 }, diags);
         }
     }
 }
@@ -258,13 +253,13 @@ fn check_subscript_expr(
     addr: &[&str],
     diags: &mut Vec<Diagnostic>,
 ) {
-    if (e.op == "xv·at" || e.op == "xv·set") && !e.args.is_empty() {
+    if (e.op == "compactarray·at" || e.op == "compactarray·set") && !e.args.is_empty() {
         let base = &e.args[0];
         if base.is_leaf() && !addr.contains(&base.val.as_str()) {
             if let Some(t) = tm.get(&base.val) {
                 let msg = if is_container_type(t) {
                     Some(format!(
-                        "`[]` 下标不能用于容器 `{}`（类型 {}）；容器成员访问用 kvspace·get/kvspace·set 或 `{}·key`，`[]` 仅限 compact array",
+                        "`[]` 下标不能用于容器 `{}`（类型 {}）；容器成员访问用 `{}·key`，`[]` 仅限 compact array",
                         base.val, t, base.val
                     ))
                 } else if t.starts_with('*') {
@@ -412,7 +407,7 @@ fn lower_body(
                 // 散 key 数组字面量 `base = {v0, v1, ...}` → 逐元素散 key 写入。
                 if s.writes.len() == 1 {
                     if let Some(e) = &s.expr {
-                        if e.op == "map" {
+                        if e.op == "map·new" {
                             preamble.extend(expand_sparse(&s.writes[0], e, &s.write_types, lg));
                             continue;
                         }
@@ -592,11 +587,11 @@ fn lower_for_with_cont(
     let cond_slot = lg.tmp();
     let len_slot = lg.tmp();
     let key_slot = lg.tmp();
-    // 容器源（stringkeymap/struct）用 kvspace·listlen/kvspace·listat/kvspace·get 遍历，compact 数组源用
+    // 容器源（stringkeymap/struct）用 kvspace·listlen/kvspace·listat + `·*key` 遍历，compact 数组源用
     // ndarray·numel/xv·at（见 spec 控制流脱糖）。判据看**声明的类型**：map 的 kindexpr 恒含
     // `key·value` 的那个 `·`（`[int64]·int64`、`[]char/utf8·int64`），compact 数组不含。
     let is_obj = s.iter.op == "obj"
-        || s.iter.op == "map"
+        || s.iter.op == "map·new"
         || (s.iter.is_leaf()
             && matches!(tm.get(&s.iter.val),
                 Some(t) if t == "stringkeymap" || t.contains(keytree::MEMBER_SEP)));
@@ -605,7 +600,7 @@ fn lower_for_with_cont(
     let mut init_body = Vec::new();
     let iter_slot = if s.iter.is_leaf() {
         s.iter.val.clone()
-    } else if s.iter.op == "map" {
+    } else if s.iter.op == "map·new" {
         let slot = lg.tmp();
         // for-in 源是裸字面量：无写目标可标注，就地推 map langtype（元素类型必须唯一且可推）。
         let wty = infer_sparse_type(&s.iter, tm);
@@ -634,7 +629,7 @@ fn lower_for_with_cont(
     } else {
         init_body.push(Stmt::Instruction(Instruction {
             comments: Vec::new(),
-            expr: Some(ast::call("ndarray·numel", vec![ast::leaf(&iter_slot)])),
+            expr: Some(ast::call("compactarray·numel", vec![ast::leaf(&iter_slot)])),
             writes: vec![len_slot.clone()],
             write_types: Vec::new(),
             arrow_left: false,
@@ -685,7 +680,7 @@ fn lower_for_with_cont(
         body_insts.push(Stmt::Instruction(Instruction {
             comments: Vec::new(),
             expr: Some(ast::call(
-                "kvspace·get",
+                MEMBER_READ_OP,
                 vec![ast::leaf(&iter_slot), ast::leaf(&key_slot)],
             )),
             writes: vec![s.var.clone()],
@@ -696,7 +691,7 @@ fn lower_for_with_cont(
         body_insts.push(Stmt::Instruction(Instruction {
             comments: Vec::new(),
             expr: Some(ast::call(
-                "xv·at",
+                "compactarray·at",
                 vec![ast::leaf(&iter_slot), ast::leaf(&idx_slot)],
             )),
             writes: vec![s.var.clone()],
@@ -806,7 +801,7 @@ fn goto_label(label: &str) -> Stmt {
 /// 位置型 `{v0,v1,…}` 键为 1 元坐标 `[int64]`，命名型 `{k=v}` 键为字符串 `[]char/utf8`；
 /// 值类型取首个元素的推断类型。推不出（元素类型未知）则空 → runtime 直接 fatal 暴露。
 fn infer_sparse_type(e: &Expr, tm: &HashMap<String, String>) -> Vec<String> {
-    let (keylt, val) = if e.op == "map" {
+    let (keylt, val) = if e.op == "map·new" {
         ("[int64]", e.args.first())
     } else {
         ("[]char/utf8", e.args.get(1))
@@ -823,12 +818,12 @@ fn infer_sparse_type(e: &Expr, tm: &HashMap<String, String>) -> Vec<String> {
     }
 }
 
-/// 散 key 数组字面量（parser 产出的 "map"）→ 单条 `map(v0, v1, ...) -> base`，
+/// 散 key 数组字面量（parser 产出的 "map·new"）→ 单条 `map·new(v0, v1, ...) -> base`，
 /// 运行时 map builtin 创建 map 根（kind=map）+ 子键 `base/[i]`（相对 key，方括号索引串）。
 fn expand_sparse(base: &str, e: &Expr, wtypes: &[String], _lg: &mut LabelGen) -> Vec<Stmt> {
     let inst = Instruction {
         comments: Vec::new(),
-        expr: Some(ast::call("map", e.args.clone())),
+        expr: Some(ast::call("map·new", e.args.clone())),
         writes: vec![base.to_string()],
         // 写类型**必须原样带过来**：容器字面量的 map langtype 就靠它落到写槽
         // （`nums:[int64]·int64 = {…}`；见 [[map容器]]）。曾在此清空，runtime 无从得知容器类型。
@@ -1064,6 +1059,20 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
         return String::new();
     }
     if symbol::lookup(opcode).word == "assign" {
+        if reads.len() > 1 {
+            // 成员读 `base·seg…`：reads = [base, seg…]；结果 = 容器 value 类型（逐段下钻）。
+            let mut ty = slot_type(&reads[0], tm);
+            for seg in &reads[1..] {
+                if let Some(v) = container_value(&ty) {
+                    ty = v;
+                } else if ty.starts_with('[') {
+                    ty = container_elem(&ty).unwrap_or_default();
+                } else {
+                    return String::new();
+                }
+            }
+            return ty;
+        }
         return if !reads.is_empty() {
             slot_type(&reads[0], tm)
         } else {
@@ -1118,21 +1127,17 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
     if opcode == "obj" {
         return "stringkeymap".to_string();
     }
-    if opcode == "map" {
+    if opcode == "map·new" {
         return "[]stringkeymap".to_string();
     }
-    if opcode == "kvspace·set" {
-        // 成员写的 base 类型**不在此推断**：map 必须显式声明准确类型
-        // （`m:[]char/utf8·int64 = {}`），由 check_map_defined 静态拦截未定义者。
-        return String::new();
-    }
     match opcode {
-        "kvlen" | "ndarray·numel" | "ndarray·dim" | "kvspace·listlen" | "string·len"
-        | "string·ord" | "string·cmp" | "string·find" | "string·parseint" | "xv·bodylen" => {
+        "kvlen" | "compactarray·numel" | "compactarray·dim" | "kvspace·listlen" | "string·len"
+        | "string·ord" | "string·cmp" | "string·find" | "string·parseint" | "compactarray·bodylen"
+        | "scatterarray·len" => {
             return "int64".to_string();
         }
-        "xv·langtype" => return "[]char/utf8".to_string(),
-        "ndarray·shape" => return "[]int64".to_string(),
+        "compactarray·langtype" => return "[]char/utf8".to_string(),
+        "compactarray·shape" => return "[]int64".to_string(),
         "string·char" | "string·set" | "string·slice" | "string·concat" | "string·formatint"
         | "string·formatuint" => return "char/utf32".to_string(),
         "random.int63" => return "int64".to_string(),
@@ -1162,7 +1167,7 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
             }
             return kind;
         }
-        "xv·at" => {
+        "compactarray·at" | "scatterarray·at" => {
             if !reads.is_empty() {
                 if let Some(t) = tm.get(&format!("{}.0", reads[0])) {
                     return t.clone();
@@ -1175,7 +1180,7 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
             }
             return String::new();
         }
-        "xv·set" => {
+        "compactarray·set" => {
             if let Some(last) = reads.last() {
                 let t = slot_type(last, tm);
                 if !t.is_empty() {
@@ -1189,7 +1194,7 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
                 String::new()
             };
         }
-        "xv·reshape" => {
+        "compactarray·newreshape" => {
             return if !reads.is_empty() {
                 slot_type(&reads[0], tm)
             } else {
@@ -1211,7 +1216,19 @@ fn arg_type(e: &Expr, tm: &HashMap<String, String>) -> String {
         LitKind::LitInt => "int64".to_string(),
         LitKind::LitFloat => "float64".to_string(),
         LitKind::LitBool => "bool".to_string(),
-        _ => slot_type(&e.val, tm),
+        _ => {
+            if e.op == ast::MEMBER_READ_OP {
+                // 成员读 `base·seg…`：按 tm 的基座类型逐段取 value 类型。
+                let mut ty = tm.get(&e.args.first().map(|a| a.val.clone()).unwrap_or_default())
+                    .cloned()
+                    .unwrap_or_default();
+                for _ in e.args.iter().skip(1) {
+                    ty = container_value(&ty).unwrap_or_default();
+                }
+                return ty;
+            }
+            slot_type(&e.val, tm)
+        }
     }
 }
 
@@ -1371,23 +1388,29 @@ fn exact_kind(
     if symbol::lookup(op).cmp {
         return Some("bool".to_string());
     }
+    if op == ast::MEMBER_READ_OP {
+        // 成员读 `base·seg…`（= 读的成员路径）：结果类型 = 容器 value（逐段下钻）。
+        // 基座 `base` 声明/稳定为容器时返回其 value 类型；否则未知。
+        let base = e.args.first()?;
+        let bt = exact_kind(base, declared, stable)?;
+        let mut ty = bt;
+        for _ in e.args.iter().skip(1) {
+            ty = container_value(&ty)?;
+        }
+        return Some(ty);
+    }
     match word.as_str() {
         // 容器读：基座类型声明/稳定且元素 kind 具体 → 结果 kind 精确。
-        "xv·at" | "array·compact" | "xv·reshape" => {
+        "compactarray·at" | "scatterarray·at" | "scatterarray·newcompact" | "compactarray·newreshape" => {
             let base = e.args.first()?;
             let t = exact_kind(base, declared, stable)?;
             return container_elem(&t);
         }
-        "kvspace·get" => {
-            let base = e.args.first()?;
-            let t = exact_kind(base, declared, stable)?;
-            return container_value(&t);
-        }
         "sqrt" | "exp" | "log" | "pow" => return Some("float64".to_string()),
         "sign" => return Some("int64".to_string()),
-        "kvlen" | "ndarray·numel" | "ndarray·dim" | "kvspace·listlen" | "string·len"
-        | "string·ord" | "string·cmp" | "string·find" | "string·parseint" | "xv·bodylen"
-        | "random.int63" => return Some("int64".to_string()),
+        "kvlen" | "compactarray·numel" | "compactarray·dim" | "kvspace·listlen" | "string·len"
+        | "string·ord" | "string·cmp" | "string·find" | "string·parseint" | "compactarray·bodylen"
+        | "scatterarray·len" | "random.int63" => return Some("int64".to_string()),
         "random·intn" | "random.uint64" | "string·parseuint" => {
             return Some("uint64".to_string())
         }
@@ -2028,7 +2051,7 @@ fn check_container_literal(
     diags: &mut Vec<Diagnostic>,
 ) {
     match e.op.as_str() {
-        "array" => {
+        "compactarray·new" => {
             if let Some(elem) = container_elem(target) {
                 if builtin::is_num_kind(&elem) {
                     for a in &e.args {
@@ -2038,7 +2061,7 @@ fn check_container_literal(
             }
         }
         // 位置型 `{v0,v1,…}`：键为隐式整数坐标，只查值。
-        "map" => {
+        "map·new" => {
             if let Some(v) = container_value(target) {
                 if builtin::is_num_kind(&v) {
                     for a in &e.args {
@@ -2077,7 +2100,7 @@ fn expr_result_type(e: &Expr, tm: &HashMap<String, String>) -> String {
     if e.is_leaf() {
         return arg_type(e, tm);
     }
-    if matches!(e.op.as_str(), "array" | "map" | "obj") {
+    if matches!(e.op.as_str(), "compactarray·new" | "map·new" | "obj") {
         return String::new();
     }
     let sym = symbol::lookup(&e.op);
@@ -2108,7 +2131,7 @@ fn expr_result_type(e: &Expr, tm: &HashMap<String, String>) -> String {
     if e.op == "obj" {
         return "stringkeymap".to_string();
     }
-    if e.op == "map" {
+    if e.op == "map·new" {
         return "[]stringkeymap".to_string();
     }
     let mut tm2 = tm.clone();
@@ -2208,7 +2231,8 @@ fn check_call_args(
     diags: &mut Vec<Diagnostic>,
 ) {
     let sym = symbol::lookup(&e.op);
-    if sym.arith || sym.cmp || is_cast_op(&e.op) || matches!(e.op.as_str(), "array" | "map" | "obj")
+    if sym.arith || sym.cmp || is_cast_op(&e.op)
+        || matches!(e.op.as_str(), "compactarray·new" | "map·new" | "obj")
     {
         return;
     }
@@ -2284,15 +2308,11 @@ fn walk_inst(
     if e.op == format!("struct{}new", keytree::MEMBER_SEP) {
         check_struct_literal(e, structs, diags);
     }
-    // 容器元素写：xv·set(container, index, value) / kvspace·set(container, key, value)。
-    if (e.op == "xv·set" || e.op == "kvspace·set") && e.args.len() >= 3 {
+    // 容器元素写：xv·set(container, index, value)。kvspace·set 已死刑（成员写走 =）。
+    if (e.op == "compactarray·set") && e.args.len() >= 3 {
         if e.args[0].is_leaf() {
             if let Some(cty) = declared.get(&e.args[0].val) {
-                let elem = if e.op == "xv·set" {
-                    container_elem(cty)
-                } else {
-                    container_value(cty)
-                };
+                let elem = container_elem(cty);
                 if let Some(kind) = elem {
                     if builtin::is_num_kind(&kind) {
                         if let Some(v) = e.args.last() {
@@ -2325,7 +2345,7 @@ fn walk_inst(
         if ty.is_empty() || ty.contains('|') || ty.starts_with('@') {
             return;
         }
-        if matches!(e.op.as_str(), "array" | "map" | "obj")
+        if matches!(e.op.as_str(), "compactarray·new" | "map·new" | "obj")
             && (ty.starts_with('[') || ty.contains(keytree::MEMBER_SEP) || ty.starts_with('/'))
         {
             check_container_literal(&ty, e, structs, diags);

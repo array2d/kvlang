@@ -244,6 +244,8 @@ int kvlangBuiltinKvspaceGet(kvlangFrame_t *f) {
     int rcap = f->instruction->read_count <= 16 ? 16 : MAX_PARAMS;
     if (rcap > 16)
         in = in_big = malloc(sizeof *in * MAX_PARAMS);
+    if (!in)
+        kvlangDie("out of memory reading kvspace·get operands");
     int n = kvlangBuiltinReadInputs(f, in, rcap);
     char merr[512] = {0};
     char keybuf[KV_KEY_MAX];
@@ -299,6 +301,8 @@ int kvlangBuiltinKvspaceSet(kvlangFrame_t *f) {
     int rcap = f->instruction->read_count <= 16 ? 16 : MAX_PARAMS;
     if (rcap > 16)
         in = in_big = malloc(sizeof *in * MAX_PARAMS);
+    if (!in)
+        kvlangDie("out of memory reading kvspace·set operands");
     int n = kvlangBuiltinReadInputs(f, in, rcap);
     char keybuf[KV_KEY_MAX];
     char *owned_key = NULL;

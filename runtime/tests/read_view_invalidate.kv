@@ -1,0 +1,14 @@
+// 仅 tests/read_view_lazy.sh：copy 整值写使 operand view 失效后，值仍必须正确。
+rwfunc test() -> () {
+	x = 1
+	z = 1
+	y = 0
+	i = 0
+	while (i < 200) {
+		y = x + 1
+		z = z + 1
+		x = z
+		i = i + 1
+	}
+	print("read_view_invalidate:", y)
+}
