@@ -128,6 +128,10 @@ struct FReg {
     // src_ptr：读参 → 调用方 reg（只读转发）；dst_ptr：写参 → 调用方 reg（写转发）。
     FReg* src_ptr = nullptr;
     FReg* dst_ptr = nullptr;
+    // 成员 base 缓存：base 槽值是否为 Ptr（member_read/write 热路径——binary_trees/
+    // hash_table 动态键 `L·*k` 每次免 kvspace read_wire_raw 检查）。写后失效。
+    bool base_ptr = false;
+    bool base_ptr_known = false;
     // compact 数组布局缓存（xv·at/set 首次 decode 后复用：dims/esz/kind 恒定，
     // quicksort 1728 次 at + 1492 次 set 免每次 strtoll/substr 解析）。
     std::uint32_t arr_esz = 0;
