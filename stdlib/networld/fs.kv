@@ -20,7 +20,7 @@ lib networld/fs {
 			networld/fs·isutf8(p) -> valid
 			if (valid) {
 				networld/fs·read(p, 0, sz) -> raw
-				xv·reinterpret(raw, "[]char/utf8") -> u8
+				compactarray·newreinterpret(raw, "[]char/utf8") -> u8
 				char/utf32(u8) -> t
 			}
 		}
@@ -28,13 +28,13 @@ lib networld/fs {
 	// writetext(p, t) -> n：文本按 UTF-8 覆盖写盘，返回字节数（失败 -1）
 	rwfunc writetext(p:[]char/utf32, t:[]char/utf32) -> (n:int64) {
 		char/utf8(t) -> u8
-		xv·reinterpret(u8, "[]uint8") -> bytes
+		compactarray·newreinterpret(u8, "[]uint8") -> bytes
 		networld/fs·write(p, bytes) -> n
 	}
 	// appendtext(p, t) -> n：文本按 UTF-8 追加到文件末尾，返回追加字节数（失败 -1）
 	rwfunc appendtext(p:[]char/utf32, t:[]char/utf32) -> (n:int64) {
 		char/utf8(t) -> u8
-		xv·reinterpret(u8, "[]uint8") -> bytes
+		compactarray·newreinterpret(u8, "[]uint8") -> bytes
 		networld/fs·append(p, bytes) -> n
 	}
 	// copyfile(src, dst) -> n：字节级整文件拷贝，返回写入字节数（源不存在/失败 -1）

@@ -14,7 +14,7 @@ rwfunc sum6(a:[6]int32) -> (total:int64) {
 
 rwfunc test() -> () {
 	a:[4]int32 = []
-	ndarray·numel(a) -> na
+	compactarray·numel(a) -> na
 	println("na =", na)
 	x0 = a[0]
 	println("a0 =", x0)

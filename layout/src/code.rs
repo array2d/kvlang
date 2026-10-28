@@ -657,7 +657,7 @@ fn build_inst(inst: &RawInst, by_irseq: &HashMap<i32, String>) -> Instruction {
     // array·fill 首参即写目标 langtype（Display 隐去不回显），回填 write_types 恢复类型标注。
     // 且须用前置 `=` 式（arrow_left=true）：parser 仅在前置标注式把写类型喂给 array·fill 首参，
     // 后置箭头式 `[5...] -> b:TYPE` 会丢弃该类型（parser 不对称），故这里强制前置式以保幂等。
-    let is_fill = inst.opcode == "array·fill" && !inst.writes.is_empty();
+    let is_fill = inst.opcode == "compactarray·fill" && !inst.writes.is_empty();
     let write_types = if is_fill {
         let ty = match inst.reads.first() {
             Some(Operand::Str(s)) | Some(Operand::Ref(s)) | Some(Operand::Lit(s)) => s.clone(),

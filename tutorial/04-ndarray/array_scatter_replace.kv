@@ -2,13 +2,13 @@
 //   0
 //   2
 rwfunc test() -> () {
-    array·fill("[0]int64") -> empty
+    compactarray·fill("[0]int64") -> empty
     a:[int64]·int64 = {1, 2, 3}
-    array·scatter(empty) -> a
+    scatterarray·newscatter(empty) -> a
     kvspace·listlen(a) -> n
     println(n)
     b:[]int64 = [8, 9]
-    array·scatter(b) -> a
+    scatterarray·newscatter(b) -> a
     kvspace·listlen(a) -> m
     println(m)
 }

@@ -16,7 +16,7 @@ rwfunc test() -> () {
 	networld/proc·exec(rm, noenv) -> rc
 	file_exists(p) -> b0
 	println("before=", b0)
-	networld/fs·write(p, xv·reinterpret("x", "[]uint8")) -> w
+	networld/fs·write(p, compactarray·newreinterpret("x", "[]uint8")) -> w
 	file_exists(p) -> b1
 	println("after_write=", b1)
 	networld/fs·del(p) -> dc

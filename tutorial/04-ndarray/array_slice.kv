@@ -1,12 +1,12 @@
-// array_slice: 数组切片 [lo,hi)（原地语义：写槽即源）
-// 规范依据: 02-kvspace模型/07-数组两种物理形态 —— array·slice 作用于 compact 时
-//           先自动 scatter，即 compact 数组必须能直接 slice
-// 语义: compact [1,2,3,4,5] 取 [1:3) 后应有 2 个元素（散列元素数用 kvspace·listlen 读）
+// array_slice: compact 数组切片 [lo,hi)（专职创建，无隐式形态转换）
+// 规范依据: 03-类型系统/09-数组形态 —— compactarray·newslice 造新 compact；
+//           compact 不隐式转散列（scatterarray 家族只收散列容器）
+// 语义: compact [1,2,3,4,5] 取 [1:3) 后有 2 个元素
 // 期望输出:
 //   2
 rwfunc test() -> () {
 	a:[]int64 = [1, 2, 3, 4, 5]
-	array·slice(a, 1, 3) -> a
-	kvspace·listlen(a) -> n
+	b = compactarray·newslice(a, 1, 3)
+	compactarray·numel(b) -> n
 	println(n)
 }

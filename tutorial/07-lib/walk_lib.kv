@@ -48,7 +48,7 @@ rwfunc walk(path:[]char/utf32, indent:[]char/utf32, down:int64) -> () {
 			if (v == None) {
 				println(indent, nm)
 			} else {
-				xv·langtype(v) -> lt
+				compactarray·langtype(v) -> lt
 				char/utf32(lt) -> lts
 				println(indent, nm, lts)
 			}

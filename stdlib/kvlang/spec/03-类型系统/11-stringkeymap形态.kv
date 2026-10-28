@@ -17,12 +17,12 @@ layout 报错；`{}` 尤其无法推断（空字面量不含任何成员）。
 坐标段支持多值键（含小数）：`geo·[39.9,116.4] = "Beijing"`，物理以字符串格式落 key（见
 `tutorial/04-ndarray/geo_coord.kv`）。
 
-## 两形态互转
+## 两形态互转（显式，无隐式）
 
 | 算子 | 语义 |
 |------|------|
-| `array·scatter(a)` | compact → stringkeymap（散 key） |
-| `array·compact(b)` | stringkeymap → compact |
+| `scatterarray·newscatter(a)` | compact → stringkeymap（散 key） |
+| `scatterarray·newcompact(b)` | stringkeymap → compact |
 
 字面量初始化默认按括号定形态；`scatter`/`compact` 显式转换（见
 `tutorial/04-ndarray/separated.kv`）。

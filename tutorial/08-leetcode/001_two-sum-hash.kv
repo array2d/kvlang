@@ -4,7 +4,7 @@
 // 期望输出:
 //   [ 0 , 1 ]
 rwfunc two_sum(nums:[]int64, target:int64) -> () {
-	n = ndarray·numel(nums)
+	n = compactarray·numel(nums)
 	i = 0
 	/tmp/two_sum:int64·int64 = {}
 	"/tmp/two_sum" -> h
@@ -30,7 +30,7 @@ rwfunc two_sum(nums:[]int64, target:int64) -> () {
 // `base·*k` 取 k 的值作 memitemkey（等价 kvspace·get(base,k)/kvspace·set(base,k,v)）；
 // 裸 `base·k` 用的是**字面名** k，两者不可混（见 05-runtime语义/03-成员访问）。
 rwfunc two_sum2(nums:[]int64, target:int64) -> () {
-	n = ndarray·numel(nums)
+	n = compactarray·numel(nums)
 	i = 0
 	/tmp/two_sum:int64·int64 = {}
 	while (i < n) {

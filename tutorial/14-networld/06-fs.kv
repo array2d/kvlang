@@ -1,7 +1,7 @@
-// networld/fs·size + networld/fs·read + xv·reinterpret：文件 → 字符串
+// networld/fs·size + networld/fs·read + compactarray·newreinterpret：文件 → 字符串
 //   fs·size(p) -> n           取字节大小
 //   fs·read(p, start, off) -> raw   从 start 起读 off 字节，返回 []uint8
-//   xv·reinterpret(raw, "[]char/utf8") -> s   body 字节原样，整个 kindexpr 换成传入的
+//   compactarray·newreinterpret(raw, "[]char/utf8") -> s   body 字节原样，整个 kindexpr 换成传入的
 // 期望输出:
 //   size= 12
 //   text= hello kvlang
@@ -9,7 +9,7 @@
 rwfunc read_text(p:[]char/utf32) -> (s:[]char/utf8, n:int64) {
 	networld/fs·size(p) -> n
 	networld/fs·read(p, 0, n) -> raw
-	xv·reinterpret(raw, "[]char/utf8") -> s
+	compactarray·newreinterpret(raw, "[]char/utf8") -> s
 }
 
 rwfunc test() -> () {

@@ -1,5 +1,5 @@
 // array_slice_hole: 带洞散列数组的 slice 按元素序列（memindex 排序）语义
-// 规范依据: 02-kvspace模型/07-数组两种物理形态 —— 洞不是元素
+// 规范依据: 02-kvspace模型/07-数组两种物理形态 —— 洞不是元素（scatterarray·slice 只做散列成员重排）
 // 语义: {[0]=10,[2]=30,[5]=50} 取秩 [1,3) → [30,50]，写连续坐标 [0],[1]；
 //       源中坐标 >= 2 的旧元素删除
 // 期望输出:
@@ -12,7 +12,7 @@ rwfunc test() -> () {
 	b·[0] = 10
 	b·[2] = 30
 	b·[5] = 50
-	array·slice(b, 1, 3) -> b
+	scatterarray·slice(b, 1, 3) -> b
 	kvspace·listlen(b) -> n
 	println("len", n)
 	b·[0] -> x

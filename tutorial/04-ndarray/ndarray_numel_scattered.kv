@@ -1,5 +1,5 @@
 // ndarray_numel_scattered: numel 对 stringkeymap（散列数组）读成员数
-// 规范依据: 03-类型系统/13-ndarray元数据算子 —— "ndarray·numel(a)：元素总数
+// 规范依据: 03-类型系统/13-ndarray元数据算子 —— "compactarray·numel(a)：元素总数
 //           （compact 读 head array_len；stringkeymap 读成员数）"，且卷首声明三算子
 //           "统一观测数组形状，对两形态均适用"（同卷 dim/shape 对散列形态同样被拒）
 // 语义: 散列数组 b 有 3 个成员 → numel = 3
@@ -7,7 +7,7 @@
 //   3
 rwfunc test() -> () {
 	a:[]int64 = [1, 2, 3]
-	b = array·scatter(a)
-	ndarray·numel(b) -> n
+	b = scatterarray·newscatter(a)
+	compactarray·numel(b) -> n
 	println(n)
 }

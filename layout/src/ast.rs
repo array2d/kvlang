@@ -468,7 +468,7 @@ impl fmt::Display for Instruction {
         };
         let writes = self.join_typed_writes();
         // array·fill(langtype[, v]) → [] / [v...]（首参 langtype 由写类型隐含，不回显）
-        if e.op == "array·fill" {
+        if e.op == "compactarray·fill" {
             let s = match e.args.get(1) {
                 Some(v) => format!("[{}...]", v),
                 None => "[]".to_string(),
@@ -482,7 +482,7 @@ impl fmt::Display for Instruction {
             return write!(f, "{s}");
         }
         // array·new(...) → [...]
-        if e.op == "array·new" {
+        if e.op == "compactarray·new" {
             let args: Vec<String> = e.args.iter().map(|a| a.to_string()).collect();
             let s = format!("[{}]", args.join(", "));
             if !self.writes.is_empty() {

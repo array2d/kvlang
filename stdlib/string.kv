@@ -195,12 +195,12 @@ lib string {
 				while (pos < ln) {
 					if (n > 0 && k == n - 1) {
 						string·slice(s, pos, ln) -> seg
-						array·append(parts, seg) -> parts
+						scatterarray·append(parts, seg) -> parts
 						k = k + 1
 						pos = ln
 					} else {
 						string·char(s, pos) -> c
-						array·append(parts, c) -> parts
+						scatterarray·append(parts, c) -> parts
 						k = k + 1
 						pos = pos + 1
 					}
@@ -209,7 +209,7 @@ lib string {
 				while (pos <= ln) {
 					if (n > 0 && k == n - 1) {
 						string·slice(s, pos, ln) -> seg
-						array·append(parts, seg) -> parts
+						scatterarray·append(parts, seg) -> parts
 						k = k + 1
 						pos = ln + 1
 					} else {
@@ -217,12 +217,12 @@ lib string {
 						string·find(rest, sep) -> j
 						if (j == -1) {
 							rest -> seg
-							array·append(parts, seg) -> parts
+							scatterarray·append(parts, seg) -> parts
 							k = k + 1
 							pos = ln + 1
 						} else {
 							string·slice(s, pos, pos + j) -> seg
-							array·append(parts, seg) -> parts
+							scatterarray·append(parts, seg) -> parts
 							k = k + 1
 							pos = pos + j + m
 						}
@@ -263,7 +263,7 @@ lib string {
 					line3 -> line
 				}
 			}
-			array·append(parts, line) -> parts
+			scatterarray·append(parts, line) -> parts
 			k = k + 1
 		}
 	}
@@ -294,7 +294,7 @@ lib string {
 					i = i + 1
 				}
 				string·slice(s, start, i) -> word
-				array·append(parts, word) -> parts
+				scatterarray·append(parts, word) -> parts
 				k = k + 1
 			}
 		}

@@ -2,6 +2,19 @@
 lib kvlang/spec/layout语义/rwfunc布局与def_rwir {
 	r####"# rwfunc 布局与 def rwir
 
+## pkg 就是 lib
+
+`pkg` 与 `lib` 是同一概念的两个词，**`pkg` ≡ `lib`**，规范中通常用 **`lib`** 而非 `pkg`。
+rwir 与 rwfunc 都可以有 lib（`/lib/<pkg>·<name>`、`/lib/<name>`），lib 的作用是 **key 前缀系统**：
+把同族 rwir/rwfunc/常量组织在同一 `/lib/<name>` 前缀下，避免 key 冲突、提供寻址命名空间——
+类比 C++ 的 `namespace`、Java 的 `module`/`package`。
+
+- `rwir` 带 lib：`/lib/<pkg>·<op>`（如 `kvspace·get`、`string·len`），签名在 `/‥isa/<folded-op>`。
+- `rwfunc` 带 lib：`/lib/<pkg>·<name>`（用户函数），签名锚点在 `[0,0]`。
+- `lib` 数据（常量）：`/lib/<name>`（如 `/lib/math·Pi`）。
+
+凡书写 `pkg·func(...)` 处，`pkg` 均指 `lib`——同一前缀系统的别名，规范统一表述为 lib。
+
 ## rwfunc 布局细节
 
 `write_func` 往 `/lib/<pkg>·<name>/` 写：
