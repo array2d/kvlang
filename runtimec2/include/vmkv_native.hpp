@@ -16,7 +16,7 @@ struct NativeCtx {
     const CInsn& ins;
     Wire in[2];
     std::int64_t v0 = 0, v1 = 0;
-    std::string fn;  // fold 后的 op 名（`·`→`/`，表键）
+    const std::string& fn;  // fold 后的 op 名（`·`→`/`，表键）
 
     // 读参解码（v_scalar 优先，time/duration 等非数值 langtype body 即 8 字节整数）。
     bool ai64(int i, std::int64_t* v);

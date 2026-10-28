@@ -14,6 +14,10 @@
 #include "valueio.hpp"
 
 namespace kv::rt {
+
+namespace {
+const bool g_trace = std::getenv("RC2_TRACE") != nullptr;
+}  // namespace
 using bin::FReg;
 using bin::FrameCtx;
 using bin::RunResult;
@@ -31,7 +35,7 @@ bool NativeCtx::ai64(int i, std::int64_t* v) {
     kvspaceXh xh{};
     if (kvspaceXhDecode(in[i].d, in[i].n, &xh) != 0 ||
         xh.content_len != 8) {
-        if (std::getenv("RC2_TRACE"))
+        if (g_trace)
             std::fprintf(stderr, "[ai64fail i=%d d=%p n=%u]\n", i,
                          (void*)in[i].d, in[i].n);
         return false;
@@ -75,7 +79,7 @@ bool NativeCtx::path_arg(int i, std::uint8_t rno, const RegDesc& d,
     FReg& pr = f.regs[rno];
     if (!vm.ensure_reg_key(f, pr))
         return false;
-    if (std::getenv("RC2_TRACE"))
+    if (g_trace)
         std::fprintf(stderr,
                      "[patharg var i=%d key='%s' desc='%s' refn='%s']\n",
                      i, pr.key.c_str(), pr.desc.c_str(),
@@ -85,7 +89,7 @@ bool NativeCtx::path_arg(int i, std::uint8_t rno, const RegDesc& d,
 }
 
 bool NativeCtx::kv_paths(std::string* k0, std::string* k1) {
-    if (std::getenv("RC2_TRACE"))
+    if (g_trace)
         std::fprintf(stderr,
                      "[patharg rd0=%d kind=%d name='%s' sk='%s']\n",
                      (int)ins.rd[0], (int)seg->regs[ins.rd[0]].kind,
@@ -1901,7 +1905,7 @@ bool h_kv_list(NativeCtx& c, std::string* err) {
     char errbuf[256] = {};
     bool ok = true;
     if (c.fn == "kvspace/listlen") {
-        if (std::getenv("RC2_TRACE"))
+        if (g_trace)
             std::fprintf(stderr, "[listlen k0='%s' dkey='%s']\n",
                          k0.c_str(), dkey.c_str());
         std::int32_t cnt = 0;

@@ -65,6 +65,12 @@ bool operand_desc(void* h, const std::string& key, RegDesc* out) {
             if (end && *end == ']')
                 out->param_k = static_cast<int>(v);
         }
+        using VC = RegDesc::VarClass;
+        out->vclass = op.empty()                     ? VC::Plain
+                      : op.rfind("*[0,", 0) == 0     ? VC::ParamPtr
+                      : op[0] == '*'                 ? VC::Ptr
+                      : op.find(' ') == std::string::npos ? VC::Plain
+                                                          : VC::Typed;
         return true;
     }
     out->kind = Operand::Kind::Literal;

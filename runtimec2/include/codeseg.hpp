@@ -20,7 +20,12 @@ struct RegDesc {
     std::string name;     // Var 名/描述符
     std::string slot_key; // Literal 的函数槽 key
     int param_k = 0;      // 参数 Ptr 槽号（`*[0,±k]` build 预解析；帧入口零 substr/atoi）
+    // Var shape, classified at build: param Ptr `*[0,k]`, other Ptr, plain name, typed name.
+    enum class VarClass : std::uint8_t { None = 0, ParamPtr, Ptr, Plain, Typed } vclass =
+        VarClass::None;
 };
+
+struct Segment;
 
 struct CInsn {
     ops::Op op = ops::Op::None;
@@ -37,6 +42,16 @@ struct CInsn {
     int s0 = 0;  // 明文指令坐标
     std::string name;    // opcode 原文（Native 分派用）
     std::string callee;  // call：被调函数名
+    // Lazily filled run-time caches; valid for the segment's lifetime.
+    mutable std::string fn_fold;           // name with `·` folded to `/`
+    mutable const void* native = nullptr;  // const NativeFn*
+    mutable bool native_ready = false;
+    mutable const Segment* call_seg = nullptr;
+    mutable const void* call_jit = nullptr;
+    mutable bool call_ready = false;
+    mutable std::vector<std::string> call_rtyp;  // callee decl type per read arg (1-based)
+    mutable std::vector<std::string> call_wtyp;  // per write arg (1-based)
+    mutable std::vector<std::uint8_t> call_rtyp_ok, call_wtyp_ok;
 };
 
 // 字面量 int64 快值缓存（build 期读槽一次，帧入口零 kvspace 预读）。

@@ -159,6 +159,10 @@ struct FrameCtx {
     // （returnpc/lib）与帧生命周期（DelTree/Mkindex）全部省略。return 直接
     // Returned（stop_pc 空，Call 分支捕获后 continue），pc 从不指向此帧。
     bool mem_frame = false;
+    // Set by the caller to skip the segment/JIT cache lookups by name.
+    const Segment* seg_hint = nullptr;
+    const void* jit_hint = nullptr;
+    bool jit_known = false;
 };
 
 // 单帧执行结果：Ok=入口帧走到段尾/return（vthread done）；

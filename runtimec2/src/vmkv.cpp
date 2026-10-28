@@ -7,6 +7,8 @@
 #include <cstring>
 #include <cstdio>
 #include <algorithm>
+#include <deque>
+#include <memory>
 #include <sys/random.h>
 #include <ctime>
 
@@ -27,6 +29,7 @@ namespace {
 
 // fast kernel A/B 开关（对拍定位用）：RC2_NOFAST=1 关连续执行，回主循环单步。
 const bool g_no_fast = std::getenv("RC2_NOFAST") != nullptr;
+const bool g_trace = std::getenv("RC2_TRACE") != nullptr;
 
 // warm frame：FReg 块池（线程局部，按容量复用）。递归帧每层借一块、返回还池，
 // 免每次 call 的 vector 堆分配 + FReg string 构造（fib 递归 setup 大头）。
@@ -39,6 +42,66 @@ struct FregPoolGuard {
             g_freg_free.push_back(std::move(*blk));
     }
 };
+
+// Callee FrameCtx free list: reused frames keep their string/array capacity.
+thread_local std::vector<std::unique_ptr<FrameCtx>> g_fctx_free;
+
+struct FctxLease {
+    FrameCtx* p;
+    FctxLease() {
+        if (g_fctx_free.empty()) {
+            p = new FrameCtx;
+        } else {
+            p = g_fctx_free.back().release();
+            g_fctx_free.pop_back();
+            FrameCtx& c = *p;
+            c.regs.clear();
+            c.arg_src_n = c.arg_dst_n = 0;
+            c.mem_frame = false;
+            c.seg_hint = nullptr;
+            c.jit_hint = nullptr;
+            c.jit_known = false;
+            c.frame_dir_hint.clear();
+        }
+    }
+    ~FctxLease() { g_fctx_free.emplace_back(p); }
+    FctxLease(const FctxLease&) = delete;
+    FctxLease& operator=(const FctxLease&) = delete;
+};
+
+// `/vthread/<vid>/[<d>]/<name>` with a plain name (no `/`, `[`, `‥`).
+bool is_any_frame_local(std::string_view k) {
+    constexpr std::string_view pre = "/vthread/";
+    if (k.substr(0, pre.size()) != pre)
+        return false;
+    const std::size_t v = k.find('/', pre.size());
+    if (v == std::string_view::npos || v + 2 >= k.size() || k[v + 1] != '[')
+        return false;
+    const std::size_t e = k.find("]/", v + 2);
+    if (e == std::string_view::npos)
+        return false;
+    for (std::size_t i = v + 2; i < e; i++)
+        if (k[i] < '0' || k[i] > '9')
+            return false;
+    const std::string_view name = k.substr(e + 2);
+    return !name.empty() && name[0] != '[' &&
+           name.find('/') == std::string_view::npos &&
+           name.find("\xE2\x80\xA5") == std::string_view::npos;
+}
+
+// "/vthread/<vid>/[<depth>]" per depth; deque keeps references stable.
+const std::string& child_frame_root(const std::string& vid, int depth) {
+    thread_local std::deque<std::pair<std::string, std::string>> c;
+    const std::size_t d = depth < 0 ? 0 : static_cast<std::size_t>(depth);
+    if (d >= c.size())
+        c.resize(d + 1);
+    auto& e = c[d];
+    if (e.second.empty() || e.first != vid) {
+        e.first = vid;
+        e.second = g_vmkv.frame_root(vid, depth);
+    }
+    return e.second;
+}
 
 }  // namespace
 
@@ -230,7 +293,7 @@ bool Vmkv::read_reg(FrameCtx& f, std::uint8_t idx, Wire* out) {
                                                 f.frame + "/") == 0 &&
                       rk.find("/[0,") == std::string::npos &&
                       rk.find("\xE2\x80\xA5") == std::string::npos);
-    if (std::getenv("RC2_TRACE") && rk == f.frame + "/t1")
+    if (g_trace && rk == f.frame + "/t1")
         std::fprintf(stderr, "[readreg t1 fast=%d flk=%d src=%p]\n",
                      (int)fr->fast_i64, (int)flk, (void*)r.src_ptr);
     if (fr->fast_i64 && flk) {
@@ -339,8 +402,8 @@ bool Vmkv::read_scalar(FrameCtx& f, std::uint8_t idx, Scalar* out) {
 
 // 帧局部普通变量 key（非参数槽、非系统槽）：纯内存化候选。
 bool Vmkv::is_frame_local(const FrameCtx& f, const std::string& rk) {
-    return rk.size() > f.frame.size() + 1 &&
-           rk.compare(0, f.frame.size() + 1, f.frame + "/") == 0 &&
+    const std::size_t fs = f.frame.size();
+    return rk.size() > fs + 1 && rk.compare(0, fs, f.frame) == 0 && rk[fs] == '/' &&
            rk.find("/[0,") == std::string::npos &&
            rk.find("\xE2\x80\xA5") == std::string::npos;
 }
@@ -498,12 +561,12 @@ bool Vmkv::write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
     // 缓存，免每 op kvspace 往返（fib/binary_search 热点）。参数/绝对路径/系统槽照旧。
     const std::string& rk = r.key;
     const bool frame_local = is_frame_local(f, rk);
-    if (std::getenv("RC2_TRACE") && rk == f.frame + "/t1")
+    if (g_trace && rk == f.frame + "/t1")
         std::fprintf(stderr, "[writereg t1 fl=%d len=%u]\n", (int)frame_local,
                      len);
     if (frame_local && len >= 8) {
         kvspaceXh xh{};
-        if (std::getenv("RC2_TRACE") && rk == f.frame + "/t1" &&
+        if (g_trace && rk == f.frame + "/t1" &&
             kvspaceXhDecode(data, len, &xh) == 0)
             std::fprintf(stderr,
                          "[writereg t1 dec body=%p clen=%lu]\n",
@@ -534,7 +597,7 @@ bool Vmkv::write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
     }
     char err[192] = {};
     if (kvspaceSetValue(f.h, r.key.c_str(), data, len, 0, 0, err, sizeof err) != 0) {
-        if (std::getenv("RC2_TRACE"))
+        if (g_trace)
             std::fprintf(stderr, "[setvalue fail key=%s err='%s' len=%u]\n",
                          r.key.c_str(), err, len);
         return false;
@@ -685,6 +748,15 @@ bool Vmkv::slot_write_scalar(FrameCtx& f, std::uint8_t idx, const Scalar& s,
     if (!kn)
         return false;
     FReg& fr = f.regs[idx];
+    // Aliased int64 write param into a caller frame local: the caller's cache is
+    // the value there, so skip the encode. Other targets keep the kvspace write.
+    if (fr.dst_ptr && s.k == Scalar::K::Int && width == 8) {
+        const FReg* dr = fr.dst_ptr;
+        while (dr->dst_ptr)
+            dr = dr->dst_ptr;
+        if (dr->key.empty() || is_any_frame_local(dr->key))
+            return slot_write_i64(f, idx, s.i);
+    }
     bool match = fr.sc_ok && fr.sck == s.k && fr.scw == width;
     if (reg_body(f, idx, &body, &body_cap) && body && body_cap >= width) {
         if (!match && fr.view.head && fr.view.headlen > 18) {
@@ -1092,7 +1164,8 @@ bool Vmkv::enter_frame(FrameCtx& f, const Segment* seg, std::string* err) {
             } else if (d.kind == Operand::Kind::Var) {
                 // Ptr 描述符（`*` 开头）惰性解析：target 由运行时写（如 &x 产 Ptr），
                 // 帧入口解析会过早失败。非 Ptr 的 Var/字面量帧入口一次建 key。
-                if (d.name[0] == '*' && d.name.rfind("*[0,", 0) == 0) {
+                using VC = RegDesc::VarClass;
+                if (d.vclass == VC::ParamPtr) {
                     // 参数 Ptr（`*[0,±k]`）：call 时已绑定。内存别名子帧命中
                     // arg_src/arg_dst 表 → 挂跨帧指针（读参 src / 写参 dst），
                     // 零 kvspace；未命中（容器/扩展参数）回退 kvspace 原路径。
@@ -1127,17 +1200,17 @@ bool Vmkv::enter_frame(FrameCtx& f, const Segment* seg, std::string* err) {
                             f.regs[i].key = ap->key;
                         else
                             f.regs[i].key.clear();
-                        if (std::getenv("RC2_TRACE"))
+                        if (g_trace)
                             std::fprintf(stderr, "[argmem d=%s k=%d %s]\n",
                                          d.name.c_str(), k,
                                          k < 0 ? "src" : "dst");
                     } else if (!resolve_desc(f, d.name, &f.regs[i].key, err)) {
-                        if (std::getenv("RC2_TRACE"))
+                        if (g_trace)
                             std::fprintf(stderr, "[argkv d=%s key=%s]\n",
                                          d.name.c_str(), f.regs[i].key.c_str());
                         return false;
                     }
-                } else if (d.name[0] == '*') {
+                } else if (d.vclass == VC::Ptr) {
                     // 普通 Ptr 描述符（`*p`）：target 由运行时写，惰性解析。
                     f.regs[i].key.clear();
                     f.regs[i].desc = d.name;
@@ -1145,7 +1218,7 @@ bool Vmkv::enter_frame(FrameCtx& f, const Segment* seg, std::string* err) {
                     // 普通变量：无类型声明（纯名 a/b/x/y）key 惰性（fast 路径零构造，
                     // ensure_reg_key 才拼 frame/name）；带类型声明（容器/类型化，如
                     // `A [N,N]float64`）成员访问需 key，立即 resolve。
-                    if (d.name.find(' ') == std::string::npos) {
+                    if (d.vclass == VC::Plain) {
                         f.regs[i].key.clear();
                         f.regs[i].desc.clear();
                         f.regs[i].desc_ref = &d;
@@ -1155,7 +1228,7 @@ bool Vmkv::enter_frame(FrameCtx& f, const Segment* seg, std::string* err) {
                 }
             }
     }
-    if (std::getenv("RC2_TRACE"))
+    if (g_trace)
         for (std::size_t ri = 0; ri < f.regs.size() && ri < 12; ri++)
             std::fprintf(stderr, "[reginit %zu kind=%d name='%s' key='%s']\n",
                          ri, (int)seg->regs[ri].kind,
@@ -1169,7 +1242,8 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
     bin.prof_init();
     if (stop_pc)
         stop_pc->clear();
-    const Segment* seg = cached_segment(f.h, f.func_dir);
+    const Segment* seg =
+        f.seg_hint ? f.seg_hint : cached_segment(f.h, f.func_dir);
     if (!seg) {
         *err = "build_segment failed: " + f.func_dir;
         return RunResult::Error;
@@ -1192,7 +1266,8 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
     // JIT 钩子（M1）：命中即原生执行返回；否则走 fast kernel。
     {
         bin::RunResult jr = bin::RunResult::Ok;
-        if (jit_try_run(f, seg, start_s0, &jr, stop_pc, err))
+        if ((!f.jit_known || f.jit_hint) &&
+            jit_try_run(f, seg, start_s0, &jr, stop_pc, err))
             return jr;
     }
     const int n = static_cast<int>(seg->insns.size());
@@ -1664,18 +1739,23 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
         if (ins.impl == ops::Impl::Native) {
             // Native 分派：fold `·`→`/` 后查两级表（vmkv_native.cpp），一 op 一 handler。
             // 表未命中 / handler 失败 → error；写失败统一由调用方补 "write failed"。
-            NativeCtx ctx{g_vmkv, f, seg, ins};
-            ctx.fn.reserve(ins.name.size());
-            for (std::size_t i = 0; i < ins.name.size();) {
-                if (i + 2 < ins.name.size() &&
-                    static_cast<unsigned char>(ins.name[i]) == 0xC2 &&
-                    static_cast<unsigned char>(ins.name[i + 1]) == 0xB7) {
-                    ctx.fn += '/';
-                    i += 2;
-                } else {
-                    ctx.fn += ins.name[i++];
+            if (!ins.native_ready) {
+                std::string& fo = ins.fn_fold;
+                fo.clear();
+                for (std::size_t i = 0; i < ins.name.size();) {
+                    if (i + 2 < ins.name.size() &&
+                        static_cast<unsigned char>(ins.name[i]) == 0xC2 &&
+                        static_cast<unsigned char>(ins.name[i + 1]) == 0xB7) {
+                        fo += '/';
+                        i += 2;
+                    } else {
+                        fo += ins.name[i++];
+                    }
                 }
+                ins.native = find_native(fo);
+                ins.native_ready = true;
             }
+            NativeCtx ctx{g_vmkv, f, seg, ins, {}, 0, 0, ins.fn_fold};
             for (int i = 0; i < ins.nrd && i < 2; i++) {
                 if (!read_reg(f, ins.rd[i], &ctx.in[i])) {
                     *err = "native: missing operand " + std::to_string(i) + ": " +
@@ -1683,7 +1763,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                     return RunResult::Error;
                 }
             }
-            const NativeFn* h = find_native(ctx.fn);
+            const NativeFn* h = static_cast<const NativeFn*>(ins.native);
             if (!h) {
                 *err = "native op not implemented: " + ins.name;
                 return RunResult::Error;
@@ -2335,12 +2415,13 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
         *err = "call: empty callee";
         return RunResult::Error;
     }
-    const std::string nf = frame_root(f.vid, f.depth + 1);
+    const std::string& nf = child_frame_root(f.vid, f.depth + 1);
     char e[192] = {};
     // 纯 runtime rwfunc 调用（callee 有代码段可解释）：帧局部 int64/bool
     // 参数走内存别名，免建 kvspace arg 槽/写参槽（fib 递归热点）。
     // 扩展/native/容器/float 参数照旧 kvspace 传值/Ptr。
-    const Segment* cseg = cached_segment(f.h, callee);
+    const Segment* cseg =
+        ins.call_ready ? ins.call_seg : cached_segment(f.h, callee);
     // 纯内存递归帧：callee 段无 native/handoff → 无观察边界 → 帧系统变量
     // （returnpc/lib）与生命周期（DelTree/Mkindex/ext 索引）全部省略，
     // 每帧省 ~17k cycles kvspace（fib 递归最大头）。
@@ -2348,7 +2429,8 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
     // JIT 快路径判定（M1）：callee 已编译 → 形状已知（int64 单读参/写参），
     // 参数绑定直接走 mem 路径，免签名/参数 wire 的 kvspace 读取。
     const void* jcode =
-        cseg && jit_enabled() ? jit_compile(callee, cseg) : nullptr;
+        ins.call_ready ? ins.call_jit
+                       : (cseg && jit_enabled() ? jit_compile(callee, cseg) : nullptr);
     // 非纯内存帧：清残留 + 建目录 + 系统变量落明文（明文栈唯一事实）。
     if (!mem_frame) {
         const std::string nstack = nf + "/";
@@ -2367,7 +2449,7 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
             return RunResult::Error;
         }
     }
-    if (std::getenv("RC2_TRACE")) {
+    if (g_trace) {
         std::fprintf(stderr, "[memcall callee=%s mem=%d]\n",
                      callee.c_str(), (int)(cseg != nullptr));
     }
@@ -2393,6 +2475,29 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
             *out = txt.substr(nul + 1);
         }
         return !out->empty();
+    };
+    // Call-site cache: callee segment, JIT entry and decl types never change
+    // while the segment cache lives. Unresolved callees retry every call.
+    if (!ins.call_ready && cseg) {
+        ins.call_seg = cseg;
+        ins.call_jit = jcode;
+        ins.call_rtyp.assign(ins.nrd, std::string());
+        ins.call_rtyp_ok.assign(ins.nrd, 0);
+        for (int i = 1; i < ins.nrd; i++)
+            ins.call_rtyp_ok[i] = param_decl_type(-i, &ins.call_rtyp[i]);
+        ins.call_wtyp.assign(ins.nwr + 1, std::string());
+        ins.call_wtyp_ok.assign(ins.nwr + 1, 0);
+        for (int i = 1; i <= ins.nwr; i++)
+            ins.call_wtyp_ok[i] = param_decl_type(i, &ins.call_wtyp[i]);
+        ins.call_ready = true;
+    }
+    auto decl_type = [&](int x, std::string* out) -> bool {
+        if (!ins.call_ready)
+            return param_decl_type(x, out);
+        const bool ok = x < 0 ? ins.call_rtyp_ok[-x] : ins.call_wtyp_ok[x];
+        if (ok)
+            *out = x < 0 ? ins.call_rtyp[-x] : ins.call_wtyp[x];
+        return ok;
     };
     // 内存别名子帧：arg_src/arg_dst 从调用方 FReg 建立。定长栈数组（段 nr/nw ≤ 16）。
     FReg* mem_src[16] = {};
@@ -2425,7 +2530,7 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
         const std::string xs = std::to_string(x);
         const std::string arg_key = nf + "/\xE2\x80\xA5" "arg[0," + xs + "]";
         const std::string slot = nf + "/[0," + xs + "]";
-        if (std::getenv("RC2_TRACE") &&
+        if (g_trace &&
             callee.find("bsearch") != std::string::npos)
             std::fprintf(stderr, "[bindkv x=%d typ=%s memcall=%d scalar=%d]\n",
                          x, typ.c_str(), (int)(cseg != nullptr),
@@ -2523,7 +2628,7 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
         std::uint32_t an = 0, sn = 0;
         bool bok = kvspaceNewPtr(typ.c_str(), value_key.c_str(), &a, &an) == 0;
         if (!bok) {
-            if (std::getenv("RC2_TRACE"))
+            if (g_trace)
                 std::fprintf(stderr,
                              "[bind NewPtr fail typ=%s value_key=%s]\n",
                              typ.c_str(), value_key.c_str());
@@ -2549,6 +2654,19 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
         Wire vw{};
         std::string vk, typ;
         const RegDesc& rd = seg->regs[ins.rd[i]];
+        // Scalar arg into a memory frame: the alias needs no wire or key.
+        if (mem_frame && ins.call_ready && ins.call_rtyp_ok[i] &&
+            (ins.call_rtyp[i] == "int64" || ins.call_rtyp[i] == "bool") &&
+            !(rd.kind == Operand::Kind::Literal && !rd.name.empty() &&
+              rd.name[0] == '/')) {
+            FReg& cr = f.regs[ins.rd[i]];
+            const FReg& ca = cr.src_ptr ? *cr.src_ptr : cr;
+            if (ca.fast_i64 || ca.fast_bool) {
+                if (!bind_arg(-i, &cr, vk, ins.call_rtyp[i], vw))
+                    return RunResult::Error;
+                continue;
+            }
+        }
         // Literal 绝对路径实参（`count_children("/tmp/kvt/")`）：传**路径文本**。
         if (rd.kind == Operand::Kind::Literal && !rd.name.empty() &&
             rd.name[0] == '/') {
@@ -2596,7 +2714,7 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
             vk = rr.key;
         }
         typ.clear();
-        if (!param_decl_type(-i, &typ) && !v_langtype(vw, &typ))
+        if (!decl_type(-i, &typ) && !v_langtype(vw, &typ))
             typ = "int64";
         if (!bind_arg(-i, &f.regs[ins.rd[i]], vk, typ, vw))
             return RunResult::Error;
@@ -2613,17 +2731,21 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
             return RunResult::Error;
         const std::string vk = wrk->key;
         std::string typ;
-        if (!param_decl_type(i, &typ))
+        if (!decl_type(i, &typ))
             typ = "int64";
         if (!bind_arg(i, &f.regs[ins.wr[i - 1]], vk, typ, Wire{}))
             return RunResult::Error;
     }
-    FrameCtx nfc;
+    FctxLease lease;
+    FrameCtx& nfc = *lease.p;
     nfc.h = f.h;
     nfc.vid = f.vid;
     nfc.depth = f.depth + 1;
-    nfc.frame = std::move(nf);
+    nfc.frame = nf;
     nfc.func_dir = callee;
+    nfc.seg_hint = cseg;
+    nfc.jit_hint = jcode;
+    nfc.jit_known = ins.call_ready;
     if (mem_src_n)
         std::memcpy(nfc.arg_src, mem_src,
                     static_cast<std::size_t>(mem_src_n) * sizeof(FReg*));
