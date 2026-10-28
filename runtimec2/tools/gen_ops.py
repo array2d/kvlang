@@ -59,14 +59,13 @@ def impl_of(name):
             return "Impl::Native"
         if fam in KIND:
             return "Impl::Typed"
-        # 用户裁定：容器/string/ndarray 是 runtimec2 核心职责（Native），
-        # Handoff 只留 struct·new（待实现）。
-        return "Impl::Native" if name != "struct·new" else "Impl::Handoff"
+        # 用户裁定：容器/string/ndarray 是 runtimec2 核心职责（Native）。
+        return "Impl::Native"
     if name in KIND:
         return "Impl::Typed"  # bare kind = cast
     if name in GENERIC or name.startswith("char/"):
         return "Impl::Dynamic"  # 泛型数值/比较 + char cast：运行动态分派
-    return "Impl::Native" if name != "struct·new" else "Impl::Handoff"
+    return "Impl::Native"
 
 
 def op_of(name):

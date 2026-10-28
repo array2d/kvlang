@@ -1615,6 +1615,131 @@ bool h_array_at_set(NativeCtx& c, std::string* err) {
     return false;
 }
 
+// ── struct·new ─────────────────────────────────────────────────────────────
+// 克隆 /lib/Name 原型子树到写槽，覆盖给定字段（校验字段存在性+类型）。
+// in[0]=structref（"/lib/Name"），其后成对 (字段名, 值)。实例基值 langtype=structref。
+namespace {
+// 剥 `[dims]` 前缀得裸 kind（字段类型与值类型比对用）。
+std::string bare_kind(const std::string& lt) {
+    if (!lt.empty() && lt[0] == '[') {
+        const std::size_t close = lt.find(']');
+        if (close != std::string::npos)
+            return lt.substr(close + 1);
+    }
+    return lt;
+}
+}  // namespace
+
+bool h_struct_new(NativeCtx& c, std::string* err) {
+    // ref 形参：绝对路径字面量（`/lib/Point`）的 RegDesc.name 即路径本体——
+    // read_reg 会按 key 直达目标值（def struct 标记），不能当文本读；变量则读值。
+    const RegDesc& rd0 = c.seg->regs[c.ins.rd[0]];
+    std::string ref;
+    if (rd0.kind == Operand::Kind::Literal && !rd0.name.empty() &&
+        rd0.name[0] == '/') {
+        ref = rd0.name.substr(0, rd0.name.find(' '));
+    } else if (!c.atext(0, &ref) || ref.empty()) {
+        *err = "TypeError: struct·new requires a type";
+        return false;
+    }
+    if (ref.empty()) {
+        *err = "TypeError: struct·new requires a type";
+        return false;
+    }
+    // 原型必须存在且 kind=def struct。
+    const std::uint8_t* pd = nullptr;
+    std::uint32_t pn = 0;
+    std::string plt;
+    if (!read_wire(c.f.h, ref, &pd, &pn) || !v_langtype(Wire{pd, pn}, &plt) ||
+        bare_kind(plt) != "def struct") {
+        *err = "TypeError: " + ref + " is not a struct type";
+        return false;
+    }
+    FReg& wr0 = c.f.regs[c.ins.wr[0]];
+    if (!c.vm.ensure_reg_key(c.f, wr0)) {
+        *err = "struct·new: bad write slot";
+        return false;
+    }
+    const std::string base = wr0.key;
+    char eb[192] = {};
+    // 克隆原型成员（默认值：`Point·x` 等）+ 基值，覆盖给定字段。
+    if (kvspaceCpList(c.f.h, ref.c_str(), base.c_str(), eb, sizeof eb) != 0) {
+        *err = std::string("struct·new: copy failed: ") + eb;
+        return false;
+    }
+    // 基值标 structref 标记（langtype=ref，空 body，ndim 0）。
+    std::uint8_t* mark = nullptr;
+    std::uint32_t ml = 0;
+    bool ok = kvspaceXvalueEncode(ref.c_str(), nullptr, 0, nullptr, 0, &mark,
+                                  &ml) == 0 &&
+              mark;
+    if (ok)
+        ok = kvspaceSetValue(c.f.h, base.c_str(), mark, ml, 0, 0, eb,
+                             sizeof eb) == 0;
+    std::free(mark);
+    if (!ok) {
+        *err = std::string("struct·new: marker failed: ") + eb;
+        return false;
+    }
+    // 字段成对：读参[1]=字段名,[2]=值,[3]=名,[4]=值,…
+    for (int i = 1; i + 1 < c.ins.nrd; i += 2) {
+        std::string fname;
+        Wire fw{};
+        Wire fv{};
+        if (!c.vm.read_reg(c.f, c.ins.rd[i], &fw) ||
+            !wire_text(fw.d, fw.n, &fname) || fname.empty() ||
+            !c.vm.read_reg(c.f, c.ins.rd[i + 1], &fv)) {
+            *err = "struct·new: bad field pair";
+            return false;
+        }
+        // 字段类型槽：`ref/<fname>` 的 def langtype body。
+        std::string ftype;
+        {
+            const std::uint8_t* td = nullptr;
+            std::uint32_t tn = 0;
+            const std::string tk = ref + "/" + fname;
+            std::string tlt;
+            if (!read_wire(c.f.h, tk, &td, &tn) ||
+                !v_langtype(Wire{td, tn}, &tlt) ||
+                bare_kind(tlt) != "def langtype") {
+                *err = "TypeError: struct " + ref + " has no field " + fname;
+                return false;
+            }
+            kvspaceXh th{};
+            if (kvspaceXhDecode(td, tn, &th) != 0 || !th.body)
+                ftype.clear();
+            else
+                ftype.assign(reinterpret_cast<const char*>(th.body),
+                             th.content_len);
+        }
+        std::string vlt;
+        (void)v_langtype(fv, &vlt);
+        const bool none = v_is_none(fv);
+        // *T 字段：None 合法；非 None 须 Ptr 且目标种类匹配（剥离前导 *）。
+        if (!ftype.empty() && ftype[0] == '*') {
+            if (!none &&
+                (!v_ptr(fv) ||
+                 bare_kind(ftype.substr(1)) != bare_kind(vlt))) {
+                *err = "TypeError: field " + fname + ": expected " + ftype +
+                       ", got " + (vlt.empty() ? "None" : vlt);
+                return false;
+            }
+        } else if (!ftype.empty() &&
+                   (none || bare_kind(ftype) != bare_kind(vlt))) {
+            *err = "TypeError: field " + fname + ": expected " + ftype +
+                   ", got " + (none ? "None" : vlt);
+            return false;
+        }
+        const std::string mk = base + "\xC2\xB7" + fname;
+        if (kvspaceSetValue(c.f.h, mk.c_str(), fv.d, fv.n, 0, 0, eb,
+                            sizeof eb) != 0) {
+            *err = std::string("struct·new: set field failed: ") + eb;
+            return false;
+        }
+    }
+    return true;
+}
+
 // ── 容器（obj / map·new）───────────────────────────────────────────────────
 bool h_obj_map(NativeCtx& c, std::string* err) {
     std::string lt = c.write_slot_lt();
@@ -1686,7 +1811,12 @@ bool h_kvlang_abs(NativeCtx& c, std::string* err) {
     } else if (ad.name[0] == '/') {
         k0 = ad.name.substr(0, ad.name.find(' '));  // 剥类型后缀
     } else {
-        k0 = c.f.regs[c.ins.rd[0]].key;  // 变量已解析的帧 key
+        // 变量帧 key 惰性：`&x` 前 x 未必写过（链表 `{next=&n3}` 先于 n3 再写），
+        // 必须 ensure_reg_key 才拿得到路径（&n3 恒指向已建实例的槽 key）。
+        FReg& ar = c.f.regs[c.ins.rd[0]];
+        if (!c.vm.ensure_reg_key(c.f, ar))
+            return false;
+        k0 = ar.key;
     }
     if (!ok || k0.empty()) {
         *err = "native: bad path operand: " + c.ins.name;
@@ -1921,6 +2051,7 @@ constexpr NativeCap kStringCaps[] = {
 constexpr NativeCap kContainerCaps[] = {
     NCAP("obj", h_obj_map),
     NCAP("map/new", h_obj_map),
+    NCAP("struct/new", h_struct_new),
 };
 
 constexpr NativeCap kKvlangCaps[] = {
@@ -1956,6 +2087,7 @@ constexpr NativeFamily kFamilies[] = {
     {"string/", kStringCaps, NCAPS(kStringCaps)},
     {"obj", kContainerCaps, NCAPS(kContainerCaps)},
     {"map/", kContainerCaps, NCAPS(kContainerCaps)},
+    {"struct/", kContainerCaps, NCAPS(kContainerCaps)},
     {"kvlang/", kKvlangCaps, NCAPS(kKvlangCaps)},
     {"kvspace/", kKvspaceCaps, NCAPS(kKvspaceCaps)},
 };

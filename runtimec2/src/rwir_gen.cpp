@@ -207,7 +207,7 @@ const Entry myrwircaps[] = {
     {"string·parseuint", Op::None, Kind::None, 0, Class::Complex, Impl::Native},
     {"string·set", Op::None, Kind::None, 0, Class::Complex, Impl::Native},
     {"string·slice", Op::None, Kind::None, 0, Class::Complex, Impl::Native},
-    {"struct·new", Op::None, Kind::None, 0, Class::Complex, Impl::Handoff},
+    {"struct·new", Op::None, Kind::None, 0, Class::Complex, Impl::Native},
     {"sub", Op::Sub, Kind::Any, 0, Class::Complex, Impl::Dynamic},
     {"time/duration·add", Op::None, Kind::None, 0, Class::Complex, Impl::Native},
     {"time/duration·after", Op::None, Kind::None, 0, Class::Complex, Impl::Native},

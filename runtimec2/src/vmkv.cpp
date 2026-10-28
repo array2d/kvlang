@@ -89,15 +89,20 @@ bool Vmkv::resolve_desc(FrameCtx& f, const std::string& name, std::string* key,
         const std::uint8_t* ad = nullptr;
         std::uint32_t an = 0;
         if (!read_wire_raw(f.h, target, &ad, &an)) {
-            *err = "operand: arg Ptr missing: " + target;
-            return false;
+            // arg 槽缺失 = 空指针（None 在 shm 即无键）：key 指回 arg 槽，
+            // 读取自然返回 None，不是错误（`inorder(None)` 传空指针参数）。
+            *key = target;
+            return true;
         }
+        // 读参（`*[0,-k]`）取 arg 槽本体（Ptr→调用方槽，一跳）：`head -> cur`
+        // 复制的是指针；两跳会落到调用方实例。写参（`*[0,k]`）才两跳取地址。
+        const bool read_arg = member.size() >= 4 && member[3] == '-';
         Wire aw{ad, an};
         std::string t2;
-        if (v_ptr_target(aw, &t2)) {
+        if (!read_arg && v_ptr_target(aw, &t2)) {
             *key = t2;  // 写参 Ptr 链：arg 槽 Ptr → 调用方槽
         } else {
-            *key = target;  // 读参传值：arg 槽即值槽（本帧，view 缓存）
+            *key = target;  // 读参：arg 槽即 Ptr/值槽（本帧，view 缓存）
         }
         return true;
     }
@@ -179,6 +184,15 @@ thread_local std::uint32_t g_none_len = 0;
 // 帧入口解析会过早失败）。读写共用同一入口。
 bool Vmkv::ensure_reg_key(FrameCtx& f, FReg& r) {
     if (r.key.empty()) {
+        // 内存别名写参（dst_ptr 链）：key = 调用方 reg 最终槽（纯内存帧无 arg 槽，
+        // `p·x = v` 的 p 写参直接落在调用方实例成员上）。
+        FReg* ap = &r;
+        while (ap->dst_ptr)
+            ap = ap->dst_ptr;
+        if (ap != &r && !ap->key.empty()) {
+            r.key = ap->key;
+            return true;
+        }
         // 普通变量（desc_ref）：key = frame + "/" + name（一次轻拼接，SSO）。
         if (r.desc_ref) {
             // 绝对路径变量（`/lib/...` 顶层写槽）：直接作 key，不拼 f.frame。
@@ -404,9 +418,74 @@ bool Vmkv::write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
         if (dr.view_ok) {
             dr.view_ok = false;
         }
+        dr.base_ptr_known = false;
         char err[192] = {};
         return kvspaceSetValue(f.h, dr.key.c_str(), data, len, 0, 0, err,
                                sizeof err) == 0;
+    }
+    // 成员写槽（desc 含 `·`，如 `p·x`）：base 是帧变量/参数（可能 dst_ptr 别名
+    // 指向调用方实例），key = 最终 base 槽 + `·` + 成员名（`p·x = v` 就地改
+    // 调用方对象，见 ptr-param-mutate）。绝对路径 base（`/tmp/x·y`）直接用。
+    const std::string& wdsc = !r.desc.empty() ? r.desc
+                             : (r.desc_ref ? r.desc_ref->name : r.desc);
+    if (wdsc.find("\xC2\xB7") != std::string::npos && wdsc[0] != '/') {
+        const auto mid = wdsc.find("\xC2\xB7");
+        const std::string base_part = wdsc.substr(0, mid);
+        const std::string mname = wdsc.substr(mid + 2);
+        // base 对应的 reg：desc 名匹配（`p` 参数/变量）→ 沿 src/dst 别名链到最终槽
+        // （`p·x` 的 p 写参 dst_ptr→调用方 a）。
+        FReg* bp = &r;
+        for (FReg& rr : f.regs) {
+            const std::string rn = !rr.desc.empty() ? rr.desc
+                                   : (rr.desc_ref ? rr.desc_ref->name : std::string());
+            if (rn == base_part || rr.key == f.frame + "/" + base_part) {
+                bp = &rr;
+                break;
+            }
+        }
+        while (bp->src_ptr || bp->dst_ptr)
+            bp = bp->src_ptr ? bp->src_ptr : bp->dst_ptr;
+        // base 名未匹配（写槽 `p·x` 的 p 是 `*[0,1]` 写参描述符）：取已解析到
+        // 调用方实例的写参 reg 链作 base（成员写就地改调用方对象）。
+        if (bp == &r || bp->key.empty()) {
+            for (FReg& rr : f.regs) {
+                const std::string rn = !rr.desc.empty() ? rr.desc
+                                       : (rr.desc_ref ? rr.desc_ref->name
+                                                      : std::string());
+                if (rn.rfind("*[0,", 0) == 0) {
+                    FReg* rp = &rr;
+                    while (rp->src_ptr || rp->dst_ptr)
+                        rp = rp->src_ptr ? rp->src_ptr : rp->dst_ptr;
+                    if (rp->key.empty() && !ensure_reg_key(f, *rp))
+                        continue;
+                    if (!rp->key.empty()) {
+                        bp = rp;
+                        break;
+                    }
+                }
+            }
+        }
+        if (bp->key.empty() && !ensure_reg_key(f, *bp))
+            return false;
+        // base 槽是 Ptr（`cur->next = v` 的 cur 存指针）：成员写落在 target 上。
+        if (!bp->key.empty()) {
+            const std::uint8_t* bd = nullptr;
+            std::uint32_t bn = 0;
+            std::string bt;
+            if (read_wire_raw(f.h, bp->key, &bd, &bn) &&
+                v_ptr_target(Wire{bd, bn}, &bt) && !bt.empty())
+                bp->key = bt;
+        }
+        if (!bp->key.empty() && !mname.empty() && mname[0] != '*') {
+            r.key = bp->key + "\xC2\xB7" + mname;
+            r.view_ok = false;
+            r.sc_ok = false;
+            r.fast_i64 = false;
+            r.fast_bool = false;
+            char errb[192] = {};
+            return kvspaceSetValue(f.h, r.key.c_str(), data, len, 0, 0, errb,
+                                   sizeof errb) == 0;
+        }
     }
     if (!ensure_reg_key(f, r))
         return false;
@@ -414,6 +493,7 @@ bool Vmkv::write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
     r.sc_ok = false;
     r.fast_i64 = false;
     r.fast_bool = false;
+    r.base_ptr_known = false;  // 槽值可能变 Ptr/非 Ptr，成员 base 缓存失效
     // 帧局部 int64 变量：内存化写（FReg.fv + 槽直写若已有 view），层内读走 fast
     // 缓存，免每 op kvspace 往返（fib/binary_search 热点）。参数/绝对路径/系统槽照旧。
     const std::string& rk = r.key;
@@ -982,6 +1062,8 @@ bool Vmkv::enter_frame(FrameCtx& f, const Segment* seg, std::string* err) {
         rr.arr_dims[4] = rr.arr_dims[5] = rr.arr_dims[6] = rr.arr_dims[7] = 0;
         rr.arr_ndim = 0;
         rr.arr_kind = 0;
+        rr.base_ptr = false;
+        rr.base_ptr_known = false;
         rr.key.clear();
         rr.desc.clear();
         rr.desc_ref = nullptr;
@@ -1016,6 +1098,7 @@ bool Vmkv::enter_frame(FrameCtx& f, const Segment* seg, std::string* err) {
                     // 零 kvspace；未命中（容器/扩展参数）回退 kvspace 原路径。
                     // 槽号 build 已预解析（d.param_k），帧入口零 substr/atoi
                     // （fib 递归每帧 12+ reg，字符串解析是 setup 大头）。
+                    f.regs[i].desc_ref = &d;  // 成员写 base 匹配（`p·x` 的 p→`*[0,1]`）
                     const int k = d.param_k;
                     FReg* ap = nullptr;
                     if (k < 0 && static_cast<std::size_t>(-k) <=
@@ -1037,7 +1120,13 @@ bool Vmkv::enter_frame(FrameCtx& f, const Segment* seg, std::string* err) {
                         } else {
                             f.regs[i].dst_ptr = ap;
                         }
-                        f.regs[i].key.clear();
+                        // 写参别名：key 直接继承调用方实例槽（成员写 `p·x = v` 的
+                        // base p 经 f.regs 遍历能取到最终 key）。读参别名 key 留空
+                        // （值转发走 src_ptr，读穿透到目标）。
+                        if (k > 0 && ap && !ap->key.empty())
+                            f.regs[i].key = ap->key;
+                        else
+                            f.regs[i].key.clear();
                         if (std::getenv("RC2_TRACE"))
                             std::fprintf(stderr, "[argmem d=%s k=%d %s]\n",
                                          d.name.c_str(), k,
@@ -1625,8 +1714,9 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
         bool none0 = false, none1 = false;
         if (ins.op != ops::Op::Copy) {
             for (int i = 0; i < ins.nrd; i++) {
-                if (read_scalar(f, ins.rd[i], &s[i]))
+                if (read_scalar(f, ins.rd[i], &s[i])) {
                     continue;
+                }
                 if (!read_reg(f, ins.rd[i], &w[i])) {
                     *err = "operand " + std::to_string(i) + " is missing";
                     return RunResult::Error;
@@ -1640,7 +1730,9 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
         }
         bool ok = true;
         // None 参与比较：对齐 C 语义（Eq：双 None=true；Neq：双 None=false；其余 → TypeError）。
-        if ((none0 || none1) && is_cmp(ins.op)) {
+        // Ptr vs None（Ptr 悬空=空指针）交给 non_scalar 的 Ptr 分支，不在此判。
+        const bool any_ptr_cmp = (v_ptr(w[0]) || v_ptr(w[1])) && is_cmp(ins.op);
+        if (!any_ptr_cmp && (none0 || none1) && is_cmp(ins.op)) {
             if (ins.op == ops::Op::Eq)
                 ok = slot_write_bool(f, ins.wr[0], none0 && none1);
             else if (ins.op == ops::Op::Neq)
@@ -1694,47 +1786,83 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                 // 动态算子按运行时类型分派：`+` 对 char 族即字符串拼接；
                 // `==`/`!=` 对 char 族按文本比较产 bool。
                 std::string a, b;
-                if (ins.nrd == 2 && (ins.op == ops::Op::Eq || ins.op == ops::Op::Neq) &&
-                    wire_text(w[0].d, w[0].n, &a) &&
-                    wire_text(w[1].d, w[1].n, &b)) {
-                    const bool eq = a == b;
-                    ok = slot_write_bool(f, ins.wr[0], ins.op == ops::Op::Eq ? eq : !eq);
+                if (ins.nrd == 2 && (ins.op == ops::Op::Eq || ins.op == ops::Op::Neq)) {
+                    // Ptr 参与比较：指针本体 vs None（空指针检查）或 Ptr 间按 target 比
+                    // （链表 `cur != None` / `h·next == &n2`）。读参 w[i] 可能已被
+                    // resolve 穿透成目标值——按 Ptr target 判空与相等。
+                    const bool p0 = v_ptr(w[0]), p1 = v_ptr(w[1]);
+                    if (p0 || p1) {
+                        // Ptr 为空 = target 槽缺失/None（`walk(None)` 的 arg 槽
+                        // Ptr→nil 槽是空指针，`node != None` 须 false）。
+                        auto ptr_empty = [&](const Wire& pw) -> bool {
+                            std::string t;
+                            if (!v_ptr_target(pw, &t) || t.empty())
+                                return true;
+                            const std::uint8_t* td = nullptr;
+                            std::uint32_t tn = 0;
+                            return !read_wire(f.h, t, &td, &tn) ||
+                                   v_is_none(Wire{td, tn});
+                        };
+                        const bool e0 = ptr_empty(w[0]);
+                        const bool e1 = ptr_empty(w[1]);
+                        std::string pt0, pt1;
+                        const bool h0 = v_ptr_target(w[0], &pt0);
+                        const bool h1 = v_ptr_target(w[1], &pt1);
+                        const bool eq = p0 && p1
+                                            ? (e0 && e1) || (!e0 && !e1 && pt0 == pt1)
+                                            : p0 ? e0 : e1;
+                        ok = slot_write_bool(f, ins.wr[0],
+                                             ins.op == ops::Op::Eq ? eq : !eq);
+                        if (bin.prof_on) {
+                            const std::uint64_t d2 = bin.now() - t0;
+                            bin.prof.handler += d2;
+                            bin.prof.steps++;
+                            bin.prof_tick(ins.prof_id, d2, 0);
+                        }
+                        continue;
+                    }
+                    if (wire_text(w[0].d, w[0].n, &a) &&
+                        wire_text(w[1].d, w[1].n, &b)) {
+                        const bool eq = a == b;
+                        ok = slot_write_bool(f, ins.wr[0],
+                                             ins.op == ops::Op::Eq ? eq : !eq);
+                        if (bin.prof_on) {
+                            const std::uint64_t dh = bin.now() - t0;
+                            bin.prof.handler += dh;
+                            bin.prof.steps++;
+                            bin.prof_tick(ins.prof_id, dh, 0);
+                        }
+                        continue;
+                    }
+                    if (ins.op != ops::Op::Add || ins.nrd != 2 ||
+                        !wire_text(w[0].d, w[0].n, &a) ||
+                        !wire_text(w[1].d, w[1].n, &b)) {
+                        *err = "non-scalar operand: " + ins.name;
+                        return RunResult::Error;
+                    }
+                    const std::string out_s = a + b;
+                    const std::int32_t dims[1] = {static_cast<std::int32_t>(out_s.size())};
+                    std::uint8_t* buf = nullptr;
+                    std::uint32_t len = 0;
+                    ok = kvspaceXvalueEncode(
+                             "char/utf8",
+                             reinterpret_cast<const std::uint8_t*>(out_s.data()),
+                             static_cast<std::uint32_t>(out_s.size()), dims, 1,
+                             &buf, &len) == 0 &&
+                         buf && write_reg(f, ins.wr[0], buf, len);
+                    std::free(buf);
                     if (bin.prof_on) {
                         const std::uint64_t dh = bin.now() - t0;
                         bin.prof.handler += dh;
                         bin.prof.steps++;
                         bin.prof_tick(ins.prof_id, dh, 0);
                     }
+                    if (!ok) {
+                        *err = "value op failed: " + ins.name;
+                        return RunResult::Error;
+                    }
                     continue;
                 }
-                if (ins.op != ops::Op::Add || ins.nrd != 2 ||
-                    !wire_text(w[0].d, w[0].n, &a) ||
-                    !wire_text(w[1].d, w[1].n, &b)) {
-                    *err = "non-scalar operand: " + ins.name;
-                    return RunResult::Error;
-                }
-            const std::string out_s = a + b;
-            const std::int32_t dims[1] = {static_cast<std::int32_t>(out_s.size())};
-            std::uint8_t* buf = nullptr;
-            std::uint32_t len = 0;
-            ok = kvspaceXvalueEncode(
-                     "char/utf8",
-                     reinterpret_cast<const std::uint8_t*>(out_s.data()),
-                     static_cast<std::uint32_t>(out_s.size()), dims, 1, &buf,
-                     &len) == 0 &&
-                 buf && write_reg(f, ins.wr[0], buf, len);
-            std::free(buf);
-            if (bin.prof_on) {
-                const std::uint64_t dh = bin.now() - t0;
-                bin.prof.handler += dh;
-                bin.prof.steps++;
-                bin.prof_tick(ins.prof_id, dh, 0);
-            }
-            if (!ok) {
-                *err = "value op failed: " + ins.name;
-                return RunResult::Error;
-            }
-            continue;
             }
         }
         // 动态键：Ptr 参数先解引用取 target 槽值（链最多 2 跳）；int64/标量 →
@@ -1838,6 +1966,8 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                 // 成员读：base（读参0 的值或 Ptr 目标 key）+ key（读参1 的值）。
                 Wire bw{};
                 std::string base_key;
+                FReg& br0 = f.regs[ins.rd[0]];
+                FReg& br0f = br0.src_ptr ? *br0.src_ptr : br0;
                 if (read_reg(f, ins.rd[0], &bw)) {
                     std::string bt;
                     if (v_ptr_target(bw, &bt)) {
@@ -1846,8 +1976,22 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                                bt[0] == '/') {
                         // 字面量路径 base（`char/utf32:/tmp/up`）→ 直接取文本。
                         base_key = bt;
-                    } else if (f.regs[ins.rd[0]].key.size() > 5) {
-                        base_key = f.regs[ins.rd[0]].key;
+                    } else {
+                        // 帧局部变量（惰性 key 未解析）：ensure 后取实例槽路径
+                        // （`n3·val` 在 n3 只经 struct·new 写、无明文值时 key 仍空）。
+                        if (ensure_reg_key(f, br0) && br0.key.size() > 5)
+                            base_key = br0.key;
+                        // Ptr 参数（key=arg 槽）：read_reg 已穿透成实例，raw 读回
+                        // Ptr 本体取 target（`p·x` 的 p 是 *点 读参）。
+                        if (br0f.key.size() > 5) {
+                            const std::uint8_t* rd2 = nullptr;
+                            std::uint32_t rn2 = 0;
+                            std::string t2;
+                            if (read_wire_raw(f.h, br0f.key, &rd2, &rn2) &&
+                                v_ptr_target(Wire{rd2, rn2}, &t2) &&
+                                !t2.empty())
+                                base_key = t2;
+                        }
                     }
                 }
                 Wire kw{};
@@ -1855,10 +1999,12 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                 if (!base_key.empty() && read_reg(f, ins.rd[1], &kw) &&
                     key_str(kw, &kstr) && !kstr.empty()) {
                     // 容器成员 key = base·name（· 中点键，对齐 C kvlangKeytreeMember）。
+                    // 值读用 raw（resolve=0）：成员是 Ptr 时须取 Ptr 本体（链表
+                    // `cur·next -> cur` 拿指针），穿透会得到目标值。
                     const std::string mkey = base_key + "\xC2\xB7" + kstr;
                     const std::uint8_t* md = nullptr;
                     std::uint32_t mn = 0;
-                    if (read_wire(f.h, mkey, &md, &mn) && md && mn) {
+                    if (read_wire_raw(f.h, mkey, &md, &mn) && md && mn) {
                         ok = write_reg(f, ins.wr[0], md, mn);
                     } else {
                         // 缺失成员 → None（容器成员可能未建）。
@@ -1918,10 +2064,91 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                 }
                 // base 槽 key = 帧局部变量名（arr 是帧变量，key=frame/arr）；
                 // `/` 开头 = 绝对路径字面量 base（如 /tmp/two_sum·*x），直接用。
-                const std::string base_key =
-                    !base_part.empty() && base_part[0] == '/'
-                        ? base_part
-                        : f.frame + "/" + base_part;
+                // 参数 Ptr 别名（`*[0,±k]` / `*p`）：取调用方 reg 链的最终 key
+                // （`p·x = v` 的 p 是 src_ptr 别名 → 写调用方实例成员）。
+                std::string base_key;
+                if (!base_part.empty() && base_part[0] == '/') {
+                    base_key = base_part;
+                } else {
+                    const std::string fbp = f.frame + "/" + base_part;
+                    // 先精确匹配 base 名（`cur·next` 的 cur 局部变量），失败才回退
+                    // 写参 Ptr（`*[0,±k]`：`r·x` 的 r 是写参）——顺序不可反。
+                    // 无字符串拷贝：desc_ref 指针/name 直接比较，key 前缀匹配。
+                    FReg* base_reg = nullptr;
+                    for (FReg& r : f.regs) {
+                        if ((r.desc_ref && r.desc_ref->name == base_part) ||
+                            r.key == fbp ||
+                            (!r.desc.empty() && r.desc == base_part)) {
+                            base_reg = &r;
+                            break;
+                        }
+                    }
+                    if (base_reg) {
+                        FReg* rk = base_reg;
+                        while (rk->src_ptr || rk->dst_ptr)
+                            rk = rk->src_ptr ? rk->src_ptr : rk->dst_ptr;
+                        if (!rk->key.empty()) {
+                            // base 槽是 Ptr（`cur·next` 的 cur 存指针）：成员写落
+                            // target。首查后缓存（热路径动态键容器免每写 kvspace）。
+                            if (!rk->base_ptr_known) {
+                                const std::uint8_t* bd = nullptr;
+                                std::uint32_t bn = 0;
+                                std::string bt;
+                                rk->base_ptr =
+                                    read_wire_raw(f.h, rk->key, &bd, &bn) &&
+                                    v_ptr_target(Wire{bd, bn}, &bt) && !bt.empty();
+                                rk->base_ptr_known = true;
+                            }
+                            if (rk->base_ptr) {
+                                const std::uint8_t* bd = nullptr;
+                                std::uint32_t bn = 0;
+                                std::string bt;
+                                if (read_wire_raw(f.h, rk->key, &bd, &bn) &&
+                                    v_ptr_target(Wire{bd, bn}, &bt))
+                                    base_key = bt;
+                                else
+                                    base_key = rk->key;
+                            } else {
+                                base_key = rk->key;
+                            }
+                        }
+                    } else {
+                        base_key = fbp;
+                    }
+                    if (base_key == f.frame + "/" + base_part) {
+                        for (FReg& r : f.regs) {
+                            const std::string rn = !r.desc.empty() ? r.desc
+                                                   : (r.desc_ref ? r.desc_ref->name
+                                                                 : std::string());
+                            if (rn.rfind("*[0,", 0) == 0 && !r.key.empty()) {
+                                FReg* rk = &r;
+                                while (rk->src_ptr || rk->dst_ptr)
+                                    rk = rk->src_ptr ? rk->src_ptr : rk->dst_ptr;
+                                if (!rk->key.empty()) {
+                                    base_key = rk->key;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    // 写参 base 无独立 reg（`造点(a,b) -> (r:*点)` 的 r 只出现在
+                    // `r·x` 写槽，layout 不生成 `*[0,1]` reg）：读本帧写参 arg 槽
+                    // （do_call 绑定 `‥arg[0,k]` 存 Ptr→调用方槽）取 target。
+                    if (base_key == f.frame + "/" + base_part) {
+                        for (int k2 = 1; k2 <= 4; k2++) {
+                            const std::string ak = f.frame + "/\xE2\x80\xA5" "arg[0," +
+                                                   std::to_string(k2) + "]";
+                            const std::uint8_t* ad2 = nullptr;
+                            std::uint32_t an2 = 0;
+                            std::string at;
+                            if (read_wire_raw(f.h, ak, &ad2, &an2) &&
+                                v_ptr_target(Wire{ad2, an2}, &at) && !at.empty()) {
+                                base_key = at;
+                                break;
+                            }
+                        }
+                    }
+                }
                 if (base_key.empty()) {
                     *err = "member write: no base: " + ins.name;
                     return RunResult::Error;
@@ -1936,8 +2163,19 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                 ok = kvspaceSetValue(f.h, mkey.c_str(), kw.d, kw.n, 0, 0, e,
                                      sizeof e) == 0;
             } else {
+                // 普通单参赋值（`a -> b`）：复制**槽本体**（Ptr 不穿透——链表
+                // `head -> cur` 复制指针，穿透会拿到目标实例）。普通值 raw 同值。
                 Wire src{};
-                if (read_reg(f, ins.rd[0], &src)) {
+                FReg& sr0 = regs[ins.rd[0]];
+                FReg& srf = sr0.src_ptr ? *sr0.src_ptr : sr0;
+                const std::uint8_t* rawd = nullptr;
+                std::uint32_t rawn = 0;
+                if (!srf.key.empty() &&
+                    read_wire_raw(f.h, srf.key, &rawd, &rawn) && rawd && rawn) {
+                    src.d = rawd;
+                    src.n = rawn;
+                    ok = write_reg(f, ins.wr[0], src.d, src.n);
+                } else if (read_reg(f, ins.rd[0], &src)) {
                     ok = write_reg(f, ins.wr[0], src.d, src.n);
                 } else {
                     // 未赋值变量读作 None：整体写 None XValue，不是错误。
@@ -2201,6 +2439,60 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
             mk_done = true;
         }
         if (x < 0 && !container_arg) {
+            // Ptr 类型读参（`*T`）：arg 槽存 Ptr→调用方槽（`求和(a)` 的 a 是
+            // 值实例；&n3 已 Ptr 则链 Ptr→target）。slot 恒 Ptr→arg。
+            if (typ.size() >= 2 && typ[0] == '*') {
+                const std::uint8_t* pd = src.d;
+                std::uint32_t pn = src.n;
+                std::string pt;
+                const std::string pkind = typ.substr(1);
+                std::uint8_t* ap = nullptr;
+                std::uint32_t an = 0;
+                // src 已是 Ptr（&n3 传 _3 变量）：arg 直接继承 Ptr→target。
+                if (v_ptr_target(src, &pt) && !pt.empty()) {
+                    bool bok = kvspaceNewPtr(pkind.c_str(), pt.c_str(), &ap,
+                                             &an) == 0;
+                    if (!bok) {
+                        *err = "bind: NewPtr(arg chain) failed";
+                        return false;
+                    }
+                } else if (pd && pn) {
+                    // 值实例：arg 槽 = Ptr→调用方槽。
+                    bool bok = value_key.empty()
+                                   ? false
+                                   : kvspaceNewPtr(pkind.c_str(),
+                                                   value_key.c_str(), &ap,
+                                                   &an) == 0;
+                    if (!bok) {
+                        *err = "bind: NewPtr(value) failed typ=" + typ;
+                        return false;
+                    }
+                } else {
+                    *err = "bind: read arg value failed: " + value_key;
+                    return false;
+                }
+                bool bok2 = kvspaceSetValue(f.h, arg_key.c_str(), ap, an, 0, 0,
+                                            be, sizeof be) == 0;
+                std::free(ap);
+                if (!bok2) {
+                    *err = std::string("bind: set arg failed: ") + be;
+                    return false;
+                }
+                std::uint8_t* sp = nullptr;
+                std::uint32_t sn = 0;
+                bool bok3 = kvspaceNewPtr(typ.c_str(), arg_key.c_str(), &sp,
+                                          &sn) == 0;
+                if (!bok3) {
+                    *err = "bind: NewPtr(slot) failed";
+                    return false;
+                }
+                bok3 = kvspaceSetValue(f.h, slot.c_str(), sp, sn, 0, 0, be,
+                                       sizeof be) == 0;
+                std::free(sp);
+                if (!bok3)
+                    *err = std::string("bind: set slot failed: ") + be;
+                return bok3;
+            }
             const std::uint8_t* vd = src.d;
             std::uint32_t vn = src.n;
             if (!vd || !vn) {
