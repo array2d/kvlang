@@ -42,8 +42,8 @@ rwfunc main() -> () {
     a:[]int64 = [1,2,3,4]
     0 -> acc
     0 -> i
-    while (i < ndarray·numel(a)) {
-        xv·at(a, i) -> e
+    while (i < compactarray·numel(a)) {
+        compactarray·at(a, i) -> e
         acc + e -> acc
         i + 1 -> i
     }
@@ -103,19 +103,19 @@ s[1] = "X"                   // 替换单字符，s 变 "hXllo"
 
 ```kv
 a:[]int64 = [7,2,9,4]
-ndarray·numel(a) -> n     // 4（元素数）
-ndarray·dim(a) -> d       // 1（维数）
-ndarray·shape(a) -> sh    // 各轴长度
-xv·at(a, 2) -> e          // 9（越界报错）
-xv·set(a, 1, 99) -> b     // 改元素，返回新数组 [7,99,9,4]
+compactarray·numel(a) -> n     // 4（元素数）
+compactarray·dim(a) -> d       // 1（维数）
+compactarray·shape(a) -> sh    // 各轴长度
+compactarray·at(a, 2) -> e          // 9（越界报错）
+tmp = compactarray·copy(a); compactarray·set(tmp, 1, 99) -> tmp  // 值语义先 copy 再同槽 set
 a[0] -> head              // 7
-xv·langtype(a) -> lt      // "[4]int64"
-xv·bodylen(a) -> bl       // 32（body 字节数）
+compactarray·langtype(a) -> lt      // "[4]int64"
+compactarray·bodylen(a) -> bl       // 32（body 字节数）
 ```
 
-遍历用 `while + ndarray·numel + xv·at`。多维 `[2,3]int64` 也是 compact ndarray。
+遍历用 `while + compactarray·numel + compactarray·at`。多维 `[2,3]int64` 也是 compact ndarray。
 字符串数组 / 变长集合用 `{}` stringkeymap 形态（见下），不要用 `[]`。
-`array·append/slice/fill/scatter/compact` 当前行为未稳定，数组任务优先用 compact + 下标/`xv·*`。
+`scatterarray·append/slice/fill/scatter/compact` 当前行为未稳定，数组任务优先用 compact + 下标/`xv·*`。
 
 ## 6. 容器：stringkeymap / map / struct（成员一律用 `·`，绝不用 `[]`）
 
@@ -205,14 +205,14 @@ rwfunc main() -> () {
 - `networld/fs·size(p)->n`、`·read(p,start,len)->raw`、`·write(p,bytes)->n`、`·append(p,bytes)->n`、`·rename(src,dst)->code`、`·list(p)->names`、`·del(p)->code`、`·mkdir(p)->code`、`·exists(p)->b`、`·isutf8(p)->b`。
 - 文本与路径（`networld/fs` rwfunc）：`readtext(p)->(t,sz)`、`writetext(p,t)->n`、`appendtext(p,t)->n`（UTF-8 往返）、`copyfile(src,dst)->n`、`basename(p)->name`、`dirname(p)->dir`、`ext(p)->e`、`joinpath(a,b)->p`、`match(name,pat)->b`（`*`/`?` 通配）、`glob(pat)->paths`、`scan(text,path,pat)->hits`、`grep(pat,path,glob)->hits`（`路径:行号:文本`）。
 - 文件改写（`networld/edit` rwfunc）：`read(p,from,lines)->(view,total,sz)`、`write(p,t)->(n,code)`、`replace(p,old,new,dry)->(done,hit,code)`、`multi(p,olds,news,dry)->(done,bad,code)`、`commit(p,t)->code`。
-- 字符串↔字节：`xv·reinterpret("s","[]uint8")` 或 `xv·reinterpret(raw,"[]char/utf8")`。
+- 字符串↔字节：`compactarray·newreinterpret("s","[]uint8")` 或 `compactarray·newreinterpret(raw,"[]char/utf8")`。
 
 ```kv
 noenv = map·new()
 a = {"sh", "-c", "echo hi; echo oops 1>&2"}
 networld/proc·exec(a, noenv) -> code, out, err
 println(code, out, err)
-networld/fs·write("/tmp/x.txt", xv·reinterpret("hi", "[]uint8")) -> n
+networld/fs·write("/tmp/x.txt", compactarray·newreinterpret("hi", "[]uint8")) -> n
 ```
 
 ### KV 树（kvspace·*）
@@ -228,8 +228,8 @@ networld/fs·write("/tmp/x.txt", xv·reinterpret("hi", "[]uint8")) -> n
 - rwfunc 变换/分类：`reverse / repeat / upper / lower / capitalize / title / swapcase`、`allinset / isalpha / isdigit / isalnum / isspace / isupper / islower / isxdigit / ispunct / lang`（大小写与分类一律 ASCII；`lang` 按文字系统返 `zh/en/ja/ko/other`）。
 
 ### 数组（ndarray·* / xv·*）
-- `ndarray·numel / dim / shape`；`xv·at / set / reshape / reinterpret / langtype / bodylen`。
-- `xv·parselangtype(v) -> (kind[, ndim])`：解析 langtype 基名（剥 `[dims]` 与 `def ` 前缀），
+- `compactarray·numel / dim / shape`；`compactarray·at / set / reshape / reinterpret / langtype / bodylen`。
+- `compactarray·parselangtype(v) -> (kind[, ndim])`：解析 langtype 基名（剥 `[dims]` 与 `def ` 前缀），
   如 `def langtype`→`langtype`、`def rwir`→`rwir`、`[508]char/utf8`→`char/utf8`；用于按类型分类 KV 成员。
 - rwfunc（`[]int64`）：`xv·first / last / swap / reverse / find / contains / count / sum / min / max / flatten`。
 

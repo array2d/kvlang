@@ -8,7 +8,7 @@ lib kvlang/spec/layout语义/控制流脱糖 {
 迭代变量：
 
 - 容器源（struct / stringkeymap）——长度用 `kvspace·listlen`，取元素用 `kvspace·listat` + `kvspace·get`。
-- compact 数组源——长度用 `ndarray·numel`，取元素用 `xv·at`。
+- compact 数组源——长度用 `compactarray·numel`，取元素用 `compactarray·at`。
 
 迭代源为裸标识符时原地遍历；为表达式（如数组字面量）时先物化到临时槽。迭代变量 `x` 是被写槽——`x` 命
 中读参名则拒绝（见 [[函数]] 读参只读）。

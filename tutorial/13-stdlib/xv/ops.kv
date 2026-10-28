@@ -25,8 +25,8 @@ rwfunc test() -> () {
 	println("sum:", xv·sum(a))
 	println("min:", xv·min(a))
 	println("max:", xv·max(a))
-	m = xv·reshape([1, 2, 3, 4], 2, 2)
+	m = compactarray·newreshape([1, 2, 3, 4], 2, 2)
 	fl = xv·flatten(m)
-	println("flat len:", ndarray·numel(fl))
+	println("flat len:", compactarray·numel(fl))
 	println("flat[3]:", fl[3])
 }

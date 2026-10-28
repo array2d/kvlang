@@ -30,9 +30,9 @@ rwfunc test() -> () {
 	2 -> "/tmp/kvt/b"
 	count_children("/tmp/kvt/") -> n
 	println("n=", n)
-	ndarray·numel([10,20,30]) -> m
-	ndarray·dim([10,20,30]) -> d
+	compactarray·numel([10,20,30]) -> m
+	compactarray·dim([10,20,30]) -> d
 	println("numel=", m, "dim=", d)
-	ndarray·shape([10,20,30]) -> s
+	compactarray·shape([10,20,30]) -> s
 	println("shape0=", s[0])
 }

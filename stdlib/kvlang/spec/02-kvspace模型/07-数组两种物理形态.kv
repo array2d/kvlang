@@ -7,11 +7,11 @@ lib kvlang/spec/kvspace模型/数组两种物理形态 {
 | 形态 | langtype | 触发写法 | 元素位置 | XValue 数 |
 |------|----------|---------|---------|----------|
 | **compact** | 元素 kind（`int64`…） | `[1,2,3]`、`[N]T`、`[d0,d1]T` | 连续打包进单个 XValue 的 body | 1 |
-| **stringkeymap** | `stringkeymap` | `{v0,v1,…}`、`array·scatter` 等 | 每元素落独立子 key `base·[i]` | N+1 |
+| **stringkeymap** | `stringkeymap` | `{v0,v1,…}`、`scatterarray·newscatter` 等 | 每元素落独立子 key `base·[i]` | N+1 |
 
 - **compact**：元素连续打包进一个 XValue，`raw_len = ∏dims × 元素字节宽`，langtype 记录元素类型与形状。对齐 C `int[10]`、Go `[10]int`、Rust `[i32;10]`；多维即连续布局的 ndarray/tensor。要求元素
   定长同类型——含变长字符串字面量的 `[…]` 在 layout 阶段报错。支持 `arr[i]` 随机访问（下标读经
-  `xv·at` 在 body 内定位），可零拷贝整块读。
+  `compactarray·at` 在 body 内定位），可零拷贝整块读。
 - **stringkeymap**：base key 的 langtype 为 map 类型、body 为空；每个元素是独立子 key，成员名即
   **memitemkey 值逐字**（逐字铁律见 [[文法与合法性]]）：裸标量键落 `b·200`、标量元组键落
   `a·[342.124,23.2345]`、字符串键落 `m·a`；由 `scatter` 展开的数组元素落坐标段 `base·[i]`。变长、可
@@ -28,7 +28,7 @@ stringkeymap 元素的成员名是坐标段，物理 key 形如 `m·[i]`（一�
   标）。
 - 排序 `cmp_coord`（row-major）：坐标段恒排在非坐标段之前；两个可按整数解析的坐标段按数值升序，否则
   字典序。
-- 访问：源码 `m·[i]` 对散 key 元素走 `kvspace·get`（member 名 `[i]`）；compact 的 `arr[i]` 走 `xv·at`。二
+- 访问：源码 `m·[i]` 对散 key 元素走 `kvspace·get`（member 名 `[i]`）；compact 的 `arr[i]` 走 `compactarray·at`。二
   者由括号与形态区分。
 
 ## 字面量括号即形态
@@ -39,24 +39,26 @@ stringkeymap 元素的成员名是坐标段，物理 key 形如 `m·[i]`（一�
 | `{1, 2, 3}` | stringkeymap（散 key） | 变长 / 可增长；字符串数组必须走此形式 |
 | `{k = v; …}` | struct 或 stringkeymap | 由 `=` 键值对与散 key 数组区分；空 `{}` 须带类型标注 |
 
-## 形态转换
+## 形态转换（显式，无隐式）
 
 | rwir | 方向 | 语义 |
 |------|------|------|
-| `array·scatter(arr) -> dst` | compact → stringkeymap | 连续数组拆成 `dst·[0]…dst·[N-1]` 独立 key |
-| `array·compact(arr) -> dst` | stringkeymap → compact | 读散 key 打包成连续数组；源须是散 key 形态（map 标记），已是 compact 值（数组/字符串）报 TypeError |
-| `array·append` / `array·slice` | 变长 | 作用于 compact 时先自动 scatter |
+| `scatterarray·newscatter(arr) -> dst` | compact → stringkeymap | 连续数组拆成 `dst·[0]…dst·[N-1]` 独立 key |
+| `scatterarray·newcompact(arr) -> dst` | stringkeymap → compact | 读散 key 打包成连续数组；源须是散 key 形态（map 标记），已是 compact 值（数组/字符串）报 TypeError |
+
+**无隐式跨形态**：`scatterscatterarray·append` 只收散列容器，compact 源 TypeError（必须先显式
+`scatterarray·newscatter`）；`scatterarray·slice` 只做散列成员重排，compact 裁剪走 `compactarray·newslice`。
 
 ## slice 与带洞数组
 
-- 散列数组的**长度 = 元素个数**（memindex 权威，`kvspace·listlen`）。
-- `array·slice(arr, lo, hi) -> arr` 原地语义：
-  - 源为 compact：先自动 scatter，结果为 dense，按坐标 `[lo,hi)` 切片；
-  - 源为 stringkeymap 且坐标连续（dense）：同上按坐标切片；
-  - 源为 stringkeymap **带洞**（坐标不连续）：洞不是元素。按 memindex 排序后的元素序列取
+- 散列数组的**长度 = 元素个数**（memindex 权威，`scatterarray·len`）。
+- `scatterarray·slice(arr, lo, hi) -> arr` 原地语义：
+  - 源坐标连续（dense）：按坐标 `[lo,hi)` 切片；
+  - 源 **带洞**（坐标不连续）：洞不是元素。按 memindex 排序后的元素序列取
     秩 `[lo,hi)`，结果写连续坐标 `[0,hi-lo)`；源中坐标 `>= hi-lo` 的旧元素全部删除。
     因此不存在「读到 None 再写成删除」的路径。
 - 尾部删除：dense 按下标 `[hi-lo, len)` 删除；带洞按上述元素序列规则删除。
+- compact 裁剪：`compactarray·newslice(a, lo, hi) -> b` 造新 compact（专职创建）。
 
 ## ref（存储位置维）与扩展句柄
 

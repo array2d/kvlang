@@ -14,13 +14,14 @@ lib kvlang/spec/类型系统/稠密vs稀疏 {
 | 适用 | 稠密张量、绝大多数元素有值、需连续内存与 O(1) 下标 | 稀疏矩阵、坐标空间极大而实际有值项稀少 |
 
 ```kv
-dense:[]int32 = xv·reshape(array(…), 1024, 1024)   // 4 MiB 稠密块，class 2
+dense:[]int32 = compactarray·newreshape(array(…), 1024, 1024)   // 4 MiB 稠密块，class 2
 sparse:[int32,int32]·int32 = {}                     // 稀疏，class 0 容器头与物理成员 key
 99 -> sparse·[3,7]                                  // 仅此一项落子 key sparse·[3,7]
 sparse·[0,0] -> x                                   // 未写坐标 → None（子 key 不存在）
 ```
 
-两种落库共享 `ndarray·*` 观测（`numel` 对稀疏形态返回**实存成员数**，非坐标空间容量），并经下节
-`array·scatter`/`array·compact` 互转。
+两种落库形态分离观测（`compactarray·numel` 对 compact 读 head array_len；
+`scatterarray·len` 对稀疏形态返回**实存成员数**，非坐标空间容量），并经下节
+`scatterarray·newscatter`/`scatterarray·newcompact` 互转。
 "#### -> /lib/kvlang/spec/类型系统/稠密vs稀疏
 }

@@ -67,6 +67,18 @@ bool operand_desc(void* h, const std::string& key, RegDesc* out) {
     }
     out->kind = Operand::Kind::Literal;
     out->slot_key = key;
+    // 绝对路径字面量（对齐 C is_absolute_key）：槽值是 char/ 且文本 `/` 开头 →
+    // name 存路径本体，运行期 read/write 直接以路径作 key（`42 -> "/path"` 路径写、
+    // `"/path" -> v` 路径读、println 实参）。`·`（U+00B7）是成员分隔，保留原样。
+    {
+        const std::uint8_t* d = nullptr;
+        std::uint32_t n = 0;
+        std::string lt, txt;
+        if (read_wire_raw(h, key, &d, &n) && d && n &&
+            v_langtype(Wire{d, n}, &lt) && lt.find("char/") != std::string::npos &&
+            wire_text(d, n, &txt) && !txt.empty() && txt[0] == '/')
+            out->name = txt;
+    }
     return true;
 }
 

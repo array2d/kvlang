@@ -1210,7 +1210,7 @@ impl Parser {
                     let (name, typ) = self.parse_write_slot();
                     inst.writes = vec![name];
                     inst.write_types = vec![typ];
-                    inst.expr = Some(ast::call("array·new", Vec::new()));
+                    inst.expr = Some(ast::call("compactarray·new", Vec::new()));
                 } else {
                     inst.expr = self.parse_pratt(0);
                 }
@@ -1407,7 +1407,7 @@ impl Parser {
                 let mut args = vec![left];
                 args.extend(indices);
                 // 路径字面量 + [idx] → 成员路径读（`=` 读，KV 路径下标访问）；否则 xv.at（compact 数组元素）。
-                left = ast::call(if is_path { MEMBER_READ_OP } else { "xv·at" }, args);
+                left = ast::call(if is_path { MEMBER_READ_OP } else { "compactarray·at" }, args);
                 continue;
             }
             let t = self.peek();
@@ -1522,7 +1522,7 @@ impl Parser {
                     });
                 }
                 // 填充值先挂 array·fill；langtype（维度来源）在指令级由写类型补齐。
-                return Some(ast::call("array·fill", elems));
+                return Some(ast::call("compactarray·fill", elems));
             }
             if let Some(bad) = elems.iter().find(|e| e.is_leaf() && e.quote != 0) {
                 self.errors.push(Diagnostic {
@@ -1538,7 +1538,7 @@ impl Parser {
                     src_name: String::new(),
                 });
             }
-            return Some(ast::call("array·new", elems));
+            return Some(ast::call("compactarray·new", elems));
         }
 
         // struct 字面量 Name{...} 或 pkg.Name{...} → struct·new("/lib/…", "f", v, …)
@@ -2235,7 +2235,7 @@ impl Parser {
             }
         }
         args.push(e.unwrap_or(ast::leaf("")));
-        inst.expr = Some(ast::call("xv·set", args));
+        inst.expr = Some(ast::call("compactarray·set", args));
         inst.writes = vec![arr];
         inst.write_types = Vec::new();
     }
@@ -2308,7 +2308,7 @@ impl Parser {
             Some(e) => e,
             None => return,
         };
-        if e.op == "array·fill" {
+        if e.op == "compactarray·fill" {
             if !fixed {
                 self.errors.push(Diagnostic {
                     pos: Pos { line: 0, col: 0 },
@@ -2325,9 +2325,9 @@ impl Parser {
             }
             let mut args = vec![ast::str_lit(&wt)];
             args.extend(e.args.iter().cloned());
-            inst.expr = Some(ast::call("array·fill", args));
-        } else if e.op == "array·new" && e.args.is_empty() && fixed {
-            inst.expr = Some(ast::call("array·fill", vec![ast::str_lit(&wt)]));
+            inst.expr = Some(ast::call("compactarray·fill", args));
+        } else if e.op == "compactarray·new" && e.args.is_empty() && fixed {
+            inst.expr = Some(ast::call("compactarray·fill", vec![ast::str_lit(&wt)]));
         }
     }
 
@@ -2336,7 +2336,7 @@ impl Parser {
             Some(e) => e,
             None => return,
         };
-        let expr_is_array = e.op == "array·new";
+        let expr_is_array = e.op == "compactarray·new";
         let scalar_lit = expr_is_scalar_lit(e);
 
         for (j, wt) in inst.write_types.iter().enumerate() {

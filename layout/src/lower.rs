@@ -253,7 +253,7 @@ fn check_subscript_expr(
     addr: &[&str],
     diags: &mut Vec<Diagnostic>,
 ) {
-    if (e.op == "xv·at" || e.op == "xv·set") && !e.args.is_empty() {
+    if (e.op == "compactarray·at" || e.op == "compactarray·set") && !e.args.is_empty() {
         let base = &e.args[0];
         if base.is_leaf() && !addr.contains(&base.val.as_str()) {
             if let Some(t) = tm.get(&base.val) {
@@ -629,7 +629,7 @@ fn lower_for_with_cont(
     } else {
         init_body.push(Stmt::Instruction(Instruction {
             comments: Vec::new(),
-            expr: Some(ast::call("ndarray·numel", vec![ast::leaf(&iter_slot)])),
+            expr: Some(ast::call("compactarray·numel", vec![ast::leaf(&iter_slot)])),
             writes: vec![len_slot.clone()],
             write_types: Vec::new(),
             arrow_left: false,
@@ -691,7 +691,7 @@ fn lower_for_with_cont(
         body_insts.push(Stmt::Instruction(Instruction {
             comments: Vec::new(),
             expr: Some(ast::call(
-                "xv·at",
+                "compactarray·at",
                 vec![ast::leaf(&iter_slot), ast::leaf(&idx_slot)],
             )),
             writes: vec![s.var.clone()],
@@ -1131,12 +1131,13 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
         return "[]stringkeymap".to_string();
     }
     match opcode {
-        "kvlen" | "ndarray·numel" | "ndarray·dim" | "kvspace·listlen" | "string·len"
-        | "string·ord" | "string·cmp" | "string·find" | "string·parseint" | "xv·bodylen" => {
+        "kvlen" | "compactarray·numel" | "compactarray·dim" | "kvspace·listlen" | "string·len"
+        | "string·ord" | "string·cmp" | "string·find" | "string·parseint" | "compactarray·bodylen"
+        | "scatterarray·len" => {
             return "int64".to_string();
         }
-        "xv·langtype" => return "[]char/utf8".to_string(),
-        "ndarray·shape" => return "[]int64".to_string(),
+        "compactarray·langtype" => return "[]char/utf8".to_string(),
+        "compactarray·shape" => return "[]int64".to_string(),
         "string·char" | "string·set" | "string·slice" | "string·concat" | "string·formatint"
         | "string·formatuint" => return "char/utf32".to_string(),
         "random.int63" => return "int64".to_string(),
@@ -1166,7 +1167,7 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
             }
             return kind;
         }
-        "xv·at" => {
+        "compactarray·at" | "scatterarray·at" => {
             if !reads.is_empty() {
                 if let Some(t) = tm.get(&format!("{}.0", reads[0])) {
                     return t.clone();
@@ -1179,7 +1180,7 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
             }
             return String::new();
         }
-        "xv·set" => {
+        "compactarray·set" => {
             if let Some(last) = reads.last() {
                 let t = slot_type(last, tm);
                 if !t.is_empty() {
@@ -1193,7 +1194,7 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
                 String::new()
             };
         }
-        "xv·reshape" => {
+        "compactarray·newreshape" => {
             return if !reads.is_empty() {
                 slot_type(&reads[0], tm)
             } else {
@@ -1400,16 +1401,16 @@ fn exact_kind(
     }
     match word.as_str() {
         // 容器读：基座类型声明/稳定且元素 kind 具体 → 结果 kind 精确。
-        "xv·at" | "array·compact" | "xv·reshape" => {
+        "compactarray·at" | "scatterarray·at" | "scatterarray·newcompact" | "compactarray·newreshape" => {
             let base = e.args.first()?;
             let t = exact_kind(base, declared, stable)?;
             return container_elem(&t);
         }
         "sqrt" | "exp" | "log" | "pow" => return Some("float64".to_string()),
         "sign" => return Some("int64".to_string()),
-        "kvlen" | "ndarray·numel" | "ndarray·dim" | "kvspace·listlen" | "string·len"
-        | "string·ord" | "string·cmp" | "string·find" | "string·parseint" | "xv·bodylen"
-        | "random.int63" => return Some("int64".to_string()),
+        "kvlen" | "compactarray·numel" | "compactarray·dim" | "kvspace·listlen" | "string·len"
+        | "string·ord" | "string·cmp" | "string·find" | "string·parseint" | "compactarray·bodylen"
+        | "scatterarray·len" | "random.int63" => return Some("int64".to_string()),
         "random·intn" | "random.uint64" | "string·parseuint" => {
             return Some("uint64".to_string())
         }
@@ -2050,7 +2051,7 @@ fn check_container_literal(
     diags: &mut Vec<Diagnostic>,
 ) {
     match e.op.as_str() {
-        "array·new" => {
+        "compactarray·new" => {
             if let Some(elem) = container_elem(target) {
                 if builtin::is_num_kind(&elem) {
                     for a in &e.args {
@@ -2099,7 +2100,7 @@ fn expr_result_type(e: &Expr, tm: &HashMap<String, String>) -> String {
     if e.is_leaf() {
         return arg_type(e, tm);
     }
-    if matches!(e.op.as_str(), "array·new" | "map·new" | "obj") {
+    if matches!(e.op.as_str(), "compactarray·new" | "map·new" | "obj") {
         return String::new();
     }
     let sym = symbol::lookup(&e.op);
@@ -2231,7 +2232,7 @@ fn check_call_args(
 ) {
     let sym = symbol::lookup(&e.op);
     if sym.arith || sym.cmp || is_cast_op(&e.op)
-        || matches!(e.op.as_str(), "array·new" | "map·new" | "obj")
+        || matches!(e.op.as_str(), "compactarray·new" | "map·new" | "obj")
     {
         return;
     }
@@ -2308,7 +2309,7 @@ fn walk_inst(
         check_struct_literal(e, structs, diags);
     }
     // 容器元素写：xv·set(container, index, value)。kvspace·set 已死刑（成员写走 =）。
-    if (e.op == "xv·set") && e.args.len() >= 3 {
+    if (e.op == "compactarray·set") && e.args.len() >= 3 {
         if e.args[0].is_leaf() {
             if let Some(cty) = declared.get(&e.args[0].val) {
                 let elem = container_elem(cty);
@@ -2344,7 +2345,7 @@ fn walk_inst(
         if ty.is_empty() || ty.contains('|') || ty.starts_with('@') {
             return;
         }
-        if matches!(e.op.as_str(), "array·new" | "map·new" | "obj")
+        if matches!(e.op.as_str(), "compactarray·new" | "map·new" | "obj")
             && (ty.starts_with('[') || ty.contains(keytree::MEMBER_SEP) || ty.starts_with('/'))
         {
             check_container_literal(&ty, e, structs, diags);

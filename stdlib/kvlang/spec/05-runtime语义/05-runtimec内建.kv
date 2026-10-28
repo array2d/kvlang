@@ -37,8 +37,8 @@ ISA 不再分 Core/Ext class：native 与扩展都以
 **类型构造兼转换**（裸名）：`bool`、`int8`、`int16`、`int32`、`int64`、`uint8`、`uint16`、`uint32`、
 `uint64`、`float32`、`float64`、`char/utf32`、`char/utf8`、`char/ascii`。
 
-**容器构造**（裸名）：`map·new`（stringkeymap 构造）、`array·new`（数组构造）、`struct·new`（structref
-实例）。
+**容器构造**（裸名）：`map·new`（stringkeymap 构造）、`compactarray·new`（compact 数组构造）、
+`scatterarray·new`（散列数组构造）、`struct·new`（structref 实例）。
 
 **调试**：`debugger`（等价 `vthread·setstatus("paused")`）。
 
@@ -46,7 +46,9 @@ ISA 不再分 Core/Ext class：native 与扩展都以
 
 带 `·` 的 native 内建按族注册；各族的完整方法集如下：
 
-- `array·`：`scatter`、`compact`、`append`、`slice`、`fill`。
+- `compactarray·`：`new`、`fill`、`copy`、`at`、`set`、`numel`、`dim`、`shape`、`slice`、
+  `reshape`、`reinterpret`、`langtype`、`bodylen`、`parselangtype`。
+- `scatterarray·`：`new`、`scatter`、`compact`、`len`、`at`、`set`、`append`、`slice`。
 - 原生算术/比较的 **layout 特化**（normative）：layout 按操作数静态 kind 把指令改写成
   `<kind>·<op>`（如 `int64·add`、`float64·lt`），并校验操作数类型与 arity——字符串与数值
   混用、非数值操作数、一元/二元 arity 不符均在 layout 阶段报错。runtime 对已注册的
@@ -54,8 +56,9 @@ ISA 不再分 Core/Ext class：native 与扩展都以
   def rwir 与用户扩展仍走通用实现并保留动态校验。值相关检查（除零、None 比较、越界）
   语义不变；未注册特化时回退通用实现，不得静默改变语义。
 
-- `ndarray·`：`numel`、`dim`、`shape`。
-- `xv·`：`at`、`set`、`reshape`、`reinterpret`、`langtype`、`bodylen`、`parselangtype`。
+**形态边界**：`compactarray·*` 只收 compact 数组（含字符串 char 序列），`scatterarray·*` 只收
+stringkeymap 散列容器；跨形态 TypeError。`compactarray·set` 仅同槽 patch；`scatterarray·append`
+对 compact 源 TypeError（须先显式 `scatterarray·newscatter`）。
 - `string·`：`set`、`char`、`ord`、`cmp`、`find`、`len`、`slice`、`concat`、`formatint`、
   `formatuint`、`parseint`、`parseuint`、`parsefloat`。
 - `time·`：`now`、`sub`、`add`、`before`、`after`。
