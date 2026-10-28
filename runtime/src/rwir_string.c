@@ -39,6 +39,29 @@ static uint32_t *string_runes(const kvlangXvalue_t *v, int *out_n) {
 }
 
 static int write_char32(kvlangFrame_t *f, const uint32_t *r, int n) {
+    if (n == 1 && f->kvspace && f->kvspace->shm && f->instruction &&
+        f->instruction->write_count == 1 && f->instruction->write_offs) {
+        const char *target = f->instruction->writes[0].type;
+        if (!target || !target[0]) {
+            kvspaceKeyOff *wo = f->instruction->write_offs[0];
+            if (wo && wo->resolved) {
+                uint8_t *cur = NULL;
+                uint32_t cur_len = 0;
+                if (kvspaceGetByRef(f->kvspace->handle, &wo->off, wo->key, &cur,
+                                    &cur_len) == 0 &&
+                    cur && cur_len == 68 && cur[0] == 6 && cur[1] == 1 &&
+                    xh_rd64(cur + 2) == 4 && xh_rd64(cur + 10) == 4 &&
+                    memcmp(cur + XH_PREFIX, "[1]char/utf32", 14) == 0) {
+                    cur[64] = (uint8_t)(r[0] & 0xFF);
+                    cur[65] = (uint8_t)((r[0] >> 8) & 0xFF);
+                    cur[66] = (uint8_t)((r[0] >> 16) & 0xFF);
+                    cur[67] = (uint8_t)((r[0] >> 24) & 0xFF);
+                    kvlangBuiltinNextPc(f);
+                    return 0;
+                }
+            }
+        }
+    }
     if (n >= 0 && n <= 16) {
         uint8_t sbuf[128];
         uint32_t blen = (uint32_t)n * 4;
@@ -104,7 +127,28 @@ int kvlangBuiltinStringSet(kvlangFrame_t *f) {
     kvlangBuiltinNextPc(f); kvlangBuiltinFreeInputs(in, n); return 0;
 }
 
+static inline bool fast_utf32_bytes(const kvlangXvalue_t *v) {
+    return v->bytes && v->length >= XH_PREFIX &&
+           !xh_is_none(v->bytes) &&
+           kvlangXvalueKindIs(v, KVSPACE_KIND_CHAR);
+}
+
 int kvlangBuiltinStringChar(kvlangFrame_t *f) {
+    if (f->instruction && f->instruction->read_count >= 2) {
+        const kvlangXvalue_t *in0 = &f->instruction->reads[0].value;
+        const kvlangXvalue_t *in1 = &f->instruction->reads[1].value;
+        if (fast_utf32_bytes(in0) && in1->bytes && !xh_is_none(in1->bytes)) {
+            int idx = (int)kvlangScalarI64(kvlangXvalueScalar(in1));
+            int rn = (int)(xh_content_len(in0->bytes) >> 2);
+            if (idx < 0 || idx >= rn)
+                return kvlangBuiltinSetError(
+                    f, "IndexError: at: index %d out of bounds (char count=%d)",
+                    idx, rn);
+            const uint8_t *p = xh_body(in0->bytes) + (size_t)idx * 4;
+            uint32_t one = xh_rd32(p);
+            return write_char32(f, &one, 1);
+        }
+    }
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     if (n < 2) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetError(f, "TypeError: string.char requires string and index"); }
     if (!kvlangXvalueNone(&in[0]) && kvlangXvalueKindIs(&in[0], KVSPACE_KIND_CHAR)) {
@@ -130,6 +174,14 @@ int kvlangBuiltinStringChar(kvlangFrame_t *f) {
 }
 
 int kvlangBuiltinStringOrd(kvlangFrame_t *f) {
+    if (f->instruction && f->instruction->read_count >= 1) {
+        const kvlangXvalue_t *in0 = &f->instruction->reads[0].value;
+        if (fast_utf32_bytes(in0)) {
+            int rn = (int)(xh_content_len(in0->bytes) >> 2);
+            int64_t cp = rn <= 0 ? -1 : (int64_t)xh_rd32(xh_body(in0->bytes));
+            return kvlangBuiltinEmitInt64(f, cp);
+        }
+    }
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     if (n < 1) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetError(f, "TypeError: string.ord requires a string"); }
     if (!kvlangXvalueNone(&in[0]) && kvlangXvalueKindIs(&in[0], KVSPACE_KIND_CHAR)) {
@@ -168,11 +220,18 @@ int kvlangBuiltinStringFind(kvlangFrame_t *f) {
 }
 
 int kvlangBuiltinStringLen(kvlangFrame_t *f) {
+    if (f->instruction && f->instruction->read_count >= 1) {
+        const kvlangXvalue_t *in0 = &f->instruction->reads[0].value;
+        if (fast_utf32_bytes(in0)) {
+            int len = (int)(xh_content_len(in0->bytes) >> 2);
+            return kvlangBuiltinEmitInt64(f, len);
+        }
+    }
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     int len = 0;
     if (n > 0) {
         { const char *cerr = variable_length_char_error(kvlangXvalueKind(&in[0])); if (cerr) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetError(f, "%s", cerr); } }
-        if (kvlangXvalueKindIs(&in[0], KVSPACE_KIND_CHAR)) len = kvlangXvalueArrayLen(&in[0]);
+        if (kvlangXvalueKindIs(&in[0], KVSPACE_KIND_CHAR)) len = (int)(xh_content_len_of(&in[0]) >> 2);
         else { uint32_t *r = string_runes(&in[0], &len); free(r); }
     }
     int rc = kvlangBuiltinEmitInt64(f, len);kvlangBuiltinFreeInputs(in, n);

@@ -19,4 +19,12 @@ int kvlangKvcpuCallOpcode(kvspace_t *kv, const char *vtid, const char *pc,
                           kvlangParam_t *writes, int nw, char *pc_out,
                           size_t pc_out_cap, bool *pc_feedback,
                           struct kvspaceKeyOff *pc_off,
-                          struct kvspaceKeyOff *status_off);
+                          struct kvspaceKeyOff *status_off,
+                          kvlangExecCursor *cursor);
+
+struct kvlangParkedFrame;
+struct kvlangParkedFrame *kvlangParkedFrameGet(kvspace_t *kv, const char *vtid,
+                                               int depth);
+void kvlangParkedFramesCleanupAbove(kvspace_t *kv, const char *vtid,
+                                    int min_depth);
+void kvlangParkedFramesInvalidateAll(void *handle);

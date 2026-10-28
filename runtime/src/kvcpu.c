@@ -61,7 +61,32 @@ static int operand_load(kvspace_t *kv, kvlangBoundCell_t *cell, uint32_t pack,
     if (pack != 0 && kvlangReadViewTry(kv, cell, pack, out))
         return 0;
     kvspaceKeyOff *ko = &cell->off;
-    if (ko->resolved) {
+    if (cell->rview_state == 1) {
+        if ((++cell->rview_hits & 127u) != 0 &&
+            cell->rview_bytes[0] == 5 && (cell->rview_bytes[1] & 7u) == 0) {
+            out->bytes = cell->rview_bytes;
+            out->length = cell->rview_len;
+        } else {
+            uint8_t *d = NULL;
+            uint32_t len = 0;
+            if (kvspaceGetByRef(kv->handle, &ko->off, cell->key, &d, &len) != 0)
+                return -1;
+            if (d == cell->rview_bytes && len == cell->rview_len &&
+                d[0] == 5 && (d[1] & 7u) == 0) {
+                out->bytes = d;
+                out->length = len;
+            } else {
+                cell->rview_bytes = NULL;
+                cell->rview_len = 0;
+                cell->rview_hits = 0;
+                cell->rview_state = 2;
+                if (d && len > 0) {
+                    out->bytes = d;
+                    out->length = len;
+                }
+            }
+        }
+    } else if (ko->resolved) {
         uint8_t *d = NULL;
         uint32_t len = 0;
         if (kvspaceGetByRef(kv->handle, &ko->off, cell->key, &d, &len) != 0)
@@ -69,6 +94,8 @@ static int operand_load(kvspace_t *kv, kvlangBoundCell_t *cell, uint32_t pack,
         if (d && len > 0) {
             out->bytes = d;
             out->length = len;
+            if (cell->rview_state == 0 && ++cell->rview_hits >= 8)
+                kvlangOperandViewPromote(kv, cell, cell->key, d, len);
         }
     } else {
         if (kvlangKvspaceGetOne(kv, cell->key, out) != 0)
@@ -122,17 +149,115 @@ static void count_report(void) {
 #define COUNT_REPORT() do {} while (0)
 #endif
 
-/* 帧的 ‥lib：函数目录路径（owned）。 */
-static char *frame_func_dir(kvspace_t *kv, const char *frame_root) {
-    char *stack = kvlangKeytreeStack(frame_root);
-    char key[KV_KEY_MAX];
-    kvlangKeyFormat(key, sizeof key, "%s%s", stack, SEG_LIB);
-    free(stack);
+__attribute__((noinline)) static bool
+frame_func_dir_buf(kvspace_t *kv, const char *frame_root, char *out,
+                   size_t cap) {
+    char stk[KV_KEY_MAX], key[KV_KEY_MAX];
+    if (!kvlangKeytreeStackBuffer(frame_root, stk, sizeof stk))
+        return false;
+    kvlangKeyFormat(key, sizeof key, "%s%s", stk, SEG_LIB);
     kvlangXvalue_t v;
     kvlangXvalueZero(&v);
     kvlangKvspaceGetOne(kv, key, &v);
-    char *dir = kvlangXvalueNone(&v) ? NULL : kvlangXvalueValueString(&v);
-    return dir;
+    if (kvlangXvalueNone(&v) || !kvlangXvalueKindIs(&v, KVSPACE_KIND_CHAR_UTF8))
+        return false;
+    const char *src = (const char *)xh_body(v.bytes);
+    size_t n = (size_t)xh_content_len(v.bytes);
+    while (n > 0 && src[n - 1] == '/')
+        n--;
+    if (n == 0 || n + 2 > cap)
+        return false;
+    memcpy(out, src, n);
+    out[n] = '/';
+    out[n + 1] = 0;
+    return true;
+}
+
+#define FCTX_VARIANTS 4 /* ctx variants per depth, by park target set */
+
+static void fctx_pool_free(kvlangFrameCtx_t **pool) {
+    for (size_t i = 0; i < (size_t)(MAX_STACK_DEPTH + 1) * FCTX_VARIANTS; i++)
+        kvlangFrameCtxFree(pool[i]);
+    free(pool);
+}
+
+static bool park_vkey(const kvlangParkedFrame_t *pf, const char *fdir,
+                      char *out, size_t cap) {
+    size_t n = 0;
+    const char *parts[1 + 2 * KVLANG_PARK_MAX_PARAMS];
+    int np = 0;
+    parts[np++] = fdir;
+    for (int i = 0; i < pf->nr && i < KVLANG_PARK_MAX_PARAMS; i++)
+        parts[np++] = pf->r_target[i];
+    for (int i = 0; i < pf->nw && i < KVLANG_PARK_MAX_PARAMS; i++)
+        parts[np++] = pf->w_target[i];
+    for (int k = 0; k < np; k++) {
+        size_t l = strlen(parts[k]);
+        if (n + l + 2 > cap)
+            return false;
+        memcpy(out + n, parts[k], l);
+        n += l;
+        out[n++] = '\x1f';
+    }
+    out[n] = 0;
+    return true;
+}
+
+/* fctx[d]: active ctx (borrowed); pool holds all variants per depth. */
+__attribute__((noinline)) static int
+switch_frame_ctx(kvspace_t *kv, const char *vtid, const char *cur,
+                 const char *cur_frame, int depth, int last_depth,
+                 uint32_t addr_epoch, kvlangFuncCache_t *fcache,
+                 kvlangFrameCtx_t **fctx, kvlangFrameCtx_t **pool) {
+    static __thread uint32_t lru_clock;
+    kvlangParkedFrame_t *pf = kvlangParkedFrameGet(kv, vtid, depth);
+    if (depth <= last_depth && fctx[depth] &&
+        strcmp(fctx[depth]->frame_root, cur_frame) == 0) {
+        fctx[depth]->park = pf;
+        return 0;
+    }
+    char fdir[KV_KEY_MAX];
+    const char *fdir_p = (pf && pf->func_dir[0]) ? pf->func_dir : NULL;
+    if (!fdir_p) {
+        if (!frame_func_dir_buf(kv, cur_frame, fdir, sizeof fdir))
+            return execute_error(kv, vtid, cur,
+                                 "RuntimeError: frame has no ‥lib: %s",
+                                 cur_frame);
+        fdir_p = fdir;
+    }
+    kvlangFrameCtx_t **slots = &pool[(size_t)depth * FCTX_VARIANTS];
+    char vk[2048];
+    const bool use_vk = pf && pf->warm && park_vkey(pf, fdir_p, vk, sizeof vk);
+    int victim = 0;
+    for (int i = 0; i < FCTX_VARIANTS; i++) {
+        kvlangFrameCtx_t *c = slots[i];
+        if (!c) {
+            if (slots[victim])
+                victim = i;
+            continue;
+        }
+        if (slots[victim] && c->lru < slots[victim]->lru)
+            victim = i;
+        if (strcmp(c->frame_root, cur_frame) != 0 ||
+            strcmp(c->code->func_dir, fdir_p) != 0)
+            continue;
+        if (use_vk ? (!c->vkey || strcmp(c->vkey, vk) != 0) : c->vkey != NULL)
+            continue;
+        c->park = pf;
+        if (depth > last_depth || fctx[depth] != c)
+            kvlangFrameCtxReenter(kv, c, addr_epoch);
+        c->lru = ++lru_clock;
+        fctx[depth] = c;
+        return 0;
+    }
+    kvlangFrameCtxFree(slots[victim]);
+    kvlangFrameCtx_t *c = kvlangFrameCtxNew(fcache, fdir_p, cur_frame);
+    c->park = pf;
+    c->vkey = use_vk ? strdup(vk) : NULL;
+    c->lru = ++lru_clock;
+    slots[victim] = c;
+    fctx[depth] = c;
+    return 0;
 }
 
 __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const char *pc, kvmode_t mode,
@@ -190,6 +315,10 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
     kvlangFuncCache_t fcache;
     kvlangFuncCacheInit(&fcache);
     kvlangFrameCtx_t *fctx[MAX_STACK_DEPTH + 1] = {0};
+    kvlangFrameCtx_t **fpool =
+        calloc((size_t)(MAX_STACK_DEPTH + 1) * FCTX_VARIANTS, sizeof *fpool);
+    if (!fpool)
+        kvlangDie("out of memory allocating frame contexts");
     uint32_t addr_epoch = 0; /* 删除/委托/handoff 后自增，使帧层 keyoff 失效 */
     int last_depth = 0; /* 0 = 尚未进入任何帧 */
     /* C-iii 游标：帧深/帧根/irseq 的派生缓存，仅在 PC 结构变化时重解析。 */
@@ -225,6 +354,10 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
     f.pc_view_state = &pc_view;
 
     const kvlangRwirCap *caps = kvlangRwirCaps();
+    /* 快核开关：debug 日志需要逐步 trace，KVLANG_NOFAST=1 供 A/B。 */
+    const char *nofast = getenv("KVLANG_NOFAST");
+    const bool fast_on =
+        kv->shm && !kvlangLogDebugOn && !(nofast && nofast[0] && nofast[0] != '0');
     int rc = 0;
     uint32_t qops = 0;
     for (;;) {
@@ -290,7 +423,7 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
             }
         }
         const char *status = status_b;
-        if (strcmp(status, "init") != 0 && strcmp(status, "running") != 0 &&
+        if (strcmp(status, "running") != 0 && strcmp(status, "init") != 0 &&
             strcmp(status, "wait") != 0) {
             break;
         }
@@ -306,36 +439,19 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
                 break;
             }
             if (depth != last_depth) {
-                /* 帧变：变深=call（新帧）；变浅=return（更深的帧已删，本帧可复用）。 */
                 if (!kvlangKeytreeFrameRootBuffer(cur, fr_stk, sizeof fr_stk)) {
                     rc = execute_error(kv, vtid, cur,
                                        "RuntimeError: invalid pc: %s", cur);
                     break;
                 }
                 cur_frame = fr_stk;
-                for (int d = depth + 1; d <= last_depth && d <= MAX_STACK_DEPTH;
-                     d++) {
-                    kvlangFrameCtxFree(fctx[d]);
-                    fctx[d] = NULL;
-                }
-                if (fctx[depth] &&
-                    strcmp(fctx[depth]->frame_root, cur_frame) != 0) {
-                    kvlangFrameCtxFree(fctx[depth]);
-                    fctx[depth] = NULL;
-                }
-                /* 模板里的 name/type/off 借用自 ctx 的 bind：ctx 释放即作废。 */
                 tpl_bind = NULL;
                 tpl_row = NULL;
-                if (!fctx[depth]) {
-                    char *func_dir = frame_func_dir(kv, cur_frame);
-                    if (!func_dir) {
-                        rc = execute_error(kv, vtid, cur,
-                                           "RuntimeError: frame has no ‥lib: %s",
-                                           cur_frame);
-                        break;
-                    }
-                    fctx[depth] = kvlangFrameCtxNew(&fcache, func_dir, cur_frame);
-                    free(func_dir);
+                if (switch_frame_ctx(kv, vtid, cur, cur_frame, depth,
+                                     last_depth, addr_epoch, &fcache,
+                                     fctx, fpool) != 0) {
+                    rc = -1;
+                    break;
                 }
                 last_depth = depth;
             }
@@ -364,16 +480,16 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
 
         char err[256];
         err[0] = 0;
-        /* P0-2：目标行已加载/已绑定 → 直接复用 row/bind，不再走
-         * kvlangFrameRow（省一次函数调用与双重边界检查）。 */
         if ((size_t)irseq < ctx->code->rows_cap &&
             (size_t)irseq < ctx->binds_cap &&
             (row = ctx->code->rows[irseq]) != NULL &&
-            ctx->binds[irseq].bound) {
+            ctx->binds[irseq].bound &&
+            ctx->binds[irseq].reenter_gen == ctx->reenter_gen) {
             bind = &ctx->binds[irseq];
         } else {
             row = NULL;
             bind = kvlangFrameRow(kv, ctx, irseq, &row, err, sizeof err);
+            tpl_bind = NULL;
         }
         if (!bind || !row->opcode || !row->opcode[0]) {
             /* layout 对每条路径都补了 return；走到空槽只能是 /lib 损坏或 goto/br 越界。 */
@@ -391,6 +507,20 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
         else if (row->opcode_id >= 0)
             kvCGen++;
 #endif
+        /* 快核：本行及其后的可快行连续原地执行（每步仍持久化值/PC、查 status）。
+         * 停在第一条不可快行；本步若一行都没执行则落回下方通用路径。 */
+        if (fast_on && bind->fk_state != 1 && cursor.prefix_ok) {
+            int fi = irseq;
+            int ns = kvlangFastRun(ctx, &fi, &pc_off, &status_off,
+                                   cursor.prefix, cursor.prefix_len,
+                                   fb_b[fb_i ^ 1], sizeof fb_b[0]);
+            if (ns > 0) {
+                cursor.irseq = fi;
+                fb_i ^= 1;
+                have_fb = true;
+                continue;
+            }
+        }
         int exec_err = 0;
         if (bind != tpl_bind || row != tpl_row) {
             row_template(&inst, reads, writes, write_offs, row, bind);
@@ -477,11 +607,11 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
         if (exec_err == 0 && yield) {
             /* vthread·run return 模式 / def rwir RETURN：冒泡子 rwir pc 给上层驱动。
              * 本 vthread（主）pc 未推进，驱动派发子 rwir 并推进子 pc 后重入即续跑。 */
+            kvlangParkedFramesCleanupAbove(kv, vtid, depth);
             pinned_free(bind, row->nr, reads);
             free(reads);
             free(writes);
-            for (int d = 0; d <= MAX_STACK_DEPTH; d++)
-                kvlangFrameCtxFree(fctx[d]);
+            fctx_pool_free(fpool);
             kvlangFuncCacheFree(&fcache);
             COUNT_REPORT();
             return execute_yield(out_pc, yield);
@@ -498,8 +628,8 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
         }
     }
 
-    for (int d = 0; d <= MAX_STACK_DEPTH; d++)
-        kvlangFrameCtxFree(fctx[d]);
+    kvlangParkedFramesCleanupAbove(kv, vtid, last_depth > 0 ? last_depth : 1);
+    fctx_pool_free(fpool);
     kvlangFuncCacheFree(&fcache);
     COUNT_REPORT();
     free(reads);

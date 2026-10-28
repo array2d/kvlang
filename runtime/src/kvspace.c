@@ -1,6 +1,7 @@
 #include "runtime_internal.h"
 #include "func_code.h"
 #include "xvaluebodyview.h"
+#include "kvcpu_internal.h"
 
 kvspace_t *kvlangKvspaceConnect(const char *dsn) {
     kvspace_t *k = calloc(1, sizeof(*k));
@@ -20,6 +21,7 @@ kvspace_t *kvlangKvspaceConnect(const char *dsn) {
 void kvlangKvspaceDisconnect(kvspace_t *k) {
     if (!k)
         return;
+    kvlangParkedFramesInvalidateAll(k->handle);
     if (k->handle)
         kvspaceClose(k->handle);
     free(k);

@@ -49,10 +49,42 @@ void kvspaceKeyOffBind(kvspaceKeyOff *ko, kvspace_t *kvspace, const char *key) {
     ko->kvspace = kvspace;
     ko->key = key;
     ko->fast = NULL;
+    ko->view_ok = false;
     ko->resolved = kvspaceResolveRef(kvspace->handle, key, &ko->off) == 0;
 }
 
+static bool is_status_key(const char *key) {
+    static const char pfx[] = "/vthread/";
+    static const char suf[] = "/\xE2\x80\xA5status";
+    if (!key)
+        return false;
+    size_t n = strlen(key), sl = sizeof suf - 1;
+    return n > sl && strncmp(key, pfx, sizeof pfx - 1) == 0 &&
+           memcmp(key + n - sl, suf, sl) == 0;
+}
+
 bool kvspaceKeyOffRead(kvspaceKeyOff *ko, char *out, size_t cap) {
+    if (!ko->view_ok && ko->resolved && ko->kvspace->shm &&
+        ko->kvspace->slot_view_sup >= 0 && is_status_key(ko->key)) {
+        int vrc = kvspaceXvalueBodyView(ko->kvspace->handle, &ko->off, ko->key,
+                                  &ko->view);
+        if (vrc == 0) {
+            ko->kvspace->slot_view_sup = 1;
+            ko->view_ok = true;
+        } else if (vrc == -2) {
+            ko->kvspace->slot_view_sup = -1;
+        }
+    }
+    if (ko->view_ok) {
+        const uint8_t *h = ko->view.head;
+        uint64_t a = xh_rd64(h + 2);
+        if (h[0] == 6 && h[1] == 1 && a <= ko->view.body_cap && a + 1 <= cap) {
+            memcpy(out, ko->view.body, (size_t)a);
+            out[a] = 0;
+            return true;
+        }
+        ko->view_ok = false;
+    }
     kvlangXvalue_t v;
     kvlangXvalueZero(&v);
     if (ko->resolved) {
@@ -123,6 +155,7 @@ typedef struct {
     char key[KV_KEY_MAX]; /* 缓存所属槽的 key 副本：跨 vthread 时栈/堆地址可能复用 */
     uint8_t buf[64 + VT_SLACK_MAX_CAP];
     uint32_t cap; /* 槽实际容量档（b 字段） */
+    uint32_t last_cp;
     bool ready;
 } pc_slot_cache_t;
 static __thread pc_slot_cache_t pc_cache;
@@ -140,30 +173,56 @@ static uint32_t utf8_cp_count(const char *s, uint32_t len) {
     return n;
 }
 
-/* PC 路径绝大多数是纯 ASCII：此时码点数 == 字节数，免一次全串扫描。 */
 static uint32_t cp_count(const char *s, uint32_t len) {
     uint8_t acc = 0;
-    for (uint32_t i = 0; i < len; i++)
+    uint32_t i = 0;
+    for (; i + 8 <= len; i += 8) {
+        uint64_t w;
+        memcpy(&w, s + i, 8);
+        if (w & 0x8080808080808080ULL)
+            return utf8_cp_count(s, len);
+    }
+    for (; i < len; i++)
         acc |= (uint8_t)s[i];
     return (acc & 0x80) ? utf8_cp_count(s, len) : len;
 }
 
-/* 整值写（首次/超长/非 shm/part 失败回退）：编码进 pc 缓存并写整值。 */
+static void capture_pc_view(kvlangFrame_t *f, struct kvspaceKeyOff *ko) {
+    if (!ko->resolved || !f->kvspace->shm || f->kvspace->slot_view_sup < 0)
+        return;
+    int vrc = kvspaceXvalueBodyView(f->kvspace->handle, &ko->off, ko->key, &ko->view);
+    if (vrc == 0 && ko->view.headlen == 64 &&
+        64 + ko->view.body_cap <= ko->view.cap) {
+        f->kvspace->slot_view_sup = 1;
+        ko->view_ok = true;
+    } else if (vrc == -2) {
+        f->kvspace->slot_view_sup = -1;
+    }
+}
+
 static int pc_write_whole(kvlangFrame_t *f, struct kvspaceKeyOff *ko,
                           const char *s, uint32_t len) {
     uint32_t cap = len > VT_PC_SLACK_CAP ? VT_SLACK_MAX_CAP : VT_PC_SLACK_CAP;
     uint32_t n = kvlangSlackEncodeChar((const uint8_t *)s, len, cap,
                                        pc_cache.buf, sizeof pc_cache.buf);
     pc_cache.cap = cap;
+    pc_cache.last_cp = cp_count(s, len);
     pc_cache.ready = true;
     snprintf(pc_cache.key, sizeof pc_cache.key, "%s", ko->key);
-    return kvspaceKeyOffSet(ko, pc_cache.buf, n, NULL, 0);
+    ko->view_ok = false;
+    int rc = kvspaceKeyOffSet(ko, pc_cache.buf, n, NULL, 0);
+    if (rc == 0)
+        capture_pc_view(f, ko);
+    return rc;
 }
 
 /* langtype = "[N]char/utf8"（冷 helper）：码点数统计 + 无 snprintf 整数格式化。 */
 __attribute__((noinline, visibility("hidden"))) int
 kvlangCharLangtypeFmt(uint8_t *lt, const char *s, uint32_t len) {
     uint32_t v = cp_count(s, len);
+    if (v == pc_cache.last_cp)
+        return 0;
+    pc_cache.last_cp = v;
     char digits[12];
     int d = 0;
     do {
@@ -176,11 +235,10 @@ kvlangCharLangtypeFmt(uint8_t *lt, const char *s, uint32_t len) {
     lt[p++] = '[';
     while (d)
         lt[p++] = (uint8_t)digits[--d];
-    memcpy(lt + p, "]char/utf8", 11); /* 含结尾 NUL */
+    memcpy(lt + p, "]char/utf8", 11);
     return 0;
 }
 
-/* 等价值写：只更新 head 的 a/langtype 与 body 前缀，写 `[2, 64+len)`。 */
 static int pc_write_part(kvlangFrame_t *f, struct kvspaceKeyOff *ko,
                          const char *s, uint32_t len) {
     uint8_t *b = pc_cache.buf;
@@ -188,6 +246,18 @@ static int pc_write_part(kvlangFrame_t *f, struct kvspaceKeyOff *ko,
         b[2 + i] = (uint8_t)(len >> (8 * i)); /* a */
     if (kvlangCharLangtypeFmt(b + XH_PREFIX, s, len) != 0)
         return -1;
+    if (!ko->view_ok && ko->resolved)
+        capture_pc_view(f, ko);
+    if (ko->view_ok) {
+        uint8_t *vh = ko->view.head;
+        if (vh[0] == 6 && vh[1] == 1 && vh[XH_PREFIX] == '[' &&
+            xh_rd64(vh + 10) == pc_cache.cap && len <= ko->view.body_cap) {
+            memcpy(vh + 2, b + 2, 62);
+            memcpy(ko->view.body, s, len);
+            return 0;
+        }
+        ko->view_ok = false;
+    }
     memcpy(b + 64, s, len);
     uint32_t part = 64 + len - 2;
     return kvspaceSetPartByRef(f->kvspace->handle, &ko->off, ko->key, 2, b + 2,

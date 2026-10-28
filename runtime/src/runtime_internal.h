@@ -187,6 +187,7 @@ typedef struct {
     void *handle;    /* opaque KVSpace connection（数据 store） */
     bool shm;        /* DSN scheme == shm：允许 body 就地写快路径 */
     bool xvaluebodyview_unsupported; /* xvalue body view 返回 -2：本句柄永久回退 */
+    int8_t slot_view_sup; /* slot view 支持度（0=未知，1=支持，-1=不支持） */
 } kvspace_t;
 
 /* ── 字符串工具 ──────────────────────────────────────────────────────
@@ -737,6 +738,8 @@ struct kvspaceKeyOff {
     const char *key;
     kvspaceRef_t off;
     bool resolved;
+    kvspaceXvalueBodyView_t view; /* #513 快核：读视图缓存 */
+    bool view_ok;
     /* 定长标量写槽（只写参、只候选行设置）：emit 快路径由此取绑定。 */
     void *fast;
 };

@@ -10,12 +10,35 @@ unsigned long kvCBodyFast, kvCBodyFallback;
 /* ── resolve ───────────────────────────────────────────────────────── */
 /* #116 后 if/while 不再建 scope 帧，当前帧 [d] 即 rwfunc 帧，frame_root 直接可用。 */
 
+static inline bool xvalue_ready_non_rwir(const kvlangXvalue_t *val) {
+    if (!val || !val->bytes || val->length == 0 || xh_is_none(val->bytes))
+        return false;
+    if ((val->bytes[1] & 3u) != 0 || val->bytes[XH_PREFIX] != 'r')
+        return true;
+    return !kvlangXvalueKindIs(val, KVSPACE_KIND_RWIR) &&
+           !kvlangXvalueKindIs(val, KVSPACE_KIND_RWFUNC);
+}
+
+static void slot_bind_scalar_kind(kvlangBodySlot *slot,
+                                  const kvlangXvalue_t *v) {
+    if (slot->kind || slot->dead)
+        return;
+    uint32_t ltlen = xh_langtype_len(v->bytes);
+    int tid = kvlangLangtypeId((const char *)(v->bytes + XH_PREFIX), ltlen);
+    if ((kvlangLangtypeIsNum(tid) || tid == KVLANG_LT_BOOL) &&
+        v->length == 32u + (uint32_t)kvlangLangtypeElemSize(tid)) {
+        slot->kind = kvlangLangtypeKind(tid);
+        slot->width = (uint32_t)kvlangLangtypeElemSize(tid);
+        slot->kind_len = (uint8_t)ltlen;
+    }
+}
+
 void kvlangBuiltinResolveReadValue(kvspace_t *kv, const char *frame_root, const char *name,
                            const kvlangXvalue_t *val, kvlangXvalue_t *out) {
     kvlangXvalueZero(out);
     /* decode 期已按 read_target 取回目标值（out->name 是绝对路径时亦然），直接借用即可。
      * 这一支必须排在绝对路径之前：否则每步都会把已经拿到的值丢掉、再去后端读一遍。 */
-    if (val && !kvlangXvalueNone(val) && !kvlangXvalueKindIs(val, KVSPACE_KIND_RWIR) && !kvlangXvalueKindIs(val, KVSPACE_KIND_RWFUNC)) {
+    if (xvalue_ready_non_rwir(val)) {
         out->bytes = val->bytes; /* Borrowed for this instruction. */
         out->length = val->length;
         return;
@@ -54,7 +77,7 @@ char *kvlangBuiltinResolveReadKey(kvspace_t *kv, const char *frame_root, const c
                           const kvlangXvalue_t *val) {
     if (name && name[0] == '/')
         return strdup(name);
-    if (val && !kvlangXvalueNone(val) && !kvlangXvalueKindIs(val, KVSPACE_KIND_RWIR) && !kvlangXvalueKindIs(val, KVSPACE_KIND_RWFUNC))
+    if (xvalue_ready_non_rwir(val))
         return NULL;
     if (!name || !name[0]) return NULL;
     return kvlangBuiltinResolveWriteSlot(kv, frame_root, name);
@@ -257,7 +280,7 @@ write_value_to_slot(kvlangFrame_t *f, const kvlangXvalue_t *v) {
 int kvlangBuiltinWriteResult(kvlangFrame_t *f, const kvlangXvalue_t *result) {
 #ifdef KV_COUNT
     if (f->instruction->write_count > 0)
-        kvCBodyFallback++; /* 真正落槽但未走 body 快路径的写 */
+        kvCBodyFallback++;
 #endif
     if (f->instruction->write_count > 0) {
         const char *target = f->instruction->writes[0].type;
@@ -265,15 +288,21 @@ int kvlangBuiltinWriteResult(kvlangFrame_t *f, const kvlangXvalue_t *result) {
         kvlangXvalue_t cv;
         if (kvlangCoerceAssign(f, target, result, cbuf, sizeof cbuf, &cv) != 0)
             return -1;
-        /* coercion 后若声明类型是数值标量，重新尝试 body 快路径。 */
-        if (target && target[0]) {
-            int tid = kvlangLangtypeId(target, strlen(target));
-            if (kvlangLangtypeIsNum(tid) && cv.bytes &&
-                cv.length >= XH_PREFIX) {
-                const uint8_t *body = cv.bytes + (1u << cv.bytes[0]);
-                uint32_t blen = (uint32_t)xh_content_len(cv.bytes);
-                if (kvlangBuiltinWriteBody(f, target, body, blen))
-                    return 0;
+        if (cv.bytes && cv.length > 32 && cv.bytes[0] == 5 && cv.bytes[1] == 0) {
+            kvspaceKeyOff *wo = f->instruction->write_offs
+                                    ? f->instruction->write_offs[0]
+                                    : NULL;
+            kvlangBodySlot *slot = wo ? wo->fast : NULL;
+            if (slot) {
+                slot_bind_scalar_kind(slot, &cv);
+                if (slot->kind &&
+                    ((target && target[0]) ||
+                     memcmp(cv.bytes + XH_PREFIX, slot->kind,
+                            (size_t)slot->kind_len + 1) == 0)) {
+                    if (kvlangBuiltinWriteBody(f, slot->kind, cv.bytes + 32,
+                                               cv.length - 32))
+                        return 0;
+                }
             }
         }
         write_value_to_slot(f, &cv);
@@ -334,10 +363,15 @@ kvlangBuiltinWriteBody(kvlangFrame_t *f, const char *kind, const uint8_t *raw,
                             ? f->instruction->write_offs[0]
                             : NULL;
     kvlangBodySlot *slot = wo ? wo->fast : NULL;
-    if (slot && !slot->ok && !slot->dead && slot->off->resolved)
+    if (slot && !slot->kind && !slot->dead && kind) {
+        slot->kind = kind;
+        slot->width = len;
+        slot->kind_len = (uint8_t)strlen(kind);
+    }
+    if (slot && !slot->ok && !slot->dead && slot->kind && slot->off->resolved)
         kvlangBodyCapture(f->kvspace, slot, f->frame_root, NULL);
-    if (slot && slot->ok && slot->len == len &&
-        strcmp(slot->kind, kind) == 0) {
+    if (slot && slot->ok && slot->len == len && slot->kind &&
+        (slot->kind == kind || strcmp(slot->kind, kind) == 0)) {
 #ifdef KV_COUNT
         kvCBodyFast++;
 #endif
@@ -393,12 +427,56 @@ int kvlangBuiltinSetError(kvlangFrame_t *f, const char *fmt, ...) {
 int kvlangBuiltinExecuteCopy(kvlangFrame_t *f) {
     kvspace_t *kv = f->kvspace;
     kvlangRwirInst_t *inst = f->instruction;
+    const kvlangRowBind_t *rb = (const kvlangRowBind_t *)f->bind;
+    if (rb && rb->copy_plain) {
+        const kvlangXvalue_t *rv = &inst->reads[0].value;
+        kvlangBodySlot *slot = rb->body;
+        if (slot && rv->bytes && rv->length > 32 && rv->length <= 40 &&
+            rv->bytes[0] == 5 && rv->bytes[1] == 0) {
+            slot_bind_scalar_kind(slot, rv);
+            const char *target = inst->writes[0].type;
+            if (slot->kind && (!target || !target[0]) &&
+                rv->length == 32 + slot->width &&
+                memcmp(rv->bytes + XH_PREFIX, slot->kind,
+                       (size_t)slot->kind_len + 1) == 0) {
+                if (!slot->ok && !slot->dead && slot->off->resolved)
+                    kvlangBodyCapture(kv, slot, f->frame_root, NULL);
+                if (slot->ok) {
+#ifdef KV_COUNT
+                    kvCBodyFast++;
+#endif
+                    memcpy(slot->body, rv->bytes + 32, slot->width);
+                    kvlangBuiltinNextPc(f);
+                    return 0;
+                }
+                write_value_to_slot(f, rv);
+                return 0;
+            }
+        }
+        if (rv->bytes && !kvlangXvalueNone(rv) &&
+            !kvlangXvalueKindIs(rv, KVSPACE_KIND_RWIR) &&
+            !kvlangXvalueKindIs(rv, KVSPACE_KIND_RWFUNC)) {
+            return kvlangBuiltinWriteResult(f, rv);
+        }
+    }
     char *owned = NULL;
     const char *fr = f->frame_root;
     if (!fr) { owned = kvlangKeytreeFrameRoot(f->pc); fr = owned; }
     if (inst->read_count == 0) { free(owned); kvlangBuiltinNextPc(f); return 0; }
     kvlangXvalue_t v; kvlangXvalueZero(&v);
     kvlangBuiltinResolveReadValue(kv, fr, inst->reads[0].name, &inst->reads[0].value, &v);
+    if (inst->write_count == 1) {
+        if (rb && rb->copy_plain) {
+            free(owned);
+            return kvlangBuiltinWriteResult(f, &v);
+        }
+        const char *slot = inst->writes[0].name;
+        const char *dot = strstr(slot, MEMBER_SEP);
+        if (!dot || dot == slot) {
+            free(owned);
+            return kvlangBuiltinWriteResult(f, &v);
+        }
+    }
     for (int i = 0; i < inst->write_count; i++) {
         const char *slot = inst->writes[i].name;
         const char *dot = strstr(slot, MEMBER_SEP);

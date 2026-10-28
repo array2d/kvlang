@@ -14,6 +14,7 @@ typedef struct {
     kvlangXvalue_t literal; /* 字面量副本（owned，code_free 释放）；descriptor 时 None */
     char *type;             /* 声明类型（owned） */
     int s1;                 /* 参数轴：-nr..-1 读参，+1..+nw 写参 */
+    int param_s1;
     bool is_literal;
     bool key_absolute; /* Ptr 操作数：descriptor 已是绝对 key，不再按帧解析 */
 } kvlangOperand_t;
@@ -58,15 +59,20 @@ typedef struct kvlangBoundCell {
         struct { uint16_t hits; uint16_t width; uint8_t kind; } view; /* typed 行 */
     };
     uint8_t *coerce_buf; /* typed 读转换的 64B 临时视图（惰性分配，帧内复用） */
+    int coerce_tid; /* #513 快核：声明 kind id（0=非 typed 标量） */
+    uint16_t coerce_len; /* #513 快核：声明 kind 文本长度 */
+    uint8_t *rview_bytes;
+    uint32_t rview_len;
+    uint16_t rview_hits;
+    uint8_t rview_state;
 } kvlangBoundCell_t;
-_Static_assert(sizeof(kvlangBoundCell_t) == 96,
-               "kvlangBoundCell_t must stay 96B (operand view fields reuse existing bytes)");
 
 /* 定长标量写的绑定状态：只给候选行分配一个，不放大每个操作数 cell。 */
 typedef struct kvlangBodySlot {
     const char *key;        /* borrowed：cell 的 key */
     const char *kind;       /* 静态结果类型 */
     uint32_t width;
+    uint8_t kind_len;       /* 快核写槽匹配用（kvcpu_fast.c） */
     uint8_t *head;          /* T-120 A：XValue wire head（借用后端常驻空间） */
     uint32_t headlen;
     uint8_t *body;
@@ -78,6 +84,7 @@ typedef struct kvlangBodySlot {
     bool reg;               /* 已挂进全局失效表 */
     uint32_t bucket;
     struct kvlangBodySlot *next;
+    kvlangBoundCell_t *rcell;
 } kvlangBodySlot;
 
 /* 读 view：body slot + 版本化 token（只在提升时分配，写候选行不背 token）。 */
@@ -87,23 +94,71 @@ typedef struct {
 } kvlangReadViewSlot;
 
 typedef struct {
-    kvlangBoundCell_t *cell; /* [n] */
+    kvlangBoundCell_t *cell;
     int n;
     bool bound;
-    bool has_pin;          /* 本行有读 cell 落在写槽之下：执行后需释放 pin 副本 */
-    kvlangBodySlot *body; /* 定长标量写槽（候选行才有，owned） */
-    /* goto/br 目标 irseq：绑定期从 int64 字面量固化（0 = 不可用，执行期回退）。
-     * goto 用 [0]；br 用 [false]=[0]、[true]=[1]。不分配字符串：目标 PC 在
-     * 跳转时用帧根 + irseq 格式化到栈缓冲，避免每次函数调用都 malloc。 */
+    bool has_pin;
+    bool copy_plain;
+    bool has_star_op;
+    bool xv_same_slot;
+    uint32_t reenter_gen;
+    uint32_t star_rmask;
+    uint32_t star_wmask;
+    kvlangBodySlot *body;
     int jump_irseq[2];
+    const uint8_t *xv_bytes;
+    uint32_t xv_len;
+    const uint8_t *xv_body;
+    uint32_t xv_headlen;
+    int xv_tid;
+    int xv_elem_size;
+    int32_t xv_ndim;
+    int32_t xv_dims[X_MAX_NDIM];
+    bool xv_is_ptr;
+    /* 快核（kvcpu_fast.c）：行形状的一次性分类。0=未分类，1=不可快，2=可快；
+     * fk_op 为快核内部操作码。只依赖 row 形状，reenter 不变。 */
+    uint8_t fk_state;
+    uint8_t fk_op;
 } kvlangRowBind_t;
+
+#define KVLANG_PARK_MAX_PARAMS 16
+typedef struct kvlangParkedFrame {
+    void *handle;
+    char vtid[64];
+    int depth;
+    char frame_root[256];
+    char stack_fr[256];
+    char func_key[256];
+    char func_dir[256];
+    char entry_pc[256];
+    char retpc_key[256];
+    char retpc_val[256];
+    kvspaceKeyOff retpc_ko;
+    int nr, nw;
+    char r_arg_key[KVLANG_PARK_MAX_PARAMS][256];
+    char r_lit_key[KVLANG_PARK_MAX_PARAMS][256];
+    char r_target[KVLANG_PARK_MAX_PARAMS][256];
+    kvspaceKeyOff r_arg_ko[KVLANG_PARK_MAX_PARAMS];
+    kvspaceKeyOff r_lit_ko[KVLANG_PARK_MAX_PARAMS];
+    char w_arg_key[KVLANG_PARK_MAX_PARAMS][256];
+    char w_target[KVLANG_PARK_MAX_PARAMS][256];
+    kvspaceKeyOff w_arg_ko[KVLANG_PARK_MAX_PARAMS];
+    uint32_t r_changed_mask;
+    uint32_t w_changed_mask;
+    bool warm;
+    bool active;
+} kvlangParkedFrame_t;
 
 typedef struct {
     char *frame_root;
     kvlangFuncCode_t *code;
-    kvlangRowBind_t *binds; /* 与 code->rows 平行 */
+    kvlangRowBind_t *binds;
     size_t binds_cap;
-    uint32_t epoch; /* 已同步的地址世代 */
+    uint32_t epoch;
+    uint32_t reenter_gen;
+    kvlangParkedFrame_t *park;
+    char *vkey; /* park target-set variant key (owned); NULL = singleton */
+    uint32_t lru;
 } kvlangFrameCtx_t;
 
 /* ExecuteMode 内的函数缓存：func_dir -> 二维表 */
@@ -119,7 +174,10 @@ void kvlangFuncCacheFree(kvlangFuncCache_t *c);
 kvlangFrameCtx_t *kvlangFrameCtxNew(kvlangFuncCache_t *c, const char *func_dir,
                                     const char *frame_root);
 void kvlangFrameCtxFree(kvlangFrameCtx_t *ctx);
-/* 地址世代变化（删除/委托/handoff）后，帧内所有 keyoff 失效，执行时按 key 重绑。 */
+int kvlangFrameCtxReenter(kvspace_t *kv, kvlangFrameCtx_t *ctx,
+                          uint32_t epoch);
+int kvlangRowBindReenter(kvspace_t *kv, kvlangFrameCtx_t *ctx,
+                         kvlangCodeRow_t *row, kvlangRowBind_t *b);
 void kvlangFrameCtxSync(kvlangFrameCtx_t *ctx, uint32_t epoch);
 
 /* 定长标量写槽捕获：head 完全匹配才成功；失败置 dead（等该 key 被写后重试）。
@@ -127,6 +185,16 @@ void kvlangFrameCtxSync(kvlangFrameCtx_t *ctx, uint32_t epoch);
 __attribute__((visibility("hidden"))) bool
 kvlangBodyCapture(kvspace_t *kv, kvlangBodySlot *slot, const char *vthread_root,
                   kvspaceViewToken_t *tok);   /* tok 非 NULL 时用版本化 view */
+__attribute__((visibility("hidden"))) bool
+kvlangOperandViewPromote(kvspace_t *kv, kvlangBoundCell_t *cell,
+                         const char *frame_root, uint8_t *d, uint32_t len);
+/* 快核：从 *irseq 起连续执行可快行（typed 标量算术/比较、copy、goto、br），
+ * 每步仍原地持久化值与 PC 并检查 ‥status。遇到不可快行/任一前提不满足即停，
+ * *irseq 为下一条待执行行；返回执行的步数。pc_out 收到最终 PC 串（步数>0 时）。 */
+__attribute__((visibility("hidden"))) int
+kvlangFastRun(kvlangFrameCtx_t *ctx, int *irseq, kvspaceKeyOff *pc_off,
+              kvspaceKeyOff *status_off, const char *prefix, int prefix_len,
+              char *pc_out, size_t pc_out_cap);
 /* 校验 wire 形状并填充 slot；tok 的 head/headlen/value_len 由调用方保证已就绪。 */
 __attribute__((visibility("hidden"))) bool
 kvlangBodyAdopt(kvlangBodySlot *slot, const uint8_t *val, uint32_t len);
