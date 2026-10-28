@@ -1,4 +1,5 @@
 #include "jit.hpp"
+#include "valueio.hpp"
 
 #include <cstdio>
 #include <cstdlib>
@@ -537,6 +538,7 @@ bool jit_try_run(FrameCtx& f, const Segment* seg, int start_s0,
         return false;
     const std::int64_t arg = src->fv;
     std::int64_t errf = 0;
+    view_cache_idle_all();  // native code never acks: hold no view tokens across it
     const std::int64_t res =
         reinterpret_cast<JitFn>(const_cast<void*>(code))(arg, &errf);
     if (g_jitdbg)

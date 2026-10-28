@@ -13,6 +13,18 @@ bool read_wire(void* h, std::string_view key, const std::uint8_t** data,
 bool read_wire_raw(void* h, std::string_view key, const std::uint8_t** data,
                    std::uint32_t* len) noexcept;
 
+// Drop cached view tokens and quiesce the handle; call before going idle.
+void view_cache_idle(void* h) noexcept;
+// Same for whichever handle currently holds tokens.
+void view_cache_idle_all() noexcept;
+// Ack the recovery epoch; call only between instructions (no wires held).
+void view_cache_tick() noexcept;
+
+// Quiesces live view tokens when an ABI entry returns to the host.
+struct ViewIdleGuard {
+    ~ViewIdleGuard() { view_cache_idle_all(); }
+};
+
 // 把一段 XValue 线数据按 char 族解码成 UTF-8 文本。
 bool wire_text(const std::uint8_t* data, std::uint32_t len, std::string* out) noexcept;
 

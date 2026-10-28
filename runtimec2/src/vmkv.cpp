@@ -89,6 +89,26 @@ bool is_any_frame_local(std::string_view k) {
            name.find("\xE2\x80\xA5") == std::string_view::npos;
 }
 
+// Whether r, or the caller reg it read-aliases, caches a scalar value.
+bool holds_value(const FReg* r) {
+    while (!(r->fast_i64 || r->fast_bool) && r->src_ptr)
+        r = r->src_ptr;
+    return r->fast_i64 || r->fast_bool;
+}
+
+// First Var reg whose name (type suffix stripped) is `name`; -1 if none.
+int reg_by_name(const Segment* seg, std::string_view name) {
+    for (std::size_t i = 0; i < seg->regs.size(); i++) {
+        const RegDesc& d = seg->regs[i];
+        if (d.kind != Operand::Kind::Var)
+            continue;
+        const std::string_view n = d.name;
+        if (n == name || n.substr(0, n.find(' ')) == name)
+            return static_cast<int>(i);
+    }
+    return -1;
+}
+
 // "/vthread/<vid>/[<depth>]" per depth; deque keeps references stable.
 const std::string& child_frame_root(const std::string& vid, int depth) {
     thread_local std::deque<std::pair<std::string, std::string>> c;
@@ -531,16 +551,19 @@ bool Vmkv::write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
         if (bp->key.empty() && !ensure_reg_key(f, *bp))
             return false;
         // base 槽是 Ptr（`cur->next = v` 的 cur 存指针）：成员写落在 target 上。
-        if (!bp->key.empty()) {
+        // The base reg keeps its own key: rebinding it would aim later writes to
+        // the variable itself (`cur·next -> cur`) at the old target.
+        std::string bkey = bp->key;
+        if (!bkey.empty()) {
             const std::uint8_t* bd = nullptr;
             std::uint32_t bn = 0;
             std::string bt;
-            if (read_wire_raw(f.h, bp->key, &bd, &bn) &&
+            if (read_wire_raw(f.h, bkey, &bd, &bn) &&
                 v_ptr_target(Wire{bd, bn}, &bt) && !bt.empty())
-                bp->key = bt;
+                bkey = bt;
         }
-        if (!bp->key.empty() && !mname.empty() && mname[0] != '*') {
-            r.key = bp->key + "\xC2\xB7" + mname;
+        if (!bkey.empty() && !mname.empty() && mname[0] != '*') {
+            r.key = bkey + "\xC2\xB7" + mname;
             r.view_ok = false;
             r.sc_ok = false;
             r.fast_i64 = false;
@@ -645,8 +668,31 @@ bool Vmkv::read_bool(FrameCtx& f, std::uint8_t idx, bool* out) {
 }
 
 // 专用直写 int64：缓存命中（Int/8）时免 Scalar 装箱、免 kind 判定，纯 8 字节 memcpy。
+bool Vmkv::write_member_scalar(FrameCtx& f, std::uint8_t idx, const Scalar& s,
+                               std::uint8_t width) {
+    const char* kn = kind_name(s.k, width);
+    std::uint8_t* buf = nullptr;
+    std::uint32_t len = 0;
+    const bool ok = kn && v_encode(kn, width, s, &buf, &len) &&
+                    write_reg(f, idx, buf, len);
+    std::free(buf);
+    return ok;
+}
+
 bool Vmkv::slot_write_i64(FrameCtx& f, std::uint8_t idx, std::int64_t v) {
     FReg& fr = f.regs[idx];
+    if (fr.desc_ref && fr.desc_ref->member) {
+        Scalar s{};
+        s.k = Scalar::K::Int;
+        s.width = 8;
+        s.i = v;
+        s.u = (std::uint64_t)v;
+        if (!write_member_scalar(f, idx, s, 8))
+            return false;
+        fr.fv = v;  // callers mark the cache valid; keep it equal to what was written
+        fr.fast_i64 = true;
+        return true;
+    }
     // 内存别名写参（mem_frame 递归/纯内存调用的返回槽）：直写调用方 reg
     // （镜像 write_reg 的 dst_ptr 分支），免每迭代 v_encode+malloc 回退。
     if (fr.dst_ptr) {
@@ -697,6 +743,17 @@ bool Vmkv::slot_write_i64(FrameCtx& f, std::uint8_t idx, std::int64_t v) {
 // 专用直写 bool：同理，1 字节。
 bool Vmkv::slot_write_bool(FrameCtx& f, std::uint8_t idx, bool b) {
     FReg& fr = f.regs[idx];
+    if (fr.desc_ref && fr.desc_ref->member) {
+        Scalar s{};
+        s.k = Scalar::K::Bool;
+        s.width = 1;
+        s.u = b ? 1 : 0;
+        if (!write_member_scalar(f, idx, s, 1))
+            return false;
+        fr.fb = b;
+        fr.fast_bool = true;
+        return true;
+    }
     // 内存别名写参：直写调用方 reg（对齐 slot_write_i64 的 dst_ptr 快路径）。
     if (fr.dst_ptr) {
         FReg& dr = *fr.dst_ptr;
@@ -748,6 +805,8 @@ bool Vmkv::slot_write_scalar(FrameCtx& f, std::uint8_t idx, const Scalar& s,
     if (!kn)
         return false;
     FReg& fr = f.regs[idx];
+    if (fr.desc_ref && fr.desc_ref->member)
+        return write_member_scalar(f, idx, s, width);
     // Aliased int64 write param into a caller frame local: the caller's cache is
     // the value there, so skip the encode. Other targets keep the kvspace write.
     if (fr.dst_ptr && s.k == Scalar::K::Int && width == 8) {
@@ -1289,6 +1348,8 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
         const unsigned long long t0 = bin.prof_on ? bin.now() : 0;
         const CInsn& ins = ci[idx];
         // runaway 防护：每 16M 步抽检一次（热路径无每步大数比较）。
+        if (((run_steps + 1) & 63u) == 0)
+            view_cache_tick();  // instruction boundary: no borrowed wires held
         if ((++run_steps & 0xFFFFFFULL) == 0 && run_steps > 50000000ULL) {
             *err = "runaway loop: " + f.func_dir + " s0=" + std::to_string(ins.s0) +
                    " op=" + ins.name;
@@ -1337,7 +1398,9 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                 return RunResult::Ok;
             {
                 const CInsn& ik = ci[idx];
-                if ((++fk_n & 0xFFFFFFULL) == 0 && fk_n > 50000000ULL) {
+                if ((++fk_n & 4095u) == 0)
+                    view_cache_tick();
+                if ((fk_n & 0xFFFFFFULL) == 0 && fk_n > 50000000ULL) {
                     *err = "runaway loop (fast): " + f.func_dir + " s0=" +
                            std::to_string(ik.s0);
                     return RunResult::Error;
@@ -2122,7 +2185,11 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                         const std::string keyreg =
                             std::string("v:") + keyref;
                         std::uint8_t kridx = 255;
-                        for (std::size_t kr = 0; kr < f.regs.size(); kr++) {
+                        if (ins.mw_keyreg == -2)
+                            ins.mw_keyreg = reg_by_name(seg, keyref);
+                        if (ins.mw_keyreg >= 0)
+                            kridx = static_cast<std::uint8_t>(ins.mw_keyreg);
+                        for (std::size_t kr = 0; kridx == 255 && kr < f.regs.size(); kr++) {
                             // 惰性 key 普通变量 desc=name（帧局部），与 key 等价匹配。
                             if (f.regs[kr].key == f.frame + "/" + keyref ||
                                 f.regs[kr].desc == keyref ||
@@ -2155,7 +2222,12 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                     // 写参 Ptr（`*[0,±k]`：`r·x` 的 r 是写参）——顺序不可反。
                     // 无字符串拷贝：desc_ref 指针/name 直接比较，key 前缀匹配。
                     FReg* base_reg = nullptr;
-                    for (FReg& r : f.regs) {
+                    if (ins.mw_basereg == -2)
+                        ins.mw_basereg = reg_by_name(seg, base_part);
+                    if (ins.mw_basereg >= 0)
+                        base_reg = &f.regs[static_cast<std::size_t>(ins.mw_basereg)];
+                    for (std::size_t ri = 0; !base_reg && ri < f.regs.size(); ri++) {
+                        FReg& r = f.regs[ri];
                         if ((r.desc_ref && r.desc_ref->name == base_part) ||
                             r.key == fbp ||
                             (!r.desc.empty() && r.desc == base_part)) {
@@ -2167,6 +2239,8 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                         FReg* rk = base_reg;
                         while (rk->src_ptr || rk->dst_ptr)
                             rk = rk->src_ptr ? rk->src_ptr : rk->dst_ptr;
+                        if (rk->key.empty() && rk == base_reg)
+                            ensure_reg_key(f, *rk);  // lazy local: frame/name
                         if (!rk->key.empty()) {
                             // base 槽是 Ptr（`cur·next` 的 cur 存指针）：成员写落
                             // target。首查后缓存（热路径动态键容器免每写 kvspace）。
@@ -2195,12 +2269,14 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                     } else {
                         base_key = fbp;
                     }
-                    if (base_key == f.frame + "/" + base_part) {
+                    // Write-param fallbacks apply only when no local reg names the base.
+                    if (!base_reg && base_key == fbp) {
                         for (FReg& r : f.regs) {
-                            const std::string rn = !r.desc.empty() ? r.desc
-                                                   : (r.desc_ref ? r.desc_ref->name
-                                                                 : std::string());
-                            if (rn.rfind("*[0,", 0) == 0 && !r.key.empty()) {
+                            const std::string_view rn =
+                                !r.desc.empty() ? std::string_view(r.desc)
+                                : r.desc_ref    ? std::string_view(r.desc_ref->name)
+                                                : std::string_view();
+                            if (rn.substr(0, 4) == "*[0," && !r.key.empty()) {
                                 FReg* rk = &r;
                                 while (rk->src_ptr || rk->dst_ptr)
                                     rk = rk->src_ptr ? rk->src_ptr : rk->dst_ptr;
@@ -2214,7 +2290,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                     // 写参 base 无独立 reg（`造点(a,b) -> (r:*点)` 的 r 只出现在
                     // `r·x` 写槽，layout 不生成 `*[0,1]` reg）：读本帧写参 arg 槽
                     // （do_call 绑定 `‥arg[0,k]` 存 Ptr→调用方槽）取 target。
-                    if (base_key == f.frame + "/" + base_part) {
+                    if (!base_reg && base_key == fbp) {
                         for (int k2 = 1; k2 <= 4; k2++) {
                             const std::string ak = f.frame + "/\xE2\x80\xA5" "arg[0," +
                                                    std::to_string(k2) + "]";
@@ -2250,7 +2326,39 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                 FReg& srf = sr0.src_ptr ? *sr0.src_ptr : sr0;
                 const std::uint8_t* rawd = nullptr;
                 std::uint32_t rawn = 0;
-                if (!srf.key.empty() &&
+                // A write param resolves to the caller's instance; copying it must
+                // alias that instance (`p -> c; v -> c·x` writes the caller), so a
+                // non-scalar target copied into a plain local becomes a Ptr to it.
+                const RegDesc& sd0 = seg->regs[ins.rd[0]];
+                const RegDesc& dd0 = seg->regs[ins.wr[0]];
+                bool aliased = false;
+                if (sd0.vclass == RegDesc::VarClass::ParamPtr && sd0.param_k > 0 &&
+                    dd0.vclass == RegDesc::VarClass::Plain && !dd0.member) {
+                    FReg* tk = &sr0;
+                    while (tk->dst_ptr)
+                        tk = tk->dst_ptr;
+                    std::string lt;
+                    if (!tk->key.empty() &&
+                        read_wire_raw(f.h, tk->key, &rawd, &rawn) && rawd &&
+                        rawn > KVSPACE_XH_PREFIX && !v_ptr(Wire{rawd, rawn}) &&
+                        v_langtype(Wire{rawd, rawn}, &lt)) {
+                        const auto t = bin.langtype_of(lt.data(), lt.size());
+                        const bool scalar = t >= bin::LangType::Int8 &&
+                                            t <= bin::LangType::CharAscii;
+                        std::uint8_t* pb = nullptr;
+                        std::uint32_t pl = 0;
+                        if (!scalar && kvspaceNewPtr(lt.c_str(), tk->key.c_str(), &pb,
+                                                     &pl) == 0 && pb) {
+                            ok = write_reg(f, ins.wr[0], pb, pl);
+                            aliased = true;
+                        }
+                        std::free(pb);
+                    }
+                    rawd = nullptr;
+                    rawn = 0;
+                }
+                if (aliased) {
+                } else if (!srf.key.empty() &&
                     read_wire_raw(f.h, srf.key, &rawd, &rawn) && rawd && rawn) {
                     src.d = rawd;
                     src.n = rawn;
@@ -2513,7 +2621,9 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
         // 内存别名只对纯内存帧（callee 段无 native/handoff）：段含 Handoff
         // 时执行中途 Stop、帧会被 execute_vthread 重启（arg_src 丢失），
         // 标量参数必须建 kvspace 槽保证重启后可解析（prime_sieve println 坑）。
-        if (mem_frame && scalar_arg) {
+        // A read alias forwards the caller reg's cached value; a caller reg bound
+        // through kvspace has none, so its value goes through an arg slot instead.
+        if (mem_frame && scalar_arg && (x > 0 || holds_value(caller_reg))) {
             if (x < 0) {
                 const std::size_t ix = static_cast<std::size_t>(-x - 1);
                 mem_src[ix] = caller_reg;
@@ -2649,6 +2759,10 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
         std::free(sp);
         return bok;
     };
+    // The JIT binding aliases every read arg; it needs each one to hold a value.
+    for (int i = 1; jcode && i < ins.nrd; i++)
+        if (!holds_value(&f.regs[ins.rd[i]]))
+            jcode = nullptr;
     if (!jcode)
     for (int i = 1; i < ins.nrd; i++) {
         Wire vw{};
@@ -2745,7 +2859,7 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
     nfc.func_dir = callee;
     nfc.seg_hint = cseg;
     nfc.jit_hint = jcode;
-    nfc.jit_known = ins.call_ready;
+    nfc.jit_known = ins.call_ready || !jcode;
     if (mem_src_n)
         std::memcpy(nfc.arg_src, mem_src,
                     static_cast<std::size_t>(mem_src_n) * sizeof(FReg*));

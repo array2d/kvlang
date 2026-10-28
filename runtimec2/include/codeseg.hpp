@@ -23,6 +23,7 @@ struct RegDesc {
     // Var shape, classified at build: param Ptr `*[0,k]`, other Ptr, plain name, typed name.
     enum class VarClass : std::uint8_t { None = 0, ParamPtr, Ptr, Plain, Typed } vclass =
         VarClass::None;
+    bool member = false;  // `base·name` write target: its key follows base, never cache it
 };
 
 struct Segment;
@@ -52,6 +53,8 @@ struct CInsn {
     mutable std::vector<std::string> call_rtyp;  // callee decl type per read arg (1-based)
     mutable std::vector<std::string> call_wtyp;  // per write arg (1-based)
     mutable std::vector<std::uint8_t> call_rtyp_ok, call_wtyp_ok;
+    // Member write `v -> base·key`: reg indexes found by name (-2 = not yet, -1 = none).
+    mutable int mw_keyreg = -2, mw_basereg = -2;
 };
 
 // 字面量 int64 快值缓存（build 期读槽一次，帧入口零 kvspace 预读）。

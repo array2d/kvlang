@@ -71,6 +71,8 @@ bool operand_desc(void* h, const std::string& key, RegDesc* out) {
                       : op[0] == '*'                 ? VC::Ptr
                       : op.find(' ') == std::string::npos ? VC::Plain
                                                           : VC::Typed;
+        out->member = !op.empty() && op[0] != '/' &&
+                      op.find("\xC2\xB7") != std::string::npos;
         return true;
     }
     out->kind = Operand::Kind::Literal;
