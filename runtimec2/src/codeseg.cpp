@@ -5,6 +5,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "jit.hpp"
+
 #include <kvspace/kvspace.h>
 
 #include "value.hpp"
@@ -210,6 +212,22 @@ bool build(void* h, const std::string& func_dir, Segment* out) {
         }
         out->insns.push_back(ins);
     }
+    if (std::getenv("RC2_TRACE")) {
+        for (std::size_t ri = 0; ri < out->regs.size(); ri++) {
+            const RegDesc& d = out->regs[ri];
+            std::fprintf(stderr, "[segdmp reg %zu kind=%d name='%s' key='%s' pk=%d]\n",
+                         ri, (int)d.kind, d.name.c_str(), d.slot_key.c_str(),
+                         d.param_k);
+        }
+        for (const CInsn& ci : out->insns) {
+            std::fprintf(stderr,
+                         "[segdmp s0=%d op=%s opfn=%d fast=%d wrl=%d nrd=%u nwr=%u "
+                         "rd=%d,%d,%d wr=%d,%d,%d]\n",
+                         ci.s0, ci.name.c_str(), (int)ci.opfn, (int)ci.fast_i64,
+                         (int)ci.wr_local, ci.nrd, ci.nwr, ci.rd[0], ci.rd[1],
+                         ci.rd[2], ci.wr[0], ci.wr[1], ci.wr[2]);
+        }
+    }
     // 字面量 int64 快值缓存：build 期读槽一次，运行期帧入口零 kvspace 预读
     // （fib 递归每帧省 1 次 kvspaceXvalueBodyView 读字面量 `1`）。
     out->lit.assign(out->regs.size(), LitFast{});
@@ -278,6 +296,9 @@ bool cached_insn(const std::string& func_dir, int s0, const CInsn** out,
     return true;
 }
 
-void clear_segment_cache() { cache().clear(); }
+void clear_segment_cache() {
+    cache().clear();
+    jit_clear_cache();
+}
 
 }  // namespace kv::rt

@@ -14,6 +14,7 @@ add_library(kvlang_runtimec2 SHARED EXCLUDE_FROM_ALL
     src/rwir_gen.cpp
     src/rwir_lookup.cpp
     src/codeseg.cpp
+    src/jit.cpp
     src/value.cpp
     src/vmkv.cpp
     src/vmkv_native.cpp

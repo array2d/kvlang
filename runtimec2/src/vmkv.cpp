@@ -1,5 +1,6 @@
 #include "vmkv.hpp"
 #include "vmkv_native.hpp"
+#include "jit.hpp"
 
 #include <cstdlib>
 #include <charconv>
@@ -503,6 +504,18 @@ bool Vmkv::read_bool(FrameCtx& f, std::uint8_t idx, bool* out) {
 // 专用直写 int64：缓存命中（Int/8）时免 Scalar 装箱、免 kind 判定，纯 8 字节 memcpy。
 bool Vmkv::slot_write_i64(FrameCtx& f, std::uint8_t idx, std::int64_t v) {
     FReg& fr = f.regs[idx];
+    // 内存别名写参（mem_frame 递归/纯内存调用的返回槽）：直写调用方 reg
+    // （镜像 write_reg 的 dst_ptr 分支），免每迭代 v_encode+malloc 回退。
+    if (fr.dst_ptr) {
+        FReg& dr = *fr.dst_ptr;
+        dr.fv = v;
+        dr.fast_i64 = true;
+        if (dr.view_ok && dr.body)
+            std::memcpy(dr.body, &v, 8);
+        fr.fv = v;
+        fr.fast_i64 = true;
+        return true;
+    }
     // 帧局部变量（含首次写，fast_i64 未设）：无 view 也直写 fast 缓存 return
     // （免 kvspace）。非帧局部（参数/容器/系统槽）照旧落明文。
     if (is_frame_local(f, fr.key)) {
@@ -541,6 +554,17 @@ bool Vmkv::slot_write_i64(FrameCtx& f, std::uint8_t idx, std::int64_t v) {
 // 专用直写 bool：同理，1 字节。
 bool Vmkv::slot_write_bool(FrameCtx& f, std::uint8_t idx, bool b) {
     FReg& fr = f.regs[idx];
+    // 内存别名写参：直写调用方 reg（对齐 slot_write_i64 的 dst_ptr 快路径）。
+    if (fr.dst_ptr) {
+        FReg& dr = *fr.dst_ptr;
+        dr.fb = b;
+        dr.fast_bool = true;
+        if (dr.view_ok && dr.body)
+            *dr.body = b ? 1 : 0;
+        fr.fb = b;
+        fr.fast_bool = true;
+        return true;
+    }
     // 帧局部纯内存变量：无 view 也直写 fast 缓存 return（免 kvspace）。
     if (fr.fast_bool && is_frame_local(f, fr.key)) {
         fr.fb = b;
@@ -1076,6 +1100,12 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
     freg_guard.blk = &f.regs;
     if (!enter_frame(f, seg, err))
         return RunResult::Error;
+    // JIT 钩子（M1）：命中即原生执行返回；否则走 fast kernel。
+    {
+        bin::RunResult jr = bin::RunResult::Ok;
+        if (jit_try_run(f, seg, start_s0, &jr, stop_pc, err))
+            return jr;
+    }
     const int n = static_cast<int>(seg->insns.size());
     int idx = start_s0 > 0 ? start_s0 - 1 : 0;
     if (idx < 0 || idx >= n) {
@@ -2077,6 +2107,10 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
     // （returnpc/lib）与生命周期（DelTree/Mkindex/ext 索引）全部省略，
     // 每帧省 ~17k cycles kvspace（fib 递归最大头）。
     const bool mem_frame = cseg && !cseg->has_native;
+    // JIT 快路径判定（M1）：callee 已编译 → 形状已知（int64 单读参/写参），
+    // 参数绑定直接走 mem 路径，免签名/参数 wire 的 kvspace 读取。
+    const void* jcode =
+        cseg && jit_enabled() ? jit_compile(callee, cseg) : nullptr;
     // 非纯内存帧：清残留 + 建目录 + 系统变量落明文（明文栈唯一事实）。
     if (!mem_frame) {
         const std::string nstack = nf + "/";
@@ -2108,13 +2142,18 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
         std::uint32_t n = 0;
         if (!read_wire(f.h, pk, &d, &n))
             return false;
-        const std::uint8_t* end = d + n;
-        const std::uint8_t* p = d;
-        while (p < end && *p)
-            p++;
-        if (p + 1 < end)
-            *out = std::string(reinterpret_cast<const char*>(p + 1),
-                               end - p - 1);
+        // 槽值 = XValue（head 的 langtype 即 "def langtype"，body=名字\0类型串）。
+        // 先解 head 取 body 文本，再按名字\0类型 拆。
+        std::string txt;
+        if (!wire_text(d, n, &txt))
+            return false;
+        const auto nul = txt.find('\0');
+        if (nul == std::string::npos) {
+            if (!txt.empty())
+                *out = txt;  // 无名字：body 即类型
+        } else if (nul + 1 < txt.size()) {
+            *out = txt.substr(nul + 1);
+        }
         return !out->empty();
     };
     // 内存别名子帧：arg_src/arg_dst 从调用方 FReg 建立。定长栈数组（段 nr/nw ≤ 16）。
@@ -2213,6 +2252,7 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
         std::free(sp);
         return bok;
     };
+    if (!jcode)
     for (int i = 1; i < ins.nrd; i++) {
         Wire vw{};
         std::string vk, typ;
@@ -2269,6 +2309,7 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
         if (!bind_arg(-i, &f.regs[ins.rd[i]], vk, typ, vw))
             return RunResult::Error;
     }
+    if (!jcode)
     for (int i = 1; i <= ins.nwr; i++) {
         FReg& wr = f.regs[ins.wr[i - 1]];
         if (!ensure_reg_key(f, wr))
@@ -2295,6 +2336,25 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
     nfc.arg_src_n = mem_src_n;
     nfc.arg_dst_n = mem_dst_n;
     nfc.mem_frame = mem_frame;
+    if (jcode) {
+        // JIT 快路径：绕过上文所有 kvspace 读取（param_decl_type/read_reg/
+        // ensure_reg_key/_lit 槽），直接 mem 绑定 int64 参数。
+        for (int i = 1; i < ins.nrd; i++)
+            if (!bind_arg(-i, &f.regs[ins.rd[i]], "", "int64", Wire{}))
+                return RunResult::Error;
+        for (int i = 1; i <= ins.nwr; i++)
+            if (!bind_arg(i, &f.regs[ins.wr[i - 1]], "", "int64", Wire{}))
+                return RunResult::Error;
+        if (mem_src_n)
+            std::memcpy(nfc.arg_src, mem_src,
+                        static_cast<std::size_t>(mem_src_n) * sizeof(FReg*));
+        if (mem_dst_n)
+            std::memcpy(nfc.arg_dst, mem_dst,
+                        static_cast<std::size_t>(mem_dst_n) * sizeof(FReg*));
+        nfc.arg_src_n = mem_src_n;
+        nfc.arg_dst_n = mem_dst_n;
+        nfc.mem_frame = true;
+    }
     RunResult rr = run_frame(nfc, 1, stop_pc, err);
     if (rr != RunResult::Ok && rr != RunResult::Returned)
         return rr;
