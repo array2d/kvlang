@@ -1,5 +1,6 @@
 #include "jit.hpp"
 #include "valueio.hpp"
+#include "vmkv.hpp"
 
 #include <cstdio>
 #include <cstdlib>
@@ -555,7 +556,7 @@ bool jit_try_run(FrameCtx& f, const Segment* seg, int start_s0,
     dst->fv = res;
     dst->fast_i64 = true;
     if (dst->view_ok && dst->body)
-        std::memcpy(dst->body, &res, 8);
+        (void)g_vmkv.store_i64_slot(f, *dst, res);
     dr0.fv = res;
     dr0.fast_i64 = true;
     if (stop_pc)

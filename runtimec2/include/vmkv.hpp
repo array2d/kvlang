@@ -55,6 +55,8 @@ struct Vmkv {
     // Encode and route through write_reg's member branch (key recomputed per write).
     bool write_member_scalar(bin::FrameCtx& f, std::uint8_t idx, const Scalar& s,
                              std::uint8_t width);
+    // Store v into r's existing slot: in place if it is int64, else re-encode it.
+    bool store_i64_slot(bin::FrameCtx& f, bin::FReg& r, std::int64_t v);
     bool slot_write_bool(bin::FrameCtx& f, std::uint8_t idx, bool b);
     bool slot_write_scalar(bin::FrameCtx& f, std::uint8_t idx,
                            const Scalar& s, std::uint8_t width);

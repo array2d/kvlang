@@ -69,6 +69,7 @@ struct FctxLease {
     FctxLease& operator=(const FctxLease&) = delete;
 };
 
+
 // `/vthread/<vid>/[<d>]/<name>` with a plain name (no `/`, `[`, `‥`).
 bool is_any_frame_local(std::string_view k) {
     constexpr std::string_view pre = "/vthread/";
@@ -308,31 +309,38 @@ bool Vmkv::read_reg(FrameCtx& f, std::uint8_t idx, Wire* out) {
     // 纯内存帧局部变量（write_reg 内存化、fast_i64 已设、无 kvspace 槽）：直构 int64 wire。
     // 别名 reg（src_ptr）key 为空，走 fast 缓存构造。
     const std::string& rk = r.key;
+    const std::size_t fs = f.frame.size();
     const bool flk =
-        r.src_ptr || (!rk.empty() && rk.compare(0, f.frame.size() + 1,
-                                                f.frame + "/") == 0 &&
+        r.src_ptr || (rk.size() >= fs + 1 && rk.compare(0, fs, f.frame) == 0 &&
+                      rk[fs] == '/' &&
                       rk.find("/[0,") == std::string::npos &&
                       rk.find("\xE2\x80\xA5") == std::string::npos);
     if (g_trace && rk == f.frame + "/t1")
         std::fprintf(stderr, "[readreg t1 fast=%d flk=%d src=%p]\n",
                      (int)fr->fast_i64, (int)flk, (void*)r.src_ptr);
     if (fr->fast_i64 && flk) {
+        // The int64 wire is fixed-shape: encode once, then patch the body.
         thread_local std::uint8_t s_buf[64];
         thread_local std::uint32_t s_len = 0;
-        std::uint8_t* buf = nullptr;
-        std::uint32_t len = 0;
-        if (kvspaceXvalueEncode("int64",
-                                reinterpret_cast<const std::uint8_t*>(&fr->fv), 8,
-                                nullptr, 0, &buf, &len) == 0 &&
-            buf && len <= sizeof s_buf) {
-            std::memcpy(s_buf, buf, len);
+        if (!s_len) {
+            std::uint8_t* buf = nullptr;
+            std::uint32_t len = 0;
+            const std::int64_t zero = 0;
+            if (kvspaceXvalueEncode("int64",
+                                    reinterpret_cast<const std::uint8_t*>(&zero), 8,
+                                    nullptr, 0, &buf, &len) == 0 &&
+                buf && len >= 8 && len <= sizeof s_buf) {
+                std::memcpy(s_buf, buf, len);
+                s_len = len;
+            }
             std::free(buf);
-            s_len = len;
+        }
+        if (s_len) {
+            std::memcpy(s_buf + s_len - 8, &fr->fv, 8);
             out->d = s_buf;
             out->n = s_len;
             return true;
         }
-        std::free(buf);
     }
     if (ensure_ref(f, &r)) {
         std::uint8_t* d = nullptr;
@@ -490,8 +498,8 @@ bool Vmkv::write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
                 std::memcpy(&v, xh.body, 8);
                 dr.fv = v;
                 dr.fast_i64 = true;
-                if (dr.view_ok && dr.body)
-                    std::memcpy(dr.body, &v, 8);
+                if (dr.view_ok && dr.body && !store_i64_slot(f, dr, v))
+                    return false;
                 r.fv = v;
                 r.fast_i64 = true;
                 return true;
@@ -602,10 +610,8 @@ bool Vmkv::write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
             std::memcpy(&v, xh.body, 8);
             r.fv = v;
             r.fast_i64 = true;
-            if (r.view_ok && r.body) {
-                std::memcpy(r.body, &v, 8);  // 已有槽：直写同步明文
-                return true;
-            }
+            if (r.view_ok && r.body)
+                return store_i64_slot(f, r, v);  // 已有槽：直写同步明文
             // 纯内存：不建 kvspace 槽。帧局部 int64 变量层内读走 fast 缓存；
             // 调用边界经 arg_src/arg_dst 内存别名或读参传值，无需明文存在。
             return true;
@@ -668,6 +674,31 @@ bool Vmkv::read_bool(FrameCtx& f, std::uint8_t idx, bool* out) {
 }
 
 // 专用直写 int64：缓存命中（Int/8）时免 Scalar 装箱、免 kind 判定，纯 8 字节 memcpy。
+// Store v into r's existing slot: in place if it is int64, else re-encode it.
+bool Vmkv::store_i64_slot(FrameCtx& f, FReg& r, std::int64_t v) {
+    const kvspaceXvalueBodyView_t& w = r.view;
+    if (w.head && w.headlen > 18 && w.body_cap >= 8 &&
+        std::memcmp(w.head + 18, "int64", 6) == 0) {
+        std::memcpy(r.body, &v, 8);
+        return true;
+    }
+    std::uint8_t* buf = nullptr;
+    std::uint32_t len = 0;
+    char err[192] = {};
+    const bool ok =
+        !r.key.empty() &&
+        kvspaceXvalueEncode("int64", reinterpret_cast<const std::uint8_t*>(&v), 8,
+                            nullptr, 0, &buf, &len) == 0 &&
+        buf && kvspaceSetValue(f.h, r.key.c_str(), buf, len, 0, 0, err, sizeof err) == 0;
+    std::free(buf);
+    r.view_ok = false;
+    r.body = nullptr;
+    r.resolved = false;
+    r.sc_ok = false;
+    r.fast_bool = false;
+    return ok;
+}
+
 bool Vmkv::write_member_scalar(FrameCtx& f, std::uint8_t idx, const Scalar& s,
                                std::uint8_t width) {
     const char* kn = kind_name(s.k, width);
@@ -697,10 +728,10 @@ bool Vmkv::slot_write_i64(FrameCtx& f, std::uint8_t idx, std::int64_t v) {
     // （镜像 write_reg 的 dst_ptr 分支），免每迭代 v_encode+malloc 回退。
     if (fr.dst_ptr) {
         FReg& dr = *fr.dst_ptr;
+        if (dr.view_ok && dr.body && !store_i64_slot(f, dr, v))
+            return false;
         dr.fv = v;
         dr.fast_i64 = true;
-        if (dr.view_ok && dr.body)
-            std::memcpy(dr.body, &v, 8);
         fr.fv = v;
         fr.fast_i64 = true;
         return true;
@@ -708,10 +739,10 @@ bool Vmkv::slot_write_i64(FrameCtx& f, std::uint8_t idx, std::int64_t v) {
     // 帧局部变量（含首次写，fast_i64 未设）：无 view 也直写 fast 缓存 return
     // （免 kvspace）。非帧局部（参数/容器/系统槽）照旧落明文。
     if (is_frame_local(f, fr.key)) {
+        if (fr.view_ok && fr.body && !store_i64_slot(f, fr, v))
+            return false;
         fr.fv = v;
         fr.fast_i64 = true;
-        if (fr.view_ok && fr.body)
-            std::memcpy(fr.body, &v, 8);
         if (bin.prof_on)
             bin.prof.w_fast++;
         return true;
@@ -720,7 +751,8 @@ bool Vmkv::slot_write_i64(FrameCtx& f, std::uint8_t idx, std::int64_t v) {
     std::uint64_t cap = 0;
     if ((fr.fast_i64 || (fr.sc_ok && fr.sck == Scalar::K::Int && fr.scw == 8)) &&
         reg_body(f, idx, &body, &cap) && body && cap >= 8) {
-        std::memcpy(body, &v, 8);
+        if (!store_i64_slot(f, fr, v))
+            return false;
         fr.fv = v;
         fr.fast_i64 = true;
         if (bin.prof_on)
@@ -1437,7 +1469,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                                 w.sc_ok = false;
                             } else if (w.fast_i64 && w.view_ok && w.body) {
                                 w.fv = rv;
-                                std::memcpy(w.body, &rv, 8);
+                                (void)store_i64_slot(f, w, rv);
                                 w.fast_i64 = true;
                                 w.sc_ok = false;
                             } else {
@@ -1523,7 +1555,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                             w.sc_ok = false;
                         } else if (w.view_ok && w.body) {
                             w.fv = rf.fv;
-                            std::memcpy(w.body, &rf.fv, 8);
+                            (void)store_i64_slot(f, w, rf.fv);
                             w.fast_i64 = true;
                             w.sc_ok = false;
                         } else {
@@ -1616,7 +1648,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                         w.sc_ok = false;
                     } else if (w.fast_i64 && w.view_ok && w.body) {
                         w.fv = rv;
-                        std::memcpy(w.body, &rv, 8);  // body 直写：明文槽同步（shm 即 mmap）
+                        (void)store_i64_slot(f, w, rv);  // body 直写：明文槽同步（shm 即 mmap）
                         w.fast_i64 = true;
                         w.sc_ok = false;
                     } else {
@@ -1683,7 +1715,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                     w.fv = rv;
                     w.fast_bool = false;
                     if (w.fast_i64 && w.view_ok && w.body) {
-                        std::memcpy(w.body, &rv, 8);
+                        ok2 = store_i64_slot(f, w, rv);
                     } else {
                         ok2 = slot_write_i64(f, ins.wr[0], rv);
                     }
@@ -1816,10 +1848,13 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                     }
                 }
                 ins.native = find_native(fo);
+                // These handlers read their operands themselves.
+                ins.native_noprefetch =
+                    fo == "compactarray/at" || fo == "compactarray/set";
                 ins.native_ready = true;
             }
             NativeCtx ctx{g_vmkv, f, seg, ins, {}, 0, 0, ins.fn_fold};
-            for (int i = 0; i < ins.nrd && i < 2; i++) {
+            for (int i = 0; !ins.native_noprefetch && i < ins.nrd && i < 2; i++) {
                 if (!read_reg(f, ins.rd[i], &ctx.in[i])) {
                     *err = "native: missing operand " + std::to_string(i) + ": " +
                            ins.name;
@@ -2061,7 +2096,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                             target.fv = rf.fv;
                             target.fast_i64 = true;
                             if (target.view_ok && target.body)
-                                std::memcpy(target.body, &rf.fv, 8);
+                                (void)store_i64_slot(f, target, rf.fv);
                             if (wr.dst_ptr) {  // 写参链：同步当前帧 reg（对齐 write_reg）
                                 wr.fv = rf.fv;
                                 wr.fast_i64 = true;

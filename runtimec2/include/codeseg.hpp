@@ -47,6 +47,7 @@ struct CInsn {
     mutable std::string fn_fold;           // name with `·` folded to `/`
     mutable const void* native = nullptr;  // const NativeFn*
     mutable bool native_ready = false;
+    mutable bool native_noprefetch = false;
     mutable const Segment* call_seg = nullptr;
     mutable const void* call_jit = nullptr;
     mutable bool call_ready = false;

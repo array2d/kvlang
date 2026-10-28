@@ -1451,6 +1451,9 @@ bool h_array_at_set(NativeCtx& c, std::string* err) {
     FReg& ar0 = c.f.regs[c.ins.rd[0]];
     std::uint8_t* ab0 = nullptr;
     std::uint64_t acap0 = 0;
+    // No operand prefetch for this op: resolve the lazy key read_reg would have.
+    if (!ar0.src_ptr)
+        c.vm.ensure_reg_key(c.f, ar0);
     if (!c.vm.reg_body(c.f, c.ins.rd[0], &ab0, &acap0) || !ab0) {
         *err = "xv: bad array";
         return false;
@@ -1578,24 +1581,30 @@ bool h_array_at_set(NativeCtx& c, std::string* err) {
         if (ev.k == Scalar::K::Int && esz == 8) {
             return c.vm.slot_write_i64(c.f, c.ins.wr[0], ev.i);
         }
-        std::uint8_t* eb = nullptr;
-        std::uint32_t el = 0;
-        const char* kn =
-            c.vm.kind_name(ekind, static_cast<std::uint8_t>(esz));
-        const bool ok = kn && v_encode(kn, esz, ev, &eb, &el) && eb &&
-                        c.vm.write_reg(c.f, c.ins.wr[0], eb, el);
-        std::free(eb);
-        return ok;
+        // Same-type slot: patch the body in place; slot_write_scalar re-encodes otherwise.
+        if (!c.vm.slot_write_scalar(c.f, c.ins.wr[0], ev,
+                                    static_cast<std::uint8_t>(esz)))
+            return false;
+        c.vm.sync_fast_after_write(c.f, c.ins.wr[0], ev);
+        return true;
     }
     // 写元素：值读参最后。同槽原地 patch / 异槽 TypeError。
+    std::uint8_t tmp[8] = {0};
+    FReg& vr0 = c.f.regs[c.ins.rd[c.ins.nrd - 1]];
+    const FReg& vr = vr0.src_ptr ? *vr0.src_ptr : vr0;
+    // read_reg trusts the cache only for aliases and frame locals; mirror that.
+    const bool vtrust =
+        vr.fast_i64 && esz == 8 && ekind == Scalar::K::Int && !is_char &&
+        (vr0.src_ptr || (c.vm.ensure_reg_key(c.f, vr0) &&
+                         c.vm.is_frame_local(c.f, vr0.key)));
     Wire vw{};
-    if (!c.vm.read_reg(c.f, c.ins.rd[c.ins.nrd - 1], &vw)) {
+    kvspaceXh vh{};
+    if (vtrust) {
+        std::memcpy(tmp, &vr.fv, 8);  // same bytes the int64 wire body would carry
+    } else if (!c.vm.read_reg(c.f, c.ins.rd[c.ins.nrd - 1], &vw)) {
         *err = "xv: bad value";
         return false;
-    }
-    std::uint8_t tmp[8] = {0};
-    kvspaceXh vh{};
-    if (kvspaceXhDecode(vw.d, vw.n, &vh) == 0 && vh.body) {
+    } else if (kvspaceXhDecode(vw.d, vw.n, &vh) == 0 && vh.body) {
         const std::uint32_t take = vh.content_len < esz ? vh.content_len : esz;
         std::memcpy(tmp, vh.body, take);
     } else if (vw.n <= 8) {
