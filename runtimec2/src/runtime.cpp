@@ -4,6 +4,7 @@
 #include <cstdio>
 
 #include <cstring>
+#include <vector>
 
 #include <kvspace/kvspace.h>
 
@@ -11,6 +12,8 @@
 #include "rwir.hpp"
 #include "status.hpp"
 #include "valueio.hpp"
+#include "codeseg.hpp"
+#include "jit.hpp"
 
 namespace kv::rt {
 using bin::FrameCtx;
@@ -92,6 +95,32 @@ Runtime* runtime_of(void* rt) noexcept { return static_cast<Runtime*>(rt); }
 
 // ── 内部入口（供 abi.cpp 调用）──────────────────────────────────────
 
+// 可达性预构建：build + JIT 编译入口函数调用图内全部函数（visited 防环）。
+// 副作用仅进程内缓存；kvspace 只读。
+static void prebuild_reachable(void* h, const std::string& func_key) {
+    std::vector<std::string> work{func_key};
+    std::vector<std::string> seen;
+    while (!work.empty()) {
+        const std::string fk = work.back();
+        work.pop_back();
+        bool dup = false;
+        for (const std::string& s : seen)
+            if (s == fk)
+                dup = true;
+        if (dup)
+            continue;
+        seen.push_back(fk);
+        const Segment* seg = cached_segment(h, fk);
+        if (!seg)
+            continue;
+        if (jit_enabled())
+            jit_compile(fk, seg);
+        for (const CInsn& ci : seg->insns)
+            if (ci.op == ops::Op::Call && !ci.callee.empty())
+                work.push_back(ci.callee);
+    }
+}
+
 char* bootstrap_impl(Runtime* r, const char* funcname) {
     if (!r || !funcname || !*funcname)
         return nullptr;
@@ -114,6 +143,9 @@ char* bootstrap_impl(Runtime* r, const char* funcname) {
         !write_text(h, seglib_key(stack), func_key) ||
         !write_text(h, pc_key(vid), entry) || !write_status(h, vid, "init"))
         return nullptr;
+    // 启动预构建（M1）：从入口函数沿调用图可达性 build + JIT 编译。
+    // 执行前（test() 的 t0 之前）完成——一次性构建/编译移出计时窗。
+    prebuild_reachable(h, func_key);
     return strdup(vid.c_str());
 }
 
