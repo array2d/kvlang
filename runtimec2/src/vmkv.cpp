@@ -2312,9 +2312,14 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
     if (!jcode)
     for (int i = 1; i <= ins.nwr; i++) {
         FReg& wr = f.regs[ins.wr[i - 1]];
-        if (!ensure_reg_key(f, wr))
+        // 内存别名写参（dst_ptr，key 空）转发给非纯内存 callee：值在调用方 reg，
+        // 沿 dst_ptr 链取明文 key 作 NewPtr 目标（replace→replacen 转发链）。
+        FReg* wrk = &wr;
+        while (wrk->key.empty() && wrk->dst_ptr)
+            wrk = wrk->dst_ptr;
+        if (!ensure_reg_key(f, *wrk))
             return RunResult::Error;
-        const std::string vk = wr.key;
+        const std::string vk = wrk->key;
         std::string typ;
         if (!param_decl_type(i, &typ))
             typ = "int64";
@@ -2358,6 +2363,28 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
     RunResult rr = run_frame(nfc, 1, stop_pc, err);
     if (rr != RunResult::Ok && rr != RunResult::Returned)
         return rr;
+    // 写参回写分流失效：内存别名（mem_dst）标量直写调用方 reg，缓存即值；
+    // 其余经 kvspace 槽回写 → 调用方写参 fast 缓存陈旧，须逐级失效（重读槽），
+    // 否则下条指令的 fk 快路径读到旧值（title 每字符 isalpha 后 br 误判）。
+    for (int i = 0; i < ins.nwr; i++) {
+        bool aliased = false;
+        for (int j = 0; j < mem_dst_n; j++)
+            if (mem_dst[j] == &f.regs[ins.wr[i]]) {
+                aliased = true;
+                break;
+            }
+        if (aliased)
+            continue;
+        FReg* wr = &f.regs[ins.wr[i]];
+        do {
+            wr->fast_i64 = false;
+            wr->fast_bool = false;
+            wr->sc_ok = false;
+            wr->view_ok = false;
+            wr->resolved = false;
+            wr = wr->dst_ptr;
+        } while (wr);
+    }
     if (bin.prof_on)
         bin.prof.steps++;  // 嵌套帧自身已计时，勿重复累计
     return RunResult::Ok;

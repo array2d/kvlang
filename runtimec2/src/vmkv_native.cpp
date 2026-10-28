@@ -942,6 +942,241 @@ bool h_string_ord(NativeCtx& c, std::string* err) {
     return c.vm.slot_write_i64(c.f, c.ins.wr[0], cp);
 }
 
+// ── string 家族共用 ────────────────────────────────────────────────────────
+// UTF-8 文本 → 码点数组（无效序列按 0xFFFD，对齐 C utf8_decode_next）。
+std::vector<std::uint32_t> utf8_to_runes(const std::string& s) {
+    std::vector<std::uint32_t> r;
+    r.reserve(s.size());
+    std::size_t i = 0;
+    while (i < s.size()) {
+        const std::uint32_t c0 = static_cast<unsigned char>(s[i]);
+        std::uint32_t cp = c0, take = 1;
+        if (c0 < 0x80) cp = c0;
+        else if ((c0 >> 5) == 0x6) { cp = c0 & 0x1F; take = 2; }
+        else if ((c0 >> 4) == 0xE) { cp = c0 & 0x0F; take = 3; }
+        else if ((c0 >> 3) == 0x1E) { cp = c0 & 0x07; take = 4; }
+        else { cp = 0xFFFD; take = 1; }
+        if (i + take > s.size()) { cp = 0xFFFD; take = 1; }
+        for (std::size_t k = 1; k < take && i + k < s.size(); k++)
+            cp = (cp << 6) | (static_cast<unsigned char>(s[i + k]) & 0x3F);
+        r.push_back(cp);
+        i += take;
+    }
+    return r;
+}
+
+// 码点数组 → char/utf32 XValue → 写槽（字符串 ops 的统一输出）。
+bool write_runes(NativeCtx& c, const std::vector<std::uint32_t>& r) {
+    const std::uint32_t n = static_cast<std::uint32_t>(r.size());
+    std::vector<std::uint8_t> raw(static_cast<std::size_t>(n) * 4, 0);
+    for (std::uint32_t i = 0; i < n; i++)
+        std::memcpy(raw.data() + static_cast<std::size_t>(i) * 4, &r[i], 4);
+    const std::int32_t dims[1] = {static_cast<std::int32_t>(n)};
+    std::uint8_t* out = nullptr;
+    std::uint32_t ol = 0;
+    const bool ok = kvspaceXvalueEncode(
+                        "char/utf32", raw.data(),
+                        static_cast<std::uint32_t>(raw.size()), dims, 1, &out,
+                        &ol) == 0 &&
+                    out && c.vm.write_reg(c.f, c.ins.wr[0], out, ol);
+    std::free(out);
+    return ok;
+}
+
+// 读参必须是 char 族（剥 dims 前缀后 kind 为 char/*；对齐 C 的 char 判定）。
+bool is_char_wire(const Wire& w) {
+    std::string lt;
+    if (!v_langtype(w, &lt))
+        return false;
+    const std::size_t close = lt.find(']');
+    if (!lt.empty() && lt[0] == '[' && close != std::string::npos)
+        lt = lt.substr(close + 1);
+    return lt.rfind("char/", 0) == 0;
+}
+
+bool h_string_cmp(NativeCtx& c, std::string* err) {
+    std::string a, b;
+    if (c.ins.nrd < 2 || !c.atext(0, &a) || !c.atext(1, &b)) {
+        *err = "string·cmp: bad input";
+        return false;
+    }
+    const std::int64_t r = a < b ? -1 : a > b ? 1 : 0;
+    return c.vm.slot_write_i64(c.f, c.ins.wr[0], r);
+}
+
+bool h_string_slice(NativeCtx& c, std::string* err) {
+    std::string s;
+    std::int64_t lo = 0, hi = 0;
+    if (c.ins.nrd < 3 || !c.atext(0, &s) ||
+        !c.vm.read_i64(c.f, c.ins.rd[1], &lo) ||
+        !c.vm.read_i64(c.f, c.ins.rd[2], &hi)) {
+        *err = "string·slice: bad input";
+        return false;
+    }
+    const std::vector<std::uint32_t> r = utf8_to_runes(s);
+    if (lo < 0 || hi > static_cast<std::int64_t>(r.size()) || lo > hi) {
+        *err = "string·slice: index out of bounds";
+        return false;
+    }
+    return write_runes(c, std::vector<std::uint32_t>(r.begin() + lo, r.begin() + hi));
+}
+
+bool h_string_find(NativeCtx& c, std::string* err) {
+    std::string hs, nd;
+    if (c.ins.nrd < 2 || !c.atext(0, &hs) || !c.atext(1, &nd)) {
+        *err = "string·find: bad input";
+        return false;
+    }
+    const std::vector<std::uint32_t> hay = utf8_to_runes(hs);
+    const std::vector<std::uint32_t> ndl = utf8_to_runes(nd);
+    std::int64_t r = -1;
+    if (ndl.empty())
+        r = 0;
+    else
+        for (std::size_t i = 0; i + ndl.size() <= hay.size(); i++) {
+            bool m = true;
+            for (std::size_t j = 0; j < ndl.size(); j++)
+                if (hay[i + j] != ndl[j]) { m = false; break; }
+            if (m) { r = static_cast<std::int64_t>(i); break; }
+        }
+    return c.vm.slot_write_i64(c.f, c.ins.wr[0], r);
+}
+
+bool h_string_concat(NativeCtx& c, std::string* err) {
+    if (c.ins.nrd < 2 || !is_char_wire(c.in[0]) || !is_char_wire(c.in[1])) {
+        *err = "string·concat: requires strings";
+        return false;
+    }
+    std::string a, b;
+    if (!c.atext(0, &a) || !c.atext(1, &b)) {
+        *err = "string·concat: bad input";
+        return false;
+    }
+    return write_runes(c, utf8_to_runes(a + b));
+}
+
+// 对齐 C format_base：base 2..36，非法 base 回退 10；负数带 '-'。
+std::string format_base(std::uint64_t u, int base, bool neg) {
+    if (base < 2 || base > 36)
+        base = 10;
+    char tmp[65];
+    int n = 0;
+    if (u == 0)
+        tmp[n++] = '0';
+    while (u) {
+        const int d = static_cast<int>(u % static_cast<unsigned>(base));
+        tmp[n++] = static_cast<char>(d < 10 ? '0' + d : 'a' + d - 10);
+        u /= static_cast<unsigned>(base);
+    }
+    std::string out;
+    if (neg)
+        out.push_back('-');
+    for (int i = n - 1; i >= 0; i--)
+        out.push_back(tmp[i]);
+    return out;
+}
+
+bool h_string_formatint(NativeCtx& c, std::string* err) {
+    std::int64_t v = 0, base = 10;
+    if (c.ins.nrd < 1 || !c.ai64(0, &v)) {
+        *err = "string·formatint: bad input";
+        return false;
+    }
+    if (c.ins.nrd >= 2)
+        (void)c.ai64(1, &base);
+    const std::uint64_t u =
+        v < 0 ? static_cast<std::uint64_t>(-(v + 1)) + 1 : static_cast<std::uint64_t>(v);
+    return write_runes(c, utf8_to_runes(format_base(u, static_cast<int>(base), v < 0)));
+}
+
+bool h_string_formatuint(NativeCtx& c, std::string* err) {
+    std::int64_t v = 0, base = 10;
+    if (c.ins.nrd < 1 || !c.ai64(0, &v)) {
+        *err = "string·formatuint: bad input";
+        return false;
+    }
+    if (c.ins.nrd >= 2)
+        (void)c.ai64(1, &base);
+    return write_runes(c, utf8_to_runes(
+                               format_base(static_cast<std::uint64_t>(v),
+                                           static_cast<int>(base), false)));
+}
+
+// 整串消费完（无尾随空白/垃圾），否则 ValueError（对齐 C strtoll 三查）。
+bool parse_consumed(const std::string& s, char* end, const char* start) {
+    return !s.empty() && end != start && *end == '\0';
+}
+
+bool h_string_parseint(NativeCtx& c, std::string* err) {
+    std::string s;
+    std::int64_t base = 10;
+    if (c.ins.nrd < 1 || !c.atext(0, &s)) {
+        *err = "string·parseint: bad input";
+        return false;
+    }
+    if (c.ins.nrd >= 2)
+        (void)c.ai64(1, &base);
+    char* end = nullptr;
+    long long v = std::strtoll(s.c_str(), &end, static_cast<int>(base));
+    if (!parse_consumed(s, end, s.c_str())) {
+        *err = "ValueError: string·parseint: invalid syntax";
+        return false;
+    }
+    return c.vm.slot_write_i64(c.f, c.ins.wr[0], static_cast<std::int64_t>(v));
+}
+
+bool h_string_parseuint(NativeCtx& c, std::string* err) {
+    std::string s;
+    std::int64_t base = 10;
+    if (c.ins.nrd < 1 || !c.atext(0, &s)) {
+        *err = "string·parseuint: bad input";
+        return false;
+    }
+    if (c.ins.nrd >= 2)
+        (void)c.ai64(1, &base);
+    char* end = nullptr;
+    unsigned long long v = std::strtoull(s.c_str(), &end, static_cast<int>(base));
+    if (!parse_consumed(s, end, s.c_str())) {
+        *err = "ValueError: string·parseuint: invalid syntax";
+        return false;
+    }
+    return c.vm.write_named_i64(c.f.h, c.ins.wr[0], c.f, "uint64",
+                                static_cast<std::int64_t>(v));
+}
+
+bool h_string_parsefloat(NativeCtx& c, std::string* err) {
+    std::string s;
+    if (c.ins.nrd < 1 || !c.atext(0, &s)) {
+        *err = "string·parsefloat: bad input";
+        return false;
+    }
+    char* end = nullptr;
+    double v = std::strtod(s.c_str(), &end);
+    if (!parse_consumed(s, end, s.c_str())) {
+        *err = "ValueError: string·parsefloat: invalid syntax";
+        return false;
+    }
+    std::uint8_t raw[8];
+    std::memcpy(raw, &v, 8);
+    std::uint8_t* buf = nullptr;
+    std::uint32_t len = 0;
+    const bool ok = kvspaceXvalueEncode("float64", raw, 8, nullptr, 0, &buf,
+                                        &len) == 0 &&
+                    buf && c.vm.write_reg(c.f, c.ins.wr[0], buf, len);
+    std::free(buf);
+    return ok;
+}
+
+bool h_string_set(NativeCtx& c, std::string* err) {
+    // 对齐 C kvlangBuiltinStringSet：读参[0] 的显示文本写为 char/utf32。
+    std::string s;
+    if (c.ins.nrd < 1 || !c.atext(0, &s)) {
+        *err = "string·set: bad input";
+        return false;
+    }
+    return write_runes(c, utf8_to_runes(s));
+}
+
 // ── ndarray 元数据（numel/dim/shape）──────────────────────────────────────
 bool h_array_meta(NativeCtx& c, std::string* err) {
     Wire aw{};
@@ -1669,8 +1904,18 @@ constexpr NativeCap kScatterCaps[] = {
 
 constexpr NativeCap kStringCaps[] = {
     NCAP("string/char", h_string_char),
+    NCAP("string/cmp", h_string_cmp),
+    NCAP("string/concat", h_string_concat),
+    NCAP("string/find", h_string_find),
+    NCAP("string/formatint", h_string_formatint),
+    NCAP("string/formatuint", h_string_formatuint),
     NCAP("string/len", h_string_len),
     NCAP("string/ord", h_string_ord),
+    NCAP("string/parsefloat", h_string_parsefloat),
+    NCAP("string/parseint", h_string_parseint),
+    NCAP("string/parseuint", h_string_parseuint),
+    NCAP("string/set", h_string_set),
+    NCAP("string/slice", h_string_slice),
 };
 
 constexpr NativeCap kContainerCaps[] = {
