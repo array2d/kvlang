@@ -77,17 +77,18 @@ kvlang 用两个符号访问复合数据，语义严格分离，runtime **不得
 ## compact 数组下标
 
 数组有两种存储形态：**compact**（`[...]` 字面量，元素连续打包进单个 XValue，head kind = 元素类型）与
-**stringkeymap**（`{...}` 字面量，散 key，每元素落 `base·[i]` 坐标段独立子 key）。下标 `a[i]` / `xv·at` /
-`xv·set` 用于 **compact** 形态；stringkeymap 形态用 `for-in` / `kvspace·get` 遍历访问。
+**stringkeymap**（`{...}` 字面量，散 key，每元素落 `base·[i]` 坐标段独立子 key）。下标 `a[i]` /
+`compactarray·at` / `compactarray·set` 用于 **compact** 形态；stringkeymap 形态用 `scatterarray·at` /
+`scatterarray·set` / `for-in` / `kvspace·get` 遍历访问。
 
 下标的操作数**必须**是 compact 数组**值**本身。Ptr（ref=1）是寻址用的间接层，不是数组：`p[i]`（`p:*[]T`）
 报 TypeError——先显式解引用 `*p` 再下标（`*` 是唯一解引用路径，`[]` 不做隐式解引用，见 [[ptr]]）。
 
-- **下标读**：`a[i] -> e`（layout 脱糖为 `xv·at`/`kvspace·get`），按 `kvlangXvalueElemSize(kind)` 定的元
+- **下标读**：`a[i] -> e`（layout 脱糖为 `compactarray·at`），按 `kvlangXvalueElemSize(kind)` 定的元
   素字节宽零拷贝定位第 `i` 个元素。
-- **下标写**：`a[i] = v` / `v -> a[i]`（两种书写等价，脱糖为 `xv·set`，见 [[指令架构]]），就地改第 `i`
-  个元素；索引个数须等于维数，越界报 IndexError。
-- `xv·at(a, i) -> e` / `xv·set(a, i, v) -> a` 是显式等价形式。
+- **下标写**：`a[i] = v` / `v -> a[i]`（两种书写等价，脱糖为 `compactarray·set`，见 [[指令架构]]），
+  就地改第 `i` 个元素；索引个数须等于维数，越界报 IndexError。
+- `compactarray·at(a, i) -> e` / `compactarray·set(a, i, v) -> a` 是显式等价形式。
 
 元素字节宽由 kind 决定（`char/utf8`=1，`int32`/`float32`=4，`int64`/`float64`=8……），数组与字符串的
 元素访问据此零拷贝定位。锚例：`tutorial/04-ndarray/`（`continuous.kv`、`subscript_write.kv`、

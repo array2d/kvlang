@@ -11,11 +11,14 @@ lib kvlang/spec/layout语义/lib与rwir数据 {
 | 类别 | 语义 | 有指令体 | langtype | 布局路径 |
 |------|------|---------|---------|---------|
 | **rwfunc** | 用户函数 | 是 | `rwfunc` | `/lib/<pkg>·<name>/` |
-| **def rwir 路由头** | rwir 统一调度入口，各 runtime myrwircaps 对外入口 | 否，无 kvlang 实现体 | `def rwir` | `/lib/<opcode>` |
+| **def rwir 路由头** | rwir 统一调度入口，各 runtime myrwircaps 对外入口 | 否，无 kvlang 实现体 | `def rwir` | `/‥isa/<folded-op>` |
 | **lib 数据** | 常量 | 否，单 XValue | 值类型 | `/lib/<name>` |
 | **struct 原型** | 结构体原型 | 否 | `def struct` | `/lib/<Name>` |
 
-四类同存 `/lib`，无独立 `/rwir/` 命名空间。
+rwfunc/lib 数据/struct 原型在 `/lib`；def rwir 签名在 `/‥isa`，
+无独立 `/rwir/` 命名空间。
+
+ISA 签名在数据 store 的 `/‥isa/<folded-op>`，不设独立控制 store；详见 [[结构域]]。
 
 ## pkg 与嵌套 lib
 
@@ -35,10 +38,11 @@ lib a { lib b { rwfunc f() -> (r:int64) { 1 -> r } } }
 
 ## 签名装载：计数头 + 参数类型承载
 
-rwfunc（layout 装载）与 def rwir（runtime 注册）的签名都分两处存放（见 [[总体方案]]）：
+rwfunc（layout 装载）与 def rwir（layout 写 native / runtime 写扩展）的签名都分两处存放（见 [[总体方案]]）：
 
 1. **计数头**：`rwfunc` 落签名行锚点 `/lib/pkg·funca/[0,0]`（langtype `rwfunc`）、`def rwir` 落
-   `/lib/<op>` 节点自身（langtype `def rwir`），其 body 只记 `[nr:u16 LE][nw:u16 LE][dynamic:u8]`——
+   `/‥isa/<folded-op>` 节点自身（langtype `def rwir`），其 body 只记 `[nr:u16 LE][nw:u16
+   LE][dynamic:u8]`——
    读参个数 `nr`、写参个数 `nw`、是否变参 `dynamic`（末位读参 `...`）。**不含任何参数 langtype 串**。
 2. **参数类型承载**（按符号分两路，见 [[storetype_def族与签名行]]）：`def rwir` 落位置化签名行
    `[0,x]` 槽（`x<0` 读参、`x>0` 写参、`[0,0]` 为锚点），每槽一个 `def langtype` xvalue、body 为该参

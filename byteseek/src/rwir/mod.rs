@@ -3,8 +3,8 @@
 //!   term         : print / println / cerr / printf / input   行输出 + C 风格格式化 + 读 stdin（裸 rwir）
 //!   json         : json·to / json·from                   KV 子树 ↔ JSON 文本
 //!   http         : http·call                             网络抓取（ureq 原生）
-//!   kvlanglayout : kvlang·vet/format/layout/dump    自造 kv 代码入库（layout C ABI）
-//!   networld     : networld/proc·exec、networld/fs·size/read/write/append/list/del/mkdir/exists   外部进程 + 宿主文件系统
+//!   kvlanglayout : kvlang·vet/format/layout/printlib/printstack  自造 kv 代码入库与自省（layout C ABI）
+//!   networld     : networld/proc·exec、networld/fs·size/read/write/append/rename/list/del/mkdir/exists/isutf8   外部进程 + 宿主文件系统
 //! 不纯 rwir（llm/shell/python/byteseek·run 等）留在 byteseek，依赖本库后自行叠加。
 
 pub mod http;
@@ -440,6 +440,7 @@ pub fn in_myrwircaps(op: &str) -> bool {
 
 /// 主导驱动循环遇到就地 rwir 时分派。
 pub fn dispatch(eng: &Engine, op: &str, pc: &str) {
+    let _ = (eng, op, pc);  // 本帧中不再修改 guard_ran
     match op {
         "print" | "println" | "cerr" => term::print_line(eng, pc),
         "printf" => term::printf(eng, pc),
@@ -483,5 +484,44 @@ pub fn dispatch(eng: &Engine, op: &str, pc: &str) {
             eng.set_kv(&eng.write0(pc), &out);
         }
         other => crate::elog!("未知 rwir: {other} @ {pc}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn myrwircaps_inproc_parity() {
+        for (op, _) in MYRWIRCAPS {
+            assert!(
+                is_inproc(op),
+                "{op} registered in MYRWIRCAPS but missing from is_inproc"
+            );
+            assert!(
+                in_myrwircaps(op),
+                "{op} registered in MYRWIRCAPS but missing from rwirmap"
+            );
+        }
+    }
+
+    #[test]
+    fn embedded_stdlib_all_vet() {
+        let dsn = format!("shm:///tmp/kvlang-stdlib-vet-{}", std::process::id());
+        let kv = unsafe { kvspaceConnect(cs(&dsn).as_ptr()) };
+        assert!(!kv.is_null());
+        let eng = Engine {
+            rt: std::ptr::null_mut(),
+            kv,
+            dsn,
+            ext: None,
+        };
+        for (name, src) in crate::stdlib::EMBEDDED_KV {
+            assert_eq!(
+                kvlanglayout::vet(&eng, src),
+                "ok",
+                "stdlib/{name} failed vet"
+            );
+        }
     }
 }

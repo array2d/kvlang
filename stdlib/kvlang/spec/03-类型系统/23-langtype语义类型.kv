@@ -21,8 +21,9 @@ lib kvlang/spec/类型系统/langtype语义类型 {
 
 **def 族的来源**（`def` 不是 kvlang 关键字、不在 kv 源码书写）：`def struct`（源码 `struct Name{}`，
 layout 落原型定义节点）、`def langtype`（源码参数标注 `x:int64`，layout 铺签名行时逐参生成）由
-**layout** 产生；`def rwir`（`/lib/<op>` 路由头）**由各 runtime 注册**——kv 源码不声明 rwir，layout
-也不产生 def rwir（见 [[rwfunc布局与def_rwir]]）。
+**layout** 产生；`def rwir`（`/‥isa/<folded-op>` 路由头）由 layout
+按 native 作者清单写入、runtime 为扩展注册；kv 源码不声明 rwir
+（见 [[rwfunc布局与def_rwir]]）。
 
 `object`/`scope` **彻底不存在**——无此种类名、无此关键字；异构命名容器一律是 `struct`（见
 [[struct]]）。容器**语义类型**只剩 `stringkeymap`、`struct`（口语称「map」指的即 stringkeymap，规范一律书

@@ -1,30 +1,10 @@
 // 欢迎加入kvspace世界
-// lib kvspace —— KV 空间便利库。native rwir：kvspace·get/set/del/deltree/list/listlen；
-// rwfunc 补充：has（存在检测）、get_or（缺省回退）、set_default（幂等写）。
-// /___kv_stdlib_null___ 为内部 sentinel 路径，用户不得写入。
+// lib kvspace —— KV 空间便利库。native rwir：kvspace·del/deltree/cp/cpdir/cplist/listlen/listat；
+// rwfunc 补充：members（折叠孪生目录条目）、count（折叠后成员数）。
+// （has/get_or/set_default 已删：get/set 死刑，调用方直接用 `= /path`（无引号槽名）
+// 解引用读键值 + if 条件写表达。）
 
 lib kvspace {
-	rwfunc has(path:[]char/utf32) -> (result:bool) {
-		v = kvspace·get(path)
-		sentinel = kvspace·get("/___kv_stdlib_null___")
-		result = !(v == sentinel)
-	}
-	rwfunc get_or(path:[]char/utf32, default_val:[]char/utf32) -> (result:[]char/utf32) {
-		v = kvspace·get(path)
-		sentinel = kvspace·get("/___kv_stdlib_null___")
-		if (v == sentinel) {
-			result = default_val
-		} else {
-			result = v
-		}
-	}
-	rwfunc set_default(path:[]char/utf32, val:[]char/utf32) -> () {
-		existing = kvspace·get(path)
-		sentinel = kvspace·get("/___kv_stdlib_null___")
-		if (existing == sentinel) {
-			kvspace·set(path, val)
-		}
-	}
 	// members(path) -> (names, n)：列目录成员，并**折叠同名孪生条目**。
 	// 值与同名目录可以共存（见 kvspace/tutorial-durable/10-dir-file-coexist.sh），此时
 	// 列举会同时给出裸名 X 与目录名 X/（或 X·）——它们是两个实体，**后端不去重**（fs 发两
@@ -45,8 +25,8 @@ lib kvspace {
 				string·char(m, ml - 1) -> tail
 				if (tail != "/" && tail != "·") {
 					// 名字带 `.[…]`/`.src` 的兄弟把裸名与 `<名>/` 隔开
-					// （列举按 cmp_coord 排序：fields, fields.[0,-1], …, fields/），
-					// 所以要向后扫完**同前缀**的条目，不能只看下一条。
+					// （列举按 cmp_coord 排序），所以要向后扫完同前缀条目，
+					// 不能只看下一条。
 					j = i + 1
 					while (j < total) {
 						kvspace·listat(path, j) -> n8
@@ -74,10 +54,15 @@ lib kvspace {
 				}
 			}
 			if (!skip) {
-				array·append(names, m) -> names
+				scatterarray·append(names, m) -> names
 				n = n + 1
 			}
 			i = i + 1
 		}
+	}
+	// count(path) -> n：统计目录 path 下折叠同名孪生条目后的直接成员数。
+	rwfunc count(path:[]char/utf32) -> (n:int64) {
+		ms:[int64]·[]char/utf32 = {}
+		kvspace·members(path) -> (ms, n)
 	}
 }

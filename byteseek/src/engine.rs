@@ -28,6 +28,14 @@ impl Engine {
         let raw: Vec<u8> = utf32.iter().flat_map(|v| v.to_le_bytes()).collect();
         self.set_xvalue_encoded(key, "char/utf32", &raw, &[utf32.len() as i32]);
     }
+    /// key 是否存在（不取值；容器类值也能判）。
+    pub fn kv_exists(&self, key: &str) -> bool {
+        unsafe {
+            let (mut out, mut olen) = (null_mut(), 0u32);
+            let rc = kvspaceGet(self.kv, cs(key).as_ptr(), 0, &mut out, &mut olen);
+            rc == 0 && !out.is_null()
+        }
+    }
     pub fn get_kv(&self, key: &str) -> String {
         unsafe {
             let (mut out, mut olen) = (null_mut(), 0u32);
@@ -308,7 +316,7 @@ impl Engine {
             .collect())
     }
 
-    /// layout 一组 (名, 源码) 库进 kvspace（stdlib 与 KVLANG_LIB 共用），汇总各库的 init 函数名。
+    /// layout 一组 (名, 源码) 库进 kvspace（stdlib 与 `--lib` 共用），汇总各库的 init 函数名。
     /// 多文件库允许前向引用：未解析的库在多轮中重试，直到无进展；仍失败才报错（硬失败）。
     pub fn layout_libs<S: AsRef<str>>(&self, libs: &[(S, S)]) -> Vec<String> {
         let mut inits = Vec::new();
@@ -350,7 +358,7 @@ impl Engine {
 
     /// 运行 layout 返回的一组 init 函数（与 layout 分离）：按 pkg 深度升序（父先于子）run，
     /// run 完即删（一次性引导）。init 名由 layout 按 `lib` 声明给出（`X·init`/`init`），
-    /// 不做文件系统路径推导。常量成员式（如 /lib/math·Pi）在 init 落值；KVLANG_LIB 库
+    /// 不做文件系统路径推导。常量成员式（如 /lib/math·Pi）在 init 落值；`--lib` 库
     /// （如 byteseek，把 config/种子/REPL 编排进 <pkg>·init）同款引导。
     pub fn run_inits(&self, inits: &[String]) {
         let mut inits: Vec<String> = inits.to_vec();

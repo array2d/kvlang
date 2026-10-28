@@ -11,19 +11,23 @@ builtin_call = ( "abs" | "neg" | "sign" | "pow" | "sqrt" | "exp" | "log"
               | "uint8" | "uint16" | "uint32" | "uint64"
               | "float32" | "float64"
               | "char/utf8" | "char/utf32" | "char/ascii"        (* 类型构造器兼转换 *)
-              | "array" | "map"
               | "debugger" ) "(" [ arg_list ] ")"
 ```
 
-`print` / `println` / `cerr` / `input` **不是 native**——它们由 term runtime 的 myrwircaps（rwir 能力
+`print` / `println` / `cerr` / `input` **不是 native**——它们由 term runtime 的
+myrwircaps（rwir 能力
 集）兑现（见 runtime 语义卷）。
 
 `·` 限定内建族（`base·method(...)`，非裸名终结符）：
-`string·*`、`xv·*`（at/set/reshape/reinterpret/langtype/bodylen…）、`kvspace·*`（get/set/del…）、
-`kvlang·*`（abs 取址）、
-`ndarray·*`（numel/dim/shape）、`array·*`（append/slice/scatter/compact）、`struct·new`、`vthread·*`
+`string·*`、`compactarray·*`（new/fill/copy/newslice/newreshape/newreinterpret/at/set/numel/dim/shape/
+langtype/bodylen/parselangtype）、`scatterarray·*`（new/newscatter/newcompact/len/at/set/append/slice）、
+`kvspace·*`（get/set/del…）、
+`kvlang·*`（abs 取址）、`struct·new`、`vthread·*`
 （create/run/call/sleep/setstatus）、`time·*`、`time/duration·*`（包分隔用 `/` 分段、`·` 接方法）、
 `random·*`（uint64/int63/intn）。
+
+**创建铁律**：创建新 key/XValue 的 rwir 必须带 `new`/`fill`/`copy`；`compactarray·*` 只操作 compact
+形态，`scatterarray·*` 只操作散列容器形态，无隐式跨形态转换。
 
 ```
 (* 类型构造器兼转换：int8(x)/float32(x)/char/utf8(x)/bool(x) …；窄化按补码回绕，float→int 向零截断 *)

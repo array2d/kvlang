@@ -40,31 +40,35 @@ myrwircaps **只关乎执行位置**（哪张表登记了它、由谁就地跑�
 核心公理（normative）：
 
 1. **rwir 自描述**：opcode + 读/写参已含执行所需全部信息。
-2. **注册即签名**：扩展把 `/lib/<opcode>`（kind=`def rwir`，主槽 body=[nr][nw][dynamic]，各参数类型
+2. **注册即签名**：扩展把 `/‥isa/<folded-op>`（kind=`def rwir`，主槽 body=[nr][nw][dynamic]，各参数类型
    在签名行 `[0,x]` 各槽）写进 kvspace 即完成声明——无 `/sys/`、无中心目录。
 3. **批量执行**：扩展连续执行 myrwircaps 内的 rwir 到不在 myrwircaps 内的指令，把最终 PC 写回
    vthread。
-4. **被动消费**：跨进程扩展只监控己方 `/lib/<opcode>/vids` 队列。
+4. **被动消费**：跨进程扩展只监控己方 `/lib/<op>/vids` 队列。
 
 ## 注册与发现
 
 ### 签名注册
 
-扩展把每个 opcode 的签名写到 `/lib/<opcode>`（kind=`def rwir`），格式为：
+扩展把每个 opcode 的签名写到 `/‥isa/<folded-op>`（kind=`def rwir`），格式为：
 
 - 主槽 body：`[nr:u16 LE][nw:u16 LE][dynamic:u8]`——读参个数 `nr`、写参个数 `nw`、是否变参
   `dynamic`。
 - 签名行 `[0,x]` 各槽：每个参数类型落一个 `def langtype` xvalue（`x<0` 读参、`x>0` 写参、`[0,0]` 为
   锚点）。
 
-例：`/lib/json·to`（nr=1, nw=1）→ 主槽 body=[1,1,0]，`[0,-1]=def langtype("char/utf8")`，
+例：`/‥isa/json/to`（nr=1, nw=1）→ 主槽 body=[1,1,0]，`[0,-1]=def langtype("char/utf8")`，
 `[0,1]=def langtype("[]char/utf8")`。
 
-- 本 runtime myrwircaps 内 opcode 的签名**不落入 kvspace**——在 C 注册表直接查表（见 [[runtimec内
-  建]]）。
-- 其它 runtime 的 rwir 签名**落 `/lib/<opcode>`**，中央 runtime 经 `notinmyrwircaps` 识别：
-  `opcode[0]=='/'` → false；否则读 `/lib/<opcode>` 的 kind，等于 `def rwir` 即不在本 runtime
+- native opcode 的签名由 layout 按作者清单写入 `/‥isa`；runtime 的
+  handler 仍在 C/各语言 myrwircaps 表中，启动时按名对账。
+- 其它 runtime 的 rwir 签名**落 `/‥isa/<folded-op>`**，中央 runtime 经 `notinmyrwircaps` 识别：
+  `opcode[0]=='/'` → false；否则读 `/‥isa/<folded-op>` 的 kind，等于 `def rwir` 即不在本 runtime
   myrwircaps、须经 def rwir 路由。
+
+layout 把 `/‥isa/<folded-op>` 的 def rwir 当唯一签名来源；
+native 与扩展同形。扩展在自己的 runtime 启动时写同名声明，不设
+`‥ext` manifest、不设独立控制 store。
 
 ### 全局标记与幂等
 
@@ -76,7 +80,7 @@ myrwircaps **只关乎执行位置**（哪张表登记了它、由谁就地跑�
 ## 注册表：逐槽 langtype
 
 扩展的每个 opcode 携带读参表 `rp` 与写参表 `wp`，各槽一个 langtype（Rust
-`byteseek/src/rwir/mod.rs::Rwir{rp,wp}`）。注册时各参数类型分别写入 `/lib/<opcode>` 签名行 `[0,x]`
+`runtime-rs/src/rwir/mod.rs::Rwir{rp,wp}`）。注册时各参数类型分别写入 `/‥isa/<folded-op>` 签名行 `[0,x]`
 的 `def langtype` 槽（`rp` 各参 `x<0` 递减、`wp` 各参 `x>0` 递增）；主槽 body 只记
 `[nr][nw][dynamic]`（见 [[总体方案]]）。读参**只读**、写参**可写可读**；扩展**必须**把输出显式写入其
 写槽（见 [[执行模型]] §五）。示例（networld）：

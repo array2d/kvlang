@@ -1,12 +1,12 @@
-// kvspace·has：检测 KV 路径是否存在
+// has：检测 KV 路径是否存在（`= /path != None`）
 // 期望输出:
 //   has missing: false
 //   has existing: true
 
 rwfunc test() -> () {
-	h1 = kvspace·has("/missing_key")
+	h1 = /missing_key != None
 	println("has missing:", h1)
-	kvspace·set("/exists_key", "hello")
-	h2 = kvspace·has("/exists_key")
+	"hello" -> "/exists_key"
+	h2 = /exists_key != None
 	println("has existing:", h2)
 }

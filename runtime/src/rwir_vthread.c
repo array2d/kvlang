@@ -1,6 +1,8 @@
 // rwir_vthread —— vthread·* 虚拟线程 rwir
 
 #include "rwir_internal.h"
+#include "func_code.h"
+#include "xvaluebodyview.h"
 #include <time.h>
 
 /* vthread·create(funckey) -> vid：分配 vid、建栈索引、bootstrap 首指令、置 init，返回 vid 句柄。
@@ -80,7 +82,11 @@ int kvlangBuiltinVthreadSleep(kvlangFrame_t *f) {
     kvlangBuiltinFreeInputs(in, n);
     if (ns > 0) {
         struct timespec ts = { .tv_sec = ns / 1000000000LL, .tv_nsec = ns % 1000000000LL };
+        kvlangBodyInvalidateAll();
+        (void)kvspaceViewQuiesce(f->kvspace->handle, 1);
         nanosleep(&ts, NULL);
+        (void)kvspaceViewQuiesce(f->kvspace->handle, 0);
+        kvlangViewAckNow(f->kvspace);
     }
     kvlangBuiltinNextPc(f); return 0;
 }

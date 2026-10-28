@@ -1,4 +1,5 @@
 #include "runtime_internal.h"
+#include "xvaluebodyview.h"
 
 #define VT_MEMBER_GET(fn, want_status)                                         \
     void fn(kvspace_t *kv, const char *vtid, char **out) {                     \
@@ -65,7 +66,7 @@ static bool is_status_key(const char *key) {
 bool kvspaceKeyOffRead(kvspaceKeyOff *ko, char *out, size_t cap) {
     if (!ko->view_ok && ko->resolved && ko->kvspace->shm &&
         ko->kvspace->slot_view_sup >= 0 && is_status_key(ko->key)) {
-        int vrc = kvspaceSlotView(ko->kvspace->handle, &ko->off, ko->key,
+        int vrc = kvspaceXvalueBodyView(ko->kvspace->handle, &ko->off, ko->key,
                                   &ko->view);
         if (vrc == 0) {
             ko->kvspace->slot_view_sup = 1;
@@ -143,6 +144,8 @@ int kvlangVthreadSet(kvspace_t *kv, const char *vtid, const char *pc,
 
 /* 槽容量：pc 常态长度一档、status 更短一档；超长值退回全尺寸，仍不截断。 */
 #define VT_PC_SLACK_CAP 256
+/* status 固定档：b=16 使 wire 总长 64+16=80，与后端物理容量下限一致；
+ * 超过 16 的写入由后端硬错（persist_failed），不再用更大 cap 扩容。 */
 #define VT_STATUS_SLACK_CAP 16
 #define VT_SLACK_MAX_CAP KV_KEY_MAX
 
@@ -156,6 +159,11 @@ typedef struct {
     bool ready;
 } pc_slot_cache_t;
 static __thread pc_slot_cache_t pc_cache;
+
+/* b1b：owned 接管/回退时作废 part-write 缓存，避免指向被 WriteNewPlace 移动的旧 box。 */
+__attribute__((visibility("hidden"))) void kvlangPcCacheInvalidate(void) {
+    pc_cache.ready = false;
+}
 
 static uint32_t utf8_cp_count(const char *s, uint32_t len) {
     uint32_t n = 0;
@@ -182,7 +190,7 @@ static uint32_t cp_count(const char *s, uint32_t len) {
 static void capture_pc_view(kvlangFrame_t *f, struct kvspaceKeyOff *ko) {
     if (!ko->resolved || !f->kvspace->shm || f->kvspace->slot_view_sup < 0)
         return;
-    int vrc = kvspaceSlotView(f->kvspace->handle, &ko->off, ko->key, &ko->view);
+    int vrc = kvspaceXvalueBodyView(f->kvspace->handle, &ko->off, ko->key, &ko->view);
     if (vrc == 0 && ko->view.headlen == 64 &&
         64 + ko->view.body_cap <= ko->view.cap) {
         f->kvspace->slot_view_sup = 1;
@@ -208,8 +216,9 @@ static int pc_write_whole(kvlangFrame_t *f, struct kvspaceKeyOff *ko,
     return rc;
 }
 
-__attribute__((noinline)) static int fmt_char_langtype(uint8_t *lt, const char *s,
-                                                       uint32_t len) {
+/* langtype = "[N]char/utf8"（冷 helper）：码点数统计 + 无 snprintf 整数格式化。 */
+__attribute__((noinline, visibility("hidden"))) int
+kvlangCharLangtypeFmt(uint8_t *lt, const char *s, uint32_t len) {
     uint32_t v = cp_count(s, len);
     if (v == pc_cache.last_cp)
         return 0;
@@ -234,8 +243,8 @@ static int pc_write_part(kvlangFrame_t *f, struct kvspaceKeyOff *ko,
                          const char *s, uint32_t len) {
     uint8_t *b = pc_cache.buf;
     for (int i = 0; i < 4; i++)
-        b[2 + i] = (uint8_t)(len >> (8 * i));
-    if (fmt_char_langtype(b + XH_PREFIX, s, len) != 0)
+        b[2 + i] = (uint8_t)(len >> (8 * i)); /* a */
+    if (kvlangCharLangtypeFmt(b + XH_PREFIX, s, len) != 0)
         return -1;
     if (!ko->view_ok && ko->resolved)
         capture_pc_view(f, ko);
@@ -276,6 +285,8 @@ static void member_write(kvlangFrame_t *f, struct kvspaceKeyOff *ko,
             f->persist_failed = true;
         return;
     }
+    if (ko && kvlangPcViewWrite(f, ko, s, len) == 1)
+        return;
     if (ko && f->kvspace->shm && pc_cache.ready &&
         strcmp(pc_cache.key, ko->key) == 0 && len <= pc_cache.cap) {
         if (pc_write_part(f, ko, s, len) == 0)

@@ -4,15 +4,15 @@
 //   string kindexpr= [2]char/utf8 bodylen= 2
 rwfunc test() -> () {
 	a:[]int64 = [10, 20, 30, 40]
-	xv·langtype(a) -> ka
-	xv·bodylen(a) -> ba
+	compactarray·langtype(a) -> ka
+	compactarray·bodylen(a) -> ba
 	println("array kindexpr=", ka, "bodylen=", ba)
 	n:int64 = 7
-	xv·langtype(n) -> kn
-	xv·bodylen(n) -> bn
+	compactarray·langtype(n) -> kn
+	compactarray·bodylen(n) -> bn
 	println("scalar kindexpr=", kn, "bodylen=", bn)
 	s:char/utf8 = "hi"
-	xv·langtype(s) -> ks
-	xv·bodylen(s) -> bs
+	compactarray·langtype(s) -> ks
+	compactarray·bodylen(s) -> bs
 	println("string kindexpr=", ks, "bodylen=", bs)
 }

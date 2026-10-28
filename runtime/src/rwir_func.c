@@ -369,7 +369,7 @@ kvlangBuiltinWriteBody(kvlangFrame_t *f, const char *kind, const uint8_t *raw,
         slot->kind_len = (uint8_t)strlen(kind);
     }
     if (slot && !slot->ok && !slot->dead && slot->kind && slot->off->resolved)
-        kvlangBodyCapture(f->kvspace, slot, f->frame_root);
+        kvlangBodyCapture(f->kvspace, slot, f->frame_root, NULL);
     if (slot && slot->ok && slot->len == len && slot->kind &&
         (slot->kind == kind || strcmp(slot->kind, kind) == 0)) {
 #ifdef KV_COUNT
@@ -440,7 +440,7 @@ int kvlangBuiltinExecuteCopy(kvlangFrame_t *f) {
                 memcmp(rv->bytes + XH_PREFIX, slot->kind,
                        (size_t)slot->kind_len + 1) == 0) {
                 if (!slot->ok && !slot->dead && slot->off->resolved)
-                    kvlangBodyCapture(kv, slot, f->frame_root);
+                    kvlangBodyCapture(kv, slot, f->frame_root, NULL);
                 if (slot->ok) {
 #ifdef KV_COUNT
                     kvCBodyFast++;
@@ -503,6 +503,7 @@ int kvlangBuiltinExecuteCopy(kvlangFrame_t *f) {
         }
         kvspaceKeyOff *wo =
             inst->write_offs ? inst->write_offs[i] : NULL;
+        /* 整值写可能移动 box：先按同一规则失效 body/operand view。 */
         if (wo && cv.bytes && cv.length >= XH_PREFIX)
             kvlangBodyInvalidateKind(wo->key, xh_langtype(cv.bytes),
                                      xh_langtype_len(cv.bytes));

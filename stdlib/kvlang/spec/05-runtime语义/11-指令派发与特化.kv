@@ -17,6 +17,10 @@ opcode 的特化命名与数值 promotion 规则（语言可见）。
   `yield_pc` 冒泡，主循环的 yield/pc 回传逻辑不变。
 - native handler 不感知委托、def rwir、调用与 yield。
 
+layout 的 target selection 在 layout 期完成（Rwir/User）；runtime 的
+handler_id/派发模型不因 `/‥isa` 改变。typed Rwir opcode 仍由 layout 的
+`specialize` 按静态类型发出；不做 Code/字节码下译。
+
 ## opcode 特化命名
 
 - 同型：`<kind>·<op>`（如 `int64·add`、`float64·lt`）。仅当**全部操作数静态类型严格一致**
@@ -41,8 +45,8 @@ opcode 的特化命名与数值 promotion 规则（语言可见）。
 
 ## 值相关检查（保留）
 
-除零/模零、None 比较、越界与动态槽的运行时判别不受本章影响；特化 handler 只在
-静态类型完全匹配时接管，其余回退通用实现，语义必须逐字节一致。
+除零/模零、None 比较、越界与动态槽的运行时判别不受本章影响；
+通用 handler 按实际 kind 归约，语义与旧实现逐字节一致。
 
 ## 写槽 body 快路径（实现约束）
 

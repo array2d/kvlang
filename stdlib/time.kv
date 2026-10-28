@@ -1,11 +1,15 @@
 // 欢迎加入kvspace世界
 // lib time —— 时间标准库便利函数。native rwir: now/sub/add/before/after；
-// since/equal/elapsed_ns 是 rwfunc 封装（kv 源码，可寻址/可自改）。
+// since/until/equal/elapsed_ns/elapsed_ms/elapsed_s/max/min 是 rwfunc 封装（kv 源码，可寻址/可自改）。
 
 lib time {
 	rwfunc since(t:time) -> (dur:duration) {
 		time·now() -> now
 		time·sub(now, t) -> dur
+	}
+	rwfunc until(t:time) -> (dur:duration) {
+		time·now() -> now
+		time·sub(t, now) -> dur
 	}
 	rwfunc equal(a:time, b:time) -> (r:bool) {
 		time·before(a, b) -> ba
@@ -15,5 +19,29 @@ lib time {
 	rwfunc elapsed_ns(t:time) -> (ns:int64) {
 		time·since(t) -> dur
 		time/duration·as_nanos(dur) -> ns
+	}
+	rwfunc elapsed_ms(t:time) -> (ms:int64) {
+		time·since(t) -> dur
+		time/duration·as_millis(dur) -> ms
+	}
+	rwfunc elapsed_s(t:time) -> (s:int64) {
+		time·since(t) -> dur
+		time/duration·as_seconds(dur) -> s
+	}
+	rwfunc max(a:time, b:time) -> (r:time) {
+		time·after(a, b) -> gt
+		if (gt) {
+			a -> r
+		} else {
+			b -> r
+		}
+	}
+	rwfunc min(a:time, b:time) -> (r:time) {
+		time·before(a, b) -> lt
+		if (lt) {
+			a -> r
+		} else {
+			b -> r
+		}
 	}
 }

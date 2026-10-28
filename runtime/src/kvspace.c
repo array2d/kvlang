@@ -1,4 +1,6 @@
 #include "runtime_internal.h"
+#include "func_code.h"
+#include "xvaluebodyview.h"
 #include "kvcpu_internal.h"
 
 kvspace_t *kvlangKvspaceConnect(const char *dsn) {
@@ -11,6 +13,8 @@ kvspace_t *kvlangKvspaceConnect(const char *dsn) {
         return NULL;
     }
     k->shm = strncmp(dsn, "shm://", 6) == 0;
+    if (k->shm)
+        (void)kvspaceViewQuiesce(k->handle, 0);  /* 退出 open 的默认静默 */
     return k;
 }
 
@@ -18,8 +22,6 @@ void kvlangKvspaceDisconnect(kvspace_t *k) {
     if (!k)
         return;
     kvlangParkedFramesInvalidateAll(k->handle);
-    if (k->isa_handle && !k->isa_shared)
-        kvspaceClose(k->isa_handle);
     if (k->handle)
         kvspaceClose(k->handle);
     free(k);
@@ -204,7 +206,13 @@ int kvlangKvspaceWatch(kvspace_t *k, const char *key, const kvlangXvalue_t *targ
     uint32_t tl = target->length;
     uint8_t *d;
     uint32_t len;
-    if (kvspaceWatch(k->handle, key, t, tl, tick_ns, &d, &len) != 0)
+    /* 阻塞点：作废全部 body slot 并声明静默；返回后再放开、惰性重捕。 */
+    kvlangBodyInvalidateAll();
+    (void)kvspaceViewQuiesce(k->handle, 1);
+    int wrc = kvspaceWatch(k->handle, key, t, tl, tick_ns, &d, &len);
+    (void)kvspaceViewQuiesce(k->handle, 0);
+    kvlangViewAckNow(k);
+    if (wrc != 0)
         return -1;
     if (d && len) {
         out->bytes = d; /* 借用视图；调用方在同一指令内使用，不 free */

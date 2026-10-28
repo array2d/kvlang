@@ -23,7 +23,7 @@ rwfunc walk(path:[]char/utf32, indent:[]char/utf32, down:int64) -> () {
 	0 -> i
 	while (i < n) {
 		kvspace·listat(ms, i) -> mk
-		kvspace·get(ms, mk) -> nm8
+		ms·*mk -> nm8
 		char/utf32(nm8) -> nm
 		path + nm -> full
 		"" -> child
@@ -44,11 +44,11 @@ rwfunc walk(path:[]char/utf32, indent:[]char/utf32, down:int64) -> () {
 			}
 		}
 		if (child == "") {
-			kvspace·get(full) -> v
+			full -> v
 			if (v == None) {
 				println(indent, nm)
 			} else {
-				xv·langtype(v) -> lt
+				compactarray·langtype(v) -> lt
 				char/utf32(lt) -> lts
 				println(indent, nm, lts)
 			}

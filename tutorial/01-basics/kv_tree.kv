@@ -8,7 +8,7 @@
 
 // path 下是否存在字段 key
 rwfunc has_field(path:[]char/utf32, key:[]char/utf32) -> (ok:bool) {
-	kvspace·get(path, key) != None -> ok
+	path·*key != None -> ok
 }
 
 // 列出 prefix 下的子键并计数（成员数查 memindex，非 ndarray 形状）
@@ -18,21 +18,21 @@ rwfunc count_children(prefix:[]char/utf32) -> (n:int64) {
 
 rwfunc test() -> () {
 	/tmp/kvt:int64·int64 = {}
-	kvspace·set("/tmp/kvt·data", 42)
-	kvspace·get("/tmp/kvt·data") -> v
+	42 -> "/tmp/kvt·data"
+	"/tmp/kvt·data" -> v
 	println("v=", v)
 	has_field("/tmp/kvt", "data") -> h
 	println("has_data=", h)
-	kvspace·get("/tmp/kvt", "data") -> x
+	"/tmp/kvt"·*"data" -> x
 	println("x=", x)
 	kvspace·mkindex("/tmp/kvt/")
-	kvspace·set("/tmp/kvt/a", 1)
-	kvspace·set("/tmp/kvt/b", 2)
+	1 -> "/tmp/kvt/a"
+	2 -> "/tmp/kvt/b"
 	count_children("/tmp/kvt/") -> n
 	println("n=", n)
-	ndarray·numel([10,20,30]) -> m
-	ndarray·dim([10,20,30]) -> d
+	compactarray·numel([10,20,30]) -> m
+	compactarray·dim([10,20,30]) -> d
 	println("numel=", m, "dim=", d)
-	ndarray·shape([10,20,30]) -> s
+	compactarray·shape([10,20,30]) -> s
 	println("shape0=", s[0])
 }

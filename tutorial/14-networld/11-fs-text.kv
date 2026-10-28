@@ -1,4 +1,5 @@
-// networld/fs 文本级 rwfunc：readtext / writetext / match / glob / grep
+// networld/fs 文本与路径 rwfunc：readtext / writetext / appendtext / copyfile /
+//   basename / dirname / ext / joinpath / match / glob / grep
 //   文件 ↔ 文本按 UTF-8 往返（字节级 read/write 仍是 native rwir）
 //   match：名字段通配（* 任意串、? 单字符）  glob：按通配展开路径（\n 连接）
 //   grep：文件或目录下匹配 glob 的成员逐行查找
@@ -9,11 +10,15 @@
 //   match= true false
 //   glob= /tmp/kvlang_fs_text/a.txt
 //   grep= /tmp/kvlang_fs_text/a.txt:1:hello world
+//   append= 14
+//   copied= 14
+//   path= a.txt /tmp/kvlang_fs_text .txt /tmp/kvlang_fs_text/sub/x.kv
 rwfunc test() -> () {
 	d = "/tmp/kvlang_fs_text"
 	a = "/tmp/kvlang_fs_text/a.txt"
 	b = "/tmp/kvlang_fs_text/b.md"
 	c = "/tmp/kvlang_fs_text/c.txt"
+	cp = "/tmp/kvlang_fs_text/copy.md"
 	noenv:[int64]·[]char/utf32 = {}
 	clean:[int64]·[]char/utf32 = {"rm", "-rf", "/tmp/kvlang_fs_text"}
 	networld/proc·exec(clean, noenv) -> rc
@@ -33,4 +38,14 @@ rwfunc test() -> () {
 	println("glob=", g)
 	networld/fs·grep("world", d, "*.txt") -> hits
 	println("grep=", hits)
+	networld/fs·appendtext(b, "more line\n") -> wa
+	networld/fs·size(b) -> bsz
+	println("append=", bsz)
+	networld/fs·copyfile(b, cp) -> cpsz
+	println("copied=", cpsz)
+	networld/fs·basename(a) -> bn
+	networld/fs·dirname(a) -> dn
+	networld/fs·ext(a) -> ex
+	networld/fs·joinpath(d, "sub/x.kv") -> jp
+	println("path=", bn, dn, ex, jp)
 }

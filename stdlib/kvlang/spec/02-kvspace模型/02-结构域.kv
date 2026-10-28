@@ -20,6 +20,13 @@ kvspace 的路径中，只有以下前缀由语言核心赋予固定结构语义
 径 `/lib/{pkg}·{func}`。多文件经引导拼接后统一 layout 进 `/lib`，已加载条目去重。函数在 `/lib` 下只
 读，帧调用经 extindex 复用同一份指令树（见 [[指令布局格式]]）。
 
+### ISA 签名
+
+ISA 签名与程序同处数据 store，位于 `/‥isa/<folded-op>` 的 `def rwir` 节点；
+native 与扩展统一，不设独立控制 store。`folded-op` 把 opcode 的 `·`
+与 `/` 都折成 `/`，折叠冲突硬错 `ISA op path conflict`。详见
+[[指令布局格式]]。
+
 ### `/vthread`
 
 每个虚线程 `vid` 占一棵子树 `/vthread/{vid}/`，借用 Unix `/proc/<pid>/` 思想：栈帧为其下的 KV 子树，
@@ -36,7 +43,7 @@ stdout/stderr 捕获为扩展存储句柄，其逻辑定位符形如 `/networld/
 ### 没有设备域
 
 kvspace 世界中没有终端、没有设备文件，只有 key 与 value。`print`/`println` 等 I/O 不是地址空间的一个
-域，也不是核心内建，而是 rwir（以 def rwir 路由头注册于 `/lib/<opcode>`，见 [[指令布局格式]]），执行
+域，也不是核心内建，而是 rwir（以 def rwir 路由头注册于 `/‥isa/<folded-op>`，见 [[指令布局格式]]），执行
 时直接作用于宿主 I/O。
 	"#### -> /lib/kvlang/spec/kvspace模型/结构域
 }

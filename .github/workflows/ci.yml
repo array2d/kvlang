@@ -17,7 +17,7 @@ jobs:
         run: ./ci/deps.sh
       - name: 构建
         run: |
-          make runtime
+          make runtimec2
           make layout
           sudo cp layout/target/release/libkvlanglayout.so /usr/lib/
           make byteseek
@@ -37,6 +37,7 @@ jobs:
       - name: 构建 layout + byteseek（提供 bin/byteseek、kvlanglayout）
         run: |
           mkdir -p bin
+          make runtimec2
           make runtime
           make layout
           make byteseek
@@ -57,3 +58,77 @@ jobs:
           KVLANG_LAYOUT_BIN="$PWD/bin/kvlanglayout" \
           KVLANG_TERM_BIN="$PWD/bin/byteseek" \
           python3 runtime/tests/isa_conformance.py
+
+  # #493 单一二进制：嵌入 .so + memfd dlsym。构建、无自有库/rpath 校验、冒烟。
+  single:
+    runs-on: ubuntu-latest
+    name: single-binary
+    steps:
+      - uses: actions/checkout@v4
+      - name: 下载 ABI 依赖
+        env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+        run: ./ci/deps.sh
+      - name: 构建 kvspace 前端（含 RTLD_NOLOAD 能力标记；v0.3.18 发布版没有）
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/array2d/kvspace /tmp/kvspace-src
+          cmake -S /tmp/kvspace-src -B /tmp/kvspace-src/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build /tmp/kvspace-src/build -j
+          # 守卫：前端必须带 RTLD_NOLOAD 能力标记，否则单文件会静默回退到系统目录后端
+          grep -aq "kvspace:embed-noload" /tmp/kvspace-src/build/libkvspace.so.1
+      - name: 启动本地 redis（redis:// 冒烟）
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq redis-server
+          sudo redis-server --daemonize yes --port 6379
+          sleep 1
+      - name: 构建 runtime + layout（单文件 payload 里的两份）
+        run: |
+          make runtimec2
+          make layout
+      - name: 构建单一二进制
+        run: FRONTEND_SO=/tmp/kvspace-src/build/libkvspace.so.1 make single
+      - name: 校验：运行时只有 KVSPACE 一个环境变量
+        run: |
+          set -euo pipefail
+          # 单二进制不得在运行期 setenv 任何 KVSPACE*（只认 KVSPACE 选后端）
+          ! grep -rn 'setenv.*KVSPACE' byteseek/src/
+      - name: 校验：无自有 .so、无 RPATH
+        run: |
+          set -euo pipefail
+          ldd bin/kvlang-single | tee /tmp/ldd.txt
+          ! grep -E 'kvspace|kvlang' /tmp/ldd.txt
+          ! readelf -d bin/kvlang-single | grep -E 'RPATH|RUNPATH'
+      - name: 冒烟（移走系统库后 shm/fs + tutorial 子集）
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/single-ci && mkdir -p /tmp/single-ci
+          # 证明单文件不依赖系统安装：临时移走 kvspace 前端与后端目录
+          sudo mv /usr/lib/kvspace /usr/lib/kvspace.hidden
+          for f in /usr/lib/libkvspace.so*; do
+            sudo mv "$f" "/tmp/$(basename "$f").hidden"
+          done
+          restore() {
+            sudo mv /usr/lib/kvspace.hidden /usr/lib/kvspace
+            for f in /tmp/libkvspace.so*.hidden; do
+              sudo mv "$f" "/usr/lib/$(basename "$f" .hidden)"
+            done
+          }
+          trap restore EXIT
+          # 三种 DSN，且环境里只有 KVSPACE（绝对路径调用）
+          for dsn in "shm:///tmp/single-ci/s" "fs:///tmp/single-ci/fs" \
+                     "redis://127.0.0.1:6379"; do
+            out=$(env -i KVSPACE="$dsn" "$PWD/bin/kvlang-single" -c 'print("ok")')
+            echo "$dsn -> $out"
+            [ "$out" = "ok" ]
+          done
+          env -i KVSPACE=fs:///tmp/single-ci/fs2 \
+            "$PWD/bin/kvlang-single" tutorial/01-basics/hello.kv >/dev/null
+          # tutorial 子集：TERM 用 single，layout 用 single 的 layout 子命令
+          printf '#!/bin/sh\nexec env KVSPACE="$2" "$PWD/bin/kvlang-single" layout "$1"\n' \
+            > /tmp/kl-wrap.sh
+          chmod +x /tmp/kl-wrap.sh
+          ln -sf "$PWD/bin/kvlang-single" /tmp/kvlang
+          PATH=/tmp:$PATH KVLANG_TERM_BIN="$PWD/bin/kvlang-single" \
+          KVLANG_LAYOUT_BIN=/tmp/kl-wrap.sh KVSPACE=shm:///tmp/single-ci/tut \
+            python3 tutorial/test.py --no-build --filter 01

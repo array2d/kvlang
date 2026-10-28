@@ -1,20 +1,36 @@
 // 欢迎加入kvspace世界
 lib kvlang/spec/类型系统/ndarray元数据算子 {
-	r####"# ndarray 元数据算子
+	r####"# 数组形状观测算子
 
-三个算子统一观测数组形状，对两形态均适用：
+形状观测按形态分离：`compactarray·*` 只观测 compact，`scatterarray·len` 只观测散列容器。
+**任何算子不得跨形态**（compact 用 `scatterarray·len` 或散列用 `compactarray·numel` 均报 TypeError）。
+
+**compactarray（compact 形态）**：
 
 | 算子 | 语义 |
 |------|------|
-| `ndarray·numel(a)` | 元素总数（compact 读 head array_len；stringkeymap 读成员数） |
-| `ndarray·dim(a)` | 维数（head ndim） |
-| `ndarray·shape(a)` | 各维长度，返回一维 `int64` compact 数组 |
+| `compactarray·numel(a)` | 元素总数（读 head array_len = ∏dims） |
+| `compactarray·dim(a)` | 维数（head ndim） |
+| `compactarray·shape(a)` | 各维长度，返回一维 `int64` compact 数组 |
 
 ```kv
 a:[]int64 = [10, 20, 30, 40]
-ndarray·numel(a) -> n   // 4
-ndarray·dim(a)   -> d   // 1
-ndarray·shape(a) -> s   // [4]；s[0] = 4
+compactarray·numel(a) -> n   // 4
+compactarray·dim(a)   -> d   // 1
+compactarray·shape(a) -> s   // [4]；s[0] = 4
+```
+
+**scatterarray（散列形态）**：
+
+| 算子 | 语义 |
+|------|------|
+| `scatterarray·len(a)` | 实存成员数（memindex 权威，非坐标空间容量） |
+| `scatterarray·at(a, i)` | 坐标段 `[i]` 成员读 |
+
+```kv
+b = scatterarray·newscatter(a)
+scatterarray·len(b) -> n     // 实存成员数
+scatterarray·at(b, 2) -> e   // b·[2]
 ```
 "#### -> /lib/kvlang/spec/类型系统/ndarray元数据算子
 }

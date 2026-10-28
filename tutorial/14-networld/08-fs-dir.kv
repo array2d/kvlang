@@ -16,7 +16,7 @@ rwfunc print_dir(d:[]char/utf32) -> () {
 	i = 0
 	while (i < nc) {
 		kvspace·listat(names, i) -> key
-		kvspace·get(names, key) -> nm
+		names·*key -> nm
 		println("name=", nm)
 		i = i + 1
 	}
@@ -30,8 +30,8 @@ rwfunc test() -> () {
 	clean:[int64]·[]char/utf32 = {"rm", "-rf", "/tmp/kvlang_fs_dir"}
 	networld/proc·exec(clean, noenv) -> rc
 	networld/fs·mkdir(d) -> mc
-	networld/fs·write(da, xv·reinterpret("A", "[]uint8")) -> w1
-	networld/fs·write(db, xv·reinterpret("B", "[]uint8")) -> w2
+	networld/fs·write(da, compactarray·newreinterpret("A", "[]uint8")) -> w1
+	networld/fs·write(db, compactarray·newreinterpret("B", "[]uint8")) -> w2
 	print_dir(d)
 	networld/fs·del(da) -> d1
 	networld/fs·del(db) -> d2

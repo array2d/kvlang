@@ -222,10 +222,10 @@ static const kvlangRwirCap myrwircaps[] = {
     {"float32", kvlangBuiltinCastFloat32, false}, {"float64", kvlangBuiltinCastFloat64, false},
     {"char/utf32", kvlangBuiltinCastCharUtf32, false}, {"char/utf8", kvlangBuiltinCastCharUtf8, false}, {"char/ascii", kvlangBuiltinCastCharAscii, false},
     /* collection */
-    {"array", kvlangBuiltinArray, false}, {"array·fill", kvlangBuiltinArrayFill, false},
+    {"array·new", kvlangBuiltinArray, false}, {"array·fill", kvlangBuiltinArrayFill, false},
     {"array·scatter", kvlangBuiltinScatter, false}, {"array·compact", kvlangBuiltinCompact, false},
     {"array·append", kvlangBuiltinAppend, false}, {"array·slice", kvlangBuiltinSlice, false},
-    {"obj", kvlangBuiltinObj, true}, {"map", kvlangBuiltinMap, true}, {"struct·new", kvlangBuiltinStructNew, false},
+    {"obj", kvlangBuiltinObj, true}, {"map·new", kvlangBuiltinMap, true}, {"struct·new", kvlangBuiltinStructNew, false},
     {"ndarray·numel", kvlangBuiltinNdarrayNumel, false}, {"ndarray·dim", kvlangBuiltinNdarrayDim, false}, {"ndarray·shape", kvlangBuiltinNdarrayShape, false},
     {"xv·at", kvlangBuiltinXvAt, false}, {"xv·set", kvlangBuiltinXvSet, false}, {"xv·reshape", kvlangBuiltinXvReshape, false},
     {"xv·reinterpret", kvlangBuiltinXvReinterpret, false},

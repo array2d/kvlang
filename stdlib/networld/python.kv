@@ -1,7 +1,8 @@
 // 欢迎加入kvspace世界
-// lib networld/python —— 跑一段 python3 代码取 stdout（rwfunc，kv 源码）。
-//   run(code) -> out：等价 `python3 -c code`，返回 stdout 文本（stderr 一并捕获但不返回）。
-// 实现在 networld/proc·exec 之上；要退出码或 stderr 就直接用 proc·exec。
+// lib networld/python —— 跑一段 python3 代码取输出与退出码（rwfunc，kv 源码）。
+//   run(code) -> out：等价 `python3 -c code`，返回 stdout（stderr 一并捕获但不返回）。
+//   exec(code) -> (ret, out, err)：返回退出码（uint8）、stdout、stderr。
+// 实现在 networld/proc·exec 之上。
 
 lib networld/python {
 	rwfunc run(code:[]char/utf32) -> (out:[]char/utf32) {
@@ -9,5 +10,12 @@ lib networld/python {
 		a:[int64]·[]char/utf32 = {"python3", "-c", code}
 		networld/proc·exec(a, noenv) -> ret, o, e
 		o -> out
+	}
+	rwfunc exec(code:[]char/utf32) -> (ret:uint8, out:[]char/utf32, err:[]char/utf32) {
+		noenv:[int64]·[]char/utf32 = {}
+		a:[int64]·[]char/utf32 = {"python3", "-c", code}
+		networld/proc·exec(a, noenv) -> ret, o, e
+		o -> out
+		e -> err
 	}
 }

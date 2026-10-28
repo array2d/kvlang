@@ -4,13 +4,13 @@
 //   true
 //   false
 rwfunc near_dup(nums:[]int64, k:int64) -> () {
-	n = ndarray·numel(nums)
+	n = compactarray·numel(nums)
 	h:[]char/utf8·int64 = {}
 	found = false
 	0 -> i
 	while (i < n) {
 		nums[i] -> x
-		kvspace·get(h, x) != None -> exists
+		h·*x != None -> exists
 
 		if (exists) {
 			h·*x -> j
@@ -24,7 +24,7 @@ rwfunc near_dup(nums:[]int64, k:int64) -> () {
 			}
 		}
 		if (found == false) {
-			kvspace·set(h, x, i + 1) -> _
+			i + 1 -> h·*x
 		}
 		i = i + 1
 	}

@@ -13,6 +13,6 @@ rwfunc test() -> () {
 	println("h·x =", v)
 	42 -> h·z
 	println("h·z =", h·z)
-	kvspace·get(h, "x") != None -> ok
+	h·*"x" != None -> ok
 	println("has x:", ok)
 }

@@ -4,7 +4,7 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 LAYOUT="${KVLANG_LAYOUT_BIN:-$ROOT/bin/kvlanglayout}"
-KVLANG="${KVLANG_TERM_BIN:-$ROOT/bin/byteseek}"
+KVLANG="${KVLANG_TERM_BIN:-$ROOT/bin/kvlang}"
 boot() { KVSPACE="$1" "$KVLANG" -c 'print("boot")' >/dev/null 2>&1; }
 KVC="${KVSPACE_CLI:-kvspace}"
 command -v "$KVC" >/dev/null 2>&1 || { echo "FAIL: 需要 kvspace CLI（设置 KVSPACE_CLI）"; exit 1; }

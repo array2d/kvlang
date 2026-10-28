@@ -10,7 +10,7 @@
  *   - 读：cell 的 rview（kvlangOperandViewPromote 建立，失效表/世代统一清理），
  *         或行内字面量；
  *   - 写：行的 body 槽（kvlangBodyCapture 建立，同一失效表）；
- *   - ‥pc / ‥status：kvspaceSlotView 槽视图（通用路径首次写/读时捕获）。
+ *   - ‥pc / ‥status：kvspaceXvalueBodyView 槽视图（通用路径首次写/读时捕获）。
  * 任何前提不满足（视图未建、kind/宽度不符、None、除零、status 非 running、
  * rview 周期复核点……）立即停下，把这一行原样交还通用路径——语义不分叉。
  *

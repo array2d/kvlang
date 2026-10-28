@@ -5,16 +5,18 @@ lib kvlang/spec/类型系统/归属与存储 {
 | 归属 | 存放位置 | 种类 |
 |------|---------|------|
 | 用户函数签名 | `/lib/<pkg>·<name>` | `rwfunc` |
-| def rwir 路由头 | `/lib/<opcode>` | `def rwir` |
-| native 算子签名 | C 注册表（不落入 kvspace） | —— |
+| def rwir 路由头 | `/‥isa/<folded-op>` | `def rwir` |
+| native/扩展签名 | `/‥isa/<folded-op>` | `def rwir` |
 
 **铁律**：`rwfunc` 每个参数落入 kvspace 的 **def langtype**（参数定义键 body 的类型串，即定义处的匹配类
 型）与源码里的类型标注**逐字节相同**（同一文法；变参尾缀 `...` 除外——它是签名层 arity、解析时剥离，见
-[[函数]]）；`def rwir` 源码不声明，其参数 def langtype 由各 runtime 注册时按同一文法写入。签名**不写
+[[函数]]）；`def rwir` 源码不声明，其参数 def langtype 由 layout 写 native、
+runtime 写扩展，按同一文法写入。签名**不写
 进**计数头节点的 langtype、也不塞进其 body，分两处存：
 
-1. **计数头**：`rwfunc` 落 `/lib/pkg·funca/[0,0]`（langtype `rwfunc`）、`def rwir` 落 `/lib/<op>` 节点自
-   身（langtype `def rwir`），body 只记 `[nr:u16 LE][nw:u16 LE][dynamic:u8]`——读参个数 `nr`、写参个数
+1. **计数头**：`rwfunc` 落 `/lib/pkg·funca/[0,0]`（langtype `rwfunc`）、`def rwir` 落
+   `/‥isa/<folded-op>` 节点自身（langtype `def rwir`），body 只记 `[nr:u16 LE][nw:u16
+   LE][dynamic:u8]`——读参个数 `nr`、写参个数
    `nw`、是否变参 `dynamic`（末位读参 `...`）；**不含任何参数 langtype 串**。
 2. **参数类型承载**（按符号分两路，见 [[storetype_def族与签名行]]）：
    - `def rwir` → **位置化签名行 `[0,x]`**（`x<0` 读参、`x>0` 写参、`[0,0]` 锚点），每槽 `def langtype`，
@@ -23,10 +25,10 @@ lib kvlang/spec/类型系统/归属与存储 {
      `def langtype`，body = 参数名 + NUL + 类型串；函数体形参引用改走帧坐标，运行期不查此键（见
      [[调用extindex]]）。
 
-故计数头节点的 langtype 就是裸种类名 `rwfunc`（rwfunc 的 `[0,0]`）/`def rwir`（def rwir 的
-`/lib/<op>` 节点自身）本身，不再是「签名 langtype 串」。native 算子的 langtype 内联在 C 注册表中，是唯
-一权威来源，运行时匹配**直接读 C 表、不回查 kvspace**；数值多类型算子在 C 表中融合为单条（如
-`add(a:int8|…|float64, b:…)`）。
+故计数头节点的 langtype 就是裸种类名 `rwfunc`（rwfunc 的 `[0,0]`）/`def rwir`
+（def rwir 的 `/‥isa/<folded-op>` 节点自身）本身，不再是「签名 langtype 串」。
+native 与扩展的签名都以 `/‥isa/<folded-op>` 为唯一来源；runtime 启动按
+myrwircaps 名字表 fold 读取并对账，缺一/多一硬错。
 
 ## 强制类型标注
 

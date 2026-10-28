@@ -20,20 +20,29 @@ layout 能力经 cdylib 导出，第三方无需 fork 子进程即可布局（�
 成功返回 0（`entry_out` 为 init 入口名列表，`\n` 分隔），失败返回 -1（`err_out` 为错误）。
 `kvlangLayoutFile` 是 `kvlangLayoutCode` 的薄封装。
 
+## ISA 签名 bootstrap
+
+layout 只连一个数据 store：编译前把 native 作者清单写成/刷新
+`/‥isa/<folded-op>` 的 `def rwir`（签名行 `[0,x]`），再从同一子树
+读回；只有一个数据 store。扩展 rwir 由对应 runtime 在同一 `/‥isa`
+子树注册；runtime 只按 `/‥isa/<folded-op>` 与 myrwircaps 对账。
+`vet`/`format` 不写/不读 ISA。
+
 ## vet 闸门
 
 `vet` 走 parse + lower，但**不写 kvspace**。它是自造代码的装载前闸门：LLM 生成或外部注入的 `.kv` 先
 过 vet，失败不污染 `/lib`。
 
-## KVLANG_LIB 引导与 init 入口
+## `--lib` 引导与 init 入口
 
-`KVLANG_LIB` 引导 layout 与 run 各 lib 的 init。pkg **严格取自 `lib` 声明**（`lib X { … }` → `X`），
-不从文件名推导。layout 产出的 init 入口名列表即消费方驱动 init 的依据；tutorial 按约定跑 `test` 入
-口。
+`kvlang --lib p1:p2:…` 引导 layout 与 run 各 lib 的 init（路径以 `:` 分隔；目录递归、相对根、排序）。
+pkg **严格取自 `lib` 声明**（`lib X { … }` → `X`），不从文件名推导。不带 `--lib` 时不存在隐式库路径，
+也没有对应的环境变量。layout 产出的 init 入口名列表即消费方驱动 init 的依据；tutorial 按约定跑
+`test` 入口。
 
 ## 导出符号
 
-layout 导出五个 `kvlangLayout*` 入口（file / code / vet / format / dump）与 `kvlangKindexprParse`。**符号
+layout 导出六个 `kvlangLayout*` 入口（file / code / vet / format / printlib / printstack）与 `kvlangKindexprParse`。**符号
 清单的权威来源是构建产物**——`nm -D --defined-only layout/target/release/libkvlanglayout.so | grep
 '^kvlang'`；本文只约定语义，不抄清单（抄清单必漂移）。
 	"#### -> /lib/kvlang/spec/layout语义/layout流水线接口

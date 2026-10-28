@@ -8,7 +8,7 @@
 //!   byteseek vet <file>      仅校验（parse+lower），打印 ok 或错误
 //!   byteseek format <file>   格式化输出到 stdout
 //!   byteseek printlib <file> [prefix]  layout 该文件后，把 /lib（或 prefix）子树重建为可运行 kvlang + 槽位注释（不读 .src）
-//!   byteseek（无参，设 KVLANG_LIB=p1:p2:…）  layout 各路径下所有 .kv → run 各 lib 的 init（pkg 取自源码 `lib` 声明，同 stdlib）
+//!   byteseek --lib p1:p2:…   layout 各路径下所有 .kv → run 各 lib 的 init（pkg 取自源码 `lib` 声明，同 stdlib）
 //! 驱动循环：executeVthread 主导执行，遇 rwir 停下；就地 rwir（print/json/http/…）
 //! 连续批处理 + nextPc；外部 rwir（如 numpy）handoff 给扩展进程；native/控制帧写回 pc。
 #![allow(non_snake_case, non_camel_case_types)]
@@ -40,6 +40,10 @@ fn read_file(path: &str) -> String {
 }
 
 fn main() {
+    // #493：先从内存加载嵌入的 .so 并绑定符号（必须在任何 connect 之前）。
+    #[cfg(feature = "embed")]
+    byteseek::embed::init();
+
     let args: Vec<String> = std::env::args().skip(1).collect();
     let dsn = dsn();
 
@@ -154,17 +158,21 @@ fn main() {
 
         // ── 运行已入库的显式入口（tutorial 测试主路径：pkg·func 或裸名，pkg 可空）──
         [x] => drive(&boot(&dsn), x),
-        // ── KVLANG_LIB=p1:p2:… → layout 各路径下所有 .kv（相对名=pkg），复用 stdlib 的 run init 引导──
-        [] => {
-            let lib = std::env::var("KVLANG_LIB").unwrap_or_default();
+        // ── --lib p1:p2:… → layout 各路径下所有 .kv（相对名=pkg），复用 stdlib 的 run init 引导──
+        [flag, lib] if flag == "--lib" => {
             if lib.is_empty() {
                 byteseek::elog!("need entry");
                 std::process::exit(1);
             }
             let eng = boot(&dsn);
-            let libs = collect_libs(&lib);
+            let libs = collect_libs(lib);
             let inits = eng.layout_libs(&libs);
             eng.run_inits(&inits);
+        }
+        // 无参：直接报错（没有任何“隐式库路径”环境变量）
+        [] => {
+            byteseek::elog!("need entry (or --lib p1:p2:…)");
+            std::process::exit(1);
         }
         _ => {
             byteseek::elog!("参数不合法");
@@ -214,7 +222,7 @@ fn layout_code_or_die(src: &str, dsn: &str) {
     }
 }
 
-/// KVLANG_LIB（: 分隔路径）→ (名, 源码)：文件取 basename，目录递归、相对根、排序（确定性）。
+/// `--lib`（: 分隔路径）→ (名, 源码)：文件取 basename，目录递归、相对根、排序（确定性）。
 /// 名仅作错误显示；pkg 与 init 由 layout 按源码 `lib` 声明产出，不从此名/路径推导。
 fn collect_libs(spec: &str) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = Vec::new();
@@ -309,6 +317,10 @@ fn drive(eng: &Engine, funcname: &str) {
 /// 从 kvspace 里 vid 的持久化 pc 续跑到结束（崩溃恢复入口，与 drive 共用循环，不 bootstrap）。
 fn drive_vid(eng: &Engine, vid: &str) {
     let (rt, kv) = (eng.rt, eng.kv);
+    let mut guard_pc: Option<String> = None;
+    let mut guard_st = String::new();
+    let mut guard_n = 0u32;
+    let mut guard_ran = false;
 
     loop {
         let mut pc: *mut c_char = null_mut();
@@ -324,8 +336,29 @@ fn drive_vid(eng: &Engine, vid: &str) {
             std::process::exit(1);
         }
 
+        let st_before = eng.get_kv(&format!("/vthread/{vid}/\u{2025}status"));
+        let c0 = take(pc);
+
+        // 无进展闸门：runtime 回到同一 pc、期间没派发任何就地 op、状态也没变 → 空转。
+        let same = guard_pc.as_deref() == Some(c0.as_str()) && !guard_ran
+                   && guard_st == st_before;
+        guard_n = if same { guard_n + 1 } else { 0 };
+        guard_pc = Some(c0.clone());
+        guard_st = st_before;
+        guard_ran = false;
+        if guard_n >= 3 {
+            let op_at = take(unsafe { kvlangRwirextParams(kv, cs(&c0).as_ptr()) });
+            let op_at = op_at.lines().next().unwrap_or("").to_string();
+            let msg = eng.get_kv(&format!("/vthread/{vid}/\u{2025}msg"));
+            byteseek::elog!(
+                "op '{op_at}' not implemented by any runtime (Handoff): pc 连续 \
+                 3 次未推进 @ {c0} status={guard_st} {msg}"
+            );
+            std::process::exit(1);
+        }
+
         // 连续批处理就地 rwir（print/json/http/kvlayout/input），遇非就地指令停下。
-        let mut c = take(pc);
+        let mut c = c0.clone();
         let stop_op = loop {
             let params = take(unsafe { kvlangRwirextParams(kv, cs(&c).as_ptr()) });
             let op = params.split('\n').next().unwrap_or("").to_string();
@@ -333,13 +366,24 @@ fn drive_vid(eng: &Engine, vid: &str) {
                 break op;
             }
             rwir::dispatch(eng, &op, &c);
-            c = take(unsafe { kvlangRwirextNextPc(cs(&c).as_ptr()) });
+            guard_ran = true;
+            let nxt = take(unsafe { kvlangRwirextNextPc(cs(&c).as_ptr()) });
+            // 就地派发可能跳到子 vthread：接下来停在的 pc 属谁，就推进谁的‥pc。
+            let nsub = nxt.split('/').nth(2).unwrap_or(vid);
+            eng.set_kv(&format!("/vthread/{nsub}/\u{2025}pc"), &nxt);
+            c = nxt;
         };
 
         // pc 可能属子 vthread（native vthread·run 冒泡上来）：目标 vid 一律由 pc 导出，非固定主 vid。
         let sub = c.split('/').nth(2).unwrap_or(vid);
-        // 停在本 myrwircaps 内的 op：handoff；native/控制帧/帧结束：写回 pc 让 runtime 继续。
-        if !stop_op.is_empty() && rwir::in_myrwircaps(&stop_op) {
+
+        // 路由：本 myrwircaps 或已登记扩展（/lib/<op>/vids）→ handoff；
+        // 其余写回 pc 交给 runtime 自己执行（native/控制帧/帧结束都走这条）。
+        // 无人认领的 op 由上面的"无进展"闸门在 3 次空转内硬错，不无限空转。
+        let claimed = !stop_op.is_empty()
+            && (rwir::in_myrwircaps(&stop_op)
+                || eng.kv_exists(&format!("/lib/{stop_op}/vids")));
+        if claimed {
             if unsafe { kvlangRwirextHandoff(kv, cs(sub).as_ptr(), cs(&c).as_ptr()) } != 0 {
                 byteseek::elog!("handoff {stop_op} 失败 @ {c}");
                 std::process::exit(1);

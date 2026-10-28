@@ -233,25 +233,30 @@ static const kvlangIsaSig isa_sig[] = {
     {KV_ISA_CORE, KV_ISA_CAST, 1, 1, 0, KV_EFF_PURE}, /* char/utf32 */
     {KV_ISA_CORE, KV_ISA_CAST, 1, 1, 0, KV_EFF_PURE}, /* char/utf8 */
     {KV_ISA_CORE, KV_ISA_CAST, 1, 1, 0, KV_EFF_PURE}, /* char/ascii */
-    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 1, KV_EFF_PURE}, /* array */
-    {KV_ISA_EXT, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* array·fill */
-    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* array·scatter */
-    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* array·compact */
-    {KV_ISA_EXT, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* array·append */
-    {KV_ISA_EXT, KV_ISA_ANY, 3, 1, 0, KV_EFF_PURE}, /* array·slice */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* compactarray·new */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* compactarray·copy */
+    {KV_ISA_EXT, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* compactarray·fill */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* scatterarray·newscatter */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* scatterarray·newcompact */
+    {KV_ISA_EXT, KV_ISA_ANY, 0, 1, 0, KV_EFF_PURE}, /* scatterarray·new */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* scatterarray·len */
+    {KV_ISA_EXT, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* scatterarray·at */
+    {KV_ISA_EXT, KV_ISA_ANY, 3, 1, 0, KV_EFF_PURE}, /* scatterarray·set */
+    {KV_ISA_EXT, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* scatterarray·append */
+    {KV_ISA_EXT, KV_ISA_ANY, 3, 1, 0, KV_EFF_PURE}, /* scatterarray·slice */
     {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 1, KV_EFF_PURE}, /* obj */
     {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 1, KV_EFF_PURE}, /* map */
     {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 1, KV_EFF_PURE}, /* struct·new */
-    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* ndarray·numel */
-    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* ndarray·dim */
-    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* ndarray·shape */
-    {KV_ISA_EXT, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* xv·at */
-    {KV_ISA_EXT, KV_ISA_ANY, 3, 1, 0, KV_EFF_PURE}, /* xv·set */
-    {KV_ISA_EXT, KV_ISA_ANY, 3, 1, 0, KV_EFF_PURE}, /* xv·reshape */
-    {KV_ISA_EXT, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* xv·reinterpret */
-    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* xv·langtype */
-    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* xv·bodylen */
-    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* xv·parselangtype */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* compactarray·numel */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* compactarray·dim */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* compactarray·shape */
+    {KV_ISA_EXT, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* compactarray·at */
+    {KV_ISA_EXT, KV_ISA_ANY, 3, 1, 0, KV_EFF_PURE}, /* compactarray·set */
+    {KV_ISA_EXT, KV_ISA_ANY, 3, 1, 0, KV_EFF_PURE}, /* compactarray·newreshape */
+    {KV_ISA_EXT, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* compactarray·newreinterpret */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* compactarray·langtype */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* compactarray·bodylen */
+    {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* compactarray·parselangtype */
     {KV_ISA_EXT, KV_ISA_ANY, 3, 1, 0, KV_EFF_PURE}, /* string·set */
     {KV_ISA_EXT, KV_ISA_ANY, 2, 1, 0, KV_EFF_PURE}, /* string·char */
     {KV_ISA_EXT, KV_ISA_ANY, 1, 1, 0, KV_EFF_PURE}, /* string·ord */
@@ -309,9 +314,9 @@ static const kvlangIsaSig isa_sig[] = {
     {KV_ISA_CORE, KV_ISA_ANY, 0, 0, 0, KV_EFF_DEBUG}, /* debugger */
 };
 
-_Static_assert(sizeof(isa_sig) / sizeof(isa_sig[0]) == 300,
-               "P1b1: isa_sig must have 300 rows (core 237 + ext 63)");
-/* 与 myrwircaps 的对齐由 kvlangIsaPublishCore 的运行期 route==nsig 校验兜底。 */
+_Static_assert(sizeof(isa_sig) / sizeof(isa_sig[0]) == 305,
+               "P1b1: isa_sig must have 305 rows");
+/* 新架构：签名声明由 layout/扩展写 /‥isa/<folded-op>；本表只服务 runtime 自身的 typed_core 判定。 */
 
 __attribute__((visibility("hidden"))) const kvlangIsaSig *
 kvlangIsaSigs(uint32_t *n_out) {

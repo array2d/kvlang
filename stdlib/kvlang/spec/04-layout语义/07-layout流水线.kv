@@ -31,14 +31,18 @@ kvspace 的 `/lib/` 子树，供 runtime 解释执行。layout 是 **o0 编译�
 `no executable code found`。compile 返回本次写入的 init 函数名列表（供消费方按 lib 声明驱动 init，非
 文件系统路径推导）。
 
+compile 前把 native 作者清单写成/刷新 `/‥isa/<folded-op>` 的
+`def rwir` 并读回；未知 opcode 硬失败，不 layout、不 fallback。
+
 ## write_func 步骤
 
 1. 推断类型并特化算子；对写槽做可赋性与字面量可表示性检查（见 [[赋值转换]]）。
 2. `del_tree` 本函数目录（增量覆盖，仅本函数子树）。
-3. 写 `[0,0]` 签名锚点（langtype `rwfunc`，body `[nr][nw][dynamic]`）、`.src` 源码副本、各**参数定义
-   键** `funcDir.[0,±j]`（`def langtype` xvalue，body=参数名 + NUL + 该参的 def langtype 串）。func 目录根不落
-   `[0,±k]` 坐标槽（那些坐标留给 runtime 调用期写实参槽，见 [[函数写槽与布局]]）。
-4. 从 `[1,0]` 起写线性指令；goto/br 标签解析为整数 irseq。
-5. 若有标签，写 `‥labels/<label>` → irseq。
+3. 写 `[0,0]` 签名锚点、`.src` 源码副本、各**参数定义键** `funcDir.[0,±j]`。
+4. 三类 target 归类（Rwir/User）；Rwir 检查 arity；
+   `sub` 恒 2r→1w；未知 opcode 硬失败；不把类型写进槽。
+5. 从 `[1,0]` 起写线性指令；goto/br 标签解析为整数 irseq。
+6. 若有标签，写 `‥labels/<label>` → irseq。
+7. 写/刷新每函数 `/lib/<func>/‥ctime`：`max(旧 ctime + 1, now_ns)`。
 	"#### -> /lib/kvlang/spec/layout语义/layout流水线
 }

@@ -1,39 +1,122 @@
+// 欢迎加入kvspace世界
+// lib xv —— 数组操作便利库。native rwir：compactarray·at/set/newreshape/newreinterpret/
+// langtype/bodylen/parselangtype、compactarray·numel/dim/shape；
+// rwfunc 补充（[]int64 一维/多维 compact 数组）：
+//   first / last         首/尾元素
+//   swap                 交换两下标元素，返回新数组
+//   reverse              反转一维数组，返回新数组
+//   contains / find / count  包含判定、首次出现下标（无则 -1）、元素计数
+//   sum / min / max      求和、最小值、最大值
+//   flatten              多维 compact 数组展平为一维 []int64
+// 值语义铁律：compactarray·set 仅同槽 patch；异槽变换必须先 compactarray·copy。
+
 lib xv {
 	rwfunc swap(arr:[]int64, i:int64, j:int64) -> (result:[]int64) {
-		vi = xv·at(arr, i)
-		vj = xv·at(arr, j)
-		tmp = xv·set(arr, i, vj)
-		result = xv·set(tmp, j, vi)
+		vi = compactarray·at(arr, i)
+		vj = compactarray·at(arr, j)
+		tmp = compactarray·copy(arr)
+		compactarray·set(tmp, i, vj) -> tmp
+		compactarray·set(tmp, j, vi) -> tmp
+		result = tmp
 	}
 
 	rwfunc first(arr:[]int64) -> (result:int64) {
-		result = xv·at(arr, 0)
+		result = compactarray·at(arr, 0)
 	}
-
 	rwfunc last(arr:[]int64) -> (result:int64) {
-		result = xv·at(arr, ndarray·numel(arr) - 1)
+		n = compactarray·numel(arr)
+		result = compactarray·at(arr, n - 1)
 	}
-
-	rwfunc sum(arr:[]int64) -> (result:int64) {
-		n = ndarray·numel(arr)
-		result = 0
+	rwfunc reverse(arr:[]int64) -> (result:[]int64) {
+		result = arr
+		n = compactarray·numel(arr)
+		i = 0
+		j = n - 1
+		while (i < j) {
+			xv·swap(result, i, j) -> result
+			i = i + 1
+			j = j - 1
+		}
+	}
+	rwfunc find(arr:[]int64, val:int64) -> (idx:int64) {
+		idx = -1
+		n = compactarray·numel(arr)
 		i = 0
 		while (i < n) {
-			result = result + xv·at(arr, i)
+			compactarray·at(arr, i) -> v
+			if (v == val) {
+				idx = i
+				break
+			}
 			i = i + 1
 		}
 	}
-
+	rwfunc contains(arr:[]int64, val:int64) -> (ok:bool) {
+		xv·find(arr, val) -> idx
+		idx != -1 -> ok
+	}
+	rwfunc count(arr:[]int64, val:int64) -> (cnt:int64) {
+		cnt = 0
+		n = compactarray·numel(arr)
+		i = 0
+		while (i < n) {
+			compactarray·at(arr, i) -> v
+			if (v == val) {
+				cnt = cnt + 1
+			}
+			i = i + 1
+		}
+	}
+	rwfunc sum(arr:[]int64) -> (total:int64) {
+		total = 0
+		n = compactarray·numel(arr)
+		i = 0
+		while (i < n) {
+			compactarray·at(arr, i) -> v
+			total = total + v
+			i = i + 1
+		}
+	}
+	rwfunc min(arr:[]int64) -> (m:int64) {
+		compactarray·at(arr, 0) -> m
+		n = compactarray·numel(arr)
+		i = 1
+		while (i < n) {
+			compactarray·at(arr, i) -> v
+			if (v < m) {
+				m = v
+			}
+			i = i + 1
+		}
+	}
+	rwfunc max(arr:[]int64) -> (m:int64) {
+		compactarray·at(arr, 0) -> m
+		n = compactarray·numel(arr)
+		i = 1
+		while (i < n) {
+			compactarray·at(arr, i) -> v
+			if (v > m) {
+				m = v
+			}
+			i = i + 1
+		}
+	}
+	rwfunc flatten(arr:[]int64) -> (result:[]int64) {
+		n = compactarray·numel(arr)
+		compactarray·newreshape(arr, n) -> result
+	}
+	// ── 以下为 #514 增补吸收（原 xv·at/set、ndarray·numel 改写为
+	//    compactarray 系；mutating 函数先 compactarray·copy 再 set）──
 	rwfunc argmin(arr:[]int64) -> (idx:int64) {
-		n = ndarray·numel(arr)
+		n = compactarray·numel(arr)
 		if (n == 0) {
 			idx = -1
 		} else {
 			idx = 0
-			best = xv·at(arr, 0)
+			best = compactarray·at(arr, 0)
 			i = 1
 			while (i < n) {
-				v = xv·at(arr, i)
+				v = compactarray·at(arr, i)
 				if (v < best) {
 					best = v
 					idx = i
@@ -42,17 +125,16 @@ lib xv {
 			}
 		}
 	}
-
 	rwfunc argmax(arr:[]int64) -> (idx:int64) {
-		n = ndarray·numel(arr)
+		n = compactarray·numel(arr)
 		if (n == 0) {
 			idx = -1
 		} else {
 			idx = 0
-			best = xv·at(arr, 0)
+			best = compactarray·at(arr, 0)
 			i = 1
 			while (i < n) {
-				v = xv·at(arr, i)
+				v = compactarray·at(arr, i)
 				if (v > best) {
 					best = v
 					idx = i
@@ -61,75 +143,26 @@ lib xv {
 			}
 		}
 	}
-
-	rwfunc min(arr:[]int64) -> (result:int64) {
-		xv·argmin(arr) -> idx
-		if (idx == -1) {
-			result = 0
-		} else {
-			result = xv·at(arr, idx)
-		}
-	}
-
-	rwfunc max(arr:[]int64) -> (result:int64) {
-		xv·argmax(arr) -> idx
-		if (idx == -1) {
-			result = 0
-		} else {
-			result = xv·at(arr, idx)
-		}
-	}
-
-	rwfunc find(arr:[]int64, target:int64) -> (idx:int64) {
-		n = ndarray·numel(arr)
-		idx = -1
-		i = 0
-		while (i < n) {
-			if (xv·at(arr, i) == target) {
-				idx = i
-				break
-			}
-			i = i + 1
-		}
-	}
-
 	rwfunc rfind(arr:[]int64, target:int64) -> (idx:int64) {
 		idx = -1
-		i = ndarray·numel(arr) - 1
+		i = compactarray·numel(arr) - 1
 		while (i >= 0) {
-			if (xv·at(arr, i) == target) {
+			if (compactarray·at(arr, i) == target) {
 				idx = i
 				break
 			}
 			i = i - 1
 		}
 	}
-
-	rwfunc contains(arr:[]int64, target:int64) -> (r:bool) {
-		r = xv·find(arr, target) != -1
-	}
-
-	rwfunc count(arr:[]int64, target:int64) -> (c:int64) {
-		n = ndarray·numel(arr)
-		c = 0
-		i = 0
-		while (i < n) {
-			if (xv·at(arr, i) == target) {
-				c = c + 1
-			}
-			i = i + 1
-		}
-	}
-
 	rwfunc eq(a:[]int64, b:[]int64) -> (r:bool) {
-		na = ndarray·numel(a)
-		if (na != ndarray·numel(b)) {
+		na = compactarray·numel(a)
+		if (na != compactarray·numel(b)) {
 			r = false
 		} else {
 			r = true
 			i = 0
 			while (i < na) {
-				if (xv·at(a, i) != xv·at(b, i)) {
+				if (compactarray·at(a, i) != compactarray·at(b, i)) {
 					r = false
 					break
 				}
@@ -137,58 +170,44 @@ lib xv {
 			}
 		}
 	}
-
 	rwfunc is_sorted(arr:[]int64) -> (r:bool) {
-		n = ndarray·numel(arr)
+		n = compactarray·numel(arr)
 		r = true
 		i = 1
 		while (i < n) {
-			if (xv·at(arr, i) < xv·at(arr, i - 1)) {
+			if (compactarray·at(arr, i) < compactarray·at(arr, i - 1)) {
 				r = false
 				break
 			}
 			i = i + 1
 		}
 	}
-
-	rwfunc reverse(arr:[]int64) -> (result:[]int64) {
-		result = arr
-		lo = 0
-		hi = ndarray·numel(arr) - 1
-		while (lo < hi) {
-			xv·swap(result, lo, hi) -> result
-			lo = lo + 1
-			hi = hi - 1
-		}
-	}
-
 	rwfunc sort(arr:[]int64) -> (result:[]int64) {
-		result = arr
-		n = ndarray·numel(result)
+		result = compactarray·copy(arr)
+		n = compactarray·numel(result)
 		i = 1
 		while (i < n) {
-			key = xv·at(result, i)
+			key = compactarray·at(result, i)
 			j = i - 1
 			while (j >= 0) {
-				vj = xv·at(result, j)
+				vj = compactarray·at(result, j)
 				if (vj <= key) {
 					break
 				}
-				result = xv·set(result, j + 1, vj)
+				compactarray·set(result, j + 1, vj) -> result
 				j = j - 1
 			}
-			result = xv·set(result, j + 1, key)
+			compactarray·set(result, j + 1, key) -> result
 			i = i + 1
 		}
 	}
-
 	rwfunc binary_search(arr:[]int64, target:int64) -> (idx:int64) {
 		lo = 0
-		hi = ndarray·numel(arr) - 1
+		hi = compactarray·numel(arr) - 1
 		idx = -1
 		while (lo <= hi) {
 			mid = lo + (hi - lo) ÷ 2
-			vm = xv·at(arr, mid)
+			vm = compactarray·at(arr, mid)
 			if (vm == target) {
 				idx = mid
 				break
@@ -199,13 +218,12 @@ lib xv {
 			}
 		}
 	}
-
 	rwfunc fill(arr:[]int64, val:int64) -> (result:[]int64) {
-		result = arr
-		n = ndarray·numel(result)
+		result = compactarray·copy(arr)
+		n = compactarray·numel(result)
 		i = 0
 		while (i < n) {
-			result = xv·set(result, i, val)
+			compactarray·set(result, i, val) -> result
 			i = i + 1
 		}
 	}

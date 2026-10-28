@@ -2,6 +2,19 @@
 lib kvlang/spec/layout语义/rwfunc布局与def_rwir {
 	r####"# rwfunc 布局与 def rwir
 
+## pkg 就是 lib
+
+`pkg` 与 `lib` 是同一概念的两个词，**`pkg` ≡ `lib`**，规范中通常用 **`lib`** 而非 `pkg`。
+rwir 与 rwfunc 都可以有 lib（`/lib/<pkg>·<name>`、`/lib/<name>`），lib 的作用是 **key 前缀系统**：
+把同族 rwir/rwfunc/常量组织在同一 `/lib/<name>` 前缀下，避免 key 冲突、提供寻址命名空间——
+类比 C++ 的 `namespace`、Java 的 `module`/`package`。
+
+- `rwir` 带 lib：`/lib/<pkg>·<op>`（如 `kvspace·get`、`string·len`），签名在 `/‥isa/<folded-op>`。
+- `rwfunc` 带 lib：`/lib/<pkg>·<name>`（用户函数），签名锚点在 `[0,0]`。
+- `lib` 数据（常量）：`/lib/<name>`（如 `/lib/math·Pi`）。
+
+凡书写 `pkg·func(...)` 处，`pkg` 均指 `lib`——同一前缀系统的别名，规范统一表述为 lib。
+
 ## rwfunc 布局细节
 
 `write_func` 往 `/lib/<pkg>·<name>/` 写：
@@ -23,20 +36,23 @@ rwfunc 无 `[0,x]` 槽、def rwir 无 `{name}` 键。
 
 ## def rwir 路由头（rwir 统一调度入口）
 
-`/lib/<opcode>`（langtype `def rwir`）由 layout 的声明或 runtime 注册写入：
+`/‥isa/<folded-op>`（langtype `def rwir`）由 layout 写 native、
+runtime 写扩展：
 
-- **runtime 注册**——各 runtime 启动时经运行时注册接口把自身 myrwircaps 的每个 opcode 写入
-  `/lib/<opcode>`；注册前校验各参 langtype。主槽 body `[nr][nw][dynamic]`，各参数类型分别落入
-  `[0,x]` 签名行槽（`def langtype` xvalue），无实现指令行。
+- **native**：layout 按作者清单写 `/‥isa/<folded-op>`，主槽 body
+  `[nr][nw][dynamic]`，各参数类型落 `[0,x]` 签名行槽（`def langtype`）。
+- **扩展**：runtime 启动时经运行接口写同一 `/‥isa` 子树；注册前校验各参
+  langtype，折叠冲突硬错 `ISA op path conflict`。
 
-layout 在生成 opcode 槽时区分 `rwir` 与已知的 `rwfunc`；runtime 仍查 `/lib/<opcode>` 分派。def rwir
-路由头仅落于 `/lib/<opcode>`，无 native/扩展/user 的静态归类——每个 runtime 只声明自身 myrwircaps，不
-在 layout 层区分。
+layout 在生成 opcode 槽时按 `/‥isa` + `/lib` 静态元数据做三类归类
+（Rwir/User）；runtime 按 myrwircaps 名字表绑定 `/‥isa` 声明。
+def rwir 路由头落 `/‥isa/<folded-op>`，不把签名写进操作数槽。
 
-## native rwir 不落入 kvspace
+## native rwir 声明落入 `/‥isa`
 
-`+`、`==`、`array`、`sqrt`、`print` 等 native builtin 融合在 runtime 内建表，**不**写 kvspace、运行
-时也不回查 `/lib`。数值多类型算子在内建表中融合为单条（`add` 覆盖 int8…float64），派发前剥掉
+`+`、`==`、`array`、`sqrt`、`print` 等 native builtin 的签名写入
+`/‥isa/<folded-op>` 的 `def rwir`；runtime 的 handler 仍在 myrwircaps。
+数值多类型算子在内建表中融合为单条（`add` 覆盖 int8…float64），派发前剥掉
 `<numkind>·` 前缀，输出 kind 由实参决定。
 
 ## lib 数据（常量）
