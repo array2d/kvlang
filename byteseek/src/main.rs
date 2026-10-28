@@ -1,14 +1,14 @@
-//! kvlang —— 功能完整的 runtime 二进制。模式2（runtime 主导 + 就地 rwir stdlib）。
+//! byteseek —— 功能完整的 runtime 二进制。模式2（runtime 主导 + 就地 rwir stdlib）。
 //! CLI（DSN 取环境变量 KVSPACE，缺省 redis://127.0.0.1:6379）。入口须显式给出（不再自动探测）：
-//!   kvlang                 无入口 → 提示 need entry
-//!   kvlang <entry>         运行已 layout 进 kvspace 的入口（pkg·func 或裸名，pkg 可空）
-//!   kvlang <file.kv>       stdlib 先行 → layout 该文件 → 运行约定入口 test
-//!   kvlang -c "<src>"      stdlib 先行 → layout 内存源码 → 运行散语句合成入口 init
-//!   kvlang layout <file>   仅 layout，打印 ENTRY=<entry>
-//!   kvlang vet <file>      仅校验（parse+lower），打印 ok 或错误
-//!   kvlang format <file>   格式化输出到 stdout
-//!   kvlang printlib <file> [prefix]  layout 该文件后，把 /lib（或 prefix）子树重建为可运行 kvlang + 槽位注释（不读 .src）
-//!   kvlang --lib p1:p2:…   layout 各路径下所有 .kv → run 各 lib 的 init（pkg 取自源码 `lib` 声明，同 stdlib）
+//!   byteseek                 无入口 → 提示 need entry
+//!   byteseek <entry>         运行已 layout 进 kvspace 的入口（pkg·func 或裸名，pkg 可空）
+//!   byteseek <file.kv>       stdlib 先行 → layout 该文件 → 运行约定入口 test
+//!   byteseek -c "<src>"      stdlib 先行 → layout 内存源码 → 运行散语句合成入口 init
+//!   byteseek layout <file>   仅 layout，打印 ENTRY=<entry>
+//!   byteseek vet <file>      仅校验（parse+lower），打印 ok 或错误
+//!   byteseek format <file>   格式化输出到 stdout
+//!   byteseek printlib <file> [prefix]  layout 该文件后，把 /lib（或 prefix）子树重建为可运行 kvlang + 槽位注释（不读 .src）
+//!   byteseek --lib p1:p2:…   layout 各路径下所有 .kv → run 各 lib 的 init（pkg 取自源码 `lib` 声明，同 stdlib）
 //! 驱动循环：executeVthread 主导执行，遇 rwir 停下；就地 rwir（print/json/http/…）
 //! 连续批处理 + nextPc；外部 rwir（如 numpy）handoff 给扩展进程；native/控制帧写回 pc。
 #![allow(non_snake_case, non_camel_case_types)]
@@ -16,9 +16,9 @@
 use std::ffi::c_char;
 use std::ptr::null_mut;
 
-use kvlang_rs::engine::Engine;
-use kvlang_rs::ffi::*;
-use kvlang_rs::rwir;
+use byteseek::engine::Engine;
+use byteseek::ffi::*;
+use byteseek::rwir;
 
 fn dsn() -> String {
     std::env::var("KVSPACE").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string())
@@ -27,14 +27,14 @@ fn dsn() -> String {
 /// info 级日志（对齐 C logx.c 的 LOG_LEVEL 门控）：默认 warn 静默，仅 LOG_LEVEL=info|debug 时以 `<exe>: ` 前缀输出到 stderr。
 fn log_info(msg: &str) {
     match std::env::var("LOG_LEVEL").as_deref() {
-        Ok("info") | Ok("debug") => kvlang_rs::elog!("{msg}"),
+        Ok("info") | Ok("debug") => byteseek::elog!("{msg}"),
         _ => {}
     }
 }
 
 fn read_file(path: &str) -> String {
     std::fs::read_to_string(path).unwrap_or_else(|e| {
-        kvlang_rs::elog!("读取 {path} 失败: {e}");
+        byteseek::elog!("读取 {path} 失败: {e}");
         std::process::exit(1);
     })
 }
@@ -42,7 +42,7 @@ fn read_file(path: &str) -> String {
 fn main() {
     // #493：先从内存加载嵌入的 .so 并绑定符号（必须在任何 connect 之前）。
     #[cfg(feature = "embed")]
-    kvlang_rs::embed::init();
+    byteseek::embed::init();
 
     let args: Vec<String> = std::env::args().skip(1).collect();
     let dsn = dsn();
@@ -63,7 +63,7 @@ fn main() {
                 )
             };
             if rc != 0 {
-                kvlang_rs::elog!("layout 失败: {}", cbuf(&err));
+                byteseek::elog!("layout 失败: {}", cbuf(&err));
                 std::process::exit(1);
             }
             println!("ENTRY={}", cbuf(&entry));
@@ -99,7 +99,7 @@ fn main() {
                 )
             };
             if rc != 0 {
-                kvlang_rs::elog!("format 失败: {}", cbuf(&err));
+                byteseek::elog!("format 失败: {}", cbuf(&err));
                 std::process::exit(1);
             }
             print!("{}", cbuf(&out));
@@ -122,12 +122,12 @@ fn main() {
             drive(&eng, "test");
         }
 
-        // ── isa publish：发布 core manifest（connect）并注册 runtime-rs 的 def rwir，
+        // ── isa publish：发布 core manifest（connect）并注册 byteseek 的 def rwir，
         //    使 layout CLI 无需完整 boot 即可独立工作。──
         [cmd, act] if cmd == "isa" && act == "publish" => {
             let rt = unsafe { kvlangRuntimeConnect(cs(&dsn).as_ptr()) };
             if rt.is_null() {
-                kvlang_rs::elog!("kvlangRuntimeConnect 失败: {dsn}");
+                byteseek::elog!("kvlangRuntimeConnect 失败: {dsn}");
                 std::process::exit(1);
             }
             let kv = unsafe { kvlangRuntimeKvspaceHandle(rt) };
@@ -148,7 +148,7 @@ fn main() {
                 kvlangRuntimeBootstrap(eng.rt, cs(funcname).as_ptr(), null_mut(), 0)
             });
             if vid.is_empty() {
-                kvlang_rs::elog!("create {funcname} 失败");
+                byteseek::elog!("create {funcname} 失败");
                 std::process::exit(1);
             }
             println!("{vid}"); // vid 是命令结果 → stdout（区别于运行诊断日志）
@@ -161,7 +161,7 @@ fn main() {
         // ── --lib p1:p2:… → layout 各路径下所有 .kv（相对名=pkg），复用 stdlib 的 run init 引导──
         [flag, lib] if flag == "--lib" => {
             if lib.is_empty() {
-                kvlang_rs::elog!("--lib needs p1:p2:…");
+                byteseek::elog!("need entry");
                 std::process::exit(1);
             }
             let eng = boot(&dsn);
@@ -171,11 +171,11 @@ fn main() {
         }
         // 无参：直接报错（没有任何“隐式库路径”环境变量）
         [] => {
-            kvlang_rs::elog!("need entry (or --lib p1:p2:…)");
+            byteseek::elog!("need entry (or --lib p1:p2:…)");
             std::process::exit(1);
         }
         _ => {
-            kvlang_rs::elog!("参数不合法");
+            byteseek::elog!("参数不合法");
             std::process::exit(1);
         }
     }
@@ -198,7 +198,7 @@ fn printlib_file(path: &str, prefix: &str, dsn: &str) {
         )
     };
     if rc != 0 {
-        kvlang_rs::elog!("printlib 失败: {}", cbuf(&err));
+        byteseek::elog!("printlib 失败: {}", cbuf(&err));
         std::process::exit(1);
     }
     print!("{}", cbuf(&out));
@@ -217,7 +217,7 @@ fn layout_code_or_die(src: &str, dsn: &str) {
         )
     };
     if rc != 0 {
-        kvlang_rs::elog!("layout 失败: {}", cbuf(&err));
+        byteseek::elog!("layout 失败: {}", cbuf(&err));
         std::process::exit(1);
     }
 }
@@ -275,7 +275,7 @@ fn layout_file_or_die(path: &str, dsn: &str) {
         )
     };
     if rc != 0 {
-        kvlang_rs::elog!("layout 失败: {}", cbuf(&err));
+        byteseek::elog!("layout 失败: {}", cbuf(&err));
         std::process::exit(1);
     }
 }
@@ -285,7 +285,7 @@ fn layout_file_or_die(path: &str, dsn: &str) {
 fn boot(dsn: &str) -> Engine {
     let rt = unsafe { kvlangRuntimeConnect(cs(dsn).as_ptr()) };
     if rt.is_null() {
-        kvlang_rs::elog!("kvlangRuntimeConnect 失败: {dsn}");
+        byteseek::elog!("kvlangRuntimeConnect 失败: {dsn}");
         std::process::exit(1);
     }
     // 复用 rt 内部 kvspace 句柄，绝不另开连接——durable 惰性 flush 只在同句柄内相干，
@@ -307,10 +307,10 @@ fn boot(dsn: &str) -> Engine {
 fn drive(eng: &Engine, funcname: &str) {
     let vid = take(unsafe { kvlangRuntimeBootstrap(eng.rt, cs(funcname).as_ptr(), null_mut(), 0) });
     if vid.is_empty() {
-        kvlang_rs::elog!("bootstrap {funcname} 失败");
+        byteseek::elog!("bootstrap {funcname} 失败");
         std::process::exit(1);
     }
-    log_info(&format!("vthread {vid}")); // 供崩溃恢复：LOG_LEVEL=info 时暴露 vid，可 `kvlang run <vid>`
+    log_info(&format!("vthread {vid}")); // 供崩溃恢复：LOG_LEVEL=info 时暴露 vid，可 `byteseek run <vid>`
     drive_vid(eng, &vid);
 }
 
@@ -332,7 +332,7 @@ fn drive_vid(eng: &Engine, vid: &str) {
             let st = eng.get_kv(&format!("/vthread/{vid}/\u{2025}status"));
             let msg = eng.get_kv(&format!("/vthread/{vid}/\u{2025}msg"));
             let st = if st.is_empty() { "error".into() } else { st };
-            kvlang_rs::elog!("vthread {vid} {st}: {msg}");
+            byteseek::elog!("vthread {vid} {st}: {msg}");
             std::process::exit(1);
         }
 
@@ -350,7 +350,7 @@ fn drive_vid(eng: &Engine, vid: &str) {
             let op_at = take(unsafe { kvlangRwirextParams(kv, cs(&c0).as_ptr()) });
             let op_at = op_at.lines().next().unwrap_or("").to_string();
             let msg = eng.get_kv(&format!("/vthread/{vid}/\u{2025}msg"));
-            kvlang_rs::elog!(
+            byteseek::elog!(
                 "op '{op_at}' not implemented by any runtime (Handoff): pc 连续 \
                  3 次未推进 @ {c0} status={guard_st} {msg}"
             );
@@ -385,7 +385,7 @@ fn drive_vid(eng: &Engine, vid: &str) {
                 || eng.kv_exists(&format!("/lib/{stop_op}/vids")));
         if claimed {
             if unsafe { kvlangRwirextHandoff(kv, cs(sub).as_ptr(), cs(&c).as_ptr()) } != 0 {
-                kvlang_rs::elog!("handoff {stop_op} 失败 @ {c}");
+                byteseek::elog!("handoff {stop_op} 失败 @ {c}");
                 std::process::exit(1);
             }
         } else {

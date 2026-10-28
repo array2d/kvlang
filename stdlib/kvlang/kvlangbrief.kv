@@ -1,6 +1,6 @@
 // 欢迎加入kvspace世界
 // kvlang 语法速览 —— 也是 KV 树里的数据，也是 LLM 生成 kvlang 代码时的权威提示。
-// 本文件在 kvlang stdlib，runtime-rs 启动时 layout&run：顶层写语句包进 kvlang·init，
+// 本文件在 kvlang stdlib，byteseek 启动时 layout&run：顶层写语句包进 kvlang·init，
 // 执行后把整份速览作为字符串落在 /lib/kvlang/kvlangbrief，供 byteseek 的 llm·call 拼接进 system prompt。
 lib kvlang {
 	r###"# kvlang 速览（LLM 代码生成版）
@@ -177,7 +177,7 @@ rwfunc main() -> () {
 
 读参只读（不能放进写槽）；写参可读可写（初值 None，先置初值）；变参 `x:int64...` 仅限末位读参。
 
-## 9. 完整内建/rwir 速查（runtime-rs）
+## 9. 完整内建/rwir 速查（byteseek）
 
 ### 输出/输入（term）
 - `print(x,…)` 无空格无换行；`println(x,…)` 空格分隔并换行；`cerr(x,…)` 同 println 但写 stderr。
@@ -227,14 +227,19 @@ networld/fs·write("/tmp/x.txt", compactarray·newreinterpret("hi", "[]uint8")) 
 - rwfunc 修剪/切分：`trim / trimstart / trimend / trimprefix / trimsuffix / padstart / padend`、`split / splitn / lines / fields / join`。
 - rwfunc 变换/分类：`reverse / repeat / upper / lower / capitalize / title / swapcase`、`allinset / isalpha / isdigit / isalnum / isspace / isupper / islower / isxdigit / ispunct / lang`（大小写与分类一律 ASCII；`lang` 按文字系统返 `zh/en/ja/ko/other`）。
 
+### 路径（path·*）
+- `path·isabs(p)->b`、`path·join(a,b)->p`、`path·dirname(p)->d`、`path·basename(p)->b`、`path·ext(p)->e`（含 `.`，如 `".txt"`）、`path·stem(p)->s`、`path·split(p)->(dir,base)`、`path·splitext(p)->(root,ext)`、`path·normpath(p)->r`。
+
 ### 数组（ndarray·* / xv·*）
 - `compactarray·numel / dim / shape`；`compactarray·at / set / reshape / reinterpret / langtype / bodylen`。
 - `compactarray·parselangtype(v) -> (kind[, ndim])`：解析 langtype 基名（剥 `[dims]` 与 `def ` 前缀），
   如 `def langtype`→`langtype`、`def rwir`→`rwir`、`[508]char/utf8`→`char/utf8`；用于按类型分类 KV 成员。
-- rwfunc（`[]int64`）：`xv·first / last / swap / reverse / find / contains / count / sum / min / max / flatten`。
+- rwfunc（`[]int64`）：`xv·first / last / swap / reverse / find / contains / count / sum / min / max / flatten / argmin / argmax / rfind / eq / is_sorted / sort / binary_search / fill`。
 
-### 数学
+### 数学（math·*）
 - 运算符见上；`pow / sqrt / exp / log / abs / sign / neg / min / max`；常量 `/lib/math·Pi` `/lib/math·E` `/lib/math·Tau`。
+- 浮点超越与分类（rwir）：`math·sin / cos / tan / asin / acos / atan / atan2 / sinh / cosh / tanh / floor / ceil / round / trunc / log2 / log10 / hypot / isnan / isinf / isfinite`。
+- 整数与标量工具（rwfunc）：`math·clamp / fclamp / gcd / lcm / factorial / isqrt / lerp / deg2rad / rad2deg`。
 
 ### 时间/时长/随机
 - `time·now()`、`time·sub/add/before/after`；rwfunc：`time·since / until / equal / elapsed_ns / elapsed_ms / elapsed_s / max / min`。

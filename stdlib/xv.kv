@@ -19,6 +19,7 @@ lib xv {
 		compactarray·set(tmp, j, vi) -> tmp
 		result = tmp
 	}
+
 	rwfunc first(arr:[]int64) -> (result:int64) {
 		result = compactarray·at(arr, 0)
 	}
@@ -103,5 +104,127 @@ lib xv {
 	rwfunc flatten(arr:[]int64) -> (result:[]int64) {
 		n = compactarray·numel(arr)
 		compactarray·newreshape(arr, n) -> result
+	}
+	// ── 以下为 #514 增补吸收（原 xv·at/set、ndarray·numel 改写为
+	//    compactarray 系；mutating 函数先 compactarray·copy 再 set）──
+	rwfunc argmin(arr:[]int64) -> (idx:int64) {
+		n = compactarray·numel(arr)
+		if (n == 0) {
+			idx = -1
+		} else {
+			idx = 0
+			best = compactarray·at(arr, 0)
+			i = 1
+			while (i < n) {
+				v = compactarray·at(arr, i)
+				if (v < best) {
+					best = v
+					idx = i
+				}
+				i = i + 1
+			}
+		}
+	}
+	rwfunc argmax(arr:[]int64) -> (idx:int64) {
+		n = compactarray·numel(arr)
+		if (n == 0) {
+			idx = -1
+		} else {
+			idx = 0
+			best = compactarray·at(arr, 0)
+			i = 1
+			while (i < n) {
+				v = compactarray·at(arr, i)
+				if (v > best) {
+					best = v
+					idx = i
+				}
+				i = i + 1
+			}
+		}
+	}
+	rwfunc rfind(arr:[]int64, target:int64) -> (idx:int64) {
+		idx = -1
+		i = compactarray·numel(arr) - 1
+		while (i >= 0) {
+			if (compactarray·at(arr, i) == target) {
+				idx = i
+				break
+			}
+			i = i - 1
+		}
+	}
+	rwfunc eq(a:[]int64, b:[]int64) -> (r:bool) {
+		na = compactarray·numel(a)
+		if (na != compactarray·numel(b)) {
+			r = false
+		} else {
+			r = true
+			i = 0
+			while (i < na) {
+				if (compactarray·at(a, i) != compactarray·at(b, i)) {
+					r = false
+					break
+				}
+				i = i + 1
+			}
+		}
+	}
+	rwfunc is_sorted(arr:[]int64) -> (r:bool) {
+		n = compactarray·numel(arr)
+		r = true
+		i = 1
+		while (i < n) {
+			if (compactarray·at(arr, i) < compactarray·at(arr, i - 1)) {
+				r = false
+				break
+			}
+			i = i + 1
+		}
+	}
+	rwfunc sort(arr:[]int64) -> (result:[]int64) {
+		result = compactarray·copy(arr)
+		n = compactarray·numel(result)
+		i = 1
+		while (i < n) {
+			key = compactarray·at(result, i)
+			j = i - 1
+			while (j >= 0) {
+				vj = compactarray·at(result, j)
+				if (vj <= key) {
+					break
+				}
+				compactarray·set(result, j + 1, vj) -> result
+				j = j - 1
+			}
+			compactarray·set(result, j + 1, key) -> result
+			i = i + 1
+		}
+	}
+	rwfunc binary_search(arr:[]int64, target:int64) -> (idx:int64) {
+		lo = 0
+		hi = compactarray·numel(arr) - 1
+		idx = -1
+		while (lo <= hi) {
+			mid = lo + (hi - lo) ÷ 2
+			vm = compactarray·at(arr, mid)
+			if (vm == target) {
+				idx = mid
+				break
+			} else if (vm < target) {
+				lo = mid + 1
+			} else {
+				hi = mid - 1
+			}
+		}
+	}
+	rwfunc fill(arr:[]int64, val:int64) -> (result:[]int64) {
+		result = compactarray·copy(arr)
+		n = compactarray·numel(result)
+		i = 0
+		while (i < n) {
+			compactarray·set(result, i, val) -> result
+			i = i + 1
+		}
 	}
 }

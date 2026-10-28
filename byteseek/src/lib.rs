@@ -16,7 +16,7 @@ pub fn exe() -> &'static str {
         std::env::current_exe()
             .ok()
             .and_then(|p| p.file_name().map(|s| s.to_string_lossy().into_owned()))
-            .unwrap_or_else(|| "kvlang".into())
+            .unwrap_or_else(|| "byteseek".into())
     })
 }
 

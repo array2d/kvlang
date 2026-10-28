@@ -1,15 +1,15 @@
 [package]
-name = "kvlang-rs"
+name = "byteseek"
 version = "0.1.0"
 edition = "2021"
-description = "功能完整的 kvlang runtime：模式2 主导执行 + 纯净 rwir stdlib（term/json/http/kvlanglayout）"
+description = "功能完整的 kvlang runtime：模式2 主导执行 + 纯净 rwir stdlib（term/json/http/kvlanglayout/networld）"
 
 [lib]
-name = "kvlang_rs"
+name = "byteseek"
 path = "src/lib.rs"
 
 [[bin]]
-name = "kvlang"
+name = "byteseek"
 path = "src/main.rs"
 
 [features]

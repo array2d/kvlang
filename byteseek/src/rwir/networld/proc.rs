@@ -4,7 +4,7 @@
 //! 其余为参数；envs 每成员一条 "K=V"，空 = 继承父进程环境、非空 = 完整替换（execve 语义）。
 //! exitcode：uint8。正常退出=退出码(0-255)；被信号终止=128+signo；spawn 失败/无 argv=127。
 //! stdout/stderr 为 @[]uint8 扩展句柄：仅当调用点绑定该写槽时才捕获——绑定→管道捕获+落
-//! 物理文件 /tmp/kvlangruntime-rs/{pid}/{stdout,stderr}+写 @ 句柄（body=逻辑
+//! 物理文件 /tmp/byteseek/{pid}/{stdout,stderr}+写 @ 句柄（body=逻辑
 //! /networld/{host}/proc/{pid}/{stream}）；未绑定→继承父终端（保持无捕获时的直通输出）。
 
 use std::ffi::OsStr;
@@ -118,7 +118,7 @@ fn write_handle(eng: &Engine, slot: &str, pid: u32, stream: &str, bytes: &[u8]) 
 }
 
 fn phys_dir(pid: u32) -> String {
-    format!("/tmp/kvlangruntime-rs/{pid}")
+    format!("/tmp/byteseek/{pid}")
 }
 
 /// @ 句柄兑现（read_at 调）：逻辑 /networld/{host}/proc/{pid}/{stream} → 物理文件读回字节。
@@ -132,7 +132,7 @@ pub fn resolve_read(locator: &str) -> Vec<u8> {
 }
 
 fn phys_dir_str(pid: &str) -> String {
-    format!("/tmp/kvlangruntime-rs/{pid}")
+    format!("/tmp/byteseek/{pid}")
 }
 
 /// 取读参 idx 的容器 KV 路径（ResolveRead 对数组只返首元素，容器须用 ResolveReadPath）。

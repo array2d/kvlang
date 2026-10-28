@@ -63,7 +63,7 @@ kvspace is the addressing and memory space at the core; the language is a small 
 - **kvspace** — one C ABI in PascalCase with no underscores (`kvspaceGet`, `kvspaceWriteInPlace`, `kvlangRuntimeConnect`); two implementations selected at run time by DSN: `kvspace-c` (C, `shm://`) and `kvspace-durable` (Rust, `redis://` / `fs://`; s3 planned). Backends must be byte-identical.
 - **layout** — Rust crate (`bin/libkvlanglayout.so`, CLI `bin/kvlanglayout`). The **o0 compiler**: scan → parse → lower (control-flow lowering, type inference, specialization) → write the KV instruction tree into `/lib`. It performs **no optimization** — optimizing here would erase the high-level semantics that other runtimes rely on to optimize on heterogeneous hardware. It writes only to `/lib`, and diagnoses at three levels: `error` / `warn` / `info`.
 - **runtime-c** — the core interpreter (`bin/libkvlang_runtime.so`, C11). Pure interpretation: fetch-decode-execute, native rwir dispatch, the copy opcode `=`, call/return/br/goto, and the user-function call. It does not compile, optimize, or reorder. Depends only on the `kvspace*` C ABI.
-- **runtime-rs** — Rust (`bin/kvlang`, the `kvlang` CLI). A reference **myrwir host**: it links layout and runtime-c, interprets its own opcodes, and routes the rest. Its in-process families: `term`, `json`, `http`, `networld`, `kvlang·*`.
+- **byteseek** — Rust (`bin/byteseek`, the `byteseek` CLI). A reference **myrwir host**: it links layout and runtime-c, interprets its own opcodes, and routes the rest. Its in-process families: `term`, `json`, `http`, `networld`, `kvlang·*`.
 - **Three stages** — layout (o0) → compiler (an extension) → runtime (pure interpretation). The compiler is not part of the language core; §06 of the spec defines only its contract with the core (front-end/back-end operators, backend binding, operator versioning). Uncompiled `/lib` runs as-is.
 
 ### myrwircaps: how an opcode is fulfilled
@@ -86,7 +86,7 @@ Detects OS/arch and fetches the **latest** release — `linux-x86_64` or `darwin
 PREFIX=/opt/kvlang VERSION=v0.2.18 sh install.sh   # override prefix / pin a version
 ```
 
-It installs `kvlang` (runtime CLI), `kvlanglayout` (layout CLI) and `kvspace` (backend CLI) into `<prefix>/bin`, the libraries into `<prefix>/lib` + `<prefix>/lib/kvspace`, and the headers into `<prefix>/include/{kvlang,kvspace,…}`.
+It installs `byteseek` (runtime CLI), `kvlanglayout` (layout CLI) and `kvspace` (backend CLI) into `<prefix>/bin`, the libraries into `<prefix>/lib` + `<prefix>/lib/kvspace`, and the headers into `<prefix>/include/{kvlang,kvspace,…}`.
 
 ## Single-file binary (Linux)
 
@@ -131,26 +131,26 @@ Requirements: a C toolchain + cmake, Rust (cargo), and the kvspace ABI libraries
 ```bash
 git clone git@github.com:array2d/kvlang.git
 cd kvlang
-make all                                     # runtime(C) + layout(Rust) + runtime-rs(Rust) + json(Go)
+make all                                     # runtime(C) + layout(Rust) + byteseek(Rust) + json(Go)
 
-./bin/kvlang tutorial/01-basics/hello.kv     # run a file (entry rwfunc test)
-./bin/kvlang -c 'println("hello, world")'    # inline mode (entry init)
-./bin/kvlang vet my.kv                       # parse + lower only
-./bin/kvlang format my.kv                    # format to stdout
-./bin/kvlang layout my.kv                    # print the entry point
-./bin/kvlang printlib my.kv                  # reconstruct /lib as runnable kvlang (layout result, no .src)
+./bin/byteseek tutorial/01-basics/hello.kv   # run a file (entry rwfunc test)
+./bin/byteseek -c 'println("hello, world")'  # inline mode (entry init)
+./bin/byteseek vet my.kv                     # parse + lower only
+./bin/byteseek format my.kv                  # format to stdout
+./bin/byteseek layout my.kv                  # print the entry point
+./bin/byteseek printlib my.kv                # reconstruct /lib as runnable kvlang (layout result, no .src)
 ```
 
-`make` targets: `all` · `runtime` · `layout` · `runtime-rs` · `json` · `oldhero` · `test` · `install` · `clean`. `make install` places the libraries in `/usr/lib`, the CLIs (`kvlang`, `kvlanglayout`) in `/usr/bin`, and headers in `/usr/include/kvlang`.
+`make` targets: `all` · `runtime` · `layout` · `byteseek` · `json` · `oldhero` · `test` · `install` · `clean`. `make install` places the libraries in `/usr/lib`, the CLIs (`byteseek`, `kvlanglayout`) in `/usr/bin`, and headers in `/usr/include/kvlang`.
 
 **Backends** are chosen by the `KVSPACE` DSN (default `redis://127.0.0.1:6379`):
 
 ```bash
-KVSPACE=shm:///tmp/kvlang.shm ./bin/kvlang tutorial/01-basics/hello.kv   # kvspace-c
-KVSPACE=fs:///tmp/kvlang-fs   ./bin/kvlang tutorial/01-basics/hello.kv   # kvspace-durable
+KVSPACE=shm:///tmp/kvlang.shm ./bin/byteseek tutorial/01-basics/hello.kv   # kvspace-c
+KVSPACE=fs:///tmp/kvlang-fs   ./bin/byteseek tutorial/01-basics/hello.kv   # kvspace-durable
 ```
 
-Two more modes: `kvlang create <func>` prints a vthread `vid`, and `kvlang run <vid>` resumes from the persisted PC (crash recovery). With `--lib p1:p2:…` (instead of an entry), kvlang lays out every `.kv` under those paths and runs each lib's `init`; there is no environment variable for this.
+Two more modes: `byteseek create <func>` prints a vthread `vid`, and `byteseek run <vid>` resumes from the persisted PC (crash recovery). With `--lib p1:p2:…` (instead of an entry), byteseek lays out every `.kv` under those paths and runs each lib's `init`; there is no environment variable for this.
 
 ---
 
@@ -381,8 +381,8 @@ For an LLM-oriented one-page summary of the language, see [`stdlib/kvlang/kvlang
 ```
 
 ```bash
-./bin/kvlang tutorial/01-basics/hello.kv          # run one example
-./bin/kvlang tutorial/06-algo/gcd.kv              # gcd = 6
+./bin/byteseek tutorial/01-basics/hello.kv        # run one example
+./bin/byteseek tutorial/06-algo/gcd.kv            # gcd = 6
 
 python3 tutorial/test.py                          # whole suite — the conformance test
 python3 error_cases/error_test.py                 # expected-diagnostic cases

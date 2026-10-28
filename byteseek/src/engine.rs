@@ -103,7 +103,7 @@ impl Engine {
     }
 
     /// 扩展句柄兑现：按 body 前缀路由 —— /networld/{host}/proc/... → 进程内 proc 兑现器
-    /// （逻辑路径 → /tmp/kvlangruntime-rs/{pid}/… 物理文件 → 读回字节）。其余前缀暂原样退化。
+    /// （逻辑路径 → /tmp/byteseek/{pid}/… 物理文件 → 读回字节）。其余前缀暂原样退化。
     fn resolve_ext_bytes(&self, locator: &str) -> Vec<u8> {
         if locator.starts_with("/networld/") && locator.contains("/proc/") {
             return rwir::networld::proc::resolve_read(locator);
@@ -117,6 +117,23 @@ impl Engine {
     /// 读一个 int64 读参：ValueString 输出十进制串，直接 parse（缺槽/空串退 0）。
     pub fn read_i64(&self, pc: &str, idx: i32) -> i64 {
         self.read_at(pc, idx).trim().parse().unwrap_or(0)
+    }
+
+    pub fn read_f64(&self, pc: &str, idx: i32) -> f64 {
+        let p = take(unsafe { kvlangRwirextResolveReadPath(self.kv, cs(pc).as_ptr(), idx) });
+        if !p.is_empty() {
+            let xv = self.get_xvalue(&p);
+            if !xv.is_empty() && !xh_is_ptr(&xv) && xh_class(&xv) == 0 {
+                let body = xh_body_slice(&xv);
+                match (xh_langtype(&xv).as_str(), body.len()) {
+                    ("float64", 8) => return f64::from_le_bytes(body.try_into().unwrap()),
+                    ("float32", 4) => return f32::from_le_bytes(body.try_into().unwrap()) as f64,
+                    ("int64", 8) => return i64::from_le_bytes(body.try_into().unwrap()) as f64,
+                    _ => {}
+                }
+            }
+        }
+        self.read_at(pc, idx).trim().parse().unwrap_or(0.0)
     }
 
     // ── rwir 派发时按下标解析读/写槽（rwirext 宿主 ABI，传 kvspace 句柄）─

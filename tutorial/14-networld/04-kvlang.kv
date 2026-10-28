@@ -1,4 +1,4 @@
-// networld/proc·exec 启动 kvlang 自身：子进程继承 KVSPACE，与父共享同一 redis
+// networld/proc·exec 启动 byteseek 自身：子进程继承 KVSPACE，与父共享同一 redis
 //   父作为子的父进程，同步等待并取回退出码
 // 期望输出:
 //   kvlang in kvlang
@@ -10,7 +10,7 @@ rwfunc run_proc(args:*[int64]·[]char/utf32,
 
 rwfunc test() -> () {
 	noenv:[int64]·[]char/utf32 = {}
-	args:[int64]·[]char/utf32 = {"kvlang", "-c", "print(\"kvlang in kvlang\")"}
+	args:[int64]·[]char/utf32 = {"./bin/byteseek", "-c", "print(\"kvlang in kvlang\")"}
 	run_proc(args, noenv) -> code
 	println("exit=", code)
 }

@@ -24,7 +24,7 @@ lib kvlang/spec/runtime语义/notinmyrwircaps {
 ## 就地扩展（同进程）
 
 同进程扩展在驱动循环里就地派发（Rust `run_vid`：`rwir::is_inproc(op)`——即 `op ∈ myrwircaps`——命中 →
-`rwir::dispatch`），无 handoff、无 watch。runtime-rs 的 myrwircaps（就地集合）当前登记：
+`rwir::dispatch`），无 handoff、无 watch。byteseek 的 myrwircaps（就地集合）当前登记：
 
 ```
 term      print / println / cerr / printf / input

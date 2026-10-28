@@ -6,4 +6,69 @@ lib math {
 	/lib/math·Pi = 3.141592653589793
 	/lib/math·E = 2.718281828459045
 	/lib/math·Tau = 6.283185307179586
+
+	rwfunc clamp(x:int64, lo:int64, hi:int64) -> (r:int64) {
+		r = max(lo, min(x, hi))
+	}
+
+	rwfunc fclamp(x:float64, lo:float64, hi:float64) -> (r:float64) {
+		r = max(lo, min(x, hi))
+	}
+
+	rwfunc gcd(a:int64, b:int64) -> (r:int64) {
+		x = abs(a)
+		y = abs(b)
+		while (y != 0) {
+			t = x % y
+			x = y
+			y = t
+		}
+		r = x
+	}
+
+	rwfunc lcm(a:int64, b:int64) -> (r:int64) {
+		if (a == 0 || b == 0) {
+			r = 0
+		} else {
+			g = math·gcd(a, b)
+			r = abs(a ÷ g × b)
+		}
+	}
+
+	rwfunc factorial(n:int64) -> (r:int64) {
+		r = 1
+		i = 2
+		while (i <= n) {
+			r = r × i
+			i = i + 1
+		}
+	}
+
+	rwfunc isqrt(n:int64) -> (r:int64) {
+		if (n <= 0) {
+			r = 0
+		} else {
+			r = int64(sqrt(float64(n)))
+			while ((r + 1) × (r + 1) <= n) {
+				r = r + 1
+			}
+			while (r × r > n) {
+				r = r - 1
+			}
+		}
+	}
+
+	rwfunc lerp(a:float64, b:float64, t:float64) -> (r:float64) {
+		r = a + (b - a) × t
+	}
+
+	rwfunc deg2rad(deg:float64) -> (rad:float64) {
+		/lib/math·Pi -> pi
+		rad = deg × pi ÷ 180.0
+	}
+
+	rwfunc rad2deg(rad:float64) -> (deg:float64) {
+		/lib/math·Pi -> pi
+		deg = rad × 180.0 ÷ pi
+	}
 }

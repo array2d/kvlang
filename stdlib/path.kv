@@ -1,0 +1,151 @@
+lib path {
+	rwfunc isabs(p:[]char/utf32) -> (r:bool) {
+		string·startswith(p, "/") -> r
+	}
+
+	rwfunc join(a:[]char/utf32, b:[]char/utf32) -> (r:[]char/utf32) {
+		if (string·len(b) == 0) {
+			a -> r
+		} else if (path·isabs(b) || string·len(a) == 0) {
+			b -> r
+		} else if (string·endswith(a, "/")) {
+			a + b -> r
+		} else {
+			a + "/" + b -> r
+		}
+	}
+
+	rwfunc trim_slashes(p:[]char/utf32) -> (r:[]char/utf32) {
+		hi = string·len(p)
+		while (hi > 1) {
+			if (string·char(p, hi - 1) != "/") {
+				break
+			}
+			hi = hi - 1
+		}
+		string·slice(p, 0, hi) -> r
+	}
+
+	rwfunc dirname(p:[]char/utf32) -> (d:[]char/utf32) {
+		if (string·len(p) == 0) {
+			"." -> d
+		} else {
+			path·trim_slashes(p) -> t
+			string·rfind(t, "/") -> idx
+			if (idx == -1) {
+				"." -> d
+			} else {
+				string·slice(t, 0, max(1, idx)) -> prefix
+				path·trim_slashes(prefix) -> d
+			}
+		}
+	}
+
+	rwfunc basename(p:[]char/utf32) -> (b:[]char/utf32) {
+		if (string·len(p) == 0) {
+			"" -> b
+		} else {
+			path·trim_slashes(p) -> t
+			if (t == "/") {
+				"/" -> b
+			} else {
+				string·rfind(t, "/") -> idx
+				string·slice(t, idx + 1, string·len(t)) -> b
+			}
+		}
+	}
+
+	rwfunc split(p:[]char/utf32) -> (dir:[]char/utf32, base:[]char/utf32) {
+		path·dirname(p) -> dir
+		path·basename(p) -> base
+	}
+
+	rwfunc splitext(p:[]char/utf32) -> (root:[]char/utf32, e:[]char/utf32) {
+		plen = string·len(p)
+		string·rfind(p, "/") -> slash
+		string·rfind(p, ".") -> dot
+		if (dot <= slash + 1) {
+			p -> root
+			"" -> e
+		} else {
+			string·slice(p, slash + 1, dot) -> prefix
+			if (string·allinset(prefix, ".")) {
+				p -> root
+				"" -> e
+			} else {
+				string·slice(p, 0, dot) -> root
+				string·slice(p, dot, plen) -> e
+			}
+		}
+	}
+
+	rwfunc ext(p:[]char/utf32) -> (e:[]char/utf32) {
+		path·basename(p) -> b
+		path·splitext(b) -> (_, e)
+	}
+
+	rwfunc stem(p:[]char/utf32) -> (s:[]char/utf32) {
+		path·basename(p) -> b
+		path·splitext(b) -> (s, _)
+	}
+
+	rwfunc normpath(p:[]char/utf32) -> (r:[]char/utf32) {
+		n = string·len(p)
+		if (n == 0) {
+			"." -> r
+		} else {
+			path·isabs(p) -> is_abs
+			"" -> acc
+			i = 0
+			while (i < n) {
+				while (i < n) {
+					if (string·char(p, i) != "/") {
+						break
+					}
+					i = i + 1
+				}
+				if (i < n) {
+					start = i
+					while (i < n) {
+						if (string·char(p, i) == "/") {
+							break
+						}
+						i = i + 1
+					}
+					string·slice(p, start, i) -> seg
+					if (seg == "..") {
+						al = string·len(acc)
+						if (al == 0) {
+							if (!is_abs) {
+								".." -> acc
+							}
+						} else {
+							string·rfind(acc, "/") -> ls
+							string·slice(acc, ls + 1, al) -> last_seg
+							if (last_seg == "..") {
+								acc + "/.." -> acc
+							} else if (ls == -1) {
+								"" -> acc
+							} else {
+								string·slice(acc, 0, ls) -> acc
+							}
+						}
+					} else if (seg != ".") {
+						if (string·len(acc) == 0) {
+							seg -> acc
+						} else {
+							acc + "/" + seg -> acc
+						}
+					}
+				}
+			}
+			if (is_abs) {
+				"/" + acc -> r
+			} else if (string·len(acc) == 0) {
+				"." -> r
+			} else {
+				acc -> r
+			}
+		}
+	}
+}

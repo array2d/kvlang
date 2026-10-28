@@ -10,6 +10,7 @@
 pub mod http;
 pub mod json;
 pub mod kvlanglayout;
+pub mod math;
 pub mod networld;
 pub mod term;
 
@@ -209,6 +210,146 @@ pub const MYRWIRCAPS: &[(&str, Rwir)] = &[
             wp: &["*bool"],
         },
     ),
+    (
+        "math·sin",
+        Rwir {
+            rp: &["*float64|*int64"],
+            wp: &["*float64"],
+        },
+    ),
+    (
+        "math·cos",
+        Rwir {
+            rp: &["*float64|*int64"],
+            wp: &["*float64"],
+        },
+    ),
+    (
+        "math·tan",
+        Rwir {
+            rp: &["*float64|*int64"],
+            wp: &["*float64"],
+        },
+    ),
+    (
+        "math·asin",
+        Rwir {
+            rp: &["*float64|*int64"],
+            wp: &["*float64"],
+        },
+    ),
+    (
+        "math·acos",
+        Rwir {
+            rp: &["*float64|*int64"],
+            wp: &["*float64"],
+        },
+    ),
+    (
+        "math·atan",
+        Rwir {
+            rp: &["*float64|*int64"],
+            wp: &["*float64"],
+        },
+    ),
+    (
+        "math·atan2",
+        Rwir {
+            rp: &["*float64|*int64", "*float64|*int64"],
+            wp: &["*float64"],
+        },
+    ),
+    (
+        "math·sinh",
+        Rwir {
+            rp: &["*float64|*int64"],
+            wp: &["*float64"],
+        },
+    ),
+    (
+        "math·cosh",
+        Rwir {
+            rp: &["*float64|*int64"],
+            wp: &["*float64"],
+        },
+    ),
+    (
+        "math·tanh",
+        Rwir {
+            rp: &["*float64|*int64"],
+            wp: &["*float64"],
+        },
+    ),
+    (
+        "math·floor",
+        Rwir {
+            rp: &["*float64|*int64"],
+            wp: &["*float64"],
+        },
+    ),
+    (
+        "math·ceil",
+        Rwir {
+            rp: &["*float64|*int64"],
+            wp: &["*float64"],
+        },
+    ),
+    (
+        "math·round",
+        Rwir {
+            rp: &["*float64|*int64"],
+            wp: &["*float64"],
+        },
+    ),
+    (
+        "math·trunc",
+        Rwir {
+            rp: &["*float64|*int64"],
+            wp: &["*float64"],
+        },
+    ),
+    (
+        "math·log2",
+        Rwir {
+            rp: &["*float64|*int64"],
+            wp: &["*float64"],
+        },
+    ),
+    (
+        "math·log10",
+        Rwir {
+            rp: &["*float64|*int64"],
+            wp: &["*float64"],
+        },
+    ),
+    (
+        "math·hypot",
+        Rwir {
+            rp: &["*float64|*int64", "*float64|*int64"],
+            wp: &["*float64"],
+        },
+    ),
+    (
+        "math·isnan",
+        Rwir {
+            rp: &["*float64|*int64"],
+            wp: &["*bool"],
+        },
+    ),
+    (
+        "math·isinf",
+        Rwir {
+            rp: &["*float64|*int64"],
+            wp: &["*bool"],
+        },
+    ),
+    (
+        "math·isfinite",
+        Rwir {
+            rp: &["*float64|*int64"],
+            wp: &["*bool"],
+        },
+    ),
 ];
 
 /// opcode → &Rwir，供注册与逐槽 langtype 查询。
@@ -269,6 +410,26 @@ pub fn is_inproc(op: &str) -> bool {
             | "networld/fs·mkdir"
             | "networld/fs·exists"
             | "networld/fs·isutf8"
+            | "math·sin"
+            | "math·cos"
+            | "math·tan"
+            | "math·asin"
+            | "math·acos"
+            | "math·atan"
+            | "math·atan2"
+            | "math·sinh"
+            | "math·cosh"
+            | "math·tanh"
+            | "math·floor"
+            | "math·ceil"
+            | "math·round"
+            | "math·trunc"
+            | "math·log2"
+            | "math·log10"
+            | "math·hypot"
+            | "math·isnan"
+            | "math·isinf"
+            | "math·isfinite"
     )
 }
 
@@ -298,6 +459,10 @@ pub fn dispatch(eng: &Engine, op: &str, pc: &str) {
         "networld/fs·mkdir" => networld::fs::mkdir(eng, pc),
         "networld/fs·exists" => networld::fs::exists(eng, pc),
         "networld/fs·isutf8" => networld::fs::isutf8(eng, pc),
+        "math·sin" | "math·cos" | "math·tan" | "math·asin" | "math·acos" | "math·atan"
+        | "math·atan2" | "math·sinh" | "math·cosh" | "math·tanh" | "math·floor" | "math·ceil"
+        | "math·round" | "math·trunc" | "math·log2" | "math·log10" | "math·hypot"
+        | "math·isnan" | "math·isinf" | "math·isfinite" => math::dispatch(eng, op, pc),
         "kvlang·vet" => {
             let out = kvlanglayout::vet(eng, &eng.read0(pc));
             eng.set_kv(&eng.write0(pc), &out);

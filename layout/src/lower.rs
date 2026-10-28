@@ -1142,7 +1142,11 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
         | "string·formatuint" => return "char/utf32".to_string(),
         "random.int63" => return "int64".to_string(),
         "random·intn" | "random.uint64" | "string·parseuint" => return "uint64".to_string(),
-        "pow" | "sqrt" | "exp" | "log" | "string·parsefloat" => return "float64".to_string(),
+        "pow" | "sqrt" | "exp" | "log" | "string·parsefloat" | "math·sin" | "math·cos"
+        | "math·tan" | "math·asin" | "math·acos" | "math·atan" | "math·atan2" | "math·sinh"
+        | "math·cosh" | "math·tanh" | "math·floor" | "math·ceil" | "math·round" | "math·trunc"
+        | "math·log2" | "math·log10" | "math·hypot" => return "float64".to_string(),
+        "math·isnan" | "math·isinf" | "math·isfinite" => return "bool".to_string(),
         "sign" => return "int64".to_string(),
         "abs" | "neg" => {
             return if !reads.is_empty() {
@@ -1406,7 +1410,16 @@ fn exact_kind(
             let t = exact_kind(base, declared, stable)?;
             return container_elem(&t);
         }
-        "sqrt" | "exp" | "log" | "pow" => return Some("float64".to_string()),
+        "kvspace·get" => {
+            let base = e.args.first()?;
+            let t = exact_kind(base, declared, stable)?;
+            return container_value(&t);
+        }
+        "sqrt" | "exp" | "log" | "pow" | "math·sin" | "math·cos" | "math·tan" | "math·asin"
+        | "math·acos" | "math·atan" | "math·atan2" | "math·sinh" | "math·cosh" | "math·tanh"
+        | "math·floor" | "math·ceil" | "math·round" | "math·trunc" | "math·log2" | "math·log10"
+        | "math·hypot" => return Some("float64".to_string()),
+        "math·isnan" | "math·isinf" | "math·isfinite" => return Some("bool".to_string()),
         "sign" => return Some("int64".to_string()),
         "kvlen" | "compactarray·numel" | "compactarray·dim" | "kvspace·listlen" | "string·len"
         | "string·ord" | "string·cmp" | "string·find" | "string·parseint" | "compactarray·bodylen"

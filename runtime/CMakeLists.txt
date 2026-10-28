@@ -117,13 +117,13 @@ if(NOT APPLE)
     add_test(NAME isa_typed_violation
              COMMAND bash "${CMAKE_SOURCE_DIR}/tests/isa_typed_violation.sh")
     set_tests_properties(isa_typed_violation PROPERTIES SKIP_RETURN_CODE 77
-        ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/kvlang")
+        ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/byteseek")
     find_program(PYTHON3_EXE python3)
     if(PYTHON3_EXE)
         add_test(NAME isa_conformance
                  COMMAND "${PYTHON3_EXE}" "${CMAKE_SOURCE_DIR}/tests/isa_conformance.py")
         set_tests_properties(isa_conformance PROPERTIES
-            ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/kvlang")
+            ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/byteseek")
     endif()
     add_test(NAME specialize_gate COMMAND bash "${CMAKE_SOURCE_DIR}/tests/specialize_gate.sh")
     set_tests_properties(getmember_siblings kvset_invalid_head_shm pc_kvspace_source_shm crash_resume_shm param_address_shm delegate_shm scalar_encode pc_part_write_shm ro_rewrite_shm
@@ -131,21 +131,21 @@ if(NOT APPLE)
     set_tests_properties(kvset_invalid_head_fs pc_kvspace_source_fs crash_resume_fs param_address_fs pc_part_write_fs ro_rewrite_fs
         PROPERTIES ENVIRONMENT "KVLANG_TEST_SCHEME=fs")
     set_tests_properties(body_write
-        PROPERTIES ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/kvlang")
+        PROPERTIES ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/byteseek")
     set_tests_properties(int_specialize
-        PROPERTIES ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/kvlang")
+        PROPERTIES ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/byteseek")
     set_tests_properties(float_specialize
-        PROPERTIES ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/kvlang")
+        PROPERTIES ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/byteseek")
     set_tests_properties(pause_resume
-        PROPERTIES ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/kvlang")
+        PROPERTIES ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/byteseek")
     set_tests_properties(status_view
-        PROPERTIES ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/kvlang")
+        PROPERTIES ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/byteseek")
     set_tests_properties(layout_reject
         PROPERTIES ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout")
     set_tests_properties(coercion
-        PROPERTIES ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/kvlang")
+        PROPERTIES ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/byteseek")
     set_tests_properties(dyn_specialize
-        PROPERTIES ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/kvlang")
+        PROPERTIES ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/byteseek")
     set_tests_properties(specialize_gate
         PROPERTIES ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout")
 endif()

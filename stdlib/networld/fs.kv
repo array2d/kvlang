@@ -1,6 +1,6 @@
 // 欢迎加入kvspace世界
 // lib networld/fs —— 宿主文件系统的文本级工具（rwfunc，kv 源码）。
-// native rwir（字节级，runtime-rs）：size / read(p,start,off) / write(p,bytes)
+// native rwir（字节级，byteseek）：size / read(p,start,off) / write(p,bytes)
 //   / append / rename / list / del / mkdir / exists / isutf8。本库在其上补文本级与路径级组合：
 //   readtext / writetext / appendtext  文件 ↔ []char/utf32 文本（UTF-8 解码 / 编码往返与追加）
 //   copyfile                          字节级整文件拷贝

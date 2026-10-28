@@ -63,7 +63,7 @@ kvspace 是核心的寻址空间与内存空间；语言本体是小核心 runti
 - **kvspace** — 一套 PascalCase、无下划线的 C ABI（`kvspaceGet`、`kvspaceWriteInPlace`、`kvlangRuntimeConnect`）；两种实现由运行期 DSN 选择：`kvspace-c`（C，`shm://`）与 `kvspace-durable`（Rust，`redis://` / `fs://`；s3 规划中）。各后端必须逐字节一致。
 - **layout** — Rust crate（`bin/libkvlanglayout.so`，CLI `bin/kvlanglayout`）。**o0 编译器**：scan → parse → lower（控制流降级、类型推断、特化）→ 把 KV 指令树写进 `/lib`。它**不做任何优化**——在此优化会丢掉其它 runtime 赖以在异构硬件上优化所需的高层语义。只写 `/lib`，诊断三级：`error` / `warn` / `info`。
 - **runtime-c** — 核心解释器（`bin/libkvlang_runtime.so`，C11）。纯解释：取指-译码-执行、native rwir 派发、拷贝操作码 `=`、call/return/br/goto、用户函数调用。不编译、不优化、不重排。只依赖 `kvspace*` C ABI。
-- **runtime-rs** — Rust（`bin/kvlang`，即 `kvlang` CLI）。一个参考 **myrwir 宿主**：链接 layout 与 runtime-c，解释自己的操作码、路由其余。其进程内 families：`term`、`json`、`http`、`networld`、`kvlang·*`。
+- **byteseek** — Rust（`bin/byteseek`，即 `byteseek` CLI）。一个参考 **myrwir 宿主**：链接 layout 与 runtime-c，解释自己的操作码、路由其余。其进程内 families：`term`、`json`、`http`、`networld`、`kvlang·*`。
 - **三个阶段** — layout（o0）→ 编译器（一种扩展）→ runtime（纯解释）。编译器不属语言核心；规范卷 06 只界定它与核心的契约（前端算子/后端算子、后端绑定、算子版本化）。未编译的 `/lib` 可直接运行。
 
 ### myrwircaps：一个操作码如何被兑现
@@ -86,7 +86,7 @@ curl -fsSL https://raw.githubusercontent.com/array2d/kvlang/master/install.sh | 
 PREFIX=/opt/kvlang VERSION=v0.2.18 sh install.sh   # 覆盖前缀 / 指定版本
 ```
 
-安装内容：`kvlang`（runtime CLI）、`kvlanglayout`（layout CLI）、`kvspace`（后端 CLI）→ `<prefix>/bin`；库 → `<prefix>/lib` + `<prefix>/lib/kvspace`；头 → `<prefix>/include/{kvlang,kvspace,…}`。
+安装内容：`byteseek`（runtime CLI）、`kvlanglayout`（layout CLI）、`kvspace`（后端 CLI）→ `<prefix>/bin`；库 → `<prefix>/lib` + `<prefix>/lib/kvspace`；头 → `<prefix>/include/{kvlang,kvspace,…}`。
 
 ## 单文件二进制（Linux）
 
@@ -127,26 +127,26 @@ PATH=/tmp:$PATH KVLANG_TERM_BIN="$PWD/bin/kvlang-single" KVLANG_LAYOUT_BIN=/tmp/
 ```bash
 git clone git@github.com:array2d/kvlang.git
 cd kvlang
-make all                                     # runtime(C) + layout(Rust) + runtime-rs(Rust) + json(Go)
+make all                                     # runtime(C) + layout(Rust) + byteseek(Rust) + json(Go)
 
-./bin/kvlang tutorial/01-basics/hello.kv     # 运行文件（入口 rwfunc test）
-./bin/kvlang -c 'println("hello, world")'    # inline 模式（入口 init）
-./bin/kvlang vet my.kv                       # 只 parse + lower
-./bin/kvlang format my.kv                    # 格式化到 stdout
-./bin/kvlang layout my.kv                    # 打印入口点
-./bin/kvlang printlib my.kv                  # 把 /lib 重建为可运行 kvlang（看 layout 结果，不读 .src）
+./bin/byteseek tutorial/01-basics/hello.kv   # 运行文件（入口 rwfunc test）
+./bin/byteseek -c 'println("hello, world")'  # inline 模式（入口 init）
+./bin/byteseek vet my.kv                     # 只 parse + lower
+./bin/byteseek format my.kv                  # 格式化到 stdout
+./bin/byteseek layout my.kv                  # 打印入口点
+./bin/byteseek printlib my.kv                # 把 /lib 重建为可运行 kvlang（看 layout 结果，不读 .src）
 ```
 
-`make` 目标：`all` · `runtime` · `layout` · `runtime-rs` · `json` · `oldhero` · `test` · `install` · `clean`。`make install` 把库装到 `/usr/lib`、CLI（`kvlang`、`kvlanglayout`）装到 `/usr/bin`、头文件装到 `/usr/include/kvlang`。
+`make` 目标：`all` · `runtime` · `layout` · `byteseek` · `json` · `oldhero` · `test` · `install` · `clean`。`make install` 把库装到 `/usr/lib`、CLI（`byteseek`、`kvlanglayout`）装到 `/usr/bin`、头文件装到 `/usr/include/kvlang`。
 
 **后端**由 `KVSPACE` DSN 选择（默认 `redis://127.0.0.1:6379`）：
 
 ```bash
-KVSPACE=shm:///tmp/kvlang.shm ./bin/kvlang tutorial/01-basics/hello.kv   # kvspace-c
-KVSPACE=fs:///tmp/kvlang-fs   ./bin/kvlang tutorial/01-basics/hello.kv   # kvspace-durable
+KVSPACE=shm:///tmp/kvlang.shm ./bin/byteseek tutorial/01-basics/hello.kv   # kvspace-c
+KVSPACE=fs:///tmp/kvlang-fs   ./bin/byteseek tutorial/01-basics/hello.kv   # kvspace-durable
 ```
 
-另有两种模式：`kvlang create <func>` 打印 vthread `vid`，`kvlang run <vid>` 从持久化的 PC 继续（崩溃恢复）。用 `--lib p1:p2:…`（代替入口名）时，kvlang 会 layout 这些路径下的所有 `.kv` 并运行各 lib 的 `init`；没有对应环境变量。
+另有两种模式：`byteseek create <func>` 打印 vthread `vid`，`byteseek run <vid>` 从持久化的 PC 继续（崩溃恢复）。用 `--lib p1:p2:…`（代替入口名）时，byteseek 会 layout 这些路径下的所有 `.kv` 并运行各 lib 的 `init`；没有对应环境变量。
 
 ---
 
@@ -377,8 +377,8 @@ rwfunc test() -> () {
 ```
 
 ```bash
-./bin/kvlang tutorial/01-basics/hello.kv          # 运行一个示例
-./bin/kvlang tutorial/06-algo/gcd.kv              # gcd = 6
+./bin/byteseek tutorial/01-basics/hello.kv        # 运行一个示例
+./bin/byteseek tutorial/06-algo/gcd.kv            # gcd = 6
 
 python3 tutorial/test.py                          # 全套 — 即一致性测试
 python3 error_cases/error_test.py                 # 期望诊断用例

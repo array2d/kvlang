@@ -3,7 +3,7 @@ on: [push, pull_request]
 jobs:
   build:
     runs-on: macos-latest
-    # /usr 受 SIP 保护，kvspace 装到 /usr/local（本仓 runtime/layout/runtime-rs 固定该目录）
+    # /usr 受 SIP 保护，kvspace 装到 /usr/local（本仓 runtime/layout/byteseek 固定该目录）
     steps:
       - uses: actions/checkout@v4
       - name: 构建依赖 kvspace（macOS 无预编译 ABI，从源码装到 /usr/local）
@@ -19,5 +19,5 @@ jobs:
           mkdir -p bin && cp layout/target/release/libkvlanglayout.dylib bin/
       - name: 构建 runtimec2（默认 runtime）
         run: make runtimec2
-      - name: 构建 runtime-rs（Rust）
-        run: cargo build --release --manifest-path runtime-rs/Cargo.toml
+      - name: 构建 byteseek（Rust）
+        run: cargo build --release --manifest-path byteseek/Cargo.toml
