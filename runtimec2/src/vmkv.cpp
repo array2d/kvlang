@@ -199,9 +199,12 @@ bool ensure_ref(FrameCtx& f, FReg* r) {
         return true;
     if (r->key.empty())
         return false;
-    if (kvspaceResolveRef(f.h, r->key.c_str(), &r->ref) != 0)
+    if (kvspaceResolveRef(f.h, r->key.c_str(), &r->ref) != 0) {
+        r->noslot = true;
         return false;
+    }
     r->resolved = true;
+    r->noslot = false;
     return true;
 }
 
@@ -694,6 +697,7 @@ bool Vmkv::store_i64_slot(FrameCtx& f, FReg& r, std::int64_t v) {
     r.view_ok = false;
     r.body = nullptr;
     r.resolved = false;
+    r.noslot = false;
     r.sc_ok = false;
     r.fast_bool = false;
     return ok;
@@ -848,6 +852,16 @@ bool Vmkv::slot_write_scalar(FrameCtx& f, std::uint8_t idx, const Scalar& s,
         if (dr->key.empty() || is_any_frame_local(dr->key))
             return slot_write_i64(f, idx, s.i);
     }
+    // Slotless frame-local int64 (a ResolveRef already missed in this frame):
+    // slot_write_i64 keeps it in the cache, as it always has, without another miss.
+    // Plain names only (the build-time wr_local rule): `p·x` is a member write.
+    if (!fr.dst_ptr && !fr.src_ptr && !fr.view_ok && !fr.resolved && fr.noslot &&
+        s.k == Scalar::K::Int && width == 8 && fr.desc_ref &&
+        fr.desc_ref->vclass == RegDesc::VarClass::Plain &&
+        fr.desc_ref->name.find("\xC2\xB7") == std::string::npos &&
+        !fr.desc_ref->name.empty() && fr.desc_ref->name[0] != '/' &&
+        ensure_reg_key(f, fr) && is_frame_local(f, fr.key))
+        return slot_write_i64(f, idx, s.i);
     bool match = fr.sc_ok && fr.sck == s.k && fr.scw == width;
     if (reg_body(f, idx, &body, &body_cap) && body && body_cap >= width) {
         if (!match && fr.view.head && fr.view.headlen > 18) {
@@ -1207,6 +1221,7 @@ bool Vmkv::enter_frame(FrameCtx& f, const Segment* seg, std::string* err) {
         FReg& rr = f.regs[i];
         rr.ref = kvspaceRef_t{};
         rr.resolved = false;
+        rr.noslot = false;
         rr.view = kvspaceXvalueBodyView_t{};
         rr.view_ok = false;
         rr.body = nullptr;
@@ -2945,6 +2960,7 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
             wr->sc_ok = false;
             wr->view_ok = false;
             wr->resolved = false;
+            wr->noslot = false;
             wr = wr->dst_ptr;
         } while (wr);
     }

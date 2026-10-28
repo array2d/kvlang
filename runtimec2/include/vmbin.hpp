@@ -112,6 +112,7 @@ struct FReg {
     const RegDesc* desc_ref = nullptr;  // 段级描述符指针（普通变量惰性 key 用，零 string 拷贝）
     kvspaceRef_t ref{};
     bool resolved = false;
+    bool noslot = false;  // ResolveRef failed in this frame: the key has no slot
     kvspaceXvalueBodyView_t view{};
     bool view_ok = false;
     std::uint8_t* body = nullptr;  // view 的 body 指针（槽搬迁/写后失效）
