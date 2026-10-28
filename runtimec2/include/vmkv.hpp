@@ -73,10 +73,17 @@ struct Vmkv {
                  const Scalar& b, bool* out);
 
     // ── 执行（原 vm.cpp run_frame 方法化）──
+    // 帧入口：逐 reg 热字段重置 + 字面量快值缓存 + Ptr 参数内存别名绑定 + 描述符解析。
+    // 每 call 唯一的 kvspace 冷路径，与指令派发正交。false = err 已填。
+    bool enter_frame(bin::FrameCtx& f, const Segment* seg, std::string* err);
     // 从 start_s0 起执行指令段（二进制栈帧 f）；Stop 时把停机指令的完整明文 pc
     // （含帧层）写入 stop_pc。run_frame 是明文栈 ↔ 二进制栈的执行边界。
     bin::RunResult run_frame(bin::FrameCtx& f, int start_s0,
                              std::string* stop_pc, std::string* err);
+    // Call 块（原 run_frame 内嵌）：callee 解析、mem_frame 判定、帧初始化、
+    // arg_src/arg_dst 内存别名表、递归 run_frame。Ok = 调用方继续下一条指令。
+    bin::RunResult do_call(bin::FrameCtx& f, const Segment* seg, const CInsn& ins,
+                           std::string* stop_pc, std::string* err);
 };
 
 // 进程级明文栈实例（Runtime 注入共享 kvspace 句柄；bin 成员经 g_vmkv.bin 访问）。
