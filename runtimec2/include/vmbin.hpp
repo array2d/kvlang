@@ -112,6 +112,7 @@ struct FReg {
     const RegDesc* desc_ref = nullptr;  // 段级描述符指针（普通变量惰性 key 用，零 string 拷贝）
     kvspaceRef_t ref{};
     bool resolved = false;
+    bool noslot = false;  // ResolveRef failed in this frame: the key has no slot
     kvspaceXvalueBodyView_t view{};
     bool view_ok = false;
     std::uint8_t* body = nullptr;  // view 的 body 指针（槽搬迁/写后失效）
@@ -159,6 +160,10 @@ struct FrameCtx {
     // （returnpc/lib）与帧生命周期（DelTree/Mkindex）全部省略。return 直接
     // Returned（stop_pc 空，Call 分支捕获后 continue），pc 从不指向此帧。
     bool mem_frame = false;
+    // Set by the caller to skip the segment/JIT cache lookups by name.
+    const Segment* seg_hint = nullptr;
+    const void* jit_hint = nullptr;
+    bool jit_known = false;
     // 外部可观察：vthread·run 驱动的子链（printstack 检视需要帧 ‥lib/extindex）。
     // 顶层 vthread（bootstrap/test）链默认不可观察——mem_frame 保持零 kvspace
     // 性能（fib/iops 热路径）。do_call 子帧继承父链。

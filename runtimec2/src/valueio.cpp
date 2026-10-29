@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string_view>
+#include <unordered_map>
 
 #include <kvspace/kvspace.h>
 #include <kvspace/xvalue_head.h>
@@ -52,14 +53,155 @@ bool read_wire(void* h, std::string_view key, const std::uint8_t** data,
     return d != nullptr && n > 0;
 }
 
+namespace {
+
+// Process-private key -> view token cache (P2 protocol). Values stay in
+// kvspace; a hit costs one ViewCheck plus a head compare instead of a walk.
+struct SvHash {
+    using is_transparent = void;
+    std::size_t operator()(std::string_view s) const noexcept {
+        return std::hash<std::string_view>{}(s);
+    }
+};
+
+struct ViewEnt {
+    kvspaceViewToken_t tok{};
+    std::uint32_t total = 0;  // 0 = not cacheable, read through kvspaceGet
+    bool is_bool = false;     // kvspaceGet rejects a bool body > 1; so must a hit
+    std::uint8_t hn = 0;
+    std::uint8_t head[128];
+};
+
+struct ViewCache {
+    void* h = nullptr;
+    int state = 0;  // 0 = idle, 1 = live, -1 = backend has no views
+    std::uint32_t epoch = 0;
+    std::unordered_map<std::string, ViewEnt, SvHash, std::equal_to<>> m;
+};
+
+thread_local ViewCache g_vc;
+constexpr std::size_t kViewCacheMax = 1u << 16;
+
+const char* zkey(std::string_view k) {
+    thread_local std::string b;
+    b.assign(k);
+    return b.c_str();
+}
+
+void vc_ack(void* h) {
+    if (kvspaceViewAck(h, &g_vc.epoch) == 1) {
+        g_vc.m.clear();
+        kvspaceViewAck(h, &g_vc.epoch);
+    }
+}
+
+bool vc_live(void* h) {
+    if (g_vc.h != h) {
+        view_cache_idle(g_vc.h);
+        g_vc.h = h;
+        g_vc.state = 0;
+    }
+    if (g_vc.state == 0) {
+        if (kvspaceViewQuiesce(h, 0) != 0) {
+            g_vc.state = -1;
+            return false;
+        }
+        g_vc.state = 1;
+        vc_ack(h);
+    }
+    return g_vc.state > 0;
+}
+
+// Whole wire length for scalars and tensors, whose validity kvspaceGet decides
+// from the head alone (plus the bool byte); 0 = read through kvspaceGet.
+std::uint32_t wire_total(const kvspaceViewToken_t& t) {
+    const std::uint8_t* hd = t.head;
+    const std::uint8_t kind = hd[1];
+    std::uint64_t a = 0, b = 0;
+    std::memcpy(&a, hd + 2, 8);
+    std::memcpy(&b, hd + 10, 8);
+    std::uint64_t cap;
+    if (kind == KVSPACE_XH_FIXED_SMALL) {
+        if (t.headlen <= KVSPACE_XH_PREFIX || hd[KVSPACE_XH_PREFIX] == 0)
+            return 0;
+        cap = t.value_len;
+    } else if (kind == KVSPACE_XH_FIXED_LARGE) {
+        cap = a * b;
+    } else {
+        return 0;
+    }
+    const std::uint64_t total = t.headlen + cap;
+    if (total > t.cap || total > 0x7fffffffu)
+        return 0;
+    kvspaceXh xh{};
+    return kvspaceXhDecode(t.head, total, &xh) == 0 ? static_cast<std::uint32_t>(total) : 0;
+}
+
+}  // namespace
+
+void view_cache_tick() noexcept {
+    if (g_vc.state > 0)
+        vc_ack(g_vc.h);
+}
+
+void view_cache_idle_all() noexcept { view_cache_idle(g_vc.h); }
+
+void view_cache_idle(void* h) noexcept {
+    if (h && g_vc.h == h && g_vc.state == 1) {
+        g_vc.m.clear();
+        kvspaceViewQuiesce(h, 1);
+        g_vc.state = 0;
+        g_vc.h = nullptr;
+    }
+}
+
 bool read_wire_raw(void* h, std::string_view key, const std::uint8_t** data,
                    std::uint32_t* len) noexcept {
     *data = nullptr;
     *len = 0;
-    auto k = keyz(key);
+    // System vars (`‥`) are volatile by contract: always read through.
+    const bool cacheable =
+        vc_live(h) && key.find("\xE2\x80\xA5") == std::string_view::npos;
+    if (cacheable) {
+        auto it = g_vc.m.find(key);
+        if (it != g_vc.m.end()) {
+            ViewEnt& e = it->second;
+            if (e.total == 0)
+                goto slow;
+            if (kvspaceViewCheck(h, &e.tok) == 0 &&
+                std::memcmp(e.tok.head, e.head, e.hn) == 0 &&
+                !(e.is_bool && e.tok.body[0] > 1)) {
+                *data = e.tok.head;
+                *len = e.total;
+                return true;
+            }
+            g_vc.m.erase(it);
+        }
+        if (g_vc.m.size() >= kViewCacheMax)
+            g_vc.m.clear();
+        ViewEnt e;
+        if (kvspaceViewResolve(h, zkey(key), &e.tok) == 0)
+            e.total = wire_total(e.tok);
+        if (e.total) {
+            e.hn = static_cast<std::uint8_t>(e.tok.headlen < sizeof e.head
+                                                 ? e.tok.headlen
+                                                 : sizeof e.head);
+            std::memcpy(e.head, e.tok.head, e.hn);
+            e.is_bool = e.tok.head[1] == KVSPACE_XH_FIXED_SMALL &&
+                        std::strncmp(reinterpret_cast<const char*>(e.tok.head) +
+                                         KVSPACE_XH_PREFIX,
+                                     "bool", e.tok.headlen - KVSPACE_XH_PREFIX) == 0;
+            *data = e.tok.head;
+            *len = e.total;
+            g_vc.m.emplace(std::string(key), e);
+            return true;
+        }
+        g_vc.m.emplace(std::string(key), e);
+    }
+slow:
     std::uint8_t* d = nullptr;
     std::uint32_t n = 0;
-    if (kvspaceGet(h, k.c_str(), 0, &d, &n) != 0)
+    if (kvspaceGet(h, zkey(key), 0, &d, &n) != 0)
         return false;
     *data = d;
     *len = n;

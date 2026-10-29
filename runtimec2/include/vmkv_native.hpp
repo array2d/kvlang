@@ -16,7 +16,7 @@ struct NativeCtx {
     const CInsn& ins;
     Wire in[2];
     std::int64_t v0 = 0, v1 = 0;
-    std::string fn;  // fold 后的 op 名（`·`→`/`，表键）
+    const std::string& fn;  // fold 后的 op 名（`·`→`/`，表键）
     // vthread·run 子 vid 撞外部 rwir 时的冒泡 pc：handler 填后，run_frame 以
     // Stop 让出，execute_vthread_impl 把该 pc 交驱动（处理子 rwir 后重入续驱）。
     std::string yield_pc;

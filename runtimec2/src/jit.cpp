@@ -1,4 +1,6 @@
 #include "jit.hpp"
+#include "valueio.hpp"
+#include "vmkv.hpp"
 
 #include <cstdio>
 #include <cstdlib>
@@ -537,6 +539,7 @@ bool jit_try_run(FrameCtx& f, const Segment* seg, int start_s0,
         return false;
     const std::int64_t arg = src->fv;
     std::int64_t errf = 0;
+    view_cache_idle_all();  // native code never acks: hold no view tokens across it
     const std::int64_t res =
         reinterpret_cast<JitFn>(const_cast<void*>(code))(arg, &errf);
     if (g_jitdbg)
@@ -553,7 +556,7 @@ bool jit_try_run(FrameCtx& f, const Segment* seg, int start_s0,
     dst->fv = res;
     dst->fast_i64 = true;
     if (dst->view_ok && dst->body)
-        std::memcpy(dst->body, &res, 8);
+        (void)g_vmkv.store_i64_slot(f, *dst, res);
     dr0.fv = res;
     dr0.fast_i64 = true;
     if (stop_pc)
