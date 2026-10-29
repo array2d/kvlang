@@ -121,11 +121,8 @@ static void prebuild_reachable(void* h, const std::string& func_key) {
     }
 }
 
-char* bootstrap_impl(Runtime* r, const char* funcname) {
-    if (!r || !funcname || !*funcname)
-        return nullptr;
-    void* h = r->kv.handle();
-    if (!h)
+char* bootstrap_h(void* h, const char* funcname) {
+    if (!h || !funcname || !*funcname)
         return nullptr;
     std::string vid = alloc_vid(h);
     if (vid.empty())
@@ -149,12 +146,16 @@ char* bootstrap_impl(Runtime* r, const char* funcname) {
     return strdup(vid.c_str());
 }
 
-int execute_vthread_impl(Runtime* r, const char* vid, char** out_pc) {
+char* bootstrap_impl(Runtime* r, const char* funcname) {
+    return r ? bootstrap_h(r->kv.handle(), funcname) : nullptr;
+}
+
+int execute_vthread_h(void* h, const char* vid, char** out_pc,
+                      bool observable) {
     if (out_pc)
         *out_pc = nullptr;
-    if (!r || !vid || !*vid)
+    if (!h || !vid || !*vid)
         return -1;
-    void* h = r->kv.handle();
     // 帧级缓存：key/pc 只构造一次（P0：消灭每步字符串构造）。
     const std::string st_key = status_key(vid);
     const std::string pc_k = pc_key(vid);
@@ -193,6 +194,7 @@ int execute_vthread_impl(Runtime* r, const char* vid, char** out_pc) {
             fctx.vid = p.vid;
             fctx.depth = p.depth;
             fctx.frame = std::move(frame);
+            fctx.observable = observable;  // vthread·run 子链可观察（printstack）
             // 复用 read_opcode 探测到的函数目录（段缓存已持有，免二次解析）。
             if (!g_dir_hint.empty())
                 fctx.func_dir = std::move(g_dir_hint);
@@ -202,6 +204,10 @@ int execute_vthread_impl(Runtime* r, const char* vid, char** out_pc) {
             std::string stop_pc;
             RunResult rr = g_vmkv.run_frame(fctx, p.s0, &stop_pc, &err);
             if (rr == RunResult::Error) {
+                // 出错指令行：run_frame 已把 stop_pc 设为 param_key(出错帧, s0)。
+                // 子 vthread 的 pc 应指向出错指令（printstack cur 渲染依赖）。
+                if (!stop_pc.empty())
+                    (void)write_text(h, pc_k, stop_pc);
                 write_status(h, vid, "error");
                 write_text(h, msg_key,
                            err.empty() ? "runtimec2: execution failed" : err);
@@ -227,6 +233,11 @@ int execute_vthread_impl(Runtime* r, const char* vid, char** out_pc) {
             *out_pc = strdup(pc.c_str());
         return 1;  // 非本 runtime 的 rwir：交驱动
     }
+}
+
+int execute_vthread_impl(Runtime* r, const char* vid, char** out_pc) {
+    // 顶层驱动（bootstrap/test 链）不可观察：mem_frame 保持零 kvspace 性能。
+    return r ? execute_vthread_h(r->kv.handle(), vid, out_pc, false) : -1;
 }
 
 }  // namespace kv::rt

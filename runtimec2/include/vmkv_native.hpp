@@ -17,6 +17,9 @@ struct NativeCtx {
     Wire in[2];
     std::int64_t v0 = 0, v1 = 0;
     std::string fn;  // fold 后的 op 名（`·`→`/`，表键）
+    // vthread·run 子 vid 撞外部 rwir 时的冒泡 pc：handler 填后，run_frame 以
+    // Stop 让出，execute_vthread_impl 把该 pc 交驱动（处理子 rwir 后重入续驱）。
+    std::string yield_pc;
 
     // 读参解码（v_scalar 优先，time/duration 等非数值 langtype body 即 8 字节整数）。
     bool ai64(int i, std::int64_t* v);

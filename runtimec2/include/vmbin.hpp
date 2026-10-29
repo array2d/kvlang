@@ -159,6 +159,10 @@ struct FrameCtx {
     // （returnpc/lib）与帧生命周期（DelTree/Mkindex）全部省略。return 直接
     // Returned（stop_pc 空，Call 分支捕获后 continue），pc 从不指向此帧。
     bool mem_frame = false;
+    // 外部可观察：vthread·run 驱动的子链（printstack 检视需要帧 ‥lib/extindex）。
+    // 顶层 vthread（bootstrap/test）链默认不可观察——mem_frame 保持零 kvspace
+    // 性能（fib/iops 热路径）。do_call 子帧继承父链。
+    bool observable = false;
 };
 
 // 单帧执行结果：Ok=入口帧走到段尾/return（vthread done）；
