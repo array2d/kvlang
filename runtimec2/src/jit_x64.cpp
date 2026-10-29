@@ -187,7 +187,7 @@ std::vector<std::uint8_t> emit_arch(const Segment* seg, const JitShape& sh) {
         if (!ci.fast_i64 || ci.opfn < 13 || ci.opfn > 18)
             continue;
         const CInsn& nx = seg->insns[i + 1];
-        if (nx.op != ops::Op::Br || nx.rd[0] != ci.wr[0])
+        if (nx.op != rwir::Op::Br || nx.rd[0] != ci.wr[0])
             continue;
         bool only_here = true;
         for (const CInsn& x : seg->insns)
@@ -202,12 +202,12 @@ std::vector<std::uint8_t> emit_arch(const Segment* seg, const JitShape& sh) {
     for (std::size_t i = 0; i < n; i++) {
         start[i] = c.b.size();
         const CInsn& ci = seg->insns[i];
-        if (ci.op == ops::Op::Return) {
+        if (ci.op == rwir::Op::Return) {
             c.ret();
             continue;
         }
-        if (ci.op == ops::Op::Goto || ci.op == ops::Op::Br) {
-            const bool br = ci.op == ops::Op::Br;
+        if (ci.op == rwir::Op::Goto || ci.op == rwir::Op::Br) {
+            const bool br = ci.op == rwir::Op::Br;
             const int t1 = static_cast<int>(lit(ci.rd[br ? 1 : 0]));
             const int t2 = br ? static_cast<int>(lit(ci.rd[2])) : 0;
             const bool backward =
@@ -278,7 +278,7 @@ std::vector<std::uint8_t> emit_arch(const Segment* seg, const JitShape& sh) {
             }
             continue;
         }
-        if (ci.op == ops::Op::Copy) {
+        if (ci.op == rwir::Op::Copy) {
             const XReg d = *reg_of(ci.wr[0]);
             if (is_lit(ci.rd[0]))
                 c.mov_imm(d, static_cast<std::int32_t>(lit(ci.rd[0])));

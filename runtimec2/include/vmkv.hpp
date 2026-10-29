@@ -69,12 +69,12 @@ struct Vmkv {
 
     // ── 标量运算（步骤 2 挪 vmbin 后删，此处转发）──
     bool truthy(const Scalar& s);
-    bool is_cmp(ops::Op op);
+    bool is_cmp(rwir::Op op);
     bool same_class(Scalar::K a, Scalar::K b);
-    bool compute_int(ops::Op op, Scalar::K k, const Scalar& a,
+    bool compute_int(rwir::Op op, Scalar::K k, const Scalar& a,
                      const Scalar& b, Scalar* r);
-    bool compute_float(ops::Op op, double a, double b, double* r);
-    bool compare(ops::Op op, Scalar::K k, const Scalar& a,
+    bool compute_float(rwir::Op op, double a, double b, double* r);
+    bool compare(rwir::Op op, Scalar::K k, const Scalar& a,
                  const Scalar& b, bool* out);
 
     // ── 执行（原 vm.cpp run_frame 方法化）──

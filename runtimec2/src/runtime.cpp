@@ -116,7 +116,7 @@ static void prebuild_reachable(void* h, const std::string& func_key) {
         if (jit_enabled())
             jit_compile(fk, seg);
         for (const CInsn& ci : seg->insns)
-            if (ci.op == ops::Op::Call && !ci.callee.empty())
+            if (ci.op == rwir::Op::Call && !ci.callee.empty())
                 work.push_back(ci.callee);
     }
 }
@@ -182,13 +182,13 @@ int execute_vthread_h(void* h, const char* vid, char** out_pc,
         std::string op;
         if (!read_opcode(h, pc, &op))
             return -1;
-        const ops::Entry* e = ops::find_myrwircap(op.data(),
+        const rwir::Entry* e = rwir::find_myrwircap(op.data(),
                                                    static_cast<std::uint32_t>(op.size()));
         static const bool op_trace = std::getenv("RC2_TRACE") != nullptr;
         if (op_trace)
             std::fprintf(stderr, "[op=%s found=%d impl=%d]\n", op.c_str(), e != nullptr,
                          e ? (int)e->impl : -1);
-        if (e && e->impl != ops::Impl::Handoff) {
+        if (e && e->impl != rwir::Impl::Handoff) {
             FrameCtx fctx;
             fctx.h = h;
             fctx.vid = p.vid;

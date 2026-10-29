@@ -141,50 +141,50 @@ bool build(void* h, const std::string& func_dir, Segment* out) {
             op = "call";
             callee = resolve_callee(h, func_dir, callee);  // 预解析为最终 /lib/ 路径
         }
-        const ops::Entry* e = ops::find_myrwircap(op.data(),
+        const rwir::Entry* e = rwir::find_myrwircap(op.data(),
                                                    static_cast<std::uint32_t>(op.size()));
         CInsn ins;
-        ins.op = ops::Op::None;
-        ins.impl = ops::Impl::Handoff;
+        ins.op = rwir::Op::None;
+        ins.impl = rwir::Impl::Handoff;
         ins.s0 = s0;
         ins.name = op;
         ins.prof_id = intern_op(op);
         if (is_call) {
             ins.callee = callee;
-            ins.op = ops::Op::Call;
-            ins.impl = ops::Impl::Control;
+            ins.op = rwir::Op::Call;
+            ins.impl = rwir::Impl::Control;
         } else if (e) {
             ins.op = e->op;
             ins.kind = e->kind;
             ins.width = e->width;
             ins.impl = e->impl;
-            if (e->kind == ops::Kind::Int && e->width == 8) {
+            if (e->kind == rwir::Kind::Int && e->width == 8) {
                 switch (e->op) {
-                case ops::Op::Add: ins.fast_i64 = true; ins.opfn = 1; break;
-                case ops::Op::Sub: ins.fast_i64 = true; ins.opfn = 2; break;
-                case ops::Op::Mul: ins.fast_i64 = true; ins.opfn = 3; break;
-                case ops::Op::Div: ins.fast_i64 = true; ins.opfn = 4; break;
-                case ops::Op::Mod: ins.fast_i64 = true; ins.opfn = 5; break;
-                case ops::Op::Max: ins.fast_i64 = true; ins.opfn = 6; break;
-                case ops::Op::Min: ins.fast_i64 = true; ins.opfn = 7; break;
-                case ops::Op::BitAnd: ins.fast_i64 = true; ins.opfn = 8; break;
-                case ops::Op::BitOr: ins.fast_i64 = true; ins.opfn = 9; break;
-                case ops::Op::BitXor: ins.fast_i64 = true; ins.opfn = 10; break;
-                case ops::Op::Shl: ins.fast_i64 = true; ins.opfn = 11; break;
-                case ops::Op::Shr: ins.fast_i64 = true; ins.opfn = 12; break;
-                case ops::Op::Eq: ins.fast_i64 = true; ins.opfn = 13; break;
-                case ops::Op::Neq: ins.fast_i64 = true; ins.opfn = 14; break;
-                case ops::Op::Lt: ins.fast_i64 = true; ins.opfn = 15; break;
-                case ops::Op::Le: ins.fast_i64 = true; ins.opfn = 16; break;
-                case ops::Op::Gt: ins.fast_i64 = true; ins.opfn = 17; break;
-                case ops::Op::Ge: ins.fast_i64 = true; ins.opfn = 18; break;
+                case rwir::Op::Add: ins.fast_i64 = true; ins.opfn = 1; break;
+                case rwir::Op::Sub: ins.fast_i64 = true; ins.opfn = 2; break;
+                case rwir::Op::Mul: ins.fast_i64 = true; ins.opfn = 3; break;
+                case rwir::Op::Div: ins.fast_i64 = true; ins.opfn = 4; break;
+                case rwir::Op::Mod: ins.fast_i64 = true; ins.opfn = 5; break;
+                case rwir::Op::Max: ins.fast_i64 = true; ins.opfn = 6; break;
+                case rwir::Op::Min: ins.fast_i64 = true; ins.opfn = 7; break;
+                case rwir::Op::BitAnd: ins.fast_i64 = true; ins.opfn = 8; break;
+                case rwir::Op::BitOr: ins.fast_i64 = true; ins.opfn = 9; break;
+                case rwir::Op::BitXor: ins.fast_i64 = true; ins.opfn = 10; break;
+                case rwir::Op::Shl: ins.fast_i64 = true; ins.opfn = 11; break;
+                case rwir::Op::Shr: ins.fast_i64 = true; ins.opfn = 12; break;
+                case rwir::Op::Eq: ins.fast_i64 = true; ins.opfn = 13; break;
+                case rwir::Op::Neq: ins.fast_i64 = true; ins.opfn = 14; break;
+                case rwir::Op::Lt: ins.fast_i64 = true; ins.opfn = 15; break;
+                case rwir::Op::Le: ins.fast_i64 = true; ins.opfn = 16; break;
+                case rwir::Op::Gt: ins.fast_i64 = true; ins.opfn = 17; break;
+                case rwir::Op::Ge: ins.fast_i64 = true; ins.opfn = 18; break;
                 default: break;
                 }
             }
         }
-        if (ins.impl == ops::Impl::Native)
+        if (ins.impl == rwir::Impl::Native)
             out->has_native = true;
-        if (ins.impl == ops::Impl::Handoff) {
+        if (ins.impl == rwir::Impl::Handoff) {
             out->has_native = true;
             out->insns.push_back(ins);
             continue;

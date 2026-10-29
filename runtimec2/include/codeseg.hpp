@@ -29,9 +29,9 @@ struct RegDesc {
 struct Segment;
 
 struct CInsn {
-    ops::Op op = ops::Op::None;
-    ops::Kind kind = ops::Kind::None;
-    ops::Impl impl = ops::Impl::None;
+    rwir::Op op = rwir::Op::None;
+    rwir::Kind kind = rwir::Kind::None;
+    rwir::Impl impl = rwir::Impl::None;
     std::uint8_t width = 0;
     std::uint8_t opfn = 0;      // 快路径算术函数表下标（Add=1..Ge=6，0=非快算术）
     bool fast_i64 = false;      // 快路径候选：Typed int64 二目二元 op（iops 热循环）

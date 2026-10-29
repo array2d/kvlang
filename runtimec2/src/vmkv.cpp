@@ -965,96 +965,96 @@ const char* Vmkv::kind_name(Scalar::K k, std::uint8_t width) {
 // ── 模板化值计算：switch(Op) → template<Op> constexpr（编译期内联单指令）。
 // 返回 false = 该 op 不支持此操作数（Zero 检查失败等）。
 
-template <ops::Op O, bool SGN>
+template <rwir::Op O, bool SGN>
 constexpr bool arith_i(const Scalar& a, const Scalar& b, Scalar* r) {
-    if constexpr (O == ops::Op::Add) { r->i = a.i + b.i; return true; }
-    if constexpr (O == ops::Op::Sub) { r->i = a.i - b.i; return true; }
-    if constexpr (O == ops::Op::Mul) { r->i = a.i * b.i; return true; }
-    if constexpr (O == ops::Op::Div) {
+    if constexpr (O == rwir::Op::Add) { r->i = a.i + b.i; return true; }
+    if constexpr (O == rwir::Op::Sub) { r->i = a.i - b.i; return true; }
+    if constexpr (O == rwir::Op::Mul) { r->i = a.i * b.i; return true; }
+    if constexpr (O == rwir::Op::Div) {
         if (SGN) { if (b.i == 0) return false; r->i = a.i / b.i; }
         else     { if (b.u == 0) return false; r->u = a.u / b.u; }
         return true;
     }
-    if constexpr (O == ops::Op::Mod) {
+    if constexpr (O == rwir::Op::Mod) {
         if (SGN) { if (b.i == 0) return false; r->i = a.i % b.i; }
         else     { if (b.u == 0) return false; r->u = a.u % b.u; }
         return true;
     }
-    if constexpr (O == ops::Op::Max) {
+    if constexpr (O == rwir::Op::Max) {
         r->i = SGN ? (a.i > b.i ? a.i : b.i) : (std::int64_t)(a.u > b.u ? a.u : b.u);
         return true;
     }
-    if constexpr (O == ops::Op::Min) {
+    if constexpr (O == rwir::Op::Min) {
         r->i = SGN ? (a.i < b.i ? a.i : b.i) : (std::int64_t)(a.u < b.u ? a.u : b.u);
         return true;
     }
-    if constexpr (O == ops::Op::Neg) { r->i = -a.i; return true; }
-    if constexpr (O == ops::Op::Abs) { r->i = a.i < 0 ? -a.i : a.i; return true; }
-    if constexpr (O == ops::Op::Sign) { r->i = a.i > 0 ? 1 : a.i < 0 ? -1 : 0; return true; }
-    if constexpr (O == ops::Op::BitAnd) { r->i = a.i & b.i; return true; }
-    if constexpr (O == ops::Op::BitOr)  { r->i = a.i | b.i; return true; }
-    if constexpr (O == ops::Op::BitXor) { r->i = a.i ^ b.i; return true; }
-    if constexpr (O == ops::Op::Shl) {
+    if constexpr (O == rwir::Op::Neg) { r->i = -a.i; return true; }
+    if constexpr (O == rwir::Op::Abs) { r->i = a.i < 0 ? -a.i : a.i; return true; }
+    if constexpr (O == rwir::Op::Sign) { r->i = a.i > 0 ? 1 : a.i < 0 ? -1 : 0; return true; }
+    if constexpr (O == rwir::Op::BitAnd) { r->i = a.i & b.i; return true; }
+    if constexpr (O == rwir::Op::BitOr)  { r->i = a.i | b.i; return true; }
+    if constexpr (O == rwir::Op::BitXor) { r->i = a.i ^ b.i; return true; }
+    if constexpr (O == rwir::Op::Shl) {
         // SGN 时 i 有效（u 可能未同步）；无符号用 u。移位量取低 6 位。
         r->i = (std::int64_t)((SGN ? (std::uint64_t)a.i : a.u)
                               << (SGN ? (std::uint64_t)b.i & 63 : b.u & 63));
         return true;
     }
-    if constexpr (O == ops::Op::Shr) {
+    if constexpr (O == rwir::Op::Shr) {
         r->i = SGN ? (a.i >> (b.i & 63)) : (std::int64_t)(a.u >> (b.u & 63));
         return true;
     }
     return false;
 }
 
-template <ops::Op O>
+template <rwir::Op O>
 constexpr bool arith_f(const Scalar& a, const Scalar& b, Scalar* r) {
-    if constexpr (O == ops::Op::Add) { r->f = a.f + b.f; return true; }
-    if constexpr (O == ops::Op::Sub) { r->f = a.f - b.f; return true; }
-    if constexpr (O == ops::Op::Mul) { r->f = a.f * b.f; return true; }
-    if constexpr (O == ops::Op::Div) { r->f = a.f / b.f; return true; }
-    if constexpr (O == ops::Op::Max) { r->f = a.f > b.f ? a.f : b.f; return true; }
-    if constexpr (O == ops::Op::Min) { r->f = a.f < b.f ? a.f : b.f; return true; }
-    if constexpr (O == ops::Op::Neg) { r->f = -a.f; return true; }
-    if constexpr (O == ops::Op::Abs) { r->f = a.f < 0 ? -a.f : a.f; return true; }
-    if constexpr (O == ops::Op::Sign) { r->f = a.f > 0 ? 1 : a.f < 0 ? -1 : 0; return true; }
-    if constexpr (O == ops::Op::Sqrt) { r->f = __builtin_sqrt(a.f); return true; }
-    if constexpr (O == ops::Op::Exp) { r->f = __builtin_exp(a.f); return true; }
-    if constexpr (O == ops::Op::Log) { r->f = __builtin_log(a.f); return true; }
-    if constexpr (O == ops::Op::Pow) { r->f = __builtin_pow(a.f, b.f); return true; }
+    if constexpr (O == rwir::Op::Add) { r->f = a.f + b.f; return true; }
+    if constexpr (O == rwir::Op::Sub) { r->f = a.f - b.f; return true; }
+    if constexpr (O == rwir::Op::Mul) { r->f = a.f * b.f; return true; }
+    if constexpr (O == rwir::Op::Div) { r->f = a.f / b.f; return true; }
+    if constexpr (O == rwir::Op::Max) { r->f = a.f > b.f ? a.f : b.f; return true; }
+    if constexpr (O == rwir::Op::Min) { r->f = a.f < b.f ? a.f : b.f; return true; }
+    if constexpr (O == rwir::Op::Neg) { r->f = -a.f; return true; }
+    if constexpr (O == rwir::Op::Abs) { r->f = a.f < 0 ? -a.f : a.f; return true; }
+    if constexpr (O == rwir::Op::Sign) { r->f = a.f > 0 ? 1 : a.f < 0 ? -1 : 0; return true; }
+    if constexpr (O == rwir::Op::Sqrt) { r->f = __builtin_sqrt(a.f); return true; }
+    if constexpr (O == rwir::Op::Exp) { r->f = __builtin_exp(a.f); return true; }
+    if constexpr (O == rwir::Op::Log) { r->f = __builtin_log(a.f); return true; }
+    if constexpr (O == rwir::Op::Pow) { r->f = __builtin_pow(a.f, b.f); return true; }
     return false;
 }
 
-template <ops::Op O>
+template <rwir::Op O>
 constexpr bool cmp_f(const Scalar& a, const Scalar& b) {
-    if constexpr (O == ops::Op::Eq)  return a.f == b.f;
-    if constexpr (O == ops::Op::Neq) return a.f != b.f;
-    if constexpr (O == ops::Op::Lt)  return a.f < b.f;
-    if constexpr (O == ops::Op::Le)  return a.f <= b.f;
-    if constexpr (O == ops::Op::Gt)  return a.f > b.f;
-    if constexpr (O == ops::Op::Ge)  return a.f >= b.f;
+    if constexpr (O == rwir::Op::Eq)  return a.f == b.f;
+    if constexpr (O == rwir::Op::Neq) return a.f != b.f;
+    if constexpr (O == rwir::Op::Lt)  return a.f < b.f;
+    if constexpr (O == rwir::Op::Le)  return a.f <= b.f;
+    if constexpr (O == rwir::Op::Gt)  return a.f > b.f;
+    if constexpr (O == rwir::Op::Ge)  return a.f >= b.f;
     return false;
 }
 
-template <ops::Op O>
+template <rwir::Op O>
 constexpr bool cmp_sgn(const Scalar& a, const Scalar& b) {
-    if constexpr (O == ops::Op::Eq)  return a.i == b.i;
-    if constexpr (O == ops::Op::Neq) return a.i != b.i;
-    if constexpr (O == ops::Op::Lt)  return a.i < b.i;
-    if constexpr (O == ops::Op::Le)  return a.i <= b.i;
-    if constexpr (O == ops::Op::Gt)  return a.i > b.i;
-    if constexpr (O == ops::Op::Ge)  return a.i >= b.i;
+    if constexpr (O == rwir::Op::Eq)  return a.i == b.i;
+    if constexpr (O == rwir::Op::Neq) return a.i != b.i;
+    if constexpr (O == rwir::Op::Lt)  return a.i < b.i;
+    if constexpr (O == rwir::Op::Le)  return a.i <= b.i;
+    if constexpr (O == rwir::Op::Gt)  return a.i > b.i;
+    if constexpr (O == rwir::Op::Ge)  return a.i >= b.i;
     return false;
 }
 
-template <ops::Op O>
+template <rwir::Op O>
 constexpr bool cmp_uns(const Scalar& a, const Scalar& b) {
-    if constexpr (O == ops::Op::Eq)  return a.u == b.u;
-    if constexpr (O == ops::Op::Neq) return a.u != b.u;
-    if constexpr (O == ops::Op::Lt)  return a.u < b.u;
-    if constexpr (O == ops::Op::Le)  return a.u <= b.u;
-    if constexpr (O == ops::Op::Gt)  return a.u > b.u;
-    if constexpr (O == ops::Op::Ge)  return a.u >= b.u;
+    if constexpr (O == rwir::Op::Eq)  return a.u == b.u;
+    if constexpr (O == rwir::Op::Neq) return a.u != b.u;
+    if constexpr (O == rwir::Op::Lt)  return a.u < b.u;
+    if constexpr (O == rwir::Op::Le)  return a.u <= b.u;
+    if constexpr (O == rwir::Op::Gt)  return a.u > b.u;
+    if constexpr (O == rwir::Op::Ge)  return a.u >= b.u;
     return false;
 }
 
@@ -1064,83 +1064,83 @@ typedef bool (*IntFn)(const Scalar&, const Scalar&, Scalar*);
 typedef bool (*FloatFn)(const Scalar&, const Scalar&, Scalar*);
 typedef bool (*CmpFn)(const Scalar&, const Scalar&);
 static constexpr IntFn kIntTbl[] = {
-    arith_i<ops::Op::None, false>, arith_i<ops::Op::Copy, false>, arith_i<ops::Op::Bool, false>,
-    arith_i<ops::Op::Br, false>, arith_i<ops::Op::Call, false>, arith_i<ops::Op::Goto, false>,
-    arith_i<ops::Op::Return, false>, arith_i<ops::Op::Cast, false>,
-    arith_i<ops::Op::Abs, true>, arith_i<ops::Op::Add, true>, arith_i<ops::Op::Sub, true>,
-    arith_i<ops::Op::Mul, true>, arith_i<ops::Op::Div, true>, arith_i<ops::Op::Mod, true>,
-    arith_i<ops::Op::Max, true>, arith_i<ops::Op::Min, true>, arith_i<ops::Op::Neg, true>,
-    arith_i<ops::Op::Sign, true>, arith_i<ops::Op::BitAnd, true>, arith_i<ops::Op::BitOr, true>,
-    arith_i<ops::Op::BitXor, true>, arith_i<ops::Op::Shl, true>, arith_i<ops::Op::Shr, true>,
-    arith_i<ops::Op::Eq, true>, arith_i<ops::Op::Neq, true>, arith_i<ops::Op::Lt, true>,
-    arith_i<ops::Op::Le, true>, arith_i<ops::Op::Gt, true>, arith_i<ops::Op::Ge, true>,
-    arith_i<ops::Op::Sqrt, true>, arith_i<ops::Op::Exp, true>, arith_i<ops::Op::Log, true>,
-    arith_i<ops::Op::Pow, true>, arith_i<ops::Op::And, true>, arith_i<ops::Op::Or, true>,
-    arith_i<ops::Op::Not, true>,
+    arith_i<rwir::Op::None, false>, arith_i<rwir::Op::Copy, false>, arith_i<rwir::Op::Bool, false>,
+    arith_i<rwir::Op::Br, false>, arith_i<rwir::Op::Call, false>, arith_i<rwir::Op::Goto, false>,
+    arith_i<rwir::Op::Return, false>, arith_i<rwir::Op::Cast, false>,
+    arith_i<rwir::Op::Abs, true>, arith_i<rwir::Op::Add, true>, arith_i<rwir::Op::Sub, true>,
+    arith_i<rwir::Op::Mul, true>, arith_i<rwir::Op::Div, true>, arith_i<rwir::Op::Mod, true>,
+    arith_i<rwir::Op::Max, true>, arith_i<rwir::Op::Min, true>, arith_i<rwir::Op::Neg, true>,
+    arith_i<rwir::Op::Sign, true>, arith_i<rwir::Op::BitAnd, true>, arith_i<rwir::Op::BitOr, true>,
+    arith_i<rwir::Op::BitXor, true>, arith_i<rwir::Op::Shl, true>, arith_i<rwir::Op::Shr, true>,
+    arith_i<rwir::Op::Eq, true>, arith_i<rwir::Op::Neq, true>, arith_i<rwir::Op::Lt, true>,
+    arith_i<rwir::Op::Le, true>, arith_i<rwir::Op::Gt, true>, arith_i<rwir::Op::Ge, true>,
+    arith_i<rwir::Op::Sqrt, true>, arith_i<rwir::Op::Exp, true>, arith_i<rwir::Op::Log, true>,
+    arith_i<rwir::Op::Pow, true>, arith_i<rwir::Op::And, true>, arith_i<rwir::Op::Or, true>,
+    arith_i<rwir::Op::Not, true>,
 };
 static constexpr FloatFn kFloatTbl[] = {
-    arith_f<ops::Op::None>, arith_f<ops::Op::Copy>, arith_f<ops::Op::Bool>,
-    arith_f<ops::Op::Br>, arith_f<ops::Op::Call>, arith_f<ops::Op::Goto>,
-    arith_f<ops::Op::Return>, arith_f<ops::Op::Cast>,
-    arith_f<ops::Op::Abs>, arith_f<ops::Op::Add>, arith_f<ops::Op::Sub>,
-    arith_f<ops::Op::Mul>, arith_f<ops::Op::Div>, arith_f<ops::Op::Mod>,
-    arith_f<ops::Op::Max>, arith_f<ops::Op::Min>, arith_f<ops::Op::Neg>,
-    arith_f<ops::Op::Sign>, arith_f<ops::Op::BitAnd>, arith_f<ops::Op::BitOr>,
-    arith_f<ops::Op::BitXor>, arith_f<ops::Op::Shl>, arith_f<ops::Op::Shr>,
-    arith_f<ops::Op::Eq>, arith_f<ops::Op::Neq>, arith_f<ops::Op::Lt>,
-    arith_f<ops::Op::Le>, arith_f<ops::Op::Gt>, arith_f<ops::Op::Ge>,
-    arith_f<ops::Op::Sqrt>, arith_f<ops::Op::Exp>, arith_f<ops::Op::Log>,
-    arith_f<ops::Op::Pow>, arith_f<ops::Op::And>, arith_f<ops::Op::Or>,
-    arith_f<ops::Op::Not>,
+    arith_f<rwir::Op::None>, arith_f<rwir::Op::Copy>, arith_f<rwir::Op::Bool>,
+    arith_f<rwir::Op::Br>, arith_f<rwir::Op::Call>, arith_f<rwir::Op::Goto>,
+    arith_f<rwir::Op::Return>, arith_f<rwir::Op::Cast>,
+    arith_f<rwir::Op::Abs>, arith_f<rwir::Op::Add>, arith_f<rwir::Op::Sub>,
+    arith_f<rwir::Op::Mul>, arith_f<rwir::Op::Div>, arith_f<rwir::Op::Mod>,
+    arith_f<rwir::Op::Max>, arith_f<rwir::Op::Min>, arith_f<rwir::Op::Neg>,
+    arith_f<rwir::Op::Sign>, arith_f<rwir::Op::BitAnd>, arith_f<rwir::Op::BitOr>,
+    arith_f<rwir::Op::BitXor>, arith_f<rwir::Op::Shl>, arith_f<rwir::Op::Shr>,
+    arith_f<rwir::Op::Eq>, arith_f<rwir::Op::Neq>, arith_f<rwir::Op::Lt>,
+    arith_f<rwir::Op::Le>, arith_f<rwir::Op::Gt>, arith_f<rwir::Op::Ge>,
+    arith_f<rwir::Op::Sqrt>, arith_f<rwir::Op::Exp>, arith_f<rwir::Op::Log>,
+    arith_f<rwir::Op::Pow>, arith_f<rwir::Op::And>, arith_f<rwir::Op::Or>,
+    arith_f<rwir::Op::Not>,
 };
 static constexpr CmpFn kCmpSgnTbl[] = {
-    cmp_sgn<ops::Op::None>, cmp_sgn<ops::Op::Copy>, cmp_sgn<ops::Op::Bool>,
-    cmp_sgn<ops::Op::Br>, cmp_sgn<ops::Op::Call>, cmp_sgn<ops::Op::Goto>,
-    cmp_sgn<ops::Op::Return>, cmp_sgn<ops::Op::Cast>,
-    cmp_sgn<ops::Op::Abs>, cmp_sgn<ops::Op::Add>, cmp_sgn<ops::Op::Sub>,
-    cmp_sgn<ops::Op::Mul>, cmp_sgn<ops::Op::Div>, cmp_sgn<ops::Op::Mod>,
-    cmp_sgn<ops::Op::Max>, cmp_sgn<ops::Op::Min>, cmp_sgn<ops::Op::Neg>,
-    cmp_sgn<ops::Op::Sign>, cmp_sgn<ops::Op::BitAnd>, cmp_sgn<ops::Op::BitOr>,
-    cmp_sgn<ops::Op::BitXor>, cmp_sgn<ops::Op::Shl>, cmp_sgn<ops::Op::Shr>,
-    cmp_sgn<ops::Op::Eq>, cmp_sgn<ops::Op::Neq>, cmp_sgn<ops::Op::Lt>,
-    cmp_sgn<ops::Op::Le>, cmp_sgn<ops::Op::Gt>, cmp_sgn<ops::Op::Ge>,
-    cmp_sgn<ops::Op::Sqrt>, cmp_sgn<ops::Op::Exp>, cmp_sgn<ops::Op::Log>,
-    cmp_sgn<ops::Op::Pow>, cmp_sgn<ops::Op::And>, cmp_sgn<ops::Op::Or>,
-    cmp_sgn<ops::Op::Not>,
+    cmp_sgn<rwir::Op::None>, cmp_sgn<rwir::Op::Copy>, cmp_sgn<rwir::Op::Bool>,
+    cmp_sgn<rwir::Op::Br>, cmp_sgn<rwir::Op::Call>, cmp_sgn<rwir::Op::Goto>,
+    cmp_sgn<rwir::Op::Return>, cmp_sgn<rwir::Op::Cast>,
+    cmp_sgn<rwir::Op::Abs>, cmp_sgn<rwir::Op::Add>, cmp_sgn<rwir::Op::Sub>,
+    cmp_sgn<rwir::Op::Mul>, cmp_sgn<rwir::Op::Div>, cmp_sgn<rwir::Op::Mod>,
+    cmp_sgn<rwir::Op::Max>, cmp_sgn<rwir::Op::Min>, cmp_sgn<rwir::Op::Neg>,
+    cmp_sgn<rwir::Op::Sign>, cmp_sgn<rwir::Op::BitAnd>, cmp_sgn<rwir::Op::BitOr>,
+    cmp_sgn<rwir::Op::BitXor>, cmp_sgn<rwir::Op::Shl>, cmp_sgn<rwir::Op::Shr>,
+    cmp_sgn<rwir::Op::Eq>, cmp_sgn<rwir::Op::Neq>, cmp_sgn<rwir::Op::Lt>,
+    cmp_sgn<rwir::Op::Le>, cmp_sgn<rwir::Op::Gt>, cmp_sgn<rwir::Op::Ge>,
+    cmp_sgn<rwir::Op::Sqrt>, cmp_sgn<rwir::Op::Exp>, cmp_sgn<rwir::Op::Log>,
+    cmp_sgn<rwir::Op::Pow>, cmp_sgn<rwir::Op::And>, cmp_sgn<rwir::Op::Or>,
+    cmp_sgn<rwir::Op::Not>,
 };
 static constexpr CmpFn kCmpUnsTbl[] = {
-    cmp_uns<ops::Op::None>, cmp_uns<ops::Op::Copy>, cmp_uns<ops::Op::Bool>,
-    cmp_uns<ops::Op::Br>, cmp_uns<ops::Op::Call>, cmp_uns<ops::Op::Goto>,
-    cmp_uns<ops::Op::Return>, cmp_uns<ops::Op::Cast>,
-    cmp_uns<ops::Op::Abs>, cmp_uns<ops::Op::Add>, cmp_uns<ops::Op::Sub>,
-    cmp_uns<ops::Op::Mul>, cmp_uns<ops::Op::Div>, cmp_uns<ops::Op::Mod>,
-    cmp_uns<ops::Op::Max>, cmp_uns<ops::Op::Min>, cmp_uns<ops::Op::Neg>,
-    cmp_uns<ops::Op::Sign>, cmp_uns<ops::Op::BitAnd>, cmp_uns<ops::Op::BitOr>,
-    cmp_uns<ops::Op::BitXor>, cmp_uns<ops::Op::Shl>, cmp_uns<ops::Op::Shr>,
-    cmp_uns<ops::Op::Eq>, cmp_uns<ops::Op::Neq>, cmp_uns<ops::Op::Lt>,
-    cmp_uns<ops::Op::Le>, cmp_uns<ops::Op::Gt>, cmp_uns<ops::Op::Ge>,
-    cmp_uns<ops::Op::Sqrt>, cmp_uns<ops::Op::Exp>, cmp_uns<ops::Op::Log>,
-    cmp_uns<ops::Op::Pow>, cmp_uns<ops::Op::And>, cmp_uns<ops::Op::Or>,
-    cmp_uns<ops::Op::Not>,
+    cmp_uns<rwir::Op::None>, cmp_uns<rwir::Op::Copy>, cmp_uns<rwir::Op::Bool>,
+    cmp_uns<rwir::Op::Br>, cmp_uns<rwir::Op::Call>, cmp_uns<rwir::Op::Goto>,
+    cmp_uns<rwir::Op::Return>, cmp_uns<rwir::Op::Cast>,
+    cmp_uns<rwir::Op::Abs>, cmp_uns<rwir::Op::Add>, cmp_uns<rwir::Op::Sub>,
+    cmp_uns<rwir::Op::Mul>, cmp_uns<rwir::Op::Div>, cmp_uns<rwir::Op::Mod>,
+    cmp_uns<rwir::Op::Max>, cmp_uns<rwir::Op::Min>, cmp_uns<rwir::Op::Neg>,
+    cmp_uns<rwir::Op::Sign>, cmp_uns<rwir::Op::BitAnd>, cmp_uns<rwir::Op::BitOr>,
+    cmp_uns<rwir::Op::BitXor>, cmp_uns<rwir::Op::Shl>, cmp_uns<rwir::Op::Shr>,
+    cmp_uns<rwir::Op::Eq>, cmp_uns<rwir::Op::Neq>, cmp_uns<rwir::Op::Lt>,
+    cmp_uns<rwir::Op::Le>, cmp_uns<rwir::Op::Gt>, cmp_uns<rwir::Op::Ge>,
+    cmp_uns<rwir::Op::Sqrt>, cmp_uns<rwir::Op::Exp>, cmp_uns<rwir::Op::Log>,
+    cmp_uns<rwir::Op::Pow>, cmp_uns<rwir::Op::And>, cmp_uns<rwir::Op::Or>,
+    cmp_uns<rwir::Op::Not>,
 };
 static constexpr CmpFn kCmpFloatTbl[] = {
-    cmp_f<ops::Op::None>, cmp_f<ops::Op::Copy>, cmp_f<ops::Op::Bool>,
-    cmp_f<ops::Op::Br>, cmp_f<ops::Op::Call>, cmp_f<ops::Op::Goto>,
-    cmp_f<ops::Op::Return>, cmp_f<ops::Op::Cast>,
-    cmp_f<ops::Op::Abs>, cmp_f<ops::Op::Add>, cmp_f<ops::Op::Sub>,
-    cmp_f<ops::Op::Mul>, cmp_f<ops::Op::Div>, cmp_f<ops::Op::Mod>,
-    cmp_f<ops::Op::Max>, cmp_f<ops::Op::Min>, cmp_f<ops::Op::Neg>,
-    cmp_f<ops::Op::Sign>, cmp_f<ops::Op::BitAnd>, cmp_f<ops::Op::BitOr>,
-    cmp_f<ops::Op::BitXor>, cmp_f<ops::Op::Shl>, cmp_f<ops::Op::Shr>,
-    cmp_f<ops::Op::Eq>, cmp_f<ops::Op::Neq>, cmp_f<ops::Op::Lt>,
-    cmp_f<ops::Op::Le>, cmp_f<ops::Op::Gt>, cmp_f<ops::Op::Ge>,
-    cmp_f<ops::Op::Sqrt>, cmp_f<ops::Op::Exp>, cmp_f<ops::Op::Log>,
-    cmp_f<ops::Op::Pow>, cmp_f<ops::Op::And>, cmp_f<ops::Op::Or>,
-    cmp_f<ops::Op::Not>,
+    cmp_f<rwir::Op::None>, cmp_f<rwir::Op::Copy>, cmp_f<rwir::Op::Bool>,
+    cmp_f<rwir::Op::Br>, cmp_f<rwir::Op::Call>, cmp_f<rwir::Op::Goto>,
+    cmp_f<rwir::Op::Return>, cmp_f<rwir::Op::Cast>,
+    cmp_f<rwir::Op::Abs>, cmp_f<rwir::Op::Add>, cmp_f<rwir::Op::Sub>,
+    cmp_f<rwir::Op::Mul>, cmp_f<rwir::Op::Div>, cmp_f<rwir::Op::Mod>,
+    cmp_f<rwir::Op::Max>, cmp_f<rwir::Op::Min>, cmp_f<rwir::Op::Neg>,
+    cmp_f<rwir::Op::Sign>, cmp_f<rwir::Op::BitAnd>, cmp_f<rwir::Op::BitOr>,
+    cmp_f<rwir::Op::BitXor>, cmp_f<rwir::Op::Shl>, cmp_f<rwir::Op::Shr>,
+    cmp_f<rwir::Op::Eq>, cmp_f<rwir::Op::Neq>, cmp_f<rwir::Op::Lt>,
+    cmp_f<rwir::Op::Le>, cmp_f<rwir::Op::Gt>, cmp_f<rwir::Op::Ge>,
+    cmp_f<rwir::Op::Sqrt>, cmp_f<rwir::Op::Exp>, cmp_f<rwir::Op::Log>,
+    cmp_f<rwir::Op::Pow>, cmp_f<rwir::Op::And>, cmp_f<rwir::Op::Or>,
+    cmp_f<rwir::Op::Not>,
 };
 
 // 通用数值计算入口：查表直呼（不再 switch）。
-bool Vmkv::compute_int(ops::Op op, Scalar::K k, const Scalar& a, const Scalar& b, Scalar* r) {
+bool Vmkv::compute_int(rwir::Op op, Scalar::K k, const Scalar& a, const Scalar& b, Scalar* r) {
     const auto o = static_cast<std::size_t>(op);
     if (o >= sizeof kIntTbl / sizeof kIntTbl[0])
         return false;
@@ -1158,7 +1158,7 @@ bool Vmkv::compute_int(ops::Op op, Scalar::K k, const Scalar& a, const Scalar& b
     return true;
 }
 
-bool Vmkv::compute_float(ops::Op op, double a, double b, double* r) {
+bool Vmkv::compute_float(rwir::Op op, double a, double b, double* r) {
     Scalar x, y;
     x.f = a;
     y.f = b;
@@ -1172,7 +1172,7 @@ bool Vmkv::compute_float(ops::Op op, double a, double b, double* r) {
     return true;
 }
 
-bool Vmkv::compare(ops::Op op, Scalar::K k, const Scalar& a, const Scalar& b, bool* out) {
+bool Vmkv::compare(rwir::Op op, Scalar::K k, const Scalar& a, const Scalar& b, bool* out) {
     const auto o = static_cast<std::size_t>(op);
     if (o >= sizeof kCmpSgnTbl / sizeof kCmpSgnTbl[0])
         return false;
@@ -1184,9 +1184,9 @@ bool Vmkv::compare(ops::Op op, Scalar::K k, const Scalar& a, const Scalar& b, bo
     }
 }
 
-bool Vmkv::is_cmp(ops::Op op) {
-    return op == ops::Op::Eq || op == ops::Op::Neq || op == ops::Op::Lt ||
-           op == ops::Op::Le || op == ops::Op::Gt || op == ops::Op::Ge;
+bool Vmkv::is_cmp(rwir::Op op) {
+    return op == rwir::Op::Eq || op == rwir::Op::Neq || op == rwir::Op::Lt ||
+           op == rwir::Op::Le || op == rwir::Op::Gt || op == rwir::Op::Ge;
 }
 
 bool raw_i64(Wire w, std::int64_t* out) {
@@ -1420,18 +1420,18 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                 FReg& ra = r0.src_ptr ? *r0.src_ptr : r0;
                 FReg& rb = r1.src_ptr ? *r1.src_ptr : r1;
                 fk_enter = ra.fast_i64 && rb.fast_i64;
-            } else if (ins.op == ops::Op::Goto || ins.op == ops::Op::Br) {
-                FReg& tr = regs[ins.rd[ins.op == ops::Op::Br ? 1 : 0]];
+            } else if (ins.op == rwir::Op::Goto || ins.op == rwir::Op::Br) {
+                FReg& tr = regs[ins.rd[ins.op == rwir::Op::Br ? 1 : 0]];
                 FReg& tra = tr.src_ptr ? *tr.src_ptr : tr;
                 fk_enter = tra.fast_i64;
-                if (ins.op == ops::Op::Br) {
+                if (ins.op == rwir::Op::Br) {
                     // cond 也要 fast（bool/int64）：否则 fk 内 cond exit → 主循环 br
                     // 又进 fk → 死循环（is_prime bool 落明文无 fast_bool）。
                     FReg& cr = regs[ins.rd[0]];
                     FReg& cra = cr.src_ptr ? *cr.src_ptr : cr;
                     fk_enter = fk_enter && (cra.fast_bool || cra.fast_i64);
                 }
-            } else if (ins.op == ops::Op::Copy && ins.wr_local && ins.nrd == 1) {
+            } else if (ins.op == rwir::Op::Copy && ins.wr_local && ins.nrd == 1) {
                 FReg& sr = regs[ins.rd[0]];
                 FReg& rf = sr.src_ptr ? *sr.src_ptr : sr;
                 fk_enter = rf.fast_i64 || rf.fast_bool;
@@ -1523,15 +1523,15 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                     idx--;
                     goto fk_exit;  // cold 读参：主循环处理（含冷 fallback）
                 }
-                if (ik.op == ops::Op::Goto || ik.op == ops::Op::Br) {
-                    FReg& tr = regs[ik.rd[ik.op == ops::Op::Br ? 1 : 0]];
+                if (ik.op == rwir::Op::Goto || ik.op == rwir::Op::Br) {
+                    FReg& tr = regs[ik.rd[ik.op == rwir::Op::Br ? 1 : 0]];
                     FReg& tra = tr.src_ptr ? *tr.src_ptr : tr;
                     if (!tra.fast_i64) {
                         idx--;
                         goto fk_exit;
                     }
                     std::int64_t targ = tra.fv;
-                    if (ik.op == ops::Op::Br) {
+                    if (ik.op == rwir::Op::Br) {
                         FReg& cr = regs[ik.rd[0]];
                         FReg& cra = cr.src_ptr ? *cr.src_ptr : cr;
                         bool cond = false;
@@ -1560,7 +1560,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                     idx = static_cast<int>(targ) - 1;  // fk 内无 for 补偿
                     goto fk_next;
                 }
-                if (ik.op == ops::Op::Copy && ik.wr_local && ik.nrd == 1) {
+                if (ik.op == rwir::Op::Copy && ik.wr_local && ik.nrd == 1) {
                     FReg& sr = regs[ik.rd[0]];
                     FReg& rf = sr.src_ptr ? *sr.src_ptr : sr;
                     FReg& w = regs[ik.wr[0]];
@@ -1766,17 +1766,17 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
             }
             // cold 读参失败：回退到通用路径（下述）。
         }
-        if (ins.op == ops::Op::Goto || ins.op == ops::Op::Br) {
+        if (ins.op == rwir::Op::Goto || ins.op == rwir::Op::Br) {
             std::int64_t target_v = 0;
-            FReg &tr = regs[ins.rd[ins.op == ops::Op::Br ? 1 : 0]];
+            FReg &tr = regs[ins.rd[ins.op == rwir::Op::Br ? 1 : 0]];
             if (!(tr.fast_i64 ? (target_v = tr.fv, true)
-                              : read_i64(f, ins.rd[ins.op == ops::Op::Br ? 1 : 0],
+                              : read_i64(f, ins.rd[ins.op == rwir::Op::Br ? 1 : 0],
                                          &target_v))) {
                 *err = "control: bad target";
                 return RunResult::Error;
             }
             int dest = static_cast<int>(target_v);
-            if (ins.op == ops::Op::Br) {
+            if (ins.op == rwir::Op::Br) {
                 bool cond = false;
                 FReg &cr = regs[ins.rd[0]];
                 if (!(cr.fast_bool ? (cond = cr.fb, true)
@@ -1807,7 +1807,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
             }
             continue;
         }
-        if (ins.impl == ops::Impl::Handoff || ins.impl == ops::Impl::None) {
+        if (ins.impl == rwir::Impl::Handoff || ins.impl == rwir::Impl::None) {
             if (bin.trace_on)
                 std::fprintf(stderr, "[stop %s d%d s0=%d %s]\n",
                              f.func_dir.c_str(), f.depth, ins.s0, ins.name.c_str());
@@ -1818,7 +1818,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                 *stop_pc = param_key(f.frame, ins.s0, 0);
             return RunResult::Stop;
         }
-        if (ins.op == ops::Op::Return) {
+        if (ins.op == rwir::Op::Return) {
             if (bin.prof_on) {
                 bin.prof.loop += bin.now() - t0;
                 bin.prof.steps++;
@@ -1850,7 +1850,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                 *stop_pc = ret;
             return RunResult::Returned;
         }
-        if (ins.impl == ops::Impl::Native) {
+        if (ins.impl == rwir::Impl::Native) {
             // Native 分派：fold `·`→`/` 后查两级表（vmkv_native.cpp），一 op 一 handler。
             // 表未命中 / handler 失败 → error；写失败统一由调用方补 "write failed"。
             if (!ins.native_ready) {
@@ -1913,7 +1913,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
             }
             continue;
         }
-        if (ins.op == ops::Op::Call) {
+        if (ins.op == rwir::Op::Call) {
             const RunResult rr = do_call(f, seg, ins, stop_pc, err);
             if (rr != RunResult::Ok)
                 return rr;
@@ -1924,7 +1924,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
         Scalar s[4]{};
         bool non_scalar = false;
         bool none0 = false, none1 = false;
-        if (ins.op != ops::Op::Copy) {
+        if (ins.op != rwir::Op::Copy) {
             for (int i = 0; i < ins.nrd; i++) {
                 if (read_scalar(f, ins.rd[i], &s[i])) {
                     continue;
@@ -1941,9 +1941,9 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
             }
             // A char slot reads as a Scalar of its first char; `+`/`==`/`!=` on
             // two char operands are text operations, so re-read them as wires.
-            const bool text_op = ins.nrd == 2 && (ins.op == ops::Op::Add ||
-                                                  ins.op == ops::Op::Eq ||
-                                                  ins.op == ops::Op::Neq);
+            const bool text_op = ins.nrd == 2 && (ins.op == rwir::Op::Add ||
+                                                  ins.op == rwir::Op::Eq ||
+                                                  ins.op == rwir::Op::Neq);
             auto charish = [&](int i) {
                 return w[i].d ? !v_is_none(w[i]) : s[i].k == Scalar::K::Char;
             };
@@ -1963,9 +1963,9 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
         // Ptr vs None（Ptr 悬空=空指针）交给 non_scalar 的 Ptr 分支，不在此判。
         const bool any_ptr_cmp = (v_ptr(w[0]) || v_ptr(w[1])) && is_cmp(ins.op);
         if (!any_ptr_cmp && (none0 || none1) && is_cmp(ins.op)) {
-            if (ins.op == ops::Op::Eq)
+            if (ins.op == rwir::Op::Eq)
                 ok = slot_write_bool(f, ins.wr[0], none0 && none1);
-            else if (ins.op == ops::Op::Neq)
+            else if (ins.op == rwir::Op::Neq)
                 ok = slot_write_bool(f, ins.wr[0], !(none0 && none1));
             else {
                 *err = "TypeError: None in comparison: " + ins.name;
@@ -1986,7 +1986,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
         if (non_scalar) {
             // char 族转码（char/utf8|utf32|ascii 互转）优先于 `+` 拼接。
             // 简化：统一按 utf8 文本读入，目标编码经 kvspaceNewChar 产 char XValue。
-            if (ins.op == ops::Op::Cast && ins.nrd == 1 &&
+            if (ins.op == rwir::Op::Cast && ins.nrd == 1 &&
                 ins.name.rfind("char/", 0) == 0) {
                 std::string txt;
                 if (!wire_text(w[0].d, w[0].n, &txt)) {
@@ -2016,7 +2016,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                 // 动态算子按运行时类型分派：`+` 对 char 族即字符串拼接；
                 // `==`/`!=` 对 char 族按文本比较产 bool。
                 std::string a, b;
-                if (ins.nrd == 2 && (ins.op == ops::Op::Eq || ins.op == ops::Op::Neq)) {
+                if (ins.nrd == 2 && (ins.op == rwir::Op::Eq || ins.op == rwir::Op::Neq)) {
                     // Ptr 参与比较：指针本体 vs None（空指针检查）或 Ptr 间按 target 比
                     // （链表 `cur != None` / `h·next == &n2`）。读参 w[i] 可能已被
                     // resolve 穿透成目标值——按 Ptr target 判空与相等。
@@ -2042,7 +2042,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                                             ? (e0 && e1) || (!e0 && !e1 && pt0 == pt1)
                                             : p0 ? e0 : e1;
                         ok = slot_write_bool(f, ins.wr[0],
-                                             ins.op == ops::Op::Eq ? eq : !eq);
+                                             ins.op == rwir::Op::Eq ? eq : !eq);
                         if (bin.prof_on) {
                             const std::uint64_t d2 = bin.now() - t0;
                             bin.prof.handler += d2;
@@ -2055,7 +2055,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                         wire_text(w[1].d, w[1].n, &b)) {
                         const bool eq = a == b;
                         ok = slot_write_bool(f, ins.wr[0],
-                                             ins.op == ops::Op::Eq ? eq : !eq);
+                                             ins.op == rwir::Op::Eq ? eq : !eq);
                         if (bin.prof_on) {
                             const std::uint64_t dh = bin.now() - t0;
                             bin.prof.handler += dh;
@@ -2068,7 +2068,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                 // 动态算子按运行时类型分派：`+` 对 char 族即字符串拼接。
                 // kvspaceNewChar 按码点计数产 `[n]char/utf8` head（#552 性能+正确）。
                 {
-                    if (ins.op != ops::Op::Add || ins.nrd != 2 ||
+                    if (ins.op != rwir::Op::Add || ins.nrd != 2 ||
                         !wire_text(w[0].d, w[0].n, &a) ||
                         !wire_text(w[1].d, w[1].n, &b)) {
                         *err = "non-scalar operand: " + ins.name;
@@ -2097,7 +2097,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                 }
                 // 动态算子按运行时类型分派：`+` 对 char 族即字符串拼接（Eq/Neq
                 // 已在上方处理；此处是 else 层的通用路径——Add 及其它）。
-                if (ins.op != ops::Op::Add || ins.nrd != 2 ||
+                if (ins.op != rwir::Op::Add || ins.nrd != 2 ||
                     !wire_text(w[0].d, w[0].n, &a) ||
                     !wire_text(w[1].d, w[1].n, &b)) {
                     *err = "non-scalar operand: " + ins.name;
@@ -2161,7 +2161,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
             }
             return wire_text(cur.d, cur.n, out);
         };
-        if (ins.op == ops::Op::Copy) {
+        if (ins.op == rwir::Op::Copy) {
             // 单参普通赋值（`a -> b`，非成员读写）：src fast 缓存 → dst 直传，
             // 免 read_reg 的 kvspaceXvalueEncode + write_reg 的整套 wire 路径。
             // dst 为写参别名（dst_ptr）转发调用方 reg；非别名且非帧局部才落明文。
@@ -2500,7 +2500,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                     std::free(none);
                 }
             }
-        } else if (ins.op == ops::Op::Bool) {
+        } else if (ins.op == rwir::Op::Bool) {
             Scalar r{};
             r.k = Scalar::K::Bool;
             r.width = 1;
@@ -2508,11 +2508,11 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
             ok = slot_write_scalar(f, ins.wr[0], r, 1);
             if (ok)
                 sync_fast_after_write(f, ins.wr[0], r);
-        } else if (ins.op == ops::Op::Cast) {
+        } else if (ins.op == rwir::Op::Cast) {
             Scalar r{};
-            r.k = ins.kind == ops::Kind::Int     ? Scalar::K::Int
-                  : ins.kind == ops::Kind::Uint  ? Scalar::K::Uint
-                  : ins.kind == ops::Kind::Float ? Scalar::K::Float
+            r.k = ins.kind == rwir::Kind::Int     ? Scalar::K::Int
+                  : ins.kind == rwir::Kind::Uint  ? Scalar::K::Uint
+                  : ins.kind == rwir::Kind::Float ? Scalar::K::Float
                                                  : Scalar::K::None;
             r.width = ins.width;
             const Scalar& src = s[0];
@@ -2534,12 +2534,12 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
             ok = slot_write_scalar(f, ins.wr[0], r, r.width);
             if (ok)
                 sync_fast_after_write(f, ins.wr[0], r);
-        } else if (ins.op == ops::Op::And || ins.op == ops::Op::Or ||
-                   ins.op == ops::Op::Not) {
+        } else if (ins.op == rwir::Op::And || ins.op == rwir::Op::Or ||
+                   ins.op == rwir::Op::Not) {
             bool a = truthy(s[0]);
             bool b = ins.nrd > 1 ? truthy(s[1]) : false;
-            bool r = ins.op == ops::Op::And ? (a && b)
-                     : ins.op == ops::Op::Or ? (a || b)
+            bool r = ins.op == rwir::Op::And ? (a && b)
+                     : ins.op == rwir::Op::Or ? (a || b)
                                              : !a;
             Scalar out{};
             out.k = Scalar::K::Bool;
@@ -2585,13 +2585,13 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                 sync_fast_after_write(f, ins.wr[0], out);
         } else {
             // 一元 `-` 与二元 Sub 同 opcode：按读参数区分。
-            const ops::Op op =
-                ins.nrd == 1 && ins.op == ops::Op::Sub ? ops::Op::Neg : ins.op;
+            const rwir::Op op =
+                ins.nrd == 1 && ins.op == rwir::Op::Sub ? rwir::Op::Neg : ins.op;
             Scalar::K k = s[0].k;
             const Scalar::K k1 = ins.nrd > 1 ? s[1].k : k;
             Scalar out = s[0];
-            const bool to_float = op == ops::Op::Pow || op == ops::Op::Sqrt ||
-                                  op == ops::Op::Exp || op == ops::Op::Log ||
+            const bool to_float = op == rwir::Op::Pow || op == rwir::Op::Sqrt ||
+                                  op == rwir::Op::Exp || op == rwir::Op::Log ||
                                   k == Scalar::K::Float ||
                                   (ins.nrd > 1 && k1 == Scalar::K::Float);
             auto as_d = [](const Scalar& v) {
