@@ -13,7 +13,7 @@
 // 明文栈契约保持：kvspace 落盘仍 string 形态（kindexpr / /vthread/... key）；
 // stackbin 侧以枚举 + 偏移量直寻址，仅在边界（首次/落盘）经映射表转换一次。
 
-namespace kv::rt::bin {
+namespace kvlang::runtimec2::bin {
 namespace {
 
 // kindexpr 串 → LangType 映射（init 期查表，此后常数）。
@@ -167,4 +167,4 @@ void VmBin::prof_init() {
 #endif
 }
 
-}  // namespace kv::rt::bin
+}  // namespace kvlang::runtimec2::bin

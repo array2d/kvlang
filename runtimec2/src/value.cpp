@@ -7,7 +7,7 @@
 #include <kvspace/kvspace.h>
 #include <kvspace/xvalue_head.h>
 
-namespace kv::rt {
+namespace kvlang::runtimec2 {
 
 bool v_is_none(Wire w) noexcept {
     if (!w.d || w.n == 0)
@@ -205,4 +205,4 @@ bool v_write_scalar(void* h, const std::string& key, const char* kind,
     return rc == 0;
 }
 
-}  // namespace kv::rt
+}  // namespace kvlang::runtimec2

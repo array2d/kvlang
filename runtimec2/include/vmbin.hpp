@@ -22,7 +22,7 @@
 //   /vthread/<vid>/[<d>]/[<s0>,<axis>]  ↔  FrameId + SlotOff（2×int32）
 //   head+body xvalue ↔  body 纯数据（FReg 值缓存，无 head）
 
-namespace kv::rt::bin {
+namespace kvlang::runtimec2::bin {
 
 // langtype 枚举：与明文栈 kindexpr 一一对应（init 期映射表，热路径零 string）。
 // 覆盖 scalar + 容器 + 扩展；kindexpr 串 → 枚举经映射表查一次（首次），此后常数。
@@ -198,4 +198,4 @@ inline std::int64_t fast_i64(std::int64_t a, std::int64_t b) {
     return 0;
 }
 
-}  // namespace kv::rt::bin
+}  // namespace kvlang::runtimec2::bin

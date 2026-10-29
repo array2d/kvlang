@@ -134,7 +134,8 @@ def main():
     if len(names) != expect_n:
         sys.exit(f"fixture: expected {expect_n} names, got {len(names)}")
     out = ["/* 生成：native 作者清单 → 算子表。源 layout/tests/fixtures/isa_native.txt。勿手改。 */",
-           '#include "rwir.hpp"', "", "namespace kv::ops {", "",
+           '#include "rwir.hpp"', "",
+           "namespace kvlang::runtimec2::ops {", "",
            "const Entry myrwircaps[] = {"]
     counts = {"Typed": 0, "Control": 0, "Dynamic": 0, "Native": 0, "Handoff": 0}
     for n in names:
@@ -142,7 +143,7 @@ def main():
         counts[impl.split("::", 1)[1]] += 1
         out.append(f'    {{"{n}", {op}, {kind}, {w}, {cls}, {impl}}},')
     out += ["};", "", f"const int kMyrwircapsN = {expect_n};", "",
-            "}  // namespace kv::ops", ""]
+            "}  // namespace kvlang::runtimec2::ops", ""]
     sys.stderr.write(
         f"impl counts: Typed={counts['Typed']} Control={counts['Control']} "
         f"Dynamic={counts['Dynamic']} Native={counts['Native']} "

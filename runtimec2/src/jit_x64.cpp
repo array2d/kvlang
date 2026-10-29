@@ -11,7 +11,7 @@
 // 寄存器：RDI=读参、RAX=结果/写参、RCX=guard 计数、RSI=err_out、局部 R8..R15。
 // 全部 rel32 相对跳转（位置无关）。jit.cpp 经 emit_arch 调用本文件。
 
-namespace kv::rt {
+namespace kvlang::runtimec2 {
 namespace {
 
 // ── 最小 x86_64 发射器 ─────────────────────────────────────────────
@@ -318,4 +318,4 @@ std::vector<std::uint8_t> emit_arch(const Segment* seg, const JitShape& sh) {
 #endif
 }
 
-}  // namespace kv::rt
+}  // namespace kvlang::runtimec2

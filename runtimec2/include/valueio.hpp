@@ -3,7 +3,7 @@
 #include <string>
 #include <string_view>
 
-namespace kv::rt {
+namespace kvlang::runtimec2 {
 
 // 读借用 wire（生命周期到该 key 被写/删或 handle close）。
 bool read_wire(void* h, std::string_view key, const std::uint8_t** data,
@@ -49,4 +49,4 @@ bool frame_func_dir(void* h, std::string_view vid, int depth, std::string* out) 
 bool read_int(void* h, std::string_view key, std::int64_t* out) noexcept;
 bool write_int(void* h, std::string_view key, std::int64_t v) noexcept;
 
-}  // namespace kv::rt
+}  // namespace kvlang::runtimec2

@@ -11,7 +11,7 @@
 // guard 计数寄存器 + err_out 指针（X1），add/比较/copy/br/return 的 AArch64
 // 指令编码（32 位定长），rel 跳转（B.cond/B）。
 
-namespace kv::rt {
+namespace kvlang::runtimec2 {
 
 std::vector<std::uint8_t> emit_arch(const Segment* seg, const JitShape& sh) {
     (void)seg;
@@ -20,4 +20,4 @@ std::vector<std::uint8_t> emit_arch(const Segment* seg, const JitShape& sh) {
     return {};
 }
 
-}  // namespace kv::rt
+}  // namespace kvlang::runtimec2

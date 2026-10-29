@@ -7,7 +7,7 @@
 // （持 VmBin 成员 + 明文方法）。vmkv 可依赖 vmbin 公开接口，vmbin 不依赖 vmkv。
 #include "vmbin.hpp"
 
-namespace kv::rt {
+namespace kvlang::runtimec2 {
 
 // PC 路径：/vthread/<vid>/[<depth>]/[<s0>,<s1>]（明文 PC 是外部/持久契约）。
 struct Pc {
@@ -94,4 +94,4 @@ struct Vmkv {
 // 进程级明文栈实例（Runtime 注入共享 kvspace 句柄；bin 成员经 g_vmkv.bin 访问）。
 extern Vmkv g_vmkv;
 
-}  // namespace kv::rt
+}  // namespace kvlang::runtimec2

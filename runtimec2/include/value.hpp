@@ -2,7 +2,7 @@
 #include <cstdint>
 #include <string>
 
-namespace kv::rt {
+namespace kvlang::runtimec2 {
 
 struct Wire {
     const std::uint8_t* d = nullptr;
@@ -43,4 +43,4 @@ bool v_encode(const char* kind, std::uint8_t width, const Scalar& s,
 bool v_write_scalar(void* h, const std::string& key, const char* kind,
                     std::uint8_t width, const Scalar& s) noexcept;
 
-}  // namespace kv::rt
+}  // namespace kvlang::runtimec2

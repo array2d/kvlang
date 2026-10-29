@@ -15,7 +15,7 @@
 #include "codeseg.hpp"
 #include "jit.hpp"
 
-namespace kv::rt {
+namespace kvlang::runtimec2 {
 using bin::FrameCtx;
 using bin::RunResult;
 namespace {
@@ -240,4 +240,4 @@ int execute_vthread_impl(Runtime* r, const char* vid, char** out_pc) {
     return r ? execute_vthread_h(r->kv.handle(), vid, out_pc, false) : -1;
 }
 
-}  // namespace kv::rt
+}  // namespace kvlang::runtimec2

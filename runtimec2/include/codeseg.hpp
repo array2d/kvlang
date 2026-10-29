@@ -5,7 +5,7 @@
 
 #include "rwir.hpp"
 
-namespace kv::rt {
+namespace kvlang::runtimec2 {
 
 // 操作数：字面量（值在函数槽）或变量（帧栈成员 <frame>/<name>）。
 struct Operand {
@@ -88,4 +88,4 @@ std::size_t op_name_count();
 bool cached_insn(const std::string& func_dir, int s0, const CInsn** out,
                  const Segment** seg_out);
 
-}  // namespace kv::rt
+}  // namespace kvlang::runtimec2

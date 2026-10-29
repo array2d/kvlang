@@ -14,7 +14,7 @@
 #include "valueio.hpp"
 #include "runtime.hpp"
 
-namespace kv::rt {
+namespace kvlang::runtimec2 {
 
 namespace {
 const bool g_trace = std::getenv("RC2_TRACE") != nullptr;
@@ -2316,4 +2316,4 @@ const NativeFn* find_native(std::string_view fn) {
     return nullptr;
 }
 
-}  // namespace kv::rt
+}  // namespace kvlang::runtimec2
