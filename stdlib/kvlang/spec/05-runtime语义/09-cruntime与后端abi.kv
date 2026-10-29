@@ -9,28 +9,29 @@ durable 单句柄相干、后端装载。
 
 中央 runtime 只实现执行核心（取指-解码-执行、call/return/br/goto、native builtin 派发、`=` 拷贝、用
 户函数调用）；tensor / LLM / agent / print / fs / http 全部交给扩展运行时（见 [[runtime开发规
-范]]）。这条分工是**不可越界的职责线**：runtime-c 独占三件事，扩展一件都不许重做。
+范]]）。这条分工是**不可越界的职责线**：runtimec2 独占三件事，扩展一件都不许重做。
 
-**runtime-c 拥有（唯一实现，扩展不得复刻）**：
+**runtimec2 拥有（唯一实现，扩展不得复刻）**：
 
 1. **执行核心**：取指-解码-执行大循环、call/return/br/goto、vthread 调度、native builtin 派发、`=`
    拷贝语义。
 2. **值语义与编解码**：headlenpow / langtype 的**唯一编解码器**在 kvspace 正典 codec（`kvspaceXvalueEncode` /
-   `kvspaceDecodeHead` / `kvspaceNewPtr`/`NewChar`/`NewBool`/`NewInt64`/`NewFloat64`）；runtime-c 的
-   `xvalue.c` 只是其薄封装。langtype 串是类型的唯一真相，怎么拼、怎么解，只此一处。
+   `kvspaceDecodeHead` / `kvspaceNewPtr`/`NewChar`/`NewBool`/`NewInt64`/
+   `NewFloat64`）；runtimec2 的 `xvalue.c` 只是其薄封装。langtype 串是类型的
+   唯一真相，怎么拼、怎么解，只此一处。
 3. **指令解码与签名校验**：`rwir_decode.c:RwirDecode`（稠密探查、遇空即停）、`/‥isa/<folded-op>`
 签名的读写码规范、
    `LangtypeValid`/`LangtypeMatch` 类型判定。
 
-**扩展运行时套用核心，不复刻**：runtime-c 把上述三件能力经嵌入式 C ABI（下节 `kvlang_vthread.h` +
+**扩展运行时套用核心，不复刻**：runtimec2 把上述三件能力经嵌入式 C ABI（下节 `kvlang_vthread.h` +
 `kvlang_runtime.h`）对外开放。扩展运行时**嵌入**这套核心、复用其执行循环、native 派发与正典 codec，只
 **自行解释己方 opcode**——不得另起执行核心、不得另写编解码器、不得复刻 native 算子。据此：
 
 - **byteseek 是扩展运行时的参考实现**（携带 stdlib 的完整解释器），不是第二套
-  等价核心。它作为 myrwir 宿主，套用 runtime-c 核心，在自己的 **myrwircaps**
+  等价核心。它作为 myrwir 宿主，套用 runtimec2 核心，在自己的 **myrwircaps**
   （见 [[runtime开发规范]]）里登记 print/fs/http/networld/vthread 等「OS 工具箱」
   rwir。其对 head/langtype 的读写**必须**走正典 codec，不得自持一份编解码。
-- **未来的 deepx-gpu-compute（GPU 算子融合计算引擎）同架构**：同样嵌入 runtime-c 核心，只在其
+- **未来的 deepx-gpu-compute（GPU 算子融合计算引擎）同架构**：同样嵌入 runtimec2 核心，只在其
   **myrwircaps** 里登记 tensor 融合算子——算子融合发生在扩展侧（见 [[runtime开发规范]]），核心的解释
   语义不变。
 

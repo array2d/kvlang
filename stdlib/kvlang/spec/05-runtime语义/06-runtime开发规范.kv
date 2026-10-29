@@ -18,7 +18,7 @@ myrwircaps 内的 rwir，直到遇到不在 myrwircaps 内的指令，把最终 
 opcode**，映射 `opcode → 就地处理器`。它是 kvlang runtime 分层与派发的核心术语：一个 runtime「能跑什
 么」由且仅由它的 myrwircaps 界定。
 
-- **每个 runtime 必须声明自己的 myrwircaps**。核心 runtime-c 的 myrwircaps 就是其 **native 静态注册
+- **每个 runtime 必须声明自己的 myrwircaps**。核心 runtimec2 的 myrwircaps 就是其 **native 静态注册
   表**（数组 + 线性查找，见 [[cruntime与后端abi]]），登记 native builtin（+ 控制流 `call`/`return`/
   `br`/`goto` + `=` 拷贝，见 [[runtimec内建]]）。
 - **每个扩展运行时各自定义一张 myrwircaps**，登记其自带的 rwir opcode。例：byteseek 为 `term`/
