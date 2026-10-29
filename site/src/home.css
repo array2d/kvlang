@@ -15,6 +15,19 @@
   padding: 0 16px;
 }
 
+/* 全宽容器：宽表格（多版本对比）铺满浏览区，桌面全屏时不再受 68ch 限制；
+   区内文字块仍保持 68ch 排版宽度。 */
+.wrap.bench-wrap {
+  max-width: none;
+  padding: 0 24px;
+}
+.wrap.bench-wrap > h2,
+.wrap.bench-wrap > .section-lead,
+.wrap.bench-wrap > .bench-meta,
+.wrap.bench-wrap > .bench-note {
+  max-width: 68ch;
+}
+
 .mono,
 code,
 pre {
@@ -479,7 +492,7 @@ details.source-build pre.code {
 /* ── 多版本对比表 ── */
 .bench-versions {
   width: 100%;
-  min-width: 760px;
+  min-width: 980px;
   border-collapse: collapse;
   font-size: 12.5px;
   margin-top: 10px;
