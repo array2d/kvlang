@@ -82,6 +82,8 @@ export default defineConfig({
         stdlib: resolve(SITE, "stdlib/index.html"),
         runtimes: resolve(SITE, "runtimes/index.html"),
         zhRuntimes: resolve(SITE, "zh/runtimes/index.html"),
+        benchmarks: resolve(SITE, "benchmarks/index.html"),
+        zhBenchmarks: resolve(SITE, "zh/benchmarks/index.html"),
       },
     },
   },

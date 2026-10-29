@@ -5,4 +5,6 @@
   <url><loc>https://kvlang.com/stdlib/</loc><priority>0.8</priority></url>
   <url><loc>https://kvlang.com/runtimes/</loc><priority>0.7</priority></url>
   <url><loc>https://kvlang.com/zh/runtimes/</loc><priority>0.7</priority></url>
+  <url><loc>https://kvlang.com/benchmarks/</loc><priority>0.7</priority></url>
+  <url><loc>https://kvlang.com/zh/benchmarks/</loc><priority>0.7</priority></url>
 </urlset>

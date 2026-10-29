@@ -30,7 +30,7 @@
       },
       {
         "label": "Learn",
-        "href": "#start"
+        "href": "/#start"
       },
       {
         "label": "Docs",
@@ -39,6 +39,10 @@
       {
         "label": "Runtimes",
         "href": "/runtimes/"
+      },
+      {
+        "label": "Benchmarks",
+        "href": "/benchmarks/"
       },
       {
         "label": "GitHub",
@@ -103,9 +107,9 @@
         "featureClass": "feature",
         "title": "Byte-identical backends",
         "body": "One PascalCase C ABI, two implementations chosen by DSN. The same program runs against shared memory, files, or Redis with identical bytes.",
-        "code": "KVSPACE=shm:///tmp/kvlang.shm ./bin/kvlang tutorial/01-basics/hello.kv   # kvspace-c\nKVSPACE=fs:///tmp/kvlang-fs   ./bin/kvlang tutorial/01-basics/hello.kv   # kvspace-durable",
+        "code": "KVSPACE=shm:///tmp/kvlang.shm ./bin/byteseek tutorial/01-basics/hello.kv   # kvspace-c\nKVSPACE=fs:///tmp/kvlang-fs   ./bin/byteseek tutorial/01-basics/hello.kv   # kvspace-durable",
         "source": "README.md",
-        "codeHtml": "<pre class=\"code\"><code><!-- source: README.md -->\nKVSPACE=shm:///tmp/kvlang.shm ./bin/kvlang tutorial/01-basics/hello.kv   # kvspace-c\nKVSPACE=fs:///tmp/kvlang-fs   ./bin/kvlang tutorial/01-basics/hello.kv   # kvspace-durable</code></pre>"
+        "codeHtml": "<pre class=\"code\"><code><!-- source: README.md -->\nKVSPACE=shm:///tmp/kvlang.shm ./bin/byteseek tutorial/01-basics/hello.kv   # kvspace-c\nKVSPACE=fs:///tmp/kvlang-fs   ./bin/byteseek tutorial/01-basics/hello.kv   # kvspace-durable</code></pre>"
       },
       {
         "featureClass": "feature single",
@@ -149,9 +153,9 @@
         },
         {
           "title": "2 · Run",
-          "code": "./bin/kvlang -c 'println(\"hello, world\")'    # inline mode (entry init)",
+          "code": "./bin/byteseek -c 'println(\"hello, world\")'  # inline mode (entry init)",
           "source": "README.md",
-          "codeHtml": "<pre class=\"code\"><code><!-- source: README.md -->\n./bin/kvlang -c 'println(\"hello, world\")'    # inline mode (entry init)</code></pre>",
+          "codeHtml": "<pre class=\"code\"><code><!-- source: README.md -->\n./bin/byteseek -c 'println(\"hello, world\")'  # inline mode (entry init)</code></pre>",
           "bodyHtml": ""
         },
         {
@@ -164,9 +168,9 @@
       ],
       "sourceBuild": {
         "summary": "Build from source",
-        "code": "make all                                     # runtime(C) + layout(Rust) + runtime-rs(Rust) + json(Go)",
+        "code": "make all                                     # runtime(C) + layout(Rust) + byteseek(Rust) + json(Go)",
         "source": "README.md",
-        "codeHtml": "<pre class=\"code\"><code><!-- source: README.md -->\nmake all                                     # runtime(C) + layout(Rust) + runtime-rs(Rust) + json(Go)</code></pre>",
+        "codeHtml": "<pre class=\"code\"><code><!-- source: README.md -->\nmake all                                     # runtime(C) + layout(Rust) + byteseek(Rust) + json(Go)</code></pre>",
         "bodyHtml": "<p>Requirements: a C toolchain + cmake, Rust (cargo), and the kvspace ABI libraries. See the <a href=\"https://github.com/array2d/kvlang#quick-start-from-source\">README</a>.</p>"
       }
     },
@@ -397,6 +401,15 @@
   "benchmarks": {
     "title": "Benchmarks",
     "lead": "Each case has four logically equivalent implementations. kvlang is <strong>currently slower</strong> than Python, Rust, and C; these charts track how fast it converges.",
+    "chartTitle": "Latest results",
+    "versionsTitle": "Versions",
+    "versionsLead": "Per version, three rows per case: wall time, ratio to Python, and the headline ratio to C (C = 1). Each cell stacks the case's three input points.",
+    "versionsNote": "All runs on the same CPU model unless noted. The v0.2.17 snapshot on a different CPU is excluded. Ratios are kvlang / baseline; a lower ratio is faster. C is the reference baseline (ratio to C = 1 is the primary metric).",
+    "versionRowLabels": [
+      "time",
+      "vs Python",
+      "vs C"
+    ],
     "note": "ns/µs/ms are self-adaptive. Missing values are shown as —.",
     "versionLabel": "Data from",
     "fullResults": "Full results ({n} rows)",
@@ -423,6 +436,28 @@
     "dateLabel": "measured",
     "rawCsvLabel": "raw CSV",
     "axisTitle": "time (ns, log scale)",
-    "desc": "Log-scale latency in nanoseconds for ten benchmark cases, comparing kvlang (shm, fs, redis) with Python, Rust, and C."
+    "desc": "Log-scale latency in nanoseconds for ten benchmark cases, comparing kvlang (shm, fs, redis) with Python, Rust, and C.",
+    "meta": {
+      "title": "Benchmarks — kvlang",
+      "description": "kvlang's cross-language benchmark suite: wall time and ratios to Python and C (C = 1) across versions, for ten frozen cases on a fixed input sweep.",
+      "canonical": "https://kvlang.com/benchmarks/",
+      "ogUrl": "https://kvlang.com/benchmarks/",
+      "alternateTitle": "README",
+      "alternateHref": "https://raw.githubusercontent.com/array2d/kvlang/master/README.md",
+      "hreflangEn": "https://kvlang.com/benchmarks/",
+      "hreflangZh": "https://kvlang.com/zh/benchmarks/",
+      "hreflangDefault": "https://kvlang.com/benchmarks/",
+      "ogImage": "https://kvlang.com/img/ecosystem.png",
+      "ogImageWidth": "1201",
+      "ogImageHeight": "1091"
+    },
+    "nav": {
+      "switch": {
+        "label": "中文",
+        "href": "/zh/benchmarks/",
+        "hreflang": "zh-CN",
+        "lang": "zh-CN"
+      }
+    }
   }
 }

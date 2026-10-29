@@ -140,26 +140,6 @@
         </div>
       </section>
 
-      <section id="benchmarks" data-version="{{ benchmarks.key }}">
-        <div class="wrap">
-          <h2>{{ benchmarks.title }}</h2>
-          <p class="section-lead">{{{ benchmarks.lead }}}</p>
-          <p class="bench-meta" data-bench-meta>{{{ benchmarks.metaHtml }}}</p>
-          <div data-bench-chart>{{{ benchmarks.chartSvg }}}</div>
-          <details class="bench-details">
-            <summary data-bench-summary>{{ benchmarks.resultsLabel }}</summary>
-            <div class="table-wrap" data-bench-table>{{{ benchmarks.tableHtml }}}</div>
-          </details>
-          <p class="bench-note">
-            {{{ benchmarks.note }}}
-            <a href="{{ benchmarks.sourceHref }}">{{ benchmarks.sourceLabel }}</a>
-          </p>
-        </div>
-        <script type="application/json" id="bench-labels">
-          {{{ benchmarks.labelsJson }}}
-        </script>
-      </section>
-
       <section id="start">
         <div class="wrap">
           <h2>{{ home.start.title }}</h2>

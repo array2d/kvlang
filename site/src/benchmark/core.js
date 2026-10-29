@@ -325,6 +325,80 @@ export function fullResultsLabel(labels, groups) {
   return String(labels.fullResults || "").replace("{n}", String(rowCount(groups)));
 }
 
+/** 比值格式化：≥1000 显示千分位整数，<1000 用 3 位有效数字；空值返回 —。 */
+export function formatRatio(v) {
+  if (v === "" || v == null) return "—";
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return "—";
+  if (n >= 1000) return `${Math.round(n).toLocaleString("en-US")}×`;
+  return `${n.toPrecision(3)}×`;
+}
+
+/** 一个 case 在某版本下按 key 取三输入点数值，竖排成 <br> 分隔的一格。 */
+function cellLines(points, key) {
+  return points
+    .map((p) => {
+      const v = p[key];
+      return `${escapeXml(p.input)} ${escapeXml(v === "" || v == null ? "—" : formatNs(Number(v)))}`;
+    })
+    .join("<br>");
+}
+
+/** 比值格：每输入点 "input ratio×"，主口径 vs C（C=1）。 */
+function cellRatios(points, numKey, denKey) {
+  return points
+    .map((p) => {
+      const num = p[numKey];
+      const den = p[denKey];
+      if (num === "" || num == null || den === "" || den == null || Number(den) <= 0) {
+        return `${escapeXml(p.input)} —`;
+      }
+      return `${escapeXml(p.input)} ${escapeXml(formatRatio(Number(num) / Number(den)))}`;
+    })
+    .join("<br>");
+}
+
+/**
+ * 多版本对比表：列为 10 个 case，每个版本 3 行（耗时 / vs Python / vs C）。
+ * 每格竖排该 case 的三个输入点；vs C 行是主口径（C=1），加强调色。
+ */
+export function buildVersionsTableHtml(versions, labels) {
+  const [timeLabel, pyLabel, cLabel] = labels.versionRowLabels || ["time", "vs Python", "vs C"];
+  const cases = versions[0].groups.map((g) => g.case);
+  const head = ["<th scope=\"col\">Version</th>"]
+    .concat(cases.map((c) => `<th scope="col">${escapeXml(c)}</th>`))
+    .join("");
+  const body = versions
+    .flatMap((v) => {
+      const row = (cls, label, cell) =>
+        `<tr class="${cls}"><th scope="row">${escapeXml(label)}</th>${v.groups
+          .map((g) => (g.points.length ? `<td>${cell(g.points)}</td>` : "<td>—</td>"))
+          .join("")}</tr>`;
+      const cols = (points) => cellLines(points, "kvlang_shm_ns");
+      return [
+        `<tr class="bench-ver"><th colspan="${cases.length + 1}">${escapeXml(v.version)}</th></tr>`,
+        row("", timeLabel, cols),
+        row("bench-py", pyLabel, (points) => cellRatios(points, "kvlang_shm_ns", "python_ns")),
+        row("bench-c", cLabel, (points) => cellRatios(points, "kvlang_shm_ns", "c_ns")),
+      ];
+    })
+    .join("");
+  return `<table class="bench-versions"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+}
+
+/** 多版本元信息行：版本 / CPU / 工具链 / 日期。 */
+export function buildVersionsMetaHtml(versions, labels) {
+  const items = [];
+  for (const v of versions) {
+    const parts = [`<strong>${escapeXml(v.version)}</strong>`];
+    if (v.cpu) parts.push(escapeXml(v.cpu));
+    if (v.toolchain) parts.push(escapeXml(v.toolchain));
+    if (v.timestamp) parts.push(`${escapeXml(labels.dateLabel || "")} ${escapeXml(v.timestamp.slice(0, 10))}`);
+    items.push(`<p>${parts.join(" · ")}</p>`);
+  }
+  return items.join("");
+}
+
 function stripTags(s) {
   return String(s ?? "").replace(/<[^>]+>/g, "");
 }

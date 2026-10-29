@@ -30,7 +30,7 @@
       },
       {
         "label": "学习",
-        "href": "#start"
+        "href": "/zh/#start"
       },
       {
         "label": "文档",
@@ -39,6 +39,10 @@
       {
         "label": "运行时",
         "href": "/zh/runtimes/"
+      },
+      {
+        "label": "基准测试",
+        "href": "/zh/benchmarks/"
       },
       {
         "label": "GitHub",
@@ -103,9 +107,9 @@
         "featureClass": "feature",
         "title": "字节一致的双后端",
         "body": "一套 PascalCase C ABI，两个实现由 DSN 选择。同一份程序在共享内存、文件或 Redis 上运行，落盘字节完全一致。",
-        "code": "KVSPACE=shm:///tmp/kvlang.shm ./bin/kvlang tutorial/01-basics/hello.kv   # kvspace-c\nKVSPACE=fs:///tmp/kvlang-fs   ./bin/kvlang tutorial/01-basics/hello.kv   # kvspace-durable",
+        "code": "KVSPACE=shm:///tmp/kvlang.shm ./bin/byteseek tutorial/01-basics/hello.kv   # kvspace-c\nKVSPACE=fs:///tmp/kvlang-fs   ./bin/byteseek tutorial/01-basics/hello.kv   # kvspace-durable",
         "source": "README.md",
-        "codeHtml": "<pre class=\"code\"><code><!-- source: README.md -->\nKVSPACE=shm:///tmp/kvlang.shm ./bin/kvlang tutorial/01-basics/hello.kv   # kvspace-c\nKVSPACE=fs:///tmp/kvlang-fs   ./bin/kvlang tutorial/01-basics/hello.kv   # kvspace-durable</code></pre>"
+        "codeHtml": "<pre class=\"code\"><code><!-- source: README.md -->\nKVSPACE=shm:///tmp/kvlang.shm ./bin/byteseek tutorial/01-basics/hello.kv   # kvspace-c\nKVSPACE=fs:///tmp/kvlang-fs   ./bin/byteseek tutorial/01-basics/hello.kv   # kvspace-durable</code></pre>"
       },
       {
         "featureClass": "feature single",
@@ -149,9 +153,9 @@
         },
         {
           "title": "2 · 运行",
-          "code": "./bin/kvlang -c 'println(\"hello, world\")'    # inline mode (entry init)",
+          "code": "./bin/byteseek -c 'println(\"hello, world\")'  # inline mode (entry init)",
           "source": "README.md",
-          "codeHtml": "<pre class=\"code\"><code><!-- source: README.md -->\n./bin/kvlang -c 'println(\"hello, world\")'    # inline mode (entry init)</code></pre>",
+          "codeHtml": "<pre class=\"code\"><code><!-- source: README.md -->\n./bin/byteseek -c 'println(\"hello, world\")'  # inline mode (entry init)</code></pre>",
           "bodyHtml": ""
         },
         {
@@ -164,9 +168,9 @@
       ],
       "sourceBuild": {
         "summary": "从源码构建",
-        "code": "make all                                     # runtime(C) + layout(Rust) + runtime-rs(Rust) + json(Go)",
+        "code": "make all                                     # runtime(C) + layout(Rust) + byteseek(Rust) + json(Go)",
         "source": "README.md",
-        "codeHtml": "<pre class=\"code\"><code><!-- source: README.md -->\nmake all                                     # runtime(C) + layout(Rust) + runtime-rs(Rust) + json(Go)</code></pre>",
+        "codeHtml": "<pre class=\"code\"><code><!-- source: README.md -->\nmake all                                     # runtime(C) + layout(Rust) + byteseek(Rust) + json(Go)</code></pre>",
         "bodyHtml": "<p>需要 C 工具链 + cmake、Rust（cargo）与 kvspace ABI 库。详见 <a href=\"https://github.com/array2d/kvlang/blob/master/README_CN.md#quick-start从源码\">README_CN</a>。</p>"
       }
     },
@@ -397,6 +401,15 @@
   "benchmarks": {
     "title": "基准测试",
     "lead": "每个 case 有四份逻辑等价的实现。kvlang <strong>目前仍比</strong> Python、Rust、C 慢；这些图表用于追踪它收敛的速度。",
+    "chartTitle": "最新结果",
+    "versionsTitle": "版本对比",
+    "versionsLead": "每个版本每 case 三行：耗时、相对 Python 的比值、以及主口径——相对 C 的比值（C=1）。每格竖排该 case 的三个输入点。",
+    "versionsNote": "所有运行在同一 CPU 型号上（另有注明除外）；换过 CPU 的 v0.2.17 快照已排除。比值 = kvlang / 基线，越小越快；C 为参考基线（相对 C = 1 是主口径）。",
+    "versionRowLabels": [
+      "耗时",
+      "vs Python",
+      "vs C"
+    ],
     "note": "ns/µs/ms 自动选择单位；缺值显示为 —。",
     "versionLabel": "数据来自",
     "fullResults": "完整结果（{n} 行）",
@@ -423,6 +436,28 @@
     "dateLabel": "测量于",
     "rawCsvLabel": "原始 CSV",
     "axisTitle": "耗时（ns，对数刻度）",
-    "desc": "十个基准用例的纳秒级耗时（对数刻度），对比 kvlang（shm、fs、redis）与 Python、Rust、C。"
+    "desc": "十个基准用例的纳秒级耗时（对数刻度），对比 kvlang（shm、fs、redis）与 Python、Rust、C。",
+    "meta": {
+      "title": "基准测试 — kvlang",
+      "description": "kvlang 的跨语言基准套件：十个冻结 case 在固定规模阶梯上的耗时，以及相对 Python 与 C（C=1）的比值，逐版本对比。",
+      "canonical": "https://kvlang.com/zh/benchmarks/",
+      "ogUrl": "https://kvlang.com/zh/benchmarks/",
+      "alternateTitle": "README_CN",
+      "alternateHref": "https://raw.githubusercontent.com/array2d/kvlang/master/README_CN.md",
+      "hreflangEn": "https://kvlang.com/benchmarks/",
+      "hreflangZh": "https://kvlang.com/zh/benchmarks/",
+      "hreflangDefault": "https://kvlang.com/benchmarks/",
+      "ogImage": "https://kvlang.com/img/ecosystem.png",
+      "ogImageWidth": "1201",
+      "ogImageHeight": "1091"
+    },
+    "nav": {
+      "switch": {
+        "label": "English",
+        "href": "/benchmarks/",
+        "hreflang": "en",
+        "lang": "en"
+      }
+    }
   }
 }
