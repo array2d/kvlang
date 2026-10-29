@@ -12,5 +12,8 @@ Runtime* runtime_of(void* rt) noexcept;
 
 char* bootstrap_impl(Runtime* r, const char* funcname);
 int execute_vthread_impl(Runtime* r, const char* vid, char** out_pc);
+// h 版内核（native vthread·* handler 与 abi 共用；Runtime 实例在 native 内不可达）。
+char* bootstrap_h(void* h, const char* funcname);
+int execute_vthread_h(void* h, const char* vid, char** out_pc, bool observable);
 
 }  // namespace kv::rt

@@ -164,6 +164,10 @@ struct FrameCtx {
     const Segment* seg_hint = nullptr;
     const void* jit_hint = nullptr;
     bool jit_known = false;
+    // 外部可观察：vthread·run 驱动的子链（printstack 检视需要帧 ‥lib/extindex）。
+    // 顶层 vthread（bootstrap/test）链默认不可观察——mem_frame 保持零 kvspace
+    // 性能（fib/iops 热路径）。do_call 子帧继承父链。
+    bool observable = false;
 };
 
 // 单帧执行结果：Ok=入口帧走到段尾/return（vthread done）；

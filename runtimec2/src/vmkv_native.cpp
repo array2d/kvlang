@@ -12,6 +12,7 @@
 
 #include "value.hpp"
 #include "valueio.hpp"
+#include "runtime.hpp"
 
 namespace kv::rt {
 
@@ -1848,6 +1849,189 @@ bool h_kvlang_abs(NativeCtx& c, std::string* err) {
     return ok;
 }
 
+// ── vthread ─────────────────────────────────────────────────────────────────
+// vthread·create(funckey) -> vid：分配新 vid、建栈索引、bootstrap 首指令、置 init，
+// 返回 vid 句柄。只创建不运行——运行交给 vthread·run。与 call 不同：新开独立 vid。
+bool h_vthread_create(NativeCtx& c, std::string* err) {
+    std::string fn;
+    if (c.ins.nrd < 1 || !c.atext(0, &fn) || fn.empty()) {
+        *err = "TypeError: vthread·create requires 1 string arg";
+        return false;
+    }
+    char* vid = bootstrap_h(c.f.h, fn.c_str());
+    if (!vid) {
+        *err = "RuntimeError: vthread·create failed";
+        return false;
+    }
+    std::string vs(vid);
+    std::free(vid);
+    // 写 vid 到写槽（char/utf8 字符串，对齐 C kvlangXvalueNewCharUtf8）。
+    std::uint8_t* buf = nullptr;
+    std::uint32_t len = 0;
+    const std::int32_t dims[1] = {static_cast<std::int32_t>(vs.size())};
+    const bool ok = kvspaceXvalueEncode(
+                        "char/utf8",
+                        reinterpret_cast<const std::uint8_t*>(vs.data()),
+                        static_cast<std::uint32_t>(vs.size()), dims, 1, &buf,
+                        &len) == 0 &&
+                    buf && c.vm.write_reg(c.f, c.ins.wr[0], buf, len);
+    std::free(buf);
+    return ok;
+}
+
+// vthread·run(vid)：从子 vid 的持久化 pc 驱动到结束（阻塞）。子撞外部 rwir →
+// execute_vthread_h 返回 1 + 子 pc，冒泡 yield_pc 交驱动；驱动处理子 rwir 推进
+// 子 pc 后重入本指令续驱（父 pc 停在 vthread·run，handler 未推进）。
+bool h_vthread_run(NativeCtx& c, std::string* err) {
+    std::string vid;
+    if (c.ins.nrd < 1 || !c.atext(0, &vid) || vid.empty()) {
+        *err = "TypeError: vthread·run requires 1 string (vid) arg";
+        return false;
+    }
+    char* subout = nullptr;
+    // 子 vid 驱动链可观察（printstack 检视子栈需帧 lib/extindex）。
+    const int rc = execute_vthread_h(c.f.h, vid.c_str(), &subout, true);
+    if (rc < 0) {
+        // 子 vthread 自己失败（status=error）是**子**的终态：监督者要能活着检视
+        // /vthread/<vid>/‥status 与 ‥msg（对齐 C 语义）。只有驱动本身失败才冒泡。
+        std::string st;
+        if (read_text(c.f.h,
+                      "/vthread/" + vid + "/\xE2\x80\xA5" "status", &st) &&
+            st == "error") {
+            std::free(subout);
+            return true;  // 子失败不杀父会话
+        }
+        std::free(subout);
+        *err = "RuntimeError: vthread·run failed";
+        return false;
+    }
+    if (rc == 1 && subout) {
+        // 子撞外部 rwir：冒泡给驱动。父 pc 保持 vthread·run 指令行（重入续驱）——
+        // 驱动处理子 rwir 写子 vid pc，重入 execute(父) 从本行再驱动子。
+        const std::string pck =
+            "/vthread/" + c.f.vid + "/\xE2\x80\xA5" "pc";
+        const std::string stay = g_vmkv.param_key(c.f.frame, c.ins.s0, 0);
+        if (!write_text(c.f.h, pck, stay))
+            std::free(subout);
+        c.yield_pc = subout;  // 子 pc：交驱动处理子 rwir
+        std::free(subout);
+        return true;
+    }
+    std::free(subout);
+    return true;
+}
+
+// vthread·call(funckey)：在当前 vthread（同 vid）按运行时 funckey 动态调用被调
+// 函数，跑完回到本指令继续。与 run 不同：不新开 vid、不挂起——被调里 rwir 由
+// 当前驱动就地派发（父 pc 停在 call 指令，冒泡 ext rwir 后重入续跑被调）。
+bool h_vthread_call(NativeCtx& c, std::string* err) {
+    std::string fn;
+    if (c.ins.nrd < 1 || !c.atext(0, &fn) || fn.empty()) {
+        *err = "TypeError: vthread·call requires 1 string arg";
+        return false;
+    }
+    // 运行时 funckey → /lib/<key>；不存在/非函数则 RuntimeError。
+    const std::string key = "/lib/" + c.vm.fold_op(fn);
+    if (!frame_func_dir(c.f.h, c.f.vid, c.f.depth, &c.f.func_dir))
+        return false;  // 本帧函数目录应已解析
+    const std::uint8_t* sd = nullptr;
+    std::uint32_t sn = 0;
+    if (!read_wire(c.f.h, key + "/[0,0]", &sd, &sn)) {
+        *err = "RuntimeError: vthread·call: function not found: " + fn;
+        return false;
+    }
+    // 动态调用 = 在当前帧压一子帧跑被调：复用 do_call 路径太重（需 CInsn），
+    // 直接递归 run_frame（无参数绑定——被调签名 nr/nw=0 时才合法）。
+    // 对齐 C：被调函数跑完回到本指令 NextPc。参数非空走外部（纯 rwfunc 无参调用）。
+    // 简化：支持无参动态调用（tutorial 01-call 的 greet() 无参）。
+    std::string err2;
+    std::string stop_pc;
+    const Segment* cseg = cached_segment(c.f.h, key);
+    if (!cseg) {
+        *err = "RuntimeError: vthread·call: not a function: " + fn;
+        return false;
+    }
+    bin::FrameCtx nfc;
+    nfc.h = c.f.h;
+    nfc.vid = c.f.vid;
+    nfc.depth = c.f.depth + 1;
+    nfc.frame = g_vmkv.frame_root(nfc.vid, nfc.depth);
+    nfc.func_dir = key;
+    nfc.mem_frame = cseg && !cseg->has_native;
+    nfc.observable = c.f.observable;  // 同 vid 动态调用：可观察链继承父
+    // 非纯内存帧需建帧目录 + 系统变量（returnpc 指向本指令下一行）。
+    if (!nfc.mem_frame) {
+        const std::string ns = nfc.frame + "/";
+        char be[192] = {};
+        if (kvspaceMkindex(c.f.h, ns.c_str(), 0, be, sizeof be) != 0) {
+            *err = std::string("vthread·call: frame init failed: ") + be;
+            return false;
+        }
+        const std::string retpc =
+            g_vmkv.param_key(c.f.frame, c.ins.s0 + 1, 0);
+        if (!write_text(c.f.h, nfc.frame + "\xE2\x80\xA5" "returnpc", retpc) ||
+            !write_text(c.f.h, nfc.frame + "/\xE2\x80\xA5" "lib", key)) {
+            *err = "vthread·call: frame sysvars failed";
+            return false;
+        }
+    }
+    bin::RunResult rr = g_vmkv.run_frame(nfc, 1, &stop_pc, &err2);
+    if (rr == bin::RunResult::Error) {
+        *err = err2.empty() ? "vthread·call failed" : err2;
+        return false;
+    }
+    if (rr == bin::RunResult::Stop) {
+        // 被调撞外部 rwir：冒泡给驱动（父 pc 停在 vthread·call，重入续跑被调）。
+        c.yield_pc = stop_pc;
+    }
+    // Returned/Ok：被调跑完，父继续下一条指令。
+    return true;
+}
+
+// vthread·sleep(dur)：阻塞当前 vthread dur（duration 纳秒）。单进程模型即
+// nanosleep 阻塞驱动线程；睡眠后推进父 pc（本指令已完成）。
+bool h_vthread_sleep(NativeCtx& c, std::string* err) {
+    std::int64_t ns = 0;
+    if (c.ins.nrd < 1 || !c.ai64(0, &ns)) {
+        *err = "TypeError: vthread·sleep requires 1 duration arg";
+        return false;
+    }
+    if (ns > 0) {
+        struct timespec ts = {
+            .tv_sec = ns / 1000000000LL,
+            .tv_nsec = static_cast<long>(ns % 1000000000LL)};
+        nanosleep(&ts, nullptr);
+    }
+    return true;
+}
+
+// vthread·setstatus(status)：置本 vthread 状态并把 PC 前进到下一指令。
+// 恢复执行即把 ‥status 改回 running（外部/调试器）。
+bool h_vthread_setstatus(NativeCtx& c, std::string* err) {
+    std::string st;
+    if (c.ins.nrd < 1 || !c.atext(0, &st) || st.empty()) {
+        *err = "TypeError: vthread·setstatus requires 1 string arg";
+        return false;
+    }
+    // 写状态 + PC 推进：父 pc 前进到下一指令（对齐 C set_status NextPc）。
+    const std::string st_key =
+        "/vthread/" + c.f.vid + "/\xE2\x80\xA5" "status";
+    if (!write_text(c.f.h, st_key, st)) {
+        *err = "vthread·setstatus: write failed";
+        return false;
+    }
+    // PC 推进：本指令已完成，把父 pc 写到 vthread·run 的下一指令。
+    const std::string next_pc =
+        g_vmkv.param_key(c.f.frame, c.ins.s0 + 1, 0);
+    const std::string pc_key =
+        "/vthread/" + c.f.vid + "/\xE2\x80\xA5" "pc";
+    if (!write_text(c.f.h, pc_key, next_pc)) {
+        *err = "vthread·setstatus: pc failed";
+        return false;
+    }
+    return true;
+}
+
 // ── kvspace ─────────────────────────────────────────────────────────────────
 // kvspace 写失败：errbuf 优先，空则统一 "write failed"（对齐原末尾检查）。
 bool kv_fail(NativeCtx& c, bool ok, char* errbuf, std::string* err) {
@@ -2071,6 +2255,14 @@ constexpr NativeCap kKvlangCaps[] = {
     NCAP("kvlang/abs", h_kvlang_abs),
 };
 
+constexpr NativeCap kVthreadCaps[] = {
+    NCAP("vthread/create", h_vthread_create),
+    NCAP("vthread/run", h_vthread_run),
+    NCAP("vthread/call", h_vthread_call),
+    NCAP("vthread/sleep", h_vthread_sleep),
+    NCAP("vthread/setstatus", h_vthread_setstatus),
+};
+
 constexpr NativeCap kKvspaceCaps[] = {
     NCAP("kvspace/del", h_kv_del),
     NCAP("kvspace/deltree", h_kv_deltree),
@@ -2103,6 +2295,7 @@ constexpr NativeFamily kFamilies[] = {
     {"struct/", kContainerCaps, NCAPS(kContainerCaps)},
     {"kvlang/", kKvlangCaps, NCAPS(kKvlangCaps)},
     {"kvspace/", kKvspaceCaps, NCAPS(kKvspaceCaps)},
+    {"vthread/", kVthreadCaps, NCAPS(kVthreadCaps)},
 };
 
 #undef NCAP
