@@ -72,7 +72,7 @@ array 两种物理形态彻底分离为两个 lib，**创建新 key/XValue 的 r
 - `10-types/06-unconstrained-param`：空 kindexp 读参 `kvspace·listlen` 返 0（期望 3）——指针/空约束路径
 - `10-types/09-deref`：`*p` 解引用读到空——指针解引用路径
 - `11-string/{03-slice-find,04-cmp-concat,08-strconv}`：`string·find/cmp/formatint` c2 未实现
-- `15-vthread/*`：`vthread·create/run/sleep/call` c2 未实现（runtime-rs 方向）
+- `15-vthread/*`：`vthread·create/run/sleep/call` c2 未实现（byteseek 方向）
 - `14-networld/*`：engine.rs 断言（kvspace se…）非 c2 层
 
 ## 性能护栏（#499）
@@ -82,5 +82,5 @@ array 两种物理形态彻底分离为两个 lib，**创建新 key/XValue 的 r
 ## 下一步建议顺序
 1. **C runtime 换名**（myrwircaps/rwir_array/rwir_xvalue/rwir_ndarray）——对拍基准同步（唯一遗留迁移项）
 2. 指针/空 kindexp 两例（10-types）——非迁移，独立 issue
-3. string/vthread c2 缺口——按 runtime-rs 计划跟进
+3. string/vthread c2 缺口——按 byteseek 计划跟进
 4. `make all` + stage_embed 重建发布态二进制（本会话已跑，交付前重跑一遍）

@@ -31,7 +31,7 @@ int kvlangRuntimeExecutePc(kvlangRuntime_t *rt, const char *pc) {
   return kvlangKvcpuExecute(rt->kvspace, pc);
 }
 
-/* runtime 与 runtime-rs 必须共用同一 kvspace 句柄——durable 惰性 flush
+/* runtime 与 byteseek 必须共用同一 kvspace 句柄——durable 惰性 flush
  * 仅在同句柄内相干， 跨句柄写不可见（shm 共享 mmap
  * 掩盖了此点）。暴露内部句柄，禁止调用方另开连接。 */
 void *kvlangRuntimeKvspaceHandle(kvlangRuntime_t *rt) { return rt->kvspace->handle; }
