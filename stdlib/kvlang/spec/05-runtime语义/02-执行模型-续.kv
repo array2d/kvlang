@@ -52,7 +52,7 @@ vthread 是 kvlang 的执行线程，句柄为整数 `vid`，根在 `/vthread/<v
 - `vthread·create(funckey) -> vid`：分配新 vid、建栈索引、bootstrap 被调函数首指令、置 `init`，返回
   vid 句柄。**只创建不运行**。
 - `vthread·run(vid)`：以 vid 为参数，从其持久化 `‥pc` 驱动到结束（阻塞）。这是 create 之外的独立子
-  vid 的运行入口，也是崩溃恢复入口（`kvlang run <vid>`）。子 vid 命中须经 def rwir 路由的 rwir 时经
+  vid 的运行入口，也是崩溃恢复入口（`byteseek run <vid>`）。子 vid 命中须经 def rwir 路由的 rwir 时经
   `out_pc` 冒泡给上层驱动派发、推进子 pc 后重入续驱。
 - `vthread·call(funckey)`：在**当前 vthread（同 vid）**内按运行时 funckey 造一次动态 `call`，被调函
   数跑到结束再回本指令后继。**不新开 vid、不挂起**——被调里的 rwir 由当前驱动就地派发。
@@ -60,8 +60,9 @@ vthread 是 kvlang 的执行线程，句柄为整数 `vid`，根在 `/vthread/<v
 - `vthread·setstatus(status)`：置本 vthread 状态并把 PC 前进到下一指令。恢复执行即把 `‥status` 改回
   `running` 再驱动该 vid。
 
-`vthread·create` 与 `vthread·run` 是**两步分离**（对应 `kvlang create <fn>` / `kvlang run <vid>` 两
-个子命令）；`vthread·call` 是同 vid 内的动态调用。三者**不得**混同。锚例：`tutorial/15-vthread/`
+`vthread·create` 与 `vthread·run` 是**两步分离**（对应 `byteseek create <fn>` /
+`byteseek run <vid>` 两个子命令）；`vthread·call` 是同 vid 内的动态调用。
+三者**不得**混同。锚例：`tutorial/15-vthread/`
 （`01-call.kv`、`03-create-run.kv`、`04-sleep.kv`、`02-crashrecover.kv`）。
 
 ## networld 与外部世界
@@ -90,7 +91,8 @@ kvlang **没有独立调试器进程，也没有 `--debug` 开关**。调试模�
 - **PC 即调用栈**：嵌套帧路径 `/vthread/<vid>/[1,0]/[1,0]/[2,0]` 逐段即调用链，无需另存栈结构。
 - **观察源码**：`kvlang printlib` 把 `/lib` 子树逆向重建为可运行 kvlang，并以 `#` 注释标出每条指令的
   `[s0,s1]` 槽位，是核对 layout 结果与坐标 bug 的透视镜；`kvlang·printstack(vid)` 渲染活动栈。
-- **恢复**：`kvspace set /vthread/<vid>/‥status running` 后 `kvlang run <vid>` 从持久化 `‥pc` 续跑。
+- **恢复**：`kvspace set /vthread/<vid>/‥status running` 后
+  `byteseek run <vid>` 从持久化 `‥pc` 续跑。
 
 锚例：`tutorial/09-debugger/`（`breakpoint.kv`、`sum_to.kv`、`chain_array.kv`）。
 	"#### -> /lib/kvlang/spec/runtime语义/执行模型_续

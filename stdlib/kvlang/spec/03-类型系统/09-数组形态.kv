@@ -81,7 +81,7 @@ rwir 只写既有槽/成员，绝不隐式跨形态转换）。
 | `a:[1024]int32 = []` | 空初始化：按声明维度分配，全零 |
 | `b:[256,256]float32 = [1...]` | 填充初始化：按声明维度分配，每元素填 `1`（填充值按元素种类编码，`1`→`float32 1.0`） |
 
-- 两者降级为 `compactcompactarray·fill(langtype[, v])`：`langtype` 即写类型（维度来源），`v` 为填充值
+- 两者降级为 `compactarray·fill(langtype[, v])`：`langtype` 即写类型（维度来源），`v` 为填充值
   （`[]` 省略即全零）。runtime 一条指令批量填充，不展开成 N 个字面量参数。
 - `[v...]` 只允许**单一**填充值，且写类型必须是定长数组（`[]T` 动态一维、`[.,N]T` 含任意长维均报
   错）。（此处 `[v...]` 是**值字面量**的填充展开，与类型表达式无关。）
@@ -93,8 +93,8 @@ rwir 只写既有槽/成员，绝不隐式跨形态转换）。
 
 - **`T·new`（创建）**：只创建类型骨架，不负责数据初值。`map·new`、`compactarray·new`、
   `scatterarray·new`、`struct·new`。所有 xvalue 类型的创建 rwir 一律 `T·new` 命名（`T` = 类型名）。
-- **`T·fill`（全量填充，核心 runtime 唯一初始化模式）**：`compactcompactarray·fill(langtype[, v])`——
-  按定长维度一次成型 + 统一填充值（缺省全零）。这是 **runtimec2/C runtime 就地支持**
+- **`T·fill`（全量填充，核心 runtime 唯一初始化模式）**：`compactarray·fill(langtype[, v])`——
+  按定长维度一次成型 + 统一填充值（缺省全零）。这是 **runtimec2 核心就地支持**
   的唯一初始化模式，`[]`/`[v...]` 字面量降级于此。
 - **其它特殊初始化（扩展 runtime 职责）**：带算法语义、需模式生成的初始化——如
   `np·eye`（单位阵）、`np·zeros`、`np·ones`、`np·arange`、`np·rand`、`np·linspace` 等。

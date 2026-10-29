@@ -80,7 +80,8 @@ native 与扩展同形。扩展在自己的 runtime 启动时写同名声明，�
 ## 注册表：逐槽 langtype
 
 扩展的每个 opcode 携带读参表 `rp` 与写参表 `wp`，各槽一个 langtype（Rust
-`runtime-rs/src/rwir/mod.rs::Rwir{rp,wp}`）。注册时各参数类型分别写入 `/‥isa/<folded-op>` 签名行 `[0,x]`
+`byteseek/src/rwir/mod.rs::Rwir{rp,wp}`）。注册时各参数类型分别写入
+`/‥isa/<folded-op>` 签名行 `[0,x]`
 的 `def langtype` 槽（`rp` 各参 `x<0` 递减、`wp` 各参 `x>0` 递增）；主槽 body 只记
 `[nr][nw][dynamic]`（见 [[总体方案]]）。读参**只读**、写参**可写可读**；扩展**必须**把输出显式写入其
 写槽（见 [[执行模型]] §五）。示例（networld）：
