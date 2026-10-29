@@ -62,9 +62,9 @@ jobs:
           # 后端目录固定 /usr/lib/kvspace、前端固定 /usr/lib：按 tarball 布局安装后运行。
           sudo cp -P "$d"/lib/*.so* /usr/lib/
           sudo cp -P "$d"/lib/kvspace/*.so* /usr/lib/kvspace/
-          sudo cp "$d"/bin/kvlang "$d"/bin/kvlanglayout /usr/bin/
+          sudo cp "$d"/bin/byteseek "$d"/bin/kvlanglayout /usr/bin/
           out=$(env -i PATH=/usr/bin:/bin HOME=/tmp \
-            KVSPACE="shm:///tmp/rel-smoke.shm" /usr/bin/kvlang -c 'print("ok")')
+            KVSPACE="shm:///tmp/rel-smoke.shm" /usr/bin/byteseek -c 'print("ok")')
           echo "smoke: $out"
           [ "$out" = "ok" ]
           usage=$(/usr/bin/kvlanglayout 2>&1 || true)
@@ -82,8 +82,8 @@ jobs:
           grep -aq "kvspace:embed-noload" /tmp/kvspace-src/build/libkvspace.so.1
           FRONTEND_SO=/tmp/kvspace-src/build/libkvspace.so.1 make single
           # 记录嵌入的依赖版本（deps.json 即 tag 的 pin）与 sha256
-          python3 -c 'import json,hashlib,sys; v=sys.argv[1]; deps=json.load(open("deps.json")); b=open("bin/kvlang-single","rb").read(); json.dump({"single":v,"platform":"linux-x86_64","embedded":deps,"size":len(b),"sha256":hashlib.sha256(b).hexdigest()}, open("kvlang-single-%s-linux-x86_64.json"%v,"w"), indent=2)' "$v"
-          cp bin/kvlang-single "kvlang-single-$v-linux-x86_64"
+          python3 -c 'import json,hashlib,sys; v=sys.argv[1]; deps=json.load(open("deps.json")); b=open("bin/byteseek","rb").read(); json.dump({"single":v,"platform":"linux-x86_64","embedded":deps,"size":len(b),"sha256":hashlib.sha256(b).hexdigest()}, open("kvlang-single-%s-linux-x86_64.json"%v,"w"), indent=2)' "$v"
+          cp bin/byteseek "kvlang-single-$v-linux-x86_64"
           sha256sum "kvlang-single-$v-linux-x86_64" | tee SHA256SUMS-single
       - name: 单文件冒烟（无系统库、无 rpath）
         run: |
@@ -101,12 +101,12 @@ jobs:
             done
           }
           trap restore EXIT
-          ldd "byteseek-$v-linux-x86_64" > /tmp/ldd-single.txt
+          ldd "kvlang-single-$v-linux-x86_64" > /tmp/ldd-single.txt
           ! grep -E 'kvspace|kvlang' /tmp/ldd-single.txt
-          ! readelf -d "byteseek-$v-linux-x86_64" | grep -E 'RPATH|RUNPATH'
+          ! readelf -d "kvlang-single-$v-linux-x86_64" | grep -E 'RPATH|RUNPATH'
           out=$(env -i PATH=/usr/bin:/bin HOME=/tmp \
             KVSPACE="shm:///tmp/single-rel.shm" \
-            "./byteseek-$v-linux-x86_64" -c 'print("ok")')
+            "./kvlang-single-$v-linux-x86_64" -c 'print("ok")')
           [ "$out" = "ok" ]
       - name: 发布 release
         if: github.event_name == 'push'
@@ -216,8 +216,8 @@ jobs:
             add_rpath "$f" @loader_path/../lib
           done
           # 打包前核验：CLI 的 layout/前端依赖确实解析到 @rpath，且 rpath 覆盖 lib/
-          otool -L "$d/bin/kvlang"
-          otool -l "$d/bin/kvlang" | awk '/cmd LC_RPATH/{f=1} f && /path /{print "rpath:", $2; f=0}'
+          otool -L "$d/bin/byteseek"
+          otool -l "$d/bin/byteseek" | awk '/cmd LC_RPATH/{f=1} f && /path /{print "rpath:", $2; f=0}'
           for f in "$d/bin/kvlanglayout" "$d/lib/libkvlang_runtimec2.dylib" \
                    "$d/lib/libkvlanglayout.dylib" "$d/lib/libkvspace.1.dylib"; do
             echo "=== otool -L $f"
@@ -244,9 +244,9 @@ jobs:
           # 后端目录固定 /usr/local/lib/kvspace、前端在 /usr/local/lib：按 tarball 布局安装后运行。
           sudo cp -P "$d"/lib/*.dylib /usr/local/lib/
           sudo cp -P "$d"/lib/kvspace/*.dylib /usr/local/lib/kvspace/
-          sudo cp "$d"/bin/kvlang "$d"/bin/kvlanglayout /usr/local/bin/
+          sudo cp "$d"/bin/byteseek "$d"/bin/kvlanglayout /usr/local/bin/
           out=$(env -i PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin HOME=/tmp \
-            KVSPACE="shm:///tmp/rel-smoke.shm" /usr/local/bin/kvlang -c 'print("ok")')
+            KVSPACE="shm:///tmp/rel-smoke.shm" /usr/local/bin/byteseek -c 'print("ok")')
           echo "smoke: $out"
           [ "$out" = "ok" ]
           usage=$(/usr/local/bin/kvlanglayout 2>&1 || true)
