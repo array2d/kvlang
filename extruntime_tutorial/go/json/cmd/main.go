@@ -4,7 +4,7 @@ package main
 import (
 	"flag"
 
-	"runtime-rwirext/go/json"
+	"extruntime_tutorial/go/json"
 )
 
 func main() {

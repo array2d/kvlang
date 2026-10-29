@@ -73,7 +73,7 @@ install:
 	install -m 644 runtime/include/kvlang_vthread.h runtime/include/kvlang_runtime.h /usr/include/kvlang/
 
 json:
-	cd runtime-rwirext_example/go/json && CGO_LDFLAGS="-lkvspace" go build -o ../../../bin/json-rwirext ./cmd/
+	cd extruntime_tutorial/go/json && CGO_LDFLAGS="-lkvspace" go build -o ../../../bin/json-rwirext ./cmd/
 
 oldhero:
 	cd oldhero && go build -ldflags="-s -w" -o ../bin/kvlang-go ./cmd/kvlang/
