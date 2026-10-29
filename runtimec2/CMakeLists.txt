@@ -6,6 +6,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # 不进入默认构建：显式 `cmake --build <dir> --target runtimec2`。
+# JIT 平台发射器：按 arch 只编译对应文件（emit_arch 单一定义）。
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|arm")
+    set(JIT_ARCH_SRC src/jit_arm.cpp)
+else()
+    set(JIT_ARCH_SRC src/jit_x64.cpp)
+endif()
+
 add_library(kvlang_runtimec2 SHARED EXCLUDE_FROM_ALL
     src/abi.cpp
     src/kvspace.cpp
@@ -15,6 +22,7 @@ add_library(kvlang_runtimec2 SHARED EXCLUDE_FROM_ALL
     src/rwir_lookup.cpp
     src/codeseg.cpp
     src/jit.cpp
+    ${JIT_ARCH_SRC}
     src/value.cpp
     src/vmkv.cpp
     src/vmkv_native.cpp
