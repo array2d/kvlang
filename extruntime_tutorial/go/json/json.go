@@ -6,7 +6,7 @@ package json
 // 后端（shm→kvspace-c / redis|fs→kvspace_durable）由 libkvspace dispatch 前端按 DSN 选，
 // 经 CGO_LDFLAGS 注入。
 #cgo CFLAGS: -I${SRCDIR}/../../../runtime/include
-#cgo LDFLAGS: -L${SRCDIR}/../../../bin -lkvlang_runtime -Wl,-rpath,${SRCDIR}/../../../bin
+#cgo LDFLAGS: -L${SRCDIR}/../../../bin -lkvlang_runtimec2 -lkvspace -Wl,-rpath,${SRCDIR}/../../../bin
 #include "kvlang_runtime.h"
 #include <stdint.h>
 #include <stdlib.h>
@@ -19,6 +19,7 @@ extern int   kvspaceWriteInPlace(void *h, const char *key, int resolve, uint32_t
                                  uint8_t **body, char *err, uint32_t err_cap);
 extern int   kvspaceWriteNewPlace(void *h, const char *key, uint8_t ref, uint8_t storetype,
                                   uint8_t ro, uint32_t vid, const char *langtype, uint32_t body_len,
+                                  uint64_t body_cap,
                                   uint8_t **body, char *err, uint32_t err_cap);
 extern int   kvspaceListLen(void *h, const char *prefix, int expand_ext, int resolve, int32_t *out_count);
 extern int   kvspaceListAt(void *h, const char *prefix, int expand_ext, int resolve, int32_t idx,
@@ -165,7 +166,8 @@ func writeBody(c unsafe.Pointer, key string, ref, storetype, ro C.uint8_t, vid C
 		place = C.kvspaceWriteInPlace(c, ck, 0, n, &dst, &err[0], 256)
 	}
 	if place != 0 {
-		if C.kvspaceWriteNewPlace(c, ck, ref, storetype, ro, vid, cl, n, &dst, &err[0], 256) != 0 {
+		// 新 box 容量即 body 长度（body_cap 为预留容量）。
+		if C.kvspaceWriteNewPlace(c, ck, ref, storetype, ro, vid, cl, n, C.uint64_t(n), &dst, &err[0], 256) != 0 {
 			return
 		}
 	}

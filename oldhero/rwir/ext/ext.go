@@ -7,7 +7,7 @@
 //  2. Register/Serve 两行转发（注册签名、常驻监控 .todo、批量执行、交还 PC）；
 //  3. Exec 按 opcode 分发到具体 handler。
 //
-// 参考实现见 runtime-rwirext/go/json 与 rwirext/term。
+// 参考实现见 extruntime_tutorial/go/json 与 rwirext/term。
 package ext
 
 import (
