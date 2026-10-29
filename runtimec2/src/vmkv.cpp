@@ -1288,6 +1288,8 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                         if (ik.opfn == 4 || ik.opfn == 5) {
                             if (b == 0) {
                                 *err = "division by zero: " + ik.name;
+                                if (stop_pc)
+                                    *stop_pc = param_key(f.frame, ik.s0, 0);
                                 return RunResult::Error;
                             }
                         }
@@ -1465,6 +1467,8 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                 if (ins.opfn == 4 || ins.opfn == 5) {
                     if (b == 0) {
                         *err = "division by zero: " + ins.name;
+                        if (stop_pc)
+                            *stop_pc = param_key(f.frame, ins.s0, 0);  // 出错指令行
                         return RunResult::Error;
                     }
                 }
@@ -1693,6 +1697,21 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                     *err = "native: write failed: " + ins.name;
                 return RunResult::Error;
             }
+            // vthread·run 冒泡：子 vid 撞外部 rwir → 父以 Stop 让出（stop_pc=子 pc），
+            // execute_vthread_impl 交驱动处理子 rwir 后重入续驱。父 pc 停在 vthread·run
+            // 指令（handler 未推进），重入后继续驱动子。
+            if (!ctx.yield_pc.empty()) {
+                if (bin.prof_on) {
+                    const std::uint64_t d = bin.now() - t0;
+                    bin.prof.handler += d;
+                    bin.prof.steps++;
+                    bin.prof_tick(ins.prof_id, d, 0);
+                }
+                flush_frame_locals(f);
+                if (stop_pc)
+                    *stop_pc = std::move(ctx.yield_pc);
+                return RunResult::Stop;
+            }
             if (bin.prof_on) {
                 const std::uint64_t d = bin.now() - t0;
                 bin.prof.handler += d;
@@ -1834,35 +1853,38 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                         }
                         continue;
                     }
-                    if (ins.op != ops::Op::Add || ins.nrd != 2 ||
-                        !wire_text(w[0].d, w[0].n, &a) ||
-                        !wire_text(w[1].d, w[1].n, &b)) {
-                        *err = "non-scalar operand: " + ins.name;
-                        return RunResult::Error;
-                    }
-                    const std::string out_s = a + b;
-                    const std::int32_t dims[1] = {static_cast<std::int32_t>(out_s.size())};
-                    std::uint8_t* buf = nullptr;
-                    std::uint32_t len = 0;
-                    ok = kvspaceXvalueEncode(
-                             "char/utf8",
-                             reinterpret_cast<const std::uint8_t*>(out_s.data()),
-                             static_cast<std::uint32_t>(out_s.size()), dims, 1,
-                             &buf, &len) == 0 &&
-                         buf && write_reg(f, ins.wr[0], buf, len);
-                    std::free(buf);
-                    if (bin.prof_on) {
-                        const std::uint64_t dh = bin.now() - t0;
-                        bin.prof.handler += dh;
-                        bin.prof.steps++;
-                        bin.prof_tick(ins.prof_id, dh, 0);
-                    }
-                    if (!ok) {
-                        *err = "value op failed: " + ins.name;
-                        return RunResult::Error;
-                    }
-                    continue;
                 }
+                // 动态算子按运行时类型分派：`+` 对 char 族即字符串拼接（Eq/Neq
+                // 已在上方处理；此处是 else 层的通用路径——Add 及其它）。
+                if (ins.op != ops::Op::Add || ins.nrd != 2 ||
+                    !wire_text(w[0].d, w[0].n, &a) ||
+                    !wire_text(w[1].d, w[1].n, &b)) {
+                    *err = "non-scalar operand: " + ins.name;
+                    return RunResult::Error;
+                }
+                const std::string out_s = a + b;
+                const std::int32_t dims[1] = {static_cast<std::int32_t>(out_s.size())};
+                std::uint8_t* buf = nullptr;
+                std::uint32_t len = 0;
+                const int enc_rc =
+                    kvspaceXvalueEncode(
+                        "char/utf8",
+                        reinterpret_cast<const std::uint8_t*>(out_s.data()),
+                        static_cast<std::uint32_t>(out_s.size()), dims, 1,
+                        &buf, &len);
+                ok = enc_rc == 0 && buf && write_reg(f, ins.wr[0], buf, len);
+                std::free(buf);
+                if (bin.prof_on) {
+                    const std::uint64_t dh = bin.now() - t0;
+                    bin.prof.handler += dh;
+                    bin.prof.steps++;
+                    bin.prof_tick(ins.prof_id, dh, 0);
+                }
+                if (!ok) {
+                    *err = "value op failed: " + ins.name;
+                    return RunResult::Error;
+                }
+                continue;
             }
         }
         // 动态键：Ptr 参数先解引用取 target 槽值（链最多 2 跳）；int64/标量 →
@@ -2087,6 +2109,10 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                         FReg* rk = base_reg;
                         while (rk->src_ptr || rk->dst_ptr)
                             rk = rk->src_ptr ? rk->src_ptr : rk->dst_ptr;
+                        // enter_frame 每 execute 重入重置 regs（惰性 key 清空）：
+                        // struct·new 已建的实例槽 key 需重新解析（02-mutate `5 -> p·x`）。
+                        if (rk->key.empty() && !ensure_reg_key(f, *rk))
+                            return RunResult::Error;
                         if (!rk->key.empty()) {
                             // base 槽是 Ptr（`cur·next` 的 cur 存指针）：成员写落
                             // target。首查后缓存（热路径动态键容器免每写 kvspace）。
@@ -2366,6 +2392,20 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
             *err = "call: system vars failed";
             return RunResult::Error;
         }
+    } else if (f.observable) {
+        // 纯内存帧在**外部可观察链**（vthread·run 驱动的子链，printstack 检视）
+        // 仍落最小可观察面：‥lib 标识函数 + extindex 使帧内 pc 可解析到函数指令
+        // 树（05 printstack 的 frame[1] 缺 lib、cur 读 pc 键失败均由此）。
+        // 顶层链（bootstrap/test）不可观察——mem_frame 保持零 kvspace（fib/iops
+        // 热路径），省略 returnpc/生命周期（mem_frame return 走 Returned 直返）。
+        const std::string nstack = nf + "/";
+        const std::string callee_dir = callee + "/";
+        if (!write_text(f.h, nf + "/\xE2\x80\xA5" "lib", callee)) {
+            *err = "call: mem frame lib failed";
+            return RunResult::Error;
+        }
+        kvspaceMkindexExt(f.h, nstack.c_str(), callee_dir.c_str(), e,
+                          sizeof e);
     }
     if (std::getenv("RC2_TRACE")) {
         std::fprintf(stderr, "[memcall callee=%s mem=%d]\n",
@@ -2633,6 +2673,7 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
     nfc.arg_src_n = mem_src_n;
     nfc.arg_dst_n = mem_dst_n;
     nfc.mem_frame = mem_frame;
+    nfc.observable = f.observable;  // 可观察链传播（vthread·run 子链的递归帧）
     if (jcode) {
         // JIT 快路径：绕过上文所有 kvspace 读取（param_decl_type/read_reg/
         // ensure_reg_key/_lit 槽），直接 mem 绑定 int64 参数。

@@ -218,10 +218,40 @@ char* resolve_read_path_impl(void* h, const char* pc, int idx) {
 }
 
 char* resolve_write_impl(void* h, const char* pc, int idx) {
-    (void)h;
-    (void)pc;
-    (void)idx;
-    return dup("");
+    Pc p;
+    if (!h || !pc || !parse_pc(pc, &p) || idx < 0)
+        return dup("");
+    // 写槽 [s0,+k] 的描述符 name（对齐 C kvlangRwirextResolveWrite：
+    // 解码 rwir → writes[idx].name → ResolveWriteSlot 解析为帧槽路径）。
+    const std::string key = func_key(h, p, idx + 1);
+    std::string var;
+    int nr = 0, nw = 0;
+    if (!read_rwir(h, key, &var, &nr, &nw))
+        return dup("");
+    const std::string frame = g_vmkv.frame_root(p.vid, p.depth);
+    std::string target;
+    if (var.empty())
+        return dup("");
+    if (var[0] == '/') {
+        // 绝对路径（可能带类型后缀）：剥空格后段。
+        const auto sp = var.find(' ');
+        target = var.substr(0, sp);
+    } else if (var[0] == '*') {
+        // Ptr 写槽：帧成员 `*name` → Ptr target；参数 `*[0,k]` → arg 槽链。
+        const std::string mk = frame + "/" + var.substr(1);
+        const std::uint8_t* d = nullptr;
+        std::uint32_t n = 0;
+        if (read_wire_raw(h, mk, &d, &n)) {
+            std::string t;
+            if (v_ptr_target(Wire{d, n}, &t))
+                target = t;
+        }
+        if (target.empty())
+            target = mk;
+    } else {
+        target = frame + "/" + var;
+    }
+    return dup(target);
 }
 
 char* next_pc_impl(const char* pc) {
