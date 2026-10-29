@@ -1,4 +1,4 @@
-/* M1 冒烟：模拟 runtime-rs 的驱动循环，验证 runtimec2 的
+/* M1 冒烟：模拟 byteseek 的驱动循环，验证 runtimec2 的
  * Bootstrap / ExecuteVthread / Params / ResolveRead / NextPc。
  * 用法：m1_smoke <dsn> <funcname>   （kvspace 里需已有 layout 结果） */
 #include <stdio.h>

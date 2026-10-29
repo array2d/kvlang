@@ -8,7 +8,7 @@ void kvlangRuntimeDisconnect(kvlangRuntime_t *rt);
 
 int kvlangRuntimeExecutePc(kvlangRuntime_t *rt, const char *pc);
 
-/* runtime 内部 kvspace 句柄——runtime-rs 须复用它而非另开连接（durable 惰性
+/* runtime 内部 kvspace 句柄——byteseek 须复用它而非另开连接（durable 惰性
  * flush 只在同句柄内相干）。返回句柄生命周期同 rt，调用方不得 close。 */
 void *kvlangRuntimeKvspaceHandle(kvlangRuntime_t *rt);
 
