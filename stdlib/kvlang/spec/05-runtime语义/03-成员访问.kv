@@ -45,12 +45,12 @@ kvlang 用两个符号访问复合数据，语义严格分离，runtime **不得
 
 ## 动态成员名 `·*`：解引用操作数取 memitemkey
 
-`base·*k` 用 `k` 的**值**作为成员键：`·*` 令 runtime-c **解引用/求值**操作数 `k`，以其值定位
+`base·*k` 用 `k` 的**值**作为成员键：`·*` 令 runtimec2 **解引用/求值**操作数 `k`，以其值定位
 `base·<k 值>`（等价显式形式 `kvspace·get(base, k)` / `kvspace·set(base, k, v)`）。裸 `base·k`（无 `*`）用字面
 名 `k`；`base·*k` 才取 `k` 的值。
 
 **指针作 memitemkey 必须 `*` 开头**：当作为 key 的操作数是**指针**（ref=1 Ptr）时，**必须**写
-`base·*k`，由 runtime-c 沿 Ptr 解引用到被指向值、再以该值作 memitemkey；对指针操作数省略 `*` 非法（不
+`base·*k`，由 runtimec2 沿 Ptr 解引用到被指向值、再以该值作 memitemkey；对指针操作数省略 `*` 非法（不
 会自动解引用）。解引用得到的值随后**逐字**作键——`*` 是**显式** deref，与逐字铁律（[[文法与合法性]]，
 禁止**自动**改键）不冲突：改写由源码 `*` 显式授权，非 runtime 擅自所为。
 

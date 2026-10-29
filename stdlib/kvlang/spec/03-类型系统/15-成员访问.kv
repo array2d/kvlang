@@ -7,11 +7,11 @@ lib kvlang/spec/类型系统/成员访问 {
 | `base·name` | 静态字符串键成员读/写 |
 | `base·200` | 裸标量 memitemkey：访问键即标量字面量本身（禁 `base·[200]`） |
 | `base·[342.124,23.2345]` | 标量元组 memitemkey：访问键即元组字面量本身 |
-| `base·*k` | 动态键：`*` 令 runtime-c 解引用/求值 `k`，其值作 memitemkey |
+| `base·*k` | 动态键：`*` 令 runtimec2 解引用/求值 `k`，其值作 memitemkey |
 | `kvspace·get(base, k)` / `kvspace·set(base, k, v)` | 动态键读/写 |
 
 **指针作 key 必须 `*` 开头**：当作为 memitemkey 的操作数是指针（ref=1 Ptr）时，**必须**写 `base·*k`，
-由 runtime-c 沿 Ptr 解引用取被指向值作键；省略 `*` 非法（不自动解引用）。这是**显式** deref、非自动改
+由 runtimec2 沿 Ptr 解引用取被指向值作键；省略 `*` 非法（不自动解引用）。这是**显式** deref、非自动改
 键（运行期语义见 [[成员访问]]（runtime 卷））。
 
 `base` 即 map 的 memheadname（或 struct 实例名）。访问键**逐字即键侧 formatter 的输出**（memitemkey 只

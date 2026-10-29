@@ -31,7 +31,7 @@ storage class=3（@ext，见 [[XValueHead线格式]]），其 body 只记录目�
 
 读取一个 class-3 扩展句柄 value 时，由**支持 `@` 的 rwir** 按定位串还原真实字节——例如 byteseek 的
 networld/fs 一族 rwir 直接以 `@` 开头的扩展 key 为输入（`byteseek/src/engine.rs` 的 `read_at` /
-`resolve_ext`）。核心 runtime-c 不解引用 `@`。
+`resolve_ext`）。核心 runtimec2 不解引用 `@`。
 
 ## 后端与前端
 
