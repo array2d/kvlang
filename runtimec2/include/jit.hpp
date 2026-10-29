@@ -1,5 +1,7 @@
 #pragma once
 #include <cstdint>
+#include <string>
+#include <vector>
 
 #include "codeseg.hpp"
 #include "vmbin.hpp"
@@ -14,6 +16,19 @@ namespace kv::rt {
 
 // 发射函数 ABI（M1）：arg → RAX 结果；err_out 非 0 = runaway guard 触发。
 using JitFn = std::int64_t (*)(std::int64_t arg, std::int64_t* err_out);
+
+// 平台无关发射常量：guard 预算（发射器入口装载，回环递减）。
+inline constexpr std::int64_t kJitGuardBudget = 16 * 1024 * 1024;
+
+// ── 平台无关判定结果（jit.cpp 产出，平台发射器消费）──────────────
+struct JitShape {
+    int src_idx = -1;  // 读参（RDI/arg）
+    int dst_idx = -1;  // 写参（RAX/结果）
+};
+
+// 平台发射器：x86_64 在 jit_x64.cpp（完整）、ARM64 在 jit_arm.cpp（框架）。
+// 返回空 vector = 该平台不可发射（回退解释路径）。
+std::vector<std::uint8_t> emit_arch(const Segment* seg, const JitShape& sh);
 
 // 判定 + 发射 + 缓存（进程级，键 = 函数目录，随段缓存失效）。
 // 返回 nullptr = 不可 JIT / 发射失败（调用方回退 fast kernel）。
