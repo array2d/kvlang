@@ -9,7 +9,7 @@
 #include <kvspace/kvspace.h>
 #include <kvspace/xvalue_head.h>
 
-namespace kv::rt {
+namespace kvlang::runtimec2 {
 namespace {
 
 std::string keyz(std::string_view k) { return std::string(k); }
@@ -324,4 +324,4 @@ bool write_int(void* h, std::string_view key, std::int64_t v) noexcept {
     return write_text(h, key, buf);
 }
 
-}  // namespace kv::rt
+}  // namespace kvlang::runtimec2

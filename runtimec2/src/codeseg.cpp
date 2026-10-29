@@ -12,7 +12,7 @@
 #include "value.hpp"
 #include "valueio.hpp"
 
-namespace kv::rt {
+namespace kvlang::runtimec2 {
 namespace {
 
 std::vector<std::string> g_op_names;
@@ -309,4 +309,4 @@ void clear_segment_cache() {
     jit_clear_cache();
 }
 
-}  // namespace kv::rt
+}  // namespace kvlang::runtimec2

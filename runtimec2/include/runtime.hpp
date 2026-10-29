@@ -1,7 +1,7 @@
 #pragma once
 #include "kvspace.hpp"
 
-namespace kv::rt {
+namespace kvlang::runtimec2 {
 
 struct Runtime {
     Kvspace kv;
@@ -16,4 +16,4 @@ int execute_vthread_impl(Runtime* r, const char* vid, char** out_pc);
 char* bootstrap_h(void* h, const char* funcname);
 int execute_vthread_h(void* h, const char* vid, char** out_pc, bool observable);
 
-}  // namespace kv::rt
+}  // namespace kvlang::runtimec2

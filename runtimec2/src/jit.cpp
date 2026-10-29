@@ -14,7 +14,7 @@
 // run_frame 钩子。发射器按 arch 拆分：x86_64 → jit_x64.cpp（完整），
 // ARM64 → jit_arm.cpp（框架）。emit_arch 返回空 = 该平台不可发射。
 
-namespace kv::rt {
+namespace kvlang::runtimec2 {
 namespace {
 
 using bin::FReg;
@@ -261,4 +261,4 @@ bool jit_try_run(FrameCtx& f, const Segment* seg, int start_s0,
     return true;
 }
 
-}  // namespace kv::rt
+}  // namespace kvlang::runtimec2

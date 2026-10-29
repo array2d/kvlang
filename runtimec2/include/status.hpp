@@ -2,7 +2,7 @@
 #include <cstdint>
 #include <cstddef>
 
-namespace kv::rt {
+namespace kvlang::runtimec2 {
 
 enum class Status : std::uint8_t { Ok = 0, Error = 1, Yield = 2, Wait = 3, Fatal = 4 };
 
@@ -13,4 +13,4 @@ struct ErrorBuf {
     void set(std::uint16_t c, const char* m) noexcept;
 };
 
-}  // namespace kv::rt
+}  // namespace kvlang::runtimec2

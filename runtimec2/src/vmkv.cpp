@@ -18,7 +18,7 @@
 #include "value.hpp"
 #include "valueio.hpp"
 
-namespace kv::rt {
+namespace kvlang::runtimec2 {
 // 明文栈操作（装载/槽解析/回写）。FReg/FrameCtx 来自 vmbin（bin 命名空间）。
 using bin::FReg;
 using bin::FrameCtx;
@@ -3182,4 +3182,4 @@ std::string Vmkv::fold_op(std::string_view op) {
 
 Vmkv g_vmkv;
 
-}  // namespace kv::rt
+}  // namespace kvlang::runtimec2

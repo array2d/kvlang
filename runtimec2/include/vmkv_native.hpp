@@ -5,7 +5,7 @@
 
 #include "vmkv.hpp"
 
-namespace kv::rt {
+namespace kvlang::runtimec2 {
 
 // Native 分派上下文（vmkv.cpp run_frame native 分支的装载态 + 原内嵌 lambda 提升）。
 // handler 一律自由函数，经 ctx.vm 调 Vmkv 方法（消除每 native 重复捕获）。
@@ -45,4 +45,4 @@ using NativeFn = bool (*)(NativeCtx&, std::string* err);
 // 折叠名 → handler；未命中返回 nullptr（表未命中 = 未实现 op，调用方兜底 error）。
 const NativeFn* find_native(std::string_view fn);
 
-}  // namespace kv::rt
+}  // namespace kvlang::runtimec2

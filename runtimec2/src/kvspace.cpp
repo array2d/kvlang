@@ -4,7 +4,7 @@
 
 #include <kvspace/kvspace.h>
 
-namespace kv::rt {
+namespace kvlang::runtimec2 {
 
 Kvspace::~Kvspace() { close(); }
 
@@ -32,4 +32,4 @@ void Kvspace::close() noexcept {
     }
 }
 
-}  // namespace kv::rt
+}  // namespace kvlang::runtimec2

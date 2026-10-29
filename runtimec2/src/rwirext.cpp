@@ -11,7 +11,7 @@
 #include "value.hpp"
 #include "valueio.hpp"
 
-namespace kv::rt {
+namespace kvlang::runtimec2 {
 namespace {
 
 // 与 C runtime kvlangFormatFloat 逐字一致：%.16g → 不可回读则 %.17g，
@@ -261,4 +261,4 @@ char* next_pc_impl(const char* pc) {
     return dup(g_vmkv.next_pc(p));
 }
 
-}  // namespace kv::rt
+}  // namespace kvlang::runtimec2
