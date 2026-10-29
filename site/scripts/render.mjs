@@ -114,7 +114,7 @@ const OLD_MILESTONES = new Set(["0.2.5", "0.2.9", "0.2.12", "0.2.14", "0.2.16"])
 /** 独台 CPU（Xeon Gold 6418H，跨机不可比）的 v0.2.17 快照排除。 */
 const EXCLUDE_CPU = "Intel(R) Xeon(R) Gold 6418H";
 
-/** 收集多版本数据：最新 + 关键里程碑，按版本升序。 */
+/** 收集多版本数据：最新 + 关键里程碑，按版本降序（最新在前）。 */
 function collectVersions(dir, latestName) {
   const versions = [];
   const names = new Set([latestName]);
@@ -139,7 +139,7 @@ function collectVersions(dir, latestName) {
       toolchain: (rows[0] && rows[0].native_opt) || "",
     });
   }
-  return versions.sort((a, b) => compareSem(a.version.replace(/^v/, ""), b.version.replace(/^v/, "")));
+  return versions.sort((a, b) => compareSem(b.version.replace(/^v/, ""), a.version.replace(/^v/, "")));
 }
 
 /** 独立 benchmark 页数据：最新版本图/表 + 多版本对比表。 */
