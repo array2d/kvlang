@@ -475,3 +475,61 @@ details.source-build pre.code {
   font: 9px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   fill: var(--fg-dim);
 }
+
+/* ── 多版本对比表 ── */
+.bench-versions {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  margin-top: 10px;
+}
+.bench-versions th,
+.bench-versions td {
+  text-align: left;
+  vertical-align: top;
+  padding: 5px 9px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.bench-versions thead th {
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-dim);
+  font-weight: 600;
+}
+.bench-versions .bench-ver th {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--fg);
+  text-transform: none;
+  letter-spacing: normal;
+  background: var(--bg-alt);
+  border-bottom: 1px solid var(--border);
+  padding: 7px 9px;
+}
+.bench-versions tbody th {
+  font-weight: 600;
+  color: var(--fg-dim);
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: 0.03em;
+}
+.bench-versions tr.bench-c td {
+  background: var(--bg-alt);
+  font-weight: 600;
+  color: var(--accent);
+}
+.bench-versions tr.bench-py td {
+  color: var(--fg-dim);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .bench-versions thead th,
+  :root:not([data-theme="light"]) .bench-versions .bench-ver th {
+    background: var(--bg-alt);
+  }
+}
