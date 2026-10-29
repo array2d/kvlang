@@ -1,7 +1,7 @@
 /* 生成：native 作者清单 → 算子表。源 layout/tests/fixtures/isa_native.txt。勿手改。 */
 #include "rwir.hpp"
 
-namespace kvlang::runtimec2::ops {
+namespace kvlang::runtimec2::rwir {
 
 const Entry myrwircaps[] = {
     {"!", Op::Not, Kind::Any, 0, Class::Complex, Impl::Dynamic},
@@ -313,4 +313,4 @@ const Entry myrwircaps[] = {
 
 const int kMyrwircapsN = 305;
 
-}  // namespace kvlang::runtimec2::ops
+}  // namespace kvlang::runtimec2::rwir

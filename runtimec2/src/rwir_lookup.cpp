@@ -2,7 +2,7 @@
 
 #include "rwir.hpp"
 
-namespace kvlang::runtimec2::ops {
+namespace kvlang::runtimec2::rwir {
 
 const Entry* find_myrwircap(const char* name, std::uint32_t len) noexcept {
     for (int i = 0; i < kMyrwircapsN; i++) {
@@ -13,4 +13,4 @@ const Entry* find_myrwircap(const char* name, std::uint32_t len) noexcept {
     return nullptr;
 }
 
-}  // namespace kvlang::runtimec2::ops
+}  // namespace kvlang::runtimec2::rwir

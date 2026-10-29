@@ -1,7 +1,7 @@
 #pragma once
 #include <cstdint>
 
-namespace kvlang::runtimec2::ops {
+namespace kvlang::runtimec2::rwir {
 
 enum class Op : std::uint8_t {
     None = 0, Copy, Bool, Br, Call, Goto, Return, Cast, Abs, Add, Sub, Mul,
@@ -31,4 +31,4 @@ extern const int kMyrwircapsN;
 // 名字 → 表项；未命中返回 nullptr（非本 runtime 的 rwir）。
 const Entry* find_myrwircap(const char* name, std::uint32_t len) noexcept;
 
-}  // namespace kvlang::runtimec2::ops
+}  // namespace kvlang::runtimec2::rwir

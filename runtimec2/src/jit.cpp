@@ -89,14 +89,14 @@ bool verify(const Segment* seg, JitShape* sh) {
     }
     for (std::size_t ii = 0; ii < seg->insns.size(); ii++) {
         const CInsn& ci = seg->insns[ii];
-        if (ci.op == ops::Op::Return) {
+        if (ci.op == rwir::Op::Return) {
             if (ci.nrd != 0 || ci.nwr != 0 || ii + 1 != seg->insns.size())
                 return false;
             continue;
         }
-        if (ci.op == ops::Op::Goto || ci.op == ops::Op::Br) {
-            const bool br = ci.op == ops::Op::Br;
-            if (ci.impl != ops::Impl::Control || (br && ci.nrd != 3) ||
+        if (ci.op == rwir::Op::Goto || ci.op == rwir::Op::Br) {
+            const bool br = ci.op == rwir::Op::Br;
+            if (ci.impl != rwir::Impl::Control || (br && ci.nrd != 3) ||
                 (!br && ci.nrd != 1) || ci.nwr != 0)
                 return false;
             // rd[0]=cond（Var）；目标 rd[1]/rd[2] 必须是字面量且在 [1,n]
@@ -123,7 +123,7 @@ bool verify(const Segment* seg, JitShape* sh) {
             }
             continue;
         }
-        if (ci.op == ops::Op::Copy) {
+        if (ci.op == rwir::Op::Copy) {
             if (ci.nrd != 1 || ci.nwr != 1)
                 return false;  // Copy 的 opcode 是 `==`（Impl::Dynamic），不判 impl
         } else if (ci.fast_i64) {
