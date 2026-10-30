@@ -1,26 +1,40 @@
-<p align="center"><img src="docs/kvlang-mark.svg" width="96" alt="kvlang"></p>
+<div align="center">
+
+<img src="docs/kvlang-mark.svg" width="104" alt="kvlang logo">
 
 # kvlang
 
-[![CI](https://github.com/array2d/kvlang/actions/workflows/ci.yml/badge.svg)](https://github.com/array2d/kvlang/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Tutorial Examples](https://img.shields.io/badge/tutorials-236%20examples-4c1)](tutorial/)
-[![Spec](https://img.shields.io/badge/spec-84%20chapters-blueviolet)](stdlib/kvlang/spec/)
+**A plaintext, interpreted language whose addressing space and memory space are both kvspace**<br>
+a small core with extensions on top · the front-end language of deepx (formerly dxlang)
 
-**A plaintext, interpreted language whose addressing space and memory space are both kvspace — a small core with extensions on top (the front-end language of deepx, formerly dxlang).** Code and data live in one KV tree; the PC is a KV path (crash-resumable), the source is the IR, and every KV value is plaintext. The core runtime does only the execute loop and control flow; every other capability is supplied by other runtimes and registered at `/lib/<opcode>`.
+[![CI](https://github.com/array2d/kvlang/actions/workflows/ci.yml/badge.svg)](https://github.com/array2d/kvlang/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Tutorial Examples](https://img.shields.io/badge/tutorials-236%20examples-4c1)](tutorial/) [![Spec](https://img.shields.io/badge/spec-84%20chapters-blueviolet)](stdlib/kvlang/spec/)
 
-> 中文文档: [README_CN.md](README_CN.md)
->
+**English** · [简体中文](README_CN.md)
+
+</div>
+
+Code and data live in one KV tree; the PC is a KV path (crash-resumable), the source is the IR, and every KV value is plaintext. The core runtime does only the execute loop and control flow; every other capability is supplied by other runtimes and registered at `/lib/<opcode>`.
+
+> [!IMPORTANT]
 > **The specification is the single source of truth.** Language facts live in [`stdlib/kvlang/spec/`](stdlib/kvlang/spec/) — 84 chapters of normative text plus the authoritative grammar, written in kvlang itself and laid out into `/lib/kvlang/spec/…`. Any change to language behavior is spec-driven: edit the spec clause and its anchored example first, then the implementation, until the anchored tutorials pass on every backend. When spec and implementation disagree, the spec wins and the implementation is the defect. This README is a teaching derivative.
 
----
+## Contents
+
+- [Use Cases](#use-cases)
+- [Core Model in One Screen](#core-model-in-one-screen)
+- [Ecosystem Architecture](#ecosystem-architecture) — [myrwircaps](#myrwircaps-how-an-opcode-is-fulfilled)
+- [Repository Layout](#repository-layout)
+- [Getting Started](#getting-started) — [Install](#install) · [Quick Start](#quick-start-from-source) · [Single-file binary](#single-file-binary-linux)
+- [Language Guide](#language-guide) — [Ten Rules](#ten-rules-read-this-first) · [Program Structure](#program-structure) · [Write Forms](#write-forms--and--) · [Types](#types) · [langtype](#langtype-two-forms) · [Arrays](#arrays-compact-) · [Maps and struct](#maps-member-access-and-struct) · [Pointers](#pointers) · [Control Flow](#control-flow-inside-rwfunc-bodies-only) · [Operators](#operators) · [Builtins](#builtins) · [Worked Example](#worked-example)
+- [Tutorial](#tutorial)
+- [Benchmark](#benchmark)
+- [Specification](#specification)
+- [License](#license)
 
 ## Use Cases
 
 - **Model front-end for deepx**: the front-end language of the train-and-infer framework deepx (formerly dxlang) — model structure and operator graphs are expressed as a KV tree, with code, parameters, and intermediate results living in one tree addressed by path.
 - **Self-iterating agents (e.g. byteseek)**: the agent harness is written in kvlang; because code is data, the PC is a path, and execution resumes from the PC after a crash, the agent reads and rewrites its own code and state through the same KV reads/writes.
-
----
 
 ## Core Model in One Screen
 
@@ -52,13 +66,11 @@ Three address-space domains have fixed structural semantics: `/lib` (function li
 
 Key forms are three-way split, and the three classes never overlap: `X/name` (structure — frames, slots, directories; core-owned), `X·name` (user data member), `X/‥name` (system variable — shadow metadata; core-owned).
 
----
-
 ## Ecosystem Architecture
 
 kvspace is the addressing and memory space at the core; the language is a small runtime with extensions on top.
 
-![kvlang ecosystem architecture](docs/kvlang-ecosystem-architecture.png)
+![kvlang ecosystem architecture](docs/kvlang-architecture.en.png)
 
 - **kvspace** — one C ABI in PascalCase with no underscores (`kvspaceGet`, `kvspaceWriteInPlace`, `kvlangRuntimeConnect`); two implementations selected at run time by DSN: `kvspace-c` (C, `shm://`) and `kvspace-durable` (Rust, `redis://` / `fs://`; s3 planned). Backends must be byte-identical.
 - **layout** — Rust crate (`bin/libkvlanglayout.so`, CLI `bin/kvlanglayout`). The **o0 compiler**: scan → parse → lower (control-flow lowering, type inference, specialization) → write the KV instruction tree into `/lib`. It performs **no optimization** — optimizing here would erase the high-level semantics that other runtimes rely on to optimize on heterogeneous hardware. It writes only to `/lib`, and diagnoses at three levels: `error` / `warn` / `info`.
@@ -72,9 +84,31 @@ Each runtime declares **`myrwircaps`** — the table of opcodes it can interpret
 
 Cross-process handoff uses the queue `/lib/<opcode>/vids/<vtid> = pc`: the calling runtime `kvspace·watch`es until the item disappears; an in-process opcode dispatches in the driver loop with no handoff.
 
----
+## Repository Layout
 
-## Install
+```
+kvlang/
+├── runtime/              runtime-c, the core interpreter (C11)
+├── layout/               layout, the o0 compiler (Rust)
+├── byteseek/             byteseek, the reference host and CLI (Rust)
+├── runtimec2/            C++20 rewrite of runtime-c (draft, not the default runtime)
+├── stdlib/               standard library; stdlib/kvlang/spec/ is the specification
+├── tutorial/             examples, which double as the conformance suite
+├── error_cases/          expected-diagnostic cases
+├── benchmark/            cross-language, cross-backend benchmarks
+├── bench/                IOPS floor micro-benchmark
+├── extruntime_tutorial/  example extension runtimes: json (Go), numpy (Python)
+├── extensions/kvlang/    VS Code language support for .kv files
+├── site/                 source of kvlang.com
+├── oldhero/              the original Go implementation (archived)
+├── docs/                 logo and architecture figures
+├── article/              design essays
+└── ci/  tools/           dependency fetch and single-binary staging scripts
+```
+
+## Getting Started
+
+### Install
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/array2d/kvlang/master/install.sh | sh
@@ -88,43 +122,7 @@ PREFIX=/opt/kvlang VERSION=v0.2.18 sh install.sh   # override prefix / pin a ver
 
 It installs `byteseek` (runtime CLI), `kvlanglayout` (layout CLI) and `kvspace` (backend CLI) into `<prefix>/bin`, the libraries into `<prefix>/lib` + `<prefix>/lib/kvspace`, and the headers into `<prefix>/include/{kvlang,kvspace,…}`.
 
-## Single-file binary (Linux)
-
-`make single` builds `bin/kvlang-single`: one executable with every project-owned
-shared library embedded as bytes. At startup they are written to anonymous
-`memfd_create` objects and loaded with `dlopen("/proc/self/fd/N")` — nothing is
-extracted to disk, and the binary needs no `LD_LIBRARY_PATH`, rpath, or installed
-kvspace/kvlang libraries (`ldd` shows only libc/libm/libgcc).
-
-```bash
-./ci/deps.sh          # or point KVSPACE_DEPS_DIR at an existing deps prefix
-make single           # → bin/kvlang-single
-ldd bin/kvlang-single # only system libraries
-KVSPACE=shm:///tmp/s.db bin/kvlang-single -c 'print("ok")'
-```
-
-`KVSPACE` (the DSN) selects the backend, and the loader itself sets no environment
-variables. The loader maps the backends from memory; the dispatch front end reuses
-them by SONAME with
-`dlopen(name, RTLD_NOW | RTLD_NOLOAD)`, so no backend directory, rpath, or
-`LD_LIBRARY_PATH` is involved. The front end embedded in the payload must carry
-that NOLOAD support — build it from current kvspace sources and pass
-`FRONTEND_SO=<path> make single` (the build fails loudly otherwise). To run the
-tutorial suite against the single binary, point the layout step at its own
-`layout` subcommand and put a `kvlang` symlink on `PATH` for the nested-exec test
-case:
-
-```bash
-printf '#!/bin/sh\nexec env KVSPACE="$2" "$PWD/bin/kvlang-single" layout "$1"\n' > /tmp/kl.sh
-chmod +x /tmp/kl.sh && ln -sf "$PWD/bin/kvlang-single" /tmp/kvlang
-PATH=/tmp:$PATH KVLANG_TERM_BIN="$PWD/bin/kvlang-single" KVLANG_LAYOUT_BIN=/tmp/kl.sh \
-  KVSPACE=shm:///tmp/tut python3 tutorial/test.py --no-build
-```
-
-The self-contained tarball remains the supported/released artifact; the
-single-file binary is an additional Linux artifact (macOS is a follow-up).
-
-## Quick Start (from source)
+### Quick Start (from source)
 
 Requirements: a C toolchain + cmake, Rust (cargo), and the kvspace ABI libraries installed to `/usr/lib/kvspace` (fetched by [`ci/deps.sh`](ci/deps.sh) from the tags in [`deps.json`](deps.json)). Go is needed only for the Go `json` example extension.
 
@@ -152,7 +150,46 @@ KVSPACE=fs:///tmp/kvlang-fs   ./bin/byteseek tutorial/01-basics/hello.kv   # kvs
 
 Two more modes: `byteseek create <func>` prints a vthread `vid`, and `byteseek run <vid>` resumes from the persisted PC (crash recovery). With `--lib p1:p2:…` (instead of an entry), byteseek lays out every `.kv` under those paths and runs each lib's `init`; there is no environment variable for this.
 
----
+### Single-file binary (Linux)
+
+`make single` builds `bin/kvlang-single`: one executable with every project-owned
+shared library embedded as bytes. At startup they are written to anonymous
+`memfd_create` objects and loaded with `dlopen("/proc/self/fd/N")` — nothing is
+extracted to disk, and the binary needs no `LD_LIBRARY_PATH`, rpath, or installed
+kvspace/kvlang libraries (`ldd` shows only libc/libm/libgcc).
+
+```bash
+./ci/deps.sh          # or point KVSPACE_DEPS_DIR at an existing deps prefix
+make single           # → bin/kvlang-single
+ldd bin/kvlang-single # only system libraries
+KVSPACE=shm:///tmp/s.db bin/kvlang-single -c 'print("ok")'
+```
+
+The self-contained tarball remains the supported/released artifact; the
+single-file binary is an additional Linux artifact (macOS is a follow-up).
+
+<details>
+<summary>How the loader works, and running the tutorial suite on the single binary</summary>
+
+`KVSPACE` (the DSN) selects the backend, and the loader itself sets no environment
+variables. The loader maps the backends from memory; the dispatch front end reuses
+them by SONAME with
+`dlopen(name, RTLD_NOW | RTLD_NOLOAD)`, so no backend directory, rpath, or
+`LD_LIBRARY_PATH` is involved. The front end embedded in the payload must carry
+that NOLOAD support — build it from current kvspace sources and pass
+`FRONTEND_SO=<path> make single` (the build fails loudly otherwise). To run the
+tutorial suite against the single binary, point the layout step at its own
+`layout` subcommand and put a `kvlang` symlink on `PATH` for the nested-exec test
+case:
+
+```bash
+printf '#!/bin/sh\nexec env KVSPACE="$2" "$PWD/bin/kvlang-single" layout "$1"\n' > /tmp/kl.sh
+chmod +x /tmp/kl.sh && ln -sf "$PWD/bin/kvlang-single" /tmp/kvlang
+PATH=/tmp:$PATH KVLANG_TERM_BIN="$PWD/bin/kvlang-single" KVLANG_LAYOUT_BIN=/tmp/kl.sh \
+  KVSPACE=shm:///tmp/tut python3 tutorial/test.py --no-build
+```
+
+</details>
 
 ## Language Guide
 
@@ -356,29 +393,28 @@ rwfunc test() -> () {
 
 For an LLM-oriented one-page summary of the language, see [`stdlib/kvlang/kvlangbrief.kv`](stdlib/kvlang/kvlangbrief.kv).
 
----
-
 ## Tutorial
 
 236 self-contained examples (`// 期望输出` headers give expected output for 228 of them), organized by topic:
 
-```
-01-basics/      hello, arith, precision, numtypes, strings, …     (18)
-02-func/        rwfunc, call, accumulator                         (4)
-03-control/     if, while, for, guess                             (5)
-04-ndarray/     compact arrays, subscript, multi-dim              (12)
-05-dict/        maps, dynamic keys, missing-key → None            (3)
-06-algo/        gcd, collatz, power, factorial, …                 (8)
-07-lib/         lib blocks, nested, cross-lib, anonymous          (13)
-08-leetcode/    LeetCode solutions                                (88)
-09-debugger/    debugger builtin                                  (3)
-10-types/       typed maps, nested types, tuple keys              (8)
-11-string/      string operations                                 (9)
-12-struct/      struct declaration, fields, pointers, lists       (10)
-13-stdlib/      stdlib libs: time, duration, kv, xv, math, string (15)
-14-networld/    process exec, filesystem, http                    (10)
-15-vthread/     vthread create/call/run                           (4)
-```
+| Directory | Topics | Examples |
+|---|---|--:|
+| [`01-basics/`](tutorial/01-basics/) | hello, arith, precision, numtypes, strings, … | 18 |
+| [`02-func/`](tutorial/02-func/) | rwfunc, call, accumulator | 4 |
+| [`03-control/`](tutorial/03-control/) | if, while, for, guess | 5 |
+| [`04-ndarray/`](tutorial/04-ndarray/) | compact arrays, subscript, multi-dim | 12 |
+| [`05-dict/`](tutorial/05-dict/) | maps, dynamic keys, missing-key → None | 3 |
+| [`06-algo/`](tutorial/06-algo/) | gcd, collatz, power, factorial, … | 8 |
+| [`07-lib/`](tutorial/07-lib/) | lib blocks, nested, cross-lib, anonymous | 13 |
+| [`08-leetcode/`](tutorial/08-leetcode/) | LeetCode solutions | 88 |
+| [`09-debugger/`](tutorial/09-debugger/) | debugger builtin | 3 |
+| [`10-types/`](tutorial/10-types/) | typed maps, nested types, tuple keys | 8 |
+| [`11-string/`](tutorial/11-string/) | string operations | 9 |
+| [`12-struct/`](tutorial/12-struct/) | struct declaration, fields, pointers, lists | 10 |
+| [`13-stdlib/`](tutorial/13-stdlib/) | stdlib libs: time, duration, kv, xv, math, string | 15 |
+| [`14-networld/`](tutorial/14-networld/) | process exec, filesystem, http | 10 |
+| [`15-vthread/`](tutorial/15-vthread/) | vthread create/call/run | 4 |
+
 
 ```bash
 ./bin/byteseek tutorial/01-basics/hello.kv        # run one example
@@ -389,8 +425,6 @@ python3 error_cases/error_test.py                 # expected-diagnostic cases
 ```
 
 `tutorial/test.py` discovers every `.kv` under `tutorial/`, extracts the `// 期望输出` expectations, lays the file out with `bin/kvlanglayout` and runs it, then matches stdout. The tutorial suite **is** the conformance test: an implementation conforms when, for each anchored example, the output is byte-identical on every backend. `error_cases/` holds 37 cases across 10 diagnostic categories.
-
----
 
 ## Benchmark
 
@@ -405,27 +439,23 @@ python3 benchmark/run.py --show     # print recorded history
 
 See [benchmark/README.md](benchmark/README.md) for cases, timing convention, and CSV schema.
 
----
-
 ## Specification
 
 The normative language definition lives in [`stdlib/kvlang/spec/`](stdlib/kvlang/spec/), written in kvlang and laid out into `/lib/kvlang/spec/…`. It is the single source of truth; this README is a derivative.
 
 | Volume | Contents |
 |--------|----------|
-| [00-导言](stdlib/kvlang/spec/00-导言/) | Scope, normative language, reading conventions |
-| [01-词法](stdlib/kvlang/spec/01-词法/) | Source structure, tokens, comments, identifiers, path literals, literals, operators and precedence |
-| [02-kvspace模型](stdlib/kvlang/spec/02-kvspace模型/) | Address space, structure domains, addressing and naming, the C ABI, XValue head wire format, the two array forms, instruction layout, vthread, system variables |
-| [03-类型系统](stdlib/kvlang/spec/03-类型系统/) | Kinds and fixed-width types, langtype, the map container, member access, ptr, struct, the head's three axes, wire layout, string encodings |
-| [04-layout语义](stdlib/kvlang/spec/04-layout语义/) | Instruction architecture, slot encoding, functions and write slots, control flow and its lowering, the layout pipeline and ABI, diagnostics |
-| [05-runtime语义](stdlib/kvlang/spec/05-runtime语义/) | Execution model, member access, calls, runtime-c builtins, runtime development norms, notinmyrwircaps, the C ABI |
-| [06-编译器语义](stdlib/kvlang/spec/06-编译器语义/) | The contract between the core and extension compilers: front-end/back-end operators, backend binding, operator versioning |
-| [附录](stdlib/kvlang/spec/附录/) | The authoritative grammar: program structure, type expressions, instructions, expressions, control flow, builtins |
-| [设计理由](stdlib/kvlang/spec/设计理由/) | Non-normative rationale: storage/compute separation, everything is plaintext, program as data, code hierarchy, how to design a language |
+| [00 Introduction](stdlib/kvlang/spec/00-导言/) | Scope, normative language, reading conventions |
+| [01 Lexical structure](stdlib/kvlang/spec/01-词法/) | Source structure, tokens, comments, identifiers, path literals, literals, operators and precedence |
+| [02 kvspace model](stdlib/kvlang/spec/02-kvspace模型/) | Address space, structure domains, addressing and naming, the C ABI, XValue head wire format, the two array forms, instruction layout, vthread, system variables |
+| [03 Type system](stdlib/kvlang/spec/03-类型系统/) | Kinds and fixed-width types, langtype, the map container, member access, ptr, struct, the head's three axes, wire layout, string encodings |
+| [04 layout semantics](stdlib/kvlang/spec/04-layout语义/) | Instruction architecture, slot encoding, functions and write slots, control flow and its lowering, the layout pipeline and ABI, diagnostics |
+| [05 runtime semantics](stdlib/kvlang/spec/05-runtime语义/) | Execution model, member access, calls, runtime-c builtins, runtime development norms, notinmyrwircaps, the C ABI |
+| [06 Compiler semantics](stdlib/kvlang/spec/06-编译器语义/) | The contract between the core and extension compilers: front-end/back-end operators, backend binding, operator versioning |
+| [Appendix](stdlib/kvlang/spec/附录/) | The authoritative grammar: program structure, type expressions, instructions, expressions, control flow, builtins |
+| [Design rationale](stdlib/kvlang/spec/设计理由/) | Non-normative rationale: storage/compute separation, everything is plaintext, program as data, code hierarchy, how to design a language |
 
 A rendered view of the stdlib and spec is published at [kvlang.com/stdlib](https://kvlang.com/stdlib/).
-
----
 
 ## License
 

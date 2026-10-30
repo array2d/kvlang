@@ -1,26 +1,40 @@
-<p align="center"><img src="docs/kvlang-mark.svg" width="96" alt="kvlang"></p>
+<div align="center">
+
+<img src="docs/kvlang-mark.svg" width="104" alt="kvlang logo">
 
 # kvlang
 
-[![CI](https://github.com/array2d/kvlang/actions/workflows/ci.yml/badge.svg)](https://github.com/array2d/kvlang/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Tutorial Examples](https://img.shields.io/badge/tutorials-236%20examples-4c1)](tutorial/)
-[![Spec](https://img.shields.io/badge/spec-84%20chapters-blueviolet)](stdlib/kvlang/spec/)
+**以 kvspace 为寻址空间和内存空间的明文解释执行语言**<br>
+小核心、扩展主导 · 原训推框架 deepx 的前端语言（前身 dxlang）
 
-**以 kvspace 为寻址空间和内存空间、小核心、扩展主导的明文解释执行语言（原训推框架 deepx 的前端语言，前身 dxlang）。** 代码与数据统一在一棵 KV 树；PC 即 KV 路径、可崩溃恢复，源码即 IR、KV 皆明文。核心 runtime 只做执行循环与控制流，其余能力由其它 runtime 提供、注册在 `/lib/<opcode>`。
+[![CI](https://github.com/array2d/kvlang/actions/workflows/ci.yml/badge.svg)](https://github.com/array2d/kvlang/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Tutorial Examples](https://img.shields.io/badge/tutorials-236%20examples-4c1)](tutorial/) [![Spec](https://img.shields.io/badge/spec-84%20chapters-blueviolet)](stdlib/kvlang/spec/)
 
-> English: [README.md](README.md)
->
+[English](README.md) · **简体中文**
+
+</div>
+
+代码与数据统一在一棵 KV 树；PC 即 KV 路径、可崩溃恢复，源码即 IR、KV 皆明文。核心 runtime 只做执行循环与控制流，其余能力由其它 runtime 提供、注册在 `/lib/<opcode>`。
+
+> [!IMPORTANT]
 > **规范是唯一事实源。** 语言事实在 [`stdlib/kvlang/spec/`](stdlib/kvlang/spec/)——84 章规范性条文加唯一权威文法，以 kvlang 自身书写、layout 落进 `/lib/kvlang/spec/…`。语言行为的任何改动一律规范驱动：先改规范条款及其锚定示例，再改实现，直至锚定 tutorial 在所有后端通过。规范与实现不符时以规范为准，实现视为缺陷。本 README 为教学衍生。
 
----
+## 目录
+
+- [应用场景](#应用场景)
+- [核心模型：一屏看懂](#核心模型一屏看懂)
+- [生态架构](#生态架构) — [myrwircaps](#myrwircaps一个操作码如何被兑现)
+- [目录结构](#目录结构)
+- [开始使用](#开始使用) — [安装](#安装) · [Quick Start](#quick-start从源码) · [单文件二进制](#单文件二进制linux)
+- [Language Guide](#language-guide) — [十条铁律](#十条铁律先读这条) · [程序结构](#程序结构) · [写入两形态](#写入两形态-与--) · [类型](#类型) · [langtype](#langtype两型) · [数组](#数组compact-) · [map 与 struct](#map成员访问与-struct) · [指针](#指针) · [控制流](#控制流仅限-rwfunc-体内) · [操作符](#操作符) · [内建函数](#内建函数) · [完整示例](#完整示例)
+- [Tutorial](#tutorial)
+- [Benchmark](#benchmark)
+- [规范](#规范)
+- [License](#license)
 
 ## 应用场景
 
 - **deepx 的模型前端**：作为训推一体化框架 deepx 的前端语言（前身 dxlang），以 KV 树表达模型结构与算子图——代码、参数、中间结果同在一棵 KV 树，按路径寻址。
 - **自迭代 agent（如 byteseek）**：agent harness 用 kvlang 编写；代码即数据、PC 即路径、崩溃可按 PC 恢复，agent 读改自身代码与状态走同一套 KV 读写。
-
----
 
 ## 核心模型：一屏看懂
 
@@ -52,13 +66,11 @@ lib main {
 
 键形态三分，三类零交集：`X/名`（结构——帧、指令槽、目录；核心所有）、`X·名`（用户数据成员）、`X/‥名`（系统变量——影子元数据；核心所有）。
 
----
-
 ## 生态架构
 
 kvspace 是核心的寻址空间与内存空间；语言本体是小核心 runtime，能力由上层扩展承担。
 
-![kvlang 生态架构](docs/kvlang-ecosystem-architecture.png)
+![kvlang 生态架构](docs/kvlang-architecture.zh.png)
 
 - **kvspace** — 一套 PascalCase、无下划线的 C ABI（`kvspaceGet`、`kvspaceWriteInPlace`、`kvlangRuntimeConnect`）；两种实现由运行期 DSN 选择：`kvspace-c`（C，`shm://`）与 `kvspace-durable`（Rust，`redis://` / `fs://`；s3 规划中）。各后端必须逐字节一致。
 - **layout** — Rust crate（`bin/libkvlanglayout.so`，CLI `bin/kvlanglayout`）。**o0 编译器**：scan → parse → lower（控制流降级、类型推断、特化）→ 把 KV 指令树写进 `/lib`。它**不做任何优化**——在此优化会丢掉其它 runtime 赖以在异构硬件上优化所需的高层语义。只写 `/lib`，诊断三级：`error` / `warn` / `info`。
@@ -72,9 +84,31 @@ kvspace 是核心的寻址空间与内存空间；语言本体是小核心 runti
 
 跨进程 handoff 走队列 `/lib/<opcode>/vids/<vtid> = pc`：调用方 runtime `kvspace·watch` 到该项消失为止；进程内操作码在驱动循环里直接派发，无 handoff。
 
----
+## 目录结构
 
-## 安装
+```
+kvlang/
+├── runtime/              runtime-c，核心解释器（C11）
+├── layout/               layout，o0 编译器（Rust）
+├── byteseek/             byteseek，参考宿主与 CLI（Rust）
+├── runtimec2/            runtime-c 的 C++20 重写（草稿，不是默认 runtime）
+├── stdlib/               标准库；stdlib/kvlang/spec/ 即规范
+├── tutorial/             示例，同时是一致性测试套件
+├── error_cases/          期望诊断用例
+├── benchmark/            跨语言、跨后端性能基准
+├── bench/                IOPS 地板微基准
+├── extruntime_tutorial/  扩展 runtime 示例：json（Go）、numpy（Python）
+├── extensions/kvlang/    .kv 的 VS Code 语言支持
+├── site/                 kvlang.com 源码
+├── oldhero/              最初的 Go 实现（已归档）
+├── docs/                 logo 与架构图
+├── article/              设计随笔
+└── ci/  tools/           依赖拉取与单文件二进制打包脚本
+```
+
+## 开始使用
+
+### 安装
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/array2d/kvlang/master/install.sh | sh
@@ -88,39 +122,7 @@ PREFIX=/opt/kvlang VERSION=v0.2.18 sh install.sh   # 覆盖前缀 / 指定版本
 
 安装内容：`byteseek`（runtime CLI）、`kvlanglayout`（layout CLI）、`kvspace`（后端 CLI）→ `<prefix>/bin`；库 → `<prefix>/lib` + `<prefix>/lib/kvspace`；头 → `<prefix>/include/{kvlang,kvspace,…}`。
 
-## 单文件二进制（Linux）
-
-`make single` 产出 `bin/kvlang-single`：一个可执行文件，把项目自有的全部 `.so`
-以字节嵌入。启动时写入匿名 `memfd_create` 对象并 `dlopen("/proc/self/fd/N")`
-从内存加载——**不落盘**，运行期不需要 `LD_LIBRARY_PATH`、rpath，也不需要系统里
-安装 kvspace/kvlang 库（`ldd` 只剩 libc/libm/libgcc）。
-
-```bash
-./ci/deps.sh          # 或把 KVSPACE_DEPS_DIR 指向已有的依赖前缀
-make single           # → bin/kvlang-single
-ldd bin/kvlang-single # 只系统库
-KVSPACE=shm:///tmp/s.db bin/kvlang-single -c 'print("ok")'
-```
-
-`KVSPACE`（DSN）选择后端；**加载器本身不设置任何环境变量**。它把后端从内存映射进来，
-dispatch 前端再用 `dlopen(name, RTLD_NOW | RTLD_NOLOAD)` 按 SONAME 复用，不需要
-后端目录、rpath 或 `LD_LIBRARY_PATH`。payload 里的前端必须是**支持 NOLOAD 复用**的
-kvspace 构建（v0.3.18 发布版没有）：用当前 kvspace 源码构建并
-`FRONTEND_SO=<路径> make single`；缺能力标记时构建**直接失败**，不会静默回退。
-
-要用单文件跑 tutorial：layout 步骤改调它自己的 `layout` 子命令，并在 `PATH` 上放一个
-指向单文件的 `kvlang` 符号链接（networld 嵌套 exec 用例需要）：
-
-```bash
-printf '#!/bin/sh\nexec env KVSPACE="$2" "$PWD/bin/kvlang-single" layout "$1"\n' > /tmp/kl.sh
-chmod +x /tmp/kl.sh && ln -sf "$PWD/bin/kvlang-single" /tmp/kvlang
-PATH=/tmp:$PATH KVLANG_TERM_BIN="$PWD/bin/kvlang-single" KVLANG_LAYOUT_BIN=/tmp/kl.sh \
-  KVSPACE=shm:///tmp/tut python3 tutorial/test.py --no-build
-```
-
-自包含 tarball 仍是正式发布物；单文件是 Linux 的**新增**产物（macOS 为后续项）。
-
-## Quick Start（从源码）
+### Quick Start（从源码）
 
 依赖：C 工具链 + cmake、Rust（cargo），以及装到 `/usr/lib/kvspace` 的 kvspace ABI 库（由 [`ci/deps.sh`](ci/deps.sh) 按 [`deps.json`](deps.json) 里的 tag 拉取）。Go 仅 Go `json` 示例扩展需要。
 
@@ -148,7 +150,42 @@ KVSPACE=fs:///tmp/kvlang-fs   ./bin/byteseek tutorial/01-basics/hello.kv   # kvs
 
 另有两种模式：`byteseek create <func>` 打印 vthread `vid`，`byteseek run <vid>` 从持久化的 PC 继续（崩溃恢复）。用 `--lib p1:p2:…`（代替入口名）时，byteseek 会 layout 这些路径下的所有 `.kv` 并运行各 lib 的 `init`；没有对应环境变量。
 
----
+### 单文件二进制（Linux）
+
+`make single` 产出 `bin/kvlang-single`：一个可执行文件，把项目自有的全部 `.so`
+以字节嵌入。启动时写入匿名 `memfd_create` 对象并 `dlopen("/proc/self/fd/N")`
+从内存加载——**不落盘**，运行期不需要 `LD_LIBRARY_PATH`、rpath，也不需要系统里
+安装 kvspace/kvlang 库（`ldd` 只剩 libc/libm/libgcc）。
+
+```bash
+./ci/deps.sh          # 或把 KVSPACE_DEPS_DIR 指向已有的依赖前缀
+make single           # → bin/kvlang-single
+ldd bin/kvlang-single # 只系统库
+KVSPACE=shm:///tmp/s.db bin/kvlang-single -c 'print("ok")'
+```
+
+自包含 tarball 仍是正式发布物；单文件是 Linux 的**新增**产物（macOS 为后续项）。
+
+<details>
+<summary>加载器如何工作，以及用单文件跑 tutorial</summary>
+
+`KVSPACE`（DSN）选择后端；**加载器本身不设置任何环境变量**。它把后端从内存映射进来，
+dispatch 前端再用 `dlopen(name, RTLD_NOW | RTLD_NOLOAD)` 按 SONAME 复用，不需要
+后端目录、rpath 或 `LD_LIBRARY_PATH`。payload 里的前端必须是**支持 NOLOAD 复用**的
+kvspace 构建（v0.3.18 发布版没有）：用当前 kvspace 源码构建并
+`FRONTEND_SO=<路径> make single`；缺能力标记时构建**直接失败**，不会静默回退。
+
+要用单文件跑 tutorial：layout 步骤改调它自己的 `layout` 子命令，并在 `PATH` 上放一个
+指向单文件的 `kvlang` 符号链接（networld 嵌套 exec 用例需要）：
+
+```bash
+printf '#!/bin/sh\nexec env KVSPACE="$2" "$PWD/bin/kvlang-single" layout "$1"\n' > /tmp/kl.sh
+chmod +x /tmp/kl.sh && ln -sf "$PWD/bin/kvlang-single" /tmp/kvlang
+PATH=/tmp:$PATH KVLANG_TERM_BIN="$PWD/bin/kvlang-single" KVLANG_LAYOUT_BIN=/tmp/kl.sh \
+  KVSPACE=shm:///tmp/tut python3 tutorial/test.py --no-build
+```
+
+</details>
 
 ## Language Guide
 
@@ -352,29 +389,28 @@ rwfunc test() -> () {
 
 面向 LLM 的一页语法速览见 [`stdlib/kvlang/kvlangbrief.kv`](stdlib/kvlang/kvlangbrief.kv)。
 
----
-
 ## Tutorial
 
 236 个自包含示例（其中 228 个用 `// 期望输出` 头给出期望输出），按主题组织：
 
-```
-01-basics/      hello, arith, precision, numtypes, strings, …     (18)
-02-func/        rwfunc, call, accumulator                         (4)
-03-control/     if, while, for, guess                             (5)
-04-ndarray/     compact 数组、下标、多维                           (12)
-05-dict/        map、动态键、缺失键 → None                         (3)
-06-algo/        gcd, collatz, power, factorial, …                 (8)
-07-lib/         lib 块、嵌套、跨库、匿名                            (13)
-08-leetcode/    LeetCode 题解                                     (88)
-09-debugger/    debugger 内建                                     (3)
-10-types/       带类型 map、嵌套类型、元组键                        (8)
-11-string/      字符串操作                                        (9)
-12-struct/      struct 声明、字段、指针、链表                       (10)
-13-stdlib/      stdlib：time、duration、kv、xv、math、string       (15)
-14-networld/    进程 exec、文件系统、http                          (10)
-15-vthread/     vthread create/call/run                           (4)
-```
+| 目录 | 主题 | 示例数 |
+|---|---|--:|
+| [`01-basics/`](tutorial/01-basics/) | hello, arith, precision, numtypes, strings, … | 18 |
+| [`02-func/`](tutorial/02-func/) | rwfunc, call, accumulator | 4 |
+| [`03-control/`](tutorial/03-control/) | if, while, for, guess | 5 |
+| [`04-ndarray/`](tutorial/04-ndarray/) | compact 数组、下标、多维 | 12 |
+| [`05-dict/`](tutorial/05-dict/) | map、动态键、缺失键 → None | 3 |
+| [`06-algo/`](tutorial/06-algo/) | gcd, collatz, power, factorial, … | 8 |
+| [`07-lib/`](tutorial/07-lib/) | lib 块、嵌套、跨库、匿名 | 13 |
+| [`08-leetcode/`](tutorial/08-leetcode/) | LeetCode 题解 | 88 |
+| [`09-debugger/`](tutorial/09-debugger/) | debugger 内建 | 3 |
+| [`10-types/`](tutorial/10-types/) | 带类型 map、嵌套类型、元组键 | 8 |
+| [`11-string/`](tutorial/11-string/) | 字符串操作 | 9 |
+| [`12-struct/`](tutorial/12-struct/) | struct 声明、字段、指针、链表 | 10 |
+| [`13-stdlib/`](tutorial/13-stdlib/) | stdlib：time、duration、kv、xv、math、string | 15 |
+| [`14-networld/`](tutorial/14-networld/) | 进程 exec、文件系统、http | 10 |
+| [`15-vthread/`](tutorial/15-vthread/) | vthread create/call/run | 4 |
+
 
 ```bash
 ./bin/byteseek tutorial/01-basics/hello.kv        # 运行一个示例
@@ -385,8 +421,6 @@ python3 error_cases/error_test.py                 # 期望诊断用例
 ```
 
 `tutorial/test.py` 发现 `tutorial/` 下所有 `.kv`，提取 `// 期望输出` 期望，用 `bin/kvlanglayout` layout 后运行，再比对 stdout。tutorial 套件**就是**一致性测试：每条锚定示例的输出在所有后端逐字节一致，即为符合。`error_cases/` 有 37 个用例、覆盖 10 个诊断类别。
-
----
 
 ## Benchmark
 
@@ -403,8 +437,6 @@ python3 benchmark/run.py --show     # 打印历史记录
 ```
 
 case、计时约定、CSV 字段见 [benchmark/README.md](benchmark/README.md)。
-
----
 
 ## 规范
 
@@ -423,8 +455,6 @@ case、计时约定、CSV 字段见 [benchmark/README.md](benchmark/README.md)�
 | [设计理由](stdlib/kvlang/spec/设计理由/) | 非规范动机说明：存算分离、一切皆明文、程序即数据结构、代码层级、如何设计一门语言 |
 
 stdlib 与 spec 的渲染视图发布在 [kvlang.com/stdlib](https://kvlang.com/stdlib/)。
-
----
 
 ## License
 
