@@ -36,6 +36,25 @@ namespace kvlang::runtimec2 {
 namespace {
 const bool g_trace = std::getenv("RC2_TRACE") != nullptr;
 
+// A3：time/duration 是规范的不透明标量（03-类型系统/02-种类-标量时间容器.kv:70），
+// 字节布局不由类型卷规定，由 time 标准库兑现为 8 字节整数——对齐 runtime-c
+// kvlangScalarReadInt64 对 KVLANG_LT_TIME/DURATION 的 read_u64。
+// 剥 `[dims]` 前缀得裸 kind（字段类型与值类型比对用）。
+std::string bare_dims(const std::string& lt) {
+    if (!lt.empty() && lt[0] == '[') {
+        const std::size_t close = lt.find(']');
+        if (close != std::string::npos)
+            return lt.substr(close + 1);
+    }
+    return lt;
+}
+
+// 只有 langtype 明说是这两种时才按整数解；其余一律不猜。
+bool is_opaque_i64_scalar(const std::string& lt) {
+    const std::string k = bare_dims(lt);
+    return k == "time" || k == "duration";
+}
+
 /* v2 组装 wire：按 kind 分派 New* 构造器，完整 langtype（含 dims）拼入 attr 区；
  * out_len 转 u32（>UINT32_MAX 失败）。
  * 原 kvspaceXvalueToWire(kind, raw, len, dims, ndim) 的替代入口。 */
@@ -94,18 +113,42 @@ using bin::RunResult;
 bool NativeCtx::ai64(int i, std::int64_t* v) {
     Scalar sc{};
     std::string lt;
-    if (vm.reg_langtype(f, ins.rd[i], &lt) && v_scalar(in[i], lt, &sc)) {
+    // 纯内存帧局部变量（int64 纯内存化）：无 kvspace 槽、无 langtype——
+    // fast 缓存本身即类型事实（只在 langtype 确认 Int/8 时置位），先取。
+    {
+        FReg& r = f.regs[ins.rd[i]];
+        FReg& rf = r.src_ptr ? *r.src_ptr : r;
+        if (rf.fast_i64) {
+            *v = rf.fv;
+            return true;
+        }
+        if (rf.fast_bool) {
+            *v = rf.fb ? 1 : 0;
+            return true;
+        }
+    }
+    if (!vm.reg_langtype(f, ins.rd[i], &lt)) {
+        if (g_trace)
+            std::fprintf(stderr, "[ai64fail i=%d d=%p n=%u]\n", i,
+                         (void*)in[i].d, in[i].n);
+        return false;  // 无 langtype 且无 fast 缓存 = 无类型事实，不按长度猜
+    }
+    if (v_scalar(in[i], lt, &sc)) {
         *v = sc.k == Scalar::K::Int     ? sc.i
              : sc.k == Scalar::K::Float ? (std::int64_t)sc.f
                                         : (std::int64_t)sc.u;
         return true;
     }
-    // time/duration 等非数值 langtype：body 即 8 字节整数（按 head body_len 判定）。
-    if (!in[i].d || in[i].n < KVSPACE_XVALUE_HEAD_LEN ||
-        kvspaceXvalueHeadLen(reinterpret_cast<const kvspaceXvalueHead*>(in[i].d)) < 8) {
+    // A3：time/duration 白名单——规范的不透明标量（03-类型系统/02-种类-标量时间容器.kv:70），
+    // 字节布局由 time 标准库定为 8 字节整数。只认这两个名字，其余一律不按长度重释
+    // （char/utf8 等 ≥8 字节值必须 TypeError）。
+    if (!is_opaque_i64_scalar(lt) ||
+        !in[i].d || in[i].n < KVSPACE_XVALUE_HEAD_LEN ||
+        kvspaceXvalueHeadLen(
+            reinterpret_cast<const kvspaceXvalueHead*>(in[i].d)) < 8) {
         if (g_trace)
-            std::fprintf(stderr, "[ai64fail i=%d d=%p n=%u]\n", i,
-                         (void*)in[i].d, in[i].n);
+            std::fprintf(stderr, "[ai64fail i=%d lt=%s d=%p n=%u]\n", i,
+                         lt.c_str(), (void*)in[i].d, in[i].n);
         return false;
     }
     std::memcpy(v, in[i].d + KVSPACE_XVALUE_HEAD_LEN, 8);
@@ -662,6 +705,45 @@ bool h_scatter_newcompact(NativeCtx& c, std::string* err) {
     if (esz == 0) {
         *err = "array·compact: bad elem kind " + ekind;
         return false;
+    }
+    // A9：逐元素校验——langtype 必须与首元素一致，body_len 必须等于元素宽。
+    // 混合类型散列若原样拼接会产生错位紧凑数组（静默错位），故 TypeError。
+    {
+        std::string ekind_bare = bare_dims(ekind);
+        std::uint64_t off = 0;
+        for (std::int32_t i = 0; i < cnt; i++) {
+            const std::string mk = cb + "\xC2\xB7[" + std::to_string(i) + "]";
+            const std::uint8_t* md = nullptr;
+            std::uint32_t mn = 0;
+            if (!read_wire(c.f.h, mk, &md, &mn) || !md ||
+                mn < KVSPACE_XVALUE_HEAD_LEN) {
+                *err = "array·compact: element " + std::to_string(i) +
+                       " is missing";
+                return false;
+            }
+            std::string ilt;
+            read_langtype(c.f.h, mk, &ilt);
+            if (bare_dims(ilt) != ekind_bare) {
+                *err = "TypeError: array·compact mixed element kinds: [" +
+                       std::to_string(i) + "] is " +
+                       (ilt.empty() ? std::string("None") : ilt) +
+                       ", element 0 is " + ekind;
+                return false;
+            }
+            const std::uint64_t bl = kvspaceXvalueHeadLen(
+                reinterpret_cast<const kvspaceXvalueHead*>(md));
+            if (bl != esz) {
+                *err = "TypeError: array·compact element " + std::to_string(i) +
+                       " body_len " + std::to_string(bl) +
+                       " != element width " + std::to_string(esz);
+                return false;
+            }
+            off += bl;
+        }
+        if (off != raw.size()) {
+            *err = "array·compact: body size mismatch";
+            return false;
+        }
     }
     const std::int32_t nd = cnt;
     std::uint8_t* nb = nullptr;
@@ -1382,6 +1464,16 @@ bool h_xv_meta(NativeCtx& c, std::string* err) {
             *err = "xv·reinterpret: bad langtype";
             return false;
         }
+        // A6：body 有效长以 head 的 len 为准（mcap 是分配器物理容量，只作可读上限）。
+        const std::uint64_t mlen =
+            mr.view.head && mr.view.headlen == KVSPACE_XVALUE_HEAD_LEN
+                ? kvspaceXvalueHeadLen(
+                      reinterpret_cast<const kvspaceXvalueHead*>(mr.view.head))
+                : 0;
+        if (mlen > mcap || (mlen && !mb)) {
+            *err = "xv·reinterpret: bad source body";
+            return false;
+        }
         std::int32_t ndims[8] = {};
         int ndim = 0;
         std::string kk = nlt;
@@ -1408,8 +1500,8 @@ bool h_xv_meta(NativeCtx& c, std::string* err) {
                              kk.rfind("uint8", 0) == 0 ||
                              kk.rfind("bool", 0) == 0) esz = 1;
                     ndims[0] = esz > 0
-                                   ? static_cast<std::int32_t>(mcap / esz)
-                                   : static_cast<std::int32_t>(mcap);
+                                   ? static_cast<std::int32_t>(mlen / esz)
+                                   : static_cast<std::int32_t>(mlen);
                     ndim = 1;
                 } else {
                     std::size_t i = 0;
@@ -1430,7 +1522,7 @@ bool h_xv_meta(NativeCtx& c, std::string* err) {
         }
         std::uint8_t* nb = nullptr;
         std::uint32_t nl = 0;
-        ok = to_wire_v2(kk.c_str(), mb, static_cast<std::uint32_t>(mcap), ndims,
+        ok = to_wire_v2(kk.c_str(), mb, static_cast<std::uint32_t>(mlen), ndims,
                     ndim, &nb, &nl) &&
              nb && c.vm.write_reg(c.f, c.ins.wr[0], nb, nl);
         std::free(nb);
@@ -1516,12 +1608,15 @@ bool h_array_at_set(NativeCtx& c, std::string* err) {
     std::uint32_t esz;
     Scalar::K ekind;
     bool is_char;
+    std::string array_elem_kind;  // 元素裸 kind 名（A2 值类型比对用）
     if (ar0.arr_ndim) {
         ndim = ar0.arr_ndim;
         esz = ar0.arr_esz;
         ekind = static_cast<Scalar::K>(ar0.arr_kind & 0x7F);
         is_char = (ar0.arr_kind & 0x80) != 0;
         std::memcpy(dims, ar0.arr_dims, sizeof(std::int32_t) * ndim);
+        c.vm.reg_langtype(c.f, c.ins.rd[0], &array_elem_kind);
+        array_elem_kind = bare_dims(array_elem_kind);
     } else {
         std::string alt;
         c.vm.reg_langtype(c.f, c.ins.rd[0], &alt);
@@ -1562,6 +1657,7 @@ bool h_array_at_set(NativeCtx& c, std::string* err) {
                           bt == bin::LangType::Uint64
                     ? Scalar::K::Uint
                     : Scalar::K::Bool;
+        array_elem_kind = lt;
         ar0.arr_esz = esz;
         ar0.arr_ndim = ndim;
         ar0.arr_kind =
@@ -1582,8 +1678,19 @@ bool h_array_at_set(NativeCtx& c, std::string* err) {
         }
         flat = flat * dims[d] + idxv;
     }
+    // A7：越界以 head 的 body 有效长为界（acap0 是物理容量，可含填充区）。
+    // 注意 ab0 是 body 指针（view.body = head + 8），len 须从 view.head 读。
+    const std::uint64_t abody =
+        ar0.view.head && ar0.view.headlen == KVSPACE_XVALUE_HEAD_LEN
+            ? kvspaceXvalueHeadLen(
+                  reinterpret_cast<const kvspaceXvalueHead*>(ar0.view.head))
+            : 0;
+    if (abody > acap0) {
+        *err = "xv: array body exceeds capacity";
+        return false;
+    }
     const std::uint64_t off = (std::uint64_t)flat * esz;
-    if ((std::uint64_t)flat * esz + esz > acap0) {
+    if (off + esz > abody) {
         *err = "xv: index out of range";
         return false;
     }
@@ -1648,8 +1755,23 @@ bool h_array_at_set(NativeCtx& c, std::string* err) {
         *err = "xv: bad value";
         return false;
     } else if (vw.d && vw.n >= KVSPACE_XVALUE_HEAD_LEN) {
-        std::uint64_t vlen = kvspaceXvalueHeadLen(
+        // A2：严格类型安全——值的 langtype 必须与数组元素 kind 完全一致。
+        // 不做位拷贝、不做隐式转换（int64 写 float64 数组 = TypeError）。
+        const std::uint64_t vlen = kvspaceXvalueHeadLen(
             reinterpret_cast<const kvspaceXvalueHead*>(vw.d));
+        const std::uint8_t* vltp = nullptr;
+        const std::uint16_t vltl =
+            kvspaceXvalueHeadLangtype(vw.d, vlen, &vltp);
+        std::string vkind =
+            vltl ? std::string(reinterpret_cast<const char*>(vltp), vltl)
+                 : std::string();
+        vkind = bare_dims(vkind);
+        if (vkind != array_elem_kind) {
+            *err = "TypeError: compactarray·set element is " +
+                   (vkind.empty() ? std::string("None") : vkind) +
+                   ", array element kind is " + array_elem_kind;
+            return false;
+        }
         const std::uint32_t take = vlen < esz ? (std::uint32_t)vlen : esz;
         if (take)
             std::memcpy(tmp, vw.d + KVSPACE_XVALUE_HEAD_LEN, take);
@@ -1659,7 +1781,7 @@ bool h_array_at_set(NativeCtx& c, std::string* err) {
     const RegDesc& wd0 = c.seg->regs[c.ins.wr[0]];
     const bool same_slot = !rd0.name.empty() && rd0.name == wd0.name;
     if (same_slot && c.vm.reg_body(c.f, c.ins.rd[0], &ab0, &acap0) && ab0 &&
-        (std::uint64_t)flat * esz + esz <= acap0) {
+        (std::uint64_t)flat * esz + esz <= abody) {
         ar.body = ab0;
         ar.cap = acap0;
         std::memcpy(ab0 + (std::uint64_t)flat * esz, tmp, esz);
@@ -1676,15 +1798,6 @@ bool h_array_at_set(NativeCtx& c, std::string* err) {
 // 克隆 /lib/Name 原型子树到写槽，覆盖给定字段（校验字段存在性+类型）。
 // in[0]=structref（"/lib/Name"），其后成对 (字段名, 值)。实例基值 langtype=structref。
 namespace {
-// 剥 `[dims]` 前缀得裸 kind（字段类型与值类型比对用）。
-std::string bare_kind(const std::string& lt) {
-    if (!lt.empty() && lt[0] == '[') {
-        const std::size_t close = lt.find(']');
-        if (close != std::string::npos)
-            return lt.substr(close + 1);
-    }
-    return lt;
-}
 }  // namespace
 
 bool h_struct_new(NativeCtx& c, std::string* err) {
@@ -1706,7 +1819,7 @@ bool h_struct_new(NativeCtx& c, std::string* err) {
     // 原型必须存在且 kind=def struct。
     std::string plt;
     if (!read_langtype(c.f.h, ref, &plt) ||
-        bare_kind(plt) != "def struct") {
+        bare_dims(plt) != "def struct") {
         *err = "TypeError: " + ref + " is not a struct type";
         return false;
     }
@@ -1754,11 +1867,13 @@ bool h_struct_new(NativeCtx& c, std::string* err) {
             const std::string tk = ref + "/" + fname;
             std::string tlt;
             if (!read_langtype(c.f.h, tk, &tlt) ||
-                bare_kind(tlt) != "def langtype") {
+                bare_dims(tlt) != "def langtype") {
                 *err = "TypeError: struct " + ref + " has no field " + fname;
                 return false;
             }
-            if (tn < KVSPACE_XVALUE_HEAD_LEN)
+            // 声明类型在 def langtype 槽 body（#571 后类型随值 attr 尾，声明仍在此）。
+            if (!read_wire(c.f.h, tk, &td, &tn) || !td ||
+                tn < KVSPACE_XVALUE_HEAD_LEN)
                 ftype.clear();
             else {
                 std::uint64_t tlen = kvspaceXvalueHeadLen(
@@ -1775,13 +1890,13 @@ bool h_struct_new(NativeCtx& c, std::string* err) {
         if (!ftype.empty() && ftype[0] == '*') {
             if (!none &&
                 (!v_ptr(fv) ||
-                 bare_kind(ftype.substr(1)) != bare_kind(vlt))) {
+                 bare_dims(ftype.substr(1)) != bare_dims(vlt))) {
                 *err = "TypeError: field " + fname + ": expected " + ftype +
                        ", got " + (vlt.empty() ? "None" : vlt);
                 return false;
             }
         } else if (!ftype.empty() &&
-                   (none || bare_kind(ftype) != bare_kind(vlt))) {
+                   (none || bare_dims(ftype) != bare_dims(vlt))) {
             *err = "TypeError: field " + fname + ": expected " + ftype +
                    ", got " + (none ? "None" : vlt);
             return false;
