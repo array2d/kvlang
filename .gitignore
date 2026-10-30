@@ -119,3 +119,6 @@ rp.*
 /include/slotsboxmalloc/
 /lib/*.so*
 /lib/kvspace/
+
+# 架构图（本地生成可视化，不入库）
+docs/diagrams/
