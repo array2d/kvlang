@@ -18,9 +18,18 @@ impl Engine {
     // ── kvspace 读写（绝对路径，char/utf8 与 char/utf32 互转）─────────
     /// 通用类型化写入：任意 kind + body 字节 + dims（空=标量 ndim0）。
     /// set_kv 与各 rwir 的类型化输出共用，避免每种 kind 一个专用写函数。
+    /// 写主值前补 `x‥langtype` attr key（上层职责；kvspace 层不代写）——
+    /// 结果槽（math·sin/json/http 输出）跨 Handoff/println 读依赖类型。
     pub fn set_xvalue_wire(&self, key: &str, kind: &str, raw: &[u8], dims: &[i32]) {
         let value = xvalue_to_wire(kind, raw, dims);
         assert!(!value.is_empty(), "invalid XValue for {key}");
+        // 系统键（末段含 ‥：status/pc/‥lib）无类型不写 attr；其余写 attr。
+        let last_seg = key.rsplit('/').next().unwrap_or(key);
+        if !last_seg.contains('\u{2025}') {
+            let attr = format!("{key}\u{2025}langtype");
+            let aw = xvalue_to_wire("char/utf8", kind.as_bytes(), &[kind.len() as i32]);
+            self.set_xvalue(&attr, &aw);
+        }
         self.set_xvalue(key, &value);
     }
     /// 普通文本值（含中文）：utf32 编码 + 写 langtype attr。

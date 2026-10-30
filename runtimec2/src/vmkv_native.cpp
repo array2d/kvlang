@@ -115,6 +115,13 @@ bool NativeCtx::path_arg(int i, std::uint8_t rno, const RegDesc& d,
     // 值文本优先（对齐 C path_arg）：读参值若是 char/ 且 `/` 开头 → 直接
     // 用文本（`·`→`/`）。参数（Ptr）的 key 解析出来是 arg 槽链，不是路径
     // 文本，列表 op 必须用值（kvspace·listlen(prefix) 参数值 `/tmp/kvt/`）。
+    // 字面量路径（`kvspace·cp("/cp_src")`）：name 即路径文本——直接用它，
+    // 不读 reg 值（字面量 reg key=name 是绝对路径，读它可能拿到别的值）。
+    if (d.kind == Operand::Kind::Literal && d.name.size() > 1 &&
+        d.name[0] == '/' && d.name.find(' ') == std::string::npos) {
+        *out = d.name;
+        return true;
+    }
     Wire vw{};
     std::string lt, txt;
     if (vm.read_reg(f, rno, &vw) && vm.reg_langtype(f, rno, &lt) &&
