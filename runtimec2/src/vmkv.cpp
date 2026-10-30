@@ -584,6 +584,9 @@ bool Vmkv::write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
             dr.view_ok = false;
         }
         dr.base_ptr_known = false;
+        dr.arr_esz = 0;  // 写参槽可能换型，数组布局缓存失效
+        dr.arr_ndim = 0;
+        dr.arr_kind = 0;
         char err[192] = {};
         return kvspaceSetValue(f.h, dr.key.c_str(), data, len, err, sizeof err) == 0;
     }
@@ -630,6 +633,9 @@ bool Vmkv::write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
                 r.sc_ok = false;
                 r.fast_i64 = false;
                 r.fast_bool = false;
+                r.arr_esz = 0;
+                r.arr_ndim = 0;
+                r.arr_kind = 0;
                 // data 自带类型（attr 区随值），直接落。
                 char derrb[192] = {};
                 return kvspaceSetValue(f.h, r.key.c_str(), data, len, derrb,
@@ -694,6 +700,9 @@ bool Vmkv::write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
             r.sc_ok = false;
             r.fast_i64 = false;
             r.fast_bool = false;
+            r.arr_esz = 0;
+            r.arr_ndim = 0;
+            r.arr_kind = 0;
             // data 自带类型（attr 区随值），直接落。
             char errb[192] = {};
             return kvspaceSetValue(f.h, r.key.c_str(), data, len, errb, sizeof errb) == 0;
@@ -738,6 +747,9 @@ bool Vmkv::write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
                     r.sc_ok = false;
                     r.fast_i64 = false;
                     r.fast_bool = false;
+                    r.arr_esz = 0;
+                    r.arr_ndim = 0;
+                    r.arr_kind = 0;
                     char errb[192] = {};
                     return kvspaceSetValue(f.h, r.key.c_str(), data, len, errb,
                                            sizeof errb) == 0;
@@ -752,6 +764,9 @@ bool Vmkv::write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
     r.fast_i64 = false;
     r.fast_bool = false;
     r.base_ptr_known = false;  // 槽值可能变 Ptr/非 Ptr，成员 base 缓存失效
+    r.arr_esz = 0;  // 槽值可能换型/换形状，compact 数组布局缓存失效
+    r.arr_ndim = 0;
+    r.arr_kind = 0;
     // 帧局部 int64 变量：内存化写（FReg.fv + 槽直写若已有 view），层内读走 fast
     // 缓存，免每 op kvspace 往返（fib/binary_search 热点）。参数/绝对路径/系统槽照旧。
     const std::string& rk = r.key;
