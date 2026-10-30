@@ -13,8 +13,6 @@ unsigned long kvCBodyFast, kvCBodyFallback;
 static inline bool xvalue_ready_non_rwir(const kvlangXvalue_t *val) {
     if (!val || !val->bytes || val->length == 0 || xh_is_none(val->bytes))
         return false;
-    if ((val->bytes[1] & 3u) != 0 || val->bytes[XH_PREFIX] != 'r')
-        return true;
     return !kvlangXvalueKindIs(val, KVSPACE_KIND_RWIR) &&
            !kvlangXvalueKindIs(val, KVSPACE_KIND_RWFUNC);
 }
@@ -23,10 +21,12 @@ static void slot_bind_scalar_kind(kvlangBodySlot *slot,
                                   const kvlangXvalue_t *v) {
     if (slot->kind || slot->dead)
         return;
-    uint32_t ltlen = xh_langtype_len(v->bytes);
-    int tid = kvlangLangtypeId((const char *)(v->bytes + XH_PREFIX), ltlen);
-    if ((kvlangLangtypeIsNum(tid) || tid == KVLANG_LT_BOOL) &&
-        v->length == 32u + (uint32_t)kvlangLangtypeElemSize(tid)) {
+    uint32_t ltlen = v->langtype_len;
+    int tid = kvlangLangtypeId(v->langtype, (size_t)ltlen);
+    if ((kvlangLangtypeIsNum(tid) || tid == KVLANG_LT_BOOL) && v->bytes &&
+        v->length == KVSPACE_XVALUE_HEAD_LEN +
+                         (uint32_t)kvlangLangtypeElemSize(tid) &&
+        xh_storetype(v->bytes) == KVSPACE_XVALUE_ST_SHORT) {
         slot->kind = kvlangLangtypeKind(tid);
         slot->width = (uint32_t)kvlangLangtypeElemSize(tid);
         slot->kind_len = (uint8_t)ltlen;
@@ -246,9 +246,9 @@ write_value_to_slot(kvlangFrame_t *f, const kvlangXvalue_t *v) {
     kvspaceKeyOff *wo = f->instruction->write_offs
                             ? f->instruction->write_offs[0]
                             : NULL;
-    if (wo && v->bytes && v->length >= XH_PREFIX)
-        kvlangBodyInvalidateKind(wo->key, xh_langtype(v->bytes),
-                                 xh_langtype_len(v->bytes));
+    if (wo && v->bytes && v->length >= KVSPACE_XVALUE_HEAD_LEN)
+        kvlangBodyInvalidateKind(wo->key, (const uint8_t *)v->langtype,
+                                 v->langtype_len);
     else if (wo)
         kvlangBodyInvalidate(wo->key);
     if (wo && v->bytes && v->length > 0 &&
@@ -265,9 +265,9 @@ write_value_to_slot(kvlangFrame_t *f, const kvlangXvalue_t *v) {
     char *key = kvlangBuiltinResolveWriteSlot(f->kvspace, fr,
                                               f->instruction->writes[0].name);
     free(owned);
-    if (v->bytes && v->length >= XH_PREFIX)
-        kvlangBodyInvalidateKind(key, xh_langtype(v->bytes),
-                                 xh_langtype_len(v->bytes));
+    if (v->bytes && v->length >= KVSPACE_XVALUE_HEAD_LEN)
+        kvlangBodyInvalidateKind(key, (const uint8_t *)v->langtype,
+                                 v->langtype_len);
     else
         kvlangBodyInvalidate(key);
     kvlangKvPair_t pair = {key, *v};
@@ -288,7 +288,9 @@ int kvlangBuiltinWriteResult(kvlangFrame_t *f, const kvlangXvalue_t *result) {
         kvlangXvalue_t cv;
         if (kvlangCoerceAssign(f, target, result, cbuf, sizeof cbuf, &cv) != 0)
             return -1;
-        if (cv.bytes && cv.length > 32 && cv.bytes[0] == 5 && cv.bytes[1] == 0) {
+        if (cv.bytes && cv.length >= KVSPACE_XVALUE_HEAD_LEN &&
+            xh_storetype(cv.bytes) == KVSPACE_XVALUE_ST_SHORT &&
+            xh_ptr(cv.bytes) == KVSPACE_XVALUE_PTR_INLINE) {
             kvspaceKeyOff *wo = f->instruction->write_offs
                                     ? f->instruction->write_offs[0]
                                     : NULL;
@@ -297,10 +299,13 @@ int kvlangBuiltinWriteResult(kvlangFrame_t *f, const kvlangXvalue_t *result) {
                 slot_bind_scalar_kind(slot, &cv);
                 if (slot->kind &&
                     ((target && target[0]) ||
-                     memcmp(cv.bytes + XH_PREFIX, slot->kind,
-                            (size_t)slot->kind_len + 1) == 0)) {
-                    if (kvlangBuiltinWriteBody(f, slot->kind, cv.bytes + 32,
-                                               cv.length - 32))
+                     (cv.langtype_len == slot->kind_len &&
+                      memcmp(cv.langtype, slot->kind,
+                             (size_t)slot->kind_len) == 0))) {
+                    if (kvlangBuiltinWriteBody(
+                            f, slot->kind,
+                            cv.bytes + KVSPACE_XVALUE_HEAD_LEN,
+                            cv.length - KVSPACE_XVALUE_HEAD_LEN))
                         return 0;
                 }
             }
@@ -318,29 +323,26 @@ __attribute__((visibility("hidden"))) int
 kvlangBuiltinWriteResultTyped(kvlangFrame_t *f, const kvlangXvalue_t *v,
                               const char *kind) {
 #ifdef KV_DEBUG_TYPES
-    /* 写入侧断言：结果 head kind 必须等于 manifest kind；非空目标槽若已有
-     * 值，其 kind 也必须一致（typed 槽不混型）。 */
-    if (v->bytes && v->length >= XH_PREFIX &&
-        (xh_langtype_len(v->bytes) != strlen(kind) ||
-         memcmp(xh_langtype(v->bytes), kind, strlen(kind)) != 0))
+    /* 写入侧断言：结果 attr key langtype 必须等于 manifest kind；非空目标槽若
+     * 已有值，其 langtype 也必须一致（typed 槽不混型）。 */
+    if (v->bytes && v->length >= KVSPACE_XVALUE_HEAD_LEN &&
+        (v->langtype_len != strlen(kind) ||
+         memcmp(v->langtype, kind, strlen(kind)) != 0))
         kvlangDie("typed write %s: result kind %.*s != manifest %s",
-                  f->instruction->opcode, (int)xh_langtype_len(v->bytes),
-                  (const char *)xh_langtype(v->bytes), kind);
+                  f->instruction->opcode, (int)v->langtype_len, v->langtype,
+                  kind);
     kvspaceKeyOff *wo = f->instruction->write_offs
                             ? f->instruction->write_offs[0]
                             : NULL;
     if (wo && wo->resolved) {
-        uint8_t *cur = NULL;
-        uint32_t cur_len = 0;
-        if (kvspaceGetByRef(f->kvspace->handle, &wo->off, wo->key, &cur,
-                            &cur_len) == 0 &&
-            cur && cur_len >= XH_PREFIX) {
-            if (xh_langtype_len(cur) != strlen(kind) ||
-                memcmp(xh_langtype(cur), kind, strlen(kind)) != 0)
+        kvspaceHead_t curh;
+        if (kvspaceGetHead(f->kvspace->handle, wo->key, &curh) == 0 &&
+            curh.langtype_len > 0) {
+            if (curh.langtype_len != (int32_t)strlen(kind) ||
+                memcmp(curh.langtype, kind, strlen(kind)) != 0)
                 kvlangDie("typed write %s: slot has kind %.*s != manifest %s",
-                          f->instruction->opcode,
-                          (int)xh_langtype_len(cur),
-                          (const char *)xh_langtype(cur), kind);
+                          f->instruction->opcode, (int)curh.langtype_len,
+                          curh.langtype, kind);
         }
     }
 #endif
@@ -357,7 +359,7 @@ int kvlangBuiltinEmitResult(kvlangFrame_t *f, kvlangXvalue_t *v) {
 __attribute__((visibility("hidden"))) int
 kvlangBuiltinWriteBody(kvlangFrame_t *f, const char *kind, const uint8_t *raw,
                        uint32_t len) {
-    /* 快路径：写槽 body 已绑定且 kind/宽度一致，只原地写 body，不编码 head、不 Set。
+    /* 快路径：写槽 body 已绑定且 kind/宽度一致，只原地写 body，不写 head、不 Set。
      * 失效后在此惰性重捕一次（槽未解析时不动，等它被写后再来）。 */
     kvspaceKeyOff *wo = f->instruction->write_offs
                             ? f->instruction->write_offs[0]
@@ -387,8 +389,9 @@ static int emit_inline_scalar(kvlangFrame_t *f, const char *kind,
     if (kvlangBuiltinWriteBody(f, kind, raw, len))
         return 0;
     uint8_t buf[64];
-    uint32_t n = kvlangScalarEncode(kind, raw, len, buf, sizeof buf);
+    uint32_t n = kvlangScalarToWire(kind, raw, len, buf, sizeof buf);
     kvlangXvalue_t v = {buf, n};
+    kvlangXvalueSetLangtype(&v, kind, (uint32_t)strlen(kind));
     if (f->instruction && f->instruction->typed_core)
         return kvlangBuiltinWriteResultTyped(f, &v, kind);
     return kvlangBuiltinWriteResult(f, &v); /* 栈缓冲，不 free */
@@ -431,21 +434,24 @@ int kvlangBuiltinExecuteCopy(kvlangFrame_t *f) {
     if (rb && rb->copy_plain) {
         const kvlangXvalue_t *rv = &inst->reads[0].value;
         kvlangBodySlot *slot = rb->body;
-        if (slot && rv->bytes && rv->length > 32 && rv->length <= 40 &&
-            rv->bytes[0] == 5 && rv->bytes[1] == 0) {
+        if (slot && rv->bytes && rv->length >= KVSPACE_XVALUE_HEAD_LEN &&
+            xh_storetype(rv->bytes) == KVSPACE_XVALUE_ST_SHORT &&
+            xh_ptr(rv->bytes) == KVSPACE_XVALUE_PTR_INLINE) {
             slot_bind_scalar_kind(slot, rv);
             const char *target = inst->writes[0].type;
             if (slot->kind && (!target || !target[0]) &&
-                rv->length == 32 + slot->width &&
-                memcmp(rv->bytes + XH_PREFIX, slot->kind,
-                       (size_t)slot->kind_len + 1) == 0) {
+                rv->length == KVSPACE_XVALUE_HEAD_LEN + slot->width &&
+                rv->langtype_len == slot->kind_len &&
+                memcmp(rv->langtype, slot->kind,
+                       (size_t)slot->kind_len) == 0) {
                 if (!slot->ok && !slot->dead && slot->off->resolved)
                     kvlangBodyCapture(kv, slot, f->frame_root, NULL);
                 if (slot->ok) {
 #ifdef KV_COUNT
                     kvCBodyFast++;
 #endif
-                    memcpy(slot->body, rv->bytes + 32, slot->width);
+                    memcpy(slot->body,
+                           rv->bytes + KVSPACE_XVALUE_HEAD_LEN, slot->width);
                     kvlangBuiltinNextPc(f);
                     return 0;
                 }
@@ -504,9 +510,9 @@ int kvlangBuiltinExecuteCopy(kvlangFrame_t *f) {
         kvspaceKeyOff *wo =
             inst->write_offs ? inst->write_offs[i] : NULL;
         /* 整值写可能移动 box：先按同一规则失效 body/operand view。 */
-        if (wo && cv.bytes && cv.length >= XH_PREFIX)
-            kvlangBodyInvalidateKind(wo->key, xh_langtype(cv.bytes),
-                                     xh_langtype_len(cv.bytes));
+        if (wo && cv.bytes && cv.length >= KVSPACE_XVALUE_HEAD_LEN)
+            kvlangBodyInvalidateKind(wo->key, (const uint8_t *)cv.langtype,
+                                     cv.langtype_len);
         else if (wo)
             kvlangBodyInvalidate(wo->key);
         if (wo && cv.bytes && cv.length > 0 &&

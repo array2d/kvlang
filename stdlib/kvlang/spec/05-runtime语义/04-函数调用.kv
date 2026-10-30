@@ -4,7 +4,7 @@ lib kvlang/spec/runtime语义/函数调用 {
 
 调用 `/lib/<pkg>·<name>` 下的 rwfunc。源码可以写绝对路径、`pkg·name`，或同包优先的裸名。layout 根据已知目标将 opcode 槽写成 `rwfunc`；runtime 从 KVSpace 读取函数的 `[0,0]` 锚点及参数定义。
 
-调用时在 `/vthread/<vid>/[depth]` 创建子帧，使用 class 3 扩展定位叠加函数目录的只读指令树。帧内 `‥lib`、`‥callpc`、`‥returnpc` 都写在 KVSpace；PC 也只存于 KVSpace。每条指令边界重新读取 PC 和状态。
+调用时在 `/vthread/<vid>/[depth]` 创建子帧，使用 storetype 3 扩展定位叠加函数目录的只读指令树。帧内 `‥lib`、`‥callpc`、`‥returnpc` 都写在 KVSpace；PC 也只存于 KVSpace。每条指令边界重新读取 PC 和状态。
 
 ## 参数绑定
 

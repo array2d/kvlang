@@ -13,8 +13,6 @@ typedef struct {
     uint16_t headlen;
     uint8_t ref;
     uint8_t storetype;
-    uint8_t ro;
-    uint32_t vid;
     int32_t body_len;
     int32_t ndim;
     int32_t dims[8];
@@ -36,8 +34,7 @@ extern void kvspaceClose(void *h);
 extern int kvspaceGet(void *h, const char *key, int resolve, uint8_t **out,
                       uint32_t *out_len);
 extern int kvspaceSetValue(void *h, const char *key, const uint8_t *value,
-                           uint32_t value_len, uint8_t ro, uint32_t vid,
-                           char *err, uint32_t err_cap);
+                           uint32_t value_len, char *err, uint32_t err_cap);
 
 /* key 的 64 位寻址结果（派生量，非真相）。见 kvspace.h 契约：
  * block_id=叶子、gen=0；GetByRef 遇到 ART 节点搬移会沿 MOVED 链更新 ref。 */
@@ -92,15 +89,14 @@ extern int kvspaceSetPartByRef(void *h, kvspaceRef_t *ref,
 extern int kvspaceSetValueByRef(void *h, kvspaceRef_t *ref,
                                 const char *key_fallback,
                                 const uint8_t *value, uint32_t value_len,
-                                uint8_t ro, uint32_t vid, char *err,
-                                uint32_t err_cap);
+                                char *err, uint32_t err_cap);
 
 /* 定位读/写（分片）；只读 head 前缀。见 kvspace.h 契约。 */
-/* 新位置写：按 (ref,storetype,langtype,body_len,body_cap) 分配并写 head，
- * 返回 body 指针供调用方填（shm 写即落）。 */
+/* 新位置写：按 (ref,storetype,body_len,body_cap) 分配并写 head，
+ * 返回 body 指针供调用方填（shm 写即落）。kvspace 层不写 attr key——
+ * 需要类型时调用方自写 `x‥langtype`（attr 先落、x 后落）。 */
 extern int kvspaceWriteNewPlace(void *h, const char *key, uint8_t ref,
-                                uint8_t storetype, uint8_t ro, uint32_t vid,
-                                const char *langtype, uint32_t body_len,
+                                uint8_t storetype, uint32_t body_len,
                                 uint64_t body_cap, uint8_t **body, char *err,
                                 uint32_t err_cap);
 
@@ -135,18 +131,51 @@ extern int kvspaceRmindexExt(void *h, const char *path, char *err,
 extern int kvspaceWatch(void *h, const char *key, const uint8_t *target,
                         uint32_t target_len, uint64_t tick_ns, uint8_t **out,
                         uint32_t *out_len);
-extern int kvspaceXvalueEncode(const char *kind, const uint8_t *raw,
-                            uint32_t raw_len, const int32_t *dims, int32_t ndim,
-                            uint8_t **out, uint32_t *out_len);
-extern int kvspaceDecodeHead(const uint8_t *data, uint32_t data_len,
-                             kvspaceHead_t *out);
+/* v2 固定 8 字节 head：[len:u48 LE@0-5][storetype:u8@6][ptr:u8@7]，body 偏移恒 8。
+ * 构造器由前端 libkvspace 导出（byte-identical）。 */
+#define KVSPACE_XVALUE_HEAD_LEN 8u
+#define KVSPACE_XVALUE_ST_SHORT 0u
+#define KVSPACE_XVALUE_ST_SLACK 1u
+#define KVSPACE_XVALUE_ST_LARGE 2u
+#define KVSPACE_XVALUE_ST_EXT   3u
+#define KVSPACE_XVALUE_PTR_INLINE 0u
+#define KVSPACE_XVALUE_PTR_PTR    1u
+#define KVSPACE_XVALUE_PTR_EXT    2u
+#define UINT48_MAX UINT64_C(0xFFFFFFFFFFFF)
+typedef struct {
+    uint8_t len[6]; /* u48 小端（offset 0-5） */
+    uint8_t storetype;
+    uint8_t ptr;
+} kvspaceXvalueHead;
+static inline uint64_t kvspaceXvalueHeadLen(const kvspaceXvalueHead *h) {
+    uint64_t v = 0;
+    for (int i = 5; i >= 0; i--)
+        v = (v << 8) | h->len[i];
+    return v;
+}
+static inline void kvspaceXvalueHeadSetLen(kvspaceXvalueHead *h, uint64_t v) {
+    for (int i = 0; i < 6; i++) {
+        h->len[i] = (uint8_t)(v & 0xff);
+        v >>= 8;
+    }
+}
+extern int kvspaceXvalueHeadNewNone(uint8_t **out, uint64_t *out_len);
+extern int kvspaceXvalueHeadNewScalar(uint8_t storetype, const uint8_t *raw,
+                                      uint32_t raw_len, uint8_t **out,
+                                      uint64_t *out_len);
+extern int kvspaceXvalueHeadNewSlack(const uint8_t *data, uint64_t data_len,
+                                     uint64_t cap, uint8_t **out,
+                                     uint64_t *out_len);
+extern int kvspaceXvalueHeadNewTensor(const uint64_t *dims, uint32_t ndim,
+                                      const uint8_t *raw, uint64_t raw_len,
+                                      uint8_t **out, uint64_t *out_len);
+extern int kvspaceXvalueHeadNewCode(const uint8_t *body, uint64_t body_len,
+                                    uint64_t cap, uint8_t **out,
+                                    uint64_t *out_len);
 extern int kvspaceNewPtr(const char *target_langtype, const char *target,
                          uint8_t **out, uint32_t *out_len);
 extern int kvspaceNewChar(const uint8_t *bytes, uint32_t len, uint8_t **out,
                           uint32_t *out_len);
-/* 正典 slack 编码（elem 1 = UTF-8），tests/test_scalar_encode.c 作对照。 */
-extern int kvspaceXhNewSlack(int elem, const uint8_t *data, uint64_t data_len,
-                             uint64_t cap, uint8_t **out, uint64_t *out_len);
 extern int kvspaceNewBool(uint8_t v, uint8_t **out, uint32_t *out_len);
 extern int kvspaceNewInt64(int64_t v, uint8_t **out, uint32_t *out_len);
 
@@ -173,9 +202,13 @@ void kvlangLangtypeParse(const uint8_t *langtype, int32_t langtype_len,
 
 /* ── 基础类型 ──────────────────────────────────────────────────────── */
 
+/* v2 固定头（#566）langtype 不在 wire，存 x‥langtype attr key；读侧由本缓存承载。
+ * 读值（kvlangKvspaceGetOne/GetMember）经 GetHead 填；构造（New*）用 kind 填。 */
 typedef struct {
     uint8_t *bytes; /* 视图：mmap / durable 常驻快照 / 行内字面量 / 显式 copy */
     uint32_t length;
+    char langtype[256]; /* 完整 langtype（含 [dims]），NUL 终止 */
+    uint32_t langtype_len;
 } kvlangXvalue_t;
 
 typedef struct {
@@ -205,14 +238,13 @@ char *kvlangStringFormat(const char *fmt, ...)
     __attribute__((format(printf, 1, 2)));
 char *kvlangStringCopyN(const char *s, size_t n);
 
-/* ── xvalue head 零解码访问 ──────────────────────────────────────────
- * wire: [pow:u8][flags:u8][a:u64le][b:u64le][langtype][padding][body]
- * headlen = 1 << pow；body 起于 headlen；langtype 起于 18。
+/* ── xvalue head 零拷贝直接读（v2 固定 8 字节头，#566） ────────────────
+ * wire: [len:u48 LE@0-5][storetype:u8@6][ptr:u8@7][body@8]
+ * body 偏移恒 = 8；langtype 不在 head——存 x‥langtype attr key
+ * （kvspaceGetHead 读），读侧由 kvlangXvalue_t.langtype 缓存承载。
  * 不建 328B head 结构体、不拷贝 langtype、不校验——全部原位取。 */
 
-#define XH_PREFIX 18u
-
-static inline uint32_t xh_rd32(const uint8_t *p) {
+static inline uint64_t xh_rd32(const uint8_t *p) {
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) |
            ((uint32_t)p[3] << 24);
 }
@@ -220,49 +252,57 @@ static inline uint64_t xh_rd64(const uint8_t *p) {
     return (uint64_t)xh_rd32(p) | ((uint64_t)xh_rd32(p + 4) << 32);
 }
 
-static inline uint32_t xh_headlen(const uint8_t *d) { return 1u << d[0]; }
+static inline uint64_t xh_len(const uint8_t *d) {
+    return kvspaceXvalueHeadLen((const kvspaceXvalueHead *)d);
+}
 static inline const uint8_t *xh_body(const uint8_t *d) {
-    return d + (1u << d[0]);
+    return d + KVSPACE_XVALUE_HEAD_LEN;
 }
-/* langtype 区起始（无 NUL 保证；长度见 xh_langtype_len）。 */
-static inline const uint8_t *xh_langtype(const uint8_t *d) {
-    return d + XH_PREFIX;
+static inline uint8_t xh_storetype(const uint8_t *d) { return d[6]; }
+static inline uint8_t xh_ptr(const uint8_t *d) { return d[7]; }
+static inline bool xh_is_ptr(const uint8_t *d) {
+    return d[7] == KVSPACE_XVALUE_PTR_PTR;
 }
-/* langtype 字节数（不含 NUL）。等于 headlen-18 表示填满、区内无 NUL。 */
-static inline uint32_t xh_langtype_len(const uint8_t *d) {
-    uint32_t region = xh_headlen(d) - XH_PREFIX;
-    uint32_t n = 0;
-    while (n < region && d[XH_PREFIX + n])
-        n++;
-    return n;
+static inline bool xh_is_ext(const uint8_t *d) {
+    return d[7] == KVSPACE_XVALUE_PTR_EXT;
 }
-static inline uint8_t xh_class(const uint8_t *d) { return d[1] & 3u; }
-static inline bool xh_is_ptr(const uint8_t *d) { return (d[1] & 4u) != 0; }
+/* None = len 0 且 非 ptr/ext（v2 下 wire 自身可判；langtype 空判定由 kvlangXvalueNone）。 */
 static inline bool xh_is_none(const uint8_t *d) {
-    return d[1] == 0u && d[XH_PREFIX] == 0u;
+    return d[7] != KVSPACE_XVALUE_PTR_PTR &&
+           d[7] != KVSPACE_XVALUE_PTR_EXT && xh_len(d) == 0;
 }
-static inline uint64_t xh_a(const uint8_t *d) { return xh_rd64(d + 2); }
-static inline uint64_t xh_b(const uint8_t *d) { return xh_rd64(d + 10); }
+/* body 字节数 = u48 len（v2 不再按 class 特判）。 */
+static inline int32_t xh_content_len(const uint8_t *d) {
+    uint64_t n = xh_len(d);
+    return n > INT32_MAX ? -1 : (int32_t)n;
+}
+/* 定长标量 body 宽度（body 实际字节数 = len；供非 langtype 的纯长度用途）。 */
+static inline uint32_t xh_body_len(const uint8_t *d) {
+    uint64_t n = xh_len(d);
+    return n > UINT32_MAX ? 0 : (uint32_t)n;
+}
 
 /* ── XValue 操作 ───────────────────────────────────────────────────── */
 
 static inline bool kvlangXvalueNone(const kvlangXvalue_t *v) {
-    if (!v->bytes || v->length == 0)
+    if (!v->bytes || v->length < KVSPACE_XVALUE_HEAD_LEN)
         return true;
-    /* flags 无 class/ptr 位 且 langtype 首字节为 0 ⇒ langtype 长度 0 ⇒ None。 */
+    /* v2：len 0 且 非 ptr/ext = None；带 body 的值恒非 None。 */
     return xh_is_none(v->bytes);
 }
 static inline void kvlangXvalueZero(kvlangXvalue_t *v) {
     v->bytes = NULL;
     v->length = 0;
+    v->langtype[0] = 0;
+    v->langtype_len = 0;
 }
 
-/* langtype 原位指针 + 字节数；None → 空串 / 0。指针无 NUL 保证，勿当 C 串用。 */
-static inline const uint8_t *xh_langtype_of(const kvlangXvalue_t *v) {
-    return kvlangXvalueNone(v) ? (const uint8_t *)"" : xh_langtype(v->bytes);
+/* langtype 缓存指针 + 字节数；None → 空串 / 0。 */
+static inline const char *xh_langtype_of(const kvlangXvalue_t *v) {
+    return kvlangXvalueNone(v) ? "" : v->langtype;
 }
 static inline uint32_t xh_langtype_len_of(const kvlangXvalue_t *v) {
-    return kvlangXvalueNone(v) ? 0u : xh_langtype_len(v->bytes);
+    return kvlangXvalueNone(v) ? 0u : v->langtype_len;
 }
 /* 有界拷进调用方缓冲并 NUL 终止，返回写入长度（不含 NUL）。 */
 static inline uint32_t xh_langtype_copy_of(const kvlangXvalue_t *v, char *buf,
@@ -280,15 +320,15 @@ static inline uint32_t xh_langtype_copy_of(const kvlangXvalue_t *v, char *buf,
 char *kvlangXvalueLangtypeDup(const kvlangXvalue_t *v);
 void kvlangXvalueFree(kvlangXvalue_t *v);
 void kvlangXvalueCopy(kvlangXvalue_t *v);
-/* 标量 inline 编码到调用方缓冲：pow=5(headlen 32)、flags=0、a=b=0、
- * langtype@18、body@32。与正典 codec 的字节一致性由 ctest scalar_encode 守护。 */
-/* 变长 char/utf8 的 SLACK 编码（pow=6、flags=1、a=len、b=cap、body@64）。
- * 固定 cap 让每步写同尺寸值，后端得以原地覆写；返回值 = 编码总长。 */
+/* 标量 inline 写 wire 到调用方缓冲：pow=5(headlen 32)、flags=0、a=b=0、
+ * langtype@18、body@32。与正典 wire codec 的字节一致性由 ctest scalar_wire 守护。 */
+/* 变长 char/utf8 的 SLACK 写 wire（pow=6、flags=1、a=len、b=cap、body@64）。
+ * 固定 cap 让每步写同尺寸值，后端得以原地覆写；返回值 = 写出总长。 */
 __attribute__((visibility("hidden"))) uint32_t
-kvlangSlackEncodeChar(const uint8_t *raw, uint32_t len, uint32_t cap,
+kvlangSlackCharToWire(const uint8_t *raw, uint32_t len, uint32_t cap,
                       uint8_t *buf, uint32_t bufsize);
 
-uint32_t kvlangScalarEncode(const char *kind, const uint8_t *raw, uint32_t len,
+uint32_t kvlangScalarToWire(const char *kind, const uint8_t *raw, uint32_t len,
                             uint8_t *buf, uint32_t cap);
 void kvlangXvalueSetBytes(kvlangXvalue_t *v, uint8_t *data,
                           uint32_t len); /* 视图赋值 */
@@ -397,7 +437,7 @@ static inline int kvlangLangtypeElemSize(int id) {
 bool kvlangLangtypeValid(const char *expr);
 bool kvlangLangtypeMatch(const char *expr, const char *kind, int32_t ndim,
                          const int32_t *dims);
-/* 标量 0copy 视图（取代 kvlangXvalueAsInt64 等按值转换）：decode head 一次，
+/* 标量 0copy 视图（取代 kvlangXvalueAsInt64 等按值转换）：解 head 一次，
  * 持 langtype id + 指向 body 首字节的借用指针，热路径按 id 直读 body。 */
 typedef struct {
     int kind_id;
@@ -406,7 +446,7 @@ typedef struct {
 } kvlangScalar_t;
 kvlangScalar_t kvlangXvalueScalar(const kvlangXvalue_t *v);
 /* 标量转换（唯一转换路径，[[赋值转换]]）：target 为数值 kind id。
- * 成功返回 0，out 指向 buf 上的标量编码；失败 -1（None/非数值）。 */
+ * 成功返回 0，out 指向 buf 上的标量 wire；失败 -1（None/非数值）。 */
 __attribute__((visibility("hidden"))) int
 kvlangScalarCast(int target_id, kvlangScalar_t s, uint8_t *buf, size_t cap,
                  kvlangXvalue_t *out);
@@ -451,22 +491,6 @@ static inline uint64_t kvlangScalarU64(kvlangScalar_t s) {
 uint32_t kvlangXvalueChar32At(const kvlangXvalue_t *v, int32_t idx);
 int32_t kvlangXvalueElemSize(const char *kind);
 
-/* body 内容长度：按 storage class 原位推导（不读 head.body_len、不校验）。
- *   class0 短定长 → 标量宽度（def rwir 特例 5）；class1 slack / class3 ext → a；class2 tensor → a*b。 */
-static inline int32_t xh_content_len(const uint8_t *d) {
-    uint8_t cls = d[1] & 3u;
-    if (cls == 0u) {
-        uint32_t n = xh_langtype_len(d);
-        if (n == sizeof(KVSPACE_KIND_DEF_RWIR) - 1 &&
-            memcmp(d + XH_PREFIX, KVSPACE_KIND_DEF_RWIR, n) == 0)
-            return 5;
-        return kvlangLangtypeElemSize(
-            kvlangLangtypeId((const char *)(d + XH_PREFIX), n));
-    }
-    if (cls == 2u)
-        return (int32_t)(xh_a(d) * xh_b(d));
-    return (int32_t)xh_a(d);
-}
 static inline const uint8_t *xh_body_of(const kvlangXvalue_t *v) {
     return kvlangXvalueNone(v) ? NULL : xh_body(v->bytes);
 }
@@ -474,15 +498,40 @@ static inline int32_t xh_content_len_of(const kvlangXvalue_t *v) {
     return kvlangXvalueNone(v) ? 0 : xh_content_len(v->bytes);
 }
 
+/* 从 kvspaceHead_t（GetHead 的 attr key langtype）填 v 的 langtype 缓存。 */
+static inline void kvlangXvalueSetHeadLangtype(kvlangXvalue_t *v,
+                                               const kvspaceHead_t *h) {
+    int32_t n = h->langtype_len;
+    if (n < 0)
+        n = 0;
+    if (n > 255)
+        n = 255;
+    if (n > 0)
+        memcpy(v->langtype, h->langtype, (size_t)n);
+    v->langtype[n] = 0;
+    v->langtype_len = (uint32_t)n;
+}
+
+/* 从 kind 串（写侧构造/读侧静态声明）填 langtype 缓存。 */
+static inline void kvlangXvalueSetLangtype(kvlangXvalue_t *v, const char *kind,
+                                           uint32_t len) {
+    if (len > 255)
+        len = 255;
+    if (len > 0)
+        memcpy(v->langtype, kind, len);
+    v->langtype[len] = 0;
+    v->langtype_len = len;
+}
+
 /* P1b4-a4：typed_core 行的标量视图——kind 由行静态签名定型，跳过 langtype
  * 解析。bytes 为空（None/空值）返回 false；调用方不得读成 0。 */
 static inline bool kvlangXvalueScalarTyped(const kvlangXvalue_t *v, int kid,
                                            kvlangScalar_t *out) {
-    if (!v->bytes || v->length < XH_PREFIX)
+    if (!v->bytes || v->length < KVSPACE_XVALUE_HEAD_LEN)
         return false;
     out->kind_id = kid;
     out->bytes = xh_body(v->bytes);
-    /* 宽度由静态 kind 决定，不经 xh_content_len（class0 会重解析 langtype）。 */
+    /* 宽度由静态 kind 决定，不经 xh_content_len。 */
     out->length = kvlangLangtypeElemSize(kid);
     return true;
 }

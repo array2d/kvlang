@@ -1,18 +1,18 @@
 // 欢迎加入kvspace世界
 lib kvlang/spec/类型系统/storetype物理布局 {
-	r####"# storage class 与物理布局
+	r####"# storetype 与物理布局
 
-wire 的 flags 低两位表示 class，具体 head 见 [[XValueHead线格式]]。语言语义由 langtype 决定，class 只决定 body 的长度规则。
+wire 的 storetype 表示存储形态，具体 head 见 [[XValueHead线格式]]。语言语义由 langtype 决定，storetype 只决定 body 的长度规则。
 
-| class | 用途 | 长度规则 |
+| storetype | 用途 | 长度规则 |
 |-------|------|----------|
 | 0 短定长 | None、标量、map/struct 头、lib/rwfunc 目录、def rwir | 类型决定 body 长度，目录及容器头为空 |
-| 1 有冗余的长度 | 字符/字节数组、rwir/rwfunc 调用槽、def langtype、ptr | a 是有效字节数，b 是容量 |
-| 2 大定长 | 定宽元素张量 | a 是元素数，b 是元素宽度 |
-| 3 扩展定位 | @ext | a 是定位串字节数，b 是容量 |
+| 1 变长 | 字符/字节数组、rwir/rwfunc 调用槽、def langtype、ptr | len 是有效字节数 |
+| 2 大定长 | 定宽元素张量 | body 是元素连续字节，长度由 langtype 形状推 |
+| 3 扩展定位 | @ext | len 是定位串字节数 |
 
-rwir/rwfunc 调用槽的 body 为 5 字节计数头加目标名；layout 按目标在生成时选类型。rwfunc 目录 key 本身是 class 0 空值，其 `[0,0]` 锚点是 class 1、5 字节计数头。def rwir 是 class 0 的 5 字节路由头。参数签名为独立的 def langtype key。
+rwir/rwfunc 调用槽的 body 为 5 字节计数头加目标名；layout 按目标在生成时选类型。rwfunc 目录 key 本身是 storetype 0 空值，其 `[0,0]` 锚点是 storetype 1、5 字节计数头。def rwir 是 storetype 0 的 5 字节路由头。参数签名为独立的 def langtype key。
 
-map、struct 成员在 `base·member`；函数和 lib 成员在目录下的 `/` 子路径。目录和 map 成员都由物理 key 前缀枚举，无额外索引矩阵。外部叠加目录由 class 3 定位串描述，和成员枚举分开处理。
+map、struct 成员在 `base·member`；函数和 lib 成员在目录下的 `/` 子路径。目录和 map 成员都由物理 key 前缀枚举，无额外索引矩阵。外部叠加目录由 storetype 3 定位串描述，和成员枚举分开处理。
 "#### -> /lib/kvlang/spec/类型系统/storetype物理布局
 }

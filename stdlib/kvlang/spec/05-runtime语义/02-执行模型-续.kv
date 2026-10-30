@@ -17,18 +17,19 @@ runtime **不得**另存独立的调用栈结构：嵌套帧路径本身即调�
 
 ### `‥pc` / `‥status` 槽编码
 
-两者是变长 `char/utf8`，每步都要重写，**必须**用 SLACK 头写：`pow=6`（headlen 64）、
-`flags=1`、`a=当前字节长`、`b=槽容量`、langtype `[<码点数>]char/utf8` @18、body @64。
-值语义只取前 `a` 字节；`b-a` 的零填充不属于值。
+两者是变长 `char/utf8`，每步都要重写，**必须**用 SLACK 头写：固定头
+`len=当前字节长`、`storetype=1`、`ptr=0`，body 偏移恒为 8，langtype
+`[<码点数>]char/utf8` 存 `x‥langtype` attr key。值语义只取前 `len` 字节；物理容量超出
+部分不属于值。
 
 每个槽使用**固定档容量**（pc 与 status 各一档，实现自选，须覆盖常态长度）：同槽每次写入
 尺寸相同，后端可原地覆写（shm 直接 memcpy，不重新分配、不改索引）。长度超过该档时改用
-全尺寸槽（`b` 为最大键长），仍满足 `a ≤ b`、`total = 64 + b`，**不得**截断或退回定长编码。
+全尺寸槽，仍满足物理容量 ≥ `len`、`total = 8 + 容量`，**不得**截断或退回定长编码。
 
 执行循环入口**必须**把两个槽的定位（`ResolveRef` 结果）绑进帧，每步写回新值。写回**可以**是整值
-写，也可以是**等价值写**：只更新 head 的 `a` 字段、langtype 与 body 前缀（`[2, 64+a)`），`pow`/
-`flags`/容量档 `b` 不变；part-write 与整值写的**值语义完全相同**（值只取前 `a` 字节，`b-a` 的旧
-字节不属于值）。后端不支持 part-write 或写失败时**必须**回退整值写，并成功后就地重绑定。外部
+写，也可以是**等价值写**：只更新 head 的 `len` 字段与 body 前缀（`[8, 8+len)`），`storetype`/
+`ptr`/容量档不变；part-write 与整值写的**值语义完全相同**（值只取前 `len` 字节，容量超出部分
+的旧字节不属于值）。后端不支持 part-write 或写失败时**必须**回退整值写，并成功后就地重绑定。外部
 `set`/`watch` 看到的值不变：仍是那条 UTF-8 串。
 
 ## 操作数只读 view
@@ -69,7 +70,7 @@ vthread 是 kvlang 的执行线程，句柄为整数 `vid`，根在 `/vthread/<v
 
 runtime 核心不含 I/O；与外部世界（进程、文件系统、网络）的交互一律经 `networld/*` rwir（见 [[runtime
 开发规范]]）。`/networld/<host>` 是本机在该命名空间下的身份（`host` 取裸 hostname）。外部产物（如子
-进程 stdout/stderr）经**扩展世界句柄（class 3，@ext）**登记：写槽 storage class=3、langtype 为目标 langtype 串
+进程 stdout/stderr）经**扩展世界句柄（storetype 3、ptr=2，@ext）**登记：写槽 storetype=3、langtype 为目标 langtype 串
 （不带 `@` 前缀）、body 为逻辑定位串（如 `/networld/<host>/proc/<pid>/stdout`），读取时由**支持 `@` 的
 rwir**（如 byteseek 的 networld/proc、networld/fs 一族）按该定位串兑现真实字节。锚例：
 `tutorial/14-networld/`。

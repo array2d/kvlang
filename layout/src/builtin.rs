@@ -152,8 +152,8 @@ pub fn num_op(opcode: &str) -> bool {
 
 // ── 字面量解析 ───────────────────────────────────────────────────────
 
-/// Encode a numeric literal.
-pub fn try_parse_number(s: &str) -> Option<Vec<u8>> {
+/// 数值字面量 wire + langtype（attr key 精确匹配 wire 的 kind）。
+pub fn try_parse_number(s: &str) -> Option<(Vec<u8>, &'static str)> {
     if s.is_empty() {
         return None;
     }
@@ -164,15 +164,15 @@ pub fn try_parse_number(s: &str) -> Option<Vec<u8>> {
         return None;
     }
     if let Ok(i) = s.parse::<i64>() {
-        return Some(ffi::new_int64(i));
+        return Some((ffi::new_int64(i), "int64"));
     }
     if c0 != b'-' && !s.contains('.') && !s.contains('e') && !s.contains('E') {
         if let Ok(u) = s.parse::<u64>() {
-            return Some(ffi::xvalue_encode("uint64", &u.to_le_bytes(), 1));
+            return Some((ffi::xvalue_to_wire("uint64", &u.to_le_bytes(), 1), "uint64"));
         }
     }
     if let Ok(f) = s.parse::<f64>() {
-        return Some(ffi::new_float64(f));
+        return Some((ffi::new_float64(f), "float64"));
     }
     None
 }

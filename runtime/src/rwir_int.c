@@ -13,7 +13,7 @@ unsigned long kvCNarrow, kvCCompare;
 
 /* ── 类型 helper ─────────────────────────────────────────────── */
 
-/* ── 类型 helper：全经 langtype id + 标量 0copy 视图，热路径零 strcmp、每值只 decode 一次 ── */
+/* ── 类型 helper：全经 langtype id + 标量 0copy 视图，热路径零 strcmp、每值只解 head 一次 ── */
 
 static const kvlangScalar_t SCALAR_NONE = { KVLANG_LT_NONE, NULL, 0 };
 
@@ -52,7 +52,7 @@ static void narrow_int(int a, int b, int64_t v, uint8_t *buf, size_t cap,
     case KVLANG_LT_UINT64: { uint64_t x = (uint64_t)v; memcpy(raw, &x, 8); len = 8; break; }
     default: { uint64_t x = (uint64_t)v; memcpy(raw, &x, 8); len = 8; break; }
     }
-    out->length = kvlangScalarEncode(kvlangLangtypeKind(k), raw, len, buf, cap);
+    out->length = kvlangScalarToWire(kvlangLangtypeKind(k), raw, len, buf, cap);
     out->bytes = buf;
 }
 
@@ -72,7 +72,7 @@ static void narrow_float(int a, int b, double v, uint8_t *buf, size_t cap,
         len = 8;
         kind = KVSPACE_KIND_FLOAT64;
     }
-    out->length = kvlangScalarEncode(kind, raw, len, buf, cap);
+    out->length = kvlangScalarToWire(kind, raw, len, buf, cap);
     out->bytes = buf;
 }
 
@@ -106,7 +106,7 @@ int kvlangBuiltinAdd(kvlangFrame_t *f) {
             narrow_int(a.kind_id, b.kind_id, kvlangScalarI64(a) + kvlangScalarI64(b), sbuf, sizeof sbuf, &r);
         else
             narrow_float(a.kind_id, b.kind_id, kvlangScalarF64(a) + kvlangScalarF64(b), sbuf, sizeof sbuf, &r);
-        rc = kvlangBuiltinWriteResult(f, &r); /* 栈上编码，不 free */
+        rc = kvlangBuiltinWriteResult(f, &r); /* 栈上 wire，不 free */
     } else rc = kvlangBuiltinSetError(f, "TypeError: expected numeric, got %s", n ? kvlangXvalueKind(&in[0]) : "none");
     kvlangBuiltinFreeInputs(in, n);
     return rc;

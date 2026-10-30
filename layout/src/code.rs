@@ -349,8 +349,9 @@ fn collect_funcs(
         } else if !kv.list(&mem_sub, false, true).is_empty() {
             collect_funcs(kv, &mem_sub, &sub_pkg, funcs, decls);
         } else {
-            let v = kv.get_one(&format!("{prefix}{base}"));
-            decls.push(format!("{prefix}{base} {}", sanitize(&kvkind::display(&v))));
+            let key = format!("{prefix}{base}");
+            let v = kv.get_one(&key);
+            decls.push(format!("{key} {}", sanitize(&kvkind::display(&v, &kv.langtype_of(&key)))));
         }
     }
 }
@@ -386,7 +387,7 @@ fn collect_slots(kv: &mut Kv, prefix: &str, out: &mut Vec<String>) {
             collect_slots(kv, &full, out);
         } else {
             let v = kv.get_one(&full);
-            out.push(format!("{c} {}", sanitize(&kvkind::display(&v))));
+            out.push(format!("{c} {}", sanitize(&kvkind::display(&v, &kv.langtype_of(&full)))));
         }
     }
 }
@@ -513,7 +514,8 @@ fn read_labels(kv: &mut Kv, dir: &str) -> Vec<(i32, String)> {
         .into_iter()
         .filter(|c| !c.ends_with('/'))
         .filter_map(|c| {
-            let irseq: i32 = kvkind::plain(&kv.get_one(&format!("{ldir}{c}")))
+            let key = format!("{ldir}{c}");
+            let irseq: i32 = kvkind::plain(&kv.get_one(&key), &kv.langtype_of(&key))
                 .parse()
                 .ok()?;
             Some((irseq, c))
@@ -551,11 +553,12 @@ fn read_insts(kv: &mut Kv, dir: &str) -> Vec<RawInst> {
         let mut reads = Vec::new();
         let mut j = 1;
         loop {
-            let d = kv.get_one(&format!("{dir}[{n},-{j}]"));
+            let key = format!("{dir}[{n},-{j}]");
+            let d = kv.get_one(&key);
             if d.is_empty() {
                 break;
             }
-            reads.push(decode_operand(&d));
+            reads.push(operand_from_wire(&d, &kv.langtype_of(&key)));
             j += 1;
         }
         let mut writes = Vec::new();
@@ -583,14 +586,14 @@ fn read_insts(kv: &mut Kv, dir: &str) -> Vec<RawInst> {
 }
 
 /// 槽值 → Operand：rwir 族为引用/opcode 名，char 为字符串字面量，其余为明文字面量。
-fn decode_operand(data: &[u8]) -> Operand {
-    let k = kvkind::kind(data);
+fn operand_from_wire(data: &[u8], lt: &str) -> Operand {
+    let k = kvkind::kind(data, lt);
     if matches!(k.as_str(), "rwir" | "rwfunc" | "def rwir") {
         Operand::Ref(kvkind::rwir_sig(data))
     } else if kvkind::is_char_kind(&k) {
-        Operand::Str(kvkind::plain(data))
+        Operand::Str(kvkind::plain(data, lt))
     } else {
-        Operand::Lit(kvkind::plain(data))
+        Operand::Lit(kvkind::plain(data, lt))
     }
 }
 
@@ -721,7 +724,9 @@ pub fn isa_target(
         }
     }
     let isa_path = crate::keytree::isa_op(op);
-    if crate::kvkind::kind(&kv.get_one(&isa_path)) == crate::kvkind::KIND_DEF_RWIR {
+    if crate::kvkind::kind(&kv.get_one(&isa_path), &kv.langtype_of(&isa_path))
+        == crate::kvkind::KIND_DEF_RWIR
+    {
         return Ok(IsaTarget::Bridge);
     }
     let func_path = if op.starts_with('/') {
@@ -826,8 +831,10 @@ pub fn write_func(
     } else {
         format!("{pkg}{}{}", keytree::MEMBER_SEP, fn_.sig.name)
     };
-    let lib_decl = kvkind::kind(&kv.get_one(&keytree::rwir(&opcode))) == kvkind::KIND_DEF_RWIR;
-    let isa_decl = kvkind::kind(&kv.get_one(&keytree::isa_op(&opcode))) == kvkind::KIND_DEF_RWIR;
+    let lib_key = keytree::rwir(&opcode);
+    let isa_key = keytree::isa_op(&opcode);
+    let lib_decl = kvkind::kind(&kv.get_one(&lib_key), &kv.langtype_of(&lib_key)) == kvkind::KIND_DEF_RWIR;
+    let isa_decl = kvkind::kind(&kv.get_one(&isa_key), &kv.langtype_of(&isa_key)) == kvkind::KIND_DEF_RWIR;
     if lib_decl || (isa_decl && !isa.is_native(&opcode)) {
         return Err(format!(
             "{opcode}: rwir declaration and rwfunc body both define it; one opcode, one definition"
@@ -890,15 +897,21 @@ pub fn write_func(
         param_langtype.insert(r.name.clone(), param_types[nr as usize + i].clone());
     }
 
-    let mut pairs: Vec<(String, Vec<u8>)> = Vec::new();
-    pairs.push((format!("{func_dir}/"), kvkind::new_rwfunc_dir()));
-    pairs.push((ctime_key, ffi::new_int64(ctime)));
+    let mut pairs: Vec<(String, String, Vec<u8>)> = Vec::new();
+    pairs.push((
+        format!("{func_dir}/"),
+        kvkind::KIND_RWFUNC.to_string(),
+        kvkind::new_rwfunc_dir(),
+    ));
+    pairs.push((ctime_key, String::new(), ffi::new_int64(ctime)));
     pairs.push((
         format!("{func_dir}/[0,0]"),
+        kvkind::KIND_RWFUNC.to_string(),
         kvkind::new_rwfunc_anchor(nr, nw, fn_.sig.dynamic()),
     ));
     pairs.push((
         keytree::lib_src(pkg, &fn_.sig.name),
+        "char/utf8".to_string(),
         ffi::new_char_byte(fn_.full_text().as_bytes()),
     ));
     // 参数定义键 funcDir.[0,±k]（点后缀，与坐标斜杠键 /[0,±k] 区分）：langtype=def langtype，
@@ -907,12 +920,14 @@ pub fn write_func(
     for (i, p) in fn_.sig.params.iter().enumerate() {
         pairs.push((
             format!("{func_dir}.[0,-{}]", i + 1),
+            kvkind::KIND_DEF_LANGTYPE.to_string(),
             kvkind::new_def_param(&p.name, &param_types[i]),
         ));
     }
     for (i, r) in fn_.sig.returns.iter().enumerate() {
         pairs.push((
             format!("{func_dir}.[0,{}]", i + 1),
+            kvkind::KIND_DEF_LANGTYPE.to_string(),
             kvkind::new_def_param(&r.name, &param_types[nr as usize + i]),
         ));
     }
@@ -1013,11 +1028,12 @@ pub fn write_func(
     }
     if !labels.is_empty() {
         let _ = kv.mkindex(&keytree::lib_labels_dir(pkg, &fn_.sig.name));
-        let lpairs: Vec<(String, Vec<u8>)> = labels
+        let lpairs: Vec<(String, String, Vec<u8>)> = labels
             .iter()
             .map(|(label, irseq)| {
                 (
                     keytree::lib_label(pkg, &fn_.sig.name, label),
+                    String::new(), // ‥labels 段系统键：无类型、不写 attr
                     ffi::new_int64(*irseq as i64),
                 )
             })
@@ -1035,11 +1051,16 @@ pub fn write_struct_decl(kv: &mut Kv, decl: &StructDecl) {
     }
     let base = keytree::rwir(&name);
     let _ = kv.del_tree(&base);
-    let mut pairs: Vec<(String, Vec<u8>)> = Vec::new();
-    pairs.push((base.clone(), kvkind::new_struct()));
+    let mut pairs: Vec<(String, String, Vec<u8>)> = Vec::new();
+    pairs.push((
+        base.clone(),
+        kvkind::KIND_DEF_STRUCT.to_string(),
+        kvkind::new_struct(),
+    ));
     for fld in &decl.fields {
         pairs.push((
             format!("{base}/{}", fld.name),
+            kvkind::KIND_DEF_LANGTYPE.to_string(),
             kvkind::new_def_langtype(&fld.ty),
         ));
         // *T 字段的默认值是空指针 None——不落键。None 在 kvspace 即"无值"（键不存在），
@@ -1049,6 +1070,7 @@ pub fn write_struct_decl(kv: &mut Kv, decl: &StructDecl) {
         }
         pairs.push((
             keytree::member(&base, &fld.name),
+            fld.ty.clone(),
             field_default(&fld.ty, fld.default.as_ref()),
         ));
     }
@@ -1065,24 +1087,24 @@ fn field_default(ty: &str, default: Option<&Expr>) -> Vec<u8> {
         return ffi::new_char(&base, &s);
     }
     if !dims.is_empty() {
-        return ffi::xvalue_encode(&base, &[], dims.iter().product());
+        return ffi::xvalue_to_wire(&base, &[], dims.iter().product());
     }
     let i = || s.parse::<i64>().unwrap_or(0);
     let u = || s.parse::<u64>().unwrap_or(0);
     let f = || s.parse::<f64>().unwrap_or(0.0);
     match base.as_str() {
         "bool" => ffi::new_bool(s == "true"),
-        "int8" => ffi::xvalue_encode("int8", &(i() as i8).to_le_bytes(), 1),
-        "int16" => ffi::xvalue_encode("int16", &(i() as i16).to_le_bytes(), 1),
-        "int32" => ffi::xvalue_encode("int32", &(i() as i32).to_le_bytes(), 1),
+        "int8" => ffi::xvalue_to_wire("int8", &(i() as i8).to_le_bytes(), 1),
+        "int16" => ffi::xvalue_to_wire("int16", &(i() as i16).to_le_bytes(), 1),
+        "int32" => ffi::xvalue_to_wire("int32", &(i() as i32).to_le_bytes(), 1),
         "int64" => ffi::new_int64(i()),
-        "uint8" => ffi::xvalue_encode("uint8", &[u() as u8], 1),
-        "uint16" => ffi::xvalue_encode("uint16", &(u() as u16).to_le_bytes(), 1),
-        "uint32" => ffi::xvalue_encode("uint32", &(u() as u32).to_le_bytes(), 1),
-        "uint64" => ffi::xvalue_encode("uint64", &u().to_le_bytes(), 1),
-        "float32" => ffi::xvalue_encode("float32", &(f() as f32).to_le_bytes(), 1),
+        "uint8" => ffi::xvalue_to_wire("uint8", &[u() as u8], 1),
+        "uint16" => ffi::xvalue_to_wire("uint16", &(u() as u16).to_le_bytes(), 1),
+        "uint32" => ffi::xvalue_to_wire("uint32", &(u() as u32).to_le_bytes(), 1),
+        "uint64" => ffi::xvalue_to_wire("uint64", &u().to_le_bytes(), 1),
+        "float32" => ffi::xvalue_to_wire("float32", &(f() as f32).to_le_bytes(), 1),
         "float64" => ffi::new_float64(f()),
-        _ => ffi::xvalue_encode(&base, &[], 1),
+        _ => ffi::xvalue_to_wire(&base, &[], 1),
     }
 }
 
@@ -1093,7 +1115,7 @@ pub fn write_rwir_decl(kv: &mut Kv, decl: &RwirDecl) -> Result<(), String> {
         opcode = format!("{}{}{opcode}", decl.pkg, keytree::MEMBER_SEP);
     }
     let anchor = format!("{}/[0,0]", keytree::lib_func("", &opcode));
-    if kvkind::kind(&kv.get_one(&anchor)) == kvkind::KIND_RWFUNC {
+    if kvkind::kind(&kv.get_one(&anchor), &kv.langtype_of(&anchor)) == kvkind::KIND_RWFUNC {
         return Err(format!(
             "{opcode}: rwir declaration and rwfunc body both define it; one opcode, one definition"
         ));
@@ -1103,19 +1125,22 @@ pub fn write_rwir_decl(kv: &mut Kv, decl: &RwirDecl) -> Result<(), String> {
     let param_types = decl.sig.langtype_list();
     let base = keytree::isa_op(&opcode);
     // 路由头：仅计数头（无参数载荷）；各参数类型落 [0,x] 签名行槽（def langtype）。
-    let mut pairs: Vec<(String, Vec<u8>)> = vec![(
+    let mut pairs: Vec<(String, String, Vec<u8>)> = vec![(
         base.clone(),
+        kvkind::KIND_DEF_RWIR.to_string(),
         kvkind::new_defrwir(nr, nw, decl.sig.dynamic()),
     )];
     for i in 0..nr as usize {
         pairs.push((
             format!("{base}/[0,-{}]", i + 1),
+            kvkind::KIND_DEF_LANGTYPE.to_string(),
             kvkind::new_def_langtype(&param_types[i]),
         ));
     }
     for i in 0..nw as usize {
         pairs.push((
             format!("{base}/[0,{}]", i + 1),
+            kvkind::KIND_DEF_LANGTYPE.to_string(),
             kvkind::new_def_langtype(&param_types[nr as usize + i]),
         ));
     }
@@ -1189,19 +1214,18 @@ fn write_linear_inst(
         ""
     };
 
-    let mut pairs: Vec<(String, Vec<u8>)> = Vec::with_capacity(1 + reads.len() + s.writes.len());
+    let mut pairs: Vec<(String, String, Vec<u8>)> =
+        Vec::with_capacity(1 + reads.len() + s.writes.len());
     if !opcode.is_empty() {
-        pairs.push((
-            format!("{prefix}/[{n},0]"),
-            opcode_value(
-                kv,
-                &opcode,
-                reads.len() as i32,
-                s.writes.len() as i32,
-                pkg,
-                local_funcs,
-            ),
-        ));
+        let (wire, lt) = opcode_value(
+            kv,
+            &opcode,
+            reads.len() as i32,
+            s.writes.len() as i32,
+            pkg,
+            local_funcs,
+        );
+        pairs.push((format!("{prefix}/[{n},0]"), lt, wire));
     }
     for (j, r) in reads.iter().enumerate() {
         let rv = params
@@ -1213,10 +1237,8 @@ fn write_linear_inst(
             .or_else(|| declared.get(r))
             .map(String::as_str)
             .unwrap_or("");
-        pairs.push((
-            format!("{prefix}/[{n},-{}]", j + 1),
-            typed_slot_value(rv, ty, target_char),
-        ));
+        let (wire, lt) = typed_slot_value(rv, ty, target_char);
+        pairs.push((format!("{prefix}/[{n},-{}]", j + 1), lt, wire));
     }
     for (j, w) in s.writes.iter().enumerate() {
         let orig = w.as_str();
@@ -1230,10 +1252,8 @@ fn write_linear_inst(
             .or_else(|| param_langtype.get(orig).map(String::as_str))
             .or_else(|| resolved.as_deref())
             .unwrap_or("");
-        pairs.push((
-            format!("{prefix}/[{n},{}]", j + 1),
-            typed_slot_value(wv, ty, ""),
-        ));
+        let (wire, lt) = typed_slot_value(wv, ty, "");
+        pairs.push((format!("{prefix}/[{n},{}]", j + 1), lt, wire));
     }
     if !pairs.is_empty() {
         let _ = kv.set(&pairs);
@@ -1262,7 +1282,7 @@ fn opcode_value(
     nw: i32,
     pkg: &str,
     local_funcs: &HashSet<String>,
-) -> Vec<u8> {
+) -> (Vec<u8>, String) {
     let name = opcode.strip_prefix("/lib/").unwrap_or(opcode);
     let qualified = if pkg.is_empty() || name.contains(keytree::MEMBER_SEP) || name.contains('/') {
         name.to_string()
@@ -1273,27 +1293,39 @@ fn opcode_value(
         || local_funcs.contains(&qualified)
         || [name, qualified.as_str()].iter().any(|candidate| {
             let dir = format!("/lib/{candidate}/");
-            kvkind::kind(&kv.get_one(&dir)) == kvkind::KIND_RWFUNC
+            kvkind::kind(&kv.get_one(&dir), &kv.langtype_of(&dir)) == kvkind::KIND_RWFUNC
         });
     if is_func {
-        kvkind::new_rwfunc_call(nr, nw, opcode)
+        (
+            kvkind::new_rwfunc_call(nr, nw, opcode),
+            kvkind::KIND_RWFUNC.to_string(),
+        )
     } else {
-        kvkind::new_rwir(nr, nw, opcode)
+        (
+            kvkind::new_rwir(nr, nw, opcode),
+            kvkind::KIND_RWIR.to_string(),
+        )
     }
 }
 
 /// Preserve the target type.
-fn typed_slot_value(name: &str, ty: &str, target_char: &str) -> Vec<u8> {
+fn typed_slot_value(name: &str, ty: &str, target_char: &str) -> (Vec<u8>, String) {
     if !ty.is_empty() && (name.starts_with('/') || !is_literal(name)) {
-        return kvkind::new_typed_rwir(name, ty);
+        return (
+            kvkind::new_typed_rwir(name, ty),
+            kvkind::KIND_RWIR.to_string(),
+        );
     }
     slot_value(name, target_char)
 }
 
-/// Encode an instruction operand.
-fn slot_value(val: &str, target_char: &str) -> Vec<u8> {
+/// 指令操作数的 wire 解析；langtype 精确匹配 wire 的 kind。
+fn slot_value(val: &str, target_char: &str) -> (Vec<u8>, String) {
     if !is_literal(val) {
-        return kvkind::new_rwir(0, 0, val);
+        return (
+            kvkind::new_rwir(0, 0, val),
+            kvkind::KIND_RWIR.to_string(),
+        );
     }
     let b = val.as_bytes();
     if b[0] == b'"' {
@@ -1306,18 +1338,24 @@ fn slot_value(val: &str, target_char: &str) -> Vec<u8> {
         } else {
             target_char
         };
-        return ffi::new_char(k, s);
+        return (ffi::new_char(k, s), k.to_string());
     }
     if val == "true" || val == "false" {
-        return ffi::new_bool(val == "true");
+        return (ffi::new_bool(val == "true"), "bool".to_string());
     }
     if b[0].is_ascii_digit() || (b[0] == b'-' && val.len() > 1) {
         if val.contains('.') || val.contains('e') || val.contains('E') {
-            return ffi::new_float64(val.parse::<f64>().unwrap_or(0.0));
+            return (
+                ffi::new_float64(val.parse::<f64>().unwrap_or(0.0)),
+                "float64".to_string(),
+            );
         }
-        return builtin::try_parse_number(val).unwrap_or_else(|| ffi::new_int64(0));
+        return match builtin::try_parse_number(val) {
+            Some((w, lt)) => (w, lt.to_string()),
+            None => (ffi::new_int64(0), "int64".to_string()),
+        };
     }
-    kvkind::new_rwir(0, 0, val)
+    (kvkind::new_rwir(0, 0, val), kvkind::KIND_RWIR.to_string())
 }
 
 fn is_literal(s: &str) -> bool {
@@ -1379,11 +1417,12 @@ fn plain_of(kv: &mut Kv, key: &str) -> String {
     if d.is_empty() {
         return String::new();
     }
-    let k = kvkind::kind(&d);
+    let lt = kv.langtype_of(key);
+    let k = kvkind::kind(&d, &lt);
     if kvkind::is_char_kind(&k) {
         kvkind::value_string(&d)
     } else {
-        let s = kvkind::display(&d);
+        let s = kvkind::display(&d, &lt);
         if s == "None" {
             String::new()
         } else {
@@ -1452,25 +1491,28 @@ pub fn printstack(kv: &mut Kv, vid: &str) -> String {
             if !(is_arg || is_local) {
                 continue;
             }
-            let mut v = kv.get_one(&format!("{f}/{n}"));
+            let mut cur_key = format!("{f}/{n}");
+            let mut v = kv.get_one(&cur_key);
             if is_arg {
                 for _ in 0..2 {
                     if !kvkind::is_ptr(&v) {
                         break;
                     }
-                    v = kv.get_one(&kvkind::ptr_target(&v));
+                    cur_key = kvkind::ptr_target(&v);
+                    v = kv.get_one(&cur_key);
                 }
             }
-            let v = kvkind::display(&v);
+            let v = kvkind::display(&v, &kv.langtype_of(&cur_key));
             out.push_str(&format!("  {n} = {}\n", clip(v)));
         }
         if cur.as_deref() == Some(f.as_str()) && !pc.is_empty() {
             let opcode = kv.get_one(&pc);
-            let kind = kvkind::kind(&opcode);
+            let lt = kv.langtype_of(&pc);
+            let kind = kvkind::kind(&opcode, &lt);
             let v = if kind == "rwir" || kind == "rwfunc" {
                 format!("{kind}:{}", kvkind::rwir_sig(&opcode))
             } else {
-                kvkind::display(&opcode)
+                kvkind::display(&opcode, &lt)
             };
             out.push_str(&format!("  cur = {}\n", clip(v)));
         }
@@ -1519,10 +1561,16 @@ mod tests {
         )
         .unwrap();
         let dir = kv.get_one("/lib/a/b·f/");
-        assert_eq!(kvkind::kind(&dir), "rwfunc");
+        assert_eq!(kvkind::kind(&dir, &kv.langtype_of("/lib/a/b·f/")), "rwfunc");
         assert_eq!(kvkind::head(&dir).storetype, 0);
-        assert_eq!(kvkind::kind(&kv.get_one("/lib/a/b·f/[0,0]")), "rwfunc");
-        assert_eq!(kvkind::head(&kv.get_one("/lib/a/b·f/[0,0]")).storetype, 1);
+        assert_eq!(
+            kvkind::kind(&kv.get_one("/lib/a/b·f/[0,0]"), &kv.langtype_of("/lib/a/b·f/[0,0]")),
+            "rwfunc"
+        );
+        assert_eq!(
+            kvkind::head(&kv.get_one("/lib/a/b·f/[0,0]")).storetype,
+            1
+        );
 
         // 同 lib a 下再 layout 另一嵌套 lib c，验证 b·f 未被整库删除（增量合并）
         compile(
@@ -1531,11 +1579,17 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            kvkind::kind(&kv.get_one("/lib/a/b·f/[0,0]")),
+            kvkind::kind(
+                &kv.get_one("/lib/a/b·f/[0,0]"),
+                &kv.langtype_of("/lib/a/b·f/[0,0]")
+            ),
             "rwfunc",
             "b·f 应保留"
         );
-        assert_eq!(kvkind::kind(&kv.get_one("/lib/a/c·g/[0,0]")), "rwfunc");
+        assert_eq!(
+            kvkind::kind(&kv.get_one("/lib/a/c·g/[0,0]"), &kv.langtype_of("/lib/a/c·g/[0,0]")),
+            "rwfunc"
+        );
     }
 
     #[test]
@@ -1580,30 +1634,51 @@ mod tests {
         crate::isa::ensure_test_isa(&mut kv);
         crate::isa::ensure_test_bridge(&mut kv, "println", 1, 0);
         compile(&mut kv, "rwfunc caller() -> () {\ncallee(1) -> y\nprintln(y)\n}\nrwfunc callee(x:int64) -> (r:int64) {\nx -> r\n}\n").unwrap();
-        assert_eq!(kvkind::kind(&kv.get_one("/lib/caller/[1,0]")), "rwfunc");
+        assert_eq!(
+            kvkind::kind(&kv.get_one("/lib/caller/[1,0]"), &kv.langtype_of("/lib/caller/[1,0]")),
+            "rwfunc"
+        );
         assert_eq!(
             kvkind::counts(&kv.get_one("/lib/caller/[1,0]")),
             (1, 1, false)
         );
-        assert_eq!(kvkind::kind(&kv.get_one("/lib/caller/[2,0]")), "rwir");
+        assert_eq!(
+            kvkind::kind(&kv.get_one("/lib/caller/[2,0]"), &kv.langtype_of("/lib/caller/[2,0]")),
+            "rwir"
+        );
         assert_eq!(
             kvkind::counts(&kv.get_one("/lib/caller/[2,0]")),
             (1, 0, false)
         );
         compile(&mut kv, "rwfunc later() -> () {\ncallee(1) -> y\n}\n").unwrap();
-        assert_eq!(kvkind::kind(&kv.get_one("/lib/later/[1,0]")), "rwfunc");
+        assert_eq!(
+            kvkind::kind(&kv.get_one("/lib/later/[1,0]"), &kv.langtype_of("/lib/later/[1,0]")),
+            "rwfunc"
+        );
         compile(
             &mut kv,
             "rwfunc absolute() -> () {\n/lib/callee(1) -> y\n}\n",
         )
         .unwrap();
-        assert_eq!(kvkind::kind(&kv.get_one("/lib/absolute/[1,0]")), "rwfunc");
+        assert_eq!(
+            kvkind::kind(
+                &kv.get_one("/lib/absolute/[1,0]"),
+                &kv.langtype_of("/lib/absolute/[1,0]")
+            ),
+            "rwfunc"
+        );
         compile(
             &mut kv,
             "lib p {\nrwfunc caller() -> () {\ntarget()\n}\nrwfunc target() -> () {}\n}\n",
         )
         .unwrap();
-        assert_eq!(kvkind::kind(&kv.get_one("/lib/p·caller/[1,0]")), "rwfunc");
+        assert_eq!(
+            kvkind::kind(
+                &kv.get_one("/lib/p·caller/[1,0]"),
+                &kv.langtype_of("/lib/p·caller/[1,0]")
+            ),
+            "rwfunc"
+        );
     }
 
     #[test]
@@ -1620,14 +1695,17 @@ mod tests {
         )
         .unwrap();
         let proto = kv.get_one("/lib/Point");
-        assert_eq!(kvkind::kind(&proto), "def struct");
+        assert_eq!(kvkind::kind(&proto, &kv.langtype_of("/lib/Point")), "def struct");
         assert!(kvkind::body(&proto, &kvkind::head(&proto)).is_empty());
         assert_eq!(kvkind::value_string(&kv.get_one("/lib/Point/x")), "int64");
         assert_eq!(
             kvkind::value_string(&kv.get_one("/lib/Point/next")),
             "*/lib/Point"
         );
-        assert_eq!(kvkind::kind(&kv.get_one("/lib/Point·x")), "int64");
+        assert_eq!(
+            kvkind::kind(&kv.get_one("/lib/Point·x"), &kv.langtype_of("/lib/Point·x")),
+            "int64"
+        );
         assert!(kv.get_one("/lib/Point·next").is_empty());
     }
 
@@ -1649,7 +1727,10 @@ mod tests {
             "lib t {\nrwfunc main() -> () {\nfoo.bar(\"x\") -> y\nbaz(\"z\") -> w\n}\n}\n",
         )
         .unwrap();
-        assert_eq!(kvkind::kind(&kv.get_one("/lib/t·main/[0,0]")), "rwfunc");
+        assert_eq!(
+            kvkind::kind(&kv.get_one("/lib/t·main/[0,0]"), &kv.langtype_of("/lib/t·main/[0,0]")),
+            "rwfunc"
+        );
         assert!(
             kvkind::value_string(&kv.get_one("/lib/t·main/[1,0]")).contains("foo.bar"),
             "'.' 应作普通字符保留在 opcode 内（单一 token foo.bar）"

@@ -5,22 +5,30 @@ lib kvlang/spec/kvspace模型/XValueHead线格式 {
 XValue 由 head 与 body 组成。所有后端使用同一线格式：
 
 ```
-[pow:u8][flags:u8][a:u64 LE][b:u64 LE][langtype UTF-8][zero padding][body]
+[len:u48 LE][storetype:u8][ptr:u8][body]
 ```
 
-固定前缀为 18 字节。head 长度是 `1 << pow`，body 从该偏移开始。flags 低两位为 storage class；bit 2 为指针标志。未使用的标志位必须为零。langtype 为真实目标类型，不含源码的 `*`/`@` 前缀，后面以零填充至 head 末尾。解码须校验填充、长度和类型。
+head 固定 8 字节，body 偏移恒为 8，容量 2^48。类型（langtype）**不在 head**——存于独立 attr key `x‥langtype`（明文 UTF-8 串，含形状段）。`‥` 后缀 key 必须是叶子节点。
 
-| class | a | b | body |
-|-------|---|---|------|
-| 0（短定长） | 0 | 0 | None、标量、目录、map 头等的定长内容；rwfunc 目录值为空 |
-| 1（有冗余的长度） | 有效字节数 | 容量，且 ≥ a | 字符/字节数组、代码槽、指针路径；`[0,0]` rwfunc 锚点的 a=5、b≥5 |
-| 2（大定长） | 元素数 | 元素宽度 | 张量元素按行主序连续存储 |
-| 3（扩展定位） | UTF-8 定位串字节数 | 容量，且 ≥ a | `@ext` 定位串 |
+| 字段 | 宽 | 含义 |
+|------|----|------|
+| `len` | u48 | body 有效字节数，小端，占用偏移 0-5 |
+| `storetype` | u8 | 存储形态（= 旧 class），偏移 6 |
+| `ptr` | u8 | 0=inline、1=ptr、2=@ext，偏移 7 |
 
-UTF-8 字符数组使用 class 1，`a` 是**字节数**，langtype 里的长度是 Unicode 码点数；两者独立校验。指针使用 class 1 加 flags bit 2，body 是目标 KV 路径；目标类型写入 langtype。
+| storetype | 含义 | body |
+|-----------|------|------|
+| 0（短定长） | None、标量、目录、map 头等的定长内容；rwfunc 目录值为空 | 定长 |
+| 1（变长） | 字符/字节数组、代码槽、指针路径；`[0,0]` rwfunc 锚点 | 有效字节（len 字节） |
+| 2（大定长） | 张量 | 元素按行主序连续存储 |
+| 3（扩展定位） | `@ext` | UTF-8 定位串 |
 
-`ro` 与 `vid` 不在 XValue 中。它们存于独立的 KV key：`/.kvspace-meta/` 加原 key UTF-8 字节的小写十六进制编码。读 head 时后端合并这两个元数据字段，复制和删除 key 时同步处理 sidecar。枚举成员按实际物理 key 前缀进行，不存在 index/extindex 成员矩阵或 memindex 载体。
+指针（`ptr=1`）body 为目标 KV 路径；`@ext`（`ptr=2`）body 为 UTF-8 定位串。UTF-8 字符数组的 `len` 是**字节数**，langtype 里的长度是 Unicode 码点数；两者独立校验。
 
-目录 key 以 `/` 结尾，值与不带斜杠的 base key 独立。例如 `/lib/f/` 的 rwfunc 目录值为 class 0、空 body；`/lib/f/[0,0]` 是 class 1、5 字节计数头。map 的 base key 为 class 0、空 body，成员位于 `base·name` 的独立 key。扩展目录叠加通过 class 3 定位串表示。
+**x‥langtype attr key**：每个 XValue 主键 `x` 有唯一 attr key `x‥langtype`，存完整 langtype 串（含 `[N,M]` 形状段），不含源码 `*`/`@` 前缀。只有创建（T·new）与 **reinterpret** 写它；其余读写只碰主键。写序固定：**attr 先落，x 后落**——x 的写入即提交点，x 存在则类型必完整；attr key 存在而 x 缺失 = 未提交创建残留，读路径惰性清理。
+
+枚举成员按实际物理 key 前缀进行，不存在 index/extindex 成员矩阵或 memindex 载体。
+
+目录 key 以 `/` 结尾，值与不带斜杠的 base key 独立。例如 `/lib/f/` 的 rwfunc 目录值为 storetype 0、空 body；`/lib/f/[0,0]` 是 storetype 1、5 字节计数头。map 的 base key 为 storetype 0、空 body，成员位于 `base·name` 的独立 key。扩展目录叠加通过 storetype 3 定位串表示。
 "#### -> /lib/kvlang/spec/kvspace模型/XValueHead线格式
 }

@@ -110,9 +110,11 @@ static size_t fmt_i64_into(int64_t val, char *buf, size_t cap) {
 }
 
 static size_t kvspace_key_into(const kvlangXvalue_t *v, char *buf, size_t cap) {
-    if (v->length == 40 && v->bytes && v->bytes[0] == 5 && v->bytes[1] == 0 &&
-        memcmp(v->bytes + 18, "int64", 6) == 0)
-        return fmt_i64_into((int64_t)xh_rd64(v->bytes + 32), buf, cap);
+    if (v->bytes && xh_len(v->bytes) == 8 &&
+        xh_storetype(v->bytes) == KVSPACE_XVALUE_ST_SHORT &&
+        xh_ptr(v->bytes) == KVSPACE_XVALUE_PTR_INLINE &&
+        v->langtype_len == 5 && memcmp(v->langtype, "int64", 5) == 0)
+        return fmt_i64_into((int64_t)xh_rd64(xh_body(v->bytes)), buf, cap);
     if (kvlangXvalueNone(v)) {
         if (cap)
             buf[0] = 0;

@@ -52,7 +52,7 @@ static int xv_read_head(kvlangFrame_t *f, const char *fr, int ri,
         return -1;
     if (kvlangXvalueIsPtr(view))
         return -2;
-    xv_head_from_data(h, view->bytes);
+    xv_head_from_value(h, view);
     return 0;
 }
 
@@ -105,9 +105,11 @@ static void xv_read_indices_fast(kvlangFrame_t *f, int first, int nidx,
     for (int i = 0; i < nidx && i < X_MAX_NDIM; i++) {
         kvlangXvalue_t iv;
         xv_resolve_param(f, first + i, &iv);
-        if (iv.length == 40 && iv.bytes && iv.bytes[0] == 5 &&
-            iv.bytes[1] == 0 && memcmp(iv.bytes + 18, "int64", 6) == 0)
-            idx[i] = (int64_t)xh_rd64(iv.bytes + 32);
+        if (iv.bytes && xh_len(iv.bytes) == 8 &&
+            xh_storetype(iv.bytes) == KVSPACE_XVALUE_ST_SHORT &&
+            xh_ptr(iv.bytes) == KVSPACE_XVALUE_PTR_INLINE &&
+            iv.langtype_len == 5 && memcmp(iv.langtype, "int64", 5) == 0)
+            idx[i] = (int64_t)xh_rd64(xh_body(iv.bytes));
         else
             idx[i] = kvlangScalarI64(kvlangXvalueScalar(&iv));
     }
@@ -124,8 +126,8 @@ int kvlangBuiltinXvAt(kvlangFrame_t *f) {
             return kvlangBuiltinSetError(
                 f, "TypeError: xv.at: pointer cannot be indexed — "
                    "dereference it first (*p)");
-        const uint8_t *lt = xh_langtype(av->bytes);
-        int32_t ltlen = (int32_t)xh_langtype_len(av->bytes);
+        const uint8_t *lt = (const uint8_t *)av->langtype;
+        int32_t ltlen = (int32_t)av->langtype_len;
         kvlangLangtype kx;
         kvlangLangtypeParse(lt, ltlen, &kx);
         int tid = (kx.kind && kx.kind_len > 0)
@@ -156,7 +158,7 @@ int kvlangBuiltinXvAt(kvlangFrame_t *f) {
                 return 0;
             uint8_t sbuf[64];
             uint32_t slen =
-                kvlangScalarEncode(kstr, elem, (uint32_t)sz, sbuf, sizeof sbuf);
+                kvlangScalarToWire(kstr, elem, (uint32_t)sz, sbuf, sizeof sbuf);
             kvlangXvalue_t ev = {sbuf, slen};
             return kvlangBuiltinWriteResult(f, &ev);
         }
@@ -246,8 +248,8 @@ int kvlangBuiltinXvSet(kvlangFrame_t *f) {
         xv_resolve_param(f, nidx + 1, &vv);
         bool is_ptr = kvlangXvalueIsPtr(av);
         kvlangLangtype kx;
-        kvlangLangtypeParse(xh_langtype(av->bytes),
-                            (int32_t)xh_langtype_len(av->bytes), &kx);
+        kvlangLangtypeParse((const uint8_t *)av->langtype,
+                            (int32_t)av->langtype_len, &kx);
         int tid = (kx.kind && kx.kind_len > 0)
                       ? kvlangLangtypeId(kx.kind, (size_t)kx.kind_len)
                       : KVLANG_LT_UNKNOWN;
@@ -275,13 +277,14 @@ int kvlangBuiltinXvSet(kvlangFrame_t *f) {
         int c = 0;
         uint8_t cbuf[64];
         kvlangXvalue_t cv;
-        if ((tid == KVLANG_LT_INT64 && vv.length == 40 && vv.bytes &&
-             vv.bytes[0] == 5 && vv.bytes[1] == 0 &&
-             memcmp(vv.bytes + 18, "int64", 6) == 0) ||
-            (tid == KVLANG_LT_FLOAT64 && vv.length == 40 && vv.bytes &&
-             vv.bytes[0] == 5 && vv.bytes[1] == 0 &&
-             memcmp(vv.bytes + 18, "float64", 8) == 0)) {
-            cvb = vv.bytes + 32;
+        if (vv.bytes && xh_len(vv.bytes) == 8 &&
+            xh_storetype(vv.bytes) == KVSPACE_XVALUE_ST_SHORT &&
+            xh_ptr(vv.bytes) == KVSPACE_XVALUE_PTR_INLINE &&
+            ((tid == KVLANG_LT_INT64 && vv.langtype_len == 5 &&
+              memcmp(vv.langtype, "int64", 5) == 0) ||
+             (tid == KVLANG_LT_FLOAT64 && vv.langtype_len == 7 &&
+              memcmp(vv.langtype, "float64", 7) == 0))) {
+            cvb = xh_body(vv.bytes);
             c = 8;
         } else {
             if (kvlangCoerceAssign(f, ek, &vv, cbuf, sizeof cbuf, &cv) != 0)
@@ -290,7 +293,7 @@ int kvlangBuiltinXvSet(kvlangFrame_t *f) {
             int32_t cvblen = xh_content_len_of(&cv);
             c = cvblen < sz ? cvblen : sz;
         }
-        uint32_t off = (uint32_t)(xh_headlen(av->bytes) + flat * sz);
+        uint32_t off = (uint32_t)(KVSPACE_XVALUE_HEAD_LEN + flat * sz);
         char err[256];
         if (wo && wo->resolved &&
             kvspaceSetPartByRef(f->kvspace->handle, &wo->off, wo->key, off, cvb,

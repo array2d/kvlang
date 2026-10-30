@@ -442,31 +442,18 @@ bool kvlangBodyAdopt(kvlangBodySlot *slot, const uint8_t *val, uint32_t len) {
     slot->head = NULL;
     slot->headlen = 0;
     slot->body = NULL;
-    if (!val || len < XH_PREFIX)
+    if (!val || len < KVSPACE_XVALUE_HEAD_LEN)
         return false;
-    if (val[0] < 5 || val[0] > 31)
+    /* v2 固定头：必须是 SHORT inline，body 宽 = slot 宽度（langtype 不在 wire，
+     * kind 校验由调用方经 GetHead attr key 完成——见 kvlangBodyCapture）。 */
+    if (xh_storetype(val) != KVSPACE_XVALUE_ST_SHORT ||
+        xh_ptr(val) != KVSPACE_XVALUE_PTR_INLINE)
         return false;
-    uint32_t headlen = 1u << val[0];
-    if ((val[1] & 7u) != 0) /* 必须是 FIXED_SMALL 且非 ptr/ext */
-        return false;
-    if (headlen < XH_PREFIX || headlen > len)
-        return false;
-    uint32_t ltlen = 0;
-    while (XH_PREFIX + ltlen < headlen && val[XH_PREFIX + ltlen])
-        ltlen++;
-    if (XH_PREFIX + ltlen >= headlen) /* langtype 必须 NUL 终止 */
-        return false;
-    size_t kl = strlen(slot->kind);
-    if (ltlen != kl || memcmp(val + XH_PREFIX, slot->kind, kl) != 0)
-        return false;
-    /* FIXED_SMALL：a/b 必须为 0，宽度由 langtype 决定。 */
-    if (xh_rd64(val + 2) != 0 || xh_rd64(val + 10) != 0)
-        return false;
-    if (len != headlen + slot->width)
+    if (xh_len(val) != slot->width || len != KVSPACE_XVALUE_HEAD_LEN + slot->width)
         return false;
     slot->head = (uint8_t *)val;
-    slot->headlen = headlen;
-    slot->body = (uint8_t *)val + headlen;
+    slot->headlen = KVSPACE_XVALUE_HEAD_LEN;
+    slot->body = (uint8_t *)val + KVSPACE_XVALUE_HEAD_LEN;
     slot->len = slot->width;
     slot->ok = true;
     return true;
@@ -536,23 +523,21 @@ __attribute__((noinline)) bool
 kvlangOperandViewPromote(kvspace_t *kv, kvlangBoundCell_t *cell,
                          const char *frame_root, uint8_t *d, uint32_t len) {
     cell->rview_state = 2;
-    if (!kv || !kv->shm || !cell->off.resolved || !d || len <= 32 ||
-        len > 40)
+    if (!kv || !kv->shm || !cell->off.resolved || !d ||
+        len < KVSPACE_XVALUE_HEAD_LEN)
         return false;
-    if (d[0] != 5 || (d[1] & 7u) != 0)
+    /* v2 固定头：SHORT inline，body 宽 = 静态声明类型宽（langtype 不在 wire）。 */
+    if (xh_storetype(d) != KVSPACE_XVALUE_ST_SHORT ||
+        xh_ptr(d) != KVSPACE_XVALUE_PTR_INLINE)
         return false;
-    if (xh_rd64(d + 2) != 0 || xh_rd64(d + 10) != 0)
+    /* 类型/宽度取绑定期静态声明（cell->coerce.tid 已在 bind_row 固化）。 */
+    int tid = cell->coerce.tid;
+    int w = tid > 0 ? kvlangLangtypeElemSize(tid) : 0;
+    if (w <= 0 || tid == KVLANG_LT_UNKNOWN || !kvlangLangtypeIsNum(tid) &&
+        tid != KVLANG_LT_BOOL)
         return false;
-    uint32_t ltlen = 0;
-    while (XH_PREFIX + ltlen < 32 && d[XH_PREFIX + ltlen])
-        ltlen++;
-    if (ltlen == 0 || XH_PREFIX + ltlen >= 32)
-        return false;
-    int tid = kvlangLangtypeId((const char *)(d + XH_PREFIX), ltlen);
-    if (!kvlangLangtypeIsNum(tid) && tid != KVLANG_LT_BOOL)
-        return false;
-    int w = kvlangLangtypeElemSize(tid);
-    if (w <= 0 || len != 32u + (uint32_t)w)
+    if (xh_len(d) != (uint64_t)w ||
+        len != KVSPACE_XVALUE_HEAD_LEN + (uint32_t)w)
         return false;
     char root[KV_KEY_MAX];
     bool in_tree = false;

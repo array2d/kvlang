@@ -49,13 +49,14 @@ static int write_char32(kvlangFrame_t *f, const uint32_t *r, int n) {
                 uint32_t cur_len = 0;
                 if (kvspaceGetByRef(f->kvspace->handle, &wo->off, wo->key, &cur,
                                     &cur_len) == 0 &&
-                    cur && cur_len == 68 && cur[0] == 6 && cur[1] == 1 &&
-                    xh_rd64(cur + 2) == 4 && xh_rd64(cur + 10) == 4 &&
-                    memcmp(cur + XH_PREFIX, "[1]char/utf32", 14) == 0) {
-                    cur[64] = (uint8_t)(r[0] & 0xFF);
-                    cur[65] = (uint8_t)((r[0] >> 8) & 0xFF);
-                    cur[66] = (uint8_t)((r[0] >> 16) & 0xFF);
-                    cur[67] = (uint8_t)((r[0] >> 24) & 0xFF);
+                    cur && cur_len >= KVSPACE_XVALUE_HEAD_LEN + 4 &&
+                    xh_storetype(cur) == KVSPACE_XVALUE_ST_SLACK &&
+                    xh_ptr(cur) == KVSPACE_XVALUE_PTR_INLINE &&
+                    xh_len(cur) == 4) {
+                    cur[8] = (uint8_t)(r[0] & 0xFF);
+                    cur[9] = (uint8_t)((r[0] >> 8) & 0xFF);
+                    cur[10] = (uint8_t)((r[0] >> 16) & 0xFF);
+                    cur[11] = (uint8_t)((r[0] >> 24) & 0xFF);
                     kvlangBuiltinNextPc(f);
                     return 0;
                 }
@@ -65,24 +66,24 @@ static int write_char32(kvlangFrame_t *f, const uint32_t *r, int n) {
     if (n >= 0 && n <= 16) {
         uint8_t sbuf[128];
         uint32_t blen = (uint32_t)n * 4;
-        memset(sbuf, 0, 64);
-        sbuf[0] = 6;
-        sbuf[1] = 1;
-        for (int i = 0; i < 4; i++) {
-            sbuf[2 + i] = (uint8_t)(blen >> (8 * i));
-            sbuf[10 + i] = (uint8_t)(blen >> (8 * i));
-        }
-        snprintf((char *)sbuf + XH_PREFIX, 64 - XH_PREFIX, "[%d]char/utf32", n);
+        kvspaceXvalueHead h = {.storetype = KVSPACE_XVALUE_ST_SLACK,
+                               .ptr = KVSPACE_XVALUE_PTR_INLINE};
+        kvspaceXvalueHeadSetLen(&h, blen);
+        memcpy(sbuf, &h, sizeof h);
         for (int i = 0; i < n; i++) {
-            sbuf[64 + i * 4 + 0] = (uint8_t)(r[i] & 0xFF);
-            sbuf[64 + i * 4 + 1] = (uint8_t)((r[i] >> 8) & 0xFF);
-            sbuf[64 + i * 4 + 2] = (uint8_t)((r[i] >> 16) & 0xFF);
-            sbuf[64 + i * 4 + 3] = (uint8_t)((r[i] >> 24) & 0xFF);
+            sbuf[8 + i * 4 + 0] = (uint8_t)(r[i] & 0xFF);
+            sbuf[8 + i * 4 + 1] = (uint8_t)((r[i] >> 8) & 0xFF);
+            sbuf[8 + i * 4 + 2] = (uint8_t)((r[i] >> 16) & 0xFF);
+            sbuf[8 + i * 4 + 3] = (uint8_t)((r[i] >> 24) & 0xFF);
         }
-        kvlangXvalue_t e = {sbuf, 64 + blen};
+        kvlangXvalue_t e = {sbuf, KVSPACE_XVALUE_HEAD_LEN + blen};
+        char lt[48];
+        int ln = snprintf(lt, sizeof lt, "[%d]char/utf32", n);
+        kvlangXvalueSetLangtype(&e, lt, (uint32_t)ln);
         return kvlangBuiltinWriteResult(f, &e);
     }
     kvlangXvalue_t e;
+    kvlangXvalueZero(&e);
     if (n > 0) {
         uint8_t *raw = malloc((size_t)n * 4);
         if (!raw)
@@ -93,15 +94,19 @@ static int write_char32(kvlangFrame_t *f, const uint32_t *r, int n) {
             raw[i * 4 + 2] = (uint8_t)((r[i] >> 16) & 0xFF);
             raw[i * 4 + 3] = (uint8_t)((r[i] >> 24) & 0xFF);
         }
-        uint8_t *out; uint32_t len; int32_t d = n;
-        kvspaceXvalueEncode(KVSPACE_KIND_CHAR, raw, (uint32_t)n * 4, &d, 1, &out, &len);
+        uint8_t *out; uint64_t len = 0;
+        kvspaceXvalueHeadNewSlack(raw, (uint64_t)n * 4, (uint64_t)n * 4, &out,
+                                  &len);
         free(raw);
-        e.bytes = out; e.length = len;
+        e.bytes = out; e.length = (uint32_t)len;
     } else {
-        uint8_t *out; uint32_t len; int32_t d = 0;
-        kvspaceXvalueEncode(KVSPACE_KIND_CHAR, (const uint8_t *)"", 0, &d, 1, &out, &len);
-        e.bytes = out; e.length = len;
+        uint8_t *out; uint64_t len = 0;
+        kvspaceXvalueHeadNewSlack((const uint8_t *)"", 0, 0, &out, &len);
+        e.bytes = out; e.length = (uint32_t)len;
     }
+    char lt[48];
+    int ln = snprintf(lt, sizeof lt, "[%d]char/utf32", n);
+    kvlangXvalueSetLangtype(&e, lt, (uint32_t)ln);
     int rc = kvlangBuiltinEmitResult(f, &e);
     return rc;
 }
@@ -128,7 +133,7 @@ int kvlangBuiltinStringSet(kvlangFrame_t *f) {
 }
 
 static inline bool fast_utf32_bytes(const kvlangXvalue_t *v) {
-    return v->bytes && v->length >= XH_PREFIX &&
+    return v->bytes && v->length >= KVSPACE_XVALUE_HEAD_LEN &&
            !xh_is_none(v->bytes) &&
            kvlangXvalueKindIs(v, KVSPACE_KIND_CHAR);
 }

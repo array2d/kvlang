@@ -31,11 +31,12 @@ static inline void xv_head_langtype_str(const xv_head_t *o, char *buf,
     memcpy(buf, o->langtype, (size_t)n);
     buf[n] = 0;
 }
-static inline void xv_head_from_data(xv_head_t *o, const uint8_t *d) {
-    o->langtype = xh_langtype(d);
-    o->langtype_len = (int32_t)xh_langtype_len(d);
-    o->body_offset = (int32_t)xh_headlen(d);
-    o->body_len = xh_content_len(d);
+/* 字面量路径：langtype 取 v 的 attr key 缓存（v2 wire 不携带），body 偏移恒 8。 */
+static inline void xv_head_from_value(xv_head_t *o, const kvlangXvalue_t *v) {
+    o->langtype = (const uint8_t *)v->langtype;
+    o->langtype_len = (int32_t)v->langtype_len;
+    o->body_offset = (int32_t)KVSPACE_XVALUE_HEAD_LEN;
+    o->body_len = xh_content_len(v->bytes);
 }
 
 /* ── 跨模块共享 helper ─────────────────────────────────────────────
@@ -88,9 +89,9 @@ int kvlangBuiltinF64Le(kvlangFrame_t *f);
 int kvlangBuiltinF64Gt(kvlangFrame_t *f);
 int kvlangBuiltinF64Ge(kvlangFrame_t *f);
 
-/* 写结果槽并释放构造值（encode→write→free 的唯一入口）。 */
+/* 写结果槽并释放构造值（to-wire→write→free 的唯一入口）。 */
 int kvlangBuiltinEmitResult(kvlangFrame_t *f, kvlangXvalue_t *v);
-/* 标量结果：栈上编码 + 直接写，不经过堆。 */
+/* 标量结果：栈上写 wire + 直接写，不经过堆。 */
 int kvlangBuiltinEmitInt64(kvlangFrame_t *f, int64_t n);
 int kvlangBuiltinEmitFloat64(kvlangFrame_t *f, double d);
 int kvlangBuiltinEmitBool(kvlangFrame_t *f, bool b);
@@ -99,7 +100,7 @@ void kvlangXvalueElementAt(const kvlangXvalue_t *v, int i, kvlangXvalue_t *out);
 char *kvlangBuiltinScatterKey(const char *base, const int64_t *coords,
                               int ncoord);
 void kvlangBuiltinMapMarker(kvlangXvalue_t *out, const char *langtype);
-/* char 拼接（+ 与 string·concat 共用）：均须 char kind；编码不同返 false（调用方 throw），相同则 out=拼接结果并保持该编码。 */
+/* char 拼接（+ 与 string·concat 共用）：均须 char kind；wire 编码不同返 false（调用方 throw），相同则 out=拼接结果并保持该编码。 */
 bool kvlangBuiltinCharConcat(const kvlangXvalue_t *a, const kvlangXvalue_t *b,
                              kvlangXvalue_t *out);
 

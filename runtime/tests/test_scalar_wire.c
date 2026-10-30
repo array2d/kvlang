@@ -1,6 +1,6 @@
-/* 标量栈编码 vs 正典 codec 的逐字节一致性。
+/* 标量栈写 wire vs 正典 codec 的逐字节一致性。
  * 覆盖 runtime 标量快路径用到的全部 kind：int8/16/32/64、uint8/16/32/64、
- * float32/float64、bool。新增 kind 必须在此登记，防止第二份 head 编码静默漂移。 */
+ * float32/float64、bool。新增 kind 必须在此登记，防止第二份 head 写静默漂移。 */
 
 #include "runtime_internal.h"
 #include <stdio.h>
@@ -18,15 +18,17 @@ static int failures;
         }                                                                      \
     } while (0)
 
-/* raw 低位字节为 0x2a，其余 0；与 kvspaceXvalueEncode(ndim=0) 逐字节比对。 */
+/* raw 低位字节为 0x2a，其余 0；与 kvspaceXvalueHeadNewScalar(ndim=0) 逐字节比对。 */
 static void check_kind(const char *kind, uint32_t len) {
     uint8_t raw[8] = {0x2a, 0, 0, 0, 0, 0, 0, 0};
     uint8_t buf[64];
-    uint32_t bl = kvlangScalarEncode(kind, raw, len, buf, sizeof buf);
+    uint32_t bl = kvlangScalarToWire(kind, raw, len, buf, sizeof buf);
     uint8_t *ref = NULL;
-    uint32_t rl = 0;
-    int32_t dims[1] = {0};
-    CHECK(kvspaceXvalueEncode(kind, raw, len, dims, 0, &ref, &rl) == 0);
+    uint64_t rl64 = 0;
+    CHECK(kvspaceXvalueHeadNewScalar(KVSPACE_XVALUE_ST_SHORT, raw, len, &ref,
+                                     &rl64) == 0);
+    CHECK(rl64 <= UINT32_MAX);
+    uint32_t rl = (uint32_t)rl64;
     CHECK(bl == rl);
     CHECK(bl > 0 && memcmp(buf, ref, bl) == 0);
     free(ref);
@@ -55,19 +57,20 @@ static void check_member(kvspace_t *kv, bool is_status, const char *s) {
     kvlangXvalue_t v;
     kvlangXvalueZero(&v);
     CHECK(kvlangKvspaceGetOne(kv, key, &v) == 0);
-    kvspaceHead_t h;
-    CHECK(kvspaceDecodeHead(v.bytes, v.length, &h) == 0);
-    CHECK(h.storetype == 1 /* slack */);
-    CHECK(h.body_len == (int32_t)strlen(s));
-    CHECK(h.body_cap >= (uint64_t)strlen(s));
+    CHECK(v.length >= KVSPACE_XVALUE_HEAD_LEN);
+    kvspaceXvalueHead xh;
+    memcpy(&xh, v.bytes, sizeof xh);
+    CHECK(xh.storetype == KVSPACE_XVALUE_ST_SLACK);
+    uint32_t blen = (uint32_t)kvspaceXvalueHeadLen(&xh);
+    CHECK(blen == (uint32_t)strlen(s));
     uint8_t *ref = NULL;
     uint64_t rl = 0;
-    CHECK(kvspaceXhNewSlack(1 /* UTF-8 */, (const uint8_t *)s, strlen(s),
-                            h.body_cap, &ref, &rl) == 0);
+    CHECK(kvspaceXvalueHeadNewSlack((const uint8_t *)s, strlen(s), strlen(s),
+                                    &ref, &rl) == 0);
     CHECK(v.length == (uint32_t)rl);
-    /* 等价值写（part-write）只保证 [0, 64+a) 是对的；b-a 的旧字节不属于值
+    /* 等价值写（part-write）只保证 [0, 8+a) 是对的；旧字节不属于值
      * （spec 05/02：值语义只取前 a 字节）。整值写时两者自然相同。 */
-    size_t prefix = 64 + (size_t)h.body_len;
+    size_t prefix = KVSPACE_XVALUE_HEAD_LEN + (size_t)blen;
     CHECK(prefix <= (size_t)rl && prefix <= (size_t)v.length);
     CHECK(prefix > 0 && memcmp(v.bytes, ref, prefix) == 0);
     free(ref);
@@ -96,7 +99,7 @@ int main(void) {
         for (int j = 0; j < 8; j++)
             raw[j] = (uint8_t)((uint64_t)ints[i] >> (j * 8));
         uint32_t bl =
-            kvlangScalarEncode(KVSPACE_KIND_INT64, raw, 8, buf, sizeof buf);
+            kvlangScalarToWire(KVSPACE_KIND_INT64, raw, 8, buf, sizeof buf);
         uint8_t *ref = NULL;
         uint32_t rl = 0;
         CHECK(kvspaceNewInt64(ints[i], &ref, &rl) == 0);
@@ -111,7 +114,7 @@ int main(void) {
         for (int j = 0; j < 8; j++)
             raw[j] = (uint8_t)(u >> (j * 8));
         uint32_t bl =
-            kvlangScalarEncode(KVSPACE_KIND_FLOAT64, raw, 8, buf, sizeof buf);
+            kvlangScalarToWire(KVSPACE_KIND_FLOAT64, raw, 8, buf, sizeof buf);
         uint8_t *ref = NULL;
         uint32_t rl = 0;
         CHECK(kvspaceNewFloat64(floats[i], &ref, &rl) == 0);
@@ -121,7 +124,7 @@ int main(void) {
     for (int b = 0; b <= 1; b++) {
         uint8_t raw = (uint8_t)b, buf[64];
         uint32_t bl =
-            kvlangScalarEncode(KVSPACE_KIND_BOOL, &raw, 1, buf, sizeof buf);
+            kvlangScalarToWire(KVSPACE_KIND_BOOL, &raw, 1, buf, sizeof buf);
         uint8_t *ref = NULL;
         uint32_t rl = 0;
         CHECK(kvspaceNewBool(raw, &ref, &rl) == 0);

@@ -15,9 +15,10 @@ durable 单句柄相干、后端装载。
 
 1. **执行核心**：取指-解码-执行大循环、call/return/br/goto、vthread 调度、native builtin 派发、`=`
    拷贝语义。
-2. **值语义与编解码**：headlenpow / langtype 的**唯一编解码器**在 kvspace 正典 codec（`kvspaceXvalueEncode` /
-   `kvspaceDecodeHead` / `kvspaceNewPtr`/`NewChar`/`NewBool`/`NewInt64`/
-   `NewFloat64`）；runtimec2 的 `xvalue.c` 只是其薄封装。langtype 串是类型的
+2. **值语义与读写点**：head 固定 8 字节（`len[6] u48 小端`、`storetype`、`ptr`，body 偏移恒 8），唯一 wire
+   读写点在前端——构造走 `kvspaceXvalueHeadNew*`/`Reserve`，读走 memcpy `kvspaceXvalueHead` struct +
+   `kvspaceXvalueHeadLen`，标准标量构造器 `kvspaceNewPtr`/`NewChar`/`NewBool`/`NewInt64`/`NewFloat64`；
+   langtype 在 `x‥langtype` attr key。runtimec2 的 `xvalue.c` 只是其薄封装。langtype 串是类型的
    唯一真相，怎么拼、怎么解，只此一处。
 3. **指令解码与签名校验**：`rwir_decode.c:RwirDecode`（稠密探查、遇空即停）、`/‥isa/<folded-op>`
 签名的读写码规范、
@@ -51,7 +52,7 @@ livebyte）。两组对外 C ABI：
 其中 `LangtypeValid`/`LangtypeMatch` 与正典 codec 的 head 解码，正是 **def langtype 与 langtype** 对外的
 两条 ABI（两者区别见 [[langtype签名类型表达式]]）：前者服务 **def langtype**（匹配侧——校验一条签名匹配
 类型、把一个值的 `(kind,ndim,dims)` 匹配进它），后者服务 **langtype**（解析侧——把 head 里一条类型串解析
-为 `(kind,ndim,dims,元素字节宽)`，事实源为 `kvspaceDecodeHead` 与 `kvlangKindexprParse`）。两者同吃一条
+为 `(kind,ndim,dims,元素字节宽)`，事实源为 `x‥langtype` attr key 与 `kvlangKindexprParse`）。两者同吃一条
 类型表达式串、共用唯一文法与 codec，差别只在**匹配** vs **解析**。
 
 内部模块：`xvalue.c`（XValue 编解码薄封装）、`langtype.c` + `langtypetable.c`（langtype 校验/匹配与我
@@ -77,11 +78,11 @@ layout 与 runtime 对**数据 store**不做特化：不 dlopen、不双后端�
 ```
 kvspaceConnect / Close / Clear
 kvspaceGet                       // 借用读：*out 指向后端常驻/回收空间，调用方不得 free
-kvspaceSetValue                  // 验证并同步写入完整 XValue 与 ro/vid 元数据
-kvspaceGetHead                   // 读 head 与独立 KV key 上的 ro/vid
+kvspaceSetValue                  // 验证并同步写入完整 XValue
+kvspaceGetHead                   // 读 head
 kvspaceListLen / ListAt / Del / DelTree / Cp / CpTree
 kvspaceMkindex / MkindexExt / RmindexExt / Watch
-kvspaceXvalueEncode / XvalueEncodeMode / DecodeHead
+kvspaceXvalueHeadNewNone / NewScalar / NewSlack / NewTensor / NewPtr / NewExt / NewCode / Reserve
 kvspaceNewPtr / NewChar / NewBool / NewInt64 / NewFloat64
 kvspaceResolveRef / GetByRef / SetPartByRef / SetValueByRef
                                  // 地址寻址：key→64 位地址是派生量，后端可不实现（前端退回按 key）

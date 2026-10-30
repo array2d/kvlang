@@ -13,10 +13,10 @@ fn sig(data: &[u8]) -> String {
     String::from_utf8_lossy(&b[5.min(b.len())..]).into_owned()
 }
 
-fn slot_text(data: &[u8]) -> String {
-    let k = kvkind::kind(data);
+fn slot_text(data: &[u8], lt: &str) -> String {
+    let k = kvkind::kind(data, lt);
     if k == "int64" || k == "bool" || k == "float64" {
-        kvkind::display(data)
+        kvkind::display(data, lt)
             .rsplit(':')
             .next()
             .unwrap_or("")
@@ -83,7 +83,11 @@ fn plane(kv: &mut Kv, fn_: &str) -> BTreeMap<i32, Inst> {
         let Some((row, col)) = parse_coord(c) else {
             continue;
         };
-        slots.insert((row, col), slot_text(&kv.get_one(&format!("{prefix}{c}"))));
+        let key = format!("{prefix}{c}");
+        slots.insert(
+            (row, col),
+            slot_text(&kv.get_one(&key), &kv.langtype_of(&key)),
+        );
     }
     let mut out = BTreeMap::new();
     for ((row, col), text) in slots {
@@ -139,11 +143,13 @@ fn labels_of(kv: &mut Kv, fn_: &str) -> HashMap<String, i32> {
         if n.is_empty() {
             continue;
         }
-        let v = kv.get_one(&format!("{dir}{n}"));
-        if kvkind::kind(&v) != "int64" {
+        let key = format!("{dir}{n}");
+        let v = kv.get_one(&key);
+        let lt = kv.langtype_of(&key);
+        if kvkind::kind(&v, &lt) != "int64" {
             continue;
         }
-        let disp = kvkind::display(&v);
+        let disp = kvkind::display(&v, &lt);
         let irseq: i32 = disp
             .split(':')
             .nth(1)
@@ -195,15 +201,17 @@ fn assert_jumps_are_int64(kv: &mut Kv, fn_: &str, p: &BTreeMap<i32, Inst>) {
         let prefix = format!("/lib/{fn_}/");
         let cols: &[i32] = if inst.op == "goto" { &[-1] } else { &[-2, -3] };
         for col in cols {
-            let v = kv.get_one(&format!("{prefix}[{n},{col}]"));
+            let key = format!("{prefix}[{n},{col}]");
+            let v = kv.get_one(&key);
+            let lt = kv.langtype_of(&key);
             assert_eq!(
-                kvkind::kind(&v),
+                kvkind::kind(&v, &lt),
                 "int64",
                 "{fn_} [{n},{col}] {} {}",
                 inst.op,
-                kvkind::display(&v)
+                kvkind::display(&v, &lt)
             );
-            let irseq: i32 = slot_text(&v).parse().unwrap();
+            let irseq: i32 = slot_text(&v, &lt).parse().unwrap();
             assert!(irseq >= 1, "{fn_} [{n}] {} target {irseq} < 1", inst.op);
             assert!(
                 p.contains_key(&irseq),
@@ -295,11 +303,13 @@ fn labeled_irseq_is_not_fallen_into() {
         if n.is_empty() {
             continue;
         }
-        let v = kv.get_one(&format!("{prefix}\u{2025}labels/{n}"));
-        if kvkind::kind(&v) != "int64" {
+        let key = format!("{prefix}\u{2025}labels/{n}");
+        let v = kv.get_one(&key);
+        let lt = kv.langtype_of(&key);
+        if kvkind::kind(&v, &lt) != "int64" {
             continue;
         }
-        let disp = kvkind::display(&v);
+        let disp = kvkind::display(&v, &lt);
         let irseq: i32 = disp
             .split(':')
             .nth(1)
@@ -345,14 +355,21 @@ fn br_true_false_are_int64() {
         if sig(&kv.get_one(&format!("/lib/f/[{row},0]"))) != "br" {
             continue;
         }
-        let t = kv.get_one(&format!("/lib/f/[{row},-2]"));
-        let f = kv.get_one(&format!("/lib/f/[{row},-3]"));
-        assert_eq!(kvkind::kind(&t), "int64", "br true {}", kvkind::display(&t));
+        let tk = format!("/lib/f/[{row},-2]");
+        let fk = format!("/lib/f/[{row},-3]");
+        let t = kv.get_one(&tk);
+        let f = kv.get_one(&fk);
         assert_eq!(
-            kvkind::kind(&f),
+            kvkind::kind(&t, &kv.langtype_of(&tk)),
+            "int64",
+            "br true {}",
+            kvkind::display(&t, &kv.langtype_of(&tk))
+        );
+        assert_eq!(
+            kvkind::kind(&f, &kv.langtype_of(&fk)),
             "int64",
             "br false {}",
-            kvkind::display(&f)
+            kvkind::display(&f, &kv.langtype_of(&fk))
         );
         saw_br = true;
     }

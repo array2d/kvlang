@@ -15,18 +15,26 @@ pub struct Engine {
 }
 
 impl Engine {
-    // ── kvspace 读写（绝对路径，char/utf8 与 char/utf32 编解码）─────────
+    // ── kvspace 读写（绝对路径，char/utf8 与 char/utf32 互转）─────────
     /// 通用类型化写入：任意 kind + body 字节 + dims（空=标量 ndim0）。
     /// set_kv 与各 rwir 的类型化输出共用，避免每种 kind 一个专用写函数。
-    pub fn set_xvalue_encoded(&self, key: &str, kind: &str, raw: &[u8], dims: &[i32]) {
-        let value = xvalue_encode(kind, raw, dims);
+    pub fn set_xvalue_wire(&self, key: &str, kind: &str, raw: &[u8], dims: &[i32]) {
+        let value = xvalue_to_wire(kind, raw, dims);
         assert!(!value.is_empty(), "invalid XValue for {key}");
         self.set_xvalue(key, &value);
     }
+    /// 普通文本值（含中文）：utf32 编码 + 写 langtype attr。
     pub fn set_kv(&self, key: &str, val: &str) {
         let utf32: Vec<u32> = val.chars().map(|c| c as u32).collect();
         let raw: Vec<u8> = utf32.iter().flat_map(|v| v.to_le_bytes()).collect();
-        self.set_xvalue_encoded(key, "char/utf32", &raw, &[utf32.len() as i32]);
+        self.set_xvalue_wire(key, "char/utf32", &raw, &[utf32.len() as i32]);
+    }
+
+    /// 系统文本（`‥pc`/`‥status` 等，末段含 ‥）：纯字节 SLACK、不写 attr——对齐
+    /// runtime 的 write_text（runtime 侧 read_text 对无 attr 键按纯字节文本读）。
+    pub fn set_sys_text(&self, key: &str, val: &str) {
+        let value = xvalue_to_wire("char/utf8", val.as_bytes(), &[val.len() as i32]);
+        self.set_xvalue(key, &value);
     }
     /// key 是否存在（不取值；容器类值也能判）。
     pub fn kv_exists(&self, key: &str) -> bool {
@@ -44,7 +52,7 @@ impl Engine {
                 return String::new();
             }
             let d = std::slice::from_raw_parts(out, olen as usize);
-            let kx = xh_langtype(d);
+            let kx = crate::ffi::langtype_of(self.kv, key);
             let body = xh_body_slice(d);
             if kx.ends_with("char/utf32") {
                 body.chunks_exact(4)
@@ -60,18 +68,15 @@ impl Engine {
     }
 
     pub fn set_ext_handle(&self, key: &str, target_langtype: &str, locator: &str) {
+        // #566：@ext 句柄 = NewExt（body=定位串）；langtype 走 x‥langtype attr key，
+        // 不再写进 head（target_langtype 参数仅保留签名）。
+        let _ = target_langtype;
         unsafe {
             let mut out = null_mut();
-            let mut len = 0u32;
-            let rc = kvspaceXvalueEncodeMode(
-                cs(target_langtype).as_ptr(),
+            let mut len = 0u64;
+            let rc = kvspaceXvalueHeadNewExt(
                 locator.as_ptr(),
                 locator.len() as u32,
-                std::ptr::null(),
-                0,
-                2,
-                0,
-                0,
                 &mut out,
                 &mut len,
             );
@@ -90,7 +95,7 @@ impl Engine {
         }
         let r = if xh_is_ptr(&xvalue) {
             1
-        } else if xh_class(&xvalue) == 3 {
+        } else if xh_is_ext(&xvalue) {
             2
         } else {
             0
@@ -123,9 +128,9 @@ impl Engine {
         let p = take(unsafe { kvlangRwirextResolveReadPath(self.kv, cs(pc).as_ptr(), idx) });
         if !p.is_empty() {
             let xv = self.get_xvalue(&p);
-            if !xv.is_empty() && !xh_is_ptr(&xv) && xh_class(&xv) == 0 {
+            if !xv.is_empty() && !xh_is_ptr(&xv) && xh_storetype(&xv) == 0 {
                 let body = xh_body_slice(&xv);
-                match (xh_langtype(&xv).as_str(), body.len()) {
+                match (crate::ffi::langtype_of(self.kv, &p).as_str(), body.len()) {
                     ("float64", 8) => return f64::from_le_bytes(body.try_into().unwrap()),
                     ("float32", 4) => return f32::from_le_bytes(body.try_into().unwrap()) as f64,
                     ("int64", 8) => return i64::from_le_bytes(body.try_into().unwrap()) as f64,
@@ -169,7 +174,7 @@ impl Engine {
         }
         let r = if xh_is_ptr(&xvalue) {
             1
-        } else if xh_class(&xvalue) == 3 {
+        } else if xh_is_ext(&xvalue) {
             2
         } else {
             0
@@ -182,7 +187,7 @@ impl Engine {
     }
 
     pub fn set_str_list(&self, dst: &str, items: &[String]) {
-        self.set_xvalue_encoded(dst, "[int64]·[]char/utf32", &[], &[]);
+        self.set_xvalue_wire(dst, "[int64]·[]char/utf32", &[], &[]);
         for (i, it) in items.iter().enumerate() {
             self.set_kv(&format!("{dst}\u{b7}[{i}]"), it);
         }
@@ -418,7 +423,7 @@ impl Engine {
             let nxt = take(unsafe { kvlangRwirextNextPc(cs(&c).as_ptr()) });
             // pc 可能属子 vthread（native vthread·run 冒泡上来）：nextpc 写回其所属 vid，不写主 vid。
             let sub = c.split('/').nth(2).unwrap_or(vid);
-            self.set_kv(&format!("/vthread/{sub}/\u{2025}pc"), &nxt);
+            self.set_sys_text(&format!("/vthread/{sub}/\u{2025}pc"), &nxt);
         }
     }
 }

@@ -27,6 +27,17 @@ void kvlangKvspaceDisconnect(kvspace_t *k) {
     free(k);
 }
 
+/* 借用读顺带读 attr key langtype（v2：#566 类型不在 wire）。
+ * GetHead 失败/无 attr key → langtype_len=0（None 判据的一部分）。 */
+static void get_one_fill_langtype(kvspace_t *k, const char *key,
+                                  kvlangXvalue_t *out) {
+    kvspaceHead_t h;
+    if (kvspaceGetHead(k->handle, key, &h) == 0)
+        kvlangXvalueSetHeadLangtype(out, &h);
+    else
+        kvlangXvalueSetLangtype(out, "", 0);
+}
+
 /* Borrowed read (resolve=0). Empty -> out len=0. */
 int kvlangKvspaceGetOne(kvspace_t *k, const char *key, kvlangXvalue_t *out) {
     kvlangXvalueZero(out);
@@ -37,6 +48,7 @@ int kvlangKvspaceGetOne(kvspace_t *k, const char *key, kvlangXvalue_t *out) {
     if (d && len > 0) {
         out->bytes = d;
         out->length = len;
+        get_one_fill_langtype(k, key, out);
     }
     return 0;
 }
@@ -89,9 +101,10 @@ int kvlangKvspaceGetHead(kvspace_t *k, const char *key, kvspaceHead_t *out) {
 int kvlangKvspaceSet(kvspace_t *k, const kvlangKvPair_t *pairs, int n, char *err, uint32_t err_cap) {
     for (int i = 0; i < n; i++) {
         const kvlangXvalue_t *v = &pairs[i].value;
-        if (v->bytes && v->length >= XH_PREFIX)
-            kvlangBodyInvalidateKind(pairs[i].key, xh_langtype(v->bytes),
-                                     xh_langtype_len(v->bytes));
+        if (v->bytes && v->length >= KVSPACE_XVALUE_HEAD_LEN)
+            kvlangBodyInvalidateKind(pairs[i].key,
+                                     (const uint8_t *)v->langtype,
+                                     v->langtype_len);
         else
             kvlangBodyInvalidate(pairs[i].key);
         if (kvlangXvalueNone(v)) {
@@ -100,7 +113,7 @@ int kvlangKvspaceSet(kvspace_t *k, const kvlangKvPair_t *pairs, int n, char *err
                 return -1;
             continue;
         }
-        if (kvspaceSetValue(k->handle, pairs[i].key, v->bytes, v->length, 0, 0,
+        if (kvspaceSetValue(k->handle, pairs[i].key, v->bytes, v->length,
                             err, err_cap) != 0)
             return -1;
     }

@@ -53,6 +53,12 @@ static int execute_yield(char **out_pc, char *next_pc) {
     return 1;
 }
 
+/* v2 SHORT inline 标量 wire 判定（rview 快路径）。 */
+static inline bool rview_scalar(const uint8_t *d) {
+    return d && xh_storetype(d) == KVSPACE_XVALUE_ST_SHORT &&
+           xh_ptr(d) == KVSPACE_XVALUE_PTR_INLINE;
+}
+
 /* 读一个操作数目标值；None 合法。地址未解析时按 key 读并补一次绑定。 */
 static int operand_load(kvspace_t *kv, kvlangBoundCell_t *cell, uint32_t pack,
                         kvlangXvalue_t *out) {
@@ -61,20 +67,27 @@ static int operand_load(kvspace_t *kv, kvlangBoundCell_t *cell, uint32_t pack,
     if (pack != 0 && kvlangReadViewTry(kv, cell, pack, out))
         return 0;
     kvspaceKeyOff *ko = &cell->off;
+    /* v2：rview 是 SHORT inline 标量视图（langtype 不在 wire，取 cell 静态声明）。 */
     if (cell->rview_state == 1) {
         if ((++cell->rview_hits & 127u) != 0 &&
-            cell->rview_bytes[0] == 5 && (cell->rview_bytes[1] & 7u) == 0) {
+            rview_scalar(cell->rview_bytes)) {
             out->bytes = cell->rview_bytes;
             out->length = cell->rview_len;
+            if (cell->type && cell->type[0])
+                kvlangXvalueSetLangtype(out, cell->type,
+                                        (uint32_t)strlen(cell->type));
         } else {
             uint8_t *d = NULL;
             uint32_t len = 0;
             if (kvspaceGetByRef(kv->handle, &ko->off, cell->key, &d, &len) != 0)
                 return -1;
             if (d == cell->rview_bytes && len == cell->rview_len &&
-                d[0] == 5 && (d[1] & 7u) == 0) {
+                rview_scalar(d)) {
                 out->bytes = d;
                 out->length = len;
+                if (cell->type && cell->type[0])
+                    kvlangXvalueSetLangtype(out, cell->type,
+                                            (uint32_t)strlen(cell->type));
             } else {
                 cell->rview_bytes = NULL;
                 cell->rview_len = 0;
@@ -94,6 +107,9 @@ static int operand_load(kvspace_t *kv, kvlangBoundCell_t *cell, uint32_t pack,
         if (d && len > 0) {
             out->bytes = d;
             out->length = len;
+            if (cell->type && cell->type[0])
+                kvlangXvalueSetLangtype(out, cell->type,
+                                        (uint32_t)strlen(cell->type));
             if (cell->rview_state == 0 && ++cell->rview_hits >= 8)
                 kvlangOperandViewPromote(kv, cell, cell->key, d, len);
         }

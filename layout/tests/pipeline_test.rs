@@ -37,8 +37,9 @@ fn compile_simple_func() {
     compile(&mut kv, src).unwrap();
 
     // 函数签名
-    let sig_val = kv.get_one("/lib/sum/[0,0]");
-    assert_eq!(kvkind::kind(&sig_val), "rwfunc");
+    let sig_key = "/lib/sum/[0,0]";
+    let sig_val = kv.get_one(sig_key);
+    assert_eq!(kvkind::kind(&sig_val, &kv.langtype_of(sig_key)), "rwfunc");
     assert_eq!(body(&sig_val).len(), 5);
     let b = body(&sig_val);
     assert_eq!(kvkind::rwfunc_num_reads(b), 2);
@@ -55,8 +56,9 @@ fn compile_simple_func() {
     assert_eq!(types, vec!["int64", "int64", "int64"]);
 
     // 指令（layout 类型特化：opcode = int64·add）
-    let op = kv.get_one("/lib/sum/[1,0]");
-    assert_eq!(kvkind::kind(&op), "rwir");
+    let op_key = "/lib/sum/[1,0]";
+    let op = kv.get_one(op_key);
+    assert_eq!(kvkind::kind(&op, &kv.langtype_of(op_key)), "rwir");
     assert_eq!(sig(&op), "int64·add");
     assert_eq!(sig(&kv.get_one("/lib/sum/[1,-1]")), "*[0,-1]\0int64");
     assert_eq!(sig(&kv.get_one("/lib/sum/[1,-2]")), "*[0,-2]\0int64");
@@ -64,8 +66,9 @@ fn compile_simple_func() {
     assert_eq!(sig(&kv.get_one("/lib/sum/[2,0]")), "return");
 
     // 源码副本
-    let src_val = kv.get_one("/lib/sum.src");
-    assert_eq!(kvkind::kind(&src_val), "char/utf8");
+    let src_key = "/lib/sum.src";
+    let src_val = kv.get_one(src_key);
+    assert_eq!(kvkind::kind(&src_val, &kv.langtype_of(src_key)), "char/utf8");
 }
 
 #[test]
@@ -75,12 +78,14 @@ fn compile_string_literal_and_lib() {
     compile(&mut kv, src).unwrap();
 
     // 函数在 /lib/p·hi/ 下（lib 块 pkg 前缀）
-    let sig_val = kv.get_one("/lib/p·hi/[0,0]");
-    assert_eq!(kvkind::kind(&sig_val), "rwfunc");
+    let sig_key = "/lib/p·hi/[0,0]";
+    let sig_val = kv.get_one(sig_key);
+    assert_eq!(kvkind::kind(&sig_val, &kv.langtype_of(sig_key)), "rwfunc");
 
     // 字符串字面量读槽 → char/utf32（UTF-32 LE 码点）
-    let r = kv.get_one("/lib/p·hi/[1,-1]");
-    assert_eq!(kvkind::kind(&r), "char/utf32");
+    let r_key = "/lib/p·hi/[1,-1]";
+    let r = kv.get_one(r_key);
+    assert_eq!(kvkind::kind(&r, &kv.langtype_of(r_key)), "char/utf32");
     let b = body(&r);
     let s: String = b
         .chunks_exact(4)
@@ -95,8 +100,9 @@ fn compile_multiline_string_literal() {
     let src = "lib m { rwfunc ml() -> () {\n    r#\"hello\nworld\"# -> _\n} }\n";
     compile(&mut kv, src).unwrap();
 
-    let r = kv.get_one("/lib/m·ml/[1,-1]");
-    assert_eq!(kvkind::kind(&r), "char/utf32");
+    let r_key = "/lib/m·ml/[1,-1]";
+    let r = kv.get_one(r_key);
+    assert_eq!(kvkind::kind(&r, &kv.langtype_of(r_key)), "char/utf32");
     let b = body(&r);
     let s: String = b
         .chunks_exact(4)
@@ -111,8 +117,9 @@ fn compile_control_flow_is_single_plane() {
     let src = "rwfunc f(X:int64) -> (Y:int64) {\n    if (X > 0) {\n        X -> Y\n    } else {\n        0 -> Y\n    }\n}\n";
     compile(&mut kv, src).unwrap();
 
-    let sig_val = kv.get_one("/lib/f/[0,0]");
-    assert_eq!(kvkind::kind(&sig_val), "rwfunc");
+    let sig_key = "/lib/f/[0,0]";
+    let sig_val = kv.get_one(sig_key);
+    assert_eq!(kvkind::kind(&sig_val, &kv.langtype_of(sig_key)), "rwfunc");
     let children = kv.list("/lib/f/", false, false);
     let old_scope = children.iter().any(|c| {
         let b = c.trim_end_matches('/');
@@ -130,23 +137,25 @@ fn compile_control_flow_is_single_plane() {
         .map(|c| c.trim_end_matches('/'))
         .find(|c| c.contains("_if_"));
     assert!(if_name.is_some(), "‥labels={labels:?}");
-    let if_irseq = kv.get_one(&format!("/lib/f/\u{2025}labels/{}", if_name.unwrap()));
+    let if_key = format!("/lib/f/\u{2025}labels/{}", if_name.unwrap());
+    let if_irseq = kv.get_one(&if_key);
     assert_eq!(
-        kvkind::kind(&if_irseq),
+        kvkind::kind(&if_irseq, &kv.langtype_of(&if_key)),
         "int64",
         "label kind={} labels={labels:?}",
-        kvkind::display(&if_irseq)
+        kvkind::display(&if_irseq, &kv.langtype_of(&if_key))
     );
 
     // irseq 1 is preamble goto; target is int64
     let goto_op = kv.get_one("/lib/f/[1,0]");
     assert_eq!(sig(&goto_op), "goto");
-    let tgt = kv.get_one("/lib/f/[1,-1]");
+    let tgt_key = "/lib/f/[1,-1]";
+    let tgt = kv.get_one(tgt_key);
     assert_eq!(
-        kvkind::kind(&tgt),
+        kvkind::kind(&tgt, &kv.langtype_of(tgt_key)),
         "int64",
         "goto target {}",
-        kvkind::display(&tgt)
+        kvkind::display(&tgt, &kv.langtype_of(tgt_key))
     );
 }
 
@@ -178,8 +187,9 @@ fn compile_while_goto_targets_are_int64() {
             .unwrap()
             .parse()
             .unwrap();
-        let tgt = kv.get_one(&format!("/lib/sum_to/[{row},-1]"));
-        assert_eq!(kvkind::kind(&tgt), "int64");
+        let tgt_key = format!("/lib/sum_to/[{row},-1]");
+        let tgt = kv.get_one(&tgt_key);
+        assert_eq!(kvkind::kind(&tgt, &kv.langtype_of(&tgt_key)), "int64");
         saw_int_goto = true;
     }
     assert!(saw_int_goto, "no goto found in {children:?}");

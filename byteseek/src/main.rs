@@ -9,6 +9,8 @@
 //!   byteseek format <file>   格式化输出到 stdout
 //!   byteseek printlib <file> [prefix]  layout 该文件后，把 /lib（或 prefix）子树重建为可运行 kvlang + 槽位注释（不读 .src）
 //!   byteseek --lib p1:p2:…   layout 各路径下所有 .kv → run 各 lib 的 init（pkg 取自源码 `lib` 声明，同 stdlib）
+//!   byteseek <arg...> --no-stdlib  任意位置：跳过 stdlib 的 layout&run 引导（benchmark 隔离用），
+//!                                  只 layout 用户文件后直接 run 入口，不加载/运行内置库
 //! 驱动循环：executeVthread 主导执行，遇 rwir 停下；就地 rwir（print/json/http/…）
 //! 连续批处理 + nextPc；外部 rwir（如 numpy）handoff 给扩展进程；native/控制帧写回 pc。
 #![allow(non_snake_case, non_camel_case_types)]
@@ -46,6 +48,11 @@ fn main() {
 
     let args: Vec<String> = std::env::args().skip(1).collect();
     let dsn = dsn();
+
+    // `--no-stdlib`（任意位置）：跳过 stdlib 的 layout&run 引导（benchmark 隔离用），
+    // 仅把用户文件 layout 进 kvspace 后直接 run 入口，不加载/运行任何内置库。
+    let no_stdlib = args.iter().any(|a| a == "--no-stdlib");
+    let args: Vec<String> = args.into_iter().filter(|a| a != "--no-stdlib").collect();
 
     match args.as_slice() {
         // ── 仅 layout / 校验 / 格式化（不需 runtime）───────────────────
@@ -110,14 +117,14 @@ fn main() {
 
         // ── stdlib 先 layout&run → 再 layout 内存源码 → 运行（散语句合成 init）──
         [cmd, src] if cmd == "-c" => {
-            let eng = boot(&dsn);
+            let eng = boot(&dsn, no_stdlib);
             layout_code_or_die(src, &dsn);
             drive(&eng, "init");
         }
 
         // ── stdlib 先 layout&run → 再 layout .kv 文件 → 运行（约定入口 test）──
         [x] if x.ends_with(".kv") && std::path::Path::new(x).is_file() => {
-            let eng = boot(&dsn);
+            let eng = boot(&dsn, no_stdlib);
             layout_file_or_die(x, &dsn);
             drive(&eng, "test");
         }
@@ -143,7 +150,7 @@ fn main() {
 
         // ── vthread 两步分离：create 只创建（bootstrap）并把 vid 打到 stdout，不运行 ──
         [cmd, funcname] if cmd == "create" => {
-            let eng = boot(&dsn);
+            let eng = boot(&dsn, no_stdlib);
             let vid = take(unsafe {
                 kvlangRuntimeBootstrap(eng.rt, cs(funcname).as_ptr(), null_mut(), 0)
             });
@@ -154,17 +161,17 @@ fn main() {
             println!("{vid}"); // vid 是命令结果 → stdout（区别于运行诊断日志）
         }
         // ── run <vid>：以 vid 为参数从持久化 pc 跑到结束（也即崩溃恢复：续跑已有 vthread）──
-        [cmd, vid] if cmd == "run" => drive_vid(&boot(&dsn), vid),
+        [cmd, vid] if cmd == "run" => drive_vid(&boot(&dsn, no_stdlib), vid),
 
         // ── 运行已入库的显式入口（tutorial 测试主路径：pkg·func 或裸名，pkg 可空）──
-        [x] => drive(&boot(&dsn), x),
+        [x] => drive(&boot(&dsn, no_stdlib), x),
         // ── --lib p1:p2:… → layout 各路径下所有 .kv（相对名=pkg），复用 stdlib 的 run init 引导──
         [flag, lib] if flag == "--lib" => {
             if lib.is_empty() {
                 byteseek::elog!("need entry");
                 std::process::exit(1);
             }
-            let eng = boot(&dsn);
+            let eng = boot(&dsn, no_stdlib);
             let libs = collect_libs(lib);
             let inits = eng.layout_libs(&libs);
             eng.run_inits(&inits);
@@ -282,7 +289,7 @@ fn layout_file_or_die(path: &str, dsn: &str) {
 
 /// 连接 runtime+kvspace，注册就地 rwir，layout stdlib 并 run 其 init（一次性引导）。
 /// 先于用户代码 layout —— stdlib 常量（如 /lib/math·Pi）在此落值，用户代码随后可读。
-fn boot(dsn: &str) -> Engine {
+fn boot(dsn: &str, no_stdlib: bool) -> Engine {
     let rt = unsafe { kvlangRuntimeConnect(cs(dsn).as_ptr()) };
     if rt.is_null() {
         byteseek::elog!("kvlangRuntimeConnect 失败: {dsn}");
@@ -298,8 +305,10 @@ fn boot(dsn: &str) -> Engine {
         ext: None,
     };
     eng.register();
-    let inits = eng.layout_stdlib();
-    eng.run_inits(&inits);
+    if !no_stdlib {
+        let inits = eng.layout_stdlib();
+        eng.run_inits(&inits);
+    }
     eng
 }
 
@@ -332,7 +341,7 @@ fn drive_vid(eng: &Engine, vid: &str) {
             let st = eng.get_kv(&format!("/vthread/{vid}/\u{2025}status"));
             let msg = eng.get_kv(&format!("/vthread/{vid}/\u{2025}msg"));
             let st = if st.is_empty() { "error".into() } else { st };
-            byteseek::elog!("vthread {vid} {st}: {msg}");
+            byteseek::elog!("vthread {vid} rc={rc} {st}: {msg}");
             std::process::exit(1);
         }
 
@@ -370,7 +379,7 @@ fn drive_vid(eng: &Engine, vid: &str) {
             let nxt = take(unsafe { kvlangRwirextNextPc(cs(&c).as_ptr()) });
             // 就地派发可能跳到子 vthread：接下来停在的 pc 属谁，就推进谁的‥pc。
             let nsub = nxt.split('/').nth(2).unwrap_or(vid);
-            eng.set_kv(&format!("/vthread/{nsub}/\u{2025}pc"), &nxt);
+            eng.set_sys_text(&format!("/vthread/{nsub}/\u{2025}pc"), &nxt);
             c = nxt;
         };
 
@@ -389,7 +398,7 @@ fn drive_vid(eng: &Engine, vid: &str) {
                 std::process::exit(1);
             }
         } else {
-            eng.set_kv(&format!("/vthread/{sub}/\u{2025}pc"), &c);
+            eng.set_sys_text(&format!("/vthread/{sub}/\u{2025}pc"), &c);
         }
     }
     // kv 属 rt（kvlangRuntimeKvspaceHandle），进程退出时随 rt 回收，此处不 close。

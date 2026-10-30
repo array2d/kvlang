@@ -1,36 +1,21 @@
 // 欢迎加入kvspace世界
 lib kvlang/spec/类型系统/总体方案 {
-	r####"# 类型系统总体方案：xvalue head 的定长头
+	r####"# 类型系统总体方案：xvalue head 的固定头
 
-> **本卷即现行方案**：#329 已把 head 改为**定长头**（32 / 64 / 128），取代 v0.2.9 的
-> 「三正交各占独立字节」。本卷各章与其它各卷均据此书写。
+> **本卷即现行方案**：#566 已把 head 改为**固定 8 字节头**，类型（langtype）移出 head
+> 到 `x‥langtype` attr key。本卷各章与其它各卷均据此书写。
 
-每个 XValue 落入 kvspace 时，head 定长、body 紧随其后：
+每个 XValue 落入 kvspace 时，head 固定 8 字节、body 紧随其后：
 
-	head = [pow:u8][flags:u8][a:u64 LE][b:u64 LE][langtype][padding]
-	headlen = 1 << pow
-	body = head + headlen
+	head = [len:u48 LE][storetype:u8][ptr:u8]
+	body = head + 8
 
-- **`pow`（偏移 0）** — headlen 的以 2 为底对数。**body 偏移 = `1 << pow`**，一步移位即得，
-  无需解码。
-- **`flags`（偏移 1）** — 低 2 位是 **storage class**：0 短定长 / 1 有冗余的长度 / 2 长定长 /
-  3 扩展世界；**bit2 是指针位**。`ref` 不是独立字节，而是这个字节的派生视图。
-- **`a` / `b`（偏移 2 / 10）** — 按 class 解释：class 1 =（有效字节数, 容量），class 2 =
-  （numel, 元素宽），class 0 / 3 按类型定。
-- **`langtype`（偏移 18 起）** — 语义类型串，**占满到 headlen 为止**（无独立长度字段、
-  无 NUL 终止符）；类型串过长时由 codec 选更大的 pow 档。
+- **`len`（偏移 0-5）** — body 有效字节数，小端 u48，容量 2^48。
+- **`storetype`（偏移 6）** — 存储形态：0 短定长 / 1 变长 / 2 长定长 / 3 扩展世界。
+- **`ptr`（偏移 7）** — 0=inline、1=ptr、2=@ext。
+- **类型不在 head** — langtype 存 `x‥langtype` attr key（明文 UTF-8 串，含形状段）。
 
-**codec 会解析 langtype**（`short_width` 查标量宽度、`parse_tensor` 解析 `[d0,d1]T`、
-`slack_count` 统计字符数）——它是分类与定位的依据，不是透传字节。
-
-## 与 v0.2.9（#239）的差异
-
-| | v0.2.9 | 现行（#329） |
-|---|---|---|
-| head 长度 | `headlen u16`，变长 | `1 << pow`，32 / 64 / 128 |
-| ref | 独立 1 字节 | 并入 `flags` bit2 |
-| storetype | 独立 1 字节 | 并入 `flags` 低 2 位 |
-| body 长度 | `body_len u32` + storetype 物理字段 | `a` / `b` 按 class 解释 |
-| ro / vid | head 内联 | 移入 `/.kvspace-meta/` sidecar |
+**codec 不解析 langtype**：后端是纯存储层——body 偏移恒为 8，类型事实源在 attr key，
+由 vmkv（明文栈）读取解析。
 "#### -> /lib/kvlang/spec/类型系统/总体方案
 }

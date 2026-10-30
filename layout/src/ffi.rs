@@ -29,11 +29,11 @@ extern "C" {
         key: *const c_char,
         value: *const u8,
         value_len: u32,
-        ro: u8,
-        vid: u32,
         err: *mut c_char,
         err_cap: u32,
     ) -> c_int;
+    /// 读 head + x‥langtype attr key：缺失/空 → 非 0。langtype 为明文事实源。
+    fn kvspaceGetHead(h: Handle, key: *const c_char, out: *mut kvspaceHead_t) -> c_int;
     fn kvspaceDel(
         h: Handle,
         keys: *const *const c_char,
@@ -67,17 +67,37 @@ extern "C" {
         err: *mut c_char,
         err_cap: u32,
     ) -> c_int;
-    fn kvspaceXvalueEncode(
-        kind: *const c_char,
+    /// 固定 8 字节 head 构造器（直接 memcpy struct + body）。
+    fn kvspaceXvalueHeadNewNone(out: *mut *mut u8, out_len: *mut u64) -> c_int;
+    fn kvspaceXvalueHeadNewScalar(
+        storetype: u8,
         raw: *const u8,
         raw_len: u32,
-        dims: *const i32,
-        ndim: i32,
         out: *mut *mut u8,
-        out_len: *mut u32,
+        out_len: *mut u64,
     ) -> c_int;
-    #[allow(dead_code)] // 保留绑定（外部 ABI 用）；调用点已改为原位字节访问。
-    fn kvspaceDecodeHead(data: *const u8, data_len: u32, out: *mut kvspaceHead_t) -> c_int;
+    fn kvspaceXvalueHeadNewSlack(
+        data: *const u8,
+        data_len: u64,
+        cap: u64,
+        out: *mut *mut u8,
+        out_len: *mut u64,
+    ) -> c_int;
+    fn kvspaceXvalueHeadNewTensor(
+        dims: *const u64,
+        ndim: u32,
+        raw: *const u8,
+        raw_len: u64,
+        out: *mut *mut u8,
+        out_len: *mut u64,
+    ) -> c_int;
+    fn kvspaceXvalueHeadNewCode(
+        body: *const u8,
+        body_len: u64,
+        cap: u64,
+        out: *mut *mut u8,
+        out_len: *mut u64,
+    ) -> c_int;
 
     fn kvspaceNewChar(bytes: *const u8, len: u32, out: *mut *mut u8, out_len: *mut u32) -> c_int;
     fn kvspaceNewBool(v: u8, out: *mut *mut u8, out_len: *mut u32) -> c_int;
@@ -86,14 +106,14 @@ extern "C" {
 }
 
 /// XValueHead 解码结果（与 kvspace/include/kvspace/kvspace.h 的 kvspaceHead_t 逐字段对齐）。
-/// 三正交轴 ref×storetype×langtype；langtype 为语义类型真相（含 [dims]、无 ptr/ext 前缀）。
+/// 三正交轴 ref×storetype×langtype；langtype 为语义类型真相（含 [dims]、无 ptr/ext 前缀），
+/// 由 kvspaceGetHead 从 x‥langtype attr key 读入（不在 head 内）。
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct kvspaceHead_t {
     pub headlen: u16,
     pub r#ref: u8,
     pub storetype: u8,
-    pub ro: u8,
-    pub vid: u32,
     pub body_len: i32,
     pub ndim: i32,
     pub dims: [i32; 8],
@@ -103,85 +123,51 @@ pub struct kvspaceHead_t {
     pub body_cap: u64,
 }
 
-// ── 原位 head 访问（与 C 侧 xh_* 对齐：偏移直取，不建 328B head、不校验）──
+// ── 原位 head 访问（v2 固定 8 字节头，#566：偏移直取，不建结构、不校验）──
 
-/// wire: [pow:u8][flags:u8][a:u64le][b:u64le][langtype][padding][body]。
-pub const XH_PREFIX: usize = 18;
+/// wire: [len:u48 LE@0-5][storetype:u8@6][ptr:u8@7][body@8]；body 偏移恒 = 8。
+pub const PREFIX: usize = 8;
 
+/// u48 小端 body 长度（offset 0-5）。data 过短 → 0。
 #[inline]
-fn xh_headlen(data: &[u8]) -> usize {
-    1usize << data[0]
+pub fn xh_len(data: &[u8]) -> u64 {
+    let b = data.get(0..6).unwrap_or(&[]);
+    let mut v = 0u64;
+    for i in (0..b.len()).rev() {
+        v = (v << 8) | u64::from(b[i]);
+    }
+    v
 }
+/// storetype（offset 6）；data 过短 → 0。
 #[inline]
-fn xh_class(data: &[u8]) -> u8 {
-    data[1] & 3
+pub fn xh_storetype(data: &[u8]) -> u8 {
+    data.get(6).copied().unwrap_or(0)
+}
+/// ptr（offset 7）：0 inline / 1 PTR / 2 EXT；data 过短 → 0。
+#[inline]
+pub fn xh_ptr(data: &[u8]) -> u8 {
+    data.get(7).copied().unwrap_or(0)
 }
 #[inline]
 pub fn xh_is_ptr(data: &[u8]) -> bool {
-    data[1] & 4 != 0
+    xh_ptr(data) == 1
 }
+/// None：空字节，或固定头 len=0 且非 ptr/ext（KVSPACE_XVALUE_PTR_INLINE 的 SHORT 空值）。
 #[inline]
 pub fn xh_is_none(data: &[u8]) -> bool {
-    data.len() > XH_PREFIX && data[1] == 0 && data[XH_PREFIX] == 0
-}
-#[inline]
-fn xh_a(data: &[u8]) -> u64 {
-    u64::from_le_bytes(data[2..10].try_into().unwrap())
-}
-#[inline]
-fn xh_b(data: &[u8]) -> u64 {
-    u64::from_le_bytes(data[10..18].try_into().unwrap())
+    data.is_empty() || (data.len() >= PREFIX && xh_len(data) == 0 && xh_ptr(data) == 0)
 }
 
-/// wire 内 langtype 串（headlen 内首个 NUL 前）。data 过短 → ""。
-pub fn xh_langtype(data: &[u8]) -> String {
-    if data.len() <= XH_PREFIX {
-        return String::new();
-    }
-    let hl = xh_headlen(data).min(data.len());
-    let end = data[XH_PREFIX..hl]
-        .iter()
-        .position(|&b| b == 0)
-        .map(|i| XH_PREFIX + i)
-        .unwrap_or(hl);
-    String::from_utf8_lossy(&data[XH_PREFIX..end]).into_owned()
-}
-
-/// class0 标量宽度（按 base kind 查表；def rwir 特例 5；其余 0）。
-fn scalar_width(kind: &str) -> usize {
-    match kind {
-        "bool" | "int8" | "uint8" => 1,
-        "int16" | "uint16" => 2,
-        "int32" | "uint32" | "float32" => 4,
-        "int64" | "uint64" | "float64" | "time" | "duration" => 8,
-        "def rwir" => 5,
-        _ => 0,
-    }
-}
-
-/// body 内容长度：class0 标量宽度 / class1 slack 与 class3 ext = a / class2 tensor = a*b。
-pub fn xh_content_len(data: &[u8]) -> usize {
-    if data.len() < XH_PREFIX {
-        return 0;
-    }
-    match xh_class(data) {
-        0 => scalar_width(&xh_langtype(data)),
-        2 => (xh_a(data) * xh_b(data)) as usize,
-        _ => xh_a(data) as usize,
-    }
-}
-
-/// body 切片（按 headlen 偏移 + class 推导长度）；越界 → 空。
+/// body 切片（偏移恒 = PREFIX，长度 = len）；越界 → 空。
 pub fn xh_body_slice(data: &[u8]) -> &[u8] {
-    if data.len() < XH_PREFIX {
+    let len = xh_len(data) as usize;
+    let Some(end) = PREFIX.checked_add(len) else {
+        return &[];
+    };
+    if end > data.len() {
         return &[];
     }
-    let off = xh_headlen(data);
-    let len = xh_content_len(data);
-    if off + len > data.len() {
-        return &[];
-    }
-    &data[off..off + len]
+    &data[PREFIX..end]
 }
 
 // ── 内部助手 ─────────────────────────────────────────────────────────
@@ -206,6 +192,22 @@ fn call_codec(f: impl FnOnce(*mut *mut u8, *mut u32) -> c_int) -> Vec<u8> {
     let mut out_len: u32 = 0;
     f(&mut out, &mut out_len);
     if out.is_null() || out_len == 0 {
+        return Vec::new();
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(out, out_len as usize) }.to_vec();
+    unsafe { free(out as *mut c_void) };
+    bytes
+}
+
+/// 固定头构造器调用（New* 的 out_len 为 u64）：成功且 total<=u32::MAX 才转 u32。
+fn call_codec64(f: impl FnOnce(*mut *mut u8, *mut u64) -> c_int) -> Vec<u8> {
+    let mut out: *mut u8 = std::ptr::null_mut();
+    let mut out_len: u64 = 0;
+    f(&mut out, &mut out_len);
+    if out.is_null() || out_len == 0 || out_len > u32::MAX as u64 {
+        if !out.is_null() {
+            unsafe { free(out as *mut c_void) };
+        }
         return Vec::new();
     }
     let bytes = unsafe { std::slice::from_raw_parts(out, out_len as usize) }.to_vec();
@@ -247,37 +249,84 @@ impl Kv {
         }
     }
 
-    pub fn set(&mut self, pairs: &[(String, Vec<u8>)]) -> Result<(), String> {
-        for (key, xvalue) in pairs {
-            let ck = CString::new(key.as_str()).expect("no NUL in key");
-            let mut err: [c_char; 256] = [0; 256];
-            let is_none = xvalue.is_empty() || xh_is_none(xvalue);
-            let ret = if is_none {
-                let key_ptr = ck.as_ptr();
-                unsafe { kvspaceDel(self.h, &key_ptr, 1, err.as_mut_ptr(), err.len() as u32) }
-            } else {
-                unsafe {
-                    kvspaceSetValue(
-                        self.h,
-                        ck.as_ptr(),
-                        xvalue.as_ptr(),
-                        xvalue.len() as u32,
-                        0,
-                        0,
-                        err.as_mut_ptr(),
-                        err.len() as u32,
-                    )
-                }
-            };
-            err_ret(&mut err, ret)?;
+    /// 写多对 (key, langtype, wire)：langtype 非空 → 先写 `x‥langtype` 字符串 XValue
+    /// （attr 先落、x 后落，x 写 = 提交点），再写主值。langtype 空 → 只写主值。
+    /// wire 空字节 = None → 删该 key（并删其 attr）。8 字节空头是目录 marker 等
+    /// 合法值（len=0 非 None），照常写——None 语义恒空字节（[[kvlang-layout-rust]]）。
+    pub fn set(&mut self, pairs: &[(String, String, Vec<u8>)]) -> Result<(), String> {
+        for (key, lt, xvalue) in pairs {
+            // 末段含 ‥ 的 key 是系统变量/attr 本体：无类型、不写嵌套 attr（对齐后端约定）。
+            // 前缀可含 ‥（如 /‥isa/），只拦末段。
+            let last_seg = key.rsplit('/').next().unwrap_or(key);
+            if !lt.is_empty() && !last_seg.contains('\u{2025}') && !xvalue.is_empty() {
+                let attr = format!("{key}\u{2025}langtype");
+                let aw = xvalue_to_wire("char/utf8", lt.as_bytes(), 1);
+                self.set_one(&attr, &aw)?;
+            }
+            self.set_one(key, xvalue)?;
         }
         Ok(())
+    }
+
+    fn set_one(&mut self, key: &str, xvalue: &[u8]) -> Result<(), String> {
+        let ck = CString::new(key).expect("no NUL in key");
+        let mut err: [c_char; 256] = [0; 256];
+        let is_none = xvalue.is_empty(); // None 恒空字节（8 字节空头 = 目录 marker 等真值）
+        let ret = if is_none {
+            let key_ptr = ck.as_ptr();
+            unsafe { kvspaceDel(self.h, &key_ptr, 1, err.as_mut_ptr(), err.len() as u32) }
+        } else {
+            unsafe {
+                kvspaceSetValue(
+                    self.h,
+                    ck.as_ptr(),
+                    xvalue.as_ptr(),
+                    xvalue.len() as u32,
+                    err.as_mut_ptr(),
+                    err.len() as u32,
+                )
+            }
+        };
+        err_ret(&mut err, ret)
     }
 
     /// 单点读（借用后拷出自持）：None 返回空字节。resolve=1 穿透 link。
     pub fn get_one(&mut self, key: &str) -> Vec<u8> {
         let c = CString::new(key).expect("no NUL in key");
         call_borrow(|out, out_len| unsafe { kvspaceGet(self.h, c.as_ptr(), 0, out, out_len) })
+    }
+
+    /// 读 head + x‥langtype attr key（缺失/空 → 返回默认空 head）。
+    pub fn get_head(&mut self, key: &str) -> kvspaceHead_t {
+        let mut h = kvspaceHead_t {
+            headlen: 0,
+            r#ref: 0,
+            storetype: 0,
+            body_len: 0,
+            ndim: 0,
+            dims: [0i32; 8],
+            langtype: [0u8; 256],
+            langtype_len: 0,
+            body_offset: 0,
+            body_cap: 0,
+        };
+        let c = CString::new(key).expect("no NUL in key");
+        let ret = unsafe { kvspaceGetHead(self.h, c.as_ptr(), &mut h) };
+        if ret != 0 {
+            h.langtype_len = 0;
+        }
+        h
+    }
+
+    /// 读 key 的完整 langtype（attr key 明文事实源）；无/空 → 空串。
+    pub fn langtype_of(&mut self, key: &str) -> String {
+        let h = self.get_head(key);
+        let end = h
+            .langtype
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(h.langtype.len());
+        String::from_utf8_lossy(&h.langtype[..end]).into_owned()
     }
 
     pub fn list(&mut self, prefix: &str, expand_ext: bool, resolve: bool) -> Vec<String> {
@@ -354,31 +403,56 @@ fn al_to_dims(kind: &str, array_len: i32) -> Vec<i32> {
     }
 }
 
-/// Encode an inline XValue.
-pub fn xvalue_encode(kind: &str, raw: &[u8], array_len: i32) -> Vec<u8> {
-    let ck = CString::new(kind).expect("no NUL in kind");
+/// 按 kind+body 产 wire（固定 8 字节 head + body；langtype 由调用方写 x‥langtype attr key）。
+/// storetype 判定对齐 durable to_wire_head：char/* 与 rwir 族→SLACK、ndim>0 非容器→LARGE、
+/// 其余标量→SHORT。
+pub fn xvalue_to_wire(kind: &str, raw: &[u8], array_len: i32) -> Vec<u8> {
     let dims = al_to_dims(kind, array_len);
-    call_codec(|out, out_len| unsafe {
-        kvspaceXvalueEncode(
-            ck.as_ptr(),
-            raw.as_ptr(),
-            raw.len() as u32,
-            dims.as_ptr(),
-            dims.len() as i32,
-            out,
-            out_len,
-        )
+    if (kind.is_empty() || kind == "None") && raw.is_empty() {
+        return call_codec64(|out, out_len| unsafe {
+            kvspaceXvalueHeadNewNone(out, out_len)
+        });
+    }
+    if kind == "char" || kind.starts_with("char/") {
+        return call_codec64(|out, out_len| unsafe {
+            kvspaceXvalueHeadNewSlack(
+                raw.as_ptr(),
+                raw.len() as u64,
+                raw.len() as u64,
+                out,
+                out_len,
+            )
+        });
+    }
+    if !dims.is_empty() && !kind.contains('·') && !kind.starts_with('/') {
+        let d: Vec<u64> = dims.iter().map(|&x| x as u64).collect();
+        return call_codec64(|out, out_len| unsafe {
+            kvspaceXvalueHeadNewTensor(d.as_ptr(), d.len() as u32, raw.as_ptr(), raw.len() as u64, out, out_len)
+        });
+    }
+    if kind == "rwir" || kind == "def langtype" || (kind == "rwfunc" && !raw.is_empty()) {
+        return call_codec64(|out, out_len| unsafe {
+            kvspaceXvalueHeadNewCode(
+                raw.as_ptr(),
+                raw.len() as u64,
+                raw.len() as u64,
+                out,
+                out_len,
+            )
+        });
+    }
+    call_codec64(|out, out_len| unsafe {
+        kvspaceXvalueHeadNewScalar(0 /* KVSPACE_XVALUE_ST_SHORT */, raw.as_ptr(), raw.len() as u32, out, out_len)
     })
 }
 
-/// 按 wire 字节原位填 head 视图（不调用 kvspaceDecodeHead、不校验）。
-pub fn decode_head(data: &[u8]) -> kvspaceHead_t {
+/// 按 wire 字节原位填 head 视图（v2 固定 8 字节头：#566）。
+/// langtype 不在 head——由调用方从 kvspaceGetHead（x‥langtype attr key）读入后传入。
+pub fn from_wire_head(data: &[u8], langtype: &str) -> kvspaceHead_t {
     let mut h = kvspaceHead_t {
         headlen: 0,
         r#ref: 0,
         storetype: 0,
-        ro: 0,
-        vid: 0,
         body_len: 0,
         ndim: 0,
         dims: [0i32; 8],
@@ -387,26 +461,29 @@ pub fn decode_head(data: &[u8]) -> kvspaceHead_t {
         body_offset: 0,
         body_cap: 0,
     };
-    if data.len() < XH_PREFIX {
+    if data.len() < PREFIX {
         return h;
     }
-    let hl = xh_headlen(data);
-    h.headlen = hl as u16;
-    h.r#ref = if xh_is_ptr(data) {
+    let len = xh_len(data);
+    let storetype = data[6];
+    let ptr = data[7];
+    if storetype > 3 || ptr > 2 {
+        return h;
+    }
+    h.headlen = PREFIX as u16;
+    h.r#ref = if ptr == 1 {
         1
-    } else if xh_class(data) == 3 {
+    } else if ptr == 2 {
         2
     } else {
         0
     };
-    h.storetype = xh_class(data);
-    let bl = xh_content_len(data);
-    h.body_len = bl as i32;
-    h.body_offset = hl as i32;
-    h.body_cap = bl as u64;
-    let lt = xh_langtype(data);
-    let n = lt.len().min(255);
-    h.langtype[..n].copy_from_slice(&lt.as_bytes()[..n]);
+    h.storetype = storetype;
+    h.body_len = i32::try_from(len).unwrap_or(i32::MAX);
+    h.body_offset = PREFIX as i32;
+    h.body_cap = len;
+    let n = langtype.len().min(255);
+    h.langtype[..n].copy_from_slice(&langtype.as_bytes()[..n]);
     h.langtype_len = n as i32;
     h
 }
@@ -418,22 +495,16 @@ pub fn new_char(kind: &str, s: &str) -> Vec<u8> {
     if kind == "char/utf8" {
         return new_char_byte(bytes);
     }
-    let (raw, n) = if kind == "char/utf32" {
-        let v: Vec<u8> = s.chars().flat_map(|c| (c as u32).to_le_bytes()).collect();
-        let n = (v.len() / 4) as i32;
-        (v, n)
+    let raw = if kind == "char/utf32" {
+        s.chars().flat_map(|c| (c as u32).to_le_bytes()).collect()
     } else {
-        (bytes.to_vec(), bytes.len() as i32)
+        bytes.to_vec()
     };
-    let ck = CString::new(kind).expect("no NUL");
-    let dims = [n];
-    call_codec(|out, out_len| unsafe {
-        kvspaceXvalueEncode(
-            ck.as_ptr(),
+    call_codec64(|out, out_len| unsafe {
+        kvspaceXvalueHeadNewSlack(
             raw.as_ptr(),
-            raw.len() as u32,
-            dims.as_ptr(),
-            1,
+            raw.len() as u64,
+            raw.len() as u64,
             out,
             out_len,
         )
