@@ -122,3 +122,6 @@ rp.*
 
 # 架构图（本地生成可视化，不入库）
 docs/diagrams/
+
+# Mermaid 生成脚本（本地工具，不入库）
+docs/kvlang_dataflow_mermaid.py
