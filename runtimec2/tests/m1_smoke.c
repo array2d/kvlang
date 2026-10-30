@@ -11,17 +11,14 @@
 #include "kvlang_runtime.h"
 #include "kvlang_vthread.h"
 
-extern int kvspaceXvalueHeadNewSlack(const uint8_t *data, uint64_t data_len,
-                                     uint64_t cap, uint8_t **out,
-                                     uint64_t *out_len);
-
+/* ‥pc 是系统键：无类型（langtype 空 = 空 attr）。 */
 static void set_pc(void *kv, const char *vid, const char *pc) {
     char key[512];
     snprintf(key, sizeof key, "/vthread/%s/\xE2\x80\xA5pc", vid);
     uint8_t *buf = NULL;
     uint64_t len64 = 0;
     if (kvspaceXvalueHeadNewSlack((const uint8_t *)pc, (uint64_t)strlen(pc),
-                                  (uint64_t)strlen(pc), &buf, &len64) != 0)
+                                  (uint64_t)strlen(pc), "", &buf, &len64) != 0)
         return;
     char err[192] = {0};
     kvspaceSetValue(kv, key, buf, (uint32_t)len64, err, sizeof err);

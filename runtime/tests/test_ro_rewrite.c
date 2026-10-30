@@ -40,12 +40,15 @@ int main(void) {
     mk(b, sizeof b, 'b');
     uint8_t *v1 = NULL, *v2 = NULL;
     uint32_t l1 = 0, l2 = 0;
-    CHECK(kvspaceNewChar((const uint8_t *)a, (uint32_t)strlen(a), &v1, &l1) == 0);
-    CHECK(kvspaceNewChar((const uint8_t *)b, (uint32_t)strlen(b), &v2, &l2) == 0);
+    /* ‥core 是系统键：langtype 传空串。 */
+    CHECK(kvspaceNewChar((const uint8_t *)a, (uint32_t)strlen(a), "", &v1,
+                         &l1) == 0);
+    CHECK(kvspaceNewChar((const uint8_t *)b, (uint32_t)strlen(b), "", &v2,
+                         &l2) == 0);
     char key[128];
     snprintf(key, sizeof key, "/isa-ro-%d/‥core", (int)getpid());
-    int rc1 = kvspaceSetValue(h, key, v1, l1, 1, 0, NULL, 0);
-    int rc2 = kvspaceSetValue(h, key, v2, l2, 1, 0, NULL, 0);
+    int rc1 = kvspaceSetValue(h, key, v1, l1, NULL, 0);
+    int rc2 = kvspaceSetValue(h, key, v2, l2, NULL, 0);
     CHECK(rc1 == 0);
     CHECK(rc2 == 0);
     uint8_t *out = NULL;

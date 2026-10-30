@@ -50,7 +50,10 @@ int main(void) {
     CHECK(got.bytes && got.length == before_len &&
           memcmp(got.bytes, before, before_len) == 0);
 
-    pair.value = (kvlangXvalue_t){.bytes = before, .length = before_len - 1};
+    /* 值短于 head 声称的 body（head+body 放不进）：head 不自洽 → 拒绝。
+     * 注意：v2 值尾是自描述 attr 区（#571），只截 attr 尾后端不拒。 */
+    pair.value = (kvlangXvalue_t){.bytes = before,
+                                  .length = KVSPACE_XVALUE_HEAD_LEN + 7};
     err[0] = 0;
     CHECK(kvlangKvspaceSet(kv, &pair, 1, err, sizeof err) != 0);
     CHECK(strstr(err, "invalid XValue") != NULL);

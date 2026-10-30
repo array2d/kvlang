@@ -18,7 +18,7 @@ fn redis_roundtrip() {
 
     // 写一个 rwir（Opaque kind）并读回（无 `.` 的 plain key，避免 dict 拆分）
     let v = kvkind::new_rwir(0, 0, "testop");
-    kv.set(&[("/lib/testop".to_string(), v)]).unwrap();
+    kv.set(&[("/lib/testop".to_string(), "rwir".to_string(), v)]).unwrap();
     let got = kv.get_one("/lib/testop");
     assert_eq!(kvkind::kind(&got, &kv.langtype_of("/lib/testop")), "rwir");
     assert_eq!(String::from_utf8_lossy(&body(&got)[5..]), "testop");

@@ -41,7 +41,9 @@ static void check_slot(kvspace_t *kv, const char *key, const char *s,
     CHECK(kvspaceXvalueHeadLen(&xh) == (uint64_t)len);
     uint8_t *ref = NULL;
     uint64_t rl = 0;
-    CHECK(kvspaceXvalueHeadNewSlack((const uint8_t *)s, len, len, &ref, &rl) == 0);
+    /* pc 是系统键：空 langtype（空 attr）。 */
+    CHECK(kvspaceXvalueHeadNewSlack((const uint8_t *)s, len, len, "", &ref,
+                                    &rl) == 0);
     CHECK(v.length == (uint32_t)rl);
     size_t prefix = KVSPACE_XVALUE_HEAD_LEN + len;
     CHECK(prefix <= (size_t)rl && memcmp(v.bytes, ref, prefix) == 0);
@@ -98,7 +100,7 @@ int main(void) {
         write_pc(kv, &ko, s);
         check_slot(kv, key, s, !shm);
     }
-    /* UTF-8 码点：langtype 记码点数、head 的 a 记字节数；与正典 codec 逐字节比对。 */
+    /* UTF-8 码点：head 的 a 记字节数；pc 系统键 langtype 为空（空 attr）。 */
     static const char *utf8_pcs[] = {
         "/vthread/1/[1]/[2,0]·中文",
         "/vthread/1/[1]/[2,0]·é€𝄞",

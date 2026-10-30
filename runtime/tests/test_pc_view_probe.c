@@ -6,7 +6,7 @@
 #include <stdint.h>
 
 /* shrink：把 ‥pc 重写为 langtype 基类型不符的槽（模拟 owned 后不合规），
- * 用于验证 runtime 回退仍能正确写 PC。 */
+ * 用于验证 runtime 回退仍能正确写 PC。langtype 写进值内 attr 区（#571）。 */
 static int shrink(void *h, const char *key) {
     uint8_t *val = NULL;
     uint32_t vlen = 0;
@@ -28,29 +28,15 @@ static int shrink(void *h, const char *key) {
     if (a >= sizeof saved)
         return 1;
     memcpy(saved, val + KVSPACE_XVALUE_HEAD_LEN, (size_t)a);
+    /* ‥pc 是系统键（末段含 ‥）：契约不写 langtype——但本测试要模拟
+       「langtype 基类型不符」槽，特此把 langtype 写进值 attr 区验证
+       runtime 回退（#571 单 key 写，无 attr key）。 */
     if (kvspaceWriteNewPlace(h, key, KVSPACE_REF_INLINE,
                              KVSPACE_STORETYPE_SLACK, (uint32_t)a, 1024,
-                             &body, err, sizeof err) != 0 ||
+                             lt, &body, err, sizeof err) != 0 ||
         !body)
         return 1;
     memcpy(body, saved, (size_t)a);
-    /* ‥pc 是系统键（末段含 ‥）：契约不写 attr——但本测试要模拟
-       「langtype 基类型不符」槽，特此自写 attr key 验证 runtime 回退。 */
-    {
-        uint8_t *lv = NULL;
-        uint64_t lvn = 0;
-        char ltk[1028];
-        snprintf(ltk, sizeof ltk, "%s\xE2\x80\xA5" "langtype", key);
-        if (kvspaceXvalueHeadNewSlack((const uint8_t *)lt,
-                                      (uint64_t)strlen(lt),
-                                      (uint64_t)strlen(lt), &lv, &lvn) != 0 ||
-            lvn > 0xffffffffu)
-            return 1;
-        int r = kvspaceSetValue(h, ltk, lv, (uint32_t)lvn, err, sizeof err);
-        free(lv);
-        if (r != 0)
-            return 1;
-    }
     printf("shrunk a=%llu langtype=%s\n", (unsigned long long)a, lt);
     return 0;
 }
