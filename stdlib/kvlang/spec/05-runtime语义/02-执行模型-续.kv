@@ -19,7 +19,7 @@ runtime **不得**另存独立的调用栈结构：嵌套帧路径本身即调�
 
 两者是变长 `char/utf8`，每步都要重写，**必须**用 SLACK 头写：固定头
 `len=当前字节长`、`storetype=1`、`ptr=0`，body 偏移恒为 8，langtype
-`[<码点数>]char/utf8` 存 `x‥langtype` attr key。值语义只取前 `len` 字节；物理容量超出
+`[<码点数>]char/utf8` 存值内 attr 区（tag 1 记录）。值语义只取前 `len` 字节；物理容量超出
 部分不属于值。
 
 每个槽使用**固定档容量**（pc 与 status 各一档，实现自选，须覆盖常态长度）：同槽每次写入

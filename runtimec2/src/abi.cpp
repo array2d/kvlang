@@ -114,39 +114,15 @@ namespace {
 
 bool set_wire(void* h, const std::string& key, const char* kind,
               const std::uint8_t* raw, std::uint32_t len) {
-    /* 上层写 attr key（attr 先落、x 后落）：x‥langtype = 字符串 XValue
-       （SLACK，body=明文类型串）。kvspace 层不代写 attr。 */
-    if (*kind) {
-        char ltkey[1028];
-        int ltn = snprintf(ltkey, sizeof ltkey, "%s\xE2\x80\xA5" "langtype",
-                           key.c_str());
-        if (ltn < 0 || ltn >= (int)sizeof ltkey)
-            return false;
-        std::uint8_t* lv = nullptr;
-        std::uint64_t lvn = 0;
-        int lrc = kvspaceXvalueHeadNewSlack(
-            reinterpret_cast<const std::uint8_t*>(kind),
-            static_cast<std::uint64_t>(std::strlen(kind)),
-            static_cast<std::uint64_t>(std::strlen(kind)), &lv, &lvn);
-        if (lrc != 0 || !lv || lvn > UINT32_MAX) {
-            if (lv) std::free(lv);
-            return false;
-        }
-        char lerr[192] = {};
-        int lk = kvspaceSetValue(h, ltkey, lv, static_cast<std::uint32_t>(lvn),
-                                 lerr, sizeof lerr);
-        std::free(lv);
-        if (lk != 0)
-            return false;
-    }
+    /* kind 拼入值 attr 区（单 key 整体），无 attr key。 */
     std::uint8_t* buf = nullptr;
     std::uint64_t n64 = 0;
     int rc = 0;
     if (strcmp(kind, "rwir") == 0 || strcmp(kind, "def rwir") == 0 ||
         strcmp(kind, "def langtype") == 0)
-        rc = kvspaceXvalueHeadNewCode(raw, len, len, &buf, &n64);
+        rc = kvspaceXvalueHeadNewCode(raw, len, len, kind, &buf, &n64);
     else
-        rc = kvspaceXvalueHeadNewScalar(0, raw, len, &buf, &n64);
+        rc = kvspaceXvalueHeadNewScalar(0, raw, len, kind, &buf, &n64);
     if (rc != 0 || !buf || n64 > UINT32_MAX)
         return false;
     char err[192] = {};

@@ -18,29 +18,30 @@ impl Engine {
     // ── kvspace 读写（绝对路径，char/utf8 与 char/utf32 互转）─────────
     /// 通用类型化写入：任意 kind + body 字节 + dims（空=标量 ndim0）。
     /// set_kv 与各 rwir 的类型化输出共用，避免每种 kind 一个专用写函数。
-    /// 写主值前补 `x‥langtype` attr key（上层职责；kvspace 层不代写）——
-    /// 结果槽（math·sin/json/http 输出）跨 Handoff/println 读依赖类型。
+    /// 完整 langtype（含 [dims]）拼入值 attr 区（#571）——结果槽
+    /// （math·sin/json/http 输出）跨 Handoff/println 读依赖类型。
     pub fn set_xvalue_wire(&self, key: &str, kind: &str, raw: &[u8], dims: &[i32]) {
         let value = xvalue_to_wire(kind, raw, dims);
         assert!(!value.is_empty(), "invalid XValue for {key}");
-        // 系统键（末段含 ‥：status/pc/‥lib）无类型不写 attr；其余写 attr。
+        // 系统键（末段含 ‥：status/pc/‥lib）无类型保留空 attr；其余填 langtype 记录。
         let last_seg = key.rsplit('/').next().unwrap_or(key);
-        if !last_seg.contains('\u{2025}') {
-            let attr = format!("{key}\u{2025}langtype");
-            let aw = xvalue_to_wire("char/utf8", kind.as_bytes(), &[kind.len() as i32]);
-            self.set_xvalue(&attr, &aw);
-        }
-        self.set_xvalue(key, &value);
+        let wire = if last_seg.contains('\u{2025}') {
+            value
+        } else {
+            with_langtype(&value, &full_langtype(kind, dims))
+        };
+        self.set_xvalue(key, &wire);
     }
-    /// 普通文本值（含中文）：utf32 编码 + 写 langtype attr。
+    /// 普通文本值（含中文）：utf32 编码 + 写 langtype 记录。
     pub fn set_kv(&self, key: &str, val: &str) {
         let utf32: Vec<u32> = val.chars().map(|c| c as u32).collect();
         let raw: Vec<u8> = utf32.iter().flat_map(|v| v.to_le_bytes()).collect();
         self.set_xvalue_wire(key, "char/utf32", &raw, &[utf32.len() as i32]);
     }
 
-    /// 系统文本（`‥pc`/`‥status` 等，末段含 ‥）：纯字节 SLACK、不写 attr——对齐
-    /// runtime 的 write_text（runtime 侧 read_text 对无 attr 键按纯字节文本读）。
+    /// 系统文本（`‥pc`/`‥status` 等，末段含 ‥）：纯字节 SLACK、不写 langtype 记录
+    /// （保留 codec 空 attr）——对齐 runtime 的 write_text（read_text 对无类型值
+    /// 按纯字节文本读）。
     pub fn set_sys_text(&self, key: &str, val: &str) {
         let value = xvalue_to_wire("char/utf8", val.as_bytes(), &[val.len() as i32]);
         self.set_xvalue(key, &value);
@@ -77,15 +78,14 @@ impl Engine {
     }
 
     pub fn set_ext_handle(&self, key: &str, target_langtype: &str, locator: &str) {
-        // #566：@ext 句柄 = NewExt（body=定位串）；langtype 走 x‥langtype attr key，
-        // 不再写进 head（target_langtype 参数仅保留签名）。
-        let _ = target_langtype;
+        // #571：@ext 句柄 = NewExt（body=定位串）；langtype 拼入值 attr 区。
         unsafe {
             let mut out = null_mut();
             let mut len = 0u64;
             let rc = kvspaceXvalueHeadNewExt(
                 locator.as_ptr(),
                 locator.len() as u32,
+                cs(target_langtype).as_ptr(),
                 &mut out,
                 &mut len,
             );

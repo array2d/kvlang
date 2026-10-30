@@ -24,8 +24,8 @@ static void slot_bind_scalar_kind(kvlangBodySlot *slot,
     uint32_t ltlen = v->langtype_len;
     int tid = kvlangLangtypeId(v->langtype, (size_t)ltlen);
     if ((kvlangLangtypeIsNum(tid) || tid == KVLANG_LT_BOOL) && v->bytes &&
-        v->length == KVSPACE_XVALUE_HEAD_LEN +
-                         (uint32_t)kvlangLangtypeElemSize(tid) &&
+        (uint32_t)xh_content_len(v->bytes) ==
+            (uint32_t)kvlangLangtypeElemSize(tid) &&
         xh_storetype(v->bytes) == KVSPACE_XVALUE_ST_SHORT) {
         slot->kind = kvlangLangtypeKind(tid);
         slot->width = (uint32_t)kvlangLangtypeElemSize(tid);
@@ -305,7 +305,7 @@ int kvlangBuiltinWriteResult(kvlangFrame_t *f, const kvlangXvalue_t *result) {
                     if (kvlangBuiltinWriteBody(
                             f, slot->kind,
                             cv.bytes + KVSPACE_XVALUE_HEAD_LEN,
-                            cv.length - KVSPACE_XVALUE_HEAD_LEN))
+                            (uint32_t)xh_content_len(cv.bytes)))
                         return 0;
                 }
             }
@@ -323,8 +323,8 @@ __attribute__((visibility("hidden"))) int
 kvlangBuiltinWriteResultTyped(kvlangFrame_t *f, const kvlangXvalue_t *v,
                               const char *kind) {
 #ifdef KV_DEBUG_TYPES
-    /* 写入侧断言：结果 attr key langtype 必须等于 manifest kind；非空目标槽若
-     * 已有值，其 langtype 也必须一致（typed 槽不混型）。 */
+    /* 写入侧断言：结果值 attr 区 langtype 必须等于 manifest kind；非空目标
+     * 槽若已有值，其 langtype 也必须一致（typed 槽不混型）。 */
     if (v->bytes && v->length >= KVSPACE_XVALUE_HEAD_LEN &&
         (v->langtype_len != strlen(kind) ||
          memcmp(v->langtype, kind, strlen(kind)) != 0))
@@ -440,7 +440,7 @@ int kvlangBuiltinExecuteCopy(kvlangFrame_t *f) {
             slot_bind_scalar_kind(slot, rv);
             const char *target = inst->writes[0].type;
             if (slot->kind && (!target || !target[0]) &&
-                rv->length == KVSPACE_XVALUE_HEAD_LEN + slot->width &&
+                (uint32_t)xh_content_len(rv->bytes) == slot->width &&
                 rv->langtype_len == slot->kind_len &&
                 memcmp(rv->langtype, slot->kind,
                        (size_t)slot->kind_len) == 0) {

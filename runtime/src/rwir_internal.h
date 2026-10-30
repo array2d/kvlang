@@ -31,7 +31,7 @@ static inline void xv_head_langtype_str(const xv_head_t *o, char *buf,
     memcpy(buf, o->langtype, (size_t)n);
     buf[n] = 0;
 }
-/* 字面量路径：langtype 取 v 的 attr key 缓存（v2 wire 不携带），body 偏移恒 8。 */
+/* 字面量路径：langtype 取 v 的缓存（值 attr 区，GetHead 读），body 偏移恒 8。 */
 static inline void xv_head_from_value(xv_head_t *o, const kvlangXvalue_t *v) {
     o->langtype = (const uint8_t *)v->langtype;
     o->langtype_len = (int32_t)v->langtype_len;

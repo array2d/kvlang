@@ -10,6 +10,6 @@ lib kvlang/spec/类型系统/head字段 {
 | `storetype` | u8 | 存储形态（短定长/变长/大定长/扩展），偏移 6 |
 | `ptr` | u8 | 0=inline、1=ptr、2=@ext，偏移 7 |
 
-body 从偏移 8 开始。类型（langtype）不在 head——存于独立 attr key `x‥langtype`（明文串）。各 storetype 的规则见 [[XValueHead线格式]]。
+body 从偏移 8 开始。类型（langtype）不在 head——存于 body 之后的值内 attr 区（明文 UTF-8 串，含形状段）。各 storetype 的规则见 [[XValueHead线格式]]。
 "#### -> /lib/kvlang/spec/类型系统/head字段
 }

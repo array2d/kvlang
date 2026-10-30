@@ -2,13 +2,13 @@
 lib kvlang/spec/kvspace模型/XValueHead线格式 {
 	r####"# XValueHead 线格式
 
-XValue 由 head 与 body 组成。所有后端使用同一线格式：
+XValue 由 head、body 与 attr 区组成。所有后端使用同一线格式：
 
 ```
-[len:u48 LE][storetype:u8][ptr:u8][body]
+[len:u48 LE@0-5][storetype:u8@6][ptr:u8@7][body @8..8+len][attr @8+len..8+len+attr_len]
 ```
 
-head 固定 8 字节，body 偏移恒为 8，容量 2^48。类型（langtype）**不在 head**——存于独立 attr key `x‥langtype`（明文 UTF-8 串，含形状段）。`‥` 后缀 key 必须是叶子节点。
+head 固定 8 字节，body 偏移恒为 8，容量 2^48。类型（langtype）**不在 head**——存于 body 之后的值内 attr 区（明文 UTF-8 串，含形状段）。
 
 | 字段 | 宽 | 含义 |
 |------|----|------|
@@ -25,7 +25,19 @@ head 固定 8 字节，body 偏移恒为 8，容量 2^48。类型（langtype）*
 
 指针（`ptr=1`）body 为目标 KV 路径；`@ext`（`ptr=2`）body 为 UTF-8 定位串。UTF-8 字符数组的 `len` 是**字节数**，langtype 里的长度是 Unicode 码点数；两者独立校验。
 
-**x‥langtype attr key**：每个 XValue 主键 `x` 有唯一 attr key `x‥langtype`，存完整 langtype 串（含 `[N,M]` 形状段），不含源码 `*`/`@` 前缀。只有创建（T·new）与 **reinterpret** 写它；其余读写只碰主键。写序固定：**attr 先落，x 后落**——x 的写入即提交点，x 存在则类型必完整；attr key 存在而 x 缺失 = 未提交创建残留，读路径惰性清理。
+**值内 attr 区**：每个 XValue 在 body 之后携带 attr 区，存完整 langtype 串（含 `[N,M]` 形状段），不含源码 `*`/`@` 前缀。只有创建（T·new）与 **reinterpret** 写它；其余读写只碰主键。**单 key 一次写（head+body+attr 整体）→ 天然原子**——无 attr key、无顺写裁决、无孤儿清理。
+
+attr 区编码（normative）：
+
+    attr = [attr_len:u16 LE][records...]
+
+- `attr_len = 2 + Σ records`（含自身 2 字节；空 attr = `[2]`，恒存在）。
+- `record = [tag:u8][len:u16 LE][data len 字节]`：
+  - tag 1 = langtype：UTF-8 明文串，含 `[dims]` 形状段，无 `*`/`@` 前缀；终止由 record len 自描述，无 NUL。
+  - tag 2+ = 预留扩展（ro/vid 等，未实现）。
+- `total = 8 + len + attr_len`（自描述——后端据此读完整值长）。
+- 无 pad：attr 起始 = 8+len；记录紧凑；整体末尾不 pad。
+- 扩展协议：新增 tag 追加记录；旧读者按 attr_len 边界跳未知 tag。
 
 枚举成员按实际物理 key 前缀进行，不存在 index/extindex 成员矩阵或 memindex 载体。
 

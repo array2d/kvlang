@@ -67,12 +67,13 @@ extern "C" {
         err: *mut c_char,
         err_cap: u32,
     ) -> c_int;
-    /// 固定 8 字节 head 构造器（直接 memcpy struct + body）。
+    /// 固定 8 字节 head 构造器（直接 memcpy struct + body + attr 区；langtype 空 = 空 attr）。
     fn kvspaceXvalueHeadNewNone(out: *mut *mut u8, out_len: *mut u64) -> c_int;
     fn kvspaceXvalueHeadNewScalar(
         storetype: u8,
         raw: *const u8,
         raw_len: u32,
+        langtype: *const c_char,
         out: *mut *mut u8,
         out_len: *mut u64,
     ) -> c_int;
@@ -80,6 +81,7 @@ extern "C" {
         data: *const u8,
         data_len: u64,
         cap: u64,
+        langtype: *const c_char,
         out: *mut *mut u8,
         out_len: *mut u64,
     ) -> c_int;
@@ -88,6 +90,7 @@ extern "C" {
         ndim: u32,
         raw: *const u8,
         raw_len: u64,
+        langtype: *const c_char,
         out: *mut *mut u8,
         out_len: *mut u64,
     ) -> c_int;
@@ -95,14 +98,21 @@ extern "C" {
         body: *const u8,
         body_len: u64,
         cap: u64,
+        langtype: *const c_char,
         out: *mut *mut u8,
         out_len: *mut u64,
     ) -> c_int;
 
-    fn kvspaceNewChar(bytes: *const u8, len: u32, out: *mut *mut u8, out_len: *mut u32) -> c_int;
-    fn kvspaceNewBool(v: u8, out: *mut *mut u8, out_len: *mut u32) -> c_int;
-    fn kvspaceNewInt64(v: i64, out: *mut *mut u8, out_len: *mut u32) -> c_int;
-    fn kvspaceNewFloat64(v: f64, out: *mut *mut u8, out_len: *mut u32) -> c_int;
+    fn kvspaceNewChar(
+        bytes: *const u8,
+        len: u32,
+        langtype: *const c_char,
+        out: *mut *mut u8,
+        out_len: *mut u32,
+    ) -> c_int;
+    fn kvspaceNewBool(v: u8, langtype: *const c_char, out: *mut *mut u8, out_len: *mut u32) -> c_int;
+    fn kvspaceNewInt64(v: i64, langtype: *const c_char, out: *mut *mut u8, out_len: *mut u32) -> c_int;
+    fn kvspaceNewFloat64(v: f64, langtype: *const c_char, out: *mut *mut u8, out_len: *mut u32) -> c_int;
 }
 
 /// XValueHead 解码结果（与 kvspace/include/kvspace/kvspace.h 的 kvspaceHead_t 逐字段对齐）。
@@ -249,21 +259,24 @@ impl Kv {
         }
     }
 
-    /// 写多对 (key, langtype, wire)：langtype 非空 → 先写 `x‥langtype` 字符串 XValue
-    /// （attr 先落、x 后落，x 写 = 提交点），再写主值。langtype 空 → 只写主值。
-    /// wire 空字节 = None → 删该 key（并删其 attr）。8 字节空头是目录 marker 等
-    /// 合法值（len=0 非 None），照常写——None 语义恒空字节（[[kvlang-layout-rust]]）。
+    /// 写多对 (key, langtype, wire)：langtype 拼入值 attr 区整体单写（无 attr key）。
+    /// wire 空字节 = None → 删该 key。8 字节空头是目录 marker 等合法值（len=0 非
+    /// None），照常写——None 语义恒空字节（[[kvlang-layout-rust]]）。
     pub fn set(&mut self, pairs: &[(String, String, Vec<u8>)]) -> Result<(), String> {
         for (key, lt, xvalue) in pairs {
-            // 末段含 ‥ 的 key 是系统变量/attr 本体：无类型、不写嵌套 attr（对齐后端约定）。
+            // 末段含 ‥ 的 key 是系统变量本体：无类型（保留 codec 空 attr）。
             // 前缀可含 ‥（如 /‥isa/），只拦末段。
             let last_seg = key.rsplit('/').next().unwrap_or(key);
-            if !lt.is_empty() && !last_seg.contains('\u{2025}') && !xvalue.is_empty() {
-                let attr = format!("{key}\u{2025}langtype");
-                let aw = xvalue_to_wire("char/utf8", lt.as_bytes(), 1);
-                self.set_one(&attr, &aw)?;
-            }
-            self.set_one(key, xvalue)?;
+            let wire = if xvalue.is_empty() || lt.is_empty() || last_seg.contains('\u{2025}') {
+                xvalue.clone()
+            } else {
+                // 用真实 langtype 替换 codec 产出的空 attr 占位：[head+body] + attr(lt)。
+                let body_len = xh_len(xvalue) as usize;
+                let mut w = xvalue[..PREFIX + body_len].to_vec();
+                w.extend_from_slice(&attr_bytes(lt));
+                w
+            };
+            self.set_one(key, &wire)?;
         }
         Ok(())
     }
@@ -403,9 +416,26 @@ fn al_to_dims(kind: &str, array_len: i32) -> Vec<i32> {
     }
 }
 
-/// 按 kind+body 产 wire（固定 8 字节 head + body；langtype 由调用方写 x‥langtype attr key）。
-/// storetype 判定对齐 durable to_wire_head：char/* 与 rwir 族→SLACK、ndim>0 非容器→LARGE、
-/// 其余标量→SHORT。
+/// 空 C 串（codec langtype 参数：空 = 空 attr 占位，真实类型由 Kv::set 按 pair 的 lt 写入）。
+pub static EMPTY_CSTR: [u8; 1] = [0];
+
+/// attr 区字节（#571）：langtype 记录（含 attr_len 前缀）；空 lt = 空 attr `[2,0]`。
+pub fn attr_bytes(lt: &str) -> Vec<u8> {
+    if lt.is_empty() {
+        return vec![2, 0];
+    }
+    let alen = 2u16 + 3 + lt.len() as u16;
+    let mut v = Vec::with_capacity(5 + lt.len());
+    v.extend_from_slice(&alen.to_le_bytes());
+    v.push(1); // tag = langtype
+    v.extend_from_slice(&(lt.len() as u16).to_le_bytes());
+    v.extend_from_slice(lt.as_bytes());
+    v
+}
+
+/// 按 kind+body 产 wire（固定 8 字节 head + body + 空 attr 占位；真实类型由 Kv::set 按
+/// pair 的 lt 替换）。storetype 判定对齐 durable to_wire_head：char/* 与 rwir 族→SLACK、
+/// ndim>0 非容器→LARGE、其余标量→SHORT。
 pub fn xvalue_to_wire(kind: &str, raw: &[u8], array_len: i32) -> Vec<u8> {
     let dims = al_to_dims(kind, array_len);
     if (kind.is_empty() || kind == "None") && raw.is_empty() {
@@ -413,12 +443,14 @@ pub fn xvalue_to_wire(kind: &str, raw: &[u8], array_len: i32) -> Vec<u8> {
             kvspaceXvalueHeadNewNone(out, out_len)
         });
     }
+    let empty = EMPTY_CSTR.as_ptr() as *const c_char;
     if kind == "char" || kind.starts_with("char/") {
         return call_codec64(|out, out_len| unsafe {
             kvspaceXvalueHeadNewSlack(
                 raw.as_ptr(),
                 raw.len() as u64,
                 raw.len() as u64,
+                empty,
                 out,
                 out_len,
             )
@@ -427,7 +459,7 @@ pub fn xvalue_to_wire(kind: &str, raw: &[u8], array_len: i32) -> Vec<u8> {
     if !dims.is_empty() && !kind.contains('·') && !kind.starts_with('/') {
         let d: Vec<u64> = dims.iter().map(|&x| x as u64).collect();
         return call_codec64(|out, out_len| unsafe {
-            kvspaceXvalueHeadNewTensor(d.as_ptr(), d.len() as u32, raw.as_ptr(), raw.len() as u64, out, out_len)
+            kvspaceXvalueHeadNewTensor(d.as_ptr(), d.len() as u32, raw.as_ptr(), raw.len() as u64, empty, out, out_len)
         });
     }
     if kind == "rwir" || kind == "def langtype" || (kind == "rwfunc" && !raw.is_empty()) {
@@ -436,13 +468,14 @@ pub fn xvalue_to_wire(kind: &str, raw: &[u8], array_len: i32) -> Vec<u8> {
                 raw.as_ptr(),
                 raw.len() as u64,
                 raw.len() as u64,
+                empty,
                 out,
                 out_len,
             )
         });
     }
     call_codec64(|out, out_len| unsafe {
-        kvspaceXvalueHeadNewScalar(0 /* KVSPACE_XVALUE_ST_SHORT */, raw.as_ptr(), raw.len() as u32, out, out_len)
+        kvspaceXvalueHeadNewScalar(0 /* KVSPACE_XVALUE_ST_SHORT */, raw.as_ptr(), raw.len() as u32, empty, out, out_len)
     })
 }
 
@@ -500,11 +533,13 @@ pub fn new_char(kind: &str, s: &str) -> Vec<u8> {
     } else {
         bytes.to_vec()
     };
+    let empty = EMPTY_CSTR.as_ptr() as *const c_char;
     call_codec64(|out, out_len| unsafe {
         kvspaceXvalueHeadNewSlack(
             raw.as_ptr(),
             raw.len() as u64,
             raw.len() as u64,
+            empty,
             out,
             out_len,
         )
@@ -512,19 +547,23 @@ pub fn new_char(kind: &str, s: &str) -> Vec<u8> {
 }
 
 pub fn new_char_byte(bytes: &[u8]) -> Vec<u8> {
+    let empty = EMPTY_CSTR.as_ptr() as *const c_char;
     call_codec(|out, out_len| unsafe {
-        kvspaceNewChar(bytes.as_ptr(), bytes.len() as u32, out, out_len)
+        kvspaceNewChar(bytes.as_ptr(), bytes.len() as u32, empty, out, out_len)
     })
 }
 
 pub fn new_bool(v: bool) -> Vec<u8> {
-    call_codec(|out, out_len| unsafe { kvspaceNewBool(v as u8, out, out_len) })
+    let empty = EMPTY_CSTR.as_ptr() as *const c_char;
+    call_codec(|out, out_len| unsafe { kvspaceNewBool(v as u8, empty, out, out_len) })
 }
 
 pub fn new_int64(v: i64) -> Vec<u8> {
-    call_codec(|out, out_len| unsafe { kvspaceNewInt64(v, out, out_len) })
+    let empty = EMPTY_CSTR.as_ptr() as *const c_char;
+    call_codec(|out, out_len| unsafe { kvspaceNewInt64(v, empty, out, out_len) })
 }
 
 pub fn new_float64(v: f64) -> Vec<u8> {
-    call_codec(|out, out_len| unsafe { kvspaceNewFloat64(v, out, out_len) })
+    let empty = EMPTY_CSTR.as_ptr() as *const c_char;
+    call_codec(|out, out_len| unsafe { kvspaceNewFloat64(v, empty, out, out_len) })
 }

@@ -36,34 +36,49 @@ namespace kvlang::runtimec2 {
 namespace {
 const bool g_trace = std::getenv("RC2_TRACE") != nullptr;
 
-/* v2 组装 wire：按 kind 分派 New* 构造器；out_len 转 u32（>UINT32_MAX 失败）。
+/* v2 组装 wire：按 kind 分派 New* 构造器，完整 langtype（含 dims）拼入 attr 区；
+ * out_len 转 u32（>UINT32_MAX 失败）。
  * 原 kvspaceXvalueToWire(kind, raw, len, dims, ndim) 的替代入口。 */
 bool to_wire_v2(const char* kind, const std::uint8_t* raw, std::uint32_t raw_len,
             const std::int32_t* dims, std::int32_t ndim, std::uint8_t** out,
             std::uint32_t* out_len) {
     std::uint64_t total = 0;
     int rc;
-    if (!kind || !kind[0]) {
+    std::string full;
+    const bool is_none = !kind || !kind[0] ||
+                         (std::strcmp(kind, "None") == 0 && raw_len == 0);
+    if (!is_none) {
+        full = kind;
+        if (ndim > 0 && dims) {
+            std::string d;
+            for (std::int32_t i = 0; i < ndim; i++) {
+                if (i)
+                    d += ',';
+                d += std::to_string(dims[i]);
+            }
+            full = "[" + d + "]" + kind;
+        }
+    }
+    const char* lt = full.c_str();
+    if (is_none) {
         rc = kvspaceXvalueHeadNewNone(out, &total);
     } else if (std::strcmp(kind, "char/utf8") == 0 ||
                std::strcmp(kind, "char/ascii") == 0 ||
                std::strcmp(kind, "char/utf32") == 0) {
-        rc = kvspaceXvalueHeadNewSlack(raw, raw_len, raw_len, out, &total);
+        rc = kvspaceXvalueHeadNewSlack(raw, raw_len, raw_len, lt, out, &total);
     } else if (std::strcmp(kind, "rwir") == 0 ||
                std::strcmp(kind, "def rwir") == 0 ||
                std::strcmp(kind, "def langtype") == 0 ||
                (std::strcmp(kind, "rwfunc") == 0 && raw_len > 0)) {
-        rc = kvspaceXvalueHeadNewCode(raw, raw_len, raw_len, out, &total);
+        rc = kvspaceXvalueHeadNewCode(raw, raw_len, raw_len, lt, out, &total);
     } else if (ndim > 0 && dims) {
         std::uint64_t du[8] = {};
         for (std::int32_t i = 0; i < ndim && i < 8; i++)
             du[i] = static_cast<std::uint64_t>(dims[i]);
         rc = kvspaceXvalueHeadNewTensor(du, static_cast<std::uint32_t>(ndim),
-                                        raw, raw_len, out, &total);
-    } else if (std::strcmp(kind, "None") == 0 && raw_len == 0) {
-        rc = kvspaceXvalueHeadNewNone(out, &total);
+                                        raw, raw_len, lt, out, &total);
     } else {
-        rc = kvspaceXvalueHeadNewScalar(0, raw, raw_len, out, &total);
+        rc = kvspaceXvalueHeadNewScalar(0, raw, raw_len, lt, out, &total);
     }
     if (rc != 0 || total > 0xFFFFFFFFull)
         return false;
@@ -85,8 +100,9 @@ bool NativeCtx::ai64(int i, std::int64_t* v) {
                                         : (std::int64_t)sc.u;
         return true;
     }
-    // time/duration 等非数值 langtype：body 即 8 字节整数。
-    if (!in[i].d || in[i].n < KVSPACE_XVALUE_HEAD_LEN + 8) {
+    // time/duration 等非数值 langtype：body 即 8 字节整数（按 head body_len 判定）。
+    if (!in[i].d || in[i].n < KVSPACE_XVALUE_HEAD_LEN ||
+        kvspaceXvalueHeadLen(reinterpret_cast<const kvspaceXvalueHead*>(in[i].d)) < 8) {
         if (g_trace)
             std::fprintf(stderr, "[ai64fail i=%d d=%p n=%u]\n", i,
                          (void*)in[i].d, in[i].n);
@@ -393,18 +409,6 @@ bool h_array_new(NativeCtx& c, std::string* err) {
                            static_cast<std::uint32_t>(raw.size()), adims, 1,
                            &arr, &al) &&
                     arr && c.vm.write_reg(c.f, c.ins.wr[0], arr, al);
-    if (ok && arr) {
-        // 数组字面量槽补 attr（含 [N] 形状段）：compactarray·at/set 按它解 dims。
-        char aerr[192] = {};
-        FReg& wr0 = c.f.regs[c.ins.wr[0]];
-        FReg& wf = wr0.src_ptr ? *wr0.src_ptr : wr0;
-        const std::string full_lt = "[" + std::to_string(nd) + "]" + lt;
-        if (wf.key.empty())
-            (void)c.vm.ensure_reg_key(c.f, wf);
-        if (!wf.key.empty())
-            (void)write_attr_lt(c.f.h, wf.key.c_str(), full_lt.c_str(), aerr,
-                                sizeof aerr);
-    }
     std::free(arr);
     return ok;
 }
@@ -421,7 +425,6 @@ bool h_array_fill(NativeCtx& c, std::string* err) {
     }
     std::int32_t dims[8];
     std::uint32_t ndim = 0;
-    const std::string full_lt = lt;  // 完整 [dims]kind：attr 须含形状段
     lt = c.parse_dims(lt, dims, &ndim);
     const std::uint32_t esz = c.elem_size(lt);
     if (esz == 0 || ndim == 0) {
@@ -476,16 +479,6 @@ bool h_array_fill(NativeCtx& c, std::string* err) {
                            static_cast<std::uint32_t>(raw.size()), dims, ndim,
                            &arr, &al) &&
                     arr && c.vm.write_reg(c.f, c.ins.wr[0], arr, al);
-    if (ok && arr) {
-        // 数组槽 langtype 走 attr key（上层职责）：compactarray·at/set 按它解 dims。
-        char aerr[192] = {};
-        FReg& wr0 = c.f.regs[c.ins.wr[0]];
-        FReg& wf = wr0.src_ptr ? *wr0.src_ptr : wr0;
-        if (wf.key.empty())
-            (void)c.vm.ensure_reg_key(c.f, wf);
-        if (!wf.key.empty())
-            (void)write_attr_lt(c.f.h, wf.key.c_str(), full_lt.c_str(), aerr, sizeof aerr);
-    }
     std::free(arr);
     return ok;
 }
@@ -548,7 +541,8 @@ bool h_scatter_new(NativeCtx& c, std::string*) {
         lt = "map";
     std::uint8_t* mark = nullptr;
     std::uint64_t ml = 0;
-    bool ok = kvspaceXvalueHeadNewScalar(KVSPACE_XVALUE_ST_SHORT, nullptr, 0, &mark, &ml) == 0 &&
+    bool ok = kvspaceXvalueHeadNewScalar(KVSPACE_XVALUE_ST_SHORT, nullptr, 0,
+                                         lt.c_str(), &mark, &ml) == 0 &&
               mark && c.vm.write_reg(c.f, c.ins.wr[0], mark,
                                      static_cast<std::uint32_t>(ml));
     std::free(mark);
@@ -712,7 +706,8 @@ bool h_scatter_newscatter(NativeCtx& c, std::string* err) {
     const std::string mklt = "[int64]\xC2\xB7" + slt;
     std::uint8_t* mark = nullptr;
     std::uint64_t ml = 0;
-    bool ok = kvspaceXvalueHeadNewScalar(KVSPACE_XVALUE_ST_SHORT, nullptr, 0, &mark, &ml) == 0 &&
+    bool ok = kvspaceXvalueHeadNewScalar(KVSPACE_XVALUE_ST_SHORT, nullptr, 0,
+                                         mklt.c_str(), &mark, &ml) == 0 &&
               mark && kvspaceSetValue(c.f.h, db.c_str(), mark, static_cast<std::uint32_t>(ml), errbuf, sizeof errbuf) == 0;
     std::free(mark);
     if (!ok) {
@@ -960,16 +955,6 @@ bool h_string_char(NativeCtx& c, std::string* err) {
                            reinterpret_cast<const std::uint8_t*>(&u32), 4,
                            cdims, 1, &cb, &cl) &&
                     cb && c.vm.write_reg(c.f, c.ins.wr[0], cb, cl);
-    if (ok && cb) {
-        // ch 槽补 attr（char/utf32）：后续 string·ord 读依赖类型。
-        char aerr[192] = {};
-        FReg& cw = c.f.regs[c.ins.wr[0]];
-        if (cw.key.empty())
-            (void)c.vm.ensure_reg_key(c.f, cw);
-        if (!cw.key.empty())
-            (void)write_attr_lt(c.f.h, cw.key.c_str(), "char/utf32", aerr,
-                                sizeof aerr);
-    }
     std::free(cb);
     return ok;
 }
@@ -1070,18 +1055,6 @@ bool write_runes(NativeCtx& c, const std::vector<std::uint32_t>& r) {
                            static_cast<std::uint32_t>(raw.size()), dims, 1,
                            &out, &ol) &&
                     out && c.vm.write_reg(c.f, c.ins.wr[0], out, ol);
-    if (ok && out) {
-        // 结果串槽补 attr（[n]char/utf32）：后续 string·* 读参数依赖类型。
-        char aerr[192] = {};
-        FReg& w0 = c.f.regs[c.ins.wr[0]];
-        FReg& wf = w0.src_ptr ? *w0.src_ptr : w0;
-        const std::string full_lt = "[" + std::to_string(n) + "]char/utf32";
-        if (wf.key.empty())
-            (void)c.vm.ensure_reg_key(c.f, wf);
-        if (!wf.key.empty())
-            (void)write_attr_lt(c.f.h, wf.key.c_str(), full_lt.c_str(), aerr,
-                                sizeof aerr);
-    }
     std::free(out);
     return ok;
 }
@@ -1352,10 +1325,9 @@ bool h_xv_meta(NativeCtx& c, std::string* err) {
     if (c.fn == "compactarray/langtype") {
         std::uint8_t* sb = nullptr;
         std::uint32_t sl = 0;
-        ok = to_wire_v2("char/utf8",
+        ok = v_char_wire("char/utf8",
                     reinterpret_cast<const std::uint8_t*>(mlt.data()),
-                    static_cast<std::uint32_t>(mlt.size()), nullptr, 0, &sb,
-                    &sl) &&
+                    static_cast<std::uint32_t>(mlt.size()), &sb, &sl) &&
              sb && c.vm.write_reg(c.f, c.ins.wr[0], sb, sl);
         std::free(sb);
     } else if (c.fn == "compactarray/bodylen") {
@@ -1378,10 +1350,9 @@ bool h_xv_meta(NativeCtx& c, std::string* err) {
             base = base.substr(4);
         std::uint8_t* sb = nullptr;
         std::uint32_t sl = 0;
-        ok = to_wire_v2("char/utf8",
+        ok = v_char_wire("char/utf8",
                     reinterpret_cast<const std::uint8_t*>(base.data()),
-                    static_cast<std::uint32_t>(base.size()), nullptr, 0, &sb,
-                    &sl) &&
+                    static_cast<std::uint32_t>(base.size()), &sb, &sl) &&
              sb && c.vm.write_reg(c.f, c.ins.wr[0], sb, sl);
         std::free(sb);
         if (ok && c.ins.nwr >= 2) {
@@ -1648,16 +1619,6 @@ bool h_array_at_set(NativeCtx& c, std::string* err) {
             const bool ok = to_wire_v2(ck, u32,
                                    esz, cdims, 1, &eb, &el) &&
                             eb && c.vm.write_reg(c.f, c.ins.wr[0], eb, el);
-            if (ok && eb) {
-                // 字符元素槽补 attr（char/utf32|utf8）：`==`/string·* 读依赖。
-                char aerr[192] = {};
-                FReg& cw = c.f.regs[c.ins.wr[0]];
-                if (cw.key.empty())
-                    (void)c.vm.ensure_reg_key(c.f, cw);
-                if (!cw.key.empty())
-                    (void)write_attr_lt(c.f.h, cw.key.c_str(), ck, aerr,
-                                        sizeof aerr);
-            }
             std::free(eb);
             return ok;
         }
@@ -1761,13 +1722,12 @@ bool h_struct_new(NativeCtx& c, std::string* err) {
         *err = std::string("struct·new: copy failed: ") + eb;
         return false;
     }
-    // 基值标 structref 标记（langtype=ref，空 body，ndim 0）。attr=ref（含 /lib/ 前缀）。
+    // 基值标 structref 标记（langtype=ref，空 body，ndim 0）：类型随值 attr 区。
     std::uint8_t* mark = nullptr;
     std::uint32_t ml = 0;
     bool ok = to_wire_v2(ref.c_str(), nullptr, 0, nullptr, 0, &mark, &ml) && mark;
     if (ok)
-        ok = write_attr_lt(c.f.h, base.c_str(), ref.c_str(), eb, sizeof eb) &&
-             kvspaceSetValue(c.f.h, base.c_str(), mark, ml, eb, sizeof eb) == 0;
+        ok = kvspaceSetValue(c.f.h, base.c_str(), mark, ml, eb, sizeof eb) == 0;
     std::free(mark);
     if (!ok) {
         *err = std::string("struct·new: marker failed: ") + eb;
@@ -1827,15 +1787,12 @@ bool h_struct_new(NativeCtx& c, std::string* err) {
             return false;
         }
         const std::string mk = base + "\xC2\xB7" + fname;
-        // 字段槽补 attr（上层职责）：ftype=字段声明类型（float64/[]char 等）——
-        // 后续 `p·f -> v` 读字段依赖类型，attr 缺失会当 int64 显示位模式。
-        if (!ftype.empty() && ftype[0] == '*')
-            ;  // Ptr 字段：target 自带类型，字段槽不约束
-        else if (!ftype.empty())
-            (void)write_attr_lt(c.f.h, mk.c_str(), ftype.c_str(), eb, sizeof eb);
-        else if (!vlt.empty())
-            (void)write_attr_lt(c.f.h, mk.c_str(), vlt.c_str(), eb, sizeof eb);
-        if (kvspaceSetValue(c.f.h, mk.c_str(), fv.d, fv.n, eb, sizeof eb) != 0) {
+        // 字段类型：值自带则随值；值无类型才按声明 ftype/vlt 填入。
+        const char* field_lt = (!ftype.empty() && ftype[0] != '*')
+                                   ? ftype.c_str()
+                                   : vlt.c_str();
+        if (!set_value_typed(c.f.h, mk.c_str(), fv.d, fv.n, field_lt, eb,
+                             sizeof eb)) {
             *err = std::string("struct·new: set field failed: ") + eb;
             return false;
         }
@@ -1851,7 +1808,8 @@ bool h_obj_map(NativeCtx& c, std::string* err) {
     std::uint8_t* mark = nullptr;
     std::uint64_t ml = 0;
     const std::string ck = c.f.regs[c.ins.wr[0]].key;
-    bool ok = kvspaceXvalueHeadNewScalar(KVSPACE_XVALUE_ST_SHORT, nullptr, 0, &mark, &ml) == 0 &&
+    bool ok = kvspaceXvalueHeadNewScalar(KVSPACE_XVALUE_ST_SHORT, nullptr, 0,
+                                         lt.c_str(), &mark, &ml) == 0 &&
               mark &&
               c.vm.write_reg(c.f, c.ins.wr[0], mark,
                              static_cast<std::uint32_t>(ml));
@@ -2211,10 +2169,7 @@ bool h_kv_list(NativeCtx& c, std::string* err) {
             FReg& wr = c.f.regs[c.ins.wr[0]];
             ok = c.vm.ensure_reg_key(c.f, wr);
             if (ok) {
-                // 键名槽补 attr（char/utf8）：动态键成员读（`data·*k`）依赖。
-                char aerr[192] = {};
-                (void)write_attr_lt(c.f.h, wr.key.c_str(), "char/utf8", aerr,
-                                    sizeof aerr);
+                // write_text 已带 char/utf8 类型（值 attr 区），动态键成员读依赖。
                 ok = write_text(c.f.h, wr.key,
                                 std::string_view(
                                     reinterpret_cast<const char*>(name), nn));

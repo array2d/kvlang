@@ -41,7 +41,7 @@ abi]]），供扩展运行时与嵌入方调用：
   `(kind,ndim,dims)` 对一条 def langtype 作**逐值无状态**匹配。用于签名校验与派发（参数变参判定不在此,
   靠签名行锚点 `[0,0]` 的 `dynamic` 字节,见 [[函数]]）。
 - **langtype 侧（解析）**：把一条 langtype 串解析/解码为 `(kind, ndim, dims, 元素字节宽)`——唯一事实源为
-  `x‥langtype` attr key（读 langtype）与 `kvlangKindexprParse`（layout 侧入口；runtime 侧
+  值内 attr 区 tag 1 记录（读 langtype）与 `kvlangKindexprParse`（layout 侧入口；runtime 侧
   同一能力名为 `kvlangLangtypeParse`，两处 ABI 名待统一，见 [[layout流水线接口]]）。用于零拷贝定位、显
   示、round-trip。
 

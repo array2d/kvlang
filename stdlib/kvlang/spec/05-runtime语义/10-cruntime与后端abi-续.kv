@@ -55,7 +55,7 @@ durable 后端（fs/redis）采用**惰性 flush**，只在**同一 kvspace 句�
   `init/running/wait` 白名单判定；不得只比较首字节或按固定长度截断。fs/redis 走
   fallback，全量 tutorial 必须与 master 行为一致。
 - **owned 仅 PC**：PC owned view 按 `view->body_cap` 编码整个 XValue，固定 head 的
-  storetype/headlen 原样拷贝、只更新内容长度（langtype 在 attr key，不随 body 重写）；
+  storetype/headlen 原样拷贝、只更新内容长度（langtype 在值内 attr 区，不随 body 重写）；
   总长超过 `cap` 或后端拒绝即永久回退 `SetPartByRef`。局部操作数不进入 owned（继续
   `WriteBody`）。
 - **operand 只读 view**：仅用于 typed_core 行的**本 vthread 独占 frame 槽**；每次读

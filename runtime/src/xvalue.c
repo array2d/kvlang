@@ -35,14 +35,14 @@ void kvlangXvalueCopy(kvlangXvalue_t *v) {
 }
 
 /* 标量 inline 写 wire：为省掉「每个标量结果一次 malloc」而写的第二份 head 写入。
- * v2 固定 8 字节头：[len:u48 LE@0-5][storetype@6][ptr@7][body@8]。
- * langtype 不在 head——调用方已有 kind（侧写 attr key 由写值路径负责）。 */
+ * 固定 8 字节头 + body + 值内 attr 区（langtype=kind，#571 单 key 写）。 */
 uint32_t kvlangScalarToWire(const char *kind, const uint8_t *raw, uint32_t len,
                             uint8_t *buf, uint32_t cap) {
+    uint32_t ltl = kind ? (uint32_t)strlen(kind) : 0;
+    uint32_t alen = 2 + (ltl ? 3 + ltl : 0);
     if (len > UINT48_MAX - KVSPACE_XVALUE_HEAD_LEN ||
-        KVSPACE_XVALUE_HEAD_LEN + len > cap)
+        KVSPACE_XVALUE_HEAD_LEN + len + alen > cap)
         kvlangDie("scalar to-wire overflow: kind=%s len=%u", kind, len);
-    (void)kind;
     memset(buf, 0, KVSPACE_XVALUE_HEAD_LEN);
     kvspaceXvalueHead h = {
         .storetype = KVSPACE_XVALUE_ST_SHORT,
@@ -52,18 +52,19 @@ uint32_t kvlangScalarToWire(const char *kind, const uint8_t *raw, uint32_t len,
     memcpy(buf, &h, sizeof h);
     if (len)
         memcpy(buf + KVSPACE_XVALUE_HEAD_LEN, raw, len);
-    return KVSPACE_XVALUE_HEAD_LEN + len;
+    xh_attr_write(buf + KVSPACE_XVALUE_HEAD_LEN + len, kind);
+    return KVSPACE_XVALUE_HEAD_LEN + len + alen;
 }
 
-/* 变长 char/utf8 的 SLACK 写 wire：v2 固定 8 字节头，len=有效字节。
- * langtype 不在 head（"[N]char/utf8" 由写值路径侧写 attr key）。 */
+/* 变长 char/utf8 的 SLACK 写 wire：固定 8 字节头 + body + 空 attr
+ * （`‥` 系统键无类型，#571）。返回值 = 写出总长。 */
 __attribute__((visibility("hidden"))) uint32_t
 kvlangSlackCharToWire(const uint8_t *raw, uint32_t len, uint32_t cap,
                       uint8_t *buf, uint32_t bufsize) {
     if (len > cap || len > UINT48_MAX - KVSPACE_XVALUE_HEAD_LEN ||
-        KVSPACE_XVALUE_HEAD_LEN + len > bufsize)
+        KVSPACE_XVALUE_HEAD_LEN + len + 2 > bufsize)
         kvlangDie("slack to-wire overflow: len=%u cap=%u", len, cap);
-    memset(buf, 0, KVSPACE_XVALUE_HEAD_LEN + len);
+    memset(buf, 0, KVSPACE_XVALUE_HEAD_LEN + len + 2);
     kvspaceXvalueHead h = {
         .storetype = KVSPACE_XVALUE_ST_SLACK,
         .ptr = KVSPACE_XVALUE_PTR_INLINE,
@@ -72,7 +73,10 @@ kvlangSlackCharToWire(const uint8_t *raw, uint32_t len, uint32_t cap,
     memcpy(buf, &h, sizeof h);
     if (len)
         memcpy(buf + KVSPACE_XVALUE_HEAD_LEN, raw, len);
-    return KVSPACE_XVALUE_HEAD_LEN + len;
+    /* 空 attr = [attr_len:2]，位置恒 @8+len。 */
+    buf[KVSPACE_XVALUE_HEAD_LEN + len] = 2;
+    buf[KVSPACE_XVALUE_HEAD_LEN + len + 1] = 0;
+    return KVSPACE_XVALUE_HEAD_LEN + len + 2;
 }
 
 void kvlangXvalueSetBytes(kvlangXvalue_t *v, uint8_t *data, uint32_t len) {
@@ -152,6 +156,7 @@ static uint8_t *kvlangXvalueOwn(uint8_t *tmp, uint32_t tl, uint32_t *out_len) {
 
 static uint8_t *kvlangXvalueToWire(const char *kind, const uint8_t *raw,
                                       uint32_t raw_len, int32_t array_len,
+                                      const char *langtype,
                                       uint32_t *out_len) {
     int32_t dims[1];
     int32_t ndim = array_len_to_dims(kind, array_len, dims);
@@ -163,23 +168,25 @@ static uint8_t *kvlangXvalueToWire(const char *kind, const uint8_t *raw,
     } else if (strcmp(kind, KVSPACE_KIND_CHAR_UTF8) == 0 ||
                strcmp(kind, KVSPACE_KIND_CHAR_ASCII) == 0 ||
                strcmp(kind, KVSPACE_KIND_CHAR) == 0) {
-        rc = kvspaceXvalueHeadNewSlack(raw, raw_len, raw_len, &tmp, &tl);
+        rc = kvspaceXvalueHeadNewSlack(raw, raw_len, raw_len, langtype,
+                                        &tmp, &tl);
     } else if (strcmp(kind, KVSPACE_KIND_RWIR) == 0 ||
                strcmp(kind, KVSPACE_KIND_DEF_RWIR) == 0 ||
                strcmp(kind, KVSPACE_KIND_DEF_LANGTYPE) == 0 ||
                (strcmp(kind, KVSPACE_KIND_RWFUNC) == 0 && raw_len > 0)) {
-        rc = kvspaceXvalueHeadNewCode(raw, raw_len, raw_len, &tmp, &tl);
+        rc = kvspaceXvalueHeadNewCode(raw, raw_len, raw_len, langtype,
+                                      &tmp, &tl);
     } else if (ndim > 0) {
         uint64_t dims_u64[X_MAX_NDIM];
         for (int i = 0; i < ndim && i < X_MAX_NDIM; i++)
             dims_u64[i] = (uint64_t)dims[i];
         rc = kvspaceXvalueHeadNewTensor(dims_u64, (uint32_t)ndim, raw,
-                                        raw_len, &tmp, &tl);
+                                        raw_len, langtype, &tmp, &tl);
     } else if (strcmp(kind, KVSPACE_KIND_NONE) == 0 && raw_len == 0) {
         rc = kvspaceXvalueHeadNewNone(&tmp, &tl);
     } else {
         rc = kvspaceXvalueHeadNewScalar(KVSPACE_XVALUE_ST_SHORT, raw, raw_len,
-                                        &tmp, &tl);
+                                        langtype, &tmp, &tl);
     }
     if (rc != 0 || tl > UINT32_MAX) {
         *out_len = 0;
@@ -190,7 +197,7 @@ static uint8_t *kvlangXvalueToWire(const char *kind, const uint8_t *raw,
 
 /* head 视图：把 wire 原位解进调用方给的 kvspaceHead_t（不校验）。
  * 这是**测试/外部**用的完整 head 入口（runtime/tests/ 两处调用，Linux CI 编译）；
- * 热路径走 xh_* 访问器，不建 328B head。langtype 取 v 的 attr key 缓存。 */
+ * 热路径走 xh_* 访问器，不建 328B head。langtype 取 v 的缓存（GetHead 读值 attr 区）。 */
 static void xh_fill_head(const uint8_t *d, kvspaceHead_t *h,
                          const char *lt, uint32_t ltlen) {
     memset(h, 0, sizeof(*h));
@@ -589,44 +596,43 @@ char *kvlangXvalueValueString(const kvlangXvalue_t *v) {
 
 /* ── 构造 ──────────────────────────────────────────────────────────── */
 
-/* langtype 缓存：标量裸 kind；char/数组加 `[N]` 维度前缀（attr key 完整串形状）。 */
-static void fill_lt(kvlangXvalue_t *v, const char *kind, int32_t al,
-                    const int32_t *dims, int32_t ndim) {
-    char buf[256];
-    int n;
-    if (!kind || kind[0] == '\0') {
-        kvlangXvalueSetLangtype(v, "", 0);
-        return;
-    }
+/* 完整 langtype 串（标量裸 kind；char/数组加 `[N]` 维度前缀）写入 buf、
+ * 返回长度。kind 空 → 0（None）。与写值 wire 的 attr 区同源（#571）。 */
+static int32_t lt_fmt(char *buf, size_t cap, const char *kind, int32_t al,
+                      const int32_t *dims, int32_t ndim) {
+    if (!kind || kind[0] == '\0')
+        return 0;
     int32_t dd[1];
     if (ndim <= 0 || !dims) {
         ndim = array_len_to_dims(kind, al, dd);
         dims = dd;
     }
     if (ndim > 0) {
-        n = snprintf(buf, sizeof buf, "[%d]", dims[0]);
+        int n = snprintf(buf, cap, "[%d]", dims[0]);
         for (int i = 1; i < ndim; i++)
-            n += snprintf(buf + n, sizeof buf - (size_t)n, ",%d", dims[i]);
-        snprintf(buf + n, sizeof buf - (size_t)n, "%s", kind);
-        n = (int)strlen(buf);
-        kvlangXvalueSetLangtype(v, buf, (uint32_t)n);
-    } else {
-        kvlangXvalueSetLangtype(v, kind, (uint32_t)strlen(kind));
+            n += snprintf(buf + n, cap - (size_t)n, ",%d", dims[i]);
+        n += snprintf(buf + n, cap - (size_t)n, "%s", kind);
+        return n;
     }
+    return (int32_t)snprintf(buf, cap, "%s", kind);
 }
 
 void kvlangXvalueNew(kvlangXvalue_t *v, const char *kind, const uint8_t *raw,
                         uint32_t raw_len, int32_t al) {
+    char lt[256];
+    int32_t ltl = lt_fmt(lt, sizeof lt, kind, al, NULL, 0);
     uint32_t len;
-    v->bytes = kvlangXvalueToWire(kind, raw, raw_len, al, &len);
+    v->bytes = kvlangXvalueToWire(kind, raw, raw_len, al, lt, &len);
     v->length = len;
-    fill_lt(v, kind, al, NULL, 0);
+    kvlangXvalueSetLangtype(v, lt, (uint32_t)ltl);
 }
 
 /* 显式 ndim/dims 构造（保留多维 shape，供 xv.shape/xv.set 用）。 */
 void kvlangXvalueNewDims(kvlangXvalue_t *v, const char *kind,
                             const uint8_t *raw, uint32_t raw_len,
                             const int32_t *dims, int32_t ndim) {
+    char lt[256];
+    int32_t ltl = lt_fmt(lt, sizeof lt, kind, 1, dims, ndim);
     uint8_t *tmp = NULL;
     uint64_t tl = 0;
     int rc;
@@ -635,23 +641,23 @@ void kvlangXvalueNewDims(kvlangXvalue_t *v, const char *kind,
     } else if (strcmp(kind, KVSPACE_KIND_CHAR_UTF8) == 0 ||
                strcmp(kind, KVSPACE_KIND_CHAR_ASCII) == 0 ||
                strcmp(kind, KVSPACE_KIND_CHAR) == 0) {
-        rc = kvspaceXvalueHeadNewSlack(raw, raw_len, raw_len, &tmp, &tl);
+        rc = kvspaceXvalueHeadNewSlack(raw, raw_len, raw_len, lt, &tmp, &tl);
     } else if (strcmp(kind, KVSPACE_KIND_RWIR) == 0 ||
                strcmp(kind, KVSPACE_KIND_DEF_RWIR) == 0 ||
                strcmp(kind, KVSPACE_KIND_DEF_LANGTYPE) == 0 ||
                (strcmp(kind, KVSPACE_KIND_RWFUNC) == 0 && raw_len > 0)) {
-        rc = kvspaceXvalueHeadNewCode(raw, raw_len, raw_len, &tmp, &tl);
+        rc = kvspaceXvalueHeadNewCode(raw, raw_len, raw_len, lt, &tmp, &tl);
     } else if (ndim > 0 && dims) {
         uint64_t dims_u64[X_MAX_NDIM];
         for (int i = 0; i < ndim && i < X_MAX_NDIM; i++)
             dims_u64[i] = (uint64_t)dims[i];
         rc = kvspaceXvalueHeadNewTensor(dims_u64, (uint32_t)ndim, raw,
-                                        raw_len, &tmp, &tl);
+                                        raw_len, lt, &tmp, &tl);
     } else if (strcmp(kind, KVSPACE_KIND_NONE) == 0 && raw_len == 0) {
         rc = kvspaceXvalueHeadNewNone(&tmp, &tl);
     } else {
         rc = kvspaceXvalueHeadNewScalar(KVSPACE_XVALUE_ST_SHORT, raw, raw_len,
-                                        &tmp, &tl);
+                                        lt, &tmp, &tl);
     }
     if (rc != 0 || tl > UINT32_MAX || !tmp) {
         kvlangXvalueZero(v);
@@ -659,7 +665,7 @@ void kvlangXvalueNewDims(kvlangXvalue_t *v, const char *kind,
     }
     v->bytes = tmp;
     v->length = (uint32_t)tl;
-    fill_lt(v, kind, 1, dims, ndim);
+    kvlangXvalueSetLangtype(v, lt, (uint32_t)ltl);
 }
 
 void kvlangXvalueNewInt64(kvlangXvalue_t *v, int64_t n) {
@@ -713,7 +719,8 @@ void kvlangXvalueNewCharUtf32(kvlangXvalue_t *v, const char *s) {
                        (int32_t)(off / 4));
     free(raw);
 }
-/* 指针：attr key langtype = target_langtype（目标完整 langtype），body = 目标 key。 */
+/* 指针：值 attr 区 langtype = target_langtype（目标完整 kindexpr，codec 拼入），
+ * body = 目标 key。 */
 void kvlangXvalueNewPtr(kvlangXvalue_t *v, const char *target_langtype,
                         const char *target) {
     uint8_t *tmp = NULL;

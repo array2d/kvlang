@@ -218,23 +218,26 @@ fn value_to_xvalue(v: &Value) -> Vec<u8> {
     match v {
         Value::Number(n) => {
             if let Some(i) = n.as_i64() {
-                xvalue_to_wire("int64", &i.to_le_bytes(), &[])
+                with_langtype(&xvalue_to_wire("int64", &i.to_le_bytes(), &[]), "int64")
             } else {
-                xvalue_to_wire("float64", &n.as_f64().unwrap_or(0.0).to_le_bytes(), &[])
+                with_langtype(
+                    &xvalue_to_wire("float64", &n.as_f64().unwrap_or(0.0).to_le_bytes(), &[]),
+                    "float64",
+                )
             }
         }
-        Value::Bool(b) => xvalue_to_wire("bool", &[*b as u8], &[]),
+        Value::Bool(b) => with_langtype(&xvalue_to_wire("bool", &[*b as u8], &[]), "bool"),
         Value::String(s) => new_char_byte(s.as_bytes()),
         _ => Vec::new(),
     }
 }
 
 fn mk_obj_value() -> Vec<u8> {
-    xvalue_to_wire(OBJECT_TYPE, &[], &[])
+    with_langtype(&xvalue_to_wire(OBJECT_TYPE, &[], &[]), OBJECT_TYPE)
 }
 
 fn mk_map_value() -> Vec<u8> {
-    xvalue_to_wire(ARRAY_TYPE, &[], &[])
+    with_langtype(&xvalue_to_wire(ARRAY_TYPE, &[], &[]), ARRAY_TYPE)
 }
 
 fn parse_langtype(kx: &str) -> (Vec<i32>, String) {
@@ -264,7 +267,11 @@ fn new_char_byte(bytes: &[u8]) -> Vec<u8> {
         .map(|c| c as u32)
         .collect();
     let raw: Vec<u8> = utf32.iter().flat_map(|v| v.to_le_bytes()).collect();
-    xvalue_to_wire("char/utf32", &raw, &[utf32.len() as i32])
+    let dims = [utf32.len() as i32];
+    with_langtype(
+        &xvalue_to_wire("char/utf32", &raw, &dims),
+        &full_langtype("char/utf32", &dims),
+    )
 }
 
 #[cfg(test)]
@@ -279,7 +286,7 @@ mod tests {
         }
         let d = [vals.len() as i32];
         let ds: &[i32] = if vals.len() > 1 { &d } else { &[] };
-        xvalue_to_wire("int64", &raw, ds)
+        with_langtype(&xvalue_to_wire("int64", &raw, ds), &full_langtype("int64", ds))
     }
 
     fn test_engine() -> Engine {

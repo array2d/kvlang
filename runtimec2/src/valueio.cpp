@@ -136,7 +136,11 @@ std::uint32_t wire_total(const kvspaceViewToken_t& t) {
         return 0;
     std::uint64_t len = kvspaceXvalueHeadLen(
         reinterpret_cast<const kvspaceXvalueHead*>(hd));
-    const std::uint64_t total = (std::uint64_t)t.headlen + len;
+    /* 完整值长 = head + body + attr（attr_len @8+len 自描述）。 */
+    std::uint64_t alen = 0;
+    if (t.body_cap >= 2)
+        alen = (std::uint64_t)hd[8 + len] | ((std::uint64_t)hd[9 + len] << 8);
+    const std::uint64_t total = (std::uint64_t)t.headlen + len + alen;
     if (total > t.cap || total > 0x7fffffffu)
         return 0;
     return static_cast<std::uint32_t>(total);
@@ -210,6 +214,37 @@ slow:
     return d != nullptr && n > 0;
 }
 
+/* UTF-8 码点数（字节流中非续字节数；不含 NUL）。 */
+static std::uint32_t utf8_chars(const std::uint8_t* s, std::uint32_t n) noexcept {
+    std::uint32_t c = 0;
+    for (std::uint32_t i = 0; i < n; i++)
+        if ((s[i] & 0xC0) != 0x80)
+            c++;
+    return c;
+}
+
+/* 组装字符串 wire：langtype 带 [len] 形状段（码点数）——xv/array 下标按它解 dims。
+   len = 头 body 字节数（utf32=字节/4、utf8=码点数）。 */
+bool v_char_wire(const char* kind, const std::uint8_t* bytes, std::uint32_t n,
+                 std::uint8_t** out, std::uint32_t* out_len) noexcept {
+    const std::uint32_t chars =
+        std::strcmp(kind, "char/utf32") == 0 ? n / 4 : utf8_chars(bytes, n);
+    char lt[96];
+    std::snprintf(lt, sizeof lt, "[%u]%s", chars, kind);
+    std::uint64_t len64 = 0;
+    const int rc = kvspaceXvalueHeadNewSlack(bytes, n, n, lt, out, &len64);
+    if (rc != 0 || !*out || len64 > UINT32_MAX) {
+        if (*out) {
+            std::free(*out);
+            *out = nullptr;
+        }
+        *out_len = 0;
+        return false;
+    }
+    *out_len = static_cast<std::uint32_t>(len64);
+    return true;
+}
+
 bool read_langtype(void* h, std::string_view key, std::string* out) noexcept {
     out->clear();
     auto k = keyz(key);
@@ -252,16 +287,14 @@ bool wire_text(const std::uint8_t* d, std::uint32_t n,
 
 bool write_text(void* h, std::string_view key, std::string_view text) noexcept {
     std::uint8_t* buf = nullptr;
-    std::uint64_t len = 0;
-    if (kvspaceXvalueHeadNewSlack(
-            reinterpret_cast<const std::uint8_t*>(text.data()),
-            static_cast<std::uint64_t>(text.size()),
-            static_cast<std::uint64_t>(text.size()), &buf, &len) != 0 ||
-        !buf)
+    std::uint32_t len = 0;
+    if (!v_char_wire("char/utf8",
+                     reinterpret_cast<const std::uint8_t*>(text.data()),
+                     static_cast<std::uint32_t>(text.size()), &buf, &len))
         return false;
     auto k = keyz(key);
     char err[192] = {};
-    int rc = kvspaceSetValue(h, k.c_str(), buf, static_cast<std::uint32_t>(len), err, sizeof err);
+    int rc = kvspaceSetValue(h, k.c_str(), buf, len, err, sizeof err);
     std::free(buf);
     return rc == 0;
 }

@@ -444,12 +444,13 @@ bool kvlangBodyAdopt(kvlangBodySlot *slot, const uint8_t *val, uint32_t len) {
     slot->body = NULL;
     if (!val || len < KVSPACE_XVALUE_HEAD_LEN)
         return false;
-    /* v2 固定头：必须是 SHORT inline，body 宽 = slot 宽度（langtype 不在 wire，
-     * kind 校验由调用方经 GetHead attr key 完成——见 kvlangBodyCapture）。 */
+    /* v2 固定头：必须是 SHORT inline，body 宽 = slot 宽度；值尾 attr 区在
+     * 视图外（langtype 由调用方 GetHead 从值 attr 区校验）。 */
     if (xh_storetype(val) != KVSPACE_XVALUE_ST_SHORT ||
         xh_ptr(val) != KVSPACE_XVALUE_PTR_INLINE)
         return false;
-    if (xh_len(val) != slot->width || len != KVSPACE_XVALUE_HEAD_LEN + slot->width)
+    if (xh_len(val) != slot->width ||
+        len < KVSPACE_XVALUE_HEAD_LEN + slot->width)
         return false;
     slot->head = (uint8_t *)val;
     slot->headlen = KVSPACE_XVALUE_HEAD_LEN;
@@ -526,7 +527,8 @@ kvlangOperandViewPromote(kvspace_t *kv, kvlangBoundCell_t *cell,
     if (!kv || !kv->shm || !cell->off.resolved || !d ||
         len < KVSPACE_XVALUE_HEAD_LEN)
         return false;
-    /* v2 固定头：SHORT inline，body 宽 = 静态声明类型宽（langtype 不在 wire）。 */
+    /* v2 固定头：SHORT inline，body 宽 = 静态声明类型宽（langtype 在值 attr
+     * 区，kind 取绑定期静态声明）。 */
     if (xh_storetype(d) != KVSPACE_XVALUE_ST_SHORT ||
         xh_ptr(d) != KVSPACE_XVALUE_PTR_INLINE)
         return false;
@@ -537,7 +539,7 @@ kvlangOperandViewPromote(kvspace_t *kv, kvlangBoundCell_t *cell,
         tid != KVLANG_LT_BOOL)
         return false;
     if (xh_len(d) != (uint64_t)w ||
-        len != KVSPACE_XVALUE_HEAD_LEN + (uint32_t)w)
+        len < KVSPACE_XVALUE_HEAD_LEN + (uint32_t)w)
         return false;
     char root[KV_KEY_MAX];
     bool in_tree = false;
