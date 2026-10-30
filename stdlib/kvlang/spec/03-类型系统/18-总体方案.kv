@@ -3,7 +3,7 @@ lib kvlang/spec/类型系统/总体方案 {
 	r####"# 类型系统总体方案：xvalue head 的固定头
 
 > **本卷即现行方案**：#566 已把 head 改为**固定 8 字节头**，类型（langtype）移出 head
-> 到 `x‥langtype` attr key。本卷各章与其它各卷均据此书写。
+> 到值内 attr 区（body 之后的 tag 1 记录）。本卷各章与其它各卷均据此书写。
 
 每个 XValue 落入 kvspace 时，head 固定 8 字节、body 紧随其后：
 
@@ -13,9 +13,9 @@ lib kvlang/spec/类型系统/总体方案 {
 - **`len`（偏移 0-5）** — body 有效字节数，小端 u48，容量 2^48。
 - **`storetype`（偏移 6）** — 存储形态：0 短定长 / 1 变长 / 2 长定长 / 3 扩展世界。
 - **`ptr`（偏移 7）** — 0=inline、1=ptr、2=@ext。
-- **类型不在 head** — langtype 存 `x‥langtype` attr key（明文 UTF-8 串，含形状段）。
+- **类型不在 head** — langtype 存值内 attr 区（body 后 tag 1 记录，明文 UTF-8 串，含形状段）。
 
-**codec 不解析 langtype**：后端是纯存储层——body 偏移恒为 8，类型事实源在 attr key，
+**codec 不解析 langtype**：后端是纯存储层——body 偏移恒为 8，类型事实源在值内 attr 区，
 由 vmkv（明文栈）读取解析。
 "#### -> /lib/kvlang/spec/类型系统/总体方案
 }

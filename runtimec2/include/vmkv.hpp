@@ -92,13 +92,11 @@ struct Vmkv {
                            std::string* stop_pc, std::string* err);
 };
 
-// 写 `x‥langtype` attr key（上层职责；kvspace 层不代写）。attr 先落、x 后落。
-// 帧成员/变量/数组槽写主值前由本 helper 补类型（vmkv.cpp 定义，兄弟 TU 共用）。
-bool write_attr_lt(void* h, const char* key, const char* lt, char* err,
-                   uint32_t err_cap);
-
-// 直接读 attr 键本体（不依赖主值存在；GetHead 需主值，attr 先落时序会读空）。
-bool read_langtype_attr_direct(void* h, const char* key, std::string* out);
+// 带类型整体写：lt 写入 value 的 attr 区（替换 codec 空 attr 占位），单 key 一次写。
+// 帧成员/变量/数组槽写值前由本 helper 补类型（vmkv.cpp 定义，兄弟 TU 共用）。
+bool set_value_typed(void* h, const char* key, const std::uint8_t* value,
+                     std::uint32_t value_len, const char* lt, char* err,
+                     std::uint32_t err_cap);
 
 // 进程级明文栈实例（Runtime 注入共享 kvspace 句柄；bin 成员经 g_vmkv.bin 访问）。
 extern Vmkv g_vmkv;

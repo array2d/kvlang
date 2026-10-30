@@ -223,30 +223,6 @@ static int pc_write_whole(kvlangFrame_t *f, struct kvspaceKeyOff *ko,
     return rc;
 }
 
-/* attr key langtype = "[N]char/utf8"（冷 helper）：码点数统计 + 无 snprintf 整数格式化。 */
-__attribute__((noinline, visibility("hidden"))) int
-kvlangCharLangtypeFmt(uint8_t *lt, const char *s, uint32_t len) {
-    uint32_t v = cp_count(s, len);
-    if (v == pc_cache.last_cp)
-        return 0;
-    pc_cache.last_cp = v;
-    char digits[12];
-    int d = 0;
-    do {
-        digits[d++] = (char)('0' + (int)(v % 10));
-        v /= 10;
-    } while (v);
-    uint32_t p = 0;
-    if ((uint32_t)d + 12 > 64)
-        return -1;
-    lt[p++] = '[';
-    while (d)
-        lt[p++] = (uint8_t)digits[--d];
-    memcpy(lt + p, "]char/utf8", 11);
-    lt[p + 11] = 0;
-    return 0;
-}
-
 static int pc_write_part(kvlangFrame_t *f, struct kvspaceKeyOff *ko,
                          const char *s, uint32_t len) {
     uint8_t *b = pc_cache.buf;
@@ -260,20 +236,19 @@ static int pc_write_part(kvlangFrame_t *f, struct kvspaceKeyOff *ko,
         capture_pc_view(f, ko);
     if (ko->view_ok) {
         uint8_t *vh = ko->view.head;
+        /* 值内 attr 区 @8+len 随 body 长移动：只有 len 不变时原地写 head+body
+         * 才不动 attr；长度变化/无 view 一律回退 pc_write_whole 整值写。 */
         if (ko->view.headlen == KVSPACE_XVALUE_HEAD_LEN &&
             xh_storetype(vh) == KVSPACE_XVALUE_ST_SLACK &&
             xh_ptr(vh) == KVSPACE_XVALUE_PTR_INLINE &&
-            len <= ko->view.body_cap) {
+            xh_len(vh) == len && len <= ko->view.body_cap) {
             memcpy(vh, b, KVSPACE_XVALUE_HEAD_LEN);
             memcpy(ko->view.body, s, len);
             return 0;
         }
         ko->view_ok = false;
     }
-    memcpy(b + KVSPACE_XVALUE_HEAD_LEN, s, len);
-    uint32_t part = KVSPACE_XVALUE_HEAD_LEN + len;
-    return kvspaceSetPartByRef(f->kvspace->handle, &ko->off, ko->key, 0, b,
-                               part, NULL, 0);
+    return -1;
 }
 
 /* 写 pc/status 槽：已绑定的 keyoff 直接写；独立帧没有绑定，按 key 冷写。 */

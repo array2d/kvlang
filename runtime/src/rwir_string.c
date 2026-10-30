@@ -63,6 +63,8 @@ static int write_char32(kvlangFrame_t *f, const uint32_t *r, int n) {
             }
         }
     }
+    char lt[48];
+    int ln = snprintf(lt, sizeof lt, "[%d]char/utf32", n);
     if (n >= 0 && n <= 16) {
         uint8_t sbuf[128];
         uint32_t blen = (uint32_t)n * 4;
@@ -77,8 +79,8 @@ static int write_char32(kvlangFrame_t *f, const uint32_t *r, int n) {
             sbuf[8 + i * 4 + 3] = (uint8_t)((r[i] >> 24) & 0xFF);
         }
         kvlangXvalue_t e = {sbuf, KVSPACE_XVALUE_HEAD_LEN + blen};
-        char lt[48];
-        int ln = snprintf(lt, sizeof lt, "[%d]char/utf32", n);
+        /* 值内 attr 区：langtype 随值单 key（#571）。 */
+        e.length += xh_attr_write(e.bytes + e.length, lt);
         kvlangXvalueSetLangtype(&e, lt, (uint32_t)ln);
         return kvlangBuiltinWriteResult(f, &e);
     }
@@ -95,17 +97,15 @@ static int write_char32(kvlangFrame_t *f, const uint32_t *r, int n) {
             raw[i * 4 + 3] = (uint8_t)((r[i] >> 24) & 0xFF);
         }
         uint8_t *out; uint64_t len = 0;
-        kvspaceXvalueHeadNewSlack(raw, (uint64_t)n * 4, (uint64_t)n * 4, &out,
-                                  &len);
+        kvspaceXvalueHeadNewSlack(raw, (uint64_t)n * 4, (uint64_t)n * 4, lt,
+                                  &out, &len);
         free(raw);
         e.bytes = out; e.length = (uint32_t)len;
     } else {
         uint8_t *out; uint64_t len = 0;
-        kvspaceXvalueHeadNewSlack((const uint8_t *)"", 0, 0, &out, &len);
+        kvspaceXvalueHeadNewSlack((const uint8_t *)"", 0, 0, lt, &out, &len);
         e.bytes = out; e.length = (uint32_t)len;
     }
-    char lt[48];
-    int ln = snprintf(lt, sizeof lt, "[%d]char/utf32", n);
     kvlangXvalueSetLangtype(&e, lt, (uint32_t)ln);
     int rc = kvlangBuiltinEmitResult(f, &e);
     return rc;

@@ -186,7 +186,6 @@ bool v_scalar_raw(Scalar::K k, std::uint8_t width, const std::uint8_t* body,
 
 bool v_to_wire(const char* kind, std::uint8_t width, const Scalar& s,
                std::uint8_t** out, std::uint32_t* out_len) noexcept {
-    (void)kind; /* v2 标量构造器不消费 kind（langtype 走 attr key） */
     std::uint8_t raw[8] = {};
     std::uint64_t u = 0;
     switch (s.k) {
@@ -213,7 +212,7 @@ bool v_to_wire(const char* kind, std::uint8_t width, const Scalar& s,
     std::memcpy(raw, &u, width);
     std::uint8_t* buf = nullptr;
     std::uint64_t total = 0;
-    if (kvspaceXvalueHeadNewScalar(0, raw, width, &buf, &total) != 0 ||
+    if (kvspaceXvalueHeadNewScalar(0, raw, width, kind, &buf, &total) != 0 ||
         total > UINT32_MAX) {
         *out = nullptr;
         *out_len = 0;

@@ -18,7 +18,7 @@ durable 单句柄相干、后端装载。
 2. **值语义与读写点**：head 固定 8 字节（`len[6] u48 小端`、`storetype`、`ptr`，body 偏移恒 8），唯一 wire
    读写点在前端——构造走 `kvspaceXvalueHeadNew*`/`Reserve`，读走 memcpy `kvspaceXvalueHead` struct +
    `kvspaceXvalueHeadLen`，标准标量构造器 `kvspaceNewPtr`/`NewChar`/`NewBool`/`NewInt64`/`NewFloat64`；
-   langtype 在 `x‥langtype` attr key。runtimec2 的 `xvalue.c` 只是其薄封装。langtype 串是类型的
+   langtype 落值内 attr 区（随单 key 一次写整体落下）。runtimec2 的 `xvalue.c` 只是其薄封装。langtype 串是类型的
    唯一真相，怎么拼、怎么解，只此一处。
 3. **指令解码与签名校验**：`rwir_decode.c:RwirDecode`（稠密探查、遇空即停）、`/‥isa/<folded-op>`
 签名的读写码规范、
@@ -52,7 +52,7 @@ livebyte）。两组对外 C ABI：
 其中 `LangtypeValid`/`LangtypeMatch` 与正典 codec 的 head 解码，正是 **def langtype 与 langtype** 对外的
 两条 ABI（两者区别见 [[langtype签名类型表达式]]）：前者服务 **def langtype**（匹配侧——校验一条签名匹配
 类型、把一个值的 `(kind,ndim,dims)` 匹配进它），后者服务 **langtype**（解析侧——把 head 里一条类型串解析
-为 `(kind,ndim,dims,元素字节宽)`，事实源为 `x‥langtype` attr key 与 `kvlangKindexprParse`）。两者同吃一条
+为 `(kind,ndim,dims,元素字节宽)`，事实源为值内 attr 区 tag 1 记录与 `kvlangKindexprParse`）。两者同吃一条
 类型表达式串、共用唯一文法与 codec，差别只在**匹配** vs **解析**。
 
 内部模块：`xvalue.c`（XValue 编解码薄封装）、`langtype.c` + `langtypetable.c`（langtype 校验/匹配与我

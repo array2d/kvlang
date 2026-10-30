@@ -319,6 +319,7 @@ static int emit_int_kind(kvlangFrame_t *f, const char *kind, uint32_t width,
     uint8_t buf[64];
     kvlangXvalue_t r = {buf, kvlangScalarToWire(kind, raw, width, buf,
                                                 sizeof buf)};
+    kvlangXvalueSetLangtype(&r, kind, (uint32_t)strlen(kind));
     if (f->instruction && f->instruction->typed_core)
         return kvlangBuiltinWriteResultTyped(f, &r, kind);
     return kvlangBuiltinWriteResult(f, &r);

@@ -27,8 +27,8 @@ void kvlangKvspaceDisconnect(kvspace_t *k) {
     free(k);
 }
 
-/* 借用读顺带读 attr key langtype（v2：#566 类型不在 wire）。
- * GetHead 失败/无 attr key → langtype_len=0（None 判据的一部分）。 */
+/* 借用读顺带读值内 attr 区 langtype（#571：类型随值单 key）。
+ * GetHead 失败/空 attr → langtype_len=0（None 判据的一部分）。 */
 static void get_one_fill_langtype(kvspace_t *k, const char *key,
                                   kvlangXvalue_t *out) {
     kvspaceHead_t h;

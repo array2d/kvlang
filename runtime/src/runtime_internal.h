@@ -92,13 +92,13 @@ extern int kvspaceSetValueByRef(void *h, kvspaceRef_t *ref,
                                 char *err, uint32_t err_cap);
 
 /* 定位读/写（分片）；只读 head 前缀。见 kvspace.h 契约。 */
-/* 新位置写：按 (ref,storetype,body_len,body_cap) 分配并写 head，
- * 返回 body 指针供调用方填（shm 写即落）。kvspace 层不写 attr key——
- * 需要类型时调用方自写 `x‥langtype`（attr 先落、x 后落）。 */
+/* 新位置写：按 (ref,storetype,body_len,body_cap,langtype) 分配并写固定头 +
+ * 值内 attr 区（#571），返回 body 指针供调用方填（shm 写即落）。
+ * langtype 整体单写；空串 = 无类型（空 attr）。 */
 extern int kvspaceWriteNewPlace(void *h, const char *key, uint8_t ref,
                                 uint8_t storetype, uint32_t body_len,
-                                uint64_t body_cap, uint8_t **body, char *err,
-                                uint32_t err_cap);
+                                uint64_t body_cap, const char *langtype,
+                                uint8_t **body, char *err, uint32_t err_cap);
 
 extern int kvspaceGetPart(void *h, const char *key, uint32_t offset,
                           uint32_t len, uint8_t **out, uint32_t *out_len);
@@ -161,25 +161,30 @@ static inline void kvspaceXvalueHeadSetLen(kvspaceXvalueHead *h, uint64_t v) {
 }
 extern int kvspaceXvalueHeadNewNone(uint8_t **out, uint64_t *out_len);
 extern int kvspaceXvalueHeadNewScalar(uint8_t storetype, const uint8_t *raw,
-                                      uint32_t raw_len, uint8_t **out,
-                                      uint64_t *out_len);
+                                      uint32_t raw_len, const char *langtype,
+                                      uint8_t **out, uint64_t *out_len);
 extern int kvspaceXvalueHeadNewSlack(const uint8_t *data, uint64_t data_len,
-                                     uint64_t cap, uint8_t **out,
-                                     uint64_t *out_len);
+                                     uint64_t cap, const char *langtype,
+                                     uint8_t **out, uint64_t *out_len);
 extern int kvspaceXvalueHeadNewTensor(const uint64_t *dims, uint32_t ndim,
                                       const uint8_t *raw, uint64_t raw_len,
+                                      const char *langtype,
                                       uint8_t **out, uint64_t *out_len);
 extern int kvspaceXvalueHeadNewCode(const uint8_t *body, uint64_t body_len,
-                                    uint64_t cap, uint8_t **out,
-                                    uint64_t *out_len);
+                                    uint64_t cap, const char *langtype,
+                                    uint8_t **out, uint64_t *out_len);
 extern int kvspaceNewPtr(const char *target_langtype, const char *target,
                          uint8_t **out, uint32_t *out_len);
-extern int kvspaceNewChar(const uint8_t *bytes, uint32_t len, uint8_t **out,
+extern int kvspaceNewChar(const uint8_t *bytes, uint32_t len,
+                          const char *langtype, uint8_t **out,
                           uint32_t *out_len);
-extern int kvspaceNewBool(uint8_t v, uint8_t **out, uint32_t *out_len);
-extern int kvspaceNewInt64(int64_t v, uint8_t **out, uint32_t *out_len);
+extern int kvspaceNewBool(uint8_t v, const char *langtype, uint8_t **out,
+                          uint32_t *out_len);
+extern int kvspaceNewInt64(int64_t v, const char *langtype, uint8_t **out,
+                           uint32_t *out_len);
 
-extern int kvspaceNewFloat64(double v, uint8_t **out, uint32_t *out_len);
+extern int kvspaceNewFloat64(double v, const char *langtype, uint8_t **out,
+                             uint32_t *out_len);
 
 /* ── 数值上限 ──────────────────────────────────────────────────────── */
 
@@ -202,8 +207,9 @@ void kvlangLangtypeParse(const uint8_t *langtype, int32_t langtype_len,
 
 /* ── 基础类型 ──────────────────────────────────────────────────────── */
 
-/* v2 固定头（#566）langtype 不在 wire，存 x‥langtype attr key；读侧由本缓存承载。
- * 读值（kvlangKvspaceGetOne/GetMember）经 GetHead 填；构造（New*）用 kind 填。 */
+/* v2 固定头（#566）+ 值内 attr 区（#571）：langtype 随值单 key 写，
+ * GetHead 从 attr 区读回；读侧由本缓存承载。构造（New*）把 langtype
+ * 拼进 wire attr 区，缓存与 wire 同源。 */
 typedef struct {
     uint8_t *bytes; /* 视图：mmap / durable 常驻快照 / 行内字面量 / 显式 copy */
     uint32_t length;
@@ -239,10 +245,28 @@ char *kvlangStringFormat(const char *fmt, ...)
 char *kvlangStringCopyN(const char *s, size_t n);
 
 /* ── xvalue head 零拷贝直接读（v2 固定 8 字节头，#566） ────────────────
- * wire: [len:u48 LE@0-5][storetype:u8@6][ptr:u8@7][body@8]
- * body 偏移恒 = 8；langtype 不在 head——存 x‥langtype attr key
- * （kvspaceGetHead 读），读侧由 kvlangXvalue_t.langtype 缓存承载。
+ * wire: [len:u48 LE@0-5][storetype:u8@6][ptr:u8@7][body@8][attr@8+len]
+ * attr 区自描述（attr_len:u16 @8+len），tag 1 = langtype（#571）；
+ * 读侧由 kvlangXvalue_t.langtype 缓存承载（GetHead 从 attr 区读）。
  * 不建 328B head 结构体、不拷贝 langtype、不校验——全部原位取。 */
+
+/* attr 区常量与写入：空 langtype = 无记录（空 attr = [attr_len:2]）。 */
+#define KVSPACE_XVALUE_ATTR_TAG_LANGTYPE 1u
+
+/* 写 attr 区到 dst（调用方保证 8+len+alen ≤ 缓冲）；返回 attr 总长。 */
+static inline uint32_t xh_attr_write(uint8_t *dst, const char *langtype) {
+    uint32_t ltl = langtype ? (uint32_t)strlen(langtype) : 0;
+    uint32_t alen = 2 + (ltl ? 3 + ltl : 0);
+    dst[0] = (uint8_t)alen;
+    dst[1] = (uint8_t)(alen >> 8);
+    if (ltl) {
+        dst[2] = KVSPACE_XVALUE_ATTR_TAG_LANGTYPE;
+        dst[3] = (uint8_t)ltl;
+        dst[4] = (uint8_t)(ltl >> 8);
+        memcpy(dst + 5, langtype, ltl);
+    }
+    return alen;
+}
 
 static inline uint64_t xh_rd32(const uint8_t *p) {
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) |
@@ -320,10 +344,11 @@ static inline uint32_t xh_langtype_copy_of(const kvlangXvalue_t *v, char *buf,
 char *kvlangXvalueLangtypeDup(const kvlangXvalue_t *v);
 void kvlangXvalueFree(kvlangXvalue_t *v);
 void kvlangXvalueCopy(kvlangXvalue_t *v);
-/* 标量 inline 写 wire 到调用方缓冲：pow=5(headlen 32)、flags=0、a=b=0、
- * langtype@18、body@32。与正典 wire codec 的字节一致性由 ctest scalar_wire 守护。 */
-/* 变长 char/utf8 的 SLACK 写 wire（pow=6、flags=1、a=len、b=cap、body@64）。
- * 固定 cap 让每步写同尺寸值，后端得以原地覆写；返回值 = 写出总长。 */
+/* 标量 inline 写 wire 到调用方缓冲：固定 8 字节头 + body + 值内 attr 区
+ * （langtype=kind，随值单 key）。与正典 wire codec 的字节一致性由
+ * ctest scalar_wire 守护。 */
+/* 变长 char/utf8 的 SLACK 写 wire：固定 8 字节头 + body + 空 attr
+ * （系统键无类型，#571）。返回值 = 写出总长。 */
 __attribute__((visibility("hidden"))) uint32_t
 kvlangSlackCharToWire(const uint8_t *raw, uint32_t len, uint32_t cap,
                       uint8_t *buf, uint32_t bufsize);
@@ -340,9 +365,6 @@ int kvlangXvalueLangtype(const kvlangXvalue_t *v, char *buf,
                          size_t cap); /* 完整 langtype → buf */
 bool kvlangKindIsMap(
     const char *kind); /* stringkeymap 或 map langtype（`…·…`） */
-/* "[<utf8码点>]char/utf8" 写入 lt（≥64B）；失败 -1。 */
-__attribute__((visibility("hidden"))) int
-kvlangCharLangtypeFmt(uint8_t *lt, const char *s, uint32_t len);
 /* 作废 PC part-write 缓存（owned 接管或回退时调用）。 */
 __attribute__((visibility("hidden"))) void kvlangPcCacheInvalidate(void);
 bool kvlangXvalueIsPtr(const kvlangXvalue_t *v);
@@ -498,7 +520,7 @@ static inline int32_t xh_content_len_of(const kvlangXvalue_t *v) {
     return kvlangXvalueNone(v) ? 0 : xh_content_len(v->bytes);
 }
 
-/* 从 kvspaceHead_t（GetHead 的 attr key langtype）填 v 的 langtype 缓存。 */
+/* 从 kvspaceHead_t（GetHead 读值内 attr 区得到的 langtype）填缓存。 */
 static inline void kvlangXvalueSetHeadLangtype(kvlangXvalue_t *v,
                                                const kvspaceHead_t *h) {
     int32_t n = h->langtype_len;

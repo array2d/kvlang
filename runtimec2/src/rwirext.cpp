@@ -189,12 +189,50 @@ char* resolve_read_impl(void* h, const char* pc, int idx) {
     return dup(v);
 }
 
-// 读参 KV 路径：M2 接 operand 解码后实现；M1 一律空（走 ResolveRead 取值）。
+// 读参 KV 路径：解析读参描述符 → 帧槽/调用方实例路径（供容器成员枚举
+// read_str_list：networld/proc·exec(args) 读 stringkeymap 容器参数）。
 char* resolve_read_path_impl(void* h, const char* pc, int idx) {
-    (void)h;
-    (void)pc;
-    (void)idx;
-    return dup("");
+    Pc p;
+    if (!h || !pc || !parse_pc(pc, &p) || idx < 0)
+        return dup("");
+    const std::string key = func_key(h, p, -(idx + 1));
+    std::string var;
+    int nr = 0, nw = 0;
+    if (!read_rwir(h, key, &var, &nr, &nw))
+        return dup("");
+    const std::string frame = g_vmkv.frame_root(p.vid, p.depth);
+    std::string target;
+    if (!var.empty() && var[0] == '*') {
+        // 参数 Ptr：arg 槽 Ptr → 调用方实例（容器参数 `args:*[int64]·[]char/utf32`）。
+        const std::string mk = frame + "/" + var.substr(1);
+        const std::uint8_t* d = nullptr;
+        std::uint32_t n = 0;
+        if (!read_wire_raw(h, mk, &d, &n))
+            return dup("");
+        Wire w{d, n};
+        std::string t;
+        if (!v_ptr_target(w, &t) || t.empty())
+            return dup("");
+        if (var.rfind("*[0,", 0) == 0) {
+            const std::uint8_t* d2 = nullptr;
+            std::uint32_t n2 = 0;
+            if (!read_wire_raw(h, t, &d2, &n2))
+                return dup("");
+            Wire w2{d2, n2};
+            if (v_ptr_target(w2, &target)) {
+                /* 两跳：arg → 写参槽 → 调用方实例 */
+            } else {
+                target = t;
+            }
+        } else {
+            target = t;
+        }
+    } else if (!var.empty() && var[0] == '/') {
+        target = var;
+    } else {
+        target = frame + "/" + var;
+    }
+    return dup(target);
 }
 
 char* resolve_write_impl(void* h, const char* pc, int idx) {

@@ -18,15 +18,15 @@ static int failures;
         }                                                                      \
     } while (0)
 
-/* raw 低位字节为 0x2a，其余 0；与 kvspaceXvalueHeadNewScalar(ndim=0) 逐字节比对。 */
+/* raw 低位字节为 0x2a，其余 0；与 kvspaceXvalueHeadNewScalar 逐字节比对。 */
 static void check_kind(const char *kind, uint32_t len) {
     uint8_t raw[8] = {0x2a, 0, 0, 0, 0, 0, 0, 0};
     uint8_t buf[64];
     uint32_t bl = kvlangScalarToWire(kind, raw, len, buf, sizeof buf);
     uint8_t *ref = NULL;
     uint64_t rl64 = 0;
-    CHECK(kvspaceXvalueHeadNewScalar(KVSPACE_XVALUE_ST_SHORT, raw, len, &ref,
-                                     &rl64) == 0);
+    CHECK(kvspaceXvalueHeadNewScalar(KVSPACE_XVALUE_ST_SHORT, raw, len, kind,
+                                     &ref, &rl64) == 0);
     CHECK(rl64 <= UINT32_MAX);
     uint32_t rl = (uint32_t)rl64;
     CHECK(bl == rl);
@@ -65,8 +65,9 @@ static void check_member(kvspace_t *kv, bool is_status, const char *s) {
     CHECK(blen == (uint32_t)strlen(s));
     uint8_t *ref = NULL;
     uint64_t rl = 0;
+    /* pc/status 是系统键：空 langtype（空 attr）。 */
     CHECK(kvspaceXvalueHeadNewSlack((const uint8_t *)s, strlen(s), strlen(s),
-                                    &ref, &rl) == 0);
+                                    "", &ref, &rl) == 0);
     CHECK(v.length == (uint32_t)rl);
     /* 等价值写（part-write）只保证 [0, 8+a) 是对的；旧字节不属于值
      * （spec 05/02：值语义只取前 a 字节）。整值写时两者自然相同。 */
@@ -102,7 +103,7 @@ int main(void) {
             kvlangScalarToWire(KVSPACE_KIND_INT64, raw, 8, buf, sizeof buf);
         uint8_t *ref = NULL;
         uint32_t rl = 0;
-        CHECK(kvspaceNewInt64(ints[i], &ref, &rl) == 0);
+        CHECK(kvspaceNewInt64(ints[i], KVSPACE_KIND_INT64, &ref, &rl) == 0);
         CHECK(bl == rl && bl > 0 && memcmp(buf, ref, bl) == 0);
         free(ref);
     }
@@ -117,7 +118,8 @@ int main(void) {
             kvlangScalarToWire(KVSPACE_KIND_FLOAT64, raw, 8, buf, sizeof buf);
         uint8_t *ref = NULL;
         uint32_t rl = 0;
-        CHECK(kvspaceNewFloat64(floats[i], &ref, &rl) == 0);
+        CHECK(kvspaceNewFloat64(floats[i], KVSPACE_KIND_FLOAT64, &ref, &rl) ==
+              0);
         CHECK(bl == rl && bl > 0 && memcmp(buf, ref, bl) == 0);
         free(ref);
     }
@@ -127,7 +129,7 @@ int main(void) {
             kvlangScalarToWire(KVSPACE_KIND_BOOL, &raw, 1, buf, sizeof buf);
         uint8_t *ref = NULL;
         uint32_t rl = 0;
-        CHECK(kvspaceNewBool(raw, &ref, &rl) == 0);
+        CHECK(kvspaceNewBool(raw, KVSPACE_KIND_BOOL, &ref, &rl) == 0);
         CHECK(bl == rl && bl > 0 && memcmp(buf, ref, bl) == 0);
         free(ref);
     }

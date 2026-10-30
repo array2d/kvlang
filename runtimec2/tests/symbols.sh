@@ -2,7 +2,7 @@
 # ABI 对齐验收：16 个 C ABI 符号在 c2 与 C 版中都存在；c2 不得多导出 kvlang*。
 set -euo pipefail
 C2=${1:?usage: symbols.sh <libkvlang_runtimec2.so>}
-C=${KVLANG_C_SO:-/usr/lib/libkvlang_runtime.so}
+C=${KVLANG_C_SO:-$(dirname "$C2")/libkvlang_runtime.so}
 
 EXPECT="kvlangDefRwir
 kvlangRwirextHandoff

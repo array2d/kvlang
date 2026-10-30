@@ -67,7 +67,8 @@ static int operand_load(kvspace_t *kv, kvlangBoundCell_t *cell, uint32_t pack,
     if (pack != 0 && kvlangReadViewTry(kv, cell, pack, out))
         return 0;
     kvspaceKeyOff *ko = &cell->off;
-    /* v2：rview 是 SHORT inline 标量视图（langtype 不在 wire，取 cell 静态声明）。 */
+    /* v2：rview 是 SHORT inline 标量视图（langtype 在值 attr 区，kind 取
+     * cell 静态声明）。 */
     if (cell->rview_state == 1) {
         if ((++cell->rview_hits & 127u) != 0 &&
             rview_scalar(cell->rview_bytes)) {

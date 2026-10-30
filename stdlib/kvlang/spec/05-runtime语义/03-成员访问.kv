@@ -68,7 +68,7 @@ kvlang 用两个符号访问复合数据，语义严格分离，runtime **不得
 ## 扩展世界句柄（storetype 3，@ext）
 
 `@ext` 使用 storetype=3、ptr=2，不使用独立 `ref` 字节。head 的 langtype 是目标类型（不带 `@` 前缀，存
-于 `x‥langtype` attr key）；body 是 UTF-8 **定位串**（如
+于值内 attr 区）；body 是 UTF-8 **定位串**（如
 `/networld/<host>/proc/<pid>/stdout`），不是真实值字节。读取该 key 时
 由支持 `@` 的 rwir（如 byteseek 的 fs/networld 一族）按 body 定位串还原真实字节（见 [[runtime开发规
 范]]、[[执行模型]] §八）。真

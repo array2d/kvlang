@@ -40,7 +40,7 @@ kvlangPcViewInit(kvlangPcViewState *st) {
 }
 
 /* 取 view 并校验固定档与规范形状；成功写入 st->view。
- * v2：SLACK inline 固定头（langtype 在 attr key，不在 wire）。 */
+ * v2：SLACK inline 固定头，值内 attr 区自描述（‥pc 系统键 = 空 attr）。 */
 static bool pc_view_adopt(kvlangPcViewState *st, kvspace_t *kv,
                           kvspaceKeyOff *ko) {
     kvspaceXvalueBodyView_t nv;
@@ -69,10 +69,11 @@ static bool pc_fixed_init(kvlangFrame_t *f, kvspaceKeyOff *ko, const char *pc,
         return false;
     uint8_t *body = NULL;
     char err[256];
-    /* ‥pc 是系统键（末段含 ‥）：无类型、不写 attr key。 */
+    /* ‥pc 是系统键（末段含 ‥）：无类型，langtype 传空串（空 attr）。 */
     if (kvspaceWriteNewPlace(f->kvspace->handle, ko->key, KVSPACE_REF_INLINE,
                              KVSPACE_STORETYPE_SLACK,
-                             len, PC_FIXED_CAP, &body, err, sizeof err) != 0 ||
+                             len, PC_FIXED_CAP, "", &body, err, sizeof err) !=
+            0 ||
         !body)
         return false;
     memcpy(body, pc, len);
@@ -109,6 +110,12 @@ kvlangPcViewWrite(kvlangFrame_t *f, kvspaceKeyOff *ko, const char *pc,
             return pc_fallback(st);
     }
     uint8_t *h = st->view.head;
+    /* 值内 attr 区 @8+len 随 body 长移动：len 不变才可原地写 head+body
+     * （attr 位置不动）；长度变化作废视图、回退整值写。 */
+    if (xh_len(h) != len) {
+        st->ready = false;
+        return 0;
+    }
     kvspaceXvalueHead hd = {
         .storetype = KVSPACE_XVALUE_ST_SLACK,
         .ptr = KVSPACE_XVALUE_PTR_INLINE,

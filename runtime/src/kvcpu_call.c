@@ -338,16 +338,18 @@ static const func_sig_entry_t *lookup_func_sig(kvspace_t *kv,
     return NULL;
 }
 
-/* v2 固定头 Ptr 写 wire：[len:u48][storetype=SLACK][ptr=PTR][body=target]。
- * langtype（目标 kindexpr）不在 head——写值路径侧写 attr key。 */
+/* v2 固定头 Ptr 写 wire：[len:u48][storetype=SLACK][ptr=PTR][body=target]
+ * + 值内 attr 区（langtype=目标 kindexpr，#571）。放不进 buf → 0（调用方
+ * 回退 kvspaceNewPtr 堆构造）。 */
 static uint32_t ptr_wire_buf(const char *type, const char *target,
                              uint8_t *buf, size_t cap) {
     if (!type || !target || strcmp(type, "any") == 0)
         return 0;
     size_t tlen = strlen(target);
-    if (tlen == 0 || tlen > UINT48_MAX - KVSPACE_XVALUE_HEAD_LEN)
-        return 0;
-    if (KVSPACE_XVALUE_HEAD_LEN + tlen > cap)
+    size_t ltl = strlen(type);
+    size_t alen = 2 + (ltl ? 3 + ltl : 0);
+    if (tlen == 0 || tlen > UINT48_MAX - KVSPACE_XVALUE_HEAD_LEN ||
+        KVSPACE_XVALUE_HEAD_LEN + tlen + alen > cap)
         return 0;
     memset(buf, 0, KVSPACE_XVALUE_HEAD_LEN);
     kvspaceXvalueHead h = {
@@ -357,7 +359,8 @@ static uint32_t ptr_wire_buf(const char *type, const char *target,
     kvspaceXvalueHeadSetLen(&h, tlen);
     memcpy(buf, &h, sizeof h);
     memcpy(buf + KVSPACE_XVALUE_HEAD_LEN, target, tlen);
-    return KVSPACE_XVALUE_HEAD_LEN + (uint32_t)tlen;
+    xh_attr_write(buf + KVSPACE_XVALUE_HEAD_LEN + tlen, type);
+    return KVSPACE_XVALUE_HEAD_LEN + (uint32_t)tlen + (uint32_t)alen;
 }
 
 static int write_kv_raw(kvspace_t *kv, const char *key, const uint8_t *bytes,

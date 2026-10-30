@@ -98,3 +98,24 @@ kvlangtest*
 
 # isadbg 调试 dump（本地生成，不入库）
 isadbg*
+
+# 调试 probe 产物（本地生成）
+*.garb
+*.gen
+bsProbe*
+layoutProbe*
+kvtest-probe*
+probe*
+p9
+p9.*
+testA
+testA.*
+rp
+rp.*
+
+# 外部依赖拷贝 / 构建产物（不入库；头来自源仓，.so 属产物）
+/include/kvspace/
+/include/blockmalloc/
+/include/slotsboxmalloc/
+/lib/*.so*
+/lib/kvspace/

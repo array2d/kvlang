@@ -115,13 +115,15 @@ __attribute__((noinline)) static void fk_classify(const kvlangCodeRow_t *row,
 }
 
 /* SHORT inline 标量值（v2 固定头、body 宽 w）→ body 指针。
- * langtype 不在 wire：kind 由调用方静态声明（fk_read 传参），只验 storetype/ptr/宽。 */
+ * langtype 在值 attr 区：kind 由调用方静态声明（fk_read 传参），
+ * 只验 storetype/ptr/body 宽。 */
 static inline const uint8_t *fk_scalar(const uint8_t *d, uint32_t len,
                                        const char *kind, uint32_t kl,
                                        uint32_t w) {
     (void)kind;
     (void)kl;
-    if (len != KVSPACE_XVALUE_HEAD_LEN + w ||
+    if (len < KVSPACE_XVALUE_HEAD_LEN + w ||
+        xh_len(d) != w ||
         xh_storetype(d) != KVSPACE_XVALUE_ST_SHORT ||
         xh_ptr(d) != KVSPACE_XVALUE_PTR_INLINE)
         return NULL;

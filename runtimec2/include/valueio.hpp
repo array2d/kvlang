@@ -38,6 +38,10 @@ bool read_text(void* h, std::string_view key, std::string* out) noexcept;
 // 写 UTF-8 字符串值（v2 固定头由 kvspaceXvalueHeadNewSlack 生成）。
 bool write_text(void* h, std::string_view key, std::string_view text) noexcept;
 
+/* 组装字符串 wire：langtype 带 [len] 形状段（码点数）。 */
+bool v_char_wire(const char* kind, const std::uint8_t* bytes, std::uint32_t n,
+                 std::uint8_t** out, std::uint32_t* out_len) noexcept;
+
 // 读 rwir 指令值：body = [nr u16][nw u16][dyn u8][opcode…]。
 bool read_rwir(void* h, std::string_view key, std::string* op, int* nr,
                int* nw) noexcept;

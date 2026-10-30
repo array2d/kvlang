@@ -56,7 +56,7 @@ int kvspaceSlotView(void *h, const kvspaceRef_t *ref,
 - **只读 view**：只读 head/body，不写；用于 status 与 operand 的每步读。
 - **owned view（P1 仅 PC）**：key 由本 vthread 独占写，storetype/headlen 固定。
   允许一次 memcpy 原地替换整个 XValue，但必须按 `view->body_cap` 编码（不得按
-  新值长度收紧）；storetype 与 attr key langtype 的**基类型**必须不变；char 的
+  新值长度收紧）；storetype 与 langtype 的**基类型**必须不变；char 的
   `[<n>]` 长度前缀是派生字段，必须用规范编码随内容更新并与 valuelen 一致
   （不得整串照抄旧 n）。总长超过 `cap` 或后端拒绝时回退 `SetPartByRef`（一次性）。
   owned 键不提供 `kvspaceWatch` 通知保证；P1 的局部操作数不进入 owned，继续走
@@ -121,7 +121,7 @@ box 退役进垃圾环；释放发生在屏障轮（`kvspaceViewSweep` 同步跑
 | `kvspaceGet` | 借用读：`*out` 指向后端常驻空间；`resolve=1` 穿透 link；不存在/空值 → `*out=NULL`、返回 0 |
 | `kvspaceSlotView` | shm-only slot view：返回映射内 `head/body/cap/body_cap`；只读或 owned 直写；不支持后端返回 `-2` |
 | `kvspaceWriteInPlace` | 就地写：key 已存在、kind 不变、body 长度不变；返回原 box body 偏移指针，违反前置条件即报错，绝不静默重分配 |
-| `kvspaceWriteNewPlace` | 新位置写：按 `(ref, storetype, body_len, body_cap)` 分配新 box、写好固定 head，返回 body 偏移指针。**kvspace 层不写 attr key**——langtype 由上层调用方写 `x‥langtype` attr key（attr 先落、x 后落）。用于新建或 kind/尺寸变化。`body_cap` 是 v0.3.0 起的容量下界（预留冗余，减少后续扩容） |
+| `kvspaceWriteNewPlace` | 新位置写：按 `(ref, storetype, body_len, body_cap, langtype)` 分配新 box、写好固定 head 与 attr 区 tag 1 langtype 记录，返回 body 偏移指针。用于新建或 kind/尺寸变化。`body_cap` 是 v0.3.0 起的容量下界（预留冗余，减少后续扩容） |
 | `kvspaceSetValue` | 整值写：给定完整 xvalue 字节，由后端编码 head 并写入。runtime 侧的写出口走它，而非上面的偏移指针原语 |
 | `kvspaceListLen` | 返回前缀下直接子项计数 |
 | `kvspaceListAt` | 取前缀下第 `idx` 个子项名，写入调用方自备缓冲；配合 `kvspaceListLen` 遍历 |
@@ -136,9 +136,10 @@ box 退役进垃圾环；释放发生在屏障轮（`kvspaceViewSweep` 同步跑
 无句柄的 XValue 构造/读取（前端静态导出，byte-identical）：head 固定 8 字节、无 encode/decode 层——构造
 走 `kvspaceXvalueHeadNewNone`/`NewScalar`/`NewSlack`/`NewTensor`/`NewPtr`/`NewExt`/`NewCode`/`Reserve`
 （`kvspaceXvalueHead` struct 为 `len[6] u48 小端 @0-5`、`storetype @6`、`ptr @7`，body 偏移恒 8），读走
-memcpy `kvspaceXvalueHead` struct + inline `kvspaceXvalueHeadLen`/`SetLen`；langtype 不在 head，由调用方
-写 `x‥langtype` attr key。标准标量构造器保留：`kvspaceNewPtr`（存目标完整 langtype + 目标 key）、
-`kvspaceNewChar` / `kvspaceNewBool` / `kvspaceNewInt64` / `kvspaceNewFloat64`。
+memcpy `kvspaceXvalueHead` struct + inline `kvspaceXvalueHeadLen`/`SetLen`；langtype 不在 head——落值内
+attr 区（tag 1 记录），随单 key 一次写整体落下。标准标量构造器保留：`kvspaceNewPtr`（存目标完整 langtype +
+目标 key）、`kvspaceNewChar` / `kvspaceNewBool` / `kvspaceNewInt64` / `kvspaceNewFloat64`（签名各增
+langtype 参数，写入 attr 区）。
 
 读写各带 `resolve` 参数：`resolve=1` 时透明穿透 ref=1 指针（link）；`kvspaceListLen`/`kvspaceListAt`
 另有 `expand_ext` 参数控制是否展开 extindex 子项。head 线格式与 langtype 编码见 [[键系统与数组访

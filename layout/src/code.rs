@@ -1338,7 +1338,9 @@ fn slot_value(val: &str, target_char: &str) -> (Vec<u8>, String) {
         } else {
             target_char
         };
-        return (ffi::new_char(k, s), k.to_string());
+        /* 字符串 langtype 带 [len] 形状段（码点数）——xv/array 下标按它解 dims。 */
+        let lt = format!("[{}]{k}", s.chars().count());
+        return (ffi::new_char(k, s), lt);
     }
     if val == "true" || val == "false" {
         return (ffi::new_bool(val == "true"), "bool".to_string());

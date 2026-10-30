@@ -2,7 +2,7 @@
 lib kvlang/spec/类型系统/wire布局示例 {
 	r####"# wire 布局示例
 
-通用 head `H=[len:u48 LE][storetype:u8][ptr:u8]`（元组 `H(len, storetype, ptr)`），body 偏移恒为 8。类型存 `x‥langtype` attr key：
+通用 head `H=[len:u48 LE][storetype:u8][ptr:u8]`（元组 `H(len, storetype, ptr)`），body 偏移恒为 8。类型存值内 attr 区（tag 1 记录）：
 
 ```
 None              : H(0,0,0)                  lang=""                   body=空

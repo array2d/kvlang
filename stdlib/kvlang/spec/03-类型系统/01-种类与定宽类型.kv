@@ -5,7 +5,7 @@ lib kvlang/spec/类型系统/种类与定宽类型 {
 kvlang 是**严格定宽类型语言**。
 每个变量、参数、返回值都有确定的种类（kind）；无无类型变量，运行时种类不隐式改变。
 写入/读取 typed 槽的种类约束见 [[赋值转换]]。
-类型信息随值自描述：head 的 storetype 给出存储形态、ptr 给出指针位，langtype 给出完整语义类型（存于 `x‥langtype` attr key）；@ext 是 storetype 3、ptr 2。
+类型信息随值自描述：head 的 storetype 给出存储形态、ptr 给出指针位，langtype 给出完整语义类型（存于值内 attr 区）；@ext 是 storetype 3、ptr 2。
 
 ## 锚例
 
