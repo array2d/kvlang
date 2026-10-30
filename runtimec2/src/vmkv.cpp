@@ -587,6 +587,8 @@ bool Vmkv::write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
         dr.arr_esz = 0;  // 写参槽可能换型，数组布局缓存失效
         dr.arr_ndim = 0;
         dr.arr_kind = 0;
+        dr.arr_bodylen = 0;
+        dr.arr_elem_kind.clear();
         char err[192] = {};
         return kvspaceSetValue(f.h, dr.key.c_str(), data, len, err, sizeof err) == 0;
     }
@@ -636,6 +638,8 @@ bool Vmkv::write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
                 r.arr_esz = 0;
                 r.arr_ndim = 0;
                 r.arr_kind = 0;
+                r.arr_bodylen = 0;
+                r.arr_elem_kind.clear();
                 // data 自带类型（attr 区随值），直接落。
                 char derrb[192] = {};
                 return kvspaceSetValue(f.h, r.key.c_str(), data, len, derrb,
@@ -703,6 +707,8 @@ bool Vmkv::write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
             r.arr_esz = 0;
             r.arr_ndim = 0;
             r.arr_kind = 0;
+            r.arr_bodylen = 0;
+            r.arr_elem_kind.clear();
             // data 自带类型（attr 区随值），直接落。
             char errb[192] = {};
             return kvspaceSetValue(f.h, r.key.c_str(), data, len, errb, sizeof errb) == 0;
@@ -750,6 +756,8 @@ bool Vmkv::write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
                     r.arr_esz = 0;
                     r.arr_ndim = 0;
                     r.arr_kind = 0;
+                    r.arr_bodylen = 0;
+                    r.arr_elem_kind.clear();
                     char errb[192] = {};
                     return kvspaceSetValue(f.h, r.key.c_str(), data, len, errb,
                                            sizeof errb) == 0;
@@ -767,6 +775,8 @@ bool Vmkv::write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
     r.arr_esz = 0;  // 槽值可能换型/换形状，compact 数组布局缓存失效
     r.arr_ndim = 0;
     r.arr_kind = 0;
+    r.arr_bodylen = 0;
+    r.arr_elem_kind.clear();
     // 帧局部 int64 变量：内存化写（FReg.fv + 槽直写若已有 view），层内读走 fast
     // 缓存，免每 op kvspace 往返（fib/binary_search 热点）。参数/绝对路径/系统槽照旧。
     const std::string& rk = r.key;
@@ -1464,6 +1474,8 @@ bool Vmkv::enter_frame(FrameCtx& f, const Segment* seg, std::string* err) {
         rr.arr_dims[4] = rr.arr_dims[5] = rr.arr_dims[6] = rr.arr_dims[7] = 0;
         rr.arr_ndim = 0;
         rr.arr_kind = 0;
+        rr.arr_bodylen = 0;
+        rr.arr_elem_kind.clear();
         rr.base_ptr = false;
         rr.base_ptr_known = false;
         rr.key.clear();

@@ -672,78 +672,58 @@ bool h_scatter_newcompact(NativeCtx& c, std::string* err) {
         std::free(zb);
         return ok;
     }
-    // 读元素 [0..cnt-1]，取首元素 kind 打包。
+    // 单遍读：累积 body 同时校验——首元素定 kind，其余 langtype 必须与首元素
+    // 一致、body_len 必须等于元素宽（混合类型若原样拼接会错位，故 TypeError）。
+    // langtype 在 wire attr 区（tag=1 记录，xvalue_head.h），直接从已取回的 md
+    // 解析，零额外后端访问（A9 曾双遍读，每元素 2 次 kvspaceGet 往返）。
     std::vector<std::uint8_t> raw;
     std::string ekind;
-    bool first = true;
+    std::string ekind_bare;
+    std::uint32_t esz = 0;
     for (std::int32_t i = 0; i < cnt; i++) {
         const std::string mk = cb + "\xC2\xB7[" + std::to_string(i) + "]";
         const std::uint8_t* md = nullptr;
         std::uint32_t mn = 0;
-        if (!read_wire(c.f.h, mk, &md, &mn) || !md || !mn)
-            break;
-        if (first) {
-            std::string lt;
-            if (read_langtype(c.f.h, mk, &lt)) {
-                ekind = lt;
-                if (!ekind.empty() && ekind[0] == '[') {
-                    const std::size_t cl = ekind.find(']');
-                    if (cl != std::string::npos)
-                        ekind = ekind.substr(cl + 1);
-                }
-            }
-            first = false;
-        }
-        if (mn < KVSPACE_XVALUE_HEAD_LEN)
-            break;
-        std::uint64_t bl = kvspaceXvalueHeadLen(
-            reinterpret_cast<const kvspaceXvalueHead*>(md));
-        raw.insert(raw.end(), md + KVSPACE_XVALUE_HEAD_LEN,
-                   md + KVSPACE_XVALUE_HEAD_LEN + bl);
-    }
-    const std::uint32_t esz = c.elem_size(ekind);
-    if (esz == 0) {
-        *err = "array·compact: bad elem kind " + ekind;
-        return false;
-    }
-    // A9：逐元素校验——langtype 必须与首元素一致，body_len 必须等于元素宽。
-    // 混合类型散列若原样拼接会产生错位紧凑数组（静默错位），故 TypeError。
-    {
-        std::string ekind_bare = bare_dims(ekind);
-        std::uint64_t off = 0;
-        for (std::int32_t i = 0; i < cnt; i++) {
-            const std::string mk = cb + "\xC2\xB7[" + std::to_string(i) + "]";
-            const std::uint8_t* md = nullptr;
-            std::uint32_t mn = 0;
-            if (!read_wire(c.f.h, mk, &md, &mn) || !md ||
-                mn < KVSPACE_XVALUE_HEAD_LEN) {
-                *err = "array·compact: element " + std::to_string(i) +
-                       " is missing";
-                return false;
-            }
-            std::string ilt;
-            read_langtype(c.f.h, mk, &ilt);
-            if (bare_dims(ilt) != ekind_bare) {
-                *err = "TypeError: array·compact mixed element kinds: [" +
-                       std::to_string(i) + "] is " +
-                       (ilt.empty() ? std::string("None") : ilt) +
-                       ", element 0 is " + ekind;
-                return false;
-            }
-            const std::uint64_t bl = kvspaceXvalueHeadLen(
-                reinterpret_cast<const kvspaceXvalueHead*>(md));
-            if (bl != esz) {
-                *err = "TypeError: array·compact element " + std::to_string(i) +
-                       " body_len " + std::to_string(bl) +
-                       " != element width " + std::to_string(esz);
-                return false;
-            }
-            off += bl;
-        }
-        if (off != raw.size()) {
-            *err = "array·compact: body size mismatch";
+        if (!read_wire(c.f.h, mk, &md, &mn) || !md || !mn ||
+            mn < KVSPACE_XVALUE_HEAD_LEN) {
+            *err = "array·compact: element " + std::to_string(i) + " is missing";
             return false;
         }
+        const std::uint64_t bl = kvspaceXvalueHeadLen(
+            reinterpret_cast<const kvspaceXvalueHead*>(md));
+        const std::uint8_t* ltp = nullptr;
+        const std::uint16_t ltl = kvspaceXvalueHeadLangtype(md, bl, &ltp);
+        std::string ilt;
+        if (ltp && ltl > 0)
+            ilt.assign(reinterpret_cast<const char*>(ltp), ltl);
+        if (i == 0) {
+            ekind = ilt;
+            if (!ekind.empty() && ekind[0] == '[') {
+                const std::size_t cl = ekind.find(']');
+                if (cl != std::string::npos)
+                    ekind = ekind.substr(cl + 1);
+            }
+            ekind_bare = bare_dims(ekind);
+            esz = c.elem_size(ekind);
+            if (esz == 0) {
+                *err = "array·compact: bad elem kind " + ekind;
+                return false;
+            }
+        } else if (bare_dims(ilt) != ekind_bare) {
+            *err = "TypeError: array·compact mixed element kinds: [" +
+                   std::to_string(i) + "] is " +
+                   (ilt.empty() ? std::string("None") : ilt) +
+                   ", element 0 is " + ekind;
+            return false;
+        }
+        if (bl != esz) {
+            *err = "TypeError: array·compact element " + std::to_string(i) +
+                   " body_len " + std::to_string(bl) +
+                   " != element width " + std::to_string(esz);
+            return false;
+        }
+        raw.insert(raw.end(), md + KVSPACE_XVALUE_HEAD_LEN,
+                   md + KVSPACE_XVALUE_HEAD_LEN + bl);
     }
     const std::int32_t nd = cnt;
     std::uint8_t* nb = nullptr;
@@ -1608,15 +1588,17 @@ bool h_array_at_set(NativeCtx& c, std::string* err) {
     std::uint32_t esz;
     Scalar::K ekind;
     bool is_char;
-    std::string array_elem_kind;  // 元素裸 kind 名（A2 值类型比对用）
+    // 元素裸 kind 名（A2 值类型比对用）：冷路径首次解析后指向缓存串，
+    // 热路径（set）零拷贝引用；读路径（非 set）不比对类型、不引用。
+    const std::string* array_elem_kind = nullptr;
     if (ar0.arr_ndim) {
         ndim = ar0.arr_ndim;
         esz = ar0.arr_esz;
         ekind = static_cast<Scalar::K>(ar0.arr_kind & 0x7F);
         is_char = (ar0.arr_kind & 0x80) != 0;
         std::memcpy(dims, ar0.arr_dims, sizeof(std::int32_t) * ndim);
-        c.vm.reg_langtype(c.f, c.ins.rd[0], &array_elem_kind);
-        array_elem_kind = bare_dims(array_elem_kind);
+        if (is_set)
+            array_elem_kind = &ar0.arr_elem_kind;
     } else {
         std::string alt;
         c.vm.reg_langtype(c.f, c.ins.rd[0], &alt);
@@ -1657,7 +1639,14 @@ bool h_array_at_set(NativeCtx& c, std::string* err) {
                           bt == bin::LangType::Uint64
                     ? Scalar::K::Uint
                     : Scalar::K::Bool;
-        array_elem_kind = lt;
+        ar0.arr_elem_kind = lt;
+        array_elem_kind = &ar0.arr_elem_kind;
+        // A7：越界以 head 的 body 有效长为界——首次解析缓存，后续免每 op 解 head。
+        ar0.arr_bodylen =
+            ar0.view.head && ar0.view.headlen == KVSPACE_XVALUE_HEAD_LEN
+                ? kvspaceXvalueHeadLen(
+                      reinterpret_cast<const kvspaceXvalueHead*>(ar0.view.head))
+                : 0;
         ar0.arr_esz = esz;
         ar0.arr_ndim = ndim;
         ar0.arr_kind =
@@ -1679,12 +1668,8 @@ bool h_array_at_set(NativeCtx& c, std::string* err) {
         flat = flat * dims[d] + idxv;
     }
     // A7：越界以 head 的 body 有效长为界（acap0 是物理容量，可含填充区）。
-    // 注意 ab0 是 body 指针（view.body = head + 8），len 须从 view.head 读。
-    const std::uint64_t abody =
-        ar0.view.head && ar0.view.headlen == KVSPACE_XVALUE_HEAD_LEN
-            ? kvspaceXvalueHeadLen(
-                  reinterpret_cast<const kvspaceXvalueHead*>(ar0.view.head))
-            : 0;
+    // abody 首次解析时缓存进 arr_bodylen，后续每 op 免解 head。
+    const std::uint64_t abody = ar0.arr_bodylen;
     if (abody > acap0) {
         *err = "xv: array body exceeds capacity";
         return false;
@@ -1762,14 +1747,19 @@ bool h_array_at_set(NativeCtx& c, std::string* err) {
         const std::uint8_t* vltp = nullptr;
         const std::uint16_t vltl =
             kvspaceXvalueHeadLangtype(vw.d, vlen, &vltp);
-        std::string vkind =
-            vltl ? std::string(reinterpret_cast<const char*>(vltp), vltl)
-                 : std::string();
-        vkind = bare_dims(vkind);
-        if (vkind != array_elem_kind) {
+        // string_view 比对，免逐次拷贝；出错时才构造 string 进消息。
+        std::string_view vkind =
+            vltl ? std::string_view(reinterpret_cast<const char*>(vltp), vltl)
+                 : std::string_view();
+        if (vkind.size() && vkind[0] == '[') {
+            const std::size_t cl = vkind.find(']');
+            if (cl != std::string_view::npos)
+                vkind = vkind.substr(cl + 1);
+        }
+        if (vkind != *array_elem_kind) {
             *err = "TypeError: compactarray·set element is " +
-                   (vkind.empty() ? std::string("None") : vkind) +
-                   ", array element kind is " + array_elem_kind;
+                   (vltl ? std::string(vkind) : std::string("None")) +
+                   ", array element kind is " + *array_elem_kind;
             return false;
         }
         const std::uint32_t take = vlen < esz ? (std::uint32_t)vlen : esz;
