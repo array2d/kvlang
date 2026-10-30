@@ -5,9 +5,11 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# Outputs go under bin/.
+# 两级布局（repo 即 prefix）：可执行 → bin/，库 → lib/，后端在 lib/kvspace/。
 set(BIN_DIR "${CMAKE_SOURCE_DIR}/../bin")
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${BIN_DIR}")
+set(LIB_DIR "${CMAKE_SOURCE_DIR}/../lib")
+set(BACKEND_DIR "${LIB_DIR}/kvspace")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${LIB_DIR}")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${BIN_DIR}")
 
 file(GLOB KVLANG_RUNTIME_SRC CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/*.c")
@@ -43,26 +45,24 @@ if(KVLANG_DEBUG_TYPES)
     target_compile_definitions(kvlang_runtime PRIVATE KV_DEBUG_TYPES)
 endif()
 
-# 链接 kvspace dispatch 前端（与后端同装 <prefix>/lib/kvspace），运行期按 DSN 选后端，编译期不再选后端。
-# 安装目录固定（无构建期覆盖变量）：Linux 前端在 /usr/lib、后端 /usr/lib/kvspace；
-# macOS 前端在 /usr/local/lib、后端 /usr/local/lib/kvspace（/usr 受 SIP 保护）。
-if(APPLE)
-    set(KVLANG_LINK_DIRS "/usr/local/lib" "/usr/local/lib/kvspace")
-else()
-    set(KVLANG_LINK_DIRS "/usr/lib" "/usr/lib/kvspace")
-endif()
-target_link_directories(kvlang_runtime PRIVATE ${KVLANG_LINK_DIRS})
+# 链接 kvspace dispatch 前端：产物只放 repo 内 lib/（后端 lib/kvspace/），不装 /usr。
+# 链接期用 repo 内绝对路径，运行期 rpath 用相对自身的 $ORIGIN（库本身就在 lib/）。
+target_link_directories(kvlang_runtime PRIVATE "${LIB_DIR}" "${BACKEND_DIR}")
 
 if(APPLE)
     # macOS：数学/线程符号在 libSystem 内（无 -lm/-lpthread）；ld64 无 --disable-new-dtags。
     target_link_libraries(kvlang_runtime PRIVATE kvspace)
     set_target_properties(kvlang_runtime PROPERTIES
-        LINK_FLAGS "-Wl,-export_dynamic -Wl,-rpath,/usr/local/lib -Wl,-rpath,/usr/local/lib/kvspace")
+        INSTALL_RPATH "@loader_path;@loader_path/kvspace"
+        BUILD_WITH_INSTALL_RPATH ON
+        LINK_FLAGS "-Wl,-export_dynamic")
 else()
     target_link_libraries(kvlang_runtime PRIVATE kvspace m pthread)
     # --export-dynamic 供 kvlang（term 扩展）找符号；--disable-new-dtags 使 rpath 转 DT_RPATH（传递）。
     set_target_properties(kvlang_runtime PROPERTIES
-        LINK_FLAGS "-Wl,--export-dynamic -Wl,--disable-new-dtags -Wl,-rpath,/usr/lib -Wl,-rpath,/usr/lib/kvspace")
+        INSTALL_RPATH "\$ORIGIN;\$ORIGIN/kvspace"
+        BUILD_WITH_INSTALL_RPATH ON
+        LINK_FLAGS "-Wl,--export-dynamic -Wl,--disable-new-dtags")
 endif()
 
 if(NOT APPLE)
@@ -72,11 +72,12 @@ if(NOT APPLE)
             OUTPUT "${BIN_DIR}/${test_name}"
             COMMAND ${CMAKE_C_COMPILER} -O2 -D_GNU_SOURCE
                 -I${CMAKE_SOURCE_DIR}/include -I${CMAKE_SOURCE_DIR}/src
+                -I${CMAKE_SOURCE_DIR}/../include
                 ${CMAKE_SOURCE_DIR}/tests/${test_name}.c
                 -o ${BIN_DIR}/${test_name}
-                -L${BIN_DIR} -L/usr/lib -L/usr/lib/kvspace
+                -L${LIB_DIR} -L${BACKEND_DIR}
                 -Wl,--disable-new-dtags
-                -Wl,-rpath,${BIN_DIR} -Wl,-rpath,/usr/lib -Wl,-rpath,/usr/lib/kvspace
+                -Wl,-rpath,$ORIGIN/../lib -Wl,-rpath,$ORIGIN/../lib/kvspace
                 -Wl,--no-as-needed -lkvspace -Wl,--as-needed -lkvlang_runtime
             DEPENDS kvlang_runtime "${CMAKE_SOURCE_DIR}/tests/${test_name}.c"
             VERBATIM)

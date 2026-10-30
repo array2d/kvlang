@@ -4,11 +4,11 @@
 #   IOPS_N=100000000 ./bench/iops/run.sh        # issue-sized (slow)
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-# 测试按 /usr 最终态安装：依赖（前端/后端）装在 /usr/lib 与 /usr/lib/kvspace。
-# 需要别的安装前缀时显式 DEPS=…（该前缀下必须有 lib/ 与 lib/kvspace/）。
-DEPS="${DEPS:-/usr}"
+# 依赖（前端/后端）在 repo 内 lib/ 与 lib/kvspace/（不装 /usr）。
+# 需要别的前缀时显式 DEPS=…（该前缀下必须有 lib/ 与 lib/kvspace/）。
+DEPS="${DEPS:-$ROOT}"
 [[ -e "$DEPS/lib/libkvspace.so" ]] || {
-  echo "bench/iops: $DEPS/lib/libkvspace.so not found (install ABI to /usr or set DEPS)" >&2
+  echo "bench/iops: $DEPS/lib/libkvspace.so not found (set DEPS to a prefix with lib/)" >&2
   exit 1
 }
 HERE="$(cd "$(dirname "$0")" && pwd)"

@@ -39,44 +39,40 @@ endif()
 target_include_directories(kvlang_runtimec2 PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/include   # ABI 头只读引用
-    /usr/include)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include)          # deps 头（deps.sh 落 repo）
 
 target_compile_options(kvlang_runtimec2 PRIVATE
     -O3 -fno-exceptions -fno-rtti -fvisibility=hidden -fno-threadsafe-statics
     -Wall -Wextra)
 
-# 链接 kvspace dispatch 前端（与后端同装 <prefix>/lib/kvspace），运行期按 DSN 选后端。
-# 安装目录固定（无构建期覆盖变量）：Linux 前端在 /usr/lib、后端 /usr/lib/kvspace；
-# macOS 前端在 /usr/local/lib、后端 /usr/local/lib/kvspace（/usr 受 SIP 保护）。
-# 对齐 runtime/CMakeLists.txt 的 KVLANG_LINK_DIRS。
+# 链接 kvspace dispatch 前端：产物只放 repo 内 lib/（后端 lib/kvspace/），不装 /usr。
+# 链接期用 repo 内绝对路径，运行期 rpath 用相对自身的 $ORIGIN（库本身就在 lib/）。
+set(LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../lib")
+set(BACKEND_DIR "${LIB_DIR}/kvspace")
 if(APPLE)
-    target_link_directories(kvlang_runtimec2 PRIVATE /usr/local/lib /usr/local/lib/kvspace)
+    target_link_directories(kvlang_runtimec2 PRIVATE "${LIB_DIR}" "${BACKEND_DIR}")
     target_link_libraries(kvlang_runtimec2 PRIVATE kvspace)
     set_target_properties(kvlang_runtimec2 PROPERTIES
         OUTPUT_NAME "kvlang_runtimec2"
-        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-        INSTALL_RPATH "/usr/local/lib;/usr/local/lib/kvspace")
+        LIBRARY_OUTPUT_DIRECTORY "${LIB_DIR}"
+        INSTALL_RPATH "@loader_path;@loader_path/kvspace"
+        BUILD_WITH_INSTALL_RPATH ON)
 else()
-    target_link_directories(kvlang_runtimec2 PRIVATE /usr/lib /usr/lib/kvspace)
+    target_link_directories(kvlang_runtimec2 PRIVATE "${LIB_DIR}" "${BACKEND_DIR}")
     target_link_libraries(kvlang_runtimec2 PRIVATE kvspace)
     set_target_properties(kvlang_runtimec2 PROPERTIES
         OUTPUT_NAME "kvlang_runtimec2"
-        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-        LINK_FLAGS "-Wl,--disable-new-dtags -Wl,-rpath,/usr/lib -Wl,-rpath,/usr/lib/kvspace")
+        LIBRARY_OUTPUT_DIRECTORY "${LIB_DIR}"
+        INSTALL_RPATH "\$ORIGIN;\$ORIGIN/kvspace"
+        BUILD_WITH_INSTALL_RPATH ON
+        LINK_FLAGS "-Wl,--disable-new-dtags")
 endif()
-
-# install：装到 /usr/lib/libkvlang_runtimec2.so（与 C 版同目录）。
-install(TARGETS kvlang_runtimec2
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
 
 add_executable(m1_smoke tests/m1_smoke.c)
 target_include_directories(m1_smoke PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/include /usr/include)
-if(APPLE)
-    target_link_directories(m1_smoke PRIVATE /usr/local/lib /usr/local/lib/kvspace)
-else()
-    target_link_directories(m1_smoke PRIVATE /usr/lib /usr/lib/kvspace)
-endif()
+    ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include)
+target_link_directories(m1_smoke PRIVATE "${LIB_DIR}" "${BACKEND_DIR}")
 target_link_libraries(m1_smoke PRIVATE kvlang_runtimec2 kvspace)
 
 enable_testing()
