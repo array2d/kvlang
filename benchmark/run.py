@@ -309,7 +309,8 @@ def main():
                     help="kvlang 后端子集，逗号分隔（shm,fs,redis）")
     ap.add_argument("--redis", default="redis://127.0.0.1:6379",
                     help="redis 后端 DSN")
-    ap.add_argument("--kvlang-bin", default="/usr/bin/kvlang")
+    ap.add_argument("--kvlang-bin",
+                    default=str(Path(__file__).resolve().parent.parent / "bin" / "byteseek"))
     ap.add_argument("--no-stdlib", action="store_true",
                     help="向 kvlang 追加 --no-stdlib（跳过 stdlib 引导，只测用户代码）")
     ap.add_argument("--timeout", type=int, default=300)
