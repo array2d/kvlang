@@ -139,6 +139,9 @@ struct FReg {
     std::int32_t arr_dims[8] = {};
     std::uint32_t arr_ndim = 0;
     std::uint8_t arr_kind = 0;  // Scalar::K（元素类别）+ 高位置 is_char
+    std::uint64_t arr_bodylen = 0;  // head 的 body 有效长（A7 越界界；随 arr_* 同失效）
+    // 数组元素裸 kind 名（A2 set 类型比对用；随 arr_* 同失效，免每 op kvspaceGetHead）。
+    std::string arr_elem_kind;
 };
 
 // 单帧执行上下文（二进制栈帧）。
