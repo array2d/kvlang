@@ -224,15 +224,63 @@ static std::uint32_t utf8_chars(const std::uint8_t* s, std::uint32_t n) noexcept
 }
 
 /* 组装字符串 wire：langtype 带 [len] 形状段（码点数）——xv/array 下标按它解 dims。
-   len = 头 body 字节数（utf32=字节/4、utf8=码点数）。 */
+   len = 头 body 字节数（utf8=码点数、ascii=字节数）。char/utf32 输入是 UTF-8 文本
+   （char cast 统一按 utf8 读入），body 必须真转为 UTF-32 LE——只算码点数不改 body
+   会产出错位编码（对齐 C kvlangXvalueNewCharUtf32）。 */
 bool v_char_wire(const char* kind, const std::uint8_t* bytes, std::uint32_t n,
                  std::uint8_t** out, std::uint32_t* out_len) noexcept {
-    const std::uint32_t chars =
-        std::strcmp(kind, "char/utf32") == 0 ? n / 4 : utf8_chars(bytes, n);
+    const bool utf32 = std::strcmp(kind, "char/utf32") == 0;
+    std::uint8_t* u32b = nullptr;
+    const std::uint8_t* body = bytes;
+    std::uint32_t blen = n;
+    if (utf32) {
+        u32b = static_cast<std::uint8_t*>(std::malloc((n ? n : 1) * 4));
+        if (!u32b) {
+            *out = nullptr;
+            *out_len = 0;
+            return false;
+        }
+        std::uint32_t off = 0;
+        std::uint32_t i = 0;
+        while (i < n) {
+            std::uint32_t cp = bytes[i];
+            if (cp < 0x80) {
+                i++;
+            } else {
+                int cnt = 0;
+                if ((cp & 0xE0) == 0xC0) {
+                    cnt = 1;
+                    cp &= 0x1F;
+                } else if ((cp & 0xF0) == 0xE0) {
+                    cnt = 2;
+                    cp &= 0x0F;
+                } else if ((cp & 0xF8) == 0xF0) {
+                    cnt = 3;
+                    cp &= 0x07;
+                } else {
+                    cp = 0xFFFD;  // 坏前导字节 → 替换字符（对齐 C utf8_next）
+                    i++;
+                }
+                if (cnt > 0) {
+                    i++;  // 越过前导字节，续字节从 [i] 起
+                    for (int j = 0; j < cnt && i < n; j++, i++)
+                        cp = (cp << 6) | (bytes[i] & 0x3F);
+                }
+            }
+            u32b[off++] = (std::uint8_t)(cp & 0xFF);
+            u32b[off++] = (std::uint8_t)((cp >> 8) & 0xFF);
+            u32b[off++] = (std::uint8_t)((cp >> 16) & 0xFF);
+            u32b[off++] = (std::uint8_t)((cp >> 24) & 0xFF);
+        }
+        body = u32b;
+        blen = off;
+    }
+    const std::uint32_t chars = utf32 ? blen / 4 : utf8_chars(bytes, n);
     char lt[96];
     std::snprintf(lt, sizeof lt, "[%u]%s", chars, kind);
     std::uint64_t len64 = 0;
-    const int rc = kvspaceXvalueHeadNewSlack(bytes, n, n, lt, out, &len64);
+    const int rc = kvspaceXvalueHeadNewSlack(body, blen, blen, lt, out, &len64);
+    std::free(u32b);
     if (rc != 0 || !*out || len64 > UINT32_MAX) {
         if (*out) {
             std::free(*out);

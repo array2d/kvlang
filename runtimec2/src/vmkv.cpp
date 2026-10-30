@@ -548,9 +548,13 @@ void Vmkv::flush_frame_locals(FrameCtx& f) {
 bool Vmkv::write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
                std::uint32_t len) {
     FReg& r = f.regs[idx];
-    // 内存别名写参：直接写调用方 reg（fast 缓存 + 已有槽直写），零 kvspace。
+    // 内存别名写参：沿 dst_ptr 链贯通到最终调用方 reg（fast 缓存 + 已有槽直写），
+    // 零 kvspace。只挂一层会丢多层转发（depth≥2 时中间层的 fast 缓存随帧消亡）。
     if (r.dst_ptr) {
-        FReg& dr = *r.dst_ptr;
+        FReg* drp = r.dst_ptr;
+        while (drp->dst_ptr)
+            drp = drp->dst_ptr;
+        FReg& dr = *drp;
         r.fast_i64 = false;
         r.fast_bool = false;
         if (len >= KVSPACE_XVALUE_HEAD_LEN &&
@@ -925,10 +929,13 @@ bool Vmkv::slot_write_i64(FrameCtx& f, std::uint8_t idx, std::int64_t v) {
         fr.fast_i64 = true;
         return true;
     }
-    // 内存别名写参（mem_frame 递归/纯内存调用的返回槽）：直写调用方 reg
-    // （镜像 write_reg 的 dst_ptr 分支），免每迭代 v_to_wire+malloc 回退。
+    // 内存别名写参（mem_frame 递归/纯内存调用的返回槽）：沿链贯通到最终调用方
+    // reg 直写（镜像 write_reg 的 dst_ptr 分支），免每迭代 v_to_wire+malloc 回退。
     if (fr.dst_ptr) {
-        FReg& dr = *fr.dst_ptr;
+        FReg* drp = fr.dst_ptr;
+        while (drp->dst_ptr)
+            drp = drp->dst_ptr;
+        FReg& dr = *drp;
         if (dr.view_ok && dr.body && !store_i64_slot(f, dr, v))
             return false;
         dr.fv = v;
@@ -987,9 +994,12 @@ bool Vmkv::slot_write_bool(FrameCtx& f, std::uint8_t idx, bool b) {
         fr.fast_bool = true;
         return true;
     }
-    // 内存别名写参：直写调用方 reg（对齐 slot_write_i64 的 dst_ptr 快路径）。
+    // 内存别名写参：沿链贯通到最终调用方 reg（对齐 slot_write_i64 的 dst_ptr 快路径）。
     if (fr.dst_ptr) {
-        FReg& dr = *fr.dst_ptr;
+        FReg* drp = fr.dst_ptr;
+        while (drp->dst_ptr)
+            drp = drp->dst_ptr;
+        FReg& dr = *drp;
         dr.fb = b;
         dr.fast_bool = true;
         if (dr.view_ok && dr.body)
@@ -2438,7 +2448,11 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                     FReg& rf = sr.src_ptr ? *sr.src_ptr : sr;
                     if (rf.fast_i64 || rf.fast_bool) {
                         FReg& wr = regs[ins.wr[0]];
-                        FReg& target = wr.dst_ptr ? *wr.dst_ptr : wr;
+                        // 写参链沿 dst_ptr 贯通到最终调用方 reg（Copy 直传同规）。
+                        FReg* tp = wr.dst_ptr ? wr.dst_ptr : &wr;
+                        while (tp->dst_ptr)
+                            tp = tp->dst_ptr;
+                        FReg& target = *tp;
                         target.fast_bool = false;
                         if (rf.fast_i64) {
                             target.fv = rf.fv;
