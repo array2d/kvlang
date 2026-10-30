@@ -246,9 +246,12 @@ bool jit_try_run(FrameCtx& f, const Segment* seg, int start_s0,
         *out = RunResult::Error;
         return true;
     }
-    // 结果回写（镜像 write_reg 的 dst_ptr 分支：fast 缓存 + 已有槽直写）
+    // 结果回写（镜像 write_reg 的 dst_ptr 分支：fast 缓存 + 已有槽直写）。
+    // 沿链贯通到最终调用方 reg——只挂一层会让 depth≥2 的中间帧 fast 缓存随帧消亡。
     FReg& dr0 = f.regs[dst_idx];
     FReg* dst = dr0.dst_ptr ? dr0.dst_ptr : &dr0;
+    while (dst->dst_ptr)
+        dst = dst->dst_ptr;
     dst->fv = res;
     dst->fast_i64 = true;
     if (dst->view_ok && dst->body)

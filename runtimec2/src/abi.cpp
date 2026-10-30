@@ -165,7 +165,7 @@ KV2_EXPORT int kvlangDefRwir(void* kvspace, const char* opcode,
                 f += c;
             }
         }
-        return "/â¥isa/" + f;
+        return "/‥isa/" + f;
     }();
     int dynamic = 0;
     std::size_t last_len = nr > 0 && rp[nr - 1] ? std::strlen(rp[nr - 1]) : 0;

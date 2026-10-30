@@ -1414,8 +1414,31 @@ impl Parser {
             if t.kind != Kind::Ident {
                 break;
             }
-            let prec = Expr::infix_prec(&t.value);
-            if prec == 0 || prec <= min_prec {
+            let e = symbol::lookup(&t.value);
+            let prec = e.precedence;
+            if prec == 0 {
+                // 一元算子（`*`/`!`/`√`，precedence 0）出现在操作数之后 = 中缀位置：
+                // 静默错（`a * b` 只取 a、`a * b + 2` 运行时错），违反 p1，编译期硬错。
+                if e.unary && !e.word.is_empty() {
+                    let hint = if e.word == "pointer" {
+                        "（乘号用 ×）"
+                    } else {
+                        "（该一元算子不支持中缀）"
+                    };
+                    self.errors.push(Diagnostic {
+                        pos: t.pos,
+                        warn: false,
+                        message: format!("一元算子 {:?} 出现在操作数之后{hint}", t.value),
+                        info: false,
+                        source: String::new(),
+                        src_file: String::new(),
+                        src_name: String::new(),
+                    });
+                    return None;
+                }
+                break;
+            }
+            if prec <= min_prec {
                 break;
             }
             let op = self.advance().value;
