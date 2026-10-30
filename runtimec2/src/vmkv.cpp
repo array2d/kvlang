@@ -2529,8 +2529,14 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                     } else {
                         // 帧局部变量（惰性 key 未解析）：ensure 后取实例槽路径
                         // （`n3·val` 在 n3 只经 struct·new 写、无明文值时 key 仍空）。
-                        if (ensure_reg_key(f, br0) && br0.key.size() > 5)
+                        // 内存别名读参（src_ptr）：值=调用方实例——直接取调用方
+                        // reg 的槽 key（容器 Ptr 参数 `arr:*[int64]·int64` 的
+                        // bsearch，`arr·*mid` 须读调用方 test 的 arr 实例）。
+                        if (&br0f != &br0 && !br0f.key.empty()) {
+                            base_key = br0f.key;
+                        } else if (ensure_reg_key(f, br0) && br0.key.size() > 5) {
                             base_key = br0.key;
+                        }
                         // Ptr 参数（key=arg 槽）：read_reg 已穿透成实例，raw 读回
                         // Ptr 本体取 target（`p·x` 的 p 是 *点 读参）。
                         if (br0f.key.size() > 5) {
