@@ -174,7 +174,12 @@ def run_kvlang(case_dir, label, args, workdir, scale):
         cmd = [args.kvlang_bin, str(src)]
         if args.no_stdlib:
             cmd.append("--no-stdlib")
-        return sh(cmd, timeout=args.timeout, env=env).stdout
+        r = sh(cmd, timeout=args.timeout, env=env)
+        if r.returncode != 0:
+            tail = (r.stderr.strip().splitlines() or [""])[-1]
+            raise RuntimeError(
+                f"kvlang/{label} exit {r.returncode}: {tail[:200]}")
+        return r.stdout
     return _run
 
 
@@ -235,7 +240,13 @@ def bench_case(case_dir, args, scale):
                       file=sys.stderr)
                 best[lang] = None
     present = [func[k] for k in func if best.get(k) is not None]
-    valid = len(present) >= 2 and all(x == present[0] for x in present)
+    # valid 的前提：每个被测后端都必须有 kvlang 数据——kvlang 失败/无 __bench_ns
+    # 不再被 python/rust/c 的一致性掩盖。
+    kv_ok = all(best.get(f"kvlang_{l}") is not None for l in args.backends)
+    valid = kv_ok and len(present) >= 2 and all(x == present[0] for x in present)
+    if not kv_ok:
+        print(f"  ! {case_dir.name}: kvlang 无有效数据 → valid=False",
+              file=sys.stderr)
     return best, valid, case_input
 
 
