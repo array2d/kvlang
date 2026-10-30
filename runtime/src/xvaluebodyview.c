@@ -17,11 +17,12 @@ kvlangStatusXvalueBodyViewRead(const kvspaceXvalueBodyView_t *view, char *out,
                           size_t cap) {
     if (!view || !view->head || !out || cap == 0)
         return false;
-    /* 规范 status：SLACK、headlen=64（pow=6）；任何不自洽都不暴露。 */
-    if (view->headlen < (1u << 6) || view->head[0] != 6 ||
-        (view->head[1] & 7u) != 1u)
+    /* 规范 status：v2 SLACK inline 固定头；任何不自洽都不暴露。 */
+    if (view->headlen < KVSPACE_XVALUE_HEAD_LEN ||
+        xh_storetype(view->head) != KVSPACE_XVALUE_ST_SLACK ||
+        xh_ptr(view->head) != KVSPACE_XVALUE_PTR_INLINE)
         return false;
-    uint64_t n = xh_a(view->head);
+    uint64_t n = xh_len(view->head);
     if (n > view->body_cap || n + 1 > cap)
         return false;
     memcpy(out, view->body, (size_t)n);
@@ -38,33 +39,17 @@ kvlangPcViewInit(kvlangPcViewState *st) {
     memset(st, 0, sizeof *st);
 }
 
-/* langtype 必须是 "[<n>]char/utf8" 基类型。 */
-static bool pc_langtype_ok(const uint8_t *head, uint32_t headlen) {
-    uint32_t i = XH_PREFIX, n = headlen;
-    if (i >= n || head[i] != '[')
-        return false;
-    i++;
-    uint32_t d0 = i;
-    while (i < n && head[i] >= '0' && head[i] <= '9')
-        i++;
-    if (i == d0 || i >= n || head[i] != ']')
-        return false;
-    i++;
-    static const char suf[] = "char/utf8";
-    if (n - i < sizeof suf)
-        return false;
-    return memcmp(head + i, suf, sizeof suf - 1) == 0 && head[i + sizeof suf - 1] == 0;
-}
-
-/* 取 view 并校验固定档与规范形状；成功写入 st->view。 */
+/* 取 view 并校验固定档与规范形状；成功写入 st->view。
+ * v2：SLACK inline 固定头（langtype 在 attr key，不在 wire）。 */
 static bool pc_view_adopt(kvlangPcViewState *st, kvspace_t *kv,
                           kvspaceKeyOff *ko) {
     kvspaceXvalueBodyView_t nv;
     if (kvspaceXvalueBodyView(kv->handle, &ko->off, ko->key, &nv) != 0)
         return false;
-    if (!nv.head || nv.headlen != (1u << 6) || nv.body_cap < PC_FIXED_CAP ||
-        nv.head[0] != 6 || (nv.head[1] & 3u) != 1u ||
-        (nv.head[1] & 4u) || !pc_langtype_ok(nv.head, nv.headlen))
+    if (!nv.head || nv.headlen != KVSPACE_XVALUE_HEAD_LEN ||
+        nv.body_cap < PC_FIXED_CAP ||
+        xh_storetype(nv.head) != KVSPACE_XVALUE_ST_SLACK ||
+        xh_ptr(nv.head) != KVSPACE_XVALUE_PTR_INLINE)
         return false;
     st->view = nv;
     return true;
@@ -82,13 +67,11 @@ static bool pc_fixed_init(kvlangFrame_t *f, kvspaceKeyOff *ko, const char *pc,
                           uint32_t len, kvlangPcViewState *st) {
     if (len > PC_FIXED_CAP)
         return false;
-    uint8_t lt[64];
-    if (kvlangCharLangtypeFmt(lt, pc, len) != 0)
-        return false;
     uint8_t *body = NULL;
     char err[256];
+    /* ‥pc 是系统键（末段含 ‥）：无类型、不写 attr key。 */
     if (kvspaceWriteNewPlace(f->kvspace->handle, ko->key, KVSPACE_REF_INLINE,
-                             KVSPACE_STORETYPE_SLACK, 0, 0, (const char *)lt,
+                             KVSPACE_STORETYPE_SLACK,
                              len, PC_FIXED_CAP, &body, err, sizeof err) != 0 ||
         !body)
         return false;
@@ -126,28 +109,12 @@ kvlangPcViewWrite(kvlangFrame_t *f, kvspaceKeyOff *ko, const char *pc,
             return pc_fallback(st);
     }
     uint8_t *h = st->view.head;
-    for (int i = 0; i < 8; i++)
-        h[2 + i] = (uint8_t)((uint64_t)len >> (8 * i));
-    /* 快路径：PC 几乎全 ASCII，码点数 == 字节数；避免再次扫串/函数调用。 */
-    uint8_t acc = 0;
-    for (uint32_t i = 0; i < len; i++)
-        acc |= (uint8_t)pc[i];
-    if (!(acc & 0x80)) {
-        char digits[12];
-        int d = 0;
-        uint32_t v = len;
-        do {
-            digits[d++] = (char)('0' + (int)(v % 10));
-            v /= 10;
-        } while (v);
-        uint8_t *lt = h + XH_PREFIX;
-        *lt++ = '[';
-        while (d)
-            *lt++ = (uint8_t)digits[--d];
-        memcpy(lt, "]char/utf8", 11); /* 含 NUL */
-    } else if (kvlangCharLangtypeFmt(h + XH_PREFIX, pc, len) != 0) {
-        return pc_fallback(st);
-    }
+    kvspaceXvalueHead hd = {
+        .storetype = KVSPACE_XVALUE_ST_SLACK,
+        .ptr = KVSPACE_XVALUE_PTR_INLINE,
+    };
+    kvspaceXvalueHeadSetLen(&hd, len);
+    memcpy(h, &hd, sizeof hd);
     memcpy(st->view.body, pc, len);
     return 1;
 }

@@ -9,6 +9,24 @@
 #include <string.h>
 #include <time.h>
 
+/* v2 固定 8 字节 head：NewInt64 产物直接 memcpy 读，无需 codec。 */
+#define KVSPACE_XVALUE_HEAD_LEN 8u
+#define KVSPACE_XVALUE_ST_SHORT 0u
+#define KVSPACE_XVALUE_ST_SLACK 1u
+#define KVSPACE_XVALUE_PTR_INLINE 0u
+#define KVSPACE_XVALUE_PTR_PTR 1u
+typedef struct {
+    uint8_t len[6];
+    uint8_t storetype;
+    uint8_t ptr;
+} kvspaceXvalueHead;
+static inline uint64_t kvspaceXvalueHeadLen(const kvspaceXvalueHead *h) {
+    uint64_t v = 0;
+    for (int i = 5; i >= 0; i--)
+        v = (v << 8) | h->len[i];
+    return v;
+}
+
 static int64_t rd64(const uint8_t *p) {
     uint64_t u = (uint64_t)p[0] | ((uint64_t)p[1] << 8) | ((uint64_t)p[2] << 16) |
                  ((uint64_t)p[3] << 24) | ((uint64_t)p[4] << 32) |
@@ -29,17 +47,35 @@ static int set_xvalue(void *h, const char *key, uint8_t *xvalue, uint32_t tlen,
     kvspaceHead_t hd;
     uint8_t *dst = NULL;
     uint32_t body_len;
-    if (kvspaceDecodeHead(xvalue, tlen, &hd) != 0)
+    if (tlen < KVSPACE_XVALUE_HEAD_LEN)
         return 1;
-    body_len = hd.body_len < 0 ? 0 : (uint32_t)hd.body_len;
+    kvspaceXvalueHead xh;
+    memcpy(&xh, xvalue, sizeof xh);
+    memset(&hd, 0, sizeof hd);
+    hd.ref = xh.ptr == KVSPACE_XVALUE_PTR_PTR ? KVSPACE_REF_PTR
+                                              : KVSPACE_REF_INLINE;
+    hd.storetype = xh.storetype;
+    body_len = (uint32_t)kvspaceXvalueHeadLen(&xh);
     if (kvspaceWriteInPlace(h, key, 0, body_len, &dst, err, err_cap) != 0) {
+        /* kvspace 不代写 attr key：int64 槽类型由本层（bench）自写。attr 先落、x 后落。 */
+        char ltkey[1028];
+        snprintf(ltkey, sizeof ltkey, "%s\xE2\x80\xA5" "langtype", key);
+        uint8_t *lv = NULL;
+        uint64_t lvn = 0;
+        if (kvspaceXvalueHeadNewSlack((const uint8_t *)"int64", 5, 5, &lv, &lvn) != 0 ||
+            lvn > 0xffffffffu)
+            return 1;
+        int rc = kvspaceSetValue(h, ltkey, lv, (uint32_t)lvn, err, err_cap);
+        free(lv);
+        if (rc != 0)
+            return 1;
         if (kvspaceWriteNewPlace(h, key, hd.ref, hd.storetype, hd.ro, hd.vid,
-                                 hd.langtype, body_len, (uint64_t)body_len, &dst,
+                                 body_len, (uint64_t)body_len, &dst,
                                  err, err_cap) != 0)
             return 1;
     }
     if (body_len && dst)
-        memcpy(dst, xvalue + hd.body_offset, body_len);
+        memcpy(dst, xvalue + KVSPACE_XVALUE_HEAD_LEN, body_len);
     return 0;
 }
 
@@ -81,14 +117,18 @@ int main(void) {
             fprintf(stderr, "get failed\n");
             return 1;
         }
-        kvspaceHead_t hd;
-        memset(&hd, 0, sizeof hd);
-        if (kvspaceDecodeHead(d, len, &hd) != 0 || hd.body_len < 8 ||
-            hd.body_offset + 8 > (int32_t)len) {
+        kvspaceXvalueHead xh;
+        if (len < KVSPACE_XVALUE_HEAD_LEN) {
             fprintf(stderr, "decode failed len=%u\n", len);
             return 1;
         }
-        a = rd64(d + hd.body_offset);
+        memcpy(&xh, d, sizeof xh);
+        if (kvspaceXvalueHeadLen(&xh) < 8 ||
+            KVSPACE_XVALUE_HEAD_LEN + 8 > (uint32_t)len) {
+            fprintf(stderr, "decode failed len=%u\n", len);
+            return 1;
+        }
+        a = rd64(d + KVSPACE_XVALUE_HEAD_LEN);
         if (a >= n)
             break;
         a += 1;

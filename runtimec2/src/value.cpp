@@ -7,37 +7,56 @@
 #include <kvspace/kvspace.h>
 #include <kvspace/xvalue_head.h>
 
+/* v2 head 构造器：系统头装 v2 前由本地声明桥接（v2 头已带 KVSPACE_XVALUE_HEAD_LEN）。 */
+#ifndef KVSPACE_XVALUE_HEAD_LEN
+extern "C" {
+int kvspaceXvalueHeadNewNone(uint8_t **out, uint64_t *out_len);
+int kvspaceXvalueHeadNewScalar(uint8_t storetype, const uint8_t *raw,
+                               uint32_t raw_len, uint8_t **out,
+                               uint64_t *out_len);
+int kvspaceXvalueHeadNewSlack(const uint8_t *data, uint64_t data_len,
+                              uint64_t cap, uint8_t **out, uint64_t *out_len);
+int kvspaceXvalueHeadNewTensor(const uint64_t *dims, uint32_t ndim,
+                               const uint8_t *raw, uint64_t raw_len,
+                               uint8_t **out, uint64_t *out_len);
+int kvspaceXvalueHeadNewCode(const uint8_t *body, uint64_t body_len,
+                             uint64_t cap, uint8_t **out, uint64_t *out_len);
+}
+#endif
+
 namespace kvlang::runtimec2 {
 
+/* v2 固定 8 字节头：[len:u48 LE@0-5][storetype@6][ptr@7][body@8]。 */
+static std::uint64_t xh_len(Wire w) noexcept {
+    if (!w.d || w.n < KVSPACE_XVALUE_HEAD_LEN)
+        return 0;
+    std::uint64_t v = 0;
+    for (int i = 5; i >= 0; i--)
+        v = (v << 8) | w.d[i];
+    return v;
+}
+
 bool v_is_none(Wire w) noexcept {
-    if (!w.d || w.n == 0)
+    if (!w.d || w.n < KVSPACE_XVALUE_HEAD_LEN)
         return true;
-    // 对齐 C 的 xh_is_none：flags 无 class/ptr 位 且 langtype 首字节为 0。
-    return w.n >= 19 && w.d[1] == 0 && w.d[18] == 0;
+    /* v2：len 0 且 非 ptr/ext = None。 */
+    return w.d[7] != KVSPACE_XVALUE_PTR_PTR &&
+           w.d[7] != KVSPACE_XVALUE_PTR_EXT && xh_len(w) == 0;
 }
 
 bool v_ptr(Wire w) noexcept {
-    kvspaceXh xh{};
-    if (!w.d || kvspaceXhDecode(w.d, w.n, &xh) != 0)
-        return false;
-    return (xh.kind & KVSPACE_XH_PTR_FLAG) != 0;
+    return w.d && w.n >= KVSPACE_XVALUE_HEAD_LEN &&
+           w.d[7] == KVSPACE_XVALUE_PTR_PTR;
 }
 
 bool v_ptr_target(Wire w, std::string* out) noexcept {
-    kvspaceXh xh{};
-    if (!w.d || kvspaceXhDecode(w.d, w.n, &xh) != 0)
+    if (!w.d || w.n < KVSPACE_XVALUE_HEAD_LEN ||
+        w.d[7] != KVSPACE_XVALUE_PTR_PTR)
         return false;
-    if ((xh.kind & KVSPACE_XH_PTR_FLAG) == 0 || !xh.body)
-        return false;
-    out->assign(reinterpret_cast<const char*>(xh.body), xh.content_len);
-    return true;
-}
-
-bool v_langtype(Wire w, std::string* out) noexcept {
-    kvspaceXh xh{};
-    if (!w.d || kvspaceXhDecode(w.d, w.n, &xh) != 0)
-        return false;
-    out->assign(reinterpret_cast<const char*>(xh.langtype), xh.langtype_len);
+    const std::uint64_t len = xh_len(w);
+    const std::uint8_t* b = w.d + KVSPACE_XVALUE_HEAD_LEN;
+    out->assign(reinterpret_cast<const char*>(b),
+                static_cast<std::size_t>(len));
     return true;
 }
 
@@ -73,19 +92,20 @@ bool kind_of_langtype(const std::string& lt, Scalar* s) {
 
 }  // namespace
 
-bool v_scalar(Wire w, Scalar* out) noexcept {
-    kvspaceXh xh{};
-    if (!w.d || kvspaceXhDecode(w.d, w.n, &xh) != 0)
+bool v_scalar(Wire w, std::string_view langtype, Scalar* out) noexcept {
+    if (!w.d || w.n < KVSPACE_XVALUE_HEAD_LEN)
         return false;
-    std::string lt(reinterpret_cast<const char*>(xh.langtype), xh.langtype_len);
+    std::string lt(langtype);
     if (!kind_of_langtype(lt, out))
         return false;
     if (out->k == Scalar::K::Char)
         return false;  // 字符串按文本读取，不走标量通道
-    if (!xh.body || xh.content_len < out->width)
+    const std::uint64_t clen = xh_len(w);
+    const std::uint8_t* body = w.d + KVSPACE_XVALUE_HEAD_LEN;
+    if (clen < out->width)
         return false;
     std::uint64_t raw = 0;
-    std::memcpy(&raw, xh.body, out->width);
+    std::memcpy(&raw, body, out->width);
     switch (out->k) {
     case Scalar::K::Int:
         out->i = (out->width == 1)   ? (std::int8_t)raw
@@ -164,8 +184,9 @@ bool v_scalar_raw(Scalar::K k, std::uint8_t width, const std::uint8_t* body,
     return true;
 }
 
-bool v_encode(const char* kind, std::uint8_t width, const Scalar& s,
-              std::uint8_t** out, std::uint32_t* out_len) noexcept {
+bool v_to_wire(const char* kind, std::uint8_t width, const Scalar& s,
+               std::uint8_t** out, std::uint32_t* out_len) noexcept {
+    (void)kind; /* v2 标量构造器不消费 kind（langtype 走 attr key） */
     std::uint8_t raw[8] = {};
     std::uint64_t u = 0;
     switch (s.k) {
@@ -190,17 +211,27 @@ bool v_encode(const char* kind, std::uint8_t width, const Scalar& s,
         return false;
     }
     std::memcpy(raw, &u, width);
-    return kvspaceXvalueEncode(kind, raw, width, nullptr, 0, out, out_len) == 0;
+    std::uint8_t* buf = nullptr;
+    std::uint64_t total = 0;
+    if (kvspaceXvalueHeadNewScalar(0, raw, width, &buf, &total) != 0 ||
+        total > UINT32_MAX) {
+        *out = nullptr;
+        *out_len = 0;
+        return false;
+    }
+    *out = buf;
+    *out_len = static_cast<std::uint32_t>(total);
+    return true;
 }
 
 bool v_write_scalar(void* h, const std::string& key, const char* kind,
                     std::uint8_t width, const Scalar& s) noexcept {
     std::uint8_t* buf = nullptr;
     std::uint32_t len = 0;
-    if (!v_encode(kind, width, s, &buf, &len))
+    if (!v_to_wire(kind, width, s, &buf, &len))
         return false;
     char err[192] = {};
-    int rc = kvspaceSetValue(h, key.c_str(), buf, len, 0, 0, err, sizeof err);
+    int rc = kvspaceSetValue(h, key.c_str(), buf, len, err, sizeof err);
     std::free(buf);
     return rc == 0;
 }

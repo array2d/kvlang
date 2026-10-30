@@ -72,7 +72,7 @@ memitemvalue 可递归嵌套（`[]char/utf8·[]char/utf8·int64` 即 `map[string
 
 ## 容器物理结构
 
-map 的 base key 存 class 0、body 为空，langtype 为完整 map 类型（例如 `[]char/utf8·int64`）。每个成员落在 `base·memitemkey` 的独立 KV key，保存该成员自己的 XValue。成员通过物理 key 前缀枚举；不存放 `base·` 索引矩阵。struct 成员遵循同一物理规则。`/lib/{pkg}·{func}` 中的 `·` 是函数命名字符，函数成员则位于 `/` 目录下。
+map 的 base key 存 storetype 0、body 为空，langtype 为完整 map 类型（例如 `[]char/utf8·int64`）。每个成员落在 `base·memitemkey` 的独立 KV key，保存该成员自己的 XValue。成员通过物理 key 前缀枚举；不存放 `base·` 索引矩阵。struct 成员遵循同一物理规则。`/lib/{pkg}·{func}` 中的 `·` 是函数命名字符，函数成员则位于 `/` 目录下。
 
 ## 容器字面量须带类型标注
 

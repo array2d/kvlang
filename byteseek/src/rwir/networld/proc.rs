@@ -23,7 +23,7 @@ pub fn exec(eng: &Engine, pc: &str) {
     let out_slot = eng.write_at(pc, 1);
     let err_slot = eng.write_at(pc, 2);
     let r = run(&args, &envs, !out_slot.is_empty(), !err_slot.is_empty());
-    eng.set_xvalue_encoded(&eng.write0(pc), "uint8", &[r.code], &[]);
+    eng.set_xvalue_wire(&eng.write0(pc), "uint8", &[r.code], &[]);
     if !out_slot.is_empty() {
         write_handle(eng, &out_slot, r.pid, "stdout", &r.out);
     }

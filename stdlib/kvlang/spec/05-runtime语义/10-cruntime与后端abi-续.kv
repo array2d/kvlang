@@ -43,8 +43,9 @@ durable 后端（fs/redis）采用**惰性 flush**，只在**同一 kvspace 句�
 扩展宿主（op-gpu、numpy、Go json）**自己** `kvspaceConnect(dsn)` 拿句柄，rwir 移交只用
 `kvlangRwirext*` 的 runtime 语义（`kvlangDefRwir`/`Params`/`ResolveRead`/`ResolveReadPath`/`ResolveWrite`
 /`NextPc`）。tensor 类大 buffer **应**走 shm 后端零拷贝：`ResolveReadPath` 拿容器路径 → `kvspaceGet`
-取 XValue 指针 → `DecodeHead` 定位 body → 在该地址原位建 ndarray，读写 ndarray 即读写 kvspace，无拷贝；
-写走 `kvspaceXvalueEncode` + `WriteInPlace`/`WriteNewPlace`。锚例：`tutorial/14-numpy/`（shm 全流程）、
+取 XValue 指针 → memcpy `kvspaceXvalueHead` struct + `kvspaceXvalueHeadLen` 定位 body（head 固定 8 字节，body
+偏移恒 8）→ 在该地址原位建 ndarray，读写 ndarray 即读写 kvspace，无拷贝；
+写走 `kvspaceXvalueHeadNew*` + `WriteInPlace`/`WriteNewPlace`。锚例：`tutorial/14-numpy/`（shm 全流程）、
 `tutorial/14-networld/`（fs/proc）。
 ## slot view 的使用（runtimec2, normative）
 
@@ -53,9 +54,10 @@ durable 后端（fs/redis）采用**惰性 flush**，只在**同一 kvspace 句�
 - **status 每步直读**：有 view 时每步比较 head 的内容长度与**全部 body 字节**，再进
   `init/running/wait` 白名单判定；不得只比较首字节或按固定长度截断。fs/redis 走
   fallback，全量 tutorial 必须与 master 行为一致。
-- **owned 仅 PC**：PC owned view 按 `view->body_cap` 编码整个 XValue，旧 head 的
-  storetype/headlen/langtype 原样拷贝、只更新内容长度；总长超过 `cap` 或后端拒绝即
-  永久回退 `SetPartByRef`。局部操作数不进入 owned（继续 `WriteBody`）。
+- **owned 仅 PC**：PC owned view 按 `view->body_cap` 编码整个 XValue，固定 head 的
+  storetype/headlen 原样拷贝、只更新内容长度（langtype 在 attr key，不随 body 重写）；
+  总长超过 `cap` 或后端拒绝即永久回退 `SetPartByRef`。局部操作数不进入 owned（继续
+  `WriteBody`）。
 - **operand 只读 view**：仅用于 typed_core 行的**本 vthread 独占 frame 槽**；每次读
   按静态 kind 校验。外部改变长度/kind 导致 box 移动**不可检测**（无世代号，读旧 head
   即 UAF）；外部写必须同 key/同类型/同尺寸，否则属契约外（debug 构建断言）。runtime

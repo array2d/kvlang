@@ -2,7 +2,7 @@
 lib kvlang/spec/kvspace模型/调用extindex {
 	r####"# 调用：扩展目录复用指令树
 
-runtime 为每次调用创建帧子树，帧根通过 class 3 扩展定位指向 `/lib/{pkg}·{name}/` 的只读指令目录。指令树不复制，参数绑定、局部变量、PC 和返回地址都写入 KVSpace。
+runtime 为每次调用创建帧子树，帧根通过 storetype 3 扩展定位指向 `/lib/{pkg}·{name}/` 的只读指令目录。指令树不复制，参数绑定、局部变量、PC 和返回地址都写入 KVSpace。
 
 `/lib/{pkg}·{name}.[0,±k]` 是静态参数定义键，类型为 `def langtype`，body 为参数名、NUL、匹配类型串。它与帧根的 `/[0,±k]` 坐标不同名，因而帧内可以保存本次调用的参数指针。
 

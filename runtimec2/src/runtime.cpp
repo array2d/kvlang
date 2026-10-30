@@ -188,7 +188,12 @@ int execute_vthread_h(void* h, const char* vid, char** out_pc,
         if (op_trace)
             std::fprintf(stderr, "[op=%s found=%d impl=%d]\n", op.c_str(), e != nullptr,
                          e ? (int)e->impl : -1);
-        if (e && e->impl != rwir::Impl::Handoff) {
+        // 总能进 run_frame：本 runtime 的 op 执行；外部/未知 op（e=nullptr 或
+        // Handoff）由 run_frame 在 Stop 边界 flush 帧局部后交出（handoff），
+        // 保证 Handoff 后 resume 的新 FrameCtx 能重建（flush 已落明文+attr）。
+        if (e && e->impl == rwir::Impl::None)
+            return -1;  // 表内但无实现：硬错
+        {
             FrameCtx fctx;
             fctx.h = h;
             fctx.vid = p.vid;

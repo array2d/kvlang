@@ -114,14 +114,18 @@ __attribute__((noinline)) static void fk_classify(const kvlangCodeRow_t *row,
     }
 }
 
-/* FIXED_SMALL 标量值（headlen 32、langtype 恰为 kind、body 宽 w）→ body 指针。 */
+/* SHORT inline 标量值（v2 固定头、body 宽 w）→ body 指针。
+ * langtype 不在 wire：kind 由调用方静态声明（fk_read 传参），只验 storetype/ptr/宽。 */
 static inline const uint8_t *fk_scalar(const uint8_t *d, uint32_t len,
                                        const char *kind, uint32_t kl,
                                        uint32_t w) {
-    if (len != 32u + w || d[0] != 5 || (d[1] & 7u) != 0 ||
-        memcmp(d + XH_PREFIX, kind, kl + 1) != 0)
+    (void)kind;
+    (void)kl;
+    if (len != KVSPACE_XVALUE_HEAD_LEN + w ||
+        xh_storetype(d) != KVSPACE_XVALUE_ST_SHORT ||
+        xh_ptr(d) != KVSPACE_XVALUE_PTR_INLINE)
         return NULL;
-    return d + 32;
+    return d + KVSPACE_XVALUE_HEAD_LEN;
 }
 
 /* 读一个操作数为 kind 标量：字面量或已提升的 rview；其它情形 NULL（交还通用路径）。
@@ -215,10 +219,13 @@ static bool fk_pc_open(fk_pc_t *pc, kvspaceKeyOff *ko, const char *prefix,
     if (!ko->view_ok || plen <= 0)
         return false;
     uint8_t *h = ko->view.head;
-    if (ko->view.headlen != 64 || h[0] != 6 || h[1] != 1 || h[XH_PREFIX] != '[')
+    /* v2 固定头：SLACK inline，body = PC 串，len = 有效字节。 */
+    if (ko->view.headlen != KVSPACE_XVALUE_HEAD_LEN ||
+        xh_storetype(h) != KVSPACE_XVALUE_ST_SLACK ||
+        xh_ptr(h) != KVSPACE_XVALUE_PTR_INLINE)
         return false;
-    uint64_t a = xh_rd64(h + 2), bcap = xh_rd64(h + 10);
-    uint64_t cap = ko->view.body_cap < bcap ? ko->view.body_cap : bcap;
+    uint64_t a = xh_len(h);
+    uint64_t cap = ko->view.body_cap;
     if (a > cap || a < (uint64_t)plen ||
         memcmp(ko->view.body, prefix, (size_t)plen) != 0)
         return false;
@@ -240,16 +247,12 @@ static inline bool fk_pc_write(fk_pc_t *pc, int irseq) {
         return false;
     memcpy(pc->body + pc->plen, tail, tl);
     if (len != pc->cur_len) {
-        uint8_t *h = pc->head;
-        for (int i = 0; i < 8; i++)
-            h[2 + i] = (uint8_t)((uint64_t)len >> (8 * i));
-        /* langtype "[<码点数>]char/utf8"：尾部全 ASCII，码点数 = 前缀码点 + 尾长。 */
-        char lt[46];
-        int n = snprintf(lt, sizeof lt, "[%u]char/utf8",
-                         pc->prefix_cp + (unsigned)tl);
-        if (n <= 0 || (size_t)n + 1 > 64 - XH_PREFIX)
-            return false;
-        memcpy(h + XH_PREFIX, lt, (size_t)n + 1);
+        kvspaceXvalueHead h = {
+            .storetype = KVSPACE_XVALUE_ST_SLACK,
+            .ptr = KVSPACE_XVALUE_PTR_INLINE,
+        };
+        kvspaceXvalueHeadSetLen(&h, len);
+        memcpy(pc->head, &h, sizeof h);
         pc->cur_len = len;
     }
     return true;
@@ -259,7 +262,9 @@ static inline bool fk_status_running(kvspaceKeyOff *ko) {
     if (!ko->view_ok)
         return false;
     const uint8_t *h = ko->view.head;
-    return h[0] == 6 && h[1] == 1 && xh_rd64(h + 2) == 7 &&
+    return ko->view.headlen == KVSPACE_XVALUE_HEAD_LEN &&
+           xh_storetype(h) == KVSPACE_XVALUE_ST_SLACK &&
+           xh_ptr(h) == KVSPACE_XVALUE_PTR_INLINE && xh_len(h) == 7 &&
            ko->view.body_cap >= 7 && memcmp(ko->view.body, "running", 7) == 0;
 }
 

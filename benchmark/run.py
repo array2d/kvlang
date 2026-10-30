@@ -21,6 +21,7 @@ python / rust / c 与后端无关，作原生/脚本基线各一列。
     python3 benchmark/run.py --repeat 1      # 快跑（不取 min）
     python3 benchmark/run.py --backends shm,fs   # 只跑部分后端
     python3 benchmark/run.py --no-write      # 只打印不落 csv
+    python3 benchmark/run.py --no-stdlib     # 向 kvlang 追加 --no-stdlib（跳过 stdlib 引导，隔离用户代码）
     python3 benchmark/run.py --show          # 汇总 results/ 历史，不跑
 """
 import argparse
@@ -170,8 +171,10 @@ def run_kvlang(case_dir, label, args, workdir, scale):
     def _run():
         kv_reset(label, workdir, args.redis)
         env = {**os.environ, "KVSPACE": dsn}
-        return sh([args.kvlang_bin, str(src)], timeout=args.timeout,
-                  env=env).stdout
+        cmd = [args.kvlang_bin, str(src)]
+        if args.no_stdlib:
+            cmd.append("--no-stdlib")
+        return sh(cmd, timeout=args.timeout, env=env).stdout
     return _run
 
 
@@ -296,6 +299,8 @@ def main():
     ap.add_argument("--redis", default="redis://127.0.0.1:6379",
                     help="redis 后端 DSN")
     ap.add_argument("--kvlang-bin", default="/usr/bin/kvlang")
+    ap.add_argument("--no-stdlib", action="store_true",
+                    help="向 kvlang 追加 --no-stdlib（跳过 stdlib 引导，只测用户代码）")
     ap.add_argument("--timeout", type=int, default=300)
     ap.add_argument("--no-write", action="store_true", help="不写快照")
     ap.add_argument("--show", action="store_true", help="汇总历史后退出")

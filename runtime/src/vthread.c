@@ -77,11 +77,15 @@ bool kvspaceKeyOffRead(kvspaceKeyOff *ko, char *out, size_t cap) {
     }
     if (ko->view_ok) {
         const uint8_t *h = ko->view.head;
-        uint64_t a = xh_rd64(h + 2);
-        if (h[0] == 6 && h[1] == 1 && a <= ko->view.body_cap && a + 1 <= cap) {
-            memcpy(out, ko->view.body, (size_t)a);
-            out[a] = 0;
-            return true;
+        if (ko->view.headlen == KVSPACE_XVALUE_HEAD_LEN &&
+            xh_storetype(h) == KVSPACE_XVALUE_ST_SLACK &&
+            xh_ptr(h) == KVSPACE_XVALUE_PTR_INLINE) {
+            uint64_t a = xh_len(h);
+            if (a <= ko->view.body_cap && a + 1 <= cap) {
+                memcpy(out, ko->view.body, (size_t)a);
+                out[a] = 0;
+                return true;
+            }
         }
         ko->view_ok = false;
     }
@@ -96,6 +100,9 @@ bool kvspaceKeyOffRead(kvspaceKeyOff *ko, char *out, size_t cap) {
         if (d && len > 0) {
             v.bytes = d;
             v.length = len;
+            kvspaceHead_t h;
+            if (kvspaceGetHead(ko->kvspace->handle, ko->key, &h) == 0)
+                kvlangXvalueSetHeadLangtype(&v, &h);
         }
     } else if (kvlangKvspaceGetOne(ko->kvspace, ko->key, &v) != 0) {
         return false;
@@ -108,9 +115,9 @@ int kvspaceKeyOffSet(kvspaceKeyOff *ko, const uint8_t *val, uint32_t len,
                      char *err, uint32_t err_cap) {
     if (ko->resolved &&
         kvspaceSetValueByRef(ko->kvspace->handle, &ko->off, ko->key, val, len,
-                             0, 0, err, err_cap) == 0)
+                             err, err_cap) == 0)
         return 0;
-    if (kvspaceSetValue(ko->kvspace->handle, ko->key, val, len, 0, 0, err,
+    if (kvspaceSetValue(ko->kvspace->handle, ko->key, val, len, err,
                         err_cap) != 0)
         return -1;
     if (kvspaceResolveRef(ko->kvspace->handle, ko->key, &ko->off) == 0)
@@ -149,7 +156,7 @@ int kvlangVthreadSet(kvspace_t *kv, const char *vtid, const char *pc,
 #define VT_STATUS_SLACK_CAP 16
 #define VT_SLACK_MAX_CAP KV_KEY_MAX
 
-/* PC 槽缓存：shm 下每步只 part-write `[2, 64+len)`（等价值写），不重编码、
+/* PC 槽缓存：shm 下每步只 part-write `[2, 64+len)`（等价值写），不重写 wire、
  * 不 memset 320B；fs/redis 保持整值写。见 spec [[执行模型-续]]。 */
 typedef struct {
     char key[KV_KEY_MAX]; /* 缓存所属槽的 key 副本：跨 vthread 时栈/堆地址可能复用 */
@@ -191,8 +198,8 @@ static void capture_pc_view(kvlangFrame_t *f, struct kvspaceKeyOff *ko) {
     if (!ko->resolved || !f->kvspace->shm || f->kvspace->slot_view_sup < 0)
         return;
     int vrc = kvspaceXvalueBodyView(f->kvspace->handle, &ko->off, ko->key, &ko->view);
-    if (vrc == 0 && ko->view.headlen == 64 &&
-        64 + ko->view.body_cap <= ko->view.cap) {
+    if (vrc == 0 && ko->view.headlen == KVSPACE_XVALUE_HEAD_LEN &&
+        KVSPACE_XVALUE_HEAD_LEN + ko->view.body_cap <= ko->view.cap) {
         f->kvspace->slot_view_sup = 1;
         ko->view_ok = true;
     } else if (vrc == -2) {
@@ -203,7 +210,7 @@ static void capture_pc_view(kvlangFrame_t *f, struct kvspaceKeyOff *ko) {
 static int pc_write_whole(kvlangFrame_t *f, struct kvspaceKeyOff *ko,
                           const char *s, uint32_t len) {
     uint32_t cap = len > VT_PC_SLACK_CAP ? VT_SLACK_MAX_CAP : VT_PC_SLACK_CAP;
-    uint32_t n = kvlangSlackEncodeChar((const uint8_t *)s, len, cap,
+    uint32_t n = kvlangSlackCharToWire((const uint8_t *)s, len, cap,
                                        pc_cache.buf, sizeof pc_cache.buf);
     pc_cache.cap = cap;
     pc_cache.last_cp = cp_count(s, len);
@@ -216,7 +223,7 @@ static int pc_write_whole(kvlangFrame_t *f, struct kvspaceKeyOff *ko,
     return rc;
 }
 
-/* langtype = "[N]char/utf8"（冷 helper）：码点数统计 + 无 snprintf 整数格式化。 */
+/* attr key langtype = "[N]char/utf8"（冷 helper）：码点数统计 + 无 snprintf 整数格式化。 */
 __attribute__((noinline, visibility("hidden"))) int
 kvlangCharLangtypeFmt(uint8_t *lt, const char *s, uint32_t len) {
     uint32_t v = cp_count(s, len);
@@ -230,37 +237,42 @@ kvlangCharLangtypeFmt(uint8_t *lt, const char *s, uint32_t len) {
         v /= 10;
     } while (v);
     uint32_t p = 0;
-    if ((uint32_t)d + 13 > 64 - XH_PREFIX)
+    if ((uint32_t)d + 12 > 64)
         return -1;
     lt[p++] = '[';
     while (d)
         lt[p++] = (uint8_t)digits[--d];
     memcpy(lt + p, "]char/utf8", 11);
+    lt[p + 11] = 0;
     return 0;
 }
 
 static int pc_write_part(kvlangFrame_t *f, struct kvspaceKeyOff *ko,
                          const char *s, uint32_t len) {
     uint8_t *b = pc_cache.buf;
-    for (int i = 0; i < 4; i++)
-        b[2 + i] = (uint8_t)(len >> (8 * i)); /* a */
-    if (kvlangCharLangtypeFmt(b + XH_PREFIX, s, len) != 0)
-        return -1;
+    kvspaceXvalueHead hd = {
+        .storetype = KVSPACE_XVALUE_ST_SLACK,
+        .ptr = KVSPACE_XVALUE_PTR_INLINE,
+    };
+    kvspaceXvalueHeadSetLen(&hd, len);
+    memcpy(b, &hd, sizeof hd);
     if (!ko->view_ok && ko->resolved)
         capture_pc_view(f, ko);
     if (ko->view_ok) {
         uint8_t *vh = ko->view.head;
-        if (vh[0] == 6 && vh[1] == 1 && vh[XH_PREFIX] == '[' &&
-            xh_rd64(vh + 10) == pc_cache.cap && len <= ko->view.body_cap) {
-            memcpy(vh + 2, b + 2, 62);
+        if (ko->view.headlen == KVSPACE_XVALUE_HEAD_LEN &&
+            xh_storetype(vh) == KVSPACE_XVALUE_ST_SLACK &&
+            xh_ptr(vh) == KVSPACE_XVALUE_PTR_INLINE &&
+            len <= ko->view.body_cap) {
+            memcpy(vh, b, KVSPACE_XVALUE_HEAD_LEN);
             memcpy(ko->view.body, s, len);
             return 0;
         }
         ko->view_ok = false;
     }
-    memcpy(b + 64, s, len);
-    uint32_t part = 64 + len - 2;
-    return kvspaceSetPartByRef(f->kvspace->handle, &ko->off, ko->key, 2, b + 2,
+    memcpy(b + KVSPACE_XVALUE_HEAD_LEN, s, len);
+    uint32_t part = KVSPACE_XVALUE_HEAD_LEN + len;
+    return kvspaceSetPartByRef(f->kvspace->handle, &ko->off, ko->key, 0, b,
                                part, NULL, 0);
 }
 
@@ -272,7 +284,7 @@ static void member_write(kvlangFrame_t *f, struct kvspaceKeyOff *ko,
         uint32_t cap = len > VT_STATUS_SLACK_CAP ? VT_SLACK_MAX_CAP
                                                  : VT_STATUS_SLACK_CAP;
         uint8_t val[64 + VT_SLACK_MAX_CAP];
-        uint32_t n = kvlangSlackEncodeChar((const uint8_t *)s, len, cap, val,
+        uint32_t n = kvlangSlackCharToWire((const uint8_t *)s, len, cap, val,
                                            sizeof val);
         if (ko) {
             if (kvspaceKeyOffSet(ko, val, n, NULL, 0) != 0)
@@ -281,7 +293,7 @@ static void member_write(kvlangFrame_t *f, struct kvspaceKeyOff *ko,
         }
         char k[KV_KEY_MAX];
         kvlangKeytreeVthreadStatus(f->vthread_id, k, sizeof k);
-        if (kvspaceSetValue(f->kvspace->handle, k, val, n, 0, 0, NULL, 0) != 0)
+        if (kvspaceSetValue(f->kvspace->handle, k, val, n, NULL, 0) != 0)
             f->persist_failed = true;
         return;
     }
@@ -303,9 +315,9 @@ static void member_write(kvlangFrame_t *f, struct kvspaceKeyOff *ko,
     kvlangKeytreeVthreadPc(f->vthread_id, k, sizeof k);
     uint8_t val[64 + VT_SLACK_MAX_CAP];
     uint32_t cap = len > VT_PC_SLACK_CAP ? VT_SLACK_MAX_CAP : VT_PC_SLACK_CAP;
-    uint32_t n = kvlangSlackEncodeChar((const uint8_t *)s, len, cap, val,
+    uint32_t n = kvlangSlackCharToWire((const uint8_t *)s, len, cap, val,
                                        sizeof val);
-    if (kvspaceSetValue(f->kvspace->handle, k, val, n, 0, 0, NULL, 0) != 0)
+    if (kvspaceSetValue(f->kvspace->handle, k, val, n, NULL, 0) != 0)
         f->persist_failed = true;
 }
 

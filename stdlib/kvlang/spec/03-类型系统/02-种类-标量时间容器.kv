@@ -58,7 +58,7 @@ kvlang 的数字种类**必须携带精确位宽**：
 | `stringkeymap` | 种类（kind） | map 容器，langtype 为 `key·value`（如 `[]char/utf8·int64`） |
 | `struct` | 种类（kind） | 结构原型实例的种类（见 [[struct]]） |
 
-map/struct 的 base key 为 class 0 空值，成员使用物理 `base·member` key；函数和 lib 使用目录子路径。容器物理结构见 [[map容器]]。
+map/struct 的 base key 为 storetype 0 空值，成员使用物理 `base·member` key；函数和 lib 使用目录子路径。容器物理结构见 [[map容器]]。
 
 ### 时间种类
 

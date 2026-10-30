@@ -34,23 +34,23 @@ static void check_slot(kvspace_t *kv, const char *key, const char *s,
     kvlangXvalue_t v;
     kvlangXvalueZero(&v);
     CHECK(kvlangKvspaceGetOne(kv, key, &v) == 0);
-    kvspaceHead_t h;
-    CHECK(kvspaceDecodeHead(v.bytes, v.length, &h) == 0);
-    CHECK(h.storetype == 1 /* slack */);
-    CHECK(h.body_len == (int32_t)len);
-    CHECK(h.body_cap >= (uint64_t)len);
+    CHECK(v.length >= KVSPACE_XVALUE_HEAD_LEN);
+    kvspaceXvalueHead xh;
+    memcpy(&xh, v.bytes, sizeof xh);
+    CHECK(xh.storetype == KVSPACE_XVALUE_ST_SLACK);
+    CHECK(kvspaceXvalueHeadLen(&xh) == (uint64_t)len);
     uint8_t *ref = NULL;
     uint64_t rl = 0;
-    CHECK(kvspaceXhNewSlack(1 /* UTF-8 */, (const uint8_t *)s, len, h.body_cap,
-                            &ref, &rl) == 0);
+    CHECK(kvspaceXvalueHeadNewSlack((const uint8_t *)s, len, len, &ref, &rl) == 0);
     CHECK(v.length == (uint32_t)rl);
-    size_t prefix = 64 + len;
+    size_t prefix = KVSPACE_XVALUE_HEAD_LEN + len;
     CHECK(prefix <= (size_t)rl && memcmp(v.bytes, ref, prefix) == 0);
-    if (strict_tail) /* 整值写：尾部零填充也一致；part-write 的 b-a 不属于值 */
+    if (strict_tail) /* 整值写：尾部一致；part-write 的旧字节不属于值 */
         CHECK(memcmp(v.bytes, ref, (size_t)rl) == 0);
     uint8_t *d = NULL;
     uint32_t got = 0;
-    CHECK(kvspaceGetPart(kv->handle, key, 64, len, &d, &got) == 0 &&
+    CHECK(kvspaceGetPart(kv->handle, key, KVSPACE_XVALUE_HEAD_LEN, len, &d,
+                         &got) == 0 &&
           got == len && memcmp(d, s, len) == 0);
     free(ref);
 }

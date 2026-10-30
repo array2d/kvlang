@@ -72,7 +72,7 @@ static int emit_float_kind(kvlangFrame_t *f, const char *kind, uint32_t width,
         return 0;
     uint8_t buf[64];
     kvlangXvalue_t r = {buf,
-                        kvlangScalarEncode(kind, raw, width, buf, sizeof buf)};
+                        kvlangScalarToWire(kind, raw, width, buf, sizeof buf)};
     if (f->instruction && f->instruction->typed_core)
         return kvlangBuiltinWriteResultTyped(f, &r, kind);
     return kvlangBuiltinWriteResult(f, &r);

@@ -10,6 +10,23 @@
 #include <kvspace/kvspace.h>
 #include <kvspace/xvalue_head.h>
 
+/* v2 head 构造器：系统头装 v2 前由本地声明桥接（v2 头已带 KVSPACE_XVALUE_HEAD_LEN）。 */
+#ifndef KVSPACE_XVALUE_HEAD_LEN
+extern "C" {
+int kvspaceXvalueHeadNewNone(uint8_t **out, uint64_t *out_len);
+int kvspaceXvalueHeadNewScalar(uint8_t storetype, const uint8_t *raw,
+                               uint32_t raw_len, uint8_t **out,
+                               uint64_t *out_len);
+int kvspaceXvalueHeadNewSlack(const uint8_t *data, uint64_t data_len,
+                              uint64_t cap, uint8_t **out, uint64_t *out_len);
+int kvspaceXvalueHeadNewTensor(const uint64_t *dims, uint32_t ndim,
+                               const uint8_t *raw, uint64_t raw_len,
+                               uint8_t **out, uint64_t *out_len);
+int kvspaceXvalueHeadNewCode(const uint8_t *body, uint64_t body_len,
+                             uint64_t cap, uint8_t **out, uint64_t *out_len);
+}
+#endif
+
 #include "value.hpp"
 #include "valueio.hpp"
 #include "runtime.hpp"
@@ -18,6 +35,41 @@ namespace kvlang::runtimec2 {
 
 namespace {
 const bool g_trace = std::getenv("RC2_TRACE") != nullptr;
+
+/* v2 组装 wire：按 kind 分派 New* 构造器；out_len 转 u32（>UINT32_MAX 失败）。
+ * 原 kvspaceXvalueToWire(kind, raw, len, dims, ndim) 的替代入口。 */
+bool to_wire_v2(const char* kind, const std::uint8_t* raw, std::uint32_t raw_len,
+            const std::int32_t* dims, std::int32_t ndim, std::uint8_t** out,
+            std::uint32_t* out_len) {
+    std::uint64_t total = 0;
+    int rc;
+    if (!kind || !kind[0]) {
+        rc = kvspaceXvalueHeadNewNone(out, &total);
+    } else if (std::strcmp(kind, "char/utf8") == 0 ||
+               std::strcmp(kind, "char/ascii") == 0 ||
+               std::strcmp(kind, "char/utf32") == 0) {
+        rc = kvspaceXvalueHeadNewSlack(raw, raw_len, raw_len, out, &total);
+    } else if (std::strcmp(kind, "rwir") == 0 ||
+               std::strcmp(kind, "def rwir") == 0 ||
+               std::strcmp(kind, "def langtype") == 0 ||
+               (std::strcmp(kind, "rwfunc") == 0 && raw_len > 0)) {
+        rc = kvspaceXvalueHeadNewCode(raw, raw_len, raw_len, out, &total);
+    } else if (ndim > 0 && dims) {
+        std::uint64_t du[8] = {};
+        for (std::int32_t i = 0; i < ndim && i < 8; i++)
+            du[i] = static_cast<std::uint64_t>(dims[i]);
+        rc = kvspaceXvalueHeadNewTensor(du, static_cast<std::uint32_t>(ndim),
+                                        raw, raw_len, out, &total);
+    } else if (std::strcmp(kind, "None") == 0 && raw_len == 0) {
+        rc = kvspaceXvalueHeadNewNone(out, &total);
+    } else {
+        rc = kvspaceXvalueHeadNewScalar(0, raw, raw_len, out, &total);
+    }
+    if (rc != 0 || total > 0xFFFFFFFFull)
+        return false;
+    *out_len = static_cast<std::uint32_t>(total);
+    return true;
+}
 }  // namespace
 using bin::FReg;
 using bin::FrameCtx;
@@ -26,27 +78,28 @@ using bin::RunResult;
 // ── NativeCtx 方法（原 run_frame 内嵌 lambda 提升）────────────────────────
 bool NativeCtx::ai64(int i, std::int64_t* v) {
     Scalar sc{};
-    if (v_scalar(in[i], &sc)) {
+    std::string lt;
+    if (vm.reg_langtype(f, ins.rd[i], &lt) && v_scalar(in[i], lt, &sc)) {
         *v = sc.k == Scalar::K::Int     ? sc.i
              : sc.k == Scalar::K::Float ? (std::int64_t)sc.f
                                         : (std::int64_t)sc.u;
         return true;
     }
     // time/duration 等非数值 langtype：body 即 8 字节整数。
-    kvspaceXh xh{};
-    if (kvspaceXhDecode(in[i].d, in[i].n, &xh) != 0 ||
-        xh.content_len != 8) {
+    if (!in[i].d || in[i].n < KVSPACE_XVALUE_HEAD_LEN + 8) {
         if (g_trace)
             std::fprintf(stderr, "[ai64fail i=%d d=%p n=%u]\n", i,
                          (void*)in[i].d, in[i].n);
         return false;
     }
-    std::memcpy(v, xh.body, 8);
+    std::memcpy(v, in[i].d + KVSPACE_XVALUE_HEAD_LEN, 8);
     return true;
 }
 
 bool NativeCtx::atext(int i, std::string* out) {
-    return wire_text(in[i].d, in[i].n, out);
+    std::string lt;
+    return vm.reg_langtype(f, ins.rd[i], &lt) &&
+           wire_text(in[i].d, in[i].n, lt, out);
 }
 
 bool NativeCtx::wbool(bool b) {
@@ -64,9 +117,9 @@ bool NativeCtx::path_arg(int i, std::uint8_t rno, const RegDesc& d,
     // 文本，列表 op 必须用值（kvspace·listlen(prefix) 参数值 `/tmp/kvt/`）。
     Wire vw{};
     std::string lt, txt;
-    if (vm.read_reg(f, rno, &vw) && v_langtype(Wire{vw.d, vw.n}, &lt) &&
+    if (vm.read_reg(f, rno, &vw) && vm.reg_langtype(f, rno, &lt) &&
         lt.find("char/") != std::string::npos &&
-        wire_text(vw.d, vw.n, &txt) && !txt.empty() && txt[0] == '/') {
+        wire_text(vw.d, vw.n, lt, &txt) && !txt.empty() && txt[0] == '/') {
         *out = txt;  // 路径文本原样（`·` 保留，对齐 C path_arg）
         return true;
     }
@@ -78,6 +131,15 @@ bool NativeCtx::path_arg(int i, std::uint8_t rno, const RegDesc& d,
         return true;
     }
     FReg& pr = f.regs[rno];
+    // 内存别名读参（mem_frame 调用 src_ptr 链）：arg 槽纯内存不落 kvspace——
+    // 取调用方 reg 最终槽作路径（容器参数 `chars:*[int64]·...` 经 src_ptr）。
+    {
+        FReg* ch = &pr;
+        while (ch->src_ptr || ch->dst_ptr)
+            ch = ch->src_ptr ? ch->src_ptr : ch->dst_ptr;
+        if (ch != &pr && !ch->key.empty())
+            pr.key = ch->key;
+    }
     if (!vm.ensure_reg_key(f, pr))
         return false;
     if (g_trace)
@@ -110,19 +172,18 @@ std::string NativeCtx::write_slot_lt() {
         f.func_dir + "/[" + std::to_string(ins.s0) + ",1]";
     const std::uint8_t* wd = nullptr;
     std::uint32_t wn = 0;
-    if (read_wire_raw(f.h, wkey, &wd, &wn) && wd) {
-        kvspaceXh wxh{};
-        if (kvspaceXhDecode(wd, wn, &wxh) == 0 && wxh.body) {
-            const std::uint8_t* b = wxh.body;
-            const std::size_t bl = wxh.content_len;
-            if (bl > 5) {
-                const char* p = reinterpret_cast<const char*>(b + 5);
-                const std::size_t cap = bl - 5;
-                std::size_t i = 0;
-                while (i < cap && p[i] != '\0') i++;
-                if (i < cap)
-                    return std::string(p + i + 1, cap - i - 1);
-            }
+    if (read_wire_raw(f.h, wkey, &wd, &wn) && wd &&
+        wn >= KVSPACE_XVALUE_HEAD_LEN) {
+        std::uint64_t bl = kvspaceXvalueHeadLen(
+            reinterpret_cast<const kvspaceXvalueHead*>(wd));
+        const std::uint8_t* b = wd + KVSPACE_XVALUE_HEAD_LEN;
+        if (bl > 5) {
+            const char* p = reinterpret_cast<const char*>(b + 5);
+            const std::size_t cap = static_cast<std::size_t>(bl - 5);
+            std::size_t i = 0;
+            while (i < cap && p[i] != '\0') i++;
+            if (i < cap)
+                return std::string(p + i + 1, cap - i - 1);
         }
     }
     return {};
@@ -256,7 +317,10 @@ bool h_array_new(NativeCtx& c, std::string* err) {
     if (lt.empty() && c.ins.nrd >= 1) {
         Wire ew{};
         Scalar es{};
-        if (c.vm.read_reg(c.f, c.ins.rd[0], &ew) && v_scalar(ew, &es)) {
+        std::string elt;
+        if (c.vm.read_reg(c.f, c.ins.rd[0], &ew) &&
+            c.vm.reg_langtype(c.f, c.ins.rd[0], &elt) &&
+            v_scalar(ew, elt, &es)) {
             if (es.k == Scalar::K::Float) lt = "float64";
             else if (es.k == Scalar::K::Uint) lt = "uint64";
             else if (es.k == Scalar::K::Bool) lt = "bool";
@@ -278,7 +342,10 @@ bool h_array_new(NativeCtx& c, std::string* err) {
     for (int i = 0; i < c.ins.nrd; i++) {
         Wire ew{};
         Scalar es{};
-        if (!c.vm.read_reg(c.f, c.ins.rd[i], &ew) || !v_scalar(ew, &es)) {
+        std::string elt;
+        if (!c.vm.read_reg(c.f, c.ins.rd[i], &ew) ||
+            !c.vm.reg_langtype(c.f, c.ins.rd[i], &elt) ||
+            !v_scalar(ew, elt, &es)) {
             *err = "array: bad element " + std::to_string(i);
             return false;
         }
@@ -315,11 +382,22 @@ bool h_array_new(NativeCtx& c, std::string* err) {
     const std::int32_t adims[1] = {nd};
     std::uint8_t* arr = nullptr;
     std::uint32_t al = 0;
-    const bool ok = kvspaceXvalueEncode(
-                        lt.c_str(), raw.data(),
-                        static_cast<std::uint32_t>(raw.size()), adims, 1,
-                        &arr, &al) == 0 &&
+    const bool ok = to_wire_v2(lt.c_str(), raw.data(),
+                           static_cast<std::uint32_t>(raw.size()), adims, 1,
+                           &arr, &al) &&
                     arr && c.vm.write_reg(c.f, c.ins.wr[0], arr, al);
+    if (ok && arr) {
+        // 数组字面量槽补 attr（含 [N] 形状段）：compactarray·at/set 按它解 dims。
+        char aerr[192] = {};
+        FReg& wr0 = c.f.regs[c.ins.wr[0]];
+        FReg& wf = wr0.src_ptr ? *wr0.src_ptr : wr0;
+        const std::string full_lt = "[" + std::to_string(nd) + "]" + lt;
+        if (wf.key.empty())
+            (void)c.vm.ensure_reg_key(c.f, wf);
+        if (!wf.key.empty())
+            (void)write_attr_lt(c.f.h, wf.key.c_str(), full_lt.c_str(), aerr,
+                                sizeof aerr);
+    }
     std::free(arr);
     return ok;
 }
@@ -327,14 +405,16 @@ bool h_array_new(NativeCtx& c, std::string* err) {
 bool h_array_fill(NativeCtx& c, std::string* err) {
     // array·fill(langtype[, value])：按定长数组类型一次成型 compact XValue。
     Wire lw{};
-    std::string lt;
+    std::string lt, llt;
     if (c.ins.nrd < 1 || !c.vm.read_reg(c.f, c.ins.rd[0], &lw) ||
-        !wire_text(lw.d, lw.n, &lt)) {
+        !c.vm.reg_langtype(c.f, c.ins.rd[0], &llt) ||
+        !wire_text(lw.d, lw.n, llt, &lt)) {
         *err = "array·fill: bad langtype";
         return false;
     }
     std::int32_t dims[8];
     std::uint32_t ndim = 0;
+    const std::string full_lt = lt;  // 完整 [dims]kind：attr 须含形状段
     lt = c.parse_dims(lt, dims, &ndim);
     const std::uint32_t esz = c.elem_size(lt);
     if (esz == 0 || ndim == 0) {
@@ -350,7 +430,10 @@ bool h_array_fill(NativeCtx& c, std::string* err) {
     if (c.ins.nrd >= 2) {
         Wire vw{};
         Scalar vs{};
-        if (c.vm.read_reg(c.f, c.ins.rd[1], &vw) && v_scalar(vw, &vs)) {
+        std::string vlt;
+        if (c.vm.read_reg(c.f, c.ins.rd[1], &vw) &&
+            c.vm.reg_langtype(c.f, c.ins.rd[1], &vlt) &&
+            v_scalar(vw, vlt, &vs)) {
             for (std::uint64_t i = 0; i < total / esz; i++) {
                 const std::uint64_t off = i * esz;
                 if (lt.rfind("float64", 0) == 0)
@@ -382,11 +465,20 @@ bool h_array_fill(NativeCtx& c, std::string* err) {
     }
     std::uint8_t* arr = nullptr;
     std::uint32_t al = 0;
-    const bool ok = kvspaceXvalueEncode(
-                        lt.c_str(), raw.data(),
-                        static_cast<std::uint32_t>(raw.size()), dims, ndim,
-                        &arr, &al) == 0 &&
+    const bool ok = to_wire_v2(lt.c_str(), raw.data(),
+                           static_cast<std::uint32_t>(raw.size()), dims, ndim,
+                           &arr, &al) &&
                     arr && c.vm.write_reg(c.f, c.ins.wr[0], arr, al);
+    if (ok && arr) {
+        // 数组槽 langtype 走 attr key（上层职责）：compactarray·at/set 按它解 dims。
+        char aerr[192] = {};
+        FReg& wr0 = c.f.regs[c.ins.wr[0]];
+        FReg& wf = wr0.src_ptr ? *wr0.src_ptr : wr0;
+        if (wf.key.empty())
+            (void)c.vm.ensure_reg_key(c.f, wf);
+        if (!wf.key.empty())
+            (void)write_attr_lt(c.f.h, wf.key.c_str(), full_lt.c_str(), aerr, sizeof aerr);
+    }
     std::free(arr);
     return ok;
 }
@@ -398,12 +490,8 @@ bool h_array_copy(NativeCtx& c, std::string* err) {
     std::uint64_t ccap = 0;
     std::string clt;
     if (c.vm.reg_body(c.f, c.ins.rd[0], &cb, &ccap) && cb &&
-        cr.view.head && cr.view.headlen > 18) {
-        const char* hp = reinterpret_cast<const char*>(cr.view.head + 18);
-        const std::size_t hcap = cr.view.headlen - 18;
-        const std::size_t hn = ::strnlen(hp, hcap);
-        clt.assign(hp, hn);
-    }
+        cr.view.head && cr.view.headlen == KVSPACE_XVALUE_HEAD_LEN)
+        c.vm.reg_langtype(c.f, c.ins.rd[0], &clt);
     if (clt.empty() || !cb) {
         *err = "compactarray·copy: bad array";
         return false;
@@ -413,10 +501,9 @@ bool h_array_copy(NativeCtx& c, std::string* err) {
     const std::string ck = c.parse_dims(clt, cdims, &cndim);
     std::uint8_t* nb = nullptr;
     std::uint32_t nl = 0;
-    const bool ok = kvspaceXvalueEncode(
-                        ck.c_str(), cb, static_cast<std::uint32_t>(ccap),
-                        cdims, static_cast<std::int32_t>(cndim), &nb, &nl) ==
-                        0 &&
+    const bool ok = to_wire_v2(ck.c_str(), cb, static_cast<std::uint32_t>(ccap),
+                           cdims, static_cast<std::int32_t>(cndim), &nb,
+                           &nl) &&
                     nb && c.vm.write_reg(c.f, c.ins.wr[0], nb, nl);
     std::free(nb);
     return ok;
@@ -454,7 +541,7 @@ bool h_scatter_new(NativeCtx& c, std::string*) {
         lt = "map";
     std::uint8_t* mark = nullptr;
     std::uint64_t ml = 0;
-    bool ok = kvspaceXhNewShort(lt.c_str(), nullptr, 0, &mark, &ml) == 0 &&
+    bool ok = kvspaceXvalueHeadNewScalar(KVSPACE_XVALUE_ST_SHORT, nullptr, 0, &mark, &ml) == 0 &&
               mark && c.vm.write_reg(c.f, c.ins.wr[0], mark,
                                      static_cast<std::uint32_t>(ml));
     std::free(mark);
@@ -515,8 +602,7 @@ bool h_scatter_set(NativeCtx& c, std::string* err) {
     }
     const std::string mk = sw.key + "\xC2\xB7[" + std::to_string(si) + "]";
     char errbuf[256] = {};
-    const bool ok = kvspaceSetValue(c.f.h, mk.c_str(), sv.d, sv.n, 0, 0,
-                                    errbuf, sizeof errbuf) == 0;
+    const bool ok = kvspaceSetValue(c.f.h, mk.c_str(), sv.d, sv.n, errbuf, sizeof errbuf) == 0;
     if (!ok && errbuf[0])
         *err = std::string(c.ins.name) + ": " + errbuf;
     return ok;
@@ -537,8 +623,7 @@ bool h_scatter_newcompact(NativeCtx& c, std::string* err) {
         const std::int32_t z[1] = {0};
         std::uint8_t* zb = nullptr;
         std::uint32_t zl = 0;
-        const bool ok = kvspaceXvalueEncode(
-                            "int64", nullptr, 0, z, 1, &zb, &zl) == 0 &&
+        const bool ok = to_wire_v2("int64", nullptr, 0, z, 1, &zb, &zl) &&
                         zb && c.vm.write_reg(c.f, c.ins.wr[0], zb, zl);
         std::free(zb);
         return ok;
@@ -555,7 +640,7 @@ bool h_scatter_newcompact(NativeCtx& c, std::string* err) {
             break;
         if (first) {
             std::string lt;
-            if (v_langtype(Wire{md, mn}, &lt)) {
+            if (read_langtype(c.f.h, mk, &lt)) {
                 ekind = lt;
                 if (!ekind.empty() && ekind[0] == '[') {
                     const std::size_t cl = ekind.find(']');
@@ -565,10 +650,12 @@ bool h_scatter_newcompact(NativeCtx& c, std::string* err) {
             }
             first = false;
         }
-        kvspaceXh eh{};
-        if (kvspaceXhDecode(md, mn, &eh) != 0 || !eh.body)
+        if (mn < KVSPACE_XVALUE_HEAD_LEN)
             break;
-        raw.insert(raw.end(), eh.body, eh.body + eh.content_len);
+        std::uint64_t bl = kvspaceXvalueHeadLen(
+            reinterpret_cast<const kvspaceXvalueHead*>(md));
+        raw.insert(raw.end(), md + KVSPACE_XVALUE_HEAD_LEN,
+                   md + KVSPACE_XVALUE_HEAD_LEN + bl);
     }
     const std::uint32_t esz = c.elem_size(ekind);
     if (esz == 0) {
@@ -578,10 +665,9 @@ bool h_scatter_newcompact(NativeCtx& c, std::string* err) {
     const std::int32_t nd = cnt;
     std::uint8_t* nb = nullptr;
     std::uint32_t nl = 0;
-    const bool ok = kvspaceXvalueEncode(
-                        ekind.c_str(), raw.data(),
-                        static_cast<std::uint32_t>(raw.size()), &nd, 1, &nb,
-                        &nl) == 0 &&
+    const bool ok = to_wire_v2(ekind.c_str(), raw.data(),
+                           static_cast<std::uint32_t>(raw.size()), &nd, 1,
+                           &nb, &nl) &&
                     nb && c.vm.write_reg(c.f, c.ins.wr[0], nb, nl);
     std::free(nb);
     return ok;
@@ -595,11 +681,8 @@ bool h_scatter_newscatter(NativeCtx& c, std::string* err) {
     std::string slt;
     std::uint32_t sesz = 0;
     if (c.vm.reg_body(c.f, c.ins.rd[0], &sb, &scap) && sb &&
-        sr.view.head && sr.view.headlen > 18) {
-        const char* hp = reinterpret_cast<const char*>(sr.view.head + 18);
-        const std::size_t hcap = sr.view.headlen - 18;
-        const std::size_t hn = ::strnlen(hp, hcap);
-        slt.assign(hp, hn);
+        sr.view.head && sr.view.headlen == KVSPACE_XVALUE_HEAD_LEN &&
+        c.vm.reg_langtype(c.f, c.ins.rd[0], &slt)) {
         if (!slt.empty() && slt[0] == '[') {
             const std::size_t cl = slt.find(']');
             if (cl != std::string::npos)
@@ -622,10 +705,8 @@ bool h_scatter_newscatter(NativeCtx& c, std::string* err) {
     const std::string mklt = "[int64]\xC2\xB7" + slt;
     std::uint8_t* mark = nullptr;
     std::uint64_t ml = 0;
-    bool ok = kvspaceXhNewShort(mklt.c_str(), nullptr, 0, &mark, &ml) == 0 &&
-              mark && kvspaceSetValue(c.f.h, db.c_str(), mark,
-                                      static_cast<std::uint32_t>(ml), 0, 0,
-                                      errbuf, sizeof errbuf) == 0;
+    bool ok = kvspaceXvalueHeadNewScalar(KVSPACE_XVALUE_ST_SHORT, nullptr, 0, &mark, &ml) == 0 &&
+              mark && kvspaceSetValue(c.f.h, db.c_str(), mark, static_cast<std::uint32_t>(ml), errbuf, sizeof errbuf) == 0;
     std::free(mark);
     if (!ok) {
         *err = "array·scatter: marker failed";
@@ -637,11 +718,9 @@ bool h_scatter_newscatter(NativeCtx& c, std::string* err) {
         std::uint8_t* eb = nullptr;
         std::uint32_t el = 0;
         const std::int32_t ed[1] = {1};
-        ok = kvspaceXvalueEncode(
-                 slt.c_str(), sb + i * sesz,
-                 static_cast<std::uint32_t>(sesz), ed, 1, &eb, &el) == 0 &&
-             eb && kvspaceSetValue(c.f.h, mk.c_str(), eb, el, 0, 0, errbuf,
-                                   sizeof errbuf) == 0;
+        ok = to_wire_v2(slt.c_str(), sb + i * sesz,
+                    static_cast<std::uint32_t>(sesz), ed, 1, &eb, &el) &&
+             eb && kvspaceSetValue(c.f.h, mk.c_str(), eb, el, errbuf, sizeof errbuf) == 0;
         std::free(eb);
         if (!ok) {
             *err = "array·scatter: elem failed";
@@ -665,7 +744,7 @@ bool h_scatter_append(NativeCtx& c, std::string* err) {
         Wire bw0{};
         std::string blt;
         if (c.vm.read_reg(c.f, c.ins.rd[0], &bw0) &&
-            v_langtype(Wire{bw0.d, bw0.n}, &blt) &&
+            c.vm.reg_langtype(c.f, c.ins.rd[0], &blt) &&
             blt.find("\xC2\xB7") == std::string::npos &&
             blt.find('[') != std::string::npos) {
             *err = "TypeError: scatterarray·append requires a scattered "
@@ -698,8 +777,7 @@ bool h_scatter_append(NativeCtx& c, std::string* err) {
     }
     const std::string mk = bb + "\xC2\xB7[" + std::to_string(next) + "]";
     char errbuf[256] = {};
-    const bool ok = kvspaceSetValue(c.f.h, mk.c_str(), ev.d, ev.n, 0, 0,
-                                    errbuf, sizeof errbuf) == 0;
+    const bool ok = kvspaceSetValue(c.f.h, mk.c_str(), ev.d, ev.n, errbuf, sizeof errbuf) == 0;
     if (!ok) {
         *err = "array·append: set failed";
         return false;
@@ -752,8 +830,7 @@ bool h_scatter_slice(NativeCtx& c, std::string* err) {
         }
         const std::string dk = bb + "\xC2\xB7[" + std::to_string(r - lo) + "]";
         char errbuf[256] = {};
-        if (kvspaceSetValue(c.f.h, dk.c_str(), vd, vn, 0, 0, errbuf,
-                            sizeof errbuf) != 0) {
+        if (kvspaceSetValue(c.f.h, dk.c_str(), vd, vn, errbuf, sizeof errbuf) != 0) {
             *err = "scatterarray·slice: set failed";
             return false;
         }
@@ -790,11 +867,8 @@ bool h_array_newslice(NativeCtx& c, std::string* err) {
     std::string slt;
     std::uint32_t sesz = 0;
     if (c.vm.reg_body(c.f, c.ins.rd[0], &sb, &scap) && sb &&
-        sr.view.head && sr.view.headlen > 18) {
-        const char* hp = reinterpret_cast<const char*>(sr.view.head + 18);
-        const std::size_t hcap = sr.view.headlen - 18;
-        const std::size_t hn = ::strnlen(hp, hcap);
-        slt.assign(hp, hn);
+        sr.view.head && sr.view.headlen == KVSPACE_XVALUE_HEAD_LEN &&
+        c.vm.reg_langtype(c.f, c.ins.rd[0], &slt)) {
         if (!slt.empty() && slt[0] == '[') {
             const std::size_t cl = slt.find(']');
             if (cl != std::string::npos)
@@ -814,10 +888,9 @@ bool h_array_newslice(NativeCtx& c, std::string* err) {
     const std::int32_t nd = static_cast<std::int32_t>(hi - lo);
     std::uint8_t* nb = nullptr;
     std::uint32_t nl = 0;
-    const bool ok = kvspaceXvalueEncode(
-                        slt.c_str(), sb + lo * sesz,
-                        static_cast<std::uint32_t>((hi - lo) * sesz), &nd, 1,
-                        &nb, &nl) == 0 &&
+    const bool ok = to_wire_v2(slt.c_str(), sb + lo * sesz,
+                           static_cast<std::uint32_t>((hi - lo) * sesz), &nd,
+                           1, &nb, &nl) &&
                     nb && c.vm.write_reg(c.f, c.ins.wr[0], nb, nl);
     std::free(nb);
     return ok;
@@ -836,17 +909,10 @@ bool h_string_char(NativeCtx& c, std::string* err) {
         *err = "string·char: bad string";
         return false;
     }
-    FReg& sr = c.f.regs[c.ins.rd[0]];
-    const std::uint8_t* hd = sr.view.head;
-    const std::size_t hcap =
-        hd ? static_cast<std::size_t>(sr.view.headlen > 18
-                                         ? sr.view.headlen - 18
-                                         : 0)
-           : 0;
-    const std::size_t hlen =
-        hcap ? ::strnlen(reinterpret_cast<const char*>(hd + 18), hcap) : 0;
-    const bin::LangType st = c.vm.bin.langtype_of(
-        reinterpret_cast<const char*>(hd + 18), hlen);
+    std::string slt;
+    c.vm.reg_langtype(c.f, c.ins.rd[0], &slt);
+    const bin::LangType st =
+        c.vm.bin.langtype_of(slt.data(), slt.size());
     std::uint32_t cp = 0;
     const bool utf32 = st == bin::LangType::CharUtf32;
     const std::uint64_t blen = sc;
@@ -883,10 +949,20 @@ bool h_string_char(NativeCtx& c, std::string* err) {
     std::uint8_t* cb = nullptr;
     std::uint32_t cl = 0;
     const std::int32_t cdims[1] = {1};
-    const bool ok = kvspaceXvalueEncode(
-                        "char/utf32", reinterpret_cast<const std::uint8_t*>(&u32),
-                        4, cdims, 1, &cb, &cl) == 0 &&
+    const bool ok = to_wire_v2("char/utf32",
+                           reinterpret_cast<const std::uint8_t*>(&u32), 4,
+                           cdims, 1, &cb, &cl) &&
                     cb && c.vm.write_reg(c.f, c.ins.wr[0], cb, cl);
+    if (ok && cb) {
+        // ch 槽补 attr（char/utf32）：后续 string·ord 读依赖类型。
+        char aerr[192] = {};
+        FReg& cw = c.f.regs[c.ins.wr[0]];
+        if (cw.key.empty())
+            (void)c.vm.ensure_reg_key(c.f, cw);
+        if (!cw.key.empty())
+            (void)write_attr_lt(c.f.h, cw.key.c_str(), "char/utf32", aerr,
+                                sizeof aerr);
+    }
     std::free(cb);
     return ok;
 }
@@ -897,18 +973,19 @@ bool h_string_len(NativeCtx& c, std::string* err) {
         *err = "string·len: bad input";
         return false;
     }
-    kvspaceXh sh{};
+    std::string sl;
     std::int64_t len = 0;
-    if (kvspaceXhDecode(sw.d, sw.n, &sh) == 0 && sh.body) {
-        std::string sl(reinterpret_cast<const char*>(sh.langtype),
-                       sh.langtype_len);
+    if (c.vm.reg_langtype(c.f, c.ins.rd[0], &sl) && sw.d &&
+        sw.n >= KVSPACE_XVALUE_HEAD_LEN) {
+        std::uint64_t clen = kvspaceXvalueHeadLen(
+            reinterpret_cast<const kvspaceXvalueHead*>(sw.d));
+        const std::uint8_t* b = sw.d + KVSPACE_XVALUE_HEAD_LEN;
         if (sl.find("utf32") != std::string::npos) {
-            len = static_cast<std::int64_t>(sh.content_len / 4);
+            len = static_cast<std::int64_t>(clen / 4);
         } else if (sl.find("ascii") != std::string::npos) {
-            len = static_cast<std::int64_t>(sh.content_len);
+            len = static_cast<std::int64_t>(clen);
         } else {
-            const std::uint8_t* b = sh.body;
-            for (std::uint64_t i = 0; i < sh.content_len; i++)
+            for (std::uint64_t i = 0; i < clen; i++)
                 if ((b[i] & 0xC0) != 0x80)
                     len++;
         }
@@ -922,26 +999,29 @@ bool h_string_ord(NativeCtx& c, std::string* err) {
         *err = "string·ord: bad input";
         return false;
     }
-    kvspaceXh sh{};
+    std::string sl;
     std::int64_t cp = -1;
-    if (kvspaceXhDecode(sw.d, sw.n, &sh) == 0 && sh.body && sh.content_len) {
-        std::string sl(reinterpret_cast<const char*>(sh.langtype),
-                       sh.langtype_len);
-        const std::uint8_t* b = sh.body;
-        if (sl.find("utf32") != std::string::npos) {
-            std::uint32_t u = 0;
-            std::memcpy(&u, b, 4);
-            cp = u;
-        } else {
-            std::uint32_t r = 0, take = 1;
-            const std::uint8_t c0 = b[0];
-            if (c0 < 0x80) { r = c0; }
-            else if ((c0 >> 5) == 0x6) { r = c0 & 0x1F; take = 2; }
-            else if ((c0 >> 4) == 0xE) { r = c0 & 0x0F; take = 3; }
-            else if ((c0 >> 3) == 0x1E) { r = c0 & 0x07; take = 4; }
-            for (std::uint32_t k = 1; k < take && k < sh.content_len; k++)
-                r = (r << 6) | (b[k] & 0x3F);
-            cp = r;
+    if (c.vm.reg_langtype(c.f, c.ins.rd[0], &sl) && sw.d &&
+        sw.n >= KVSPACE_XVALUE_HEAD_LEN) {
+        std::uint64_t clen = kvspaceXvalueHeadLen(
+            reinterpret_cast<const kvspaceXvalueHead*>(sw.d));
+        const std::uint8_t* b = sw.d + KVSPACE_XVALUE_HEAD_LEN;
+        if (clen) {
+            if (sl.find("utf32") != std::string::npos) {
+                std::uint32_t u = 0;
+                std::memcpy(&u, b, 4);
+                cp = u;
+            } else {
+                std::uint32_t r = 0, take = 1;
+                const std::uint8_t c0 = b[0];
+                if (c0 < 0x80) { r = c0; }
+                else if ((c0 >> 5) == 0x6) { r = c0 & 0x1F; take = 2; }
+                else if ((c0 >> 4) == 0xE) { r = c0 & 0x0F; take = 3; }
+                else if ((c0 >> 3) == 0x1E) { r = c0 & 0x07; take = 4; }
+                for (std::uint32_t k = 1; k < take && k < clen; k++)
+                    r = (r << 6) | (b[k] & 0x3F);
+                cp = r;
+            }
         }
     }
     return c.vm.slot_write_i64(c.f, c.ins.wr[0], cp);
@@ -979,20 +1059,28 @@ bool write_runes(NativeCtx& c, const std::vector<std::uint32_t>& r) {
     const std::int32_t dims[1] = {static_cast<std::int32_t>(n)};
     std::uint8_t* out = nullptr;
     std::uint32_t ol = 0;
-    const bool ok = kvspaceXvalueEncode(
-                        "char/utf32", raw.data(),
-                        static_cast<std::uint32_t>(raw.size()), dims, 1, &out,
-                        &ol) == 0 &&
+    const bool ok = to_wire_v2("char/utf32", raw.data(),
+                           static_cast<std::uint32_t>(raw.size()), dims, 1,
+                           &out, &ol) &&
                     out && c.vm.write_reg(c.f, c.ins.wr[0], out, ol);
+    if (ok && out) {
+        // 结果串槽补 attr（[n]char/utf32）：后续 string·* 读参数依赖类型。
+        char aerr[192] = {};
+        FReg& w0 = c.f.regs[c.ins.wr[0]];
+        FReg& wf = w0.src_ptr ? *w0.src_ptr : w0;
+        const std::string full_lt = "[" + std::to_string(n) + "]char/utf32";
+        if (wf.key.empty())
+            (void)c.vm.ensure_reg_key(c.f, wf);
+        if (!wf.key.empty())
+            (void)write_attr_lt(c.f.h, wf.key.c_str(), full_lt.c_str(), aerr,
+                                sizeof aerr);
+    }
     std::free(out);
     return ok;
 }
 
 // 读参必须是 char 族（剥 dims 前缀后 kind 为 char/*；对齐 C 的 char 判定）。
-bool is_char_wire(const Wire& w) {
-    std::string lt;
-    if (!v_langtype(w, &lt))
-        return false;
+bool is_char_wire(std::string_view lt) {
     const std::size_t close = lt.find(']');
     if (!lt.empty() && lt[0] == '[' && close != std::string::npos)
         lt = lt.substr(close + 1);
@@ -1048,7 +1136,10 @@ bool h_string_find(NativeCtx& c, std::string* err) {
 }
 
 bool h_string_concat(NativeCtx& c, std::string* err) {
-    if (c.ins.nrd < 2 || !is_char_wire(c.in[0]) || !is_char_wire(c.in[1])) {
+    std::string lt0, lt1;
+    if (c.ins.nrd < 2 ||
+        !c.vm.reg_langtype(c.f, c.ins.rd[0], &lt0) || !is_char_wire(lt0) ||
+        !c.vm.reg_langtype(c.f, c.ins.rd[1], &lt1) || !is_char_wire(lt1)) {
         *err = "string·concat: requires strings";
         return false;
     }
@@ -1165,8 +1256,7 @@ bool h_string_parsefloat(NativeCtx& c, std::string* err) {
     std::memcpy(raw, &v, 8);
     std::uint8_t* buf = nullptr;
     std::uint32_t len = 0;
-    const bool ok = kvspaceXvalueEncode("float64", raw, 8, nullptr, 0, &buf,
-                                        &len) == 0 &&
+    const bool ok = to_wire_v2("float64", raw, 8, nullptr, 0, &buf, &len) &&
                     buf && c.vm.write_reg(c.f, c.ins.wr[0], buf, len);
     std::free(buf);
     return ok;
@@ -1189,13 +1279,11 @@ bool h_array_meta(NativeCtx& c, std::string* err) {
         *err = "ndarray: bad array";
         return false;
     }
-    kvspaceXh axh{};
-    if (kvspaceXhDecode(aw.d, aw.n, &axh) != 0) {
+    std::string alt;
+    if (!c.vm.reg_langtype(c.f, c.ins.rd[0], &alt)) {
         *err = "ndarray: not a compact array";
         return false;
     }
-    std::string alt(reinterpret_cast<const char*>(axh.langtype),
-                    axh.langtype_len);
     std::int32_t adims[8];
     std::uint32_t andim = 0;
     const bool is_map = alt.find("\xC2\xB7") != std::string::npos;
@@ -1230,7 +1318,7 @@ bool h_array_meta(NativeCtx& c, std::string* err) {
         const std::int32_t sd[1] = {static_cast<std::int32_t>(andim)};
         std::uint8_t* sb = nullptr;
         std::uint32_t sl = 0;
-        ok = kvspaceXvalueEncode("int64", raw, andim * 8, sd, 1, &sb, &sl) == 0 &&
+        ok = to_wire_v2("int64", raw, andim * 8, sd, 1, &sb, &sl) &&
              sb && c.vm.write_reg(c.f, c.ins.wr[0], sb, sl);
         std::free(sb);
     }
@@ -1250,31 +1338,26 @@ bool h_xv_meta(NativeCtx& c, std::string* err) {
         mlt = "bool";
         mcap = 1;
     } else if (c.vm.reg_body(c.f, c.ins.rd[0], &mb, &mcap) && mb &&
-               mr.view.head && mr.view.headlen > 18) {
-        const char* hp = reinterpret_cast<const char*>(mr.view.head + 18);
-        const std::size_t hcap = mr.view.headlen - 18;
-        const std::size_t hn = ::strnlen(hp, hcap);
-        mlt.assign(hp, hn);
+               mr.view.head && mr.view.headlen == KVSPACE_XVALUE_HEAD_LEN) {
+        c.vm.reg_langtype(c.f, c.ins.rd[0], &mlt);
     }
     bool ok = true;
     if (c.fn == "compactarray/langtype") {
         std::uint8_t* sb = nullptr;
         std::uint32_t sl = 0;
-        ok = kvspaceXvalueEncode(
-                 "char/utf8", reinterpret_cast<const std::uint8_t*>(mlt.data()),
-                 static_cast<std::uint32_t>(mlt.size()), nullptr, 0, &sb, &sl) ==
-                 0 &&
+        ok = to_wire_v2("char/utf8",
+                    reinterpret_cast<const std::uint8_t*>(mlt.data()),
+                    static_cast<std::uint32_t>(mlt.size()), nullptr, 0, &sb,
+                    &sl) &&
              sb && c.vm.write_reg(c.f, c.ins.wr[0], sb, sl);
         std::free(sb);
     } else if (c.fn == "compactarray/bodylen") {
         std::int64_t blen = 0;
         if (mr.fast_i64) blen = 8;
         else if (mr.fast_bool) blen = 1;
-        else if (mr.view.head && mr.view.headlen) {
-            kvspaceXh bh{};
-            if (kvspaceXhDecode(mr.view.head, mr.view.headlen + mr.view.body_cap,
-                                &bh) == 0)
-                blen = static_cast<std::int64_t>(bh.content_len);
+        else if (mr.view.head && mr.view.headlen == KVSPACE_XVALUE_HEAD_LEN) {
+            blen = static_cast<std::int64_t>(kvspaceXvalueHeadLen(
+                reinterpret_cast<const kvspaceXvalueHead*>(mr.view.head)));
         }
         ok = c.vm.slot_write_i64(c.f, c.ins.wr[0], blen);
     } else if (c.fn == "compactarray/parselangtype") {
@@ -1288,10 +1371,10 @@ bool h_xv_meta(NativeCtx& c, std::string* err) {
             base = base.substr(4);
         std::uint8_t* sb = nullptr;
         std::uint32_t sl = 0;
-        ok = kvspaceXvalueEncode(
-                 "char/utf8", reinterpret_cast<const std::uint8_t*>(base.data()),
-                 static_cast<std::uint32_t>(base.size()), nullptr, 0, &sb, &sl) ==
-                 0 &&
+        ok = to_wire_v2("char/utf8",
+                    reinterpret_cast<const std::uint8_t*>(base.data()),
+                    static_cast<std::uint32_t>(base.size()), nullptr, 0, &sb,
+                    &sl) &&
              sb && c.vm.write_reg(c.f, c.ins.wr[0], sb, sl);
         std::free(sb);
         if (ok && c.ins.nwr >= 2) {
@@ -1314,9 +1397,10 @@ bool h_xv_meta(NativeCtx& c, std::string* err) {
     } else {
         // xv·reinterpret：读参[1]=新 kindexpr 文本；body 原样，dims 由传入串解析。
         Wire lw{};
-        std::string nlt;
+        std::string nlt, llt;
         if (c.ins.nrd < 2 || !c.vm.read_reg(c.f, c.ins.rd[1], &lw) ||
-            !wire_text(lw.d, lw.n, &nlt) || nlt.empty()) {
+            !c.vm.reg_langtype(c.f, c.ins.rd[1], &llt) ||
+            !wire_text(lw.d, lw.n, llt, &nlt) || nlt.empty()) {
             *err = "xv·reinterpret: bad langtype";
             return false;
         }
@@ -1368,9 +1452,8 @@ bool h_xv_meta(NativeCtx& c, std::string* err) {
         }
         std::uint8_t* nb = nullptr;
         std::uint32_t nl = 0;
-        ok = kvspaceXvalueEncode(
-                 kk.c_str(), mb, static_cast<std::uint32_t>(mcap), ndims, ndim,
-                 &nb, &nl) == 0 &&
+        ok = to_wire_v2(kk.c_str(), mb, static_cast<std::uint32_t>(mcap), ndims,
+                    ndim, &nb, &nl) &&
              nb && c.vm.write_reg(c.f, c.ins.wr[0], nb, nl);
         std::free(nb);
     }
@@ -1379,23 +1462,15 @@ bool h_xv_meta(NativeCtx& c, std::string* err) {
 
 bool h_array_reshape(NativeCtx& c, std::string* err) {
     // xv·reshape(arr, dims...) -> a：body 字节原样，只换 dims（numel 守恒校验）。
-    FReg& rr0 = c.f.regs[c.ins.rd[0]];
     std::uint8_t* rbody = nullptr;
     std::uint64_t rcap = 0;
     if (!c.vm.reg_body(c.f, c.ins.rd[0], &rbody, &rcap) || !rbody) {
         *err = "xv·reshape: bad array";
         return false;
     }
-    std::uint8_t* rhd = rr0.view.head;
-    const std::size_t rhcap =
-        rhd ? static_cast<std::size_t>(rr0.view.headlen > 18
-                                          ? rr0.view.headlen - 18
-                                          : 0)
-            : 0;
-    const std::size_t rhlen =
-        rhcap ? ::strnlen(reinterpret_cast<const char*>(rhd + 18), rhcap) : 0;
-    const bin::LangType rt =
-        c.vm.bin.langtype_of(reinterpret_cast<const char*>(rhd + 18), rhlen);
+    std::string rlt;
+    c.vm.reg_langtype(c.f, c.ins.rd[0], &rlt);
+    const bin::LangType rt = c.vm.bin.langtype_of(rlt.data(), rlt.size());
     const std::uint32_t resz = c.vm.bin.elem_width_of(rt);
     if (resz == 0) {
         *err = "xv·reshape: requires a compact array";
@@ -1438,9 +1513,8 @@ bool h_array_reshape(NativeCtx& c, std::string* err) {
     }
     std::uint8_t* nb = nullptr;
     std::uint32_t nl = 0;
-    const bool ok = kvspaceXvalueEncode(
-                        rkn, rbody, static_cast<std::uint32_t>(rcap), rdims,
-                        ndims, &nb, &nl) == 0 &&
+    const bool ok = to_wire_v2(rkn, rbody, static_cast<std::uint32_t>(rcap), rdims,
+                           ndims, &nb, &nl) &&
                     nb && c.vm.write_reg(c.f, c.ins.wr[0], nb, nl);
     std::free(nb);
     return ok;
@@ -1471,21 +1545,14 @@ bool h_array_at_set(NativeCtx& c, std::string* err) {
         is_char = (ar0.arr_kind & 0x80) != 0;
         std::memcpy(dims, ar0.arr_dims, sizeof(std::int32_t) * ndim);
     } else {
-        const std::uint8_t* hd = ar0.view.head;
-        const std::size_t hcap =
-            hd ? static_cast<std::size_t>(ar0.view.headlen > 18
-                                             ? ar0.view.headlen - 18
-                                             : 0)
-               : 0;
-        const std::size_t hlen =
-            hcap ? ::strnlen(reinterpret_cast<const char*>(hd + 18), hcap) : 0;
-        const char* lt = reinterpret_cast<const char*>(hd + 18);
-        std::size_t ln = hlen;
+        std::string alt;
+        c.vm.reg_langtype(c.f, c.ins.rd[0], &alt);
+        std::string lt = alt;
         ndim = 0;
-        if (ln && *lt == '[') {
-            const std::size_t close = std::string(lt, ln).find(']');
+        if (!lt.empty() && lt[0] == '[') {
+            const std::size_t close = lt.find(']');
             if (close != std::string::npos) {
-                const std::string seg(lt + 1, close - 1);
+                const std::string seg = lt.substr(1, close - 1);
                 std::size_t i = 0;
                 while (i <= seg.size() && ndim < 8) {
                     const std::size_t comma = seg.find(',', i);
@@ -1498,12 +1565,10 @@ bool h_array_at_set(NativeCtx& c, std::string* err) {
                     if (comma == std::string::npos) break;
                     i = comma + 1;
                 }
-                const std::size_t koff = close + 1;
-                lt += koff;
-                ln -= koff;
+                lt = lt.substr(close + 1);
             }
         }
-        const bin::LangType bt = c.vm.bin.langtype_of(lt, ln);
+        const bin::LangType bt = c.vm.bin.langtype_of(lt.data(), lt.size());
         is_char = bt == bin::LangType::CharUtf8 ||
                   bt == bin::LangType::CharUtf32 ||
                   bt == bin::LangType::CharAscii;
@@ -1572,17 +1637,27 @@ bool h_array_at_set(NativeCtx& c, std::string* err) {
             std::uint8_t* eb = nullptr;
             std::uint32_t el = 0;
             const std::int32_t cdims[1] = {1};
-            const bool ok = kvspaceXvalueEncode(
-                                esz == 4 ? "char/utf32" : "char/utf8", u32, esz,
-                                cdims, 1, &eb, &el) == 0 &&
+            const char* ck = esz == 4 ? "char/utf32" : "char/utf8";
+            const bool ok = to_wire_v2(ck, u32,
+                                   esz, cdims, 1, &eb, &el) &&
                             eb && c.vm.write_reg(c.f, c.ins.wr[0], eb, el);
+            if (ok && eb) {
+                // 字符元素槽补 attr（char/utf32|utf8）：`==`/string·* 读依赖。
+                char aerr[192] = {};
+                FReg& cw = c.f.regs[c.ins.wr[0]];
+                if (cw.key.empty())
+                    (void)c.vm.ensure_reg_key(c.f, cw);
+                if (!cw.key.empty())
+                    (void)write_attr_lt(c.f.h, cw.key.c_str(), ck, aerr,
+                                        sizeof aerr);
+            }
             std::free(eb);
             return ok;
         }
         if (ev.k == Scalar::K::Int && esz == 8) {
             return c.vm.slot_write_i64(c.f, c.ins.wr[0], ev.i);
         }
-        // Same-type slot: patch the body in place; slot_write_scalar re-encodes otherwise.
+        // 同类型槽：就地改 body；否则 slot_write_scalar 重新组装。
         if (!c.vm.slot_write_scalar(c.f, c.ins.wr[0], ev,
                                     static_cast<std::uint8_t>(esz)))
             return false;
@@ -1599,17 +1674,17 @@ bool h_array_at_set(NativeCtx& c, std::string* err) {
         (vr0.src_ptr || (c.vm.ensure_reg_key(c.f, vr0) &&
                          c.vm.is_frame_local(c.f, vr0.key)));
     Wire vw{};
-    kvspaceXh vh{};
     if (vtrust) {
         std::memcpy(tmp, &vr.fv, 8);  // same bytes the int64 wire body would carry
     } else if (!c.vm.read_reg(c.f, c.ins.rd[c.ins.nrd - 1], &vw)) {
         *err = "xv: bad value";
         return false;
-    } else if (kvspaceXhDecode(vw.d, vw.n, &vh) == 0 && vh.body) {
-        const std::uint32_t take = vh.content_len < esz ? vh.content_len : esz;
-        std::memcpy(tmp, vh.body, take);
-    } else if (vw.n <= 8) {
-        std::memcpy(tmp, vw.d, vw.n);
+    } else if (vw.d && vw.n >= KVSPACE_XVALUE_HEAD_LEN) {
+        std::uint64_t vlen = kvspaceXvalueHeadLen(
+            reinterpret_cast<const kvspaceXvalueHead*>(vw.d));
+        const std::uint32_t take = vlen < esz ? (std::uint32_t)vlen : esz;
+        if (take)
+            std::memcpy(tmp, vw.d + KVSPACE_XVALUE_HEAD_LEN, take);
     }
     FReg& ar = c.f.regs[c.ins.rd[0]];
     const RegDesc& rd0 = c.seg->regs[c.ins.rd[0]];
@@ -1661,10 +1736,8 @@ bool h_struct_new(NativeCtx& c, std::string* err) {
         return false;
     }
     // 原型必须存在且 kind=def struct。
-    const std::uint8_t* pd = nullptr;
-    std::uint32_t pn = 0;
     std::string plt;
-    if (!read_wire(c.f.h, ref, &pd, &pn) || !v_langtype(Wire{pd, pn}, &plt) ||
+    if (!read_langtype(c.f.h, ref, &plt) ||
         bare_kind(plt) != "def struct") {
         *err = "TypeError: " + ref + " is not a struct type";
         return false;
@@ -1681,15 +1754,13 @@ bool h_struct_new(NativeCtx& c, std::string* err) {
         *err = std::string("struct·new: copy failed: ") + eb;
         return false;
     }
-    // 基值标 structref 标记（langtype=ref，空 body，ndim 0）。
+    // 基值标 structref 标记（langtype=ref，空 body，ndim 0）。attr=ref（含 /lib/ 前缀）。
     std::uint8_t* mark = nullptr;
     std::uint32_t ml = 0;
-    bool ok = kvspaceXvalueEncode(ref.c_str(), nullptr, 0, nullptr, 0, &mark,
-                                  &ml) == 0 &&
-              mark;
+    bool ok = to_wire_v2(ref.c_str(), nullptr, 0, nullptr, 0, &mark, &ml) && mark;
     if (ok)
-        ok = kvspaceSetValue(c.f.h, base.c_str(), mark, ml, 0, 0, eb,
-                             sizeof eb) == 0;
+        ok = write_attr_lt(c.f.h, base.c_str(), ref.c_str(), eb, sizeof eb) &&
+             kvspaceSetValue(c.f.h, base.c_str(), mark, ml, eb, sizeof eb) == 0;
     std::free(mark);
     if (!ok) {
         *err = std::string("struct·new: marker failed: ") + eb;
@@ -1700,8 +1771,10 @@ bool h_struct_new(NativeCtx& c, std::string* err) {
         std::string fname;
         Wire fw{};
         Wire fv{};
+        std::string fllt;
         if (!c.vm.read_reg(c.f, c.ins.rd[i], &fw) ||
-            !wire_text(fw.d, fw.n, &fname) || fname.empty() ||
+            !c.vm.reg_langtype(c.f, c.ins.rd[i], &fllt) ||
+            !wire_text(fw.d, fw.n, fllt, &fname) || fname.empty() ||
             !c.vm.read_reg(c.f, c.ins.rd[i + 1], &fv)) {
             *err = "struct·new: bad field pair";
             return false;
@@ -1713,21 +1786,23 @@ bool h_struct_new(NativeCtx& c, std::string* err) {
             std::uint32_t tn = 0;
             const std::string tk = ref + "/" + fname;
             std::string tlt;
-            if (!read_wire(c.f.h, tk, &td, &tn) ||
-                !v_langtype(Wire{td, tn}, &tlt) ||
+            if (!read_langtype(c.f.h, tk, &tlt) ||
                 bare_kind(tlt) != "def langtype") {
                 *err = "TypeError: struct " + ref + " has no field " + fname;
                 return false;
             }
-            kvspaceXh th{};
-            if (kvspaceXhDecode(td, tn, &th) != 0 || !th.body)
+            if (tn < KVSPACE_XVALUE_HEAD_LEN)
                 ftype.clear();
-            else
-                ftype.assign(reinterpret_cast<const char*>(th.body),
-                             th.content_len);
+            else {
+                std::uint64_t tlen = kvspaceXvalueHeadLen(
+                    reinterpret_cast<const kvspaceXvalueHead*>(td));
+                ftype.assign(reinterpret_cast<const char*>(td +
+                                                           KVSPACE_XVALUE_HEAD_LEN),
+                             static_cast<std::size_t>(tlen));
+            }
         }
         std::string vlt;
-        (void)v_langtype(fv, &vlt);
+        (void)c.vm.reg_langtype(c.f, c.ins.rd[i + 1], &vlt);
         const bool none = v_is_none(fv);
         // *T 字段：None 合法；非 None 须 Ptr 且目标种类匹配（剥离前导 *）。
         if (!ftype.empty() && ftype[0] == '*') {
@@ -1745,8 +1820,15 @@ bool h_struct_new(NativeCtx& c, std::string* err) {
             return false;
         }
         const std::string mk = base + "\xC2\xB7" + fname;
-        if (kvspaceSetValue(c.f.h, mk.c_str(), fv.d, fv.n, 0, 0, eb,
-                            sizeof eb) != 0) {
+        // 字段槽补 attr（上层职责）：ftype=字段声明类型（float64/[]char 等）——
+        // 后续 `p·f -> v` 读字段依赖类型，attr 缺失会当 int64 显示位模式。
+        if (!ftype.empty() && ftype[0] == '*')
+            ;  // Ptr 字段：target 自带类型，字段槽不约束
+        else if (!ftype.empty())
+            (void)write_attr_lt(c.f.h, mk.c_str(), ftype.c_str(), eb, sizeof eb);
+        else if (!vlt.empty())
+            (void)write_attr_lt(c.f.h, mk.c_str(), vlt.c_str(), eb, sizeof eb);
+        if (kvspaceSetValue(c.f.h, mk.c_str(), fv.d, fv.n, eb, sizeof eb) != 0) {
             *err = std::string("struct·new: set field failed: ") + eb;
             return false;
         }
@@ -1762,7 +1844,7 @@ bool h_obj_map(NativeCtx& c, std::string* err) {
     std::uint8_t* mark = nullptr;
     std::uint64_t ml = 0;
     const std::string ck = c.f.regs[c.ins.wr[0]].key;
-    bool ok = kvspaceXhNewShort(lt.c_str(), nullptr, 0, &mark, &ml) == 0 &&
+    bool ok = kvspaceXvalueHeadNewScalar(KVSPACE_XVALUE_ST_SHORT, nullptr, 0, &mark, &ml) == 0 &&
               mark &&
               c.vm.write_reg(c.f, c.ins.wr[0], mark,
                              static_cast<std::uint32_t>(ml));
@@ -1784,8 +1866,7 @@ bool h_obj_map(NativeCtx& c, std::string* err) {
                 }
                 const std::string mk =
                     base_key + "\xC2\xB7[" + std::to_string(i) + "]";
-                if (kvspaceSetValue(c.f.h, mk.c_str(), ew.d, ew.n, 0, 0, e,
-                                    sizeof e) != 0) {
+                if (kvspaceSetValue(c.f.h, mk.c_str(), ew.d, ew.n, e, sizeof e) != 0) {
                     *err = "map: set failed: " + c.ins.name;
                     return false;
                 }
@@ -1795,16 +1876,16 @@ bool h_obj_map(NativeCtx& c, std::string* err) {
             for (int i = 0; i + 1 < c.ins.nrd; i += 2) {
                 Wire kw{};
                 Wire vw{};
-                std::string kname;
+                std::string kname, klt;
                 if (!c.vm.read_reg(c.f, c.ins.rd[i], &kw) ||
-                    !wire_text(kw.d, kw.n, &kname) || kname.empty() ||
+                    !c.vm.reg_langtype(c.f, c.ins.rd[i], &klt) ||
+                    !wire_text(kw.d, kw.n, klt, &kname) || kname.empty() ||
                     !c.vm.read_reg(c.f, c.ins.rd[i + 1], &vw)) {
                     *err = "obj: bad member pair " + c.ins.name;
                     return false;
                 }
                 const std::string mk = base_key + "\xC2\xB7" + kname;
-                if (kvspaceSetValue(c.f.h, mk.c_str(), vw.d, vw.n, 0, 0, e,
-                                    sizeof e) != 0) {
+                if (kvspaceSetValue(c.f.h, mk.c_str(), vw.d, vw.n, e, sizeof e) != 0) {
                     *err = "obj: set failed: " + c.ins.name;
                     return false;
                 }
@@ -1836,11 +1917,9 @@ bool h_kvlang_abs(NativeCtx& c, std::string* err) {
         *err = "native: bad path operand: " + c.ins.name;
         return false;
     }
-    const std::uint8_t* td = nullptr;
-    std::uint32_t tn = 0;
     std::string lt;
-    if (read_wire(c.f.h, k0, &td, &tn))
-        (void)v_langtype(Wire{td, tn}, &lt);
+    if (!read_langtype(c.f.h, k0, &lt))
+        lt.clear();
     std::uint8_t* ptr = nullptr;
     std::uint32_t pl = 0;
     ok = kvspaceNewPtr(lt.c_str(), k0.c_str(), &ptr, &pl) == 0 && ptr &&
@@ -1869,11 +1948,10 @@ bool h_vthread_create(NativeCtx& c, std::string* err) {
     std::uint8_t* buf = nullptr;
     std::uint32_t len = 0;
     const std::int32_t dims[1] = {static_cast<std::int32_t>(vs.size())};
-    const bool ok = kvspaceXvalueEncode(
-                        "char/utf8",
-                        reinterpret_cast<const std::uint8_t*>(vs.data()),
-                        static_cast<std::uint32_t>(vs.size()), dims, 1, &buf,
-                        &len) == 0 &&
+    const bool ok = to_wire_v2("char/utf8",
+                           reinterpret_cast<const std::uint8_t*>(vs.data()),
+                           static_cast<std::uint32_t>(vs.size()), dims, 1,
+                           &buf, &len) &&
                     buf && c.vm.write_reg(c.f, c.ins.wr[0], buf, len);
     std::free(buf);
     return ok;
@@ -2090,6 +2168,17 @@ bool h_kv_list(NativeCtx& c, std::string* err) {
         return false;
     }
     std::string dkey = k0;
+    // 参数槽是 Ptr（容器参数 `chars:*[int64]·...` 绑定 Ptr→调用方实例）：
+    // list 须先解析 Ptr target（resolve=1 对 `‥arg[0,-1]·` 无效——· 后无成员，
+    // 且 resolve=1 会穿透 Ptr 读到 target 值而非本体）。读 Ptr 本体取 target 路径。
+    {
+        const std::uint8_t* kd = nullptr;
+        std::uint32_t kn = 0;
+        std::string kt;
+        if (read_wire_raw(c.f.h, k0, &kd, &kn) &&
+            v_ptr_target(Wire{kd, kn}, &kt) && !kt.empty())
+            dkey = kt;
+    }
     if (!dkey.empty() && dkey.back() != '/' &&
         !(dkey.size() >= 2 &&
           (unsigned char)dkey[dkey.size() - 2] == 0xC2 &&
@@ -2102,21 +2191,27 @@ bool h_kv_list(NativeCtx& c, std::string* err) {
             std::fprintf(stderr, "[listlen k0='%s' dkey='%s']\n",
                          k0.c_str(), dkey.c_str());
         std::int32_t cnt = 0;
-        ok = kvspaceListLen(c.f.h, dkey.c_str(), 0, 0, &cnt) == 0 &&
+        ok = kvspaceListLen(c.f.h, dkey.c_str(), 0, 1, &cnt) == 0 &&
              c.vm.write_named_i64(c.f.h, c.ins.wr[0], c.f, "int64", cnt);
     } else {
         std::int64_t idx = 0;
         std::uint8_t name[512];
         std::uint32_t nn = 0;
         ok = c.ai64(1, &idx) &&
-             kvspaceListAt(c.f.h, dkey.c_str(), 0, 0, (std::int32_t)idx, name,
+             kvspaceListAt(c.f.h, dkey.c_str(), 0, 1, (std::int32_t)idx, name,
                            sizeof name, &nn) == 0;
         if (ok) {
             FReg& wr = c.f.regs[c.ins.wr[0]];
-            ok = c.vm.ensure_reg_key(c.f, wr) &&
-                 write_text(c.f.h, wr.key,
-                            std::string_view(
-                                reinterpret_cast<const char*>(name), nn));
+            ok = c.vm.ensure_reg_key(c.f, wr);
+            if (ok) {
+                // 键名槽补 attr（char/utf8）：动态键成员读（`data·*k`）依赖。
+                char aerr[192] = {};
+                (void)write_attr_lt(c.f.h, wr.key.c_str(), "char/utf8", aerr,
+                                    sizeof aerr);
+                ok = write_text(c.f.h, wr.key,
+                                std::string_view(
+                                    reinterpret_cast<const char*>(name), nn));
+            }
         }
     }
     return kv_fail(c, ok, errbuf, err);

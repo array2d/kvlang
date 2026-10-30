@@ -2,10 +2,9 @@
 lib kvlang/spec/类型系统/ptr {
 	r####"# ptr（指针）
 
-**ptr** 不是独立种类。18 字节 head 的 storetype 字节用 bit2 表示指针，低两位用长度类；两个
-u64 分别存目标 key 的字节长度与容量，body 存目标 key 路径。langtype 是去掉这一层 `*` 后的目标
-类型。源码可写 `*T`，例如 `*int64`、`*Node`；另一层指针由目标 key 的 head 再置指针位表达，
-而不是在这一格的 langtype 中重复 `*`（见 [[XValueHead线格式]]）。
+**ptr** 不是独立种类。固定 8 字节 head 的 `ptr` 字段置 1 表示指针（`ptr=2` 为 @ext），body 存目标
+key 路径。langtype 是去掉这一层 `*` 后的目标类型。源码可写 `*T`，例如 `*int64`、`*Node`；另一层
+指针由目标 key 的 head 再置指针位表达，而不是在这一格的 langtype 中重复 `*`（见 [[XValueHead线格式]]）。
 
 指针是**值**：读一个 `*T` 变量得到**地址值本身**（ref=1 Ptr，不解引用），解引用是**显式**的——用一元
 前缀 `*`。四项与 C 对齐：

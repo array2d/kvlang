@@ -21,7 +21,7 @@ kvspace 是文件系统风格的键值抽象。任一条目由 key 与 value 构
 ## 扩展存储
 
 kvspace 元存中的 value 分两类：**内联数据**（基础类型、容器元数据）与**扩展存储句柄**。句柄 value 的
-storage class=3（@ext，见 [[XValueHead线格式]]），其 body 只记录目标位置描述符，真实字节位于元存之外：
+storetype=3、ptr=2（@ext，见 [[XValueHead线格式]]），其 body 只记录目标位置描述符，真实字节位于元存之外：
 
 | 扩展位置 | 典型数据 |
 |---------|---------|

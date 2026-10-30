@@ -41,9 +41,10 @@ struct Vmkv {
                   kvspaceXvalueBodyView_t* out);
     bool reg_body(bin::FrameCtx& f, std::uint8_t idx, std::uint8_t** body,
                   std::uint64_t* cap);
-    bool slot_langtype(const kvspaceXvalueBodyView_t& v, std::string* lt);
-    bool slot_read_scalar(const kvspaceXvalueBodyView_t& v, Scalar* out);
+    bool slot_read_scalar(const kvspaceXvalueBodyView_t& v,
+                          std::string_view langtype, Scalar* out);
     bool ensure_reg_key(bin::FrameCtx& f, bin::FReg& r);
+    bool reg_langtype(bin::FrameCtx& f, std::uint8_t idx, std::string* lt);
     bool read_reg(bin::FrameCtx& f, std::uint8_t idx, Wire* out);
     bool read_scalar(bin::FrameCtx& f, std::uint8_t idx, Scalar* out);
     bool read_i64(bin::FrameCtx& f, std::uint8_t idx, std::int64_t* out);
@@ -52,10 +53,10 @@ struct Vmkv {
     bool write_reg(bin::FrameCtx& f, std::uint8_t idx,
                    const std::uint8_t* data, std::uint32_t len);
     bool slot_write_i64(bin::FrameCtx& f, std::uint8_t idx, std::int64_t v);
-    // Encode and route through write_reg's member branch (key recomputed per write).
+    // 组装 wire 并走 write_reg 的 member 分支（key 每次写重算）。
     bool write_member_scalar(bin::FrameCtx& f, std::uint8_t idx, const Scalar& s,
                              std::uint8_t width);
-    // Store v into r's existing slot: in place if it is int64, else re-encode it.
+    // 把 v 存入 r 的现有槽：int64 就地改写，否则重新组装。
     bool store_i64_slot(bin::FrameCtx& f, bin::FReg& r, std::int64_t v);
     bool slot_write_bool(bin::FrameCtx& f, std::uint8_t idx, bool b);
     bool slot_write_scalar(bin::FrameCtx& f, std::uint8_t idx,
@@ -90,6 +91,14 @@ struct Vmkv {
     bin::RunResult do_call(bin::FrameCtx& f, const Segment* seg, const CInsn& ins,
                            std::string* stop_pc, std::string* err);
 };
+
+// 写 `x‥langtype` attr key（上层职责；kvspace 层不代写）。attr 先落、x 后落。
+// 帧成员/变量/数组槽写主值前由本 helper 补类型（vmkv.cpp 定义，兄弟 TU 共用）。
+bool write_attr_lt(void* h, const char* key, const char* lt, char* err,
+                   uint32_t err_cap);
+
+// 直接读 attr 键本体（不依赖主值存在；GetHead 需主值，attr 先落时序会读空）。
+bool read_langtype_attr_direct(void* h, const char* key, std::string* out);
 
 // 进程级明文栈实例（Runtime 注入共享 kvspace 句柄；bin 成员经 g_vmkv.bin 访问）。
 extern Vmkv g_vmkv;

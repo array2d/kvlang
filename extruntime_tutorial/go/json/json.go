@@ -18,9 +18,13 @@ extern int   kvspaceGet(void *h, const char *key, int resolve, uint8_t **out, ui
 extern int   kvspaceWriteInPlace(void *h, const char *key, int resolve, uint32_t body_len,
                                  uint8_t **body, char *err, uint32_t err_cap);
 extern int   kvspaceWriteNewPlace(void *h, const char *key, uint8_t ref, uint8_t storetype,
-                                  uint8_t ro, uint32_t vid, const char *langtype, uint32_t body_len,
+                                  uint8_t ro, uint32_t vid, uint32_t body_len,
                                   uint64_t body_cap,
                                   uint8_t **body, char *err, uint32_t err_cap);
+extern int   kvspaceSetValue(void *h, const char *key, const uint8_t *value, uint32_t value_len,
+                              char *err, uint32_t err_cap);
+extern int   kvspaceXvalueHeadNewSlack(const uint8_t *data, uint64_t data_len, uint64_t cap,
+                                        uint8_t **out, uint64_t *out_len);
 extern int   kvspaceListLen(void *h, const char *prefix, int expand_ext, int resolve, int32_t *out_count);
 extern int   kvspaceListAt(void *h, const char *prefix, int expand_ext, int resolve, int32_t idx,
                            uint8_t *buf, uint32_t buf_cap, uint32_t *out_len);
@@ -147,15 +151,36 @@ func get(c unsafe.Pointer, key string, resolve int) string {
 	return string(data[bo : bo+bl])
 }
 
+// writeAttr：写 `x‥langtype` attr key（attr 先落、x 后落——调用方须在写主值前调用）。
+func writeAttr(c unsafe.Pointer, key, langtype string) {
+	if langtype == "" {
+		return
+	}
+	ck := cstr(key + "‥langtype")
+	defer C.free(unsafe.Pointer(ck))
+	cl := cstr(langtype)
+	defer C.free(unsafe.Pointer(cl))
+	var lv *C.uint8_t
+	var lvn C.uint64_t
+	var err [256]C.char
+	if C.kvspaceXvalueHeadNewSlack((*C.uint8_t)(unsafe.Pointer(cl)), C.uint64_t(len(langtype)),
+		C.uint64_t(len(langtype)), &lv, &lvn) != 0 || lvn > 0xffffffff {
+		if lv != nil {
+			C.free(unsafe.Pointer(lv))
+		}
+		return
+	}
+	C.kvspaceSetValue(c, ck, lv, C.uint32_t(lvn), &err[0], 256)
+	C.free(unsafe.Pointer(lv))
+}
+
 // writeBody：写即构造——按三正交轴 (ref, storetype, ro, vid, langtype) + body 向后端要
 // body 偏移指针后直接写字节。key 已存在且三轴与 body_len 全同 → WriteInPlace（原 box 就地）；
-// 否则 WriteNewPlace（新 box）。
+// 否则 WriteNewPlace（新 box）。langtype attr key 由本层（上层）写，kvspace 不代写。
 func writeBody(c unsafe.Pointer, key string, ref, storetype, ro C.uint8_t, vid C.uint32_t,
 	langtype string, body []byte) {
 	ck := cstr(key)
 	defer C.free(unsafe.Pointer(ck))
-	cl := cstr(langtype)
-	defer C.free(unsafe.Pointer(cl))
 	n := C.uint32_t(len(body))
 	var dst *C.uint8_t
 	var err [256]C.char
@@ -164,10 +189,10 @@ func writeBody(c unsafe.Pointer, key string, ref, storetype, ro C.uint8_t, vid C
 		cur.ref == ref && cur.storetype == storetype &&
 		int(cur.body_len) == len(body) && langtypeOf(&cur) == langtype {
 		place = C.kvspaceWriteInPlace(c, ck, 0, n, &dst, &err[0], 256)
-	}
-	if place != 0 {
-		// 新 box 容量即 body 长度（body_cap 为预留容量）。
-		if C.kvspaceWriteNewPlace(c, ck, ref, storetype, ro, vid, cl, n, C.uint64_t(n), &dst, &err[0], 256) != 0 {
+	} else {
+		// 新 box 容量即 body 长度（body_cap 为预留容量）。attr 先落，主值后落。
+		writeAttr(c, key, langtype)
+		if C.kvspaceWriteNewPlace(c, ck, ref, storetype, ro, vid, n, C.uint64_t(n), &dst, &err[0], 256) != 0 {
 			return
 		}
 	}

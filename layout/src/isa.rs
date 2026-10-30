@@ -105,8 +105,9 @@ fn wire_type(t: &str) -> &str {
 }
 
 fn read_def(kv: &mut Kv, op: &str, class: &str) -> Option<Entry> {
-    let d = kv.get_one(&keytree::isa_op(op));
-    if kvkind::kind(&d) != kvkind::KIND_DEF_RWIR {
+    let key = keytree::isa_op(op);
+    let d = kv.get_one(&key);
+    if kvkind::kind(&d, &kv.langtype_of(&key)) != kvkind::KIND_DEF_RWIR {
         return None;
     }
     let b = ffi::xh_body_slice(&d);
@@ -152,7 +153,8 @@ fn read_def(kv: &mut Kv, op: &str, class: &str) -> Option<Entry> {
 fn ensure_native(kv: &mut Kv, e: &Entry) -> Result<(), String> {
     let key = keytree::isa_op(&e.opcode);
     let cur = kv.get_one(&key);
-    let k = kvkind::kind(&cur);
+    let lt = kv.langtype_of(&key);
+    let k = kvkind::kind(&cur, &lt);
     if k == kvkind::KIND_DEF_RWIR {
         return Ok(());
     }
@@ -162,19 +164,22 @@ fn ensure_native(kv: &mut Kv, e: &Entry) -> Result<(), String> {
             e.opcode
         ));
     }
-    let mut pairs = vec![(
+    let mut pairs: Vec<(String, String, Vec<u8>)> = vec![(
         key.clone(),
+        kvkind::KIND_DEF_RWIR.to_string(),
         kvkind::new_defrwir(e.nr as i32, e.nw as i32, e.dynamic),
     )];
     for (j, t) in e.rp.iter().enumerate() {
         pairs.push((
             format!("{key}/[0,-{}]", j + 1),
+            kvkind::KIND_DEF_LANGTYPE.to_string(),
             kvkind::new_def_langtype(wire_type(t)),
         ));
     }
     for (j, t) in e.wp.iter().enumerate() {
         pairs.push((
             format!("{key}/[0,{}]", j + 1),
+            kvkind::KIND_DEF_LANGTYPE.to_string(),
             kvkind::new_def_langtype(wire_type(t)),
         ));
     }
@@ -254,19 +259,22 @@ pub fn ensure_test_isa(kv: &mut Kv) {
 
 pub fn ensure_test_bridge(kv: &mut Kv, op: &str, nr: u32, nw: u32) {
     let base = keytree::isa_op(op);
-    let mut pairs = vec![(
+    let mut pairs: Vec<(String, String, Vec<u8>)> = vec![(
         base.clone(),
+        kvkind::KIND_DEF_RWIR.to_string(),
         kvkind::new_defrwir(nr as i32, nw as i32, false),
     )];
     for j in 0..nr {
         pairs.push((
             format!("{base}/[0,-{}]", j + 1),
+            kvkind::KIND_DEF_LANGTYPE.to_string(),
             kvkind::new_def_langtype("*"),
         ));
     }
     for j in 0..nw {
         pairs.push((
             format!("{base}/[0,{}]", j + 1),
+            kvkind::KIND_DEF_LANGTYPE.to_string(),
             kvkind::new_def_langtype("*"),
         ));
     }

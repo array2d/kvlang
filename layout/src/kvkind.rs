@@ -21,7 +21,7 @@ pub fn is_none(data: &[u8]) -> bool {
 }
 
 pub fn head(data: &[u8]) -> ffi::kvspaceHead_t {
-    ffi::decode_head(data)
+    ffi::from_wire_head(data, "")
 }
 
 /// 解析 langtype 内容 → (dims, base kind)。langtype 无前缀（ref/ptr 归 head.ref）。
@@ -58,36 +58,32 @@ pub fn parse_langtype(kx: &str) -> (Vec<i32>, String) {
     }
 }
 
-/// 读 head 的 langtype 内容（去 NUL）。
-pub fn langtype(data: &[u8]) -> String {
+/// langtype 内容（完整 kindexpr 串，含 [dims]）。data 空（None）→ ""；否则返回调用方
+/// 从 kvspaceGetHead（x‥langtype attr key）读入的 lt。
+pub fn langtype(data: &[u8], lt: &str) -> String {
     if data.is_empty() {
-        return String::new();
+        String::new()
+    } else {
+        lt.to_string()
     }
-    let h = ffi::decode_head(data);
-    let end = h
-        .langtype
-        .iter()
-        .position(|&b| b == 0)
-        .unwrap_or(h.langtype.len());
-    String::from_utf8_lossy(&h.langtype[..end]).into_owned()
 }
 
-pub fn kind(data: &[u8]) -> String {
+pub fn kind(data: &[u8], lt: &str) -> String {
     if data.is_empty() {
         return String::new();
     }
-    parse_langtype(&langtype(data)).1
+    parse_langtype(lt).1
 }
 
 pub fn is_ptr(data: &[u8]) -> bool {
-    !data.is_empty() && ffi::decode_head(data).r#ref == 1
+    !data.is_empty() && ffi::xh_is_ptr(data)
 }
 
-pub fn array_len(data: &[u8]) -> i32 {
+pub fn array_len(data: &[u8], lt: &str) -> i32 {
     if data.is_empty() {
         return 0;
     }
-    let dims = parse_langtype(&langtype(data)).0;
+    let dims = parse_langtype(lt).0;
     if dims.is_empty() {
         1
     } else {
@@ -107,27 +103,27 @@ pub fn body<'a>(data: &'a [u8], h: &ffi::kvspaceHead_t) -> &'a [u8] {
 
 /// 指针目标 key（Ptr 的 body 即目标 key 路径；head 去 * 为目标完整 langtype）。
 pub fn ptr_target(data: &[u8]) -> String {
-    let h = ffi::decode_head(data);
+    let h = ffi::from_wire_head(data, "");
     String::from_utf8_lossy(body(data, &h)).into_owned()
 }
 
 /// char/utf8 的明文表示（body 字节按 UTF-8 解码）。
 pub fn value_string(data: &[u8]) -> String {
-    let h = ffi::decode_head(data);
+    let h = ffi::from_wire_head(data, "");
     String::from_utf8_lossy(body(data, &h)).into_owned()
 }
 
 /// Format an XValue for inspection.
 /// 对齐 kvspace CLI 的 format_value/plain，供 dump 审查 lower 后的 /lib。
-pub fn display(data: &[u8]) -> String {
+pub fn display(data: &[u8], lt: &str) -> String {
     if data.is_empty() {
         return "None".to_string();
     }
-    let (_, k) = parse_langtype(&langtype(data));
+    let (_, k) = parse_langtype(lt);
     if k.is_empty() {
         return "None".to_string();
     }
-    let h = ffi::decode_head(data);
+    let h = ffi::from_wire_head(data, lt);
     let b = body(data, &h);
     if h.r#ref == 1 {
         return format!("→{}:{}", String::from_utf8_lossy(b), k);
@@ -229,13 +225,13 @@ fn counts_body(nr: i32, nw: i32, dynamic: bool) -> Vec<u8> {
 pub fn new_rwir(nr: i32, nw: i32, sig: &str) -> Vec<u8> {
     let mut raw = counts_body(nr, nw, false);
     raw.extend_from_slice(sig.as_bytes());
-    ffi::xvalue_encode(KIND_RWIR, &raw, 1)
+    ffi::xvalue_to_wire(KIND_RWIR, &raw, 1)
 }
 
 pub fn new_rwfunc_call(nr: i32, nw: i32, sig: &str) -> Vec<u8> {
     let mut raw = counts_body(nr, nw, false);
     raw.extend_from_slice(sig.as_bytes());
-    ffi::xvalue_encode(KIND_RWFUNC, &raw, 1)
+    ffi::xvalue_to_wire(KIND_RWFUNC, &raw, 1)
 }
 
 pub fn new_typed_rwir(name: &str, langtype: &str) -> Vec<u8> {
@@ -243,17 +239,17 @@ pub fn new_typed_rwir(name: &str, langtype: &str) -> Vec<u8> {
     raw.extend_from_slice(name.as_bytes());
     raw.push(0);
     raw.extend_from_slice(langtype.as_bytes());
-    ffi::xvalue_encode(KIND_RWIR, &raw, 1)
+    ffi::xvalue_to_wire(KIND_RWIR, &raw, 1)
 }
 
 /// def rwir 路由头：仅计数头，无参数载荷。各参数落 [0,x] 签名行槽（def langtype）。
 pub fn new_defrwir(nr: i32, nw: i32, dynamic: bool) -> Vec<u8> {
-    ffi::xvalue_encode(KIND_DEF_RWIR, &counts_body(nr, nw, dynamic), 1)
+    ffi::xvalue_to_wire(KIND_DEF_RWIR, &counts_body(nr, nw, dynamic), 1)
 }
 
 /// 签名行 [0,x] 槽：一个参数的类型定义，body=该参数完整 langtype 串。
 pub fn new_def_langtype(langtype: &str) -> Vec<u8> {
-    ffi::xvalue_encode(KIND_DEF_LANGTYPE, langtype.as_bytes(), 1)
+    ffi::xvalue_to_wire(KIND_DEF_LANGTYPE, langtype.as_bytes(), 1)
 }
 
 /// rwfunc 参数定义键（点后缀 .[0,-k]）：body=名字\x00类型串，langtype=def langtype。
@@ -261,7 +257,7 @@ pub fn new_def_param(name: &str, langtype: &str) -> Vec<u8> {
     let mut body = name.as_bytes().to_vec();
     body.push(0);
     body.extend_from_slice(langtype.as_bytes());
-    ffi::xvalue_encode(KIND_DEF_LANGTYPE, &body, 1)
+    ffi::xvalue_to_wire(KIND_DEF_LANGTYPE, &body, 1)
 }
 
 /// 解析参数定义键 body（名字\x00类型串）→ (名字, 类型)。
@@ -269,7 +265,7 @@ pub fn def_param_parts(data: &[u8]) -> Option<(String, String)> {
     if data.is_empty() {
         return None;
     }
-    let h = ffi::decode_head(data);
+    let h = ffi::from_wire_head(data, "");
     let b = body(data, &h);
     let nul = b.iter().position(|&x| x == 0)?;
     let name = String::from_utf8_lossy(&b[..nul]).into_owned();
@@ -278,17 +274,17 @@ pub fn def_param_parts(data: &[u8]) -> Option<(String, String)> {
 }
 
 pub fn new_struct() -> Vec<u8> {
-    ffi::xvalue_encode(KIND_DEF_STRUCT, &[], 1)
+    ffi::xvalue_to_wire(KIND_DEF_STRUCT, &[], 1)
 }
 
 // ── kvlang 自有 kind：rwfunc ────────────────────────────────────────
 //
 pub fn new_rwfunc_dir() -> Vec<u8> {
-    ffi::xvalue_encode(KIND_RWFUNC, &[], 1)
+    ffi::xvalue_to_wire(KIND_RWFUNC, &[], 1)
 }
 
 pub fn new_rwfunc_anchor(nr: i32, nw: i32, dynamic: bool) -> Vec<u8> {
-    ffi::xvalue_encode(KIND_RWFUNC, &counts_body(nr, nw, dynamic), 1)
+    ffi::xvalue_to_wire(KIND_RWFUNC, &counts_body(nr, nw, dynamic), 1)
 }
 
 /// rwfunc body 访问器（layout 读回签名时用）。
@@ -311,7 +307,7 @@ pub fn counts(data: &[u8]) -> (i32, i32, bool) {
     if data.is_empty() {
         return (0, 0, false);
     }
-    let h = ffi::decode_head(data);
+    let h = ffi::from_wire_head(data, "");
     let b = body(data, &h);
     if b.len() >= 5 {
         (
@@ -325,12 +321,12 @@ pub fn counts(data: &[u8]) -> (i32, i32, bool) {
 }
 
 /// 字面量的明文源值（不含 kind 前缀、不含引号）；char/utf32 按码点正确解码。
-pub fn plain(data: &[u8]) -> String {
+pub fn plain(data: &[u8], lt: &str) -> String {
     if data.is_empty() {
         return String::new();
     }
-    let (_, k) = parse_langtype(&langtype(data));
-    let h = ffi::decode_head(data);
+    let (_, k) = parse_langtype(lt);
+    let h = ffi::from_wire_head(data, lt);
     plain_value(&k, body(data, &h))
 }
 
@@ -342,7 +338,7 @@ pub fn write_slot_name(data: &[u8]) -> (String, String) {
     if data.is_empty() {
         return (String::new(), String::new());
     }
-    let h = ffi::decode_head(data);
+    let h = ffi::from_wire_head(data, "");
     let b = body(data, &h);
     if b.len() > 5 {
         if let Some(split) = b[5..].iter().position(|&x| x == 0) {
@@ -358,7 +354,7 @@ pub fn rwir_sig(data: &[u8]) -> String {
     if data.is_empty() {
         return String::new();
     }
-    let h = ffi::decode_head(data);
+    let h = ffi::from_wire_head(data, "");
     let b = body(data, &h);
     let text = &b[5.min(b.len())..];
     let end = text.iter().position(|&x| x == 0).unwrap_or(text.len());

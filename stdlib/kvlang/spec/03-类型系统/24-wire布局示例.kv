@@ -2,24 +2,24 @@
 lib kvlang/spec/类型系统/wire布局示例 {
 	r####"# wire 布局示例
 
-通用 head 前缀 `U=[pow:u8][flags:u8][a:u64 LE][b:u64 LE]`，后面是 langtype、零填充和 body。head 长度为 `1 << pow`。以下省略填充字节：
+通用 head `H=[len:u48 LE][storetype:u8][ptr:u8]`（元组 `H(len, storetype, ptr)`），body 偏移恒为 8。类型存 `x‥langtype` attr key：
 
 ```
-None              : U(class=0,a=0,b=0)       lang=""                   body=空
-int64             : U(class=0,a=0,b=0)       lang="int64"              body=8 字节
-[]char/utf8       : U(class=1,a=字节数,b≥a)  lang="[码点数]char/utf8" body=UTF-8
-[3,4]float32      : U(class=2,a=12,b=4)      lang="[3,4]float32"       body=48 字节
-map               : U(class=0,a=0,b=0)       lang="[]char/utf8·int64" body=空；成员在 base·key
-struct 实例       : U(class=0,a=0,b=0)       lang="/lib/Point"         body=空；成员在 base·field
-/lib/pkg·f/       : U(class=0,a=0,b=0)       lang="rwfunc"            body=空；成员在目录下
-/lib/pkg·f/[0,0]  : U(class=1,a=5,b≥5)       lang="rwfunc"            body=[nr][nw][dynamic]
-/lib/op           : U(class=0,a=0,b=0)       lang="def rwir"          body=[nr][nw][dynamic]
-rwir 调用槽       : U(class=1,a=len,b≥a)     lang="rwir"              body=计数头+目标名
-rwfunc 调用槽     : U(class=1,a=len,b≥a)     lang="rwfunc"            body=计数头+目标名
-ptr→int64         : U(class=1|ptr,a=len,b≥a) lang="int64"             body=目标 KV 路径
-@ext→T            : U(class=3,a=len,b≥a)     lang="T"                 body=UTF-8 定位串
+None              : H(0,0,0)                  lang=""                   body=空
+int64             : H(8,0,0)                  lang="int64"              body=8 字节
+[]char/utf8       : H(字节数,1,0)             lang="[码点数]char/utf8" body=UTF-8
+[3,4]float32      : H(48,2,0)                 lang="[3,4]float32"       body=48 字节
+map               : H(0,0,0)                  lang="[]char/utf8·int64" body=空；成员在 base·key
+struct 实例       : H(0,0,0)                  lang="/lib/Point"         body=空；成员在 base·field
+/lib/pkg·f/       : H(0,0,0)                  lang="rwfunc"            body=空；成员在目录下
+/lib/pkg·f/[0,0]  : H(5,1,0)                  lang="rwfunc"            body=[nr][nw][dynamic]
+/lib/op           : H(0,0,0)                  lang="def rwir"          body=[nr][nw][dynamic]
+rwir 调用槽       : H(len,1,0)                lang="rwir"              body=计数头+目标名
+rwfunc 调用槽     : H(len,1,0)                lang="rwfunc"            body=计数头+目标名
+ptr→int64         : H(len,1,1)                lang="int64"             body=目标 KV 路径
+@ext→T            : H(len,3,2)                lang="T"                 body=UTF-8 定位串
 ```
 
-`ro` 与 `vid` 在 `/.kvspace-meta/<hex key>`；目录与 map 成员通过实际 key 前缀枚举。
+目录与 map 成员通过实际 key 前缀枚举。
 "#### -> /lib/kvlang/spec/类型系统/wire布局示例
 }

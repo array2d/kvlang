@@ -4,12 +4,12 @@ lib kvlang/spec/类型系统/langtype语义类型 {
 
 本章界定 **langtype**——一个具体值 head 的**真实类型**（它与定义处匹配类型 `def langtype` 的区别见
 [[langtype签名类型表达式]]）。langtype 是完整的类型表达式串，逐字节即类型标注文法，天然含 base 种
-类、`[dims]`、map 键值、struct 原型路径。各 langtype 与 storage class 的典型关系：
+类、`[dims]`、map 键值、struct 原型路径。各 langtype 与 storetype 的典型关系：
 
-| langtype（示例） | class | 说明 |
-|------------------|-------|------|
+| langtype（示例） | storetype | 说明 |
+|------------------|-----------|------|
 | `int64` `bool` `time` `duration` | 0 | 定宽标量 |
-| `[N]char/utf8`、`[N]char/utf32`、`[N]char/ascii` | 1 | 字符序列；UTF-8 的 a 为字节数，N 为码点数 |
+| `[N]char/utf8`、`[N]char/utf32`、`[N]char/ascii` | 1 | 字符序列；UTF-8 的 len 为字节数，N 为码点数 |
 | `[3,4]float32` | 2 | 定宽张量 |
 | `rwir` / `rwfunc` 调用槽 | 1 | 5 字节计数头加目标名 |
 | `def rwir` | 0 | 5 字节路由头 |
@@ -17,7 +17,7 @@ lib kvlang/spec/类型系统/langtype语义类型 {
 | `def struct`、`lib`、`rwfunc` 目录 | 0 | 空 body 目录值，成员为物理 `/` key |
 | `rwfunc` 的 `[0,0]` 锚点、`def langtype` | 1 | 5 字节计数头或类型定义文本 |
 
-指针为 class 1 加指针标志；@ext 使用 class 3，langtype 仍为目标真实类型。
+指针为 ptr=1；@ext 使用 storetype 3、ptr=2，langtype 仍为目标真实类型。
 
 **def 族的来源**（`def` 不是 kvlang 关键字、不在 kv 源码书写）：`def struct`（源码 `struct Name{}`，
 layout 落原型定义节点）、`def langtype`（源码参数标注 `x:int64`，layout 铺签名行时逐参生成）由
@@ -29,6 +29,6 @@ layout 落原型定义节点）、`def langtype`（源码参数标注 `x:int64`�
 [[struct]]）。容器**语义类型**只剩 `stringkeymap`、`struct`（口语称「map」指的即 stringkeymap，规范一律书
 写种类名 `stringkeymap`）。
 
-同一 langtype 可出现在不同 class；例如 rwfunc 目录值为 class 0，而其签名锚点和调用槽为 class 1。
+同一 langtype 可出现在不同 storetype；例如 rwfunc 目录值为 storetype 0，而其签名锚点和调用槽为 storetype 1。
 "#### -> /lib/kvlang/spec/类型系统/langtype语义类型
 }

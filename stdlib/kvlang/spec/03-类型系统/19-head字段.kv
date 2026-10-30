@@ -2,16 +2,14 @@
 lib kvlang/spec/类型系统/head字段 {
 	r####"# 通用 XValue head
 
-固定前缀为 18 字节：
+固定 8 字节：
 
 | 字段 | 宽 | 含义 |
 |------|----|------|
-| `pow` | u8 | head 总长度为 `1 << pow` |
-| `flags` | u8 | 低两位为 class，bit 2 为指针 |
-| `a` | u64 LE | 按 class 解释 |
-| `b` | u64 LE | 按 class 解释 |
-| `langtype` | UTF-8 | 真实语义类型；之后以零填充至 head 末尾 |
+| `len` | u48 | body 有效字节数，小端，偏移 0-5 |
+| `storetype` | u8 | 存储形态（短定长/变长/大定长/扩展），偏移 6 |
+| `ptr` | u8 | 0=inline、1=ptr、2=@ext，偏移 7 |
 
-body 从 `1 << pow` 开始，长度由 class、a/b 和 langtype 校验得出。ro/vid 是独立 KV 元数据，不在 head 中。各 class 的规则见 [[XValueHead线格式]]。
+body 从偏移 8 开始。类型（langtype）不在 head——存于独立 attr key `x‥langtype`（明文串）。各 storetype 的规则见 [[XValueHead线格式]]。
 "#### -> /lib/kvlang/spec/类型系统/head字段
 }

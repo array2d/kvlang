@@ -20,7 +20,7 @@ fn redis_roundtrip() {
     let v = kvkind::new_rwir(0, 0, "testop");
     kv.set(&[("/lib/testop".to_string(), v)]).unwrap();
     let got = kv.get_one("/lib/testop");
-    assert_eq!(kvkind::kind(&got), "rwir");
+    assert_eq!(kvkind::kind(&got, &kv.langtype_of("/lib/testop")), "rwir");
     assert_eq!(String::from_utf8_lossy(&body(&got)[5..]), "testop");
 
     // 目录索引可见
@@ -41,12 +41,12 @@ fn redis_compile() {
     compile(&mut kv, src).unwrap();
 
     let sig_val = kv.get_one("/lib/sum/[0,0]");
-    assert_eq!(kvkind::kind(&sig_val), "rwfunc");
+    assert_eq!(kvkind::kind(&sig_val, &kv.langtype_of("/lib/sum/[0,0]")), "rwfunc");
     let b = body(&sig_val);
     assert_eq!(kvkind::rwfunc_num_reads(b), 2);
     assert_eq!(kvkind::rwfunc_num_writes(b), 1);
 
     let op = kv.get_one("/lib/sum/[1,0]");
-    assert_eq!(kvkind::kind(&op), "rwir");
+    assert_eq!(kvkind::kind(&op, &kv.langtype_of("/lib/sum/[1,0]")), "rwir");
     assert_eq!(String::from_utf8_lossy(&body(&op)[5..]), "int64·add");
 }

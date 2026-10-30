@@ -2,16 +2,15 @@
 lib kvlang/spec/类型系统/已敲定 {
 	r####"# 已敲定
 
-- 线格式为 18 字节固定前缀 `[pow][flags][a:u64 LE][b:u64 LE]`，后接 langtype、零填充及 body；head 长度为 `1 << pow`。flags 低两位为 storage class，bit 2 为指针。
-- class 0 为短定长值；class 1 为有冗余的长度值（a=有效字节数，b=容量）；class 2 为张量（a=元素数，b=元素宽度）；class 3 为 @ext（a=定位串 UTF-8 字节数，b=容量）。
-- langtype 是完整语义类型。源码类型标注的 `*`/`@` 前缀在 wire 中分别表示为指针标志和 class 3，不进入 langtype 串。
-- `ro`/`vid` 存于独立 KV key `/.kvspace-meta/` 加原 key 字节的小写十六进制编码，不占 XValue head。
-- map/struct 的 base key 存 class 0 空 body，成员直接在 `base·member`；函数和 lib 使用 `/` 目录。成员由物理 key 前缀枚举，无 index/extindex 矩阵或 memindex body。
-- rwfunc 目录值为 class 0、body 空；`[0,0]` 锚点为 class 1、a=5、b≥5。def rwir 路由头为 class 0、5 字节。调用槽由 layout 判定为 rwir 或 rwfunc，均使用 class 1，body 为计数头加目标名。
-- 字符串（`[n]char/utf8` 等）使用 class 1；UTF-8 的 a 是字节数，langtype 的形状记录码点数，解码同时校验。
-- 语言层面的 `[]uint8` / `[N]uint8`（`ndim ≥ 1`）是定长张量，使用 class 2。
-- ro/vid sidecar 的 `[5]uint8` 是带长度冗余的定长字节序列，走 class 1（与字符串同族）。
-- 指针 class 1 的 body 是目标 KV 路径；@ext class 3 的 body 是扩展定位串，langtype 为实际目标类型。
+- 线格式为固定 8 字节 head `[len:u48 LE][storetype:u8][ptr:u8]`（len 在前、占偏移 0-5），body 偏移恒为 8，容量 2^48。类型（langtype）不在 head——存于 `x‥langtype` attr key 明文串（含形状段）。
+- storetype 0 为短定长值；1 为变长（len=有效字节数）；2 为大定长张量（body=元素连续）；3 为 @ext（body=UTF-8 定位串）。
+- langtype 是完整语义类型。源码类型标注的 `*`/`@` 前缀在 wire 中分别表示为 ptr 字段（1/2）与 storetype 3，不进入 langtype 串。
+- map/struct 的 base key 存 storetype 0 空 body，成员直接在 `base·member`；函数和 lib 使用 `/` 目录。成员由物理 key 前缀枚举，无 index/extindex 矩阵或 memindex body。
+- rwfunc 目录值为 storetype 0、body 空；`[0,0]` 锚点为 storetype 1、5 字节计数头。def rwir 路由头为 storetype 0、5 字节。调用槽由 layout 判定为 rwir 或 rwfunc，均使用 storetype 1，body 为计数头加目标名。
+- 字符串（`[n]char/utf8` 等）使用 storetype 1；UTF-8 的 len 是字节数，langtype 的形状记录码点数，解码同时校验。
+- 语言层面的 `[]uint8` / `[N]uint8`（`ndim ≥ 1`）是定长张量，使用 storetype 2。
+- 指针（ptr=1）body 是目标 KV 路径；@ext（ptr=2、storetype 3）body 是扩展定位串，langtype 为实际目标类型。
+- **attr 写序**：创建（T·new）与 reinterpret 写 `x‥langtype` 时，attr 先落、x 后落——x 的写入即提交点；崩溃在两者之间留下未提交残留，读路径惰性清理。
 - runtime 每次从 kvspace 读取变量和 PC，完成指令后写回；进程内不保留其私有状态副本。
 "#### -> /lib/kvlang/spec/类型系统/已敲定
 }

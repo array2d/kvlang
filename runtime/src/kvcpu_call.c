@@ -338,52 +338,45 @@ static const func_sig_entry_t *lookup_func_sig(kvspace_t *kv,
     return NULL;
 }
 
-static uint32_t encode_ptr_buf(const char *type, const char *target,
-                               uint8_t *buf, size_t cap) {
+/* v2 固定头 Ptr 写 wire：[len:u48][storetype=SLACK][ptr=PTR][body=target]。
+ * langtype（目标 kindexpr）不在 head——写值路径侧写 attr key。 */
+static uint32_t ptr_wire_buf(const char *type, const char *target,
+                             uint8_t *buf, size_t cap) {
     if (!type || !target || strcmp(type, "any") == 0)
         return 0;
-    size_t lt = strlen(type);
     size_t tlen = strlen(target);
-    if (tlen == 0)
+    if (tlen == 0 || tlen > UINT48_MAX - KVSPACE_XVALUE_HEAD_LEN)
         return 0;
-    int pow = 5;
-    while (pow <= 31 && (uint64_t)lt + XH_PREFIX > (1ULL << pow))
-        pow++;
-    if (pow > 31)
+    if (KVSPACE_XVALUE_HEAD_LEN + tlen > cap)
         return 0;
-    uint32_t headlen = 1u << pow;
-    if (headlen + tlen > cap)
-        return 0;
-    memset(buf, 0, headlen);
-    buf[0] = (uint8_t)pow;
-    buf[1] = 1u | 4u; /* KVSPACE_XH_SLACK | KVSPACE_XH_PTR_FLAG */
-    for (int i = 0; i < 8; i++) {
-        buf[2 + i] = (uint8_t)((uint64_t)tlen >> (8 * i));
-        buf[10 + i] = (uint8_t)((uint64_t)tlen >> (8 * i));
-    }
-    if (lt)
-        memcpy(buf + XH_PREFIX, type, lt);
-    memcpy(buf + headlen, target, tlen);
-    return headlen + (uint32_t)tlen;
+    memset(buf, 0, KVSPACE_XVALUE_HEAD_LEN);
+    kvspaceXvalueHead h = {
+        .storetype = KVSPACE_XVALUE_ST_SLACK,
+        .ptr = KVSPACE_XVALUE_PTR_PTR,
+    };
+    kvspaceXvalueHeadSetLen(&h, tlen);
+    memcpy(buf, &h, sizeof h);
+    memcpy(buf + KVSPACE_XVALUE_HEAD_LEN, target, tlen);
+    return KVSPACE_XVALUE_HEAD_LEN + (uint32_t)tlen;
 }
 
 static int write_kv_raw(kvspace_t *kv, const char *key, const uint8_t *bytes,
                         uint32_t len, char *err, uint32_t err_cap) {
-    if (!bytes || len < XH_PREFIX)
+    if (!bytes || len < KVSPACE_XVALUE_HEAD_LEN)
         return -1;
-    kvlangBodyInvalidateKind(key, xh_langtype(bytes), xh_langtype_len(bytes));
-    return kvspaceSetValue(kv->handle, key, bytes, len, 0, 0, err, err_cap);
+    kvlangBodyInvalidate(key);
+    return kvspaceSetValue(kv->handle, key, bytes, len, err, err_cap);
 }
 
 static int write_kv_raw_ko(kvspace_t *kv, kvspaceKeyOff *ko, const char *key,
                            const uint8_t *bytes, uint32_t len, char *err,
                            uint32_t err_cap) {
-    if (!bytes || len < XH_PREFIX)
+    if (!bytes || len < KVSPACE_XVALUE_HEAD_LEN)
         return -1;
-    kvlangBodyInvalidateKind(key, xh_langtype(bytes), xh_langtype_len(bytes));
+    kvlangBodyInvalidate(key);
     if (ko)
         return kvspaceKeyOffSet(ko, bytes, len, err, err_cap);
-    return kvspaceSetValue(kv->handle, key, bytes, len, 0, 0, err, err_cap);
+    return kvspaceSetValue(kv->handle, key, bytes, len, err, err_cap);
 }
 
 static int write_arg_ptr_ko(kvspace_t *kv, kvspaceKeyOff *ko,
@@ -395,7 +388,7 @@ static int write_arg_ptr_ko(kvspace_t *kv, kvspaceKeyOff *ko,
     while (*type == '*' || *type == '@')
         type++;
     uint8_t abuf[128 + KV_KEY_MAX];
-    uint32_t alen = encode_ptr_buf(type, value_key, abuf, sizeof abuf);
+    uint32_t alen = ptr_wire_buf(type, value_key, abuf, sizeof abuf);
     if (!alen) {
         kvlangXvalue_t arg_ptr;
         kvlangXvalueNewPtr(&arg_ptr, type, value_key);
@@ -414,7 +407,7 @@ static int write_slot_ptr(kvspace_t *kv, const char *slot_key, const char *type,
     while (*type == '*' || *type == '@')
         type++;
     uint8_t sbuf[128 + KV_KEY_MAX];
-    uint32_t slen = encode_ptr_buf(type, arg_key, sbuf, sizeof sbuf);
+    uint32_t slen = ptr_wire_buf(type, arg_key, sbuf, sizeof sbuf);
     if (!slen) {
         kvlangXvalue_t frame_ptr;
         kvlangXvalueNewPtr(&frame_ptr, type, arg_key);
@@ -648,17 +641,17 @@ static int handle_call_buf(kvspace_t *kv, const char *pc,
         uint32_t nl_npc = (uint32_t)strlen(npc);
         uint32_t nl_ep = (uint32_t)strlen(ep_out);
         uint32_t nl_fn = (uint32_t)strlen(func_key);
-        uint32_t wn_npc = kvlangSlackEncodeChar((const uint8_t *)npc, nl_npc,
+        uint32_t wn_npc = kvlangSlackCharToWire((const uint8_t *)npc, nl_npc,
                                                 nl_npc, sbuf, sizeof sbuf);
         int sys_rc = write_kv_raw(kv, retpc, sbuf, wn_npc, err, sizeof err);
         if (sys_rc == 0) {
-            uint32_t wn_ep = kvlangSlackEncodeChar((const uint8_t *)ep_out,
+            uint32_t wn_ep = kvlangSlackCharToWire((const uint8_t *)ep_out,
                                                    nl_ep, nl_ep, sbuf,
                                                    sizeof sbuf);
             sys_rc = write_kv_raw(kv, callpc, sbuf, wn_ep, err, sizeof err);
         }
         if (sys_rc == 0) {
-            uint32_t wn_fn = kvlangSlackEncodeChar((const uint8_t *)func_key,
+            uint32_t wn_fn = kvlangSlackCharToWire((const uint8_t *)func_key,
                                                    nl_fn, nl_fn, sbuf,
                                                    sizeof sbuf);
             sys_rc = write_kv_raw(kv, seglib, sbuf, wn_fn, err, sizeof err);
@@ -719,7 +712,7 @@ static int handle_call_buf(kvspace_t *kv, const char *pc,
         if (strcmp(pf->retpc_val, npc) != 0) {
             uint8_t sbuf[64 + KV_KEY_MAX];
             uint32_t nl_npc = (uint32_t)strlen(npc);
-            uint32_t wn_npc = kvlangSlackEncodeChar(
+            uint32_t wn_npc = kvlangSlackCharToWire(
                 (const uint8_t *)npc, nl_npc, nl_npc, sbuf, sizeof sbuf);
             if (write_kv_raw_ko(kv, &pf->retpc_ko, pf->retpc_key, sbuf, wn_npc,
                                 err, sizeof err) != 0) {
@@ -975,9 +968,11 @@ int kvlangControlBr(kvlangFrame_t *f) {
         return -1;
     }
     const kvlangXvalue_t *cv = &inst->reads[0].value;
-    if (cv->length == 33 && cv->bytes && cv->bytes[0] == 5 &&
-        cv->bytes[1] == 0 && memcmp(cv->bytes + 18, "bool", 5) == 0) {
-        bool taken = cv->bytes[32] != 0;
+    if (cv->bytes && xh_len(cv->bytes) == 1 &&
+        xh_storetype(cv->bytes) == KVSPACE_XVALUE_ST_SHORT &&
+        xh_ptr(cv->bytes) == KVSPACE_XVALUE_PTR_INLINE &&
+        cv->langtype_len == 4 && memcmp(cv->langtype, "bool", 4) == 0) {
+        bool taken = xh_body(cv->bytes)[0] != 0;
         return jump_to(f, taken ? 1 : 0, &inst->reads[taken ? 1 : 2], OP_BR);
     }
     char *owned = NULL;
