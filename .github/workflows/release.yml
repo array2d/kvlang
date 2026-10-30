@@ -14,74 +14,69 @@ env:
   # workflow_dispatch 在分支上跑，GITHUB_REF_NAME 含 /；用 tag 输入或固定名
   ABI_VERSION: ${{ github.event_name == 'push' && github.ref_name || inputs.tag || 'dryrun' }}
 jobs:
-  # Linux：deps.json 所列依赖有预编译 ABI tarball，直接下载安装后打包（自包含）。
+  # 产物布局（repo 即 prefix）：bin/ 可执行、lib/ 库、lib/kvspace/ 后端、
+  # include/ 头。tarball 保持同一布局，rpath 相对 $ORIGIN / @loader_path。
   linux:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
-      - name: 下载 ABI 依赖
+      - name: 下载 ABI 依赖到 repo（include/lib/lib/kvspace/bin）
         env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
         run: ./ci/deps.sh
-      - name: 构建 runtime + layout + byteseek（产 bin/ 下的 CLI）
+      - name: 构建 runtime + layout + byteseek
         run: |
-          make runtimec2
-          make layout      # cargo build + cp kvlanglayout / libkvlanglayout.so → bin/
-          make byteseek    # → bin/byteseek
+          make runtimec2    # CMake 直写 lib/
+          make layout       # → bin/kvlanglayout + lib/libkvlanglayout.so
+          make byteseek     # → bin/byteseek
       - name: 打包 ABI 产物
         run: |
           set -euo pipefail
           v="${ABI_VERSION}"
           d="kvlang-abi-$v-linux-x86_64"
           mkdir -p "$d/include/kvlang" "$d/lib/kvspace" "$d/bin"
-          # 头（递归）：自己的 runtime 头 + deps.json 各依赖的头（/usr/include/<repo>/）
           cp -R runtime/include/. "$d/include/kvlang/"
           for h in kvspace blockmalloc slotsboxmalloc; do
-            [ -d "/usr/include/$h" ] && cp -R "/usr/include/$h" "$d/include/"
+            [ -d "include/$h" ] && cp -R "include/$h" "$d/include/"
           done
-          # 库（递归扫）：本仓两个产物 + 依赖顶层库 + 后端库（dispatch 的 dlopen 目录）
-          find bin layout/target/release -maxdepth 1 \( -name 'lib*.so*' -o -name 'lib*.dylib' \) -exec cp -P {} "$d/lib/" \;
-          # dispatch 前端：runtime/layout 的 DT_NEEDED 是 libkvspace.so.1，
-          # 连同 soname 链一起收进顶层 lib/（cp -P 保留符号链接）
-          cp -P /usr/lib/libkvspace.so* "$d/lib/"
-          # blockmalloc / slotsboxmalloc 是 header-only（只发头、无 lib），故不收集它们的 .so
-          find /usr/lib/kvspace -maxdepth 1 -name '*.so*' -exec cp -P {} "$d/lib/kvspace/" \;
-          # 可执行：本仓 CLI + 依赖带来的 CLI
-          cp bin/byteseek bin/kvlanglayout "$d/bin/"
-          cp /usr/bin/kvspace "$d/bin/"
+          find lib -maxdepth 1 \( -name 'lib*.so*' -o -name 'lib*.dylib' \) -exec cp -P {} "$d/lib/" \;
+          find lib/kvspace -maxdepth 1 -name '*.so*' -exec cp -P {} "$d/lib/kvspace/" \;
+          cp bin/byteseek bin/kvlanglayout bin/kvspace "$d/bin/"
           printf '{"abi":"%s"}\n' "$v" > "$d/abi-manifest.json"
           tar czf "$d.tar.gz" "$d"
           tar tzf "$d.tar.gz"
           sha256sum "$d.tar.gz" | tee SHA256SUMS-linux
-      - name: 自包含冒烟（安装到 /usr 后运行；后端目录固定，不再有运行期 env）
+      - name: 自包含冒烟（解包到临时目录运行，不依赖 /usr）
         run: |
           set -euo pipefail
           v="${ABI_VERSION}"
           d="kvlang-abi-$v-linux-x86_64"
-          # 后端目录固定 /usr/lib/kvspace、前端固定 /usr/lib：按 tarball 布局安装后运行。
-          sudo cp -P "$d"/lib/*.so* /usr/lib/
-          sudo cp -P "$d"/lib/kvspace/*.so* /usr/lib/kvspace/
-          sudo cp "$d"/bin/byteseek "$d"/bin/kvlanglayout /usr/bin/
+          run="$RUNNER_TEMP/rel-smoke"
+          rm -rf "$run"; mkdir -p "$run"
+          tar xzf "$d.tar.gz" -C "$run" --strip-components=1
           out=$(env -i PATH=/usr/bin:/bin HOME=/tmp \
-            KVSPACE="shm:///tmp/rel-smoke.shm" /usr/bin/byteseek -c 'print("ok")')
+            KVSPACE="shm://$run/smoke.shm" "$run/bin/byteseek" -c 'print("ok")')
           echo "smoke: $out"
           [ "$out" = "ok" ]
-          usage=$(/usr/bin/kvlanglayout 2>&1 || true)
+          # stdlib 自举 + layout 冒烟（同一 tarball 布局）
+          env -i PATH=/usr/bin:/bin HOME=/tmp \
+            KVSPACE="shm://$run/boot.shm" "$run/bin/byteseek" -c 'print("boot")' >/dev/null
+          env -i PATH=/usr/bin:/bin HOME=/tmp \
+            KVSPACE="shm://$run/layout.shm" "$run/bin/byteseek" -c 'print("boot")' >/dev/null
+          env -i PATH=/usr/bin:/bin HOME=/tmp \
+            KVSPACE="shm://$run/layout.shm" \
+            "$run/bin/kvlanglayout" tutorial/01-basics/hello.kv "shm://$run/layout.shm" >/dev/null
+          usage=$("$run/bin/kvlanglayout" 2>&1 || true)
           echo "smoke layout: $usage"
           echo "$usage" | grep -q '^usage: kvlanglayout'
-      - name: 构建单一二进制（#493：嵌入本 tag 构建的 runtime/layout + 依赖五件套）
+          "$run/bin/kvspace" get /nonexistent >/dev/null 2>&1 || true
+      - name: 构建单一二进制（#493：嵌入本 tag 构建的 runtime/layout + 依赖）
         run: |
           set -euo pipefail
           v="${ABI_VERSION}"
-          # 前端必须带 RTLD_NOLOAD 能力标记；deps.json 的 v0.3.18 发布版没有，
-          # 故从 kvspace 源码构建（下个协同 tag 起改为 deps.json pin 的版本）。
-          git clone --depth 1 https://github.com/array2d/kvspace /tmp/kvspace-src
-          cmake -S /tmp/kvspace-src -B /tmp/kvspace-src/build -DCMAKE_BUILD_TYPE=Release
-          cmake --build /tmp/kvspace-src/build -j
-          grep -aq "kvspace:embed-noload" /tmp/kvspace-src/build/libkvspace.so.1
-          FRONTEND_SO=/tmp/kvspace-src/build/libkvspace.so.1 make single
-          # 记录嵌入的依赖版本（deps.json 即 tag 的 pin）与 sha256
+          grep -aq "kvspace:embed-noload" lib/libkvspace.so.1
+          FRONTEND_SO=lib/libkvspace.so.1 make single
           python3 -c 'import json,hashlib,sys; v=sys.argv[1]; deps=json.load(open("deps.json")); b=open("bin/byteseek","rb").read(); json.dump({"single":v,"platform":"linux-x86_64","embedded":deps,"size":len(b),"sha256":hashlib.sha256(b).hexdigest()}, open("kvlang-single-%s-linux-x86_64.json"%v,"w"), indent=2)' "$v"
           cp bin/byteseek "kvlang-single-$v-linux-x86_64"
           sha256sum "kvlang-single-$v-linux-x86_64" | tee SHA256SUMS-single
@@ -89,18 +84,6 @@ jobs:
         run: |
           set -euo pipefail
           v="${ABI_VERSION}"
-          # 证明单文件不依赖系统安装：临时移走 kvspace 前端与后端目录
-          sudo mv /usr/lib/kvspace /usr/lib/kvspace.hidden
-          for f in /usr/lib/libkvspace.so*; do
-            sudo mv "$f" "/tmp/$(basename "$f").hidden"
-          done
-          restore() {
-            sudo mv /usr/lib/kvspace.hidden /usr/lib/kvspace
-            for f in /tmp/libkvspace.so*.hidden; do
-              sudo mv "$f" "/usr/lib/$(basename "$f" .hidden)"
-            done
-          }
-          trap restore EXIT
           ldd "kvlang-single-$v-linux-x86_64" > /tmp/ldd-single.txt
           ! grep -E 'kvspace|kvlang' /tmp/ldd-single.txt
           ! readelf -d "kvlang-single-$v-linux-x86_64" | grep -E 'RPATH|RUNPATH'
@@ -116,7 +99,8 @@ jobs:
             kvlang-single-*-linux-x86_64 kvlang-single-*.json SHA256SUMS-single \
             --generate-notes
 
-  # macOS：各仓只有 linux ABI tarball，依赖全部源码构建（装 /usr/local）后打包（自包含）。
+  # macOS：依赖全部源码构建进 repo（include/、lib/、lib/kvspace/、bin/），
+  # 与 Linux 同一 tarball 布局；不使用 /usr/local。
   macos:
     needs: linux
     runs-on: macos-latest
@@ -124,35 +108,33 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
-      - name: 构建依赖链（blockmalloc / slotsboxmalloc / kvspace / kvspace-c / kvspace-durable）
+      - name: 构建依赖链到 repo（blockmalloc / slotsboxmalloc / kvspace / kvspace-c / durable）
         run: |
           set -euo pipefail
-          PREFIX=/usr/local
+          mkdir -p include lib/kvspace bin
           for repo in blockmalloc slotsboxmalloc kvspace kvspace-c; do
             git clone --depth 1 "https://github.com/array2d/$repo.git" "/tmp/$repo"
             cmake -S "/tmp/$repo" -B "/tmp/$repo/build" \
-              -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PREFIX
+              -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PWD"
             cmake --build "/tmp/$repo/build" -j
-            sudo cmake --install "/tmp/$repo/build"
+            cmake --install "/tmp/$repo/build"
           done
+          # kvspace 前端按安装规则落在 lib/kvspace/，顶层 lib/ 也放一份
+          # （runtime/layout/byteseek 以 -lkvspace 链接，dlopen 也按 SONAME 找）。
+          cp -P lib/kvspace/libkvspace*.dylib lib/ 2>/dev/null || true
           git clone --depth 1 https://github.com/array2d/kvspace-durable.git /tmp/kvspace-durable
           cargo build --release --manifest-path /tmp/kvspace-durable/Cargo.toml
-          # durable 为 Rust（无 install 规则），手动装入后端目录，供 frontend dlopen
-          sudo mkdir -p "$PREFIX/lib/kvspace"
-          sudo cp /tmp/kvspace-durable/target/release/libkvspace_durable.dylib "$PREFIX/lib/kvspace/"
+          cp /tmp/kvspace-durable/target/release/libkvspace_durable.dylib lib/kvspace/
       - name: 构建 runtime + layout + byteseek + kvspace CLI
         run: |
+          set -euo pipefail
           make runtimec2
-          cargo build --release --manifest-path layout/Cargo.toml
-          # byteseek 的 build.rs 在 ../bin 找 libkvlang_runtimec2/libkvlanglayout，必须先就位
-          mkdir -p bin
-          cp layout/target/release/libkvlanglayout.dylib bin/
-          cargo build --release --manifest-path byteseek/Cargo.toml
-          # kvspace CLI 用 #[link(name = "kvspace")]，前端装在 /usr/local/lib/kvspace
-          RUSTFLAGS="-L native=/usr/local/lib/kvspace" cargo build --release --manifest-path /tmp/kvspace/cli/Cargo.toml
-          cp layout/target/release/kvlanglayout bin/
-          cp byteseek/target/release/byteseek bin/
-      - name: 后端装载冒烟（frontend 的 dlopen 真能加载后端）
+          make layout
+          make byteseek
+          RUSTFLAGS="-L native=$PWD/lib -C link-arg=-Wl,-rpath,@loader_path/../lib" \
+            cargo build --release --manifest-path /tmp/kvspace/cli/Cargo.toml
+          cp /tmp/kvspace/cli/target/release/kvspace bin/
+      - name: 后端装载冒烟（repo 内前端 dlopen 后端）
         run: |
           cat > /tmp/conn.c <<'EOF'
           #include <kvspace/kvspace.h>
@@ -166,31 +148,23 @@ jobs:
               return (shm && fs) ? 0 : 1;
           }
           EOF
-          cc /tmp/conn.c -o /tmp/conn -I/usr/local/include -L/usr/local/lib/kvspace -lkvspace
-          # libkvspace 在 /usr/local/lib/kvspace；后端依赖 libblockmalloc 在 /usr/local/lib
-          DYLD_FALLBACK_LIBRARY_PATH=/usr/local/lib:/usr/local/lib/kvspace /tmp/conn
+          cc /tmp/conn.c -o /tmp/conn -I"$PWD/include" -L"$PWD/lib/kvspace" -lkvspace
+          DYLD_FALLBACK_LIBRARY_PATH="$PWD/lib:$PWD/lib/kvspace" /tmp/conn
       - name: 打包 ABI 产物
         run: |
           set -euo pipefail
           v="${ABI_VERSION}"
           d="kvlang-abi-$v-darwin-arm64"
           mkdir -p "$d/include/kvlang" "$d/lib/kvspace" "$d/bin"
-          # 头（递归）：自己的 runtime 头 + 各依赖的头（/usr/local/include/<repo>/）
           cp -R runtime/include/. "$d/include/kvlang/"
           for h in kvspace blockmalloc slotsboxmalloc; do
-            [ -d "/usr/local/include/$h" ] && cp -R "/usr/local/include/$h" "$d/include/"
+            [ -d "include/$h" ] && cp -R "include/$h" "$d/include/"
           done
-          # 库（递归扫）：本仓产物 + 依赖顶层 dylib + 后端 dylib（dispatch 的 dlopen 目录）
-          find bin layout/target/release -maxdepth 1 -name '*.dylib' -exec cp -P {} "$d/lib/" \;
-          # dispatch 前端：runtime/layout/CLI 都以 @rpath 依赖 libkvspace.1.dylib
-          cp -P /usr/local/lib/kvspace/libkvspace*.dylib "$d/lib/"
-          find /usr/local/lib/kvspace -maxdepth 1 -name '*.dylib' -exec cp -P {} "$d/lib/kvspace/" \;
-          cp /tmp/kvspace-durable/target/release/libkvspace_durable.dylib "$d/lib/kvspace/"
-          # 可执行：本仓 CLI + 依赖带来的 CLI
-          cp bin/byteseek bin/kvlanglayout "$d/bin/"
-          cp /tmp/kvspace/cli/target/release/kvspace "$d/bin/"
-          # 抹掉构建机绝对路径：layout 的 ID 与 CLI 对它的依赖必须是 @rpath，
-          # 且 bin/ 与 lib/ 都要能从 tarball 内的 lib/ 解析 @rpath
+          find lib -maxdepth 1 -name '*.dylib' -exec cp -P {} "$d/lib/" \;
+          find lib/kvspace -maxdepth 1 -name '*.dylib' -exec cp -P {} "$d/lib/kvspace/" \;
+          cp bin/byteseek bin/kvlanglayout bin/kvspace "$d/bin/"
+          # 抹掉构建机绝对路径：layout 的 ID 与 CLI/byteseek 的依赖落到 @rpath，
+          # bin/ 与 lib/ 都能从 tarball 内 lib/ 解析。
           has_rpath() { otool -l "$1" | awk '/cmd LC_RPATH/{f=1} f && /path /{print $2; f=0}' | grep -qx "$2"; }
           add_rpath() {
             has_rpath "$1" "$2" && return 0
@@ -205,7 +179,6 @@ jobs:
             @rpath/*) ;;
             *) install_name_tool -change "$layout_dep" @rpath/libkvlanglayout.dylib "$d/bin/byteseek" ;;
           esac
-          # 前端依赖必须是 @rpath，绝对路径加 rpath 也救不回来
           front_dep=$(otool -L "$d/bin/byteseek" | awk '/libkvspace\.[0-9]+\.dylib/ {print $1; exit}')
           test -n "$front_dep"
           case "$front_dep" in
@@ -215,18 +188,30 @@ jobs:
           for f in "$d"/bin/* "$d"/lib/*.dylib; do
             add_rpath "$f" @loader_path/../lib
           done
-          # 打包前核验：CLI 的 layout/前端依赖确实解析到 @rpath，且 rpath 覆盖 lib/
           otool -L "$d/bin/byteseek"
           otool -l "$d/bin/byteseek" | awk '/cmd LC_RPATH/{f=1} f && /path /{print "rpath:", $2; f=0}'
-          for f in "$d/bin/kvlanglayout" "$d/lib/libkvlang_runtimec2.dylib" \
-                   "$d/lib/libkvlanglayout.dylib" "$d/lib/libkvspace.1.dylib"; do
-            echo "=== otool -L $f"
-            otool -L "$f"
-          done
           printf '{"abi":"%s"}\n' "$v" > "$d/abi-manifest.json"
           tar czf "$d.tar.gz" "$d"
           tar tzf "$d.tar.gz"
           sha256sum "$d.tar.gz" | tee SHA256SUMS-macos
+      - name: 自包含冒烟（解包到临时目录运行）
+        run: |
+          set -euo pipefail
+          v="${ABI_VERSION}"
+          d="kvlang-abi-$v-darwin-arm64"
+          test -e "$d/lib/libkvspace.1.dylib"
+          run="$RUNNER_TEMP/rel-smoke"
+          rm -rf "$run"; mkdir -p "$run"
+          tar xzf "$d.tar.gz" -C "$run" --strip-components=1
+          out=$(env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME=/tmp \
+            KVSPACE="shm://$run/smoke.shm" "$run/bin/byteseek" -c 'print("ok")')
+          echo "smoke: $out"
+          [ "$out" = "ok" ]
+          env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME=/tmp \
+            KVSPACE="shm://$run/layout.shm" "$run/bin/byteseek" -c 'print("boot")' >/dev/null
+          env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME=/tmp \
+            KVSPACE="shm://$run/layout.shm" \
+            "$run/bin/kvlanglayout" tutorial/01-basics/hello.kv "shm://$run/layout.shm" >/dev/null
       - name: 上传 dry-run 产物（供合并前核对/重传）
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
@@ -235,23 +220,6 @@ jobs:
           path: |
             kvlang-abi-${{ env.ABI_VERSION }}-darwin-arm64.tar.gz
             SHA256SUMS-macos
-      - name: 自包含冒烟（安装到 /usr/local 后运行；后端目录固定，不再有运行期 env）
-        run: |
-          set -euo pipefail
-          v="${ABI_VERSION}"
-          d="kvlang-abi-$v-darwin-arm64"
-          test -e "$d/lib/libkvspace.1.dylib"
-          # 后端目录固定 /usr/local/lib/kvspace、前端在 /usr/local/lib：按 tarball 布局安装后运行。
-          sudo cp -P "$d"/lib/*.dylib /usr/local/lib/
-          sudo cp -P "$d"/lib/kvspace/*.dylib /usr/local/lib/kvspace/
-          sudo cp "$d"/bin/byteseek "$d"/bin/kvlanglayout /usr/local/bin/
-          out=$(env -i PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin HOME=/tmp \
-            KVSPACE="shm:///tmp/rel-smoke.shm" /usr/local/bin/byteseek -c 'print("ok")')
-          echo "smoke: $out"
-          [ "$out" = "ok" ]
-          usage=$(/usr/local/bin/kvlanglayout 2>&1 || true)
-          echo "smoke layout: $usage"
-          echo "$usage" | grep -q '^usage: kvlanglayout'
       - name: dispatch 发布（tag 输入非空且冒烟通过）
         if: github.event_name == 'workflow_dispatch' && inputs.tag != ''
         run: |
