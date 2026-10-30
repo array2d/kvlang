@@ -20,11 +20,11 @@ struct Scalar {
 
 bool v_ptr(Wire w) noexcept;
 bool v_ptr_target(Wire w, std::string* out) noexcept;
-bool v_langtype(Wire w, std::string* out) noexcept;
 bool v_is_none(Wire w) noexcept;
 
 // 解码标量；kind 取 langtype（忽略 dims 前缀），支持 int*/uint*/float*/bool。
-bool v_scalar(Wire w, Scalar* out) noexcept;
+// v2 下 langtype 不在 wire——调用方经 kvspaceGetHead 读 x‥langtype attr key 传入。
+bool v_scalar(Wire w, std::string_view langtype, Scalar* out) noexcept;
 
 // 已解码出 kind/width 后，直接按 body 原始字节取标量（零拷贝热路径）。
 bool v_scalar_raw(Scalar::K k, std::uint8_t width, const std::uint8_t* body,
@@ -35,9 +35,9 @@ bool v_scalar_view(const std::uint8_t* langtype, std::size_t lt_len,
                    const std::uint8_t* body, std::uint64_t cap,
                    Scalar* out) noexcept;
 
-// 按 kind/width 把标量编码成 wire（malloc），调用方 free。
-bool v_encode(const char* kind, std::uint8_t width, const Scalar& s,
-              std::uint8_t** out, std::uint32_t* out_len) noexcept;
+// 按 kind/width 把标量组装成 wire（malloc），调用方 free。
+bool v_to_wire(const char* kind, std::uint8_t width, const Scalar& s,
+               std::uint8_t** out, std::uint32_t* out_len) noexcept;
 
 // 写入标量值（SetValue）。
 bool v_write_scalar(void* h, const std::string& key, const char* kind,

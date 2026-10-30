@@ -15,6 +15,23 @@
 #include <kvspace/kvspace.h>
 #include <kvspace/xvalue_head.h>
 
+/* v2 head 构造器：系统头装 v2 前由本地声明桥接（v2 头已带 KVSPACE_XVALUE_HEAD_LEN）。 */
+#ifndef KVSPACE_XVALUE_HEAD_LEN
+extern "C" {
+int kvspaceXvalueHeadNewNone(uint8_t **out, uint64_t *out_len);
+int kvspaceXvalueHeadNewScalar(uint8_t storetype, const uint8_t *raw,
+                               uint32_t raw_len, uint8_t **out,
+                               uint64_t *out_len);
+int kvspaceXvalueHeadNewSlack(const uint8_t *data, uint64_t data_len,
+                              uint64_t cap, uint8_t **out, uint64_t *out_len);
+int kvspaceXvalueHeadNewTensor(const uint64_t *dims, uint32_t ndim,
+                               const uint8_t *raw, uint64_t raw_len,
+                               uint8_t **out, uint64_t *out_len);
+int kvspaceXvalueHeadNewCode(const uint8_t *body, uint64_t body_len,
+                             uint64_t cap, uint8_t **out, uint64_t *out_len);
+}
+#endif
+
 #include "value.hpp"
 #include "valueio.hpp"
 
@@ -125,6 +142,59 @@ const std::string& child_frame_root(const std::string& vid, int depth) {
 }
 
 }  // namespace
+
+// 写 `x‥langtype` attr key（上层职责；kvspace 层不代写）。attr 先落、x 后落。
+// 普通帧成员/变量槽写主值前由本 helper 补类型，runtime 侧 read_langtype 才读得到。
+// 非匿名 namespace：vmkv_native.cpp 等兄弟 TU 也要调（数组槽类型）。
+bool write_attr_lt(void* h, const char* key, const char* lt, char* err,
+                   uint32_t err_cap) {
+    if (!lt || !*lt)
+        return true;  // 无类型 → 不写 attr（系统键/无类型槽）
+    char ltkey[1028];
+    int ltn = snprintf(ltkey, sizeof ltkey, "%s\xE2\x80\xA5" "langtype", key);
+    if (ltn < 0 || ltn >= (int)sizeof ltkey)
+        return false;
+    const std::size_t llen = std::strlen(lt);
+    std::uint8_t* lv = nullptr;
+    std::uint64_t lvn = 0;
+    if (kvspaceXvalueHeadNewSlack(reinterpret_cast<const std::uint8_t*>(lt), llen, llen,
+                                  &lv, &lvn) != 0 ||
+        !lv || lvn > UINT32_MAX) {
+        if (lv) std::free(lv);
+        return false;
+    }
+    char lerr[192] = {};
+    int rc = kvspaceSetValue(h, ltkey, lv, static_cast<std::uint32_t>(lvn),
+                             lerr, sizeof lerr);
+    std::free(lv);
+    (void)err;
+    (void)err_cap;
+    return rc == 0;
+}
+bool write_attr_int64(void* h, const char* key, char* err, uint32_t err_cap) {
+    return write_attr_lt(h, key, "int64", err, err_cap);
+}
+
+// 直接读 attr 键本体（`x‥langtype` 的字符串 body），不依赖主值存在——
+// GetHead 先读主值，attr 先落时序（attr 写、主值未落）下会读空。
+bool read_langtype_attr_direct(void* h, const char* key, std::string* out) {
+    out->clear();
+    char ltkey[1028];
+    int ltn = snprintf(ltkey, sizeof ltkey, "%s\xE2\x80\xA5" "langtype", key);
+    if (ltn < 0 || ltn >= (int)sizeof ltkey)
+        return false;
+    std::uint8_t* d = nullptr;
+    std::uint32_t n = 0;
+    if (kvspaceGet(h, ltkey, 0, &d, &n) != 0 || !d || n < KVSPACE_XVALUE_HEAD_LEN)
+        return false;
+    std::uint64_t blen =
+        kvspaceXvalueHeadLen(reinterpret_cast<const kvspaceXvalueHead*>(d));
+    if (blen > n - KVSPACE_XVALUE_HEAD_LEN)
+        return false;
+    out->assign(reinterpret_cast<const char*>(d + KVSPACE_XVALUE_HEAD_LEN),
+                static_cast<std::size_t>(blen));
+    return true;
+}
 
 // 变量描述符 → 具体 key（帧入口一次；Ptr 链在此解析完）。
 bool Vmkv::resolve_desc(FrameCtx& f, const std::string& name, std::string* key,
@@ -244,22 +314,14 @@ bool Vmkv::reg_body(FrameCtx& f, std::uint8_t idx, std::uint8_t** body,
     return true;
 }
 
-bool Vmkv::slot_langtype(const kvspaceXvalueBodyView_t& v, std::string* lt) {
-    if (!v.head || v.headlen <= 18)
+// 从 view 直读标量（不读 head、不 ABI；langtype 由 attr key 传入）。
+bool Vmkv::slot_read_scalar(const kvspaceXvalueBodyView_t& v,
+                            std::string_view langtype, Scalar* out) {
+    if (!v.head || v.headlen != KVSPACE_XVALUE_HEAD_LEN)
         return false;
-    const char* p = reinterpret_cast<const char*>(v.head + 18);
-    std::size_t cap = v.headlen - 18, n = 0;
-    while (n < cap && p[n] != '\0')
-        n++;
-    lt->assign(p, n);
-    return !lt->empty();
-}
-
-// 从 view 直读标量（不 decode head、不 ABI）。
-bool Vmkv::slot_read_scalar(const kvspaceXvalueBodyView_t& v, Scalar* out) {
-    if (!v.head || v.headlen <= 18)
-        return false;
-    return v_scalar_view(v.head + 18, v.headlen - 18, v.body, v.body_cap, out);
+    return v_scalar_view(
+        reinterpret_cast<const std::uint8_t*>(langtype.data()),
+        langtype.size(), v.body, v.body_cap, out);
 }
 
 // 槽值缓存：None 值用显式 XValue 表示（kvspace-c 对 None 返回 NULL，C runtime 对齐语义）。
@@ -303,6 +365,15 @@ bool Vmkv::ensure_reg_key(FrameCtx& f, FReg& r) {
     return true;
 }
 
+// 读 reg idx 的 x‥langtype attr key（v2 明文事实源）；无 key/缺失 → false。
+bool Vmkv::reg_langtype(FrameCtx& f, std::uint8_t idx, std::string* lt) {
+    FReg& r = f.regs[idx];
+    FReg* fr = r.src_ptr ? r.src_ptr : &r;
+    if (fr->key.empty() && !ensure_reg_key(f, *fr))
+        return false;
+    return read_langtype(f.h, fr->key, lt);
+}
+
 bool Vmkv::read_reg(FrameCtx& f, std::uint8_t idx, Wire* out) {
     FReg& r = f.regs[idx];
     // 内存别名读参：转发读调用方 reg 的 fast 缓存（src_ptr 链已在帧入口挂好）。
@@ -322,19 +393,19 @@ bool Vmkv::read_reg(FrameCtx& f, std::uint8_t idx, Wire* out) {
         std::fprintf(stderr, "[readreg t1 fast=%d flk=%d src=%p]\n",
                      (int)fr->fast_i64, (int)flk, (void*)r.src_ptr);
     if (fr->fast_i64 && flk) {
-        // The int64 wire is fixed-shape: encode once, then patch the body.
+        // The int64 wire is fixed-shape: 组装一次后改 body。
         thread_local std::uint8_t s_buf[64];
         thread_local std::uint32_t s_len = 0;
         if (!s_len) {
             std::uint8_t* buf = nullptr;
-            std::uint32_t len = 0;
+            std::uint64_t len64 = 0;
             const std::int64_t zero = 0;
-            if (kvspaceXvalueEncode("int64",
-                                    reinterpret_cast<const std::uint8_t*>(&zero), 8,
-                                    nullptr, 0, &buf, &len) == 0 &&
-                buf && len >= 8 && len <= sizeof s_buf) {
-                std::memcpy(s_buf, buf, len);
-                s_len = len;
+            if (kvspaceXvalueHeadNewScalar(
+                    0, reinterpret_cast<const std::uint8_t*>(&zero), 8, &buf,
+                    &len64) == 0 &&
+                buf && len64 >= 8 && len64 <= sizeof s_buf) {
+                std::memcpy(s_buf, buf, static_cast<std::size_t>(len64));
+                s_len = static_cast<std::uint32_t>(len64);
             }
             std::free(buf);
         }
@@ -357,7 +428,7 @@ bool Vmkv::read_reg(FrameCtx& f, std::uint8_t idx, Wire* out) {
         if (!g_none_len) {
             std::uint64_t nn = 0;
             g_none_ptr = g_none_wire;
-            if (kvspaceXhNewNone(&g_none_ptr, &nn) == 0)
+            if (kvspaceXvalueHeadNewNone(&g_none_ptr, &nn) == 0)
                 g_none_len = static_cast<std::uint32_t>(nn);
         }
         if (g_none_len) {
@@ -373,7 +444,7 @@ bool Vmkv::read_reg(FrameCtx& f, std::uint8_t idx, Wire* out) {
         if (!g_none_len) {
             std::uint64_t nn = 0;
             g_none_ptr = g_none_wire;
-            if (kvspaceXhNewNone(&g_none_ptr, &nn) == 0)
+            if (kvspaceXvalueHeadNewNone(&g_none_ptr, &nn) == 0)
                 g_none_len = static_cast<std::uint32_t>(nn);
         }
         if (g_none_len) {
@@ -390,7 +461,7 @@ bool Vmkv::read_reg(FrameCtx& f, std::uint8_t idx, Wire* out) {
 
 // 读标量：xvaluebodyview 直读；kind/width 每帧解析一次后缓存。
 // 帧局部/内存别名的 fast 缓存直取（纯内存变量无明文槽，view 恒无 →
-// 此前每步 fallback 到 kvspaceXvalueEncode，fib 的 `+` 3003 cycles/次 主源）。
+// 此前每步 fallback 到 kvspaceXvalueToWire，fib 的 `+` 3003 cycles/次 主源）。
 bool Vmkv::read_scalar(FrameCtx& f, std::uint8_t idx, Scalar* out) {
     FReg& r = f.regs[idx];
     FReg& rf = r.src_ptr ? *r.src_ptr : r;
@@ -407,18 +478,23 @@ bool Vmkv::read_scalar(FrameCtx& f, std::uint8_t idx, Scalar* out) {
         out->u = rf.fb ? 1 : 0;
         return true;
     }
+    // 续跑（Handoff 后重建帧）fast 缓存丢失：普通变量惰性 key 需补解析再读槽。
+    if (rf.key.empty())
+        (void)ensure_reg_key(f, rf);
     std::uint8_t* body = nullptr;
     std::uint64_t cap = 0;
     const bool have_view = reg_body(f, idx, &body, &cap);
     if (bin.prof_on && !have_view)
         bin.prof.f_slot++;
+    std::string lt;
+    const bool have_lt = read_langtype(f.h, rf.key, &lt);
     if (have_view) {
         if (r.sc_ok) {
             if (v_scalar_raw(r.sck, r.scw, body, cap, out))
                 return true;
             if (bin.prof_on)
                 bin.prof.f_raw++;
-        } else if (slot_read_scalar(r.view, out)) {
+        } else if (have_lt && slot_read_scalar(r.view, lt, out)) {
             r.sck = out->k;
             r.scw = out->width;
             r.sc_ok = true;
@@ -428,7 +504,7 @@ bool Vmkv::read_scalar(FrameCtx& f, std::uint8_t idx, Scalar* out) {
     if (bin.prof_on)
         bin.prof.fb++;
     Wire w{};
-    return read_reg(f, idx, &w) && v_scalar(w, out);
+    return have_lt && read_reg(f, idx, &w) && v_scalar(w, lt, out);
 }
 
 // 帧局部普通变量 key（非参数槽、非系统槽）：纯内存化候选。
@@ -443,7 +519,7 @@ bool Vmkv::is_frame_local(const FrameCtx& f, const std::string& rk) {
 // 仅对 fast 缓存有效但无 kvspace 槽的变量落一次明文，后续 read 走明文/新 view。
 void Vmkv::flush_frame_locals(FrameCtx& f) {
     std::uint8_t* buf = nullptr;
-    std::uint32_t len = 0;
+    std::uint64_t len64 = 0;
     for (FReg& r : f.regs) {
         if (r.view_ok || r.src_ptr || r.dst_ptr)
             continue;
@@ -456,25 +532,24 @@ void Vmkv::flush_frame_locals(FrameCtx& f) {
         if (r.key.empty())
             continue;
         if (r.fast_i64 && is_frame_local(f, r.key)) {
-            if (kvspaceXvalueEncode("int64",
-                                    reinterpret_cast<const std::uint8_t*>(&r.fv),
-                                    8, nullptr, 0, &buf, &len) != 0 || !buf)
+            if (kvspaceXvalueHeadNewScalar(
+                    0, reinterpret_cast<const std::uint8_t*>(&r.fv), 8, &buf,
+                    &len64) != 0 ||
+                !buf)
                 continue;
             char err[192] = {};
-            if (kvspaceSetValue(f.h, r.key.c_str(), buf, len, 0, 0, err,
-                                sizeof err) == 0 &&
+            if (write_attr_int64(f.h, r.key.c_str(), err, sizeof err) &&
+                kvspaceSetValue(f.h, r.key.c_str(), buf, static_cast<std::uint32_t>(len64), err, sizeof err) == 0 &&
                 kvspaceResolveRef(f.h, r.key.c_str(), &r.ref) == 0)
                 r.resolved = true;
             std::free(buf);
             buf = nullptr;
         } else if (r.fast_bool && is_frame_local(f, r.key)) {
             const std::uint8_t b = r.fb ? 1 : 0;
-            if (kvspaceXvalueEncode("bool", &b, 1, nullptr, 0, &buf, &len) != 0 ||
-                !buf)
+            if (kvspaceXvalueHeadNewScalar(0, &b, 1, &buf, &len64) != 0 || !buf)
                 continue;
             char err[192] = {};
-            if (kvspaceSetValue(f.h, r.key.c_str(), buf, len, 0, 0, err,
-                                sizeof err) == 0 &&
+            if (kvspaceSetValue(f.h, r.key.c_str(), buf, static_cast<std::uint32_t>(len64), err, sizeof err) == 0 &&
                 kvspaceResolveRef(f.h, r.key.c_str(), &r.ref) == 0)
                 r.resolved = true;
             std::free(buf);
@@ -491,14 +566,14 @@ bool Vmkv::write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
         FReg& dr = *r.dst_ptr;
         r.fast_i64 = false;
         r.fast_bool = false;
-        if (len >= 8) {
-            kvspaceXh xh{};
-            if (kvspaceXhDecode(data, len, &xh) == 0 && xh.body &&
-                xh.content_len == 8 &&
-                std::strcmp(reinterpret_cast<const char*>(xh.langtype),
-                            "int64") == 0) {
+        if (len >= KVSPACE_XVALUE_HEAD_LEN + 8 &&
+            data[6] == KVSPACE_XVALUE_ST_SHORT &&
+            data[7] == KVSPACE_XVALUE_PTR_INLINE) {
+            std::string lt;
+            /* v2：langtype 在 attr key；槽已有类型须为 int64，无 attr key（首写）接受。 */
+            if (!read_langtype(f.h, dr.key, &lt) || lt == "int64") {
                 std::int64_t v = 0;
-                std::memcpy(&v, xh.body, 8);
+                std::memcpy(&v, data + KVSPACE_XVALUE_HEAD_LEN, 8);
                 dr.fv = v;
                 dr.fast_i64 = true;
                 if (dr.view_ok && dr.body && !store_i64_slot(f, dr, v))
@@ -514,14 +589,74 @@ bool Vmkv::write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
         }
         dr.base_ptr_known = false;
         char err[192] = {};
-        return kvspaceSetValue(f.h, dr.key.c_str(), data, len, 0, 0, err,
-                               sizeof err) == 0;
+        return kvspaceSetValue(f.h, dr.key.c_str(), data, len, err, sizeof err) == 0;
     }
     // 成员写槽（desc 含 `·`，如 `p·x`）：base 是帧变量/参数（可能 dst_ptr 别名
     // 指向调用方实例），key = 最终 base 槽 + `·` + 成员名（`p·x = v` 就地改
     // 调用方对象，见 ptr-param-mutate）。绝对路径 base（`/tmp/x·y`）直接用。
     const std::string& wdsc = !r.desc.empty() ? r.desc
                              : (r.desc_ref ? r.desc_ref->name : r.desc);
+    // 绝对路径 + 动态键（`/tmp/mi·*i0`）：native 写（compactarray·new/fill）直接
+    // 落 member——解析 `*var` 变量值作真实键（对齐主循环 member write 动态键）。
+    if (wdsc[0] == '/' && wdsc.find("\xC2\xB7*") != std::string::npos) {
+        const auto dmid = wdsc.find("\xC2\xB7");
+        const std::string dbkey = wdsc.substr(0, dmid);
+        const std::string dvar = wdsc.substr(dmid + 3);  // 跳过 `·*`
+        for (FReg& vr : f.regs) {
+            const std::string_view vn =
+                !vr.desc.empty() ? std::string_view(vr.desc)
+                : vr.desc_ref    ? std::string_view(vr.desc_ref->name)
+                                 : std::string_view();
+            if (vn != dvar)
+                continue;
+            std::string dk;
+            if (vr.fast_i64) {
+                dk = std::to_string(vr.fv);
+            } else if (!vr.key.empty() || (vr.desc_ref && ensure_reg_key(f, vr))) {
+                Wire vw{};
+                Scalar vs{};
+                std::string vlt;
+                const std::uint8_t ridx =
+                    static_cast<std::uint8_t>(&vr - f.regs.data());
+                if (read_reg(f, ridx, &vw) && reg_langtype(f, ridx, &vlt) &&
+                    v_scalar(vw, vlt, &vs)) {
+                    if (vs.k == Scalar::K::Float)
+                        dk = std::to_string((int64_t)vs.f);
+                    else if (vs.k == Scalar::K::Uint)
+                        dk = std::to_string(vs.u);
+                    else
+                        dk = std::to_string(vs.i);
+                }
+            }
+            if (!dk.empty()) {
+                r.key = dbkey + "\xC2\xB7" + dk;
+                r.view_ok = false;
+                r.sc_ok = false;
+                r.fast_i64 = false;
+                r.fast_bool = false;
+                char derrb[192] = {};
+                // 动态 member 写补 attr（同静态分支推断：SLACK 串/SHORT 标量）。
+                char aerr[192] = {};
+                if (len >= KVSPACE_XVALUE_HEAD_LEN + 8 &&
+                    data[6] == KVSPACE_XVALUE_ST_SLACK &&
+                    data[7] == KVSPACE_XVALUE_PTR_INLINE)
+                    (void)write_attr_lt(f.h, r.key.c_str(), "char/utf8", aerr,
+                                        sizeof aerr);
+                else if (len == KVSPACE_XVALUE_HEAD_LEN + 1 &&
+                         data[6] == KVSPACE_XVALUE_ST_SHORT &&
+                         data[7] == KVSPACE_XVALUE_PTR_INLINE)
+                    (void)write_attr_lt(f.h, r.key.c_str(), "bool", aerr,
+                                        sizeof aerr);
+                else if (len >= KVSPACE_XVALUE_HEAD_LEN + 8 &&
+                         data[6] == KVSPACE_XVALUE_ST_SHORT &&
+                         data[7] == KVSPACE_XVALUE_PTR_INLINE)
+                    (void)write_attr_lt(f.h, r.key.c_str(), "int64", aerr,
+                                        sizeof aerr);
+                return kvspaceSetValue(f.h, r.key.c_str(), data, len, derrb,
+                                       sizeof derrb) == 0;
+            }
+        }
+    }
     if (wdsc.find("\xC2\xB7") != std::string::npos && wdsc[0] != '/') {
         const auto mid = wdsc.find("\xC2\xB7");
         const std::string base_part = wdsc.substr(0, mid);
@@ -579,9 +714,72 @@ bool Vmkv::write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
             r.sc_ok = false;
             r.fast_i64 = false;
             r.fast_bool = false;
+            // 静态 member 写补 attr：SLACK=char/utf8 串、SHORT+8=int64、bool=9 字节。
+            // （对齐 write_reg 的推断；map 值字符串/数组跨 Handoff 读依赖类型。）
+            char aerr[192] = {};
+            if (len >= KVSPACE_XVALUE_HEAD_LEN + 8 &&
+                data[6] == KVSPACE_XVALUE_ST_SLACK &&
+                data[7] == KVSPACE_XVALUE_PTR_INLINE)
+                (void)write_attr_lt(f.h, r.key.c_str(), "char/utf8", aerr,
+                                    sizeof aerr);
+            else if (len == KVSPACE_XVALUE_HEAD_LEN + 1 &&
+                     data[6] == KVSPACE_XVALUE_ST_SHORT &&
+                     data[7] == KVSPACE_XVALUE_PTR_INLINE)
+                (void)write_attr_lt(f.h, r.key.c_str(), "bool", aerr,
+                                    sizeof aerr);
+            else if (len >= KVSPACE_XVALUE_HEAD_LEN + 8 &&
+                     data[6] == KVSPACE_XVALUE_ST_SHORT &&
+                     data[7] == KVSPACE_XVALUE_PTR_INLINE)
+                (void)write_attr_lt(f.h, r.key.c_str(), "int64", aerr,
+                                    sizeof aerr);
             char errb[192] = {};
-            return kvspaceSetValue(f.h, r.key.c_str(), data, len, 0, 0, errb,
-                                   sizeof errb) == 0;
+            return kvspaceSetValue(f.h, r.key.c_str(), data, len, errb, sizeof errb) == 0;
+        }
+        // 动态成员键（`·*var`，如 `/tmp/mi·*i0`）：native 写（compactarray·new/fill）
+        // 直接落 member——解析 var 值作真实键（对齐主循环 member write 动态键）。
+        if (!bkey.empty() && !mname.empty() && mname[0] == '*') {
+            const std::string var = mname.substr(1);
+            for (FReg& vr : f.regs) {
+                const std::string_view vn =
+                    !vr.desc.empty() ? std::string_view(vr.desc)
+                    : vr.desc_ref    ? std::string_view(vr.desc_ref->name)
+                                     : std::string_view();
+                if (vn != var)
+                    continue;
+                std::string kstr;
+                if (vr.fast_i64) {
+                    kstr = std::to_string(vr.fv);
+                } else if (!vr.key.empty() ||
+                           (vr.desc_ref && ensure_reg_key(f, vr))) {
+                    Wire vw{};
+                    Scalar vs{};
+                    std::string vlt;
+                    if (read_reg(f, static_cast<std::uint8_t>(
+                                       &vr - f.regs.data()),
+                                 &vw) &&
+                        reg_langtype(f, static_cast<std::uint8_t>(
+                                            &vr - f.regs.data()),
+                                     &vlt) &&
+                        v_scalar(vw, vlt, &vs)) {
+                        if (vs.k == Scalar::K::Float)
+                            kstr = std::to_string((int64_t)vs.f);
+                        else if (vs.k == Scalar::K::Uint)
+                            kstr = std::to_string(vs.u);
+                        else
+                            kstr = std::to_string(vs.i);
+                    }
+                }
+                if (!kstr.empty()) {
+                    r.key = bkey + "\xC2\xB7" + kstr;
+                    r.view_ok = false;
+                    r.sc_ok = false;
+                    r.fast_i64 = false;
+                    r.fast_bool = false;
+                    char errb[192] = {};
+                    return kvspaceSetValue(f.h, r.key.c_str(), data, len, errb,
+                                           sizeof errb) == 0;
+                }
+            }
         }
     }
     if (!ensure_reg_key(f, r))
@@ -598,19 +796,19 @@ bool Vmkv::write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
     if (g_trace && rk == f.frame + "/t1")
         std::fprintf(stderr, "[writereg t1 fl=%d len=%u]\n", (int)frame_local,
                      len);
-    if (frame_local && len >= 8) {
-        kvspaceXh xh{};
-        if (g_trace && rk == f.frame + "/t1" &&
-            kvspaceXhDecode(data, len, &xh) == 0)
-            std::fprintf(stderr,
-                         "[writereg t1 dec body=%p clen=%lu]\n",
-                         (void*)xh.body,
-                         (unsigned long)xh.content_len);
-        if (kvspaceXhDecode(data, len, &xh) == 0 && xh.body &&
-            xh.content_len == 8 &&
-            std::strcmp(reinterpret_cast<const char*>(xh.langtype), "int64") == 0) {
+    if (frame_local && len >= KVSPACE_XVALUE_HEAD_LEN + 8 &&
+        data[6] == KVSPACE_XVALUE_ST_SHORT &&
+        data[7] == KVSPACE_XVALUE_PTR_INLINE) {
+        if (g_trace && rk == f.frame + "/t1")
+            std::fprintf(stderr, "[writereg t1 fl=%d len=%u]\n", (int)frame_local,
+                         len);
+        std::string lt;
+        // 读 attr 键本体（不依赖主值存在——GetHead 先读主值，attr 先落时序下
+        // 主值未落会读空，导致 float64 被纯内存化当 int64 存位模式）。
+        read_langtype_attr_direct(f.h, rk.c_str(), &lt);
+        if (lt.empty() || lt == "int64") {
             std::int64_t v = 0;
-            std::memcpy(&v, xh.body, 8);
+            std::memcpy(&v, data + KVSPACE_XVALUE_HEAD_LEN, 8);
             r.fv = v;
             r.fast_i64 = true;
             if (r.view_ok && r.body)
@@ -622,13 +820,18 @@ bool Vmkv::write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
     }
     if (ensure_ref(f, &r)) {
         char err[192] = {};
-        if (kvspaceSetValueByRef(f.h, &r.ref, r.key.c_str(), data, len, 0, 0, err,
-                                 sizeof err) == 0)
+        if (kvspaceSetValueByRef(f.h, &r.ref, r.key.c_str(), data, len, err, sizeof err) == 0)
             return true;
         r.resolved = false;
     }
     char err[192] = {};
-    if (kvspaceSetValue(f.h, r.key.c_str(), data, len, 0, 0, err, sizeof err) != 0) {
+    // 写槽前补 attr（上层职责）：bool 由 SHORT inline 1 字节 body 推断（9 字节 wire）。
+    // 其余类型（int64/float64/容器）由调用方在写前补（见 Copy 慢路径/算术写）。
+    if (len == KVSPACE_XVALUE_HEAD_LEN + 1 &&
+        data[6] == KVSPACE_XVALUE_ST_SHORT &&
+        data[7] == KVSPACE_XVALUE_PTR_INLINE)
+        (void)write_attr_lt(f.h, r.key.c_str(), "bool", err, sizeof err);
+    if (kvspaceSetValue(f.h, r.key.c_str(), data, len, err, sizeof err) != 0) {
         if (g_trace)
             std::fprintf(stderr, "[setvalue fail key=%s err='%s' len=%u]\n",
                          r.key.c_str(), err, len);
@@ -677,22 +880,25 @@ bool Vmkv::read_bool(FrameCtx& f, std::uint8_t idx, bool* out) {
 }
 
 // 专用直写 int64：缓存命中（Int/8）时免 Scalar 装箱、免 kind 判定，纯 8 字节 memcpy。
-// Store v into r's existing slot: in place if it is int64, else re-encode it.
+// 把 v 存入 r 的现有槽：int64 就地改写，否则重新组装。
 bool Vmkv::store_i64_slot(FrameCtx& f, FReg& r, std::int64_t v) {
     const kvspaceXvalueBodyView_t& w = r.view;
-    if (w.head && w.headlen > 18 && w.body_cap >= 8 &&
-        std::memcmp(w.head + 18, "int64", 6) == 0) {
+    std::string lt;
+    if (w.head && w.headlen == KVSPACE_XVALUE_HEAD_LEN &&
+        w.body_cap >= 8 && read_langtype(f.h, r.key, &lt) && lt == "int64") {
         std::memcpy(r.body, &v, 8);
         return true;
     }
     std::uint8_t* buf = nullptr;
-    std::uint32_t len = 0;
+    std::uint64_t len64 = 0;
     char err[192] = {};
     const bool ok =
         !r.key.empty() &&
-        kvspaceXvalueEncode("int64", reinterpret_cast<const std::uint8_t*>(&v), 8,
-                            nullptr, 0, &buf, &len) == 0 &&
-        buf && kvspaceSetValue(f.h, r.key.c_str(), buf, len, 0, 0, err, sizeof err) == 0;
+        kvspaceXvalueHeadNewScalar(0,
+                                   reinterpret_cast<const std::uint8_t*>(&v), 8,
+                                   &buf, &len64) == 0 &&
+        buf && write_attr_int64(f.h, r.key.c_str(), err, sizeof err) &&
+        kvspaceSetValue(f.h, r.key.c_str(), buf, static_cast<std::uint32_t>(len64), err, sizeof err) == 0;
     std::free(buf);
     r.view_ok = false;
     r.body = nullptr;
@@ -708,7 +914,7 @@ bool Vmkv::write_member_scalar(FrameCtx& f, std::uint8_t idx, const Scalar& s,
     const char* kn = kind_name(s.k, width);
     std::uint8_t* buf = nullptr;
     std::uint32_t len = 0;
-    const bool ok = kn && v_encode(kn, width, s, &buf, &len) &&
+    const bool ok = kn && v_to_wire(kn, width, s, &buf, &len) &&
                     write_reg(f, idx, buf, len);
     std::free(buf);
     return ok;
@@ -729,7 +935,7 @@ bool Vmkv::slot_write_i64(FrameCtx& f, std::uint8_t idx, std::int64_t v) {
         return true;
     }
     // 内存别名写参（mem_frame 递归/纯内存调用的返回槽）：直写调用方 reg
-    // （镜像 write_reg 的 dst_ptr 分支），免每迭代 v_encode+malloc 回退。
+    // （镜像 write_reg 的 dst_ptr 分支），免每迭代 v_to_wire+malloc 回退。
     if (fr.dst_ptr) {
         FReg& dr = *fr.dst_ptr;
         if (dr.view_ok && dr.body && !store_i64_slot(f, dr, v))
@@ -844,7 +1050,7 @@ bool Vmkv::slot_write_scalar(FrameCtx& f, std::uint8_t idx, const Scalar& s,
     if (fr.desc_ref && fr.desc_ref->member)
         return write_member_scalar(f, idx, s, width);
     // Aliased int64 write param into a caller frame local: the caller's cache is
-    // the value there, so skip the encode. Other targets keep the kvspace write.
+    // the value there, so skip 组装 wire. Other targets keep the kvspace write.
     if (fr.dst_ptr && s.k == Scalar::K::Int && width == 8) {
         const FReg* dr = fr.dst_ptr;
         while (dr->dst_ptr)
@@ -864,11 +1070,15 @@ bool Vmkv::slot_write_scalar(FrameCtx& f, std::uint8_t idx, const Scalar& s,
         return slot_write_i64(f, idx, s.i);
     bool match = fr.sc_ok && fr.sck == s.k && fr.scw == width;
     if (reg_body(f, idx, &body, &body_cap) && body && body_cap >= width) {
-        if (!match && fr.view.head && fr.view.headlen > 18) {
-            const char* lt = reinterpret_cast<const char*>(fr.view.head + 18);
-            const std::size_t cap = fr.view.headlen - 18;
-            const std::size_t n = ::strnlen(lt, cap);
-            match = n == std::strlen(kn) && std::memcmp(lt, kn, n) == 0;
+        if (!match && fr.view.head &&
+            fr.view.headlen == KVSPACE_XVALUE_HEAD_LEN) {
+            std::string lt;
+            if (read_langtype(f.h, fr.key, &lt)) {
+                std::size_t close = lt.find(']');
+                if (!lt.empty() && lt[0] == '[' && close != std::string::npos)
+                    lt = lt.substr(close + 1);
+                match = lt == kn;
+            }
         }
         if (match) {
             std::uint64_t u = 0;
@@ -899,14 +1109,39 @@ bool Vmkv::slot_write_scalar(FrameCtx& f, std::uint8_t idx, const Scalar& s,
             return true;
         }
     }
-    // 回退：编码 + ByRef（槽 langtype/容量不匹配时走这里）。
+    // 回退：组装 wire + ByRef（槽 langtype/容量不匹配时走这里）。
     if (bin.prof_on)
         bin.prof.w_fb++;
     std::uint8_t* buf = nullptr;
     std::uint32_t len = 0;
-    if (!v_encode(kn, width, s, &buf, &len))
+    if (!v_to_wire(kn, width, s, &buf, &len))
         return false;
-    bool ok = write_reg(f, idx, buf, len);
+    // 新槽/类型不匹配：写前补 attr（上层职责）——float64 等非 int64 标量跨
+    // Handoff 续跑须从槽重建，attr 是类型唯一事实源。
+    char aerr[192] = {};
+    if (fr.key.empty())
+        (void)ensure_reg_key(f, fr);
+    bool attr_ok = true;
+    if (!fr.key.empty())
+        attr_ok = write_attr_lt(f.h, fr.key.c_str(), kn, aerr, sizeof aerr);
+    // attr 先落、主值后落（提交点）：主值必须真落槽——不走 write_reg 的
+    // 纯内存化（float64 等非 int64 标量须跨 Handoff 存活），直接 ByRef 写。
+    bool ok = false;
+    if (!fr.key.empty() && attr_ok) {
+        char verr[192] = {};
+        if (ensure_ref(f, &fr)) {
+            ok = kvspaceSetValueByRef(f.h, &fr.ref, fr.key.c_str(), buf,
+                                      static_cast<std::uint32_t>(len), verr,
+                                      sizeof verr) == 0;
+        } else {
+            ok = kvspaceSetValue(f.h, fr.key.c_str(), buf,
+                                 static_cast<std::uint32_t>(len), verr,
+                                 sizeof verr) == 0;
+            if (ok)
+                (void)kvspaceResolveRef(f.h, fr.key.c_str(), &fr.ref);
+        }
+        fr.resolved = ok;
+    }
     std::free(buf);
     return ok;
 }
@@ -1190,22 +1425,35 @@ bool Vmkv::is_cmp(rwir::Op op) {
 }
 
 bool raw_i64(Wire w, std::int64_t* out) {
-    kvspaceXh xh{};
-    if (!w.d || kvspaceXhDecode(w.d, w.n, &xh) != 0 || !xh.body || xh.content_len < 8)
+    if (!w.d || w.n < KVSPACE_XVALUE_HEAD_LEN + 8)
         return false;
-    std::memcpy(out, xh.body, 8);
+    std::memcpy(out, w.d + KVSPACE_XVALUE_HEAD_LEN, 8);
     return true;
 }
 
 bool Vmkv::write_named_i64(void* h, std::uint8_t idx, FrameCtx& f, const char* kind,
                      std::int64_t v) {
+    // 命名 i64（time/duration 等非 int64 标量）：langtype 走 attr key（上层职责），
+    // 且须落槽（非纯内存化）——Handoff 后帧重建，槽 + attr 是唯一类型/值事实源。
+    FReg& r = f.regs[idx];
+    FReg& rf = r.src_ptr ? *r.src_ptr : r;
+    if (rf.key.empty())
+        (void)ensure_reg_key(f, rf);
+    char err[192] = {};
+    if (!rf.key.empty() && kind && *kind)
+        (void)write_attr_lt(f.h, rf.key.c_str(), kind, err, sizeof err);
     std::uint8_t raw[8];
     std::memcpy(raw, &v, 8);
     std::uint8_t* buf = nullptr;
-    std::uint32_t len = 0;
-    if (kvspaceXvalueEncode(kind, raw, 8, nullptr, 0, &buf, &len) != 0 || !buf)
+    std::uint64_t len64 = 0;
+    if (kvspaceXvalueHeadNewScalar(0, raw, 8, &buf, &len64) != 0 || !buf)
         return false;
-    bool ok = write_reg(f, idx, buf, len);
+    bool ok = write_reg(f, idx, buf, static_cast<std::uint32_t>(len64));
+    // 纯内存化（655 分支）后无槽：强制落明文，保证 Handoff 续跑可读。
+    if (ok && !rf.key.empty() && !rf.view_ok && !rf.dst_ptr &&
+        kvspaceSetValue(f.h, rf.key.c_str(), buf,
+                        static_cast<std::uint32_t>(len64), err, sizeof err) == 0)
+        rf.resolved = false;  // 下次 read 重取 view
     std::free(buf);
     return ok;
 }
@@ -1259,9 +1507,12 @@ bool Vmkv::enter_frame(FrameCtx& f, const Segment* seg, std::string* err) {
                     Scalar sc{};
                     std::uint8_t* lb = nullptr;
                     std::uint64_t lc = 0;
+                    std::string lt;
                     if (reg_body(f, static_cast<std::uint8_t>(i), &lb, &lc) &&
-                        v_scalar_view(f.regs[i].view.head + 18,
-                                      f.regs[i].view.headlen - 18, lb, lc, &sc) &&
+                        read_langtype(f.h, f.regs[i].key, &lt) &&
+                        v_scalar_view(
+                            reinterpret_cast<const std::uint8_t*>(lt.data()),
+                            lt.size(), lb, lc, &sc) &&
                         sc.k == Scalar::K::Int && sc.width == 8) {
                         f.regs[i].fv = sc.i;
                         f.regs[i].fast_i64 = true;
@@ -1947,7 +2198,16 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
             auto charish = [&](int i) {
                 return w[i].d ? !v_is_none(w[i]) : s[i].k == Scalar::K::Char;
             };
-            if (text_op && (s[0].k == Scalar::K::Char || s[1].k == Scalar::K::Char) &&
+            // read_scalar 对字符串失败（v_scalar 拒 Char）：text_op 的 char 判定
+            // 须看 langtype（char/* 族）而非 s[i].k（未设）。
+            auto ltis_char = [&](int i) -> bool {
+                if (s[i].k == Scalar::K::Char)
+                    return true;
+                std::string clt;
+                return reg_langtype(f, ins.rd[i], &clt) &&
+                       clt.find("char/") != std::string::npos;
+            };
+            if (text_op && (ltis_char(0) || ltis_char(1)) &&
                 charish(0) && charish(1)) {
                 for (int i = 0; i < 2; i++) {
                     if (!w[i].d && !read_reg(f, ins.rd[i], &w[i])) {
@@ -1959,6 +2219,12 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
             }
         }
         bool ok = true;
+        // v2：char 族文本读需 attr key langtype（wire 不携带）。
+        auto wtext = [&](int i, std::string* out) -> bool {
+            std::string lt;
+            return reg_langtype(f, ins.rd[i], &lt) &&
+                   wire_text(w[i].d, w[i].n, lt, out);
+        };
         // None 参与比较：对齐 C 语义（Eq：双 None=true；Neq：双 None=false；其余 → TypeError）。
         // Ptr vs None（Ptr 悬空=空指针）交给 non_scalar 的 Ptr 分支，不在此判。
         const bool any_ptr_cmp = (v_ptr(w[0]) || v_ptr(w[1])) && is_cmp(ins.op);
@@ -1989,7 +2255,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
             if (ins.op == rwir::Op::Cast && ins.nrd == 1 &&
                 ins.name.rfind("char/", 0) == 0) {
                 std::string txt;
-                if (!wire_text(w[0].d, w[0].n, &txt)) {
+                if (!wtext(0, &txt)) {
                     *err = "char cast: bad input";
                     return RunResult::Error;
                 }
@@ -2036,8 +2302,8 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                         const bool e0 = ptr_empty(w[0]);
                         const bool e1 = ptr_empty(w[1]);
                         std::string pt0, pt1;
-                        const bool h0 = v_ptr_target(w[0], &pt0);
-                        const bool h1 = v_ptr_target(w[1], &pt1);
+                        (void)v_ptr_target(w[0], &pt0);
+                        (void)v_ptr_target(w[1], &pt1);
                         const bool eq = p0 && p1
                                             ? (e0 && e1) || (!e0 && !e1 && pt0 == pt1)
                                             : p0 ? e0 : e1;
@@ -2051,8 +2317,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                         }
                         continue;
                     }
-                    if (wire_text(w[0].d, w[0].n, &a) &&
-                        wire_text(w[1].d, w[1].n, &b)) {
+                    if (wtext(0, &a) && wtext(1, &b)) {
                         const bool eq = a == b;
                         ok = slot_write_bool(f, ins.wr[0],
                                              ins.op == rwir::Op::Eq ? eq : !eq);
@@ -2069,8 +2334,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                 // kvspaceNewChar 按码点计数产 `[n]char/utf8` head（#552 性能+正确）。
                 {
                     if (ins.op != rwir::Op::Add || ins.nrd != 2 ||
-                        !wire_text(w[0].d, w[0].n, &a) ||
-                        !wire_text(w[1].d, w[1].n, &b)) {
+                        !wtext(0, &a) || !wtext(1, &b)) {
                         *err = "non-scalar operand: " + ins.name;
                         return RunResult::Error;
                     }
@@ -2082,6 +2346,16 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                              reinterpret_cast<const std::uint8_t*>(out_s.data()),
                              static_cast<std::uint32_t>(out_s.size()), &buf, &len) == 0 &&
                          buf && write_reg(f, ins.wr[0], buf, len);
+                    if (ok && buf) {
+                        // 拼接结果字符串槽补 attr（上层职责）：后续 string·* 读依赖。
+                        char aerr[192] = {};
+                        FReg& sw0 = f.regs[ins.wr[0]];
+                        if (sw0.key.empty())
+                            (void)ensure_reg_key(f, sw0);
+                        if (!sw0.key.empty())
+                            (void)write_attr_lt(f.h, sw0.key.c_str(), "char/utf8",
+                                                aerr, sizeof aerr);
+                    }
                     std::free(buf);
                     if (bin.prof_on) {
                         const std::uint64_t dh = bin.now() - t0;
@@ -2098,22 +2372,21 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                 // 动态算子按运行时类型分派：`+` 对 char 族即字符串拼接（Eq/Neq
                 // 已在上方处理；此处是 else 层的通用路径——Add 及其它）。
                 if (ins.op != rwir::Op::Add || ins.nrd != 2 ||
-                    !wire_text(w[0].d, w[0].n, &a) ||
-                    !wire_text(w[1].d, w[1].n, &b)) {
+                    !wtext(0, &a) || !wtext(1, &b)) {
                     *err = "non-scalar operand: " + ins.name;
                     return RunResult::Error;
                 }
                 const std::string out_s = a + b;
-                const std::int32_t dims[1] = {static_cast<std::int32_t>(out_s.size())};
                 std::uint8_t* buf = nullptr;
-                std::uint32_t len = 0;
+                std::uint64_t len = 0;
                 const int enc_rc =
-                    kvspaceXvalueEncode(
-                        "char/utf8",
+                    kvspaceXvalueHeadNewSlack(
                         reinterpret_cast<const std::uint8_t*>(out_s.data()),
-                        static_cast<std::uint32_t>(out_s.size()), dims, 1,
-                        &buf, &len);
-                ok = enc_rc == 0 && buf && write_reg(f, ins.wr[0], buf, len);
+                        static_cast<std::uint64_t>(out_s.size()),
+                        static_cast<std::uint64_t>(out_s.size()), &buf, &len);
+                ok = enc_rc == 0 && buf &&
+                     write_reg(f, ins.wr[0], buf,
+                               static_cast<std::uint32_t>(len));
                 std::free(buf);
                 if (bin.prof_on) {
                     const std::uint64_t dh = bin.now() - t0;
@@ -2129,8 +2402,20 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
             }
         }
         // 动态键：Ptr 参数先解引用取 target 槽值（链最多 2 跳）；int64/标量 →
-        // 十进制字符串；char 族 → 文本。
-        auto key_str = [&](const Wire& kw0, std::string* out) -> bool {
+        // 十进制字符串；char 族 → 文本。langtype 走 reg attr key（v2）。
+        auto key_str = [&](std::uint8_t ridx, std::string* out) -> bool {
+            // 纯内存 fast 缓存（帧局部 int64 键）：无 kvspace 槽、无 attr——
+            // 直取 fv 转十进制（动态键 `h·*key` 常见形态）。
+            FReg& kf = f.regs[ridx];
+            FReg& kfr = kf.src_ptr ? *kf.src_ptr : kf;
+            if (kfr.fast_i64) {
+                *out = std::to_string(kfr.fv);
+                return true;
+            }
+            Wire kw0{};
+            std::string lt;
+            if (!read_reg(f, ridx, &kw0) || !reg_langtype(f, ridx, &lt))
+                return false;
             Wire cur = kw0;
             for (int hop = 0; hop < 2; hop++) {
                 std::string target;
@@ -2142,9 +2427,10 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                     break;
                 cur.d = td;
                 cur.n = tn;
+                read_langtype(f.h, target, &lt);
             }
             Scalar sc{};
-            if (v_scalar(cur, &sc)) {
+            if (v_scalar(cur, lt, &sc)) {
                 char b[64];
                 switch (sc.k) {
                 case Scalar::K::Int:
@@ -2159,11 +2445,11 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                     break;
                 }
             }
-            return wire_text(cur.d, cur.n, out);
+            return wire_text(cur.d, cur.n, lt, out);
         };
         if (ins.op == rwir::Op::Copy) {
             // 单参普通赋值（`a -> b`，非成员读写）：src fast 缓存 → dst 直传，
-            // 免 read_reg 的 kvspaceXvalueEncode + write_reg 的整套 wire 路径。
+            // 免 read_reg 的 kvspaceXvalueToWire + write_reg 的整套 wire 路径。
             // dst 为写参别名（dst_ptr）转发调用方 reg；非别名且非帧局部才落明文。
             {
                 const RegDesc& wdesc0 = seg->regs[ins.wr[0]];
@@ -2232,10 +2518,11 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                 FReg& br0 = f.regs[ins.rd[0]];
                 FReg& br0f = br0.src_ptr ? *br0.src_ptr : br0;
                 if (read_reg(f, ins.rd[0], &bw)) {
-                    std::string bt;
+                    std::string bt, blt;
                     if (v_ptr_target(bw, &bt)) {
                         base_key = bt;
-                    } else if (wire_text(bw.d, bw.n, &bt) && !bt.empty() &&
+                    } else if (reg_langtype(f, ins.rd[0], &blt) &&
+                               wire_text(bw.d, bw.n, blt, &bt) && !bt.empty() &&
                                bt[0] == '/') {
                         // 字面量路径 base（`char/utf32:/tmp/up`）→ 直接取文本。
                         base_key = bt;
@@ -2257,10 +2544,9 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                         }
                     }
                 }
-                Wire kw{};
                 std::string kstr;
-                if (!base_key.empty() && read_reg(f, ins.rd[1], &kw) &&
-                    key_str(kw, &kstr) && !kstr.empty()) {
+                if (!base_key.empty() && key_str(ins.rd[1], &kstr) &&
+                    !kstr.empty()) {
                     // 容器成员 key = base·name（· 中点键，对齐 C kvlangKeytreeMember）。
                     // 值读用 raw（resolve=0）：成员是 Ptr 时须取 Ptr 本体（链表
                     // `cur·next -> cur` 拿指针），穿透会得到目标值。
@@ -2268,12 +2554,26 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                     const std::uint8_t* md = nullptr;
                     std::uint32_t mn = 0;
                     if (read_wire_raw(f.h, mkey, &md, &mn) && md && mn) {
+                        // 目标槽补 attr（from 成员值）：数组/非 int64 标量跨 Handoff
+                        // 续跑须从槽重建，attr 是类型唯一事实源。
+                        std::string mlt;
+                        char maerr[192] = {};
+                        FReg& mw0 = f.regs[ins.wr[0]];
+                        const bool mlt_ok = read_langtype(f.h, mkey, &mlt);
+                        if (mlt_ok && !mlt.empty()) {
+                            if (mw0.key.empty())
+                                (void)ensure_reg_key(f, mw0);
+                            if (!mw0.key.empty())
+                                (void)write_attr_lt(f.h, mw0.key.c_str(),
+                                                    mlt.c_str(), maerr,
+                                                    sizeof maerr);
+                        }
                         ok = write_reg(f, ins.wr[0], md, mn);
                     } else {
                         // 缺失成员 → None（容器成员可能未建）。
                         std::uint8_t* none = nullptr;
                         std::uint64_t nn = 0;
-                        ok = kvspaceXhNewNone(&none, &nn) == 0 && none &&
+                        ok = kvspaceXvalueHeadNewNone(&none, &nn) == 0 && none &&
                              write_reg(f, ins.wr[0], none,
                                        static_cast<std::uint32_t>(nn));
                         std::free(none);
@@ -2301,7 +2601,6 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                         kstr = keyref.substr(1, keyref.size() - 2);  // `·*"a"` → 文本 a
                     } else {
                         // 动态键变量：读帧成员值（纯内存帧局部变量走 fast 缓存）。
-                        Wire kvw{};
                         const std::string keyreg =
                             std::string("v:") + keyref;
                         std::uint8_t kridx = 255;
@@ -2319,9 +2618,8 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                                 break;
                             }
                         }
-                        if (kridx == 255 ||
-                            !read_reg(f, kridx, &kvw) ||
-                            !key_str(kvw, &kstr) || kstr.empty()) {
+                        if (kridx == 255 || !key_str(kridx, &kstr) ||
+                            kstr.empty()) {
                             *err = "member write: bad key var: " + wname;
                             return RunResult::Error;
                         }
@@ -2441,8 +2739,25 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                     *err = "member write: no value: " + ins.name;
                     return RunResult::Error;
                 }
-                ok = kvspaceSetValue(f.h, mkey.c_str(), kw.d, kw.n, 0, 0, e,
-                                     sizeof e) == 0;
+                // member 写补 attr（同 write_reg 推断）：SLACK=char/utf8、SHORT+8=int64、
+                // bool=9 字节。容器成员值（map/字符串）后续读依赖类型。
+                char aerr[192] = {};
+                if (kw.n >= KVSPACE_XVALUE_HEAD_LEN + 8 &&
+                    kw.d[6] == KVSPACE_XVALUE_ST_SLACK &&
+                    kw.d[7] == KVSPACE_XVALUE_PTR_INLINE)
+                    (void)write_attr_lt(f.h, mkey.c_str(), "char/utf8",
+                                        aerr, sizeof aerr);
+                else if (kw.n == KVSPACE_XVALUE_HEAD_LEN + 1 &&
+                         kw.d[6] == KVSPACE_XVALUE_ST_SHORT &&
+                         kw.d[7] == KVSPACE_XVALUE_PTR_INLINE)
+                    (void)write_attr_lt(f.h, mkey.c_str(), "bool", aerr,
+                                        sizeof aerr);
+                else if (kw.n >= KVSPACE_XVALUE_HEAD_LEN + 8 &&
+                         kw.d[6] == KVSPACE_XVALUE_ST_SHORT &&
+                         kw.d[7] == KVSPACE_XVALUE_PTR_INLINE)
+                    (void)write_attr_lt(f.h, mkey.c_str(), "int64", aerr,
+                                        sizeof aerr);
+                ok = kvspaceSetValue(f.h, mkey.c_str(), kw.d, kw.n, e, sizeof e) == 0;
             } else {
                 // 普通单参赋值（`a -> b`）：复制**槽本体**（Ptr 不穿透——链表
                 // `head -> cur` 复制指针，穿透会拿到目标实例）。普通值 raw 同值。
@@ -2464,9 +2779,9 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                         tk = tk->dst_ptr;
                     std::string lt;
                     if (!tk->key.empty() &&
+                        read_langtype(f.h, tk->key, &lt) &&
                         read_wire_raw(f.h, tk->key, &rawd, &rawn) && rawd &&
-                        rawn > KVSPACE_XH_PREFIX && !v_ptr(Wire{rawd, rawn}) &&
-                        v_langtype(Wire{rawd, rawn}, &lt)) {
+                        !v_ptr(Wire{rawd, rawn})) {
                         const auto t = bin.langtype_of(lt.data(), lt.size());
                         const bool scalar = t >= bin::LangType::Int8 &&
                                             t <= bin::LangType::CharAscii;
@@ -2487,14 +2802,35 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                     read_wire_raw(f.h, srf.key, &rawd, &rawn) && rawd && rawn) {
                     src.d = rawd;
                     src.n = rawn;
+                    // 源槽类型复制到目标槽（Copy 慢路径：目标无 attr，源有则补）。
+                    std::string lt;
+                    char ae[192] = {};
+                    FReg& wt0 = regs[ins.wr[0]];
+                    if (reg_langtype(f, ins.rd[0], &lt) && !lt.empty()) {
+                        if (wt0.key.empty())
+                            (void)ensure_reg_key(f, wt0);
+                        if (!wt0.key.empty())
+                            (void)write_attr_lt(f.h, wt0.key.c_str(),
+                                                lt.c_str(), ae, sizeof ae);
+                    }
                     ok = write_reg(f, ins.wr[0], src.d, src.n);
                 } else if (read_reg(f, ins.rd[0], &src)) {
+                    std::string lt;
+                    char ae[192] = {};
+                    FReg& wt1 = regs[ins.wr[0]];
+                    if (reg_langtype(f, ins.rd[0], &lt) && !lt.empty()) {
+                        if (wt1.key.empty())
+                            (void)ensure_reg_key(f, wt1);
+                        if (!wt1.key.empty())
+                            (void)write_attr_lt(f.h, wt1.key.c_str(),
+                                                lt.c_str(), ae, sizeof ae);
+                    }
                     ok = write_reg(f, ins.wr[0], src.d, src.n);
                 } else {
                     // 未赋值变量读作 None：整体写 None XValue，不是错误。
                     std::uint8_t* none = nullptr;
                     std::uint64_t nn = 0;
-                    ok = kvspaceXhNewNone(&none, &nn) == 0 && none &&
+                    ok = kvspaceXvalueHeadNewNone(&none, &nn) == 0 && none &&
                          write_reg(f, ins.wr[0], none,
                                    static_cast<std::uint32_t>(nn));
                     std::free(none);
@@ -2709,10 +3045,10 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
         std::uint32_t n = 0;
         if (!read_wire(f.h, pk, &d, &n))
             return false;
-        // 槽值 = XValue（head 的 langtype 即 "def langtype"，body=名字\0类型串）。
-        // 先解 head 取 body 文本，再按名字\0类型 拆。
+        // 槽值 = XValue（langtype 即 "def langtype"，body=名字\0类型串）。
+        // 先解 body 文本，再按名字\0类型 拆。
         std::string txt;
-        if (!wire_text(d, n, &txt))
+        if (!wire_text(d, n, "def langtype", &txt))
             return false;
         const auto nul = txt.find('\0');
         if (nul == std::string::npos) {
@@ -2762,7 +3098,14 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
         // 标量参数必须建 kvspace 槽保证重启后可解析（prime_sieve println 坑）。
         // A read alias forwards the caller reg's cached value; a caller reg bound
         // through kvspace has none, so its value goes through an arg slot instead.
-        if (mem_frame && scalar_arg && (x > 0 || holds_value(caller_reg))) {
+        // `*T` 指针参数（struct/链表头）也走内存别名：值=调用方 Ptr wire，
+        // src_ptr 链可解引用（mem_frame 不落 arg 槽，走槽会读空）。
+        const bool ptr_alias = scalar_arg || typ[0] == '*';
+        // `*T` 指针参数：值=调用方 Ptr wire（非 fast），直接挂内存别名——
+        // mem_frame 不落 arg 槽，走槽会读空（链表 `show_list(&n1)` 头指针）。
+        const bool want_alias =
+            x > 0 || holds_value(caller_reg) || typ[0] == '*';
+        if (mem_frame && ptr_alias && want_alias) {
             if (x < 0) {
                 const std::size_t ix = static_cast<std::size_t>(-x - 1);
                 mem_src[ix] = caller_reg;
@@ -2792,9 +3135,11 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
             }
             mk_done = true;
         }
-        if (x < 0 && !container_arg) {
+        if (x < 0 && (!container_arg || typ[0] == '*')) {
             // Ptr 类型读参（`*T`）：arg 槽存 Ptr→调用方槽（`求和(a)` 的 a 是
             // 值实例；&n3 已 Ptr 则链 Ptr→target）。slot 恒 Ptr→arg。
+            // 容器但 `*` 前缀（`chars:*[int64]·[]char/utf32`）：仍 Ptr 绑定
+            // （arg 槽 Ptr→实例，容器值拷贝会丢实例键）。
             if (typ.size() >= 2 && typ[0] == '*') {
                 const std::uint8_t* pd = src.d;
                 std::uint32_t pn = src.n;
@@ -2825,8 +3170,7 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
                     *err = "bind: read arg value failed: " + value_key;
                     return false;
                 }
-                bool bok2 = kvspaceSetValue(f.h, arg_key.c_str(), ap, an, 0, 0,
-                                            be, sizeof be) == 0;
+                bool bok2 = kvspaceSetValue(f.h, arg_key.c_str(), ap, an, be, sizeof be) == 0;
                 std::free(ap);
                 if (!bok2) {
                     *err = std::string("bind: set arg failed: ") + be;
@@ -2840,8 +3184,7 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
                     *err = "bind: NewPtr(slot) failed";
                     return false;
                 }
-                bok3 = kvspaceSetValue(f.h, slot.c_str(), sp, sn, 0, 0, be,
-                                       sizeof be) == 0;
+                bok3 = kvspaceSetValue(f.h, slot.c_str(), sp, sn, be, sizeof be) == 0;
                 std::free(sp);
                 if (!bok3)
                     *err = std::string("bind: set slot failed: ") + be;
@@ -2853,8 +3196,21 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
                 *err = "bind: read arg value failed: " + value_key;
                 return false;
             }
-            if (kvspaceSetValue(f.h, arg_key.c_str(), vd, vn, 0, 0, be,
-                                sizeof be) != 0) {
+            // arg 槽 attr 用实参实际类型（调用方槽的 attr，含真实 dims）——
+            // 数组参数 `a:[]int64` 的声明无 dims，at/numel 按实际 dims 解析；
+            // 无实参 attr 才退回声明 typ（标量/路径字面量）。
+            std::string arg_lt;
+            if (!value_key.empty() && value_key[0] == '/') {
+                if (!read_langtype(f.h, value_key.c_str(), &arg_lt))
+                    arg_lt.clear();
+            }
+            if (arg_lt.empty())
+                arg_lt = typ;
+            if (!write_attr_lt(f.h, arg_key.c_str(), arg_lt.c_str(), be, sizeof be)) {
+                *err = std::string("bind: set arg attr failed: ") + be;
+                return false;
+            }
+            if (kvspaceSetValue(f.h, arg_key.c_str(), vd, vn, be, sizeof be) != 0) {
                 *err = std::string("bind: set arg value failed: ") + be;
                 return false;
             }
@@ -2865,8 +3221,7 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
                 *err = "bind: NewPtr(slot) failed";
                 return false;
             }
-            bok = kvspaceSetValue(f.h, slot.c_str(), sp, sn, 0, 0, be,
-                                  sizeof be) == 0;
+            bok = kvspaceSetValue(f.h, slot.c_str(), sp, sn, be, sizeof be) == 0;
             std::free(sp);
             if (!bok)
                 *err = std::string("bind: set slot failed: ") + be;
@@ -2890,8 +3245,8 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
             std::free(a);
             return false;
         }
-        bok = kvspaceSetValue(f.h, arg_key.c_str(), a, an, 0, 0, be, sizeof be) == 0 &&
-              kvspaceSetValue(f.h, slot.c_str(), sp, sn, 0, 0, be, sizeof be) == 0;
+        bok = kvspaceSetValue(f.h, arg_key.c_str(), a, an, be, sizeof be) == 0 &&
+              kvspaceSetValue(f.h, slot.c_str(), sp, sn, be, sizeof be) == 0;
         if (!bok)
             *err = std::string("bind: set failed: ") + be;
         std::free(a);
@@ -2931,20 +3286,19 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
             rd.name[0] == '/') {
             const std::string pt = rd.name;
             std::uint8_t* pb = nullptr;
-            std::uint32_t pl = 0;
-            if (kvspaceXvalueEncode(
-                    "char/utf8",
+            std::uint64_t pl64 = 0;
+            if (kvspaceXvalueHeadNewSlack(
                     reinterpret_cast<const std::uint8_t*>(pt.data()),
-                    static_cast<std::uint32_t>(pt.size()), nullptr, 0, &pb,
-                    &pl) != 0 ||
+                    static_cast<std::uint64_t>(pt.size()),
+                    static_cast<std::uint64_t>(pt.size()), &pb, &pl64) != 0 ||
                 !pb) {
-                *err = "call: path arg encode failed";
+                *err = "call: path arg to_wire failed";
                 return RunResult::Error;
             }
+            std::uint32_t pl = static_cast<std::uint32_t>(pl64);
             vk = nf + "/._lit" + std::to_string(i);
             char be[192] = {};
-            const bool okk = kvspaceSetValue(f.h, vk.c_str(), pb, pl, 0, 0, be,
-                                             sizeof be) == 0;
+            const bool okk = kvspaceSetValue(f.h, vk.c_str(), pb, pl, be, sizeof be) == 0;
             std::free(pb);
             if (!okk) {
                 *err = std::string("call: literal arg failed: ") + be;
@@ -2961,8 +3315,7 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
         } else if (rd.kind == Operand::Kind::Literal) {
             vk = nf + "/._lit" + std::to_string(i);
             char be[192] = {};
-            if (kvspaceSetValue(f.h, vk.c_str(), vw.d, vw.n, 0, 0, be,
-                                sizeof be) != 0) {
+            if (kvspaceSetValue(f.h, vk.c_str(), vw.d, vw.n, be, sizeof be) != 0) {
                 *err = std::string("call: literal arg failed: ") + be;
                 return RunResult::Error;
             }
@@ -2973,7 +3326,7 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
             vk = rr.key;
         }
         typ.clear();
-        if (!decl_type(-i, &typ) && !v_langtype(vw, &typ))
+        if (!decl_type(-i, &typ) && !reg_langtype(f, ins.rd[i], &typ))
             typ = "int64";
         if (!bind_arg(-i, &f.regs[ins.rd[i]], vk, typ, vw))
             return RunResult::Error;

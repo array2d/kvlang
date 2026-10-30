@@ -15,6 +15,23 @@ extern "C" {
 #include "valueio.hpp"
 #include <kvspace/xvalue_head.h>
 
+/* v2 head 构造器：系统头装 v2 前由本地声明桥接（v2 头已带 KVSPACE_XVALUE_HEAD_LEN）。 */
+#ifndef KVSPACE_XVALUE_HEAD_LEN
+extern "C" {
+int kvspaceXvalueHeadNewNone(uint8_t **out, uint64_t *out_len);
+int kvspaceXvalueHeadNewScalar(uint8_t storetype, const uint8_t *raw,
+                               uint32_t raw_len, uint8_t **out,
+                               uint64_t *out_len);
+int kvspaceXvalueHeadNewSlack(const uint8_t *data, uint64_t data_len,
+                              uint64_t cap, uint8_t **out, uint64_t *out_len);
+int kvspaceXvalueHeadNewTensor(const uint64_t *dims, uint32_t ndim,
+                               const uint8_t *raw, uint64_t raw_len,
+                               uint8_t **out, uint64_t *out_len);
+int kvspaceXvalueHeadNewCode(const uint8_t *body, uint64_t body_len,
+                             uint64_t cap, uint8_t **out, uint64_t *out_len);
+}
+#endif
+
 #include "vmkv.hpp"
 #include "runtime.hpp"
 
@@ -97,14 +114,46 @@ namespace {
 
 bool set_wire(void* h, const std::string& key, const char* kind,
               const std::uint8_t* raw, std::uint32_t len) {
+    /* 上层写 attr key（attr 先落、x 后落）：x‥langtype = 字符串 XValue
+       （SLACK，body=明文类型串）。kvspace 层不代写 attr。 */
+    if (*kind) {
+        char ltkey[1028];
+        int ltn = snprintf(ltkey, sizeof ltkey, "%s\xE2\x80\xA5" "langtype",
+                           key.c_str());
+        if (ltn < 0 || ltn >= (int)sizeof ltkey)
+            return false;
+        std::uint8_t* lv = nullptr;
+        std::uint64_t lvn = 0;
+        int lrc = kvspaceXvalueHeadNewSlack(
+            reinterpret_cast<const std::uint8_t*>(kind),
+            static_cast<std::uint64_t>(std::strlen(kind)),
+            static_cast<std::uint64_t>(std::strlen(kind)), &lv, &lvn);
+        if (lrc != 0 || !lv || lvn > UINT32_MAX) {
+            if (lv) std::free(lv);
+            return false;
+        }
+        char lerr[192] = {};
+        int lk = kvspaceSetValue(h, ltkey, lv, static_cast<std::uint32_t>(lvn),
+                                 lerr, sizeof lerr);
+        std::free(lv);
+        if (lk != 0)
+            return false;
+    }
     std::uint8_t* buf = nullptr;
-    std::uint32_t n = 0;
-    if (kvspaceXvalueEncode(kind, raw, len, nullptr, 0, &buf, &n) != 0 || !buf)
+    std::uint64_t n64 = 0;
+    int rc = 0;
+    if (strcmp(kind, "rwir") == 0 || strcmp(kind, "def rwir") == 0 ||
+        strcmp(kind, "def langtype") == 0)
+        rc = kvspaceXvalueHeadNewCode(raw, len, len, &buf, &n64);
+    else
+        rc = kvspaceXvalueHeadNewScalar(0, raw, len, &buf, &n64);
+    if (rc != 0 || !buf || n64 > UINT32_MAX)
         return false;
     char err[192] = {};
-    int rc = kvspaceSetValue(h, key.c_str(), buf, n, 1, 0, err, sizeof err);
+    int srv = kvspaceSetValue(h, key.c_str(), buf,
+                              static_cast<std::uint32_t>(n64), err, sizeof err);
     std::free(buf);
-    return rc == 0;
+    return srv == 0;
 }
 
 bool write_sig(void* h, const std::string& base, int x, const char* lt,

@@ -9,6 +9,23 @@
 #include <kvspace/kvspace.h>
 #include <kvspace/xvalue_head.h>
 
+/* v2 head 构造器：系统头装 v2 前由本地声明桥接（v2 头已带 KVSPACE_XVALUE_HEAD_LEN）。 */
+#ifndef KVSPACE_XVALUE_HEAD_LEN
+extern "C" {
+int kvspaceXvalueHeadNewNone(uint8_t **out, uint64_t *out_len);
+int kvspaceXvalueHeadNewScalar(uint8_t storetype, const uint8_t *raw,
+                               uint32_t raw_len, uint8_t **out,
+                               uint64_t *out_len);
+int kvspaceXvalueHeadNewSlack(const uint8_t *data, uint64_t data_len,
+                              uint64_t cap, uint8_t **out, uint64_t *out_len);
+int kvspaceXvalueHeadNewTensor(const uint64_t *dims, uint32_t ndim,
+                               const uint8_t *raw, uint64_t raw_len,
+                               uint8_t **out, uint64_t *out_len);
+int kvspaceXvalueHeadNewCode(const uint8_t *body, uint64_t body_len,
+                             uint64_t cap, uint8_t **out, uint64_t *out_len);
+}
+#endif
+
 namespace kvlang::runtimec2 {
 namespace {
 
@@ -30,11 +47,6 @@ void put_utf8(std::string* out, std::uint32_t cp) {
         out->push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
         out->push_back(static_cast<char>(0x80 | (cp & 0x3F)));
     }
-}
-
-bool langtype_has(const kvspaceXh& xh, std::string_view what) {
-    return std::string_view(reinterpret_cast<const char*>(xh.langtype), xh.langtype_len)
-               .find(what) != std::string_view::npos;
 }
 
 }  // namespace
@@ -113,28 +125,21 @@ bool vc_live(void* h) {
 }
 
 // Whole wire length for scalars and tensors, whose validity kvspaceGet decides
-// from the head alone (plus the bool byte); 0 = read through kvspaceGet.
+// from the head alone; 0 = read through kvspaceGet.
 std::uint32_t wire_total(const kvspaceViewToken_t& t) {
-    const std::uint8_t* hd = t.head;
-    const std::uint8_t kind = hd[1];
-    std::uint64_t a = 0, b = 0;
-    std::memcpy(&a, hd + 2, 8);
-    std::memcpy(&b, hd + 10, 8);
-    std::uint64_t cap;
-    if (kind == KVSPACE_XH_FIXED_SMALL) {
-        if (t.headlen <= KVSPACE_XH_PREFIX || hd[KVSPACE_XH_PREFIX] == 0)
-            return 0;
-        cap = t.value_len;
-    } else if (kind == KVSPACE_XH_FIXED_LARGE) {
-        cap = a * b;
-    } else {
+    if (t.headlen != KVSPACE_XVALUE_HEAD_LEN)
         return 0;
-    }
-    const std::uint64_t total = t.headlen + cap;
+    const std::uint8_t* hd = t.head;
+    const std::uint8_t st = hd[6];
+    /* 只缓存 SHORT/LARGE 定长值（SLACK 长度可变，视图缓存会 stale）。 */
+    if (st != KVSPACE_XVALUE_ST_SHORT && st != KVSPACE_XVALUE_ST_LARGE)
+        return 0;
+    std::uint64_t len = kvspaceXvalueHeadLen(
+        reinterpret_cast<const kvspaceXvalueHead*>(hd));
+    const std::uint64_t total = (std::uint64_t)t.headlen + len;
     if (total > t.cap || total > 0x7fffffffu)
         return 0;
-    kvspaceXh xh{};
-    return kvspaceXhDecode(t.head, total, &xh) == 0 ? static_cast<std::uint32_t>(total) : 0;
+    return static_cast<std::uint32_t>(total);
 }
 
 }  // namespace
@@ -187,10 +192,7 @@ bool read_wire_raw(void* h, std::string_view key, const std::uint8_t** data,
                                                  ? e.tok.headlen
                                                  : sizeof e.head);
             std::memcpy(e.head, e.tok.head, e.hn);
-            e.is_bool = e.tok.head[1] == KVSPACE_XH_FIXED_SMALL &&
-                        std::strncmp(reinterpret_cast<const char*>(e.tok.head) +
-                                         KVSPACE_XH_PREFIX,
-                                     "bool", e.tok.headlen - KVSPACE_XH_PREFIX) == 0;
+            e.is_bool = false; /* v2 head 不含 langtype，无法从 wire 判 bool */
             *data = e.tok.head;
             *len = e.total;
             g_vc.m.emplace(std::string(key), e);
@@ -208,64 +210,82 @@ slow:
     return d != nullptr && n > 0;
 }
 
+bool read_langtype(void* h, std::string_view key, std::string* out) noexcept {
+    out->clear();
+    auto k = keyz(key);
+    kvspaceHead_t head{};
+    if (kvspaceGetHead(h, k.c_str(), &head) != 0 || head.langtype_len <= 0)
+        return false;
+    out->assign(head.langtype, static_cast<std::size_t>(head.langtype_len));
+    return true;
+}
+
 bool read_text(void* h, std::string_view key, std::string* out) noexcept {
+    std::string lt;
+    // 系统键（末段含 ‥：status/pc/msg/‥lib/…）无 attr——无类型，按纯字节文本读。
+    // 有 attr 则按 langtype 解码（char/utf32 → UTF-8）。缺失 attr 不是错误。
+    read_langtype(h, key, &lt);
     const std::uint8_t* d = nullptr;
     std::uint32_t n = 0;
     if (!read_wire(h, key, &d, &n))
         return false;
-    return wire_text(d, n, out);
+    return wire_text(d, n, lt, out);
 }
 
-bool wire_text(const std::uint8_t* d, std::uint32_t n, std::string* out) noexcept {
-    kvspaceXh xh{};
-    if (kvspaceXhDecode(d, n, &xh) != 0)
+bool wire_text(const std::uint8_t* d, std::uint32_t n,
+               std::string_view langtype, std::string* out) noexcept {
+    if (!d || n < KVSPACE_XVALUE_HEAD_LEN)
         return false;
+    std::uint64_t len = kvspaceXvalueHeadLen(
+        reinterpret_cast<const kvspaceXvalueHead*>(d));
+    const std::uint8_t* b = d + KVSPACE_XVALUE_HEAD_LEN;
     out->clear();
-    if (langtype_has(xh, "char/utf32")) {
-        const auto* p = reinterpret_cast<const std::uint32_t*>(xh.body);
-        for (std::uint64_t i = 0; i < xh.content_len / 4; i++)
+    if (langtype.find("char/utf32") != std::string_view::npos) {
+        const auto* p = reinterpret_cast<const std::uint32_t*>(b);
+        for (std::uint64_t i = 0; i < len / 4; i++)
             put_utf8(out, p[i]);
         return true;
     }
-    out->assign(reinterpret_cast<const char*>(xh.body), xh.content_len);
+    out->assign(reinterpret_cast<const char*>(b), static_cast<std::size_t>(len));
     return true;
 }
 
 bool write_text(void* h, std::string_view key, std::string_view text) noexcept {
-    const std::int32_t dims[1] = {static_cast<std::int32_t>(text.size())};
     std::uint8_t* buf = nullptr;
-    std::uint32_t len = 0;
-    if (kvspaceXvalueEncode("char/utf8",
-                            reinterpret_cast<const std::uint8_t*>(text.data()),
-                            static_cast<std::uint32_t>(text.size()), dims, 1, &buf,
-                            &len) != 0 ||
+    std::uint64_t len = 0;
+    if (kvspaceXvalueHeadNewSlack(
+            reinterpret_cast<const std::uint8_t*>(text.data()),
+            static_cast<std::uint64_t>(text.size()),
+            static_cast<std::uint64_t>(text.size()), &buf, &len) != 0 ||
         !buf)
         return false;
     auto k = keyz(key);
     char err[192] = {};
-    int rc = kvspaceSetValue(h, k.c_str(), buf, len, 0, 0, err, sizeof err);
+    int rc = kvspaceSetValue(h, k.c_str(), buf, static_cast<std::uint32_t>(len), err, sizeof err);
     std::free(buf);
     return rc == 0;
 }
 
 bool read_rwir(void* h, std::string_view key, std::string* op, int* nr,
                int* nw) noexcept {
+    std::string lt;
+    if (!read_langtype(h, key, &lt) || lt != "rwir")
+        return false;
     const std::uint8_t* d = nullptr;
     std::uint32_t n = 0;
     if (!read_wire(h, key, &d, &n))
         return false;
-    kvspaceXh xh{};
-    if (kvspaceXhDecode(d, n, &xh) != 0)
+    if (!d || n < KVSPACE_XVALUE_HEAD_LEN)
         return false;
-    if (xh.langtype_len != 4 || std::memcmp(xh.langtype, "rwir", 4) != 0)
+    std::uint64_t clen = kvspaceXvalueHeadLen(
+        reinterpret_cast<const kvspaceXvalueHead*>(d));
+    if (clen < 5)
         return false;
-    if (!xh.body || xh.content_len < 5)
-        return false;
-    const std::uint8_t* b = xh.body;
+    const std::uint8_t* b = d + KVSPACE_XVALUE_HEAD_LEN;
     *nr = static_cast<int>(b[0] | (b[1] << 8));
     *nw = static_cast<int>(b[2] | (b[3] << 8));
     const char* opb = reinterpret_cast<const char*>(b + 5);
-    std::size_t opn = 0, cap = static_cast<std::size_t>(xh.content_len - 5);
+    std::size_t opn = 0, cap = static_cast<std::size_t>(clen - 5);
     while (opn < cap && opb[opn] != '\0')
         opn++;
     op->assign(opb, opn);
@@ -274,22 +294,24 @@ bool read_rwir(void* h, std::string_view key, std::string* op, int* nr,
 
 bool read_rwfunc(void* h, std::string_view key, std::string* name, int* nr,
                  int* nw) noexcept {
+    std::string lt;
+    if (!read_langtype(h, key, &lt) || lt != "rwfunc")
+        return false;
     const std::uint8_t* d = nullptr;
     std::uint32_t n = 0;
     if (!read_wire(h, key, &d, &n))
         return false;
-    kvspaceXh xh{};
-    if (kvspaceXhDecode(d, n, &xh) != 0)
+    if (!d || n < KVSPACE_XVALUE_HEAD_LEN)
         return false;
-    if (xh.langtype_len != 6 || std::memcmp(xh.langtype, "rwfunc", 6) != 0)
+    std::uint64_t clen = kvspaceXvalueHeadLen(
+        reinterpret_cast<const kvspaceXvalueHead*>(d));
+    if (clen < 5)
         return false;
-    if (!xh.body || xh.content_len < 5)
-        return false;
-    const std::uint8_t* b = xh.body;
+    const std::uint8_t* b = d + KVSPACE_XVALUE_HEAD_LEN;
     *nr = static_cast<int>(b[0] | (b[1] << 8));
     *nw = static_cast<int>(b[2] | (b[3] << 8));
     const char* nb = reinterpret_cast<const char*>(b + 5);
-    std::size_t cap = static_cast<std::size_t>(xh.content_len - 5), len = 0;
+    std::size_t cap = static_cast<std::size_t>(clen - 5), len = 0;
     while (len < cap && nb[len] != '\0')
         len++;
     name->assign(nb, len);

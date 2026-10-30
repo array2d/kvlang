@@ -133,7 +133,7 @@ struct FReg {
     // hash_table 动态键 `L·*k` 每次免 kvspace read_wire_raw 检查）。写后失效。
     bool base_ptr = false;
     bool base_ptr_known = false;
-    // compact 数组布局缓存（xv·at/set 首次 decode 后复用：dims/esz/kind 恒定，
+    // compact 数组布局缓存（xv·at/set 首次解析后复用：dims/esz/kind 恒定，
     // quicksort 1728 次 at + 1492 次 set 免每次 strtoll/substr 解析）。
     std::uint32_t arr_esz = 0;
     std::int32_t arr_dims[8] = {};

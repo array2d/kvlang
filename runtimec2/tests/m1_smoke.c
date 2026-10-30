@@ -11,17 +11,20 @@
 #include "kvlang_runtime.h"
 #include "kvlang_vthread.h"
 
+extern int kvspaceXvalueHeadNewSlack(const uint8_t *data, uint64_t data_len,
+                                     uint64_t cap, uint8_t **out,
+                                     uint64_t *out_len);
+
 static void set_pc(void *kv, const char *vid, const char *pc) {
     char key[512];
     snprintf(key, sizeof key, "/vthread/%s/\xE2\x80\xA5pc", vid);
-    int32_t dims[1] = {(int32_t)strlen(pc)};
     uint8_t *buf = NULL;
-    uint32_t len = 0;
-    if (kvspaceXvalueEncode("char/utf8", (const uint8_t *)pc, (uint32_t)strlen(pc),
-                            dims, 1, &buf, &len) != 0)
+    uint64_t len64 = 0;
+    if (kvspaceXvalueHeadNewSlack((const uint8_t *)pc, (uint64_t)strlen(pc),
+                                  (uint64_t)strlen(pc), &buf, &len64) != 0)
         return;
     char err[192] = {0};
-    kvspaceSetValue(kv, key, buf, len, 0, 0, err, sizeof err);
+    kvspaceSetValue(kv, key, buf, (uint32_t)len64, err, sizeof err);
     free(buf);
 }
 
@@ -52,12 +55,11 @@ int main(int argc, char **argv) {
             snprintf(mk, sizeof mk, "/vthread/%s/\xE2\x80\xA5msg", vid);
             uint8_t *md = NULL;
             uint32_t mn = 0;
-            kvspaceXh xh;
-            memset(&xh, 0, sizeof xh);
             if (kvspaceGet(kv, mk, 1, &md, &mn) == 0 && md && mn &&
-                kvspaceXhDecode(md, mn, &xh) == 0 && xh.body)
+                mn >= KVSPACE_XVALUE_HEAD_LEN)
                 fprintf(stderr, "execute failed rc=%d: %.*s\n", rc,
-                        (int)xh.content_len, (const char *)xh.body);
+                        (int)kvspaceXvalueHeadLen((const kvspaceXvalueHead *)md),
+                        (const char *)(md + KVSPACE_XVALUE_HEAD_LEN));
             else
                 fprintf(stderr, "execute failed rc=%d\n", rc);
             return 1;

@@ -84,9 +84,10 @@ bool operand_desc(void* h, const std::string& key, RegDesc* out) {
         const std::uint8_t* d = nullptr;
         std::uint32_t n = 0;
         std::string lt, txt;
-        if (read_wire_raw(h, key, &d, &n) && d && n &&
-            v_langtype(Wire{d, n}, &lt) && lt.find("char/") != std::string::npos &&
-            wire_text(d, n, &txt) && !txt.empty() && txt[0] == '/')
+        if (read_langtype(h, key, &lt) &&
+            lt.find("char/") != std::string::npos &&
+            read_wire_raw(h, key, &d, &n) && d && n &&
+            wire_text(d, n, lt, &txt) && !txt.empty() && txt[0] == '/')
             out->name = txt;
     }
     return true;
@@ -242,11 +243,14 @@ bool build(void* h, const std::string& func_dir, Segment* out) {
     for (std::size_t i = 0; i < out->regs.size(); i++) {
         const RegDesc& d = out->regs[i];
         if (d.kind == Operand::Kind::Literal) {
+            std::string lt;
+            if (!read_langtype(h, d.slot_key, &lt))
+                continue;
             const std::uint8_t* dd = nullptr;
             std::uint32_t dn = 0;
             if (read_wire(h, d.slot_key, &dd, &dn)) {
                 Scalar sc{};
-                if (v_scalar(Wire{dd, dn}, &sc) && sc.k == Scalar::K::Int &&
+                if (v_scalar(Wire{dd, dn}, lt, &sc) && sc.k == Scalar::K::Int &&
                     sc.width == 8) {
                     out->lit[i].is_i64 = true;
                     out->lit[i].v = sc.i;
