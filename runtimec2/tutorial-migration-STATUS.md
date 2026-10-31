@@ -17,9 +17,9 @@ array 两种物理形态彻底分离为两个 lib，**创建新 key/XValue 的 r
 - `02-kvspace模型/07-数组两种物理形态`、`04-layout语义/06-控制流脱糖`、`05-runtime语义/03-成员访问`、`05-runtimec内建`、`附录/07-内建函数`
 
 ### ISA
-- `layout/tests/fixtures/isa_native.txt`：换名 + 新增 6 行（count 299→305，hash 已重算）
+- native 算子清单 fixture：2026-10-31 #583 已删除（ISA 不是 kvlang 概念）
 - `runtime/src/isa_sig.c`：注释换名（位置表未加新行——**static_assert 300 行断言需同步**）
-- `runtimec2/src/rwir_gen.cpp`：已用 `tools/gen_ops.py` 重新生成（新名 Native）
+- `runtimec2/src/rwir_gen.cpp`：表即代码，手写维护（#583 删除生成链）
 
 ### layout（Rust）
 - `layout/src/{ast,code,lower,parser}.rs`：全部旧名换新名（批量替换，已 cargo build 通过）
