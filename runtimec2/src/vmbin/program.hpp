@@ -2,6 +2,8 @@
 
 #include <cstdint>
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "langtype.hpp"
@@ -42,34 +44,39 @@ static_assert(sizeof(RegisterDesc) == 64,
 
 struct Program;
 
-struct Instruction {
-    rwir::Op op = rwir::Op::None;
-    rwir::Kind kind = rwir::Kind::None;
-    rwir::Impl impl = rwir::Impl::None;
-    rwir::RwirHandlerId handler = rwir::RwirHandlerId::None;
-    std::uint8_t width = 0;
-    std::uint8_t opfn = 0;
-    bool fast_i64 = false;
-    std::uint8_t nrd = 0, nwr = 0;
-    std::uint8_t rd[16] = {};
-    std::uint8_t wr[4] = {};
-    bool wr_local = false;
-    std::uint16_t prof_id = 0;
-    int s0 = 0;
-    std::uint16_t rwir_id = 0xFFFF;    // rwir::RwirId（表下标；≥0x8000 = extra 池）
-    std::uint16_t callee_id = 0xFFFF;  // Program::callees 池下标（仅 call 指令）
-    mutable const Program* call_seg = nullptr;
-    mutable const void* call_jit = nullptr;
-    mutable bool call_ready = false;
-    mutable std::vector<std::string> call_rtyp;
-    mutable std::vector<std::string> call_wtyp;
-    mutable std::vector<std::uint8_t> call_rtyp_ok, call_wtyp_ok;
-    mutable int mw_keyreg = -2, mw_basereg = -2;
+struct Instruction {                    // 34B（align 2）
+    std::uint16_t rwir_id = 0xFFFF;    // 0  rwir::RwirId（表下标；≥0x8000 = extra 池）
+    rwir::RwirHandlerId handler = rwir::RwirHandlerId::None;  // 2
+    std::uint16_t call_site = 0xFFFF;  // 4  Program::call_sites 下标（仅 call）
+    rwir::Op op = rwir::Op::None;      // 6
+    rwir::Kind kind = rwir::Kind::None;  // 7
+    rwir::Impl impl = rwir::Impl::None;  // 8
+    std::uint8_t width = 0;            // 9
+    std::uint8_t opfn = 0;             // 10  fast kernel 跳表号
+    std::uint8_t fast_i64 : 1 = 0;     // 11  int64 快路
+    std::uint8_t wr_local : 1 = 0;     //     写参帧局部
+    std::uint8_t nrd = 0;              // 12
+    std::uint8_t nwr = 0;              // 13
+    std::uint8_t rd[16] = {};          // 14..29
+    std::uint8_t wr[4] = {};           // 30..33
 };
+
+static_assert(sizeof(Instruction) == 34,
+              "Instruction must stay 34 bytes (slim decode view)");
 
 struct FastLiteral {
     bool is_i64 = false;
     std::int64_t v = 0;
+};
+
+// 调用点缓存：一条 call 指令一项（其余指令不占内存）。
+struct CallSite {
+    std::uint16_t callee_id = 0xFFFF;  // Program::callees 池下标
+    const Program* segment = nullptr;  // callee 段
+    const void* jit = nullptr;         // callee JIT 入口
+    bool ready = false;
+    std::vector<std::string> read_types, write_types;
+    std::vector<std::uint8_t> read_types_ok, write_types_ok;
 };
 
 struct Program {
@@ -78,6 +85,13 @@ struct Program {
     std::vector<FastLiteral> lit;
     std::vector<std::string> callees;          // call 目标路径池（callee_id）
     std::vector<std::string> extra_rwir_names;  // 非 myrwircaps 条目（扩展算子）
+    mutable std::vector<CallSite> call_sites;  // 调用点缓存（call_site 下标）
+    // 成员写缓存：指令下标 → key/base 寄存器；-2 = 未解析。
+    struct MemberWriteCache {
+        std::int16_t key_register = -2;
+        std::int16_t base_register = -2;
+    };
+    mutable std::unordered_map<std::uint32_t, MemberWriteCache> member_write_cache;
     bool has_rwirhandler = false;
 };
 
@@ -95,16 +109,30 @@ inline const char* instruction_name(const Program& seg,
                : "<ext>";
 }
 
+// 指令 pc = 下标 + 1：与原 s0 不变量一致（kvspace pc 路径 [s0,·]）。
+inline int instruction_pc(std::size_t index) noexcept {
+    return static_cast<int>(index) + 1;
+}
+
+// PROF 统计键：表内 rwir 用其 id；扩展算子归入 <ext> 桶（kMyrwircapsN）。
+inline std::uint16_t instruction_prof_id(const Instruction& ins) noexcept {
+    return ins.rwir_id < kRwirIdExtraBase
+               ? ins.rwir_id
+               : static_cast<std::uint16_t>(rwir::kMyrwircapsN);
+}
+
 inline bool instruction_is(const Instruction& ins, rwir::RwirId id) noexcept {
     return ins.rwir_id == static_cast<std::uint16_t>(id);
 }
 
-// call 目标路径（建段期已预解析为最终 /lib/…）。
+// call 目标路径（建段期已预解析为最终 /lib/…；存于调用点表）。
 inline const std::string& instruction_callee(const Program& seg,
                                              const Instruction& ins) noexcept {
     static const std::string kEmpty;
-    return ins.callee_id < seg.callees.size() ? seg.callees[ins.callee_id]
-                                              : kEmpty;
+    if (ins.call_site >= seg.call_sites.size())
+        return kEmpty;
+    const std::uint16_t callee_id = seg.call_sites[ins.call_site].callee_id;
+    return callee_id < seg.callees.size() ? seg.callees[callee_id] : kEmpty;
 }
 
 }  // namespace kvlang::runtimec2::vmbin

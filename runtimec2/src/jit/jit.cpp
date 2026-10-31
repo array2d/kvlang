@@ -51,7 +51,8 @@ bool verify(const Segment* seg, JitShape* sh, JitRefusal* refusal) {
             std::fprintf(stderr,
                          "[jitdbg insn %zu s0=%d op=%s opfn=%d nrd=%u nwr=%u "
                          "rd=%d,%d,%d wr=%d,%d,%d]\n",
-                         i, ci.s0, instruction_name(*seg, ci), (int)ci.opfn, ci.nrd, ci.nwr,
+                         i, vmbin::instruction_pc(i), instruction_name(*seg, ci),
+                         (int)ci.opfn, ci.nrd, ci.nwr,
                          ci.rd[0], ci.rd[1], ci.rd[2], ci.wr[0], ci.wr[1],
                          ci.wr[2]);
         }
@@ -92,9 +93,6 @@ bool verify(const Segment* seg, JitShape* sh, JitRefusal* refusal) {
                       static_cast<std::uint32_t>(seg->regs.size()));
     for (std::size_t ii = 0; ii < seg->insns.size(); ii++) {
         const CInsn& ci = seg->insns[ii];
-        if (ci.s0 != static_cast<int>(ii) + 1)
-            return refuse(VmjitRefusalReason::BadTarget,
-                          static_cast<std::uint32_t>(ii));
         if (ci.nrd > 16 || ci.nwr > 4)
             return refuse(VmjitRefusalReason::MalformedSegment,
                           static_cast<std::uint32_t>(ii));

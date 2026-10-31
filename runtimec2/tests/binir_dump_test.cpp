@@ -80,7 +80,7 @@ CInsn make_insn(Op op, Kind kind, std::uint8_t width, RwirId id,
     ci.rwir_id = static_cast<std::uint16_t>(id);
     ci.impl = op == Op::Call ? kvlang::runtimec2::rwir::Impl::Control
                              : kvlang::runtimec2::rwir::Impl::Typed;
-    ci.s0 = s0;
+    (void)s0;  // pc 由下标决定（s0 已删除）
     ci.nrd = static_cast<std::uint8_t>(reads.size());
     ci.nwr = static_cast<std::uint8_t>(writes.size());
     for (std::size_t k = 0; k < reads.size(); k++)
@@ -116,7 +116,9 @@ Segment demo_mixed() {
         make_insn(Op::Br, Kind::None, 0, RwirId::Br, {t, l1}, {}, 4));
     CInsn call = make_insn(Op::Call, Kind::None, 0, RwirId::Call, {a, acc},
                            {res}, 5);
-    call.callee_id = push_callee(&seg, "/lib/demo·f");
+    call.call_site = static_cast<std::uint16_t>(seg.call_sites.size());
+    seg.call_sites.emplace_back();
+    seg.call_sites.back().callee_id = push_callee(&seg, "/lib/demo·f");
     seg.insns.push_back(call);
     seg.insns.push_back(
         make_insn(Op::Copy, Kind::None, 0, RwirId::CopySym, {k42}, {i}, 6));
@@ -138,7 +140,6 @@ Segment demo_handler() {
     handler_insn.kind = Kind::None;
     handler_insn.handler = kvlang::runtimec2::rwir::RwirHandlerId::ArrayNew;
     handler_insn.rwir_id = static_cast<std::uint16_t>(RwirId::CompactArrayNew);
-    handler_insn.s0 = 1;
     handler_insn.nrd = 1;
     handler_insn.rd[0] = p;
     handler_insn.nwr = 1;

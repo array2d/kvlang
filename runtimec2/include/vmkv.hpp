@@ -77,7 +77,7 @@ struct Vmkv {
     vmbin::Outcome run_frame(vmbin::Frame& frame, int start_s0,
                              std::string* stop_pc, std::string* err);
     vmbin::Outcome do_call(vmbin::Frame& frame, const vmbin::Program* program,
-                           const vmbin::Instruction& instruction,
+                           const vmbin::Instruction& instruction, int pc,
                            std::string* stop_pc, std::string* err);
 
     vmbin::State vmbin;

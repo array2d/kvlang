@@ -135,7 +135,6 @@ struct Builder {
 
     Instruction& insn(const char* name) {
         Instruction ins;
-        ins.s0 = static_cast<int>(seg.insns.size()) + 1;
         const Entry* entry = lookup(name);
         if (entry == nullptr) {
             ins.impl = kvlang::runtimec2::rwir::Impl::Handoff;
@@ -155,7 +154,9 @@ struct Builder {
     }
 
     void callee(Instruction* ins, const char* path) {
-        ins->callee_id = callee_id(&seg, path);
+        seg.call_sites.emplace_back();
+        seg.call_sites.back().callee_id = callee_id(&seg, path);
+        ins->call_site = static_cast<std::uint16_t>(seg.call_sites.size() - 1);
     }
 
     Segment done() {
@@ -825,7 +826,6 @@ bool build_fixture_segment(const FixtureFn& fn, Segment* out, std::string* why) 
     for (std::size_t i = 0; i < fn.insns.size(); i++) {
         const FixtureInsn& item = fn.insns[i];
         Instruction ins;
-        ins.s0 = static_cast<int>(i) + 1;
         const Entry* entry = lookup(item.op);
         if (entry == nullptr) {
             ins.impl = kvlang::runtimec2::rwir::Impl::Handoff;
@@ -845,8 +845,11 @@ bool build_fixture_segment(const FixtureFn& fn, Segment* out, std::string* why) 
                 *why = "call shape invalid in " + fn.name;
                 return false;
             }
-            ins.callee_id =
+            seg.call_sites.emplace_back();
+            seg.call_sites.back().callee_id =
                 callee_id(&seg, "/lib/fixture·callee" + std::to_string(item.imm));
+            ins.call_site =
+                static_cast<std::uint16_t>(seg.call_sites.size() - 1);
             ins.nrd = static_cast<std::uint8_t>(item.reads.size() + 1);
             ins.rd[0] = 0;
             for (std::size_t k = 0; k < item.reads.size(); k++) {

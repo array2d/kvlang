@@ -236,7 +236,8 @@ std::vector<std::uint8_t> emit_arch(const Segment* seg, const JitShape& sh) {
         // 后向/自环分支不融合：guard 的 sub 会覆盖比较 flags，导致按 guard 跳转。
         const int ft1 = static_cast<int>(seg->lit[nx.rd[1]].v);
         const int ft2 = static_cast<int>(seg->lit[nx.rd[2]].v);
-        if (ft1 <= nx.s0 || ft2 <= nx.s0)
+        const int next_pc = static_cast<int>(i) + 2;  // nx 的下标 +1
+        if (ft1 <= next_pc || ft2 <= next_pc)
             continue;
         bool only_here = true;
         for (const CInsn& x : seg->insns)
@@ -262,9 +263,9 @@ std::vector<std::uint8_t> emit_arch(const Segment* seg, const JitShape& sh) {
             const bool br = ci.op == rwir::Op::Br;
             const int t1 = static_cast<int>(lit(ci.rd[br ? 1 : 0]));
             const int t2 = br ? static_cast<int>(lit(ci.rd[2])) : 0;
-            // 自环也算反向：t1 == ci.s0 时必须递减预算，否则永不触发 guard。
-            const bool backward =
-                t1 <= ci.s0 || (br && t2 <= ci.s0);
+            // 自环也算反向：t1 == pc 时必须递减预算，否则永不触发 guard。
+            const int pc = static_cast<int>(i) + 1;
+            const bool backward = t1 <= pc || (br && t2 <= pc);
             if (backward) {
                 c.sub_imm(kRCX, 1);
                 c.jcc(0x84);  // jz guard
@@ -277,10 +278,10 @@ std::vector<std::uint8_t> emit_arch(const Segment* seg, const JitShape& sh) {
             }
             if (i > 0 && fused[i - 1]) {
                 const std::uint8_t cc = jcc_of(seg->insns[i - 1].opfn);
-                if (t1 == ci.s0 + 1) {  // true 落下一指令 → 只跳 false
+                if (t1 == pc + 1) {  // true 落下一指令 → 只跳 false
                     c.jcc(static_cast<std::uint8_t>(cc ^ 1));
                     fixes.push_back({c.b.size() - 4, t2});
-                } else if (t2 == ci.s0 + 1) {  // false 落下一指令 → 只跳 true
+                } else if (t2 == pc + 1) {  // false 落下一指令 → 只跳 true
                     c.jcc(cc);
                     fixes.push_back({c.b.size() - 4, t1});
                 } else {

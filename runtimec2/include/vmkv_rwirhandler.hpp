@@ -16,6 +16,7 @@ struct RwirHandlerCtx {
     vmbin::Frame& f;
     const Segment* seg;
     const CInsn& ins;
+    int pc;  // 指令 pc = 下标 + 1（原 Instruction::s0）
     Wire in[2];
     std::int64_t v0 = 0, v1 = 0;
     // vthread·run 子 vid 撞外部 rwir 时的冒泡 pc：handler 填后，run_frame 以

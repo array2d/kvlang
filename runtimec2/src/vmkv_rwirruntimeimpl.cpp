@@ -238,7 +238,7 @@ bool RwirHandlerCtx::kv_paths(std::string* k0, std::string* k1) {
 std::string RwirHandlerCtx::write_slot_lt() {
     // 写槽描述符 body = `name\0<langtype>`（NUL 分隔两段）。
     const std::string wkey =
-        f.func_dir + "/[" + std::to_string(ins.s0) + ",1]";
+        f.func_dir + "/[" + std::to_string(pc) + ",1]";
     const std::uint8_t* wd = nullptr;
     std::uint32_t wn = 0;
     if (read_wire_raw(f.h, wkey, &wd, &wn) && wd &&
@@ -2068,7 +2068,7 @@ bool h_vthread_run(RwirHandlerCtx& c, std::string* err) {
         // 驱动处理子 rwir 写子 vid pc，重入 execute(父) 从本行再驱动子。
         const std::string pck =
             "/vthread/" + c.f.vid + "/\xE2\x80\xA5" "pc";
-        const std::string stay = g_vmkv.param_key(c.f.frame, c.ins.s0, 0);
+        const std::string stay = g_vmkv.param_key(c.f.frame, c.pc, 0);
         if (!write_text(c.f.h, pck, stay))
             std::free(subout);
         c.yield_pc = subout;  // 子 pc：交驱动处理子 rwir
@@ -2127,7 +2127,7 @@ bool h_vthread_call(RwirHandlerCtx& c, std::string* err) {
             return false;
         }
         const std::string retpc =
-            g_vmkv.param_key(c.f.frame, c.ins.s0 + 1, 0);
+            g_vmkv.param_key(c.f.frame, c.pc + 1, 0);
         if (!write_text(c.f.h, nfc.frame + "\xE2\x80\xA5" "returnpc", retpc) ||
             !write_text(c.f.h, nfc.frame + "/\xE2\x80\xA5" "lib", key)) {
             *err = "vthread·call: frame sysvars failed";
@@ -2181,7 +2181,7 @@ bool h_vthread_setstatus(RwirHandlerCtx& c, std::string* err) {
     }
     // PC 推进：本指令已完成，把父 pc 写到 vthread·run 的下一指令。
     const std::string next_pc =
-        g_vmkv.param_key(c.f.frame, c.ins.s0 + 1, 0);
+        g_vmkv.param_key(c.f.frame, c.pc + 1, 0);
     const std::string pc_key =
         "/vthread/" + c.f.vid + "/\xE2\x80\xA5" "pc";
     if (!write_text(c.f.h, pc_key, next_pc)) {

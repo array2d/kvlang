@@ -18,7 +18,7 @@ bool build_segment(void* h, const std::string& func_dir, vmbin::Program* out);
 const vmbin::Program* cached_segment(void* h, const std::string& func_dir);
 void clear_segment_cache();
 
-const std::string& op_name(std::uint16_t id);
+const char* op_name(std::uint16_t id);
 std::size_t op_name_count();
 
 bool cached_insn(const std::string& func_dir, int s0,
