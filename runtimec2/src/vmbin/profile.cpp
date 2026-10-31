@@ -162,7 +162,7 @@ void State::prof_report() {
         std::fprintf(stderr,
                      "RC2PROFOP %-24s n=%-7llu handler=%.1f loop=%.1f "
                      "(扣探针 %.1f)\n",
-                     op_name(static_cast<std::uint16_t>(index)).c_str(), stat.n,
+                     op_name(static_cast<std::uint16_t>(index)), stat.n,
                      static_cast<double>(stat.handler) / stat.n,
                      static_cast<double>(stat.loop) / stat.n,
                      static_cast<double>(stat.handler + stat.loop) / stat.n -

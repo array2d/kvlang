@@ -21,19 +21,6 @@ using vmbin::LangType;
 using vmbin::langtype_kind;
 using vmbin::langtype_name;
 
-std::vector<std::string> g_op_names;
-
-std::uint16_t intern_op(const std::string& name) {
-    static std::unordered_map<std::string, std::uint16_t> idx;
-    auto it = idx.find(name);
-    if (it != idx.end())
-        return it->second;
-    const auto id = static_cast<std::uint16_t>(g_op_names.size());
-    g_op_names.push_back(name);
-    idx[name] = id;
-    return id;
-}
-
 std::string slot_key(const std::string& func_dir, int s0, int s1) {
     std::string k = func_dir;
     if (!k.empty() && k.back() == '/')
@@ -189,6 +176,8 @@ bool build(void* h, const std::string& func_dir, Segment* out) {
     out->regs.clear();
     out->callees.clear();
     out->extra_rwir_names.clear();
+    out->call_sites.clear();
+    out->member_write_cache.clear();
     std::unordered_map<std::string, int> dedup;
     std::unordered_map<std::string, std::uint16_t> callee_ids;
     std::unordered_map<std::string, std::uint16_t> extra_ids;
@@ -218,10 +207,11 @@ bool build(void* h, const std::string& func_dir, Segment* out) {
         CInsn ins;
         ins.op = rwir::Op::None;
         ins.impl = rwir::Impl::Handoff;
-        ins.s0 = s0;
-        ins.prof_id = intern_op(op);
         if (is_call) {
-            ins.callee_id = pool_add(&out->callees, &callee_ids, callee);
+            ins.call_site = static_cast<std::uint16_t>(out->call_sites.size());
+            out->call_sites.emplace_back();
+            out->call_sites.back().callee_id = pool_add(
+                &out->callees, &callee_ids, callee);
             ins.op = rwir::Op::Call;
             ins.impl = rwir::Impl::Control;
             const rwir::Entry* ce = rwir::find_myrwircap("call", 4);
@@ -340,11 +330,13 @@ bool build(void* h, const std::string& func_dir, Segment* out) {
                          ri, (int)d.kind, d.name.c_str(), d.slot_key.c_str(),
                          d.param_k, ltn ? ltn : "?", (unsigned)d.width);
         }
-        for (const CInsn& ci : out->insns) {
+        for (std::size_t ii = 0; ii < out->insns.size(); ii++) {
+            const CInsn& ci = out->insns[ii];
             std::fprintf(stderr,
                          "[segdmp s0=%d op=%s opfn=%d fast=%d wrl=%d nrd=%u nwr=%u "
                          "rd=%d,%d,%d wr=%d,%d,%d]\n",
-                         ci.s0, instruction_name(*out, ci), (int)ci.opfn,
+                         vmbin::instruction_pc(ii), instruction_name(*out, ci),
+                         (int)ci.opfn,
                          (int)ci.fast_i64,
                          (int)ci.wr_local, ci.nrd, ci.nwr, ci.rd[0], ci.rd[1],
                          ci.rd[2], ci.wr[0], ci.wr[1], ci.wr[2]);
@@ -385,12 +377,14 @@ bool build_segment(void* h, const std::string& func_dir, Segment* out) {
     return build(h, func_dir, out);
 }
 
-const std::string& op_name(std::uint16_t id) {
-    static const std::string kEmpty;
-    return id < g_op_names.size() ? g_op_names[id] : kEmpty;
+const char* op_name(std::uint16_t id) {
+    if (id < static_cast<std::uint16_t>(rwir::kMyrwircapsN))
+        return rwir::myrwircaps[id].name;
+    return id == static_cast<std::uint16_t>(rwir::kMyrwircapsN) ? "<ext>"
+                                                                : "<unknown>";
 }
 
-std::size_t op_name_count() { return g_op_names.size(); }
+std::size_t op_name_count() { return static_cast<std::size_t>(rwir::kMyrwircapsN) + 1; }
 
 const Segment* cached_segment(void* h, const std::string& func_dir) {
     auto& c = cache();

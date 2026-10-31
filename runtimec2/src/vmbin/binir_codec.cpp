@@ -175,8 +175,6 @@ bool encode_binir(const Segment& segment, std::vector<std::uint8_t>* out) {
                 return false;
             written[ins.wr[k]] = true;
         }
-        if (ins.s0 != static_cast<int>(&ins - segment.insns.data()) + 1)
-            return false;
     }
 
     std::vector<bool> is_const(nslots, false);
@@ -906,6 +904,11 @@ bool decode_binir(const std::uint8_t* data, std::size_t size, Segment* out) {
         decoded.callees.push_back(path);
         return static_cast<std::uint16_t>(decoded.callees.size() - 1);
     };
+    auto call_site = [&](std::uint16_t callee) -> std::uint16_t {
+        decoded.call_sites.emplace_back();
+        decoded.call_sites.back().callee_id = callee;
+        return static_cast<std::uint16_t>(decoded.call_sites.size() - 1);
+    };
     auto slot_of = [&](const Ref& ref) -> int {
         if (ref.is_const)
             return ref.index < constants.size()
@@ -932,7 +935,6 @@ bool decode_binir(const std::uint8_t* data, std::size_t size, Segment* out) {
     for (std::size_t index = 0; index < wires.size(); index++) {
         const Wire& wire = wires[index];
         Instruction ins;
-        ins.s0 = static_cast<int>(index) + 1;
         ins.wr_local = (wire.flags & 0x1) != 0;
         const rwir::Entry* entry =
             wire.op < static_cast<std::uint16_t>(rwir::kMyrwircapsN)
@@ -1058,7 +1060,7 @@ bool decode_binir(const std::uint8_t* data, std::size_t size, Segment* out) {
             const auto found = strings.find(callee_offsets[callee_ordinal]);
             if (found == strings.end())
                 return false;
-            ins.callee_id = callee_id(found->second);
+            ins.call_site = call_site(callee_id(found->second));
             if (args.size() + 1 > static_cast<std::size_t>(kMaxReads))
                 return false;
             ins.nrd = static_cast<std::uint8_t>(args.size() + 1);

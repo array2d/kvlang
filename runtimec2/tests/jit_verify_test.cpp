@@ -54,7 +54,7 @@ void push_insn(Segment* seg, rwir::Op op, int s0,
     ci.op = op;
     ci.impl = (op == rwir::Op::Goto || op == rwir::Op::Br) ? rwir::Impl::Control
                                                            : rwir::Impl::Typed;
-    ci.s0 = s0;
+    (void)s0;  // pc = 下标 + 1（s0 已删除）
     ci.fast_i64 = fast_i64;
     ci.opfn = static_cast<std::uint8_t>(opfn);
     ci.nrd = static_cast<std::uint8_t>(rd.size());
@@ -143,11 +143,6 @@ int main() {
         Segment s = iops_segment();
         push_var(&s, "*[0,-2]", -2);
         expect_refuse(s, VmjitRefusalReason::BadParamLayout, "two read params");
-    }
-    {
-        Segment s = iops_segment();
-        s.insns[2].s0 = 5;  // 破坏 s0 稠密
-        expect_refuse(s, VmjitRefusalReason::BadTarget, "non-dense s0");
     }
     {
         Segment s = iops_segment();

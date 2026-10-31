@@ -207,15 +207,9 @@ bool export_function(const std::string& name, const Segment& segment,
     const int virtual_exit_source = static_cast<int>(segment.insns.size()) + 1;
     const std::size_t virtual_exit_index = segment.insns.size();
     std::map<int, std::size_t> pc_index;
-    for (std::size_t index = 0; index < segment.insns.size(); ++index) {
-        const int source = segment.insns[index].s0;
-        const int expected_source = static_cast<int>(index) + 1;
-        if (source != expected_source || !pc_index.emplace(source, index).second) {
-            *error = name + ": non-contiguous or duplicate CInsn::s0 " +
-                     std::to_string(source);
-            return false;
-        }
-    }
+    // pc = 指令下标 + 1（Instruction 不再存 s0）。
+    for (std::size_t index = 0; index < segment.insns.size(); ++index)
+        pc_index.emplace(static_cast<int>(index) + 1, index);
 
     out->name = name;
     out->instructions.reserve(segment.insns.size());
@@ -225,14 +219,15 @@ bool export_function(const std::string& name, const Segment& segment,
         ExportInsn item;
         item.op = instruction_name(segment, ins);
         item.family = family_of(segment, ins);
-        item.source_id = static_cast<std::uint32_t>(ins.s0);
+        item.source_id = static_cast<std::uint32_t>(instruction_index) + 1;
 
         std::uint8_t read_begin = 0;
         std::uint8_t read_end = ins.nrd;
         if (ins.op == Op::Call) {
             const std::string& callee_path = instruction_callee(segment, ins);
             if (callee_path.empty()) {
-                *error = name + ": call at source id " + std::to_string(ins.s0) +
+                *error = name + ": call at source id " +
+                         std::to_string(instruction_index + 1) +
                          " has no resolved callee";
                 return false;
             }
@@ -248,7 +243,8 @@ bool export_function(const std::string& name, const Segment& segment,
             const bool conditional = ins.op == Op::Br;
             const std::uint8_t expected = conditional ? 3 : 1;
             if (ins.nrd != expected) {
-                *error = name + ": branch at source id " + std::to_string(ins.s0) +
+                *error = name + ": branch at source id " +
+                         std::to_string(instruction_index + 1) +
                          " has unexpected read arity " + std::to_string(ins.nrd);
                 return false;
             }
@@ -278,7 +274,8 @@ bool export_function(const std::string& name, const Segment& segment,
             if (!checked_slot(segment, slot, instruction_index, "write", error))
                 return false;
             if (slots[slot].is_const) {
-                *error = name + ": write at source id " + std::to_string(ins.s0) +
+                *error = name + ": write at source id " +
+                         std::to_string(instruction_index + 1) +
                          " was classified as ConstId";
                 return false;
             }
