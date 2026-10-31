@@ -44,11 +44,25 @@ run_case() {
         fail=1
         return
     fi
+    local jit_needle=${2:-}
+    local nojit_needle=${3:-}
+    if [ -n "$jit_needle" ] && ! grep -q "$jit_needle" "$TMP/$name-jit.err"; then
+        echo "FAIL $name: JIT stderr missing '$jit_needle'"
+        fail=1
+        return
+    fi
+    if [ -n "$nojit_needle" ] && ! grep -q "$nojit_needle" "$TMP/$name-nojit.err"; then
+        echo "FAIL $name: NOJIT stderr missing '$nojit_needle'"
+        fail=1
+        return
+    fi
     echo "OK $name (exit=$rj)"
 }
 
 run_case callee_saved_7
 run_case register_pressure_9
 run_case read_before_write
+# guard 必须真正写 *err_out：JIT 报 runaway，而不是把 16M 次后的残值当成功结果。
+run_case guard_runaway "runaway loop (jit)" "runaway loop (fast)"
 
 exit $fail
