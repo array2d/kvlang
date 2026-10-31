@@ -1,5 +1,6 @@
 #include "jit.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -30,6 +31,8 @@ const XReg kLocals[] = {
     {0, true, true}, {1, true, true}, {2, true, true}, {3, true, true},
     {4, true, true}, {5, true, true}, {6, true, true}, {7, true, true},
 };
+static_assert(sizeof(kLocals) / sizeof(kLocals[0]) == kJitLocalRegisterCount,
+              "kLocals 必须与 verify 的 kJitLocalRegisterCount 一致");
 
 struct Code {
     std::vector<std::uint8_t> b;
@@ -119,6 +122,15 @@ struct Code {
         w32(0);
     }
     void ret() { w8(0xC3); }
+    // R12-R15（REX.B + 0x50+r / 0x58+r）；只用于按需保存 callee-saved。
+    void push_reg(const XReg& r) {
+        w8(static_cast<std::uint8_t>(0x41));
+        w8(static_cast<std::uint8_t>(0x50 | (r.field & 7)));
+    }
+    void pop_reg(const XReg& r) {
+        w8(static_cast<std::uint8_t>(0x41));
+        w8(static_cast<std::uint8_t>(0x58 | (r.field & 7)));
+    }
 };
 
 // opfn 13-18 → jcc / setcc 变体。
@@ -157,24 +169,56 @@ std::vector<std::uint8_t> emit_arch(const Segment* seg, const JitShape& sh) {
     Code c;
     std::vector<std::size_t> start(n, 0);
     std::vector<Fixup> fixes;
+    // 前置规划：与 verify 的寄存器压力预检同序（按指令顺序首次出现分配），
+    // 先得到完整 loc 表；发射期只查表，不再动态失败。
     std::unordered_map<int, XReg> loc;
-    int loc_cur = 0;
+    bool pool_overflow = false;
+    {
+        int loc_cur = 0;
+        auto alloc = [&](int idx) {
+            if (seg->regs[idx].kind != Operand::Kind::Var)
+                return;
+            if (idx == sh.src_idx || idx == sh.dst_idx)
+                return;
+            if (loc.find(idx) != loc.end())
+                return;
+            if (loc_cur >= kJitLocalRegisterCount) {
+                pool_overflow = true;  // verify 已拒绝；发射期仍 fail-closed
+                return;
+            }
+            loc.emplace(idx, kLocals[loc_cur++]);
+        };
+        for (const CInsn& ci : seg->insns) {
+            for (int k = 0; k < ci.nrd; k++)
+                alloc(ci.rd[k]);
+            for (int k = 0; k < ci.nwr; k++)
+                alloc(ci.wr[k]);
+        }
+    }
+    if (pool_overflow)
+        return {};
     auto reg_of = [&](int idx) -> std::optional<XReg> {
-        const RegDesc& d = seg->regs[idx];
-        if (d.kind == Operand::Kind::Literal)
+        if (seg->regs[idx].kind == Operand::Kind::Literal)
             return std::nullopt;
         if (idx == sh.src_idx)
             return kRDI;
         if (idx == sh.dst_idx)
             return kRAX;
         auto it = loc.find(idx);
-        if (it != loc.end())
-            return it->second;
-        if (loc_cur >= static_cast<int>(sizeof(kLocals) / sizeof(kLocals[0])))
+        if (it == loc.end())
             return std::nullopt;
-        const XReg r = kLocals[loc_cur++];
-        loc[idx] = r;
-        return r;
+        return it->second;
+    };
+    // 按需保存：只保存 allocator 实际分配到 R12-R15（kLocals[4..7]）的寄存器。
+    std::vector<XReg> saved;
+    for (const auto& [idx, reg] : loc)
+        if (reg.field >= 4)
+            saved.push_back(reg);
+    std::sort(saved.begin(), saved.end(),
+              [](const XReg& a, const XReg& b) { return a.field < b.field; });
+    auto emit_restore = [&]() {
+        for (auto it = saved.rbegin(); it != saved.rend(); ++it)
+            c.pop_reg(*it);
     };
     auto lit = [&](int idx) -> std::int64_t { return seg->lit[idx].v; };
     auto is_lit = [&](int idx) -> bool {
@@ -189,6 +233,11 @@ std::vector<std::uint8_t> emit_arch(const Segment* seg, const JitShape& sh) {
         const CInsn& nx = seg->insns[i + 1];
         if (nx.op != rwir::Op::Br || nx.rd[0] != ci.wr[0])
             continue;
+        // 后向/自环分支不融合：guard 的 sub 会覆盖比较 flags，导致按 guard 跳转。
+        const int ft1 = static_cast<int>(seg->lit[nx.rd[1]].v);
+        const int ft2 = static_cast<int>(seg->lit[nx.rd[2]].v);
+        if (ft1 <= nx.s0 || ft2 <= nx.s0)
+            continue;
         bool only_here = true;
         for (const CInsn& x : seg->insns)
             for (int k = 0; k < x.nrd; k++)
@@ -196,13 +245,16 @@ std::vector<std::uint8_t> emit_arch(const Segment* seg, const JitShape& sh) {
                     only_here = false;
         fused[i] = only_here;
     }
-    // 入口：guard 计数 + 写参初值（对齐 enter_frame fv=0）
+    // 入口：guard 计数 + 按需保存 callee-saved + 写参初值（对齐 enter_frame fv=0）
     c.mov_imm(kRCX, static_cast<std::int32_t>(kJitGuardBudget));
+    for (const XReg& r : saved)
+        c.push_reg(r);
     c.mov_imm(kRAX, 0);
     for (std::size_t i = 0; i < n; i++) {
         start[i] = c.b.size();
         const CInsn& ci = seg->insns[i];
         if (ci.op == rwir::Op::Return) {
+            emit_restore();
             c.ret();
             continue;
         }
@@ -210,8 +262,9 @@ std::vector<std::uint8_t> emit_arch(const Segment* seg, const JitShape& sh) {
             const bool br = ci.op == rwir::Op::Br;
             const int t1 = static_cast<int>(lit(ci.rd[br ? 1 : 0]));
             const int t2 = br ? static_cast<int>(lit(ci.rd[2])) : 0;
+            // 自环也算反向：t1 == ci.s0 时必须递减预算，否则永不触发 guard。
             const bool backward =
-                t1 < ci.s0 || (br && t2 < ci.s0);
+                t1 <= ci.s0 || (br && t2 <= ci.s0);
             if (backward) {
                 c.sub_imm(kRCX, 1);
                 c.jcc(0x84);  // jz guard
@@ -255,7 +308,10 @@ std::vector<std::uint8_t> emit_arch(const Segment* seg, const JitShape& sh) {
                 else
                     c.cmp(a, *reg_of(ci.rd[1]));
                 if (!fused[i]) {
-                    c.setcc(setcc_of(ci.opfn), *reg_of(ci.wr[0]));
+                    // setcc 只写低 8 位：先清零，保证比较结果严格是 0/1。
+                    const XReg d = *reg_of(ci.wr[0]);
+                    c.mov_imm(d, 0);
+                    c.setcc(setcc_of(ci.opfn), d);
                 }
             } else {
                 // add（opfn 1）：dst = a + b
@@ -288,7 +344,7 @@ std::vector<std::uint8_t> emit_arch(const Segment* seg, const JitShape& sh) {
         }
         return {};
     }
-    // guard stub（fixup target=0）：err_out = 1；eax = 0；ret
+    // guard stub（fixup target=0）：err_out = 1；eax = 0；恢复 callee-saved；ret
     const std::size_t guard_stub = c.b.size();
     c.rexw(kRAX, kRSI);
     c.w8(0xC7);
@@ -296,6 +352,7 @@ std::vector<std::uint8_t> emit_arch(const Segment* seg, const JitShape& sh) {
     c.w32(1);
     c.w8(0xB8);
     c.w32(0);
+    emit_restore();
     c.ret();
     // 修补跳转
     for (const Fixup& fx : fixes) {
