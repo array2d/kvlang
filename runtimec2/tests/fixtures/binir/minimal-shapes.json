@@ -1,0 +1,153 @@
+{
+  "schema": "kvlang.binir-probe.v1",
+  "corpus": "minimal-shapes-fixture",
+  "provenance": "Hand-authored fixture from runtimec2 CInsn operand shapes; not a layout export and not project coverage.",
+  "fixture_only": true,
+  "functions": [
+    {
+      "name": "/fixture/alu_and_branch",
+      "register_count": 8,
+      "constant_count": 2,
+      "instructions": [
+        {
+          "op": "int64.add",
+          "family": "generic",
+          "reads": [
+            {"kind": "reg", "index": 0},
+            {"kind": "const", "index": 0}
+          ],
+          "writes": [1],
+          "source_id": 10
+        },
+        {
+          "op": "int64.lt",
+          "family": "generic",
+          "reads": [
+            {"kind": "reg", "index": 1},
+            {"kind": "const", "index": 1}
+          ],
+          "writes": [2],
+          "source_id": 11
+        },
+        {
+          "op": "br",
+          "family": "branch",
+          "reads": [{"kind": "reg", "index": 2}],
+          "targets": [-2, 1],
+          "source_id": 12,
+          "side_exits": [{"target": 1, "reason": "cold-successor"}]
+        },
+        {
+          "op": "goto",
+          "family": "branch",
+          "targets": [-3],
+          "source_id": 13
+        }
+      ]
+    },
+    {
+      "name": "/fixture/array_ops",
+      "register_count": 12,
+      "constant_count": 1,
+      "instructions": [
+        {
+          "op": "compactarray.at",
+          "family": "array",
+          "reads": [
+            {"kind": "reg", "index": 0},
+            {"kind": "reg", "index": 1}
+          ],
+          "writes": [2],
+          "source_id": 20
+        },
+        {
+          "op": "compactarray.set",
+          "family": "array",
+          "reads": [
+            {"kind": "reg", "index": 0},
+            {"kind": "reg", "index": 1},
+            {"kind": "reg", "index": 3}
+          ],
+          "effect": true,
+          "source_id": 21,
+          "side_exits": [{"target": 1, "reason": "bounds"}]
+        },
+        {
+          "op": "return",
+          "family": "generic",
+          "reads": [{"kind": "reg", "index": 2}],
+          "source_id": 22
+        }
+      ]
+    },
+    {
+      "name": "/fixture/calls",
+      "register_count": 16,
+      "constant_count": 0,
+      "instructions": [
+        {
+          "op": "call",
+          "family": "call",
+          "reads": [{"kind": "reg", "index": 0}],
+          "writes": [1],
+          "immediate": 3,
+          "effect": true,
+          "safepoint": true,
+          "source_id": 30
+        },
+        {
+          "op": "call",
+          "family": "call",
+          "reads": [
+            {"kind": "reg", "index": 0},
+            {"kind": "reg", "index": 1},
+            {"kind": "reg", "index": 2}
+          ],
+          "writes": [3, 4],
+          "immediate": 70000,
+          "effect": true,
+          "safepoint": true,
+          "source_id": 31,
+          "side_exits": [{"target": 1, "reason": "callee-bailout"}]
+        },
+        {
+          "op": "return",
+          "family": "generic",
+          "reads": [
+            {"kind": "reg", "index": 3},
+            {"kind": "reg", "index": 4}
+          ],
+          "source_id": 32
+        }
+      ]
+    },
+    {
+      "name": "/fixture/tagged_index_boundary",
+      "register_count": 257,
+      "constant_count": 129,
+      "instructions": [
+        {
+          "op": "copy",
+          "family": "generic",
+          "reads": [{"kind": "const", "index": 127}],
+          "writes": [255],
+          "source_id": 40
+        },
+        {
+          "op": "copy",
+          "family": "generic",
+          "reads": [{"kind": "const", "index": 128}],
+          "writes": [0],
+          "source_id": 41
+        },
+        {
+          "op": "copy",
+          "family": "generic",
+          "reads": [{"kind": "reg", "index": 128}],
+          "writes": [256],
+          "source_id": 42
+        }
+      ]
+    }
+  ]
+}

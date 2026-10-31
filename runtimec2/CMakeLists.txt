@@ -23,20 +23,27 @@ add_library(kvlang_runtimec2 SHARED EXCLUDE_FROM_ALL
     src/codeseg.cpp
     src/jit.cpp
     ${JIT_ARCH_SRC}
+    vmbin/profile.cpp
     src/value.cpp
     src/vmkv.cpp
-    src/vmkv_native.cpp
-    src/vmbin.cpp
+    src/vmkv_rwirhandler.cpp
+    src/binir_dump.cpp
     src/runtime.cpp)
 add_custom_target(runtimec2 ALL DEPENDS kvlang_runtimec2)
 
-# 性能探针开关：默认关（热路径零开销）；开时产 profiling 二进制（RC2_PROF 输出）。
-option(RC2_PROF "Build runtimec2 with per-op rdtsc profiling" OFF)
+# 性能探针开关：默认关（热路径零开销）。
+option(RUNTIMEC2_VMBIN_PROFILE "Build runtimec2 with per-op rdtsc profiling" OFF)
+option(RC2_PROF "Compatibility alias for RUNTIMEC2_VMBIN_PROFILE" OFF)
 if(RC2_PROF)
-    target_compile_definitions(kvlang_runtimec2 PRIVATE RC2_PROF)
+    set(RUNTIMEC2_VMBIN_PROFILE ON)
+    message(STATUS "RC2_PROF maps to RUNTIMEC2_VMBIN_PROFILE")
+endif()
+if(RUNTIMEC2_VMBIN_PROFILE)
+    target_compile_definitions(kvlang_runtimec2 PRIVATE RUNTIMEC2_VMBIN_PROFILE)
 endif()
 
 target_include_directories(kvlang_runtimec2 PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/include   # ABI 头只读引用
     ${CMAKE_CURRENT_SOURCE_DIR}/../include)          # deps 头（deps.sh 落 repo）
@@ -79,14 +86,66 @@ enable_testing()
 add_executable(rwir_table tests/rwir_table.cpp src/rwir_gen.cpp)
 target_include_directories(rwir_table PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
+# myrwircap 表导出：layout 产出 rwir 差集断言用。
+add_executable(myrwircap_dump tests/myrwircap_dump.cpp src/rwir_gen.cpp)
+target_include_directories(myrwircap_dump PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+add_executable(segment_shape_dump
+    tools/segment_shape_dump.cpp
+    src/codeseg.cpp
+    src/binir_dump.cpp
+    vmbin/profile.cpp
+    src/value.cpp
+    src/valueio.cpp
+    src/rwir_gen.cpp
+    src/rwir_lookup.cpp)
+target_include_directories(segment_shape_dump PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include)
+target_compile_options(segment_shape_dump PRIVATE -O2 -Wall -Wextra)
+target_link_directories(segment_shape_dump PRIVATE "${LIB_DIR}" "${BACKEND_DIR}")
+target_link_libraries(segment_shape_dump PRIVATE kvspace)
+
+# binir 序列打印（§2·8）：只编 binir_dump.cpp，不链接 runtime/kvspace。
+add_executable(binir_dump_test tests/binir_dump_test.cpp src/binir_dump.cpp)
+target_include_directories(binir_dump_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_options(binir_dump_test PRIVATE -O2 -Wall -Wextra)
+add_test(NAME c2_binir_dump COMMAND binir_dump_test)
+
 add_test(NAME c2_rwir_table COMMAND $<TARGET_FILE:rwir_table>)
 add_test(NAME c2_impl_db_check
          COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/impl_db_check.sh)
-add_test(NAME c2_ops_gen_check
-         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/rwir_gen_check.sh)
+add_test(NAME c2_layout_ops_subset
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/tests/layout_ops_diff.py
+                 --layout ${CMAKE_CURRENT_SOURCE_DIR}/../bin/kvlanglayout
+                 --byteseek ${CMAKE_CURRENT_SOURCE_DIR}/../bin/byteseek
+                 --myrwircap-dump $<TARGET_FILE:myrwircap_dump>
+                 --source-root ${CMAKE_CURRENT_SOURCE_DIR}/..)
+set_tests_properties(c2_layout_ops_subset PROPERTIES TIMEOUT 180)
+add_test(NAME c2_unknown_rwir_rejected
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/tests/unknown_rwir_test.py
+                 --layout ${CMAKE_CURRENT_SOURCE_DIR}/../bin/kvlanglayout
+                 --m1 $<TARGET_FILE:m1_smoke>
+                 --source-root ${CMAKE_CURRENT_SOURCE_DIR}/..)
+set_tests_properties(c2_unknown_rwir_rejected PROPERTIES TIMEOUT 120)
 add_test(NAME c2_m1_smoke
          COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/m1_smoke.sh
                  $<TARGET_FILE:m1_smoke>)
+add_test(NAME c2_kvspace_dynamic_ops
+         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/kvspace_dynamic_ops.sh
+                 $<TARGET_FILE:m1_smoke>
+                 ${CMAKE_CURRENT_SOURCE_DIR}/../bin/byteseek)
+set_tests_properties(c2_kvspace_dynamic_ops PROPERTIES TIMEOUT 120)
 add_test(NAME c2_symbol_parity
          COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/symbols.sh
                  $<TARGET_FILE:kvlang_runtimec2>)
+add_test(NAME c2_segment_shape_dump
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/tests/segment_shape_dump_test.py
+                 --exporter $<TARGET_FILE:segment_shape_dump>
+                 --byteseek ${CMAKE_CURRENT_SOURCE_DIR}/../bin/byteseek
+                 --probe ${CMAKE_CURRENT_SOURCE_DIR}/tools/binir_format_probe.py
+                 --source-root ${CMAKE_CURRENT_SOURCE_DIR}/..)
+set_tests_properties(c2_segment_shape_dump PROPERTIES TIMEOUT 120)

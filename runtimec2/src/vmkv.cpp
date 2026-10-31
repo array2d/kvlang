@@ -1,5 +1,6 @@
 #include "vmkv.hpp"
-#include "vmkv_native.hpp"
+#include "binir_dump.hpp"
+#include "vmkv_rwirhandler.hpp"
 #include "jit.hpp"
 
 #include <cstdlib>
@@ -36,11 +37,11 @@ int kvspaceXvalueHeadNewCode(const uint8_t *body, uint64_t body_len,
 #include "valueio.hpp"
 
 namespace kvlang::runtimec2 {
-// 明文栈操作（装载/槽解析/回写）。FReg/FrameCtx 来自 vmbin（bin 命名空间）。
-using bin::FReg;
-using bin::FrameCtx;
-using bin::RunResult;
-using bin::fast_i64;
+// 明文栈操作（装载/槽解析/回写）。Register/Frame 来自 vmbin（bin 命名空间）。
+using vmbin::Register;
+using vmbin::Frame;
+using vmbin::Outcome;
+using vmbin::fast_i64;
 
 namespace {
 
@@ -48,31 +49,31 @@ namespace {
 const bool g_no_fast = std::getenv("RC2_NOFAST") != nullptr;
 const bool g_trace = std::getenv("RC2_TRACE") != nullptr;
 
-// warm frame：FReg 块池（线程局部，按容量复用）。递归帧每层借一块、返回还池，
-// 免每次 call 的 vector 堆分配 + FReg string 构造（fib 递归 setup 大头）。
-thread_local std::vector<std::vector<FReg>> g_freg_free;
+// warm frame：Register 块池（线程局部，按容量复用）。递归帧每层借一块、返回还池，
+// 免每次 call 的 vector 堆分配 + Register string 构造（fib 递归 setup 大头）。
+thread_local std::vector<std::vector<Register>> g_freg_free;
 
 struct FregPoolGuard {
-    std::vector<FReg>* blk = nullptr;
+    std::vector<Register>* blk = nullptr;
     ~FregPoolGuard() {
         if (blk && !blk->empty())
             g_freg_free.push_back(std::move(*blk));
     }
 };
 
-// Callee FrameCtx free list: reused frames keep their string/array capacity.
-thread_local std::vector<std::unique_ptr<FrameCtx>> g_fctx_free;
+// Callee Frame free list: reused frames keep their string/array capacity.
+thread_local std::vector<std::unique_ptr<Frame>> g_fctx_free;
 
 struct FctxLease {
-    FrameCtx* p;
+    Frame* p;
     FctxLease() {
         if (g_fctx_free.empty()) {
-            p = new FrameCtx;
+            p = new Frame;
         } else {
             p = g_fctx_free.back().release();
             g_fctx_free.pop_back();
-            FrameCtx& c = *p;
-            c.regs.clear();
+            Frame& c = *p;
+            c.parent = nullptr;
             c.arg_src_n = c.arg_dst_n = 0;
             c.mem_frame = false;
             c.seg_hint = nullptr;
@@ -81,7 +82,10 @@ struct FctxLease {
             c.frame_dir_hint.clear();
         }
     }
-    ~FctxLease() { g_fctx_free.emplace_back(p); }
+    ~FctxLease() {
+        p->parent = nullptr;
+        g_fctx_free.emplace_back(p);
+    }
     FctxLease(const FctxLease&) = delete;
     FctxLease& operator=(const FctxLease&) = delete;
 };
@@ -108,10 +112,36 @@ bool is_any_frame_local(std::string_view k) {
 }
 
 // Whether r, or the caller reg it read-aliases, caches a scalar value.
-bool holds_value(const FReg* r) {
+bool holds_value(const Register* r) {
     while (!(r->fast_i64 || r->fast_bool) && r->src_ptr)
         r = r->src_ptr;
     return r->fast_i64 || r->fast_bool;
+}
+
+void invalidate_reg_cache(Register& reg) {
+    reg.ref = kvspaceRef_t{};
+    reg.resolved = false;
+    reg.noslot = false;
+    reg.view = kvspaceXvalueBodyView_t{};
+    reg.view_ok = false;
+    reg.body = nullptr;
+    reg.cap = 0;
+    reg.sc_ok = false;
+    reg.sck = Scalar::K::None;
+    reg.scw = 0;
+    reg.fast_i64 = false;
+    reg.fv = 0;
+    reg.fast_bool = false;
+    reg.fb = false;
+    reg.base_ptr = false;
+    reg.base_ptr_known = false;
+    reg.arr_esz = 0;
+    for (std::int32_t& dim : reg.arr_dims)
+        dim = 0;
+    reg.arr_ndim = 0;
+    reg.arr_kind = 0;
+    reg.arr_bodylen = 0;
+    reg.arr_elem_kind.clear();
 }
 
 // First Var reg whose name (type suffix stripped) is `name`; -1 if none.
@@ -145,7 +175,7 @@ const std::string& child_frame_root(const std::string& vid, int depth) {
 
 // 带类型整体写：value 已带 langtype 记录 → 原样写；否则把 lt 填入 attr 区
 // （替换 codec 产出的空 attr 占位），单 key 一次写。lt 空 → 原样写。
-// 非匿名 namespace：vmkv_native.cpp 等兄弟 TU 也调。
+// 非匿名 namespace：vmkv_rwirhandler.cpp 等兄弟 TU 也调。
 bool set_value_typed(void* h, const char* key, const std::uint8_t* value,
                      std::uint32_t value_len, const char* lt, char* err,
                      std::uint32_t err_cap) {
@@ -183,8 +213,30 @@ bool set_value_typed(void* h, const char* key, const std::uint8_t* value,
     return rc == 0;
 }
 
+void Vmkv::invalidate_path(Frame& f, std::string_view path) {
+    for (Frame* frame = &f; frame; frame = frame->parent) {
+        for (Register& reg : frame->regs) {
+            std::vector<Register*> aliases;
+            Register* cursor = &reg;
+            while (cursor &&
+                   std::find(aliases.begin(), aliases.end(), cursor) == aliases.end()) {
+                aliases.push_back(cursor);
+                cursor = cursor->src_ptr ? cursor->src_ptr : cursor->dst_ptr;
+            }
+            const bool matches =
+                std::any_of(aliases.begin(), aliases.end(), [&](const Register* alias) {
+                    return alias->key == path;
+                });
+            if (!matches)
+                continue;
+            for (Register* alias : aliases)
+                invalidate_reg_cache(*alias);
+        }
+    }
+}
+
 // 变量描述符 → 具体 key（帧入口一次；Ptr 链在此解析完）。
-bool Vmkv::resolve_desc(FrameCtx& f, const std::string& name, std::string* key,
+bool Vmkv::resolve_desc(Frame& f, const std::string& name, std::string* key,
                   std::string* err) {
     if (name.empty()) {
         *err = "operand: empty var";
@@ -251,7 +303,7 @@ bool Vmkv::resolve_desc(FrameCtx& f, const std::string& name, std::string* key,
     return true;
 }
 
-bool ensure_ref(FrameCtx& f, FReg* r) {
+bool ensure_ref(Frame& f, Register* r) {
     if (r->resolved)
         return true;
     if (r->key.empty())
@@ -266,8 +318,8 @@ bool ensure_ref(FrameCtx& f, FReg* r) {
 }
 
 // shm xvaluebodyview：head/body 直接指针（帧内缓存，写后失效）。
-bool Vmkv::reg_slot(FrameCtx& f, std::uint8_t idx, kvspaceXvalueBodyView_t* out) {
-    FReg& r = f.regs[idx];
+bool Vmkv::reg_slot(Frame& f, std::uint8_t idx, kvspaceXvalueBodyView_t* out) {
+    Register& r = f.regs[idx];
     if (r.view_ok) {
         *out = r.view;
         return true;
@@ -284,9 +336,9 @@ bool Vmkv::reg_slot(FrameCtx& f, std::uint8_t idx, kvspaceXvalueBodyView_t* out)
 }
 
 // 只取 body/cap（热路径不搬 40 字节 view 结构）。
-bool Vmkv::reg_body(FrameCtx& f, std::uint8_t idx, std::uint8_t** body,
+bool Vmkv::reg_body(Frame& f, std::uint8_t idx, std::uint8_t** body,
               std::uint64_t* cap) {
-    FReg& r = f.regs[idx];
+    Register& r = f.regs[idx];
     if (!r.view_ok) {
         if (!ensure_ref(f, &r))
             return false;
@@ -318,11 +370,11 @@ thread_local std::uint32_t g_none_len = 0;
 
 // 惰性解析：Ptr 描述符在首次读/写时经 resolve_desc 补 key（target 由运行时写，
 // 帧入口解析会过早失败）。读写共用同一入口。
-bool Vmkv::ensure_reg_key(FrameCtx& f, FReg& r) {
+bool Vmkv::ensure_reg_key(Frame& f, Register& r) {
     if (r.key.empty()) {
         // 内存别名写参（dst_ptr 链）：key = 调用方 reg 最终槽（纯内存帧无 arg 槽，
         // `p·x = v` 的 p 写参直接落在调用方实例成员上）。
-        FReg* ap = &r;
+        Register* ap = &r;
         while (ap->dst_ptr)
             ap = ap->dst_ptr;
         if (ap != &r && !ap->key.empty()) {
@@ -353,18 +405,18 @@ bool Vmkv::ensure_reg_key(FrameCtx& f, FReg& r) {
 }
 
 // 读 reg idx 的 x‥langtype attr key（v2 明文事实源）；无 key/缺失 → false。
-bool Vmkv::reg_langtype(FrameCtx& f, std::uint8_t idx, std::string* lt) {
-    FReg& r = f.regs[idx];
-    FReg* fr = r.src_ptr ? r.src_ptr : &r;
+bool Vmkv::reg_langtype(Frame& f, std::uint8_t idx, std::string* lt) {
+    Register& r = f.regs[idx];
+    Register* fr = r.src_ptr ? r.src_ptr : &r;
     if (fr->key.empty() && !ensure_reg_key(f, *fr))
         return false;
     return read_langtype(f.h, fr->key, lt);
 }
 
-bool Vmkv::read_reg(FrameCtx& f, std::uint8_t idx, Wire* out) {
-    FReg& r = f.regs[idx];
+bool Vmkv::read_reg(Frame& f, std::uint8_t idx, Wire* out) {
+    Register& r = f.regs[idx];
     // 内存别名读参：转发读调用方 reg 的 fast 缓存（src_ptr 链已在帧入口挂好）。
-    FReg* fr = r.src_ptr ? r.src_ptr : &r;
+    Register* fr = r.src_ptr ? r.src_ptr : &r;
     if (!r.src_ptr && !ensure_reg_key(f, r))
         return false;
     // 纯内存帧局部变量（write_reg 内存化、fast_i64 已设、无 kvspace 槽）：直构 int64 wire。
@@ -449,9 +501,9 @@ bool Vmkv::read_reg(FrameCtx& f, std::uint8_t idx, Wire* out) {
 // 读标量：xvaluebodyview 直读；kind/width 每帧解析一次后缓存。
 // 帧局部/内存别名的 fast 缓存直取（纯内存变量无明文槽，view 恒无 →
 // 此前每步 fallback 到 kvspaceXvalueToWire，fib 的 `+` 3003 cycles/次 主源）。
-bool Vmkv::read_scalar(FrameCtx& f, std::uint8_t idx, Scalar* out) {
-    FReg& r = f.regs[idx];
-    FReg& rf = r.src_ptr ? *r.src_ptr : r;
+bool Vmkv::read_scalar(Frame& f, std::uint8_t idx, Scalar* out) {
+    Register& r = f.regs[idx];
+    Register& rf = r.src_ptr ? *r.src_ptr : r;
     if (rf.fast_i64) {
         out->k = Scalar::K::Int;
         out->width = 8;
@@ -471,16 +523,16 @@ bool Vmkv::read_scalar(FrameCtx& f, std::uint8_t idx, Scalar* out) {
     std::uint8_t* body = nullptr;
     std::uint64_t cap = 0;
     const bool have_view = reg_body(f, idx, &body, &cap);
-    if (bin.prof_on && !have_view)
-        bin.prof.f_slot++;
+    if (vmbin.prof_on && !have_view)
+        vmbin.prof.f_slot++;
     std::string lt;
     const bool have_lt = read_langtype(f.h, rf.key, &lt);
     if (have_view) {
         if (r.sc_ok) {
             if (v_scalar_raw(r.sck, r.scw, body, cap, out))
                 return true;
-            if (bin.prof_on)
-                bin.prof.f_raw++;
+            if (vmbin.prof_on)
+                vmbin.prof.f_raw++;
         } else if (have_lt && slot_read_scalar(r.view, lt, out)) {
             r.sck = out->k;
             r.scw = out->width;
@@ -488,30 +540,30 @@ bool Vmkv::read_scalar(FrameCtx& f, std::uint8_t idx, Scalar* out) {
             return true;
         }
     }
-    if (bin.prof_on)
-        bin.prof.fb++;
+    if (vmbin.prof_on)
+        vmbin.prof.fb++;
     Wire w{};
     return have_lt && read_reg(f, idx, &w) && v_scalar(w, lt, out);
 }
 
 // 帧局部普通变量 key（非参数槽、非系统槽）：纯内存化候选。
-bool Vmkv::is_frame_local(const FrameCtx& f, const std::string& rk) {
+bool Vmkv::is_frame_local(const Frame& f, const std::string& rk) {
     const std::size_t fs = f.frame.size();
     return rk.size() > fs + 1 && rk.compare(0, fs, f.frame) == 0 && rk[fs] == '/' &&
            rk.find("/[0,") == std::string::npos &&
            rk.find("\xE2\x80\xA5") == std::string::npos;
 }
 
-// 冲刷帧局部纯内存变量落明文（Stop/native 边界前；纯内存子帧无 native 则免）。
+// 冲刷帧局部纯内存变量落明文（Stop/handler 边界前；子帧无 handler 则免）。
 // 仅对 fast 缓存有效但无 kvspace 槽的变量落一次明文，后续 read 走明文/新 view。
-void Vmkv::flush_frame_locals(FrameCtx& f) {
+void Vmkv::flush_frame_locals(Frame& f) {
     std::uint8_t* buf = nullptr;
     std::uint64_t len64 = 0;
-    for (FReg& r : f.regs) {
+    for (Register& r : f.regs) {
         if (r.view_ok || r.src_ptr || r.dst_ptr)
             continue;
         // 惰性 key：普通变量（desc_ref 或 desc 非 Ptr/绝对路径）帧入口未解析 key，
-        // flush 边界须补解析（native/handoff 前落明文，println 读帧局部）。
+        // flush 边界须补解析（handler/handoff 前落明文，println 读帧局部）。
         if (r.key.empty() &&
             (r.desc_ref ||
              (!r.desc.empty() && r.desc[0] != '*' && r.desc[0] != '/')))
@@ -545,16 +597,16 @@ void Vmkv::flush_frame_locals(FrameCtx& f) {
     }
 }
 
-bool Vmkv::write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
+bool Vmkv::write_reg(Frame& f, std::uint8_t idx, const std::uint8_t* data,
                std::uint32_t len) {
-    FReg& r = f.regs[idx];
+    Register& r = f.regs[idx];
     // 内存别名写参：沿 dst_ptr 链贯通到最终调用方 reg（fast 缓存 + 已有槽直写），
     // 零 kvspace。只挂一层会丢多层转发（depth≥2 时中间层的 fast 缓存随帧消亡）。
     if (r.dst_ptr) {
-        FReg* drp = r.dst_ptr;
+        Register* drp = r.dst_ptr;
         while (drp->dst_ptr)
             drp = drp->dst_ptr;
-        FReg& dr = *drp;
+        Register& dr = *drp;
         r.fast_i64 = false;
         r.fast_bool = false;
         if (len >= KVSPACE_XVALUE_HEAD_LEN &&
@@ -601,13 +653,13 @@ bool Vmkv::write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
     // 调用方对象，见 ptr-param-mutate）。绝对路径 base（`/tmp/x·y`）直接用。
     const std::string& wdsc = !r.desc.empty() ? r.desc
                              : (r.desc_ref ? r.desc_ref->name : r.desc);
-    // 绝对路径 + 动态键（`/tmp/mi·*i0`）：native 写（compactarray·new/fill）直接
+    // 绝对路径 + 动态键（`/tmp/mi·*i0`）：handler 写（compactarray·new/fill）直接
     // 落 member——解析 `*var` 变量值作真实键（对齐主循环 member write 动态键）。
     if (wdsc[0] == '/' && wdsc.find("\xC2\xB7*") != std::string::npos) {
         const auto dmid = wdsc.find("\xC2\xB7");
         const std::string dbkey = wdsc.substr(0, dmid);
         const std::string dvar = wdsc.substr(dmid + 3);  // 跳过 `·*`
-        for (FReg& vr : f.regs) {
+        for (Register& vr : f.regs) {
             const std::string_view vn =
                 !vr.desc.empty() ? std::string_view(vr.desc)
                 : vr.desc_ref    ? std::string_view(vr.desc_ref->name)
@@ -657,8 +709,8 @@ bool Vmkv::write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
         const std::string mname = wdsc.substr(mid + 2);
         // base 对应的 reg：desc 名匹配（`p` 参数/变量）→ 沿 src/dst 别名链到最终槽
         // （`p·x` 的 p 写参 dst_ptr→调用方 a）。
-        FReg* bp = &r;
-        for (FReg& rr : f.regs) {
+        Register* bp = &r;
+        for (Register& rr : f.regs) {
             const std::string rn = !rr.desc.empty() ? rr.desc
                                    : (rr.desc_ref ? rr.desc_ref->name : std::string());
             if (rn == base_part || rr.key == f.frame + "/" + base_part) {
@@ -671,12 +723,12 @@ bool Vmkv::write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
         // base 名未匹配（写槽 `p·x` 的 p 是 `*[0,1]` 写参描述符）：取已解析到
         // 调用方实例的写参 reg 链作 base（成员写就地改调用方对象）。
         if (bp == &r || bp->key.empty()) {
-            for (FReg& rr : f.regs) {
+            for (Register& rr : f.regs) {
                 const std::string rn = !rr.desc.empty() ? rr.desc
                                        : (rr.desc_ref ? rr.desc_ref->name
                                                       : std::string());
                 if (rn.rfind("*[0,", 0) == 0) {
-                    FReg* rp = &rr;
+                    Register* rp = &rr;
                     while (rp->src_ptr || rp->dst_ptr)
                         rp = rp->src_ptr ? rp->src_ptr : rp->dst_ptr;
                     if (rp->key.empty() && !ensure_reg_key(f, *rp))
@@ -717,11 +769,11 @@ bool Vmkv::write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
             char errb[192] = {};
             return kvspaceSetValue(f.h, r.key.c_str(), data, len, errb, sizeof errb) == 0;
         }
-        // 动态成员键（`·*var`，如 `/tmp/mi·*i0`）：native 写（compactarray·new/fill）
+        // 动态成员键（`·*var`，如 `/tmp/mi·*i0`）：handler 写（compactarray·new/fill）
         // 直接落 member——解析 var 值作真实键（对齐主循环 member write 动态键）。
         if (!bkey.empty() && !mname.empty() && mname[0] == '*') {
             const std::string var = mname.substr(1);
-            for (FReg& vr : f.regs) {
+            for (Register& vr : f.regs) {
                 const std::string_view vn =
                     !vr.desc.empty() ? std::string_view(vr.desc)
                     : vr.desc_ref    ? std::string_view(vr.desc_ref->name)
@@ -781,7 +833,7 @@ bool Vmkv::write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
     r.arr_kind = 0;
     r.arr_bodylen = 0;
     r.arr_elem_kind.clear();
-    // 帧局部 int64 变量：内存化写（FReg.fv + 槽直写若已有 view），层内读走 fast
+    // 帧局部 int64 变量：内存化写（Register.fv + 槽直写若已有 view），层内读走 fast
     // 缓存，免每 op kvspace 往返（fib/binary_search 热点）。参数/绝对路径/系统槽照旧。
     const std::string& rk = r.key;
     const bool frame_local = is_frame_local(f, rk);
@@ -839,8 +891,8 @@ bool Vmkv::write_reg(FrameCtx& f, std::uint8_t idx, const std::uint8_t* data,
 }
 
 // 直取 int64 槽值（不经 Scalar 结构）。快缓存命中：零判定、零拷贝。
-bool Vmkv::read_i64(FrameCtx& f, std::uint8_t idx, std::int64_t* out) {
-    FReg& r = f.regs[idx];
+bool Vmkv::read_i64(Frame& f, std::uint8_t idx, std::int64_t* out) {
+    Register& r = f.regs[idx];
     if (r.fast_i64) {
         *out = r.fv;
         return true;
@@ -857,8 +909,8 @@ bool Vmkv::read_i64(FrameCtx& f, std::uint8_t idx, std::int64_t* out) {
 }
 
 // 直取 bool 槽值（比较/br/条件）。
-bool Vmkv::read_bool(FrameCtx& f, std::uint8_t idx, bool* out) {
-    FReg& r = f.regs[idx];
+bool Vmkv::read_bool(Frame& f, std::uint8_t idx, bool* out) {
+    Register& r = f.regs[idx];
     if (r.fast_bool) {
         *out = r.fb;
         return true;
@@ -876,7 +928,7 @@ bool Vmkv::read_bool(FrameCtx& f, std::uint8_t idx, bool* out) {
 
 // 专用直写 int64：缓存命中（Int/8）时免 Scalar 装箱、免 kind 判定，纯 8 字节 memcpy。
 // 把 v 存入 r 的现有槽：int64 就地改写，否则重新组装。
-bool Vmkv::store_i64_slot(FrameCtx& f, FReg& r, std::int64_t v) {
+bool Vmkv::store_i64_slot(Frame& f, Register& r, std::int64_t v) {
     const kvspaceXvalueBodyView_t& w = r.view;
     std::string lt;
     if (w.head && w.headlen == KVSPACE_XVALUE_HEAD_LEN &&
@@ -904,7 +956,7 @@ bool Vmkv::store_i64_slot(FrameCtx& f, FReg& r, std::int64_t v) {
     return ok;
 }
 
-bool Vmkv::write_member_scalar(FrameCtx& f, std::uint8_t idx, const Scalar& s,
+bool Vmkv::write_member_scalar(Frame& f, std::uint8_t idx, const Scalar& s,
                                std::uint8_t width) {
     const char* kn = kind_name(s.k, width);
     std::uint8_t* buf = nullptr;
@@ -915,8 +967,8 @@ bool Vmkv::write_member_scalar(FrameCtx& f, std::uint8_t idx, const Scalar& s,
     return ok;
 }
 
-bool Vmkv::slot_write_i64(FrameCtx& f, std::uint8_t idx, std::int64_t v) {
-    FReg& fr = f.regs[idx];
+bool Vmkv::slot_write_i64(Frame& f, std::uint8_t idx, std::int64_t v) {
+    Register& fr = f.regs[idx];
     if (fr.desc_ref && fr.desc_ref->member) {
         Scalar s{};
         s.k = Scalar::K::Int;
@@ -932,10 +984,10 @@ bool Vmkv::slot_write_i64(FrameCtx& f, std::uint8_t idx, std::int64_t v) {
     // 内存别名写参（mem_frame 递归/纯内存调用的返回槽）：沿链贯通到最终调用方
     // reg 直写（镜像 write_reg 的 dst_ptr 分支），免每迭代 v_to_wire+malloc 回退。
     if (fr.dst_ptr) {
-        FReg* drp = fr.dst_ptr;
+        Register* drp = fr.dst_ptr;
         while (drp->dst_ptr)
             drp = drp->dst_ptr;
-        FReg& dr = *drp;
+        Register& dr = *drp;
         if (dr.view_ok && dr.body && !store_i64_slot(f, dr, v))
             return false;
         dr.fv = v;
@@ -951,8 +1003,8 @@ bool Vmkv::slot_write_i64(FrameCtx& f, std::uint8_t idx, std::int64_t v) {
             return false;
         fr.fv = v;
         fr.fast_i64 = true;
-        if (bin.prof_on)
-            bin.prof.w_fast++;
+        if (vmbin.prof_on)
+            vmbin.prof.w_fast++;
         return true;
     }
     std::uint8_t* body = nullptr;
@@ -963,8 +1015,8 @@ bool Vmkv::slot_write_i64(FrameCtx& f, std::uint8_t idx, std::int64_t v) {
             return false;
         fr.fv = v;
         fr.fast_i64 = true;
-        if (bin.prof_on)
-            bin.prof.w_fast++;
+        if (vmbin.prof_on)
+            vmbin.prof.w_fast++;
         return true;
     }
     Scalar s{};
@@ -981,8 +1033,8 @@ bool Vmkv::slot_write_i64(FrameCtx& f, std::uint8_t idx, std::int64_t v) {
 }
 
 // 专用直写 bool：同理，1 字节。
-bool Vmkv::slot_write_bool(FrameCtx& f, std::uint8_t idx, bool b) {
-    FReg& fr = f.regs[idx];
+bool Vmkv::slot_write_bool(Frame& f, std::uint8_t idx, bool b) {
+    Register& fr = f.regs[idx];
     if (fr.desc_ref && fr.desc_ref->member) {
         Scalar s{};
         s.k = Scalar::K::Bool;
@@ -996,10 +1048,10 @@ bool Vmkv::slot_write_bool(FrameCtx& f, std::uint8_t idx, bool b) {
     }
     // 内存别名写参：沿链贯通到最终调用方 reg（对齐 slot_write_i64 的 dst_ptr 快路径）。
     if (fr.dst_ptr) {
-        FReg* drp = fr.dst_ptr;
+        Register* drp = fr.dst_ptr;
         while (drp->dst_ptr)
             drp = drp->dst_ptr;
-        FReg& dr = *drp;
+        Register& dr = *drp;
         dr.fb = b;
         dr.fast_bool = true;
         if (dr.view_ok && dr.body)
@@ -1013,8 +1065,8 @@ bool Vmkv::slot_write_bool(FrameCtx& f, std::uint8_t idx, bool b) {
         fr.fb = b;
         if (fr.view_ok && fr.body)
             *fr.body = b ? 1 : 0;
-        if (bin.prof_on)
-            bin.prof.w_fast++;
+        if (vmbin.prof_on)
+            vmbin.prof.w_fast++;
         return true;
     }
     std::uint8_t* body = nullptr;
@@ -1024,8 +1076,8 @@ bool Vmkv::slot_write_bool(FrameCtx& f, std::uint8_t idx, bool b) {
         *body = b ? 1 : 0;
         fr.fb = b;
         fr.fast_bool = true;
-        if (bin.prof_on)
-            bin.prof.w_fast++;
+        if (vmbin.prof_on)
+            vmbin.prof.w_fast++;
         return true;
     }
     Scalar s{};
@@ -1040,20 +1092,20 @@ bool Vmkv::slot_write_bool(FrameCtx& f, std::uint8_t idx, bool b) {
     return ok;
 }
 
-bool Vmkv::slot_write_scalar(FrameCtx& f, std::uint8_t idx, const Scalar& s,
+bool Vmkv::slot_write_scalar(Frame& f, std::uint8_t idx, const Scalar& s,
                        std::uint8_t width) {
     std::uint8_t* body = nullptr;
     std::uint64_t body_cap = 0;
     const char* kn = kind_name(s.k, width);
     if (!kn)
         return false;
-    FReg& fr = f.regs[idx];
+    Register& fr = f.regs[idx];
     if (fr.desc_ref && fr.desc_ref->member)
         return write_member_scalar(f, idx, s, width);
     // Aliased int64 write param into a caller frame local: the caller's cache is
     // the value there, so skip 组装 wire. Other targets keep the kvspace write.
     if (fr.dst_ptr && s.k == Scalar::K::Int && width == 8) {
-        const FReg* dr = fr.dst_ptr;
+        const Register* dr = fr.dst_ptr;
         while (dr->dst_ptr)
             dr = dr->dst_ptr;
         if (dr->key.empty() || is_any_frame_local(dr->key))
@@ -1105,14 +1157,14 @@ bool Vmkv::slot_write_scalar(FrameCtx& f, std::uint8_t idx, const Scalar& s,
             fr.sck = s.k;
             fr.scw = width;
             fr.sc_ok = true;
-            if (bin.prof_on)
-                bin.prof.w_fast++;
+            if (vmbin.prof_on)
+                vmbin.prof.w_fast++;
             return true;
         }
     }
     // 回退：组装 wire + ByRef（槽 langtype/容量不匹配时走这里）。
-    if (bin.prof_on)
-        bin.prof.w_fb++;
+    if (vmbin.prof_on)
+        vmbin.prof.w_fb++;
     std::uint8_t* buf = nullptr;
     std::uint32_t len = 0;
     if (!v_to_wire(kn, width, s, &buf, &len))
@@ -1142,8 +1194,8 @@ bool Vmkv::slot_write_scalar(FrameCtx& f, std::uint8_t idx, const Scalar& s,
 }
 
 // 写后 fast 缓存同步（Int/8 → fv；Bool/1 → fb；其余失效）。
-void Vmkv::sync_fast_after_write(FrameCtx& f, std::uint8_t idx, const Scalar& s) {
-    FReg& r = f.regs[idx];
+void Vmkv::sync_fast_after_write(Frame& f, std::uint8_t idx, const Scalar& s) {
+    Register& r = f.regs[idx];
     r.fast_i64 = false;
     r.fast_bool = false;
     if (s.k == Scalar::K::Int && s.width == 8) {
@@ -1428,12 +1480,12 @@ bool raw_i64(Wire w, std::int64_t* out) {
     return true;
 }
 
-bool Vmkv::write_named_i64(void* h, std::uint8_t idx, FrameCtx& f, const char* kind,
+bool Vmkv::write_named_i64(void* h, std::uint8_t idx, Frame& f, const char* kind,
                      std::int64_t v) {
     // 命名 i64（time/duration 等非 int64 标量）：langtype 在值 attr 区，
     // 且须落槽（非纯内存化）——Handoff 后帧重建，槽是唯一类型/值事实源。
-    FReg& r = f.regs[idx];
-    FReg& rf = r.src_ptr ? *r.src_ptr : r;
+    Register& r = f.regs[idx];
+    Register& rf = r.src_ptr ? *r.src_ptr : r;
     if (rf.key.empty())
         (void)ensure_reg_key(f, rf);
     std::uint8_t raw[8];
@@ -1457,12 +1509,12 @@ bool Vmkv::write_named_i64(void* h, std::uint8_t idx, FrameCtx& f, const char* k
 // ── 执行（原 vm.cpp run_frame 方法化）：明文栈 ↔ 二进制栈的执行边界 ──────
 // 帧入口：逐 reg 热字段重置 + 字面量快值缓存 + Ptr 参数内存别名绑定 + 描述符解析。
 // 每 call 唯一的 kvspace 冷路径，与指令派发正交。
-bool Vmkv::enter_frame(FrameCtx& f, const Segment* seg, std::string* err) {
+bool Vmkv::enter_frame(Frame& f, const Segment* seg, std::string* err) {
     // 逐 reg 热字段重置（不清 string capacity——池复用的 key/desc 保留缓冲，
     // fib 每帧省 24 次 string 构造/析构；语义同 assign 全清零）。
     f.regs.resize(seg->regs.size());
     for (size_t i = 0; i < seg->regs.size(); i++) {
-        FReg& rr = f.regs[i];
+        Register& rr = f.regs[i];
         rr.ref = kvspaceRef_t{};
         rr.resolved = false;
         rr.noslot = false;
@@ -1528,7 +1580,7 @@ bool Vmkv::enter_frame(FrameCtx& f, const Segment* seg, std::string* err) {
                     // （fib 递归每帧 12+ reg，字符串解析是 setup 大头）。
                     f.regs[i].desc_ref = &d;  // 成员写 base 匹配（`p·x` 的 p→`*[0,1]`）
                     const int k = d.param_k;
-                    FReg* ap = nullptr;
+                    Register* ap = nullptr;
                     if (k < 0 && static_cast<std::size_t>(-k) <=
                                      static_cast<std::size_t>(f.arg_src_n))
                         ap = f.arg_src[-k - 1];
@@ -1591,19 +1643,19 @@ bool Vmkv::enter_frame(FrameCtx& f, const Segment* seg, std::string* err) {
     return true;
 }
 
-RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
+Outcome Vmkv::run_frame(Frame& f, int start_s0,
                          std::string* stop_pc,
                          std::string* err) {
-    bin.prof_init();
+    vmbin.prof_init();
     if (stop_pc)
         stop_pc->clear();
     const Segment* seg =
         f.seg_hint ? f.seg_hint : cached_segment(f.h, f.func_dir);
     if (!seg) {
         *err = "build_segment failed: " + f.func_dir;
-        return RunResult::Error;
+        return Outcome::Error;
     }
-    // warm frame：从池借一块容量匹配的 FReg 块（复用 string capacity 免分配）。
+    // warm frame：从池借一块容量匹配的 Register 块（复用 string capacity 免分配）。
     FregPoolGuard freg_guard;
     if (f.regs.empty()) {
         const std::size_t need = static_cast<std::size_t>(seg->regs.size());
@@ -1617,10 +1669,13 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
     }
     freg_guard.blk = &f.regs;
     if (!enter_frame(f, seg, err))
-        return RunResult::Error;
+        return Outcome::Error;
+    // binir 打印（RC2_DUMP_BINIR=all：每次执行前）。
+    if (binir_dump_on_run())
+        dump_binir(*seg, f.func_dir.c_str());
     // JIT 钩子（M1）：命中即原生执行返回；否则走 fast kernel。
     {
-        bin::RunResult jr = bin::RunResult::Ok;
+        vmbin::Outcome jr = vmbin::Outcome::Ok;
         if ((!f.jit_known || f.jit_hint) &&
             jit_try_run(f, seg, start_s0, &jr, stop_pc, err))
             return jr;
@@ -1629,19 +1684,19 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
     int idx = start_s0 > 0 ? start_s0 - 1 : 0;
     if (idx < 0 || idx >= n) {
         if (idx == n)
-            return RunResult::Ok;
+            return Outcome::Ok;
         *err = "start s0 out of segment";
-        return RunResult::Error;
+        return Outcome::Error;
     }
-    if (bin.prof_on)
-        bin.prof.frames++;
-    // 四基址常驻：指令段/FReg 表基址提局部，热路径免 vector 链访问。
+    if (vmbin.prof_on)
+        vmbin.prof.frames++;
+    // 四基址常驻：指令段/Register 表基址提局部，热路径免 vector 链访问。
     const CInsn* ci = seg->insns.data();
-    FReg* regs = f.regs.data();
+    Register* regs = f.regs.data();
     // runaway 防护：局部计数，函数末尾合并进全局（热路径无全局 inc）。
     unsigned long long run_steps = 0;
     for (; idx < n; idx++) {
-        const unsigned long long t0 = bin.prof_on ? bin.now() : 0;
+        const unsigned long long t0 = vmbin.prof_on ? vmbin.now() : 0;
         const CInsn& ins = ci[idx];
         // runaway 防护：每 16M 步抽检一次（热路径无每步大数比较）。
         if (((run_steps + 1) & 63u) == 0)
@@ -1649,15 +1704,15 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
         if ((++run_steps & 0xFFFFFFULL) == 0 && run_steps > 50000000ULL) {
             *err = "runaway loop: " + f.func_dir + " s0=" + std::to_string(ins.s0) +
                    " op=" + ins.name;
-            return RunResult::Error;
+            return Outcome::Error;
         }
-        if (bin.trace_on && run_steps < bin.trace_n)
+        if (vmbin.trace_on && run_steps < vmbin.trace_n)
             std::fprintf(stderr, "[%s d%d s0=%d op=%s impl=%d idx=%d]\n",
                          f.func_dir.c_str(), f.depth, ins.s0, ins.name.c_str(),
                          (int)ins.impl, idx);
         // ── fast kernel：typed 连续执行（RC2_NOFAST=1 关闭）──────────────────
         // 连续执行 fast 指令（int64 算术/比较、wr_local copy、goto/br），直到
-        // 不可连续指令（call/return/native/handoff/非 fast）。每步写值（fv/fb）
+        // 不可连续指令（call/return/handler/handoff/非 fast）。每步写值（fv/fb）
         // 与推进 idx（内存 PC，主循环边界落盘——与主循环 PC 语义等价，崩溃恢复
         // 不破）；runaway 防护每 16M 步抽检。不可连续时退出走主循环。
         // 进入预检：读参/目标 fast 才连续（否则主循环 cold 处理，防 idx-- 补偿
@@ -1665,24 +1720,24 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
         bool fk_enter = false;
         if (!g_no_fast) {
             if (ins.fast_i64) {
-                FReg& r0 = regs[ins.rd[0]], &r1 = regs[ins.rd[1]];
-                FReg& ra = r0.src_ptr ? *r0.src_ptr : r0;
-                FReg& rb = r1.src_ptr ? *r1.src_ptr : r1;
+                Register& r0 = regs[ins.rd[0]], &r1 = regs[ins.rd[1]];
+                Register& ra = r0.src_ptr ? *r0.src_ptr : r0;
+                Register& rb = r1.src_ptr ? *r1.src_ptr : r1;
                 fk_enter = ra.fast_i64 && rb.fast_i64;
             } else if (ins.op == rwir::Op::Goto || ins.op == rwir::Op::Br) {
-                FReg& tr = regs[ins.rd[ins.op == rwir::Op::Br ? 1 : 0]];
-                FReg& tra = tr.src_ptr ? *tr.src_ptr : tr;
+                Register& tr = regs[ins.rd[ins.op == rwir::Op::Br ? 1 : 0]];
+                Register& tra = tr.src_ptr ? *tr.src_ptr : tr;
                 fk_enter = tra.fast_i64;
                 if (ins.op == rwir::Op::Br) {
                     // cond 也要 fast（bool/int64）：否则 fk 内 cond exit → 主循环 br
                     // 又进 fk → 死循环（is_prime bool 落明文无 fast_bool）。
-                    FReg& cr = regs[ins.rd[0]];
-                    FReg& cra = cr.src_ptr ? *cr.src_ptr : cr;
+                    Register& cr = regs[ins.rd[0]];
+                    Register& cra = cr.src_ptr ? *cr.src_ptr : cr;
                     fk_enter = fk_enter && (cra.fast_bool || cra.fast_i64);
                 }
             } else if (ins.op == rwir::Op::Copy && ins.wr_local && ins.nrd == 1) {
-                FReg& sr = regs[ins.rd[0]];
-                FReg& rf = sr.src_ptr ? *sr.src_ptr : sr;
+                Register& sr = regs[ins.rd[0]];
+                Register& rf = sr.src_ptr ? *sr.src_ptr : sr;
                 fk_enter = rf.fast_i64 || rf.fast_bool;
             }
         }
@@ -1691,7 +1746,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
             goto fk_next;
         fk_next:
             if (idx >= n)
-                return RunResult::Ok;
+                return Outcome::Ok;
             {
                 const CInsn& ik = ci[idx];
                 if ((++fk_n & 4095u) == 0)
@@ -1699,13 +1754,13 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                 if ((fk_n & 0xFFFFFFULL) == 0 && fk_n > 50000000ULL) {
                     *err = "runaway loop (fast): " + f.func_dir + " s0=" +
                            std::to_string(ik.s0);
-                    return RunResult::Error;
+                    return Outcome::Error;
                 }
                 if (ik.fast_i64) {
-                    FReg &r0 = regs[ik.rd[0]], &r1 = regs[ik.rd[1]],
+                    Register &r0 = regs[ik.rd[0]], &r1 = regs[ik.rd[1]],
                          &w = regs[ik.wr[0]];
-                    FReg& ra = r0.src_ptr ? *r0.src_ptr : r0;
-                    FReg& rb = r1.src_ptr ? *r1.src_ptr : r1;
+                    Register& ra = r0.src_ptr ? *r0.src_ptr : r0;
+                    Register& rb = r1.src_ptr ? *r1.src_ptr : r1;
                     if (ra.fast_i64 && rb.fast_i64) {
                         const std::int64_t a = ra.fv, b = rb.fv;
                         std::int64_t rv;
@@ -1724,7 +1779,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                                 *err = "division by zero: " + ik.name;
                                 if (stop_pc)
                                     *stop_pc = param_key(f.frame, ik.s0, 0);
-                                return RunResult::Error;
+                                return Outcome::Error;
                             }
                         }
                         w.fast_bool = false;
@@ -1773,16 +1828,16 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                     goto fk_exit;  // cold 读参：主循环处理（含冷 fallback）
                 }
                 if (ik.op == rwir::Op::Goto || ik.op == rwir::Op::Br) {
-                    FReg& tr = regs[ik.rd[ik.op == rwir::Op::Br ? 1 : 0]];
-                    FReg& tra = tr.src_ptr ? *tr.src_ptr : tr;
+                    Register& tr = regs[ik.rd[ik.op == rwir::Op::Br ? 1 : 0]];
+                    Register& tra = tr.src_ptr ? *tr.src_ptr : tr;
                     if (!tra.fast_i64) {
                         idx--;
                         goto fk_exit;
                     }
                     std::int64_t targ = tra.fv;
                     if (ik.op == rwir::Op::Br) {
-                        FReg& cr = regs[ik.rd[0]];
-                        FReg& cra = cr.src_ptr ? *cr.src_ptr : cr;
+                        Register& cr = regs[ik.rd[0]];
+                        Register& cra = cr.src_ptr ? *cr.src_ptr : cr;
                         bool cond = false;
                         if (cra.fast_bool)
                             cond = cra.fb;
@@ -1793,8 +1848,8 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                             goto fk_exit;
                         }
                         if (!cond) {
-                            FReg& fr = regs[ik.rd[2]];
-                            FReg& fra = fr.src_ptr ? *fr.src_ptr : fr;
+                            Register& fr = regs[ik.rd[2]];
+                            Register& fra = fr.src_ptr ? *fr.src_ptr : fr;
                             if (!fra.fast_i64) {
                                 idx--;
                                 goto fk_exit;
@@ -1804,15 +1859,15 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                     }
                     if (targ < 1 || targ > n + 1) {
                         *err = "control: target out of range (fast): " + ik.name;
-                        return RunResult::Error;
+                        return Outcome::Error;
                     }
                     idx = static_cast<int>(targ) - 1;  // fk 内无 for 补偿
                     goto fk_next;
                 }
                 if (ik.op == rwir::Op::Copy && ik.wr_local && ik.nrd == 1) {
-                    FReg& sr = regs[ik.rd[0]];
-                    FReg& rf = sr.src_ptr ? *sr.src_ptr : sr;
-                    FReg& w = regs[ik.wr[0]];
+                    Register& sr = regs[ik.rd[0]];
+                    Register& rf = sr.src_ptr ? *sr.src_ptr : sr;
+                    Register& w = regs[ik.wr[0]];
                     if (rf.fast_i64) {
                         w.fast_bool = false;
                         if (ik.wr_local && !w.view_ok) {
@@ -1853,23 +1908,23 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                 }
                 idx--;
             fk_exit:
-                if (bin.prof_on) {
-                    bin.prof.handler += bin.now() - t0;
-                    bin.prof.steps += fk_n;
+                if (vmbin.prof_on) {
+                    vmbin.prof.handler += vmbin.now() - t0;
+                    vmbin.prof.steps += fk_n;
                 }
                 continue;
             }
         }
         // 快路径前置：fast op 纯算术（int64 二目），不可能是 handoff/
-        // goto/br/native/call，提前到通用检查之前（iops 热循环主力）。
+        // goto/br/handler/call，提前到通用检查之前（iops 热循环主力）。
         if (ins.fast_i64) {
-            FReg &r0 = regs[ins.rd[0]], &r1 = regs[ins.rd[1]];
-            FReg &w = regs[ins.wr[0]];
+            Register &r0 = regs[ins.rd[0]], &r1 = regs[ins.rd[1]];
+            Register &w = regs[ins.wr[0]];
             // 稳态恒 fast：双读参直接取缓存值（mem 别名参数追 src_ptr，fib/iops
             // 参数读参也走 hot）；未命中（首次/失效）落冷路径 read_i64 兜底。
             // opfn 1-18 → goto 跳表（编译期 label 数组）。
-            FReg& ra = r0.src_ptr ? *r0.src_ptr : r0;
-            FReg& rb = r1.src_ptr ? *r1.src_ptr : r1;
+            Register& ra = r0.src_ptr ? *r0.src_ptr : r0;
+            Register& rb = r1.src_ptr ? *r1.src_ptr : r1;
             if (ra.fast_i64 && rb.fast_i64) {
                 const std::int64_t a = ra.fv, b = rb.fv;
                 std::int64_t rv;
@@ -1903,7 +1958,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                         *err = "division by zero: " + ins.name;
                         if (stop_pc)
                             *stop_pc = param_key(f.frame, ins.s0, 0);  // 出错指令行
-                        return RunResult::Error;
+                        return Outcome::Error;
                     }
                 }
                 if (ins.opfn <= 12) {
@@ -1950,11 +2005,11 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                         w.sc_ok = false;
                     }
                 }
-                if (bin.prof_on) {
-                    const std::uint64_t dh = bin.now() - t0;
-                    bin.prof.handler += dh;
-                    bin.prof.steps++;
-                    bin.prof_tick(ins.prof_id, dh, 0);
+                if (vmbin.prof_on) {
+                    const std::uint64_t dh = vmbin.now() - t0;
+                    vmbin.prof.handler += dh;
+                    vmbin.prof.steps++;
+                    vmbin.prof_tick(ins.prof_id, dh, 0);
                 }
                 continue;
             }
@@ -1977,7 +2032,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                     if (ins.opfn == 4 || ins.opfn == 5) {
                         if (b == 0) {
                             *err = "division by zero: " + ins.name;
-                            return RunResult::Error;
+                            return Outcome::Error;
                         }
                     }
                     w.fv = rv;
@@ -2005,11 +2060,11 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                     w.fast_i64 = false;
                     w.sc_ok = false;
                 }
-                if (bin.prof_on) {
-                    const std::uint64_t dh = bin.now() - t0;
-                    bin.prof.handler += dh;
-                    bin.prof.steps++;
-                    bin.prof_tick(ins.prof_id, dh, 0);
+                if (vmbin.prof_on) {
+                    const std::uint64_t dh = vmbin.now() - t0;
+                    vmbin.prof.handler += dh;
+                    vmbin.prof.steps++;
+                    vmbin.prof_tick(ins.prof_id, dh, 0);
                 }
                 continue;
             }
@@ -2017,154 +2072,131 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
         }
         if (ins.op == rwir::Op::Goto || ins.op == rwir::Op::Br) {
             std::int64_t target_v = 0;
-            FReg &tr = regs[ins.rd[ins.op == rwir::Op::Br ? 1 : 0]];
+            Register &tr = regs[ins.rd[ins.op == rwir::Op::Br ? 1 : 0]];
             if (!(tr.fast_i64 ? (target_v = tr.fv, true)
                               : read_i64(f, ins.rd[ins.op == rwir::Op::Br ? 1 : 0],
                                          &target_v))) {
                 *err = "control: bad target";
-                return RunResult::Error;
+                return Outcome::Error;
             }
             int dest = static_cast<int>(target_v);
             if (ins.op == rwir::Op::Br) {
                 bool cond = false;
-                FReg &cr = regs[ins.rd[0]];
+                Register &cr = regs[ins.rd[0]];
                 if (!(cr.fast_bool ? (cond = cr.fb, true)
                                    : read_bool(f, ins.rd[0], &cond))) {
                     *err = "br: bad cond";
-                    return RunResult::Error;
+                    return Outcome::Error;
                 }
                 if (!cond) {
-                    FReg &fr = regs[ins.rd[2]];
+                    Register &fr = regs[ins.rd[2]];
                     if (!(fr.fast_i64 ? (target_v = fr.fv, true)
                                       : read_i64(f, ins.rd[2], &target_v))) {
                         *err = "br: bad false target";
-                        return RunResult::Error;
+                        return Outcome::Error;
                     }
                     dest = static_cast<int>(target_v);
                 }
             }
             if (dest < 1 || dest > n + 1) {
                 *err = "control: target out of range";
-                return RunResult::Error;
+                return Outcome::Error;
             }
             idx = dest - 2;
-            if (bin.prof_on) {
-                const std::uint64_t d = bin.now() - t0;
-                bin.prof.ctrl += d;
-                bin.prof.steps++;
-                bin.prof_tick(ins.prof_id, 0, d);
+            if (vmbin.prof_on) {
+                const std::uint64_t d = vmbin.now() - t0;
+                vmbin.prof.ctrl += d;
+                vmbin.prof.steps++;
+                vmbin.prof_tick(ins.prof_id, 0, d);
             }
             continue;
         }
-        if (ins.impl == rwir::Impl::Handoff || ins.impl == rwir::Impl::None) {
-            if (bin.trace_on)
-                std::fprintf(stderr, "[stop %s d%d s0=%d %s]\n",
-                             f.func_dir.c_str(), f.depth, ins.s0, ins.name.c_str());
-            // Stop 边界（handoff/外部引擎接管）：冲刷帧局部纯内存变量落明文，
-            // resume 后的新 FrameCtx 无 fast 缓存，须从 kvspace 重建。
-            flush_frame_locals(f);
-            if (stop_pc)
-                *stop_pc = param_key(f.frame, ins.s0, 0);
-            return RunResult::Stop;
-        }
-        if (ins.op == rwir::Op::Return) {
-            if (bin.prof_on) {
-                bin.prof.loop += bin.now() - t0;
-                bin.prof.steps++;
-            }
-            if (bin.prof_on)
-                bin.prof_tick(ins.prof_id, 0, 0);
-            // return 边界：本段含 native/handoff 才冲刷（纯算术/递归帧免，
-            // 保持零 kvspace）。入口帧 return 交给外层引擎收尾（同样冲刷）。
-            if (seg->has_native)
-                flush_frame_locals(f);
-            if (f.depth <= 1)
-                return RunResult::Ok;  // 入口帧（depth=1）return = vthread done
-            // 纯内存递归帧：无 returnpc 明文（call 时省略）→ 直接 Returned，
-            // stop_pc 留空；Call 分支捕获后 continue 到调用方下一条指令。
-            if (f.mem_frame) {
-                if (stop_pc)
-                    stop_pc->clear();
-                return RunResult::Returned;
-            }
-            std::string ret;
-            if (!read_text(f.h, f.frame + "\xE2\x80\xA5" "returnpc", &ret) ||
-                ret.empty()) {
-                *err = "return: missing returnpc in " + f.frame;
-                return RunResult::Error;
-            }
-            // 帧不立即 DelTree：残留延迟到下次同 depth 的 call 建帧时清理，
-            // 每层 return 省 1 次 kvspace 往返（纯内存递归帧无外部可观察面）。
-            if (stop_pc)
-                *stop_pc = ret;
-            return RunResult::Returned;
-        }
-        if (ins.impl == rwir::Impl::Native) {
-            // Native 分派：fold `·`→`/` 后查两级表（vmkv_native.cpp），一 op 一 handler。
-            // 表未命中 / handler 失败 → error；写失败统一由调用方补 "write failed"。
-            if (!ins.native_ready) {
-                std::string& fo = ins.fn_fold;
-                fo.clear();
-                for (std::size_t i = 0; i < ins.name.size();) {
-                    if (i + 2 < ins.name.size() &&
-                        static_cast<unsigned char>(ins.name[i]) == 0xC2 &&
-                        static_cast<unsigned char>(ins.name[i + 1]) == 0xB7) {
-                        fo += '/';
-                        i += 2;
-                    } else {
-                        fo += ins.name[i++];
-                    }
-                }
-                ins.native = find_native(fo);
-                // These handlers read their operands themselves.
-                ins.native_noprefetch =
-                    fo == "compactarray/at" || fo == "compactarray/set";
-                ins.native_ready = true;
-            }
-            NativeCtx ctx{g_vmkv, f, seg, ins, {}, 0, 0, ins.fn_fold};
-            for (int i = 0; !ins.native_noprefetch && i < ins.nrd && i < 2; i++) {
+        if (ins.handler != rwir::RwirHandlerId::None) {
+            // handler 分派：编译期写入的 handler id 直接下标取表项（无字符串查找）。
+            // handler 失败 → error；写失败统一由调用方补 "write failed"。
+            const RwirHandlerSlot& slot = rwir_handler(ins.handler);
+            RwirHandlerCtx ctx{g_vmkv, f, seg, ins, {}, 0, 0};
+            for (int i = 0; slot.prefetch_operands && i < ins.nrd && i < 2; i++) {
                 if (!read_reg(f, ins.rd[i], &ctx.in[i])) {
-                    *err = "native: missing operand " + std::to_string(i) + ": " +
-                           ins.name;
-                    return RunResult::Error;
+                    *err = "rwir handler: missing operand " +
+                           std::to_string(i) + ": " + ins.name;
+                    return Outcome::Error;
                 }
             }
-            const NativeFn* h = static_cast<const NativeFn*>(ins.native);
-            if (!h) {
-                *err = "native op not implemented: " + ins.name;
-                return RunResult::Error;
-            }
-            if (!(*h)(ctx, err)) {
+            if (!slot.handle(ctx, err)) {
                 if (err->empty())
-                    *err = "native: write failed: " + ins.name;
-                return RunResult::Error;
+                    *err = "rwir handler: write failed: " + ins.name;
+                return Outcome::Error;
             }
             // vthread·run 冒泡：子 vid 撞外部 rwir → 父以 Stop 让出（stop_pc=子 pc），
             // execute_vthread_impl 交驱动处理子 rwir 后重入续驱。父 pc 停在 vthread·run
             // 指令（handler 未推进），重入后继续驱动子。
             if (!ctx.yield_pc.empty()) {
-                if (bin.prof_on) {
-                    const std::uint64_t d = bin.now() - t0;
-                    bin.prof.handler += d;
-                    bin.prof.steps++;
-                    bin.prof_tick(ins.prof_id, d, 0);
+                if (vmbin.prof_on) {
+                    const std::uint64_t d = vmbin.now() - t0;
+                    vmbin.prof.handler += d;
+                    vmbin.prof.steps++;
+                    vmbin.prof_tick(ins.prof_id, d, 0);
                 }
                 flush_frame_locals(f);
                 if (stop_pc)
                     *stop_pc = std::move(ctx.yield_pc);
-                return RunResult::Stop;
+                return Outcome::Stop;
             }
-            if (bin.prof_on) {
-                const std::uint64_t d = bin.now() - t0;
-                bin.prof.handler += d;
-                bin.prof.steps++;
-                bin.prof_tick(ins.prof_id, d, 0);
+            if (vmbin.prof_on) {
+                const std::uint64_t d = vmbin.now() - t0;
+                vmbin.prof.handler += d;
+                vmbin.prof.steps++;
+                vmbin.prof_tick(ins.prof_id, d, 0);
             }
             continue;
         }
+        if (ins.impl == rwir::Impl::Handoff || ins.impl == rwir::Impl::None) {
+            if (vmbin.trace_on)
+                std::fprintf(stderr, "[stop %s d%d s0=%d %s]\n",
+                             f.func_dir.c_str(), f.depth, ins.s0, ins.name.c_str());
+            // Stop 边界（handoff/外部引擎接管）：冲刷帧局部纯内存变量落明文，
+            // resume 后的新 Frame 无 fast 缓存，须从 kvspace 重建。
+            flush_frame_locals(f);
+            if (stop_pc)
+                *stop_pc = param_key(f.frame, ins.s0, 0);
+            return Outcome::Stop;
+        }
+        if (ins.op == rwir::Op::Return) {
+            if (vmbin.prof_on) {
+                vmbin.prof.loop += vmbin.now() - t0;
+                vmbin.prof.steps++;
+            }
+            if (vmbin.prof_on)
+                vmbin.prof_tick(ins.prof_id, 0, 0);
+            // return 边界：本段含 handler/handoff 才冲刷（纯算术/递归帧免，
+            // 保持零 kvspace）。入口帧 return 交给外层引擎收尾（同样冲刷）。
+            if (seg->has_rwirhandler)
+                flush_frame_locals(f);
+            if (f.depth <= 1)
+                return Outcome::Ok;  // 入口帧（depth=1）return = vthread done
+            // 纯内存递归帧：无 returnpc 明文（call 时省略）→ 直接 Returned，
+            // stop_pc 留空；Call 分支捕获后 continue 到调用方下一条指令。
+            if (f.mem_frame) {
+                if (stop_pc)
+                    stop_pc->clear();
+                return Outcome::Returned;
+            }
+            std::string ret;
+            if (!read_text(f.h, f.frame + "\xE2\x80\xA5" "returnpc", &ret) ||
+                ret.empty()) {
+                *err = "return: missing returnpc in " + f.frame;
+                return Outcome::Error;
+            }
+            // 帧不立即 DelTree：残留延迟到下次同 depth 的 call 建帧时清理，
+            // 每层 return 省 1 次 kvspace 往返（纯内存递归帧无外部可观察面）。
+            if (stop_pc)
+                *stop_pc = ret;
+            return Outcome::Returned;
+        }
         if (ins.op == rwir::Op::Call) {
-            const RunResult rr = do_call(f, seg, ins, stop_pc, err);
-            if (rr != RunResult::Ok)
+            const Outcome rr = do_call(f, seg, ins, stop_pc, err);
+            if (rr != Outcome::Ok)
                 return rr;
             continue;
         }
@@ -2180,7 +2212,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                 }
                 if (!read_reg(f, ins.rd[i], &w[i])) {
                     *err = "operand " + std::to_string(i) + " is missing";
-                    return RunResult::Error;
+                    return Outcome::Error;
                 }
                 if (v_is_none(w[i])) {
                     if (i == 0) none0 = true;
@@ -2210,7 +2242,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                 for (int i = 0; i < 2; i++) {
                     if (!w[i].d && !read_reg(f, ins.rd[i], &w[i])) {
                         *err = "operand " + std::to_string(i) + " is missing";
-                        return RunResult::Error;
+                        return Outcome::Error;
                     }
                 }
                 non_scalar = true;
@@ -2233,17 +2265,17 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                 ok = slot_write_bool(f, ins.wr[0], !(none0 && none1));
             else {
                 *err = "TypeError: None in comparison: " + ins.name;
-                return RunResult::Error;
+                return Outcome::Error;
             }
-            if (bin.prof_on) {
-                const std::uint64_t dh = bin.now() - t0;
-                bin.prof.handler += dh;
-                bin.prof.steps++;
-                bin.prof_tick(ins.prof_id, dh, 0);
+            if (vmbin.prof_on) {
+                const std::uint64_t dh = vmbin.now() - t0;
+                vmbin.prof.handler += dh;
+                vmbin.prof.steps++;
+                vmbin.prof_tick(ins.prof_id, dh, 0);
             }
             if (!ok) {
                 *err = "value op failed: " + ins.name;
-                return RunResult::Error;
+                return Outcome::Error;
             }
             continue;
         }
@@ -2255,7 +2287,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                 std::string txt;
                 if (!wtext(0, &txt)) {
                     *err = "char cast: bad input";
-                    return RunResult::Error;
+                    return Outcome::Error;
                 }
                 std::uint8_t* cb = nullptr;
                 std::uint32_t cl = 0;
@@ -2265,15 +2297,15 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                     static_cast<std::uint32_t>(txt.size()), &cb, &cl);
                 ok = cok && cb && write_reg(f, ins.wr[0], cb, cl);
                 std::free(cb);
-                if (bin.prof_on) {
-                    const std::uint64_t dh = bin.now() - t0;
-                    bin.prof.handler += dh;
-                    bin.prof.steps++;
-                    bin.prof_tick(ins.prof_id, dh, 0);
+                if (vmbin.prof_on) {
+                    const std::uint64_t dh = vmbin.now() - t0;
+                    vmbin.prof.handler += dh;
+                    vmbin.prof.steps++;
+                    vmbin.prof_tick(ins.prof_id, dh, 0);
                 }
                 if (!ok) {
                     *err = "value op failed: " + ins.name;
-                    return RunResult::Error;
+                    return Outcome::Error;
                 }
                 continue;
             } else {
@@ -2307,11 +2339,11 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                                             : p0 ? e0 : e1;
                         ok = slot_write_bool(f, ins.wr[0],
                                              ins.op == rwir::Op::Eq ? eq : !eq);
-                        if (bin.prof_on) {
-                            const std::uint64_t d2 = bin.now() - t0;
-                            bin.prof.handler += d2;
-                            bin.prof.steps++;
-                            bin.prof_tick(ins.prof_id, d2, 0);
+                        if (vmbin.prof_on) {
+                            const std::uint64_t d2 = vmbin.now() - t0;
+                            vmbin.prof.handler += d2;
+                            vmbin.prof.steps++;
+                            vmbin.prof_tick(ins.prof_id, d2, 0);
                         }
                         continue;
                     }
@@ -2319,11 +2351,11 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                         const bool eq = a == b;
                         ok = slot_write_bool(f, ins.wr[0],
                                              ins.op == rwir::Op::Eq ? eq : !eq);
-                        if (bin.prof_on) {
-                            const std::uint64_t dh = bin.now() - t0;
-                            bin.prof.handler += dh;
-                            bin.prof.steps++;
-                            bin.prof_tick(ins.prof_id, dh, 0);
+                        if (vmbin.prof_on) {
+                            const std::uint64_t dh = vmbin.now() - t0;
+                            vmbin.prof.handler += dh;
+                            vmbin.prof.steps++;
+                            vmbin.prof_tick(ins.prof_id, dh, 0);
                         }
                         continue;
                     }
@@ -2334,7 +2366,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                     if (ins.op != rwir::Op::Add || ins.nrd != 2 ||
                         !wtext(0, &a) || !wtext(1, &b)) {
                         *err = "non-scalar operand: " + ins.name;
-                        return RunResult::Error;
+                        return Outcome::Error;
                     }
                     const std::string out_s = a + b;
                     std::uint8_t* buf = nullptr;
@@ -2347,15 +2379,15 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                              &len) &&
                          buf && write_reg(f, ins.wr[0], buf, len);
                     std::free(buf);
-                    if (bin.prof_on) {
-                        const std::uint64_t dh = bin.now() - t0;
-                        bin.prof.handler += dh;
-                        bin.prof.steps++;
-                        bin.prof_tick(ins.prof_id, dh, 0);
+                    if (vmbin.prof_on) {
+                        const std::uint64_t dh = vmbin.now() - t0;
+                        vmbin.prof.handler += dh;
+                        vmbin.prof.steps++;
+                        vmbin.prof_tick(ins.prof_id, dh, 0);
                     }
                     if (!ok) {
                         *err = "value op failed: " + ins.name;
-                        return RunResult::Error;
+                        return Outcome::Error;
                     }
                     continue;
                 }
@@ -2364,7 +2396,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                 if (ins.op != rwir::Op::Add || ins.nrd != 2 ||
                     !wtext(0, &a) || !wtext(1, &b)) {
                     *err = "non-scalar operand: " + ins.name;
-                    return RunResult::Error;
+                    return Outcome::Error;
                 }
                 const std::string out_s = a + b;
                 std::uint8_t* buf = nullptr;
@@ -2375,15 +2407,15 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                          static_cast<std::uint32_t>(out_s.size()), &buf, &len) &&
                      buf && write_reg(f, ins.wr[0], buf, len);
                 std::free(buf);
-                if (bin.prof_on) {
-                    const std::uint64_t dh = bin.now() - t0;
-                    bin.prof.handler += dh;
-                    bin.prof.steps++;
-                    bin.prof_tick(ins.prof_id, dh, 0);
+                if (vmbin.prof_on) {
+                    const std::uint64_t dh = vmbin.now() - t0;
+                    vmbin.prof.handler += dh;
+                    vmbin.prof.steps++;
+                    vmbin.prof_tick(ins.prof_id, dh, 0);
                 }
                 if (!ok) {
                     *err = "value op failed: " + ins.name;
-                    return RunResult::Error;
+                    return Outcome::Error;
                 }
                 continue;
             }
@@ -2393,8 +2425,8 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
         auto key_str = [&](std::uint8_t ridx, std::string* out) -> bool {
             // 纯内存 fast 缓存（帧局部 int64 键）：无 kvspace 槽、无 attr——
             // 直取 fv 转十进制（动态键 `h·*key` 常见形态）。
-            FReg& kf = f.regs[ridx];
-            FReg& kfr = kf.src_ptr ? *kf.src_ptr : kf;
+            Register& kf = f.regs[ridx];
+            Register& kfr = kf.src_ptr ? *kf.src_ptr : kf;
             if (kfr.fast_i64) {
                 *out = std::to_string(kfr.fv);
                 return true;
@@ -2444,15 +2476,15 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                     wdesc0.name.find("\xC2\xB7") != std::string::npos &&
                     wdesc0.name[0] != '/';
                 if (ins.nrd == 1 && !mw) {
-                    FReg& sr = regs[ins.rd[0]];
-                    FReg& rf = sr.src_ptr ? *sr.src_ptr : sr;
+                    Register& sr = regs[ins.rd[0]];
+                    Register& rf = sr.src_ptr ? *sr.src_ptr : sr;
                     if (rf.fast_i64 || rf.fast_bool) {
-                        FReg& wr = regs[ins.wr[0]];
+                        Register& wr = regs[ins.wr[0]];
                         // 写参链沿 dst_ptr 贯通到最终调用方 reg（Copy 直传同规）。
-                        FReg* tp = wr.dst_ptr ? wr.dst_ptr : &wr;
+                        Register* tp = wr.dst_ptr ? wr.dst_ptr : &wr;
                         while (tp->dst_ptr)
                             tp = tp->dst_ptr;
-                        FReg& target = *tp;
+                        Register& target = *tp;
                         target.fast_bool = false;
                         if (rf.fast_i64) {
                             target.fv = rf.fv;
@@ -2474,11 +2506,11 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                                 wr.fast_bool = true;
                             }
                         }
-                        if (bin.prof_on) {
-                            const std::uint64_t dh = bin.now() - t0;
-                            bin.prof.handler += dh;
-                            bin.prof.steps++;
-                            bin.prof_tick(ins.prof_id, dh, 0);
+                        if (vmbin.prof_on) {
+                            const std::uint64_t dh = vmbin.now() - t0;
+                            vmbin.prof.handler += dh;
+                            vmbin.prof.steps++;
+                            vmbin.prof_tick(ins.prof_id, dh, 0);
                         }
                         // 非别名写参/绝对路径槽：fast 直写只进缓存，须补落明文
                         // （内存别名由边界冲刷兜底，见 flush_frame_locals）。
@@ -2488,7 +2520,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                                            : slot_write_bool(f, ins.wr[0], rf.fb);
                             if (!ok2) {
                                 *err = "value op failed: " + ins.name;
-                                return RunResult::Error;
+                                return Outcome::Error;
                             }
                         }
                         continue;
@@ -2507,8 +2539,8 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                 // 成员读：base（读参0 的值或 Ptr 目标 key）+ key（读参1 的值）。
                 Wire bw{};
                 std::string base_key;
-                FReg& br0 = f.regs[ins.rd[0]];
-                FReg& br0f = br0.src_ptr ? *br0.src_ptr : br0;
+                Register& br0 = f.regs[ins.rd[0]];
+                Register& br0f = br0.src_ptr ? *br0.src_ptr : br0;
                 if (read_reg(f, ins.rd[0], &bw)) {
                     std::string bt, blt;
                     if (v_ptr_target(bw, &bt)) {
@@ -2565,7 +2597,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                     }
                 } else {
                     *err = "member read: bad base/key: " + ins.name;
-                    return RunResult::Error;
+                    return Outcome::Error;
                 }
             } else if (member_write) {
                 // 成员写 `v -> base·name` / `v -> base·*key` / `v -> base·*"lit"`。
@@ -2606,7 +2638,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                         if (kridx == 255 || !key_str(kridx, &kstr) ||
                             kstr.empty()) {
                             *err = "member write: bad key var: " + wname;
-                            return RunResult::Error;
+                            return Outcome::Error;
                         }
                     }
                 } else {
@@ -2624,13 +2656,13 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                     // 先精确匹配 base 名（`cur·next` 的 cur 局部变量），失败才回退
                     // 写参 Ptr（`*[0,±k]`：`r·x` 的 r 是写参）——顺序不可反。
                     // 无字符串拷贝：desc_ref 指针/name 直接比较，key 前缀匹配。
-                    FReg* base_reg = nullptr;
+                    Register* base_reg = nullptr;
                     if (ins.mw_basereg == -2)
                         ins.mw_basereg = reg_by_name(seg, base_part);
                     if (ins.mw_basereg >= 0)
                         base_reg = &f.regs[static_cast<std::size_t>(ins.mw_basereg)];
                     for (std::size_t ri = 0; !base_reg && ri < f.regs.size(); ri++) {
-                        FReg& r = f.regs[ri];
+                        Register& r = f.regs[ri];
                         if ((r.desc_ref && r.desc_ref->name == base_part) ||
                             r.key == fbp ||
                             (!r.desc.empty() && r.desc == base_part)) {
@@ -2639,7 +2671,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                         }
                     }
                     if (base_reg) {
-                        FReg* rk = base_reg;
+                        Register* rk = base_reg;
                         while (rk->src_ptr || rk->dst_ptr)
                             rk = rk->src_ptr ? rk->src_ptr : rk->dst_ptr;
                         // enter_frame 每 execute 重入重置 regs（惰性 key 清空）：
@@ -2648,7 +2680,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                         // 调用方 reg（跨帧）时不动——#552 的跨帧安全 + 错误检查。
                         if (rk->key.empty() && rk == base_reg &&
                             !ensure_reg_key(f, *rk))
-                            return RunResult::Error;
+                            return Outcome::Error;
                         if (!rk->key.empty()) {
                             // base 槽是 Ptr（`cur·next` 的 cur 存指针）：成员写落
                             // target。首查后缓存（热路径动态键容器免每写 kvspace）。
@@ -2679,13 +2711,13 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                     }
                     // Write-param fallbacks apply only when no local reg names the base.
                     if (!base_reg && base_key == fbp) {
-                        for (FReg& r : f.regs) {
+                        for (Register& r : f.regs) {
                             const std::string_view rn =
                                 !r.desc.empty() ? std::string_view(r.desc)
                                 : r.desc_ref    ? std::string_view(r.desc_ref->name)
                                                 : std::string_view();
                             if (rn.substr(0, 4) == "*[0," && !r.key.empty()) {
-                                FReg* rk = &r;
+                                Register* rk = &r;
                                 while (rk->src_ptr || rk->dst_ptr)
                                     rk = rk->src_ptr ? rk->src_ptr : rk->dst_ptr;
                                 if (!rk->key.empty()) {
@@ -2715,14 +2747,14 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                 }
                 if (base_key.empty()) {
                     *err = "member write: no base: " + ins.name;
-                    return RunResult::Error;
+                    return Outcome::Error;
                 }
                 const std::string mkey = base_key + "\xC2\xB7" + kstr;
                 char e[192] = {};
                 Wire kw{};
                 if (!read_reg(f, ins.rd[0], &kw)) {
                     *err = "member write: no value: " + ins.name;
-                    return RunResult::Error;
+                    return Outcome::Error;
                 }
                 // 值自带类型（attr 区随值），直接落。
                 ok = kvspaceSetValue(f.h, mkey.c_str(), kw.d, kw.n, e, sizeof e) == 0;
@@ -2730,8 +2762,8 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                 // 普通单参赋值（`a -> b`）：复制**槽本体**（Ptr 不穿透——链表
                 // `head -> cur` 复制指针，穿透会拿到目标实例）。普通值 raw 同值。
                 Wire src{};
-                FReg& sr0 = regs[ins.rd[0]];
-                FReg& srf = sr0.src_ptr ? *sr0.src_ptr : sr0;
+                Register& sr0 = regs[ins.rd[0]];
+                Register& srf = sr0.src_ptr ? *sr0.src_ptr : sr0;
                 const std::uint8_t* rawd = nullptr;
                 std::uint32_t rawn = 0;
                 // A write param resolves to the caller's instance; copying it must
@@ -2742,7 +2774,7 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                 bool aliased = false;
                 if (sd0.vclass == RegDesc::VarClass::ParamPtr && sd0.param_k > 0 &&
                     dd0.vclass == RegDesc::VarClass::Plain && !dd0.member) {
-                    FReg* tk = &sr0;
+                    Register* tk = &sr0;
                     while (tk->dst_ptr)
                         tk = tk->dst_ptr;
                     std::string lt;
@@ -2750,9 +2782,9 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
                         read_langtype(f.h, tk->key, &lt) &&
                         read_wire_raw(f.h, tk->key, &rawd, &rawn) && rawd &&
                         !v_ptr(Wire{rawd, rawn})) {
-                        const auto t = bin.langtype_of(lt.data(), lt.size());
-                        const bool scalar = t >= bin::LangType::Int8 &&
-                                            t <= bin::LangType::CharAscii;
+                        const auto t = vmbin.langtype_of(lt.data(), lt.size());
+                        const bool scalar = t >= vmbin::LangType::Int8 &&
+                                            t <= vmbin::LangType::CharAscii;
                         std::uint8_t* pb = nullptr;
                         std::uint32_t pl = 0;
                         if (!scalar && kvspaceNewPtr(lt.c_str(), tk->key.c_str(), &pb,
@@ -2907,42 +2939,42 @@ RunResult Vmkv::run_frame(FrameCtx& f, int start_s0,
             if (ok)
                 sync_fast_after_write(f, ins.wr[0], out);
         }
-        if (bin.prof_on) {
-            const std::uint64_t dh = bin.now() - t0;
-            bin.prof.handler += dh;
-            bin.prof.steps++;
-            bin.prof_tick(ins.prof_id, dh, 0);
+        if (vmbin.prof_on) {
+            const std::uint64_t dh = vmbin.now() - t0;
+            vmbin.prof.handler += dh;
+            vmbin.prof.steps++;
+            vmbin.prof_tick(ins.prof_id, dh, 0);
         }
         if (!ok) {
             *err = "value op failed: " + ins.name;
-            return RunResult::Error;
+            return Outcome::Error;
         }
     }
-    return RunResult::Ok;
+    return Outcome::Ok;
 }
 
 // Call 块（原 run_frame 内嵌）：callee 解析、mem_frame 判定、帧初始化、
 // arg_src/arg_dst 内存别名表、递归 run_frame。Call 是天然 checkpoint 边界。
-bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
+vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
                             std::string* stop_pc, std::string* err) {
     // callee 已在 build_segment 预解析为最终 /lib/ 路径（裸名 pkg 探测一次，
     // 运行期零 read_text/kvspaceGet）。fib 递归每帧省 2 次 kvspace 往返。
     const std::string& callee = ins.callee;
     if (callee.empty()) {
         *err = "call: empty callee";
-        return RunResult::Error;
+        return Outcome::Error;
     }
     const std::string& nf = child_frame_root(f.vid, f.depth + 1);
     char e[192] = {};
     // 纯 runtime rwfunc 调用（callee 有代码段可解释）：帧局部 int64/bool
     // 参数走内存别名，免建 kvspace arg 槽/写参槽（fib 递归热点）。
-    // 扩展/native/容器/float 参数照旧 kvspace 传值/Ptr。
+    // 扩展/handler/容器/float 参数照旧 kvspace 传值/Ptr。
     const Segment* cseg =
         ins.call_ready ? ins.call_seg : cached_segment(f.h, callee);
-    // 纯内存递归帧：callee 段无 native/handoff → 无观察边界 → 帧系统变量
+    // 纯内存递归帧：callee 段无 handler/handoff → 无观察边界 → 帧系统变量
     // （returnpc/lib）与生命周期（DelTree/Mkindex/ext 索引）全部省略，
     // 每帧省 ~17k cycles kvspace（fib 递归最大头）。
-    const bool mem_frame = cseg && !cseg->has_native;
+    const bool mem_frame = cseg && !cseg->has_rwirhandler;
     // JIT 快路径判定（M1）：callee 已编译 → 形状已知（int64 单读参/写参），
     // 参数绑定直接走 mem 路径，免签名/参数 wire 的 kvspace 读取。
     const void* jcode =
@@ -2955,7 +2987,7 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
         // Mkindex 删除：shm ART SetValue 隐式建目录（实测无回归）。
         if (kvspaceMkindex(f.h, nstack.c_str(), 0, e, sizeof e) != 0) {
             *err = std::string("call: frame init failed: ") + e;
-            return RunResult::Error;
+            return Outcome::Error;
         }
         const std::string callee_dir = callee + "/";
         kvspaceMkindexExt(f.h, nstack.c_str(), callee_dir.c_str(), e, sizeof e);
@@ -2963,7 +2995,7 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
         if (!write_text(f.h, nf + "\xE2\x80\xA5" "returnpc", retpc) ||
             !write_text(f.h, nstack + "\xE2\x80\xA5" "lib", callee)) {
             *err = "call: system vars failed";
-            return RunResult::Error;
+            return Outcome::Error;
         }
     } else if (f.observable) {
         // 纯内存帧在**外部可观察链**（vthread·run 驱动的子链，printstack 检视）
@@ -2975,7 +3007,7 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
         const std::string callee_dir = callee + "/";
         if (!write_text(f.h, nf + "/\xE2\x80\xA5" "lib", callee)) {
             *err = "call: mem frame lib failed";
-            return RunResult::Error;
+            return Outcome::Error;
         }
         kvspaceMkindexExt(f.h, nstack.c_str(), callee_dir.c_str(), e,
                           sizeof e);
@@ -3030,18 +3062,18 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
             *out = x < 0 ? ins.call_rtyp[-x] : ins.call_wtyp[x];
         return ok;
     };
-    // 内存别名子帧：arg_src/arg_dst 从调用方 FReg 建立。定长栈数组（段 nr/nw ≤ 16）。
-    FReg* mem_src[16] = {};
-    FReg* mem_dst[16] = {};
+    // 内存别名子帧：arg_src/arg_dst 从调用方 Register 建立。定长栈数组（段 nr/nw ≤ 16）。
+    Register* mem_src[16] = {};
+    Register* mem_dst[16] = {};
     int mem_src_n = 0, mem_dst_n = 0;
     bool mk_done = !mem_frame;
-    auto bind_arg = [&](int x, FReg* caller_reg, const std::string& value_key,
+    auto bind_arg = [&](int x, Register* caller_reg, const std::string& value_key,
                         const std::string& typ, const Wire& src) -> bool {
         char be[192] = {};
         const bool container_arg = typ.find("\xC2\xB7") != std::string::npos;
         const bool scalar_arg =
             !container_arg && (typ == "int64" || typ == "bool");
-        // 内存别名只对纯内存帧（callee 段无 native/handoff）：段含 Handoff
+        // 内存别名只对纯内存帧（callee 段无 handler/handoff）：段含 Handoff
         // 时执行中途 Stop、帧会被 execute_vthread 重启（arg_src 丢失），
         // 标量参数必须建 kvspace 槽保证重启后可解析（prime_sieve println 坑）。
         // A read alias forwards the caller reg's cached value; a caller reg bound
@@ -3218,11 +3250,11 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
             (ins.call_rtyp[i] == "int64" || ins.call_rtyp[i] == "bool") &&
             !(rd.kind == Operand::Kind::Literal && !rd.name.empty() &&
               rd.name[0] == '/')) {
-            FReg& cr = f.regs[ins.rd[i]];
-            const FReg& ca = cr.src_ptr ? *cr.src_ptr : cr;
+            Register& cr = f.regs[ins.rd[i]];
+            const Register& ca = cr.src_ptr ? *cr.src_ptr : cr;
             if (ca.fast_i64 || ca.fast_bool) {
                 if (!bind_arg(-i, &cr, vk, ins.call_rtyp[i], vw))
-                    return RunResult::Error;
+                    return Outcome::Error;
                 continue;
             }
         }
@@ -3239,7 +3271,7 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
                     &pl64) != 0 ||
                 !pb) {
                 *err = "call: path arg to_wire failed";
-                return RunResult::Error;
+                return Outcome::Error;
             }
             std::uint32_t pl = static_cast<std::uint32_t>(pl64);
             vk = nf + "/._lit" + std::to_string(i);
@@ -3248,12 +3280,12 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
             std::free(pb);
             if (!okk) {
                 *err = std::string("call: literal arg failed: ") + be;
-                return RunResult::Error;
+                return Outcome::Error;
             }
             read_wire(f.h, vk, &vw.d, &vw.n);
         } else if (!read_reg(f, ins.rd[i], &vw)) {
             *err = "call: bad arg " + std::to_string(i);
-            return RunResult::Error;
+            return Outcome::Error;
         }
         if (rd.kind == Operand::Kind::Literal && !rd.name.empty() &&
             rd.name[0] == '/') {
@@ -3263,39 +3295,40 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
             char be[192] = {};
             if (kvspaceSetValue(f.h, vk.c_str(), vw.d, vw.n, be, sizeof be) != 0) {
                 *err = std::string("call: literal arg failed: ") + be;
-                return RunResult::Error;
+                return Outcome::Error;
             }
         } else {
-            FReg& rr = f.regs[ins.rd[i]];
+            Register& rr = f.regs[ins.rd[i]];
             if (!ensure_reg_key(f, rr))
-                return RunResult::Error;
+                return Outcome::Error;
             vk = rr.key;
         }
         typ.clear();
         if (!decl_type(-i, &typ) && !reg_langtype(f, ins.rd[i], &typ))
             typ = "int64";
         if (!bind_arg(-i, &f.regs[ins.rd[i]], vk, typ, vw))
-            return RunResult::Error;
+            return Outcome::Error;
     }
     if (!jcode || f.observable)
     for (int i = 1; i <= ins.nwr; i++) {
-        FReg& wr = f.regs[ins.wr[i - 1]];
+        Register& wr = f.regs[ins.wr[i - 1]];
         // 内存别名写参（dst_ptr，key 空）转发给非纯内存 callee：值在调用方 reg，
         // 沿 dst_ptr 链取明文 key 作 NewPtr 目标（replace→replacen 转发链）。
-        FReg* wrk = &wr;
+        Register* wrk = &wr;
         while (wrk->key.empty() && wrk->dst_ptr)
             wrk = wrk->dst_ptr;
         if (!ensure_reg_key(f, *wrk))
-            return RunResult::Error;
+            return Outcome::Error;
         const std::string vk = wrk->key;
         std::string typ;
         if (!decl_type(i, &typ))
             typ = "int64";
         if (!bind_arg(i, &f.regs[ins.wr[i - 1]], vk, typ, Wire{}))
-            return RunResult::Error;
+            return Outcome::Error;
     }
     FctxLease lease;
-    FrameCtx& nfc = *lease.p;
+    Frame& nfc = *lease.p;
+    nfc.parent = &f;
     nfc.h = f.h;
     nfc.vid = f.vid;
     nfc.depth = f.depth + 1;
@@ -3306,10 +3339,10 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
     nfc.jit_known = ins.call_ready || !jcode;
     if (mem_src_n)
         std::memcpy(nfc.arg_src, mem_src,
-                    static_cast<std::size_t>(mem_src_n) * sizeof(FReg*));
+                    static_cast<std::size_t>(mem_src_n) * sizeof(Register*));
     if (mem_dst_n)
         std::memcpy(nfc.arg_dst, mem_dst,
-                    static_cast<std::size_t>(mem_dst_n) * sizeof(FReg*));
+                    static_cast<std::size_t>(mem_dst_n) * sizeof(Register*));
     nfc.arg_src_n = mem_src_n;
     nfc.arg_dst_n = mem_dst_n;
     nfc.mem_frame = mem_frame;
@@ -3321,22 +3354,22 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
         // 须落 _lit 槽（05-printstack 的 `int64:3` 渲染依赖）。
         for (int i = 1; i < ins.nrd; i++)
             if (!bind_arg(-i, &f.regs[ins.rd[i]], "", "int64", Wire{}))
-                return RunResult::Error;
+                return Outcome::Error;
         for (int i = 1; i <= ins.nwr; i++)
             if (!bind_arg(i, &f.regs[ins.wr[i - 1]], "", "int64", Wire{}))
-                return RunResult::Error;
+                return Outcome::Error;
         if (mem_src_n)
             std::memcpy(nfc.arg_src, mem_src,
-                        static_cast<std::size_t>(mem_src_n) * sizeof(FReg*));
+                        static_cast<std::size_t>(mem_src_n) * sizeof(Register*));
         if (mem_dst_n)
             std::memcpy(nfc.arg_dst, mem_dst,
-                        static_cast<std::size_t>(mem_dst_n) * sizeof(FReg*));
+                        static_cast<std::size_t>(mem_dst_n) * sizeof(Register*));
         nfc.arg_src_n = mem_src_n;
         nfc.arg_dst_n = mem_dst_n;
         nfc.mem_frame = true;
     }
-    RunResult rr = run_frame(nfc, 1, stop_pc, err);
-    if (rr != RunResult::Ok && rr != RunResult::Returned)
+    Outcome rr = run_frame(nfc, 1, stop_pc, err);
+    if (rr != Outcome::Ok && rr != Outcome::Returned)
         return rr;
     // 写参回写分流失效：内存别名（mem_dst）标量直写调用方 reg，缓存即值；
     // 其余经 kvspace 槽回写 → 调用方写参 fast 缓存陈旧，须逐级失效（重读槽），
@@ -3350,7 +3383,7 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
             }
         if (aliased)
             continue;
-        FReg* wr = &f.regs[ins.wr[i]];
+        Register* wr = &f.regs[ins.wr[i]];
         do {
             wr->fast_i64 = false;
             wr->fast_bool = false;
@@ -3361,9 +3394,9 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
             wr = wr->dst_ptr;
         } while (wr);
     }
-    if (bin.prof_on)
-        bin.prof.steps++;  // 嵌套帧自身已计时，勿重复累计
-    return RunResult::Ok;
+    if (vmbin.prof_on)
+        vmbin.prof.steps++;  // 嵌套帧自身已计时，勿重复累计
+    return Outcome::Ok;
 }
 
 namespace {

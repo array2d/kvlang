@@ -17,9 +17,9 @@
 namespace kvlang::runtimec2 {
 namespace {
 
-using bin::FReg;
-using bin::FrameCtx;
-using bin::RunResult;
+using vmbin::Register;
+using vmbin::Frame;
+using vmbin::Outcome;
 
 bool g_nojit = std::getenv("RC2_NOJIT") != nullptr;
 bool g_jitdump = std::getenv("RC2_JITDUMP") != nullptr;
@@ -31,7 +31,7 @@ constexpr std::int64_t kInt32Max = 2147483647LL;
 // ── 静态判定（M1 形状，平台无关）──────────────────────────────────
 
 bool verify(const Segment* seg, JitShape* sh) {
-    if (seg->has_native || seg->insns.empty())
+    if (seg->has_rwirhandler || seg->insns.empty())
         return false;
     if (g_jitdbg) {
         for (std::size_t i = 0; i < seg->regs.size(); i++) {
@@ -198,9 +198,9 @@ const void* jit_compile(const std::string& func_dir, const Segment* seg) {
     return reinterpret_cast<const void*>(mem);
 }
 
-bool jit_try_run(FrameCtx& f, const Segment* seg, int start_s0,
-                 RunResult* out, std::string* stop_pc, std::string* err) {
-    *out = RunResult::Ok;
+bool jit_try_run(Frame& f, const Segment* seg, int start_s0,
+                 Outcome* out, std::string* stop_pc, std::string* err) {
+    *out = Outcome::Ok;
     if (!jit_enabled())
         return false;
     if (start_s0 != 1)
@@ -221,8 +221,8 @@ bool jit_try_run(FrameCtx& f, const Segment* seg, int start_s0,
     if (src_idx < 0 || dst_idx < 0)
         return false;
     // 读参装载（镜像 read_i64 的 src_ptr 继承）
-    FReg& sr0 = f.regs[src_idx];
-    FReg* src = sr0.src_ptr ? sr0.src_ptr : &sr0;
+    Register& sr0 = f.regs[src_idx];
+    Register* src = sr0.src_ptr ? sr0.src_ptr : &sr0;
     if (g_jitdbg)
         std::fprintf(stderr,
                      "[jitdbg run %s src_ptr=%p spfast=%d self=%p fast=%d v=%lld "
@@ -243,13 +243,13 @@ bool jit_try_run(FrameCtx& f, const Segment* seg, int start_s0,
                      f.func_dir.c_str(), (long long)arg, (long long)res);
     if (errf) {
         *err = "runaway loop (jit): " + f.func_dir;
-        *out = RunResult::Error;
+        *out = Outcome::Error;
         return true;
     }
     // 结果回写（镜像 write_reg 的 dst_ptr 分支：fast 缓存 + 已有槽直写）。
     // 沿链贯通到最终调用方 reg——只挂一层会让 depth≥2 的中间帧 fast 缓存随帧消亡。
-    FReg& dr0 = f.regs[dst_idx];
-    FReg* dst = dr0.dst_ptr ? dr0.dst_ptr : &dr0;
+    Register& dr0 = f.regs[dst_idx];
+    Register* dst = dr0.dst_ptr ? dr0.dst_ptr : &dr0;
     while (dst->dst_ptr)
         dst = dst->dst_ptr;
     dst->fv = res;
@@ -260,7 +260,7 @@ bool jit_try_run(FrameCtx& f, const Segment* seg, int start_s0,
     dr0.fast_i64 = true;
     if (stop_pc)
         stop_pc->clear();
-    *out = f.depth <= 1 ? RunResult::Ok : RunResult::Returned;
+    *out = f.depth <= 1 ? Outcome::Ok : Outcome::Returned;
     return true;
 }
 

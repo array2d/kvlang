@@ -42,12 +42,6 @@ pub fn rwir(opcode: &str) -> String {
     format!("{RWIR_ROOT}/{opcode}")
 }
 
-/// ISA 签名 key：`/‥isa/<folded-op>`，`·` 与 `/` 都折成 `/`。
-pub fn isa_op(opcode: &str) -> String {
-    let folded = opcode.replace(['·', '/'], "/");
-    format!("/‥isa/{folded}")
-}
-
 // ── 成员 ─────────────────────────────────────────────────────────────
 
 pub fn member(base: &str, name: &str) -> String {

@@ -1,0 +1,285 @@
+schema: kvlang.runtimec2.trunk-rename.v1
+authority: workspace/583/runtimec2-trunk-rename-plan.md
+canonical_trunk: [vmkv, vmbin, vmjit]
+service_namespaces: [runtime]
+phases: [0, 1, 2, 3, 4, 5]
+
+scan:
+  roots:
+    - runtimec2
+    - docs
+    - Makefile
+    - .github/workflows
+  text_suffixes:
+    - .c
+    - .cc
+    - .cpp
+    - .cxx
+    - .h
+    - .hpp
+    - .py
+    - .sh
+    - .cmake
+    - .md
+    - .mmd
+    - .txt
+    - .json
+    - .yaml
+    - .yml
+  text_names: [CMakeLists.txt, Makefile]
+  binary_suffixes: [.a, .bin, .dll, .dylib, .exe, .gif, .jpeg, .jpg, .o, .pdf, .png, .so, .svg, .wasm]
+  excluded_globs:
+    - .git/**
+    - workspace/**
+    - build/**
+    - '**/build/**'
+    - '**/CMakeFiles/**'
+    - '**/target/**'
+    - '**/__pycache__/**'
+    - '**/node_modules/**'
+    - site/dist/**
+    - benchmark/results/**
+    - tutorial/test_failures.csv
+    - docs/c+keyto64/**
+    - docs/runtimec-compiler-layers.md
+    - runtimec2/tools/architecture/**
+    - runtimec2/tests/runtime/trunk_names_test.py
+    # 陈旧图源：停留在改名前的 Segment/CInsn/NativeCtx 口径，待按新结构重生成。
+    - docs/diagrams/runtimec2-class.mmd
+  generated_globs:
+    - docs/diagrams/*.png
+    - docs/diagrams/*.svg
+    - docs/diagrams/*.pdf
+
+protected_files:
+  - path: runtimec2/tools/real_segment_corpus.py
+    sha256: 288eebbb10ee2aba4f13bd9fede1a2dbc3fac77c9a4faf5eaa1a046f983f5b82
+    protect_through_phase: 4
+  - path: runtimec2/tests/real_segment_corpus_test.py
+    sha256: 64d033163bf12c65624925ddd982fa8827cb14966e17a537736a51108da8adc8
+    protect_through_phase: 4
+
+permanent_allowlist:
+  targets: [kvlang_runtimec2, runtimec2]
+  c_symbols:
+    - kvlangDefRwir
+    - kvlangRwirextHandoff
+    - kvlangRwirextNextPc
+    - kvlangRwirextParams
+    - kvlangRwirextResolveRead
+    - kvlangRwirextResolveReadPath
+    - kvlangRwirextResolveWrite
+    - kvlangLangtypeValid
+    - kvlangLangtypeMatch
+    - kvlangRuntimeConnect
+    - kvlangRuntimeDisconnect
+    - kvlangRuntimeExecutePc
+    - kvlangRuntimeKvspaceHandle
+    - kvlangRuntimeBootstrap
+    - kvlangRuntimeExecuteVthread
+    - kvlangRuntimeExecute
+  external_platform_macros:
+    - __aarch64__
+    - __APPLE__
+    - __arm__
+    - __x86_64__
+    - KVSPACE_XVALUE_HEAD_LEN
+
+renames:
+  paths:
+    - {from: runtimec2/include/codeseg.hpp, to: runtimec2/vmbin/legacy_program.hpp, owner: vmbin, expires_at_phase: 5}
+    - {from: runtimec2/include/jit.hpp, to: runtimec2/vmjit/vmjit.hpp, owner: vmjit, expires_at_phase: 5}
+    - {from: runtimec2/include/kvspace.hpp, to: runtimec2/runtime/kvspace.hpp, owner: runtime, expires_at_phase: 5}
+    - {from: runtimec2/include/runtime.hpp, to: runtimec2/runtime/session.hpp, owner: runtime, expires_at_phase: 5}
+    - {from: runtimec2/include/rwir.hpp, to: runtimec2/vmkv/rwir_rule.hpp, owner: vmkv, expires_at_phase: 5}
+    - {from: runtimec2/include/status.hpp, to: runtimec2/vmbin/outcome.hpp, owner: vmbin, expires_at_phase: 5}
+    - {from: runtimec2/include/value.hpp, to: runtimec2/runtime/value.hpp, owner: runtime, expires_at_phase: 5}
+    - {from: runtimec2/include/valueio.hpp, to: runtimec2/runtime/value_io.hpp, owner: runtime, expires_at_phase: 5}
+    - {from: runtimec2/include/vmbin.hpp, to: runtimec2/vmbin/program.hpp, owner: vmbin, expires_at_phase: 5}
+    - {from: runtimec2/include/vmkv.hpp, to: runtimec2/vmbin/interpreter.hpp, owner: vmbin, expires_at_phase: 5}
+    - {from: runtimec2/include/vmkv_native.hpp, to: runtimec2/include/vmkv_rwirhandler.hpp, owner: vmkv, expires_at_phase: 5}
+    - {from: runtimec2/src/abi.cpp, to: runtimec2/runtime/abi.cpp, owner: runtime, expires_at_phase: 5}
+    - {from: runtimec2/src/codeseg.cpp, to: runtimec2/vmkv/compiler.cpp, owner: vmkv, expires_at_phase: 3}
+    - {from: runtimec2/src/jit.cpp, to: runtimec2/vmjit/compiler.cpp, owner: vmjit, expires_at_phase: 4}
+    - {from: runtimec2/src/jit_arm.cpp, to: runtimec2/vmjit/backends/aarch64_unavailable.cpp, owner: vmjit, expires_at_phase: 4}
+    - {from: runtimec2/src/jit_x64.cpp, to: runtimec2/vmjit/backends/x86_64.cpp, owner: vmjit, expires_at_phase: 4}
+    - {from: runtimec2/src/kvspace.cpp, to: runtimec2/runtime/kvspace.cpp, owner: runtime, expires_at_phase: 5}
+    - {from: runtimec2/src/runtime.cpp, to: runtimec2/runtime/route.cpp, owner: runtime, expires_at_phase: 5}
+    - {from: runtimec2/src/rwir_gen.cpp, to: runtimec2/vmkv/generated/rwir_rules.cpp, owner: vmkv, expires_at_phase: 3}
+    - {from: runtimec2/src/rwir_lookup.cpp, to: runtimec2/vmkv/rwir_rule_lookup.cpp, owner: vmkv, expires_at_phase: 3}
+    - {from: runtimec2/src/rwirext.cpp, to: runtimec2/runtime/extension.cpp, owner: runtime, expires_at_phase: 5}
+    - {from: runtimec2/src/value.cpp, to: runtimec2/runtime/value.cpp, owner: runtime, expires_at_phase: 5}
+    - {from: runtimec2/src/valueio.cpp, to: runtimec2/runtime/value_io.cpp, owner: runtime, expires_at_phase: 5}
+    - {from: runtimec2/src/vmbin.cpp, to: runtimec2/vmbin/profile.cpp, owner: vmbin, expires_at_phase: 2}
+    - {from: runtimec2/src/vmkv.cpp, to: runtimec2/vmbin/interpreter.cpp, owner: vmbin, expires_at_phase: 5}
+    - {from: runtimec2/src/vmkv_native.cpp, to: runtimec2/src/vmkv_rwirhandler.cpp, owner: vmkv, expires_at_phase: 5}
+    - {from: runtimec2/tools/check_impl_consistency.py, to: runtimec2/tools/vmkv/check_rwir_consistency.py, owner: vmkv, expires_at_phase: 5}
+    - {from: runtimec2/tools/segment_shape_dump.cpp, to: runtimec2/tools/vmkv/program_dump.cpp, owner: vmkv, expires_at_phase: 5}
+    - {from: runtimec2/tools/binir_format_probe.py, to: runtimec2/tools/vmbin/format_probe.py, owner: vmbin, expires_at_phase: 5}
+    - {from: runtimec2/tools/real_segment_corpus.py, to: runtimec2/tools/vmbin/real_program_corpus.py, owner: vmbin, expires_at_phase: 5}
+    - {from: runtimec2/tests/rwir_table.cpp, to: runtimec2/tests/vmkv/rwir_rules_test.cpp, owner: vmkv, expires_at_phase: 5}
+    - {from: runtimec2/tests/impl_db_check.sh, to: runtimec2/tests/vmkv/rwir_consistency_test.sh, owner: vmkv, expires_at_phase: 5}
+    - {from: runtimec2/tests/rwir_gen_check.sh, to: runtimec2/tests/vmkv/generated_rwir_rules_test.sh, owner: vmkv, expires_at_phase: 5}
+    - {from: runtimec2/tests/kvspace_dynamic_ops.sh, to: runtimec2/tests/vmbin/builtin_kvspace_test.sh, owner: vmbin, expires_at_phase: 5}
+    - {from: runtimec2/tests/m1_smoke.c, to: runtimec2/tests/integration/shm/trunk_smoke.c, owner: runtime, expires_at_phase: 5}
+    - {from: runtimec2/tests/m1_smoke.sh, to: runtimec2/tests/integration/shm/trunk_smoke.sh, owner: runtime, expires_at_phase: 5}
+    - {from: runtimec2/tests/symbols.sh, to: runtimec2/tests/runtime/abi_symbols_test.sh, owner: runtime, expires_at_phase: 5}
+    - {from: runtimec2/tests/binir_format_probe_test.py, to: runtimec2/tests/vmbin/format_probe_test.py, owner: vmbin, expires_at_phase: 5}
+    - {from: runtimec2/tests/segment_shape_dump_test.py, to: runtimec2/tests/vmkv/program_dump_test.py, owner: vmkv, expires_at_phase: 5}
+    - {from: runtimec2/tests/real_segment_corpus_test.py, to: runtimec2/tests/vmbin/real_program_corpus_test.py, owner: vmbin, expires_at_phase: 5}
+    - {from: runtimec2/tests/fixtures/binir, to: runtimec2/tests/fixtures/vmbin, owner: vmbin, expires_at_phase: 5}
+  namespaces:
+    - {from: 'kvlang::runtimec2::rwir', to: 'kvlang::runtimec2::vmkv', owner: vmkv}
+    - {from: 'kvlang::runtimec2::bin', to: 'kvlang::runtimec2::vmbin', owner: vmbin}
+  types:
+    - {from: Segment, to: 'vmbin::LegacyProgram', owner: vmbin}
+    - {from: CInsn, to: 'vmbin::Instruction', owner: vmbin}
+    - {from: RegDesc, to: 'vmbin::RegisterDesc', owner: vmbin}
+    - {from: Operand, to: 'vmbin::Operand', owner: vmbin}
+    - {from: LitFast, to: 'vmbin::FastLiteral', owner: vmbin}
+    - {from: FReg, to: 'vmbin::Register', owner: vmbin}
+    - {from: FrameCtx, to: 'vmbin::Frame', owner: vmbin}
+    - {from: RunResult, to: 'vmbin::Outcome', owner: vmbin}
+    - {from: VmBin, to: null, owner: vmbin, action: split-facade}
+    - {from: Vmkv, to: 'vmbin::Interpreter', owner: vmbin}
+    - {from: NativeCtx, to: RwirHandlerCtx, owner: vmkv}
+    - {from: NativeFn, to: RwirHandler, owner: vmkv}
+    - {from: JitFn, to: 'vmjit::EntryPoint', owner: vmjit}
+    - {from: JitShape, to: 'vmjit::Plan', owner: vmjit}
+    - {from: Runtime, to: 'runtime::Session', owner: runtime}
+    - {from: Kvspace, to: 'runtime::Kvspace', owner: runtime}
+    - {from: Wire, to: 'runtime::Wire', owner: runtime}
+    - {from: Scalar, to: 'runtime::Scalar', owner: runtime}
+  functions:
+    - {from: build_segment, to: 'vmkv::compile_rwir', owner: vmkv}
+    - {from: cached_segment, to: 'runtime::ProgramRepository::get_or_compile', owner: runtime}
+    - {from: clear_segment_cache, to: 'runtime::ProgramRepository::clear', owner: runtime}
+    - {from: cached_insn, to: 'runtime::ProgramRepository::find_instruction', owner: runtime}
+    - {from: find_myrwircap, to: 'vmkv::find_rwir_rule', owner: vmkv}
+    - {from: op_name, to: 'vmbin::opcode_name', owner: vmbin}
+    - {from: parse_pc, to: 'vmbin::parse_pc', owner: vmbin}
+    - {from: 'Vmkv::run_frame', to: 'vmbin::Interpreter::execute', owner: vmbin}
+    - {from: find_native, to: null, owner: vmkv, action: removed}
+    - {from: has_native, to: has_rwirhandler, owner: vmbin}
+    - {from: jit_compile, to: 'vmjit::Compiler::compile', owner: vmjit}
+    - {from: jit_try_run, to: 'vmjit::try_execute', owner: vmjit}
+    - {from: jit_clear_cache, to: 'vmjit::CodeCache::clear', owner: vmjit}
+    - {from: jit_enabled, to: 'vmjit::Config::enabled', owner: vmjit}
+    - {from: emit_arch, to: 'vmjit::backend::emit', owner: vmjit}
+    - {from: bootstrap_impl, to: 'runtime::bootstrap', owner: runtime}
+    - {from: execute_vthread_impl, to: 'runtime::execute_vthread', owner: runtime}
+  config:
+    - {from: KV2_EXPORT, to: RUNTIMEC2_ABI_EXPORT, owner: runtime}
+    - {from: RC2_PROF, to: RUNTIMEC2_VMBIN_PROFILE, owner: vmbin}
+    - {from: RC2_TRACE, to: RUNTIMEC2_TRACE, owner: runtime}
+    - {from: RC2_TRACE_N, to: RUNTIMEC2_VMBIN_TRACE_LIMIT, owner: vmbin}
+    - {from: RC2_NOFAST, to: RUNTIMEC2_VMBIN_DISABLE_FAST, owner: vmbin}
+    - {from: RC2_NOJIT, to: RUNTIMEC2_VMJIT_DISABLE, owner: vmjit}
+    - {from: RC2_JITDUMP, to: RUNTIMEC2_VMJIT_DUMP, owner: vmjit}
+    - {from: RC2_JITDBG, to: RUNTIMEC2_VMJIT_DEBUG, owner: vmjit}
+    - {from: JIT_ARCH_SRC, to: RUNTIMEC2_VMJIT_BACKEND_SOURCE, owner: vmjit}
+  targets:
+    - {from: m1_smoke, to: runtimec2_trunk_smoke, owner: runtime}
+    - {from: rwir_table, to: runtimec2_vmkv_rwir_rules_test, owner: vmkv}
+    - {from: segment_shape_dump, to: runtimec2_vmkv_program_dump, owner: vmkv}
+  ctests:
+    - {from: c2_rwir_table, to: runtimec2.vmkv.rwir_rules, owner: vmkv}
+    - {from: c2_impl_db_check, to: runtimec2.vmkv.rwir_consistency, owner: vmkv}
+    - {from: c2_m1_smoke, to: runtimec2.integration.shm.trunk_smoke, owner: runtime}
+    - {from: c2_kvspace_dynamic_ops, to: runtimec2.vmbin.builtin_kvspace, owner: vmbin}
+    - {from: c2_symbol_parity, to: runtimec2.runtime.abi_symbols, owner: runtime}
+    - {from: c2_segment_shape_dump, to: runtimec2.vmkv.program_dump, owner: vmkv}
+  tools:
+    - {from: check_impl_consistency.py, to: tools/vmkv/check_rwir_consistency.py, owner: vmkv}
+    - {from: segment_shape_dump.cpp, to: tools/vmkv/program_dump.cpp, owner: vmkv}
+    - {from: binir_format_probe.py, to: tools/vmbin/format_probe.py, owner: vmbin}
+    - {from: real_segment_corpus.py, to: tools/vmbin/real_program_corpus.py, owner: vmbin}
+
+# 原地新增/改名后已存在的路径：不来自 renames.paths 的旧路径，但属于现行拓扑，
+# 不再触发 unmapped-old-topology。renamed_from 指回 renames.paths 的 from；
+# 全新文件写 predecessor: none。
+new_paths:
+  - {path: runtimec2/include/vmkv_rwirhandler.hpp, renamed_from: runtimec2/include/vmkv_native.hpp}
+  - {path: runtimec2/src/vmkv_rwirhandler.cpp, renamed_from: runtimec2/src/vmkv_native.cpp}
+  - {path: runtimec2/include/binir_dump.hpp, predecessor: none}
+  - {path: runtimec2/src/binir_dump.cpp, predecessor: none}
+
+rules:
+  - id: old-namespace-declaration
+    kind: regex
+    pattern: '\bnamespace\s+(?:kvlang::runtimec2::)?(?:bin|rwir)\b'
+    message: old bin/rwir namespace declaration
+  - id: old-namespace-qualifier
+    kind: regex
+    pattern: '\b(?:bin|rwir)::'
+    message: old bin/rwir namespace qualifier
+  - id: old-core-type
+    kind: regex
+    pattern: '\b(?:Segment|CInsn|RegDesc|LitFast|FReg|FrameCtx|RunResult|Vmkv|VmBin|NativeCtx|NativeFn)\b'
+    message: old root/component type
+  - id: old-jit-type
+    kind: regex
+    pattern: '\bJit[A-Za-z0-9_]*\b'
+    message: Jit-prefixed type must move under vmjit with its canonical name
+  - id: old-function
+    kind: regex
+    pattern: '\b(?:build_segment|cached_segment|clear_segment_cache|cached_insn|find_myrwircap|op_name|parse_pc|find_native|has_native|emit_arch|bootstrap_impl|execute_vthread_impl)\b'
+    message: old private function name
+  - id: old-instruction-native-field
+    kind: regex
+    pattern: '\b(?:fn_fold|native_ready|native_noprefetch)\b'
+    message: removed Instruction fold/native fields; use handler (RwirHandlerId)
+  - id: bare-jit-identifier
+    kind: regex
+    pattern: '\bjit_[A-Za-z0-9_]*\b'
+    message: bare jit_ identifier must move under vmjit
+  - id: old-rwir-table-symbol
+    kind: regex
+    pattern: '\b(?:myrwircaps|kMyrwircapsN)\b'
+    message: old RWIR capability table symbol
+  - id: old-rc2-config
+    kind: regex
+    pattern: '\bRC2_[A-Z0-9_]+\b'
+    message: old RC2 macro or environment variable
+  - id: old-abi-export-macro
+    kind: regex
+    pattern: '\bKV2_EXPORT\b'
+    message: old private ABI export macro
+  - id: old-jit-cmake-variable
+    kind: regex
+    pattern: '\bJIT_ARCH_SRC\b'
+    message: old JIT backend CMake variable
+  - id: generic-internal-target
+    kind: regex
+    pattern: '\bruntimec2_(?:core|exec|ir|jit)\b'
+    message: generic internal target hides vmkv/vmbin/vmjit ownership
+  - id: old-ctest-name
+    kind: regex
+    pattern: '\bc2_(?:rwir_table|impl_db_check|m1_smoke|kvspace_dynamic_ops|symbol_parity|segment_shape_dump)\b'
+    message: old CTest name
+  - id: old-tool-or-test-name
+    kind: regex
+    pattern: '\b(?:check_impl_consistency\.py|segment_shape_dump(?:\.cpp)?|binir_format_probe\.py|real_segment_corpus\.py|rwir_table(?:\.cpp)?|kvspace_dynamic_ops\.sh|m1_smoke|symbols\.sh)\b'
+    message: old tool, test, or executable name
+  - id: old-private-include
+    kind: regex
+    pattern: '["<](?:codeseg|jit|rwir|vmbin|vmkv|vmkv_native)\.hpp[">]'
+    message: old flat private include
+  - id: root-namespace-product-type
+    kind: root_namespace_type
+    namespace: 'kvlang::runtimec2'
+    message: product type declared directly in root runtimec2 namespace
+
+compatibility_allowances:
+  - rule: old-rc2-config
+    path: runtimec2/runtime/environment.hpp
+    max_count: 8
+    expires_at_phase: 6
+    reason: centralized legacy environment compatibility table
+
+unmapped_path_rules:
+  - id: unmapped-old-topology
+    pattern: '^runtimec2/(?:include|src)(?:/|$)'
+    message: file in old include/src topology is absent from rename manifest
+
+baseline_debt: []

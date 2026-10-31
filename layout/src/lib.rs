@@ -8,7 +8,6 @@ pub mod builtin;
 pub mod capi;
 pub mod code;
 pub mod ffi;
-pub mod isa;
 pub mod keytree;
 pub mod kvkind;
 pub mod langtype;

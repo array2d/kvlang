@@ -265,7 +265,7 @@ impl Kv {
     pub fn set(&mut self, pairs: &[(String, String, Vec<u8>)]) -> Result<(), String> {
         for (key, lt, xvalue) in pairs {
             // 末段含 ‥ 的 key 是系统变量本体：无类型（保留 codec 空 attr）。
-            // 前缀可含 ‥（如 /‥isa/），只拦末段。
+            // 前缀可含 ‥（如 /lib/‥labels/），只拦末段。
             let last_seg = key.rsplit('/').next().unwrap_or(key);
             let wire = if xvalue.is_empty() || lt.is_empty() || last_seg.contains('\u{2025}') {
                 xvalue.clone()
