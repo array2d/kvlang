@@ -313,4 +313,8 @@ const Entry myrwircaps[] = {
 
 const int kMyrwircapsN = 305;
 
+// binir 的 op 字段 = RwirId = 本表下标，合法区间 0..0x1FB
+// （0x1FC=HANDOFF、0x1FD=BR_IF_FALSE、0x1FE=BR_IF_TRUE、0x1FF=WIDE 标记）。
+static_assert(kMyrwircapsN <= 0x1FB, "binir RwirId space is 0..0x1FB");
+
 }  // namespace kvlang::runtimec2::rwir
