@@ -1,6 +1,6 @@
 //! 控制流 lowering + 类型推断 + 特化（对齐 lower/lower.go、infer.go、specialize.go）。
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use super::ast::{self, Expr, Func, Instruction, LitKind, MEMBER_READ_OP, Stmt};
 use super::scanner::{Diagnostic, Pos};
@@ -1064,45 +1064,172 @@ fn infer_body(body: &[Stmt], tm: &mut HashMap<String, String>) {
     }
 }
 
-fn infer_inst(inst: &Instruction, tm: &mut HashMap<String, String>) {
-    let e = match &inst.expr {
-        Some(e) => e,
-        None => return,
+/// 每条指令各写槽的类型：显式注解（含 call 返回类型）优先，否则统一用
+/// 本条表达式的结果类型（字面量 kind / 算子结果）。
+fn per_write_types(
+    inst: &Instruction,
+    tm: &mut HashMap<String, String>,
+) -> Vec<Option<String>> {
+    let Some(e) = &inst.expr else {
+        return Vec::new();
     };
+    let shared = if e.is_leaf() && e.lit != LitKind::LitNone {
+        lit_to_type(e.lit).to_string()
+    } else {
+        // 变量拷贝（叶、LitNone）走 flat() 的 `=` 分支，结果类型 = 源变量类型。
+        let (opcode, reads) = inst.flat();
+        if opcode.is_empty() {
+            String::new()
+        } else {
+            infer_op_type(&opcode, &reads, tm)
+        }
+    };
+    (0..inst.writes.len())
+        .map(|j| {
+            if let Some(t) = inst.write_types.get(j).filter(|t| !t.is_empty()) {
+                return Some(t.clone());
+            }
+            if shared.is_empty() {
+                None
+            } else {
+                Some(shared.clone())
+            }
+        })
+        .collect()
+}
+
+fn infer_inst(inst: &Instruction, tm: &mut HashMap<String, String>) {
     if inst.writes.is_empty() {
         return;
     }
-    for (j, w) in inst.writes.iter().enumerate() {
-        if j < inst.write_types.len() && !inst.write_types[j].is_empty() {
-            tm.entry(w.clone())
-                .or_insert_with(|| inst.write_types[j].clone());
-        }
-    }
-    if e.is_leaf() && e.lit != LitKind::LitNone {
-        let inferred = lit_to_type(e.lit);
-        if !inferred.is_empty() {
-            for w in &inst.writes {
-                if w.is_empty() || w.starts_with(keytree::MEMBER_SEP) {
-                    continue;
-                }
-                tm.entry(w.clone()).or_insert_with(|| inferred.to_string());
-            }
-        }
-        return;
-    }
-    let (opcode, reads) = inst.flat();
-    if opcode.is_empty() {
-        return;
-    }
-    let inferred = infer_op_type(&opcode, &reads, tm);
-    if inferred.is_empty() {
-        return;
-    }
-    for w in &inst.writes {
+    let types = per_write_types(inst, tm);
+    for (w, t) in inst.writes.iter().zip(types) {
         if w.is_empty() || w.starts_with(keytree::MEMBER_SEP) {
             continue;
         }
-        tm.entry(w.clone()).or_insert_with(|| inferred.clone());
+        if let Some(t) = t {
+            tm.entry(w.clone()).or_insert(t);
+        }
+    }
+}
+
+/// 变量的有限类型集合（union 用）：签名/源码声明的类型 + 每条写的类型并集。
+/// 用于给操作数槽补类型：单元素 → 具体类型；多元素 → `<t1>|<t2>|…`。
+pub fn infer_type_sets(fn_: &Func) -> HashMap<String, Vec<String>> {
+    let mut sets: HashMap<String, BTreeSet<String>> = HashMap::new();
+    for p in fn_.sig.params.iter().chain(fn_.sig.returns.iter()) {
+        insert_type_set(&mut sets, &p.name, &p.ty);
+    }
+    let mut declared = HashMap::new();
+    collect_declared(&fn_.body, &mut declared);
+    for (name, ty) in &declared {
+        insert_type_set(&mut sets, name, ty);
+    }
+    let mut work = infer_types(fn_);
+    let mut unknown: HashSet<String> = HashSet::new();
+    collect_type_sets(&fn_.body, &mut sets, &mut unknown, &mut work);
+    // 有任一写无法推断类型的变量：其槽不能静态定类型（运行期实际 kind 可能不同），
+    // 只有源码/签名声明过的变量可以例外（声明是语言契约）。
+    for name in unknown {
+        if !declared.contains_key(&name) {
+            sets.remove(&name);
+        }
+    }
+    sets.into_iter()
+        .map(|(name, set)| (name, set.into_iter().collect()))
+        .collect()
+}
+
+fn insert_type_set(
+    sets: &mut HashMap<String, BTreeSet<String>>,
+    name: &str,
+    ty: &str,
+) {
+    if name.is_empty() || ty.is_empty() {
+        return;
+    }
+    for part in ty.split('|') {
+        let part = part.trim();
+        if !part.is_empty() {
+            sets.entry(name.to_string()).or_default().insert(part.to_string());
+        }
+    }
+}
+
+fn collect_type_sets(
+    body: &[Stmt],
+    sets: &mut HashMap<String, BTreeSet<String>>,
+    unknown: &mut HashSet<String>,
+    tm: &mut HashMap<String, String>,
+) {
+    for st in body {
+        match st {
+            Stmt::Instruction(s) => {
+                record_inst_sets(s, sets, unknown, tm);
+            }
+            Stmt::Scope(s) => collect_type_sets(&s.body, sets, unknown, tm),
+            Stmt::If(s) => {
+                if let Some(c) = &s.cond {
+                    record_inst_sets(c, sets, unknown, tm);
+                }
+                collect_type_sets(&s.then_, sets, unknown, tm);
+                collect_type_sets(&s.else_, sets, unknown, tm);
+            }
+            Stmt::While(s) => {
+                if let Some(c) = &s.cond {
+                    record_inst_sets(c, sets, unknown, tm);
+                }
+                collect_type_sets(&s.body, sets, unknown, tm);
+            }
+            Stmt::For(s) => collect_type_sets(&s.body, sets, unknown, tm),
+            _ => {}
+        }
+    }
+}
+
+fn record_inst_sets(
+    s: &Instruction,
+    sets: &mut HashMap<String, BTreeSet<String>>,
+    unknown: &mut HashSet<String>,
+    tm: &mut HashMap<String, String>,
+) {
+    let types = per_write_types(s, tm);
+    for (j, w) in s.writes.iter().enumerate() {
+        if w.is_empty() || w.starts_with(keytree::MEMBER_SEP) {
+            continue;
+        }
+        match types.get(j).and_then(|t| t.as_ref()) {
+            Some(t) if !t.is_empty() => insert_type_set(sets, w, t),
+            _ => {
+                unknown.insert(w.clone());
+            }
+        }
+    }
+}
+
+/// 有限 union 的成员（`a|b|c` → [a,b,c]）。
+pub fn type_members(t: &str) -> Vec<&str> {
+    t.split('|').map(str::trim).filter(|s| !s.is_empty()).collect()
+}
+
+/// 成员排序后重新拼回 union 串；单成员时就是普通类型。
+fn join_type_members(set: BTreeSet<String>) -> String {
+    set.into_iter().collect::<Vec<_>>().join("|")
+}
+
+/// 字面量操作数自身的类型（数字/字符串/布尔）；非字面量返回空。
+pub fn literal_slot_type(name: &str) -> String {
+    slot_type(name, &HashMap::new())
+}
+
+/// 变量的有限类型集合拼成槽类型：单元素 → 具体类型；多元素 → union。
+pub fn type_set_slot_type(sets: &HashMap<String, Vec<String>>, name: &str) -> Option<String> {
+    let types = sets.get(name)?;
+    let members: BTreeSet<String> = types.iter().cloned().collect();
+    if members.is_empty() {
+        None
+    } else {
+        Some(join_type_members(members))
     }
 }
 
@@ -1148,9 +1275,13 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
         };
     }
     if symbol::lookup(opcode).arith {
-        // 字符串拼接走 add：任一读参是 char 族，结果仍是该字符串类型（不是 int64）。
+        // 字符串拼接走 add：读参是 char 族（或其 union）时，结果仍是该字符串类型。
         for r in reads {
             let t = slot_type(r, tm);
+            let members = type_members(&t);
+            if !members.is_empty() && members.iter().all(|m| is_string_kind(m)) {
+                return t;
+            }
             if is_string_kind(&t) {
                 return t;
             }
@@ -1162,23 +1293,40 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
         }
         // 结果 kind 必须与 runtime 一致：同族按更宽者合流（narrow_int/narrow_float）；
         // 任一操作数类型未知（动态 any/空）→ 不声明，runtime 按实际 kind 产出。
-        let mut kind = String::new();
+        // union 操作数按成员笛卡尔积求更宽者，结果仍是有限 union。
+        let mut combos: BTreeSet<String> = BTreeSet::new();
         for r in reads {
             let t = slot_type(r, tm);
-            if t.is_empty() || !builtin::is_num_kind(&t) {
+            let members = type_members(&t);
+            if members.is_empty() {
                 return String::new();
             }
-            kind = if kind.is_empty() {
-                t
+            for m in &members {
+                if !builtin::is_num_kind(m) {
+                    return String::new();
+                }
+            }
+            if combos.is_empty() {
+                combos = members.into_iter().map(str::to_string).collect();
             } else {
-                builtin::wider_num_kind(&kind, &t)
-            };
+                let mut next = BTreeSet::new();
+                for a in &combos {
+                    for b in &members {
+                        next.insert(builtin::wider_num_kind(a, b));
+                    }
+                }
+                combos = next;
+            }
         }
-        if kind.is_empty() {
+        if combos.is_empty() {
             return String::new();
         }
-        let rk = builtin::op_kind(&word, &kind);
-        return if rk.is_empty() { kind } else { rk };
+        let mut out = BTreeSet::new();
+        for kind in &combos {
+            let rk = builtin::op_kind(&word, kind);
+            out.insert(if rk.is_empty() { kind.clone() } else { rk });
+        }
+        return join_type_members(out);
     }
     if symbol::lookup(opcode).cmp {
         return "bool".to_string();
@@ -1238,6 +1386,25 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
                 };
             }
             return kind;
+        }
+        "compactarray·new" => {
+            // 字面量构造：元素 kind 全一致时产 `[N]K`（N = 元素个数，与 runtime 定长数组一致）。
+            let mut kind = String::new();
+            for r in reads {
+                let t = slot_type(r, tm);
+                if t.is_empty() || !(builtin::is_num_kind(&t) || t == "bool") {
+                    return String::new();
+                }
+                if kind.is_empty() {
+                    kind = t;
+                } else if kind != t {
+                    return String::new();
+                }
+            }
+            if kind.is_empty() {
+                return String::new();
+            }
+            return format!("[{}]{}", reads.len(), kind);
         }
         "compactarray·at" | "scatterarray·at" => {
             if !reads.is_empty() {
@@ -1383,11 +1550,17 @@ fn validate_num_op(
         if t.is_empty() {
             continue;
         }
-        if is_string_kind(&t) {
+        // 有限 union 按成员判定：全数值 / 全字符串（含只含这两种成员的逻辑或）。
+        let members = type_members(&t);
+        let all_num = !members.is_empty() && members.iter().all(|m| builtin::is_num_kind(m));
+        let all_str = !members.is_empty() && members.iter().all(|m| is_string_kind(m));
+        let all_cmp_ok = !members.is_empty()
+            && members.iter().all(|m| *m == "bool" || m.starts_with('*'));
+        if is_string_kind(&t) || all_str {
             saw_char = true;
-        } else if builtin::is_num_kind(&t) {
+        } else if builtin::is_num_kind(&t) || all_num {
             saw_num = true;
-        } else if (t == "bool" || t.starts_with('*')) && is_cmp {
+        } else if is_cmp && all_cmp_ok {
             // bool / Ptr 比较合法（Ptr 对 None 的判空在运行时做值检查）
         } else {
             push_num_diag(

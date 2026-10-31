@@ -712,6 +712,7 @@ pub fn write_func(
 ) -> Result<(), String> {
     let type_map = lower::infer_types(fn_);
     let declared = lower::declared_types(fn_);
+    let type_sets = lower::infer_type_sets(fn_);
     let mut diags = lower::validate_writes(fn_, pkg, &type_map, structs, sigs);
     diags.extend(lower::specialize(fn_, &type_map, &declared));
     for d in &diags {
@@ -818,12 +819,71 @@ pub fn write_func(
             inst,
             &labels,
             &declared,
+            &type_sets,
             structs,
             &param_coord,
             &param_langtype,
             pkg,
             local_funcs,
         );
+    }
+    if std::env::var("KVLANG_LAYOUT_STATS").is_ok() {
+        let (mut concrete, mut union, mut unknown) = (0usize, 0usize, 0usize);
+        // 每条 op 观测到的操作数类型集合（union 成员表校准输入）。
+        let mut per_op: std::collections::BTreeMap<
+            String,
+            (std::collections::BTreeSet<String>, std::collections::BTreeSet<String>),
+        > = std::collections::BTreeMap::new();
+        let mut record = |op: &str, ty: String, write: bool| {
+            let members = lower::type_members(&ty);
+            if members.is_empty() {
+                unknown += 1;
+                return;
+            }
+            if members.len() > 1 {
+                union += 1;
+            } else {
+                concrete += 1;
+            }
+            let slot = per_op.entry(op.to_string()).or_default();
+            let set = if write { &mut slot.1 } else { &mut slot.0 };
+            set.insert(ty);
+        };
+        for inst in &seq {
+            let (op, reads) = inst.flat();
+            if op.is_empty() {
+                continue;
+            }
+            for r in &reads {
+                let mut ty = read_slot_type(r, &param_langtype, &declared, &type_sets);
+                if ty.is_empty() {
+                    ty = lower::literal_slot_type(r);
+                }
+                record(&op, ty, false);
+            }
+            for (j, w) in inst.writes.iter().enumerate() {
+                record(
+                    &op,
+                    write_slot_type(inst, j, w, &param_langtype, &declared, &type_sets, structs),
+                    true,
+                );
+            }
+        }
+        eprintln!(
+            "layout-stats: {opcode}: operands={} concrete={concrete} union={union} unknown={unknown}",
+            concrete + union + unknown
+        );
+        for (op, (reads, writes)) in &per_op {
+            // `;` 分隔：类型串本身可含 `,`（多维 dims）和 `|`（union）。
+            let join = |set: &std::collections::BTreeSet<String>| {
+                set.iter().cloned().collect::<Vec<_>>().join(";")
+            };
+            eprintln!(
+                "layout-stats-op: {opcode}: {op} reads=[{}] writes=[{}]",
+                join(reads),
+                join(writes)
+            );
+        }
     }
     if !labels.is_empty() {
         let _ = kv.mkindex(&keytree::lib_labels_dir(pkg, &fn_.sig.name));
@@ -974,6 +1034,55 @@ fn collect_insts(body: &[Stmt], seq: &mut Vec<Instruction>, labels: &mut HashMap
     }
 }
 
+/// 操作数槽的静态类型：形参/返回声明 → 源码声明 → 有限类型集合（union）。
+/// 任一来源都没有 → 空串（未知；由 KVLANG_LAYOUT_STATS 显式计数）。
+fn slot_static_type(
+    name: &str,
+    param_langtype: &HashMap<String, String>,
+    declared: &HashMap<String, String>,
+    type_sets: &HashMap<String, Vec<String>>,
+) -> String {
+    for map in [param_langtype, declared] {
+        if let Some(t) = map.get(name) {
+            if !t.is_empty() {
+                return t.clone();
+            }
+        }
+    }
+    lower::type_set_slot_type(type_sets, name).unwrap_or_default()
+}
+
+fn read_slot_type(
+    name: &str,
+    param_langtype: &HashMap<String, String>,
+    declared: &HashMap<String, String>,
+    type_sets: &HashMap<String, Vec<String>>,
+) -> String {
+    slot_static_type(name, param_langtype, declared, type_sets)
+}
+
+/// 写槽类型：本条注解（含 call 返回）→ 形参/返回 → 声明可解析类型 → 类型集合。
+fn write_slot_type(
+    s: &Instruction,
+    j: usize,
+    orig: &str,
+    param_langtype: &HashMap<String, String>,
+    declared: &HashMap<String, String>,
+    type_sets: &HashMap<String, Vec<String>>,
+    structs: &lower::StructTable,
+) -> String {
+    if let Some(t) = s.write_types.get(j).filter(|t| !t.is_empty()) {
+        return t.clone();
+    }
+    if let Some(t) = param_langtype.get(orig).filter(|t| !t.is_empty()) {
+        return t.clone();
+    }
+    if let Some(t) = lower::resolve_slot_type(orig, declared, structs, declared) {
+        return t;
+    }
+    slot_static_type(orig, param_langtype, declared, type_sets)
+}
+
 fn write_linear_inst(
     kv: &mut Kv,
     prefix: &str,
@@ -981,6 +1090,7 @@ fn write_linear_inst(
     s: &Instruction,
     labels: &HashMap<String, i32>,
     declared: &HashMap<String, String>,
+    type_sets: &HashMap<String, Vec<String>>,
     structs: &lower::StructTable,
     params: &HashMap<String, String>,
     param_langtype: &HashMap<String, String>,
@@ -1031,27 +1141,15 @@ fn write_linear_inst(
             .get(r.as_str())
             .map(String::as_str)
             .unwrap_or(r.as_str());
-        let ty = param_langtype
-            .get(r)
-            .or_else(|| declared.get(r))
-            .map(String::as_str)
-            .unwrap_or("");
-        let (wire, lt) = typed_slot_value(rv, ty, target_char);
+        let ty = read_slot_type(r, param_langtype, declared, type_sets);
+        let (wire, lt) = typed_slot_value(rv, &ty, target_char);
         pairs.push((format!("{prefix}/[{n},-{}]", j + 1), lt, wire));
     }
     for (j, w) in s.writes.iter().enumerate() {
         let orig = w.as_str();
         let wv = params.get(orig).map(String::as_str).unwrap_or(orig);
-        let resolved = lower::resolve_slot_type(orig, declared, structs, declared);
-        let ty = s
-            .write_types
-            .get(j)
-            .map(String::as_str)
-            .filter(|t| !t.is_empty())
-            .or_else(|| param_langtype.get(orig).map(String::as_str))
-            .or_else(|| resolved.as_deref())
-            .unwrap_or("");
-        let (wire, lt) = typed_slot_value(wv, ty, "");
+        let ty = write_slot_type(s, j, orig, param_langtype, declared, type_sets, structs);
+        let (wire, lt) = typed_slot_value(wv, &ty, "");
         pairs.push((format!("{prefix}/[{n},{}]", j + 1), lt, wire));
     }
     if !pairs.is_empty() {
