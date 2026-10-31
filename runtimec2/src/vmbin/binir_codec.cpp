@@ -15,7 +15,8 @@
 //   字符串条目随后。解码按「指令流引用到的最大 ConstId + 1」切出值条目区。
 // - tag 0 = u64 raw + u32 key 串偏移（0xFFFFFFFF = 无）；tag 3 = u32 len + utf8
 //   （在值条目区 = 无 fast 值的常量槽，其文本即槽 key；在串区 = 普通字符串）。
-// - RegDesc 8B = kind u8 | width u8 | addr i32（池内串偏移）| flags u8 | param_k i8；
+// - RegDesc 12B = kind u8 | width u8 | langtype u8 | flags u8 | addr i32 |
+//   param_k i8 | pad 3B=0（E 层 langtype/width 必须往返，8B 装不下 → 12B）；
 //   flags = vclass(3b) | member(1b)；槽文本用 '\0' 连接 slot_key 与 path 名。
 // - 段尾补 2 字节零，允许 fast kernel 8B over-read。
 
@@ -33,6 +34,7 @@ namespace {
 
 using vmbin::FastLiteral;
 using vmbin::Instruction;
+using vmbin::LangType;
 using vmbin::Operand;
 using vmbin::Program;
 using vmbin::RegisterDesc;
@@ -46,7 +48,7 @@ constexpr std::uint16_t kOpBrIfTrue = 0x1FE;
 constexpr std::uint16_t kOpWide = 0x1FF;
 constexpr std::uint16_t kMaxRwirId = 0x1FB;
 constexpr std::uint32_t kNoString = 0xFFFFFFFFu;
-constexpr std::size_t kRegDescBytes = 8;
+constexpr std::size_t kRegDescBytes = 12;
 constexpr std::size_t kTailBytes = 2;
 constexpr int kMaxNarrowIndex = 63;
 constexpr int kMaxReads = 16;
@@ -180,17 +182,13 @@ bool encode_binir(const Segment& segment, std::vector<std::uint8_t>* out) {
     std::vector<bool> is_const(nslots, false);
     std::vector<int> reg_id(nslots, -1);
     std::vector<int> const_id(nslots, -1);
-    int nreg = 0;
     for (std::size_t i = 0; i < nslots; i++) {
         const RegisterDesc& desc = segment.regs[i];
         if (desc.kind != Operand::Kind::Literal && desc.kind != Operand::Kind::Var)
             return false;
         is_const[i] = desc.kind == Operand::Kind::Literal && !written[i];
-        if (!is_const[i])
-            reg_id[i] = nreg++;
     }
-    if (nreg > 255)
-        return false;
+    int nreg = 0;
 
     auto entry_of = [](const Instruction& ins) -> const rwir::Entry* {
         if (ins.rwir_id >= vmbin::kRwirIdExtraBase ||
@@ -204,9 +202,19 @@ bool encode_binir(const Segment& segment, std::vector<std::uint8_t>* out) {
     std::vector<bool> const_has_value;
     std::vector<std::string> const_texts;
     std::vector<std::string> callees;
-    std::unordered_map<std::string, std::size_t> callee_index;
 
+    std::vector<bool> used(nslots, false);
+    auto note_reg = [&](std::uint8_t slot) -> bool {
+        used[slot] = true;
+        if (reg_id[slot] < 0) {
+            if (nreg >= 255)
+                return false;
+            reg_id[slot] = nreg++;
+        }
+        return true;
+    };
     auto note_const = [&](std::uint8_t slot) {
+        used[slot] = true;
         if (const_id[slot] < 0) {
             const int id = static_cast<int>(const_texts.size());
             const_id[slot] = id;
@@ -252,6 +260,9 @@ bool encode_binir(const Segment& segment, std::vector<std::uint8_t>* out) {
         std::string name;  // 扩展算子（handoff）名
     };
     std::vector<Planned> planned(ninsn);
+    const_texts.reserve(64);
+    const_value.reserve(64);
+    const_has_value.reserve(64);
 
     for (std::size_t i = 0; i < ninsn; i++) {
         const Instruction& ins = segment.insns[i];
@@ -284,26 +295,32 @@ bool encode_binir(const Segment& segment, std::vector<std::uint8_t>* out) {
             if (callee.empty() || ins.nrd < 1)
                 return false;
             plan.form = Form::Call;
-            const auto found = callee_index.find(callee);
-            if (found != callee_index.end()) {
-                plan.callee = found->second;
-            } else {
-                plan.callee = callees.size();
-                callee_index.emplace(callee, plan.callee);
+            std::size_t callee_index = callees.size();
+            for (std::size_t c = 0; c < callees.size(); c++)
+                if (callees[c] == callee) {
+                    callee_index = c;
+                    break;
+                }
+            if (callee_index == callees.size())
                 callees.push_back(callee);
-            }
-            for (int k = 1; k < ins.nrd; k++)
+            plan.callee = callee_index;
+            for (int k = 1; k < ins.nrd; k++) {
                 if (is_const[ins.rd[k]])
                     note_const(ins.rd[k]);
+                else if (!note_reg(ins.rd[k]))
+                    return false;
+            }
         } else if (entry->op == rwir::Op::Goto) {
             if (ins.nrd != 1 || ins.nwr != 0)
                 return false;
+            used[ins.rd[0]] = true;
             if (!branch_disp(i, ins.rd[0], &plan.taken))
                 return false;
             plan.form = Form::Goto;
         } else if (entry->op == rwir::Op::Br) {
             if (ins.nrd != 3 || ins.nwr != 0)
                 return false;
+            used[ins.rd[0]] = used[ins.rd[1]] = used[ins.rd[2]] = true;
             if (!branch_disp(i, ins.rd[1], &plan.taken) ||
                 !branch_disp(i, ins.rd[2], &plan.fallthrough))
                 return false;
@@ -311,27 +328,45 @@ bool encode_binir(const Segment& segment, std::vector<std::uint8_t>* out) {
             plan.form = Form::Br;
             if (is_const[ins.rd[0]])
                 note_const(ins.rd[0]);
+            else if (!note_reg(ins.rd[0]))
+                return false;
         } else {
             plan.form = Form::Table;
-            for (int k = 0; k < ins.nrd; k++)
+            for (int k = 0; k < ins.nrd; k++) {
                 if (is_const[ins.rd[k]])
                     note_const(ins.rd[k]);
+                else if (!note_reg(ins.rd[k]))
+                    return false;
+            }
         }
-        for (int k = 0; k < ins.nwr; k++)
+        for (int k = 0; k < ins.nwr; k++) {
             if (is_const[ins.wr[k]])
                 return false;
+            if (!note_reg(ins.wr[k]))
+                return false;
+        }
     }
+    // 未被任何指令引用的槽：字面量槽无法用「位移/ConstId」表示（真实段不存在，
+    // 直接拒绝）；寄存器照常进 RegDesc 表（按槽顺序补编号）。
+    for (std::size_t slot = 0; slot < nslots; slot++) {
+        if (used[slot] || is_const[slot])
+            continue;
+        if (!note_reg(static_cast<std::uint8_t>(slot)))
+            return false;
+    }
+    for (std::size_t slot = 0; slot < nslots; slot++)
+        if (!used[slot] && is_const[slot])
+            return false;
 
+    // 每函数字符串条数很小（~几十），线性查找比 unordered_map 的哈希+节点分配快。
     std::vector<std::string> strings;
-    std::unordered_map<std::string, std::size_t> string_index;
+    strings.reserve(const_texts.size() + callees.size() + ninsn + nreg);
     auto intern = [&](const std::string& text) -> std::size_t {
-        const auto found = string_index.find(text);
-        if (found != string_index.end())
-            return found->second;
-        const std::size_t index = strings.size();
+        for (std::size_t i = 0; i < strings.size(); i++)
+            if (strings[i] == text)
+                return i;
         strings.push_back(text);
-        string_index.emplace(text, index);
-        return index;
+        return strings.size() - 1;
     };
     const_text_index.assign(const_texts.size(), 0);
     for (std::size_t i = 0; i < const_texts.size(); i++)
@@ -344,11 +379,18 @@ bool encode_binir(const Segment& segment, std::vector<std::uint8_t>* out) {
     for (std::size_t i = 0; i < ninsn; i++)
         if (planned[i].form == Form::Handoff)
             handoff_string[i] = intern(planned[i].name);
-    std::vector<std::size_t> reg_string(static_cast<std::size_t>(nreg));
+    std::vector<int> slot_of_reg(static_cast<std::size_t>(nreg), -1);
     for (std::size_t slot = 0; slot < nslots; slot++)
-        if (!is_const[slot])
-            reg_string[static_cast<std::size_t>(reg_id[slot])] =
-                intern(register_text(segment.regs[slot]));
+        if (!is_const[slot] && reg_id[slot] >= 0)
+            slot_of_reg[static_cast<std::size_t>(reg_id[slot])] =
+                static_cast<int>(slot);
+    std::vector<std::size_t> reg_string(static_cast<std::size_t>(nreg));
+    for (std::size_t reg = 0; reg < static_cast<std::size_t>(nreg); reg++) {
+        const std::size_t slot = static_cast<std::size_t>(slot_of_reg[reg]);
+        if (slot >= nslots)
+            return false;
+        reg_string[reg] = intern(register_text(segment.regs[slot]));
+    }
 
     std::size_t value_bytes = 0;
     for (std::size_t i = 0; i < const_texts.size(); i++)
@@ -534,19 +576,22 @@ bool encode_binir(const Segment& segment, std::vector<std::uint8_t>* out) {
         return false;
 
     std::vector<std::uint8_t> regs;
-    for (std::size_t slot = 0; slot < nslots; slot++) {
-        if (is_const[slot])
-            continue;
+    for (std::size_t reg = 0; reg < static_cast<std::size_t>(nreg); reg++) {
+        const std::size_t slot = static_cast<std::size_t>(slot_of_reg[reg]);
+        if (slot >= nslots)
+            return false;
         const RegisterDesc& desc = segment.regs[slot];
-        const std::size_t reg = static_cast<std::size_t>(reg_id[slot]);
         put_u8(&regs, static_cast<std::uint8_t>(desc.kind));
-        put_u8(&regs, 0);
-        put_u32(&regs, string_offset[reg_string[reg]]);
+        put_u8(&regs, desc.width);
+        put_u8(&regs, static_cast<std::uint8_t>(desc.langtype));
         std::uint8_t flags = static_cast<std::uint8_t>(desc.vclass) & 0x7;
         if (desc.member)
             flags |= 0x8;
         put_u8(&regs, flags);
+        put_u32(&regs, string_offset[reg_string[reg]]);
         put_u8(&regs, static_cast<std::uint8_t>(desc.param_k));
+        for (int pad = 0; pad < 3; pad++)
+            put_u8(&regs, 0);
     }
 
     const std::size_t cpool_offset = kHeaderBytes + code.size();
@@ -609,6 +654,7 @@ bool decode_binir(const std::uint8_t* data, std::size_t size, Segment* out) {
         std::uint32_t text_offset = kNoString;  // tag 3 条目自身的池内偏移
     };
     std::vector<PoolEntry> entries;
+    entries.reserve(64);
     std::unordered_map<std::uint32_t, std::string> strings;
     {
         std::size_t offset = cpool_offset;
@@ -661,13 +707,20 @@ bool decode_binir(const std::uint8_t* data, std::size_t size, Segment* out) {
 
     Segment decoded;
     decoded.regs.clear();
+    std::vector<RegisterDesc> reg_descs(static_cast<std::size_t>(nreg));
     for (std::uint16_t r = 0; r < nreg; r++) {
         const std::uint8_t* base =
             data + regs_offset + static_cast<std::size_t>(r) * kRegDescBytes;
         const std::uint8_t kind = base[0];
-        const std::uint32_t addr = read_u32_le(base + 2);
-        const std::uint8_t flags = base[6];
-        const std::int8_t param_k = static_cast<std::int8_t>(base[7]);
+        const std::uint8_t width = base[1];
+        const std::uint8_t langtype = base[2];
+        const std::uint8_t flags = base[3];
+        const std::uint32_t addr = read_u32_le(base + 4);
+        const std::int8_t param_k = static_cast<std::int8_t>(base[8]);
+        if (base[9] != 0 || base[10] != 0 || base[11] != 0)
+            return false;
+        if (langtype > static_cast<std::uint8_t>(LangType::Ext))
+            return false;
         if (kind != static_cast<std::uint8_t>(Operand::Kind::Literal) &&
             kind != static_cast<std::uint8_t>(Operand::Kind::Var))
             return false;
@@ -679,6 +732,8 @@ bool decode_binir(const std::uint8_t* data, std::size_t size, Segment* out) {
         desc.vclass = static_cast<RegisterDesc::VarClass>(vclass);
         desc.member = (flags & 0x8) != 0;
         desc.param_k = param_k;
+        desc.langtype = static_cast<LangType>(langtype);
+        desc.width = width;
         if (addr != kNoString) {
             const auto found = strings.find(addr);
             if (found == strings.end())
@@ -688,7 +743,7 @@ bool decode_binir(const std::uint8_t* data, std::size_t size, Segment* out) {
             else
                 desc.name = found->second;
         }
-        decoded.regs.push_back(std::move(desc));
+        reg_descs[r] = std::move(desc);
     }
 
     // 指令流 → wire（此阶段不落地槽号）。
@@ -872,22 +927,20 @@ bool decode_binir(const std::uint8_t* data, std::size_t size, Segment* out) {
     if (constants.size() != value_count)
         return false;
 
-    for (const ConstSlot& constant : constants) {
-        RegisterDesc desc;
-        desc.kind = Operand::Kind::Literal;
-        apply_slot_text(constant.text, &desc);
+    decoded.regs.reserve(nreg + constants.size() + ninsn);
+    decoded.lit.reserve(nreg + constants.size() + ninsn);
+    // 槽按「指令顺序里第一次出现」惰性建立：寄存器来自 RegDesc 表、常量来自池，
+    // 分支目标在分支指令处新建。这样解码视图的槽号与旧 build 路径逐项一致
+    // （dump/报错里的 rN/cN 才能两路径相同）。
+    std::vector<std::int16_t> reg_slot(static_cast<std::size_t>(nreg), -1);
+    std::vector<std::int16_t> const_slot(constants.size(), -1);
+    auto append_slot = [&](RegisterDesc desc, FastLiteral literal) -> int {
+        if (decoded.regs.size() >= 255)
+            return -1;
         decoded.regs.push_back(std::move(desc));
-    }
-    if (decoded.regs.size() > 255)
-        return false;
-    decoded.lit.assign(decoded.regs.size(), FastLiteral{});
-    for (std::size_t i = 0; i < constants.size(); i++) {
-        if (!constants[i].has_value)
-            continue;
-        const std::size_t slot = static_cast<std::size_t>(nreg) + i;
-        decoded.lit[slot].is_i64 = true;
-        decoded.lit[slot].v = static_cast<std::int64_t>(constants[i].value);
-    }
+        decoded.lit.push_back(literal);
+        return static_cast<int>(decoded.regs.size() - 1);
+    };
 
     auto extra_id = [&](const std::string& name) -> std::uint16_t {
         for (std::size_t i = 0; i < decoded.extra_rwir_names.size(); i++)
@@ -910,24 +963,36 @@ bool decode_binir(const std::uint8_t* data, std::size_t size, Segment* out) {
         return static_cast<std::uint16_t>(decoded.call_sites.size() - 1);
     };
     auto slot_of = [&](const Ref& ref) -> int {
-        if (ref.is_const)
-            return ref.index < constants.size()
-                       ? static_cast<int>(static_cast<std::size_t>(nreg) +
-                                          ref.index)
-                       : -1;
-        return ref.index < nreg ? static_cast<int>(ref.index) : -1;
+        if (ref.is_const) {
+            if (ref.index >= constants.size())
+                return -1;
+            std::int16_t& slot = const_slot[ref.index];
+            if (slot < 0) {
+                RegisterDesc desc;
+                desc.kind = Operand::Kind::Literal;
+                apply_slot_text(constants[ref.index].text, &desc);
+                FastLiteral literal;
+                literal.is_i64 = constants[ref.index].has_value;
+                literal.v = static_cast<std::int64_t>(constants[ref.index].value);
+                slot = static_cast<std::int16_t>(append_slot(std::move(desc), literal));
+            }
+            return slot;
+        }
+        if (ref.index >= nreg)
+            return -1;
+        std::int16_t& slot = reg_slot[ref.index];
+        if (slot < 0)
+            slot = static_cast<std::int16_t>(
+                append_slot(reg_descs[ref.index], FastLiteral{}));
+        return slot;
     };
     auto target_slot = [&](std::int64_t source_id) -> int {
-        if (decoded.regs.size() >= 255)
-            return -1;
         RegisterDesc desc;
         desc.kind = Operand::Kind::Literal;
-        decoded.regs.push_back(desc);
         FastLiteral literal;
         literal.is_i64 = true;
         literal.v = source_id;
-        decoded.lit.push_back(literal);
-        return static_cast<int>(decoded.regs.size() - 1);
+        return append_slot(std::move(desc), literal);
     };
 
     decoded.insns.clear();
@@ -1073,9 +1138,10 @@ bool decode_binir(const std::uint8_t* data, std::size_t size, Segment* out) {
             }
             ins.nwr = static_cast<std::uint8_t>(wire.writes.size());
             for (std::size_t k = 0; k < wire.writes.size(); k++) {
-                if (wire.writes[k] >= nreg)
+                const int slot = slot_of(Ref{false, wire.writes[k]});
+                if (slot < 0)
                     return false;
-                ins.wr[k] = static_cast<std::uint8_t>(wire.writes[k]);
+                ins.wr[k] = static_cast<std::uint8_t>(slot);
             }
         } else {
             if (!wire.targets.empty())
@@ -1089,13 +1155,32 @@ bool decode_binir(const std::uint8_t* data, std::size_t size, Segment* out) {
                 ins.rd[k] = static_cast<std::uint8_t>(slot);
             }
             for (std::size_t k = 0; k < wire.writes.size(); k++) {
-                if (wire.writes[k] >= nreg)
+                const int slot = slot_of(Ref{false, wire.writes[k]});
+                if (slot < 0)
                     return false;
-                ins.wr[k] = static_cast<std::uint8_t>(wire.writes[k]);
+                ins.wr[k] = static_cast<std::uint8_t>(slot);
             }
         }
         derive_fast(&ins);
         decoded.insns.push_back(std::move(ins));
+    }
+
+    // 未被任何指令引用的槽（真实段不存在；手工段/防御性）按 id 顺序补回，
+    // 避免解码视图丢数据；它们不影响重编码的线格式。
+    for (std::size_t r = 0; r < reg_slot.size(); r++)
+        if (reg_slot[r] < 0 && append_slot(reg_descs[r], FastLiteral{}) < 0)
+            return false;
+    for (std::size_t c = 0; c < const_slot.size(); c++) {
+        if (const_slot[c] >= 0)
+            continue;
+        RegisterDesc desc;
+        desc.kind = Operand::Kind::Literal;
+        apply_slot_text(constants[c].text, &desc);
+        FastLiteral literal;
+        literal.is_i64 = constants[c].has_value;
+        literal.v = static_cast<std::int64_t>(constants[c].value);
+        if (append_slot(std::move(desc), literal) < 0)
+            return false;
     }
 
     bool has_handler = false;

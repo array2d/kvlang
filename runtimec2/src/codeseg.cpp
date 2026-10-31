@@ -1,7 +1,10 @@
 #include "codeseg.hpp"
+#include "binir_codec.hpp"
 #include "binir_dump.hpp"
 
+#include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <unordered_map>
 #include <vector>
@@ -169,6 +172,161 @@ LangType scalar_langtype(rwir::Kind kind, std::uint8_t width) {
     default:
         return LangType::None;
     }
+}
+
+// #583 L2 阶段 B：段存储改用 binir 字节流（纯内存）。RC2_SEGMENT_FROM_BINIR=0
+// 保留旧路径做 A/B（默认 0，验证后由架构师定）；RC2_SEGMENT_BINIR_CHECK=1 时
+// 逐字段对拍两路径，不一致直接失败（不静默）。
+bool segment_from_binir() {
+    static const bool from_binir = [] {
+        const char* env = std::getenv("RC2_SEGMENT_FROM_BINIR");
+        // 默认 1 = binir 解码视图（#583 L2 阶段 B 裁决 2026-10-31）；
+        // RC2_SEGMENT_FROM_BINIR=0 保留旧路径做 A/B。
+        return env == nullptr || std::strcmp(env, "0") != 0;
+    }();
+    return from_binir;
+}
+
+bool binir_check_enabled() {
+    static const bool enabled = std::getenv("RC2_SEGMENT_BINIR_CHECK") != nullptr;
+    return enabled;
+}
+
+std::vector<bool> read_referenced(const Segment& seg) {
+    std::vector<bool> ref(seg.regs.size(), false);
+    for (const CInsn& ins : seg.insns) {
+        for (int k = 0; k < ins.nrd; k++) {
+            if (ins.op == rwir::Op::Goto && k == 0)
+                continue;  // goto 的读参是分支目标
+            if (ins.op == rwir::Op::Br && k >= 1)
+                continue;
+            if (ins.op == rwir::Op::Call && k == 0)
+                continue;  // call 的 rd[0] 是哨兵
+            if (ins.rd[k] < ref.size())
+                ref[ins.rd[k]] = true;
+        }
+    }
+    return ref;
+}
+
+std::string slot_identity(const Segment& seg, std::uint8_t slot) {
+    if (slot >= seg.regs.size())
+        return "<oor:" + std::to_string(slot) + ">";
+    const RegDesc& d = seg.regs[slot];
+    if (d.kind == Operand::Kind::Literal) {
+        const LitFast lit = slot < seg.lit.size() ? seg.lit[slot] : LitFast{};
+        if (lit.is_i64)
+            return "i|" + std::to_string(lit.v);
+        return "s|" + d.slot_key + "|" + d.name;
+    }
+    return "v|" + d.name;
+}
+
+bool same_program(const Segment& a, const Segment& b, std::string* why) {
+    if (a.insns.size() != b.insns.size()) {
+        *why = "insn count";
+        return false;
+    }
+    for (std::size_t i = 0; i < a.insns.size(); i++) {
+        const CInsn& x = a.insns[i];
+        const CInsn& y = b.insns[i];
+        auto fail = [&](const char* field) {
+            *why = "insn " + std::to_string(i) + " (" +
+                   vmbin::instruction_name(a, x) + ") " + field;
+            return false;
+        };
+        if (x.rwir_id != y.rwir_id) return fail("rwir_id");
+        if (x.handler != y.handler) return fail("handler");
+        if (x.call_site != y.call_site) return fail("call_site");
+        if (x.op != y.op) return fail("op");
+        if (x.kind != y.kind) return fail("kind");
+        if (x.impl != y.impl) return fail("impl");
+        if (x.width != y.width) return fail("width");
+        if (x.opfn != y.opfn) return fail("opfn");
+        if (x.fast_i64 != y.fast_i64) return fail("fast_i64");
+        if (x.wr_local != y.wr_local) return fail("wr_local");
+        if (x.nrd != y.nrd) return fail("nrd");
+        if (x.nwr != y.nwr) return fail("nwr");
+        const std::size_t read_begin = x.op == rwir::Op::Call ? 1 : 0;
+        for (std::size_t k = read_begin; k < x.nrd; k++)
+            if (slot_identity(a, x.rd[k]) != slot_identity(b, y.rd[k]))
+                return fail("read operand");
+        for (std::size_t k = 0; k < x.nwr; k++)
+            if (slot_identity(a, x.wr[k]) != slot_identity(b, y.wr[k]))
+                return fail("write operand");
+    }
+    if (a.callees != b.callees || a.extra_rwir_names != b.extra_rwir_names ||
+        a.has_rwirhandler != b.has_rwirhandler) {
+        *why = "pool/has_rwirhandler";
+        return false;
+    }
+    if (a.call_sites.size() != b.call_sites.size()) {
+        *why = "call_sites count";
+        return false;
+    }
+    for (std::size_t i = 0; i < a.call_sites.size(); i++) {
+        const vmbin::CallSite& x = a.call_sites[i];
+        const vmbin::CallSite& y = b.call_sites[i];
+        if (x.callee_id != y.callee_id || y.segment != nullptr ||
+            y.jit != nullptr || y.ready || !y.read_types.empty() ||
+            !y.write_types.empty()) {
+            *why = "call_site " + std::to_string(i);
+            return false;
+        }
+    }
+    const std::vector<bool> ra = read_referenced(a);
+    const std::vector<bool> rb = read_referenced(b);
+    auto classify = [](const Segment& seg, const std::vector<bool>& ref,
+                       std::vector<std::string>* regs_out,
+                       std::vector<std::string>* consts_out) {
+        std::vector<bool> written(seg.regs.size(), false);
+        for (const CInsn& ins : seg.insns)
+            for (int k = 0; k < ins.nwr; k++)
+                if (ins.wr[k] < written.size())
+                    written[ins.wr[k]] = true;
+        for (std::size_t i = 0; i < seg.regs.size(); i++) {
+            const RegDesc& d = seg.regs[i];
+            const bool is_const = d.kind == Operand::Kind::Literal && !written[i];
+            const LitFast lit = i < seg.lit.size() ? seg.lit[i] : LitFast{};
+            if (!is_const) {
+                regs_out->push_back(
+                    std::to_string(static_cast<int>(d.kind)) + "|" + d.name +
+                    "|" + d.slot_key + "|" + std::to_string(d.param_k) + "|" +
+                    std::to_string(static_cast<int>(d.vclass)) + "|" +
+                    (d.member ? "m" : "-") + "|" +
+                    std::to_string(static_cast<int>(d.langtype)) + "|" +
+                    std::to_string(d.width));
+                continue;
+            }
+            std::string key = lit.is_i64
+                                  ? "int:" + std::to_string(lit.v)
+                                  : "text:" + d.slot_key + "|" + d.name;
+            // 只读引用的常量（池条目）连 key 一起比；分支目标常量只比值。
+            if (!lit.is_i64 || (i < ref.size() && ref[i]))
+                key += "|" + d.slot_key + "|" + d.name;
+            consts_out->push_back(std::move(key));
+        }
+    };
+    std::vector<std::string> ar, br, ac, bc;
+    classify(a, ra, &ar, &ac);
+    classify(b, rb, &br, &bc);
+    std::sort(ar.begin(), ar.end());
+    std::sort(br.begin(), br.end());
+    std::sort(ac.begin(), ac.end());
+    std::sort(bc.begin(), bc.end());
+    if (ar != br) {
+        *why = "register set differs";
+        return false;
+    }
+    if (ac != bc) {
+        *why = "constant set differs";
+        return false;
+    }
+    if (a.lit.size() != b.lit.size()) {
+        *why = "lit size";
+        return false;
+    }
+    return true;
 }
 
 bool build(void* h, const std::string& func_dir, Segment* out) {
@@ -362,6 +520,37 @@ bool build(void* h, const std::string& func_dir, Segment* out) {
                 }
             }
         }
+    }
+    // #583 L2 阶段 B：先在内存编码成 binir 字节流，再按开关用解码视图替换
+    // （insns/regs/lit/call_sites）。旧路径不付解码成本；编码失败时旧路径照常
+    // 交给上层校验（例如导出器报 invalid target），要 binir 视图则硬失败。
+    std::vector<std::uint8_t> bytes;
+    const bool encoded = encode_binir(*out, &bytes);
+    if (encoded)
+        out->binir = std::move(bytes);
+    if (!segment_from_binir() && !binir_check_enabled())
+        return true;
+    if (!encoded) {
+        std::fprintf(stderr,
+                     "runtimec2: binir encode failed for %s (invalid branch target "
+                     "or unsupported instruction shape)\n",
+                     func_dir.c_str());
+        return false;
+    }
+    Segment decoded;
+    if (!decode_binir(out->binir.data(), out->binir.size(), &decoded))
+        return false;
+    if (binir_check_enabled()) {
+        std::string why;
+        if (!same_program(*out, decoded, &why)) {
+            std::fprintf(stderr, "runtimec2: binir check failed for %s: %s\n",
+                         func_dir.c_str(), why.c_str());
+            return false;
+        }
+    }
+    if (segment_from_binir()) {
+        decoded.binir = out->binir;
+        *out = std::move(decoded);
     }
     return true;
 }

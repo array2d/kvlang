@@ -247,7 +247,14 @@ def main() -> int:
             virtual_exit_source + 1,
         )
         invalid = subprocess.run(command, cwd=root, capture_output=True)
-        if invalid.returncode == 0 or b"targets missing source id" not in invalid.stderr:
+        # 目标缺失既可能在导出期（旧路径 targets missing source id）被发现，也可能
+        # 在建段编码期（binir encode failed）被拒绝；两者都算「未被当成虚拟出口」。
+        stderr = invalid.stderr
+        if (
+            invalid.returncode == 0
+            or b"/lib/iops" not in stderr
+            or (b"binir encode failed" not in stderr and b"targets missing" not in stderr)
+        ):
             raise AssertionError("an arbitrary missing target was accepted as virtual exit")
 
     print(

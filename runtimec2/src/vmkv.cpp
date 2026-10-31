@@ -53,8 +53,8 @@ namespace {
 const bool g_no_fast = std::getenv("RC2_NOFAST") != nullptr;
 const bool g_trace = std::getenv("RC2_TRACE") != nullptr;
 
-// 活动 view 直接读内存里的 XValue head 取 langtype（零后端调用）。
-// attr 缺失/坏 head → false，调用方回退 read_langtype（语义不变）。
+// keyto64_xvalueBody 活动时，直接从 keyto64_xvalue（8B 头）读 langtype，零后端调用。
+// attr 缺失或 keyto64_xvalue 头无效 → false，调用方回退 read_langtype（语义不变）。
 bool view_langtype(const kvspaceXvalueBodyView_t& view, std::string* lt) {
     if (!view.head || view.headlen != KVSPACE_XVALUE_HEAD_LEN)
         return false;
@@ -443,7 +443,8 @@ bool Vmkv::reg_langtype(Frame& f, std::uint8_t idx, std::string* lt) {
             return true;
         }
     }
-    // 活动 view 已带 head：直接读 langtype，省一次 kvspaceGetHead。
+    // keyto64_xvalueBody 活动时，直接从 keyto64_xvalue 读 langtype，
+    // 省一次 kvspaceGetHead。
     if (fr->view_ok && view_langtype(fr->view, lt))
         return true;
     if (fr->key.empty() && !ensure_reg_key(f, *fr))
