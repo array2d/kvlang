@@ -1,0 +1,16 @@
+rwfunc many(x:int64) -> (r:int64) {
+	r = x + 1
+	a = x + 2
+	b = x + 3
+	c = x + 4
+	d = x + 5
+	e = x + 6
+	f = x + 7
+	g = x + 8
+	h = x + 9
+	r = r + a + b + c + d + e + f + g + h
+}
+rwfunc test() -> () {
+	many(10) -> y
+	println("y =", y)
+}

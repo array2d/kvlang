@@ -1,0 +1,19 @@
+rwfunc seven(x:int64) -> (r:int64) {
+	r = x + 1
+	a = x + 2
+	b = x + 3
+	c = x + 4
+	d = x + 5
+	e = x + 6
+	f = x + 7
+	r = r + a
+	r = r + b
+	r = r + c
+	r = r + d
+	r = r + e
+	r = r + f
+}
+rwfunc test() -> () {
+	seven(10) -> y
+	println("y =", y)
+}
