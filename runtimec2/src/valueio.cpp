@@ -348,7 +348,9 @@ bool write_text(void* h, std::string_view key, std::string_view text) noexcept {
 }
 
 bool read_rwir(void* h, std::string_view key, std::string* op, int* nr,
-               int* nw) noexcept {
+               int* nw, std::string* langtype) noexcept {
+    if (langtype)
+        langtype->clear();
     std::string lt;
     if (!read_langtype(h, key, &lt) || lt != "rwir")
         return false;
@@ -370,6 +372,9 @@ bool read_rwir(void* h, std::string_view key, std::string* op, int* nr,
     while (opn < cap && opb[opn] != '\0')
         opn++;
     op->assign(opb, opn);
+    // 槽类型串：opcode 名后 NUL + 类型（layout typed_slot_value），无则空。
+    if (langtype && opn < cap)
+        langtype->assign(opb + opn + 1, cap - opn - 1);
     return true;
 }
 

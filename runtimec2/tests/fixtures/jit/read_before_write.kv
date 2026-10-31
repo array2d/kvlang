@@ -1,0 +1,9 @@
+rwfunc f(x:int64) -> (r:int64) {
+	r = r + x
+}
+
+rwfunc test() -> () {
+	y = 5
+	f(1) -> y
+	println("y =", y)
+}

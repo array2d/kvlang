@@ -12,6 +12,7 @@ namespace {
 
 using vmbin::Operand;
 using vmbin::RegisterDesc;
+using vmbin::langtype_name;
 
 // 与 tools/segment_shape_dump.cpp 同一套槽位归类：Literal 且从未被写 = 常量池
 // 条目，其余 = 寄存器；ConstId / RegId 都按 Segment 槽位顺序紧凑编号。
@@ -80,7 +81,7 @@ bool is_handler(const CInsn& ci) {
 
 // 汇编助记符（§2·6）：typed rwir 取 `·` 后缀（int64·add → add）；
 // 控制流用 br_if / goto / call / return / copy。
-std::string mnemonic_of(const CInsn& ci) {
+std::string mnemonic_of(const Segment& seg, const CInsn& ci) {
     switch (ci.op) {
     case rwir::Op::Copy: return "copy";
     case rwir::Op::Br: return "br_if";
@@ -89,10 +90,9 @@ std::string mnemonic_of(const CInsn& ci) {
     case rwir::Op::Return: return "return";
     default: break;
     }
-    if (ci.name.empty())
-        return "?";
-    const auto dot = ci.name.rfind("\xC2\xB7"); // U+00B7
-    return dot == std::string::npos ? ci.name : ci.name.substr(dot + 2);
+    const std::string name = instruction_name(seg, ci);
+    const auto dot = name.rfind("\xC2\xB7"); // U+00B7
+    return dot == std::string::npos ? name : name.substr(dot + 2);
 }
 
 const char* kind_name(rwir::Kind kind) {
@@ -155,13 +155,13 @@ std::string operand(const Segment& seg, const SlotMap& m, std::uint8_t slot) {
 }
 
 std::string insn_text(const Segment& seg, const SlotMap& m, const CInsn& ci) {
-    std::string text = mnemonic_of(ci);
+    std::string text = mnemonic_of(seg, ci);
     if (text.size() < 7)
         text.append(7 - text.size(), ' ');
     std::string args;
     if (ci.op == rwir::Op::Call) {
-        // call 的 rd[0] 是占位哨兵（codeseg.cpp: rbase=1），callee 在文本字段。
-        args = ci.callee;
+        // call 的 rd[0] 是占位哨兵（codeseg.cpp: rbase=1），callee 在段内池。
+        args = instruction_callee(seg, ci);
         for (int k = 1; k < ci.nrd; k++) {
             if (!args.empty())
                 args += ", ";
@@ -189,9 +189,9 @@ std::string insn_text(const Segment& seg, const SlotMap& m, const CInsn& ci) {
 
 // 来源 rwir 注释：Call 给 callee，分支给目标槽，读常量给常量池下标+值。
 std::string insn_comment(const Segment& seg, const SlotMap& m, const CInsn& ci) {
-    std::string c = ci.name.empty() ? "?" : ci.name;
+    std::string c = instruction_name(seg, ci);
     if (ci.op == rwir::Op::Call) {
-        c = "callee=" + ci.callee;
+        c = "callee=" + instruction_callee(seg, ci);
     } else if (ci.op == rwir::Op::Goto || ci.op == rwir::Op::Br) {
         const int k = ci.op == rwir::Op::Br ? 1 : 0;
         if (k < ci.nrd)
@@ -270,7 +270,9 @@ void dump_binir(const Segment& seg, const char* func_dir) {
         std::string head = "  reg[" + std::to_string(m.reg_id[slot]) + "]";
         if (head.size() < 10)
             head.append(10 - head.size(), ' ');
-        appendf(&out, "%s kind=%-5s width=%u\n", head.c_str(), kind.c_str(), width);
+        const char* static_type = langtype_name(seg.regs[slot].langtype);
+        appendf(&out, "%s kind=%-5s width=%u static=%s\n", head.c_str(),
+                kind.c_str(), width, static_type ? static_type : "?");
     }
 
     const std::size_t total = jit_n + interp_n;

@@ -112,7 +112,7 @@ renames:
     - {from: runtimec2/src/valueio.cpp, to: runtimec2/runtime/value_io.cpp, owner: runtime, expires_at_phase: 5}
     - {from: runtimec2/src/vmbin.cpp, to: runtimec2/vmbin/profile.cpp, owner: vmbin, expires_at_phase: 2}
     - {from: runtimec2/src/vmkv.cpp, to: runtimec2/vmbin/interpreter.cpp, owner: vmbin, expires_at_phase: 5}
-    - {from: runtimec2/src/vmkv_native.cpp, to: runtimec2/src/vmkv_rwirhandler.cpp, owner: vmkv, expires_at_phase: 5}
+    - {from: runtimec2/src/vmkv_native.cpp, to: runtimec2/src/vmkv_rwirruntimeimpl.cpp, owner: vmkv, expires_at_phase: 5}
     - {from: runtimec2/tools/check_impl_consistency.py, to: runtimec2/tools/vmkv/check_rwir_consistency.py, owner: vmkv, expires_at_phase: 5}
     - {from: runtimec2/tools/segment_shape_dump.cpp, to: runtimec2/tools/vmkv/program_dump.cpp, owner: vmkv, expires_at_phase: 5}
     - {from: runtimec2/tools/binir_format_probe.py, to: runtimec2/tools/vmbin/format_probe.py, owner: vmbin, expires_at_phase: 5}
@@ -200,7 +200,7 @@ renames:
 # 全新文件写 predecessor: none。
 new_paths:
   - {path: runtimec2/include/vmkv_rwirhandler.hpp, renamed_from: runtimec2/include/vmkv_native.hpp}
-  - {path: runtimec2/src/vmkv_rwirhandler.cpp, renamed_from: runtimec2/src/vmkv_native.cpp}
+  - {path: runtimec2/src/vmkv_rwirruntimeimpl.cpp, renamed_from: runtimec2/src/vmkv_native.cpp}
   - {path: runtimec2/include/binir_dump.hpp, predecessor: none}
   - {path: runtimec2/src/binir_dump.cpp, predecessor: none}
 
@@ -283,3 +283,17 @@ unmapped_path_rules:
     message: file in old include/src topology is absent from rename manifest
 
 baseline_debt: []
+
+# 下游约定（#583 步骤 1）：Instruction::rwir_id 是联合 id 域。
+#   < 0x8000      → myrwircaps 下标（kMyrwircapsN = 305）
+#   >= 0x8000     → Program::extra_rwir_names[rwir_id - 0x8000]（扩展算子 handoff）
+#   0xFFFF        → 构造默认值，正常建段不产出
+# 取名只走 instruction_name()；判等只走 instruction_is()/RwirId 数值比较；
+# 禁止 myrwircaps[ins.rwir_id] 直接下标（扩展 id 越界）与恢复字符串比较。
+notes:
+  - id: instruction-rwir-id-union
+    scope: runtimec2
+    detail: >-
+      rwir_id < 0x8000 is a myrwircaps index; >= 0x8000 indexes
+      Program::extra_rwir_names; 0xFFFF is the unset default. Resolve names via
+      instruction_name() only.

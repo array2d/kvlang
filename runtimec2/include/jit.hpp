@@ -26,6 +26,31 @@ struct JitShape {
     int dst_idx = -1;  // 写参（RAX/结果）
 };
 
+// verify/refusal 观测口径（拒绝原因，不执行出口语义）。
+// 10 个拒绝值沿用 coding2/answer-004 §5.3；None 仅为默认初始化。
+// G1 落地时映射为 StructuredExit(Error/Deopt).detail_code，不新增出口种类。
+enum class VmjitRefusalReason : std::uint16_t {
+    None = 0,
+    MalformedSegment,
+    UnsupportedOpcode,
+    UnsupportedOperand,
+    BadParamLayout,
+    BadTarget,
+    TypeMismatch,
+    UninitializedRead,
+    OutputNotDefined,
+    RegisterPressure,
+    UnsupportedBackend,
+};
+
+struct JitRefusal {
+    VmjitRefusalReason refusal_reason = VmjitRefusalReason::None;
+    std::uint32_t detail_code = 0;  // 指令下标 / 寄存器下标
+};
+
+// 发射器局部寄存器池容量；verify 的压力预检与 jit_x64 的 kLocals 共用。
+inline constexpr int kJitLocalRegisterCount = 8;
+
 // 平台发射器：x86_64 在 jit_x64.cpp（完整）、ARM64 在 jit_arm.cpp（框架）。
 // 返回空 vector = 该平台不可发射（回退解释路径）。
 std::vector<std::uint8_t> emit_arch(const Segment* seg, const JitShape& sh);
@@ -34,6 +59,9 @@ std::vector<std::uint8_t> emit_arch(const Segment* seg, const JitShape& sh);
 // 返回 nullptr = 不可 JIT / 发射失败（调用方回退 fast kernel）。
 const void* jit_compile(const std::string& func_dir, const Segment* seg);
 void jit_clear_cache();
+
+// 测试/诊断入口：只做静态判定，不发射、不缓存、不执行。
+bool jit_verify(const Segment* seg, JitRefusal* refusal);
 
 // run_frame 钩子：命中则执行并把 Outcome 写入 *out，返回 true；
 // 未命中/禁用/不满足运行时前提 → false（走解释路径）。

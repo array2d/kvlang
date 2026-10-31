@@ -10,7 +10,7 @@ namespace kvlang::runtimec2 {
 
 // rwir handler 分派上下文（vmkv.cpp run_frame handler 分支的装载态 + 原内嵌
 // lambda 提升）。handler 一律自由函数，经 ctx.vm 调 Vmkv 方法（消除重复捕获）。
-// 同一 handler 可服务多条 rwir（如 time·add/time·sub），变体由 ins.name 区分。
+// 同一 handler 可服务多条 rwir（如 time·add/time·sub），变体由 ins.rwir_id 区分。
 struct RwirHandlerCtx {
     Vmkv& vm;
     vmbin::Frame& f;

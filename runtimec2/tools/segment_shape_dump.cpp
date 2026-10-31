@@ -111,7 +111,7 @@ bool normalize_function(std::string value, std::string* out) {
     return true;
 }
 
-std::string family_of(const CInsn& ins) {
+std::string family_of(const Segment& seg, const CInsn& ins) {
     if (ins.op == Op::Call)
         return "call";
     if (ins.op == Op::Br || ins.op == Op::Goto)
@@ -121,7 +121,7 @@ std::string family_of(const CInsn& ins) {
         "scatterarray\xC2\xB7",
     };
     for (std::string_view prefix : kArrayPrefixes)
-        if (starts_with(ins.name, prefix))
+        if (starts_with(instruction_name(seg, ins), prefix))
             return "array";
     return "generic";
 }
@@ -223,21 +223,22 @@ bool export_function(const std::string& name, const Segment& segment,
          ++instruction_index) {
         const CInsn& ins = segment.insns[instruction_index];
         ExportInsn item;
-        item.op = ins.name;
-        item.family = family_of(ins);
+        item.op = instruction_name(segment, ins);
+        item.family = family_of(segment, ins);
         item.source_id = static_cast<std::uint32_t>(ins.s0);
 
         std::uint8_t read_begin = 0;
         std::uint8_t read_end = ins.nrd;
         if (ins.op == Op::Call) {
-            if (ins.callee.empty()) {
+            const std::string& callee_path = instruction_callee(segment, ins);
+            if (callee_path.empty()) {
                 *error = name + ": call at source id " + std::to_string(ins.s0) +
                          " has no resolved callee";
                 return false;
             }
-            const auto callee = callee_pool.find(ins.callee);
+            const auto callee = callee_pool.find(callee_path);
             if (callee == callee_pool.end()) {
-                *error = name + ": internal callee-pool mismatch for " + ins.callee;
+                *error = name + ": internal callee-pool mismatch for " + callee_path;
                 return false;
             }
             item.has_immediate = true;
@@ -388,9 +389,13 @@ int main(int argc, char** argv) {
     std::vector<std::string> callees;
     for (const auto& [name, segment] : segments) {
         (void)name;
-        for (const CInsn& ins : segment.insns)
-            if (ins.op == Op::Call && !ins.callee.empty())
-                callees.push_back(ins.callee);
+        for (const CInsn& ins : segment.insns) {
+            if (ins.op != Op::Call)
+                continue;
+            const std::string& callee_path = instruction_callee(segment, ins);
+            if (!callee_path.empty())
+                callees.push_back(callee_path);
+        }
     }
     std::sort(callees.begin(), callees.end());
     callees.erase(std::unique(callees.begin(), callees.end()), callees.end());
