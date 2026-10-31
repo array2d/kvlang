@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <sys/mman.h>
+#include <unistd.h>
 
 #include "codeseg.hpp"
 #include "jit.hpp"
@@ -255,17 +256,30 @@ int main() {
         std::int64_t err = 0;
         check(run(exe, 5, &err) == 6 && err == 0, "backward loop result");
     }
-    // 5) 自环 goto：发射必须包含 guard 递减（结构断言）
+    // 5) 自环 goto：guard 递减 + guard stub 写 *err_out（字节 + 执行）
     {
         Segment s = self_loop();
         JitShape sh{-1, -1};
         const auto bytes = emit_arch(&s, sh);
-        bool has_sub_rcx = false;
-        for (std::size_t i = 0; i + 3 < bytes.size(); i++)
-            if (bytes[i] == 0x48 && bytes[i + 1] == 0x83 &&
-                bytes[i + 2] == 0xE9 && bytes[i + 3] == 0x01)
-                has_sub_rcx = true;
-        check(has_sub_rcx, "self-loop decrements guard");
+        auto contains = [&](const std::vector<std::uint8_t>& needle) {
+            for (std::size_t i = 0; i + needle.size() <= bytes.size(); i++)
+                if (std::memcmp(&bytes[i], needle.data(), needle.size()) == 0)
+                    return true;
+            return false;
+        };
+        check(contains({0x48, 0x83, 0xE9, 0x01}), "self-loop decrements guard");
+        // guard stub 必须写内存：[rsi] = 1（48 C7 06 01 00 00 00）
+        check(contains({0x48, 0xC7, 0x06, 0x01, 0x00, 0x00, 0x00}),
+              "guard stub stores through err_out");
+        check(!contains({0x48, 0xC7, 0xC6, 0x01, 0x00, 0x00, 0x00}),
+              "guard stub must not write the rsi register");
+        Executable exe;
+        check(make_executable(bytes, &exe), "self-loop emit");
+        std::int64_t err = 0;
+        alarm(10);  // 若 guard 未生效则死循环：由超时杀掉进程而不是挂住 ctest
+        (void)run(exe, 0, &err);
+        alarm(0);
+        check(err == 1, "guard sets err_out == 1");
     }
     // 6) 池溢出：emit 直接 fail-closed（不调用 verify）
     {

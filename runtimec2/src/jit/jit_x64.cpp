@@ -122,6 +122,14 @@ struct Code {
         w32(0);
     }
     void ret() { w8(0xC3); }
+    // [RSI] = imm32：ModRM mod=00、rm=110（[rsi]，无 SIB、无位移）。
+    // guard stub 用它写 *err_out；不能用 modrm()（那是 mod=3 的寄存器寻址）。
+    void store_imm32_at_rsi(std::int32_t v) {
+        rexw(kRAX, kRSI);
+        w8(0xC7);
+        w8(0x06);
+        w32(v);
+    }
     // R12-R15（REX.B + 0x50+r / 0x58+r）；只用于按需保存 callee-saved。
     void push_reg(const XReg& r) {
         w8(static_cast<std::uint8_t>(0x41));
@@ -345,12 +353,9 @@ std::vector<std::uint8_t> emit_arch(const Segment* seg, const JitShape& sh) {
         }
         return {};
     }
-    // guard stub（fixup target=0）：err_out = 1；eax = 0；恢复 callee-saved；ret
+    // guard stub（fixup target=0）：*err_out = 1；eax = 0；恢复 callee-saved；ret
     const std::size_t guard_stub = c.b.size();
-    c.rexw(kRAX, kRSI);
-    c.w8(0xC7);
-    c.modrm(0, kRSI);
-    c.w32(1);
+    c.store_imm32_at_rsi(1);
     c.w8(0xB8);
     c.w32(0);
     emit_restore();

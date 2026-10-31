@@ -24,7 +24,9 @@ add_library(kvlang_runtimec2 SHARED EXCLUDE_FROM_ALL
     src/rwir_gen.cpp
     src/rwir_lookup.cpp
     src/codeseg.cpp
+    src/vmbin/binir_codec.cpp
     src/jit/jit.cpp
+    src/jit/jit_abi_adapter.cpp
     ${JIT_ARCH_SRC}
     src/vmbin/profile.cpp
     src/value.cpp
@@ -96,6 +98,7 @@ target_include_directories(myrwircap_dump PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/in
 add_executable(segment_shape_dump
     tools/segment_shape_dump.cpp
     src/codeseg.cpp
+    src/vmbin/binir_codec.cpp
     src/binir_dump.cpp
     src/vmbin/profile.cpp
     src/value.cpp
@@ -178,6 +181,7 @@ set_tests_properties(c2_segment_shape_dump PROPERTIES TIMEOUT 120)
 add_executable(jit_verify_test
     tests/jit_verify_test.cpp
     src/jit/jit.cpp
+    src/jit/jit_abi_adapter.cpp
     src/jit/jit_x64.cpp
     src/rwir_gen.cpp)
 target_include_directories(jit_verify_test PRIVATE

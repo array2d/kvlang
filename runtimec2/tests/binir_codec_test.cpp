@@ -228,6 +228,17 @@ bool same_segment(const Segment& a, const Segment& b, std::string* why) {
         *why = "has_rwirhandler differs";
         return false;
     }
+    if (a.call_sites.size() != b.call_sites.size()) {
+        *why = "call_sites count differs";
+        return false;
+    }
+    for (std::size_t i = 0; i < a.call_sites.size(); i++)
+        if (a.call_sites[i].callee_id != b.call_sites[i].callee_id ||
+            b.call_sites[i].segment != nullptr || b.call_sites[i].jit != nullptr ||
+            b.call_sites[i].ready) {
+            *why = "call_site " + std::to_string(i) + " differs";
+            return false;
+        }
     for (std::size_t i = 0; i < a.insns.size(); i++) {
         const Instruction& x = a.insns[i];
         const Instruction& y = b.insns[i];
@@ -291,7 +302,9 @@ bool same_segment(const Segment& a, const Segment& b, std::string* why) {
                          a.regs[i].name + "|" + a.regs[i].slot_key + "|" +
                          std::to_string(static_cast<int>(a.regs[i].vclass)) + "|" +
                          std::to_string(a.regs[i].param_k) + "|" +
-                         (a.regs[i].member ? "m" : "-"));
+                         (a.regs[i].member ? "m" : "-") + "|" +
+                         std::to_string(static_cast<int>(a.regs[i].langtype)) + "|" +
+                         std::to_string(a.regs[i].width));
     }
     for (std::size_t i = 0; i < b.regs.size(); i++) {
         if (cb[i])
@@ -301,7 +314,9 @@ bool same_segment(const Segment& a, const Segment& b, std::string* why) {
                          b.regs[i].name + "|" + b.regs[i].slot_key + "|" +
                          std::to_string(static_cast<int>(b.regs[i].vclass)) + "|" +
                          std::to_string(b.regs[i].param_k) + "|" +
-                         (b.regs[i].member ? "m" : "-"));
+                         (b.regs[i].member ? "m" : "-") + "|" +
+                         std::to_string(static_cast<int>(b.regs[i].langtype)) + "|" +
+                         std::to_string(b.regs[i].width));
     }
     std::sort(ra.begin(), ra.end());
     std::sort(rb.begin(), rb.end());
@@ -358,7 +373,20 @@ bool roundtrip(const Segment& segment, std::vector<std::uint8_t>* encoded,
         return false;
     }
     if (again != *encoded) {
-        *why = "re-encode bytes differ";
+        std::size_t at = 0;
+        while (at < again.size() && at < encoded->size() &&
+               again[at] == (*encoded)[at])
+            at++;
+        *why = "re-encode bytes differ at " + std::to_string(at) + " (size " +
+               std::to_string(encoded->size()) + " vs " +
+               std::to_string(again.size()) + ")";
+        for (std::size_t i = (at > 12 ? at - 12 : 0);
+             i < at + 12 && i < encoded->size(); i++) {
+            char buf[32];
+            std::snprintf(buf, sizeof buf, " %02x/%02x", (*encoded)[i],
+                          i < again.size() ? again[i] : 0);
+            *why += buf;
+        }
         return false;
     }
     return true;

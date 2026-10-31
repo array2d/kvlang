@@ -1,0 +1,11 @@
+rwfunc spin(n:int64) -> (r:int64) {
+	r = n
+	while (r >= n) {
+		r = r + 1
+	}
+}
+
+rwfunc test() -> () {
+	spin(1) -> x
+	println("x =", x)
+}

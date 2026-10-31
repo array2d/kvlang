@@ -1,4 +1,5 @@
 #include "jit.hpp"
+#include "jit_abi_adapter.hpp"
 #include "valueio.hpp"
 #include "vmkv.hpp"
 
@@ -396,6 +397,25 @@ bool jit_try_run(Frame& f, const Segment* seg, int start_s0,
                      f.func_dir.c_str(), src_idx, dst_idx);
     if (src_idx < 0 || dst_idx < 0)
         return false;
+    if (jit_abi_enabled()) {
+        JitAbiLink link{&f, seg, static_cast<std::uint8_t>(src_idx),
+                        static_cast<std::uint8_t>(dst_idx)};
+        if (jit_abi_eligible(link)) {
+            jitabi::StructuredExitV1 exit{};
+            jit_abi_run(link, code, &exit);
+            if (exit.kind == jitabi::ExitKindV1::Error) {
+                *err = exit.detail_code == jitabi::kDetailRunaway
+                           ? "runaway loop (jit): " + f.func_dir
+                           : "jit commit failed: " + f.func_dir;
+                *out = Outcome::Error;
+                return true;
+            }
+            if (stop_pc)
+                stop_pc->clear();
+            *out = f.depth <= 1 ? Outcome::Ok : Outcome::Returned;
+            return true;
+        }
+    }
     // 读参装载（镜像 read_i64 的 src_ptr 继承）
     Register& sr0 = f.regs[src_idx];
     Register* src = sr0.src_ptr ? sr0.src_ptr : &sr0;

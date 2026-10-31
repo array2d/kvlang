@@ -80,6 +80,9 @@ struct CallSite {
 };
 
 struct Program {
+    // #583 L2：段的 binir 字节流（纯内存，不落盘；落盘仍按 §2·3 不做）。
+    // RC2_SEGMENT_FROM_BINIR=1（默认）时 insns/regs/lit/call_sites 是它的解码视图。
+    std::vector<std::uint8_t> binir;
     std::vector<Instruction> insns;
     std::vector<RegisterDesc> regs;
     std::vector<FastLiteral> lit;
