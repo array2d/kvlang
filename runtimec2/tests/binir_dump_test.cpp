@@ -27,6 +27,7 @@ using kvlang::runtimec2::Segment;
 using kvlang::runtimec2::dump_binir;
 using kvlang::runtimec2::rwir::Kind;
 using kvlang::runtimec2::rwir::Op;
+using kvlang::runtimec2::rwir::RwirId;
 
 std::uint8_t push_var(Segment* seg, const char* name, RegDesc::VarClass vclass,
                       int param_k = 0) {
@@ -64,14 +65,19 @@ std::uint8_t push_const_string(Segment* seg, const char* text) {
     return static_cast<std::uint8_t>(slot);
 }
 
-CInsn make_insn(Op op, Kind kind, std::uint8_t width, const char* name,
+std::uint16_t push_callee(Segment* seg, const char* path) {
+    seg->callees.emplace_back(path);
+    return static_cast<std::uint16_t>(seg->callees.size() - 1);
+}
+
+CInsn make_insn(Op op, Kind kind, std::uint8_t width, RwirId id,
                 std::vector<std::uint8_t> reads, std::vector<std::uint8_t> writes,
                 int s0) {
     CInsn ci;
     ci.op = op;
     ci.kind = kind;
     ci.width = width;
-    ci.name = name;
+    ci.rwir_id = static_cast<std::uint16_t>(id);
     ci.impl = op == Op::Call ? kvlang::runtimec2::rwir::Impl::Control
                              : kvlang::runtimec2::rwir::Impl::Typed;
     ci.s0 = s0;
@@ -100,19 +106,24 @@ Segment demo_mixed() {
     const std::uint8_t l1 = push_var(&seg, "L1", RegDesc::VarClass::Plain);
     const std::uint8_t res = push_var(&seg, "res", RegDesc::VarClass::Plain);
     (void)push_const_string(&seg, "/lib/data");
+    seg.insns.push_back(make_insn(Op::Add, Kind::Int, 8, RwirId::Int64Add,
+                                 {a, b}, {acc}, 1));
+    seg.insns.push_back(make_insn(Op::Add, Kind::Int, 8, RwirId::Int64Add,
+                                 {acc, k42}, {i}, 2));
+    seg.insns.push_back(make_insn(Op::Lt, Kind::Int, 8, RwirId::Int64Lt,
+                                 {i, k42}, {t}, 3));
     seg.insns.push_back(
-        make_insn(Op::Add, Kind::Int, 8, "int64·add", {a, b}, {acc}, 1));
-    seg.insns.push_back(
-        make_insn(Op::Add, Kind::Int, 8, "int64·add", {acc, k42}, {i}, 2));
-    seg.insns.push_back(
-        make_insn(Op::Lt, Kind::Int, 8, "int64·lt", {i, k42}, {t}, 3));
-    seg.insns.push_back(make_insn(Op::Br, Kind::None, 0, "br", {t, l1}, {}, 4));
-    CInsn call = make_insn(Op::Call, Kind::None, 0, "call", {a, acc}, {res}, 5);
-    call.callee = "/lib/demo·f";
+        make_insn(Op::Br, Kind::None, 0, RwirId::Br, {t, l1}, {}, 4));
+    CInsn call = make_insn(Op::Call, Kind::None, 0, RwirId::Call, {a, acc},
+                           {res}, 5);
+    call.callee_id = push_callee(&seg, "/lib/demo·f");
     seg.insns.push_back(call);
-    seg.insns.push_back(make_insn(Op::Copy, Kind::None, 0, "=", {k42}, {i}, 6));
-    seg.insns.push_back(make_insn(Op::Goto, Kind::None, 0, "goto", {l1}, {}, 7));
-    seg.insns.push_back(make_insn(Op::Return, Kind::None, 0, "return", {res}, {}, 8));
+    seg.insns.push_back(
+        make_insn(Op::Copy, Kind::None, 0, RwirId::CopySym, {k42}, {i}, 6));
+    seg.insns.push_back(
+        make_insn(Op::Goto, Kind::None, 0, RwirId::Goto, {l1}, {}, 7));
+    seg.insns.push_back(
+        make_insn(Op::Return, Kind::None, 0, RwirId::Return, {res}, {}, 8));
     return seg;
 }
 
@@ -126,15 +137,15 @@ Segment demo_handler() {
     handler_insn.op = Op::None;
     handler_insn.kind = Kind::None;
     handler_insn.handler = kvlang::runtimec2::rwir::RwirHandlerId::ArrayNew;
-    handler_insn.name = "compactarray·new";
+    handler_insn.rwir_id = static_cast<std::uint16_t>(RwirId::CompactArrayNew);
     handler_insn.s0 = 1;
     handler_insn.nrd = 1;
     handler_insn.rd[0] = p;
     handler_insn.nwr = 1;
     handler_insn.wr[0] = tmp;
     seg.insns.push_back(handler_insn);
-    seg.insns.push_back(
-        make_insn(Op::Add, Kind::Int, 8, "int64·add", {tmp, k7}, {tmp}, 2));
+    seg.insns.push_back(make_insn(Op::Add, Kind::Int, 8, RwirId::Int64Add,
+                                 {tmp, k7}, {tmp}, 2));
     seg.has_rwirhandler = true;
     return seg;
 }

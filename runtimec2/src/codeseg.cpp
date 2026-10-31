@@ -12,9 +12,14 @@
 
 #include "value.hpp"
 #include "valueio.hpp"
+#include "vmbin/regtype.hpp"
 
 namespace kvlang::runtimec2 {
 namespace {
+
+using vmbin::LangType;
+using vmbin::langtype_kind;
+using vmbin::langtype_name;
 
 std::vector<std::string> g_op_names;
 
@@ -53,9 +58,9 @@ int reg_of(Segment* seg, std::unordered_map<std::string, int>* dedup,
 }
 
 bool operand_desc(void* h, const std::string& key, RegDesc* out) {
-    std::string op;
+    std::string op, ltype;
     int nr = 0, nw = 0;
-    if (read_rwir(h, key, &op, &nr, &nw)) {
+    if (read_rwir(h, key, &op, &nr, &nw, &ltype)) {
         out->kind = Operand::Kind::Var;
         out->name = op;
         // 参数 Ptr 槽号预解析（`*[0,±k]`）：帧入口零 substr/atoi（fib 递归 setup 大头）。
@@ -74,6 +79,9 @@ bool operand_desc(void* h, const std::string& key, RegDesc* out) {
                                                           : VC::Typed;
         out->member = !op.empty() && op[0] != '/' &&
                       op.find("\xC2\xB7") != std::string::npos;
+        // E 层：操作数槽 NUL 后的类型串（layout typed_slot_value）。
+        if (!ltype.empty())
+            langtype_kind(ltype, &out->langtype, &out->width);
         return true;
     }
     out->kind = Operand::Kind::Literal;
@@ -81,12 +89,13 @@ bool operand_desc(void* h, const std::string& key, RegDesc* out) {
     // 绝对路径字面量（对齐 C is_absolute_key）：槽值是 char/ 且文本 `/` 开头 →
     // name 存路径本体，运行期 read/write 直接以路径作 key（`42 -> "/path"` 路径写、
     // `"/path" -> v` 路径读、println 实参）。`·`（U+00B7）是成员分隔，保留原样。
-    {
+    std::string lt;
+    if (read_langtype(h, key, &lt)) {
+        langtype_kind(lt, &out->langtype, &out->width);
         const std::uint8_t* d = nullptr;
         std::uint32_t n = 0;
-        std::string lt, txt;
-        if (read_langtype(h, key, &lt) &&
-            lt.find("char/") != std::string::npos &&
+        std::string txt;
+        if (lt.find("char/") != std::string::npos &&
             read_wire_raw(h, key, &d, &n) && d && n &&
             wire_text(d, n, lt, &txt) && !txt.empty() && txt[0] == '/')
             out->name = txt;
@@ -134,10 +143,64 @@ bool is_declared_rwir(void* h, const std::string& op) {
     return read_langtype(h, "/lib/" + op, &lt) && lt == "def rwir";
 }
 
+// 段内池去重：rwir 身份用表下标（扩展算子进 extra 池），callee 路径进 callees 池。
+std::uint16_t pool_add(std::vector<std::string>* pool,
+                       std::unordered_map<std::string, std::uint16_t>* index,
+                       const std::string& text) {
+    auto it = index->find(text);
+    if (it != index->end())
+        return it->second;
+    const auto id = static_cast<std::uint16_t>(pool->size());
+    pool->push_back(text);
+    (*index)[text] = id;
+    return id;
+}
+
+// rwir::Kind/width → 标量 LangType（typed op 的写参兜底；Kind::Any/None 无信息）。
+LangType scalar_langtype(rwir::Kind kind, std::uint8_t width) {
+    switch (kind) {
+    case rwir::Kind::Int:
+        switch (width) {
+        case 1: return LangType::Int8;
+        case 2: return LangType::Int16;
+        case 4: return LangType::Int32;
+        case 8: return LangType::Int64;
+        default: return LangType::None;
+        }
+    case rwir::Kind::Uint:
+        switch (width) {
+        case 1: return LangType::Uint8;
+        case 2: return LangType::Uint16;
+        case 4: return LangType::Uint32;
+        case 8: return LangType::Uint64;
+        default: return LangType::None;
+        }
+    case rwir::Kind::Float:
+        return width == 4 ? LangType::Float32
+               : width == 8 ? LangType::Float64
+                            : LangType::None;
+    default:
+        return LangType::None;
+    }
+}
+
 bool build(void* h, const std::string& func_dir, Segment* out) {
     out->insns.clear();
     out->regs.clear();
+    out->callees.clear();
+    out->extra_rwir_names.clear();
     std::unordered_map<std::string, int> dedup;
+    std::unordered_map<std::string, std::uint16_t> callee_ids;
+    std::unordered_map<std::string, std::uint16_t> extra_ids;
+    std::vector<vmbin::RegisterTypeState> type_state;
+    auto record_type = [&type_state](int idx, LangType kind,
+                                     std::uint8_t width, bool write) {
+        if (idx < 0)
+            return;
+        if (static_cast<std::size_t>(idx) >= type_state.size())
+            type_state.resize(static_cast<std::size_t>(idx) + 1);
+        type_state[static_cast<std::size_t>(idx)].record(kind, width, write);
+    };
     for (int s0 = 1;; s0++) {
         const std::string op_key = slot_key(func_dir, s0, 0);
         std::string op, callee;
@@ -156,13 +219,18 @@ bool build(void* h, const std::string& func_dir, Segment* out) {
         ins.op = rwir::Op::None;
         ins.impl = rwir::Impl::Handoff;
         ins.s0 = s0;
-        ins.name = op;
         ins.prof_id = intern_op(op);
         if (is_call) {
-            ins.callee = callee;
+            ins.callee_id = pool_add(&out->callees, &callee_ids, callee);
             ins.op = rwir::Op::Call;
             ins.impl = rwir::Impl::Control;
+            const rwir::Entry* ce = rwir::find_myrwircap("call", 4);
+            ins.rwir_id = ce ? static_cast<std::uint16_t>(ce - rwir::myrwircaps)
+                             : static_cast<std::uint16_t>(
+                                   vmbin::kRwirIdExtraBase +
+                                   pool_add(&out->extra_rwir_names, &extra_ids, "call"));
         } else if (e) {
+            ins.rwir_id = static_cast<std::uint16_t>(e - rwir::myrwircaps);
             ins.op = e->op;
             ins.kind = e->kind;
             ins.width = e->width;
@@ -199,6 +267,11 @@ bool build(void* h, const std::string& func_dir, Segment* out) {
                          "and no /lib/%s def rwir\n",
                          op.c_str(), func_dir.c_str(), op.c_str());
             return false;
+        } else {
+            // 已声明但不在 myrwircap：扩展算子 handoff，名字进 extra 池（仅诊断）。
+            ins.rwir_id = static_cast<std::uint16_t>(
+                vmbin::kRwirIdExtraBase +
+                pool_add(&out->extra_rwir_names, &extra_ids, op));
         }
         if (ins.handler != rwir::RwirHandlerId::None)
             out->has_rwirhandler = true;
@@ -219,7 +292,9 @@ bool build(void* h, const std::string& func_dir, Segment* out) {
                 return false;
             const std::string tag = std::string(d.kind == Operand::Kind::Var ? "v:" : "l:") +
                                     (d.kind == Operand::Kind::Var ? d.name : rk);
-            ins.rd[rbase + k - 1] = static_cast<std::uint8_t>(reg_of(out, &dedup, tag, d));
+            const int ri = reg_of(out, &dedup, tag, d);
+            ins.rd[rbase + k - 1] = static_cast<std::uint8_t>(ri);
+            record_type(ri, d.langtype, d.width, false);
         }
         for (int k = 1; k <= nw; k++) {
             const std::string wk = slot_key(func_dir, s0, k);
@@ -228,7 +303,16 @@ bool build(void* h, const std::string& func_dir, Segment* out) {
                 return false;
             const std::string tag = std::string(d.kind == Operand::Kind::Var ? "v:" : "l:") +
                                     (d.kind == Operand::Kind::Var ? d.name : wk);
-            ins.wr[k - 1] = static_cast<std::uint8_t>(reg_of(out, &dedup, tag, d));
+            const int ri = reg_of(out, &dedup, tag, d);
+            ins.wr[k - 1] = static_cast<std::uint8_t>(ri);
+            // 写参类型：槽后缀优先；无后缀时用 typed op 的结果 kind/width 兜底。
+            LangType wk_kind = d.langtype;
+            std::uint8_t wk_width = d.width;
+            if (wk_kind == LangType::None) {
+                wk_kind = scalar_langtype(ins.kind, ins.width);
+                wk_width = wk_kind == LangType::None ? 0 : ins.width;
+            }
+            record_type(ri, wk_kind, wk_width, true);
             // 写槽帧局部预标记：普通变量（非 * 参数/非 / 绝对路径/非 · 成员写）
             // → fast 写直走 fv。成员写（`base·member`）排除（fast kernel 单参 copy 误判）。
             if (d.kind == Operand::Kind::Var && !d.name.empty() &&
@@ -238,18 +322,30 @@ bool build(void* h, const std::string& func_dir, Segment* out) {
         }
         out->insns.push_back(ins);
     }
+    // E 层定稿：写者一致且全部有类型 → 写入；否则只读变量看读槽；再否则 None。
+    for (std::size_t i = 0; i < out->regs.size(); i++) {
+        const vmbin::RegisterTypeState s =
+            i < type_state.size() ? type_state[i] : vmbin::RegisterTypeState{};
+        std::uint8_t width = 0;
+        out->regs[i].langtype = s.final_kind(&width);
+        out->regs[i].width = width;
+    }
     if (std::getenv("RC2_TRACE")) {
         for (std::size_t ri = 0; ri < out->regs.size(); ri++) {
             const RegDesc& d = out->regs[ri];
-            std::fprintf(stderr, "[segdmp reg %zu kind=%d name='%s' key='%s' pk=%d]\n",
+            const char* ltn = langtype_name(d.langtype);
+            std::fprintf(stderr,
+                         "[segdmp reg %zu kind=%d name='%s' key='%s' pk=%d "
+                         "lt=%s w=%u]\n",
                          ri, (int)d.kind, d.name.c_str(), d.slot_key.c_str(),
-                         d.param_k);
+                         d.param_k, ltn ? ltn : "?", (unsigned)d.width);
         }
         for (const CInsn& ci : out->insns) {
             std::fprintf(stderr,
                          "[segdmp s0=%d op=%s opfn=%d fast=%d wrl=%d nrd=%u nwr=%u "
                          "rd=%d,%d,%d wr=%d,%d,%d]\n",
-                         ci.s0, ci.name.c_str(), (int)ci.opfn, (int)ci.fast_i64,
+                         ci.s0, instruction_name(*out, ci), (int)ci.opfn,
+                         (int)ci.fast_i64,
                          (int)ci.wr_local, ci.nrd, ci.nwr, ci.rd[0], ci.rd[1],
                          ci.rd[2], ci.wr[0], ci.wr[1], ci.wr[2]);
         }

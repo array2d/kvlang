@@ -73,8 +73,9 @@ bool read_opcode(void* h, const std::string& pc, std::string* op) {
     if (!frame_func_dir(h, p.vid, p.depth, &dir))
         return false;
     const CInsn* insn = nullptr;
-    if (cached_insn(dir, p.s0, &insn, nullptr)) {
-        *op = insn->name;
+    const Segment* insn_seg = nullptr;
+    if (cached_insn(dir, p.s0, &insn, &insn_seg)) {
+        *op = instruction_name(*insn_seg, *insn);
         g_dir_hint.assign(dir);  // 段已存在：把函数目录带给 run_frame
         return true;
     }
@@ -84,7 +85,7 @@ bool read_opcode(void* h, const std::string& pc, std::string* op) {
     const auto i = p.s0 - 1;
     if (i < 0 || i >= static_cast<int>(seg->insns.size()))
         return false;
-    *op = seg->insns[static_cast<std::size_t>(i)].name;
+    *op = instruction_name(*seg, seg->insns[static_cast<std::size_t>(i)]);
     g_dir_hint.assign(dir);
     return true;
 }
@@ -115,9 +116,13 @@ static void prebuild_reachable(void* h, const std::string& func_key) {
             continue;
         if (jit_enabled())
             jit_compile(fk, seg);
-        for (const CInsn& ci : seg->insns)
-            if (ci.op == rwir::Op::Call && !ci.callee.empty())
-                work.push_back(ci.callee);
+        for (const CInsn& ci : seg->insns) {
+            if (ci.op != rwir::Op::Call)
+                continue;
+            const std::string& callee = instruction_callee(*seg, ci);
+            if (!callee.empty())
+                work.push_back(callee);
+        }
     }
 }
 

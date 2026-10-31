@@ -297,6 +297,11 @@ std::uint32_t RwirHandlerCtx::elem_size(const std::string& kind) {
 
 namespace {
 
+// handler 变体分派：rwir 身份 id 比较（建段期写入，无字符串比较）。
+inline bool is_rwir(const CInsn& ins, rwir::RwirId id) {
+    return ins.rwir_id == static_cast<std::uint16_t>(id);
+}
+
 // ── time ──────────────────────────────────────────────────────────────────
 bool h_time_now(RwirHandlerCtx& c, std::string*) {
     struct timespec ts;
@@ -309,14 +314,16 @@ bool h_time_now(RwirHandlerCtx& c, std::string*) {
 bool h_time_arith(RwirHandlerCtx& c, std::string* err) {
     const bool ok = c.ai64(0, &c.v0) && c.ai64(1, &c.v1);
     if (!ok) {
-        *err = "rwir handler: bad operands: " + c.ins.name;
+        *err = std::string("rwir handler: bad operands: ") + instruction_name(*c.seg, c.ins);
         return false;
     }
-    if (c.ins.name == "time·before" || c.ins.name == "time/duration·before")
+    if (is_rwir(c.ins, rwir::RwirId::TimeBefore) ||
+        is_rwir(c.ins, rwir::RwirId::TimeDurationBefore))
         return c.wbool(c.v0 < c.v1);
-    if (c.ins.name == "time·after" || c.ins.name == "time/duration·after")
+    if (is_rwir(c.ins, rwir::RwirId::TimeAfter) ||
+        is_rwir(c.ins, rwir::RwirId::TimeDurationAfter))
         return c.wbool(c.v0 > c.v1);
-    if (c.ins.name == "time·add")
+    if (is_rwir(c.ins, rwir::RwirId::TimeAdd))
         return c.vm.write_named_i64(c.f.h, c.ins.wr[0], c.f, "time", c.v0 + c.v1);
     return c.vm.write_named_i64(c.f.h, c.ins.wr[0], c.f, "duration",
                                 c.v0 - c.v1);
@@ -325,10 +332,10 @@ bool h_time_arith(RwirHandlerCtx& c, std::string* err) {
 bool h_duration_scale(RwirHandlerCtx& c, std::string*) {
     const bool ok = c.ai64(0, &c.v0);
     std::int64_t mul = 1;
-    if (c.ins.name == "time/duration·millis") mul = 1000000;
-    else if (c.ins.name == "time/duration·seconds") mul = 1000000000;
-    else if (c.ins.name == "time/duration·minutes") mul = 60000000000LL;
-    else if (c.ins.name == "time/duration·hours") mul = 3600000000000LL;
+    if (is_rwir(c.ins, rwir::RwirId::TimeDurationMillis)) mul = 1000000;
+    else if (is_rwir(c.ins, rwir::RwirId::TimeDurationSeconds)) mul = 1000000000;
+    else if (is_rwir(c.ins, rwir::RwirId::TimeDurationMinutes)) mul = 60000000000LL;
+    else if (is_rwir(c.ins, rwir::RwirId::TimeDurationHours)) mul = 3600000000000LL;
     return ok &&
            c.vm.write_named_i64(c.f.h, c.ins.wr[0], c.f, "duration",
                                 c.v0 * mul);
@@ -337,10 +344,10 @@ bool h_duration_scale(RwirHandlerCtx& c, std::string*) {
 bool h_duration_as(RwirHandlerCtx& c, std::string*) {
     const bool ok = c.ai64(0, &c.v0);
     std::int64_t div = 1;
-    if (c.ins.name.find("millis") != std::string::npos) div = 1000000;
-    else if (c.ins.name.find("seconds") != std::string::npos) div = 1000000000;
-    else if (c.ins.name.find("minutes") != std::string::npos) div = 60000000000LL;
-    else if (c.ins.name.find("hours") != std::string::npos) div = 3600000000000LL;
+    if (is_rwir(c.ins, rwir::RwirId::TimeDurationAsMillis)) div = 1000000;
+    else if (is_rwir(c.ins, rwir::RwirId::TimeDurationAsSeconds)) div = 1000000000;
+    else if (is_rwir(c.ins, rwir::RwirId::TimeDurationAsMinutes)) div = 60000000000LL;
+    else if (is_rwir(c.ins, rwir::RwirId::TimeDurationAsHours)) div = 3600000000000LL;
     Scalar outv{};
     outv.k = Scalar::K::Int;
     outv.width = 8;
@@ -360,13 +367,13 @@ bool h_random(RwirHandlerCtx& c, std::string* err) {
     }
 #endif
     bool ok = true;
-    if (c.ins.name == "random·intn") {
+    if (is_rwir(c.ins, rwir::RwirId::RandomIntN)) {
         ok = c.ai64(0, &c.v0);
         const std::uint64_t m = (std::uint64_t)c.v0;
         r = m == 0 ? 0 : r % m;
         ok = ok && c.vm.write_named_i64(c.f.h, c.ins.wr[0], c.f, "uint64",
                                         (std::int64_t)r);
-    } else if (c.ins.name == "random·int63") {
+    } else if (is_rwir(c.ins, rwir::RwirId::RandomInt63)) {
         ok = c.vm.write_named_i64(c.f.h, c.ins.wr[0], c.f, "int64",
                                   (std::int64_t)(r >> 1));
     } else {
@@ -403,7 +410,7 @@ bool h_array_new(RwirHandlerCtx& c, std::string* err) {
     }
     const std::uint32_t esz = c.elem_size(lt);
     if (esz == 0 || c.ins.nrd < 1) {
-        *err = "array: bad type/elements " + c.ins.name;
+        *err = std::string("array: bad type/elements ") + instruction_name(*c.seg, c.ins);
         return false;
     }
     const std::int32_t nd = static_cast<std::int32_t>(c.ins.nrd);
@@ -651,7 +658,7 @@ bool h_scatter_set(RwirHandlerCtx& c, std::string* err) {
     char errbuf[256] = {};
     const bool ok = kvspaceSetValue(c.f.h, mk.c_str(), sv.d, sv.n, errbuf, sizeof errbuf) == 0;
     if (!ok && errbuf[0])
-        *err = std::string(c.ins.name) + ": " + errbuf;
+        *err = std::string(instruction_name(*c.seg, c.ins)) + ": " + errbuf;
     return ok;
 }
 
@@ -1334,7 +1341,7 @@ bool h_array_meta(RwirHandlerCtx& c, std::string* err) {
     const bool is_map = alt.find("\xC2\xB7") != std::string::npos;
     alt = c.parse_dims(alt, adims, &andim);
     bool ok = true;
-    if (c.ins.name == "compactarray·numel") {
+    if (is_rwir(c.ins, rwir::RwirId::CompactArrayNumel)) {
         if (is_map) {
             std::string base_key;
             if (c.f.regs[c.ins.rd[0]].key.size() > 5)
@@ -1351,7 +1358,7 @@ bool h_array_meta(RwirHandlerCtx& c, std::string* err) {
                 total *= adims[i];
             ok = c.vm.slot_write_i64(c.f, c.ins.wr[0], total);
         }
-    } else if (c.ins.name == "compactarray·dim") {
+    } else if (is_rwir(c.ins, rwir::RwirId::CompactArrayDim)) {
         ok = c.vm.slot_write_i64(c.f, c.ins.wr[0], andim);
     } else {
         std::uint8_t raw[64];
@@ -1387,7 +1394,7 @@ bool h_xv_meta(RwirHandlerCtx& c, std::string* err) {
         c.vm.reg_langtype(c.f, c.ins.rd[0], &mlt);
     }
     bool ok = true;
-    if (c.ins.name == "compactarray·langtype") {
+    if (is_rwir(c.ins, rwir::RwirId::CompactArrayLangType)) {
         std::uint8_t* sb = nullptr;
         std::uint32_t sl = 0;
         ok = v_char_wire("char/utf8",
@@ -1395,7 +1402,7 @@ bool h_xv_meta(RwirHandlerCtx& c, std::string* err) {
                     static_cast<std::uint32_t>(mlt.size()), &sb, &sl) &&
              sb && c.vm.write_reg(c.f, c.ins.wr[0], sb, sl);
         std::free(sb);
-    } else if (c.ins.name == "compactarray·bodylen") {
+    } else if (is_rwir(c.ins, rwir::RwirId::CompactArrayBodyLen)) {
         std::int64_t blen = 0;
         if (mr.fast_i64) blen = 8;
         else if (mr.fast_bool) blen = 1;
@@ -1404,7 +1411,7 @@ bool h_xv_meta(RwirHandlerCtx& c, std::string* err) {
                 reinterpret_cast<const kvspaceXvalueHead*>(mr.view.head)));
         }
         ok = c.vm.slot_write_i64(c.f, c.ins.wr[0], blen);
-    } else if (c.ins.name == "compactarray·parselangtype") {
+    } else if (is_rwir(c.ins, rwir::RwirId::CompactArrayParseLangType)) {
         std::string base = mlt;
         if (!base.empty() && base[0] == '[') {
             const std::size_t close = base.find(']');
@@ -1575,7 +1582,7 @@ bool h_array_reshape(RwirHandlerCtx& c, std::string* err) {
 
 bool h_array_at_set(RwirHandlerCtx& c, std::string* err) {
     // compact 数组元素读/写（[N,M]kind，body 连续打包）。
-    const bool is_set = c.ins.name == "compactarray·set";
+    const bool is_set = is_rwir(c.ins, rwir::RwirId::CompactArraySet);
     Register& ar0 = c.f.regs[c.ins.rd[0]];
     std::uint8_t* ab0 = nullptr;
     std::uint64_t acap0 = 0;
@@ -1927,10 +1934,10 @@ bool h_obj_map(RwirHandlerCtx& c, std::string* err) {
         const std::string dir = ck + "/";
         ok = kvspaceMkindex(c.f.h, dir.c_str(), 0, e, sizeof e) == 0;
     }
-    if (ok && (c.ins.name == "map·new" || c.ins.nrd >= 2)) {
+    if (ok && (is_rwir(c.ins, rwir::RwirId::MapNew) || c.ins.nrd >= 2)) {
         const std::string base_key = c.f.regs[c.ins.wr[0]].key;
         char e[192] = {};
-        if (c.ins.name == "map·new") {
+        if (is_rwir(c.ins, rwir::RwirId::MapNew)) {
             for (int i = 0; i < c.ins.nrd; i++) {
                 Wire ew{};
                 if (!c.vm.read_reg(c.f, c.ins.rd[i], &ew)) {
@@ -1940,7 +1947,7 @@ bool h_obj_map(RwirHandlerCtx& c, std::string* err) {
                 const std::string mk =
                     base_key + "\xC2\xB7[" + std::to_string(i) + "]";
                 if (kvspaceSetValue(c.f.h, mk.c_str(), ew.d, ew.n, e, sizeof e) != 0) {
-                    *err = "map: set failed: " + c.ins.name;
+                    *err = std::string("map: set failed: ") + instruction_name(*c.seg, c.ins);
                     return false;
                 }
             }
@@ -1954,12 +1961,12 @@ bool h_obj_map(RwirHandlerCtx& c, std::string* err) {
                     !c.vm.reg_langtype(c.f, c.ins.rd[i], &klt) ||
                     !wire_text(kw.d, kw.n, klt, &kname) || kname.empty() ||
                     !c.vm.read_reg(c.f, c.ins.rd[i + 1], &vw)) {
-                    *err = "obj: bad member pair " + c.ins.name;
+                    *err = std::string("obj: bad member pair ") + instruction_name(*c.seg, c.ins);
                     return false;
                 }
                 const std::string mk = base_key + "\xC2\xB7" + kname;
                 if (kvspaceSetValue(c.f.h, mk.c_str(), vw.d, vw.n, e, sizeof e) != 0) {
-                    *err = "obj: set failed: " + c.ins.name;
+                    *err = std::string("obj: set failed: ") + instruction_name(*c.seg, c.ins);
                     return false;
                 }
             }
@@ -1987,7 +1994,7 @@ bool h_kvlang_abs(RwirHandlerCtx& c, std::string* err) {
         k0 = ar.key;
     }
     if (!ok || k0.empty()) {
-        *err = "rwir handler: bad path operand: " + c.ins.name;
+        *err = std::string("rwir handler: bad path operand: ") + instruction_name(*c.seg, c.ins);
         return false;
     }
     std::string lt;
@@ -2189,8 +2196,8 @@ bool h_vthread_setstatus(RwirHandlerCtx& c, std::string* err) {
 bool kv_fail(RwirHandlerCtx& c, bool ok, char* errbuf, std::string* err) {
     if (ok)
         return true;
-    *err = errbuf[0] ? std::string(c.ins.name) + ": " + errbuf
-                     : "rwir handler: write failed: " + c.ins.name;
+    *err = errbuf[0] ? std::string(instruction_name(*c.seg, c.ins)) + ": " + errbuf
+                     : std::string("rwir handler: write failed: ") + instruction_name(*c.seg, c.ins);
     return false;
 }
 
@@ -2338,7 +2345,7 @@ bool member_path(RwirHandlerCtx& c, std::string* base_path,
                  std::string* member_path_out, bool* base_is_none,
                  std::string* err) {
     if (c.ins.nrd < 2) {
-        *err = "TypeError: " + c.ins.name + " requires base and key";
+        *err = std::string("TypeError: ") + instruction_name(*c.seg, c.ins) + " requires base and key";
         return false;
     }
 
@@ -2477,7 +2484,7 @@ bool h_kv_set(RwirHandlerCtx& c, std::string* err) {
 bool h_kv_del(RwirHandlerCtx& c, std::string* err) {
     std::string k0, k1;
     if (!c.kv_paths(&k0, &k1)) {
-        *err = "rwir handler: bad path operand: " + c.ins.name;
+        *err = std::string("rwir handler: bad path operand: ") + instruction_name(*c.seg, c.ins);
         return false;
     }
     char errbuf[256] = {};
@@ -2489,7 +2496,7 @@ bool h_kv_del(RwirHandlerCtx& c, std::string* err) {
 bool h_kv_deltree(RwirHandlerCtx& c, std::string* err) {
     std::string k0, k1;
     if (!c.kv_paths(&k0, &k1)) {
-        *err = "rwir handler: bad path operand: " + c.ins.name;
+        *err = std::string("rwir handler: bad path operand: ") + instruction_name(*c.seg, c.ins);
         return false;
     }
     char errbuf[256] = {};
@@ -2500,7 +2507,7 @@ bool h_kv_deltree(RwirHandlerCtx& c, std::string* err) {
 bool h_kv_mkindex(RwirHandlerCtx& c, std::string* err) {
     std::string k0, k1;
     if (!c.kv_paths(&k0, &k1)) {
-        *err = "rwir handler: bad path operand: " + c.ins.name;
+        *err = std::string("rwir handler: bad path operand: ") + instruction_name(*c.seg, c.ins);
         return false;
     }
     char errbuf[256] = {};
@@ -2518,7 +2525,7 @@ bool h_kv_mkindex(RwirHandlerCtx& c, std::string* err) {
 bool h_kv_list(RwirHandlerCtx& c, std::string* err) {
     std::string k0, k1;
     if (!c.kv_paths(&k0, &k1)) {
-        *err = "rwir handler: bad path operand: " + c.ins.name;
+        *err = std::string("rwir handler: bad path operand: ") + instruction_name(*c.seg, c.ins);
         return false;
     }
     std::string dkey = k0;
@@ -2540,7 +2547,7 @@ bool h_kv_list(RwirHandlerCtx& c, std::string* err) {
         dkey += "\xC2\xB7";
     char errbuf[256] = {};
     bool ok = true;
-    if (c.ins.name == "kvspace·listlen") {
+    if (is_rwir(c.ins, rwir::RwirId::KvspaceListLen)) {
         if (g_trace)
             std::fprintf(stderr, "[listlen k0='%s' dkey='%s']\n",
                          k0.c_str(), dkey.c_str());
@@ -2571,14 +2578,14 @@ bool h_kv_list(RwirHandlerCtx& c, std::string* err) {
 bool h_kv_cp(RwirHandlerCtx& c, std::string* err) {
     std::string k0, k1;
     if (!c.kv_paths(&k0, &k1)) {
-        *err = "rwir handler: bad path operand: " + c.ins.name;
+        *err = std::string("rwir handler: bad path operand: ") + instruction_name(*c.seg, c.ins);
         return false;
     }
     char errbuf[256] = {};
-    const int rc = c.ins.name == "kvspace·cp"
+    const int rc = is_rwir(c.ins, rwir::RwirId::KvspaceCp)
                        ? kvspaceCp(c.f.h, k0.c_str(), k1.c_str(), errbuf,
                                    sizeof errbuf)
-                       : c.ins.name == "kvspace·cpdir"
+                       : is_rwir(c.ins, rwir::RwirId::KvspaceCpDir)
                              ? kvspaceCpTree(c.f.h, k0.c_str(), k1.c_str(),
                                              errbuf, sizeof errbuf)
                              : kvspaceCpList(c.f.h, k0.c_str(), k1.c_str(),
@@ -2589,7 +2596,7 @@ bool h_kv_cp(RwirHandlerCtx& c, std::string* err) {
 bool h_kv_extindex(RwirHandlerCtx& c, std::string* err) {
     std::string k0, k1;
     if (!c.kv_paths(&k0, &k1)) {
-        *err = "rwir handler: bad path operand: " + c.ins.name;
+        *err = std::string("rwir handler: bad path operand: ") + instruction_name(*c.seg, c.ins);
         return false;
     }
     char errbuf[256] = {};
@@ -2602,7 +2609,7 @@ bool h_kv_extindex(RwirHandlerCtx& c, std::string* err) {
 bool h_kv_rmindexext(RwirHandlerCtx& c, std::string* err) {
     std::string k0, k1;
     if (!c.kv_paths(&k0, &k1)) {
-        *err = "rwir handler: bad path operand: " + c.ins.name;
+        *err = std::string("rwir handler: bad path operand: ") + instruction_name(*c.seg, c.ins);
         return false;
     }
     char errbuf[256] = {};

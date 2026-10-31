@@ -43,8 +43,9 @@ bool v_char_wire(const char* kind, const std::uint8_t* bytes, std::uint32_t n,
                  std::uint8_t** out, std::uint32_t* out_len) noexcept;
 
 // 读 rwir 指令值：body = [nr u16][nw u16][dyn u8][opcode…]。
+// langtype 非空时额外返回 opcode 后 NUL 分隔的类型串（无则清空）。
 bool read_rwir(void* h, std::string_view key, std::string* op, int* nr,
-               int* nw) noexcept;
+               int* nw, std::string* langtype = nullptr) noexcept;
 
 // 读 rwfunc 值（调用点）：body = [nr u16][nw u16][dyn u8][name…]。
 bool read_rwfunc(void* h, std::string_view key, std::string* name, int* nr,

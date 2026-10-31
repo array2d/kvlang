@@ -39,15 +39,33 @@ int kvspaceXvalueHeadNewCode(const uint8_t *body, uint64_t body_len,
 namespace kvlang::runtimec2 {
 // 明文栈操作（装载/槽解析/回写）。Register/Frame 来自 vmbin（bin 命名空间）。
 using vmbin::Register;
+using vmbin::RegisterDesc;
 using vmbin::Frame;
 using vmbin::Outcome;
 using vmbin::fast_i64;
+using vmbin::langtype_name;
 
 namespace {
 
 // fast kernel A/B 开关（对拍定位用）：RC2_NOFAST=1 关连续执行，回主循环单步。
 const bool g_no_fast = std::getenv("RC2_NOFAST") != nullptr;
 const bool g_trace = std::getenv("RC2_TRACE") != nullptr;
+
+// 活动 view 直接读内存里的 XValue head 取 langtype（零后端调用）。
+// attr 缺失/坏 head → false，调用方回退 read_langtype（语义不变）。
+bool view_langtype(const kvspaceXvalueBodyView_t& view, std::string* lt) {
+    if (!view.head || view.headlen != KVSPACE_XVALUE_HEAD_LEN)
+        return false;
+    const uint64_t body_len = kvspaceXvalueHeadLen(
+        reinterpret_cast<const kvspaceXvalueHead*>(view.head));
+    const std::uint8_t* p = nullptr;
+    const std::uint16_t n =
+        kvspaceXvalueHeadLangtype(view.head, body_len, &p);
+    if (!n || !p)
+        return false;
+    lt->assign(reinterpret_cast<const char*>(p), n);
+    return true;
+}
 
 // warm frame：Register 块池（线程局部，按容量复用）。递归帧每层借一块、返回还池，
 // 免每次 call 的 vector 堆分配 + Register string 构造（fib 递归 setup 大头）。
@@ -175,7 +193,7 @@ const std::string& child_frame_root(const std::string& vid, int depth) {
 
 // 带类型整体写：value 已带 langtype 记录 → 原样写；否则把 lt 填入 attr 区
 // （替换 codec 产出的空 attr 占位），单 key 一次写。lt 空 → 原样写。
-// 非匿名 namespace：vmkv_rwirhandler.cpp 等兄弟 TU 也调。
+// 非匿名 namespace：vmkv_rwirruntimeimpl.cpp 等兄弟 TU 也调。
 bool set_value_typed(void* h, const char* key, const std::uint8_t* value,
                      std::uint32_t value_len, const char* lt, char* err,
                      std::uint32_t err_cap) {
@@ -405,9 +423,27 @@ bool Vmkv::ensure_reg_key(Frame& f, Register& r) {
 }
 
 // 读 reg idx 的 x‥langtype attr key（v2 明文事实源）；无 key/缺失 → false。
+// E 层快路径：建段期已知的静态标量类型直接返回，零 kvspaceGetHead；
+// 未知（数组/容器/指针/冲突）仍走 attr。
 bool Vmkv::reg_langtype(Frame& f, std::uint8_t idx, std::string* lt) {
     Register& r = f.regs[idx];
     Register* fr = r.src_ptr ? r.src_ptr : &r;
+    const RegisterDesc* d = fr->desc_ref;
+    if (!d && f.seg_hint && fr >= f.regs.data() &&
+        fr < f.regs.data() + f.regs.size()) {
+        const std::size_t ri = static_cast<std::size_t>(fr - f.regs.data());
+        if (ri < f.seg_hint->regs.size())
+            d = &f.seg_hint->regs[ri];
+    }
+    if (d) {
+        if (const char* name = langtype_name(d->langtype)) {
+            lt->assign(name);
+            return true;
+        }
+    }
+    // 活动 view 已带 head：直接读 langtype，省一次 kvspaceGetHead。
+    if (fr->view_ok && view_langtype(fr->view, lt))
+        return true;
     if (fr->key.empty() && !ensure_reg_key(f, *fr))
         return false;
     return read_langtype(f.h, fr->key, lt);
@@ -931,8 +967,7 @@ bool Vmkv::read_bool(Frame& f, std::uint8_t idx, bool* out) {
 bool Vmkv::store_i64_slot(Frame& f, Register& r, std::int64_t v) {
     const kvspaceXvalueBodyView_t& w = r.view;
     std::string lt;
-    if (w.head && w.headlen == KVSPACE_XVALUE_HEAD_LEN &&
-        w.body_cap >= 8 && read_langtype(f.h, r.key, &lt) && lt == "int64") {
+    if (w.body_cap >= 8 && view_langtype(w, &lt) && lt == "int64") {
         std::memcpy(r.body, &v, 8);
         return true;
     }
@@ -1126,7 +1161,7 @@ bool Vmkv::slot_write_scalar(Frame& f, std::uint8_t idx, const Scalar& s,
         if (!match && fr.view.head &&
             fr.view.headlen == KVSPACE_XVALUE_HEAD_LEN) {
             std::string lt;
-            if (read_langtype(f.h, fr.key, &lt)) {
+            if (view_langtype(fr.view, &lt)) {
                 std::size_t close = lt.find(']');
                 if (!lt.empty() && lt[0] == '[' && close != std::string::npos)
                     lt = lt.substr(close + 1);
@@ -1655,6 +1690,7 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
         *err = "build_segment failed: " + f.func_dir;
         return Outcome::Error;
     }
+    f.seg_hint = seg;  // reg_langtype 的段级静态类型快路径依赖
     // warm frame：从池借一块容量匹配的 Register 块（复用 string capacity 免分配）。
     FregPoolGuard freg_guard;
     if (f.regs.empty()) {
@@ -1703,12 +1739,12 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
             view_cache_tick();  // instruction boundary: no borrowed wires held
         if ((++run_steps & 0xFFFFFFULL) == 0 && run_steps > 50000000ULL) {
             *err = "runaway loop: " + f.func_dir + " s0=" + std::to_string(ins.s0) +
-                   " op=" + ins.name;
+                   std::string(" op=") + instruction_name(*seg, ins);
             return Outcome::Error;
         }
         if (vmbin.trace_on && run_steps < vmbin.trace_n)
             std::fprintf(stderr, "[%s d%d s0=%d op=%s impl=%d idx=%d]\n",
-                         f.func_dir.c_str(), f.depth, ins.s0, ins.name.c_str(),
+                         f.func_dir.c_str(), f.depth, ins.s0, instruction_name(*seg, ins),
                          (int)ins.impl, idx);
         // ── fast kernel：typed 连续执行（RC2_NOFAST=1 关闭）──────────────────
         // 连续执行 fast 指令（int64 算术/比较、wr_local copy、goto/br），直到
@@ -1776,7 +1812,7 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                         }
                         if (ik.opfn == 4 || ik.opfn == 5) {
                             if (b == 0) {
-                                *err = "division by zero: " + ik.name;
+                                *err = std::string("division by zero: ") + instruction_name(*seg, ik);
                                 if (stop_pc)
                                     *stop_pc = param_key(f.frame, ik.s0, 0);
                                 return Outcome::Error;
@@ -1858,7 +1894,7 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                         }
                     }
                     if (targ < 1 || targ > n + 1) {
-                        *err = "control: target out of range (fast): " + ik.name;
+                        *err = std::string("control: target out of range (fast): ") + instruction_name(*seg, ik);
                         return Outcome::Error;
                     }
                     idx = static_cast<int>(targ) - 1;  // fk 内无 for 补偿
@@ -1955,7 +1991,7 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
             LWR:
                 if (ins.opfn == 4 || ins.opfn == 5) {
                     if (b == 0) {
-                        *err = "division by zero: " + ins.name;
+                        *err = std::string("division by zero: ") + instruction_name(*seg, ins);
                         if (stop_pc)
                             *stop_pc = param_key(f.frame, ins.s0, 0);  // 出错指令行
                         return Outcome::Error;
@@ -2031,7 +2067,7 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                 if (ins.opfn <= 12) {
                     if (ins.opfn == 4 || ins.opfn == 5) {
                         if (b == 0) {
-                            *err = "division by zero: " + ins.name;
+                            *err = std::string("division by zero: ") + instruction_name(*seg, ins);
                             return Outcome::Error;
                         }
                     }
@@ -2119,13 +2155,13 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
             for (int i = 0; slot.prefetch_operands && i < ins.nrd && i < 2; i++) {
                 if (!read_reg(f, ins.rd[i], &ctx.in[i])) {
                     *err = "rwir handler: missing operand " +
-                           std::to_string(i) + ": " + ins.name;
+                           std::to_string(i) + std::string(": ") + instruction_name(*seg, ins);
                     return Outcome::Error;
                 }
             }
             if (!slot.handle(ctx, err)) {
                 if (err->empty())
-                    *err = "rwir handler: write failed: " + ins.name;
+                    *err = std::string("rwir handler: write failed: ") + instruction_name(*seg, ins);
                 return Outcome::Error;
             }
             // vthread·run 冒泡：子 vid 撞外部 rwir → 父以 Stop 让出（stop_pc=子 pc），
@@ -2154,7 +2190,7 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
         if (ins.impl == rwir::Impl::Handoff || ins.impl == rwir::Impl::None) {
             if (vmbin.trace_on)
                 std::fprintf(stderr, "[stop %s d%d s0=%d %s]\n",
-                             f.func_dir.c_str(), f.depth, ins.s0, ins.name.c_str());
+                             f.func_dir.c_str(), f.depth, ins.s0, instruction_name(*seg, ins));
             // Stop 边界（handoff/外部引擎接管）：冲刷帧局部纯内存变量落明文，
             // resume 后的新 Frame 无 fast 缓存，须从 kvspace 重建。
             flush_frame_locals(f);
@@ -2264,7 +2300,7 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
             else if (ins.op == rwir::Op::Neq)
                 ok = slot_write_bool(f, ins.wr[0], !(none0 && none1));
             else {
-                *err = "TypeError: None in comparison: " + ins.name;
+                *err = std::string("TypeError: None in comparison: ") + instruction_name(*seg, ins);
                 return Outcome::Error;
             }
             if (vmbin.prof_on) {
@@ -2274,7 +2310,7 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                 vmbin.prof_tick(ins.prof_id, dh, 0);
             }
             if (!ok) {
-                *err = "value op failed: " + ins.name;
+                *err = std::string("value op failed: ") + instruction_name(*seg, ins);
                 return Outcome::Error;
             }
             continue;
@@ -2283,7 +2319,9 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
             // char 族转码（char/utf8|utf32|ascii 互转）优先于 `+` 拼接。
             // 简化：统一按 utf8 文本读入，目标编码经 kvspaceNewChar 产 char XValue。
             if (ins.op == rwir::Op::Cast && ins.nrd == 1 &&
-                ins.name.rfind("char/", 0) == 0) {
+                (ins.rwir_id == static_cast<std::uint16_t>(rwir::RwirId::CharUtf8) ||
+                 ins.rwir_id == static_cast<std::uint16_t>(rwir::RwirId::CharUtf32) ||
+                 ins.rwir_id == static_cast<std::uint16_t>(rwir::RwirId::CharAscii))) {
                 std::string txt;
                 if (!wtext(0, &txt)) {
                     *err = "char cast: bad input";
@@ -2292,7 +2330,7 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                 std::uint8_t* cb = nullptr;
                 std::uint32_t cl = 0;
                 const bool cok = v_char_wire(
-                    ins.name.c_str(),
+                    instruction_name(*seg, ins),
                     reinterpret_cast<const std::uint8_t*>(txt.data()),
                     static_cast<std::uint32_t>(txt.size()), &cb, &cl);
                 ok = cok && cb && write_reg(f, ins.wr[0], cb, cl);
@@ -2304,7 +2342,7 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                     vmbin.prof_tick(ins.prof_id, dh, 0);
                 }
                 if (!ok) {
-                    *err = "value op failed: " + ins.name;
+                    *err = std::string("value op failed: ") + instruction_name(*seg, ins);
                     return Outcome::Error;
                 }
                 continue;
@@ -2365,7 +2403,7 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                 {
                     if (ins.op != rwir::Op::Add || ins.nrd != 2 ||
                         !wtext(0, &a) || !wtext(1, &b)) {
-                        *err = "non-scalar operand: " + ins.name;
+                        *err = std::string("non-scalar operand: ") + instruction_name(*seg, ins);
                         return Outcome::Error;
                     }
                     const std::string out_s = a + b;
@@ -2386,7 +2424,7 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                         vmbin.prof_tick(ins.prof_id, dh, 0);
                     }
                     if (!ok) {
-                        *err = "value op failed: " + ins.name;
+                        *err = std::string("value op failed: ") + instruction_name(*seg, ins);
                         return Outcome::Error;
                     }
                     continue;
@@ -2395,7 +2433,7 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                 // 已在上方处理；此处是 else 层的通用路径——Add 及其它）。
                 if (ins.op != rwir::Op::Add || ins.nrd != 2 ||
                     !wtext(0, &a) || !wtext(1, &b)) {
-                    *err = "non-scalar operand: " + ins.name;
+                    *err = std::string("non-scalar operand: ") + instruction_name(*seg, ins);
                     return Outcome::Error;
                 }
                 const std::string out_s = a + b;
@@ -2414,7 +2452,7 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                     vmbin.prof_tick(ins.prof_id, dh, 0);
                 }
                 if (!ok) {
-                    *err = "value op failed: " + ins.name;
+                    *err = std::string("value op failed: ") + instruction_name(*seg, ins);
                     return Outcome::Error;
                 }
                 continue;
@@ -2519,7 +2557,7 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                                            ? slot_write_i64(f, ins.wr[0], rf.fv)
                                            : slot_write_bool(f, ins.wr[0], rf.fb);
                             if (!ok2) {
-                                *err = "value op failed: " + ins.name;
+                                *err = std::string("value op failed: ") + instruction_name(*seg, ins);
                                 return Outcome::Error;
                             }
                         }
@@ -2596,7 +2634,7 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                         std::free(none);
                     }
                 } else {
-                    *err = "member read: bad base/key: " + ins.name;
+                    *err = std::string("member read: bad base/key: ") + instruction_name(*seg, ins);
                     return Outcome::Error;
                 }
             } else if (member_write) {
@@ -2746,14 +2784,14 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                     }
                 }
                 if (base_key.empty()) {
-                    *err = "member write: no base: " + ins.name;
+                    *err = std::string("member write: no base: ") + instruction_name(*seg, ins);
                     return Outcome::Error;
                 }
                 const std::string mkey = base_key + "\xC2\xB7" + kstr;
                 char e[192] = {};
                 Wire kw{};
                 if (!read_reg(f, ins.rd[0], &kw)) {
-                    *err = "member write: no value: " + ins.name;
+                    *err = std::string("member write: no value: ") + instruction_name(*seg, ins);
                     return Outcome::Error;
                 }
                 // 值自带类型（attr 区随值），直接落。
@@ -2946,7 +2984,7 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
             vmbin.prof_tick(ins.prof_id, dh, 0);
         }
         if (!ok) {
-            *err = "value op failed: " + ins.name;
+            *err = std::string("value op failed: ") + instruction_name(*seg, ins);
             return Outcome::Error;
         }
     }
@@ -2959,7 +2997,7 @@ vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
                             std::string* stop_pc, std::string* err) {
     // callee 已在 build_segment 预解析为最终 /lib/ 路径（裸名 pkg 探测一次，
     // 运行期零 read_text/kvspaceGet）。fib 递归每帧省 2 次 kvspace 往返。
-    const std::string& callee = ins.callee;
+    const std::string& callee = instruction_callee(*seg, ins);
     if (callee.empty()) {
         *err = "call: empty callee";
         return Outcome::Error;
