@@ -10,7 +10,7 @@ kvlangRuntime_t *kvlangRuntimeConnect(const char *dsn) {
   if (!kv)
     return NULL;
   /* 新架构：没有独立控制 store，runtime 不发布 ISA manifest；
-   * 签名声明由 layout/扩展写到同一 kvspace 的 /‥isa/<folded-op>。 */
+   * 扩展 rwir 声明由 runtime 经 kvlangDefRwir 落到同一 kvspace 的 /lib/<op>。 */
   kvlangRuntime_t *rt = malloc(sizeof(*rt));
   if (!rt) {
     kvlangKvspaceDisconnect(kv);

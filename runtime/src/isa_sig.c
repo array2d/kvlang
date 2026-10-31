@@ -316,7 +316,8 @@ static const kvlangIsaSig isa_sig[] = {
 
 _Static_assert(sizeof(isa_sig) / sizeof(isa_sig[0]) == 305,
                "P1b1: isa_sig must have 305 rows");
-/* 新架构：签名声明由 layout/扩展写 /‥isa/<folded-op>；本表只服务 runtime 自身的 typed_core 判定。 */
+/* 本表只服务 runtime 自身的 typed_core 判定；isa_sig 是 runtime 私有快照，
+ * 不是 kvlang 概念，也不对外发布（#583）。 */
 
 __attribute__((visibility("hidden"))) const kvlangIsaSig *
 kvlangIsaSigs(uint32_t *n_out) {

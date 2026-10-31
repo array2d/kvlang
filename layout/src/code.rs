@@ -43,8 +43,6 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
         return Err("parse: error-level diagnostics — refusing to load".to_string());
     }
 
-    /* 写/读 `/‥isa/<folded-op>` 的 native 声明；冲突硬失败。 */
-    let mut isa = crate::isa::Isa::load(kv)?;
     let mut any_code = false;
     let mut inits: Vec<String> = Vec::new();
     let local_funcs: HashSet<String> = file
@@ -101,15 +99,7 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
             func.pkg.clone()
         };
         let mut lowered = lower::lower_func(func);
-        write_func(
-            kv,
-            &pkg,
-            &mut lowered,
-            &local_funcs,
-            &structs,
-            &sigs,
-            &mut isa,
-        )?;
+        write_func(kv, &pkg, &mut lowered, &local_funcs, &structs, &sigs)?;
         any_code = true;
         if func.sig.name == "init" {
             inits.push(init_fn_name(&pkg));
@@ -136,15 +126,7 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
             pkg: String::new(),
         };
         let mut lowered = lower::lower_func(&init_fn);
-        write_func(
-            kv,
-            "",
-            &mut lowered,
-            &local_funcs,
-            &structs,
-            &sigs,
-            &mut isa,
-        )?;
+        write_func(kv, "", &mut lowered, &local_funcs, &structs, &sigs)?;
         any_code = true;
         inits.push(init_fn_name(""));
     }
@@ -685,99 +667,11 @@ fn build_inst(inst: &RawInst, by_irseq: &HashMap<i32, String>) -> Instruction {
     }
 }
 
-/// 发射归属：Rwir（`/‥isa` 声明）或 User（`/lib` 函数）。
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum IsaTarget {
-    Core,
-    Ext,
-    Bridge,
-    User,
-}
-
-/// 按 `/‥isa` 声明 + `/lib` 函数判定 opcode 归属；未知硬失败。
-pub fn isa_target(
-    kv: &mut Kv,
-    isa: &crate::isa::Isa,
-    op: &str,
-    pkg: &str,
-    local_funcs: &HashSet<String>,
-) -> Result<IsaTarget, String> {
-    if let Some(e) = isa.entries.get(op) {
-        return Ok(if e.class == "core" {
-            IsaTarget::Core
-        } else {
-            IsaTarget::Ext
-        });
-    }
-    if local_funcs.contains(op) {
-        return Ok(IsaTarget::User);
-    }
-    // 包内裸名先按 `<pkg>·<name>` 解析，再回退全局名；绝对路径本身就是 key。
-    let qual = if !op.starts_with('/') && !pkg.is_empty() {
-        Some(format!("{pkg}{}{op}", crate::keytree::MEMBER_SEP))
-    } else {
-        None
-    };
-    if let Some(q) = &qual {
-        if local_funcs.contains(q) {
-            return Ok(IsaTarget::User);
-        }
-    }
-    let isa_path = crate::keytree::isa_op(op);
-    if crate::kvkind::kind(&kv.get_one(&isa_path), &kv.langtype_of(&isa_path))
-        == crate::kvkind::KIND_DEF_RWIR
-    {
-        return Ok(IsaTarget::Bridge);
-    }
-    let func_path = if op.starts_with('/') {
-        op.to_string()
-    } else {
-        crate::keytree::rwir(op)
-    };
-    if is_func_dir(kv, &format!("{func_path}/")) {
-        return Ok(IsaTarget::User);
-    }
-    Err(format!("ISA: unknown opcode {op}"))
-}
-
-/// 临时槽：lower 生成 `_N` / `_prefix_N`；未来 `‥tmp[n]`。
-fn is_temp_slot(n: &str) -> bool {
-    n.starts_with('_') || n.starts_with("‥tmp")
-}
-
-/// P1b3：typed 写不得复用临时槽。临时槽若被 >=2 条指令写，且其中任一写是
-/// core 具体 opcode（typed 写 = 本条 opcode 定义槽类型），必须已有 exact 声明；
-/// 否则混型风险。纯 generic/copy 多写（如 for 索引 init+increment）允许。
-pub fn check_temp_write_kinds(
-    writes: &[(String, bool)],
-    exact: impl Fn(&str) -> bool,
-) -> Result<(), String> {
-    let mut seen: HashMap<&str, (usize, usize)> = HashMap::new();
-    for (w, typed) in writes {
-        if !is_temp_slot(w) {
-            continue;
-        }
-        let e = seen.entry(w.as_str()).or_default();
-        e.0 += 1;
-        if *typed {
-            e.1 += 1;
-        }
-    }
-    for (n, (count, typed)) in seen {
-        if count >= 2 && typed > 0 && !exact(n) {
-            return Err(format!(
-                "ISA: temporary slot {n} is written by a typed opcode and reused; needs exact declaration"
-            ));
-        }
-    }
-    Ok(())
-}
-
 /// 通用 `sub` 只能是 2r→1w；一元取负必须走 `neg/abs`（P1b2 契约）。
 pub fn check_sub_arity(op: &str, reads: usize, writes: usize) -> Result<(), String> {
     if op == "sub" && (reads != 2 || writes != 1) {
         return Err(format!(
-            "ISA: sub must emit 2 reads / 1 write (got {reads}/{writes})"
+            "sub must emit 2 reads / 1 write (got {reads}/{writes})"
         ));
     }
     Ok(())
@@ -811,13 +705,10 @@ pub fn write_func(
     local_funcs: &HashSet<String>,
     structs: &lower::StructTable,
     sigs: &lower::SigTable,
-    isa: &mut crate::isa::Isa,
 ) -> Result<(), String> {
     let type_map = lower::infer_types(fn_);
     let declared = lower::declared_types(fn_);
     let mut diags = lower::validate_writes(fn_, pkg, &type_map, structs, sigs);
-    // P1b3 证明闸门/临时槽检查：与 specialize 用同一份（特化前）declared+stable。
-    let stable = lower::stable_kinds(fn_, &type_map, &declared);
     diags.extend(lower::specialize(fn_, &type_map, &declared));
     for d in &diags {
         eprintln!("{}", d.string());
@@ -832,10 +723,7 @@ pub fn write_func(
         format!("{pkg}{}{}", keytree::MEMBER_SEP, fn_.sig.name)
     };
     let lib_key = keytree::rwir(&opcode);
-    let isa_key = keytree::isa_op(&opcode);
-    let lib_decl = kvkind::kind(&kv.get_one(&lib_key), &kv.langtype_of(&lib_key)) == kvkind::KIND_DEF_RWIR;
-    let isa_decl = kvkind::kind(&kv.get_one(&isa_key), &kv.langtype_of(&isa_key)) == kvkind::KIND_DEF_RWIR;
-    if lib_decl || (isa_decl && !isa.is_native(&opcode)) {
+    if kvkind::kind(&kv.get_one(&lib_key), &kv.langtype_of(&lib_key)) == kvkind::KIND_DEF_RWIR {
         return Err(format!(
             "{opcode}: rwir declaration and rwfunc body both define it; one opcode, one definition"
         ));
@@ -844,29 +732,6 @@ pub fn write_func(
     let mut seq: Vec<Instruction> = Vec::new();
     let mut labels: HashMap<String, i32> = HashMap::new();
     collect_insts(&fn_.body, &mut seq, &mut labels);
-    {
-        let mut writes: Vec<(String, bool)> = Vec::new();
-        for inst in &seq {
-            let (op, _) = inst.flat();
-            let typed = isa
-                .entries
-                .get(&op)
-                .map(|e| {
-                    (e.nr > 0 || e.nw > 0)
-                        && e.rp
-                            .iter()
-                            .chain(e.wp.iter())
-                            .all(|t| t != "any" && !t.ends_with("..."))
-                })
-                .unwrap_or(false);
-            for w in &inst.writes {
-                writes.push((w.clone(), typed));
-            }
-        }
-        check_temp_write_kinds(&writes, |n| {
-            lower::exact_name_kind(n, &declared, &stable).is_some()
-        })?;
-    }
 
     let mut param_coord: HashMap<String, String> = HashMap::new();
     for (i, p) in fn_.sig.params.iter().enumerate() {
@@ -933,82 +798,12 @@ pub fn write_func(
     }
     let _ = kv.set(&pairs);
 
-    let mut emitted: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    for inst in &seq {
-        if let Some(e) = &inst.expr {
-            if !e.op.is_empty() {
-                emitted.insert(e.op.clone());
-            }
-        }
-    }
-    isa.ensure_ops(kv, &emitted)?;
-
-    // P1b2/P1b3：四路归类 + typed core 的 exact-kind 证明闸门（hard fail）。
-    // concrete native = /‥isa 声明 rp/wp 全具体、且有操作数；
-    // 不把类型写进槽（typed 性是 row/opcode 属性），只用同一套 exact kind 证明。
     for inst in &seq {
         let (op, reads) = inst.flat();
         if op.is_empty() {
             continue;
         }
-        let target = isa_target(kv, &*isa, &op, pkg, local_funcs)?;
         check_sub_arity(&op, reads.len(), inst.writes.len())?;
-        if target != IsaTarget::Core {
-            continue;
-        }
-        let e = isa
-            .entries
-            .get(&op)
-            .ok_or_else(|| format!("ISA: missing declaration {op}"))?;
-        let typed = (e.nr > 0 || e.nw > 0)
-            && e.rp
-                .iter()
-                .chain(e.wp.iter())
-                .all(|t| t != "any" && !t.ends_with("..."));
-        if !typed {
-            continue;
-        }
-        if reads.len() != e.nr as usize || inst.writes.len() != e.nw as usize {
-            return Err(format!(
-                "ISA: arity mismatch for {op}: decl {}r/{}w, got {}r/{}w",
-                e.nr,
-                e.nw,
-                reads.len(),
-                inst.writes.len()
-            ));
-        }
-        let expr = inst
-            .expr
-            .as_ref()
-            .ok_or_else(|| format!("ISA: {op} without expression"))?;
-        for (j, arg) in expr.args.iter().enumerate() {
-            let mt = e
-                .concrete(j, false)
-                .ok_or_else(|| format!("ISA: {op} read {} not concrete", j + 1))?;
-            let proved = lower::exact_operand_kind(arg, &declared, &stable);
-            if proved.as_deref() != Some(mt) {
-                return Err(format!(
-                    "ISA: {op} read {}: cannot prove exact {mt} (got {}); use generic opcode or explicit cast",
-                    j + 1,
-                    proved.as_deref().unwrap_or("<unknown>")
-                ));
-            }
-        }
-        for (j, w) in inst.writes.iter().enumerate() {
-            let mt = e
-                .concrete(j, true)
-                .ok_or_else(|| format!("ISA: {op} write {} not concrete", j + 1))?;
-            // 写槽由本条 opcode 定 kind：目标无声明/不可静态证明（临时槽等）是合法的；
-            // 只有“已有 exact 声明且与 ISA 声明不符”才是硬错误。
-            if let Some(proved) = lower::exact_name_kind(w, &declared, &stable) {
-                if proved != mt {
-                    return Err(format!(
-                        "ISA: {op} write {}: exact {proved} != decl {mt}",
-                        j + 1
-                    ));
-                }
-            }
-        }
     }
 
     for (i, inst) in seq.iter().enumerate() {
@@ -1108,7 +903,7 @@ fn field_default(ty: &str, default: Option<&Expr>) -> Vec<u8> {
     }
 }
 
-/// 写用户声明的 rwir（无体）到 /‥isa/<folded-op>。
+/// 写用户声明的 rwir（无体）到 /lib/<opcode>（kind=def rwir）。
 pub fn write_rwir_decl(kv: &mut Kv, decl: &RwirDecl) -> Result<(), String> {
     let mut opcode = decl.sig.name.clone();
     if !decl.pkg.is_empty() {
@@ -1123,7 +918,7 @@ pub fn write_rwir_decl(kv: &mut Kv, decl: &RwirDecl) -> Result<(), String> {
     let nr = decl.sig.num_reads();
     let nw = decl.sig.num_writes();
     let param_types = decl.sig.langtype_list();
-    let base = keytree::isa_op(&opcode);
+    let base = keytree::rwir(&opcode);
     // 路由头：仅计数头（无参数载荷）；各参数类型落 [0,x] 签名行槽（def langtype）。
     let mut pairs: Vec<(String, String, Vec<u8>)> = vec![(
         base.clone(),
@@ -1555,7 +1350,6 @@ mod tests {
             std::process::id()
         ));
         init_dirs(&mut kv).unwrap();
-        crate::isa::ensure_test_isa(&mut kv);
 
         compile(
             &mut kv,
@@ -1595,30 +1389,6 @@ mod tests {
     }
 
     #[test]
-    fn temp_write_kind_contract() {
-        // 纯 generic/copy 多写（for 索引）允许。
-        assert!(
-            check_temp_write_kinds(&[("_1".into(), false), ("_1".into(), false)], |_| false)
-                .is_ok()
-        );
-        // typed 写 + 复用 → 必须 exact 声明。
-        assert!(
-            check_temp_write_kinds(&[("_1".into(), true), ("_1".into(), false)], |_| false)
-                .is_err()
-        );
-        assert!(
-            check_temp_write_kinds(&[("_1".into(), true), ("_1".into(), false)], |n| n == "_1")
-                .is_ok()
-        );
-        assert!(check_temp_write_kinds(&[("_1".into(), true)], |_| false).is_ok());
-        assert!(check_temp_write_kinds(
-            &[("‥tmp1".into(), true), ("‥tmp1".into(), true)],
-            |_| false
-        )
-        .is_err());
-    }
-
-    #[test]
     fn sub_arity_contract() {
         assert!(check_sub_arity("sub", 2, 1).is_ok());
         assert!(check_sub_arity("sub", 1, 1).is_err());
@@ -1633,8 +1403,6 @@ mod tests {
             std::process::id()
         ));
         init_dirs(&mut kv).unwrap();
-        crate::isa::ensure_test_isa(&mut kv);
-        crate::isa::ensure_test_bridge(&mut kv, "println", 1, 0);
         compile(&mut kv, "rwfunc caller() -> () {\ncallee(1) -> y\nprintln(y)\n}\nrwfunc callee(x:int64) -> (r:int64) {\nx -> r\n}\n").unwrap();
         assert_eq!(
             kvkind::kind(&kv.get_one("/lib/caller/[1,0]"), &kv.langtype_of("/lib/caller/[1,0]")),
@@ -1690,7 +1458,6 @@ mod tests {
             std::process::id()
         ));
         init_dirs(&mut kv).unwrap();
-        crate::isa::ensure_test_isa(&mut kv);
         compile(
             &mut kv,
             "struct Point {\n\tx:int64=3\n\tnext:*Point=None\n}\n",
@@ -1721,9 +1488,6 @@ mod tests {
             std::process::id()
         ));
         init_dirs(&mut kv).unwrap();
-        crate::isa::ensure_test_isa(&mut kv);
-        crate::isa::ensure_test_bridge(&mut kv, "foo.bar", 1, 1);
-        crate::isa::ensure_test_bridge(&mut kv, "baz", 1, 1);
         compile(
             &mut kv,
             "lib t {\nrwfunc main() -> () {\nfoo.bar(\"x\") -> y\nbaz(\"z\") -> w\n}\n}\n",
