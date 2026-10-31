@@ -7,6 +7,10 @@
 
 #include "codeseg.hpp"
 
+#ifdef RC2_PROF
+#include "vmkv.hpp"
+#endif
+
 // 双栈映射实现：langtype 枚举 ↔ 明文 kindexpr 串的映射表、槽 suffix 预编码、
 // 帧基址拼接。全部 init 期一次性构建，热路径零 string 判断、零 malloc。
 //
@@ -15,6 +19,12 @@
 
 namespace kvlang::runtimec2::bin {
 namespace {
+
+#ifdef RC2_PROF
+void prof_report_at_exit() {
+    ::kvlang::runtimec2::g_vmkv.bin.prof_report();
+}
+#endif
 
 // kindexpr 串 → LangType 映射（init 期查表，此后常数）。
 struct TypeMapEntry {
@@ -35,6 +45,8 @@ constexpr TypeMapEntry kTypeMap[] = {
     {"char/utf32", LangType::CharUtf32},
     {"char/ascii", LangType::CharAscii},
 };
+
+constexpr char kStringKeyMapSuffix[] = "\xC2\xB7";
 
 // 元素字节宽（对齐 kind_name/esz 判定）。
 std::uint8_t elem_width(LangType t) {
@@ -77,7 +89,9 @@ LangType VmBin::langtype_of(const char* kindexpr, std::size_t len) {
             return e.type;
     }
     // `·` 结尾 = stringkeymap；`@` 开头 = 扩展世界。
-    if (n && p[n - 1] == '\xC2\xB7')
+    constexpr std::size_t suffix_len = sizeof(kStringKeyMapSuffix) - 1;
+    if (n >= suffix_len &&
+        std::memcmp(p + n - suffix_len, kStringKeyMapSuffix, suffix_len) == 0)
         return LangType::StringKeyMap;
     if (n && *p == '@')
         return LangType::Ext;
@@ -163,7 +177,7 @@ void VmBin::prof_init() {
             best = b - a;
     }
     prof.rdtsc = best;
-    std::atexit(prof_report);
+    std::atexit(prof_report_at_exit);
 #endif
 }
 
