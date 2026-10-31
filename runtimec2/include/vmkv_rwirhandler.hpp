@@ -1,22 +1,23 @@
 #pragma once
 #include <cstdint>
 #include <string>
-#include <string_view>
 
+#include "codeseg.hpp"
+#include "rwir.hpp"
 #include "vmkv.hpp"
 
 namespace kvlang::runtimec2 {
 
-// Native 分派上下文（vmkv.cpp run_frame native 分支的装载态 + 原内嵌 lambda 提升）。
-// handler 一律自由函数，经 ctx.vm 调 Vmkv 方法（消除每 native 重复捕获）。
-struct NativeCtx {
+// rwir handler 分派上下文（vmkv.cpp run_frame handler 分支的装载态 + 原内嵌
+// lambda 提升）。handler 一律自由函数，经 ctx.vm 调 Vmkv 方法（消除重复捕获）。
+// 同一 handler 可服务多条 rwir（如 time·add/time·sub），变体由 ins.name 区分。
+struct RwirHandlerCtx {
     Vmkv& vm;
-    bin::FrameCtx& f;
+    vmbin::Frame& f;
     const Segment* seg;
     const CInsn& ins;
     Wire in[2];
     std::int64_t v0 = 0, v1 = 0;
-    const std::string& fn;  // fold 后的 op 名（`·`→`/`，表键）
     // vthread·run 子 vid 撞外部 rwir 时的冒泡 pc：handler 填后，run_frame 以
     // Stop 让出，execute_vthread_impl 把该 pc 交驱动（处理子 rwir 后重入续驱）。
     std::string yield_pc;
@@ -40,9 +41,15 @@ struct NativeCtx {
 };
 
 // handler：返回 false = 失败（err 已填，或留空由调用方补 "write failed"）。
-using NativeFn = bool (*)(NativeCtx&, std::string* err);
+using RwirHandler = bool (*)(RwirHandlerCtx&, std::string* err);
 
-// 折叠名 → handler；未命中返回 nullptr（表未命中 = 未实现 op，调用方兜底 error）。
-const NativeFn* find_native(std::string_view fn);
+struct RwirHandlerSlot {
+    RwirHandler handle;
+    bool prefetch_operands;  // false = handler 自行读参（省一次 read_reg）
+};
+
+// rwir::RwirHandlerId → 表项，按 id 直接下标（无字符串查找）。
+// 表完整性由实现文件的 static_assert 保证，越界 id 直接 abort。
+const RwirHandlerSlot& rwir_handler(rwir::RwirHandlerId id);
 
 }  // namespace kvlang::runtimec2

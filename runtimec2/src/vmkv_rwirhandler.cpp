@@ -1,4 +1,4 @@
-#include "vmkv_native.hpp"
+#include "vmkv_rwirhandler.hpp"
 
 #include <charconv>
 #include <cmath>
@@ -6,6 +6,7 @@
 #include <cstring>
 #include <cstdio>
 #include <ctime>
+#include <iterator>
 #include <sys/random.h>
 #include <vector>
 
@@ -107,19 +108,19 @@ bool to_wire_v2(const char* kind, const std::uint8_t* raw, std::uint32_t raw_len
     return true;
 }
 }  // namespace
-using bin::FReg;
-using bin::FrameCtx;
-using bin::RunResult;
+using vmbin::Register;
+using vmbin::Frame;
+using vmbin::Outcome;
 
-// ── NativeCtx 方法（原 run_frame 内嵌 lambda 提升）────────────────────────
-bool NativeCtx::ai64(int i, std::int64_t* v) {
+// ── RwirHandlerCtx 方法（原 run_frame 内嵌 lambda 提升）────────────────────────
+bool RwirHandlerCtx::ai64(int i, std::int64_t* v) {
     Scalar sc{};
     std::string lt;
     // 纯内存帧局部变量（int64 纯内存化）：无 kvspace 槽、无 langtype——
     // fast 缓存本身即类型事实（只在 langtype 确认 Int/8 时置位），先取。
     {
-        FReg& r = f.regs[ins.rd[i]];
-        FReg& rf = r.src_ptr ? *r.src_ptr : r;
+        Register& r = f.regs[ins.rd[i]];
+        Register& rf = r.src_ptr ? *r.src_ptr : r;
         if (rf.fast_i64) {
             *v = rf.fv;
             return true;
@@ -157,13 +158,13 @@ bool NativeCtx::ai64(int i, std::int64_t* v) {
     return true;
 }
 
-bool NativeCtx::atext(int i, std::string* out) {
+bool RwirHandlerCtx::atext(int i, std::string* out) {
     std::string lt;
     return vm.reg_langtype(f, ins.rd[i], &lt) &&
            wire_text(in[i].d, in[i].n, lt, out);
 }
 
-bool NativeCtx::wbool(bool b) {
+bool RwirHandlerCtx::wbool(bool b) {
     Scalar sc{};
     sc.k = Scalar::K::Bool;
     sc.width = 1;
@@ -171,7 +172,7 @@ bool NativeCtx::wbool(bool b) {
     return vm.slot_write_scalar(f, ins.wr[0], sc, 1);
 }
 
-bool NativeCtx::path_arg(int i, std::uint8_t rno, const RegDesc& d,
+bool RwirHandlerCtx::path_arg(int i, std::uint8_t rno, const RegDesc& d,
                          std::string* out) {
     // 值文本优先（对齐 C path_arg）：读参值若是 char/ 且 `/` 开头 → 直接
     // 用文本（`·`→`/`）。参数（Ptr）的 key 解析出来是 arg 槽链，不是路径
@@ -198,11 +199,11 @@ bool NativeCtx::path_arg(int i, std::uint8_t rno, const RegDesc& d,
         *out = d.name.substr(0, d.name.find(' '));  // 剥类型后缀
         return true;
     }
-    FReg& pr = f.regs[rno];
+    Register& pr = f.regs[rno];
     // 内存别名读参（mem_frame 调用 src_ptr 链）：arg 槽纯内存不落 kvspace——
     // 取调用方 reg 最终槽作路径（容器参数 `chars:*[int64]·...` 经 src_ptr）。
     {
-        FReg* ch = &pr;
+        Register* ch = &pr;
         while (ch->src_ptr || ch->dst_ptr)
             ch = ch->src_ptr ? ch->src_ptr : ch->dst_ptr;
         if (ch != &pr && !ch->key.empty())
@@ -219,7 +220,7 @@ bool NativeCtx::path_arg(int i, std::uint8_t rno, const RegDesc& d,
     return true;
 }
 
-bool NativeCtx::kv_paths(std::string* k0, std::string* k1) {
+bool RwirHandlerCtx::kv_paths(std::string* k0, std::string* k1) {
     if (g_trace)
         std::fprintf(stderr,
                      "[patharg rd0=%d kind=%d name='%s' sk='%s']\n",
@@ -234,7 +235,7 @@ bool NativeCtx::kv_paths(std::string* k0, std::string* k1) {
     return true;
 }
 
-std::string NativeCtx::write_slot_lt() {
+std::string RwirHandlerCtx::write_slot_lt() {
     // 写槽描述符 body = `name\0<langtype>`（NUL 分隔两段）。
     const std::string wkey =
         f.func_dir + "/[" + std::to_string(ins.s0) + ",1]";
@@ -257,7 +258,7 @@ std::string NativeCtx::write_slot_lt() {
     return {};
 }
 
-std::string NativeCtx::parse_dims(std::string lt, std::int32_t dims[8],
+std::string RwirHandlerCtx::parse_dims(std::string lt, std::int32_t dims[8],
                                   std::uint32_t* ndim) {
     *ndim = 0;
     if (!lt.empty() && lt[0] == '[') {
@@ -283,7 +284,7 @@ std::string NativeCtx::parse_dims(std::string lt, std::int32_t dims[8],
     return lt;
 }
 
-std::uint32_t NativeCtx::elem_size(const std::string& kind) {
+std::uint32_t RwirHandlerCtx::elem_size(const std::string& kind) {
     if (kind.rfind("float64", 0) == 0) return 8;
     if (kind.rfind("float32", 0) == 0) return 4;
     if (kind.rfind("int64", 0) == 0 || kind.rfind("uint64", 0) == 0) return 8;
@@ -297,7 +298,7 @@ std::uint32_t NativeCtx::elem_size(const std::string& kind) {
 namespace {
 
 // ── time ──────────────────────────────────────────────────────────────────
-bool h_time_now(NativeCtx& c, std::string*) {
+bool h_time_now(RwirHandlerCtx& c, std::string*) {
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
     const std::int64_t ns =
@@ -305,41 +306,41 @@ bool h_time_now(NativeCtx& c, std::string*) {
     return c.vm.write_named_i64(c.f.h, c.ins.wr[0], c.f, "time", ns);
 }
 
-bool h_time_arith(NativeCtx& c, std::string* err) {
+bool h_time_arith(RwirHandlerCtx& c, std::string* err) {
     const bool ok = c.ai64(0, &c.v0) && c.ai64(1, &c.v1);
     if (!ok) {
-        *err = "native: bad operands: " + c.ins.name;
+        *err = "rwir handler: bad operands: " + c.ins.name;
         return false;
     }
-    if (c.fn == "time/before" || c.fn == "time/duration/before")
+    if (c.ins.name == "time·before" || c.ins.name == "time/duration·before")
         return c.wbool(c.v0 < c.v1);
-    if (c.fn == "time/after" || c.fn == "time/duration/after")
+    if (c.ins.name == "time·after" || c.ins.name == "time/duration·after")
         return c.wbool(c.v0 > c.v1);
-    if (c.fn == "time/add")
+    if (c.ins.name == "time·add")
         return c.vm.write_named_i64(c.f.h, c.ins.wr[0], c.f, "time", c.v0 + c.v1);
     return c.vm.write_named_i64(c.f.h, c.ins.wr[0], c.f, "duration",
                                 c.v0 - c.v1);
 }
 
-bool h_duration_scale(NativeCtx& c, std::string*) {
+bool h_duration_scale(RwirHandlerCtx& c, std::string*) {
     const bool ok = c.ai64(0, &c.v0);
     std::int64_t mul = 1;
-    if (c.fn == "time/duration/millis") mul = 1000000;
-    else if (c.fn == "time/duration/seconds") mul = 1000000000;
-    else if (c.fn == "time/duration/minutes") mul = 60000000000LL;
-    else if (c.fn == "time/duration/hours") mul = 3600000000000LL;
+    if (c.ins.name == "time/duration·millis") mul = 1000000;
+    else if (c.ins.name == "time/duration·seconds") mul = 1000000000;
+    else if (c.ins.name == "time/duration·minutes") mul = 60000000000LL;
+    else if (c.ins.name == "time/duration·hours") mul = 3600000000000LL;
     return ok &&
            c.vm.write_named_i64(c.f.h, c.ins.wr[0], c.f, "duration",
                                 c.v0 * mul);
 }
 
-bool h_duration_as(NativeCtx& c, std::string*) {
+bool h_duration_as(RwirHandlerCtx& c, std::string*) {
     const bool ok = c.ai64(0, &c.v0);
     std::int64_t div = 1;
-    if (c.fn.find("millis") != std::string::npos) div = 1000000;
-    else if (c.fn.find("seconds") != std::string::npos) div = 1000000000;
-    else if (c.fn.find("minutes") != std::string::npos) div = 60000000000LL;
-    else if (c.fn.find("hours") != std::string::npos) div = 3600000000000LL;
+    if (c.ins.name.find("millis") != std::string::npos) div = 1000000;
+    else if (c.ins.name.find("seconds") != std::string::npos) div = 1000000000;
+    else if (c.ins.name.find("minutes") != std::string::npos) div = 60000000000LL;
+    else if (c.ins.name.find("hours") != std::string::npos) div = 3600000000000LL;
     Scalar outv{};
     outv.k = Scalar::K::Int;
     outv.width = 8;
@@ -348,24 +349,24 @@ bool h_duration_as(NativeCtx& c, std::string*) {
 }
 
 // ── random ────────────────────────────────────────────────────────────────
-bool h_random(NativeCtx& c, std::string* err) {
+bool h_random(RwirHandlerCtx& c, std::string* err) {
     std::uint64_t r = 0;
 #if defined(__APPLE__)
     arc4random_buf(&r, sizeof r);
 #else
     if (getrandom(&r, sizeof r, 0) != (ssize_t)sizeof r) {
-        *err = "native: getrandom failed";
+        *err = "rwir handler: getrandom failed";
         return false;
     }
 #endif
     bool ok = true;
-    if (c.fn == "random/intn") {
+    if (c.ins.name == "random·intn") {
         ok = c.ai64(0, &c.v0);
         const std::uint64_t m = (std::uint64_t)c.v0;
         r = m == 0 ? 0 : r % m;
         ok = ok && c.vm.write_named_i64(c.f.h, c.ins.wr[0], c.f, "uint64",
                                         (std::int64_t)r);
-    } else if (c.fn == "random/int63") {
+    } else if (c.ins.name == "random·int63") {
         ok = c.vm.write_named_i64(c.f.h, c.ins.wr[0], c.f, "int64",
                                   (std::int64_t)(r >> 1));
     } else {
@@ -376,7 +377,7 @@ bool h_random(NativeCtx& c, std::string* err) {
 }
 
 // ── compactarray ──────────────────────────────────────────────────────────
-bool h_array_new(NativeCtx& c, std::string* err) {
+bool h_array_new(RwirHandlerCtx& c, std::string* err) {
     // 数组字面量 `[v...]`：读参[0..n-1]=元素，写槽描述符 `a <langtype>`
     // 提供 elem kind（`[]int64`/`[N]T`），打包为 [n]elem compact XValue。
     std::string lt = c.write_slot_lt();
@@ -458,7 +459,7 @@ bool h_array_new(NativeCtx& c, std::string* err) {
     return ok;
 }
 
-bool h_array_fill(NativeCtx& c, std::string* err) {
+bool h_array_fill(RwirHandlerCtx& c, std::string* err) {
     // array·fill(langtype[, value])：按定长数组类型一次成型 compact XValue。
     Wire lw{};
     std::string lt, llt;
@@ -528,9 +529,9 @@ bool h_array_fill(NativeCtx& c, std::string* err) {
     return ok;
 }
 
-bool h_array_copy(NativeCtx& c, std::string* err) {
+bool h_array_copy(RwirHandlerCtx& c, std::string* err) {
     // compactarray·copy(a) -> b：专职创建同形副本（值语义变换的显式第一步）。
-    FReg& cr = c.f.regs[c.ins.rd[0]];
+    Register& cr = c.f.regs[c.ins.rd[0]];
     std::uint8_t* cb = nullptr;
     std::uint64_t ccap = 0;
     std::string clt;
@@ -579,7 +580,7 @@ void clear_members(void* h, const std::string& base, char* errbuf,
     }
 }
 
-bool h_scatter_new(NativeCtx& c, std::string*) {
+bool h_scatter_new(RwirHandlerCtx& c, std::string*) {
     // 空散 key 容器：写 marker（写槽描述符的 langtype，缺省 map）+ 建成员目录。
     std::string lt = c.write_slot_lt();
     if (lt.empty())
@@ -599,9 +600,9 @@ bool h_scatter_new(NativeCtx& c, std::string*) {
     return ok;
 }
 
-bool h_scatter_len(NativeCtx& c, std::string* err) {
+bool h_scatter_len(RwirHandlerCtx& c, std::string* err) {
     // 成员数（memindex 权威）：扫 `base·` 子键空间。
-    FReg& lr = c.f.regs[c.ins.rd[0]];
+    Register& lr = c.f.regs[c.ins.rd[0]];
     if (!c.vm.ensure_reg_key(c.f, lr)) {
         *err = "scatterarray·len: bad container";
         return false;
@@ -612,9 +613,9 @@ bool h_scatter_len(NativeCtx& c, std::string* err) {
     return c.vm.slot_write_i64(c.f, c.ins.wr[0], cnt);
 }
 
-bool h_scatter_at(NativeCtx& c, std::string* err) {
+bool h_scatter_at(RwirHandlerCtx& c, std::string* err) {
     // 坐标段成员读：`base·[i]` 取 XValue 写读参（`b·[i]` 降级目标）。
-    FReg& ar = c.f.regs[c.ins.rd[0]];
+    Register& ar = c.f.regs[c.ins.rd[0]];
     std::int64_t ai = 0;
     if (c.ins.nrd < 2 || !c.vm.ensure_reg_key(c.f, ar) ||
         !c.vm.read_i64(c.f, c.ins.rd[1], &ai) || ai < 0) {
@@ -632,9 +633,9 @@ bool h_scatter_at(NativeCtx& c, std::string* err) {
     return c.vm.write_reg(c.f, c.ins.wr[0], md, mn);
 }
 
-bool h_scatter_set(NativeCtx& c, std::string* err) {
+bool h_scatter_set(RwirHandlerCtx& c, std::string* err) {
     // 坐标段成员写：`base·[i] = v`（只写既有成员，不创建——操作型铁律）。
-    FReg& sw = c.f.regs[c.ins.wr[0]];
+    Register& sw = c.f.regs[c.ins.wr[0]];
     std::int64_t si = 0;
     if (c.ins.nrd < 3 || !c.vm.ensure_reg_key(c.f, sw) ||
         !c.vm.read_i64(c.f, c.ins.rd[1], &si) || si < 0) {
@@ -654,9 +655,9 @@ bool h_scatter_set(NativeCtx& c, std::string* err) {
     return ok;
 }
 
-bool h_scatter_newcompact(NativeCtx& c, std::string* err) {
+bool h_scatter_newcompact(RwirHandlerCtx& c, std::string* err) {
     // 源散 key 容器（读参 0 = 容器值 marker，key 指向容器槽）。
-    FReg& cr = c.f.regs[c.ins.rd[0]];
+    Register& cr = c.f.regs[c.ins.rd[0]];
     if (!c.vm.ensure_reg_key(c.f, cr)) {
         *err = "array·compact: bad src";
         return false;
@@ -738,9 +739,9 @@ bool h_scatter_newcompact(NativeCtx& c, std::string* err) {
     return ok;
 }
 
-bool h_scatter_newscatter(NativeCtx& c, std::string* err) {
+bool h_scatter_newscatter(RwirHandlerCtx& c, std::string* err) {
     // 读参[0]=compact 数组；写参=散 key 容器。清旧成员 + 写 marker + 逐元素。
-    FReg& sr = c.f.regs[c.ins.rd[0]];
+    Register& sr = c.f.regs[c.ins.rd[0]];
     std::uint8_t* sb = nullptr;
     std::uint64_t scap = 0;
     std::string slt;
@@ -759,7 +760,7 @@ bool h_scatter_newscatter(NativeCtx& c, std::string* err) {
         *err = "array·scatter: bad array";
         return false;
     }
-    FReg& wr0 = c.f.regs[c.ins.wr[0]];
+    Register& wr0 = c.f.regs[c.ins.wr[0]];
     if (!c.vm.ensure_reg_key(c.f, wr0)) {
         *err = "array·scatter: bad dst";
         return false;
@@ -796,9 +797,9 @@ bool h_scatter_newscatter(NativeCtx& c, std::string* err) {
     return true;
 }
 
-bool h_scatter_append(NativeCtx& c, std::string* err) {
+bool h_scatter_append(RwirHandlerCtx& c, std::string* err) {
     // 读参[0]=散列容器，读参[1]=元素；写参=容器。坐标=max+1。
-    FReg& bw = c.f.regs[c.ins.wr[0]];
+    Register& bw = c.f.regs[c.ins.wr[0]];
     if (!c.vm.ensure_reg_key(c.f, bw)) {
         *err = "scatterarray·append: bad write";
         return false;
@@ -851,7 +852,7 @@ bool h_scatter_append(NativeCtx& c, std::string* err) {
     return true;
 }
 
-bool h_scatter_slice(NativeCtx& c, std::string* err) {
+bool h_scatter_slice(RwirHandlerCtx& c, std::string* err) {
     // scatterarray·slice(a, lo, hi) -> a：散列成员重排（不创建新 compact）。
     std::int64_t lo = 0, hi = 0;
     if (c.ins.nrd < 3 || !c.vm.read_i64(c.f, c.ins.rd[1], &lo) ||
@@ -859,7 +860,7 @@ bool h_scatter_slice(NativeCtx& c, std::string* err) {
         *err = "scatterarray·slice: bad bounds";
         return false;
     }
-    FReg& sw = c.f.regs[c.ins.wr[0]];
+    Register& sw = c.f.regs[c.ins.wr[0]];
     if (!c.vm.ensure_reg_key(c.f, sw)) {
         *err = "scatterarray·slice: bad write";
         return false;
@@ -919,7 +920,7 @@ bool h_scatter_slice(NativeCtx& c, std::string* err) {
     return true;
 }
 
-bool h_array_newslice(NativeCtx& c, std::string* err) {
+bool h_array_newslice(RwirHandlerCtx& c, std::string* err) {
     // compactarray·newslice(a, lo, hi) -> b：compact 裁剪造新 compact。
     std::int64_t lo = 0, hi = 0;
     if (c.ins.nrd < 3 || !c.vm.read_i64(c.f, c.ins.rd[1], &lo) ||
@@ -927,7 +928,7 @@ bool h_array_newslice(NativeCtx& c, std::string* err) {
         *err = "compactarray·newslice: bad bounds";
         return false;
     }
-    FReg& sr = c.f.regs[c.ins.rd[0]];
+    Register& sr = c.f.regs[c.ins.rd[0]];
     std::uint8_t* sb = nullptr;
     std::uint64_t scap = 0;
     std::string slt;
@@ -963,7 +964,7 @@ bool h_array_newslice(NativeCtx& c, std::string* err) {
 }
 
 // ── string ────────────────────────────────────────────────────────────────
-bool h_string_char(NativeCtx& c, std::string* err) {
+bool h_string_char(RwirHandlerCtx& c, std::string* err) {
     std::int64_t idx = 0;
     if (c.ins.nrd < 2 || !c.vm.read_i64(c.f, c.ins.rd[1], &idx)) {
         *err = "string·char: bad input";
@@ -977,10 +978,10 @@ bool h_string_char(NativeCtx& c, std::string* err) {
     }
     std::string slt;
     c.vm.reg_langtype(c.f, c.ins.rd[0], &slt);
-    const bin::LangType st =
-        c.vm.bin.langtype_of(slt.data(), slt.size());
+    const vmbin::LangType st =
+        c.vm.vmbin.langtype_of(slt.data(), slt.size());
     std::uint32_t cp = 0;
-    const bool utf32 = st == bin::LangType::CharUtf32;
+    const bool utf32 = st == vmbin::LangType::CharUtf32;
     const std::uint64_t blen = sc;
     if (utf32) {
         const std::uint32_t n = static_cast<std::uint32_t>(blen / 4);
@@ -1023,7 +1024,7 @@ bool h_string_char(NativeCtx& c, std::string* err) {
     return ok;
 }
 
-bool h_string_len(NativeCtx& c, std::string* err) {
+bool h_string_len(RwirHandlerCtx& c, std::string* err) {
     Wire sw{};
     if (c.ins.nrd < 1 || !c.vm.read_reg(c.f, c.ins.rd[0], &sw)) {
         *err = "string·len: bad input";
@@ -1049,7 +1050,7 @@ bool h_string_len(NativeCtx& c, std::string* err) {
     return c.vm.slot_write_i64(c.f, c.ins.wr[0], len);
 }
 
-bool h_string_ord(NativeCtx& c, std::string* err) {
+bool h_string_ord(RwirHandlerCtx& c, std::string* err) {
     Wire sw{};
     if (c.ins.nrd < 1 || !c.vm.read_reg(c.f, c.ins.rd[0], &sw)) {
         *err = "string·ord: bad input";
@@ -1107,7 +1108,7 @@ std::vector<std::uint32_t> utf8_to_runes(const std::string& s) {
 }
 
 // 码点数组 → char/utf32 XValue → 写槽（字符串 ops 的统一输出）。
-bool write_runes(NativeCtx& c, const std::vector<std::uint32_t>& r) {
+bool write_runes(RwirHandlerCtx& c, const std::vector<std::uint32_t>& r) {
     const std::uint32_t n = static_cast<std::uint32_t>(r.size());
     std::vector<std::uint8_t> raw(static_cast<std::size_t>(n) * 4, 0);
     for (std::uint32_t i = 0; i < n; i++)
@@ -1131,7 +1132,7 @@ bool is_char_wire(std::string_view lt) {
     return lt.rfind("char/", 0) == 0;
 }
 
-bool h_string_cmp(NativeCtx& c, std::string* err) {
+bool h_string_cmp(RwirHandlerCtx& c, std::string* err) {
     std::string a, b;
     if (c.ins.nrd < 2 || !c.atext(0, &a) || !c.atext(1, &b)) {
         *err = "string·cmp: bad input";
@@ -1141,7 +1142,7 @@ bool h_string_cmp(NativeCtx& c, std::string* err) {
     return c.vm.slot_write_i64(c.f, c.ins.wr[0], r);
 }
 
-bool h_string_slice(NativeCtx& c, std::string* err) {
+bool h_string_slice(RwirHandlerCtx& c, std::string* err) {
     std::string s;
     std::int64_t lo = 0, hi = 0;
     if (c.ins.nrd < 3 || !c.atext(0, &s) ||
@@ -1158,7 +1159,7 @@ bool h_string_slice(NativeCtx& c, std::string* err) {
     return write_runes(c, std::vector<std::uint32_t>(r.begin() + lo, r.begin() + hi));
 }
 
-bool h_string_find(NativeCtx& c, std::string* err) {
+bool h_string_find(RwirHandlerCtx& c, std::string* err) {
     std::string hs, nd;
     if (c.ins.nrd < 2 || !c.atext(0, &hs) || !c.atext(1, &nd)) {
         *err = "string·find: bad input";
@@ -1179,7 +1180,7 @@ bool h_string_find(NativeCtx& c, std::string* err) {
     return c.vm.slot_write_i64(c.f, c.ins.wr[0], r);
 }
 
-bool h_string_concat(NativeCtx& c, std::string* err) {
+bool h_string_concat(RwirHandlerCtx& c, std::string* err) {
     std::string lt0, lt1;
     if (c.ins.nrd < 2 ||
         !c.vm.reg_langtype(c.f, c.ins.rd[0], &lt0) || !is_char_wire(lt0) ||
@@ -1216,7 +1217,7 @@ std::string format_base(std::uint64_t u, int base, bool neg) {
     return out;
 }
 
-bool h_string_formatint(NativeCtx& c, std::string* err) {
+bool h_string_formatint(RwirHandlerCtx& c, std::string* err) {
     std::int64_t v = 0, base = 10;
     if (c.ins.nrd < 1 || !c.ai64(0, &v)) {
         *err = "string·formatint: bad input";
@@ -1229,7 +1230,7 @@ bool h_string_formatint(NativeCtx& c, std::string* err) {
     return write_runes(c, utf8_to_runes(format_base(u, static_cast<int>(base), v < 0)));
 }
 
-bool h_string_formatuint(NativeCtx& c, std::string* err) {
+bool h_string_formatuint(RwirHandlerCtx& c, std::string* err) {
     std::int64_t v = 0, base = 10;
     if (c.ins.nrd < 1 || !c.ai64(0, &v)) {
         *err = "string·formatuint: bad input";
@@ -1247,7 +1248,7 @@ bool parse_consumed(const std::string& s, char* end, const char* start) {
     return !s.empty() && end != start && *end == '\0';
 }
 
-bool h_string_parseint(NativeCtx& c, std::string* err) {
+bool h_string_parseint(RwirHandlerCtx& c, std::string* err) {
     std::string s;
     std::int64_t base = 10;
     if (c.ins.nrd < 1 || !c.atext(0, &s)) {
@@ -1265,7 +1266,7 @@ bool h_string_parseint(NativeCtx& c, std::string* err) {
     return c.vm.slot_write_i64(c.f, c.ins.wr[0], static_cast<std::int64_t>(v));
 }
 
-bool h_string_parseuint(NativeCtx& c, std::string* err) {
+bool h_string_parseuint(RwirHandlerCtx& c, std::string* err) {
     std::string s;
     std::int64_t base = 10;
     if (c.ins.nrd < 1 || !c.atext(0, &s)) {
@@ -1284,7 +1285,7 @@ bool h_string_parseuint(NativeCtx& c, std::string* err) {
                                 static_cast<std::int64_t>(v));
 }
 
-bool h_string_parsefloat(NativeCtx& c, std::string* err) {
+bool h_string_parsefloat(RwirHandlerCtx& c, std::string* err) {
     std::string s;
     if (c.ins.nrd < 1 || !c.atext(0, &s)) {
         *err = "string·parsefloat: bad input";
@@ -1306,7 +1307,7 @@ bool h_string_parsefloat(NativeCtx& c, std::string* err) {
     return ok;
 }
 
-bool h_string_set(NativeCtx& c, std::string* err) {
+bool h_string_set(RwirHandlerCtx& c, std::string* err) {
     // 对齐 C kvlangBuiltinStringSet：读参[0] 的显示文本写为 char/utf32。
     std::string s;
     if (c.ins.nrd < 1 || !c.atext(0, &s)) {
@@ -1317,7 +1318,7 @@ bool h_string_set(NativeCtx& c, std::string* err) {
 }
 
 // ── ndarray 元数据（numel/dim/shape）──────────────────────────────────────
-bool h_array_meta(NativeCtx& c, std::string* err) {
+bool h_array_meta(RwirHandlerCtx& c, std::string* err) {
     Wire aw{};
     if (c.ins.nrd < 1 || !c.vm.read_reg(c.f, c.ins.rd[0], &aw)) {
         *err = "ndarray: bad array";
@@ -1333,7 +1334,7 @@ bool h_array_meta(NativeCtx& c, std::string* err) {
     const bool is_map = alt.find("\xC2\xB7") != std::string::npos;
     alt = c.parse_dims(alt, adims, &andim);
     bool ok = true;
-    if (c.fn == "compactarray/numel") {
+    if (c.ins.name == "compactarray·numel") {
         if (is_map) {
             std::string base_key;
             if (c.f.regs[c.ins.rd[0]].key.size() > 5)
@@ -1350,7 +1351,7 @@ bool h_array_meta(NativeCtx& c, std::string* err) {
                 total *= adims[i];
             ok = c.vm.slot_write_i64(c.f, c.ins.wr[0], total);
         }
-    } else if (c.fn == "compactarray/dim") {
+    } else if (c.ins.name == "compactarray·dim") {
         ok = c.vm.slot_write_i64(c.f, c.ins.wr[0], andim);
     } else {
         std::uint8_t raw[64];
@@ -1370,8 +1371,8 @@ bool h_array_meta(NativeCtx& c, std::string* err) {
 }
 
 // ── xv（langtype/bodylen/parselangtype/reinterpret）────────────────────────
-bool h_xv_meta(NativeCtx& c, std::string* err) {
-    FReg& mr = c.f.regs[c.ins.rd[0]];
+bool h_xv_meta(RwirHandlerCtx& c, std::string* err) {
+    Register& mr = c.f.regs[c.ins.rd[0]];
     std::uint8_t* mb = nullptr;
     std::uint64_t mcap = 0;
     std::string mlt;
@@ -1386,7 +1387,7 @@ bool h_xv_meta(NativeCtx& c, std::string* err) {
         c.vm.reg_langtype(c.f, c.ins.rd[0], &mlt);
     }
     bool ok = true;
-    if (c.fn == "compactarray/langtype") {
+    if (c.ins.name == "compactarray·langtype") {
         std::uint8_t* sb = nullptr;
         std::uint32_t sl = 0;
         ok = v_char_wire("char/utf8",
@@ -1394,7 +1395,7 @@ bool h_xv_meta(NativeCtx& c, std::string* err) {
                     static_cast<std::uint32_t>(mlt.size()), &sb, &sl) &&
              sb && c.vm.write_reg(c.f, c.ins.wr[0], sb, sl);
         std::free(sb);
-    } else if (c.fn == "compactarray/bodylen") {
+    } else if (c.ins.name == "compactarray·bodylen") {
         std::int64_t blen = 0;
         if (mr.fast_i64) blen = 8;
         else if (mr.fast_bool) blen = 1;
@@ -1403,7 +1404,7 @@ bool h_xv_meta(NativeCtx& c, std::string* err) {
                 reinterpret_cast<const kvspaceXvalueHead*>(mr.view.head)));
         }
         ok = c.vm.slot_write_i64(c.f, c.ins.wr[0], blen);
-    } else if (c.fn == "compactarray/parselangtype") {
+    } else if (c.ins.name == "compactarray·parselangtype") {
         std::string base = mlt;
         if (!base.empty() && base[0] == '[') {
             const std::size_t close = base.find(']');
@@ -1512,7 +1513,7 @@ bool h_xv_meta(NativeCtx& c, std::string* err) {
     return ok;
 }
 
-bool h_array_reshape(NativeCtx& c, std::string* err) {
+bool h_array_reshape(RwirHandlerCtx& c, std::string* err) {
     // xv·reshape(arr, dims...) -> a：body 字节原样，只换 dims（numel 守恒校验）。
     std::uint8_t* rbody = nullptr;
     std::uint64_t rcap = 0;
@@ -1522,8 +1523,8 @@ bool h_array_reshape(NativeCtx& c, std::string* err) {
     }
     std::string rlt;
     c.vm.reg_langtype(c.f, c.ins.rd[0], &rlt);
-    const bin::LangType rt = c.vm.bin.langtype_of(rlt.data(), rlt.size());
-    const std::uint32_t resz = c.vm.bin.elem_width_of(rt);
+    const vmbin::LangType rt = c.vm.vmbin.langtype_of(rlt.data(), rlt.size());
+    const std::uint32_t resz = c.vm.vmbin.elem_width_of(rt);
     if (resz == 0) {
         *err = "xv·reshape: requires a compact array";
         return false;
@@ -1549,13 +1550,13 @@ bool h_array_reshape(NativeCtx& c, std::string* err) {
         return false;
     }
     const char* rkn = c.vm.kind_name(
-        rt == bin::LangType::Float64      ? Scalar::K::Float
-        : rt == bin::LangType::Float32    ? Scalar::K::Float
-        : rt == bin::LangType::Int8 || rt == bin::LangType::Int16 ||
-                  rt == bin::LangType::Int32 || rt == bin::LangType::Int64
+        rt == vmbin::LangType::Float64      ? Scalar::K::Float
+        : rt == vmbin::LangType::Float32    ? Scalar::K::Float
+        : rt == vmbin::LangType::Int8 || rt == vmbin::LangType::Int16 ||
+                  rt == vmbin::LangType::Int32 || rt == vmbin::LangType::Int64
               ? Scalar::K::Int
-        : rt == bin::LangType::Uint8 || rt == bin::LangType::Uint16 ||
-                  rt == bin::LangType::Uint32 || rt == bin::LangType::Uint64
+        : rt == vmbin::LangType::Uint8 || rt == vmbin::LangType::Uint16 ||
+                  rt == vmbin::LangType::Uint32 || rt == vmbin::LangType::Uint64
               ? Scalar::K::Uint
               : Scalar::K::Bool,
         static_cast<std::uint8_t>(resz));
@@ -1572,10 +1573,10 @@ bool h_array_reshape(NativeCtx& c, std::string* err) {
     return ok;
 }
 
-bool h_array_at_set(NativeCtx& c, std::string* err) {
+bool h_array_at_set(RwirHandlerCtx& c, std::string* err) {
     // compact 数组元素读/写（[N,M]kind，body 连续打包）。
-    const bool is_set = c.fn == "compactarray/set";
-    FReg& ar0 = c.f.regs[c.ins.rd[0]];
+    const bool is_set = c.ins.name == "compactarray·set";
+    Register& ar0 = c.f.regs[c.ins.rd[0]];
     std::uint8_t* ab0 = nullptr;
     std::uint64_t acap0 = 0;
     // No operand prefetch for this op: resolve the lazy key read_reg would have.
@@ -1625,20 +1626,20 @@ bool h_array_at_set(NativeCtx& c, std::string* err) {
                 lt = lt.substr(close + 1);
             }
         }
-        const bin::LangType bt = c.vm.bin.langtype_of(lt.data(), lt.size());
-        is_char = bt == bin::LangType::CharUtf8 ||
-                  bt == bin::LangType::CharUtf32 ||
-                  bt == bin::LangType::CharAscii;
-        esz = c.vm.bin.elem_width_of(bt);
-        ekind = bt == bin::LangType::Float32 || bt == bin::LangType::Float64
+        const vmbin::LangType bt = c.vm.vmbin.langtype_of(lt.data(), lt.size());
+        is_char = bt == vmbin::LangType::CharUtf8 ||
+                  bt == vmbin::LangType::CharUtf32 ||
+                  bt == vmbin::LangType::CharAscii;
+        esz = c.vm.vmbin.elem_width_of(bt);
+        ekind = bt == vmbin::LangType::Float32 || bt == vmbin::LangType::Float64
                     ? Scalar::K::Float
-                : bt == bin::LangType::Int8 || bt == bin::LangType::Int16 ||
-                          bt == bin::LangType::Int32 ||
-                          bt == bin::LangType::Int64
+                : bt == vmbin::LangType::Int8 || bt == vmbin::LangType::Int16 ||
+                          bt == vmbin::LangType::Int32 ||
+                          bt == vmbin::LangType::Int64
                     ? Scalar::K::Int
-                : bt == bin::LangType::Uint8 || bt == bin::LangType::Uint16 ||
-                          bt == bin::LangType::Uint32 ||
-                          bt == bin::LangType::Uint64
+                : bt == vmbin::LangType::Uint8 || bt == vmbin::LangType::Uint16 ||
+                          bt == vmbin::LangType::Uint32 ||
+                          bt == vmbin::LangType::Uint64
                     ? Scalar::K::Uint
                     : Scalar::K::Bool;
         ar0.arr_elem_kind = lt;
@@ -1728,8 +1729,8 @@ bool h_array_at_set(NativeCtx& c, std::string* err) {
     }
     // 写元素：值读参最后。同槽原地 patch / 异槽 TypeError。
     std::uint8_t tmp[8] = {0};
-    FReg& vr0 = c.f.regs[c.ins.rd[c.ins.nrd - 1]];
-    const FReg& vr = vr0.src_ptr ? *vr0.src_ptr : vr0;
+    Register& vr0 = c.f.regs[c.ins.rd[c.ins.nrd - 1]];
+    const Register& vr = vr0.src_ptr ? *vr0.src_ptr : vr0;
     // read_reg trusts the cache only for aliases and frame locals; mirror that.
     const bool vtrust =
         vr.fast_i64 && esz == 8 && ekind == Scalar::K::Int && !is_char &&
@@ -1768,7 +1769,7 @@ bool h_array_at_set(NativeCtx& c, std::string* err) {
         if (take)
             std::memcpy(tmp, vw.d + KVSPACE_XVALUE_HEAD_LEN, take);
     }
-    FReg& ar = c.f.regs[c.ins.rd[0]];
+    Register& ar = c.f.regs[c.ins.rd[0]];
     const RegDesc& rd0 = c.seg->regs[c.ins.rd[0]];
     const RegDesc& wd0 = c.seg->regs[c.ins.wr[0]];
     const bool same_slot = !rd0.name.empty() && rd0.name == wd0.name;
@@ -1792,7 +1793,7 @@ bool h_array_at_set(NativeCtx& c, std::string* err) {
 namespace {
 }  // namespace
 
-bool h_struct_new(NativeCtx& c, std::string* err) {
+bool h_struct_new(RwirHandlerCtx& c, std::string* err) {
     // ref 形参：绝对路径字面量（`/lib/Point`）的 RegDesc.name 即路径本体——
     // read_reg 会按 key 直达目标值（def struct 标记），不能当文本读；变量则读值。
     const RegDesc& rd0 = c.seg->regs[c.ins.rd[0]];
@@ -1815,7 +1816,7 @@ bool h_struct_new(NativeCtx& c, std::string* err) {
         *err = "TypeError: " + ref + " is not a struct type";
         return false;
     }
-    FReg& wr0 = c.f.regs[c.ins.wr[0]];
+    Register& wr0 = c.f.regs[c.ins.wr[0]];
     if (!c.vm.ensure_reg_key(c.f, wr0)) {
         *err = "struct·new: bad write slot";
         return false;
@@ -1908,7 +1909,7 @@ bool h_struct_new(NativeCtx& c, std::string* err) {
 }
 
 // ── 容器（obj / map·new）───────────────────────────────────────────────────
-bool h_obj_map(NativeCtx& c, std::string* err) {
+bool h_obj_map(RwirHandlerCtx& c, std::string* err) {
     std::string lt = c.write_slot_lt();
     if (lt.empty())
         lt = "map";
@@ -1926,10 +1927,10 @@ bool h_obj_map(NativeCtx& c, std::string* err) {
         const std::string dir = ck + "/";
         ok = kvspaceMkindex(c.f.h, dir.c_str(), 0, e, sizeof e) == 0;
     }
-    if (ok && (c.fn == "map/new" || c.ins.nrd >= 2)) {
+    if (ok && (c.ins.name == "map·new" || c.ins.nrd >= 2)) {
         const std::string base_key = c.f.regs[c.ins.wr[0]].key;
         char e[192] = {};
-        if (c.fn == "map/new") {
+        if (c.ins.name == "map·new") {
             for (int i = 0; i < c.ins.nrd; i++) {
                 Wire ew{};
                 if (!c.vm.read_reg(c.f, c.ins.rd[i], &ew)) {
@@ -1968,7 +1969,7 @@ bool h_obj_map(NativeCtx& c, std::string* err) {
 }
 
 // ── kvlang（abs）───────────────────────────────────────────────────────────
-bool h_kvlang_abs(NativeCtx& c, std::string* err) {
+bool h_kvlang_abs(RwirHandlerCtx& c, std::string* err) {
     // &x ≡ kvlang·abs(x)：读参是变量名/字面量路径 → 产 Ptr。
     std::string k0;
     const RegDesc& ad = c.seg->regs[c.ins.rd[0]];
@@ -1980,13 +1981,13 @@ bool h_kvlang_abs(NativeCtx& c, std::string* err) {
     } else {
         // 变量帧 key 惰性：`&x` 前 x 未必写过（链表 `{next=&n3}` 先于 n3 再写），
         // 必须 ensure_reg_key 才拿得到路径（&n3 恒指向已建实例的槽 key）。
-        FReg& ar = c.f.regs[c.ins.rd[0]];
+        Register& ar = c.f.regs[c.ins.rd[0]];
         if (!c.vm.ensure_reg_key(c.f, ar))
             return false;
         k0 = ar.key;
     }
     if (!ok || k0.empty()) {
-        *err = "native: bad path operand: " + c.ins.name;
+        *err = "rwir handler: bad path operand: " + c.ins.name;
         return false;
     }
     std::string lt;
@@ -2003,7 +2004,7 @@ bool h_kvlang_abs(NativeCtx& c, std::string* err) {
 // ── vthread ─────────────────────────────────────────────────────────────────
 // vthread·create(funckey) -> vid：分配新 vid、建栈索引、bootstrap 首指令、置 init，
 // 返回 vid 句柄。只创建不运行——运行交给 vthread·run。与 call 不同：新开独立 vid。
-bool h_vthread_create(NativeCtx& c, std::string* err) {
+bool h_vthread_create(RwirHandlerCtx& c, std::string* err) {
     std::string fn;
     if (c.ins.nrd < 1 || !c.atext(0, &fn) || fn.empty()) {
         *err = "TypeError: vthread·create requires 1 string arg";
@@ -2032,7 +2033,7 @@ bool h_vthread_create(NativeCtx& c, std::string* err) {
 // vthread·run(vid)：从子 vid 的持久化 pc 驱动到结束（阻塞）。子撞外部 rwir →
 // execute_vthread_h 返回 1 + 子 pc，冒泡 yield_pc 交驱动；驱动处理子 rwir 推进
 // 子 pc 后重入本指令续驱（父 pc 停在 vthread·run，handler 未推进）。
-bool h_vthread_run(NativeCtx& c, std::string* err) {
+bool h_vthread_run(RwirHandlerCtx& c, std::string* err) {
     std::string vid;
     if (c.ins.nrd < 1 || !c.atext(0, &vid) || vid.empty()) {
         *err = "TypeError: vthread·run requires 1 string (vid) arg";
@@ -2074,7 +2075,7 @@ bool h_vthread_run(NativeCtx& c, std::string* err) {
 // vthread·call(funckey)：在当前 vthread（同 vid）按运行时 funckey 动态调用被调
 // 函数，跑完回到本指令继续。与 run 不同：不新开 vid、不挂起——被调里 rwir 由
 // 当前驱动就地派发（父 pc 停在 call 指令，冒泡 ext rwir 后重入续跑被调）。
-bool h_vthread_call(NativeCtx& c, std::string* err) {
+bool h_vthread_call(RwirHandlerCtx& c, std::string* err) {
     std::string fn;
     if (c.ins.nrd < 1 || !c.atext(0, &fn) || fn.empty()) {
         *err = "TypeError: vthread·call requires 1 string arg";
@@ -2101,14 +2102,14 @@ bool h_vthread_call(NativeCtx& c, std::string* err) {
         *err = "RuntimeError: vthread·call: not a function: " + fn;
         return false;
     }
-    bin::FrameCtx nfc;
+    vmbin::Frame nfc;
     nfc.parent = &c.f;
     nfc.h = c.f.h;
     nfc.vid = c.f.vid;
     nfc.depth = c.f.depth + 1;
     nfc.frame = g_vmkv.frame_root(nfc.vid, nfc.depth);
     nfc.func_dir = key;
-    nfc.mem_frame = cseg && !cseg->has_native;
+    nfc.mem_frame = cseg && !cseg->has_rwirhandler;
     nfc.observable = c.f.observable;  // 同 vid 动态调用：可观察链继承父
     // 非纯内存帧需建帧目录 + 系统变量（returnpc 指向本指令下一行）。
     if (!nfc.mem_frame) {
@@ -2126,12 +2127,12 @@ bool h_vthread_call(NativeCtx& c, std::string* err) {
             return false;
         }
     }
-    bin::RunResult rr = g_vmkv.run_frame(nfc, 1, &stop_pc, &err2);
-    if (rr == bin::RunResult::Error) {
+    vmbin::Outcome rr = g_vmkv.run_frame(nfc, 1, &stop_pc, &err2);
+    if (rr == vmbin::Outcome::Error) {
         *err = err2.empty() ? "vthread·call failed" : err2;
         return false;
     }
-    if (rr == bin::RunResult::Stop) {
+    if (rr == vmbin::Outcome::Stop) {
         // 被调撞外部 rwir：冒泡给驱动（父 pc 停在 vthread·call，重入续跑被调）。
         c.yield_pc = stop_pc;
     }
@@ -2141,7 +2142,7 @@ bool h_vthread_call(NativeCtx& c, std::string* err) {
 
 // vthread·sleep(dur)：阻塞当前 vthread dur（duration 纳秒）。单进程模型即
 // nanosleep 阻塞驱动线程；睡眠后推进父 pc（本指令已完成）。
-bool h_vthread_sleep(NativeCtx& c, std::string* err) {
+bool h_vthread_sleep(RwirHandlerCtx& c, std::string* err) {
     std::int64_t ns = 0;
     if (c.ins.nrd < 1 || !c.ai64(0, &ns)) {
         *err = "TypeError: vthread·sleep requires 1 duration arg";
@@ -2158,7 +2159,7 @@ bool h_vthread_sleep(NativeCtx& c, std::string* err) {
 
 // vthread·setstatus(status)：置本 vthread 状态并把 PC 前进到下一指令。
 // 恢复执行即把 ‥status 改回 running（外部/调试器）。
-bool h_vthread_setstatus(NativeCtx& c, std::string* err) {
+bool h_vthread_setstatus(RwirHandlerCtx& c, std::string* err) {
     std::string st;
     if (c.ins.nrd < 1 || !c.atext(0, &st) || st.empty()) {
         *err = "TypeError: vthread·setstatus requires 1 string arg";
@@ -2185,11 +2186,11 @@ bool h_vthread_setstatus(NativeCtx& c, std::string* err) {
 
 // ── kvspace ─────────────────────────────────────────────────────────────────
 // kvspace 写失败：errbuf 优先，空则统一 "write failed"（对齐原末尾检查）。
-bool kv_fail(NativeCtx& c, bool ok, char* errbuf, std::string* err) {
+bool kv_fail(RwirHandlerCtx& c, bool ok, char* errbuf, std::string* err) {
     if (ok)
         return true;
     *err = errbuf[0] ? std::string(c.ins.name) + ": " + errbuf
-                     : "native: write failed: " + c.ins.name;
+                     : "rwir handler: write failed: " + c.ins.name;
     return false;
 }
 
@@ -2216,7 +2217,7 @@ bool wire_langtype(Wire wire, std::string* out) {
     return true;
 }
 
-bool operand_langtype(NativeCtx& c, int index, Wire wire, std::string* out) {
+bool operand_langtype(RwirHandlerCtx& c, int index, Wire wire, std::string* out) {
     return c.vm.reg_langtype(c.f, c.ins.rd[index], out) ||
            wire_langtype(wire, out);
 }
@@ -2227,7 +2228,7 @@ bool is_member_container(std::string_view langtype) {
             langtype.find("\xC2\xB7") != std::string_view::npos);
 }
 
-bool direct_kv_path(NativeCtx& c, int index, std::string* out) {
+bool direct_kv_path(RwirHandlerCtx& c, int index, std::string* out) {
     const RegDesc& desc = c.seg->regs[c.ins.rd[index]];
     if (desc.kind == Operand::Kind::Literal && desc.name.size() > 1 &&
         desc.name.front() == '/' && desc.name.find(' ') == std::string::npos) {
@@ -2278,10 +2279,10 @@ bool format_member_float(double value, std::uint8_t width, std::string* out) {
     return true;
 }
 
-bool member_key(NativeCtx& c, int index, Wire wire, std::string* out,
+bool member_key(RwirHandlerCtx& c, int index, Wire wire, std::string* out,
                 std::string* err) {
-    FReg& reg = c.f.regs[c.ins.rd[index]];
-    FReg& source = reg.src_ptr ? *reg.src_ptr : reg;
+    Register& reg = c.f.regs[c.ins.rd[index]];
+    Register& source = reg.src_ptr ? *reg.src_ptr : reg;
     if (source.fast_i64) {
         *out = std::to_string(source.fv);
         return true;
@@ -2333,7 +2334,7 @@ bool member_key(NativeCtx& c, int index, Wire wire, std::string* out,
     }
 }
 
-bool member_path(NativeCtx& c, std::string* base_path,
+bool member_path(RwirHandlerCtx& c, std::string* base_path,
                  std::string* member_path_out, bool* base_is_none,
                  std::string* err) {
     if (c.ins.nrd < 2) {
@@ -2379,7 +2380,7 @@ bool member_path(NativeCtx& c, std::string* base_path,
     return true;
 }
 
-bool kv_get_value(NativeCtx& c, const std::string& path) {
+bool kv_get_value(RwirHandlerCtx& c, const std::string& path) {
     const std::uint8_t* value = nullptr;
     std::uint32_t value_len = 0;
     if (read_wire_raw(c.f.h, path, &value, &value_len) && value && value_len)
@@ -2395,7 +2396,7 @@ bool kv_get_value(NativeCtx& c, const std::string& path) {
     return ok;
 }
 
-bool kv_set_value(NativeCtx& c, const std::string& path, Wire value,
+bool kv_set_value(RwirHandlerCtx& c, const std::string& path, Wire value,
                   std::string* err) {
     char errbuf[256] = {};
     bool ok;
@@ -2411,7 +2412,7 @@ bool kv_set_value(NativeCtx& c, const std::string& path, Wire value,
     return kv_fail(c, ok, errbuf, err);
 }
 
-bool h_kv_get(NativeCtx& c, std::string* err) {
+bool h_kv_get(RwirHandlerCtx& c, std::string* err) {
     std::string path;
     if (c.ins.nrd == 1) {
         if (!direct_kv_path(c, 0, &path)) {
@@ -2430,7 +2431,7 @@ bool h_kv_get(NativeCtx& c, std::string* err) {
     return kv_get_value(c, path);
 }
 
-bool h_kv_set(NativeCtx& c, std::string* err) {
+bool h_kv_set(RwirHandlerCtx& c, std::string* err) {
     std::string path;
     Wire value{};
     if (c.ins.nrd == 2) {
@@ -2473,10 +2474,10 @@ bool h_kv_set(NativeCtx& c, std::string* err) {
     return kv_set_value(c, path, value, err);
 }
 
-bool h_kv_del(NativeCtx& c, std::string* err) {
+bool h_kv_del(RwirHandlerCtx& c, std::string* err) {
     std::string k0, k1;
     if (!c.kv_paths(&k0, &k1)) {
-        *err = "native: bad path operand: " + c.ins.name;
+        *err = "rwir handler: bad path operand: " + c.ins.name;
         return false;
     }
     char errbuf[256] = {};
@@ -2485,10 +2486,10 @@ bool h_kv_del(NativeCtx& c, std::string* err) {
     return kv_fail(c, ok, errbuf, err);
 }
 
-bool h_kv_deltree(NativeCtx& c, std::string* err) {
+bool h_kv_deltree(RwirHandlerCtx& c, std::string* err) {
     std::string k0, k1;
     if (!c.kv_paths(&k0, &k1)) {
-        *err = "native: bad path operand: " + c.ins.name;
+        *err = "rwir handler: bad path operand: " + c.ins.name;
         return false;
     }
     char errbuf[256] = {};
@@ -2496,10 +2497,10 @@ bool h_kv_deltree(NativeCtx& c, std::string* err) {
     return kv_fail(c, ok, errbuf, err);
 }
 
-bool h_kv_mkindex(NativeCtx& c, std::string* err) {
+bool h_kv_mkindex(RwirHandlerCtx& c, std::string* err) {
     std::string k0, k1;
     if (!c.kv_paths(&k0, &k1)) {
-        *err = "native: bad path operand: " + c.ins.name;
+        *err = "rwir handler: bad path operand: " + c.ins.name;
         return false;
     }
     char errbuf[256] = {};
@@ -2514,10 +2515,10 @@ bool h_kv_mkindex(NativeCtx& c, std::string* err) {
     return kv_fail(c, ok, errbuf, err);
 }
 
-bool h_kv_list(NativeCtx& c, std::string* err) {
+bool h_kv_list(RwirHandlerCtx& c, std::string* err) {
     std::string k0, k1;
     if (!c.kv_paths(&k0, &k1)) {
-        *err = "native: bad path operand: " + c.ins.name;
+        *err = "rwir handler: bad path operand: " + c.ins.name;
         return false;
     }
     std::string dkey = k0;
@@ -2539,7 +2540,7 @@ bool h_kv_list(NativeCtx& c, std::string* err) {
         dkey += "\xC2\xB7";
     char errbuf[256] = {};
     bool ok = true;
-    if (c.fn == "kvspace/listlen") {
+    if (c.ins.name == "kvspace·listlen") {
         if (g_trace)
             std::fprintf(stderr, "[listlen k0='%s' dkey='%s']\n",
                          k0.c_str(), dkey.c_str());
@@ -2554,7 +2555,7 @@ bool h_kv_list(NativeCtx& c, std::string* err) {
              kvspaceListAt(c.f.h, dkey.c_str(), 0, 1, (std::int32_t)idx, name,
                            sizeof name, &nn) == 0;
         if (ok) {
-            FReg& wr = c.f.regs[c.ins.wr[0]];
+            Register& wr = c.f.regs[c.ins.wr[0]];
             ok = c.vm.ensure_reg_key(c.f, wr);
             if (ok) {
                 // write_text 已带 char/utf8 类型（值 attr 区），动态键成员读依赖。
@@ -2567,17 +2568,17 @@ bool h_kv_list(NativeCtx& c, std::string* err) {
     return kv_fail(c, ok, errbuf, err);
 }
 
-bool h_kv_cp(NativeCtx& c, std::string* err) {
+bool h_kv_cp(RwirHandlerCtx& c, std::string* err) {
     std::string k0, k1;
     if (!c.kv_paths(&k0, &k1)) {
-        *err = "native: bad path operand: " + c.ins.name;
+        *err = "rwir handler: bad path operand: " + c.ins.name;
         return false;
     }
     char errbuf[256] = {};
-    const int rc = c.fn == "kvspace/cp"
+    const int rc = c.ins.name == "kvspace·cp"
                        ? kvspaceCp(c.f.h, k0.c_str(), k1.c_str(), errbuf,
                                    sizeof errbuf)
-                       : c.fn == "kvspace/cpdir"
+                       : c.ins.name == "kvspace·cpdir"
                              ? kvspaceCpTree(c.f.h, k0.c_str(), k1.c_str(),
                                              errbuf, sizeof errbuf)
                              : kvspaceCpList(c.f.h, k0.c_str(), k1.c_str(),
@@ -2585,10 +2586,10 @@ bool h_kv_cp(NativeCtx& c, std::string* err) {
     return kv_fail(c, rc == 0, errbuf, err);
 }
 
-bool h_kv_extindex(NativeCtx& c, std::string* err) {
+bool h_kv_extindex(RwirHandlerCtx& c, std::string* err) {
     std::string k0, k1;
     if (!c.kv_paths(&k0, &k1)) {
-        *err = "native: bad path operand: " + c.ins.name;
+        *err = "rwir handler: bad path operand: " + c.ins.name;
         return false;
     }
     char errbuf[256] = {};
@@ -2598,10 +2599,10 @@ bool h_kv_extindex(NativeCtx& c, std::string* err) {
     return kv_fail(c, ok, errbuf, err);
 }
 
-bool h_kv_rmindexext(NativeCtx& c, std::string* err) {
+bool h_kv_rmindexext(RwirHandlerCtx& c, std::string* err) {
     std::string k0, k1;
     if (!c.kv_paths(&k0, &k1)) {
-        *err = "native: bad path operand: " + c.ins.name;
+        *err = "rwir handler: bad path operand: " + c.ins.name;
         return false;
     }
     char errbuf[256] = {};
@@ -2610,157 +2611,78 @@ bool h_kv_rmindexext(NativeCtx& c, std::string* err) {
     return kv_fail(c, ok, errbuf, err);
 }
 
-// ── 两级表：族前缀表 → 族内成员表（constexpr，无哈希）────────────────────
-struct NativeCap {
-    std::string_view name;  // 折叠名（`·`→`/`）= 表键
-    NativeFn fn;
+// ── handler 表：rwir id 即下标，逐项直接取函数（无字符串查找）──────────
+constexpr RwirHandlerSlot kHandlers[static_cast<std::size_t>(
+    rwir::RwirHandlerId::Count)] = {
+    [static_cast<std::size_t>(rwir::RwirHandlerId::None)] = {nullptr, false},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::TimeNow)] = {h_time_now, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::TimeArithmetic)] = {h_time_arith, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::DurationScale)] = {h_duration_scale, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::DurationAs)] = {h_duration_as, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::RandomNumber)] = {h_random, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::ArrayNew)] = {h_array_new, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::ArrayFill)] = {h_array_fill, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::ArrayCopy)] = {h_array_copy, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::ArrayNewSlice)] = {h_array_newslice, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::ArrayMetadata)] = {h_array_meta, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::ArrayReshape)] = {h_array_reshape, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::XvalueMetadata)] = {h_xv_meta, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::ArrayElementAccess)] = {h_array_at_set, false},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::ScatterNew)] = {h_scatter_new, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::ScatterLength)] = {h_scatter_len, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::ScatterAt)] = {h_scatter_at, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::ScatterSet)] = {h_scatter_set, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::ScatterNewCompact)] = {h_scatter_newcompact, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::ScatterNewScatter)] = {h_scatter_newscatter, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::ScatterAppend)] = {h_scatter_append, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::ScatterSlice)] = {h_scatter_slice, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::StringCharacter)] = {h_string_char, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::StringCompare)] = {h_string_cmp, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::StringConcatenate)] = {h_string_concat, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::StringFind)] = {h_string_find, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::StringFormatInt)] = {h_string_formatint, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::StringFormatUint)] = {h_string_formatuint, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::StringLength)] = {h_string_len, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::StringOrdinal)] = {h_string_ord, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::StringParseFloat)] = {h_string_parsefloat, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::StringParseInt)] = {h_string_parseint, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::StringParseUint)] = {h_string_parseuint, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::StringSet)] = {h_string_set, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::StringSlice)] = {h_string_slice, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::ObjectMap)] = {h_obj_map, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::StructNew)] = {h_struct_new, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::Absolute)] = {h_kvlang_abs, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::VthreadCreate)] = {h_vthread_create, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::VthreadRun)] = {h_vthread_run, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::VthreadCall)] = {h_vthread_call, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::VthreadSleep)] = {h_vthread_sleep, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::VthreadSetStatus)] = {h_vthread_setstatus, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::KvspaceGet)] = {h_kv_get, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::KvspaceSet)] = {h_kv_set, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::KvspaceDelete)] = {h_kv_del, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::KvspaceDeleteTree)] = {h_kv_deltree, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::KvspaceMakeIndex)] = {h_kv_mkindex, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::KvspaceList)] = {h_kv_list, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::KvspaceCopy)] = {h_kv_cp, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::KvspaceExternalIndex)] = {h_kv_extindex, true},
+    [static_cast<std::size_t>(rwir::RwirHandlerId::KvspaceRemoveExternalIndex)] = {h_kv_rmindexext, true},
 };
 
-#define NCAP(name, fn) NativeCap{name, fn}
-
-constexpr NativeCap kTimeCaps[] = {
-    NCAP("time/now", h_time_now),
-    NCAP("time/add", h_time_arith),
-    NCAP("time/sub", h_time_arith),
-    NCAP("time/before", h_time_arith),
-    NCAP("time/after", h_time_arith),
-    NCAP("time/duration/add", h_time_arith),
-    NCAP("time/duration/sub", h_time_arith),
-    NCAP("time/duration/before", h_time_arith),
-    NCAP("time/duration/after", h_time_arith),
-    NCAP("time/duration/nanos", h_duration_scale),
-    NCAP("time/duration/millis", h_duration_scale),
-    NCAP("time/duration/seconds", h_duration_scale),
-    NCAP("time/duration/minutes", h_duration_scale),
-    NCAP("time/duration/hours", h_duration_scale),
-    NCAP("time/duration/as_nanos", h_duration_as),
-    NCAP("time/duration/as_millis", h_duration_as),
-    NCAP("time/duration/as_seconds", h_duration_as),
-    NCAP("time/duration/as_minutes", h_duration_as),
-    NCAP("time/duration/as_hours", h_duration_as),
-};
-
-constexpr NativeCap kRandomCaps[] = {
-    NCAP("random/int63", h_random),
-    NCAP("random/uint64", h_random),
-    NCAP("random/intn", h_random),
-};
-
-constexpr NativeCap kArrayCaps[] = {
-    NCAP("compactarray/new", h_array_new),
-    NCAP("compactarray/fill", h_array_fill),
-    NCAP("compactarray/copy", h_array_copy),
-    NCAP("compactarray/newslice", h_array_newslice),
-    NCAP("compactarray/numel", h_array_meta),
-    NCAP("compactarray/dim", h_array_meta),
-    NCAP("compactarray/shape", h_array_meta),
-    NCAP("compactarray/langtype", h_xv_meta),
-    NCAP("compactarray/bodylen", h_xv_meta),
-    NCAP("compactarray/parselangtype", h_xv_meta),
-    NCAP("compactarray/newreinterpret", h_xv_meta),
-    NCAP("compactarray/newreshape", h_array_reshape),
-    NCAP("compactarray/at", h_array_at_set),
-    NCAP("compactarray/set", h_array_at_set),
-};
-
-constexpr NativeCap kScatterCaps[] = {
-    NCAP("scatterarray/new", h_scatter_new),
-    NCAP("scatterarray/len", h_scatter_len),
-    NCAP("scatterarray/at", h_scatter_at),
-    NCAP("scatterarray/set", h_scatter_set),
-    NCAP("scatterarray/newcompact", h_scatter_newcompact),
-    NCAP("scatterarray/newscatter", h_scatter_newscatter),
-    NCAP("scatterarray/append", h_scatter_append),
-    NCAP("scatterarray/slice", h_scatter_slice),
-};
-
-constexpr NativeCap kStringCaps[] = {
-    NCAP("string/char", h_string_char),
-    NCAP("string/cmp", h_string_cmp),
-    NCAP("string/concat", h_string_concat),
-    NCAP("string/find", h_string_find),
-    NCAP("string/formatint", h_string_formatint),
-    NCAP("string/formatuint", h_string_formatuint),
-    NCAP("string/len", h_string_len),
-    NCAP("string/ord", h_string_ord),
-    NCAP("string/parsefloat", h_string_parsefloat),
-    NCAP("string/parseint", h_string_parseint),
-    NCAP("string/parseuint", h_string_parseuint),
-    NCAP("string/set", h_string_set),
-    NCAP("string/slice", h_string_slice),
-};
-
-constexpr NativeCap kContainerCaps[] = {
-    NCAP("obj", h_obj_map),
-    NCAP("map/new", h_obj_map),
-    NCAP("struct/new", h_struct_new),
-};
-
-constexpr NativeCap kKvlangCaps[] = {
-    NCAP("kvlang/abs", h_kvlang_abs),
-};
-
-constexpr NativeCap kVthreadCaps[] = {
-    NCAP("vthread/create", h_vthread_create),
-    NCAP("vthread/run", h_vthread_run),
-    NCAP("vthread/call", h_vthread_call),
-    NCAP("vthread/sleep", h_vthread_sleep),
-    NCAP("vthread/setstatus", h_vthread_setstatus),
-};
-
-constexpr NativeCap kKvspaceCaps[] = {
-    NCAP("kvspace/get", h_kv_get),
-    NCAP("kvspace/set", h_kv_set),
-    NCAP("kvspace/del", h_kv_del),
-    NCAP("kvspace/deltree", h_kv_deltree),
-    NCAP("kvspace/mkindex", h_kv_mkindex),
-    NCAP("kvspace/listlen", h_kv_list),
-    NCAP("kvspace/listat", h_kv_list),
-    NCAP("kvspace/cp", h_kv_cp),
-    NCAP("kvspace/cpdir", h_kv_cp),
-    NCAP("kvspace/cplist", h_kv_cp),
-    NCAP("kvspace/extindex", h_kv_extindex),
-    NCAP("kvspace/rmindexext", h_kv_rmindexext),
-};
-
-struct NativeFamily {
-    std::string_view prefix;      // 族前缀（含尾 `/`，obj 等单名精确匹配）
-    const NativeCap* caps;
-    std::size_t n;
-};
-
-#define NCAPS(a) sizeof(a) / sizeof((a)[0])
-
-constexpr NativeFamily kFamilies[] = {
-    {"time/", kTimeCaps, NCAPS(kTimeCaps)},
-    {"random/", kRandomCaps, NCAPS(kRandomCaps)},
-    {"compactarray/", kArrayCaps, NCAPS(kArrayCaps)},
-    {"scatterarray/", kScatterCaps, NCAPS(kScatterCaps)},
-    {"string/", kStringCaps, NCAPS(kStringCaps)},
-    {"obj", kContainerCaps, NCAPS(kContainerCaps)},
-    {"map/", kContainerCaps, NCAPS(kContainerCaps)},
-    {"struct/", kContainerCaps, NCAPS(kContainerCaps)},
-    {"kvlang/", kKvlangCaps, NCAPS(kKvlangCaps)},
-    {"kvspace/", kKvspaceCaps, NCAPS(kKvspaceCaps)},
-    {"vthread/", kVthreadCaps, NCAPS(kVthreadCaps)},
-};
-
-#undef NCAP
-#undef NCAPS
+constexpr bool handlers_complete() {
+    for (std::size_t i = 1; i < std::size(kHandlers); i++)
+        if (!kHandlers[i].handle)
+            return false;
+    return true;
+}
+static_assert(handlers_complete(), "every RwirHandlerId needs a handler");
 
 }  // namespace
 
-// 折叠名 → handler；未命中 = 表未命中（未实现 op）。
-const NativeFn* find_native(std::string_view fn) {
-    for (const NativeFamily& fam : kFamilies) {
-        if (!fn.starts_with(fam.prefix))
-            continue;
-        for (std::size_t i = 0; i < fam.n; i++) {
-            if (fam.caps[i].name == fn)
-                return &fam.caps[i].fn;
-        }
-    }
-    return nullptr;
+const RwirHandlerSlot& rwir_handler(rwir::RwirHandlerId id) {
+    const auto i = static_cast<std::size_t>(id);
+    if (i >= std::size(kHandlers))
+        std::abort();  // 越界 id = 生成表错误，不容许继续
+    return kHandlers[i];
 }
 
 }  // namespace kvlang::runtimec2

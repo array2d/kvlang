@@ -16,8 +16,8 @@
 #include "jit.hpp"
 
 namespace kvlang::runtimec2 {
-using bin::FrameCtx;
-using bin::RunResult;
+using vmbin::Frame;
+using vmbin::Outcome;
 namespace {
 
 constexpr std::string_view kMemberSep = "\xE2\x80\xA5";  // ‥
@@ -190,11 +190,12 @@ int execute_vthread_h(void* h, const char* vid, char** out_pc,
                          e ? (int)e->impl : -1);
         // 总能进 run_frame：本 runtime 的 op 执行；外部/未知 op（e=nullptr 或
         // Handoff）由 run_frame 在 Stop 边界 flush 帧局部后交出（handoff），
-        // 保证 Handoff 后 resume 的新 FrameCtx 能重建（flush 已落明文+attr）。
-        if (e && e->impl == rwir::Impl::None)
+        // 保证 Handoff 后 resume 的新 Frame 能重建（flush 已落明文+attr）。
+        if (e && e->impl == rwir::Impl::None &&
+            e->handler == rwir::RwirHandlerId::None)
             return -1;  // 表内但无实现：硬错
         {
-            FrameCtx fctx;
+            Frame fctx;
             fctx.h = h;
             fctx.vid = p.vid;
             fctx.depth = p.depth;
@@ -207,8 +208,8 @@ int execute_vthread_h(void* h, const char* vid, char** out_pc,
                 return -1;
             std::string err;
             std::string stop_pc;
-            RunResult rr = g_vmkv.run_frame(fctx, p.s0, &stop_pc, &err);
-            if (rr == RunResult::Error) {
+            Outcome rr = g_vmkv.run_frame(fctx, p.s0, &stop_pc, &err);
+            if (rr == Outcome::Error) {
                 // 出错指令行：run_frame 已把 stop_pc 设为 param_key(出错帧, s0)。
                 // 子 vthread 的 pc 应指向出错指令（printstack cur 渲染依赖）。
                 if (!stop_pc.empty())
@@ -218,13 +219,13 @@ int execute_vthread_h(void* h, const char* vid, char** out_pc,
                            err.empty() ? "runtimec2: execution failed" : err);
                 return -1;
             }
-            if (rr == RunResult::Ok) {
+            if (rr == Outcome::Ok) {
                 write_status(h, vid, "ok");
                 return 0;
             }
             if (ev_trace)
                 std::fprintf(stderr, "[rr=%d stop=%s]\n", (int)rr, stop_pc.c_str());
-            if (rr == RunResult::Returned) {
+            if (rr == Outcome::Returned) {
                 // 子帧返回 → 续跑调用方返回地址（帧已由 run_frame 删除）。
                 if (stop_pc.empty() || !write_text(h, pc_k, stop_pc))
                     return -1;

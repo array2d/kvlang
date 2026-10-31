@@ -1,4 +1,5 @@
 #include "codeseg.hpp"
+#include "binir_dump.hpp"
 
 #include <cstdio>
 #include <cstring>
@@ -126,6 +127,13 @@ std::string resolve_callee(void* h, const std::string& func_dir,
     return "/lib/" + fn;
 }
 
+// 扩展 rwir 声明：runtime 以 kvlangDefRwir 注册到 `/lib/<opcode>`（kind=def rwir）。
+// 契约域外算子（println 等）只有这种声明，才允许走 handoff。
+bool is_declared_rwir(void* h, const std::string& op) {
+    std::string lt;
+    return read_langtype(h, "/lib/" + op, &lt) && lt == "def rwir";
+}
+
 bool build(void* h, const std::string& func_dir, Segment* out) {
     out->insns.clear();
     out->regs.clear();
@@ -159,6 +167,7 @@ bool build(void* h, const std::string& func_dir, Segment* out) {
             ins.kind = e->kind;
             ins.width = e->width;
             ins.impl = e->impl;
+            ins.handler = e->handler;
             if (e->kind == rwir::Kind::Int && e->width == 8) {
                 switch (e->op) {
                 case rwir::Op::Add: ins.fast_i64 = true; ins.opfn = 1; break;
@@ -182,11 +191,19 @@ bool build(void* h, const std::string& func_dir, Segment* out) {
                 default: break;
                 }
             }
+        } else if (!is_declared_rwir(h, op)) {
+            // #583 §2·4：未知 rwir 不得静默走 handoff——不在 myrwircap 且
+            // `/lib/<op>` 无 def rwir 声明，即 layout 产出了本 runtime 无法执行的算子。
+            std::fprintf(stderr,
+                         "runtimec2: unknown rwir \"%s\" in %s: not in myrwircap "
+                         "and no /lib/%s def rwir\n",
+                         op.c_str(), func_dir.c_str(), op.c_str());
+            return false;
         }
-        if (ins.impl == rwir::Impl::Native)
-            out->has_native = true;
+        if (ins.handler != rwir::RwirHandlerId::None)
+            out->has_rwirhandler = true;
         if (ins.impl == rwir::Impl::Handoff) {
-            out->has_native = true;
+            out->has_rwirhandler = true;
             out->insns.push_back(ins);
             continue;
         }
@@ -288,6 +305,8 @@ const Segment* cached_segment(void* h, const std::string& func_dir) {
     if (!build(h, func_dir, &seg))
         return nullptr;
     auto res = c.emplace(func_dir, std::move(seg));
+    if (binir_dump_on_build())
+        dump_binir(res.first->second, func_dir.c_str());
     return &res.first->second;
 }
 
