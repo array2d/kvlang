@@ -312,6 +312,74 @@ impl LabelGen {
     }
 }
 
+/// call 结果槽带 callee 返回类型：把 rwfunc/rwir 声明的返回类型写进调用指令的
+/// `write_types`（声明类型，不是推断类型）。递归/互递归无碍——`sigs` 是文件级
+/// 签名表，在各函数体 layout 之前已建好；跨文件调用不在本表内，保持原样。
+pub fn annotate_call_returns(fn_: &mut Func, pkg: &str, sigs: &SigTable) {
+    annotate_returns_body(&mut fn_.body, pkg, sigs);
+}
+
+fn annotate_returns_body(body: &mut [Stmt], pkg: &str, sigs: &SigTable) {
+    for st in body {
+        match st {
+            Stmt::Instruction(s) => annotate_returns_inst(s, pkg, sigs),
+            Stmt::Scope(s) => annotate_returns_body(&mut s.body, pkg, sigs),
+            Stmt::If(s) => {
+                if let Some(c) = &mut s.cond {
+                    annotate_returns_inst(c, pkg, sigs);
+                }
+                annotate_returns_body(&mut s.then_, pkg, sigs);
+                annotate_returns_body(&mut s.else_, pkg, sigs);
+            }
+            Stmt::While(s) => {
+                if let Some(c) = &mut s.cond {
+                    annotate_returns_inst(c, pkg, sigs);
+                }
+                annotate_returns_body(&mut s.body, pkg, sigs);
+            }
+            Stmt::For(s) => annotate_returns_body(&mut s.body, pkg, sigs),
+            _ => {}
+        }
+    }
+}
+
+fn annotate_returns_inst(inst: &mut Instruction, pkg: &str, sigs: &SigTable) {
+    let e = match &inst.expr {
+        Some(e) if !e.is_leaf() => e,
+        _ => return,
+    };
+    let sym = symbol::lookup(&e.op);
+    if sym.arith || sym.cmp || is_cast_op(&e.op) {
+        return;
+    }
+    let Some(sig) = sig_lookup(sigs, pkg, &e.op) else {
+        return;
+    };
+    for (j, ret) in sig.returns.iter().enumerate() {
+        if j >= inst.writes.len() {
+            break;
+        }
+        if inst.write_types.len() <= j {
+            inst.write_types.resize(j + 1, String::new());
+        }
+        if inst.write_types[j].is_empty() && !ret.ty.is_empty() {
+            inst.write_types[j] = ret.ty.clone();
+        }
+    }
+}
+
+/// 调用名 → 签名：支持裸名、`pkg·名`、`/lib/` 绝对路径。
+fn sig_lookup<'a>(sigs: &'a SigTable, pkg: &str, op: &str) -> Option<&'a ast::FuncSig> {
+    let name = op.strip_prefix("/lib/").unwrap_or(op);
+    if let Some(sig) = sigs.get(name) {
+        return Some(sig);
+    }
+    if pkg.is_empty() || name.contains(keytree::MEMBER_SEP) || name.contains('/') {
+        return None;
+    }
+    sigs.get(&format!("{pkg}{}{name}", keytree::MEMBER_SEP))
+}
+
 /// 将函数体中 if/while 控制流降级为 ScopeStmt + br/goto，展开复合表达式。
 pub fn lower_func(fn_: &Func) -> Func {
     let tm = infer_types(fn_);
@@ -1177,8 +1245,14 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
                     return t.clone();
                 }
                 if let Some(t) = tm.get(&reads[0]) {
-                    if let Some(stripped) = t.strip_prefix("[]") {
-                        return stripped.to_string();
+                    // compact 数组取元素类型（`[]K` / `[d1,d2]K` 均剥到 K）；
+                    // 散 key map 取 value 类型（`[]K·V` → V）。
+                    if opcode == "scatterarray·at" {
+                        if let Some(v) = container_value(t) {
+                            return v;
+                        }
+                    } else if let Some(e) = container_elem(t) {
+                        return e;
                     }
                 }
             }

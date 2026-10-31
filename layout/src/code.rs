@@ -98,7 +98,9 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
         } else {
             func.pkg.clone()
         };
-        let mut lowered = lower::lower_func(func);
+        let mut src = func.clone();
+        lower::annotate_call_returns(&mut src, &pkg, &sigs);
+        let mut lowered = lower::lower_func(&src);
         write_func(kv, &pkg, &mut lowered, &local_funcs, &structs, &sigs)?;
         any_code = true;
         if func.sig.name == "init" {
@@ -125,7 +127,9 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
             body,
             pkg: String::new(),
         };
-        let mut lowered = lower::lower_func(&init_fn);
+        let mut src = init_fn.clone();
+        lower::annotate_call_returns(&mut src, "", &sigs);
+        let mut lowered = lower::lower_func(&src);
         write_func(kv, "", &mut lowered, &local_funcs, &structs, &sigs)?;
         any_code = true;
         inits.push(init_fn_name(""));
