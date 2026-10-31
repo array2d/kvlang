@@ -18,10 +18,14 @@ jobs:
       - name: 构建
         run: |
           make runtimec2
+          cmake --build build/runtimec2 -j
           make layout
           sudo cp layout/target/release/libkvlanglayout.so /usr/lib/
           make byteseek
-          sudo make install
+      - name: runtimec2 ctest（安装前）
+        run: KVLANG_BIN="$PWD/bin/byteseek" ctest --test-dir build/runtimec2 --output-on-failure
+      - name: 安装（tutorial 兼容）
+        run: sudo make install
       - name: 测试 (${{ matrix.backend.name }})
         env: { KVSPACE: "${{ matrix.backend.dsn }}", KV_CASE_TIMEOUT: "600" }
         run: python3 tutorial/test.py
