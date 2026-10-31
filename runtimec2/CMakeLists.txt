@@ -79,6 +79,21 @@ enable_testing()
 add_executable(rwir_table tests/rwir_table.cpp src/rwir_gen.cpp)
 target_include_directories(rwir_table PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
+add_executable(segment_shape_dump
+    tools/segment_shape_dump.cpp
+    src/codeseg.cpp
+    src/value.cpp
+    src/valueio.cpp
+    src/rwir_gen.cpp
+    src/rwir_lookup.cpp)
+target_include_directories(segment_shape_dump PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include)
+target_compile_options(segment_shape_dump PRIVATE -O2 -Wall -Wextra)
+target_link_directories(segment_shape_dump PRIVATE "${LIB_DIR}" "${BACKEND_DIR}")
+target_link_libraries(segment_shape_dump PRIVATE kvspace)
+
 add_test(NAME c2_rwir_table COMMAND $<TARGET_FILE:rwir_table>)
 add_test(NAME c2_impl_db_check
          COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/impl_db_check.sh)
@@ -90,3 +105,10 @@ add_test(NAME c2_m1_smoke
 add_test(NAME c2_symbol_parity
          COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/symbols.sh
                  $<TARGET_FILE:kvlang_runtimec2>)
+add_test(NAME c2_segment_shape_dump
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/tests/segment_shape_dump_test.py
+                 --exporter $<TARGET_FILE:segment_shape_dump>
+                 --byteseek ${CMAKE_CURRENT_SOURCE_DIR}/../bin/byteseek
+                 --probe ${CMAKE_CURRENT_SOURCE_DIR}/tools/binir_format_probe.py
+                 --source-root ${CMAKE_CURRENT_SOURCE_DIR}/..)
+set_tests_properties(c2_segment_shape_dump PROPERTIES TIMEOUT 120)
