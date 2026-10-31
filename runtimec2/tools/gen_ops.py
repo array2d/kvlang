@@ -6,7 +6,7 @@
 
 两个正交维度：
 - policy：no-malloc 口径，base 174 / complex 126；
-- impl：执行方式，Typed 166 / Control 7 / Dynamic 52 / Handoff 75。
+- impl：执行方式，Typed 166 / Control 6 / Dynamic 54 / Native 78 / Handoff 1。
 """
 import os
 import sys
@@ -33,6 +33,7 @@ SUF = {
     "exp": "Exp", "log": "Log", "pow": "Pow",
 }
 NATIVE_FAMILIES = {"time", "time/duration", "random", "kvspace", "vthread"}
+HANDOFF = {"kvspace·watch"}
 SPECIAL = {"=": "Copy", "bool": "Bool", "br": "Br", "call": "Call", "goto": "Goto",
            "return": "Return"}
 GENERIC = {
@@ -50,6 +51,8 @@ GENERIC = {
 
 
 def impl_of(name):
+    if name in HANDOFF:
+        return "Impl::Handoff"
     if name in SPECIAL:
         return "Impl::Control"
     if "·" in name:

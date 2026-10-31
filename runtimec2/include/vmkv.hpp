@@ -50,6 +50,7 @@ struct Vmkv {
     bool read_i64(bin::FrameCtx& f, std::uint8_t idx, std::int64_t* out);
     bool read_bool(bin::FrameCtx& f, std::uint8_t idx, bool* out);
     void flush_frame_locals(bin::FrameCtx& f);
+    void invalidate_path(bin::FrameCtx& f, std::string_view path);
     bool write_reg(bin::FrameCtx& f, std::uint8_t idx,
                    const std::uint8_t* data, std::uint32_t len);
     bool slot_write_i64(bin::FrameCtx& f, std::uint8_t idx, std::int64_t v);

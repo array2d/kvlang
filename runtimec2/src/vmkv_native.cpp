@@ -1,5 +1,7 @@
 #include "vmkv_native.hpp"
 
+#include <charconv>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <cstdio>
@@ -2100,6 +2102,7 @@ bool h_vthread_call(NativeCtx& c, std::string* err) {
         return false;
     }
     bin::FrameCtx nfc;
+    nfc.parent = &c.f;
     nfc.h = c.f.h;
     nfc.vid = c.f.vid;
     nfc.depth = c.f.depth + 1;
@@ -2188,6 +2191,286 @@ bool kv_fail(NativeCtx& c, bool ok, char* errbuf, std::string* err) {
     *err = errbuf[0] ? std::string(c.ins.name) + ": " + errbuf
                      : "native: write failed: " + c.ins.name;
     return false;
+}
+
+bool wire_langtype(Wire wire, std::string* out) {
+    out->clear();
+    if (!wire.d || wire.n < KVSPACE_XVALUE_HEAD_LEN + 2)
+        return false;
+    const std::uint64_t body_len = kvspaceXvalueHeadLen(
+        reinterpret_cast<const kvspaceXvalueHead*>(wire.d));
+    if (body_len > wire.n - KVSPACE_XVALUE_HEAD_LEN - 2)
+        return false;
+    const std::size_t attr_offset = KVSPACE_XVALUE_HEAD_LEN + body_len;
+    const std::uint16_t attr_len = static_cast<std::uint16_t>(
+        wire.d[attr_offset] |
+        (static_cast<std::uint16_t>(wire.d[attr_offset + 1]) << 8));
+    if (attr_len < 2 || attr_offset + attr_len > wire.n)
+        return false;
+    const std::uint8_t* langtype = nullptr;
+    const std::uint16_t langtype_len =
+        kvspaceXvalueHeadLangtype(wire.d, body_len, &langtype);
+    if (!langtype || langtype_len == 0)
+        return false;
+    out->assign(reinterpret_cast<const char*>(langtype), langtype_len);
+    return true;
+}
+
+bool operand_langtype(NativeCtx& c, int index, Wire wire, std::string* out) {
+    return c.vm.reg_langtype(c.f, c.ins.rd[index], out) ||
+           wire_langtype(wire, out);
+}
+
+bool is_member_container(std::string_view langtype) {
+    return !langtype.empty() &&
+           (langtype.front() == '/' ||
+            langtype.find("\xC2\xB7") != std::string_view::npos);
+}
+
+bool direct_kv_path(NativeCtx& c, int index, std::string* out) {
+    const RegDesc& desc = c.seg->regs[c.ins.rd[index]];
+    if (desc.kind == Operand::Kind::Literal && desc.name.size() > 1 &&
+        desc.name.front() == '/' && desc.name.find(' ') == std::string::npos) {
+        *out = desc.name;
+        return true;
+    }
+
+    std::string langtype;
+    std::string text;
+    if (operand_langtype(c, index, c.in[index], &langtype) &&
+        is_char_wire(langtype) &&
+        wire_text(c.in[index].d, c.in[index].n, langtype, &text) &&
+        !text.empty() && text.front() == '/') {
+        *out = std::move(text);
+        return true;
+    }
+
+    if (desc.kind != Operand::Kind::Literal && !desc.name.empty() &&
+        desc.name.front() == '/' && !desc.name.starts_with("/vthread/")) {
+        *out = desc.name.substr(0, desc.name.find(' '));
+        return true;
+    }
+    return false;
+}
+
+bool format_member_float(double value, std::uint8_t width, std::string* out) {
+    char text[64];
+    std::to_chars_result result;
+    if (width == 4) {
+        const float narrowed = static_cast<float>(value);
+        if (!std::isfinite(narrowed))
+            return false;
+        result = std::to_chars(text, text + sizeof text, narrowed,
+                               std::chars_format::general);
+    } else if (width == 8) {
+        if (!std::isfinite(value))
+            return false;
+        result = std::to_chars(text, text + sizeof text, value,
+                               std::chars_format::general);
+    } else {
+        return false;
+    }
+    if (result.ec != std::errc{})
+        return false;
+    out->assign(text, result.ptr);
+    if (out->find_first_of(".eE") == std::string::npos)
+        out->append(".0");
+    return true;
+}
+
+bool member_key(NativeCtx& c, int index, Wire wire, std::string* out,
+                std::string* err) {
+    FReg& reg = c.f.regs[c.ins.rd[index]];
+    FReg& source = reg.src_ptr ? *reg.src_ptr : reg;
+    if (source.fast_i64) {
+        *out = std::to_string(source.fv);
+        return true;
+    }
+    if (source.fast_bool) {
+        *out = source.fb ? "true" : "false";
+        return true;
+    }
+
+    std::string langtype;
+    if (!operand_langtype(c, index, wire, &langtype)) {
+        *err = "TypeError: kvspace member key has no scalar/string langtype";
+        return false;
+    }
+    if (is_char_wire(langtype)) {
+        if (wire_text(wire.d, wire.n, langtype, out))
+            return true;
+        *err = "TypeError: kvspace member key is not valid text";
+        return false;
+    }
+    if (!langtype.empty() && langtype.front() == '[') {
+        *err = "TypeError: kvspace member key must be a scalar or string";
+        return false;
+    }
+
+    Scalar scalar{};
+    if (!v_scalar(wire, langtype, &scalar)) {
+        *err = "TypeError: unsupported kvspace member key type: " + langtype;
+        return false;
+    }
+    switch (scalar.k) {
+    case Scalar::K::Int:
+        *out = std::to_string(scalar.i);
+        return true;
+    case Scalar::K::Uint:
+        *out = std::to_string(scalar.u);
+        return true;
+    case Scalar::K::Bool:
+        *out = scalar.u ? "true" : "false";
+        return true;
+    case Scalar::K::Float:
+        if (format_member_float(scalar.f, scalar.width, out))
+            return true;
+        *err = "TypeError: kvspace floating member key must be finite";
+        return false;
+    default:
+        *err = "TypeError: unsupported kvspace member key type: " + langtype;
+        return false;
+    }
+}
+
+bool member_path(NativeCtx& c, std::string* base_path,
+                 std::string* member_path_out, bool* base_is_none,
+                 std::string* err) {
+    if (c.ins.nrd < 2) {
+        *err = "TypeError: " + c.ins.name + " requires base and key";
+        return false;
+    }
+
+    const Wire base = c.in[0];
+    std::string langtype;
+    const bool has_langtype = operand_langtype(c, 0, base, &langtype);
+    *base_is_none = !has_langtype && v_is_none(base);
+    if (v_ptr(base)) {
+        if (!has_langtype || !is_member_container(langtype) ||
+            !v_ptr_target(base, base_path) || base_path->empty()) {
+            *err = "TypeError: kvspace member base Ptr target must be a struct/map container";
+            return false;
+        }
+    } else if (has_langtype && is_member_container(langtype)) {
+        if (!c.path_arg(0, c.ins.rd[0], c.seg->regs[c.ins.rd[0]], base_path)) {
+            *err = "TypeError: kvspace member container has no physical path";
+            return false;
+        }
+    } else if (has_langtype && is_char_wire(langtype)) {
+        if (!wire_text(base.d, base.n, langtype, base_path) ||
+            base_path->empty() || base_path->front() != '/') {
+            *err = "TypeError: kvspace member base must be an absolute path string";
+            return false;
+        }
+    } else if (*base_is_none) {
+        if (!c.path_arg(0, c.ins.rd[0], c.seg->regs[c.ins.rd[0]], base_path)) {
+            *err = "TypeError: kvspace member base None has no physical path";
+            return false;
+        }
+    } else {
+        *err = "TypeError: kvspace member access requires a struct/map container or path string";
+        return false;
+    }
+
+    std::string key;
+    if (!member_key(c, 1, c.in[1], &key, err))
+        return false;
+    *member_path_out = *base_path + "\xC2\xB7" + key;
+    return true;
+}
+
+bool kv_get_value(NativeCtx& c, const std::string& path) {
+    const std::uint8_t* value = nullptr;
+    std::uint32_t value_len = 0;
+    if (read_wire_raw(c.f.h, path, &value, &value_len) && value && value_len)
+        return c.vm.write_reg(c.f, c.ins.wr[0], value, value_len);
+
+    std::uint8_t* none = nullptr;
+    std::uint64_t none_len = 0;
+    const bool ok = kvspaceXvalueHeadNewNone(&none, &none_len) == 0 && none &&
+                    none_len <= 0xFFFFFFFFull &&
+                    c.vm.write_reg(c.f, c.ins.wr[0], none,
+                                   static_cast<std::uint32_t>(none_len));
+    std::free(none);
+    return ok;
+}
+
+bool kv_set_value(NativeCtx& c, const std::string& path, Wire value,
+                  std::string* err) {
+    char errbuf[256] = {};
+    bool ok;
+    if (v_is_none(value)) {
+        const char* keys[1] = {path.c_str()};
+        ok = kvspaceDel(c.f.h, keys, 1, errbuf, sizeof errbuf) == 0;
+    } else {
+        ok = kvspaceSetValue(c.f.h, path.c_str(), value.d, value.n,
+                             errbuf, sizeof errbuf) == 0;
+    }
+    if (ok)
+        c.vm.invalidate_path(c.f, path);
+    return kv_fail(c, ok, errbuf, err);
+}
+
+bool h_kv_get(NativeCtx& c, std::string* err) {
+    std::string path;
+    if (c.ins.nrd == 1) {
+        if (!direct_kv_path(c, 0, &path)) {
+            *err = "TypeError: kvspace·get requires an absolute path";
+            return false;
+        }
+    } else if (c.ins.nrd == 2) {
+        std::string base_path;
+        bool base_is_none = false;
+        if (!member_path(c, &base_path, &path, &base_is_none, err))
+            return false;
+    } else {
+        *err = "TypeError: kvspace·get requires path or base and key";
+        return false;
+    }
+    return kv_get_value(c, path);
+}
+
+bool h_kv_set(NativeCtx& c, std::string* err) {
+    std::string path;
+    Wire value{};
+    if (c.ins.nrd == 2) {
+        if (!direct_kv_path(c, 0, &path)) {
+            *err = "TypeError: kvspace·set requires an absolute path and value";
+            return false;
+        }
+        value = c.in[1];
+    } else if (c.ins.nrd == 3) {
+        std::string base_path;
+        bool base_is_none = false;
+        if (!member_path(c, &base_path, &path, &base_is_none, err))
+            return false;
+
+        const RegDesc& base_desc = c.seg->regs[c.ins.rd[0]];
+        if (base_is_none && base_desc.kind == Operand::Kind::Var &&
+            !base_path.starts_with("/lib")) {
+            const std::uint8_t* memhead = nullptr;
+            std::uint32_t memhead_len = 0;
+            std::string memhead_langtype;
+            if (!read_wire_raw(c.f.h, base_path, &memhead, &memhead_len) ||
+                !wire_langtype(Wire{memhead, memhead_len}, &memhead_langtype) ||
+                !is_member_container(memhead_langtype)) {
+                const std::string name =
+                    base_desc.name.empty() ? base_path : base_desc.name;
+                *err = "TypeError: memhead " + name +
+                       " does not exist — declare the container first (e.g. `" +
+                       name + ":T = {}`)";
+                return false;
+            }
+        }
+        if (!c.vm.read_reg(c.f, c.ins.rd[2], &value)) {
+            *err = "TypeError: kvspace·set value is missing";
+            return false;
+        }
+    } else {
+        *err = "TypeError: kvspace·set requires path/value or base/key/value";
+        return false;
+    }
+    return kv_set_value(c, path, value, err);
 }
 
 bool h_kv_del(NativeCtx& c, std::string* err) {
@@ -2426,6 +2709,8 @@ constexpr NativeCap kVthreadCaps[] = {
 };
 
 constexpr NativeCap kKvspaceCaps[] = {
+    NCAP("kvspace/get", h_kv_get),
+    NCAP("kvspace/set", h_kv_set),
     NCAP("kvspace/del", h_kv_del),
     NCAP("kvspace/deltree", h_kv_deltree),
     NCAP("kvspace/mkindex", h_kv_mkindex),

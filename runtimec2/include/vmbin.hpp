@@ -146,6 +146,7 @@ struct FReg {
 
 // 单帧执行上下文（二进制栈帧）。
 struct FrameCtx {
+    FrameCtx* parent = nullptr;
     void* h = nullptr;
     std::string vid;
     int depth = 0;

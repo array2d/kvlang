@@ -102,6 +102,11 @@ add_test(NAME c2_ops_gen_check
 add_test(NAME c2_m1_smoke
          COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/m1_smoke.sh
                  $<TARGET_FILE:m1_smoke>)
+add_test(NAME c2_kvspace_dynamic_ops
+         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/kvspace_dynamic_ops.sh
+                 $<TARGET_FILE:m1_smoke>
+                 ${CMAKE_CURRENT_SOURCE_DIR}/../bin/byteseek)
+set_tests_properties(c2_kvspace_dynamic_ops PROPERTIES TIMEOUT 120)
 add_test(NAME c2_symbol_parity
          COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/symbols.sh
                  $<TARGET_FILE:kvlang_runtimec2>)

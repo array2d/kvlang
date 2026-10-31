@@ -22,10 +22,11 @@ RWIR_HEADER = ROOT / "runtimec2/include/rwir.hpp"
 VM_SOURCE = ROOT / "runtimec2/src/vmkv.cpp"
 NATIVE_SOURCE = ROOT / "runtimec2/src/vmkv_native.cpp"
 
-KNOWN_UNSUPPORTED = {
-    "kvspace·get": "retired from layout emission; legacy table declaration has no runtimec2 handler",
-    "kvspace·set": "retired from layout emission; legacy table declaration has no runtimec2 handler",
-    "kvspace·watch": "cross-process primitive has no runtimec2 handler or handoff classification",
+KNOWN_HANDOFF_BLOCKERS = {
+    "kvspace·watch": (
+        "runtimec2 yields the exact PC, but the default byteseek driver has no "
+        "in-process handler or registered external claimant"
+    ),
 }
 
 CONTROL_OPS = {
@@ -343,8 +344,6 @@ def check_dispatch_contract(entries, handlers, errors):
             folded_native[folded] = entry.name
             if folded in handlers:
                 availability["native-handler"] += 1
-            elif entry.name in KNOWN_UNSUPPORTED:
-                availability["unsupported"] += 1
             else:
                 errors.append(f"native opcode has no registered handler: {entry.name} -> {folded}")
         elif impl == "Handoff":
@@ -353,18 +352,18 @@ def check_dispatch_contract(entries, handlers, errors):
                     f"handoff opcode has executable-table fields: {entry.name} "
                     f"({entry.op}, {entry.kind}, width={entry.width})"
                 )
-            availability["handoff"] += 1
+            availability["handoff-routed"] += 1
+            if entry.name in KNOWN_HANDOFF_BLOCKERS:
+                availability["handoff-blocker"] += 1
         else:
             errors.append(f"opcode has unsupported implementation class: {entry.name} ({entry.impl})")
 
-    for name in sorted(KNOWN_UNSUPPORTED):
+    for name in sorted(KNOWN_HANDOFF_BLOCKERS):
         entry = by_name.get(name)
         if entry is None:
-            errors.append(f"stale unsupported declaration: {name} is absent from generated table")
-        elif entry.impl != "Impl::Native":
-            errors.append(f"stale unsupported declaration: {name} is now {entry.impl}")
-        elif name.replace("·", "/") in handlers:
-            errors.append(f"stale unsupported declaration: {name} now has a native handler")
+            errors.append(f"stale handoff blocker: {name} is absent from generated table")
+        elif entry.impl != "Impl::Handoff":
+            errors.append(f"stale handoff blocker: {name} is now {entry.impl}")
 
     for folded_name in sorted(handlers):
         if folded_name not in folded_native:
@@ -469,14 +468,16 @@ def main():
         f"generated typed={counts['Typed']} control={counts['Control']} "
         f"dynamic={counts['Dynamic']} native={counts['Native']} handoff={counts['Handoff']}; "
         f"available native-handler={availability['native-handler']} "
-        f"handoff={availability['handoff']} unsupported={availability['unsupported']})"
+        f"routed-handoff={availability['handoff-routed']} "
+        f"blocked-handoff={availability['handoff-blocker']} "
+        f"unsupported={availability['unsupported']})"
     )
     print(
         "LIMITED guarantee: validates generation, dispatch shapes, lookup reachability, and "
         "Native registration; it does not prove handler bodies or runtime value semantics"
     )
-    for name, reason in sorted(KNOWN_UNSUPPORTED.items()):
-        print(f"UNSUPPORTED {name}: {reason}")
+    for name, reason in sorted(KNOWN_HANDOFF_BLOCKERS.items()):
+        print(f"BLOCKER {name}: {reason}")
 
     if len(sys.argv) == 2:
         csv_path = Path(sys.argv[1]).resolve()

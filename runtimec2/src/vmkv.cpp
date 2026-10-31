@@ -72,6 +72,7 @@ struct FctxLease {
             p = g_fctx_free.back().release();
             g_fctx_free.pop_back();
             FrameCtx& c = *p;
+            c.parent = nullptr;
             c.regs.clear();
             c.arg_src_n = c.arg_dst_n = 0;
             c.mem_frame = false;
@@ -81,7 +82,10 @@ struct FctxLease {
             c.frame_dir_hint.clear();
         }
     }
-    ~FctxLease() { g_fctx_free.emplace_back(p); }
+    ~FctxLease() {
+        p->parent = nullptr;
+        g_fctx_free.emplace_back(p);
+    }
     FctxLease(const FctxLease&) = delete;
     FctxLease& operator=(const FctxLease&) = delete;
 };
@@ -112,6 +116,32 @@ bool holds_value(const FReg* r) {
     while (!(r->fast_i64 || r->fast_bool) && r->src_ptr)
         r = r->src_ptr;
     return r->fast_i64 || r->fast_bool;
+}
+
+void invalidate_reg_cache(FReg& reg) {
+    reg.ref = kvspaceRef_t{};
+    reg.resolved = false;
+    reg.noslot = false;
+    reg.view = kvspaceXvalueBodyView_t{};
+    reg.view_ok = false;
+    reg.body = nullptr;
+    reg.cap = 0;
+    reg.sc_ok = false;
+    reg.sck = Scalar::K::None;
+    reg.scw = 0;
+    reg.fast_i64 = false;
+    reg.fv = 0;
+    reg.fast_bool = false;
+    reg.fb = false;
+    reg.base_ptr = false;
+    reg.base_ptr_known = false;
+    reg.arr_esz = 0;
+    for (std::int32_t& dim : reg.arr_dims)
+        dim = 0;
+    reg.arr_ndim = 0;
+    reg.arr_kind = 0;
+    reg.arr_bodylen = 0;
+    reg.arr_elem_kind.clear();
 }
 
 // First Var reg whose name (type suffix stripped) is `name`; -1 if none.
@@ -181,6 +211,28 @@ bool set_value_typed(void* h, const char* key, const std::uint8_t* value,
     const int rc = kvspaceSetValue(h, key, w, (std::uint32_t)total, err, err_cap);
     std::free(w);
     return rc == 0;
+}
+
+void Vmkv::invalidate_path(FrameCtx& f, std::string_view path) {
+    for (FrameCtx* frame = &f; frame; frame = frame->parent) {
+        for (FReg& reg : frame->regs) {
+            std::vector<FReg*> aliases;
+            FReg* cursor = &reg;
+            while (cursor &&
+                   std::find(aliases.begin(), aliases.end(), cursor) == aliases.end()) {
+                aliases.push_back(cursor);
+                cursor = cursor->src_ptr ? cursor->src_ptr : cursor->dst_ptr;
+            }
+            const bool matches =
+                std::any_of(aliases.begin(), aliases.end(), [&](const FReg* alias) {
+                    return alias->key == path;
+                });
+            if (!matches)
+                continue;
+            for (FReg* alias : aliases)
+                invalidate_reg_cache(*alias);
+        }
+    }
 }
 
 // 变量描述符 → 具体 key（帧入口一次；Ptr 链在此解析完）。
@@ -3296,6 +3348,7 @@ bin::RunResult Vmkv::do_call(FrameCtx& f, const Segment* seg, const CInsn& ins,
     }
     FctxLease lease;
     FrameCtx& nfc = *lease.p;
+    nfc.parent = &f;
     nfc.h = f.h;
     nfc.vid = f.vid;
     nfc.depth = f.depth + 1;

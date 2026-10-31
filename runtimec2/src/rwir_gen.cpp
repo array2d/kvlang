@@ -168,7 +168,7 @@ const Entry myrwircaps[] = {
     {"kvspace·mkindex", Op::None, Kind::None, 0, Class::Complex, Impl::Native},
     {"kvspace·rmindexext", Op::None, Kind::None, 0, Class::Complex, Impl::Native},
     {"kvspace·set", Op::None, Kind::None, 0, Class::Complex, Impl::Native},
-    {"kvspace·watch", Op::None, Kind::None, 0, Class::Complex, Impl::Native},
+    {"kvspace·watch", Op::None, Kind::None, 0, Class::Complex, Impl::Handoff},
     {"le", Op::Le, Kind::Any, 0, Class::Complex, Impl::Dynamic},
     {"log", Op::Log, Kind::Any, 0, Class::Complex, Impl::Dynamic},
     {"lt", Op::Lt, Kind::Any, 0, Class::Complex, Impl::Dynamic},
