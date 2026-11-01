@@ -65,10 +65,14 @@ SWEEP = {
 }
 SCALE_ENV = "BENCH_SCALE"   # python/rust/c 从此环境变量读规模
 SCALE_TOKEN = "__SCALE__"   # kvlang 源码里的规模占位符
+# case 结构版本：历史 CSV 一律视为 1（不回填）；改 case 结构或计时代码路径必须 +1，
+# 只改注释/无关字段不升。跨 harness_rev 只能看趋势，不能做精确回归判定。
+HARNESS_REV = 2
 FIELDS = ["timestamp", "version", "commit", "cpu", "case", "input", "samples",
           "kvlang_shm_ns", "kvlang_fs_ns", "kvlang_redis_ns",
           "python_ns", "rust_ns", "c_ns",
-          "python_ver", "rust_ver", "c_ver", "native_opt", "valid"]
+          "python_ver", "rust_ver", "c_ver", "native_opt", "valid",
+          "harness_rev"]
 
 
 def sh(cmd, timeout=None, env=None):
@@ -284,7 +288,8 @@ def show_history():
     rows = []
     for fp in files:
         with fp.open() as f:
-            rows.extend(csv.DictReader(f))
+            # 只认本脚本产出的快照；带 `#` 元数据头的 release CSV 无 version 列，跳过。
+            rows.extend(r for r in csv.DictReader(f) if r.get("version"))
     if not rows:
         print("results/ 快照为空")
         return
@@ -298,7 +303,7 @@ def show_history():
             return fmt_ns(int(v)) if v not in ("", "-") else "-"
         cells = "".join(f"{g(c):>11}" for c in COLS)
         print(f"{r['version']:<{w}}{r['case']:<14}"
-              f"{(r.get('input') or '-'):<{iw}}{cells}  {r['valid']}")
+              f"{(r.get('input') or '-'):<{iw}}{cells}  {r.get('valid', '-')}")
 
 
 def main():
@@ -338,7 +343,8 @@ def main():
         print("无匹配 case", file=sys.stderr)
         sys.exit(1)
 
-    print(f"version={version} commit={commit} cpu=[{cpu}]\n"
+    print(f"version={version} commit={commit} cpu=[{cpu}] "
+          f"harness_rev={HARNESS_REV}\n"
           f"python={py_ver} rust={rust_ver} gcc={c_ver} opt=[{NATIVE_OPT}] "
           f"backends={','.join(args.backends)} repeat={args.repeat}\n")
     print_header()
@@ -361,6 +367,7 @@ def main():
                 "c_ns": best.get("c") or "",
                 "python_ver": py_ver, "rust_ver": rust_ver, "c_ver": c_ver,
                 "native_opt": NATIVE_OPT, "valid": valid,
+                "harness_rev": HARNESS_REV,
             })
 
     if args.no_write:
