@@ -51,11 +51,11 @@ runtime:
 	cmake -S runtime -B build/runtime -DCMAKE_BUILD_TYPE=Release
 	cmake --build build/runtime --target kvlang_runtime -j
 
-# c2 runtime（默认）：产物 lib/libkvlang_runtimec2.so。C 版 libkvlang_runtime.so
-# 仍由 `make runtime` 单独产出（同目录）。
+# c2 runtime（默认）：产物 lib/libkvlang_runtimec2.so + bin/binircompiler
+# （编译模块的可执行入口）。C 版 libkvlang_runtime.so 仍由 `make runtime` 单独产出。
 runtimec2:
 	cmake -S runtimec2 -B build/runtimec2 -DCMAKE_BUILD_TYPE=Release
-	cmake --build build/runtimec2 --target kvlang_runtimec2 -j
+	cmake --build build/runtimec2 --target kvlang_runtimec2 binircompiler -j
 
 byteseek:
 	cargo build --release --manifest-path byteseek/Cargo.toml

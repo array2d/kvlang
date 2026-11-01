@@ -24,6 +24,7 @@ add_library(kvlang_runtimec2 SHARED EXCLUDE_FROM_ALL
     src/rwir_gen.cpp
     src/rwir_lookup.cpp
     src/codeseg.cpp
+    src/binircompiler/compiler.cpp
     src/vmbin/binir_codec.cpp
     src/jit/jit.cpp
     src/jit/jit_stage2.cpp
@@ -35,7 +36,7 @@ add_library(kvlang_runtimec2 SHARED EXCLUDE_FROM_ALL
     src/vmkv_rwirruntimeimpl.cpp
     src/binir_dump.cpp
     src/runtime.cpp)
-add_custom_target(runtimec2 ALL DEPENDS kvlang_runtimec2)
+add_custom_target(runtimec2 ALL DEPENDS kvlang_runtimec2 binircompiler)
 
 # 性能探针开关：默认关（热路径零开销）。
 option(RUNTIMEC2_VMBIN_PROFILE "Build runtimec2 with per-op rdtsc profiling" OFF)
@@ -99,6 +100,7 @@ target_include_directories(myrwircap_dump PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/in
 add_executable(segment_shape_dump
     tools/segment_shape_dump.cpp
     src/codeseg.cpp
+    src/binircompiler/compiler.cpp
     src/vmbin/binir_codec.cpp
     src/binir_dump.cpp
     src/vmbin/profile.cpp
@@ -114,6 +116,50 @@ target_include_directories(segment_shape_dump PRIVATE
 target_compile_options(segment_shape_dump PRIVATE -O2 -Wall -Wextra)
 target_link_directories(segment_shape_dump PRIVATE "${LIB_DIR}" "${BACKEND_DIR}")
 target_link_libraries(segment_shape_dump PRIVATE kvspace)
+
+# 可执行入口 binircompiler：与运行时用同一份编译源码（src/binircompiler/compiler.cpp）。
+# 这里**刻意重复编译**这组 TU，而不是链接 libkvlang_runtimec2.so：库用
+# -fvisibility=hidden 且 c2_symbol_parity 禁止新增导出，隐藏符号无法从外部链接。
+# 与 tools/segment_shape_dump 同法；抽 OBJECT 库属另一层改造，暂不做。
+add_executable(binircompiler
+    src/binircompiler/main.cpp
+    src/binircompiler/compiler.cpp
+    src/vmbin/binir_codec.cpp
+    src/binir_dump.cpp
+    src/vmbin/profile.cpp
+    src/value.cpp
+    src/valueio.cpp
+    src/rwir_gen.cpp
+    src/rwir_lookup.cpp)
+target_include_directories(binircompiler PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include)
+target_compile_options(binircompiler PRIVATE
+    -O3 -fno-exceptions -fno-rtti -Wall -Wextra)
+target_link_directories(binircompiler PRIVATE "${LIB_DIR}" "${BACKEND_DIR}")
+target_link_libraries(binircompiler PRIVATE kvspace ${CMAKE_DL_LIBS})
+if(APPLE)
+    set_target_properties(binircompiler PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../bin"
+        INSTALL_RPATH "@loader_path/../lib;@loader_path/../lib/kvspace"
+        BUILD_WITH_INSTALL_RPATH ON)
+else()
+    set_target_properties(binircompiler PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../bin"
+        INSTALL_RPATH "\$ORIGIN/../lib;\$ORIGIN/../lib/kvspace"
+        BUILD_WITH_INSTALL_RPATH ON
+        LINK_FLAGS "-Wl,--disable-new-dtags")
+endif()
+
+add_test(NAME c2_binircompiler_cli
+         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/binircompiler_cli.sh
+                 $<TARGET_FILE:binircompiler>
+                 ${CMAKE_CURRENT_SOURCE_DIR}/../bin/byteseek
+                 ${CMAKE_CURRENT_SOURCE_DIR}/../bin/kvlanglayout
+                 ${CMAKE_CURRENT_SOURCE_DIR}/..)
+set_tests_properties(c2_binircompiler_cli PROPERTIES TIMEOUT 120)
 
 # binir 序列打印（§2·8）：只编 binir_dump.cpp，不链接 runtime/kvspace。
 add_executable(binir_dump_test
