@@ -37,6 +37,16 @@ fn fresh_kv() -> Kv {
     );
     let mut kv = Kv::conn(&dsn);
     init_dirs(&mut kv).unwrap();
+    // 裸名必须有声明来源：运行时 boot 会发布这些内建的 /lib/<op> def rwir，
+    // 测试直接在空 store 上布局源码，按同样形状补声明（变参）。
+    for op in ["println", "print", "cerr"] {
+        kv.set(&[(
+            format!("/lib/{op}"),
+            kvkind::KIND_DEF_RWIR.to_string(),
+            kvkind::new_defrwir(1, 0, true),
+        )])
+        .unwrap();
+    }
     kv
 }
 
