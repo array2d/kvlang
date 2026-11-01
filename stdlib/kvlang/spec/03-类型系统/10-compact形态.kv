@@ -14,6 +14,31 @@ a:[]int64 = [10, 20, 30, 40]   // head langtype = [4]int64，body = 4×8 字节
 - 字符串是 compact 的字符序列：`s:char/utf8 = "hi"` 的 langtype 为 `[2]char/utf8`。单个字符串是
   compact；**字符串的数组**是变长集合，必须 stringkeymap。
 
+### 元素类型限定
+
+compact 的元素种类（langtype 尾段）**必须**是固定长度的标量；允许的只有以下 11 种
+（`bool` 与 10 种数值标量）：
+
+| 类别 | 元素种类 | 元素宽度（字节） |
+|------|----------|-----------------|
+| 布尔 | `bool` | 1 |
+| 有符号整数 | `int8` `int16` `int32` `int64` | 1 / 2 / 4 / 8 |
+| 无符号整数 | `uint8` `uint16` `uint32` `uint64` | 1 / 2 / 4 / 8 |
+| 浮点 | `float32` `float64` | 4 / 8 |
+
+- **char 族不是标量元素**：`[N]char/utf8`、`[N]char/utf32`、`[N]char/ascii` 是
+  **字符串**（compact 的字符序列），不是「字符的数组」。`s:char/utf8 = "hi"` 的
+  langtype 是 `[2]char/utf8`，body 是字符序列本身。
+- **其它类型不得作为 compact 元素**：`string`、数组、map、struct、ptr 等都不是定长
+  标量；`[]string` 这种字符串数组不是 compact，必须用 stringkeymap（`{...}` 散 key
+  形态）。含变长元素字面量的 `[...]` 在 layout 阶段报错。
+- **对齐 C 数组**：compact 创建即定长 `T[len]`（多维为 `[d0,d1,…]T`），body 连续、
+  按元素宽度寻址、下标访问做越界检查；对应 C `T[len]`、Go `[len]T`、Rust
+  `[T; len]`。
+- **实现约束**：元素种类与元素宽度在创建时确定，创建后 body 的字节布局不再改变。
+  `compactarray·newreinterpret` 只替换 langtype 视图、body 原样保留；需要不同元素
+  布局时必须新建 compact（`compactarray·new` / `newslice` / `newreshape`），不能就地改。
+
 ### compact 元素访问
 
 下标 `a[i]` 是 compact 元素访问：读降级为 `compactarray·at`，写（`a[i]=v` 或 `v -> a[i]`）降级为

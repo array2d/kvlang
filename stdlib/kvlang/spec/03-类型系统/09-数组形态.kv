@@ -10,7 +10,9 @@ rwir 只写既有槽/成员，绝不隐式跨形态转换）。
 
 ## 两套算子族
 
-**`compactarray`（compact 形态，单一 XValue，定长）**：
+**`compactarray`（compact 形态，单一 XValue，定长）**：元素限 `bool` 与 10 种数值标量
+（有/无符号 8/16/32/64 位整数、`float32/float64`）；char 族是字符串本身，
+不是「字符的数组」（见 [[compact形态]]）。
 
 | 类别 | rwir | 语义 |
 |------|------|------|

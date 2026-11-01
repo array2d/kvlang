@@ -13,6 +13,9 @@ lib kvlang/spec/类型系统/稠密vs稀疏 {
 | 随机访问 | `a[i,j]` 按 row-major O(1) 偏移 | `base·[i,j]` / `kvspace·get` 按 key 查找 |
 | 适用 | 稠密张量、绝大多数元素有值、需连续内存与 O(1) 下标 | 稀疏矩阵、坐标空间极大而实际有值项稀少 |
 
+compact 的元素种类限 `bool` 与 10 种数值标量；char 族表示字符串本身，不是「字符的数组」
+（见 [[compact形态]]）。
+
 ```kv
 dense:[]int32 = compactarray·newreshape(array(…), 1024, 1024)   // 4 MiB 稠密块，storetype 2
 sparse:[int32,int32]·int32 = {}                     // 稀疏，storetype 0 容器头与物理成员 key
