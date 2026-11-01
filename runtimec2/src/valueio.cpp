@@ -91,7 +91,13 @@ struct ViewCache {
     std::unordered_map<std::string, ViewEnt, SvHash, std::equal_to<>> m;
 };
 
+struct ShmSlotCap {
+    void* h = nullptr;
+    int state = 0;  // 0 = unknown, 1 = supported, -1 = unsupported (durable)
+};
+
 thread_local ViewCache g_vc;
+thread_local ShmSlotCap g_shm_cap;
 constexpr std::size_t kViewCacheMax = 1u << 16;
 
 const char* zkey(std::string_view k) {
@@ -136,10 +142,14 @@ std::uint32_t wire_total(const kvspaceViewToken_t& t) {
         return 0;
     std::uint64_t len = kvspaceXvalueHeadLen(
         reinterpret_cast<const kvspaceXvalueHead*>(hd));
+    if (t.cap < static_cast<std::uint64_t>(t.headlen) + 2u ||
+        len > t.cap - static_cast<std::uint64_t>(t.headlen) - 2u)
+        return 0;
     /* 完整值长 = head + body + attr（attr_len @8+len 自描述）。 */
-    std::uint64_t alen = 0;
-    if (t.body_cap >= 2)
-        alen = (std::uint64_t)hd[8 + len] | ((std::uint64_t)hd[9 + len] << 8);
+    const std::uint64_t alen =
+        (std::uint64_t)hd[8 + len] | ((std::uint64_t)hd[9 + len] << 8);
+    if (alen < 2u)
+        return 0;
     const std::uint64_t total = (std::uint64_t)t.headlen + len + alen;
     if (total > t.cap || total > 0x7fffffffu)
         return 0;
@@ -153,14 +163,49 @@ void view_cache_tick() noexcept {
         vc_ack(g_vc.h);
 }
 
-void view_cache_idle_all() noexcept { view_cache_idle(g_vc.h); }
+void view_cache_idle_all() noexcept {
+    view_cache_idle(g_vc.h);
+    g_shm_cap.h = nullptr;
+    g_shm_cap.state = 0;
+}
 
 void view_cache_idle(void* h) noexcept {
-    if (h && g_vc.h == h && g_vc.state == 1) {
-        g_vc.m.clear();
-        kvspaceViewQuiesce(h, 1);
+    if (h && g_vc.h == h) {
+        if (g_vc.state == 1) {
+            g_vc.m.clear();
+            kvspaceViewQuiesce(h, 1);
+        }
         g_vc.state = 0;
         g_vc.h = nullptr;
+    }
+}
+
+void view_cache_close(void* h) noexcept {
+    view_cache_idle(h);
+    if (h && g_shm_cap.h == h) {
+        g_shm_cap.h = nullptr;
+        g_shm_cap.state = 0;
+    }
+}
+
+bool shm_slot_supported(void* h) noexcept {
+    if (!h)
+        return false;
+    if (g_shm_cap.h == h && g_shm_cap.state != 0)
+        return g_shm_cap.state > 0;
+    kvspaceRef_t dref{};
+    kvspaceXvalueBodyView_t dview{};
+    const int rc =
+        kvspaceXvalueBodyView(h, &dref, "/\xE2\x80\xA5" "rc2_cap", &dview);
+    g_shm_cap.h = h;
+    g_shm_cap.state = (rc == -2) ? -1 : 1;
+    return g_shm_cap.state > 0;
+}
+
+void mark_shm_slot_unsupported(void* h) noexcept {
+    if (h) {
+        g_shm_cap.h = h;
+        g_shm_cap.state = -1;
     }
 }
 

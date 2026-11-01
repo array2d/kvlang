@@ -55,7 +55,8 @@ endif()
 
 target_include_directories(kvlang_runtimec2 PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_include_directories(kvlang_runtimec2 SYSTEM PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/include   # ABI 头只读引用
     ${CMAKE_CURRENT_SOURCE_DIR}/../include)          # deps 头（deps.sh 落 repo）
 
@@ -101,7 +102,7 @@ set_target_properties(inplace_body_test PROPERTIES
     BUILD_RPATH "${LIB_DIR};${BACKEND_DIR}")
 
 add_executable(m1_smoke tests/m1_smoke.c)
-target_include_directories(m1_smoke PRIVATE
+target_include_directories(m1_smoke SYSTEM PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../include)
 target_link_directories(m1_smoke PRIVATE "${LIB_DIR}" "${BACKEND_DIR}")
@@ -130,7 +131,8 @@ add_executable(segment_shape_dump
     src/rwir_lookup.cpp)
 target_include_directories(segment_shape_dump PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_include_directories(segment_shape_dump SYSTEM PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../include)
 target_compile_options(segment_shape_dump PRIVATE -O2 -Wall -Wextra)
@@ -251,6 +253,19 @@ target_include_directories(register_desc_type_test PRIVATE
 target_compile_options(register_desc_type_test PRIVATE -O2 -Wall -Wextra)
 add_test(NAME c2_register_desc_type COMMAND register_desc_type_test)
 
+# Unit test for bounded wire trailing-attr `langtype` parsing (with ASan).
+add_executable(wire_langtype_test tests/wire_langtype_test.cpp src/value.cpp)
+target_include_directories(wire_langtype_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_include_directories(wire_langtype_test SYSTEM PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include)
+target_compile_options(wire_langtype_test PRIVATE -O2 -Wall -Wextra -fsanitize=address)
+target_link_options(wire_langtype_test PRIVATE -fsanitize=address)
+target_link_directories(wire_langtype_test PRIVATE "${LIB_DIR}" "${BACKEND_DIR}")
+target_link_libraries(wire_langtype_test PRIVATE kvspace)
+add_test(NAME c2_wire_langtype COMMAND wire_langtype_test)
+
 # binir 编解码往返（#583 L2）：不链 kvspace。
 add_executable(binir_codec_test
     tests/binir_codec_test.cpp
@@ -267,6 +282,8 @@ add_test(NAME c2_binir_codec COMMAND binir_codec_test
 add_executable(slot_state_test tests/slot_state_test.cpp)
 target_include_directories(slot_state_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_include_directories(slot_state_test SYSTEM PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include)
 target_compile_options(slot_state_test PRIVATE -O2 -Wall -Wextra)
 add_test(NAME c2_slot_state_unit COMMAND slot_state_test)
 
@@ -329,7 +346,8 @@ add_executable(jit_verify_test
     src/rwir_gen.cpp)
 target_include_directories(jit_verify_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_include_directories(jit_verify_test SYSTEM PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../include)
 target_compile_options(jit_verify_test PRIVATE -O2 -Wall -Wextra)
@@ -341,7 +359,8 @@ add_executable(jit_x64_abi_test
     src/jit/jit_x64.cpp)
 target_include_directories(jit_x64_abi_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_include_directories(jit_x64_abi_test SYSTEM PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../include)
 target_compile_options(jit_x64_abi_test PRIVATE -O2 -Wall -Wextra)
@@ -367,3 +386,15 @@ add_test(NAME c2_jit_return_types
                  ${CMAKE_CURRENT_SOURCE_DIR}/../bin/byteseek
                  ${CMAKE_CURRENT_SOURCE_DIR}/..)
 set_tests_properties(c2_jit_return_types PROPERTIES TIMEOUT 120)
+
+add_test(NAME c2_review_semantics
+         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/review_semantics.sh
+                 ${CMAKE_CURRENT_SOURCE_DIR}/../bin/kvlanglayout
+                 ${CMAKE_CURRENT_SOURCE_DIR}/../bin/byteseek)
+set_tests_properties(c2_review_semantics PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 120)
+
+add_test(NAME c2_ctime_relayout
+         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/ctime_relayout.sh
+                 ${CMAKE_CURRENT_SOURCE_DIR}/../bin/kvlanglayout
+                 ${CMAKE_CURRENT_SOURCE_DIR}/../bin/byteseek)
+set_tests_properties(c2_ctime_relayout PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 120)

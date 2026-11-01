@@ -333,12 +333,17 @@ std::vector<std::uint8_t> emit_arch(const Segment* seg, const JitShape& sh) {
                         c.add(d, *reg_of(ci.rd[1]));
                 } else {
                     const XReg a = *reg_of(ci.rd[0]);
-                    if (!(d == a))
-                        c.mov(d, a);
-                    if (is_lit(ci.rd[1]))
-                        c.add_imm(d, static_cast<std::int32_t>(lit(ci.rd[1])));
-                    else
-                        c.add(d, *reg_of(ci.rd[1]));
+                    if (!is_lit(ci.rd[1]) && !(d == a) && d == *reg_of(ci.rd[1])) {
+                        // `d` aliases `rd[1]` (`t = i + t`): emit `d += a` so `mov d, a` does not clobber `b`.
+                        c.add(d, a);
+                    } else {
+                        if (!(d == a))
+                            c.mov(d, a);
+                        if (is_lit(ci.rd[1]))
+                            c.add_imm(d, static_cast<std::int32_t>(lit(ci.rd[1])));
+                        else
+                            c.add(d, *reg_of(ci.rd[1]));
+                    }
                 }
             }
             continue;

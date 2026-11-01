@@ -46,10 +46,13 @@ struct Register {
     std::int64_t fv = 0;
     bool fast_bool = false;
     bool fb = false;
+    bool kv_live = false;    // slot exists (or may exist) in kvspace
+    bool kv_pinned = false;  // address-taken (`&x`) or Ptr-bound: keep kvspace synced when unviewed
     Register* src_ptr = nullptr;
     Register* dst_ptr = nullptr;
     bool base_ptr = false;
     bool base_ptr_known = false;
+    bool base_path = false;  // base slot holds a `/`-prefixed path string (tracked with `base_ptr_known`)
     // 显式槽状态（成员读/写快路径用，避免每写一次 read_langtype）：
     //   Absent  = 纯内存写（int64 快路径，kvspace 无槽）；
     //   Present = 对该 key 的 kvspace 写成功过；
@@ -96,13 +99,15 @@ struct Frame {
     const void* jit2_entry = nullptr;  // callee 的 JIT2 产物（CallSite 缓存）
 };
 
+// `int64` fast path: compute `+`/`-`/`*` via `uint64_t` for two's-complement wraparound without UB;
+// caller checks `b == 0` beforehand, and `b == -1` avoids `INT64_MIN` `idiv` SIGFPE.
 template <std::uint8_t O>
 inline std::int64_t fast_i64(std::int64_t a, std::int64_t b) {
-    if constexpr (O == 1) return a + b;
-    if constexpr (O == 2) return a - b;
-    if constexpr (O == 3) return a * b;
-    if constexpr (O == 4) return b ? a / b : 0;
-    if constexpr (O == 5) return b ? a % b : 0;
+    if constexpr (O == 1) return (std::int64_t)((std::uint64_t)a + (std::uint64_t)b);
+    if constexpr (O == 2) return (std::int64_t)((std::uint64_t)a - (std::uint64_t)b);
+    if constexpr (O == 3) return (std::int64_t)((std::uint64_t)a * (std::uint64_t)b);
+    if constexpr (O == 4) return b == 0 ? 0 : b == -1 ? (std::int64_t)(0 - (std::uint64_t)a) : a / b;
+    if constexpr (O == 5) return b == 0 || b == -1 ? 0 : a % b;
     if constexpr (O == 6) return a > b ? a : b;
     if constexpr (O == 7) return a < b ? a : b;
     if constexpr (O == 8) return a & b;

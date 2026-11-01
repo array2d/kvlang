@@ -1,4 +1,5 @@
 #include "kvspace.hpp"
+#include "valueio.hpp"
 
 #include <new>
 
@@ -27,6 +28,7 @@ bool Kvspace::open(const char* dsn) noexcept {
 
 void Kvspace::close() noexcept {
     if (h_) {
+        view_cache_close(h_);
         kvspaceClose(h_);
         h_ = nullptr;
     }

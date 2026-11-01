@@ -150,7 +150,9 @@ char* bootstrap_h(void* h, const char* funcname) {
         return nullptr;
     // 启动预构建（M1）：从入口函数沿调用图可达性 build + JIT 编译。
     // 执行前（test() 的 t0 之前）完成——一次性构建/编译移出计时窗。
+    bump_segment_epoch();
     prebuild_reachable(h, func_key);
+    (void)take_last_segment_error();
     return strdup(vid.c_str());
 }
 
@@ -170,6 +172,7 @@ int execute_vthread_h(void* h, const char* vid, char** out_pc,
     const std::string msg_key = join(g_vmkv.vthread_root(vid), join("/", join(kMemberSep, "msg")));
     const std::string vid_root = g_vmkv.vthread_root(vid);
     for (;;) {
+        bump_segment_epoch();
         std::string st;
         if (!read_text(h, st_key, &st) || st.empty())
             return -1;
@@ -188,8 +191,14 @@ int execute_vthread_h(void* h, const char* vid, char** out_pc,
                          pc_k.c_str(), pc.c_str(), st.c_str());
         // 本 runtime 能力判定：经段缓存预解码找 opcode，找到即本地执行。
         std::string op;
-        if (!read_opcode(h, pc, &op))
+        if (!read_opcode(h, pc, &op)) {
+            std::string seg_err = take_last_segment_error();
+            if (!seg_err.empty()) {
+                write_status(h, vid, "error");
+                write_text(h, msg_key, seg_err);
+            }
             return -1;
+        }
         const rwir::Entry* e = rwir::find_myrwircap(op.data(),
                                                    static_cast<std::uint32_t>(op.size()));
         static const bool op_trace = std::getenv("RC2_TRACE") != nullptr;
@@ -239,6 +248,11 @@ int execute_vthread_h(void* h, const char* vid, char** out_pc,
                     return -1;
                 continue;
             }
+            std::string st_after;
+            if (!read_text(h, st_key, &st_after) ||
+                (st_after != "init" && st_after != "running" &&
+                 st_after != "wait"))
+                return 0;  // paused / done / error: halt without external handoff
             if (out_pc)
                 *out_pc = strdup(stop_pc.c_str());
             return 1;

@@ -63,6 +63,7 @@ std::vector<std::uint8_t> emit_arch(const Segment* seg, const JitShape& sh);
 // 返回 nullptr = 不可 JIT / 发射失败（调用方回退 fast kernel）。
 const void* jit_compile(const std::string& func_dir, const Segment* seg);
 void jit_clear_cache();
+std::uint64_t jit_cache_epoch() noexcept;
 
 // 测试/诊断入口：只做静态判定，不发射、不缓存、不执行。
 bool jit_verify(const Segment* seg, JitRefusal* refusal);

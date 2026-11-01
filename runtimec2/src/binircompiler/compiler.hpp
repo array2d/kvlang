@@ -64,6 +64,11 @@ const Segment* cached(void* kvspace, const std::string& func_dir,
 // 纯查缓存，不建段（cached_insn 的未命中语义）。
 const Segment* lookup(const std::string& func_dir);
 void clear_cache();
+std::string take_last_error();
+void bump_epoch() noexcept;
+std::uint64_t current_epoch() noexcept;
+std::uint64_t relayout_epoch() noexcept;
+bool segment_may_stop(void* kvspace, const Segment* seg);
 
 // encode → decode → same_program 往返校验（--check）。
 bool check_roundtrip(const Segment& segment, std::string* why);

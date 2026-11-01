@@ -203,9 +203,9 @@ bool encode_binir(const Segment& segment, std::vector<std::uint8_t>* out) {
     std::vector<std::string> const_texts;
     std::vector<std::string> callees;
 
-    std::vector<bool> used(nslots, false);
+    std::vector<std::uint8_t> used(nslots, 0);
     auto note_reg = [&](std::uint8_t slot) -> bool {
-        used[slot] = true;
+        used[slot] = 1;
         if (reg_id[slot] < 0) {
             if (nreg >= 255)
                 return false;
@@ -214,7 +214,7 @@ bool encode_binir(const Segment& segment, std::vector<std::uint8_t>* out) {
         return true;
     };
     auto note_const = [&](std::uint8_t slot) {
-        used[slot] = true;
+        used[slot] = 1;
         if (const_id[slot] < 0) {
             const int id = static_cast<int>(const_texts.size());
             const_id[slot] = id;
@@ -1265,10 +1265,17 @@ bool decode_binir(const std::uint8_t* data, std::size_t size, Segment* out) {
     }
 
     bool has_handler = false;
-    for (const Instruction& ins : decoded.insns)
+    bool stops_local = false;
+    for (const Instruction& ins : decoded.insns) {
         has_handler = has_handler || ins.handler != rwir::RwirHandlerId::None ||
                       ins.impl == rwir::Impl::Handoff;
+        stops_local = stops_local || ins.impl == rwir::Impl::Handoff ||
+                      instruction_is(ins, rwir::RwirId::VthreadCall) ||
+                      instruction_is(ins, rwir::RwirId::VthreadRun) ||
+                      instruction_is(ins, rwir::RwirId::VthreadSetStatus);
+    }
     decoded.has_rwirhandler = has_handler;
+    decoded.stops_local = stops_local;
     *out = std::move(decoded);
     return true;
 }

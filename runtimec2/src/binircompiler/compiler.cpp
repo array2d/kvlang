@@ -4,11 +4,13 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <optional>
 #include <unordered_map>
 #include <vector>
 
 #include <kvspace/kvspace.h>
+#include <kvspace/xvalue_head.h>
 
 #include "binir_codec.hpp"
 #include "binir_dump.hpp"
@@ -139,8 +141,11 @@ bool operand_desc(void* h, const std::string& key, RegDesc* out,
                       : op[0] == '*'                 ? VC::Ptr
                       : op.find(' ') == std::string::npos ? VC::Plain
                                                           : VC::Typed;
-        out->member = !op.empty() && op[0] != '/' &&
-                      op.find("\xC2\xB7") != std::string::npos;
+        // Member write slot: relative `base·name`, or `/`-prefixed path with dynamic `·*k`
+        // (static `/tmp/kvt·data` writes the literal key directly).
+        out->member = !op.empty() &&
+                      (op[0] != '/' ? op.find("\xC2\xB7") != std::string::npos
+                                    : op.find("\xC2\xB7*") != std::string::npos);
         // E 层：操作数槽 NUL 后的类型串（layout typed_slot_value）。
         if (!ltype.empty())
             langtype_kind(ltype, &out->langtype, &out->width);
@@ -151,20 +156,12 @@ bool operand_desc(void* h, const std::string& key, RegDesc* out,
     }
     out->kind = Operand::Kind::Literal;
     out->slot_key = key;
-    // 绝对路径字面量（对齐 C is_absolute_key）：槽值是 char/ 且文本 `/` 开头 →
-    // name 存路径本体，运行期 read/write 直接以路径作 key（`42 -> "/path"` 路径写、
-    // `"/path" -> v` 路径读、println 实参）。`·`（U+00B7）是成员分隔，保留原样。
+    // Quoted string read operands always evaluate to string values (unquoted `/tmp/...` reads kvspace);
+    // member bases, call args, and `&"/x"` extract path text explicitly where required.
+    // Literal wire `langtype` is used here only for static type annotation.
     std::string lt;
-    if (read_langtype(h, key, &lt)) {
+    if (read_langtype(h, key, &lt))
         langtype_kind(lt, &out->langtype, &out->width);
-        const std::uint8_t* d = nullptr;
-        std::uint32_t n = 0;
-        std::string txt;
-        if (lt.find("char/") != std::string::npos &&
-            read_wire_raw(h, key, &d, &n) && d && n &&
-            wire_text(d, n, lt, &txt) && !txt.empty() && txt[0] == '/')
-            out->name = txt;
-    }
     return true;
 }
 
@@ -345,8 +342,9 @@ bool same_program(const Segment& a, const Segment& b, std::string* why) {
                 return fail("write operand");
     }
     if (a.callees != b.callees || a.extra_rwir_names != b.extra_rwir_names ||
-        a.has_rwirhandler != b.has_rwirhandler) {
-        *why = "pool/has_rwirhandler";
+        a.has_rwirhandler != b.has_rwirhandler ||
+        a.stops_local != b.stops_local) {
+        *why = "pool/has_rwirhandler/stops_local";
         return false;
     }
     if (a.call_sites.size() != b.call_sites.size()) {
@@ -460,15 +458,48 @@ void fill_from_entry(const rwir::Entry* e, CInsn* ins) {
     }
 }
 
+std::uint64_t g_seg_epoch = 1;
+std::uint64_t g_relayout_epoch = 0;
+thread_local std::string s_last_segment_error;
+
+// Read `/lib/<func>/‥ctime` (written last by layout on each function rewrite).
+// Decodes the 8-byte little-endian `int64` body directly, returning 0 if absent.
+std::int64_t read_ctime(void* h, const std::string& func_dir) {
+    if (!h)
+        return 0;
+    std::string k = func_dir;
+    if (!k.empty() && k.back() == '/')
+        k.pop_back();
+    k += "/\xE2\x80\xA5" "ctime";
+    const std::uint8_t* d = nullptr;
+    std::uint32_t n = 0;
+    if (!read_wire(h, k, &d, &n) || !d || n < KVSPACE_XVALUE_HEAD_LEN)
+        return 0;
+    const std::uint64_t blen = kvspaceXvalueHeadLen(
+        reinterpret_cast<const kvspaceXvalueHead*>(d));
+    if (blen != 8 || KVSPACE_XVALUE_HEAD_LEN + 8 > n)
+        return 0;
+    std::int64_t v = 0;
+    std::memcpy(&v, d + KVSPACE_XVALUE_HEAD_LEN, 8);
+    return v;
+}
+
 // 建段：从 kvspace 读签名与指令、解析分支目标/被调方、物化字面量。
 bool build(void* h, const std::string& func_dir, Segment* out,
            CompileError* err) {
+    // Read `‥ctime` before instructions so any concurrent relayout forces a safe rebuild.
+    out->ctime = read_ctime(h, func_dir);
+    out->validated_epoch = g_seg_epoch;
+    out->retired = false;
     out->insns.clear();
     out->regs.clear();
     out->callees.clear();
     out->extra_rwir_names.clear();
     out->call_sites.clear();
     out->member_write_cache.clear();
+    out->has_rwirhandler = false;
+    out->stops_local = false;
+    out->stop_state = 0;
     std::unordered_map<std::string, int> dedup;
     std::unordered_map<std::string, std::uint16_t> callee_ids;
     std::unordered_map<std::string, std::uint16_t> extra_ids;
@@ -521,6 +552,7 @@ bool build(void* h, const std::string& func_dir, Segment* out,
                          "runtimec2: unknown rwir \"%s\" in %s: not in myrwircap "
                          "and no /lib/%s def rwir\n",
                          op.c_str(), func_dir.c_str(), op.c_str());
+            s_last_segment_error = "NameError: rwfunc not found: " + op;
             err->reason = "unknown rwir \"" + op + "\": not in myrwircap and no /lib/" +
                           op + " def rwir";
             return false;
@@ -530,10 +562,17 @@ bool build(void* h, const std::string& func_dir, Segment* out,
                 vmbin::kRwirIdExtraBase +
                 pool_add(&out->extra_rwir_names, &extra_ids, op));
         }
-        if (ins.handler != rwir::RwirHandlerId::None)
+        if (ins.handler != rwir::RwirHandlerId::None) {
             out->has_rwirhandler = true;
+            // Handlers that can bubble up a child Stop or transition vthread status out of running.
+            if (instruction_is(ins, rwir::RwirId::VthreadCall) ||
+                instruction_is(ins, rwir::RwirId::VthreadRun) ||
+                instruction_is(ins, rwir::RwirId::VthreadSetStatus))
+                out->stops_local = true;
+        }
         if (ins.impl == rwir::Impl::Handoff) {
             out->has_rwirhandler = true;
+            out->stops_local = true;
             out->insns.push_back(ins);
             continue;
         }
@@ -683,6 +722,9 @@ bool finalize_binir(Segment* out, const std::string& func_dir,
     }
     if (segment_from_binir()) {
         decoded.binir = out->binir;
+        decoded.ctime = out->ctime;
+        decoded.validated_epoch = out->validated_epoch;
+        decoded.retired = false;
         *out = std::move(decoded);
     }
     return true;
@@ -1343,9 +1385,17 @@ bool specialize(void* h, const std::string& func_dir,
     return true;
 }
 
-std::unordered_map<std::string, Segment>& cache() {
-    static std::unordered_map<std::string, Segment> c;
+std::unordered_map<std::string, std::unique_ptr<Segment>>& cache() {
+    static std::unordered_map<std::string, std::unique_ptr<Segment>> c;
     return c;
+}
+
+// Re-verify `‥ctime` after building so a concurrent layout mid-build cannot produce a torn segment.
+bool seg_ready(void* h, const std::string& func_dir, const Segment& seg,
+               bool is_rebuild) {
+    if (seg.insns.empty() || read_ctime(h, func_dir) != seg.ctime)
+        return false;
+    return !is_rebuild || seg.ctime != 0;
 }
 
 std::string cache_key(const std::string& func_dir,
@@ -1501,6 +1551,23 @@ bool run_union_signature_checks(const Segment& segment, CompileError* error) {
                 continue;
             }
             if (!(sig->operands & rwir::type_bit(cls))) {
+                if (s_last_segment_error.empty()) {
+                    const char* got = langtype_name(segment.regs[ins.rd[k]].langtype);
+                    const std::string gname = got ? got : "unknown";
+                    if (ins.op == rwir::Op::And)
+                        s_last_segment_error = "TypeError: && requires bool, got " + gname;
+                    else if (ins.op == rwir::Op::Or)
+                        s_last_segment_error = "TypeError: || requires bool, got " + gname;
+                    else if (ins.op == rwir::Op::Not)
+                        s_last_segment_error = "TypeError: ! requires bool, got " + gname;
+                    else if (sig == &rwir::kSigBit || sig == &rwir::kSigMod)
+                        s_last_segment_error = "TypeError: expected integer, got " + gname;
+                    else
+                        s_last_segment_error =
+                            std::string("TypeError: ") +
+                            vmbin::instruction_name(segment, ins) +
+                            " expects numeric operand, got \"" + gname + "\"";
+                }
                 error->reason = "insn " + std::to_string(i) +
                                 ": operand class not in operator union";
                 return false;
@@ -1684,16 +1751,42 @@ bool check_roundtrip(const Segment& segment, std::string* why) {
 const Segment* cached(void* h, const std::string& func_dir) {
     auto& c = cache();
     auto it = c.find(func_dir);
-    if (it != c.end())
-        return &it->second;
+    if (it != c.end() && it->second) {
+        if (it->second->validated_epoch == g_seg_epoch)
+            return it->second.get();
+        if (read_ctime(h, func_dir) == it->second->ctime) {
+            it->second->validated_epoch = g_seg_epoch;
+            return it->second.get();
+        }
+        Segment seg;
+        CompileError err;
+        if (!compile(h, func_dir, CompileOptions{}, &seg, &err) ||
+            !seg_ready(h, func_dir, seg, true))
+            return it->second.get();
+        it->second->retired = true;
+        static std::vector<std::unique_ptr<Segment>> retired;
+        retired.push_back(std::move(it->second));
+        ++g_relayout_epoch;
+        for (auto& kv : c) {
+            if (kv.second && kv.second->stop_state != 0)
+                kv.second->stop_state = 0;
+        }
+        seg.validated_epoch = g_seg_epoch;
+        it->second = std::make_unique<Segment>(std::move(seg));
+        if (binir_dump_on_build())
+            dump_binir(*it->second, func_dir.c_str());
+        return it->second.get();
+    }
     Segment seg;
     CompileError err;
-    if (!compile(h, func_dir, CompileOptions{}, &seg, &err))
+    if (!compile(h, func_dir, CompileOptions{}, &seg, &err) ||
+        !seg_ready(h, func_dir, seg, false))
         return nullptr;
-    auto res = c.emplace(func_dir, std::move(seg));
+    seg.validated_epoch = g_seg_epoch;
+    auto res = c.emplace(func_dir, std::make_unique<Segment>(std::move(seg)));
     if (binir_dump_on_build())
-        dump_binir(res.first->second, func_dir.c_str());
-    return &res.first->second;
+        dump_binir(*res.first->second, func_dir.c_str());
+    return res.first->second.get();
 }
 
 const Segment* cached(void* h, const std::string& func_dir,
@@ -1703,24 +1796,89 @@ const Segment* cached(void* h, const std::string& func_dir,
     const std::string key = cache_key(func_dir, *options.arguments);
     auto& c = cache();
     auto it = c.find(key);
-    if (it != c.end())
-        return &it->second;
+    if (it != c.end() && it->second)
+        return it->second.get();
     Segment seg;
     CompileError err;
     if (!compile(h, func_dir, options, &seg, &err))
         return nullptr;
-    auto res = c.emplace(key, std::move(seg));
+    seg.validated_epoch = g_seg_epoch;
+    auto res = c.emplace(key, std::make_unique<Segment>(std::move(seg)));
     if (binir_dump_on_build())
-        dump_binir(res.first->second, func_dir.c_str());
-    return &res.first->second;
+        dump_binir(*res.first->second, func_dir.c_str());
+    return res.first->second.get();
 }
 
 const Segment* lookup(const std::string& func_dir) {
     auto& c = cache();
     auto it = c.find(func_dir);
-    return it == c.end() ? nullptr : &it->second;
+    if (it == c.end() || !it->second ||
+        it->second->validated_epoch != g_seg_epoch)
+        return nullptr;
+    return it->second.get();
 }
 
-void clear_cache() { cache().clear(); }
+void clear_cache() {
+    cache().clear();
+    bump_epoch();
+}
+
+std::string take_last_error() {
+    std::string out;
+    out.swap(s_last_segment_error);
+    return out;
+}
+
+void bump_epoch() noexcept {
+    if (++g_seg_epoch == 0)
+        g_seg_epoch = 1;
+}
+
+std::uint64_t current_epoch() noexcept { return g_seg_epoch; }
+
+std::uint64_t relayout_epoch() noexcept { return g_relayout_epoch; }
+
+namespace {
+
+enum : std::uint8_t { kStopUnknown = 0, kStopBusy = 1, kStopNo = 2, kStopYes = 3 };
+
+// DFS over call edges. "Yes" is final as soon as one path reaches a Stop. A node
+// that found no Stop stays Busy: inside a call cycle its answer depends on nodes
+// still on the stack, so only the top-level caller can settle it.
+bool may_stop_dfs(void* h, const Segment* s, std::vector<const Segment*>* seen) {
+    if (s->stop_state == kStopYes)
+        return true;
+    if (s->stop_state != kStopUnknown)
+        return false;  // No, or Busy (a cycle back onto the DFS stack)
+    s->stop_state = kStopBusy;
+    seen->push_back(s);
+    bool stops = s->stops_local;
+    for (std::size_t i = 0; !stops && i < s->insns.size(); i++) {
+        const CInsn& ci = s->insns[i];
+        if (ci.op != rwir::Op::Call)
+            continue;
+        const std::string& callee = vmbin::instruction_callee(*s, ci);
+        const Segment* cs = callee.empty() ? nullptr : cached(h, callee);
+        stops = !cs || may_stop_dfs(h, cs, seen);
+    }
+    if (stops)
+        s->stop_state = kStopYes;
+    return stops;
+}
+
+}  // namespace
+
+bool segment_may_stop(void* h, const Segment* seg) {
+    if (seg->stop_state == kStopYes)
+        return true;
+    if (seg->stop_state == kStopNo)
+        return false;
+    std::vector<const Segment*> seen;
+    const bool stops = may_stop_dfs(h, seg, &seen);
+    for (const Segment* s : seen)
+        if (s->stop_state == kStopBusy)
+            s->stop_state = stops ? kStopUnknown : kStopNo;
+    return stops;
+}
 
 }  // namespace kvlang::runtimec2::binircompiler

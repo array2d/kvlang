@@ -17,8 +17,14 @@ bool read_wire_raw(void* h, std::string_view key, const std::uint8_t** data,
 void view_cache_idle(void* h) noexcept;
 // Same for whichever handle currently holds tokens.
 void view_cache_idle_all() noexcept;
+// Forget per-handle capability/view state before kvspaceClose(h).
+void view_cache_close(void* h) noexcept;
 // Ack the recovery epoch; call only between instructions (no wires held).
 void view_cache_tick() noexcept;
+
+// Per-handle capability probe: true when shm XvalueBodyView / ResolveRef is supported.
+bool shm_slot_supported(void* h) noexcept;
+void mark_shm_slot_unsupported(void* h) noexcept;
 
 // Quiesces live view tokens when an ABI entry returns to the host.
 struct ViewIdleGuard {

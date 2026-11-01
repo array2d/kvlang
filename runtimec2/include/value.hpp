@@ -21,6 +21,17 @@ struct Scalar {
 bool v_ptr(Wire w) noexcept;
 bool v_ptr_target(Wire w, std::string* out) noexcept;
 bool v_is_none(Wire w) noexcept;
+bool is_num_scalar_type(std::string_view lt) noexcept;
+
+// Coerce `src` wire to declared scalar `dst_type` (passing non-scalars through);
+// if re-encoded, `*owned_buf` is non-null (`std::free` by caller) and `*out` points to it.
+bool coerce_scalar_wire(std::string_view dst_type, Wire src,
+                        std::uint8_t** owned_buf, Wire* out, std::string* err);
+
+// Bounded parse of tag=1 `langtype` record from wire `[0..total_len)`;
+// returns 0 with `*out_p = nullptr` if absent or truncated.
+std::uint16_t wire_langtype_view(const std::uint8_t* d, std::uint64_t total_len,
+                                 const std::uint8_t** out_p) noexcept;
 
 // 解码标量；kind 取 langtype（忽略 dims 前缀），支持 int*/uint*/float*/bool。
 // v2 下 langtype 不在 wire——调用方经 kvspaceGetHead 读 x‥langtype attr key 传入。
