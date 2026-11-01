@@ -367,3 +367,10 @@ add_test(NAME c2_jit_return_types
                  ${CMAKE_CURRENT_SOURCE_DIR}/../bin/byteseek
                  ${CMAKE_CURRENT_SOURCE_DIR}/..)
 set_tests_properties(c2_jit_return_types PROPERTIES TIMEOUT 120)
+
+# 回归钉子：matmul 段（float64 局部 + compact 数组 + bool 条件）JIT2 不得 syncfail。
+add_test(NAME c2_jit2_matmul_sync
+         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/jit2_matmul_sync.sh
+                 ${CMAKE_CURRENT_SOURCE_DIR}/../bin/byteseek
+                 ${CMAKE_CURRENT_SOURCE_DIR}/..)
+set_tests_properties(c2_jit2_matmul_sync PROPERTIES TIMEOUT 120)

@@ -574,6 +574,26 @@ int jit2_handler_call(vmbin::Frame* f, jitabi::ValueSlotV1* slots,
             slots[r].tag = jitabi::ValueTagV1::I64;
             continue;
         }
+        if (seg->regs[r].langtype == vmbin::LangType::Bool) {
+            // bool 的 body 逻辑长度是 1 字节：不能走下面的「读前 8 字节」兜底
+            //（#607 之后 cap=声明长度，cap<8 会误判为取值失败）。JIT 槽统一
+            // 用 I64 0/1 表示 bool。
+            bool b = false;
+            if (!g_vmkv.read_bool(*f, static_cast<std::uint8_t>(r), &b)) {
+                const std::vector<char>& defined = plan.out_defined[idx];
+                if (r < defined.size() && !defined[r])
+                    continue;
+                if (g_jitdbg)
+                    std::fprintf(stderr,
+                                 "[jit2dbg syncfail %s pc=%u r=%zu lt=%d]\n",
+                                 f->func_dir.c_str(), idx, r,
+                                 (int)seg->regs[r].langtype);
+                return 2;
+            }
+            slots[r].payload_lo = b ? 1 : 0;
+            slots[r].tag = jitabi::ValueTagV1::I64;
+            continue;
+        }
         if (f->regs[r].fast_i64)
             v = f->regs[r].fv;
         else if (!g_vmkv.read_i64(*f, static_cast<std::uint8_t>(r), &v)) {
