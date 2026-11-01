@@ -7,6 +7,7 @@
 
 #include "codeseg.hpp"
 #include "jit.hpp"
+#include "jit_stage2.hpp"
 #include "valueio.hpp"
 #include "vmkv.hpp"
 #include "vmkv_rwirhandler.hpp"
@@ -140,6 +141,69 @@ void expect_refuse(const Segment& s, VmjitRefusalReason want, const char* what) 
                      static_cast<unsigned>(want));
 }
 
+// ── B1：语义段（Impl::Dynamic + langtype）的接受/拒绝集合 ──────────────
+// 只调 jit2_verify，不发射；typed 段的判定由上面的 jit_verify 断言覆盖。
+int push_typed_var(Segment* seg, const char* name, int param_k,
+                   vmbin::LangType lt, std::uint8_t width) {
+    const int r = push_var(seg, name, param_k);
+    seg->regs[static_cast<std::size_t>(r)].langtype = lt;
+    seg->regs[static_cast<std::size_t>(r)].width = width;
+    return r;
+}
+
+void push_dynamic(Segment* seg, rwir::Op op, std::initializer_list<int> rd,
+                  std::initializer_list<int> wr) {
+    push_insn(seg, op, 0, rd, wr);
+    seg->insns.back().impl = rwir::Impl::Dynamic;
+}
+
+// op(a, lit|b) -> r；结果槽类型取 a。
+Segment sem_segment(rwir::Op op, vmbin::LangType a, std::uint8_t aw,
+                    bool second_var, vmbin::LangType b, std::uint8_t bw) {
+    Segment s;
+    const int x = push_typed_var(&s, "a", -1, a, aw);
+    const int w = push_typed_var(&s, "r", 1, a, aw);
+    const int y = second_var ? push_typed_var(&s, "b", -2, b, bw)
+                             : push_lit(&s, 1);
+    push_dynamic(&s, op, {x, y}, {w});
+    push_insn(&s, rwir::Op::Return, 0, {}, {});
+    return s;
+}
+
+Segment sem_unary(rwir::Op op, vmbin::LangType a, std::uint8_t aw) {
+    Segment s;
+    const int x = push_typed_var(&s, "a", -1, a, aw);
+    const int w = push_typed_var(&s, "r", 1, a, aw);
+    push_dynamic(&s, op, {x}, {w});
+    push_insn(&s, rwir::Op::Return, 0, {}, {});
+    return s;
+}
+
+bool jit2_accepts(const Segment& s) {
+    Jit2Plan plan;
+    JitRefusal r;
+    return jit2_verify(&s, &plan, &r);
+}
+
+VmjitRefusalReason jit2_reason(const Segment& s) {
+    Jit2Plan plan;
+    JitRefusal r;
+    return jit2_verify(&s, &plan, &r) ? VmjitRefusalReason::None
+                                      : r.refusal_reason;
+}
+
+// 矩阵是否接管某条指令（scalar_count != 0）；B1 的边界只对矩阵判定负责。
+bool matrix_takes(const Segment& s) {
+    Jit2Plan plan;
+    JitRefusal r;
+    if (!jit2_verify(&s, &plan, &r))
+        return false;
+    for (std::uint8_t c : plan.scalar_count)
+        if (c != 0)
+            return true;
+    return false;
+}
+
 }  // namespace
 
 int main() {
@@ -236,6 +300,46 @@ int main() {
         push_insn(&s, rwir::Op::Return, 2, {}, {});
         expect_accept(s, "dst defined before return");
     }
+
+    // B1 语义段：同型格子由标量矩阵接受。
+    using LT = vmbin::LangType;
+    check(jit2_accepts(sem_segment(rwir::Op::Add, LT::Int64, 8, false, LT::Int64, 8)),
+          "sem int64 add accepted");
+    check(jit2_accepts(sem_segment(rwir::Op::Mul, LT::Uint64, 8, true, LT::Uint64, 8)),
+          "sem uint64 mul accepted");
+    check(jit2_accepts(sem_segment(rwir::Op::Sub, LT::Int32, 4, true, LT::Int32, 4)),
+          "sem int32 sub accepted");
+    check(jit2_accepts(sem_segment(rwir::Op::Lt, LT::Int64, 8, true, LT::Int64, 8)),
+          "sem int64 lt accepted");
+    // 一元 `-`：旧 opfn 只认二元，B1 是唯一接管者（矩阵 Neg64）。
+    check(jit2_accepts(sem_unary(rwir::Op::Neg, LT::Int64, 8)) &&
+              matrix_takes(sem_unary(rwir::Op::Neg, LT::Int64, 8)),
+          "sem int64 neg accepted by matrix");
+    // float64 同型：旧 fopfn 路径（非 B1）受理；矩阵必须不接管。
+    check(jit2_accepts(sem_segment(rwir::Op::Add, LT::Float64, 8, true,
+                                   LT::Float64, 8)) &&
+              !matrix_takes(sem_segment(rwir::Op::Add, LT::Float64, 8, true,
+                                        LT::Float64, 8)),
+          "sem float64 add not taken by matrix");
+
+    // B1 边界：跨类/窄宽提升/F32/sqrt 族仍整段拒绝（fail-closed）。
+    const struct {
+        Segment seg;
+        const char* what;
+    } refused[] = {
+        {sem_segment(rwir::Op::Add, LT::Int64, 8, true, LT::Float64, 8),
+         "sem int64 x float64 refused"},
+        {sem_segment(rwir::Op::Add, LT::Float32, 8, true, LT::Float64, 8),
+         "sem float32 x float64 refused"},
+        {sem_segment(rwir::Op::Add, LT::Int64, 8, true, LT::Int32, 4),
+         "sem int64 x int32 refused"},
+        {sem_segment(rwir::Op::Add, LT::Float32, 4, true, LT::Float32, 4),
+         "sem float32 cell refused"},
+        {sem_unary(rwir::Op::Sqrt, LT::Int64, 8), "sem sqrt(int64) refused"},
+    };
+    for (const auto& c : refused)
+        check(jit2_reason(c.seg) == VmjitRefusalReason::UnsupportedOpcode,
+              c.what);
 
     if (g_failures == 0) {
         std::printf("OK jit_verify_test\n");
