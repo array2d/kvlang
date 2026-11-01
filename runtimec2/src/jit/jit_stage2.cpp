@@ -3,6 +3,8 @@
 // 入口 ABI：void fn(const int64_t* args, int64_t* outs, int64_t* err);
 #include "jit_stage2.hpp"
 
+#include "fast_opfn.hpp"
+
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -676,28 +678,8 @@ bool jit2_verify(const Segment* seg, Jit2Plan* plan, JitRefusal* refusal) {
     // 发射机器码；其余 handler 在原生代码里调 C 侧 helper 执行后继续；
     // 只有 Handoff（println 等交外部引擎的算子）才是真正的停止点。
     // 动态算子（`×`/`÷` 等 Kind::Any）按操作数静态类型定型为 int64 算子。
-    auto int_opfn_of = [&](const CInsn& ci) -> std::uint8_t {
-        switch (ci.op) {
-        case rwir::Op::Add: return 1;
-        case rwir::Op::Sub: return 2;
-        case rwir::Op::Mul: return 3;
-        case rwir::Op::Div: return 4;
-        case rwir::Op::Mod: return 5;
-        case rwir::Op::Max: return 6;
-        case rwir::Op::Min: return 7;
-        case rwir::Op::BitAnd: return 8;
-        case rwir::Op::BitOr: return 9;
-        case rwir::Op::BitXor: return 10;
-        case rwir::Op::Shl: return 11;
-        case rwir::Op::Shr: return 12;
-        case rwir::Op::Eq: return 13;
-        case rwir::Op::Neq: return 14;
-        case rwir::Op::Lt: return 15;
-        case rwir::Op::Le: return 16;
-        case rwir::Op::Gt: return 17;
-        case rwir::Op::Ge: return 18;
-        default: return 0;
-        }
+    auto int_opfn_of = [](const CInsn& ci) -> std::uint8_t {
+        return rwir::int64_fast_opfn(ci.op);
     };
     plan->opfn.assign(static_cast<std::size_t>(n), 0);
     for (int i = 0; i < n; i++) {

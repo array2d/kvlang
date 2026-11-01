@@ -116,6 +116,14 @@ struct Program {
     bool has_rwirhandler = false;
     bool jit_handler_cold = false;        // 建段期：首个 handler 在循环之后
     std::uint8_t handler_loop_ratio = 0;  // 建段期：handler 指令占比 0–100
+    // B2 建段期派生分派：Impl::Dynamic 指令按读参静态类型算出的 int64 快路径
+    // 描述，与 typed 行里预置的 fast_i64/opfn 同义。不落 binir 线格式；
+    // 解码视图建好后按段算一次（binircompiler::compile 收尾）。
+    struct DerivedDispatch {
+        std::uint8_t opfn = 0;  // 1..18 = 快内核算子号；0 = 不定型
+        bool fast_i64 = false;
+    };
+    std::vector<DerivedDispatch> derived;
 };
 
 // 扩展算子 id 段：rwir_id ≥ 本值 = extra_rwir_names 池下标（表内 id 恒 < 0x8000）。
