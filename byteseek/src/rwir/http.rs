@@ -4,16 +4,16 @@
 
 use std::time::Duration;
 
-use crate::engine::Engine;
+use crate::engine::{Engine, KvResult};
 use crate::ffi::*;
 
-pub fn call(eng: &Engine, pc: &str) {
+pub fn call(eng: &Engine, pc: &str) -> KvResult {
     let method = eng.read0(pc);
     let header = read(eng, pc, 1);
     let url = read(eng, pc, 2);
     let body = read(eng, pc, 3);
     let out = request(&method, &header, &url, &body);
-    eng.set_kv(&eng.write0(pc), &out);
+    eng.set_kv(&eng.write0(pc), &out)
 }
 
 fn read(eng: &Engine, pc: &str, idx: i32) -> String {

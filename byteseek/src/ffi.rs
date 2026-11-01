@@ -236,13 +236,12 @@ unsafe extern "C" {
         out: *mut *mut u8,
         out_len: *mut u32,
     ) -> c_int;
+    // 6-arg signature per kvspace.h v0.3.23+ (no legacy ro/vid params before err/err_cap).
     pub fn kvspaceSetValue(
         h: *mut c_void,
         key: *const c_char,
         value: *const u8,
         value_len: u32,
-        ro: u8,
-        vid: u32,
         err: *mut c_char,
         err_cap: u32,
     ) -> c_int;
