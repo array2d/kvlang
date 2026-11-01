@@ -2049,29 +2049,9 @@ fn promoted_numeric_kind(kinds: &[String], allow_mixed_classes: bool) -> Option<
         if !allow_mixed_classes {
             return None;
         }
-        // 与 runtime 现状对齐（`to_float`）：结果宽度 = 首操作数是 float 时取
-        // wmax，否则恒 8（float64）。C 语义本应取浮点操作数宽度，runtime 的
-        // 顺序相关行为留待阶段 A/B 修正；layout 按可观测结果取名。
-        let first_float = builtin::is_float_kind(&kinds[0]);
-        if !first_float {
-            return Some("float64".to_string());
-        }
-        let wmax = kinds
-            .iter()
-            .map(|t| {
-                if builtin::is_float_kind(t) {
-                    if t == "float32" {
-                        4
-                    } else {
-                        8
-                    }
-                } else {
-                    builtin::int_kind_width(t) as u8
-                }
-            })
-            .max()
-            .unwrap_or(8);
-        return Some(if wmax == 8 { "float64" } else { "float32" }.to_string());
+        // C 规则（spec §数值 promotion）：结果宽度只由浮点操作数决定，整数
+        // 转成该宽度；与操作数顺序无关。旧实现用位/字节混比 wmax，是 bug。
+        return Some(if has_float64 { "float64" } else { "float32" }.to_string());
     }
     if has_float {
         return Some(if has_float64 { "float64" } else { "float32" }.to_string());
