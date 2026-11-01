@@ -1,0 +1,8 @@
+# c2_union_cross_check 的布局失败基线（每行一个用例标签）。
+#
+# 只收「当前在布局阶段失败」的用例：现在只有下面这一条（debugger 仍是未知
+# rwir）。判定规则：本次观察到的 layout_failed 集合必须 ⊆ 本清单；不在清单里
+# 的布局失败一律判失败——禁止用 skipped 静默放行，否则新的布局回归会被吞掉。
+# 运行期/期望输出层面的既有失败不属于本清单。
+# debugger 改成 rwfunc 后本行应删除，届时任何布局失败都直接判错。
+tutorial/09-debugger/pauses.kv

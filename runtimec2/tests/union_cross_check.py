@@ -2,7 +2,15 @@
 """阶段 A 交叉校验驱动：tutorial（有期望输出、非 extern/wip）+ benchmark 10。
 
 每个用例：fresh shm → stdlib boot → layout → 解析 rwfunc → union_cross_check
-逐函数比对 layout typed 行与 union 选出的实现。差异非零即失败。
+逐函数比对 layout typed 行与 union 选出的实现。
+
+判定（三条同时成立才通过）：
+1. 所有用例的 mismatched 合计为 0；
+2. 布局失败（layout_failed）集合 ⊆ 已登记基线
+   `union_layout_failed_baseline.txt`——不在基线里的布局失败一律判失败，
+   不给新的布局回归留静默放行口子；
+3. 其它失败（超时 / 工具无 summary）为 0。
+基线里已被修复的条目会打印提醒，可从基线移除。
 """
 import argparse
 import os
@@ -89,8 +97,20 @@ def main():
     ap.add_argument("--layout", required=True)
     ap.add_argument("--source-root", required=True)
     ap.add_argument("--filter", default="")
+    ap.add_argument(
+        "--baseline",
+        default=os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "union_layout_failed_baseline.txt"),
+        help="已登记的 layout 失败基线（每行一个用例标签，# 开头为注释）",
+    )
     args = ap.parse_args()
     root = os.path.abspath(args.source_root)
+    baseline = set()
+    with open(args.baseline, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                baseline.add(line)
 
     cases = []
     for dirpath, _, names in os.walk(os.path.join(root, "tutorial")):
@@ -110,9 +130,10 @@ def main():
         cases = [c for c in cases if args.filter in c[0]]
 
     total = {"cases": 0, "checked": 0, "matched": 0, "mismatched": 0,
-             "undecidable": 0, "skipped": 0, "failed": 0,
+             "undecidable": 0, "skipped": 0, "failed": 0, "layout_failed": 0,
              "no_typed_variant": 0, "und_const": 0, "und_member": 0,
              "und_pointer": 0, "und_untyped": 0}
+    layout_failed = []
     failures = []
     work = tempfile.mkdtemp(prefix="unionx.")
     try:
@@ -134,8 +155,13 @@ def main():
             except subprocess.TimeoutExpired:
                 r, err = None, "timeout"
             if r is None:
-                total["failed"] += 1
-                failures.append((label, err))
+                if err == "layout failed":
+                    # 布局失败单独成类：只在基线集合内允许（见文件头注释）。
+                    total["layout_failed"] += 1
+                    layout_failed.append(label)
+                else:
+                    total["failed"] += 1
+                    failures.append((label, err))
                 continue
             m = re.search(
                 r"summary: checked=(\d+) matched=(\d+) mismatched=(\d+) "
@@ -167,12 +193,26 @@ def main():
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
+    # 判定：mismatched 必须为 0；layout 失败集合必须 ⊆ 基线（不在基线里的
+    # 一律算失败，不给新的布局回归留静默放行口子）。
+    extra_layout = sorted(set(layout_failed) - baseline)
+    missing_layout = sorted(baseline - set(layout_failed))
+    for label in extra_layout:
+        failures.append((label, "layout failed (not in baseline)"))
+    if missing_layout:
+        head = ", ".join(missing_layout[:5])
+        more = "" if len(missing_layout) <= 5 else " …(+%d)" % (len(missing_layout) - 5)
+        print("baseline-only layout failures (已修复，可从基线移除): %s%s" %
+              (head, more))
+
     print("union cross-check: cases=%d checked=%d matched=%d mismatched=%d "
-          "undecidable=%d skipped=%d failed=%d no_typed_variant=%d "
+          "undecidable=%d skipped=%d failed=%d layout_failed=%d "
+          "baseline_missing=%d no_typed_variant=%d "
           "und_const=%d und_member=%d und_pointer=%d und_untyped=%d" %
           (total["cases"], total["checked"], total["matched"],
            total["mismatched"], total["undecidable"], total["skipped"],
-           total["failed"], total["no_typed_variant"], total["und_const"],
+           total["failed"], total["layout_failed"], len(missing_layout),
+           total["no_typed_variant"], total["und_const"],
            total["und_member"], total["und_pointer"], total["und_untyped"]))
     for label, why in failures:
         print("FAIL %s: %s" % (label, why))
