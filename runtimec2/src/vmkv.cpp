@@ -53,6 +53,18 @@ namespace {
 const bool g_no_fast = std::getenv("RC2_NOFAST") != nullptr;
 const bool g_trace = std::getenv("RC2_TRACE") != nullptr;
 
+// 槽状态快速路径计数（RC2_SLOTSTATE_STATS=1，进程退出打印）。
+const bool g_slot_stats = std::getenv("RC2_SLOTSTATE_STATS") != nullptr;
+std::uint64_t g_absent_write_hits = 0;   // write_reg int64 纯内存写：跳过 read_langtype
+struct SlotStatsDump {
+    ~SlotStatsDump() {
+        if (!g_slot_stats)
+            return;
+        std::fprintf(stderr, "[slotstate] absent_write_hits=%llu\n",
+                     (unsigned long long)g_absent_write_hits);
+    }
+} g_slot_stats_dump;
+
 // keyto64_xvalueBody 活动时，直接从 keyto64_xvalue（8B 头）读 langtype，零后端调用。
 // attr 缺失或 keyto64_xvalue 头无效 → false，调用方回退 read_langtype（语义不变）。
 bool view_langtype(const kvspaceXvalueBodyView_t& view, std::string* lt) {
@@ -139,6 +151,7 @@ bool holds_value(const Register* r) {
 }
 
 void invalidate_reg_cache(Register& reg) {
+    reg.slot_state = Register::SlotState::Unknown;
     reg.ref = kvspaceRef_t{};
     reg.resolved = false;
     reg.noslot = false;
@@ -399,6 +412,7 @@ bool Vmkv::ensure_reg_key(Frame& f, Register& r) {
             ap = ap->dst_ptr;
         if (ap != &r && !ap->key.empty()) {
             r.key = ap->key;
+            r.slot_state = Register::SlotState::Unknown;
             return true;
         }
         // 普通变量（desc_ref）：key = frame + "/" + name（一次轻拼接，SSO）。
@@ -406,12 +420,14 @@ bool Vmkv::ensure_reg_key(Frame& f, Register& r) {
             // 绝对路径变量（`/lib/...` 顶层写槽）：直接作 key，不拼 f.frame。
             if (!r.desc_ref->name.empty() && r.desc_ref->name[0] == '/') {
                 r.key = r.desc_ref->name;
+                r.slot_state = Register::SlotState::Unknown;
                 return true;
             }
             r.key.reserve(f.frame.size() + 1 + r.desc_ref->name.size());
             r.key = f.frame;
             r.key += "/";
             r.key += r.desc_ref->name;
+            r.slot_state = Register::SlotState::Unknown;
             return true;
         }
         if (!r.desc.empty()) {
@@ -419,6 +435,7 @@ bool Vmkv::ensure_reg_key(Frame& f, Register& r) {
             if (!resolve_desc(f, r.desc, &ek, &ed))
                 return false;
             r.key = std::move(ek);
+            r.slot_state = Register::SlotState::Unknown;
         }
     }
     return true;
@@ -617,8 +634,10 @@ void Vmkv::flush_frame_locals(Frame& f) {
                 continue;
             char err[192] = {};
             if (kvspaceSetValue(f.h, r.key.c_str(), buf, static_cast<std::uint32_t>(len64), err, sizeof err) == 0 &&
-                kvspaceResolveRef(f.h, r.key.c_str(), &r.ref) == 0)
+                kvspaceResolveRef(f.h, r.key.c_str(), &r.ref) == 0) {
                 r.resolved = true;
+                r.slot_state = Register::SlotState::Present;  // 槽已建，后续写须查类型
+            }
             std::free(buf);
             buf = nullptr;
         } else if (r.fast_bool && is_frame_local(f, r.key)) {
@@ -628,8 +647,10 @@ void Vmkv::flush_frame_locals(Frame& f) {
                 continue;
             char err[192] = {};
             if (kvspaceSetValue(f.h, r.key.c_str(), buf, static_cast<std::uint32_t>(len64), err, sizeof err) == 0 &&
-                kvspaceResolveRef(f.h, r.key.c_str(), &r.ref) == 0)
+                kvspaceResolveRef(f.h, r.key.c_str(), &r.ref) == 0) {
                 r.resolved = true;
+                r.slot_state = Register::SlotState::Present;  // 槽已建，后续写须查类型
+            }
             std::free(buf);
             buf = nullptr;
         }
@@ -661,14 +682,20 @@ bool Vmkv::write_reg(Frame& f, std::uint8_t idx, const std::uint8_t* data,
             const bool value_is_i64 =
                 vltl == 0 || (vltl == 5 && std::memcmp(vlt, "int64", 5) == 0);
             std::string lt;
-            /* 槽已有类型须为 int64，无类型（首写）接受。 */
-            if (value_is_i64 && (!read_langtype(f.h, dr.key, &lt) || lt == "int64")) {
+            /* 槽已有类型须为 int64，无类型（首写）接受。Absent = 纯内存无槽，免查。 */
+            const bool slot_absent = dr.slot_state == Register::SlotState::Absent;
+            if (value_is_i64 &&
+                (slot_absent || !read_langtype(f.h, dr.key, &lt) || lt == "int64")) {
                 std::int64_t v = 0;
                 std::memcpy(&v, data + KVSPACE_XVALUE_HEAD_LEN, 8);
                 dr.fv = v;
                 dr.fast_i64 = true;
-                if (dr.view_ok && dr.body && !store_i64_slot(f, dr, v))
-                    return false;
+                if (dr.view_ok && dr.body) {
+                    if (!store_i64_slot(f, dr, v))
+                        return false;
+                } else {
+                    dr.slot_state = Register::SlotState::Absent;
+                }
                 r.fv = v;
                 r.fast_i64 = true;
                 return true;
@@ -685,7 +712,11 @@ bool Vmkv::write_reg(Frame& f, std::uint8_t idx, const std::uint8_t* data,
         dr.arr_bodylen = 0;
         dr.arr_elem_kind.clear();
         char err[192] = {};
-        return kvspaceSetValue(f.h, dr.key.c_str(), data, len, err, sizeof err) == 0;
+        const bool ok = kvspaceSetValue(f.h, dr.key.c_str(), data, len, err,
+                                        sizeof err) == 0;
+        dr.slot_state = ok ? Register::SlotState::Present
+                           : Register::SlotState::Unknown;
+        return ok;
     }
     // 成员写槽（desc 含 `·`，如 `p·x`）：base 是帧变量/参数（可能 dst_ptr 别名
     // 指向调用方实例），key = 最终 base 槽 + `·` + 成员名（`p·x = v` 就地改
@@ -737,8 +768,11 @@ bool Vmkv::write_reg(Frame& f, std::uint8_t idx, const std::uint8_t* data,
                 r.arr_elem_kind.clear();
                 // data 自带类型（attr 区随值），直接落。
                 char derrb[192] = {};
-                return kvspaceSetValue(f.h, r.key.c_str(), data, len, derrb,
-                                       sizeof derrb) == 0;
+                r.slot_state = kvspaceSetValue(f.h, r.key.c_str(), data, len,
+                                               derrb, sizeof derrb) == 0
+                                   ? Register::SlotState::Present
+                                   : Register::SlotState::Unknown;
+                return r.slot_state == Register::SlotState::Present;
             }
         }
     }
@@ -806,7 +840,11 @@ bool Vmkv::write_reg(Frame& f, std::uint8_t idx, const std::uint8_t* data,
             r.arr_elem_kind.clear();
             // data 自带类型（attr 区随值），直接落。
             char errb[192] = {};
-            return kvspaceSetValue(f.h, r.key.c_str(), data, len, errb, sizeof errb) == 0;
+            r.slot_state = kvspaceSetValue(f.h, r.key.c_str(), data, len, errb,
+                                           sizeof errb) == 0
+                               ? Register::SlotState::Present
+                               : Register::SlotState::Unknown;
+            return r.slot_state == Register::SlotState::Present;
         }
         // 动态成员键（`·*var`，如 `/tmp/mi·*i0`）：handler 写（compactarray·new/fill）
         // 直接落 member——解析 var 值作真实键（对齐主循环 member write 动态键）。
@@ -854,8 +892,11 @@ bool Vmkv::write_reg(Frame& f, std::uint8_t idx, const std::uint8_t* data,
                     r.arr_bodylen = 0;
                     r.arr_elem_kind.clear();
                     char errb[192] = {};
-                    return kvspaceSetValue(f.h, r.key.c_str(), data, len, errb,
-                                           sizeof errb) == 0;
+                    r.slot_state = kvspaceSetValue(f.h, r.key.c_str(), data, len,
+                                                   errb, sizeof errb) == 0
+                                       ? Register::SlotState::Present
+                                       : Register::SlotState::Unknown;
+                    return r.slot_state == Register::SlotState::Present;
                 }
             }
         }
@@ -893,10 +934,15 @@ bool Vmkv::write_reg(Frame& f, std::uint8_t idx, const std::uint8_t* data,
                 kvspaceXvalueHeadLangtype(data, blen, &vlt);
             const bool value_is_i64 =
                 vltl == 0 || (vltl == 5 && std::memcmp(vlt, "int64", 5) == 0);
+            // 槽状态显式化：Absent = 纯内存写、kvspace 无槽 → 跳过 langtype 查询
+            // （帧局部 int64 变量每次写都查必然未命中）；Unknown/Present 照旧查。
+            const bool slot_absent = r.slot_state == Register::SlotState::Absent;
+            if (slot_absent && g_slot_stats)
+                g_absent_write_hits++;
             std::string lt;
-            // 槽已有类型也须 int64 兼容（float64 槽不纯内存化）。
-            read_langtype(f.h, rk.c_str(), &lt);
-            if (value_is_i64 && (lt.empty() || lt == "int64")) {
+            if (!slot_absent)
+                read_langtype(f.h, rk.c_str(), &lt);  // float64 槽不纯内存化
+            if (value_is_i64 && (slot_absent || lt.empty() || lt == "int64")) {
                 std::int64_t v = 0;
                 std::memcpy(&v, data + KVSPACE_XVALUE_HEAD_LEN, 8);
                 r.fv = v;
@@ -905,14 +951,17 @@ bool Vmkv::write_reg(Frame& f, std::uint8_t idx, const std::uint8_t* data,
                     return store_i64_slot(f, r, v);  // 已有槽：直写同步明文
                 // 纯内存：不建 kvspace 槽。帧局部 int64 变量层内读走 fast 缓存；
                 // 调用边界经 arg_src/arg_dst 内存别名或读参传值，无需明文存在。
+                r.slot_state = Register::SlotState::Absent;
                 return true;
             }
         }
     }
     if (ensure_ref(f, &r)) {
         char err[192] = {};
-        if (kvspaceSetValueByRef(f.h, &r.ref, r.key.c_str(), data, len, err, sizeof err) == 0)
+        if (kvspaceSetValueByRef(f.h, &r.ref, r.key.c_str(), data, len, err, sizeof err) == 0) {
+            r.slot_state = Register::SlotState::Present;
             return true;
+        }
         r.resolved = false;
     }
     char err[192] = {};
@@ -926,6 +975,7 @@ bool Vmkv::write_reg(Frame& f, std::uint8_t idx, const std::uint8_t* data,
     // 新键：补一次绑定，后续走 ByRef。
     if (kvspaceResolveRef(f.h, r.key.c_str(), &r.ref) == 0)
         r.resolved = true;
+    r.slot_state = Register::SlotState::Present;
     return true;
 }
 
@@ -972,6 +1022,7 @@ bool Vmkv::store_i64_slot(Frame& f, Register& r, std::int64_t v) {
     std::string lt;
     if (w.body_cap >= 8 && view_langtype(w, &lt) && lt == "int64") {
         std::memcpy(r.body, &v, 8);
+        r.slot_state = Register::SlotState::Present;
         return true;
     }
     std::uint8_t* buf = nullptr;
@@ -991,6 +1042,7 @@ bool Vmkv::store_i64_slot(Frame& f, Register& r, std::int64_t v) {
     r.noslot = false;
     r.sc_ok = false;
     r.fast_bool = false;
+    r.slot_state = ok ? Register::SlotState::Present : Register::SlotState::Unknown;
     return ok;
 }
 
@@ -1037,8 +1089,12 @@ bool Vmkv::slot_write_i64(Frame& f, std::uint8_t idx, std::int64_t v) {
     // 帧局部变量（含首次写，fast_i64 未设）：无 view 也直写 fast 缓存 return
     // （免 kvspace）。非帧局部（参数/容器/系统槽）照旧落明文。
     if (is_frame_local(f, fr.key)) {
-        if (fr.view_ok && fr.body && !store_i64_slot(f, fr, v))
-            return false;
+        if (fr.view_ok && fr.body) {
+            if (!store_i64_slot(f, fr, v))
+                return false;
+        } else {
+            fr.slot_state = Register::SlotState::Absent;  // 纯内存，kvspace 无槽
+        }
         fr.fv = v;
         fr.fast_i64 = true;
         if (vmbin.prof_on)
@@ -1051,6 +1107,7 @@ bool Vmkv::slot_write_i64(Frame& f, std::uint8_t idx, std::int64_t v) {
         reg_body(f, idx, &body, &cap) && body && cap >= 8) {
         if (!store_i64_slot(f, fr, v))
             return false;
+        fr.slot_state = Register::SlotState::Present;
         fr.fv = v;
         fr.fast_i64 = true;
         if (vmbin.prof_on)
@@ -1101,8 +1158,12 @@ bool Vmkv::slot_write_bool(Frame& f, std::uint8_t idx, bool b) {
     // 帧局部纯内存变量：无 view 也直写 fast 缓存 return（免 kvspace）。
     if (fr.fast_bool && is_frame_local(f, fr.key)) {
         fr.fb = b;
-        if (fr.view_ok && fr.body)
+        if (fr.view_ok && fr.body) {
             *fr.body = b ? 1 : 0;
+            fr.slot_state = Register::SlotState::Present;
+        } else {
+            fr.slot_state = Register::SlotState::Absent;  // 纯内存，kvspace 无槽
+        }
         if (vmbin.prof_on)
             vmbin.prof.w_fast++;
         return true;
@@ -1112,6 +1173,7 @@ bool Vmkv::slot_write_bool(Frame& f, std::uint8_t idx, bool b) {
     if ((fr.fast_bool || (fr.sc_ok && fr.sck == Scalar::K::Bool && fr.scw == 1)) &&
         reg_body(f, idx, &body, &cap) && body && cap >= 1) {
         *body = b ? 1 : 0;
+        fr.slot_state = Register::SlotState::Present;
         fr.fb = b;
         fr.fast_bool = true;
         if (vmbin.prof_on)
@@ -1198,6 +1260,7 @@ bool Vmkv::slot_write_scalar(Frame& f, std::uint8_t idx, const Scalar& s,
             // 正文写了新值：fast 缓存必须同步。池复用帧/被 JIT 预置过的寄存器
             // 可能带着陈旧 fast_i64；不同步会让后续按 fast 取值的读者读到旧值
             // （JIT handler 物化、下一次 handler 的 ai64 都走 fast 优先）。
+            fr.slot_state = Register::SlotState::Present;
             sync_fast_after_write(f, idx, s);
             if (vmbin.prof_on)
                 vmbin.prof.w_fast++;
@@ -1230,6 +1293,8 @@ bool Vmkv::slot_write_scalar(Frame& f, std::uint8_t idx, const Scalar& s,
                 (void)kvspaceResolveRef(f.h, fr.key.c_str(), &fr.ref);
         }
         fr.resolved = ok;
+        if (ok)
+            fr.slot_state = Register::SlotState::Present;
     }
     std::free(buf);
     return ok;
@@ -1542,8 +1607,10 @@ bool Vmkv::write_named_i64(void* h, std::uint8_t idx, Frame& f, const char* kind
     // 纯内存化（655 分支）后无槽：强制落明文，保证 Handoff 续跑可读。
     if (ok && !rf.key.empty() && !rf.view_ok && !rf.dst_ptr &&
         kvspaceSetValue(f.h, rf.key.c_str(), buf,
-                        static_cast<std::uint32_t>(len64), err, sizeof err) == 0)
+                        static_cast<std::uint32_t>(len64), err, sizeof err) == 0) {
         rf.resolved = false;  // 下次 read 重取 view
+        rf.slot_state = Register::SlotState::Present;  // 槽已建：后续写须查类型
+    }
     std::free(buf);
     return ok;
 }
@@ -1557,6 +1624,7 @@ bool Vmkv::enter_frame(Frame& f, const Segment* seg, std::string* err) {
     f.regs.resize(seg->regs.size());
     for (size_t i = 0; i < seg->regs.size(); i++) {
         Register& rr = f.regs[i];
+        rr.slot_state = Register::SlotState::Unknown;
         rr.ref = kvspaceRef_t{};
         rr.resolved = false;
         rr.noslot = false;
@@ -1649,6 +1717,7 @@ bool Vmkv::enter_frame(Frame& f, const Segment* seg, std::string* err) {
                             f.regs[i].key = ap->key;
                         else
                             f.regs[i].key.clear();
+                        f.regs[i].slot_state = Register::SlotState::Unknown;
                         if (g_trace)
                             std::fprintf(stderr, "[argmem d=%s k=%d %s]\n",
                                          d.name.c_str(), k,

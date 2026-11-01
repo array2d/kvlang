@@ -50,6 +50,13 @@ struct Register {
     Register* dst_ptr = nullptr;
     bool base_ptr = false;
     bool base_ptr_known = false;
+    // 显式槽状态（成员读/写快路径用，避免每写一次 read_langtype）：
+    //   Absent  = 纯内存写（int64 快路径，kvspace 无槽）；
+    //   Present = 对该 key 的 kvspace 写成功过；
+    //   Unknown = 默认，保守查询。key 变更 / 帧复用 / 外部失效必须回 Unknown。
+    // 落进两个 bool 之后的既有 padding：不增大 Register（帧数组内存敏感）。
+    enum class SlotState : std::uint8_t { Unknown = 0, Absent, Present };
+    SlotState slot_state = SlotState::Unknown;
     std::uint32_t arr_esz = 0;
     std::int32_t arr_dims[8] = {};
     std::uint32_t arr_ndim = 0;
@@ -57,6 +64,15 @@ struct Register {
     std::uint64_t arr_bodylen = 0;
     std::string arr_elem_kind;
 };
+
+// handler 直写 kvspace 后同步槽状态：写的正是本寄存器自己的 key → Present
+// （槽已真实存在，后续写须查类型）；派生 key（成员/动态键）不动寄存器自身状态。
+inline void note_slot_write(Register& w, const char* key) noexcept {
+    if (w.slot_state != Register::SlotState::Absent)
+        return;
+    if (key && *key && w.key == key)
+        w.slot_state = Register::SlotState::Present;
+}
 
 struct Frame {
     Frame* parent = nullptr;
