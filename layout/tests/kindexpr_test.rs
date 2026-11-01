@@ -53,13 +53,12 @@ fn reject_non_kind_annotation_on_literal() {
     }
 }
 
-/// 已知种类名、`any`，以及容器/结构字面量的对应标注，都不得误伤。
+/// 已知种类名，以及容器/结构字面量的对应标注，都不得误伤。
 #[test]
 fn accept_known_kinds_on_literal() {
     let cases = [
         "\tx:int64 = 7\n",
         "\tx:float64 = 7\n",
-        "\tx:any = 7\n",
         "\ts:char/utf8 = \"hi\"\n",
         "\tx:[]int64 = [1, 2]\n",
         "\tx:[2]float32 = [1.0, 2.0]\n",
@@ -70,6 +69,23 @@ fn accept_known_kinds_on_literal() {
         let src = format!("struct Point {{\n\tx:int64=0\n}}\nrwfunc f() -> () {{\n{body}}}\n");
         assert_eq!(errors(&src), Vec::<String>::new(), "src: {src}");
     }
+}
+
+/// `any` 已不是类型名（不约束请写空 kindexp，见 spec 类型系统/文法与合法性）：
+/// 变量标注 `x:any` 必须报 unknown type，且不能退化成空 kindexp 放行。
+#[test]
+fn reject_any_annotation_on_literal() {
+    let src = "rwfunc f() -> () {\n\tx:any = 7\n}\n";
+    let msgs = errors(src);
+    assert!(
+        msgs.iter().any(|m| m.contains("unknown type \"any\"")),
+        "x:any 应报 unknown type，got {msgs:?}"
+    );
+    assert!(
+        msgs.iter()
+            .any(|m| m.contains("empty kindexp is only allowed in signature slots")),
+        "x:any 不得按空 kindexp 放行，got {msgs:?}"
+    );
 }
 
 /// 非字面量右值无从推断类型，放行（不因标注而报错）。
