@@ -29,6 +29,7 @@ add_library(kvlang_runtimec2 SHARED EXCLUDE_FROM_ALL
     src/jit/jit.cpp
     src/jit/jit_stage2.cpp
     src/jit/jit_abi_adapter.cpp
+    src/jit/jit_scalar_matrix.cpp
     ${JIT_ARCH_SRC}
     src/vmbin/profile.cpp
     src/value.cpp
@@ -168,6 +169,15 @@ target_include_directories(binir_dump_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_options(binir_dump_test PRIVATE -O2 -Wall -Wextra)
 add_test(NAME c2_binir_dump COMMAND binir_dump_test)
+
+# 标量 JIT 矩阵单测（来源 45add7a3，只入库未接线）：只编矩阵自身，不链 runtime。
+add_executable(jit_scalar_matrix_test
+    tests/jit_scalar_matrix_test.cpp
+    src/jit/jit_scalar_matrix.cpp)
+target_include_directories(jit_scalar_matrix_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_options(jit_scalar_matrix_test PRIVATE -O2 -Wall -Wextra)
+add_test(NAME c2_jit_scalar_matrix COMMAND jit_scalar_matrix_test)
 
 # E 层单测（#583 L3）：只依赖头文件，不链接 kvspace/runtime。
 add_executable(register_desc_type_test tests/register_desc_type_test.cpp)
