@@ -114,8 +114,11 @@ static void prebuild_reachable(void* h, const std::string& func_key) {
         const Segment* seg = cached_segment(h, fk);
         if (!seg)
             continue;
-        if (jit_enabled())
-            jit_compile(fk, seg);
+        // 预构建与运行期调度一致（M1 优先、JIT2 补形状）：M1 能编的函数
+        // 不再编 JIT2（它永远不会被执行，预编译只给进程加启动抖动）。
+        const void* code = jit_enabled() ? jit_compile(fk, seg) : nullptr;
+        if (jit2_enabled() && !code)
+            jit2_accepted(fk, seg);
         for (const CInsn& ci : seg->insns) {
             if (ci.op != rwir::Op::Call)
                 continue;

@@ -1,0 +1,15 @@
+rwfunc cold(n:int64) -> (r:int64) {
+	r = 0
+	i = 0
+	while (i < n) {
+		r = r + i
+		i = i + 1
+	}
+	t = time·now()
+	r = r + 1
+}
+
+rwfunc test() -> () {
+	cold(5) -> x
+	println("cold", x)
+}

@@ -40,7 +40,7 @@ using vmbin::Program;
 using vmbin::RegisterDesc;
 
 constexpr std::uint16_t kMagic = 0x4642;
-constexpr std::uint8_t kVersion = 1;
+constexpr std::uint8_t kVersion = 2;  // P0：reg 尾部 pad 存 array_type_id + 数组类型池段
 constexpr std::size_t kHeaderBytes = 32;
 constexpr std::uint16_t kOpHandoff = 0x1FC;
 constexpr std::uint16_t kOpBrIfFalse = 0x1FD;
@@ -199,7 +199,7 @@ bool encode_binir(const Segment& segment, std::vector<std::uint8_t>* out) {
 
     std::vector<std::size_t> const_text_index;  // ConstId → 串条目下标（tag 0 的 key）
     std::vector<std::uint64_t> const_value;
-    std::vector<bool> const_has_value;
+    std::vector<std::uint8_t> const_tag;  // 0 int64 / 1 float64 / 3 string
     std::vector<std::string> const_texts;
     std::vector<std::string> callees;
 
@@ -221,8 +221,18 @@ bool encode_binir(const Segment& segment, std::vector<std::uint8_t>* out) {
             const_texts.push_back(slot_text(segment.regs[slot]));
             const FastLiteral literal =
                 slot < segment.lit.size() ? segment.lit[slot] : FastLiteral{};
-            const_has_value.push_back(literal.is_i64);
-            const_value.push_back(static_cast<std::uint64_t>(literal.v));
+            if (literal.is_i64) {
+                const_tag.push_back(kTagInt64);
+                const_value.push_back(static_cast<std::uint64_t>(literal.v));
+            } else if (literal.is_f64) {
+                std::uint64_t bits = 0;
+                std::memcpy(&bits, &literal.f, sizeof bits);
+                const_tag.push_back(kTagFloat64);
+                const_value.push_back(bits);
+            } else {
+                const_tag.push_back(kTagString);
+                const_value.push_back(0);
+            }
         }
     };
 
@@ -262,7 +272,7 @@ bool encode_binir(const Segment& segment, std::vector<std::uint8_t>* out) {
     std::vector<Planned> planned(ninsn);
     const_texts.reserve(64);
     const_value.reserve(64);
-    const_has_value.reserve(64);
+    const_tag.reserve(64);
 
     for (std::size_t i = 0; i < ninsn; i++) {
         const Instruction& ins = segment.insns[i];
@@ -370,7 +380,7 @@ bool encode_binir(const Segment& segment, std::vector<std::uint8_t>* out) {
     };
     const_text_index.assign(const_texts.size(), 0);
     for (std::size_t i = 0; i < const_texts.size(); i++)
-        if (const_has_value[i])
+        if (const_tag[i] != kTagString)
             const_text_index[i] = intern(const_texts[i]);
     std::vector<std::size_t> callee_string(callees.size());
     for (std::size_t i = 0; i < callees.size(); i++)
@@ -394,8 +404,9 @@ bool encode_binir(const Segment& segment, std::vector<std::uint8_t>* out) {
 
     std::size_t value_bytes = 0;
     for (std::size_t i = 0; i < const_texts.size(); i++)
-        value_bytes += const_has_value[i] ? (1 + 8 + 4)
-                                          : (1 + 4 + const_texts[i].size());
+        value_bytes += const_tag[i] != kTagString
+                           ? (1 + 8 + 4)
+                           : (1 + 4 + const_texts[i].size());
     const std::size_t callee_bytes = callees.size() * (1 + 4);
     std::vector<std::uint32_t> string_offset(strings.size());
     std::size_t pool_cursor = value_bytes + callee_bytes;
@@ -553,8 +564,8 @@ bool encode_binir(const Segment& segment, std::vector<std::uint8_t>* out) {
 
     std::vector<std::uint8_t> pool;
     for (std::size_t i = 0; i < const_texts.size(); i++) {
-        if (const_has_value[i]) {
-            put_u8(&pool, kTagInt64);
+        if (const_tag[i] != kTagString) {
+            put_u8(&pool, const_tag[i]);  // tag 0 int64 / tag 1 float64
             put_u64(&pool, const_value[i]);
             put_u32(&pool, string_offset[const_text_index[i]]);
         } else {
@@ -590,8 +601,9 @@ bool encode_binir(const Segment& segment, std::vector<std::uint8_t>* out) {
         put_u8(&regs, flags);
         put_u32(&regs, string_offset[reg_string[reg]]);
         put_u8(&regs, static_cast<std::uint8_t>(desc.param_k));
-        for (int pad = 0; pad < 3; pad++)
-            put_u8(&regs, 0);
+        put_u8(&regs, static_cast<std::uint8_t>(desc.array_type_id & 0xFF));
+        put_u8(&regs, static_cast<std::uint8_t>(desc.array_type_id >> 8));
+        put_u8(&regs, 0);
     }
 
     const std::size_t cpool_offset = kHeaderBytes + code.size();
@@ -615,6 +627,28 @@ bool encode_binir(const Segment& segment, std::vector<std::uint8_t>* out) {
     out->insert(out->end(), code.begin(), code.end());
     out->insert(out->end(), pool.begin(), pool.end());
     out->insert(out->end(), regs.begin(), regs.end());
+    // 数组类型池（P0）：u32 count + 每项 72B（elem_kind/width/ndim/pad +
+    // dims[4] + strides[4] + numel，均小端 i64）。
+    std::vector<std::uint8_t> atpool;
+    put_u32(&atpool, static_cast<std::uint32_t>(segment.array_types.size()));
+    auto put_i64 = [&](std::int64_t v) {
+        put_u32(&atpool, static_cast<std::uint32_t>(
+                             static_cast<std::uint64_t>(v) & 0xFFFFFFFFu));
+        put_u32(&atpool, static_cast<std::uint32_t>(
+                             static_cast<std::uint64_t>(v) >> 32));
+    };
+    for (const vmbin::ArrayTypeDesc& t : segment.array_types) {
+        put_u8(&atpool, static_cast<std::uint8_t>(t.elem_kind));
+        put_u8(&atpool, t.width);
+        put_u8(&atpool, t.ndim);
+        put_u8(&atpool, 0);
+        for (int d = 0; d < 4; d++)
+            put_i64(t.dims[d]);
+        for (int d = 0; d < 4; d++)
+            put_i64(t.strides[d]);
+        put_i64(t.numel);
+    }
+    out->insert(out->end(), atpool.begin(), atpool.end());
     out->insert(out->end(), kTailBytes, 0);
     return true;
 }
@@ -638,8 +672,9 @@ bool decode_binir(const std::uint8_t* data, std::size_t size, Segment* out) {
         return false;
     if (static_cast<std::size_t>(cpool_offset) + pool_bytes != regs_offset)
         return false;
-    if (static_cast<std::size_t>(regs_offset) +
-            static_cast<std::size_t>(nreg) * kRegDescBytes + kTailBytes != size)
+    const std::size_t regs_end = static_cast<std::size_t>(regs_offset) +
+                                 static_cast<std::size_t>(nreg) * kRegDescBytes;
+    if (regs_end + 4 + kTailBytes > size)
         return false;
     if (ninsn > 0xFFFFFFu || nreg > 255)
         return false;
@@ -717,7 +752,9 @@ bool decode_binir(const std::uint8_t* data, std::size_t size, Segment* out) {
         const std::uint8_t flags = base[3];
         const std::uint32_t addr = read_u32_le(base + 4);
         const std::int8_t param_k = static_cast<std::int8_t>(base[8]);
-        if (base[9] != 0 || base[10] != 0 || base[11] != 0)
+        const std::uint16_t array_type_id =
+            static_cast<std::uint16_t>(base[9] | (base[10] << 8));
+        if (base[11] != 0)
             return false;
         if (langtype > static_cast<std::uint8_t>(LangType::Ext))
             return false;
@@ -734,6 +771,7 @@ bool decode_binir(const std::uint8_t* data, std::size_t size, Segment* out) {
         desc.param_k = param_k;
         desc.langtype = static_cast<LangType>(langtype);
         desc.width = width;
+        desc.array_type_id = array_type_id;
         if (addr != kNoString) {
             const auto found = strings.find(addr);
             if (found == strings.end())
@@ -744,6 +782,40 @@ bool decode_binir(const std::uint8_t* data, std::size_t size, Segment* out) {
                 desc.name = found->second;
         }
         reg_descs[r] = std::move(desc);
+    }
+    // 数组类型池
+    {
+        if (regs_end + 4 + kTailBytes > size)
+            return false;
+        const std::uint32_t count = read_u32_le(data + regs_end);
+        std::size_t off = regs_end + 4;
+        const std::size_t need = static_cast<std::size_t>(count) * 76 + kTailBytes;
+        if (std::getenv("RC2_ATDBG"))
+            std::fprintf(stderr, "[atdbg decode regs_end=%zu size=%zu count=%u off=%zu need=%zu]\n",
+                         regs_end, size, count, off, need);
+        if (off + need != size)
+            return false;
+        auto get_i64 = [&](std::size_t at) {
+            const std::uint64_t lo = read_u32_le(data + at);
+            const std::uint64_t hi = read_u32_le(data + at + 4);
+            return static_cast<std::int64_t>(lo | (hi << 32));
+        };
+        decoded.array_types.resize(count);
+        for (std::uint32_t k = 0; k < count; k++) {
+            vmbin::ArrayTypeDesc t;
+            t.elem_kind = static_cast<LangType>(data[off]);
+            t.width = data[off + 1];
+            t.ndim = data[off + 2];
+            for (int d = 0; d < 4; d++)
+                t.dims[d] = get_i64(off + 4 + 8 * d);
+            for (int d = 0; d < 4; d++)
+                t.strides[d] = get_i64(off + 36 + 8 * d);
+            t.numel = get_i64(off + 68);
+            if (t.ndim > 4 || t.width == 0)
+                return false;
+            decoded.array_types[k] = t;
+            off += 76;
+        }
     }
 
     // 指令流 → wire（此阶段不落地槽号）。
@@ -880,7 +952,7 @@ bool decode_binir(const std::uint8_t* data, std::size_t size, Segment* out) {
 
     struct ConstSlot {
         std::string text;
-        bool has_value = false;
+        std::uint8_t tag = kTagString;  // 0 int64 / 1 float64 / 3 string
         std::uint64_t value = 0;
     };
     std::vector<ConstSlot> constants;
@@ -888,9 +960,9 @@ bool decode_binir(const std::uint8_t* data, std::size_t size, Segment* out) {
     for (std::size_t i = 0; i < entries.size(); i++) {
         const PoolEntry& entry = entries[i];
         if (i < value_count) {
-            if (entry.tag == kTagInt64) {
+            if (entry.tag == kTagInt64 || entry.tag == kTagFloat64) {
                 ConstSlot slot;
-                slot.has_value = true;
+                slot.tag = entry.tag;
                 slot.value = entry.value;
                 if (entry.key_offset != kNoString) {
                     const auto found = strings.find(entry.key_offset);
@@ -972,8 +1044,13 @@ bool decode_binir(const std::uint8_t* data, std::size_t size, Segment* out) {
                 desc.kind = Operand::Kind::Literal;
                 apply_slot_text(constants[ref.index].text, &desc);
                 FastLiteral literal;
-                literal.is_i64 = constants[ref.index].has_value;
+                literal.is_i64 = constants[ref.index].tag == kTagInt64;
                 literal.v = static_cast<std::int64_t>(constants[ref.index].value);
+                if (constants[ref.index].tag == kTagFloat64) {
+                    literal.is_f64 = true;
+                    std::memcpy(&literal.f, &constants[ref.index].value,
+                                sizeof literal.f);
+                }
                 slot = static_cast<std::int16_t>(append_slot(std::move(desc), literal));
             }
             return slot;
@@ -1177,8 +1254,12 @@ bool decode_binir(const std::uint8_t* data, std::size_t size, Segment* out) {
         desc.kind = Operand::Kind::Literal;
         apply_slot_text(constants[c].text, &desc);
         FastLiteral literal;
-        literal.is_i64 = constants[c].has_value;
+        literal.is_i64 = constants[c].tag == kTagInt64;
         literal.v = static_cast<std::int64_t>(constants[c].value);
+        if (constants[c].tag == kTagFloat64) {
+            literal.is_f64 = true;
+            std::memcpy(&literal.f, &constants[c].value, sizeof literal.f);
+        }
         if (append_slot(std::move(desc), literal) < 0)
             return false;
     }

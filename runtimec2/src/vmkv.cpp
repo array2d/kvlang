@@ -1195,6 +1195,10 @@ bool Vmkv::slot_write_scalar(Frame& f, std::uint8_t idx, const Scalar& s,
             fr.sck = s.k;
             fr.scw = width;
             fr.sc_ok = true;
+            // 正文写了新值：fast 缓存必须同步。池复用帧/被 JIT 预置过的寄存器
+            // 可能带着陈旧 fast_i64；不同步会让后续按 fast 取值的读者读到旧值
+            // （JIT handler 物化、下一次 handler 的 ai64 都走 fast 优先）。
+            sync_fast_after_write(f, idx, s);
             if (vmbin.prof_on)
                 vmbin.prof.w_fast++;
             return true;
@@ -1707,8 +1711,9 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
         }
     }
     freg_guard.blk = &f.regs;
-    if (!enter_frame(f, seg, err))
+    if (!f.skip_enter_frame && !enter_frame(f, seg, err))
         return Outcome::Error;
+    f.skip_enter_frame = false;
     // binir 打印（RC2_DUMP_BINIR=all：每次执行前）。
     if (binir_dump_on_run())
         dump_binir(*seg, f.func_dir.c_str());
@@ -3032,9 +3037,20 @@ vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
     const bool mem_frame = cseg && !cseg->has_rwirhandler;
     // JIT 快路径判定（M1）：callee 已编译 → 形状已知（int64 单读参/写参），
     // 参数绑定直接走 mem 路径，免签名/参数 wire 的 kvspace 读取。
-    const void* jcode =
+    // 调度：M1 能编的优先（其适配更轻，iops 类小函数不被通用适配的固定成本
+    // 拖慢）；JIT2 补 M1 拒绝的形状。M1 只编译一次（CallSite 缓存）。
+    const void* m1_code =
         site.ready ? site.jit
-                   : (cseg && jit_enabled() ? jit_compile(callee, cseg) : nullptr);
+                   : (cseg && jit_enabled() ? jit_compile(callee, cseg)
+                                            : nullptr);
+    const void* jit2_code =
+        m1_code
+            ? nullptr
+            : (site.ready
+                   ? site.jit2_entry
+                   : (jit2_enabled() && cseg ? jit2_entry(callee, cseg)
+                                             : nullptr));
+    const void* jcode = m1_code ? m1_code : jit2_code;
     // 非纯内存帧：清残留 + 建目录 + 系统变量落明文（明文栈唯一事实）。
     if (!mem_frame) {
         const std::string nstack = nf + "/";
@@ -3098,7 +3114,8 @@ vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
     // while the segment cache lives. Unresolved callees retry every call.
     if (!site.ready && cseg) {
         site.segment = cseg;
-        site.jit = jcode;
+        site.jit = m1_code;
+        site.jit2_entry = jit2_code;
         site.read_types.assign(ins.nrd, std::string());
         site.read_types_ok.assign(ins.nrd, 0);
         for (int i = 1; i < ins.nrd; i++)
@@ -3292,7 +3309,11 @@ vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
         for (int i = 1; jcode && i < ins.nrd; i++)
             if (!holds_value(&f.regs[ins.rd[i]]))
                 jcode = nullptr;
-    if (!jcode || f.observable)
+    // JIT 快路径绑定只对纯内存帧成立（参数=调用方 reg 别名、不落 kvspace 槽）。
+    // 含 handler/handoff 的段必须走完整 kvspace 绑定：帧可能中途 Stop 重启，
+    // 别名会丢（prime_sieve println 坑），且 JIT2 接受 handler 函数后更常见。
+    const bool jit_fast_bind = jcode && !f.observable && mem_frame;
+    if (!jit_fast_bind)
     for (int i = 1; i < ins.nrd; i++) {
         Wire vw{};
         std::string vk, typ;
@@ -3364,7 +3385,7 @@ vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
         if (!bind_arg(-i, &f.regs[ins.rd[i]], vk, typ, vw))
             return Outcome::Error;
     }
-    if (!jcode || f.observable)
+    if (!jit_fast_bind)
     for (int i = 1; i <= ins.nwr; i++) {
         Register& wr = f.regs[ins.wr[i - 1]];
         // 内存别名写参（dst_ptr，key 空）转发给非纯内存 callee：值在调用方 reg，
@@ -3391,7 +3412,10 @@ vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
     nfc.func_dir = callee;
     nfc.seg_hint = cseg;
     nfc.jit_hint = jcode;
-    nfc.jit_known = site.ready || !jcode;
+    nfc.jit2_entry = jit2_code;
+    // 钩子是否需要：M1 提示或 JIT2 入口存在（读参不 hold 值时 hint 会被清，
+    // 但 JIT2 仍可能用槽式适配执行，故以两者判）。
+    nfc.jit_known = !(jcode || jit2_code);
     if (mem_src_n)
         std::memcpy(nfc.arg_src, mem_src,
                     static_cast<std::size_t>(mem_src_n) * sizeof(Register*));
@@ -3402,7 +3426,7 @@ vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
     nfc.arg_dst_n = mem_dst_n;
     nfc.mem_frame = mem_frame;
     nfc.observable = f.observable;  // 可观察链传播（vthread·run 子链的递归帧）
-    if (jcode && !f.observable) {
+    if (jit_fast_bind) {
         // JIT 快路径：绕过上文所有 kvspace 读取（param_decl_type/read_reg/
         // ensure_reg_key/_lit 槽），直接 mem 绑定 int64 参数。
         // 可观察链（vthread·run 子链，printstack 检视）不走此路径——字面量实参

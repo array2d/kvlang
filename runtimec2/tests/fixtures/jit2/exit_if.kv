@@ -1,0 +1,12 @@
+rwfunc clamp_low(a:int64) -> (r:int64) {
+	r = a
+	if (a > 5) {
+		r = 5
+	}
+}
+
+rwfunc test() -> () {
+	clamp_low(9) -> x
+	clamp_low(2) -> y
+	println("clamp", x, y)
+}
