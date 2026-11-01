@@ -1233,6 +1233,24 @@ pub fn type_set_slot_type(sets: &HashMap<String, Vec<String>>, name: &str) -> Op
     }
 }
 
+/// 文本形式字面量的 kind（与 `slot_type` 同规则）：数字/布尔；其它 None。
+fn literal_text_kind(name: &str) -> Option<&'static str> {
+    if name == "true" || name == "false" {
+        return Some("bool");
+    }
+    let b = name.as_bytes();
+    let digit = b.first().is_some_and(|c| c.is_ascii_digit());
+    let neg = b.len() > 1 && b[0] == b'-' && b[1].is_ascii_digit();
+    if !digit && !neg {
+        return None;
+    }
+    if name.contains('.') || name.contains('e') || name.contains('E') {
+        Some("float64")
+    } else {
+        Some("int64")
+    }
+}
+
 fn is_cast_op(op: &str) -> bool {
     matches!(
         op,
@@ -1608,6 +1626,11 @@ fn exact_kind(
             LitKind::LitBool => Some("bool".to_string()),
             LitKind::LitNone if e.val == "None" => None,
             _ => {
+                // lower 合成的字面量叶（`ast::leaf("1")` / `("-1")`）lit 也是
+                // LitNone，但文本本身仍是字面量：按 slot_type 同规则判 kind。
+                if let Some(t) = literal_text_kind(&e.val) {
+                    return Some(t.to_string());
+                }
                 // 变量叶的 lit 也是 LitNone，按名字查声明/稳定表。
                 let name = &e.val;
                 if name.is_empty() {
@@ -1741,11 +1764,14 @@ pub fn stable_kinds(
             if stable.contains_key(*v) || dead.contains(*v) {
                 continue;
             }
+            // boot 先用**候选表**（cands）而不是已稳定表：互相依赖的循环变量
+            // （`rev = r + d` / `r = rev × 10`）需要同一轮里一起点火，否则先被
+            // bad 检查误杀。正确性仍由下面的 bad 检查用最终 stable 全量复核。
             let boot = sources
                 .get(*v)
                 .map(|es| {
                     es.iter()
-                        .any(|e| exact_kind(e, declared, &stable).as_deref() == Some(k.as_str()))
+                        .any(|e| exact_kind(e, declared, &cands).as_deref() == Some(k.as_str()))
                 })
                 .unwrap_or(false);
             if boot {
@@ -1929,8 +1955,8 @@ fn specialize_inst(
     }
     validate_num_op(&word, &e.args, tm, diags);
     /* 特化决策用 declared（见上）；诊断仍用推断表以保持现有报错面。 */
-    /* 只在「全部操作数静态类型完全一致且为 int64/float64」时特化；
-     * 混合宽度/混合 int+float/动态 any/字符串/bool 一律保留通用 opcode。 */
+    /* 操作数类型必须全部可证明（exact_operand_kind）；混合数值 kind 按五语言
+     * 提升规则取唯一结果 kind，证明不了（未知/字符串/bool/不可判混合）保留通用 opcode。 */
     let mut kinds: Vec<String> = Vec::new();
     for arg in &e.args {
         let t = match exact_operand_kind(arg, declared, stable) {
@@ -1945,15 +1971,22 @@ fn specialize_inst(
     if kinds.is_empty() {
         return;
     }
-    let k = &kinds[0];
-    if !(builtin::is_int_kind(k) || k == "float64" || k == "float32") {
-        return;
-    }
-    if kinds.iter().any(|t| t != k) {
+    let is_cmp = matches!(word.as_str(), "eq" | "neq" | "lt" | "le" | "gt" | "ge");
+    /* 混合 int×float 的比较在 runtime 报错（same_class=false）；不特化以免发出
+     * 与解释器行为不符的 typed 名。 */
+    let mut k = match promoted_numeric_kind(&kinds, !is_cmp) {
+        Some(k) => k,
+        None => return,
+    };
+    // 一元负号（1 参 `-`/sub）：runtime 按 Neg 执行 → 发 `<k>·neg`。
+    if word == "sub" && e.args.len() == 1 {
+        if builtin::is_unsigned_kind(&k) {
+            return;
+        }
+        e.op = format!("{k}{}neg", keytree::MEMBER_SEP);
         return;
     }
     /* handler 的实参个数必须与之一致（通用 sub 允许 1 参，特化版只收 2 参）。 */
-    let is_cmp = matches!(word.as_str(), "eq" | "neq" | "lt" | "le" | "gt" | "ge");
     let unary = matches!(
         word.as_str(),
         "neg" | "abs" | "sign" | "sqrt" | "exp" | "log"
@@ -1966,23 +1999,88 @@ fn specialize_inst(
             return;
         }
     } else if matches!(word.as_str(), "sqrt" | "exp" | "log" | "pow") {
-        /* 通用实现对这些恒给 float64；float32 不特化。 */
-        if k != "float64" {
+        /* 通用实现对这些恒给 float64（int 操作数隐式提升）；float32 不特化。 */
+        if k == "float32" {
             return;
         }
+        k = "float64".to_string();
     } else if matches!(word.as_str(), "bitand" | "bitor" | "bitxor" | "shl" | "shr") {
         /* layout 把 bit/shift 的静态结果定义为 64 位；小宽度留待专门修正。 */
         if k != "int64" && k != "uint64" {
             return;
         }
     } else if matches!(word.as_str(), "neg" | "abs") {
-        if builtin::is_unsigned_kind(k) {
+        if builtin::is_unsigned_kind(&k) {
             return;
         }
-    } else if !is_cmp && builtin::op_kind(&word, k) != *k {
+    } else if !is_cmp && builtin::op_kind(&word, &k) != k {
         return;
     }
     e.op = format!("{k}{}{word}", keytree::MEMBER_SEP);
+}
+
+/// 混合数值 kind 的唯一结果 kind（五语言阵营，且与 runtime 现状一致）：
+/// - int×int 取更宽（`wider_int_kind`，C 整型提升）；
+/// - float×float 取 float64（有 float64 时）；
+/// - int×float 取 float 宽度：仅当 float64 或整数侧全为 64 位（runtime 的
+///   to_float 结果宽度 = wmax 或 8，窄 int×float32 与顺序相关）→ float64；
+/// - int×uint 混合 runtime 直接报错（same_class=false），不特化。
+/// `allow_mixed_classes=false`（比较类）时跨类混合一律不特化。
+fn promoted_numeric_kind(kinds: &[String], allow_mixed_classes: bool) -> Option<String> {
+    let (mut has_int, mut has_uint, mut has_float) = (false, false, false);
+    let mut has_float64 = false;
+    for k in kinds {
+        match k.as_str() {
+            "int8" | "int16" | "int32" | "int64" => has_int = true,
+            "uint8" | "uint16" | "uint32" | "uint64" => has_uint = true,
+            "float32" => has_float = true,
+            "float64" => {
+                has_float = true;
+                has_float64 = true;
+            }
+            _ => return None,
+        }
+    }
+    if has_int && has_uint {
+        return None;
+    }
+    let mixed_class = has_float && (has_int || has_uint);
+    if mixed_class {
+        if !allow_mixed_classes {
+            return None;
+        }
+        // 与 runtime 现状对齐（`to_float`）：结果宽度 = 首操作数是 float 时取
+        // wmax，否则恒 8（float64）。C 语义本应取浮点操作数宽度，runtime 的
+        // 顺序相关行为留待阶段 A/B 修正；layout 按可观测结果取名。
+        let first_float = builtin::is_float_kind(&kinds[0]);
+        if !first_float {
+            return Some("float64".to_string());
+        }
+        let wmax = kinds
+            .iter()
+            .map(|t| {
+                if builtin::is_float_kind(t) {
+                    if t == "float32" {
+                        4
+                    } else {
+                        8
+                    }
+                } else {
+                    builtin::int_kind_width(t) as u8
+                }
+            })
+            .max()
+            .unwrap_or(8);
+        return Some(if wmax == 8 { "float64" } else { "float32" }.to_string());
+    }
+    if has_float {
+        return Some(if has_float64 { "float64" } else { "float32" }.to_string());
+    }
+    let mut k = kinds[0].clone();
+    for t in &kinds[1..] {
+        k = builtin::wider_num_kind(&k, t);
+    }
+    Some(k)
 }
 
 // ── typed 写槽校验（见 spec [[赋值转换]]）───────────────────────────

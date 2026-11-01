@@ -123,6 +123,18 @@ struct Builder {
         return static_cast<std::uint8_t>(seg.regs.size() - 1);
     }
 
+    std::uint8_t float_const(double value, const char* key) {
+        RegisterDesc desc;
+        desc.kind = Operand::Kind::Literal;
+        desc.slot_key = key;
+        seg.regs.push_back(desc);
+        FastLiteral literal;
+        literal.is_f64 = true;
+        literal.f = value;
+        seg.lit.push_back(literal);
+        return static_cast<std::uint8_t>(seg.regs.size() - 1);
+    }
+
     std::uint8_t text_const(const char* key, const char* name) {
         RegisterDesc desc;
         desc.kind = Operand::Kind::Literal;
@@ -178,6 +190,11 @@ std::string slot_identity(const Segment& seg, std::uint8_t slot) {
             slot < seg.lit.size() ? seg.lit[slot] : FastLiteral{};
         if (literal.is_i64)
             return "int:" + std::to_string(literal.v);
+        if (literal.is_f64) {
+            std::uint64_t bits = 0;
+            std::memcpy(&bits, &literal.f, sizeof bits);
+            return "float:" + std::to_string(bits) + "|" + desc.slot_key;
+        }
         return "text:" + desc.slot_key + "|" + desc.name;
     }
     return "var:" + desc.name;
@@ -286,10 +303,16 @@ bool same_segment(const Segment& a, const Segment& b, std::string* why) {
         const RegisterDesc& desc = seg.regs[slot];
         const FastLiteral literal =
             slot < seg.lit.size() ? seg.lit[slot] : FastLiteral{};
-        const std::string base = literal.is_i64
-                                     ? "int:" + std::to_string(literal.v)
-                                     : "text:";
-        if (!literal.is_i64 || (slot < ref.size() && ref[slot]))
+        std::string base = "text:";
+        if (literal.is_i64)
+            base = "int:" + std::to_string(literal.v);
+        else if (literal.is_f64) {
+            std::uint64_t bits = 0;
+            std::memcpy(&bits, &literal.f, sizeof bits);
+            base = "float:" + std::to_string(bits);
+        }
+        if ((!literal.is_i64 && !literal.is_f64) ||
+            (slot < ref.size() && ref[slot]))
             return base + "|" + desc.slot_key + "|" + desc.name;
         return base;
     };
@@ -593,6 +616,18 @@ void handmade_tests() {
         ins.nwr = 1;
         ins.wr[0] = r;
         test_roundtrip("text_constant", b.done());
+    }
+    {
+        Builder b;
+        const std::uint8_t pi = b.float_const(3.1400000000000001243,
+                                              "/lib/demo/[1,-1]");
+        const std::uint8_t x = b.var("x");
+        Instruction& ins = b.insn("float64");
+        ins.nrd = 1;
+        ins.rd[0] = pi;
+        ins.nwr = 1;
+        ins.wr[0] = x;
+        test_roundtrip("float_literal_const", b.done());
     }
     {
         // 空段（无指令）：仍须往返。

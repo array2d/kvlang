@@ -1,0 +1,9 @@
+rwfunc pair(a:int64) -> (x:int64, y:int64) {
+	x = a + 1
+	y = a + 2
+}
+
+rwfunc test() -> () {
+	pair(10) -> (p, q)
+	println("pair", p, q)
+}

@@ -17,8 +17,21 @@ struct Operand {
     std::string slot_key;
 };
 
+// compact 数组静态类型（创建即定长：T[d0,d1,...]）。JIT 发射期常量折叠
+// 宽度/维度/步长/元素数，运行期只剩 body 指针 + 边界比较。
+struct ArrayTypeDesc {
+    LangType elem_kind = LangType::None;  // 标量元素类型
+    std::uint8_t width = 0;               // 元素字节宽（1/2/4/8）
+    std::uint8_t ndim = 0;
+    std::int64_t dims[4] = {};      // 支持到 4 维（benchmark 实际 1–2）
+    std::int64_t strides[4] = {};   // row-major 预计算步长
+    std::int64_t numel = 0;
+};
+inline constexpr std::uint16_t kArrayTypeNone = 0xFFFF;
+
 struct RegisterDesc {
-    Operand::Kind kind = Operand::Kind::None;
+    Operand::Kind kind = Operand::Kind::None;  // 0
+    std::uint16_t array_type_id = kArrayTypeNone;  // 2（头部 padding，80B 不变）
     std::string name;
     std::string slot_key;
     int param_k = 0;
@@ -67,6 +80,9 @@ static_assert(sizeof(Instruction) == 34,
 struct FastLiteral {
     bool is_i64 = false;
     std::int64_t v = 0;
+    // float64 字面量快值（JIT2 浮点段用；codec tag 1 往返）。
+    bool is_f64 = false;
+    double f = 0;
 };
 
 // 调用点缓存：一条 call 指令一项（其余指令不占内存）。
@@ -74,6 +90,7 @@ struct CallSite {
     std::uint16_t callee_id = 0xFFFF;  // Program::callees 池下标
     const Program* segment = nullptr;  // callee 段
     const void* jit = nullptr;         // callee JIT 入口
+    const void* jit2_entry = nullptr;  // callee 的 JIT2 产物（null = 不走 JIT2）
     bool ready = false;
     std::vector<std::string> read_types, write_types;
     std::vector<std::uint8_t> read_types_ok, write_types_ok;
@@ -88,6 +105,7 @@ struct Program {
     std::vector<FastLiteral> lit;
     std::vector<std::string> callees;          // call 目标路径池（callee_id）
     std::vector<std::string> extra_rwir_names;  // 非 myrwircaps 条目（扩展算子）
+    std::vector<ArrayTypeDesc> array_types;     // 静态数组类型池（array_type_id）
     mutable std::vector<CallSite> call_sites;  // 调用点缓存（call_site 下标）
     // 成员写缓存：指令下标 → key/base 寄存器；-2 = 未解析。
     struct MemberWriteCache {
@@ -96,6 +114,8 @@ struct Program {
     };
     mutable std::unordered_map<std::uint32_t, MemberWriteCache> member_write_cache;
     bool has_rwirhandler = false;
+    bool jit_handler_cold = false;        // 建段期：首个 handler 在循环之后
+    std::uint8_t handler_loop_ratio = 0;  // 建段期：handler 指令占比 0–100
 };
 
 // 扩展算子 id 段：rwir_id ≥ 本值 = extra_rwir_names 池下标（表内 id 恒 < 0x8000）。

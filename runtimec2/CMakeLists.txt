@@ -26,6 +26,7 @@ add_library(kvlang_runtimec2 SHARED EXCLUDE_FROM_ALL
     src/codeseg.cpp
     src/vmbin/binir_codec.cpp
     src/jit/jit.cpp
+    src/jit/jit_stage2.cpp
     src/jit/jit_abi_adapter.cpp
     ${JIT_ARCH_SRC}
     src/vmbin/profile.cpp
@@ -181,6 +182,7 @@ set_tests_properties(c2_segment_shape_dump PROPERTIES TIMEOUT 120)
 add_executable(jit_verify_test
     tests/jit_verify_test.cpp
     src/jit/jit.cpp
+    src/jit/jit_stage2.cpp
     src/jit/jit_abi_adapter.cpp
     src/jit/jit_x64.cpp
     src/rwir_gen.cpp)

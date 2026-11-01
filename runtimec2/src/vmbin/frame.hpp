@@ -76,6 +76,8 @@ struct Frame {
     const void* jit_hint = nullptr;
     bool jit_known = false;
     bool observable = false;
+    bool skip_enter_frame = false;  // JIT Native 出口后从 pc 续跑，不重置帧
+    const void* jit2_entry = nullptr;  // callee 的 JIT2 产物（CallSite 缓存）
 };
 
 template <std::uint8_t O>

@@ -251,7 +251,12 @@ void dump_binir(const Segment& seg, const char* func_dir) {
         const bool jit = !has_handler && in_jit_bucket(ci);
         (jit ? jit_n : interp_n)++;
         const std::string text = insn_text(seg, m, ci);
-        const std::string comment = insn_comment(seg, m, ci);
+        std::string comment = insn_comment(seg, m, ci);
+        if (ci.handler != rwir::RwirHandlerId::None && std::getenv("RC2_HDBG"))
+            comment += " h=" + std::to_string(static_cast<int>(ci.handler));
+        if (ci.handler != rwir::RwirHandlerId::None && std::getenv("RC2_HDBG"))
+            comment += std::string(" impl=") +
+                        std::to_string(static_cast<int>(ci.impl));
         appendf(&out, "  %04zu  %-30s ; %-18s [%s]\n", i, text.c_str(),
                 comment.c_str(), jit ? "JIT" : "INTERP");
     }

@@ -10,7 +10,8 @@ lib kvlang/spec/kvspace模型/数组两种物理形态 {
 | **stringkeymap** | `stringkeymap` | `{v0,v1,…}`、`scatterarray·newscatter` 等 | 每元素落独立子 key `base·[i]` | N+1 |
 
 - **compact**：元素连续打包进一个 XValue，`raw_len = ∏dims × 元素字节宽`，langtype 记录元素类型与形状。对齐 C `int[10]`、Go `[10]int`、Rust `[i32;10]`；多维即连续布局的 ndarray/tensor。要求元素
-  定长同类型——含变长字符串字面量的 `[…]` 在 layout 阶段报错。支持 `arr[i]` 随机访问（下标读经
+  定长同类型——元素限 `bool` 与 10 种数值标量（整数/浮点），char 族是字符串本身而非元素数组，
+  含变长字符串字面量的 `[…]` 在 layout 阶段报错。支持 `arr[i]` 随机访问（下标读经
   `compactarray·at` 在 body 内定位），可零拷贝整块读。
 - **stringkeymap**：base key 的 langtype 为 map 类型、body 为空；每个元素是独立子 key，成员名即
   **memitemkey 值逐字**（逐字铁律见 [[文法与合法性]]）：裸标量键落 `b·200`、标量元组键落

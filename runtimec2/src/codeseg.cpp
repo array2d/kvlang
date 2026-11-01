@@ -47,7 +47,78 @@ int reg_of(Segment* seg, std::unordered_map<std::string, int>* dedup,
     return idx;
 }
 
-bool operand_desc(void* h, const std::string& key, RegDesc* out) {
+// 静态数组类型 kindexpr：`[d0,d1,...]elem`（compact 定长、row-major）。
+// 只收标量元素（bool/int*/uint*/float*）；char 族与容器不进 JIT 内联。
+bool parse_array_kindexpr(std::string_view lt, vmbin::ArrayTypeDesc* out) {
+    if (lt.size() < 4 || lt.front() != '[')
+        return false;
+    const std::size_t close = lt.find(']');
+    if (close == std::string_view::npos || close + 1 >= lt.size())
+        return false;
+    std::uint8_t ndim = 0;
+    std::size_t i = 0;
+    const std::string_view dims = lt.substr(1, close - 1);
+    while (i <= dims.size()) {
+        const std::size_t comma = dims.find(',', i);
+        const std::string_view one =
+            comma == std::string_view::npos ? dims.substr(i)
+                                            : dims.substr(i, comma - i);
+        if (one.empty() || ndim >= 4)
+            return false;
+        std::int64_t v = 0;
+        for (char ch : one) {
+            if (ch < '0' || ch > '9')
+                return false;
+            v = v * 10 + (ch - '0');
+        }
+        if (v <= 0)
+            return false;
+        out->dims[ndim++] = v;
+        if (comma == std::string_view::npos)
+            break;
+        i = comma + 1;
+    }
+    vmbin::LangType kind = vmbin::LangType::None;
+    std::uint8_t width = 0;
+    if (!vmbin::langtype_kind(lt.substr(close + 1), &kind, &width))
+        return false;
+    out->elem_kind = kind;
+    out->width = width;
+    out->ndim = ndim;
+    out->numel = 1;
+    for (std::uint8_t d = 0; d < ndim; d++)
+        out->numel *= out->dims[d];
+    out->strides[ndim - 1] = 1;
+    for (int d = static_cast<int>(ndim) - 2; d >= 0; d--)
+        out->strides[d] = out->strides[d + 1] * out->dims[d + 1];
+    return true;
+}
+
+// 数组类型池去重登记（layout 的 `[d0,d1]T` 串 → array_type_id）。
+std::uint16_t array_type_of(vmbin::Program* seg, std::string_view lt) {
+    vmbin::ArrayTypeDesc t;
+    if (!parse_array_kindexpr(lt, &t))
+        return vmbin::kArrayTypeNone;
+    for (std::size_t k = 0; k < seg->array_types.size(); k++) {
+        const vmbin::ArrayTypeDesc& e = seg->array_types[k];
+        if (e.elem_kind != t.elem_kind || e.width != t.width ||
+            e.ndim != t.ndim || e.numel != t.numel)
+            continue;
+        bool same = true;
+        for (std::uint8_t d = 0; d < t.ndim; d++)
+            if (e.dims[d] != t.dims[d])
+                same = false;
+        if (same)
+            return static_cast<std::uint16_t>(k);
+    }
+    if (seg->array_types.size() >= vmbin::kArrayTypeNone)
+        return vmbin::kArrayTypeNone;
+    seg->array_types.push_back(t);
+    return static_cast<std::uint16_t>(seg->array_types.size() - 1);
+}
+
+bool operand_desc(void* h, const std::string& key, RegDesc* out,
+                  vmbin::Program* seg) {
     std::string op, ltype;
     int nr = 0, nw = 0;
     if (read_rwir(h, key, &op, &nr, &nw, &ltype)) {
@@ -72,6 +143,9 @@ bool operand_desc(void* h, const std::string& key, RegDesc* out) {
         // E 层：操作数槽 NUL 后的类型串（layout typed_slot_value）。
         if (!ltype.empty())
             langtype_kind(ltype, &out->langtype, &out->width);
+        // compact 定长数组：`[d0,d1,...]T` → 静态类型池（JIT 内联的唯一前置）。
+        if (!ltype.empty() && ltype.front() == '[')
+            out->array_type_id = array_type_of(seg, ltype);
         return true;
     }
     out->kind = Operand::Kind::Literal;
@@ -298,11 +372,18 @@ bool same_program(const Segment& a, const Segment& b, std::string* why) {
                     std::to_string(d.width));
                 continue;
             }
-            std::string key = lit.is_i64
-                                  ? "int:" + std::to_string(lit.v)
-                                  : "text:" + d.slot_key + "|" + d.name;
+            std::string key;
+            if (lit.is_i64)
+                key = "int:" + std::to_string(lit.v);
+            else if (lit.is_f64) {
+                std::uint64_t bits = 0;
+                std::memcpy(&bits, &lit.f, sizeof bits);
+                key = "float:" + std::to_string(bits);
+            } else {
+                key = "text:" + d.slot_key + "|" + d.name;
+            }
             // 只读引用的常量（池条目）连 key 一起比；分支目标常量只比值。
-            if (!lit.is_i64 || (i < ref.size() && ref[i]))
+            if ((!lit.is_i64 && !lit.is_f64) || (i < ref.size() && ref[i]))
                 key += "|" + d.slot_key + "|" + d.name;
             consts_out->push_back(std::move(key));
         }
@@ -436,7 +517,7 @@ bool build(void* h, const std::string& func_dir, Segment* out) {
         for (int k = 1; k <= nr; k++) {
             const std::string rk = slot_key(func_dir, s0, -k);
             RegDesc d;
-            if (!operand_desc(h, rk, &d))
+            if (!operand_desc(h, rk, &d, out))
                 return false;
             const std::string tag = std::string(d.kind == Operand::Kind::Var ? "v:" : "l:") +
                                     (d.kind == Operand::Kind::Var ? d.name : rk);
@@ -447,7 +528,7 @@ bool build(void* h, const std::string& func_dir, Segment* out) {
         for (int k = 1; k <= nw; k++) {
             const std::string wk = slot_key(func_dir, s0, k);
             RegDesc d;
-            if (!operand_desc(h, wk, &d))
+            if (!operand_desc(h, wk, &d, out))
                 return false;
             const std::string tag = std::string(d.kind == Operand::Kind::Var ? "v:" : "l:") +
                                     (d.kind == Operand::Kind::Var ? d.name : wk);
@@ -487,6 +568,8 @@ bool build(void* h, const std::string& func_dir, Segment* out) {
                          "lt=%s w=%u]\n",
                          ri, (int)d.kind, d.name.c_str(), d.slot_key.c_str(),
                          d.param_k, ltn ? ltn : "?", (unsigned)d.width);
+            std::fprintf(stderr, "[segdmp reg %zu atype=%u]\n", ri,
+                         (unsigned)d.array_type_id);
         }
         for (std::size_t ii = 0; ii < out->insns.size(); ii++) {
             const CInsn& ci = out->insns[ii];
@@ -517,6 +600,9 @@ bool build(void* h, const std::string& func_dir, Segment* out) {
                     sc.width == 8) {
                     out->lit[i].is_i64 = true;
                     out->lit[i].v = sc.i;
+                } else if (sc.k == Scalar::K::Float && sc.width == 8) {
+                    out->lit[i].is_f64 = true;
+                    out->lit[i].f = sc.f;
                 }
             }
         }

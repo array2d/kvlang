@@ -1,0 +1,13 @@
+rwfunc zero() -> (r:int64) {
+	r = 0
+	i = 0
+	while (i < 5) {
+		r = r + i
+		i = i + 1
+	}
+}
+
+rwfunc test() -> () {
+	zero() -> x
+	println("zero x =", x)
+}

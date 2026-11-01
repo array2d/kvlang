@@ -1,11 +1,16 @@
 #include "jit.hpp"
+#include "vmkv_rwirhandler.hpp"
 #include "jit_abi_adapter.hpp"
+#include "jit_stage2.hpp"
 #include "valueio.hpp"
 #include "vmkv.hpp"
+
+#include <kvspace/xvalue_head.h>
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <unordered_map>
 
@@ -315,11 +320,482 @@ std::unordered_map<std::string, JitFn>& jit_cache() {
     return c;
 }
 
+// ── 第二阶段（RC2_JIT2=1）：统一 ABI 的槽式执行 ───────────────────
+using Jit2Fn = jitabi::GeneralJitFnV1;
+bool g_jit2 = std::getenv("RC2_JIT2") != nullptr;
+
+// runtimec2 执行单线程（jit cache 本身也是静态 map）：用静态缓冲避免 TLS 开销。
+jitabi::ValueSlotV1 g_jit2_slots[64];
+jitabi::BinFrameV1 g_jit2_frame;
+jitabi::VmContextV1 g_jit2_context;
+
+struct Jit2Entry {
+    std::vector<std::uint8_t> bytes;
+    Jit2Plan plan;
+    void* code = nullptr;
+    std::size_t size = 0;
+    ~Jit2Entry() {
+        if (code)
+            munmap(code, size);
+    }
+};
+
+std::unordered_map<std::string, std::unique_ptr<Jit2Entry>>& jit2_cache() {
+    static std::unordered_map<std::string, std::unique_ptr<Jit2Entry>> c;
+    return c;
+}
+
+Jit2Entry* jit2_lookup(const std::string& func_dir, const Segment* seg) {
+    auto& cache = jit2_cache();
+    auto it = cache.find(func_dir);
+    if (it != cache.end())
+        return it->second.get();  // nullptr = 已判定不可 JIT2
+    auto fresh = std::make_unique<Jit2Entry>();
+    JitRefusal refusal;
+    if (!jit2_verify(seg, &fresh->plan, &refusal)) {
+        if (g_jitdbg)
+            std::fprintf(stderr, "[jit2dbg reject %s reason=%u detail=%u]\n",
+                         func_dir.c_str(),
+                         static_cast<unsigned>(refusal.refusal_reason),
+                         refusal.detail_code);
+        cache[func_dir] = nullptr;
+        return nullptr;
+    }
+    fresh->bytes = jit2_emit(seg, fresh->plan);
+    if (fresh->bytes.empty()) {
+        cache[func_dir] = nullptr;
+        return nullptr;
+    }
+    const std::size_t cap = fresh->bytes.size();
+    void* mem = mmap(nullptr, cap, PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (mem == MAP_FAILED) {
+        cache[func_dir] = nullptr;
+        return nullptr;
+    }
+    std::memcpy(mem, fresh->bytes.data(), cap);
+    if (mprotect(mem, cap, PROT_READ | PROT_EXEC) != 0) {
+        munmap(mem, cap);
+        cache[func_dir] = nullptr;
+        return nullptr;
+    }
+    fresh->code = mem;
+    fresh->size = cap;
+    if (g_jitdbg) {
+        std::string asg;
+        for (std::size_t i = 0; i < fresh->plan.assignment.size(); i++)
+            if (fresh->plan.assignment[i] >= 0 ||
+                fresh->plan.spill_slot[i] >= 0)
+                asg += " r" + std::to_string(i) + "=" +
+                       (fresh->plan.assignment[i] >= 0
+                            ? std::to_string(fresh->plan.assignment[i])
+                            : std::string("S") +
+                                  std::to_string(fresh->plan.spill_slot[i]));
+        std::fprintf(stderr, "[jit2dbg plan %s%s]\n", func_dir.c_str(),
+                     asg.c_str());
+    }
+    if (g_jitdbg)
+        std::fprintf(stderr,
+                     "[jit2dbg accept %s in=%zu out=%zu blocks=%zu spills=%d "
+                     "handlers=%d ratio=%d]\n",
+                     func_dir.c_str(), fresh->plan.shape.inputs.size(),
+                     fresh->plan.shape.outputs.size(),
+                     fresh->plan.blocks.size(), fresh->plan.spill_count,
+                     fresh->plan.handler_count, fresh->plan.handler_percent);
+    std::memset(g_jit2_slots, 0, sizeof(g_jit2_slots));  // 预热线程缓冲
+    Jit2Entry* entry = fresh.get();
+    cache[func_dir] = std::move(fresh);
+    return entry;
+}
+
+namespace {
+
+// 原生内调 handler 的 C 侧实现：在同一个解释器 Frame 上执行一条 handler，
+// 把 JIT 槽与 Frame 寄存器对齐（见 answer-013 之后的 P0 设计）。
+// 返回：0 = 继续原生，1 = Error，2 = Stop（交回解释器）。
+Jit2Entry* g_jit2_running = nullptr;  // 当前执行中的 JIT2 产物（单线程）
+
+// 把 JIT 槽值写回帧寄存器：按静态 langtype 选写路径（bool 不能当 int64 落）。
+bool slot_store_typed(vmbin::Frame* f, const vmbin::Program* seg, std::size_t r,
+                      std::int64_t v) {
+    const RegDesc& d = seg->regs[r];
+    if (d.langtype == vmbin::LangType::Bool) {
+        if (g_vmkv.slot_write_bool(*f, static_cast<std::uint8_t>(r), v != 0))
+            return true;
+    } else if (d.langtype == vmbin::LangType::Int64 ||
+               d.langtype == vmbin::LangType::Uint64 ||
+               d.langtype == vmbin::LangType::None) {
+        if (g_vmkv.slot_write_i64(*f, static_cast<std::uint8_t>(r), v))
+            return true;
+    } else if (d.langtype == vmbin::LangType::Float64) {
+        Scalar sc{};
+        sc.k = Scalar::K::Float;
+        sc.width = 8;
+        std::memcpy(&sc.f, &v, sizeof sc.f);
+        if (g_vmkv.slot_write_scalar(*f, static_cast<std::uint8_t>(r), sc, 8)) {
+            f->regs[r].fast_i64 = false;
+            f->regs[r].fast_bool = false;
+            return true;
+        }
+    } else {
+        return false;  // 字符串：原生侧不产生这类值，交给 kvspace 原值
+    }
+    if (d.langtype != vmbin::LangType::Float64) {
+        f->regs[r].fv = v;
+        f->regs[r].fast_i64 = true;
+    }
+    return true;
+}
+
+int jit2_handler_call(vmbin::Frame* f, jitabi::ValueSlotV1* slots,
+                      std::uint32_t idx) {
+    const Jit2Entry* entry = g_jit2_running;
+    if (std::getenv("RC2_HDBG2") && f)
+        std::fprintf(stderr,
+                     "[hcall f=%p entry=%p seg=%p idx=%u dirlen=%zu fa=%zu]\n",
+                     (void*)f, (void*)entry, (void*)f->seg_hint, idx,
+                     f->func_dir.size(),
+                     (std::size_t)(uintptr_t)__builtin_frame_address(0) & 15);
+    if (!f || !entry || !f->seg_hint)
+        return 1;
+    const Segment* seg = f->seg_hint;
+    if (idx >= seg->insns.size())
+        return 1;
+    const CInsn& ins = seg->insns[idx];
+    if (ins.handler == rwir::RwirHandlerId::None)
+        return 1;
+    const Jit2Plan& plan = entry->plan;
+    const std::vector<char>& staged = plan.native_stage[idx];
+    // 槽 → 帧：把活跃寄存器的值放回解释器寄存器（帧局部走 fast 缓存）。
+    for (std::size_t r = 0; r < seg->regs.size(); r++) {
+        if (!staged[r] || seg->regs[r].kind != Operand::Kind::Var)
+            continue;
+        if (seg->regs[r].array_type_id != vmbin::kArrayTypeNone)
+            continue;  // 数组以帧内 Register 的 key/view 为准
+        const std::int64_t v = static_cast<std::int64_t>(slots[r].payload_lo);
+        slot_store_typed(f, seg, r, v);
+    }
+    if (g_jitdbg) {
+        for (std::size_t r = 0; r < seg->regs.size(); r++) {
+            if (!staged[r] || seg->regs[r].kind != Operand::Kind::Var ||
+                seg->regs[r].array_type_id == vmbin::kArrayTypeNone)
+                continue;
+            std::uint8_t* before = nullptr;
+            std::uint64_t bcap = 0;
+            (void)g_vmkv.reg_body(*f, static_cast<std::uint8_t>(r), &before, &bcap);
+            std::fprintf(stderr,
+                         "[arrstage pc=%u r=%zu slot=%llx frame=%p name=%s]\n",
+                         idx, r,
+                         (unsigned long long)slots[r].payload_lo,
+                         (void*)before, seg->regs[r].name.c_str());
+        }
+    }
+    const RwirHandlerSlot& slot = rwir_handler(ins.handler);
+    RwirHandlerCtx ctx{g_vmkv, *f, seg, ins, static_cast<int>(idx) + 1, {}, 0, 0};
+    std::string err;
+    for (int i = 0; slot.prefetch_operands && i < ins.nrd && i < 2; i++)
+        if (!g_vmkv.read_reg(*f, ins.rd[i], &ctx.in[i])) {
+            if (g_jitdbg)
+                std::fprintf(stderr,
+                             "[jit2dbg handler-opfail %s pc=%u op=%d]\n",
+                             f->func_dir.c_str(), idx, (int)ins.rd[i]);
+            return 1;
+        }
+    if (!slot.handle(ctx, &err)) {
+        if (g_jitdbg)
+            std::fprintf(stderr, "[jit2dbg handler-fail %s pc=%u err=%s]\n",
+                         f->func_dir.c_str(), idx, err.c_str());
+        return 1;
+    }
+    if (!ctx.yield_pc.empty())
+        return 2;  // vthread·run 冒泡：交回解释器出口
+    // 帧 → 槽：handler 写回的值（含数组 body 指针）同步给原生代码。
+    for (std::size_t r = 0; r < seg->regs.size(); r++) {
+        if (!staged[r] || seg->regs[r].kind != Operand::Kind::Var)
+            continue;
+        if (seg->regs[r].array_type_id != vmbin::kArrayTypeNone) {
+            std::uint8_t* body = nullptr;
+            std::uint64_t cap = 0;
+            if (!g_vmkv.reg_body(*f, static_cast<std::uint8_t>(r), &body, &cap) ||
+                !body)
+                return 2;
+            slots[r].payload_lo = reinterpret_cast<std::uint64_t>(body);
+            slots[r].tag = jitabi::ValueTagV1::I64;
+            if (g_jitdbg)
+                std::fprintf(stderr, "[arrreload pc=%u r=%zu body=%p]\n", idx, r,
+                             (void*)body);
+            continue;
+        }
+        std::int64_t v = 0;
+        if (seg->regs[r].langtype == vmbin::LangType::Float64) {
+            // float64：按原始 8 字节取位（不经过 int64 解释）。
+            std::uint8_t* body = nullptr;
+            std::uint64_t cap = 0;
+            if (!g_vmkv.reg_body(*f, static_cast<std::uint8_t>(r), &body, &cap) ||
+                !body || cap < 8) {
+                // 尚未定义的 may-live float 寄存器没有帧值：跳过（不当作失败）。
+                const std::vector<char>& defined = plan.out_defined[idx];
+                if (r < defined.size() && !defined[r])
+                    continue;
+                if (g_jitdbg)
+                    std::fprintf(stderr,
+                                 "[jit2dbg syncfail %s pc=%u r=%zu lt=%d]\n",
+                                 f->func_dir.c_str(), idx, r,
+                                 (int)seg->regs[r].langtype);
+                return 2;
+            }
+            std::memcpy(&v, body, 8);
+            slots[r].payload_lo = static_cast<std::uint64_t>(v);
+            slots[r].tag = jitabi::ValueTagV1::I64;
+            continue;
+        }
+        if (f->regs[r].fast_i64)
+            v = f->regs[r].fv;
+        else if (!g_vmkv.read_i64(*f, static_cast<std::uint8_t>(r), &v)) {
+            // 非数值 8 字节值（time/duration 等 langtype 不可知）：读 body 前 8 字节。
+            std::uint8_t* body = nullptr;
+            std::uint64_t cap = 0;
+            if (g_vmkv.reg_body(*f, static_cast<std::uint8_t>(r), &body, &cap) &&
+                body && cap >= 8) {
+                std::memcpy(&v, body, 8);
+            } else {
+                if (g_jitdbg)
+                    std::fprintf(stderr,
+                                 "[jit2dbg syncfail %s pc=%u r=%zu lt=%d]\n",
+                                 f->func_dir.c_str(), idx, r,
+                                 (int)seg->regs[r].langtype);
+                return 2;
+            }
+        }
+        slots[r].payload_lo = static_cast<std::uint64_t>(v);
+        slots[r].tag = jitabi::ValueTagV1::I64;
+    }
+    return 0;
+}
+
+}  // namespace
+
+bool jit2_try_run(Frame& f, const Segment* seg, int start_s0, Outcome* out,
+                  std::string* stop_pc, std::string* err) {
+    if (g_jitdbg)
+        std::fprintf(stderr, "[jit2dbg try %s s0=%d g=%d e=%p]\n",
+                     f.func_dir.c_str(), start_s0, (int)g_jit2,
+                     f.jit2_entry);
+    if (!g_jit2 || start_s0 != 1)
+        return false;
+    Jit2Entry* entry =
+        f.jit2_entry
+            ? reinterpret_cast<Jit2Entry*>(const_cast<void*>(f.jit2_entry))
+            : jit2_lookup(f.func_dir, seg);
+    if (!entry)
+        return false;
+    const Jit2Shape& shape = entry->plan.shape;
+    // slots 只被 JIT 写（输出/物化）或由适配器填（输入/预载）；JIT 不会读未填槽，
+    // 因此无需每次清零。
+    std::unique_ptr<jitabi::ValueSlotV1[]> big_slots;
+    jitabi::ValueSlotV1* slots = g_jit2_slots;
+    if (seg->regs.size() > 64) {
+        big_slots = std::make_unique<jitabi::ValueSlotV1[]>(seg->regs.size());
+        std::memset(big_slots.get(), 0,
+                    sizeof(jitabi::ValueSlotV1) * seg->regs.size());
+        slots = big_slots.get();
+    }
+    for (int r : shape.inputs) {
+        Register& r0 = f.regs[static_cast<std::size_t>(r)];
+        // compact 数组参数：槽里放 body 指针（内联寻址的唯一运行时值）。
+        if (seg->regs[static_cast<std::size_t>(r)].array_type_id !=
+            vmbin::kArrayTypeNone) {
+            std::uint8_t* body = nullptr;
+            std::uint64_t cap = 0;
+            if (!g_vmkv.reg_body(f, static_cast<std::uint8_t>(r), &body, &cap) ||
+                !body) {
+                if (g_jitdbg)
+                    std::fprintf(stderr, "[jit2dbg input-fail %s r=%d array]\n",
+                                 f.func_dir.c_str(), r);
+                return false;
+            }
+            slots[static_cast<std::size_t>(r)].payload_lo =
+                reinterpret_cast<std::uint64_t>(body);
+            slots[static_cast<std::size_t>(r)].tag = jitabi::ValueTagV1::I64;
+            continue;
+        }
+        Register* p = r0.src_ptr ? r0.src_ptr : &r0;
+        while (!p->fast_i64 && p->src_ptr)
+            p = p->src_ptr;
+        std::int64_t value = 0;
+        if (p->fast_i64) {
+            value = p->fv;
+        } else if (!g_vmkv.read_i64(f, static_cast<std::uint8_t>(r), &value)) {
+            // 非纯内存帧（含 handler 的段）参数走 kvspace 槽：用解释器同一条读路径装载。
+            if (g_jitdbg)
+                std::fprintf(stderr, "[jit2dbg input-fail %s r=%d]\n",
+                             f.func_dir.c_str(), r);
+            return false;
+        }
+        slots[static_cast<std::size_t>(r)].payload_lo =
+            static_cast<std::uint64_t>(value);
+        slots[static_cast<std::size_t>(r)].tag = jitabi::ValueTagV1::I64;
+    }
+    // 读-写写参：调用方预载 + 可读性证明；未证明 → 回退解释器（与解释器报错一致）。
+    for (int r : shape.outputs) {
+        if (!entry->plan.output_preload[static_cast<std::size_t>(r)])
+            continue;
+        // 可读性证明：先沿写参内存别名链（dst_ptr/src_ptr）取调用方 fast 值
+        // （`p + 1 -> p` 的 p 在调用方 reg 里是 fast，未落槽）；
+        // 无 fast 值时用解释器同一条读路径读本帧写参槽。
+        Register& pr0 = f.regs[static_cast<std::size_t>(r)];
+        Register* pr = &pr0;
+        std::int64_t initial = 0;
+        bool got = false;
+        for (;;) {
+            if (pr->fast_i64) {
+                initial = pr->fv;
+                got = true;
+                break;
+            }
+            Register* next = pr->dst_ptr ? pr->dst_ptr : pr->src_ptr;
+            if (!next)
+                break;
+            pr = next;
+        }
+        // 别名链尽头是调用方 reg（值可能只在 fast 缓存、未落槽）：按父帧下标
+        // 走解释器同一条读数路径。
+        if (!got && f.parent && !f.parent->regs.empty()) {
+            Register* base = f.parent->regs.data();
+            const std::size_t cnt = f.parent->regs.size();
+            if (pr >= base && pr < base + cnt)
+                got = g_vmkv.read_i64(
+                    *f.parent,
+                    static_cast<std::uint8_t>(pr - base), &initial);
+        }
+        if (!got &&
+            !g_vmkv.read_i64(f, static_cast<std::uint8_t>(r), &initial)) {
+            if (g_jitdbg)
+                std::fprintf(stderr, "[jit2dbg preload-fail %s r=%d]\n",
+                             f.func_dir.c_str(), r);
+            return false;
+        }
+        slots[static_cast<std::size_t>(r)].payload_lo =
+            static_cast<std::uint64_t>(initial);
+        slots[static_cast<std::size_t>(r)].tag = jitabi::ValueTagV1::I64;
+    }
+    g_jit2_frame.slots = slots;
+    g_jit2_frame.slot_count = static_cast<std::uint32_t>(seg->regs.size());
+    g_jit2_frame.pc = 1;
+    g_jit2_frame.legacy_frame_adapter = &f;  // 原生内调 handler 的 Frame
+    g_jit2_context.reserved_u64[0] =
+        reinterpret_cast<std::uint64_t>(&jit2_handler_call);
+    jitabi::StructuredExitV1 exit_record;
+    view_cache_idle_all();
+    g_jit2_running = entry;
+    reinterpret_cast<Jit2Fn>(entry->code)(&g_jit2_context, &g_jit2_frame,
+                                          &exit_record);
+    g_jit2_running = nullptr;
+    if (g_jitdbg)
+        std::fprintf(stderr, "[jit2dbg exit %s kind=%u pc=%u detail=%u]\n",
+                     f.func_dir.c_str(), (unsigned)exit_record.kind,
+                     exit_record.pc, exit_record.detail_code);
+    if (exit_record.kind == jitabi::ExitKindV1::Error) {
+        // 出错指令行（printstack cur / stop_pc 契约与解释器一致）。
+        if (stop_pc && exit_record.pc >= 1)
+            *stop_pc = g_vmkv.param_key(f.frame, static_cast<int>(exit_record.pc), 0);
+        if (exit_record.detail_code == 11)
+            *err = "division by zero: " + std::string(
+                       exit_record.pc >= 1 && exit_record.pc <= seg->insns.size()
+                           ? instruction_name(*seg, seg->insns[exit_record.pc - 1])
+                           : "int64·div");
+        else if (exit_record.detail_code == 10)
+            *err = "xv: index out of range";
+        else if (exit_record.detail_code == 9)
+            *err = "jit2 handler failed: " + f.func_dir;
+        else
+            *err = exit_record.detail_code == jitabi::kDetailRunaway
+                       ? "runaway loop (jit2): " + f.func_dir
+                       : "jit2 commit failed: " + f.func_dir;
+        *out = Outcome::Error;
+        return true;
+    }
+    if (exit_record.kind == jitabi::ExitKindV1::Native) {
+        if (g_jitdbg)
+            std::fprintf(stderr, "[jit2dbg native %s pc=%u aux0=%llu]\n",
+                         f.func_dir.c_str(), exit_record.pc,
+                         (unsigned long long)exit_record.aux0);
+        for (std::size_t i = 0; i < seg->regs.size(); i++)
+            if (seg->regs[i].kind == Operand::Kind::Var) {
+                if (seg->regs[i].langtype == vmbin::LangType::Float64) {
+                    // float64 不是 int64 快缓存：位模式不能被当整数暴露给续跑。
+                    f.regs[i].fast_i64 = false;
+                    f.regs[i].fast_bool = false;
+                    continue;
+                }
+                f.regs[i].fv = static_cast<std::int64_t>(slots[i].payload_lo);
+                f.regs[i].fast_i64 = true;
+            }
+        // 出原生前把物化槽回填到解释器帧（续跑读的是 f.regs）。
+        const std::size_t hi = exit_record.pc > 0 ? exit_record.pc - 1 : 0;
+        if (hi < seg->insns.size()) {
+            const std::vector<char>& staged = entry->plan.native_stage[hi];
+            for (std::size_t r = 0; r < seg->regs.size(); r++) {
+                if (!staged[r] || seg->regs[r].kind != Operand::Kind::Var)
+                    continue;
+                if (seg->regs[r].array_type_id != vmbin::kArrayTypeNone)
+                    continue;
+                const std::int64_t v =
+                    static_cast<std::int64_t>(slots[r].payload_lo);
+                slot_store_typed(&f, seg, r, v);
+                if (g_jitdbg && !seg->regs[r].name.empty())
+                    std::fprintf(stderr,
+                                 "[exitstage pc=%u r=%zu name=%s v=%lld]\n",
+                                 exit_record.pc, r, seg->regs[r].name.c_str(),
+                                 (long long)v);
+            }
+        }
+        f.jit_known = true;
+        f.jit_hint = nullptr;
+        f.skip_enter_frame = true;
+        const Outcome resumed =
+            g_vmkv.run_frame(f, static_cast<int>(exit_record.pc), stop_pc, err);
+        f.skip_enter_frame = false;
+        *out = resumed;
+        return true;
+    }
+    // Return：提交写参（slots[reg].payload_lo）。走解释器同一条写路径：
+    // 内存别名帧贯通 dst_ptr，kvspace 绑定帧（含 handler 的段）解析 Ptr→调用方槽。
+    for (int r : shape.outputs) {
+        const std::int64_t value =
+            static_cast<std::int64_t>(slots[static_cast<std::size_t>(r)].payload_lo);
+        if (!g_vmkv.slot_write_i64(f, static_cast<std::uint8_t>(r), value)) {
+            *err = "jit2 commit failed: " + f.func_dir;
+            *out = Outcome::Error;
+            return true;
+        }
+        f.regs[static_cast<std::size_t>(r)].fv = value;
+        f.regs[static_cast<std::size_t>(r)].fast_i64 = true;
+    }
+    if (stop_pc)
+        stop_pc->clear();
+    *out = f.depth <= 1 ? Outcome::Ok : Outcome::Returned;
+    return true;
+}
+
 }  // namespace
 
 bool jit_enabled() { return !g_nojit; }
 
-void jit_clear_cache() { jit_cache().clear(); }
+bool jit2_enabled() { return g_jit2; }
+
+const void* jit2_entry(const std::string& func_dir, const Segment* seg) {
+    return g_jit2 ? jit2_lookup(func_dir, seg) : nullptr;
+}
+
+bool jit2_accepted(const std::string& func_dir, const Segment* seg) {
+    return jit2_entry(func_dir, seg) != nullptr;
+}
+
+void jit_clear_cache() {
+    jit_cache().clear();
+    jit2_cache().clear();
+}
 
 bool jit_verify(const Segment* seg, JitRefusal* refusal) {
     *refusal = JitRefusal{};
@@ -382,9 +858,10 @@ bool jit_try_run(Frame& f, const Segment* seg, int start_s0,
         return false;
     if (start_s0 != 1)
         return false;
+    // 调度：M1 优先（适配更轻）；M1 拒绝的形状交给 JIT2。
     const void* code = jit_compile(f.func_dir, seg);
     if (!code)
-        return false;
+        return jit2_try_run(f, seg, start_s0, out, stop_pc, err);
     int src_idx = -1, dst_idx = -1;
     for (std::size_t i = 0; i < seg->regs.size(); i++) {
         if (seg->regs[i].kind == Operand::Kind::Var && seg->regs[i].param_k == -1)
