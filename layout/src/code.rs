@@ -735,6 +735,9 @@ pub fn write_func(
         ));
     }
 
+    split_fused_member_writes(fn_, &declared);
+    alias_write_param_members(fn_, &declared);
+
     let mut seq: Vec<Instruction> = Vec::new();
     let mut labels: HashMap<String, i32> = HashMap::new();
     collect_insts(&fn_.body, &mut seq, &mut labels);
@@ -1155,6 +1158,217 @@ fn write_linear_inst(
     if !pairs.is_empty() {
         let _ = kv.set(&pairs);
     }
+}
+
+/// 算术/内建指令不得直接写成员槽：先把结果落临时槽，再拷贝到成员路径。
+/// runtime 只有拷贝（`=`）走成员写分支；算术指令的写槽走 write_reg，动态键
+/// （`m·*k + 1 -> m·*k`）会丢写，写参 base 还会被名字兜底串到别的参数。
+fn split_fused_member_writes(fn_: &mut Func, declared: &HashMap<String, String>) {
+    let mut used: HashSet<String> = declared.keys().cloned().collect();
+    for p in fn_.sig.params.iter().chain(fn_.sig.returns.iter()) {
+        used.insert(p.name.clone());
+    }
+    let mut seq = 0usize;
+    split_member_body(&mut fn_.body, &mut used, &mut seq);
+}
+
+fn split_member_body(body: &mut Vec<Stmt>, used: &mut HashSet<String>, seq: &mut usize) {
+    let mut i = 0;
+    while i < body.len() {
+        let mut insert: Option<Stmt> = None;
+        match &mut body[i] {
+            Stmt::Instruction(s) => {
+                if s.writes.len() == 1 && s.flat().0 != "=" {
+                    let target = s.writes[0].clone();
+                    if target.contains(keytree::MEMBER_SEP) && !target.starts_with('/') {
+                        let mut temp = format!("_r{}", *seq);
+                        while used.contains(&temp) {
+                            *seq += 1;
+                            temp = format!("_r{}", *seq);
+                        }
+                        *seq += 1;
+                        used.insert(temp.clone());
+                        let write_types = std::mem::take(&mut s.write_types);
+                        s.writes[0] = temp.clone();
+                        insert = Some(Stmt::Instruction(Instruction {
+                            comments: Vec::new(),
+                            expr: Some(ast::leaf(&temp)),
+                            writes: vec![target],
+                            write_types,
+                            arrow_left: false,
+                            operator: false,
+                        }));
+                    }
+                }
+            }
+            Stmt::Scope(s) => split_member_body(&mut s.body, used, seq),
+            Stmt::If(s) => {
+                split_member_body(&mut s.then_, used, seq);
+                split_member_body(&mut s.else_, used, seq);
+            }
+            Stmt::While(s) => split_member_body(&mut s.body, used, seq),
+            Stmt::For(s) => split_member_body(&mut s.body, used, seq),
+            Stmt::Break(_) | Stmt::Continue(_) => {}
+        }
+        if let Some(st) = insert {
+            body.insert(i + 1, st);
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+}
+
+/// 写参在函数体里以成员路径（`w·rest` / `w·*key`）出现时，函数入口先把它复制到一个
+/// 帧内别名 `_arg_w`，函数体内所有 `w·rest` 改写为 `_arg_w·rest`。
+///
+/// 为什么必须有一条显式指令：runtime 的成员写/读按**寄存器**找 base，而寄存器只由
+/// 指令操作数产生（`binircompiler` 的 `reg_of` 只扫指令槽）。`n -> h·0` 这种写法里
+/// `h` 只作为写槽 base 出现，若不先复制，段里就没有 `*[0,+1]` 参数寄存器，运行期只能
+/// 按名字兜底，最终落到被调帧本地的 `h` 上（调用方读不到）。
+/// 入口复制在运行期是「写参 → 指向调用方实例的 Ptr」（runtime 别名路径），
+/// 因此 `_arg_w` 与调用方是同一实例，静态键与动态键都走这条路。
+fn alias_write_param_members(fn_: &mut Func, declared: &HashMap<String, String>) {
+    let mut aliases: Vec<(String, String)> = Vec::new();
+    let mut witness: Vec<Stmt> = Vec::new();
+    for (i, w) in fn_.sig.returns.iter().enumerate() {
+        let prefix = format!("{}{}", w.name, keytree::MEMBER_SEP);
+        if !stmt_uses_member_prefix(&fn_.body, &prefix) {
+            continue;
+        }
+        let plain = format!("*[0,{}]", i + 1);
+        let mut alias = format!("_arg_{}", w.name);
+        while declared.contains_key(&alias)
+            || fn_.sig.params.iter().any(|p| p.name == alias)
+            || fn_.sig.returns.iter().any(|r| r.name == alias)
+        {
+            alias.push('_');
+        }
+        aliases.push((prefix, format!("{plain}{}", keytree::MEMBER_SEP)));
+        witness.push(make_copy_inst(&w.name, &alias));
+    }
+    if aliases.is_empty() {
+        return;
+    }
+    rewrite_member_aliases(&mut fn_.body, &aliases);
+    witness.append(&mut fn_.body);
+    fn_.body = witness;
+}
+
+fn make_copy_inst(value: &str, dest: &str) -> Stmt {
+    Stmt::Instruction(Instruction {
+        comments: Vec::new(),
+        expr: Some(ast::leaf(value)),
+        writes: vec![dest.to_string()],
+        write_types: Vec::new(),
+        arrow_left: false,
+        operator: false,
+    })
+}
+
+fn stmt_uses_member_prefix(body: &[Stmt], prefix: &str) -> bool {
+    body.iter().any(|st| match st {
+        Stmt::Instruction(s) => {
+            s.writes.iter().any(|w| w.starts_with(prefix))
+                || s.expr
+                    .as_ref()
+                    .is_some_and(|e| expr_uses_member_prefix(e, prefix))
+        }
+        Stmt::Scope(s) => stmt_uses_member_prefix(&s.body, prefix),
+        Stmt::If(s) => {
+            s.cond
+                .as_ref()
+                .is_some_and(|c| instr_uses_member_prefix(c, prefix))
+                || stmt_uses_member_prefix(&s.then_, prefix)
+                || stmt_uses_member_prefix(&s.else_, prefix)
+        }
+        Stmt::While(s) => {
+            s.cond
+                .as_ref()
+                .is_some_and(|c| instr_uses_member_prefix(c, prefix))
+                || stmt_uses_member_prefix(&s.body, prefix)
+        }
+        Stmt::For(s) => stmt_uses_member_prefix(&s.body, prefix),
+        Stmt::Break(_) | Stmt::Continue(_) => false,
+    })
+}
+
+fn instr_uses_member_prefix(s: &Instruction, prefix: &str) -> bool {
+    s.writes.iter().any(|w| w.starts_with(prefix))
+        || s.expr
+            .as_ref()
+            .is_some_and(|e| expr_uses_member_prefix(e, prefix))
+}
+
+fn expr_uses_member_prefix(e: &Expr, prefix: &str) -> bool {
+    (e.is_leaf() && e.val.starts_with(prefix)) || e.args.iter().any(|a| expr_uses_member_prefix(a, prefix))
+}
+
+fn rewrite_member_aliases(body: &mut [Stmt], aliases: &[(String, String)]) {
+    for st in body {
+        match st {
+            Stmt::Instruction(s) => rewrite_instr_aliases(s, aliases),
+            Stmt::Scope(s) => rewrite_member_aliases(&mut s.body, aliases),
+            Stmt::If(s) => {
+                if let Some(c) = &mut s.cond {
+                    rewrite_instr_aliases(c, aliases);
+                }
+                rewrite_member_aliases(&mut s.then_, aliases);
+                rewrite_member_aliases(&mut s.else_, aliases);
+            }
+            Stmt::While(s) => {
+                if let Some(c) = &mut s.cond {
+                    rewrite_instr_aliases(c, aliases);
+                }
+                rewrite_member_aliases(&mut s.body, aliases);
+            }
+            Stmt::For(s) => rewrite_member_aliases(&mut s.body, aliases),
+            Stmt::Break(_) | Stmt::Continue(_) => {}
+        }
+    }
+}
+
+fn rewrite_instr_aliases(s: &mut Instruction, aliases: &[(String, String)]) {
+    // 只改写拷贝（`=`）的成员写槽：copy 的成员写走 runtime 的 member-write 分支，
+    // 复合 base（`*[0,+k]`）能被精确匹配到参数寄存器；
+    // 算术/内建写槽（`p·x + dx -> p·x`）必须保留 `p·x`——它们的落库走
+    // write_reg 的成员分支，复合 desc 会被 dst_ptr 短路成整值写。
+    if s.flat().0 != "=" {
+        return;
+    }
+    for w in &mut s.writes {
+        if let Some(rest) = strip_member_prefix(w, aliases) {
+            *w = rest;
+        }
+    }
+    if let Some(e) = &mut s.expr {
+        rewrite_expr_aliases(e, aliases);
+    }
+}
+
+fn rewrite_expr_aliases(e: &mut Expr, aliases: &[(String, String)]) {
+    if e.is_leaf() {
+        if let Some(rest) = strip_member_prefix(&e.val, aliases) {
+            e.val = rest;
+        }
+        return;
+    }
+    for a in &mut e.args {
+        rewrite_expr_aliases(a, aliases);
+    }
+}
+
+/// `w·rest` → `*[0,+k]·rest`（只改写成员路径的 base，普通引用 `w` 不动）。
+fn strip_member_prefix(
+    operand: &str,
+    aliases: &[(String, String)],
+) -> Option<String> {
+    for (prefix, base) in aliases {
+        if let Some(rest) = operand.strip_prefix(prefix.as_str()) {
+            return Some(format!("{base}{rest}"));
+        }
+    }
+    None
 }
 
 fn inst_is_terminator(inst: &Instruction) -> bool {
