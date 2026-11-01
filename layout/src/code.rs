@@ -735,6 +735,7 @@ pub fn write_func(
         ));
     }
 
+    split_fused_member_writes(fn_, &declared);
     alias_write_param_members(fn_, &declared);
 
     let mut seq: Vec<Instruction> = Vec::new();
@@ -1156,6 +1157,65 @@ fn write_linear_inst(
     }
     if !pairs.is_empty() {
         let _ = kv.set(&pairs);
+    }
+}
+
+/// 算术/内建指令不得直接写成员槽：先把结果落临时槽，再拷贝到成员路径。
+/// runtime 只有拷贝（`=`）走成员写分支；算术指令的写槽走 write_reg，动态键
+/// （`m·*k + 1 -> m·*k`）会丢写，写参 base 还会被名字兜底串到别的参数。
+fn split_fused_member_writes(fn_: &mut Func, declared: &HashMap<String, String>) {
+    let mut used: HashSet<String> = declared.keys().cloned().collect();
+    for p in fn_.sig.params.iter().chain(fn_.sig.returns.iter()) {
+        used.insert(p.name.clone());
+    }
+    let mut seq = 0usize;
+    split_member_body(&mut fn_.body, &mut used, &mut seq);
+}
+
+fn split_member_body(body: &mut Vec<Stmt>, used: &mut HashSet<String>, seq: &mut usize) {
+    let mut i = 0;
+    while i < body.len() {
+        let mut insert: Option<Stmt> = None;
+        match &mut body[i] {
+            Stmt::Instruction(s) => {
+                if s.writes.len() == 1 && s.flat().0 != "=" {
+                    let target = s.writes[0].clone();
+                    if target.contains(keytree::MEMBER_SEP) && !target.starts_with('/') {
+                        let mut temp = format!("_r{}", *seq);
+                        while used.contains(&temp) {
+                            *seq += 1;
+                            temp = format!("_r{}", *seq);
+                        }
+                        *seq += 1;
+                        used.insert(temp.clone());
+                        let write_types = std::mem::take(&mut s.write_types);
+                        s.writes[0] = temp.clone();
+                        insert = Some(Stmt::Instruction(Instruction {
+                            comments: Vec::new(),
+                            expr: Some(ast::leaf(&temp)),
+                            writes: vec![target],
+                            write_types,
+                            arrow_left: false,
+                            operator: false,
+                        }));
+                    }
+                }
+            }
+            Stmt::Scope(s) => split_member_body(&mut s.body, used, seq),
+            Stmt::If(s) => {
+                split_member_body(&mut s.then_, used, seq);
+                split_member_body(&mut s.else_, used, seq);
+            }
+            Stmt::While(s) => split_member_body(&mut s.body, used, seq),
+            Stmt::For(s) => split_member_body(&mut s.body, used, seq),
+            Stmt::Break(_) | Stmt::Continue(_) => {}
+        }
+        if let Some(st) = insert {
+            body.insert(i + 1, st);
+            i += 2;
+        } else {
+            i += 1;
+        }
     }
 }
 
