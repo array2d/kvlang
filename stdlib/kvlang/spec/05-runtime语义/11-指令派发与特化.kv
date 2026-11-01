@@ -62,10 +62,10 @@ layout 的 `specialize` 与 binircompiler 的按实参类型特化都按本表�
 - `sub`：全数值，2 参；一元形式即取负（1 参，结果为该操作数 kind）。
 - `max min`：全数值，可变参，结果按 promotion。
 - `mod`：仅整型（SI*/UI*）。
-- `bitand bitor bitxor shl shr`：仅 SI64/UI64；两操作数必须同类
-  （int×uint 运行时直接报错）。
-- `neg abs`：有符号整数与浮点（无符号数不接）。
-- `sign`：SI64、F64。
+- `bitand bitor bitxor shl shr`：整型（SI*/UI*）；同符号不同宽度按 promotion，
+  混合符号不特化（运行时直接报错）。
+- `neg abs`：任意数值（结果同操作数）。
+- `sign`：任意数值（结果同操作数）。
 - `sqrt exp log pow`：任意数值，结果恒 `float64`；`float32` 操作数不特化。
 - `eq neq lt le gt ge`：任意数值与 `bool`，结果 `bool`；跨类混合（int 与
   float、int 与 uint）不特化，由通用实现按值比较（运行时支持）。
