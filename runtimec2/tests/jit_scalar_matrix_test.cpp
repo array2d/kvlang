@@ -1,6 +1,5 @@
-// Unit test for the standalone scalar JIT matrix (no CMake registration yet).
-// Build: g++ -std=c++20 -I runtimec2/include runtimec2/tests/jit_scalar_matrix_test.cpp \
-//            runtimec2/src/jit/jit_scalar_matrix.cpp -o /tmp/jit_scalar_matrix_test
+// Unit test for the standalone scalar JIT matrix.
+// 已注册为 ctest `c2_jit_scalar_matrix`；矩阵本身尚未接线（阶段 B）。
 #include "jit_scalar_matrix.hpp"
 
 #include <cstdio>
@@ -106,21 +105,26 @@ int main() {
         }
     }
 
-    // Promotion table (layout wider_num_kind, C camp).
+    // Promotion table: spec 05-runtime语义/11-指令派发与特化.kv §数值 promotion。
+    // want = nullptr 表示该组合不特化（混合符号 int×uint），返回 None。
     struct Pair { const char* a; const char* b; const char* want; };
     const Pair pairs[] = {
-        {"int8", "int16", "int16"}, {"int8", "uint8", "int16"},
-        {"int32", "uint32", "int64"}, {"int64", "uint64", "int64"},
+        {"int8", "int16", "int16"},
+        {"int32", "int64", "int64"},
         {"int64", "float32", "float32"}, {"int64", "float64", "float64"},
-        {"float32", "float64", "float64"}, {"uint16", "int32", "int64"},
+        {"float32", "float64", "float64"},
+        {"int8", "uint8", nullptr}, {"int32", "uint32", nullptr},
+        {"int64", "uint64", nullptr}, {"uint16", "int32", nullptr},
     };
     for (const Pair& p : pairs) {
         const ScalarTypeClass got = promote(parse_kindexpr(p.a),
                                             parse_kindexpr(p.b));
-        const ScalarTypeClass want = parse_kindexpr(p.want);
+        const ScalarTypeClass want = p.want ? parse_kindexpr(p.want)
+                                            : ScalarTypeClass::None;
         if (got != want) {
             std::fprintf(stderr, "promote %s+%s -> class %d, want %s\n", p.a,
-                         p.b, static_cast<int>(got), p.want);
+                         p.b, static_cast<int>(got),
+                         p.want ? p.want : "none");
             g_failures++;
         }
     }

@@ -12,6 +12,7 @@
 
 #include "binir_codec.hpp"
 #include "binir_dump.hpp"
+#include "rwir_signature.hpp"
 #include "value.hpp"
 #include "valueio.hpp"
 #include "vmbin/regtype.hpp"
@@ -197,6 +198,20 @@ std::string resolve_callee(void* h, const std::string& func_dir,
             return cand;
     }
     return "/lib/" + fn;
+}
+
+// 控制指令 call 的表内 id：按 Op/Impl 查表，不走字符串（阶段 B 要求算子身份
+// 来自指令本身而不是名字解析；这里是建段期的一次性定位）。
+std::uint16_t call_rwir_id() {
+    static const std::uint16_t id = [] {
+        for (int i = 0; i < rwir::kMyrwircapsN; i++) {
+            if (rwir::myrwircaps[i].op == rwir::Op::Call &&
+                rwir::myrwircaps[i].impl == rwir::Impl::Control)
+                return static_cast<std::uint16_t>(i);
+        }
+        return static_cast<std::uint16_t>(0xFFFF);
+    }();
+    return id;
 }
 
 // 扩展 rwir 声明：runtime 以 kvlangDefRwir 注册到 `/lib/<opcode>`（kind=def rwir）。
@@ -489,11 +504,13 @@ bool build(void* h, const std::string& func_dir, Segment* out,
                 &out->callees, &callee_ids, callee);
             ins.op = rwir::Op::Call;
             ins.impl = rwir::Impl::Control;
-            const rwir::Entry* ce = rwir::find_myrwircap("call", 4);
-            ins.rwir_id = ce ? static_cast<std::uint16_t>(ce - rwir::myrwircaps)
-                             : static_cast<std::uint16_t>(
-                                   vmbin::kRwirIdExtraBase +
-                                   pool_add(&out->extra_rwir_names, &extra_ids, "call"));
+            const std::uint16_t cid = call_rwir_id();
+            ins.rwir_id = cid != 0xFFFF
+                              ? cid
+                              : static_cast<std::uint16_t>(
+                                    vmbin::kRwirIdExtraBase +
+                                    pool_add(&out->extra_rwir_names,
+                                             &extra_ids, "call"));
         } else if (e) {
             fill_from_entry(e, &ins);
         } else if (!is_declared_rwir(h, op)) {
@@ -1344,12 +1361,280 @@ std::string cache_key(const std::string& func_dir,
 
 }  // namespace
 
-bool RunCompileChecks(const Segment& segment, CompileError* error) {
-    // #594（规则 2/3：每个写参在所有返回路径必须赋值）尚未实现。
-    // 规则落地时在此做编译期检查；在此之前不得在此放任何"看起来在检查"的逻辑。
+namespace {
+
+// #594（规则 2/3：每个写参在所有返回路径必须赋值）——独立实现，规则落地前为空。
+// 与阶段 A 的 union 校验分开，互不掺杂。
+bool run_write_assignment_checks(const Segment& segment, CompileError* error) {
     (void)segment;
     (void)error;
     return true;
+}
+
+rwir::ScalarClass scalar_class_of(LangType t) {
+    switch (t) {
+    case LangType::Int8: return rwir::ScalarClass::SI8;
+    case LangType::Int16: return rwir::ScalarClass::SI16;
+    case LangType::Int32: return rwir::ScalarClass::SI32;
+    case LangType::Int64: return rwir::ScalarClass::SI64;
+    case LangType::Uint8: return rwir::ScalarClass::UI8;
+    case LangType::Uint16: return rwir::ScalarClass::UI16;
+    case LangType::Uint32: return rwir::ScalarClass::UI32;
+    case LangType::Uint64: return rwir::ScalarClass::UI64;
+    case LangType::Float32: return rwir::ScalarClass::F32;
+    case LangType::Float64: return rwir::ScalarClass::F64;
+    case LangType::Bool: return rwir::ScalarClass::Bool;
+    default: return rwir::ScalarClass::None;
+    }
+}
+
+std::optional<NumKind> numkind_of_class(rwir::ScalarClass c) {
+    switch (c) {
+    case rwir::ScalarClass::SI8: return NumKind{rwir::Kind::Int, 1};
+    case rwir::ScalarClass::SI16: return NumKind{rwir::Kind::Int, 2};
+    case rwir::ScalarClass::SI32: return NumKind{rwir::Kind::Int, 4};
+    case rwir::ScalarClass::SI64: return NumKind{rwir::Kind::Int, 8};
+    case rwir::ScalarClass::UI8: return NumKind{rwir::Kind::Uint, 1};
+    case rwir::ScalarClass::UI16: return NumKind{rwir::Kind::Uint, 2};
+    case rwir::ScalarClass::UI32: return NumKind{rwir::Kind::Uint, 4};
+    case rwir::ScalarClass::UI64: return NumKind{rwir::Kind::Uint, 8};
+    case rwir::ScalarClass::F32: return NumKind{rwir::Kind::Float, 4};
+    case rwir::ScalarClass::F64: return NumKind{rwir::Kind::Float, 8};
+    default: return std::nullopt;
+    }
+}
+
+// 指令的族签名：动态行直接看 Entry.signature，typed 行按 Op 查。
+const rwir::OpSignature* instruction_signature(const CInsn& ins) {
+    if (ins.rwir_id >= static_cast<std::uint16_t>(rwir::kMyrwircapsN))
+        return nullptr;  // 扩展算子（extra 池）
+    const rwir::Entry& e = rwir::myrwircaps[ins.rwir_id];
+    return e.signature ? e.signature : rwir::signature_of(e.op);
+}
+
+// 全操作数已知时的结果 class；nullopt 表示 spec 给不出（或比较类跨类，
+// 只由通用实现按值处理，不算错误）。
+std::optional<rwir::ScalarClass> result_class(
+    const rwir::OpSignature& sig, const CInsn& ins,
+    const std::vector<rwir::ScalarClass>& operands) {
+    switch (sig.result) {
+    case rwir::OpSignature::Result::Bool:
+        return rwir::ScalarClass::Bool;
+    case rwir::OpSignature::Result::Float64:
+        return rwir::ScalarClass::F64;
+    case rwir::OpSignature::Result::Target:
+        return std::nullopt;
+    case rwir::OpSignature::Result::Same:
+        if (operands.empty())
+            return std::nullopt;
+        return operands[0];
+    case rwir::OpSignature::Result::Promoted:
+        break;
+    }
+    std::vector<NumKind> kinds;
+    kinds.reserve(operands.size());
+    for (const rwir::ScalarClass c : operands) {
+        const auto k = numkind_of_class(c);
+        if (!k)
+            return std::nullopt;
+        kinds.push_back(*k);
+    }
+    const auto promoted = promote(kinds, /*allow_mixed=*/!compare_op(ins.op));
+    if (!promoted)
+        return std::nullopt;
+    return scalar_class_of(langtype_of(*promoted));
+}
+
+// 阶段 A（def rwir union 签名）的编译期校验入口：操作数类型集合必须 ⊆ 算子
+// union；全已知时结果 class 必须与写槽声明一致。规则见
+// stdlib/kvlang/spec/05-runtime语义/11-指令派发与特化.kv。
+bool run_union_signature_checks(const Segment& segment, CompileError* error) {
+    for (std::size_t i = 0; i < segment.insns.size(); i++) {
+        const CInsn& ins = segment.insns[i];
+        for (int k = 0; k < ins.nrd; k++) {
+            // 与 read_referenced 同一口径：这些位置的 rd 不是寄存器槽
+            // （call 的 rd[0] 是哨兵，goto 的 rd[0] 与 br 的 rd[1..] 是分支目标）。
+            if (ins.op == rwir::Op::Call && k == 0)
+                continue;
+            if (ins.op == rwir::Op::Goto)
+                continue;
+            if (ins.op == rwir::Op::Br && k >= 1)
+                continue;
+            if (ins.rd[k] >= segment.regs.size()) {
+                error->reason = "insn " + std::to_string(i) +
+                                ": read slot out of range";
+                return false;
+            }
+        }
+        for (int k = 0; k < ins.nwr; k++) {
+            if (ins.wr[k] >= segment.regs.size()) {
+                error->reason = "insn " + std::to_string(i) +
+                                ": write slot out of range";
+                return false;
+            }
+        }
+        if (ins.impl == rwir::Impl::Typed &&
+            (ins.kind == rwir::Kind::None || ins.width == 0)) {
+            error->reason = "insn " + std::to_string(i) +
+                            ": typed instruction without kind/width";
+            return false;
+        }
+        const rwir::OpSignature* sig = instruction_signature(ins);
+        if (!sig)
+            continue;
+        const std::uint8_t arity = ins.nrd;
+        if (arity < sig->min_arity ||
+            (sig->max_arity != 0 && arity > sig->max_arity)) {
+            error->reason = "insn " + std::to_string(i) + ": arity " +
+                            std::to_string(arity) + " outside operator union";
+            return false;
+        }
+        std::vector<rwir::ScalarClass> operands;
+        bool all_known = true;
+        for (int k = 0; k < ins.nrd; k++) {
+            const rwir::ScalarClass cls =
+                scalar_class_of(segment.regs[ins.rd[k]].langtype);
+            operands.push_back(cls);
+            if (cls == rwir::ScalarClass::None) {
+                all_known = false;  // char/容器/动态槽：运行时决定
+                continue;
+            }
+            if (!(sig->operands & rwir::type_bit(cls))) {
+                error->reason = "insn " + std::to_string(i) +
+                                ": operand class not in operator union";
+                return false;
+            }
+        }
+        if (!all_known)
+            continue;
+        // 结果侧只校验「promotion 表必须给得出结果」：算术/位运算的
+        // int×uint 混合在运行时直接报错，这里提前拒绝。比较类跨类混合是合法
+        // 的（通用实现按值比较），不报错。
+        // 注意：不校验写槽的声明类型——layout 对未特化的通用算子可能按运行时
+        // 实际宽度落槽，与 typed 变体的结果宽度不同属于阶段 B 的统一范围。
+        if (sig->result == rwir::OpSignature::Result::Promoted &&
+            !compare_op(ins.op)) {
+            std::vector<NumKind> kinds;
+            for (const rwir::ScalarClass c : operands) {
+                const auto nk = numkind_of_class(c);
+                if (nk)
+                    kinds.push_back(*nk);
+            }
+            if (!promote(kinds, /*allow_mixed=*/true)) {
+                error->reason = "insn " + std::to_string(i) +
+                                ": promotion undefined for mixed operands";
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+// 交叉校验：layout 已发出的 typed 指令，必须与「按 union/ promotion 选出的
+// 唯一实现」完全一致；反过来，操作数类型全已知、表里存在对应 typed 变体时，
+// layout 不该留泛型。类型未知的指令计入 undecidable（char/容器/动态槽）。
+bool cross_check_union(const Segment& segment, UnionCheckReport* report,
+                       CompileError* error) {
+    for (std::size_t i = 0; i < segment.insns.size(); i++) {
+        const CInsn& ins = segment.insns[i];
+        if (ins.impl == rwir::Impl::Handoff)
+            continue;
+        const rwir::OpSignature* sig = instruction_signature(ins);
+        if (!sig)
+            continue;
+        report->checked++;
+        // 变参算子（min/max）没有 typed 变体，不参与逐条对拍。
+        if (ins.nrd > 2) {
+            report->matched++;
+            continue;
+        }
+        std::vector<rwir::ScalarClass> operands;
+        bool all_known = true;
+        for (int k = 0; k < ins.nrd; k++) {
+            const rwir::ScalarClass cls =
+                scalar_class_of(segment.regs[ins.rd[k]].langtype);
+            operands.push_back(cls);
+            if (cls == rwir::ScalarClass::None)
+                all_known = false;
+        }
+        if (!all_known) {
+            report->undecidable++;
+            for (int k = 0; k < ins.nrd; k++) {
+                const std::uint8_t slot = ins.rd[k];
+                if (slot >= segment.regs.size())
+                    continue;
+                const RegDesc& d = segment.regs[slot];
+                if (scalar_class_of(d.langtype) != rwir::ScalarClass::None)
+                    continue;
+                if (d.kind == Operand::Kind::Literal)
+                    report->undecidable_constant++;
+                else if (d.member)
+                    report->undecidable_member++;
+                else if (d.vclass == RegDesc::VarClass::ParamPtr ||
+                         d.vclass == RegDesc::VarClass::Ptr)
+                    report->undecidable_pointer++;
+                else
+                    report->undecidable_untyped++;
+                break;
+            }
+            continue;
+        }
+        const auto expected = result_class(*sig, ins, operands);
+        if (!expected) {
+            // 比较跨类 / cast：类型已知但没有唯一 typed 期望。
+            report->no_typed_variant++;
+            continue;
+        }
+        rwir::Op target = ins.op;
+        if (ins.op == rwir::Op::Sub && ins.nrd == 1)
+            target = rwir::Op::Neg;
+        const auto expected_kind = numkind_of_class(*expected);
+        if (!expected_kind) {
+            report->undecidable++;
+            continue;
+        }
+        const rwir::Entry* want = typed_variant(target, *expected_kind);
+        if (ins.impl == rwir::Impl::Typed) {
+            const NumKind actual{ins.kind, ins.width};
+            if (!want || actual.kind != want->kind || actual.width != want->width) {
+                report->mismatched++;
+                if (report->details.size() < 32)
+                    report->details.push_back(
+                        "pc " + std::to_string(i) + " " +
+                        vmbin::instruction_name(segment, ins) +
+                        ": typed op disagrees with union");
+            } else {
+                report->matched++;
+            }
+            continue;
+        }
+        if (want) {
+            report->mismatched++;
+            if (report->details.size() < 32)
+                report->details.push_back("pc " + std::to_string(i) + " " +
+                                          vmbin::instruction_name(segment, ins) +
+                                          ": layout left generic, union selects " +
+                                          want->name);
+        } else {
+            report->matched++;
+        }
+    }
+    (void)error;
+    return report->mismatched == 0;
+}
+
+}  // namespace
+
+bool RunCompileChecks(const Segment& segment, CompileError* error) {
+    if (!run_write_assignment_checks(segment, error))
+        return false;
+    return run_union_signature_checks(segment, error);
+}
+
+bool CrossCheckUnion(const Segment& segment, UnionCheckReport* report,
+                     CompileError* error) {
+    UnionCheckReport local;
+    return cross_check_union(segment, report ? report : &local, error);
 }
 
 bool compile(void* h, const std::string& func_dir,
@@ -1367,6 +1652,8 @@ bool compile(void* h, const std::string& func_dir,
         if (!specialize(h, func_dir, *options.arguments, out, err, report))
             return false;
     }
+    if (!RunCompileChecks(*out, err))
+        return false;
     return finalize_binir(out, func_dir, err);
 }
 

@@ -162,6 +162,35 @@ add_test(NAME c2_binircompiler_cli
                  ${CMAKE_CURRENT_SOURCE_DIR}/..)
 set_tests_properties(c2_binircompiler_cli PROPERTIES TIMEOUT 120)
 
+# 阶段 A 交叉校验工具：layout 已发 typed 行 vs union/promotion 选出的实现。
+# 测试专用，产物留在 build 目录（与 segment_shape_dump 同）。
+add_executable(union_cross_check
+    tools/union_cross_check.cpp
+    src/binircompiler/compiler.cpp
+    src/vmbin/binir_codec.cpp
+    src/binir_dump.cpp
+    src/vmbin/profile.cpp
+    src/value.cpp
+    src/valueio.cpp
+    src/rwir_gen.cpp
+    src/rwir_lookup.cpp)
+target_include_directories(union_cross_check PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include)
+target_compile_options(union_cross_check PRIVATE -O3 -fno-exceptions -fno-rtti -Wall -Wextra)
+target_link_directories(union_cross_check PRIVATE "${LIB_DIR}" "${BACKEND_DIR}")
+target_link_libraries(union_cross_check PRIVATE kvspace)
+
+add_test(NAME c2_union_cross_check
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/tests/union_cross_check.py
+                 --tool $<TARGET_FILE:union_cross_check>
+                 --byteseek ${CMAKE_CURRENT_SOURCE_DIR}/../bin/byteseek
+                 --layout ${CMAKE_CURRENT_SOURCE_DIR}/../bin/kvlanglayout
+                 --source-root ${CMAKE_CURRENT_SOURCE_DIR}/..)
+set_tests_properties(c2_union_cross_check PROPERTIES TIMEOUT 900)
+
 # binir 序列打印（§2·8）：只编 binir_dump.cpp，不链接 runtime/kvspace。
 add_executable(binir_dump_test
     tests/binir_dump_test.cpp src/binir_dump.cpp src/rwir_gen.cpp)

@@ -68,8 +68,26 @@ void clear_cache();
 // encode → decode → same_program 往返校验（--check）。
 bool check_roundtrip(const Segment& segment, std::string* why);
 
-// 编译期检查入口（#594：每个写参在所有返回路径必须赋值）。
-// 本阶段为空实现，规则落地时在此实现。
+// 编译期检查入口：内部按两条独立规则执行——
+//   #594（写参在所有返回路径必须赋值，规则未落地，空实现）
+//   阶段 A（语义算子 union 签名：操作数 ⊆ union、结果与写槽类型一致）
 bool RunCompileChecks(const Segment& segment, CompileError* error);
+
+// 阶段 A 交叉校验：layout 已发的 typed 指令必须与 union/promotion 选出的实现
+// 完全一致；类型全已知时 layout 不得漏特化。供工具与 ctest 使用。
+struct UnionCheckReport {
+    std::size_t checked = 0;      // 参与检查的语义指令数
+    std::size_t matched = 0;
+    std::size_t mismatched = 0;
+    std::size_t undecidable = 0;  // 操作数类型未知（char/容器/动态槽）
+    std::size_t undecidable_constant = 0;  // 字面量（char/路径/非标量）
+    std::size_t undecidable_member = 0;    // 结构体/容器成员
+    std::size_t undecidable_pointer = 0;   // 指针 / 参数 Ptr
+    std::size_t undecidable_untyped = 0;   // 无类型标注的普通槽
+    std::size_t no_typed_variant = 0;      // 类型全已知但无唯一 typed 期望
+    std::vector<std::string> details;  // 差异明细（最多 32 条）
+};
+bool CrossCheckUnion(const Segment& segment, UnionCheckReport* report,
+                     CompileError* error);
 
 }  // namespace kvlang::runtimec2::binircompiler

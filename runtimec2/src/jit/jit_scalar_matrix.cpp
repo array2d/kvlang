@@ -256,10 +256,8 @@ ScalarTypeClass promote(ScalarTypeClass lhs, ScalarTypeClass rhs) noexcept {
     const int aw = width_of(lhs), bw = width_of(rhs);
     if (is_signed(lhs) == is_signed(rhs))
         return aw >= bw ? lhs : rhs;
-    const int w = aw > bw ? aw : bw;   // preserve the wider signedness rules
-    if (w == 1) return ScalarTypeClass::SI16;
-    if (w == 2) return ScalarTypeClass::SI32;
-    return ScalarTypeClass::SI64;
+    // 混合符号（int×uint）：spec §数值 promotion 不特化，运行时直接报错。
+    return ScalarTypeClass::None;
 }
 
 bool typed_variant_exists(KernelOp op, ScalarTypeClass type) noexcept {

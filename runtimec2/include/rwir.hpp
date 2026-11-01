@@ -388,6 +388,8 @@ enum class RwirId : std::uint16_t {
     GeUnicodeSym = 304,
 };
 
+struct OpSignature;  // rwir_signature.hpp：语义算子的参数/结果 union
+
 struct Entry {
     const char* name;
     Op op;
@@ -396,6 +398,9 @@ struct Entry {
     Class cls;
     Impl impl;
     RwirHandlerId handler;
+    // 只有语义通用行（Impl::Dynamic 的数值/比较/逻辑/转换）非空；
+    // typed/handler/控制行留空，按 Op 走 signature_of()。
+    const OpSignature* signature = nullptr;
 };
 
 // = C runtime 的 myrwircaps（能力表，opcode→处理器）。

@@ -1,24 +1,24 @@
 // Scalar JIT matrix: typed kind + op family -> abstract machine sequence.
 //
+// 来源：feat/583-stage7 存档提交 45add7a3（jit_scalar_matrix.{hpp,cpp} 与单测）。
+// 当前只入库、未接线：vmkv / jit_stage2 都不调用本表。阶段 B 才接线
+// （解释器按 (opcode, RegDesc.langtype) 选实现，JIT 用同一张表发射）。
+//
 // Dispatch contract: MicroOp enum values are the only emission key.
 // MicroOpInfo.mnemonic is documentation/diagnostics only; no emission path may
 // switch or match on the mnemonic string (that would be a hidden branch).
 //
-// This file is standalone: it does not touch jit_stage2.cpp.  The wiring
-// draft (workspace/583/looker1/scalar-matrix-wiring.diff) maps ScalarPlan
-// micro-ops to the JIT2 emitter primitives.
+// This file is standalone: it does not touch jit_stage2.cpp.
 #pragma once
 
 #include <cstdint>
 
+#include "rwir_signature.hpp"
+
 namespace kvlang::runtimec2::jit2 {
 
-enum class ScalarTypeClass : std::uint8_t {
-    None = 0,
-    SI8, SI16, SI32, SI64,
-    UI8, UI16, UI32, UI64,
-    F32, F64,
-};
+// 与 rwir 的 ScalarClass 是同一个类型（单一枚举，不复制）。
+using ScalarTypeClass = rwir::ScalarClass;
 
 enum class KernelOp : std::uint8_t {
     Add = 0, Sub, Mul, Div, Mod, Max, Min, Abs, Neg, Sign,
@@ -77,7 +77,9 @@ struct ScalarPlan {
 // for comparisons/bit ops; arithmetic callers must reject bool themselves.
 ScalarTypeClass parse_kindexpr(const char* kindexpr) noexcept;
 
-// Arithmetic/compare promotion (C camp, matches layout wider_num_kind).
+// 数值 promotion：唯一书面定义在
+// stdlib/kvlang/spec/05-runtime语义/11-指令派发与特化.kv §数值 promotion。
+// int×uint 混合不特化（返回 None，运行时直接报错）；结果宽度与操作数顺序无关。
 // bool is not a numeric kind: returns None for any bool arithmetic operand.
 ScalarTypeClass promote(ScalarTypeClass lhs, ScalarTypeClass rhs) noexcept;
 
