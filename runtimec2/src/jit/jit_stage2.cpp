@@ -908,9 +908,8 @@ bool jit2_verify(const Segment* seg, Jit2Plan* plan, JitRefusal* refusal) {
         const RegDesc& d = seg->regs[i];
         if (d.kind == Operand::Kind::Literal)
             entry[i] = 1;
-        else if (d.kind == Operand::Kind::Var &&
-                 (d.param_k < 0 || d.param_k > 0))
-            entry[i] = 1;  // 读参＝实参；写参＝调用方预载（可读性在运行时证明）
+        else if (d.kind == Operand::Kind::Var && d.param_k < 0)
+            entry[i] = 1;  // 读参＝实参；写参必须在函数内先写后用，否则拒绝
     }
     std::vector<std::vector<char>> in_def(static_cast<std::size_t>(n),
                                           std::vector<char>(nr, 0));
@@ -1094,70 +1093,9 @@ bool jit2_verify(const Segment* seg, Jit2Plan* plan, JitRefusal* refusal) {
         }
     }
 
-    // 读-写写参预载集合：存在「未写先读」的可达路径 → 调用方必须预载。
-    // 用同一 CFG 再做一次「不把写参视为入口已定义」的 definite assignment。
-    {
-        std::vector<char> entry_no_out(nr, 0);
-        for (std::size_t i = 0; i < nr; i++) {
-            const RegDesc& d = seg->regs[i];
-            if (d.kind == Operand::Kind::Literal)
-                entry_no_out[i] = 1;
-            else if (d.kind == Operand::Kind::Var && d.param_k < 0)
-                entry_no_out[i] = 1;
-        }
-        std::vector<std::vector<char>> in2(static_cast<std::size_t>(n),
-                                           std::vector<char>(nr, 0));
-        std::vector<std::vector<char>> out2(static_cast<std::size_t>(n),
-                                            std::vector<char>(nr, 0));
-        std::vector<char> reach2(static_cast<std::size_t>(n), 0);
-        in2[0] = entry_no_out;
-        reach2[0] = 1;
-        for (bool changed = true; changed;) {
-            changed = false;
-            for (int i = 0; i < n; i++) {
-                if (!reach2[i])
-                    continue;
-                out2[static_cast<std::size_t>(i)] =
-                    in2[static_cast<std::size_t>(i)];
-                const CInsn& ci = seg->insns[i];
-                for (int k = 0; k < ci.nwr; k++)
-                    out2[static_cast<std::size_t>(i)][ci.wr[k]] = 1;
-                for (int s2 : successors[static_cast<std::size_t>(i)]) {
-                    if (s2 < 0 || s2 >= n)
-                        continue;
-                    if (!reach2[s2]) {
-                        in2[static_cast<std::size_t>(s2)] =
-                            out2[static_cast<std::size_t>(i)];
-                        reach2[s2] = 1;
-                        changed = true;
-                        continue;
-                    }
-                    for (std::size_t r = 0; r < nr; r++)
-                        if (in2[static_cast<std::size_t>(s2)][r] &&
-                            !out2[static_cast<std::size_t>(i)][r]) {
-                            in2[static_cast<std::size_t>(s2)][r] = 0;
-                            changed = true;
-                        }
-                }
-            }
-        }
-        plan->output_preload.assign(nr, 0);
-        for (int i = 0; i < n; i++) {
-            if (!reach2[i])
-                continue;
-            const CInsn& ci = seg->insns[i];
-            for (int k = 0; k < ci.nrd; k++) {
-                const int idx = ci.rd[k];
-                if (seg->regs[idx].kind != Operand::Kind::Var)
-                    continue;
-                if (in2[static_cast<std::size_t>(i)][idx])
-                    continue;
-                for (int r : outputs)
-                    if (r == idx)
-                        plan->output_preload[static_cast<std::size_t>(r)] = 1;
-            }
-        }
-    }
+    // 写参预载已废除：写参在定义前被读会触发上面的「定义先于使用」检查并拒绝
+    // 该函数（回退解释器，报与不开 JIT 时相同的错），预载只会把错误变成静默成功。
+    plan->output_preload.assign(nr, 0);
 
     // 物化集合：
     //  - Handoff 出口：操作数 ∪ live_out（之后由解释器接管）；

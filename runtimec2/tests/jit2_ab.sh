@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# 第二阶段原型 A/B：RC2_JIT2=1 与 RC2_NOJIT=1 逐值对拍，并检查目标函数确实进 JIT2。
+# 第二阶段 A/B：默认档（JIT2 开）与 RC2_NOJIT2=1（JIT2 关）逐值对拍，
+# 并检查目标函数确实进 JIT2。
 # usage: jit2_ab.sh <byteseek> <repo-root>
 set -uo pipefail
 BIN=${1:?usage: jit2_ab.sh <byteseek> <repo-root>}
@@ -17,10 +18,10 @@ run_case() {
         local dsn="shm://$TMP/$name-${mode}.shm"
         rm -f "$TMP/$name-${mode}.shm"*
         if [ "$mode" = nojit ]; then
-            KVSPACE="$dsn" RC2_NOJIT=1 "$BIN" "$FIX/$name.kv" \
+            KVSPACE="$dsn" RC2_NOJIT2=1 "$BIN" "$FIX/$name.kv" \
                 > "$TMP/$name-$mode.out" 2> "$TMP/$name-$mode.err"
         else
-            KVSPACE="$dsn" RC2_JIT2=1 RC2_JITDBG=1 "$BIN" "$FIX/$name.kv" \
+            KVSPACE="$dsn" RC2_JITDBG=1 "$BIN" "$FIX/$name.kv" \
                 > "$TMP/$name-$mode.out" 2> "$TMP/$name-$mode.err"
         fi
         echo $? > "$TMP/$name-$mode.rc"

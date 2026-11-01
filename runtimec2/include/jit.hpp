@@ -71,7 +71,7 @@ bool jit_try_run(vmbin::Frame& f, const Segment* seg, int start_s0,
 
 // 环境开关：RC2_NOJIT=1 关 JIT；RC2_JITDUMP=1 发射后打印机器码。
 bool jit_enabled();
-// 第二阶段：RC2_JIT2=1（统一 ABI 的槽式执行）。
+// 第二阶段：默认开启（统一 ABI 的槽式执行），RC2_NOJIT2 关闭。
 bool jit2_enabled();
 // JIT2 产物指针（null = 不接受）；CallSite 缓存它以免每次调用查表。
 const void* jit2_entry(const std::string& func_dir, const Segment* seg);
