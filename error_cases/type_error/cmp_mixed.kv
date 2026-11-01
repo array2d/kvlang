@@ -1,5 +1,5 @@
 // expected
-//   TypeError: cannot compare int64 with char/utf32
+//   TypeError: eq cannot mix string and numeric operands
 // 修复: todo-033 — evalCmp 曾对所有类型对回退到字符串比较（dict==array 也"成功"），现跨类型直接 TypeError
 rwfunc test() -> () {
 	int64(5) == "hello" -> x

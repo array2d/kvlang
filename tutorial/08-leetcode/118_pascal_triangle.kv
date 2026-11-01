@@ -30,7 +30,8 @@ rwfunc generate(num_rows:int64) -> () {
 		1 -> "/tmp/cur"·*0
 		i = 1
 		while (i < r) {
-			"/tmp/pt"·*i-1 -> a
+			i - 1 -> im1
+			"/tmp/pt"·*im1 -> a
 			"/tmp/pt"·*i -> b
 			v = a + b
 			println(v)

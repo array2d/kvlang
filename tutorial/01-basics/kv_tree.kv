@@ -19,7 +19,7 @@ rwfunc count_children(prefix:[]char/utf32) -> (n:int64) {
 rwfunc test() -> () {
 	/tmp/kvt:int64·int64 = {}
 	42 -> "/tmp/kvt·data"
-	"/tmp/kvt·data" -> v
+	/tmp/kvt·data -> v
 	println("v=", v)
 	has_field("/tmp/kvt", "data") -> h
 	println("has_data=", h)

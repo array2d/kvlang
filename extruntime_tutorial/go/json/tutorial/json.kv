@@ -10,14 +10,18 @@
 //   j = {"active":true,"age":42,"cont":[10,20,30],"grp":{"c":1,"d":2},"name":"alice","nested":{"level1":{"count":3,"flags":[true,false,true],"level2":"deep"},"list":[1,2,3]},"scat":[10,20,30],"score":3.14}
 //   name = alice
 //   c = 1
-//   cont = [10, 20, 30]
-//   scat = [10, 20, 30]
+//   cont = 10 20 30
+//   scat = 10 20 30
 //   len = 3 3
 //   level2 = deep
 //   count = 3
-//   flags = [true, false, true]
-//   list = [1, 2, 3]
-rwfunc main() -> () {
+//   flags = true false true
+//   list = 1 2 3
+rwfunc test() -> () {
+	/data:[]char/utf8·int64 = {}
+	/data·grp:[]char/utf8·int64 = {}
+	/data·nested:[]char/utf8·int64 = {}
+	/data·nested·level1:[]char/utf8·int64 = {}
 	42 -> /data·age
 	"alice" -> /data·name
 	3.14 -> /data·score
@@ -30,21 +34,19 @@ rwfunc main() -> () {
 	[1, 2, 3] -> /data·nested·list
 	a:[]int64 = [10, 20, 30]
 	[10, 20, 30] -> /data·cont
-	array·scatter(a) -> /data·scat
+	scatterarray·newscatter(a) -> /data·scat
 	json·to(/data) -> j
 	println("j =", j)
 	json·from(j) -> /data2
 	println("name =", /data2·name)
 	println("c =", /data2·grp·c)
-	println("cont =", /data2·cont)
-	println("scat =", /data2·scat)
-	ndarray·numel(/data2·cont) -> n1
-	ndarray·numel(/data2·scat) -> n2
+	println("cont =", /data2·cont·[0], /data2·cont·[1], /data2·cont·[2])
+	println("scat =", /data2·scat·[0], /data2·scat·[1], /data2·scat·[2])
+	compactarray·numel(/data2·cont) -> n1
+	compactarray·numel(/data2·scat) -> n2
 	println("len =", n1, n2)
 	println("level2 =", /data2·nested·level1·level2)
 	println("count =", /data2·nested·level1·count)
-	println("flags =", /data2·nested·level1·flags)
-	println("list =", /data2·nested·list)
+	println("flags =", /data2·nested·level1·flags·[0], /data2·nested·level1·flags·[1], /data2·nested·level1·flags·[2])
+	println("list =", /data2·nested·list·[0], /data2·nested·list·[1], /data2·nested·list·[2])
 }
-
-main()

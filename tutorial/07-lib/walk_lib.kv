@@ -2,7 +2,8 @@
 // 粒度按实测定：本 pod 上单次 kvspace 操作约 17ms（redis RTT 主导），所以整棵 /lib
 // （含 84 章规范树）或 string 包全下钻（3k+ 叶子）都是分钟级。这里：
 //   1) 列 string 包自身成员（38 个函数的签名键 / 源码 / 目录条目，192 条）；
-//   2) 只挑一个函数目录（count/）下钻，演示递归 + 指令槽与标签的 langtype。
+//   2) Recurse into a single function directory (count/) to inspect instruction and label slots;
+//      ‥labels/ is a system segment hidden from parent listings, so walk it explicitly.
 // 成员经 `kvspace·members` 取：值与同名目录共存时后端会同时给出裸名与目录名（两个实体，
 // 后端不去重），members 折成一条，遍历侧不必各自去重（见 lib kvspace 注释）。
 // 目录判定不看 list 的尾斜杠（三后端不统一）：<名>/ 是结构目录，<名>· 是成员前缀目录。
@@ -44,7 +45,11 @@ rwfunc walk(path:[]char/utf32, indent:[]char/utf32, down:int64) -> () {
 			}
 		}
 		if (child == "") {
-			full -> v
+			// `full` is a runtime string (`full -> v` copies the string, not the target key);
+			// copy the leaf to a fixed scratch key and read it via an unquoted path.
+			kvspace·del("/tmp/walk_lib_leaf") -> _
+			kvspace·cp(full, "/tmp/walk_lib_leaf")
+			/tmp/walk_lib_leaf -> v
 			if (v == None) {
 				println(indent, nm)
 			} else {
@@ -66,4 +71,7 @@ rwfunc test() -> () {
 	walk("/lib/string·", "  ", 0)
 	println("/lib/string·count/")
 	walk("/lib/string·count/", "  ", 1)
+	// System segments (prefixed with ‥) are omitted from parent listings; walk explicitly.
+	println("/lib/string·count/‥labels/")
+	walk("/lib/string·count/‥labels/", "  ", 0)
 }

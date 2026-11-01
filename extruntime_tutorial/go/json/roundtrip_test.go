@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 	"unsafe"
 )
@@ -12,6 +13,8 @@ func rtConn(t *testing.T) unsafe.Pointer {
 	dsn := os.Getenv("KVSPACE")
 	if dsn == "" {
 		dsn = "redis://127.0.0.1:6379"
+	} else if dsn == "shm://" || dsn == "fs://" {
+		dsn = dsn + filepath.Join(t.TempDir(), "test")
 	}
 	c := connect(dsn)
 	if c == nil {

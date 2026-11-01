@@ -1,0 +1,62 @@
+// 10-member-chain: multi-segment member reads (`t·1·val`), member address-of (`&t·2`),
+// `*T` read-params in pure-memory callees, and member writes on write-only struct params (`r·x`).
+// Expected output:
+//   chain= 7 7 9
+//   isnone= 0 7 1
+//   depth= 2
+//   mk= 2 2
+//   mk2= 5 15
+struct N {
+	val:int64=0
+	left:*N=None
+}
+struct P {
+	x:int64=0
+	y:int64=0
+}
+rwfunc isnone(root:*N) -> (r:int64) {
+	if (root == None) { 1 -> r } else { 0 -> r }
+}
+rwfunc rootval(root:*N) -> (r:int64) {
+	r = root·val
+}
+rwfunc depth(root:*N) -> (d:int64) {
+	if (root == None) { 0 -> d }
+	else {
+		l = depth(root·left)
+		d = l + 1
+	}
+}
+rwfunc mk(a:int64, b:int64) -> (r:*P) {
+	a + 1 -> r·x
+	b -> r·y
+}
+rwfunc mk2(a:int64) -> (s:*P, t:*P) {
+	println("mk2 runs")
+	a -> s·x
+	a + 10 -> t·x
+}
+rwfunc test() -> () {
+	t:[int64]·N = {}
+	t·2:N = {val=9}
+	t·1:N = {val=7 left=&t·2}
+	k = 1
+	t·1·val -> a
+	t·*k·val -> b
+	t·1·left·val -> c
+	println("chain=", a, b, c)
+	&t·1 -> root
+	i1 = isnone(root)
+	v1 = rootval(root)
+	i2 = isnone(None)
+	println("isnone=", i1, v1, i2)
+	dd = depth(root)
+	println("depth=", dd)
+	r0:P = {}
+	mk(1, 2) -> r0
+	println("mk=", r0·x, r0·y)
+	s0:P = {}
+	t0:P = {}
+	mk2(5) -> (s0, t0)
+	println("mk2=", s0·x, t0·x)
+}
