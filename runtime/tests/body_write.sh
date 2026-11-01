@@ -3,8 +3,13 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 LAYOUT="${KVLANG_LAYOUT_BIN:-$ROOT/bin/kvlanglayout}"
-KVLANG="${KVLANG_TERM_BIN:-$ROOT/bin/kvlang}"
-boot() { KVSPACE="$1" "$KVLANG" -c 'print("boot")' >/dev/null 2>&1; }
+KVLANG="${KVLANG_TERM_BIN:-$ROOT/bin/byteseek}"
+boot() {
+	if ! KVSPACE="$1" "$KVLANG" -c 'print("boot")' >/dev/null; then
+		echo "FAIL: boot $1 (KVLANG=$KVLANG)" >&2
+		exit 1
+	fi
+}
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 want=$'a 600\nb hello\nc 6\nd 5\ne 50.0\ng 9\nh 55'

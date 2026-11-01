@@ -7,6 +7,6 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 PAUSE_RESUME_DSN="shm://$tmp/sv" \
 KVLANG_LAYOUT_BIN="${KVLANG_LAYOUT_BIN:-$ROOT/bin/kvlanglayout}" \
-KVLANG_TERM_BIN="${KVLANG_TERM_BIN:-$ROOT/bin/kvlang}" \
+KVLANG_TERM_BIN="${KVLANG_TERM_BIN:-$ROOT/bin/byteseek}" \
 KVSPACE_CLI="${KVSPACE_CLI:-kvspace}" \
 	bash "$ROOT/runtime/tests/pause_resume.sh"

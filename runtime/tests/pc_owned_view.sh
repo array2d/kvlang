@@ -8,7 +8,7 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 LAYOUT="${KVLANG_LAYOUT_BIN:-$ROOT/bin/kvlanglayout}"
-KVLANG="${KVLANG_TERM_BIN:-$ROOT/bin/kvlang}"
+KVLANG="${KVLANG_TERM_BIN:-$ROOT/bin/byteseek}"
 PROBE="${KVLANG_PC_PROBE:-$ROOT/bin/test_pc_view_probe}"
 KVC="${KVSPACE_CLI:-kvspace}"
 command -v "$KVC" >/dev/null 2>&1 || { echo "skip: no kvspace CLI"; exit 77; }
@@ -16,7 +16,7 @@ command -v "$KVC" >/dev/null 2>&1 || { echo "skip: no kvspace CLI"; exit 77; }
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 export KVSPACE="shm://$tmp/db"
 fail() { echo "FAIL: $*"; exit 1; }
-"$KVLANG" -c 'print("boot")' >/dev/null 2>&1
+"$KVLANG" -c 'print("boot")' >/dev/null || { echo "FAIL: boot $KVSPACE (KVLANG=$KVLANG)" >&2; exit 1; }
 "$LAYOUT" "$ROOT/runtime/tests/pc_long.kv" "$KVSPACE" >/dev/null 2>&1 || fail "layout"
 vid=$("$KVLANG" create worker) || fail "create"
 "$KVLANG" run "$vid" >/dev/null 2>&1 # 停在 deep() 底部的 paused
