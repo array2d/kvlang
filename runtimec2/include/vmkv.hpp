@@ -37,7 +37,8 @@ struct Vmkv {
     bool reg_body(vmbin::Frame& frame, std::uint8_t index, std::uint8_t** body,
                   std::uint64_t* cap);
     bool slot_read_scalar(const kvspaceXvalueBodyView_t& view,
-                          std::string_view langtype, Scalar* out);
+                          std::uint64_t cap, std::string_view langtype,
+                          Scalar* out);
     bool ensure_reg_key(vmbin::Frame& frame, vmbin::Register& reg);
     bool reg_langtype(vmbin::Frame& frame, std::uint8_t index, std::string* langtype);
     bool read_reg(vmbin::Frame& frame, std::uint8_t index, Wire* out);

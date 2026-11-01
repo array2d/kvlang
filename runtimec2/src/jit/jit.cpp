@@ -27,6 +27,20 @@ using vmbin::Register;
 using vmbin::Frame;
 using vmbin::Outcome;
 
+// compact 数组槽的 body 逻辑长度须装下全部元素（head dims × 元素宽度），
+// 否则内联寻址会越过 body 写进 attr 区。
+bool array_body_fits(const Segment& seg, std::size_t r,
+                     std::uint64_t cap) {
+    if (r >= seg.regs.size())
+        return false;
+    const std::uint32_t tid = seg.regs[r].array_type_id;
+    if (tid == vmbin::kArrayTypeNone || tid >= seg.array_types.size())
+        return false;
+    const vmbin::ArrayTypeDesc& at = seg.array_types[tid];
+    return at.numel > 0 && at.width != 0 &&
+           cap >= static_cast<std::uint64_t>(at.numel) * at.width;
+}
+
 bool g_nojit = std::getenv("RC2_NOJIT") != nullptr;
 bool g_jitdump = std::getenv("RC2_JITDUMP") != nullptr;
 bool g_jitdbg = std::getenv("RC2_JITDBG") != nullptr;
@@ -517,7 +531,7 @@ int jit2_handler_call(vmbin::Frame* f, jitabi::ValueSlotV1* slots,
             std::uint8_t* body = nullptr;
             std::uint64_t cap = 0;
             if (!g_vmkv.reg_body(*f, static_cast<std::uint8_t>(r), &body, &cap) ||
-                !body)
+                !body || !array_body_fits(*seg, r, cap))
                 return 2;
             slots[r].payload_lo = reinterpret_cast<std::uint64_t>(body);
             slots[r].tag = jitabi::ValueTagV1::I64;
@@ -608,7 +622,7 @@ bool jit2_try_run(Frame& f, const Segment* seg, int start_s0, Outcome* out,
             std::uint8_t* body = nullptr;
             std::uint64_t cap = 0;
             if (!g_vmkv.reg_body(f, static_cast<std::uint8_t>(r), &body, &cap) ||
-                !body) {
+                !body || !array_body_fits(*seg, static_cast<std::size_t>(r), cap)) {
                 if (g_jitdbg)
                     std::fprintf(stderr, "[jit2dbg input-fail %s r=%d array]\n",
                                  f.func_dir.c_str(), r);

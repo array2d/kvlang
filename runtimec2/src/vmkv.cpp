@@ -81,6 +81,16 @@ bool view_langtype(const kvspaceXvalueBodyView_t& view, std::string* lt) {
     return true;
 }
 
+// body 逻辑长度 = head 声明的 len，原地写/直读的可用上界。
+// body_cap 是物理容量，越过 len 的读写落在 attr 区。
+std::uint64_t view_body_len(const kvspaceXvalueBodyView_t& view) {
+    if (!view.head || view.headlen != KVSPACE_XVALUE_HEAD_LEN)
+        return 0;
+    const std::uint64_t len = kvspaceXvalueHeadLen(
+        reinterpret_cast<const kvspaceXvalueHead*>(view.head));
+    return len < view.body_cap ? len : view.body_cap;
+}
+
 // warm frame：Register 块池（线程局部，按容量复用）。递归帧每层借一块、返回还池，
 // 免每次 call 的 vector 堆分配 + Register string 构造（fib 递归 setup 大头）。
 thread_local std::vector<std::vector<Register>> g_freg_free;
@@ -363,7 +373,7 @@ bool Vmkv::reg_slot(Frame& f, std::uint8_t idx, kvspaceXvalueBodyView_t* out) {
         return false;
     r.view_ok = true;
     r.body = r.view.body;
-    r.cap = r.view.body_cap;
+    r.cap = view_body_len(r.view);
     *out = r.view;
     return true;
 }
@@ -379,21 +389,21 @@ bool Vmkv::reg_body(Frame& f, std::uint8_t idx, std::uint8_t** body,
             return false;
         r.view_ok = true;
         r.body = r.view.body;
-        r.cap = r.view.body_cap;
+        r.cap = view_body_len(r.view);
     }
     *body = r.body;
     *cap = r.cap;
     return true;
 }
 
-// 从 view 直读标量（不读 head、不 ABI；langtype 由 attr key 传入）。
-bool Vmkv::slot_read_scalar(const kvspaceXvalueBodyView_t& v,
+// 从 view 直读标量（langtype 由 attr key 传入；cap 是 body 逻辑长度）。
+bool Vmkv::slot_read_scalar(const kvspaceXvalueBodyView_t& v, std::uint64_t cap,
                             std::string_view langtype, Scalar* out) {
     if (!v.head || v.headlen != KVSPACE_XVALUE_HEAD_LEN)
         return false;
     return v_scalar_view(
         reinterpret_cast<const std::uint8_t*>(langtype.data()),
-        langtype.size(), v.body, v.body_cap, out);
+        langtype.size(), v.body, cap, out);
 }
 
 // 槽值缓存：None 值用显式 XValue 表示（kvspace-c 对 None 返回 NULL，C runtime 对齐语义）。
@@ -589,7 +599,7 @@ bool Vmkv::read_scalar(Frame& f, std::uint8_t idx, Scalar* out) {
                 return true;
             if (vmbin.prof_on)
                 vmbin.prof.f_raw++;
-        } else if (have_lt && slot_read_scalar(r.view, lt, out)) {
+        } else if (have_lt && slot_read_scalar(r.view, r.cap, lt, out)) {
             r.sck = out->k;
             r.scw = out->width;
             r.sc_ok = true;
@@ -1029,7 +1039,7 @@ bool Vmkv::read_bool(Frame& f, std::uint8_t idx, bool* out) {
 bool Vmkv::store_i64_slot(Frame& f, Register& r, std::int64_t v) {
     const kvspaceXvalueBodyView_t& w = r.view;
     std::string lt;
-    if (w.body_cap >= 8 && view_langtype(w, &lt) && lt == "int64") {
+    if (r.cap >= 8 && view_langtype(w, &lt) && lt == "int64") {
         std::memcpy(r.body, &v, 8);
         r.slot_state = Register::SlotState::Present;
         return true;
