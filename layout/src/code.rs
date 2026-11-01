@@ -715,7 +715,7 @@ pub fn write_func(
     let declared = lower::declared_types(fn_);
     let type_sets = lower::infer_type_sets(fn_);
     let mut diags = lower::validate_writes(fn_, pkg, &type_map, structs, sigs);
-    diags.extend(lower::specialize(fn_, &type_map, &declared));
+    diags.extend(lower::specialize(fn_, &type_map, &declared, &type_sets));
     for d in &diags {
         eprintln!("{}", d.string());
     }

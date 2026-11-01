@@ -26,6 +26,18 @@ pub fn semantic_ops() -> bool {
     })
 }
 
+/// 字符串拼接脱糖开关：默认随语义算子开关；`KVLANG_LAYOUT_STRING_CONCAT=0`
+/// 可单独关闭（A/B 隔离用）。关闭时 `"a" + "b"` 保持 `+`，产物与旧版逐字节相同。
+pub fn string_concat_ops() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        semantic_ops()
+            && std::env::var("KVLANG_LAYOUT_STRING_CONCAT")
+                .map(|v| !v.is_empty() && v != "0")
+                .unwrap_or(true)
+    })
+}
+
 fn is_container_type(t: &str) -> bool {
     t == "stringkeymap" || t.contains(keytree::MEMBER_SEP)
 }
@@ -1725,6 +1737,9 @@ fn exact_kind(
             return Some("uint64".to_string())
         }
         "string·parsefloat" => return Some("float64".to_string()),
+        // 字符串族结果：类型精确（char/utf32），供字符串 `+` 的脱糖判定。
+        "string·char" | "string·set" | "string·slice" | "string·concat" | "string·formatint"
+        | "string·formatuint" => return Some("char/utf32".to_string()),
         _ => {}
     }
     let arith = symbol::lookup(op).arith;
@@ -1921,11 +1936,20 @@ pub fn specialize(
     fn_: &mut Func,
     tm: &HashMap<String, String>,
     declared: &HashMap<String, String>,
+    type_sets: &HashMap<String, Vec<String>>,
 ) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
     let stable = stable_kinds(fn_, tm, declared);
-    specialize_body(&mut fn_.body, tm, declared, &stable, &mut diags);
+    specialize_body(&mut fn_.body, tm, declared, &stable, type_sets, &mut diags);
     diags
+}
+
+/// 变量的推断类型集合全为字符串/字符族（无未知写者）→ 可证明是字符串。
+fn sets_all_string(sets: &HashMap<String, Vec<String>>, name: &str) -> bool {
+    match sets.get(name) {
+        Some(ts) => !ts.is_empty() && ts.iter().all(|t| is_string_kind(t)),
+        None => false,
+    }
 }
 
 fn specialize_body(
@@ -1933,26 +1957,27 @@ fn specialize_body(
     tm: &HashMap<String, String>,
     declared: &HashMap<String, String>,
     stable: &HashMap<String, String>,
+    type_sets: &HashMap<String, Vec<String>>,
     diags: &mut Vec<Diagnostic>,
 ) {
     for st in body {
         match st {
-            Stmt::Instruction(s) => specialize_inst(s, tm, declared, stable, diags),
-            Stmt::Scope(s) => specialize_body(&mut s.body, tm, declared, stable, diags),
+            Stmt::Instruction(s) => specialize_inst(s, tm, declared, stable, type_sets, diags),
+            Stmt::Scope(s) => specialize_body(&mut s.body, tm, declared, stable, type_sets, diags),
             Stmt::If(s) => {
                 if let Some(c) = &mut s.cond {
-                    specialize_inst(c, tm, declared, stable, diags);
+                    specialize_inst(c, tm, declared, stable, type_sets, diags);
                 }
-                specialize_body(&mut s.then_, tm, declared, stable, diags);
-                specialize_body(&mut s.else_, tm, declared, stable, diags);
+                specialize_body(&mut s.then_, tm, declared, stable, type_sets, diags);
+                specialize_body(&mut s.else_, tm, declared, stable, type_sets, diags);
             }
             Stmt::While(s) => {
                 if let Some(c) = &mut s.cond {
-                    specialize_inst(c, tm, declared, stable, diags);
+                    specialize_inst(c, tm, declared, stable, type_sets, diags);
                 }
-                specialize_body(&mut s.body, tm, declared, stable, diags);
+                specialize_body(&mut s.body, tm, declared, stable, type_sets, diags);
             }
-            Stmt::For(s) => specialize_body(&mut s.body, tm, declared, stable, diags),
+            Stmt::For(s) => specialize_body(&mut s.body, tm, declared, stable, type_sets, diags),
             _ => {}
         }
     }
@@ -1963,6 +1988,7 @@ fn specialize_inst(
     tm: &HashMap<String, String>,
     declared: &HashMap<String, String>,
     stable: &HashMap<String, String>,
+    type_sets: &HashMap<String, Vec<String>>,
     diags: &mut Vec<Diagnostic>,
 ) {
     let e = match &mut inst.expr {
@@ -1980,22 +2006,56 @@ fn specialize_inst(
     if !builtin::num_op(&word) {
         return;
     }
+    let diags_before = diags.len();
     validate_num_op(&word, &e.args, tm, diags);
     /* 特化决策用 declared（见上）；诊断仍用推断表以保持现有报错面。 */
     /* 操作数类型必须全部可证明（exact_operand_kind）；混合数值 kind 按五语言
      * 提升规则取唯一结果 kind，证明不了（未知/字符串/bool/不可判混合）保留通用 opcode。 */
     let mut kinds: Vec<String> = Vec::new();
+    let mut string_operands = 0usize;
     for arg in &e.args {
         let t = match exact_operand_kind(arg, declared, stable) {
             Some(t) => t,
-            None => return,
+            None => {
+                // 声明/稳定表都推不出时，退到有限类型集合：全字符串集合可证明是字符串。
+                if arg.is_leaf() && sets_all_string(type_sets, &arg.val) {
+                    string_operands += 1;
+                    kinds.push("char/utf32".to_string());
+                    continue;
+                }
+                return;
+            }
         };
-        if is_string_kind(&t) || !builtin::is_num_kind(&t) {
+        if is_string_kind(&t) {
+            string_operands += 1;
+        } else if !builtin::is_num_kind(&t) {
             return;
         }
         kinds.push(t);
     }
     if kinds.is_empty() {
+        return;
+    }
+    /* 字符串拼接脱糖（spec 05-runtime语义/11）：
+     * 全部操作数可证明是字符串/字符族 → `string·concat`；字符串与非字符串混杂
+     * → layout 阶段报错（不再留给运行时）。开关关闭时保持原样（`+`）。 */
+    if string_operands > 0 {
+        if word != "add" || !string_concat_ops() {
+            return;
+        }
+        if string_operands != kinds.len() {
+            // 字符串 + 可证明非字符串：layout 阶段报错，不留运行时。
+            // 仅在脱糖开启时生效（关闭时产物与旧版逐字节相同）。
+            if diags.len() == diags_before {
+                push_num_diag(
+                    diags,
+                    format!("TypeError: {word} cannot mix string and numeric operands"),
+                );
+            }
+            return;
+        }
+        e.op = "string·concat".to_string();
+        inst.operator = true;
         return;
     }
     let is_cmp = matches!(word.as_str(), "eq" | "neq" | "lt" | "le" | "gt" | "ge");
