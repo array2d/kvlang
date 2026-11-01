@@ -6,7 +6,7 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 LAYOUT="${KVLANG_LAYOUT_BIN:-$ROOT/bin/kvlanglayout}"
-KVLANG="${KVLANG_TERM_BIN:-$ROOT/bin/kvlang}"
+KVLANG="${KVLANG_TERM_BIN:-$ROOT/bin/byteseek}"
 KVC="${KVSPACE_CLI:-kvspace}"
 command -v "$KVC" >/dev/null 2>&1 || { echo "skip: no kvspace CLI"; exit 77; }
 tmp=$(mktemp -d)
@@ -27,7 +27,7 @@ grep -q 'read_view_global:8' <<<"$out" || fail "global: $out"
 
 # 4) 外部同 key 写可见（独立 store，避免沿用 global 子测试的 /viewtest/i）
 export KVSPACE="shm://$tmp/db4"
-"$KVLANG" -c 'print("boot")' >/dev/null 2>&1
+"$KVLANG" -c 'print("boot")' >/dev/null || { echo "FAIL: boot $KVSPACE (KVLANG=$KVLANG)" >&2; exit 1; }
 "$LAYOUT" "$ROOT/runtime/tests/read_view_external.kv" "$KVSPACE" >/dev/null 2>&1 ||
 	fail "layout"
 vid=$("$KVLANG" create worker) || fail "create"

@@ -4,7 +4,7 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 LAYOUT="${KVLANG_LAYOUT_BIN:-$ROOT/bin/kvlanglayout}"
-KVLANG="${KVLANG_TERM_BIN:-$ROOT/bin/kvlang}"
+KVLANG="${KVLANG_TERM_BIN:-$ROOT/bin/byteseek}"
 KVC="${KVSPACE_CLI:-kvspace}"
 command -v "$KVC" >/dev/null 2>&1 || { echo "skip: no kvspace CLI"; exit 77; }
 tmp=$(mktemp -d)
@@ -20,7 +20,7 @@ wait_progress() {
 	done
 	fail "进度未达到 $1（当前 $(progress)）"
 }
-"$KVLANG" -c 'print("boot")' >/dev/null 2>&1
+"$KVLANG" -c 'print("boot")' >/dev/null || { echo "FAIL: boot $KVSPACE (KVLANG=$KVLANG)" >&2; exit 1; }
 "$LAYOUT" "$ROOT/runtime/tests/pause_resume.kv" "$KVSPACE" >/dev/null 2>&1 || fail "layout"
 vid=$("$KVLANG" create worker) || fail "create"
 ST=$(printf '/vthread/%s/\xe2\x80\xa5status' "$vid")
