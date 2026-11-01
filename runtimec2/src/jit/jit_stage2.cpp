@@ -281,6 +281,37 @@ struct Code2 {
         w8(op);
         modrm(3, static_cast<std::uint8_t>(d & 7), static_cast<std::uint8_t>(s & 7));
     }
+    // B1：窄宽度规范化与 64 位有/无符号移位。
+    void mov32(const X2& d, const X2& s) {  // mov r32, r/m32（高 32 位清零）
+        rex(false, d, s);
+        w8(0x8B);
+        modrm(3, d.field, s.field);
+    }
+    void movsx_r(const X2& d, const X2& s, int width) {  // movsx/movsxd r64, r/m
+        rexw(d, s);
+        if (width == 4) {
+            w8(0x63);  // movsxd r64, r/m32
+        } else {
+            w8(0x0F);
+            w8(width == 1 ? 0xBE : 0xBF);
+        }
+        modrm(3, d.field, s.field);
+    }
+    void movzx_r(const X2& d, const X2& s, int width) {  // movzx r64, r/m8|16
+        if (width == 4) {
+            mov32(d, s);
+            return;
+        }
+        rexw(d, s);
+        w8(0x0F);
+        w8(width == 1 ? 0xB6 : 0xB7);
+        modrm(3, d.field, s.field);
+    }
+    void sar_cl(const X2& d) {  // sar r64, cl
+        rexw(kRcx, d);
+        w8(0xD3);
+        modrm(3, 7, d.field);
+    }
     void cvtsi2sd(int xmm, const X2& g) {  // int64 → double
         w8(0xF2);
         // reg 域是 xmm(<8 不需要 REX.R)，rm 域是 GPR → REX.B 跟 GPR 高比特。
@@ -439,9 +470,139 @@ struct Fixup {
     int target = 0;  // 0 = guard stub
 };
 
+std::uint8_t setcc_of_op(rwir::Op op) {
+    switch (op) {
+    case rwir::Op::Eq: return 0x94;
+    case rwir::Op::Neq: return 0x95;
+    case rwir::Op::Lt: return 0x9C;
+    case rwir::Op::Le: return 0x9E;
+    case rwir::Op::Gt: return 0x9F;
+    case rwir::Op::Ge: return 0x9D;
+    default: return 0;
+    }
+}
+
 bool is_terminator(const CInsn& ci) {
     return ci.op == rwir::Op::Return || ci.op == rwir::Op::Goto ||
            ci.op == rwir::Op::Br;
+}
+
+// ── B1：语义算子 → 标量矩阵 ─────────────────────────────────────────
+// rwir::Op → jit2::KernelOp 的唯一映射。矩阵不覆盖的算子（sqrt/exp/log/pow、
+// cast、逻辑、copy）返回 false；一元 `-`（nrd == 1）按 Neg 语义。
+bool kernel_op_of(rwir::Op op, int nrd, jit2::KernelOp* out) {
+    switch (op) {
+    case rwir::Op::Add: *out = jit2::KernelOp::Add; return true;
+    case rwir::Op::Sub:
+        *out = nrd == 1 ? jit2::KernelOp::Neg : jit2::KernelOp::Sub;
+        return true;
+    case rwir::Op::Mul: *out = jit2::KernelOp::Mul; return true;
+    case rwir::Op::Div: *out = jit2::KernelOp::Div; return true;
+    case rwir::Op::Mod: *out = jit2::KernelOp::Mod; return true;
+    case rwir::Op::Max: *out = jit2::KernelOp::Max; return true;
+    case rwir::Op::Min: *out = jit2::KernelOp::Min; return true;
+    case rwir::Op::Neg: *out = jit2::KernelOp::Neg; return true;
+    case rwir::Op::Abs: *out = jit2::KernelOp::Abs; return true;
+    case rwir::Op::Sign: *out = jit2::KernelOp::Sign; return true;
+    case rwir::Op::BitAnd: *out = jit2::KernelOp::BitAnd; return true;
+    case rwir::Op::BitOr: *out = jit2::KernelOp::BitOr; return true;
+    case rwir::Op::BitXor: *out = jit2::KernelOp::BitXor; return true;
+    case rwir::Op::Shl: *out = jit2::KernelOp::Shl; return true;
+    case rwir::Op::Shr: *out = jit2::KernelOp::Shr; return true;
+    case rwir::Op::Eq: *out = jit2::KernelOp::Eq; return true;
+    case rwir::Op::Neq: *out = jit2::KernelOp::Neq; return true;
+    case rwir::Op::Lt: *out = jit2::KernelOp::Lt; return true;
+    case rwir::Op::Le: *out = jit2::KernelOp::Le; return true;
+    case rwir::Op::Gt: *out = jit2::KernelOp::Gt; return true;
+    case rwir::Op::Ge: *out = jit2::KernelOp::Ge; return true;
+    default: return false;
+    }
+}
+
+// B1 的槽 ABI 可表示范围：只接整数类（窄宽度按规范化 int64 落槽）。
+// float64 暂不接：JIT2 的 Return 提交仍是 slot_write_i64（bits 当整数落槽），
+// 浮点输出会被 println 读成原始位；该缺口修好前浮点格整段回退解释器。
+bool scalar_class_supported(jit2::ScalarTypeClass c) {
+    switch (c) {
+    case jit2::ScalarTypeClass::SI8:
+    case jit2::ScalarTypeClass::SI16:
+    case jit2::ScalarTypeClass::SI32:
+    case jit2::ScalarTypeClass::SI64:
+    case jit2::ScalarTypeClass::UI8:
+    case jit2::ScalarTypeClass::UI16:
+    case jit2::ScalarTypeClass::UI32:
+    case jit2::ScalarTypeClass::UI64:
+        return true;
+    default:
+        return false;
+    }
+}
+
+jit2::ScalarTypeClass operand_class(const Segment& seg, int r) {
+    const RegDesc& d = seg.regs[static_cast<std::size_t>(r)];
+    if (d.kind == Operand::Kind::Literal) {
+        if (static_cast<std::size_t>(r) >= seg.lit.size())
+            return jit2::ScalarTypeClass::None;
+        if (seg.lit[static_cast<std::size_t>(r)].is_i64)
+            return jit2::ScalarTypeClass::SI64;
+        if (seg.lit[static_cast<std::size_t>(r)].is_f64)
+            return jit2::ScalarTypeClass::F64;
+        return jit2::ScalarTypeClass::None;
+    }
+    if (d.kind != Operand::Kind::Var)
+        return jit2::ScalarTypeClass::None;
+    switch (d.langtype) {
+    case vmbin::LangType::Int8: return jit2::ScalarTypeClass::SI8;
+    case vmbin::LangType::Int16: return jit2::ScalarTypeClass::SI16;
+    case vmbin::LangType::Int32: return jit2::ScalarTypeClass::SI32;
+    case vmbin::LangType::Int64: return jit2::ScalarTypeClass::SI64;
+    case vmbin::LangType::Uint8: return jit2::ScalarTypeClass::UI8;
+    case vmbin::LangType::Uint16: return jit2::ScalarTypeClass::UI16;
+    case vmbin::LangType::Uint32: return jit2::ScalarTypeClass::UI32;
+    case vmbin::LangType::Uint64: return jit2::ScalarTypeClass::UI64;
+    case vmbin::LangType::Float64: return jit2::ScalarTypeClass::F64;
+    default: return jit2::ScalarTypeClass::None;
+    }
+}
+
+// B1 发射器覆盖的微操作集合（与 emit_scalar 的 switch 一一对应）。
+// 明确排除：除法守卫组（Guard*/Cqo/IDiv64/Div64）、转换组（Convert*）、
+// Abs64/Sign64、浮点组（Float32/Float64：输出提交缺口未修）——继续回退解释器。
+bool micro_ops_supported(const jit2::ScalarPlan& p) {
+    for (std::uint8_t k = 0; k < p.count; k++) {
+        switch (p.ops[k]) {
+        case jit2::MicroOp::LoadS8:
+        case jit2::MicroOp::LoadS16:
+        case jit2::MicroOp::LoadS32:
+        case jit2::MicroOp::LoadS64:
+        case jit2::MicroOp::LoadZ8:
+        case jit2::MicroOp::LoadZ16:
+        case jit2::MicroOp::LoadZ32:
+        case jit2::MicroOp::LoadZ64:
+        case jit2::MicroOp::Store8:
+        case jit2::MicroOp::Store16:
+        case jit2::MicroOp::Store32:
+        case jit2::MicroOp::Store64:
+        case jit2::MicroOp::Add64:
+        case jit2::MicroOp::Sub64:
+        case jit2::MicroOp::Mul64:
+        case jit2::MicroOp::Neg64:
+        case jit2::MicroOp::And64:
+        case jit2::MicroOp::Or64:
+        case jit2::MicroOp::Xor64:
+        case jit2::MicroOp::Shl64:
+        case jit2::MicroOp::Sar64:
+        case jit2::MicroOp::Shr64:
+        case jit2::MicroOp::CmpSigned:
+        case jit2::MicroOp::CmpUnsigned:
+        case jit2::MicroOp::SetCC:
+        case jit2::MicroOp::Cmov:
+            break;
+        default:
+            return false;
+        }
+    }
+    return p.count > 0;
 }
 
 }  // namespace
@@ -603,6 +764,39 @@ bool jit2_verify(const Segment* seg, Jit2Plan* plan, JitRefusal* refusal) {
             else if (src_f && !dst_f)
                 plan->fcast[static_cast<std::size_t>(i)] = 2;  // float64 → int64
         }
+    }
+    // B1：矩阵驱动的语义分派（Impl::Dynamic + 同型操作数）。旧路径已能覆盖的
+    // 格子保留原 codegen；矩阵返回的 ops 指向 thread_local scratch，必须立刻
+    // 复制进 plan 自己的 micro_pool（生命期随 plan/段缓存）。
+    plan->micro_pool.clear();
+    plan->scalar_offset.assign(static_cast<std::size_t>(n), 0);
+    plan->scalar_count.assign(static_cast<std::size_t>(n), 0);
+    for (int i = 0; i < n; i++) {
+        const CInsn& ci = seg->insns[i];
+        if (ci.impl != rwir::Impl::Dynamic || ci.nrd < 1 || ci.nrd > 2 ||
+            ci.nwr != 1)
+            continue;
+        if (plan->opfn[static_cast<std::size_t>(i)] != 0 ||
+            plan->fopfn[static_cast<std::size_t>(i)] != 0 ||
+            plan->fcast[static_cast<std::size_t>(i)] != 0)
+            continue;
+        jit2::KernelOp kop;
+        if (!kernel_op_of(ci.op, ci.nrd, &kop))
+            continue;
+        const jit2::ScalarTypeClass lhs = operand_class(*seg, ci.rd[0]);
+        const jit2::ScalarTypeClass rhs =
+            ci.nrd == 2 ? operand_class(*seg, ci.rd[1]) : lhs;
+        if (!scalar_class_supported(lhs) || !scalar_class_supported(rhs))
+            continue;
+        const jit2::ScalarPlan sp = jit2::scalar_plan(kop, lhs, rhs, lhs);
+        if (!sp.ok || sp.count > 24 || !micro_ops_supported(sp))
+            continue;
+        const std::uint32_t off =
+            static_cast<std::uint32_t>(plan->micro_pool.size());
+        for (std::uint8_t k = 0; k < sp.count; k++)
+            plan->micro_pool.push_back(sp.ops[k]);
+        plan->scalar_offset[static_cast<std::size_t>(i)] = off;
+        plan->scalar_count[static_cast<std::size_t>(i)] = sp.count;
     }
     plan->is_handler.assign(static_cast<std::size_t>(n), 0);
     plan->array_op.assign(static_cast<std::size_t>(n), 0);
@@ -871,6 +1065,24 @@ bool jit2_verify(const Segment* seg, Jit2Plan* plan, JitRefusal* refusal) {
             site = 8;
             if (ci.nrd != 1 || ci.nwr != 1)
                 return refuse(VmjitRefusalReason::MalformedSegment, i);
+        } else if (plan->scalar_count[static_cast<std::size_t>(i)] != 0) {
+            site = 9;
+            if (ci.nrd < 1 || ci.nrd > 2 || ci.nwr != 1)
+                return refuse(VmjitRefusalReason::MalformedSegment, i);
+            for (int k = 0; k < ci.nrd; k++) {
+                const RegDesc& d = seg->regs[ci.rd[k]];
+                if (d.kind == Operand::Kind::Literal) {
+                    const vmbin::FastLiteral& l = seg->lit[ci.rd[k]];
+                    if (!l.is_i64 && !l.is_f64)
+                        return refuse(VmjitRefusalReason::UnsupportedOperand,
+                                      ci.rd[k]);
+                } else if (d.kind != Operand::Kind::Var) {
+                    return refuse(VmjitRefusalReason::UnsupportedOperand,
+                                  ci.rd[k]);
+                }
+            }
+            if (seg->regs[ci.wr[0]].kind != Operand::Kind::Var)
+                return refuse(VmjitRefusalReason::UnsupportedOperand, ci.wr[0]);
         } else if (ci.fast_i64 || plan->opfn[static_cast<std::size_t>(i)] != 0) {
             site = 6;
             const std::uint8_t ofn = plan->opfn[static_cast<std::size_t>(i)];
@@ -1352,6 +1564,178 @@ std::vector<std::uint8_t> jit2_emit(const Segment* seg, const Jit2Plan& plan) {
                 is_target[static_cast<std::size_t>(ti)] = 1;
         }
     }
+    // B1：按矩阵 MicroOp 序列发射。值栈 ≤2（二元），整数值栈用 R10/R11；
+    // 唯一分派键是 MicroOp 枚举（与 micro_ops_supported 一一对应）。
+    auto emit_scalar = [&](int i) -> bool {
+        const CInsn& ci = seg->insns[i];
+        const std::uint32_t off = plan.scalar_offset[static_cast<std::size_t>(i)];
+        const std::uint32_t cnt = plan.scalar_count[static_cast<std::size_t>(i)];
+        if (cnt == 0 || off + cnt > plan.micro_pool.size())
+            return false;
+        const int dr = ci.wr[0];
+        const jit2::ScalarTypeClass lhs = operand_class(*seg, ci.rd[0]);
+        const bool lhs_signed =
+            lhs == jit2::ScalarTypeClass::SI8 ||
+            lhs == jit2::ScalarTypeClass::SI16 ||
+            lhs == jit2::ScalarTypeClass::SI32 ||
+            lhs == jit2::ScalarTypeClass::SI64;
+        const jit2::ScalarTypeClass res = operand_class(*seg, dr);
+        const bool res_signed =
+            res == jit2::ScalarTypeClass::SI8 ||
+            res == jit2::ScalarTypeClass::SI16 ||
+            res == jit2::ScalarTypeClass::SI32 ||
+            res == jit2::ScalarTypeClass::SI64;
+        int depth = 0;
+        int loads = 0;
+        std::uint8_t cc = 0;
+        auto extend = [&](const X2& r, int width, bool sign) {
+            if (width >= 8)
+                return;
+            if (sign)
+                c.movsx_r(r, r, width);
+            else
+                c.movzx_r(r, r, width);
+        };
+        for (std::uint32_t k = 0; k < cnt; k++) {
+            const jit2::MicroOp m = plan.micro_pool[off + k];
+            switch (m) {
+            case jit2::MicroOp::LoadS8:
+            case jit2::MicroOp::LoadS16:
+            case jit2::MicroOp::LoadS32:
+            case jit2::MicroOp::LoadS64:
+            case jit2::MicroOp::LoadZ8:
+            case jit2::MicroOp::LoadZ16:
+            case jit2::MicroOp::LoadZ32:
+            case jit2::MicroOp::LoadZ64: {
+                if (loads > 1)
+                    return false;
+                const int r = ci.rd[loads];
+                const X2 scratch = loads == 0 ? kR10 : kR11;
+                const RegDesc& d = seg->regs[r];
+                if (d.kind == Operand::Kind::Literal) {
+                    const vmbin::FastLiteral& l = seg->lit[r];
+                    if (!l.is_i64)
+                        return false;
+                    c.mov_imm64(scratch, l.v);
+                } else {
+                    const X2 src = read_reg(r, scratch);
+                    if (!(src.field == scratch.field && src.rb == scratch.rb))
+                        c.mov(scratch, src);
+                }
+                int width = 8;
+                bool sign = true;
+                switch (m) {
+                case jit2::MicroOp::LoadS8: width = 1; break;
+                case jit2::MicroOp::LoadS16: width = 2; break;
+                case jit2::MicroOp::LoadS32: width = 4; break;
+                case jit2::MicroOp::LoadZ8: width = 1; sign = false; break;
+                case jit2::MicroOp::LoadZ16: width = 2; sign = false; break;
+                case jit2::MicroOp::LoadZ32: width = 4; sign = false; break;
+                default: break;
+                }
+                extend(scratch, width, sign);
+                loads++;
+                depth = loads;
+                break;
+            }
+            case jit2::MicroOp::Add64:
+                if (depth != 2) return false;
+                c.add(kR10, kR11);
+                depth = 1;
+                break;
+            case jit2::MicroOp::Sub64:
+                if (depth != 2) return false;
+                c.sub(kR10, kR11);
+                depth = 1;
+                break;
+            case jit2::MicroOp::Mul64:
+                if (depth != 2) return false;
+                c.imul(kR10, kR11);
+                depth = 1;
+                break;
+            case jit2::MicroOp::And64:
+                if (depth != 2) return false;
+                c.and_(kR10, kR11);
+                depth = 1;
+                break;
+            case jit2::MicroOp::Or64:
+                if (depth != 2) return false;
+                c.or_(kR10, kR11);
+                depth = 1;
+                break;
+            case jit2::MicroOp::Xor64:
+                if (depth != 2) return false;
+                c.xor_(kR10, kR11);
+                depth = 1;
+                break;
+            case jit2::MicroOp::Neg64:
+                if (depth != 1) return false;
+                c.neg(kR10);
+                break;
+            case jit2::MicroOp::Shl64:
+            case jit2::MicroOp::Sar64:
+            case jit2::MicroOp::Shr64:
+                if (depth != 2) return false;
+                c.mov_stack_from_reg(guard_slot, kRcx);
+                c.mov(kRcx, kR11);
+                if (m == jit2::MicroOp::Shl64)
+                    c.shl_cl(kR10);
+                else if (m == jit2::MicroOp::Sar64)
+                    c.sar_cl(kR10);
+                else
+                    c.shr_cl(kR10);
+                c.mov_reg_from_stack(kRcx, guard_slot);
+                depth = 1;
+                break;
+            case jit2::MicroOp::CmpSigned:
+            case jit2::MicroOp::CmpUnsigned:
+                if (depth != 2) return false;
+                c.cmp(kR10, kR11);
+                cc = setcc_of_op(ci.op);
+                if (cc == 0) return false;
+                break;
+            case jit2::MicroOp::SetCC:
+                if (depth != 2 || cc == 0) return false;
+                c.setcc(cc, kR10);
+                c.movzx_r(kR10, kR10, 1);  // 0/1
+                depth = 1;
+                break;
+            case jit2::MicroOp::Cmov: {
+                if (depth != 2) return false;
+                std::uint8_t cond = 0;
+                if (ci.op == rwir::Op::Max)
+                    cond = lhs_signed ? 0x4C : 0x42;  // cmovl / cmovb
+                else if (ci.op == rwir::Op::Min)
+                    cond = lhs_signed ? 0x4F : 0x47;  // cmovg / cmova
+                else
+                    return false;
+                c.cmovcc(cond, kR10, kR11);
+                depth = 1;
+                break;
+            }
+            case jit2::MicroOp::Store8:
+            case jit2::MicroOp::Store16:
+            case jit2::MicroOp::Store32:
+            case jit2::MicroOp::Store64: {
+                if (depth != 1) return false;
+                int width = 8;
+                switch (m) {
+                case jit2::MicroOp::Store8: width = 1; break;
+                case jit2::MicroOp::Store16: width = 2; break;
+                case jit2::MicroOp::Store32: width = 4; break;
+                default: break;
+                }
+                extend(kR10, width, res_signed);
+                store_dst(dr, kR10);
+                depth = 0;
+                break;
+            }
+            default:
+                return false;
+            }
+        }
+        return depth == 0;
+    };
     for (int i = 0; i < n; i++) {
         if (is_target[static_cast<std::size_t>(i)])
             while ((c.b.size() & 15) != 0)
@@ -1819,6 +2203,11 @@ std::vector<std::uint8_t> jit2_emit(const Segment* seg, const Jit2Plan& plan) {
             }
             if (!dst_alloc)
                 c.mov_stack_from_reg(spill_slot(dr), d);
+            continue;
+        }
+        if (plan.scalar_count[static_cast<std::size_t>(i)] != 0) {
+            if (!emit_scalar(i))
+                return {};
             continue;
         }
         if (ci.op == rwir::Op::Copy) {

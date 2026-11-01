@@ -5,6 +5,7 @@
 #include "codeseg.hpp"
 #include "jit.hpp"
 #include "jit_abi_v1.hpp"
+#include "jit_scalar_matrix.hpp"
 
 // 第二阶段最小原型：CFG + 活跃分析 + 线性扫描分配（含栈溢出）。
 // 与第一阶段共用 opcode 白名单，但放宽「单入单出」形状：
@@ -46,6 +47,12 @@ struct Jit2Plan {
     // 3 mul / 4 div；fcast 1 = int64→float64，2 = float64→int64。
     std::vector<std::uint8_t> fopfn;
     std::vector<std::uint8_t> fcast;
+    // B1：矩阵驱动的语义分派（Impl::Dynamic + 同型操作数）。micro_pool 由 plan
+    // 自己持有（生命周期与 plan/段缓存一致），scalar_offset/count 指向它；
+    // 矩阵接口返回的是 thread_local scratch，verify 必须立刻复制进本池。
+    std::vector<jit2::MicroOp> micro_pool;
+    std::vector<std::uint32_t> scalar_offset;  // 每条指令在池中的起点
+    std::vector<std::uint8_t> scalar_count;    // 0 = 不走矩阵路径
     std::vector<char> is_float;  // 该寄存器是 float64 表示
     std::vector<std::uint8_t> array_op;
     std::vector<std::uint8_t> call_handler;

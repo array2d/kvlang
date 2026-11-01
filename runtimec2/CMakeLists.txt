@@ -301,6 +301,7 @@ add_executable(jit_verify_test
     tests/jit_verify_test.cpp
     src/jit/jit.cpp
     src/jit/jit_stage2.cpp
+    src/jit/jit_scalar_matrix.cpp
     src/jit/jit_abi_adapter.cpp
     src/jit/jit_x64.cpp
     src/rwir_gen.cpp)
@@ -330,3 +331,10 @@ add_test(NAME c2_jit_failclosed
                  ${CMAKE_CURRENT_SOURCE_DIR}/../bin/byteseek
                  ${CMAKE_CURRENT_SOURCE_DIR}/..)
 set_tests_properties(c2_jit_failclosed PROPERTIES TIMEOUT 120)
+
+# B1：语义段 JIT2 接受矩阵格子（一元 - 等旧 opfn 未覆盖的形状）。
+add_test(NAME c2_jit_semantic_ops
+         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/jit_semantic_ops.sh
+                 ${CMAKE_CURRENT_SOURCE_DIR}/../bin/byteseek
+                 ${CMAKE_CURRENT_SOURCE_DIR}/..)
+set_tests_properties(c2_jit_semantic_ops PROPERTIES TIMEOUT 120)
