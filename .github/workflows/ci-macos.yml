@@ -3,21 +3,33 @@ on: [push, pull_request]
 jobs:
   build:
     runs-on: macos-latest
-    # /usr 受 SIP 保护，kvspace 装到 /usr/local（本仓 runtime/layout/byteseek 固定该目录）
+    # 产物布局与 release.yml 一致：repo 即 prefix（include/、lib/、lib/kvspace/、bin/），
+    # 不装 /usr/local——layout 现在按 layout/../lib 找 libkvspace.dylib。
     steps:
       - uses: actions/checkout@v4
-      - name: 构建依赖 kvspace（macOS 无预编译 ABI，从源码装到 /usr/local）
+      - name: 构建依赖链到 repo（blockmalloc / slotsboxmalloc / kvspace / kvspace-c）
         run: |
-          git clone --depth 1 https://github.com/array2d/kvspace.git /tmp/kvspace
-          cmake -S /tmp/kvspace -B /tmp/kvspace/build \
-            -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
-          cmake --build /tmp/kvspace/build -j
-          sudo cmake --install /tmp/kvspace/build
-      - name: 构建 layout（Rust；macOS 产物后缀为 .dylib）
+          set -euo pipefail
+          mkdir -p include lib/kvspace bin
+          for repo in blockmalloc slotsboxmalloc kvspace kvspace-c; do
+            git clone --depth 1 "https://github.com/array2d/$repo.git" "/tmp/$repo"
+            cmake -S "/tmp/$repo" -B "/tmp/$repo/build" \
+              -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PWD" \
+              -DCMAKE_PREFIX_PATH="$PWD" \
+              -DCMAKE_INCLUDE_PATH="$PWD/include" \
+              -DCMAKE_LIBRARY_PATH="$PWD/lib;$PWD/lib/kvspace" \
+              -DCMAKE_C_FLAGS="-I$PWD/include" \
+              -DCMAKE_CXX_FLAGS="-I$PWD/include" \
+              -DCMAKE_EXE_LINKER_FLAGS="-L$PWD/lib -L$PWD/lib/kvspace" \
+              -DCMAKE_SHARED_LINKER_FLAGS="-L$PWD/lib -L$PWD/lib/kvspace"
+            cmake --build "/tmp/$repo/build" -j
+            cmake --install "/tmp/$repo/build"
+          done
+          # 前端按安装规则落在 lib/kvspace/，顶层 lib/ 也放一份
+          # （runtime/layout/byteseek 以 -lkvspace 链接，dlopen 也按 SONAME 找）。
+          cp -P lib/kvspace/libkvspace*.dylib lib/ 2>/dev/null || true
+      - name: 构建 layout（Rust）/ runtimec2 / byteseek
         run: |
-          cargo build --release --manifest-path layout/Cargo.toml
-          mkdir -p bin && cp layout/target/release/libkvlanglayout.dylib bin/
-      - name: 构建 runtimec2（默认 runtime）
-        run: make runtimec2
-      - name: 构建 byteseek（Rust）
-        run: cargo build --release --manifest-path byteseek/Cargo.toml
+          make layout      # → bin/kvlanglayout + lib/libkvlanglayout.dylib
+          make runtimec2   # → lib/libkvlang_runtimec2.dylib
+          make byteseek    # → bin/byteseek
