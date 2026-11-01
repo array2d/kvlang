@@ -2,7 +2,7 @@
 
 use serde_json::{Map, Value};
 
-use crate::engine::Engine;
+use crate::engine::{Engine, KvResult};
 use crate::ffi::*;
 
 const SEP: &str = "·";
@@ -10,39 +10,67 @@ const DIR_SUF: &str = "/";
 const OBJECT_TYPE: &str = "[]char/utf32·";
 const ARRAY_TYPE: &str = "[int64]·";
 
-pub fn to(eng: &Engine, pc: &str) {
-    let names = params(eng, pc);
-    let root = if names[1].starts_with('/') {
-        names[1].clone()
-    } else {
-        eng.read0(pc)
-    };
+pub fn to(eng: &Engine, pc: &str) -> KvResult {
+    let root = root_of(eng, pc, 0);
+    if root.is_empty() {
+        return Ok(());
+    }
     let out = read_value(eng, &root).to_string();
-    eng.set_kv(&eng.write0(pc), &out);
+    eng.set_kv(&eng.write0(pc), &out)
 }
 
-pub fn from(eng: &Engine, pc: &str) {
+fn ptr_target(eng: &Engine, path: &str) -> String {
+    let xv = eng.get_xvalue(path);
+    if !xv.is_empty() && xh_is_ptr(&xv) {
+        let t = String::from_utf8_lossy(xh_body_slice(&xv)).into_owned();
+        if !t.is_empty() {
+            return t;
+        }
+    }
+    path.to_string()
+}
+
+fn root_of(eng: &Engine, pc: &str, idx: i32) -> String {
+    let names = params(eng, pc);
+    let rname = names.get((idx + 1) as usize).map(String::as_str).unwrap_or("");
+    if rname.starts_with('/') && !rname.contains("·*") {
+        return ptr_target(eng, rname);
+    }
+    let v = eng.read_at(pc, idx);
+    if v.starts_with('/') {
+        return ptr_target(eng, &v);
+    }
+    let p = take(unsafe { kvlangRwirextResolveReadPath(eng.kv, cs(pc).as_ptr(), idx) });
+    if p.is_empty() {
+        return String::new();
+    }
+    ptr_target(eng, &p)
+}
+
+pub fn from(eng: &Engine, pc: &str) -> KvResult {
     let names = params(eng, pc);
     let src = eng.read0(pc);
-    let root = if names[2].starts_with('/') {
-        names[2].clone()
+    let wname = names.get(2).map(String::as_str).unwrap_or("");
+    let root = if wname.starts_with('/') && !wname.contains("·*") {
+        wname.to_string()
     } else {
         eng.write0(pc)
     };
     if let Ok(v) = serde_json::from_str::<Value>(&src) {
         eng.del_tree(&root);
-        write_value(eng, &root, &v);
+        write_value(eng, &root, &v)?;
     }
+    Ok(())
 }
 
 fn params(eng: &Engine, pc: &str) -> Vec<String> {
     let s = take(unsafe { kvlangRwirextParams(eng.kv, cs(pc).as_ptr()) });
-    s.lines().map(str::to_string).collect()
+    s.split('\n').map(str::to_string).collect()
 }
 
 fn read_value(eng: &Engine, path: &str) -> Value {
     let (kind, raw, arr_len) = parse_xvalue(eng, path, &eng.get_xvalue(path));
-    if kind.contains(SEP) {
+    if path != "/" && (kind.contains(SEP) || !member_names(eng, path).is_empty()) {
         return read_container(eng, path, &kind);
     }
     if !eng.list_kv(&format!("{path}{DIR_SUF}")).is_empty() {
@@ -55,43 +83,66 @@ fn read_value(eng: &Engine, path: &str) -> Value {
 }
 
 fn read_dir(eng: &Engine, path: &str) -> Value {
+    let prefix = if path == "/" {
+        "/".to_string()
+    } else {
+        format!("{path}{DIR_SUF}")
+    };
     let mut map = Map::new();
-    for name in eng.list_kv(&format!("{path}{DIR_SUF}")) {
-        let key = name.trim_end_matches('/').to_string();
-        map.insert(
-            key.clone(),
-            read_value(eng, &format!("{path}{DIR_SUF}{key}")),
-        );
+    for name in eng.list_kv(&prefix) {
+        let key = name.trim_end_matches('/').trim_end_matches(SEP).to_string();
+        if key.is_empty() {
+            continue;
+        }
+        let child = if path == "/" {
+            format!("/{key}")
+        } else {
+            format!("{path}{DIR_SUF}{key}")
+        };
+        map.insert(key, read_value(eng, &child));
     }
     Value::Object(map)
 }
 
+fn member_names(eng: &Engine, path: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    for n in eng.list_kv(&format!("{path}{SEP}")) {
+        let n = n.trim_end_matches(SEP).to_string();
+        if !n.is_empty() && !names.contains(&n) {
+            names.push(n);
+        }
+    }
+    names
+}
+
 fn read_container(eng: &Engine, path: &str, langtype: &str) -> Value {
-    let names = eng.list_kv(&format!("{path}{SEP}"));
-    if langtype.starts_with("[int64]·")
+    let names = member_names(eng, path);
+    if !names.is_empty()
         && names.iter().all(|n| {
             n.strip_prefix('[')
                 .and_then(|r| r.strip_suffix(']'))
                 .is_some_and(|i| i.parse::<usize>().is_ok())
         })
     {
-        read_arr(eng, path)
+        read_arr(eng, path, &names)
+    } else if names.is_empty() && langtype.starts_with("[int64]·") {
+        Value::Array(Vec::new())
     } else {
-        read_obj(eng, path)
+        read_obj(eng, path, &names)
     }
 }
 
-fn read_obj(eng: &Engine, path: &str) -> Value {
+fn read_obj(eng: &Engine, path: &str, names: &[String]) -> Value {
     let mut map = Map::new();
-    for name in eng.list_kv(&format!("{path}{SEP}")) {
+    for name in names {
         map.insert(name.clone(), read_value(eng, &format!("{path}{SEP}{name}")));
     }
     Value::Object(map)
 }
 
-fn read_arr(eng: &Engine, path: &str) -> Value {
+fn read_arr(eng: &Engine, path: &str, names: &[String]) -> Value {
     let mut idxs: Vec<usize> = Vec::new();
-    for n in eng.list_kv(&format!("{path}{SEP}")) {
+    for n in names {
         let s = n.trim_start_matches('[').trim_end_matches(']');
         if let Ok(i) = s.parse::<usize>() {
             idxs.push(i);
@@ -112,41 +163,37 @@ fn parse_xvalue(eng: &Engine, path: &str, data: &[u8]) -> (String, Vec<u8>, usiz
     let kx = crate::ffi::langtype_of(eng.kv, path);
     let (dims, kind) = parse_langtype(&kx);
     let raw = xh_body_slice(data).to_vec();
-    let mut arr_len = 1usize;
-    for d in &dims {
-        arr_len *= (*d).max(1) as usize;
-    }
+    // Use dims product only to detect arrays; actual element count is bounded by body length.
+    let arr_len = dims
+        .iter()
+        .fold(1usize, |n, &d| n.saturating_mul(d.max(1) as usize));
     (kind, raw, arr_len)
 }
 
+/// Slice elements from `raw` by `elem_size` (capped at `arr_len`) so mismatched `dims` never panic.
 fn xvalue_to_json(kind: &str, raw: &[u8], arr_len: usize) -> Value {
     let es = elem_size(kind);
+    let elems = |f: fn(&[u8]) -> Value| -> Value {
+        Value::Array(raw.chunks_exact(es.max(1)).take(arr_len).map(f).collect())
+    };
     match kind {
         "bool" => {
             if arr_len > 1 {
-                Value::Array((0..arr_len).map(|i| Value::Bool(raw[i] != 0)).collect())
+                elems(|c| Value::Bool(c[0] != 0))
             } else {
                 Value::Bool(raw.first().map(|&b| b != 0).unwrap_or(false))
             }
         }
         "int8" | "int16" | "int32" | "int64" | "uint8" | "uint16" | "uint32" | "uint64" => {
             if arr_len > 1 {
-                Value::Array(
-                    (0..arr_len)
-                        .map(|i| Value::from(read_int(&raw[i * es..i * es + es])))
-                        .collect(),
-                )
+                elems(|c| Value::from(read_int(c)))
             } else {
                 Value::from(read_int(raw))
             }
         }
         "float32" | "float64" => {
             if arr_len > 1 {
-                Value::Array(
-                    (0..arr_len)
-                        .map(|i| Value::from(float_from(&raw[i * es..i * es + es])))
-                        .collect(),
-                )
+                elems(|c| Value::from(float_from(c)))
             } else {
                 Value::from(float_from(raw))
             }
@@ -191,7 +238,7 @@ fn utf32_to_string(raw: &[u8]) -> String {
         .collect()
 }
 
-fn write_value(eng: &Engine, path: &str, v: &Value) {
+fn write_value(eng: &Engine, path: &str, v: &Value) -> KvResult {
     match v {
         Value::Object(m) => write_obj(eng, path, m),
         Value::Array(arr) => write_arr(eng, path, arr),
@@ -200,18 +247,20 @@ fn write_value(eng: &Engine, path: &str, v: &Value) {
     }
 }
 
-fn write_obj(eng: &Engine, path: &str, m: &Map<String, Value>) {
-    eng.set_xvalue(path, &mk_obj_value());
+fn write_obj(eng: &Engine, path: &str, m: &Map<String, Value>) -> KvResult {
+    eng.set_xvalue(path, &mk_obj_value())?;
     for k in m.keys() {
-        write_value(eng, &format!("{path}{SEP}{k}"), &m[k]);
+        write_value(eng, &format!("{path}{SEP}{k}"), &m[k])?;
     }
+    Ok(())
 }
 
-fn write_arr(eng: &Engine, path: &str, arr: &[Value]) {
-    eng.set_xvalue(path, &mk_map_value());
+fn write_arr(eng: &Engine, path: &str, arr: &[Value]) -> KvResult {
+    eng.set_xvalue(path, &mk_map_value())?;
     for (i, v) in arr.iter().enumerate() {
-        write_value(eng, &format!("{path}{SEP}[{i}]"), v);
+        write_value(eng, &format!("{path}{SEP}[{i}]"), v)?;
     }
+    Ok(())
 }
 
 fn value_to_xvalue(v: &Value) -> Vec<u8> {
@@ -314,7 +363,7 @@ mod tests {
                 "scat":[10,20,30],"score":3.14}"#,
         )
         .unwrap();
-        write_value(&eng, "/data", &v);
+        write_value(&eng, "/data", &v).unwrap();
 
         let j = read_value(&eng, "/data").to_string();
         assert_eq!(
@@ -326,15 +375,50 @@ mod tests {
     #[test]
     fn native_data_to() {
         let eng = test_engine();
-        eng.set_xvalue("/data", &mk_obj_value());
-        eng.set_xvalue("/data·age", &i64_xvalue(&[42]));
-        eng.set_xvalue("/data·name", &new_char_byte(b"alice"));
-        eng.set_xvalue("/data·scat", &mk_map_value());
-        eng.set_xvalue("/data·scat·[0]", &i64_xvalue(&[10]));
-        eng.set_xvalue("/data·scat·[1]", &i64_xvalue(&[20]));
-        eng.set_xvalue("/data·scat·[2]", &i64_xvalue(&[30]));
+        eng.set_xvalue("/data", &mk_obj_value()).unwrap();
+        eng.set_xvalue("/data·age", &i64_xvalue(&[42])).unwrap();
+        eng.set_xvalue("/data·name", &new_char_byte(b"alice")).unwrap();
+        eng.set_xvalue("/data·scat", &mk_map_value()).unwrap();
+        eng.set_xvalue("/data·scat·[0]", &i64_xvalue(&[10])).unwrap();
+        eng.set_xvalue("/data·scat·[1]", &i64_xvalue(&[20])).unwrap();
+        eng.set_xvalue("/data·scat·[2]", &i64_xvalue(&[30])).unwrap();
 
         let j = read_value(&eng, "/data").to_string();
         assert_eq!(j, r#"{"age":42,"name":"alice","scat":[10,20,30]}"#);
+    }
+
+    #[test]
+    fn struct_and_local_container_to_json() {
+        let eng = test_engine();
+        // Struct instance: root langtype is `/lib/Profile` (no `·`), fields live under `path·field`.
+        let prof_wire = with_langtype(&xvalue_to_wire("/lib/Profile", &[], &[]), "/lib/Profile");
+        eng.set_xvalue("/vthread/1/[1]/profile", &prof_wire).unwrap();
+        eng.set_xvalue("/vthread/1/[1]/profile·name", &new_char_byte(b"alice"))
+            .unwrap();
+        eng.set_xvalue("/vthread/1/[1]/profile·age", &i64_xvalue(&[42]))
+            .unwrap();
+        eng.set_xvalue("/vthread/1/[1]/profile·nums", &i64_xvalue(&[1, 2, 3]))
+            .unwrap();
+        assert_eq!(
+            read_value(&eng, "/vthread/1/[1]/profile").to_string(),
+            r#"{"age":42,"name":"alice","nums":[1,2,3]}"#
+        );
+    }
+
+    /// Oversized or overflowing langtype dims must clamp to body length without panicking.
+    #[test]
+    fn short_body_vs_langtype_dims() {
+        let eng = test_engine();
+        let one = |lt: &str| with_langtype(&xvalue_to_wire("int64", &7i64.to_le_bytes(), &[]), lt);
+        eng.set_xvalue("/short", &one("[1000]int64")).unwrap();
+        assert_eq!(read_value(&eng, "/short").to_string(), "[7]");
+        eng.set_xvalue("/huge", &one("[2147483647,2147483647,2147483647]int64")).unwrap();
+        assert_eq!(read_value(&eng, "/huge").to_string(), "[7]");
+        let b = with_langtype(&xvalue_to_wire("bool", &[1], &[]), "[64]bool");
+        eng.set_xvalue("/flags", &b).unwrap();
+        assert_eq!(read_value(&eng, "/flags").to_string(), "[true]");
+        // Empty body or trailing partial element.
+        assert_eq!(xvalue_to_json("float64", &[], 5).to_string(), "[]");
+        assert_eq!(xvalue_to_json("int32", &[1, 0, 0, 0, 9], usize::MAX).to_string(), "[1]");
     }
 }

@@ -6,10 +6,10 @@
 use std::cell::RefCell;
 use std::io::Write;
 
-use crate::engine::Engine;
+use crate::engine::{Engine, KvResult};
 use crate::ffi::*;
 
-pub fn print_line(eng: &Engine, pc: &str) {
+pub fn print_line(eng: &Engine, pc: &str) -> KvResult {
     let params = take(unsafe { kvlangRwirextParams(eng.kv, cs(pc).as_ptr()) });
     let mut it = params.split('\n');
     let opcode = it.next().unwrap_or("");
@@ -17,7 +17,7 @@ pub fn print_line(eng: &Engine, pc: &str) {
         "print" => ("", 1, 0),
         "println" => (" ", 0, 0),
         "cerr" => (" ", 0, 1),
-        _ => return,
+        _ => return Ok(()),
     };
     let mut line = String::new();
     for (i, _) in it.enumerate() {
@@ -39,21 +39,23 @@ pub fn print_line(eng: &Engine, pc: &str) {
         }
         std::io::stdout().flush().ok();
     }
+    Ok(())
 }
 
 /// printf(fmt, args...)：C 风格格式化串就地输出到 stdout（不自动换行，换行靠 fmt 里的 `\n`）。
 /// 支持转换 `d i u o x X f F e E g G c s %`、标志 `- 0 + 空格 #`、宽度、`.精度`；
 /// 实参经 read_at 取显示串，数值型转换按需 parse 回 i64/f64。
-pub fn printf(eng: &Engine, pc: &str) {
+pub fn printf(eng: &Engine, pc: &str) -> KvResult {
     let params = take(unsafe { kvlangRwirextParams(eng.kv, cs(pc).as_ptr()) });
     let nslots = params.split('\n').count().saturating_sub(1);
     if nslots == 0 {
-        return;
+        return Ok(());
     }
     let fmt = eng.read_at(pc, 0);
     let args: Vec<String> = (1..nslots as i32).map(|i| eng.read_at(pc, i)).collect();
     print!("{}", format_c(&fmt, &args));
     std::io::stdout().flush().ok();
+    Ok(())
 }
 
 struct Spec {
@@ -317,14 +319,14 @@ thread_local! {
 
 /// input(prompt) -> line：读一行 stdin → 回填写槽。
 /// Ctrl-C / Ctrl-D 视作 "exit"，让主循环优雅退出。
-pub fn input(eng: &Engine, pc: &str) {
+pub fn input(eng: &Engine, pc: &str) -> KvResult {
     let prompt = eng.read0(pc);
     let line = if unsafe { libc::isatty(libc::STDIN_FILENO) } != 0 {
         rl_readline(&prompt)
     } else {
         pipe_readline(&prompt)
     };
-    eng.set_kv(&eng.write0(pc), &line);
+    eng.set_kv(&eng.write0(pc), &line)
 }
 
 /// TTY：rustyline 行编辑（方向键 / 历史 / 多字节退格）。

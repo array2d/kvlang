@@ -45,10 +45,32 @@ fn find_entry(kv: &mut Kv, prefix: &str, pkg: &str) -> String {
     String::new()
 }
 
+/// Read source file, printing an error and exiting 1 on failure.
+fn read_src(path: &str) -> String {
+    fs::read_to_string(path).unwrap_or_else(|e| die(&format!("read {path}: {e}")))
+}
+
+fn die(msg: &str) -> ! {
+    eprintln!("{msg}");
+    std::process::exit(1);
+}
+
+/// Connect, initialize root dirs, and compile; exits 1 on any error.
+fn layout_or_die(src: &str, dsn: &str) -> Kv {
+    let mut kv = Kv::try_conn(dsn).unwrap_or_else(|e| die(&e));
+    if let Err(e) = init_dirs(&mut kv) {
+        die(&format!("init_dirs {dsn}: {e}"));
+    }
+    if let Err(e) = compile(&mut kv, src) {
+        die(&format!("layout failed: {e}"));
+    }
+    kv
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() >= 3 && args[1] == "vet" {
-        let src = fs::read_to_string(&args[2]).expect("read file");
+        let src = read_src(&args[2]);
         match vet(&src) {
             Ok(()) => println!("ok"),
             Err(e) => {
@@ -59,7 +81,7 @@ fn main() {
         return;
     }
     if args.len() >= 3 && args[1] == "format" {
-        let src = fs::read_to_string(&args[2]).expect("read file");
+        let src = read_src(&args[2]);
         match format(&src) {
             Ok(s) => print!("{s}"),
             Err(e) => {
@@ -75,10 +97,8 @@ fn main() {
             .get(4)
             .map(String::as_str)
             .unwrap_or("redis://127.0.0.1:6379");
-        let src = fs::read_to_string(&args[2]).expect("read file");
-        let mut kv = Kv::conn(dsn);
-        init_dirs(&mut kv).expect("init_dirs");
-        compile(&mut kv, &src).expect("compile");
+        let src = read_src(&args[2]);
+        let mut kv = layout_or_die(&src, dsn);
         print!("{}", printlib(&mut kv, prefix));
         return;
     }
@@ -90,11 +110,9 @@ fn main() {
         .get(2)
         .map(String::as_str)
         .unwrap_or("redis://127.0.0.1:6379");
-    let src = fs::read_to_string(&args[1]).expect("read file");
+    let src = read_src(&args[1]);
 
-    let mut kv = Kv::conn(dsn);
-    init_dirs(&mut kv).expect("init_dirs");
-    compile(&mut kv, &src).expect("compile");
+    let mut kv = layout_or_die(&src, dsn);
 
     let entry = find_entry(&mut kv, "/lib/", "");
     let entry = if entry.is_empty() { "init" } else { &entry };

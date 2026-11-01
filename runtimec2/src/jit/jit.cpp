@@ -214,6 +214,14 @@ bool verify(const Segment* seg, JitShape* sh, JitRefusal* refusal) {
             if (seg->regs[ci.wr[0]].kind != Operand::Kind::Var)
                 return refuse(VmjitRefusalReason::UnsupportedOperand,
                               static_cast<std::uint32_t>(ii));
+            for (int k = 0; k < 2; k++) {
+                const RegDesc& rd = seg->regs[ci.rd[k]];
+                if (rd.kind == Operand::Kind::Var &&
+                    rd.langtype != vmbin::LangType::None &&
+                    (rd.langtype != vmbin::LangType::Int64 || rd.width != 8))
+                    return refuse(VmjitRefusalReason::TypeMismatch,
+                                  static_cast<std::uint32_t>(ci.rd[k]));
+            }
         } else {
             return refuse(VmjitRefusalReason::UnsupportedOpcode,
                           static_cast<std::uint32_t>(ii));
@@ -305,6 +313,50 @@ bool verify(const Segment* seg, JitShape* sh, JitRefusal* refusal) {
                               static_cast<std::uint32_t>(i));
         }
     }
+    // Value-kind consistency: JIT represents bools as 0/1 ints and writes exits as `int64`,
+    // so bool regs may only feed `br` or copy to bool locals (never write-params, `add`/cmp inputs, or mixed int/bool regs).
+    {
+        enum : std::uint8_t { kUnk = 0, kInt = 1, kBool = 2 };
+        std::vector<std::uint8_t> ty(seg->regs.size(), kUnk);
+        for (std::size_t i = 0; i < seg->regs.size(); i++)
+            if (seg->regs[i].kind == Operand::Kind::Literal)
+                ty[i] = kInt;  // all literals were verified as int64 above
+        ty[static_cast<std::size_t>(sh->src_idx)] = kInt;
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            for (const CInsn& ci : seg->insns) {
+                std::uint8_t t = kUnk;
+                if (ci.fast_i64)
+                    t = ci.opfn == 1 ? kInt : kBool;
+                else if (ci.op == rwir::Op::Copy)
+                    t = ty[ci.rd[0]];
+                else
+                    continue;
+                if (t == kUnk)
+                    continue;
+                std::uint8_t& w = ty[ci.wr[0]];
+                if (w == kUnk) {
+                    w = t;
+                    changed = true;
+                } else if (w != t) {
+                    return refuse(VmjitRefusalReason::TypeMismatch,
+                                  static_cast<std::uint32_t>(ci.wr[0]));
+                }
+            }
+        }
+        if (ty[static_cast<std::size_t>(sh->dst_idx)] != kInt)
+            return refuse(VmjitRefusalReason::TypeMismatch,
+                          static_cast<std::uint32_t>(sh->dst_idx));
+        for (const CInsn& ci : seg->insns) {
+            if (ci.fast_i64 && (ty[ci.rd[0]] != kInt || ty[ci.rd[1]] != kInt))
+                return refuse(VmjitRefusalReason::TypeMismatch,
+                              static_cast<std::uint32_t>(ci.rd[0]));
+            if (ci.op == rwir::Op::Br && ty[ci.rd[0]] != kBool)
+                return refuse(VmjitRefusalReason::TypeMismatch,
+                              static_cast<std::uint32_t>(ci.rd[0]));
+        }
+    }
     // 寄存器压力预检：复刻发射器 reg_of 的惰性分配（分配后永不释放），
     // 池耗尽时拒绝而不是在发射期解引用空 optional。
     {
@@ -340,8 +392,14 @@ bool verify(const Segment* seg, JitShape* sh, JitRefusal* refusal) {
     return true;
 }
 
-std::unordered_map<std::string, JitFn>& jit_cache() {
-    static std::unordered_map<std::string, JitFn> c;
+// Record `mmap` size for `jit_clear_cache` (`fn == nullptr` marks non-JIT-eligible segments).
+struct JitEntry {
+    JitFn fn = nullptr;
+    std::size_t len = 0;
+};
+
+std::unordered_map<std::string, JitEntry>& jit_cache() {
+    static std::unordered_map<std::string, JitEntry> c;
     return c;
 }
 
@@ -444,15 +502,18 @@ Jit2Entry* g_jit2_running = nullptr;  // 当前执行中的 JIT2 产物（单线
 bool slot_store_typed(vmbin::Frame* f, const vmbin::Program* seg, std::size_t r,
                       std::int64_t v) {
     const RegDesc& d = seg->regs[r];
-    if (d.langtype == vmbin::LangType::Bool) {
-        if (g_vmkv.slot_write_bool(*f, static_cast<std::uint8_t>(r), v != 0))
-            return true;
-    } else if (d.langtype == vmbin::LangType::Int64 ||
-               d.langtype == vmbin::LangType::Uint64 ||
-               d.langtype == vmbin::LangType::None) {
-        if (g_vmkv.slot_write_i64(*f, static_cast<std::uint8_t>(r), v))
-            return true;
-    } else if (d.langtype == vmbin::LangType::Float64) {
+    if (d.langtype == vmbin::LangType::Bool)
+        return g_vmkv.slot_write_bool(*f, static_cast<std::uint8_t>(r), v != 0);
+    if (d.langtype == vmbin::LangType::Int64 ||
+        d.langtype == vmbin::LangType::Uint64 ||
+        d.langtype == vmbin::LangType::None) {
+        if (!g_vmkv.slot_write_i64(*f, static_cast<std::uint8_t>(r), v))
+            return false;
+        f->regs[r].fv = v;
+        f->regs[r].fast_i64 = true;
+        return true;
+    }
+    if (d.langtype == vmbin::LangType::Float64) {
         Scalar sc{};
         sc.k = Scalar::K::Float;
         sc.width = 8;
@@ -462,14 +523,8 @@ bool slot_store_typed(vmbin::Frame* f, const vmbin::Program* seg, std::size_t r,
             f->regs[r].fast_bool = false;
             return true;
         }
-    } else {
-        return false;  // 字符串：原生侧不产生这类值，交给 kvspace 原值
     }
-    if (d.langtype != vmbin::LangType::Float64) {
-        f->regs[r].fv = v;
-        f->regs[r].fast_i64 = true;
-    }
-    return true;
+    return false;
 }
 
 int jit2_handler_call(vmbin::Frame* f, jitabi::ValueSlotV1* slots,
@@ -574,6 +629,20 @@ int jit2_handler_call(vmbin::Frame* f, jitabi::ValueSlotV1* slots,
             slots[r].tag = jitabi::ValueTagV1::I64;
             continue;
         }
+        if (seg->regs[r].langtype == vmbin::LangType::Bool) {
+            bool bv = false;
+            if (f->regs[r].fast_bool)
+                bv = f->regs[r].fb;
+            else if (!g_vmkv.read_bool(*f, static_cast<std::uint8_t>(r), &bv)) {
+                const std::vector<char>& defined = plan.out_defined[idx];
+                if (r < defined.size() && !defined[r])
+                    continue;
+                return 2;
+            }
+            slots[r].payload_lo = bv ? 1 : 0;
+            slots[r].tag = jitabi::ValueTagV1::I64;
+            continue;
+        }
         if (f->regs[r].fast_i64)
             v = f->regs[r].fv;
         else if (!g_vmkv.read_i64(*f, static_cast<std::uint8_t>(r), &v)) {
@@ -645,10 +714,22 @@ bool jit2_try_run(Frame& f, const Segment* seg, int start_s0, Outcome* out,
             continue;
         }
         Register* p = r0.src_ptr ? r0.src_ptr : &r0;
-        while (!p->fast_i64 && p->src_ptr)
+        while (!(p->fast_i64 || p->fast_bool) && p->src_ptr)
             p = p->src_ptr;
         std::int64_t value = 0;
-        if (p->fast_i64) {
+        if (seg->regs[static_cast<std::size_t>(r)].langtype ==
+            vmbin::LangType::Bool) {
+            bool bv = false;
+            if (p->fast_bool)
+                bv = p->fb;
+            else if (!g_vmkv.read_bool(f, static_cast<std::uint8_t>(r), &bv)) {
+                if (g_jitdbg)
+                    std::fprintf(stderr, "[jit2dbg input-fail %s r=%d bool]\n",
+                                 f.func_dir.c_str(), r);
+                return false;
+            }
+            value = bv ? 1 : 0;
+        } else if (p->fast_i64) {
             value = p->fv;
         } else if (!g_vmkv.read_i64(f, static_cast<std::uint8_t>(r), &value)) {
             // 非纯内存帧（含 handler 的段）参数走 kvspace 槽：用解释器同一条读路径装载。
@@ -672,9 +753,12 @@ bool jit2_try_run(Frame& f, const Segment* seg, int start_s0, Outcome* out,
         Register* pr = &pr0;
         std::int64_t initial = 0;
         bool got = false;
+        const bool is_bool_out =
+            seg->regs[static_cast<std::size_t>(r)].langtype ==
+            vmbin::LangType::Bool;
         for (;;) {
-            if (pr->fast_i64) {
-                initial = pr->fv;
+            if (is_bool_out ? pr->fast_bool : pr->fast_i64) {
+                initial = is_bool_out ? (pr->fb ? 1 : 0) : pr->fv;
                 got = true;
                 break;
             }
@@ -688,17 +772,37 @@ bool jit2_try_run(Frame& f, const Segment* seg, int start_s0, Outcome* out,
         if (!got && f.parent && !f.parent->regs.empty()) {
             Register* base = f.parent->regs.data();
             const std::size_t cnt = f.parent->regs.size();
-            if (pr >= base && pr < base + cnt)
-                got = g_vmkv.read_i64(
-                    *f.parent,
-                    static_cast<std::uint8_t>(pr - base), &initial);
+            if (pr >= base && pr < base + cnt) {
+                if (is_bool_out) {
+                    bool bv = false;
+                    got = g_vmkv.read_bool(
+                        *f.parent, static_cast<std::uint8_t>(pr - base), &bv);
+                    if (got)
+                        initial = bv ? 1 : 0;
+                } else {
+                    got = g_vmkv.read_i64(
+                        *f.parent,
+                        static_cast<std::uint8_t>(pr - base), &initial);
+                }
+            }
         }
-        if (!got &&
-            !g_vmkv.read_i64(f, static_cast<std::uint8_t>(r), &initial)) {
-            if (g_jitdbg)
-                std::fprintf(stderr, "[jit2dbg preload-fail %s r=%d]\n",
-                             f.func_dir.c_str(), r);
-            return false;
+        if (!got) {
+            if (is_bool_out) {
+                bool bv = false;
+                if (!g_vmkv.read_bool(f, static_cast<std::uint8_t>(r), &bv)) {
+                    if (g_jitdbg)
+                        std::fprintf(stderr, "[jit2dbg preload-fail %s r=%d]\n",
+                                     f.func_dir.c_str(), r);
+                    return false;
+                }
+                initial = bv ? 1 : 0;
+            } else if (!g_vmkv.read_i64(f, static_cast<std::uint8_t>(r),
+                                        &initial)) {
+                if (g_jitdbg)
+                    std::fprintf(stderr, "[jit2dbg preload-fail %s r=%d]\n",
+                                 f.func_dir.c_str(), r);
+                return false;
+            }
         }
         slots[static_cast<std::size_t>(r)].payload_lo =
             static_cast<std::uint64_t>(initial);
@@ -724,12 +828,13 @@ bool jit2_try_run(Frame& f, const Segment* seg, int start_s0, Outcome* out,
         // 出错指令行（printstack cur / stop_pc 契约与解释器一致）。
         if (stop_pc && exit_record.pc >= 1)
             *stop_pc = g_vmkv.param_key(f.frame, static_cast<int>(exit_record.pc), 0);
-        if (exit_record.detail_code == 11)
-            *err = "division by zero: " + std::string(
-                       exit_record.pc >= 1 && exit_record.pc <= seg->insns.size()
-                           ? instruction_name(*seg, seg->insns[exit_record.pc - 1])
-                           : "int64·div");
-        else if (exit_record.detail_code == 10)
+        if (exit_record.detail_code == 11) {
+            const bool is_mod = exit_record.pc >= 1 &&
+                                exit_record.pc <= seg->insns.size() &&
+                                seg->insns[exit_record.pc - 1].op == rwir::Op::Mod;
+            *err = is_mod ? "ZeroDivisionError: modulo by zero"
+                          : "ZeroDivisionError: division by zero";
+        } else if (exit_record.detail_code == 10)
             *err = "xv: index out of range";
         else if (exit_record.detail_code == 9)
             *err = "jit2 handler failed: " + f.func_dir;
@@ -751,6 +856,12 @@ bool jit2_try_run(Frame& f, const Segment* seg, int start_s0, Outcome* out,
                     // float64 不是 int64 快缓存：位模式不能被当整数暴露给续跑。
                     f.regs[i].fast_i64 = false;
                     f.regs[i].fast_bool = false;
+                    continue;
+                }
+                if (seg->regs[i].langtype == vmbin::LangType::Bool) {
+                    f.regs[i].fb = slots[i].payload_lo != 0;
+                    f.regs[i].fast_bool = true;
+                    f.regs[i].fast_i64 = false;
                     continue;
                 }
                 f.regs[i].fv = static_cast<std::int64_t>(slots[i].payload_lo);
@@ -824,8 +935,22 @@ bool jit2_accepted(const std::string& func_dir, const Segment* seg) {
     return jit2_entry(func_dir, seg) != nullptr;
 }
 
+std::uint64_t g_jit_epoch = 1;
+
+std::uint64_t jit_cache_epoch() noexcept { return g_jit_epoch; }
+
 void jit_clear_cache() {
+    if (++g_jit_epoch == 0)
+        g_jit_epoch = 1;
+    static std::vector<JitEntry> retired_jit;
+    static std::vector<std::unique_ptr<Jit2Entry>> retired_jit2;
+    for (auto& kv : jit_cache())
+        if (kv.second.fn)
+            retired_jit.push_back(kv.second);
     jit_cache().clear();
+    for (auto& kv : jit2_cache())
+        if (kv.second)
+            retired_jit2.push_back(std::move(kv.second));
     jit2_cache().clear();
 }
 
@@ -839,7 +964,7 @@ const void* jit_compile(const std::string& func_dir, const Segment* seg) {
     auto& cache = jit_cache();
     auto it = cache.find(func_dir);
     if (it != cache.end())
-        return reinterpret_cast<const void*>(it->second);
+        return reinterpret_cast<const void*>(it->second.fn);
     JitShape sh;
     JitRefusal refusal;
     if (g_jitdbg)
@@ -851,7 +976,7 @@ const void* jit_compile(const std::string& func_dir, const Segment* seg) {
                          static_cast<unsigned>(refusal.refusal_reason),
                          refusal.detail_code);
         }
-        cache[func_dir] = nullptr;
+        cache[func_dir] = JitEntry{};
         return nullptr;
     }
     if (g_jitdbg)
@@ -863,23 +988,23 @@ const void* jit_compile(const std::string& func_dir, const Segment* seg) {
             std::fprintf(stderr, "[jitdbg refuse reason=%u detail=0]\n",
                          static_cast<unsigned>(
                              VmjitRefusalReason::UnsupportedBackend));
-        cache[func_dir] = nullptr;
+        cache[func_dir] = JitEntry{};
         return nullptr;
     }
     const std::size_t cap = bytes.size();
     void* mem = mmap(nullptr, cap, PROT_READ | PROT_WRITE,
                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (mem == MAP_FAILED) {
-        cache[func_dir] = nullptr;
+        cache[func_dir] = JitEntry{};
         return nullptr;
     }
     std::memcpy(mem, bytes.data(), cap);
     if (mprotect(mem, cap, PROT_READ | PROT_EXEC) != 0) {
         munmap(mem, cap);
-        cache[func_dir] = nullptr;
+        cache[func_dir] = JitEntry{};
         return nullptr;
     }
-    cache[func_dir] = reinterpret_cast<JitFn>(mem);
+    cache[func_dir] = JitEntry{reinterpret_cast<JitFn>(mem), cap};
     return reinterpret_cast<const void*>(mem);
 }
 
@@ -953,20 +1078,28 @@ bool jit_try_run(Frame& f, const Segment* seg, int start_s0,
     }
     // 结果回写（镜像 write_reg 的 dst_ptr 分支：fast 缓存 + 已有槽直写）。
     // 沿链贯通到最终调用方 reg——只挂一层会让 depth≥2 的中间帧 fast 缓存随帧消亡。
-    Register& dr0 = f.regs[dst_idx];
-    Register* dst = dr0.dst_ptr ? dr0.dst_ptr : &dr0;
-    while (dst->dst_ptr)
-        dst = dst->dst_ptr;
-    dst->fv = res;
-    dst->fast_i64 = true;
-    if (dst->view_ok && dst->body &&
+    // Sync every `dst_ptr` hop (reads inspect only their local reg) and clear `fast_bool`.
+    Register* dst = &f.regs[dst_idx];
+    for (;; dst = dst->dst_ptr) {
+        dst->fv = res;
+        dst->fast_i64 = true;
+        dst->fast_bool = false;
+        if (!dst->dst_ptr)
+            break;
+    }
+    if ((dst->kv_pinned || (dst->view_ok && dst->body)) &&
         !g_vmkv.store_i64_slot(f, *dst, res)) {
         *err = "jit commit failed: " + f.func_dir;
         *out = Outcome::Error;
         return true;
     }
-    dr0.fv = res;
-    dr0.fast_i64 = true;
+    if (dst->kv_pinned) {
+        dst->kv_live = true;
+        if (!(dst->view_ok && dst->body)) {
+            for (Register* r = &f.regs[dst_idx]; r; r = r->dst_ptr)
+                r->fast_i64 = false;
+        }
+    }
     if (stop_pc)
         stop_pc->clear();
     *out = f.depth <= 1 ? Outcome::Ok : Outcome::Returned;

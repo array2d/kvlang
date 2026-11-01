@@ -21,17 +21,15 @@ want_stable() {
 	*) echo "FAIL: 应特化但未出现 '$1'"; exit 1 ;;
 	esac
 }
-# 稳定：局部循环变量 + 声明参数
+# Stable: loop local, declared param, and typed `int64` array element (`compactarray·at`).
 want_stable "int64·add(stable, 1)"
 want_stable "int64·add(*[0,-1], 1)"
-# 不稳定：动态改 kind / 取址 / 容器元素 → 通用 opcode
+want_stable "int64·add(elem, 1)"
+# Unstable: dynamic kind changes or address-taken locals emit generic opcodes.
 case "$out" in
 *"·add(unstable"*) echo "FAIL: unstable 不应特化"; exit 1 ;;
 esac
 case "$out" in
 *"·add(addr"*) echo "FAIL: 取址变量不应特化"; exit 1 ;;
-esac
-case "$out" in
-*"·add(elem"*) echo "FAIL: 容器元素不应特化"; exit 1 ;;
 esac
 echo "PASS: specialize gate"

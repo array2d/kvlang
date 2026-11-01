@@ -361,6 +361,16 @@ kvlangScalar_t kvlangXvalueScalar(const kvlangXvalue_t *v) {
     s.kind_id = kvlangLangtypeId(kx.kind, (size_t)kx.kind_len);
     s.bytes = xh_body(v->bytes);
     s.length = xh_content_len(v->bytes);
+    /* Require `s.length >= elem_size` for fixed-width scalars so empty-body markers never read past `body`. */
+    int w = (kvlangLangtypeIsNum(s.kind_id) || s.kind_id == KVLANG_LT_BOOL)
+                ? kvlangLangtypeElemSize(s.kind_id)
+                : 0;
+    if (w > 0 && (s.length < w ||
+                  v->length < KVSPACE_XVALUE_HEAD_LEN + (uint32_t)w)) {
+        s.kind_id = KVLANG_LT_UNKNOWN;
+        s.bytes = NULL;
+        s.length = 0;
+    }
     return s;
 }
 
@@ -608,11 +618,19 @@ static int32_t lt_fmt(char *buf, size_t cap, const char *kind, int32_t al,
         dims = dd;
     }
     if (ndim > 0) {
-        int n = snprintf(buf, cap, "[%d]", dims[0]);
-        for (int i = 1; i < ndim; i++)
-            n += snprintf(buf + n, cap - (size_t)n, ",%d", dims[i]);
-        n += snprintf(buf + n, cap - (size_t)n, "%s", kind);
-        return n;
+        /* Format shape prefix `[d0,d1,...]kind` with bounded writes (`n < cap`). */
+        size_t n = 0;
+        for (int i = 0; i < ndim && n < cap; i++) {
+            int w = snprintf(buf + n, cap - n, "%s%d", i ? "," : "[", dims[i]);
+            n = w < 0 ? cap : n + (size_t)w;
+        }
+        if (n < cap) {
+            int w = snprintf(buf + n, cap - n, "]%s", kind);
+            n = w < 0 ? cap : n + (size_t)w;
+        }
+        if (n >= cap)
+            n = cap ? cap - 1 : 0;
+        return (int32_t)n;
     }
     return (int32_t)snprintf(buf, cap, "%s", kind);
 }

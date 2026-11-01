@@ -1,6 +1,8 @@
 // expected:
-//   error: KeyError: kv·at: key not found
+//   IndexError:
+//   index out of bounds
 
 rwfunc test() -> () {
-	kvspace·get([1, 2], 5) -> _
+	a:[]int64 = [1, 2]
+	a[5] -> _
 }

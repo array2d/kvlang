@@ -5,7 +5,11 @@
 static uint64_t crypto_rand_u64(void) {
     uint64_t v = 0;
     FILE *fp = fopen("/dev/urandom", "rb");
-    if (fp) { fread(&v, 8, 1, fp); fclose(fp); }
+    if (fp) {
+        size_t n = fread(&v, 8, 1, fp);
+        (void)n;
+        fclose(fp);
+    }
     return v;
 }
 

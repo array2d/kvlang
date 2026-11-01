@@ -1,0 +1,41 @@
+// nested_write_param: forwarded write-params across nested pure-memory and kvspace frames
+// must propagate updated values to every intermediate and outer caller slot.
+// Expected output:
+//   outer1 a= 3
+//   f1= 3
+//   outer a= 3  b= 4
+//   f= 3  g= 4
+//   fib(10) = 34 55
+rwfunc inner(n:int64) -> (a:int64, b:int64) {
+	a = n
+	b = 4
+}
+rwfunc outer1(n:int64) -> (a:int64) {
+	inner(n) -> (a, _)
+	println("outer1 a=", a)
+	x = a + 1
+}
+rwfunc outer(n:int64) -> (a:int64, b:int64) {
+	inner(n) -> (a, b)
+	println("outer a=", a, " b=", b)
+}
+rwfunc fib(n:int64) -> (a:int64, b:int64) {
+	if (n <= 1) {
+		a = 0
+		1 -> b
+	} else {
+		n1 = n - 1
+		fib(n1) -> (a, b)
+		x = a + b
+		b -> a
+		b = x
+	}
+}
+rwfunc test() -> () {
+	outer1(3) -> f1
+	println("f1=", f1)
+	outer(3) -> (f, g)
+	println("f=", f, " g=", g)
+	fib(10) -> (p, q)
+	println("fib(10) =", p, q)
+}

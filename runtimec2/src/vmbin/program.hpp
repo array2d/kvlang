@@ -91,6 +91,7 @@ struct CallSite {
     const Program* segment = nullptr;  // callee 段
     const void* jit = nullptr;         // callee JIT 入口
     const void* jit2_entry = nullptr;  // callee 的 JIT2 产物（null = 不走 JIT2）
+    std::uint64_t jit_epoch = 0;       // JIT cache epoch when `jit`/`jit2_entry` were bound
     bool ready = false;
     std::vector<std::string> read_types, write_types;
     std::vector<std::uint8_t> read_types_ok, write_types_ok;
@@ -124,6 +125,16 @@ struct Program {
         bool fast_i64 = false;
     };
     std::vector<DerivedDispatch> derived;
+    // Segment itself may Stop (handoff op or handler that bubbles Stop/status changes).
+    bool stops_local = false;
+    // Transitive `segment_may_stop` cache: 0 unknown, 1 visiting, 2 no, 3 yes.
+    mutable std::uint8_t stop_state = 0;
+    // `/lib/<func>/‥ctime` observed when this segment was built.
+    std::int64_t ctime = 0;
+    // Segment-cache epoch at last `‥ctime` check (avoids repeat `kvspaceGet` within one epoch).
+    mutable std::uint64_t validated_epoch = 0;
+    // Marked true when superseded by relayout so call-site caches refresh immediately.
+    mutable bool retired = false;
 };
 
 // 扩展算子 id 段：rwir_id ≥ 本值 = extra_rwir_names 池下标（表内 id 恒 < 0x8000）。

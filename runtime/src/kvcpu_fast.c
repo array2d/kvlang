@@ -17,6 +17,7 @@
  * 持久化语义不变：每步先写值槽，再写 ‥pc（串值与通用路径逐字节一致），并在
  * 每步开始前检查 ‥status == "running"，pause/kill/crash 恢复行为与通用路径相同。 */
 #include "func_code.h"
+#include "intops.h"
 
 enum {
     FK_NONE = 0,
@@ -228,7 +229,9 @@ static bool fk_pc_open(fk_pc_t *pc, kvspaceKeyOff *ko, const char *prefix,
         return false;
     uint64_t a = xh_len(h);
     uint64_t cap = ko->view.body_cap;
-    if (a > cap || a < (uint64_t)plen ||
+    /* `‥pc` is a system key with empty trailing attr `[02 00]` at `8 + len`; fall back if shape differs. */
+    if (a + 2 > cap || a < (uint64_t)plen ||
+        ko->view.body[a] != 2 || ko->view.body[a + 1] != 0 ||
         memcmp(ko->view.body, prefix, (size_t)plen) != 0)
         return false;
     pc->head = h;
@@ -240,15 +243,18 @@ static bool fk_pc_open(fk_pc_t *pc, kvspaceKeyOff *ko, const char *prefix,
     return true;
 }
 
-/* 原地写 PC 尾 [irseq,0]；容量不足返回 false（尚未写任何字节）。 */
+/* Rewrite PC tail `[irseq,0]` in place (returning false if capacity is insufficient)
+ * and relocate the trailing empty attr `[02 00]` to `8 + new_len`. */
 static inline bool fk_pc_write(fk_pc_t *pc, int irseq) {
     char tail[16];
     size_t tl = fk_tail(tail, irseq);
     uint32_t len = pc->plen + (uint32_t)tl;
-    if (len > pc->cap)
+    if ((uint64_t)len + 2 > pc->cap)
         return false;
     memcpy(pc->body + pc->plen, tail, tl);
     if (len != pc->cur_len) {
+        pc->body[len] = 2;
+        pc->body[len + 1] = 0;
         kvspaceXvalueHead h = {
             .storetype = KVSPACE_XVALUE_ST_SLACK,
             .ptr = KVSPACE_XVALUE_PTR_INLINE,
@@ -326,35 +332,29 @@ static inline int fk_step(kvlangRowBind_t *b, int irseq, uint8_t **dst_out,
         int64_t x = rd_i64(pa), y = pb ? rd_i64(pb) : 0, r = 0;
         bool br = false;
         switch (op) {
-        case FK_I_ADD: r = (int64_t)((uint64_t)x + (uint64_t)y); break;
-        case FK_I_SUB: r = (int64_t)((uint64_t)x - (uint64_t)y); break;
-        case FK_I_MUL: r = (int64_t)((uint64_t)x * (uint64_t)y); break;
+        /* Delegate integer ops to `intops.h` (wraparound, `MIN / -1`, `& 63` shifts);
+         * fall back to the slow path on division by zero to raise `ZeroDivisionError`. */
+        case FK_I_ADD: r = kvi_add(x, y); break;
+        case FK_I_SUB: r = kvi_sub(x, y); break;
+        case FK_I_MUL: r = kvi_mul(x, y); break;
         case FK_I_DIV:
-            if (y == 0 || (y == -1 && x == INT64_MIN))
+            if (y == 0)
                 return 0;
-            r = x / y;
+            r = kvi_div(x, y, false);
             break;
         case FK_I_MOD:
-            if (y == 0 || (y == -1 && x == INT64_MIN))
+            if (y == 0)
                 return 0;
-            r = x % y;
+            r = kvi_mod(x, y, false);
             break;
         case FK_I_AND: r = x & y; break;
         case FK_I_OR: r = x | y; break;
         case FK_I_XOR: r = x ^ y; break;
-        case FK_I_SHL:
-            if ((uint64_t)y >= 64 || x < 0)
-                return 0;
-            r = x << y;
-            break;
-        case FK_I_SHR:
-            if ((uint64_t)y >= 64)
-                return 0;
-            r = x >> y;
-            break;
+        case FK_I_SHL: r = kvi_shl(x, y); break;
+        case FK_I_SHR: r = kvi_shr(x, y, false); break;
         case FK_I_MAX: r = x >= y ? x : y; break;
         case FK_I_MIN: r = x <= y ? x : y; break;
-        case FK_I_NEG: r = (int64_t)(0 - (uint64_t)x); break;
+        case FK_I_NEG: r = kvi_neg(x); break;
         case FK_I_EQ: br = x == y; break;
         case FK_I_NE: br = x != y; break;
         case FK_I_LT: br = x < y; break;
@@ -438,7 +438,7 @@ int kvlangFastRun(kvlangFrameCtx_t *ctx, int *irseq_io, kvspaceKeyOff *pc_off,
         /* 先值后 PC：与通用路径（WriteBody → NextPc）的落盘顺序一致。
          * PC 容量不足时值也不写，整行交还通用路径。 */
         char tail[16];
-        if (pc.plen + fk_tail(tail, next) > pc.cap)
+        if ((uint64_t)pc.plen + fk_tail(tail, next) + 2 > pc.cap)
             break;
         if (w)
             memcpy(dst, val, w);

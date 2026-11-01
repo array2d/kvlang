@@ -21,7 +21,8 @@ rwfunc next_seq(src_len:int64) -> (dst_len:int64) {
 			else { src_len -> j }
 		}
 			count -> "/tmp/s2"·*di
-			cur -> "/tmp/s2"·*di+1
+			di + 1 -> di1
+			cur -> "/tmp/s2"·*di1
 		di + 2 -> di
 		i + count -> i
 	}
@@ -32,7 +33,8 @@ rwfunc print_seq_len(seq_len:int64) -> () {
 	i = 0
 	while (i < seq_len) {
 		"/tmp/s"·*i -> cnt
-		"/tmp/s"·*i+1 -> val
+		i + 1 -> i1
+		"/tmp/s"·*i1 -> val
 		k = 0
 		while (k < cnt) {
 			print(val)

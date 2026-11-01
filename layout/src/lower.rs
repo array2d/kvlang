@@ -394,6 +394,8 @@ struct LoopCtx {
 
 struct LabelGen {
     n: i32,
+    // First structural error encountered during lowering (e.g. `break` outside loop).
+    err: Option<String>,
 }
 
 impl LabelGen {
@@ -470,19 +472,23 @@ fn sig_lookup<'a>(sigs: &'a SigTable, op: &str) -> Option<&'a ast::FuncSig> {
 }
 
 /// 将函数体中 if/while 控制流降级为 ScopeStmt + br/goto，展开复合表达式。
-pub fn lower_func(fn_: &Func) -> Func {
+/// Parser reports invalid control flow with source positions; this falls back to `Err` without panicking.
+pub fn lower_func(fn_: &Func) -> Result<Func, String> {
     let tm = infer_types(fn_);
-    let mut lg = LabelGen { n: 0 };
+    let mut lg = LabelGen { n: 0, err: None };
     // 收集已有 br/goto 的跳转目标：这些 label 已可达，lower 时不再补 fall-through goto（幂等）。
     let mut targets = HashSet::new();
     collect_goto_targets(&fn_.body, &mut targets);
-    let body = terminate(lower_body(&fn_.body, &mut lg, None, &tm, &targets));
-    Func {
+    let body = terminate(lower_body(&fn_.body, &mut lg, None, &tm, &targets, true));
+    if let Some(e) = lg.err {
+        return Err(format!("{}: {e}", fn_.sig.name));
+    }
+    Ok(Func {
         comments: Vec::new(),
         sig: fn_.sig.clone(),
         body,
         pkg: String::new(),
-    }
+    })
 }
 
 fn return_inst() -> Stmt {
@@ -548,12 +554,16 @@ fn collect_goto_targets(stmts: &[Stmt], targets: &mut HashSet<String>) {
     }
 }
 
+/// `adjacent` indicates that the first statement immediately follows its predecessor in final linear order,
+/// allowing an empty preamble to enter a labeled block without a synthetic `goto`. Non-adjacent continuations
+/// (after `if`/`while`/`for` or inside split bodies) must emit an explicit `goto`.
 fn lower_body(
     stmts: &[Stmt],
     lg: &mut LabelGen,
     lc: Option<&LoopCtx>,
     tm: &HashMap<String, String>,
     targets: &HashSet<String>,
+    adjacent: bool,
 ) -> Vec<Stmt> {
     if stmts.is_empty() {
         return Vec::new();
@@ -584,36 +594,45 @@ fn lower_body(
                 preamble.push(st.clone());
             }
             Stmt::If(s) => {
-                let cont = lower_body(&stmts[i + 1..], lg, lc, tm, targets);
+                let cont = lower_body(&stmts[i + 1..], lg, lc, tm, targets, false);
                 return lower_if_with_cont(&preamble, s, cont, lg, lc, tm, targets);
             }
             Stmt::While(s) => {
-                let cont = lower_body(&stmts[i + 1..], lg, lc, tm, targets);
+                let cont = lower_body(&stmts[i + 1..], lg, lc, tm, targets, false);
                 return lower_while_with_cont(&preamble, s, cont, lg, lc, tm, targets);
             }
             Stmt::Scope(s) => {
                 let mut s = s.clone();
-                s.body = lower_body(&s.body, lg, lc, tm, targets);
-                if !preamble_ends_with_terminator(&preamble) && !targets.contains(&s.label) {
+                s.body = lower_body(&s.body, lg, lc, tm, targets, true);
+                // Omit fall-through `goto` into a targeted label only when `preamble` is empty and `adjacent` holds.
+                let enters_directly =
+                    preamble.is_empty() && adjacent && targets.contains(&s.label);
+                if !preamble_ends_with_terminator(&preamble) && !enters_directly {
                     preamble.push(goto_label(&s.label));
                 }
                 let mut out = preamble;
                 out.push(Stmt::Scope(s));
-                out.extend(lower_body(&stmts[i + 1..], lg, lc, tm, targets));
+                out.extend(lower_body(&stmts[i + 1..], lg, lc, tm, targets, true));
                 return out;
             }
-            Stmt::Break(_) => {
-                let lc = lc.expect("break outside loop");
-                preamble.push(goto_label(&lc.break_label));
-                return preamble;
-            }
-            Stmt::Continue(_) => {
-                let lc = lc.expect("continue outside loop");
-                preamble.push(goto_label(&lc.continue_label));
+            Stmt::Break(_) | Stmt::Continue(_) => {
+                let is_break = matches!(st, Stmt::Break(_));
+                match lc {
+                    Some(lc) => preamble.push(goto_label(if is_break {
+                        &lc.break_label
+                    } else {
+                        &lc.continue_label
+                    })),
+                    None => {
+                        let kw = if is_break { "break" } else { "continue" };
+                        lg.err.get_or_insert_with(|| format!("{kw} outside loop"));
+                        preamble.push(return_inst());
+                    }
+                }
                 return preamble;
             }
             Stmt::For(s) => {
-                let cont = lower_body(&stmts[i + 1..], lg, lc, tm, targets);
+                let cont = lower_body(&stmts[i + 1..], lg, lc, tm, targets, false);
                 return lower_for_with_cont(&preamble, s, cont, lg, lc, tm, targets);
             }
         }
@@ -639,8 +658,8 @@ fn lower_if_with_cont(
     let mut cond_body = cond_eval;
     cond_body.push(br_inst(&cond_slot, &then_label, &else_label));
 
-    let then_ = inject_goto(lower_body(&s.then_, lg, lc, tm, targets), &merge_label);
-    let else_ = inject_goto(lower_body(&s.else_, lg, lc, tm, targets), &merge_label);
+    let then_ = inject_goto(lower_body(&s.then_, lg, lc, tm, targets, false), &merge_label);
+    let else_ = inject_goto(lower_body(&s.else_, lg, lc, tm, targets, false), &merge_label);
     let (then_insts, mut then_blocks) = split_insts_and_blocks(then_);
     let (else_insts, mut else_blocks) = split_insts_and_blocks(else_);
     let (cont_insts, cont_blocks) = split_insts_and_blocks(cont);
@@ -698,7 +717,7 @@ fn lower_while_with_cont(
         continue_label: cond_label.clone(),
     };
     let body_ = inject_goto(
-        lower_body(&s.body, lg, Some(&body_lc), tm, targets),
+        lower_body(&s.body, lg, Some(&body_lc), tm, targets, false),
         &cond_label,
     );
     let (body_insts, mut body_blocks) = split_insts_and_blocks(body_);
@@ -827,7 +846,7 @@ fn lower_for_with_cont(
         break_label: exit_label.clone(),
         continue_label: cond_label.clone(),
     };
-    let body_inner = lower_body(&s.body, lg, Some(&body_lc), tm, targets);
+    let body_inner = lower_body(&s.body, lg, Some(&body_lc), tm, targets, false);
     let mut body_insts = Vec::new();
     if is_obj {
         body_insts.push(Stmt::Instruction(Instruction {
@@ -1219,18 +1238,51 @@ fn infer_inst(inst: &Instruction, tm: &mut HashMap<String, String>) {
 /// 变量的有限类型集合（union 用）：签名/源码声明的类型 + 每条写的类型并集。
 /// 用于给操作数槽补类型：单元素 → 具体类型；多元素 → `<t1>|<t2>|…`。
 pub fn infer_type_sets(fn_: &Func) -> HashMap<String, Vec<String>> {
-    let mut sets: HashMap<String, BTreeSet<String>> = HashMap::new();
+    let mut base_sets: HashMap<String, BTreeSet<String>> = HashMap::new();
+    let mut base_work: HashMap<String, String> = HashMap::new();
     for p in fn_.sig.params.iter().chain(fn_.sig.returns.iter()) {
-        insert_type_set(&mut sets, &p.name, &p.ty);
+        insert_type_set(&mut base_sets, &p.name, &p.ty);
+        if !p.name.is_empty() && !p.ty.is_empty() {
+            base_work.insert(p.name.clone(), p.ty.clone());
+        }
     }
     let mut declared = HashMap::new();
     collect_declared(&fn_.body, &mut declared);
     for (name, ty) in &declared {
-        insert_type_set(&mut sets, name, ty);
+        insert_type_set(&mut base_sets, name, ty);
+        if !name.is_empty() && !ty.is_empty() {
+            base_work.insert(name.clone(), ty.clone());
+        }
     }
-    let mut work = infer_types(fn_);
+    let mut work = base_work;
+    let mut sets = base_sets.clone();
     let mut unknown: HashSet<String> = HashSet::new();
-    collect_type_sets(&fn_.body, &mut sets, &mut unknown, &mut work);
+    // Fixed-point pass: start each round from `base_sets`, updating `work` in statement order so
+    // reads before first write stay unknown/None while multi-type writes propagate their full union.
+    for _ in 0..4 {
+        let mut next_sets = base_sets.clone();
+        let mut next_unknown: HashSet<String> = HashSet::new();
+        collect_type_sets(&fn_.body, &mut next_sets, &mut next_unknown, &mut work);
+        for (name, set) in &next_sets {
+            if !next_unknown.contains(name) || declared.contains_key(name) {
+                let joined = join_type_members(set.clone());
+                if !joined.is_empty() {
+                    work.insert(name.clone(), joined);
+                }
+            }
+        }
+        for name in &next_unknown {
+            if !declared.contains_key(name) {
+                work.remove(name);
+            }
+        }
+        let converged = next_sets == sets && next_unknown == unknown;
+        sets = next_sets;
+        unknown = next_unknown;
+        if converged {
+            break;
+        }
+    }
     // 有任一写无法推断类型的变量：其槽不能静态定类型（运行期实际 kind 可能不同），
     // 只有源码/签名声明过的变量可以例外（声明是语言契约）。
     for name in unknown {
@@ -1296,13 +1348,42 @@ fn record_inst_sets(
     unknown: &mut HashSet<String>,
     tm: &mut HashMap<String, String>,
 ) {
+    let (op, reads) = s.flat();
+    // A read before any write/declaration observes `None` at runtime; mark it unknown so later writes do not back-propagate.
+    for r in &reads {
+        let base = r.split(keytree::MEMBER_SEP).next().unwrap_or(r);
+        if !base.is_empty()
+            && !base.starts_with('*')
+            && literal_slot_type(base).is_empty()
+            && !sets.contains_key(base)
+        {
+            unknown.insert(base.to_string());
+            tm.remove(base);
+        }
+    }
+    // Member reads, `scatterarray·at`, and `kvspace·get` may yield `None` on missing keys; keep unannotated destination slots nullable.
+    let nullable_lookup = (symbol::lookup(&op).word == "assign" && reads.len() > 1)
+        || matches!(op.as_str(), "scatterarray·at" | "kvspace·get");
     let types = per_write_types(s, tm);
     for (j, w) in s.writes.iter().enumerate() {
         if w.is_empty() || w.starts_with(keytree::MEMBER_SEP) {
             continue;
         }
+        let has_explicit_wt = s.write_types.get(j).is_some_and(|t| !t.is_empty());
+        if nullable_lookup && !has_explicit_wt {
+            unknown.insert(w.clone());
+            continue;
+        }
         match types.get(j).and_then(|t| t.as_ref()) {
-            Some(t) if !t.is_empty() => insert_type_set(sets, w, t),
+            Some(t) if !t.is_empty() => {
+                insert_type_set(sets, w, t);
+                if let Some(set) = sets.get(w) {
+                    let joined = join_type_members(set.clone());
+                    if !joined.is_empty() {
+                        tm.insert(w.clone(), joined);
+                    }
+                }
+            }
             _ => {
                 unknown.insert(w.clone());
             }
@@ -1378,7 +1459,7 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
         if reads.len() > 1 {
             // 成员读 `base·seg…`：reads = [base, seg…]；结果 = 容器 value 类型（逐段下钻）。
             let mut ty = slot_type(&reads[0], tm);
-            for seg in &reads[1..] {
+            for _ in &reads[1..] {
                 if let Some(v) = container_value(&ty) {
                     ty = v;
                 } else if ty.starts_with('[') {
@@ -2275,7 +2356,7 @@ fn container_value(ty: &str) -> Option<String> {
 /// 写槽能解析出的声明类型；None = 非 typed 或不可解析。
 pub fn resolve_slot_type(
     w: &str,
-    tm: &HashMap<String, String>,
+    _tm: &HashMap<String, String>,
     structs: &StructTable,
     declared: &HashMap<String, String>,
 ) -> Option<String> {
@@ -2405,6 +2486,39 @@ fn check_literal(target: &str, e: &Expr, diags: &mut Vec<Diagnostic>) -> bool {
     }
 }
 
+/// Validate struct field default `f:T=...` (must be a representable scalar literal, matching local decl rules).
+pub fn check_field_default(name: &str, ty: &str, e: &Expr) -> Vec<Diagnostic> {
+    let mut diags = Vec::new();
+    if ty.starts_with('*') || ty.starts_with('@') {
+        return diags; // Pointer/ext fields default to None.
+    }
+    let (dims, base) = super::kvkind::parse_langtype(ty);
+    let scalar = dims.is_empty()
+        && (builtin::is_int_kind(&base) || builtin::is_float_kind(&base) || base == "bool");
+    if !scalar {
+        return diags; // Non-numeric kinds (char/*, arrays, structref) are not scalar-encoded here.
+    }
+    if !e.is_leaf() {
+        push_write_diag(
+            &mut diags,
+            format!("struct field {name:?}: default for {ty} must be a literal, got `{e}`"),
+        );
+    } else if base == "bool" {
+        if e.quote != 0 || (e.val != "true" && e.val != "false") {
+            push_write_diag(
+                &mut diags,
+                format!("struct field {name:?}: bool default must be true/false, got {:?}", e.val),
+            );
+        }
+    } else if !check_literal(&base, e, &mut diags) {
+        push_write_diag(
+            &mut diags,
+            format!("struct field {name:?}: default for {ty} must be a numeric literal, got {:?}", e.val),
+        );
+    }
+    diags
+}
+
 fn check_element(kind: &str, e: &Expr, diags: &mut Vec<Diagnostic>) {
     if !e.is_leaf() {
         return;
@@ -2468,44 +2582,6 @@ fn check_assignable(target: &str, rhs: &str, diags: &mut Vec<Diagnostic>) {
             push_write_diag(diags, format!("TypeError: cannot assign {rhs} to {target}"));
         }
     }
-}
-
-/// 单个值对声明类型的检查：字面量范围优先，其余按静态类型可赋性。
-fn check_value(target: &str, e: &Expr, tm: &HashMap<String, String>, diags: &mut Vec<Diagnostic>) {
-    if e.is_leaf() {
-        if check_literal(target, e, diags) {
-            return;
-        }
-        match e.lit {
-            LitKind::LitBool => {
-                if target != "bool" {
-                    push_write_diag(diags, format!("TypeError: cannot assign bool to {target}"));
-                }
-                return;
-            }
-            LitKind::LitString | LitKind::LitRawString => {
-                if !is_string_kind(target) {
-                    push_write_diag(
-                        diags,
-                        format!("TypeError: cannot assign string to {target}"),
-                    );
-                }
-                return;
-            }
-            _ => {
-                if is_none_lit(e) {
-                    if !target.starts_with('*') && !target.is_empty() {
-                        push_write_diag(
-                            diags,
-                            format!("TypeError: None cannot be assigned to {target}"),
-                        );
-                    }
-                    return;
-                }
-            }
-        }
-    }
-    check_assignable(target, &expr_result_type(e, tm), diags);
 }
 
 fn check_rhs(target: &str, e: &Expr, rhs: &str, diags: &mut Vec<Diagnostic>) {
@@ -2629,12 +2705,6 @@ fn expr_result_type(e: &Expr, tm: &HashMap<String, String>) -> String {
     if is_cast_op(&e.op) {
         return e.op.clone();
     }
-    if e.op == "obj" {
-        return "stringkeymap".to_string();
-    }
-    if e.op == "map·new" {
-        return "[]stringkeymap".to_string();
-    }
     let mut tm2 = tm.clone();
     let reads: Vec<String> = e.args.iter().map(|a| a.val.clone()).collect();
     infer_op_type(&e.op, &reads, &mut tm2)
@@ -2725,7 +2795,6 @@ fn check_struct_literal(e: &Expr, structs: &StructTable, diags: &mut Vec<Diagnos
 fn check_call_args(
     e: &Expr,
     sigs: &SigTable,
-    tm: &HashMap<String, String>,
     declared: &HashMap<String, String>,
     diags: &mut Vec<Diagnostic>,
 ) {
@@ -2735,7 +2804,7 @@ fn check_call_args(
     {
         return;
     }
-    let Some(sig) = sigs.get(&e.op) else {
+    let Some(sig) = sig_lookup(sigs, &e.op) else {
         return;
     };
     let np = sig.params.len();
@@ -2843,7 +2912,7 @@ fn walk_inst(
     diags: &mut Vec<Diagnostic>,
 ) {
     let Some(e) = &s.expr else { return };
-    check_call_args(e, sigs, tm, declared, diags);
+    check_call_args(e, sigs, declared, diags);
     if e.op == format!("struct{}new", keytree::MEMBER_SEP) {
         check_struct_literal(e, structs, diags);
     }

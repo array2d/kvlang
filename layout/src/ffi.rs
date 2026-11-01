@@ -197,32 +197,36 @@ fn err_ret(buf: &mut [c_char; 256], ret: c_int) -> Result<(), String> {
 }
 
 /// codec 调用：产出 frontend malloc 缓冲，拷出后以 libc free 释放。
-fn call_codec(f: impl FnOnce(*mut *mut u8, *mut u32) -> c_int) -> Vec<u8> {
+/// Non-zero rc or empty output is an `Err` (passing an empty `Vec` to [`Kv::set`] would delete the key).
+fn call_codec(what: &str, f: impl FnOnce(*mut *mut u8, *mut u32) -> c_int) -> Result<Vec<u8>, String> {
     let mut out: *mut u8 = std::ptr::null_mut();
     let mut out_len: u32 = 0;
-    f(&mut out, &mut out_len);
-    if out.is_null() || out_len == 0 {
-        return Vec::new();
-    }
-    let bytes = unsafe { std::slice::from_raw_parts(out, out_len as usize) }.to_vec();
-    unsafe { free(out as *mut c_void) };
-    bytes
-}
-
-/// 固定头构造器调用（New* 的 out_len 为 u64）：成功且 total<=u32::MAX 才转 u32。
-fn call_codec64(f: impl FnOnce(*mut *mut u8, *mut u64) -> c_int) -> Vec<u8> {
-    let mut out: *mut u8 = std::ptr::null_mut();
-    let mut out_len: u64 = 0;
-    f(&mut out, &mut out_len);
-    if out.is_null() || out_len == 0 || out_len > u32::MAX as u64 {
+    let rc = f(&mut out, &mut out_len);
+    if rc != 0 || out.is_null() || out_len == 0 {
         if !out.is_null() {
             unsafe { free(out as *mut c_void) };
         }
-        return Vec::new();
+        return Err(format!("kvspace codec {what} failed (rc={rc}, len={out_len})"));
     }
     let bytes = unsafe { std::slice::from_raw_parts(out, out_len as usize) }.to_vec();
     unsafe { free(out as *mut c_void) };
-    bytes
+    Ok(bytes)
+}
+
+/// 固定头构造器调用（New* 的 out_len 为 u64）：成功且 total<=u32::MAX 才转 u32。
+fn call_codec64(what: &str, f: impl FnOnce(*mut *mut u8, *mut u64) -> c_int) -> Result<Vec<u8>, String> {
+    let mut out: *mut u8 = std::ptr::null_mut();
+    let mut out_len: u64 = 0;
+    let rc = f(&mut out, &mut out_len);
+    if rc != 0 || out.is_null() || out_len == 0 || out_len > u32::MAX as u64 {
+        if !out.is_null() {
+            unsafe { free(out as *mut c_void) };
+        }
+        return Err(format!("kvspace codec {what} failed (rc={rc}, len={out_len})"));
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(out, out_len as usize) }.to_vec();
+    unsafe { free(out as *mut c_void) };
+    Ok(bytes)
 }
 
 /// 借用调用：*out 指向后端常驻/回收空间，拷出自持（借用只需活到本次拷贝），不 free。
@@ -257,6 +261,16 @@ impl Kv {
         Kv {
             h: connect_or_panic(dsn),
         }
+    }
+
+    /// Like [`Kv::conn`], but returns `Err` instead of panicking on connection failure.
+    pub fn try_conn(dsn: &str) -> Result<Kv, String> {
+        let c = CString::new(dsn).map_err(|_| format!("dsn contains NUL: {dsn:?}"))?;
+        let h = unsafe { kvspaceConnect(c.as_ptr()) };
+        if h.is_null() {
+            return Err(format!("kvspace connect failed: {dsn}"));
+        }
+        Ok(Kv { h })
     }
 
     /// 写多对 (key, langtype, wire)：langtype 拼入值 attr 区整体单写（无 attr key）。
@@ -436,16 +450,16 @@ pub fn attr_bytes(lt: &str) -> Vec<u8> {
 /// 按 kind+body 产 wire（固定 8 字节 head + body + 空 attr 占位；真实类型由 Kv::set 按
 /// pair 的 lt 替换）。storetype 判定对齐 durable to_wire_head：char/* 与 rwir 族→SLACK、
 /// ndim>0 非容器→LARGE、其余标量→SHORT。
-pub fn xvalue_to_wire(kind: &str, raw: &[u8], array_len: i32) -> Vec<u8> {
+pub fn xvalue_to_wire(kind: &str, raw: &[u8], array_len: i32) -> Result<Vec<u8>, String> {
     let dims = al_to_dims(kind, array_len);
     if (kind.is_empty() || kind == "None") && raw.is_empty() {
-        return call_codec64(|out, out_len| unsafe {
+        return call_codec64("HeadNewNone", |out, out_len| unsafe {
             kvspaceXvalueHeadNewNone(out, out_len)
         });
     }
     let empty = EMPTY_CSTR.as_ptr() as *const c_char;
     if kind == "char" || kind.starts_with("char/") {
-        return call_codec64(|out, out_len| unsafe {
+        return call_codec64("HeadNewSlack", |out, out_len| unsafe {
             kvspaceXvalueHeadNewSlack(
                 raw.as_ptr(),
                 raw.len() as u64,
@@ -458,12 +472,12 @@ pub fn xvalue_to_wire(kind: &str, raw: &[u8], array_len: i32) -> Vec<u8> {
     }
     if !dims.is_empty() && !kind.contains('·') && !kind.starts_with('/') {
         let d: Vec<u64> = dims.iter().map(|&x| x as u64).collect();
-        return call_codec64(|out, out_len| unsafe {
+        return call_codec64("HeadNewTensor", |out, out_len| unsafe {
             kvspaceXvalueHeadNewTensor(d.as_ptr(), d.len() as u32, raw.as_ptr(), raw.len() as u64, empty, out, out_len)
         });
     }
     if kind == "rwir" || kind == "def langtype" || (kind == "rwfunc" && !raw.is_empty()) {
-        return call_codec64(|out, out_len| unsafe {
+        return call_codec64("HeadNewCode", |out, out_len| unsafe {
             kvspaceXvalueHeadNewCode(
                 raw.as_ptr(),
                 raw.len() as u64,
@@ -474,7 +488,7 @@ pub fn xvalue_to_wire(kind: &str, raw: &[u8], array_len: i32) -> Vec<u8> {
             )
         });
     }
-    call_codec64(|out, out_len| unsafe {
+    call_codec64("HeadNewScalar", |out, out_len| unsafe {
         kvspaceXvalueHeadNewScalar(0 /* KVSPACE_XVALUE_ST_SHORT */, raw.as_ptr(), raw.len() as u32, empty, out, out_len)
     })
 }
@@ -523,7 +537,7 @@ pub fn from_wire_head(data: &[u8], langtype: &str) -> kvspaceHead_t {
 
 // ── 标准标量构造器 ───────────────────────────────────────────────────
 
-pub fn new_char(kind: &str, s: &str) -> Vec<u8> {
+pub fn new_char(kind: &str, s: &str) -> Result<Vec<u8>, String> {
     let bytes = s.as_bytes();
     if kind == "char/utf8" {
         return new_char_byte(bytes);
@@ -534,7 +548,7 @@ pub fn new_char(kind: &str, s: &str) -> Vec<u8> {
         bytes.to_vec()
     };
     let empty = EMPTY_CSTR.as_ptr() as *const c_char;
-    call_codec64(|out, out_len| unsafe {
+    call_codec64("HeadNewSlack", |out, out_len| unsafe {
         kvspaceXvalueHeadNewSlack(
             raw.as_ptr(),
             raw.len() as u64,
@@ -546,24 +560,41 @@ pub fn new_char(kind: &str, s: &str) -> Vec<u8> {
     })
 }
 
-pub fn new_char_byte(bytes: &[u8]) -> Vec<u8> {
+pub fn new_char_byte(bytes: &[u8]) -> Result<Vec<u8>, String> {
     let empty = EMPTY_CSTR.as_ptr() as *const c_char;
-    call_codec(|out, out_len| unsafe {
+    call_codec("NewChar", |out, out_len| unsafe {
         kvspaceNewChar(bytes.as_ptr(), bytes.len() as u32, empty, out, out_len)
     })
 }
 
-pub fn new_bool(v: bool) -> Vec<u8> {
+pub fn new_bool(v: bool) -> Result<Vec<u8>, String> {
     let empty = EMPTY_CSTR.as_ptr() as *const c_char;
-    call_codec(|out, out_len| unsafe { kvspaceNewBool(v as u8, empty, out, out_len) })
+    call_codec("NewBool", |out, out_len| unsafe { kvspaceNewBool(v as u8, empty, out, out_len) })
 }
 
-pub fn new_int64(v: i64) -> Vec<u8> {
+pub fn new_int64(v: i64) -> Result<Vec<u8>, String> {
     let empty = EMPTY_CSTR.as_ptr() as *const c_char;
-    call_codec(|out, out_len| unsafe { kvspaceNewInt64(v, empty, out, out_len) })
+    call_codec("NewInt64", |out, out_len| unsafe { kvspaceNewInt64(v, empty, out, out_len) })
 }
 
-pub fn new_float64(v: f64) -> Vec<u8> {
+pub fn new_float64(v: f64) -> Result<Vec<u8>, String> {
     let empty = EMPTY_CSTR.as_ptr() as *const c_char;
-    call_codec(|out, out_len| unsafe { kvspaceNewFloat64(v, empty, out, out_len) })
+    call_codec("NewFloat64", |out, out_len| unsafe { kvspaceNewFloat64(v, empty, out, out_len) })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Codec failure must return `Err` rather than an empty `Vec` (which `Kv::set` treats as key deletion).
+    #[test]
+    fn codec_failure_is_error_not_empty_value() {
+        assert!(call_codec("t", |_, _| -1).is_err());
+        assert!(call_codec64("t", |_, _| -1).is_err());
+        // `rc == 0` with empty output is also an error.
+        assert!(call_codec("t", |_, _| 0).is_err());
+        assert!(call_codec64("t", |_, _| 0).is_err());
+        let v = new_int64(7).unwrap();
+        assert_eq!(xh_body_slice(&v), 7i64.to_le_bytes());
+    }
 }

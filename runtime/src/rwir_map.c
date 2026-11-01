@@ -8,8 +8,8 @@ void kvlangBuiltinMapMarker(kvlangXvalue_t *out, const char *langtype) {
     kvlangXvalueNew(out, langtype, (const uint8_t *)"", 0, 1);
 }
 
-/* 写槽 `w` 的声明容器类型：layout 的 write_slot_value 把 map langtype 落进写槽的 langtype
- * （见 code.rs）。缺类型即 layout 漏检——直接 fatal，不退化兜底。调用方负责 free。 */
+/* Return write slot `w`'s declared map `langtype` (stripping a leading `*` from Ptr-param slots
+ * so empty-body markers are not mistaken for null `*T` pointers); caller frees. */
 static char *declared_map_langtype(kvlangFrame_t *f, int w) {
     if (w >= f->instruction->write_count) {
         fprintf(stderr,
@@ -17,23 +17,32 @@ static char *declared_map_langtype(kvlangFrame_t *f, int w) {
                 f->instruction->write_count);
         abort();
     }
+    const char *raw_t = NULL;
+    char *owned = NULL;
     if (f->instruction->writes[w].type &&
-        strstr(f->instruction->writes[w].type, MEMBER_SEP))
-        return strdup(f->instruction->writes[w].type);
-    if (kvlangXvalueNone(&f->instruction->writes[w].value))
-        abort();
-    const uint8_t *body = xh_body(f->instruction->writes[w].value.bytes);
-    int32_t len = xh_content_len(f->instruction->writes[w].value.bytes);
-    const uint8_t *split = len > 5 ? memchr(body + 5, 0, (size_t)len - 5) : NULL;
-    char *type = split ? strndup((const char *)split + 1,
-                                 (size_t)(body + len - split - 1)) : strdup("");
-    if (!strstr(type, MEMBER_SEP)) {
+        strstr(f->instruction->writes[w].type, MEMBER_SEP)) {
+        raw_t = f->instruction->writes[w].type;
+    } else {
+        if (kvlangXvalueNone(&f->instruction->writes[w].value))
+            abort();
+        const uint8_t *body = xh_body(f->instruction->writes[w].value.bytes);
+        int32_t len = xh_content_len(f->instruction->writes[w].value.bytes);
+        const uint8_t *split = len > 5 ? memchr(body + 5, 0, (size_t)len - 5) : NULL;
+        owned = split ? strndup((const char *)split + 1,
+                                (size_t)(body + len - split - 1)) : strdup("");
+        raw_t = owned;
+    }
+    while (*raw_t == '*')
+        raw_t++;
+    if (!strstr(raw_t, MEMBER_SEP)) {
         fprintf(stderr,
                 "panic: container literal target %s has no map langtype "
                 "(layout must reject)\n",
                 f->instruction->writes[w].name);
         abort();
     }
+    char *type = strdup(raw_t);
+    free(owned);
     return type;
 }
 

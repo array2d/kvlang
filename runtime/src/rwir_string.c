@@ -155,7 +155,7 @@ int kvlangBuiltinStringChar(kvlangFrame_t *f) {
         }
     }
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
-    if (n < 2) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetError(f, "TypeError: string.char requires string and index"); }
+    if (n < 2) { kvlangBuiltinFreeInputs(in, n); return kvlangBuiltinSetError(f, "TypeError: string·char requires string and index"); }
     if (!kvlangXvalueNone(&in[0]) && kvlangXvalueKindIs(&in[0], KVSPACE_KIND_CHAR)) {
         int idx = (int)kvlangScalarI64(kvlangXvalueScalar(&in[1]));
         int rn = (int)(xh_content_len_of(&in[0]) >> 2);
@@ -280,7 +280,7 @@ int kvlangBuiltinStringConcat(kvlangFrame_t *f) {
     }
     const char *k0 = kvlangXvalueKind(&in[0]), *k1 = kvlangXvalueKind(&in[1]);
     if (!kvlangXvalueIsCharKind(k0) || !kvlangXvalueIsCharKind(k1)) {
-        kvlangBuiltinSetError(f, "TypeError: string.concat requires strings, got %s and %s", k0, k1);
+        kvlangBuiltinSetError(f, "TypeError: string·concat requires strings, got %s and %s", k0, k1);
         kvlangBuiltinFreeInputs(in, n); return -1;
     }
     kvlangXvalue_t r;

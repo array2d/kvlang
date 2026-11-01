@@ -1,7 +1,7 @@
 // expected:
-//   error: KeyError: kv·at: key not found
+//   error: TypeError: compactarray index must be integer, got char/utf32
 
 rwfunc test() -> () {
 	arr:[]int32 = [1, 2, 3]
-	kvspace·get(arr, "key") -> _
+	arr["key"] -> _
 }

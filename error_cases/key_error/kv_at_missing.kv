@@ -1,6 +1,7 @@
 // expected:
-//   error: KeyError: kv·at: key not found
+//   error: IndexError: scatterarray·at: index out of range
 
 rwfunc test() -> () {
-	kvspace·get("/x", "y") -> _
+	a:[int64]·int64 = {}
+	scatterarray·at(a, 0) -> _
 }

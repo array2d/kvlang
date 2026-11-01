@@ -7,10 +7,8 @@
 //       null→None 空字节）；json·to(root) 把 KV 子树序列化回 JSON，二者无损等价。
 // 期望输出:
 //   roundtrip = {"a":[1,{"b":"x"}],"list":[{"x":1},{"y":2}],"mixed":[1,"a",true,null,3.14],"n":null,"s":["a","b"]}
-rwfunc main() -> () {
+rwfunc test() -> () {
 	json·from("{\"a\":[1,{\"b\":\"x\"}],\"list\":[{\"x\":1},{\"y\":2}],\"mixed\":[1,\"a\",true,null,3.14],\"n\":null,\"s\":[\"a\",\"b\"]}") -> /t
 	json·to(/t) -> out
 	println("roundtrip =", out)
 }
-
-main()

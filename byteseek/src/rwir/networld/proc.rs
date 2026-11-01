@@ -3,33 +3,41 @@
 //! args/envs 均为 stringkeymap（成员 ·[i] 为 []char/utf32）：args 首成员=可执行文件、
 //! 其余为参数；envs 每成员一条 "K=V"，空 = 继承父进程环境、非空 = 完整替换（execve 语义）。
 //! exitcode：uint8。正常退出=退出码(0-255)；被信号终止=128+signo；spawn 失败/无 argv=127。
-//! stdout/stderr 为 @[]uint8 扩展句柄：仅当调用点绑定该写槽时才捕获——绑定→管道捕获+落
-//! 物理文件 /tmp/byteseek/{pid}/{stdout,stderr}+写 @ 句柄（body=逻辑
-//! /networld/{host}/proc/{pid}/{stream}）；未绑定→继承父终端（保持无捕获时的直通输出）。
+//! Bound `stdout`/`stderr` slots capture via pipes into `/tmp/byteseek-{euid}/{id}/{stdout,stderr}`
+//! and write `@[]uint8` handles (`/networld/{host}/proc/{id}/{stream}`, `id = {pid}-{n}`);
+//! unbound slots inherit parent stdio, and capture files persist across restarts.
 
 use std::ffi::OsStr;
+use std::io::Write;
 use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::os::unix::process::ExitStatusExt;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use crate::engine::Engine;
+use crate::engine::{Engine, KvResult};
 use crate::ffi::*;
 
 const SEP: &str = "·";
 
-pub fn exec(eng: &Engine, pc: &str) {
+pub fn exec(eng: &Engine, pc: &str) -> KvResult {
     let args = read_str_list(eng, &read_path(eng, pc, 0));
     let envs = read_str_list(eng, &read_path(eng, pc, 1));
     let out_slot = eng.write_at(pc, 1);
     let err_slot = eng.write_at(pc, 2);
     let r = run(&args, &envs, !out_slot.is_empty(), !err_slot.is_empty());
-    eng.set_xvalue_wire(&eng.write0(pc), "uint8", &[r.code], &[]);
-    if !out_slot.is_empty() {
-        write_handle(eng, &out_slot, r.pid, "stdout", &r.out);
+    eng.set_xvalue_wire(&eng.write0(pc), "uint8", &[r.code], &[])?;
+    if out_slot.is_empty() && err_slot.is_empty() {
+        return Ok(());
     }
-    if !err_slot.is_empty() {
-        write_handle(eng, &err_slot, r.pid, "stderr", &r.err);
+    // Share one capture directory across stdout and stderr of the same execution.
+    let (id, dir) = new_capture_dir(&capture_root()?, r.pid)?;
+    for (slot, stream, bytes) in [(&out_slot, "stdout", &r.out), (&err_slot, "stderr", &r.err)] {
+        if !slot.is_empty() {
+            write_handle(eng, slot, &id, &dir, stream, bytes)?;
+        }
     }
+    Ok(())
 }
 
 struct Run {
@@ -108,31 +116,100 @@ fn run(args: &[String], envs: &[String], cap_out: bool, cap_err: bool) -> Run {
     }
 }
 
-/// 捕获字节落物理文件 + 该写槽写 @[]uint8 句柄（body=逻辑 /networld/{host}/proc/{pid}/{stream}）。
-fn write_handle(eng: &Engine, slot: &str, pid: u32, stream: &str, bytes: &[u8]) {
-    let dir = phys_dir(pid);
-    std::fs::create_dir_all(&dir).ok();
-    std::fs::write(format!("{dir}/{stream}"), bytes).ok();
-    let locator = format!("/networld/{}/proc/{pid}/{stream}", super::hostname());
-    eng.set_ext_handle(slot, "[]uint8", &locator);
+/// Persist captured bytes (exclusive 0600 file) and write the `@[]uint8` handle to `slot`.
+/// Fails the op if writing the file fails so no dangling handle is stored.
+fn write_handle(
+    eng: &Engine,
+    slot: &str,
+    id: &str,
+    dir: &Path,
+    stream: &str,
+    bytes: &[u8],
+) -> KvResult {
+    let path = dir.join(stream);
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&path)
+        .and_then(|mut f| f.write_all(bytes))
+        .map_err(|e| format!("capture {}: {e}", path.display()))?;
+    let locator = format!("/networld/{}/proc/{id}/{stream}", super::hostname());
+    eng.set_ext_handle(slot, "[]uint8", &locator)
 }
 
-fn phys_dir(pid: u32) -> String {
-    format!("/tmp/byteseek/{pid}")
+/// Per-user private capture root `/tmp/byteseek-{euid}` (avoids `/tmp` symlink/squatting
+/// attacks while keeping a fixed path across restarts).
+fn capture_root() -> KvResult<PathBuf> {
+    let root = capture_root_path();
+    ensure_private_dir(&root, true)?;
+    Ok(root)
 }
 
-/// @ 句柄兑现（read_at 调）：逻辑 /networld/{host}/proc/{pid}/{stream} → 物理文件读回字节。
+fn capture_root_path() -> PathBuf {
+    PathBuf::from(format!("/tmp/byteseek-{}", unsafe { libc::geteuid() }))
+}
+
+/// Verify `path` is a real directory (via `lstat`, no symlinks) owned by `euid` with mode 0700;
+/// creates it with mode 0700 when `create` is true.
+fn ensure_private_dir(path: &Path, create: bool) -> KvResult {
+    if create {
+        match std::fs::DirBuilder::new().mode(0o700).create(path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(format!("create {}: {e}", path.display())),
+        }
+    }
+    let uid = unsafe { libc::geteuid() };
+    let m = std::fs::symlink_metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    if !m.file_type().is_dir() || m.uid() != uid || m.mode() & 0o077 != 0 {
+        return Err(format!(
+            "{} is not a private directory of uid {uid} (symlink, foreign owner, or group/other \
+             permissions); refusing to use it for captures",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+/// Allocate a unique `{pid}-{n}` capture directory via exclusive `mkdir`, avoiding PID-reuse collisions.
+fn new_capture_dir(root: &Path, pid: u32) -> KvResult<(String, PathBuf)> {
+    let mut n = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    for _ in 0..64 {
+        let id = format!("{pid}-{n}");
+        let dir = root.join(&id);
+        match std::fs::DirBuilder::new().mode(0o700).create(&dir) {
+            Ok(()) => return Ok((id, dir)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => n = n.wrapping_add(1),
+            Err(e) => return Err(format!("create {}: {e}", dir.display())),
+        }
+    }
+    Err(format!("no free capture id for pid {pid} under {}", root.display()))
+}
+
+/// Accept only `{digits}-{digits}` capture IDs to prevent path traversal.
+fn valid_capture_id(id: &str) -> bool {
+    let digits = |s: &str| !s.is_empty() && s.len() <= 20 && s.bytes().all(|b| b.is_ascii_digit());
+    id.split_once('-').is_some_and(|(p, n)| digits(p) && digits(n))
+}
+
+/// Materialize `@` handle `/networld/{host}/proc/{id}/{stream}` from the validated private capture dir.
 pub fn resolve_read(locator: &str) -> Vec<u8> {
     let parts: Vec<&str> = locator.trim_start_matches('/').split('/').collect();
-    if parts.len() == 5 && parts[0] == "networld" && parts[2] == "proc" {
-        return std::fs::read(format!("{}/{}", phys_dir_str(parts[3]), parts[4]))
-            .unwrap_or_default();
+    let ["networld", host, "proc", id, stream] = parts.as_slice() else {
+        return Vec::new();
+    };
+    if host.is_empty() || !valid_capture_id(id) || !matches!(*stream, "stdout" | "stderr") {
+        return Vec::new();
     }
-    Vec::new()
-}
-
-fn phys_dir_str(pid: &str) -> String {
-    format!("/tmp/byteseek/{pid}")
+    let root = capture_root_path();
+    if ensure_private_dir(&root, false).is_err() {
+        return Vec::new();
+    }
+    std::fs::read(root.join(id).join(stream)).unwrap_or_default()
 }
 
 /// 取读参 idx 的容器 KV 路径（ResolveRead 对数组只返首元素，容器须用 ResolveReadPath）。
@@ -154,4 +231,72 @@ fn read_str_list(eng: &Engine, path: &str) -> Vec<String> {
     idxs.iter()
         .map(|i| eng.get_kv(&format!("{path}{SEP}[{i}]")))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn scratch(tag: &str) -> PathBuf {
+        let p = std::env::temp_dir().join(format!("byteseek-proc-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&p);
+        let _ = std::fs::remove_file(&p);
+        p
+    }
+
+    #[test]
+    fn capture_id_shape() {
+        assert!(valid_capture_id("1234-1730000000000000000"));
+        for bad in ["", "1234", "-1", "1-", "..", "1-2/..", "1-2-3", "a-1", "1-../x", " 1-2"] {
+            assert!(!valid_capture_id(bad), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn private_dir_checks() {
+        let d = scratch("dir");
+        ensure_private_dir(&d, true).unwrap();
+        let m = std::fs::symlink_metadata(&d).unwrap();
+        assert_eq!(m.mode() & 0o777, 0o700);
+        ensure_private_dir(&d, false).unwrap();
+        // Reject group/other permissions.
+        std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o775)).unwrap();
+        assert!(ensure_private_dir(&d, true).is_err());
+        std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o700)).unwrap();
+        // Reject symlinks even when pointing to a private dir (lstat).
+        let l = scratch("link");
+        std::os::unix::fs::symlink(&d, &l).unwrap();
+        assert!(ensure_private_dir(&l, true).is_err());
+        // Reject missing dir when create=false.
+        assert!(ensure_private_dir(&scratch("missing"), false).is_err());
+        std::fs::remove_file(&l).unwrap();
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn capture_ids_never_collide_for_same_pid() {
+        let d = scratch("ids");
+        ensure_private_dir(&d, true).unwrap();
+        let (a, da) = new_capture_dir(&d, 42).unwrap();
+        let (b, db) = new_capture_dir(&d, 42).unwrap();
+        assert_ne!(a, b);
+        assert!(valid_capture_id(&a) && valid_capture_id(&b));
+        assert!(a.starts_with("42-") && da.is_dir() && db.is_dir());
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn resolve_read_rejects_bad_locators() {
+        for bad in [
+            "/networld/h/proc/../../etc/passwd",
+            "/networld/h/proc/1-2/../x",
+            "/networld/h/proc/1/stdout",
+            "/networld/h/proc/1-2/passwd",
+            "/networld//proc/1-2/stdout",
+            "/elsewhere/h/proc/1-2/stdout",
+        ] {
+            assert!(resolve_read(bad).is_empty(), "{bad}");
+        }
+    }
 }

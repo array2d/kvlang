@@ -5,18 +5,24 @@ fn body(data: &[u8]) -> &[u8] {
     kvkind::body(data, &h)
 }
 
-fn redis_dsn() -> String {
-    std::env::var("KVLANG_TEST_REDIS_DSN").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string())
+/// Run only when `KVLANG_TEST_REDIS_DSN` is explicitly set to avoid polluting a local Redis instance.
+fn redis_dsn() -> Option<String> {
+    let dsn = std::env::var("KVLANG_TEST_REDIS_DSN").ok().filter(|d| !d.is_empty());
+    if dsn.is_none() {
+        eprintln!("skip: set KVLANG_TEST_REDIS_DSN to a dedicated redis to run this test");
+    }
+    dsn
 }
 
 /// Use a dedicated Redis instance for this test.
 #[test]
 fn redis_roundtrip() {
-    let mut kv = Kv::conn(&redis_dsn());
+    let Some(dsn) = redis_dsn() else { return };
+    let mut kv = Kv::conn(&dsn);
     init_dirs(&mut kv).unwrap();
 
     // 写一个 rwir（Opaque kind）并读回（无 `.` 的 plain key，避免 dict 拆分）
-    let v = kvkind::new_rwir(0, 0, "testop");
+    let v = kvkind::new_rwir(0, 0, "testop").unwrap();
     kv.set(&[("/lib/testop".to_string(), "rwir".to_string(), v)]).unwrap();
     let got = kv.get_one("/lib/testop");
     assert_eq!(kvkind::kind(&got, &kv.langtype_of("/lib/testop")), "rwir");
@@ -32,7 +38,8 @@ fn redis_roundtrip() {
 
 #[test]
 fn redis_compile() {
-    let mut kv = Kv::conn(&redis_dsn());
+    let Some(dsn) = redis_dsn() else { return };
+    let mut kv = Kv::conn(&dsn);
     init_dirs(&mut kv).unwrap();
 
     let src = "rwfunc sum(A:int64, B:int64) -> (C:int64) {\n    A + B -> C\n}\n";

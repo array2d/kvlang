@@ -27,29 +27,16 @@ void kvlangKvspaceDisconnect(kvspace_t *k) {
     free(k);
 }
 
-/* 借用读顺带读值内 attr 区 langtype（#571：类型随值单 key）。
- * GetHead 失败/空 attr → langtype_len=0（None 判据的一部分）。 */
-static void get_one_fill_langtype(kvspace_t *k, const char *key,
-                                  kvlangXvalue_t *out) {
-    kvspaceHead_t h;
-    if (kvspaceGetHead(k->handle, key, &h) == 0)
-        kvlangXvalueSetHeadLangtype(out, &h);
-    else
-        kvlangXvalueSetLangtype(out, "", 0);
-}
-
-/* Borrowed read (resolve=0). Empty -> out len=0. */
+/* Borrowed read (resolve=0). Empty -> out len=0.
+ * Populate `langtype` directly from the wire's trailing attr section (`langtype_len = 0` if empty). */
 int kvlangKvspaceGetOne(kvspace_t *k, const char *key, kvlangXvalue_t *out) {
     kvlangXvalueZero(out);
     uint8_t *d = NULL;
     uint32_t len = 0;
     if (kvspaceGet(k->handle, key, 0, &d, &len) != 0)
         return -1;
-    if (d && len > 0) {
-        out->bytes = d;
-        out->length = len;
-        get_one_fill_langtype(k, key, out);
-    }
+    if (d && len > 0)
+        kvlangXvalueSetWire(out, d, len);
     return 0;
 }
 
@@ -227,9 +214,7 @@ int kvlangKvspaceWatch(kvspace_t *k, const char *key, const kvlangXvalue_t *targ
     kvlangViewAckNow(k);
     if (wrc != 0)
         return -1;
-    if (d && len) {
-        out->bytes = d; /* 借用视图；调用方在同一指令内使用，不 free */
-        out->length = len;
-    }
+    if (d && len) /* borrowed view valid for the current instruction; do not free */
+        kvlangXvalueSetWire(out, d, len);
     return 0;
 }

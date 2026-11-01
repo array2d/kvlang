@@ -682,10 +682,26 @@ bool jit2_verify(const Segment* seg, Jit2Plan* plan, JitRefusal* refusal) {
         return rwir::int64_fast_opfn(ci.op);
     };
     plan->opfn.assign(static_cast<std::size_t>(n), 0);
+    auto int_typed = [&](int r) {
+        const RegDesc& d = seg->regs[static_cast<std::size_t>(r)];
+        if (d.kind == Operand::Kind::Literal)
+            return seg->lit[r].is_i64;
+        return d.kind == Operand::Kind::Var &&
+               d.langtype == vmbin::LangType::Int64 && d.width == 8;
+    };
+    auto int_operand_ok = [&](int r) {
+        const RegDesc& d = seg->regs[static_cast<std::size_t>(r)];
+        if (d.kind == Operand::Kind::Literal)
+            return seg->lit[r].is_i64;
+        return d.kind == Operand::Kind::Var &&
+               (d.langtype == vmbin::LangType::None ||
+                (d.langtype == vmbin::LangType::Int64 && d.width == 8));
+    };
     for (int i = 0; i < n; i++) {
         const CInsn& ci = seg->insns[i];
         if (ci.fast_i64) {
-            plan->opfn[static_cast<std::size_t>(i)] = ci.opfn;
+            if (ci.nrd == 2 && int_operand_ok(ci.rd[0]) && int_operand_ok(ci.rd[1]))
+                plan->opfn[static_cast<std::size_t>(i)] = ci.opfn;
             continue;
         }
         if (ci.impl != rwir::Impl::Dynamic || ci.nrd != 2 || ci.nwr != 1)
@@ -693,13 +709,6 @@ bool jit2_verify(const Segment* seg, Jit2Plan* plan, JitRefusal* refusal) {
         const std::uint8_t f = int_opfn_of(ci);
         if (f == 0)
             continue;
-        auto int_typed = [&](int r) {
-            const RegDesc& d = seg->regs[static_cast<std::size_t>(r)];
-            if (d.kind == Operand::Kind::Literal)
-                return seg->lit[r].is_i64;
-            return d.kind == Operand::Kind::Var &&
-                   d.langtype == vmbin::LangType::Int64 && d.width == 8;
-        };
         if (int_typed(ci.rd[0]) && int_typed(ci.rd[1]))
             plan->opfn[static_cast<std::size_t>(i)] = f;
     }
@@ -1065,7 +1074,7 @@ bool jit2_verify(const Segment* seg, Jit2Plan* plan, JitRefusal* refusal) {
             }
             if (seg->regs[ci.wr[0]].kind != Operand::Kind::Var)
                 return refuse(VmjitRefusalReason::UnsupportedOperand, ci.wr[0]);
-        } else if (ci.fast_i64 || plan->opfn[static_cast<std::size_t>(i)] != 0) {
+        } else if (plan->opfn[static_cast<std::size_t>(i)] != 0) {
             site = 6;
             const std::uint8_t ofn = plan->opfn[static_cast<std::size_t>(i)];
             if (ofn < 1 || ofn > 18)
@@ -1985,8 +1994,25 @@ std::vector<std::uint8_t> jit2_emit(const Segment* seg, const Jit2Plan& plan) {
                 std::memcpy(&bits, &seg->lit[ci.rd[1]].f, sizeof bits);
                 c.mov_imm64(kR11, static_cast<std::int64_t>(bits));
                 c.movq_xmm_gpr(1, kR11);
+            } else if (fop == 4) {
+                c.mov_reg_from_stack(kR11, spill_slot(ci.rd[1]));
+                c.movq_xmm_gpr(1, kR11);
             } else {
                 c.movsd_load(1, spill_slot(ci.rd[1]));
+            }
+            if (fop == 4) {
+                // Reject +0.0 and -0.0 before `divsd` to raise `ZeroDivisionError`.
+                c.mov_imm64(kR10, 0x7FFFFFFFFFFFFFFFLL);
+                c.and_(kR10, kR11);
+                c.jcc(0x85);  // jnz non-zero
+                const std::size_t jnz_ok = c.b.size() - 4;
+                emit_exit_record(6 /*Error*/, 0, 11 /*div by zero*/,
+                                 static_cast<std::uint32_t>(i + 1), 0);
+                emit_return_from_stub();
+                const std::int32_t rel =
+                    static_cast<std::int32_t>(c.b.size()) -
+                    static_cast<std::int32_t>(jnz_ok + 4);
+                std::memcpy(c.b.data() + jnz_ok, &rel, 4);
             }
             switch (fop) {
             case 1: c.ss_arith(0x58, 0, 1); break;  // addsd

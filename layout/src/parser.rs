@@ -7,7 +7,7 @@ use super::ast::{
     StructDecl,
 };
 use super::keytree;
-use super::scanner::{scan, Diagnostic, Kind, Pos, Token};
+use super::scanner::{scan_with_diags, Diagnostic, Kind, Pos, Token};
 use super::symbol;
 
 pub fn has_errors(diags: &[Diagnostic]) -> bool {
@@ -20,11 +20,13 @@ pub fn parse_code(src: &str) -> Result<(ast::File, Vec<Diagnostic>), String> {
         return Err("empty input".to_string());
     }
     let lines: Vec<String> = src.split('\n').map(|s| s.to_string()).collect();
+    let (tokens, lex_errors) = scan_with_diags(src);
     let mut p = Parser {
-        tokens: scan(src),
+        tokens,
         pos: 0,
-        errors: Vec::new(),
+        errors: lex_errors,
         addr_params: Vec::new(),
+        flow: FlowCtx::default(),
     };
     let f = p.parse_file();
     for d in &mut p.errors {
@@ -45,9 +47,97 @@ struct Parser {
     // 当前函数体的地址形参名（声明带 `*`/`@`）：体内名字已被 layout 解引用一次（即实参值），
     // 故体里再写 `*p` 就是两层间接——当前参数模型不支持（见 issue #286），报错不静默降级。
     addr_params: Vec<String>,
+    // Per-function control-flow context, validated at function end.
+    flow: FlowCtx,
+}
+
+/// Per-function control-flow state: loop depth (`break`/`continue`), block labels, and
+/// `goto`/`br` jumps (validated in the parser to report source positions).
+#[derive(Default)]
+struct FlowCtx {
+    loop_depth: u32,
+    labels: Vec<(String, Pos)>,
+    jumps: Vec<(Expr, Pos)>,
 }
 
 impl Parser {
+    fn error_at(&mut self, pos: Pos, message: String) {
+        self.errors.push(Diagnostic {
+            pos,
+            message,
+            warn: false,
+            info: false,
+            source: String::new(),
+            src_file: String::new(),
+            src_name: String::new(),
+        });
+    }
+
+    /// Parse one comma-separated list item; if no token is consumed (e.g. `=` in `f(a=1)`),
+    /// emit an error and advance one token to prevent infinite loops.
+    fn parse_list_item(&mut self, items: &mut Vec<Expr>, ctx: &str) {
+        let before = self.pos;
+        if let Some(e) = self.parse_pratt(0) {
+            items.push(e);
+        }
+        if self.pos == before {
+            let t = self.advance();
+            self.error_at(
+                t.pos,
+                format!("unexpected {} {:?} in {ctx}", t.kind, t.value),
+            );
+        }
+    }
+
+    /// Finish a function body: validate label uniqueness and `goto`/`br` targets/arity, then restore `outer`.
+    fn finish_flow(&mut self, outer: FlowCtx) {
+        let flow = std::mem::replace(&mut self.flow, outer);
+        let mut defined: std::collections::HashMap<String, Pos> = std::collections::HashMap::new();
+        for (label, pos) in flow.labels {
+            if let Some(first) = defined.get(&label) {
+                let msg = format!(
+                    "duplicate block label {label:?} (first defined at {}:{})",
+                    first.line, first.col
+                );
+                self.error_at(pos, msg);
+            } else {
+                defined.insert(label, pos);
+            }
+        }
+        for (e, pos) in flow.jumps {
+            let (want, label_args): (usize, &[usize]) = if e.op == "goto" {
+                (1, &[0])
+            } else {
+                (3, &[1, 2])
+            };
+            if e.args.len() != want {
+                let shape = if want == 1 {
+                    "goto(label)"
+                } else {
+                    "br(cond, then_label, else_label)"
+                };
+                self.error_at(
+                    pos,
+                    format!("{} expects {want} argument(s) — {shape}; got {}", e.op, e.args.len()),
+                );
+                continue;
+            }
+            for &i in label_args {
+                let a = &e.args[i];
+                if !a.is_leaf() || a.quote != 0 || !defined.contains_key(&a.val) {
+                    let shown = if a.is_leaf() { a.val.clone() } else { a.to_string() };
+                    self.error_at(
+                        pos,
+                        format!(
+                            "{}: unknown label {shown:?} — target must be a block label `name: {{ … }}` defined in this function",
+                            e.op
+                        ),
+                    );
+                }
+            }
+        }
+    }
+
     fn peek(&self) -> Token {
         self.tokens
             .get(self.pos)
@@ -238,6 +328,8 @@ impl Parser {
                 }
             }
         }
+        // Validate `goto`/`br` targets in the synthesized top-level `init` body.
+        self.finish_flow(FlowCtx::default());
         f
     }
 
@@ -266,6 +358,8 @@ impl Parser {
         let prev_pkg = f.package.clone();
         f.package = pkg.clone();
         self.expect(Kind::LBrace);
+        // Bare statements inside a `lib` block form an independent `init` control-flow context.
+        let outer_flow = std::mem::take(&mut self.flow);
         let mut body: Vec<Stmt> = Vec::new();
         loop {
             let mut comments = self.collect_leading_comments();
@@ -314,6 +408,7 @@ impl Parser {
             }
         }
         self.expect(Kind::RBrace);
+        self.finish_flow(outer_flow);
         if !body.is_empty() {
             f.funcs.push(Func {
                 comments: Vec::new(),
@@ -342,8 +437,10 @@ impl Parser {
             .collect();
         self.skip_newlines_and_comments();
         self.expect(Kind::LBrace);
+        let outer_flow = std::mem::take(&mut self.flow);
         let body = self.parse_body();
         self.expect(Kind::RBrace);
+        self.finish_flow(outer_flow);
         self.addr_params.clear();
         let func = Func {
             comments: Vec::new(),
@@ -453,6 +550,12 @@ impl Parser {
                     && !super::langtype::is_plain_kind(&ty)
                 {
                     self.push_unknown_type("struct field", &fname, &ty, pos);
+                }
+                if let Some(d) = &default {
+                    for mut diag in super::lower::check_field_default(&fname, &ty, d) {
+                        diag.pos = pos;
+                        self.errors.push(diag);
+                    }
                 }
             }
             fields.push(Field {
@@ -948,19 +1051,23 @@ impl Parser {
             Kind::If => vec![self.parse_if()],
             Kind::For => vec![self.parse_for()],
             Kind::While => vec![self.parse_while()],
-            Kind::Break => {
-                self.advance();
+            Kind::Break | Kind::Continue => {
+                let t = self.advance();
                 self.eat(Kind::Newline);
-                vec![Stmt::Break(ast::BreakStmt {
-                    comments: Vec::new(),
-                })]
-            }
-            Kind::Continue => {
-                self.advance();
-                self.eat(Kind::Newline);
-                vec![Stmt::Continue(ast::ContinueStmt {
-                    comments: Vec::new(),
-                })]
+                if self.flow.loop_depth == 0 {
+                    // Still return the statement so `lib` block parsing continues; the recorded error blocks lowering.
+                    let kw = if t.kind == Kind::Break { "break" } else { "continue" };
+                    self.error_at(t.pos, format!("{kw} outside loop (only allowed inside while/for)"));
+                }
+                if t.kind == Kind::Break {
+                    vec![Stmt::Break(ast::BreakStmt {
+                        comments: Vec::new(),
+                    })]
+                } else {
+                    vec![Stmt::Continue(ast::ContinueStmt {
+                        comments: Vec::new(),
+                    })]
+                }
             }
             _ => self
                 .parse_inst()
@@ -1075,7 +1182,9 @@ impl Parser {
         self.expect(Kind::RParen);
         self.skip_newlines_and_comments();
         self.expect(Kind::LBrace);
+        self.flow.loop_depth += 1;
         let body = self.parse_body();
+        self.flow.loop_depth -= 1;
         self.expect(Kind::RBrace);
         Stmt::For(ast::ForStmt {
             comments: Vec::new(),
@@ -1133,7 +1242,9 @@ impl Parser {
         let cond = self.parse_cond_inst();
         self.skip_newlines_and_comments();
         self.expect(Kind::LBrace);
+        self.flow.loop_depth += 1;
         let body = self.parse_body();
+        self.flow.loop_depth -= 1;
         self.expect(Kind::RBrace);
         Stmt::While(ast::WhileStmt {
             comments: Vec::new(),
@@ -1143,7 +1254,9 @@ impl Parser {
     }
 
     fn parse_block_label(&mut self) -> Stmt {
-        let label = self.advance().value;
+        let t = self.advance();
+        let label = t.value;
+        self.flow.labels.push((label.clone(), t.pos));
         self.advance(); // consume Colon
         self.skip_newlines_and_comments();
         self.expect(Kind::LBrace);
@@ -1169,6 +1282,7 @@ impl Parser {
     /// 解析一条「语句级指令」，返回**一或 N 条** Instruction：读槽侧写顶层逗号列表时，
     /// 按位置配对 `writes`、展开为 N 条独立单赋值（见 spec「多赋值」）。个数不等 → error。
     fn parse_inst(&mut self) -> Vec<Instruction> {
+        let start_pos = self.peek().pos;
         let mut inst = Instruction::default();
         let mut multi: Vec<Instruction> = Vec::new();
 
@@ -1231,6 +1345,9 @@ impl Parser {
             let top_legal = i.writes.len() == 1;
             if let Some(e) = &i.expr {
                 self.check_sparse_usage(e, top_legal);
+                if e.op == "goto" || e.op == "br" {
+                    self.flow.jumps.push((e.clone(), start_pos));
+                }
             }
             out[k] = i;
         }
@@ -1342,7 +1459,7 @@ impl Parser {
                 self.advance(); // consume ·
                                 // 动态键 d·*k：段是变量（运行时取值的字符串键）。
                 if self.peek().kind == Kind::Ident && self.peek().value == "*" {
-                    self.advance(); // consume *
+                    let star = self.advance(); // consume *
                     if self.peek().kind == Kind::Ident {
                         let key = self.advance().value;
                         if chain_base.is_none() {
@@ -1350,6 +1467,14 @@ impl Parser {
                         }
                         chain_segs.push(ast::leaf(&key));
                         continue;
+                    }
+                    // `·*<literal>` falls through as a static key (`≡ ·<literal>`); reject complex `·*(...)` keys.
+                    if self.peek().kind != Kind::Literal {
+                        self.error_at(
+                            star.pos,
+                            "dynamic member read: expected a name after `·*` (`base·*k`)".to_string(),
+                        );
+                        return None;
                     }
                 }
                 // 静态成员：段是字符串字面量。
@@ -1399,9 +1524,7 @@ impl Parser {
                     if self.eat(Kind::Comma) {
                         continue;
                     }
-                    if let Some(idx) = self.parse_pratt(0) {
-                        indices.push(idx);
-                    }
+                    self.parse_list_item(&mut indices, "subscript");
                 }
                 self.expect(Kind::RBrack);
                 let is_path = left.is_leaf() && left.val.starts_with('/');
@@ -1528,9 +1651,7 @@ impl Parser {
                     fill = true;
                     break;
                 }
-                if let Some(e) = self.parse_pratt(0) {
-                    elems.push(e);
-                }
+                self.parse_list_item(&mut elems, "array literal");
             }
             self.expect(Kind::RBrack);
             if fill {
@@ -1754,9 +1875,7 @@ impl Parser {
                 if self.eat(Kind::Comma) {
                     continue;
                 }
-                if let Some(a) = self.parse_pratt(0) {
-                    args.push(a);
-                }
+                self.parse_list_item(&mut args, "argument list");
             }
             self.expect(Kind::RParen);
             return Some(ast::call(&name, args));
@@ -1769,9 +1888,11 @@ impl Parser {
                 || (lhs.kind == Kind::Literal
                     && !lhs.value.is_empty()
                     && lhs.value.as_bytes()[0] == b'/');
-            lhs_ok && self.peek_at(1).kind == Kind::Dot && self.peek_at(2).kind == Kind::Ident && {
+            // `*` after `·` starts a dynamic member key (`·*k`), never a call opcode `m·*`.
+            let seg = |t: Token| t.kind == Kind::Ident && t.value != ast::DEREF_OP;
+            lhs_ok && self.peek_at(1).kind == Kind::Dot && seg(self.peek_at(2)) && {
                 let mut j = 3isize;
-                while self.peek_at(j).kind == Kind::Dot && self.peek_at(j + 1).kind == Kind::Ident {
+                while self.peek_at(j).kind == Kind::Dot && seg(self.peek_at(j + 1)) {
                     j += 2;
                 }
                 self.peek_at(j).kind == Kind::LParen
@@ -1790,9 +1911,7 @@ impl Parser {
                 if self.eat(Kind::Comma) {
                     continue;
                 }
-                if let Some(a) = self.parse_pratt(0) {
-                    args.push(a);
-                }
+                self.parse_list_item(&mut args, "argument list");
             }
             self.expect(Kind::RParen);
             return Some(ast::call(&opcode, args));
@@ -1813,9 +1932,7 @@ impl Parser {
                 if self.eat(Kind::Comma) {
                     continue;
                 }
-                if let Some(a) = self.parse_pratt(0) {
-                    args.push(a);
-                }
+                self.parse_list_item(&mut args, "argument list");
             }
             self.expect(Kind::RParen);
             return Some(ast::call(&opcode, args));
@@ -1978,6 +2095,10 @@ impl Parser {
                     }
                     w.push_str(&self.advance().value);
                 }
+                if depth > 0 {
+                    let pos = self.peek().pos;
+                    self.error_at(pos, format!("unterminated `[` in write slot {w:?}"));
+                }
                 writes.push(w);
                 wtypes.push(String::new());
                 continue;
@@ -1990,15 +2111,7 @@ impl Parser {
                 while self.peek().kind == Kind::Dot {
                     self.advance(); // .
                     w.push_str(keytree::MEMBER_SEP);
-                    if self.peek().kind == Kind::Ident
-                        && self.peek().value == "*"
-                        && self.peek_at(1).kind == Kind::Ident
-                    {
-                        w.push_str(&self.advance().value); // *
-                    }
-                    if self.peek().kind == Kind::Ident || self.peek().kind == Kind::Literal {
-                        w.push_str(&self.advance().value);
-                    } else {
+                    if !self.member_write_segment(&mut w) {
                         break;
                     }
                 }
@@ -2037,6 +2150,66 @@ impl Parser {
             src_file: String::new(),
             src_name: String::new(),
         });
+    }
+
+    /// Parse one write-slot member segment (`·` already consumed); returns whether chaining may continue.
+    /// Accepts static names/literals (`base·0`, `base·"c"`), `·*<literal>` (`≡ ·<literal>`), and single-name
+    /// dynamic keys `base·*name`; rejects missing names or compound expressions like `·*k+1`.
+    fn member_write_segment(&mut self, w: &mut String) -> bool {
+        let t = self.peek();
+        if t.kind == Kind::Ident && t.value == ast::DEREF_OP {
+            let next = self.peek_at(1);
+            let is_path = next.kind == Kind::Literal && next.value.starts_with('/');
+            match next.kind {
+                Kind::Ident => {
+                    self.advance(); // *
+                    w.push_str(ast::DEREF_OP);
+                    w.push_str(&self.advance().value);
+                    let after = self.peek();
+                    if after.kind == Kind::Ident && symbol::lookup(&after.value).precedence > 0 {
+                        self.error_at(
+                            after.pos,
+                            format!(
+                                "dynamic member write key must be a single name (`base·*k`), got `·*{}{}…`; compute the key into a variable first",
+                                next.value, after.value
+                            ),
+                        );
+                        self.skip_rest_of_slot();
+                        return false;
+                    }
+                    true
+                }
+                Kind::Literal if !is_path => {
+                    self.advance(); // *
+                    w.push_str(&self.advance().value);
+                    true
+                }
+                _ => {
+                    self.error_at(
+                        t.pos,
+                        "dynamic member write: expected a name after `·*` (`base·*k`)".to_string(),
+                    );
+                    self.advance(); // *
+                    self.skip_rest_of_slot();
+                    false
+                }
+            }
+        } else if t.kind == Kind::Ident || t.kind == Kind::Literal {
+            w.push_str(&self.advance().value);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Skip remaining tokens of a malformed write-slot list up to newline, `}`, or assignment arrow.
+    fn skip_rest_of_slot(&mut self) {
+        while !matches!(
+            self.peek().kind,
+            Kind::Newline | Kind::RBrace | Kind::EOF | Kind::Arrow
+        ) {
+            self.advance();
+        }
     }
 
     fn parse_write_slot(&mut self) -> (String, String) {
@@ -2148,15 +2321,7 @@ impl Parser {
                 while self.peek().kind == Kind::Dot && self.peek_at(1).kind != Kind::LBrack {
                     self.advance(); // .
                     w.push_str(keytree::MEMBER_SEP);
-                    if self.peek().kind == Kind::Ident
-                        && self.peek().value == "*"
-                        && self.peek_at(1).kind == Kind::Ident
-                    {
-                        w.push_str(&self.advance().value); // *
-                    }
-                    if self.peek().kind == Kind::Ident || self.peek().kind == Kind::Literal {
-                        w.push_str(&self.advance().value);
-                    } else {
+                    if !self.member_write_segment(&mut w) {
                         break;
                     }
                 }
@@ -2196,6 +2361,10 @@ impl Parser {
                     }
                     w.push_str(&self.advance().value);
                 }
+                if depth > 0 {
+                    let pos = self.peek().pos;
+                    self.error_at(pos, format!("unterminated `[` in write slot {w:?}"));
+                }
                 writes.push(w);
                 wtypes.push(String::new());
                 continue;
@@ -2219,6 +2388,10 @@ impl Parser {
                     }
                     w.push_str(&self.advance().value);
                 }
+                if depth > 0 {
+                    let pos = self.peek().pos;
+                    self.error_at(pos, format!("unterminated `[` in write slot {w:?}"));
+                }
                 writes.push(w);
                 wtypes.push(String::new());
                 continue;
@@ -2241,7 +2414,9 @@ impl Parser {
         let s = inst.writes[0].clone();
         let br = s.find('[').unwrap_or(s.len());
         let arr = s[..br].to_string();
-        let idxs = s[br + 1..s.len().saturating_sub(1)].to_string();
+        // Strip trailing `]` safely even when `[` is unclosed or the final byte is non-ASCII.
+        let end = s.len().saturating_sub(1).max(br + 1);
+        let idxs = s.get(br + 1..end).unwrap_or("").to_string();
         let e = inst.expr.take();
         let dot_coord = arr.ends_with(keytree::MEMBER_SEP);
         let arr = arr.trim_end_matches(keytree::MEMBER_SEP).to_string();
@@ -2297,10 +2472,11 @@ impl Parser {
         for field in parts {
             if field.starts_with('*') {
                 if field.len() == 1 {
+                    // Reject malformed `base·*` write slot (defensive fallback after `member_write_segment`).
                     let t = self.peek();
                     self.errors.push(Diagnostic {
                         pos: t.pos,
-                        warn: true,
+                        warn: false,
                         message: "dynamic member write: expected identifier after '.*'".to_string(),
                         info: false,
                         source: String::new(),

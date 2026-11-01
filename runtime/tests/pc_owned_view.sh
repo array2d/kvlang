@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # b1b：PC owned view 固定档与跨档。
-# 1) 首次写后 body_cap >= 1024、headlen=64、pow=6/flags=1、
-#    a==len(body)、langtype == [a]char/utf8；
+# 1) After first write: body_cap >= 1024, headlen=8, storetype=1, ptr=0, len==${#body};
 # 2) 深递归多帧运行后仍走 owned（固定档保持），可暂停/恢复。
 # 说明：PC 编码按帧深/irseq 压缩，合法 PC 远小于 256，跨档路径不可达；
 # 这里验证固定档与深帧场景的一致性。
@@ -22,20 +21,18 @@ vid=$("$KVLANG" create worker) || fail "create"
 "$KVLANG" run "$vid" >/dev/null 2>&1 # 停在 deep() 底部的 paused
 out=$("$PROBE" "$KVSPACE" "$vid") || fail "probe"
 echo "$out"
-pow=$(sed -n 's/.*pow=\([0-9]*\).*/\1/p' <<<"$out")
-flags=$(sed -n 's/.*flags=\([0-9]*\).*/\1/p' <<<"$out")
-a=$(sed -n 's/.* a=\([0-9]*\) .*/\1/p' <<<"$out")
-b=$(sed -n 's/.* b=\([0-9]*\) .*/\1/p' <<<"$out")
+st=$(sed -n 's/.*storetype=\([0-9]*\).*/\1/p' <<<"$out")
+ptr=$(sed -n 's/.*ptr=\([0-9]*\).*/\1/p' <<<"$out")
+len=$(sed -n 's/.* len=\([0-9]*\).*/\1/p' <<<"$out")
 hl=$(sed -n 's/.*headlen=\([0-9]*\).*/\1/p' <<<"$out")
 bc=$(sed -n 's/.*body_cap=\([0-9]*\).*/\1/p' <<<"$out")
-lt=$(sed -n 's/.*lt=\([^ ]*\).*/\1/p' <<<"$out")
-[ "$pow" = 6 ] || fail "pow=$pow"
-[ "$flags" = 1 ] || fail "flags=$flags"
-[ "$hl" = 64 ] || fail "headlen=$hl"
+body=$(sed -n 's/.*body=//p' <<<"$out")
+[ "$st" = 1 ] || fail "storetype=$st"
+[ "$ptr" = 0 ] || fail "ptr=$ptr"
+[ "$hl" = 8 ] || fail "headlen=$hl"
 [ "$bc" -ge 1024 ] || fail "body_cap=$bc < 1024"
-[ "$a" -le "$b" ] || fail "a=$a > b=$b"
-[ "$lt" = "[$a]char/utf8" ] || fail "langtype=$lt a=$a"
-[ "$a" -gt 0 ] && [ "$a" -lt 256 ] || fail "PC 长度异常（a=$a）"
+[ "$len" = "${#body}" ] || fail "len=$len != bodylen=${#body}"
+[ "$len" -gt 0 ] && [ "$len" -lt 256 ] || fail "unexpected PC length (len=$len)"
 # 恢复并跑完
 ST=$(printf '/vthread/%s/\xe2\x80\xa5status' "$vid")
 "$KVC" set "$ST" "string:running" >/dev/null

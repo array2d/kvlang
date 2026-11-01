@@ -218,16 +218,17 @@ rwfunc float_key_runtime_canonical() -> () {
 
 rwfunc invalid_nan_key() -> () {
     m:float64·int64 = {}
-    zero = 0.0
-    k = zero ÷ zero
+    // Float `/ 0` raises ZeroDivisionError; produce NaN via `sqrt(-1)`.
+    neg = 0.0 - 1.0
+    float64·sqrt(neg) -> k
     string·concat(m, k) -> v
 }
 
 rwfunc invalid_inf_key() -> () {
     m:float64·int64 = {}
-    one = 1.0
-    zero = 0.0
-    k = one ÷ zero
+    // Produce `+Inf` via `exp` overflow (float `/ 0` raises ZeroDivisionError).
+    big = 1000.0
+    float64·exp(big) -> k
     string·concat(m, k) -> v
 }
 
@@ -584,8 +585,8 @@ run_error("invalid_direct_relative", "requires an absolute path")
 run_error("invalid_direct_bool", "requires an absolute path")
 run_error("invalid_direct_container", "requires an absolute path")
 run_error("invalid_member_relative", "member base must be an absolute path string")
-run_error("invalid_scalar", "requires a struct/map container or path string")
-run_error("invalid_compact", "requires a struct/map container or path string")
+run_error("invalid_scalar", "member access requires a container (struct/map)")
+run_error("invalid_compact", "member access requires a container (struct/map)")
 run_error("invalid_key", "member key must be a scalar or string")
 run_error("missing_memhead", "TypeError: memhead b does not exist")
 

@@ -101,8 +101,9 @@ def parse_expects(f: Path) -> list[str]:
     with open(f) as fh:
         for line in fh:
             line = line.rstrip("\n")
-            if line.startswith("// 期望输出"):
-                inline = line[len("// 期望输出") :].lstrip()
+            if line.startswith("// 期望输出") or line.startswith("// Expected output"):
+                prefix = "// 期望输出" if line.startswith("// 期望输出") else "// Expected output"
+                inline = line[len(prefix) :].lstrip()
                 if inline.startswith(":"):
                     inline = inline[1:].strip()
                 if inline:

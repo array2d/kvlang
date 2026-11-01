@@ -20,6 +20,7 @@ int kvlangKvcpuCallOpcode(kvspace_t *kv, const char *vtid, const char *pc,
                           size_t pc_out_cap, bool *pc_feedback,
                           struct kvspaceKeyOff *pc_off,
                           struct kvspaceKeyOff *status_off,
+                          void *pc_view_state,
                           kvlangExecCursor *cursor);
 
 struct kvlangParkedFrame;

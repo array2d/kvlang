@@ -1,0 +1,93 @@
+// jit_alias: x86_64 JIT loop shapes covering destination aliasing (`t = i + t`),
+// callee-saved registers (R12-R15), zero-extended setcc booleans, and bool return values.
+// Expected output:
+//   sum_alias(10) = 45
+//   alias_dst(5) = 1136
+//   locals8(10) = 7347
+//   locals9(10) = 9492
+//   cmp_var(10) = 45
+//   lt5(3) = true
+//   lt5(7) = false
+rwfunc sum_alias(n:int64) -> (total:int64) {
+	total = 0
+	i = 0
+	while (i < n) {
+		total = i + total
+		i = i + 1
+	}
+}
+rwfunc alias_dst(n:int64) -> (r:int64) {
+	r = 1
+	i = 0
+	while (i < n) {
+		r = r + r
+		t = i + r
+		r = t + r
+		i = i + 1
+	}
+}
+rwfunc locals8(n:int64) -> (r:int64) {
+	r = 0
+	a = 1
+	b = 2
+	c = 3
+	d = 4
+	e = 5
+	g = 6
+	i = 0
+	while (i < n) {
+		a = a + b
+		b = b + c
+		c = c + d
+		d = d + e
+		e = e + g
+		g = g + 1
+		r = r + a
+		i = i + 1
+	}
+}
+rwfunc locals9(n:int64) -> (r:int64) {
+	r = 0
+	a = 1
+	b = 2
+	c = 3
+	d = 4
+	e = 5
+	g = 6
+	h = 7
+	i = 0
+	while (i < n) {
+		a = a + b
+		b = b + c
+		c = c + d
+		d = d + e
+		e = e + g
+		g = g + h
+		h = h + 1
+		r = r + a
+		i = i + 1
+	}
+}
+rwfunc cmp_var(n:int64) -> (r:int64) {
+	// Store comparison result in a local before `while` to exercise standalone setcc.
+	r = 0
+	i = 0
+	c = i < n
+	while (c) {
+		r = r + i
+		i = i + 1
+		c = i < n
+	}
+}
+rwfunc lt5(n:int64) -> (r:bool) {
+	r = n < 5
+}
+rwfunc test() -> () {
+	println("sum_alias(10) =", sum_alias(10))
+	println("alias_dst(5) =", alias_dst(5))
+	println("locals8(10) =", locals8(10))
+	println("locals9(10) =", locals9(10))
+	println("cmp_var(10) =", cmp_var(10))
+	println("lt5(3) =", lt5(3))
+	println("lt5(7) =", lt5(7))
+}

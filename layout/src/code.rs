@@ -30,20 +30,10 @@ pub fn init_dirs(kv: &mut Kv) -> Result<(), String> {
 /// 返回本次写入的 init 函数名列表（pkg 严格取自 `lib` 声明：`lib X {…}` → `X·init`，
 /// 裸顶层语句 → `init`），供消费方按 lib 声明驱动 init（非文件系统路径推导）。
 pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
-    let (file, mut diags) = parser::parse_code(src)?;
-    for f in subscript_check_funcs(&file) {
-        diags.extend(lower::check_container_subscript(&f));
-        diags.extend(lower::check_map_defined(&f));
-        diags.extend(lower::check_container_typed(&f));
-    }
-    for d in &diags {
-        eprintln!("{}", d.string());
-    }
-    if parser::has_errors(&diags) {
-        return Err("parse: error-level diagnostics — refusing to load".to_string());
-    }
+    // Run all pure checks first (shared with `vet`) so errors never leave partial writes.
+    let checked = analyze_file(src)?;
+    let file = &checked.file;
 
-    let mut any_code = false;
     let mut inits: Vec<String> = Vec::new();
     let local_funcs: HashSet<String> = file
         .funcs
@@ -61,6 +51,61 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
             }
         })
         .collect();
+    // Write order: struct decls -> rwfuncs -> rwir decls -> top-level init.
+    for decl in &file.structs {
+        write_struct_decl(kv, decl)?;
+    }
+    for a in &checked.funcs {
+        write_func(kv, a, &local_funcs, &checked.structs)?;
+        if a.is_init {
+            inits.push(init_fn_name(&a.pkg));
+        }
+    }
+    for decl in &file.rwir_decls {
+        write_rwir_decl(kv, decl)?;
+    }
+    if let Some(a) = &checked.top_init {
+        write_func(kv, a, &local_funcs, &checked.structs)?;
+        inits.push(init_fn_name(""));
+    }
+    Ok(inits)
+}
+
+/// Pure per-function analysis output: lowering, slot/type checks, specialization, and linearization.
+pub struct AnalyzedFunc {
+    pkg: String,
+    func: Func,
+    declared: HashMap<String, String>,
+    type_sets: HashMap<String, Vec<String>>,
+    seq: Vec<Instruction>,
+    labels: HashMap<String, i32>,
+    is_init: bool,
+}
+
+/// Output of [`analyze_file`]: parsed AST plus analyzed rwfuncs and optional top-level init.
+pub struct CheckedFile {
+    file: ast::File,
+    structs: lower::StructTable,
+    funcs: Vec<AnalyzedFunc>,
+    top_init: Option<AnalyzedFunc>,
+}
+
+/// Pure kvspace-free validation shared by `vet` and `compile`: parse/container diagnostics,
+/// lowering, write-slot checks, specialization, linearization, jump target resolution, and op arity.
+/// State-dependent checks (such as `/lib/<opcode>` `def rwir` collisions) remain in `compile`.
+fn analyze_file(src: &str) -> Result<CheckedFile, String> {
+    let (file, mut diags) = parser::parse_code(src)?;
+    for f in subscript_check_funcs(&file) {
+        diags.extend(lower::check_container_subscript(&f));
+        diags.extend(lower::check_map_defined(&f));
+        diags.extend(lower::check_container_typed(&f));
+    }
+    for d in &diags {
+        eprintln!("{}", d.string());
+    }
+    if parser::has_errors(&diags) {
+        return Err("parse: error-level diagnostics — refusing to load".to_string());
+    }
     let mut sigs: lower::SigTable = HashMap::new();
     for f in &file.funcs {
         let qual = if f.pkg.is_empty() {
@@ -80,7 +125,6 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
     }
     let mut structs: lower::StructTable = HashMap::new();
     for decl in &file.structs {
-        write_struct_decl(kv, decl);
         let qual = if decl.pkg.is_empty() {
             decl.name.clone()
         } else {
@@ -90,32 +134,21 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
         structs
             .entry(decl.name.clone())
             .or_insert_with(|| decl.clone());
-        any_code = true;
     }
+    let mut funcs: Vec<AnalyzedFunc> = Vec::new();
     for func in &file.funcs {
         let pkg = if func.pkg.is_empty() {
             file.package.clone()
         } else {
             func.pkg.clone()
         };
-        let mut src = func.clone();
-        lower::annotate_call_returns(&mut src, &sigs);
-        let mut lowered = lower::lower_func(&src);
-        write_func(kv, &pkg, &mut lowered, &local_funcs, &structs, &sigs)?;
-        any_code = true;
-        if func.sig.name == "init" {
-            inits.push(init_fn_name(&pkg));
-        }
+        funcs.push(analyze_func(func, pkg, &structs, &sigs)?);
     }
-    for decl in &file.rwir_decls {
-        write_rwir_decl(kv, decl)?;
-        any_code = true;
-    }
-
     let mut body = file.init_body.clone();
     for c in &file.top_level_calls {
         body.push(Stmt::Instruction(c.clone()));
     }
+    let mut top_init = None;
     if !body.is_empty() {
         let init_fn = Func {
             comments: Vec::new(),
@@ -127,18 +160,68 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
             body,
             pkg: String::new(),
         };
-        let mut src = init_fn.clone();
-        lower::annotate_call_returns(&mut src, &sigs);
-        let mut lowered = lower::lower_func(&src);
-        write_func(kv, "", &mut lowered, &local_funcs, &structs, &sigs)?;
-        any_code = true;
-        inits.push(init_fn_name(""));
+        top_init = Some(analyze_func(&init_fn, String::new(), &structs, &sigs)?);
     }
-
-    if !any_code {
+    if funcs.is_empty()
+        && top_init.is_none()
+        && file.structs.is_empty()
+        && file.rwir_decls.is_empty()
+    {
         return Err("no executable code found".to_string());
     }
-    Ok(inits)
+    Ok(CheckedFile {
+        file,
+        structs,
+        funcs,
+        top_init,
+    })
+}
+
+/// Pure single-function analysis: call-return annotation, lowering, linearization, and jump validation.
+fn analyze_func(
+    func: &Func,
+    pkg: String,
+    structs: &lower::StructTable,
+    sigs: &lower::SigTable,
+) -> Result<AnalyzedFunc, String> {
+    // Annotate call-site return types from `sigs` before lowering.
+    let mut src = func.clone();
+    lower::annotate_call_returns(&mut src, sigs);
+    let mut fn_ = lower::lower_func(&src)?;
+    let type_map = lower::infer_types(&fn_);
+    let declared = lower::declared_types(&fn_);
+    let type_sets = lower::infer_type_sets(&fn_);
+    let mut diags = lower::validate_writes(&fn_, &type_map, structs, sigs);
+    diags.extend(lower::specialize(&mut fn_, &type_map, &declared, &type_sets));
+    for d in &diags {
+        eprintln!("{}", d.string());
+    }
+    if parser::has_errors(&diags) {
+        return Err("type: error-level diagnostics — refusing to load".to_string());
+    }
+    let mut seq: Vec<Instruction> = Vec::new();
+    let mut labels: HashMap<String, i32> = HashMap::new();
+    collect_insts(&fn_.body, &mut seq, &mut labels)
+        .map_err(|e| format!("{}: {e}", fn_.sig.name))?;
+    check_jumps(&seq, &labels).map_err(|e| format!("{}: {e}", fn_.sig.name))?;
+    // Validate instruction arity before touching kvspace (shared by `vet` and `compile`).
+    for inst in &seq {
+        let (op, reads) = inst.flat();
+        if op.is_empty() {
+            continue;
+        }
+        check_sub_arity(&op, reads.len(), inst.writes.len())
+            .map_err(|e| format!("{}: {e}", fn_.sig.name))?;
+    }
+    Ok(AnalyzedFunc {
+        is_init: func.sig.name == "init",
+        pkg,
+        func: fn_,
+        declared,
+        type_sets,
+        seq,
+        labels,
+    })
 }
 
 /// 待做 `[]` 下标校验的函数集合：显式 funcs + init_body/top_level_calls 合成的 init。
@@ -187,30 +270,8 @@ pub fn format(src: &str) -> Result<String, String> {
 /// 校验源码是否可 layout（parse + lower），但不写入 kvspace。
 /// 供运行时 vet 闸门：LLM 生成的 kv 代码先过此关，失败不污染 /lib。
 pub fn vet(src: &str) -> Result<(), String> {
-    let (file, mut diags) = parser::parse_code(src)?;
-    for f in subscript_check_funcs(&file) {
-        diags.extend(lower::check_container_subscript(&f));
-        diags.extend(lower::check_map_defined(&f));
-        diags.extend(lower::check_container_typed(&f));
-    }
-    for d in &diags {
-        eprintln!("{}", d.string());
-    }
-    if parser::has_errors(&diags) {
-        return Err("parse: error-level diagnostics — refusing to load".to_string());
-    }
-    let mut any_code = false;
-    for func in &file.funcs {
-        let _ = lower::lower_func(func);
-        any_code = true;
-    }
-    if !file.init_body.is_empty() || !file.top_level_calls.is_empty() || !file.structs.is_empty() {
-        any_code = true;
-    }
-    if !any_code {
-        return Err("no executable code found".to_string());
-    }
-    Ok(())
+    // Shares `analyze_file` with `compile`; state-dependent checks run only in `compile`.
+    analyze_file(src).map(|_| ())
 }
 
 /// printlib：把 /lib 子树重构为可运行的 kvlang 源码（**只看 layout 结果，不读 `.src`**：
@@ -625,6 +686,11 @@ fn build_inst(inst: &RawInst, by_irseq: &HashMap<i32, String>) -> Instruction {
     let expr = match inst.opcode.as_str() {
         "" => None,
         "return" => Some(ast::leaf("return")),
+        // Single read is plain copy; >=2 reads reconstruct `MEMBER_READ_OP(base, seg...)`.
+        "=" if inst.reads.len() > 1 => Some(ast::call(
+            ast::MEMBER_READ_OP,
+            inst.reads.iter().map(operand_expr).collect(),
+        )),
         "=" => inst.reads.first().map(operand_expr),
         "goto" => Some(ast::call(
             "goto",
@@ -703,25 +769,16 @@ fn next_ctime(old: i64) -> i64 {
 }
 
 /// 写函数到 /lib/：签名（rwfunc）、源码、参数 Ptr、指令体。
+/// Check kvspace-dependent collisions (`def rwir` vs `rwfunc`) before deleting the old subtree and writing.
 pub fn write_func(
     kv: &mut Kv,
-    pkg: &str,
-    fn_: &mut Func,
+    a: &AnalyzedFunc,
     local_funcs: &HashSet<String>,
     structs: &lower::StructTable,
-    sigs: &lower::SigTable,
 ) -> Result<(), String> {
-    let type_map = lower::infer_types(fn_);
-    let declared = lower::declared_types(fn_);
-    let type_sets = lower::infer_type_sets(fn_);
-    let mut diags = lower::validate_writes(fn_, &type_map, structs, sigs);
-    diags.extend(lower::specialize(fn_, &type_map, &declared, &type_sets));
-    for d in &diags {
-        eprintln!("{}", d.string());
-    }
-    if parser::has_errors(&diags) {
-        return Err("type: error-level diagnostics — refusing to load".to_string());
-    }
+    let pkg = a.pkg.as_str();
+    let fn_ = &a.func;
+    let (seq, labels, declared, type_sets) = (&a.seq, &a.labels, &a.declared, &a.type_sets);
     let func_dir = keytree::lib_func(pkg, &fn_.sig.name);
     let opcode = if pkg.is_empty() {
         fn_.sig.name.clone()
@@ -735,10 +792,7 @@ pub fn write_func(
         ));
     }
 
-    let mut seq: Vec<Instruction> = Vec::new();
-    let mut labels: HashMap<String, i32> = HashMap::new();
-    collect_insts(&fn_.body, &mut seq, &mut labels);
-    check_call_names(kv, pkg, &seq, local_funcs)?;
+    check_call_names(kv, pkg, seq, local_funcs)?;
 
     let mut param_coord: HashMap<String, String> = HashMap::new();
     for (i, p) in fn_.sig.params.iter().enumerate() {
@@ -750,11 +804,6 @@ pub fn write_func(
 
     let ctime_key = format!("{func_dir}/‥ctime");
     let ctime = next_ctime(read_ctime(kv, &ctime_key));
-
-    // 按函数覆盖（文件夹复制式合并）：只 del_tree 本函数子树，不动 /lib 下其它函数。
-    // 禁止整库删除——layoutcode 必须可增量：多次 layout 各自覆盖其函数，不误删先前的函数。
-    let _ = kv.del_tree(&func_dir);
-    let _ = kv.mkindex(&format!("{func_dir}/"));
 
     let nr = fn_.sig.num_reads();
     let nw = fn_.sig.num_writes();
@@ -773,18 +822,18 @@ pub fn write_func(
     pairs.push((
         format!("{func_dir}/"),
         kvkind::KIND_RWFUNC.to_string(),
-        kvkind::new_rwfunc_dir(),
+        kvkind::new_rwfunc_dir()?,
     ));
-    pairs.push((ctime_key, String::new(), ffi::new_int64(ctime)));
+    // Write `‥ctime` last (after all instructions and labels) so runtimes never rebuild from a half-written segment.
     pairs.push((
         format!("{func_dir}/[0,0]"),
         kvkind::KIND_RWFUNC.to_string(),
-        kvkind::new_rwfunc_anchor(nr, nw, fn_.sig.dynamic()),
+        kvkind::new_rwfunc_anchor(nr, nw, fn_.sig.dynamic())?,
     ));
     pairs.push((
         keytree::lib_src(pkg, &fn_.sig.name),
         "char/utf8".to_string(),
-        ffi::new_char_byte(fn_.full_text().as_bytes()),
+        ffi::new_char_byte(fn_.full_text().as_bytes())?,
     ));
     // 参数定义键 funcDir.[0,±k]（点后缀，与坐标斜杠键 /[0,±k] 区分）：langtype=def langtype，
     // body=名字\x00类型串。坐标斜杠键 [0,±k] 留给 runtime call 期写实参地址 Ptr；点后缀键
@@ -793,25 +842,22 @@ pub fn write_func(
         pairs.push((
             format!("{func_dir}.[0,-{}]", i + 1),
             kvkind::KIND_DEF_LANGTYPE.to_string(),
-            kvkind::new_def_param(&p.name, &param_types[i]),
+            kvkind::new_def_param(&p.name, &param_types[i])?,
         ));
     }
     for (i, r) in fn_.sig.returns.iter().enumerate() {
         pairs.push((
             format!("{func_dir}.[0,{}]", i + 1),
             kvkind::KIND_DEF_LANGTYPE.to_string(),
-            kvkind::new_def_param(&r.name, &param_types[nr as usize + i]),
+            kvkind::new_def_param(&r.name, &param_types[nr as usize + i])?,
         ));
     }
-    let _ = kv.set(&pairs);
 
-    for inst in &seq {
-        let (op, reads) = inst.flat();
-        if op.is_empty() {
-            continue;
-        }
-        check_sub_arity(&op, reads.len(), inst.writes.len())?;
-    }
+    // Incrementally replace only this function's subtree without disturbing sibling `/lib` entries.
+    let werr = |e: String| format!("kvspace write {func_dir}: {e}");
+    kv.del_tree(&func_dir).map_err(werr)?;
+    kv.mkindex(&format!("{func_dir}/")).map_err(werr)?;
+    kv.set(&pairs).map_err(werr)?;
 
     for (i, inst) in seq.iter().enumerate() {
         write_linear_inst(
@@ -819,14 +865,15 @@ pub fn write_func(
             &func_dir,
             (i as i32) + 1,
             inst,
-            &labels,
-            &declared,
-            &type_sets,
+            labels,
+            declared,
+            type_sets,
             structs,
             &param_coord,
             &param_langtype,
             local_funcs,
-        );
+        )
+        .map_err(werr)?;
     }
     if std::env::var("KVLANG_LAYOUT_STATS").is_ok() {
         let (mut concrete, mut union, mut unknown) = (0usize, 0usize, 0usize);
@@ -850,13 +897,13 @@ pub fn write_func(
             let set = if write { &mut slot.1 } else { &mut slot.0 };
             set.insert(ty);
         };
-        for inst in &seq {
+        for inst in seq {
             let (op, reads) = inst.flat();
             if op.is_empty() {
                 continue;
             }
             for r in &reads {
-                let mut ty = read_slot_type(r, &param_langtype, &declared, &type_sets);
+                let mut ty = read_slot_type(r, &param_langtype, declared, type_sets);
                 if ty.is_empty() {
                     ty = lower::literal_slot_type(r);
                 }
@@ -865,7 +912,7 @@ pub fn write_func(
             for (j, w) in inst.writes.iter().enumerate() {
                 record(
                     &op,
-                    write_slot_type(inst, j, w, &param_langtype, &declared, &type_sets, structs),
+                    write_slot_type(inst, j, w, &param_langtype, declared, type_sets, structs),
                     true,
                 );
             }
@@ -887,41 +934,43 @@ pub fn write_func(
         }
     }
     if !labels.is_empty() {
-        let _ = kv.mkindex(&keytree::lib_labels_dir(pkg, &fn_.sig.name));
-        let lpairs: Vec<(String, String, Vec<u8>)> = labels
-            .iter()
-            .map(|(label, irseq)| {
-                (
-                    keytree::lib_label(pkg, &fn_.sig.name, label),
-                    "int64".to_string(), // 规范：‥labels/<label> kind int64
-                    ffi::new_int64(*irseq as i64),
-                )
-            })
-            .collect();
-        let _ = kv.set(&lpairs);
+        kv.mkindex(&keytree::lib_labels_dir(pkg, &fn_.sig.name))
+            .map_err(werr)?;
+        let mut lpairs: Vec<(String, String, Vec<u8>)> = Vec::with_capacity(labels.len());
+        for (label, irseq) in labels {
+            // `‥labels/<label>` stores an `int64` irseq (its leaf name has no `‥`, so `printlib` needs `"int64"` langtype).
+            lpairs.push((
+                keytree::lib_label(pkg, &fn_.sig.name, label),
+                "int64".to_string(),
+                ffi::new_int64(*irseq as i64)?,
+            ));
+        }
+        kv.set(&lpairs).map_err(werr)?;
     }
+    // Commit `‥ctime` last once all instruction and label slots are persisted.
+    kv.set(&[(ctime_key, String::new(), ffi::new_int64(ctime)?)])
+        .map_err(werr)?;
     Ok(())
 }
 
 /// Store field types under the prototype and defaults under member keys.
-pub fn write_struct_decl(kv: &mut Kv, decl: &StructDecl) {
+pub fn write_struct_decl(kv: &mut Kv, decl: &StructDecl) -> Result<(), String> {
     let mut name = decl.name.clone();
     if !decl.pkg.is_empty() {
         name = format!("{}{}{name}", decl.pkg, keytree::MEMBER_SEP);
     }
     let base = keytree::rwir(&name);
-    let _ = kv.del_tree(&base);
     let mut pairs: Vec<(String, String, Vec<u8>)> = Vec::new();
     pairs.push((
         base.clone(),
         kvkind::KIND_DEF_STRUCT.to_string(),
-        kvkind::new_struct(),
+        kvkind::new_struct()?,
     ));
     for fld in &decl.fields {
         pairs.push((
             format!("{base}/{}", fld.name),
             kvkind::KIND_DEF_LANGTYPE.to_string(),
-            kvkind::new_def_langtype(&fld.ty),
+            kvkind::new_def_langtype(&fld.ty)?,
         ));
         // *T 字段的默认值是空指针 None——不落键。None 在 kvspace 即"无值"（键不存在），
         // 故原型不带该字段、实例读回 None（见 [[ptr]]）；不造"空 Ptr"这第二种空值表示。
@@ -931,15 +980,18 @@ pub fn write_struct_decl(kv: &mut Kv, decl: &StructDecl) {
         pairs.push((
             keytree::member(&base, &fld.name),
             fld.ty.clone(),
-            field_default(&fld.ty, fld.default.as_ref()),
+            field_default(&fld.ty, fld.default.as_ref())?,
         ));
     }
-    let _ = kv.set(&pairs);
+    let werr = |e: String| format!("kvspace write {base}: {e}");
+    kv.del_tree(&base).map_err(werr)?;
+    kv.set(&pairs).map_err(werr)
 }
 
 /// 字段默认值 XValue：head kind = 字段类型，body = 默认字面量（未给则零值）。
 /// 标量+char 直接编码；带 dims / structref 仅记录类型（空 body），嵌套 struct 待定。
-fn field_default(ty: &str, default: Option<&Expr>) -> Vec<u8> {
+/// Representability is validated earlier by `lower::check_field_default`; this only encodes.
+fn field_default(ty: &str, default: Option<&Expr>) -> Result<Vec<u8>, String> {
     // *T 指针字段不在此列——write_struct_decl 已按"空指针 = None = 不落键"跳过。
     let (dims, base) = kvkind::parse_langtype(ty);
     let s = default.map(|e| e.val.clone()).unwrap_or_default();
@@ -949,19 +1001,24 @@ fn field_default(ty: &str, default: Option<&Expr>) -> Vec<u8> {
     if !dims.is_empty() {
         return ffi::xvalue_to_wire(&base, &[], dims.iter().product());
     }
-    let i = || s.parse::<i64>().unwrap_or(0);
-    let u = || s.parse::<u64>().unwrap_or(0);
+    // Allow integral float literals (e.g. `x:int64=3.0`) already validated by `check_literal`.
+    let i = || {
+        s.parse::<i128>()
+            .ok()
+            .or_else(|| s.parse::<f64>().ok().map(|f| f as i128))
+            .unwrap_or(0)
+    };
     let f = || s.parse::<f64>().unwrap_or(0.0);
     match base.as_str() {
         "bool" => ffi::new_bool(s == "true"),
         "int8" => ffi::xvalue_to_wire("int8", &(i() as i8).to_le_bytes(), 1),
         "int16" => ffi::xvalue_to_wire("int16", &(i() as i16).to_le_bytes(), 1),
         "int32" => ffi::xvalue_to_wire("int32", &(i() as i32).to_le_bytes(), 1),
-        "int64" => ffi::new_int64(i()),
-        "uint8" => ffi::xvalue_to_wire("uint8", &[u() as u8], 1),
-        "uint16" => ffi::xvalue_to_wire("uint16", &(u() as u16).to_le_bytes(), 1),
-        "uint32" => ffi::xvalue_to_wire("uint32", &(u() as u32).to_le_bytes(), 1),
-        "uint64" => ffi::xvalue_to_wire("uint64", &u().to_le_bytes(), 1),
+        "int64" => ffi::new_int64(i() as i64),
+        "uint8" => ffi::xvalue_to_wire("uint8", &[i() as u8], 1),
+        "uint16" => ffi::xvalue_to_wire("uint16", &(i() as u16).to_le_bytes(), 1),
+        "uint32" => ffi::xvalue_to_wire("uint32", &(i() as u32).to_le_bytes(), 1),
+        "uint64" => ffi::xvalue_to_wire("uint64", &(i() as u64).to_le_bytes(), 1),
         "float32" => ffi::xvalue_to_wire("float32", &(f() as f32).to_le_bytes(), 1),
         "float64" => ffi::new_float64(f()),
         _ => ffi::xvalue_to_wire(&base, &[], 1),
@@ -988,51 +1045,96 @@ pub fn write_rwir_decl(kv: &mut Kv, decl: &RwirDecl) -> Result<(), String> {
     let mut pairs: Vec<(String, String, Vec<u8>)> = vec![(
         base.clone(),
         kvkind::KIND_DEF_RWIR.to_string(),
-        kvkind::new_defrwir(nr, nw, decl.sig.dynamic()),
+        kvkind::new_defrwir(nr, nw, decl.sig.dynamic())?,
     )];
     for i in 0..nr as usize {
         pairs.push((
             format!("{base}/[0,-{}]", i + 1),
             kvkind::KIND_DEF_LANGTYPE.to_string(),
-            kvkind::new_def_langtype(&param_types[i]),
+            kvkind::new_def_langtype(&param_types[i])?,
         ));
     }
     for i in 0..nw as usize {
         pairs.push((
             format!("{base}/[0,{}]", i + 1),
             kvkind::KIND_DEF_LANGTYPE.to_string(),
-            kvkind::new_def_langtype(&param_types[nr as usize + i]),
+            kvkind::new_def_langtype(&param_types[nr as usize + i])?,
         ));
     }
-    let _ = kv.set(&pairs);
-    Ok(())
+    kv.set(&pairs)
+        .map_err(|e| format!("kvspace write {base}: {e}"))
 }
 
 /// Flatten body into seq; ScopeStmt records label → irseq (1-based; [0,0] is the signature).
-fn collect_insts(body: &[Stmt], seq: &mut Vec<Instruction>, labels: &mut HashMap<String, i32>) {
+/// Returns `Err` (never panics) on block-structure violations such as duplicate labels or unterminated blocks.
+fn collect_insts(
+    body: &[Stmt],
+    seq: &mut Vec<Instruction>,
+    labels: &mut HashMap<String, i32>,
+) -> Result<(), String> {
     for st in body {
         match st {
             Stmt::Instruction(s) => seq.push(s.clone()),
             Stmt::Scope(s) => {
                 if s.label.is_empty() {
-                    panic!("WriteBody: ScopeStmt with empty label");
+                    return Err("block with empty label".to_string());
                 }
                 if labels.contains_key(&s.label) {
-                    panic!("WriteBody: duplicate label {}", s.label);
+                    return Err(format!(
+                        "duplicate block label {:?} (labels must be unique per function; `_<name>_<n>` names are reserved for lowered control flow)",
+                        s.label
+                    ));
                 }
                 let start = seq.len() as i32 + 1;
-                if start > 1 && !inst_is_terminator(seq.last().unwrap()) {
-                    panic!("WriteBody: fall through into label {}", s.label);
+                if seq.last().is_some_and(|last| !inst_is_terminator(last)) {
+                    return Err(format!(
+                        "control falls through into block label {:?} (previous instruction is not return/goto/br)",
+                        s.label
+                    ));
                 }
                 labels.insert(s.label.clone(), start);
-                collect_insts(&s.body, seq, labels);
-                if (seq.len() as i32) < start || !inst_is_terminator(seq.last().unwrap()) {
-                    panic!("WriteBody: unterminated block {}", s.label);
+                collect_insts(&s.body, seq, labels)?;
+                let terminated = (seq.len() as i32) >= start
+                    && seq.last().is_some_and(inst_is_terminator);
+                if !terminated {
+                    return Err(format!(
+                        "block {:?} does not end with return/goto/br",
+                        s.label
+                    ));
                 }
             }
-            _ => panic!("WriteBody: unexpected stmt {} after lower", st.first_line()),
+            _ => {
+                return Err(format!(
+                    "unexpected statement after lowering: {}",
+                    st.first_line()
+                ))
+            }
         }
     }
+    Ok(())
+}
+
+/// Verify `goto`/`br` arity and target labels after linearization so emission cannot fail.
+fn check_jumps(seq: &[Instruction], labels: &HashMap<String, i32>) -> Result<(), String> {
+    for inst in seq {
+        let (op, reads) = inst.flat();
+        let label_reads: &[usize] = match op.as_str() {
+            "goto" if reads.len() == 1 => &[0],
+            "br" if reads.len() == 3 => &[1, 2],
+            "goto" | "br" => {
+                return Err(format!(
+                    "{op} expects {} read(s), got {}",
+                    if op == "goto" { 1 } else { 3 },
+                    reads.len()
+                ))
+            }
+            _ => continue,
+        };
+        for &j in label_reads {
+            resolve_label(labels, &reads[j], &op)?;
+        }
+    }
+    Ok(())
 }
 
 /// 操作数槽的静态类型：形参/返回声明 → 源码声明 → 有限类型集合（union）。
@@ -1084,6 +1186,7 @@ fn write_slot_type(
     slot_static_type(orig, param_langtype, declared, type_sets)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_linear_inst(
     kv: &mut Kv,
     prefix: &str,
@@ -1096,22 +1199,18 @@ fn write_linear_inst(
     params: &HashMap<String, String>,
     param_langtype: &HashMap<String, String>,
     local_funcs: &HashSet<String>,
-) {
+) -> Result<(), String> {
     let (opcode, mut reads) = s.flat();
+    // Already validated by `check_jumps`; still return `Result` to avoid panic paths.
     match opcode.as_str() {
-        "goto" => {
-            if reads.len() != 1 {
-                panic!("WriteBody: goto expects 1 read, got {}", reads.len());
-            }
-            reads[0] = resolve_label(labels, &reads[0], "goto").to_string();
+        "goto" if reads.len() == 1 => {
+            reads[0] = resolve_label(labels, &reads[0], "goto")?.to_string();
         }
-        "br" => {
-            if reads.len() != 3 {
-                panic!("WriteBody: br expects 3 reads, got {}", reads.len());
-            }
-            reads[1] = resolve_label(labels, &reads[1], "br").to_string();
-            reads[2] = resolve_label(labels, &reads[2], "br").to_string();
+        "br" if reads.len() == 3 => {
+            reads[1] = resolve_label(labels, &reads[1], "br")?.to_string();
+            reads[2] = resolve_label(labels, &reads[2], "br")?.to_string();
         }
+        "goto" | "br" => return Err(format!("{opcode}: bad arity {}", reads.len())),
         _ => {}
     }
     let target_char = if s.writes.len() == 1
@@ -1133,7 +1232,7 @@ fn write_linear_inst(
             s.writes.len() as i32,
             local_funcs,
             s.operator,
-        );
+        )?;
         pairs.push((format!("{prefix}/[{n},0]"), lt, wire));
     }
     for (j, r) in reads.iter().enumerate() {
@@ -1142,19 +1241,20 @@ fn write_linear_inst(
             .map(String::as_str)
             .unwrap_or(r.as_str());
         let ty = read_slot_type(r, param_langtype, declared, type_sets);
-        let (wire, lt) = typed_slot_value(rv, &ty, target_char);
+        let (wire, lt) = typed_slot_value(rv, &ty, target_char)?;
         pairs.push((format!("{prefix}/[{n},-{}]", j + 1), lt, wire));
     }
     for (j, w) in s.writes.iter().enumerate() {
         let orig = w.as_str();
         let wv = params.get(orig).map(String::as_str).unwrap_or(orig);
         let ty = write_slot_type(s, j, orig, param_langtype, declared, type_sets, structs);
-        let (wire, lt) = typed_slot_value(wv, &ty, "");
+        let (wire, lt) = typed_slot_value(wv, &ty, "")?;
         pairs.push((format!("{prefix}/[{n},{}]", j + 1), lt, wire));
     }
     if !pairs.is_empty() {
-        let _ = kv.set(&pairs);
+        kv.set(&pairs)?;
     }
+    Ok(())
 }
 
 fn inst_is_terminator(inst: &Instruction) -> bool {
@@ -1165,11 +1265,11 @@ fn inst_is_terminator(inst: &Instruction) -> bool {
     }
 }
 
-fn resolve_label(labels: &HashMap<String, i32>, name: &str, opcode: &str) -> i32 {
-    match labels.get(name) {
-        Some(&irseq) => irseq,
-        None => panic!("WriteBody: {opcode} unknown label {name:?}"),
-    }
+fn resolve_label(labels: &HashMap<String, i32>, name: &str, opcode: &str) -> Result<i32, String> {
+    labels
+        .get(name)
+        .copied()
+        .ok_or_else(|| format!("{opcode}: unknown label {name:?}"))
 }
 
 /// 调用名必须是「全路径去掉 `/lib`」：全局函数写 `name`，包内函数写 `包名·name`。
@@ -1262,14 +1362,14 @@ fn opcode_value(
     nw: i32,
     local_funcs: &HashSet<String>,
     is_operator: bool,
-) -> (Vec<u8>, String) {
+) -> Result<(Vec<u8>, String), String> {
     // lower 认定的算子永不是函数调用：语义名可能与同包 rwfunc 同名
     // （`==` → `eq` vs `lib string { rwfunc eq }`），不得被裸名解析抢走。
     if is_operator {
-        return (
-            kvkind::new_rwir(nr, nw, opcode),
+        return Ok((
+            kvkind::new_rwir(nr, nw, opcode)?,
             kvkind::KIND_RWIR.to_string(),
-        );
+        ));
     }
     // 裸名只有一条解析路径：`/lib/<name>`。删除「回退到 `<pkg>·<name>`」分支
     // （包内裸名与全局函数争名空间，是 6976 层递归的根源）；同包调用必须写
@@ -1280,7 +1380,7 @@ fn opcode_value(
             &kv.get_one(&format!("/lib/{name}/")),
             &kv.langtype_of(&format!("/lib/{name}/")),
         ) == kvkind::KIND_RWFUNC;
-    if is_func {
+    Ok(if is_func {
         // 全局函数调用一律落绝对路径，运行期不得再做包内回退。
         let target = if opcode.starts_with("/lib/")
             || name.contains(keytree::MEMBER_SEP)
@@ -1291,35 +1391,35 @@ fn opcode_value(
             format!("/lib/{name}")
         };
         (
-            kvkind::new_rwfunc_call(nr, nw, &target),
+            kvkind::new_rwfunc_call(nr, nw, &target)?,
             kvkind::KIND_RWFUNC.to_string(),
         )
     } else {
         (
-            kvkind::new_rwir(nr, nw, opcode),
+            kvkind::new_rwir(nr, nw, opcode)?,
             kvkind::KIND_RWIR.to_string(),
         )
-    }
+    })
 }
 
 /// Preserve the target type.
-fn typed_slot_value(name: &str, ty: &str, target_char: &str) -> (Vec<u8>, String) {
+fn typed_slot_value(name: &str, ty: &str, target_char: &str) -> Result<(Vec<u8>, String), String> {
     if !ty.is_empty() && (name.starts_with('/') || !is_literal(name)) {
-        return (
-            kvkind::new_typed_rwir(name, ty),
+        return Ok((
+            kvkind::new_typed_rwir(name, ty)?,
             kvkind::KIND_RWIR.to_string(),
-        );
+        ));
     }
     slot_value(name, target_char)
 }
 
 /// 指令操作数的 wire 解析；langtype 精确匹配 wire 的 kind。
-fn slot_value(val: &str, target_char: &str) -> (Vec<u8>, String) {
+fn slot_value(val: &str, target_char: &str) -> Result<(Vec<u8>, String), String> {
     if !is_literal(val) {
-        return (
-            kvkind::new_rwir(0, 0, val),
+        return Ok((
+            kvkind::new_rwir(0, 0, val)?,
             kvkind::KIND_RWIR.to_string(),
-        );
+        ));
     }
     let b = val.as_bytes();
     if b[0] == b'"' {
@@ -1334,24 +1434,24 @@ fn slot_value(val: &str, target_char: &str) -> (Vec<u8>, String) {
         };
         /* 字符串 langtype 带 [len] 形状段（码点数）——xv/array 下标按它解 dims。 */
         let lt = format!("[{}]{k}", s.chars().count());
-        return (ffi::new_char(k, s), lt);
+        return Ok((ffi::new_char(k, s)?, lt));
     }
     if val == "true" || val == "false" {
-        return (ffi::new_bool(val == "true"), "bool".to_string());
+        return Ok((ffi::new_bool(val == "true")?, "bool".to_string()));
     }
     if b[0].is_ascii_digit() || (b[0] == b'-' && val.len() > 1) {
         if val.contains('.') || val.contains('e') || val.contains('E') {
-            return (
-                ffi::new_float64(val.parse::<f64>().unwrap_or(0.0)),
+            return Ok((
+                ffi::new_float64(val.parse::<f64>().unwrap_or(0.0))?,
                 "float64".to_string(),
-            );
+            ));
         }
-        return match builtin::try_parse_number(val) {
+        return Ok(match builtin::try_parse_number(val)? {
             Some((w, lt)) => (w, lt.to_string()),
-            None => (ffi::new_int64(0), "int64".to_string()),
-        };
+            None => (ffi::new_int64(0)?, "int64".to_string()),
+        });
     }
-    (kvkind::new_rwir(0, 0, val), kvkind::KIND_RWIR.to_string())
+    Ok((kvkind::new_rwir(0, 0, val)?, kvkind::KIND_RWIR.to_string()))
 }
 
 fn is_literal(s: &str) -> bool {
@@ -1415,7 +1515,7 @@ fn plain_of(kv: &mut Kv, key: &str) -> String {
     }
     let lt = kv.langtype_of(key);
     let k = kvkind::kind(&d, &lt);
-    if kvkind::is_char_kind(&k) {
+    if lt.is_empty() || kvkind::is_char_kind(&k) {
         kvkind::value_string(&d)
     } else {
         let s = kvkind::display(&d, &lt);
@@ -1606,7 +1706,7 @@ mod tests {
         kv.set(&[(
             "/lib/println".to_string(),
             kvkind::KIND_DEF_RWIR.to_string(),
-            kvkind::new_defrwir(1, 0, false),
+            kvkind::new_defrwir(1, 0, false).unwrap(),
         )])
         .unwrap();
         compile(&mut kv, "rwfunc caller() -> () {\ncallee(1) -> y\nprintln(y)\n}\nrwfunc callee(x:int64) -> (r:int64) {\nx -> r\n}\n").unwrap();
@@ -1698,7 +1798,7 @@ mod tests {
         kv.set(&[(
             "/lib/baz".to_string(),
             kvkind::KIND_DEF_RWIR.to_string(),
-            kvkind::new_defrwir(1, 1, false),
+            kvkind::new_defrwir(1, 1, false).unwrap(),
         )])
         .unwrap();
         compile(
@@ -1729,11 +1829,10 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "fall through into label")]
-    fn fallthrough_into_label_panics() {
+    fn fallthrough_into_label_is_error() {
         let mut seq = Vec::new();
         let mut labels = HashMap::new();
-        collect_insts(
+        let r = collect_insts(
             &[
                 Stmt::Instruction(Instruction {
                     expr: Some(crate::ast::leaf("1")),
@@ -1752,14 +1851,14 @@ mod tests {
             &mut seq,
             &mut labels,
         );
+        assert!(r.unwrap_err().contains("falls through into block label"));
     }
 
     #[test]
-    #[should_panic(expected = "unterminated block")]
-    fn unterminated_block_panics() {
+    fn unterminated_block_is_error() {
         let mut seq = Vec::new();
         let mut labels = HashMap::new();
-        collect_insts(
+        let r = collect_insts(
             &[Stmt::Scope(crate::ast::ScopeStmt {
                 comments: Vec::new(),
                 label: "_open".into(),
@@ -1772,5 +1871,6 @@ mod tests {
             &mut seq,
             &mut labels,
         );
+        assert!(r.unwrap_err().contains("does not end with return/goto/br"));
     }
 }

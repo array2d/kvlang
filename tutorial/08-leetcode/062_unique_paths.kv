@@ -15,13 +15,15 @@ rwfunc dp(m:int64, n:int64) -> (result:int64) {
 		k = 1
 		while (k < n) {
 			"/tmp/up"·*k -> v
-			"/tmp/up"·*k-1 -> prev
+			k - 1 -> km1
+			"/tmp/up"·*km1 -> prev
 			prev + v -> "/tmp/up"·*k
 			k + 1 -> k
 		}
 		j + 1 -> j
 	}
-	"/tmp/up"·*n-1 -> result
+	n - 1 -> last
+	"/tmp/up"·*last -> result
 }
 
 rwfunc test() -> () {

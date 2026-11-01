@@ -1,5 +1,6 @@
 #include "runtime_internal.h"
 #include "rwir_internal.h"
+#include "intops.h"
 #include <math.h>
 
 #ifdef KV_COUNT
@@ -52,8 +53,11 @@ static void narrow_int(int a, int b, int64_t v, uint8_t *buf, size_t cap,
     case KVLANG_LT_UINT64: { uint64_t x = (uint64_t)v; memcpy(raw, &x, 8); len = 8; break; }
     default: { uint64_t x = (uint64_t)v; memcpy(raw, &x, 8); len = 8; break; }
     }
-    out->length = kvlangScalarToWire(kvlangLangtypeKind(k), raw, len, buf, cap);
+    const char *kind = kvlangLangtypeKind(k);
+    out->length = kvlangScalarToWire(kind, raw, len, buf, cap);
     out->bytes = buf;
+    /* Keep `langtype` cache synchronized with wire attr (`out` may be uninitialized). */
+    kvlangXvalueSetLangtype(out, kind, (uint32_t)strlen(kind));
 }
 
 static void narrow_float(int a, int b, double v, uint8_t *buf, size_t cap,
@@ -74,16 +78,46 @@ static void narrow_float(int a, int b, double v, uint8_t *buf, size_t cap,
     }
     out->length = kvlangScalarToWire(kind, raw, len, buf, cap);
     out->bytes = buf;
+    kvlangXvalueSetLangtype(out, kind, (uint32_t)strlen(kind));
 }
 
+/* Result is unsigned iff both operands are unsigned (see `wider_int_id`). */
+static bool int_result_unsigned(int a, int b) {
+    return kvlangLangtypeIsUint(a) && kvlangLangtypeIsUint(b);
+}
+
+static const char *xv_kind_or_none(const kvlangXvalue_t *v) {
+    return (!v || kvlangXvalueNone(v)) ? "None" : kvlangXvalueKind(v);
+}
+
+/* Unary negation (`-x` / `neg`): wrap signed ints, negate floats, and reject unsigned/other kinds. */
+static int emit_neg(kvlangFrame_t *f, const kvlangXvalue_t *in,
+                    kvlangScalar_t sa) {
+    if (!kvlangLangtypeIsNum(sa.kind_id))
+        return kvlangBuiltinSetError(f, "TypeError: expected numeric, got %s",
+                                     xv_kind_or_none(in));
+    if (kvlangLangtypeIsUint(sa.kind_id))
+        return kvlangBuiltinSetError(f, "TypeError: cannot negate unsigned %s",
+                                     xv_kind_or_none(in));
+    uint8_t sbuf[64];
+    kvlangXvalue_t r;
+    if (kvlangLangtypeIsFloat(sa.kind_id))
+        narrow_float(sa.kind_id, sa.kind_id, -kvlangScalarF64(sa), sbuf, sizeof sbuf, &r);
+    else
+        narrow_int(sa.kind_id, sa.kind_id, kvi_neg(kvlangScalarI64(sa)), sbuf, sizeof sbuf, &r);
+    return kvlangBuiltinWriteResult(f, &r);
+}
+
+/* Compare in the promoted integer kind (matching arithmetic promotion): unsigned iff both are
+ * unsigned, else signed (`uint64 >= 2^63` wraps as `int64`, keeping `==`, `min`, and `max` consistent). */
 int compare_int(kvlangScalar_t a, kvlangScalar_t b) {
     CNT_CMP();
-    bool au = kvlangLangtypeIsUint(a.kind_id), bu = kvlangLangtypeIsUint(b.kind_id);
-    if (!au && !bu) { int64_t ai = kvlangScalarI64(a), bi = kvlangScalarI64(b); return ai < bi ? -1 : ai > bi ? 1 : 0; }
-    if (au && bu) { uint64_t x = kvlangScalarU64(a), y = kvlangScalarU64(b); return x < y ? -1 : x > y ? 1 : 0; }
-    if (au && !bu) { int64_t bi = kvlangScalarI64(b); if (bi < 0) return 1; uint64_t x = kvlangScalarU64(a); return x < (uint64_t)bi ? -1 : x > (uint64_t)bi ? 1 : 0; }
-    int64_t ai = kvlangScalarI64(a); if (ai < 0) return -1; uint64_t y = kvlangScalarU64(b);
-    return (uint64_t)ai < y ? -1 : (uint64_t)ai > y ? 1 : 0;
+    if (int_result_unsigned(a.kind_id, b.kind_id)) {
+        uint64_t x = kvlangScalarU64(a), y = kvlangScalarU64(b);
+        return x < y ? -1 : x > y ? 1 : 0;
+    }
+    int64_t ai = kvlangScalarI64(a), bi = kvlangScalarI64(b);
+    return ai < bi ? -1 : ai > bi ? 1 : 0;
 }
 
 /* ── 算术算子 ─────────────────────────────────────────────── */
@@ -103,11 +137,12 @@ int kvlangBuiltinAdd(kvlangFrame_t *f) {
     } else if (n >= 2 && kvlangLangtypeIsNum(a.kind_id) && kvlangLangtypeIsNum(b.kind_id)) {
         kvlangXvalue_t r;
         if (kvlangLangtypeIsInt(a.kind_id) && kvlangLangtypeIsInt(b.kind_id))
-            narrow_int(a.kind_id, b.kind_id, kvlangScalarI64(a) + kvlangScalarI64(b), sbuf, sizeof sbuf, &r);
+            narrow_int(a.kind_id, b.kind_id, kvi_add(kvlangScalarI64(a), kvlangScalarI64(b)), sbuf, sizeof sbuf, &r);
         else
             narrow_float(a.kind_id, b.kind_id, kvlangScalarF64(a) + kvlangScalarF64(b), sbuf, sizeof sbuf, &r);
         rc = kvlangBuiltinWriteResult(f, &r); /* 栈上 wire，不 free */
-    } else rc = kvlangBuiltinSetError(f, "TypeError: expected numeric, got %s", n ? kvlangXvalueKind(&in[0]) : "none");
+    } else rc = kvlangBuiltinSetError(f, "TypeError: expected numeric, got %s",
+                                      n == 0 ? "None" : (!kvlangLangtypeIsNum(a.kind_id) ? xv_kind_or_none(&in[0]) : (n >= 2 ? xv_kind_or_none(&in[1]) : "None")));
     kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
@@ -118,16 +153,17 @@ int kvlangBuiltinSub(kvlangFrame_t *f) {
     uint8_t sbuf[64];
     int rc;
     if (n == 1) {
-        rc = kvlangBuiltinEmitInt64(f, -kvlangScalarI64(a));
+        rc = emit_neg(f, &in[0], a); /* unary minus per operand kind */
     } else if (n >= 2 && kvlangLangtypeIsInt(a.kind_id) && kvlangLangtypeIsInt(b.kind_id)) {
         kvlangXvalue_t r;
-        narrow_int(a.kind_id, b.kind_id, kvlangScalarI64(a) - kvlangScalarI64(b), sbuf, sizeof sbuf, &r);
+        narrow_int(a.kind_id, b.kind_id, kvi_sub(kvlangScalarI64(a), kvlangScalarI64(b)), sbuf, sizeof sbuf, &r);
         rc = kvlangBuiltinWriteResult(f, &r);
     } else if (n >= 2 && kvlangLangtypeIsNum(a.kind_id) && kvlangLangtypeIsNum(b.kind_id)) {
         kvlangXvalue_t r;
         narrow_float(a.kind_id, b.kind_id, kvlangScalarF64(a) - kvlangScalarF64(b), sbuf, sizeof sbuf, &r);
         rc = kvlangBuiltinWriteResult(f, &r);
-    } else rc = kvlangBuiltinSetError(f, "TypeError: expected numeric, got %s", n ? kvlangXvalueKind(&in[0]) : "none");
+    } else rc = kvlangBuiltinSetError(f, "TypeError: expected numeric, got %s",
+                                      n == 0 ? "None" : (!kvlangLangtypeIsNum(a.kind_id) ? xv_kind_or_none(&in[0]) : (n >= 2 ? xv_kind_or_none(&in[1]) : "None")));
     kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
@@ -139,13 +175,14 @@ int kvlangBuiltinMul(kvlangFrame_t *f) {
     int rc;
     if (n >= 2 && kvlangLangtypeIsInt(a.kind_id) && kvlangLangtypeIsInt(b.kind_id)) {
         kvlangXvalue_t r;
-        narrow_int(a.kind_id, b.kind_id, kvlangScalarI64(a) * kvlangScalarI64(b), sbuf, sizeof sbuf, &r);
+        narrow_int(a.kind_id, b.kind_id, kvi_mul(kvlangScalarI64(a), kvlangScalarI64(b)), sbuf, sizeof sbuf, &r);
         rc = kvlangBuiltinWriteResult(f, &r);
     } else if (n >= 2 && kvlangLangtypeIsNum(a.kind_id) && kvlangLangtypeIsNum(b.kind_id)) {
         kvlangXvalue_t r;
         narrow_float(a.kind_id, b.kind_id, kvlangScalarF64(a) * kvlangScalarF64(b), sbuf, sizeof sbuf, &r);
         rc = kvlangBuiltinWriteResult(f, &r);
-    } else rc = kvlangBuiltinSetError(f, "TypeError: expected numeric, got %s", n ? kvlangXvalueKind(&in[0]) : "none");
+    } else rc = kvlangBuiltinSetError(f, "TypeError: expected numeric, got %s",
+                                      n == 0 ? "None" : (!kvlangLangtypeIsNum(a.kind_id) ? xv_kind_or_none(&in[0]) : (n >= 2 ? xv_kind_or_none(&in[1]) : "None")));
     kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
@@ -156,10 +193,18 @@ int kvlangBuiltinDiv(kvlangFrame_t *f) {
     uint8_t sbuf[64];
     int rc;
     if (n < 2) { rc = kvlangBuiltinSetError(f, "TypeError: binary op requires 2 inputs, got %d", n); kvlangBuiltinFreeInputs(in, n); return rc; }
+    if (!kvlangLangtypeIsNum(a.kind_id) || !kvlangLangtypeIsNum(b.kind_id)) {
+        rc = kvlangBuiltinSetError(f, "TypeError: expected numeric, got %s",
+                                   !kvlangLangtypeIsNum(a.kind_id) ? xv_kind_or_none(&in[0]) : xv_kind_or_none(&in[1]));
+        kvlangBuiltinFreeInputs(in, n); return rc;
+    }
     if (kvlangScalarF64(b) == 0) { rc = kvlangBuiltinSetError(f, "ZeroDivisionError: division by zero"); kvlangBuiltinFreeInputs(in, n); return rc; }
     kvlangXvalue_t r;
     if (kvlangLangtypeIsInt(a.kind_id) && kvlangLangtypeIsInt(b.kind_id))
-        narrow_int(a.kind_id, b.kind_id, kvlangScalarI64(a) / kvlangScalarI64(b), sbuf, sizeof sbuf, &r);
+        narrow_int(a.kind_id, b.kind_id,
+                   kvi_div(kvlangScalarI64(a), kvlangScalarI64(b),
+                           int_result_unsigned(a.kind_id, b.kind_id)),
+                   sbuf, sizeof sbuf, &r);
     else
         narrow_float(a.kind_id, b.kind_id, kvlangScalarF64(a) / kvlangScalarF64(b), sbuf, sizeof sbuf, &r);
     rc = kvlangBuiltinWriteResult(f, &r);
@@ -173,13 +218,17 @@ int kvlangBuiltinMod(kvlangFrame_t *f) {
     uint8_t sbuf[64];
     int rc;
     if (n < 2 || !kvlangLangtypeIsInt(a.kind_id) || !kvlangLangtypeIsInt(b.kind_id)) {
-        rc = kvlangBuiltinSetError(f, "TypeError: expected integer, got %s", n ? kvlangXvalueKind(&in[0]) : "none");
+        rc = kvlangBuiltinSetError(f, "TypeError: expected integer, got %s",
+                                   n == 0 ? "None" : (!kvlangLangtypeIsInt(a.kind_id) ? xv_kind_or_none(&in[0]) : (n >= 2 ? xv_kind_or_none(&in[1]) : "None")));
         kvlangBuiltinFreeInputs(in, n); return rc;
     }
     int64_t bv = kvlangScalarI64(b);
     if (bv == 0) { rc = kvlangBuiltinSetError(f, "ZeroDivisionError: modulo by zero"); kvlangBuiltinFreeInputs(in, n); return rc; }
     kvlangXvalue_t r;
-    narrow_int(a.kind_id, b.kind_id, kvlangScalarI64(a) % bv, sbuf, sizeof sbuf, &r);
+    narrow_int(a.kind_id, b.kind_id,
+               kvi_mod(kvlangScalarI64(a), bv,
+                       int_result_unsigned(a.kind_id, b.kind_id)),
+               sbuf, sizeof sbuf, &r);
     rc = kvlangBuiltinWriteResult(f, &r);
     kvlangBuiltinFreeInputs(in, n);
     return rc;
@@ -191,11 +240,15 @@ static int kvlangBuiltinBit(kvlangFrame_t *f, int op) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     kvlangScalar_t sa = kvlangXvalueScalar(&in[0]), sb = n >= 2 ? kvlangXvalueScalar(&in[1]) : SCALAR_NONE;
     if (n < 2 || !kvlangLangtypeIsInt(sa.kind_id) || !kvlangLangtypeIsInt(sb.kind_id)) {
-        kvlangBuiltinSetError(f, "TypeError: expected integer, got %s", n ? kvlangXvalueKind(&in[0]) : "none");
+        kvlangBuiltinSetError(f, "TypeError: expected integer, got %s",
+                              n == 0 ? "None" : (!kvlangLangtypeIsInt(sa.kind_id) ? xv_kind_or_none(&in[0]) : (n >= 2 ? xv_kind_or_none(&in[1]) : "None")));
         kvlangBuiltinFreeInputs(in, n); return -1;
     }
     int64_t a = kvlangScalarI64(sa), b = kvlangScalarI64(sb);
-    int64_t v = op == 0 ? a & b : op == 1 ? a | b : op == 2 ? a ^ b : op == 3 ? (a << (uint64_t)b) : (a >> (uint64_t)b);
+    /* Right-shift signedness follows the left operand; shift count masks with `& 63`. */
+    int64_t v = op == 0 ? a & b : op == 1 ? a | b : op == 2 ? a ^ b
+              : op == 3 ? kvi_shl(a, b)
+                        : kvi_shr(a, b, kvlangLangtypeIsUint(sa.kind_id));
     uint8_t sbuf[64];
     kvlangXvalue_t r;
     narrow_int(sa.kind_id, sb.kind_id, v, sbuf, sizeof sbuf, &r);
@@ -213,21 +266,22 @@ int kvlangBuiltinShr(kvlangFrame_t *f) { return kvlangBuiltinBit(f, 4); }
 static int kvlangBuiltinMathUnary(kvlangFrame_t *f, int op) {
     kvlangXvalue_t in[2]; int n = kvlangBuiltinReadInputs(f, in, 2);
     kvlangScalar_t sa = kvlangXvalueScalar(&in[0]);
-    if (n < 1 || !kvlangLangtypeIsNum(sa.kind_id)) { kvlangBuiltinSetError(f, "TypeError: expected numeric, got %s", n ? kvlangXvalueKind(&in[0]) : "none"); kvlangBuiltinFreeInputs(in, n); return -1; }
+    if (n < 1 || !kvlangLangtypeIsNum(sa.kind_id)) { kvlangBuiltinSetError(f, "TypeError: expected numeric, got %s", n ? xv_kind_or_none(&in[0]) : "None"); kvlangBuiltinFreeInputs(in, n); return -1; }
     uint8_t sbuf[64];
     double x = kvlangScalarF64(sa);
     int rc;
     switch (op) {
     case 0: rc = kvlangBuiltinEmitFloat64(f, sqrt(x)); break;
     case 1: rc = kvlangBuiltinEmitFloat64(f, exp(x)); break;
-    case 2: rc = kvlangBuiltinEmitFloat64(f, log(x)); break;
-    case 3: { kvlangXvalue_t r; /* neg */
-        if (kvlangLangtypeIsFloat(sa.kind_id)) narrow_float(sa.kind_id, sa.kind_id, -x, sbuf, sizeof sbuf, &r);
-        else narrow_int(sa.kind_id, sa.kind_id, -kvlangScalarI64(sa), sbuf, sizeof sbuf, &r);
-        rc = kvlangBuiltinWriteResult(f, &r); break; }
-    case 4: { kvlangXvalue_t r; /* abs */
+    case 2:
+        if (x <= 0.0) rc = kvlangBuiltinSetError(f, "ValueError: log of non-positive number");
+        else rc = kvlangBuiltinEmitFloat64(f, log(x));
+        break;
+    case 3: rc = emit_neg(f, &in[0], sa); break;
+    case 4: { kvlangXvalue_t r; /* `abs` is identity on unsigned kinds */
         if (kvlangLangtypeIsFloat(sa.kind_id)) narrow_float(sa.kind_id, sa.kind_id, fabs(x), sbuf, sizeof sbuf, &r);
-        else { int64_t iv = kvlangScalarI64(sa); narrow_int(sa.kind_id, sa.kind_id, iv < 0 ? -iv : iv, sbuf, sizeof sbuf, &r); }
+        else if (kvlangLangtypeIsUint(sa.kind_id)) narrow_int(sa.kind_id, sa.kind_id, (int64_t)kvlangScalarU64(sa), sbuf, sizeof sbuf, &r);
+        else narrow_int(sa.kind_id, sa.kind_id, kvi_abs(kvlangScalarI64(sa)), sbuf, sizeof sbuf, &r);
         rc = kvlangBuiltinWriteResult(f, &r); break; }
     case 5: rc = kvlangBuiltinEmitInt64(f, x < 0 ? -1 : x > 0 ? 1 : 0); break;
     default: rc = -1; break;

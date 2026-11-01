@@ -1,0 +1,18 @@
+// `abs` is identity on unsigned integer kinds (e.g. `abs(u64max) == u64max`).
+rwfunc test() -> () {
+	a = abs(uint64(18446744073709551615))
+	println("u64max:", a, compactarray·langtype(a))
+	b = abs(uint64(9223372036854775808))
+	println("u64 2^63:", b, compactarray·langtype(b))
+	c = abs(uint32(4294967295))
+	println("u32max:", c, compactarray·langtype(c))
+	d = abs(uint8(200))
+	println("u8:", d, compactarray·langtype(d))
+	x:uint64 = 18446744073709551615
+	abs(x) -> y
+	println("typed:", y, compactarray·langtype(y))
+	e = abs(int8(-5))
+	println("i8:", e, compactarray·langtype(e))
+	g = abs(int64(-9223372036854775807))
+	println("i64:", g, compactarray·langtype(g))
+}

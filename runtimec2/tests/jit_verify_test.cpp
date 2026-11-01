@@ -19,6 +19,7 @@ bool Vmkv::store_i64_slot(vmbin::Frame&, vmbin::Register&, std::int64_t) {
     return true;
 }
 bool Vmkv::read_i64(vmbin::Frame&, std::uint8_t, std::int64_t*) { return false; }
+bool Vmkv::read_bool(vmbin::Frame&, std::uint8_t, bool*) { return false; }
 // JIT2 的 handler 物化/浮点段在 jit.cpp 里会调这些 Vmkv 方法；本测试不跑 VM，
 // 只需提供链接符号（返回值不影响 verify/emit 的无副作用断言）。
 std::string Vmkv::param_key(std::string_view, int, int) { return {}; }

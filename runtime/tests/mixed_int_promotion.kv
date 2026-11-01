@@ -1,0 +1,34 @@
+// Dynamic mixed signed/unsigned integer promotion (arithmetic, comparison, and `min`/`max`):
+// same-signedness keeps the wider kind; mixed-signedness in dynamic slots widens to signed `int16`/`int32`/`int64`
+// (`uint64 >= 2^63` wraps as `int64`, so `u64max == int64(-1)`).
+rwfunc id(x:) -> (r:) {
+	r = x
+}
+
+rwfunc test() -> () {
+	a = id(uint8(200)) + id(int8(100))
+	println("u8+i8:", a, compactarray·langtype(a))
+	b = id(int8(-1)) × id(uint8(255))
+	println("i8*u8:", b, compactarray·langtype(b))
+	c = id(uint16(60000)) + id(int16(10000))
+	println("u16+i16:", c, compactarray·langtype(c))
+	d = id(uint32(4000000000)) + id(int32(1))
+	println("u32+i32:", d, compactarray·langtype(d))
+	e = id(uint64(18446744073709551615)) + id(int64(0))
+	println("u64+i64:", e, compactarray·langtype(e))
+	g = id(uint8(200)) ÷ id(int8(-3))
+	println("u8/i8:", g, compactarray·langtype(g))
+	h = uint8(250) + uint16(10)
+	println("u8+u16:", h, compactarray·langtype(h))
+	println("u8>i8:", uint8(255) > int8(-1))
+	println("u32>i32:", uint32(4000000000) > int32(-1))
+	println("u64==i64:", uint64(18446744073709551615) == int64(-1))
+	println("u64>i64:", uint64(18446744073709551615) > int64(0))
+	println("u64small>i64:", uint64(5) > int64(-1))
+	println("u64>u64:", uint64(18446744073709551615) > uint64(1))
+	println("i8<i64:", int8(-1) < int64(5))
+	mx = max(id(uint64(18446744073709551615)), id(int64(0)))
+	println("max:", mx, compactarray·langtype(mx))
+	mn = min(id(uint64(18446744073709551615)), id(int64(0)))
+	println("min:", mn, compactarray·langtype(mn))
+}

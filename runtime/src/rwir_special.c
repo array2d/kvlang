@@ -7,6 +7,7 @@
 
 #include "runtime_internal.h"
 #include "rwir_internal.h"
+#include "intops.h"
 #include <math.h>
 
 typedef int64_t I64_t;
@@ -42,15 +43,15 @@ typedef double F64_t;
 
 static int64_t arg_I64(kvlangFrame_t *f, kvlangXvalue_t *in, int i) {
     kvlangScalar_t s = kvlangScalarOf(f, &in[i], KVLANG_LT_INT64);
-    kvlangSpecCheckDeclared(f, i, s.kind_id, KVLANG_LT_INT64);
     kvlangSpecCheckTyped(f, i, s.kind_id, KVLANG_LT_INT64);
+    kvlangSpecCheckDeclared(f, i, s.kind_id, KVLANG_LT_INT64);
     return kvlangScalarI64(s);
 }
 
 static double arg_F64(kvlangFrame_t *f, kvlangXvalue_t *in, int i) {
     kvlangScalar_t s = kvlangScalarOf(f, &in[i], KVLANG_LT_FLOAT64);
-    kvlangSpecCheckDeclared(f, i, s.kind_id, KVLANG_LT_FLOAT64);
     kvlangSpecCheckTyped(f, i, s.kind_id, KVLANG_LT_FLOAT64);
+    kvlangSpecCheckDeclared(f, i, s.kind_id, KVLANG_LT_FLOAT64);
     return kvlangScalarF64(s);
 }
 
@@ -114,7 +115,7 @@ static double arg_F64(kvlangFrame_t *f, kvlangXvalue_t *in, int i) {
         return rc;                                                             \
     }
 
-DEF_I64_BIN(Add, a + b)
+DEF_I64_BIN(Add, kvi_add(a, b))
 HIDDEN int kvlangBuiltinI64Sub(kvlangFrame_t *f) {
     kvlangXvalue_t in[2];
     int n = kvlangBuiltinReadInputs(f, in, 2);
@@ -123,21 +124,21 @@ HIDDEN int kvlangBuiltinI64Sub(kvlangFrame_t *f) {
         return kvlangBuiltinSetError(f, "TypeError: sub requires 1 or 2 inputs");
     }
     int64_t a = arg_I64(f, in, 0);
-    int64_t r = n == 1 ? -a : a - arg_I64(f, in, 1);
+    int64_t r = n == 1 ? kvi_neg(a) : kvi_sub(a, arg_I64(f, in, 1));
     int rc = kvlangBuiltinEmitInt64(f, r);
     kvlangBuiltinFreeInputs(in, n);
     return rc;
 }
-DEF_I64_BIN(Mul, a * b)
+DEF_I64_BIN(Mul, kvi_mul(a, b))
 DEF_I64_BIN(Bitand, a & b)
 DEF_I64_BIN(Bitor, a | b)
 DEF_I64_BIN(Bitxor, a ^ b)
-DEF_I64_BIN(Shl, a << (uint64_t)b)
-DEF_I64_BIN(Shr, a >> (uint64_t)b)
+DEF_I64_BIN(Shl, kvi_shl(a, b))
+DEF_I64_BIN(Shr, kvi_shr(a, b, false))
 DEF_I64_BIN(Max, a >= b ? a : b)
 DEF_I64_BIN(Min, a <= b ? a : b)
-DEF_I64_UN(Neg, -a)
-DEF_I64_UN(Abs, a < 0 ? -a : a)
+DEF_I64_UN(Neg, kvi_neg(a))
+DEF_I64_UN(Abs, kvi_abs(a))
 DEF_I64_UN(Sign, a < 0 ? -1 : a > 0 ? 1 : 0)
 
 HIDDEN int kvlangBuiltinI64Div(kvlangFrame_t *f) {
@@ -152,7 +153,7 @@ HIDDEN int kvlangBuiltinI64Div(kvlangFrame_t *f) {
     if (b == 0) {
         rc = kvlangBuiltinSetError(f, "ZeroDivisionError: division by zero");
     } else {
-        rc = kvlangBuiltinEmitInt64(f, a / b);
+        rc = kvlangBuiltinEmitInt64(f, kvi_div(a, b, false));
     }
     kvlangBuiltinFreeInputs(in, n);
     return rc;
@@ -170,7 +171,7 @@ HIDDEN int kvlangBuiltinI64Mod(kvlangFrame_t *f) {
     if (b == 0) {
         rc = kvlangBuiltinSetError(f, "ZeroDivisionError: modulo by zero");
     } else {
-        rc = kvlangBuiltinEmitInt64(f, a % b);
+        rc = kvlangBuiltinEmitInt64(f, kvi_mod(a, b, false));
     }
     kvlangBuiltinFreeInputs(in, n);
     return rc;
@@ -194,10 +195,23 @@ DEF_F64_BIN(Mul, a * b)
 DEF_F64_BIN(Max, a >= b ? a : b)
 DEF_F64_BIN(Min, a <= b ? a : b)
 DEF_F64_UN(Neg, -a)
-DEF_F64_UN(Abs, a < 0 ? -a : a)
+DEF_F64_UN(Abs, fabs(a))
 DEF_F64_UN(Sqrt, sqrt(a))
 DEF_F64_UN(Exp, exp(a))
-DEF_F64_UN(Log, log(a))
+HIDDEN int kvlangBuiltinF64Log(kvlangFrame_t *f) {
+    kvlangXvalue_t in[1];
+    int n = kvlangBuiltinReadInputs(f, in, 1);
+    if (n < 1) {
+        kvlangBuiltinFreeInputs(in, n);
+        return kvlangBuiltinSetError(f, "TypeError: unary op requires 1");
+    }
+    double a = arg_F64(f, in, 0);
+    int rc = (a <= 0.0)
+                 ? kvlangBuiltinSetError(f, "ValueError: log of non-positive number")
+                 : kvlangBuiltinEmitFloat64(f, log(a));
+    kvlangBuiltinFreeInputs(in, n);
+    return rc;
+}
 DEF_F64_BIN(Pow, pow(a, b))
 
 HIDDEN int kvlangBuiltinF64Div(kvlangFrame_t *f) {
@@ -345,7 +359,7 @@ static int emit_int_kind(kvlangFrame_t *f, const char *kind, uint32_t width,
         return rc;                                                             \
     }
 
-#define DEF_INT_DIVMOD(ktok, kstr, w, kid, name, gfn, op, msg)                 \
+#define DEF_INT_DIVMOD(ktok, kstr, w, kid, name, gfn, U, opfn, msg)           \
     HIDDEN int kvlangBuiltin##ktok##name(kvlangFrame_t *f) {                   \
         INT_READ2(f, in, n)                                                    \
         kvlangScalar_t sa = kvlangScalarOf(f, &in[0], kid);                    \
@@ -356,7 +370,7 @@ static int emit_int_kind(kvlangFrame_t *f, const char *kind, uint32_t width,
         if (b == 0)                                                            \
             rc = kvlangBuiltinSetError(f, "ZeroDivisionError: " msg);          \
         else                                                                   \
-            rc = emit_int_kind(f, kstr, w, a op b);                            \
+            rc = emit_int_kind(f, kstr, w, opfn(a, b, U));                     \
         kvlangBuiltinFreeInputs(in, n);                                        \
         return rc;                                                             \
     }
@@ -411,7 +425,7 @@ static int emit_int_kind(kvlangFrame_t *f, const char *kind, uint32_t width,
         }                                                                      \
         kvlangScalar_t sa = kvlangScalarOf(f, &in[0], kid);                    \
         SPEC_FALLBACK1(f, in, n, sa.kind_id, kid, kvlangBuiltinNeg);           \
-        int rc = emit_int_kind(f, kstr, w, -kvlangScalarI64(sa));              \
+        int rc = emit_int_kind(f, kstr, w, kvi_neg(kvlangScalarI64(sa)));      \
         kvlangBuiltinFreeInputs(in, n);                                        \
         return rc;                                                             \
     }
@@ -427,18 +441,18 @@ static int emit_int_kind(kvlangFrame_t *f, const char *kind, uint32_t width,
         kvlangScalar_t sa = kvlangScalarOf(f, &in[0], kid);                    \
         SPEC_FALLBACK1(f, in, n, sa.kind_id, kid, kvlangBuiltinAbs);           \
         int64_t a = kvlangScalarI64(sa);                                       \
-        int rc = emit_int_kind(f, kstr, w, a < 0 ? -a : a);                    \
+        int rc = emit_int_kind(f, kstr, w, kvi_abs(a));                        \
         kvlangBuiltinFreeInputs(in, n);                                        \
         return rc;                                                             \
     }
 
 #define DEF_INT_BASE_FUNCS(ktok, kstr, w, U, kid)                              \
-    DEF_INT_BIN(ktok, kstr, w, kid, Add, kvlangBuiltinAdd, a + b)              \
-    DEF_INT_BIN(ktok, kstr, w, kid, Sub, kvlangBuiltinSub, a - b)              \
-    DEF_INT_BIN(ktok, kstr, w, kid, Mul, kvlangBuiltinMul, a * b)              \
-    DEF_INT_DIVMOD(ktok, kstr, w, kid, Div, kvlangBuiltinDiv, /,               \
+    DEF_INT_BIN(ktok, kstr, w, kid, Add, kvlangBuiltinAdd, kvi_add(a, b))      \
+    DEF_INT_BIN(ktok, kstr, w, kid, Sub, kvlangBuiltinSub, kvi_sub(a, b))      \
+    DEF_INT_BIN(ktok, kstr, w, kid, Mul, kvlangBuiltinMul, kvi_mul(a, b))      \
+    DEF_INT_DIVMOD(ktok, kstr, w, kid, Div, kvlangBuiltinDiv, U, kvi_div,      \
                    "division by zero")                                         \
-    DEF_INT_DIVMOD(ktok, kstr, w, kid, Mod, kvlangBuiltinMod, %,               \
+    DEF_INT_DIVMOD(ktok, kstr, w, kid, Mod, kvlangBuiltinMod, U, kvi_mod,      \
                    "modulo by zero")                                           \
     DEF_INT_MAXMIN(ktok, kstr, w, kid, Max, kvlangBuiltinMax, U, >=)           \
     DEF_INT_MAXMIN(ktok, kstr, w, kid, Min, kvlangBuiltinMin, U, <=)           \
@@ -457,10 +471,8 @@ static int emit_int_kind(kvlangFrame_t *f, const char *kind, uint32_t width,
     DEF_INT_BIN(ktok, kstr, w, kid, Bitand, kvlangBuiltinBitand, a & b)        \
     DEF_INT_BIN(ktok, kstr, w, kid, Bitor, kvlangBuiltinBitor, a | b)          \
     DEF_INT_BIN(ktok, kstr, w, kid, Bitxor, kvlangBuiltinBitxor, a ^ b)        \
-    DEF_INT_BIN(ktok, kstr, w, kid, Shl, kvlangBuiltinShl,                     \
-                a << (uint64_t)b)                                              \
-    DEF_INT_BIN(ktok, kstr, w, kid, Shr, kvlangBuiltinShr,                     \
-                a >> (uint64_t)b)
+    DEF_INT_BIN(ktok, kstr, w, kid, Shl, kvlangBuiltinShl, kvi_shl(a, b))      \
+    DEF_INT_BIN(ktok, kstr, w, kid, Shr, kvlangBuiltinShr, kvi_shr(a, b, U))
 
 KVLANG_INT_BASE_KINDS(DEF_INT_BASE_FUNCS)
 KVLANG_INT_SIGNED_KINDS(DEF_INT_SIGNED_FUNCS)

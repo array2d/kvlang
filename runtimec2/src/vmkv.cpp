@@ -5,6 +5,7 @@
 
 #include <cstdlib>
 #include <charconv>
+#include <cmath>
 #include <cstring>
 #include <cstdio>
 #include <algorithm>
@@ -70,11 +71,8 @@ struct SlotStatsDump {
 bool view_langtype(const kvspaceXvalueBodyView_t& view, std::string* lt) {
     if (!view.head || view.headlen != KVSPACE_XVALUE_HEAD_LEN)
         return false;
-    const uint64_t body_len = kvspaceXvalueHeadLen(
-        reinterpret_cast<const kvspaceXvalueHead*>(view.head));
     const std::uint8_t* p = nullptr;
-    const std::uint16_t n =
-        kvspaceXvalueHeadLangtype(view.head, body_len, &p);
+    const std::uint16_t n = wire_langtype_view(view.head, view.cap, &p);
     if (!n || !p)
         return false;
     lt->assign(reinterpret_cast<const char*>(p), n);
@@ -118,9 +116,12 @@ struct FctxLease {
             c.parent = nullptr;
             c.arg_src_n = c.arg_dst_n = 0;
             c.mem_frame = false;
+            c.observable = false;
             c.seg_hint = nullptr;
             c.jit_hint = nullptr;
+            c.jit2_entry = nullptr;
             c.jit_known = false;
+            c.skip_enter_frame = false;
             c.frame_dir_hint.clear();
         }
     }
@@ -151,6 +152,276 @@ bool is_any_frame_local(std::string_view k) {
     return !name.empty() && name[0] != '[' &&
            name.find('/') == std::string_view::npos &&
            name.find("\xE2\x80\xA5") == std::string_view::npos;
+}
+
+// Propagate `v` across every hop on the `dst_ptr` write-param alias chain (reads inspect
+// only their own reg) and return the tail caller reg.
+Register* chain_set_i64(Register* r, std::int64_t v) {
+    for (;; r = r->dst_ptr) {
+        r->fv = v;
+        r->fast_i64 = true;
+        r->fast_bool = false;
+        if (!r->dst_ptr)
+            return r;
+    }
+}
+Register* chain_set_bool(Register* r, bool b) {
+    for (;; r = r->dst_ptr) {
+        r->fb = b;
+        r->fast_bool = true;
+        r->fast_i64 = false;
+        if (!r->dst_ptr)
+            return r;
+    }
+}
+// Non-scalar write on alias chain: invalidate fast caches across all hops.
+void chain_clear_fast(Register* r) {
+    for (; r; r = r->dst_ptr) {
+        r->fast_i64 = false;
+        r->fast_bool = false;
+    }
+}
+
+// Path-string member base: if `w` is a non-empty `char/*` starting with `/`, set `*out`
+// to that path (matching member reads; skips empty-body container/struct markers).
+bool path_string_base(void* h, const std::string& key, Wire w, std::string* out) {
+    if (!w.d || w.n < KVSPACE_XVALUE_HEAD_LEN ||
+        kvspaceXvalueHeadLen(reinterpret_cast<const kvspaceXvalueHead*>(w.d)) == 0)
+        return false;
+    std::string lt, txt;
+    if (!read_langtype(h, key, &lt) || lt.find("char/") == std::string::npos ||
+        !wire_text(w.d, w.n, lt, &txt) || txt.empty() || txt[0] != '/')
+        return false;
+    *out = std::move(txt);
+    return true;
+}
+
+bool format_member_key_float(double value, std::uint8_t width, std::string* out) {
+    char text[64];
+    if (width == 4) {
+        const float narrowed = static_cast<float>(value);
+        if (!std::isfinite(narrowed))
+            return false;
+        for (int p = 1; p <= 9; p++) {
+            std::snprintf(text, sizeof text, "%.*g", p,
+                          static_cast<double>(narrowed));
+            if (std::strtof(text, nullptr) == narrowed)
+                break;
+        }
+    } else if (width == 8) {
+        if (!std::isfinite(value))
+            return false;
+        for (int p = 1; p <= 17; p++) {
+            std::snprintf(text, sizeof text, "%.*g", p, value);
+            if (std::strtod(text, nullptr) == value)
+                break;
+        }
+    } else {
+        return false;
+    }
+    *out = text;
+    if (out->find_first_of(".eE") == std::string::npos)
+        out->append(".0");
+    return true;
+}
+
+bool format_member_key_wire(Wire cur, const std::string& lt, std::string* out,
+                            std::string* err) {
+    if (!lt.empty() && lt.find("char/") != std::string::npos) {
+        if (wire_text(cur.d, cur.n, lt, out))
+            return true;
+        if (err)
+            *err = "TypeError: member key is not valid text";
+        return false;
+    }
+    if (!lt.empty() && lt[0] == '[') {
+        if (err)
+            *err = "TypeError: member key must be a scalar or string, got " + lt;
+        return false;
+    }
+    Scalar sc{};
+    if (v_scalar(cur, lt, &sc)) {
+        switch (sc.k) {
+        case Scalar::K::Int:
+            *out = std::to_string(sc.i);
+            return true;
+        case Scalar::K::Uint:
+            *out = std::to_string(sc.u);
+            return true;
+        case Scalar::K::Bool:
+            *out = sc.u ? "true" : "false";
+            return true;
+        case Scalar::K::Float:
+            if (format_member_key_float(sc.f, sc.width, out))
+                return true;
+            if (err)
+                *err = "TypeError: floating member key must be finite";
+            return false;
+        default:
+            break;
+        }
+    }
+    if (wire_text(cur.d, cur.n, lt, out))
+        return true;
+    if (err)
+        *err = "TypeError: member key must be a scalar or string, got " +
+               (lt.empty() ? std::string("None") : lt);
+    return false;
+}
+
+// Resolve write-param container slot by parameter name when `r` only appears as `r·x`
+// (no `*[0,k]` reg): match `<func_dir>.[0,k]`, then follow `f.arg_dst` (or `‥arg[0,k]`) to caller target.
+std::string mem_write_param_key(Frame& f, std::string_view name) {
+    std::string fd = f.func_dir;
+    if (!fd.empty() && fd.back() == '/')
+        fd.pop_back();
+    for (int k = 1; k <= 16; k++) {
+        const std::uint8_t* d = nullptr;
+        std::uint32_t n = 0;
+        std::string txt;
+        if (!read_wire(f.h, fd + ".[0," + std::to_string(k) + "]", &d, &n))
+            break;
+        if (!wire_text(d, n, "def langtype", &txt) ||
+            std::string_view(txt).substr(0, txt.find('\0')) != name)
+            continue;
+        std::string key, t;
+        if (k <= f.arg_dst_n && f.arg_dst[k - 1]) {
+            Register* ap = f.arg_dst[k - 1];
+            while (ap->dst_ptr)
+                ap = ap->dst_ptr;
+            key = ap->key;
+        } else {
+            const std::string ak =
+                f.frame + "/\xE2\x80\xA5" "arg[0," + std::to_string(k) + "]";
+            const std::uint8_t* ad = nullptr;
+            std::uint32_t an = 0;
+            if (read_wire_raw(f.h, ak, &ad, &an) && v_ptr_target(Wire{ad, an}, &t))
+                key = std::move(t);
+        }
+        if (key.empty())
+            return {};
+        const std::uint8_t* vd = nullptr;
+        std::uint32_t vn = 0;
+        if (read_wire_raw(f.h, key, &vd, &vn) && v_ptr_target(Wire{vd, vn}, &t) &&
+            !t.empty())
+            key = std::move(t);
+        return key;
+    }
+    return {};
+}
+
+// Resolve read-param Ptr base by name (`v -> m·*k` where layout leaves `m` unrewritten):
+// match `<func_dir>.[0,-k]` and follow the Ptr chain to the target container slot.
+std::string mem_read_param_base_key(Frame& f, std::string_view name) {
+    std::string fd = f.func_dir;
+    if (!fd.empty() && fd.back() == '/')
+        fd.pop_back();
+    for (int k = 1; k <= 16; k++) {
+        const std::uint8_t* d = nullptr;
+        std::uint32_t n = 0;
+        std::string txt;
+        if (!read_wire(f.h, fd + ".[0,-" + std::to_string(k) + "]", &d, &n))
+            break;
+        if (!wire_text(d, n, "def langtype", &txt) ||
+            std::string_view(txt).substr(0, txt.find('\0')) != name)
+            continue;
+        std::string key, t;
+        if (k <= f.arg_src_n && f.arg_src[k - 1]) {
+            Register* ap = f.arg_src[k - 1];
+            while (ap->src_ptr || ap->dst_ptr)
+                ap = ap->src_ptr ? ap->src_ptr : ap->dst_ptr;
+            key = ap->key;
+        } else {
+            const std::string ak =
+                f.frame + "/\xE2\x80\xA5" "arg[0,-" + std::to_string(k) + "]";
+            const std::uint8_t* ad = nullptr;
+            std::uint32_t an = 0;
+            if (read_wire_raw(f.h, ak, &ad, &an) && v_ptr_target(Wire{ad, an}, &t))
+                key = std::move(t);
+        }
+        if (key.empty())
+            return {};
+        for (int hop = 0; hop < 2; hop++) {
+            const std::uint8_t* vd = nullptr;
+            std::uint32_t vn = 0;
+            if (!read_wire_raw(f.h, key, &vd, &vn) || !v_ptr_target(Wire{vd, vn}, &t) ||
+                t.empty())
+                break;
+            key = std::move(t);
+        }
+        std::string blt;
+        if (read_langtype(f.h, key, &blt) &&
+            (blt.front() == '/' || blt.find("\xC2\xB7") != std::string::npos))
+            return key;
+        return {};
+    }
+    return {};
+}
+
+// Format dynamic key `k` from signature parameters when `k` is not a local reg.
+bool param_member_key_text(Frame& f, std::string_view name, std::string* out,
+                           std::string* err) {
+    std::string fd = f.func_dir;
+    if (!fd.empty() && fd.back() == '/')
+        fd.pop_back();
+    for (int sign = -1; sign <= 1; sign += 2) {
+        for (int k = 1; k <= 16; k++) {
+            const int slot = sign * k;
+            const std::uint8_t* d = nullptr;
+            std::uint32_t n = 0;
+            std::string txt;
+            if (!read_wire(f.h, fd + ".[0," + std::to_string(slot) + "]", &d, &n))
+                break;
+            if (!wire_text(d, n, "def langtype", &txt) ||
+                std::string_view(txt).substr(0, txt.find('\0')) != name)
+                continue;
+            Register* ap = nullptr;
+            if (slot < 0 && k <= f.arg_src_n)
+                ap = f.arg_src[k - 1];
+            else if (slot > 0 && k <= f.arg_dst_n)
+                ap = f.arg_dst[k - 1];
+            while (ap && (ap->src_ptr || ap->dst_ptr))
+                ap = ap->src_ptr ? ap->src_ptr : ap->dst_ptr;
+            if (ap) {
+                if (ap->fast_i64) {
+                    *out = std::to_string(ap->fv);
+                    return true;
+                }
+                if (ap->fast_bool) {
+                    *out = ap->fb ? "true" : "false";
+                    return true;
+                }
+            }
+            std::string key;
+            if (ap && !ap->key.empty()) {
+                key = ap->key;
+            } else {
+                key = f.frame + "/\xE2\x80\xA5" "arg[0," + std::to_string(slot) + "]";
+            }
+            for (int hop = 0; hop < 3; hop++) {
+                const std::uint8_t* rd = nullptr;
+                std::uint32_t rn = 0;
+                std::string t;
+                if (!read_wire_raw(f.h, key, &rd, &rn) ||
+                    !v_ptr_target(Wire{rd, rn}, &t) || t.empty())
+                    break;
+                key = std::move(t);
+            }
+            const std::uint8_t* vd = nullptr;
+            std::uint32_t vn = 0;
+            if (!read_wire(f.h, key, &vd, &vn) || !vd || !vn)
+                return false;
+            std::string lt;
+            const std::uint8_t* ltp = nullptr;
+            const std::uint16_t ltl = wire_langtype_view(vd, vn, &ltp);
+            if (ltp && ltl > 0)
+                lt.assign(reinterpret_cast<const char*>(ltp), ltl);
+            else
+                read_langtype(f.h, key, &lt);
+            return format_member_key_wire(Wire{vd, vn}, lt, out, err);
+        }
+    }
+    return false;
 }
 
 // Whether r, or the caller reg it read-aliases, caches a scalar value.
@@ -229,7 +500,7 @@ bool set_value_typed(void* h, const char* key, const std::uint8_t* value,
     if (KVSPACE_XVALUE_HEAD_LEN + blen > value_len)
         return kvspaceSetValue(h, key, value, value_len, err, err_cap) == 0;
     const std::uint8_t* have = nullptr;
-    if (kvspaceXvalueHeadLangtype(value, blen, &have) > 0)
+    if (wire_langtype_view(value, value_len, &have) > 0)
         return kvspaceSetValue(h, key, value, value_len, err, err_cap) == 0;
     if (!lt || !*lt)
         return kvspaceSetValue(h, key, value, value_len, err, err_cap) == 0;
@@ -349,7 +620,7 @@ bool Vmkv::resolve_desc(Frame& f, const std::string& name, std::string* key,
 bool ensure_ref(Frame& f, Register* r) {
     if (r->resolved)
         return true;
-    if (r->key.empty())
+    if (r->key.empty() || !shm_slot_supported(f.h))
         return false;
     if (kvspaceResolveRef(f.h, r->key.c_str(), &r->ref) != 0) {
         r->noslot = true;
@@ -367,10 +638,14 @@ bool Vmkv::reg_slot(Frame& f, std::uint8_t idx, kvspaceXvalueBodyView_t* out) {
         *out = r.view;
         return true;
     }
-    if (!ensure_ref(f, &r))
+    if (!shm_slot_supported(f.h) || !ensure_ref(f, &r))
         return false;
-    if (kvspaceXvalueBodyView(f.h, &r.ref, r.key.c_str(), &r.view) != 0)
+    const int rc = kvspaceXvalueBodyView(f.h, &r.ref, r.key.c_str(), &r.view);
+    if (rc != 0) {
+        if (rc == -2)
+            mark_shm_slot_unsupported(f.h);
         return false;
+    }
     r.view_ok = true;
     r.body = r.view.body;
     r.cap = view_body_len(r.view);
@@ -383,10 +658,14 @@ bool Vmkv::reg_body(Frame& f, std::uint8_t idx, std::uint8_t** body,
               std::uint64_t* cap) {
     Register& r = f.regs[idx];
     if (!r.view_ok) {
-        if (!ensure_ref(f, &r))
+        if (!shm_slot_supported(f.h) || !ensure_ref(f, &r))
             return false;
-        if (kvspaceXvalueBodyView(f.h, &r.ref, r.key.c_str(), &r.view) != 0)
+        const int rc = kvspaceXvalueBodyView(f.h, &r.ref, r.key.c_str(), &r.view);
+        if (rc != 0) {
+            if (rc == -2)
+                mark_shm_slot_unsupported(f.h);
             return false;
+        }
         r.view_ok = true;
         r.body = r.view.body;
         r.cap = view_body_len(r.view);
@@ -415,6 +694,14 @@ thread_local std::uint32_t g_none_len = 0;
 // 帧入口解析会过早失败）。读写共用同一入口。
 bool Vmkv::ensure_reg_key(Frame& f, Register& r) {
     if (r.key.empty()) {
+        Frame* owner = &f;
+        for (Frame* cur = &f; cur; cur = cur->parent) {
+            if (!cur->regs.empty() && &r >= cur->regs.data() &&
+                &r < cur->regs.data() + cur->regs.size()) {
+                owner = cur;
+                break;
+            }
+        }
         // 内存别名写参（dst_ptr 链）：key = 调用方 reg 最终槽（纯内存帧无 arg 槽，
         // `p·x = v` 的 p 写参直接落在调用方实例成员上）。
         Register* ap = &r;
@@ -433,8 +720,8 @@ bool Vmkv::ensure_reg_key(Frame& f, Register& r) {
                 r.slot_state = Register::SlotState::Unknown;
                 return true;
             }
-            r.key.reserve(f.frame.size() + 1 + r.desc_ref->name.size());
-            r.key = f.frame;
+            r.key.reserve(owner->frame.size() + 1 + r.desc_ref->name.size());
+            r.key = owner->frame;
             r.key += "/";
             r.key += r.desc_ref->name;
             r.slot_state = Register::SlotState::Unknown;
@@ -442,7 +729,7 @@ bool Vmkv::ensure_reg_key(Frame& f, Register& r) {
         }
         if (!r.desc.empty()) {
             std::string ek, ed;
-            if (!resolve_desc(f, r.desc, &ek, &ed))
+            if (!resolve_desc(*owner, r.desc, &ek, &ed))
                 return false;
             r.key = std::move(ek);
             r.slot_state = Register::SlotState::Unknown;
@@ -470,6 +757,14 @@ bool Vmkv::reg_langtype(Frame& f, std::uint8_t idx, std::string* lt) {
             return true;
         }
     }
+    if (fr->fast_i64) {
+        lt->assign("int64");
+        return true;
+    }
+    if (fr->fast_bool) {
+        lt->assign("bool");
+        return true;
+    }
     // keyto64_xvalueBody 活动时，直接从 keyto64_xvalue 读 langtype，
     // 省一次 kvspaceGetHead。
     if (fr->view_ok && view_langtype(fr->view, lt))
@@ -485,7 +780,7 @@ bool Vmkv::read_reg(Frame& f, std::uint8_t idx, Wire* out) {
     Register* fr = r.src_ptr ? r.src_ptr : &r;
     if (!r.src_ptr && !ensure_reg_key(f, r))
         return false;
-    // 纯内存帧局部变量（write_reg 内存化、fast_i64 已设、无 kvspace 槽）：直构 int64 wire。
+    // Pure-memory frame local (`fast_i64`/`fast_bool` set, no kvspace slot): synthesize wire directly.
     // 别名 reg（src_ptr）key 为空，走 fast 缓存构造。
     const std::string& rk = r.key;
     const std::size_t fs = f.frame.size();
@@ -498,9 +793,10 @@ bool Vmkv::read_reg(Frame& f, std::uint8_t idx, Wire* out) {
         std::fprintf(stderr, "[readreg t1 fast=%d flk=%d src=%p]\n",
                      (int)fr->fast_i64, (int)flk, (void*)r.src_ptr);
     if (fr->fast_i64 && flk) {
-        // The int64 wire is fixed-shape: 组装一次后改 body。
-        thread_local std::uint8_t s_buf[64];
+        // Fixed-shape int64 wire: 4-slot ring buffer prevents dual-operand prefetch (`in[0]`/`in[1]`) from clobbering.
+        thread_local std::uint8_t s_buf[4][64];
         thread_local std::uint32_t s_len = 0;
+        thread_local std::uint32_t s_idx = 0;
         if (!s_len) {
             std::uint8_t* buf = nullptr;
             std::uint64_t len64 = 0;
@@ -508,17 +804,96 @@ bool Vmkv::read_reg(Frame& f, std::uint8_t idx, Wire* out) {
             if (kvspaceXvalueHeadNewScalar(
                     0, reinterpret_cast<const std::uint8_t*>(&zero), 8, "int64",
                     &buf, &len64) == 0 &&
-                buf && len64 >= 8 && len64 <= sizeof s_buf) {
-                std::memcpy(s_buf, buf, static_cast<std::size_t>(len64));
+                buf && len64 >= 8 && len64 <= sizeof s_buf[0]) {
+                for (auto& slot : s_buf)
+                    std::memcpy(slot, buf, static_cast<std::size_t>(len64));
                 s_len = static_cast<std::uint32_t>(len64);
             }
             std::free(buf);
         }
         if (s_len) {
-            std::memcpy(s_buf + KVSPACE_XVALUE_HEAD_LEN, &fr->fv, 8);
-            out->d = s_buf;
+            std::uint8_t* cur = s_buf[s_idx];
+            s_idx = (s_idx + 1) & 3u;
+            std::memcpy(cur + KVSPACE_XVALUE_HEAD_LEN, &fr->fv, 8);
+            out->d = cur;
             out->n = s_len;
             return true;
+        }
+    }
+    if (fr->fast_bool && flk) {
+        thread_local std::uint8_t b_buf[4][64];
+        thread_local std::uint32_t b_len = 0;
+        thread_local std::uint32_t b_idx = 0;
+        if (!b_len) {
+            std::uint8_t* buf = nullptr;
+            std::uint64_t len64 = 0;
+            const std::uint8_t zero = 0;
+            if (kvspaceXvalueHeadNewScalar(0, &zero, 1, "bool", &buf, &len64) == 0 &&
+                buf && len64 > KVSPACE_XVALUE_HEAD_LEN && len64 <= sizeof b_buf[0]) {
+                for (auto& slot : b_buf)
+                    std::memcpy(slot, buf, static_cast<std::size_t>(len64));
+                b_len = static_cast<std::uint32_t>(len64);
+            }
+            std::free(buf);
+        }
+        if (b_len) {
+            std::uint8_t* cur = b_buf[b_idx];
+            b_idx = (b_idx + 1) & 3u;
+            cur[KVSPACE_XVALUE_HEAD_LEN] = fr->fb ? 1 : 0;
+            out->d = cur;
+            out->n = b_len;
+            return true;
+        }
+    }
+    // Memory-aliased read-param (`src_ptr`) has no local key: follow `src_ptr` to the caller
+    // reg's slot so non-fast values (such as `*T` Ptr wires) read from the caller.
+    if (r.src_ptr) {
+        Register* tr = r.src_ptr;
+        while (tr->src_ptr)
+            tr = tr->src_ptr;
+        if (tr->fast_bool) {
+            thread_local std::uint8_t b_buf[4][64];
+            thread_local std::uint32_t b_len = 0;
+            thread_local std::uint32_t b_idx = 0;
+            if (!b_len) {
+                std::uint8_t* buf = nullptr;
+                std::uint64_t len64 = 0;
+                const std::uint8_t zero = 0;
+                if (kvspaceXvalueHeadNewScalar(0, &zero, 1, "bool", &buf, &len64) == 0 &&
+                    buf && len64 > KVSPACE_XVALUE_HEAD_LEN && len64 <= sizeof b_buf[0]) {
+                    for (auto& slot : b_buf)
+                        std::memcpy(slot, buf, static_cast<std::size_t>(len64));
+                    b_len = static_cast<std::uint32_t>(len64);
+                }
+                std::free(buf);
+            }
+            if (b_len) {
+                std::uint8_t* cur = b_buf[b_idx];
+                b_idx = (b_idx + 1) & 3u;
+                cur[KVSPACE_XVALUE_HEAD_LEN] = tr->fb ? 1 : 0;
+                out->d = cur;
+                out->n = b_len;
+                return true;
+            }
+        }
+        // Read via caller's `ByRef` handle if available, else by key.
+        if (ensure_ref(f, tr)) {
+            std::uint8_t* d = nullptr;
+            std::uint32_t n = 0;
+            if (kvspaceGetByRef(f.h, &tr->ref, tr->key.c_str(), &d, &n) == 0 && d &&
+                n) {
+                out->d = d;
+                out->n = n;
+                return true;
+            }
+        } else {
+            const std::uint8_t* d = nullptr;
+            std::uint32_t n = 0;
+            if (!tr->key.empty() && read_wire_raw(f.h, tr->key, &d, &n) && d && n) {
+                out->d = d;
+                out->n = n;
+                return true;
+            }
         }
     }
     if (ensure_ref(f, &r)) {
@@ -544,8 +919,8 @@ bool Vmkv::read_reg(Frame& f, std::uint8_t idx, Wire* out) {
     }
     const std::uint8_t* d = nullptr;
     std::uint32_t n = 0;
-    if (!read_wire(f.h, r.key, &d, &n)) {
-        // read_wire 也失败：同 None 语义（key 缺失/空值 → None）。
+    if (!read_wire_raw(f.h, r.key, &d, &n)) {
+        // Missing or unreadable key evaluates to `None`.
         if (!g_none_len) {
             std::uint64_t nn = 0;
             g_none_ptr = g_none_wire;
@@ -591,15 +966,17 @@ bool Vmkv::read_scalar(Frame& f, std::uint8_t idx, Scalar* out) {
     const bool have_view = reg_body(f, idx, &body, &cap);
     if (vmbin.prof_on && !have_view)
         vmbin.prof.f_slot++;
-    std::string lt;
-    const bool have_lt = read_langtype(f.h, rf.key, &lt);
     if (have_view) {
         if (r.sc_ok) {
             if (v_scalar_raw(r.sck, r.scw, body, cap, out))
                 return true;
             if (vmbin.prof_on)
                 vmbin.prof.f_raw++;
-        } else if (have_lt && slot_read_scalar(r.view, r.cap, lt, out)) {
+        }
+        std::string lt;
+        const bool have_lt =
+            view_langtype(r.view, &lt) || reg_langtype(f, idx, &lt);
+        if (have_lt && slot_read_scalar(r.view, r.cap, lt, out)) {
             r.sck = out->k;
             r.scw = out->width;
             r.sc_ok = true;
@@ -609,7 +986,16 @@ bool Vmkv::read_scalar(Frame& f, std::uint8_t idx, Scalar* out) {
     if (vmbin.prof_on)
         vmbin.prof.fb++;
     Wire w{};
-    return have_lt && read_reg(f, idx, &w) && v_scalar(w, lt, out);
+    if (!read_reg(f, idx, &w))
+        return false;
+    const std::uint8_t* ltp = nullptr;
+    const std::uint16_t ltl = wire_langtype_view(w.d, w.n, &ltp);
+    if (ltp && ltl > 0) {
+        return v_scalar(w, std::string_view(reinterpret_cast<const char*>(ltp), ltl),
+                        out);
+    }
+    std::string lt;
+    return reg_langtype(f, idx, &lt) && v_scalar(w, lt, out);
 }
 
 // 帧局部普通变量 key（非参数槽、非系统槽）：纯内存化候选。
@@ -652,10 +1038,12 @@ void Vmkv::flush_frame_locals(Frame& f, const Register* const* skip,
                 !buf)
                 continue;
             char err[192] = {};
-            if (kvspaceSetValue(f.h, r.key.c_str(), buf, static_cast<std::uint32_t>(len64), err, sizeof err) == 0 &&
-                kvspaceResolveRef(f.h, r.key.c_str(), &r.ref) == 0) {
-                r.resolved = true;
-                r.slot_state = Register::SlotState::Present;  // 槽已建，后续写须查类型
+            if (kvspaceSetValue(f.h, r.key.c_str(), buf, static_cast<std::uint32_t>(len64), err, sizeof err) == 0) {
+                r.kv_live = true;
+                r.slot_state = Register::SlotState::Present;
+                if (shm_slot_supported(f.h) &&
+                    kvspaceResolveRef(f.h, r.key.c_str(), &r.ref) == 0)
+                    r.resolved = true;
             }
             std::free(buf);
             buf = nullptr;
@@ -665,10 +1053,12 @@ void Vmkv::flush_frame_locals(Frame& f, const Register* const* skip,
                 !buf)
                 continue;
             char err[192] = {};
-            if (kvspaceSetValue(f.h, r.key.c_str(), buf, static_cast<std::uint32_t>(len64), err, sizeof err) == 0 &&
-                kvspaceResolveRef(f.h, r.key.c_str(), &r.ref) == 0) {
-                r.resolved = true;
-                r.slot_state = Register::SlotState::Present;  // 槽已建，后续写须查类型
+            if (kvspaceSetValue(f.h, r.key.c_str(), buf, static_cast<std::uint32_t>(len64), err, sizeof err) == 0) {
+                r.kv_live = true;
+                r.slot_state = Register::SlotState::Present;
+                if (shm_slot_supported(f.h) &&
+                    kvspaceResolveRef(f.h, r.key.c_str(), &r.ref) == 0)
+                    r.resolved = true;
             }
             std::free(buf);
             buf = nullptr;
@@ -688,39 +1078,44 @@ bool Vmkv::write_reg(Frame& f, std::uint8_t idx, const std::uint8_t* data,
         Register& dr = *drp;
         r.fast_i64 = false;
         r.fast_bool = false;
-        if (len >= KVSPACE_XVALUE_HEAD_LEN &&
+        const bool dr_pinned_noview = dr.kv_pinned && !(dr.view_ok && dr.body);
+        if (!dr_pinned_noview && len >= KVSPACE_XVALUE_HEAD_LEN &&
             kvspaceXvalueHeadLen(reinterpret_cast<const kvspaceXvalueHead*>(data)) >= 8 &&
+            kvspaceXvalueHeadLen(reinterpret_cast<const kvspaceXvalueHead*>(data)) <=
+                len - KVSPACE_XVALUE_HEAD_LEN &&
             data[6] == KVSPACE_XVALUE_ST_SHORT &&
             data[7] == KVSPACE_XVALUE_PTR_INLINE) {
             /* 值自带类型须 int64 兼容（float64 body 也 8 字节，勿误当 int64）。 */
             const std::uint8_t* vlt = nullptr;
-            const std::uint16_t vltl = kvspaceXvalueHeadLangtype(
-                data,
-                kvspaceXvalueHeadLen(reinterpret_cast<const kvspaceXvalueHead*>(data)),
-                &vlt);
+            const std::uint16_t vltl = wire_langtype_view(data, len, &vlt);
             const bool value_is_i64 =
                 vltl == 0 || (vltl == 5 && std::memcmp(vlt, "int64", 5) == 0);
             std::string lt;
             /* 槽已有类型须为 int64，无类型（首写）接受。Absent = 纯内存无槽，免查。 */
             const bool slot_absent = dr.slot_state == Register::SlotState::Absent;
-            if (value_is_i64 &&
-                (slot_absent || !read_langtype(f.h, dr.key, &lt) || lt == "int64")) {
+            if (!slot_absent && dr.kv_live && !dr.fast_i64 && dr.key.empty())
+                (void)ensure_reg_key(f, dr);
+            const bool slot_is_i64 =
+                slot_absent || !dr.kv_live || dr.fast_i64 ||
+                (dr.desc_ref && dr.desc_ref->langtype == vmbin::LangType::Int64) ||
+                (!read_langtype(f.h, dr.key, &lt) || lt == "int64");
+            if (value_is_i64 && slot_is_i64) {
                 std::int64_t v = 0;
                 std::memcpy(&v, data + KVSPACE_XVALUE_HEAD_LEN, 8);
-                dr.fv = v;
-                dr.fast_i64 = true;
-                if (dr.view_ok && dr.body) {
+                chain_set_i64(&r, v);
+                if ((dr.view_ok && dr.body) || dr.kv_live) {
                     if (!store_i64_slot(f, dr, v))
                         return false;
                 } else {
                     dr.slot_state = Register::SlotState::Absent;
                 }
-                r.fv = v;
-                r.fast_i64 = true;
                 return true;
             }
         }
         // 非 int64 写参：转发落 kvspace（别名调用不常见，回退安全路径）。
+        chain_clear_fast(&r);
+        if (dr.key.empty() && !ensure_reg_key(f, dr))
+            return false;
         if (dr.view_ok) {
             dr.view_ok = false;
         }
@@ -733,6 +1128,8 @@ bool Vmkv::write_reg(Frame& f, std::uint8_t idx, const std::uint8_t* data,
         char err[192] = {};
         const bool ok = kvspaceSetValue(f.h, dr.key.c_str(), data, len, err,
                                         sizeof err) == 0;
+        if (ok)
+            dr.kv_live = true;
         dr.slot_state = ok ? Register::SlotState::Present
                            : Register::SlotState::Unknown;
         return ok;
@@ -748,52 +1145,49 @@ bool Vmkv::write_reg(Frame& f, std::uint8_t idx, const std::uint8_t* data,
         const auto dmid = wdsc.find("\xC2\xB7");
         const std::string dbkey = wdsc.substr(0, dmid);
         const std::string dvar = wdsc.substr(dmid + 3);  // 跳过 `·*`
-        for (Register& vr : f.regs) {
-            const std::string_view vn =
-                !vr.desc.empty() ? std::string_view(vr.desc)
-                : vr.desc_ref    ? std::string_view(vr.desc_ref->name)
-                                 : std::string_view();
-            if (vn != dvar)
-                continue;
-            std::string dk;
-            if (vr.fast_i64) {
-                dk = std::to_string(vr.fv);
-            } else if (!vr.key.empty() || (vr.desc_ref && ensure_reg_key(f, vr))) {
-                Wire vw{};
-                Scalar vs{};
-                std::string vlt;
-                const std::uint8_t ridx =
-                    static_cast<std::uint8_t>(&vr - f.regs.data());
-                if (read_reg(f, ridx, &vw) && reg_langtype(f, ridx, &vlt) &&
-                    v_scalar(vw, vlt, &vs)) {
-                    if (vs.k == Scalar::K::Float)
-                        dk = std::to_string((int64_t)vs.f);
-                    else if (vs.k == Scalar::K::Uint)
-                        dk = std::to_string(vs.u);
-                    else
-                        dk = std::to_string(vs.i);
+        const bool dlit = dvar.size() >= 2 && dvar.front() == '"' && dvar.back() == '"';
+        std::string dk;
+        bool dk_ok = false;
+        if (dlit) {
+            dk = dvar.substr(1, dvar.size() - 2);
+            dk_ok = !dk.empty();
+        } else {
+            for (std::size_t vi = 0; vi < f.regs.size(); vi++) {
+                Register& vr = f.regs[vi];
+                const std::string_view vn =
+                    !vr.desc.empty() ? std::string_view(vr.desc)
+                    : vr.desc_ref    ? std::string_view(vr.desc_ref->name)
+                                     : std::string_view();
+                if (vn != dvar)
+                    continue;
+                if (member_key_text(f, static_cast<std::uint8_t>(vi), &dk) && !dk.empty()) {
+                    dk_ok = true;
+                    break;
                 }
             }
-            if (!dk.empty()) {
-                r.key = dbkey + "\xC2\xB7" + dk;
-                r.view_ok = false;
-                r.sc_ok = false;
-                r.fast_i64 = false;
-                r.fast_bool = false;
-                r.arr_esz = 0;
-                r.arr_ndim = 0;
-                r.arr_kind = 0;
-                r.arr_bodylen = 0;
-                r.arr_elem_kind.clear();
-                // data 自带类型（attr 区随值），直接落。
-                char derrb[192] = {};
-                r.slot_state = kvspaceSetValue(f.h, r.key.c_str(), data, len,
-                                               derrb, sizeof derrb) == 0
-                                   ? Register::SlotState::Present
-                                   : Register::SlotState::Unknown;
-                return r.slot_state == Register::SlotState::Present;
-            }
+            if (!dk_ok && param_member_key_text(f, dvar, &dk, nullptr) && !dk.empty())
+                dk_ok = true;
         }
+        if (dk_ok) {
+            r.key = dbkey + "\xC2\xB7" + dk;
+            r.view_ok = false;
+            r.sc_ok = false;
+            r.fast_i64 = false;
+            r.fast_bool = false;
+            r.arr_esz = 0;
+            r.arr_ndim = 0;
+            r.arr_kind = 0;
+            r.arr_bodylen = 0;
+            r.arr_elem_kind.clear();
+            char derrb[192] = {};
+            r.slot_state = kvspaceSetValue(f.h, r.key.c_str(), data, len,
+                                           derrb, sizeof derrb) == 0
+                               ? Register::SlotState::Present
+                               : Register::SlotState::Unknown;
+            return r.slot_state == Register::SlotState::Present;
+        }
+        // Fail when dynamic key cannot be resolved rather than writing literal `/tmp/m·*k`.
+        return false;
     }
     if (wdsc.find("\xC2\xB7") != std::string::npos && wdsc[0] != '/') {
         const auto mid = wdsc.find("\xC2\xB7");
@@ -812,14 +1206,21 @@ bool Vmkv::write_reg(Frame& f, std::uint8_t idx, const std::uint8_t* data,
         }
         while (bp->src_ptr || bp->dst_ptr)
             bp = bp->src_ptr ? bp->src_ptr : bp->dst_ptr;
-        // base 名未匹配（写槽 `p·x` 的 p 是 `*[0,1]` 写参描述符）：取已解析到
-        // 调用方实例的写参 reg 链作 base（成员写就地改调用方对象）。
-        if (bp == &r || bp->key.empty()) {
+        // Parameter Ptr base without a local reg (`r·x`): resolve caller slot via signature.
+        std::string mwk;
+        if (bp == &r) {
+            mwk = mem_write_param_key(f, base_part);
+            if (mwk.empty())
+                mwk = mem_read_param_base_key(f, base_part);
+        }
+        // Fallback for `*[0,k]` write-param base: match only positive write-param descriptors
+        // (`k > 0`), never read-params `*[0,-k]` (whose chain tail may be a `/lib` literal slot).
+        if (mwk.empty() && (bp == &r || bp->key.empty())) {
             for (Register& rr : f.regs) {
                 const std::string rn = !rr.desc.empty() ? rr.desc
                                        : (rr.desc_ref ? rr.desc_ref->name
                                                       : std::string());
-                if (rn.rfind("*[0,", 0) == 0) {
+                if (rn.rfind("*[0,", 0) == 0 && rn.size() > 4 && rn[4] != '-') {
                     Register* rp = &rr;
                     while (rp->src_ptr || rp->dst_ptr)
                         rp = rp->src_ptr ? rp->src_ptr : rp->dst_ptr;
@@ -832,19 +1233,22 @@ bool Vmkv::write_reg(Frame& f, std::uint8_t idx, const std::uint8_t* data,
                 }
             }
         }
-        if (bp->key.empty() && !ensure_reg_key(f, *bp))
+        if (mwk.empty() && bp->key.empty() && !ensure_reg_key(f, *bp))
             return false;
         // base 槽是 Ptr（`cur->next = v` 的 cur 存指针）：成员写落在 target 上。
         // The base reg keeps its own key: rebinding it would aim later writes to
         // the variable itself (`cur·next -> cur`) at the old target.
-        std::string bkey = bp->key;
-        if (!bkey.empty()) {
+        std::string bkey = mwk.empty() ? bp->key : mwk;
+        if (mwk.empty() && !bkey.empty()) {
             const std::uint8_t* bd = nullptr;
             std::uint32_t bn = 0;
             std::string bt;
-            if (read_wire_raw(f.h, bkey, &bd, &bn) &&
-                v_ptr_target(Wire{bd, bn}, &bt) && !bt.empty())
-                bkey = bt;
+            if (read_wire_raw(f.h, bkey, &bd, &bn)) {
+                if (v_ptr_target(Wire{bd, bn}, &bt) && !bt.empty())
+                    bkey = bt;
+                else if (path_string_base(f.h, bkey, Wire{bd, bn}, &bt))
+                    bkey = bt;  // path-string base
+            }
         }
         if (!bkey.empty() && !mname.empty() && mname[0] != '*') {
             r.key = bkey + "\xC2\xB7" + mname;
@@ -865,59 +1269,53 @@ bool Vmkv::write_reg(Frame& f, std::uint8_t idx, const std::uint8_t* data,
                                : Register::SlotState::Unknown;
             return r.slot_state == Register::SlotState::Present;
         }
-        // 动态成员键（`·*var`，如 `/tmp/mi·*i0`）：handler 写（compactarray·new/fill）
-        // 直接落 member——解析 var 值作真实键（对齐主循环 member write 动态键）。
+        // Dynamic member key (`·*var`) on handler writes: resolve `var`'s runtime key text.
         if (!bkey.empty() && !mname.empty() && mname[0] == '*') {
             const std::string var = mname.substr(1);
-            for (Register& vr : f.regs) {
-                const std::string_view vn =
-                    !vr.desc.empty() ? std::string_view(vr.desc)
-                    : vr.desc_ref    ? std::string_view(vr.desc_ref->name)
-                                     : std::string_view();
-                if (vn != var)
-                    continue;
-                std::string kstr;
-                if (vr.fast_i64) {
-                    kstr = std::to_string(vr.fv);
-                } else if (!vr.key.empty() ||
-                           (vr.desc_ref && ensure_reg_key(f, vr))) {
-                    Wire vw{};
-                    Scalar vs{};
-                    std::string vlt;
-                    if (read_reg(f, static_cast<std::uint8_t>(
-                                       &vr - f.regs.data()),
-                                 &vw) &&
-                        reg_langtype(f, static_cast<std::uint8_t>(
-                                            &vr - f.regs.data()),
-                                     &vlt) &&
-                        v_scalar(vw, vlt, &vs)) {
-                        if (vs.k == Scalar::K::Float)
-                            kstr = std::to_string((int64_t)vs.f);
-                        else if (vs.k == Scalar::K::Uint)
-                            kstr = std::to_string(vs.u);
-                        else
-                            kstr = std::to_string(vs.i);
+            const bool vlit = var.size() >= 2 && var.front() == '"' && var.back() == '"';
+            std::string kstr;
+            bool kok = false;
+            if (vlit) {
+                kstr = var.substr(1, var.size() - 2);
+                kok = !kstr.empty();
+            } else {
+                for (std::size_t vi = 0; vi < f.regs.size(); vi++) {
+                    Register& vr = f.regs[vi];
+                    const std::string_view vn =
+                        !vr.desc.empty() ? std::string_view(vr.desc)
+                        : vr.desc_ref    ? std::string_view(vr.desc_ref->name)
+                                         : std::string_view();
+                    if (vn != var)
+                        continue;
+                    if (member_key_text(f, static_cast<std::uint8_t>(vi), &kstr) &&
+                        !kstr.empty()) {
+                        kok = true;
+                        break;
                     }
                 }
-                if (!kstr.empty()) {
-                    r.key = bkey + "\xC2\xB7" + kstr;
-                    r.view_ok = false;
-                    r.sc_ok = false;
-                    r.fast_i64 = false;
-                    r.fast_bool = false;
-                    r.arr_esz = 0;
-                    r.arr_ndim = 0;
-                    r.arr_kind = 0;
-                    r.arr_bodylen = 0;
-                    r.arr_elem_kind.clear();
-                    char errb[192] = {};
-                    r.slot_state = kvspaceSetValue(f.h, r.key.c_str(), data, len,
-                                                   errb, sizeof errb) == 0
-                                       ? Register::SlotState::Present
-                                       : Register::SlotState::Unknown;
-                    return r.slot_state == Register::SlotState::Present;
-                }
+                if (!kok && param_member_key_text(f, var, &kstr, nullptr) && !kstr.empty())
+                    kok = true;
             }
+            if (kok) {
+                r.key = bkey + "\xC2\xB7" + kstr;
+                r.view_ok = false;
+                r.sc_ok = false;
+                r.fast_i64 = false;
+                r.fast_bool = false;
+                r.arr_esz = 0;
+                r.arr_ndim = 0;
+                r.arr_kind = 0;
+                r.arr_bodylen = 0;
+                r.arr_elem_kind.clear();
+                char errb[192] = {};
+                r.slot_state = kvspaceSetValue(f.h, r.key.c_str(), data, len,
+                                               errb, sizeof errb) == 0
+                                   ? Register::SlotState::Present
+                                   : Register::SlotState::Unknown;
+                return r.slot_state == Register::SlotState::Present;
+            }
+            // Fail when dynamic key cannot be resolved rather than writing literal `base·*k`.
+            return false;
         }
     }
     if (!ensure_reg_key(f, r))
@@ -939,18 +1337,20 @@ bool Vmkv::write_reg(Frame& f, std::uint8_t idx, const std::uint8_t* data,
     if (g_trace && rk == f.frame + "/t1")
         std::fprintf(stderr, "[writereg t1 fl=%d len=%u]\n", (int)frame_local,
                      len);
-    /* int64 纯内存化：body_len>=8（总长含 attr 会误判 bool）且**值自带类型须 int64
-       兼容**（float64 的 body 也是 8 字节——old attr 方案靠 attr 先写挡，现在类型随
-       值，须读值自身 attr 区）。 */
-    if (frame_local && len >= KVSPACE_XVALUE_HEAD_LEN &&
+    const bool ptr_deref = !wdsc.empty() && wdsc[0] == '*';
+    const bool r_pinned_noview = r.kv_pinned && !(r.view_ok && r.body);
+    /* Cache frame-local `int64` in memory only when `body_len >= 8` and wire `langtype`
+       is `int64`-compatible (excluding 8-byte `float64`); Ptr derefs, write-params, and
+       unviewed `kv_pinned` (`&x`) slots must persist to kvspace. */
+    if (frame_local && !ptr_deref && !r_pinned_noview &&
+        len >= KVSPACE_XVALUE_HEAD_LEN &&
         data[6] == KVSPACE_XVALUE_ST_SHORT &&
         data[7] == KVSPACE_XVALUE_PTR_INLINE) {
         const std::uint64_t blen =
             kvspaceXvalueHeadLen(reinterpret_cast<const kvspaceXvalueHead*>(data));
-        if (blen >= 8) {
+        if (blen >= 8 && blen <= len - KVSPACE_XVALUE_HEAD_LEN) {
             const std::uint8_t* vlt = nullptr;
-            const std::uint16_t vltl =
-                kvspaceXvalueHeadLangtype(data, blen, &vlt);
+            const std::uint16_t vltl = wire_langtype_view(data, len, &vlt);
             const bool value_is_i64 =
                 vltl == 0 || (vltl == 5 && std::memcmp(vlt, "int64", 5) == 0);
             // 槽状态显式化：Absent = 纯内存写、kvspace 无槽 → 跳过 langtype 查询
@@ -959,18 +1359,24 @@ bool Vmkv::write_reg(Frame& f, std::uint8_t idx, const std::uint8_t* data,
             if (slot_absent && g_slot_stats)
                 g_absent_write_hits++;
             std::string lt;
-            if (!slot_absent)
-                read_langtype(f.h, rk.c_str(), &lt);  // float64 槽不纯内存化
-            if (value_is_i64 && (slot_absent || lt.empty() || lt == "int64")) {
+            const bool slot_is_i64 =
+                slot_absent || !r.kv_live ||
+                (r.desc_ref && r.desc_ref->langtype == vmbin::LangType::Int64) ||
+                (!read_langtype(f.h, rk.c_str(), &lt) || lt == "int64");
+            if (value_is_i64 && slot_is_i64) {
                 std::int64_t v = 0;
                 std::memcpy(&v, data + KVSPACE_XVALUE_HEAD_LEN, 8);
                 r.fv = v;
                 r.fast_i64 = true;
-                if (r.view_ok && r.body)
-                    return store_i64_slot(f, r, v);  // 已有槽：直写同步明文
-                // 纯内存：不建 kvspace 槽。帧局部 int64 变量层内读走 fast 缓存；
-                // 调用边界经 arg_src/arg_dst 内存别名或读参传值，无需明文存在。
-                r.slot_state = Register::SlotState::Absent;
+                if ((r.view_ok && r.body) || r.kv_live) {
+                    if (!store_i64_slot(f, r, v))
+                        return false;
+                    r.kv_live = true;
+                    r.slot_state = Register::SlotState::Present;
+                } else {
+                    // Pure-memory local: skip creating a kvspace slot while cached in `fv`.
+                    r.slot_state = Register::SlotState::Absent;
+                }
                 return true;
             }
         }
@@ -978,7 +1384,10 @@ bool Vmkv::write_reg(Frame& f, std::uint8_t idx, const std::uint8_t* data,
     if (ensure_ref(f, &r)) {
         char err[192] = {};
         if (kvspaceSetValueByRef(f.h, &r.ref, r.key.c_str(), data, len, err, sizeof err) == 0) {
+            r.kv_live = true;
             r.slot_state = Register::SlotState::Present;
+            if (ptr_deref)
+                invalidate_path(f, rk);
             return true;
         }
         r.resolved = false;
@@ -991,8 +1400,12 @@ bool Vmkv::write_reg(Frame& f, std::uint8_t idx, const std::uint8_t* data,
                          r.key.c_str(), err, len);
         return false;
     }
+    r.kv_live = true;
+    if (ptr_deref)
+        invalidate_path(f, rk);
     // 新键：补一次绑定，后续走 ByRef。
-    if (kvspaceResolveRef(f.h, r.key.c_str(), &r.ref) == 0)
+    if (shm_slot_supported(f.h) &&
+        kvspaceResolveRef(f.h, r.key.c_str(), &r.ref) == 0)
         r.resolved = true;
     r.slot_state = Register::SlotState::Present;
     return true;
@@ -1009,14 +1422,18 @@ bool Vmkv::read_i64(Frame& f, std::uint8_t idx, std::int64_t* out) {
     if (!read_scalar(f, idx, &sc) || sc.k != Scalar::K::Int)
         return false;
     *out = sc.i;
-    if (sc.width == 8) {
+    const Register& rf = r.src_ptr ? *r.src_ptr : r;
+    const bool pinned_noview =
+        (r.kv_pinned && !(r.view_ok && r.body)) ||
+        (rf.kv_pinned && !(rf.view_ok && rf.body));
+    if (sc.width == 8 && !pinned_noview) {
         r.fv = sc.i;
         r.fast_i64 = true;
     }
     return true;
 }
 
-// 直取 bool 槽值（比较/br/条件）。
+// Read strict `bool` value for `br`/conditions (no implicit int/float truthiness).
 bool Vmkv::read_bool(Frame& f, std::uint8_t idx, bool* out) {
     Register& r = f.regs[idx];
     if (r.fast_bool) {
@@ -1024,10 +1441,14 @@ bool Vmkv::read_bool(Frame& f, std::uint8_t idx, bool* out) {
         return true;
     }
     Scalar sc{};
-    if (!read_scalar(f, idx, &sc))
+    if (!read_scalar(f, idx, &sc) || sc.k != Scalar::K::Bool)
         return false;
-    *out = truthy(sc);
-    if (sc.k == Scalar::K::Bool && sc.width == 1) {
+    *out = sc.u != 0;
+    const Register& rf = r.src_ptr ? *r.src_ptr : r;
+    const bool pinned_noview =
+        (r.kv_pinned && !(r.view_ok && r.body)) ||
+        (rf.kv_pinned && !(rf.view_ok && rf.body));
+    if (sc.width == 1 && !pinned_noview) {
         r.fb = *out;
         r.fast_bool = true;
     }
@@ -1039,11 +1460,14 @@ bool Vmkv::read_bool(Frame& f, std::uint8_t idx, bool* out) {
 bool Vmkv::store_i64_slot(Frame& f, Register& r, std::int64_t v) {
     const kvspaceXvalueBodyView_t& w = r.view;
     std::string lt;
-    if (r.cap >= 8 && view_langtype(w, &lt) && lt == "int64") {
+    if (r.view_ok && r.body && r.cap >= 8 && view_langtype(w, &lt) &&
+        lt == "int64") {
         std::memcpy(r.body, &v, 8);
         r.slot_state = Register::SlotState::Present;
         return true;
     }
+    if (r.key.empty() && !ensure_reg_key(f, r))
+        return false;
     std::uint8_t* buf = nullptr;
     std::uint64_t len64 = 0;
     char err[192] = {};
@@ -1055,6 +1479,8 @@ bool Vmkv::store_i64_slot(Frame& f, Register& r, std::int64_t v) {
         buf &&
         kvspaceSetValue(f.h, r.key.c_str(), buf, static_cast<std::uint32_t>(len64), err, sizeof err) == 0;
     std::free(buf);
+    if (ok)
+        r.kv_live = true;
     r.view_ok = false;
     r.body = nullptr;
     r.resolved = false;
@@ -1097,18 +1523,33 @@ bool Vmkv::slot_write_i64(Frame& f, std::uint8_t idx, std::int64_t v) {
         while (drp->dst_ptr)
             drp = drp->dst_ptr;
         Register& dr = *drp;
-        if (dr.view_ok && dr.body && !store_i64_slot(f, dr, v))
+        const bool was_fast_i64 = dr.fast_i64;
+        chain_set_i64(&fr, v);
+        const bool need_kv_sync =
+            (dr.view_ok && dr.body) || dr.kv_pinned ||
+            (dr.kv_live && !was_fast_i64);
+        if (need_kv_sync && !store_i64_slot(f, dr, v))
             return false;
-        dr.fv = v;
-        dr.fast_i64 = true;
-        fr.fv = v;
-        fr.fast_i64 = true;
+        if (dr.kv_pinned && !(dr.view_ok && dr.body))
+            chain_clear_fast(&fr);
         return true;
     }
-    // 帧局部变量（含首次写，fast_i64 未设）：无 view 也直写 fast 缓存 return
-    // （免 kvspace）。非帧局部（参数/容器/系统槽）照旧落明文。
+    if (fr.key.empty() && fr.desc_ref &&
+        fr.desc_ref->vclass == RegDesc::VarClass::Plain &&
+        fr.desc_ref->name.find("\xC2\xB7") == std::string::npos &&
+        !fr.desc_ref->name.empty() && fr.desc_ref->name[0] != '/')
+        (void)ensure_reg_key(f, fr);
+    // Frame local: update `fast_i64` in memory when unviewed and unpinned; if `kv_pinned`
+    // or previously persisted as another type (`kv_live && !fast_i64`), sync kvspace too.
     if (is_frame_local(f, fr.key)) {
-        if (fr.view_ok && fr.body) {
+        if (fr.kv_pinned && !(fr.view_ok && fr.body)) {
+            if (!store_i64_slot(f, fr, v))
+                return false;
+            fr.fast_i64 = false;
+            fr.fast_bool = false;
+            return true;
+        }
+        if ((fr.view_ok && fr.body) || (fr.kv_live && !fr.fast_i64)) {
             if (!store_i64_slot(f, fr, v))
                 return false;
         } else {
@@ -1116,6 +1557,7 @@ bool Vmkv::slot_write_i64(Frame& f, std::uint8_t idx, std::int64_t v) {
         }
         fr.fv = v;
         fr.fast_i64 = true;
+        fr.fast_bool = false;
         if (vmbin.prof_on)
             vmbin.prof.w_fast++;
         return true;
@@ -1139,7 +1581,7 @@ bool Vmkv::slot_write_i64(Frame& f, std::uint8_t idx, std::int64_t v) {
     s.i = v;
     s.u = (std::uint64_t)v;
     bool ok = slot_write_scalar(f, idx, s, 8);
-    if (ok) {
+    if (ok && !(fr.kv_pinned && !(fr.view_ok && fr.body))) {
         fr.fv = v;
         fr.fast_i64 = true;
     }
@@ -1166,17 +1608,50 @@ bool Vmkv::slot_write_bool(Frame& f, std::uint8_t idx, bool b) {
         while (drp->dst_ptr)
             drp = drp->dst_ptr;
         Register& dr = *drp;
-        dr.fb = b;
-        dr.fast_bool = true;
-        if (dr.view_ok && dr.body)
+        const bool was_fast_bool = dr.fast_bool;
+        chain_set_bool(&fr, b);
+        if (dr.view_ok && dr.body) {
             *dr.body = b ? 1 : 0;
-        fr.fb = b;
-        fr.fast_bool = true;
+            return true;
+        }
+        if (dr.kv_pinned || (dr.kv_live && !was_fast_bool)) {
+            if (dr.key.empty() && !ensure_reg_key(f, dr))
+                return false;
+            const std::uint8_t bv = b ? 1 : 0;
+            std::uint8_t* buf = nullptr;
+            std::uint64_t len64 = 0;
+            char err[192] = {};
+            const bool ok =
+                !dr.key.empty() &&
+                kvspaceXvalueHeadNewScalar(0, &bv, 1, "bool", &buf, &len64) == 0 &&
+                buf &&
+                kvspaceSetValue(f.h, dr.key.c_str(), buf,
+                                static_cast<std::uint32_t>(len64), err,
+                                sizeof err) == 0;
+            std::free(buf);
+            if (!ok)
+                return false;
+            dr.kv_live = true;
+            dr.view_ok = false;
+            dr.body = nullptr;
+            dr.resolved = false;
+            dr.sc_ok = false;
+            if (dr.kv_pinned)
+                chain_clear_fast(&fr);
+        }
         return true;
     }
-    // 帧局部纯内存变量：无 view 也直写 fast 缓存 return（免 kvspace）。
-    if (fr.fast_bool && is_frame_local(f, fr.key)) {
+    if (fr.key.empty() && fr.desc_ref &&
+        fr.desc_ref->vclass == RegDesc::VarClass::Plain &&
+        fr.desc_ref->name.find("\xC2\xB7") == std::string::npos &&
+        !fr.desc_ref->name.empty() && fr.desc_ref->name[0] != '/')
+        (void)ensure_reg_key(f, fr);
+    // Frame local bool: update `fast_bool` in memory when unpinned and without stale non-bool kvspace state.
+    if (is_frame_local(f, fr.key) && !fr.kv_pinned &&
+        (!fr.kv_live || fr.fast_bool)) {
         fr.fb = b;
+        fr.fast_bool = true;
+        fr.fast_i64 = false;
         if (fr.view_ok && fr.body) {
             *fr.body = b ? 1 : 0;
             fr.slot_state = Register::SlotState::Present;
@@ -1204,7 +1679,7 @@ bool Vmkv::slot_write_bool(Frame& f, std::uint8_t idx, bool b) {
     s.width = 1;
     s.u = b ? 1 : 0;
     bool ok = slot_write_scalar(f, idx, s, 1);
-    if (ok) {
+    if (ok && !(fr.kv_pinned && !(fr.view_ok && fr.body))) {
         fr.fb = b;
         fr.fast_bool = true;
     }
@@ -1230,16 +1705,18 @@ bool Vmkv::slot_write_scalar(Frame& f, std::uint8_t idx, const Scalar& s,
         if (dr->key.empty() || is_any_frame_local(dr->key))
             return slot_write_i64(f, idx, s.i);
     }
-    // Slotless frame-local int64 (a ResolveRef already missed in this frame):
-    // slot_write_i64 keeps it in the cache, as it always has, without another miss.
-    // Plain names only (the build-time wr_local rule): `p·x` is a member write.
-    if (!fr.dst_ptr && !fr.src_ptr && !fr.view_ok && !fr.resolved && fr.noslot &&
-        s.k == Scalar::K::Int && width == 8 && fr.desc_ref &&
-        fr.desc_ref->vclass == RegDesc::VarClass::Plain &&
+    // Unpinned frame-local int64/bool without non-matching live kvspace slot:
+    // keep in pure-memory fast cache without a backend SetValue roundtrip.
+    if (!fr.dst_ptr && !fr.src_ptr && !fr.view_ok && !fr.kv_pinned &&
+        fr.desc_ref && fr.desc_ref->vclass == RegDesc::VarClass::Plain &&
         fr.desc_ref->name.find("\xC2\xB7") == std::string::npos &&
         !fr.desc_ref->name.empty() && fr.desc_ref->name[0] != '/' &&
-        ensure_reg_key(f, fr) && is_frame_local(f, fr.key))
-        return slot_write_i64(f, idx, s.i);
+        ensure_reg_key(f, fr) && is_frame_local(f, fr.key)) {
+        if (s.k == Scalar::K::Int && width == 8 && (!fr.kv_live || fr.fast_i64))
+            return slot_write_i64(f, idx, s.i);
+        if (s.k == Scalar::K::Bool && width == 1 && (!fr.kv_live || fr.fast_bool))
+            return slot_write_bool(f, idx, s.u != 0);
+    }
     bool match = fr.sc_ok && fr.sck == s.k && fr.scw == width;
     if (reg_body(f, idx, &body, &body_cap) && body && body_cap >= width) {
         if (!match && fr.view.head &&
@@ -1308,12 +1785,21 @@ bool Vmkv::slot_write_scalar(Frame& f, std::uint8_t idx, const Scalar& s,
             ok = kvspaceSetValue(f.h, fr.key.c_str(), buf,
                                  static_cast<std::uint32_t>(len), verr,
                                  sizeof verr) == 0;
-            if (ok)
-                (void)kvspaceResolveRef(f.h, fr.key.c_str(), &fr.ref);
+            if (ok && shm_slot_supported(f.h) &&
+                kvspaceResolveRef(f.h, fr.key.c_str(), &fr.ref) == 0) {
+                fr.resolved = true;
+            } else {
+                fr.resolved = false;
+            }
         }
-        fr.resolved = ok;
-        if (ok)
+        if (ok) {
+            fr.kv_live = true;
             fr.slot_state = Register::SlotState::Present;
+            fr.fast_i64 = false;
+            fr.fast_bool = false;
+        } else {
+            fr.resolved = false;
+        }
     }
     std::free(buf);
     return ok;
@@ -1324,6 +1810,14 @@ void Vmkv::sync_fast_after_write(Frame& f, std::uint8_t idx, const Scalar& s) {
     Register& r = f.regs[idx];
     r.fast_i64 = false;
     r.fast_bool = false;
+    const Register* dr = &r;
+    while (dr->dst_ptr)
+        dr = dr->dst_ptr;
+    const bool pinned_noview =
+        (r.kv_pinned && !(r.view_ok && r.body)) ||
+        (dr->kv_pinned && !(dr->view_ok && dr->body));
+    if (pinned_noview)
+        return;
     if (s.k == Scalar::K::Int && s.width == 8) {
         r.fv = s.i;
         r.fast_i64 = true;
@@ -1331,6 +1825,146 @@ void Vmkv::sync_fast_after_write(Frame& f, std::uint8_t idx, const Scalar& s) {
         r.fb = s.u != 0;
         r.fast_bool = true;
     }
+}
+
+// Dynamic member key: dereference Ptr params (up to 2 hops) and format scalar/`char/*` key text.
+bool Vmkv::member_key_text(Frame& f, std::uint8_t ridx, std::string* out,
+                           std::string* err) {
+    // Fast-cached frame-local `int64`/`bool` key (no kvspace slot).
+    Register& kf = f.regs[ridx];
+    Register& kfr = kf.src_ptr ? *kf.src_ptr : kf;
+    if (kfr.fast_i64) {
+        *out = std::to_string(kfr.fv);
+        return true;
+    }
+    if (kfr.fast_bool) {
+        *out = kfr.fb ? "true" : "false";
+        return true;
+    }
+    Wire kw0{};
+    if (!read_reg(f, ridx, &kw0)) {
+        if (err)
+            *err = "TypeError: member key must be a scalar or string, got None";
+        return false;
+    }
+    std::string lt;
+    Wire cur = kw0;
+    for (int hop = 0; hop < 2; hop++) {
+        std::string target;
+        if (!v_ptr_target(cur, &target))
+            break;
+        const std::uint8_t* td = nullptr;
+        std::uint32_t tn = 0;
+        if (!read_wire(f.h, target, &td, &tn) || !td || !tn)
+            break;
+        cur.d = td;
+        cur.n = tn;
+        read_langtype(f.h, target, &lt);
+    }
+    if (lt.empty()) {
+        const std::uint8_t* ltp = nullptr;
+        const std::uint16_t ltl = wire_langtype_view(cur.d, cur.n, &ltp);
+        if (ltp && ltl > 0)
+            lt.assign(reinterpret_cast<const char*>(ltp), ltl);
+        else
+            (void)reg_langtype(f, ridx, &lt);
+    }
+    return format_member_key_wire(cur, lt, out, err);
+}
+
+bool Vmkv::member_path(Frame& f, const CInsn& ins, std::string* key,
+                       std::string* err) {
+    if (ins.nrd < 2)
+        return false;
+    auto is_container_lt = [](std::string_view lt) {
+        return !lt.empty() &&
+               (lt.front() == '/' ||
+                lt.find("\xC2\xB7") != std::string_view::npos);
+    };
+    auto is_char_lt = [](std::string_view lt) {
+        const std::size_t cl = lt.find(']');
+        if (!lt.empty() && lt.front() == '[' && cl != std::string_view::npos)
+            lt = lt.substr(cl + 1);
+        return lt.rfind("char/", 0) == 0;
+    };
+    auto strip_ptr_lt = [](std::string s) {
+        while (!s.empty() && s.front() == '*')
+            s.erase(0, 1);
+        return s.empty() ? std::string("?") : s;
+    };
+    auto set_not_container = [&](const std::string& lt) {
+        if (err) {
+            *err = "TypeError: kvspace·get: member access requires a container (struct/map), got " +
+                   strip_ptr_lt(lt) + "; compact arrays use [] indexing";
+        }
+        return false;
+    };
+    // Resolve `base` (`rd[0]`): Ptr -> target, `/`-prefixed string -> path text, else variable slot key.
+    Wire bw{};
+    std::string base_key;
+    Register& br0 = f.regs[ins.rd[0]];
+    Register& br0f = br0.src_ptr ? *br0.src_ptr : br0;
+    if (br0f.fast_i64)
+        return set_not_container("int64");
+    if (br0f.fast_bool)
+        return set_not_container("bool");
+    if (read_reg(f, ins.rd[0], &bw)) {
+        std::string bt, blt;
+        const std::uint8_t* wltp = nullptr;
+        const std::uint16_t wltn = wire_langtype_view(bw.d, bw.n, &wltp);
+        if (wltp && wltn > 0)
+            blt.assign(reinterpret_cast<const char*>(wltp), wltn);
+        if (blt.empty())
+            (void)reg_langtype(f, ins.rd[0], &blt);
+        if (v_ptr_target(bw, &bt)) {
+            if (!blt.empty() && !is_container_lt(strip_ptr_lt(blt)))
+                return set_not_container(blt);
+            base_key = bt;
+        } else if (!blt.empty() && is_char_lt(blt) &&
+                   wire_text(bw.d, bw.n, blt, &bt) && !bt.empty() && bt[0] == '/') {
+            // Literal path-string base: use its text directly.
+            base_key = bt;
+        } else {
+            if (!v_is_none(bw) && !is_container_lt(strip_ptr_lt(blt)))
+                return set_not_container(blt);
+            // Ensure lazy local key, or use caller reg's slot key for `src_ptr` container params.
+            if (&br0f != &br0 && !br0f.key.empty()) {
+                base_key = br0f.key;
+            } else if (ensure_reg_key(f, br0) && br0.key.size() > 5) {
+                base_key = br0.key;
+            }
+            // Ptr param (`key` = arg slot): `read_reg` already dereferenced, so read raw Ptr wire to get target.
+            if (br0f.key.size() > 5) {
+                const std::uint8_t* rd2 = nullptr;
+                std::uint32_t rn2 = 0;
+                std::string t2;
+                if (read_wire_raw(f.h, br0f.key, &rd2, &rn2) &&
+                    v_ptr_target(Wire{rd2, rn2}, &t2) && !t2.empty())
+                    base_key = t2;
+            }
+        }
+    }
+    if (base_key.empty())
+        return false;
+    // Append `·<seg>` segments (matching C `kvlangKeytreeMember`).
+    for (int i = 1; i < ins.nrd; i++) {
+        std::string kstr;
+        if (!member_key_text(f, ins.rd[i], &kstr, err) || kstr.empty())
+            return false;
+        base_key += "\xC2\xB7";
+        base_key += kstr;
+        if (i + 1 < ins.nrd) {
+            // Intermediate Ptr segment (`a·left·val`): continue from its target path.
+            const std::uint8_t* md = nullptr;
+            std::uint32_t mn = 0;
+            std::string t;
+            if (read_wire_raw(f.h, base_key, &md, &mn) &&
+                v_ptr_target(Wire{md, mn}, &t) && !t.empty())
+                base_key = std::move(t);
+        }
+    }
+    *key = std::move(base_key);
+    return true;
 }
 
 // ── 值计算（与之前相同）────────────────────────────────────────────
@@ -1346,12 +1980,8 @@ bool Vmkv::truthy(const Scalar& s) {
 }
 
 bool Vmkv::same_class(Scalar::K a, Scalar::K b) {
-    if (a == Scalar::K::Bool)
-        a = Scalar::K::Uint;
-    if (b == Scalar::K::Bool)
-        b = Scalar::K::Uint;
     return a == b && (a == Scalar::K::Int || a == Scalar::K::Uint ||
-                      a == Scalar::K::Float);
+                      a == Scalar::K::Float || a == Scalar::K::Bool);
 }
 
 const char* Vmkv::kind_name(Scalar::K k, std::uint8_t width) {
@@ -1370,22 +2000,42 @@ const char* Vmkv::kind_name(Scalar::K k, std::uint8_t width) {
 }
 
 
+// Division/modulo-by-zero diagnostic messages aligned with C runtime and `error_cases`.
+inline const char* zero_div_msg(bool mod) {
+    return mod ? "ZeroDivisionError: modulo by zero" : "ZeroDivisionError: division by zero";
+}
+
 // ── 模板化值计算：switch(Op) → template<Op> constexpr（编译期内联单指令）。
 // 返回 false = 该 op 不支持此操作数（Zero 检查失败等）。
 
+// `SGN`: signed reads `.i`, unsigned reads `.u` (`compute_int` syncs `.u` from `r->i`).
+// Compute `+`/`-`/`*`/neg/shifts on `uint64_t` for two's-complement wraparound without signed overflow UB.
 template <rwir::Op O, bool SGN>
 constexpr bool arith_i(const Scalar& a, const Scalar& b, Scalar* r) {
-    if constexpr (O == rwir::Op::Add) { r->i = a.i + b.i; return true; }
-    if constexpr (O == rwir::Op::Sub) { r->i = a.i - b.i; return true; }
-    if constexpr (O == rwir::Op::Mul) { r->i = a.i * b.i; return true; }
+    const std::uint64_t ua = SGN ? (std::uint64_t)a.i : a.u;
+    const std::uint64_t ub = SGN ? (std::uint64_t)b.i : b.u;
+    if constexpr (O == rwir::Op::Add) { r->i = (std::int64_t)(ua + ub); return true; }
+    if constexpr (O == rwir::Op::Sub) { r->i = (std::int64_t)(ua - ub); return true; }
+    if constexpr (O == rwir::Op::Mul) { r->i = (std::int64_t)(ua * ub); return true; }
     if constexpr (O == rwir::Op::Div) {
-        if (SGN) { if (b.i == 0) return false; r->i = a.i / b.i; }
-        else     { if (b.u == 0) return false; r->u = a.u / b.u; }
+        // Return false on `b == 0`; handle `b == -1` via negation so `INT64_MIN / -1` wraps without SIGFPE.
+        if (SGN) {
+            if (b.i == 0) return false;
+            r->i = b.i == -1 ? (std::int64_t)(0 - ua) : a.i / b.i;
+        } else {
+            if (b.u == 0) return false;
+            r->i = (std::int64_t)(a.u / b.u);
+        }
         return true;
     }
     if constexpr (O == rwir::Op::Mod) {
-        if (SGN) { if (b.i == 0) return false; r->i = a.i % b.i; }
-        else     { if (b.u == 0) return false; r->u = a.u % b.u; }
+        if (SGN) {
+            if (b.i == 0) return false;
+            r->i = b.i == -1 ? 0 : a.i % b.i;  // `INT64_MIN % -1 == 0` without `#DE`
+        } else {
+            if (b.u == 0) return false;
+            r->i = (std::int64_t)(a.u % b.u);
+        }
         return true;
     }
     if constexpr (O == rwir::Op::Max) {
@@ -1396,20 +2046,25 @@ constexpr bool arith_i(const Scalar& a, const Scalar& b, Scalar* r) {
         r->i = SGN ? (a.i < b.i ? a.i : b.i) : (std::int64_t)(a.u < b.u ? a.u : b.u);
         return true;
     }
-    if constexpr (O == rwir::Op::Neg) { r->i = -a.i; return true; }
-    if constexpr (O == rwir::Op::Abs) { r->i = a.i < 0 ? -a.i : a.i; return true; }
-    if constexpr (O == rwir::Op::Sign) { r->i = a.i > 0 ? 1 : a.i < 0 ? -1 : 0; return true; }
-    if constexpr (O == rwir::Op::BitAnd) { r->i = a.i & b.i; return true; }
-    if constexpr (O == rwir::Op::BitOr)  { r->i = a.i | b.i; return true; }
-    if constexpr (O == rwir::Op::BitXor) { r->i = a.i ^ b.i; return true; }
+    if constexpr (O == rwir::Op::Neg) { r->i = (std::int64_t)(0 - ua); return true; }
+    if constexpr (O == rwir::Op::Abs) {
+        r->i = SGN && a.i < 0 ? (std::int64_t)(0 - ua) : (std::int64_t)ua;  // wraps `abs(INT64_MIN)`
+        return true;
+    }
+    if constexpr (O == rwir::Op::Sign) {
+        r->i = SGN ? (a.i > 0 ? 1 : a.i < 0 ? -1 : 0) : (a.u != 0 ? 1 : 0);
+        return true;
+    }
+    if constexpr (O == rwir::Op::BitAnd) { r->i = (std::int64_t)(ua & ub); return true; }
+    if constexpr (O == rwir::Op::BitOr)  { r->i = (std::int64_t)(ua | ub); return true; }
+    if constexpr (O == rwir::Op::BitXor) { r->i = (std::int64_t)(ua ^ ub); return true; }
     if constexpr (O == rwir::Op::Shl) {
-        // SGN 时 i 有效（u 可能未同步）；无符号用 u。移位量取低 6 位。
-        r->i = (std::int64_t)((SGN ? (std::uint64_t)a.i : a.u)
-                              << (SGN ? (std::uint64_t)b.i & 63 : b.u & 63));
+        r->i = (std::int64_t)(ua << (ub & 63));  // mask shift count with `& 63`
         return true;
     }
     if constexpr (O == rwir::Op::Shr) {
-        r->i = SGN ? (a.i >> (b.i & 63)) : (std::int64_t)(a.u >> (b.u & 63));
+        // Arithmetic right shift for signed (C++20), logical right shift for unsigned.
+        r->i = SGN ? (a.i >> (ub & 63)) : (std::int64_t)(a.u >> (ub & 63));
         return true;
     }
     return false;
@@ -1424,7 +2079,7 @@ constexpr bool arith_f(const Scalar& a, const Scalar& b, Scalar* r) {
     if constexpr (O == rwir::Op::Max) { r->f = a.f > b.f ? a.f : b.f; return true; }
     if constexpr (O == rwir::Op::Min) { r->f = a.f < b.f ? a.f : b.f; return true; }
     if constexpr (O == rwir::Op::Neg) { r->f = -a.f; return true; }
-    if constexpr (O == rwir::Op::Abs) { r->f = a.f < 0 ? -a.f : a.f; return true; }
+    if constexpr (O == rwir::Op::Abs) { r->f = __builtin_fabs(a.f); return true; }
     if constexpr (O == rwir::Op::Sign) { r->f = a.f > 0 ? 1 : a.f < 0 ? -1 : 0; return true; }
     if constexpr (O == rwir::Op::Sqrt) { r->f = __builtin_sqrt(a.f); return true; }
     if constexpr (O == rwir::Op::Exp) { r->f = __builtin_exp(a.f); return true; }
@@ -1486,6 +2141,23 @@ static constexpr IntFn kIntTbl[] = {
     arith_i<rwir::Op::Pow, true>, arith_i<rwir::Op::And, true>, arith_i<rwir::Op::Or, true>,
     arith_i<rwir::Op::Not, true>,
 };
+// Unsigned (`uint*`/`bool`) dispatch table reading `.u`.
+static constexpr IntFn kUintTbl[] = {
+    arith_i<rwir::Op::None, false>, arith_i<rwir::Op::Copy, false>, arith_i<rwir::Op::Bool, false>,
+    arith_i<rwir::Op::Br, false>, arith_i<rwir::Op::Call, false>, arith_i<rwir::Op::Goto, false>,
+    arith_i<rwir::Op::Return, false>, arith_i<rwir::Op::Cast, false>,
+    arith_i<rwir::Op::Abs, false>, arith_i<rwir::Op::Add, false>, arith_i<rwir::Op::Sub, false>,
+    arith_i<rwir::Op::Mul, false>, arith_i<rwir::Op::Div, false>, arith_i<rwir::Op::Mod, false>,
+    arith_i<rwir::Op::Max, false>, arith_i<rwir::Op::Min, false>, arith_i<rwir::Op::Neg, false>,
+    arith_i<rwir::Op::Sign, false>, arith_i<rwir::Op::BitAnd, false>, arith_i<rwir::Op::BitOr, false>,
+    arith_i<rwir::Op::BitXor, false>, arith_i<rwir::Op::Shl, false>, arith_i<rwir::Op::Shr, false>,
+    arith_i<rwir::Op::Eq, false>, arith_i<rwir::Op::Neq, false>, arith_i<rwir::Op::Lt, false>,
+    arith_i<rwir::Op::Le, false>, arith_i<rwir::Op::Gt, false>, arith_i<rwir::Op::Ge, false>,
+    arith_i<rwir::Op::Sqrt, false>, arith_i<rwir::Op::Exp, false>, arith_i<rwir::Op::Log, false>,
+    arith_i<rwir::Op::Pow, false>, arith_i<rwir::Op::And, false>, arith_i<rwir::Op::Or, false>,
+    arith_i<rwir::Op::Not, false>,
+};
+static_assert(sizeof kUintTbl == sizeof kIntTbl, "kUintTbl/kIntTbl must cover the same ops");
 static constexpr FloatFn kFloatTbl[] = {
     arith_f<rwir::Op::None>, arith_f<rwir::Op::Copy>, arith_f<rwir::Op::Bool>,
     arith_f<rwir::Op::Br>, arith_f<rwir::Op::Call>, arith_f<rwir::Op::Goto>,
@@ -1559,10 +2231,9 @@ bool Vmkv::compute_int(rwir::Op op, Scalar::K k, const Scalar& a, const Scalar& 
         r->u = (std::uint64_t)r->i;
         return true;
     }
-    if (!kIntTbl[o](a, b, r))
+    if (!kUintTbl[o](a, b, r))
         return false;
     r->u = (std::uint64_t)r->i;
-    r->i = (std::int64_t)r->u;
     return true;
 }
 
@@ -1608,6 +2279,7 @@ bool raw_i64(Wire w, std::int64_t* out) {
 
 bool Vmkv::write_named_i64(void* h, std::uint8_t idx, Frame& f, const char* kind,
                      std::int64_t v) {
+    (void)h;
     // 命名 i64（time/duration 等非 int64 标量）：langtype 在值 attr 区，
     // 且须落槽（非纯内存化）——Handoff 后帧重建，槽是唯一类型/值事实源。
     Register& r = f.regs[idx];
@@ -1627,6 +2299,7 @@ bool Vmkv::write_named_i64(void* h, std::uint8_t idx, Frame& f, const char* kind
     if (ok && !rf.key.empty() && !rf.view_ok && !rf.dst_ptr &&
         kvspaceSetValue(f.h, rf.key.c_str(), buf,
                         static_cast<std::uint32_t>(len64), err, sizeof err) == 0) {
+        rf.kv_live = true;
         rf.resolved = false;  // 下次 read 重取 view
         rf.slot_state = Register::SlotState::Present;  // 槽已建：后续写须查类型
     }
@@ -1637,7 +2310,8 @@ bool Vmkv::write_named_i64(void* h, std::uint8_t idx, Frame& f, const char* kind
 // ── 执行（原 vm.cpp run_frame 方法化）：明文栈 ↔ 二进制栈的执行边界 ──────
 // 帧入口：逐 reg 热字段重置 + 字面量快值缓存 + Ptr 参数内存别名绑定 + 描述符解析。
 // 每 call 唯一的 kvspace 冷路径，与指令派发正交。
-bool Vmkv::enter_frame(Frame& f, const Segment* seg, std::string* err) {
+bool Vmkv::enter_frame(Frame& f, const Segment* seg, bool resumed,
+                       std::string* err) {
     // 逐 reg 热字段重置（不清 string capacity——池复用的 key/desc 保留缓冲，
     // fib 每帧省 24 次 string 构造/析构；语义同 assign 全清零）。
     f.regs.resize(seg->regs.size());
@@ -1647,6 +2321,8 @@ bool Vmkv::enter_frame(Frame& f, const Segment* seg, std::string* err) {
         rr.ref = kvspaceRef_t{};
         rr.resolved = false;
         rr.noslot = false;
+        rr.kv_live = resumed && (seg->regs[i].kind == Operand::Kind::Var);
+        rr.kv_pinned = false;
         rr.view = kvspaceXvalueBodyView_t{};
         rr.view_ok = false;
         rr.body = nullptr;
@@ -1669,6 +2345,7 @@ bool Vmkv::enter_frame(Frame& f, const Segment* seg, std::string* err) {
         rr.arr_elem_kind.clear();
         rr.base_ptr = false;
         rr.base_ptr_known = false;
+        rr.base_path = false;
         rr.key.clear();
         rr.desc.clear();
         rr.desc_ref = nullptr;
@@ -1779,6 +2456,12 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
     vmbin.prof_init();
     if (stop_pc)
         stop_pc->clear();
+    if (f.depth > 256) {
+        *err = "RecursionError: stack overflow: depth=" + std::to_string(f.depth);
+        if (stop_pc)
+            *stop_pc = param_key(f.frame, start_s0 > 0 ? start_s0 : 1, 0);
+        return Outcome::Error;
+    }
     const Segment* seg =
         f.seg_hint ? f.seg_hint : cached_segment(f.h, f.func_dir);
     if (!seg) {
@@ -1799,7 +2482,7 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
         }
     }
     freg_guard.blk = &f.regs;
-    if (!f.skip_enter_frame && !enter_frame(f, seg, err))
+    if (!f.skip_enter_frame && !enter_frame(f, seg, start_s0 > 1, err))
         return Outcome::Error;
     f.skip_enter_frame = false;
     // binir 打印（RC2_DUMP_BINIR=all：每次执行前）。
@@ -1867,16 +2550,19 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                 Register& tra = tr.src_ptr ? *tr.src_ptr : tr;
                 fk_enter = tra.fast_i64;
                 if (ins.op == rwir::Op::Br) {
-                    // cond 也要 fast（bool/int64）：否则 fk 内 cond exit → 主循环 br
-                    // 又进 fk → 死循环（is_prime bool 落明文无 fast_bool）。
+                    // Require `fast_bool` on `br` condition too to avoid an exit/re-enter fast-kernel loop.
                     Register& cr = regs[ins.rd[0]];
                     Register& cra = cr.src_ptr ? *cr.src_ptr : cr;
-                    fk_enter = fk_enter && (cra.fast_bool || cra.fast_i64);
+                    fk_enter = fk_enter && cra.fast_bool;
                 }
             } else if (ins.op == rwir::Op::Copy && ins.wr_local && ins.nrd == 1) {
                 Register& sr = regs[ins.rd[0]];
                 Register& rf = sr.src_ptr ? *sr.src_ptr : sr;
-                fk_enter = rf.fast_i64 || rf.fast_bool;
+                const auto wlt = seg->regs[ins.wr[0]].langtype;
+                fk_enter = (rf.fast_i64 && (wlt == vmbin::LangType::None ||
+                                            wlt == vmbin::LangType::Int64)) ||
+                           (rf.fast_bool && (wlt == vmbin::LangType::None ||
+                                             wlt == vmbin::LangType::Bool));
             }
         }
         if (fk_enter) {
@@ -1918,7 +2604,7 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                         }
                         if (opfn == 4 || opfn == 5) {
                             if (b == 0) {
-                                *err = std::string("division by zero: ") + instruction_name(*seg, ik);
+                                *err = zero_div_msg(opfn == 5);
                                 if (stop_pc)
                                     *stop_pc = param_key(f.frame, instruction_pc(idx), 0);
                                 return Outcome::Error;
@@ -1926,7 +2612,8 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                         }
                         w.fast_bool = false;
                         if (opfn <= 12) {
-                            if (ik.wr_local && !w.view_ok) {
+                            if (ik.wr_local && !w.view_ok && !w.kv_pinned &&
+                                (!w.kv_live || w.fast_i64)) {
                                 w.fv = rv;
                                 w.fast_i64 = true;
                                 w.sc_ok = false;
@@ -1937,12 +2624,12 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                                 w.sc_ok = false;
                             } else {
                                 (void)slot_write_i64(f, ik.wr[0], rv);
-                                w.fast_i64 = true;
                                 w.sc_ok = false;
                             }
                         } else {
                             const bool rb2 = rv != 0;
-                            if (ik.wr_local && !w.view_ok) {
+                            if (ik.wr_local && !w.view_ok && !w.kv_pinned &&
+                                (!w.kv_live || w.fast_bool)) {
                                 w.fb = rb2;
                                 w.fast_bool = true;
                                 w.sc_ok = false;
@@ -1983,8 +2670,6 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                         bool cond = false;
                         if (cra.fast_bool)
                             cond = cra.fb;
-                        else if (cra.fast_i64)
-                            cond = cra.fv != 0;
                         else {
                             idx--;
                             goto fk_exit;
@@ -2010,9 +2695,12 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                     Register& sr = regs[ik.rd[0]];
                     Register& rf = sr.src_ptr ? *sr.src_ptr : sr;
                     Register& w = regs[ik.wr[0]];
-                    if (rf.fast_i64) {
+                    const auto wlt = seg->regs[ik.wr[0]].langtype;
+                    if (rf.fast_i64 && (wlt == vmbin::LangType::None ||
+                                        wlt == vmbin::LangType::Int64)) {
                         w.fast_bool = false;
-                        if (ik.wr_local && !w.view_ok) {
+                        if (ik.wr_local && !w.view_ok && !w.kv_pinned &&
+                            (!w.kv_live || w.fast_i64)) {
                             w.fv = rf.fv;
                             w.fast_i64 = true;
                             w.sc_ok = false;
@@ -2023,12 +2711,13 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                             w.sc_ok = false;
                         } else {
                             (void)slot_write_i64(f, ik.wr[0], rf.fv);
-                            w.fast_i64 = true;
                             w.sc_ok = false;
                         }
-                    } else if (rf.fast_bool) {
+                    } else if (rf.fast_bool && (wlt == vmbin::LangType::None ||
+                                                wlt == vmbin::LangType::Bool)) {
                         w.fast_i64 = false;
-                        if (ik.wr_local && !w.view_ok) {
+                        if (ik.wr_local && !w.view_ok && !w.kv_pinned &&
+                            (!w.kv_live || w.fast_bool)) {
                             w.fb = rf.fb;
                             w.fast_bool = true;
                             w.sc_ok = false;
@@ -2038,7 +2727,6 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                             w.fast_bool = true;
                         } else {
                             (void)slot_write_bool(f, ik.wr[0], rf.fb);
-                            w.fast_bool = true;
                             w.sc_ok = false;
                         }
                     } else {
@@ -2076,11 +2764,12 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                     &&L13, &&L14, &&L15, &&L16, &&L17, &&L18,
                 };
                 goto *kJmp[ins.opfn - 1];
-            L1:  rv = a + b; goto LWR;
-            L2:  rv = a - b; goto LWR;
-            L3:  rv = a * b; goto LWR;
-            L4:  rv = b ? a / b : 0; goto LWR;
-            L5:  rv = b ? a % b : 0; goto LWR;
+            // Use `fast_i64` (`uint64_t` wraparound, safe `INT64_MIN / -1`; `b == 0` checked below).
+            L1:  rv = fast_i64<1>(a, b); goto LWR;
+            L2:  rv = fast_i64<2>(a, b); goto LWR;
+            L3:  rv = fast_i64<3>(a, b); goto LWR;
+            L4:  rv = fast_i64<4>(a, b); goto LWR;
+            L5:  rv = fast_i64<5>(a, b); goto LWR;
             L6:  rv = a > b ? a : b; goto LWR;
             L7:  rv = a < b ? a : b; goto LWR;
             L8:  rv = a & b; goto LWR;
@@ -2097,7 +2786,7 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
             LWR:
                 if (ins.opfn == 4 || ins.opfn == 5) {
                     if (b == 0) {
-                        *err = std::string("division by zero: ") + instruction_name(*seg, ins);
+                        *err = zero_div_msg(ins.opfn == 5);
                         if (stop_pc)
                             *stop_pc = param_key(f.frame, instruction_pc(idx), 0);  // 出错指令行
                         return Outcome::Error;
@@ -2107,7 +2796,8 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                     w.fast_bool = false;
                     // 帧局部普通变量（build 预标记 wr_local）：纯 fv 写零 string 比较
                     // （iops 单变量读改写热路径）；有明文槽（view）才 memcpy 同步。
-                    if (ins.wr_local && !w.view_ok) {
+                    if (ins.wr_local && !w.view_ok && !w.kv_pinned &&
+                        (!w.kv_live || w.fast_i64)) {
                         w.fv = rv;
                         w.fast_i64 = true;
                         w.sc_ok = false;
@@ -2118,7 +2808,6 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                         w.sc_ok = false;
                     } else {
                         (void)slot_write_i64(f, ins.wr[0], rv);
-                        w.fast_i64 = true;
                         w.sc_ok = false;
                     }
                 } else {
@@ -2127,7 +2816,8 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                     const bool rb = rv != 0;
                     // 帧局部临时 bool（wr_local）：纯 fb 写免 slot_write_bool
                     // （iops 的 le 结果 `_5`，每轮一次）。
-                    if (ins.wr_local && !w.view_ok) {
+                    if (ins.wr_local && !w.view_ok && !w.kv_pinned &&
+                        (!w.kv_live || w.fast_bool)) {
                         w.fb = rb;
                         w.fast_bool = true;
                         w.sc_ok = false;
@@ -2173,18 +2863,19 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                 if (ins.opfn <= 12) {
                     if (ins.opfn == 4 || ins.opfn == 5) {
                         if (b == 0) {
-                            *err = std::string("division by zero: ") + instruction_name(*seg, ins);
+                            *err = zero_div_msg(ins.opfn == 5);
                             return Outcome::Error;
                         }
                     }
-                    w.fv = rv;
                     w.fast_bool = false;
                     if (w.fast_i64 && w.view_ok && w.body) {
+                        w.fv = rv;
                         ok2 = store_i64_slot(f, w, rv);
+                        w.fast_i64 = true;
                     } else {
                         ok2 = slot_write_i64(f, ins.wr[0], rv);
                     }
-                    w.fast_i64 = true;
+                    (void)ok2;
                     w.sc_ok = false;
                 } else {
                     const bool rb = rv != 0;
@@ -2199,6 +2890,7 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                     } else {
                         ok2 = slot_write_bool(f, ins.wr[0], rb);
                     }
+                    (void)ok2;
                     w.fast_i64 = false;
                     w.sc_ok = false;
                 }
@@ -2227,7 +2919,32 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                 Register &cr = regs[ins.rd[0]];
                 if (!(cr.fast_bool ? (cond = cr.fb, true)
                                    : read_bool(f, ins.rd[0], &cond))) {
-                    *err = "br: bad cond";
+                    const Register& cra = cr.src_ptr ? *cr.src_ptr : cr;
+                    Wire cw{};
+                    if (!cra.fast_i64 && !cra.fast_bool &&
+                        (!read_reg(f, ins.rd[0], &cw) || v_is_none(cw))) {
+                        *err = "TypeError: None in branch condition";
+                    } else {
+                        std::string clt;
+                        if (cra.fast_i64) {
+                            clt = "int64";
+                        } else if (!reg_langtype(f, ins.rd[0], &clt) || clt.empty()) {
+                            const std::uint8_t* ltp = nullptr;
+                            const std::uint16_t ltn = wire_langtype_view(cw.d, cw.n, &ltp);
+                            if (ltp && ltn)
+                                clt.assign(reinterpret_cast<const char*>(ltp), ltn);
+                        }
+                        while (!clt.empty() && clt.front() == '[') {
+                            const std::size_t cl = clt.find(']');
+                            if (cl == std::string::npos)
+                                break;
+                            clt.erase(0, cl + 1);
+                        }
+                        *err = "TypeError: branch condition must be bool, got " +
+                               (clt.empty() ? std::string("?") : clt);
+                    }
+                    if (stop_pc)
+                        *stop_pc = param_key(f.frame, instruction_pc(idx), 0);
                     return Outcome::Error;
                 }
                 if (!cond) {
@@ -2257,7 +2974,7 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
             // handler 分派：编译期写入的 handler id 直接下标取表项（无字符串查找）。
             // handler 失败 → error；写失败统一由调用方补 "write failed"。
             const RwirHandlerSlot& slot = rwir_handler(ins.handler);
-            RwirHandlerCtx ctx{g_vmkv, f, seg, ins, instruction_pc(idx), {}, 0, 0};
+            RwirHandlerCtx ctx{g_vmkv, f, seg, ins, instruction_pc(idx), {}, 0, 0, {}};
             for (int i = 0; slot.prefetch_operands && i < ins.nrd && i < 2; i++) {
                 if (!read_reg(f, ins.rd[i], &ctx.in[i])) {
                     *err = "rwir handler: missing operand " +
@@ -2398,6 +3115,42 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
             return reg_langtype(f, ins.rd[i], &lt) &&
                    wire_text(w[i].d, w[i].n, lt, out);
         };
+        auto operand_kind_str = [&](int i) -> std::string {
+            if ((i == 0 && none0) || (i == 1 && none1))
+                return "None";
+            if (w[i].d && v_is_none(w[i]))
+                return "None";
+            std::string lt;
+            if (!reg_langtype(f, ins.rd[i], &lt) || lt.empty()) {
+                if (w[i].d) {
+                    const std::uint8_t* ltp = nullptr;
+                    const std::uint16_t ltn = wire_langtype_view(w[i].d, w[i].n, &ltp);
+                    if (ltp && ltn)
+                        lt.assign(reinterpret_cast<const char*>(ltp), ltn);
+                }
+            }
+            if (lt.empty() && s[i].k != Scalar::K::None) {
+                const char* kn = kind_name(s[i].k, s[i].width ? s[i].width : 8);
+                if (kn)
+                    lt = kn;
+            }
+            while (!lt.empty() && lt.front() == '[') {
+                const std::size_t cl = lt.find(']');
+                if (cl == std::string::npos)
+                    break;
+                lt.erase(0, cl + 1);
+            }
+            return lt.empty() ? "None" : lt;
+        };
+        const bool is_char_cast =
+            ins.op == rwir::Op::Cast && ins.nrd >= 1 &&
+            (ins.rwir_id == static_cast<std::uint16_t>(rwir::RwirId::CharUtf8) ||
+             ins.rwir_id == static_cast<std::uint16_t>(rwir::RwirId::CharUtf32) ||
+             ins.rwir_id == static_cast<std::uint16_t>(rwir::RwirId::CharAscii));
+        if (is_char_cast && none0) {
+            *err = "TypeError: char conversion requires a value";
+            return Outcome::Error;
+        }
         // None 参与比较：对齐 C 语义（Eq：双 None=true；Neq：双 None=false；其余 → TypeError）。
         // Ptr vs None（Ptr 悬空=空指针）交给 non_scalar 的 Ptr 分支，不在此判。
         const bool any_ptr_cmp = (v_ptr(w[0]) || v_ptr(w[1])) && is_cmp(ins.op);
@@ -2422,16 +3175,54 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
             }
             continue;
         }
+        if (ins.op == rwir::Op::Bool) {
+            if (none0) {
+                *err = "TypeError: cannot cast None";
+                return Outcome::Error;
+            }
+            if (non_scalar || s[0].k != Scalar::K::Bool) {
+                *err = "TypeError: cannot cast " + operand_kind_str(0) +
+                       " to bool — use != 0";
+                return Outcome::Error;
+            }
+        } else if (ins.op == rwir::Op::Cast && !is_char_cast) {
+            if (none0) {
+                *err = "TypeError: cannot cast None";
+                return Outcome::Error;
+            }
+            if (non_scalar ||
+                !(s[0].k == Scalar::K::Int || s[0].k == Scalar::K::Uint ||
+                  s[0].k == Scalar::K::Float)) {
+                *err = "TypeError: cannot cast " + operand_kind_str(0) +
+                       " to " + instruction_name(*seg, ins);
+                return Outcome::Error;
+            }
+        } else if (ins.op == rwir::Op::And || ins.op == rwir::Op::Or ||
+                   ins.op == rwir::Op::Not) {
+            const int want = ins.op == rwir::Op::Not ? 1 : 2;
+            const char* sym = ins.op == rwir::Op::And  ? "&&"
+                              : ins.op == rwir::Op::Or ? "||"
+                                                       : "!";
+            if (ins.nrd < want) {
+                *err = std::string("TypeError: ") + sym + " requires bool";
+                return Outcome::Error;
+            }
+            for (int i = 0; i < want; i++) {
+                if ((i == 0 && none0) || (i == 1 && none1) ||
+                    w[i].d != nullptr || s[i].k != Scalar::K::Bool) {
+                    *err = std::string("TypeError: ") + sym +
+                           " requires bool, got " + operand_kind_str(i);
+                    return Outcome::Error;
+                }
+            }
+        }
         if (non_scalar) {
             // char 族转码（char/utf8|utf32|ascii 互转）优先于 `+` 拼接。
             // 简化：统一按 utf8 文本读入，目标编码经 kvspaceNewChar 产 char XValue。
-            if (ins.op == rwir::Op::Cast && ins.nrd == 1 &&
-                (ins.rwir_id == static_cast<std::uint16_t>(rwir::RwirId::CharUtf8) ||
-                 ins.rwir_id == static_cast<std::uint16_t>(rwir::RwirId::CharUtf32) ||
-                 ins.rwir_id == static_cast<std::uint16_t>(rwir::RwirId::CharAscii))) {
+            if (is_char_cast && ins.nrd == 1) {
                 std::string txt;
                 if (!wtext(0, &txt)) {
-                    *err = "char cast: bad input";
+                    *err = "TypeError: char conversion requires a value";
                     return Outcome::Error;
                 }
                 std::uint8_t* cb = nullptr;
@@ -2457,14 +3248,19 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                 // 动态算子按运行时类型分派：`+` 对 char 族即字符串拼接；
                 // `==`/`!=` 对 char 族按文本比较产 bool。
                 std::string a, b;
-                if (ins.nrd == 2 && (ins.op == rwir::Op::Eq || ins.op == rwir::Op::Neq)) {
-                    // Ptr 参与比较：指针本体 vs None（空指针检查）或 Ptr 间按 target 比
-                    // （链表 `cur != None` / `h·next == &n2`）。读参 w[i] 可能已被
-                    // resolve 穿透成目标值——按 Ptr target 判空与相等。
+                if (ins.nrd == 2 && is_cmp(ins.op)) {
                     const bool p0 = v_ptr(w[0]), p1 = v_ptr(w[1]);
                     if (p0 || p1) {
-                        // Ptr 为空 = target 槽缺失/None（`walk(None)` 的 arg 槽
-                        // Ptr→nil 槽是空指针，`node != None` 须 false）。
+                        if (ins.op != rwir::Op::Eq && ins.op != rwir::Op::Neq) {
+                            *err = "TypeError: cannot order ptr with " + operand_kind_str(0);
+                            return Outcome::Error;
+                        }
+                        if (!(p0 && p1) && !(p0 && none1) && !(p1 && none0)) {
+                            *err = "TypeError: cannot compare " +
+                                   operand_kind_str(p0 ? 1 : 0) +
+                                   " with ptr; use None for a null pointer";
+                            return Outcome::Error;
+                        }
                         auto ptr_empty = [&](const Wire& pw) -> bool {
                             std::string t;
                             if (!v_ptr_target(pw, &t) || t.empty())
@@ -2493,9 +3289,14 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                         continue;
                     }
                     if (wtext(0, &a) && wtext(1, &b)) {
-                        const bool eq = a == b;
-                        ok = slot_write_bool(f, ins.wr[0],
-                                             ins.op == rwir::Op::Eq ? eq : !eq);
+                        const int cmp = a < b ? -1 : a > b ? 1 : 0;
+                        const bool res = ins.op == rwir::Op::Eq    ? cmp == 0
+                                         : ins.op == rwir::Op::Neq ? cmp != 0
+                                         : ins.op == rwir::Op::Lt  ? cmp < 0
+                                         : ins.op == rwir::Op::Gt  ? cmp > 0
+                                         : ins.op == rwir::Op::Le  ? cmp <= 0
+                                                                   : cmp >= 0;
+                        ok = slot_write_bool(f, ins.wr[0], res);
                         if (vmbin.prof_on) {
                             const std::uint64_t dh = vmbin.now() - t0;
                             vmbin.prof.handler += dh;
@@ -2504,52 +3305,45 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                         }
                         continue;
                     }
+                    *err = "TypeError: cannot compare " + operand_kind_str(0) +
+                           " with " + operand_kind_str(1);
+                    return Outcome::Error;
                 }
                 // 动态算子按运行时类型分派：`+` 对 char 族即字符串拼接。
                 // kvspaceNewChar 按码点计数产 `[n]char/utf8` head（#552 性能+正确）。
-                {
-                    if (ins.op != rwir::Op::Add || ins.nrd != 2 ||
-                        !wtext(0, &a) || !wtext(1, &b)) {
-                        *err = std::string("non-scalar operand: ") + instruction_name(*seg, ins);
-                        return Outcome::Error;
-                    }
-                    const std::string out_s = a + b;
-                    std::uint8_t* buf = nullptr;
-                    std::uint32_t len = 0;
-                    // langtype 带 [len] 码点数形状段（后续 string·*/xv 下标读依赖）。
-                    ok = v_char_wire(
-                             "char/utf8",
-                             reinterpret_cast<const std::uint8_t*>(out_s.data()),
-                             static_cast<std::uint32_t>(out_s.size()), &buf,
-                             &len) &&
-                         buf && write_reg(f, ins.wr[0], buf, len);
-                    std::free(buf);
-                    if (vmbin.prof_on) {
-                        const std::uint64_t dh = vmbin.now() - t0;
-                        vmbin.prof.handler += dh;
-                        vmbin.prof.steps++;
-                        vmbin.prof_tick(instruction_prof_id(ins), dh, 0);
-                    }
-                    if (!ok) {
-                        *err = std::string("value op failed: ") + instruction_name(*seg, ins);
-                        return Outcome::Error;
-                    }
-                    continue;
-                }
-                // 动态算子按运行时类型分派：`+` 对 char 族即字符串拼接（Eq/Neq
-                // 已在上方处理；此处是 else 层的通用路径——Add 及其它）。
                 if (ins.op != rwir::Op::Add || ins.nrd != 2 ||
                     !wtext(0, &a) || !wtext(1, &b)) {
-                    *err = std::string("non-scalar operand: ") + instruction_name(*seg, ins);
+                    const bool int_only =
+                        ins.op == rwir::Op::Mod || ins.op == rwir::Op::BitAnd ||
+                        ins.op == rwir::Op::BitOr || ins.op == rwir::Op::BitXor ||
+                        ins.op == rwir::Op::Shl || ins.op == rwir::Op::Shr;
+                    int bad_idx = 0;
+                    if (ins.nrd >= 2 &&
+                        (s[0].k == Scalar::K::Int || s[0].k == Scalar::K::Uint ||
+                         (!int_only && s[0].k == Scalar::K::Float)) &&
+                        w[0].d == nullptr && !none0) {
+                        bad_idx = 1;
+                    }
+                    if (ins.op == rwir::Op::Max || ins.op == rwir::Op::Min) {
+                        *err = "TypeError: max/min requires numeric, got " +
+                               operand_kind_str(0) + " and " + operand_kind_str(1);
+                    } else {
+                        *err = std::string(int_only
+                                               ? "TypeError: expected integer, got "
+                                               : "TypeError: expected numeric, got ") +
+                               operand_kind_str(bad_idx);
+                    }
                     return Outcome::Error;
                 }
                 const std::string out_s = a + b;
                 std::uint8_t* buf = nullptr;
                 std::uint32_t len = 0;
+                // Include `[len]` codepoint shape in `langtype` for downstream `string·*`/`xv` ops.
                 ok = v_char_wire(
                          "char/utf8",
                          reinterpret_cast<const std::uint8_t*>(out_s.data()),
-                         static_cast<std::uint32_t>(out_s.size()), &buf, &len) &&
+                         static_cast<std::uint32_t>(out_s.size()), &buf,
+                         &len) &&
                      buf && write_reg(f, ins.wr[0], buf, len);
                 std::free(buf);
                 if (vmbin.prof_on) {
@@ -2567,49 +3361,9 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
         }
         // 动态键：Ptr 参数先解引用取 target 槽值（链最多 2 跳）；int64/标量 →
         // 十进制字符串；char 族 → 文本。langtype 走 reg attr key（v2）。
-        auto key_str = [&](std::uint8_t ridx, std::string* out) -> bool {
-            // 纯内存 fast 缓存（帧局部 int64 键）：无 kvspace 槽、无 attr——
-            // 直取 fv 转十进制（动态键 `h·*key` 常见形态）。
-            Register& kf = f.regs[ridx];
-            Register& kfr = kf.src_ptr ? *kf.src_ptr : kf;
-            if (kfr.fast_i64) {
-                *out = std::to_string(kfr.fv);
-                return true;
-            }
-            Wire kw0{};
-            std::string lt;
-            if (!read_reg(f, ridx, &kw0) || !reg_langtype(f, ridx, &lt))
-                return false;
-            Wire cur = kw0;
-            for (int hop = 0; hop < 2; hop++) {
-                std::string target;
-                if (!v_ptr_target(cur, &target))
-                    break;
-                const std::uint8_t* td = nullptr;
-                std::uint32_t tn = 0;
-                if (!read_wire(f.h, target, &td, &tn) || !td || !tn)
-                    break;
-                cur.d = td;
-                cur.n = tn;
-                read_langtype(f.h, target, &lt);
-            }
-            Scalar sc{};
-            if (v_scalar(cur, lt, &sc)) {
-                char b[64];
-                switch (sc.k) {
-                case Scalar::K::Int:
-                    std::snprintf(b, sizeof b, "%lld", (long long)sc.i);
-                    *out = b;
-                    return true;
-                case Scalar::K::Uint:
-                    std::snprintf(b, sizeof b, "%llu", (unsigned long long)sc.u);
-                    *out = b;
-                    return true;
-                default:
-                    break;
-                }
-            }
-            return wire_text(cur.d, cur.n, lt, out);
+        auto key_str = [&](std::uint8_t ridx, std::string* out,
+                           std::string* kerr) -> bool {
+            return member_key_text(f, ridx, out, kerr);
         };
         if (ins.op == rwir::Op::Copy) {
             // 单参普通赋值（`a -> b`，非成员读写）：src fast 缓存 → dst 直传，
@@ -2617,131 +3371,112 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
             // dst 为写参别名（dst_ptr）转发调用方 reg；非别名且非帧局部才落明文。
             {
                 const RegDesc& wdesc0 = seg->regs[ins.wr[0]];
-                const bool mw =
-                    wdesc0.name.find("\xC2\xB7") != std::string::npos &&
-                    wdesc0.name[0] != '/';
-                if (ins.nrd == 1 && !mw) {
+                if (ins.nrd == 1 && !wdesc0.member) {
                     Register& sr = regs[ins.rd[0]];
                     Register& rf = sr.src_ptr ? *sr.src_ptr : sr;
-                    if (rf.fast_i64 || rf.fast_bool) {
+                    const auto wlt0 = wdesc0.langtype;
+                    if ((rf.fast_i64 && (wlt0 == vmbin::LangType::None ||
+                                         wlt0 == vmbin::LangType::Int64)) ||
+                        (rf.fast_bool && (wlt0 == vmbin::LangType::None ||
+                                          wlt0 == vmbin::LangType::Bool))) {
                         Register& wr = regs[ins.wr[0]];
-                        // 写参链沿 dst_ptr 贯通到最终调用方 reg（Copy 直传同规）。
-                        Register* tp = wr.dst_ptr ? wr.dst_ptr : &wr;
-                        while (tp->dst_ptr)
-                            tp = tp->dst_ptr;
-                        Register& target = *tp;
-                        target.fast_bool = false;
-                        if (rf.fast_i64) {
-                            target.fv = rf.fv;
-                            target.fast_i64 = true;
-                            if (target.view_ok && target.body)
-                                (void)store_i64_slot(f, target, rf.fv);
-                            if (wr.dst_ptr) {  // 写参链：同步当前帧 reg（对齐 write_reg）
-                                wr.fv = rf.fv;
-                                wr.fast_i64 = true;
+                        Register* wt = &wr;
+                        while (wt->dst_ptr)
+                            wt = wt->dst_ptr;
+                        const bool wt_has_view = wt->view_ok && wt->body;
+                        const bool can_fast_copy =
+                            (!wt->kv_pinned || wt_has_view) &&
+                            (!wt->kv_live || wt_has_view ||
+                             (rf.fast_i64 ? wt->fast_i64 : wt->fast_bool));
+                        if (can_fast_copy) {
+                            // Sync every hop along `dst_ptr` to the final caller reg.
+                            if (rf.fast_i64) {
+                                Register& target = *chain_set_i64(&wr, rf.fv);
+                                if (target.view_ok && target.body)
+                                    (void)store_i64_slot(f, target, rf.fv);
+                            } else {
+                                Register& target = *chain_set_bool(&wr, rf.fb);
+                                if (target.view_ok && target.body)
+                                    *target.body = rf.fb ? 1 : 0;
                             }
-                        } else {
-                            if (target.key.find("is_prime") != std::string::npos) std::fprintf(stderr, "[main copy is_prime] fast_bool path\n");
-                            target.fb = rf.fb;
-                            target.fast_bool = true;
-                            if (target.view_ok && target.body)
-                                *target.body = rf.fb ? 1 : 0;
-                            if (wr.dst_ptr) {
-                                wr.fb = rf.fb;
-                                wr.fast_bool = true;
+                            if (vmbin.prof_on) {
+                                const std::uint64_t dh = vmbin.now() - t0;
+                                vmbin.prof.handler += dh;
+                                vmbin.prof.steps++;
+                                vmbin.prof_tick(instruction_prof_id(ins), dh, 0);
                             }
-                        }
-                        if (vmbin.prof_on) {
-                            const std::uint64_t dh = vmbin.now() - t0;
-                            vmbin.prof.handler += dh;
-                            vmbin.prof.steps++;
-                            vmbin.prof_tick(instruction_prof_id(ins), dh, 0);
-                        }
-                        // 非别名写参/绝对路径槽：fast 直写只进缓存，须补落明文
-                        // （内存别名由边界冲刷兜底，见 flush_frame_locals）。
-                        if (!wr.dst_ptr && !is_frame_local(f, wr.key)) {
-                            bool ok2 = rf.fast_i64
-                                           ? slot_write_i64(f, ins.wr[0], rf.fv)
-                                           : slot_write_bool(f, ins.wr[0], rf.fb);
-                            if (!ok2) {
-                                *err = std::string("value op failed: ") + instruction_name(*seg, ins);
-                                return Outcome::Error;
+                            // Non-aliased write-param or absolute-path slot: persist to kvspace as well.
+                            if (!wr.dst_ptr && !is_frame_local(f, wr.key)) {
+                                bool ok2 = rf.fast_i64
+                                               ? slot_write_i64(f, ins.wr[0], rf.fv)
+                                               : slot_write_bool(f, ins.wr[0], rf.fb);
+                                if (!ok2) {
+                                    *err = std::string("value op failed: ") + instruction_name(*seg, ins);
+                                    return Outcome::Error;
+                                }
                             }
+                            continue;
                         }
-                        continue;
                     }
                 }
             }
-            // 成员路径（layout MEMBER_READ_OP="="）：nrd=2 = 成员读（base+key），
-            // 写槽描述符含 `·*` = 成员写。目标 key = 容器槽 + "·" + 键值。
-            // `/` 开头的绝对路径（`42 -> "/tmp/kvt·data"` 路径写）不是成员写：
-            // C 语义直接原样作 key（ResolveWriteSlot name[0]=='/' 分支）。
+            // Member access on `=`: `nrd >= 2` is member read (`MEMBER_READ_OP`);
+            // `wdesc.member` marks relative member writes (`base·field`) and dynamic `/tmp/m·*k`
+            // writes (whereas static `/tmp/kvt·data` writes that literal path directly).
             const RegDesc& wdesc = seg->regs[ins.wr[0]];
-            const bool member_write =
-                wdesc.name.find("\xC2\xB7") != std::string::npos &&
-                wdesc.name[0] != '/';
-            if (ins.nrd == 2 && !member_write) {
-                // 成员读：base（读参0 的值或 Ptr 目标 key）+ key（读参1 的值）。
-                Wire bw{};
-                std::string base_key;
-                Register& br0 = f.regs[ins.rd[0]];
-                Register& br0f = br0.src_ptr ? *br0.src_ptr : br0;
-                if (read_reg(f, ins.rd[0], &bw)) {
-                    std::string bt, blt;
-                    if (v_ptr_target(bw, &bt)) {
-                        base_key = bt;
-                    } else if (reg_langtype(f, ins.rd[0], &blt) &&
-                               wire_text(bw.d, bw.n, blt, &bt) && !bt.empty() &&
-                               bt[0] == '/') {
-                        // 字面量路径 base（`char/utf32:/tmp/up`）→ 直接取文本。
-                        base_key = bt;
-                    } else {
-                        // 帧局部变量（惰性 key 未解析）：ensure 后取实例槽路径
-                        // （`n3·val` 在 n3 只经 struct·new 写、无明文值时 key 仍空）。
-                        // 内存别名读参（src_ptr）：值=调用方实例——直接取调用方
-                        // reg 的槽 key（容器 Ptr 参数 `arr:*[int64]·int64` 的
-                        // bsearch，`arr·*mid` 须读调用方 test 的 arr 实例）。
-                        if (&br0f != &br0 && !br0f.key.empty()) {
-                            base_key = br0f.key;
-                        } else if (ensure_reg_key(f, br0) && br0.key.size() > 5) {
-                            base_key = br0.key;
-                        }
-                        // Ptr 参数（key=arg 槽）：read_reg 已穿透成实例，raw 读回
-                        // Ptr 本体取 target（`p·x` 的 p 是 *点 读参）。
-                        if (br0f.key.size() > 5) {
-                            const std::uint8_t* rd2 = nullptr;
-                            std::uint32_t rn2 = 0;
-                            std::string t2;
-                            if (read_wire_raw(f.h, br0f.key, &rd2, &rn2) &&
-                                v_ptr_target(Wire{rd2, rn2}, &t2) &&
-                                !t2.empty())
-                                base_key = t2;
-                        }
-                    }
+            const bool member_write = wdesc.member;
+            const bool decl_scalar =
+                wdesc.langtype >= vmbin::LangType::Int8 &&
+                wdesc.langtype <= vmbin::LangType::Bool;
+            const std::string_view decl_tname =
+                decl_scalar ? std::string_view(vmbin::langtype_name(wdesc.langtype))
+                            : std::string_view();
+            auto write_copy_reg = [&](Wire w_in, bool* cok) -> bool {
+                if (!decl_scalar) {
+                    *cok = write_reg(f, ins.wr[0], w_in.d, w_in.n);
+                    return true;
                 }
-                std::string kstr;
-                if (!base_key.empty() && key_str(ins.rd[1], &kstr) &&
-                    !kstr.empty()) {
-                    // 容器成员 key = base·name（· 中点键，对齐 C kvlangKeytreeMember）。
+                std::uint8_t* cbuf = nullptr;
+                Wire cw{};
+                if (!coerce_scalar_wire(decl_tname, w_in, &cbuf, &cw, err)) {
+                    std::free(cbuf);
+                    return false;
+                }
+                *cok = write_reg(f, ins.wr[0], cw.d, cw.n);
+                std::free(cbuf);
+                return true;
+            };
+            if (ins.nrd >= 2 && !member_write) {
+                // Member read: `rd[0]` base + `rd[1..nrd-1]` segments (including multi-segment chains).
+                std::string mkey, kerr;
+                if (member_path(f, ins, &mkey, &kerr)) {
                     // 值读用 raw（resolve=0）：成员是 Ptr 时须取 Ptr 本体（链表
                     // `cur·next -> cur` 拿指针），穿透会得到目标值。
-                    const std::string mkey = base_key + "\xC2\xB7" + kstr;
                     const std::uint8_t* md = nullptr;
                     std::uint32_t mn = 0;
                     if (read_wire_raw(f.h, mkey, &md, &mn) && md && mn) {
-                        // 成员值自带类型（attr 区随值），直接转发。
-                        ok = write_reg(f, ins.wr[0], md, mn);
+                        // Forward member wire directly (or coerce if destination declares a scalar kind).
+                        if (!write_copy_reg(Wire{md, mn}, &ok))
+                            return Outcome::Error;
                     } else {
                         // 缺失成员 → None（容器成员可能未建）。
                         std::uint8_t* none = nullptr;
                         std::uint64_t nn = 0;
-                        ok = kvspaceXvalueHeadNewNone(&none, &nn) == 0 && none &&
-                             write_reg(f, ins.wr[0], none,
-                                       static_cast<std::uint32_t>(nn));
+                        if (kvspaceXvalueHeadNewNone(&none, &nn) != 0 || !none) {
+                            ok = false;
+                        } else if (!write_copy_reg(
+                                       Wire{none, static_cast<std::uint32_t>(nn)},
+                                       &ok)) {
+                            std::free(none);
+                            return Outcome::Error;
+                        }
                         std::free(none);
                     }
                 } else {
-                    *err = std::string("member read: bad base/key: ") + instruction_name(*seg, ins);
+                    *err = !kerr.empty()
+                               ? kerr
+                               : (std::string("member read: bad base/key: ") +
+                                  instruction_name(*seg, ins));
                     return Outcome::Error;
                 }
             } else if (member_write) {
@@ -2763,8 +3498,6 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                         kstr = keyref.substr(1, keyref.size() - 2);  // `·*"a"` → 文本 a
                     } else {
                         // 动态键变量：读帧成员值（纯内存帧局部变量走 fast 缓存）。
-                        const std::string keyreg =
-                            std::string("v:") + keyref;
                         std::uint8_t kridx = 255;
                         auto& mw =
                             seg->member_write_cache[static_cast<std::uint32_t>(idx)];
@@ -2783,9 +3516,16 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                                 break;
                             }
                         }
-                        if (kridx == 255 || !key_str(kridx, &kstr) ||
-                            kstr.empty()) {
-                            *err = "member write: bad key var: " + wname;
+                        std::string kerr;
+                        bool kok = false;
+                        if (kridx != 255)
+                            kok = key_str(kridx, &kstr, &kerr) && !kstr.empty();
+                        if (!kok && kridx == 255)
+                            kok = param_member_key_text(f, keyref, &kstr, &kerr) &&
+                                  !kstr.empty();
+                        if (!kok) {
+                            *err = !kerr.empty() ? kerr
+                                                 : ("member write: bad key var: " + wname);
                             return Outcome::Error;
                         }
                     }
@@ -2840,17 +3580,23 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                                 const std::uint8_t* bd = nullptr;
                                 std::uint32_t bn = 0;
                                 std::string bt;
-                                rk->base_ptr =
-                                    read_wire_raw(f.h, rk->key, &bd, &bn) &&
-                                    v_ptr_target(Wire{bd, bn}, &bt) && !bt.empty();
+                                const bool got = read_wire_raw(f.h, rk->key, &bd, &bn);
+                                rk->base_ptr = got && v_ptr_target(Wire{bd, bn}, &bt) &&
+                                               !bt.empty();
+                                rk->base_path = got && !rk->base_ptr &&
+                                                path_string_base(f.h, rk->key,
+                                                                 Wire{bd, bn}, &bt);
                                 rk->base_ptr_known = true;
                             }
-                            if (rk->base_ptr) {
+                            if (rk->base_ptr || rk->base_path) {
                                 const std::uint8_t* bd = nullptr;
                                 std::uint32_t bn = 0;
                                 std::string bt;
-                                if (read_wire_raw(f.h, rk->key, &bd, &bn) &&
-                                    v_ptr_target(Wire{bd, bn}, &bt))
+                                const bool got = read_wire_raw(f.h, rk->key, &bd, &bn);
+                                if (got && rk->base_ptr && v_ptr_target(Wire{bd, bn}, &bt))
+                                    base_key = bt;
+                                else if (got && rk->base_path &&
+                                         path_string_base(f.h, rk->key, Wire{bd, bn}, &bt))
                                     base_key = bt;
                                 else
                                     base_key = rk->key;
@@ -2861,14 +3607,24 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                     } else {
                         base_key = fbp;
                     }
+                    // Parameter Ptr base without a local reg (`r·x`): resolve via signature.
+                    if (!base_reg && base_key == fbp) {
+                        std::string mk = mem_write_param_key(f, base_part);
+                        if (mk.empty())
+                            mk = mem_read_param_base_key(f, base_part);
+                        if (!mk.empty())
+                            base_key = std::move(mk);
+                    }
                     // Write-param fallbacks apply only when no local reg names the base.
+                    // Match only `*[0,k]` write-params (`k > 0`), never read-params `*[0,-k]`.
                     if (!base_reg && base_key == fbp) {
                         for (Register& r : f.regs) {
                             const std::string_view rn =
                                 !r.desc.empty() ? std::string_view(r.desc)
                                 : r.desc_ref    ? std::string_view(r.desc_ref->name)
                                                 : std::string_view();
-                            if (rn.substr(0, 4) == "*[0," && !r.key.empty()) {
+                            if (rn.substr(0, 4) == "*[0," && rn.size() > 4 &&
+                                rn[4] != '-' && !r.key.empty()) {
                                 Register* rk = &r;
                                 while (rk->src_ptr || rk->dst_ptr)
                                     rk = rk->src_ptr ? rk->src_ptr : rk->dst_ptr;
@@ -2908,8 +3664,16 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                     *err = std::string("member write: no value: ") + instruction_name(*seg, ins);
                     return Outcome::Error;
                 }
+                std::uint8_t* cbuf = nullptr;
+                Wire cw = kw;
+                if (decl_scalar &&
+                    !coerce_scalar_wire(decl_tname, kw, &cbuf, &cw, err)) {
+                    std::free(cbuf);
+                    return Outcome::Error;
+                }
                 // 值自带类型（attr 区随值），直接落。
-                ok = kvspaceSetValue(f.h, mkey.c_str(), kw.d, kw.n, e, sizeof e) == 0;
+                ok = kvspaceSetValue(f.h, mkey.c_str(), cw.d, cw.n, e, sizeof e) == 0;
+                std::free(cbuf);
             } else {
                 // 普通单参赋值（`a -> b`）：复制**槽本体**（Ptr 不穿透——链表
                 // `head -> cur` 复制指针，穿透会拿到目标实例）。普通值 raw 同值。
@@ -2950,21 +3714,28 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                     rawn = 0;
                 }
                 if (aliased) {
-                } else if (!srf.key.empty() &&
+                } else if (!decl_scalar && !(srf.fast_i64 || srf.fast_bool) &&
+                           !srf.key.empty() &&
                     read_wire_raw(f.h, srf.key, &rawd, &rawn) && rawd && rawn) {
-                                    // 源槽值自带类型（attr 随值），直接复制到目标槽。
+                    // Source wire carries its own `langtype` attr; copy to non-scalar destination.
                     src.d = rawd;
                     src.n = rawn;
                     ok = write_reg(f, ins.wr[0], src.d, src.n);
                 } else if (read_reg(f, ins.rd[0], &src)) {
-                                    ok = write_reg(f, ins.wr[0], src.d, src.n);
+                    if (!write_copy_reg(src, &ok))
+                        return Outcome::Error;
                 } else {
-                    // 未赋值变量读作 None：整体写 None XValue，不是错误。
+                    // Unassigned source reads as `None` (fixed-width numeric destinations raise `TypeError`).
                     std::uint8_t* none = nullptr;
                     std::uint64_t nn = 0;
-                    ok = kvspaceXvalueHeadNewNone(&none, &nn) == 0 && none &&
-                         write_reg(f, ins.wr[0], none,
-                                   static_cast<std::uint32_t>(nn));
+                    if (kvspaceXvalueHeadNewNone(&none, &nn) != 0 || !none) {
+                        ok = false;
+                    } else if (!write_copy_reg(
+                                   Wire{none, static_cast<std::uint32_t>(nn)},
+                                   &ok)) {
+                        std::free(none);
+                        return Outcome::Error;
+                    }
                     std::free(none);
                 }
             }
@@ -3021,29 +3792,28 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
             Scalar a = s[0], b = s[1];
             if ((a.k == Scalar::K::Uint && b.k == Scalar::K::Int) ||
                 (a.k == Scalar::K::Int && b.k == Scalar::K::Uint)) {
-                // 有符号/无符号混合：按 C 提升语义统一到能容纳的一侧。
-                const bool a_u = a.k == Scalar::K::Uint;
-                const std::uint64_t uv = a_u ? a.u : b.u;
-                const std::int64_t iv = a_u ? b.i : a.i;
-                if (iv < 0 || uv > (std::uint64_t)INT64_MAX) {
-                    a.k = b.k = Scalar::K::Uint;
-                    a.u = a_u ? a.u : (std::uint64_t)iv;
-                    b.u = a_u ? (std::uint64_t)iv : b.u;
-                } else {
-                    a.k = b.k = Scalar::K::Int;
-                    a.i = a_u ? (std::int64_t)uv : a.i;
-                    b.i = a_u ? b.i : (std::int64_t)uv;
-                }
-            } else if (a.k != Scalar::K::Float && b.k == Scalar::K::Float) {
+                // Mixed-signedness integer comparison uses promoted signed `int16/32/64`
+                // (`<= 32`-bit unsigned widens losslessly; `uint64` wraps as `int64`).
+                a.i = a.k == Scalar::K::Uint ? static_cast<std::int64_t>(a.u) : a.i;
+                b.i = b.k == Scalar::K::Uint ? static_cast<std::int64_t>(b.u) : b.i;
+                a.k = b.k = Scalar::K::Int;
+            } else if ((a.k == Scalar::K::Int || a.k == Scalar::K::Uint) &&
+                       b.k == Scalar::K::Float) {
                 a.k = Scalar::K::Float;
                 a.f = (double)(s[0].k == Scalar::K::Uint ? (double)s[0].u
                                                         : (double)s[0].i);
-            } else if (b.k != Scalar::K::Float && a.k == Scalar::K::Float) {
+            } else if ((b.k == Scalar::K::Int || b.k == Scalar::K::Uint) &&
+                       a.k == Scalar::K::Float) {
                 b.k = Scalar::K::Float;
                 b.f = (double)(s[1].k == Scalar::K::Uint ? (double)s[1].u
                                                         : (double)s[1].i);
             }
-            ok = same_class(a.k, b.k) && compare(ins.op, a.k, a, b, &r);
+            if (!same_class(a.k, b.k)) {
+                *err = "TypeError: cannot compare " + operand_kind_str(0) +
+                       " with " + operand_kind_str(1);
+                return Outcome::Error;
+            }
+            ok = compare(ins.op, a.k, a, b, &r);
             Scalar out{};
             out.k = Scalar::K::Bool;
             out.width = 1;
@@ -3055,9 +3825,52 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
             // 一元 `-` 与二元 Sub 同 opcode：按读参数区分。
             const rwir::Op op =
                 ins.nrd == 1 && ins.op == rwir::Op::Sub ? rwir::Op::Neg : ins.op;
-            Scalar::K k = s[0].k;
-            const Scalar::K k1 = ins.nrd > 1 ? s[1].k : k;
-            Scalar out = s[0];
+            const bool int_only =
+                op == rwir::Op::Mod || op == rwir::Op::BitAnd ||
+                op == rwir::Op::BitOr || op == rwir::Op::BitXor ||
+                op == rwir::Op::Shl || op == rwir::Op::Shr;
+            const int want = (op == rwir::Op::Neg || op == rwir::Op::Abs ||
+                              op == rwir::Op::Sign || op == rwir::Op::Sqrt ||
+                              op == rwir::Op::Exp || op == rwir::Op::Log)
+                                 ? 1
+                                 : 2;
+            auto is_num_k = [](Scalar::K x) {
+                return x == Scalar::K::Int || x == Scalar::K::Uint ||
+                       x == Scalar::K::Float;
+            };
+            auto is_int_k = [](Scalar::K x) {
+                return x == Scalar::K::Int || x == Scalar::K::Uint;
+            };
+            for (int i = 0; i < want && i < ins.nrd; i++) {
+                const bool none_i = (i == 0 && none0) || (i == 1 && none1);
+                const bool valid =
+                    !none_i && (int_only ? is_int_k(s[i].k) : is_num_k(s[i].k));
+                if (!valid) {
+                    if (op == rwir::Op::Max || op == rwir::Op::Min) {
+                        *err = "TypeError: max/min requires numeric, got " +
+                               operand_kind_str(0) + " and " + operand_kind_str(1);
+                    } else {
+                        *err = std::string(int_only
+                                               ? "TypeError: expected integer, got "
+                                               : "TypeError: expected numeric, got ") +
+                               operand_kind_str(i);
+                    }
+                    return Outcome::Error;
+                }
+            }
+            Scalar sa = s[0];
+            Scalar sb = ins.nrd > 1 ? s[1] : s[0];
+            const Scalar::K k = sa.k;
+            const Scalar::K k1 = sb.k;
+            if (op == rwir::Op::Neg && k == Scalar::K::Uint) {
+                *err = std::string("TypeError: cannot negate unsigned ") +
+                       kind_name(sa.k, sa.width ? sa.width : 8);
+                return Outcome::Error;
+            }
+            const bool both_int =
+                (k == Scalar::K::Int || k == Scalar::K::Uint) &&
+                (k1 == Scalar::K::Int || k1 == Scalar::K::Uint);
+            Scalar out = sa;
             const bool to_float = op == rwir::Op::Pow || op == rwir::Op::Sqrt ||
                                   op == rwir::Op::Exp || op == rwir::Op::Log ||
                                   k == Scalar::K::Float ||
@@ -3067,24 +3880,130 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                        : v.k == Scalar::K::Uint ? (double)v.u
                                                 : (double)v.i;
             };
-            ok = same_class(k, k1) || to_float;
-            // 结果宽度 = 两操作数中更宽者（窄化回输入位宽）。
+            if (op == rwir::Op::Log && as_d(sa) <= 0.0) {
+                *err = "ValueError: log of non-positive number";
+                return Outcome::Error;
+            }
+            ok = same_class(k, k1) || both_int || to_float;
             const std::uint8_t wmax =
-                std::max(s[0].width, ins.nrd > 1 ? s[1].width : s[0].width);
+                std::max(sa.width, ins.nrd > 1 ? sb.width : sa.width);
+            // Float division by zero raises `ZeroDivisionError` (matching C runtime and `error_cases`).
+            if (ok && (to_float || k == Scalar::K::Float) && op == rwir::Op::Div &&
+                ins.nrd > 1 && (to_float ? as_d(sb) : sb.f) == 0.0) {
+                *err = zero_div_msg(false);
+                return Outcome::Error;
+            }
             if (ok && to_float) {
+                const bool math_f64 =
+                    op == rwir::Op::Pow || op == rwir::Op::Sqrt ||
+                    op == rwir::Op::Exp || op == rwir::Op::Log;
                 out.k = Scalar::K::Float;
-                out.width = k == Scalar::K::Float ? wmax : 8;
-                ok = compute_float(op, as_d(s[0]), as_d(s[1]), &out.f);
+                out.width =
+                    math_f64
+                        ? 8
+                        : (k == Scalar::K::Float &&
+                           (ins.nrd == 1 || k1 == Scalar::K::Float))
+                              ? wmax
+                              : (ins.nrd > 1 &&
+                                 (k == Scalar::K::Float ||
+                                  k1 == Scalar::K::Float))
+                                    ? ((k == Scalar::K::Float &&
+                                        sa.width == 8) ||
+                                               (k1 == Scalar::K::Float &&
+                                                sb.width == 8)
+                                           ? 8
+                                           : 4)
+                                    : 8;
+                ok = compute_float(op, as_d(sa), as_d(sb), &out.f);
             } else if (ok && k == Scalar::K::Float)
-                ok = compute_float(op, s[0].f, s[1].f, &out.f);
-            else if (ok && (k == Scalar::K::Int || k == Scalar::K::Uint ||
-                            k == Scalar::K::Bool)) {
-                if (k == Scalar::K::Bool)
-                    k = Scalar::K::Uint;
-                ok = compute_int(op, k, s[0], s[1], &out);
-                out.width = wmax;
+                ok = compute_float(op, sa.f, sb.f, &out.f);
+            else if (ok && both_int) {
+                // Same signedness -> wider kind; mixed -> widen signed (`<=8->int16`, `16->int32`, `32/64->int64`).
+                const bool mixed = ins.nrd > 1 && k != k1;
+                const Scalar::K rk = mixed ? Scalar::K::Int : k;
+                const std::uint8_t rw =
+                    mixed ? (wmax <= 1 ? 2 : wmax == 2 ? 4 : 8) : wmax;
+                // Right-shift signedness follows the left operand.
+                const Scalar::K exec_k = (op == rwir::Op::Shr) ? k : rk;
+                if (exec_k == Scalar::K::Int) {
+                    sa.i = sa.k == Scalar::K::Uint ? static_cast<std::int64_t>(sa.u) : sa.i;
+                    sb.i = sb.k == Scalar::K::Uint ? static_cast<std::int64_t>(sb.u) : sb.i;
+                    sa.u = static_cast<std::uint64_t>(sa.i);
+                    sb.u = static_cast<std::uint64_t>(sb.i);
+                }
+                ok = compute_int(op, exec_k, sa, sb, &out);
+                if (!ok && (op == rwir::Op::Div || op == rwir::Op::Mod) &&
+                    (exec_k == Scalar::K::Int ? sb.i == 0 : sb.u == 0)) {
+                    *err = zero_div_msg(op == rwir::Op::Mod);  // match int64 fast-path message
+                    return Outcome::Error;
+                }
+                if (op == rwir::Op::Sign) {
+                    out.k = Scalar::K::Int;
+                    out.width = 8;
+                } else {
+                    out.k = rk;
+                    out.width = rw;
+                    if (rk == Scalar::K::Int) {
+                        out.i = rw == 1   ? static_cast<std::int8_t>(out.i)
+                                : rw == 2 ? static_cast<std::int16_t>(out.i)
+                                : rw == 4 ? static_cast<std::int32_t>(out.i)
+                                          : out.i;
+                        out.u = static_cast<std::uint64_t>(out.i);
+                    } else {
+                        out.u = rw == 1   ? static_cast<std::uint8_t>(out.u)
+                                : rw == 2 ? static_cast<std::uint16_t>(out.u)
+                                : rw == 4 ? static_cast<std::uint32_t>(out.u)
+                                          : out.u;
+                        out.i = static_cast<std::int64_t>(out.u);
+                    }
+                }
             } else
                 ok = false;
+            // Coerce/narrow dynamic op output when writing into a declared scalar slot.
+            const RegDesc& awd = seg->regs[ins.wr[0]];
+            if (ok && ins.kind == rwir::Kind::Any &&
+                awd.langtype >= vmbin::LangType::Int8 &&
+                awd.langtype <= vmbin::LangType::Bool) {
+                if (awd.langtype == vmbin::LangType::Bool) {
+                    if (out.k != Scalar::K::Bool) {
+                        *err = std::string("TypeError: cannot assign ") +
+                               kind_name(out.k, out.width ? out.width : 8) + " to bool";
+                        return Outcome::Error;
+                    }
+                } else {
+                    const double df = as_d(out);
+                    if (awd.langtype == vmbin::LangType::Float32 ||
+                        awd.langtype == vmbin::LangType::Float64) {
+                        out.k = Scalar::K::Float;
+                        out.f = df;
+                    } else if (awd.langtype >= vmbin::LangType::Uint8 &&
+                               awd.langtype <= vmbin::LangType::Uint64) {
+                        const std::uint64_t uv =
+                            out.k == Scalar::K::Float
+                                ? static_cast<std::uint64_t>(static_cast<std::int64_t>(out.f))
+                            : out.k == Scalar::K::Uint ? out.u
+                                                       : static_cast<std::uint64_t>(out.i);
+                        out.k = Scalar::K::Uint;
+                        out.u = awd.width == 1   ? static_cast<std::uint8_t>(uv)
+                                : awd.width == 2 ? static_cast<std::uint16_t>(uv)
+                                : awd.width == 4 ? static_cast<std::uint32_t>(uv)
+                                                 : uv;
+                        out.i = static_cast<std::int64_t>(out.u);
+                    } else {
+                        const std::int64_t iv =
+                            out.k == Scalar::K::Float  ? static_cast<std::int64_t>(out.f)
+                            : out.k == Scalar::K::Uint ? static_cast<std::int64_t>(out.u)
+                                                       : out.i;
+                        out.k = Scalar::K::Int;
+                        out.i = awd.width == 1   ? static_cast<std::int8_t>(iv)
+                                : awd.width == 2 ? static_cast<std::int16_t>(iv)
+                                : awd.width == 4 ? static_cast<std::int32_t>(iv)
+                                                 : iv;
+                        out.u = static_cast<std::uint64_t>(out.i);
+                    }
+                    out.width = awd.width;
+                }
+            }
             if (ok)
                 ok = slot_write_scalar(f, ins.wr[0], out,
                                        out.width ? out.width : 8);
@@ -3115,6 +4034,12 @@ bool sync_alias_write_params(Vmkv& vm, Frame& f, Register** dsts, int n,
 // arg_src/arg_dst 内存别名表、递归 run_frame。Call 是天然 checkpoint 边界。
 vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
                             int pc, std::string* stop_pc, std::string* err) {
+    if (f.depth + 1 > 256) {
+        *err = "RecursionError: stack overflow: depth=" + std::to_string(f.depth + 1);
+        if (stop_pc)
+            *stop_pc = param_key(f.frame, pc, 0);
+        return Outcome::Error;
+    }
     // callee 已在 build_segment 预解析为最终 /lib/ 路径（裸名 pkg 探测一次，
     // 运行期零 read_text/kvspaceGet）。fib 递归每帧省 2 次 kvspace 往返。
     const std::string& callee = instruction_callee(*seg, ins);
@@ -3123,7 +4048,7 @@ vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
         return Outcome::Error;
     }
     const std::string& nf = child_frame_root(f.vid, f.depth + 1);
-    char e[192] = {};
+    char e[256] = {};
     // 纯 runtime rwfunc 调用（callee 有代码段可解释）：帧局部 int64/bool
     // 参数走内存别名，免建 kvspace arg 槽/写参槽（fib 递归热点）。
     // 扩展/handler/容器/float 参数照旧 kvspace 传值/Ptr。
@@ -3132,12 +4057,27 @@ vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
         return Outcome::Error;
     }
     CallSite& site = seg->call_sites[ins.call_site];
+    thread_local std::uint64_t s_call_ticks = 0;
+    if ((++s_call_ticks & 255u) == 0)
+        bump_segment_epoch();
+    if (site.ready && site.segment &&
+        (site.segment->retired || site.jit_epoch != jit_cache_epoch() ||
+         site.segment->validated_epoch != current_segment_epoch())) {
+        const Segment* fresh = cached_segment(f.h, callee);
+        if (fresh != site.segment || site.jit_epoch != jit_cache_epoch()) {
+            const std::uint16_t cid = site.callee_id;
+            site = CallSite{};
+            site.callee_id = cid;
+        }
+    }
     const Segment* cseg =
         site.ready ? site.segment : cached_segment(f.h, callee);
     // 纯内存递归帧：callee 段无 handler/handoff → 无观察边界 → 帧系统变量
     // （returnpc/lib）与生命周期（DelTree/Mkindex/ext 索引）全部省略，
     // 每帧省 ~17k cycles kvspace（fib 递归最大头）。
-    const bool mem_frame = cseg && !cseg->has_rwirhandler;
+    // All transitive callees must also be non-stopping because Stop reconstructs frames from kvspace.
+    const bool mem_frame =
+        cseg && !cseg->has_rwirhandler && !segment_may_stop(f.h, cseg);
     // JIT 快路径判定（M1）：callee 已编译 → 形状已知（int64 单读参/写参），
     // 参数绑定直接走 mem 路径，免签名/参数 wire 的 kvspace 读取。
     // 调度：M1 能编的优先（其适配更轻，iops 类小函数不被通用适配的固定成本
@@ -3219,6 +4159,7 @@ vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
         site.segment = cseg;
         site.jit = m1_code;
         site.jit2_entry = jit2_code;
+        site.jit_epoch = jit_cache_epoch();
         site.read_types.assign(ins.nrd, std::string());
         site.read_types_ok.assign(ins.nrd, 0);
         for (int i = 1; i < ins.nrd; i++)
@@ -3247,9 +4188,14 @@ vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
     // 返回点再判链末仍为参数才真的写，帧局部热路径零成本。
     Register* sync_dst[4];  // 段 nwr ≤ 4（codeseg 建段已校验）
     int sync_n = 0;
+    auto strip_ptr_sigil = [](std::string_view t) -> std::string {
+        while (!t.empty() && (t.front() == '*' || t.front() == '@'))
+            t.remove_prefix(1);
+        return std::string(t);
+    };
     auto bind_arg = [&](int x, Register* caller_reg, const std::string& value_key,
                         const std::string& typ, const Wire& src) -> bool {
-        char be[192] = {};
+        char be[256] = {};
         const bool container_arg = typ.find("\xC2\xB7") != std::string::npos;
         const bool scalar_arg =
             !container_arg && (typ == "int64" || typ == "bool");
@@ -3260,11 +4206,11 @@ vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
         // through kvspace has none, so its value goes through an arg slot instead.
         // `*T` 指针参数（struct/链表头）也走内存别名：值=调用方 Ptr wire，
         // src_ptr 链可解引用（mem_frame 不落 arg 槽，走槽会读空）。
-        const bool ptr_alias = scalar_arg || typ[0] == '*';
+        const bool ptr_alias = scalar_arg || (!typ.empty() && typ[0] == '*');
         // `*T` 指针参数：值=调用方 Ptr wire（非 fast），直接挂内存别名——
         // mem_frame 不落 arg 槽，走槽会读空（链表 `show_list(&n1)` 头指针）。
         const bool want_alias =
-            x > 0 || holds_value(caller_reg) || typ[0] == '*';
+            x > 0 || holds_value(caller_reg) || (!typ.empty() && typ[0] == '*');
         if (mem_frame && ptr_alias && want_alias) {
             if (x > 0 && sync_n < 4 &&
                 ((caller_reg->desc_ref &&
@@ -3284,6 +4230,8 @@ vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
             }
             return true;
         }
+        const std::string pkind = strip_ptr_sigil(typ);
+        const char* pkind_c = pkind.empty() ? typ.c_str() : pkind.c_str();
         const std::string xs = std::to_string(x);
         const std::string arg_key = nf + "/\xE2\x80\xA5" "arg[0," + xs + "]";
         const std::string slot = nf + "/[0," + xs + "]";
@@ -3300,7 +4248,7 @@ vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
             }
             mk_done = true;
         }
-        if (x < 0 && (!container_arg || typ[0] == '*')) {
+        if (x < 0 && (!container_arg || (!typ.empty() && typ[0] == '*'))) {
             // Ptr 类型读参（`*T`）：arg 槽存 Ptr→调用方槽（`求和(a)` 的 a 是
             // 值实例；&n3 已 Ptr 则链 Ptr→target）。slot 恒 Ptr→arg。
             // 容器但 `*` 前缀（`chars:*[int64]·[]char/utf32`）：仍 Ptr 绑定
@@ -3309,41 +4257,55 @@ vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
                 const std::uint8_t* pd = src.d;
                 std::uint32_t pn = src.n;
                 std::string pt;
-                const std::string pkind = typ.substr(1);
                 std::uint8_t* ap = nullptr;
                 std::uint32_t an = 0;
-                // src 已是 Ptr（&n3 传 _3 变量）：arg 直接继承 Ptr→target。
-                if (v_ptr_target(src, &pt) && !pt.empty()) {
-                    bool bok = kvspaceNewPtr(pkind.c_str(), pt.c_str(), &ap,
-                                             &an) == 0;
-                    if (!bok) {
-                        *err = "bind: NewPtr(arg chain) failed";
-                        return false;
+                bool bok2 = false;
+                if (v_is_none(src)) {
+                    // Write `None` directly to the arg slot instead of creating a dangling Ptr.
+                    if (!g_none_len) {
+                        std::uint64_t nn = 0;
+                        g_none_ptr = g_none_wire;
+                        if (kvspaceXvalueHeadNewNone(&g_none_ptr, &nn) == 0)
+                            g_none_len = static_cast<std::uint32_t>(nn);
                     }
-                } else if (pd && pn) {
-                    // 值实例：arg 槽 = Ptr→调用方槽。
-                    bool bok = value_key.empty()
-                                   ? false
-                                   : kvspaceNewPtr(pkind.c_str(),
-                                                   value_key.c_str(), &ap,
-                                                   &an) == 0;
-                    if (!bok) {
-                        *err = "bind: NewPtr(value) failed typ=" + typ;
-                        return false;
-                    }
+                    bok2 = g_none_len &&
+                           kvspaceSetValue(f.h, arg_key.c_str(), g_none_ptr,
+                                           g_none_len, be, sizeof be) == 0;
                 } else {
-                    *err = "bind: read arg value failed: " + value_key;
-                    return false;
+                    // `src` is already a Ptr (`&x` temp): forward `Ptr -> target`.
+                    if (v_ptr_target(src, &pt) && !pt.empty()) {
+                        bool bok = kvspaceNewPtr(pkind_c, pt.c_str(), &ap,
+                                                 &an) == 0;
+                        if (!bok) {
+                            *err = "bind: NewPtr(arg chain) failed";
+                            return false;
+                        }
+                    } else if (pd && pn) {
+                        // Value instance: bind arg slot as `Ptr -> caller slot`.
+                        bool bok = value_key.empty()
+                                       ? false
+                                       : kvspaceNewPtr(pkind_c,
+                                                       value_key.c_str(), &ap,
+                                                       &an) == 0;
+                        if (!bok) {
+                            *err = "bind: NewPtr(value) failed typ=" + typ;
+                            return false;
+                        }
+                    } else {
+                        *err = "bind: read arg value failed: " + value_key;
+                        return false;
+                    }
+                    bok2 = kvspaceSetValue(f.h, arg_key.c_str(), ap, an, be,
+                                           sizeof be) == 0;
+                    std::free(ap);
                 }
-                bool bok2 = kvspaceSetValue(f.h, arg_key.c_str(), ap, an, be, sizeof be) == 0;
-                std::free(ap);
                 if (!bok2) {
                     *err = std::string("bind: set arg failed: ") + be;
                     return false;
                 }
                 std::uint8_t* sp = nullptr;
                 std::uint32_t sn = 0;
-                bool bok3 = kvspaceNewPtr(typ.c_str(), arg_key.c_str(), &sp,
+                bool bok3 = kvspaceNewPtr(pkind_c, arg_key.c_str(), &sp,
                                           &sn) == 0;
                 if (!bok3) {
                     *err = "bind: NewPtr(slot) failed";
@@ -3365,12 +4327,16 @@ vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
             // 数组参数 `a:[]int64` 的声明无 dims，at/numel 按实际 dims 解析；
             // 值无类型才退回声明 typ（标量/路径字面量）。
             std::string arg_lt;
-            if (!value_key.empty() && value_key[0] == '/') {
-                if (!read_langtype(f.h, value_key.c_str(), &arg_lt))
-                    arg_lt.clear();
+            if (v_is_none(src)) {
+                arg_lt = (!typ.empty() && typ[0] == '*') ? typ : "None";
+            } else {
+                if (!value_key.empty() && value_key[0] == '/') {
+                    if (!read_langtype(f.h, value_key.c_str(), &arg_lt))
+                        arg_lt.clear();
+                }
+                if (arg_lt.empty())
+                    arg_lt = typ;
             }
-            if (arg_lt.empty())
-                arg_lt = typ;
             if (!set_value_typed(f.h, arg_key.c_str(), vd, vn, arg_lt.c_str(),
                                  be, sizeof be)) {
                 *err = std::string("bind: set arg value failed: ") + be;
@@ -3378,7 +4344,7 @@ vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
             }
             std::uint8_t* sp = nullptr;
             std::uint32_t sn = 0;
-            bool bok = kvspaceNewPtr(typ.c_str(), arg_key.c_str(), &sp, &sn) == 0;
+            bool bok = kvspaceNewPtr(pkind_c, arg_key.c_str(), &sp, &sn) == 0;
             if (!bok) {
                 *err = "bind: NewPtr(slot) failed";
                 return false;
@@ -3392,7 +4358,7 @@ vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
         std::uint8_t* a = nullptr;
         std::uint8_t* sp = nullptr;
         std::uint32_t an = 0, sn = 0;
-        bool bok = kvspaceNewPtr(typ.c_str(), value_key.c_str(), &a, &an) == 0;
+        bool bok = kvspaceNewPtr(pkind_c, value_key.c_str(), &a, &an) == 0;
         if (!bok) {
             if (g_trace)
                 std::fprintf(stderr,
@@ -3401,7 +4367,7 @@ vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
             *err = "bind: NewPtr(value) failed typ=" + typ;
             return false;
         }
-        bok = kvspaceNewPtr(typ.c_str(), arg_key.c_str(), &sp, &sn) == 0;
+        bok = kvspaceNewPtr(pkind_c, arg_key.c_str(), &sp, &sn) == 0;
         if (!bok) {
             *err = "bind: NewPtr(arg) failed";
             std::free(a);
@@ -3425,11 +4391,22 @@ vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
     // JIT 快路径绑定只对纯内存帧成立（参数=调用方 reg 别名、不落 kvspace 槽）。
     // 含 handler/handoff 的段必须走完整 kvspace 绑定：帧可能中途 Stop 重启，
     // 别名会丢（prime_sieve println 坑），且 JIT2 接受 handler 函数后更常见。
-    // 快路径绑定把每个参数按 int64 别名处理（bind_arg 的 typ 固定 "int64"）：
-    // 只对全部参数都是 int64/uint64 的段成立。bool 写参要落 bool 槽、float
-    // 写参要落 float 槽（JIT2 接比较/浮点段），走完整 kvspace 绑定。
-    const bool jit_fast_bind = jcode && !f.observable && mem_frame &&
-                               callee_int_params(cseg);
+    bool jit_bind_ok =
+        jcode && !f.observable && mem_frame && callee_int_params(cseg);
+    if (jit_bind_ok && !m1_code) {
+        auto scalar_mem_type = [](const std::string& t) {
+            return t == "int64" || t == "bool";
+        };
+        for (int i = 1; jit_bind_ok && i < ins.nrd; i++)
+            if (!site.ready || !site.read_types_ok[i] ||
+                !scalar_mem_type(site.read_types[i]))
+                jit_bind_ok = false;
+        for (int i = 1; jit_bind_ok && i <= ins.nwr; i++)
+            if (site.ready && site.write_types_ok[i] &&
+                !scalar_mem_type(site.write_types[i]))
+                jit_bind_ok = false;
+    }
+    const bool jit_fast_bind = jit_bind_ok;
     if (!jit_fast_bind)
     for (int i = 1; i < ins.nrd; i++) {
         Wire vw{};
@@ -3445,7 +4422,8 @@ vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
               rd.name[0] == '/')) {
             Register& cr = f.regs[ins.rd[i]];
             const Register& ca = cr.src_ptr ? *cr.src_ptr : cr;
-            if (ca.fast_i64 || ca.fast_bool) {
+            if ((ca.fast_i64 && site.read_types[i] == "int64") ||
+                (ca.fast_bool && site.read_types[i] == "bool")) {
                 if (!bind_arg(-i, &cr, vk, site.read_types[i], vw))
                     return Outcome::Error;
                 continue;
@@ -3468,7 +4446,7 @@ vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
             }
             std::uint32_t pl = static_cast<std::uint32_t>(pl64);
             vk = nf + "/._lit" + std::to_string(i);
-            char be[192] = {};
+            char be[256] = {};
             const bool okk = kvspaceSetValue(f.h, vk.c_str(), pb, pl, be, sizeof be) == 0;
             std::free(pb);
             if (!okk) {
@@ -3485,7 +4463,7 @@ vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
             // 上面已写 _lit 槽；vw 已设为文本。
         } else if (rd.kind == Operand::Kind::Literal) {
             vk = nf + "/._lit" + std::to_string(i);
-            char be[192] = {};
+            char be[256] = {};
             if (kvspaceSetValue(f.h, vk.c_str(), vw.d, vw.n, be, sizeof be) != 0) {
                 *err = std::string("call: literal arg failed: ") + be;
                 return Outcome::Error;
@@ -3497,8 +4475,28 @@ vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
             vk = rr.key;
         }
         typ.clear();
-        if (!decl_type(-i, &typ) && !reg_langtype(f, ins.rd[i], &typ))
-            typ = "int64";
+        const bool has_decl = decl_type(-i, &typ);
+        if (has_decl && is_num_scalar_type(typ) && v_is_none(vw)) {
+            *err = "TypeError: cannot write None to " + typ +
+                   " slot (read argument " + std::to_string(i) + ")";
+            return Outcome::Error;
+        }
+        if (!has_decl && !reg_langtype(f, ins.rd[i], &typ))
+            typ = v_is_none(vw) ? "None" : "int64";
+        // Flush fast-cached caller locals to `vk` before binding `*T` `Ptr -> vk` for a kvspace callee.
+        if (!mem_frame && !typ.empty() && typ[0] == '*' && !v_is_none(vw) &&
+            !v_ptr(vw) && rd.kind != Operand::Kind::Literal) {
+            Register& rr = f.regs[ins.rd[i]];
+            Register* ro = rr.src_ptr ? rr.src_ptr : &rr;
+            if ((ro->fast_i64 || ro->fast_bool) && !(ro->view_ok && ro->body) &&
+                !vk.empty()) {
+                char be[256] = {};
+                if (kvspaceSetValue(f.h, vk.c_str(), vw.d, vw.n, be, sizeof be) == 0) {
+                    ro->kv_live = true;
+                    rr.kv_live = true;
+                }
+            }
+        }
         if (!bind_arg(-i, &f.regs[ins.rd[i]], vk, typ, vw))
             return Outcome::Error;
     }
@@ -3548,12 +4546,20 @@ vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
         // ensure_reg_key/_lit 槽），直接 mem 绑定 int64 参数。
         // 可观察链（vthread·run 子链，printstack 检视）不走此路径——字面量实参
         // 须落 _lit 槽（05-printstack 的 `int64:3` 渲染依赖）。
-        for (int i = 1; i < ins.nrd; i++)
-            if (!bind_arg(-i, &f.regs[ins.rd[i]], "", "int64", Wire{}))
+        for (int i = 1; i < ins.nrd; i++) {
+            const std::string& rt =
+                site.ready && site.read_types_ok[i] ? site.read_types[i]
+                                                    : std::string("int64");
+            if (!bind_arg(-i, &f.regs[ins.rd[i]], "", rt, Wire{}))
                 return Outcome::Error;
-        for (int i = 1; i <= ins.nwr; i++)
-            if (!bind_arg(i, &f.regs[ins.wr[i - 1]], "", "int64", Wire{}))
+        }
+        for (int i = 1; i <= ins.nwr; i++) {
+            const std::string& wt =
+                site.ready && site.write_types_ok[i] ? site.write_types[i]
+                                                     : std::string("int64");
+            if (!bind_arg(i, &f.regs[ins.wr[i - 1]], "", wt, Wire{}))
                 return Outcome::Error;
+        }
         if (mem_src_n)
             std::memcpy(nfc.arg_src, mem_src,
                         static_cast<std::size_t>(mem_src_n) * sizeof(Register*));
@@ -3603,10 +4609,44 @@ vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
                 aliased = true;
                 break;
             }
-        if (aliased)
+        if (aliased) {
+            // If this kvspace frame forwarded its own `*[0,k]` write-param to a pure-memory
+            // callee, flush the updated cached value back to the outer caller's kvspace slot.
+            Register& dr = f.regs[ins.wr[i]];
+            // Viewed slots were already updated in place via `store_i64_slot` / `*body`.
+            if (!f.mem_frame && !dr.dst_ptr && dr.desc_ref &&
+                dr.desc_ref->vclass == RegDesc::VarClass::ParamPtr &&
+                dr.desc_ref->param_k > 0 && !dr.key.empty() &&
+                (dr.fast_i64 || dr.fast_bool) && !(dr.view_ok && dr.body)) {
+                const std::uint8_t b = dr.fb ? 1 : 0;
+                const std::uint8_t* body =
+                    dr.fast_i64 ? reinterpret_cast<const std::uint8_t*>(&dr.fv) : &b;
+                std::uint8_t* wb = nullptr;
+                std::uint64_t wl = 0;
+                char be[256] = {};
+                const bool wok =
+                    kvspaceXvalueHeadNewScalar(0, body, dr.fast_i64 ? 8 : 1,
+                                               dr.fast_i64 ? "int64" : "bool", &wb,
+                                               &wl) == 0 &&
+                    wb &&
+                    kvspaceSetValue(f.h, dr.key.c_str(), wb,
+                                    static_cast<std::uint32_t>(wl), be, sizeof be) == 0;
+                std::free(wb);
+                if (wok)
+                    dr.kv_live = true;
+                dr.view_ok = false;
+                dr.body = nullptr;
+                dr.resolved = false;
+                if (!wok) {
+                    *err = "call: write param store failed: " + dr.key;
+                    return Outcome::Error;
+                }
+            }
             continue;
+        }
         Register* wr = &f.regs[ins.wr[i]];
         do {
+            wr->kv_live = true;
             wr->fast_i64 = false;
             wr->fast_bool = false;
             wr->sc_ok = false;

@@ -11,10 +11,14 @@ lib kvlang/spec/词法/绝对路径字面量 {
 - 其余非分隔符字符构成段名（同样允许非 ASCII）。
 
 ```
-kvspace·set("/tmp/kvt·data", 42)
-kvspace·get("/tmp/kvt", "data") -> x
-kvspace·set("/tmp/kvt/a", 1)
+42 -> /tmp/kvt·data          // write
+/tmp/kvt·data -> x           // read
+"/tmp/kvt"·*k -> y           // path string as dynamic member base
 ```
+
+绝对路径字面量**不带引号**。带引号的 `"/tmp/kvt·data"` 是字符串字面量：作读参时得到的是这串文本本身，
+即使它以 `/` 开头、含 `·` 也不会被当作路径去读（`=` 是值拷贝，见 [[成员访问]] §读解引用链）。字符串
+作路径使用的场合是显式的：成员基座 `"/a"·*k`、以路径为参数的 native（`kvspace·listlen("/dir/")` 等）。
 
 路径的完整寻址语义见 [[寻址与命名]]；本节只界定其词法形态。裸 `/`（其后不接字母/数字/下划线，且非
 `//`、`/*`）不构成路径，见 [[运算符基础]]。

@@ -311,8 +311,14 @@ static inline uint32_t xh_body_len(const uint8_t *d) {
 static inline bool kvlangXvalueNone(const kvlangXvalue_t *v) {
     if (!v->bytes || v->length < KVSPACE_XVALUE_HEAD_LEN)
         return true;
-    /* v2：len 0 且 非 ptr/ext = None；带 body 的值恒非 None。 */
-    return xh_is_none(v->bytes);
+    /* `None` iff empty body, non-PTR/EXT ref, and `langtype` is empty, `"None"`, or `*T`
+     * (null pointer in a Ptr slot). Other empty-body typed values (empty strings/arrays,
+     * map/struct markers, `def` headers) are concrete values, not `None`. */
+    if (!xh_is_none(v->bytes))
+        return false;
+    uint32_t n = v->langtype_len;
+    return n == 0 || v->langtype[0] == '*' ||
+           (n == 4 && memcmp(v->langtype, "None", 4) == 0);
 }
 static inline void kvlangXvalueZero(kvlangXvalue_t *v) {
     v->bytes = NULL;
@@ -320,6 +326,27 @@ static inline void kvlangXvalueZero(kvlangXvalue_t *v) {
     v->langtype[0] = 0;
     v->langtype_len = 0;
 }
+
+/* Return the first `·` if `desc` is a dynamic member write `base·*key`, else NULL. */
+static inline const char *kvlangRwirDynMember(const char *desc) {
+    const char *dot = desc ? strstr(desc, MEMBER_SEP) : NULL;
+    return dot && dot != desc && dot[MEMBER_SEP_LEN] == '*' ? dot : NULL;
+}
+
+/* Format a dynamic member key value (`intN` signed decimal, `uintN` unsigned decimal,
+ * `bool` true/false, finite `float32`/`float64` shortest round-trip `%.*g` with `.0` suffix,
+ * `char/*` verbatim; non-finite floats and other types write `"TypeError: ..."` to `err` and
+ * return `KVLANG_KEYTEXT_TYPE`; insufficient `cap` returns `KVLANG_KEYTEXT_OVERFLOW`). */
+#define KVLANG_KEYTEXT_OVERFLOW ((size_t)-1)
+#define KVLANG_KEYTEXT_TYPE ((size_t)-2)
+__attribute__((visibility("hidden"))) size_t
+kvlangMemberKeyText(const kvlangXvalue_t *v, char *buf, size_t cap, char *err,
+                    size_t errsz);
+/* Like `kvlangMemberKeyText`, returning a `malloc`-allocated string or NULL on TypeError. */
+__attribute__((visibility("hidden"))) char *
+kvlangMemberKeyTextDup(const kvlangXvalue_t *v, char *err, size_t errsz);
+/* Thread-local reason for the most recent dynamic member write key failure ("" if none). */
+__attribute__((visibility("hidden"))) const char *kvlangRwirDynKeyError(void);
 
 /* langtype 缓存指针 + 字节数；None → 空串 / 0。 */
 static inline const char *xh_langtype_of(const kvlangXvalue_t *v) {
@@ -430,6 +457,12 @@ static inline bool kvlangLangtypeIsNum(int id) {
 static inline bool kvlangLangtypeIsChar(int id) {
     return id >= KVLANG_LT_CHAR_UTF32 && id <= KVLANG_LT_CHAR_ASCII;
 }
+/* True iff `type` is a fixed-width numeric scalar (`int8..64`, `uint8..64`, `float32/64`),
+ * which rejects `None` on write or parameter binding. */
+static inline bool kvlangTypeIsNumScalar(const char *type) {
+    return type && type[0] &&
+           kvlangLangtypeIsNum(kvlangLangtypeId(type, strlen(type)));
+}
 static inline int kvlangLangtypeIntWidth(int id) {
     if (id >= KVLANG_LT_INT8 && id <= KVLANG_LT_INT64)
         return 8 << (id - KVLANG_LT_INT8);
@@ -478,10 +511,10 @@ __attribute__((visibility("hidden"))) int
 kvlangXvalueCoerce(const char *type, const kvlangXvalue_t *v, uint8_t *buf,
                    size_t cap, kvlangXvalue_t *out);
 
-/* 声明类型 ty 的元素/成员值 kind（`[]T`/`[N]T` → T，map `k·v` → v）；非容器 NULL。 */
+/* Extract element/value kind from container type `ty` (`[]T`/`[N]T -> T`, `k·v -> v`), or NULL. */
 static inline const char *kvlangDeclElemKind(const char *ty, char *buf,
                                              size_t cap) {
-    if (!ty || !ty[0] || !strchr(ty, '['))
+    if (!ty || !ty[0] || strchr(ty, '|') || !strchr(ty, '['))
         return NULL;
     const char *p = strstr(ty, MEMBER_SEP);
     if (p)
@@ -545,6 +578,47 @@ static inline void kvlangXvalueSetLangtype(kvlangXvalue_t *v, const char *kind,
     v->langtype_len = len;
 }
 
+/* Bounded parse of tag=1 `langtype` from wire trailing attr (`@8 + body_len`) within `v->length`;
+ * leaves `langtype` empty if absent or truncated. */
+static inline void kvlangXvalueLangtypeFromWire(kvlangXvalue_t *v) {
+    v->langtype[0] = 0;
+    v->langtype_len = 0;
+    const uint8_t *d = v->bytes;
+    if (!d || v->length < KVSPACE_XVALUE_HEAD_LEN + 2u)
+        return;
+    uint64_t at = xh_len(d);
+    if (at > (uint64_t)v->length - KVSPACE_XVALUE_HEAD_LEN - 2u)
+        return;
+    at += KVSPACE_XVALUE_HEAD_LEN;
+    uint32_t alen = (uint32_t)d[at] | ((uint32_t)d[at + 1] << 8);
+    if (alen < 2u || at + alen > v->length)
+        return;
+    uint64_t p = at + 2u, end = at + alen;
+    while (p + 3u <= end) {
+        uint32_t rl = (uint32_t)d[p + 1] | ((uint32_t)d[p + 2] << 8);
+        if (p + 3u + rl > end)
+            return;
+        if (d[p] == KVSPACE_XVALUE_ATTR_TAG_LANGTYPE) {
+            kvlangXvalueSetLangtype(v, (const char *)d + p + 3, rl);
+            return;
+        }
+        p += 3u + rl;
+    }
+}
+/* Assign borrowed wire slice and populate `langtype` cache from wire attr. */
+static inline void kvlangXvalueSetWire(kvlangXvalue_t *v, uint8_t *bytes,
+                                       uint32_t len) {
+    v->bytes = bytes;
+    v->length = len;
+    kvlangXvalueLangtypeFromWire(v);
+}
+/* Borrow `src` within the same instruction, copying both wire slice and `langtype` cache. */
+static inline void kvlangXvalueBorrow(kvlangXvalue_t *dst,
+                                      const kvlangXvalue_t *src) {
+    dst->bytes = src->bytes;
+    dst->length = src->length;
+    kvlangXvalueSetLangtype(dst, src->langtype, src->langtype_len);
+}
 /* P1b4-a4：typed_core 行的标量视图——kind 由行静态签名定型，跳过 langtype
  * 解析。bytes 为空（None/空值）返回 false；调用方不得读成 0。 */
 static inline bool kvlangXvalueScalarTyped(const kvlangXvalue_t *v, int kid,
@@ -966,6 +1040,27 @@ kvlangBodyInvalidateKind(const char *key, const uint8_t *langtype,
                          uint32_t langtype_len);
 __attribute__((visibility("hidden"))) void
 kvlangBodyInvalidateTree(const char *prefix);
+
+/* Subtree boundary for `DelTree`/`CpTree`: keys equal to normalized `P` (after stripping one
+ * trailing `/` or `·`) or followed by `/`, `·` (U+00B7), or `‥` (U+2025). */
+static inline size_t kvlangSubtreeBaseLen(const char *prefix) {
+    size_t n = strlen(prefix);
+    if (n >= 1 && prefix[n - 1] == '/')
+        return n - 1;
+    if (n >= MEMBER_SEP_LEN &&
+        memcmp(prefix + n - MEMBER_SEP_LEN, MEMBER_SEP, MEMBER_SEP_LEN) == 0)
+        return n - MEMBER_SEP_LEN;
+    return n;
+}
+static inline bool kvlangKeyInSubtree(const char *key, const char *base,
+                                      size_t base_len) {
+    if (strncmp(key, base, base_len) != 0)
+        return false;
+    const char *r = key + base_len;
+    return r[0] == 0 || r[0] == '/' ||
+           strncmp(r, MEMBER_SEP, MEMBER_SEP_LEN) == 0 ||
+           strncmp(r, RUNTIME_MEMBER_SEP, sizeof RUNTIME_MEMBER_SEP - 1) == 0;
+}
 
 /* 指令派发表：native 项 + 表尾 route。row 加载期定型 handler_id，执行期一次间接调用。 */
 typedef int (*kvlangBuiltinFn)(kvlangFrame_t *f);

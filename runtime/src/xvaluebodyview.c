@@ -39,8 +39,7 @@ kvlangPcViewInit(kvlangPcViewState *st) {
     memset(st, 0, sizeof *st);
 }
 
-/* 取 view 并校验固定档与规范形状；成功写入 st->view。
- * v2：SLACK inline 固定头，值内 attr 区自描述（‥pc 系统键 = 空 attr）。 */
+/* Acquire and validate `st->view` (v2 SLACK inline head with empty attr `[02 00]` for `‥pc`). */
 static bool pc_view_adopt(kvlangPcViewState *st, kvspace_t *kv,
                           kvspaceKeyOff *ko) {
     kvspaceXvalueBodyView_t nv;
@@ -50,6 +49,9 @@ static bool pc_view_adopt(kvlangPcViewState *st, kvspace_t *kv,
         nv.body_cap < PC_FIXED_CAP ||
         xh_storetype(nv.head) != KVSPACE_XVALUE_ST_SLACK ||
         xh_ptr(nv.head) != KVSPACE_XVALUE_PTR_INLINE)
+        return false;
+    uint64_t a = xh_len(nv.head);
+    if (a + 2 > nv.body_cap || nv.body[a] != 2 || nv.body[a + 1] != 0)
         return false;
     st->view = nv;
     return true;
@@ -65,22 +67,36 @@ static int pc_fallback(kvlangPcViewState *st) {
 /* 首次：WriteNewPlace 一次预留 PC_FIXED_CAP 并写实际值（不得用 SetValue）。 */
 static bool pc_fixed_init(kvlangFrame_t *f, kvspaceKeyOff *ko, const char *pc,
                           uint32_t len, kvlangPcViewState *st) {
-    if (len > PC_FIXED_CAP)
+    if ((uint64_t)len + 2 > PC_FIXED_CAP)
         return false;
     uint8_t *body = NULL;
     char err[256];
-    /* ‥pc 是系统键（末段含 ‥）：无类型，langtype 传空串（空 attr）。 */
+    /* `‥pc` is untyped (empty attr `[02 00]`): reserve `PC_FIXED_CAP` to get `body_cap >= 1024`,
+     * then write the actual length and trailing `[02 00]` into the view. */
     if (kvspaceWriteNewPlace(f->kvspace->handle, ko->key, KVSPACE_REF_INLINE,
                              KVSPACE_STORETYPE_SLACK,
-                             len, PC_FIXED_CAP, "", &body, err, sizeof err) !=
-            0 ||
+                             PC_FIXED_CAP, PC_FIXED_CAP, "", &body, err,
+                             sizeof err) != 0 ||
         !body)
         return false;
-    memcpy(body, pc, len);
     kvlangPcCacheInvalidate(); /* box 可能被移动/重建 */
     if (kvspaceResolveRef(f->kvspace->handle, ko->key, &ko->off) != 0)
         return false;
     ko->resolved = true;
+    kvspaceXvalueBodyView_t nv;
+    if (kvspaceXvalueBodyView(f->kvspace->handle, &ko->off, ko->key, &nv) != 0 ||
+        !nv.head || nv.headlen != KVSPACE_XVALUE_HEAD_LEN ||
+        nv.body_cap < PC_FIXED_CAP)
+        return false;
+    memcpy(nv.body, pc, len);
+    nv.body[len] = 2;
+    nv.body[len + 1] = 0;
+    kvspaceXvalueHead hd = {
+        .storetype = KVSPACE_XVALUE_ST_SLACK,
+        .ptr = KVSPACE_XVALUE_PTR_INLINE,
+    };
+    kvspaceXvalueHeadSetLen(&hd, len);
+    memcpy(nv.head, &hd, sizeof hd);
     return pc_view_adopt(st, f->kvspace, ko);
 }
 
@@ -101,7 +117,7 @@ kvlangPcViewWrite(kvlangFrame_t *f, kvspaceKeyOff *ko, const char *pc,
             return 1; /* 本次值已由 WriteNewPlace 写入 */
         }
     }
-    if (len > st->view.body_cap)
+    if ((uint64_t)len + 2 > st->view.body_cap)
         return pc_fallback(st);
     if ((++st->recheck & 127u) == 0) {
         /* 删除/重建检测：强制重解析 keyoff 再取 view。 */
@@ -110,19 +126,21 @@ kvlangPcViewWrite(kvlangFrame_t *f, kvspaceKeyOff *ko, const char *pc,
             return pc_fallback(st);
     }
     uint8_t *h = st->view.head;
-    /* 值内 attr 区 @8+len 随 body 长移动：len 不变才可原地写 head+body
-     * （attr 位置不动）；长度变化作废视图、回退整值写。 */
-    if (xh_len(h) != len) {
-        st->ready = false;
-        return 0;
-    }
+    uint64_t old_len = xh_len(h);
+    if (xh_storetype(h) != KVSPACE_XVALUE_ST_SLACK ||
+        xh_ptr(h) != KVSPACE_XVALUE_PTR_INLINE ||
+        old_len + 2 > st->view.body_cap ||
+        st->view.body[old_len] != 2 || st->view.body[old_len + 1] != 0)
+        return pc_fallback(st);
+    memcpy(st->view.body, pc, len);
+    st->view.body[len] = 2;
+    st->view.body[len + 1] = 0;
     kvspaceXvalueHead hd = {
         .storetype = KVSPACE_XVALUE_ST_SLACK,
         .ptr = KVSPACE_XVALUE_PTR_INLINE,
     };
     kvspaceXvalueHeadSetLen(&hd, len);
     memcpy(h, &hd, sizeof hd);
-    memcpy(st->view.body, pc, len);
     return 1;
 }
 
@@ -144,6 +162,7 @@ static bool rv_promote(kvspace_t *kv, kvlangBoundCell_t *cell) {
     kvlangBodySlot *slot = &rs->slot;
     slot->key = cell->key;
     slot->kind = kvlangLangtypeKind(cell->view.kind);
+    slot->kind_len = slot->kind ? (uint8_t)strlen(slot->kind) : 0;
     slot->width = cell->view.width;
     slot->off = &cell->off;
     /* 读 cell 的 key 是帧内绝对路径；显式取 /vthread/<vid> 前缀交给
@@ -186,8 +205,9 @@ static bool rv_recheck(kvspace_t *kv, kvlangBoundCell_t *cell) {
         return false;                  /* -2/-1：回退 */
     if (kvspaceViewRefresh(kv->handle, &rs->token, cell->key) != 0)
         return false;
-    if (!kvlangBodyAdopt(&rs->slot, rs->token.head,
-                         rs->token.headlen + rs->token.value_len))
+    uint32_t tcap =
+        rs->token.cap > UINT32_MAX ? UINT32_MAX : (uint32_t)rs->token.cap;
+    if (!kvlangBodyAdopt(&rs->slot, rs->token.head, tcap))
         return false;
     return true;
 }
@@ -277,7 +297,16 @@ kvlangReadViewTry(kvspace_t *kv, struct kvlangBoundCell *cell, uint32_t pack,
 #ifdef KV_COUNT
     kvCReadViewHit++;
 #endif
+#ifdef KV_DEBUG_TYPES
+    {
+        kvlangReadViewSlot *rs = (kvlangReadViewSlot *)s;
+        uint32_t cap =
+            rs->token.cap > UINT32_MAX ? UINT32_MAX : (uint32_t)rs->token.cap;
+        kvlangXvalueSetWire(out, s->head, cap);
+    }
+#else
     out->bytes = s->head;
     out->length = s->headlen + s->width;
+#endif
     return 1;
 }

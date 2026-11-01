@@ -10,24 +10,24 @@
 //   profile = {"active":true,"age":42,"name":"alice","nums":[1,2,3],"score":3.14}
 //   map = [10,20,30]
 //   tags = ["a","b","c"]
-rwfunc main() -> () {
-	profile = {}
-	kvspace·set(profile, "name", "alice")
-	kvspace·set(profile, "age", 42)
-	kvspace·set(profile, "active", true)
-	kvspace·set(profile, "score", 3.14)
-	nums = [1, 2, 3]
-	kvspace·set(profile, "nums", nums)
+struct Profile {
+	name:[]char/utf32=""
+	age:int64=0
+	active:bool=false
+	score:float64=0.0
+	nums:[3]int64=[0, 0, 0]
+}
+
+rwfunc test() -> () {
+	profile:Profile = {name="alice" age=42 active=true score=3.14 nums=[1, 2, 3]}
 	json·to(profile) -> j1
 	println("profile =", j1)
 
-	a = {10, 20, 30}
+	a:[int64]·int64 = {10, 20, 30}
 	json·to(a) -> j2
 	println("map =", j2)
 
-	tags = {"a", "b", "c"}
+	tags:[int64]·[]char/utf32 = {"a", "b", "c"}
 	json·to(tags) -> j3
 	println("tags =", j3)
 }
-
-main()

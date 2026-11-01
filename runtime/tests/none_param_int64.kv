@@ -1,0 +1,17 @@
+// Binding `None` to a fixed-width numeric read-param raises `TypeError`, whereas `*T` accepts `None`.
+struct N {
+	v:int64=0
+}
+rwfunc f(x:int64) -> () {
+	println("f x==None:", x == None)
+}
+rwfunc g(p:*N) -> () {
+	println("g p==None:", p == None)
+}
+rwfunc test() -> () {
+	n = None
+	g(n)
+	q:*N = None
+	println("q==None:", q == None)
+	f(n)
+}

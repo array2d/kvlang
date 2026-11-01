@@ -85,22 +85,20 @@ impl FuncSig {
             if i > 0 {
                 sb.push_str(", ");
             }
+            // Always emit `:` even for unconstrained `a:` so format/printlib output re-parses.
             sb.push_str(&p.name);
-            if !p.ty.is_empty() {
-                sb.push(':');
-                sb.push_str(&p.ty);
-            }
+            sb.push(':');
+            sb.push_str(&p.ty);
         }
         sb.push_str(") -> (");
         for (i, p) in self.returns.iter().enumerate() {
             if i > 0 {
                 sb.push_str(", ");
             }
+            // Always emit `:` even for unconstrained `a:` so format/printlib output re-parses.
             sb.push_str(&p.name);
-            if !p.ty.is_empty() {
-                sb.push(':');
-                sb.push_str(&p.ty);
-            }
+            sb.push(':');
+            sb.push_str(&p.ty);
         }
         sb.push(')');
         sb
@@ -348,6 +346,24 @@ impl Expr {
             }
             return self.val.clone();
         }
+        // Render `MEMBER_READ_OP(base, seg...)` back as `base·seg...` rather than unparseable `=(...)`.
+        if self.op == MEMBER_READ_OP && self.args.len() >= 2 {
+            let base = &self.args[0];
+            let bare_base = base.is_leaf()
+                || base.op == MEMBER_READ_OP
+                || (symbol::lookup(&base.op).precedence == 0
+                    && !is_operator_char(base.op.as_bytes()[0]));
+            let mut s = if bare_base {
+                base.string_prec(200)
+            } else {
+                format!("({})", base.string_prec(0))
+            };
+            for seg in &self.args[1..] {
+                s.push_str(super::keytree::MEMBER_SEP);
+                s.push_str(&member_seg_text(seg));
+            }
+            return s;
+        }
         let p = symbol::lookup(&self.op).precedence;
         if p > 0 && self.args.len() == 2 {
             let left = self.args[0].string_prec(p);
@@ -410,11 +426,16 @@ impl Instruction {
         // 解引用：`*<叶>` → 读参/写槽名 `*name`（与形参槽 `*[0,±k]` 同一约定，runtime 按该槽里的
         // Ptr 解引用到目标）。非叶操作数由 lower 先展开成临时槽，故此处必为叶。
         if e.op == DEREF_OP {
-            let a = match e.args.first() {
-                Some(a) if a.is_leaf() => a,
-                _ => panic!("flat: `*` 解引用要求叶操作数（lower 未展开？）"),
-            };
-            return ("=".to_string(), vec![format!("*{}", a.val)]);
+            match e.args.first() {
+                Some(a) if a.is_leaf() => return ("=".to_string(), vec![format!("*{}", a.val)]),
+                // Before lowering, `*(a + 1)` or `*f(x)` has a non-leaf operand; return as a regular op.
+                _ => {
+                    return (
+                        DEREF_OP.to_string(),
+                        e.args.iter().map(|a| a.to_string()).collect(),
+                    )
+                }
+            }
         }
         let opcode = e.op.clone();
         let reads: Vec<String> = e
@@ -890,4 +911,46 @@ fn raw_string_lit(v: &str) -> String {
 
 fn is_operator_char(c: u8) -> bool {
     symbol::scanner_one_char_ops().contains(&c)
+}
+
+/// Render a member-read segment so it round-trips through the parser:
+/// dynamic variable -> `*k`; static string key -> bare ident/number/tuple when single-token, else quoted.
+fn member_seg_text(seg: &Expr) -> String {
+    if !seg.is_leaf() {
+        return format!("*({seg})");
+    }
+    if seg.quote == 0 {
+        if matches!(seg.lit, LitKind::LitInt | LitKind::LitFloat) {
+            return seg.val.clone();
+        }
+        return format!("{DEREF_OP}{}", seg.val);
+    }
+    let v = seg.val.as_str();
+    if seg.lit != LitKind::LitRawString && is_bare_member_key(v) {
+        return v.to_string();
+    }
+    format!("\"{}\"", escape_string(v))
+}
+
+fn is_bare_member_key(v: &str) -> bool {
+    let b = v.as_bytes();
+    let Some(&c0) = b.first() else {
+        return false;
+    };
+    if b.iter().all(u8::is_ascii_digit) {
+        return true;
+    }
+    if c0 == b'[' {
+        // Tuple key: emit bare if composed solely of digits, commas, dots, and minus signs.
+        return v.ends_with(']')
+            && v[1..v.len() - 1]
+                .bytes()
+                .all(|c| c.is_ascii_digit() || matches!(c, b',' | b'.' | b'-'));
+    }
+    let ident_start = c0.is_ascii_alphabetic() || c0 == b'_' || (c0 >= 0x80 && !v.starts_with('·'));
+    ident_start
+        && !super::scanner::has_token_delim(v)
+        && !v.contains(['"', '\'', '.'])
+        && !symbol::unicode_ops().iter().any(|op| v.contains(op.as_str()))
+        && !matches!(v, "return" | "if" | "else" | "for" | "while" | "break" | "continue")
 }

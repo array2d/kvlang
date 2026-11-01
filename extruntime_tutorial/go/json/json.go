@@ -5,52 +5,13 @@ package json
 /*
 // 后端（shm→kvspace-c / redis|fs→kvspace_durable）由 libkvspace dispatch 前端按 DSN 选，
 // 经 CGO_LDFLAGS 注入。
-#cgo CFLAGS: -I${SRCDIR}/../../../runtime/include
-#cgo LDFLAGS: -L${SRCDIR}/../../../bin -lkvlang_runtimec2 -lkvspace -Wl,-rpath,${SRCDIR}/../../../bin
+#cgo CFLAGS: -I${SRCDIR}/../../../include -I${SRCDIR}/../../../runtime/include
+#cgo LDFLAGS: -L${SRCDIR}/../../../lib -L${SRCDIR}/../../../bin -lkvlang_runtimec2 -lkvspace -Wl,-rpath,${SRCDIR}/../../../lib -Wl,-rpath,${SRCDIR}/../../../bin
 #include "kvlang_runtime.h"
+#include <kvspace/kvspace.h>
+#include <kvspace/xvalue_head.h>
 #include <stdint.h>
 #include <stdlib.h>
-
-// kvspace 正典 ABI（30 符号）。读恒借用（不得 free）；codec 产出为前端 malloc（libc free）。
-extern void *kvspaceConnect(const char *dsn);
-extern void  kvspaceClose(void *h);
-extern int   kvspaceGet(void *h, const char *key, int resolve, uint8_t **out, uint32_t *out_len);
-extern int   kvspaceWriteInPlace(void *h, const char *key, int resolve, uint32_t body_len,
-                                 uint8_t **body, char *err, uint32_t err_cap);
-extern int   kvspaceWriteNewPlace(void *h, const char *key, uint8_t ref, uint8_t storetype,
-                                  uint8_t ro, uint32_t vid, uint32_t body_len,
-                                  uint64_t body_cap,
-                                  uint8_t **body, char *err, uint32_t err_cap);
-extern int   kvspaceSetValue(void *h, const char *key, const uint8_t *value, uint32_t value_len,
-                              char *err, uint32_t err_cap);
-extern int   kvspaceXvalueHeadNewSlack(const uint8_t *data, uint64_t data_len, uint64_t cap,
-                                        uint8_t **out, uint64_t *out_len);
-extern int   kvspaceListLen(void *h, const char *prefix, int expand_ext, int resolve, int32_t *out_count);
-extern int   kvspaceListAt(void *h, const char *prefix, int expand_ext, int resolve, int32_t idx,
-                           uint8_t *buf, uint32_t buf_cap, uint32_t *out_len);
-extern int   kvspaceDel(void *h, const char *const *keys, uint32_t nkeys, char *err, uint32_t err_cap);
-extern int   kvspaceDelTree(void *h, const char *prefix, char *err, uint32_t err_cap);
-extern int   kvspaceMkindex(void *h, const char *path, uint32_t capacity, char *err, uint32_t err_cap);
-extern int   kvspaceXvalueEncode(const char *kind, const uint8_t *raw, uint32_t raw_len,
-                              const int32_t *dims, int32_t ndim, uint8_t **out, uint32_t *out_len);
-extern int   kvspaceNewChar(const uint8_t *bytes, uint32_t len, uint8_t **out, uint32_t *out_len);
-extern const char *kvspaceConst(const char *name);
-
-// XValue 头（逐字段对齐 kvspace/include/kvspace/kvspace.h）：三正交轴 ref×storetype×langtype。
-typedef struct {
-    uint16_t headlen;
-    uint8_t  ref;
-    uint8_t  storetype;
-    uint8_t  ro;
-    uint32_t vid;
-    int32_t  body_len;
-    int32_t  ndim;
-    int32_t  dims[8];
-    char     langtype[256];
-    int32_t  langtype_len;
-    int32_t  body_offset;
-} kvspaceHead_t;
-extern int kvspaceDecodeHead(const uint8_t *data, uint32_t data_len, kvspaceHead_t *out);
 */
 import "C"
 
@@ -64,14 +25,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 	"unsafe"
 )
 
-// storetype：容器值恒 index（spec map容器）；extindex 同 index 系，读判共用。
 const (
-	storetypeIndex    = 3
-	storetypeExtIndex = 4
-	refPtr            = 1
+	storetypeShort = C.KVSPACE_XVALUE_ST_SHORT
+	refPtr         = C.KVSPACE_REF_PTR
 )
 
 // ── cgo 封装 ────────────────────────────────────────────────────────
@@ -88,11 +48,69 @@ func gostr(s *C.char) string {
 
 func headOf(data []byte) (C.kvspaceHead_t, bool) {
 	var h C.kvspaceHead_t
-	if len(data) == 0 {
+	if len(data) < int(C.KVSPACE_XVALUE_HEAD_LEN) {
 		return h, false
 	}
-	if C.kvspaceDecodeHead((*C.uint8_t)(unsafe.Pointer(&data[0])), C.uint32_t(len(data)), &h) != 0 {
+	var bl uint64
+	for i := 5; i >= 0; i-- {
+		bl = (bl << 8) | uint64(data[i])
+	}
+	if bl > 0x7fffffff || uint64(C.KVSPACE_XVALUE_HEAD_LEN)+bl > uint64(len(data)) {
 		return h, false
+	}
+	h.headlen = C.uint16_t(C.KVSPACE_XVALUE_HEAD_LEN)
+	h.body_offset = C.int32_t(C.KVSPACE_XVALUE_HEAD_LEN)
+	h.body_len = C.int32_t(bl)
+	h.storetype = C.uint8_t(data[6])
+	h.ref = C.uint8_t(data[7])
+
+	var lt string
+	apos := int(C.KVSPACE_XVALUE_HEAD_LEN) + int(bl)
+	if apos+2 <= len(data) {
+		alen := int(binary.LittleEndian.Uint16(data[apos : apos+2]))
+		if alen >= 2 && apos+alen <= len(data) {
+			p := apos + 2
+			end := apos + alen
+			for p+3 <= end {
+				tag := data[p]
+				rlen := int(binary.LittleEndian.Uint16(data[p+1 : p+3]))
+				if p+3+rlen > end {
+					break
+				}
+				if tag == C.KVSPACE_XVALUE_ATTR_TAG_LANGTYPE {
+					lt = string(data[p+3 : p+3+rlen])
+					break
+				}
+				p += 3 + rlen
+			}
+		}
+	}
+	if len(lt) > 0 {
+		n := len(lt)
+		if n >= len(h.langtype) {
+			n = len(h.langtype) - 1
+		}
+		for i := 0; i < n; i++ {
+			h.langtype[i] = C.char(lt[i])
+		}
+		h.langtype[n] = 0
+		h.langtype_len = C.int32_t(n)
+		if !strings.Contains(lt, sep) && strings.HasPrefix(lt, "[") {
+			if closeIdx := strings.IndexByte(lt, ']'); closeIdx > 1 {
+				parts := strings.Split(lt[1:closeIdx], ",")
+				ndim := 0
+				for _, part := range parts {
+					if ndim >= 8 {
+						break
+					}
+					if d, err := strconv.Atoi(strings.TrimSpace(part)); err == nil {
+						h.dims[ndim] = C.int32_t(d)
+						ndim++
+					}
+				}
+				h.ndim = C.int32_t(ndim)
+			}
+		}
 	}
 	return h, true
 }
@@ -151,36 +169,14 @@ func get(c unsafe.Pointer, key string, resolve int) string {
 	return string(data[bo : bo+bl])
 }
 
-// writeAttr：写 `x‥langtype` attr key（attr 先落、x 后落——调用方须在写主值前调用）。
-func writeAttr(c unsafe.Pointer, key, langtype string) {
-	if langtype == "" {
-		return
-	}
-	ck := cstr(key + "‥langtype")
+// writeBody writes (ref, storetype, langtype) + body: tries WriteInPlace when key and shape match,
+// falls back to WriteNewPlace if unavailable (e.g. missing key or -2 on durable),
+// and otherwise uses single-key kvspaceXvalueHeadReserve + kvspaceSetValue.
+func writeBody(c unsafe.Pointer, key string, ref, storetype C.uint8_t, langtype string, body []byte) {
+	ck := cstr(key)
 	defer C.free(unsafe.Pointer(ck))
 	cl := cstr(langtype)
 	defer C.free(unsafe.Pointer(cl))
-	var lv *C.uint8_t
-	var lvn C.uint64_t
-	var err [256]C.char
-	if C.kvspaceXvalueHeadNewSlack((*C.uint8_t)(unsafe.Pointer(cl)), C.uint64_t(len(langtype)),
-		C.uint64_t(len(langtype)), &lv, &lvn) != 0 || lvn > 0xffffffff {
-		if lv != nil {
-			C.free(unsafe.Pointer(lv))
-		}
-		return
-	}
-	C.kvspaceSetValue(c, ck, lv, C.uint32_t(lvn), &err[0], 256)
-	C.free(unsafe.Pointer(lv))
-}
-
-// writeBody：写即构造——按三正交轴 (ref, storetype, ro, vid, langtype) + body 向后端要
-// body 偏移指针后直接写字节。key 已存在且三轴与 body_len 全同 → WriteInPlace（原 box 就地）；
-// 否则 WriteNewPlace（新 box）。langtype attr key 由本层（上层）写，kvspace 不代写。
-func writeBody(c unsafe.Pointer, key string, ref, storetype, ro C.uint8_t, vid C.uint32_t,
-	langtype string, body []byte) {
-	ck := cstr(key)
-	defer C.free(unsafe.Pointer(ck))
 	n := C.uint32_t(len(body))
 	var dst *C.uint8_t
 	var err [256]C.char
@@ -189,16 +185,42 @@ func writeBody(c unsafe.Pointer, key string, ref, storetype, ro C.uint8_t, vid C
 		cur.ref == ref && cur.storetype == storetype &&
 		int(cur.body_len) == len(body) && langtypeOf(&cur) == langtype {
 		place = C.kvspaceWriteInPlace(c, ck, 0, n, &dst, &err[0], 256)
+	}
+	if place != 0 {
+		place = C.kvspaceWriteNewPlace(c, ck, ref, storetype, n, C.uint64_t(n), cl, &dst, &err[0], 256)
+	}
+	if place == 0 {
+		if len(body) > 0 && dst != nil {
+			copy(unsafe.Slice((*byte)(unsafe.Pointer(dst)), len(body)), body)
+		}
+		return
+	}
+	var wire *C.uint8_t
+	var wireLen C.uint64_t
+	var rc C.int
+	if ref == refPtr {
+		var bp *C.uint8_t
+		if len(body) > 0 {
+			bp = (*C.uint8_t)(unsafe.Pointer(&body[0]))
+		}
+		rc = C.kvspaceXvalueHeadNewPtr(bp, n, cl, &wire, &wireLen)
+	} else if ref == 0 && storetype == 0 && len(body) == 0 && langtype == "" {
+		rc = C.kvspaceXvalueHeadNewNone(&wire, &wireLen)
 	} else {
-		// 新 box 容量即 body 长度（body_cap 为预留容量）。attr 先落，主值后落。
-		writeAttr(c, key, langtype)
-		if C.kvspaceWriteNewPlace(c, ck, ref, storetype, ro, vid, n, C.uint64_t(n), &dst, &err[0], 256) != 0 {
-			return
+		rc = C.kvspaceXvalueHeadReserve(storetype, C.uint64_t(len(body)), C.uint64_t(len(body)), cl, &wire, &wireLen)
+		if rc == 0 && wire != nil && len(body) > 0 {
+			bodyDst := unsafe.Add(unsafe.Pointer(wire), int(C.KVSPACE_XVALUE_HEAD_LEN))
+			copy(unsafe.Slice((*byte)(bodyDst), len(body)), body)
 		}
 	}
-	if len(body) > 0 && dst != nil {
-		copy(unsafe.Slice((*byte)(unsafe.Pointer(dst)), len(body)), body)
+	if rc != 0 || wire == nil || wireLen > 0xffffffff {
+		if wire != nil {
+			C.free(unsafe.Pointer(wire))
+		}
+		return
 	}
+	C.kvspaceSetValue(c, ck, wire, C.uint32_t(wireLen), &err[0], 256)
+	C.free(unsafe.Pointer(wire))
 }
 
 // setXValue：解 head 取三轴 + body，走写即构造。
@@ -212,12 +234,12 @@ func setXValue(c unsafe.Pointer, key string, xvalue []byte) {
 	if bo >= 0 && bl >= 0 && bo+bl <= len(xvalue) {
 		body = xvalue[bo : bo+bl]
 	}
-	writeBody(c, key, h.ref, h.storetype, h.ro, h.vid, langtypeOf(&h), body)
+	writeBody(c, key, h.ref, h.storetype, langtypeOf(&h), body)
 }
 
-// setNone：None（JSON null）落 storetype=NONE、langtype=""、body 空。
+// setNone stores None (JSON null) with storetype=SHORT, empty langtype, and empty body.
 func setNone(c unsafe.Pointer, key string) {
-	writeBody(c, key, 0, 0, 0, 0, "", nil)
+	writeBody(c, key, 0, 0, "", nil)
 }
 
 // list：前缀直接子项名（ListLen 定计数 + 逐 idx ListAt 取名，借用缓冲不 free）。
@@ -324,26 +346,43 @@ func parseXValue(data []byte) (kind string, raw []byte, arrLen int) {
 	return kind, raw, arrLen
 }
 
-// encodeXValue：类型化编码（唯一编码入口，委托 kvspace 正典 codec，不手拼 head）。
+// encodeXValue encodes a typed XValue via canonical kvspace v2 head constructors.
 func encodeXValue(kind string, raw []byte, dims []int32) []byte {
-	ck := cstr(kind)
-	defer C.free(unsafe.Pointer(ck))
+	lt := kind
+	if len(dims) > 0 {
+		parts := make([]string, len(dims))
+		for i, d := range dims {
+			parts[i] = strconv.Itoa(int(d))
+		}
+		lt = "[" + strings.Join(parts, ",") + "]" + kind
+	}
+	clt := cstr(lt)
+	defer C.free(unsafe.Pointer(clt))
 	var buf unsafe.Pointer
 	if len(raw) > 0 {
 		buf = C.CBytes(raw)
 		defer C.free(buf)
 	}
-	carr := make([]C.int32_t, len(dims))
-	for i, d := range dims {
-		carr[i] = C.int32_t(d)
-	}
-	var dp *C.int32_t
-	if len(dims) > 0 {
-		dp = &carr[0]
-	}
 	var out *C.uint8_t
-	var ol C.uint32_t
-	if C.kvspaceXvalueEncode(ck, (*C.uint8_t)(buf), C.uint32_t(len(raw)), dp, C.int32_t(len(dims)), &out, &ol) != 0 || out == nil {
+	var ol C.uint64_t
+	var rc C.int
+	if (kind == "" || kind == "None") && len(raw) == 0 && len(dims) == 0 {
+		rc = C.kvspaceXvalueHeadNewNone(&out, &ol)
+	} else if kind == "char" || strings.HasPrefix(kind, "char/") {
+		rc = C.kvspaceXvalueHeadNewSlack((*C.uint8_t)(buf), C.uint64_t(len(raw)), C.uint64_t(len(raw)), clt, &out, &ol)
+	} else if len(dims) > 0 && kind != kindMap && !strings.Contains(kind, sep) && !strings.HasPrefix(kind, "/") {
+		udims := make([]C.uint64_t, len(dims))
+		for i, d := range dims {
+			udims[i] = C.uint64_t(d)
+		}
+		rc = C.kvspaceXvalueHeadNewTensor(&udims[0], C.uint32_t(len(dims)), (*C.uint8_t)(buf), C.uint64_t(len(raw)), clt, &out, &ol)
+	} else {
+		rc = C.kvspaceXvalueHeadNewScalar(C.KVSPACE_XVALUE_ST_SHORT, (*C.uint8_t)(buf), C.uint32_t(len(raw)), clt, &out, &ol)
+	}
+	if rc != 0 || out == nil || ol == 0 || ol > 0xffffffff {
+		if out != nil {
+			C.free(unsafe.Pointer(out))
+		}
 		return nil
 	}
 	defer C.free(unsafe.Pointer(out)) // codec 产出为前端 malloc
@@ -369,9 +408,11 @@ func constructChar(raw []byte) []byte {
 	if len(raw) > 0 {
 		copy(unsafe.Slice((*byte)(buf), len(raw)), raw)
 	}
+	clt := cstr(fmt.Sprintf("[%d]char/utf8", utf8.RuneCount(raw)))
+	defer C.free(unsafe.Pointer(clt))
 	var out *C.uint8_t
 	var ol C.uint32_t
-	if C.kvspaceNewChar((*C.uint8_t)(buf), C.uint32_t(len(raw)), &out, &ol) != 0 || out == nil {
+	if C.kvspaceNewChar((*C.uint8_t)(buf), C.uint32_t(len(raw)), clt, &out, &ol) != 0 || out == nil {
 		return nil
 	}
 	defer C.free(unsafe.Pointer(out))
@@ -555,8 +596,8 @@ func init() {
 	kindBool = cconst("KVSPACE_KIND_BOOL")
 
 	myrwircaps = []op{
-		{"json" + sep + "to", 1, 1},
-		{"json" + sep + "from", 1, 1},
+		{"json" + sep + "to", []string{"*"}, []string{"*"}},
+		{"json" + sep + "from", []string{""}, []string{"*"}},
 	}
 }
 
@@ -618,14 +659,14 @@ func writeValue(c unsafe.Pointer, path string, v interface{}) error {
 }
 
 // writeContainer：容器值落裸 base（body 空）。dims 空 = 命名字典（对象）；dims=[n] = 坐标数组。
-// storetype 恒 index（spec map容器）；langtype 由 codec 产出（裸 stringkeymap）。
+// Uses fixed short head; codec sets langtype (bare stringkeymap or [n]stringkeymap).
 func writeContainer(c unsafe.Pointer, path string, dims []int32) {
 	xvalue := encodeXValue(kindMap, nil, dims)
 	h, ok := headOf(xvalue)
 	if !ok {
 		return
 	}
-	writeBody(c, path, 0, storetypeIndex, 0, 0, langtypeOf(&h), nil)
+	writeBody(c, path, 0, storetypeShort, langtypeOf(&h), nil)
 }
 
 func writeObj(c unsafe.Pointer, path string, m map[string]any) error {
@@ -656,19 +697,24 @@ func writeArr(c unsafe.Pointer, path string, arr []interface{}) error {
 	return nil
 }
 
-// isContainer：容器值在 p（body 空，map langtype），或 memindex 落 p·（成员已写）。
+func hasPrefixChildren(c unsafe.Pointer, prefix string) bool {
+	cp := cstr(prefix)
+	defer C.free(unsafe.Pointer(cp))
+	var count C.int32_t
+	return C.kvspaceListLen(c, cp, 0, 0, &count) == 0 && count > 0
+}
+
+// isContainer reports whether path holds a map container marker or has p· members.
 func isContainer(c unsafe.Pointer, path string) bool {
 	if h, ok := headAt(c, path); ok && h.ref == 0 && isMapLangtype(langtypeOf(&h)) {
 		return true
 	}
-	h, ok := headAt(c, path+sep)
-	return ok && (h.storetype == storetypeIndex || h.storetype == storetypeExtIndex)
+	return hasPrefixChildren(c, path+sep)
 }
 
-// isDir：p/ 是 index/extindex 目录（层级目录，与 · 成员目录并列）。
+// isDir reports whether path/ has hierarchical children.
 func isDir(c unsafe.Pointer, path string) bool {
-	h, ok := headAt(c, path+dirSuf)
-	return ok && (h.storetype == storetypeIndex || h.storetype == storetypeExtIndex)
+	return hasPrefixChildren(c, dirPrefix(path))
 }
 
 func readValue(c unsafe.Pointer, path string) interface{} {
@@ -717,8 +763,8 @@ func memberNames(c unsafe.Pointer, prefix string) []string {
 func readContainer(c unsafe.Pointer, path string) interface{} {
 	names := memberNames(c, path+sep)
 	if len(names) == 0 {
-		if h, ok := headAt(c, path); ok && h.ndim >= 1 {
-			return []interface{}{} // 数组：容器值带 dims=[n]
+		if h, ok := headAt(c, path); ok && (h.ndim >= 1 || strings.HasPrefix(langtypeOf(&h), "[int64]"+sep)) {
+			return []interface{}{} // Array container marker (dims=[n] or [int64]·).
 		}
 		return map[string]any{}
 	}
@@ -786,12 +832,15 @@ func ptrTarget(c unsafe.Pointer, path string) string {
 	return string(data[bo : bo+bl])
 }
 
-// rootOf：读参 idx 解析为可遍历的绝对路径（变量 → 帧槽路径，Ptr → 其目标）。
+// rootOf resolves read arg idx to a traversable absolute path (literal/Ptr target or frame slot).
 func rootOf(c unsafe.Pointer, pc string, name string, idx int) string {
-	root := name
-	if !strings.HasPrefix(root, "/") {
-		root = resolveReadPath(c, pc, idx)
+	if strings.HasPrefix(name, "/") && !strings.Contains(name, sep+"*") {
+		return ptrTarget(c, name)
 	}
+	if p := resolveRead(c, pc, idx); strings.HasPrefix(p, "/") {
+		return ptrTarget(c, p)
+	}
+	root := resolveReadPath(c, pc, idx)
 	if root == "" {
 		return ""
 	}
@@ -822,19 +871,19 @@ func fromJSON(data []byte) (interface{}, error) {
 
 type op struct {
 	name string
-	nr   int
-	nw   int
+	rp   []string
+	wp   []string
 }
 
 var myrwircaps []op
 
-func cstrArr(n int) (**C.char, []*C.char) {
-	if n == 0 {
+func cstrSlice(ss []string) (**C.char, []*C.char) {
+	if len(ss) == 0 {
 		return nil, nil
 	}
-	arr := make([]*C.char, n)
-	for i := range arr {
-		arr[i] = cstr("any")
+	arr := make([]*C.char, len(ss))
+	for i, s := range ss {
+		arr[i] = cstr(s)
 	}
 	return (**C.char)(unsafe.Pointer(&arr[0])), arr
 }
@@ -842,9 +891,9 @@ func cstrArr(n int) (**C.char, []*C.char) {
 func register(c unsafe.Pointer) {
 	for _, o := range myrwircaps {
 		co := cstr(o.name)
-		rp, ra := cstrArr(o.nr)
-		wp, wa := cstrArr(o.nw)
-		C.kvlangDefRwir(c, co, rp, C.int32_t(o.nr), wp, C.int32_t(o.nw))
+		rp, ra := cstrSlice(o.rp)
+		wp, wa := cstrSlice(o.wp)
+		C.kvlangDefRwir(c, co, rp, C.int32_t(len(o.rp)), wp, C.int32_t(len(o.wp)))
 		C.free(unsafe.Pointer(co))
 		for _, p := range ra {
 			C.free(unsafe.Pointer(p))
@@ -872,7 +921,7 @@ func fail(c unsafe.Pointer, vid string, msg string) {
 func doFrom(c unsafe.Pointer, pc string, writeNames []string, vid string) {
 	src := resolveRead(c, pc, 0)
 	root := writeNames[0]
-	if !strings.HasPrefix(root, "/") {
+	if !strings.HasPrefix(root, "/") || strings.Contains(root, sep+"*") {
 		root = resolveWrite(c, pc, 0)
 	}
 	v, err := fromJSON([]byte(src))
@@ -912,14 +961,15 @@ func serveOp(c unsafe.Pointer) {
 			}
 			ps := params(c, pc)
 			spec, mine := specOf(ps[0])
-			if !mine || len(ps) < 1+spec.nr+spec.nw {
+			nr, nw := len(spec.rp), len(spec.wp)
+			if !mine || len(ps) < 1+nr+nw {
 				continue
 			}
 			key := "/lib/" + spec.name + "/vids/" + vid
 			if spec.name == "json"+sep+"to" {
-				doTo(c, pc, ps[1:1+spec.nr])
+				doTo(c, pc, ps[1:1+nr])
 			} else {
-				doFrom(c, pc, ps[1+spec.nr:1+spec.nr+spec.nw], vid)
+				doFrom(c, pc, ps[1+nr:1+nr+nw], vid)
 			}
 			setXValue(c, "/vthread/"+vid+"/"+runtimeSep+"pc", constructChar([]byte(nextPC(pc))))
 			del(c, key)

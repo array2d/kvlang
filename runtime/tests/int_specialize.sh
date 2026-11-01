@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # 整数族同型特化：结果必须与通用实现逐字节一致（含回退路径与边界）。
+# `uint64` uses unsigned `/`, `%`, and logical `>>`.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 LAYOUT="${KVLANG_LAYOUT_BIN:-$ROOT/bin/kvlanglayout}"
@@ -35,10 +36,10 @@ u8gt true
 u16wrap 0
 u32wrap 0
 u64max 18446744073709551615
-u64div 0
-u64mod 18446744073709551615
+u64div 9223372036854775807
+u64mod 1
 u64gt true
-u64shr 18446744073709551615
+u64shr 9223372036854775807
 u64and 1
 u64xor 18446744073709551614
 u64wrap 0

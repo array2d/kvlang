@@ -66,7 +66,7 @@ static char *alloc_vthread_id(kvspace_t *kv) {
   snprintf(buf, sizeof buf, "%lld", (long long)n);
   kvlangXvalue_t nv;
   kvlangXvalueNewCharUtf8(&nv, buf);
-  kvlangKvPair_t p = {seq, nv};
+  kvlangKvPair_t p = {(char *)seq, nv};
   char err[256];
   int rc = kvlangXvalueNone(&nv) ? -1 :
            kvlangKvspaceSet(kv, &p, 1, err, sizeof err);

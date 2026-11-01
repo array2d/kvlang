@@ -1,6 +1,6 @@
-use crate::engine::Engine;
+use crate::engine::{Engine, KvResult};
 
-pub fn dispatch(eng: &Engine, op: &str, pc: &str) {
+pub fn dispatch(eng: &Engine, op: &str, pc: &str) -> KvResult {
     let x = eng.read_f64(pc, 0);
     let dst = eng.write0(pc);
     match op {
@@ -26,9 +26,9 @@ pub fn dispatch(eng: &Engine, op: &str, pc: &str) {
                 "math·log2" => x.log2(),
                 "math·log10" => x.log10(),
                 "math·hypot" => x.hypot(eng.read_f64(pc, 1)),
-                _ => return,
+                _ => return Err(format!("unknown math rwir: {op}")),
             };
-            eng.set_xvalue_wire(&dst, "float64", &v.to_le_bytes(), &[]);
+            eng.set_xvalue_wire(&dst, "float64", &v.to_le_bytes(), &[])
         }
     }
 }

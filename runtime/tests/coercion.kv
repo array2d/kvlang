@@ -15,8 +15,9 @@ rwfunc test() -> () {
 	println("arr", a[0], a[1])
 	a[0] = v
 	println("set", a[0])
-	a = array·append(a, v)
-	cout = array·compact(a)
+	sa:[int64]·int8 = scatterarray·newscatter(a)
+	sa = scatterarray·append(sa, v)
+	cout = scatterarray·newcompact(sa)
 	println("append", cout[2])
 	m:[]char/utf8·int8 = {x=v}
 	println("map", m·x)
@@ -25,7 +26,7 @@ rwfunc test() -> () {
 	p:*int8 = &x
 	*p = v
 	println("ptr", x)
-	k:[]char/utf8·int8 = {y=v}
+	k:[]char/utf8· = {y=v}
 	w = 300
 	k·y = w
 	println("dynmap", k·y)

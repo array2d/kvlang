@@ -52,6 +52,15 @@ std::string bare_dims(const std::string& lt) {
     return lt;
 }
 
+// `reg_body` returns allocator `body_cap` (which includes slack); clamp `xh_len(head)`
+// to `cap` for actual logical byte length, falling back to `cap` when unviewed.
+std::uint64_t logical_body_len(const vmbin::Register& r, std::uint64_t cap) {
+    if (!r.view.head || r.view.headlen != KVSPACE_XVALUE_HEAD_LEN)
+        return cap;
+    const std::uint64_t n =
+        kvspaceXvalueHeadLen(reinterpret_cast<const kvspaceXvalueHead*>(r.view.head));
+    return n < cap ? n : cap;
+}
 // 只有 langtype 明说是这两种时才按整数解；其余一律不猜。
 bool is_opaque_i64_scalar(const std::string& lt) {
     const std::string k = bare_dims(lt);
@@ -107,6 +116,66 @@ bool to_wire_v2(const char* kind, const std::uint8_t* raw, std::uint32_t raw_len
     *out_len = static_cast<std::uint32_t>(total);
     return true;
 }
+
+// Read array/string/XValue body and logical length: use zero-copy `reg_body` view on `shm://`,
+// or fall back to prefetched/loaded wire and extract `langtype` directly from wire attr.
+bool reg_wire_body(RwirHandlerCtx& c, int arg_idx, const std::uint8_t** body,
+                   std::uint64_t* logical_len, std::string* lt_out) {
+    const std::uint8_t ridx = c.ins.rd[arg_idx];
+    vmbin::Register& r = c.f.regs[ridx];
+    std::uint8_t* vb = nullptr;
+    std::uint64_t vcap = 0;
+    if (c.vm.reg_body(c.f, ridx, &vb, &vcap) && vb &&
+        r.view.head && r.view.headlen == KVSPACE_XVALUE_HEAD_LEN) {
+        *body = vb;
+        *logical_len = logical_body_len(r, vcap);
+        if (lt_out)
+            (void)c.vm.reg_langtype(c.f, ridx, lt_out);
+        return true;
+    }
+    Wire w{};
+    if (arg_idx < 2 && c.in[arg_idx].d) {
+        w = c.in[arg_idx];
+    } else if (!c.vm.read_reg(c.f, ridx, &w)) {
+        return false;
+    }
+    if (v_is_none(w) || !w.d || w.n < KVSPACE_XVALUE_HEAD_LEN)
+        return false;
+    const std::uint64_t hlen = kvspaceXvalueHeadLen(
+        reinterpret_cast<const kvspaceXvalueHead*>(w.d));
+    const std::uint64_t avail = w.n - KVSPACE_XVALUE_HEAD_LEN;
+    if (hlen > avail)
+        return false;
+    *body = w.d + KVSPACE_XVALUE_HEAD_LEN;
+    *logical_len = hlen;
+    if (lt_out) {
+        const std::uint8_t* ltp = nullptr;
+        const std::uint16_t ltl = wire_langtype_view(w.d, w.n, &ltp);
+        if (ltp && ltl > 0)
+            lt_out->assign(reinterpret_cast<const char*>(ltp), ltl);
+        else
+            (void)c.vm.reg_langtype(c.f, ridx, lt_out);
+    }
+    return true;
+}
+
+// Resolve destination container slot key (`wr[0]`), following `dst_ptr` and ensuring lazy keys.
+bool resolve_dst_slot_key(RwirHandlerCtx& c, std::string* out) {
+    vmbin::Register& wr0 = c.f.regs[c.ins.wr[0]];
+    vmbin::Register* wp = &wr0;
+    while (wp->dst_ptr)
+        wp = wp->dst_ptr;
+    if (wp->key.empty() && !c.vm.ensure_reg_key(c.f, *wp))
+        return false;
+    if (wp->key.empty())
+        return false;
+    if (wp != &wr0)
+        wr0.key = wp->key;
+    wp->kv_live = true;
+    wr0.kv_live = true;
+    *out = wp->key;
+    return true;
+}
 }  // namespace
 using vmbin::Register;
 using vmbin::Frame;
@@ -159,9 +228,24 @@ bool RwirHandlerCtx::ai64(int i, std::int64_t* v) {
 }
 
 bool RwirHandlerCtx::atext(int i, std::string* out) {
+    Wire w{};
+    if (i >= 0 && i < 2 && in[i].d && in[i].n >= KVSPACE_XVALUE_HEAD_LEN) {
+        w = in[i];
+    } else if (i >= 0 && i < ins.nrd && vm.read_reg(f, ins.rd[i], &w)) {
+        /* lazy operand read */
+    } else {
+        return false;
+    }
+    const std::uint8_t* ltp = nullptr;
+    const std::uint16_t ltl = wire_langtype_view(w.d, w.n, &ltp);
+    if (ltp && ltl > 0) {
+        std::string_view lt(reinterpret_cast<const char*>(ltp), ltl);
+        return wire_text(w.d, w.n, lt, out);
+    }
+    std::vector<std::uint8_t> copy(w.d, w.d + w.n);
     std::string lt;
     return vm.reg_langtype(f, ins.rd[i], &lt) &&
-           wire_text(in[i].d, in[i].n, lt, out);
+           wire_text(copy.data(), static_cast<std::uint32_t>(copy.size()), lt, out);
 }
 
 bool RwirHandlerCtx::wbool(bool b) {
@@ -388,6 +472,8 @@ bool h_array_new(RwirHandlerCtx& c, std::string* err) {
     // 数组字面量 `[v...]`：读参[0..n-1]=元素，写槽描述符 `a <langtype>`
     // 提供 elem kind（`[]int64`/`[N]T`），打包为 [n]elem compact XValue。
     std::string lt = c.write_slot_lt();
+    while (!lt.empty() && lt[0] == '*')
+        lt.erase(0, 1);
     // 动态成员写槽（`[v...] -> /tmp/mi·*j`）描述符无类型 → fallback 第一元素
     // 的 langtype（对齐 C kvlangDeclElemKind fallback kvlangXvalueKind(in[0])）。
     if (lt.empty() && c.ins.nrd >= 1) {
@@ -538,15 +624,14 @@ bool h_array_fill(RwirHandlerCtx& c, std::string* err) {
 
 bool h_array_copy(RwirHandlerCtx& c, std::string* err) {
     // compactarray·copy(a) -> b：专职创建同形副本（值语义变换的显式第一步）。
-    Register& cr = c.f.regs[c.ins.rd[0]];
-    std::uint8_t* cb = nullptr;
-    std::uint64_t ccap = 0;
+    const std::uint8_t* cb = nullptr;
+    std::uint64_t clen = 0;
     std::string clt;
-    if (c.vm.reg_body(c.f, c.ins.rd[0], &cb, &ccap) && cb &&
-        cr.view.head && cr.view.headlen == KVSPACE_XVALUE_HEAD_LEN)
-        c.vm.reg_langtype(c.f, c.ins.rd[0], &clt);
-    if (clt.empty() || !cb) {
-        *err = "compactarray·copy: bad array";
+    (void)reg_wire_body(c, 0, &cb, &clen, &clt);
+    if (clt.empty() || !cb || clt.front() != '[' ||
+        clt.find("\xC2\xB7") != std::string::npos) {
+        *err = "TypeError: compactarray·copy expects a compact array, got " +
+               (clt.empty() ? std::string("None") : clt);
         return false;
     }
     std::int32_t cdims[8] = {};
@@ -554,7 +639,7 @@ bool h_array_copy(RwirHandlerCtx& c, std::string* err) {
     const std::string ck = c.parse_dims(clt, cdims, &cndim);
     std::uint8_t* nb = nullptr;
     std::uint32_t nl = 0;
-    const bool ok = to_wire_v2(ck.c_str(), cb, static_cast<std::uint32_t>(ccap),
+    const bool ok = to_wire_v2(ck.c_str(), cb, static_cast<std::uint32_t>(clen),
                            cdims, static_cast<std::int32_t>(cndim), &nb,
                            &nl) &&
                     nb && c.vm.write_reg(c.f, c.ins.wr[0], nb, nl);
@@ -587,9 +672,18 @@ void clear_members(void* h, const std::string& base, char* errbuf,
     }
 }
 
-bool h_scatter_new(RwirHandlerCtx& c, std::string*) {
-    // 空散 key 容器：写 marker（写槽描述符的 langtype，缺省 map）+ 建成员目录。
+bool h_scatter_new(RwirHandlerCtx& c, std::string* err) {
+    // Empty scatter container: clear old `base·*` members and write marker (no `base/` dir).
+    std::string base_key;
+    if (!resolve_dst_slot_key(c, &base_key)) {
+        *err = "scatterarray·new: bad write slot";
+        return false;
+    }
+    char e[256] = {};
+    clear_members(c.f.h, base_key, e, sizeof e);
     std::string lt = c.write_slot_lt();
+    while (!lt.empty() && lt[0] == '*')
+        lt.erase(0, 1);
     if (lt.empty())
         lt = "map";
     std::uint8_t* mark = nullptr;
@@ -599,11 +693,6 @@ bool h_scatter_new(RwirHandlerCtx& c, std::string*) {
               mark && c.vm.write_reg(c.f, c.ins.wr[0], mark,
                                      static_cast<std::uint32_t>(ml));
     std::free(mark);
-    if (ok) {
-        char e[192] = {};
-        const std::string dir = c.f.regs[c.ins.wr[0]].key + "/";
-        ok = kvspaceMkindex(c.f.h, dir.c_str(), 0, e, sizeof e) == 0;
-    }
     return ok;
 }
 
@@ -626,7 +715,7 @@ bool h_scatter_at(RwirHandlerCtx& c, std::string* err) {
     std::int64_t ai = 0;
     if (c.ins.nrd < 2 || !c.vm.ensure_reg_key(c.f, ar) ||
         !c.vm.read_i64(c.f, c.ins.rd[1], &ai) || ai < 0) {
-        *err = "scatterarray·at: bad index";
+        *err = "IndexError: scatterarray·at: bad index";
         return false;
     }
     const std::string mk =
@@ -634,7 +723,7 @@ bool h_scatter_at(RwirHandlerCtx& c, std::string* err) {
     const std::uint8_t* md = nullptr;
     std::uint32_t mn = 0;
     if (!read_wire(c.f.h, mk, &md, &mn) || !md || !mn) {
-        *err = "scatterarray·at: index out of range";
+        *err = "IndexError: scatterarray·at: index out of range";
         return false;
     }
     return c.vm.write_reg(c.f, c.ins.wr[0], md, mn);
@@ -663,10 +752,27 @@ bool h_scatter_set(RwirHandlerCtx& c, std::string* err) {
 }
 
 bool h_scatter_newcompact(RwirHandlerCtx& c, std::string* err) {
+    // Source must be a scatter container; reject compact arrays with `TypeError`.
+    Wire sw0{};
+    std::string slt;
+    if (c.ins.nrd >= 1 && c.vm.read_reg(c.f, c.ins.rd[0], &sw0) &&
+        !v_is_none(sw0) && !v_ptr(sw0)) {
+        if (!c.vm.reg_langtype(c.f, c.ins.rd[0], &slt)) {
+            const std::uint8_t* ltp = nullptr;
+            const std::uint16_t ltn = wire_langtype_view(sw0.d, sw0.n, &ltp);
+            if (ltp && ltn)
+                slt.assign(reinterpret_cast<const char*>(ltp), ltn);
+        }
+        if (!slt.empty() && slt != "map" &&
+            slt.find("\xC2\xB7") == std::string::npos) {
+            *err = "TypeError: scatterarray·newcompact requires a scattered array, got " + slt;
+            return false;
+        }
+    }
     // 源散 key 容器（读参 0 = 容器值 marker，key 指向容器槽）。
     Register& cr = c.f.regs[c.ins.rd[0]];
     if (!c.vm.ensure_reg_key(c.f, cr)) {
-        *err = "array·compact: bad src";
+        *err = "TypeError: scatterarray·newcompact requires a scattered array variable";
         return false;
     }
     const std::string cb = cr.key;
@@ -701,8 +807,12 @@ bool h_scatter_newcompact(RwirHandlerCtx& c, std::string* err) {
         }
         const std::uint64_t bl = kvspaceXvalueHeadLen(
             reinterpret_cast<const kvspaceXvalueHead*>(md));
+        if (bl > mn - KVSPACE_XVALUE_HEAD_LEN) {
+            *err = "array·compact: truncated element " + std::to_string(i);
+            return false;
+        }
         const std::uint8_t* ltp = nullptr;
-        const std::uint16_t ltl = kvspaceXvalueHeadLangtype(md, bl, &ltp);
+        const std::uint16_t ltl = wire_langtype_view(md, mn, &ltp);
         std::string ilt;
         if (ltp && ltl > 0)
             ilt.assign(reinterpret_cast<const char*>(ltp), ltl);
@@ -748,14 +858,11 @@ bool h_scatter_newcompact(RwirHandlerCtx& c, std::string* err) {
 
 bool h_scatter_newscatter(RwirHandlerCtx& c, std::string* err) {
     // 读参[0]=compact 数组；写参=散 key 容器。清旧成员 + 写 marker + 逐元素。
-    Register& sr = c.f.regs[c.ins.rd[0]];
-    std::uint8_t* sb = nullptr;
-    std::uint64_t scap = 0;
+    const std::uint8_t* sb_src = nullptr;
+    std::uint64_t slen = 0;
     std::string slt;
     std::uint32_t sesz = 0;
-    if (c.vm.reg_body(c.f, c.ins.rd[0], &sb, &scap) && sb &&
-        sr.view.head && sr.view.headlen == KVSPACE_XVALUE_HEAD_LEN &&
-        c.vm.reg_langtype(c.f, c.ins.rd[0], &slt)) {
+    if (reg_wire_body(c, 0, &sb_src, &slen, &slt) && sb_src) {
         if (!slt.empty() && slt[0] == '[') {
             const std::size_t cl = slt.find(']');
             if (cl != std::string::npos)
@@ -763,16 +870,17 @@ bool h_scatter_newscatter(RwirHandlerCtx& c, std::string* err) {
         }
         sesz = c.elem_size(slt);
     }
-    if (sesz == 0 || !sb) {
+    if (sesz == 0 || !sb_src) {
         *err = "array·scatter: bad array";
         return false;
     }
-    Register& wr0 = c.f.regs[c.ins.wr[0]];
-    if (!c.vm.ensure_reg_key(c.f, wr0)) {
+    // Copy source bytes before `clear_members`/`SetValue` can reuse TLS read buffers or alias dst.
+    std::vector<std::uint8_t> sb_copy(sb_src, sb_src + slen);
+    std::string db;
+    if (!resolve_dst_slot_key(c, &db)) {
         *err = "array·scatter: bad dst";
         return false;
     }
-    const std::string db = wr0.key;
     char errbuf[256] = {};
     clear_members(c.f.h, db, errbuf, sizeof errbuf);
     const std::string mklt = "[int64]\xC2\xB7" + slt;
@@ -780,20 +888,22 @@ bool h_scatter_newscatter(RwirHandlerCtx& c, std::string* err) {
     std::uint64_t ml = 0;
     bool ok = kvspaceXvalueHeadNewScalar(KVSPACE_XVALUE_ST_SHORT, nullptr, 0,
                                          mklt.c_str(), &mark, &ml) == 0 &&
-              mark && kvspaceSetValue(c.f.h, db.c_str(), mark, static_cast<std::uint32_t>(ml), errbuf, sizeof errbuf) == 0;
+              mark && c.vm.write_reg(c.f, c.ins.wr[0], mark,
+                                     static_cast<std::uint32_t>(ml));
     std::free(mark);
     if (!ok) {
         *err = "array·scatter: marker failed";
         return false;
     }
     c.note_slot_write(db.c_str());  // db 即写槽自身 key：kvspace 槽已存在
-    const std::int64_t n = static_cast<std::int64_t>(scap / sesz);
+    // Count elements from logical `slen` (not `body_cap`, which includes allocator slack).
+    const std::int64_t n = static_cast<std::int64_t>(slen / sesz);
     for (std::int64_t i = 0; i < n; i++) {
         const std::string mk = db + "\xC2\xB7[" + std::to_string(i) + "]";
         std::uint8_t* eb = nullptr;
         std::uint32_t el = 0;
         const std::int32_t ed[1] = {1};
-        ok = to_wire_v2(slt.c_str(), sb + i * sesz,
+        ok = to_wire_v2(slt.c_str(), sb_copy.data() + i * sesz,
                     static_cast<std::uint32_t>(sesz), ed, 1, &eb, &el) &&
              eb && kvspaceSetValue(c.f.h, mk.c_str(), eb, el, errbuf, sizeof errbuf) == 0;
         std::free(eb);
@@ -936,14 +1046,11 @@ bool h_array_newslice(RwirHandlerCtx& c, std::string* err) {
         *err = "compactarray·newslice: bad bounds";
         return false;
     }
-    Register& sr = c.f.regs[c.ins.rd[0]];
-    std::uint8_t* sb = nullptr;
-    std::uint64_t scap = 0;
+    const std::uint8_t* sb = nullptr;
+    std::uint64_t slen = 0;
     std::string slt;
     std::uint32_t sesz = 0;
-    if (c.vm.reg_body(c.f, c.ins.rd[0], &sb, &scap) && sb &&
-        sr.view.head && sr.view.headlen == KVSPACE_XVALUE_HEAD_LEN &&
-        c.vm.reg_langtype(c.f, c.ins.rd[0], &slt)) {
+    if (reg_wire_body(c, 0, &sb, &slen, &slt) && sb) {
         if (!slt.empty() && slt[0] == '[') {
             const std::size_t cl = slt.find(']');
             if (cl != std::string::npos)
@@ -955,7 +1062,7 @@ bool h_array_newslice(RwirHandlerCtx& c, std::string* err) {
         *err = "compactarray·newslice: bad array";
         return false;
     }
-    const std::int64_t alen = static_cast<std::int64_t>(scap / sesz);
+    const std::int64_t alen = static_cast<std::int64_t>(slen / sesz);
     if (lo < 0 || hi < lo || hi > alen) {
         *err = "compactarray·newslice: index out of range";
         return false;
@@ -975,48 +1082,51 @@ bool h_array_newslice(RwirHandlerCtx& c, std::string* err) {
 bool h_string_char(RwirHandlerCtx& c, std::string* err) {
     std::int64_t idx = 0;
     if (c.ins.nrd < 2 || !c.vm.read_i64(c.f, c.ins.rd[1], &idx)) {
-        *err = "string·char: bad input";
+        *err = "TypeError: string·char requires string and index";
         return false;
     }
-    std::uint8_t* sb = nullptr;
-    std::uint64_t sc = 0;
-    if (!c.vm.reg_body(c.f, c.ins.rd[0], &sb, &sc) || !sb) {
-        *err = "string·char: bad string";
-        return false;
-    }
+    const std::uint8_t* sb = nullptr;
+    std::uint64_t blen = 0;
     std::string slt;
-    c.vm.reg_langtype(c.f, c.ins.rd[0], &slt);
+    if (!reg_wire_body(c, 0, &sb, &blen, &slt) || !sb) {
+        *err = "TypeError: string·char requires string and index";
+        return false;
+    }
     const vmbin::LangType st =
         c.vm.vmbin.langtype_of(slt.data(), slt.size());
     std::uint32_t cp = 0;
     const bool utf32 = st == vmbin::LangType::CharUtf32;
-    const std::uint64_t blen = sc;
     if (utf32) {
         const std::uint32_t n = static_cast<std::uint32_t>(blen / 4);
         if (idx >= 0 && (std::uint64_t)idx < n)
             std::memcpy(&cp, sb + (std::uint64_t)idx * 4, 4);
         else {
-            *err = "string·char: index out of bounds";
+            *err = "IndexError: at: index " + std::to_string(idx) +
+                   " out of bounds (char count=" + std::to_string(n) + ")";
             return false;
         }
     } else {
         const std::uint8_t* b = sb;
         std::int64_t rune_i = 0;
-        for (std::uint64_t i = 0; i < blen && rune_i <= idx;) {
-            const std::uint8_t c0 = b[i];
-            std::uint32_t r = 0, take = 1;
-            if (c0 < 0x80) { r = c0; }
-            else if ((c0 >> 5) == 0x6) { r = c0 & 0x1F; take = 2; }
-            else if ((c0 >> 4) == 0xE) { r = c0 & 0x0F; take = 3; }
-            else if ((c0 >> 3) == 0x1E) { r = c0 & 0x07; take = 4; }
-            for (std::uint32_t k = 1; k < take && i + k < blen; k++)
-                r = (r << 6) | (b[i + k] & 0x3F);
-            if (rune_i == idx) { cp = r; break; }
-            rune_i++;
-            i += take;
+        bool found = false;
+        if (idx >= 0) {
+            for (std::uint64_t i = 0; i < blen && rune_i <= idx;) {
+                const std::uint8_t c0 = b[i];
+                std::uint32_t r = 0, take = 1;
+                if (c0 < 0x80) { r = c0; }
+                else if ((c0 >> 5) == 0x6) { r = c0 & 0x1F; take = 2; }
+                else if ((c0 >> 4) == 0xE) { r = c0 & 0x0F; take = 3; }
+                else if ((c0 >> 3) == 0x1E) { r = c0 & 0x07; take = 4; }
+                for (std::uint32_t k = 1; k < take && i + k < blen; k++)
+                    r = (r << 6) | (b[i + k] & 0x3F);
+                if (rune_i == idx) { cp = r; found = true; break; }
+                rune_i++;
+                i += take;
+            }
         }
-        if (rune_i < idx) {
-            *err = "string·char: index out of bounds";
+        if (!found) {
+            *err = "IndexError: at: index " + std::to_string(idx) +
+                   " out of bounds (char count=" + std::to_string(rune_i) + ")";
             return false;
         }
     }
@@ -1156,12 +1266,14 @@ bool h_string_slice(RwirHandlerCtx& c, std::string* err) {
     if (c.ins.nrd < 3 || !c.atext(0, &s) ||
         !c.vm.read_i64(c.f, c.ins.rd[1], &lo) ||
         !c.vm.read_i64(c.f, c.ins.rd[2], &hi)) {
-        *err = "string·slice: bad input";
+        *err = "TypeError: string·slice requires string, start, end";
         return false;
     }
     const std::vector<std::uint32_t> r = utf8_to_runes(s);
     if (lo < 0 || hi > static_cast<std::int64_t>(r.size()) || lo > hi) {
-        *err = "string·slice: index out of bounds";
+        *err = "IndexError: at: slice index out of bounds (lo=" +
+               std::to_string(lo) + " hi=" + std::to_string(hi) +
+               " char count=" + std::to_string(r.size()) + ")";
         return false;
     }
     return write_runes(c, std::vector<std::uint32_t>(r.begin() + lo, r.begin() + hi));
@@ -1189,11 +1301,38 @@ bool h_string_find(RwirHandlerCtx& c, std::string* err) {
 }
 
 bool h_string_concat(RwirHandlerCtx& c, std::string* err) {
-    std::string lt0, lt1;
-    if (c.ins.nrd < 2 ||
-        !c.vm.reg_langtype(c.f, c.ins.rd[0], &lt0) || !is_char_wire(lt0) ||
-        !c.vm.reg_langtype(c.f, c.ins.rd[1], &lt1) || !is_char_wire(lt1)) {
-        *err = "string·concat: requires strings";
+    auto operand_lt = [&](int idx) -> std::string {
+        if (idx >= 0 && idx < 2 && c.in[idx].d &&
+            c.in[idx].n >= KVSPACE_XVALUE_HEAD_LEN) {
+            const std::uint8_t* ltp = nullptr;
+            const std::uint16_t ltl =
+                wire_langtype_view(c.in[idx].d, c.in[idx].n, &ltp);
+            if (ltp && ltl > 0)
+                return std::string(reinterpret_cast<const char*>(ltp), ltl);
+        }
+        std::string lt;
+        if (idx >= 0 && idx < c.ins.nrd &&
+            c.vm.reg_langtype(c.f, c.ins.rd[idx], &lt))
+            return lt;
+        return {};
+    };
+    auto bare_kind = [&](std::string lt) -> std::string {
+        if (lt.empty())
+            return "None";
+        while (!lt.empty() && lt.front() == '[') {
+            const std::size_t cl = lt.find(']');
+            if (cl == std::string::npos)
+                break;
+            lt.erase(0, cl + 1);
+        }
+        return lt.empty() ? "None" : lt;
+    };
+    const std::string lt0 = operand_lt(0);
+    const std::string lt1 = operand_lt(1);
+    if (c.ins.nrd < 2 || !is_char_wire(lt0) || !is_char_wire(lt1)) {
+        *err = "TypeError: string·concat requires strings, got " +
+               bare_kind(lt0) + " and " +
+               (c.ins.nrd >= 2 ? bare_kind(lt1) : std::string("None"));
         return false;
     }
     std::string a, b;
@@ -1381,18 +1520,26 @@ bool h_array_meta(RwirHandlerCtx& c, std::string* err) {
 // ── xv（langtype/bodylen/parselangtype/reinterpret）────────────────────────
 bool h_xv_meta(RwirHandlerCtx& c, std::string* err) {
     Register& mr = c.f.regs[c.ins.rd[0]];
-    std::uint8_t* mb = nullptr;
-    std::uint64_t mcap = 0;
+    Register& mrs = mr.src_ptr ? *mr.src_ptr : mr;
+    std::uint8_t fast_raw[8] = {};
+    const std::uint8_t* mb = nullptr;
+    std::uint64_t mlen = 0;
     std::string mlt;
-    if (mr.fast_i64) {
+    bool have_body = false;
+    if (mrs.fast_i64) {
+        std::memcpy(fast_raw, &mrs.fv, 8);
+        mb = fast_raw;
+        mlen = 8;
         mlt = "int64";
-        mcap = 8;
-    } else if (mr.fast_bool) {
+        have_body = true;
+    } else if (mrs.fast_bool) {
+        fast_raw[0] = mrs.fb ? 1 : 0;
+        mb = fast_raw;
+        mlen = 1;
         mlt = "bool";
-        mcap = 1;
-    } else if (c.vm.reg_body(c.f, c.ins.rd[0], &mb, &mcap) && mb &&
-               mr.view.head && mr.view.headlen == KVSPACE_XVALUE_HEAD_LEN) {
-        c.vm.reg_langtype(c.f, c.ins.rd[0], &mlt);
+        have_body = true;
+    } else if (reg_wire_body(c, 0, &mb, &mlen, &mlt)) {
+        have_body = true;
     }
     bool ok = true;
     if (is_rwir(c.ins, rwir::RwirId::CompactArrayLangType)) {
@@ -1404,13 +1551,7 @@ bool h_xv_meta(RwirHandlerCtx& c, std::string* err) {
              sb && c.vm.write_reg(c.f, c.ins.wr[0], sb, sl);
         std::free(sb);
     } else if (is_rwir(c.ins, rwir::RwirId::CompactArrayBodyLen)) {
-        std::int64_t blen = 0;
-        if (mr.fast_i64) blen = 8;
-        else if (mr.fast_bool) blen = 1;
-        else if (mr.view.head && mr.view.headlen == KVSPACE_XVALUE_HEAD_LEN) {
-            blen = static_cast<std::int64_t>(kvspaceXvalueHeadLen(
-                reinterpret_cast<const kvspaceXvalueHead*>(mr.view.head)));
-        }
+        const std::int64_t blen = have_body ? static_cast<std::int64_t>(mlen) : 0;
         ok = c.vm.slot_write_i64(c.f, c.ins.wr[0], blen);
     } else if (is_rwir(c.ins, rwir::RwirId::CompactArrayParseLangType)) {
         std::string base = mlt;
@@ -1447,22 +1588,28 @@ bool h_xv_meta(RwirHandlerCtx& c, std::string* err) {
         }
     } else {
         // xv·reinterpret：读参[1]=新 kindexpr 文本；body 原样，dims 由传入串解析。
+        // Copy source bytes first so `read_reg(rd[1])` cannot overwrite the borrowed TLS buffer.
+        if (!have_body || (mlen && !mb)) {
+            *err = "xv·reinterpret: bad source body";
+            return false;
+        }
+        std::vector<std::uint8_t> mcopy;
+        if (mlen > 0)
+            mcopy.assign(mb, mb + mlen);
         Wire lw{};
         std::string nlt, llt;
-        if (c.ins.nrd < 2 || !c.vm.read_reg(c.f, c.ins.rd[1], &lw) ||
-            !c.vm.reg_langtype(c.f, c.ins.rd[1], &llt) ||
-            !wire_text(lw.d, lw.n, llt, &nlt) || nlt.empty()) {
+        if (c.ins.nrd < 2 || !c.vm.read_reg(c.f, c.ins.rd[1], &lw)) {
             *err = "xv·reinterpret: bad langtype";
             return false;
         }
-        // A6：body 有效长以 head 的 len 为准（mcap 是分配器物理容量，只作可读上限）。
-        const std::uint64_t mlen =
-            mr.view.head && mr.view.headlen == KVSPACE_XVALUE_HEAD_LEN
-                ? kvspaceXvalueHeadLen(
-                      reinterpret_cast<const kvspaceXvalueHead*>(mr.view.head))
-                : 0;
-        if (mlen > mcap || (mlen && !mb)) {
-            *err = "xv·reinterpret: bad source body";
+        const std::uint8_t* lltp = nullptr;
+        const std::uint16_t lltl = wire_langtype_view(lw.d, lw.n, &lltp);
+        if (lltp && lltl > 0)
+            llt.assign(reinterpret_cast<const char*>(lltp), lltl);
+        else
+            (void)c.vm.reg_langtype(c.f, c.ins.rd[1], &llt);
+        if (!wire_text(lw.d, lw.n, llt, &nlt) || nlt.empty()) {
+            *err = "xv·reinterpret: bad langtype";
             return false;
         }
         std::int32_t ndims[8] = {};
@@ -1513,7 +1660,8 @@ bool h_xv_meta(RwirHandlerCtx& c, std::string* err) {
         }
         std::uint8_t* nb = nullptr;
         std::uint32_t nl = 0;
-        ok = to_wire_v2(kk.c_str(), mb, static_cast<std::uint32_t>(mlen), ndims,
+        ok = to_wire_v2(kk.c_str(), mcopy.empty() ? nullptr : mcopy.data(),
+                    static_cast<std::uint32_t>(mlen), ndims,
                     ndim, &nb, &nl) &&
              nb && c.vm.write_reg(c.f, c.ins.wr[0], nb, nl);
         std::free(nb);
@@ -1523,14 +1671,14 @@ bool h_xv_meta(RwirHandlerCtx& c, std::string* err) {
 
 bool h_array_reshape(RwirHandlerCtx& c, std::string* err) {
     // xv·reshape(arr, dims...) -> a：body 字节原样，只换 dims（numel 守恒校验）。
-    std::uint8_t* rbody = nullptr;
-    std::uint64_t rcap = 0;
-    if (!c.vm.reg_body(c.f, c.ins.rd[0], &rbody, &rcap) || !rbody) {
+    const std::uint8_t* rbody = nullptr;
+    std::uint64_t rlen = 0;
+    std::string rlt;
+    if (!reg_wire_body(c, 0, &rbody, &rlen, &rlt) || !rbody) {
         *err = "xv·reshape: bad array";
         return false;
     }
-    std::string rlt;
-    c.vm.reg_langtype(c.f, c.ins.rd[0], &rlt);
+    std::vector<std::uint8_t> rcopy(rbody, rbody + rlen);
     const vmbin::LangType rt = c.vm.vmbin.langtype_of(rlt.data(), rlt.size());
     const std::uint32_t resz = c.vm.vmbin.elem_width_of(rt);
     if (resz == 0) {
@@ -1553,7 +1701,7 @@ bool h_array_reshape(RwirHandlerCtx& c, std::string* err) {
         rdims[i] = static_cast<std::int32_t>(dv);
         numel *= dv;
     }
-    if (numel != static_cast<std::int64_t>(rcap / resz)) {
+    if (numel != static_cast<std::int64_t>(rlen / resz)) {
         *err = "xv·reshape: numel mismatch";
         return false;
     }
@@ -1574,8 +1722,8 @@ bool h_array_reshape(RwirHandlerCtx& c, std::string* err) {
     }
     std::uint8_t* nb = nullptr;
     std::uint32_t nl = 0;
-    const bool ok = to_wire_v2(rkn, rbody, static_cast<std::uint32_t>(rcap), rdims,
-                           ndims, &nb, &nl) &&
+    const bool ok = to_wire_v2(rkn, rcopy.data(), static_cast<std::uint32_t>(rlen),
+                           rdims, ndims, &nb, &nl) &&
                     nb && c.vm.write_reg(c.f, c.ins.wr[0], nb, nl);
     std::free(nb);
     return ok;
@@ -1590,9 +1738,25 @@ bool h_array_at_set(RwirHandlerCtx& c, std::string* err) {
     // No operand prefetch for this op: resolve the lazy key read_reg would have.
     if (!ar0.src_ptr)
         c.vm.ensure_reg_key(c.f, ar0);
-    if (!c.vm.reg_body(c.f, c.ins.rd[0], &ab0, &acap0) || !ab0) {
-        *err = "xv: bad array";
-        return false;
+    const bool have_shm_view =
+        c.vm.reg_body(c.f, c.ins.rd[0], &ab0, &acap0) && ab0 &&
+        ar0.view.head && ar0.view.headlen == KVSPACE_XVALUE_HEAD_LEN;
+    Wire aw{};
+    std::uint64_t wire_hlen = 0;
+    if (!have_shm_view) {
+        if (!c.vm.read_reg(c.f, c.ins.rd[0], &aw) || v_is_none(aw) || !aw.d ||
+            aw.n < KVSPACE_XVALUE_HEAD_LEN) {
+            *err = "xv: bad array";
+            return false;
+        }
+        wire_hlen = kvspaceXvalueHeadLen(
+            reinterpret_cast<const kvspaceXvalueHead*>(aw.d));
+        acap0 = aw.n - KVSPACE_XVALUE_HEAD_LEN;
+        if (wire_hlen > acap0) {
+            *err = "xv: array body exceeds capacity";
+            return false;
+        }
+        ab0 = const_cast<std::uint8_t*>(aw.d + KVSPACE_XVALUE_HEAD_LEN);
     }
     std::int32_t dims[8];
     std::uint32_t ndim;
@@ -1608,11 +1772,20 @@ bool h_array_at_set(RwirHandlerCtx& c, std::string* err) {
         ekind = static_cast<Scalar::K>(ar0.arr_kind & 0x7F);
         is_char = (ar0.arr_kind & 0x80) != 0;
         std::memcpy(dims, ar0.arr_dims, sizeof(std::int32_t) * ndim);
+        if (!have_shm_view)
+            ar0.arr_bodylen = wire_hlen;
         if (is_set)
             array_elem_kind = &ar0.arr_elem_kind;
     } else {
         std::string alt;
-        c.vm.reg_langtype(c.f, c.ins.rd[0], &alt);
+        if (!have_shm_view) {
+            const std::uint8_t* altp = nullptr;
+            const std::uint16_t altl = wire_langtype_view(aw.d, aw.n, &altp);
+            if (altp && altl > 0)
+                alt.assign(reinterpret_cast<const char*>(altp), altl);
+        }
+        if (alt.empty())
+            c.vm.reg_langtype(c.f, c.ins.rd[0], &alt);
         std::string lt = alt;
         ndim = 0;
         if (!lt.empty() && lt[0] == '[') {
@@ -1654,10 +1827,10 @@ bool h_array_at_set(RwirHandlerCtx& c, std::string* err) {
         array_elem_kind = &ar0.arr_elem_kind;
         // A7：越界以 head 的 body 有效长为界——首次解析缓存，后续免每 op 解 head。
         ar0.arr_bodylen =
-            ar0.view.head && ar0.view.headlen == KVSPACE_XVALUE_HEAD_LEN
+            have_shm_view
                 ? kvspaceXvalueHeadLen(
                       reinterpret_cast<const kvspaceXvalueHead*>(ar0.view.head))
-                : 0;
+                : wire_hlen;
         ar0.arr_esz = esz;
         ar0.arr_ndim = ndim;
         ar0.arr_kind =
@@ -1669,15 +1842,6 @@ bool h_array_at_set(RwirHandlerCtx& c, std::string* err) {
         *err = "xv: bad type/dims";
         return false;
     }
-    std::int64_t flat = 0;
-    for (int d = 0; d < nidx; d++) {
-        std::int64_t idxv = 0;
-        if (!c.vm.read_i64(c.f, c.ins.rd[d + 1], &idxv)) {
-            *err = "xv: bad index";
-            return false;
-        }
-        flat = flat * dims[d] + idxv;
-    }
     // A7：越界以 head 的 body 有效长为界（acap0 是物理容量，可含填充区）。
     // abody 首次解析时缓存进 arr_bodylen，后续每 op 免解 head。
     const std::uint64_t abody = ar0.arr_bodylen;
@@ -1685,9 +1849,71 @@ bool h_array_at_set(RwirHandlerCtx& c, std::string* err) {
         *err = "xv: array body exceeds capacity";
         return false;
     }
-    const std::uint64_t off = (std::uint64_t)flat * esz;
-    if (off + esz > abody) {
-        *err = "xv: index out of range";
+    // On non-shm reads, uncached `read_i64` calls may overwrite borrowed `aw.d` via `kvspaceGet`;
+    // re-fetch `aw` after reading indices if needed.
+    std::int64_t idx_vals[8] = {};
+    for (int d = 0; d < nidx; d++) {
+        if (!c.vm.read_i64(c.f, c.ins.rd[d + 1], &idx_vals[d])) {
+            Scalar isc{};
+            if (c.vm.read_scalar(c.f, c.ins.rd[d + 1], &isc) &&
+                (isc.k == Scalar::K::Int || isc.k == Scalar::K::Uint)) {
+                idx_vals[d] = isc.k == Scalar::K::Uint
+                                  ? static_cast<std::int64_t>(isc.u)
+                                  : isc.i;
+            } else {
+                std::string ilt;
+                (void)c.vm.reg_langtype(c.f, c.ins.rd[d + 1], &ilt);
+                while (!ilt.empty() && ilt.front() == '[') {
+                    const std::size_t cl = ilt.find(']');
+                    if (cl == std::string::npos)
+                        break;
+                    ilt.erase(0, cl + 1);
+                }
+                *err = "TypeError: compactarray index must be integer, got " +
+                       (ilt.empty() ? std::string("None") : ilt);
+                return false;
+            }
+        }
+    }
+    if (!have_shm_view && !is_set) {
+        // Re-fetch `aw` if any index read went through `kvspaceGet` and invalidated TLS buffer.
+        bool any_nonfast_idx = false;
+        for (int d = 0; d < nidx; d++) {
+            const Register& ir = c.f.regs[c.ins.rd[d + 1]];
+            const Register& irs = ir.src_ptr ? *ir.src_ptr : ir;
+            if (!irs.fast_i64)
+                any_nonfast_idx = true;
+        }
+        if (any_nonfast_idx) {
+            if (!c.vm.read_reg(c.f, c.ins.rd[0], &aw) || !aw.d ||
+                aw.n < KVSPACE_XVALUE_HEAD_LEN + abody) {
+                *err = "xv: bad array";
+                return false;
+            }
+            ab0 = const_cast<std::uint8_t*>(aw.d + KVSPACE_XVALUE_HEAD_LEN);
+        }
+    }
+    const std::uint64_t nelem = abody / esz;
+    std::uint64_t flat = 0;
+    for (int d = 0; d < nidx; d++) {
+        const std::int64_t idxv = idx_vals[d];
+        if (idxv < 0 || dims[d] <= 0 || idxv >= dims[d] ||
+            __builtin_mul_overflow(flat, static_cast<std::uint64_t>(dims[d]),
+                                   &flat) ||
+            __builtin_add_overflow(flat, static_cast<std::uint64_t>(idxv),
+                                   &flat) ||
+            flat >= nelem) {
+            *err = "IndexError: compactarray index out of bounds";
+            return false;
+        }
+    }
+    std::uint64_t off = 0;
+    std::uint64_t end_off = 0;
+    if (__builtin_mul_overflow(flat, static_cast<std::uint64_t>(esz), &off) ||
+        __builtin_add_overflow(off, static_cast<std::uint64_t>(esz),
+                               &end_off) ||
+        end_off > abody) {
+        *err = "IndexError: compactarray index out of bounds";
         return false;
     }
     if (!is_set) {
@@ -1755,9 +1981,12 @@ bool h_array_at_set(RwirHandlerCtx& c, std::string* err) {
         // 不做位拷贝、不做隐式转换（int64 写 float64 数组 = TypeError）。
         const std::uint64_t vlen = kvspaceXvalueHeadLen(
             reinterpret_cast<const kvspaceXvalueHead*>(vw.d));
+        if (vlen > vw.n - KVSPACE_XVALUE_HEAD_LEN) {
+            *err = "xv: truncated value";
+            return false;
+        }
         const std::uint8_t* vltp = nullptr;
-        const std::uint16_t vltl =
-            kvspaceXvalueHeadLangtype(vw.d, vlen, &vltp);
+        const std::uint16_t vltl = wire_langtype_view(vw.d, vw.n, &vltp);
         // string_view 比对，免逐次拷贝；出错时才构造 string 进消息。
         std::string_view vkind =
             vltl ? std::string_view(reinterpret_cast<const char*>(vltp), vltl)
@@ -1781,13 +2010,41 @@ bool h_array_at_set(RwirHandlerCtx& c, std::string* err) {
     const RegDesc& rd0 = c.seg->regs[c.ins.rd[0]];
     const RegDesc& wd0 = c.seg->regs[c.ins.wr[0]];
     const bool same_slot = !rd0.name.empty() && rd0.name == wd0.name;
-    if (same_slot && c.vm.reg_body(c.f, c.ins.rd[0], &ab0, &acap0) && ab0 &&
-        (std::uint64_t)flat * esz + esz <= abody) {
-        ar.body = ab0;
-        ar.cap = acap0;
-        std::memcpy(ab0 + (std::uint64_t)flat * esz, tmp, esz);
-        ar.fast_i64 = false;
-        ar.fast_bool = false;
+    if (same_slot && end_off <= abody) {
+        if (c.vm.reg_body(c.f, c.ins.rd[0], &ab0, &acap0) && ab0) {
+            ar.body = ab0;
+            ar.cap = acap0;
+            std::memcpy(ab0 + off, tmp, esz);
+            ar.fast_i64 = false;
+            ar.fast_bool = false;
+            return true;
+        }
+        // Non-shm backends (`fs://`, `redis://`, `s3://`): partial update via `kvspaceSetPart`.
+        std::string target_key;
+        if (!resolve_dst_slot_key(c, &target_key)) {
+            *err = "xv: bad write slot";
+            return false;
+        }
+        // Follow up to 2 Ptr hops when destination slot holds a `*[]T` pointer.
+        for (int hop = 0; hop < 2; hop++) {
+            const std::uint8_t* td = nullptr;
+            std::uint32_t tn = 0;
+            std::string pt;
+            if (!read_wire_raw(c.f.h, target_key, &td, &tn) ||
+                !v_ptr_target(Wire{td, tn}, &pt) || pt.empty())
+                break;
+            target_key = std::move(pt);
+        }
+        char errbuf[256] = {};
+        if (kvspaceSetPart(c.f.h, target_key.c_str(),
+                           static_cast<std::uint32_t>(KVSPACE_XVALUE_HEAD_LEN + off),
+                           tmp, static_cast<std::uint32_t>(esz), errbuf,
+                           sizeof errbuf) != 0) {
+            *err = std::string("compactarray·set: ") +
+                   (errbuf[0] ? errbuf : "SetPart failed");
+            return false;
+        }
+        c.vm.invalidate_path(c.f, target_key);
         return true;
     }
     *err = "TypeError: compactarray·set requires same write slot "
@@ -1798,8 +2055,6 @@ bool h_array_at_set(RwirHandlerCtx& c, std::string* err) {
 // ── struct·new ─────────────────────────────────────────────────────────────
 // 克隆 /lib/Name 原型子树到写槽，覆盖给定字段（校验字段存在性+类型）。
 // in[0]=structref（"/lib/Name"），其后成对 (字段名, 值)。实例基值 langtype=structref。
-namespace {
-}  // namespace
 
 bool h_struct_new(RwirHandlerCtx& c, std::string* err) {
     // ref 形参：绝对路径字面量（`/lib/Point`）的 RegDesc.name 即路径本体——
@@ -1824,13 +2079,13 @@ bool h_struct_new(RwirHandlerCtx& c, std::string* err) {
         *err = "TypeError: " + ref + " is not a struct type";
         return false;
     }
-    Register& wr0 = c.f.regs[c.ins.wr[0]];
-    if (!c.vm.ensure_reg_key(c.f, wr0)) {
+    std::string base;
+    if (!resolve_dst_slot_key(c, &base)) {
         *err = "struct·new: bad write slot";
         return false;
     }
-    const std::string base = wr0.key;
-    char eb[192] = {};
+    char eb[256] = {};
+    clear_members(c.f.h, base, eb, sizeof eb);
     // 克隆原型成员（默认值：`Point·x` 等）+ 基值，覆盖给定字段。
     if (kvspaceCpList(c.f.h, ref.c_str(), base.c_str(), eb, sizeof eb) != 0) {
         *err = std::string("struct·new: copy failed: ") + eb;
@@ -1886,8 +2141,15 @@ bool h_struct_new(RwirHandlerCtx& c, std::string* err) {
             }
         }
         std::string vlt;
-        (void)c.vm.reg_langtype(c.f, c.ins.rd[i + 1], &vlt);
+        const std::uint8_t* vltp = nullptr;
+        const std::uint16_t vltl = wire_langtype_view(fv.d, fv.n, &vltp);
+        if (vltp && vltl > 0)
+            vlt.assign(reinterpret_cast<const char*>(vltp), vltl);
+        else
+            (void)c.vm.reg_langtype(c.f, c.ins.rd[i + 1], &vlt);
         const bool none = v_is_none(fv);
+        std::uint8_t* cbuf = nullptr;
+        Wire cfv = fv;
         // *T 字段：None 合法；非 None 须 Ptr 且目标种类匹配（剥离前导 *）。
         if (!ftype.empty() && ftype[0] == '*') {
             if (!none &&
@@ -1895,6 +2157,12 @@ bool h_struct_new(RwirHandlerCtx& c, std::string* err) {
                  bare_dims(ftype.substr(1)) != bare_dims(vlt))) {
                 *err = "TypeError: field " + fname + ": expected " + ftype +
                        ", got " + (vlt.empty() ? "None" : vlt);
+                return false;
+            }
+        } else if (!ftype.empty() &&
+                   (is_num_scalar_type(ftype) || ftype == "bool")) {
+            if (!coerce_scalar_wire(ftype, fv, &cbuf, &cfv, err)) {
+                std::free(cbuf);
                 return false;
             }
         } else if (!ftype.empty() &&
@@ -1908,8 +2176,10 @@ bool h_struct_new(RwirHandlerCtx& c, std::string* err) {
         const char* field_lt = (!ftype.empty() && ftype[0] != '*')
                                    ? ftype.c_str()
                                    : vlt.c_str();
-        if (!set_value_typed(c.f.h, mk.c_str(), fv.d, fv.n, field_lt, eb,
-                             sizeof eb)) {
+        const bool sok = set_value_typed(c.f.h, mk.c_str(), cfv.d, cfv.n,
+                                         field_lt, eb, sizeof eb);
+        std::free(cbuf);
+        if (!sok) {
             *err = std::string("struct·new: set field failed: ") + eb;
             return false;
         }
@@ -1919,62 +2189,97 @@ bool h_struct_new(RwirHandlerCtx& c, std::string* err) {
 
 // ── 容器（obj / map·new）───────────────────────────────────────────────────
 bool h_obj_map(RwirHandlerCtx& c, std::string* err) {
+    std::string base_key;
+    if (!resolve_dst_slot_key(c, &base_key)) {
+        *err = std::string("obj: bad write slot: ") + instruction_name(*c.seg, c.ins);
+        return false;
+    }
+    // Read all member operands before clearing old members so self-references (`m = {a: m·b}`) work.
+    std::vector<std::vector<std::uint8_t>> map_elems;
+    std::vector<std::pair<std::string, std::vector<std::uint8_t>>> obj_pairs;
     std::string lt = c.write_slot_lt();
+    while (!lt.empty() && lt[0] == '*')
+        lt.erase(0, 1);
     if (lt.empty())
         lt = "map";
+    if (is_rwir(c.ins, rwir::RwirId::MapNew)) {
+        map_elems.resize(static_cast<std::size_t>(c.ins.nrd));
+        for (int i = 0; i < c.ins.nrd; i++) {
+            Wire ew{};
+            if (!c.vm.read_reg(c.f, c.ins.rd[i], &ew) || !ew.d || !ew.n) {
+                *err = "map: bad element " + std::to_string(i);
+                return false;
+            }
+            map_elems[static_cast<std::size_t>(i)].assign(ew.d, ew.d + ew.n);
+        }
+    } else if (c.ins.nrd >= 2) {
+        const auto dot = lt.find("\xC2\xB7");
+        const std::string_view map_vkind =
+            dot != std::string_view::npos
+                ? std::string_view(lt).substr(dot + 2)
+                : std::string_view();
+        const bool coerce_val =
+            is_num_scalar_type(map_vkind) || map_vkind == "bool";
+        for (int i = 0; i + 1 < c.ins.nrd; i += 2) {
+            Wire kw{};
+            Wire vw{};
+            std::string kname, klt;
+            if (!c.vm.read_reg(c.f, c.ins.rd[i], &kw) ||
+                !c.vm.reg_langtype(c.f, c.ins.rd[i], &klt) ||
+                !wire_text(kw.d, kw.n, klt, &kname) || kname.empty() ||
+                !c.vm.read_reg(c.f, c.ins.rd[i + 1], &vw) || !vw.d || !vw.n) {
+                *err = std::string("obj: bad member pair ") + instruction_name(*c.seg, c.ins);
+                return false;
+            }
+            std::uint8_t* cbuf = nullptr;
+            Wire cvw = vw;
+            if (coerce_val &&
+                !coerce_scalar_wire(map_vkind, vw, &cbuf, &cvw, err)) {
+                std::free(cbuf);
+                return false;
+            }
+            obj_pairs.emplace_back(
+                std::move(kname),
+                std::vector<std::uint8_t>(cvw.d, cvw.d + cvw.n));
+            std::free(cbuf);
+        }
+    }
+    char e[256] = {};
+    clear_members(c.f.h, base_key, e, sizeof e);
     std::uint8_t* mark = nullptr;
     std::uint64_t ml = 0;
-    const std::string ck = c.f.regs[c.ins.wr[0]].key;
     bool ok = kvspaceXvalueHeadNewScalar(KVSPACE_XVALUE_ST_SHORT, nullptr, 0,
                                          lt.c_str(), &mark, &ml) == 0 &&
               mark &&
               c.vm.write_reg(c.f, c.ins.wr[0], mark,
                              static_cast<std::uint32_t>(ml));
     std::free(mark);
-    if (ok) {
-        char e[192] = {};
-        const std::string dir = ck + "/";
-        ok = kvspaceMkindex(c.f.h, dir.c_str(), 0, e, sizeof e) == 0;
-    }
-    if (ok && (is_rwir(c.ins, rwir::RwirId::MapNew) || c.ins.nrd >= 2)) {
-        const std::string base_key = c.f.regs[c.ins.wr[0]].key;
-        char e[192] = {};
-        if (is_rwir(c.ins, rwir::RwirId::MapNew)) {
-            for (int i = 0; i < c.ins.nrd; i++) {
-                Wire ew{};
-                if (!c.vm.read_reg(c.f, c.ins.rd[i], &ew)) {
-                    *err = "map: bad element " + std::to_string(i);
-                    return false;
-                }
-                const std::string mk =
-                    base_key + "\xC2\xB7[" + std::to_string(i) + "]";
-                if (kvspaceSetValue(c.f.h, mk.c_str(), ew.d, ew.n, e, sizeof e) != 0) {
-                    *err = std::string("map: set failed: ") + instruction_name(*c.seg, c.ins);
-                    return false;
-                }
+    if (!ok)
+        return false;
+    if (is_rwir(c.ins, rwir::RwirId::MapNew)) {
+        for (std::size_t i = 0; i < map_elems.size(); i++) {
+            const std::string mk =
+                base_key + "\xC2\xB7[" + std::to_string(i) + "]";
+            const auto& ew = map_elems[i];
+            if (kvspaceSetValue(c.f.h, mk.c_str(), ew.data(),
+                                static_cast<std::uint32_t>(ew.size()), e,
+                                sizeof e) != 0) {
+                *err = std::string("map: set failed: ") + instruction_name(*c.seg, c.ins);
+                return false;
             }
-        } else {
-            // obj 命名成员：读参 [0]=键名,[1]=值,[2]=键名,[3]=值,…
-            for (int i = 0; i + 1 < c.ins.nrd; i += 2) {
-                Wire kw{};
-                Wire vw{};
-                std::string kname, klt;
-                if (!c.vm.read_reg(c.f, c.ins.rd[i], &kw) ||
-                    !c.vm.reg_langtype(c.f, c.ins.rd[i], &klt) ||
-                    !wire_text(kw.d, kw.n, klt, &kname) || kname.empty() ||
-                    !c.vm.read_reg(c.f, c.ins.rd[i + 1], &vw)) {
-                    *err = std::string("obj: bad member pair ") + instruction_name(*c.seg, c.ins);
-                    return false;
-                }
-                const std::string mk = base_key + "\xC2\xB7" + kname;
-                if (kvspaceSetValue(c.f.h, mk.c_str(), vw.d, vw.n, e, sizeof e) != 0) {
-                    *err = std::string("obj: set failed: ") + instruction_name(*c.seg, c.ins);
-                    return false;
-                }
+        }
+    } else if (!obj_pairs.empty()) {
+        for (const auto& kv : obj_pairs) {
+            const std::string mk = base_key + "\xC2\xB7" + kv.first;
+            if (kvspaceSetValue(c.f.h, mk.c_str(), kv.second.data(),
+                                static_cast<std::uint32_t>(kv.second.size()), e,
+                                sizeof e) != 0) {
+                *err = std::string("obj: set failed: ") + instruction_name(*c.seg, c.ins);
+                return false;
             }
         }
     }
-    return ok;
+    return true;
 }
 
 // ── kvlang（abs）───────────────────────────────────────────────────────────
@@ -1983,7 +2288,10 @@ bool h_kvlang_abs(RwirHandlerCtx& c, std::string* err) {
     std::string k0;
     const RegDesc& ad = c.seg->regs[c.ins.rd[0]];
     bool ok = true;
-    if (ad.kind == Operand::Kind::Literal) {
+    if (c.ins.nrd >= 2) {
+        // Member address `&t·2` / `&p·left`: `kvlang·abs(base, seg...)` resolves via `member_path`.
+        ok = c.vm.member_path(c.f, c.ins, &k0);
+    } else if (ad.kind == Operand::Kind::Literal) {
         ok = c.atext(0, &k0);
     } else if (ad.name[0] == '/') {
         k0 = ad.name.substr(0, ad.name.find(' '));  // 剥类型后缀
@@ -1991,9 +2299,64 @@ bool h_kvlang_abs(RwirHandlerCtx& c, std::string* err) {
         // 变量帧 key 惰性：`&x` 前 x 未必写过（链表 `{next=&n3}` 先于 n3 再写），
         // 必须 ensure_reg_key 才拿得到路径（&n3 恒指向已建实例的槽 key）。
         Register& ar = c.f.regs[c.ins.rd[0]];
-        if (!c.vm.ensure_reg_key(c.f, ar))
-            return false;
-        k0 = ar.key;
+        Register* owner = &ar;
+        while (owner->src_ptr || owner->dst_ptr)
+            owner = owner->src_ptr ? owner->src_ptr : owner->dst_ptr;
+        if (owner == &ar) {
+            if (!c.vm.ensure_reg_key(c.f, ar))
+                return false;
+            k0 = ar.key;
+        } else if (!owner->key.empty()) {
+            k0 = owner->key;
+            ar.key = k0;
+        } else {
+            if (!c.vm.ensure_reg_key(c.f, ar))
+                return false;
+            k0 = ar.key;
+        }
+        // Address-taken local (`&x`): flush fast-cached `int64`/`bool` to `k0`, bind view on `shm://`,
+        // or set `kv_pinned` and clear fast caches on non-shm backends so `x` and `*p` stay synced.
+        if ((owner->fast_i64 || owner->fast_bool) &&
+            !(owner->view_ok && owner->body) && !k0.empty()) {
+            const std::uint8_t b = owner->fb ? 1 : 0;
+            std::uint8_t* wb = nullptr;
+            std::uint64_t wl = 0;
+            char be[256] = {};
+            const bool wok =
+                kvspaceXvalueHeadNewScalar(
+                    0,
+                    owner->fast_i64
+                        ? reinterpret_cast<const std::uint8_t*>(&owner->fv)
+                        : &b,
+                    owner->fast_i64 ? 8 : 1,
+                    owner->fast_i64 ? "int64" : "bool", &wb, &wl) == 0 &&
+                wb &&
+                kvspaceSetValue(c.f.h, k0.c_str(), wb,
+                                static_cast<std::uint32_t>(wl), be,
+                                sizeof be) == 0;
+            std::free(wb);
+            if (!wok) {
+                *err = std::string("native: &x materialize failed: ") + be;
+                return false;
+            }
+            owner->kv_live = true;
+            ar.kv_live = true;
+            owner->resolved = false;
+            owner->noslot = false;
+            ar.resolved = false;
+            ar.noslot = false;
+        }
+        owner->kv_pinned = true;
+        ar.kv_pinned = true;
+        std::uint8_t* body = nullptr;
+        std::uint64_t cap = 0;
+        (void)c.vm.reg_body(c.f, c.ins.rd[0], &body, &cap);
+        if (!(ar.view_ok && ar.body)) {
+            ar.fast_i64 = false;
+            ar.fast_bool = false;
+            owner->fast_i64 = false;
+            owner->fast_bool = false;
+        }
     }
     if (!ok || k0.empty()) {
         *err = std::string("rwir handler: bad path operand: ") + instruction_name(*c.seg, c.ins);
@@ -2118,7 +2481,7 @@ bool h_vthread_call(RwirHandlerCtx& c, std::string* err) {
     nfc.depth = c.f.depth + 1;
     nfc.frame = g_vmkv.frame_root(nfc.vid, nfc.depth);
     nfc.func_dir = key;
-    nfc.mem_frame = cseg && !cseg->has_rwirhandler;
+    nfc.mem_frame = cseg && !cseg->has_rwirhandler && !segment_may_stop(c.f.h, cseg);
     nfc.observable = c.f.observable;  // 同 vid 动态调用：可观察链继承父
     // 非纯内存帧需建帧目录 + 系统变量（returnpc 指向本指令下一行）。
     if (!nfc.mem_frame) {
@@ -2190,6 +2553,8 @@ bool h_vthread_setstatus(RwirHandlerCtx& c, std::string* err) {
         *err = "vthread·setstatus: pc failed";
         return false;
     }
+    if (st != "init" && st != "running" && st != "wait")
+        c.yield_pc = next_pc;
     return true;
 }
 
@@ -2205,21 +2570,9 @@ bool kv_fail(RwirHandlerCtx& c, bool ok, char* errbuf, std::string* err) {
 
 bool wire_langtype(Wire wire, std::string* out) {
     out->clear();
-    if (!wire.d || wire.n < KVSPACE_XVALUE_HEAD_LEN + 2)
-        return false;
-    const std::uint64_t body_len = kvspaceXvalueHeadLen(
-        reinterpret_cast<const kvspaceXvalueHead*>(wire.d));
-    if (body_len > wire.n - KVSPACE_XVALUE_HEAD_LEN - 2)
-        return false;
-    const std::size_t attr_offset = KVSPACE_XVALUE_HEAD_LEN + body_len;
-    const std::uint16_t attr_len = static_cast<std::uint16_t>(
-        wire.d[attr_offset] |
-        (static_cast<std::uint16_t>(wire.d[attr_offset + 1]) << 8));
-    if (attr_len < 2 || attr_offset + attr_len > wire.n)
-        return false;
     const std::uint8_t* langtype = nullptr;
     const std::uint16_t langtype_len =
-        kvspaceXvalueHeadLangtype(wire.d, body_len, &langtype);
+        wire_langtype_view(wire.d, wire.n, &langtype);
     if (!langtype || langtype_len == 0)
         return false;
     out->assign(reinterpret_cast<const char*>(langtype), langtype_len);
@@ -2265,24 +2618,28 @@ bool direct_kv_path(RwirHandlerCtx& c, int index, std::string* out) {
 
 bool format_member_float(double value, std::uint8_t width, std::string* out) {
     char text[64];
-    std::to_chars_result result;
     if (width == 4) {
         const float narrowed = static_cast<float>(value);
         if (!std::isfinite(narrowed))
             return false;
-        result = std::to_chars(text, text + sizeof text, narrowed,
-                               std::chars_format::general);
+        for (int p = 1; p <= 9; p++) {
+            std::snprintf(text, sizeof text, "%.*g", p,
+                          static_cast<double>(narrowed));
+            if (std::strtof(text, nullptr) == narrowed)
+                break;
+        }
     } else if (width == 8) {
         if (!std::isfinite(value))
             return false;
-        result = std::to_chars(text, text + sizeof text, value,
-                               std::chars_format::general);
+        for (int p = 1; p <= 17; p++) {
+            std::snprintf(text, sizeof text, "%.*g", p, value);
+            if (std::strtod(text, nullptr) == value)
+                break;
+        }
     } else {
         return false;
     }
-    if (result.ec != std::errc{})
-        return false;
-    out->assign(text, result.ptr);
+    *out = text;
     if (out->find_first_of(".eE") == std::string::npos)
         out->append(".0");
     return true;
@@ -2355,10 +2712,21 @@ bool member_path(RwirHandlerCtx& c, std::string* base_path,
     std::string langtype;
     const bool has_langtype = operand_langtype(c, 0, base, &langtype);
     *base_is_none = !has_langtype && v_is_none(base);
+    auto strip_ptr = [](std::string s) {
+        while (!s.empty() && s.front() == '*')
+            s.erase(0, 1);
+        return s.empty() ? std::string("?") : s;
+    };
     if (v_ptr(base)) {
-        if (!has_langtype || !is_member_container(langtype) ||
-            !v_ptr_target(base, base_path) || base_path->empty()) {
-            *err = "TypeError: kvspace member base Ptr target must be a struct/map container";
+        const std::string target_lt = strip_ptr(langtype);
+        if (!has_langtype || !is_member_container(target_lt)) {
+            *err = std::string("TypeError: ") + instruction_name(*c.seg, c.ins) +
+                   ": member access requires a container (struct/map), got " +
+                   target_lt + "; compact arrays use [] indexing";
+            return false;
+        }
+        if (!v_ptr_target(base, base_path) || base_path->empty()) {
+            *err = "TypeError: kvspace member base Ptr target has no physical path";
             return false;
         }
     } else if (has_langtype && is_member_container(langtype)) {
@@ -2378,7 +2746,9 @@ bool member_path(RwirHandlerCtx& c, std::string* base_path,
             return false;
         }
     } else {
-        *err = "TypeError: kvspace member access requires a struct/map container or path string";
+        *err = std::string("TypeError: ") + instruction_name(*c.seg, c.ins) +
+               ": member access requires a container (struct/map), got " +
+               strip_ptr(langtype) + "; compact arrays use [] indexing";
         return false;
     }
 

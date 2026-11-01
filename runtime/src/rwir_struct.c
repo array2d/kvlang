@@ -84,6 +84,15 @@ int kvlangBuiltinStructNew(kvlangFrame_t *f) {
                                 : true);
             if (ftype[0] == '*' && !kvlangXvalueNone(&cv) && !xh_is_ptr(cv.bytes))
                 type_ok = false;
+            if (!type_ok && kvlangXvalueNone(&in[i + 1]) &&
+                kvlangTypeIsNumScalar(ftype)) {
+                rc = kvlangBuiltinSetError(
+                    f, "TypeError: cannot write None to %s slot (field %s)",
+                    ftype, fname);
+                free(ftype);
+                free(fname);
+                break;
+            }
             if (ftype[0] && !type_ok) {
                 rc = kvlangBuiltinSetError(
                     f, "TypeError: field %s: expected %s, got %s", fname, ftype,

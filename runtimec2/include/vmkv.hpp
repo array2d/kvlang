@@ -67,6 +67,13 @@ struct Vmkv {
     const char* kind_name(Scalar::K kind, std::uint8_t width);
     bool write_named_i64(void* handle, std::uint8_t index, vmbin::Frame& frame,
                          const char* kind, std::int64_t value);
+    // Format `ridx` as a member key segment (dereferencing Ptr params first).
+    bool member_key_text(vmbin::Frame& frame, std::uint8_t ridx, std::string* out,
+                         std::string* err = nullptr);
+    // Resolve absolute key for member chain `base·k1·...·kn` (`rd[0]` = base, `rd[1..nrd-1]` = segments),
+    // dereferencing intermediate Ptr segments without dereferencing the final leaf.
+    bool member_path(vmbin::Frame& frame, const vmbin::Instruction& ins,
+                     std::string* key, std::string* err = nullptr);
 
     bool truthy(const Scalar& scalar);
     bool is_cmp(rwir::Op op);
@@ -78,7 +85,7 @@ struct Vmkv {
                  const Scalar& right, bool* out);
 
     bool enter_frame(vmbin::Frame& frame, const vmbin::Program* program,
-                     std::string* err);
+                     bool resumed, std::string* err);
     vmbin::Outcome run_frame(vmbin::Frame& frame, int start_s0,
                              std::string* stop_pc, std::string* err);
     vmbin::Outcome do_call(vmbin::Frame& frame, const vmbin::Program* program,
