@@ -168,6 +168,11 @@ set_tests_properties(c2_unknown_rwir_rejected PROPERTIES TIMEOUT 120)
 add_test(NAME c2_m1_smoke
          COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/m1_smoke.sh
                  $<TARGET_FILE:m1_smoke>)
+# 回归：嵌套调用触发 Stop 时，调用方帧的纯内存 int64/bool 局部须先落槽。
+add_test(NAME c2_frame_local_flush
+         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/frame_local_flush.sh
+                 ${CMAKE_CURRENT_SOURCE_DIR}/../bin/byteseek)
+set_tests_properties(c2_frame_local_flush PROPERTIES TIMEOUT 120)
 add_test(NAME c2_kvspace_dynamic_ops
          COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/kvspace_dynamic_ops.sh
                  $<TARGET_FILE:m1_smoke>

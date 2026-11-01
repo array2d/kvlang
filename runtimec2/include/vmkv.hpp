@@ -44,7 +44,11 @@ struct Vmkv {
     bool read_scalar(vmbin::Frame& frame, std::uint8_t index, Scalar* out);
     bool read_i64(vmbin::Frame& frame, std::uint8_t index, std::int64_t* out);
     bool read_bool(vmbin::Frame& frame, std::uint8_t index, bool* out);
-    void flush_frame_locals(vmbin::Frame& frame);
+    // skip：本次 Stop 所属调用的**非内存别名写参**（值由被调方写穿 kvspace，
+    // 调用方缓存可能陈旧）；Stop 冲刷时跳过它们，返回点统一失效重读。
+    void flush_frame_locals(vmbin::Frame& frame,
+                            const vmbin::Register* const* skip = nullptr,
+                            int skip_n = 0);
     void invalidate_path(vmbin::Frame& frame, std::string_view path);
     bool write_reg(vmbin::Frame& frame, std::uint8_t index,
                    const std::uint8_t* data, std::uint32_t len);
