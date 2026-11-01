@@ -893,7 +893,7 @@ pub fn write_func(
             .map(|(label, irseq)| {
                 (
                     keytree::lib_label(pkg, &fn_.sig.name, label),
-                    String::new(), // ‥labels 段系统键：无类型、不写 attr
+                    "int64".to_string(), // 规范：‥labels/<label> kind int64
                     ffi::new_int64(*irseq as i64),
                 )
             })
