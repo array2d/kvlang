@@ -1,0 +1,12 @@
+// 回归：比较结果（bool 快缓存）在「中间调用触发 Stop」之后必须保留。
+// 期望输出:
+//   other
+//   b = true
+rwfunc other() -> () {
+	println("other")
+}
+rwfunc test() -> () {
+	b = 1 < 2
+	other()
+	println("b =", b)
+}

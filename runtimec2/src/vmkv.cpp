@@ -612,10 +612,19 @@ bool Vmkv::is_frame_local(const Frame& f, const std::string& rk) {
 
 // 冲刷帧局部纯内存变量落明文（Stop/handler 边界前；子帧无 handler 则免）。
 // 仅对 fast 缓存有效但无 kvspace 槽的变量落一次明文，后续 read 走明文/新 view。
-void Vmkv::flush_frame_locals(Frame& f) {
+void Vmkv::flush_frame_locals(Frame& f, const Register* const* skip,
+                              int skip_n) {
     std::uint8_t* buf = nullptr;
     std::uint64_t len64 = 0;
     for (Register& r : f.regs) {
+        bool skipped = false;
+        for (int k = 0; k < skip_n; k++)
+            if (skip[k] == &r) {
+                skipped = true;
+                break;
+            }
+        if (skipped)
+            continue;
         if (r.view_ok || r.src_ptr || r.dst_ptr)
             continue;
         // 惰性 key：普通变量（desc_ref 或 desc 非 Ptr/绝对路径）帧入口未解析 key，
@@ -3533,6 +3542,27 @@ vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
         nfc.mem_frame = true;
     }
     Outcome rr = run_frame(nfc, 1, stop_pc, err);
+    // 嵌套帧 Stop 是观察点：驱动层会销毁调用方帧，resume 时按 pc 重建并
+    // enter_frame 重置寄存器；只存在于 fast 缓存的 int64/bool 帧局部（纯内存
+    // 写，无 kvspace 槽）必须在此落槽，否则重入后读到空值。
+    if (rr == Outcome::Stop) {
+        // 被挂起调用的写参若走 kvspace arg（非内存别名），其值由被调方写穿，
+        // 调用方缓存可能陈旧；Stop 冲刷必须跳过，避免用旧缓存覆盖新值。
+        // 返回点会统一失效这些寄存器并重读。
+        const Register* skip[4];
+        int skip_n = 0;
+        for (int i = 0; i < ins.nwr && skip_n < 4; i++) {
+            bool aliased = false;
+            for (int j = 0; j < mem_dst_n; j++)
+                if (mem_dst[j] == &f.regs[ins.wr[i]]) {
+                    aliased = true;
+                    break;
+                }
+            if (!aliased)
+                skip[skip_n++] = &f.regs[ins.wr[i]];
+        }
+        flush_frame_locals(f, skip, skip_n);
+    }
     if (rr != Outcome::Ok && rr != Outcome::Returned)
         return rr;
     // answer-017 V1：别名写参落在参数寄存器时，值只在调用方 fast 缓存；该寄存器
