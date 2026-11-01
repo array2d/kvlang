@@ -227,7 +227,7 @@ void appendf(std::string* out, const char* fmt, ...) {
 
 }  // namespace
 
-void dump_binir(const Segment& seg, const char* func_dir) {
+std::string render_binir(const Segment& seg, const char* func_dir) {
     const SlotMap m = build_slot_map(seg);
 
     bool has_handler = seg.has_rwirhandler;
@@ -285,9 +285,17 @@ void dump_binir(const Segment& seg, const char* func_dir) {
                                    static_cast<double>(total)
                              : 0.0;
     appendf(&out, "  exit: JIT %zu / INTERP %zu  (%.1f%%)\n", jit_n, interp_n, pct);
+    return out;
+}
 
-    std::fwrite(out.data(), 1, out.size(), stderr);
-    std::fflush(stderr);
+void dump_binir_to(std::FILE* out, const Segment& seg, const char* func_dir) {
+    const std::string text = render_binir(seg, func_dir);
+    std::fwrite(text.data(), 1, text.size(), out);
+    std::fflush(out);
+}
+
+void dump_binir(const Segment& seg, const char* func_dir) {
+    dump_binir_to(stderr, seg, func_dir);
 }
 
 }  // namespace kvlang::runtimec2

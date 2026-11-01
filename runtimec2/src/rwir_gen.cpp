@@ -1,28 +1,96 @@
 /* myrwircap 唯一事实源：runtimec2 支持的全部 rwir。表即代码，手写维护。 */
 #include "rwir.hpp"
+#include "rwir_signature.hpp"
 
 namespace kvlang::runtimec2::rwir {
 
+// 语义算子签名：spec §语义算子参数 union 的唯一转录。
+const OpSignature kSigArith{kNumeric, 2, 2, OpSignature::Result::Promoted};
+const OpSignature kSigArithOrNeg{kNumeric, 1, 2, OpSignature::Result::Promoted};
+const OpSignature kSigMod{kInts, 2, 2, OpSignature::Result::Promoted};
+const OpSignature kSigMinMax{kNumeric, 2, 0, OpSignature::Result::Promoted};
+const OpSignature kSigBit{kInts, 2, 2, OpSignature::Result::Promoted};
+const OpSignature kSigNegAbs{kNumeric, 1, 1, OpSignature::Result::Same};
+const OpSignature kSigSign{kNumeric, 1, 1, OpSignature::Result::Same};
+const OpSignature kSigFloat64Unary{kNumeric, 1, 1, OpSignature::Result::Float64};
+const OpSignature kSigFloat64Binary{kNumeric, 2, 2, OpSignature::Result::Float64};
+const OpSignature kSigCompare{kNumeric | type_bit(ScalarClass::Bool), 2, 2,
+                              OpSignature::Result::Bool};
+const OpSignature kSigBoolUnary{type_bit(ScalarClass::Bool), 1, 1,
+                                OpSignature::Result::Bool};
+const OpSignature kSigBoolBinary{type_bit(ScalarClass::Bool), 2, 2,
+                                 OpSignature::Result::Bool};
+const OpSignature kSigCast{kAny, 1, 1, OpSignature::Result::Target};
+
+const OpSignature* signature_of(Op op) noexcept {
+    switch (op) {
+    case Op::Add:
+    case Op::Mul:
+    case Op::Div:
+        return &kSigArith;
+    case Op::Sub:
+        return &kSigArithOrNeg;
+    case Op::Mod:
+        return &kSigMod;
+    case Op::Max:
+    case Op::Min:
+        return &kSigMinMax;
+    case Op::BitAnd:
+    case Op::BitOr:
+    case Op::BitXor:
+    case Op::Shl:
+    case Op::Shr:
+        return &kSigBit;
+    case Op::Neg:
+    case Op::Abs:
+        return &kSigNegAbs;
+    case Op::Sign:
+        return &kSigSign;
+    case Op::Sqrt:
+    case Op::Exp:
+    case Op::Log:
+        return &kSigFloat64Unary;
+    case Op::Pow:
+        return &kSigFloat64Binary;
+    case Op::Eq:
+    case Op::Neq:
+    case Op::Lt:
+    case Op::Le:
+    case Op::Gt:
+    case Op::Ge:
+        return &kSigCompare;
+    case Op::Not:
+        return &kSigBoolUnary;
+    case Op::And:
+    case Op::Or:
+        return &kSigBoolBinary;
+    case Op::Cast:
+        return &kSigCast;
+    default:
+        return nullptr;
+    }
+}
+
 const Entry myrwircaps[] = {
-    {"!", Op::Not, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"!=", Op::Neq, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"%", Op::Mod, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"&", Op::BitAnd, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"&&", Op::And, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"+", Op::Add, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"-", Op::Sub, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"<", Op::Lt, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"<<", Op::Shl, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"<=", Op::Le, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
+    {"!", Op::Not, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigBoolUnary},
+    {"!=", Op::Neq, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigCompare},
+    {"%", Op::Mod, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigMod},
+    {"&", Op::BitAnd, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigBit},
+    {"&&", Op::And, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigBoolBinary},
+    {"+", Op::Add, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigArith},
+    {"-", Op::Sub, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigArithOrNeg},
+    {"<", Op::Lt, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigCompare},
+    {"<<", Op::Shl, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigBit},
+    {"<=", Op::Le, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigCompare},
     {"=", Op::Copy, Kind::None, 0, Class::Base, Impl::Control, RwirHandlerId::None},
-    {"==", Op::Eq, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {">", Op::Gt, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {">=", Op::Ge, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {">>", Op::Shr, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"^", Op::BitXor, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"abs", Op::Abs, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"add", Op::Add, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"and", Op::And, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
+    {"==", Op::Eq, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigCompare},
+    {">", Op::Gt, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigCompare},
+    {">=", Op::Ge, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigCompare},
+    {">>", Op::Shr, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigBit},
+    {"^", Op::BitXor, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigBit},
+    {"abs", Op::Abs, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigNegAbs},
+    {"add", Op::Add, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigArith},
+    {"and", Op::And, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigBoolBinary},
     {"compactarray·new", Op::None, Kind::None, 0, Class::Complex, Impl::None, RwirHandlerId::ArrayNew},
     {"compactarray·copy", Op::None, Kind::None, 0, Class::Complex, Impl::None, RwirHandlerId::ArrayCopy},
     {"compactarray·newslice", Op::None, Kind::None, 0, Class::Complex, Impl::None, RwirHandlerId::ArrayNewSlice},
@@ -35,18 +103,18 @@ const Entry myrwircaps[] = {
     {"scatterarray·at", Op::None, Kind::None, 0, Class::Complex, Impl::None, RwirHandlerId::ScatterAt},
     {"scatterarray·set", Op::None, Kind::None, 0, Class::Complex, Impl::None, RwirHandlerId::ScatterSet},
     {"scatterarray·slice", Op::None, Kind::None, 0, Class::Complex, Impl::None, RwirHandlerId::ScatterSlice},
-    {"bitand", Op::BitAnd, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"bitor", Op::BitOr, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"bitxor", Op::BitXor, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
+    {"bitand", Op::BitAnd, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigBit},
+    {"bitor", Op::BitOr, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigBit},
+    {"bitxor", Op::BitXor, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigBit},
     {"bool", Op::Bool, Kind::None, 0, Class::Base, Impl::Control, RwirHandlerId::None},
     {"br", Op::Br, Kind::None, 0, Class::Base, Impl::Control, RwirHandlerId::None},
     {"call", Op::Call, Kind::None, 0, Class::Base, Impl::Control, RwirHandlerId::None},
-    {"char/ascii", Op::Cast, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"char/utf32", Op::Cast, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"char/utf8", Op::Cast, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"div", Op::Div, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"eq", Op::Eq, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"exp", Op::Exp, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
+    {"char/ascii", Op::Cast, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigCast},
+    {"char/utf32", Op::Cast, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigCast},
+    {"char/utf8", Op::Cast, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigCast},
+    {"div", Op::Div, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigArith},
+    {"eq", Op::Eq, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigCompare},
+    {"exp", Op::Exp, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigFloat64Unary},
     {"float32", Op::Cast, Kind::Float, 4, Class::Base, Impl::Typed, RwirHandlerId::None},
     {"float32·abs", Op::Abs, Kind::Float, 4, Class::Base, Impl::Typed, RwirHandlerId::None},
     {"float32·add", Op::Add, Kind::Float, 4, Class::Base, Impl::Typed, RwirHandlerId::None},
@@ -82,9 +150,9 @@ const Entry myrwircaps[] = {
     {"float64·sign", Op::Sign, Kind::Float, 8, Class::Base, Impl::Typed, RwirHandlerId::None},
     {"float64·sqrt", Op::Sqrt, Kind::Float, 8, Class::Base, Impl::Typed, RwirHandlerId::None},
     {"float64·sub", Op::Sub, Kind::Float, 8, Class::Base, Impl::Typed, RwirHandlerId::None},
-    {"ge", Op::Ge, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
+    {"ge", Op::Ge, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigCompare},
     {"goto", Op::Goto, Kind::None, 0, Class::Base, Impl::Control, RwirHandlerId::None},
-    {"gt", Op::Gt, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
+    {"gt", Op::Gt, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigCompare},
     {"int16", Op::Cast, Kind::Int, 2, Class::Base, Impl::Typed, RwirHandlerId::None},
     {"int16·abs", Op::Abs, Kind::Int, 2, Class::Base, Impl::Typed, RwirHandlerId::None},
     {"int16·add", Op::Add, Kind::Int, 2, Class::Base, Impl::Typed, RwirHandlerId::None},
@@ -169,31 +237,31 @@ const Entry myrwircaps[] = {
     {"kvspace·rmindexext", Op::None, Kind::None, 0, Class::Complex, Impl::None, RwirHandlerId::KvspaceRemoveExternalIndex},
     {"kvspace·set", Op::None, Kind::None, 0, Class::Complex, Impl::None, RwirHandlerId::KvspaceSet},
     {"kvspace·watch", Op::None, Kind::None, 0, Class::Complex, Impl::Handoff, RwirHandlerId::None},
-    {"le", Op::Le, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"log", Op::Log, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"lt", Op::Lt, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
+    {"le", Op::Le, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigCompare},
+    {"log", Op::Log, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigFloat64Unary},
+    {"lt", Op::Lt, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigCompare},
     {"map·new", Op::None, Kind::None, 0, Class::Complex, Impl::None, RwirHandlerId::ObjectMap},
-    {"max", Op::Max, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"min", Op::Min, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"mod", Op::Mod, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"mul", Op::Mul, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
+    {"max", Op::Max, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigMinMax},
+    {"min", Op::Min, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigMinMax},
+    {"mod", Op::Mod, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigMod},
+    {"mul", Op::Mul, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigArith},
     {"compactarray·dim", Op::None, Kind::None, 0, Class::Complex, Impl::None, RwirHandlerId::ArrayMetadata},
     {"compactarray·numel", Op::None, Kind::None, 0, Class::Complex, Impl::None, RwirHandlerId::ArrayMetadata},
     {"compactarray·shape", Op::None, Kind::None, 0, Class::Complex, Impl::None, RwirHandlerId::ArrayMetadata},
-    {"neg", Op::Neg, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"neq", Op::Neq, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"not", Op::Not, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
+    {"neg", Op::Neg, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigNegAbs},
+    {"neq", Op::Neq, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigCompare},
+    {"not", Op::Not, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigBoolUnary},
     {"obj", Op::None, Kind::None, 0, Class::Complex, Impl::None, RwirHandlerId::ObjectMap},
-    {"or", Op::Or, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"pow", Op::Pow, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
+    {"or", Op::Or, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigBoolBinary},
+    {"pow", Op::Pow, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigFloat64Binary},
     {"random·int63", Op::None, Kind::None, 0, Class::Complex, Impl::None, RwirHandlerId::RandomNumber},
     {"random·intn", Op::None, Kind::None, 0, Class::Complex, Impl::None, RwirHandlerId::RandomNumber},
     {"random·uint64", Op::None, Kind::None, 0, Class::Complex, Impl::None, RwirHandlerId::RandomNumber},
     {"return", Op::Return, Kind::None, 0, Class::Base, Impl::Control, RwirHandlerId::None},
-    {"shl", Op::Shl, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"shr", Op::Shr, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"sign", Op::Sign, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"sqrt", Op::Sqrt, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
+    {"shl", Op::Shl, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigBit},
+    {"shr", Op::Shr, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigBit},
+    {"sign", Op::Sign, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigSign},
+    {"sqrt", Op::Sqrt, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigFloat64Unary},
     {"string·char", Op::None, Kind::None, 0, Class::Complex, Impl::None, RwirHandlerId::StringCharacter},
     {"string·cmp", Op::None, Kind::None, 0, Class::Complex, Impl::None, RwirHandlerId::StringCompare},
     {"string·concat", Op::None, Kind::None, 0, Class::Complex, Impl::None, RwirHandlerId::StringConcatenate},
@@ -208,7 +276,7 @@ const Entry myrwircaps[] = {
     {"string·set", Op::None, Kind::None, 0, Class::Complex, Impl::None, RwirHandlerId::StringSet},
     {"string·slice", Op::None, Kind::None, 0, Class::Complex, Impl::None, RwirHandlerId::StringSlice},
     {"struct·new", Op::None, Kind::None, 0, Class::Complex, Impl::None, RwirHandlerId::StructNew},
-    {"sub", Op::Sub, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
+    {"sub", Op::Sub, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigArithOrNeg},
     {"time/duration·add", Op::None, Kind::None, 0, Class::Complex, Impl::None, RwirHandlerId::TimeArithmetic},
     {"time/duration·after", Op::None, Kind::None, 0, Class::Complex, Impl::None, RwirHandlerId::TimeArithmetic},
     {"time/duration·as_hours", Op::None, Kind::None, 0, Class::Complex, Impl::None, RwirHandlerId::DurationAs},
@@ -301,14 +369,14 @@ const Entry myrwircaps[] = {
     {"compactarray·newreinterpret", Op::None, Kind::None, 0, Class::Complex, Impl::None, RwirHandlerId::XvalueMetadata},
     {"compactarray·newreshape", Op::None, Kind::None, 0, Class::Complex, Impl::None, RwirHandlerId::ArrayReshape},
     {"compactarray·set", Op::None, Kind::None, 0, Class::Complex, Impl::None, RwirHandlerId::ArrayElementAccess},
-    {"|", Op::BitOr, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"||", Op::Or, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"×", Op::Mul, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"÷", Op::Div, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"√", Op::Sqrt, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"≠", Op::Neq, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"≤", Op::Le, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
-    {"≥", Op::Ge, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None},
+    {"|", Op::BitOr, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigBit},
+    {"||", Op::Or, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigBoolBinary},
+    {"×", Op::Mul, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigArith},
+    {"÷", Op::Div, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigArith},
+    {"√", Op::Sqrt, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigFloat64Unary},
+    {"≠", Op::Neq, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigCompare},
+    {"≤", Op::Le, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigCompare},
+    {"≥", Op::Ge, Kind::Any, 0, Class::Complex, Impl::Dynamic, RwirHandlerId::None, &kSigCompare},
 };
 
 const int kMyrwircapsN = 305;

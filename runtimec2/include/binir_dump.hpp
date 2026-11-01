@@ -1,7 +1,9 @@
 #pragma once
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 
 #include "codeseg.hpp"
 
@@ -29,6 +31,11 @@ inline bool binir_dump_on_run() {
     return m && std::strcmp(m, "all") == 0;
 }
 
+// 渲染为文本（纯函数，不写任何流）。
+std::string render_binir(const Segment& seg, const char* func_dir);
+// 写指定流（运行时的 RC2_DUMP_BINIR 走 stderr；工具 dump 走 stdout）。
+void dump_binir_to(std::FILE* out, const Segment& seg, const char* func_dir);
+// 兼容入口：运行时行为不变（stderr）。
 void dump_binir(const Segment& seg, const char* func_dir);
 
 }  // namespace kvlang::runtimec2

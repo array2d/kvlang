@@ -134,7 +134,7 @@ TABLE_ENTRY_RE = re.compile(
     r'^\s*\{"(?P<name>[^"]+)",\s+(?P<op>Op::\w+),\s+'
     r'(?P<kind>Kind::\w+),\s+(?P<width>\d+),\s+'
     r'(?P<policy>Class::\w+),\s+(?P<impl>Impl::\w+),\s+'
-    r'(?P<handler>RwirHandlerId::\w+)\},\s*$',
+    r'(?P<handler>RwirHandlerId::\w+)(?:,\s*&(?P<signature>kSig\w+))?\},\s*$',
     re.MULTILINE,
 )
 
@@ -148,6 +148,7 @@ class Entry:
     policy: str
     impl: str
     handler: str
+    signature: str | None = None
 
 
 def load_table(errors):
@@ -161,6 +162,7 @@ def load_table(errors):
             match.group("policy"),
             match.group("impl"),
             match.group("handler"),
+            match.group("signature"),
         )
         for match in TABLE_ENTRY_RE.finditer(source)
     ]
@@ -187,6 +189,10 @@ def check_contract(entries, errors):
     for entry in entries:
         impl = entry.impl.removeprefix("Impl::")
         counts[impl if impl != "None" else "handler"] += 1
+        if impl != "Dynamic" and entry.signature is not None:
+            errors.append(
+                f"non-dynamic opcode must not carry a union signature: {entry.name}"
+            )
         if impl == "Typed":
             if entry.op not in TYPED_OPS.get((entry.kind, entry.width), set()):
                 errors.append(
@@ -196,6 +202,10 @@ def check_contract(entries, errors):
             if entry.handler != "RwirHandlerId::None":
                 errors.append(f"inline opcode must not carry a handler: {entry.name}")
         elif impl == "Dynamic":
+            if entry.signature is None:
+                errors.append(
+                    f"dynamic opcode missing union signature: {entry.name}"
+                )
             if entry.kind != "Kind::Any" or entry.width != 0 or entry.op not in DYNAMIC_OPS:
                 errors.append(
                     f"dynamic opcode lacks dispatch contract: {entry.name} "

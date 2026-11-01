@@ -123,6 +123,17 @@ def main() -> int:
         dsn = f"shm://{tmp}/store.shm"
         source = Path(tmp) / "case.kv"
         source.write_text(SOURCE, encoding="utf-8")
+        # 严格调用名规则：裸 `print` 需要 stdlib/扩展的 def rwir 声明才能被
+        # layout 解析。先按运行时同一路径 boot（stdlib layout + 扩展注册），
+        # 再 layout 本用例。
+        boot = subprocess.run(
+            [str(root / "bin" / "byteseek"), "-c", 'print("boot")'],
+            env={**env, "KVSPACE": dsn},
+            capture_output=True,
+            text=True,
+        )
+        if boot.returncode != 0:
+            raise SystemExit(f"FAIL: stdlib boot: {boot.stderr.strip()[:300]}")
         layout = subprocess.run(
             [str(args.layout), str(source), dsn], env=env,
             capture_output=True, text=True,
