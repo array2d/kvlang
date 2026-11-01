@@ -212,30 +212,31 @@ pub fn is_char_kind(k: &str) -> bool {
 // dynamic=末读参变参（arity，非 langtype）。
 
 /// 计数头 [nr:u16 LE][nw:u16 LE][dynamic:u8]（定义体，无参数载荷）。
-fn counts_body(nr: i32, nw: i32, dynamic: bool) -> Vec<u8> {
+/// Return `Err` instead of panicking when read/write arg count exceeds `u16::MAX`.
+fn counts_body(nr: i32, nw: i32, dynamic: bool) -> Result<Vec<u8>, String> {
     let mut raw = Vec::with_capacity(5);
-    let nr = u16::try_from(nr).expect("read count exceeds u16");
-    let nw = u16::try_from(nw).expect("write count exceeds u16");
+    let nr = u16::try_from(nr).map_err(|_| format!("read count {nr} exceeds 65535"))?;
+    let nw = u16::try_from(nw).map_err(|_| format!("write count {nw} exceeds 65535"))?;
     raw.extend_from_slice(&nr.to_le_bytes());
     raw.extend_from_slice(&nw.to_le_bytes());
     raw.push(dynamic as u8);
-    raw
+    Ok(raw)
 }
 
-pub fn new_rwir(nr: i32, nw: i32, sig: &str) -> Vec<u8> {
-    let mut raw = counts_body(nr, nw, false);
+pub fn new_rwir(nr: i32, nw: i32, sig: &str) -> Result<Vec<u8>, String> {
+    let mut raw = counts_body(nr, nw, false)?;
     raw.extend_from_slice(sig.as_bytes());
     ffi::xvalue_to_wire(KIND_RWIR, &raw, 1)
 }
 
-pub fn new_rwfunc_call(nr: i32, nw: i32, sig: &str) -> Vec<u8> {
-    let mut raw = counts_body(nr, nw, false);
+pub fn new_rwfunc_call(nr: i32, nw: i32, sig: &str) -> Result<Vec<u8>, String> {
+    let mut raw = counts_body(nr, nw, false)?;
     raw.extend_from_slice(sig.as_bytes());
     ffi::xvalue_to_wire(KIND_RWFUNC, &raw, 1)
 }
 
-pub fn new_typed_rwir(name: &str, langtype: &str) -> Vec<u8> {
-    let mut raw = counts_body(0, 0, false);
+pub fn new_typed_rwir(name: &str, langtype: &str) -> Result<Vec<u8>, String> {
+    let mut raw = counts_body(0, 0, false)?;
     raw.extend_from_slice(name.as_bytes());
     raw.push(0);
     raw.extend_from_slice(langtype.as_bytes());
@@ -243,17 +244,17 @@ pub fn new_typed_rwir(name: &str, langtype: &str) -> Vec<u8> {
 }
 
 /// def rwir 路由头：仅计数头，无参数载荷。各参数落 [0,x] 签名行槽（def langtype）。
-pub fn new_defrwir(nr: i32, nw: i32, dynamic: bool) -> Vec<u8> {
-    ffi::xvalue_to_wire(KIND_DEF_RWIR, &counts_body(nr, nw, dynamic), 1)
+pub fn new_defrwir(nr: i32, nw: i32, dynamic: bool) -> Result<Vec<u8>, String> {
+    ffi::xvalue_to_wire(KIND_DEF_RWIR, &counts_body(nr, nw, dynamic)?, 1)
 }
 
 /// 签名行 [0,x] 槽：一个参数的类型定义，body=该参数完整 langtype 串。
-pub fn new_def_langtype(langtype: &str) -> Vec<u8> {
+pub fn new_def_langtype(langtype: &str) -> Result<Vec<u8>, String> {
     ffi::xvalue_to_wire(KIND_DEF_LANGTYPE, langtype.as_bytes(), 1)
 }
 
 /// rwfunc 参数定义键（点后缀 .[0,-k]）：body=名字\x00类型串，langtype=def langtype。
-pub fn new_def_param(name: &str, langtype: &str) -> Vec<u8> {
+pub fn new_def_param(name: &str, langtype: &str) -> Result<Vec<u8>, String> {
     let mut body = name.as_bytes().to_vec();
     body.push(0);
     body.extend_from_slice(langtype.as_bytes());
@@ -273,18 +274,18 @@ pub fn def_param_parts(data: &[u8]) -> Option<(String, String)> {
     Some((name, ty))
 }
 
-pub fn new_struct() -> Vec<u8> {
+pub fn new_struct() -> Result<Vec<u8>, String> {
     ffi::xvalue_to_wire(KIND_DEF_STRUCT, &[], 1)
 }
 
 // ── kvlang 自有 kind：rwfunc ────────────────────────────────────────
 //
-pub fn new_rwfunc_dir() -> Vec<u8> {
+pub fn new_rwfunc_dir() -> Result<Vec<u8>, String> {
     ffi::xvalue_to_wire(KIND_RWFUNC, &[], 1)
 }
 
-pub fn new_rwfunc_anchor(nr: i32, nw: i32, dynamic: bool) -> Vec<u8> {
-    ffi::xvalue_to_wire(KIND_RWFUNC, &counts_body(nr, nw, dynamic), 1)
+pub fn new_rwfunc_anchor(nr: i32, nw: i32, dynamic: bool) -> Result<Vec<u8>, String> {
+    ffi::xvalue_to_wire(KIND_RWFUNC, &counts_body(nr, nw, dynamic)?, 1)
 }
 
 /// rwfunc body 访问器（layout 读回签名时用）。

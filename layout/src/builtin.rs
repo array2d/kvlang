@@ -153,26 +153,27 @@ pub fn num_op(opcode: &str) -> bool {
 // ── 字面量解析 ───────────────────────────────────────────────────────
 
 /// 数值字面量 wire + langtype（attr key 精确匹配 wire 的 kind）。
-pub fn try_parse_number(s: &str) -> Option<(Vec<u8>, &'static str)> {
+/// Returns `Err` on kvspace codec failure and `Ok(None)` for non-numeric tokens.
+pub fn try_parse_number(s: &str) -> Result<Option<(Vec<u8>, &'static str)>, String> {
     if s.is_empty() {
-        return None;
+        return Ok(None);
     }
     let c0 = s.as_bytes()[0];
     let is_digit = c0.is_ascii_digit();
     let is_neg = c0 == b'-' && s.len() >= 2 && s.as_bytes()[1].is_ascii_digit();
     if !is_digit && !is_neg {
-        return None;
+        return Ok(None);
     }
     if let Ok(i) = s.parse::<i64>() {
-        return Some((ffi::new_int64(i), "int64"));
+        return Ok(Some((ffi::new_int64(i)?, "int64")));
     }
     if c0 != b'-' && !s.contains('.') && !s.contains('e') && !s.contains('E') {
         if let Ok(u) = s.parse::<u64>() {
-            return Some((ffi::xvalue_to_wire("uint64", &u.to_le_bytes(), 1), "uint64"));
+            return Ok(Some((ffi::xvalue_to_wire("uint64", &u.to_le_bytes(), 1)?, "uint64")));
         }
     }
     if let Ok(f) = s.parse::<f64>() {
-        return Some((ffi::new_float64(f), "float64"));
+        return Ok(Some((ffi::new_float64(f)?, "float64")));
     }
-    None
+    Ok(None)
 }

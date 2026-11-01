@@ -235,33 +235,104 @@ pub struct kvlangKindexpr {
 }
 
 /// 解析 XValue head 的 langtype 内容（NUL 终止串，含 */@ 前缀与 [dims]）。
-/// 成功返回 0，失败（空指针/空串）返回 -1。
+/// Returns 0 on success, or -1 without modifying `out` on null/empty/non-UTF-8 input,
+/// `ndim > 8`, negative dims, `i32` product overflow, or `kind` > 63 bytes. Catches panics across FFI.
+///
+/// # Safety
+/// `langtype` must be NULL or NUL-terminated; `out` must be NULL or point to a writable `kvlangKindexpr`.
 #[no_mangle]
-pub extern "C" fn kvlangKindexprParse(langtype: *const c_char, out: *mut kvlangKindexpr) -> i32 {
+pub unsafe extern "C" fn kvlangKindexprParse(
+    langtype: *const c_char,
+    out: *mut kvlangKindexpr,
+) -> i32 {
     if langtype.is_null() || out.is_null() {
         return -1;
     }
     let s = cstr(langtype);
-    if s.is_empty() {
-        return -1;
-    }
-    let (dims, kind) = kvkind::parse_langtype(s);
-    let out = unsafe { &mut *out };
-    out.ref_ = 0;
-    out.ndim = dims.len() as i32;
-    for (i, d) in dims.iter().enumerate() {
-        if i < 8 {
-            out.dims[i] = *d;
+    match catch_unwind(|| parse_kindexpr(s)) {
+        Ok(Some(v)) => {
+            // SAFETY: caller guarantees `out` points to a writable `kvlangKindexpr`.
+            unsafe { out.write(v) };
+            0
         }
+        _ => -1,
     }
-    out.array_len = if dims.is_empty() {
-        1
-    } else {
-        dims.iter().product()
+}
+
+/// Pure Rust core of [`kvlangKindexprParse`]: `*`/`@` sets `ref_` (1 ptr / 2 ext), followed by `[dims]kind`.
+fn parse_kindexpr(s: &str) -> Option<kvlangKindexpr> {
+    let (ref_, body) = match s.as_bytes().first()? {
+        b'*' => (1, &s[1..]),
+        b'@' => (2, &s[1..]),
+        _ => (0, s),
     };
+    if body.is_empty() {
+        return None;
+    }
+    let (dims, kind) = kvkind::parse_langtype(body);
+    let mut out = kvlangKindexpr {
+        ref_,
+        ndim: 0,
+        dims: [0; 8],
+        array_len: 1,
+        kind: [0; 64],
+    };
+    if dims.len() > out.dims.len() {
+        return None;
+    }
+    out.ndim = dims.len() as i32;
+    for (i, &d) in dims.iter().enumerate() {
+        if d < 0 {
+            return None;
+        }
+        out.dims[i] = d;
+        out.array_len = out.array_len.checked_mul(d)?;
+    }
     let kb = kind.as_bytes();
-    let n = kb.len().min(63);
-    out.kind[..n].copy_from_slice(&kb[..n]);
-    out.kind[n] = 0;
-    0
+    if kb.len() >= out.kind.len() {
+        return None;
+    }
+    out.kind[..kb.len()].copy_from_slice(kb);
+    Some(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(s: &str) -> Option<kvlangKindexpr> {
+        let c = std::ffi::CString::new(s).unwrap();
+        let mut out = kvlangKindexpr {
+            ref_: -9,
+            ndim: -9,
+            dims: [-9; 8],
+            array_len: -9,
+            kind: [0xff; 64],
+        };
+        let rc = unsafe { kvlangKindexprParse(c.as_ptr(), &mut out) };
+        (rc == 0).then_some(out)
+    }
+
+    fn kind(k: &kvlangKindexpr) -> &str {
+        let n = k.kind.iter().position(|&b| b == 0).unwrap();
+        std::str::from_utf8(&k.kind[..n]).unwrap()
+    }
+
+    #[test]
+    fn kindexpr_parse_contract() {
+        let k = parse("[2,3]int64").unwrap();
+        assert_eq!((k.ref_, k.ndim, &k.dims[..2], k.array_len, kind(&k)), (0, 2, &[2, 3][..], 6, "int64"));
+        let k = parse("*[4]float32").unwrap();
+        assert_eq!((k.ref_, k.ndim, k.array_len, kind(&k)), (1, 1, 4, "float32"));
+        let k = parse("@char/utf8").unwrap();
+        assert_eq!((k.ref_, k.ndim, k.array_len, kind(&k)), (2, 0, 1, "char/utf8"));
+        // Reject ndim > 8, i32 overflow, negative dims, overlong kind, and empty input.
+        assert!(parse("[1,1,1,1,1,1,1,1,1]int64").is_none());
+        assert!(parse("[65536,65536]int64").is_none());
+        assert!(parse("[-1]int64").is_none());
+        assert!(parse(&format!("/lib/{}", "x".repeat(70))).is_none());
+        assert!(parse("").is_none() && parse("*").is_none());
+        let rc = unsafe { kvlangKindexprParse(std::ptr::null(), std::ptr::null_mut()) };
+        assert_eq!(rc, -1);
+    }
 }

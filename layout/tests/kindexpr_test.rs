@@ -41,6 +41,8 @@ fn errors(src: &str) -> Vec<String> {
 fn reject_non_kind_annotation_on_literal() {
     for ty in [
         "int", "intg64", "uint", "float", "num", "char", "int4", "string", "[]int", "[2]float",
+        // `any` is not a valid langtype name per spec.
+        "any",
     ] {
         let rhs = if ty.starts_with('[') { "[1]" } else { "1" };
         let src = format!("rwfunc f() -> () {{\n\tx:{ty} = {rhs}\n}}\n");
@@ -53,7 +55,7 @@ fn reject_non_kind_annotation_on_literal() {
     }
 }
 
-/// 已知种类名，以及容器/结构字面量的对应标注，都不得误伤。
+/// Known scalar kinds and matching container/struct annotations must be accepted.
 #[test]
 fn accept_known_kinds_on_literal() {
     let cases = [

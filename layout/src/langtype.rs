@@ -55,14 +55,12 @@ fn valid_structref(s: &str) -> bool {
         Some(r) => r,
         None => return false,
     };
-    // 段名字符集与**标识符**同一套（见 scanner::is_token_delim）——否则 `点` 这类 CJK
-    // struct 名能作标识符、能作 struct 名，却单单不能出现在参数/返回的类型位置。
+    // Segment charset matches identifiers (see scanner::is_token_delim_at), allowing CJK struct names.
     !rest.is_empty()
         && rest.split('/').all(|seg| {
             !seg.is_empty()
-                && seg
-                    .bytes()
-                    .all(|b| !super::scanner::is_token_delim(b) && b != b'"' && b != b'\'')
+                && !super::scanner::has_token_delim(seg)
+                && seg.bytes().all(|b| b != b'"' && b != b'\'')
         })
 }
 

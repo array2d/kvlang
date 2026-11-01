@@ -322,29 +322,40 @@ fn is_ascii(s: &str) -> bool {
     s.bytes().all(|b| b < 128)
 }
 
-pub fn scanner_two_char_ops() -> Vec<String> {
-    ENTRIES
-        .iter()
-        .flat_map(|e| e.glyphs.iter())
-        .filter(|g| g.len() == 2 && is_ascii(g))
-        .map(|g| g.to_string())
-        .collect()
+// Cache operator tables once per process via `OnceLock` instead of rebuilding `Vec<String>` per token.
+
+pub fn scanner_two_char_ops() -> &'static [String] {
+    static T: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    T.get_or_init(|| {
+        ENTRIES
+            .iter()
+            .flat_map(|e| e.glyphs.iter())
+            .filter(|g| g.len() == 2 && is_ascii(g))
+            .map(|g| g.to_string())
+            .collect()
+    })
 }
 
-pub fn scanner_one_char_ops() -> Vec<u8> {
-    ENTRIES
-        .iter()
-        .flat_map(|e| e.glyphs.iter())
-        .filter(|g| g.len() == 1 && is_ascii(g))
-        .map(|g| g.as_bytes()[0])
-        .collect()
+pub fn scanner_one_char_ops() -> &'static [u8] {
+    static T: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    T.get_or_init(|| {
+        ENTRIES
+            .iter()
+            .flat_map(|e| e.glyphs.iter())
+            .filter(|g| g.len() == 1 && is_ascii(g))
+            .map(|g| g.as_bytes()[0])
+            .collect()
+    })
 }
 
-pub fn unicode_ops() -> Vec<String> {
-    ENTRIES
-        .iter()
-        .flat_map(|e| e.glyphs.iter())
-        .filter(|g| !is_ascii(g))
-        .map(|g| g.to_string())
-        .collect()
+pub fn unicode_ops() -> &'static [String] {
+    static T: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    T.get_or_init(|| {
+        ENTRIES
+            .iter()
+            .flat_map(|e| e.glyphs.iter())
+            .filter(|g| !is_ascii(g))
+            .map(|g| g.to_string())
+            .collect()
+    })
 }

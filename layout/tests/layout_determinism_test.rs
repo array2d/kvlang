@@ -15,7 +15,7 @@ fn seed_builtins(dsn: &str) {
         kv.set(&[(
             format!("/lib/{op}"),
             kvlanglayout::kvkind::KIND_DEF_RWIR.to_string(),
-            kvlanglayout::kvkind::new_defrwir(1, 0, true),
+            kvlanglayout::kvkind::new_defrwir(1, 0, true).unwrap(),
         )])
         .unwrap();
     }

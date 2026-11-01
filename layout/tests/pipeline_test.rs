@@ -11,7 +11,13 @@ fn sig(data: &[u8]) -> String {
 }
 
 fn fresh_kv() -> Kv {
-    let dsn = format!("fs:///tmp/kvlanglayout_test_{}", std::process::id());
+    // Isolate each parallel test in its own `fs://` directory to avoid concurrent backend races.
+    static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let dsn = format!(
+        "fs:///tmp/kvlanglayout_test_{}_{}",
+        std::process::id(),
+        SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+    );
     let mut kv = Kv::conn(&dsn);
     init_dirs(&mut kv).unwrap();
     kv
@@ -125,7 +131,7 @@ fn compile_control_flow_is_single_plane() {
         b.contains("_if_") || b.contains("_then_") || b.contains("_else_") || b.contains("_merge_")
     });
     assert!(!old_scope, "scope keys still present: {children:?}");
-    // ‥ 前缀是系统键，List 函数目录时按设计隐藏；直接列 ‥labels/ 子树。
+    // Parent listings omit `‥` system segments; list `‥labels/` directly below.
     let labels = kv.list("/lib/f/\u{2025}labels/", false, false);
     assert!(!labels.is_empty(), "missing ‥labels: {children:?}");
     let if_name = labels

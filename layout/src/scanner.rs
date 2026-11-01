@@ -166,7 +166,8 @@ fn escaped_byte(c: u8) -> u8 {
     }
 }
 
-fn scan_quoted(src: &[u8], mut i: usize, quote: u8) -> (String, usize) {
+/// Returns `(content, next_index, closed)`; unterminated literals consume to EOF with `closed = false`.
+fn scan_quoted(src: &[u8], mut i: usize, quote: u8) -> (String, usize, bool) {
     i += 1;
     let mut b: Vec<u8> = Vec::new();
     while i < src.len() {
@@ -180,17 +181,17 @@ fn scan_quoted(src: &[u8], mut i: usize, quote: u8) -> (String, usize) {
             continue;
         }
         if c == quote {
-            return (String::from_utf8_lossy(&b).into_owned(), i + 1);
+            return (String::from_utf8_lossy(&b).into_owned(), i + 1, true);
         }
         b.push(c);
         i += 1;
     }
-    (String::from_utf8_lossy(&b).into_owned(), src.len())
+    (String::from_utf8_lossy(&b).into_owned(), src.len(), false)
 }
 
 /// Rust 原始字符串 `r"..."` / `r#"..."#` / `r##"..."##` … —— 跨行，零转义。
-/// `i` 指向 `r`。成功返回（内容, 闭合之后下标, true）；非 raw 形式返回 (_, i, false)。
-fn scan_raw(src: &[u8], i: usize) -> (String, usize, bool) {
+/// `i` points to `r`. Returns `(content, next_index, is_raw, closed)`.
+fn scan_raw(src: &[u8], i: usize) -> (String, usize, bool, bool) {
     let mut j = i + 1;
     let mut hashes = 0usize;
     while j < src.len() && src[j] == b'#' {
@@ -198,7 +199,7 @@ fn scan_raw(src: &[u8], i: usize) -> (String, usize, bool) {
         j += 1;
     }
     if j >= src.len() || src[j] != b'"' {
-        return (String::new(), i, false);
+        return (String::new(), i, false, false);
     }
     let content_start = j + 1;
     let mut k = content_start;
@@ -210,7 +211,7 @@ fn scan_raw(src: &[u8], i: usize) -> (String, usize, bool) {
             }
             if h == hashes {
                 let val = String::from_utf8_lossy(&src[content_start..k]).into_owned();
-                return (val, k + 1 + hashes, true);
+                return (val, k + 1 + hashes, true, true);
             }
         }
         k += 1;
@@ -219,11 +220,12 @@ fn scan_raw(src: &[u8], i: usize) -> (String, usize, bool) {
         String::from_utf8_lossy(&src[content_start..]).into_owned(),
         src.len(),
         true,
+        false,
     )
 }
 
-/// Rust 块注释 `/* ... */`（可嵌套）。`i` 指向第一个 `/`，返回（整段含定界符, 之后下标）。
-fn scan_block_comment(src: &[u8], i: usize) -> (String, usize) {
+/// Nested `/* ... */` block comment starting at `i`; returns `(full_slice, next_index, closed)`.
+fn scan_block_comment(src: &[u8], i: usize) -> (String, usize, bool) {
     let mut j = i + 2;
     let mut depth = 1usize;
     while j < src.len() && depth > 0 {
@@ -239,7 +241,7 @@ fn scan_block_comment(src: &[u8], i: usize) -> (String, usize) {
         }
         j += 1;
     }
-    (String::from_utf8_lossy(&src[i..j]).into_owned(), j)
+    (String::from_utf8_lossy(&src[i..j]).into_owned(), j, depth == 0)
 }
 
 /// 跨行字面量消费后同步 line/line_start（字面量内部换行不产生 Newline Token，但行号需前进）。
@@ -260,8 +262,24 @@ fn advance_line_count(
 
 /// 标识符/路径段的合法字节判定：凡**不是**分隔符者皆可入标识符（CJK 等多字节字符的
 /// 各字节都不在分隔符集内，故中文标识符天然合法，见 tutorial/01-basics/chinese_ident.kv）。
-/// langtype 的 structref 校验复用它，保证「标识符能写」与「类型名能写」同一套字符集。
-pub(crate) fn is_token_delim(c: u8) -> bool {
+/// Reused by structref validation ([`has_token_delim`]) so identifiers and type names share one charset.
+///
+/// The only multi-byte delimiter is `·` (U+00B7 = `C2 B7`); match the exact 2-byte sequence so other
+/// `0xC2`-prefixed characters (`°`, `µ`, etc.) are not split.
+pub(crate) fn is_token_delim_at(src: &[u8], i: usize) -> bool {
+    match src[i] {
+        0xC2 => src.get(i + 1) == Some(&0xB7),
+        c => is_ascii_token_delim(c),
+    }
+}
+
+/// Reports whether `s` contains any token delimiter ([`is_token_delim_at`]).
+pub(crate) fn has_token_delim(s: &str) -> bool {
+    let b = s.as_bytes();
+    (0..b.len()).any(|i| is_token_delim_at(b, i))
+}
+
+fn is_ascii_token_delim(c: u8) -> bool {
     matches!(
         c,
         b' ' | b'\t'
@@ -275,7 +293,6 @@ pub(crate) fn is_token_delim(c: u8) -> bool {
             | b'}'
             | b'['
             | b']'
-            | 0xC2 // ·（U+00B7）成员分隔符首字节
             | b'+'
             | b'-'
             | b'*'
@@ -300,7 +317,26 @@ fn is_abs_path_start(c: u8) -> bool {
 
 /// 将整个源扫描为平坦 Token 流，末尾附 EOF。
 pub fn scan(src: &str) -> Vec<Token> {
+    scan_with_diags(src).0
+}
+
+/// Build an error-level lexical diagnostic at the opening delimiter position.
+fn lex_error(pos: Pos, message: &str) -> Diagnostic {
+    Diagnostic {
+        pos,
+        message: message.to_string(),
+        warn: false,
+        info: false,
+        source: String::new(),
+        src_file: String::new(),
+        src_name: String::new(),
+    }
+}
+
+/// [`scan`] with lexical diagnostics: report an error at the opening delimiter of any unterminated literal or block comment.
+pub fn scan_with_diags(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
     let src = src.as_bytes();
+    let mut diags: Vec<Diagnostic> = Vec::new();
     let mut tokens: Vec<Token> = Vec::new();
     let mut i = 0usize;
     let mut line = 1i32;
@@ -359,8 +395,11 @@ pub fn scan(src: &str) -> Vec<Token> {
 
         // Rust 原始字符串 r"..." / r#"..."# — 跨行，零转义
         if c == b'r' {
-            let (val, next, ok) = scan_raw(src, i);
+            let (val, next, ok, closed) = scan_raw(src, i);
             if ok {
+                if !closed {
+                    diags.push(lex_error(p, "unterminated raw string literal (missing closing `\"#…`)"));
+                }
                 tokens.push(Token {
                     kind: Kind::Literal,
                     value: val,
@@ -375,7 +414,10 @@ pub fn scan(src: &str) -> Vec<Token> {
 
         // 引号字符串 "..." — 跨行，转义
         if c == b'\'' || c == b'"' {
-            let (val, next) = scan_quoted(src, i, c);
+            let (val, next, closed) = scan_quoted(src, i, c);
+            if !closed {
+                diags.push(lex_error(p, "unterminated string literal"));
+            }
             let quote = if c == b'"' { b'"' } else { 0 };
             tokens.push(Token {
                 kind: Kind::Literal,
@@ -446,7 +488,10 @@ pub fn scan(src: &str) -> Vec<Token> {
                 continue;
             }
             if i + 1 < src.len() && src[i + 1] == b'*' {
-                let (val, next) = scan_block_comment(src, i);
+                let (val, next, closed) = scan_block_comment(src, i);
+                if !closed {
+                    diags.push(lex_error(p, "unterminated block comment (missing `*/`)"));
+                }
                 tokens.push(Token {
                     kind: Kind::Comment,
                     value: val,
@@ -484,7 +529,7 @@ pub fn scan(src: &str) -> Vec<Token> {
                         i += 1;
                         continue;
                     }
-                    if is_token_delim(src[i]) {
+                    if is_token_delim_at(src, i) {
                         break;
                     }
                     i += 1;
@@ -546,7 +591,7 @@ pub fn scan(src: &str) -> Vec<Token> {
 
         // Unicode 符号算子
         if let Some(op) = symbol::unicode_ops()
-            .into_iter()
+            .iter()
             .find(|op| src[i..].starts_with(op.as_bytes()))
         {
             tokens.push(Token {
@@ -592,7 +637,7 @@ pub fn scan(src: &str) -> Vec<Token> {
 
         // 关键字 / 标识符
         let start = i;
-        while i < src.len() && !is_token_delim(src[i]) {
+        while i < src.len() && !is_token_delim_at(src, i) {
             i += 1;
         }
         if i == start {
@@ -618,5 +663,58 @@ pub fn scan(src: &str) -> Vec<Token> {
     }
 
     tokens.push(Token::eof(pos(i, line, line_start)));
-    tokens
+    (tokens, diags)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Format non-EOF tokens as `I:<val>` / `D:<val>` / `?:<val>`.
+    fn toks(src: &str) -> Vec<String> {
+        scan(src)
+            .into_iter()
+            .filter(|t| t.kind != Kind::EOF)
+            .map(|t| {
+                let k = match t.kind {
+                    Kind::Ident => "I",
+                    Kind::Dot => "D",
+                    _ => "?",
+                };
+                format!("{k}:{}", t.value)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn only_c2_b7_is_member_delimiter() {
+        // U+00B0 `°` and U+00B5 `µ` start with 0xC2 but are identifier chars, not delimiters.
+        assert_eq!(toks("温度°C"), vec!["I:温度°C"]);
+        assert_eq!(toks("µs"), vec!["I:µs"]);
+        assert_eq!(toks("a·b"), vec!["I:a", "D:·", "I:b"]);
+        assert_eq!(toks("a·*k"), vec!["I:a", "D:·", "I:*", "I:k"]);
+        // Structref segment names share the identifier charset.
+        assert!(!has_token_delim("点°"));
+        assert!(has_token_delim("a·b"));
+    }
+
+    #[test]
+    fn unterminated_literals_are_errors() {
+        for (src, want) in [
+            ("x = \"abc\nprintln(x)\n", "unterminated string literal"),
+            ("x = 'abc\n", "unterminated string literal"),
+            ("x = r#\"abc\"\n", "unterminated raw string literal"),
+            ("/* never closed\nx = 1\n", "unterminated block comment"),
+            ("/* a /* nested */ still open\n", "unterminated block comment"),
+        ] {
+            let (_, d) = scan_with_diags(src);
+            assert_eq!(d.len(), 1, "{src:?}");
+            assert!(!d[0].warn && !d[0].info, "{src:?} must be error-level");
+            assert!(d[0].message.starts_with(want), "{src:?}: {}", d[0].message);
+            assert_eq!((d[0].pos.line, d[0].pos.col > 0), (1, true), "{src:?}");
+        }
+        for src in ["x = \"a\\\"b\"\n", "x = r#\"a\"b\"#\n", "/* a /* b */ c */\nx = 1\n"] {
+            assert!(scan_with_diags(src).1.is_empty(), "{src:?}");
+        }
+    }
 }

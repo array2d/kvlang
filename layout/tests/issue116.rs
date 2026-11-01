@@ -43,7 +43,7 @@ fn fresh_kv() -> Kv {
         kv.set(&[(
             format!("/lib/{op}"),
             kvkind::KIND_DEF_RWIR.to_string(),
-            kvkind::new_defrwir(1, 0, true),
+            kvkind::new_defrwir(1, 0, true).unwrap(),
         )])
         .unwrap();
     }
@@ -290,10 +290,11 @@ fn lib_plane_has_no_scope_flat_keys() {
             children.iter().any(|c| c.starts_with('[')),
             "{fn_} has no [i,j]: {children:?}"
         );
-        // RUNTIME_MEMBER_SEP（‥）前缀键是系统键，List 时按设计隐藏，
-        // 必须直接列 ‥labels/ 子树来观察（见 spec 控制流：标签映射另存于此）。
-        let labels = children_of(&mut kv, &format!("{prefix}\u{2025}labels/"));
-        assert!(!labels.is_empty(), "{fn_} missing ‥labels: {children:?}");
+        // `kvspace` parent listings omit `‥` system segments; query `‥labels/` directly.
+        assert!(
+            !labels_of(&mut kv, fn_).is_empty(),
+            "{fn_} missing ‥labels: {children:?}"
+        );
     }
 }
 
@@ -534,7 +535,8 @@ fn continue_is_goto_cond() {
 #[test]
 fn for_is_br_goto_single_plane() {
     let mut kv = compile_fn(
-        "rwfunc f() -> () {\n    data:[]int64 = [0, 1]\n    for (x in data) {\n        x -> _\n    }\n}\n",
+        // Declare container before member writes (`lower::check_map_defined`).
+        "rwfunc f() -> () {\n    data:[int64]·int64 = {}\n    data·0 = 0\n    data·1 = 1\n    for (x in data) {\n        x -> _\n    }\n}\n",
     );
     assert_single_plane(&mut kv, "f");
     let p = plane(&mut kv, "f");
