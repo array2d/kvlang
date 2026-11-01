@@ -29,6 +29,10 @@ struct RwirHandlerCtx {
     bool atext(int i, std::string* out);
     // 写 bool 标量到写槽。
     bool wbool(bool b);
+    // handler 直写 kvspace 后同步写槽状态（见 vmbin::note_slot_write）。
+    void note_slot_write(const char* key) noexcept {
+        vmbin::note_slot_write(f.regs[ins.wr[0]], key);
+    }
     // kvspace 族路径实参：值文本优先（对齐 C path_arg），变量取帧 key。
     bool path_arg(int i, std::uint8_t rno, const RegDesc& d, std::string* out);
     // kvspace 族 k0/k1 双路径解析 + trace。

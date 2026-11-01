@@ -786,6 +786,7 @@ bool h_scatter_newscatter(RwirHandlerCtx& c, std::string* err) {
         *err = "array·scatter: marker failed";
         return false;
     }
+    c.note_slot_write(db.c_str());  // db 即写槽自身 key：kvspace 槽已存在
     const std::int64_t n = static_cast<std::int64_t>(scap / sesz);
     for (std::int64_t i = 0; i < n; i++) {
         const std::string mk = db + "\xC2\xB7[" + std::to_string(i) + "]";
@@ -1846,6 +1847,7 @@ bool h_struct_new(RwirHandlerCtx& c, std::string* err) {
         *err = std::string("struct·new: marker failed: ") + eb;
         return false;
     }
+    c.note_slot_write(base.c_str());  // base 即写槽自身 key：kvspace 槽已存在
     // 字段成对：读参[1]=字段名,[2]=值,[3]=名,[4]=值,…
     for (int i = 1; i + 1 < c.ins.nrd; i += 2) {
         std::string fname;

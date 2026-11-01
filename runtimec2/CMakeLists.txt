@@ -142,6 +142,13 @@ target_compile_options(binir_codec_test PRIVATE -O2 -Wall -Wextra)
 add_test(NAME c2_binir_codec COMMAND binir_codec_test
     ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/binir/real-shapes.txt)
 
+# 槽状态状态机（成员读优化用例 4）：不链 kvspace。
+add_executable(slot_state_test tests/slot_state_test.cpp)
+target_include_directories(slot_state_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_options(slot_state_test PRIVATE -O2 -Wall -Wextra)
+add_test(NAME c2_slot_state_unit COMMAND slot_state_test)
+
 add_test(NAME c2_rwir_table COMMAND $<TARGET_FILE:rwir_table>)
 add_test(NAME c2_impl_db_check
          COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/impl_db_check.sh)
@@ -166,6 +173,11 @@ add_test(NAME c2_kvspace_dynamic_ops
                  $<TARGET_FILE:m1_smoke>
                  ${CMAKE_CURRENT_SOURCE_DIR}/../bin/byteseek)
 set_tests_properties(c2_kvspace_dynamic_ops PROPERTIES TIMEOUT 120)
+add_test(NAME c2_slot_state
+         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/slot_state.sh
+                 $<TARGET_FILE:m1_smoke>
+                 ${CMAKE_CURRENT_SOURCE_DIR}/../bin/byteseek)
+set_tests_properties(c2_slot_state PROPERTIES TIMEOUT 120)
 add_test(NAME c2_symbol_parity
          COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/symbols.sh
                  $<TARGET_FILE:kvlang_runtimec2>)
