@@ -290,10 +290,10 @@ fn lib_plane_has_no_scope_flat_keys() {
             children.iter().any(|c| c.starts_with('[')),
             "{fn_} has no [i,j]: {children:?}"
         );
-        assert!(
-            children.iter().any(|c| c.contains("labels")),
-            "{fn_} missing ‥labels: {children:?}"
-        );
+        // RUNTIME_MEMBER_SEP（‥）前缀键是系统键，List 时按设计隐藏，
+        // 必须直接列 ‥labels/ 子树来观察（见 spec 控制流：标签映射另存于此）。
+        let labels = children_of(&mut kv, &format!("{prefix}\u{2025}labels/"));
+        assert!(!labels.is_empty(), "{fn_} missing ‥labels: {children:?}");
     }
 }
 
@@ -534,7 +534,7 @@ fn continue_is_goto_cond() {
 #[test]
 fn for_is_br_goto_single_plane() {
     let mut kv = compile_fn(
-        "rwfunc f() -> () {\n    data·0 = 0\n    data·1 = 1\n    for (x in data) {\n        x -> _\n    }\n}\n",
+        "rwfunc f() -> () {\n    data:[]int64 = [0, 1]\n    for (x in data) {\n        x -> _\n    }\n}\n",
     );
     assert_single_plane(&mut kv, "f");
     let p = plane(&mut kv, "f");

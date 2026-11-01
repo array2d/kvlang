@@ -125,12 +125,9 @@ fn compile_control_flow_is_single_plane() {
         b.contains("_if_") || b.contains("_then_") || b.contains("_else_") || b.contains("_merge_")
     });
     assert!(!old_scope, "scope keys still present: {children:?}");
-    assert!(
-        children.iter().any(|c| c.contains("labels")),
-        "missing ‥labels: {children:?}"
-    );
-
+    // ‥ 前缀是系统键，List 函数目录时按设计隐藏；直接列 ‥labels/ 子树。
     let labels = kv.list("/lib/f/\u{2025}labels/", false, false);
+    assert!(!labels.is_empty(), "missing ‥labels: {children:?}");
     let if_name = labels
         .iter()
         .map(|c| c.trim_end_matches('/'))
