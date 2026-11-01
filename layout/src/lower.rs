@@ -13,6 +13,19 @@ fn is_string_kind(t: &str) -> bool {
     t.contains("char")
 }
 
+/// A/B 开关：发语义算子（`add`）而不是具体精度名（`int64·add`）。
+/// 默认关闭——语义名会让 runtime 的 `fast_i64`/`opfn` 快路径退化为通用路径，
+/// 且当前 JIT `verify()` 会整段拒绝；只有阶段 B（按算子 + RegDesc 类型分派）落地后
+/// 才能默认打开。本开关只用于 A/B。
+pub fn semantic_ops() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var("KVLANG_LAYOUT_SEMANTIC_OP")
+            .map(|v| !v.is_empty() && v != "0")
+            .unwrap_or(false)
+    })
+}
+
 fn is_container_type(t: &str) -> bool {
     t == "stringkeymap" || t.contains(keytree::MEMBER_SEP)
 }
@@ -1998,7 +2011,12 @@ fn specialize_inst(
         if builtin::is_unsigned_kind(&k) {
             return;
         }
-        e.op = format!("{k}{}neg", keytree::MEMBER_SEP);
+        e.op = if semantic_ops() {
+            "neg".to_string()
+        } else {
+            format!("{k}{}neg", keytree::MEMBER_SEP)
+        };
+        inst.operator = true;
         return;
     }
     /* handler 的实参个数必须与之一致（通用 sub 允许 1 参，特化版只收 2 参）。 */
@@ -2032,7 +2050,12 @@ fn specialize_inst(
         return;
     }
     // 语义模式：只发算子词，具体精度由操作数槽的 langtype 承载（阶段 B 前提）。
-    e.op = format!("{k}{}{word}", keytree::MEMBER_SEP);
+    e.op = if semantic_ops() {
+        word
+    } else {
+        format!("{k}{}{word}", keytree::MEMBER_SEP)
+    };
+    inst.operator = true;
 }
 
 /// 混合数值 kind 的唯一结果 kind（五语言阵营，且与 runtime 现状一致）：
