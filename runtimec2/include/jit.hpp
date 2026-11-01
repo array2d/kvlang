@@ -52,6 +52,9 @@ struct JitRefusal {
 // 发射器局部寄存器池容量；verify 的压力预检与 jit_x64 的 kLocals 共用。
 inline constexpr int kJitLocalRegisterCount = 8;
 
+// JIT 快绑定前提：callee 参数全为 int64/uint64（按 int64 别名安全）。
+bool callee_int_params(const Segment* seg);
+
 // 平台发射器：x86_64 在 jit_x64.cpp（完整）、ARM64 在 jit_arm.cpp（框架）。
 // 返回空 vector = 该平台不可发射（回退解释路径）。
 std::vector<std::uint8_t> emit_arch(const Segment* seg, const JitShape& sh);

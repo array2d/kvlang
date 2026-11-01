@@ -1,0 +1,26 @@
+// JIT2 写参提交必须按静态 langtype 落槽：float64 不能把位模式当 int64，
+// bool 不能按 int64 落。三档（默认 / RC2_NOJIT2 / RC2_NOJIT）输出须一致。
+rwfunc fret() -> (r:float64) {
+	6.0 -> r
+}
+
+rwfunc bret(a:int64) -> (b:bool) {
+	a > 3 -> b
+}
+
+rwfunc iret(n:int64) -> (r:int64) {
+	r = 0
+	i = 0
+	while (i < n) {
+		r = r + i
+		i = i + 1
+	}
+}
+
+rwfunc test() -> () {
+	fret() -> x
+	bret(5) -> y
+	bret(1) -> z
+	iret(4) -> w
+	println("x =", x, "y =", y, "z =", z, "w =", w)
+}
