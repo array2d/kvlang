@@ -24,9 +24,10 @@ handler_id/派发模型不因 `/‥isa` 改变。typed Rwir opcode 仍由 layout
 ## opcode 特化命名
 
 - 同型：`<kind>·<op>`（如 `int64·add`、`float64·lt`）。kind 由下一节 promotion
-  表唯一确定时发出；表给不出结果（int×uint 混合、`char`/字符串、动态槽
-  （空 kindexp）、比较类跨类混合）一律保留通用 opcode（如 `+`、`add`），
-  由通用实现按值判别。
+  表唯一确定时发出；表给不出结果（int×uint 混合、动态槽（空 kindexp）、
+  比较类跨类混合）一律保留通用 opcode（如 `+`、`add`），由通用实现按值判别。
+- **char/字符串不在 `+`/`add` 的接受集合内**：字符串拼接由 layout 在语法层脱糖为
+  `string·concat`，不发射 `+`/`add`；详见下文「字符串拼接」。
 - 混合（后续）：候选复合键 `<k1>·<k2>·<op>`（输入 kind 在前、结果 kind 由 promotion 表
   决定）；在 wire 里直接写数值 handler id 作为备选方案记录，暂不采用。
 
@@ -46,8 +47,9 @@ layout 的 `specialize` 与 binircompiler 的按实参类型特化都按本表�
   `float32`）。该规则用于算术；比较类的跨类混合（int 与 float）不特化。
 - **sqrt / exp / log / pow**：结果与特化 kind 恒为 `float64`；`float32`
   操作数不特化。
-- **char/字符串不参与数值 promotion**：`add` 的字符串拼接与字符串比较走通用实现，
-  不产生任何数值特化 opcode。
+- **char/字符串不参与数值 promotion**：`+`/`add` 的操作数 union 不含 char/字符串，
+  因此不会为它们产生数值特化 opcode。字符串拼接是 `string·concat` 的语义，由
+  layout 在语法层脱糖；字符串比较不受本条影响（见本表 `eq/neq/…` 的接受集合）。
 - **结果宽度与操作数顺序无关**：任何实现（解释器、即时编译）都不得按操作数位置
   选择宽度；同一组输入的两个顺序必须得到逐位相同的结果。
 
@@ -74,6 +76,19 @@ layout 的 `specialize` 与 binircompiler 的按实参类型特化都按本表�
 `int × uint` 在算术/位运算里两个集合都接受，但 promotion 给不出结果 →
 运行时直接报错、不特化。
 
+### 字符串拼接（layout 脱糖，normative）
+
+`+` 与 `add` 在 rwir 层是**纯数值算子**，参数 union 就是本表数值部分的并集：
+`int8/16/32/64`、`uint8/16/32/64`、`float32/float64`。char/字符串不在其中。
+
+- **源码写法不变**：两个字符串操作数（含 char 族，如 `"a" + "b"`、`s + "!"`）仍可
+  写 `+`；layout 在语法/类型检查阶段改写为 `string·concat(a, b)`，落入 kvspace 的
+  opcode 是 `string·concat`，不是 `+`/`add`。
+- **错误时机在 layout**：字符串与非字符串相加（如 `"x" + 1`、`char + int`）在 layout
+  阶段报错，不生成可执行指令；这**不是**运行时错误。
+- **runtime 不做字符串拼接**：`+`/`add` 的 handler 只接受数值操作数，不得按值判别后
+  偷偷拼接字符串。自定义 rwir/扩展若需要字符串拼接，调用 `string·concat`。
+
 ## 值相关检查（保留）
 
 除零/模零、None 比较、越界与动态槽的运行时判别不受本章影响；
@@ -97,5 +112,11 @@ layout 的 `specialize` 与 binircompiler 的按实参类型特化都按本表�
 快路径仅用于 `/vthread/<vid>/` 子树内、runtime 自有的定长标量槽：值内容与整值写
 完全一致，但**不承诺**后端为整值写附带的簿记（如外部 watch 通知、版本号自增）。
 
+## 变更记录
+
+- 2026-11-01：`+`/`add` 的 rwir 参数 union 收紧为纯数值；字符串拼接改由 layout 在
+  语法层脱糖为 `string·concat`。旧表述「`add` 的通用实现直接拼接字符串」废除。
+  用户可见差异：字符串与非字符串相加的错误时机由运行期提前到 **layout 阶段**
+  （layout 报 TypeError），不再拖到 runtime；字符串+字符串的源码写法不变。
 	"#### -> /lib/kvlang/spec/runtime语义/指令派发与特化
 }
