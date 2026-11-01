@@ -34,6 +34,9 @@ FILTER=""
 CSV=""
 VERBOSE=0
 CASE_TIMEOUT="${KV_CASE_TIMEOUT:-300}"
+# case 结构版本：历史 CSV 一律视为 1（不回填）；改 case 结构或计时代码路径必须 +1，
+# 只改注释/无关字段不升。跨 harness_rev 只能看趋势，不能做精确回归判定。
+HARNESS_REV=2
 
 RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'; NC=$'\033[0m'
 
@@ -201,7 +204,8 @@ commit="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 cpu="$(awk -F: '/model name/ { gsub(/^ +/, "", $2); print $2; exit }' /proc/cpuinfo 2>/dev/null || echo unknown)"
 
 printf '# bench-shm-ab  backend=shm  repeat=%s  scale=%s\n' "$REPEAT" "$SCALE_MODE"
-printf '# version=%s commit=%s cpu=[%s]\n' "$version" "$commit" "${cpu:-unknown}"
+printf '# version=%s commit=%s cpu=[%s] harness_rev=%s\n' \
+	"$version" "$commit" "${cpu:-unknown}" "$HARNESS_REV"
 printf '# A: bin=%s lib=%s env=%s\n' "$A_BIN" "$A_LIB" "${A_ENV:-(none)}"
 if [ "$B_ON" -eq 1 ]; then
 	printf '# B: bin=%s lib=%s env=%s\n' "$B_BIN" "$B_LIB" "${B_ENV:-(none)}"
@@ -211,7 +215,7 @@ fi
 printf '# 比值以 C=1：A kv/C、B kv/C、B/A（<1 = B 更快）\n'
 
 if [ -n "$CSV" ]; then
-	printf 'case,input,A_ns,B_ns,C_ns,A_over_C,B_over_C,B_over_A,valid\n' >"$CSV"
+	printf 'case,input,A_ns,B_ns,C_ns,A_over_C,B_over_C,B_over_A,valid,harness_rev\n' >"$CSV"
 fi
 
 printf '%-14s %-10s %11s %11s %11s %9s %9s %8s %5s\n' \
@@ -294,9 +298,10 @@ for cdir in ./benchmark/cases/*/; do
 		fi
 
 		if [ -n "$CSV" ]; then
-			printf '%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+			printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
 				"$name" "$inp" "${a_ns:-}" "${b_ns:-}" "${c_best:-}" \
-				"${a_c%-x}" "${b_c%-x}" "${b_a%-x}" "$valid" >>"$CSV"
+				"${a_c%-x}" "${b_c%-x}" "${b_a%-x}" "$valid" \
+				"$HARNESS_REV" >>"$CSV"
 		fi
 	done
 done
