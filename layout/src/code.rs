@@ -99,7 +99,7 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
             func.pkg.clone()
         };
         let mut src = func.clone();
-        lower::annotate_call_returns(&mut src, &pkg, &sigs);
+        lower::annotate_call_returns(&mut src, &sigs);
         let mut lowered = lower::lower_func(&src);
         write_func(kv, &pkg, &mut lowered, &local_funcs, &structs, &sigs)?;
         any_code = true;
@@ -128,7 +128,7 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
             pkg: String::new(),
         };
         let mut src = init_fn.clone();
-        lower::annotate_call_returns(&mut src, "", &sigs);
+        lower::annotate_call_returns(&mut src, &sigs);
         let mut lowered = lower::lower_func(&src);
         write_func(kv, "", &mut lowered, &local_funcs, &structs, &sigs)?;
         any_code = true;
@@ -668,6 +668,7 @@ fn build_inst(inst: &RawInst, by_irseq: &HashMap<i32, String>) -> Instruction {
         writes: inst.writes.clone(),
         write_types,
         arrow_left: is_fill || inst.write_types.iter().any(|t| !t.is_empty()),
+        operator: false,
     }
 }
 
@@ -713,8 +714,8 @@ pub fn write_func(
     let type_map = lower::infer_types(fn_);
     let declared = lower::declared_types(fn_);
     let type_sets = lower::infer_type_sets(fn_);
-    let mut diags = lower::validate_writes(fn_, pkg, &type_map, structs, sigs);
-    diags.extend(lower::specialize(fn_, &type_map, &declared));
+    let mut diags = lower::validate_writes(fn_, &type_map, structs, sigs);
+    diags.extend(lower::specialize(fn_, &type_map, &declared, &type_sets));
     for d in &diags {
         eprintln!("{}", d.string());
     }
@@ -737,6 +738,7 @@ pub fn write_func(
     let mut seq: Vec<Instruction> = Vec::new();
     let mut labels: HashMap<String, i32> = HashMap::new();
     collect_insts(&fn_.body, &mut seq, &mut labels);
+    check_call_names(kv, pkg, &seq, local_funcs)?;
 
     let mut param_coord: HashMap<String, String> = HashMap::new();
     for (i, p) in fn_.sig.params.iter().enumerate() {
@@ -823,7 +825,6 @@ pub fn write_func(
             structs,
             &param_coord,
             &param_langtype,
-            pkg,
             local_funcs,
         );
     }
@@ -1094,7 +1095,6 @@ fn write_linear_inst(
     structs: &lower::StructTable,
     params: &HashMap<String, String>,
     param_langtype: &HashMap<String, String>,
-    pkg: &str,
     local_funcs: &HashSet<String>,
 ) {
     let (opcode, mut reads) = s.flat();
@@ -1131,8 +1131,8 @@ fn write_linear_inst(
             &opcode,
             reads.len() as i32,
             s.writes.len() as i32,
-            pkg,
             local_funcs,
+            s.operator,
         );
         pairs.push((format!("{prefix}/[{n},0]"), lt, wire));
     }
@@ -1172,29 +1172,126 @@ fn resolve_label(labels: &HashMap<String, i32>, name: &str, opcode: &str) -> i32
     }
 }
 
+/// 调用名必须是「全路径去掉 `/lib`」：全局函数写 `name`，包内函数写 `包名·name`。
+/// 裸名合法当且仅当 `/lib/<name>` 是已布局函数、已声明 rwir（def rwir），
+/// 或该词是语言算子（算术/比较/逻辑/cast）；否则一律报错——**没有包内回退**
+/// （该回退曾让包内裸名与全局函数争名空间，导致 `==`→`eq` 被解析成
+/// `string·eq` 的 6976 层递归）。
+fn check_call_names(
+    kv: &mut Kv,
+    pkg: &str,
+    seq: &[Instruction],
+    local_funcs: &HashSet<String>,
+) -> Result<(), String> {
+    for inst in seq {
+        if inst.operator {
+            continue;
+        }
+        let (op, _) = inst.flat();
+        if !is_bare_identifier(&op) {
+            continue;
+        }
+        if matches!(op.as_str(), "=" | "return" | "goto" | "br" | "call" | "obj") {
+            continue;
+        }
+        // 合法：全局函数（本文件裸定义 / 已布局）或已声明 rwir（def rwir）。
+        if local_funcs.contains(&op) {
+            continue;
+        }
+        let dir = format!("/lib/{op}/");
+        if kvkind::kind(&kv.get_one(&dir), &kv.langtype_of(&dir)) == kvkind::KIND_RWFUNC {
+            continue;
+        }
+        let decl = format!("/lib/{op}");
+        if kvkind::kind(&kv.get_one(&decl), &kv.langtype_of(&decl)) == kvkind::KIND_DEF_RWIR {
+            continue;
+        }
+        // 本包存在同名函数：裸名非法（必须写 `包名·name` 或 `/lib/包名·name`），
+        // 无论它是否还是算子词（`eq` 在 `lib string` 里就是典型）。
+        if !pkg.is_empty() {
+            let qual = format!("{pkg}{}{op}", keytree::MEMBER_SEP);
+            let qdir = format!("/lib/{qual}/");
+            if local_funcs.contains(&qual)
+                || kvkind::kind(&kv.get_one(&qdir), &kv.langtype_of(&qdir))
+                    == kvkind::KIND_RWFUNC
+            {
+                return Err(undefined_call(&op));
+            }
+        }
+        // 语言算子（含 word 形式 add/eq/…、逻辑词、cast）不是函数调用。
+        if crate::builtin::num_op(&op)
+            || matches!(op.as_str(), "and" | "or" | "not")
+            || is_cast_name(&op)
+        {
+            continue;
+        }
+        // 其余裸名：既不是全局函数、也未声明 rwir、也不是本包函数 → 明确报错，
+        // 绝不放行（`debugger` 之类未实现的内建应由提供方 def rwir 声明）。
+        return Err(undefined_call(&op));
+    }
+    Ok(())
+}
+
+fn undefined_call(op: &str) -> String {
+    format!("未定义函数 {op}：未给出被调函数的完整路径（写 `包名·函数名` 或 `/lib/包名·函数名`）")
+}
+
+fn is_cast_name(op: &str) -> bool {
+    matches!(
+        op,
+        "int8" | "int16" | "int32" | "int64"
+            | "uint8" | "uint16" | "uint32" | "uint64"
+            | "float32" | "float64" | "bool"
+            | "char/utf8" | "char/utf32" | "char/ascii"
+    ) || op == "stringkeymap"
+}
+
+/// 裸标识符（字母/数字/下划线/非 ASCII），排除符号算子、路径、命名空间算子。
+fn is_bare_identifier(s: &str) -> bool {
+    !s.is_empty()
+        && !s.contains('/')
+        && !s.contains('.')
+        && !s.contains(keytree::MEMBER_SEP)
+        && s.chars().all(|c| c.is_alphanumeric() || c == '_')
+}
+
 fn opcode_value(
     kv: &mut Kv,
     opcode: &str,
     nr: i32,
     nw: i32,
-    pkg: &str,
     local_funcs: &HashSet<String>,
+    is_operator: bool,
 ) -> (Vec<u8>, String) {
+    // lower 认定的算子永不是函数调用：语义名可能与同包 rwfunc 同名
+    // （`==` → `eq` vs `lib string { rwfunc eq }`），不得被裸名解析抢走。
+    if is_operator {
+        return (
+            kvkind::new_rwir(nr, nw, opcode),
+            kvkind::KIND_RWIR.to_string(),
+        );
+    }
+    // 裸名只有一条解析路径：`/lib/<name>`。删除「回退到 `<pkg>·<name>`」分支
+    // （包内裸名与全局函数争名空间，是 6976 层递归的根源）；同包调用必须写
+    // `pkg·name`（带 `·`），未定义裸名由 check_call_names 报错。
     let name = opcode.strip_prefix("/lib/").unwrap_or(opcode);
-    let qualified = if pkg.is_empty() || name.contains(keytree::MEMBER_SEP) || name.contains('/') {
-        name.to_string()
-    } else {
-        format!("{pkg}{}{name}", keytree::MEMBER_SEP)
-    };
     let is_func = local_funcs.contains(name)
-        || local_funcs.contains(&qualified)
-        || [name, qualified.as_str()].iter().any(|candidate| {
-            let dir = format!("/lib/{candidate}/");
-            kvkind::kind(&kv.get_one(&dir), &kv.langtype_of(&dir)) == kvkind::KIND_RWFUNC
-        });
+        || kvkind::kind(
+            &kv.get_one(&format!("/lib/{name}/")),
+            &kv.langtype_of(&format!("/lib/{name}/")),
+        ) == kvkind::KIND_RWFUNC;
     if is_func {
+        // 全局函数调用一律落绝对路径，运行期不得再做包内回退。
+        let target = if opcode.starts_with("/lib/")
+            || name.contains(keytree::MEMBER_SEP)
+            || name.contains('/')
+        {
+            opcode.to_string()
+        } else {
+            format!("/lib/{name}")
+        };
         (
-            kvkind::new_rwfunc_call(nr, nw, opcode),
+            kvkind::new_rwfunc_call(nr, nw, &target),
             kvkind::KIND_RWFUNC.to_string(),
         )
     } else {
@@ -1505,6 +1602,13 @@ mod tests {
             std::process::id()
         ));
         init_dirs(&mut kv).unwrap();
+        // `println` 是运行时提供的内建，由它 def rwir 声明（布局期必须有声明来源）。
+        kv.set(&[(
+            "/lib/println".to_string(),
+            kvkind::KIND_DEF_RWIR.to_string(),
+            kvkind::new_defrwir(1, 0, false),
+        )])
+        .unwrap();
         compile(&mut kv, "rwfunc caller() -> () {\ncallee(1) -> y\nprintln(y)\n}\nrwfunc callee(x:int64) -> (r:int64) {\nx -> r\n}\n").unwrap();
         assert_eq!(
             kvkind::kind(&kv.get_one("/lib/caller/[1,0]"), &kv.langtype_of("/lib/caller/[1,0]")),
@@ -1541,7 +1645,7 @@ mod tests {
         );
         compile(
             &mut kv,
-            "lib p {\nrwfunc caller() -> () {\ntarget()\n}\nrwfunc target() -> () {}\n}\n",
+            "lib p {\nrwfunc caller() -> () {\np·target()\n}\nrwfunc target() -> () {}\n}\n",
         )
         .unwrap();
         assert_eq!(
@@ -1590,6 +1694,13 @@ mod tests {
             std::process::id()
         ));
         init_dirs(&mut kv).unwrap();
+        // `baz` 是外部内建：裸名必须有声明来源（def rwir），否则布局期报错。
+        kv.set(&[(
+            "/lib/baz".to_string(),
+            kvkind::KIND_DEF_RWIR.to_string(),
+            kvkind::new_defrwir(1, 1, false),
+        )])
+        .unwrap();
         compile(
             &mut kv,
             "lib t {\nrwfunc main() -> () {\nfoo.bar(\"x\") -> y\nbaz(\"z\") -> w\n}\n}\n",

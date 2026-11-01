@@ -7,6 +7,20 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+fn seed_builtins(dsn: &str) {
+    // 裸名必须有声明来源：运行时 boot 会发布这些内建的 /lib/<op> def rwir。
+    let mut kv = kvlanglayout::Kv::conn(dsn);
+    kvlanglayout::init_dirs(&mut kv).unwrap();
+    for op in ["println", "print", "cerr"] {
+        kv.set(&[(
+            format!("/lib/{op}"),
+            kvlanglayout::kvkind::KIND_DEF_RWIR.to_string(),
+            kvlanglayout::kvkind::new_defrwir(1, 0, true),
+        )])
+        .unwrap();
+    }
+}
+
 fn tree(dir: &Path) -> Vec<(String, Vec<u8>)> {
     fn walk(base: &Path, cur: &Path, out: &mut Vec<(String, Vec<u8>)>) {
         let mut ents: Vec<_> = std::fs::read_dir(cur)
@@ -44,6 +58,7 @@ fn layout_is_deterministic_across_processes() {
     for run in 0..16 {
         let db = PathBuf::from(format!("/tmp/kvlanglayout_det_{pid}_{run}"));
         let _ = std::fs::remove_dir_all(&db);
+        seed_builtins(&format!("fs://{}", db.display()));
         let out = Command::new(bin)
             .arg(&src)
             .arg(format!("fs://{}", db.display()))

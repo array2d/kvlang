@@ -13,6 +13,101 @@ fn is_string_kind(t: &str) -> bool {
     t.contains("char")
 }
 
+/// A/B 开关：发语义算子（`add`）而不是具体精度名（`int64·add`）。
+/// 默认关闭——语义名会让 runtime 的 `fast_i64`/`opfn` 快路径退化为通用路径，
+/// 且当前 JIT `verify()` 会整段拒绝；只有阶段 B（按算子 + RegDesc 类型分派）落地后
+/// 才能默认打开。本开关只用于 A/B。
+pub fn semantic_ops() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var("KVLANG_LAYOUT_SEMANTIC_OP")
+            .map(|v| !v.is_empty() && v != "0")
+            .unwrap_or(false)
+    })
+}
+
+/// 字符串拼接脱糖开关：默认随语义算子开关；`KVLANG_LAYOUT_STRING_CONCAT=0`
+/// 可单独关闭（A/B 隔离用）。关闭时 `"a" + "b"` 保持 `+`，产物与旧版逐字节相同。
+pub fn string_concat_ops() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        semantic_ops()
+            && std::env::var("KVLANG_LAYOUT_STRING_CONCAT")
+                .map(|v| !v.is_empty() && v != "0")
+                .unwrap_or(true)
+    })
+}
+
+/// 值类型 `value` 是否匹配声明表达式 `decl`（支持 `a|b|c` 有限 union）。
+/// 只用于可证明的实参（字面量 / 已声明变量）；union 值要求每个成员都命中等。
+pub fn value_matches(decl: &str, value: &str) -> bool {
+    let decl = decl.trim();
+    let value = value.trim();
+    if decl.is_empty() || value.is_empty() {
+        return true;
+    }
+    value
+        .split('|')
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .all(|v| decl.split('|').map(str::trim).any(|a| atom_matches(a, v)))
+}
+
+fn split_prefix<'a>(s: &'a str) -> (usize, &'a str) {
+    let mut n = 0;
+    let mut rest = s;
+    while let Some(r) = rest.strip_prefix(['*', '@']) {
+        let ch = rest.chars().next().unwrap();
+        rest = r;
+        if ch == '*' {
+            n += 1
+        }
+    }
+    (n, rest)
+}
+
+/// value 的类型串拆成 (ndim, dims, kind)：`[2,3]int64` → (2,[2,3],"int64")；
+/// `[]char/utf8` → (1,[0],"char/utf8")；`int64` → (0,[],"int64")。
+fn value_shape(s: &str) -> (i32, Vec<i32>, String) {
+    if let Some(rest) = s.strip_prefix('[') {
+        if let Some(end) = rest.find(']') {
+            let inner = &rest[..end];
+            let dims: Vec<i32> = inner
+                .split(',')
+                .map(|d| d.trim().parse::<i32>().unwrap_or(0))
+                .collect();
+            return (dims.len() as i32, dims, rest[end + 1..].to_string());
+        }
+    }
+    (0, Vec::new(), s.to_string())
+}
+
+fn atom_matches(a: &str, v: &str) -> bool {
+    if a.is_empty() {
+        return true;
+    }
+    let (ap, ar) = split_prefix(a);
+    let (vp, vr) = split_prefix(v);
+    if ap != vp {
+        return false;
+    }
+    if ar.contains("char") || vr.contains("char") {
+        return ar.contains("char") && vr.contains("char");
+    }
+    if ar == "bool" || vr == "bool" {
+        return ar == vr;
+    }
+    if ar.contains(keytree::MEMBER_SEP) || ar == "stringkeymap" || vr.contains(keytree::MEMBER_SEP)
+    {
+        return ar == vr;
+    }
+    if ar.starts_with("/lib/") || vr.starts_with("/lib/") {
+        return ar == vr;
+    }
+    let (ndim, dims, kind) = value_shape(vr);
+    crate::langtype::match_langtype(ar, &kind, ndim, &dims)
+}
+
 fn is_container_type(t: &str) -> bool {
     t == "stringkeymap" || t.contains(keytree::MEMBER_SEP)
 }
@@ -315,35 +410,35 @@ impl LabelGen {
 /// call 结果槽带 callee 返回类型：把 rwfunc/rwir 声明的返回类型写进调用指令的
 /// `write_types`（声明类型，不是推断类型）。递归/互递归无碍——`sigs` 是文件级
 /// 签名表，在各函数体 layout 之前已建好；跨文件调用不在本表内，保持原样。
-pub fn annotate_call_returns(fn_: &mut Func, pkg: &str, sigs: &SigTable) {
-    annotate_returns_body(&mut fn_.body, pkg, sigs);
+pub fn annotate_call_returns(fn_: &mut Func, sigs: &SigTable) {
+    annotate_returns_body(&mut fn_.body, sigs);
 }
 
-fn annotate_returns_body(body: &mut [Stmt], pkg: &str, sigs: &SigTable) {
+fn annotate_returns_body(body: &mut [Stmt], sigs: &SigTable) {
     for st in body {
         match st {
-            Stmt::Instruction(s) => annotate_returns_inst(s, pkg, sigs),
-            Stmt::Scope(s) => annotate_returns_body(&mut s.body, pkg, sigs),
+            Stmt::Instruction(s) => annotate_returns_inst(s, sigs),
+            Stmt::Scope(s) => annotate_returns_body(&mut s.body, sigs),
             Stmt::If(s) => {
                 if let Some(c) = &mut s.cond {
-                    annotate_returns_inst(c, pkg, sigs);
+                    annotate_returns_inst(c, sigs);
                 }
-                annotate_returns_body(&mut s.then_, pkg, sigs);
-                annotate_returns_body(&mut s.else_, pkg, sigs);
+                annotate_returns_body(&mut s.then_, sigs);
+                annotate_returns_body(&mut s.else_, sigs);
             }
             Stmt::While(s) => {
                 if let Some(c) = &mut s.cond {
-                    annotate_returns_inst(c, pkg, sigs);
+                    annotate_returns_inst(c, sigs);
                 }
-                annotate_returns_body(&mut s.body, pkg, sigs);
+                annotate_returns_body(&mut s.body, sigs);
             }
-            Stmt::For(s) => annotate_returns_body(&mut s.body, pkg, sigs),
+            Stmt::For(s) => annotate_returns_body(&mut s.body, sigs),
             _ => {}
         }
     }
 }
 
-fn annotate_returns_inst(inst: &mut Instruction, pkg: &str, sigs: &SigTable) {
+fn annotate_returns_inst(inst: &mut Instruction, sigs: &SigTable) {
     let e = match &inst.expr {
         Some(e) if !e.is_leaf() => e,
         _ => return,
@@ -352,7 +447,7 @@ fn annotate_returns_inst(inst: &mut Instruction, pkg: &str, sigs: &SigTable) {
     if sym.arith || sym.cmp || is_cast_op(&e.op) {
         return;
     }
-    let Some(sig) = sig_lookup(sigs, pkg, &e.op) else {
+    let Some(sig) = sig_lookup(sigs, &e.op) else {
         return;
     };
     for (j, ret) in sig.returns.iter().enumerate() {
@@ -369,15 +464,9 @@ fn annotate_returns_inst(inst: &mut Instruction, pkg: &str, sigs: &SigTable) {
 }
 
 /// 调用名 → 签名：支持裸名、`pkg·名`、`/lib/` 绝对路径。
-fn sig_lookup<'a>(sigs: &'a SigTable, pkg: &str, op: &str) -> Option<&'a ast::FuncSig> {
-    let name = op.strip_prefix("/lib/").unwrap_or(op);
-    if let Some(sig) = sigs.get(name) {
-        return Some(sig);
-    }
-    if pkg.is_empty() || name.contains(keytree::MEMBER_SEP) || name.contains('/') {
-        return None;
-    }
-    sigs.get(&format!("{pkg}{}{name}", keytree::MEMBER_SEP))
+/// 调用名就是 `/lib` 去掉后的全路径：不做「包内裸名回退」。
+fn sig_lookup<'a>(sigs: &'a SigTable, op: &str) -> Option<&'a ast::FuncSig> {
+    sigs.get(op.strip_prefix("/lib/").unwrap_or(op))
 }
 
 /// 将函数体中 if/while 控制流降级为 ScopeStmt + br/goto，展开复合表达式。
@@ -403,6 +492,7 @@ fn return_inst() -> Stmt {
         writes: Vec::new(),
         write_types: Vec::new(),
         arrow_left: false,
+        operator: false,
     })
 }
 
@@ -682,6 +772,7 @@ fn lower_for_with_cont(
             writes: vec![slot.clone()],
             write_types: Vec::new(),
             arrow_left: true,
+            operator: false,
         }));
         slot
     };
@@ -693,6 +784,7 @@ fn lower_for_with_cont(
             writes: vec![len_slot.clone()],
             write_types: Vec::new(),
             arrow_left: false,
+            operator: false,
         }));
     } else {
         init_body.push(Stmt::Instruction(Instruction {
@@ -701,6 +793,7 @@ fn lower_for_with_cont(
             writes: vec![len_slot.clone()],
             write_types: Vec::new(),
             arrow_left: false,
+            operator: false,
         }));
     }
     init_body.push(goto_label(&cond_label));
@@ -711,6 +804,7 @@ fn lower_for_with_cont(
         writes: vec![idx_slot.clone()],
         write_types: Vec::new(),
         arrow_left: false,
+        operator: false,
     };
     let lt_inst = Instruction {
         comments: Vec::new(),
@@ -721,6 +815,7 @@ fn lower_for_with_cont(
         writes: vec![cond_slot.clone()],
         write_types: Vec::new(),
         arrow_left: false,
+        operator: false,
     };
     let cond_body = vec![
         Stmt::Instruction(add_inst),
@@ -744,6 +839,7 @@ fn lower_for_with_cont(
             writes: vec![key_slot.clone()],
             write_types: Vec::new(),
             arrow_left: false,
+            operator: false,
         }));
         body_insts.push(Stmt::Instruction(Instruction {
             comments: Vec::new(),
@@ -754,6 +850,7 @@ fn lower_for_with_cont(
             writes: vec![s.var.clone()],
             write_types: Vec::new(),
             arrow_left: false,
+            operator: false,
         }));
     } else {
         body_insts.push(Stmt::Instruction(Instruction {
@@ -765,6 +862,7 @@ fn lower_for_with_cont(
             writes: vec![s.var.clone()],
             write_types: Vec::new(),
             arrow_left: false,
+            operator: false,
         }));
     }
     body_insts.extend(body_inner);
@@ -825,6 +923,7 @@ fn flatten_expr(e: &Expr, lg: &mut LabelGen, extra: &mut Vec<Stmt>) -> Expr {
                 writes: vec![tmp.clone()],
                 write_types: Vec::new(),
                 arrow_left: false,
+                operator: false,
             }));
             new_args.push(ast::leaf(&tmp));
         } else {
@@ -852,6 +951,7 @@ fn br_inst(cond: &str, t_label: &str, f_label: &str) -> Stmt {
         writes: Vec::new(),
         write_types: Vec::new(),
         arrow_left: false,
+        operator: false,
     })
 }
 
@@ -862,6 +962,7 @@ fn goto_label(label: &str) -> Stmt {
         writes: Vec::new(),
         write_types: Vec::new(),
         arrow_left: false,
+        operator: false,
     })
 }
 
@@ -897,6 +998,7 @@ fn expand_sparse(base: &str, e: &Expr, wtypes: &[String], _lg: &mut LabelGen) ->
         // （`nums:[int64]·int64 = {…}`；见 [[map容器]]）。曾在此清空，runtime 无从得知容器类型。
         write_types: wtypes.to_vec(),
         arrow_left: true,
+        operator: false,
     };
     vec![Stmt::Instruction(inst)]
 }
@@ -908,6 +1010,7 @@ fn make_copy_inst(val: &str, dest: &str) -> Stmt {
         writes: vec![dest.to_string()],
         write_types: Vec::new(),
         arrow_left: false,
+        operator: false,
     })
 }
 
@@ -1698,6 +1801,9 @@ fn exact_kind(
             return Some("uint64".to_string())
         }
         "string·parsefloat" => return Some("float64".to_string()),
+        // 字符串族结果：类型精确（char/utf32），供字符串 `+` 的脱糖判定。
+        "string·char" | "string·set" | "string·slice" | "string·concat" | "string·formatint"
+        | "string·formatuint" => return Some("char/utf32".to_string()),
         _ => {}
     }
     let arith = symbol::lookup(op).arith;
@@ -1894,11 +2000,20 @@ pub fn specialize(
     fn_: &mut Func,
     tm: &HashMap<String, String>,
     declared: &HashMap<String, String>,
+    type_sets: &HashMap<String, Vec<String>>,
 ) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
     let stable = stable_kinds(fn_, tm, declared);
-    specialize_body(&mut fn_.body, tm, declared, &stable, &mut diags);
+    specialize_body(&mut fn_.body, tm, declared, &stable, type_sets, &mut diags);
     diags
+}
+
+/// 变量的推断类型集合全为字符串/字符族（无未知写者）→ 可证明是字符串。
+fn sets_all_string(sets: &HashMap<String, Vec<String>>, name: &str) -> bool {
+    match sets.get(name) {
+        Some(ts) => !ts.is_empty() && ts.iter().all(|t| is_string_kind(t)),
+        None => false,
+    }
 }
 
 fn specialize_body(
@@ -1906,26 +2021,27 @@ fn specialize_body(
     tm: &HashMap<String, String>,
     declared: &HashMap<String, String>,
     stable: &HashMap<String, String>,
+    type_sets: &HashMap<String, Vec<String>>,
     diags: &mut Vec<Diagnostic>,
 ) {
     for st in body {
         match st {
-            Stmt::Instruction(s) => specialize_inst(s, tm, declared, stable, diags),
-            Stmt::Scope(s) => specialize_body(&mut s.body, tm, declared, stable, diags),
+            Stmt::Instruction(s) => specialize_inst(s, tm, declared, stable, type_sets, diags),
+            Stmt::Scope(s) => specialize_body(&mut s.body, tm, declared, stable, type_sets, diags),
             Stmt::If(s) => {
                 if let Some(c) = &mut s.cond {
-                    specialize_inst(c, tm, declared, stable, diags);
+                    specialize_inst(c, tm, declared, stable, type_sets, diags);
                 }
-                specialize_body(&mut s.then_, tm, declared, stable, diags);
-                specialize_body(&mut s.else_, tm, declared, stable, diags);
+                specialize_body(&mut s.then_, tm, declared, stable, type_sets, diags);
+                specialize_body(&mut s.else_, tm, declared, stable, type_sets, diags);
             }
             Stmt::While(s) => {
                 if let Some(c) = &mut s.cond {
-                    specialize_inst(c, tm, declared, stable, diags);
+                    specialize_inst(c, tm, declared, stable, type_sets, diags);
                 }
-                specialize_body(&mut s.body, tm, declared, stable, diags);
+                specialize_body(&mut s.body, tm, declared, stable, type_sets, diags);
             }
-            Stmt::For(s) => specialize_body(&mut s.body, tm, declared, stable, diags),
+            Stmt::For(s) => specialize_body(&mut s.body, tm, declared, stable, type_sets, diags),
             _ => {}
         }
     }
@@ -1936,6 +2052,7 @@ fn specialize_inst(
     tm: &HashMap<String, String>,
     declared: &HashMap<String, String>,
     stable: &HashMap<String, String>,
+    type_sets: &HashMap<String, Vec<String>>,
     diags: &mut Vec<Diagnostic>,
 ) {
     let e = match &mut inst.expr {
@@ -1953,22 +2070,56 @@ fn specialize_inst(
     if !builtin::num_op(&word) {
         return;
     }
+    let diags_before = diags.len();
     validate_num_op(&word, &e.args, tm, diags);
     /* 特化决策用 declared（见上）；诊断仍用推断表以保持现有报错面。 */
     /* 操作数类型必须全部可证明（exact_operand_kind）；混合数值 kind 按五语言
      * 提升规则取唯一结果 kind，证明不了（未知/字符串/bool/不可判混合）保留通用 opcode。 */
     let mut kinds: Vec<String> = Vec::new();
+    let mut string_operands = 0usize;
     for arg in &e.args {
         let t = match exact_operand_kind(arg, declared, stable) {
             Some(t) => t,
-            None => return,
+            None => {
+                // 声明/稳定表都推不出时，退到有限类型集合：全字符串集合可证明是字符串。
+                if arg.is_leaf() && sets_all_string(type_sets, &arg.val) {
+                    string_operands += 1;
+                    kinds.push("char/utf32".to_string());
+                    continue;
+                }
+                return;
+            }
         };
-        if is_string_kind(&t) || !builtin::is_num_kind(&t) {
+        if is_string_kind(&t) {
+            string_operands += 1;
+        } else if !builtin::is_num_kind(&t) {
             return;
         }
         kinds.push(t);
     }
     if kinds.is_empty() {
+        return;
+    }
+    /* 字符串拼接脱糖（spec 05-runtime语义/11）：
+     * 全部操作数可证明是字符串/字符族 → `string·concat`；字符串与非字符串混杂
+     * → layout 阶段报错（不再留给运行时）。开关关闭时保持原样（`+`）。 */
+    if string_operands > 0 {
+        if word != "add" || !string_concat_ops() {
+            return;
+        }
+        if string_operands != kinds.len() {
+            // 字符串 + 可证明非字符串：layout 阶段报错，不留运行时。
+            // 仅在脱糖开启时生效（关闭时产物与旧版逐字节相同）。
+            if diags.len() == diags_before {
+                push_num_diag(
+                    diags,
+                    format!("TypeError: {word} cannot mix string and numeric operands"),
+                );
+            }
+            return;
+        }
+        e.op = "string·concat".to_string();
+        inst.operator = true;
         return;
     }
     let is_cmp = matches!(word.as_str(), "eq" | "neq" | "lt" | "le" | "gt" | "ge");
@@ -1978,12 +2129,18 @@ fn specialize_inst(
         Some(k) => k,
         None => return,
     };
-    // 一元负号（1 参 `-`/sub）：runtime 按 Neg 执行 → 发 `<k>·neg`。
+    // 一元负号（1 参 `-`/sub）：runtime 按 Neg 执行 → 发 `<k>·neg`
+    // （语义模式发 `neg`，类型留在操作数槽）。
     if word == "sub" && e.args.len() == 1 {
         if builtin::is_unsigned_kind(&k) {
             return;
         }
-        e.op = format!("{k}{}neg", keytree::MEMBER_SEP);
+        e.op = if semantic_ops() {
+            "neg".to_string()
+        } else {
+            format!("{k}{}neg", keytree::MEMBER_SEP)
+        };
+        inst.operator = true;
         return;
     }
     /* handler 的实参个数必须与之一致（通用 sub 允许 1 参，特化版只收 2 参）。 */
@@ -2016,14 +2173,20 @@ fn specialize_inst(
     } else if !is_cmp && builtin::op_kind(&word, &k) != k {
         return;
     }
-    e.op = format!("{k}{}{word}", keytree::MEMBER_SEP);
+    // 语义模式：只发算子词，具体精度由操作数槽的 langtype 承载（阶段 B 前提）。
+    e.op = if semantic_ops() {
+        word
+    } else {
+        format!("{k}{}{word}", keytree::MEMBER_SEP)
+    };
+    inst.operator = true;
 }
 
 /// 混合数值 kind 的唯一结果 kind（五语言阵营，且与 runtime 现状一致）：
 /// - int×int 取更宽（`wider_int_kind`，C 整型提升）；
 /// - float×float 取 float64（有 float64 时）；
-/// - int×float 取 float 宽度：仅当 float64 或整数侧全为 64 位（runtime 的
-///   to_float 结果宽度 = wmax 或 8，窄 int×float32 与顺序相关）→ float64；
+/// - int×float 取浮点操作数宽度（C 规则，与顺序无关）：有 float64 → float64，
+///   否则 float32；
 /// - int×uint 混合 runtime 直接报错（same_class=false），不特化。
 /// `allow_mixed_classes=false`（比较类）时跨类混合一律不特化。
 fn promoted_numeric_kind(kinds: &[String], allow_mixed_classes: bool) -> Option<String> {
@@ -2049,29 +2212,9 @@ fn promoted_numeric_kind(kinds: &[String], allow_mixed_classes: bool) -> Option<
         if !allow_mixed_classes {
             return None;
         }
-        // 与 runtime 现状对齐（`to_float`）：结果宽度 = 首操作数是 float 时取
-        // wmax，否则恒 8（float64）。C 语义本应取浮点操作数宽度，runtime 的
-        // 顺序相关行为留待阶段 A/B 修正；layout 按可观测结果取名。
-        let first_float = builtin::is_float_kind(&kinds[0]);
-        if !first_float {
-            return Some("float64".to_string());
-        }
-        let wmax = kinds
-            .iter()
-            .map(|t| {
-                if builtin::is_float_kind(t) {
-                    if t == "float32" {
-                        4
-                    } else {
-                        8
-                    }
-                } else {
-                    builtin::int_kind_width(t) as u8
-                }
-            })
-            .max()
-            .unwrap_or(8);
-        return Some(if wmax == 8 { "float64" } else { "float32" }.to_string());
+        // C 规则（spec §数值 promotion）：结果宽度只由浮点操作数决定，整数
+        // 转成该宽度；与操作数顺序无关。旧实现用位/字节混比 wmax，是 bug。
+        return Some(if has_float64 { "float64" } else { "float32" }.to_string());
     }
     if has_float {
         return Some(if has_float64 { "float64" } else { "float32" }.to_string());
@@ -2526,7 +2669,6 @@ fn collect_declared(body: &[Stmt], declared: &mut HashMap<String, String>) {
 
 fn walk_writes(
     body: &[Stmt],
-    pkg: &str,
     sigs: &SigTable,
     tm: &HashMap<String, String>,
     structs: &StructTable,
@@ -2535,22 +2677,22 @@ fn walk_writes(
 ) {
     for st in body {
         match st {
-            Stmt::Instruction(s) => walk_inst(s, pkg, sigs, tm, structs, declared, diags),
-            Stmt::Scope(s) => walk_writes(&s.body, pkg, sigs, tm, structs, declared, diags),
+            Stmt::Instruction(s) => walk_inst(s, sigs, tm, structs, declared, diags),
+            Stmt::Scope(s) => walk_writes(&s.body, sigs, tm, structs, declared, diags),
             Stmt::If(s) => {
                 if let Some(c) = &s.cond {
-                    walk_inst(c, pkg, sigs, tm, structs, declared, diags);
+                    walk_inst(c, sigs, tm, structs, declared, diags);
                 }
-                walk_writes(&s.then_, pkg, sigs, tm, structs, declared, diags);
-                walk_writes(&s.else_, pkg, sigs, tm, structs, declared, diags);
+                walk_writes(&s.then_, sigs, tm, structs, declared, diags);
+                walk_writes(&s.else_, sigs, tm, structs, declared, diags);
             }
             Stmt::While(s) => {
                 if let Some(c) = &s.cond {
-                    walk_inst(c, pkg, sigs, tm, structs, declared, diags);
+                    walk_inst(c, sigs, tm, structs, declared, diags);
                 }
-                walk_writes(&s.body, pkg, sigs, tm, structs, declared, diags);
+                walk_writes(&s.body, sigs, tm, structs, declared, diags);
             }
-            Stmt::For(s) => walk_writes(&s.body, pkg, sigs, tm, structs, declared, diags),
+            Stmt::For(s) => walk_writes(&s.body, sigs, tm, structs, declared, diags),
             _ => {}
         }
     }
@@ -2582,7 +2724,6 @@ fn check_struct_literal(e: &Expr, structs: &StructTable, diags: &mut Vec<Diagnos
 /// 调用实参对形参声明类型的检查（typed 参数即 typed 槽，见 [[赋值转换]]）。
 fn check_call_args(
     e: &Expr,
-    pkg: &str,
     sigs: &SigTable,
     tm: &HashMap<String, String>,
     declared: &HashMap<String, String>,
@@ -2594,12 +2735,7 @@ fn check_call_args(
     {
         return;
     }
-    let qual = if pkg.is_empty() {
-        e.op.clone()
-    } else {
-        format!("{pkg}{}{}", keytree::MEMBER_SEP, e.op)
-    };
-    let Some(sig) = sigs.get(&e.op).or_else(|| sigs.get(&qual)) else {
+    let Some(sig) = sigs.get(&e.op) else {
         return;
     };
     let np = sig.params.len();
@@ -2612,7 +2748,23 @@ fn check_call_args(
             break;
         };
         let raw = param.ty.trim_end_matches("...").trim().to_string();
-        if raw.is_empty() || raw.contains('|') || raw.starts_with('@') {
+        if raw.is_empty() || raw.starts_with('@') {
+            continue;
+        }
+        // union 形参此前被直接跳过（类型空洞）：按成员匹配可证明的实参类型，
+        // 不在成员集内即报错（与具体类型检查同一诊断级别）。
+        if raw.contains('|') {
+            if let Some(vt) = provable_arg_type(arg, declared) {
+                if !value_matches(&raw, &vt) {
+                    push_write_diag(
+                        diags,
+                        format!(
+                            "TypeError: cannot pass {vt} to {raw} (parameter {})",
+                            param.name
+                        ),
+                    );
+                }
+            }
             continue;
         }
         // 只对可静态信任的实参做检查：字面量，或已声明类型的变量。
@@ -2652,9 +2804,38 @@ fn check_call_args(
     }
 }
 
+/// 可证明的实参类型：字面量按自身 kind，已声明变量按声明类型；其余 None（不猜）。
+fn provable_arg_type(
+    e: &Expr,
+    declared: &HashMap<String, String>,
+) -> Option<String> {
+    if !e.is_leaf() {
+        return None;
+    }
+    if e.quote != 0 || matches!(e.lit, LitKind::LitString | LitKind::LitRawString) {
+        return Some("char/utf32".to_string());
+    }
+    match e.lit {
+        LitKind::LitBool => return Some("bool".to_string()),
+        LitKind::LitInt => return Some("int64".to_string()),
+        LitKind::LitFloat => return Some("float64".to_string()),
+        _ => {}
+    }
+    if let Some(t) = declared.get(&e.val) {
+        if !t.is_empty() {
+            return Some(t.clone());
+        }
+    }
+    let t = literal_slot_type(&e.val);
+    if t.is_empty() {
+        None
+    } else {
+        Some(t)
+    }
+}
+
 fn walk_inst(
     s: &Instruction,
-    pkg: &str,
     sigs: &SigTable,
     tm: &HashMap<String, String>,
     structs: &StructTable,
@@ -2662,7 +2843,7 @@ fn walk_inst(
     diags: &mut Vec<Diagnostic>,
 ) {
     let Some(e) = &s.expr else { return };
-    check_call_args(e, pkg, sigs, tm, declared, diags);
+    check_call_args(e, sigs, tm, declared, diags);
     if e.op == format!("struct{}new", keytree::MEMBER_SEP) {
         check_struct_literal(e, structs, diags);
     }
@@ -2716,7 +2897,6 @@ fn walk_inst(
 /// typed 写槽校验（[[赋值转换]]）：可赋性 + 字面量可表示性 + 容器字面量元素。
 pub fn validate_writes(
     fn_: &Func,
-    pkg: &str,
     tm: &HashMap<String, String>,
     structs: &StructTable,
     sigs: &SigTable,
@@ -2729,6 +2909,33 @@ pub fn validate_writes(
         }
     }
     collect_declared(&fn_.body, &mut declared);
-    walk_writes(&fn_.body, pkg, sigs, tm, structs, &declared, &mut diags);
+    walk_writes(&fn_.body, sigs, tm, structs, &declared, &mut diags);
     diags
+}
+
+#[cfg(test)]
+mod union_match_tests {
+    use super::value_matches;
+
+    #[test]
+    fn union_member_matching() {
+        assert!(value_matches("int64|float64", "int64"));
+        assert!(value_matches("int64|float64", "float64"));
+        assert!(!value_matches("int64|float64", "bool"));
+        assert!(!value_matches("int64|float64", "int32"));
+        assert!(value_matches("int64|float64", "int64|float64"));
+        assert!(!value_matches("int64", "int64|float64"));
+    }
+
+    #[test]
+    fn pointer_and_container_matching() {
+        assert!(value_matches("*int64|*float64", "*int64"));
+        assert!(value_matches("*int64|int64", "*int64"));
+        assert!(!value_matches("*int64", "int64"));
+        assert!(value_matches("[]char/utf8|int64", "char/utf32"));
+        assert!(value_matches("[2]int64|[3]float64", "[2]int64"));
+        assert!(!value_matches("[2]int64", "[3]int64"));
+        assert!(value_matches("stringkeymap|int64", "stringkeymap"));
+        assert!(value_matches("/lib/P|int64", "/lib/P"));
+    }
 }

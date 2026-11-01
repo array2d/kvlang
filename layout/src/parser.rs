@@ -1288,6 +1288,7 @@ impl Parser {
                 writes: vec![w],
                 write_types: vec![wt],
                 arrow_left,
+                operator: false,
             };
             self.dispatch_obj_by_type(&mut i);
             self.lower_array_fill(&mut i);

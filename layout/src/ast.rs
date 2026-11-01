@@ -381,6 +381,9 @@ pub struct Instruction {
     pub writes: Vec<String>,
     pub write_types: Vec<String>,
     pub arrow_left: bool, // true = 写槽在左（=）
+    /// true = lower 认定为算子（不是函数调用）：发射语义名时不得被同包同名
+    /// rwfunc 抢走（`==`→`eq` 与 `lib string { rwfunc eq }` 冲突）。
+    pub operator: bool,
 }
 
 impl Instruction {

@@ -6,7 +6,7 @@
 lib aaa/bbb/math {
     rwfunc sum(A:int64, B:int64) -> (C:int64) { A + B -> C }
     rwfunc double(A:int64) -> (C:int64) {
-        sum(A, A) -> C  // 同包裸名调用
+        aaa/bbb/math·sum(A, A) -> C
     }
 }
 rwfunc test() -> () {
