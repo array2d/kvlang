@@ -16,7 +16,7 @@ else()
     set(JIT_ARCH_SRC src/jit/jit_x64.cpp)
 endif()
 
-add_library(kvlang_runtimec2 SHARED EXCLUDE_FROM_ALL
+set(RUNTIMEC2_SOURCES
     src/abi.cpp
     src/kvspace.cpp
     src/valueio.cpp
@@ -37,6 +37,7 @@ add_library(kvlang_runtimec2 SHARED EXCLUDE_FROM_ALL
     src/vmkv_rwirruntimeimpl.cpp
     src/binir_dump.cpp
     src/runtime.cpp)
+add_library(kvlang_runtimec2 SHARED EXCLUDE_FROM_ALL ${RUNTIMEC2_SOURCES})
 add_custom_target(runtimec2 ALL DEPENDS kvlang_runtimec2 binircompiler)
 
 # 性能探针开关：默认关（热路径零开销）。
@@ -82,6 +83,20 @@ else()
         BUILD_WITH_INSTALL_RPATH ON
         LINK_FLAGS "-Wl,--disable-new-dtags")
 endif()
+
+# 原地写守卫：body 直写不得越过 head 声明的 body_len。
+add_executable(inplace_body_test tests/inplace_body_test.cpp ${RUNTIMEC2_SOURCES})
+target_include_directories(inplace_body_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include)
+target_compile_options(inplace_body_test PRIVATE
+    -O2 -fno-exceptions -fno-rtti -Wall -Wextra)
+target_link_directories(inplace_body_test PRIVATE "${LIB_DIR}" "${BACKEND_DIR}")
+target_link_libraries(inplace_body_test PRIVATE kvspace)
+set_target_properties(inplace_body_test PROPERTIES
+    BUILD_RPATH "${LIB_DIR};${BACKEND_DIR}")
 
 add_executable(m1_smoke tests/m1_smoke.c)
 target_include_directories(m1_smoke PRIVATE
@@ -253,6 +268,7 @@ set_tests_properties(c2_unknown_rwir_rejected PROPERTIES TIMEOUT 120)
 add_test(NAME c2_m1_smoke
          COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/m1_smoke.sh
                  $<TARGET_FILE:m1_smoke>)
+add_test(NAME c2_inplace_body COMMAND inplace_body_test)
 # 回归：嵌套调用触发 Stop 时，调用方帧的纯内存 int64/bool 局部须先落槽。
 add_test(NAME c2_frame_local_flush
          COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/frame_local_flush.sh

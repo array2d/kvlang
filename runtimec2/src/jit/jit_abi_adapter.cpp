@@ -34,7 +34,7 @@ __attribute__((always_inline)) inline bool commit_direct_i64(Register& r,
     if (d.langtype != LangType::Int64 || d.width != 8)
         return false;
     const kvspaceXvalueBodyView_t& w = r.view;
-    if (!(w.head && w.headlen == KVSPACE_XVALUE_HEAD_LEN && w.body_cap >= 8))
+    if (!(w.head && w.headlen == KVSPACE_XVALUE_HEAD_LEN && r.cap >= 8))
         return false;
     // Scalar storetype only: never memcpy into a slack/array body.
     if (w.head[6] != KVSPACE_XVALUE_ST_SHORT)
