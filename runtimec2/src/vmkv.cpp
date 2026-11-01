@@ -3077,6 +3077,12 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
     return Outcome::Ok;
 }
 
+namespace {
+// answer-017 V1：别名写参写穿（定义见文件后部）。
+bool sync_alias_write_params(Vmkv& vm, Frame& f, Register** dsts, int n,
+                             std::string* err);
+}  // namespace
+
 // Call 块（原 run_frame 内嵌）：callee 解析、mem_frame 判定、帧初始化、
 // arg_src/arg_dst 内存别名表、递归 run_frame。Call 是天然 checkpoint 边界。
 vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
@@ -3208,6 +3214,11 @@ vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
     Register* mem_dst[16] = {};
     int mem_src_n = 0, mem_dst_n = 0;
     bool mk_done = !mem_frame;
+    // answer-017 V1：别名写参若落在调用方的**参数寄存器**（帧外可观察），
+    // 调用返回后需要写穿 kvspace。这里只登记候选（每调用通常 0 个），
+    // 返回点再判链末仍为参数才真的写，帧局部热路径零成本。
+    Register* sync_dst[4];  // 段 nwr ≤ 4（codeseg 建段已校验）
+    int sync_n = 0;
     auto bind_arg = [&](int x, Register* caller_reg, const std::string& value_key,
                         const std::string& typ, const Wire& src) -> bool {
         char be[192] = {};
@@ -3227,6 +3238,11 @@ vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
         const bool want_alias =
             x > 0 || holds_value(caller_reg) || typ[0] == '*';
         if (mem_frame && ptr_alias && want_alias) {
+            if (x > 0 && sync_n < 4 &&
+                ((caller_reg->desc_ref &&
+                  caller_reg->desc_ref->param_k != 0) ||
+                 caller_reg->dst_ptr != nullptr))
+                sync_dst[sync_n++] = caller_reg;
             if (x < 0) {
                 const std::size_t ix = static_cast<std::size_t>(-x - 1);
                 mem_src[ix] = caller_reg;
@@ -3519,6 +3535,11 @@ vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
     Outcome rr = run_frame(nfc, 1, stop_pc, err);
     if (rr != Outcome::Ok && rr != Outcome::Returned)
         return rr;
+    // answer-017 V1：别名写参落在参数寄存器时，值只在调用方 fast 缓存；该寄存器
+    // 在本帧 kvspace 上可观察，需在调用返回点写穿（细节见 sync_alias_write_params）。
+    if (sync_n &&
+        !sync_alias_write_params(*this, f, sync_dst, sync_n, err))
+        return Outcome::Error;
     // 写参回写分流失效：内存别名（mem_dst）标量直写调用方 reg，缓存即值；
     // 其余经 kvspace 槽回写 → 调用方写参 fast 缓存陈旧，须逐级失效（重读槽），
     // 否则下条指令的 fk 快路径读到旧值（title 每字符 isalpha 后 br 误判）。
@@ -3548,6 +3569,64 @@ vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
 }
 
 namespace {
+
+// answer-017 V1：别名写参写穿。调用方寄存器 t 若（链末）是参数寄存器
+// （desc_ref->param_k != 0），它在 kvspace 上可观察（read_reg 的 flk 排除 /[0,、
+// handoff/扩展按 key 读），而内存别名的值只在 fast 缓存 → 用完整 SetValue 写穿。
+// noinline：保持 do_call 热路径的代码布局稳定（逐 op 成本敏感 TU）。
+[[gnu::noinline]] bool sync_alias_write_params(Vmkv& vm, Frame& f,
+                                               Register** dsts, int n,
+                                               std::string* err) {
+    for (int j = 0; j < n; j++) {
+        Register* head = dsts[j];
+        Register* end = head;
+        while (end->dst_ptr)
+            end = end->dst_ptr;
+        // 值以链末为准（别名写只更新链末 fast 缓存）。
+        const std::int64_t iv = end->fv;
+        (void)end;
+        // 逐跳：链上每个**标量参数寄存器**都要落 kvspace（中间参数会被本帧按 key 读）。
+        // 只处理 int64/uint64/bool（E 层静态类型）；float/字符串/Ptr 参数本来就不走
+        // 内存别名绑定（bind_arg 只对 int64/bool/`*T` 别名），不在此覆盖范围。
+        for (Register* t = head; t; t = t->dst_ptr) {
+            if (!t->desc_ref || t->desc_ref->param_k == 0)
+                continue;
+            const vmbin::LangType lt = t->desc_ref->langtype;
+            // 只写穿 int64 系列；bool 在基线已能正确到达 kvspace（不属 V1 形态），
+            // float/字符串/Ptr 参数根本不走内存别名绑定。None = 未知，按 int64 处理。
+            if (lt != vmbin::LangType::Int64 && lt != vmbin::LangType::Uint64 &&
+                lt != vmbin::LangType::None)
+                continue;
+            if (t->key.empty() &&
+                !vm.resolve_desc(f, t->desc_ref->name, &t->key, err))
+                continue;
+            if (t->key.empty())
+                continue;
+            std::uint8_t* buf = nullptr;
+            std::uint64_t len64 = 0;
+            const std::uint8_t* raw =
+                reinterpret_cast<const std::uint8_t*>(&iv);
+            const std::uint32_t raw_len = 8;
+            const bool built =
+                kvspaceXvalueHeadNewScalar(0, raw, raw_len, "int64", &buf, &len64) ==
+                    0 &&
+                buf;
+            char be[192] = {};
+            const bool okk =
+                built && kvspaceSetValue(f.h, t->key.c_str(), buf,
+                                         static_cast<std::uint32_t>(len64), be,
+                                         sizeof be) == 0;
+            std::free(buf);
+            if (!okk)
+                return false;
+            t->view_ok = false;
+            t->body = nullptr;
+            t->resolved = false;
+            t->slot_state = Register::SlotState::Present;
+        }
+    }
+    return true;
+}
 
 constexpr std::string_view kMemberSep = "\xE2\x80\xA5";  // ‥
 
