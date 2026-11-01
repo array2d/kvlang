@@ -12,6 +12,7 @@
 
 #include "binir_codec.hpp"
 #include "binir_dump.hpp"
+#include "dispatch_derive.hpp"
 #include "rwir_signature.hpp"
 #include "value.hpp"
 #include "valueio.hpp"
@@ -1654,7 +1655,10 @@ bool compile(void* h, const std::string& func_dir,
     }
     if (!RunCompileChecks(*out, err))
         return false;
-    return finalize_binir(out, func_dir, err);
+    if (!finalize_binir(out, func_dir, err))
+        return false;
+    derive_dispatch(out);  // 解码视图定型后按段算一次
+    return true;
 }
 
 bool check_roundtrip(const Segment& segment, std::string* why) {

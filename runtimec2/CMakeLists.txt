@@ -25,6 +25,8 @@ set(RUNTIMEC2_SOURCES
     src/rwir_lookup.cpp
     src/codeseg.cpp
     src/binircompiler/compiler.cpp
+    src/dispatch_derive.cpp
+    src/fast_opfn.cpp
     src/vmbin/binir_codec.cpp
     src/jit/jit.cpp
     src/jit/jit_stage2.cpp
@@ -117,6 +119,8 @@ add_executable(segment_shape_dump
     tools/segment_shape_dump.cpp
     src/codeseg.cpp
     src/binircompiler/compiler.cpp
+    src/dispatch_derive.cpp
+    src/fast_opfn.cpp
     src/vmbin/binir_codec.cpp
     src/binir_dump.cpp
     src/vmbin/profile.cpp
@@ -140,6 +144,8 @@ target_link_libraries(segment_shape_dump PRIVATE kvspace)
 add_executable(binircompiler
     src/binircompiler/main.cpp
     src/binircompiler/compiler.cpp
+    src/dispatch_derive.cpp
+    src/fast_opfn.cpp
     src/vmbin/binir_codec.cpp
     src/binir_dump.cpp
     src/vmbin/profile.cpp
@@ -182,6 +188,8 @@ set_tests_properties(c2_binircompiler_cli PROPERTIES TIMEOUT 120)
 add_executable(union_cross_check
     tools/union_cross_check.cpp
     src/binircompiler/compiler.cpp
+    src/dispatch_derive.cpp
+    src/fast_opfn.cpp
     src/vmbin/binir_codec.cpp
     src/binir_dump.cpp
     src/vmbin/profile.cpp
@@ -221,7 +229,20 @@ add_executable(jit_scalar_matrix_test
 target_include_directories(jit_scalar_matrix_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_options(jit_scalar_matrix_test PRIVATE -O2 -Wall -Wextra)
+
 add_test(NAME c2_jit_scalar_matrix COMMAND jit_scalar_matrix_test)
+
+# B2 建段期派生表：只编 derive 与算子号表，不链 kvspace/runtime。
+add_executable(dispatch_derive_test
+    tests/dispatch_derive_test.cpp
+    src/dispatch_derive.cpp
+    src/fast_opfn.cpp
+    src/rwir_gen.cpp)
+target_include_directories(dispatch_derive_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_compile_options(dispatch_derive_test PRIVATE -O2 -Wall -Wextra)
+add_test(NAME c2_dispatch_derive COMMAND dispatch_derive_test)
 
 # E 层单测（#583 L3）：只依赖头文件，不链接 kvspace/runtime。
 add_executable(register_desc_type_test tests/register_desc_type_test.cpp)
@@ -304,6 +325,7 @@ add_executable(jit_verify_test
     src/jit/jit_scalar_matrix.cpp
     src/jit/jit_abi_adapter.cpp
     src/jit/jit_x64.cpp
+    src/fast_opfn.cpp
     src/rwir_gen.cpp)
 target_include_directories(jit_verify_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
