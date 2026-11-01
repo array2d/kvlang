@@ -38,6 +38,76 @@ pub fn string_concat_ops() -> bool {
     })
 }
 
+/// 值类型 `value` 是否匹配声明表达式 `decl`（支持 `a|b|c` 有限 union）。
+/// 只用于可证明的实参（字面量 / 已声明变量）；union 值要求每个成员都命中等。
+pub fn value_matches(decl: &str, value: &str) -> bool {
+    let decl = decl.trim();
+    let value = value.trim();
+    if decl.is_empty() || value.is_empty() {
+        return true;
+    }
+    value
+        .split('|')
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .all(|v| decl.split('|').map(str::trim).any(|a| atom_matches(a, v)))
+}
+
+fn split_prefix<'a>(s: &'a str) -> (usize, &'a str) {
+    let mut n = 0;
+    let mut rest = s;
+    while let Some(r) = rest.strip_prefix(['*', '@']) {
+        let ch = rest.chars().next().unwrap();
+        rest = r;
+        if ch == '*' {
+            n += 1
+        }
+    }
+    (n, rest)
+}
+
+/// value 的类型串拆成 (ndim, dims, kind)：`[2,3]int64` → (2,[2,3],"int64")；
+/// `[]char/utf8` → (1,[0],"char/utf8")；`int64` → (0,[],"int64")。
+fn value_shape(s: &str) -> (i32, Vec<i32>, String) {
+    if let Some(rest) = s.strip_prefix('[') {
+        if let Some(end) = rest.find(']') {
+            let inner = &rest[..end];
+            let dims: Vec<i32> = inner
+                .split(',')
+                .map(|d| d.trim().parse::<i32>().unwrap_or(0))
+                .collect();
+            return (dims.len() as i32, dims, rest[end + 1..].to_string());
+        }
+    }
+    (0, Vec::new(), s.to_string())
+}
+
+fn atom_matches(a: &str, v: &str) -> bool {
+    if a.is_empty() {
+        return true;
+    }
+    let (ap, ar) = split_prefix(a);
+    let (vp, vr) = split_prefix(v);
+    if ap != vp {
+        return false;
+    }
+    if ar.contains("char") || vr.contains("char") {
+        return ar.contains("char") && vr.contains("char");
+    }
+    if ar == "bool" || vr == "bool" {
+        return ar == vr;
+    }
+    if ar.contains(keytree::MEMBER_SEP) || ar == "stringkeymap" || vr.contains(keytree::MEMBER_SEP)
+    {
+        return ar == vr;
+    }
+    if ar.starts_with("/lib/") || vr.starts_with("/lib/") {
+        return ar == vr;
+    }
+    let (ndim, dims, kind) = value_shape(vr);
+    crate::langtype::match_langtype(ar, &kind, ndim, &dims)
+}
+
 fn is_container_type(t: &str) -> bool {
     t == "stringkeymap" || t.contains(keytree::MEMBER_SEP)
 }
@@ -2691,7 +2761,23 @@ fn check_call_args(
             break;
         };
         let raw = param.ty.trim_end_matches("...").trim().to_string();
-        if raw.is_empty() || raw.contains('|') || raw.starts_with('@') {
+        if raw.is_empty() || raw.starts_with('@') {
+            continue;
+        }
+        // union 形参此前被直接跳过（类型空洞）：按成员匹配可证明的实参类型，
+        // 不在成员集内即报错（与具体类型检查同一诊断级别）。
+        if raw.contains('|') {
+            if let Some(vt) = provable_arg_type(arg, declared) {
+                if !value_matches(&raw, &vt) {
+                    push_write_diag(
+                        diags,
+                        format!(
+                            "TypeError: cannot pass {vt} to {raw} (parameter {})",
+                            param.name
+                        ),
+                    );
+                }
+            }
             continue;
         }
         // 只对可静态信任的实参做检查：字面量，或已声明类型的变量。
@@ -2728,6 +2814,36 @@ fn check_call_args(
             }
             check_assignable(&vt, at, diags);
         }
+    }
+}
+
+/// 可证明的实参类型：字面量按自身 kind，已声明变量按声明类型；其余 None（不猜）。
+fn provable_arg_type(
+    e: &Expr,
+    declared: &HashMap<String, String>,
+) -> Option<String> {
+    if !e.is_leaf() {
+        return None;
+    }
+    if e.quote != 0 || matches!(e.lit, LitKind::LitString | LitKind::LitRawString) {
+        return Some("char/utf32".to_string());
+    }
+    match e.lit {
+        LitKind::LitBool => return Some("bool".to_string()),
+        LitKind::LitInt => return Some("int64".to_string()),
+        LitKind::LitFloat => return Some("float64".to_string()),
+        _ => {}
+    }
+    if let Some(t) = declared.get(&e.val) {
+        if !t.is_empty() {
+            return Some(t.clone());
+        }
+    }
+    let t = literal_slot_type(&e.val);
+    if t.is_empty() {
+        None
+    } else {
+        Some(t)
     }
 }
 
@@ -2810,4 +2926,31 @@ pub fn validate_writes(
     collect_declared(&fn_.body, &mut declared);
     walk_writes(&fn_.body, pkg, sigs, tm, structs, &declared, &mut diags);
     diags
+}
+
+#[cfg(test)]
+mod union_match_tests {
+    use super::value_matches;
+
+    #[test]
+    fn union_member_matching() {
+        assert!(value_matches("int64|float64", "int64"));
+        assert!(value_matches("int64|float64", "float64"));
+        assert!(!value_matches("int64|float64", "bool"));
+        assert!(!value_matches("int64|float64", "int32"));
+        assert!(value_matches("int64|float64", "int64|float64"));
+        assert!(!value_matches("int64", "int64|float64"));
+    }
+
+    #[test]
+    fn pointer_and_container_matching() {
+        assert!(value_matches("*int64|*float64", "*int64"));
+        assert!(value_matches("*int64|int64", "*int64"));
+        assert!(!value_matches("*int64", "int64"));
+        assert!(value_matches("[]char/utf8|int64", "char/utf32"));
+        assert!(value_matches("[2]int64|[3]float64", "[2]int64"));
+        assert!(!value_matches("[2]int64", "[3]int64"));
+        assert!(value_matches("stringkeymap|int64", "stringkeymap"));
+        assert!(value_matches("/lib/P|int64", "/lib/P"));
+    }
 }
