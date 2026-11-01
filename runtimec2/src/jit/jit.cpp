@@ -320,9 +320,9 @@ std::unordered_map<std::string, JitFn>& jit_cache() {
     return c;
 }
 
-// ── 第二阶段（RC2_JIT2=1）：统一 ABI 的槽式执行 ───────────────────
+// ── 第二阶段（默认开启，RC2_NOJIT2 关闭）：统一 ABI 的槽式执行 ──────
 using Jit2Fn = jitabi::GeneralJitFnV1;
-bool g_jit2 = std::getenv("RC2_JIT2") != nullptr;
+bool g_jit2 = std::getenv("RC2_NOJIT2") == nullptr;
 
 // runtimec2 执行单线程（jit cache 本身也是静态 map）：用静态缓冲避免 TLS 开销。
 jitabi::ValueSlotV1 g_jit2_slots[64];
@@ -782,10 +782,10 @@ bool jit2_try_run(Frame& f, const Segment* seg, int start_s0, Outcome* out,
 
 bool jit_enabled() { return !g_nojit; }
 
-bool jit2_enabled() { return g_jit2; }
+bool jit2_enabled() { return g_jit2 && !g_nojit; }
 
 const void* jit2_entry(const std::string& func_dir, const Segment* seg) {
-    return g_jit2 ? jit2_lookup(func_dir, seg) : nullptr;
+    return g_jit2 && !g_nojit ? jit2_lookup(func_dir, seg) : nullptr;
 }
 
 bool jit2_accepted(const std::string& func_dir, const Segment* seg) {
