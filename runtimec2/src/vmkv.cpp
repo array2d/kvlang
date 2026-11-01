@@ -1824,6 +1824,11 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
         vmbin.prof.frames++;
     // 四基址常驻：指令段/Register 表基址提局部，热路径免 vector 链访问。
     const CInsn* ci = seg->insns.data();
+    // B2：建段期派生分派。语义段（layout 发语义算子 → Impl::Dynamic）由派生表
+    // 提供与 typed 行同义的 int64 快内核描述；typed 段派生表为空 → der=nullptr，
+    // 热路径判定与今天完全一致。
+    const Segment::DerivedDispatch* der =
+        seg->derived.empty() ? nullptr : seg->derived.data();
     Register* regs = f.regs.data();
     // runaway 防护：局部计数，函数末尾合并进全局（热路径无全局 inc）。
     unsigned long long run_steps = 0;
@@ -1852,7 +1857,7 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
         // 死循环——prime_sieve 的 limit 参数非 mem 帧不 fast）。
         bool fk_enter = false;
         if (!g_no_fast) {
-            if (ins.fast_i64) {
+            if (ins.fast_i64 || (der && der[idx].fast_i64)) {
                 Register& r0 = regs[ins.rd[0]], &r1 = regs[ins.rd[1]];
                 Register& ra = r0.src_ptr ? *r0.src_ptr : r0;
                 Register& rb = r1.src_ptr ? *r1.src_ptr : r1;
@@ -1889,7 +1894,11 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                            std::to_string(instruction_pc(idx));
                     return Outcome::Error;
                 }
-                if (ik.fast_i64) {
+                const bool ik_fast =
+                    ik.fast_i64 || (der && der[idx].fast_i64);
+                if (ik_fast) {
+                    const std::uint8_t opfn =
+                        ik.fast_i64 ? ik.opfn : der[idx].opfn;
                     Register &r0 = regs[ik.rd[0]], &r1 = regs[ik.rd[1]],
                          &w = regs[ik.wr[0]];
                     Register& ra = r0.src_ptr ? *r0.src_ptr : r0;
@@ -1897,7 +1906,7 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                     if (ra.fast_i64 && rb.fast_i64) {
                         const std::int64_t a = ra.fv, b = rb.fv;
                         std::int64_t rv;
-                        switch (ik.opfn) {
+                        switch (opfn) {
 #define C2_FK_CASE(O) case O: rv = fast_i64<O>(a, b); break
                         C2_FK_CASE(1); C2_FK_CASE(2); C2_FK_CASE(3);
                         C2_FK_CASE(4); C2_FK_CASE(5); C2_FK_CASE(6);
@@ -1907,7 +1916,7 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                         C2_FK_CASE(16); C2_FK_CASE(17); C2_FK_CASE(18);
                         default: rv = 0; break;
                         }
-                        if (ik.opfn == 4 || ik.opfn == 5) {
+                        if (opfn == 4 || opfn == 5) {
                             if (b == 0) {
                                 *err = std::string("division by zero: ") + instruction_name(*seg, ik);
                                 if (stop_pc)
@@ -1916,7 +1925,7 @@ Outcome Vmkv::run_frame(Frame& f, int start_s0,
                             }
                         }
                         w.fast_bool = false;
-                        if (ik.opfn <= 12) {
+                        if (opfn <= 12) {
                             if (ik.wr_local && !w.view_ok) {
                                 w.fv = rv;
                                 w.fast_i64 = true;
