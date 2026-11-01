@@ -338,3 +338,10 @@ add_test(NAME c2_jit_semantic_ops
                  ${CMAKE_CURRENT_SOURCE_DIR}/../bin/byteseek
                  ${CMAKE_CURRENT_SOURCE_DIR}/..)
 set_tests_properties(c2_jit_semantic_ops PROPERTIES TIMEOUT 120)
+
+# JIT 写参提交按 langtype 落槽：float64/bool/int64 三档一致。
+add_test(NAME c2_jit_return_types
+         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/jit_return_types.sh
+                 ${CMAKE_CURRENT_SOURCE_DIR}/../bin/byteseek
+                 ${CMAKE_CURRENT_SOURCE_DIR}/..)
+set_tests_properties(c2_jit_return_types PROPERTIES TIMEOUT 120)

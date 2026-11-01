@@ -3416,7 +3416,11 @@ vmbin::Outcome Vmkv::do_call(Frame& f, const Segment* seg, const CInsn& ins,
     // JIT 快路径绑定只对纯内存帧成立（参数=调用方 reg 别名、不落 kvspace 槽）。
     // 含 handler/handoff 的段必须走完整 kvspace 绑定：帧可能中途 Stop 重启，
     // 别名会丢（prime_sieve println 坑），且 JIT2 接受 handler 函数后更常见。
-    const bool jit_fast_bind = jcode && !f.observable && mem_frame;
+    // 快路径绑定把每个参数按 int64 别名处理（bind_arg 的 typ 固定 "int64"）：
+    // 只对全部参数都是 int64/uint64 的段成立。bool 写参要落 bool 槽、float
+    // 写参要落 float 槽（JIT2 接比较/浮点段），走完整 kvspace 绑定。
+    const bool jit_fast_bind = jcode && !f.observable && mem_frame &&
+                               callee_int_params(cseg);
     if (!jit_fast_bind)
     for (int i = 1; i < ins.nrd; i++) {
         Wire vw{};

@@ -92,10 +92,21 @@ bool verify(const Segment* seg, JitShape* sh, JitRefusal* refusal) {
         if (d.param_k == -1) {
             if (sh->src_idx >= 0)
                 return refuse(VmjitRefusalReason::BadParamLayout, i);
+            // M1 的值模型只有 int64：bool/float 参数经 M1 会按 int64 落槽，
+            // 调用方读回类型错（如 bool 结果被 println 打成 1/0）。这类形状
+            // 交 JIT2 或解释器。
+            if (d.langtype != vmbin::LangType::Int64 &&
+                d.langtype != vmbin::LangType::Uint64 &&
+                d.langtype != vmbin::LangType::None)
+                return refuse(VmjitRefusalReason::TypeMismatch, i);
             sh->src_idx = static_cast<int>(i);
         } else if (d.param_k == 1) {
             if (sh->dst_idx >= 0)
                 return refuse(VmjitRefusalReason::BadParamLayout, i);
+            if (d.langtype != vmbin::LangType::Int64 &&
+                d.langtype != vmbin::LangType::Uint64 &&
+                d.langtype != vmbin::LangType::None)
+                return refuse(VmjitRefusalReason::TypeMismatch, i);
             sh->dst_idx = static_cast<int>(i);
         } else if (d.param_k != 0) {
             // 多参（-2/-3/… 或 +2/…）需要参数表 ABI；当前 M1 只接受单入单出。
@@ -778,13 +789,11 @@ bool jit2_try_run(Frame& f, const Segment* seg, int start_s0, Outcome* out,
     for (int r : shape.outputs) {
         const std::int64_t value =
             static_cast<std::int64_t>(slots[static_cast<std::size_t>(r)].payload_lo);
-        if (!g_vmkv.slot_write_i64(f, static_cast<std::uint8_t>(r), value)) {
+        if (!slot_store_typed(&f, seg, static_cast<std::size_t>(r), value)) {
             *err = "jit2 commit failed: " + f.func_dir;
             *out = Outcome::Error;
             return true;
         }
-        f.regs[static_cast<std::size_t>(r)].fv = value;
-        f.regs[static_cast<std::size_t>(r)].fast_i64 = true;
     }
     if (stop_pc)
         stop_pc->clear();
@@ -793,6 +802,15 @@ bool jit2_try_run(Frame& f, const Segment* seg, int start_s0, Outcome* out,
 }
 
 }  // namespace
+
+bool callee_int_params(const Segment* seg) {
+    for (const RegDesc& d : seg->regs)
+        if (d.kind == Operand::Kind::Var && d.param_k != 0 &&
+            d.langtype != vmbin::LangType::Int64 &&
+            d.langtype != vmbin::LangType::Uint64)
+            return false;
+    return true;
+}
 
 bool jit_enabled() { return !g_nojit; }
 
