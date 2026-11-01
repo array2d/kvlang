@@ -183,7 +183,11 @@ static int decode_operand(kvspace_t *kv, const char *link_base,
         free(descriptor);
     }
     if (!target || !target[0]) {
-        snprintf(err, err_cap, "Decode: invalid operand %s", slot);
+        const char *why = kvlangRwirDynKeyError();
+        if (!target && why[0])
+            snprintf(err, err_cap, "%s (operand %s)", why, slot);
+        else
+            snprintf(err, err_cap, "Decode: invalid operand %s", slot);
         free(target);
         free(type);
         return -1;

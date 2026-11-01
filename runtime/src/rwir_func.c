@@ -11,7 +11,7 @@ unsigned long kvCBodyFast, kvCBodyFallback;
 /* #116 后 if/while 不再建 scope 帧，当前帧 [d] 即 rwfunc 帧，frame_root 直接可用。 */
 
 static inline bool xvalue_ready_non_rwir(const kvlangXvalue_t *val) {
-    if (!val || !val->bytes || val->length == 0 || xh_is_none(val->bytes))
+    if (!val || kvlangXvalueNone(val))
         return false;
     return !kvlangXvalueKindIs(val, KVSPACE_KIND_RWIR) &&
            !kvlangXvalueKindIs(val, KVSPACE_KIND_RWFUNC);
@@ -39,8 +39,8 @@ void kvlangBuiltinResolveReadValue(kvspace_t *kv, const char *frame_root, const 
     /* decode 期已按 read_target 取回目标值（out->name 是绝对路径时亦然），直接借用即可。
      * 这一支必须排在绝对路径之前：否则每步都会把已经拿到的值丢掉、再去后端读一遍。 */
     if (xvalue_ready_non_rwir(val)) {
-        out->bytes = val->bytes; /* Borrowed for this instruction. */
-        out->length = val->length;
+        /* Borrowed for this instruction, preserving cached `langtype`. */
+        kvlangXvalueBorrow(out, val);
         return;
     }
     if (name && name[0] == '/') {
@@ -83,9 +83,249 @@ char *kvlangBuiltinResolveReadKey(kvspace_t *kv, const char *frame_root, const c
     return kvlangBuiltinResolveWriteSlot(kv, frame_root, name);
 }
 
+static char *resolve_dyn_member(kvspace_t *kv, const char *frame_root,
+                                const char *name, const char *dot);
+
+/* Map parameter `name[0..nl)` to signed slot index (`+k` write, `-k` read) via `<dir>.[0,+-k]`,
+ * or 0 if not a parameter. Cold path used only when no matching frame local exists. */
+static __attribute__((noinline, cold)) int
+param_index_by_name(kvspace_t *kv, const char *stk, const char *name,
+                    size_t nl) {
+    char key[KV_KEY_MAX];
+    kvlangXvalue_t v;
+    if ((size_t)snprintf(key, sizeof key, "%s%s", stk, SEG_LIB) >= sizeof key)
+        return 0;
+    kvlangXvalueZero(&v);
+    /* `‥lib` is an untyped system key storing raw UTF-8 bytes. */
+    if (kvlangKvspaceGetOne(kv, key, &v) != 0 || kvlangXvalueNone(&v))
+        return 0;
+    char dir[KV_KEY_MAX];
+    size_t dl = (size_t)xh_content_len(v.bytes);
+    if (dl == 0 || dl >= sizeof dir)
+        return 0;
+    memcpy(dir, xh_body(v.bytes), dl);
+    while (dl > 0 && dir[dl - 1] == '/')
+        dl--;
+    dir[dl] = 0;
+    for (int sign = 1; sign >= -1; sign -= 2) {
+        for (int k = 1; k <= MAX_PARAMS; k++) {
+            if ((size_t)snprintf(key, sizeof key, "%s.[0,%d]", dir, sign * k) >=
+                sizeof key)
+                break;
+            kvlangXvalueZero(&v);
+            if (kvlangKvspaceGetOne(kv, key, &v) != 0 || kvlangXvalueNone(&v))
+                break;
+            const char *b = (const char *)xh_body(v.bytes);
+            int32_t n = xh_content_len(v.bytes);
+            if (n > (int32_t)nl && memcmp(b, name, nl) == 0 && b[nl] == 0)
+                return sign * k;
+        }
+    }
+    return 0;
+}
+
+/* True if frame local `stk + name[0..nl)` already exists (non-None). */
+static bool frame_local_exists(kvspace_t *kv, const char *stk, const char *name,
+                               size_t nl) {
+    char key[KV_KEY_MAX];
+    if ((size_t)snprintf(key, sizeof key, "%s%.*s", stk, (int)nl, name) >=
+        sizeof key)
+        return false;
+    kvlangXvalue_t v;
+    kvlangXvalueZero(&v);
+    return kvlangKvspaceGetOne(kv, key, &v) == 0 && !kvlangXvalueNone(&v);
+}
+
+/* Resolve static/chained member write slot (`a·b`, `a·b·c`):
+ *   1. Start from signature parameter target if `base` is not an existing local, else `stk + base`;
+ *   2. Follow Ptr hops (up to 16) or `/`-prefixed path-string base (falling back to frame local if a
+ *      read-param binds a non-path literal; `None` local Ptr stays `stk + base` so memhead check fails);
+ *   3. Dereference intermediate Ptr segments before appending the final `·field`. */
+static __attribute__((noinline, cold)) char *
+resolve_static_member_slot(kvspace_t *kv, const char *stk, const char *name,
+                           const char *msep) {
+    size_t bl = (size_t)(msep - name);
+    kvlangXvalue_t v;
+    char *cur_base = NULL;
+    bool from_param = false;
+
+    if (!frame_local_exists(kv, stk, name, bl)) {
+        int slot = param_index_by_name(kv, stk, name, bl);
+        if (slot) {
+            char fs[32];
+            snprintf(fs, sizeof fs, "[0,%d]", slot);
+            kvlangXvalueZero(&v);
+            if (kvlangKvspaceGetMember(kv, stk, fs, &v) == 0 &&
+                kvlangXvalueIsPtr(&v)) {
+                char *t = kvlangXvaluePtrTarget(&v);
+                for (int hop = 0; t && hop < 16; hop++) {
+                    kvlangXvalueZero(&v);
+                    if (kvlangKvspaceGetOne(kv, t, &v) != 0 ||
+                        !kvlangXvalueIsPtr(&v))
+                        break;
+                    char *nt = kvlangXvaluePtrTarget(&v);
+                    if (!nt || !nt[0]) {
+                        free(nt);
+                        break;
+                    }
+                    free(t);
+                    t = nt;
+                }
+                if (t && t[0]) {
+                    kvlangXvalueZero(&v);
+                    kvlangKvspaceGetOne(kv, t, &v);
+                    bool ok_base = true;
+                    if (!kvlangXvalueNone(&v)) {
+                        const char *k = kvlangXvalueKind(&v);
+                        if (!(k[0] == '/' || kvlangKindIsMap(k) ||
+                              kvlangXvalueIsCharKind(k)))
+                            ok_base = false;
+                    }
+                    if (ok_base) {
+                        cur_base = t;
+                        from_param = true;
+                    } else {
+                        free(t);
+                    }
+                } else {
+                    free(t);
+                }
+            }
+        }
+    }
+
+    if (!cur_base) {
+        size_t sl = strlen(stk);
+        cur_base = malloc(sl + bl + 1);
+        if (!cur_base)
+            kvlangDie("out of memory building member base");
+        memcpy(cur_base, stk, sl);
+        memcpy(cur_base + sl, name, bl);
+        cur_base[sl + bl] = 0;
+    }
+
+    /* Follow Ptr chain or `/`-prefixed path-string base on the starting slot. */
+    for (int hop = 0; hop < 16; hop++) {
+        kvlangXvalueZero(&v);
+        if (kvlangKvspaceGetOne(kv, cur_base, &v) != 0 ||
+            !kvlangXvalueIsPtr(&v))
+            break;
+        char *nt = kvlangXvaluePtrTarget(&v);
+        if (!nt || !nt[0]) {
+            free(nt);
+            break;
+        }
+        free(cur_base);
+        cur_base = nt;
+    }
+    kvlangXvalueZero(&v);
+    if (kvlangKvspaceGetOne(kv, cur_base, &v) == 0 && !kvlangXvalueNone(&v) &&
+        !kvlangXvalueIsPtr(&v) && kvlangXvalueIsCharKind(kvlangXvalueKind(&v))) {
+        char *ps = kvlangXvalueValueString(&v);
+        if (ps && ps[0] == '/') {
+            free(cur_base);
+            cur_base = ps;
+        } else if (from_param) {
+            /* Parameter bound to a non-path string literal: fall back to frame-local slot name. */
+            free(ps);
+            free(cur_base);
+            return NULL;
+        } else {
+            free(ps);
+        }
+    }
+
+    /* Advance segment by segment, dereferencing intermediate Ptrs up to 16 hops. */
+    const char *p = msep + MEMBER_SEP_LEN;
+    for (;;) {
+        const char *next_sep = strstr(p, MEMBER_SEP);
+        if (!next_sep) {
+            char *r = kvlangKeytreeMember(cur_base, p);
+            free(cur_base);
+            return r;
+        }
+        char *seg = strndup(p, (size_t)(next_sep - p));
+        if (!seg)
+            kvlangDie("out of memory resolving member segment");
+        char *mid = kvlangKeytreeMember(cur_base, seg);
+        free(seg);
+        free(cur_base);
+        cur_base = mid;
+        for (int hop = 0; hop < 16; hop++) {
+            kvlangXvalueZero(&v);
+            if (kvlangKvspaceGetOne(kv, cur_base, &v) != 0 ||
+                !kvlangXvalueIsPtr(&v))
+                break;
+            char *nt = kvlangXvaluePtrTarget(&v);
+            if (!nt || !nt[0]) {
+                free(nt);
+                break;
+            }
+            free(cur_base);
+            cur_base = nt;
+        }
+        p = next_sep + MEMBER_SEP_LEN;
+    }
+}
+
+/* Resolve parameter `[0,+-k]` (`frame slot -> ‥arg -> caller slot`), returning NULL if broken. */
+static char *param_value_key(kvspace_t *kv, const char *stk, int slot) {
+    char fs[32];
+    snprintf(fs, sizeof fs, "[0,%d]", slot);
+    kvlangXvalue_t v;
+    kvlangXvalueZero(&v);
+    if (kvlangKvspaceGetMember(kv, stk, fs, &v) != 0 || !kvlangXvalueIsPtr(&v))
+        return NULL;
+    char *arg = kvlangXvaluePtrTarget(&v);
+    if (!arg || !arg[0]) {
+        free(arg);
+        return NULL;
+    }
+    kvlangXvalueZero(&v);
+    if (kvlangKvspaceGetOne(kv, arg, &v) != 0 || !kvlangXvalueIsPtr(&v)) {
+        free(arg);
+        return NULL;
+    }
+    char *t = kvlangXvaluePtrTarget(&v);
+    free(arg);
+    if (!t || !t[0]) {
+        free(t);
+        return NULL;
+    }
+    return t;
+}
+
+/* Resolve `base` or `key` in dynamic member write `base·*key`: layout leaves parameter names
+ * unrewritten in write descriptors, so check signature parameters when no frame local exists. */
+static char *dyn_operand_slot(kvspace_t *kv, const char *frame_root,
+                              const char *name) {
+    if (name[0] && name[0] != '/' && name[0] != '*' && name[0] != '[' &&
+        !strstr(name, MEMBER_SEP)) {
+        char stkbuf[512];
+        char *stk = kvlangKeytreeStackBuffer(frame_root, stkbuf, sizeof stkbuf)
+                        ? stkbuf
+                        : kvlangKeytreeStack(frame_root);
+        size_t nl = strlen(name);
+        char *pk = NULL;
+        if (!frame_local_exists(kv, stk, name, nl)) {
+            int slot = param_index_by_name(kv, stk, name, nl);
+            if (slot)
+                pk = param_value_key(kv, stk, slot);
+        }
+        if (stk != stkbuf)
+            free(stk);
+        if (pk)
+            return pk;
+    }
+    return kvlangBuiltinResolveWriteSlot(kv, frame_root, name);
+}
+
 char *kvlangBuiltinResolveWriteSlot(kvspace_t *kv, const char *frame_root, const char *name) {
     /* 写槽/槽键解析必须有名字：字面量读参 name=NULL，调用方须先按值分流。 */
     assert(name);
+    const char *dot = kvlangRwirDynMember(name);
+    if (__builtin_expect(dot != NULL, 0))
+        return resolve_dyn_member(kv, frame_root, name, dot);
     if (name[0] == '/') return strdup(name);
     char stkbuf[512];
     char *stk = kvlangKeytreeStackBuffer(frame_root, stkbuf, sizeof stkbuf)
@@ -114,6 +354,16 @@ char *kvlangBuiltinResolveWriteSlot(kvspace_t *kv, const char *frame_root, const
         if (stk != stkbuf)
             free(stk);
         return target;
+    }
+    /* Static/chained member write (`r·x`, `a·b·c`): resolve local/param Ptrs and intermediate hops. */
+    const char *msep = strstr(name, MEMBER_SEP);
+    if (msep && msep != name && name[0] != '[') {
+        char *pk = resolve_static_member_slot(kv, stk, name, msep);
+        if (pk) {
+            if (stk != stkbuf)
+                free(stk);
+            return pk;
+        }
     }
     /* stk+name 精确分配（返回值须自持）。 */
     size_t sl = strlen(stk), nl = strlen(name);
@@ -298,7 +548,10 @@ int kvlangBuiltinWriteResult(kvlangFrame_t *f, const kvlangXvalue_t *result) {
             if (slot) {
                 slot_bind_scalar_kind(slot, &cv);
                 if (slot->kind &&
-                    ((target && target[0]) ||
+                    ((target && target[0] && !strchr(target, '|') &&
+                      (int)strlen(target) == slot->kind_len &&
+                      memcmp(target, slot->kind, (size_t)slot->kind_len) == 0 &&
+                      (uint32_t)xh_content_len(cv.bytes) == slot->width) ||
                      (cv.langtype_len == slot->kind_len &&
                       memcmp(cv.langtype, slot->kind,
                              (size_t)slot->kind_len) == 0))) {
@@ -431,6 +684,10 @@ int kvlangBuiltinExecuteCopy(kvlangFrame_t *f) {
     kvspace_t *kv = f->kvspace;
     kvlangRwirInst_t *inst = f->instruction;
     const kvlangRowBind_t *rb = (const kvlangRowBind_t *)f->bind;
+    /* `=` with >=2 reads is `MEMBER_READ_OP` (`base·k1·... -> v`); delegate to `kvlangBuiltinKvspaceGet`
+     * so base resolution and multi-segment Ptr traversal match `member_path_buf`. */
+    if (inst->read_count >= 2 && inst->write_count == 1)
+        return kvlangBuiltinKvspaceGet(f);
     if (rb && rb->copy_plain) {
         const kvlangXvalue_t *rv = &inst->reads[0].value;
         kvlangBodySlot *slot = rb->body;
@@ -485,7 +742,10 @@ int kvlangBuiltinExecuteCopy(kvlangFrame_t *f) {
     }
     for (int i = 0; i < inst->write_count; i++) {
         const char *slot = inst->writes[i].name;
-        const char *dot = strstr(slot, MEMBER_SEP);
+        const char *dot = NULL;
+        for (const char *p = slot; (p = strstr(p, MEMBER_SEP)) != NULL;
+             p += MEMBER_SEP_LEN)
+            dot = p;
         if (dot && dot != slot) {
             /* 成员写前置条件：memhead 必须已存在（同 kvspace·set，见 rwir_kv.c）。 */
             char *b = strndup(slot, (size_t)(dot - slot));
@@ -527,4 +787,69 @@ int kvlangBuiltinExecuteCopy(kvlangFrame_t *f) {
     free(owned);
     kvlangBuiltinNextPc(f);
     return 0;
+}
+
+/* Resolve dynamic member write `base·*key` / `base·*"lit"`: format `key`'s runtime value via
+ * `kvlangMemberKeyText` (recording TypeErrors in `dyn_key_err`) and resolve `base` through
+ * Ptr/path-string/parameter targets. Returns NULL if resolution fails. */
+static __thread char dyn_key_err[192];
+
+const char *kvlangRwirDynKeyError(void) { return dyn_key_err; }
+
+static __attribute__((noinline, cold)) char *
+resolve_dyn_member(kvspace_t *kv, const char *frame_root, const char *name,
+                   const char *dot) {
+    dyn_key_err[0] = 0;
+    char *base_desc = strndup(name, (size_t)(dot - name));
+    if (!base_desc)
+        kvlangDie("out of memory resolving member write");
+    char *base = dyn_operand_slot(kv, frame_root, base_desc);
+    free(base_desc);
+    if (!base)
+        return NULL;
+    kvlangXvalue_t bv;
+    kvlangXvalueZero(&bv);
+    kvlangKvspaceGetOne(kv, base, &bv);
+    if (kvlangXvalueIsPtr(&bv)) {
+        char *t = kvlangXvaluePtrTarget(&bv);
+        if (t && t[0]) {
+            free(base);
+            base = t;
+        } else {
+            free(t);
+        }
+    } else if (kvlangXvalueIsCharKind(kvlangXvalueKind(&bv))) {
+        /* Path-string base: a `char/*` value starting with `/` names the target container path. */
+        char *t = kvlangXvalueValueString(&bv);
+        if (t && t[0] == '/') {
+            free(base);
+            base = t;
+        } else {
+            free(t);
+        }
+    }
+    const char *keyref = dot + MEMBER_SEP_LEN + 1;
+    size_t kl = strlen(keyref);
+    char *ktext = NULL;
+    if (kl >= 2 && keyref[0] == '"' && keyref[kl - 1] == '"') {
+        ktext = strndup(keyref + 1, kl - 2);
+    } else if (kl > 0) {
+        char *kk = dyn_operand_slot(kv, frame_root, keyref);
+        kvlangXvalue_t k;
+        kvlangXvalueZero(&k);
+        if (kk)
+            kvlangKvspaceGetOne(kv, kk, &k);
+        free(kk);
+        /* Format key text with the same rules as `member_path`. */
+        ktext = kvlangMemberKeyTextDup(&k, dyn_key_err, sizeof dyn_key_err);
+    }
+    if (!ktext || !ktext[0]) {
+        free(ktext);
+        free(base);
+        return NULL;
+    }
+    char *r = kvlangKeytreeMember(base, ktext);
+    free(ktext);
+    free(base);
+    return r;
 }

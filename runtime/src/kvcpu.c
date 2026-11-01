@@ -67,16 +67,12 @@ static int operand_load(kvspace_t *kv, kvlangBoundCell_t *cell, uint32_t pack,
     if (pack != 0 && kvlangReadViewTry(kv, cell, pack, out))
         return 0;
     kvspaceKeyOff *ko = &cell->off;
-    /* v2：rview 是 SHORT inline 标量视图（langtype 在值 attr 区，kind 取
-     * cell 静态声明）。 */
+    /* v2 `rview` is a SHORT inline scalar view; untyped rows populate langtype from wire attr below. */
     if (cell->rview_state == 1) {
         if ((++cell->rview_hits & 127u) != 0 &&
             rview_scalar(cell->rview_bytes)) {
             out->bytes = cell->rview_bytes;
             out->length = cell->rview_len;
-            if (cell->type && cell->type[0])
-                kvlangXvalueSetLangtype(out, cell->type,
-                                        (uint32_t)strlen(cell->type));
         } else {
             uint8_t *d = NULL;
             uint32_t len = 0;
@@ -86,9 +82,6 @@ static int operand_load(kvspace_t *kv, kvlangBoundCell_t *cell, uint32_t pack,
                 rview_scalar(d)) {
                 out->bytes = d;
                 out->length = len;
-                if (cell->type && cell->type[0])
-                    kvlangXvalueSetLangtype(out, cell->type,
-                                            (uint32_t)strlen(cell->type));
             } else {
                 cell->rview_bytes = NULL;
                 cell->rview_len = 0;
@@ -108,9 +101,6 @@ static int operand_load(kvspace_t *kv, kvlangBoundCell_t *cell, uint32_t pack,
         if (d && len > 0) {
             out->bytes = d;
             out->length = len;
-            if (cell->type && cell->type[0])
-                kvlangXvalueSetLangtype(out, cell->type,
-                                        (uint32_t)strlen(cell->type));
             if (cell->rview_state == 0 && ++cell->rview_hits >= 8)
                 kvlangOperandViewPromote(kv, cell, cell->key, d, len);
         }
@@ -121,6 +111,13 @@ static int operand_load(kvspace_t *kv, kvlangBoundCell_t *cell, uint32_t pack,
         if (kvspaceResolveRef(kv->handle, cell->key, &ko->off) == 0)
             ko->resolved = true;
     }
+    /* Populate langtype cache from wire attr on untyped rows (and under KV_DEBUG_TYPES for assertions). */
+#ifdef KV_DEBUG_TYPES
+    kvlangXvalueLangtypeFromWire(out);
+#else
+    if (pack == 0)
+        kvlangXvalueLangtypeFromWire(out);
+#endif
     /* typed 读视图：声明 kind 与实际不同 → 转到 cell 复用缓冲（绑定期已备好文本）。
      * pack != 0 表示 typed 行：union 存的是 view 计数，不能当 coerce 读。 */
     if (pack == 0 && cell->coerce.tid && cell->type && out->bytes &&
@@ -140,12 +137,16 @@ static int operand_load(kvspace_t *kv, kvlangBoundCell_t *cell, uint32_t pack,
 }
 
 /* pin 副本是本指令为「会被写槽覆盖」的读值做的显式 copy，执行完即释放。 */
-static void pinned_free(kvlangRowBind_t *bind, int nr, kvlangParam_t *reads) {
-    if (!bind->has_pin)
+static void pinned_free(kvlangRowBind_t *bind, int nr, kvlangParam_t *reads,
+                        const uint64_t dyn_pin_mask[2]) {
+    if (!bind->has_pin && !dyn_pin_mask[0] && !dyn_pin_mask[1])
         return;
-    for (int i = 0; i < nr; i++)
-        if (bind->cell[i].pin) /* 字面量不可能 pin（无槽可覆盖） */
+    for (int i = 0; i < nr; i++) {
+        bool dyn_p = i < MAX_PARAMS &&
+                     ((dyn_pin_mask[i >> 6] >> (i & 63)) & 1ULL) != 0;
+        if (bind->cell[i].pin || dyn_p)
             kvlangXvalueFree(&reads[i].value);
+    }
 }
 
 #ifdef KV_COUNT
@@ -176,7 +177,11 @@ frame_func_dir_buf(kvspace_t *kv, const char *frame_root, char *out,
     kvlangXvalue_t v;
     kvlangXvalueZero(&v);
     kvlangKvspaceGetOne(kv, key, &v);
-    if (kvlangXvalueNone(&v) || !kvlangXvalueKindIs(&v, KVSPACE_KIND_CHAR_UTF8))
+    if (kvlangXvalueNone(&v) ||
+        !(kvlangXvalueKindIs(&v, KVSPACE_KIND_CHAR_UTF8) ||
+          (v.langtype_len == 0 &&
+           xh_storetype(v.bytes) == KVSPACE_XVALUE_ST_SLACK &&
+           xh_ptr(v.bytes) == KVSPACE_XVALUE_PTR_INLINE)))
         return false;
     const char *src = (const char *)xh_body(v.bytes);
     size_t n = (size_t)xh_content_len(v.bytes);
@@ -371,10 +376,14 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
     f.pc_view_state = &pc_view;
 
     const kvlangRwirCap *caps = kvlangRwirCaps();
-    /* 快核开关：debug 日志需要逐步 trace，KVLANG_NOFAST=1 供 A/B。 */
+    /* Disable fast kernel under debug logging, `KVLANG_NOFAST=1`, or `KV_DEBUG_TYPES`. */
+#ifdef KV_DEBUG_TYPES
+    const bool fast_on = false;
+#else
     const char *nofast = getenv("KVLANG_NOFAST");
     const bool fast_on =
         kv->shm && !kvlangLogDebugOn && !(nofast && nofast[0] && nofast[0] != '0');
+#endif
     int rc = 0;
     uint32_t qops = 0;
     for (;;) {
@@ -539,6 +548,8 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
             }
         }
         int exec_err = 0;
+        /* Count of pinned/copied read args so `pinned_free` skips uninitialized or borrowed slots on error. */
+        int nloaded = row->nr;
         if (bind != tpl_bind || row != tpl_row) {
             row_template(&inst, reads, writes, write_offs, row, bind);
             tpl_bind = bind;
@@ -562,6 +573,7 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
                                         c->type)
                         : execute_error(kv, vtid, cur,
                                         "RuntimeError: cannot read operand %d", i);
+                nloaded = i;
                 break;
             }
             if (c->pin) /* 写槽会覆盖此 key：显式 copy 读视图 */
@@ -588,8 +600,17 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
                 kvlangXvalueZero(&writes[j].value); /* 不继承上一行的残留值 */
             }
         }
+        uint64_t dyn_pin_mask[2] = {0, 0};
+        if (__builtin_expect(bind->dyn_wmask != 0, 0) && exec_err == 0) {
+            /* Resolve relative/dynamic member write slots for this execution and pin aliased reads. */
+            char derr[320];
+            if (kvlangRowBindDynWrites(kv, cur_frame, row, bind, reads, writes,
+                                       write_offs, dyn_pin_mask, derr,
+                                       sizeof derr) != 0)
+                exec_err = execute_error(kv, vtid, cur, "%s", derr);
+        }
         if (exec_err != 0) {
-            pinned_free(bind, row->nr, reads);
+            pinned_free(bind, nloaded, reads, dyn_pin_mask);
             rc = -1;
             break;
         }
@@ -625,7 +646,7 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
             /* vthread·run return 模式 / def rwir RETURN：冒泡子 rwir pc 给上层驱动。
              * 本 vthread（主）pc 未推进，驱动派发子 rwir 并推进子 pc 后重入即续跑。 */
             kvlangParkedFramesCleanupAbove(kv, vtid, depth);
-            pinned_free(bind, row->nr, reads);
+            pinned_free(bind, row->nr, reads, dyn_pin_mask);
             free(reads);
             free(writes);
             fctx_pool_free(fpool);
@@ -638,7 +659,7 @@ __attribute__((aligned(64))) int kvlangKvcpuExecuteMode(kvspace_t *kv, const cha
             fb_i ^= 1;
             have_fb = true;
         }
-        pinned_free(bind, row->nr, reads);
+        pinned_free(bind, row->nr, reads, dyn_pin_mask);
         if (exec_err != 0) {
             rc = -1;
             break;

@@ -1,22 +1,7 @@
 // rwir_kv —— kvspace·* KV 树 rwir
 
 #include "rwir_internal.h"
-
-static bool is_int_kind(const char *k) {
-    return kvlangXvalueIsIntKind(k) || kvlangXvalueIsUintKind(k);
-}
-
-static char *kvlangKvspaceKey(const kvlangXvalue_t *v) {
-    if (kvlangXvalueIsCharKind(kvlangXvalueKind(v)))
-        return kvlangXvalueValueString(v);
-    if (is_int_kind(kvlangXvalueKind(v))) {
-        char buf[32];
-        snprintf(buf, sizeof buf, "%lld",
-                 (long long)kvlangScalarI64(kvlangXvalueScalar(v)));
-        return strdup(buf);
-    }
-    return strdup("");
-}
+#include <math.h>
 
 static char *original_absolute_arg(kvlangFrame_t *f, int idx) {
     char *fr = kvlangKeytreeFrameRoot(f->pc);
@@ -109,42 +94,99 @@ static size_t fmt_i64_into(int64_t val, char *buf, size_t cap) {
     return p;
 }
 
-static size_t kvspace_key_into(const kvlangXvalue_t *v, char *buf, size_t cap) {
-    if (v->bytes && xh_len(v->bytes) == 8 &&
+static size_t copy_key_text(const char *s, size_t n, char *buf, size_t cap) {
+    if (n + 1 > cap)
+        return KVLANG_KEYTEXT_OVERFLOW;
+    memcpy(buf, s, n);
+    buf[n] = 0;
+    return n;
+}
+
+/* Shortest round-trip float key text: smallest `P` (`1..9` for f32, `1..17` for f64) where
+ * `%.*g` parses back equal, appending `".0"` when neither `'.'` nor `'e'`/`'E'` is present. */
+static size_t fmt_float_key(double d, bool f32, char *buf, size_t cap) {
+    char t[48];
+    int maxp = f32 ? 9 : 17;
+    for (int p = 1; p <= maxp; p++) {
+        snprintf(t, sizeof t, "%.*g", p, d);
+        if (f32 ? strtof(t, NULL) == (float)d : strtod(t, NULL) == d)
+            break;
+    }
+    if (!strpbrk(t, ".eE"))
+        strcat(t, ".0");
+    return copy_key_text(t, strlen(t), buf, cap);
+}
+
+size_t kvlangMemberKeyText(const kvlangXvalue_t *v, char *buf, size_t cap,
+                           char *err, size_t errsz) {
+    /* Fast path: format inline `int64` scalar directly as decimal. */
+    if (v->bytes && v->length >= KVSPACE_XVALUE_HEAD_LEN &&
+        xh_len(v->bytes) == 8 &&
         xh_storetype(v->bytes) == KVSPACE_XVALUE_ST_SHORT &&
         xh_ptr(v->bytes) == KVSPACE_XVALUE_PTR_INLINE &&
         v->langtype_len == 5 && memcmp(v->langtype, "int64", 5) == 0)
         return fmt_i64_into((int64_t)xh_rd64(xh_body(v->bytes)), buf, cap);
     if (kvlangXvalueNone(v)) {
-        if (cap)
-            buf[0] = 0;
-        return 0;
+        snprintf(err, errsz,
+                 "TypeError: member key must be a scalar or string, got None");
+        return KVLANG_KEYTEXT_TYPE;
     }
     kvlangScalar_t s = kvlangXvalueScalar(v);
-    if (kvlangLangtypeIsInt(s.kind_id))
-        return fmt_i64_into(kvlangScalarI64(s), buf, cap);
-    if (s.kind_id == KVLANG_LT_CHAR_UTF8 || s.kind_id == KVLANG_LT_CHAR_ASCII) {
-        size_t n = (size_t)s.length;
-        if (n + 1 > cap)
-            return (size_t)-1;
-        memcpy(buf, s.bytes, n);
-        buf[n] = 0;
-        return n;
+    /* Numeric/bool keys must be bare scalars (`full == s.kind_id`), not arrays. */
+    int full = kvlangLangtypeId(v->langtype, (size_t)v->langtype_len);
+    if (s.bytes && full == s.kind_id) {
+        if (kvlangLangtypeIsSint(s.kind_id))
+            return fmt_i64_into(kvlangScalarI64(s), buf, cap);
+        if (kvlangLangtypeIsUint(s.kind_id)) {
+            char t[24];
+            int n = snprintf(t, sizeof t, "%llu",
+                             (unsigned long long)kvlangScalarU64(s));
+            return copy_key_text(t, (size_t)n, buf, cap);
+        }
+        if (s.kind_id == KVLANG_LT_BOOL)
+            return s.bytes[0] ? copy_key_text("true", 4, buf, cap)
+                              : copy_key_text("false", 5, buf, cap);
+        if (kvlangLangtypeIsFloat(s.kind_id)) {
+            double d = kvlangScalarF64(s);
+            if (!isfinite(d)) {
+                snprintf(err, errsz,
+                         "TypeError: floating member key must be finite");
+                return KVLANG_KEYTEXT_TYPE;
+            }
+            return fmt_float_key(d, s.kind_id == KVLANG_LT_FLOAT32, buf, cap);
+        }
     }
+    if (s.kind_id == KVLANG_LT_CHAR_UTF8 || s.kind_id == KVLANG_LT_CHAR_ASCII)
+        return copy_key_text((const char *)s.bytes, (size_t)s.length, buf, cap);
     if (kvlangLangtypeIsChar(s.kind_id)) {
         char *str = kvlangXvalueValueString(v);
-        size_t n = strlen(str);
-        if (n + 1 > cap) {
-            free(str);
-            return (size_t)-1;
-        }
-        memcpy(buf, str, n + 1);
+        size_t n = copy_key_text(str, strlen(str), buf, cap);
         free(str);
         return n;
     }
-    if (cap)
-        buf[0] = 0;
-    return 0;
+    char lt[128];
+    xh_langtype_copy_of(v, lt, sizeof lt);
+    snprintf(err, errsz,
+             "TypeError: member key must be a scalar or string, got %s",
+             lt[0] ? lt : "?");
+    return KVLANG_KEYTEXT_TYPE;
+}
+
+char *kvlangMemberKeyTextDup(const kvlangXvalue_t *v, char *err,
+                             size_t errsz) {
+    char buf[128];
+    size_t n = kvlangMemberKeyText(v, buf, sizeof buf, err, errsz);
+    if (n == KVLANG_KEYTEXT_TYPE)
+        return NULL;
+    if (n != KVLANG_KEYTEXT_OVERFLOW)
+        return strdup(buf);
+    /* Only long strings exceed `buf`; extract the full string directly. */
+    return kvlangXvalueValueString(v);
+}
+
+static size_t kvspace_key_into(const kvlangXvalue_t *v, char *buf, size_t cap,
+                               char *err, size_t errsz) {
+    return kvlangMemberKeyText(v, buf, cap, err, errsz);
 }
 
 /* 成员访问的 base 解析（spec [[成员访问]] 的「按指针优先、按名回退」+ 形态判定）：
@@ -182,8 +224,10 @@ static const char *member_path_buf(kvlangFrame_t *f, const kvlangXvalue_t *in,
             goto slow;
         }
     } else if (kvlangXvalueIsCharKind(kvlangXvalueKind(base))) {
-        blen = kvspace_key_into(base, buf, cap);
-        if (blen == (size_t)-1)
+        blen = kvspace_key_into(base, buf, cap, err, errsz);
+        if (blen == KVLANG_KEYTEXT_TYPE)
+            return NULL;
+        if (blen == KVLANG_KEYTEXT_OVERFLOW)
             goto slow;
     } else {
         return member_not_container(base, err, errsz);
@@ -193,11 +237,29 @@ static const char *member_path_buf(kvlangFrame_t *f, const kvlangXvalue_t *in,
             goto slow;
         memcpy(buf + blen, MEMBER_SEP, MEMBER_SEP_LEN);
         blen += MEMBER_SEP_LEN;
-        size_t slen = kvspace_key_into(&in[i], buf + blen, cap - blen);
-        if (slen == (size_t)-1)
+        size_t slen =
+            kvspace_key_into(&in[i], buf + blen, cap - blen, err, errsz);
+        if (slen == KVLANG_KEYTEXT_TYPE)
+            return NULL;
+        if (slen == KVLANG_KEYTEXT_OVERFLOW)
             goto slow;
         blen += slen;
         buf[blen] = 0;
+        /* Follow intermediate Ptr segments (`t·1·left·val`) to their target paths. */
+        if (i + 1 < n) {
+            kvlangXvalue_t mid;
+            kvlangXvalueZero(&mid);
+            if (kvlangKvspaceGetOne(f->kvspace, buf, &mid) == 0 &&
+                kvlangXvalueIsPtr(&mid)) {
+                const uint8_t *tb = xh_body(mid.bytes);
+                int32_t tl = xh_content_len(mid.bytes);
+                if (tl <= 0 || (size_t)tl + 1 > cap)
+                    goto slow;
+                memmove(buf, tb, (size_t)tl);
+                blen = (size_t)tl;
+                buf[blen] = 0;
+            }
+        }
     }
     return buf;
 
@@ -219,14 +281,41 @@ slow:;
         bp = kvlangXvalueValueString(base);
     }
     for (int i = 1; i < n; i++) {
-        char *kk = kvlangKvspaceKey(&in[i]);
+        char *kk = kvlangMemberKeyTextDup(&in[i], err, errsz);
+        if (!kk) {
+            free(bp);
+            return NULL;
+        }
         char *next = kvlangKeytreeMember(bp, kk);
         free(kk);
         free(bp);
         bp = next;
+        if (bp && i + 1 < n) { /* intermediate Ptr segment: follow target */
+            kvlangXvalue_t mid;
+            kvlangXvalueZero(&mid);
+            if (kvlangKvspaceGetOne(f->kvspace, bp, &mid) == 0 &&
+                kvlangXvalueIsPtr(&mid)) {
+                char *t = kvlangXvaluePtrTarget(&mid);
+                if (t && t[0]) {
+                    free(bp);
+                    bp = t;
+                } else {
+                    free(t);
+                }
+            }
+        }
     }
     *owned_out = bp;
     return bp;
+}
+
+/* Report `member_path` error: emit preformatted `"TypeError: ..."` verbatim, else prefix with `op`. */
+static int member_error(kvlangFrame_t *f, const char *op, const char *merr,
+                        const char *fallback) {
+    if (strncmp(merr, "TypeError: ", 11) == 0)
+        return kvlangBuiltinSetError(f, "%s", merr);
+    return kvlangBuiltinSetError(f, "TypeError: %s: %s", op,
+                                 merr[0] ? merr : fallback);
 }
 
 static char *member_path(kvlangFrame_t *f, const kvlangXvalue_t *in, int n,
@@ -260,8 +349,7 @@ int kvlangBuiltinKvspaceGet(kvlangFrame_t *f) {
     if (!key) {
         kvlangBuiltinFreeInputs(in, n);
         free(in_big);
-        return kvlangBuiltinSetError(f, "TypeError: kvspace·get: %s",
-                                     merr[0] ? merr : "requires a path");
+        return member_error(f, "kvspace·get", merr, "requires a path");
     }
     kvlangXvalue_t v;
     kvlangXvalueZero(&v);
@@ -346,9 +434,7 @@ int kvlangBuiltinKvspaceSet(kvlangFrame_t *f) {
         free(owned_key);
         kvlangBuiltinFreeInputs(in, n);
         free(in_big);
-        return kvlangBuiltinSetError(f, "TypeError: kvspace·set: %s",
-                                     merr[0] ? merr
-                                             : "requires path and value");
+        return member_error(f, "kvspace·set", merr, "requires path and value");
     }
     kvlangKvPair_t p = {(char *)key, *val};
     char err[256];
@@ -459,9 +545,8 @@ int kvlangBuiltinKvlangAbs(kvlangFrame_t *f) {
         p = resolve_path_arg(f, 0, in);
     if (!p) {
         kvlangBuiltinFreeInputs(in, n);
-        return kvlangBuiltinSetError(f, "TypeError: kvlang·abs: %s",
-                                     n >= 2 && merr[0] ? merr
-                                                       : "requires a key");
+        return member_error(f, "kvlang·abs", n >= 2 ? merr : "",
+                            "requires a key");
     }
     /* 产出 Ptr（ref=1）：langtype = 目标 kindexpr、body = 目标绝对路径。
      * &x ≡ kvlang·abs(x)：取址返回指向 x 所在节点的软链接（单跳同型），不再产 char 路径串。 */

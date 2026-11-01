@@ -1,15 +1,31 @@
 #include "rwir_internal.h"
 
-/* 计算多维下标的 row-major 扁平索引，越界返回 -1。 */
+/* Valid body byte length (`xh_len` clamped to available wire bytes). */
+static uint64_t xv_wire_body_len(const kvlangXvalue_t *v) {
+    if (!v->bytes || v->length < KVSPACE_XVALUE_HEAD_LEN)
+        return 0;
+    uint64_t n = xh_len(v->bytes);
+    uint64_t avail = (uint64_t)v->length - KVSPACE_XVALUE_HEAD_LEN;
+    return n < avail ? n : avail;
+}
+
+/* Compute row-major flat index, returning -1 on out-of-bounds. Checks both `kx->dims`
+ * and `body_len` so untrusted/reinterpreted `dims` cannot read or write past `body`. */
 static int64_t flat_index(const kvlangLangtype *kx, const int64_t *idx,
-                          int nidx) {
-    int64_t flat = 0;
+                          int nidx, uint64_t body_len, int sz) {
+    if (sz <= 0)
+        return -1;
+    uint64_t nelem = body_len / (uint64_t)sz;
+    uint64_t flat = 0;
     for (int i = 0; i < nidx; i++) {
         if (idx[i] < 0 || idx[i] >= kx->dims[i])
             return -1;
-        flat = flat * kx->dims[i] + idx[i];
+        if (__builtin_mul_overflow(flat, (uint64_t)kx->dims[i], &flat) ||
+            __builtin_add_overflow(flat, (uint64_t)idx[i], &flat) ||
+            flat >= nelem)
+            return -1;
     }
-    return flat;
+    return (int64_t)flat;
 }
 
 /* base kind（kx.kind 为非 NUL 终止子串）拷成 NUL 终止串，取元素字节大小；空 kind → 0。 */
@@ -68,15 +84,23 @@ int xv_head1(kvlangFrame_t *f, xv_head_t *h) {
     return rc;
 }
 
-/* 读 first..first+nidx-1 的标量下标到 idx[]。 */
-static void xv_read_indices(kvlangFrame_t *f, const char *fr, int first,
-                            int nidx, int64_t *idx) {
+/* Read integer indices `first..first+nidx-1` into `idx[]`, or raise `TypeError` and return -1. */
+static int xv_read_indices(kvlangFrame_t *f, const char *fr, int first,
+                           int nidx, int64_t *idx) {
     for (int i = 0; i < nidx && i < X_MAX_NDIM; i++) {
         kvlangXvalue_t iv;
         kvlangBuiltinResolveReadValue(f->kvspace, fr, f->instruction->reads[first + i].name,
                                       &f->instruction->reads[first + i].value, &iv);
-        idx[i] = kvlangScalarI64(kvlangXvalueScalar(&iv));
+        kvlangScalar_t sc = kvlangXvalueScalar(&iv);
+        if (!kvlangLangtypeIsInt(sc.kind_id)) {
+            const char *k = kvlangXvalueNone(&iv) ? "None" : kvlangXvalueKind(&iv);
+            return kvlangBuiltinSetError(
+                f, "TypeError: compactarray index must be integer, got %s",
+                (k && k[0]) ? k : "None");
+        }
+        idx[i] = kvlangScalarI64(sc);
     }
+    return 0;
 }
 
 static bool xv_value_ready(const kvlangXvalue_t *v) {
@@ -100,19 +124,28 @@ static void xv_resolve_param(kvlangFrame_t *f, int ridx, kvlangXvalue_t *out) {
     free(owned);
 }
 
-static void xv_read_indices_fast(kvlangFrame_t *f, int first, int nidx,
-                                 int64_t *idx) {
+static int xv_read_indices_fast(kvlangFrame_t *f, int first, int nidx,
+                                int64_t *idx) {
     for (int i = 0; i < nidx && i < X_MAX_NDIM; i++) {
         kvlangXvalue_t iv;
         xv_resolve_param(f, first + i, &iv);
         if (iv.bytes && xh_len(iv.bytes) == 8 &&
             xh_storetype(iv.bytes) == KVSPACE_XVALUE_ST_SHORT &&
             xh_ptr(iv.bytes) == KVSPACE_XVALUE_PTR_INLINE &&
-            iv.langtype_len == 5 && memcmp(iv.langtype, "int64", 5) == 0)
+            iv.langtype_len == 5 && memcmp(iv.langtype, "int64", 5) == 0) {
             idx[i] = (int64_t)xh_rd64(xh_body(iv.bytes));
-        else
-            idx[i] = kvlangScalarI64(kvlangXvalueScalar(&iv));
+        } else {
+            kvlangScalar_t sc = kvlangXvalueScalar(&iv);
+            if (!kvlangLangtypeIsInt(sc.kind_id)) {
+                const char *k = kvlangXvalueNone(&iv) ? "None" : kvlangXvalueKind(&iv);
+                return kvlangBuiltinSetError(
+                    f, "TypeError: compactarray index must be integer, got %s",
+                    (k && k[0]) ? k : "None");
+            }
+            idx[i] = kvlangScalarI64(sc);
+        }
     }
+    return 0;
 }
 
 int kvlangBuiltinXvAt(kvlangFrame_t *f) {
@@ -146,8 +179,9 @@ int kvlangBuiltinXvAt(kvlangFrame_t *f) {
                 kx.ndim, kx.ndim, nidx);
         }
         int64_t idx[X_MAX_NDIM];
-        xv_read_indices_fast(f, 1, nidx, idx);
-        int64_t flat = flat_index(&kx, idx, nidx);
+        if (xv_read_indices_fast(f, 1, nidx, idx) != 0)
+            return -1;
+        int64_t flat = flat_index(&kx, idx, nidx, xv_wire_body_len(av), sz);
         if (flat < 0)
             return kvlangBuiltinSetError(
                 f, "IndexError: xv.at: index out of bounds");
@@ -160,6 +194,7 @@ int kvlangBuiltinXvAt(kvlangFrame_t *f) {
             uint32_t slen =
                 kvlangScalarToWire(kstr, elem, (uint32_t)sz, sbuf, sizeof sbuf);
             kvlangXvalue_t ev = {sbuf, slen};
+            kvlangXvalueSetLangtype(&ev, kstr, (uint32_t)strlen(kstr));
             return kvlangBuiltinWriteResult(f, &ev);
         }
         char kb[64];
@@ -201,9 +236,15 @@ int kvlangBuiltinXvAt(kvlangFrame_t *f) {
             kx.ndim, kx.ndim, nidx);
     }
     int64_t idx[X_MAX_NDIM];
-    xv_read_indices(f, fr, 1, nidx, idx);
+    if (xv_read_indices(f, fr, 1, nidx, idx) != 0) {
+        free(key);
+        free(fr);
+        return -1;
+    }
     free(fr);
-    int64_t flat = flat_index(&kx, idx, nidx);
+    uint64_t blen = key ? (h.body_len > 0 ? (uint64_t)h.body_len : 0)
+                        : xv_wire_body_len(&arr);
+    int64_t flat = flat_index(&kx, idx, nidx, blen, sz);
     if (flat < 0) {
         free(key);
         return kvlangBuiltinSetError(f, "IndexError: xv.at: index out of bounds");
@@ -243,7 +284,8 @@ int kvlangBuiltinXvSet(kvlangFrame_t *f) {
     if (rname && rname[0] == '/' && wname && wname[0] == '/' &&
         strcmp(rname, wname) == 0 && xv_value_ready(av)) {
         int64_t idx[X_MAX_NDIM];
-        xv_read_indices_fast(f, 1, nidx, idx);
+        if (xv_read_indices_fast(f, 1, nidx, idx) != 0)
+            return -1;
         kvlangXvalue_t vv;
         xv_resolve_param(f, nidx + 1, &vv);
         bool is_ptr = kvlangXvalueIsPtr(av);
@@ -255,7 +297,7 @@ int kvlangBuiltinXvSet(kvlangFrame_t *f) {
                       : KVLANG_LT_UNKNOWN;
         int sz = kvlangLangtypeElemSize(tid);
         int64_t flat = (sz > 0 && kx.ndim && nidx == kx.ndim)
-                           ? flat_index(&kx, idx, nidx)
+                           ? flat_index(&kx, idx, nidx, xv_wire_body_len(av), sz)
                            : -1;
         const char *emsg =
             is_ptr ? "TypeError: xv.set: pointer cannot be indexed — "
@@ -315,7 +357,12 @@ int kvlangBuiltinXvSet(kvlangFrame_t *f) {
     char *wk =
         kvlangBuiltinResolveWriteSlot(f->kvspace, fr, f->instruction->writes[0].name);
     int64_t idx[X_MAX_NDIM];
-    xv_read_indices(f, fr, 1, nidx, idx);
+    if (xv_read_indices(f, fr, 1, nidx, idx) != 0) {
+        free(rk);
+        free(wk);
+        free(fr);
+        return -1;
+    }
     kvlangXvalue_t vv;
     kvlangBuiltinResolveReadValue(f->kvspace, fr, f->instruction->reads[nidx + 1].name,
                                   &f->instruction->reads[nidx + 1].value, &vv);
@@ -329,7 +376,9 @@ int kvlangBuiltinXvSet(kvlangFrame_t *f) {
         kvlangLangtypeParse(h.langtype, h.langtype_len, &kx);
         int sz = xv_elem_size(&kx);
         int64_t flat = (sz > 0 && kx.ndim && nidx == kx.ndim)
-                           ? flat_index(&kx, idx, nidx)
+                           ? flat_index(&kx, idx, nidx,
+                                        h.body_len > 0 ? (uint64_t)h.body_len : 0,
+                                        sz)
                            : -1;
         const char *emsg =
             h.ref == KVSPACE_REF_PTR
@@ -384,7 +433,8 @@ int kvlangBuiltinXvSet(kvlangFrame_t *f) {
         : sz <= 0 || kx.ndim == 0 ? "TypeError: xv.set requires a compact array"
         : nidx != kx.ndim ? "IndexError: xv.set: dim/index count mismatch"
                           : NULL;
-    int64_t flat = emsg ? -1 : flat_index(&kx, idx, nidx);
+    uint64_t ablen = xv_wire_body_len(&arr);
+    int64_t flat = emsg ? -1 : flat_index(&kx, idx, nidx, ablen, sz);
     if (!emsg && flat < 0)
         emsg = "IndexError: xv.set: index out of bounds";
     if (emsg) {
@@ -394,8 +444,9 @@ int kvlangBuiltinXvSet(kvlangFrame_t *f) {
     kvlangXvalue_t cv;
     if (kvlangCoerceAssign(f, k, &vv, cbuf, sizeof cbuf, &cv) != 0)
         return -1;
-    int32_t ablen = xh_content_len_of(&arr);
     uint8_t *nb = malloc((size_t)ablen);
+    if (!nb)
+        kvlangDie("out of memory in xv.set");
     memcpy(nb, xh_body_of(&arr), (size_t)ablen);
     int32_t cvblen = xh_content_len_of(&cv);
     int c = cvblen < sz ? cvblen : sz;

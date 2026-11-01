@@ -38,7 +38,7 @@ int main(void) {
         return 1;
 
     const uint8_t counts[5] = {1, 0, 1, 0, 0};
-    const uint8_t read_def[] = {'x', 0, 'i', 'n', 't', '6', '4'};
+    const uint8_t read_def[] = {'x', 0};
     const uint8_t write_def[] = {'y', 0, 'i', 'n', 't', '6', '4'};
     const uint8_t op[] = {1, 0, 1, 0, 0, 'n', 'o', 'o', 'p'};
     const uint8_t operand[] = {0, 0, 0, 0, 0, '*', '[', '0', ',', '-', '1', ']'};
@@ -85,10 +85,11 @@ int main(void) {
     kvlangXvalue_t physical;
     kvlangXvalueZero(&physical);
     kvlangKvspaceGetOne(kv, "/vthread/vt0/[2]/[1,-1]", &physical);
-    char *physical_target = kvlangXvaluePtrTarget(&physical);
-    ok = ok && kvlangXvalueIsPtr(&physical) && physical_target &&
-         strcmp(physical_target, "/vthread/vt0/[1]/x") == 0;
-    free(physical_target);
+    char *physical_slot = kvlangXvalueSlotName(&physical);
+    ok = ok && !kvlangXvalueIsPtr(&physical) &&
+         kvlangXvalueKindIs(&physical, "rwir") && physical_slot &&
+         strcmp(physical_slot, "*[0,-1]") == 0;
+    free(physical_slot);
     kvlangXvalue_t extra;
     kvlangXvalueNewInt64(&extra, 99);
     ok = ok && set_value(kv, "/lib/f/[1,-2]", &extra) == 0;
@@ -126,10 +127,11 @@ int main(void) {
     ok = ok && strcmp(result_text, "/wrong") == 0;
     free(result_text);
 
-    const uint8_t any_operand[] = {0, 0, 0, 0, 0, 's', 'o', 'u', 'r', 'c', 'e',
-                                   0, 'a', 'n', 'y'};
+    const uint8_t unconstrained_operand[] = {0, 0, 0, 0, 0, 's', 'o', 'u',
+                                             'r', 'c', 'e', 0};
     kvlangXvalue_t any_slot;
-    kvlangXvalueNew(&any_slot, "rwir", any_operand, sizeof any_operand, 1);
+    kvlangXvalueNew(&any_slot, "rwir", unconstrained_operand,
+                    sizeof unconstrained_operand, 1);
     const uint8_t one_read_op[] = {1, 0, 0, 0, 0, 'n', 'o', 'o', 'p'};
     kvlangXvalue_t one_read_opcode;
     kvlangXvalueNew(&one_read_opcode, "rwir", one_read_op,
@@ -139,7 +141,7 @@ int main(void) {
     const char *any_pc = "/vthread/vt0/[2]/[3,0]";
     if (!ok || kvlangRwirDecode(kv, base, any_pc, &decoded, err, sizeof err) != 0)
         return 1;
-    ok = ok && decoded.read_count == 1 && strcmp(decoded.reads[0].type, "any") == 0;
+    ok = ok && decoded.read_count == 1 && decoded.reads[0].type == NULL;
     kvlangRwirInstructionFree(&decoded);
     ok = ok && set_i64(kv, absolute, 17) == 0;
     if (kvlangRwirDecode(kv, base, any_pc, &decoded, err, sizeof err) != 0)
@@ -201,6 +203,25 @@ int main(void) {
     free(resumed);
     kvlangKvspaceGetOne(kv, "/vthread/vt0/[2]/[0,-1]", &got);
     ok = ok && kvlangXvalueNone(&got);
+
+    if (kvlangKvspaceMakeIndex(kv, "/lib/f_typed/", 0, err, sizeof err) != 0)
+        return 1;
+    const uint8_t typed_read_def[] = {'x', 0, 'i', 'n', 't', '6', '4'};
+    kvlangXvalue_t typed_read_type;
+    kvlangXvalueNew(&typed_read_type, "def langtype", typed_read_def,
+                    sizeof typed_read_def, 1);
+    ok = ok && set_value(kv, "/lib/f_typed/[0,0]", &anchor) == 0 &&
+         set_value(kv, "/lib/f_typed.[0,-1]", &typed_read_type) == 0 &&
+         set_value(kv, "/lib/f_typed.[0,1]", &write_type) == 0 &&
+         set_value(kv, "/lib/f_typed/[1,0]", &opcode) == 0;
+    kvlangParam_t typed_reads[2] = {{.name = "/lib/f_typed"}, {.name = "null"}};
+    kvlangRwirInst_t typed_inst = {.reads = typed_reads, .read_count = 2,
+                                   .writes = writes, .write_count = 1};
+    kvlangFrame_t typed_frame = {.kvspace = kv, .vthread_id = "vt0",
+                                 .pc = "/vthread/vt0/[1]/[1,0]",
+                                 .instruction = &typed_inst};
+    ok = ok && kvlangControlCall(&typed_frame) == -1;
+
     kvlangKvspaceDisconnect(kv);
     return ok ? 0 : 1;
 }

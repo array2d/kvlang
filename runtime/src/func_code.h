@@ -119,6 +119,10 @@ typedef struct {
      * fk_op 为快核内部操作码。只依赖 row 形状，reenter 不变。 */
     uint8_t fk_state;
     uint8_t fk_op;
+    /* Bitmask of dynamic/relative member write slots re-resolved per execution
+     * (`kvlangRowBindDynWrites`); `dyn_name[j]` owns the resolved key. Kept at tail. */
+    uint32_t dyn_wmask;
+    char **dyn_name;
 } kvlangRowBind_t;
 
 #define KVLANG_PARK_MAX_PARAMS 16
@@ -178,6 +182,13 @@ int kvlangFrameCtxReenter(kvspace_t *kv, kvlangFrameCtx_t *ctx,
                           uint32_t epoch);
 int kvlangRowBindReenter(kvspace_t *kv, kvlangFrameCtx_t *ctx,
                          kvlangCodeRow_t *row, kvlangRowBind_t *b);
+/* Re-resolve write slots in `b->dyn_wmask`: point `writes[j].name` at `b->dyn_name[j]`,
+ * clear `write_offs[j]`, reload prior slot values when needed, or return -1 with `err`. */
+int kvlangRowBindDynWrites(kvspace_t *kv, const char *frame_root,
+                           const kvlangCodeRow_t *row, kvlangRowBind_t *b,
+                           kvlangParam_t *reads, kvlangParam_t *writes,
+                           kvspaceKeyOff **write_offs, uint64_t dyn_pin_mask[2],
+                           char *err, size_t err_cap);
 void kvlangFrameCtxSync(kvlangFrameCtx_t *ctx, uint32_t epoch);
 
 /* 定长标量写槽捕获：head 完全匹配才成功；失败置 dead（等该 key 被写后重试）。

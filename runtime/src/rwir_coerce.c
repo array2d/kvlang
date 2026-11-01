@@ -50,6 +50,10 @@ kvlangCoerceAssign(kvlangFrame_t *f, const char *type, const kvlangXvalue_t *v,
                    uint8_t *buf, size_t cap, kvlangXvalue_t *out) {
     if (kvlangXvalueCoerce(type, v, buf, cap, out) == 0)
         return 0;
+    /* Fixed-width numeric slots reject `None` (only Ptr or unconstrained slots accept `None`). */
+    if (kvlangXvalueNone(v) && kvlangTypeIsNumScalar(type))
+        return kvlangBuiltinSetError(f, "TypeError: cannot write None to %s slot",
+                                     type);
     return kvlangBuiltinSetError(f, "TypeError: cannot assign %s to %s at %s",
                                  kvlangXvalueKind(v), type, f->pc);
 }

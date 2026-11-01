@@ -66,8 +66,23 @@ else()
 endif()
 
 if(NOT APPLE)
+    # Dedicated KV_DEBUG_TYPES library for negative tests (kept in CMAKE_BINARY_DIR).
+    add_library(kvlang_runtime_debug_types SHARED ${KVLANG_RUNTIME_SRC})
+    target_include_directories(kvlang_runtime_debug_types PUBLIC include src)
+    target_compile_definitions(kvlang_runtime_debug_types PRIVATE _GNU_SOURCE KV_DEBUG_TYPES)
+    target_link_directories(kvlang_runtime_debug_types PRIVATE "${LIB_DIR}" "${BACKEND_DIR}")
+    target_link_libraries(kvlang_runtime_debug_types PRIVATE kvspace m pthread)
+    set_target_properties(kvlang_runtime_debug_types PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+        OUTPUT_NAME "kvlang_runtime_debug"
+        INSTALL_RPATH "\$ORIGIN;\$ORIGIN/kvspace;${LIB_DIR};${BACKEND_DIR}"
+        BUILD_WITH_INSTALL_RPATH ON
+        LINK_FLAGS "-Wl,--export-dynamic -Wl,--disable-new-dtags")
+
+    set(WITH_C_RUNTIME "${CMAKE_SOURCE_DIR}/tests/with_c_runtime.sh")
+
     enable_testing()
-    foreach(test_name test_getmember_siblings test_kvset_invalid_head test_pc_kvspace_source test_crash_resume test_param_address delegate_test test_scalar_wire test_pc_part_write test_ro_rewrite test_keytree_irseq_pc test_pc_view_probe)
+    foreach(test_name test_getmember_siblings test_kvset_invalid_head test_pc_kvspace_source test_crash_resume test_param_address delegate_test test_scalar_wire test_pc_part_write test_ro_rewrite test_keytree_irseq_pc test_pc_view_probe test_int_ops test_langtype_wire test_subtree_boundary)
         add_custom_command(
             OUTPUT "${BIN_DIR}/${test_name}"
             COMMAND ${CMAKE_C_COMPILER} -O2 -D_GNU_SOURCE
@@ -94,59 +109,49 @@ if(NOT APPLE)
     add_test(NAME param_address_fs COMMAND "${BIN_DIR}/test_param_address")
     add_test(NAME delegate_shm COMMAND "${BIN_DIR}/delegate_test")
     add_test(NAME scalar_wire COMMAND "${BIN_DIR}/test_scalar_wire")
+    add_test(NAME int_ops COMMAND "${BIN_DIR}/test_int_ops")
+    add_test(NAME langtype_wire COMMAND "${BIN_DIR}/test_langtype_wire")
+    add_test(NAME subtree_boundary COMMAND "${BIN_DIR}/test_subtree_boundary")
     add_test(NAME keytree_irseq_pc COMMAND "${BIN_DIR}/test_keytree_irseq_pc")
     add_test(NAME pc_part_write_shm COMMAND "${BIN_DIR}/test_pc_part_write")
     add_test(NAME pc_part_write_fs COMMAND "${BIN_DIR}/test_pc_part_write")
     add_test(NAME ro_rewrite_shm COMMAND "${BIN_DIR}/test_ro_rewrite")
     add_test(NAME ro_rewrite_fs COMMAND "${BIN_DIR}/test_ro_rewrite")
-    add_test(NAME body_write COMMAND bash "${CMAKE_SOURCE_DIR}/tests/body_write.sh")
-    add_test(NAME int_specialize COMMAND bash "${CMAKE_SOURCE_DIR}/tests/int_specialize.sh")
-    add_test(NAME float_specialize COMMAND bash "${CMAKE_SOURCE_DIR}/tests/float_specialize.sh")
-    add_test(NAME pause_resume COMMAND bash "${CMAKE_SOURCE_DIR}/tests/pause_resume.sh")
-    add_test(NAME status_view COMMAND bash "${CMAKE_SOURCE_DIR}/tests/status_view.sh")
-    add_test(NAME status_rebind COMMAND bash "${CMAKE_SOURCE_DIR}/tests/status_rebind.sh")
+    add_test(NAME body_write COMMAND "${WITH_C_RUNTIME}" bash "${CMAKE_SOURCE_DIR}/tests/body_write.sh")
+    add_test(NAME int_specialize COMMAND "${WITH_C_RUNTIME}" bash "${CMAKE_SOURCE_DIR}/tests/int_specialize.sh")
+    add_test(NAME float_specialize COMMAND "${WITH_C_RUNTIME}" bash "${CMAKE_SOURCE_DIR}/tests/float_specialize.sh")
+    add_test(NAME pause_resume COMMAND "${WITH_C_RUNTIME}" bash "${CMAKE_SOURCE_DIR}/tests/pause_resume.sh")
+    add_test(NAME status_view COMMAND "${WITH_C_RUNTIME}" bash "${CMAKE_SOURCE_DIR}/tests/status_view.sh")
+    add_test(NAME status_rebind COMMAND "${WITH_C_RUNTIME}" bash "${CMAKE_SOURCE_DIR}/tests/status_rebind.sh")
     set_tests_properties(status_rebind PROPERTIES SKIP_RETURN_CODE 77)
-    add_test(NAME pc_owned_view COMMAND bash "${CMAKE_SOURCE_DIR}/tests/pc_owned_view.sh")
-    add_test(NAME read_view_lazy COMMAND bash "${CMAKE_SOURCE_DIR}/tests/read_view_lazy.sh")
-    set_tests_properties(read_view_lazy PROPERTIES SKIP_RETURN_CODE 77
-        ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/kvlang")
-    set_tests_properties(pc_owned_view PROPERTIES SKIP_RETURN_CODE 77
-        ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/kvlang;KVLANG_PC_PROBE=${BIN_DIR}/test_pc_view_probe")
-    add_test(NAME layout_reject COMMAND bash "${CMAKE_SOURCE_DIR}/tests/layout_reject.sh")
-    add_test(NAME coercion COMMAND bash "${CMAKE_SOURCE_DIR}/tests/coercion.sh")
-    add_test(NAME dyn_specialize COMMAND bash "${CMAKE_SOURCE_DIR}/tests/dyn_specialize.sh")
+    add_test(NAME pc_owned_view COMMAND "${WITH_C_RUNTIME}" bash "${CMAKE_SOURCE_DIR}/tests/pc_owned_view.sh")
+    add_test(NAME read_view_lazy COMMAND "${WITH_C_RUNTIME}" bash "${CMAKE_SOURCE_DIR}/tests/read_view_lazy.sh")
+    set_tests_properties(read_view_lazy PROPERTIES SKIP_RETURN_CODE 77)
+    set_tests_properties(pc_owned_view PROPERTIES SKIP_RETURN_CODE 77)
+    add_test(NAME layout_reject COMMAND "${WITH_C_RUNTIME}" bash "${CMAKE_SOURCE_DIR}/tests/layout_reject.sh")
+    add_test(NAME coercion COMMAND "${WITH_C_RUNTIME}" bash "${CMAKE_SOURCE_DIR}/tests/coercion.sh")
+    add_test(NAME dyn_specialize COMMAND "${WITH_C_RUNTIME}" bash "${CMAKE_SOURCE_DIR}/tests/dyn_specialize.sh")
     add_test(NAME isa_typed_violation
-             COMMAND bash "${CMAKE_SOURCE_DIR}/tests/isa_typed_violation.sh")
+             COMMAND "${WITH_C_RUNTIME}" bash "${CMAKE_SOURCE_DIR}/tests/isa_typed_violation.sh")
     set_tests_properties(isa_typed_violation PROPERTIES SKIP_RETURN_CODE 77
-        ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/byteseek")
+        ENVIRONMENT "KVLANG_DEBUG_RUNTIME_LIB=${CMAKE_BINARY_DIR}/libkvlang_runtime_debug.so")
     find_program(PYTHON3_EXE python3)
     if(PYTHON3_EXE)
         add_test(NAME isa_conformance
-                 COMMAND "${PYTHON3_EXE}" "${CMAKE_SOURCE_DIR}/tests/isa_conformance.py")
-        set_tests_properties(isa_conformance PROPERTIES
-            ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/byteseek")
+                 COMMAND "${WITH_C_RUNTIME}" "${PYTHON3_EXE}" "${CMAKE_SOURCE_DIR}/tests/isa_conformance.py")
     endif()
-    add_test(NAME specialize_gate COMMAND bash "${CMAKE_SOURCE_DIR}/tests/specialize_gate.sh")
+    add_test(NAME specialize_gate COMMAND "${WITH_C_RUNTIME}" bash "${CMAKE_SOURCE_DIR}/tests/specialize_gate.sh")
     set_tests_properties(getmember_siblings kvset_invalid_head_shm pc_kvspace_source_shm crash_resume_shm param_address_shm delegate_shm scalar_wire pc_part_write_shm ro_rewrite_shm
         PROPERTIES ENVIRONMENT "KVLANG_TEST_SCHEME=shm")
     set_tests_properties(kvset_invalid_head_fs pc_kvspace_source_fs crash_resume_fs param_address_fs pc_part_write_fs ro_rewrite_fs
         PROPERTIES ENVIRONMENT "KVLANG_TEST_SCHEME=fs")
-    set_tests_properties(body_write
-        PROPERTIES ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/byteseek")
-    set_tests_properties(int_specialize
-        PROPERTIES ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/byteseek")
-    set_tests_properties(float_specialize
-        PROPERTIES ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/byteseek")
-    set_tests_properties(pause_resume
-        PROPERTIES ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/byteseek")
-    set_tests_properties(status_view
-        PROPERTIES ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/byteseek")
-    set_tests_properties(layout_reject
-        PROPERTIES ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout")
-    set_tests_properties(coercion
-        PROPERTIES ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/byteseek")
-    set_tests_properties(dyn_specialize
-        PROPERTIES ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout;KVLANG_TERM_BIN=${BIN_DIR}/byteseek")
-    set_tests_properties(specialize_gate
-        PROPERTIES ENVIRONMENT "KVLANG_LAYOUT_BIN=${BIN_DIR}/kvlanglayout")
+    set(KVLANG_C_KV_CASES member_key_text member_key_nan_write member_key_inf_read
+        unsigned_abs mixed_int_promotion none_param_int64 none_local_float32
+        none_struct_field none_write_param none_predicate
+        scatter_ops scatter_append_compact compactarray_copy_err)
+    foreach(kv_case ${KVLANG_C_KV_CASES})
+        add_test(NAME c_${kv_case}
+                 COMMAND "${WITH_C_RUNTIME}" bash "${CMAKE_SOURCE_DIR}/tests/c_kv_case.sh" ${kv_case})
+        set_tests_properties(c_${kv_case} PROPERTIES SKIP_RETURN_CODE 77)
+    endforeach()
 endif()

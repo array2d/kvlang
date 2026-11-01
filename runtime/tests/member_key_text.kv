@@ -1,0 +1,46 @@
+// Dynamic member key formatting (`v -> m·*k` and `m·*k`): signed `intN`, unsigned `uintN`,
+// `bool` (`true`/`false`), and shortest round-trip float (`%.*g` with `.0` suffix).
+rwfunc test() -> () {
+	m:[]char/utf8·int64 = {}
+	k1:uint64 = 18446744073709551615
+	1 -> m·*k1
+	k2:bool = true
+	2 -> m·*k2
+	k3:float64 = 1.0
+	3 -> m·*k3
+	k4:float64 = 0.1
+	4 -> m·*k4
+	k5:float64 = 100.0
+	5 -> m·*k5
+	k6:float32 = 0.25
+	6 -> m·*k6
+	k7:float64 = 1e-20
+	7 -> m·*k7
+	k8:int8 = -5
+	8 -> m·*k8
+	k9:float64 = -0.0
+	9 -> m·*k9
+	k10:bool = false
+	10 -> m·*k10
+	k11:float32 = 3.14159
+	11 -> m·*k11
+	a = 0.1
+	b = 0.2
+	k12 = a + b
+	12 -> m·*k12
+	println("n:", kvspace·listlen(m))
+	println("u64max:", m·*"18446744073709551615")
+	println("true:", m·*"true")
+	println("1.0:", m·*"1.0")
+	println("0.1:", m·*"0.1")
+	println("1e+02:", m·*"1e+02")
+	println("0.25:", m·*"0.25")
+	println("1e-20:", m·*"1e-20")
+	println("-5:", m·*"-5")
+	println("-0.0:", m·*"-0.0")
+	println("false:", m·*"false")
+	println("3.14159:", m·*"3.14159")
+	println("0.30000000000000004:", m·*"0.30000000000000004")
+	println("rd:", m·*k1, m·*k2, m·*k3, m·*k11, m·*k12)
+	println("lit:", m·1.0, m·true)
+}

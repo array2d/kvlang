@@ -222,7 +222,9 @@ static int handle_return(kvspace_t *kv, const char *vtid, const char *pc,
         kvlangKvspaceGetOne(kv, rk, &v);
         bool ok = false;
         if (!kvlangXvalueNone(&v) &&
-            kvlangXvalueKindIs(&v, KVSPACE_KIND_CHAR_UTF8)) {
+            (kvlangXvalueKindIs(&v, KVSPACE_KIND_CHAR_UTF8) ||
+             (v.langtype_len == 0 &&
+              xh_ptr(v.bytes) == KVSPACE_XVALUE_PTR_INLINE))) {
             const char *src = (const char *)xh_body(v.bytes);
             size_t n = (size_t)xh_content_len(v.bytes);
             if (n > 0 && n + 1 <= next_cap) {
@@ -260,6 +262,7 @@ typedef struct {
     int nr, nw;
     char read_lt[FUNC_SIG_MAX_CACHE_PARAMS][64];
     char write_lt[FUNC_SIG_MAX_CACHE_PARAMS][64];
+    bool read_num[FUNC_SIG_MAX_CACHE_PARAMS]; /* true when declared as fixed-width numeric scalar */
     bool valid;
 } func_sig_entry_t;
 
@@ -326,9 +329,11 @@ static const func_sig_entry_t *lookup_func_sig(kvspace_t *kv,
         memcpy(e->func_key, func_key, fkl + 1);
         e->nr = nr;
         e->nw = nw;
-        for (int i = 0; i < nr; i++)
+        for (int i = 0; i < nr; i++) {
             param_decl_type(kv, func_key, -(i + 1), e->read_lt[i],
                             sizeof e->read_lt[i]);
+            e->read_num[i] = kvlangTypeIsNumScalar(e->read_lt[i]);
+        }
         for (int i = 0; i < nw; i++)
             param_decl_type(kv, func_key, i + 1, e->write_lt[i],
                             sizeof e->write_lt[i]);
@@ -454,6 +459,21 @@ static int add_param_binding(kvlangKvPair_t *pairs, bool *owned, int *np,
     return 0;
 }
 
+/* Check whether a read argument is `None` (using preloaded `val` or reading its slot key).
+ * Binding `None` to a fixed-width numeric parameter raises `TypeError`. */
+static __attribute__((noinline)) bool read_arg_is_none(kvspace_t *kv,
+                                                      const kvlangParam_t *arg,
+                                                      const char *rk) {
+    if (arg->value.bytes)
+        return kvlangXvalueNone(&arg->value);
+    if (!rk)
+        return true;
+    kvlangXvalue_t v;
+    kvlangXvalueZero(&v);
+    kvlangKvspaceGetOne(kv, rk, &v);
+    return kvlangXvalueNone(&v);
+}
+
 /* Create the callee frame and write its entry PC into ep_out. */
 static int handle_call_buf(kvspace_t *kv, const char *pc,
                            kvlangRwirInst_t *inst, char *ep_out,
@@ -498,7 +518,7 @@ static int handle_call_buf(kvspace_t *kv, const char *pc,
                     kvlangKvspaceGetOne(kv, lk, &lv);
                     char funcdir[KV_KEY_MAX];
                     if (!kvlangXvalueNone(&lv) &&
-                        kvlangXvalueKindIs(&lv, KVSPACE_KIND_CHAR_UTF8)) {
+                        xh_ptr(lv.bytes) == KVSPACE_XVALUE_PTR_INLINE) {
                         size_t fl = (size_t)xh_content_len(lv.bytes);
                         if (fl > 5 && fl < sizeof funcdir) {
                             memcpy(funcdir, xh_body(lv.bytes), fl);
@@ -777,6 +797,14 @@ static int handle_call_buf(kvspace_t *kv, const char *pc,
             kvlangVthreadSetError(kv, vtid, pc, err);
             goto fail_frame;
         }
+        if ((fsig ? fsig->read_num[i] : kvlangTypeIsNumScalar(lt)) &&
+            read_arg_is_none(kv, arg, rk)) {
+            snprintf(err, sizeof err,
+                     "TypeError: cannot write None to %s slot (read argument %d)",
+                     lt, i + 1);
+            kvlangVthreadSetError(kv, vtid, pc, err);
+            goto fail_frame;
+        }
         if (warm_hit && pf) {
             if (strcmp(pf->r_target[i], rk) != 0) {
                 if (write_arg_ptr_ko(kv, &pf->r_arg_ko[i], pf->r_arg_key[i], lt,
@@ -1011,6 +1039,7 @@ int kvlangKvcpuCallOpcode(kvspace_t *kv, const char *vtid, const char *pc,
                           size_t pc_out_cap, bool *pc_feedback,
                           struct kvspaceKeyOff *pc_off,
                           struct kvspaceKeyOff *status_off,
+                          void *pc_view_state,
                           kvlangExecCursor *cursor) {
     kvlangParam_t rbuf[MAX_PARAMS + 1];
     kvlangRwirInst_t ci;
@@ -1033,6 +1062,7 @@ int kvlangKvcpuCallOpcode(kvspace_t *kv, const char *vtid, const char *pc,
     f.pc_out_cap = pc_out_cap;
     f.pc_off = pc_off;
     f.status_off = status_off;
+    f.pc_view_state = pc_view_state;
     f.cursor = cursor;
     int rc = kvlangControlCall(&f);
     if (f.persist_failed)
@@ -1049,13 +1079,15 @@ int kvlangKvcpuDynamicCall(kvlangFrame_t *f, const char *funckey) {
     return kvlangKvcpuCallOpcode(f->kvspace, f->vthread_id, f->pc, NULL, funckey,
                                  NULL, 0, NULL, 0, f->pc_out, f->pc_out_cap,
                                  &f->pc_feedback, f->pc_off, f->status_off,
-                                 f->cursor);
+                                 f->pc_view_state, f->cursor);
 }
 
 
 char *kvlangKvcpuBootstrap(kvspace_t *kv, const char *vtid,
                            const char *funcname, const char *const *args,
                            int nargs) {
+    if (strncmp(funcname, "/lib/", 5) == 0)
+        funcname += 5;
     char *pkg = strdup("");
     char *name = strdup(funcname);
     const char *dot = rfind_separator(funcname);

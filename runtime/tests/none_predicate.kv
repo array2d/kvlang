@@ -1,0 +1,24 @@
+// `None` predicate: empty body, non-Ptr/Ext, and `langtype` in `{"", "None", "*T"}`;
+// empty strings and empty map/struct markers are not `None`.
+struct N {
+	v:int64=0
+	next:*N=None
+}
+rwfunc g(p:*N, a:) -> () {
+	println("g:", p == None, a == None)
+}
+rwfunc test() -> () {
+	s:N = {v=1}
+	println("default next:", s·next == None)
+	s·next -> c
+	println("copied next:", c == None)
+	n = None
+	s·next = n
+	println("written next:", s·next == None)
+	g(n, n)
+	e = ""
+	println("empty string:", e == None)
+	m:[]char/utf8·int64 = {}
+	println("empty map:", m == None)
+	println("missing member:", m·k == None)
+}
