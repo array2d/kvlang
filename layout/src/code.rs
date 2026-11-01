@@ -668,6 +668,7 @@ fn build_inst(inst: &RawInst, by_irseq: &HashMap<i32, String>) -> Instruction {
         writes: inst.writes.clone(),
         write_types,
         arrow_left: is_fill || inst.write_types.iter().any(|t| !t.is_empty()),
+        operator: false,
     }
 }
 
@@ -1133,6 +1134,7 @@ fn write_linear_inst(
             s.writes.len() as i32,
             pkg,
             local_funcs,
+            s.operator,
         );
         pairs.push((format!("{prefix}/[{n},0]"), lt, wire));
     }
@@ -1179,7 +1181,16 @@ fn opcode_value(
     nw: i32,
     pkg: &str,
     local_funcs: &HashSet<String>,
+    is_operator: bool,
 ) -> (Vec<u8>, String) {
+    // lower 认定的算子永不是函数调用：语义名可能与同包 rwfunc 同名
+    // （`==` → `eq` vs `lib string { rwfunc eq }`），不得被裸名解析抢走。
+    if is_operator {
+        return (
+            kvkind::new_rwir(nr, nw, opcode),
+            kvkind::KIND_RWIR.to_string(),
+        );
+    }
     let name = opcode.strip_prefix("/lib/").unwrap_or(opcode);
     let qualified = if pkg.is_empty() || name.contains(keytree::MEMBER_SEP) || name.contains('/') {
         name.to_string()

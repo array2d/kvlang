@@ -403,6 +403,7 @@ fn return_inst() -> Stmt {
         writes: Vec::new(),
         write_types: Vec::new(),
         arrow_left: false,
+        operator: false,
     })
 }
 
@@ -682,6 +683,7 @@ fn lower_for_with_cont(
             writes: vec![slot.clone()],
             write_types: Vec::new(),
             arrow_left: true,
+            operator: false,
         }));
         slot
     };
@@ -693,6 +695,7 @@ fn lower_for_with_cont(
             writes: vec![len_slot.clone()],
             write_types: Vec::new(),
             arrow_left: false,
+            operator: false,
         }));
     } else {
         init_body.push(Stmt::Instruction(Instruction {
@@ -701,6 +704,7 @@ fn lower_for_with_cont(
             writes: vec![len_slot.clone()],
             write_types: Vec::new(),
             arrow_left: false,
+            operator: false,
         }));
     }
     init_body.push(goto_label(&cond_label));
@@ -711,6 +715,7 @@ fn lower_for_with_cont(
         writes: vec![idx_slot.clone()],
         write_types: Vec::new(),
         arrow_left: false,
+        operator: false,
     };
     let lt_inst = Instruction {
         comments: Vec::new(),
@@ -721,6 +726,7 @@ fn lower_for_with_cont(
         writes: vec![cond_slot.clone()],
         write_types: Vec::new(),
         arrow_left: false,
+        operator: false,
     };
     let cond_body = vec![
         Stmt::Instruction(add_inst),
@@ -744,6 +750,7 @@ fn lower_for_with_cont(
             writes: vec![key_slot.clone()],
             write_types: Vec::new(),
             arrow_left: false,
+            operator: false,
         }));
         body_insts.push(Stmt::Instruction(Instruction {
             comments: Vec::new(),
@@ -754,6 +761,7 @@ fn lower_for_with_cont(
             writes: vec![s.var.clone()],
             write_types: Vec::new(),
             arrow_left: false,
+            operator: false,
         }));
     } else {
         body_insts.push(Stmt::Instruction(Instruction {
@@ -765,6 +773,7 @@ fn lower_for_with_cont(
             writes: vec![s.var.clone()],
             write_types: Vec::new(),
             arrow_left: false,
+            operator: false,
         }));
     }
     body_insts.extend(body_inner);
@@ -825,6 +834,7 @@ fn flatten_expr(e: &Expr, lg: &mut LabelGen, extra: &mut Vec<Stmt>) -> Expr {
                 writes: vec![tmp.clone()],
                 write_types: Vec::new(),
                 arrow_left: false,
+                operator: false,
             }));
             new_args.push(ast::leaf(&tmp));
         } else {
@@ -852,6 +862,7 @@ fn br_inst(cond: &str, t_label: &str, f_label: &str) -> Stmt {
         writes: Vec::new(),
         write_types: Vec::new(),
         arrow_left: false,
+        operator: false,
     })
 }
 
@@ -862,6 +873,7 @@ fn goto_label(label: &str) -> Stmt {
         writes: Vec::new(),
         write_types: Vec::new(),
         arrow_left: false,
+        operator: false,
     })
 }
 
@@ -897,6 +909,7 @@ fn expand_sparse(base: &str, e: &Expr, wtypes: &[String], _lg: &mut LabelGen) ->
         // （`nums:[int64]·int64 = {…}`；见 [[map容器]]）。曾在此清空，runtime 无从得知容器类型。
         write_types: wtypes.to_vec(),
         arrow_left: true,
+        operator: false,
     };
     vec![Stmt::Instruction(inst)]
 }
@@ -908,6 +921,7 @@ fn make_copy_inst(val: &str, dest: &str) -> Stmt {
         writes: vec![dest.to_string()],
         write_types: Vec::new(),
         arrow_left: false,
+        operator: false,
     })
 }
 
@@ -1978,7 +1992,8 @@ fn specialize_inst(
         Some(k) => k,
         None => return,
     };
-    // 一元负号（1 参 `-`/sub）：runtime 按 Neg 执行 → 发 `<k>·neg`。
+    // 一元负号（1 参 `-`/sub）：runtime 按 Neg 执行 → 发 `<k>·neg`
+    // （语义模式发 `neg`，类型留在操作数槽）。
     if word == "sub" && e.args.len() == 1 {
         if builtin::is_unsigned_kind(&k) {
             return;
@@ -2016,14 +2031,15 @@ fn specialize_inst(
     } else if !is_cmp && builtin::op_kind(&word, &k) != k {
         return;
     }
+    // 语义模式：只发算子词，具体精度由操作数槽的 langtype 承载（阶段 B 前提）。
     e.op = format!("{k}{}{word}", keytree::MEMBER_SEP);
 }
 
 /// 混合数值 kind 的唯一结果 kind（五语言阵营，且与 runtime 现状一致）：
 /// - int×int 取更宽（`wider_int_kind`，C 整型提升）；
 /// - float×float 取 float64（有 float64 时）；
-/// - int×float 取 float 宽度：仅当 float64 或整数侧全为 64 位（runtime 的
-///   to_float 结果宽度 = wmax 或 8，窄 int×float32 与顺序相关）→ float64；
+/// - int×float 取浮点操作数宽度（C 规则，与顺序无关）：有 float64 → float64，
+///   否则 float32；
 /// - int×uint 混合 runtime 直接报错（same_class=false），不特化。
 /// `allow_mixed_classes=false`（比较类）时跨类混合一律不特化。
 fn promoted_numeric_kind(kinds: &[String], allow_mixed_classes: bool) -> Option<String> {
