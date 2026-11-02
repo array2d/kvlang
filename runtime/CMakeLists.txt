@@ -19,14 +19,11 @@ file(GLOB KVLANG_RUNTIME_SRC CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/*.c")
 set(KVLANG_GEN_SRC "${CMAKE_SOURCE_DIR}/src/rwir_special_gen.c")
 set(KVLANG_COERCE_SRC "${CMAKE_SOURCE_DIR}/src/rwir_coerce.c")
 set(KVLANG_DECODE_SRC "${CMAKE_SOURCE_DIR}/src/rwir_decode.c")
-set(KVLANG_ISA_SIG_SRC "${CMAKE_SOURCE_DIR}/src/isa_sig.c")
 set(KVLANG_SLOTVIEW_SRC "${CMAKE_SOURCE_DIR}/src/xvaluebodyview.c")
 list(REMOVE_ITEM KVLANG_RUNTIME_SRC "${KVLANG_GEN_SRC}" "${KVLANG_COERCE_SRC}"
-    "${KVLANG_DECODE_SRC}" "${KVLANG_ISA_SIG_SRC}"
-    "${KVLANG_SLOTVIEW_SRC}")
+    "${KVLANG_DECODE_SRC}" "${KVLANG_SLOTVIEW_SRC}")
 list(APPEND KVLANG_RUNTIME_SRC "${KVLANG_DECODE_SRC}" "${KVLANG_GEN_SRC}"
-    "${KVLANG_COERCE_SRC}" "${KVLANG_ISA_SIG_SRC}"
-    "${KVLANG_SLOTVIEW_SRC}")
+    "${KVLANG_COERCE_SRC}" "${KVLANG_SLOTVIEW_SRC}")
 add_library(kvlang_runtime SHARED ${KVLANG_RUNTIME_SRC})
 target_include_directories(kvlang_runtime PUBLIC include src)
 target_compile_definitions(kvlang_runtime PRIVATE _GNU_SOURCE)
@@ -139,6 +136,10 @@ if(NOT APPLE)
     if(PYTHON3_EXE)
         add_test(NAME isa_conformance
                  COMMAND "${WITH_C_RUNTIME}" "${PYTHON3_EXE}" "${CMAKE_SOURCE_DIR}/tests/isa_conformance.py")
+        add_test(NAME myrwircap_ids
+                 COMMAND "${PYTHON3_EXE}" "${CMAKE_SOURCE_DIR}/tests/myrwircap_ids.py")
+        add_test(NAME myrwircap_ids_selftest
+                 COMMAND "${PYTHON3_EXE}" "${CMAKE_SOURCE_DIR}/tests/myrwircap_ids.py" --selftest)
     endif()
     add_test(NAME specialize_gate COMMAND "${WITH_C_RUNTIME}" bash "${CMAKE_SOURCE_DIR}/tests/specialize_gate.sh")
     set_tests_properties(getmember_siblings kvset_invalid_head_shm pc_kvspace_source_shm crash_resume_shm param_address_shm delegate_shm scalar_wire pc_part_write_shm ro_rewrite_shm

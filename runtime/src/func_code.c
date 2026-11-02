@@ -200,17 +200,10 @@ static kvlangCodeRow_t *row_load(kvspace_t *kv, kvlangFuncCode_t *code, int s0,
     }
     row->handler_id =
         row->opcode_id >= 0 ? row->opcode_id : kvlangRwirRouteId();
-    /* P1b3 typed_core：manifest core 具体项 = 签名列 BIN/CMP/UN（156 项）。
-     * 装载期一次固化，执行期不查 manifest。 */
-    if (row->opcode_id >= 0) {
-        uint32_t nsig = 0;
-        const kvlangIsaSig *sg = kvlangIsaSigs(&nsig);
-        if ((uint32_t)row->opcode_id < nsig) {
-            uint8_t k = sg[row->opcode_id].sig;
-            row->typed_core =
-                k == KV_ISA_BIN || k == KV_ISA_CMP || k == KV_ISA_UN;
-        }
-    }
+    /* typed_core：能力表里声明了定长结果类型的行（156 项），与派发同源。 */
+    if (row->opcode_id >= 0)
+        row->typed_core =
+            kvlangRwirCaps()[row->opcode_id].result_kind != NULL;
     /* T-120 A：typed 行操作数 langtype 由 opcode 前缀承载（`int64·add`），
      * 装载期解析一次；cell->type 在 typed 行上通常为空。 */
     row->view_pack = 0;

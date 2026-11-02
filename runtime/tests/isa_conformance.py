@@ -11,8 +11,6 @@ import subprocess
 import sys
 import tempfile
 
-TERM = os.environ["KVLANG_TERM_BIN"]
-LAYOUT = os.environ["KVLANG_LAYOUT_BIN"]
 
 SIGNED = {"int8", "int16", "int32", "int64"}
 UNSIGNED = {"uint8", "uint16", "uint32", "uint64"}
@@ -107,6 +105,8 @@ def src(kind, op, arity, args, want):
 
 
 def main():
+    term = os.environ["KVLANG_TERM_BIN"]
+    layout = os.environ["KVLANG_LAYOUT_BIN"]
     base = tempfile.mkdtemp(prefix="isa-conf-")
     fails = []
     total = 0
@@ -125,17 +125,17 @@ def main():
                 except OSError:
                     pass
             env = {**os.environ, "KVSPACE": dsn}
-            boot = subprocess.run([TERM, "-c", "print(\"boot\")"], env=env,
+            boot = subprocess.run([term, "-c", "print(\"boot\")"], env=env,
                                   capture_output=True, text=True)
             if boot.returncode != 0:
                 fails.append((kind, op, "boot", boot.stderr[:120]))
                 continue
-            lay = subprocess.run([LAYOUT, prog, dsn], env=env,
+            lay = subprocess.run([layout, prog, dsn], env=env,
                                  capture_output=True, text=True)
             if lay.returncode != 0:
                 fails.append((kind, op, "layout", lay.stderr[:160]))
                 continue
-            run = subprocess.run([TERM, "test"], env=env,
+            run = subprocess.run([term, "test"], env=env,
                                  capture_output=True, text=True)
             out = run.stdout.strip().splitlines()
             if run.returncode != 0 or not out or out[0] != "OK":
