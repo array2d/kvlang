@@ -155,6 +155,133 @@ static void test_deallocate(
     (void)alignment;
 }
 
+typedef struct static_xvalue_resolution_context {
+    runtimec_xvalue_address_t xvalue_address;
+    runtimec_status_t status;
+    size_t call_count;
+} static_xvalue_resolution_context_t;
+
+static runtimec_status_t resolve_static_xvalue_address(
+    void *context, const runtimec_snapshot_t *snapshot,
+    runtimec_key_view_t key,
+    runtimec_xvalue_address_t *output_xvalue_address,
+    runtimec_error_t *error) {
+    static_xvalue_resolution_context_t *resolution_context = context;
+
+    (void)snapshot;
+    (void)key;
+    (void)error;
+    ++resolution_context->call_count;
+    if (resolution_context->status != RUNTIMEC_STATUS_SUCCESS) {
+        *output_xvalue_address = RUNTIMEC_XVALUE_ADDRESS_NONE;
+        return resolution_context->status;
+    }
+    *output_xvalue_address = resolution_context->xvalue_address;
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
+static void test_vmkv_xvalue_address_encoding(void) {
+    static_xvalue_resolution_context_t resolution_context = {
+        .xvalue_address = UINT64_C(0x1000),
+        .status = RUNTIMEC_STATUS_SUCCESS,
+        .call_count = 0U,
+    };
+    runtimec_host_services_t host_services;
+    runtimec_snapshot_t snapshot;
+    const vmkv_rwir_argument_view_t source_argument = {
+        .parameter_type_name = RUNTIMEC_STRING_VIEW_LITERAL("int64"),
+        .parameter_name = RUNTIMEC_STRING_VIEW_LITERAL("value"),
+        .key = RUNTIMEC_KEY_VIEW_LITERAL("/value"),
+        .key_addressability = VMKV_KEY_ADDRESSABILITY_STATIC,
+    };
+    vmkv_rwir_argument_view_t dynamic_argument = source_argument;
+    binrwir_argument_t encoded_argument = {
+        .argument_index = UINT32_MAX,
+        .reserved_32_bits = UINT32_MAX,
+        .body_address = UINT64_MAX,
+    };
+
+    runtimec_host_services_initialize(&host_services);
+    host_services.context = &resolution_context;
+    host_services.allocator = (runtimec_allocator_t){
+        .context = NULL,
+        .allocate = test_allocate,
+        .deallocate = test_deallocate,
+    };
+    host_services.resolve_static_xvalue_address =
+        resolve_static_xvalue_address;
+    runtimec_snapshot_reset(&snapshot);
+    const vmkv_encode_request_t request = {
+        .host_services = &host_services,
+        .function_path = RUNTIMEC_STRING_VIEW_LITERAL("/lib/test"),
+        .expected_snapshot = snapshot,
+    };
+
+    RUNTIMEC_EXPECT(vmkv_encode_static_argument(
+        &request, &source_argument, 7U, &encoded_argument, NULL) ==
+        RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(resolution_context.call_count == 1U);
+    RUNTIMEC_EXPECT(encoded_argument.argument_index == 7U);
+    RUNTIMEC_EXPECT(encoded_argument.reserved_32_bits == 0U);
+    RUNTIMEC_EXPECT(encoded_argument.body_address == UINT64_C(0x1008));
+
+    dynamic_argument.key_addressability = VMKV_KEY_ADDRESSABILITY_DYNAMIC;
+    RUNTIMEC_EXPECT(vmkv_encode_static_argument(
+        &request, &dynamic_argument, 7U, &encoded_argument, NULL) ==
+        RUNTIMEC_STATUS_UNSUPPORTED);
+    RUNTIMEC_EXPECT(resolution_context.call_count == 1U);
+    RUNTIMEC_EXPECT(encoded_argument.argument_index == 0U);
+    RUNTIMEC_EXPECT(encoded_argument.reserved_32_bits == 0U);
+    RUNTIMEC_EXPECT(encoded_argument.body_address ==
+                    BINRWIR_BODY_ADDRESS_NONE);
+
+    resolution_context.xvalue_address = RUNTIMEC_XVALUE_ADDRESS_NONE;
+    encoded_argument = (binrwir_argument_t){
+        .argument_index = UINT32_MAX,
+        .reserved_32_bits = UINT32_MAX,
+        .body_address = UINT64_MAX,
+    };
+    RUNTIMEC_EXPECT(vmkv_encode_static_argument(
+        &request, &source_argument, 7U, &encoded_argument, NULL) ==
+        RUNTIMEC_STATUS_ERROR);
+    RUNTIMEC_EXPECT(resolution_context.call_count == 2U);
+    RUNTIMEC_EXPECT(encoded_argument.argument_index == 0U);
+    RUNTIMEC_EXPECT(encoded_argument.reserved_32_bits == 0U);
+    RUNTIMEC_EXPECT(encoded_argument.body_address ==
+                    BINRWIR_BODY_ADDRESS_NONE);
+
+    resolution_context.xvalue_address = UINT64_MAX - 7U;
+    encoded_argument = (binrwir_argument_t){
+        .argument_index = UINT32_MAX,
+        .reserved_32_bits = UINT32_MAX,
+        .body_address = UINT64_MAX,
+    };
+    RUNTIMEC_EXPECT(vmkv_encode_static_argument(
+        &request, &source_argument, 7U, &encoded_argument, NULL) ==
+        RUNTIMEC_STATUS_ERROR);
+    RUNTIMEC_EXPECT(resolution_context.call_count == 3U);
+    RUNTIMEC_EXPECT(encoded_argument.argument_index == 0U);
+    RUNTIMEC_EXPECT(encoded_argument.reserved_32_bits == 0U);
+    RUNTIMEC_EXPECT(encoded_argument.body_address ==
+                    BINRWIR_BODY_ADDRESS_NONE);
+
+    resolution_context.xvalue_address = RUNTIMEC_XVALUE_ADDRESS_NONE;
+    resolution_context.status = RUNTIMEC_STATUS_UNSUPPORTED;
+    encoded_argument = (binrwir_argument_t){
+        .argument_index = UINT32_MAX,
+        .reserved_32_bits = UINT32_MAX,
+        .body_address = UINT64_MAX,
+    };
+    RUNTIMEC_EXPECT(vmkv_encode_static_argument(
+        &request, &source_argument, 7U, &encoded_argument, NULL) ==
+        RUNTIMEC_STATUS_UNSUPPORTED);
+    RUNTIMEC_EXPECT(resolution_context.call_count == 4U);
+    RUNTIMEC_EXPECT(encoded_argument.argument_index == 0U);
+    RUNTIMEC_EXPECT(encoded_argument.reserved_32_bits == 0U);
+    RUNTIMEC_EXPECT(encoded_argument.body_address ==
+                    BINRWIR_BODY_ADDRESS_NONE);
+}
+
 static void test_compiler_configuration(void) {
     const runtimec_allocator_t allocator = {
         .context = NULL,
@@ -342,6 +469,7 @@ static void test_jit_register_and_safepoint_failure_shapes(void) {
 }
 
 int main(void) {
+    test_vmkv_xvalue_address_encoding();
     test_compiler_configuration();
     test_compiler_revision_failure_shape();
     test_encoder_revision_failure_shape();

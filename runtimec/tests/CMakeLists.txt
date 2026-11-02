@@ -30,6 +30,18 @@ add_test(NAME runtimec.contracts COMMAND runtimec_contracts_test)
 set_tests_properties(runtimec.contracts PROPERTIES
     LABELS "runtimec;scaffold;contracts")
 
+add_executable(runtimec_host_contracts_test host_contracts_test.c)
+target_compile_features(runtimec_host_contracts_test PRIVATE c_std_11)
+target_include_directories(runtimec_host_contracts_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/.."
+    "${RUNTIMEC_INCLUDE_DIRECTORY}")
+target_link_libraries(runtimec_host_contracts_test PRIVATE
+    runtimec_contract runtimec_host)
+runtimec_test_warnings(runtimec_host_contracts_test)
+add_test(NAME runtimec.host.contracts COMMAND runtimec_host_contracts_test)
+set_tests_properties(runtimec.host.contracts PROPERTIES
+    LABELS "runtimec;scaffold;host;contracts")
+
 add_executable(runtimec_binrwir_compiler_contracts_test
     binrwir_compiler_contracts_test.c)
 target_compile_features(runtimec_binrwir_compiler_contracts_test PRIVATE c_std_11)

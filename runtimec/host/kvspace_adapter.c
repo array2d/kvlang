@@ -1,4 +1,4 @@
-/* kvspace adapter（包括静态 V.body 地址解析）的失败封闭骨架。 */
+/* kvspace adapter（包括静态 XValue 基址解析）的失败封闭骨架。 */
 
 #include "host/kvspace_adapter.h"
 

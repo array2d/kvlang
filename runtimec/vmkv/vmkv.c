@@ -25,6 +25,23 @@ static bool vmkv_named_argument_is_valid(
             argument->key_addressability == VMKV_KEY_ADDRESSABILITY_DYNAMIC);
 }
 
+static bool vmkv_derive_value_body_address(
+    runtimec_xvalue_address_t xvalue_address,
+    runtimec_value_body_address_t *output_body_address) {
+    if (output_body_address == NULL) {
+        return false;
+    }
+    *output_body_address = RUNTIMEC_VALUE_BODY_ADDRESS_NONE;
+    if (xvalue_address == RUNTIMEC_XVALUE_ADDRESS_NONE ||
+        xvalue_address >
+            UINT64_MAX - RUNTIMEC_XVALUE_BODY_OFFSET_BYTES) {
+        return false;
+    }
+    *output_body_address =
+        xvalue_address + RUNTIMEC_XVALUE_BODY_OFFSET_BYTES;
+    return true;
+}
+
 runtimec_status_t vmkv_source_open_function(
     const runtimec_host_services_t *host_services,
     runtimec_string_view_t function_path,
@@ -146,20 +163,22 @@ runtimec_status_t vmkv_encode_static_argument(
         VMKV_KEY_ADDRESSABILITY_DYNAMIC) {
         return RUNTIMEC_STATUS_UNSUPPORTED;
     }
-    if (request->host_services->resolve_static_value_body_address == NULL) {
+    if (request->host_services->resolve_static_xvalue_address == NULL) {
         return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
+    }
+
+    runtimec_xvalue_address_t xvalue_address = RUNTIMEC_XVALUE_ADDRESS_NONE;
+    runtimec_status_t status =
+        request->host_services->resolve_static_xvalue_address(
+            request->host_services->context, &request->expected_snapshot,
+            source_argument->key, &xvalue_address, error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return status;
     }
 
     runtimec_value_body_address_t body_address =
         RUNTIMEC_VALUE_BODY_ADDRESS_NONE;
-    runtimec_status_t status =
-        request->host_services->resolve_static_value_body_address(
-            request->host_services->context, &request->expected_snapshot,
-            source_argument->key, &body_address, error);
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return status;
-    }
-    if (body_address == RUNTIMEC_VALUE_BODY_ADDRESS_NONE) {
+    if (!vmkv_derive_value_body_address(xvalue_address, &body_address)) {
         return RUNTIMEC_STATUS_ERROR;
     }
 

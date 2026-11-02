@@ -11,7 +11,8 @@
 | myrwircap capability records | `specification/rwir_catalog.def` | 每个 capability 恰好一条 canonical 映射 |
 | Stable operation identity | `specification/` | 显式 identifier；不得使用数组下标或声明顺序 |
 | Plaintext RWIR reading and validation | `vmkv/` | 从 kvspace 读取 operation name、参数类型与参数名 |
-| Static key address resolution | `vmkv/` | 参数 key 解引用为非零、生命周期有效的 `uint64 argaddr` |
+| Static key dereference | `host/` | 参数 key 只解引用为非零、生命周期有效的 64 位 XValue 基址；不得决定 body 偏移 |
+| XValue body address derivation | `vmkv/` | 唯一验证固定 8 字节 head ABI、检查 `+8` 溢出并生成最终 `argaddr` |
 | Canonical BinRWIR Program | `binrwir/program.*` | 进程内、不可变、地址失效时整体失效 |
 | Hot instruction identity | `binrwir/instruction.*` | 每条 instruction 只保留稳定 `opid` |
 | Addressed arguments | `binrwir/argument.*` | 每个参数只保留 `argidx + uint64 argaddr`，完整且不截断 |
@@ -32,7 +33,7 @@
 | JIT register allocation | `binrwir_compiler/jit/register_allocation.*` | 唯一可在当前逻辑指令内部提升 body 到 register/spill 的组件 |
 | Machine-code execution | `binrwir_jit_execute` | 只接受已生成 code；不能编译、改选目标、提交未完成状态或执行 fallback |
 | Dynamic key policy | `specification/`, `vmkv/` | 生命周期 ABI 建立前 map/struct 动态 key 明确 `UNSUPPORTED` |
-| kvspace access and checkpoint storage | `host/` | 只通过窄主机服务合同访问 |
+| kvspace access and checkpoint storage | `host/` | 只通过窄主机服务合同访问；静态 key 查询不返回任意 body 地址 |
 | Exported symbol set | `interface/exports.txt` | 每个平台必须精确匹配 |
 
 ## Rejected ownership
@@ -40,6 +41,7 @@
 - BinRWIR 不属于 vmbin、内部 JIT 或 vmkv。
 - BinRWIR 不拥有 RWIR 明文字段、key、xvalue、`V.body` 或 register file。
 - vmkv 不拥有优化、execution plan、target decision 或 execution。
+- host 不拥有 XValue head 大小或 body 偏移策略；`+8` 只属于 vmkv。
 - Compiler 不读取 RWIR，不访问 kvspace，不执行 Program。
 - repository 不编译、不调用执行器、不改变 target。
 - route 不做 JIT eligibility，不实现 operation 语义。
@@ -47,7 +49,8 @@
 - JIT 不得关闭 instruction-completion boundary，不得 materialize speculative/partial state。
 - 未完成状态 discard 后不得推进 logical program counter 或 checkpoint。
 - vmbin 不拥有 canonical BinRWIR，不选择 JIT，不缓存 xvalue/body，也不建立 software register file。
-- 动态 key 不得通过零 `argaddr`、间接查找或 JIT 特例进入可执行 compilation。
+- 零 XValue 基址、`+8` 溢出、非 8 字节 head ABI、动态 key 或无法证明生命周期不得通过
+  间接查找或 JIT 特例进入可执行 compilation。
 - host 不检查 BinRWIR instruction。
 - 公共头不暴露内部 runtimec 结构。
 - 任何组件都不能创建第三执行器或第二公开执行入口。

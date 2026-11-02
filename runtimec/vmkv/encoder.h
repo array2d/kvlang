@@ -9,9 +9,10 @@
  * 联系：engine route 在 compilation repository 未命中时调用；源只经
  *       vmkv/source 与主机服务读取；结果交给 BinRWIR Compiler。
  * 约束：vmkv 只有 RWIR 到 canonical BinRWIR 这一条正常方向。每个静态 key
- *       必须通过 host service resolve_static_value_body_address 解析；动态 key、
- *       零地址及无法保证 snapshot 生命周期的地址返回 UNSUPPORTED 或错误，且不
- *       产生 Program。编码不得优化、融合、生成执行计划或机器码，也不得执行。
+ *       必须通过 host service resolve_static_xvalue_address 取得 XValue 基址，
+ *       再由合同唯一函数推导 V.body 地址；动态 key、零地址、地址溢出及无法保证
+ *       snapshot 生命周期的地址返回 UNSUPPORTED 或错误，且不产生 Program。
+ *       编码不得优化、融合、生成执行计划或机器码，也不得执行。
  */
 
 #include "binrwir/program.h"
@@ -47,8 +48,8 @@ runtimec_status_t vmkv_encoder_get_canonical_encoding_revision(
 
 /*
  * VMKV 地址化的唯一窄入口。它先验证明文 parameter type/name/key，再拒绝
- * dynamic key；静态 key 只能调用 host service 得到非零地址后生成 argument。
- * 该函数不读取 V.body，也不缓存 key、xvalue 或 body。
+ * dynamic key；静态 key 只能由 host service 的非零 XValue 基址安全推导 V.body
+ * 地址后生成 argument。该函数不读取 V.body，也不缓存 key、XValue 或 body。
  */
 runtimec_status_t vmkv_encode_static_argument(
     const vmkv_encode_request_t *request,

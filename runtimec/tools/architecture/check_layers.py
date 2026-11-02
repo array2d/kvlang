@@ -111,6 +111,11 @@ REMOVED_VALUE_CACHE_PATTERN = re.compile(
     r"payload_low|payload_high)\b",
     re.IGNORECASE,
 )
+HARDCODED_XVALUE_BODY_OFFSET_PATTERN = re.compile(
+    r"\b(?:xvalue|resolved)[A-Za-z0-9_]*address\b\s*\+\s*"
+    r"(?:8U?\b|UINT64_C\s*\(\s*8\s*\))",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True, order=True)
@@ -180,6 +185,7 @@ def resolve_include(
         runtimec_root / "include" / token,
         *(runtimec_root / directory / token for directory in INTERNAL_PREFIXES),
         repository_root / token,
+        repository_root / "include" / token,
     ]
     return next((candidate.resolve() for candidate in candidates if candidate.is_file()), None)
 
@@ -367,13 +373,68 @@ def audit_addressed_binrwir_model(
     host_text = host_services.read_text(encoding="utf-8") \
         if host_services.is_file() else ""
     if not re.search(
-        r"#define\s+RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION\s+2U\b",
+        r"#define\s+RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION\s+3U\b",
         host_text,
     ):
         findings.append(Finding(
             relative_display(host_services, repository_root), 1,
-            "host-services-version", "binary interface version 2 is required",
+            "host-services-version", "binary interface version 3 is required",
         ))
+    for token in (
+        "RUNTIMEC_XVALUE_BODY_OFFSET_BYTES KVSPACE_XVALUE_HEAD_LEN",
+        "RUNTIMEC_XVALUE_BODY_OFFSET_BYTES == 8U",
+        "resolve_static_xvalue_address",
+    ):
+        if token not in host_text:
+            findings.append(Finding(
+                relative_display(host_services, repository_root), 1,
+                "xvalue-body-address-contract", token,
+            ))
+
+    vmkv_source = runtimec_root / "vmkv" / "vmkv.c"
+    vmkv_text = vmkv_source.read_text(encoding="utf-8") \
+        if vmkv_source.is_file() else ""
+    for token in (
+        "static bool vmkv_derive_value_body_address(",
+        "UINT64_MAX - RUNTIMEC_XVALUE_BODY_OFFSET_BYTES",
+        "xvalue_address + RUNTIMEC_XVALUE_BODY_OFFSET_BYTES",
+    ):
+        if token not in c_code_without_comments_or_literals(vmkv_text):
+            findings.append(Finding(
+                relative_display(vmkv_source, repository_root), 1,
+                "vmkv-owned-body-address-derivation", token,
+            ))
+
+    offset_owners = {host_services, vmkv_source}
+    for path in iter_product_sources(runtimec_root):
+        code = c_code_without_comments_or_literals(
+            path.read_text(encoding="utf-8"),
+        )
+        if (path not in offset_owners and
+                "RUNTIMEC_XVALUE_BODY_OFFSET_BYTES" in code):
+            findings.append(Finding(
+                relative_display(path, repository_root), 1,
+                "body-address-derivation-outside-vmkv",
+                "only the contract declaration and VMKV derivation may use "
+                "the XValue body offset",
+            ))
+        if path != vmkv_source:
+            for match in HARDCODED_XVALUE_BODY_OFFSET_PATTERN.finditer(code):
+                findings.append(Finding(
+                    relative_display(path, repository_root),
+                    code.count("\n", 0, match.start()) + 1,
+                    "hardcoded-body-address-derivation-outside-vmkv",
+                    match.group(0),
+                ))
+
+    removed_resolver_name = "resolve_static_" + "value_body_address"
+    for path in iter_product_sources(runtimec_root):
+        text = path.read_text(encoding="utf-8")
+        if removed_resolver_name in text:
+            findings.append(Finding(
+                relative_display(path, repository_root), 1,
+                "removed-static-address-resolver", removed_resolver_name,
+            ))
 
     for path in iter_product_sources(runtimec_root):
         relative = path.relative_to(runtimec_root)

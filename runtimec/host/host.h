@@ -4,8 +4,8 @@
 /*
  * host 是 runtimec 对外部能力的唯一所有者。它只持有一份经过精确版本
  * 校验的能力表，不拥有 BinRWIR，不参与 BinRWIR Compiler 的 JIT/VMBIN
- * 执行目标选择，也不提交 checkpoint。它是静态 key 到稳定 V.body 地址解析
- * 合同的唯一入口；地址只借用到 snapshot source revision 失效为止。
+ * 执行目标选择，也不提交 checkpoint。它是静态 key 到稳定 XValue 基址解析
+ * 合同的唯一入口；基址只借用到 snapshot source revision 失效为止。
  */
 
 #include "contract/error.h"
@@ -26,10 +26,10 @@ runtimec_status_t runtimec_host_destroy(
 runtimec_status_t runtimec_host_get_services(
     const runtimec_host_t *host,
     const runtimec_host_services_t **output, runtimec_error_t *error);
-runtimec_status_t runtimec_host_resolve_static_value_body_address(
+runtimec_status_t runtimec_host_resolve_static_xvalue_address(
     const runtimec_host_t *host, const runtimec_snapshot_t *snapshot,
     runtimec_key_view_t key,
-    runtimec_value_body_address_t *output_body_address,
+    runtimec_xvalue_address_t *output_xvalue_address,
     runtimec_error_t *error);
 
 #ifdef __cplusplus

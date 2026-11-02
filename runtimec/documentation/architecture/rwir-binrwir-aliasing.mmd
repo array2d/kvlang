@@ -12,7 +12,10 @@ flowchart LR
     ALIAS_POLICY["explicit Read and Write alias policy"]
   end
 
-  VMKV["vmkv<br/>validate and dereference static keys"]
+  VMKV_VALIDATE["vmkv<br/>validate RWIR and request static key dereference"]
+  HOST["host<br/>dereference static key to nonzero uint64 XValue base<br/>never choose body offset"]
+  XVALUE["kvspace XValue<br/>64-bit base plus fixed 8-byte head"]
+  VMKV_DERIVE["vmkv only<br/>compute argaddr = xvalue_address + 8<br/>with overflow check"]
 
   subgraph BINRWIR["Process-local BinRWIR"]
     BINARY_OPERATION["opid only"]
@@ -20,24 +23,26 @@ flowchart LR
     WRITE_ARGUMENT["Write argidx plus uint64 argaddr"]
   end
 
-  BODY["one authoritative kvspace V.body<br/>same nonzero 64-bit address"]
+  BODY["one authoritative kvspace V.body<br/>at XValue base + 8<br/>same nonzero 64-bit argaddr"]
   VMBIN["vmbin<br/>direct load and store<br/>no value cache or register file"]
   JIT["internal JIT current instruction<br/>speculative register and spill state<br/>alias reads observe speculative writes"]
   COMPLETION{"Logical instruction<br/>fully completed?"}
   COMMIT["COMMIT_COMPLETED_STATE<br/>materialize all aliased dirty values<br/>then advance checkpoint"]
   DISCARD["DISCARD_INCOMPLETE_STATE<br/>drop partial register and spill state<br/>no body write or checkpoint advance"]
-  DYNAMIC["dynamic map or struct key<br/>UNSUPPORTED before lifecycle ABI<br/>no zero address or fallback"]
+  DYNAMIC["fail closed with no BinRWIR<br/>zero base, overflow, non-8-byte head ABI,<br/>dynamic key, or unproven lifetime"]
 
-  OPERATION_NAME --> VMKV
-  READ_PARAMETER --> VMKV
-  WRITE_PARAMETER --> VMKV
-  OPID --> VMKV
-  READ_ARGIDX --> VMKV
-  WRITE_ARGIDX --> VMKV
-  ALIAS_POLICY --> VMKV
-  VMKV --> BINARY_OPERATION
-  VMKV --> READ_ARGUMENT
-  VMKV --> WRITE_ARGUMENT
+  OPERATION_NAME --> VMKV_VALIDATE
+  READ_PARAMETER --> VMKV_VALIDATE
+  WRITE_PARAMETER --> VMKV_VALIDATE
+  OPID --> VMKV_VALIDATE
+  READ_ARGIDX --> VMKV_VALIDATE
+  WRITE_ARGIDX --> VMKV_VALIDATE
+  ALIAS_POLICY --> VMKV_VALIDATE
+  VMKV_VALIDATE --> HOST
+  HOST --> XVALUE --> VMKV_DERIVE
+  VMKV_DERIVE --> BINARY_OPERATION
+  VMKV_DERIVE --> READ_ARGUMENT
+  VMKV_DERIVE --> WRITE_ARGUMENT
   READ_ARGUMENT -->|"same argaddr"| BODY
   WRITE_ARGUMENT -->|"same argaddr"| BODY
   READ_ARGIDX -. "Read only" .-> READ_ARGUMENT
@@ -48,7 +53,8 @@ flowchart LR
   JIT --> COMPLETION
   COMPLETION -->|"yes: mandatory observable boundary"| COMMIT --> BODY
   COMPLETION -->|"no: guard failure, error, recovery, or resume"| DISCARD
-  VMKV -->|"address lifetime cannot be proven"| DYNAMIC
+  HOST -->|"zero, dynamic, or lifetime cannot be proven"| DYNAMIC
+  VMKV_DERIVE -->|"head ABI mismatch or +8 overflow"| DYNAMIC
 
   classDef plaintext fill:#fef3c7,stroke:#d97706,color:#451a03
   classDef read fill:#dbeafe,stroke:#2563eb,color:#172554
@@ -58,5 +64,5 @@ flowchart LR
   class OPERATION_NAME,READ_PARAMETER,WRITE_PARAMETER,OPID,READ_ARGIDX,WRITE_ARGIDX,ALIAS_POLICY plaintext
   class READ_ARGUMENT read
   class WRITE_ARGUMENT write
-  class BODY,VMBIN,JIT,COMPLETION,COMMIT shared
+  class XVALUE,BODY,VMBIN,JIT,COMPLETION,COMMIT shared
   class DYNAMIC,DISCARD unsupported

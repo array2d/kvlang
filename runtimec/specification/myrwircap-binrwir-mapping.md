@@ -10,7 +10,8 @@ five-language behavior decision
     -> one myrwircap specification record
     -> RWIR operation name and typed named parameters
     -> one canonical opid and stable argidx values
-    -> vmkv dereferences static keys to uint64 argaddr values
+    -> host dereferences static keys to nonzero uint64 XValue base addresses
+    -> vmkv alone validates the fixed 8-byte head and derives argaddr = xvalue_address + 8
     -> addressed canonical BinRWIR
 ```
 
@@ -59,7 +60,9 @@ opid
 - `opid` 取代 RWIR operation name。
 - `argidx` 取代热路径中的参数类型、参数名和方向字段；消费者按 `(opid, argidx)` 查询
   canonical signature。
-- `argaddr` 是 RWIR 参数 key 解引用后，kvspace `V.body` 所在内存的 64 位地址。
+- 参数 key 解引用得到的是 64 位 XValue 基址，不是任意 `V.body` 地址。
+- XValue head ABI 固定为 8 字节；只有 vmkv 执行带溢出检查的
+  `argaddr = xvalue_address + 8`，因此 `argaddr` 直接指向 kvspace `V.body`。
 - BinRWIR 不保存 operation name、参数类型、参数名、key 文本、xvalue 或 body 副本。
 - RWIR 参数数量可以不固定；一次具体调用必须编码全部参数对，不能截断或拆分。
 
@@ -81,10 +84,13 @@ BinRWIR 是进程内派生物。进程重启、body relocation 或完整 `snapsh
    manifest 记录不能改变它。
 5. **Signature preserving**：Read/Write 数量、顺序、类型约束和 alias policy 必须等价。
 6. **Behavior preserving**：canonical operation 必须引用同一个行为决策，不得近似替换。
-7. **Address validity**：每个 emitted `argaddr` 必须非零且在 compilation 租约期间有效。
-8. **Body uniqueness**：地址只定位 kvspace 中唯一权威的 `V.body`；任何层都不得复制 body
+7. **Address derivation**：host 只返回非零 64 位 XValue 基址，不能选择 body 偏移；vmkv
+   唯一验证固定 8 字节 head ABI，并以溢出检查执行 `xvalue_address + 8`。
+8. **Address validity**：每个 emitted `argaddr` 必须非零、直接指向 `V.body`，并在
+   compilation 租约期间有效。
+9. **Body uniqueness**：地址只定位 kvspace 中唯一权威的 `V.body`；任何层都不得复制 body
    作为 BinRWIR 状态。
-9. **No fallback**：旧名称、兼容 identifier、自动名称归一化、零地址和延迟间接 key
+10. **No fallback**：旧名称、兼容 identifier、自动名称归一化、零地址和延迟间接 key
    lookup 都不建立映射。
 
 已删除 identifier 永久保留为不可复用。语义发生不兼容变化时必须分配新 identifier，并
@@ -98,8 +104,10 @@ BinRWIR 是进程内派生物。进程重启、body relocation 或完整 `snapsh
 - vthread `status`；
 - `/lib` 下函数源等长期存在的 key/xvalue body。
 
-这里只缓存 key 解引用得到的 `uint64 argaddr`，不缓存 key 对象、xvalue 或 `V.body`。
-vmbin 每次使用参数时都从该地址读取当前 body；写参数必须写回同一地址。
+host 对 key 解引用只返回 `uint64 xvalue_address`。vmkv 验证 XValue head 固定为 8 字节，
+检查无符号地址加法不会溢出，再生成最终 `uint64 argaddr`。BinRWIR 只保存该最终地址，
+vmbin 只消费它；两者都不缓存 key 对象、XValue 或 `V.body`。vmbin 每次使用参数时都从
+`argaddr` 读取当前 body；写参数必须写回同一地址。
 
 map、struct 等能力可由运行时数据动态拼接 key。目标 key 可能尚未分配，已解析地址也可能
 因 key/xvalue 生命周期变化而失效。在生命周期 ABI 明确定义 pin、generation、relocation
@@ -114,10 +122,13 @@ vmkv 对每条 RWIR instruction 执行以下固定流程：
 2. 在 generated specification table 中找到唯一 myrwircap record 与 `opid`。
 3. 验证参数数量、名称、类型、方向和 alias declaration。
 4. 为每个参数取得 canonical `argidx`。
-5. 解引用参数 key，并验证其 body 地址属于当前支持的静态生命周期范围。
-6. 将地址编码为 `uint64 argaddr`；任何零地址或无法证明的生命周期立即失败。
-7. 按 source 参数顺序写入全部 `argidx + argaddr`，并保留 source logical program counter。
-8. finalize 前验证每条 instruction、每个参数和每个地址都可追溯到唯一 mapping 与租约。
+5. 请求 host 解引用参数 key；host 只能返回 64 位 XValue 基址，不能返回自行选择偏移的
+   body 地址。
+6. 验证 XValue 基址非零、生命周期可证明且 XValue head ABI 恰好为 8 字节。
+7. 检查 `xvalue_address + 8` 不溢出，并由 vmkv 唯一执行该加法得到直接指向 `V.body` 的
+   `uint64 argaddr`。
+8. 按 source 参数顺序写入全部 `argidx + argaddr`，并保留 source logical program counter。
+9. finalize 前验证每条 instruction、每个参数和每个地址都可追溯到唯一 mapping 与租约。
 
 vmkv 不能进行指令融合、控制流优化、register allocation、机器码生成或 execution target
 选择。它也不能为动态 key 生成占位地址、运行时间接查找描述或 fallback Program。
@@ -174,16 +185,23 @@ allocation 的路径。每条 logical instruction completion 都必须建立 saf
 不是 `NOT_COMPILABLE`。`NOT_COMPILABLE` 只表示已经成功生成合法 addressed BinRWIR，
 内部 JIT eligibility 判定不适用，因而应建立 VMBIN compilation。
 
+零 XValue 基址、`xvalue_address + 8` 溢出、非 8 字节 XValue head ABI 或无法证明地址
+生命周期都必须在 Program 产生前失败封闭。host 返回任意 body 偏移也违反合同；vmkv
+不得接受、猜测、修正或建立 fallback。
+
 ## 11. Acceptance checks
 
 - 对 `myrwircaps` 与 `rwir_catalog.def` 做集合相等检查。
 - 对 stable RWIR identifier、`opid` 和每个 signature 的 `argidx` 做唯一性检查。
 - 每条 generated instruction 只含 `opid` 和完整 `argidx + uint64 argaddr` 参数对。
-- 每个 `argaddr` 非零、指向 kvspace `V.body`，且受 compilation 地址生命周期约束。
+- host fixture 只返回非零 64 位 XValue 基址，不返回 body 地址或偏移选择。
+- vmkv fixture 唯一执行 `argaddr = xvalue_address + 8`；每个结果非零、直接指向 kvspace
+  `V.body`，且受 compilation 地址生命周期约束。
 - 两个允许 alias 的不同 `argidx` 可指向同一地址，后续 Read 观察先前 Write。
 - BinRWIR、execution plan 与 VMBIN 不含 body cache 或 register file。
 - 每条 logical instruction completion 都产生不可关闭的 recovery/observable boundary。
 - completed-state fixture 只有在全部 dirty body 写回成功后才推进 logical program counter/checkpoint。
 - guard failure、error、recovery 与 resume fixture 丢弃未完成 register/spill，且零写回。
 - 动态 map/struct key fixture 返回 `RUNTIMEC_STATUS_UNSUPPORTED`，不产生 Program。
-- 零地址、间接 key fallback 和 JIT 动态 key bypass fixture 必须失败。
+- 零 XValue 基址、`+8` 溢出、非 8 字节 head ABI、间接 key fallback 和 JIT 动态 key
+  bypass fixture 必须失败。

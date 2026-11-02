@@ -16,6 +16,7 @@ PRODUCT_DIRECTORIES = (
     "specification", "tests",
 )
 TEXT_SUFFIXES = {".c", ".h", ".cmake", ".in", ".map", ".exports", ".def"}
+ALLOWED_EXTERNAL_IDENTIFIERS = ("KVSPACE_XVALUE_HEAD_LEN",)
 FORBIDDEN_PATH_PARTS = {
     "abi": "execution_interface", "api": "interface", "compat": "delete",
     "compatibility": "delete", "docs": "documentation", "legacy": "delete",
@@ -40,6 +41,12 @@ FORBIDDEN_NAMES = (
     )),
     ("removed-runtime-retry", re.compile(
         r"\bBINRWIR_EXECUTION_EXIT_FLAG_RETRY_LOGICAL_PROGRAM_COUNTER\b",
+    )),
+    ("removed-static-body-address-resolver", re.compile(
+        r"\bresolve_static_value_body_address\b",
+    )),
+    ("removed-public-body-address-derivation", re.compile(
+        r"\bruntimec_xvalue_address_to_value_body_address\b",
     )),
     ("alternate-jit-compilation-cache", re.compile(
         r"\b(?:binrwir_jit_code_cache|binrwir_jit_cache_key|"
@@ -225,8 +232,13 @@ def audit(repository_root: Path, runtimec_root: Path) -> tuple[list[Finding], in
                     findings.append(Finding(display, line_number, rule, match.group(0)))
             if path.name == "CMakeLists.txt":
                 continue
+            abbreviation_line = line
+            for identifier in ALLOWED_EXTERNAL_IDENTIFIERS:
+                abbreviation_line = abbreviation_line.replace(
+                    identifier, " " * len(identifier),
+                )
             for abbreviation, replacement, pattern in ABBREVIATION_PATTERNS:
-                for match in pattern.finditer(line):
+                for match in pattern.finditer(abbreviation_line):
                     findings.append(Finding(
                         display, line_number,
                         f"abbreviation-{abbreviation}-use-{replacement}", match.group(0),

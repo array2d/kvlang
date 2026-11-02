@@ -27,8 +27,12 @@ _Static_assert(RUNTIMEC_STATUS_ERROR == 7, "error status changed");
 _Static_assert(RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY == 8,
                "insufficient-capacity status changed");
 
-_Static_assert(RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION == 2U,
-               "host services binary interface must remain version 2");
+_Static_assert(RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION == 3U,
+               "host services binary interface must remain version 3");
+_Static_assert(RUNTIMEC_XVALUE_BODY_OFFSET_BYTES == 8U,
+               "V.body must remain eight bytes after the XValue base");
+_Static_assert(sizeof(runtimec_xvalue_address_t) == 8U,
+               "XValue addresses must remain 64 bits");
 _Static_assert(sizeof(runtimec_value_body_address_t) == 8U,
                "V.body addresses must remain 64 bits");
 _Static_assert(sizeof(binrwir_argument_t) == 16U,
@@ -119,8 +123,8 @@ static void test_host_services_version(void) {
     runtimec_host_services_t services;
 
     runtimec_host_services_initialize(&services);
-    RUNTIMEC_EXPECT(services.binary_interface_version == 2U);
-    services.binary_interface_version = 1U;
+    RUNTIMEC_EXPECT(services.binary_interface_version == 3U);
+    services.binary_interface_version = 2U;
     RUNTIMEC_EXPECT(!runtimec_host_services_is_valid(&services));
 }
 

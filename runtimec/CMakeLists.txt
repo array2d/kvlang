@@ -22,6 +22,12 @@ set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 option(RUNTIMEC_ENABLE_JIT "Enable BinRWIR JIT compilation capability" ON)
 
 set(RUNTIMEC_INCLUDE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include")
+get_filename_component(KVLANG_INCLUDE_DIRECTORY
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include" ABSOLUTE)
+if(NOT EXISTS "${KVLANG_INCLUDE_DIRECTORY}/kvspace/xvalue_head.h")
+    message(FATAL_ERROR
+        "runtimec requires kvlang include/kvspace/xvalue_head.h")
+endif()
 set(RUNTIMEC_GENERATED_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
 file(MAKE_DIRECTORY "${RUNTIMEC_GENERATED_DIRECTORY}")
 
@@ -45,7 +51,8 @@ function(runtimec_configure_target target_name)
     target_include_directories(${target_name}
         PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}"
-            "${RUNTIMEC_INCLUDE_DIRECTORY}")
+            "${RUNTIMEC_INCLUDE_DIRECTORY}"
+            "${KVLANG_INCLUDE_DIRECTORY}")
     set_target_properties(${target_name} PROPERTIES
         C_VISIBILITY_PRESET hidden
         POSITION_INDEPENDENT_CODE ON)
@@ -88,7 +95,8 @@ runtimec_add_component(runtimec_engine engine)
 
 target_include_directories(runtimec_contract
     PUBLIC
-        "$<BUILD_INTERFACE:${RUNTIMEC_INCLUDE_DIRECTORY}>")
+        "$<BUILD_INTERFACE:${RUNTIMEC_INCLUDE_DIRECTORY}>"
+        "$<BUILD_INTERFACE:${KVLANG_INCLUDE_DIRECTORY}>")
 target_link_libraries(runtimec_host
     PRIVATE runtimec_contract)
 target_link_libraries(runtimec_binrwir

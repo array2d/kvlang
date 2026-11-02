@@ -3,7 +3,7 @@
 
 /*
  * kvspace adapter 只把一个借用的 kvspace 句柄转换为 host 能力表，包括
- * 静态 key 的稳定 V.body 地址解析。当前尚未连接 kvspace C 函数，因此
+ * 静态 key 的稳定 XValue 基址解析。当前尚未连接 kvspace C 函数，因此
  * 唯一入口明确返回 NOT_IMPLEMENTED，不发布空解析器伪装成功。
  */
 

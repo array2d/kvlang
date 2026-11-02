@@ -9,7 +9,7 @@ sequenceDiagram
   participant JitCompiler as Internal JIT compiler
   participant JitExecute as binrwir_jit_execute
   participant VmbinExecute as vmbin_execute
-  participant Body as KVspace V.body
+  participant XValue as KVspace XValue: 8-byte head plus V.body
 
   Client->>Interface: structured execute request
   Interface->>Route: validated request
@@ -24,11 +24,21 @@ sequenceDiagram
     Vmkv->>Host: open plaintext function source for snapshot
     Host-->>Vmkv: borrowed RWIR source bytes
     loop every Read or Write parameter
-      Vmkv->>Host: dereference static parameter key
-      alt body exists and address lifetime is supported
-        Host-->>Vmkv: nonzero uint64 argaddr
-      else dynamic map or struct key
-        Host-->>Vmkv: unsupported address lifetime
+      Vmkv->>Host: dereference static parameter key to XValue base
+      alt nonzero XValue base exists and address lifetime is supported
+        Host-->>Vmkv: nonzero uint64 xvalue_address only
+        Vmkv->>Vmkv: require fixed 8-byte head ABI and check addition overflow
+        alt head is exactly 8 bytes and xvalue_address plus 8 does not overflow
+          Vmkv->>Vmkv: argaddr = xvalue_address + 8
+        else non-8-byte head ABI or addition overflow
+          break fail closed before BinRWIR creation
+            Vmkv-->>Route: explicit failure and no Program
+            Route-->>Interface: structured failure result
+            Interface-->>Client: failure
+          end
+        end
+      else zero base, dynamic map or struct key, or unsupported lifetime
+        Host-->>Vmkv: no usable XValue base
         break unsupported stops before BinRWIR creation
           Vmkv-->>Route: RUNTIMEC_STATUS_UNSUPPORTED and no Program
           Route-->>Interface: structured unsupported result
@@ -67,27 +77,27 @@ sequenceDiagram
   Route->>Route: read immutable execution target once
   alt JIT target
     Route->>JitExecute: execute existing machine code
-    JitExecute->>Body: load through argaddr
+    JitExecute->>XValue: load V.body through final argaddr
     JitExecute->>JitExecute: speculative register and spill computation
     alt current logical instruction fully completed
-      Note over JitExecute,Body: Every instruction completion is a mandatory recovery and observable boundary
-      JitExecute->>Body: COMMIT_COMPLETED_STATE with all completed dirty values
-      Body-->>JitExecute: every original argaddr write succeeded
+      Note over JitExecute,XValue: Every instruction completion is a mandatory recovery and observable boundary
+      JitExecute->>XValue: COMMIT_COMPLETED_STATE with all completed dirty values
+      XValue-->>JitExecute: every original argaddr write succeeded
       JitExecute-->>Route: completed execution exit
       Route->>Host: advance logical program counter and checkpoint
     else guard failure, error, recovery, or resume before completion
       JitExecute->>JitExecute: DISCARD_INCOMPLETE_STATE for all register and spill state
-      Note over JitExecute,Body: No materialization entry and no partial body write
+      Note over JitExecute,XValue: No materialization entry and no partial body write
       JitExecute-->>Route: incomplete exit from last committed boundary
       Route->>Host: retain logical program counter and checkpoint
     end
   else VMBIN target
     Route->>VmbinExecute: execute opid with argidx and argaddr pairs
-    VmbinExecute->>Body: direct Read through argaddr
+    VmbinExecute->>XValue: direct V.body Read through final argaddr
     alt logical instruction completed
-      VmbinExecute->>Body: direct Write before completion boundary
-      Note over VmbinExecute,Body: Every instruction completion is a mandatory recovery and observable boundary
-      Body-->>VmbinExecute: completed body effects
+      VmbinExecute->>XValue: direct V.body Write before completion boundary
+      Note over VmbinExecute,XValue: Every instruction completion is a mandatory recovery and observable boundary
+      XValue-->>VmbinExecute: completed body effects
       VmbinExecute-->>Route: completed execution exit
       Route->>Host: advance only after every completed body write succeeds
     else execution error before completion

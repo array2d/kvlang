@@ -3,9 +3,9 @@ flowchart LR
   INTERFACE["public interface"]
   ROUTE["engine route"]
   REPOSITORY["compilation repository<br/>address-qualified lease"]
-  HOST["host services<br/>RWIR load and static key dereference"]
-  KVSPACE["external kvspace<br/>RWIR and authoritative V.body"]
-  VMKV["vmkv<br/>addressed BinRWIR emission"]
+  HOST["host services<br/>RWIR load and static key dereference<br/>return XValue base only; no body offset choice"]
+  KVSPACE["external kvspace<br/>RWIR and XValue base<br/>fixed 8-byte head then authoritative V.body"]
+  VMKV["vmkv<br/>only owner of checked xvalue_address + 8<br/>addressed BinRWIR emission or fail closed"]
   BINRWIR["top-level process-local BinRWIR<br/>opid plus argidx and uint64 argaddr"]
   VMBIN["vmbin<br/>address-driven memory executor"]
 
@@ -34,14 +34,15 @@ flowchart LR
   ROUTE --> VMBIN
   HOST --> KVSPACE
   VMKV --> SPECIFICATION
-  VMKV --> HOST
+  VMKV -->|"request static key dereference"| HOST
+  HOST -->|"nonzero uint64 xvalue_address"| VMKV
   VMKV --> BINRWIR
   COMPILER --> BINRWIR
   REPOSITORY --> COMPILER
   VMBIN --> BINRWIR
   JIT_COMPILER --> BINRWIR
   JIT_EXECUTOR --> BINRWIR
-  VMBIN -. "direct argaddr load and store; no body cache" .-> KVSPACE
+  VMBIN -. "direct final argaddr load and store; no XValue or body cache" .-> KVSPACE
   JIT_SAFEPOINT -. "COMMIT_COMPLETED_STATE only after full instruction completion" .-> KVSPACE
 
   BINRWIR -. "forbidden ownership dependency" .-> VMBIN

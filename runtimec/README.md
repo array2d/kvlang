@@ -29,12 +29,18 @@ Compiler 完成执行计划生成和执行目标判定，最后由 route 调用�
    `interface/public_interface.c` 定义的结构化接口。
 9. **Less code, more useful capability.** 不建立第三执行器，不为错误分层增加修补代码。
 10. **V.body 只有一个权威驻留位置。** 语言可见且可恢复的 value body 始终位于 kvspace；
-    BinRWIR 与 vmbin 只持有其 64 位地址，不复制、不缓存 body，也不建立 register file。
-11. **动态地址失败封闭。** 在 key/xvalue 生命周期 ABI 建立前，不能稳定解析 body 地址的
-    map、struct 等动态拼接 key 明确返回 `RUNTIMEC_STATUS_UNSUPPORTED`。
-12. **每条指令完成都是强制边界。** 每个 logical instruction completion 都必须成为
+    XValue 固定由 8 字节 head 与紧随其后的 `V.body` 组成，因此
+    `argaddr = xvalue_address + 8`。BinRWIR 与 vmbin 只持有最终 `argaddr`，不复制、不缓存
+    XValue 或 body，也不建立 register file。
+11. **地址派生只有一个所有者。** host 对静态 key 只返回非零、生命周期有效的 64 位
+    XValue 基址；只有 vmkv 可以验证固定 8 字节 head ABI、检查加法溢出并执行 `+8`。
+    host、BinRWIR、Compiler、vmbin 与 JIT 都不得选择或重算 body 偏移。
+12. **地址错误失败封闭。** 零 XValue 基址、`xvalue_address + 8` 溢出、非 8 字节 head ABI、
+    动态 key 或无法证明生命周期都不得产生 BinRWIR。map、struct 等动态拼接 key 在
+    key/xvalue 生命周期 ABI 建立前明确返回 `RUNTIMEC_STATUS_UNSUPPORTED`。
+13. **每条指令完成都是强制边界。** 每个 logical instruction completion 都必须成为
     recovery/observable boundary，不能由配置、优化、融合或执行目标关闭。
-13. **完成提交，未完成丢弃。** JIT 只能把完整完成指令的 dirty state 提交到原
+14. **完成提交，未完成丢弃。** JIT 只能把完整完成指令的 dirty state 提交到原
     `argaddr`；当前未完成指令的 speculative/partial register 与 spill state 在 guard
     failure、error、recovery 或 resume 时必须丢弃，绝不写回。
 
@@ -42,7 +48,10 @@ Compiler 完成执行计划生成和执行目标判定，最后由 route 调用�
 
 ```text
 myrwircaps + plaintext RWIR in kvspace
-    -> vmkv validates RWIR, dereferences arguments, and emits addressed canonical BinRWIR
+    -> vmkv validates RWIR and requests each static key
+    -> host dereferences each static key to a uint64 XValue base address
+    -> vmkv validates the fixed 8-byte XValue head and derives argaddr = xvalue_address + 8
+    -> vmkv emits addressed canonical BinRWIR
     -> binrwir_compiler builds execution plan and attempts internal JIT compilation
     -> compile-time target decision: JIT code or VMBIN plan
     -> compilation repository caches the complete compilation
@@ -54,8 +63,9 @@ myrwircaps + plaintext RWIR in kvspace
 主干顺序不能重排：
 
 - `specification/` 保存行为决策、RWIR 操作事实及 myrwircap 到 canonical BinRWIR 的映射。
-- `vmkv/` 从 kvspace 读取含 operation name、参数类型和参数名的明文 RWIR，验证并解引用
-  每个参数，只为地址生命周期稳定的参数生成 canonical BinRWIR Program。
+- `vmkv/` 从 kvspace 读取含 operation name、参数类型和参数名的明文 RWIR，通过 host 将
+  每个静态参数 key 解引用为 XValue 基址，并作为唯一组件校验固定 8 字节 head、检查 `+8`
+  溢出和生成最终 `argaddr`；只有全部地址合格时才生成 canonical BinRWIR Program。
 - `binrwir/` 拥有中立的进程内 Program、`opid` 与 `argidx + uint64 argaddr` 参数记录、
   signature、execution frame、execution exit 与 execution plan 合同；它不属于 vmbin。
 - `binrwir_compiler/` 是 canonical BinRWIR 的唯一编译组件。它派生 execution plan，
@@ -135,8 +145,10 @@ RWIR 是 kvspace 中可恢复的明文存储格式。每条调用保留 operatio
 - 名称、identifier、参数方向或行为决策无法得到唯一结果。
 
 vmkv 必须逐条执行这个映射并保持语义等价：operation name 映射为 `opid`，参数类型与
-参数名经 signature 验证后映射为 `argidx`，参数 key 解引用后的 kvspace `V.body` 地址写入
-`uint64 argaddr`。它不能用近似操作、默认操作、未知操作或数组位置补洞。完整规则见
+参数名经 signature 验证后映射为 `argidx`；host 将参数 key 解引用为 64 位 XValue 基址，
+vmkv 验证 XValue head ABI 固定为 8 字节并以溢出检查计算
+`uint64 argaddr = xvalue_address + 8`。它不能用近似操作、默认操作、未知操作或数组位置补洞。
+host 不得返回自行选择偏移后的 body 地址。完整规则见
 `specification/myrwircap-binrwir-mapping.md`。
 
 ## 5. BinRWIR 中立合同
@@ -160,8 +172,10 @@ opid
 ```
 
 `argidx` 在由 `opid` 选中的 canonical signature 中确定参数顺序、类型和 Read/Write
-权限；`argaddr` 是 RWIR 参数 key 解引用后对应 kvspace `V.body` 所在内存的 64 位地址。
-operation name、参数类型、参数名、key 文本和 body 均不复制进热 instruction。
+权限。key 解引用结果是 64 位 XValue 基址，不是任意 body 地址；XValue head ABI 固定为
+8 字节，vmkv 唯一执行 `argaddr = xvalue_address + 8`，所以 `argaddr` 仍直接指向 kvspace
+`V.body`。operation name、参数类型、参数名、key 文本、XValue 和 body 均不复制进热
+instruction。
 
 公共二进制布局固定为：4 字节 instruction header 仅含 `opid`；每个参数记录在偏移 0
 保存 32 位 `argidx`，偏移 4 是必须清零的 32 位地址对齐填充，偏移 8 保存 64 位
@@ -172,8 +186,9 @@ BinRWIR 保留 RWIR 的不固定参数数量语义；确定的一次调用必须
 参数或拆分一个原子 RWIR 操作。两个不同 `argidx` 可以持有相同 `argaddr`，这就是已声明
 Read/Write alias 在二进制形式中的表示。
 
-BinRWIR 缓存的是静态 key 的地址解析结果，不是 xvalue，更不是 `V.body`。vthread 的
-`pc`、`status` 以及 `/lib` 下函数源等 key 生命周期长且地址稳定，是当前允许的优化范围。
+BinRWIR 保存的是 vmkv 派生后的最终 `argaddr`，不是 XValue 基址、XValue 或 `V.body`；
+vmbin 也只消费该最终地址。vthread 的 `pc`、`status` 以及 `/lib` 下函数源等 key 生命周期
+长且 XValue 基址稳定，是当前允许的优化范围。
 map、struct 等依赖运行时数据动态拼接的 key，其 body 可能尚未分配或地址会变化；在
 key/xvalue 生命周期 ABI 能提供 pin、generation 与失效合同前，vmkv 必须返回
 `RUNTIMEC_STATUS_UNSUPPORTED`，不得写零地址、延迟间接查找或建立 fallback Program。
@@ -253,9 +268,10 @@ Write argidx ──> uint64 argaddr ──┘
 
 ### vmkv
 
-vmkv 只做明文 RWIR source 读取、结构验证、`opid`/`argidx` 映射、参数 key 解引用、静态
-body 地址资格验证和 canonical BinRWIR 生成。类型固化、融合、执行计划、机器码、缓存与
-执行目标都不属于 vmkv。
+vmkv 只做明文 RWIR source 读取、结构验证、`opid`/`argidx` 映射、通过 host 将参数 key
+解引用为 XValue 基址、静态地址资格验证，以及固定 8 字节 head 的唯一 `+8` 派生和
+canonical BinRWIR 生成。host 不能决定 body 偏移。类型固化、融合、执行计划、机器码、
+缓存与执行目标都不属于 vmkv。
 
 ### vmbin
 
@@ -291,7 +307,9 @@ materialization entry。logical program counter/checkpoint 只在完整提交成
 参数必须先进入明确无效状态，再开始可能失败的工作。
 
 当前动态拼接 key 属于 `UNSUPPORTED`：vmkv 不得为 map/struct 参数产生零 `argaddr`，
-BinRWIR Compiler 也不得把它改写为运行时 key lookup 或借 JIT 绕过限制。
+BinRWIR Compiler 也不得把它改写为运行时 key lookup 或借 JIT 绕过限制。零 XValue 基址、
+`+8` 溢出、非 8 字节 XValue head ABI 或无法证明地址生命周期同样必须在 Program 产生前
+失败封闭。
 
 ## 11. 五语言决策矩阵
 
