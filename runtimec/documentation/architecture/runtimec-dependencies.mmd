@@ -1,0 +1,41 @@
+flowchart LR
+  INTERFACE["public interface"]
+  ROUTE["engine route"]
+  PORT["host port declarations"]
+  HOST["kvspace host implementation"]
+  KVSPACE["external kvspace interface"]
+  CONTRACT["contracts and generated specification"]
+  VMKV["vmkv"]
+  BINRWIR["read-only BinRWIR contract"]
+  VMBIN["vmbin"]
+  VMJIT["vmjit"]
+  X86_64["x86_64 backend"]
+  AARCH64["AArch64 backend"]
+
+  INTERFACE --> ROUTE
+  ROUTE --> VMKV
+  ROUTE --> BINRWIR
+  ROUTE --> VMJIT
+  ROUTE --> VMBIN
+  ROUTE --> HOST
+  VMKV --> BINRWIR
+  VMKV --> PORT
+  VMKV --> CONTRACT
+  VMBIN --> BINRWIR
+  VMBIN --> PORT
+  VMBIN --> CONTRACT
+  VMJIT --> BINRWIR
+  VMJIT --> CONTRACT
+  HOST --> PORT
+  HOST --> KVSPACE
+  X86_64 --> VMJIT
+  AARCH64 --> VMJIT
+
+  VMKV -. "forbidden" .-> VMJIT
+  VMBIN -. "forbidden" .-> VMJIT
+  VMJIT -. "forbidden" .-> VMKV
+  VMJIT -. "forbidden" .-> HOST
+
+  classDef backend fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
+  linkStyle 18,19,20,21 stroke:#dc2626,stroke-width:2px,stroke-dasharray:5 5
+  class X86_64,AARCH64 backend

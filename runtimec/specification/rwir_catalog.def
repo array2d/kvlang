@@ -1,0 +1,13 @@
+/*
+ * 组件：specification/rwir_catalog.def
+ * 作用：RWIR 操作结构的唯一 manifest 输入。
+ * 联系：每条操作只能引用 five-language-behavior-matrix.md 已裁决的行为；
+ *       vmkv、vmbin 与 vmjit 的生成表必须来自本文件。
+ * 约束：本文件不重新定义语言行为，不保存执行策略，不冻结 BinRWIR 编码。
+ *       每条记录前必须写 behavior-decision 标记；当前 scaffold 不定义记录。
+ */
+#ifndef RUNTIMEC_RWIR_OPERATION
+#error "Define RUNTIMEC_RWIR_OPERATION before including rwir_catalog.def"
+#endif
+
+/* The scaffold defines no RWIR operation records. */

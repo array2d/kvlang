@@ -1,0 +1,13 @@
+/*
+ * 组件：specification/scalar_operations.def
+ * 作用：已裁决语义规则到标量执行族的唯一映射输入。
+ * 联系：vmbin 解释器与 vmjit 必须从同一份生成结果消费此映射。
+ * 约束：不得在此文件发明语言行为；five-language-behavior-matrix.md 是唯一
+ *       行为事实源。每条记录前必须写 behavior-decision 标记；当前 scaffold
+ *       不定义标量操作记录。
+ */
+#ifndef RUNTIMEC_SCALAR_OPERATION
+#error "Define RUNTIMEC_SCALAR_OPERATION before including scalar_operations.def"
+#endif
+
+/* The scaffold defines no scalar operation records. */

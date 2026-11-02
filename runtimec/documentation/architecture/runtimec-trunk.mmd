@@ -1,0 +1,26 @@
+flowchart TB
+  CLIENT["C client"]
+  INTERFACE["Public interface<br/>structured request and result"]
+  ROUTE["engine route<br/>only execution policy owner"]
+  VMKV["vmkv<br/>read and compile RWIR"]
+  PROGRAM["immutable BinRWIR Program"]
+  VMJIT["vmjit try"]
+  VMBIN["vmbin fallback<br/>only correctness executor"]
+  COMMIT["route commit<br/>effects and checkpoint"]
+  KVSPACE["kvspace<br/>authoritative facts"]
+
+  CLIENT --> INTERFACE --> ROUTE
+  ROUTE --> VMKV --> PROGRAM
+  PROGRAM --> VMJIT
+  VMJIT -->|"executed"| COMMIT
+  VMJIT -->|"fallback"| VMBIN
+  PROGRAM --> VMBIN
+  VMBIN --> COMMIT
+  COMMIT --> KVSPACE
+
+  classDef fact fill:#fff3cd,stroke:#9a6700,color:#3d2e00
+  classDef policy fill:#dbeafe,stroke:#2563eb,color:#172554
+  classDef derived fill:#ecfdf5,stroke:#059669,color:#052e16
+  class KVSPACE fact
+  class ROUTE,COMMIT policy
+  class VMKV,PROGRAM,VMJIT,VMBIN derived

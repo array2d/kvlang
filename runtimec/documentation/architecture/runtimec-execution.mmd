@@ -1,0 +1,31 @@
+sequenceDiagram
+  participant Client as C client
+  participant Interface as Public interface
+  participant Route as engine route
+  participant Host as Host port
+  participant Kvspace as kvspace facts
+  participant Vmkv as vmkv
+  participant Program as immutable BinRWIR Program
+  participant Vmjit as vmjit
+  participant Vmbin as vmbin
+
+  Client->>Interface: structured execute request
+  Interface->>Route: validated request
+  Route->>Host: load function generation and state
+  Host->>Kvspace: read RWIR values frame program counter status error
+  Kvspace-->>Route: host-neutral snapshot
+  Route->>Vmkv: compile RWIR snapshot
+  Vmkv->>Program: build and finalize
+  Program-->>Route: immutable Program or explicit failure
+  Route->>Vmjit: try Program
+  alt vmjit executed
+    Vmjit-->>Route: structured outcome
+  else vmjit fallback
+    Vmjit-->>Route: fallback at observable boundary
+    Route->>Vmbin: execute same Program and state
+    Vmbin-->>Route: structured outcome
+  end
+  Route->>Host: commit effects then checkpoint
+  Host->>Kvspace: values then program counter then status or error
+  Route-->>Interface: structured result
+  Interface-->>Client: status and result
