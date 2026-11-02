@@ -2042,8 +2042,13 @@ impl Parser {
                 self.advance();
                 continue;
             }
-            let is_path_literal =
-                t.kind == Kind::Literal && !t.value.is_empty() && t.value.as_bytes()[0] == b'/';
+            // 路径字面量 = 未加引号（或单引号裸字面量，见 01-词法/07）。
+            // 带引号（"…"/r"…"）一律字符串，即使内容以 `/` 开头。
+            let is_path_literal = t.kind == Kind::Literal
+                && t.quote == 0
+                && !t.value.is_empty()
+                && t.value.as_bytes()[0] == b'/';
+            let is_quoted_literal = t.kind == Kind::Literal && t.quote != 0;
             let is_ident = t.kind == Kind::Ident;
             let is_call_start = is_ident && self.peek_at(1).kind == Kind::LParen;
             let is_invalid_literal = t.kind == Kind::Literal && !is_path_literal;
@@ -2053,18 +2058,6 @@ impl Parser {
                     pos: t.pos,
                     warn: true,
                     message: format!("function call {:?} on same line as write slot — each instruction must be on its own line", t.value),
-                    info: false,
-                    source: String::new(),
-                    src_file: String::new(),
-                    src_name: String::new(),
-                });
-                return (writes, wtypes);
-            }
-            if is_invalid_literal || (!is_ident && !is_path_literal) {
-                self.errors.push(Diagnostic {
-                    pos: t.pos,
-                    warn: true,
-                    message: format!("unexpected token {:?} in write slot position — did you put two instructions on the same line? each instruction must be on its own line", t.value),
                     info: false,
                     source: String::new(),
                     src_file: String::new(),
@@ -2103,7 +2096,16 @@ impl Parser {
                 wtypes.push(String::new());
                 continue;
             }
-            if (t.kind == Kind::Ident || is_path_literal) && self.peek_at(1).kind == Kind::Dot {
+            // 成员链写槽优先于「非法字面量」判定：引号 base 后紧跟 `·` 是规范的显式形态
+            // （`"/x"·*k`），不带 `·` 的引号串才报「不是路径」。
+            let member_chain = (is_ident
+                && self.peek_at(1).kind == Kind::Dot
+                && self.peek_at(2).kind != Kind::LBrack)
+                || (is_path_literal && self.peek_at(1).kind == Kind::Dot)
+                || (is_quoted_literal
+                    && self.peek_at(1).kind == Kind::Dot
+                    && self.peek_at(2).kind != Kind::LBrack);
+            if member_chain {
                 let mut w = self.advance().value;
                 // 成员链写槽：整段 p·obj·deep 收成单个 write 槽，`=` 写（成员路径写）
                 // runtime ResolveWriteSlot 拼成员绝对路径。勿在每段 · 处截断
@@ -2117,11 +2119,39 @@ impl Parser {
                 }
                 writes.push(w);
                 wtypes.push(String::new());
-            } else {
-                let (name, typ) = self.parse_write_slot();
-                writes.push(name);
-                wtypes.push(typ);
+                continue;
             }
+            // 规范 04-layout语义/10-常见诊断：引号串不是路径（成员 base 已被上面的分支消费）。
+            if is_quoted_literal && t.value.as_bytes().first() == Some(&b'/') {
+                self.errors.push(Diagnostic {
+                    pos: t.pos,
+                    warn: false,
+                    message: format!(
+                        "string {:?} is not a path; absolute paths must be unquoted",
+                        t.value
+                    ),
+                    info: false,
+                    source: String::new(),
+                    src_file: String::new(),
+                    src_name: String::new(),
+                });
+                return (writes, wtypes);
+            }
+            if is_invalid_literal || (!is_ident && !is_path_literal) {
+                self.errors.push(Diagnostic {
+                    pos: t.pos,
+                    warn: true,
+                    message: format!("unexpected token {:?} in write slot position — did you put two instructions on the same line? each instruction must be on its own line", t.value),
+                    info: false,
+                    source: String::new(),
+                    src_file: String::new(),
+                    src_name: String::new(),
+                });
+                return (writes, wtypes);
+            }
+            let (name, typ) = self.parse_write_slot();
+            writes.push(name);
+            wtypes.push(typ);
         }
         (writes, wtypes)
     }
@@ -2310,9 +2340,16 @@ impl Parser {
                 self.advance();
                 continue;
             }
-            let is_path_lit =
-                t.kind == Kind::Literal && !t.value.is_empty() && t.value.as_bytes()[0] == b'/';
-            if (t.kind == Kind::Ident || is_path_lit)
+            let is_path_lit = t.kind == Kind::Literal
+                && t.quote == 0
+                && !t.value.is_empty()
+                && t.value.as_bytes()[0] == b'/';
+            let is_quoted_lit = t.kind == Kind::Literal && t.quote != 0;
+            // 成员链写槽优先：引号 base 后紧跟 `·` 是规范的显式形态（`"/x"·*k`）。
+            let is_string_member_base = is_quoted_lit
+                && self.peek_at(1).kind == Kind::Dot
+                && self.peek_at(2).kind != Kind::LBrack;
+            if (t.kind == Kind::Ident || is_path_lit || is_string_member_base)
                 && self.peek_at(1).kind == Kind::Dot
                 && self.peek_at(2).kind != Kind::LBrack
             {
@@ -2345,6 +2382,23 @@ impl Parser {
                 }
                 writes.push(w);
                 wtypes.push(ty);
+                continue;
+            }
+            // 规范 04-layout语义/10-常见诊断：引号串不是路径（成员 base 已被上面的分支消费）。
+            if is_quoted_lit && t.value.as_bytes().first() == Some(&b'/') {
+                self.errors.push(Diagnostic {
+                    pos: t.pos,
+                    warn: false,
+                    message: format!(
+                        "string {:?} is not a path; absolute paths must be unquoted",
+                        t.value
+                    ),
+                    info: false,
+                    source: String::new(),
+                    src_file: String::new(),
+                    src_name: String::new(),
+                });
+                self.advance();
                 continue;
             }
             if t.kind == Kind::Ident && self.peek_at(1).kind == Kind::LBrack {

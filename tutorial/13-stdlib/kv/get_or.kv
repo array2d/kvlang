@@ -9,7 +9,7 @@ rwfunc test() -> () {
 		"default_val" -> v1
 	}
 	println("get_or missing:", v1)
-	"world" -> "/exists_key"
+	"world" -> /exists_key
 	v2 = /exists_key
 	if (v2 == None) {
 		"default_val" -> v2
