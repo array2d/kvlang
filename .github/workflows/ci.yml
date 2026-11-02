@@ -1,6 +1,84 @@
 name: ci
 on: [push, pull_request, repository_dispatch]
 jobs:
+  # #622 阶段 0：runtimec（C11 新底座）独立构建与门禁。
+  # 与 test-* / typed-debug / single 完全解耦：只读 include/kvspace 头，不碰
+  # runtimec2、不跑 tutorial，所以现有红灯不会污染本 job 的判读。
+  runtimec:
+    runs-on: ubuntu-latest
+    name: runtimec
+    steps:
+      - uses: actions/checkout@v4
+      - name: 取 kvspace 头（runtimec 只依赖 include/kvspace）
+        run: |
+          set -euo pipefail
+          # 只取头文件，不跑 ci/deps.sh：那一步依赖 gh 下载 ABI release，
+          # 与 runtimec 无关，失败会污染本 job 的判读。版本与 deps.json 钉死。
+          ver=$(python3 -c 'import json;print(json.load(open("deps.json"))["kvspace"])')
+          echo "kvspace $ver"
+          git clone --depth 1 --branch "$ver" \
+            https://github.com/array2d/kvspace /tmp/kvspace
+          mkdir -p include
+          cp -R /tmp/kvspace/include/kvspace include/
+          test -f include/kvspace/xvalue_head.h
+      - name: 守卫：runtimec 不得依赖 runtimec2 / runtime
+        run: |
+          set -euo pipefail
+          # grep 的 0=命中、1=无命中、2=执行错误；三者必须分开判，不能用 `! grep`
+          # （它会把执行错误也翻成成功）。
+          guard() {
+            local rc=0
+            grep -rn "$@" > /tmp/runtimec-guard.txt || rc=$?
+            case $rc in
+              0) echo "runtimec 引用了已删除的树："; cat /tmp/runtimec-guard.txt; return 1 ;;
+              1) return 0 ;;
+              *) echo "守卫执行失败 rc=$rc"; return 1 ;;
+            esac
+          }
+          guard --include=*.c --include=*.h --include=*.txt --include=*.cmake \
+            -E '(^|[/"<])(runtimec2|runtime)/' runtimec
+          guard --include=CMakeLists.txt -E 'runtimec2|\.\./runtime/' runtimec
+      - name: 配置与构建（Debug，-Werror）
+        run: |
+          set -euo pipefail
+          cmake -S runtimec -B /tmp/kvlang-runtimec-build \
+            -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
+          cmake --build /tmp/kvlang-runtimec-build --parallel
+      - name: ctest
+        run: ctest --test-dir /tmp/kvlang-runtimec-build --output-on-failure
+      - name: 架构校验（三个结构脚本，各自非零退出即失败）
+        run: |
+          set -euo pipefail
+          # check_behavior_matrix.py 只扫 specification/ 规范树与 manifest，
+          # 不扫源码：它不会因源码改动变红，也不会拦下源码里新增的、
+          # 未进矩阵的行为决策。不要把它当成「已覆盖所有架构漂移」。
+          python3 runtimec/tools/architecture/check_layers.py \
+            --source-root "$PWD"
+          python3 runtimec/tools/architecture/check_names.py \
+            --source-root "$PWD"
+          python3 runtimec/tools/architecture/check_behavior_matrix.py \
+            --source-root "$PWD"
+      - name: 导出符号校验
+        run: |
+          set -euo pipefail
+          python3 runtimec/tools/architecture/check_exports.py \
+            --library /tmp/kvlang-runtimec-build/libkvlang_runtimec_scaffold.so \
+            --manifest runtimec/interface/exports.txt
+      - name: RWIR manifest 校验
+        run: |
+          set -euo pipefail
+          # 断言注册表 == manifest ∪ 缺口（双向）、identifier/opid/opcode 无重复、
+          # decision 在矩阵存在、无第二份签名表、两个产物与生成结果字节一致。
+          # 该脚本以 gcc -E 读 runtime/src/mywircaps.c 作为输入（旧 C runtime 的
+          # 注册表是唯一事实源），这只是只读消费，不是 runtimec 的构建依赖。
+          if [ ! -f runtimec/tools/architecture/generate_rwir_catalog.py ]; then
+            echo "::error::generate_rwir_catalog.py 未提交到本 commit（coding1 归属）"
+            exit 1
+          fi
+          gcc --version | head -1
+          python3 runtimec/tools/architecture/generate_rwir_catalog.py \
+            --check --root "$PWD"
+
   test:
     runs-on: ubuntu-latest
     name: test-${{ matrix.backend.name }}
