@@ -4,12 +4,16 @@ lib kvlang/spec/layout语义/函数写槽与布局 {
 
 ## 写槽校验
 
-写槽（`->` 右 / `=` 左）解析时，非法写槽产生警告（`warn`，不拒装载）：
+写槽（`->` 右 / `=` 左）解析时，按字面量形态给出不同诊断：
 
-- 字面量（数字/引号串开头）出现在写槽位置 → `unexpected token … in write slot position`。
-- 写槽后紧跟 `(`（同行函数调用）→ `function call … on same line as write slot`。
+- 数字，或不以 `/` 开头的引号串出现在写槽位置 → `unexpected token … in write slot position`
+  （`warn`，不拒装载）。
+- 引号串且内容以 `/` 开头 → `string "…" is not a path; absolute paths must be unquoted`
+  （`error`，拒绝装载，见 [[常见诊断]]；`…` 为字面量原文）。
+- 引号串后紧跟 `·`（如 `"/a"·*k`）→ 属显式字符串路径 base，**合法**，不报错。
+- 写槽后紧跟 `(`（同行函数调用）→ `function call … on same line as write slot`（`warn`）。
 
-合法写槽：裸名、`/abs`、`base·名`、`base·*key`、`arr[idx]`。
+合法写槽：裸名、`/abs`、`base·名`、`base·*key`、`"/a"·*k`、`arr[idx]`。
 
 ## rwfunc 布局
 
