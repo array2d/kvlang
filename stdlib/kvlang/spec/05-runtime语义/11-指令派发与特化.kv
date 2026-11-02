@@ -26,6 +26,10 @@ handler_id/派发模型不因 `/‥isa` 改变。typed Rwir opcode 仍由 layout
 - 同型：`<kind>·<op>`（如 `int64·add`、`float64·lt`）。kind 由下一节 promotion
   表唯一确定时发出；表给不出结果（int×uint 混合、动态槽（空 kindexp）、
   比较类跨类混合）一律保留通用 opcode（如 `+`、`add`），由通用实现按值判别。
+- **特化决策时，未定型整数字面量不计入 `int × uint` 混合符号判定**：按
+  [[种类与定宽类型]] 第 10 条适配到另一侧类型后再判。字面量放不进目标
+  类型时（如 `uint8_var + 300`）按自然类型处理，随后落入混合符号报错；
+  不另设字面量越界诊断。
 - **char/字符串不在 `+`/`add` 的接受集合内**：字符串拼接由 layout 在语法层脱糖为
   `string·concat`，不发射 `+`/`add`；详见下文「字符串拼接」。
 - 混合（后续）：候选复合键 `<k1>·<k2>·<op>`（输入 kind 在前、结果 kind 由 promotion 表
