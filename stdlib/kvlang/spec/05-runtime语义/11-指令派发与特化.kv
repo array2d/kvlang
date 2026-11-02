@@ -40,7 +40,8 @@ layout 的 `specialize` 与 binircompiler 的按实参类型特化都按本表�
 
 - **int × int**
   - `s(a) == s(b)`：取宽度较大者的有符号/无符号种类；同宽取任一（两侧同型）。
-  - `s(a) != s(b)`：**不特化**。通用实现直接报错（值 op 失败），本表给不出结果。
+  - `s(a) != s(b)`：**不特化**。算术/位运算的通用实现直接 TypeError；比较按
+    [[种类与定宽类型]] 的精确数学值规则，不报错。
 - **float × float**：任一方为 `float64` → `float64`；否则任一方为 `float32` → `float32`；
   其余按 `float64`。
 - **int × float**：按 float 规则（任一方 `float64` → `float64`，否则
@@ -64,8 +65,8 @@ layout 的 `specialize` 与 binircompiler 的按实参类型特化都按本表�
 - `mod`：仅整型（SI*/UI*）。
 - `bitand bitor bitxor shl shr`：整型（SI*/UI*）；同符号不同宽度按 promotion，
   混合符号不特化（运行时直接报错）。
-- `neg abs`：任意数值（结果同操作数）。
-- `sign`：任意数值（结果同操作数）。
+- `neg abs`：任意数值（结果同操作数；无符号按回绕/恒等，见 [[种类与定宽类型]]）。
+- `sign`：任意数值（结果同操作数；无符号按 0/1）。
 - `sqrt exp log pow`：任意数值，结果恒 `float64`；`float32` 操作数不特化。
 - `eq neq lt le gt ge`：任意数值与 `bool`，结果 `bool`；跨类混合（int 与
   float、int 与 uint）不特化，由通用实现按值比较（运行时支持）。
@@ -73,8 +74,8 @@ layout 的 `specialize` 与 binircompiler 的按实参类型特化都按本表�
 - 类型构造器（`int64(x)` 等）：任意数值/布尔/char，结果为目标 kind。
 
 本表是**接受集合**；具体实现（typed opcode）由 promotion 表配合本表选出。
-`int × uint` 在算术/位运算里两个集合都接受，但 promotion 给不出结果 →
-运行时直接报错、不特化。
+`int × uint` 在算术/位运算里两个集合都接受，但混合符号按
+[[种类与定宽类型]] 直接 TypeError、不特化；比较类按精确数学值比较，不报错。
 
 ### 字符串拼接（layout 脱糖，normative）
 
@@ -91,8 +92,8 @@ layout 的 `specialize` 与 binircompiler 的按实参类型特化都按本表�
 
 ## 值相关检查（保留）
 
-除零/模零、None 比较、越界与动态槽的运行时判别不受本章影响；
-通用 handler 按实际 kind 归约，语义与旧实现逐字节一致。
+整数除零/模零、None 比较、越界与动态槽的运行时判别不受本章影响；
+浮点除零按 IEEE（±inf/NaN），不是 TypeError。通用 handler 按实际 kind 归约。
 
 ## 写槽 body 快路径（实现约束）
 
