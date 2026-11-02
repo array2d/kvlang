@@ -7,18 +7,21 @@
 
 - `five-language-behavior-matrix.md`：语言行为决策的唯一事实源。
 - `myrwircap-binrwir-mapping.md`：每个 capability 到 canonical operation 的规范合同。
-- `rwir_catalog.def`：稳定 operation identifier、规范名称、参数结构、canonical 映射与
-  行为决策引用的唯一 manifest 输入。
+- `rwir_catalog.def`：**能力表**。一行一个语义算子，携带读写 TypeSet 掩码、操作数约束、
+  结果规则、alias policy 与行为决策引用；opid 与 identifier 显式分配。
+- `rwir_alias_table.def`：**别名表**。316 个注册 surface 名字到能力行的唯一映射，外加
+  编译器按操作数静态类型改选的特化行（`concat`/`streq`/`ptreq`/`bool·eq`）。
 - `scalar_operations.def`：已裁决行为到标量 execution family 的派生映射输入。
 
 ## Required order
 
 1. 在五语言矩阵中记录 C、Python、Rust、Go、V8/TypeScript 行为、kvlang 选择、边界
    fixture 与非法输入规则。
-2. 为 myrwircap 分配显式稳定 operation identifier。identifier 不得来自数组下标、文件
+2. 为**语义算子**分配显式稳定 identifier 与 `opid`。identifier 不得来自数组下标、文件
    顺序、声明顺序或生成顺序。
-3. 在 `rwir_catalog.def` 中写入 operation name 到 `opid`、参数类型/名称到 `argidx` 的唯一
-   canonical 映射与 `behavior-decision` 引用。
+3. 在 `rwir_catalog.def` 中写入能力行（读写 TypeSet 掩码、约束、结果规则、alias policy、
+   `behavior-decision`），并在 `rwir_alias_table.def` 中写入 surface 名字到能力行的唯一
+   映射。类型特化名字（`int64·add`）只作为别名出现，不是独立能力行。
 4. 由 vmkv 消费 manifest 并验证明文 RWIR；host 将每个静态参数 key 解引用为非零 64 位
    XValue 基址，vmkv 验证固定 8 字节 XValue head ABI、检查加法溢出，并且唯一执行
    `argaddr = xvalue_address + 8` 后等价生成 canonical BinRWIR。
@@ -42,16 +45,18 @@ partial register 与 spill state，不能写回。logical program counter/checkp
 拼接 key 在 key/xvalue 生命周期 ABI 建立前必须返回 `RUNTIMEC_STATUS_UNSUPPORTED`；禁止
 零 `argaddr`、延迟 key lookup 或间接 fallback。
 
-当前两个 `.def` manifest 不含 operation 记录。未来所有生成表必须来自这两个输入，禁止
-复制第二张手写表。
+`rwir_catalog.def` 与 `rwir_alias_table.def` 已给出 128 条能力行与 316 条别名映射；
+`scalar_operations.def` 仍是 scaffold。未来所有生成表必须来自这三个输入，禁止复制第二张
+手写表。
 
 ## #622 alignment
 
 `kvlang #622` 是语义与实现顺序的总纲。已裁决的六项语义（uint64→float、int→float32、
 混合有/无符号、浮点除零、None 判据、无符号 `neg`/`abs`/`sign`）和两项正确性裁决
 （浮点转整数饱和与 NaN TypeError、浮点成员键格式）必须先写入
-`five-language-behavior-matrix.md`，再由实现消费。`rwir_catalog.def` 是 opcode 与 signature
-的单一来源；CI 必须断言没有可与它漂移的第二份表。检查点粒度保持逐指令 `pc` 与
+`five-language-behavior-matrix.md`，再由实现消费。`rwir_catalog.def` 与
+`rwir_alias_table.def` 是 capability identity 与 surface 名字解析的单一来源；CI 必须断言
+没有可与它们漂移的第二张表。检查点粒度保持逐指令 `pc` 与
 `status`，`mem_frame` / `segment_may_stop` 不进入 runtimec。所有派生缓存都可从 kvspace
 明文 RWIR 与当前 `V.body` 删除重建；AArch64 与 x86_64 是 JIT 后端 peer，不得把 AArch64
 留成长期空桩。

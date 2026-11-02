@@ -7,7 +7,8 @@
 
 ```text
 five-language behavior decision
-    -> one myrwircap specification record
+    -> one capability row (semantic operator, union masks, constraint, result rule)
+    -> one alias record: surface operation name -> capability row
     -> RWIR operation name and typed named parameters
     -> one canonical opid and stable argidx values
     -> host dereferences static keys to nonzero uint64 XValue base addresses
@@ -31,18 +32,34 @@ RWIR 是 kvspace 中的明文、可恢复存储格式。每条调用至少表达
 
 ## 3. Required mapping record
 
-每个 myrwircap 必须在 `rwir_catalog.def` 中拥有一条且只有一条记录。每条记录至少包含：
+映射分两层，粒度不同：
+
+| 层 | 文件 | 数量 | 粒度 |
+|---|---|---|---|
+| 能力表 | `rwir_catalog.def` | 128 行 | **一个语义算子一行**，操作数类型是 union |
+| 别名表 | `rwir_alias_table.def` | 316 条 | **一个注册 surface 名字一条**，指向能力行 |
+
+能力行至少包含：
 
 | Field | Requirement |
 |---|---|
-| Canonical RWIR operation name | 与 RWIR specification 和 `myrwircaps` 中的名称完全一致 |
-| Stable RWIR operation identifier | 显式分配，长期稳定，不依赖任何容器位置 |
+| Stable operation identifier | 显式分配，长期稳定，不依赖任何容器位置 |
+| Semantic operator name | 语义算子的规范名；它与任何 surface 名字都不必然相同 |
 | Canonical BinRWIR `opid` | 显式分配；热 instruction 中唯一保留的 operation identity |
-| Read parameter contract | 参数数量规则、顺序、类型、名称与读取权限 |
-| Write parameter contract | 参数数量规则、顺序、类型、名称与写入权限 |
-| Canonical `argidx` | 在该 `opid` signature 中唯一标识每个参数及其方向 |
-| Alias policy | 哪些不同 `argidx` 允许、要求或禁止指向同一 body 地址 |
-| Behavior decision | 引用五语言矩阵中已存在的稳定 decision |
+| Read union mask | TypeSet 位集：该能力接受的读操作数类型集合；`0` 表示该行不在标量 union 通道 |
+| Write union mask | TypeSet 位集：该能力可能产生的写结果类型集合；`0` 语义同上 |
+| Constraint | `NONE`、`SAME_CLASS`、`NUMERIC_COMPATIBLE`、`NUMERIC_COMPARE`：操作数之间的关系 |
+| Result rule | `SAME_FIRST`、`SAME_SECOND`、`WIDEN`、`WIDEN_INTEGER`、`BOOLEAN`、`FLOAT64`、`TARGET_TYPE`、`IDENTITY`、`CHARACTER_UTF8`、`NONE` |
+| Alias policy | `FORBIDDEN` 或 `DECLARED`：不同 `argidx` 是否允许指向同一 body 地址 |
+| Behavior decisions | 一个或多个已存在的稳定 decision；第一个是该行的主决策 |
+
+掩码为 `0` 的行不复制参数签名：参数与结果类型由 `/lib/<operator>` 的 `def rwir` 槽在
+安装时声明，那是唯一签名来源。`ResultRule IDENTITY` 表示结果类型取该安装签名，不是
+wildcard。`control` 行不产生值。掩码位 0–18 之外的任何位都是 schema 错误。
+
+别名表的每条记录只做 `surface name → 能力行` 的解析，不携带类型，也不构成第二条签名
+来源。`concat`、`streq`、`ptreq`、`bool·eq` 没有注册 surface 名字，由编译器按操作数
+静态类型选择；别名表用 `RUNTIMEC_RWIR_SPECIALIZATION` 声明这条改选规则。
 
 record 是 operation 与 parameter identity 的唯一来源。生成表的位置不是 identity。
 
@@ -77,8 +94,10 @@ BinRWIR 是进程内派生物。进程重启、body relocation 或完整 `snapsh
 
 ## 5. Exact mapping rules
 
-1. **Total**：runtimec `myrwircaps` 中的每个 capability 都必须有记录。
-2. **Single-valued**：一个 capability 只能产生一个 canonical `opid`。
+1. **Total**：runtimec `myrwircaps` 中的每个注册 surface 名字都必须在别名表中有且只有
+   一条记录，且其像必须是一条能力行。
+2. **Single-valued**：一个 capability row 只能产生一个 canonical `opid`；一个 surface
+   名字只能解析到一条能力行。
 3. **Unique identity**：stable RWIR identifier 与 canonical `opid` 都不得重复。
 4. **Stable argument identity**：一个 signature 内每个参数只能有一个 `argidx`，重排其它
    manifest 记录不能改变它。
@@ -119,16 +138,18 @@ canonical Program 或 compilation。JIT 不能绕过该限制。
 vmkv 对每条 RWIR instruction 执行以下固定流程：
 
 1. 读取明文 operation name 与全部 typed, named Read/Write parameters。
-2. 在 generated specification table 中找到唯一 myrwircap record 与 `opid`。
-3. 验证参数数量、名称、类型、方向和 alias declaration。
-4. 为每个参数取得 canonical `argidx`。
-5. 请求 host 解引用参数 key；host 只能返回 64 位 XValue 基址，不能返回自行选择偏移的
+2. 经别名表把 operation name 解析到唯一能力行，取得 `opid` 与 union 掩码。
+3. 把每个实参的具体 langtype 收敛到该行的读写掩码内；掩码为 `0` 的行改为校验
+   `/lib/<operator>` 安装签名。超出掩码、或掩码均值无法唯一确定结果类型时，编译失败。
+4. 验证参数数量、名称、类型、方向和 alias declaration。
+5. 为每个参数取得 canonical `argidx`。
+6. 请求 host 解引用参数 key；host 只能返回 64 位 XValue 基址，不能返回自行选择偏移的
    body 地址。
-6. 验证 XValue 基址非零、生命周期可证明且 XValue head ABI 恰好为 8 字节。
-7. 检查 `xvalue_address + 8` 不溢出，并由 vmkv 唯一执行该加法得到直接指向 `V.body` 的
+7. 验证 XValue 基址非零、生命周期可证明且 XValue head ABI 恰好为 8 字节。
+8. 检查 `xvalue_address + 8` 不溢出，并由 vmkv 唯一执行该加法得到直接指向 `V.body` 的
    `uint64 argaddr`。
-8. 按 source 参数顺序写入全部 `argidx + argaddr`，并保留 source logical program counter。
-9. finalize 前验证每条 instruction、每个参数和每个地址都可追溯到唯一 mapping 与租约。
+9. 按 source 参数顺序写入全部 `argidx + argaddr`，并保留 source logical program counter。
+10. finalize 前验证每条 instruction、每个参数和每个地址都可追溯到唯一 mapping 与租约。
 
 vmkv 不能进行指令融合、控制流优化、register allocation、机器码生成或 execution target
 选择。它也不能为动态 key 生成占位地址、运行时间接查找描述或 fallback Program。
@@ -191,7 +212,10 @@ allocation 的路径。每条 logical instruction completion 都必须建立 saf
 
 ## 11. Acceptance checks
 
-- 对 `myrwircaps` 与 `rwir_catalog.def` 做集合相等检查。
+- 对 `myrwircaps` 的注册名字集合与 `rwir_alias_table.def` 的名字集合做双向相等检查。
+- 对 `rwir_alias_table.def` 的像集合与 `rwir_catalog.def` 的 identifier 集合做双向检查：
+  差的唯一允许成分是由编译器选择的 `concat`、`streq`、`ptreq`、`bool·eq` 四行。
+- 每条能力行的读写掩码只使用位 0–18；掩码为 `0` 的行必须是 parameterized 或 control 行。
 - 对 stable RWIR identifier、`opid` 和每个 signature 的 `argidx` 做唯一性检查。
 - 每条 generated instruction 只含 `opid` 和完整 `argidx + uint64 argaddr` 参数对。
 - host fixture 只返回非零 64 位 XValue 基址，不返回 body 地址或偏移选择。
