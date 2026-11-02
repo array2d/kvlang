@@ -1,5 +1,5 @@
-//! 字符串 `+` 脱糖：全字符串 → `string·concat`（规范 05-runtime语义/11）；
-//! 开关关闭时保持 `+`；字符串 + 可证明非字符串在 layout 阶段报错。
+//! 字符串 `+` 脱糖：全字符串 → `string·concat`（规范 05-runtime语义/11），无开关；
+//! 字符串 + 可证明非字符串在 layout 阶段报错。
 
 use kvlanglayout::{init_dirs, kvkind, Kv};
 use std::path::PathBuf;
@@ -65,8 +65,8 @@ fn op_texts(db: &str) -> Vec<(String, String)> {
 const SRC: &str = "rwfunc t() -> (r:char/utf32) {\n    a = \"hello\"\n    b = a + \"!\"\n    b -> r\n}\n";
 
 #[test]
-fn string_plus_becomes_concat_when_enabled() {
-    let (db, out) = layout("on", SRC, &[("KVLANG_LAYOUT_SEMANTIC_OP", "1")]);
+fn string_plus_becomes_concat() {
+    let (db, out) = layout("on", SRC, &[]);
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let ops = op_texts(&db);
     assert!(
@@ -76,28 +76,9 @@ fn string_plus_becomes_concat_when_enabled() {
 }
 
 #[test]
-fn string_plus_stays_plain_when_concat_disabled() {
-    let (db, out) = layout(
-        "off",
-        SRC,
-        &[
-            ("KVLANG_LAYOUT_SEMANTIC_OP", "1"),
-            ("KVLANG_LAYOUT_STRING_CONCAT", "0"),
-        ],
-    );
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    let ops = op_texts(&db);
-    assert!(
-        ops.iter().any(|(k, t)| k == "rwir" && t == "+"),
-        "expected plain + rwir, got {ops:?}"
-    );
-    assert!(!ops.iter().any(|(_, t)| t == "string·concat"));
-}
-
-#[test]
 fn mixed_string_and_number_is_layout_error() {
     let src = "rwfunc t() -> (r:char/utf32) {\n    a = \"x\"\n    b = a + 1\n    b -> r\n}\n";
-    let (_, out) = layout("mix", src, &[("KVLANG_LAYOUT_SEMANTIC_OP", "1")]);
+    let (_, out) = layout("mix", src, &[]);
     assert!(!out.status.success());
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(

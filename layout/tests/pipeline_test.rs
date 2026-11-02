@@ -60,11 +60,11 @@ fn compile_simple_func() {
         .collect();
     assert_eq!(types, vec!["int64", "int64", "int64"]);
 
-    // 指令（layout 类型特化：opcode = int64·add）
+    // 指令（layout 只发语义算子名：opcode = add，精度在操作数槽 langtype 上）
     let op_key = "/lib/sum/[1,0]";
     let op = kv.get_one(op_key);
     assert_eq!(kvkind::kind(&op, &kv.langtype_of(op_key)), "rwir");
-    assert_eq!(sig(&op), "int64·add");
+    assert_eq!(sig(&op), "add");
     assert_eq!(sig(&kv.get_one("/lib/sum/[1,-1]")), "*[0,-1]\0int64");
     assert_eq!(sig(&kv.get_one("/lib/sum/[1,-2]")), "*[0,-2]\0int64");
     assert_eq!(sig(&kv.get_one("/lib/sum/[1,1]")), "*[0,1]\0int64");

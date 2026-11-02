@@ -13,31 +13,6 @@ fn is_string_kind(t: &str) -> bool {
     t.contains("char")
 }
 
-/// A/B 开关：发语义算子（`add`）而不是具体精度名（`int64·add`）。
-/// 默认关闭——语义名会让 runtime 的 `fast_i64`/`opfn` 快路径退化为通用路径，
-/// 且当前 JIT `verify()` 会整段拒绝；只有阶段 B（按算子 + RegDesc 类型分派）落地后
-/// 才能默认打开。本开关只用于 A/B。
-pub fn semantic_ops() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| {
-        std::env::var("KVLANG_LAYOUT_SEMANTIC_OP")
-            .map(|v| !v.is_empty() && v != "0")
-            .unwrap_or(false)
-    })
-}
-
-/// 字符串拼接脱糖开关：默认随语义算子开关；`KVLANG_LAYOUT_STRING_CONCAT=0`
-/// 可单独关闭（A/B 隔离用）。关闭时 `"a" + "b"` 保持 `+`，产物与旧版逐字节相同。
-pub fn string_concat_ops() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| {
-        semantic_ops()
-            && std::env::var("KVLANG_LAYOUT_STRING_CONCAT")
-                .map(|v| !v.is_empty() && v != "0")
-                .unwrap_or(true)
-    })
-}
-
 /// 值类型 `value` 是否匹配声明表达式 `decl`（支持 `a|b|c` 有限 union）。
 /// 只用于可证明的实参（字面量 / 已声明变量）；union 值要求每个成员都命中等。
 pub fn value_matches(decl: &str, value: &str) -> bool {
@@ -499,6 +474,7 @@ fn return_inst() -> Stmt {
         write_types: Vec::new(),
         arrow_left: false,
         operator: false,
+        operand_kind: String::new(),
     })
 }
 
@@ -792,6 +768,7 @@ fn lower_for_with_cont(
             write_types: Vec::new(),
             arrow_left: true,
             operator: false,
+            operand_kind: String::new(),
         }));
         slot
     };
@@ -804,6 +781,7 @@ fn lower_for_with_cont(
             write_types: Vec::new(),
             arrow_left: false,
             operator: false,
+            operand_kind: String::new(),
         }));
     } else {
         init_body.push(Stmt::Instruction(Instruction {
@@ -813,6 +791,7 @@ fn lower_for_with_cont(
             write_types: Vec::new(),
             arrow_left: false,
             operator: false,
+            operand_kind: String::new(),
         }));
     }
     init_body.push(goto_label(&cond_label));
@@ -824,6 +803,7 @@ fn lower_for_with_cont(
         write_types: Vec::new(),
         arrow_left: false,
         operator: false,
+        operand_kind: String::new(),
     };
     let lt_inst = Instruction {
         comments: Vec::new(),
@@ -835,6 +815,7 @@ fn lower_for_with_cont(
         write_types: Vec::new(),
         arrow_left: false,
         operator: false,
+        operand_kind: String::new(),
     };
     let cond_body = vec![
         Stmt::Instruction(add_inst),
@@ -859,6 +840,7 @@ fn lower_for_with_cont(
             write_types: Vec::new(),
             arrow_left: false,
             operator: false,
+            operand_kind: String::new(),
         }));
         body_insts.push(Stmt::Instruction(Instruction {
             comments: Vec::new(),
@@ -870,6 +852,7 @@ fn lower_for_with_cont(
             write_types: Vec::new(),
             arrow_left: false,
             operator: false,
+            operand_kind: String::new(),
         }));
     } else {
         body_insts.push(Stmt::Instruction(Instruction {
@@ -882,6 +865,7 @@ fn lower_for_with_cont(
             write_types: Vec::new(),
             arrow_left: false,
             operator: false,
+            operand_kind: String::new(),
         }));
     }
     body_insts.extend(body_inner);
@@ -943,6 +927,7 @@ fn flatten_expr(e: &Expr, lg: &mut LabelGen, extra: &mut Vec<Stmt>) -> Expr {
                 write_types: Vec::new(),
                 arrow_left: false,
                 operator: false,
+                operand_kind: String::new(),
             }));
             new_args.push(ast::leaf(&tmp));
         } else {
@@ -971,6 +956,7 @@ fn br_inst(cond: &str, t_label: &str, f_label: &str) -> Stmt {
         write_types: Vec::new(),
         arrow_left: false,
         operator: false,
+        operand_kind: String::new(),
     })
 }
 
@@ -982,6 +968,7 @@ fn goto_label(label: &str) -> Stmt {
         write_types: Vec::new(),
         arrow_left: false,
         operator: false,
+        operand_kind: String::new(),
     })
 }
 
@@ -1018,6 +1005,7 @@ fn expand_sparse(base: &str, e: &Expr, wtypes: &[String], _lg: &mut LabelGen) ->
         write_types: wtypes.to_vec(),
         arrow_left: true,
         operator: false,
+        operand_kind: String::new(),
     };
     vec![Stmt::Instruction(inst)]
 }
@@ -1030,6 +1018,7 @@ fn make_copy_inst(val: &str, dest: &str) -> Stmt {
         write_types: Vec::new(),
         arrow_left: false,
         operator: false,
+        operand_kind: String::new(),
     })
 }
 
@@ -1476,7 +1465,7 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
             String::new()
         };
     }
-    if symbol::lookup(opcode).arith {
+    if symbol::lookup(opcode).arith || matches!(opcode, "max" | "min" | "abs" | "neg") {
         // 字符串拼接走 add：读参是 char 族（或其 union）时，结果仍是该字符串类型。
         for r in reads {
             let t = slot_type(r, tm);
@@ -2213,16 +2202,15 @@ fn specialize_inst(
     if kinds.is_empty() {
         return;
     }
-    /* 字符串拼接脱糖（spec 05-runtime语义/11）：
+    /* 字符串拼接脱糖（spec 05-runtime语义/11）：唯一路径，无开关。
      * 全部操作数可证明是字符串/字符族 → `string·concat`；字符串与非字符串混杂
-     * → layout 阶段报错（不再留给运行时）。开关关闭时保持原样（`+`）。 */
+     * → layout 阶段报错（不留给运行时）；`+` 之外的算子不接受字符串操作数。 */
     if string_operands > 0 {
-        if word != "add" || !string_concat_ops() {
+        if word != "add" {
+            // 比较类（`==`/`<`…）在字符串上是合法算子，保持原 opcode 不特化。
             return;
         }
         if string_operands != kinds.len() {
-            // 字符串 + 可证明非字符串：layout 阶段报错，不留运行时。
-            // 仅在脱糖开启时生效（关闭时产物与旧版逐字节相同）。
             if diags.len() == diags_before {
                 push_num_diag(
                     diags,
@@ -2236,27 +2224,23 @@ fn specialize_inst(
         return;
     }
     let is_cmp = matches!(word.as_str(), "eq" | "neq" | "lt" | "le" | "gt" | "ge");
-    /* 混合 int×float 的比较在 runtime 报错（same_class=false）；不特化以免发出
-     * 与解释器行为不符的 typed 名。 */
+    /* 混合 int×float 的比较在 runtime 报错（same_class=false）；不特化。
+     * k 只用于在 layout 阶段拒掉算子**必定失败**的组合，不再进 opcode。 */
     let mut k = match promoted_numeric_kind(&kinds, !is_cmp, &literals) {
         Some(k) => k,
         None => return,
     };
-    // 一元负号（1 参 `-`/sub）：runtime 按 Neg 执行 → 发 `<k>·neg`
-    // （语义模式发 `neg`，类型留在操作数槽）。
+    // 一元负号（1 参 `-`/sub）：runtime 按 Neg 执行 → 发语义名 `neg`。
     if word == "sub" && e.args.len() == 1 {
         if builtin::is_unsigned_kind(&k) {
             return;
         }
-        e.op = if semantic_ops() {
-            "neg".to_string()
-        } else {
-            format!("{k}{}neg", keytree::MEMBER_SEP)
-        };
+        e.op = "neg".to_string();
         inst.operator = true;
+        inst.operand_kind = k;
         return;
     }
-    /* handler 的实参个数必须与之一致（通用 sub 允许 1 参，特化版只收 2 参）。 */
+    /* handler 的实参个数必须与之一致（通用 sub 允许 1 参，neg 只收 1 参）。 */
     let unary = matches!(
         word.as_str(),
         "neg" | "abs" | "sign" | "sqrt" | "exp" | "log"
@@ -2286,13 +2270,11 @@ fn specialize_inst(
     } else if !is_cmp && builtin::op_kind(&word, &k) != k {
         return;
     }
-    // 语义模式：只发算子词，具体精度由操作数槽的 langtype 承载（阶段 B 前提）。
-    e.op = if semantic_ops() {
-        word
-    } else {
-        format!("{k}{}{word}", keytree::MEMBER_SEP)
-    };
+    // 只发语义算子词；操作数/结果的精度由槽 langtype 承载，这里记下 promotion
+    // 结果供未定型整数字面量落槽。
+    e.op = word;
     inst.operator = true;
+    inst.operand_kind = k;
 }
 
 /// 混合数值 kind 的唯一结果 kind（五语言阵营，且与 runtime 现状一致）：

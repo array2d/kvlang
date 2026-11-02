@@ -735,6 +735,7 @@ fn build_inst(inst: &RawInst, by_irseq: &HashMap<i32, String>) -> Instruction {
         write_types,
         arrow_left: is_fill || inst.write_types.iter().any(|t| !t.is_empty()),
         operator: false,
+        operand_kind: String::new(),
     }
 }
 
@@ -1240,10 +1241,9 @@ fn write_linear_inst(
             .get(r.as_str())
             .map(String::as_str)
             .unwrap_or(r.as_str());
-        // 未定型整数字面量适配（spec 03-类型系统/01 第 10 条）：typed 无符号算子
-        // （`uint64·add` 等）的字面量操作数按该 kind 落槽——runtime 的 typed op 只
-        // 接受同符号性族的操作数，int64 字面量进 `uint64·add` 会失败。
-        if let Some((wire, lt)) = adapted_literal_slot(rv, &opcode)? {
+        // 未定型整数字面量适配（spec 03-类型系统/01 第 10 条）：算子操作数的字面量
+        // 按 promotion 结果 kind 落槽（`uint64_var > 1` 的 `1` 落成 uint64）。
+        if let Some((wire, lt)) = adapted_literal_slot(rv, &s.operand_kind)? {
             pairs.push((format!("{prefix}/[{n},-{}]", j + 1), lt, wire));
             continue;
         }
@@ -1418,14 +1418,11 @@ fn integer_literal_text(s: &str) -> bool {
     !rest.is_empty() && rest.iter().all(u8::is_ascii_digit)
 }
 
-/// typed 无符号算子的字面量操作数：按算子 kind 编码（范围复检，越界不改编码）。
+/// 无符号算子的字面量操作数：按 promotion 结果 kind 编码（范围复检，越界不改编码）。
 fn adapted_literal_slot(
     text: &str,
-    opcode: &str,
+    kind: &str,
 ) -> Result<Option<(Vec<u8>, String)>, String> {
-    let Some((kind, _)) = opcode.split_once(keytree::MEMBER_SEP) else {
-        return Ok(None);
-    };
     if !builtin::is_unsigned_kind(kind) || !integer_literal_text(text) {
         return Ok(None);
     }

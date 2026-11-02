@@ -152,7 +152,7 @@ fn vet_rejects_what_compile_rejects() {
         let mut s = store();
         assert!(compile(&mut s.kv, src).is_err(), "compile accepted:\n{src}");
     }
-    let good = "rwfunc f(a:int64) -> (r:int64) {\n\tint64·add(a, 1) -> r\n}\n";
+    let good = "rwfunc f(a:int64) -> (r:int64) {\n\tadd(a, 1) -> r\n}\n";
     assert!(vet(good).is_ok());
     let mut s = store();
     compile(&mut s.kv, good).unwrap();
@@ -333,7 +333,7 @@ fn deref_of_expression_does_not_panic() {
     let mut s = store();
     compile(&mut s.kv, src).unwrap();
     let p = plane(&mut s.kv, "t");
-    assert_eq!(p[&1].0, "int64·add");
+    assert_eq!(p[&1].0, "add");
     assert_eq!(p[&2], ("=".to_string(), vec!["*_1".to_string()]));
     let src2 = "rwfunc f(a:int64) -> (r:int64) { a -> r }\nrwfunc t(a:int64) -> () {\n\tx = *f(a)\n}\n";
     assert!(vet(src2).is_ok());

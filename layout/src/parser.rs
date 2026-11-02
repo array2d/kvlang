@@ -1406,6 +1406,7 @@ impl Parser {
                 write_types: vec![wt],
                 arrow_left,
                 operator: false,
+                operand_kind: String::new(),
             };
             self.dispatch_obj_by_type(&mut i);
             self.lower_array_fill(&mut i);

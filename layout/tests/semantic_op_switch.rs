@@ -1,6 +1,7 @@
-//! KVLANG_LAYOUT_SEMANTIC_OP A/B 开关 + union 调用点报错信息（子进程）。
+//! 语义算子发射：layout 只发 `add`/`eq` 这类语义名，typed `int64·add` 已删除。
 //!
-//! 开关是进程级 OnceLock，只能靠跑独立 layout 进程来切换。
+//! 开关（`KVLANG_LAYOUT_SEMANTIC_OP`）随本改动一并删除，这里改为跑一次 layout 进程
+//! 直接断言落库 opcode。
 
 use kvlanglayout::{init_dirs, kvkind, Kv};
 use std::path::PathBuf;
@@ -39,15 +40,10 @@ fn slot_text(kv: &mut Kv, key: &str) -> String {
 }
 
 /// 返回 (opcode, 全部操作数槽文本)。
-fn dump_ops(tag: &str, src: &str, semantic: bool) -> (String, Vec<String>) {
+fn dump_ops(tag: &str, src: &str) -> (String, Vec<String>) {
     let file = temp_file(tag, src);
     let db = dsn(tag);
-    let mut cmd = Command::new(bin());
-    cmd.arg(&file).arg(&db);
-    if semantic {
-        cmd.env("KVLANG_LAYOUT_SEMANTIC_OP", "1");
-    }
-    let out = cmd.output().unwrap();
+    let out = Command::new(bin()).arg(&file).arg(&db).output().unwrap();
     assert!(
         out.status.success(),
         "layout failed: {}",
@@ -68,7 +64,7 @@ fn dump_ops(tag: &str, src: &str, semantic: bool) -> (String, Vec<String>) {
         }
         let text = slot_text(&mut kv, &key);
         if name.ends_with(",0]") {
-            if text == "add" || text.ends_with("·add") {
+            if text == "add" {
                 opcode = text;
             }
         } else {
@@ -79,16 +75,11 @@ fn dump_ops(tag: &str, src: &str, semantic: bool) -> (String, Vec<String>) {
 }
 
 #[test]
-fn switch_emits_semantic_or_typed_names() {
+fn emits_semantic_names_only() {
     let src = "rwfunc t() -> (r:int64) {\n    acc = 0\n    acc = acc + 1\n    acc -> r\n}\n";
-    let (typed, mut ops_a) = dump_ops("off", src, false);
-    let (semantic, mut ops_b) = dump_ops("on", src, true);
-    assert_eq!(typed, "int64·add");
-    assert_eq!(semantic, "add");
-    // 除算子槽文本外，操作数槽必须逐字节一致。
-    ops_a.sort();
-    ops_b.sort();
-    assert_eq!(ops_a, ops_b);
+    let (opcode, _) = dump_ops("sem", src);
+    assert_eq!(opcode, "add");
+    assert!(!opcode.contains('·'), "typed opcode 不应再出现：{opcode}");
 }
 
 /// 回归：语义算子名与同包 rwfunc 撞名（`eq` vs `lib string { rwfunc eq }`）时，
@@ -99,12 +90,7 @@ fn semantic_operator_never_resolves_as_call() {
                rwfunc t() -> (r:bool) {\n    1 == 1 -> r\n}\n";
     let file = temp_file("collide", src);
     let db = dsn("collide");
-    let out = Command::new(bin())
-        .arg(&file)
-        .arg(&db)
-        .env("KVLANG_LAYOUT_SEMANTIC_OP", "1")
-        .output()
-        .unwrap();
+    let out = Command::new(bin()).arg(&file).arg(&db).output().unwrap();
     assert!(
         out.status.success(),
         "layout failed: {}",
@@ -122,7 +108,7 @@ fn semantic_operator_never_resolves_as_call() {
         let alloc = kv.get_one(&key);
         let kind = kvkind::kind(&alloc, &kv.langtype_of(&key));
         let text = slot_text(&mut kv, &key);
-        if text == "eq" || text.ends_with("·eq") {
+        if text == "eq" {
             comparison = Some((kind, text));
         }
     }

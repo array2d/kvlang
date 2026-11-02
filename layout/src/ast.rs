@@ -400,6 +400,9 @@ pub struct Instruction {
     /// true = lower 认定为算子（不是函数调用）：发射语义名时不得被同包同名
     /// rwfunc 抢走（`==`→`eq` 与 `lib string { rwfunc eq }` 冲突）。
     pub operator: bool,
+    /// 该算子的操作数目标 kind（promotion 结果）。opcode 不再携带类型后，未定型
+    /// 整数字面量操作数要按它落槽，否则 `uint64_var > 1` 里的 `1` 会落成 int64。
+    pub operand_kind: String,
 }
 
 impl Instruction {
