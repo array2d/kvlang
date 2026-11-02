@@ -28,8 +28,8 @@ opcode 槽的 langtype：
 
 - 控制流与拷贝原语（`return`/`goto`/`br`/`call`/`=`）——`rwir`。
 - Rwir——`rwir`；User——`rwfunc`。
-- Rwir 的 typed 项（声明 rp/wp 全具体、且操作数可证明同型）发
-  `<kind>·<op>`；其余保持通用 opcode。
+- opcode 一律语义名（`add`、`eq`…），**不带** `<kind>·` 前缀；类型标注落在
+  读/写槽的 langtype 上，不进 opcode。
 - 不把 `/‥isa` 声明的 rp/wp/storetype/headlen/width 写进操作数槽；
   槽编码保持既有 layout 推断，声明只用于 target/arity 检查。
 - 通用 `sub` 只能 **2r→1w**；一元负由 layout lower 成 `sub 0,x`（2r1w），

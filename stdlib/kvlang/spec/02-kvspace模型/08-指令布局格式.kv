@@ -43,21 +43,20 @@ langtype=`def langtype`，body 为该参数 langtype 串），
 按位置收参故须有序签名（见 [[总体方案]]）。
 `folded-op` 把 opcode 的 `·` 与 `/` 都折成 `/`
 （与 [[调用extindex]] 的函数路径折叠同一规则）：
-`int64·add` → `int64/add`，
-`networld/fs·read` → `networld/fs/read`。
+`networld/fs·read` → `networld/fs/read`（算子名如 `add` 无 `·`，原样）。
 折叠后重名 → `ISA op path conflict`，不允许静默覆盖；
 native 与扩展同形。
 
 ### 指令行
 
-以 `id_val(x:int64) -> (R:int64) { int64·add(x, 0) -> R }` 为例，`/lib/id_val/` 下：
+以 `id_val(x:int64) -> (R:int64) { add(x, 0) -> R }` 为例，`/lib/id_val/` 下：
 
 ```
 /lib/id_val/  class=0  langtype=rwfunc  body=empty  ← 函数目录
 [0,0]         class=1  langtype=rwfunc  body=[nr,nw,dyn]  ← 签名行锚点（s0=0）
 .[0,-1]       def langtype:"x\0int64"          ← 参数定义键（点后缀）：参数名 + NUL + def langtype 串
 .[0,1]        def langtype:"R\0int64"          ← 参数定义键（写参）
-[1,0]         class=1  langtype=rwir  body=counts+"int64·add"  ← 指令0 opcode
+[1,0]         class=1  langtype=rwir  body=counts+"add"  ← 指令0 opcode
 [1,-1]        class=1  langtype=rwir    body=counts+"*[0,-1]\0int64"  ← 指令0 读槽1
 [1,-2]        class=0  langtype=int64   body=raw(8B)           ← 指令0 读槽2（内联字面量，非 rwir、无 counts）
 [1,1]         class=1  langtype=rwir    body=counts+"*[0,1]\0int64"   ← 指令0 写槽1
@@ -83,8 +82,9 @@ ISA 签名只有一个来源：`/‥isa/<folded-op>` 的
 `def rwir` 明文节点，native 与扩展统一。不设独立控制
 store；数据 store 内 `/‥isa/` 只承载这些签名节点。
 
-- `folded-op`：opcode 中 `·` 与 `/` 都折成 `/`；例 `int64·add` →
-  `/‥isa/int64/add`，`networld/fs·read` → `/‥isa/networld/fs/read`。
+- `folded-op`：opcode 中 `·` 与 `/` 都折成 `/`；例 `compactarray·at` →
+  `/‥isa/compactarray/at`，`networld/fs·read` → `/‥isa/networld/fs/read`。
+  数值算子只发语义名（`add`/`eq`…），不带 `<kind>·` 前缀。
 - 折叠后重名 → layout/runtime 硬错 `ISA op path conflict`。
 - layout 写/读该节点：counts 与签名行槽格式同 `def rwir`。
 - runtime bootstrap 遍历自己的 `myrwircaps` 名字表，
