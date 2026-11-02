@@ -11,6 +11,7 @@
 // This file is standalone: it does not touch jit_stage2.cpp.
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include "rwir_signature.hpp"
