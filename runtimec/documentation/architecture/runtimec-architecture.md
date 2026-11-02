@@ -187,3 +187,7 @@ host -> contract + external kvspace interface
 - BinRWIR 保持顶层中立，内部 JIT 不依赖 vmbin。
 - 未实现能力明确返回 `RUNTIMEC_STATUS_NOT_IMPLEMENTED`，输出先清空。
 - 不存在第三执行器、旧入口、兼容别名或隐藏执行路径。
+- 删除全部派生缓存（Program、plan、机器码、JIT 状态、profile、repository）后，从
+  kvspace 明文 RWIR 与当前 `V.body` 重建并继续执行（#499）。
+- AArch64 backend 与 x86_64 实现同一合同，不允许在 x86_64 完成后长期保留 AArch64 空桩
+  （#541）。

@@ -81,6 +81,12 @@ FORBIDDEN_NAMES = (
     ("ambiguous-segment-type", re.compile(r"\b(?:Segment|CodeSeg|CInsn)\b")),
     ("old-native-context", re.compile(r"\b(?:NativeCtx|NativeFn)\b")),
     ("old-frame-type", re.compile(r"\b(?:FrameCtx|RunResult)\b")),
+    ("removed-unobservable-memory-frame", re.compile(
+        r"\bmem[ _-]?frame\b", re.IGNORECASE,
+    )),
+    ("removed-segment-may-stop", re.compile(
+        r"\bsegment[ _-]?may[ _-]?stop\b", re.IGNORECASE,
+    )),
     ("old-runtimec2-macro", re.compile(r"\b(?:RC2|KV2)_[A-Za-z0-9_]*\b")),
     ("old-runtimec2-test-name", re.compile(r"\bc2_[A-Za-z0-9_]*\b")),
     ("old-codeseg-name", re.compile(r"\bcodeseg\b", re.IGNORECASE)),

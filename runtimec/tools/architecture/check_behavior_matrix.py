@@ -15,6 +15,10 @@ EXPECTED_COLUMNS = (
     "Agreement", "kvlang decision", "Boundary fixture", "Invalid input",
     "Design record",
 )
+EXPECTED_MATRIX_VERSION = "2"
+MATRIX_VERSION_PATTERN = re.compile(
+    r"<!-- runtimec-behavior-matrix-version: (\d+) -->"
+)
 DECISION_PATTERN = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 MARKER_PATTERN = re.compile(r"behavior-decision:\s*([a-z][a-z0-9-]*)")
 MANIFEST_ENTRY_PATTERN = re.compile(
@@ -73,8 +77,16 @@ def read_decisions(
     if not matrix_path.is_file():
         return set(), [Finding(matrix_display, 1, "missing-matrix", "matrix is required")]
     lines = matrix_path.read_text(encoding="utf-8").splitlines()
-    if "<!-- runtimec-behavior-matrix-version: 1 -->" not in lines:
-        findings.append(Finding(matrix_display, 1, "missing-version", "version 1 marker is required"))
+    version_match = next(
+        (MATRIX_VERSION_PATTERN.search(line) for line in lines
+         if MATRIX_VERSION_PATTERN.search(line)),
+        None,
+    )
+    if version_match is None or version_match.group(1) != EXPECTED_MATRIX_VERSION:
+        findings.append(Finding(
+            matrix_display, 1, "missing-version",
+            f"version {EXPECTED_MATRIX_VERSION} marker is required",
+        ))
     header_index = next(
         (index for index, line in enumerate(lines) if table_cells(line) == EXPECTED_COLUMNS), None,
     )

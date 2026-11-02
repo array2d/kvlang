@@ -44,3 +44,14 @@ partial register 与 spill state，不能写回。logical program counter/checkp
 
 当前两个 `.def` manifest 不含 operation 记录。未来所有生成表必须来自这两个输入，禁止
 复制第二张手写表。
+
+## #622 alignment
+
+`kvlang #622` 是语义与实现顺序的总纲。已裁决的六项语义（uint64→float、int→float32、
+混合有/无符号、浮点除零、None 判据、无符号 `neg`/`abs`/`sign`）和两项正确性裁决
+（浮点转整数饱和与 NaN TypeError、浮点成员键格式）必须先写入
+`five-language-behavior-matrix.md`，再由实现消费。`rwir_catalog.def` 是 opcode 与 signature
+的单一来源；CI 必须断言没有可与它漂移的第二份表。检查点粒度保持逐指令 `pc` 与
+`status`，`mem_frame` / `segment_may_stop` 不进入 runtimec。所有派生缓存都可从 kvspace
+明文 RWIR 与当前 `V.body` 删除重建；AArch64 与 x86_64 是 JIT 后端 peer，不得把 AArch64
+留成长期空桩。

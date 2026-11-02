@@ -43,6 +43,12 @@ Compiler 完成执行计划生成和执行目标判定，最后由 route 调用�
 14. **完成提交，未完成丢弃。** JIT 只能把完整完成指令的 dirty state 提交到原
     `argaddr`；当前未完成指令的 speculative/partial register 与 spill state 在 guard
     failure、error、recovery 或 resume 时必须丢弃，绝不写回。
+15. **可观测性与恢复不可交易。** 保留逐指令 `pc` 与 `status` 的可观察、可暂停、可恢复
+    语义；不迁移 `mem_frame` / `segment_may_stop` 这类不可观察纯内存帧，调用边界优化
+    不得以牺牲任意指令可恢复为代价。
+16. **派生状态必须可丢弃可重建。** Program、execution plan、机器码、JIT register/spill、
+    profile 与 repository 条目都是从 kvspace 明文 RWIR 与当前 `V.body` 派生的进程内状态。
+    删除全部派生缓存后，必须能从明文重建并继续执行；它们不是第二份持久事实。
 
 ## 2. 唯一主干
 
@@ -378,6 +384,34 @@ ctest --test-dir /tmp/kvlang-runtimec-build --output-on-failure
 5. `specification/five-language-behavior-matrix.md`
 6. 目标组件头文件
 
-每次实现只沿唯一主干增加真实能力：先 specification 与映射，再 vmkv 等价生成，再
-Compiler 形成 compilation，最后实现两个确定执行入口。遇到不清楚的输入、映射或状态
-必须失败，不能添加旧名字别名、隐藏执行路径或空组件兜底。
+实现按 #622 的依赖顺序在 runtimec 结构内落地，禁止跨阶段抢跑：
+
+- 阶段 1：先填 `vmbin/` 与 `engine/` 的逐指令 `pc`/`status` 执行引擎，以纯解释档对齐
+  c2 执行引擎为第一个硬指标；在引擎达标前不动 JIT。
+- 阶段 2：填 `vmkv/` 与 `binrwir/` 的明文艺文验证、单一 manifest 生成、typed 特化与
+  等价 canonical BinRWIR 生成。
+- 阶段 3：填 `binrwir_compiler/`（含内部 JIT）：M1 手写发射器 → JIT2 → 生成器标量矩阵 →
+  x86_64；AArch64 后端同阶段一等实现，不得顺延为空桩。
+- 阶段 4：runtimec 成为默认 runtime，冻结并删除 `runtimec2/`，旧 `runtime/` 不再作为
+  独立实现继续演进。
+
+每个阶段都必须先补齐对应 specification 决策与映射，再实现函数。遇到不清楚的输入、
+映射或状态必须失败，不能添加旧名字别名、隐藏执行路径或空组件兜底。
+
+## 15. 与 #622、#499、#541 的对齐
+
+runtimec 是 #622“runtime 回归 C”的新落点：它取代旧 `runtime/` 与 `runtimec2/` 两支
+实现，成为唯一 C11 运行时主干；两个旧目录只读冻结，不出现在 runtimec 构建、测试或
+文档的主干中。
+
+- 语义裁决先落 spec：`#622 4.1` 六项与 `#622 4.3` 两项已写入
+  `specification/five-language-behavior-matrix.md`；没有矩阵决策，不得实现对应语义。
+- 单一事实源：`specification/rwir_catalog.def` 是 myrwircap → canonical BinRWIR 的唯一
+  manifest；签名与执行家族从同一输入生成，CI 必须断言不存在可与它漂移的第二份表。
+- 检查点粒度：保留逐指令 `pc` + `status`，不迁移 `mem_frame`（`#622 4.4`）。
+- BIN 栈可重建：删除全部派生缓存后，从 kvspace 明文 RWIR 与当前 `V.body` 重建，并从
+  最后已提交完成边界继续执行（#499）。
+- AArch64 一等后端：`binrwir_compiler/jit/backend/aarch64.c` 与 x86_64 是 peer，必须实现
+  同一 backend 合同，不得长期保留空实现（#541）。
+- JIT 发射器先定形态：先手写 M1 发射器并用固定 opcode 表量出代码量与可读性，再决定
+  JIT2 组织；标量矩阵由生成器产生，禁止手写第二份表。
