@@ -26,7 +26,8 @@ key 路径。langtype 是去掉这一层 `*` 后的目标类型。源码可写 `
 
 `*T` 的槽只有两种取值：指向某地址的 Ptr，或 **None**。None 在 kvspace 即「无值」——键不存在、读回
 None。**不设**「空 Ptr」这第二种空值表示，也不用 `""` 之类字符哨兵冒充空指针（对齐五语言：C `NULL`、
-Go `nil`、Python `None`、Rust `None`、TS `null`，无一用空字符串）。
+Go `nil`、Python `None`、Rust `None`、TS `null`，无一用空字符串）。判据见
+[[代码类型与特殊值]]「None 判据」：body 为空且（ptr=1 或 None 形态）。
 
 - 字段默认空指针：`left:*TNode=None`；原型不落该键，实例读回 None。
 - 判定：`if (p != None) { … }`——`p == None` / `p != None` 是**唯一**的空指针判定写法。
