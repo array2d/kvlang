@@ -18,7 +18,7 @@ rwfunc count_children(prefix:[]char/utf32) -> (n:int64) {
 
 rwfunc test() -> () {
 	/tmp/kvt:int64·int64 = {}
-	42 -> "/tmp/kvt·data"
+	42 -> /tmp/kvt·data
 	/tmp/kvt·data -> v
 	println("v=", v)
 	has_field("/tmp/kvt", "data") -> h
@@ -26,8 +26,8 @@ rwfunc test() -> () {
 	"/tmp/kvt"·*"data" -> x
 	println("x=", x)
 	kvspace·mkindex("/tmp/kvt/")
-	1 -> "/tmp/kvt/a"
-	2 -> "/tmp/kvt/b"
+	1 -> /tmp/kvt/a
+	2 -> /tmp/kvt/b
 	count_children("/tmp/kvt/") -> n
 	println("n=", n)
 	compactarray·numel([10,20,30]) -> m

@@ -5,12 +5,12 @@
 
 rwfunc test() -> () {
 	if (/sd_key == None) {
-		"first_val" -> "/sd_key"
+		"first_val" -> /sd_key
 	}
 	sd1 = /sd_key
 	println("set_default new:", sd1)
 	if (/sd_key == None) {
-		"second_val" -> "/sd_key"
+		"second_val" -> /sd_key
 	}
 	sd2 = /sd_key
 	println("set_default existing:", sd2)
