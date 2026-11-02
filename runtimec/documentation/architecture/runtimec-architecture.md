@@ -85,7 +85,7 @@ BinRWIR Compiler 的唯一内容输入是 canonical `binrwir_program_t`。它按
 
 通用 execution plan 可包含紧凑 dispatch、`opid` 特化、静态 `argaddr` 调度、保持写回
 边界的指令融合和控制流信息。每个 source logical instruction completion 都必须保留为
-不可关闭的 recovery/observable boundary，即使多个 handler 被融合也不能合并完成边界。
+不可关闭的 recovery/observable boundary，即使多个 rwir_runtimecimpl 被融合也不能合并完成边界。
 plan 不得包含 xvalue 副本、body cache 或通用寄存器分配。register allocation 只属于
 内部 JIT lowering。所有优化都必须保留
 Read/Write authority、别名可见性和 source logical program counter 观察边界。

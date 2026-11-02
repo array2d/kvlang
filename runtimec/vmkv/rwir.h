@@ -30,14 +30,29 @@ typedef enum vmkv_key_addressability_t {
 } vmkv_key_addressability_t;
 
 /*
+ * 槽内已编码的内联字面量。只在参数是内联字面量时有效：bytes 是该槽的
+ * 完整值字节（XValue head + body + attr，与 kvspace 读到的完全一致），
+ * langtype 是同一个值的类型串。变量引用（含相对指针）时两个字段置空。
+ *
+ * 直接给出字节而不让 encoder 重读的理由：读取器与本视图必须描述同一个
+ * 快照，二次读取会引入两次读之间的事实漂移面。
+ */
+typedef struct vmkv_rwir_literal_view_t {
+    runtimec_bytes_view_t bytes;
+    runtimec_string_view_t langtype;
+} vmkv_rwir_literal_view_t;
+
+/*
  * 单个明文参数。parameter_type_name 与 parameter_name 必须和 operation
  * manifest 完全匹配；key 是静态 key 或尚待求值的动态 key expression。
+ * literal 只有参数是内联字面量时才有效（其余情形 bytes/langtype 均为空）。
  */
 typedef struct vmkv_rwir_argument_view_t {
     runtimec_string_view_t parameter_type_name;
     runtimec_string_view_t parameter_name;
     runtimec_key_view_t key;
     vmkv_key_addressability_t key_addressability;
+    vmkv_rwir_literal_view_t literal;
 } vmkv_rwir_argument_view_t;
 
 /* 一条 RWIR 指令及其两个方向分区。 */

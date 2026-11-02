@@ -1,27 +1,48 @@
 /*
  * 组件：binrwir/instruction 的实现
- * 作用：地址化指令构建请求校验与只读视图生成；当前明确返回未实现。
+ * 作用：校验增量构建请求，并生成借出参数切片的只读视图。
+ * 约束：不拥有参数池，不复制参数，也不缓存 V.body 或 XValue。
  */
 
 #include "binrwir/instruction.h"
 
 #include <string.h>
 
+#include "binrwir/execution_exit.h"
+
+/* 每个参数都必须是一个合法引用：argidx、引用种类、槽号与 payload 按 kind 自洽。 */
 static int binrwir_argument_span_is_invalid(
     const binrwir_argument_span_t *arguments) {
     size_t argument_ordinal;
 
     for (argument_ordinal = 0U; argument_ordinal < arguments->count;
          ++argument_ordinal) {
-        if (arguments->data[argument_ordinal].argument_index ==
-                BINRWIR_ARGUMENT_INDEX_NONE ||
-            arguments->data[argument_ordinal].body_address ==
-                BINRWIR_BODY_ADDRESS_NONE ||
-            arguments->data[argument_ordinal].reserved_32_bits != 0U) {
+        if (binrwir_argument_validate(&arguments->data[argument_ordinal]) !=
+            RUNTIMEC_STATUS_SUCCESS) {
             return 1;
         }
     }
     return 0;
+}
+
+/* operation identifier 与 source logical program counter 都是身份字段，绝不接受 NONE。 */
+static runtimec_status_t binrwir_instruction_validate_content(
+    uint32_t source_logical_program_counter, uint32_t operation_identifier,
+    binrwir_argument_span_t read_arguments,
+    binrwir_argument_span_t write_arguments) {
+    if (operation_identifier == BINRWIR_OPERATION_IDENTIFIER_NONE ||
+        source_logical_program_counter ==
+            BINRWIR_EXECUTION_PROGRAM_COUNTER_NONE ||
+        read_arguments.count > UINT32_MAX ||
+        write_arguments.count > UINT32_MAX ||
+        read_arguments.count > UINT32_MAX - write_arguments.count ||
+        (read_arguments.count != 0U && read_arguments.data == NULL) ||
+        (write_arguments.count != 0U && write_arguments.data == NULL) ||
+        binrwir_argument_span_is_invalid(&read_arguments) ||
+        binrwir_argument_span_is_invalid(&write_arguments)) {
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    return RUNTIMEC_STATUS_SUCCESS;
 }
 
 runtimec_status_t binrwir_instruction_validate_build_request(
@@ -29,20 +50,9 @@ runtimec_status_t binrwir_instruction_validate_build_request(
     if (request == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
-    if (request->operation_identifier == BINRWIR_OPERATION_IDENTIFIER_NONE ||
-        request->read_arguments.count > UINT32_MAX ||
-        request->write_arguments.count > UINT32_MAX ||
-        request->read_arguments.count >
-            UINT32_MAX - request->write_arguments.count ||
-        (request->read_arguments.count != 0U &&
-         request->read_arguments.data == NULL) ||
-        (request->write_arguments.count != 0U &&
-         request->write_arguments.data == NULL) ||
-        binrwir_argument_span_is_invalid(&request->read_arguments) ||
-        binrwir_argument_span_is_invalid(&request->write_arguments)) {
-        return RUNTIMEC_STATUS_INVALID;
-    }
-    return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
+    return binrwir_instruction_validate_content(
+        request->source_logical_program_counter, request->operation_identifier,
+        request->read_arguments, request->write_arguments);
 }
 
 runtimec_status_t binrwir_instruction_get_view(
@@ -54,17 +64,21 @@ runtimec_status_t binrwir_instruction_get_view(
     if (output_view != NULL) {
         memset(output_view, 0, sizeof(*output_view));
     }
-    if (instruction == NULL || output_view == NULL ||
-        instruction->operation_identifier == BINRWIR_OPERATION_IDENTIFIER_NONE ||
-        read_arguments.count > UINT32_MAX ||
-        write_arguments.count > UINT32_MAX ||
-        read_arguments.count > UINT32_MAX - write_arguments.count ||
-        (read_arguments.count != 0U && read_arguments.data == NULL) ||
-        (write_arguments.count != 0U && write_arguments.data == NULL) ||
-        binrwir_argument_span_is_invalid(&read_arguments) ||
-        binrwir_argument_span_is_invalid(&write_arguments)) {
+    if (instruction == NULL || output_view == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
-    (void)source_logical_program_counter;
-    return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
+    {
+        runtimec_status_t status = binrwir_instruction_validate_content(
+            source_logical_program_counter, instruction->operation_identifier,
+            read_arguments, write_arguments);
+        if (status != RUNTIMEC_STATUS_SUCCESS) {
+            return status;
+        }
+    }
+    output_view->instruction = instruction;
+    output_view->source_logical_program_counter = source_logical_program_counter;
+    output_view->reserved_32_bits = 0U;
+    output_view->read_arguments = read_arguments;
+    output_view->write_arguments = write_arguments;
+    return RUNTIMEC_STATUS_SUCCESS;
 }

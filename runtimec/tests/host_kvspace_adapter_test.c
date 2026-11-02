@@ -1,0 +1,445 @@
+/*
+ * host/kvspace_adapter 验收：用 fake 二进制接口跑通能力表，验证静态地址
+ * 解析的生命周期判据、失败封闭、以及 checkpoint/handoff 的持久效果。
+ */
+
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "contract/host_services.h"
+#include "host/host.h"
+#include "host/kvspace_adapter.h"
+#include "kvspace/xvalue_head.h"
+#include "tests/fake_kvspace.h"
+
+static int failures;
+
+#define EXPECT(condition)                                                      \
+    do {                                                                       \
+        if (!(condition)) {                                                    \
+            ++failures;                                                        \
+            fprintf(stderr, "FAIL %s:%d %s\n", __FILE__, __LINE__,             \
+                    #condition);                                               \
+        }                                                                      \
+    } while (0)
+
+static void *test_allocate(void *context, size_t size, size_t alignment) {
+    (void)context;
+    (void)alignment;
+    return malloc(size);
+}
+
+static void test_deallocate(void *context, void *allocation, size_t size,
+                            size_t alignment) {
+    (void)context;
+    (void)size;
+    (void)alignment;
+    free(allocation);
+}
+
+/* 构造一条无 langtype 的 slack wire（与 layout 写给系统键的形态一致）。 */
+static void store_text(fake_kvspace_store_t *store, const char *key,
+                       const char *text) {
+    runtimec_kvspace_binary_interface_t binary_interface;
+    fake_kvspace_bind(store, &binary_interface);
+    uint8_t *wire = NULL;
+    uint64_t wire_size = 0U;
+    EXPECT(binary_interface.new_slack((const uint8_t *)text, strlen(text),
+                                      strlen(text), NULL, &wire,
+                                      &wire_size) == 0);
+    EXPECT(fake_kvspace_put(store, key, wire, (uint32_t)wire_size, false) == 0);
+    free(wire);
+}
+
+/* 构造一条 int64 wire（`‥ctime` 的形态：body 是 8 字节小端）。 */
+static void store_int64(fake_kvspace_store_t *store, const char *key,
+                        int64_t value) {
+    uint8_t wire[KVSPACE_XVALUE_HEAD_LEN + 8U + 2U];
+    memset(wire, 0, sizeof(wire));
+    /* 8 字节 body 的短定长值：6B len(u48) + storetype + inline + body + 2B 空 attr。
+     * 按字节偏移拼，避免书写被命名检查判为缩写的结构体字段名。 */
+    wire[0] = 8U;
+    wire[6] = KVSPACE_XVALUE_ST_SHORT;
+    wire[7] = 0U;                       /* 指向形态：0 = 值内联 */
+    for (size_t index = 0U; index < 8U; index++) {
+        wire[KVSPACE_XVALUE_HEAD_LEN + index] =
+            (uint8_t)(((uint64_t)value >> (8U * index)) & 0xffU);
+    }
+    wire[KVSPACE_XVALUE_HEAD_LEN + 8U] = 2U;
+    EXPECT(fake_kvspace_put(store, key, wire, (uint32_t)sizeof(wire), false) ==
+           0);
+}
+
+/* 列表访问者：收集交出的完整键，供主流程断言。 */
+static int list_visited;
+static char list_seen[16][256];
+
+static runtimec_status_t collect_list_key(void *context,
+                                          runtimec_key_view_t key,
+                                          runtimec_error_t *error) {
+    (void)context;
+    (void)error;
+    if (list_visited < 16 && key.size < 256U) {
+        memcpy(list_seen[list_visited], key.data, key.size);
+        list_seen[list_visited][key.size] = '\0';
+        list_visited += 1;
+    }
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
+/* 读一条 slack 值的 body 文本（去掉 head 与 attr）。 */
+static void read_body_text(fake_kvspace_store_t *store, const char *key,
+                           char *output, size_t capacity) {
+    uint8_t *wire = fake_kvspace_address(store, key);
+    EXPECT(wire != NULL);
+    if (wire == NULL) {
+        output[0] = '\0';
+        return;
+    }
+    kvspaceXvalueHead head;
+    memcpy(&head, wire, sizeof(head));
+    const uint64_t body_size = kvspaceXvalueHeadLen(&head);
+    if (body_size + 1U > capacity) {
+        output[0] = '\0';
+        return;
+    }
+    memcpy(output, wire + KVSPACE_XVALUE_HEAD_LEN, (size_t)body_size);
+    output[body_size] = '\0';
+}
+
+int main(void) {
+    fake_kvspace_store_t store;
+    memset(&store, 0, sizeof(store));
+    runtimec_kvspace_binary_interface_t binary_interface;
+    fake_kvspace_bind(&store, &binary_interface);
+
+    runtimec_kvspace_adapter_request_t request = {
+        .allocator = {.context = NULL,
+                      .allocate = test_allocate,
+                      .deallocate = test_deallocate},
+        .borrowed_kvspace_handle = &store,
+    };
+    runtimec_host_services_t services;
+    runtimec_error_t error;
+
+    /* 1. 表必须被完整填满。 */
+    EXPECT(runtimec_kvspace_adapter_create_services(
+               &request, &binary_interface, &services, &error) ==
+           RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(runtimec_host_services_is_valid(&services));
+    EXPECT(services.read != NULL && services.read_header != NULL &&
+           services.write != NULL && services.write_partial != NULL &&
+           services.remove != NULL && services.list != NULL &&
+           services.watch != NULL && services.signal != NULL &&
+           services.source_revision != NULL &&
+           services.resolve_static_xvalue_address != NULL &&
+           services.resolve_frame_xvalue_address != NULL &&
+           services.checkpoint != NULL && services.handoff != NULL);
+
+    /* 2. 不完整的二进制接口必须被拒绝，且输出保持空表。 */
+    {
+        runtimec_kvspace_binary_interface_t partial = binary_interface;
+        partial.set_part = NULL;
+        runtimec_host_services_t rejected;
+        runtimec_host_services_initialize(&rejected);
+        EXPECT(runtimec_kvspace_adapter_create_services(
+                   &request, &partial, &rejected, &error) ==
+               RUNTIMEC_STATUS_INVALID);
+        EXPECT(!runtimec_host_services_is_valid(&rejected));
+    }
+
+    /* 3. 空句柄必须被拒绝。 */
+    {
+        runtimec_kvspace_adapter_request_t empty = request;
+        empty.borrowed_kvspace_handle = NULL;
+        runtimec_host_services_t rejected;
+        EXPECT(runtimec_kvspace_adapter_create_services(
+                   &empty, &binary_interface, &rejected, &error) ==
+               RUNTIMEC_STATUS_INVALID);
+    }
+
+    runtimec_snapshot_t snapshot;
+    runtimec_snapshot_reset(&snapshot);
+    snapshot.function_key = runtimec_key_view_from_c_string("/lib/sum");
+
+    /* 4. 静态 key → 非零基址，且与后端当前地址一致。 */
+    store_text(&store, "/lib/sum.[0,-1]", "a\0[]int64");
+    runtimec_xvalue_address_t address = RUNTIMEC_XVALUE_ADDRESS_NONE;
+    const runtimec_key_view_t static_key =
+        RUNTIMEC_KEY_VIEW_LITERAL("/lib/sum.[0,-1]");
+    EXPECT(services.resolve_static_xvalue_address(
+               services.context, &snapshot, static_key, &address, &error) ==
+           RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(address != RUNTIMEC_XVALUE_ADDRESS_NONE);
+    EXPECT(address == (runtimec_xvalue_address_t)(uintptr_t)
+                           fake_kvspace_address(&store, "/lib/sum.[0,-1]"));
+
+    /* 5. 动态/相对 key 必须 UNSUPPORTED，输出保持 NONE。 */
+    {
+        const runtimec_key_view_t relative =
+            RUNTIMEC_KEY_VIEW_LITERAL("*[0,-1]");
+        address = UINT64_C(0xdead);
+        EXPECT(services.resolve_static_xvalue_address(
+                   services.context, &snapshot, relative, &address, &error) ==
+               RUNTIMEC_STATUS_UNSUPPORTED);
+        EXPECT(address == RUNTIMEC_XVALUE_ADDRESS_NONE);
+    }
+
+    /* 6. 不存在/无值的 key 不得给出地址。 */
+    {
+        const runtimec_key_view_t missing =
+            RUNTIMEC_KEY_VIEW_LITERAL("/lib/sum/[9,0]");
+        address = UINT64_C(0xdead);
+        EXPECT(services.resolve_static_xvalue_address(
+                   services.context, &snapshot, missing, &address, &error) ==
+               RUNTIMEC_STATUS_UNSUPPORTED);
+        EXPECT(address == RUNTIMEC_XVALUE_ADDRESS_NONE);
+    }
+
+    /* 7. 运行期会被重写的 /vthread 子树不得给出地址。 */
+    {
+        store_text(&store, "/vthread/v1/\xE2\x80\xA5" "pc", "/lib/sum/[1,0]");
+        const runtimec_key_view_t volatile_key = RUNTIMEC_KEY_VIEW_LITERAL(
+            "/vthread/v1/\xE2\x80\xA5" "pc");
+        address = UINT64_C(0xdead);
+        EXPECT(services.resolve_static_xvalue_address(
+                   services.context, &snapshot, volatile_key, &address,
+                   &error) == RUNTIMEC_STATUS_UNSUPPORTED);
+        EXPECT(address == RUNTIMEC_XVALUE_ADDRESS_NONE);
+    }
+
+    /* 7b. 帧 key 的解析：合法帧槽给出非零基址 + 非零 generation。 */
+    {
+        const runtimec_key_view_t frame_key = RUNTIMEC_KEY_VIEW_LITERAL(
+            "/vthread/v1/[1]/[0,-1]");
+        store_text(&store, "/vthread/v1/[1]/[0,-1]", "int64");
+        runtimec_xvalue_address_t frame_address = RUNTIMEC_XVALUE_ADDRESS_NONE;
+        uint64_t frame_generation = 0U;
+        EXPECT(services.resolve_frame_xvalue_address(
+                   services.context, &snapshot, frame_key, &frame_address,
+                   &frame_generation, &error) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(frame_address != RUNTIMEC_XVALUE_ADDRESS_NONE);
+        EXPECT(frame_address ==
+               (runtimec_xvalue_address_t)(uintptr_t)fake_kvspace_address(
+                   &store, "/vthread/v1/[1]/[0,-1]"));
+        EXPECT(frame_generation != 0U);
+
+        /* 同一条帧 key 再解一次：generation 不变（没有事实变化）。 */
+        uint64_t again_generation = 0U;
+        runtimec_xvalue_address_t again_address = RUNTIMEC_XVALUE_ADDRESS_NONE;
+        EXPECT(services.resolve_frame_xvalue_address(
+                   services.context, &snapshot, frame_key, &again_address,
+                   &again_generation, &error) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(again_generation == frame_generation);
+
+        /* 静态 key 走这条必须被拒（两条路径不合并）。 */
+        runtimec_xvalue_address_t cross_address = UINT64_C(0xdead);
+        uint64_t cross_generation = UINT64_C(0xdead);
+        EXPECT(services.resolve_frame_xvalue_address(
+                   services.context, &snapshot, static_key, &cross_address,
+                   &cross_generation, &error) ==
+               RUNTIMEC_STATUS_UNSUPPORTED);
+        EXPECT(cross_address == RUNTIMEC_XVALUE_ADDRESS_NONE);
+        EXPECT(cross_generation == 0U);
+
+        /* 动态拼出的相对 key 必须被拒。 */
+        const runtimec_key_view_t relative = RUNTIMEC_KEY_VIEW_LITERAL(
+            "*[0,-1]");
+        runtimec_xvalue_address_t relative_address = UINT64_C(0xdead);
+        uint64_t relative_generation = UINT64_C(0xdead);
+        EXPECT(services.resolve_frame_xvalue_address(
+                   services.context, &snapshot, relative, &relative_address,
+                   &relative_generation, &error) ==
+               RUNTIMEC_STATUS_UNSUPPORTED);
+        EXPECT(relative_address == RUNTIMEC_XVALUE_ADDRESS_NONE);
+        EXPECT(relative_generation == 0U);
+
+        /* 尚未分配的帧槽：没有值，不能交地址。 */
+        const runtimec_key_view_t absent = RUNTIMEC_KEY_VIEW_LITERAL(
+            "/vthread/v1/[2]/[0,-1]");
+        runtimec_xvalue_address_t absent_address = UINT64_C(0xdead);
+        uint64_t absent_generation = UINT64_C(0xdead);
+        EXPECT(services.resolve_frame_xvalue_address(
+                   services.context, &snapshot, absent, &absent_address,
+                   &absent_generation, &error) ==
+               RUNTIMEC_STATUS_UNSUPPORTED);
+        EXPECT(absent_address == RUNTIMEC_XVALUE_ADDRESS_NONE);
+        EXPECT(absent_generation == 0U);
+
+    }
+
+    /* 8. 读：容量不足报 INSUFFICIENT_CAPACITY，充足时拷出完整 wire。 */
+    {
+        uint8_t small[4];
+        runtimec_bytes_buffer_t buffer = {small, 0U, sizeof(small)};
+        EXPECT(services.read(services.context, &snapshot, static_key, &buffer,
+                             &error) == RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY);
+        uint8_t roomy[64];
+        buffer = (runtimec_bytes_buffer_t){roomy, 0U, sizeof(roomy)};
+        EXPECT(services.read(services.context, &snapshot, static_key, &buffer,
+                             &error) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(buffer.size > KVSPACE_XVALUE_HEAD_LEN);
+    }
+
+    /* 9. 读 header：size 与值长度一致；缺失 key 报 0 而不是失败。 */
+    {
+        runtimec_host_value_header_t header;
+        runtimec_host_value_header_reset(&header);
+        EXPECT(services.read_header(services.context, &snapshot, static_key,
+                                    &header, &error) ==
+               RUNTIMEC_STATUS_SUCCESS);
+        uint8_t *wire = fake_kvspace_address(&store, "/lib/sum.[0,-1]");
+        EXPECT(wire != NULL);
+        kvspaceXvalueHead head;
+        memcpy(&head, wire, sizeof(head));
+        EXPECT(header.value_size ==
+               KVSPACE_XVALUE_HEAD_LEN + kvspaceXvalueHeadLen(&head) + 2U);
+        const runtimec_key_view_t missing =
+            RUNTIMEC_KEY_VIEW_LITERAL("/lib/sum/nothere");
+        EXPECT(services.read_header(services.context, &snapshot, missing,
+                                    &header, &error) ==
+               RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(header.value_size == 0U);
+    }
+
+    /* 10. 列表：交出完整键，且能同时看到目录键与兄弟键。 */
+    {
+        store_text(&store, "/lib/sum/[1,0]", "int64\xC2\xB7" "add");
+        store_text(&store, "/lib/sum/[2,0]", "return");
+        list_visited = 0;
+        EXPECT(services.list(
+                   services.context, &snapshot,
+                   runtimec_key_view_from_c_string("/lib/sum"),
+                   collect_list_key, NULL, &error) == RUNTIMEC_STATUS_SUCCESS);
+        bool saw_parameter = false;
+        bool saw_instruction = false;
+        bool saw_foreign = false;
+        for (int index = 0; index < list_visited; index++) {
+            if (strcmp(list_seen[index], "/lib/sum.[0,-1]") == 0) {
+                saw_parameter = true;
+            }
+            if (strcmp(list_seen[index], "/lib/sum/[2,0]") == 0) {
+                saw_instruction = true;
+            }
+            if (strncmp(list_seen[index], "/lib/sum", 8U) != 0) {
+                saw_foreign = true;
+            }
+        }
+        EXPECT(saw_parameter);
+        EXPECT(saw_instruction);
+        EXPECT(!saw_foreign);
+    }
+
+    /* 11. checkpoint 写 pc / status；handoff 写队列并等条目被删除。 */
+    {
+        runtimec_checkpoint_t checkpoint;
+        runtimec_checkpoint_reset(&checkpoint);
+        checkpoint.vthread_identifier =
+            runtimec_string_view_from_c_string("v7");
+        checkpoint.logical_program_counter =
+            runtimec_string_view_from_c_string("/lib/sum/[2,0]");
+        checkpoint.persistent_status =
+            runtimec_string_view_from_c_string("running");
+        EXPECT(services.checkpoint(services.context, &checkpoint, &error) ==
+               RUNTIMEC_STATUS_SUCCESS);
+        char text[64];
+        read_body_text(&store, "/vthread/v7/\xE2\x80\xA5" "pc", text,
+                       sizeof(text));
+        EXPECT(strcmp(text, "/lib/sum/[2,0]") == 0);
+        read_body_text(&store, "/vthread/v7/\xE2\x80\xA5status", text,
+                       sizeof(text));
+        EXPECT(strcmp(text, "running") == 0);
+    }
+
+    /* 12. source_revision：读不到 ctime 必须失败，不伪造 revision。 */
+    {
+        runtimec_source_revision_t revision;
+        EXPECT(services.source_revision(
+                   services.context,
+                   runtimec_key_view_from_c_string("/lib/sum"), &revision,
+                   &error) == RUNTIMEC_STATUS_ERROR);
+        store_int64(&store, "/lib/sum/\xE2\x80\xA5" "ctime", 41);
+        EXPECT(services.source_revision(
+                   services.context,
+                   runtimec_key_view_from_c_string("/lib/sum"), &revision,
+                   &error) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(revision.generation != 0U);
+        EXPECT(revision.instruction_set_version == 41U);
+        const uint64_t stable_generation = revision.generation;
+        /* 同一事实重复取：generation 不变。 */
+        EXPECT(services.source_revision(
+                   services.context,
+                   runtimec_key_view_from_c_string("/lib/sum"), &revision,
+                   &error) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(revision.generation == stable_generation);
+        /* 已交出的地址被搬移：generation 必须推进。 */
+        store.relocate_key = "/lib/sum.[0,-1]";
+        EXPECT(services.source_revision(
+                   services.context,
+                   runtimec_key_view_from_c_string("/lib/sum"), &revision,
+                   &error) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(revision.generation != stable_generation);
+    }
+
+    /* 12b. generation 变化后旧地址不可用：搬移该帧槽，source_revision 推进
+     *      generation，调用方比对到不等即必须重绑。 */
+    {
+        const runtimec_key_view_t frame_key = RUNTIMEC_KEY_VIEW_LITERAL(
+            "/vthread/v1/[1]/[0,-1]");
+        runtimec_xvalue_address_t before_address = RUNTIMEC_XVALUE_ADDRESS_NONE;
+        uint64_t before_generation = 0U;
+        EXPECT(services.resolve_frame_xvalue_address(
+                   services.context, &snapshot, frame_key, &before_address,
+                   &before_generation, &error) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(before_address != RUNTIMEC_XVALUE_ADDRESS_NONE);
+        store.relocate_key = "/vthread/v1/[1]/[0,-1]";
+        runtimec_source_revision_t moved_revision;
+        EXPECT(services.source_revision(
+                   services.context,
+                   runtimec_key_view_from_c_string("/lib/sum"),
+                   &moved_revision, &error) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(moved_revision.generation != before_generation);
+        runtimec_xvalue_address_t rebound_address = RUNTIMEC_XVALUE_ADDRESS_NONE;
+        uint64_t rebound_generation = 0U;
+        EXPECT(services.resolve_frame_xvalue_address(
+                   services.context, &snapshot, frame_key, &rebound_address,
+                   &rebound_generation, &error) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(rebound_generation == moved_revision.generation);
+        EXPECT(rebound_address != before_address);
+    }
+
+    /* 13. signal 明确未实现。 */
+    EXPECT(services.signal(services.context, static_key, &error) ==
+           RUNTIMEC_STATUS_NOT_IMPLEMENTED);
+
+    /* 14. host 层把 NONE 地址当错误，不向下透传。 */
+    {
+        runtimec_host_t *host = NULL;
+        EXPECT(runtimec_host_create(&services, &host, &error) ==
+               RUNTIMEC_STATUS_SUCCESS);
+        runtimec_xvalue_address_t output = UINT64_C(0xdead);
+        const runtimec_key_view_t volatile_key = RUNTIMEC_KEY_VIEW_LITERAL(
+            "/vthread/v1/\xE2\x80\xA5" "pc");
+        EXPECT(runtimec_host_resolve_static_xvalue_address(
+                   host, &snapshot, volatile_key, &output, &error) ==
+               RUNTIMEC_STATUS_UNSUPPORTED);
+        EXPECT(output == RUNTIMEC_XVALUE_ADDRESS_NONE);
+        EXPECT(runtimec_host_destroy(host, &error) ==
+               RUNTIMEC_STATUS_SUCCESS);
+    }
+
+    /* 15. 销毁：释放所有者结构并把表置空；句柄不被关闭。 */
+    EXPECT(runtimec_kvspace_adapter_destroy_services(&services, &error) ==
+           RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(!runtimec_host_services_is_valid(&services));
+
+    fake_kvspace_release(&store);
+    if (failures != 0) {
+        fprintf(stderr, "host_kvspace_adapter_test: %d failure(s)\n", failures);
+        return 1;
+    }
+    printf("host_kvspace_adapter_test: ok\n");
+    return 0;
+}

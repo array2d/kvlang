@@ -27,8 +27,8 @@ _Static_assert(RUNTIMEC_STATUS_ERROR == 7, "error status changed");
 _Static_assert(RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY == 8,
                "insufficient-capacity status changed");
 
-_Static_assert(RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION == 3U,
-               "host services binary interface must remain version 3");
+_Static_assert(RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION == 4U,
+               "host services binary interface must remain version 4");
 _Static_assert(RUNTIMEC_XVALUE_BODY_OFFSET_BYTES == 8U,
                "V.body must remain eight bytes after the XValue base");
 _Static_assert(sizeof(runtimec_xvalue_address_t) == 8U,
@@ -39,8 +39,16 @@ _Static_assert(sizeof(binrwir_argument_t) == 16U,
                "BinRWIR arguments must remain sixteen bytes");
 _Static_assert(offsetof(binrwir_argument_t, argument_index) == 0U,
                "BinRWIR argidx offset changed");
-_Static_assert(offsetof(binrwir_argument_t, body_address) == 8U,
-               "BinRWIR argaddr offset changed");
+_Static_assert(offsetof(binrwir_argument_t, reference_kind) == 4U,
+               "BinRWIR reference kind offset changed");
+_Static_assert(offsetof(binrwir_argument_t, reserved_8_bits) == 5U,
+               "BinRWIR reserved byte offset changed");
+_Static_assert(offsetof(binrwir_argument_t, slot) == 6U,
+               "BinRWIR slot offset changed");
+_Static_assert(offsetof(binrwir_argument_t, payload) == 8U,
+               "BinRWIR payload offset changed");
+_Static_assert(BINRWIR_BINARY_INTERFACE_GENERATION == 3U,
+               "BinRWIR binary interface generation must be 3");
 _Static_assert(sizeof(binrwir_alias_rule_t) == 12U,
                "alias rules must remain twelve bytes");
 _Static_assert(sizeof(binrwir_instruction_t) == 4U,
@@ -63,9 +71,11 @@ static int failures;
 
 static void test_plain_data_copy_round_trip(void) {
     const binrwir_argument_t initial_argument = {
-        .body_address = UINT64_C(0x1000),
         .argument_index = 7U,
-        .reserved_32_bits = 0U,
+        .reference_kind = BINRWIR_REFERENCE_STATIC,
+        .reserved_8_bits = 0U,
+        .slot = 0U,
+        .payload = UINT64_C(0x1000),
     };
     const binrwir_execution_exit_t initial_exit = {0};
     binrwir_argument_t copied_argument;
@@ -79,31 +89,58 @@ static void test_plain_data_copy_round_trip(void) {
                            sizeof(copied_exit)) == 0);
 }
 
-static void test_addressed_argument_failure_shape(void) {
+/* 构造失败必须清空输出；只有 STATIC 的 payload 可以当 body 地址。 */
+static void test_reference_argument_failure_shape(void) {
     binrwir_argument_t argument = {
-        .body_address = UINT64_MAX,
         .argument_index = UINT32_MAX,
-        .reserved_32_bits = UINT32_MAX,
+        .reference_kind = UINT8_MAX,
+        .reserved_8_bits = UINT8_MAX,
+        .slot = UINT16_MAX,
+        .payload = UINT64_MAX,
     };
 
     RUNTIMEC_EXPECT(binrwir_argument_create(
-        3U, BINRWIR_BODY_ADDRESS_NONE, &argument) == RUNTIMEC_STATUS_INVALID);
-    RUNTIMEC_EXPECT(argument.body_address == BINRWIR_BODY_ADDRESS_NONE);
+        3U, BINRWIR_REFERENCE_STATIC, 0U, BINRWIR_BODY_ADDRESS_NONE,
+        &argument) == RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(argument.argument_index == 0U);
-    RUNTIMEC_EXPECT(argument.reserved_32_bits == 0U);
+    RUNTIMEC_EXPECT(argument.reference_kind == BINRWIR_REFERENCE_INVALID);
+    RUNTIMEC_EXPECT(argument.reserved_8_bits == 0U);
+    RUNTIMEC_EXPECT(argument.slot == 0U);
+    RUNTIMEC_EXPECT(argument.payload == BINRWIR_BODY_ADDRESS_NONE);
+
+    RUNTIMEC_EXPECT(binrwir_argument_create(
+        BINRWIR_ARGUMENT_INDEX_NONE, BINRWIR_REFERENCE_PARAMETER_READ, 0U, 0U,
+        &argument) == RUNTIMEC_STATUS_INVALID);
+    RUNTIMEC_EXPECT(argument.argument_index == 0U);
+
+    /* 参数引用带 payload 视为把 payload 当地址用，必须拒绝。 */
+    RUNTIMEC_EXPECT(binrwir_argument_create(
+        3U, BINRWIR_REFERENCE_PARAMETER_READ, 0U, UINT64_C(0x1008),
+        &argument) == RUNTIMEC_STATUS_INVALID);
+    RUNTIMEC_EXPECT(argument.argument_index == 0U);
+
+    RUNTIMEC_EXPECT(binrwir_argument_create(
+        3U, BINRWIR_REFERENCE_PARAMETER_READ, 1U, 0U, &argument) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(binrwir_argument_validate(&argument) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+
+    argument.argument_index = BINRWIR_ARGUMENT_INDEX_NONE;
     RUNTIMEC_EXPECT(binrwir_argument_validate(&argument) ==
                     RUNTIMEC_STATUS_INVALID);
 
-    RUNTIMEC_EXPECT(binrwir_argument_create(
-        BINRWIR_ARGUMENT_INDEX_NONE, UINT64_C(0x1000), &argument) ==
+    argument.argument_index = 3U;
+    argument.reference_kind = BINRWIR_REFERENCE_INVALID;
+    RUNTIMEC_EXPECT(binrwir_argument_validate(&argument) ==
                     RUNTIMEC_STATUS_INVALID);
-    RUNTIMEC_EXPECT(argument.argument_index == 0U);
-    RUNTIMEC_EXPECT(argument.reserved_32_bits == 0U);
-    RUNTIMEC_EXPECT(argument.body_address == BINRWIR_BODY_ADDRESS_NONE);
 
-    argument.body_address = UINT64_C(0x1000);
-    argument.argument_index = BINRWIR_ARGUMENT_INDEX_NONE;
-    argument.reserved_32_bits = 0U;
+    argument.reference_kind = BINRWIR_REFERENCE_STATIC;
+    argument.slot = 0U;
+    argument.payload = UINT64_C(0x1008);
+    RUNTIMEC_EXPECT(binrwir_argument_validate(&argument) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+
+    argument.reserved_8_bits = 1U;
     RUNTIMEC_EXPECT(binrwir_argument_validate(&argument) ==
                     RUNTIMEC_STATUS_INVALID);
 }
@@ -123,7 +160,7 @@ static void test_host_services_version(void) {
     runtimec_host_services_t services;
 
     runtimec_host_services_initialize(&services);
-    RUNTIMEC_EXPECT(services.binary_interface_version == 3U);
+    RUNTIMEC_EXPECT(services.binary_interface_version == 4U);
     services.binary_interface_version = 2U;
     RUNTIMEC_EXPECT(!runtimec_host_services_is_valid(&services));
 }
@@ -133,7 +170,7 @@ int main(void) {
 
     (void)opaque_runtime;
     test_plain_data_copy_round_trip();
-    test_addressed_argument_failure_shape();
+    test_reference_argument_failure_shape();
     test_instruction_argument_count_overflow();
     test_host_services_version();
     return failures == 0 ? 0 : 1;

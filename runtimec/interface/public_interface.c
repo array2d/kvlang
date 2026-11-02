@@ -1,8 +1,14 @@
-/* runtimec 公共 C 接口的失败封闭骨架。 */
+/* runtimec 公共 C 接口：把结构化请求翻译成 engine 的调用。 */
 
 #include <string.h>
 
 #include <kvlang/runtimec.h>
+
+#include "engine/platform_session.h"
+
+/* 派生状态的容量上限：不表达任何正确性开关，只是缓存规模。 */
+#define RUNTIMEC_DEFAULT_COMPILATION_CACHE_CAPACITY 256U
+#define RUNTIMEC_DEFAULT_MACHINE_CODE_CAPACITY (1U << 20)
 
 static int kvlang_runtime_text_buffer_is_valid(
     const kvlang_runtime_text_buffer_t *buffer) {
@@ -66,9 +72,32 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_create(
             error, RUNTIMEC_STATUS_INVALID,
             "invalid runtimec create request");
     }
-    return kvlang_runtime_fail(
-        error, RUNTIMEC_STATUS_NOT_IMPLEMENTED,
-        "runtimec creation is not implemented");
+    runtimec_session_options_t options;
+    /* 结构体一次填满：engine 会校验 structure_size，缺省路径不留未初始化字节。 */
+    options.structure_size = sizeof(options);
+    options.allocator = runtimec_default_allocator();
+    /* 编译缓存与机器码容量是派生状态的容量上限，不表达正确性开关。 */
+    options.compilation_cache_capacity = RUNTIMEC_DEFAULT_COMPILATION_CACHE_CAPACITY;
+    options.machine_code_capacity = RUNTIMEC_DEFAULT_MACHINE_CODE_CAPACITY;
+    options.enable_jit = true;
+
+    runtimec_platform_session_t *platform_session = NULL;
+    runtimec_error_t engine_error;
+    runtimec_error_reset(&engine_error);
+    const runtimec_status_t status = runtimec_platform_session_create(
+        request->data_source_name, &options, &platform_session, &engine_error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        /* engine 的错误文本是借用视图：在本帧内转成公共错误结构。 */
+        if (engine_error.message.size != 0U &&
+            engine_error.message.data != NULL) {
+            return kvlang_runtime_fail(error, status,
+                                       engine_error.message.data);
+        }
+        return kvlang_runtime_fail(error, status,
+                                   runtimec_status_name(status));
+    }
+    *output = (kvlang_runtime_t *)platform_session;
+    return RUNTIMEC_STATUS_SUCCESS;
 }
 
 KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_destroy(
@@ -79,9 +108,17 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_destroy(
             error, RUNTIMEC_STATUS_INVALID,
             "invalid runtimec destroy request");
     }
-    return kvlang_runtime_fail(
-        error, RUNTIMEC_STATUS_NOT_IMPLEMENTED,
-        "runtimec destruction is not implemented");
+    runtimec_error_t engine_error;
+    runtimec_error_reset(&engine_error);
+    const runtimec_status_t status = runtimec_platform_session_destroy(
+        (runtimec_platform_session_t *)runtime, &engine_error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return kvlang_runtime_fail(
+            error, status,
+            engine_error.message.data != NULL ? engine_error.message.data
+                                              : runtimec_status_name(status));
+    }
+    return RUNTIMEC_STATUS_SUCCESS;
 }
 
 KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_execute(

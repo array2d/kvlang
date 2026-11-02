@@ -42,12 +42,24 @@ int main(void) {
         {program_counter, sizeof(program_counter), 5U, 5U},
     };
 
-    RUNTIMEC_EXPECT(kvlang_runtime_create(
-        &create_request, &created_runtime, &error) ==
-        RUNTIMEC_STATUS_NOT_IMPLEMENTED);
-    RUNTIMEC_EXPECT(created_runtime == NULL);
-    RUNTIMEC_EXPECT(error.status == RUNTIMEC_STATUS_NOT_IMPLEMENTED);
-    RUNTIMEC_EXPECT(error.message.length != 0U);
+    /* create 已接通 engine：没有可装载的 kvspace 前端时必须明确失败并点名
+     * SONAME，绝不返回半初始化句柄。 */
+    {
+        char error_text[512];
+        kvlang_runtime_error_t load_error =
+            prepare_error(error_text, sizeof(error_text));
+        created_runtime = runtime;
+        const runtimec_status_t create_status = kvlang_runtime_create(
+            &create_request, &created_runtime, &load_error);
+        RUNTIMEC_EXPECT(create_status == RUNTIMEC_STATUS_UNSUPPORTED ||
+                        create_status == RUNTIMEC_STATUS_NOT_IMPLEMENTED ||
+                        create_status == RUNTIMEC_STATUS_ERROR);
+        RUNTIMEC_EXPECT(created_runtime == NULL);
+        RUNTIMEC_EXPECT(load_error.status == create_status);
+        RUNTIMEC_EXPECT(load_error.message.length != 0U);
+        RUNTIMEC_EXPECT(strstr(error_text, "libkvspace") != NULL ||
+                        strstr(error_text, "kvspace") != NULL);
+    }
 
     {
         char small_error_message[4] = {'x', 'y', 'z', '\0'};
@@ -61,7 +73,10 @@ int main(void) {
         RUNTIMEC_EXPECT(small_error.status ==
                         RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY);
         RUNTIMEC_EXPECT(small_error.operation_status ==
-                        RUNTIMEC_STATUS_NOT_IMPLEMENTED);
+                        RUNTIMEC_STATUS_UNSUPPORTED ||
+                        small_error.operation_status ==
+                            RUNTIMEC_STATUS_NOT_IMPLEMENTED ||
+                        small_error.operation_status == RUNTIMEC_STATUS_ERROR);
         RUNTIMEC_EXPECT(small_error.message.length == 0U);
         RUNTIMEC_EXPECT(small_error.message.required_length >=
                         sizeof(small_error_message));
@@ -88,9 +103,12 @@ int main(void) {
     RUNTIMEC_EXPECT(program_counter[0] == '\0');
 
     error = prepare_error(error_message, sizeof(error_message));
-    RUNTIMEC_EXPECT(kvlang_runtime_destroy(runtime, &error) ==
-                    RUNTIMEC_STATUS_NOT_IMPLEMENTED);
-    RUNTIMEC_EXPECT(error.status == RUNTIMEC_STATUS_NOT_IMPLEMENTED);
+    /* destroy 只接受 create 返回的句柄；NULL 必须被拒。非 create 得到的地址
+     * 是不透明句柄契约之外的输入（任何实现都只能解引用），不在此断言。 */
+    error = prepare_error(error_message, sizeof(error_message));
+    RUNTIMEC_EXPECT(kvlang_runtime_destroy(NULL, &error) ==
+                    RUNTIMEC_STATUS_INVALID);
+    RUNTIMEC_EXPECT(error.status == RUNTIMEC_STATUS_INVALID);
 
     if (failures != 0) {
         fprintf(stderr, "stub_fail_closed_test: %d failure(s)\n", failures);

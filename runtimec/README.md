@@ -68,10 +68,13 @@ myrwircaps + plaintext RWIR in kvspace
 
 主干顺序不能重排：
 
-- `specification/` 保存行为决策、RWIR 操作事实及 myrwircap 到 canonical BinRWIR 的映射。
-- `vmkv/` 从 kvspace 读取含 operation name、参数类型和参数名的明文 RWIR，通过 host 将
-  每个静态参数 key 解引用为 XValue 基址，并作为唯一组件校验固定 8 字节 head、检查 `+8`
-  溢出和生成最终 `argaddr`；只有全部地址合格时才生成 canonical BinRWIR Program。
+- `specification/` 保存行为决策与两级能力事实：能力行（语义算子，唯一）与别名表
+  （surface 名字 → 能力行，多对一）。一个 surface 名字恰好一条别名映射，一条能力行
+  由多个名字共享。
+- `vmkv/` 从 kvspace 读取含 operation name、参数类型和参数名的明文 RWIR，把每个
+  参数收窄成单一具体类型，通过 host 将每个静态参数 key 解引用为 XValue 基址，并作为
+  唯一组件校验固定 8 字节 head、检查 `+8` 溢出和生成最终 `argaddr`；只有全部地址
+  合格时才生成 canonical BinRWIR Program。
 - `binrwir/` 拥有中立的进程内 Program、`opid` 与 `argidx + uint64 argaddr` 参数记录、
   signature、execution frame、execution exit 与 execution plan 合同；它不属于 vmbin。
 - `binrwir_compiler/` 是 canonical BinRWIR 的唯一编译组件。它派生 execution plan，
@@ -127,35 +130,70 @@ runtimec/
 
 组件没有源文件时，构建配置必须立即失败。禁止生成空翻译单元让缺失组件看似成功。
 
-## 4. Specification 与 canonical 映射
+## 4. Specification：两级能力表与 canonical 映射
 
 RWIR 是 kvspace 中可恢复的明文存储格式。每条调用保留 operation name；每个参数保留
 参数类型和参数名，并以 Read 或 Write 方向参与调用。`myrwircaps` 表示本 runtime 能就地
-兑现的 RWIR capability 集合。runtimec 不使用数组
-下标、文件顺序或声明顺序作为操作身份。每个 myrwircap 必须在
-`specification/rwir_catalog.def` 中拥有一条且只有一条映射记录，该记录必须显式给出：
+兑现的 RWIR capability 集合。runtimec 不使用数组下标、文件顺序或声明顺序作为操作身份。
 
-- 稳定 RWIR operation identifier；
-- myrwircap 的规范名称；
-- 唯一 canonical BinRWIR operation identifier；
-- Read 参数与 Write 参数结构；
-- 每个参数在 canonical signature 中的 `argidx`；
-- 五语言行为决策引用。
+能力事实分**两级**（裁决见 `workspace/622/architect/decision-union-operators.md`）：
 
-稳定 identifier 是规范数据，不是容器位置。重新排序 manifest、插入新操作或改变生成器
-都不能改变既有 identifier；已删除 identifier 不得复用。以下情况都是编译错误：
+```text
+capability_table（128 条能力行）   语义算子：union 参数掩码 + 约束 + 结果规则
+        ▲
+        │  多对一
+alias_table（316 条映射）          surface 名字（+ / add / int64·add …）→ 能力行
+```
 
-- myrwircap 没有 canonical 映射；
-- 同一个 myrwircap 出现多条映射；
-- 两条记录复用同一个稳定 identifier；
+- `specification/rwir_catalog.def`：**能力行**，一行一个语义算子。例如 `Add` 只占
+  一行，`int64·add`、`float32·add`、`+`、`add` 全部指向它。每行显式给出稳定
+  identifier、`opid`、Read/Write 的 **TypeSet bitmask union**、操作数约束
+  （`None`/`SameClass`/`NumericCompatible`/`NumericCompare`）、结果规则
+  （`Same0`/`Same1`/`Widen`/`WidenInt`/`Bool`/`Float64`/`TargetType`/
+  `Identity`/`CharacterUtf8`）、别名策略与五语言行为决策引用。
+- `specification/rwir_alias_table.def`：**surface 名字 → 能力行 identifier** 的映射，
+  纯数据、不带类型。316 个注册名收敛到 128 条能力行，因此是**多对一**。
+
+一条能力行覆盖多种精度，**但 BinRWIR 里每个参数必须收窄成单一具体类型**：
+
+| 层 | 粒度 | 参数类型 |
+|---|---|---|
+| capability_table | 语义算子 | union：一行覆盖多种精度 |
+| BinRWIR | 每次调用 | 单一具体 langtype，每参数恰好一个 |
+
+manifest 回答「这个算子能接受什么」；BinRWIR 回答「这一次调用实际是什么」。vmkv 负责
+在编译期按实参类型把 union 收敛成具体类型（并按 promotion 表算出结果类型），此后不再
+有二义。canonical Program 的签名按 `argidx` 索引逐个参数的具体类型；出现 union、
+`any` 或空类型一律拒绝。
+
+**具名族行的签名来源**：`union_mask = 0` 的能力行（`compactarray·*`、`string·*`、
+`time/duration·*` 等具名族，以及 `call`/`return`/`goto`/`branch`/`debugger` 这类
+不产生标量值的控制行）表示它不走标量 union 通道：参数与结果类型由 `/lib/<op>` 安装
+的 `def rwir` 给出，`ResultRule = Identity` 意为「取安装签名」。这是「manifest 不得
+复制第二张签名表」的直接结果，不是遗漏，也不是 wildcard。`obj`、`map·new`、
+`struct·new`、`kvlang·abs` 是例外，带类别位。
+
+**生成与门禁**：`rwir_catalog.def` 与 `rwir_alias_table.def` 都由
+`tools/architecture/generate_rwir_catalog.py` 生成。手改会被判 out of date：
+
+```bash
+python3 runtimec/tools/architecture/generate_rwir_catalog.py --check --require-complete
+```
+
+稳定 identifier 是规范数据，不是容器位置：重排 manifest、插入新算子或改生成器都不得
+改变既有 identifier，已删除 identifier 不得复用。以下都是编译错误：
+
+- 某个 surface 名字没有别名映射；
+- 同一条能力行出现两条互相冲突的定义；
+- 两条能力行复用同一个稳定 identifier 或同一个 `opid`；
 - 名称、identifier、参数方向或行为决策无法得到唯一结果。
 
-vmkv 必须逐条执行这个映射并保持语义等价：operation name 映射为 `opid`，参数类型与
-参数名经 signature 验证后映射为 `argidx`；host 将参数 key 解引用为 64 位 XValue 基址，
-vmkv 验证 XValue head ABI 固定为 8 字节并以溢出检查计算
-`uint64 argaddr = xvalue_address + 8`。它不能用近似操作、默认操作、未知操作或数组位置补洞。
-host 不得返回自行选择偏移后的 body 地址。完整规则见
-`specification/myrwircap-binrwir-mapping.md`。
+vmkv 必须逐条执行这个映射并保持语义等价：operation name 经 alias 表映射为能力行
+`opid`，参数类型与参数名经 signature 验证后映射为 `argidx`，且每个参数的类型收窄到
+单一具体 langtype；host 将参数 key 解引用为 64 位 XValue 基址，vmkv 验证 XValue head
+ABI 固定为 8 字节并以溢出检查计算 `uint64 argaddr = xvalue_address + 8`。它不能用近似
+操作、默认操作、未知操作或数组位置补洞。host 不得返回自行选择偏移后的 body 地址。
+完整规则见 `specification/myrwircap-binrwir-mapping.md`。
 
 ## 5. BinRWIR 中立合同
 
@@ -284,7 +322,7 @@ canonical BinRWIR 生成。host 不能决定 body 偏移。类型固化、融合
 vmbin 是 address-driven memory executor。它从每个 `argaddr` 指向的 kvspace body 读取，
 并在逻辑 instruction 完成前把 Write 结果写入对应 body。它不拥有 xvalue/value cache、
 software register file 或跨逻辑指令的 body 临时副本。generic、typed、fused
-与 continuous handler 只能是 `vmbin_execute` 背后的内部 dispatch 策略；融合不得消除
+与 continuous rwir_runtimecimpl 只能是 `vmbin_execute` 背后的内部 dispatch 策略；融合不得消除
 kvspace 写回，也不得跳过任何 logical instruction completion recovery/observable boundary。
 
 ### binrwir_compiler/jit
@@ -324,7 +362,7 @@ BinRWIR Compiler 也不得把它改写为运行时 key lookup 或借 JIT 绕过�
 - C、Python、Rust、Go、V8/TypeScript 一致：kvlang 必须遵从。
 - 五家分裂：记录选择阵营、原因、边界 fixture 和非法输入结果。
 - 每个 specification manifest 条目必须引用已有 `behavior-decision`。
-- 没有矩阵记录，不能添加 myrwircap 映射、canonical operation 或执行语义。
+- 没有矩阵记录，不能添加能力行、别名映射、canonical operation 或执行语义。
 
 ## 12. 依赖方向
 
@@ -406,8 +444,10 @@ runtimec 是 #622“runtime 回归 C”的新落点：它取代旧 `runtime/` �
 
 - 语义裁决先落 spec：`#622 4.1` 六项与 `#622 4.3` 两项已写入
   `specification/five-language-behavior-matrix.md`；没有矩阵决策，不得实现对应语义。
-- 单一事实源：`specification/rwir_catalog.def` 是 myrwircap → canonical BinRWIR 的唯一
-  manifest；签名与执行家族从同一输入生成，CI 必须断言不存在可与它漂移的第二份表。
+- 单一事实源：`specification/rwir_catalog.def` 是能力行（语义算子）的唯一 manifest，
+  `specification/rwir_alias_table.def` 是 surface 名字到能力行的唯一映射；两份都由
+  `generate_rwir_catalog.py` 生成，CI 用 `--check --require-complete` 断言不存在可与
+  它漂移的第二份表。能力行唯一、别名多对一。
 - 检查点粒度：保留逐指令 `pc` + `status`，不迁移 `mem_frame`（`#622 4.4`）。
 - BIN 栈可重建：删除全部派生缓存后，从 kvspace 明文 RWIR 与当前 `V.body` 重建，并从
   最后已提交完成边界继续执行（#499）。

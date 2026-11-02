@@ -3,15 +3,17 @@
 
 /*
  * 组件：binrwir/execution_frame
- * 作用：保存 BinRWIR 执行所需的控制状态。
- * 联系：engine route 创建 Frame；vmbin 与 BinRWIR JIT 消费。
- * 约束：Frame 不保存参数绑定或 V.body 内容。语言可见值的唯一权威副本
- *       位于 kvspace；每条源指令边界必须可观察。
+ * 作用：保存 BinRWIR 执行所需的控制状态，并持有本次调用的帧绑定表指针。
+ * 联系：engine route 创建 Frame；vmbin 在调用入口写入绑定表，vmbin 与 JIT 消费。
+ * 约束：Frame 持有的是可丢弃、可重建的地址绑定（槽 → XValue 基址 + generation），
+ *       不是值缓存：语言可见值的唯一权威副本位于 kvspace，Frame 不保存 V.body
+ *       内容；每条源指令边界必须可观察。
  */
 
 #include <stdint.h>
 
 #include "contract/status.h"
+#include "binrwir/frame_bindings.h"
 #include "binrwir/program.h"
 
 #ifdef __cplusplus
@@ -28,6 +30,8 @@ typedef enum binrwir_execution_frame_flags {
 typedef struct binrwir_execution_frame {
     const binrwir_program_t *program;
     struct binrwir_execution_frame *parent;
+    /* 本次调用的地址绑定表；由调用入口建立并拥有，Frame 只借用该指针。 */
+    binrwir_frame_bindings_t *bindings;
     uint64_t snapshot_generation;
     uint64_t program_generation;
     uint32_t logical_program_counter;
@@ -44,6 +48,7 @@ runtimec_status_t binrwir_execution_frame_initialize(
     uint32_t logical_program_counter);
 runtimec_status_t binrwir_execution_frame_reset(
     binrwir_execution_frame_t *frame);
+/* 只清空借用指针与标志，不销毁绑定表（所有权归调用入口）。 */
 runtimec_status_t binrwir_execution_frame_destroy(
     binrwir_execution_frame_t *frame);
 

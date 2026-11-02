@@ -41,6 +41,7 @@ void runtimec_host_services_initialize(runtimec_host_services_t *services) {
         services->signal = NULL;
         services->source_revision = NULL;
         services->resolve_static_xvalue_address = NULL;
+        services->resolve_frame_xvalue_address = NULL;
         services->checkpoint = NULL;
         services->handoff = NULL;
     }

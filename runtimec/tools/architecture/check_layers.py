@@ -100,10 +100,25 @@ C_NON_CODE_PATTERN = re.compile(
     r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'',
     re.DOTALL,
 )
+# 只有 JIT 拥有的存储形态：寄存器文件、寄存器分配、寄存器描述符、spill 槽。
+# 裸 `register` 不算——`register_parameters`（登记参数）是普通动词。
 JIT_EXCLUSIVE_STORAGE_PATTERN = re.compile(
-    r"\b(?:[A-Za-z_][A-Za-z0-9_]*register[A-Za-z0-9_]*|"
-    r"[A-Za-z_][A-Za-z0-9_]*spill[A-Za-z0-9_]*)\b",
+    r"(?:register[ _]?file|register[ _]?allocation|register[ _]?allocator|"
+    r"register[ _]?desc(?:riptor)?|virtual[ _]?register|"
+    r"spill[ _]?slot|spill[ _]?state|spilled?[ _]?register)",
     re.IGNORECASE,
+)
+# 二进制接口版本不写死具体数字：头文件定义与契约测试的 pin 必须一致。
+BINARY_INTERFACE_VERSION_DEFINITION = re.compile(
+    r"#define\s+RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION\s+(\d+)U\b"
+)
+BINARY_INTERFACE_VERSION_PIN = re.compile(
+    r"RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION\s*==\s*(\d+)U\b"
+)
+REQUIRED_BODY_ADDRESS_DERIVATION_TOKENS = (
+    "UINT64_MAX - RUNTIMEC_XVALUE_BODY_OFFSET_BYTES",
+    "xvalue_address + RUNTIMEC_XVALUE_BODY_OFFSET_BYTES",
+    "RUNTIMEC_XVALUE_ADDRESS_NONE",
 )
 REMOVED_VALUE_CACHE_PATTERN = re.compile(
     r"\b(?:binrwir_value_slot|binrwir_cell|value_slot|cell_cache|"
@@ -299,8 +314,10 @@ def audit_addressed_binrwir_model(
         binrwir_root / "argument.h": (
             "binrwir_argument", "binrwir_argument_t",
             ("uint32_t argument_index",
-             "uint32_t reserved_32_bits",
-             "uint64_t body_address"),
+             "uint8_t reference_kind",
+             "uint8_t reserved_8_bits",
+             "uint16_t slot",
+             "uint64_t payload"),
             "sizeof(binrwir_argument_t) == 16U",
         ),
         binrwir_root / "instruction.h": (
@@ -330,7 +347,7 @@ def audit_addressed_binrwir_model(
     required_layout_assertions = {
         binrwir_root / "argument.h": (
             "offsetof(binrwir_argument_t, argument_index) == 0U",
-            "offsetof(binrwir_argument_t, body_address) == 8U",
+            "offsetof(binrwir_argument_t, payload) == 8U",
         ),
         binrwir_root / "instruction.h": (
             "offsetof(binrwir_instruction_t, operation_identifier) == 0U",
@@ -347,16 +364,20 @@ def audit_addressed_binrwir_model(
                     display, 1, "addressed-binrwir-offset", assertion,
                 ))
 
+    # 裁决 A.1：参数是引用，不是地址。唯一携带地址的是 STATIC，其 payload
+    # 必须非零；零地址只能在 STATIC 分支被拒绝（其余 kind 的 payload 不是地址）。
     argument_source = binrwir_root / "argument.c"
     instruction_source = binrwir_root / "instruction.c"
     required_source_tokens = {
         argument_source: (
-            "body_address == BINRWIR_BODY_ADDRESS_NONE",
+            "BINRWIR_REFERENCE_STATIC",
+            "payload == BINRWIR_BODY_ADDRESS_NONE",
             "memset(output_argument, 0, sizeof(*output_argument))",
         ),
+        # instruction 不直接判地址，它把每个参数交给 argument_validate；
+        # 这里只要求它确实走了引用校验，不允许自己比较地址字段。
         instruction_source: (
-            ".body_address ==",
-            "BINRWIR_BODY_ADDRESS_NONE",
+            "binrwir_argument_validate",
         ),
     }
     for path, tokens in required_source_tokens.items():
@@ -368,18 +389,49 @@ def audit_addressed_binrwir_model(
                 findings.append(Finding(
                     display, 1, "missing-zero-address-rejection", token,
                 ))
+    for path in (argument_source, instruction_source):
+        display = relative_display(path, repository_root)
+        text = path.read_text(encoding="utf-8") if path.is_file() else ""
+        text = c_code_without_comments_or_literals(text)
+        if "body_address" in text:
+            findings.append(Finding(
+                display, 1, "addressed-binrwir-layout",
+                "argument items carry references, not scalar addresses; "
+                "`body_address` must not appear",
+            ))
 
     host_services = runtimec_root / "contract" / "host_services.h"
     host_text = host_services.read_text(encoding="utf-8") \
         if host_services.is_file() else ""
-    if not re.search(
-        r"#define\s+RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION\s+3U\b",
-        host_text,
-    ):
+    version = BINARY_INTERFACE_VERSION_DEFINITION.search(host_text)
+    if version is None:
         findings.append(Finding(
             relative_display(host_services, repository_root), 1,
-            "host-services-version", "binary interface version 3 is required",
+            "host-services-version",
+            "an explicit unsigned binary interface version is required",
         ))
+    else:
+        pins = {}
+        tests_directory = runtimec_root / "tests"
+        for path in sorted(tests_directory.glob("*.c")):
+            for match in BINARY_INTERFACE_VERSION_PIN.finditer(
+                    c_code_without_comments_or_literals(
+                        path.read_text(encoding="utf-8"))):
+                pins.setdefault(match.group(1), []).append(
+                    relative_display(path, repository_root))
+        if not pins:
+            findings.append(Finding(
+                relative_display(host_services, repository_root), 1,
+                "host-services-version-pin",
+                "a contract test must pin the declared binary interface version",
+            ))
+        for pinned, places in sorted(pins.items()):
+            if pinned != version.group(1):
+                findings.append(Finding(
+                    places[0], 1, "host-services-version-pin",
+                    f"contract test pins version {pinned} while the header "
+                    f"declares {version.group(1)}",
+                ))
     for token in (
         "RUNTIMEC_XVALUE_BODY_OFFSET_BYTES KVSPACE_XVALUE_HEAD_LEN",
         "RUNTIMEC_XVALUE_BODY_OFFSET_BYTES == 8U",
@@ -391,34 +443,43 @@ def audit_addressed_binrwir_model(
                 "xvalue-body-address-contract", token,
             ))
 
-    vmkv_source = runtimec_root / "vmkv" / "vmkv.c"
-    vmkv_text = vmkv_source.read_text(encoding="utf-8") \
-        if vmkv_source.is_file() else ""
-    for token in (
-        "static bool vmkv_derive_value_body_address(",
-        "UINT64_MAX - RUNTIMEC_XVALUE_BODY_OFFSET_BYTES",
-        "xvalue_address + RUNTIMEC_XVALUE_BODY_OFFSET_BYTES",
-    ):
-        if token not in c_code_without_comments_or_literals(vmkv_text):
-            findings.append(Finding(
-                relative_display(vmkv_source, repository_root), 1,
-                "vmkv-owned-body-address-derivation", token,
-            ))
-
-    offset_owners = {host_services, vmkv_source}
-    for path in iter_product_sources(runtimec_root):
-        code = c_code_without_comments_or_literals(
-            path.read_text(encoding="utf-8"),
-        )
-        if (path not in offset_owners and
-                "RUNTIMEC_XVALUE_BODY_OFFSET_BYTES" in code):
+    code_by_path = {
+        path: c_code_without_comments_or_literals(path.read_text(encoding="utf-8"))
+        for path in iter_product_sources(runtimec_root)
+    }
+    # 推导归属由代码本身决定，不钉文件名：拆文件、改名都不该让规则失效，
+    # 真正的约束是「恰好一个 vmkv 源推导 body 地址」。
+    offset_users = [
+        path for path, code in code_by_path.items()
+        if path != host_services and "RUNTIMEC_XVALUE_BODY_OFFSET_BYTES" in code
+    ]
+    derivation_owners = [path for path in offset_users if path.parent.name == "vmkv"]
+    if len(derivation_owners) != 1:
+        findings.append(Finding(
+            relative_display(runtimec_root / "vmkv", repository_root), 1,
+            "vmkv-owned-body-address-derivation",
+            "exactly one vmkv source must derive the body address; found "
+            + (", ".join(relative_display(path, repository_root)
+                         for path in derivation_owners) or "none"),
+        ))
+    else:
+        owner = derivation_owners[0]
+        for token in REQUIRED_BODY_ADDRESS_DERIVATION_TOKENS:
+            if token not in code_by_path[owner]:
+                findings.append(Finding(
+                    relative_display(owner, repository_root), 1,
+                    "vmkv-owned-body-address-derivation", token,
+                ))
+    for path in offset_users:
+        if path.parent.name != "vmkv":
             findings.append(Finding(
                 relative_display(path, repository_root), 1,
                 "body-address-derivation-outside-vmkv",
-                "only the contract declaration and VMKV derivation may use "
-                "the XValue body offset",
+                "only the contract declaration and the single VMKV derivation "
+                "may use the XValue body offset",
             ))
-        if path != vmkv_source:
+    for path, code in code_by_path.items():
+        if path not in derivation_owners:
             for match in HARDCODED_XVALUE_BODY_OFFSET_PATTERN.finditer(code):
                 findings.append(Finding(
                     relative_display(path, repository_root),
@@ -428,7 +489,7 @@ def audit_addressed_binrwir_model(
                 ))
 
     removed_resolver_name = "resolve_static_" + "value_body_address"
-    for path in iter_product_sources(runtimec_root):
+    for path in code_by_path:
         text = path.read_text(encoding="utf-8")
         if removed_resolver_name in text:
             findings.append(Finding(
@@ -436,13 +497,10 @@ def audit_addressed_binrwir_model(
                 "removed-static-address-resolver", removed_resolver_name,
             ))
 
-    for path in iter_product_sources(runtimec_root):
+    for path, code in code_by_path.items():
         relative = path.relative_to(runtimec_root)
         if relative.parts[:2] == ("binrwir_compiler", "jit"):
             continue
-        code = c_code_without_comments_or_literals(
-            path.read_text(encoding="utf-8"),
-        )
         for rule, pattern in (
             ("jit-storage-outside-jit", JIT_EXCLUSIVE_STORAGE_PATTERN),
             ("removed-value-cache-model", REMOVED_VALUE_CACHE_PATTERN),

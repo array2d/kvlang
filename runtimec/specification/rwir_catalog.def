@@ -15,7 +15,7 @@
  *       复制第二张签名表）；ResultRule IDENTITY 表示结果类型取安装签名，
  *       不是 wildcard。control 行不产生值。
  * 统计：注册表 316 个 surface 名字 → 316 条别名映射；
- *       120 条同名映射，196 条别名；能力行 128 条，待裁 0 条。
+ *       120 条同名映射，196 条别名；能力行 131 条，待裁 0 条。
  */
 #ifndef RUNTIMEC_RWIR_OPERATION
 #error "Define RUNTIMEC_RWIR_OPERATION before including rwir_catalog.def"
@@ -284,6 +284,27 @@ RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_POINTER_EQUAL, "ptreq", 0x0021,
                         "pointer-equality")  /* pointer -> boolean */
 /* behavior-decision: boolean-equality */
 RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_BOOLEAN_EQUAL, "bool·eq", 0x0022,
+                        0x00000400, 0x00000400,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_BOOLEAN,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "boolean-equality")  /* boolean -> boolean */
+/* behavior-decision: character-equality-by-text */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_CHARACTER_NOT_EQUAL, "streq·not", 0x0029,
+                        0x00003800, 0x00000400,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_BOOLEAN,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "character-equality-by-text")  /* character -> boolean */
+/* behavior-decision: pointer-equality */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_POINTER_NOT_EQUAL, "ptreq·not", 0x002A,
+                        0x00040000, 0x00000400,
+                        RUNTIMEC_RWIR_CONSTRAINT_SAME_CLASS,
+                        RUNTIMEC_RWIR_RESULT_BOOLEAN,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "pointer-equality")  /* pointer -> boolean */
+/* behavior-decision: boolean-equality */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_BOOLEAN_NOT_EQUAL, "bool·neq", 0x002B,
                         0x00000400, 0x00000400,
                         RUNTIMEC_RWIR_CONSTRAINT_NONE,
                         RUNTIMEC_RWIR_RESULT_BOOLEAN,

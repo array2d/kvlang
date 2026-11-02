@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION 3U
+#define RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION 4U
 #define RUNTIMEC_XVALUE_ADDRESS_NONE UINT64_C(0)
 #define RUNTIMEC_XVALUE_BODY_OFFSET_BYTES KVSPACE_XVALUE_HEAD_LEN
 #define RUNTIMEC_VALUE_BODY_ADDRESS_NONE UINT64_C(0)
@@ -84,10 +84,11 @@ typedef runtimec_status_t (*runtimec_host_source_revision_function_t)(
     void *context, runtimec_key_view_t function_key,
     runtimec_source_revision_t *revision, runtimec_error_t *error);
 /*
- * 只解析静态 key。SUCCESS 必须返回非零的 XValue 进程内基址，且 host 必须
+ * 解析静态 key。SUCCESS 必须返回非零的 XValue 进程内基址，且 host 必须
  * 保证该地址在 snapshot.source_revision 失效前保持有效和不变。动态 key、
  * 尚未分配的 key，或无法提供上述生命周期保证的 key 必须返回 UNSUPPORTED，
  * 并把 output_xvalue_address 保持为 RUNTIMEC_XVALUE_ADDRESS_NONE。
+ * 这条保证的是 compilation 租约：地址在整份 compilation 有效期内不变。
  */
 typedef runtimec_status_t
 (*runtimec_host_resolve_static_xvalue_address_function_t)(
@@ -95,6 +96,19 @@ typedef runtimec_status_t
     runtimec_key_view_t key,
     runtimec_xvalue_address_t *output_xvalue_address,
     runtimec_error_t *error);
+/*
+ * 解析帧 key（`/vthread/{vid}/[d]/…`）在**调用时**绑定的真地址。与静态那条
+ * 并列而不合并：静态保证 compilation 租约，这条保证 generation——地址只在
+ * output_generation 与当前 source generation 相等时有效，不等即失效，必须重绑。
+ * SUCCESS 返回非零基址与非零 generation；动态拼出的 key、无法证明生命周期、
+ * 尚未分配的槽一律 UNSUPPORTED，并把两个输出清零。
+ */
+typedef runtimec_status_t
+(*runtimec_host_resolve_frame_xvalue_address_function_t)(
+    void *context, const runtimec_snapshot_t *snapshot,
+    runtimec_key_view_t key,
+    runtimec_xvalue_address_t *output_xvalue_address,
+    uint64_t *output_generation, runtimec_error_t *error);
 typedef runtimec_status_t (*runtimec_host_checkpoint_function_t)(
     void *context, const runtimec_checkpoint_t *checkpoint,
     runtimec_error_t *error);
@@ -117,6 +131,8 @@ typedef struct runtimec_host_services {
     runtimec_host_source_revision_function_t source_revision;
     runtimec_host_resolve_static_xvalue_address_function_t
         resolve_static_xvalue_address;
+    runtimec_host_resolve_frame_xvalue_address_function_t
+        resolve_frame_xvalue_address;
     runtimec_host_checkpoint_function_t checkpoint;
     runtimec_host_handoff_function_t handoff;
 } runtimec_host_services_t;

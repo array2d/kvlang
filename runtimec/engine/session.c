@@ -1,10 +1,37 @@
-/* engine/session 的失败封闭骨架。 */
+/*
+ * 组件：engine/session 的实现
+ * 作用：显式 owner graph 的根，持有 host 能力表副本、vmkv encoder、
+ *       BinRWIR Compiler 与 compilation repository。
+ * 联系：interface 经 platform_session 调用本组件；route 在 session 上执行。
+ * 约束：依赖任一构造失败都原样上报第一个失败状态，并按逆序销毁已建对象；
+ *       不用 function-static / global / thread-local 藏状态。
+ */
 
 #include "engine/session.h"
+
+#include <string.h>
 
 #include "binrwir_compiler/compiler.h"
 #include "engine/compilation_repository.h"
 #include "vmkv/encoder.h"
+
+/* 编译器修订号：compilation repository 的 key 字段之一，非零且在构建内固定。 */
+#define RUNTIMEC_SESSION_COMPILER_REVISION 1U
+
+/* JIT 目标三元组：按宿主架构选，编译期常量，不留运行时探测。 */
+#if defined(__x86_64__) && !defined(__APPLE__)
+#define RUNTIMEC_SESSION_JIT_ARCHITECTURE BINRWIR_JIT_ARCHITECTURE_X86_64
+#define RUNTIMEC_SESSION_JIT_TRIPLE "x86_64-unknown-linux-gnu"
+#elif defined(__x86_64__) && defined(__APPLE__)
+#define RUNTIMEC_SESSION_JIT_ARCHITECTURE BINRWIR_JIT_ARCHITECTURE_X86_64
+#define RUNTIMEC_SESSION_JIT_TRIPLE "x86_64-apple-darwin"
+#elif defined(__aarch64__) && defined(__APPLE__)
+#define RUNTIMEC_SESSION_JIT_ARCHITECTURE BINRWIR_JIT_ARCHITECTURE_AARCH64
+#define RUNTIMEC_SESSION_JIT_TRIPLE "aarch64-apple-darwin"
+#else
+#define RUNTIMEC_SESSION_JIT_ARCHITECTURE BINRWIR_JIT_ARCHITECTURE_AARCH64
+#define RUNTIMEC_SESSION_JIT_TRIPLE "aarch64-unknown-linux-gnu"
+#endif
 
 struct runtimec_session_t {
     runtimec_host_services_t host_services;
@@ -14,14 +41,42 @@ struct runtimec_session_t {
     runtimec_compilation_repository_t *compilation_repository;
 };
 
+static runtimec_status_t runtimec_session_fail(runtimec_error_t *error,
+                                               runtimec_status_t status,
+                                               int64_t code,
+                                               const char *message) {
+    runtimec_error_set(error, status, RUNTIMEC_ERROR_DOMAIN_CONTRACT, code,
+                       runtimec_string_view_from_c_string(message),
+                       runtimec_string_view_make(NULL, 0U));
+    return status;
+}
+
+/* 依赖构造失败时点名是哪个组件；失败状态本身原样透传。 */
+static runtimec_status_t runtimec_session_forward(
+    runtimec_error_t *error, runtimec_status_t status, const char *component) {
+    static char message[160];
+    const char *prefix = "dependency failed: ";
+    size_t length = 0U;
+    for (const char *cursor = prefix; *cursor != '\0'; cursor++) {
+        message[length++] = *cursor;
+    }
+    for (const char *cursor = component; *cursor != '\0' &&
+                                      length + 1U < sizeof(message);
+         cursor++) {
+        message[length++] = *cursor;
+    }
+    message[length] = '\0';
+    runtimec_error_set(error, status, RUNTIMEC_ERROR_DOMAIN_CONTRACT, 0,
+                       runtimec_string_view_from_c_string(message),
+                       runtimec_string_view_make(NULL, 0U));
+    return status;
+}
+
 runtimec_status_t runtimec_session_create(
     const runtimec_host_services_t *host_services,
     const runtimec_session_options_t *options,
-    runtimec_session_t **output_session,
-    runtimec_error_t *error) {
-    (void)host_services;
-    (void)options;
-    (void)error;
+    runtimec_session_t **output_session, runtimec_error_t *error) {
+    runtimec_error_reset(error);
     if (output_session != NULL) {
         *output_session = NULL;
     }
@@ -31,17 +86,113 @@ runtimec_status_t runtimec_session_create(
         options->compilation_cache_capacity == 0U ||
         (options->enable_jit && options->machine_code_capacity == 0U) ||
         (!options->enable_jit && options->machine_code_capacity != 0U) ||
-        output_session == NULL) {
-        return RUNTIMEC_STATUS_INVALID;
+        output_session == NULL || error == NULL) {
+        return runtimec_session_fail(error, RUNTIMEC_STATUS_INVALID, 1,
+                                     "invalid session create request");
     }
-    return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
+
+    const runtimec_allocator_t allocator = options->allocator;
+    runtimec_session_t *session = runtimec_allocator_allocate(
+        &allocator, sizeof(*session), _Alignof(runtimec_session_t));
+    if (session == NULL) {
+        return runtimec_session_fail(error, RUNTIMEC_STATUS_OUT_OF_MEMORY, 2,
+                                     "session allocation failed");
+    }
+    memset(session, 0, sizeof(*session));
+    session->host_services = *host_services;
+    session->options = *options;
+
+    runtimec_status_t status = vmkv_encoder_create(
+        allocator, &session->vmkv_encoder, error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        status = runtimec_session_forward(error, status, "vmkv encoder");
+        goto fail;
+    }
+
+    binrwir_compiler_configuration_t configuration;
+    memset(&configuration, 0, sizeof(configuration));
+    configuration.structure_size = sizeof(configuration);
+    configuration.compiler_revision = RUNTIMEC_SESSION_COMPILER_REVISION;
+    configuration.enable_jit = options->enable_jit;
+    if (options->enable_jit) {
+        configuration.jit_machine_code_capacity =
+            options->machine_code_capacity;
+        configuration.jit_target.architecture =
+            RUNTIMEC_SESSION_JIT_ARCHITECTURE;
+        configuration.jit_target.triple = runtimec_string_view_from_c_string(
+            RUNTIMEC_SESSION_JIT_TRIPLE);
+        configuration.jit_target.feature_mask = 0U;
+    }
+    status = binrwir_compiler_create(&allocator, &configuration,
+                                     &session->binrwir_compiler, error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        status = runtimec_session_forward(error, status, "binrwir compiler");
+        goto fail;
+    }
+
+    status = runtimec_compilation_repository_create(
+        allocator, options->compilation_cache_capacity,
+        &session->compilation_repository, error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        status = runtimec_session_forward(error, status,
+                                          "compilation repository");
+        goto fail;
+    }
+
+    *output_session = session;
+    return RUNTIMEC_STATUS_SUCCESS;
+
+fail:
+    /* 按依赖的逆序释放已建对象；只释放确实建成的那些。 */
+    if (session->compilation_repository != NULL) {
+        (void)runtimec_compilation_repository_destroy(
+            session->compilation_repository);
+    }
+    if (session->binrwir_compiler != NULL) {
+        runtimec_error_t ignored;
+        runtimec_error_reset(&ignored);
+        (void)binrwir_compiler_destroy(session->binrwir_compiler, &ignored);
+    }
+    if (session->vmkv_encoder != NULL) {
+        (void)vmkv_encoder_destroy(session->vmkv_encoder);
+    }
+    (void)runtimec_allocator_deallocate(&allocator, session, sizeof(*session),
+                                        _Alignof(runtimec_session_t));
+    *output_session = NULL;
+    return status;
 }
 
 runtimec_status_t runtimec_session_destroy(runtimec_session_t *session) {
     if (session == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
-    return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
+    const runtimec_allocator_t allocator = session->options.allocator;
+    runtimec_status_t status = RUNTIMEC_STATUS_SUCCESS;
+    if (session->compilation_repository != NULL) {
+        status = runtimec_compilation_repository_destroy(
+            session->compilation_repository);
+        if (status != RUNTIMEC_STATUS_SUCCESS) {
+            return status;
+        }
+    }
+    if (session->binrwir_compiler != NULL) {
+        runtimec_error_t ignored;
+        runtimec_error_reset(&ignored);
+        status = binrwir_compiler_destroy(session->binrwir_compiler, &ignored);
+        if (status != RUNTIMEC_STATUS_SUCCESS) {
+            return status;
+        }
+    }
+    if (session->vmkv_encoder != NULL) {
+        status = vmkv_encoder_destroy(session->vmkv_encoder);
+        if (status != RUNTIMEC_STATUS_SUCCESS) {
+            return status;
+        }
+    }
+    memset(session, 0, sizeof(*session));
+    return runtimec_allocator_deallocate(&allocator, session,
+                                         sizeof(*session),
+                                         _Alignof(runtimec_session_t));
 }
 
 runtimec_status_t runtimec_session_get_host_services(
@@ -53,7 +204,8 @@ runtimec_status_t runtimec_session_get_host_services(
     if (session == NULL || output_host_services == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
-    return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
+    *output_host_services = &session->host_services;
+    return RUNTIMEC_STATUS_SUCCESS;
 }
 
 runtimec_status_t runtimec_session_clear_derived_state(
@@ -61,5 +213,10 @@ runtimec_status_t runtimec_session_clear_derived_state(
     if (session == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
-    return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
+    if (session->compilation_repository == NULL) {
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    /* 派生状态只有 compilation repository：清空即可，kvspace 明文不动。 */
+    return runtimec_compilation_repository_clear(
+        session->compilation_repository);
 }

@@ -197,8 +197,10 @@ static void test_vmkv_xvalue_address_encoding(void) {
     vmkv_rwir_argument_view_t dynamic_argument = source_argument;
     binrwir_argument_t encoded_argument = {
         .argument_index = UINT32_MAX,
-        .reserved_32_bits = UINT32_MAX,
-        .body_address = UINT64_MAX,
+        .reference_kind = BINRWIR_REFERENCE_INVALID,
+        .reserved_8_bits = UINT8_MAX,
+        .slot = UINT16_MAX,
+        .payload = UINT64_MAX,
     };
 
     runtimec_host_services_initialize(&host_services);
@@ -222,8 +224,11 @@ static void test_vmkv_xvalue_address_encoding(void) {
         RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(resolution_context.call_count == 1U);
     RUNTIMEC_EXPECT(encoded_argument.argument_index == 7U);
-    RUNTIMEC_EXPECT(encoded_argument.reserved_32_bits == 0U);
-    RUNTIMEC_EXPECT(encoded_argument.body_address == UINT64_C(0x1008));
+    RUNTIMEC_EXPECT(encoded_argument.reference_kind ==
+                    BINRWIR_REFERENCE_STATIC);
+    RUNTIMEC_EXPECT(encoded_argument.reserved_8_bits == 0U);
+    RUNTIMEC_EXPECT(encoded_argument.slot == 0U);
+    RUNTIMEC_EXPECT(encoded_argument.payload == UINT64_C(0x1008));
 
     dynamic_argument.key_addressability = VMKV_KEY_ADDRESSABILITY_DYNAMIC;
     RUNTIMEC_EXPECT(vmkv_encode_static_argument(
@@ -231,55 +236,69 @@ static void test_vmkv_xvalue_address_encoding(void) {
         RUNTIMEC_STATUS_UNSUPPORTED);
     RUNTIMEC_EXPECT(resolution_context.call_count == 1U);
     RUNTIMEC_EXPECT(encoded_argument.argument_index == 0U);
-    RUNTIMEC_EXPECT(encoded_argument.reserved_32_bits == 0U);
-    RUNTIMEC_EXPECT(encoded_argument.body_address ==
-                    BINRWIR_BODY_ADDRESS_NONE);
+    RUNTIMEC_EXPECT(encoded_argument.reference_kind ==
+                    BINRWIR_REFERENCE_INVALID);
+    RUNTIMEC_EXPECT(encoded_argument.reserved_8_bits == 0U);
+    RUNTIMEC_EXPECT(encoded_argument.slot == 0U);
+    RUNTIMEC_EXPECT(encoded_argument.payload == BINRWIR_BODY_ADDRESS_NONE);
 
     resolution_context.xvalue_address = RUNTIMEC_XVALUE_ADDRESS_NONE;
     encoded_argument = (binrwir_argument_t){
         .argument_index = UINT32_MAX,
-        .reserved_32_bits = UINT32_MAX,
-        .body_address = UINT64_MAX,
+        .reference_kind = BINRWIR_REFERENCE_INVALID,
+        .reserved_8_bits = UINT8_MAX,
+        .slot = UINT16_MAX,
+        .payload = UINT64_MAX,
     };
     RUNTIMEC_EXPECT(vmkv_encode_static_argument(
         &request, &source_argument, 7U, &encoded_argument, NULL) ==
         RUNTIMEC_STATUS_ERROR);
     RUNTIMEC_EXPECT(resolution_context.call_count == 2U);
     RUNTIMEC_EXPECT(encoded_argument.argument_index == 0U);
-    RUNTIMEC_EXPECT(encoded_argument.reserved_32_bits == 0U);
-    RUNTIMEC_EXPECT(encoded_argument.body_address ==
-                    BINRWIR_BODY_ADDRESS_NONE);
+    RUNTIMEC_EXPECT(encoded_argument.reference_kind ==
+                    BINRWIR_REFERENCE_INVALID);
+    RUNTIMEC_EXPECT(encoded_argument.reserved_8_bits == 0U);
+    RUNTIMEC_EXPECT(encoded_argument.slot == 0U);
+    RUNTIMEC_EXPECT(encoded_argument.payload == BINRWIR_BODY_ADDRESS_NONE);
 
     resolution_context.xvalue_address = UINT64_MAX - 7U;
     encoded_argument = (binrwir_argument_t){
         .argument_index = UINT32_MAX,
-        .reserved_32_bits = UINT32_MAX,
-        .body_address = UINT64_MAX,
+        .reference_kind = BINRWIR_REFERENCE_INVALID,
+        .reserved_8_bits = UINT8_MAX,
+        .slot = UINT16_MAX,
+        .payload = UINT64_MAX,
     };
     RUNTIMEC_EXPECT(vmkv_encode_static_argument(
         &request, &source_argument, 7U, &encoded_argument, NULL) ==
         RUNTIMEC_STATUS_ERROR);
     RUNTIMEC_EXPECT(resolution_context.call_count == 3U);
     RUNTIMEC_EXPECT(encoded_argument.argument_index == 0U);
-    RUNTIMEC_EXPECT(encoded_argument.reserved_32_bits == 0U);
-    RUNTIMEC_EXPECT(encoded_argument.body_address ==
-                    BINRWIR_BODY_ADDRESS_NONE);
+    RUNTIMEC_EXPECT(encoded_argument.reference_kind ==
+                    BINRWIR_REFERENCE_INVALID);
+    RUNTIMEC_EXPECT(encoded_argument.reserved_8_bits == 0U);
+    RUNTIMEC_EXPECT(encoded_argument.slot == 0U);
+    RUNTIMEC_EXPECT(encoded_argument.payload == BINRWIR_BODY_ADDRESS_NONE);
 
     resolution_context.xvalue_address = RUNTIMEC_XVALUE_ADDRESS_NONE;
     resolution_context.status = RUNTIMEC_STATUS_UNSUPPORTED;
     encoded_argument = (binrwir_argument_t){
         .argument_index = UINT32_MAX,
-        .reserved_32_bits = UINT32_MAX,
-        .body_address = UINT64_MAX,
+        .reference_kind = BINRWIR_REFERENCE_INVALID,
+        .reserved_8_bits = UINT8_MAX,
+        .slot = UINT16_MAX,
+        .payload = UINT64_MAX,
     };
     RUNTIMEC_EXPECT(vmkv_encode_static_argument(
         &request, &source_argument, 7U, &encoded_argument, NULL) ==
         RUNTIMEC_STATUS_UNSUPPORTED);
     RUNTIMEC_EXPECT(resolution_context.call_count == 4U);
     RUNTIMEC_EXPECT(encoded_argument.argument_index == 0U);
-    RUNTIMEC_EXPECT(encoded_argument.reserved_32_bits == 0U);
-    RUNTIMEC_EXPECT(encoded_argument.body_address ==
-                    BINRWIR_BODY_ADDRESS_NONE);
+    RUNTIMEC_EXPECT(encoded_argument.reference_kind ==
+                    BINRWIR_REFERENCE_INVALID);
+    RUNTIMEC_EXPECT(encoded_argument.reserved_8_bits == 0U);
+    RUNTIMEC_EXPECT(encoded_argument.slot == 0U);
+    RUNTIMEC_EXPECT(encoded_argument.payload == BINRWIR_BODY_ADDRESS_NONE);
 }
 
 static void test_compiler_configuration(void) {

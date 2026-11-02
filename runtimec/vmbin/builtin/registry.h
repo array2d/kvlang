@@ -23,7 +23,7 @@ extern "C" {
 #endif
 
 typedef runtimec_status_t
-(*vmbin_builtin_handler_function_t)(
+(*vmbin_builtin_rwir_runtimecimpl_function_t)(
     binrwir_execution_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit);
@@ -37,7 +37,7 @@ typedef enum vmbin_builtin_flags {
 typedef struct vmbin_builtin_entry {
     uint32_t builtin_identifier;
     uint32_t flags;
-    vmbin_builtin_handler_function_t handler;
+    vmbin_builtin_rwir_runtimecimpl_function_t rwir_runtimecimpl;
 } vmbin_builtin_entry_t;
 
 typedef struct vmbin_builtin_registry {

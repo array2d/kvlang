@@ -1,7 +1,7 @@
 /*
  * 组件：binrwir/execution_frame 的实现
- * 作用：安全初始化和重置只保存控制状态的 Frame。
- * 约束：Frame 不拥有 Program，也不保存 V.body 地址或内容。
+ * 作用：安全初始化和重置只保存控制状态的 Frame，并借用调用入口的绑定表。
+ * 约束：Frame 不拥有 Program，也不拥有绑定表；不保存 V.body 地址或内容。
  */
 
 #include "binrwir/execution_frame.h"
@@ -10,9 +10,8 @@
 
 runtimec_status_t binrwir_execution_frame_initialize(
     binrwir_execution_frame_t *frame, const binrwir_program_t *program,
-    binrwir_execution_frame_t *parent,
-    uint64_t snapshot_generation, uint64_t program_generation,
-    uint32_t logical_program_counter) {
+    binrwir_execution_frame_t *parent, uint64_t snapshot_generation,
+    uint64_t program_generation, uint32_t logical_program_counter) {
     if (frame == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
@@ -23,6 +22,7 @@ runtimec_status_t binrwir_execution_frame_initialize(
 
     frame->program = program;
     frame->parent = parent;
+    frame->bindings = NULL;
     frame->snapshot_generation = snapshot_generation;
     frame->program_generation = program_generation;
     frame->logical_program_counter = logical_program_counter;

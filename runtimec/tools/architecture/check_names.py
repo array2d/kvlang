@@ -96,7 +96,9 @@ ABBREVIATIONS = {
     "arg": "argument", "buf": "buffer", "cfg": "control_flow_graph",
     "ctx": "context", "desc": "descriptor", "dst": "destination",
     "fn": "function", "id": "identifier", "impl": "implementation",
-    "len": "length", "op": "operation", "pc": "program_counter",
+    # `pc` 允许：与语言键名 `‥pc` 对齐（用户裁决 2026-11-02，见
+    # workspace/622/architect/decision-frame-addressing.md §B）。
+    "len": "length", "op": "operation",
     "ptr": "pointer", "ref": "reference", "req": "request",
     "src": "source", "tmp": "temporary",
 }
@@ -232,13 +234,17 @@ def audit(repository_root: Path, runtimec_root: Path) -> tuple[list[Finding], in
                     "void-lifecycle-function",
                     match.group(1),
                 ))
+        # 缩写规则只看标识符：注释与字符串字面量先按等长空白抹掉（保留行号）。
+        # 否则 opcode 名字里的 `string·len`、文档里的 `pc` 会被误判为标识符缩写。
+        masked = c_code_without_comments_or_literals(text).splitlines()
         for line_number, line in enumerate(lines, 1):
+            masked_line = masked[line_number - 1] if line_number <= len(masked) else ""
             for rule, pattern in FORBIDDEN_NAMES:
-                for match in pattern.finditer(line):
+                for match in pattern.finditer(masked_line):
                     findings.append(Finding(display, line_number, rule, match.group(0)))
             if path.name == "CMakeLists.txt":
                 continue
-            abbreviation_line = line
+            abbreviation_line = masked_line
             for identifier in ALLOWED_EXTERNAL_IDENTIFIERS:
                 abbreviation_line = abbreviation_line.replace(
                     identifier, " " * len(identifier),
