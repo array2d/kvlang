@@ -1,7 +1,33 @@
-# runtimec2（草稿，未完成）
+# runtimec2（已冻结，等待迁移到 C）
+
+> ## 冻结声明
+>
+> **来自 miaobyte　2026-11-02 09:22:26 CST（2026-11-02T01:22:26Z）**
+>
+> **runtimec2 不再新增功能，也不再做性能优化。**
+>
+> runtime 的最终形态是 C 实现（`runtime/`）。本目录里的架构与全部优化措施，
+> 将被逐项吸收进 C runtime；吸收完成之日，本目录删除。
+>
+> **完全冻结：不接受任何改动**，性能优化与缺陷修复一律不做——这个目录会彻底消失，
+> 在它上面花的每一分钟都是丢弃的工作。已知缺陷（含 v0.3.30 发布说明里列出的
+> 浮点转整数越界、浮点成员键规范化）**不在本目录修复**，改由 C runtime 承担。
+>
+> 以下在途工作**全部取消**（目标并入 C 迁移，不在本目录实现）：
+>
+> - `run_frame` 热/冷代码拆分（v0.3.30 解释器回退的修复方案）
+> - 状态轮询（`pause_resume` 端到端）
+> - 复合 `ParamPtr` 写参传播
+>
+> 迁移总纲见 **#622**（`runtime 彻底回归 C`）。
 
 runtime-c 的 C++20 重写（#499 新架构：明文栈 + 二进制代码段）。
-**未完成、不可作为默认 runtime**；与 C 版并存，仅供 A/B 与原型。
+
+**现状订正**：下面的「未完成、不可作为默认 runtime；仅供 A/B 与原型」是早期描述，
+已过时。当前 `Makefile` 的**默认 runtime 就是 c2**——`make all` 只构建
+runtimec2 + byteseek + layout + json，C 版 runtime 需 `make runtime` 单独构建。
+也就是说，正在被冻结的这份 C++ 实现，正是已发布版本（含 v0.3.30）实际使用的运行时；
+「回归 C」不是回到现成答案，而是**把 C runtime 提升到与 c2 同等能力与性能**。
 
 - 构建（可选，不进入默认构建）：
   `cmake -S runtimec2 -B build/runtimec2 && cmake --build build/runtimec2 --target kvlang_runtimec2`
