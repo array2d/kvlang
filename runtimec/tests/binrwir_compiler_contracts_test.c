@@ -1,12 +1,12 @@
-/* Verify BinRWIR Compiler and vmjit compile-versus-execute boundaries. */
+/* Verify BinRWIR Compiler and its JIT compile-versus-execute boundaries. */
 
 #include <stdint.h>
 #include <stdio.h>
 
-#include "compiler/compiler.h"
-#include "compiler/optimization.h"
-#include "vmjit/compiler.h"
-#include "vmjit/vmjit.h"
+#include "binrwir_compiler/compiler.h"
+#include "binrwir_compiler/jit/compiler.h"
+#include "binrwir_compiler/jit/executor.h"
+#include "binrwir_compiler/optimization.h"
 #include "vmkv/encoder.h"
 
 #define RUNTIMEC_ASSERT_FUNCTION_TYPE(function_name, function_pointer_type)       \
@@ -31,12 +31,12 @@ typedef runtimec_status_t (*binrwir_compiler_revision_function_t)(
 typedef runtimec_status_t (*binrwir_build_execution_plan_function_t)(
     const runtimec_allocator_t *, const binrwir_program_t *, uint64_t,
     uint32_t, binrwir_execution_plan_t **, runtimec_error_t *);
-typedef runtimec_status_t (*vmjit_compile_function_t)(
-    vmjit_compiler_t *, const binrwir_program_t *,
+typedef runtimec_status_t (*binrwir_jit_compile_function_t)(
+    binrwir_jit_compiler_t *, const binrwir_program_t *,
     const binrwir_execution_plan_t *,
-    vmjit_compilation_result_t *, runtimec_error_t *);
-typedef runtimec_status_t (*vmjit_execute_function_t)(
-    const vmjit_code_t *, binrwir_execution_frame_t *,
+    binrwir_jit_compilation_result_t *, runtimec_error_t *);
+typedef runtimec_status_t (*binrwir_jit_execute_function_t)(
+    const binrwir_jit_code_t *, binrwir_execution_frame_t *,
     binrwir_execution_exit_t *, runtimec_error_t *);
 typedef runtimec_status_t (*vmkv_encoder_revision_function_t)(
     const vmkv_encoder_t *, uint32_t *);
@@ -48,8 +48,8 @@ RUNTIMEC_ASSERT_FUNCTION_TYPE(
 RUNTIMEC_ASSERT_FUNCTION_TYPE(
     binrwir_compiler_build_execution_plan,
     binrwir_build_execution_plan_function_t);
-RUNTIMEC_ASSERT_FUNCTION_TYPE(vmjit_compile, vmjit_compile_function_t);
-RUNTIMEC_ASSERT_FUNCTION_TYPE(vmjit_execute, vmjit_execute_function_t);
+RUNTIMEC_ASSERT_FUNCTION_TYPE(binrwir_jit_compile, binrwir_jit_compile_function_t);
+RUNTIMEC_ASSERT_FUNCTION_TYPE(binrwir_jit_execute, binrwir_jit_execute_function_t);
 RUNTIMEC_ASSERT_FUNCTION_TYPE(
     vmkv_encoder_get_canonical_encoding_revision,
     vmkv_encoder_revision_function_t);
@@ -58,17 +58,17 @@ _Static_assert(BINRWIR_EXECUTION_TARGET_INVALID == 0,
                "invalid execution target changed");
 _Static_assert(BINRWIR_EXECUTION_TARGET_VMBIN == 1,
                "vmbin execution target changed");
-_Static_assert(BINRWIR_EXECUTION_TARGET_VMJIT == 2,
-               "vmjit execution target changed");
+_Static_assert(BINRWIR_EXECUTION_TARGET_JIT == 2,
+               "JIT execution target changed");
 
-_Static_assert(VMJIT_COMPILATION_OUTCOME_INVALID == 0,
-               "invalid vmjit compilation outcome changed");
-_Static_assert(VMJIT_COMPILATION_OUTCOME_COMPILED == 1,
-               "compiled vmjit outcome changed");
-_Static_assert(VMJIT_COMPILATION_OUTCOME_NOT_COMPILABLE == 2,
-               "not-compilable vmjit outcome changed");
-_Static_assert(VMJIT_COMPILATION_OUTCOME_ERROR == 3,
-               "error vmjit outcome changed");
+_Static_assert(BINRWIR_JIT_COMPILATION_OUTCOME_INVALID == 0,
+               "invalid JIT compilation outcome changed");
+_Static_assert(BINRWIR_JIT_COMPILATION_OUTCOME_COMPILED == 1,
+               "compiled JIT outcome changed");
+_Static_assert(BINRWIR_JIT_COMPILATION_OUTCOME_NOT_COMPILABLE == 2,
+               "not-compilable JIT outcome changed");
+_Static_assert(BINRWIR_JIT_COMPILATION_OUTCOME_ERROR == 3,
+               "error JIT outcome changed");
 
 static int failures;
 
@@ -98,8 +98,9 @@ static void test_compiler_configuration(void) {
     binrwir_compiler_configuration_t configuration = {
         .structure_size = sizeof(configuration),
         .compiler_revision = 1U,
-        .enable_vmjit = false,
-        .vmjit_compiler = NULL,
+        .enable_jit = false,
+        .jit_machine_code_capacity = 0U,
+        .jit_target = {0},
     };
 
     RUNTIMEC_EXPECT(binrwir_compiler_create(
@@ -114,17 +115,24 @@ static void test_compiler_configuration(void) {
     RUNTIMEC_EXPECT(compiler == NULL);
     configuration.compiler_revision = 1U;
 
-    configuration.vmjit_compiler = (vmjit_compiler_t *)(uintptr_t)1U;
+    configuration.jit_machine_code_capacity = 1U;
+    RUNTIMEC_EXPECT(binrwir_compiler_create(
+        &allocator, &configuration, &compiler, NULL) ==
+        RUNTIMEC_STATUS_INVALID);
+    RUNTIMEC_EXPECT(compiler == NULL);
+    configuration.jit_machine_code_capacity = 0U;
+
+    configuration.enable_jit = true;
     RUNTIMEC_EXPECT(binrwir_compiler_create(
         &allocator, &configuration, &compiler, NULL) ==
         RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(compiler == NULL);
 
-    configuration.enable_vmjit = true;
-    configuration.vmjit_compiler = NULL;
+    configuration.jit_machine_code_capacity = 1U;
+    configuration.jit_target.architecture = BINRWIR_JIT_ARCHITECTURE_X86_64;
     RUNTIMEC_EXPECT(binrwir_compiler_create(
         &allocator, &configuration, &compiler, NULL) ==
-        RUNTIMEC_STATUS_INVALID);
+        RUNTIMEC_STATUS_NOT_IMPLEMENTED);
     RUNTIMEC_EXPECT(compiler == NULL);
 }
 
@@ -145,27 +153,27 @@ static void test_encoder_revision_failure_shape(void) {
 }
 
 static void test_compilation_shapes(void) {
-    const vmjit_compilation_result_t not_compilable = {
-        .outcome = VMJIT_COMPILATION_OUTCOME_NOT_COMPILABLE,
+    const binrwir_jit_compilation_result_t not_compilable = {
+        .outcome = BINRWIR_JIT_COMPILATION_OUTCOME_NOT_COMPILABLE,
         .code = NULL,
-        .refusal = {.reason = VMJIT_REFUSAL_UNSUPPORTED_PROGRAM},
+        .refusal = {.reason = BINRWIR_JIT_REFUSAL_UNSUPPORTED_PROGRAM},
     };
     binrwir_compilation_view_t view = {
-        .execution_target = BINRWIR_EXECUTION_TARGET_VMJIT,
+        .execution_target = BINRWIR_EXECUTION_TARGET_JIT,
         .canonical_program = (const binrwir_program_t *)(uintptr_t)1U,
         .execution_plan = (const binrwir_execution_plan_t *)(uintptr_t)1U,
-        .vmjit_code = (const vmjit_code_t *)(uintptr_t)1U,
+        .binrwir_jit_code = (const binrwir_jit_code_t *)(uintptr_t)1U,
     };
 
     RUNTIMEC_EXPECT(not_compilable.outcome ==
-                    VMJIT_COMPILATION_OUTCOME_NOT_COMPILABLE);
+                    BINRWIR_JIT_COMPILATION_OUTCOME_NOT_COMPILABLE);
     RUNTIMEC_EXPECT(not_compilable.code == NULL);
     RUNTIMEC_EXPECT(binrwir_compilation_get_view(NULL, &view, NULL) ==
                     RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(view.execution_target == BINRWIR_EXECUTION_TARGET_INVALID);
     RUNTIMEC_EXPECT(view.canonical_program == NULL);
     RUNTIMEC_EXPECT(view.execution_plan == NULL);
-    RUNTIMEC_EXPECT(view.vmjit_code == NULL);
+    RUNTIMEC_EXPECT(view.binrwir_jit_code == NULL);
 }
 
 static void test_optimization_failure_shape(void) {
@@ -178,23 +186,23 @@ static void test_optimization_failure_shape(void) {
     RUNTIMEC_EXPECT(execution_plan == NULL);
 }
 
-static void test_vmjit_failure_shapes(void) {
-    vmjit_compilation_result_t compilation_result = {
-        .outcome = VMJIT_COMPILATION_OUTCOME_NOT_COMPILABLE,
-        .code = (vmjit_code_t *)(uintptr_t)1U,
+static void test_jit_failure_shapes(void) {
+    binrwir_jit_compilation_result_t compilation_result = {
+        .outcome = BINRWIR_JIT_COMPILATION_OUTCOME_NOT_COMPILABLE,
+        .code = (binrwir_jit_code_t *)(uintptr_t)1U,
     };
     binrwir_execution_exit_t execution_exit = {
         .kind = BINRWIR_EXECUTION_EXIT_DONE,
         .status = RUNTIMEC_STATUS_SUCCESS,
     };
 
-    RUNTIMEC_EXPECT(vmjit_compile(NULL, NULL, NULL, &compilation_result, NULL) ==
+    RUNTIMEC_EXPECT(binrwir_jit_compile(NULL, NULL, NULL, &compilation_result, NULL) ==
                     RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(compilation_result.outcome ==
-                    VMJIT_COMPILATION_OUTCOME_INVALID);
+                    BINRWIR_JIT_COMPILATION_OUTCOME_INVALID);
     RUNTIMEC_EXPECT(compilation_result.code == NULL);
 
-    RUNTIMEC_EXPECT(vmjit_execute(NULL, NULL, &execution_exit, NULL) ==
+    RUNTIMEC_EXPECT(binrwir_jit_execute(NULL, NULL, &execution_exit, NULL) ==
                     RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(execution_exit.kind == BINRWIR_EXECUTION_EXIT_ERROR);
     RUNTIMEC_EXPECT(execution_exit.status == RUNTIMEC_STATUS_INVALID);
@@ -206,9 +214,9 @@ int main(void) {
     test_encoder_revision_failure_shape();
     test_compilation_shapes();
     test_optimization_failure_shape();
-    test_vmjit_failure_shapes();
+    test_jit_failure_shapes();
     if (failures != 0) {
-        fprintf(stderr, "compiler_contracts_test: %d failure(s)\n", failures);
+        fprintf(stderr, "binrwir_compiler_contracts_test: %d failure(s)\n", failures);
         return 1;
     }
     return 0;

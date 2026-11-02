@@ -3,7 +3,8 @@
 
 /*
  * host 是 runtimec 对外部能力的唯一所有者。它只持有一份经过精确版本
- * 校验的能力表，不拥有 BinRWIR，不决定 vmjit 路由，也不提交 checkpoint。
+ * 校验的能力表，不拥有 BinRWIR，不参与 BinRWIR Compiler 的 JIT/VMBIN
+ * 执行目标选择，也不提交 checkpoint。
  */
 
 #include "contract/error.h"

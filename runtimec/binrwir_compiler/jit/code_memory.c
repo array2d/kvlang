@@ -1,10 +1,10 @@
-/* vmjit/code_memory 的失败封闭骨架。 */
+/* binrwir_compiler/jit/code_memory 的失败封闭骨架。 */
 
-#include "vmjit/code_memory.h"
+#include "binrwir_compiler/jit/code_memory.h"
 
-runtimec_status_t vmjit_code_memory_create(
+runtimec_status_t binrwir_jit_code_memory_create(
     size_t capacity,
-    vmjit_code_memory_t **output_memory,
+    binrwir_jit_code_memory_t **output_memory,
     runtimec_error_t *error) {
     (void)error;
     if (output_memory != NULL) {
@@ -16,8 +16,8 @@ runtimec_status_t vmjit_code_memory_create(
     return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
 }
 
-runtimec_status_t vmjit_code_memory_writable_view(
-    vmjit_code_memory_t *memory,
+runtimec_status_t binrwir_jit_code_memory_writable_view(
+    binrwir_jit_code_memory_t *memory,
     runtimec_bytes_buffer_t *output_buffer,
     runtimec_error_t *error) {
     (void)error;
@@ -30,8 +30,8 @@ runtimec_status_t vmjit_code_memory_writable_view(
     return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
 }
 
-runtimec_status_t vmjit_code_memory_publish(
-    vmjit_code_memory_t *memory,
+runtimec_status_t binrwir_jit_code_memory_publish(
+    binrwir_jit_code_memory_t *memory,
     size_t code_size,
     runtimec_error_t *error) {
     (void)error;
@@ -41,7 +41,7 @@ runtimec_status_t vmjit_code_memory_publish(
     return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
 }
 
-runtimec_status_t vmjit_code_memory_destroy(vmjit_code_memory_t *memory) {
+runtimec_status_t binrwir_jit_code_memory_destroy(binrwir_jit_code_memory_t *memory) {
     if (memory == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }

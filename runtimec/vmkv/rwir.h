@@ -7,7 +7,7 @@
  *       [ReadReference...][WriteReference...] 两个分区表达方向：字面量
  *       只能出现在读分区，读参数只能读，写参数只能定位写入。
  * 联系：vmkv/source 提供函数源；vmkv/encoder 校验后构建不可变
- *       BinRWIR Program。vmbin 与 vmjit 不直接消费本结构。
+ *       BinRWIR Program。vmbin 与 BinRWIR JIT 不直接消费本结构。
  * 约束：所有视图都只借用内存。读取器不执行、不优化、不生成机器码、
  *       不修复输入。
  */

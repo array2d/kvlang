@@ -7,10 +7,18 @@ flowchart LR
   KVSPACE["external kvspace interface"]
   VMKV["vmkv"]
   BINRWIR["top-level binrwir contracts"]
-  COMPILER["top-level BinRWIR Compiler"]
   VMBIN["vmbin"]
-  VMJIT["vmjit"]
-  BACKENDS["x86_64 and AArch64 backends"]
+
+  subgraph BINRWIR_COMPILER["binrwir_compiler"]
+    COMPILER["compiler and optimization"]
+    subgraph JIT["internal jit"]
+      JIT_COMPILER["verifier, lowering, and compiler"]
+      BACKENDS["x86_64 and AArch64 backends"]
+      JIT_EXECUTOR["machine-code executor"]
+      JIT_COMPILER --> BACKENDS
+    end
+    COMPILER --> JIT_COMPILER
+  end
 
   INTERFACE --> ROUTE
   ROUTE --> HOST
@@ -18,26 +26,25 @@ flowchart LR
   ROUTE --> VMKV
   ROUTE --> COMPILER
   ROUTE --> BINRWIR
-  ROUTE --> VMJIT
+  ROUTE --> JIT_EXECUTOR
   ROUTE --> VMBIN
   HOST --> KVSPACE
   VMKV --> SPECIFICATION
   VMKV --> BINRWIR
   COMPILER --> BINRWIR
-  COMPILER --> VMJIT
   REPOSITORY --> COMPILER
   VMBIN --> BINRWIR
-  VMJIT --> BINRWIR
-  BACKENDS --> VMJIT
+  JIT_COMPILER --> BINRWIR
+  JIT_EXECUTOR --> BINRWIR
 
   BINRWIR -. "forbidden ownership dependency" .-> VMBIN
-  BINRWIR -. "forbidden ownership dependency" .-> VMJIT
+  BINRWIR -. "forbidden ownership dependency" .-> JIT
   VMKV -. "forbidden execution dependency" .-> VMBIN
-  VMKV -. "forbidden execution dependency" .-> VMJIT
-  VMBIN -. "forbidden peer dependency" .-> VMJIT
-  VMJIT -. "forbidden peer dependency" .-> VMBIN
+  VMKV -. "forbidden execution dependency" .-> JIT
+  VMBIN -. "forbidden peer dependency" .-> JIT
+  JIT -. "forbidden peer dependency" .-> VMBIN
   REPOSITORY -. "forbidden execution dependency" .-> VMBIN
-  REPOSITORY -. "forbidden execution dependency" .-> VMJIT
+  REPOSITORY -. "forbidden execution dependency" .-> JIT_EXECUTOR
 
   classDef specification fill:#fff3cd,stroke:#9a6700,color:#3d2e00
   classDef neutral fill:#ede9fe,stroke:#7c3aed,color:#2e1065
@@ -45,5 +52,5 @@ flowchart LR
   classDef executor fill:#ecfdf5,stroke:#059669,color:#052e16
   class SPECIFICATION specification
   class BINRWIR neutral
-  class COMPILER,REPOSITORY compiler
-  class VMBIN,VMJIT,BACKENDS executor
+  class COMPILER,REPOSITORY,JIT_COMPILER,BACKENDS compiler
+  class VMBIN,JIT_EXECUTOR executor

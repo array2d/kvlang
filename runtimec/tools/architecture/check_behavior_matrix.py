@@ -22,7 +22,7 @@ MANIFEST_ENTRY_PATTERN = re.compile(
 )
 PLACEHOLDER_PATTERN = re.compile(r"\b(?:todo|tbd|unknown|placeholder)\b", re.IGNORECASE)
 SCANNED_PRODUCT_DIRECTORIES = (
-    "specification", "binrwir", "vmkv", "compiler", "vmbin", "vmjit",
+    "specification", "binrwir", "vmkv", "binrwir_compiler", "vmbin",
 )
 
 

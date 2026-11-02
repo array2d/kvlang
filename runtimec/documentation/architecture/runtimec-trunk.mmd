@@ -1,29 +1,38 @@
 flowchart TB
   SPECIFICATION["myrwircaps and RWIR specification<br/>stable operation identifiers"]
-  VMKV["vmkv<br/>validate and emit equivalent canonical BinRWIR"]
+  VMKV["vmkv<br/>validate RWIR and emit equivalent canonical BinRWIR"]
   PROGRAM["top-level binrwir<br/>immutable canonical Program"]
-  COMPILER["top-level BinRWIR Compiler<br/>build execution plan"]
-  DECISION{"compile-time target decision"}
-  VMJIT_COMPILATION["COMPILED<br/>VMJIT compilation with machine code"]
-  VMBIN_COMPILATION["NOT_COMPILABLE<br/>VMBIN compilation without machine code"]
-  ERROR["ERROR<br/>stop immediately"]
-  REPOSITORY["compilation repository<br/>cache complete compilation"]
+
+  subgraph BINRWIR_COMPILER["binrwir_compiler"]
+    PLAN["build execution plan<br/>preserve canonical semantics"]
+    JIT_POLICY{"JIT enabled?"}
+    JIT_COMPILE["internal jit compiler<br/>verify, lower, and emit machine code"]
+    JIT_OUTCOME{"JIT compilation outcome"}
+    JIT_COMPILATION["COMPILED<br/>JIT target with machine code"]
+    VMBIN_COMPILATION["NOT_COMPILABLE or JIT disabled<br/>VMBIN target with execution plan"]
+    PLAN --> JIT_POLICY
+    JIT_POLICY -->|"yes"| JIT_COMPILE --> JIT_OUTCOME
+    JIT_POLICY -->|"no"| VMBIN_COMPILATION
+    JIT_OUTCOME -->|"COMPILED"| JIT_COMPILATION
+    JIT_OUTCOME -->|"NOT_COMPILABLE"| VMBIN_COMPILATION
+  end
+
+  ERROR["ERROR<br/>stop without compilation"]
+  REPOSITORY["compilation repository<br/>cache complete immutable compilation"]
   ROUTE{"engine route<br/>read decided target before execution"}
-  VMJIT_EXECUTE["vmjit_execute<br/>execute generated machine code"]
-  VMBIN_EXECUTE["vmbin_execute<br/>execute canonical semantics with plan"]
+  JIT_EXECUTE["binrwir_jit_execute<br/>execute generated machine code"]
+  VMBIN_EXECUTE["vmbin_execute<br/>execute canonical Program with plan"]
   COMMIT["route commit<br/>complete effects and checkpoint"]
   KVSPACE["kvspace<br/>authoritative recoverable facts"]
 
-  SPECIFICATION --> VMKV --> PROGRAM --> COMPILER --> DECISION
-  DECISION -->|"COMPILED"| VMJIT_COMPILATION
-  DECISION -->|"NOT_COMPILABLE"| VMBIN_COMPILATION
-  DECISION -->|"ERROR"| ERROR
-  VMJIT_COMPILATION --> REPOSITORY
+  SPECIFICATION --> VMKV --> PROGRAM --> PLAN
+  JIT_OUTCOME -->|"ERROR"| ERROR
+  JIT_COMPILATION --> REPOSITORY
   VMBIN_COMPILATION --> REPOSITORY
   REPOSITORY --> ROUTE
-  ROUTE -->|"VMJIT target"| VMJIT_EXECUTE
-  ROUTE -->|"VMBIN target"| VMBIN_EXECUTE
-  VMJIT_EXECUTE --> COMMIT
+  ROUTE -->|"JIT target only"| JIT_EXECUTE
+  ROUTE -->|"VMBIN target only"| VMBIN_EXECUTE
+  JIT_EXECUTE --> COMMIT
   VMBIN_EXECUTE --> COMMIT
   COMMIT --> KVSPACE
 
@@ -32,6 +41,6 @@ flowchart TB
   classDef execute fill:#ecfdf5,stroke:#059669,color:#052e16
   classDef error fill:#fee2e2,stroke:#dc2626,color:#450a0a
   class SPECIFICATION,KVSPACE fact
-  class VMKV,PROGRAM,COMPILER,DECISION,VMJIT_COMPILATION,VMBIN_COMPILATION,REPOSITORY compile
-  class ROUTE,VMJIT_EXECUTE,VMBIN_EXECUTE,COMMIT execute
+  class VMKV,PROGRAM,PLAN,JIT_POLICY,JIT_COMPILE,JIT_OUTCOME,JIT_COMPILATION,VMBIN_COMPILATION,REPOSITORY compile
+  class ROUTE,JIT_EXECUTE,VMBIN_EXECUTE,COMMIT execute
   class ERROR error

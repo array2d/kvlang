@@ -10,10 +10,10 @@
  * 联系：route 在编码和编译前查询，在 BinRWIR Compiler 完成后插入；lease
  *       保证 canonical Program、执行计划与可选机器码在执行期间同时有效。
  * 约束：repository 只持有 compilation 的所有权、租约与索引，不调用 vmkv、
- *       vmbin 或 vmjit，也不改变已确定的执行目标。
+ *       vmbin 或 BinRWIR JIT，也不改变已确定的执行目标。
  */
 
-#include "compiler/compiler.h"
+#include "binrwir_compiler/compiler.h"
 #include "contract/allocator.h"
 #include "contract/snapshot.h"
 #include "contract/status.h"

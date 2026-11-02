@@ -10,7 +10,7 @@
  *       机器码地址。
  * 联系：contract 只依赖自身；engine/route 在每条成功指令后组织
  *       checkpoint，经 host port 的 checkpoint 函数提交；host 适配层负责
- *       把它映射到 kvspace 的程序计数器、状态和错误槽。vmbin/vmjit
+ *       把它映射到 kvspace 的程序计数器、状态和错误槽。vmbin/BinRWIR JIT
  *       不直接提交，只把结构化 outcome 交给 route。
  * 约束：所有字符串字段都是 borrowed view；序列号由调用方单调递增。
  */

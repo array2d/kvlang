@@ -4,7 +4,7 @@
 /*
  * 组件：binrwir/execution_frame
  * 作用：保存可从 kvspace 重建的执行帧镜像。
- * 联系：engine route 创建 Frame；vmbin 与 vmjit 消费。
+ * 联系：engine route 创建 Frame；vmbin 与 BinRWIR JIT 消费。
  * 约束：Frame 不是持久事实源，每条源指令边界必须可观察。
  */
 

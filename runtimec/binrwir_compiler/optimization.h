@@ -1,11 +1,11 @@
-#ifndef RUNTIMEC_COMPILER_OPTIMIZATION_H
-#define RUNTIMEC_COMPILER_OPTIMIZATION_H
+#ifndef RUNTIMEC_BINRWIR_COMPILER_OPTIMIZATION_H
+#define RUNTIMEC_BINRWIR_COMPILER_OPTIMIZATION_H
 
 /*
  * 组件：BinRWIR Compiler optimization
  * 作用：从 canonical BinRWIR Program 生成只读 execution plan，统一承载
  *       指令编码、类型固化、KV 寻址、指令融合、虚拟寄存器与控制流优化。
- * 联系：仅由 compiler/compiler.c 调用；vmjit 与 vmbin 只消费完成的 plan。
+ * 联系：仅由 binrwir_compiler/compiler.c 调用；binrwir_jit 与 vmbin 只消费完成的 plan。
  * 约束：不得改变 Program 语义、Read/Write authority、alias 顺序或 source
  *       logical program counter 观察边界，不得选择或执行目标。
  */

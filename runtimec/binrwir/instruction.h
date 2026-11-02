@@ -4,7 +4,7 @@
 /*
  * 组件：binrwir/instruction
  * 作用：热指令的固定宽度表示，以及读取和写入引用的分区视图。
- * 联系：Program 拥有指令和引用池；vmbin 与 vmjit 只读消费。
+ * 联系：Program 拥有指令和引用池；vmbin 与 BinRWIR JIT 只读消费。
  * 约束：当前窄式和宽式布局不是冻结的持久格式。
  */
 

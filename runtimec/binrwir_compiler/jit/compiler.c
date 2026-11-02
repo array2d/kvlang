@@ -1,22 +1,22 @@
-/* vmjit/compiler 的失败封闭骨架。 */
+/* binrwir_compiler/jit/compiler 的失败封闭骨架。 */
 
-#include "vmjit/compiler.h"
+#include "binrwir_compiler/jit/compiler.h"
 
-static void vmjit_compilation_result_reset(
-    vmjit_compilation_result_t *result,
-    vmjit_compilation_outcome_t outcome,
-    vmjit_refusal_reason_t refusal_reason) {
+static void binrwir_jit_compilation_result_reset(
+    binrwir_jit_compilation_result_t *result,
+    binrwir_jit_compilation_outcome_t outcome,
+    binrwir_jit_refusal_reason_t refusal_reason) {
     if (result != NULL) {
-        *result = (vmjit_compilation_result_t){0};
+        *result = (binrwir_jit_compilation_result_t){0};
         result->outcome = outcome;
         result->refusal.reason = refusal_reason;
     }
 }
 
-runtimec_status_t vmjit_compiler_create(
+runtimec_status_t binrwir_jit_compiler_create(
     runtimec_allocator_t allocator,
-    const vmjit_compiler_configuration_t *configuration,
-    vmjit_compiler_t **output_compiler,
+    const binrwir_jit_compiler_configuration_t *configuration,
+    binrwir_jit_compiler_t **output_compiler,
     runtimec_error_t *error) {
     (void)error;
     if (output_compiler != NULL) {
@@ -31,31 +31,31 @@ runtimec_status_t vmjit_compiler_create(
     return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
 }
 
-runtimec_status_t vmjit_compiler_destroy(vmjit_compiler_t *compiler) {
+runtimec_status_t binrwir_jit_compiler_destroy(binrwir_jit_compiler_t *compiler) {
     if (compiler == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
     return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
 }
 
-runtimec_status_t vmjit_compile(
-    vmjit_compiler_t *compiler,
+runtimec_status_t binrwir_jit_compile(
+    binrwir_jit_compiler_t *compiler,
     const binrwir_program_t *program,
     const binrwir_execution_plan_t *execution_plan,
-    vmjit_compilation_result_t *output_result,
+    binrwir_jit_compilation_result_t *output_result,
     runtimec_error_t *error) {
     (void)error;
-    vmjit_compilation_result_reset(
+    binrwir_jit_compilation_result_reset(
         output_result,
-        VMJIT_COMPILATION_OUTCOME_INVALID,
-        VMJIT_REFUSAL_INVALID_PROGRAM);
+        BINRWIR_JIT_COMPILATION_OUTCOME_INVALID,
+        BINRWIR_JIT_REFUSAL_INVALID_PROGRAM);
     if (compiler == NULL || program == NULL || execution_plan == NULL ||
         output_result == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
-    vmjit_compilation_result_reset(
+    binrwir_jit_compilation_result_reset(
         output_result,
-        VMJIT_COMPILATION_OUTCOME_ERROR,
-        VMJIT_REFUSAL_NONE);
+        BINRWIR_JIT_COMPILATION_OUTCOME_ERROR,
+        BINRWIR_JIT_REFUSAL_NONE);
     return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
 }

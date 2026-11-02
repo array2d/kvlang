@@ -4,7 +4,7 @@
 /*
  * 组件：binrwir/execution_binding
  * 作用：Binding 将一个有方向的寄存器映射到 canonical Cell。
- * 联系：execution frame 持有 Cell 与 Binding；vmbin 与 vmjit 按同一
+ * 联系：execution frame 持有 Cell 与 Binding；vmbin 与 BinRWIR JIT 按同一
  *       签名检查显式别名。
  * 约束：不同读写寄存器可以指向同一 Cell；Cell 可从 kvspace 重建。
  */

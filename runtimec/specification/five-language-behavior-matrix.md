@@ -3,7 +3,7 @@
 <!-- runtimec-behavior-matrix-version: 1 -->
 
 本文件是 runtimec 语言行为决策的唯一事实源，不是实现进度表。任何行为进入
-`specification/`、`vmkv/`、`vmbin/` 或 `vmjit/` 前，必须先在这里形成完整
+`specification/`、`vmkv/`、`vmbin/` 或 `binrwir_compiler/jit/` 前，必须先在这里形成完整
 决策。五种语言一致时，kvlang 遵从共同直觉；五种语言分裂时，必须明确选择
 阵营、边界样例和非法输入结果。
 

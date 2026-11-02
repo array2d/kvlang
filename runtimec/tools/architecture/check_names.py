@@ -12,7 +12,7 @@ from pathlib import Path
 
 PRODUCT_DIRECTORIES = (
     "include", "interface", "contract", "host", "binrwir", "vmkv",
-    "vmjit", "compiler", "vmbin", "engine", "generated",
+    "binrwir_compiler", "vmbin", "engine", "generated",
     "specification", "tests",
 )
 TEXT_SUFFIXES = {".c", ".h", ".cmake", ".in", ".map", ".exports", ".def"}
@@ -22,20 +22,27 @@ FORBIDDEN_PATH_PARTS = {
     "spec": "specification",
 }
 FORBIDDEN_NAMES = (
+    ("removed-jit-component-name", re.compile(r"vmjit", re.IGNORECASE)),
+    ("removed-compiler-target", re.compile(r"runtimec_compiler")),
+    ("standalone-jit-target", re.compile(r"runtimec_jit")),
+    ("removed-jit-target", re.compile(r"runtimec_vmjit")),
+    ("removed-jit-option", re.compile(r"RUNTIMEC_ENABLE_VMJIT")),
+    ("removed-jit-configuration", re.compile(r"enable_vmjit")),
     ("old-binir-name", re.compile(r"\bbinir\b", re.IGNORECASE)),
     ("old-binir-identifier", re.compile(r"\bbinir_[A-Za-z0-9_]*\b")),
     ("old-runtimec2-name", re.compile(r"\bruntimec2\b")),
     ("old-runtime-tree", re.compile(r"(?:^|[\"<])runtime/")),
     ("old-success-name", re.compile(r"\bRUNTIMEC_STATUS_OK\b")),
     ("removed-fallback-status", re.compile(r"\bRUNTIMEC_STATUS_FALLBACK\b")),
-    ("removed-vmjit-execution-entry", re.compile(r"\bvmjit_try_execute\b")),
-    ("alternate-vmjit-compilation-cache", re.compile(
-        r"\b(?:vmjit_code_cache|vmjit_cache_key|vmjit_code_cache_get_or_compile)\b",
+    ("removed-jit-execution-entry", re.compile(r"\bbinrwir_jit_try_execute\b")),
+    ("alternate-jit-compilation-cache", re.compile(
+        r"\b(?:binrwir_jit_code_cache|binrwir_jit_cache_key|"
+        r"binrwir_jit_code_cache_get_or_compile)\b",
     )),
     ("binrwir-owned-plan-builder", re.compile(
         r"\bbinrwir_execution_plan_build\b",
     )),
-    ("second-vmjit-plan", re.compile(r"\bvmjit_plan_[A-Za-z0-9_]*\b")),
+    ("second-jit-plan", re.compile(r"\bbinrwir_jit_plan_[A-Za-z0-9_]*\b")),
     ("unobservable-compilation-state", re.compile(
         r"\bBINRWIR_COMPILATION_STATE_[A-Za-z0-9_]*\b",
     )),
@@ -162,11 +169,21 @@ def c_code_without_comments_or_literals(text: str) -> str:
 def audit(repository_root: Path, runtimec_root: Path) -> tuple[list[Finding], int]:
     findings = audit_public_headers(runtimec_root, repository_root)
     scanned = 0
-    for forbidden_directory in ("api", "compat", "docs", "spec"):
+    forbidden_directories = {
+        "api": "interface",
+        "compat": "delete",
+        "compiler": "binrwir_compiler",
+        "docs": "documentation",
+        "jit": "binrwir_compiler/jit",
+        "spec": "specification",
+        "vmjit": "binrwir_compiler/jit",
+    }
+    for forbidden_directory, replacement in forbidden_directories.items():
         path = runtimec_root / forbidden_directory
         if path.exists():
             findings.append(Finding(relative_display(path, repository_root), 1,
-                                    "forbidden-directory", forbidden_directory))
+                                    "forbidden-directory",
+                                    f"{forbidden_directory} -> {replacement}"))
 
     for path in iter_product_files(runtimec_root):
         scanned += 1

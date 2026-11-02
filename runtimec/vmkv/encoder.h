@@ -9,7 +9,7 @@
  *       vmkv/source 与主机服务读取；结果交给 BinRWIR Compiler。
  * 约束：vmkv 只有 RWIR 到 canonical BinRWIR 这一条正常方向。编码不得
  *       优化、类型特化、融合、生成执行计划或生成机器码，也不得执行程序、
- *       提交持久事实或依赖 vmjit。
+ *       提交持久事实或依赖 BinRWIR JIT。
  */
 
 #include "binrwir/program.h"

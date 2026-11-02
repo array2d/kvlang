@@ -6,7 +6,7 @@
  * 删除并从同一 Program 重建；它不是 RWIR 或 BinRWIR 的语义事实源。
  * execution plan 只承载执行加速决策，不持有机器码、缓存、统计、可变
  * execution frame 或 kvspace 值。BinRWIR Compiler 在编译阶段确定执行
- * 目标；vmbin 与 vmjit 只执行已选择的目标，不拒绝计划、不重新选路。
+ * 目标；vmbin 与 BinRWIR JIT 只执行已选择的目标，不拒绝计划、不重新选路。
  */
 
 #include <stddef.h>

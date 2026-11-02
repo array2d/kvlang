@@ -5,7 +5,7 @@
  * 组件：contract/status
  * 作用：声明跨组件统一的一次调用结果辅助函数。状态枚举定义在唯一公共头
  *       kvlang/runtimec.h；SUCCESS 只能表示请求真实完成。
- * 联系：host、vmbin、vmkv、vmjit 与 engine 共用同一状态词汇。
+ * 联系：host、vmbin、vmkv、BinRWIR Compiler 与 engine 共用同一状态词汇。
  *       它不是三类状态中的另外两类：
  *       - execution exit（binrwir/execution_exit.h）；
  *       - durable status（host/engine 通过 checkpoint 提交的 vthread 状态）。

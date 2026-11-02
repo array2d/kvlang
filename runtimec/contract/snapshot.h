@@ -8,7 +8,7 @@
  *       明文是唯一持久语义事实源；snapshot 只用于判断派生状态是否仍对应
  *       当前事实，不能替代或修改事实源。
  * 联系：contract 层只依赖自身；host 提供原始事实，engine 在编译/执行前
- *       取快照，vmkv/vmbin/vmjit 只消费快照与 generation，不自己读
+ *       取快照，vmkv/vmbin/BinRWIR Compiler 只消费快照与 generation，不自己读
  *       kvspace；engine 用本结构构造 compilation repository key。
  * 约束：snapshot 不携带进程地址或 kvspace 内部句柄。
  */
@@ -36,7 +36,7 @@ typedef struct runtimec_version {
 } runtimec_version_t;
 
 /* 权威 source 的世代：store 实例 + generation + schema/指令集版本。
- * 任一变化都必须让派生 Program、view、vmjit plan 与机器码失效。 */
+ * 任一变化都必须让派生 Program、view、JIT plan 与机器码失效。 */
 typedef struct runtimec_source_revision {
     uint64_t instance_identifier;
     uint64_t generation;

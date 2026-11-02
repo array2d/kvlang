@@ -5,9 +5,9 @@ sequenceDiagram
   participant Host as Host services
   participant Repository as Compilation repository
   participant Vmkv as vmkv
-  participant Compiler as BinRWIR Compiler
-  participant VmjitCompiler as vmjit compiler
-  participant VmjitExecute as vmjit_execute
+  participant Compiler as binrwir_compiler
+  participant JitCompiler as Internal JIT compiler
+  participant JitExecute as binrwir_jit_execute
   participant VmbinExecute as vmbin_execute
 
   Client->>Interface: structured execute request
@@ -16,41 +16,46 @@ sequenceDiagram
   Host-->>Route: host-neutral snapshot
   Route->>Repository: find compilation by identity
   alt compilation found
-    Repository-->>Route: compilation lease
+    Repository-->>Route: immutable compilation lease
   else compilation not found
     Repository-->>Route: not found
     Route->>Vmkv: validate RWIR and encode canonical BinRWIR
     Vmkv-->>Route: immutable canonical Program or compile error
     Route->>Compiler: compile canonical Program
     Compiler->>Compiler: build execution plan
-    Compiler->>VmjitCompiler: determine machine-code eligibility
-    alt COMPILED
-      VmjitCompiler-->>Compiler: machine code
-      Compiler-->>Route: VMJIT compilation
-    else NOT_COMPILABLE
-      VmjitCompiler-->>Compiler: successful not-compilable decision
-      Compiler-->>Route: VMBIN compilation
-    else ERROR
-      VmjitCompiler-->>Compiler: explicit error
-      Compiler-->>Route: explicit error and no compilation
-      break compilation stops immediately
-        Route-->>Interface: structured error
-        Interface-->>Client: status and error
+    alt JIT enabled
+      Compiler->>JitCompiler: verify, lower, and emit
+      alt COMPILED
+        JitCompiler-->>Compiler: generated machine code
+        Compiler-->>Route: complete JIT-target compilation
+      else NOT_COMPILABLE
+        JitCompiler-->>Compiler: successful refusal decision
+        Compiler-->>Route: complete VMBIN-target compilation
+      else ERROR
+        JitCompiler-->>Compiler: explicit compilation error
+        Compiler-->>Route: error and no compilation
+        break compilation stops immediately
+          Route-->>Interface: structured error
+          Interface-->>Client: status and error
+        end
       end
+    else JIT disabled
+      Compiler-->>Route: complete VMBIN-target compilation
     end
     opt completed compilation
       Route->>Repository: insert complete compilation
-      Repository-->>Route: compilation lease
+      Repository-->>Route: immutable compilation lease
     end
   end
-  Route->>Route: read immutable execution target
-  alt VMJIT target
-    Route->>VmjitExecute: execute generated code
-    VmjitExecute-->>Route: structured execution exit
+  Route->>Route: read immutable execution target once
+  alt JIT target
+    Route->>JitExecute: execute existing machine code
+    JitExecute-->>Route: structured execution exit or error
   else VMBIN target
-    Route->>VmbinExecute: execute Program with execution plan
-    VmbinExecute-->>Route: structured execution exit
+    Route->>VmbinExecute: execute Program with existing plan
+    VmbinExecute-->>Route: structured execution exit or error
   end
+  Note over Route,VmbinExecute: Execution never retries, recompiles, or falls back
   Route->>Host: commit complete effects then checkpoint
   Route->>Repository: release compilation lease
   Route-->>Interface: structured result

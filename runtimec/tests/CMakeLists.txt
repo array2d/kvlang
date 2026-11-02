@@ -30,19 +30,20 @@ add_test(NAME runtimec.contracts COMMAND runtimec_contracts_test)
 set_tests_properties(runtimec.contracts PROPERTIES
     LABELS "runtimec;scaffold;contracts")
 
-add_executable(runtimec_compiler_contracts_test compiler_contracts_test.c)
-target_compile_features(runtimec_compiler_contracts_test PRIVATE c_std_11)
-target_include_directories(runtimec_compiler_contracts_test PRIVATE
+add_executable(runtimec_binrwir_compiler_contracts_test
+    binrwir_compiler_contracts_test.c)
+target_compile_features(runtimec_binrwir_compiler_contracts_test PRIVATE c_std_11)
+target_include_directories(runtimec_binrwir_compiler_contracts_test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/.."
     "${RUNTIMEC_INCLUDE_DIRECTORY}")
-target_link_libraries(runtimec_compiler_contracts_test PRIVATE
-    runtimec_contract runtimec_binrwir runtimec_vmkv runtimec_vmjit
-    runtimec_compiler)
-runtimec_test_warnings(runtimec_compiler_contracts_test)
-add_test(NAME runtimec.compiler.contracts
-    COMMAND runtimec_compiler_contracts_test)
-set_tests_properties(runtimec.compiler.contracts PROPERTIES
-    LABELS "runtimec;scaffold;compiler;contracts")
+target_link_libraries(runtimec_binrwir_compiler_contracts_test PRIVATE
+    runtimec_contract runtimec_binrwir runtimec_vmkv
+    runtimec_binrwir_compiler)
+runtimec_test_warnings(runtimec_binrwir_compiler_contracts_test)
+add_test(NAME runtimec.binrwir_compiler.contracts
+    COMMAND runtimec_binrwir_compiler_contracts_test)
+set_tests_properties(runtimec.binrwir_compiler.contracts PROPERTIES
+    LABELS "runtimec;scaffold;binrwir_compiler;contracts")
 
 add_executable(runtimec_fail_closed_test stub_fail_closed_test.c)
 target_compile_features(runtimec_fail_closed_test PRIVATE c_std_11)

@@ -6,7 +6,7 @@
  * 作用：跨组件只读视图与可变字节缓冲的普通数据定义。视图只借用调用方
  *       内存，不拥有、不释放；缓冲的 data/capacity 也由调用方管理，
  *       任何函数都不得通过视图隐式分配。
- * 联系：contract 层只依赖自身；host port 的入参与 vmbin/vmkv/vmjit 的
+ * 联系：contract 层只依赖自身；host port 的入参与 vmbin/vmkv/BinRWIR Compiler 的
  *       字符串/路径/字节输入都使用这些视图，避免在执行组件边界传递 owning
  *       std::string 或 kvspace 类型。
  * 约束：size 为 0 时 data 可以为 NULL；size 非 0 时 data 必须非 NULL。

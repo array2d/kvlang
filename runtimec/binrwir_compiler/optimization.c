@@ -1,6 +1,6 @@
 /* BinRWIR optimization 的失败封闭骨架。 */
 
-#include "compiler/optimization.h"
+#include "binrwir_compiler/optimization.h"
 
 #include "binrwir/execution_plan_internal.h"
 

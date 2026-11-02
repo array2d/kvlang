@@ -13,11 +13,11 @@ from pathlib import Path, PurePosixPath
 SOURCE_SUFFIXES = {".c", ".h"}
 PRODUCT_DIRECTORIES = (
     "include", "interface", "contract", "host", "binrwir", "vmkv",
-    "vmjit", "compiler", "vmbin", "engine", "generated",
+    "binrwir_compiler", "vmbin", "engine", "generated",
 )
 KNOWN_LAYERS = {
     "public", "interface", "contract", "host", "binrwir", "vmkv",
-    "vmjit", "compiler", "vmbin", "engine",
+    "binrwir_compiler", "vmbin", "engine",
 }
 ALLOWED_DEPENDENCIES = {
     "public": {"public"},
@@ -25,11 +25,10 @@ ALLOWED_DEPENDENCIES = {
     "host": {"contract", "host"},
     "binrwir": {"contract", "binrwir"},
     "vmkv": {"contract", "binrwir", "vmkv"},
-    "vmjit": {"contract", "binrwir", "vmjit"},
-    "compiler": {"contract", "binrwir", "vmjit", "compiler"},
+    "binrwir_compiler": {"contract", "binrwir", "binrwir_compiler"},
     "vmbin": {"contract", "binrwir", "vmbin"},
     "engine": {
-        "contract", "host", "binrwir", "vmkv", "vmjit", "compiler",
+        "contract", "host", "binrwir", "vmkv", "binrwir_compiler",
         "vmbin", "engine",
     },
     "interface": {"public", "contract", "engine", "interface"},
@@ -39,8 +38,7 @@ EXPECTED_COMPONENT_ORDER = (
     ("runtimec_host", "host"),
     ("runtimec_binrwir", "binrwir"),
     ("runtimec_vmkv", "vmkv"),
-    ("runtimec_vmjit", "vmjit"),
-    ("runtimec_compiler", "compiler"),
+    ("runtimec_binrwir_compiler", "binrwir_compiler"),
     ("runtimec_vmbin", "vmbin"),
     ("runtimec_engine", "engine"),
 )
@@ -49,15 +47,11 @@ EXPECTED_TARGET_DEPENDENCIES = {
     "runtimec_host": {"runtimec_contract"},
     "runtimec_binrwir": {"runtimec_contract"},
     "runtimec_vmkv": {"runtimec_contract", "runtimec_binrwir"},
-    "runtimec_vmjit": {"runtimec_contract", "runtimec_binrwir"},
-    "runtimec_compiler": {
-        "runtimec_contract", "runtimec_binrwir", "runtimec_vmjit",
-    },
+    "runtimec_binrwir_compiler": {"runtimec_contract", "runtimec_binrwir"},
     "runtimec_vmbin": {"runtimec_contract", "runtimec_binrwir"},
     "runtimec_engine": {
         "runtimec_contract", "runtimec_host", "runtimec_binrwir",
-        "runtimec_vmkv", "runtimec_compiler", "runtimec_vmjit",
-        "runtimec_vmbin",
+        "runtimec_vmkv", "runtimec_binrwir_compiler", "runtimec_vmbin",
     },
     "runtimec_interface": {"runtimec_contract", "runtimec_engine"},
 }
@@ -71,10 +65,10 @@ LINK_PATTERN = re.compile(
     re.DOTALL,
 )
 INTERNAL_PREFIXES = {
-    "contract", "host", "binrwir", "vmkv", "vmjit", "compiler",
+    "contract", "host", "binrwir", "vmkv", "binrwir_compiler",
     "vmbin", "engine", "interface",
 }
-POLICY_LAYERS = {"compiler", "vmbin", "vmjit"}
+POLICY_LAYERS = {"binrwir_compiler", "vmbin"}
 ROUTE_FILES = {"engine/route.c", "engine/route.h"}
 BINRWIR_NEUTRAL_FILE_NAMES = {
     "value.c", "value.h", "reference.c", "reference.h", "signature.c",
@@ -271,7 +265,7 @@ def audit(repository_root: Path, runtimec_root: Path) -> tuple[list[Finding], in
                 relative.as_posix() not in ROUTE_FILES):
             findings.append(Finding(
                 display, 1, "route-bypass",
-                "only engine/route may merge compiler, vmbin, and vmjit",
+                "only engine/route may merge binrwir_compiler and vmbin",
             ))
     return sorted(set(findings)), scanned
 

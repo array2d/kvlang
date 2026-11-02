@@ -2,15 +2,15 @@
  * 组件：engine/route 的实现
  * 作用：唯一执行策略入口；当前 fail-closed，返回 NOT_IMPLEMENTED 并
  *       把结构化 execution exit 标为 ERROR。
- * 联系：这是唯一同时看到 vmkv、vmbin 与 vmjit 的文件，并且只有这里
+ * 联系：这是唯一同时看到 vmkv、vmbin 与 BinRWIR JIT 的文件，并且只有这里
  *       可以读取 BinRWIR Compiler 已确定的执行目标和提交 checkpoint。
  */
 
-#include "compiler/compiler.h"
+#include "binrwir_compiler/compiler.h"
+#include "binrwir_compiler/jit/executor.h"
 #include "engine/compilation_repository.h"
 #include "engine/route.h"
 #include "vmbin/interpreter.h"
-#include "vmjit/vmjit.h"
 #include "vmkv/encoder.h"
 
 runtimec_status_t runtimec_route_execute(

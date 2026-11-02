@@ -1,11 +1,11 @@
 # 组件：runtimec 顶层构建
 # 作用：C11-only 构建（不链接 libstdc++）；按 contract、host、binrwir、
-#       vmkv、vmjit、compiler、vmbin、engine、interface 生成独立 target，
+#       vmkv、binrwir_compiler、vmbin、engine、interface 生成独立 target，
 #       并从 interface/exports.txt
 #       生成三平台导出脚本（README §9、§10）。当前产物名刻意带 _scaffold，禁止用于
 #       benchmark/tutorial/发布。
-# 联系：组件依赖只沿本文件声明的单向图连接；只有 engine route 汇合
-#       compiler、vmbin 与 vmjit。
+# 联系：组件依赖只沿本文件声明的单向图连接；JIT 是 BinRWIR Compiler
+#       内部实现，只有 engine route 汇合 compiler 与 vmbin。
 cmake_minimum_required(VERSION 3.20)
 
 project(kvlang_runtimec_scaffold VERSION 0.1.0 LANGUAGES C)
@@ -19,7 +19,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_C_VISIBILITY_PRESET hidden)
 set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 
-option(RUNTIMEC_ENABLE_VMJIT "Enable vmjit execution capability" ON)
+option(RUNTIMEC_ENABLE_JIT "Enable BinRWIR JIT compilation capability" ON)
 
 set(RUNTIMEC_INCLUDE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include")
 set(RUNTIMEC_GENERATED_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
@@ -82,8 +82,7 @@ runtimec_add_component(runtimec_contract contract)
 runtimec_add_component(runtimec_host host)
 runtimec_add_component(runtimec_binrwir binrwir)
 runtimec_add_component(runtimec_vmkv vmkv)
-runtimec_add_component(runtimec_vmjit vmjit)
-runtimec_add_component(runtimec_compiler compiler)
+runtimec_add_component(runtimec_binrwir_compiler binrwir_compiler)
 runtimec_add_component(runtimec_vmbin vmbin)
 runtimec_add_component(runtimec_engine engine)
 
@@ -96,10 +95,8 @@ target_link_libraries(runtimec_binrwir
     PRIVATE runtimec_contract)
 target_link_libraries(runtimec_vmkv
     PRIVATE runtimec_contract runtimec_binrwir)
-target_link_libraries(runtimec_vmjit
+target_link_libraries(runtimec_binrwir_compiler
     PRIVATE runtimec_contract runtimec_binrwir)
-target_link_libraries(runtimec_compiler
-    PRIVATE runtimec_contract runtimec_binrwir runtimec_vmjit)
 target_link_libraries(runtimec_vmbin
     PRIVATE runtimec_contract runtimec_binrwir)
 target_link_libraries(runtimec_engine
@@ -108,13 +105,12 @@ target_link_libraries(runtimec_engine
         runtimec_host
         runtimec_binrwir
         runtimec_vmkv
-        runtimec_compiler
-        runtimec_vmjit
+        runtimec_binrwir_compiler
         runtimec_vmbin)
-target_compile_definitions(runtimec_vmjit
-    PRIVATE RUNTIMEC_VMJIT_ENABLED=$<BOOL:${RUNTIMEC_ENABLE_VMJIT}>)
+target_compile_definitions(runtimec_binrwir_compiler
+    PRIVATE RUNTIMEC_ENABLE_JIT=$<BOOL:${RUNTIMEC_ENABLE_JIT}>)
 target_compile_definitions(runtimec_engine
-    PRIVATE RUNTIMEC_VMJIT_ENABLED=$<BOOL:${RUNTIMEC_ENABLE_VMJIT}>)
+    PRIVATE RUNTIMEC_ENABLE_JIT=$<BOOL:${RUNTIMEC_ENABLE_JIT}>)
 
 # 编译公共二进制接口实现一次，在静态接口组件和 scaffold 动态库间共享。
 add_library(runtimec_interface_objects OBJECT interface/public_interface.c)
@@ -159,8 +155,7 @@ add_library(kvlang::runtimec_contract ALIAS runtimec_contract)
 add_library(kvlang::runtimec_host ALIAS runtimec_host)
 add_library(kvlang::runtimec_binrwir ALIAS runtimec_binrwir)
 add_library(kvlang::runtimec_vmkv ALIAS runtimec_vmkv)
-add_library(kvlang::runtimec_vmjit ALIAS runtimec_vmjit)
-add_library(kvlang::runtimec_compiler ALIAS runtimec_compiler)
+add_library(kvlang::runtimec_binrwir_compiler ALIAS runtimec_binrwir_compiler)
 add_library(kvlang::runtimec_vmbin ALIAS runtimec_vmbin)
 add_library(kvlang::runtimec_engine ALIAS runtimec_engine)
 add_library(kvlang::runtimec_interface ALIAS runtimec_interface)

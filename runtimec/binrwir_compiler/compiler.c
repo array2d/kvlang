@@ -3,7 +3,7 @@
  * 输出先进入无效状态；合法但尚未实现的请求返回 NOT_IMPLEMENTED。
  */
 
-#include "compiler/compiler.h"
+#include "binrwir_compiler/compiler.h"
 
 static void binrwir_compilation_reset_view(
     binrwir_compilation_view_t *view) {
@@ -12,9 +12,25 @@ static void binrwir_compilation_reset_view(
             .execution_target = BINRWIR_EXECUTION_TARGET_INVALID,
             .canonical_program = NULL,
             .execution_plan = NULL,
-            .vmjit_code = NULL,
+            .binrwir_jit_code = NULL,
         };
     }
+}
+
+static bool binrwir_compiler_jit_configuration_is_valid(
+    const binrwir_compiler_configuration_t *configuration) {
+    if (configuration->enable_jit) {
+        return configuration->jit_machine_code_capacity > 0U &&
+               configuration->jit_target.architecture !=
+                   BINRWIR_JIT_ARCHITECTURE_NONE &&
+               runtimec_string_view_is_valid(configuration->jit_target.triple);
+    }
+    return configuration->jit_machine_code_capacity == 0U &&
+           configuration->jit_target.architecture ==
+               BINRWIR_JIT_ARCHITECTURE_NONE &&
+           configuration->jit_target.triple.data == NULL &&
+           configuration->jit_target.triple.size == 0U &&
+           configuration->jit_target.feature_mask == 0U;
 }
 
 runtimec_status_t binrwir_compiler_create(
@@ -29,10 +45,7 @@ runtimec_status_t binrwir_compiler_create(
         output_compiler == NULL ||
         configuration->structure_size != sizeof(*configuration) ||
         configuration->compiler_revision == 0U ||
-        (configuration->enable_vmjit &&
-         configuration->vmjit_compiler == NULL) ||
-        (!configuration->enable_vmjit &&
-         configuration->vmjit_compiler != NULL)) {
+        !binrwir_compiler_jit_configuration_is_valid(configuration)) {
         return RUNTIMEC_STATUS_INVALID;
     }
     (void)error;

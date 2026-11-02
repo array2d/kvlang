@@ -1,7 +1,9 @@
 # runtimec architecture documents
 
-本目录只描述 runtimec 的唯一 Compiler 主干。`runtimec/README.md` 是总纲，本目录把组件
-所有权、编译生命周期、执行顺序和 Read/Write 别名展开为可审查文档。
+本目录只描述 runtimec 的唯一 BinRWIR Compiler 主干。`runtimec/README.md` 是总纲，
+本目录把组件所有权、编译生命周期、执行顺序和 Read/Write 别名展开为可审查文档。
+
+JIT 仅是 `binrwir_compiler/jit/` 的内部机器码实现，不是独立 VM 或并列顶层组件。
 
 - `runtimec-architecture.md`：组件所有权、compilation 生命周期、状态与依赖规则。
 - `capability-map.md`：每项 capability 的唯一所有者与禁止职责。

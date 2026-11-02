@@ -3,7 +3,7 @@
 
 /*
  * 组件：binrwir/execution_exit
- * 作用：表达 vmbin 或 vmjit 离开执行窗口的唯一结构化结果。
+ * 作用：表达 vmbin 或 BinRWIR JIT 离开执行窗口的唯一结构化结果。
  * 联系：engine route 消费退出并决定调用、交接、恢复或报错。
  * 约束：不得携带需要持久化的机器地址或伪造成功状态。
  */

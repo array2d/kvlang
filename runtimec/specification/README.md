@@ -19,7 +19,8 @@
 3. 在 `rwir_catalog.def` 中写入唯一 canonical BinRWIR operation 映射与
    `behavior-decision` 引用。
 4. 由 vmkv 生成器消费该 manifest，验证 RWIR 并等价生成 canonical BinRWIR。
-5. 由顶层 BinRWIR Compiler 从 canonical Program 生成 execution plan 和 compilation。
+5. 由 `binrwir_compiler/` 从 canonical Program 生成 execution plan 和 compilation；JIT
+   仅作为该组件的内部编译实现参与目标判定。
 
 每个 myrwircap 必须恰好出现一次。缺失映射、重复 capability、重复稳定 identifier、参数
 方向不一致、行为引用不存在或任何歧义都必须成为编译错误。禁止默认 operation、顺序推导、

@@ -1,7 +1,7 @@
 /*
  * 组件：contract/status 的实现
  * 作用：只做枚举范围、失败分类与诊断名的纯函数判断；不读 kvspace、不分配。
- * 联系：被 host/vmbin/vmkv/vmjit/engine/interface 共同调用，是组件边界的
+ * 联系：被 host/vmbin/vmkv/BinRWIR Compiler/engine/interface 共同调用，是组件边界的
  *       唯一状态词汇表。
  */
 

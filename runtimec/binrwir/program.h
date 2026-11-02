@@ -4,7 +4,7 @@
 /*
  * 组件：binrwir/program
  * 作用：定义与 RWIR 语义等价的 canonical、不可变 BinRWIR Program。
- * 联系：vmkv 构造 Program；Compiler、vmbin 与 vmjit 只读消费同一 Program。
+ * 联系：vmkv 构造 Program；BinRWIR Compiler、vmbin 与 JIT 只读消费同一 Program。
  * 约束：类型特化、kvspace 寻址、融合、虚拟寄存器、控制流派生计划、
  *       可变绑定、机器码、缓存和统计均不得进入 Program。
  */

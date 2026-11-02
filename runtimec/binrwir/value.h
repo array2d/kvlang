@@ -3,8 +3,8 @@
 
 /*
  * 组件：binrwir/value
- * 作用：vmbin 与 vmjit 共享的 32 字节目标中立值槽。
- * 联系：execution binding、execution frame、vmbin 与 vmjit 共同使用。
+ * 作用：vmbin 与 BinRWIR JIT 共享的 32 字节目标中立值槽。
+ * 联系：execution binding、execution frame、vmbin 与 BinRWIR JIT 共同使用。
  * 约束：布局是内部二进制接口，不是持久格式。
  */
 

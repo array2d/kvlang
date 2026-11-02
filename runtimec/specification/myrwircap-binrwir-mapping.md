@@ -10,7 +10,7 @@ five-language behavior decision
     -> one myrwircap specification record
     -> one canonical BinRWIR operation identifier
     -> vmkv equivalent emission
-    -> BinRWIR Compiler execution plan
+    -> binrwir_compiler execution plan
 ```
 
 前一层不完整时，后一层不得产生输出。
@@ -74,19 +74,19 @@ execution target 选择。这些工作只属于 BinRWIR Compiler 的 execution p
 - manifest version 与 Program identity 不一致。
 
 这些都是 `ERROR`，不是 `NOT_COMPILABLE`。`NOT_COMPILABLE` 只表示合法 canonical
-BinRWIR 已成功完成 vmjit eligibility 判定，并应建立 VMBIN compilation。
+BinRWIR 已成功完成内部 JIT eligibility 判定，并应建立 VMBIN compilation。
 
 ## 6. Compiler boundary
 
 BinRWIR Compiler 只接收已经 finalize 且通过 mapping validation 的 canonical Program。
 Compiler 生成 execution plan，并在编译阶段决定：
 
-- `COMPILED`：建立 VMJIT compilation，包含机器码；
+- `COMPILED`：建立 JIT compilation，包含机器码；
 - `NOT_COMPILABLE`：建立 VMBIN compilation，不包含机器码；
 - `ERROR`：不建立可执行 compilation，立即返回真实错误。
 
 repository 缓存最终 compilation。route 在执行前只读取已经决定的 target，并调用
-`vmjit_execute` 或 `vmbin_execute` 中的一个。
+`binrwir_jit_execute` 或 `vmbin_execute` 中的一个。
 
 ## 7. Acceptance checks
 

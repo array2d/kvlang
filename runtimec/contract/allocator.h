@@ -5,7 +5,7 @@
  * 组件：contract/allocator
  * 作用：所有冷路径动态内存的显式来源。指令执行热路径不得动态分配；
  *       分配器不得藏进全局状态或线程局部存储。
- * 联系：contract 层只依赖自身；host、vmbin、vmkv、vmjit、engine 的 arena、
+ * 联系：contract 层只依赖自身；host、vmbin、vmkv、BinRWIR Compiler、engine 的 arena、
  *       Program 存储、code memory 之外的冷分配都经本接口，便于测试注入、
  *       内存耗尽分类与 session 级生命周期。
  * 约束：分配/释放必须成对且 size/alignment 一致；alignment 为 2 的幂。

@@ -23,8 +23,10 @@ flowchart LR
     CELL["Canonical Cell<br/>value and mutation version"]
   end
 
-  COMPILER["BinRWIR Compiler<br/>plan preserves dependencies"]
-  EXECUTION["vmjit_execute or vmbin_execute<br/>same observable ordering"]
+  COMPILER["binrwir_compiler<br/>plan and JIT compilation preserve dependencies"]
+  TARGET{"immutable execution target"}
+  JIT_EXECUTION["binrwir_jit_execute<br/>existing machine code"]
+  VMBIN_EXECUTION["vmbin_execute<br/>canonical Program with plan"]
 
   RWIR_IDENTIFIER --> VMKV
   CANONICAL_IDENTIFIER --> VMKV
@@ -39,8 +41,11 @@ flowchart LR
   INSTRUCTION --> COMPILER
   READ_REFERENCE --> COMPILER
   WRITE_REFERENCE --> COMPILER
-  COMPILER --> EXECUTION
-  CELL -. "later Read observes ordered Write" .-> EXECUTION
+  COMPILER --> TARGET
+  TARGET -->|"JIT"| JIT_EXECUTION
+  TARGET -->|"VMBIN"| VMBIN_EXECUTION
+  CELL -. "later Read observes ordered Write" .-> JIT_EXECUTION
+  CELL -. "later Read observes ordered Write" .-> VMBIN_EXECUTION
 
   classDef specification fill:#fef3c7,stroke:#d97706,color:#451a03
   classDef read fill:#dbeafe,stroke:#2563eb,color:#172554

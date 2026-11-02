@@ -4,7 +4,8 @@
  * 联系：每条记录显式保存稳定 RWIR operation identifier、规范 capability 名称、
  *       canonical BinRWIR operation identifier、Read/Write 参数结构与
  *       five-language-behavior-matrix.md 的行为决策引用；vmkv 只从本文件生成
- *       等价编码表，BinRWIR Compiler 再生成 execution plan。
+ *       等价编码表，binrwir_compiler 再生成 execution plan，并在内部决定是否生成
+ *       JIT code 或建立 VMBIN target。
  * 约束：每个 myrwircap 必须恰好一条记录。identifier 不得来自数组下标、文件顺序、
  *       声明顺序或生成顺序。缺失、重复、歧义、签名不等价和无效行为引用必须成为
  *       编译错误。本文件不保存执行策略，不冻结 BinRWIR 内存布局。

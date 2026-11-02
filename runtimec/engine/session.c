@@ -2,7 +2,7 @@
 
 #include "engine/session.h"
 
-#include "compiler/compiler.h"
+#include "binrwir_compiler/compiler.h"
 #include "engine/compilation_repository.h"
 #include "vmkv/encoder.h"
 
@@ -29,8 +29,8 @@ runtimec_status_t runtimec_session_create(
         options->structure_size != sizeof(*options) ||
         !runtimec_allocator_is_valid(&options->allocator) ||
         options->compilation_cache_capacity == 0U ||
-        (options->enable_vmjit && options->machine_code_capacity == 0U) ||
-        (!options->enable_vmjit && options->machine_code_capacity != 0U) ||
+        (options->enable_jit && options->machine_code_capacity == 0U) ||
+        (!options->enable_jit && options->machine_code_capacity != 0U) ||
         output_session == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }

@@ -5,7 +5,7 @@
  * runtimec 的唯一公共 C 接口。
  *
  * 公共层只负责创建 runtimec、提交一次执行请求和销毁 runtimec。RWIR、
- * BinRWIR、vmkv、vmbin、vmjit 与 kvspace 的内部结构都不在此暴露。
+ * BinRWIR、vmkv、vmbin、BinRWIR Compiler 与 kvspace 的内部结构都不在此暴露。
  * 所有可失败调用返回 runtimec_status_t，输出对象在失败前先进入无效状态，
  * 错误写入调用方提供的缓冲区。当前骨架只会明确返回未实现，不伪造成功。
  */
