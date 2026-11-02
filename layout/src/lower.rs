@@ -1493,6 +1493,35 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
         if word == "sub" && reads.len() == 1 {
             return "int64".to_string();
         }
+        // 未定型整数字面量适配（spec 01-种类与定宽类型 第 10 条）：与 specialize 的
+        // promoted_numeric_kind 同一套规则，保证写槽类型与发出的 typed opcode 一致。
+        {
+            let mut ak: Vec<String> = Vec::new();
+            let mut al: Vec<Option<&str>> = Vec::new();
+            for r in reads {
+                let t = slot_type(r, tm);
+                let members = type_members(&t);
+                if members.is_empty() {
+                    return String::new();
+                }
+                if matches!(literal_text_kind(r), Some("int64")) {
+                    ak.push("int64".to_string());
+                    al.push(Some(r.as_str()));
+                } else {
+                    for m in &members {
+                        if !builtin::is_num_kind(m) {
+                            return String::new();
+                        }
+                        ak.push(m.to_string());
+                        al.push(None);
+                    }
+                }
+            }
+            if let Some(target) = adapt_int_uint(&ak, &al) {
+                let rk = builtin::op_kind(&word, &target);
+                return if rk.is_empty() { target } else { rk };
+            }
+        }
         // 结果 kind 必须与 runtime 一致：同族按更宽者合流（narrow_int/narrow_float）；
         // 任一操作数类型未知（动态 any/空）→ 不声明，runtime 按实际 kind 产出。
         // union 操作数按成员笛卡尔积求更宽者，结果仍是有限 union。
@@ -2157,6 +2186,7 @@ fn specialize_inst(
     /* 操作数类型必须全部可证明（exact_operand_kind）；混合数值 kind 按五语言
      * 提升规则取唯一结果 kind，证明不了（未知/字符串/bool/不可判混合）保留通用 opcode。 */
     let mut kinds: Vec<String> = Vec::new();
+    let mut literals: Vec<Option<&str>> = Vec::new();
     let mut string_operands = 0usize;
     for arg in &e.args {
         let t = match exact_operand_kind(arg, declared, stable) {
@@ -2166,6 +2196,7 @@ fn specialize_inst(
                 if arg.is_leaf() && sets_all_string(type_sets, &arg.val) {
                     string_operands += 1;
                     kinds.push("char/utf32".to_string());
+                    literals.push(None);
                     continue;
                 }
                 return;
@@ -2176,6 +2207,7 @@ fn specialize_inst(
         } else if !builtin::is_num_kind(&t) {
             return;
         }
+        literals.push(untyped_int_literal(arg));
         kinds.push(t);
     }
     if kinds.is_empty() {
@@ -2206,7 +2238,7 @@ fn specialize_inst(
     let is_cmp = matches!(word.as_str(), "eq" | "neq" | "lt" | "le" | "gt" | "ge");
     /* 混合 int×float 的比较在 runtime 报错（same_class=false）；不特化以免发出
      * 与解释器行为不符的 typed 名。 */
-    let mut k = match promoted_numeric_kind(&kinds, !is_cmp) {
+    let mut k = match promoted_numeric_kind(&kinds, !is_cmp, &literals) {
         Some(k) => k,
         None => return,
     };
@@ -2270,7 +2302,98 @@ fn specialize_inst(
 ///   否则 float32；
 /// - int×uint 混合 runtime 直接报错（same_class=false），不特化。
 /// `allow_mixed_classes=false`（比较类）时跨类混合一律不特化。
-fn promoted_numeric_kind(kinds: &[String], allow_mixed_classes: bool) -> Option<String> {
+/// 未定型整数字面量：叶且整数文本（含 lower 合成的文本叶），返回字面量文本。
+/// 浮点字面量不算：浮点走「任一侧浮点则提升为浮点」的既有路径。
+fn untyped_int_literal(e: &Expr) -> Option<&str> {
+    if !e.is_leaf() || e.quote != 0 {
+        return None;
+    }
+    match e.lit {
+        LitKind::LitInt => Some(e.val.as_str()),
+        LitKind::LitNone
+            if matches!(literal_text_kind(&e.val), Some("int64")) =>
+        {
+            Some(e.val.as_str())
+        }
+        _ => None,
+    }
+}
+
+/// 整数字面量文本是否落在目标整数 kind 的取值范围内。
+fn literal_fits(text: &str, kind: &str) -> bool {
+    let Ok(v) = text.parse::<i128>() else {
+        return false;
+    };
+    let (signed, width) = match kind {
+        "int8" => (true, 8),
+        "int16" => (true, 16),
+        "int32" => (true, 32),
+        "int64" => (true, 64),
+        "uint8" => (false, 8),
+        "uint16" => (false, 16),
+        "uint32" => (false, 32),
+        "uint64" => (false, 64),
+        _ => return false,
+    };
+    if signed {
+        let max = (1i128 << (width - 1)) - 1;
+        v >= -max - 1 && v <= max
+    } else {
+        v >= 0 && (v as u128) <= (1u128 << width) - 1
+    }
+}
+
+/// int×uint 混合时，若冲突只来自「未定型整数字面量」，把字面量适配到确定类型那一侧。
+/// 规则（spec 01-种类与定宽类型 第 10 条）：字面量按上下文适配；只有两侧都是**确定**
+/// 且冲突的符号性才保持混合冲突（返回 None）。
+fn adapt_int_uint(kinds: &[String], literals: &[Option<&str>]) -> Option<String> {
+    let (mut det_int, mut det_uint) = (None::<String>, None::<String>);
+    let mut has_lit = false;
+    for (i, k) in kinds.iter().enumerate() {
+        if literals.get(i).is_some_and(|l| l.is_some()) {
+            has_lit = true;
+            continue;
+        }
+        if builtin::is_unsigned_kind(k) {
+            det_uint = Some(match det_uint {
+                Some(t) => builtin::wider_int_kind(&t, k),
+                None => k.clone(),
+            });
+        } else if builtin::is_int_kind(k) {
+            det_int = Some(match det_int {
+                Some(t) => builtin::wider_int_kind(&t, k),
+                None => k.clone(),
+            });
+        } else {
+            return None;
+        }
+    }
+    if !has_lit {
+        return None;
+    }
+    let target = match (det_int, det_uint) {
+        (Some(_), Some(_)) => return None, // 真冲突：两侧都是确定类型
+        (Some(t), None) | (None, Some(t)) => t,
+        (None, None) => return None,
+    };
+    for (i, lit) in literals.iter().enumerate() {
+        if let Some(text) = lit {
+            if !literal_fits(text, &target) {
+                return None;
+            }
+        }
+        if kinds.get(i).is_some_and(|k| builtin::is_float_kind(k)) {
+            return None;
+        }
+    }
+    Some(target)
+}
+
+fn promoted_numeric_kind(
+    kinds: &[String],
+    allow_mixed_classes: bool,
+    literals: &[Option<&str>],
+) -> Option<String> {
     let (mut has_int, mut has_uint, mut has_float) = (false, false, false);
     let mut has_float64 = false;
     for k in kinds {
@@ -2286,7 +2409,12 @@ fn promoted_numeric_kind(kinds: &[String], allow_mixed_classes: bool) -> Option<
         }
     }
     if has_int && has_uint {
-        return None;
+        // 混合符号：字面量在场且能适配到确定类型一侧时不算冲突；浮点在场时保持原行为
+        // （不在此特化，留给浮点提升/运行时判别，避免顺手改动浮点路径）。
+        if has_float {
+            return None;
+        }
+        return adapt_int_uint(kinds, literals);
     }
     let mixed_class = has_float && (has_int || has_uint);
     if mixed_class {

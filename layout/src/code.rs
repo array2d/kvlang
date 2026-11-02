@@ -1240,6 +1240,13 @@ fn write_linear_inst(
             .get(r.as_str())
             .map(String::as_str)
             .unwrap_or(r.as_str());
+        // 未定型整数字面量适配（spec 03-类型系统/01 第 10 条）：typed 无符号算子
+        // （`uint64·add` 等）的字面量操作数按该 kind 落槽——runtime 的 typed op 只
+        // 接受同符号性族的操作数，int64 字面量进 `uint64·add` 会失败。
+        if let Some((wire, lt)) = adapted_literal_slot(rv, &opcode)? {
+            pairs.push((format!("{prefix}/[{n},-{}]", j + 1), lt, wire));
+            continue;
+        }
         let ty = read_slot_type(r, param_langtype, declared, type_sets);
         let (wire, lt) = typed_slot_value(rv, &ty, target_char)?;
         pairs.push((format!("{prefix}/[{n},-{}]", j + 1), lt, wire));
@@ -1403,6 +1410,46 @@ fn opcode_value(
 }
 
 /// Preserve the target type.
+/// 整数字面量文本（可选负号，无小数点/指数）。
+fn integer_literal_text(s: &str) -> bool {
+    let b = s.as_bytes();
+    let start = usize::from(b.first() == Some(&b'-'));
+    let rest = &b[start..];
+    !rest.is_empty() && rest.iter().all(u8::is_ascii_digit)
+}
+
+/// typed 无符号算子的字面量操作数：按算子 kind 编码（范围复检，越界不改编码）。
+fn adapted_literal_slot(
+    text: &str,
+    opcode: &str,
+) -> Result<Option<(Vec<u8>, String)>, String> {
+    let Some((kind, _)) = opcode.split_once(keytree::MEMBER_SEP) else {
+        return Ok(None);
+    };
+    if !builtin::is_unsigned_kind(kind) || !integer_literal_text(text) {
+        return Ok(None);
+    }
+    let Ok(v) = text.parse::<i128>() else {
+        return Ok(None);
+    };
+    if v < 0 {
+        return Ok(None);
+    }
+    let v = v as u128;
+    let (bytes, max): (Vec<u8>, u128) = match kind {
+        "uint8" => (vec![v as u8], u8::MAX as u128),
+        "uint16" => ((v as u16).to_le_bytes().to_vec(), u16::MAX as u128),
+        "uint32" => ((v as u32).to_le_bytes().to_vec(), u32::MAX as u128),
+        "uint64" => ((v as u64).to_le_bytes().to_vec(), u64::MAX as u128),
+        _ => return Ok(None),
+    };
+    if v > max {
+        return Ok(None);
+    }
+    let wire = ffi::xvalue_to_wire(kind, &bytes, 1)?;
+    Ok(Some((wire, kind.to_string())))
+}
+
 fn typed_slot_value(name: &str, ty: &str, target_char: &str) -> Result<(Vec<u8>, String), String> {
     if !ty.is_empty() && (name.starts_with('/') || !is_literal(name)) {
         return Ok((
