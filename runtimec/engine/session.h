@@ -3,9 +3,10 @@
 
 /*
  * 组件：engine/session
- * 作用：显式 owner graph 的根：host、vmkv compiler、Program repository、
- *       frame/register/view 池、vmjit compiler 与 code cache、configuration、
- *       generation 与 quiescent point。禁止用
+ * 作用：显式 owner graph 的根：host、vmkv encoder、BinRWIR Compiler、
+ *       compilation repository、frame/register/view 池、configuration、
+ *       generation 与 quiescent point。vmjit compiler 与机器码存储完全封装在
+ *       BinRWIR Compiler 内，不是 session 的直接 owner。禁止用
  *       function-static、global 或 thread-local storage 隐藏这些 owner。
  * 联系：公共接口层创建 session；route 在 session 上执行；多
  *       session/测试隔离都从本对象出发。
@@ -28,8 +29,8 @@ typedef struct runtimec_session_t runtimec_session_t;
 typedef struct runtimec_session_options_t {
     uint32_t structure_size;
     runtimec_allocator_t allocator;
-    size_t program_cache_capacity;
-    size_t code_cache_limit;
+    size_t compilation_cache_capacity;
+    size_t machine_code_capacity;
     bool enable_vmjit;
     bool observe_every_instruction;
 } runtimec_session_options_t;

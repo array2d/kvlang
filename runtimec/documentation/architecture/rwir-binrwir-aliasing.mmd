@@ -1,38 +1,52 @@
 flowchart LR
-  subgraph Contract["RWIR and BinRWIR contract"]
-    READ_REGISTER["Register a<br/>READ capability"]
-    WRITE_REGISTER["Register a_out<br/>WRITE capability"]
-    ALIAS_RULE["Alias Rule<br/>MUST_ALIAS read 0 and write 0"]
+  subgraph Specification["Specification identity"]
+    CAPABILITY["one myrwircap record"]
+    RWIR_IDENTIFIER["explicit stable RWIR operation identifier"]
+    CANONICAL_IDENTIFIER["one canonical BinRWIR operation identifier"]
+    SIGNATURE["Read and Write signature plus alias policy"]
+    CAPABILITY --> RWIR_IDENTIFIER
+    CAPABILITY --> CANONICAL_IDENTIFIER
+    CAPABILITY --> SIGNATURE
   end
 
-  subgraph Call["Call binding"]
+  VMKV["vmkv equivalent emission"]
+
+  subgraph Canonical["Top-level canonical BinRWIR"]
+    INSTRUCTION["instruction operation_code<br/>stable canonical identifier"]
+    READ_REFERENCE["Read reference"]
+    WRITE_REFERENCE["Write reference"]
+  end
+
+  subgraph Binding["Execution binding"]
     READ_BINDING["Read Binding"]
     WRITE_BINDING["Write Binding"]
     CELL["Canonical Cell<br/>value and mutation version"]
   end
 
-  subgraph Stream["Partitioned BinRWIR references"]
-    READ_BEFORE["array.get<br/>Read a and i; Write x"]
-    WRITE["array.set<br/>Read j and x; Write a_out"]
-    READ_AFTER["array.get<br/>Read a and j; Write y"]
-  end
+  COMPILER["BinRWIR Compiler<br/>plan preserves dependencies"]
+  EXECUTION["vmjit_execute or vmbin_execute<br/>same observable ordering"]
 
-  READ_REGISTER --> READ_BINDING
-  WRITE_REGISTER --> WRITE_BINDING
-  ALIAS_RULE --> READ_BINDING
-  ALIAS_RULE --> WRITE_BINDING
-  READ_BINDING --> CELL
-  WRITE_BINDING --> CELL
-  READ_BEFORE --> WRITE --> READ_AFTER
-  CELL -. "read current version" .-> READ_BEFORE
-  WRITE -. "write and increment version" .-> CELL
-  CELL -. "later read observes write" .-> READ_AFTER
+  RWIR_IDENTIFIER --> VMKV
+  CANONICAL_IDENTIFIER --> VMKV
+  SIGNATURE --> VMKV
+  VMKV --> INSTRUCTION
+  VMKV --> READ_REFERENCE
+  VMKV --> WRITE_REFERENCE
+  READ_REFERENCE --> READ_BINDING --> CELL
+  WRITE_REFERENCE --> WRITE_BINDING --> CELL
+  SIGNATURE -. "explicit alias permission" .-> READ_BINDING
+  SIGNATURE -. "explicit alias permission" .-> WRITE_BINDING
+  INSTRUCTION --> COMPILER
+  READ_REFERENCE --> COMPILER
+  WRITE_REFERENCE --> COMPILER
+  COMPILER --> EXECUTION
+  CELL -. "later Read observes ordered Write" .-> EXECUTION
 
+  classDef specification fill:#fef3c7,stroke:#d97706,color:#451a03
   classDef read fill:#dbeafe,stroke:#2563eb,color:#172554
   classDef write fill:#fee2e2,stroke:#dc2626,color:#450a0a
   classDef shared fill:#dcfce7,stroke:#16a34a,color:#052e16
-  classDef rule fill:#fef3c7,stroke:#d97706,color:#451a03
-  class READ_REGISTER,READ_BINDING,READ_BEFORE,READ_AFTER read
-  class WRITE_REGISTER,WRITE_BINDING,WRITE write
+  class CAPABILITY,RWIR_IDENTIFIER,CANONICAL_IDENTIFIER,SIGNATURE specification
+  class READ_REFERENCE,READ_BINDING read
+  class WRITE_REFERENCE,WRITE_BINDING write
   class CELL shared
-  class ALIAS_RULE rule

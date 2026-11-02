@@ -11,8 +11,9 @@ from pathlib import Path
 
 
 PRODUCT_DIRECTORIES = (
-    "include", "interface", "contract", "host", "vmbin", "vmkv",
-    "vmjit", "engine", "generated", "specification",
+    "include", "interface", "contract", "host", "binrwir", "vmkv",
+    "vmjit", "compiler", "vmbin", "engine", "generated",
+    "specification", "tests",
 )
 TEXT_SUFFIXES = {".c", ".h", ".cmake", ".in", ".map", ".exports", ".def"}
 FORBIDDEN_PATH_PARTS = {
@@ -26,6 +27,24 @@ FORBIDDEN_NAMES = (
     ("old-runtimec2-name", re.compile(r"\bruntimec2\b")),
     ("old-runtime-tree", re.compile(r"(?:^|[\"<])runtime/")),
     ("old-success-name", re.compile(r"\bRUNTIMEC_STATUS_OK\b")),
+    ("removed-fallback-status", re.compile(r"\bRUNTIMEC_STATUS_FALLBACK\b")),
+    ("removed-vmjit-execution-entry", re.compile(r"\bvmjit_try_execute\b")),
+    ("alternate-vmjit-compilation-cache", re.compile(
+        r"\b(?:vmjit_code_cache|vmjit_cache_key|vmjit_code_cache_get_or_compile)\b",
+    )),
+    ("binrwir-owned-plan-builder", re.compile(
+        r"\bbinrwir_execution_plan_build\b",
+    )),
+    ("second-vmjit-plan", re.compile(r"\bvmjit_plan_[A-Za-z0-9_]*\b")),
+    ("unobservable-compilation-state", re.compile(
+        r"\bBINRWIR_COMPILATION_STATE_[A-Za-z0-9_]*\b",
+    )),
+    ("execution-time-fallback", re.compile(r"fallback", re.IGNORECASE)),
+    ("binrwir-under-vmbin", re.compile(
+        r"(?:^|/)vmbin/(?:value|reference|signature|instruction|program|execution_plan)"
+        r"\.(?:c|h)$",
+        re.IGNORECASE,
+    )),
     ("compatibility-language", re.compile(
         r"\b(?:backward|compat|compatibility|legacy|forwarding)[ _-]?(?:header|layer|path|support)?\b",
         re.IGNORECASE,

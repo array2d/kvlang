@@ -9,7 +9,7 @@
  *       当前事实，不能替代或修改事实源。
  * 联系：contract 层只依赖自身；host 提供原始事实，engine 在编译/执行前
  *       取快照，vmkv/vmbin/vmjit 只消费快照与 generation，不自己读
- *       kvspace；Program 与机器码 cache 的 key 由 engine 用本结构构造。
+ *       kvspace；engine 用本结构构造 compilation repository key。
  * 约束：snapshot 不携带进程地址或 kvspace 内部句柄。
  */
 

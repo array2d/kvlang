@@ -1,26 +1,37 @@
 flowchart TB
-  CLIENT["C client"]
-  INTERFACE["Public interface<br/>structured request and result"]
-  ROUTE["engine route<br/>only execution policy owner"]
-  VMKV["vmkv<br/>read and compile RWIR"]
-  PROGRAM["immutable BinRWIR Program"]
-  VMJIT["vmjit try"]
-  VMBIN["vmbin fallback<br/>only correctness executor"]
-  COMMIT["route commit<br/>effects and checkpoint"]
-  KVSPACE["kvspace<br/>authoritative facts"]
+  SPECIFICATION["myrwircaps and RWIR specification<br/>stable operation identifiers"]
+  VMKV["vmkv<br/>validate and emit equivalent canonical BinRWIR"]
+  PROGRAM["top-level binrwir<br/>immutable canonical Program"]
+  COMPILER["top-level BinRWIR Compiler<br/>build execution plan"]
+  DECISION{"compile-time target decision"}
+  VMJIT_COMPILATION["COMPILED<br/>VMJIT compilation with machine code"]
+  VMBIN_COMPILATION["NOT_COMPILABLE<br/>VMBIN compilation without machine code"]
+  ERROR["ERROR<br/>stop immediately"]
+  REPOSITORY["compilation repository<br/>cache complete compilation"]
+  ROUTE{"engine route<br/>read decided target before execution"}
+  VMJIT_EXECUTE["vmjit_execute<br/>execute generated machine code"]
+  VMBIN_EXECUTE["vmbin_execute<br/>execute canonical semantics with plan"]
+  COMMIT["route commit<br/>complete effects and checkpoint"]
+  KVSPACE["kvspace<br/>authoritative recoverable facts"]
 
-  CLIENT --> INTERFACE --> ROUTE
-  ROUTE --> VMKV --> PROGRAM
-  PROGRAM --> VMJIT
-  VMJIT -->|"executed"| COMMIT
-  VMJIT -->|"fallback"| VMBIN
-  PROGRAM --> VMBIN
-  VMBIN --> COMMIT
+  SPECIFICATION --> VMKV --> PROGRAM --> COMPILER --> DECISION
+  DECISION -->|"COMPILED"| VMJIT_COMPILATION
+  DECISION -->|"NOT_COMPILABLE"| VMBIN_COMPILATION
+  DECISION -->|"ERROR"| ERROR
+  VMJIT_COMPILATION --> REPOSITORY
+  VMBIN_COMPILATION --> REPOSITORY
+  REPOSITORY --> ROUTE
+  ROUTE -->|"VMJIT target"| VMJIT_EXECUTE
+  ROUTE -->|"VMBIN target"| VMBIN_EXECUTE
+  VMJIT_EXECUTE --> COMMIT
+  VMBIN_EXECUTE --> COMMIT
   COMMIT --> KVSPACE
 
   classDef fact fill:#fff3cd,stroke:#9a6700,color:#3d2e00
-  classDef policy fill:#dbeafe,stroke:#2563eb,color:#172554
-  classDef derived fill:#ecfdf5,stroke:#059669,color:#052e16
-  class KVSPACE fact
-  class ROUTE,COMMIT policy
-  class VMKV,PROGRAM,VMJIT,VMBIN derived
+  classDef compile fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
+  classDef execute fill:#ecfdf5,stroke:#059669,color:#052e16
+  classDef error fill:#fee2e2,stroke:#dc2626,color:#450a0a
+  class SPECIFICATION,KVSPACE fact
+  class VMKV,PROGRAM,COMPILER,DECISION,VMJIT_COMPILATION,VMBIN_COMPILATION,REPOSITORY compile
+  class ROUTE,VMJIT_EXECUTE,VMBIN_EXECUTE,COMMIT execute
+  class ERROR error

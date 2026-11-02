@@ -1,119 +1,148 @@
-# runtimec Architecture Contract
+# runtimec Compiler Architecture
 
-## Purpose
+runtimec 只允许一条从 RWIR specification 到 execution 的主干。任何组件都不能建立旁路、
+第二次目标判定或第三执行器。
 
-runtimec is the single C11 runtime for kvlang. This document fixes component ownership and
-failure direction while language semantics remain unimplemented. A convenient implementation
-must never override these rules.
-
-## Only execution trunk
+## Unique trunk
 
 ```text
-public interface
-    -> engine route
-    -> vmkv reads and compiles RWIR
-    -> immutable BinRWIR Program
-    -> vmjit try
-       -> executed
-       -> fallback to vmbin
-    -> route commits effects and checkpoint
+myrwircaps + RWIR specification
+    -> vmkv validates RWIR and emits equivalent canonical BinRWIR
+    -> BinRWIR Compiler builds execution plan
+    -> compile-time target decision: VMJIT or VMBIN
+    -> compilation repository caches the complete compilation
+    -> engine route reads the decided target before execution
+    -> vmjit_execute or vmbin_execute
+    -> route commits complete effects and checkpoint
 ```
 
-`engine/route` is the only policy owner. vmbin is the only correctness executor. vmjit is a
-removable accelerator that may refuse a Program. Generic, typed, fused, and continuous
-execution are internal vmbin handler forms, never separate executors.
+这条顺序同时是职责边界：vmkv 之前是语言事实，vmkv 输出是中立 canonical Program，
+Compiler 输出是可执行 compilation，route 只消费已完成的 compilation。
 
 ## Ownership
 
 | Component | Owns | Must not own |
 |---|---|---|
-| `include/kvlang/runtimec.h` | public status, request, result, error, opaque runtime | internal component structures |
-| `interface/` | request translation and exact exported symbols | execution policy or language semantics |
-| `contract/` | shared status helpers, errors, ownership and host port types | vmkv, vmbin, or vmjit policy |
-| `host/` | concrete kvspace and external capability adapters | BinRWIR or execution selection |
-| `vmkv/` | RWIR reading, validation, type resolution, Program building | execution, machine code, checkpoint commit |
-| `vmbin/` | BinRWIR, Program, Frame, Binding, Cell and complete interpretation | vmjit selection or persistent truth |
-| `vmjit/` | verification, lowering and optional machine code execution | RWIR parsing or language semantics |
-| `engine/route` | execution choice, fallback, effect commit and checkpoint | opcode semantics |
-| `specification/` | the single language-decision matrix and RWIR operation manifests | execution strategy |
+| `specification/` | 五语言行为决策、RWIR operation facts、myrwircap 到 canonical BinRWIR 的唯一映射 | 执行策略、缓存或机器码 |
+| `vmkv/` | RWIR source 读取、验证、稳定 operation identifier 解析、等价 BinRWIR 生成 | 优化、execution plan、执行目标或机器码 |
+| `binrwir/` | canonical Program、instruction、reference、signature、execution frame、execution exit、execution plan 合同 | vmkv、vmbin 或 vmjit 策略 |
+| `compiler/` | execution plan 生成、vmjit compilation 请求、统一 compilation 与目标判定 | RWIR 解析、执行或 checkpoint 提交 |
+| `engine/compilation_repository` | compilation 所有权、索引、租约与失效 | 编译、执行或目标改选 |
+| `engine/route` | repository 查询、未命中编译、执行前目标读取、唯一执行调度、effect 与 checkpoint 提交 | operation 语义或编译 eligibility |
+| `vmbin/` | 全部合法 canonical BinRWIR 的基线执行 | BinRWIR 所有权、vmjit 选择或持久事实 |
+| `vmjit/` | eligibility、lowering、backend、机器码生命周期、已生成机器码执行 | RWIR、vmbin 依赖、语言语义或执行期目标选择 |
+| `host/` | kvspace 与外部能力适配 | BinRWIR 检查或执行策略 |
+| `interface/` | 公共请求翻译与精确导出 | 内部结构、语言语义或执行策略 |
 
-## Facts and derived state
+## Specification mapping
 
-kvspace plaintext is the only durable semantic source. RWIR, values, frame facts, source
-program counter, status, error and recovery state belong there. BinRWIR Program data,
-register caches, dispatch tables, analysis plans, machine code and profiles are derived and
-must be safe to delete.
+每个 myrwircap 必须恰好拥有一个 canonical BinRWIR operation 映射。映射记录显式保存
+稳定 RWIR operation identifier、规范名称、canonical operation identifier、Read/Write
+参数结构和行为决策引用。
 
-A finalized Program is immutable. Mutable call bindings, profiles, code caches and fusion
-plans are sidecars with explicit session ownership.
+operation identifier 是 specification 数据，不是 `myrwircaps` 数组下标，也不能由文件
+顺序、声明顺序或生成顺序计算。重新排序或插入记录不能改变既有 identity。缺失记录、
+同一 capability 的重复记录、identifier 重复、签名不一致或歧义都使 compilation 立即
+失败。vmkv 不提供默认 operation，也不把不完整映射变成可执行 Program。
 
-## BinRWIR contract
+## Canonical BinRWIR
 
-BinRWIR preserves RWIR variable-arity semantics. Compilation fixes each instruction's read and
-write counts and stores references in this order:
+BinRWIR 是顶层中立模块，不属于 vmbin。canonical Program 只保存与已验证 RWIR 等价且
+执行所必需的稳定事实。类型固化、KV 寻址、融合、虚拟寄存器、控制流分析、机器码、
+profile 和缓存都属于可重建派生状态，不能写回 canonical Program。
+
+每条 instruction 使用固定 Read 数量和 Write 数量，并通过一个规范化 view 暴露：
 
 ```text
 [ReadReference ...][WriteReference ...]
 ```
 
-The common form stays compact. A wide form may use a cold side table. Both forms must produce
-the same normalized view for vmbin and vmjit. Encoding limits never justify truncating operands
-or splitting one atomic language operation.
+RWIR 可以具有不固定参数数量；确定的一次调用在 canonical BinRWIR 中必须保存完整数量。
+窄式与宽式编码只能改变存储形式，不能改变语义、参数顺序或观察边界。
 
-Read and write parameters may explicitly bind the same canonical Cell. Signature owns the only
-alias policy. Distinct register identifiers preserve access authority even when their Bindings
-point to the same Cell. Undeclared aliasing is invalid.
+## Compilation lifecycle
 
-## vmjit refusal
+BinRWIR Compiler 的唯一内容输入是 canonical `binrwir_program_t`。它按固定顺序完成：
 
-vmjit consumes only a validated, immutable Program and execution state. It may return fallback
-for unsupported operations, cold code, disabled machine code, platform limits, failed guards,
-or inability to preserve an observable boundary. Fallback means vmjit did not complete the
-instruction; route resumes vmbin without repeating a committed effect.
+1. 验证 Program、manifest version 和 binary interface generation。
+2. 构建 `binrwir_execution_plan_t`。
+3. 若允许 VMJIT，调用 vmjit 的 verifier、lowering 与 backend 编译合同。
+4. 形成 `binrwir_compilation_t`，其中 execution target 已不可变。
 
-## Observation and commit
+execution plan 可包含六类派生优化：指令编码、类型固化、KV 寻址、指令融合、虚拟
+寄存器和控制流信息。所有优化都必须保留 canonical Program 语义、Read/Write authority、
+别名可见性和 source logical program counter 观察边界。
 
-Every source instruction boundary remains observable and recoverable. An implementation may
-keep values in derived storage within a valid region, but route commits only complete effects.
-Commit ordering is values, source program counter, then status or error. No component may make
-a partial instruction externally visible.
+vmjit 编译判定严格如下；顶层 compilation 对象只在前两种成功方向产生：
 
-## Status direction
+| vmjit compilation outcome | `runtimec_status_t` | Execution target | Required content |
+|---|---|---|---|
+| `COMPILED` | `RUNTIMEC_STATUS_SUCCESS` | `VMJIT` | Program、plan、非空机器码 |
+| `NOT_COMPILABLE` | `RUNTIMEC_STATUS_SUCCESS` | `VMBIN` | Program、plan、空机器码 |
+| `ERROR` | 明确错误 | 无 | 不产生可执行 compilation |
 
-`RUNTIMEC_STATUS_SUCCESS` is the only normal completion. `FALLBACK` is reserved for vmjit
-refusal. `NOT_IMPLEMENTED` reports absent scaffold behavior. `INVALID` reports input outside
-the contract. Outputs enter a documented empty or invalid state before work starts.
+`NOT_COMPILABLE` 表示 vmjit eligibility 已成功判定为不适用。它是建立 VMBIN compilation
+的正常编译结果。非法 BinRWIR、映射错误、内存不足与内部错误进入 `ERROR`，必须原样
+停止，不能变成任何可执行 compilation。
 
-## Behavior decisions
+## Repository and route
 
-Every language behavior starts in `../../specification/five-language-behavior-matrix.md`. A complete row records C,
-Python, Rust, Go, and V8/TypeScript behavior, then chooses consensus or a stated camp with a
-boundary fixture and invalid-input rule. Product semantics must carry a matching
-`behavior-decision: <decision>` marker. No matrix means no manifest entry and no execution.
+repository 只缓存完整 compilation。缓存键绑定 authoritative snapshot、RWIR manifest
+version、canonical encoding revision、BinRWIR binary interface generation 与 compiler
+revision；租约保证 Program、plan 和可选机器码在执行期间一起存活。失效只阻止新租约，
+不释放仍被租约持有的对象。
+vmjit 不拥有独立 compilation cache 或 `get_or_compile` 入口；机器码只作为完整
+compilation 的一部分进入 repository。
 
-## Compile-time dependencies
+route 在执行前调用 `binrwir_compilation_get_view`，读取 Compiler 已决定的
+`binrwir_execution_target_t`：
+
+- `VMJIT`：只调用 `vmjit_execute`；
+- `VMBIN`：只调用 `vmbin_execute`；
+- 其它值：立即报告非法 compilation。
+
+route 不在执行时调用 eligibility，不在一个执行入口失败后调用另一个入口，也不修改
+compilation。执行错误沿所选入口返回并停止。
+
+## Facts and derived state
+
+kvspace 明文保存可恢复语义事实：RWIR、值、frame facts、logical program counter、status、
+error 与 recovery state。canonical Program、execution plan、机器码、register cache、profile
+和 repository entry 都是可删除并重建的派生状态。
+
+只有完整 instruction effect 成功后，route 才按 values、logical program counter、status
+或 error 的顺序提交。任何组件都不能让半条 instruction 对外可见。
+
+## Read/Write aliasing
+
+RWIR 与 BinRWIR 只有 Read 和 Write 两种参数方向。Read register 与 Write register 可以按
+Signature 的显式 alias policy 绑定同一个 canonical Cell。写入后，后续 Read 必须观察到
+新值；Compiler 不能缓存、提升或重排会破坏该顺序的读取。未声明 alias 必须失败。
+
+## Dependencies
 
 ```text
-interface -> public + contract + engine
-engine/route -> host + vmkv + BinRWIR + vmjit + vmbin
-vmkv -> contract + BinRWIR build contract
-vmbin -> contract + BinRWIR
-vmjit -> contract + read-only BinRWIR contract
+interface -> public header + contract + engine
+engine/route -> host + vmkv + compiler + binrwir + vmjit + vmbin
+engine/compilation_repository -> compiler + contract
+compiler -> contract + binrwir + vmjit compile contracts
+vmkv -> contract + binrwir build contracts + generated specification facts
+vmbin -> contract + binrwir execution contracts
+vmjit -> contract + binrwir execution contracts
 host -> contract + external kvspace interface
 ```
 
-vmkv never depends on vmjit. vmbin never depends on vmjit. vmjit never depends on vmkv or a
-concrete host implementation. No engine file other than route may depend on execution
-components.
+`binrwir/` 不依赖任一执行器。vmkv 不依赖 Compiler 或执行器。vmbin 与 vmjit 彼此不
+依赖。除了 route，engine 文件不能同时看见两个执行器。
 
 ## Acceptance
 
-The scaffold is acceptable only when:
-
-- the one public header compiles as C11 and C++17;
-- only the three structured public functions are exported;
-- all unimplemented calls fail explicitly and clear outputs;
-- missing component sources stop CMake configuration;
-- name, dependency, behavior-matrix and export checks pass;
-- no third executor, old path, abbreviated project name or alternate status survives;
-- a fresh build and all scaffold tests pass.
+- 每个 myrwircap 恰好映射一个 canonical operation；stable identifier 与数组位置无关。
+- vmkv 只进行验证与等价生成。
+- Compiler 总是先生成 plan，再形成一个确定 execution target 的 compilation。
+- repository 缓存 compilation，而不是分散缓存 Program、plan 与 code。
+- route 在执行前读取目标，并只调用一个执行入口。
+- `NOT_COMPILABLE` 返回 success 并选择 VMBIN；`ERROR` 立即停止。
+- BinRWIR 保持顶层中立，vmjit 不依赖 vmbin。
+- 未实现能力明确返回 `RUNTIMEC_STATUS_NOT_IMPLEMENTED`，输出先清空。
+- 不存在第三执行器、旧入口、兼容别名或隐藏执行路径。

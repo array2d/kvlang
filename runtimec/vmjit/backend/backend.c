@@ -1,6 +1,6 @@
 /*
  * 组件：vmjit/backend/backend
- * 作用：按目标选择 backend；当前显式返回 FALLBACK。未知 processor
+ * 作用：按目标选择 backend；当前显式返回 UNSUPPORTED。未知 processor
  *       不得默认 x86_64。
  * 联系：vmjit/compiler 调用；x86_64/aarch64 是并列 peer。
  */
@@ -18,5 +18,5 @@ runtimec_status_t vmjit_backend_for_target(
     if (target == NULL || output_backend == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
-    return RUNTIMEC_STATUS_FALLBACK;
+    return RUNTIMEC_STATUS_UNSUPPORTED;
 }

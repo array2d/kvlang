@@ -2,30 +2,56 @@ sequenceDiagram
   participant Client as C client
   participant Interface as Public interface
   participant Route as engine route
-  participant Host as Host port
-  participant Kvspace as kvspace facts
+  participant Host as Host services
+  participant Repository as Compilation repository
   participant Vmkv as vmkv
-  participant Program as immutable BinRWIR Program
-  participant Vmjit as vmjit
-  participant Vmbin as vmbin
+  participant Compiler as BinRWIR Compiler
+  participant VmjitCompiler as vmjit compiler
+  participant VmjitExecute as vmjit_execute
+  participant VmbinExecute as vmbin_execute
 
   Client->>Interface: structured execute request
   Interface->>Route: validated request
-  Route->>Host: load function generation and state
-  Host->>Kvspace: read RWIR values frame program counter status error
-  Kvspace-->>Route: host-neutral snapshot
-  Route->>Vmkv: compile RWIR snapshot
-  Vmkv->>Program: build and finalize
-  Program-->>Route: immutable Program or explicit failure
-  Route->>Vmjit: try Program
-  alt vmjit executed
-    Vmjit-->>Route: structured outcome
-  else vmjit fallback
-    Vmjit-->>Route: fallback at observable boundary
-    Route->>Vmbin: execute same Program and state
-    Vmbin-->>Route: structured outcome
+  Route->>Host: load authoritative snapshot and execution state
+  Host-->>Route: host-neutral snapshot
+  Route->>Repository: find compilation by identity
+  alt compilation found
+    Repository-->>Route: compilation lease
+  else compilation not found
+    Repository-->>Route: not found
+    Route->>Vmkv: validate RWIR and encode canonical BinRWIR
+    Vmkv-->>Route: immutable canonical Program or compile error
+    Route->>Compiler: compile canonical Program
+    Compiler->>Compiler: build execution plan
+    Compiler->>VmjitCompiler: determine machine-code eligibility
+    alt COMPILED
+      VmjitCompiler-->>Compiler: machine code
+      Compiler-->>Route: VMJIT compilation
+    else NOT_COMPILABLE
+      VmjitCompiler-->>Compiler: successful not-compilable decision
+      Compiler-->>Route: VMBIN compilation
+    else ERROR
+      VmjitCompiler-->>Compiler: explicit error
+      Compiler-->>Route: explicit error and no compilation
+      break compilation stops immediately
+        Route-->>Interface: structured error
+        Interface-->>Client: status and error
+      end
+    end
+    opt completed compilation
+      Route->>Repository: insert complete compilation
+      Repository-->>Route: compilation lease
+    end
   end
-  Route->>Host: commit effects then checkpoint
-  Host->>Kvspace: values then program counter then status or error
+  Route->>Route: read immutable execution target
+  alt VMJIT target
+    Route->>VmjitExecute: execute generated code
+    VmjitExecute-->>Route: structured execution exit
+  else VMBIN target
+    Route->>VmbinExecute: execute Program with execution plan
+    VmbinExecute-->>Route: structured execution exit
+  end
+  Route->>Host: commit complete effects then checkpoint
+  Route->>Repository: release compilation lease
   Route-->>Interface: structured result
   Interface-->>Client: status and result

@@ -1,10 +1,11 @@
 # 组件：runtimec 顶层构建
-# 作用：C11-only 构建（不链接 libstdc++）；按 contract/host/vmbin/vmkv/
-#       vmjit/engine/interface 生成独立 target，并从 interface/exports.txt
+# 作用：C11-only 构建（不链接 libstdc++）；按 contract、host、binrwir、
+#       vmkv、vmjit、compiler、vmbin、engine、interface 生成独立 target，
+#       并从 interface/exports.txt
 #       生成三平台导出脚本（README §9、§10）。当前产物名刻意带 _scaffold，禁止用于
 #       benchmark/tutorial/发布。
-# 联系：各 target 的 include 只暴露 include/ 与自身私有目录；vmkv/vmbin
-#       的 build test 不链 vmjit（README §10）。
+# 联系：组件依赖只沿本文件声明的单向图连接；只有 engine route 汇合
+#       compiler、vmbin 与 vmjit。
 cmake_minimum_required(VERSION 3.20)
 
 project(kvlang_runtimec_scaffold VERSION 0.1.0 LANGUAGES C)
@@ -79,31 +80,11 @@ endfunction()
 
 runtimec_add_component(runtimec_contract contract)
 runtimec_add_component(runtimec_host host)
-
-set(RUNTIMEC_BINRWIR_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/vmbin/instruction.c"
-    "${CMAKE_CURRENT_SOURCE_DIR}/vmbin/program.c"
-    "${CMAKE_CURRENT_SOURCE_DIR}/vmbin/reference.c"
-    "${CMAKE_CURRENT_SOURCE_DIR}/vmbin/signature.c")
-foreach(binrwir_source IN LISTS RUNTIMEC_BINRWIR_SOURCES)
-    if(NOT EXISTS "${binrwir_source}")
-        message(FATAL_ERROR "required BinRWIR source is missing: ${binrwir_source}")
-    endif()
-endforeach()
-add_library(runtimec_binrwir STATIC ${RUNTIMEC_BINRWIR_SOURCES})
-runtimec_configure_target(runtimec_binrwir)
-
-file(GLOB_RECURSE RUNTIMEC_VMBIN_SOURCES CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/vmbin/*.c")
-list(REMOVE_ITEM RUNTIMEC_VMBIN_SOURCES ${RUNTIMEC_BINRWIR_SOURCES})
-if(NOT RUNTIMEC_VMBIN_SOURCES)
-    message(FATAL_ERROR "runtimec component runtimec_vmbin has no execution sources")
-endif()
-add_library(runtimec_vmbin STATIC ${RUNTIMEC_VMBIN_SOURCES})
-runtimec_configure_target(runtimec_vmbin)
-
+runtimec_add_component(runtimec_binrwir binrwir)
 runtimec_add_component(runtimec_vmkv vmkv)
 runtimec_add_component(runtimec_vmjit vmjit)
+runtimec_add_component(runtimec_compiler compiler)
+runtimec_add_component(runtimec_vmbin vmbin)
 runtimec_add_component(runtimec_engine engine)
 
 target_include_directories(runtimec_contract
@@ -113,19 +94,23 @@ target_link_libraries(runtimec_host
     PRIVATE runtimec_contract)
 target_link_libraries(runtimec_binrwir
     PRIVATE runtimec_contract)
-target_link_libraries(runtimec_vmbin
-    PRIVATE runtimec_contract runtimec_binrwir)
 target_link_libraries(runtimec_vmkv
     PRIVATE runtimec_contract runtimec_binrwir)
 target_link_libraries(runtimec_vmjit
+    PRIVATE runtimec_contract runtimec_binrwir)
+target_link_libraries(runtimec_compiler
+    PRIVATE runtimec_contract runtimec_binrwir runtimec_vmjit)
+target_link_libraries(runtimec_vmbin
     PRIVATE runtimec_contract runtimec_binrwir)
 target_link_libraries(runtimec_engine
     PRIVATE
         runtimec_contract
         runtimec_host
-        runtimec_vmbin
+        runtimec_binrwir
         runtimec_vmkv
-        runtimec_vmjit)
+        runtimec_compiler
+        runtimec_vmjit
+        runtimec_vmbin)
 target_compile_definitions(runtimec_vmjit
     PRIVATE RUNTIMEC_VMJIT_ENABLED=$<BOOL:${RUNTIMEC_ENABLE_VMJIT}>)
 target_compile_definitions(runtimec_engine
@@ -173,9 +158,10 @@ endif()
 add_library(kvlang::runtimec_contract ALIAS runtimec_contract)
 add_library(kvlang::runtimec_host ALIAS runtimec_host)
 add_library(kvlang::runtimec_binrwir ALIAS runtimec_binrwir)
-add_library(kvlang::runtimec_vmbin ALIAS runtimec_vmbin)
 add_library(kvlang::runtimec_vmkv ALIAS runtimec_vmkv)
 add_library(kvlang::runtimec_vmjit ALIAS runtimec_vmjit)
+add_library(kvlang::runtimec_compiler ALIAS runtimec_compiler)
+add_library(kvlang::runtimec_vmbin ALIAS runtimec_vmbin)
 add_library(kvlang::runtimec_engine ALIAS runtimec_engine)
 add_library(kvlang::runtimec_interface ALIAS runtimec_interface)
 add_library(kvlang::runtimec_scaffold ALIAS kvlang_runtimec_scaffold)

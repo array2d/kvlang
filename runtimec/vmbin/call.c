@@ -6,22 +6,20 @@
 
 #include "vmbin/call.h"
 
-static runtimec_status_t vmbin_call_unimplemented(
-    vmbin_exit_t *output_exit) {
-    if (output_exit != NULL) {
-        *output_exit = (vmbin_exit_t){0};
-        output_exit->kind = VMBIN_EXIT_ERROR;
-        output_exit->status = RUNTIMEC_STATUS_NOT_IMPLEMENTED;
-        output_exit->logical_program_counter = VMBIN_PROGRAM_COUNTER_NONE;
-        output_exit->resume_logical_program_counter =
-            VMBIN_PROGRAM_COUNTER_NONE;
-    }
-    return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
+static void vmbin_call_initialize_error_exit(
+    binrwir_execution_exit_t *output_exit, runtimec_status_t status) {
+    *output_exit = (binrwir_execution_exit_t){0};
+    output_exit->kind = BINRWIR_EXECUTION_EXIT_ERROR;
+    output_exit->status = status;
+    output_exit->logical_program_counter =
+        BINRWIR_EXECUTION_PROGRAM_COUNTER_NONE;
+    output_exit->resume_logical_program_counter =
+        BINRWIR_EXECUTION_PROGRAM_COUNTER_NONE;
 }
 
 runtimec_status_t vmbin_call_binding_create(
-    const vmbin_frame_t *caller,
-    const vmbin_program_t *callee,
+    const binrwir_execution_frame_t *caller,
+    const binrwir_program_t *callee,
     const vmbin_call_request_t *request,
     const runtimec_allocator_t *allocator,
     vmbin_call_binding_t **output_binding) {
@@ -33,7 +31,7 @@ runtimec_status_t vmbin_call_binding_create(
         *output_binding = NULL;
     }
     if (caller == NULL || callee == NULL || request == NULL ||
-        request->callsite_identifier == VMBIN_IDENTIFIER_NONE ||
+        request->callsite_identifier == BINRWIR_IDENTIFIER_NONE ||
         allocator == NULL || output_binding == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
@@ -46,26 +44,36 @@ runtimec_status_t vmbin_call_binding_destroy(vmbin_call_binding_t *binding) {
     return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
 }
 runtimec_status_t vmbin_call_enter(
-    vmbin_frame_t *caller,
-    vmbin_frame_t *callee,
+    binrwir_execution_frame_t *caller,
+    binrwir_execution_frame_t *callee,
     const vmbin_call_binding_t *binding,
-    vmbin_exit_t *output_exit) {
-    runtimec_status_t status = vmbin_call_unimplemented(output_exit);
+    binrwir_execution_exit_t *output_exit) {
+    if (output_exit != NULL) {
+        vmbin_call_initialize_error_exit(output_exit,
+                                         RUNTIMEC_STATUS_INVALID);
+    }
     if (caller == NULL || callee == NULL || binding == NULL ||
         output_exit == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
-    return status;
+    vmbin_call_initialize_error_exit(output_exit,
+                                     RUNTIMEC_STATUS_NOT_IMPLEMENTED);
+    return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
 }
 runtimec_status_t vmbin_call_return(
-    vmbin_frame_t *caller,
-    const vmbin_frame_t *callee,
+    binrwir_execution_frame_t *caller,
+    const binrwir_execution_frame_t *callee,
     const vmbin_call_binding_t *binding,
-    vmbin_exit_t *output_exit) {
-    runtimec_status_t status = vmbin_call_unimplemented(output_exit);
+    binrwir_execution_exit_t *output_exit) {
+    if (output_exit != NULL) {
+        vmbin_call_initialize_error_exit(output_exit,
+                                         RUNTIMEC_STATUS_INVALID);
+    }
     if (caller == NULL || callee == NULL || binding == NULL ||
         output_exit == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
-    return status;
+    vmbin_call_initialize_error_exit(output_exit,
+                                     RUNTIMEC_STATUS_NOT_IMPLEMENTED);
+    return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
 }

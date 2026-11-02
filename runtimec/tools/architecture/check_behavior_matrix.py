@@ -21,7 +21,9 @@ MANIFEST_ENTRY_PATTERN = re.compile(
     r"^\s*RUNTIMEC_[A-Z0-9_]*(?:OP|OPERATION)\s*\("
 )
 PLACEHOLDER_PATTERN = re.compile(r"\b(?:todo|tbd|unknown|placeholder)\b", re.IGNORECASE)
-SCANNED_PRODUCT_DIRECTORIES = ("specification", "vmkv", "vmbin", "vmjit")
+SCANNED_PRODUCT_DIRECTORIES = (
+    "specification", "binrwir", "vmkv", "compiler", "vmbin", "vmjit",
+)
 
 
 @dataclass(frozen=True, order=True)

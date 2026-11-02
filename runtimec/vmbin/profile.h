@@ -4,7 +4,7 @@
 /*
  * 组件：vmbin/profile
  * 作用：保存 session 拥有的可丢弃执行统计。
- * 联系：interpreter 更新；engine session 持有；vmjit 可以读取。
+ * 联系：interpreter 更新；engine session 持有。
  * 约束：统计不是正确性依赖，也不得进入不可变 Program。
  */
 
@@ -20,7 +20,6 @@ extern "C" {
 typedef struct vmbin_profile_counter {
     uint64_t instruction_count;
     uint64_t dispatch_ticks;
-    uint64_t fallback_count;
 } vmbin_profile_counter_t;
 
 typedef struct vmbin_profile {

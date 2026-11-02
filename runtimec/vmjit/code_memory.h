@@ -6,8 +6,8 @@
  * 作用：可执行页的生命周期：分配可写页 -> emit/relocate -> 切换可执行
  *       并取消可写 -> 平台 instruction cache 同步 -> 由 code lease 管理回收。
  *       内存不可同时可写与可执行。
- * 联系：backend 写入 writable_view；compiler 调 publish；code cache
- *       管理 lease/retired。
+ * 联系：backend 写入 writable_view；vmjit compiler 调 publish；完成的
+ *       BinRWIR compilation 管理机器码生命周期。
  * 约束：发布失败或 entitlement 不足时返回错误，绝不执行未发布内存。
  */
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Enforce the single runtimec dependency trunk."""
+"""Enforce the runtimec component graph and its single execution-policy merge."""
 
 from __future__ import annotations
 
@@ -11,37 +11,76 @@ from pathlib import Path, PurePosixPath
 
 
 SOURCE_SUFFIXES = {".c", ".h"}
-BINRWIR_CONTRACT_FILES = {
-    "value.h", "reference.h", "signature.h", "instruction.h", "program.h",
-    "program.c", "binding.h", "frame.h", "frame.c", "exit.h",
-}
 PRODUCT_DIRECTORIES = (
-    "include", "interface", "contract", "host", "vmbin", "vmkv",
-    "vmjit", "engine", "generated",
+    "include", "interface", "contract", "host", "binrwir", "vmkv",
+    "vmjit", "compiler", "vmbin", "engine", "generated",
 )
 KNOWN_LAYERS = {
-    "public", "contract", "host", "binrwir", "vmbin", "vmkv", "vmjit",
-    "engine", "interface",
+    "public", "interface", "contract", "host", "binrwir", "vmkv",
+    "vmjit", "compiler", "vmbin", "engine",
 }
 ALLOWED_DEPENDENCIES = {
     "public": {"public"},
     "contract": {"public", "contract"},
     "host": {"contract", "host"},
     "binrwir": {"contract", "binrwir"},
-    "vmbin": {"contract", "binrwir", "vmbin"},
     "vmkv": {"contract", "binrwir", "vmkv"},
     "vmjit": {"contract", "binrwir", "vmjit"},
+    "compiler": {"contract", "binrwir", "vmjit", "compiler"},
+    "vmbin": {"contract", "binrwir", "vmbin"},
     "engine": {
-        "contract", "host", "binrwir", "vmbin", "vmkv", "vmjit", "engine",
+        "contract", "host", "binrwir", "vmkv", "vmjit", "compiler",
+        "vmbin", "engine",
     },
     "interface": {"public", "contract", "engine", "interface"},
 }
+EXPECTED_COMPONENT_ORDER = (
+    ("runtimec_contract", "contract"),
+    ("runtimec_host", "host"),
+    ("runtimec_binrwir", "binrwir"),
+    ("runtimec_vmkv", "vmkv"),
+    ("runtimec_vmjit", "vmjit"),
+    ("runtimec_compiler", "compiler"),
+    ("runtimec_vmbin", "vmbin"),
+    ("runtimec_engine", "engine"),
+)
+EXPECTED_TARGET_DEPENDENCIES = {
+    "runtimec_contract": set(),
+    "runtimec_host": {"runtimec_contract"},
+    "runtimec_binrwir": {"runtimec_contract"},
+    "runtimec_vmkv": {"runtimec_contract", "runtimec_binrwir"},
+    "runtimec_vmjit": {"runtimec_contract", "runtimec_binrwir"},
+    "runtimec_compiler": {
+        "runtimec_contract", "runtimec_binrwir", "runtimec_vmjit",
+    },
+    "runtimec_vmbin": {"runtimec_contract", "runtimec_binrwir"},
+    "runtimec_engine": {
+        "runtimec_contract", "runtimec_host", "runtimec_binrwir",
+        "runtimec_vmkv", "runtimec_compiler", "runtimec_vmjit",
+        "runtimec_vmbin",
+    },
+    "runtimec_interface": {"runtimec_contract", "runtimec_engine"},
+}
 INCLUDE_PATTERN = re.compile(r'^\s*#\s*include\s*([<"])([^>"]+)[>"]')
 FORBIDDEN_TREE_PATTERN = re.compile(r"(?:^|/)(?:runtime|runtimec2)(?:/|$)")
+COMPONENT_PATTERN = re.compile(
+    r"runtimec_add_component\(\s*(runtimec_[a-z0-9_]+)\s+([a-z0-9_]+)\s*\)"
+)
+LINK_PATTERN = re.compile(
+    r"target_link_libraries\(\s*(runtimec_[a-z0-9_]+)\s+(.*?)\)",
+    re.DOTALL,
+)
 INTERNAL_PREFIXES = {
-    "contract", "host", "vmbin", "vmkv", "vmjit", "engine", "interface",
+    "contract", "host", "binrwir", "vmkv", "vmjit", "compiler",
+    "vmbin", "engine", "interface",
 }
-EXECUTION_LAYERS = {"vmkv", "vmbin", "vmjit"}
+POLICY_LAYERS = {"compiler", "vmbin", "vmjit"}
+ROUTE_FILES = {"engine/route.c", "engine/route.h"}
+BINRWIR_NEUTRAL_FILE_NAMES = {
+    "value.c", "value.h", "reference.c", "reference.h", "signature.c",
+    "signature.h", "instruction.c", "instruction.h", "program.c",
+    "program.h", "execution_plan.c", "execution_plan.h",
+}
 
 
 @dataclass(frozen=True, order=True)
@@ -80,19 +119,13 @@ def relative_display(path: Path, repository_root: Path) -> str:
 
 
 def layer_for_relative(relative: PurePosixPath) -> str | None:
-    parts = relative.parts
-    if not parts:
+    if not relative.parts:
         return None
-    if parts[0] == "include":
+    if relative.parts[0] == "include":
         return "public"
-    if parts[0] == "interface":
-        return "interface"
-    if parts[0] == "generated":
+    if relative.parts[0] == "generated":
         return "contract"
-    if parts[0] == "vmbin" and len(parts) >= 2:
-        if parts[1] == "binrwir" or parts[-1] in BINRWIR_CONTRACT_FILES:
-            return "binrwir"
-    return parts[0] if parts[0] in KNOWN_LAYERS else None
+    return relative.parts[0] if relative.parts[0] in KNOWN_LAYERS else None
 
 
 def inferred_include_layer(token: str) -> str | None:
@@ -105,9 +138,6 @@ def inferred_include_layer(token: str) -> str | None:
         parts = parts[1:]
     if not parts:
         return None
-    if parts[0] == "vmbin" and len(parts) > 1:
-        if parts[1] == "binrwir" or parts[-1] in BINRWIR_CONTRACT_FILES:
-            return "binrwir"
     return parts[0] if parts[0] in INTERNAL_PREFIXES else None
 
 
@@ -115,11 +145,10 @@ def resolve_include(
     token: str, source: Path, runtimec_root: Path, repository_root: Path,
 ) -> Path | None:
     candidates = [
-        source.parent / token, runtimec_root / token,
-        runtimec_root / "include" / token, runtimec_root / "contract" / token,
-        runtimec_root / "host" / token, runtimec_root / "vmbin" / token,
-        runtimec_root / "vmkv" / token, runtimec_root / "vmjit" / token,
-        runtimec_root / "engine" / token, runtimec_root / "interface" / token,
+        source.parent / token,
+        runtimec_root / token,
+        runtimec_root / "include" / token,
+        *(runtimec_root / directory / token for directory in INTERNAL_PREFIXES),
         repository_root / token,
     ]
     return next((candidate.resolve() for candidate in candidates if candidate.is_file()), None)
@@ -134,8 +163,48 @@ def iter_product_sources(runtimec_root: Path):
                     yield path
 
 
-def audit(repository_root: Path, runtimec_root: Path) -> tuple[list[Finding], int]:
+def cmake_target_dependencies(cmake_text: str) -> dict[str, set[str]]:
+    dependencies: dict[str, set[str]] = {}
+    for match in LINK_PATTERN.finditer(cmake_text):
+        target, body = match.groups()
+        tokens = set(re.findall(r"\bruntimec_[a-z0-9_]+\b", body))
+        dependencies.setdefault(target, set()).update(tokens)
+    return dependencies
+
+
+def audit_build_graph(
+    runtimec_root: Path, repository_root: Path,
+) -> list[Finding]:
+    cmake_path = runtimec_root / "CMakeLists.txt"
+    display = relative_display(cmake_path, repository_root)
+    if not cmake_path.is_file():
+        return [Finding(display, 1, "missing-build-file", "CMakeLists.txt is required")]
+    text = cmake_path.read_text(encoding="utf-8")
     findings: list[Finding] = []
+    actual_order = tuple(COMPONENT_PATTERN.findall(text))
+    if actual_order != EXPECTED_COMPONENT_ORDER:
+        findings.append(Finding(
+            display, 1, "component-order",
+            f"expected {EXPECTED_COMPONENT_ORDER!r}, found {actual_order!r}",
+        ))
+    if not re.search(r"add_library\(\s*runtimec_interface\s+STATIC\b", text):
+        findings.append(Finding(
+            display, 1, "missing-interface-component",
+            "runtimec_interface static component is required",
+        ))
+    actual_dependencies = cmake_target_dependencies(text)
+    for target, expected in EXPECTED_TARGET_DEPENDENCIES.items():
+        actual = actual_dependencies.get(target, set())
+        if actual != expected:
+            findings.append(Finding(
+                display, 1, "target-dependencies",
+                f"{target} expected {sorted(expected)!r}, found {sorted(actual)!r}",
+            ))
+    return findings
+
+
+def audit(repository_root: Path, runtimec_root: Path) -> tuple[list[Finding], int]:
+    findings = audit_build_graph(runtimec_root, repository_root)
     scanned = 0
     for source in iter_product_sources(runtimec_root):
         scanned += 1
@@ -146,12 +215,19 @@ def audit(repository_root: Path, runtimec_root: Path) -> tuple[list[Finding], in
             findings.append(Finding(display, 1, "unknown-source-layer",
                                     "product source has no owner"))
             continue
+        if (source_layer == "vmbin" and
+                relative.name in BINRWIR_NEUTRAL_FILE_NAMES):
+            findings.append(Finding(
+                display, 1, "binrwir-owned-by-vmbin",
+                "neutral BinRWIR file must live under binrwir",
+            ))
         try:
             lines = source.read_text(encoding="utf-8").splitlines()
         except (OSError, UnicodeError) as error:
             findings.append(Finding(display, 1, "read-error", str(error)))
             continue
 
+        included_layers: set[str] = set()
         for line_number, line in enumerate(lines, 1):
             match = INCLUDE_PATTERN.match(line)
             if not match:
@@ -183,17 +259,20 @@ def audit(repository_root: Path, runtimec_root: Path) -> tuple[list[Finding], in
                     ))
             if target_layer is None:
                 continue
+            included_layers.add(target_layer)
             if target_layer not in ALLOWED_DEPENDENCIES[source_layer]:
                 findings.append(Finding(
                     display, line_number, "forbidden-layer-edge",
                     f"{source_layer} -> {target_layer} via {token!r}",
                 ))
-            if (source_layer == "engine" and target_layer in EXECUTION_LAYERS
-                    and relative.as_posix() not in {"engine/route.c", "engine/route.h"}):
-                findings.append(Finding(
-                    display, line_number, "route-bypass",
-                    f"only engine/route may depend on {target_layer}",
-                ))
+
+        merged_policy_layers = included_layers & POLICY_LAYERS
+        if (source_layer == "engine" and len(merged_policy_layers) > 1 and
+                relative.as_posix() not in ROUTE_FILES):
+            findings.append(Finding(
+                display, 1, "route-bypass",
+                "only engine/route may merge compiler, vmbin, and vmjit",
+            ))
     return sorted(set(findings)), scanned
 
 

@@ -3,7 +3,7 @@
  * 作用：版本、source revision 与快照的构造/重置/形状校验；纯值操作。
  * 联系：engine 在取 Program 前构造快照；host 提供 source_revision；
  *       vmkv 在编译前后校验同一快照，拒绝事实变化期间产生的 Program；
- *       vmjit cache key 也引用它。
+ *       compilation repository key 也引用它。
  */
 
 #include "contract/snapshot.h"

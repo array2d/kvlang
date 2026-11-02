@@ -6,8 +6,8 @@
  * 作用：通过主机服务打开一个函数的明文 RWIR 源，并返回源快照。
  *       它是 vmkv 与 kvspace 之间唯一的读取入口，vmkv 不直接包含
  *       kvspace 结构。
- * 联系：vmkv/compiler 使用本接口读取 RWIR；编译结果只能进入 vmbin 的
- *       不可变 BinRWIR Program 构建器。
+ * 联系：vmkv/encoder 使用本接口读取 RWIR；读取结果只能进入顶层
+ *       binrwir 的不可变 Program 构建器。
  * 约束：打开源不执行 RWIR、不生成机器码、不修改执行事实；失败
  *       不得留下函数源。
  */

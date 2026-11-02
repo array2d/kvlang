@@ -1,41 +1,49 @@
 flowchart LR
+  SPECIFICATION["specification<br/>behavior and stable operation mapping"]
   INTERFACE["public interface"]
   ROUTE["engine route"]
-  PORT["host port declarations"]
-  HOST["kvspace host implementation"]
+  REPOSITORY["compilation repository"]
+  HOST["host services"]
   KVSPACE["external kvspace interface"]
-  CONTRACT["contracts and generated specification"]
   VMKV["vmkv"]
-  BINRWIR["read-only BinRWIR contract"]
+  BINRWIR["top-level binrwir contracts"]
+  COMPILER["top-level BinRWIR Compiler"]
   VMBIN["vmbin"]
   VMJIT["vmjit"]
-  X86_64["x86_64 backend"]
-  AARCH64["AArch64 backend"]
+  BACKENDS["x86_64 and AArch64 backends"]
 
   INTERFACE --> ROUTE
+  ROUTE --> HOST
+  ROUTE --> REPOSITORY
   ROUTE --> VMKV
+  ROUTE --> COMPILER
   ROUTE --> BINRWIR
   ROUTE --> VMJIT
   ROUTE --> VMBIN
-  ROUTE --> HOST
-  VMKV --> BINRWIR
-  VMKV --> PORT
-  VMKV --> CONTRACT
-  VMBIN --> BINRWIR
-  VMBIN --> PORT
-  VMBIN --> CONTRACT
-  VMJIT --> BINRWIR
-  VMJIT --> CONTRACT
-  HOST --> PORT
   HOST --> KVSPACE
-  X86_64 --> VMJIT
-  AARCH64 --> VMJIT
+  VMKV --> SPECIFICATION
+  VMKV --> BINRWIR
+  COMPILER --> BINRWIR
+  COMPILER --> VMJIT
+  REPOSITORY --> COMPILER
+  VMBIN --> BINRWIR
+  VMJIT --> BINRWIR
+  BACKENDS --> VMJIT
 
-  VMKV -. "forbidden" .-> VMJIT
-  VMBIN -. "forbidden" .-> VMJIT
-  VMJIT -. "forbidden" .-> VMKV
-  VMJIT -. "forbidden" .-> HOST
+  BINRWIR -. "forbidden ownership dependency" .-> VMBIN
+  BINRWIR -. "forbidden ownership dependency" .-> VMJIT
+  VMKV -. "forbidden execution dependency" .-> VMBIN
+  VMKV -. "forbidden execution dependency" .-> VMJIT
+  VMBIN -. "forbidden peer dependency" .-> VMJIT
+  VMJIT -. "forbidden peer dependency" .-> VMBIN
+  REPOSITORY -. "forbidden execution dependency" .-> VMBIN
+  REPOSITORY -. "forbidden execution dependency" .-> VMJIT
 
-  classDef backend fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
-  linkStyle 18,19,20,21 stroke:#dc2626,stroke-width:2px,stroke-dasharray:5 5
-  class X86_64,AARCH64 backend
+  classDef specification fill:#fff3cd,stroke:#9a6700,color:#3d2e00
+  classDef neutral fill:#ede9fe,stroke:#7c3aed,color:#2e1065
+  classDef compiler fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
+  classDef executor fill:#ecfdf5,stroke:#059669,color:#052e16
+  class SPECIFICATION specification
+  class BINRWIR neutral
+  class COMPILER,REPOSITORY compiler
+  class VMBIN,VMJIT,BACKENDS executor

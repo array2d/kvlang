@@ -11,6 +11,10 @@
 `behavior-decision: <decision>` 标记引用本表已有决策。没有标记的非占位
 specification manifest 条目直接失败。
 
+一个完整 decision 只能通过 `rwir_catalog.def` 中恰好一条 myrwircap mapping 进入
+canonical BinRWIR。mapping 必须使用显式稳定 operation identifier；数组下标、文件顺序、
+声明顺序和生成顺序都不能定义 operation identity。缺失、重复或歧义 mapping 是编译错误。
+
 | Decision | Behavior | C | Python | Rust | Go | V8/TypeScript | Agreement | kvlang decision | Boundary fixture | Invalid input | Design record |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | integer-no-float-roundtrip | Integer calculation does not pass through floating point | integer operators stay in integer domains | integer operators stay in integer domains | integer operators stay in integer domains | integer operators stay in integer domains | BigInt operators stay in the BigInt domain | consensus | Keep integer calculation in an integer representation from input through result | values above 2^53 retain exact integer results | reject mixed representations unless that operation has its own matrix row | runtimec principle 7 |
@@ -28,6 +32,9 @@ specification manifest 条目直接失败。
 4. Add a boundary fixture and an invalid-input result.
 5. Add `behavior-decision: <decision>` beside the specification or implementation.
 6. Only then add executable semantics.
+
+进入 executable semantics 前，还必须通过
+`myrwircap-binrwir-mapping.md` 定义的集合覆盖、identifier 唯一性和签名等价检查。
 
 Changing an established row is a language change. The same change must update fixtures and
 its issue or design record; silent reinterpretation is forbidden.

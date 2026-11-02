@@ -2,10 +2,10 @@
  * 组件：vmkv 未实现入口
  * 作用：先把输出置为明确无效，再验证接口形状，最后返回
  *       RUNTIMEC_STATUS_NOT_IMPLEMENTED。
- * 约束：不产生空 Program 伪装成功，不执行 RWIR，不生成机器码，不走兼容路径。
+ * 约束：不产生空 Program 伪装成功，不执行或优化 RWIR，不生成机器码。
  */
 
-#include "vmkv/compiler.h"
+#include "vmkv/encoder.h"
 #include "vmkv/rwir.h"
 #include "vmkv/source.h"
 
@@ -76,36 +76,48 @@ runtimec_status_t vmkv_rwir_reader_destroy(vmkv_rwir_reader_t *reader) {
     return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
 }
 
-runtimec_status_t vmkv_compiler_create(
+runtimec_status_t vmkv_encoder_create(
     runtimec_allocator_t allocator,
-    vmkv_compiler_t **output_compiler,
+    vmkv_encoder_t **output_encoder,
     runtimec_error_t *error) {
-    if (output_compiler != NULL) {
-        *output_compiler = NULL;
+    if (output_encoder != NULL) {
+        *output_encoder = NULL;
     }
-    if (!runtimec_allocator_is_valid(&allocator) || output_compiler == NULL) {
+    if (!runtimec_allocator_is_valid(&allocator) || output_encoder == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
     (void)error;
     return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
 }
 
-runtimec_status_t vmkv_compiler_destroy(vmkv_compiler_t *compiler) {
-    if (compiler == NULL) {
+runtimec_status_t vmkv_encoder_destroy(vmkv_encoder_t *encoder) {
+    if (encoder == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
     return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
 }
 
-runtimec_status_t vmkv_compile(
-    vmkv_compiler_t *compiler,
-    const vmkv_compile_request_t *request,
-    vmbin_program_t **output_program,
+runtimec_status_t vmkv_encoder_get_canonical_encoding_revision(
+    const vmkv_encoder_t *encoder,
+    uint32_t *output_canonical_encoding_revision) {
+    if (output_canonical_encoding_revision != NULL) {
+        *output_canonical_encoding_revision = UINT32_MAX;
+    }
+    if (encoder == NULL || output_canonical_encoding_revision == NULL) {
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
+}
+
+runtimec_status_t vmkv_encode(
+    vmkv_encoder_t *encoder,
+    const vmkv_encode_request_t *request,
+    binrwir_program_t **output_program,
     runtimec_error_t *error) {
     if (output_program != NULL) {
         *output_program = NULL;
     }
-    if (compiler == NULL || request == NULL || output_program == NULL ||
+    if (encoder == NULL || request == NULL || output_program == NULL ||
         !runtimec_host_services_is_valid(request->host_services) ||
         !runtimec_string_view_is_valid(request->function_path) ||
         !runtimec_snapshot_is_valid(&request->expected_snapshot)) {

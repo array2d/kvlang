@@ -1,13 +1,17 @@
 /*
  * 组件：specification/rwir_catalog.def
- * 作用：RWIR 操作结构的唯一 manifest 输入。
- * 联系：每条操作只能引用 five-language-behavior-matrix.md 已裁决的行为；
- *       vmkv、vmbin 与 vmjit 的生成表必须来自本文件。
- * 约束：本文件不重新定义语言行为，不保存执行策略，不冻结 BinRWIR 编码。
- *       每条记录前必须写 behavior-decision 标记；当前 scaffold 不定义记录。
+ * 作用：myrwircap 到 canonical BinRWIR operation 的唯一 manifest 输入。
+ * 联系：每条记录显式保存稳定 RWIR operation identifier、规范 capability 名称、
+ *       canonical BinRWIR operation identifier、Read/Write 参数结构与
+ *       five-language-behavior-matrix.md 的行为决策引用；vmkv 只从本文件生成
+ *       等价编码表，BinRWIR Compiler 再生成 execution plan。
+ * 约束：每个 myrwircap 必须恰好一条记录。identifier 不得来自数组下标、文件顺序、
+ *       声明顺序或生成顺序。缺失、重复、歧义、签名不等价和无效行为引用必须成为
+ *       编译错误。本文件不保存执行策略，不冻结 BinRWIR 内存布局。
+ *       当前 scaffold 不定义记录。
  */
 #ifndef RUNTIMEC_RWIR_OPERATION
 #error "Define RUNTIMEC_RWIR_OPERATION before including rwir_catalog.def"
 #endif
 
-/* The scaffold defines no RWIR operation records. */
+/* The scaffold defines no myrwircap mapping records. */

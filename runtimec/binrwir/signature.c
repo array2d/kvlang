@@ -1,13 +1,13 @@
 /*
- * 组件：vmbin/signature 的实现
+ * 组件：binrwir/signature 的实现
  * 作用：签名校验与别名策略查询；当前明确返回未实现。
  * 约束：默认输出仅是无效前置状态，不表示已经证明不重叠。
  */
 
-#include "vmbin/signature.h"
+#include "binrwir/signature.h"
 
 runtimec_status_t
-vmbin_signature_validate(const vmbin_signature_view_t *signature) {
+binrwir_signature_validate(const binrwir_signature_view_t *signature) {
     if (signature == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
@@ -22,11 +22,11 @@ vmbin_signature_validate(const vmbin_signature_view_t *signature) {
     return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
 }
 
-runtimec_status_t vmbin_signature_get_alias_policy(
-    const vmbin_signature_view_t *signature, uint16_t read_parameter,
-    uint16_t write_parameter, vmbin_alias_policy_t *output_policy) {
+runtimec_status_t binrwir_signature_get_alias_policy(
+    const binrwir_signature_view_t *signature, uint16_t read_parameter,
+    uint16_t write_parameter, binrwir_alias_policy_t *output_policy) {
     if (output_policy != NULL) {
-        *output_policy = VMBIN_ALIAS_POLICY_INVALID;
+        *output_policy = BINRWIR_ALIAS_POLICY_INVALID;
     }
     if (signature == NULL || output_policy == NULL ||
         read_parameter >= signature->read_parameter_count ||

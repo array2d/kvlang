@@ -6,9 +6,10 @@
  * 作用：明文 RWIR 指令的只读视图与顺序读取器。操作数按
  *       [ReadReference...][WriteReference...] 两个分区表达方向：字面量
  *       只能出现在读分区，读参数只能读，写参数只能定位写入。
- * 联系：vmkv/source 提供函数源；vmkv/compiler 校验后构建不可变
+ * 联系：vmkv/source 提供函数源；vmkv/encoder 校验后构建不可变
  *       BinRWIR Program。vmbin 与 vmjit 不直接消费本结构。
- * 约束：所有视图都只借用内存。读取器不执行、不修复、不兼容输入。
+ * 约束：所有视图都只借用内存。读取器不执行、不优化、不生成机器码、
+ *       不修复输入。
  */
 
 #include <stddef.h>

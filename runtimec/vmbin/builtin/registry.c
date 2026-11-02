@@ -46,7 +46,7 @@ vmbin_builtin_registry_find(const vmbin_builtin_registry_t *registry,
     if (output_entry != NULL) {
         *output_entry = NULL;
     }
-    if (registry == NULL || builtin_identifier == VMBIN_IDENTIFIER_NONE ||
+    if (registry == NULL || builtin_identifier == BINRWIR_IDENTIFIER_NONE ||
         output_entry == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }

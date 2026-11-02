@@ -4,14 +4,16 @@
 /*
  * 组件：vmbin/interpreter
  * 作用：定义唯一完整的 BinRWIR 正确性执行入口。
- * 联系：engine route 是唯一调用者；vmjit 拒绝时回到此入口。
- * 约束：generic、typed、fused、continuous 只能是本解释器内部策略。
+ * 联系：engine route 是唯一调用者；BinRWIR Compiler 可提供只读执行计划。
+ * 约束：执行计划可为空；此时仍须执行全部合法 canonical BinRWIR。
  */
 
+#include "binrwir/execution_exit.h"
+#include "binrwir/execution_frame.h"
+#include "binrwir/execution_plan.h"
+#include "binrwir/program.h"
 #include "builtin/registry.h"
 #include "contract/status.h"
-#include "exit.h"
-#include "frame.h"
 #include "profile.h"
 
 #ifdef __cplusplus
@@ -20,9 +22,12 @@ extern "C" {
 
 /* 从 Frame 的当前逻辑程序计数器开始执行，直到产生结构化退出。 */
 runtimec_status_t
-vmbin_execute(vmbin_frame_t *frame,
+vmbin_execute(const binrwir_program_t *program,
+              const binrwir_execution_plan_t *execution_plan,
+              binrwir_execution_frame_t *frame,
               const vmbin_builtin_registry_t *builtin_registry,
-              vmbin_profile_t *profile, vmbin_exit_t *output_exit);
+              vmbin_profile_t *profile,
+              binrwir_execution_exit_t *output_exit);
 
 #ifdef __cplusplus
 }

@@ -4,17 +4,17 @@
 /*
  * 组件：vmbin/builtin/registry
  * 作用：将 builtin 标识符映射到唯一处理函数。
- * 联系：interpreter 调用；vmjit 可以内联或退出，但不另建语义实现。
+ * 联系：interpreter 调用；处理函数消费中立执行合同。
  * 约束：Registry 不拥有条目或处理函数，生命周期属于 session。
  */
 
 #include <stddef.h>
 #include <stdint.h>
 
+#include "binrwir/execution_exit.h"
+#include "binrwir/execution_frame.h"
+#include "binrwir/instruction.h"
 #include "contract/status.h"
-#include "vmbin/exit.h"
-#include "vmbin/frame.h"
-#include "vmbin/instruction.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -22,9 +22,9 @@ extern "C" {
 
 typedef runtimec_status_t
 (*vmbin_builtin_handler_function_t)(
-    vmbin_frame_t *frame,
-    const vmbin_instruction_view_t *instruction,
-    vmbin_exit_t *output_exit);
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction,
+    binrwir_execution_exit_t *output_exit);
 
 typedef enum vmbin_builtin_flags {
     VMBIN_BUILTIN_FLAG_NONE = 0,

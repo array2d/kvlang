@@ -29,8 +29,6 @@ const char *runtimec_status_name(runtimec_status_t status) {
         return "yield";
     case RUNTIMEC_STATUS_WAIT:
         return "wait";
-    case RUNTIMEC_STATUS_FALLBACK:
-        return "fallback";
     case RUNTIMEC_STATUS_UNSUPPORTED:
         return "unsupported";
     case RUNTIMEC_STATUS_NOT_IMPLEMENTED:

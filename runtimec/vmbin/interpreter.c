@@ -5,26 +5,32 @@
  */
 
 #include "interpreter.h"
-#include "interpreter_dispatch.h"
 
 #include <string.h>
 
 runtimec_status_t
-vmbin_execute(vmbin_frame_t *frame,
+vmbin_execute(const binrwir_program_t *program,
+              const binrwir_execution_plan_t *execution_plan,
+              binrwir_execution_frame_t *frame,
               const vmbin_builtin_registry_t *builtin_registry,
-              vmbin_profile_t *profile, vmbin_exit_t *output_exit) {
+              vmbin_profile_t *profile,
+              binrwir_execution_exit_t *output_exit) {
+    (void)execution_plan;
     (void)profile;
 
     if (output_exit != NULL) {
         memset(output_exit, 0, sizeof(*output_exit));
-        output_exit->kind = VMBIN_EXIT_ERROR;
-        output_exit->status = RUNTIMEC_STATUS_NOT_IMPLEMENTED;
-        output_exit->logical_program_counter = VMBIN_PROGRAM_COUNTER_NONE;
+        output_exit->kind = BINRWIR_EXECUTION_EXIT_ERROR;
+        output_exit->status = RUNTIMEC_STATUS_INVALID;
+        output_exit->logical_program_counter =
+            BINRWIR_EXECUTION_PROGRAM_COUNTER_NONE;
         output_exit->resume_logical_program_counter =
-            VMBIN_PROGRAM_COUNTER_NONE;
+            BINRWIR_EXECUTION_PROGRAM_COUNTER_NONE;
     }
-    if (frame == NULL || builtin_registry == NULL || output_exit == NULL) {
+    if (program == NULL || frame == NULL || builtin_registry == NULL ||
+        output_exit == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
+    output_exit->status = RUNTIMEC_STATUS_NOT_IMPLEMENTED;
     return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
 }

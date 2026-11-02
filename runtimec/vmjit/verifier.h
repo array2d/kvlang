@@ -3,19 +3,21 @@
 
 /*
  * 组件：vmjit/verifier
- * 作用：vmjit eligibility 的 fail-closed 判定：先要求 vmbin 确认 Program
- *       有效，再判定 operation/backend 支持、先定义后使用、控制流 guard、
+ * 作用：vmjit eligibility 的 fail-closed 判定：先按中立 BinRWIR 合同验证
+ *       Program，再判定 operation/backend 支持、先定义后使用、控制流 guard、
  *       寄存器压力、binary interface 限制、side effect、call、builtin、
  *       handoff、observable 边界与 source program counter map 可构建。
  * 联系：vmjit/compiler 在 plan 前调用；拒绝结果以结构化 refusal 返回，
- *       route 据此回退 vmbin。
- * 约束：拒绝是正常控制流，不是运行时错误；不得“尽量执行”。
+ *       compiler 据此产生 NOT_COMPILABLE。
+ * 约束：未知架构或不支持的 operation 返回 RUNTIMEC_STATUS_UNSUPPORTED 并
+ *       填写 refusal；非法 BinRWIR 返回 INVALID。顶层 vmjit_compile 只把
+ *       UNSUPPORTED 映射为成功的 NOT_COMPILABLE；其它错误不得转成拒绝。
  */
 
 #include <stdint.h>
 
 #include "contract/status.h"
-#include "vmbin/program.h"
+#include "binrwir/program.h"
 #include "vmjit/backend.h"
 
 #ifdef __cplusplus
@@ -37,11 +39,11 @@ typedef struct vmjit_refusal_t {
 } vmjit_refusal_t;
 
 typedef struct vmjit_verified_program_t {
-    const vmbin_program_t *program;
+    const binrwir_program_t *program;
 } vmjit_verified_program_t;
 
 runtimec_status_t vmjit_verify_program(
-    const vmbin_program_t *program,
+    const binrwir_program_t *program,
     const vmjit_target_t *target,
     vmjit_verified_program_t *output_verified_program,
     vmjit_refusal_t *refusal,
