@@ -3,13 +3,13 @@
 
 /*
  * 组件：vmkv/rwir
- * 作用：明文 RWIR 指令的只读视图与顺序读取器。操作数按
- *       [ReadReference...][WriteReference...] 两个分区表达方向：字面量
- *       只能出现在读分区，读参数只能读，写参数只能定位写入。
- * 联系：vmkv/source 提供函数源；vmkv/encoder 校验后构建不可变
- *       BinRWIR Program。vmbin 与 BinRWIR JIT 不直接消费本结构。
- * 约束：所有视图都只借用内存。读取器不执行、不优化、不生成机器码、
- *       不修复输入。
+ * 作用：明文 RWIR instruction 的只读视图与顺序读取器。operation name、
+ *       parameter type、parameter name 和 key expression 都保留到 VMKV 完成
+ *       manifest 校验和地址解析；Read/Write 方向由两个参数分区显式表达。
+ * 联系：vmkv/source 提供函数源；vmkv/encoder 将已验证名称映射为 opid/argidx，
+ *       并只把静态 key 解引用为 argaddr。vmbin 与 JIT 不直接消费本结构。
+ * 约束：所有视图都只借用内存。读取器不执行、不优化、不生成机器码、不修复
+ *       输入。动态 key 只能被识别并拒绝，不能进入 canonical BinRWIR。
  */
 
 #include <stddef.h>
@@ -23,34 +23,31 @@
 extern "C" {
 #endif
 
-/* specification manifest 中稳定的 RWIR 操作标识符。 */
-typedef uint16_t vmkv_rwir_operation_identifier_t;
+typedef enum vmkv_key_addressability_t {
+    VMKV_KEY_ADDRESSABILITY_INVALID = 0,
+    VMKV_KEY_ADDRESSABILITY_STATIC = 1,
+    VMKV_KEY_ADDRESSABILITY_DYNAMIC = 2
+} vmkv_key_addressability_t;
 
-/* 操作数类别；方向由所在分区决定。 */
-typedef enum vmkv_operand_kind_t {
-    VMKV_OPERAND_NONE = 0,
-    VMKV_OPERAND_LITERAL = 1,
-    VMKV_OPERAND_VARIABLE = 2,
-    VMKV_OPERAND_PATH = 3
-} vmkv_operand_kind_t;
-
-/* 单个操作数的只读视图。 */
-typedef struct vmkv_operand_view_t {
-    vmkv_operand_kind_t kind;
-    runtimec_string_view_t source_text;
-    runtimec_bytes_view_t literal_bytes;
-    runtimec_string_view_t langtype;
-    int32_t parameter_axis;
-} vmkv_operand_view_t;
+/*
+ * 单个明文参数。parameter_type_name 与 parameter_name 必须和 operation
+ * manifest 完全匹配；key 是静态 key 或尚待求值的动态 key expression。
+ */
+typedef struct vmkv_rwir_argument_view_t {
+    runtimec_string_view_t parameter_type_name;
+    runtimec_string_view_t parameter_name;
+    runtimec_key_view_t key;
+    vmkv_key_addressability_t key_addressability;
+} vmkv_rwir_argument_view_t;
 
 /* 一条 RWIR 指令及其两个方向分区。 */
 typedef struct vmkv_rwir_instruction_view_t {
-    vmkv_rwir_operation_identifier_t operation_identifier;
+    runtimec_string_view_t operation_name;
     uint32_t logical_program_counter;
-    const vmkv_operand_view_t *read_operands;
-    size_t read_operand_count;
-    const vmkv_operand_view_t *write_operands;
-    size_t write_operand_count;
+    const vmkv_rwir_argument_view_t *read_arguments;
+    size_t read_argument_count;
+    const vmkv_rwir_argument_view_t *write_arguments;
+    size_t write_argument_count;
 } vmkv_rwir_instruction_view_t;
 
 /* 组件状态只表示调用成败；读取位置由本枚举表达。 */

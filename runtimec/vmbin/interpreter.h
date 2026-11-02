@@ -5,7 +5,10 @@
  * 组件：vmbin/interpreter
  * 作用：定义唯一完整的 BinRWIR 正确性执行入口。
  * 联系：engine route 是唯一调用者；BinRWIR Compiler 可提供只读执行计划。
- * 约束：执行计划可为空；此时仍须执行全部合法 canonical BinRWIR。
+ * 约束：执行计划可为空；此时仍须执行全部合法 canonical BinRWIR。每个参数
+ *       只通过 instruction 的 64 位 argaddr 直接访问 kvspace V.body。VMBIN
+ *       不得缓存 V.body，不得拥有 Cell、value slot、register file、spill 或
+ *       dirty value cache；写结果落入 V.body 后才能推进逻辑程序计数器。
  */
 
 #include "binrwir/execution_exit.h"

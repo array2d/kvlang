@@ -1,4 +1,4 @@
-/* BinRWIR optimization 的失败封闭骨架。 */
+/* 已地址化 BinRWIR 通用派生优化的失败封闭骨架。 */
 
 #include "binrwir_compiler/optimization.h"
 

@@ -18,6 +18,7 @@ runtimec_status_t binrwir_execution_plan_get_view(
     binrwir_execution_plan_view_t *output_view) {
     if (output_view != NULL) {
         memset(output_view, 0, sizeof(*output_view));
+        output_view->identity.snapshot_generation = UINT64_MAX;
         output_view->identity.program_generation = UINT64_MAX;
         output_view->identity.plan_generation = UINT64_MAX;
         output_view->identity.binrwir_binary_interface_generation = UINT32_MAX;

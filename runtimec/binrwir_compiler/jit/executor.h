@@ -7,8 +7,12 @@
  *       verifier 与 backend 阶段决定；执行入口没有拒绝、重编译或替代路径。
  * 联系：engine/route 只在 BinRWIR compilation 的不可变执行目标为 JIT 时调用；
  *       输出为 BinRWIR execution exit，交给 route 提交。
- * 约束：JIT executor 不读 RWIR、不访问 kvspace、不依赖 vmbin；非法机器码
- *       句柄、out-of-memory 或内部错误必须直接返回错误。
+ * 约束：JIT executor 不读 RWIR、不依赖 vmbin。机器码只可按 BinRWIR argaddr
+ *       读取或提交 KVspace V.body。每条完整 logical instruction 的 dirty state
+ *       必须先 commit，之后才可推进 logical program counter/checkpoint；当前
+ *       指令的 speculative/partial state 在 guard failure/error 时必须 discard，
+ *       不得写回。recovery/resume 丢弃全部机器状态。非法机器码句柄、commit
+ *       失败或内部错误必须直接返回错误，不得改走 VMBIN。
  */
 
 #include "binrwir/execution_exit.h"

@@ -1,15 +1,18 @@
 flowchart TB
-  SPECIFICATION["myrwircaps and RWIR specification<br/>stable operation identifiers"]
-  VMKV["vmkv<br/>validate RWIR and emit equivalent canonical BinRWIR"]
-  PROGRAM["top-level binrwir<br/>immutable canonical Program"]
+  RWIR["RWIR in kvspace<br/>plaintext operation name<br/>typed and named Read or Write parameters"]
+  SPECIFICATION["myrwircaps and specification<br/>operation name to opid<br/>parameter to argidx"]
+  VMKV["vmkv<br/>validate RWIR and dereference parameter keys"]
+  ADDRESS_KIND{"Every body address<br/>exists and remains stable?"}
+  UNSUPPORTED["RUNTIMEC_STATUS_UNSUPPORTED<br/>no BinRWIR and no compilation"]
+  PROGRAM["process-local canonical BinRWIR<br/>opid plus repeated argidx and uint64 argaddr<br/>no key, xvalue, body, or register file"]
 
   subgraph BINRWIR_COMPILER["binrwir_compiler"]
-    PLAN["build execution plan<br/>preserve canonical semantics"]
+    PLAN["build address-preserving execution plan<br/>no body cache or general register allocation"]
     JIT_POLICY{"JIT enabled?"}
-    JIT_COMPILE["internal jit compiler<br/>verify, lower, and emit machine code"]
+    JIT_COMPILE["internal JIT compiler<br/>lower and allocate machine registers"]
     JIT_OUTCOME{"JIT compilation outcome"}
     JIT_COMPILATION["COMPILED<br/>JIT target with machine code"]
-    VMBIN_COMPILATION["NOT_COMPILABLE or JIT disabled<br/>VMBIN target with execution plan"]
+    VMBIN_COMPILATION["NOT_COMPILABLE or JIT disabled<br/>VMBIN address plan"]
     PLAN --> JIT_POLICY
     JIT_POLICY -->|"yes"| JIT_COMPILE --> JIT_OUTCOME
     JIT_POLICY -->|"no"| VMBIN_COMPILATION
@@ -18,29 +21,38 @@ flowchart TB
   end
 
   ERROR["ERROR<br/>stop without compilation"]
-  REPOSITORY["compilation repository<br/>cache complete immutable compilation"]
-  ROUTE{"engine route<br/>read decided target before execution"}
-  JIT_EXECUTE["binrwir_jit_execute<br/>execute generated machine code"]
-  VMBIN_EXECUTE["vmbin_execute<br/>execute canonical Program with plan"]
-  COMMIT["route commit<br/>complete effects and checkpoint"]
-  KVSPACE["kvspace<br/>authoritative recoverable facts"]
+  REPOSITORY["compilation repository<br/>address-lifetime-qualified lease"]
+  ROUTE{"engine route<br/>read decided target once"}
+  JIT_EXECUTE["binrwir_jit_execute<br/>speculative register and spill state<br/>inside current logical instruction only"]
+  JIT_BOUNDARY{"Current logical instruction<br/>fully completed?"}
+  COMMIT_COMPLETED["COMMIT_COMPLETED_STATE<br/>materialize every completed dirty body<br/>to original argaddr"]
+  DISCARD_INCOMPLETE["DISCARD_INCOMPLETE_STATE<br/>drop all speculative or partial register and spill state<br/>zero body write"]
+  VMBIN_EXECUTE["vmbin_execute<br/>address-driven memory execution<br/>mandatory boundary at every instruction completion"]
+  BODY["kvspace V.body<br/>only authoritative value residency"]
+  CONTROL["advance logical program counter and checkpoint<br/>only after every completed body write succeeds"]
+  RETAIN["retain last committed program counter and checkpoint<br/>recover or resume only from kvspace"]
 
-  SPECIFICATION --> VMKV --> PROGRAM --> PLAN
+  RWIR --> VMKV
+  SPECIFICATION --> VMKV
+  VMKV --> ADDRESS_KIND
+  ADDRESS_KIND -->|"yes: static key"| PROGRAM --> PLAN
+  ADDRESS_KIND -->|"no: dynamic map or struct key"| UNSUPPORTED
   JIT_OUTCOME -->|"ERROR"| ERROR
   JIT_COMPILATION --> REPOSITORY
   VMBIN_COMPILATION --> REPOSITORY
   REPOSITORY --> ROUTE
-  ROUTE -->|"JIT target only"| JIT_EXECUTE
+  ROUTE -->|"JIT target only"| JIT_EXECUTE --> JIT_BOUNDARY
   ROUTE -->|"VMBIN target only"| VMBIN_EXECUTE
-  JIT_EXECUTE --> COMMIT
-  VMBIN_EXECUTE --> COMMIT
-  COMMIT --> KVSPACE
+  JIT_BOUNDARY -->|"yes: mandatory completion boundary"| COMMIT_COMPLETED --> BODY
+  JIT_BOUNDARY -->|"no: guard failure, error, recovery, or resume"| DISCARD_INCOMPLETE --> RETAIN
+  VMBIN_EXECUTE -->|"completed direct load and store"| BODY
+  BODY -->|"all completed writes succeeded"| CONTROL
 
   classDef fact fill:#fff3cd,stroke:#9a6700,color:#3d2e00
   classDef compile fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
   classDef execute fill:#ecfdf5,stroke:#059669,color:#052e16
   classDef error fill:#fee2e2,stroke:#dc2626,color:#450a0a
-  class SPECIFICATION,KVSPACE fact
+  class RWIR,SPECIFICATION,BODY fact
   class VMKV,PROGRAM,PLAN,JIT_POLICY,JIT_COMPILE,JIT_OUTCOME,JIT_COMPILATION,VMBIN_COMPILATION,REPOSITORY compile
-  class ROUTE,JIT_EXECUTE,VMBIN_EXECUTE,COMMIT execute
-  class ERROR error
+  class ROUTE,JIT_EXECUTE,JIT_BOUNDARY,COMMIT_COMPLETED,VMBIN_EXECUTE,CONTROL execute
+  class ERROR,UNSUPPORTED,DISCARD_INCOMPLETE,RETAIN error

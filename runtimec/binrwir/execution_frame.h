@@ -3,16 +3,15 @@
 
 /*
  * 组件：binrwir/execution_frame
- * 作用：保存可从 kvspace 重建的执行帧镜像。
+ * 作用：保存 BinRWIR 执行所需的控制状态。
  * 联系：engine route 创建 Frame；vmbin 与 BinRWIR JIT 消费。
- * 约束：Frame 不是持久事实源，每条源指令边界必须可观察。
+ * 约束：Frame 不保存参数绑定或 V.body 内容。语言可见值的唯一权威副本
+ *       位于 kvspace；每条源指令边界必须可观察。
  */
 
-#include <stddef.h>
 #include <stdint.h>
 
 #include "contract/status.h"
-#include "binrwir/execution_binding.h"
 #include "binrwir/program.h"
 
 #ifdef __cplusplus
@@ -29,10 +28,6 @@ typedef enum binrwir_execution_frame_flags {
 typedef struct binrwir_execution_frame {
     const binrwir_program_t *program;
     struct binrwir_execution_frame *parent;
-    binrwir_cell_t *cells;
-    size_t cell_count;
-    binrwir_binding_t *bindings;
-    size_t binding_count;
     uint64_t snapshot_generation;
     uint64_t program_generation;
     uint32_t logical_program_counter;
@@ -44,28 +39,13 @@ typedef struct binrwir_execution_frame {
 
 runtimec_status_t binrwir_execution_frame_initialize(
     binrwir_execution_frame_t *frame, const binrwir_program_t *program,
-    binrwir_execution_frame_t *parent, binrwir_cell_t *cells,
-    size_t cell_count,
-    binrwir_binding_t *bindings, size_t binding_count,
+    binrwir_execution_frame_t *parent,
     uint64_t snapshot_generation, uint64_t program_generation,
     uint32_t logical_program_counter);
 runtimec_status_t binrwir_execution_frame_reset(
     binrwir_execution_frame_t *frame);
 runtimec_status_t binrwir_execution_frame_destroy(
     binrwir_execution_frame_t *frame);
-runtimec_status_t binrwir_execution_frame_lookup_cell(
-    binrwir_execution_frame_t *frame, uint32_t cell_identifier,
-    binrwir_cell_t **output_cell);
-runtimec_status_t binrwir_execution_frame_lookup_binding(
-    binrwir_execution_frame_t *frame, uint32_t register_identifier,
-    binrwir_binding_t **output_binding);
-runtimec_status_t binrwir_execution_frame_bind_register(
-    binrwir_execution_frame_t *frame, uint32_t register_identifier,
-    uint32_t cell_identifier,
-    binrwir_binding_access_t access);
-runtimec_status_t binrwir_execution_frame_materialize_register(
-    binrwir_execution_frame_t *frame, uint32_t register_identifier,
-    binrwir_value_slot_t *output_value);
 
 #ifdef __cplusplus
 }

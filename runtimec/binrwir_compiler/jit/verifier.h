@@ -4,9 +4,11 @@
 /*
  * 组件：binrwir_compiler/jit/verifier
  * 作用：binrwir_jit eligibility 的 fail-closed 判定：先按中立 BinRWIR 合同验证
- *       Program，再判定 operation/backend 支持、先定义后使用、控制流 guard、
- *       寄存器压力、binary interface 限制、side effect、call、builtin、
- *       handoff、observable 边界与 source program counter map 可构建。
+ *       Program，再判定 operation/backend 支持、所有参数具有非零 V.body 地址、
+ *       控制流 guard、binary interface 限制、side effect、call、builtin、
+ *       handoff、每条 instruction completion、observable boundary 与 source
+ *       program counter map 可构建。guard failure/error 必须可区分未完成状态。
+ *       寄存器压力只属于后续 register_allocation，不得进入中立 BinRWIR 合同。
  * 联系：binrwir_compiler/jit/compiler 在 plan 前调用；拒绝结果以结构化 refusal 返回，
  *       compiler 据此产生 NOT_COMPILABLE。
  * 约束：未知架构或不支持的 operation 返回 RUNTIMEC_STATUS_UNSUPPORTED 并

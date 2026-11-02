@@ -75,6 +75,42 @@ BINRWIR_NEUTRAL_FILE_NAMES = {
     "signature.h", "instruction.c", "instruction.h", "program.c",
     "program.h", "execution_plan.c", "execution_plan.h",
 }
+REMOVED_BINRWIR_MODEL_FILES = (
+    "execution_binding.c", "execution_binding.h",
+    "reference.c", "reference.h", "value.c", "value.h",
+)
+REQUIRED_JIT_STATE_FILES = (
+    "register_allocation.c", "register_allocation.h",
+    "safepoint.c", "safepoint.h",
+)
+REQUIRED_JIT_SAFEPOINT_TOKENS = (
+    "BINRWIR_JIT_SAFEPOINT_BOUNDARY_INSTRUCTION_COMPLETION",
+    "BINRWIR_JIT_SAFEPOINT_ACTION_COMMIT_COMPLETED_STATE",
+    "BINRWIR_JIT_SAFEPOINT_ACTION_DISCARD_INCOMPLETE_STATE",
+    "BINRWIR_JIT_MATERIALIZATION_FLAG_COMPLETED_DIRTY",
+    "binrwir_jit_safepoint_commit_completed_state",
+    "binrwir_jit_safepoint_discard_incomplete_state",
+)
+FORBIDDEN_JIT_SAFEPOINT_TOKENS = (
+    "observe_every_instruction",
+    "BINRWIR_JIT_MATERIALIZATION_FLAG_DIRTY",
+    "binrwir_jit_safepoint_materialize(",
+)
+C_NON_CODE_PATTERN = re.compile(
+    r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'',
+    re.DOTALL,
+)
+JIT_EXCLUSIVE_STORAGE_PATTERN = re.compile(
+    r"\b(?:[A-Za-z_][A-Za-z0-9_]*register[A-Za-z0-9_]*|"
+    r"[A-Za-z_][A-Za-z0-9_]*spill[A-Za-z0-9_]*)\b",
+    re.IGNORECASE,
+)
+REMOVED_VALUE_CACHE_PATTERN = re.compile(
+    r"\b(?:binrwir_value_slot|binrwir_cell|value_slot|cell_cache|"
+    r"value_cache|register_file|virtual_register|value_base|value_count|"
+    r"payload_low|payload_high)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True, order=True)
@@ -166,6 +202,199 @@ def cmake_target_dependencies(cmake_text: str) -> dict[str, set[str]]:
     return dependencies
 
 
+def c_code_without_comments_or_literals(text: str) -> str:
+    return C_NON_CODE_PATTERN.sub(
+        lambda match: re.sub(r"[^\n]", " ", match.group(0)), text,
+    )
+
+
+def struct_fields(code: str, tag: str, alias: str) -> tuple[str, ...] | None:
+    match = re.search(
+        rf"typedef\s+struct\s+{re.escape(tag)}\s*\{{(.*?)\}}\s*"
+        rf"{re.escape(alias)}\s*;",
+        code,
+        re.DOTALL,
+    )
+    if match is None:
+        return None
+    return tuple(
+        " ".join(declaration.split())
+        for declaration in match.group(1).split(";")
+        if declaration.strip()
+    )
+
+
+def audit_addressed_binrwir_model(
+    runtimec_root: Path, repository_root: Path,
+) -> list[Finding]:
+    findings: list[Finding] = []
+    binrwir_root = runtimec_root / "binrwir"
+    jit_root = runtimec_root / "binrwir_compiler" / "jit"
+
+    for file_name in REMOVED_BINRWIR_MODEL_FILES:
+        path = binrwir_root / file_name
+        if path.exists():
+            findings.append(Finding(
+                relative_display(path, repository_root), 1,
+                "removed-binrwir-storage-model",
+                "reference/value/execution binding files must not exist",
+            ))
+    for file_name in REQUIRED_JIT_STATE_FILES:
+        path = jit_root / file_name
+        if not path.is_file():
+            findings.append(Finding(
+                relative_display(path, repository_root), 1,
+                "missing-jit-state-contract",
+                "JIT register allocation and safepoint files are required",
+            ))
+
+    safepoint_header = jit_root / "safepoint.h"
+    safepoint_source = jit_root / "safepoint.c"
+    lowering_header = jit_root / "lowering_plan.h"
+    jit_contract_text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (safepoint_header, safepoint_source, lowering_header)
+        if path.is_file()
+    )
+    for token in REQUIRED_JIT_SAFEPOINT_TOKENS:
+        if token not in jit_contract_text:
+            findings.append(Finding(
+                relative_display(safepoint_header, repository_root), 1,
+                "missing-jit-commit-discard-contract", token,
+            ))
+    for token in FORBIDDEN_JIT_SAFEPOINT_TOKENS:
+        if token in jit_contract_text:
+            findings.append(Finding(
+                relative_display(jit_root, repository_root), 1,
+                "optional-or-ambiguous-jit-boundary", token,
+            ))
+
+    lowering_code = c_code_without_comments_or_literals(
+        lowering_header.read_text(encoding="utf-8")
+        if lowering_header.is_file() else "",
+    )
+    lowering_fields = struct_fields(
+        lowering_code,
+        "binrwir_jit_lowering_plan_options_t",
+        "binrwir_jit_lowering_plan_options_t",
+    )
+    expected_lowering_fields = (
+        "size_t structure_size",
+        "uint32_t code_generation_revision",
+    )
+    if lowering_fields != expected_lowering_fields:
+        findings.append(Finding(
+            relative_display(lowering_header, repository_root), 1,
+            "optional-instruction-boundary",
+            f"expected fields {expected_lowering_fields!r}, found {lowering_fields!r}",
+        ))
+
+    expected_structs = {
+        binrwir_root / "argument.h": (
+            "binrwir_argument", "binrwir_argument_t",
+            ("uint32_t argument_index",
+             "uint32_t reserved_32_bits",
+             "uint64_t body_address"),
+            "sizeof(binrwir_argument_t) == 16U",
+        ),
+        binrwir_root / "instruction.h": (
+            "binrwir_instruction", "binrwir_instruction_t",
+            ("uint32_t operation_identifier",),
+            "sizeof(binrwir_instruction_t) == 4U",
+        ),
+    }
+    for path, (tag, alias, expected_fields, size_assertion) in expected_structs.items():
+        display = relative_display(path, repository_root)
+        if not path.is_file():
+            findings.append(Finding(display, 1, "missing-addressed-binrwir-file",
+                                    "fixed binary structure is required"))
+            continue
+        text = path.read_text(encoding="utf-8")
+        code = c_code_without_comments_or_literals(text)
+        actual_fields = struct_fields(code, tag, alias)
+        if actual_fields != expected_fields:
+            findings.append(Finding(
+                display, 1, "addressed-binrwir-layout",
+                f"expected fields {expected_fields!r}, found {actual_fields!r}",
+            ))
+        if size_assertion not in code:
+            findings.append(Finding(display, 1, "addressed-binrwir-size",
+                                    size_assertion))
+
+    required_layout_assertions = {
+        binrwir_root / "argument.h": (
+            "offsetof(binrwir_argument_t, argument_index) == 0U",
+            "offsetof(binrwir_argument_t, body_address) == 8U",
+        ),
+        binrwir_root / "instruction.h": (
+            "offsetof(binrwir_instruction_t, operation_identifier) == 0U",
+        ),
+    }
+    for path, assertions in required_layout_assertions.items():
+        display = relative_display(path, repository_root)
+        code = c_code_without_comments_or_literals(
+            path.read_text(encoding="utf-8") if path.is_file() else "",
+        )
+        for assertion in assertions:
+            if assertion not in code:
+                findings.append(Finding(
+                    display, 1, "addressed-binrwir-offset", assertion,
+                ))
+
+    argument_source = binrwir_root / "argument.c"
+    instruction_source = binrwir_root / "instruction.c"
+    required_source_tokens = {
+        argument_source: (
+            "body_address == BINRWIR_BODY_ADDRESS_NONE",
+            "memset(output_argument, 0, sizeof(*output_argument))",
+        ),
+        instruction_source: (
+            ".body_address ==",
+            "BINRWIR_BODY_ADDRESS_NONE",
+        ),
+    }
+    for path, tokens in required_source_tokens.items():
+        display = relative_display(path, repository_root)
+        text = path.read_text(encoding="utf-8") if path.is_file() else ""
+        text = c_code_without_comments_or_literals(text)
+        for token in tokens:
+            if token not in text:
+                findings.append(Finding(
+                    display, 1, "missing-zero-address-rejection", token,
+                ))
+
+    host_services = runtimec_root / "contract" / "host_services.h"
+    host_text = host_services.read_text(encoding="utf-8") \
+        if host_services.is_file() else ""
+    if not re.search(
+        r"#define\s+RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION\s+2U\b",
+        host_text,
+    ):
+        findings.append(Finding(
+            relative_display(host_services, repository_root), 1,
+            "host-services-version", "binary interface version 2 is required",
+        ))
+
+    for path in iter_product_sources(runtimec_root):
+        relative = path.relative_to(runtimec_root)
+        if relative.parts[:2] == ("binrwir_compiler", "jit"):
+            continue
+        code = c_code_without_comments_or_literals(
+            path.read_text(encoding="utf-8"),
+        )
+        for rule, pattern in (
+            ("jit-storage-outside-jit", JIT_EXCLUSIVE_STORAGE_PATTERN),
+            ("removed-value-cache-model", REMOVED_VALUE_CACHE_PATTERN),
+        ):
+            for match in pattern.finditer(code):
+                findings.append(Finding(
+                    relative_display(path, repository_root),
+                    code.count("\n", 0, match.start()) + 1,
+                    rule, match.group(0),
+                ))
+    return findings
+
+
 def audit_build_graph(
     runtimec_root: Path, repository_root: Path,
 ) -> list[Finding]:
@@ -199,6 +428,7 @@ def audit_build_graph(
 
 def audit(repository_root: Path, runtimec_root: Path) -> tuple[list[Finding], int]:
     findings = audit_build_graph(runtimec_root, repository_root)
+    findings.extend(audit_addressed_binrwir_model(runtimec_root, repository_root))
     scanned = 0
     for source in iter_product_sources(runtimec_root):
         scanned += 1

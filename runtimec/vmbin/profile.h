@@ -5,7 +5,8 @@
  * 组件：vmbin/profile
  * 作用：保存 session 拥有的可丢弃执行统计。
  * 联系：interpreter 更新；engine session 持有。
- * 约束：统计不是正确性依赖，也不得进入不可变 Program。
+ * 约束：统计不是正确性依赖，也不得进入不可变 Program；只记录计数，绝不
+ *       保存 argaddr 指向的 V.body 内容。
  */
 
 #include <stddef.h>

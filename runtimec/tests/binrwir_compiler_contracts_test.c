@@ -5,7 +5,10 @@
 
 #include "binrwir_compiler/compiler.h"
 #include "binrwir_compiler/jit/compiler.h"
+#include "binrwir_compiler/jit/execution_interface.h"
 #include "binrwir_compiler/jit/executor.h"
+#include "binrwir_compiler/jit/register_allocation.h"
+#include "binrwir_compiler/jit/safepoint.h"
 #include "binrwir_compiler/optimization.h"
 #include "vmkv/encoder.h"
 
@@ -38,6 +41,24 @@ typedef runtimec_status_t (*binrwir_jit_compile_function_t)(
 typedef runtimec_status_t (*binrwir_jit_execute_function_t)(
     const binrwir_jit_code_t *, binrwir_execution_frame_t *,
     binrwir_execution_exit_t *, runtimec_error_t *);
+typedef runtimec_status_t (*binrwir_jit_register_allocation_create_function_t)(
+    const binrwir_jit_verified_program_t *, const binrwir_execution_plan_t *,
+    const binrwir_jit_target_t *, const runtimec_allocator_t *,
+    binrwir_jit_register_allocation_t **, binrwir_jit_refusal_t *,
+    runtimec_error_t *);
+typedef runtimec_status_t (*binrwir_jit_safepoint_plan_create_function_t)(
+    const binrwir_jit_verified_program_t *,
+    const binrwir_jit_register_allocation_t *, const runtimec_allocator_t *,
+    binrwir_jit_safepoint_plan_t **, binrwir_jit_refusal_t *,
+    runtimec_error_t *);
+typedef runtimec_status_t (*binrwir_jit_safepoint_commit_function_t)(
+    const binrwir_jit_safepoint_plan_t *,
+    binrwir_jit_safepoint_boundary_t, uint32_t, uint32_t, void *,
+    binrwir_execution_frame_t *, runtimec_error_t *);
+typedef runtimec_status_t (*binrwir_jit_safepoint_discard_function_t)(
+    const binrwir_jit_safepoint_plan_t *,
+    binrwir_jit_safepoint_boundary_t, uint32_t, void *,
+    binrwir_execution_frame_t *, runtimec_error_t *);
 typedef runtimec_status_t (*vmkv_encoder_revision_function_t)(
     const vmkv_encoder_t *, uint32_t *);
 
@@ -50,6 +71,18 @@ RUNTIMEC_ASSERT_FUNCTION_TYPE(
     binrwir_build_execution_plan_function_t);
 RUNTIMEC_ASSERT_FUNCTION_TYPE(binrwir_jit_compile, binrwir_jit_compile_function_t);
 RUNTIMEC_ASSERT_FUNCTION_TYPE(binrwir_jit_execute, binrwir_jit_execute_function_t);
+RUNTIMEC_ASSERT_FUNCTION_TYPE(
+    binrwir_jit_register_allocation_create,
+    binrwir_jit_register_allocation_create_function_t);
+RUNTIMEC_ASSERT_FUNCTION_TYPE(
+    binrwir_jit_safepoint_plan_create,
+    binrwir_jit_safepoint_plan_create_function_t);
+RUNTIMEC_ASSERT_FUNCTION_TYPE(
+    binrwir_jit_safepoint_commit_completed_state,
+    binrwir_jit_safepoint_commit_function_t);
+RUNTIMEC_ASSERT_FUNCTION_TYPE(
+    binrwir_jit_safepoint_discard_incomplete_state,
+    binrwir_jit_safepoint_discard_function_t);
 RUNTIMEC_ASSERT_FUNCTION_TYPE(
     vmkv_encoder_get_canonical_encoding_revision,
     vmkv_encoder_revision_function_t);
@@ -69,6 +102,41 @@ _Static_assert(BINRWIR_JIT_COMPILATION_OUTCOME_NOT_COMPILABLE == 2,
                "not-compilable JIT outcome changed");
 _Static_assert(BINRWIR_JIT_COMPILATION_OUTCOME_ERROR == 3,
                "error JIT outcome changed");
+
+_Static_assert(sizeof(binrwir_jit_body_origin_t) == 16U,
+               "JIT body origins must remain sixteen bytes");
+_Static_assert(sizeof(binrwir_jit_location_mapping_t) == 24U,
+               "JIT location mappings must remain twenty-four bytes");
+_Static_assert(sizeof(binrwir_jit_materialization_entry_t) == 24U,
+               "JIT materialization entries must remain twenty-four bytes");
+_Static_assert(BINRWIR_JIT_SAFEPOINT_BOUNDARY_INSTRUCTION_COMPLETION == 1,
+               "instruction-completion boundary changed");
+_Static_assert(BINRWIR_JIT_SAFEPOINT_BOUNDARY_PAUSE == 2,
+               "pause boundary changed");
+_Static_assert(BINRWIR_JIT_SAFEPOINT_BOUNDARY_HANDOFF == 3,
+               "handoff boundary changed");
+_Static_assert(BINRWIR_JIT_SAFEPOINT_BOUNDARY_CALL == 4,
+               "call boundary changed");
+_Static_assert(BINRWIR_JIT_SAFEPOINT_BOUNDARY_EXTERNAL_OBSERVATION == 5,
+               "external-observation boundary changed");
+_Static_assert(BINRWIR_JIT_SAFEPOINT_BOUNDARY_RECOVERY == 6,
+               "recovery boundary changed");
+_Static_assert(BINRWIR_JIT_SAFEPOINT_BOUNDARY_RESUME == 7,
+               "resume boundary changed");
+_Static_assert(BINRWIR_JIT_SAFEPOINT_BOUNDARY_GUARD_FAILURE == 8,
+               "guard-failure boundary changed");
+_Static_assert(BINRWIR_JIT_SAFEPOINT_BOUNDARY_ERROR == 9,
+               "error boundary changed");
+_Static_assert(BINRWIR_JIT_SAFEPOINT_ACTION_COMMIT_COMPLETED_STATE == 1,
+               "completed-state commit action changed");
+_Static_assert(BINRWIR_JIT_SAFEPOINT_ACTION_DISCARD_INCOMPLETE_STATE == 2,
+               "incomplete-state discard action changed");
+_Static_assert(BINRWIR_JIT_MATERIALIZATION_FLAG_COMPLETED_DIRTY == 1,
+               "completed dirty materialization flag changed");
+_Static_assert(BINRWIR_JIT_WRITE_ALIAS_ACTION_UPDATE_READ_LOCATION == 1,
+               "write alias update action changed");
+_Static_assert(BINRWIR_JIT_WRITE_ALIAS_ACTION_INVALIDATE_READ_LOCATION == 2,
+               "write alias invalidation action changed");
 
 static int failures;
 
@@ -208,6 +276,71 @@ static void test_jit_failure_shapes(void) {
     RUNTIMEC_EXPECT(execution_exit.status == RUNTIMEC_STATUS_INVALID);
 }
 
+static void test_jit_register_and_safepoint_failure_shapes(void) {
+    binrwir_jit_register_allocation_t *register_allocation =
+        (binrwir_jit_register_allocation_t *)(uintptr_t)1U;
+    binrwir_jit_safepoint_plan_t *safepoint_plan =
+        (binrwir_jit_safepoint_plan_t *)(uintptr_t)1U;
+    binrwir_jit_refusal_t refusal = {
+        .reason = BINRWIR_JIT_REFUSAL_NONE,
+    };
+    binrwir_jit_execution_interface_t execution_interface = {
+        .binary_interface_major_version = UINT16_MAX,
+    };
+    binrwir_execution_frame_t frame = {
+        .logical_program_counter = 11U,
+    };
+
+    RUNTIMEC_EXPECT(binrwir_jit_register_allocation_create(
+        NULL, NULL, NULL, NULL, &register_allocation, &refusal, NULL) ==
+        RUNTIMEC_STATUS_INVALID);
+    RUNTIMEC_EXPECT(register_allocation == NULL);
+    RUNTIMEC_EXPECT(refusal.reason == BINRWIR_JIT_REFUSAL_INVALID_PROGRAM);
+
+    refusal.reason = BINRWIR_JIT_REFUSAL_NONE;
+    RUNTIMEC_EXPECT(binrwir_jit_safepoint_plan_create(
+        NULL, NULL, NULL, &safepoint_plan, &refusal, NULL) ==
+        RUNTIMEC_STATUS_INVALID);
+    RUNTIMEC_EXPECT(safepoint_plan == NULL);
+    RUNTIMEC_EXPECT(refusal.reason == BINRWIR_JIT_REFUSAL_INVALID_PROGRAM);
+
+    RUNTIMEC_EXPECT(binrwir_jit_safepoint_commit_completed_state(
+        NULL, BINRWIR_JIT_SAFEPOINT_BOUNDARY_INSTRUCTION_COMPLETION, 11U, 12U,
+        (void *)(uintptr_t)1U, &frame, NULL) == RUNTIMEC_STATUS_INVALID);
+    RUNTIMEC_EXPECT(frame.logical_program_counter == 11U);
+
+    RUNTIMEC_EXPECT(binrwir_jit_safepoint_commit_completed_state(
+        (const binrwir_jit_safepoint_plan_t *)(uintptr_t)1U,
+        BINRWIR_JIT_SAFEPOINT_BOUNDARY_ERROR, 11U, 12U,
+        (void *)(uintptr_t)1U, &frame, NULL) == RUNTIMEC_STATUS_INVALID);
+    RUNTIMEC_EXPECT(frame.logical_program_counter == 11U);
+
+    RUNTIMEC_EXPECT(binrwir_jit_safepoint_commit_completed_state(
+        (const binrwir_jit_safepoint_plan_t *)(uintptr_t)1U,
+        BINRWIR_JIT_SAFEPOINT_BOUNDARY_INSTRUCTION_COMPLETION, 11U, 12U,
+        (void *)(uintptr_t)1U, &frame, NULL) == RUNTIMEC_STATUS_NOT_IMPLEMENTED);
+    RUNTIMEC_EXPECT(frame.logical_program_counter == 11U);
+
+    RUNTIMEC_EXPECT(binrwir_jit_safepoint_discard_incomplete_state(
+        (const binrwir_jit_safepoint_plan_t *)(uintptr_t)1U,
+        BINRWIR_JIT_SAFEPOINT_BOUNDARY_INSTRUCTION_COMPLETION, 11U,
+        (void *)(uintptr_t)1U, &frame, NULL) == RUNTIMEC_STATUS_INVALID);
+    RUNTIMEC_EXPECT(frame.logical_program_counter == 11U);
+
+    RUNTIMEC_EXPECT(binrwir_jit_safepoint_discard_incomplete_state(
+        (const binrwir_jit_safepoint_plan_t *)(uintptr_t)1U,
+        BINRWIR_JIT_SAFEPOINT_BOUNDARY_ERROR, 11U,
+        (void *)(uintptr_t)1U, &frame, NULL) == RUNTIMEC_STATUS_NOT_IMPLEMENTED);
+    RUNTIMEC_EXPECT(frame.logical_program_counter == 11U);
+
+    RUNTIMEC_EXPECT(binrwir_jit_execution_interface(&execution_interface) ==
+                    RUNTIMEC_STATUS_NOT_IMPLEMENTED);
+    RUNTIMEC_EXPECT(execution_interface.binary_interface_major_version == 0U);
+    RUNTIMEC_EXPECT(execution_interface.value_body_address_size_bytes == 0U);
+    RUNTIMEC_EXPECT(execution_interface.argument_index_size_bytes == 0U);
+    RUNTIMEC_EXPECT(execution_interface.safepoint_contract_revision == 0U);
+}
+
 int main(void) {
     test_compiler_configuration();
     test_compiler_revision_failure_shape();
@@ -215,6 +348,7 @@ int main(void) {
     test_compilation_shapes();
     test_optimization_failure_shape();
     test_jit_failure_shapes();
+    test_jit_register_and_safepoint_failure_shapes();
     if (failures != 0) {
         fprintf(stderr, "binrwir_compiler_contracts_test: %d failure(s)\n", failures);
         return 1;

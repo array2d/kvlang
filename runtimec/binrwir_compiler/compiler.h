@@ -3,10 +3,13 @@
 
 /*
  * 组件：BinRWIR Compiler
- * 作用：从 canonical BinRWIR Program 派生 execution plan，并在启用时于同一
- *       编译阶段尝试生成 JIT 机器码。输出是统一的 opaque compilation。
- * 联系：唯一内容输入是 binrwir_program_t；编译阶段一次性选择 VMBIN 或 JIT。
- * 约束：不读取 RWIR 或 kvspace，不执行 Program；全部优化只在本模块完成。
+ * 作用：从 VMKV 已经地址化的 canonical BinRWIR Program 派生 execution plan，
+ *       并在启用时于同一编译阶段尝试生成 JIT 机器码。输出是统一的 opaque
+ *       compilation。
+ * 联系：唯一内容输入是带非零 argaddr 的 binrwir_program_t；编译阶段一次性
+ *       选择 VMBIN 或 JIT。
+ * 约束：不读取 RWIR 或 kvspace，不解析 key，不缓存 V.body，不执行 Program；
+ *       通用 plan 不重复编码 instruction、地址或寄存器状态。
  *       JIT 不可编译只形成 VMBIN plan；真实编译错误不得转换成 VMBIN plan。
  *       执行阶段不得再次探测 JIT，也不得在 JIT 与 VMBIN 之间回退。
  */
@@ -52,6 +55,7 @@ typedef struct binrwir_compiler_configuration_t {
 /*
  * 本视图借用 compilation 持有的对象。compilation 只表示已经成功完成的编译。
  * JIT 目标必须携带非空 binrwir_jit_code；VMBIN 目标必须保持该字段为空。
+ * VMBIN compilation 不携带 body cache；它只借用 Program 中已解析的 argaddr。
  * JIT 不可编译产生 VMBIN compilation；编译错误不产生 compilation。
  */
 typedef struct binrwir_compilation_view_t {
@@ -76,8 +80,11 @@ runtimec_status_t binrwir_compiler_get_revision(
     uint32_t *output_compiler_revision);
 
 /*
- * 唯一内容输入是 canonical_program。成功产生的 compilation 持有该 Program
- * 的不可变快照、execution plan 与可选机器码；调用者仍拥有输入 Program。
+ * 唯一内容输入是 canonical_program。其全部 argument 必须已由 VMKV 解析为
+ * 非零 V.body 地址。成功产生的 compilation 持有该 Program 的不可变副本、
+ * execution plan 与可选机器码，但不拥有地址指向的 body。地址只在生成它的
+ * snapshot/source revision 有效期间可用；该 revision 失效时必须使整份
+ * compilation 失效。调用者仍拥有输入 Program。
  */
 runtimec_status_t binrwir_compiler_compile(
     binrwir_compiler_t *compiler,

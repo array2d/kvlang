@@ -40,6 +40,7 @@ void runtimec_host_services_initialize(runtimec_host_services_t *services) {
         services->watch = NULL;
         services->signal = NULL;
         services->source_revision = NULL;
+        services->resolve_static_value_body_address = NULL;
         services->checkpoint = NULL;
         services->handoff = NULL;
     }

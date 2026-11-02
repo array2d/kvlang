@@ -3,7 +3,8 @@
 
 /*
  * 组件：vmkv/source
- * 作用：通过主机服务打开一个函数的明文 RWIR 源，并返回源快照。
+ * 作用：通过主机服务打开一个函数的明文 RWIR 源，并返回源快照。源保留
+ *       operation name、parameter type、parameter name 与 parameter key。
  *       它是 vmkv 与 kvspace 之间唯一的读取入口，vmkv 不直接包含
  *       kvspace 结构。
  * 联系：vmkv/encoder 使用本接口读取 RWIR；读取结果只能进入顶层

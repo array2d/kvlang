@@ -37,3 +37,27 @@ runtimec_status_t binrwir_jit_lowering_plan_destroy(binrwir_jit_lowering_plan_t 
     }
     return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
 }
+
+runtimec_status_t binrwir_jit_lowering_plan_get_register_allocation(
+    const binrwir_jit_lowering_plan_t *plan,
+    const binrwir_jit_register_allocation_t **output_allocation) {
+    if (output_allocation != NULL) {
+        *output_allocation = NULL;
+    }
+    if (plan == NULL || output_allocation == NULL) {
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
+}
+
+runtimec_status_t binrwir_jit_lowering_plan_get_safepoint_plan(
+    const binrwir_jit_lowering_plan_t *plan,
+    const binrwir_jit_safepoint_plan_t **output_safepoint_plan) {
+    if (output_safepoint_plan != NULL) {
+        *output_safepoint_plan = NULL;
+    }
+    if (plan == NULL || output_safepoint_plan == NULL) {
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
+}

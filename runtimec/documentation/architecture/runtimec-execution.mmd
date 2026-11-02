@@ -2,29 +2,45 @@ sequenceDiagram
   participant Client as C client
   participant Interface as Public interface
   participant Route as engine route
-  participant Host as Host services
+  participant Host as Host and kvspace services
   participant Repository as Compilation repository
   participant Vmkv as vmkv
   participant Compiler as binrwir_compiler
   participant JitCompiler as Internal JIT compiler
   participant JitExecute as binrwir_jit_execute
   participant VmbinExecute as vmbin_execute
+  participant Body as KVspace V.body
 
   Client->>Interface: structured execute request
   Interface->>Route: validated request
-  Route->>Host: load authoritative snapshot and execution state
-  Host-->>Route: host-neutral snapshot
-  Route->>Repository: find compilation by identity
-  alt compilation found
-    Repository-->>Route: immutable compilation lease
-  else compilation not found
+  Route->>Host: obtain authoritative snapshot and source revision
+  Host-->>Route: complete snapshot.source_revision
+  Route->>Repository: find compilation for exact snapshot identity
+  alt valid compilation found
+    Repository-->>Route: immutable compilation lease with valid argaddr values
+  else compilation not found or source revision changed
     Repository-->>Route: not found
-    Route->>Vmkv: validate RWIR and encode canonical BinRWIR
-    Vmkv-->>Route: immutable canonical Program or compile error
-    Route->>Compiler: compile canonical Program
-    Compiler->>Compiler: build execution plan
+    Route->>Vmkv: validate RWIR and build addressed BinRWIR
+    Vmkv->>Host: open plaintext function source for snapshot
+    Host-->>Vmkv: borrowed RWIR source bytes
+    loop every Read or Write parameter
+      Vmkv->>Host: dereference static parameter key
+      alt body exists and address lifetime is supported
+        Host-->>Vmkv: nonzero uint64 argaddr
+      else dynamic map or struct key
+        Host-->>Vmkv: unsupported address lifetime
+        break unsupported stops before BinRWIR creation
+          Vmkv-->>Route: RUNTIMEC_STATUS_UNSUPPORTED and no Program
+          Route-->>Interface: structured unsupported result
+          Interface-->>Client: unsupported
+        end
+      end
+    end
+    Vmkv-->>Route: opid plus complete argidx and argaddr pairs
+    Route->>Compiler: compile addressed canonical Program
+    Compiler->>Compiler: build plan without value cache or general register allocation
     alt JIT enabled
-      Compiler->>JitCompiler: verify, lower, and emit
+      Compiler->>JitCompiler: verify, lower, allocate machine registers, and emit
       alt COMPILED
         JitCompiler-->>Compiler: generated machine code
         Compiler-->>Route: complete JIT-target compilation
@@ -33,30 +49,52 @@ sequenceDiagram
         Compiler-->>Route: complete VMBIN-target compilation
       else ERROR
         JitCompiler-->>Compiler: explicit compilation error
-        Compiler-->>Route: error and no compilation
-        break compilation stops immediately
+        break compilation stops without fallback
+          Compiler-->>Route: error and no compilation
           Route-->>Interface: structured error
-          Interface-->>Client: status and error
+          Interface-->>Client: error
         end
       end
     else JIT disabled
       Compiler-->>Route: complete VMBIN-target compilation
     end
     opt completed compilation
-      Route->>Repository: insert complete compilation
+      Route->>Repository: insert complete address-qualified compilation
       Repository-->>Route: immutable compilation lease
     end
   end
+
   Route->>Route: read immutable execution target once
   alt JIT target
     Route->>JitExecute: execute existing machine code
-    JitExecute-->>Route: structured execution exit or error
+    JitExecute->>Body: load through argaddr
+    JitExecute->>JitExecute: speculative register and spill computation
+    alt current logical instruction fully completed
+      Note over JitExecute,Body: Every instruction completion is a mandatory recovery and observable boundary
+      JitExecute->>Body: COMMIT_COMPLETED_STATE with all completed dirty values
+      Body-->>JitExecute: every original argaddr write succeeded
+      JitExecute-->>Route: completed execution exit
+      Route->>Host: advance logical program counter and checkpoint
+    else guard failure, error, recovery, or resume before completion
+      JitExecute->>JitExecute: DISCARD_INCOMPLETE_STATE for all register and spill state
+      Note over JitExecute,Body: No materialization entry and no partial body write
+      JitExecute-->>Route: incomplete exit from last committed boundary
+      Route->>Host: retain logical program counter and checkpoint
+    end
   else VMBIN target
-    Route->>VmbinExecute: execute Program with existing plan
-    VmbinExecute-->>Route: structured execution exit or error
+    Route->>VmbinExecute: execute opid with argidx and argaddr pairs
+    VmbinExecute->>Body: direct Read through argaddr
+    alt logical instruction completed
+      VmbinExecute->>Body: direct Write before completion boundary
+      Note over VmbinExecute,Body: Every instruction completion is a mandatory recovery and observable boundary
+      Body-->>VmbinExecute: completed body effects
+      VmbinExecute-->>Route: completed execution exit
+      Route->>Host: advance only after every completed body write succeeds
+    else execution error before completion
+      VmbinExecute-->>Route: incomplete error exit
+      Route->>Host: retain logical program counter and checkpoint
+    end
   end
-  Note over Route,VmbinExecute: Execution never retries, recompiles, or falls back
-  Route->>Host: commit complete effects then checkpoint
   Route->>Repository: release compilation lease
   Route-->>Interface: structured result
   Interface-->>Client: status and result

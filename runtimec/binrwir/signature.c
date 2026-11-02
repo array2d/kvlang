@@ -11,10 +11,13 @@ binrwir_signature_validate(const binrwir_signature_view_t *signature) {
     if (signature == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
-    if ((signature->read_parameter_count != 0U &&
-         signature->read_parameters == NULL) ||
+    if (signature->read_parameter_count > UINT32_MAX ||
+        signature->write_parameter_count > UINT32_MAX ||
+        signature->alias_rule_count > UINT32_MAX ||
+        (signature->read_parameter_count != 0U &&
+         signature->read_parameter_argument_indices == NULL) ||
         (signature->write_parameter_count != 0U &&
-         signature->write_parameters == NULL) ||
+         signature->write_parameter_argument_indices == NULL) ||
         (signature->alias_rule_count != 0U &&
          signature->alias_rules == NULL)) {
         return RUNTIMEC_STATUS_INVALID;
@@ -23,14 +26,14 @@ binrwir_signature_validate(const binrwir_signature_view_t *signature) {
 }
 
 runtimec_status_t binrwir_signature_get_alias_policy(
-    const binrwir_signature_view_t *signature, uint16_t read_parameter,
-    uint16_t write_parameter, binrwir_alias_policy_t *output_policy) {
+    const binrwir_signature_view_t *signature, uint32_t read_parameter_index,
+    uint32_t write_parameter_index, binrwir_alias_policy_t *output_policy) {
     if (output_policy != NULL) {
         *output_policy = BINRWIR_ALIAS_POLICY_INVALID;
     }
     if (signature == NULL || output_policy == NULL ||
-        read_parameter >= signature->read_parameter_count ||
-        write_parameter >= signature->write_parameter_count) {
+        read_parameter_index >= signature->read_parameter_count ||
+        write_parameter_index >= signature->write_parameter_count) {
         return RUNTIMEC_STATUS_INVALID;
     }
     return RUNTIMEC_STATUS_NOT_IMPLEMENTED;

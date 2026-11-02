@@ -1,6 +1,6 @@
 /*
  * 组件：binrwir/program 的实现
- * 作用：Program 查询和构造入口；当前均明确返回未实现。
+ * 作用：地址化 Program 查询和构造入口；当前均明确返回未实现。
  * 约束：每个输出在失败前进入无效状态。
  */
 
@@ -98,13 +98,13 @@ runtimec_status_t binrwir_program_builder_destroy(
 
 runtimec_status_t binrwir_program_builder_add_parameter(
     binrwir_program_builder_t *builder, binrwir_parameter_direction_t direction,
-    uint32_t register_identifier, uint16_t *output_parameter_ordinal) {
-    if (output_parameter_ordinal != NULL) {
-        *output_parameter_ordinal = UINT16_MAX;
+    uint32_t argument_index, uint32_t *output_parameter_index) {
+    if (output_parameter_index != NULL) {
+        *output_parameter_index = BINRWIR_ARGUMENT_INDEX_NONE;
     }
     if (builder == NULL || direction == BINRWIR_PARAMETER_DIRECTION_INVALID ||
-        register_identifier == BINRWIR_IDENTIFIER_NONE ||
-        output_parameter_ordinal == NULL) {
+        argument_index == BINRWIR_ARGUMENT_INDEX_NONE ||
+        output_parameter_index == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
     return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
@@ -118,63 +118,6 @@ runtimec_status_t binrwir_program_builder_add_alias_rule(
     }
     if (builder == NULL || rule == NULL ||
         output_alias_rule_identifier == NULL) {
-        return RUNTIMEC_STATUS_INVALID;
-    }
-    return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
-}
-
-runtimec_status_t binrwir_program_builder_add_register(
-    binrwir_program_builder_t *builder,
-    const binrwir_register_descriptor_t *register_descriptor,
-    uint32_t *output_register_identifier) {
-    if (output_register_identifier != NULL) {
-        *output_register_identifier = BINRWIR_IDENTIFIER_NONE;
-    }
-    if (builder == NULL || register_descriptor == NULL ||
-        output_register_identifier == NULL) {
-        return RUNTIMEC_STATUS_INVALID;
-    }
-    return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
-}
-
-runtimec_status_t binrwir_program_builder_add_symbol(
-    binrwir_program_builder_t *builder, const uint8_t *bytes, size_t byte_count,
-    uint32_t *output_symbol_identifier) {
-    if (output_symbol_identifier != NULL) {
-        *output_symbol_identifier = BINRWIR_IDENTIFIER_NONE;
-    }
-    if (builder == NULL || (byte_count != 0U && bytes == NULL) ||
-        output_symbol_identifier == NULL) {
-        return RUNTIMEC_STATUS_INVALID;
-    }
-    return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
-}
-
-runtimec_status_t binrwir_program_builder_add_literal(
-    binrwir_program_builder_t *builder,
-    const binrwir_literal_descriptor_t *literal_descriptor,
-    const uint8_t *bytes, size_t byte_count,
-    uint32_t *output_literal_identifier) {
-    if (output_literal_identifier != NULL) {
-        *output_literal_identifier = BINRWIR_IDENTIFIER_NONE;
-    }
-    if (builder == NULL || literal_descriptor == NULL ||
-        (byte_count != 0U && bytes == NULL) ||
-        output_literal_identifier == NULL) {
-        return RUNTIMEC_STATUS_INVALID;
-    }
-    return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
-}
-
-runtimec_status_t binrwir_program_builder_add_callsite(
-    binrwir_program_builder_t *builder,
-    const binrwir_callsite_build_request_t *request,
-    uint32_t *output_callsite_identifier) {
-    if (output_callsite_identifier != NULL) {
-        *output_callsite_identifier = BINRWIR_IDENTIFIER_NONE;
-    }
-    if (builder == NULL || request == NULL ||
-        output_callsite_identifier == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
     return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
@@ -194,9 +137,8 @@ runtimec_status_t binrwir_program_builder_add_instruction(
     return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
 }
 
-runtimec_status_t
-binrwir_program_builder_finalize(binrwir_program_builder_t *builder,
-                               binrwir_program_t **output_program) {
+runtimec_status_t binrwir_program_builder_finalize(
+    binrwir_program_builder_t *builder, binrwir_program_t **output_program) {
     if (output_program != NULL) {
         *output_program = NULL;
     }

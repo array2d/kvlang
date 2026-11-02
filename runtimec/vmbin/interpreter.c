@@ -1,7 +1,8 @@
 /*
  * 组件：vmbin/interpreter 的实现
  * 作用：唯一 vmbin 执行入口的失败桩。
- * 约束：所有解释策略只能位于本执行器内部，不建立第三执行器。
+ * 约束：所有解释策略只能位于本执行器内部，并通过 argaddr 直接访问
+ *       kvspace V.body；不得建立值缓存或第三执行器。
  */
 
 #include "interpreter.h"

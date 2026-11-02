@@ -4,8 +4,10 @@
 /*
  * 组件：vmbin/builtin/registry
  * 作用：将 builtin 标识符映射到唯一处理函数。
- * 联系：interpreter 调用；处理函数消费中立执行合同。
- * 约束：Registry 不拥有条目或处理函数，生命周期属于 session。
+ * 联系：interpreter 调用；处理函数从 instruction 的 argaddr 直接访问
+ *       kvspace V.body。
+ * 约束：Registry 不拥有条目或处理函数，生命周期属于 session；处理函数
+ *       不得缓存 V.body 内容或建立寄存器文件。
  */
 
 #include <stddef.h>
@@ -29,8 +31,7 @@ typedef runtimec_status_t
 typedef enum vmbin_builtin_flags {
     VMBIN_BUILTIN_FLAG_NONE = 0,
     VMBIN_BUILTIN_FLAG_EFFECT = 1U << 0,
-    VMBIN_BUILTIN_FLAG_MAY_YIELD = 1U << 1,
-    VMBIN_BUILTIN_FLAG_REQUIRES_MATERIALIZATION = 1U << 2
+    VMBIN_BUILTIN_FLAG_MAY_YIELD = 1U << 1
 } vmbin_builtin_flags_t;
 
 typedef struct vmbin_builtin_entry {

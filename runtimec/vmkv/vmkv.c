@@ -3,11 +3,27 @@
  * 作用：先把输出置为明确无效，再验证接口形状，最后返回
  *       RUNTIMEC_STATUS_NOT_IMPLEMENTED。
  * 约束：不产生空 Program 伪装成功，不执行或优化 RWIR，不生成机器码。
+ *       当前只实现静态 argument 地址化合同，不实现完整 RWIR 编码。
  */
 
 #include "vmkv/encoder.h"
 #include "vmkv/rwir.h"
 #include "vmkv/source.h"
+
+#include <string.h>
+
+static bool vmkv_named_argument_is_valid(
+    const vmkv_rwir_argument_view_t *argument) {
+    return argument != NULL &&
+           runtimec_string_view_is_valid(argument->parameter_type_name) &&
+           argument->parameter_type_name.size > 0U &&
+           runtimec_string_view_is_valid(argument->parameter_name) &&
+           argument->parameter_name.size > 0U &&
+           runtimec_key_view_is_valid(argument->key) &&
+           argument->key.size > 0U &&
+           (argument->key_addressability == VMKV_KEY_ADDRESSABILITY_STATIC ||
+            argument->key_addressability == VMKV_KEY_ADDRESSABILITY_DYNAMIC);
+}
 
 runtimec_status_t vmkv_source_open_function(
     const runtimec_host_services_t *host_services,
@@ -107,6 +123,50 @@ runtimec_status_t vmkv_encoder_get_canonical_encoding_revision(
         return RUNTIMEC_STATUS_INVALID;
     }
     return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
+}
+
+runtimec_status_t vmkv_encode_static_argument(
+    const vmkv_encode_request_t *request,
+    const vmkv_rwir_argument_view_t *source_argument,
+    uint32_t argument_index,
+    binrwir_argument_t *output_argument,
+    runtimec_error_t *error) {
+    if (output_argument != NULL) {
+        memset(output_argument, 0, sizeof(*output_argument));
+    }
+    if (request == NULL || output_argument == NULL ||
+        argument_index == BINRWIR_ARGUMENT_INDEX_NONE ||
+        !runtimec_host_services_is_valid(request->host_services) ||
+        !runtimec_string_view_is_valid(request->function_path) ||
+        !runtimec_snapshot_is_valid(&request->expected_snapshot) ||
+        !vmkv_named_argument_is_valid(source_argument)) {
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    if (source_argument->key_addressability ==
+        VMKV_KEY_ADDRESSABILITY_DYNAMIC) {
+        return RUNTIMEC_STATUS_UNSUPPORTED;
+    }
+    if (request->host_services->resolve_static_value_body_address == NULL) {
+        return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
+    }
+
+    runtimec_value_body_address_t body_address =
+        RUNTIMEC_VALUE_BODY_ADDRESS_NONE;
+    runtimec_status_t status =
+        request->host_services->resolve_static_value_body_address(
+            request->host_services->context, &request->expected_snapshot,
+            source_argument->key, &body_address, error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return status;
+    }
+    if (body_address == RUNTIMEC_VALUE_BODY_ADDRESS_NONE) {
+        return RUNTIMEC_STATUS_ERROR;
+    }
+
+    output_argument->body_address = body_address;
+    output_argument->argument_index = argument_index;
+    output_argument->reserved_32_bits = 0U;
+    return RUNTIMEC_STATUS_SUCCESS;
 }
 
 runtimec_status_t vmkv_encode(

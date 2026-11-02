@@ -3,11 +3,13 @@
 
 /*
  * 组件：BinRWIR Compiler optimization
- * 作用：从 canonical BinRWIR Program 生成只读 execution plan，统一承载
- *       指令编码、类型固化、KV 寻址、指令融合、虚拟寄存器与控制流优化。
+ * 作用：从已经地址化的 canonical BinRWIR Program 生成只读 execution plan，
+ *       只承载类型固化、dispatch 融合、控制流与 source logical program
+ *       counter 映射。
  * 联系：仅由 binrwir_compiler/compiler.c 调用；binrwir_jit 与 vmbin 只消费完成的 plan。
  * 约束：不得改变 Program 语义、Read/Write authority、alias 顺序或 source
- *       logical program counter 观察边界，不得选择或执行目标。
+ *       logical program counter 观察边界，不得选择或执行目标。不得重复编码
+ *       instruction、解析或缓存 V.body 地址，也不得建立中间值存储模型。
  */
 
 #include <stdint.h>

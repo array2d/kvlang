@@ -1,57 +1,62 @@
 flowchart LR
-  subgraph Specification["Specification identity"]
-    CAPABILITY["one myrwircap record"]
-    RWIR_IDENTIFIER["explicit stable RWIR operation identifier"]
-    CANONICAL_IDENTIFIER["one canonical BinRWIR operation identifier"]
-    SIGNATURE["Read and Write signature plus alias policy"]
-    CAPABILITY --> RWIR_IDENTIFIER
-    CAPABILITY --> CANONICAL_IDENTIFIER
-    CAPABILITY --> SIGNATURE
+  subgraph RWIR["RWIR plaintext in kvspace"]
+    OPERATION_NAME["operation name"]
+    READ_PARAMETER["Read parameter<br/>type plus name plus key"]
+    WRITE_PARAMETER["Write parameter<br/>type plus name plus key"]
   end
 
-  VMKV["vmkv equivalent emission"]
-
-  subgraph Canonical["Top-level canonical BinRWIR"]
-    INSTRUCTION["instruction operation_code<br/>stable canonical identifier"]
-    READ_REFERENCE["Read reference"]
-    WRITE_REFERENCE["Write reference"]
+  subgraph SPECIFICATION["Canonical specification"]
+    OPID["stable opid"]
+    READ_ARGIDX["Read argidx and permission"]
+    WRITE_ARGIDX["Write argidx and permission"]
+    ALIAS_POLICY["explicit Read and Write alias policy"]
   end
 
-  subgraph Binding["Execution binding"]
-    READ_BINDING["Read Binding"]
-    WRITE_BINDING["Write Binding"]
-    CELL["Canonical Cell<br/>value and mutation version"]
+  VMKV["vmkv<br/>validate and dereference static keys"]
+
+  subgraph BINRWIR["Process-local BinRWIR"]
+    BINARY_OPERATION["opid only"]
+    READ_ARGUMENT["Read argidx plus uint64 argaddr"]
+    WRITE_ARGUMENT["Write argidx plus uint64 argaddr"]
   end
 
-  COMPILER["binrwir_compiler<br/>plan and JIT compilation preserve dependencies"]
-  TARGET{"immutable execution target"}
-  JIT_EXECUTION["binrwir_jit_execute<br/>existing machine code"]
-  VMBIN_EXECUTION["vmbin_execute<br/>canonical Program with plan"]
+  BODY["one authoritative kvspace V.body<br/>same nonzero 64-bit address"]
+  VMBIN["vmbin<br/>direct load and store<br/>no value cache or register file"]
+  JIT["internal JIT current instruction<br/>speculative register and spill state<br/>alias reads observe speculative writes"]
+  COMPLETION{"Logical instruction<br/>fully completed?"}
+  COMMIT["COMMIT_COMPLETED_STATE<br/>materialize all aliased dirty values<br/>then advance checkpoint"]
+  DISCARD["DISCARD_INCOMPLETE_STATE<br/>drop partial register and spill state<br/>no body write or checkpoint advance"]
+  DYNAMIC["dynamic map or struct key<br/>UNSUPPORTED before lifecycle ABI<br/>no zero address or fallback"]
 
-  RWIR_IDENTIFIER --> VMKV
-  CANONICAL_IDENTIFIER --> VMKV
-  SIGNATURE --> VMKV
-  VMKV --> INSTRUCTION
-  VMKV --> READ_REFERENCE
-  VMKV --> WRITE_REFERENCE
-  READ_REFERENCE --> READ_BINDING --> CELL
-  WRITE_REFERENCE --> WRITE_BINDING --> CELL
-  SIGNATURE -. "explicit alias permission" .-> READ_BINDING
-  SIGNATURE -. "explicit alias permission" .-> WRITE_BINDING
-  INSTRUCTION --> COMPILER
-  READ_REFERENCE --> COMPILER
-  WRITE_REFERENCE --> COMPILER
-  COMPILER --> TARGET
-  TARGET -->|"JIT"| JIT_EXECUTION
-  TARGET -->|"VMBIN"| VMBIN_EXECUTION
-  CELL -. "later Read observes ordered Write" .-> JIT_EXECUTION
-  CELL -. "later Read observes ordered Write" .-> VMBIN_EXECUTION
+  OPERATION_NAME --> VMKV
+  READ_PARAMETER --> VMKV
+  WRITE_PARAMETER --> VMKV
+  OPID --> VMKV
+  READ_ARGIDX --> VMKV
+  WRITE_ARGIDX --> VMKV
+  ALIAS_POLICY --> VMKV
+  VMKV --> BINARY_OPERATION
+  VMKV --> READ_ARGUMENT
+  VMKV --> WRITE_ARGUMENT
+  READ_ARGUMENT -->|"same argaddr"| BODY
+  WRITE_ARGUMENT -->|"same argaddr"| BODY
+  READ_ARGIDX -. "Read only" .-> READ_ARGUMENT
+  WRITE_ARGIDX -. "Write only" .-> WRITE_ARGUMENT
+  ALIAS_POLICY -. "permits equal addresses" .-> BODY
+  BODY -->|"later Read observes prior Write"| VMBIN
+  BODY -->|"initial Read through argaddr"| JIT
+  JIT --> COMPLETION
+  COMPLETION -->|"yes: mandatory observable boundary"| COMMIT --> BODY
+  COMPLETION -->|"no: guard failure, error, recovery, or resume"| DISCARD
+  VMKV -->|"address lifetime cannot be proven"| DYNAMIC
 
-  classDef specification fill:#fef3c7,stroke:#d97706,color:#451a03
+  classDef plaintext fill:#fef3c7,stroke:#d97706,color:#451a03
   classDef read fill:#dbeafe,stroke:#2563eb,color:#172554
   classDef write fill:#fee2e2,stroke:#dc2626,color:#450a0a
   classDef shared fill:#dcfce7,stroke:#16a34a,color:#052e16
-  class CAPABILITY,RWIR_IDENTIFIER,CANONICAL_IDENTIFIER,SIGNATURE specification
-  class READ_REFERENCE,READ_BINDING read
-  class WRITE_REFERENCE,WRITE_BINDING write
-  class CELL shared
+  classDef unsupported fill:#f3f4f6,stroke:#4b5563,color:#111827
+  class OPERATION_NAME,READ_PARAMETER,WRITE_PARAMETER,OPID,READ_ARGIDX,WRITE_ARGIDX,ALIAS_POLICY plaintext
+  class READ_ARGUMENT read
+  class WRITE_ARGUMENT write
+  class BODY,VMBIN,JIT,COMPLETION,COMMIT shared
+  class DYNAMIC,DISCARD unsupported

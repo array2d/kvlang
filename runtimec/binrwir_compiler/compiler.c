@@ -1,5 +1,5 @@
 /*
- * BinRWIR Compiler 当前只提供失败封闭桩。
+ * BinRWIR Compiler 当前只提供已地址化 Program 的失败封闭桩。
  * 输出先进入无效状态；合法但尚未实现的请求返回 NOT_IMPLEMENTED。
  */
 

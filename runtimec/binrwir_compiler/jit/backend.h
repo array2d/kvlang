@@ -5,12 +5,14 @@
  * 组件：binrwir_compiler/jit/backend
  * 作用：单一 backend 契约：目标架构与 feature 判定及机器码生成。x86_64 与
  *       AArch64 是并列 peer，谁也不是另一个的默认模板。
- *       backend 只拥有指令编码、调用约定实现、寄存器/spill、常量池/
- *       branch fixup、可执行页切换与 instruction cache 同步；不拥有 Program 语义、
- *       eligibility 或 cache identity。
+ *       backend 只拥有指令编码、调用约定实现、既定 register allocation/spill、
+ *       completed-state commit、incomplete-state discard、常量池、branch fixup、
+ *       可执行页切换与 instruction cache
+ *       同步；不拥有 Program 语义、eligibility 或 cache identity。
  * 联系：binrwir_compiler/jit/compiler 选择 backend；emit 请求来自 lower；输出由
  *       code_memory 发布。backend 禁止读 RWIR、kvspace 或 route policy。
- * 约束：未知 processor 或缺 feature 必须返回 UNSUPPORTED，不得默认 x86_64。
+ * 约束：guard failure/error 路径不得写回 speculative/partial state。未知
+ *       processor 或缺 feature 必须返回 UNSUPPORTED，不得默认 x86_64。
  */
 
 #include <stdbool.h>
@@ -35,9 +37,13 @@ typedef struct binrwir_jit_target_t {
 } binrwir_jit_target_t;
 
 struct binrwir_jit_lowered_program;
+struct binrwir_jit_register_allocation;
+struct binrwir_jit_safepoint_plan;
 
 typedef struct binrwir_jit_emit_request_t {
     const struct binrwir_jit_lowered_program *lowered_program;
+    const struct binrwir_jit_register_allocation *register_allocation;
+    const struct binrwir_jit_safepoint_plan *safepoint_plan;
     runtimec_bytes_buffer_t writable_code;
 } binrwir_jit_emit_request_t;
 

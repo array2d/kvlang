@@ -5,7 +5,8 @@
  * 组件：binrwir/execution_exit
  * 作用：表达 vmbin 或 BinRWIR JIT 离开执行窗口的唯一结构化结果。
  * 联系：engine route 消费退出并决定调用、交接、恢复或报错。
- * 约束：不得携带需要持久化的机器地址或伪造成功状态。
+ * 约束：只携带控制信息。语言可见值必须已写回 V.body；不得携带值、机器
+ *       地址、重试或反优化请求，所选执行目标失败即失败。
  */
 
 #include <stdint.h>
@@ -25,14 +26,12 @@ typedef enum binrwir_execution_exit_kind {
     BINRWIR_EXECUTION_EXIT_BUILTIN,
     BINRWIR_EXECUTION_EXIT_HANDOFF,
     BINRWIR_EXECUTION_EXIT_YIELD,
-    BINRWIR_EXECUTION_EXIT_DEOPTIMIZATION,
     BINRWIR_EXECUTION_EXIT_ERROR
 } binrwir_execution_exit_kind_t;
 
 typedef enum binrwir_execution_exit_flags {
     BINRWIR_EXECUTION_EXIT_FLAG_NONE = 0,
-    BINRWIR_EXECUTION_EXIT_FLAG_FRAME_MATERIALIZED = 1U << 0,
-    BINRWIR_EXECUTION_EXIT_FLAG_RETRY_LOGICAL_PROGRAM_COUNTER = 1U << 1
+    BINRWIR_EXECUTION_EXIT_FLAG_COMPLETED_STATE_COMMITTED = 1U << 0
 } binrwir_execution_exit_flags_t;
 
 typedef struct binrwir_execution_exit {
@@ -43,14 +42,10 @@ typedef struct binrwir_execution_exit {
     uint32_t resume_logical_program_counter;
     uint32_t detail_code;       /* 结构化细节码（拒绝原因/错误分类） */
     uint32_t target_identifier;
-    uint32_t value_base;        /* 退出携带值的起始槽（如需要） */
-    uint32_t value_count;       /* 退出携带值的数量 */
-    uint64_t payload_low;       /* 有限普通数据负载，低 64 位 */
-    uint64_t payload_high;      /* 有限普通数据负载，高 64 位 */
 } binrwir_execution_exit_t;
 
-_Static_assert(sizeof(binrwir_execution_exit_t) == 48U,
-               "binrwir structured exit must remain 48 bytes");
+_Static_assert(sizeof(binrwir_execution_exit_t) == 24U,
+               "binrwir structured exits must contain only control state");
 
 #ifdef __cplusplus
 }

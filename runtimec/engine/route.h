@@ -13,8 +13,10 @@
  * 联系：只有 route.c 同时包含 vmkv、vmbin 与 BinRWIR JIT；host port 只经本层
  *       提交 durable effect；公共接口层把请求翻译成本层请求。
  * 约束：NOT_COMPILABLE 是已完成的编译判定并选择 VMBIN；ERROR 直接失败。
- *       执行期不重新选择目标。其它文件不得绕过 route 自行选择执行器或
- *       提交 checkpoint。
+ *       执行前必须确认 repository lease 的完整 source revision 仍有效。
+ *       执行期不重新编译、不重新解析地址、不重新选择目标，也不允许所选入口
+ *       失败后切换至另一执行器。其它文件不得绕过 route 自行选择执行器或提交
+ *       checkpoint。
  */
 
 #include <stddef.h>

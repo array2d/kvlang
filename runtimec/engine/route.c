@@ -3,7 +3,8 @@
  * 作用：唯一执行策略入口；当前 fail-closed，返回 NOT_IMPLEMENTED 并
  *       把结构化 execution exit 标为 ERROR。
  * 联系：这是唯一同时看到 vmkv、vmbin 与 BinRWIR JIT 的文件，并且只有这里
- *       可以读取 BinRWIR Compiler 已确定的执行目标和提交 checkpoint。
+ *       可以读取 BinRWIR Compiler 已确定的执行目标和提交 checkpoint。执行期
+ *       不重新编译、解析 argaddr，所选入口失败后也不切换至另一执行器。
  */
 
 #include "binrwir_compiler/compiler.h"

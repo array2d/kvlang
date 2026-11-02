@@ -35,6 +35,12 @@ FORBIDDEN_NAMES = (
     ("old-success-name", re.compile(r"\bRUNTIMEC_STATUS_OK\b")),
     ("removed-fallback-status", re.compile(r"\bRUNTIMEC_STATUS_FALLBACK\b")),
     ("removed-jit-execution-entry", re.compile(r"\bbinrwir_jit_try_execute\b")),
+    ("removed-runtime-deoptimization", re.compile(
+        r"\bBINRWIR_EXECUTION_EXIT_DEOPTIMIZATION\b",
+    )),
+    ("removed-runtime-retry", re.compile(
+        r"\bBINRWIR_EXECUTION_EXIT_FLAG_RETRY_LOGICAL_PROGRAM_COUNTER\b",
+    )),
     ("alternate-jit-compilation-cache", re.compile(
         r"\b(?:binrwir_jit_code_cache|binrwir_jit_cache_key|"
         r"binrwir_jit_code_cache_get_or_compile)\b",

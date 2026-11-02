@@ -1,6 +1,6 @@
 /*
  * 组件：vmbin/call 的实现
- * 作用：调用绑定与进出 Frame 的失败桩。
+ * 作用：只含控制元数据的调用关系与进出 Frame 失败桩。
  * 约束：未实现必须同时返回结构化错误和未实现状态。
  */
 
@@ -17,28 +17,28 @@ static void vmbin_call_initialize_error_exit(
         BINRWIR_EXECUTION_PROGRAM_COUNTER_NONE;
 }
 
-runtimec_status_t vmbin_call_binding_create(
+runtimec_status_t vmbin_call_control_create(
     const binrwir_execution_frame_t *caller,
     const binrwir_program_t *callee,
     const vmbin_call_request_t *request,
     const runtimec_allocator_t *allocator,
-    vmbin_call_binding_t **output_binding) {
+    vmbin_call_control_t **output_control) {
     (void)caller;
     (void)callee;
     (void)request;
     (void)allocator;
-    if (output_binding != NULL) {
-        *output_binding = NULL;
+    if (output_control != NULL) {
+        *output_control = NULL;
     }
     if (caller == NULL || callee == NULL || request == NULL ||
-        request->callsite_identifier == BINRWIR_IDENTIFIER_NONE ||
-        allocator == NULL || output_binding == NULL) {
+        request->call_instruction_identifier == BINRWIR_IDENTIFIER_NONE ||
+        allocator == NULL || output_control == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
     return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
 }
-runtimec_status_t vmbin_call_binding_destroy(vmbin_call_binding_t *binding) {
-    if (binding == NULL) {
+runtimec_status_t vmbin_call_control_destroy(vmbin_call_control_t *control) {
+    if (control == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
     return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
@@ -46,13 +46,13 @@ runtimec_status_t vmbin_call_binding_destroy(vmbin_call_binding_t *binding) {
 runtimec_status_t vmbin_call_enter(
     binrwir_execution_frame_t *caller,
     binrwir_execution_frame_t *callee,
-    const vmbin_call_binding_t *binding,
+    const vmbin_call_control_t *control,
     binrwir_execution_exit_t *output_exit) {
     if (output_exit != NULL) {
         vmbin_call_initialize_error_exit(output_exit,
                                          RUNTIMEC_STATUS_INVALID);
     }
-    if (caller == NULL || callee == NULL || binding == NULL ||
+    if (caller == NULL || callee == NULL || control == NULL ||
         output_exit == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
@@ -63,13 +63,13 @@ runtimec_status_t vmbin_call_enter(
 runtimec_status_t vmbin_call_return(
     binrwir_execution_frame_t *caller,
     const binrwir_execution_frame_t *callee,
-    const vmbin_call_binding_t *binding,
+    const vmbin_call_control_t *control,
     binrwir_execution_exit_t *output_exit) {
     if (output_exit != NULL) {
         vmbin_call_initialize_error_exit(output_exit,
                                          RUNTIMEC_STATUS_INVALID);
     }
-    if (caller == NULL || callee == NULL || binding == NULL ||
+    if (caller == NULL || callee == NULL || control == NULL ||
         output_exit == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
