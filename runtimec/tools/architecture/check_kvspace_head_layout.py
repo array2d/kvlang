@@ -15,19 +15,23 @@
     8 字节布局 : [len:u48][storetype][ptr]  body  [attr_len:u16][records]
     16 字节布局: [bodylen:u64][attrslen:u32][storetype][ptr][pad:2]  body  [records]
 
-后端查找顺序**复制自 `kvspace/src/frontend.c` 的 `backend_paths`**（四条候选，
-第一条存在者即所用）：
+后端查找顺序的**依据是规范条款** `workspace/622/routing/README.md` §十
+「后端查找顺序（规范性条款）」，不是 `frontend.c` 的实现：
 
     1. <前端目录>/<soname>
     2. <前端目录>/kvspace/<soname>
     3. <前端目录>/../kvspace/<soname>
     4. /usr/lib/kvspace/<soname>（macOS: /usr/local/lib/kvspace/<soname>）
 
-**已知边界**：这是第二份事实源。`frontend.c:backend_paths` 一旦变化（新增候选、
-调整优先级、改 soname 规则），本文件必须同步——否则探针会**静默地判错**，而且
-它的输出看起来完全可信。照抄比凭空猜测好，但无人看守的复制仍会漂移且不报错，
-与本仓那份过期头副本是同一个形状。本工具不做自动校验（解析 C 源码太脆），
-所以这条边界写在这里，而不是只留在记忆里。
+第一条存在者即所用。
+
+**为什么依据是条款而不是实现**：先前本文件抄 `frontend.c:backend_paths`，于是实现与
+探针「一致」——但两边同时错也无人能发现，那是自证而不是独立真值。改成对照条款后，
+`frontend.c` 是实现、本文件是校验，两者不一致即漂移；两者一致但都违反条款，由规范
+检查发现。
+
+**已知边界**：条款本身仍需人核（文字不会自己发现错误）。本工具不解析 C 源码来自动比对
+实现与条款——那条路太脆，且会把「解析失败」伪装成「实现合规」。
 
 用法:
     python3 tools/check_kvspace_head_layout.py [--frontend PATH] [--soname NAME]
@@ -305,8 +309,9 @@ def run_selftest() -> int:
             frontend = os.path.join(directory, "frontend", "libkvspace.so")
             os.makedirs(os.path.dirname(frontend))
             shutil.copy(sixteen, frontend)
-            # 期望顺序独立写出来，不取自 backend_candidates()——拿被测函数的输出当期望，
-            # 它把顺序改错时用例会跟着一起错，永远自洽。
+            # 期望顺序独立写出来，依据是 routing/README.md §十 的规范条款，不取自
+            # backend_candidates()，也不抄 frontend.c——用被测对象的输出当期望，它把顺序
+            # 改错时用例会跟着一起错，永远自洽。
             order_soname = "liborder.so"
             directory_path = os.path.dirname(frontend)
             authoritative_order = [
@@ -318,10 +323,20 @@ def run_selftest() -> int:
             expect([os.path.normpath(path) for path in actual_order[:3]] ==
                    [os.path.normpath(path) for path in authoritative_order],
                    f"backend candidate order is {actual_order[:3]!r}, expected "
-                   f"{authoritative_order!r} (frontend.c:backend_paths)", failures)
-            # 系统目录那条只核形状，不往 /usr/lib 写：能不能写取决于运行者权限。
+                   f"{authoritative_order!r} "
+                   f"(routing/README.md §十 后端查找顺序)", failures)
+            # 第四条是平台系统目录，照条款核**具体路径**（不是只核条数）：
+            # 只核数量时把 /usr/lib 换成别的目录也不会红——那正是它存在的意义。
+            platform_directory = "/usr/local/lib/kvspace" if sys.platform == "darwin" \
+                else "/usr/lib/kvspace"
             expect(len(actual_order) == 4,
                    "four backend candidates are required", failures)
+            expect(len(actual_order) == 4 and
+                   actual_order[3] == os.path.join(platform_directory, order_soname),
+                   f"the system candidate must be "
+                   f"{os.path.join(platform_directory, order_soname)!r}, got "
+                   f"{actual_order[3] if len(actual_order) == 4 else actual_order!r}",
+                   failures)
             for length in range(1, len(authoritative_order) + 1):
                 staged_paths = []
                 for candidate in authoritative_order[:length]:
