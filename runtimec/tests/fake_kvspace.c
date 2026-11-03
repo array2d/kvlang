@@ -319,7 +319,11 @@ static int fake_kvspace_mkindex(void *handle, const char *path,
     return fake_kvspace_put(store, path, NULL, 0U, true) == 0 ? 0 : 1;
 }
 
-static int fake_kvspace_new_slack(const uint8_t *data, uint64_t data_size,
+int fake_kvspace_new_slack(const uint8_t *data, uint64_t data_size,
+                          uint64_t capacity, const char *langtype,
+                          uint8_t **output, uint64_t *output_size);
+
+int fake_kvspace_new_slack(const uint8_t *data, uint64_t data_size,
                                   uint64_t capacity, const char *langtype,
                                   uint8_t **output, uint64_t *output_size) {
     if (output == NULL || output_size == NULL) {

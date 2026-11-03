@@ -44,6 +44,16 @@ endif()
 set(RUNTIMEC_GENERATED_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
 file(MAKE_DIRECTORY "${RUNTIMEC_GENERATED_DIRECTORY}")
 
+# 真库路径：金标准比对与 backend 用例共用。缺库时两者都跳过（77），不静默降级。
+# 判据是「库文件在不在」，不是「某个环境变量有没有设」——后者会让 CI 假绿。
+set(RUNTIMEC_KVSPACE_LIBRARY_DIRECTORY
+    "${CMAKE_CURRENT_SOURCE_DIR}/../lib" CACHE PATH
+    "directory holding libkvspace")
+find_library(RUNTIMEC_KVSPACE_LIBRARY_PATH
+    NAMES kvspace
+    PATHS "${RUNTIMEC_KVSPACE_LIBRARY_DIRECTORY}"
+    NO_DEFAULT_PATH)
+
 set(RUNTIMEC_EXPORT_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/interface/exports.txt")
 file(STRINGS "${RUNTIMEC_EXPORT_MANIFEST}" RUNTIMEC_PUBLIC_SYMBOLS)
 set(RUNTIMEC_ELF_EXPORTS "{\n  global:\n")

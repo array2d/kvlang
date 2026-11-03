@@ -41,6 +41,14 @@ typedef struct fake_kvspace_store {
 /* 置一条值（wire 由调用方给出，替身复制一份）。返回 0 表示成功。 */
 int fake_kvspace_put(fake_kvspace_store_t *store, const char *key,
                      const uint8_t *wire, uint32_t wire_size, bool directory);
+/*
+ * 替身的 slack 构造器，对外可见。金标准比对用它证明「替身与真库造同一份
+ * wire」；产品代码仍只经 binary interface 的函数指针调用它。
+ */
+int fake_kvspace_new_slack(const uint8_t *data, uint64_t data_size,
+                           uint64_t capacity, const char *langtype,
+                           uint8_t **output, uint64_t *output_size);
+
 /* 把整张表接到 binary interface；全部字段非空。 */
 void fake_kvspace_bind(fake_kvspace_store_t *store,
                        runtimec_kvspace_binary_interface_t *output);

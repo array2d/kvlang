@@ -79,6 +79,42 @@ set_tests_properties(runtimec.host.kvspace_backend PROPERTIES
     SKIP_RETURN_CODE 77
     LABELS "runtimec;scaffold;host;backend")
 
+
+# 替身与真库的 wire 金标准比对：验「替身不漂移」。
+# 替身是对真实实现的照抄，抄的那一刻对、漂移时不报错；2026-11-03 就发生过一次
+# （替身的 new_slack 还在造 8 字节头，红被误认成产品 bug）。
+# 两个可执行除了链接对象外完全相同：一个链 tests/fake_kvspace.c、一个链真库。
+add_executable(runtimec_wire_golden_fake xvalue_wire_golden.c fake_kvspace.c)
+target_compile_features(runtimec_wire_golden_fake PRIVATE c_std_11)
+target_compile_definitions(runtimec_wire_golden_fake PRIVATE
+    WIRE_GOLDEN_FAKE)
+target_include_directories(runtimec_wire_golden_fake PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/.."
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${RUNTIMEC_INCLUDE_DIRECTORY}"
+    "${KVSPACE_INCLUDE_DIRECTORY}")
+runtimec_test_warnings(runtimec_wire_golden_fake)
+
+add_executable(runtimec_wire_golden_real xvalue_wire_golden.c)
+target_compile_features(runtimec_wire_golden_real PRIVATE c_std_11)
+target_include_directories(runtimec_wire_golden_real PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/.."
+    "${RUNTIMEC_INCLUDE_DIRECTORY}"
+    "${KVSPACE_INCLUDE_DIRECTORY}")
+target_link_libraries(runtimec_wire_golden_real PRIVATE
+    "${RUNTIMEC_KVSPACE_LIBRARY_PATH}")
+set_target_properties(runtimec_wire_golden_real PROPERTIES
+    BUILD_RPATH "${RUNTIMEC_KVSPACE_LIBRARY_DIRECTORY}")
+runtimec_test_warnings(runtimec_wire_golden_real)
+
+add_test(NAME runtimec.host.wire_golden
+    COMMAND sh "${CMAKE_CURRENT_SOURCE_DIR}/compare_wire_golden.sh"
+            $<TARGET_FILE:runtimec_wire_golden_fake>
+            $<TARGET_FILE:runtimec_wire_golden_real>)
+set_tests_properties(runtimec.host.wire_golden PROPERTIES
+    SKIP_RETURN_CODE 77
+    LABELS "runtimec;scaffold;host;golden")
+
 add_executable(runtimec_binrwir_compiler_contracts_test
     binrwir_compiler_contracts_test.c)
 target_compile_features(runtimec_binrwir_compiler_contracts_test PRIVATE c_std_11)
