@@ -279,6 +279,18 @@ add_test(NAME runtimec.vmbin.execute COMMAND runtimec_vmbin_execute_test)
 set_tests_properties(runtimec.vmbin.execute PROPERTIES
     LABELS "runtimec;scaffold;vmbin;execute")
 
+add_executable(runtimec_binrwir_format_test binrwir_format_test.c)
+target_compile_features(runtimec_binrwir_format_test PRIVATE c_std_11)
+target_include_directories(runtimec_binrwir_format_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/.."
+    "${RUNTIMEC_INCLUDE_DIRECTORY}")
+target_link_libraries(runtimec_binrwir_format_test PRIVATE
+    runtimec_contract runtimec_binrwir)
+runtimec_test_warnings(runtimec_binrwir_format_test)
+add_test(NAME runtimec.binrwir.format COMMAND runtimec_binrwir_format_test)
+set_tests_properties(runtimec.binrwir.format PROPERTIES
+    LABELS "runtimec;scaffold;binrwir;format")
+
 add_executable(runtimec_vmbin_call_test vmbin_call_test.c)
 target_compile_features(runtimec_vmbin_call_test PRIVATE c_std_11)
 target_include_directories(runtimec_vmbin_call_test PRIVATE
