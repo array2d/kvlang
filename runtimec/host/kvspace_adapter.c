@@ -740,6 +740,54 @@ static runtimec_status_t runtimec_kvspace_adapter_write_system_member(
 }
 
 /*
+ * 零值局部槽的宽度表。只列**定长标量**：
+ *
+ *   - 数字与 bool 进表；
+ *   - `time` 与 `time/duration` 进表：规范（`03-类型系统/02-种类-标量时间容器.kv`）
+ *     已定为 8 字节 int64 纳秒小端，取 Go 阵营。时长 kind 的规范名是
+ *     `time/duration`——与 lib 路径同名不是巧合，`duration` 不是合法类型名，
+ *     不留别名（两个名字指同一类型正是要消灭的第二事实源）；
+ *   - 所有字符类型、数组、stringkeymap、struct 一律**不在表内**——字符值恒为
+ *     一维序列、数组元素个数可变，零值长度都是 0，而写入要求与当前 body 等长，
+ *     零长 body 永远写不进真实值。留它们在表里只会制造假成功。
+ *   - 低精度浮点（float16/bfloat16/float8）**范围外**：runtimec 不处理这类格式，
+ *     不是「暂未实现」。
+ *
+ * 表里没有的类型返回 UNSUPPORTED，不猜。
+ */
+typedef struct runtimec_kvspace_width_entry {
+    const char *langtype;
+    uint64_t width;
+} runtimec_kvspace_width_entry_t;
+
+static const runtimec_kvspace_width_entry_t runtimec_kvspace_width_table[] = {
+    {"int8", 1U},    {"uint8", 1U},   {"bool", 1U},
+    {"int16", 2U},   {"uint16", 2U},  {"int32", 4U},
+    {"uint32", 4U},  {"float32", 4U}, {"int64", 8U},
+    {"uint64", 8U},  {"float64", 8U}, {"time", 8U},
+    {"time/duration", 8U},
+};
+
+/* langtype → 零值字节宽度。表中没有即 UNSUPPORTED，不做名称归一化。 */
+static bool runtimec_kvspace_zero_width(runtimec_string_view_t langtype,
+                                        uint64_t *output_width) {
+    const size_t count = sizeof(runtimec_kvspace_width_table) /
+                         sizeof(runtimec_kvspace_width_table[0]);
+
+    *output_width = 0U;
+    for (size_t ordinal = 0U; ordinal < count; ++ordinal) {
+        const char *name = runtimec_kvspace_width_table[ordinal].langtype;
+        const size_t size = strlen(name);
+        if (langtype.size == size &&
+            memcmp(langtype.data, name, size) == 0) {
+            *output_width = runtimec_kvspace_width_table[ordinal].width;
+            return true;
+        }
+    }
+    return false;
+}
+
+/*
  * 建帧：`<frame_path>/` 建目录、`<frame_path>/‥lib` 写函数 key。
  *
  * 帧路径必须已是 `/vthread/...` 的绝对路径——本层不拼、不猜 vid 或深度。
@@ -863,6 +911,101 @@ static runtimec_status_t runtimec_kvspace_adapter_ensure_frame(
             error, RUNTIMEC_STATUS_ERROR, 79,
             kvspace_error[0] != '\0' ? kvspace_error
                                      : "kvspace library write failed");
+    }
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
+/*
+ * 确保零值局部槽存在。三条语义见合同声明。
+ *
+ * 已有值且 body 长度相同即幂等成功，不重写；长度不同是冲突——同一槽换宽度
+ * 意味着调用方对类型的判断与存储不一致，失败封闭而不是静默覆盖。
+ */
+static runtimec_status_t runtimec_kvspace_adapter_ensure_zero_value(
+    void *context, const runtimec_snapshot_t *snapshot, runtimec_key_view_t key,
+    runtimec_string_view_t langtype, runtimec_error_t *error) {
+    (void)snapshot;
+    runtimec_kvspace_adapter_context_t *adapter = context;
+
+    if (adapter == NULL || !runtimec_key_view_is_valid(key) || key.size == 0U ||
+        !runtimec_string_view_is_valid(langtype) || langtype.size == 0U ||
+        error == NULL) {
+        return runtimec_kvspace_adapter_fail(
+            error, RUNTIMEC_STATUS_INVALID, 80,
+            "invalid ensure-zero-value request");
+    }
+    uint64_t width = 0U;
+    if (!runtimec_kvspace_zero_width(langtype, &width)) {
+        return runtimec_kvspace_adapter_fail(
+            error, RUNTIMEC_STATUS_UNSUPPORTED, 81,
+            "this langtype has no fixed zero width; variable-length local "
+            "slots are out of scope for this runtime");
+    }
+    char key_text[RUNTIMEC_KVSPACE_KEY_CAPACITY];
+    if (!runtimec_kvspace_adapter_key_text(key, key_text, sizeof(key_text),
+                                           NULL)) {
+        return runtimec_kvspace_adapter_fail(
+            error, RUNTIMEC_STATUS_UNSUPPORTED, 82,
+            "local slot key is not an absolute key");
+    }
+
+    /* 已存在：长度相同即成功，长度不同是冲突。 */
+    uint8_t *existing = NULL;
+    uint32_t existing_size = 0U;
+    if (adapter->binary_interface.get(adapter->handle, key_text, 1, &existing,
+                                      &existing_size) == 0 &&
+        existing != NULL) {
+        if (existing_size < KVSPACE_XVALUE_HEAD_LEN) {
+            return runtimec_kvspace_adapter_fail(
+                error, RUNTIMEC_STATUS_ERROR, 83,
+                "existing local slot has no readable XValue head");
+        }
+        kvspaceXvalueHead existing_head;
+        memcpy(&existing_head, existing, sizeof(existing_head));
+        if (kvspaceXvalueHeadLen(&existing_head) == width) {
+            return RUNTIMEC_STATUS_SUCCESS;
+        }
+        return runtimec_kvspace_adapter_fail(
+            error, RUNTIMEC_STATUS_INVALID, 84,
+            "existing local slot has a different width than its langtype");
+    }
+
+    /* 不存在：按 langtype 编完整 wire。编码交给上游，本层不拼字节。 */
+    char langtype_text[RUNTIMEC_KVSPACE_KEY_CAPACITY];
+    if (langtype.size + 1U > sizeof(langtype_text)) {
+        return runtimec_kvspace_adapter_fail(
+            error, RUNTIMEC_STATUS_INVALID, 85, "langtype is too long");
+    }
+    memcpy(langtype_text, langtype.data, langtype.size);
+    langtype_text[langtype.size] = '\0';
+
+    uint8_t *zero_body = width != 0U ? calloc(1U, (size_t)width) : NULL;
+    if (width != 0U && zero_body == NULL) {
+        return runtimec_kvspace_adapter_fail(
+            error, RUNTIMEC_STATUS_OUT_OF_MEMORY, 86,
+            "zero body allocation failed");
+    }
+    uint8_t *wire = NULL;
+    uint64_t wire_size = 0U;
+    const int encode_status = adapter->binary_interface.new_slack(
+        zero_body, width, width, langtype_text, &wire, &wire_size);
+    free(zero_body);
+    if (encode_status != 0 || wire == NULL || wire_size > UINT32_MAX) {
+        return runtimec_kvspace_adapter_fail(
+            error, RUNTIMEC_STATUS_ERROR, 87,
+            "zero value encoding failed");
+    }
+    char kvspace_error[256];
+    kvspace_error[0] = '\0';
+    const int set_status = adapter->binary_interface.set_value(
+        adapter->handle, key_text, wire, (uint32_t)wire_size, kvspace_error,
+        (uint32_t)sizeof(kvspace_error));
+    free(wire);
+    if (set_status != 0) {
+        return runtimec_kvspace_adapter_fail(
+            error, RUNTIMEC_STATUS_ERROR, 88,
+            kvspace_error[0] != '\0' ? kvspace_error
+                                      : "kvspace zero value write failed");
     }
     return RUNTIMEC_STATUS_SUCCESS;
 }
@@ -1053,6 +1196,8 @@ runtimec_status_t runtimec_kvspace_adapter_create_services(
     output->resolve_frame_xvalue_address =
         runtimec_kvspace_adapter_resolve_frame_xvalue_address;
     output->ensure_frame = runtimec_kvspace_adapter_ensure_frame;
+    output->ensure_zero_value =
+        runtimec_kvspace_adapter_ensure_zero_value;
     output->checkpoint = runtimec_kvspace_adapter_checkpoint;
     output->handoff = runtimec_kvspace_adapter_handoff;
     return RUNTIMEC_STATUS_SUCCESS;

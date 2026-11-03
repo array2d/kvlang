@@ -44,8 +44,13 @@ endif()
 set(RUNTIMEC_GENERATED_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
 file(MAKE_DIRECTORY "${RUNTIMEC_GENERATED_DIRECTORY}")
 
-# 真库路径：金标准比对与 backend 用例共用。缺库时两者都跳过（77），不静默降级。
+# 真库路径：金标准比对与 backend 用例共用。
 # 判据是「库文件在不在」，不是「某个环境变量有没有设」——后者会让 CI 假绿。
+#
+# 缺库即**配置期失败**，不跳过：静默跳过会让 wire_golden 绿着而一条都没比，
+# 别人看到绿就以为「替身与真库已比对」。跳过当通过是今天反复消灭的那类假信号。
+# backend 用例（host.kvspace_backend）仍保留 77 跳过语义——它验的是真库行为，
+# 缺库时无话可说；而金标准比对是「替身有没有漂移」，缺库时沉默等于没做。
 set(RUNTIMEC_KVSPACE_LIBRARY_DIRECTORY
     "${CMAKE_CURRENT_SOURCE_DIR}/../lib" CACHE PATH
     "directory holding libkvspace")
@@ -53,6 +58,16 @@ find_library(RUNTIMEC_KVSPACE_LIBRARY_PATH
     NAMES kvspace
     PATHS "${RUNTIMEC_KVSPACE_LIBRARY_DIRECTORY}"
     NO_DEFAULT_PATH)
+if(NOT RUNTIMEC_KVSPACE_LIBRARY_PATH)
+    message(FATAL_ERROR
+        "cannot find libkvspace (searched ${RUNTIMEC_KVSPACE_LIBRARY_DIRECTORY}). "
+        "runtimec needs it to link the wire-golden comparison, which proves the "
+        "test double has not drifted from the real implementation -- a silent "
+        "skip would leave that comparison green while running nothing. "
+        "Fix: build array2d/kvspace into ${RUNTIMEC_KVSPACE_LIBRARY_DIRECTORY} "
+        "(kvlang and kvspace must be sibling directories), or configure with "
+        "-DRUNTIMEC_KVSPACE_LIBRARY_DIRECTORY=<dir holding libkvspace>.")
+endif()
 
 set(RUNTIMEC_EXPORT_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/interface/exports.txt")
 file(STRINGS "${RUNTIMEC_EXPORT_MANIFEST}" RUNTIMEC_PUBLIC_SYMBOLS)

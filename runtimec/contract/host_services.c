@@ -97,6 +97,7 @@ void runtimec_host_services_initialize(runtimec_host_services_t *services) {
         services->resolve_static_xvalue_address = NULL;
         services->resolve_frame_xvalue_address = NULL;
         services->ensure_frame = NULL;
+        services->ensure_zero_value = NULL;
         services->checkpoint = NULL;
         services->handoff = NULL;
     }

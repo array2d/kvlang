@@ -29,8 +29,8 @@ _Static_assert(RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY == 8,
                "insufficient-capacity status changed");
 
 /* 版本 pin：接口每次变更都必须在这里显式改一次，其余断言从宏推导。 */
-_Static_assert(RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION == 7U,
-               "host services binary interface must remain version 7");
+_Static_assert(RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION == 8U,
+               "host services binary interface must remain version 8");
 _Static_assert(RUNTIMEC_XVALUE_BODY_OFFSET_BYTES == 16U,
                "V.body must start sixteen bytes after the XValue base");
 _Static_assert(sizeof(runtimec_xvalue_address_t) == 8U,

@@ -136,7 +136,9 @@ int main(void) {
            services.source_revision != NULL &&
            services.resolve_static_xvalue_address != NULL &&
            services.resolve_frame_xvalue_address != NULL &&
-           services.checkpoint != NULL && services.handoff != NULL);
+           services.checkpoint != NULL && services.handoff != NULL &&
+           services.ensure_frame != NULL &&
+           services.ensure_zero_value != NULL);
 
     /* 2. 不完整的二进制接口必须被拒绝，且输出保持空表。 */
     {
@@ -163,6 +165,114 @@ int main(void) {
     runtimec_snapshot_t snapshot;
     runtimec_snapshot_reset(&snapshot);
     snapshot.function_key = runtimec_key_view_from_c_string("/lib/sum");
+
+
+    /*
+     * 3b. 零值局部槽：定长标量建档、幂等、变长拒绝且不留半写。
+     *     time 与 time/duration 是 8 字节 int64 纳秒（规范定的定长标量）。
+     */
+    {
+        const runtimec_key_view_t slot =
+            RUNTIMEC_KEY_VIEW_LITERAL("/vthread/v1/[0]/local/x");
+
+        /* time：建槽后 body 长度必须是 8。 */
+        EXPECT(services.ensure_zero_value(
+                   services.context, &snapshot, slot,
+                   runtimec_string_view_from_c_string("time"), &error) ==
+               RUNTIMEC_STATUS_SUCCESS);
+        uint8_t *wire = fake_kvspace_address(&store, "/vthread/v1/[0]/local/x");
+        EXPECT(wire != NULL);
+        if (wire != NULL) {
+            kvspaceXvalueHead head;
+            memcpy(&head, wire, sizeof(head));
+            EXPECT(kvspaceXvalueHeadLen(&head) == 8U);
+            /* 零值：body 全是 0。 */
+            for (uint64_t index = 0U; index < 8U; ++index) {
+                EXPECT(wire[KVSPACE_XVALUE_HEAD_LEN + index] == 0U);
+            }
+        }
+
+        /* 幂等：再调一次不报错，且地址不变（证明没重写）。 */
+        uint8_t *before = wire;
+        EXPECT(services.ensure_zero_value(
+                   services.context, &snapshot, slot,
+                   runtimec_string_view_from_c_string("time"), &error) ==
+               RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(fake_kvspace_address(&store, "/vthread/v1/[0]/local/x") ==
+               before);
+    }
+
+    {
+        /* time/duration 同样是 8 字节。时长 kind 的规范名带 lib 前缀。 */
+        const runtimec_key_view_t slot =
+            RUNTIMEC_KEY_VIEW_LITERAL("/vthread/v1/[0]/local/d");
+        EXPECT(services.ensure_zero_value(
+                   services.context, &snapshot, slot,
+                   runtimec_string_view_from_c_string("time/duration"), &error) ==
+               RUNTIMEC_STATUS_SUCCESS);
+        uint8_t *wire = fake_kvspace_address(&store, "/vthread/v1/[0]/local/d");
+        EXPECT(wire != NULL);
+        if (wire != NULL) {
+            kvspaceXvalueHead head;
+            memcpy(&head, wire, sizeof(head));
+            EXPECT(kvspaceXvalueHeadLen(&head) == 8U);
+        }
+    }
+
+    {
+        /*
+         * 变长类型必须 UNSUPPORTED，且**不留下半写状态**——key 必须不存在。
+         * 字符值恒为一维序列、数组个数可变，零值长度都是 0，而写入要求与当前
+         * body 等长，零长 body 永远写不进真实值。
+         */
+        const runtimec_key_view_t slot =
+            RUNTIMEC_KEY_VIEW_LITERAL("/vthread/v1/[0]/local/s");
+        EXPECT(services.ensure_zero_value(
+                   services.context, &snapshot, slot,
+                   runtimec_string_view_from_c_string("[]char/utf8"), &error) ==
+               RUNTIMEC_STATUS_UNSUPPORTED);
+        EXPECT(fake_kvspace_address(&store, "/vthread/v1/[0]/local/s") == NULL);
+    }
+
+    {
+        /*
+         * 反向：旧的 `duration` 不再是合法类型名，必须 UNSUPPORTED——
+         * 不能因为「曾经叫这个名字」就静默建出 8 字节槽。不留别名。
+         */
+        const runtimec_key_view_t slot =
+            RUNTIMEC_KEY_VIEW_LITERAL("/vthread/v1/[0]/local/old");
+        EXPECT(services.ensure_zero_value(
+                   services.context, &snapshot, slot,
+                   runtimec_string_view_from_c_string("duration"), &error) ==
+               RUNTIMEC_STATUS_UNSUPPORTED);
+        EXPECT(fake_kvspace_address(&store, "/vthread/v1/[0]/local/old") ==
+               NULL);
+    }
+
+    {
+        /* 宽度表里没有的类型同样 UNSUPPORTED，不猜。 */
+        const runtimec_key_view_t slot =
+            RUNTIMEC_KEY_VIEW_LITERAL("/vthread/v1/[0]/local/u");
+        EXPECT(services.ensure_zero_value(
+                   services.context, &snapshot, slot,
+                   runtimec_string_view_from_c_string("stringkeymap"),
+                   &error) == RUNTIMEC_STATUS_UNSUPPORTED);
+        EXPECT(fake_kvspace_address(&store, "/vthread/v1/[0]/local/u") == NULL);
+    }
+
+    {
+        /* 已存在但宽度与类型不符：冲突，失败封闭而不是静默覆盖。 */
+        const runtimec_key_view_t slot =
+            RUNTIMEC_KEY_VIEW_LITERAL("/vthread/v1/[0]/local/y");
+        EXPECT(services.ensure_zero_value(
+                   services.context, &snapshot, slot,
+                   runtimec_string_view_from_c_string("int64"), &error) ==
+               RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(services.ensure_zero_value(
+                   services.context, &snapshot, slot,
+                   runtimec_string_view_from_c_string("int8"), &error) ==
+               RUNTIMEC_STATUS_INVALID);
+    }
 
     /* 4. 静态 key → 非零基址，且与后端当前地址一致。 */
     store_text(&store, "/lib/sum.[0,-1]", "a\0[]int64");

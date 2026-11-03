@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION 7U
+#define RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION 8U
 #define RUNTIMEC_XVALUE_ADDRESS_NONE UINT64_C(0)
 #define RUNTIMEC_XVALUE_BODY_OFFSET_BYTES KVSPACE_XVALUE_HEAD_LEN
 #define RUNTIMEC_VALUE_BODY_ADDRESS_NONE UINT64_C(0)
@@ -125,6 +125,26 @@ typedef runtimec_status_t (*runtimec_host_ensure_frame_function_t)(
     runtimec_key_view_t frame_path, runtimec_string_view_t function_key,
     runtimec_error_t *error);
 
+/*
+ * 确保一个零值局部槽存在。调用方（执行窗口）给出 key 与语言类型，本能力负责
+ * 把该类型编成完整 wire（16 字节 head + attr）写进存储。
+ *
+ * 为什么由 host 负责编码：XValue head 与 attr 的布局是 kvspace 的事，执行窗口
+ * 不该有第二份；调用方也**不能**直接调 `write`——那个能力收的是整条 wire，
+ * 写 N 个零字节会落进一条没有 head 的裸缓冲，之后被当成值头解析。
+ *
+ * 三条语义：
+ *   1. 已存在且 body 长度相同 → 不写入，直接成功（幂等）；
+ *   2. 不存在 → 按 langtype 编零值写入；
+ *   3. 变长类型、宽度表里没有的类型 → UNSUPPORTED，且不留下任何半写状态。
+ *
+ * 不负责扩容：写入后长度固定，改变长度属于存储层。
+ */
+typedef runtimec_status_t (*runtimec_host_ensure_zero_value_function_t)(
+    void *context, const runtimec_snapshot_t *snapshot,
+    runtimec_key_view_t key, runtimec_string_view_t langtype,
+    runtimec_error_t *error);
+
 typedef runtimec_status_t (*runtimec_host_checkpoint_function_t)(
     void *context, const runtimec_checkpoint_t *checkpoint,
     runtimec_error_t *error);
@@ -150,6 +170,7 @@ typedef struct runtimec_host_services {
     runtimec_host_resolve_frame_xvalue_address_function_t
         resolve_frame_xvalue_address;
     runtimec_host_ensure_frame_function_t ensure_frame;
+    runtimec_host_ensure_zero_value_function_t ensure_zero_value;
     runtimec_host_checkpoint_function_t checkpoint;
     runtimec_host_handoff_function_t handoff;
 } runtimec_host_services_t;
