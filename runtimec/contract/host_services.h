@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION 4U
+#define RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION 5U
 #define RUNTIMEC_XVALUE_ADDRESS_NONE UINT64_C(0)
 #define RUNTIMEC_XVALUE_BODY_OFFSET_BYTES KVSPACE_XVALUE_HEAD_LEN
 #define RUNTIMEC_VALUE_BODY_ADDRESS_NONE UINT64_C(0)
@@ -152,6 +152,16 @@ bool runtimec_host_services_is_valid(
  */
 runtimec_value_body_address_t
 runtimec_xvalue_body_address(runtimec_xvalue_address_t xvalue_address);
+
+/*
+ * 上面那条的逆：值体地址退掉固定头长度就是 XValue 基址。纯算术，与 `+8` 同样
+ * 只在本文件实现——调用方不得自己写 `body - 头长度`。零地址与下溢（值体地址
+ * 小于固定头长度）都返回 RUNTIMEC_XVALUE_ADDRESS_NONE。不做任何存储校验：
+ * 地址前是不是真值头由调用方凭地址来源自证。
+ */
+runtimec_xvalue_address_t
+runtimec_value_body_xvalue_address(
+    runtimec_value_body_address_t body_address);
 
 /*
  * 反向：由值体地址读回当前值体长度。与上面的 `+8` 是同一条几何的两个方向，

@@ -16,6 +16,20 @@ runtimec_xvalue_body_address(runtimec_xvalue_address_t xvalue_address) {
     return xvalue_address + RUNTIMEC_XVALUE_BODY_OFFSET_BYTES;
 }
 
+/*
+ * `+8` 的逆。零地址与下溢（值体地址小于固定头长度）都不是有效基址，一律
+ * 返回 RUNTIMEC_XVALUE_ADDRESS_NONE；不做回绕，也不查存储。
+ */
+runtimec_xvalue_address_t
+runtimec_value_body_xvalue_address(
+    runtimec_value_body_address_t body_address) {
+    if (body_address == RUNTIMEC_VALUE_BODY_ADDRESS_NONE ||
+        body_address < RUNTIMEC_XVALUE_BODY_OFFSET_BYTES) {
+        return RUNTIMEC_XVALUE_ADDRESS_NONE;
+    }
+    return body_address - RUNTIMEC_XVALUE_BODY_OFFSET_BYTES;
+}
+
 /* 值头 storetype 只能是这四个档位；其它值说明地址根本不是值头。 */
 static int runtimec_value_header_store_type_is_known(uint8_t store_type) {
     return store_type == KVSPACE_XVALUE_ST_SHORT ||

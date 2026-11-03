@@ -28,8 +28,9 @@ _Static_assert(RUNTIMEC_STATUS_ERROR == 7, "error status changed");
 _Static_assert(RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY == 8,
                "insufficient-capacity status changed");
 
-_Static_assert(RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION == 4U,
-               "host services binary interface must remain version 4");
+/* 版本 pin：接口每次变更都必须在这里显式改一次，其余断言从宏推导。 */
+_Static_assert(RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION == 5U,
+               "host services binary interface must remain version 5");
 _Static_assert(RUNTIMEC_XVALUE_BODY_OFFSET_BYTES == 8U,
                "V.body must remain eight bytes after the XValue base");
 _Static_assert(sizeof(runtimec_xvalue_address_t) == 8U,
@@ -207,11 +208,32 @@ static void test_value_body_length(void) {
                         runtimec_xvalue_body_address(base)) == 8U);
 }
 
+/* 逆入口：值体地址退回首部即基址；零地址与下溢都失败，绝不回绕到高地址。 */
+static void test_xvalue_address_from_value_body(void) {
+    RUNTIMEC_EXPECT(runtimec_value_body_xvalue_address(
+                        RUNTIMEC_VALUE_BODY_ADDRESS_NONE) ==
+                    RUNTIMEC_XVALUE_ADDRESS_NONE);
+    RUNTIMEC_EXPECT(runtimec_value_body_xvalue_address(
+                        RUNTIMEC_XVALUE_BODY_OFFSET_BYTES - 1U) ==
+                    RUNTIMEC_XVALUE_ADDRESS_NONE);
+    RUNTIMEC_EXPECT(runtimec_value_body_xvalue_address(
+                        RUNTIMEC_XVALUE_BODY_OFFSET_BYTES) ==
+                    RUNTIMEC_XVALUE_ADDRESS_NONE);
+    RUNTIMEC_EXPECT(runtimec_value_body_xvalue_address(UINT64_C(0x1008)) ==
+                    UINT64_C(0x1000));
+
+    /* 与 +8 互逆：基址 → 值体 → 基址回到原值。 */
+    const runtimec_xvalue_address_t base = UINT64_C(0x2000);
+    RUNTIMEC_EXPECT(runtimec_value_body_xvalue_address(
+                        runtimec_xvalue_body_address(base)) == base);
+}
+
 static void test_host_services_version(void) {
     runtimec_host_services_t services;
 
     runtimec_host_services_initialize(&services);
-    RUNTIMEC_EXPECT(services.binary_interface_version == 4U);
+    RUNTIMEC_EXPECT(services.binary_interface_version ==
+                    RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION);
     services.binary_interface_version = 2U;
     RUNTIMEC_EXPECT(!runtimec_host_services_is_valid(&services));
 }
@@ -225,6 +247,7 @@ int main(void) {
     test_instruction_argument_count_overflow();
     test_xvalue_body_address();
     test_value_body_length();
+    test_xvalue_address_from_value_body();
     test_host_services_version();
     return failures == 0 ? 0 : 1;
 }
