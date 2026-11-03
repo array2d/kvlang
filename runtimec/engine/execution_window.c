@@ -48,9 +48,10 @@ typedef enum runtimec_execution_window_diagnostic_t {
     RUNTIMEC_EXECUTION_WINDOW_DIAG_BINDING_FAILED = 10,
     RUNTIMEC_EXECUTION_WINDOW_DIAG_FRAME_FAILED = 11,
     RUNTIMEC_EXECUTION_WINDOW_DIAG_PROGRAM_COUNTER_NOT_FOUND = 12,
-    RUNTIMEC_EXECUTION_WINDOW_DIAG_EXECUTION_FAILED = 13,
-    RUNTIMEC_EXECUTION_WINDOW_DIAG_CHECKPOINT_FAILED = 14,
-    RUNTIMEC_EXECUTION_WINDOW_DIAG_OUT_OF_MEMORY = 15
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_FRAME_ENSURE_FAILED = 13,
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_EXECUTION_FAILED = 14,
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_CHECKPOINT_FAILED = 15,
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_OUT_OF_MEMORY = 16
 } runtimec_execution_window_diagnostic_t;
 
 static void runtimec_execution_window_reset_result(runtimec_execution_window_result_t *result,
@@ -433,6 +434,7 @@ runtimec_status_t runtimec_execution_window_execute(
             RUNTIMEC_STATUS_SUCCESS ||
         host->source_revision == NULL ||
         host->resolve_frame_xvalue_address == NULL ||
+        host->ensure_frame == NULL ||
         host->checkpoint == NULL ||
         !runtimec_allocator_is_valid(&host->allocator)) {
         return runtimec_execution_window_fail(
@@ -545,6 +547,23 @@ runtimec_status_t runtimec_execution_window_execute(
                                      RUNTIMEC_EXECUTION_WINDOW_DIAG_OUT_OF_MEMORY,
                                      "frame bindings allocation failed");
         goto release_lease;
+    }
+    /*
+     * 建帧先于一切：帧目录必须先存在，形参与 `‥pc` 的父路径才有着落，而
+     * 「这一帧在跑哪个函数」的事实（`‥lib`）也只有这里写。失败即整体失败，
+     * 一条指令都不执行。
+     */
+    status = host->ensure_frame(
+        host->context, &snapshot,
+        runtimec_key_view_make(request->frame_path.data,
+                               request->frame_path.size),
+        request->function_path, error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        status = runtimec_execution_window_fail(
+            output_result, error, status,
+            RUNTIMEC_EXECUTION_WINDOW_DIAG_FRAME_ENSURE_FAILED,
+            "frame could not be established");
+        goto release_bindings;
     }
     status = runtimec_execution_window_bind_parameters(
         host, &snapshot, compilation_view.canonical_program, request, bindings,

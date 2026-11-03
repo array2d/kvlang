@@ -28,6 +28,8 @@
 static const char runtimec_kvspace_member_program_counter[] = {'p', 'c', 0};
 static const char runtimec_kvspace_member_status[] = "status";
 static const char runtimec_kvspace_member_message[] = "msg";
+/* 帧执行哪个函数；与 pc 的 stackid/s0 是两个事实，不是两处真相。 */
+static const char runtimec_kvspace_member_library[] = "lib";
 
 /* 函数重写版本键：layout 每次重写函数都最后写它，是唯一单调的源事实。 */
 static const char runtimec_kvspace_member_source_revision[] = "ctime";
@@ -736,6 +738,134 @@ static runtimec_status_t runtimec_kvspace_adapter_write_system_member(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
+/*
+ * 建帧：`<frame_path>/` 建目录、`<frame_path>/‥lib` 写函数 key。
+ *
+ * 帧路径必须已是 `/vthread/...` 的绝对路径——本层不拼、不猜 vid 或深度。
+ * 目录已存在是幂等的（后端 mkindex 自身幂等）；`‥lib` 已是同一函数则跳过写入，
+ * 指向别的函数则冲突失败：同一帧不能同时跑两个函数。
+ */
+static runtimec_status_t runtimec_kvspace_adapter_ensure_frame(
+    void *context, const runtimec_snapshot_t *snapshot,
+    runtimec_key_view_t frame_path, runtimec_string_view_t function_key,
+    runtimec_error_t *error) {
+    (void)snapshot;
+    runtimec_kvspace_adapter_context_t *adapter = context;
+
+    if (adapter == NULL || !runtimec_key_view_is_valid(frame_path) ||
+        frame_path.size == 0U ||
+        !runtimec_string_view_is_valid(function_key) ||
+        function_key.size == 0U || error == NULL) {
+        return runtimec_kvspace_adapter_fail(
+            error, RUNTIMEC_STATUS_INVALID, 70, "invalid ensure-frame request");
+    }
+    char frame_text[RUNTIMEC_KVSPACE_KEY_CAPACITY];
+    if (!runtimec_kvspace_adapter_key_text(frame_path, frame_text,
+                                           sizeof(frame_text), NULL)) {
+        return runtimec_kvspace_adapter_fail(
+            error, RUNTIMEC_STATUS_UNSUPPORTED, 71,
+            "frame path is not an absolute key");
+    }
+    if (strncmp(frame_text, "/vthread/", sizeof("/vthread/") - 1U) != 0) {
+        return runtimec_kvspace_adapter_fail(
+            error, RUNTIMEC_STATUS_UNSUPPORTED, 72,
+            "frame path is not under /vthread");
+    }
+
+    /* 目录键必须以 '/' 结尾；调用方给的是帧根，这里补上分隔符。 */
+    char directory_text[RUNTIMEC_KVSPACE_KEY_CAPACITY];
+    const size_t frame_size = strlen(frame_text);
+    if (frame_size + 2U > sizeof(directory_text)) {
+        return runtimec_kvspace_adapter_fail(
+            error, RUNTIMEC_STATUS_INVALID, 73, "frame path is too long");
+    }
+    memcpy(directory_text, frame_text, frame_size);
+    size_t directory_size = frame_size;
+    if (directory_text[directory_size - 1U] != '/') {
+        directory_text[directory_size] = '/';
+        ++directory_size;
+    }
+    directory_text[directory_size] = '\0';
+
+    char kvspace_error[256];
+    kvspace_error[0] = '\0';
+    if (adapter->binary_interface.mkindex(
+            adapter->handle, directory_text, 0U, kvspace_error,
+            (uint32_t)sizeof(kvspace_error)) != 0) {
+        return runtimec_kvspace_adapter_fail(
+            error, RUNTIMEC_STATUS_ERROR, 74,
+            kvspace_error[0] != '\0' ? kvspace_error
+                                      : "kvspace frame directory failed");
+    }
+
+    char library_key[RUNTIMEC_KVSPACE_KEY_CAPACITY];
+    const size_t separator_size =
+        sizeof(RUNTIMEC_KVSPACE_RUNTIME_MEMBER_SEPARATOR) - 1U;
+    if (directory_size + separator_size +
+            sizeof(runtimec_kvspace_member_library) > sizeof(library_key)) {
+        return runtimec_kvspace_adapter_fail(
+            error, RUNTIMEC_STATUS_INVALID, 75, "library key is too long");
+    }
+    int written = snprintf(library_key, sizeof(library_key), "%s%s%s",
+                           directory_text,
+                           RUNTIMEC_KVSPACE_RUNTIME_MEMBER_SEPARATOR,
+                           runtimec_kvspace_member_library);
+    if (written <= 0 || (size_t)written >= sizeof(library_key)) {
+        return runtimec_kvspace_adapter_fail(
+            error, RUNTIMEC_STATUS_INVALID, 76, "library key formatting failed");
+    }
+
+    /*
+     * 已存在且已是同一函数：幂等成功，不重写。
+     *
+     * 长度取**值头声明的 body 长度**，不是 wire 总长——wire 还带 attr（系统键是
+     * 两字节 `[02 00]`），拿总长比会把每个已存在且相同的值都判成「指向别的函数」。
+     */
+    uint8_t *existing = NULL;
+    uint32_t existing_size = 0U;
+    if (adapter->binary_interface.get(adapter->handle, library_key, 1,
+                                      &existing, &existing_size) == 0 &&
+        existing != NULL) {
+        const size_t head_size = KVSPACE_XVALUE_HEAD_LEN;
+        if (existing_size >= head_size) {
+            kvspaceXvalueHead existing_head;
+            memcpy(&existing_head, existing, sizeof(existing_head));
+            const uint64_t existing_body = kvspaceXvalueHeadLen(&existing_head);
+            if (existing_body == (uint64_t)function_key.size &&
+                memcmp(existing + head_size, function_key.data,
+                       function_key.size) == 0) {
+                return RUNTIMEC_STATUS_SUCCESS;
+            }
+        }
+        return runtimec_kvspace_adapter_fail(
+            error, RUNTIMEC_STATUS_INVALID, 77,
+            "frame already runs a different function");
+    }
+
+    uint8_t *wire = NULL;
+    uint64_t wire_size = 0U;
+    if (adapter->binary_interface.new_slack(
+            (const uint8_t *)function_key.data, function_key.size,
+            function_key.size, RUNTIMEC_KVSPACE_SYSTEM_LANGTYPE, &wire,
+            &wire_size) != 0 ||
+        wire == NULL || wire_size > UINT32_MAX) {
+        return runtimec_kvspace_adapter_fail(
+            error, RUNTIMEC_STATUS_ERROR, 78, "library value encoding failed");
+    }
+    kvspace_error[0] = '\0';
+    int set_status = adapter->binary_interface.set_value(
+        adapter->handle, library_key, wire, (uint32_t)wire_size, kvspace_error,
+        (uint32_t)sizeof(kvspace_error));
+    free(wire);
+    if (set_status != 0) {
+        return runtimec_kvspace_adapter_fail(
+            error, RUNTIMEC_STATUS_ERROR, 79,
+            kvspace_error[0] != '\0' ? kvspace_error
+                                     : "kvspace library write failed");
+    }
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
 static runtimec_status_t runtimec_kvspace_adapter_checkpoint(
     void *context, const runtimec_checkpoint_t *checkpoint,
     runtimec_error_t *error) {
@@ -921,6 +1051,7 @@ runtimec_status_t runtimec_kvspace_adapter_create_services(
         runtimec_kvspace_adapter_resolve_static_xvalue_address;
     output->resolve_frame_xvalue_address =
         runtimec_kvspace_adapter_resolve_frame_xvalue_address;
+    output->ensure_frame = runtimec_kvspace_adapter_ensure_frame;
     output->checkpoint = runtimec_kvspace_adapter_checkpoint;
     output->handoff = runtimec_kvspace_adapter_handoff;
     return RUNTIMEC_STATUS_SUCCESS;

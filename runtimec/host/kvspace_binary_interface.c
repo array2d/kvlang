@@ -19,7 +19,8 @@ static const char *const runtimec_kvspace_symbol_names[] = {
     "kvspaceConnect",     "kvspaceClose",   "kvspaceGet",
     "kvspaceSetValue",    "kvspaceSetPart", "kvspaceDel",
     "kvspaceListLen",     "kvspaceListAt",  "kvspaceWatch",
-    "kvspaceViewQuiesce", "kvspaceViewAck", "kvspaceXvalueHeadNewSlack",
+    "kvspaceViewQuiesce", "kvspaceViewAck", "kvspaceMkindex",
+    "kvspaceXvalueHeadNewSlack",
 };
 
 enum { RUNTIMEC_KVSPACE_SYMBOL_COUNT =
@@ -28,7 +29,7 @@ enum { RUNTIMEC_KVSPACE_SYMBOL_COUNT =
 
 /* 表字段数量必须等于符号数量：任一侧增减都会在这里失败。 */
 _Static_assert(
-    RUNTIMEC_KVSPACE_SYMBOL_COUNT == 12U,
+    RUNTIMEC_KVSPACE_SYMBOL_COUNT == 13U,
     "kvspace binary interface symbol count must match its table fields");
 
 /* 缺失符号的错误文本：借用，指向本文件的静态缓冲，随进程存活。 */
@@ -64,6 +65,7 @@ bool runtimec_kvspace_binary_interface_is_complete(
            binary_interface->watch != NULL &&
            binary_interface->view_quiesce != NULL &&
            binary_interface->view_ack != NULL &&
+           binary_interface->mkindex != NULL &&
            binary_interface->new_slack != NULL;
 }
 
@@ -125,8 +127,10 @@ runtimec_status_t runtimec_kvspace_binary_interface_bind(
                              uint64_t, uint8_t **, uint32_t *))addresses[8];
     output->view_quiesce = (int (*)(void *, int))addresses[9];
     output->view_ack = (int (*)(void *, uint32_t *))addresses[10];
+    output->mkindex = (int (*)(void *, const char *, uint32_t, char *,
+                               uint32_t))addresses[11];
     output->new_slack = (int (*)(const uint8_t *, uint64_t, uint64_t,
                                  const char *, uint8_t **,
-                                 uint64_t *))addresses[11];
+                                 uint64_t *))addresses[12];
     return RUNTIMEC_STATUS_SUCCESS;
 }

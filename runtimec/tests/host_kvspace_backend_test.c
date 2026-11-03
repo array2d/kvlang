@@ -392,6 +392,95 @@ int main(int argument_count, char **arguments) {
         }
     }
 
+    /* 5b. 建帧：真实后端的 kvspaceMkindex。目录必须建出来，`‥lib` 写入后
+     *     能读回函数 key，重复建帧幂等。 */
+    {
+        runtimec_snapshot_reset(&snapshot);
+        snapshot.function_key = runtimec_key_view_from_c_string("/lib/sum");
+        EXPECT(services.ensure_frame(
+                   services.context, &snapshot,
+                   runtimec_key_view_from_c_string("/vthread/v9/[1]"),
+                   runtimec_string_view_from_c_string("/lib/sum"), &error) ==
+               RUNTIMEC_STATUS_SUCCESS);
+
+        /*
+         * 帧目录存在：枚举它的**父**目录 `/vthread/v9/`，条目里必须出现 `[1]/`。
+         * 不枚举 `[1]/` 自身——真后端对叶子目录返回 0 条（目录条目由 mkindex
+         * 建立，值不入目录索引），这是后端行为，不是失败。
+         */
+        int32_t parent_count = 0;
+        EXPECT(binary_interface.list_size(handle, "/vthread/v9/", 1, 0,
+                                          &parent_count) == 0);
+        EXPECT(parent_count >= 1);
+        bool saw_frame_directory = false;
+        for (int32_t ordinal = 0; ordinal < parent_count; ++ordinal) {
+            uint8_t entry[256];
+            uint32_t entry_size = 0U;
+            if (binary_interface.list_at(handle, "/vthread/v9/", 1, 0, ordinal,
+                                         entry, (uint32_t)sizeof(entry),
+                                         &entry_size) != 0) {
+                continue;
+            }
+            if (entry_size == 4U && memcmp(entry, "[1]/", 4U) == 0) {
+                saw_frame_directory = true;
+            }
+        }
+        EXPECT(saw_frame_directory);
+
+        /* `‥lib` 读回的就是函数 key。 */
+        uint8_t *library_value = NULL;
+        uint32_t library_size = 0U;
+        EXPECT(binary_interface.get(handle,
+                                    "/vthread/v9/[1]/\xE2\x80\xA5" "lib", 1,
+                                    &library_value, &library_size) == 0);
+        EXPECT(library_value != NULL && library_size > KVSPACE_XVALUE_HEAD_LEN);
+        if (library_value != NULL &&
+            library_size > KVSPACE_XVALUE_HEAD_LEN) {
+            kvspaceXvalueHead slot_head;
+            memcpy(&slot_head, library_value, sizeof(slot_head));
+            const uint64_t body_size = kvspaceXvalueHeadLen(&slot_head);
+            const char *expected = "/lib/sum";
+            EXPECT(body_size == strlen(expected));
+            EXPECT(memcmp(library_value + KVSPACE_XVALUE_HEAD_LEN, expected,
+                          body_size < strlen(expected) ? (size_t)body_size
+                                                       : strlen(expected)) ==
+                   0);
+        }
+
+        /* 幂等：同一帧再建一次，不报错、不重写（值地址与长度都不变）。 */
+        uint8_t *before_second = NULL;
+        uint32_t before_second_size = 0U;
+        EXPECT(binary_interface.get(handle,
+                                    "/vthread/v9/[1]/\xE2\x80\xA5" "lib", 1,
+                                    &before_second, &before_second_size) == 0);
+        EXPECT(services.ensure_frame(
+                   services.context, &snapshot,
+                   runtimec_key_view_from_c_string("/vthread/v9/[1]"),
+                   runtimec_string_view_from_c_string("/lib/sum"), &error) ==
+               RUNTIMEC_STATUS_SUCCESS);
+        uint8_t *after_second = NULL;
+        uint32_t after_second_size = 0U;
+        EXPECT(binary_interface.get(handle,
+                                    "/vthread/v9/[1]/\xE2\x80\xA5" "lib", 1,
+                                    &after_second, &after_second_size) == 0);
+        EXPECT(after_second == before_second);
+        EXPECT(after_second_size == before_second_size);
+
+        /* 同一帧换成别的函数：冲突，必须失败。 */
+        EXPECT(services.ensure_frame(
+                   services.context, &snapshot,
+                   runtimec_key_view_from_c_string("/vthread/v9/[1]"),
+                   runtimec_string_view_from_c_string("/lib/other"),
+                   &error) != RUNTIMEC_STATUS_SUCCESS);
+
+        /* 非 /vthread 的路径：拒绝，不猜。 */
+        EXPECT(services.ensure_frame(
+                   services.context, &snapshot,
+                   runtimec_key_view_from_c_string("/lib/not-a-frame"),
+                   runtimec_string_view_from_c_string("/lib/sum"), &error) ==
+               RUNTIMEC_STATUS_UNSUPPORTED);
+    }
+
     /* 6. handoff 的完成条件是「条目被删除」。kvspace 的 watch 只在值变化时
      *    唤醒、删除不唤醒（见下一条用例），因此实现用轮询判定；这里用另一个
      *    线程扮演认领方，断言 handoff 在删除后立刻返回而不是拖满超时。 */

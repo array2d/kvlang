@@ -68,6 +68,10 @@ typedef struct runtimec_kvspace_binary_interface {
     int (*view_quiesce)(void *handle, int enable);
     /* int kvspaceViewAck(void *handle, uint32_t *epoch) */
     int (*view_ack)(void *handle, uint32_t *epoch);
+    /* int kvspaceMkindex(void *handle, const char *path, uint32_t capacity,
+     *                   char *error_text, uint32_t error_text_capacity) */
+    int (*mkindex)(void *handle, const char *path, uint32_t capacity,
+                   char *error_text, uint32_t error_text_capacity);
     /* int kvspaceXvalueHeadNewSlack(const uint8_t *data, uint64_t data_size,
      *                               uint64_t capacity, const char *langtype,
      *                               uint8_t **output, uint64_t *output_size) */

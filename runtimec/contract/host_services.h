@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION 5U
+#define RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION 6U
 #define RUNTIMEC_XVALUE_ADDRESS_NONE UINT64_C(0)
 #define RUNTIMEC_XVALUE_BODY_OFFSET_BYTES KVSPACE_XVALUE_HEAD_LEN
 #define RUNTIMEC_VALUE_BODY_ADDRESS_NONE UINT64_C(0)
@@ -109,6 +109,22 @@ typedef runtimec_status_t
     runtimec_key_view_t key,
     runtimec_xvalue_address_t *output_xvalue_address,
     uint64_t *output_generation, runtimec_error_t *error);
+/*
+ * 建帧：确保帧目录 `<frame_path>/` 存在，并把该帧执行哪个函数写进 `‥lib`
+ * （`<frame_path>/‥lib` = 函数 key）。
+ *
+ * 为什么要有这条：`‥pc` 只带 stackid 与函数内序号，脱离函数就没有意义；「这个
+ * 帧在跑哪个函数」的事实属于帧，不属于 pc。旧运行时在建帧那一刻写它，runtimec
+ * 在此之前一条都没写——于是帧目录本身也不存在，`‥pc` 的父路径无从落地。
+ *
+ * 幂等：目录已存在、`‥lib` 已是同一函数时视为成功，不重写。`‥lib` 已存在但
+ * 指向别的函数是冲突，必须失败——同一帧不能同时跑两个函数。
+ */
+typedef runtimec_status_t (*runtimec_host_ensure_frame_function_t)(
+    void *context, const runtimec_snapshot_t *snapshot,
+    runtimec_key_view_t frame_path, runtimec_string_view_t function_key,
+    runtimec_error_t *error);
+
 typedef runtimec_status_t (*runtimec_host_checkpoint_function_t)(
     void *context, const runtimec_checkpoint_t *checkpoint,
     runtimec_error_t *error);
@@ -133,6 +149,7 @@ typedef struct runtimec_host_services {
         resolve_static_xvalue_address;
     runtimec_host_resolve_frame_xvalue_address_function_t
         resolve_frame_xvalue_address;
+    runtimec_host_ensure_frame_function_t ensure_frame;
     runtimec_host_checkpoint_function_t checkpoint;
     runtimec_host_handoff_function_t handoff;
 } runtimec_host_services_t;

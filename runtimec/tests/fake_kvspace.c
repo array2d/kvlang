@@ -301,6 +301,24 @@ static int fake_kvspace_view_ack(void *handle, uint32_t *epoch) {
     return 0;
 }
 
+/* 建目录：与真实后端同义——只登记一个目录条目，不写值。 */
+static int fake_kvspace_mkindex(void *handle, const char *path,
+                                uint32_t capacity, char *error_text,
+                                uint32_t error_text_capacity) {
+    fake_kvspace_store_t *store = handle;
+    (void)capacity;
+    if (store == NULL || path == NULL) {
+        return 1;
+    }
+    if (store->fail_writes) {
+        if (error_text != NULL && error_text_capacity != 0U) {
+            error_text[0] = '\0';
+        }
+        return 1;
+    }
+    return fake_kvspace_put(store, path, NULL, 0U, true) == 0 ? 0 : 1;
+}
+
 static int fake_kvspace_new_slack(const uint8_t *data, uint64_t data_size,
                                   uint64_t capacity, const char *langtype,
                                   uint8_t **output, uint64_t *output_size) {
@@ -384,6 +402,7 @@ void fake_kvspace_bind(fake_kvspace_store_t *store,
     output->watch = fake_kvspace_watch;
     output->view_quiesce = fake_kvspace_view_quiesce;
     output->view_ack = fake_kvspace_view_ack;
+    output->mkindex = fake_kvspace_mkindex;
     output->new_slack = fake_kvspace_new_slack;
     (void)store;
 }

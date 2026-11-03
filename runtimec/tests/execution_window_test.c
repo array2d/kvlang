@@ -76,6 +76,10 @@ typedef struct test_context {
     size_t slot_count;
     size_t resolve_count;
     size_t read_count;
+    size_t ensure_frame_count;
+    char ensured_frame_path[64];
+    char ensured_function_key[64];
+    runtimec_status_t ensure_frame_status;
     size_t checkpoint_count;
     uint64_t checkpoint_sequence;
     runtimec_status_t checkpoint_outcome;
@@ -207,6 +211,25 @@ static runtimec_status_t test_list(
     (void)visitor_context;
     return test_fail(error, RUNTIMEC_STATUS_UNSUPPORTED,
                      "test list capability is not available");
+}
+
+static runtimec_status_t test_ensure_frame(
+    void *context, const runtimec_snapshot_t *snapshot,
+    runtimec_key_view_t frame_path, runtimec_string_view_t function_key,
+    runtimec_error_t *error) {
+    test_context_t *test = context;
+
+    (void)snapshot;
+    test->ensure_frame_count += 1U;
+    test_copy_text(test->ensured_frame_path, sizeof(test->ensured_frame_path),
+                   runtimec_string_view_make(frame_path.data, frame_path.size));
+    test_copy_text(test->ensured_function_key,
+                   sizeof(test->ensured_function_key), function_key);
+    if (test->ensure_frame_status != RUNTIMEC_STATUS_SUCCESS) {
+        return test_fail(error, test->ensure_frame_status,
+                         "test ensure-frame failure");
+    }
+    return RUNTIMEC_STATUS_SUCCESS;
 }
 
 static runtimec_status_t test_checkpoint(
@@ -470,6 +493,7 @@ int main(void) {
     test.slots[1].key = TEST_WRITE_KEY;
     test.slots[1].value = &write_value;
     test.slot_count = 2U;
+    test.ensure_frame_status = RUNTIMEC_STATUS_SUCCESS;
 
     runtimec_error_reset(&error);
     runtimec_host_services_initialize(&host_services);
@@ -481,6 +505,7 @@ int main(void) {
     host_services.source_revision = test_source_revision;
     host_services.resolve_frame_xvalue_address =
         test_resolve_frame_xvalue_address;
+    host_services.ensure_frame = test_ensure_frame;
     host_services.checkpoint = test_checkpoint;
     EXPECT(runtimec_host_services_is_valid(&host_services));
 
@@ -539,6 +564,10 @@ int main(void) {
                   "/lib/route/[5,0]") == 0);
     EXPECT(strcmp(test.checkpoint_status, "running") == 0);
     EXPECT(strcmp(test.checkpoint_vthread, TEST_VTHREAD) == 0);
+    /* 建帧先于绑定：帧路径与函数 key 都必须按请求原样交给 host。 */
+    EXPECT(test.ensure_frame_count == 1U);
+    EXPECT(strcmp(test.ensured_frame_path, TEST_FRAME_PATH) == 0);
+    EXPECT(strcmp(test.ensured_function_key, TEST_TARGET) == 0);
 
     /* 2. DONE 出口：正常结束也必须提交，位置是刚完成的 RETURN。 */
     request.function_path = runtimec_string_view_from_c_string(TEST_DONE_TARGET);
@@ -552,6 +581,22 @@ int main(void) {
     EXPECT(strcmp(test.checkpoint_program_counter,
                   "/lib/route-done/[10,0]") == 0);
     EXPECT(strcmp(test.checkpoint_status, "done") == 0);
+
+    /* 2.5 建帧失败：一条指令都不执行，不提交 checkpoint。 */
+    {
+        const size_t checkpoints_before = test.checkpoint_count;
+        const size_t resolves_before = test.resolve_count;
+
+        test.ensure_frame_status = RUNTIMEC_STATUS_ERROR;
+        EXPECT(runtimec_execution_window_execute(session, &request, &result,
+                                                 &error) !=
+               RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(result.execution_exit.detail_code == 13U);
+        EXPECT(test.checkpoint_count == checkpoints_before);
+        /* 建帧在形参绑定之前：失败时连一次地址解析都不该发生。 */
+        EXPECT(test.resolve_count == resolves_before);
+        test.ensure_frame_status = RUNTIMEC_STATUS_SUCCESS;
+    }
 
     /* 3. 未命中：走真实编码，读能力失败 → 窗口失败封闭且不提交。 */
     request.function_path =
