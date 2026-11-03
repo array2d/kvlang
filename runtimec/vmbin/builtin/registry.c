@@ -37,12 +37,13 @@ runtimec_status_t vmbin_builtin_registry_destroy(
     return vmbin_builtin_registry_reset(registry);
 }
 
+/* 线性查找：注册表是 session 拥有的只读小表，不引入第二条索引。 */
 runtimec_status_t
 vmbin_builtin_registry_find(const vmbin_builtin_registry_t *registry,
                             uint32_t builtin_identifier,
                             const vmbin_builtin_entry_t **output_entry) {
-    (void)registry;
-    (void)builtin_identifier;
+    size_t entry_ordinal;
+
     if (output_entry != NULL) {
         *output_entry = NULL;
     }
@@ -50,5 +51,18 @@ vmbin_builtin_registry_find(const vmbin_builtin_registry_t *registry,
         output_entry == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
-    return RUNTIMEC_STATUS_NOT_IMPLEMENTED;
+    for (entry_ordinal = 0U; entry_ordinal < registry->entry_count;
+         ++entry_ordinal) {
+        const vmbin_builtin_entry_t *entry = &registry->entries[entry_ordinal];
+
+        if (entry->rwir_runtimecimpl == NULL) {
+            continue;
+        }
+        if (entry->builtin_identifier == builtin_identifier) {
+            *output_entry = entry;
+            return RUNTIMEC_STATUS_SUCCESS;
+        }
+    }
+    /* 没有这一条不是错误，是「本执行器不处理」：交 route handoff。 */
+    return RUNTIMEC_STATUS_UNSUPPORTED;
 }

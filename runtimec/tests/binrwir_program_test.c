@@ -120,8 +120,18 @@ static runtimec_status_t fixture_register_signature(
     };
     uint32_t parameter_index = 0U;
     uint32_t rule_identifier = 0U;
+    uint16_t symbol_index = BINRWIR_SYMBOL_INDEX_NONE;
     runtimec_status_t status;
 
+    /* 指令里那条 STATIC 引用的 key 文本；slot 就是它的池下标。 */
+    status = binrwir_program_builder_add_symbol(builder, type_view("/t/static"),
+                                                &symbol_index);
+    if (status == RUNTIMEC_STATUS_SUCCESS && symbol_index != 0U) {
+        status = RUNTIMEC_STATUS_INVALID;
+    }
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return status;
+    }
     status = binrwir_program_builder_add_parameter(
         builder, BINRWIR_PARAMETER_DIRECTION_READ, TEST_READ_ARGUMENT_INDEX,
         type_view("int64"), &parameter_index);
@@ -1127,6 +1137,74 @@ static void test_function_reference_round_trip(void) {
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
 
+/*
+ * STATIC 的 slot 是符号池下标：越界就不是「没有 key」，而是拿不到 key 的非法
+ * Program。vmbin 会按这个下标取文本，所以必须在 Program 层挡住。
+ */
+static void test_static_symbol_slot_must_be_in_pool(void) {
+    test_allocator_context_t counters = {0U, false, 0U};
+    runtimec_allocator_t allocator = test_allocator(&counters);
+    binrwir_program_identity_t identity = fixture_identity();
+    binrwir_program_builder_t *builder = NULL;
+    binrwir_program_t *program = (binrwir_program_t *)(uintptr_t)1U;
+    binrwir_argument_t static_argument;
+    binrwir_instruction_build_request_t request;
+    uint16_t symbol_index = BINRWIR_SYMBOL_INDEX_NONE;
+    uint32_t instruction_identifier = BINRWIR_IDENTIFIER_NONE;
+
+    RUNTIMEC_EXPECT(binrwir_program_builder_create(&allocator, &identity,
+                                                   &builder) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(binrwir_program_builder_add_symbol(builder,
+                                                       type_view("/t/only"),
+                                                       &symbol_index) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(symbol_index == 0U);
+
+    /* slot 1 落在池外（池里只有 1 个符号）。 */
+    RUNTIMEC_EXPECT(binrwir_argument_create(1U, BINRWIR_REFERENCE_STATIC, 1U,
+                                            TEST_STATIC_BODY_ADDRESS,
+                                            &static_argument) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    memset(&request, 0, sizeof(request));
+    request.source_logical_program_counter = TEST_SOURCE_PROGRAM_COUNTER;
+    request.operation_identifier = TEST_OPERATION_IDENTIFIER;
+    request.read_arguments.data = &static_argument;
+    request.read_arguments.count = 1U;
+    RUNTIMEC_EXPECT(binrwir_program_builder_add_instruction(
+                        builder, &request, &instruction_identifier) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(binrwir_program_builder_finalize(builder, &program) ==
+                    RUNTIMEC_STATUS_INVALID);
+    RUNTIMEC_EXPECT(program == NULL);
+
+    /* 同一形状、slot 0 在池内：定稿成功，证明差别只在这一个下标。 */
+    RUNTIMEC_EXPECT(binrwir_argument_create(1U, BINRWIR_REFERENCE_STATIC, 0U,
+                                            TEST_STATIC_BODY_ADDRESS,
+                                            &static_argument) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    request.read_arguments.data = &static_argument;
+    RUNTIMEC_EXPECT(binrwir_program_builder_reset(builder) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(binrwir_program_builder_add_symbol(builder,
+                                                       type_view("/t/only"),
+                                                       &symbol_index) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(binrwir_program_builder_add_instruction(
+                        builder, &request, &instruction_identifier) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(binrwir_program_builder_finalize(builder, &program) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(program != NULL);
+    RUNTIMEC_EXPECT(binrwir_program_validate(program) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(binrwir_program_destroy(program) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(binrwir_program_builder_destroy(builder) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(counters.live_allocations == 0U);
+}
+
 static void test_program_query_failure_shape(void) {
     binrwir_program_identity_t identity;
     binrwir_program_view_t view;
@@ -1169,6 +1247,7 @@ int main(void) {
     test_literal_pool_round_trip();
     test_literal_pool_rejects_invalid_content();
     test_function_reference_round_trip();
+    test_static_symbol_slot_must_be_in_pool();
     test_program_query_failure_shape();
     if (failures != 0) {
         fprintf(stderr, "binrwir_program_test: %d failure(s)\n", failures);

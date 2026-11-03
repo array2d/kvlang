@@ -1,6 +1,46 @@
-/* host 能力表的纯生命周期与形状校验。 */
+/* host 能力表的纯生命周期、形状校验与 V.body 地址推导。 */
 
 #include "contract/host_services.h"
+
+/*
+ * 唯一的「基址 + 8」实现。零基址不是有效地址；加法会越过 UINT64_MAX 时
+ * 直接失败，不回绕。调用方拿到 NONE 必须立即失败，不得把 0 当作合法 body。
+ */
+runtimec_value_body_address_t
+runtimec_xvalue_body_address(runtimec_xvalue_address_t xvalue_address) {
+    if (xvalue_address == RUNTIMEC_XVALUE_ADDRESS_NONE ||
+        xvalue_address >
+            UINT64_MAX - RUNTIMEC_XVALUE_BODY_OFFSET_BYTES) {
+        return RUNTIMEC_VALUE_BODY_ADDRESS_NONE;
+    }
+    return xvalue_address + RUNTIMEC_XVALUE_BODY_OFFSET_BYTES;
+}
+
+/* 值头 storetype 只能是这四个档位；其它值说明地址根本不是值头。 */
+static int runtimec_value_header_store_type_is_known(uint8_t store_type) {
+    return store_type == KVSPACE_XVALUE_ST_SHORT ||
+           store_type == KVSPACE_XVALUE_ST_SLACK ||
+           store_type == KVSPACE_XVALUE_ST_LARGE ||
+           store_type == KVSPACE_XVALUE_ST_EXT;
+}
+
+/*
+ * `+8` 的逆运算：值体地址往前挪固定头长度就是值头，长度从值头读。
+ * 零地址、下溢（body < 头长度）、storetype 不可信、长度超 uint32 都返回 0。
+ */
+uint32_t runtimec_value_body_length(runtimec_value_body_address_t body_address) {
+    if (body_address == RUNTIMEC_VALUE_BODY_ADDRESS_NONE ||
+        body_address < RUNTIMEC_XVALUE_BODY_OFFSET_BYTES) {
+        return 0U;
+    }
+    const kvspaceXvalueHead *head = (const kvspaceXvalueHead *)(uintptr_t)(
+        body_address - RUNTIMEC_XVALUE_BODY_OFFSET_BYTES);
+    if (!runtimec_value_header_store_type_is_known(head->storetype)) {
+        return 0U;
+    }
+    const uint64_t body_length = kvspaceXvalueHeadLen(head);
+    return body_length > UINT32_MAX ? 0U : (uint32_t)body_length;
+}
 
 void runtimec_host_value_header_reset(runtimec_host_value_header_t *header) {
     if (header != NULL) {

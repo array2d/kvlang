@@ -10,8 +10,10 @@
  * 约束：参数是「指针变量」——Program 只保存引用，不保存帧实参地址。只有
  *       STATIC 的 payload 是 body 地址（编译期成立、生命周期长于 compilation
  *       的静态 key）；其余 kind 的 payload 不得被当作地址使用。
- *       LOCAL 与 FUNCTION 的 slot 是 Program 私有符号池下标，LITERAL 的 payload
- *       是 Program 私有字面量池下标；池内容与下标的有效性由 program 层校验。
+ *       STATIC 与 LOCAL / FUNCTION 的 slot 是 Program 私有符号池下标（STATIC 存
+ *       绝对路径文本），LITERAL 的 payload 是 Program 私有字面量池下标；池内容
+ *       与下标的有效性由 program 层校验。阶段 1 的 vmbin 只按 key 访问，STATIC
+ *       的 body 地址留给 JIT，不在此消费。
  */
 
 #include <stddef.h>
@@ -40,7 +42,8 @@ typedef enum binrwir_reference_kind {
     BINRWIR_REFERENCE_PARAMETER_READ = 1,  /* slot = 第 j 个读参 */
     BINRWIR_REFERENCE_PARAMETER_WRITE = 2, /* slot = 第 j 个写参 */
     BINRWIR_REFERENCE_LOCAL = 3,           /* slot = 符号池下标 */
-    BINRWIR_REFERENCE_STATIC = 4,          /* payload = 静态 body 地址 */
+    /* slot = 符号池下标（key 文本），payload = 静态 body 地址（留给 JIT） */
+    BINRWIR_REFERENCE_STATIC = 4,
     BINRWIR_REFERENCE_LITERAL = 5,         /* payload = 字面量池下标 */
     BINRWIR_REFERENCE_FUNCTION = 6         /* slot = 符号池下标（函数名） */
 } binrwir_reference_kind_t;

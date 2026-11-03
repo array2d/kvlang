@@ -326,6 +326,8 @@ static int binrwir_program_argument_is_unbound(
                    argument->argument_index;
     case BINRWIR_REFERENCE_LOCAL:
     case BINRWIR_REFERENCE_FUNCTION:
+    case BINRWIR_REFERENCE_STATIC:
+        /* 三个 kind 的 slot 都是符号池下标：越界会被当成合法并越界取文本。 */
         return (size_t)argument->slot >= program->symbol_count;
     case BINRWIR_REFERENCE_LITERAL:
         return argument->payload >= (uint64_t)program->literal_count;
@@ -540,6 +542,32 @@ runtimec_status_t binrwir_program_get_instruction(
         &program->instructions.heads[instruction_identifier],
         record->source_logical_program_counter, read_arguments,
         write_arguments, output_instruction);
+}
+
+runtimec_status_t binrwir_program_find_instruction(
+    const binrwir_program_t *program, uint32_t source_logical_program_counter,
+    uint32_t *output_instruction_identifier) {
+    size_t instruction_ordinal;
+
+    if (output_instruction_identifier != NULL) {
+        *output_instruction_identifier = BINRWIR_IDENTIFIER_NONE;
+    }
+    if (program == NULL || output_instruction_identifier == NULL ||
+        source_logical_program_counter ==
+            BINRWIR_EXECUTION_PROGRAM_COUNTER_NONE) {
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    for (instruction_ordinal = 0U;
+         instruction_ordinal < program->instructions.count;
+         ++instruction_ordinal) {
+        if (program->instructions.records[instruction_ordinal]
+                .source_logical_program_counter ==
+            source_logical_program_counter) {
+            *output_instruction_identifier = (uint32_t)instruction_ordinal;
+            return RUNTIMEC_STATUS_SUCCESS;
+        }
+    }
+    return RUNTIMEC_STATUS_INVALID;
 }
 
 runtimec_status_t binrwir_program_get_symbol(
@@ -793,9 +821,11 @@ static void binrwir_program_copy_pools(binrwir_program_t *program,
     for (ordinal = 0U; ordinal < program->argument_count; ++ordinal) {
         binrwir_argument_t *argument = &program->arguments[ordinal];
 
-        /* 越界的 slot 不猜、也不查表，留给 validate 判 INVALID。 */
+        /* STATIC 的 slot 也是符号池下标（key 文本），和 LOCAL / FUNCTION 一起
+         * 重映射；越界的 slot 不猜、也不查表，留给 validate 判 INVALID。 */
         if ((argument->reference_kind == BINRWIR_REFERENCE_LOCAL ||
-             argument->reference_kind == BINRWIR_REFERENCE_FUNCTION) &&
+             argument->reference_kind == BINRWIR_REFERENCE_FUNCTION ||
+             argument->reference_kind == BINRWIR_REFERENCE_STATIC) &&
             (size_t)argument->slot < program->symbol_count) {
             argument->slot = (uint16_t)symbol_remap[argument->slot];
         }

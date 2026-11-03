@@ -4,8 +4,8 @@
 /*
  * 组件：vmbin/builtin/registry
  * 作用：将 builtin 标识符映射到唯一处理函数。
- * 联系：interpreter 调用；处理函数从 instruction 的 argaddr 直接访问
- *       kvspace V.body。
+ * 联系：interpreter 调用；处理函数经 vmbin/value_access 按地址读写操作数，
+ *       与 core 规则共用同一条数据面。
  * 约束：Registry 不拥有条目或处理函数，生命周期属于 session；处理函数
  *       不得缓存 V.body 内容或建立寄存器文件。
  */
@@ -22,6 +22,10 @@
 extern "C" {
 #endif
 
+/*
+ * 处理函数经 vmbin/value_access 按地址读写操作数；它不拥有 frame、instruction
+ * 与 output_exit，也不得保留它们的指针。
+ */
 typedef runtimec_status_t
 (*vmbin_builtin_rwir_runtimecimpl_function_t)(
     binrwir_execution_frame_t *frame,

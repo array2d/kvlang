@@ -406,6 +406,23 @@ static void test_canonical_copy(test_canonical_t *target,
     target->instruction.write_parameter_types = target->types + read_count;
 }
 
+/* canonical 指令的符号池与字面量池下标需要一个 builder 才能分配。 */
+static bool make_builder(const runtimec_host_services_t *host,
+                         binrwir_program_builder_t **output_builder) {
+    const binrwir_program_identity_t identity = {
+        .snapshot_generation = 11U,
+        .program_generation = 1U,
+        .schema_version = 1U,
+        .rwir_manifest_version = 1U,
+        .binrwir_binary_interface_generation =
+            BINRWIR_BINARY_INTERFACE_GENERATION,
+        .canonical_encoding_revision = 1U,
+    };
+    return binrwir_program_builder_create(&host->allocator, &identity,
+                                          output_builder) ==
+           RUNTIMEC_STATUS_SUCCESS;
+}
+
 /* 读第一条指令并按 canonical 形状编码。 */
 static runtimec_status_t encode_first_instruction(
     vmkv_encoder_t *encoder, const vmkv_encode_request_t *request,
@@ -415,6 +432,10 @@ static runtimec_status_t encode_first_instruction(
     /* 非形参引用的 argidx 从形参区间之后开始，与 vmkv_encode 同一规则。 */
     function.next_operand_argument_index = function.read_parameter_count +
                                            function.write_parameter_count;
+    binrwir_program_builder_t *builder = NULL;
+    if (!make_builder(request->host_services, &builder)) {
+        return RUNTIMEC_STATUS_OUT_OF_MEMORY;
+    }
     vmkv_function_source_t *source = NULL;
     runtimec_snapshot_t snapshot;
     runtimec_snapshot_reset(&snapshot);
@@ -433,14 +454,16 @@ static runtimec_status_t encode_first_instruction(
         if (status == RUNTIMEC_STATUS_SUCCESS) {
             EXPECT(read_result == VMKV_RWIR_READ_RESULT_INSTRUCTION);
             vmkv_canonical_instruction_t canonical;
-            status = vmkv_encode_instruction(encoder, request, &function,
-                                             &instruction, &canonical, error);
+            status = vmkv_encode_instruction(encoder, request, builder,
+                                             &function, &instruction,
+                                             &canonical, error);
             if (status == RUNTIMEC_STATUS_SUCCESS) {
                 test_canonical_copy(output, &canonical);
             }
         }
         vmkv_rwir_reader_destroy(reader);
     }
+    binrwir_program_builder_destroy(builder);
     vmkv_source_close_function(source);
     return status;
 }
@@ -813,12 +836,27 @@ static void test_static_path_derives_body_address(void) {
     EXPECT(instruction.arguments[1].argument_index == 3U);
     EXPECT(instruction.arguments[1].payload ==
            UINT64_C(0x10000) + KVSPACE_XVALUE_HEAD_LEN);
+    /* STATIC 的 slot 是符号池下标：vmbin 按 key 访问的依据。 */
+    EXPECT(instruction.arguments[1].slot == 0U);
+
+    binrwir_program_t *program = NULL;
+    EXPECT(vmkv_encode(encoder, &request, &program, &error) ==
+           RUNTIMEC_STATUS_SUCCESS);
+    if (program != NULL) {
+        EXPECT(binrwir_program_validate(program) == RUNTIMEC_STATUS_SUCCESS);
+        runtimec_string_view_t symbol = runtimec_string_view_make(NULL, 0U);
+        EXPECT(binrwir_program_get_symbol(program,
+                                          instruction.arguments[1].slot,
+                                          &symbol) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(view_equals(symbol, "/v/x"));
+        EXPECT(binrwir_program_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
+    }
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
     store_free(&store);
 }
 
-/* 具名帧槽：没有可编译的数值槽契约 → UNSUPPORTED，且不产生 Program。 */
-static void test_named_frame_slot_is_unsupported(void) {
+/* 具名帧槽：裸标识符是帧局部变量名，登进 Program 符号池（LOCAL）。 */
+static void test_named_frame_slot_becomes_local_symbol(void) {
     fake_store_t store;
     memset(&store, 0, sizeof(store));
     add_function(&store, "/lib/local", 2U, 1U);
@@ -831,6 +869,52 @@ static void test_named_frame_slot_is_unsupported(void) {
     add_reference(&store, "/lib/local", 1, 1, "*[0,1]", "int64");
     runtimec_host_services_t host = make_host_services(&store);
     vmkv_encode_request_t request = make_request(&host, "/lib/local");
+    vmkv_encoder_t *encoder = NULL;
+    runtimec_error_t error;
+    runtimec_error_reset(&error);
+    EXPECT(vmkv_encoder_create(host.allocator, &encoder, &error) ==
+           RUNTIMEC_STATUS_SUCCESS);
+    vmkv_encode_function_t function = {.read_parameter_count = 2U,
+                                       .write_parameter_count = 1U};
+    test_canonical_t instruction;
+    EXPECT(encode_first_instruction(encoder, &request, function, &instruction,
+                                    &error) == RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(instruction.arguments[1].reference_kind ==
+           BINRWIR_REFERENCE_LOCAL);
+    EXPECT(instruction.arguments[1].payload == 0U);
+    /* 裸名不消耗形参编号：它是非形参引用，argidx 从 nr+nw = 3 起。 */
+    EXPECT(instruction.arguments[1].argument_index == 3U);
+
+    binrwir_program_t *program = NULL;
+    EXPECT(vmkv_encode(encoder, &request, &program, &error) ==
+           RUNTIMEC_STATUS_SUCCESS);
+    if (program != NULL) {
+        EXPECT(binrwir_program_validate(program) == RUNTIMEC_STATUS_SUCCESS);
+        runtimec_string_view_t symbol = runtimec_string_view_make(NULL, 0U);
+        EXPECT(binrwir_program_get_symbol(program,
+                                          instruction.arguments[1].slot,
+                                          &symbol) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(view_equals(symbol, "temporary"));
+        EXPECT(binrwir_program_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
+    }
+    EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
+    store_free(&store);
+}
+
+/* 帧内槽表达式 `*[d,±k]`（d 非 0）：没有可编译的槽契约 → UNSUPPORTED。 */
+static void test_framed_slot_expression_is_unsupported(void) {
+    fake_store_t store;
+    memset(&store, 0, sizeof(store));
+    add_function(&store, "/lib/framed", 2U, 1U);
+    add_parameter(&store, "/lib/framed", -1, "a", "int64");
+    add_parameter(&store, "/lib/framed", -2, "b", "int64");
+    add_parameter(&store, "/lib/framed", 1, "R", "int64");
+    add_opcode(&store, "/lib/framed", 1, 2U, 1U, "add");
+    add_reference(&store, "/lib/framed", 1, -1, "*[0,-1]", "int64");
+    add_reference(&store, "/lib/framed", 1, -2, "*[1,-1]", "int64");
+    add_reference(&store, "/lib/framed", 1, 1, "*[0,1]", "int64");
+    runtimec_host_services_t host = make_host_services(&store);
+    vmkv_encode_request_t request = make_request(&host, "/lib/framed");
     vmkv_encoder_t *encoder = NULL;
     runtimec_error_t error;
     runtimec_error_reset(&error);
@@ -936,6 +1020,100 @@ static void test_stale_snapshot_is_rejected(void) {
     store_free(&store);
 }
 
+
+
+/*
+ * 符号池按字节字典序在 finalize 规范化：登记序（`a` 先、`/v/x` 后）与规范序
+ * （`/v/x` 先、`a` 后）相反。断言只能用「下标回查得到原名字」的 round-trip——
+ * 单符号是恒等映射，永远测不出漏重定位；错位表现为校验通过、名字是错的。
+ */
+static void test_symbol_pool_normalization_remaps_every_reference(void) {
+    fake_store_t store;
+    memset(&store, 0, sizeof(store));
+    add_function(&store, "/lib/two", 2U, 1U);
+    add_parameter(&store, "/lib/two", -1, "a", "int64");
+    add_parameter(&store, "/lib/two", -2, "b", "int64");
+    add_parameter(&store, "/lib/two", 1, "R", "int64");
+    add_opcode(&store, "/lib/two", 1, 2U, 1U, "add");
+    add_reference(&store, "/lib/two", 1, -1, "a", "int64");
+    add_reference(&store, "/lib/two", 1, -2, "/v/x", "int64");
+    add_reference(&store, "/lib/two", 1, 1, "*[0,1]", "int64");
+    store_add(&store, "/v/x", (const uint8_t *)"\0\0\0\0\0\0\0\0", 8U,
+              "int64");
+    runtimec_host_services_t host = make_host_services(&store);
+    vmkv_encode_request_t request = make_request(&host, "/lib/two");
+    vmkv_encoder_t *encoder = NULL;
+    runtimec_error_t error;
+    runtimec_error_reset(&error);
+    EXPECT(vmkv_encoder_create(host.allocator, &encoder, &error) ==
+           RUNTIMEC_STATUS_SUCCESS);
+    binrwir_program_t *program = NULL;
+    EXPECT(vmkv_encode(encoder, &request, &program, &error) ==
+           RUNTIMEC_STATUS_SUCCESS);
+    if (program != NULL) {
+        EXPECT(binrwir_program_validate(program) == RUNTIMEC_STATUS_SUCCESS);
+        binrwir_instruction_view_t instruction;
+        EXPECT(binrwir_program_get_instruction(program, 0U, &instruction) ==
+               RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(instruction.read_arguments.count == 2U);
+        EXPECT(instruction.read_arguments.data[0].reference_kind ==
+               BINRWIR_REFERENCE_LOCAL);
+        EXPECT(instruction.read_arguments.data[1].reference_kind ==
+               BINRWIR_REFERENCE_STATIC);
+        runtimec_string_view_t local_symbol = runtimec_string_view_make(NULL, 0U);
+        runtimec_string_view_t static_symbol = runtimec_string_view_make(NULL, 0U);
+        EXPECT(binrwir_program_get_symbol(
+                   program, instruction.read_arguments.data[0].slot,
+                   &local_symbol) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(binrwir_program_get_symbol(
+                   program, instruction.read_arguments.data[1].slot,
+                   &static_symbol) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(view_equals(local_symbol, "a"));
+        EXPECT(view_equals(static_symbol, "/v/x"));
+        EXPECT(binrwir_program_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
+    }
+    EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
+    store_free(&store);
+}
+
+/* `call` 的第一个读参是函数名：FUNCTION 引用 + 符号池下标，名字不含 /lib/。 */
+static void test_call_target_becomes_function_symbol(void) {
+    fake_store_t store;
+    memset(&store, 0, sizeof(store));
+    add_function(&store, "/lib/callfn", 1U, 0U);
+    add_parameter(&store, "/lib/callfn", -1, "a", "int64");
+    add_opcode(&store, "/lib/callfn", 1, 1U, 0U, "call");
+    add_reference(&store, "/lib/callfn", 1, -1, "other·function", "");
+    runtimec_host_services_t host = make_host_services(&store);
+    vmkv_encode_request_t request = make_request(&host, "/lib/callfn");
+    vmkv_encoder_t *encoder = NULL;
+    runtimec_error_t error;
+    runtimec_error_reset(&error);
+    EXPECT(vmkv_encoder_create(host.allocator, &encoder, &error) ==
+           RUNTIMEC_STATUS_SUCCESS);
+    vmkv_encode_function_t function = {.read_parameter_count = 1U,
+                                       .write_parameter_count = 0U};
+    test_canonical_t instruction;
+    EXPECT(encode_first_instruction(encoder, &request, function, &instruction,
+                                    &error) == RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(instruction.arguments[0].reference_kind ==
+           BINRWIR_REFERENCE_FUNCTION);
+    EXPECT(instruction.arguments[0].payload == 0U);
+    binrwir_program_t *program = NULL;
+    EXPECT(vmkv_encode(encoder, &request, &program, &error) ==
+           RUNTIMEC_STATUS_SUCCESS);
+    if (program != NULL) {
+        EXPECT(binrwir_program_validate(program) == RUNTIMEC_STATUS_SUCCESS);
+        runtimec_string_view_t symbol = runtimec_string_view_make(NULL, 0U);
+        EXPECT(binrwir_program_get_symbol(program, instruction.arguments[0].slot,
+                                          &symbol) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(symbol.size == strlen("other·function"));
+        EXPECT(binrwir_program_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
+    }
+    EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
+    store_free(&store);
+}
+
 static void test_parameter_type_classification(void) {
     uint32_t type_set = 0U;
     EXPECT(vmkv_parameter_type_classify(
@@ -978,10 +1156,13 @@ int main(void) {
     test_not_equal_specialization_selects_dedicated_row();
     test_inline_literal_uses_literal_reference();
     test_static_path_derives_body_address();
-    test_named_frame_slot_is_unsupported();
+    test_named_frame_slot_becomes_local_symbol();
+    test_framed_slot_expression_is_unsupported();
     test_unknown_operation_is_rejected();
     test_program_encoding_matches_canonical_instruction();
     test_stale_snapshot_is_rejected();
+    test_symbol_pool_normalization_remaps_every_reference();
+    test_call_target_becomes_function_symbol();
     test_parameter_type_classification();
     if (failures != 0) {
         fprintf(stderr, "%d failure(s)\n", failures);

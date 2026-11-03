@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "binrwir_compiler/compiler.h"
 #include "binrwir_compiler/jit/compiler.h"
@@ -147,6 +148,14 @@ static void *test_allocate(void *context, size_t size, size_t alignment) {
     return NULL;
 }
 
+/* 总线内存分配器：符号池登记需要真实分配，与「vmkv 不分配」的探针区分开。 */
+static void *test_allocate_working(void *context, size_t size,
+                                   size_t alignment) {
+    (void)context;
+    (void)alignment;
+    return malloc(size);
+}
+
 static void test_deallocate(
     void *context, void *allocation, size_t size, size_t alignment) {
     (void)context;
@@ -218,9 +227,28 @@ static void test_vmkv_xvalue_address_encoding(void) {
         .function_path = RUNTIMEC_STRING_VIEW_LITERAL("/lib/test"),
         .expected_snapshot = snapshot,
     };
+    /* STATIC 的 slot 现在是符号池下标，登记需要一个 builder。 */
+    const binrwir_program_identity_t identity = {
+        .snapshot_generation = 1U,
+        .program_generation = 1U,
+        .schema_version = 1U,
+        .rwir_manifest_version = 1U,
+        .binrwir_binary_interface_generation =
+            BINRWIR_BINARY_INTERFACE_GENERATION,
+        .canonical_encoding_revision = 1U,
+    };
+    const runtimec_allocator_t builder_allocator = {
+        .context = NULL,
+        .allocate = test_allocate_working,
+        .deallocate = test_deallocate,
+    };
+    binrwir_program_builder_t *builder = NULL;
+    RUNTIMEC_EXPECT(binrwir_program_builder_create(
+                        &builder_allocator, &identity, &builder) ==
+                    RUNTIMEC_STATUS_SUCCESS);
 
     RUNTIMEC_EXPECT(vmkv_encode_static_argument(
-        &request, &source_argument, 7U, &encoded_argument, NULL) ==
+        &request, builder, &source_argument, 7U, &encoded_argument, NULL) ==
         RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(resolution_context.call_count == 1U);
     RUNTIMEC_EXPECT(encoded_argument.argument_index == 7U);
@@ -232,7 +260,7 @@ static void test_vmkv_xvalue_address_encoding(void) {
 
     dynamic_argument.key_addressability = VMKV_KEY_ADDRESSABILITY_DYNAMIC;
     RUNTIMEC_EXPECT(vmkv_encode_static_argument(
-        &request, &dynamic_argument, 7U, &encoded_argument, NULL) ==
+        &request, builder, &dynamic_argument, 7U, &encoded_argument, NULL) ==
         RUNTIMEC_STATUS_UNSUPPORTED);
     RUNTIMEC_EXPECT(resolution_context.call_count == 1U);
     RUNTIMEC_EXPECT(encoded_argument.argument_index == 0U);
@@ -251,7 +279,7 @@ static void test_vmkv_xvalue_address_encoding(void) {
         .payload = UINT64_MAX,
     };
     RUNTIMEC_EXPECT(vmkv_encode_static_argument(
-        &request, &source_argument, 7U, &encoded_argument, NULL) ==
+        &request, builder, &source_argument, 7U, &encoded_argument, NULL) ==
         RUNTIMEC_STATUS_ERROR);
     RUNTIMEC_EXPECT(resolution_context.call_count == 2U);
     RUNTIMEC_EXPECT(encoded_argument.argument_index == 0U);
@@ -270,7 +298,7 @@ static void test_vmkv_xvalue_address_encoding(void) {
         .payload = UINT64_MAX,
     };
     RUNTIMEC_EXPECT(vmkv_encode_static_argument(
-        &request, &source_argument, 7U, &encoded_argument, NULL) ==
+        &request, builder, &source_argument, 7U, &encoded_argument, NULL) ==
         RUNTIMEC_STATUS_ERROR);
     RUNTIMEC_EXPECT(resolution_context.call_count == 3U);
     RUNTIMEC_EXPECT(encoded_argument.argument_index == 0U);
@@ -290,7 +318,7 @@ static void test_vmkv_xvalue_address_encoding(void) {
         .payload = UINT64_MAX,
     };
     RUNTIMEC_EXPECT(vmkv_encode_static_argument(
-        &request, &source_argument, 7U, &encoded_argument, NULL) ==
+        &request, builder, &source_argument, 7U, &encoded_argument, NULL) ==
         RUNTIMEC_STATUS_UNSUPPORTED);
     RUNTIMEC_EXPECT(resolution_context.call_count == 4U);
     RUNTIMEC_EXPECT(encoded_argument.argument_index == 0U);

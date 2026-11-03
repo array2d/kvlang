@@ -115,9 +115,12 @@ BINARY_INTERFACE_VERSION_DEFINITION = re.compile(
 BINARY_INTERFACE_VERSION_PIN = re.compile(
     r"RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION\s*==\s*(\d+)U\b"
 )
+# 裁决 decision-vmbin-data-path §2：+8 只有一处实现，在合同里。
+CONTRACT_BODY_ADDRESS_FUNCTION = "runtimec_xvalue_body_address("
+CONTRACT_BODY_ADDRESS_DERIVATION = "xvalue_address + RUNTIMEC_XVALUE_BODY_OFFSET_BYTES"
 REQUIRED_BODY_ADDRESS_DERIVATION_TOKENS = (
     "UINT64_MAX - RUNTIMEC_XVALUE_BODY_OFFSET_BYTES",
-    "xvalue_address + RUNTIMEC_XVALUE_BODY_OFFSET_BYTES",
+    CONTRACT_BODY_ADDRESS_DERIVATION,
     "RUNTIMEC_XVALUE_ADDRESS_NONE",
 )
 REMOVED_VALUE_CACHE_PATTERN = re.compile(
@@ -447,46 +450,51 @@ def audit_addressed_binrwir_model(
         path: c_code_without_comments_or_literals(path.read_text(encoding="utf-8"))
         for path in iter_product_sources(runtimec_root)
     }
-    # 推导归属由代码本身决定，不钉文件名：拆文件、改名都不该让规则失效，
-    # 真正的约束是「恰好一个 vmkv 源推导 body 地址」。
-    offset_users = [
-        path for path, code in code_by_path.items()
-        if path != host_services and "RUNTIMEC_XVALUE_BODY_OFFSET_BYTES" in code
-    ]
-    derivation_owners = [path for path in offset_users if path.parent.name == "vmkv"]
-    if len(derivation_owners) != 1:
+    # 裁决 decision-vmbin-data-path §2：`+8` 的唯一实现在合同里，vmkv 与 vmbin 都调用
+    # `runtimec_xvalue_body_address`。判据按宏的出现位置：任何产品源只要自己写偏移
+    # 算术就是违规，调用函数不算——调用式里根本不出现这个宏。
+    contract_implementation = runtimec_root / "contract" / "host_services.c"
+    contract_code = code_by_path.get(contract_implementation, "")
+    if CONTRACT_BODY_ADDRESS_FUNCTION not in contract_code:
         findings.append(Finding(
-            relative_display(runtimec_root / "vmkv", repository_root), 1,
-            "vmkv-owned-body-address-derivation",
-            "exactly one vmkv source must derive the body address; found "
-            + (", ".join(relative_display(path, repository_root)
-                         for path in derivation_owners) or "none"),
+            relative_display(contract_implementation, repository_root), 1,
+            "contract-body-address-derivation",
+            f"the contract must define {CONTRACT_BODY_ADDRESS_FUNCTION[:-1]}",
         ))
-    else:
-        owner = derivation_owners[0]
-        for token in REQUIRED_BODY_ADDRESS_DERIVATION_TOKENS:
-            if token not in code_by_path[owner]:
-                findings.append(Finding(
-                    relative_display(owner, repository_root), 1,
-                    "vmkv-owned-body-address-derivation", token,
-                ))
-    for path in offset_users:
-        if path.parent.name != "vmkv":
+    if CONTRACT_BODY_ADDRESS_FUNCTION not in c_code_without_comments_or_literals(
+            host_text):
+        findings.append(Finding(
+            relative_display(host_services, repository_root), 1,
+            "contract-body-address-derivation",
+            f"the contract must declare {CONTRACT_BODY_ADDRESS_FUNCTION[:-1]}",
+        ))
+    for token in REQUIRED_BODY_ADDRESS_DERIVATION_TOKENS:
+        occurrences = contract_code.count(token)
+        if occurrences != 1:
             findings.append(Finding(
-                relative_display(path, repository_root), 1,
-                "body-address-derivation-outside-vmkv",
-                "only the contract declaration and the single VMKV derivation "
-                "may use the XValue body offset",
+                relative_display(contract_implementation, repository_root), 1,
+                "contract-body-address-derivation",
+                f"expected exactly one {token!r}, found {occurrences}",
             ))
     for path, code in code_by_path.items():
-        if path not in derivation_owners:
-            for match in HARDCODED_XVALUE_BODY_OFFSET_PATTERN.finditer(code):
-                findings.append(Finding(
-                    relative_display(path, repository_root),
-                    code.count("\n", 0, match.start()) + 1,
-                    "hardcoded-body-address-derivation-outside-vmkv",
-                    match.group(0),
-                ))
+        if path in (host_services, contract_implementation):
+            continue
+        if "RUNTIMEC_XVALUE_BODY_OFFSET_BYTES" in code:
+            findings.append(Finding(
+                relative_display(path, repository_root),
+                code.count("\n", 0, code.index(
+                    "RUNTIMEC_XVALUE_BODY_OFFSET_BYTES")) + 1,
+                "body-address-derivation-outside-contract",
+                "the XValue body offset arithmetic belongs to "
+                f"{CONTRACT_BODY_ADDRESS_FUNCTION[:-1]} in contract/host_services.c",
+            ))
+        for match in HARDCODED_XVALUE_BODY_OFFSET_PATTERN.finditer(code):
+            findings.append(Finding(
+                relative_display(path, repository_root),
+                code.count("\n", 0, match.start()) + 1,
+                "hardcoded-body-address-derivation-outside-contract",
+                match.group(0),
+            ))
 
     removed_resolver_name = "resolve_static_" + "value_body_address"
     for path in code_by_path:

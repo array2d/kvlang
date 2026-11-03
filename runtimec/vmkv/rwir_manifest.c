@@ -75,6 +75,14 @@ bool vmkv_rwir_type_set_is_single(uint32_t type_set) {
     return (type_set & (type_set - UINT32_C(1))) == 0U;
 }
 
+const vmkv_rwir_capability_t *vmkv_rwir_manifest_capability(
+    vmkv_rwir_capability_identifier_t identifier) {
+    if (identifier >= VMKV_RWIR_CAPABILITY_IDENTIFIER_LIMIT) {
+        return NULL;
+    }
+    return &vmkv_rwir_capabilities[identifier];
+}
+
 const vmkv_rwir_capability_t *vmkv_rwir_manifest_find_operation(
     runtimec_string_view_t surface_name) {
     if (!runtimec_string_view_is_valid(surface_name) ||

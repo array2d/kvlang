@@ -13,6 +13,7 @@
 #include "binrwir/program.h"
 #include "binrwir/signature.h"
 #include "contract/host_services.h"
+#include "kvspace/xvalue_head.h"
 
 _Static_assert(RUNTIMEC_STATUS_SUCCESS == 0, "success must remain zero");
 _Static_assert(RUNTIMEC_STATUS_YIELD == 1, "yield status changed");
@@ -156,6 +157,56 @@ static void test_instruction_argument_count_overflow(void) {
                     RUNTIMEC_STATUS_INVALID);
 }
 
+/* V.body 地址推导是全系统唯一的 +8：零基址与溢出都必须失败，不回绕。 */
+static void test_xvalue_body_address(void) {
+    RUNTIMEC_EXPECT(runtimec_xvalue_body_address(RUNTIMEC_XVALUE_ADDRESS_NONE) ==
+                    RUNTIMEC_VALUE_BODY_ADDRESS_NONE);
+    RUNTIMEC_EXPECT(runtimec_xvalue_body_address(UINT64_C(0x1000)) ==
+                    UINT64_C(0x1008));
+    RUNTIMEC_EXPECT(runtimec_xvalue_body_address(UINT64_MAX) ==
+                    RUNTIMEC_VALUE_BODY_ADDRESS_NONE);
+    RUNTIMEC_EXPECT(runtimec_xvalue_body_address(
+                        UINT64_MAX - RUNTIMEC_XVALUE_BODY_OFFSET_BYTES + 1U) ==
+                    RUNTIMEC_VALUE_BODY_ADDRESS_NONE);
+    /* 最大可表示基址：+8 恰好落在 UINT64_MAX，仍合法。 */
+    RUNTIMEC_EXPECT(runtimec_xvalue_body_address(
+                        UINT64_MAX - RUNTIMEC_XVALUE_BODY_OFFSET_BYTES) ==
+                    UINT64_MAX);
+}
+
+/* 逆运算：从值体地址读回长度；零地址、下溢、坏 storetype 都返回 0。 */
+static void test_value_body_length(void) {
+    uint8_t storage[KVSPACE_XVALUE_HEAD_LEN + 8U + 2U];
+    memset(storage, 0, sizeof(storage));
+    kvspaceXvalueHead head;
+    memset(&head, 0, sizeof(head));
+    head.storetype = KVSPACE_XVALUE_ST_SHORT;
+    kvspaceXvalueHeadSetLen(&head, 8U);
+    memcpy(storage, &head, sizeof(head));
+    storage[KVSPACE_XVALUE_HEAD_LEN + 8U] = 2U;
+    const runtimec_value_body_address_t body =
+        (runtimec_value_body_address_t)(uintptr_t)storage +
+        RUNTIMEC_XVALUE_BODY_OFFSET_BYTES;
+    RUNTIMEC_EXPECT(runtimec_value_body_length(body) == 8U);
+
+    /* 零地址与下溢：不能算出长度。 */
+    RUNTIMEC_EXPECT(runtimec_value_body_length(RUNTIMEC_VALUE_BODY_ADDRESS_NONE) ==
+                    0U);
+    RUNTIMEC_EXPECT(runtimec_value_body_length(
+                        RUNTIMEC_XVALUE_BODY_OFFSET_BYTES - 1U) == 0U);
+
+    /* storetype 不可信：地址前面不是值头。 */
+    storage[6] = 0x7fU;
+    RUNTIMEC_EXPECT(runtimec_value_body_length(body) == 0U);
+    storage[6] = KVSPACE_XVALUE_ST_SLACK;
+    RUNTIMEC_EXPECT(runtimec_value_body_length(body) == 8U);
+
+    /* 与 +8 互逆：基址 → 值体 → 长度，长度就是值头声明的 len。 */
+    const runtimec_xvalue_address_t base = (runtimec_xvalue_address_t)(uintptr_t)storage;
+    RUNTIMEC_EXPECT(runtimec_value_body_length(
+                        runtimec_xvalue_body_address(base)) == 8U);
+}
+
 static void test_host_services_version(void) {
     runtimec_host_services_t services;
 
@@ -172,6 +223,8 @@ int main(void) {
     test_plain_data_copy_round_trip();
     test_reference_argument_failure_shape();
     test_instruction_argument_count_overflow();
+    test_xvalue_body_address();
+    test_value_body_length();
     test_host_services_version();
     return failures == 0 ? 0 : 1;
 }

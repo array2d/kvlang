@@ -135,6 +135,10 @@ typedef enum vmkv_rwir_specialization_result {
 const vmkv_rwir_capability_t *vmkv_rwir_manifest_find_operation(
     runtimec_string_view_t surface_name);
 
+/* 按 identifier 取能力行；同一 identifier 恒返回同一地址，可用于行比较。 */
+const vmkv_rwir_capability_t *vmkv_rwir_manifest_capability(
+    vmkv_rwir_capability_identifier_t identifier);
+
 /* 按 .def 声明顺序求第一条匹配的改选规则。 */
 vmkv_rwir_specialization_result_t vmkv_rwir_manifest_find_specialization(
     runtimec_string_view_t surface_name,

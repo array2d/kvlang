@@ -70,6 +70,14 @@ runtimec_status_t binrwir_program_get_view(const binrwir_program_t *program,
 runtimec_status_t binrwir_program_get_instruction(
     const binrwir_program_t *program, uint32_t instruction_identifier,
     binrwir_instruction_view_t *output_instruction);
+/*
+ * 按 source logical program counter 找指令标识符。goto / br 的跳转目标是 source
+ * pc（layout 的 irseq），恢复时持久化的也是 source pc，而执行游标是稠密标识符；
+ * 两个空间之间的唯一映射就是这里。找不到返回 INVALID。
+ */
+runtimec_status_t binrwir_program_find_instruction(
+    const binrwir_program_t *program, uint32_t source_logical_program_counter,
+    uint32_t *output_instruction_identifier);
 /* 符号池只读借出：LOCAL 与 FUNCTION 参数项的 slot 就是这个下标。 */
 runtimec_status_t binrwir_program_get_symbol(
     const binrwir_program_t *program, uint16_t symbol_index,

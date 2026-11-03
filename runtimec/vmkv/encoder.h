@@ -58,11 +58,19 @@ typedef struct vmkv_encode_function {
 
 /*
  * 一条指令的 canonical 形状。read/write 两个分区与 RWIR 源同序同数。
+ *
  * argument_index 的取值按引用种类分两类：
  *   - PARAMETER_READ / PARAMETER_WRITE：被引用形参的 canonical argidx，
  *     slot 是它在所属方向形参表里的序号（0 起）；
- *   - LITERAL / STATIC / LOCAL / FUNCTION：Program 内唯一的出现序号，slot 按
- *     reference kind 各自的含义填。
+ *   - LITERAL / STATIC / LOCAL / FUNCTION：Program 内唯一的出现序号。
+ *
+ * slot / payload 按 reference kind 分工：
+ *   - PARAMETER_READ / PARAMETER_WRITE：slot = 形参序号，payload = 0；
+ *   - STATIC：slot = 符号池里绝对路径文本的下标（vmbin 按 key 读写的依据），
+ *     payload = 已推导的 body 地址（留给 JIT，phase 1 不消费）；
+ *   - LOCAL / FUNCTION：slot = 符号池下标（LOCAL 是变量名，FUNCTION 是函数名，
+ *     都不含 `/lib/`），payload = 0；
+ *   - LITERAL：slot = 0，payload = Program 字面量池下标。
  *
  * 生命周期：argument 数组与类型表借用 encoder 的内部缓冲，下一次调用即失效；
  * 类型表还借用函数源内存，随 vmkv_source_close_function 失效。需要跨源使用时
@@ -96,9 +104,13 @@ runtimec_status_t vmkv_encoder_get_canonical_encoding_revision(
  * VMKV 地址化的唯一窄入口。它先验证明文 parameter type/name/key，再拒绝
  * dynamic key；静态 key 只能由 host service 的非零 XValue 基址安全推导 V.body
  * 地址后生成 argument。该函数不读取 V.body，也不缓存 key、XValue 或 body。
+ *
+ * 绝对路径文本同时登记进 Program 符号池：slot = 符号下标（vmbin 按 key 访问），
+ * payload = body 地址（JIT 用）。同名路径重复登记由 builder 幂等处理。
  */
 runtimec_status_t vmkv_encode_static_argument(
     const vmkv_encode_request_t *request,
+    binrwir_program_builder_t *builder,
     const vmkv_rwir_argument_view_t *source_argument,
     uint32_t argument_index,
     binrwir_argument_t *output_argument,
@@ -109,13 +121,18 @@ runtimec_status_t vmkv_encode_static_argument(
  * 改选特化），每个实参收敛成单一具体 langtype 并与能力行掩码求交，写参类型
  * 按能力行的结果规则算出。输出借用 encoder 的内部缓冲，下一次调用即失效。
  *
+ * builder 是符号池与字面量池的登记目标：STATIC / LOCAL / FUNCTION 参数项的 slot、
+ * LITERAL 参数项的 payload 都由它给出，因此 canonical 指令只能发射进这份
+ * Program 的池空间。builder 为 NULL 时 INVALID——没有池就没有可解析的引用。
+ *
  * 失败封闭：未注册 operation、并集参数、掩码外类型、无法唯一确定的结果类型、
- * 当前引用模型无法表达的键（动态 key / 具名帧槽）都不产生 canonical 指令；
- * 这些情形返回 RUNTIMEC_STATUS_UNSUPPORTED。
+ * 无法表达的键（指针/扩展参数、非 `*[0,±k]` 的帧内槽表达式）都不产生 canonical
+ * 指令；这些情形返回 RUNTIMEC_STATUS_UNSUPPORTED。
  */
 runtimec_status_t vmkv_encode_instruction(
     vmkv_encoder_t *encoder,
     const vmkv_encode_request_t *request,
+    binrwir_program_builder_t *builder,
     vmkv_encode_function_t *function,
     const vmkv_rwir_instruction_view_t *source_instruction,
     vmkv_canonical_instruction_t *output_instruction,

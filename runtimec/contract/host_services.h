@@ -145,6 +145,26 @@ void runtimec_host_services_initialize(runtimec_host_services_t *services);
 bool runtimec_host_services_is_valid(
     const runtimec_host_services_t *services);
 
+/*
+ * V.body 地址推导：全系统**唯一**的「XValue 基址 + 固定头长度」实现，vmkv 与
+ * vmbin 都调用它，各自不得再写偏移算术。纯函数：无状态、无分配、不查存储。
+ * 零基址与加法溢出都返回 RUNTIMEC_VALUE_BODY_ADDRESS_NONE（不截断、不回绕）。
+ */
+runtimec_value_body_address_t
+runtimec_xvalue_body_address(runtimec_xvalue_address_t xvalue_address);
+
+/*
+ * 反向：由值体地址读回当前值体长度。与上面的 `+8` 是同一条几何的两个方向，
+ * 同样只在本文件实现——执行器不得再写 `body - 头长度`。
+ *
+ * 返回 0 表示「无法给出长度」：值体地址为零、小于固定头长度（下溢）、值头
+ * storetype 不是已知档位，或长度超出 uint32。注意 **0 也可以是一个合法的空
+ * 值体长度**（None 就是 len=0），两者无法从这里区分；需要严格区分的调用方
+ * 必须先用别的证据确认地址有效（例如它来自编译期静态 payload 或刚被成功
+ * 解析的绑定），再调用本函数。
+ */
+uint32_t runtimec_value_body_length(runtimec_value_body_address_t body_address);
+
 #ifdef __cplusplus
 static_assert(KVSPACE_XVALUE_HEAD_LEN == 8U,
               "KVspace XValue heads must remain 8 bytes");
