@@ -92,15 +92,15 @@ fn assert_semantic(tag: &str, src: &str) {
 fn integer_families_emit_semantic_names() {
     assert_semantic(
         "i64",
-        "rwfunc f(a:int64, b:int64) -> () {\n\ta + b -> w\n\ta - b -> w\n\ta × b -> w\n\ta ÷ b -> w\n\ta % b -> w\n\ta == b -> w\n\ta < b -> w\n\tabs(a) -> w\n\tsign(a) -> w\n\ta & b -> w\n\ta | b -> w\n\ta ^ b -> w\n\ta << b -> w\n\ta >> b -> w\n\tmax(a, b) -> w\n\tmin(a, b) -> w\n}\n",
+        "rwfunc f(*int64 $a, *int64 $b) -> () {\n\t*a + *b -> w\n\t*a - *b -> w\n\t*a × *b -> w\n\t*a ÷ *b -> w\n\t*a % *b -> w\n\t*a == *b -> w\n\t*a < *b -> w\n\tabs(*a) -> w\n\tsign(*a) -> w\n\t*a & *b -> w\n\t*a | *b -> w\n\t*a ^ *b -> w\n\t*a << *b -> w\n\t*a >> *b -> w\n\tmax(*a, *b) -> w\n\tmin(*a, *b) -> w\n}\n",
     );
     assert_semantic(
         "u64",
-        "rwfunc f(a:uint64, b:uint64) -> () {\n\ta + b -> w\n\ta < b -> w\n\tmax(a, b) -> w\n}\n",
+        "rwfunc f(*uint64 $a, *uint64 $b) -> () {\n\t*a + *b -> w\n\t*a < *b -> w\n\tmax(*a, *b) -> w\n}\n",
     );
     assert_semantic(
         "small",
-        "rwfunc f(a:int8, b:uint8) -> () {\n\ta + a -> w\n\tb + b -> w\n\ta < a -> w\n}\n",
+        "rwfunc f(*int8 $a, *uint8 $b) -> () {\n\t*a + *a -> w\n\t*b + *b -> w\n\t*a < *a -> w\n}\n",
     );
 }
 
@@ -108,17 +108,17 @@ fn integer_families_emit_semantic_names() {
 fn float_families_emit_semantic_names() {
     assert_semantic(
         "f64",
-        "rwfunc f(a:float64, b:float64) -> () {\n\ta + b -> w\n\ta - b -> w\n\ta × b -> w\n\ta ÷ b -> w\n\ta < b -> w\n\tsqrt(a) -> w\n\tpow(a, b) -> w\n\tabs(a) -> w\n\tneg(a) -> w\n\tmax(a, b) -> w\n}\n",
+        "rwfunc f(*float64 $a, *float64 $b) -> () {\n\t*a + *b -> w\n\t*a - *b -> w\n\t*a × *b -> w\n\t*a ÷ *b -> w\n\t*a < *b -> w\n\tsqrt(*a) -> w\n\tpow(*a, *b) -> w\n\tabs(*a) -> w\n\tneg(*a) -> w\n\tmax(*a, *b) -> w\n}\n",
     );
     assert_semantic(
         "f32",
-        "rwfunc f(a:float32, b:float32) -> () {\n\ta + b -> w\n\ta < b -> w\n\tmax(a, b) -> w\n}\n",
+        "rwfunc f(*float32 $a, *float32 $b) -> () {\n\t*a + *b -> w\n\t*a < *b -> w\n\tmax(*a, *b) -> w\n}\n",
     );
 }
 
 #[test]
 fn unary_minus_emits_neg() {
-    let ops = opcodes("unary", "f", "rwfunc f(a:int64) -> () {\n\t-a -> w\n}\n");
+    let ops = opcodes("unary", "f", "rwfunc f(*int64 $a) -> () {\n\t-*a -> w\n}\n");
     assert!(ops.iter().any(|o| o == "neg"), "一元负号应发 neg：{ops:?}");
     assert!(!ops.iter().any(|o| o.contains('·')), "{ops:?}");
 }
@@ -149,7 +149,7 @@ fn string_plus_emits_concat_and_mixed_is_rejected() {
 fn no_switch_can_bring_typed_names_back() {
     // 开关已删：把历史开关值设成任意值都不影响产物。
     for value in ["1", "0", ""] {
-        let file = temp_file("switch", "rwfunc f(a:int64) -> () {\n\ta + a -> w\n}\n");
+        let file = temp_file("switch", "rwfunc f(*int64 $a) -> () {\n\t*a + *a -> w\n}\n");
         let db = dsn("switch");
         let out = Command::new(bin())
             .arg(&file)

@@ -63,7 +63,12 @@ pub fn stmt_comments(st: &Stmt) -> &[String] {
 #[derive(Clone)]
 pub struct Param {
     pub name: String,
-    pub ty: String,   // "" = 空 kindexp（不约束，仅签名槽 `name:` 合法）
+    /// 参数的**类型表达式**，不含 `*`/`@`：传递方式不是类型的一部分
+    /// （spec 04-layout语义/03-函数:17「wire langtype 不含 `*`/`@` 前缀」）。
+    /// "" = 空 kindexp（不约束）。
+    pub ty: String,
+    /// 声明前缀：`*` 传址、`@` 扩展句柄、`None` 值复制。
+    pub by_ref: Option<char>,
     pub has_ty: bool, // 源码是否写了冒号（区分「空 kindexp」与「缺注解」）
 }
 
@@ -85,32 +90,55 @@ impl FuncSig {
             if i > 0 {
                 sb.push_str(", ");
             }
-            // Always emit `:` even for unconstrained `a:` so format/printlib output re-parses.
+            // 参数声明是 `*T $name` / `T $name`（类型在前）；空 kindexpr 的指针形态写
+            // `* $name`（`*` 与名字间有空格，与 `*T` 区分），这样 format/printlib 的
+            // 输出能被 parser 重新读回（往返幂等）。
+            // 传递方式（`by_ref`）与类型分开存，输出时拼回前缀。
+            let (by_ref, ty) = (p.by_ref, p.ty.as_str());
+            if let Some(prefix) = by_ref {
+                sb.push(prefix);
+            }
+            sb.push_str(ty);
+            // 前缀后、有类型或有名字时要分隔：`*int64 $a` / `* $a`。
+            if by_ref.is_some() || !ty.is_empty() {
+                sb.push(' ');
+            }
+            sb.push('$');
             sb.push_str(&p.name);
-            sb.push(':');
-            sb.push_str(&p.ty);
         }
         sb.push_str(") -> (");
         for (i, p) in self.returns.iter().enumerate() {
             if i > 0 {
                 sb.push_str(", ");
             }
-            // Always emit `:` even for unconstrained `a:` so format/printlib output re-parses.
+            let (by_ref, ty) = (p.by_ref, p.ty.as_str());
+            if let Some(prefix) = by_ref {
+                sb.push(prefix);
+            }
+            sb.push_str(ty);
+            if by_ref.is_some() || !ty.is_empty() {
+                sb.push(' ');
+            }
+            sb.push('$');
             sb.push_str(&p.name);
-            sb.push(':');
-            sb.push_str(&p.ty);
         }
         sb.push(')');
         sb
     }
 
     /// 参数 langtype 列表（读参在前、写参在后），落盘于 rwir/rwfunc body。
-    /// 末读参尾缀 `...` 是签名层变参标记：此处剥离，langtype 串保持纯净（变参落 dynamic 字节）。
+    ///
+    /// 剥两样东西：末读参尾缀 `...`（签名层变参标记，落 dynamic 字节）、
+    /// 以及前导 `*`/`@`——spec 04-layout语义/03-函数:17 明写「wire langtype 不含
+    /// `*`/`@` 前缀」，传递方式由帧槽的指针位承载，不进类型串。
     pub fn langtype_list(&self) -> Vec<String> {
         self.params
             .iter()
             .chain(self.returns.iter())
-            .map(|p| p.ty.strip_suffix("...").unwrap_or(&p.ty).to_string())
+            .map(|p| {
+                let ty = p.ty.strip_suffix("...").unwrap_or(&p.ty);
+                ty.trim_start_matches(['*', '@']).to_string()
+            })
             .collect()
     }
 
@@ -263,6 +291,16 @@ pub const DEREF_OP: &str = "*";
 /// `base·seg…` 读表达式（等价 `=` 拷贝读的成员路径），runtime 拼路径读值。
 /// 不再经 `kvspace·get`（清理方案：get 死刑）。
 pub const MEMBER_READ_OP: &str = "=";
+
+/// 具名容器字面量 `{k=v, …}` 在 AST 里的算子名。与位置型 `map·new` 是**同一份 key
+/// 目录组织**，区别只在成员键：具名型由名字直接当键，位置型由键侧 formatter 产出。
+/// 写槽是 structref 时改写成 `struct·new`（成员名来自原型）；否则由它落
+/// `base·name` 成员（见 spec [[map容器]] 的 `{n=42} -> m`）。
+///
+/// 名字仍是 `obj`：runtime 的能力表（`runtime/src/mywircaps.c`）按这个名字分派，
+/// 而 `runtime/` 在本阶段冻结。**它不是「容器种类」**——容器语义全由 langtype 的
+/// mapexpr/structref 表达，这里仅是这一个算子行的名字。
+pub const NAMED_LITERAL_OP: &str = "obj";
 
 impl Expr {
     pub fn is_leaf(&self) -> bool {
@@ -520,15 +558,14 @@ impl fmt::Display for Instruction {
             }
             return write!(f, "{s}");
         }
-        // obj("k1", v1, ...) → { k1=v1; k2=v2 }
-        if e.op == "obj" {
-            let mut pairs = Vec::new();
-            let mut j = 0;
-            while j + 1 < e.args.len() {
-                pairs.push(format!("{}={}", e.args[j].val, e.args[j + 1]));
-                j += 2;
-            }
-            let s = format!("{{ {} }}", pairs.join("; "));
+        // map·new(v0, v1, ...) → { v0, v1, ... }（含空 `{}`）
+        if e.op == "map·new" {
+            let items: Vec<String> = e.args.iter().map(ToString::to_string).collect();
+            let s = if items.is_empty() {
+                "{}".to_string()
+            } else {
+                format!("{{ {} }}", items.join(", "))
+            };
             if !self.writes.is_empty() {
                 if self.arrow_left {
                     return write!(f, "{writes}{}{s}", self.left_arrow());

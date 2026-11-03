@@ -38,7 +38,7 @@ fn refuse_rwir_and_rwfunc() {
 #[test]
 fn compile_simple_func() {
     let mut kv = fresh_kv();
-    let src = "rwfunc sum(A:int64, B:int64) -> (C:int64) {\n    A + B -> C\n}\n";
+    let src = "rwfunc sum(*int64 $A, *int64 $B) -> (*int64 $C) {\n    *A + *B -> *C\n}\n";
     compile(&mut kv, src).unwrap();
 
     // 函数签名
@@ -60,15 +60,21 @@ fn compile_simple_func() {
         .collect();
     assert_eq!(types, vec!["int64", "int64", "int64"]);
 
-    // 指令（layout 只发语义算子名：opcode = add，精度在操作数槽 langtype 上）
-    let op_key = "/lib/sum/[1,0]";
+    // 指令（layout 只发语义算子名：opcode = add，精度在操作数槽 langtype 上）。
+    // 新参数模型下 `*A` / `*B` 各展开成一条拷贝指令（第 1、2 行），`add` 落在第 3 行。
+    let op_key = "/lib/sum/[3,0]";
     let op = kv.get_one(op_key);
     assert_eq!(kvkind::kind(&op, &kv.langtype_of(op_key)), "rwir");
     assert_eq!(sig(&op), "add");
-    assert_eq!(sig(&kv.get_one("/lib/sum/[1,-1]")), "*[0,-1]\0int64");
-    assert_eq!(sig(&kv.get_one("/lib/sum/[1,-2]")), "*[0,-2]\0int64");
-    assert_eq!(sig(&kv.get_one("/lib/sum/[1,1]")), "*[0,1]\0int64");
-    assert_eq!(sig(&kv.get_one("/lib/sum/[2,0]")), "return");
+    assert_eq!(sig(&kv.get_one("/lib/sum/[3,-1]")), "_1\0int64");
+    assert_eq!(sig(&kv.get_one("/lib/sum/[3,-2]")), "_2\0int64");
+    // 写槽用**参数名** `*C`，不是帧坐标 `*[0,1]`：两者是同一约定（见 ast.rs 的 DEREF_OP
+    // 注释），runtime 按名字沿参数指针链解析到调用方目标。
+    assert_eq!(sig(&kv.get_one("/lib/sum/[3,1]")), "*C\0int64");
+    // 解引用各自的读槽：`*A` 落 `[1,-1]`、`*B` 落 `[2,-1]`。
+    assert_eq!(sig(&kv.get_one("/lib/sum/[1,-1]")), "*A\0int64");
+    assert_eq!(sig(&kv.get_one("/lib/sum/[2,-1]")), "*B\0int64");
+    assert_eq!(sig(&kv.get_one("/lib/sum/[4,0]")), "return");
 
     // 源码副本
     let src_key = "/lib/sum.src";
@@ -119,7 +125,7 @@ fn compile_multiline_string_literal() {
 #[test]
 fn compile_control_flow_is_single_plane() {
     let mut kv = fresh_kv();
-    let src = "rwfunc f(X:int64) -> (Y:int64) {\n    if (X > 0) {\n        X -> Y\n    } else {\n        0 -> Y\n    }\n}\n";
+    let src = "rwfunc f(*int64 $X) -> (*int64 $Y) {\n    if (*X > 0) {\n        *X -> *Y\n    } else {\n        0 -> *Y\n    }\n}\n";
     compile(&mut kv, src).unwrap();
 
     let sig_key = "/lib/f/[0,0]";
@@ -164,7 +170,7 @@ fn compile_control_flow_is_single_plane() {
 #[test]
 fn compile_while_goto_targets_are_int64() {
     let mut kv = fresh_kv();
-    let src = "rwfunc sum_to(n:int64) -> (acc:int64) {\n    0 -> acc\n    1 -> i\n    while (i <= n) {\n        acc + i -> acc\n        i + 1 -> i\n    }\n}\n";
+    let src = "rwfunc sum_to(*int64 $n) -> (*int64 $acc) {\n    0 -> *acc\n    1 -> i\n    while (i <= *n) {\n        *acc + i -> *acc\n        i + 1 -> i\n    }\n}\n";
     compile(&mut kv, src).unwrap();
     let children = kv.list("/lib/sum_to/", false, false);
     assert!(

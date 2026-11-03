@@ -355,7 +355,7 @@ fn br_true_false_are_int64() {
     let mut kv = fresh_kv();
     compile(
         &mut kv,
-        "rwfunc f(X:int64) -> (Y:int64) {\n    if (X > 0) { X -> Y } else { 0 -> Y }\n}\n",
+        "rwfunc f(*int64 $X) -> (*int64 $Y) {\n    if (*X > 0) { *X -> *Y } else { 0 -> *Y }\n}\n",
     )
     .unwrap();
     let children = children_of(&mut kv, "/lib/f/");
@@ -389,7 +389,7 @@ fn br_true_false_are_int64() {
 #[test]
 fn abs_if_is_numbered_jumps() {
     let mut kv = compile_fn(
-        "rwfunc abs(x:int64) -> (r:int64) {\n    if (x < 0) {\n        0 - x -> r\n    } else {\n        x -> r\n    }\n}\n",
+        "rwfunc abs(*int64 $x) -> (*int64 $r) {\n    if (*x < 0) {\n        0 - *x -> *r\n    } else {\n        *x -> *r\n    }\n}\n",
     );
     assert_single_plane(&mut kv, "abs");
     let p = plane(&mut kv, "abs");
@@ -434,7 +434,7 @@ fn abs_if_is_numbered_jumps() {
 #[test]
 fn while_back_edge_is_goto_int64() {
     let mut kv = compile_fn(
-        "rwfunc sum_to(n:int64) -> (acc:int64) {\n    0 -> acc\n    1 -> i\n    while (i <= n) {\n        acc + i -> acc\n        i + 1 -> i\n    }\n}\n",
+        "rwfunc sum_to(*int64 $n) -> (*int64 $acc) {\n    0 -> *acc\n    1 -> i\n    while (i <= *n) {\n        *acc + i -> *acc\n        i + 1 -> i\n    }\n}\n",
     );
     assert_single_plane(&mut kv, "sum_to");
     let p = plane(&mut kv, "sum_to");
@@ -470,7 +470,7 @@ fn while_back_edge_is_goto_int64() {
 #[test]
 fn break_is_goto_exit() {
     let mut kv = compile_fn(
-        "rwfunc f() -> (i:int64) {\n    0 -> i\n    while (i < 10) {\n        if (i == 5) {\n            break\n        }\n        i = i + 1\n    }\n}\n",
+        "rwfunc f() -> (*int64 $i) {\n    0 -> *i\n    while (*i < 10) {\n        if (*i == 5) {\n            break\n        }\n        *i = *i + 1\n    }\n}\n",
     );
     assert_single_plane(&mut kv, "f");
     let p = plane(&mut kv, "f");
@@ -504,7 +504,7 @@ fn break_is_goto_exit() {
 #[test]
 fn continue_is_goto_cond() {
     let mut kv = compile_fn(
-        "rwfunc f() -> (acc:int64) {\n    0 -> acc\n    1 -> i\n    while (i <= 5) {\n        if (i == 3) {\n            i = i + 1\n            continue\n        }\n        acc = acc + i\n        i = i + 1\n    }\n}\n",
+        "rwfunc f() -> (*int64 $acc) {\n    0 -> *acc\n    1 -> i\n    while (i <= 5) {\n        if (i == 3) {\n            i = i + 1\n            continue\n        }\n        *acc = *acc + i\n        i = i + 1\n    }\n}\n",
     );
     assert_single_plane(&mut kv, "f");
     let p = plane(&mut kv, "f");
@@ -563,7 +563,7 @@ fn for_is_br_goto_single_plane() {
 #[test]
 fn nested_if_while_single_plane() {
     let mut kv = compile_fn(
-        "rwfunc f() -> (acc:int64) {\n    0 -> acc\n    1 -> i\n    while (i <= 3) {\n        if (i == 2) {\n            acc = acc + i\n        } else {\n            acc = acc + 1\n        }\n        i = i + 1\n    }\n}\n",
+        "rwfunc f() -> (*int64 $acc) {\n    0 -> *acc\n    1 -> i\n    while (i <= 3) {\n        if (i == 2) {\n            *acc = *acc + i\n        } else {\n            *acc = *acc + 1\n        }\n        i = i + 1\n    }\n}\n",
     );
     assert_single_plane(&mut kv, "f");
     let p = plane(&mut kv, "f");

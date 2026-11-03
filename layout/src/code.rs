@@ -529,6 +529,7 @@ fn reconstruct_sig(kv: &mut Kv, dir: &str, name: &str, nr: i32, nw: i32, dynamic
     let blank = || Param {
         name: String::new(),
         ty: String::new(),
+        by_ref: None,
         has_ty: false,
     };
     let mut params: Vec<Param> = (0..nr).map(|_| blank()).collect();
@@ -541,6 +542,7 @@ fn reconstruct_sig(kv: &mut Kv, dir: &str, name: &str, nr: i32, nw: i32, dynamic
             params[(k - 1) as usize] = Param {
                 name: pname,
                 ty: pty,
+                by_ref: None,
                 has_ty: true,
             };
         }
@@ -551,6 +553,7 @@ fn reconstruct_sig(kv: &mut Kv, dir: &str, name: &str, nr: i32, nw: i32, dynamic
             returns[(k - 1) as usize] = Param {
                 name: rname,
                 ty: rty,
+                by_ref: None,
                 has_ty: true,
             };
         }
@@ -580,6 +583,10 @@ fn read_labels(kv: &mut Kv, dir: &str) -> Vec<(i32, String)> {
         .list(&ldir, false, true)
         .into_iter()
         .filter(|c| !c.ends_with('/'))
+        // `‥labels/` 是个目录，目录自己的元数据键也在 list 结果里（`__dir__`），
+        // 它不是 label：它的 body 是目录头，按 int64 解会得到垃圾 irseq，
+        // 拿去切片就是越界 panic。
+        .filter(|c| !c.starts_with("__"))
         .filter_map(|c| {
             let key = format!("{ldir}{c}");
             let irseq: i32 = kvkind::plain(&kv.get_one(&key), &kv.langtype_of(&key))
@@ -684,11 +691,35 @@ fn label_leaf(o: &Operand, by_irseq: &HashMap<i32, String>) -> Expr {
 }
 
 /// 线性指令 + labels → 语句序列：首 label 前为前导语句，各 label 段成 ScopeStmt。
+///
+/// `‥labels/<name>` 的 irseq 是**外部可写**的数据（kvspace 里一个普通键），越界或倒序
+/// 都不是「可以夹带过去」的情形：越界会切片越界 panic，倒序会静默丢指令段。两者都
+/// 说明这份 `/lib` 与它的 label 表不一致，按 p0 直接 panic 并指认具体 label。
 fn build_body(insts: &[RawInst], labels: &[(i32, String)]) -> Vec<Stmt> {
     let by_irseq: HashMap<i32, String> = labels.iter().map(|(i, l)| (*i, l.clone())).collect();
     let total = insts.len() as i32;
+    // 先整体校验，再切片：落在 `Range::map` 里的断言只能看见实际迭代到的下标，
+    // 越界的 label 会让它自己的区间变空从而整个跳过，等于没检查。
+    for (bi, (start, label)) in labels.iter().enumerate() {
+        assert!(
+            (1..=total).contains(start),
+            "label {label:?} 的 irseq {start} 超出指令范围 1..={total}"
+        );
+        if let Some((next, _)) = labels.get(bi + 1) {
+            assert!(
+                start < next,
+                "label {label:?} 的 irseq {start} 不小于其后 label 的 {next}（倒序或重复）"
+            );
+        }
+    }
     let first = labels.first().map(|(i, _)| *i).unwrap_or(total + 1);
-    let inst_stmt = |i: i32| Stmt::Instruction(build_inst(&insts[i as usize - 1], &by_irseq));
+    let inst_stmt = |i: i32| {
+        assert!(
+            (1..=total).contains(&i),
+            "指令下标 {i} 超出范围 1..={total}"
+        );
+        Stmt::Instruction(build_inst(&insts[i as usize - 1], &by_irseq))
+    };
     let mut body: Vec<Stmt> = (1..first).map(inst_stmt).collect();
     for (bi, (start, label)) in labels.iter().enumerate() {
         let end = labels.get(bi + 1).map(|(i, _)| *i).unwrap_or(total + 1);
@@ -1173,16 +1204,27 @@ fn slot_static_type(
     type_sets: &HashMap<String, Vec<String>>,
     stable: &HashMap<String, String>,
 ) -> String {
+    // `*p` 的槽类型是**解引用后的值类型**：形参 `p` 声明为 `*T`，读槽 `*[0,-k]`
+    // 承载的是 `T`。判据与 `lower::deref_value_type` 同一条——`*` 是传递方式，
+    // 不是类型的一部分。不剥这一层，读槽会落到空类型、编码器退回 `rwir`，
+    // 于是「操作数槽 langtype」里出现声明层面的 kind，与具体类型串味。
+    let lookup_name = name.strip_prefix('*').unwrap_or(name);
+    let is_deref = lookup_name.len() != name.len();
     // 只在**声明侧含并集**时才用 stable 覆盖：单一具体声明已经是最强约束，
     // 用推断结果覆盖它会改变既有产物的 langtype。
     let declared_any = param_langtype
-        .get(name)
-        .or_else(|| declared.get(name))
+        .get(lookup_name)
+        .or_else(|| declared.get(lookup_name))
         .filter(|t| !t.is_empty());
     if let Some(t) = declared_any {
-        return narrow_union(t.clone(), name, stable);
+        let value = if is_deref {
+            lower::deref_value_type(t)
+        } else {
+            t.as_str()
+        };
+        return narrow_union(value.to_string(), lookup_name, stable);
     }
-    lower::type_set_slot_type(type_sets, name).unwrap_or_default()
+    lower::type_set_slot_type(type_sets, lookup_name).unwrap_or_default()
 }
 
 fn read_slot_type(
@@ -1455,7 +1497,12 @@ fn check_call_names(
         if !is_bare_identifier(&op) {
             continue;
         }
-        if matches!(op.as_str(), "=" | "return" | "goto" | "br" | "call" | "obj") {
+        // 具名字面量（`{n=42}`）与位置型（`map·new`）都是算子而非函数调用：
+        // 前者的运行时实现登记在能力表里，但它的**名字**不是可调用的函数。
+        if matches!(
+            op.as_str(),
+            "=" | "return" | "goto" | "br" | "call" | crate::ast::NAMED_LITERAL_OP
+        ) {
             continue;
         }
         // 合法：全局函数（本文件裸定义 / 已布局）或已声明 rwir（def rwir）。
@@ -1866,7 +1913,7 @@ mod tests {
 
     #[test]
     fn format_preserves_lib() {
-        roundtrip("lib http {\n\trwfunc get(url:[]char/utf32) -> (resp:[]char/utf32) {\n\t\thttp·call(\"GET\", \"\", url, \"\") -> resp\n\t}\n}\n");
+        roundtrip("lib http {\n\trwfunc get(*[]char/utf32 $url) -> (*[]char/utf32 $resp) {\n\t\thttp·call(\"GET\", \"\", *url, \"\") -> *resp\n\t}\n}\n");
         roundtrip("lib byteseek {\nlib session {\nlib s1 {\nrwfunc main() -> () {\n3 + 4 -> s\nprintln(s)\n}\n}\n}\n}\nmain()\n");
     }
 
@@ -1890,7 +1937,7 @@ mod tests {
 
         compile(
             &mut kv,
-            "lib a {\nlib b {\nrwfunc f() -> (r:int64) {\n1 -> r\n}\n}\n}\n",
+            "lib a {\nlib b {\nrwfunc f() -> (int64 $r) {\n1 -> r\n}\n}\n}\n",
         )
         .unwrap();
         let dir = kv.get_one("/lib/a/b·f/");
@@ -1908,7 +1955,7 @@ mod tests {
         // 同 lib a 下再 layout 另一嵌套 lib c，验证 b·f 未被整库删除（增量合并）
         compile(
             &mut kv,
-            "lib a {\nlib c {\nrwfunc g() -> (r:int64) {\n2 -> r\n}\n}\n}\n",
+            "lib a {\nlib c {\nrwfunc g() -> (int64 $g) {\n2 -> r\n}\n}\n}\n",
         )
         .unwrap();
         assert_eq!(
@@ -1947,7 +1994,7 @@ mod tests {
             kvkind::new_defrwir(1, 0, false).unwrap(),
         )])
         .unwrap();
-        compile(&mut kv, "rwfunc caller() -> () {\ncallee(1) -> y\nprintln(y)\n}\nrwfunc callee(x:int64) -> (r:int64) {\nx -> r\n}\n").unwrap();
+        compile(&mut kv, "rwfunc caller() -> () {\ncallee(1) -> y\nprintln(y)\n}\nrwfunc callee(int64 $x) -> (int64 $r) {\nx -> r\n}\n").unwrap();
         assert_eq!(
             kvkind::kind(&kv.get_one("/lib/caller/[1,0]"), &kv.langtype_of("/lib/caller/[1,0]")),
             "rwfunc"

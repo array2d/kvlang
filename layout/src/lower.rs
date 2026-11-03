@@ -9,6 +9,16 @@ use super::{builtin, keytree, symbol};
 /// 容器类型（stringkeymap / mapexpr）不可用 `[]` 下标访问成员——
 /// `[]` 仅限 compact array（shaped langtype，含字符串 `[]char/*`）。
 /// 字符串/字符族（含 `[]char/utf32`、`[N]char`）：参与 add 拼接与比较，不做数值特化。
+/// `*T` 的**值类型** = `T`。这是「显式解引用」的类型规则，全仓只此一处实现。
+///
+/// 新参数模型下形参名在声明表里记作 `*T`（`*` 是传递方式），表达式 `*name` 的值类型
+/// 就是剥掉一层后的 `T`。推导（`exact_kind`）、实参（`arg_type`）、临时槽
+/// （`infer_op_type` 的 assign 分支）、调用返回（`annotate_returns_inst`）四处
+/// 必须给出**同一个答案**——否则同一条规则会漂移成四种行为。
+pub fn deref_value_type(pointer_type: &str) -> &str {
+    pointer_type.strip_prefix('*').unwrap_or(pointer_type)
+}
+
 fn is_string_kind(t: &str) -> bool {
     t.contains("char")
 }
@@ -131,7 +141,7 @@ fn check_container_body(body: &[Stmt], fn_: &Func, diags: &mut Vec<Diagnostic>) 
 
 fn check_container_inst(s: &Instruction, fn_: &Func, diags: &mut Vec<Diagnostic>) {
     let Some(e) = &s.expr else { return };
-    if e.op != "obj" && e.op != "map·new" {
+    if e.op != "map·new" {
         return;
     }
     let Some(target) = s.writes.first() else {
@@ -434,8 +444,12 @@ fn annotate_returns_inst(inst: &mut Instruction, sigs: &SigTable) {
         if inst.write_types.len() <= j {
             inst.write_types.resize(j + 1, String::new());
         }
-        if inst.write_types[j].is_empty() && !ret.ty.is_empty() {
-            inst.write_types[j] = ret.ty.clone();
+        // 返回类型上的 `*` 是**传递方式**（写目标必须可引用），不是表达式的类型：
+        // 调用 `t·f(*p) -> x` 的结果值就是 `int64`，不是 `*int64`。不剥这一层，
+        // 后续 `x + 1` 会报「add expects numeric operand, got "*int64"」。
+        let value_type = deref_value_type(&ret.ty);
+        if inst.write_types[j].is_empty() && !value_type.is_empty() {
+            inst.write_types[j] = value_type.to_string();
         }
     }
 }
@@ -797,14 +811,11 @@ fn lower_for_with_cont(
     let cond_slot = lg.tmp();
     let len_slot = lg.tmp();
     let key_slot = lg.tmp();
-    // 容器源（stringkeymap/struct）用 kvspace·listlen/kvspace·listat + `·*key` 遍历，compact 数组源用
-    // ndarray·numel/xv·at（见 spec 控制流脱糖）。判据看**声明的类型**：map 的 kindexpr 恒含
+    // 容器源（mapexpr/structref）用 kvspace·listlen/kvspace·listat + `·*key` 遍历，compact 数组源用
+    // ndarray·numel/xv·at（见 spec 控制流脱糖）。判据看**声明的类型**：mapexpr 的 base 恒含
     // `key·value` 的那个 `·`（`[int64]·int64`、`[]char/utf8·int64`），compact 数组不含。
-    let is_obj = s.iter.op == "obj"
-        || s.iter.op == "map·new"
-        || (s.iter.is_leaf()
-            && matches!(tm.get(&s.iter.val),
-                Some(t) if t == "stringkeymap" || t.contains(keytree::MEMBER_SEP)));
+    let is_container = s.iter.op == "map·new"
+        || (s.iter.is_leaf() && tm.get(&s.iter.val).is_some_and(|t| t.contains(keytree::MEMBER_SEP)));
 
     // 迭代源：裸标识符直接原地遍历；表达式（如数组字面量）先物化到临时槽。
     let mut init_body = Vec::new();
@@ -830,7 +841,7 @@ fn lower_for_with_cont(
         slot
     };
     init_body.push(make_copy_inst("-1", &idx_slot));
-    if is_obj {
+    if is_container {
         init_body.push(Stmt::Instruction(Instruction {
             comments: Vec::new(),
             expr: Some(ast::call("kvspace·listlen", vec![ast::leaf(&iter_slot)])),
@@ -886,7 +897,7 @@ fn lower_for_with_cont(
     };
     let body_inner = lower_body(&s.body, lg, Some(&body_lc), tm, targets, false);
     let mut body_insts = Vec::new();
-    if is_obj {
+    if is_container {
         body_insts.push(Stmt::Instruction(Instruction {
             comments: Vec::new(),
             expr: Some(ast::call(
@@ -1249,7 +1260,8 @@ fn per_write_types(
         if opcode.is_empty() {
             String::new()
         } else {
-            infer_op_type(&opcode, &reads, tm)
+            let annotated = inst.write_types.first().map(String::as_str).unwrap_or("");
+            infer_op_type(&opcode, &reads, tm, annotated)
         }
     };
     (0..inst.writes.len())
@@ -1497,7 +1509,15 @@ fn is_cast_op(op: &str) -> bool {
     )
 }
 
-fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String>) -> String {
+/// 算子的结果类型。`annotated` 是写槽上的类型标注（`x:T = …` 的 `T`），容器字面量
+/// **有标注用标注、无标注返空**——容器值的 langtype 只有声明处能给出，替它猜一个
+/// 就是发明语义（见 spec [[map容器]]：空容器必须带 mapexpr 标注）。
+fn infer_op_type(
+    opcode: &str,
+    reads: &[String],
+    tm: &mut HashMap<String, String>,
+    annotated: &str,
+) -> String {
     if matches!(opcode, "return" | "goto" | "br" | "call") {
         return String::new();
     }
@@ -1516,8 +1536,11 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
             }
             return ty;
         }
-        return if !reads.is_empty() {
-            slot_type(&reads[0], tm)
+        // 单读参拷贝：`*a` 的值类型是指针指向的类型——形参名在 tm 里记作 `*T`，
+        // 剥掉前导 `*` 再查。不剥会让 `x` 拿不到类型，后续 `x + y` 推不出字符串。
+        return if let Some(first) = reads.first() {
+            let ty = slot_type(first.trim_start_matches('*'), tm);
+            deref_value_type(&ty).to_string()
         } else {
             String::new()
         };
@@ -1617,11 +1640,8 @@ fn infer_op_type(opcode: &str, reads: &[String], tm: &mut HashMap<String, String
     if is_cast_op(opcode) {
         return opcode.to_string();
     }
-    if opcode == "obj" {
-        return "stringkeymap".to_string();
-    }
     if opcode == "map·new" {
-        return "[]stringkeymap".to_string();
+        return annotated.to_string();
     }
     match opcode {
         "kvlen" | "compactarray·numel" | "compactarray·dim" | "kvspace·listlen" | "string·len"
@@ -1748,6 +1768,12 @@ fn arg_type(e: &Expr, tm: &HashMap<String, String>) -> String {
                     ty = container_value(&ty).unwrap_or_default();
                 }
                 return ty;
+            }
+            // `*p` 解引用：表达式类型是**指针指向的类型**，不是 `*T` 本身。
+            // 形参名在 tm 里记作 `*T`（新参数模型的传递方式），剥一层即得值类型。
+            if e.op == ast::DEREF_OP {
+                let inner = e.args.first().map(|a| slot_type(&a.val, tm)).unwrap_or_default();
+                return deref_value_type(&inner).to_string();
             }
             slot_type(&e.val, tm)
         }
@@ -1914,7 +1940,14 @@ fn exact_kind(
     if op == "bool" {
         return Some("bool".to_string());
     }
-    if op == ast::DEREF_OP || op == "kvlang·abs" {
+    if op == ast::DEREF_OP {
+        // `*p` 的值类型 = 指针指向的类型。新参数模型下形参名在 declared 里记作 `*T`，
+        // 剥掉一层即得。旧实现无条件返回 None，导致 `*a + *b` 推不出字符串、
+        // 拼接待糖退化成数值加法。
+        let inner = e.args.first().and_then(|a| exact_kind(a, declared, stable))?;
+        return Some(deref_value_type(&inner).to_string());
+    }
+    if op == "kvlang·abs" {
         return None;
     }
     let entry = symbol::lookup(op);
@@ -2606,7 +2639,7 @@ pub fn resolve_slot_type(
     }
     if let Some(rest) = w.strip_prefix('*') {
         let t = declared.get(rest)?;
-        return Some(t.strip_prefix('*').unwrap_or(t).to_string());
+        return Some(deref_value_type(t).to_string());
     }
     if let Some(open) = w.find('[') {
         let base = &w[..open];
@@ -2862,12 +2895,7 @@ fn check_rhs(target: &str, e: &Expr, rhs: &str, diags: &mut Vec<Diagnostic>) {
     check_assignable(target, rhs, diags);
 }
 
-fn check_container_literal(
-    target: &str,
-    e: &Expr,
-    structs: &StructTable,
-    diags: &mut Vec<Diagnostic>,
-) {
+fn check_container_literal(target: &str, e: &Expr, diags: &mut Vec<Diagnostic>) {
     match e.op.as_str() {
         "compactarray·new" => {
             if let Some(elem) = container_elem(target) {
@@ -2888,38 +2916,16 @@ fn check_container_literal(
                 }
             }
         }
-        // 命名型 `{k=v}`：键为字符串字面量，值为 map value 或 struct 字段类型。
-        "obj" => {
-            let mut i = 0;
-            while i + 1 < e.args.len() {
-                let key = e.args[i].val.trim_matches('"');
-                let val = &e.args[i + 1];
-                let vt = container_value(target).or_else(|| {
-                    struct_lookup(target, structs).and_then(|d| {
-                        d.fields
-                            .iter()
-                            .find(|f| f.name == key)
-                            .map(|f| f.ty.clone())
-                    })
-                });
-                if let Some(vt) = vt {
-                    if builtin::is_num_kind(&vt) {
-                        check_element(&vt, val, diags);
-                    }
-                }
-                i += 2;
-            }
-        }
         _ => {}
     }
 }
 
-fn expr_result_type(e: &Expr, tm: &HashMap<String, String>) -> String {
+fn expr_result_type(e: &Expr, tm: &HashMap<String, String>, annotated: &str) -> String {
     if e.is_leaf() {
         return arg_type(e, tm);
     }
-    if matches!(e.op.as_str(), "compactarray·new" | "map·new" | "obj") {
-        return String::new();
+    if matches!(e.op.as_str(), "compactarray·new" | "map·new") {
+        return annotated.to_string();
     }
     let sym = symbol::lookup(&e.op);
     if sym.arith {
@@ -2948,7 +2954,7 @@ fn expr_result_type(e: &Expr, tm: &HashMap<String, String>) -> String {
     }
     let mut tm2 = tm.clone();
     let reads: Vec<String> = e.args.iter().map(|a| a.val.clone()).collect();
-    infer_op_type(&e.op, &reads, &mut tm2)
+    infer_op_type(&e.op, &reads, &mut tm2, annotated)
 }
 
 fn collect_declared(body: &[Stmt], declared: &mut HashMap<String, String>) {
@@ -3041,7 +3047,7 @@ fn check_call_args(
 ) {
     let sym = symbol::lookup(&e.op);
     if sym.arith || sym.cmp || is_cast_op(&e.op)
-        || matches!(e.op.as_str(), "compactarray·new" | "map·new" | "obj")
+        || matches!(e.op.as_str(), "compactarray·new" | "map·new")
     {
         return;
     }
@@ -3063,13 +3069,19 @@ fn check_call_args(
         }
         // union 形参此前被直接跳过（类型空洞）：按成员匹配可证明的实参类型，
         // 不在成员集内即报错（与具体类型检查同一诊断级别）。
-        if raw.contains('|') {
+        //
+        // `*` 作用于**整个类型表达式**（spec [[ptr]]：`*` 是传递方式，不是类型的
+        // 一部分）。`*int64|float64` 读作「指向 (int64|float64) 的指针」，比对的是
+        // 剥掉 `*` 之后的 union；逐成员写 `*A|*B` 非法，由参数声明处拒绝。
+        let union = deref_value_type(&raw).to_string();
+        if union.contains('|') {
             if let Some(vt) = provable_arg_type(arg, declared) {
-                if !value_matches(&raw, &vt) {
+                if !value_matches(&union, &vt) {
+                    // 报**值类型**不报 `*T`：`*` 是传递方式，不是实参要满足的类型。
                     push_write_diag(
                         diags,
                         format!(
-                            "TypeError: cannot pass {vt} to {raw} (parameter {})",
+                            "TypeError: cannot pass {vt} to {union} (parameter {})",
                             param.name
                         ),
                     );
@@ -3083,7 +3095,7 @@ fn check_call_args(
             continue;
         }
         let is_ptr = raw.starts_with('*');
-        let vt = raw.strip_prefix('*').unwrap_or(&raw).to_string();
+        let vt = deref_value_type(&raw).to_string();
         if is_none_lit(arg) {
             continue;
         }
@@ -3176,7 +3188,8 @@ fn walk_inst(
         return;
     }
 
-    let rhs = expr_result_type(e, tm);
+    let annotated = s.write_types.first().map(String::as_str).unwrap_or("");
+    let rhs = expr_result_type(e, tm, annotated);
     for (j, w) in s.writes.iter().enumerate() {
         if w.is_empty() {
             return;
@@ -3194,10 +3207,10 @@ fn walk_inst(
         if ty.is_empty() || ty.contains('|') || ty.starts_with('@') {
             return;
         }
-        if matches!(e.op.as_str(), "compactarray·new" | "map·new" | "obj")
+        if matches!(e.op.as_str(), "compactarray·new" | "map·new")
             && (ty.starts_with('[') || ty.contains(keytree::MEMBER_SEP) || ty.starts_with('/'))
         {
-            check_container_literal(&ty, e, structs, diags);
+            check_container_literal(&ty, e, diags);
         } else {
             check_rhs(&ty, e, &rhs, diags);
         }

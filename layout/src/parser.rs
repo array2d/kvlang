@@ -25,7 +25,8 @@ pub fn parse_code(src: &str) -> Result<(ast::File, Vec<Diagnostic>), String> {
         tokens,
         pos: 0,
         errors: lex_errors,
-        addr_params: Vec::new(),
+        ptr_params: Vec::new(),
+        value_params: Vec::new(),
         flow: FlowCtx::default(),
     };
     let f = p.parse_file();
@@ -44,9 +45,13 @@ struct Parser {
     tokens: Vec<Token>,
     pos: usize,
     errors: Vec<Diagnostic>,
-    // 当前函数体的地址形参名（声明带 `*`/`@`）：体内名字已被 layout 解引用一次（即实参值），
-    // 故体里再写 `*p` 就是两层间接——当前参数模型不支持（见 issue #286），报错不静默降级。
-    addr_params: Vec<String>,
+    // 当前函数体的指针形参名（声明带 `*`/`@`）。新参数模型下形参名就是**指针**：
+    // 读值要写 `*p`，做成员/坐标访问要写 `(*p)·x`——`·`/`[` 直接作用在 `p` 上是
+    // 隐式解引用，一律报错（spec 05-runtime语义/04-函数调用「禁止隐式解引用」）。
+    ptr_params: Vec<String>,
+    // 当前函数体的**值复制**形参名（声明无 `*`/`@` 且类型是标量）。体内只读，
+    // 不能被解引用、不能作写槽。
+    value_params: Vec<String>,
     // Per-function control-flow context, validated at function end.
     flow: FlowCtx,
 }
@@ -429,10 +434,21 @@ impl Parser {
         self.check_param_types(&sig);
         self.check_variadic(&sig);
         self.check_param_dup(&sig);
-        self.addr_params = sig
+        // 指针参数的判据：显式 `*`/`@` 前缀（`by_ref`），或类型本身是值容器
+        // （structref `/lib/X`、mapexpr `k·v`——容器没有可拷贝的值，只能按地址传）。
+        self.ptr_params = sig
             .params
             .iter()
             .chain(sig.returns.iter())
+            .filter(|p| {
+                p.by_ref.is_some() || p.ty.starts_with('/') || p.ty.contains('\u{b7}')
+            })
+            .map(|p| p.name.clone())
+            .collect();
+        self.value_params = sig
+            .params
+            .iter()
+            .filter(|p| p.by_ref.is_none())
             .map(|p| p.name.clone())
             .collect();
         self.skip_newlines_and_comments();
@@ -441,7 +457,8 @@ impl Parser {
         let body = self.parse_body();
         self.expect(Kind::RBrace);
         self.finish_flow(outer_flow);
-        self.addr_params.clear();
+        self.ptr_params.clear();
+        self.value_params.clear();
         let func = Func {
             comments: Vec::new(),
             sig,
@@ -636,6 +653,8 @@ impl Parser {
                     sb.push(']');
                     self.advance();
                 }
+                // `$name` 是参数声明的名字标记，不属于类型：遇到就收尾，留给调用方剥 `$`。
+                Kind::Ident | Kind::Literal if t.value.starts_with('$') => return sb,
                 Kind::Ident | Kind::Literal => {
                     sb.push_str(&t.value);
                     self.advance();
@@ -669,6 +688,10 @@ impl Parser {
         }
     }
 
+    /// 参数声明只有两种形态（spec 04-layout语义/03-函数）：`*T $name` 传址、
+    /// `T $name` 标量值复制。**类型在前、`$name` 在后**；`$` 只是声明的标记，
+    /// 解析后剥掉——函数体内的引用写裸名（指针参数写 `*name`）。
+    /// 旧写法 `name: type` 不再接受。
     fn parse_param_list(&mut self, stop: Kind) -> Vec<Param> {
         let mut params = Vec::new();
         while self.peek().kind != stop && self.peek().kind != Kind::EOF {
@@ -679,21 +702,89 @@ impl Parser {
             if self.eat(Kind::Comma) {
                 continue;
             }
-            let t = self.peek();
-            if t.kind != Kind::Ident && t.kind != Kind::Literal {
+            let start = self.peek();
+            // 类型可以以 `[` 起头（`[]char/utf32`、`[int64]·int64`），也可以带 `*`/`@` 前缀。
+            if !matches!(
+                start.kind,
+                Kind::Ident | Kind::Literal | Kind::LBrack
+            ) {
                 break;
             }
-            let mut param = Param {
-                name: self.advance().value,
-                ty: String::new(),
-                has_ty: false,
-            };
-            if self.peek().kind == Kind::Colon {
-                self.advance();
-                param.has_ty = true;
-                param.ty = self.parse_type();
+            // 旧写法：`name: type`——第一个词后跟冒号。
+            if self.peek_at(1).kind == Kind::Colon {
+                self.advance(); // name
+                self.advance(); // :
+                let ty = self.parse_type();
+                self.errors.push(Diagnostic {
+                    pos: start.pos,
+                    warn: false,
+                    info: false,
+                    message: format!(
+                        "参数声明必须是 `*T $name` 或 `T $name`；旧写法 `{}:{}` 不再接受",
+                        start.value, ty
+                    ),
+                    source: String::new(),
+                    src_file: String::new(),
+                    src_name: String::new(),
+                });
+                params.push(Param {
+                    name: start.value,
+                    ty,
+                    by_ref: None,
+                    has_ty: true,
+                });
+                continue;
             }
-            params.push(param);
+            // 新写法：`*T $name` / `T $name`——类型在前。`$` 不是分隔符，故
+            // `$name` 整个是一个 Ident；剥掉 `$` 即得体内引用的裸名。
+            let ty = self.parse_type();
+            let t = self.peek();
+            let name = match t.value.strip_prefix('$').filter(|_| t.kind == Kind::Ident) {
+                Some(n) => {
+                    self.advance();
+                    n.to_string()
+                }
+                None => {
+                    self.errors.push(Diagnostic {
+                        pos: t.pos,
+                        warn: false,
+                        info: false,
+                        message: format!(
+                            "参数声明必须是 `*T $name` 或 `T $name`；类型 {ty:?} 后面缺少 `$name`"
+                        ),
+                        source: String::new(),
+                        src_file: String::new(),
+                        src_name: String::new(),
+                    });
+                    String::new()
+                }
+            };
+            // 传递方式（`*`/`@`）与类型分开存：`ty` 只留类型表达式，
+            // `*int64|float64` 的 `*` 作用于整个 union，剥掉后是 `int64|float64`。
+            let by_ref = ty.chars().next().filter(|c| *c == '*' || *c == '@');
+            let ty_value = ty.trim_start_matches(['*', '@']).to_string();
+            // 空 kindexp 只对**指针**有意义（`* $a`：目标类型不约束）。值复制的前提是
+            // 「有一个可拷贝的小值」，没有类型就没有值可拷贝——`$a` 不是「不约束的
+            // 值复制」，是一个没有定义的形态（spec 03-类型系统/07-文法与合法性:61）。
+            if by_ref.is_none() && ty_value.is_empty() {
+                self.errors.push(Diagnostic {
+                    pos: t.pos,
+                    warn: false,
+                    info: false,
+                    message: format!(
+                        "值复制参数必须声明类型（限定字符串、数值或 bool）；无类型参数请写 `* ${name}`"
+                    ),
+                    source: String::new(),
+                    src_file: String::new(),
+                    src_name: String::new(),
+                });
+            }
+            params.push(Param {
+                name,
+                ty: ty_value,
+                by_ref,
+                has_ty: true,
+            });
         }
         params
     }
@@ -710,17 +801,61 @@ impl Parser {
         // （这是 struct 引用的语法糖），因此「写错/写漏种类名」的表现就是它突然被当成
         // structref 容器、要求加 `*`。遇到这条诊断而类型看着像标量时，先看它是不是
         // 拼错或未登记的种类名，而不是急着加 `*`。
-        for (slot, ret) in sig
-            .params
-            .iter()
-            .map(|p| ("param", p))
-            .chain(sig.returns.iter().map(|r| ("return value", r)))
-        {
-            if is_value_container_ty(&ret.ty) && !ptr_prefixed(&ret.ty) {
+        // `*` 作用于**整个类型表达式**，不能逐成员写：`*int64|float64` 合法
+        // （指向 int64|float64 的指针），`*int64|*float64` 非法（同一参数两种传递方式）。
+        // `*` 是传递方式不是类型的一部分，逐成员写就是把它当类型用了（spec [[ptr]]）。
+        for param in sig.params.iter().chain(sig.returns.iter()) {
+            let members: Vec<&str> = param.ty.split('|').collect();
+            if members.len() > 1 && members.iter().skip(1).any(|m| m.trim().starts_with('*')) {
+                self.errors.push(Diagnostic {
+                    pos: Pos { line: 0, col: 0 },
+                    warn: false,
+                    info: false,
+                    message: format!(
+                        "参数 {:?}: `*` 作用于整个类型表达式，不能逐成员写 —— 写 `{}`",
+                        param.name, {
+                            let stripped: Vec<&str> =
+                                members.iter().map(|m| m.trim().trim_start_matches('*')).collect();
+                            format!("*{} ${}", stripped.join("|"), param.name)
+                        }
+                    ),
+                    source: String::new(),
+                    src_file: String::new(),
+                    src_name: String::new(),
+                });
+            }
+        }
+        // 参数位置与返回值位置各发**一条**诊断，不并列两个事实源：
+        // 参数侧的判据是「值复制只允许哪些类型」，返回值侧是「容器没有可拷贝的值」。
+        for param in &sig.params {
+            if !is_value_container_ty(&param.ty) || param.by_ref.is_some() {
+                continue;
+            }
+            let pointer_form = param
+                .ty
+                .split('|')
+                .map(|a| format!("*{a}"))
+                .collect::<Vec<_>>()
+                .join("|");
+            self.errors.push(Diagnostic {
+                pos: Pos { line: 0, col: 0 },
+                message: format!(
+                    "func {}: param {:?}: 值复制参数只能是字符串、数值或 bool —— 容器请写 `{} ${}`",
+                    sig.name, param.name, pointer_form, param.name
+                ),
+                warn: false,
+                info: false,
+                source: String::new(),
+                src_file: String::new(),
+                src_name: String::new(),
+            });
+        }
+        for ret in &sig.returns {
+            if is_value_container_ty(&ret.ty) && ret.by_ref.is_none() {
                 self.errors.push(Diagnostic {
                     pos: Pos { line: 0, col: 0 },
                     message: format!(
-                        "func {}: {slot} {:?}: 值容器类型只能按地址传递 —— 写 `{:?}`",
+                        "func {}: return value {:?}: 值容器类型只能按地址传递 —— 写 `{:?}`",
                         sig.name,
                         ret.name,
                         ret.ty
@@ -1200,13 +1335,20 @@ impl Parser {
         })
     }
 
-    /// 校验散 key 字面量 `{...}` 的出现位置。`top_legal` 表示当前上下文允许顶层出现
-    /// （赋值右值 / for-in 源）；无论如何，其元素内部都不得再嵌套散 key 字面量。
-    /// `{}` 对应两种 langtype：写类型是 structref（`/lib/Name`）→ `struct·new(path, k, v, …)`；
-    /// 否则（容器字面量）保留 `obj`（runtime 构 map 容器）。容器字面量必须有 map langtype，
-    /// 由 lower::check_container_typed 统一把关（那里能看见签名里的参数/返回类型）。
-    fn dispatch_obj_by_type(&mut self, inst: &mut Instruction) {
-        if inst.expr.as_ref().map(|e| e.op.as_str()) != Some("obj") {
+    /// 具名字面量 `{k=v, …}` 按写槽 langtype 分派，两条路径都是合法的：
+    ///
+    /// - structref（`/lib/Name`）→ `struct·new(path, k, v, …)`：成员名来自原型，
+    ///   实例化即克隆原型子树再覆盖字段（见 spec [[struct]]）；
+    /// - 其它（mapexpr）→ 保持 `map·named`：成员落 `base·name`，键就是写的名字
+    ///   （见 spec [[map容器]] 的 `{n=42} -> m`）。
+    ///
+    /// 位置型 `{v0, v1, …}` 走 `map·new`，不经这里——它的成员键由键侧 formatter 产出。
+    fn dispatch_named_literal(&mut self, inst: &mut Instruction) {
+        let is_named = inst
+            .expr
+            .as_ref()
+            .is_some_and(|e| e.op == ast::NAMED_LITERAL_OP);
+        if !is_named {
             return;
         }
         let ty = inst.write_types.first().map(String::as_str).unwrap_or("");
@@ -1304,7 +1446,7 @@ impl Parser {
                     inst.writes = writes;
                     inst.write_types = wtypes;
                     inst.expr = reads.into_iter().next().flatten();
-                    self.dispatch_obj_by_type(&mut inst);
+                    self.dispatch_named_literal(&mut inst);
                     self.lower_array_fill(&mut inst);
                     self.desugar_subscript_write(&mut inst);
                     self.desugar_member_write(&mut inst);
@@ -1320,7 +1462,7 @@ impl Parser {
                     inst.expr = reads.into_iter().next().flatten();
                     inst.writes = writes;
                     inst.write_types = wtypes;
-                    self.dispatch_obj_by_type(&mut inst);
+                    self.dispatch_named_literal(&mut inst);
                     self.desugar_subscript_write(&mut inst);
                     self.desugar_member_write(&mut inst);
                 }
@@ -1414,7 +1556,7 @@ impl Parser {
                 operator: false,
                 operand_kind: String::new(),
             };
-            self.dispatch_obj_by_type(&mut i);
+            self.dispatch_named_literal(&mut i);
             self.lower_array_fill(&mut i);
             self.desugar_subscript_write(&mut i);
             self.desugar_member_write(&mut i);
@@ -1463,6 +1605,32 @@ impl Parser {
         loop {
             // 后缀成员访问
             if self.peek().kind == Kind::Dot {
+                // `·` 作用在指针基上是隐式解引用——必须写 `(*p)·x`（见 spec 05-runtime语义/
+                // 04-函数调用「禁止隐式解引用」）。判据只看基座是不是指针形参的裸名。
+                if chain_base.is_none() && chain_segs.is_empty() {
+                    if let Some(name) = bare_ptr_param(self, &left) {
+                        // `·[i]` 是坐标访问（元组键/散 key 下标），报另一条文本。
+                        let coordinate = matches!(
+                            self.peek_at(1).kind,
+                            Kind::LBrack
+                        );
+                        let pos = self.peek().pos;
+                        let message = if coordinate {
+                            format!("对指针类型的坐标访问必须显式解引用：写 (*{name})·[i]")
+                        } else {
+                            format!("对指针类型的成员访问必须显式解引用：写 (*{name})·name")
+                        };
+                        self.errors.push(Diagnostic {
+                            pos,
+                            warn: false,
+                            info: false,
+                            message,
+                            source: String::new(),
+                            src_file: String::new(),
+                            src_name: String::new(),
+                        });
+                    }
+                }
                 self.advance(); // consume ·
                                 // 动态键 d·*k：段是变量（运行时取值的字符串键）。
                 if self.peek().kind == Kind::Ident && self.peek().value == "*" {
@@ -1525,6 +1693,21 @@ impl Parser {
             }
             // 后缀索引
             if self.peek().kind == Kind::LBrack {
+                // `[` 作用在指针基上同样是隐式解引用——写 `(*p)[i]`。
+                if let Some(name) = bare_ptr_param(self, &left) {
+                    let pos = self.peek().pos;
+                    self.errors.push(Diagnostic {
+                        pos,
+                        warn: false,
+                        info: false,
+                        message: format!(
+                            "对指针类型的坐标访问必须显式解引用：写 (*{name})[i]"
+                        ),
+                        source: String::new(),
+                        src_file: String::new(),
+                        src_name: String::new(),
+                    });
+                }
                 self.advance();
                 let mut indices = Vec::new();
                 while self.peek().kind != Kind::RBrack && self.peek().kind != Kind::EOF {
@@ -1763,42 +1946,23 @@ impl Parser {
             ));
         }
 
-        // dict 字面量
+        // 容器字面量 `{…}`。位置型与具名型是**两种不同的东西**，用不同算子承载：
+        //
+        // - 位置型 `{v0, v1, …}` → `map·new(v0, v1, …)`：map 容器，成员键由键侧
+        //   formatter 产出；
+        // - 具名型 `{k=v, …}` → 待定的 struct 实例化：成员名来自原型，最终是否成立取决于
+        //   写槽 langtype（是 structref 才合法）。用独立算子承载，让分派处能分清，
+        //   否则「位置型字符串列表」与「具名字段表」在 args 里长得一样。
         if t.kind == Kind::LBrace {
             let mut j = 1isize;
             while self.peek_at(j).kind == Kind::Newline || self.peek_at(j).kind == Kind::Comment {
                 j += 1;
             }
-            let is_dict = self.peek_at(j).kind == Kind::RBrace
-                || (self.peek_at(j).kind == Kind::Ident
-                    && self.peek_at(j + 1).kind == Kind::Arrow
-                    && self.peek_at(j + 1).value == "=");
-            if !is_dict {
-                // 值列表 `{v0, v1, ...}`（无 `=> =`）→ 散 key 数组字面量，区别于 dict 的
-                // `key => = val`。散 key：每个元素落在 base.i 独立 key（变长/可增长），
-                // 字符串数组走这里；compact 定长打包走 `[...]`。
-                self.advance(); // consume {
-                let mut elems = Vec::new();
-                loop {
-                    while matches!(
-                        self.peek().kind,
-                        Kind::Newline | Kind::Comma | Kind::Comment
-                    ) {
-                        self.advance();
-                    }
-                    if self.peek().kind == Kind::RBrace || self.peek().kind == Kind::EOF {
-                        break;
-                    }
-                    match self.parse_pratt(0) {
-                        Some(e) => elems.push(e),
-                        None => break,
-                    }
-                }
-                self.expect(Kind::RBrace);
-                return Some(ast::call("map·new", elems));
-            }
+            let named = self.peek_at(j).kind == Kind::Ident
+                && self.peek_at(j + 1).kind == Kind::Arrow
+                && self.peek_at(j + 1).value == "=";
             self.advance(); // consume {
-            let mut args = Vec::new();
+            let mut elems = Vec::new();
             loop {
                 while matches!(
                     self.peek().kind,
@@ -1809,43 +1973,23 @@ impl Parser {
                 if self.peek().kind == Kind::RBrace || self.peek().kind == Kind::EOF {
                     break;
                 }
-                if self.peek().kind != Kind::Ident {
-                    let t = self.peek();
-                    self.errors.push(Diagnostic {
-                        pos: t.pos,
-                        warn: true,
-                        message: format!("obj literal: expected member name, got {:?}", t.value),
-                        info: false,
-                        source: String::new(),
-                        src_file: String::new(),
-                        src_name: String::new(),
-                    });
-                    break;
+                if named {
+                    // `{k=v …}`：键是标识符，值接在后面，键值交错。
+                    let key = self.advance().value;
+                    self.advance(); // consume =
+                    let Some(val) = self.parse_pratt(0) else { break };
+                    elems.push(ast::str_lit(&key));
+                    elems.push(val);
+                } else {
+                    match self.parse_pratt(0) {
+                        Some(e) => elems.push(e),
+                        None => break,
+                    }
                 }
-                let key = self.advance().value;
-                if !(self.peek().kind == Kind::Arrow && self.peek().value == "=") {
-                    let t = self.peek();
-                    self.errors.push(Diagnostic {
-                        pos: t.pos,
-                        warn: true,
-                        message: format!("obj literal: expected '=' after {key:?}"),
-                        info: false,
-                        source: String::new(),
-                        src_file: String::new(),
-                        src_name: String::new(),
-                    });
-                    break;
-                }
-                self.advance(); // consume =
-                let val = match self.parse_pratt(0) {
-                    Some(v) => v,
-                    None => break,
-                };
-                args.push(ast::str_lit(&key));
-                args.push(val);
             }
             self.expect(Kind::RBrace);
-            return Some(ast::call("obj", args));
+            let op = if named { ast::NAMED_LITERAL_OP } else { "map·new" };
+            return Some(ast::call(op, elems));
         }
 
         // 括号分组
@@ -2170,10 +2314,12 @@ impl Parser {
         }
         let msg = if arg.quote != 0 {
             "`*` 解引用要求 Ptr 槽（名字），不能作用于字符串字面量".to_string()
-        } else if self.addr_params.contains(&arg.val) {
+        } else if self.value_params.contains(&arg.val) {
+            // 值复制形参是体内的一份副本，只读、没有可写的目标：
+            // 对它解引用等于凭空造一个指针（spec 05-runtime语义/04-函数调用）。
             format!(
-                "`*{}` 是两层间接：地址形参在体内已被解引用一次（名字即实参值）；先 `{} -> local` 再 `*local`（见 issue #286）",
-                arg.val, arg.val
+                "值复制参数不可解引用：只读，没有可写的目标（`{}` 是值复制形参）",
+                arg.val
             )
         } else {
             return;
@@ -2262,15 +2408,14 @@ impl Parser {
             name.push_str(ast::DEREF_OP);
         }
         name.push_str(&self.advance().value);
-        if name.starts_with(ast::DEREF_OP) && self.addr_params.contains(&name[1..].to_string()) {
+        // 参数槽本身永远不可写：形参槽存的是指针，裸写 `-> p` 改的是**指针绑定**而不是
+        // 它指向的目标，等于偷偷换掉调用方的地址。要写目标必须写 `-> *p`。
+        if !name.starts_with(ast::DEREF_OP) && self.ptr_params.contains(&name) {
             self.errors.push(Diagnostic {
                 pos: self.peek().pos,
-                message: format!(
-                    "`{}` 是两层间接：地址形参在体内已被解引用一次（名字即实参值）；先 `{} -> local` 再写 `*local`（见 issue #286）",
-                    name, &name[1..]
-                ),
                 warn: false,
                 info: false,
+                message: format!("写指针形参必须显式解引用：写 `-> *{name}`"),
                 source: String::new(),
                 src_file: String::new(),
                 src_name: String::new(),
@@ -2748,20 +2893,19 @@ fn is_fixed_dim_array(t: &str) -> bool {
         .all(|d| !d.trim().is_empty() && d.trim().bytes().all(|c| c.is_ascii_digit()))
 }
 
-/// 类型串里是否有原子以 `*`（间接性前缀）起头——以 `|`（并）与 `·`（map 键值）切分后逐段看。
-fn ptr_prefixed(ty: &str) -> bool {
-    ty.split(['|', '·']).any(|a| a.starts_with('*'))
-}
-
 /// 值容器类型：成员落在兄弟槽 `{key}·` 的类型——map langtype（含 `·`）或 structref（`/` 开头）。
 /// 这类值没有可拷贝的单槽值，只能按地址传递（见 spec [[函数]]）。
+///
+/// 传递方式不参与判断：`*` 已由 `Param::by_ref` 单独承载，`ty` 只剩类型表达式。
 fn is_value_container_ty(ty: &str) -> bool {
     ty.split('|')
-        .any(|a| a.trim_start_matches('*').starts_with('/') || a.contains('·'))
+        .any(|a| a.starts_with('/') || a.contains('·'))
 }
 
 fn type_error(_kind: &str) -> String {
-    "unknown type — valid: int8/16/32/64, uint8/16/32/64, float32/64, bool, char/utf32, obj, map, index, char, any, []T, [2,3]T, [?,N]T, A|B".to_string()
+    // 列的是**种类名**，容器不在此列：map 写 mapexpr（`[]char/utf8·int64`），
+    // struct 写原型路径（`/lib/Point`）——两者都不是种类（见 spec [[langtype语义类型]]）。
+    "unknown type — valid: int8/16/32/64, uint8/16/32/64, float32/64, bool, char/utf32, char, any, []T, [2,3]T, [?,N]T, A|B, key·value, /lib/Name".to_string()
 }
 
 /// 收集函数体（含嵌套块/分支/循环）里的全部指令，供别名污染的不动点迭代用。
@@ -2839,4 +2983,16 @@ fn type_has_any(raw: &str) -> bool {
         };
         base == "any"
     })
+}
+
+/// 基座是否为「指针形参的裸名」：是则返回名字。
+///
+/// 新参数模型下形参名是指针，`·`/`[` 直接作用在它上面就是隐式解引用。
+/// 判据只认**裸名**（`Expr::is_leaf` 且非字符串字面量）——`(*p)` 已经显式解引用过，
+/// 它的基座是解引用表达式，不在此列。
+fn bare_ptr_param(p: &Parser, e: &Expr) -> Option<String> {
+    if !e.is_leaf() || e.quote != 0 {
+        return None;
+    }
+    p.ptr_params.iter().find(|n| **n == e.val).cloned()
 }

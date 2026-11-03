@@ -50,13 +50,13 @@ fn union_members_accepted() {
     let mut kv = fresh_kv("ok");
     compile(
         &mut kv,
-        "rwfunc f(x:int64|float64) -> (r:int64) {\n    0 -> r\n}\n",
+        "rwfunc f(*int64|float64 $x) -> (*int64 $r) {\n    0 -> *r\n}\n",
     )
     .unwrap();
-    let decl = "rwfunc f(x:int64|float64) -> (r:int64) {\n    0 -> r\n}\n";
+    let decl = "rwfunc f(*int64|float64 $x) -> (*int64 $r) {\n    0 -> *r\n}\n";
     compile(&mut kv, &format!("{decl}rwfunc g() -> () {{\n    f(1)\n}}\n")).unwrap();
     compile(&mut kv, &format!("{decl}rwfunc h() -> () {{\n    f(1.5)\n}}\n")).unwrap();
-    compile(&mut kv, &format!("{decl}rwfunc i(v:int64) -> () {{\n    f(v)\n}}\n")).unwrap();
+    compile(&mut kv, &format!("{decl}rwfunc i(*int64 $v) -> () {{\n    f(*v)\n}}\n")).unwrap();
 }
 
 #[test]
@@ -64,10 +64,10 @@ fn union_non_members_rejected() {
     let mut kv = fresh_kv("bad");
     compile(
         &mut kv,
-        "rwfunc f(x:int64|float64) -> (r:int64) {\n    0 -> r\n}\n",
+        "rwfunc f(*int64|float64 $x) -> (*int64 $r) {\n    0 -> *r\n}\n",
     )
     .unwrap();
-    let decl = "rwfunc f(x:int64|float64) -> (r:int64) {\n    0 -> r\n}\n";
+    let decl = "rwfunc f(*int64|float64 $x) -> (*int64 $r) {\n    0 -> *r\n}\n";
     // bool 字面量不在 union 成员内
     assert!(compile(&mut kv, &format!("{decl}rwfunc g() -> () {{\n    f(true)\n}}\n")).is_err());
     // 已声明 int32 变量不在 union 成员内（不做隐式加宽）
@@ -89,13 +89,13 @@ fn union_pointer_and_string_members() {
     let mut kv = fresh_kv("ptr");
     compile(
         &mut kv,
-        "struct P {\n\tx:int64 = 0\n}\nrwfunc f(p:*P|int64) -> () {\n}\n",
+        "struct P {\n\tx:int64 = 0\n}\nrwfunc f(*P|int64 $p) -> () {\n}\n",
     )
     .unwrap();
     compile(&mut kv, "rwfunc g() -> () {\n    1\n    f(1)\n}\n").unwrap();
     compile(
         &mut kv,
-        "rwfunc f2(s:[]char/utf8|int64) -> () {\n}\nrwfunc h() -> () {\n    f2(\"x\")\n}\n",
+        "rwfunc f2(*[]char/utf8|int64 $s) -> () {\n}\nrwfunc h() -> () {\n    f2(\"x\")\n}\n",
     )
     .unwrap();
 }
@@ -104,8 +104,7 @@ fn union_pointer_and_string_members() {
 fn union_mismatch_reports_both_sides() {
     let file = temp_file(
         "bad",
-        "rwfunc f(x:int64|float64) -> (r:int64) {\n    0 -> r\n}\n\
-         rwfunc g() -> () {\n    f(true)\n}\n",
+        "rwfunc f(*int64|float64 $x) -> (*int64 $r) {\n    0 -> *r\n}\nrwfunc g() -> () {\n    f(true)\n}\n",
     );
     let db = dsn("bad");
     let out = Command::new(bin()).arg(&file).arg(&db).output().unwrap();

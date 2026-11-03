@@ -81,7 +81,7 @@ fn quoted_member_base_is_still_allowed() {
     let mut kv = fresh_kv("member");
     compile(
         &mut kv,
-        "rwfunc f(i:int64) -> () {\n    1 -> \"/tmp/pathlit\"·*i\n}\n",
+        "rwfunc f(*int64 $i) -> () {\n    1 -> \"/tmp/pathlit\"·*i\n}\n",
     )
     .unwrap();
     let text = slot_text(&mut kv, "/lib/f/[1,1]");
@@ -166,7 +166,7 @@ fn unquoted_path_member_base_is_allowed() {
     let mut kv = fresh_kv("pathbase");
     compile(
         &mut kv,
-        "rwfunc f(i:int64) -> () {\n    1 -> /tmp/pathlit·*i\n}\n",
+        "rwfunc f(*int64 $i) -> () {\n    1 -> /tmp/pathlit·*i\n}\n",
     )
     .unwrap();
     let text = slot_text(&mut kv, "/lib/f/[1,1]");

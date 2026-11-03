@@ -62,7 +62,7 @@ fn op_texts(db: &str) -> Vec<(String, String)> {
     out
 }
 
-const SRC: &str = "rwfunc t() -> (r:char/utf32) {\n    a = \"hello\"\n    b = a + \"!\"\n    b -> r\n}\n";
+const SRC: &str = "rwfunc t() -> (*char/utf32 $r) {\n    a = \"hello\"\n    b = a + \"!\"\n    b -> *r\n}\n";
 
 #[test]
 fn string_plus_becomes_concat() {
@@ -77,7 +77,7 @@ fn string_plus_becomes_concat() {
 
 #[test]
 fn mixed_string_and_number_is_layout_error() {
-    let src = "rwfunc t() -> (r:char/utf32) {\n    a = \"x\"\n    b = a + 1\n    b -> r\n}\n";
+    let src = "rwfunc t() -> (*char/utf32 $r) {\n    a = \"x\"\n    b = a + 1\n    b -> *r\n}\n";
     let (_, out) = layout("mix", src, &[]);
     assert!(!out.status.success());
     let err = String::from_utf8_lossy(&out.stderr);

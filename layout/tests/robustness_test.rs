@@ -101,7 +101,7 @@ fn break_continue_outside_loop_is_positioned_error() {
     assert!(compile(&mut s.kv, src).is_err());
     assert!(s.kv.get_one("/lib/test/[0,0]").is_empty(), "rejected program must not be written");
     // Valid inside a loop (including nested `if`).
-    let ok = "rwfunc t(n:int64) -> () {\n\ti = 0\n\twhile (i < n) {\n\t\tif (i == 2) { break }\n\t\ti + 1 -> i\n\t}\n}\n";
+    let ok = "rwfunc t(*int64 $n) -> () {\n\ti = 0\n\twhile (i < *n) {\n\t\tif (i == 2) { break }\n\t\ti + 1 -> i\n\t}\n}\n";
     assert!(errors(ok).is_empty(), "{:?}", errors(ok));
     assert!(vet(ok).is_ok());
 }
@@ -121,7 +121,7 @@ fn user_label_errors_are_positioned() {
 /// Unterminated code before a `goto`-targeted label must emit a fall-through `goto` rather than panicking or skipping the block.
 #[test]
 fn targeted_label_is_entered_by_fallthrough() {
-    let top = "rwfunc f(c:int64) -> (r:int64) {\n\tif (c == 1) {\n\t\tgoto(L)\n\t}\n\t1 -> r\n\tL: {\n\t\tr + 10 -> r\n\t\treturn\n\t}\n}\n";
+    let top = "rwfunc f(*int64 $c) -> (*int64 $r) {\n\tif (*c == 1) {\n\t\tgoto(L)\n\t}\n\t1 -> *r\n\tL: {\n\t\t*r + 10 -> *r\n\t\treturn\n\t}\n}\n";
     assert!(vet(top).is_ok());
     let mut s = store();
     compile(&mut s.kv, top).unwrap();
@@ -143,7 +143,7 @@ fn targeted_label_is_entered_by_fallthrough() {
 fn vet_rejects_what_compile_rejects() {
     let bad = [
         "rwfunc f() -> () {\n\tx:int8 = 300\n}\n",
-        "rwfunc f(a:) -> () {\n\tsub(a) -> x\n}\n",
+        "rwfunc f(* $a) -> () {\n\tsub(*a) -> x\n}\n",
         "struct P {\n\tx:int8=300\n}\n",
         "struct P {\n\tx:int64=\"a\"\n}\n",
     ];
@@ -152,7 +152,7 @@ fn vet_rejects_what_compile_rejects() {
         let mut s = store();
         assert!(compile(&mut s.kv, src).is_err(), "compile accepted:\n{src}");
     }
-    let good = "rwfunc f(a:int64) -> (r:int64) {\n\tadd(a, 1) -> r\n}\n";
+    let good = "rwfunc f(*int64 $a) -> (*int64 $r) {\n\tadd(*a, 1) -> *r\n}\n";
     assert!(vet(good).is_ok());
     let mut s = store();
     compile(&mut s.kv, good).unwrap();
@@ -222,7 +222,7 @@ fn failed_compile_keeps_previous_function_intact() {
     assert_eq!(s.kv.get_one("/lib/g/[1,0]"), before, "old body must survive a failed re-layout");
     let src = slot(&mut s.kv, "/lib/g.src");
     assert!(src.contains("println"), "old .src must survive: {src:?}");
-    let err = compile(&mut s.kv, "rwfunc h(a:) -> () {\n\tsub(a) -> x\n}\n").unwrap_err();
+    let err = compile(&mut s.kv, "rwfunc h(* $a) -> () {\n\tsub(*a) -> x\n}\n").unwrap_err();
     assert!(err.contains("sub must emit"), "{err}");
     assert!(s.kv.get_one("/lib/h/[0,0]").is_empty(), "no half-written signature");
     assert!(s.kv.get_one("/lib/h.src").is_empty());
@@ -302,21 +302,10 @@ fn truncated_corpus_never_panics() {
 /// `format` preserves member reads and empty-kindexp params (`a:`) idempotently with identical layout output.
 #[test]
 fn format_round_trips_member_reads_and_empty_kindexp() {
-    let src = "rwfunc f(a:, n:int64) -> (r:int64) {\n\
-               \tm:[]char/utf8·int64 = {}\n\
-               \tk = \"x\"\n\
-               \tm·x = 1\n\
-               \tm·x -> v1\n\
-               \tm·*k -> v2\n\
-               \t\"/tmp/up\"·*n -> v3\n\
-               \t\"/tmp/up\"·0 -> v4\n\
-               \tm·\"a b\" -> v5\n\
-               \tm·\"if\" -> v6\n\
-               \tv1 + m·x -> r\n\
-               }\n";
+    let src = "rwfunc f(* $a, *int64 $n) -> (*int64 $r) {\n\tm:[]char/utf8·int64 = {}\n\tk = \"x\"\n\tm·x = 1\n\tm·x -> v1\n\tm·*k -> v2\n\t\"/tmp/up\"·*n -> v3\n\t\"/tmp/up\"·0 -> v4\n\tm·\"a b\" -> v5\n\tm·\"if\" -> v6\n\tv1 + m·x -> *r\n}\n";
     let once = kvlanglayout::format(src).unwrap();
     assert!(!once.contains("=("), "member read rendered as a call:\n{once}");
-    assert!(once.contains("f(a:, n:int64)"), "{once}");
+    assert!(once.contains("f(* $a, *int64 $n)"), "{once}");
     assert!(errors(&once).is_empty(), "formatted output must parse:\n{once}\n{:?}", errors(&once));
     assert_eq!(kvlanglayout::format(&once).unwrap(), once, "format must be idempotent");
     let (mut a, mut b) = (store(), store());
@@ -325,17 +314,22 @@ fn format_round_trips_member_reads_and_empty_kindexp() {
     assert_eq!(plane(&mut a.kv, "f"), plane(&mut b.kv, "f"));
 }
 
-/// `Instruction::flat` before lowering must not panic on non-leaf deref operands (`*(a + 1)`, `*f(x)`, `*p·x`).
+/// `Instruction::flat` before lowering must not panic on non-leaf deref operands (`*(a + 1)`, `*f(x)`)。
+///
+/// 样本里不能再写 `*a·b`：裸指针基座的成员访问已是错误（显式解引用铁律），
+/// 写 `(*a)·b` 才是它的对应形态。这条测的是 flat 的健壮性，不是解引用规则。
 #[test]
 fn deref_of_expression_does_not_panic() {
-    let src = "rwfunc t(a:int64) -> () {\n\t*(a + 1) -> x\n\t*a·b -> y\n}\n";
+    let src = "rwfunc t(*int64 $a) -> () {\n\t*(*a + 1) -> x\n\t(*a)·b -> y\n}\n";
     assert!(vet(src).is_ok());
     let mut s = store();
     compile(&mut s.kv, src).unwrap();
+    // `*a` 先展开成第 1 条拷贝指令（`_1 = *a`），`add` 因此落在第 2 条。
     let p = plane(&mut s.kv, "t");
-    assert_eq!(p[&1].0, "add");
-    assert_eq!(p[&2], ("=".to_string(), vec!["*_1".to_string()]));
-    let src2 = "rwfunc f(a:int64) -> (r:int64) { a -> r }\nrwfunc t(a:int64) -> () {\n\tx = *f(a)\n}\n";
+    assert_eq!(p[&1], ("=".to_string(), vec!["*a".to_string()]));
+    assert_eq!(p[&2].0, "add");
+    assert_eq!(p[&3], ("=".to_string(), vec!["*_1".to_string()]));
+    let src2 = "rwfunc f(*int64 $a) -> (*int64 $r) { *a -> *r }\nrwfunc t(*int64 $a) -> () {\n\tx = *f(*a)\n}\n";
     assert!(vet(src2).is_ok());
     compile(&mut store().kv, src2).unwrap();
 }

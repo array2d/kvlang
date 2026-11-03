@@ -2,7 +2,7 @@ use kvlanglayout::parser::{self};
 
 #[test]
 fn parse_type_expression_signature() {
-    let src = "rwfunc f(A:int64|float64, B:[2,3]float32, C:[?,768]float32) -> (D:[]float32) {\n    A -> D\n}\n";
+    let src = "rwfunc f(*int64|float64 $A, *[2,3]float32 $B, *[?,768]float32 $C) -> (*[]float32 $D) {\n    *A -> *D\n}\n";
     let (file, diags) = parser::parse_code(src).unwrap();
     let msgs: Vec<String> = diags.iter().map(|d| d.message.clone()).collect();
     assert!(!parser::has_errors(&diags), "unexpected errors: {:?}", msgs);
@@ -17,7 +17,7 @@ fn parse_type_expression_signature() {
 
 #[test]
 fn reject_malformed_type_expression() {
-    let src = "rwfunc f(A:[2,3) -> () {\n}\n";
+    let src = "rwfunc f(*[2,3 $A) -> () {\n}\n";
     let (_, diags) = parser::parse_code(src).unwrap();
     assert!(
         parser::has_errors(&diags),
@@ -128,15 +128,15 @@ fn accept_bare_name_as_struct_on_brace_literal() {
 fn reject_duplicate_param_names() {
     let cases = [
         (
-            "rwfunc f(a:int64, a:int64) -> () {\n}\n",
+            "rwfunc f(*int64 $a, *int64 $a) -> () {\n}\n",
             "duplicate param \"a\" in read-params",
         ),
         (
-            "rwfunc f() -> (a:int64, a:int64) {\n}\n",
+            "rwfunc f() -> (*int64 $a, *int64 $a) {\n}\n",
             "duplicate param \"a\" in write-params",
         ),
         (
-            "rwfunc f(a:int64) -> (a:int64) {\n}\n",
+            "rwfunc f(*int64 $a) -> (*int64 $a) {\n}\n",
             "appears in both read-params and write-params",
         ),
     ];
@@ -152,8 +152,8 @@ fn reject_duplicate_param_names() {
 /// 合法的参数名组合不得误伤，调用点同名（读写槽同一变量）也不受影响。
 #[test]
 fn accept_unique_param_names() {
-    let sig = "rwfunc f(a:int64, b:int64) -> (c:int64, d:int64) {\n\ta + b -> c\n\t0 -> d\n}\n";
+    let sig = "rwfunc f(*int64 $a, *int64 $b) -> (*int64 $c, *int64 $d) {\n\t*a + *b -> *c\n\t0 -> *d\n}\n";
     assert_eq!(errors(sig), Vec::<String>::new());
-    let call = "rwfunc inc(a:int64) -> (b:int64) {\n\ta + 1 -> b\n}\nrwfunc f() -> () {\n\t5 -> x\n\tinc(x) -> x\n}\n";
+    let call = "rwfunc inc(*int64 $a) -> (*int64 $b) {\n\t*a + 1 -> *b\n}\nrwfunc f() -> () {\n\t5 -> x\n\tinc(x) -> x\n}\n";
     assert_eq!(errors(call), Vec::<String>::new());
 }

@@ -42,7 +42,7 @@ fn redis_compile() {
     let mut kv = Kv::conn(&dsn);
     init_dirs(&mut kv).unwrap();
 
-    let src = "rwfunc sum(A:int64, B:int64) -> (C:int64) {\n    A + B -> C\n}\n";
+    let src = "rwfunc sum(*int64 $A, *int64 $B) -> (*int64 $C) {\n    *A + *B -> *C\n}\n";
     compile(&mut kv, src).unwrap();
 
     let sig_val = kv.get_one("/lib/sum/[0,0]");

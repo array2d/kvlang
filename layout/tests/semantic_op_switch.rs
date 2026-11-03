@@ -76,7 +76,7 @@ fn dump_ops(tag: &str, src: &str) -> (String, Vec<String>) {
 
 #[test]
 fn emits_semantic_names_only() {
-    let src = "rwfunc t() -> (r:int64) {\n    acc = 0\n    acc = acc + 1\n    acc -> r\n}\n";
+    let src = "rwfunc t() -> (*int64 $r) {\n    acc = 0\n    acc = acc + 1\n    acc -> *r\n}\n";
     let (opcode, _) = dump_ops("sem", src);
     assert_eq!(opcode, "add");
     assert!(!opcode.contains('·'), "typed opcode 不应再出现：{opcode}");
@@ -86,8 +86,7 @@ fn emits_semantic_names_only() {
 /// 算子必须仍按 rwir 落库，绝不能被裸名解析成函数调用（曾导致无限递归）。
 #[test]
 fn semantic_operator_never_resolves_as_call() {
-    let src = "lib string {\n    rwfunc eq(a:[]char/utf32, b:[]char/utf32) -> (r:bool) {\n        false -> r\n    }\n}\n\
-               rwfunc t() -> (r:bool) {\n    1 == 1 -> r\n}\n";
+    let src = "lib string {\n    rwfunc eq(*[]char/utf32 $a, *[]char/utf32 $b) -> (*bool $r) {\n        false -> *r\n    }\n}\nrwfunc t() -> (*bool $r) {\n    1 == 1 -> *r\n}\n";
     let file = temp_file("collide", src);
     let db = dsn("collide");
     let out = Command::new(bin()).arg(&file).arg(&db).output().unwrap();
