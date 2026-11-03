@@ -30,6 +30,11 @@ static runtimec_status_t binrwir_instruction_validate_content(
     uint32_t source_logical_program_counter, uint32_t operation_identifier,
     binrwir_argument_span_t read_arguments,
     binrwir_argument_span_t write_arguments) {
+    /* FOREIGN 是结构标记：合法 opid，但必须零读参零写参。 */
+    if (operation_identifier == BINRWIR_OPERATION_IDENTIFIER_FOREIGN &&
+        (read_arguments.count != 0U || write_arguments.count != 0U)) {
+        return RUNTIMEC_STATUS_INVALID;
+    }
     if (operation_identifier == BINRWIR_OPERATION_IDENTIFIER_NONE ||
         source_logical_program_counter ==
             BINRWIR_EXECUTION_PROGRAM_COUNTER_NONE ||

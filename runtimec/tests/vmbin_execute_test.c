@@ -36,6 +36,7 @@ static int failures;
 #define TEST_VALUE_CAPACITY 64U
 #define TEST_COMMITTED_FLAG \
     ((uint16_t)BINRWIR_EXECUTION_EXIT_FLAG_COMPLETED_STATE_COMMITTED)
+#define TEST_COPY_OPERATION VMBIN_OPERATION_IDENTIFIER_COPY
 
 /* ---------------- 测试用 XValue：值头 + 值体，按地址读写 ---------------- */
 
@@ -847,8 +848,11 @@ static void test_add_builtin_handler(void) {
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
 
-/* 未注册的算子不是错误：交 route handoff，游标不推进。 */
-static void test_unknown_operation_hands_off(void) {
+/*
+ * Program 里出现 registry 没有的 opid = 编译期与执行期的表不一致 = 内部不一致，
+ * 报 INVALID。外部能力不走这条路，它编成 FOREIGN 标记。
+ */
+static void test_unknown_operation_is_internal_inconsistency(void) {
     test_allocator_context_t counters = {0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
     binrwir_program_t *program = NULL;
@@ -860,7 +864,7 @@ static void test_unknown_operation_hands_off(void) {
     test_program_source_t source;
 
     memset(&instruction, 0, sizeof(instruction));
-    instruction.operation_identifier = 0x00F0U; /* 未注册 */
+    instruction.operation_identifier = 0x00F0U; /* registry 里没有 */
     instruction.source_program_counter = 6U;
     memset(&source, 0, sizeof(source));
     source.instructions = &instruction;
@@ -874,12 +878,90 @@ static void test_unknown_operation_hands_off(void) {
     RUNTIMEC_EXPECT(vmbin_builtin_registry_initialize(&registry, NULL, 0U) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL,
+                                  &exit_state) == RUNTIMEC_STATUS_INVALID);
+    RUNTIMEC_EXPECT(exit_state.kind == BINRWIR_EXECUTION_EXIT_ERROR);
+    RUNTIMEC_EXPECT(exit_state.status == RUNTIMEC_STATUS_INVALID);
+    RUNTIMEC_EXPECT((exit_state.flags & TEST_COMMITTED_FLAG) == 0U);
+    RUNTIMEC_EXPECT(frame.logical_program_counter == 0U);
+
+    RUNTIMEC_EXPECT(binrwir_frame_bindings_destroy(bindings) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(binrwir_execution_frame_destroy(&frame) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(binrwir_program_destroy(program) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(counters.live_allocations == 0U);
+}
+
+/* FOREIGN 标记：不执行、不写、不推进游标，出口给出标记的 source pc。 */
+static void test_foreign_marker_hands_off(void) {
+    test_allocator_context_t counters = {0U};
+    runtimec_allocator_t allocator = test_allocator(&counters);
+    test_value_t destination;
+    binrwir_program_t *program = NULL;
+    binrwir_execution_frame_t frame;
+    binrwir_frame_bindings_t *bindings = NULL;
+    binrwir_execution_exit_t exit_state;
+    vmbin_builtin_registry_t registry;
+    uint8_t literal[8];
+    binrwir_argument_t write_argument;
+    test_instruction_t instructions[3];
+    test_program_source_t source;
+
+    test_value_initialize(&destination, sizeof(int64_t));
+    test_int64_bytes(7, literal);
+    /* 写位置在标记之后，必须一个字节都没被写。 */
+    RUNTIMEC_EXPECT(binrwir_argument_create(1U, BINRWIR_REFERENCE_STATIC, 0U,
+                                            test_value_body_address(&destination),
+                                            &write_argument) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    memset(instructions, 0, sizeof(instructions));
+    instructions[0].operation_identifier = TEST_COPY_OPERATION;
+    instructions[0].source_program_counter = 1U;
+    RUNTIMEC_EXPECT(binrwir_argument_create(2U, BINRWIR_REFERENCE_LITERAL, 0U,
+                                            0U, &instructions[0].reads[0]) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    instructions[0].read_count = 1U;
+    instructions[0].writes[0] = write_argument;
+    instructions[0].write_count = 1U;
+    /* [1] 外来标记，source pc 42。 */
+    instructions[1].operation_identifier = BINRWIR_OPERATION_IDENTIFIER_FOREIGN;
+    instructions[1].source_program_counter = 42U;
+    /* [2] 标记之后：执行到这里就说明标记没起作用。 */
+    instructions[2].operation_identifier = TEST_COPY_OPERATION;
+    instructions[2].source_program_counter = 43U;
+    instructions[2].reads[0] = instructions[0].reads[0];
+    instructions[2].read_count = 1U;
+    instructions[2].writes[0] = write_argument;
+    instructions[2].write_count = 1U;
+    memset(&source, 0, sizeof(source));
+    source.symbols[0] = "/t/foreign";
+    source.symbol_count = 1U;
+    source.literal_types[0] = "int64";
+    source.literal_bytes[0] = literal;
+    source.literal_sizes[0] = sizeof(literal);
+    source.literal_count = 1U;
+    source.instructions = instructions;
+    source.instruction_count = 3U;
+
+    RUNTIMEC_EXPECT(test_program_build(&allocator, &source, &program) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(test_frame_initialize(&frame, &bindings, program,
+                                          &allocator) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(vmbin_builtin_registry_initialize(&registry, NULL, 0U) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL,
                                   &exit_state) == RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(exit_state.kind == BINRWIR_EXECUTION_EXIT_HANDOFF);
     RUNTIMEC_EXPECT(exit_state.status == RUNTIMEC_STATUS_UNSUPPORTED);
-    RUNTIMEC_EXPECT(exit_state.resume_logical_program_counter == 6U);
+    /* 出口位置是标记自己的 source pc。 */
+    RUNTIMEC_EXPECT(exit_state.logical_program_counter == 42U);
+    RUNTIMEC_EXPECT(exit_state.resume_logical_program_counter == 42U);
+    /* 标记一个字节都没写：既有提交标志不能置。 */
     RUNTIMEC_EXPECT((exit_state.flags & TEST_COMMITTED_FLAG) == 0U);
-    RUNTIMEC_EXPECT(frame.logical_program_counter == 0U);
+    /* 标记之后的指令没有执行，值仍是最初的 0。 */
+    RUNTIMEC_EXPECT(frame.logical_program_counter != 3U);
 
     RUNTIMEC_EXPECT(binrwir_frame_bindings_destroy(bindings) ==
                     RUNTIMEC_STATUS_SUCCESS);
@@ -1219,7 +1301,8 @@ int main(void) {
     test_call_reports_target_symbol();
     test_return_completes_frame();
     test_add_builtin_handler();
-    test_unknown_operation_hands_off();
+    test_unknown_operation_is_internal_inconsistency();
+    test_foreign_marker_hands_off();
     test_zero_operation_identifier_is_invalid();
     test_unbound_parameter_is_invalid();
     test_literal_is_not_writable();

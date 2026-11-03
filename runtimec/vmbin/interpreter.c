@@ -361,20 +361,13 @@ static runtimec_status_t vmbin_interpreter_dispatch_builtin(
         execution->builtin_registry,
         instruction->instruction->operation_identifier, &entry);
 
-    if (status == RUNTIMEC_STATUS_UNSUPPORTED) {
-        /* 本执行器不处理这一条：交 route，游标不推进。 */
-        *output_exit = (binrwir_execution_exit_t){0};
-        output_exit->kind = BINRWIR_EXECUTION_EXIT_HANDOFF;
-        output_exit->status = RUNTIMEC_STATUS_UNSUPPORTED;
-        output_exit->logical_program_counter =
-            instruction->source_logical_program_counter;
-        output_exit->resume_logical_program_counter =
-            instruction->source_logical_program_counter;
-        return RUNTIMEC_STATUS_SUCCESS;
-    }
+    /* registry 是 session 自己装的表：Program 里出现表里没有的 opid，说明编译期
+     * 与执行期的表不一致，是内部不一致，报 INVALID。外部能力走 FOREIGN 标记，
+     * 不从这里出去——两者不要混。registry 未命中返回 UNSUPPORTED，这里把它
+     * 折成 INVALID：本层没有「不支持」这种外部语义。 */
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return vmbin_interpreter_fail(
-            execution, instruction, status,
+            execution, instruction, RUNTIMEC_STATUS_INVALID,
             VMBIN_INTERPRETER_DIAG_INVALID_INSTRUCTION, output_exit);
     }
     *output_exit = (binrwir_execution_exit_t){0};
@@ -432,6 +425,18 @@ static runtimec_status_t vmbin_interpreter_step(
     case VMBIN_OPERATION_IDENTIFIER_RETURN:
         return vmbin_interpreter_execute_return(execution, &instruction,
                                                 output_exit);
+    case BINRWIR_OPERATION_IDENTIFIER_FOREIGN:
+        /* 外部能力的结构标记：不执行、不写、不推进游标，把控制交出去。
+         * 不置 COMPLETED_STATE_COMMITTED——本条一个字节都没写，置了就是谎报，
+         * 下游会为一条不存在的提交做 checkpoint。 */
+        *output_exit = (binrwir_execution_exit_t){0};
+        output_exit->kind = BINRWIR_EXECUTION_EXIT_HANDOFF;
+        output_exit->status = RUNTIMEC_STATUS_UNSUPPORTED;
+        output_exit->logical_program_counter =
+            instruction.source_logical_program_counter;
+        output_exit->resume_logical_program_counter =
+            instruction.source_logical_program_counter;
+        return RUNTIMEC_STATUS_SUCCESS;
     case VMBIN_OPERATION_IDENTIFIER_NONE:
         return vmbin_interpreter_fail(
             execution, &instruction, RUNTIMEC_STATUS_INVALID,
