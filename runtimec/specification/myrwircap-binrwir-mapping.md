@@ -12,7 +12,7 @@ five-language behavior decision
     -> RWIR operation name and typed named parameters
     -> one canonical opid and stable argidx values
     -> host dereferences static keys to nonzero uint64 XValue base addresses
-    -> vmkv alone validates the fixed 8-byte head and derives argaddr = xvalue_address + 8
+    -> vmkv alone validates the fixed 16-byte head and derives argaddr = xvalue_address + 16
     -> addressed canonical BinRWIR
 ```
 
@@ -36,7 +36,7 @@ RWIR 是 kvspace 中的明文、可恢复存储格式。每条调用至少表达
 
 | 层 | 文件 | 数量 | 粒度 |
 |---|---|---|---|
-| 能力表 | `rwir_catalog.def` | 128 行 | **一个语义算子一行**，操作数类型是 union |
+| 能力表 | `rwir_catalog.def` | 131 行 | **一个语义算子一行**，操作数类型是 union |
 | 别名表 | `rwir_alias_table.def` | 316 条 | **一个注册 surface 名字一条**，指向能力行 |
 
 能力行至少包含：
@@ -78,8 +78,8 @@ opid
 - `argidx` 取代热路径中的参数类型、参数名和方向字段；消费者按 `(opid, argidx)` 查询
   canonical signature。
 - 参数 key 解引用得到的是 64 位 XValue 基址，不是任意 `V.body` 地址。
-- XValue head ABI 固定为 8 字节；只有 vmkv 执行带溢出检查的
-  `argaddr = xvalue_address + 8`，因此 `argaddr` 直接指向 kvspace `V.body`。
+- XValue head ABI 固定为 16 字节；只有 vmkv 执行带溢出检查的
+  `argaddr = xvalue_address + 16`，因此 `argaddr` 直接指向 kvspace `V.body`。
 - BinRWIR 不保存 operation name、参数类型、参数名、key 文本、xvalue 或 body 副本。
 - RWIR 参数数量可以不固定；一次具体调用必须编码全部参数对，不能截断或拆分。
 
@@ -104,7 +104,7 @@ BinRWIR 是进程内派生物。进程重启、body relocation 或完整 `snapsh
 5. **Signature preserving**：Read/Write 数量、顺序、类型约束和 alias policy 必须等价。
 6. **Behavior preserving**：canonical operation 必须引用同一个行为决策，不得近似替换。
 7. **Address derivation**：host 只返回非零 64 位 XValue 基址，不能选择 body 偏移；vmkv
-   唯一验证固定 8 字节 head ABI，并以溢出检查执行 `xvalue_address + 8`。
+   唯一验证固定 16 字节 head ABI，并以溢出检查执行 `xvalue_address + 16`。
 8. **Address validity**：每个 emitted `argaddr` 必须非零、直接指向 `V.body`，并在
    compilation 租约期间有效。
 9. **Body uniqueness**：地址只定位 kvspace 中唯一权威的 `V.body`；任何层都不得复制 body
@@ -123,7 +123,7 @@ BinRWIR 是进程内派生物。进程重启、body relocation 或完整 `snapsh
 - vthread `status`；
 - `/lib` 下函数源等长期存在的 key/xvalue body。
 
-host 对 key 解引用只返回 `uint64 xvalue_address`。vmkv 验证 XValue head 固定为 8 字节，
+host 对 key 解引用只返回 `uint64 xvalue_address`。vmkv 验证 XValue head 固定为 16 字节，
 检查无符号地址加法不会溢出，再生成最终 `uint64 argaddr`。BinRWIR 只保存该最终地址，
 vmbin 只消费它；两者都不缓存 key 对象、XValue 或 `V.body`。vmbin 每次使用参数时都从
 `argaddr` 读取当前 body；写参数必须写回同一地址。
@@ -145,8 +145,8 @@ vmkv 对每条 RWIR instruction 执行以下固定流程：
 5. 为每个参数取得 canonical `argidx`。
 6. 请求 host 解引用参数 key；host 只能返回 64 位 XValue 基址，不能返回自行选择偏移的
    body 地址。
-7. 验证 XValue 基址非零、生命周期可证明且 XValue head ABI 恰好为 8 字节。
-8. 检查 `xvalue_address + 8` 不溢出，并由 vmkv 唯一执行该加法得到直接指向 `V.body` 的
+7. 验证 XValue 基址非零、生命周期可证明且 XValue head ABI 恰好为 16 字节。
+8. 检查 `xvalue_address + 16` 不溢出，并由 vmkv 唯一执行该加法得到直接指向 `V.body` 的
    `uint64 argaddr`。
 9. 按 source 参数顺序写入全部 `argidx + argaddr`，并保留 source logical program counter。
 10. finalize 前验证每条 instruction、每个参数和每个地址都可追溯到唯一 mapping 与租约。
@@ -206,7 +206,7 @@ allocation 的路径。每条 logical instruction completion 都必须建立 saf
 不是 `NOT_COMPILABLE`。`NOT_COMPILABLE` 只表示已经成功生成合法 addressed BinRWIR，
 内部 JIT eligibility 判定不适用，因而应建立 VMBIN compilation。
 
-零 XValue 基址、`xvalue_address + 8` 溢出、非 8 字节 XValue head ABI 或无法证明地址
+零 XValue 基址、`xvalue_address + 16` 溢出、非 16 字节 XValue head ABI 或无法证明地址
 生命周期都必须在 Program 产生前失败封闭。host 返回任意 body 偏移也违反合同；vmkv
 不得接受、猜测、修正或建立 fallback。
 
@@ -219,7 +219,7 @@ allocation 的路径。每条 logical instruction completion 都必须建立 saf
 - 对 stable RWIR identifier、`opid` 和每个 signature 的 `argidx` 做唯一性检查。
 - 每条 generated instruction 只含 `opid` 和完整 `argidx + uint64 argaddr` 参数对。
 - host fixture 只返回非零 64 位 XValue 基址，不返回 body 地址或偏移选择。
-- vmkv fixture 唯一执行 `argaddr = xvalue_address + 8`；每个结果非零、直接指向 kvspace
+- vmkv fixture 唯一执行 `argaddr = xvalue_address + 16`；每个结果非零、直接指向 kvspace
   `V.body`，且受 compilation 地址生命周期约束。
 - 两个允许 alias 的不同 `argidx` 可指向同一地址，后续 Read 观察先前 Write。
 - BinRWIR、execution plan 与 VMBIN 不含 body cache 或 register file。
@@ -227,5 +227,5 @@ allocation 的路径。每条 logical instruction completion 都必须建立 saf
 - completed-state fixture 只有在全部 dirty body 写回成功后才推进 logical program counter/checkpoint。
 - guard failure、error、recovery 与 resume fixture 丢弃未完成 register/spill，且零写回。
 - 动态 map/struct key fixture 返回 `RUNTIMEC_STATUS_UNSUPPORTED`，不产生 Program。
-- 零 XValue 基址、`+8` 溢出、非 8 字节 head ABI、间接 key fallback 和 JIT 动态 key
+- 零 XValue 基址、`+16` 溢出、非 16 字节 head ABI、间接 key fallback 和 JIT 动态 key
   bypass fixture 必须失败。

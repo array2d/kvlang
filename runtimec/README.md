@@ -29,15 +29,15 @@ Compiler 完成执行计划生成和执行目标判定，最后由 route 调用�
    `interface/public_interface.c` 定义的结构化接口。
 9. **Less code, more useful capability.** 不建立第三执行器，不为错误分层增加修补代码。
 10. **V.body 只有一个权威驻留位置。** 语言可见且可恢复的 value body 始终位于 kvspace；
-    XValue 固定由 8 字节 head 与紧随其后的 `V.body` 组成，因此
-    `argaddr = xvalue_address + 8`。BinRWIR 与 vmbin 只持有最终 `argaddr`，不复制、不缓存
-    XValue 或 body，也不建立 register file。
+    XValue 固定由 16 字节 head 与紧随其后的 `V.body` 组成，因此
+    `argaddr = xvalue_address + 16`。BinRWIR 与 vmbin 只持有最终 `argaddr`，不复制、
+    不缓存 XValue 或 body，也不建立 register file。
 11. **地址派生只有一个所有者。** host 对静态 key 只返回非零、生命周期有效的 64 位
-    XValue 基址；只有 vmkv 可以验证固定 8 字节 head ABI、检查加法溢出并执行 `+8`。
+    XValue 基址；只有 vmkv 可以验证固定 16 字节 head ABI、检查加法溢出并执行 `+16`。
     host、BinRWIR、Compiler、vmbin 与 JIT 都不得选择或重算 body 偏移。
-12. **地址错误失败封闭。** 零 XValue 基址、`xvalue_address + 8` 溢出、非 8 字节 head ABI、
-    动态 key 或无法证明生命周期都不得产生 BinRWIR。map、struct 等动态拼接 key 在
-    key/xvalue 生命周期 ABI 建立前明确返回 `RUNTIMEC_STATUS_UNSUPPORTED`。
+12. **地址错误失败封闭。** 零 XValue 基址、`xvalue_address + 16` 溢出、非 16 字节
+    head ABI、动态 key 或无法证明生命周期都不得产生 BinRWIR。map、struct 等动态拼接
+    key 在 key/xvalue 生命周期 ABI 建立前明确返回 `RUNTIMEC_STATUS_UNSUPPORTED`。
 13. **每条指令完成都是强制边界。** 每个 logical instruction completion 都必须成为
     recovery/observable boundary，不能由配置、优化、融合或执行目标关闭。
 14. **完成提交，未完成丢弃。** JIT 只能把完整完成指令的 dirty state 提交到原
@@ -56,7 +56,7 @@ Compiler 完成执行计划生成和执行目标判定，最后由 route 调用�
 myrwircaps + plaintext RWIR in kvspace
     -> vmkv validates RWIR and requests each static key
     -> host dereferences each static key to a uint64 XValue base address
-    -> vmkv validates the fixed 8-byte XValue head and derives argaddr = xvalue_address + 8
+    -> vmkv validates the fixed 16-byte XValue head and derives argaddr = xvalue_address + 16
     -> vmkv emits addressed canonical BinRWIR
     -> binrwir_compiler builds execution plan and attempts internal JIT compilation
     -> compile-time target decision: JIT code or VMBIN plan
@@ -73,7 +73,7 @@ myrwircaps + plaintext RWIR in kvspace
   由多个名字共享。
 - `vmkv/` 从 kvspace 读取含 operation name、参数类型和参数名的明文 RWIR，把每个
   参数收窄成单一具体类型，通过 host 将每个静态参数 key 解引用为 XValue 基址，并作为
-  唯一组件校验固定 8 字节 head、检查 `+8` 溢出和生成最终 `argaddr`；只有全部地址
+  唯一组件校验固定 16 字节 head、检查 `+16` 溢出和生成最终 `argaddr`；只有全部地址
   合格时才生成 canonical BinRWIR Program。
 - `binrwir/` 拥有中立的进程内 Program、`opid` 与 `argidx + uint64 argaddr` 参数记录、
   signature、execution frame、execution exit 与 execution plan 合同；它不属于 vmbin。
@@ -139,7 +139,7 @@ RWIR 是 kvspace 中可恢复的明文存储格式。每条调用保留 operatio
 能力事实分**两级**（裁决见 `workspace/622/architect/decision-union-operators.md`）：
 
 ```text
-capability_table（128 条能力行）   语义算子：union 参数掩码 + 约束 + 结果规则
+capability_table（131 条能力行）   语义算子：union 参数掩码 + 约束 + 结果规则
         ▲
         │  多对一
 alias_table（316 条映射）          surface 名字（+ / add / int64·add …）→ 能力行
@@ -152,7 +152,7 @@ alias_table（316 条映射）          surface 名字（+ / add / int64·add �
   （`Same0`/`Same1`/`Widen`/`WidenInt`/`Bool`/`Float64`/`TargetType`/
   `Identity`/`CharacterUtf8`）、别名策略与五语言行为决策引用。
 - `specification/rwir_alias_table.def`：**surface 名字 → 能力行 identifier** 的映射，
-  纯数据、不带类型。316 个注册名收敛到 128 条能力行，因此是**多对一**。
+  纯数据、不带类型。316 个注册名收敛到 131 条能力行，因此是**多对一**。
 
 一条能力行覆盖多种精度，**但 BinRWIR 里每个参数必须收窄成单一具体类型**：
 
@@ -191,7 +191,7 @@ python3 runtimec/tools/architecture/generate_rwir_catalog.py --check --require-c
 vmkv 必须逐条执行这个映射并保持语义等价：operation name 经 alias 表映射为能力行
 `opid`，参数类型与参数名经 signature 验证后映射为 `argidx`，且每个参数的类型收窄到
 单一具体 langtype；host 将参数 key 解引用为 64 位 XValue 基址，vmkv 验证 XValue head
-ABI 固定为 8 字节并以溢出检查计算 `uint64 argaddr = xvalue_address + 8`。它不能用近似
+ABI 固定为 16 字节并以溢出检查计算 `uint64 argaddr = xvalue_address + 16`。它不能用近似
 操作、默认操作、未知操作或数组位置补洞。host 不得返回自行选择偏移后的 body 地址。
 完整规则见 `specification/myrwircap-binrwir-mapping.md`。
 
@@ -217,7 +217,7 @@ opid
 
 `argidx` 在由 `opid` 选中的 canonical signature 中确定参数顺序、类型和 Read/Write
 权限。key 解引用结果是 64 位 XValue 基址，不是任意 body 地址；XValue head ABI 固定为
-8 字节，vmkv 唯一执行 `argaddr = xvalue_address + 8`，所以 `argaddr` 仍直接指向 kvspace
+16 字节，vmkv 唯一执行 `argaddr = xvalue_address + 16`，所以 `argaddr` 仍直接指向 kvspace
 `V.body`。operation name、参数类型、参数名、key 文本、XValue 和 body 均不复制进热
 instruction。
 
@@ -313,7 +313,7 @@ Write argidx ──> uint64 argaddr ──┘
 ### vmkv
 
 vmkv 只做明文 RWIR source 读取、结构验证、`opid`/`argidx` 映射、通过 host 将参数 key
-解引用为 XValue 基址、静态地址资格验证，以及固定 8 字节 head 的唯一 `+8` 派生和
+解引用为 XValue 基址、静态地址资格验证，以及固定 16 字节 head 的唯一 `+16` 派生和
 canonical BinRWIR 生成。host 不能决定 body 偏移。类型固化、融合、执行计划、机器码、
 缓存与执行目标都不属于 vmkv。
 
@@ -352,7 +352,7 @@ materialization entry。logical program counter/checkpoint 只在完整提交成
 
 当前动态拼接 key 属于 `UNSUPPORTED`：vmkv 不得为 map/struct 参数产生零 `argaddr`，
 BinRWIR Compiler 也不得把它改写为运行时 key lookup 或借 JIT 绕过限制。零 XValue 基址、
-`+8` 溢出、非 8 字节 XValue head ABI 或无法证明地址生命周期同样必须在 Program 产生前
+`+16` 溢出、非 16 字节 XValue head ABI 或无法证明地址生命周期同样必须在 Program 产生前
 失败封闭。
 
 ## 11. 五语言决策矩阵
@@ -422,14 +422,22 @@ ctest --test-dir /tmp/kvlang-runtimec-build --output-on-failure
 5. `specification/five-language-behavior-matrix.md`
 6. 目标组件头文件
 
-实现按 #622 的依赖顺序在 runtimec 结构内落地，禁止跨阶段抢跑：
+实现按 #622 的依赖顺序在 runtimec 结构内落地，禁止跨阶段抢跑。
 
-- 阶段 1：先填 `vmbin/` 与 `engine/` 的逐指令 `pc`/`status` 执行引擎，以纯解释档对齐
-  c2 执行引擎为第一个硬指标；在引擎达标前不动 JIT。
-- 阶段 2：填 `vmkv/` 与 `binrwir/` 的明文艺文验证、单一 manifest 生成、typed 特化与
+**优化与执行的分层**（裁决见
+`workspace/622/architect/decision-binrwir-optimization-pipeline.md`）：
+明文 RWIR 先被 vmkv 收敛成不可变 BinRWIR Program，再经**多轮优化**（每轮
+Program → Program 的纯函数）得到优化后 IR，最后交给 codegen 层。**VMBIN 与 JIT 是
+同一份优化后 IR 的两个 codegen 后端，不是两套语义路径**；两者之间差的是代码生成方式，
+不是语义。VMBIN 只承担语义正确性、不设速度门槛，性能由 JIT 承担。
+
+- 阶段 1：填 `vmkv/` 与 `binrwir/` 的明文语义验证、单一 manifest 生成、具体类型收敛与
   等价 canonical BinRWIR 生成。
-- 阶段 3：填 `binrwir_compiler/`（含内部 JIT）：M1 手写发射器 → JIT2 → 生成器标量矩阵 →
-  x86_64；AArch64 后端同阶段一等实现，不得顺延为空桩。
+- 阶段 2：填 `vmbin/` 与 `engine/` 的逐指令 `pc`/`status` 执行引擎，作为优化后 IR 的
+  基线 codegen 后端；只验收语义正确性，不设速度门槛。
+- 阶段 3：填 `binrwir_compiler/` 的优化轮次（P1 常量折叠 → …，逐轮带合法性与等价性
+  验收）与内部 JIT 后端：M1 手写发射器 → JIT2 → 生成器标量矩阵 → x86_64；AArch64
+  后端同阶段一等实现，不得顺延为空桩。性能验收在本阶段的默认档（JIT 开启）上做。
 - 阶段 4：runtimec 成为默认 runtime，冻结并删除 `runtimec2/`，旧 `runtime/` 不再作为
   独立实现继续演进。
 

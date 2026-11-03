@@ -58,7 +58,17 @@ runtimec2:
 	cmake -S runtimec2 -B build/runtimec2 -DCMAKE_BUILD_TYPE=Release
 	cmake --build build/runtimec2 --target kvlang_runtimec2 binircompiler -j
 
-byteseek:
+# stdlib 是 byteseek 的**编译期输入**：build.rs 用 include_str! 把 stdlib/**/*.kv
+# 逐个编进 EMBEDDED_KV。而 cargo 的 rerun-if-changed 只覆盖单次 build，
+# 跨目录（stdlib 在仓库根、byteseek 在子目录）不会触发——于是「改了 stdlib、
+# 忘了重建 byteseek」时，二进制里跑的还是旧 stdlib，且**没有任何提示**。
+# 这条依赖把它变成「改了就必须重跑」：不需要每次无条件重编，改了就一定重编。
+BYTESEEK_STDLIB_SOURCES := $(shell find stdlib -name '*.kv')
+BYTESEEK_BINARY := $(BIN)/byteseek
+
+byteseek: $(BYTESEEK_BINARY)
+
+$(BYTESEEK_BINARY): $(BYTESEEK_STDLIB_SOURCES) byteseek/Cargo.toml
 	cargo build --release --manifest-path byteseek/Cargo.toml
 	mkdir -p $(BIN)
 	cp byteseek/target/release/byteseek $(BIN)/byteseek
