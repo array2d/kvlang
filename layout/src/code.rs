@@ -77,6 +77,10 @@ pub struct AnalyzedFunc {
     func: Func,
     declared: HashMap<String, String>,
     type_sets: HashMap<String, Vec<String>>,
+    /// 赋值来源可证明的具体 kind（见 `lower::stable_kinds`）。opcode 不再携带
+    /// 类型后，读取层靠槽上的具体 langtype 收敛；声明的 def langtype 可能是并集，
+    /// 这里优先写可证明的具体 kind。
+    stable: HashMap<String, String>,
     seq: Vec<Instruction>,
     labels: HashMap<String, i32>,
     is_init: bool,
@@ -193,6 +197,13 @@ fn analyze_func(
     let type_sets = lower::infer_type_sets(&fn_);
     let mut diags = lower::validate_writes(&fn_, &type_map, structs, sigs);
     diags.extend(lower::specialize(&mut fn_, &type_map, &declared, &type_sets));
+    // 两个证据来源合并：`stable_kinds` 认声明为单一具体类型的变量，
+    // `assigned_concrete_kinds` 认「声明是并集、但每次赋值都是同一具体 kind」的变量。
+    // 后者是 encoder 收敛的关键（并集声明本身无法收敛成单一类型）。
+    let mut stable = lower::stable_kinds(&fn_, &type_map, &declared);
+    for (name, kind) in lower::assigned_concrete_kinds(&fn_, &declared) {
+        stable.entry(name).or_insert(kind);
+    }
     for d in &diags {
         eprintln!("{}", d.string());
     }
@@ -219,6 +230,7 @@ fn analyze_func(
         func: fn_,
         declared,
         type_sets,
+        stable,
         seq,
         labels,
     })
@@ -779,7 +791,8 @@ pub fn write_func(
 ) -> Result<(), String> {
     let pkg = a.pkg.as_str();
     let fn_ = &a.func;
-    let (seq, labels, declared, type_sets) = (&a.seq, &a.labels, &a.declared, &a.type_sets);
+    let (seq, labels, declared, type_sets, stable) =
+        (&a.seq, &a.labels, &a.declared, &a.type_sets, &a.stable);
     let func_dir = keytree::lib_func(pkg, &fn_.sig.name);
     let opcode = if pkg.is_empty() {
         fn_.sig.name.clone()
@@ -872,6 +885,7 @@ pub fn write_func(
             structs,
             &param_coord,
             &param_langtype,
+            stable,
             local_funcs,
         )
         .map_err(werr)?;
@@ -904,7 +918,7 @@ pub fn write_func(
                 continue;
             }
             for r in &reads {
-                let mut ty = read_slot_type(r, &param_langtype, declared, type_sets);
+                let mut ty = read_slot_type(r, &param_langtype, declared, type_sets, stable);
                 if ty.is_empty() {
                     ty = lower::literal_slot_type(r);
                 }
@@ -913,7 +927,7 @@ pub fn write_func(
             for (j, w) in inst.writes.iter().enumerate() {
                 record(
                     &op,
-                    write_slot_type(inst, j, w, &param_langtype, declared, type_sets, structs),
+                    write_slot_type(inst, j, w, &param_langtype, declared, type_sets, structs, stable),
                     true,
                 );
             }
@@ -1138,20 +1152,27 @@ fn check_jumps(seq: &[Instruction], labels: &HashMap<String, i32>) -> Result<(),
     Ok(())
 }
 
-/// 操作数槽的静态类型：形参/返回声明 → 源码声明 → 有限类型集合（union）。
-/// 任一来源都没有 → 空串（未知；由 KVLANG_LAYOUT_STATS 显式计数）。
+/// 操作数槽的静态类型：**可证明的具体 kind** → 形参/返回声明 → 源码声明 →
+/// 有限类型集合（union）。任一来源都没有 → 空串（未知；由 KVLANG_LAYOUT_STATS 计数）。
+///
+/// 具体优先是 encoder 收敛的前提：opcode 不再携带 `<kind>·` 前缀后，读取层只能从
+/// 槽 langtype 拿到类型；声明的 def langtype 可能是并集（`int64|float64`），并集
+/// 无法收敛成单一具体类型。故凡赋值来源能证明唯一具体 kind，就写该 kind。
 fn slot_static_type(
     name: &str,
     param_langtype: &HashMap<String, String>,
     declared: &HashMap<String, String>,
     type_sets: &HashMap<String, Vec<String>>,
+    stable: &HashMap<String, String>,
 ) -> String {
-    for map in [param_langtype, declared] {
-        if let Some(t) = map.get(name) {
-            if !t.is_empty() {
-                return t.clone();
-            }
-        }
+    // 只在**声明侧含并集**时才用 stable 覆盖：单一具体声明已经是最强约束，
+    // 用推断结果覆盖它会改变既有产物的 langtype。
+    let declared_any = param_langtype
+        .get(name)
+        .or_else(|| declared.get(name))
+        .filter(|t| !t.is_empty());
+    if let Some(t) = declared_any {
+        return narrow_union(t.clone(), name, stable);
     }
     lower::type_set_slot_type(type_sets, name).unwrap_or_default()
 }
@@ -1161,8 +1182,9 @@ fn read_slot_type(
     param_langtype: &HashMap<String, String>,
     declared: &HashMap<String, String>,
     type_sets: &HashMap<String, Vec<String>>,
+    stable: &HashMap<String, String>,
 ) -> String {
-    slot_static_type(name, param_langtype, declared, type_sets)
+    slot_static_type(name, param_langtype, declared, type_sets, stable)
 }
 
 /// 写槽类型：本条注解（含 call 返回）→ 形参/返回 → 声明可解析类型 → 类型集合。
@@ -1174,6 +1196,7 @@ fn write_slot_type(
     declared: &HashMap<String, String>,
     type_sets: &HashMap<String, Vec<String>>,
     structs: &lower::StructTable,
+    stable: &HashMap<String, String>,
 ) -> String {
     if let Some(t) = s.write_types.get(j).filter(|t| !t.is_empty()) {
         return t.clone();
@@ -1182,9 +1205,21 @@ fn write_slot_type(
         return t.clone();
     }
     if let Some(t) = lower::resolve_slot_type(orig, declared, structs, declared) {
-        return t;
+        return narrow_union(t, orig, stable);
     }
-    slot_static_type(orig, param_langtype, declared, type_sets)
+    slot_static_type(orig, param_langtype, declared, type_sets, stable)
+}
+
+/// 声明的 def langtype 可能是并集；若赋值来源能证明唯一具体 kind，并且该 kind
+/// 是并集成员，就把它当成槽类型（encoder 只能收敛到单一具体类型）。
+fn narrow_union(ty: String, name: &str, stable: &HashMap<String, String>) -> String {
+    if !ty.contains('|') {
+        return ty;
+    }
+    match stable.get(name).filter(|k| !k.contains('|')) {
+        Some(k) if lower::type_members(&ty).contains(&k.as_str()) => k.clone(),
+        _ => ty,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1199,6 +1234,7 @@ fn write_linear_inst(
     structs: &lower::StructTable,
     params: &HashMap<String, String>,
     param_langtype: &HashMap<String, String>,
+    stable: &HashMap<String, String>,
     local_funcs: &HashSet<String>,
 ) -> Result<(), String> {
     let (opcode, mut reads) = s.flat();
@@ -1247,14 +1283,14 @@ fn write_linear_inst(
             pairs.push((format!("{prefix}/[{n},-{}]", j + 1), lt, wire));
             continue;
         }
-        let ty = read_slot_type(r, param_langtype, declared, type_sets);
+        let ty = read_slot_type(r, param_langtype, declared, type_sets, stable);
         let (wire, lt) = typed_slot_value(rv, &ty, target_char)?;
         pairs.push((format!("{prefix}/[{n},-{}]", j + 1), lt, wire));
     }
     for (j, w) in s.writes.iter().enumerate() {
         let orig = w.as_str();
         let wv = params.get(orig).map(String::as_str).unwrap_or(orig);
-        let ty = write_slot_type(s, j, orig, param_langtype, declared, type_sets, structs);
+        let ty = write_slot_type(s, j, orig, param_langtype, declared, type_sets, structs, stable);
         let (wire, lt) = typed_slot_value(wv, &ty, "")?;
         pairs.push((format!("{prefix}/[{n},{}]", j + 1), lt, wire));
     }

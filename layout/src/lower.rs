@@ -1838,8 +1838,11 @@ fn exact_kind(
                 if name.is_empty() {
                     None
                 } else {
+                    // 声明是并集时不算精确，但仍要回落到稳定推断——否则
+                    // `y:int64|float64 = 0; y = y + 1` 永远推不出 int64。
                     declared
                         .get(name)
+                        .filter(|t| !t.is_empty() && !t.contains('|'))
                         .or_else(|| stable.get(name))
                         .filter(|t| !t.is_empty() && !t.contains('|'))
                         .cloned()
@@ -1857,11 +1860,16 @@ fn exact_kind(
     if op == ast::DEREF_OP || op == "kvlang·abs" {
         return None;
     }
-    let mut word = symbol::lookup(op).word.to_string();
+    // op 可能是符号（`+`）也可能已是语义名（`add`，specialize 之后）。
+    let entry = {
+        let by_glyph = symbol::lookup(op);
+        if by_glyph.word.is_empty() { symbol::by_word(op) } else { by_glyph }
+    };
+    let mut word = entry.word.to_string();
     if word.is_empty() {
         word = op.to_string();
     }
-    if symbol::lookup(op).cmp {
+    if entry.cmp {
         return Some("bool".to_string());
     }
     if op == ast::MEMBER_READ_OP {
@@ -1905,7 +1913,7 @@ fn exact_kind(
         | "string·formatuint" => return Some("char/utf32".to_string()),
         _ => {}
     }
-    let arith = symbol::lookup(op).arith;
+    let arith = entry.arith || builtin::num_op(&word);
     let maxmin = matches!(word.as_str(), "max" | "min");
     if !arith && !maxmin {
         return None;
@@ -2009,6 +2017,74 @@ pub fn stable_kinds(
         }
     }
     stable
+}
+
+/// 赋值来源能证明的具体 kind（与 `stable_kinds` 同一套证据，但**不看声明类型**）。
+///
+/// `stable_kinds` 的候选来自 `infer_types`，而声明为并集的变量在 `infer_types` 里
+/// 就是并集，于是永远进不了候选。encoder 需要的正是这种情形：`y:int64|float64 = 1`
+/// 的每一次赋值都是 int64，槽上应写 `int64` 而不是并集。
+///
+/// 证据只有赋值来源：`y = <expr>` 里 `<expr>` 的 exact kind。全部来源一致且为具体
+/// 数值 kind 才算数；`&x`、容器/字段/指针读、调用写参、None、union 一律不算。
+pub fn assigned_concrete_kinds(
+    fn_: &Func,
+    declared: &HashMap<String, String>,
+) -> HashMap<String, String> {
+    let mut sources: HashMap<String, Vec<Expr>> = HashMap::new();
+    let mut disq: HashSet<String> = HashSet::new();
+    collect_stability(&fn_.body, &mut sources, &mut disq);
+    let mut order: Vec<String> = sources
+        .iter()
+        .filter(|(v, es)| !disq.contains(*v) && !es.is_empty())
+        .map(|(v, _)| v.clone())
+        .collect();
+    order.sort_unstable();
+    // boot + 全量复核，与 `stable_kinds` 同一结构：先由**任一**来源点火
+    // （`total = 0` 给 int64），再由后续轮次的算术来源接上（`total + i`）。
+    let mut found: HashMap<String, String> = HashMap::new();
+    let mut dead: HashSet<String> = HashSet::new();
+    for _ in 0..4 {
+        let mut changed = false;
+        for v in &order {
+            if found.contains_key(v) || dead.contains(v) {
+                continue;
+            }
+            let Some(es) = sources.get(v) else { continue };
+            let boot = es
+                .iter()
+                .filter_map(|e| exact_kind(e, declared, &found))
+                .find(|k| builtin::is_num_kind(k) && !k.contains('|'));
+            if let Some(k) = boot {
+                found.insert(v.clone(), k);
+                changed = true;
+            }
+        }
+        let mut bad: Vec<String> = found
+            .iter()
+            .filter(|(v, k)| {
+                !sources
+                    .get(*v)
+                    .map(|es| {
+                        es.iter().all(|e| {
+                            exact_kind(e, declared, &found).as_deref() == Some(k.as_str())
+                        })
+                    })
+                    .unwrap_or(false)
+            })
+            .map(|(v, _)| v.clone())
+            .collect();
+        bad.sort_unstable();
+        for v in bad {
+            found.remove(&v);
+            dead.insert(v);
+            changed = true;
+        }
+        if !changed {
+            break;
+        }
+    }
+    found
 }
 
 fn collect_inst_stability(
